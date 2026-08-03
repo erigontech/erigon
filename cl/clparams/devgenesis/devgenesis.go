@@ -217,7 +217,7 @@ func BuildGenesisState(
 		}
 		genesisBid = &cltypes.ExecutionPayloadBid{
 			ParentBlockHash:       elGenesisHash,
-			BlobKzgCommitments:    *solid.NewStaticProgressiveListSSZ[*cltypes.KZGCommitment](48),
+			BlobKzgCommitments:    *solid.NewStaticProgressiveListSSZ[*cltypes.KZGCommitment](int(cfg.MaxBlobCommittmentsPerBlock), 48),
 			ExecutionRequestsRoot: emptyRequestsRoot,
 		}
 		beaconState.SetLatestExecutionPayloadBid(genesisBid)

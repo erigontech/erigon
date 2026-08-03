@@ -54,3 +54,13 @@ func TestHashTreeRootTxs(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, common.Hash(root), common.HexToHash("0x987269bc1075122edff32bfc38479757103cee5c1ed6e990de7ffee85b5dd18a"))
 }
+
+func TestProgressiveContainerProofRejectsOversizedSchema(t *testing.T) {
+	schema := make([]any, 257)
+	for i := range schema {
+		schema[i] = uint64(i)
+	}
+
+	_, err := merkle_tree.ProgressiveContainerProofAll(0, schema...)
+	require.Error(t, err)
+}

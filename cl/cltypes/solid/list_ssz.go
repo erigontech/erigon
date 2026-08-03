@@ -63,12 +63,25 @@ func NewStaticListSSZ[T EncodableHashableSSZ](limit int, bytesPerElement int) *L
 	}
 }
 
-func NewDynamicProgressiveListSSZ[T EncodableHashableSSZ]() *ListSSZ[T] {
-	return &ListSSZ[T]{list: make([]T, 0), progressive: true}
+func NewDynamicProgressiveListSSZ[T EncodableHashableSSZ](limit int) *ListSSZ[T] {
+	return &ListSSZ[T]{list: make([]T, 0), limit: progressiveDecodeLimit(limit), progressive: true}
 }
 
-func NewStaticProgressiveListSSZ[T EncodableHashableSSZ](bytesPerElement int) *ListSSZ[T] {
-	return &ListSSZ[T]{list: make([]T, 0), static: true, bytesPerElement: bytesPerElement, progressive: true}
+func NewStaticProgressiveListSSZ[T EncodableHashableSSZ](limit int, bytesPerElement int) *ListSSZ[T] {
+	return &ListSSZ[T]{list: make([]T, 0), limit: progressiveDecodeLimit(limit), static: true, bytesPerElement: bytesPerElement, progressive: true}
+}
+
+// Progressive lists are semantically unbounded, so decode limits are resource guards rather than protocol maxima.
+func progressiveDecodeLimit(semanticLimit int) int {
+	const minimum = 16
+	if semanticLimit <= minimum/2 {
+		return minimum
+	}
+	maxInt := int(^uint(0) >> 1)
+	if semanticLimit > maxInt/2 {
+		return maxInt
+	}
+	return semanticLimit * 2
 }
 
 func (l ListSSZ[T]) MarshalJSON() ([]byte, error) {
@@ -114,13 +127,6 @@ func (l *ListSSZ[T]) EncodeSSZ(buf []byte) (dst []byte, err error) {
 
 func (l *ListSSZ[T]) DecodeSSZ(buf []byte, version int) (err error) {
 	limit := uint64(l.limit)
-	if l.progressive {
-		if l.static && l.bytesPerElement > 0 {
-			limit = uint64(len(buf) / l.bytesPerElement)
-		} else {
-			limit = uint64(len(buf) / 4)
-		}
-	}
 	if l.static {
 		l.list, err = ssz.DecodeStaticList[T](buf, 0, uint32(len(buf)), uint32(l.bytesPerElement), limit, version)
 	} else {
@@ -172,10 +178,13 @@ func (l *ListSSZ[T]) HashSSZProgressive(hashElement func(T) ([32]byte, error)) (
 
 func (l *ListSSZ[T]) Clone() clonable.Clonable {
 	if l.progressive {
-		if l.static {
-			return NewStaticProgressiveListSSZ[T](l.bytesPerElement)
+		return &ListSSZ[T]{
+			list:            make([]T, 0),
+			limit:           l.limit,
+			static:          l.static,
+			bytesPerElement: l.bytesPerElement,
+			progressive:     true,
 		}
-		return NewDynamicProgressiveListSSZ[T]()
 	}
 	if l.static {
 		return NewStaticListSSZ[T](l.limit, l.bytesPerElement)

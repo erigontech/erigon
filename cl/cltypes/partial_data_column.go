@@ -131,14 +131,14 @@ func (s *PartialDataColumnSidecar) init() {
 	}
 	if s.PartialColumn == nil {
 		if s.version >= clparams.GloasVersion {
-			s.PartialColumn = solid.NewStaticProgressiveListSSZ[*Cell](BytesPerCell)
+			s.PartialColumn = solid.NewStaticProgressiveListSSZ[*Cell](int(cfg.MaxBlobCommittmentsPerBlock), BytesPerCell)
 		} else {
 			s.PartialColumn = solid.NewStaticListSSZ[*Cell](int(cfg.MaxBlobCommittmentsPerBlock), BytesPerCell)
 		}
 	}
 	if s.KzgProofs == nil {
 		if s.version >= clparams.GloasVersion {
-			s.KzgProofs = solid.NewStaticProgressiveListSSZ[*KZGProof](48)
+			s.KzgProofs = solid.NewStaticProgressiveListSSZ[*KZGProof](int(cfg.MaxBlobCommittmentsPerBlock), 48)
 		} else {
 			s.KzgProofs = solid.NewStaticListSSZ[*KZGProof](int(cfg.MaxBlobCommittmentsPerBlock), 48)
 		}

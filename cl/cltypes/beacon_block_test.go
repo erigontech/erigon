@@ -648,3 +648,21 @@ func TestBeaconBody_GetPayloadAttestations_VersionAware(t *testing.T) {
 	gloasBody := NewBeaconBody(bc, clparams.GloasVersion)
 	assert.NotNil(t, gloasBody.GetPayloadAttestations(), "GLOAS should have PayloadAttestations")
 }
+
+func TestBeaconBodyGloasJSONRejectsNullRequiredFields(t *testing.T) {
+	for _, input := range []string{
+		`{"signed_execution_payload_bid":null}`,
+		`{"signed_execution_payload_bid":{"message":null}}`,
+		`{"signed_execution_payload_bid":{"message":{"blob_kzg_commitments":[null]}}}`,
+		`{"payload_attestations":null}`,
+		`{"payload_attestations":[null]}`,
+		`{"payload_attestations":[{"aggregation_bits":null,"data":null}]}`,
+		`{"parent_execution_requests":null}`,
+		`{"parent_execution_requests":{"deposits":[null]}}`,
+	} {
+		t.Run(input, func(t *testing.T) {
+			body := NewBeaconBody(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+			require.Error(t, json.Unmarshal([]byte(input), body))
+		})
+	}
+}

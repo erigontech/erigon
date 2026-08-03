@@ -143,6 +143,9 @@ func ProgressiveContainerRootAll(schema ...any) ([32]byte, error) {
 }
 
 func ProgressiveContainerProofAll(fieldIndex int, schema ...any) ([][32]byte, error) {
+	if len(schema) == 0 || len(schema) > 256 {
+		return nil, errors.New("invalid progressive container schema")
+	}
 	if fieldIndex < 0 || fieldIndex >= len(schema) {
 		return nil, errors.New("progressive container field index out of range")
 	}

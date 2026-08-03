@@ -300,7 +300,7 @@ func NewBeaconBody(beaconCfg *clparams.BeaconChainConfig, version clparams.State
 		// GLOAS: SignedExecutionPayloadBid and PayloadAttestations replace above
 		body.SignedExecutionPayloadBid = &SignedExecutionPayloadBid{
 			Message: &ExecutionPayloadBid{
-				BlobKzgCommitments: *solid.NewStaticProgressiveListSSZ[*KZGCommitment](48),
+				BlobKzgCommitments: *solid.NewStaticProgressiveListSSZ[*KZGCommitment](maxBlobCommitmentsForConfig(beaconCfg), 48),
 			},
 		}
 		body.ParentExecutionRequests = NewExecutionRequestsWithVersion(beaconCfg, version)
@@ -309,18 +309,38 @@ func NewBeaconBody(beaconCfg *clparams.BeaconChainConfig, version clparams.State
 	return body
 }
 
+func maxBlobCommitmentsForConfig(beaconCfg *clparams.BeaconChainConfig) int {
+	if beaconCfg != nil && beaconCfg.MaxBlobCommittmentsPerBlock > 0 {
+		return int(beaconCfg.MaxBlobCommittmentsPerBlock)
+	}
+	return MaxBlobsCommittmentsPerBlock
+}
+
+func maxPayloadAttestationsForConfig(beaconCfg *clparams.BeaconChainConfig) int {
+	if beaconCfg != nil && beaconCfg.MaxPayloadAttestations > 0 {
+		return int(beaconCfg.MaxPayloadAttestations)
+	}
+	return int(clparams.GetBeaconConfig().MaxPayloadAttestations)
+}
+
 func (b *BeaconBody) resetGloasProgressiveLists() {
-	b.ProposerSlashings = solid.NewStaticProgressiveListSSZ[*ProposerSlashing](416)
-	b.AttesterSlashings = solid.NewDynamicProgressiveListSSZ[*AttesterSlashing]()
-	b.Attestations = solid.NewDynamicProgressiveListSSZ[*solid.Attestation]()
-	b.Deposits = solid.NewStaticProgressiveListSSZ[*Deposit](1240)
-	b.VoluntaryExits = solid.NewStaticProgressiveListSSZ[*SignedVoluntaryExit](112)
-	b.ExecutionChanges = solid.NewStaticProgressiveListSSZ[*SignedBLSToExecutionChange](172)
+	maxAttesterSlashings := MaxAttesterSlashings
+	maxAttestations := MaxAttestations
+	if b.Version.AfterOrEqual(clparams.ElectraVersion) {
+		maxAttesterSlashings = MaxAttesterSlashingsElectra
+		maxAttestations = MaxAttestationsElectra
+	}
+	b.ProposerSlashings = solid.NewStaticProgressiveListSSZ[*ProposerSlashing](MaxProposerSlashings, 416)
+	b.AttesterSlashings = solid.NewDynamicProgressiveListSSZ[*AttesterSlashing](maxAttesterSlashings)
+	b.Attestations = solid.NewDynamicProgressiveListSSZ[*solid.Attestation](maxAttestations)
+	b.Deposits = solid.NewStaticProgressiveListSSZ[*Deposit](MaxDeposits, 1240)
+	b.VoluntaryExits = solid.NewStaticProgressiveListSSZ[*SignedVoluntaryExit](MaxVoluntaryExits, 112)
+	b.ExecutionChanges = solid.NewStaticProgressiveListSSZ[*SignedBLSToExecutionChange](MaxExecutionChanges, 172)
 	ptcSize := clparams.MaxPtcSize
 	if b.beaconCfg != nil && b.beaconCfg.PtcSize > 0 {
 		ptcSize = b.beaconCfg.PtcSize
 	}
-	b.PayloadAttestations = solid.NewStaticProgressiveListSSZ[*PayloadAttestation](PayloadAttestationSSZSizeWithPtcSize(ptcSize))
+	b.PayloadAttestations = solid.NewStaticProgressiveListSSZ[*PayloadAttestation](maxPayloadAttestationsForConfig(b.beaconCfg), PayloadAttestationSSZSizeWithPtcSize(ptcSize))
 }
 
 // ensureNilFields initializes any nil fields that must be present for SSZ encoding,
@@ -346,35 +366,35 @@ func (b *BeaconBody) ensureNilFields() {
 	}
 	if b.ProposerSlashings == nil {
 		if b.Version >= clparams.GloasVersion {
-			b.ProposerSlashings = solid.NewStaticProgressiveListSSZ[*ProposerSlashing](416)
+			b.ProposerSlashings = solid.NewStaticProgressiveListSSZ[*ProposerSlashing](MaxProposerSlashings, 416)
 		} else {
 			b.ProposerSlashings = solid.NewStaticListSSZ[*ProposerSlashing](MaxProposerSlashings, 416)
 		}
 	}
 	if b.AttesterSlashings == nil {
 		if b.Version >= clparams.GloasVersion {
-			b.AttesterSlashings = solid.NewDynamicProgressiveListSSZ[*AttesterSlashing]()
+			b.AttesterSlashings = solid.NewDynamicProgressiveListSSZ[*AttesterSlashing](maxAttSlashing)
 		} else {
 			b.AttesterSlashings = solid.NewDynamicListSSZ[*AttesterSlashing](maxAttSlashing)
 		}
 	}
 	if b.Attestations == nil {
 		if b.Version >= clparams.GloasVersion {
-			b.Attestations = solid.NewDynamicProgressiveListSSZ[*solid.Attestation]()
+			b.Attestations = solid.NewDynamicProgressiveListSSZ[*solid.Attestation](maxAttestation)
 		} else {
 			b.Attestations = solid.NewDynamicListSSZ[*solid.Attestation](maxAttestation)
 		}
 	}
 	if b.Deposits == nil {
 		if b.Version >= clparams.GloasVersion {
-			b.Deposits = solid.NewStaticProgressiveListSSZ[*Deposit](1240)
+			b.Deposits = solid.NewStaticProgressiveListSSZ[*Deposit](MaxDeposits, 1240)
 		} else {
 			b.Deposits = solid.NewStaticListSSZ[*Deposit](MaxDeposits, 1240)
 		}
 	}
 	if b.VoluntaryExits == nil {
 		if b.Version >= clparams.GloasVersion {
-			b.VoluntaryExits = solid.NewStaticProgressiveListSSZ[*SignedVoluntaryExit](112)
+			b.VoluntaryExits = solid.NewStaticProgressiveListSSZ[*SignedVoluntaryExit](MaxVoluntaryExits, 112)
 		} else {
 			b.VoluntaryExits = solid.NewStaticListSSZ[*SignedVoluntaryExit](MaxVoluntaryExits, 112)
 		}
@@ -385,7 +405,7 @@ func (b *BeaconBody) ensureNilFields() {
 	}
 	if b.ExecutionChanges == nil {
 		if b.Version >= clparams.GloasVersion {
-			b.ExecutionChanges = solid.NewStaticProgressiveListSSZ[*SignedBLSToExecutionChange](172)
+			b.ExecutionChanges = solid.NewStaticProgressiveListSSZ[*SignedBLSToExecutionChange](MaxExecutionChanges, 172)
 		} else {
 			b.ExecutionChanges = solid.NewStaticListSSZ[*SignedBLSToExecutionChange](MaxExecutionChanges, 172)
 		}
@@ -409,7 +429,7 @@ func (b *BeaconBody) ensureNilFields() {
 		if b.SignedExecutionPayloadBid == nil {
 			b.SignedExecutionPayloadBid = &SignedExecutionPayloadBid{
 				Message: &ExecutionPayloadBid{
-					BlobKzgCommitments: *solid.NewStaticProgressiveListSSZ[*KZGCommitment](48),
+					BlobKzgCommitments: *solid.NewStaticProgressiveListSSZ[*KZGCommitment](maxBlobCommitmentsForConfig(b.beaconCfg), 48),
 				},
 			}
 		}
@@ -418,7 +438,7 @@ func (b *BeaconBody) ensureNilFields() {
 			if b.beaconCfg != nil && b.beaconCfg.PtcSize > 0 {
 				ptcSize = b.beaconCfg.PtcSize
 			}
-			b.PayloadAttestations = solid.NewStaticProgressiveListSSZ[*PayloadAttestation](PayloadAttestationSSZSizeWithPtcSize(ptcSize))
+			b.PayloadAttestations = solid.NewStaticProgressiveListSSZ[*PayloadAttestation](maxPayloadAttestationsForConfig(b.beaconCfg), PayloadAttestationSSZSizeWithPtcSize(ptcSize))
 		}
 		if b.ParentExecutionRequests == nil {
 			b.ParentExecutionRequests = NewExecutionRequestsWithVersion(b.beaconCfg, b.Version)
@@ -484,7 +504,7 @@ func (b *BeaconBody) DecodeSSZ(buf []byte, version int) error {
 	if b.Version >= clparams.GloasVersion {
 		b.SignedExecutionPayloadBid = &SignedExecutionPayloadBid{
 			Message: &ExecutionPayloadBid{
-				BlobKzgCommitments: *solid.NewStaticProgressiveListSSZ[*KZGCommitment](48),
+				BlobKzgCommitments: *solid.NewStaticProgressiveListSSZ[*KZGCommitment](maxBlobCommitmentsForConfig(b.beaconCfg), 48),
 			},
 		}
 		b.ParentExecutionRequests = NewExecutionRequestsWithVersion(b.beaconCfg, b.Version)
@@ -739,27 +759,54 @@ func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
 	}
 	// [New in Gloas:EIP7732] Initialize GLOAS fields
 	if b.Version >= clparams.GloasVersion {
-		tmp.ProposerSlashings = solid.NewStaticProgressiveListSSZ[*ProposerSlashing](416)
-		tmp.AttesterSlashings = solid.NewDynamicProgressiveListSSZ[*AttesterSlashing]()
-		tmp.Attestations = solid.NewDynamicProgressiveListSSZ[*solid.Attestation]()
-		tmp.Deposits = solid.NewStaticProgressiveListSSZ[*Deposit](1240)
-		tmp.VoluntaryExits = solid.NewStaticProgressiveListSSZ[*SignedVoluntaryExit](112)
-		tmp.ExecutionChanges = solid.NewStaticProgressiveListSSZ[*SignedBLSToExecutionChange](172)
+		tmp.ProposerSlashings = solid.NewStaticProgressiveListSSZ[*ProposerSlashing](MaxProposerSlashings, 416)
+		tmp.AttesterSlashings = solid.NewDynamicProgressiveListSSZ[*AttesterSlashing](maxAttSlashing)
+		tmp.Attestations = solid.NewDynamicProgressiveListSSZ[*solid.Attestation](maxAttestation)
+		tmp.Deposits = solid.NewStaticProgressiveListSSZ[*Deposit](MaxDeposits, 1240)
+		tmp.VoluntaryExits = solid.NewStaticProgressiveListSSZ[*SignedVoluntaryExit](MaxVoluntaryExits, 112)
+		tmp.ExecutionChanges = solid.NewStaticProgressiveListSSZ[*SignedBLSToExecutionChange](MaxExecutionChanges, 172)
 		tmp.SignedExecutionPayloadBid = &SignedExecutionPayloadBid{
 			Message: &ExecutionPayloadBid{
-				BlobKzgCommitments: *solid.NewStaticProgressiveListSSZ[*KZGCommitment](48),
+				BlobKzgCommitments: *solid.NewStaticProgressiveListSSZ[*KZGCommitment](maxBlobCommitmentsForConfig(b.beaconCfg), 48),
 			},
 		}
 		ptcSize := clparams.MaxPtcSize
 		if b.beaconCfg != nil && b.beaconCfg.PtcSize > 0 {
 			ptcSize = b.beaconCfg.PtcSize
 		}
-		tmp.PayloadAttestations = solid.NewStaticProgressiveListSSZ[*PayloadAttestation](PayloadAttestationSSZSizeWithPtcSize(ptcSize))
+		tmp.PayloadAttestations = solid.NewStaticProgressiveListSSZ[*PayloadAttestation](maxPayloadAttestationsForConfig(b.beaconCfg), PayloadAttestationSSZSizeWithPtcSize(ptcSize))
 		tmp.ParentExecutionRequests = NewExecutionRequestsWithVersion(b.beaconCfg, b.Version)
 	}
 
 	if err := json.Unmarshal(buf, &tmp); err != nil {
 		return err
+	}
+	if b.Version >= clparams.GloasVersion {
+		if tmp.SignedExecutionPayloadBid == nil || tmp.SignedExecutionPayloadBid.Message == nil {
+			return errors.New("gloas beacon body contains a null execution payload bid")
+		}
+		if err := solid.RangeErr(&tmp.SignedExecutionPayloadBid.Message.BlobKzgCommitments, func(i int, commitment *KZGCommitment, _ int) error {
+			if commitment == nil {
+				return fmt.Errorf("blob KZG commitment %d is null", i)
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+		if tmp.PayloadAttestations == nil {
+			return errors.New("gloas beacon body contains null payload attestations")
+		}
+		if err := solid.RangeErr(tmp.PayloadAttestations, func(i int, attestation *PayloadAttestation, _ int) error {
+			if attestation == nil || attestation.AggregationBits == nil || attestation.Data == nil {
+				return fmt.Errorf("payload attestation %d is incomplete", i)
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+		if tmp.ParentExecutionRequests == nil {
+			return errors.New("gloas beacon body contains null parent execution requests")
+		}
 	}
 	tmp.AttesterSlashings.Range(func(_ int, value *AttesterSlashing, _ int) bool {
 		// Set version with config for preset-aware limits

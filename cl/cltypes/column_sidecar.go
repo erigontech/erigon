@@ -83,14 +83,14 @@ func (d *DataColumnSidecar) tryInitWithVersion(version clparams.StateVersion) {
 	cfg := clparams.GetBeaconConfig()
 	if d.Column == nil {
 		if version >= clparams.GloasVersion {
-			d.Column = solid.NewStaticProgressiveListSSZ[*Cell](BytesPerCell)
+			d.Column = solid.NewStaticProgressiveListSSZ[*Cell](int(cfg.MaxBlobCommittmentsPerBlock), BytesPerCell)
 		} else {
 			d.Column = solid.NewStaticListSSZ[*Cell](int(cfg.MaxBlobCommittmentsPerBlock), BytesPerCell)
 		}
 	}
 	if d.KzgProofs == nil {
 		if version >= clparams.GloasVersion {
-			d.KzgProofs = solid.NewStaticProgressiveListSSZ[*KZGProof](48)
+			d.KzgProofs = solid.NewStaticProgressiveListSSZ[*KZGProof](int(cfg.MaxBlobCommittmentsPerBlock), 48)
 		} else {
 			d.KzgProofs = solid.NewStaticListSSZ[*KZGProof](int(cfg.MaxBlobCommittmentsPerBlock), 48)
 		}

@@ -59,27 +59,27 @@ func (e *ExecutionRequests) ensureLists() {
 	}
 	progressive := e.effectiveVersion() >= clparams.GloasVersion
 	if e.Deposits == nil && progressive {
-		e.Deposits = solid.NewStaticProgressiveListSSZ[*solid.DepositRequest](solid.SizeDepositRequest)
+		e.Deposits = solid.NewStaticProgressiveListSSZ[*solid.DepositRequest](int(e.cfg.MaxDepositRequestsPerPayload), solid.SizeDepositRequest)
 	} else if e.Deposits == nil {
 		e.Deposits = solid.NewStaticListSSZ[*solid.DepositRequest](int(e.cfg.MaxDepositRequestsPerPayload), solid.SizeDepositRequest)
 	}
 	if e.Withdrawals == nil && progressive {
-		e.Withdrawals = solid.NewStaticProgressiveListSSZ[*solid.WithdrawalRequest](solid.SizeWithdrawalRequest)
+		e.Withdrawals = solid.NewStaticProgressiveListSSZ[*solid.WithdrawalRequest](int(e.cfg.MaxWithdrawalRequestsPerPayload), solid.SizeWithdrawalRequest)
 	} else if e.Withdrawals == nil {
 		e.Withdrawals = solid.NewStaticListSSZ[*solid.WithdrawalRequest](int(e.cfg.MaxWithdrawalRequestsPerPayload), solid.SizeWithdrawalRequest)
 	}
 	if e.Consolidations == nil && progressive {
-		e.Consolidations = solid.NewStaticProgressiveListSSZ[*solid.ConsolidationRequest](solid.SizeConsolidationRequest)
+		e.Consolidations = solid.NewStaticProgressiveListSSZ[*solid.ConsolidationRequest](int(e.cfg.MaxConsolidationRequestsPerPayload), solid.SizeConsolidationRequest)
 	} else if e.Consolidations == nil {
 		e.Consolidations = solid.NewStaticListSSZ[*solid.ConsolidationRequest](int(e.cfg.MaxConsolidationRequestsPerPayload), solid.SizeConsolidationRequest)
 	}
 	if e.BuilderDeposits == nil && progressive {
-		e.BuilderDeposits = solid.NewStaticProgressiveListSSZ[*solid.BuilderDepositRequest](solid.SizeBuilderDepositRequest)
+		e.BuilderDeposits = solid.NewStaticProgressiveListSSZ[*solid.BuilderDepositRequest](int(e.cfg.MaxBuilderDepositRequestsPerPayload), solid.SizeBuilderDepositRequest)
 	} else if e.BuilderDeposits == nil {
 		e.BuilderDeposits = solid.NewStaticListSSZ[*solid.BuilderDepositRequest](int(e.cfg.MaxBuilderDepositRequestsPerPayload), solid.SizeBuilderDepositRequest)
 	}
 	if e.BuilderExits == nil && progressive {
-		e.BuilderExits = solid.NewStaticProgressiveListSSZ[*solid.BuilderExitRequest](solid.SizeBuilderExitRequest)
+		e.BuilderExits = solid.NewStaticProgressiveListSSZ[*solid.BuilderExitRequest](int(e.cfg.MaxBuilderExitRequestsPerPayload), solid.SizeBuilderExitRequest)
 	} else if e.BuilderExits == nil {
 		e.BuilderExits = solid.NewStaticListSSZ[*solid.BuilderExitRequest](int(e.cfg.MaxBuilderExitRequestsPerPayload), solid.SizeBuilderExitRequest)
 	}
@@ -213,11 +213,11 @@ func (e *ExecutionRequests) UnmarshalJSON(b []byte) error {
 	newBuilderDeposits := solid.NewStaticListSSZ[*solid.BuilderDepositRequest](int(e.cfg.MaxBuilderDepositRequestsPerPayload), solid.SizeBuilderDepositRequest)
 	newBuilderExits := solid.NewStaticListSSZ[*solid.BuilderExitRequest](int(e.cfg.MaxBuilderExitRequestsPerPayload), solid.SizeBuilderExitRequest)
 	if e.effectiveVersion() >= clparams.GloasVersion {
-		newDeposits = solid.NewStaticProgressiveListSSZ[*solid.DepositRequest](solid.SizeDepositRequest)
-		newWithdrawals = solid.NewStaticProgressiveListSSZ[*solid.WithdrawalRequest](solid.SizeWithdrawalRequest)
-		newConsolidations = solid.NewStaticProgressiveListSSZ[*solid.ConsolidationRequest](solid.SizeConsolidationRequest)
-		newBuilderDeposits = solid.NewStaticProgressiveListSSZ[*solid.BuilderDepositRequest](solid.SizeBuilderDepositRequest)
-		newBuilderExits = solid.NewStaticProgressiveListSSZ[*solid.BuilderExitRequest](solid.SizeBuilderExitRequest)
+		newDeposits = solid.NewStaticProgressiveListSSZ[*solid.DepositRequest](int(e.cfg.MaxDepositRequestsPerPayload), solid.SizeDepositRequest)
+		newWithdrawals = solid.NewStaticProgressiveListSSZ[*solid.WithdrawalRequest](int(e.cfg.MaxWithdrawalRequestsPerPayload), solid.SizeWithdrawalRequest)
+		newConsolidations = solid.NewStaticProgressiveListSSZ[*solid.ConsolidationRequest](int(e.cfg.MaxConsolidationRequestsPerPayload), solid.SizeConsolidationRequest)
+		newBuilderDeposits = solid.NewStaticProgressiveListSSZ[*solid.BuilderDepositRequest](int(e.cfg.MaxBuilderDepositRequestsPerPayload), solid.SizeBuilderDepositRequest)
+		newBuilderExits = solid.NewStaticProgressiveListSSZ[*solid.BuilderExitRequest](int(e.cfg.MaxBuilderExitRequestsPerPayload), solid.SizeBuilderExitRequest)
 	}
 	c := struct {
 		Deposits        *solid.ListSSZ[*solid.DepositRequest]        `json:"deposits"`
@@ -235,6 +235,51 @@ func (e *ExecutionRequests) UnmarshalJSON(b []byte) error {
 	if err := json.Unmarshal(b, &c); err != nil {
 		return err
 	}
+	c.Deposits = coalesceExecutionRequestList(c.Deposits, newDeposits)
+	c.Withdrawals = coalesceExecutionRequestList(c.Withdrawals, newWithdrawals)
+	c.Consolidations = coalesceExecutionRequestList(c.Consolidations, newConsolidations)
+	c.BuilderDeposits = coalesceExecutionRequestList(c.BuilderDeposits, newBuilderDeposits)
+	c.BuilderExits = coalesceExecutionRequestList(c.BuilderExits, newBuilderExits)
+	if err := solid.RangeErr(c.Deposits, func(i int, request *solid.DepositRequest, _ int) error {
+		if request == nil {
+			return fmt.Errorf("deposit request %d is null", i)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := solid.RangeErr(c.Withdrawals, func(i int, request *solid.WithdrawalRequest, _ int) error {
+		if request == nil {
+			return fmt.Errorf("withdrawal request %d is null", i)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := solid.RangeErr(c.Consolidations, func(i int, request *solid.ConsolidationRequest, _ int) error {
+		if request == nil {
+			return fmt.Errorf("consolidation request %d is null", i)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := solid.RangeErr(c.BuilderDeposits, func(i int, request *solid.BuilderDepositRequest, _ int) error {
+		if request == nil {
+			return fmt.Errorf("builder deposit request %d is null", i)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := solid.RangeErr(c.BuilderExits, func(i int, request *solid.BuilderExitRequest, _ int) error {
+		if request == nil {
+			return fmt.Errorf("builder exit request %d is null", i)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
 
 	e.Deposits = c.Deposits
 	e.Withdrawals = c.Withdrawals
@@ -246,6 +291,13 @@ func (e *ExecutionRequests) UnmarshalJSON(b []byte) error {
 		return fmt.Errorf("builder execution requests before gloas")
 	}
 	return nil
+}
+
+func coalesceExecutionRequestList[T solid.EncodableHashableSSZ](list, empty *solid.ListSSZ[T]) *solid.ListSSZ[T] {
+	if list == nil {
+		return empty
+	}
+	return list
 }
 
 func (e *ExecutionRequests) MarshalJSON() ([]byte, error) {
