@@ -19,6 +19,9 @@ package protocol
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"math/big"
+	"slices"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -957,54 +960,179 @@ func TestBuyGas_NilMaxFeePerBlobGasWithBlobs(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// TestPreCheckNonceMismatchError pins the message text and the errors.Is
-// identity: the parallel executor matches the sentinel, RPC surfaces the text.
-func TestPreCheckNonceMismatchError(t *testing.T) {
+// accessListCountingMsg counts AccessList reads, which both the intrinsic-gas
+// calculation and the access-list clone perform.
+type accessListCountingMsg struct {
+	*types.Message
+	reads *int
+}
+
+func (m accessListCountingMsg) AccessList() types.AccessList {
+	*m.reads++
+	return m.Message.AccessList()
+}
+
+// TestPreCheckDefersIntrinsicGasUntilNeeded pins that a transaction rejected by
+// a state check never pays for the intrinsic-gas calculation. Under parallel
+// execution a stale-nonce rejection is a routine re-execution signal, so work
+// done ahead of it is repeated for every speculative attempt.
+func TestPreCheckDefersIntrinsicGasUntilNeeded(t *testing.T) {
 	t.Parallel()
 
 	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
 	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
 
-	preCheckWithNonce := func(t *testing.T, stateNonce, msgNonce uint64) error {
+	run := func(t *testing.T, stateNonce, msgNonce uint64) (int, error) {
 		t.Helper()
 		ibs := state.New(state.NewNoopReader())
 		defer ibs.Close()
 		require.NoError(t, ibs.SetNonce(sender, stateNonce, tracing.NonceChangeGenesis))
 
 		evm := newTestEVM(ibs, chain.TestChainOsakaConfig, 30_000_000)
-		msg := types.NewMessage(
+		inner := types.NewMessage(
 			sender, recipient, msgNonce, uint256.NewInt(0), 100_000,
 			uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
-			nil, nil,
+			nil, types.AccessList{{Address: recipient.Value()}},
 			true,  // checkNonce
 			false, // checkTransaction
-			false, // checkGas
+			true,  // checkGas
 			false, // isFree
 			nil,   // maxFeePerBlobGas
 		)
+		reads := 0
+		msg := accessListCountingMsg{Message: inner, reads: &reads}
 		st := NewTxnExecutor(evm, msg, new(GasPool).AddGas(30_000_000))
-		return st.preCheck(false, mdgas.IntrinsicGasCalcResult{})
+		_, err := st.Execute(true, false)
+		return reads, err
 	}
 
-	t.Run("nonce too high", func(t *testing.T) {
-		err := preCheckWithNonce(t, 3, 7)
+	t.Run("stale nonce rejects before intrinsic gas is computed", func(t *testing.T) {
+		reads, err := run(t, 3, 7)
 		require.ErrorIs(t, err, ErrNonceTooHigh)
-		require.NotErrorIs(t, err, ErrNonceTooLow)
-		require.Equal(t,
-			"nonce too high: address 0x1111111111111111111111111111111111111111, tx: 7 state: 3",
-			err.Error())
+		require.Zero(t, reads, "rejected tx must not read the access list")
 	})
 
-	t.Run("nonce too low", func(t *testing.T) {
-		err := preCheckWithNonce(t, 7, 3)
-		require.ErrorIs(t, err, ErrNonceTooLow)
-		require.NotErrorIs(t, err, ErrNonceTooHigh)
-		require.Equal(t,
-			"nonce too low: address 0x1111111111111111111111111111111111111111, tx: 3 state: 7",
-			err.Error())
+	t.Run("accepted tx still computes intrinsic gas", func(t *testing.T) {
+		reads, err := run(t, 5, 5)
+		require.NoError(t, err)
+		require.NotZero(t, reads, "accepted tx must compute intrinsic gas")
 	})
+}
 
-	t.Run("matching nonce passes", func(t *testing.T) {
-		require.NoError(t, preCheckWithNonce(t, 5, 5))
-	})
+// BenchmarkExecuteStaleNonceReject measures a transaction rejected on a stale
+// nonce, the routine outcome of a speculative parallel attempt. Access-list
+// size drives both the intrinsic-gas calculation and the tuple copy.
+func BenchmarkExecuteStaleNonceReject(b *testing.B) {
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+
+	for _, alLen := range []int{0, 8, 64} {
+		b.Run(fmt.Sprintf("accesslist=%d", alLen), func(b *testing.B) {
+			al := make(types.AccessList, alLen)
+			for i := range al {
+				al[i] = types.AccessTuple{
+					Address:     common.BigToAddress(big.NewInt(int64(i + 1))),
+					StorageKeys: []common.Hash{{byte(i)}, {byte(i), 0x01}},
+				}
+			}
+			ibs := state.New(state.NewNoopReader())
+			defer ibs.Close()
+			require.NoError(b, ibs.SetNonce(sender, 3, tracing.NonceChangeGenesis))
+
+			msg := types.NewMessage(
+				sender, recipient, 7, uint256.NewInt(0), 100_000,
+				uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
+				nil, al,
+				true, false, true, false, nil,
+			)
+
+			b.ReportAllocs()
+			for b.Loop() {
+				evm := newTestEVM(ibs, chain.TestChainOsakaConfig, 30_000_000)
+				st := NewTxnExecutor(evm, msg, new(GasPool).AddGas(30_000_000))
+				if _, err := st.Execute(true, false); !errors.Is(err, ErrNonceTooHigh) {
+					b.Fatalf("want ErrNonceTooHigh, got %v", err)
+				}
+			}
+		})
+	}
+}
+
+// TestPreCheckIntrinsicGasMatchesMessage pins that the intrinsic gas preCheck
+// leaves behind equals what the message's own fields imply, across the shapes
+// that feed the calculation.
+func TestPreCheckIntrinsicGasMatchesMessage(t *testing.T) {
+	t.Parallel()
+
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+	auth, _ := eip2780TestAuthorization()
+
+	al := types.AccessList{
+		{Address: common.HexToAddress("0xaa"), StorageKeys: []common.Hash{{0x1}, {0x2}, {0x3}}},
+		{Address: common.HexToAddress("0xbb"), StorageKeys: []common.Hash{{0x4}}},
+	}
+
+	cases := []struct {
+		name   string
+		to     accounts.Address
+		data   []byte
+		al     types.AccessList
+		auths  []types.Authorization
+		amount *uint256.Int
+	}{
+		{"plain transfer", recipient, nil, nil, nil, uint256.NewInt(0)},
+		{"with value", recipient, nil, nil, nil, uint256.NewInt(7)},
+		{"with data", recipient, []byte{0, 1, 0, 2, 3}, nil, nil, uint256.NewInt(0)},
+		{"with access list", recipient, nil, al, nil, uint256.NewInt(0)},
+		{"with authorizations", recipient, nil, al, []types.Authorization{auth}, uint256.NewInt(0)},
+		{"contract creation", accounts.NilAddress, []byte{0x60, 0x01}, al, nil, uint256.NewInt(0)},
+		{"self transfer", sender, nil, al, nil, uint256.NewInt(1)},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ibs := state.New(state.NewNoopReader())
+			defer ibs.Close()
+			ibs.SetBalance(sender, *uint256.NewInt(1_000_000), tracing.BalanceChangeUnspecified)
+			evm := newTestEVM(ibs, chain.TestChainOsakaConfig, 30_000_000)
+			msg := types.NewMessage(
+				sender, tc.to, 0, tc.amount, 10_000_000,
+				uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
+				tc.data, tc.al,
+				false, false, true, false, nil,
+			)
+			msg.SetAuthorizations(tc.auths)
+
+			st := NewTxnExecutor(evm, msg, new(GasPool).AddGas(30_000_000))
+			got, err := st.preCheck(false)
+			require.NoError(t, err)
+
+			// Derive the arguments the way Execute used to, from a cloned access
+			// list, and compare against what preCheck stored.
+			accessTuples := slices.Clone[types.AccessList](msg.AccessList())
+			contractCreation := msg.To().IsNil()
+			rules := evm.ChainRules()
+			vmConfig := evm.Config()
+			want, overflow := mdgas.IntrinsicGas(mdgas.IntrinsicGasCalcArgs{
+				Data:               tc.data,
+				AuthorizationsLen:  uint64(len(msg.Authorizations())),
+				AccessListLen:      uint64(len(accessTuples)),
+				StorageKeysLen:     uint64(accessTuples.StorageKeys()),
+				IsContractCreation: contractCreation,
+				IsSelfTransfer:     !contractCreation && msg.To() == msg.From(),
+				HasValue:           !msg.Value().IsZero(),
+				IsEIP2:             rules.IsHomestead,
+				IsEIP2028:          rules.IsIstanbul,
+				IsEIP3860:          vmConfig.HasEip3860(rules),
+				IsEIP7623:          rules.IsPrague,
+				IsEIP7976:          rules.IsAmsterdam,
+				IsEIP7981:          rules.IsAmsterdam,
+				IsEIP2780:          rules.IsAmsterdam,
+			})
+			require.False(t, overflow)
+			require.Equal(t, want, got)
+			require.NotZero(t, got.ExecutionGas)
+		})
+	}
 }
