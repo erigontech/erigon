@@ -58,7 +58,7 @@ func (d *dummyContractRef) Balance() *big.Int          { return new(big.Int) }
 func TestStoreCapture(t *testing.T) {
 	//c := vm.NewJumpDestCache(128)
 	ibs := state.New(state.NewNoopReader())
-	defer ibs.Release(false)
+	defer ibs.Close()
 	ibs.AddRefund(1337)
 
 	var (
@@ -69,7 +69,7 @@ func TestStoreCapture(t *testing.T) {
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x0, byte(vm.SSTORE)}
 	var index common.Hash
 	logger.OnTxStart(evm.GetVMContext(), nil, accounts.ZeroAddress)
-	_, _, _, err := evm.Run(contract, mdgas.MdGas{Regular: 200_000, State: params.StateGasPerStorageSet}, []byte{}, false)
+	_, _, _, err := evm.Run(contract, mdgas.MdGas{Execution: 200_000, State: params.StateGasPerStorageSet}, []byte{}, false)
 	if err != nil {
 		t.Fatal(err)
 	}

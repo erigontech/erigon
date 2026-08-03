@@ -668,7 +668,7 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 func balRequestsForHeaders(headers []*types.Header) []BALRequest {
 	reqs := make([]BALRequest, 0, len(headers))
 	for _, header := range headers {
-		if !header.HasBAL() {
+		if !header.HasNonEmptyBAL() {
 			continue
 		}
 		reqs = append(reqs, BALRequest{

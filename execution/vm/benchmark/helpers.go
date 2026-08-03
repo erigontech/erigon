@@ -3,6 +3,7 @@
 package benchmark
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -51,23 +52,35 @@ func cancunConfig() *chain.Config {
 	}
 }
 
-// benchConfig creates a runtime.Config for benchmarks with high gas limit
-// and Cancun chain rules (EIP-2929 access lists, EIP-1153 transient storage).
-func benchConfig(b *testing.B, gasLimit uint64) (*runtime.Config, *state.IntraBlockState) {
+// benchConfig builds the EVM a benchmark runs every iteration against, on
+// Cancun rules and the parallel-execution path staged sync uses. One EVM per
+// benchmark, as staged sync keeps one per worker: building it per iteration
+// costs more than the cheap benchmarks measure and throws away the caches it
+// interns into.
+func benchConfig(b *testing.B, gasLimit uint64) *vm.EVM {
 	b.Helper()
+	return newBenchEnv(b, gasLimit, true)
+}
 
-	db := testutil.TemporalDB(b)
-	tx, domains := testutil.TemporalTxSD(b, db)
+// newBenchEnv returns the env, not the runtime.Config it built: NewEnv ignores
+// Config.Value — only runtime.Call reads it — so a Value set here would never
+// reach the call.
+func newBenchEnv(t testing.TB, gasLimit uint64, noMaterialize bool) *vm.EVM {
+	t.Helper()
+
+	db := testutil.TemporalDB(t)
+	tx, domains := testutil.TemporalTxSD(t, db)
 
 	err := rawdbv3.TxNums.Append(tx, 1, 1)
-	require.NoError(b, err)
+	require.NoError(t, err)
 
 	statedb := state.NewWithVersionMap(
 		state.NewReaderV3(domains.AsGetter(tx)),
 		state.NewVersionMap(nil),
 	)
+	statedb.SetNoMaterialize(noMaterialize)
 
-	cfg := &runtime.Config{
+	return runtime.NewEnv(&runtime.Config{
 		ChainConfig: cancunConfig(),
 		Origin:      addrSender,
 		Coinbase:    accounts.ZeroAddress,
@@ -76,9 +89,7 @@ func benchConfig(b *testing.B, gasLimit uint64) (*runtime.Config, *state.IntraBl
 		GasLimit:    gasLimit,
 		Difficulty:  uint256.NewInt(0),
 		State:       statedb,
-	}
-
-	return cfg, statedb
+	})
 }
 
 // deployContract deploys code at the given address in the state.
@@ -103,10 +114,42 @@ func setStorage(statedb *state.IntraBlockState, addr accounts.Address, slots map
 }
 
 // prepareAndCall sets up EVM access lists and calls the contract.
-func prepareAndCall(cfg *runtime.Config, addr accounts.Address, input []byte) ([]byte, mdgas.MdGas, error) {
-	vmenv := runtime.NewEnv(cfg)
+func prepareAndCall(vmenv *vm.EVM, addr accounts.Address, input []byte) ([]byte, mdgas.MdGas, error) {
 	rules := vmenv.ChainRules()
-	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, addr, vm.ActivePrecompiles(rules), nil)
-	ret, left, _, err := vmenv.Call(cfg.Origin, addr, input, mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules), cfg.Value, false)
+	vmenv.IntraBlockState().Prepare(rules, vmenv.Origin, vmenv.Context.Coinbase, addr, vm.ActivePrecompiles(rules), nil)
+	gas := mdgas.SplitTxnGasLimit(vmenv.Context.GasLimit, 0, rules)
+	ret, left, _, err := vmenv.Call(vmenv.Origin, addr, input, gas, uint256.Int{}, false)
 	return ret, left, err
+}
+
+// callOOG runs one iteration of a benchmark whose program loops until the gas
+// budget is gone, and requires that it did. A call reaching an address with no
+// code returns no error and burns nothing, so the gas assertion — not the error
+// — is what catches a fixture that stopped working.
+func callOOG(b *testing.B, vmenv *vm.EVM, addr accounts.Address) {
+	statedb := vmenv.IntraBlockState()
+	snap := statedb.PushSnapshot()
+	_, left, err := prepareAndCall(vmenv, addr, nil)
+	if !errors.Is(err, vm.ErrOutOfGas) || left.Total() != 0 {
+		b.Fatalf("expected gas exhaustion, got gasLeft=%d err=%v", left.Total(), err)
+	}
+	statedb.RevertToSnapshot(snap, nil)
+	statedb.PopSnapshot(snap)
+}
+
+// callComplete runs one iteration of a benchmark whose program returns on its
+// own, and requires that it finished and did work. See callOOG on why the gas
+// check carries the weight.
+func callComplete(b *testing.B, vmenv *vm.EVM, addr accounts.Address, input []byte) {
+	statedb := vmenv.IntraBlockState()
+	snap := statedb.PushSnapshot()
+	_, left, err := prepareAndCall(vmenv, addr, input)
+	if err != nil {
+		b.Fatal(err)
+	}
+	if limit := vmenv.Context.GasLimit; left.Total() >= limit {
+		b.Fatalf("call consumed no gas (gasLeft=%d, limit=%d)", left.Total(), limit)
+	}
+	statedb.RevertToSnapshot(snap, nil)
+	statedb.PopSnapshot(snap)
 }
