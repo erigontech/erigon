@@ -242,8 +242,8 @@ func (st *TxnExecutor) to() accounts.Address {
 	return st.msg.To()
 }
 
-// txnFees holds the gas and blob fees computed by preCheck for buyGas.
-type txnFees struct {
+// upfrontTxnFees holds the gas and blob fees computed by preCheck for buyGas.
+type upfrontTxnFees struct {
 	gasVal     uint256.Int
 	blobGasVal uint256.Int
 }
@@ -251,7 +251,7 @@ type txnFees struct {
 // buyGas reserves blob gas and, unless gas bailout is enabled, debits the
 // precomputed gas and blob fees. It assumes preCheck has validated the
 // transaction.
-func (st *TxnExecutor) buyGas(fees txnFees, gasBailout bool) error {
+func (st *TxnExecutor) buyGas(fees upfrontTxnFees, gasBailout bool) error {
 	if st.evm.ChainRules().IsCancun {
 		if err := st.gp.SubBlobGas(st.msg.BlobGas()); err != nil {
 			return err
@@ -287,26 +287,26 @@ func CheckEip1559TxGasFeeCap(from accounts.Address, feeCap, tipCap, baseFee *uin
 // preCheck validates the transaction and computes the fees for buyGas without
 // mutating state or reserving block gas.
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
-func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.IntrinsicGasCalcResult) (txnFees, error) {
+func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.IntrinsicGasCalcResult) (upfrontTxnFees, error) {
 	rules := st.evm.ChainRules()
 	from := st.msg.From()
 
 	if rules.IsOsaka && len(st.msg.BlobHashes()) > params.MaxBlobsPerTxn {
-		return txnFees{}, fmt.Errorf("%w: address %v, blobs: %d", ErrTooManyBlobs, from, len(st.msg.BlobHashes()))
+		return upfrontTxnFees{}, fmt.Errorf("%w: address %v, blobs: %d", ErrTooManyBlobs, from, len(st.msg.BlobHashes()))
 	}
 
 	// Make sure this transaction's nonce is correct.
 	if st.msg.CheckNonce() {
 		stNonce, err := st.state.GetNonce(from)
 		if err != nil {
-			return txnFees{}, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+			return upfrontTxnFees{}, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 		}
 		if msgNonce := st.msg.Nonce(); stNonce < msgNonce {
-			return txnFees{}, &nonceError{err: ErrNonceTooHigh, from: from, txNonce: msgNonce, stateNonce: stNonce}
+			return upfrontTxnFees{}, &nonceError{err: ErrNonceTooHigh, from: from, txNonce: msgNonce, stateNonce: stNonce}
 		} else if stNonce > msgNonce {
-			return txnFees{}, &nonceError{err: ErrNonceTooLow, from: from, txNonce: msgNonce, stateNonce: stNonce}
+			return upfrontTxnFees{}, &nonceError{err: ErrNonceTooLow, from: from, txNonce: msgNonce, stateNonce: stNonce}
 		} else if stNonce+1 < stNonce {
-			return txnFees{}, fmt.Errorf("%w: address %v, nonce: %d", ErrNonceMax,
+			return upfrontTxnFees{}, fmt.Errorf("%w: address %v, nonce: %d", ErrNonceMax,
 				from, stNonce)
 		}
 	}
@@ -315,7 +315,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		// Make sure the sender is an EOA (EIP-3607)
 		codeHash, err := st.state.GetCodeHash(from)
 		if err != nil {
-			return txnFees{}, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+			return upfrontTxnFees{}, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 		}
 		if !codeHash.IsEmpty() {
 			// common.Hash{} means that the sender is not in the state.
@@ -325,10 +325,10 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 			// eip-7702 allows tx origination from accounts having delegated designation code.
 			_, ok, err := st.state.GetDelegatedDesignation(from)
 			if err != nil {
-				return txnFees{}, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+				return upfrontTxnFees{}, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 			}
 			if !ok {
-				return txnFees{}, fmt.Errorf("%w: address %v, codehash: %s", ErrSenderNoEOA,
+				return upfrontTxnFees{}, fmt.Errorf("%w: address %v, codehash: %s", ErrSenderNoEOA,
 					from, codeHash)
 			}
 		}
@@ -338,7 +338,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 	blobGas := st.msg.BlobGas()
 	executionContribution, stateContribution := InclusionContributions(gas, rules.IsAmsterdam)
 	if err := CheckBlockGasInclusion(st.gp, executionContribution, stateContribution, blobGas); err != nil {
-		return txnFees{}, err
+		return upfrontTxnFees{}, err
 	}
 
 	if rules.IsLondon {
@@ -346,7 +346,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		skipCheck := st.evm.Config().NoBaseFee && st.feeCap.IsZero() && st.tipCap.IsZero()
 		if !skipCheck {
 			if err := CheckEip1559TxGasFeeCap(from, st.feeCap, st.tipCap, &st.evm.Context.BaseFee, st.msg.IsFree()); err != nil {
-				return txnFees{}, err
+				return upfrontTxnFees{}, err
 			}
 		}
 	}
@@ -360,7 +360,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		}
 		skipBlobCheck := st.evm.Config().NoBaseFee && maxFeePerBlobGas.IsZero()
 		if !skipBlobCheck && blobGasPrice.Cmp(&maxFeePerBlobGas) > 0 {
-			return txnFees{}, fmt.Errorf("%w: address %v, maxFeePerBlobGas: %s < blobGasPrice: %s",
+			return upfrontTxnFees{}, fmt.Errorf("%w: address %v, maxFeePerBlobGas: %s < blobGasPrice: %s",
 				ErrMaxFeePerBlobGas, from, maxFeePerBlobGas.String(), blobGasPrice.String())
 		}
 	}
@@ -371,33 +371,33 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		if rules.IsAmsterdam {
 			// EIP-8037: TX_MAX_GAS_LIMIT applies to the execution gas dimension only.
 			if requiredIntrinsicGas > params.MaxTxnGasLimit {
-				return txnFees{}, fmt.Errorf("%w: execution gas cap %d exceeds TX_MAX_GAS_LIMIT %d",
+				return upfrontTxnFees{}, fmt.Errorf("%w: execution gas cap %d exceeds TX_MAX_GAS_LIMIT %d",
 					ErrIntrinsicGas, requiredIntrinsicGas, params.MaxTxnGasLimit)
 			}
 		} else if gas > params.MaxTxnGasLimit {
-			return txnFees{}, fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, from, gas)
+			return upfrontTxnFees{}, fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, from, gas)
 		}
 	}
 
 	// Match geth's EIP-7702 prerequisite precedence: after fee caps, before
 	// affordability and intrinsic gas.
 	if err := validateSetCodePrerequisites(st.msg.Authorizations(), st.msg.To().IsNil(), rules.IsPrague); err != nil {
-		return txnFees{}, err
+		return upfrontTxnFees{}, err
 	}
 
 	var (
-		fees     txnFees
+		fees     upfrontTxnFees
 		overflow bool
 	)
 	fees.gasVal, overflow = u256.MulOverflow(u256.U64(gas), *st.gasPrice)
 	if overflow {
-		return txnFees{}, fmt.Errorf("%w: address %v", ErrInsufficientFunds, from)
+		return upfrontTxnFees{}, fmt.Errorf("%w: address %v", ErrInsufficientFunds, from)
 	}
 
 	if hasBlobGas {
 		fees.blobGasVal, overflow = u256.MulOverflow(st.evm.Context.BlobBaseFee, u256.U64(blobGas))
 		if overflow {
-			return txnFees{}, fmt.Errorf("%w: overflow converting blob gas: %s", ErrInsufficientFunds, fees.blobGasVal.String())
+			return upfrontTxnFees{}, fmt.Errorf("%w: overflow converting blob gas: %s", ErrInsufficientFunds, fees.blobGasVal.String())
 		}
 	}
 
@@ -406,40 +406,40 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		if st.feeCap != nil {
 			balanceCheck, overflow = u256.MulOverflow(u256.U64(gas), *st.feeCap)
 			if overflow {
-				return txnFees{}, fmt.Errorf("%w: address %v", ErrInsufficientFunds, from)
+				return upfrontTxnFees{}, fmt.Errorf("%w: address %v", ErrInsufficientFunds, from)
 			}
 			balanceCheck, overflow = u256.AddOverflow(balanceCheck, st.value)
 			if overflow {
-				return txnFees{}, fmt.Errorf("%w: address %v", ErrInsufficientFunds, from)
+				return upfrontTxnFees{}, fmt.Errorf("%w: address %v", ErrInsufficientFunds, from)
 			}
 			if hasBlobGas {
 				maxBlobFee, overflow := u256.MulOverflow(maxFeePerBlobGas, u256.U64(blobGas))
 				if overflow {
-					return txnFees{}, fmt.Errorf("%w: address %v", ErrInsufficientFunds, from)
+					return upfrontTxnFees{}, fmt.Errorf("%w: address %v", ErrInsufficientFunds, from)
 				}
 				balanceCheck, overflow = u256.AddOverflow(balanceCheck, maxBlobFee)
 				if overflow {
-					return txnFees{}, fmt.Errorf("%w: address %v", ErrInsufficientFunds, from)
+					return upfrontTxnFees{}, fmt.Errorf("%w: address %v", ErrInsufficientFunds, from)
 				}
 			}
 		}
 		balance, err := st.state.GetBalance(from)
 		if err != nil {
-			return txnFees{}, err
+			return upfrontTxnFees{}, err
 		}
 		if balance.Cmp(&balanceCheck) < 0 {
-			return txnFees{}, fmt.Errorf("%w: address %v have %s want %s", ErrInsufficientFunds, from, balance.String(), balanceCheck.String())
+			return upfrontTxnFees{}, fmt.Errorf("%w: address %v have %s want %s", ErrInsufficientFunds, from, balance.String(), balanceCheck.String())
 		}
 	}
 
 	if gas < requiredIntrinsicGas {
-		return txnFees{}, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, gas, requiredIntrinsicGas)
+		return upfrontTxnFees{}, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, gas, requiredIntrinsicGas)
 	}
 
 	if st.msg.To().IsNil() {
 		vmConfig := st.evm.Config()
 		if err := vm.CheckMaxInitCodeSize(uint64(len(st.data)), vmConfig.HasEip3860(rules), rules.IsAmsterdam); err != nil {
-			return txnFees{}, err
+			return upfrontTxnFees{}, err
 		}
 	}
 
