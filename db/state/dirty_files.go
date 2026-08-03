@@ -376,7 +376,7 @@ func retire(reason mvcc.RetireReason, dirtyFiles *DirtyFiles, outs []*FilesItem,
 func openDirtyDataFile(item *FilesItem, mask string, dirEntries []string, dirPath string, ver version.Versions, tag string, logger log.Logger) bool {
 	fPath, fileVer, found, err := version.MatchVersionedFile(mask, dirEntries, dirPath)
 	if err != nil {
-		logger.Debug("[agg] "+tag+": MatchVersionedFile error", "f", filepath.Base(fPath), "err", err)
+		logger.Debug("[agg] "+tag+": MatchVersionedFile error", "f", mask, "err", err)
 		return false
 	}
 	if !found {
@@ -405,7 +405,7 @@ func openDirtyDataFile(item *FilesItem, mask string, dirEntries []string, dirPat
 func openDirtyAccessor(mask string, dirEntries []string, dirPath string, ver version.Versions, open func(fPath string) error, tag string, logger log.Logger) {
 	fPath, fileVer, found, err := version.MatchVersionedFile(mask, dirEntries, dirPath)
 	if err != nil {
-		logger.Warn("[agg] "+tag, "err", err, "f", filepath.Base(fPath))
+		logger.Warn("[agg] "+tag, "err", err, "f", mask)
 	}
 	if !found {
 		return
