@@ -14,6 +14,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -236,6 +237,7 @@ type readPathResult struct {
 	mapSelfDestructVal   bool
 	mapCreateContractVal bool
 	mapCodeVal           []byte
+	mapCodeKnownHash     accounts.CodeHash // CodePath map read only; NilCodeHash when unknown
 	mapCodeHashVal       accounts.CodeHash
 	mapCodeSizeVal       int
 	mapStorageVal        uint256.Int
@@ -413,7 +415,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	case CodePath:
 		var mc accounts.Code
 		mc, res, _ = s.versionMap.ReadCode(addr, s.txIndex)
-		r.mapCodeVal = mc.Bytes
+		r.mapCodeVal, r.mapCodeKnownHash = mc.Bytes, mc.Hash
 	case CodeHashPath:
 		r.mapCodeHashVal, res, _ = s.versionMap.ReadCodeHash(addr, s.txIndex)
 	case CodeSizePath:
@@ -1103,28 +1105,51 @@ func readCode(s *IntraBlockState, addr accounts.Address, commited bool) ([]byte,
 	}
 }
 
+// refreshedCode is code resolved by refreshCode. KnownHash is the hash the
+// writing source recorded alongside the bytes, or NilCodeHash when that source
+// stored bytes only. Unlike accounts.Code it carries no Hash == Keccak256(Bytes)
+// invariant, so callers must resolve an unknown hash before building one.
+type refreshedCode struct {
+	Bytes     []byte
+	KnownHash accounts.CodeHash
+}
+
 // refreshCode is the in-memory-only variant for CodePath.
 // CodePath is never recorded via the skipStorage branch in legacy
 // (the `path != CodePath` guard), so no recording on the default case.
-func refreshCode(s *IntraBlockState, addr accounts.Address) ([]byte, ReadSource, Version, error) {
+func refreshCode(s *IntraBlockState, addr accounts.Address) (refreshedCode, ReadSource, Version, error) {
 	var r readPathResult
 	versionedReadCore(s, addr, CodePath, accounts.NilKey, false, true, &r)
 	if r.err != nil {
-		return nil, r.source, r.version, r.err
+		return refreshedCode{}, r.source, r.version, r.err
 	}
 	switch r.outcome {
 	case outcomeWriteSetHit:
-		return r.vwCode.Val.Bytes, r.source, r.version, nil
+		return refreshedCode{r.vwCode.Val.Bytes, r.vwCode.Val.Hash}, r.source, r.version, nil
 	case outcomeReadSetHit:
 		tr, _ := s.versionedReads.GetCode(addr)
-		return tr.Val, r.source, r.version, nil
+		return refreshedCode{Bytes: tr.Val}, r.source, r.version, nil
 	case outcomeMapDone:
-		return r.mapCodeVal, r.source, r.version, nil
+		return refreshedCode{r.mapCodeVal, r.mapCodeKnownHash}, r.source, r.version, nil
 	case outcomeReturnZero, outcomeReturnDefault:
-		return nil, r.source, r.version, nil
+		return refreshedCode{}, r.source, r.version, nil
 	default:
 		panic(fmt.Sprintf("refreshCode: unexpected outcome %d for %x", r.outcome, addr))
 	}
+}
+
+// codeHash resolves the hash for refreshed bytes without re-hashing when the
+// source already knew it. A read-set value carries bytes only: recorded from
+// committed state the account record is authoritative, otherwise (a prior tx's
+// code write, which the account record can lag) the bytes must be hashed.
+func (c refreshedCode) codeHash(source ReadSource, accountHash accounts.CodeHash) accounts.CodeHash {
+	if c.KnownHash != accounts.NilCodeHash {
+		return c.KnownHash
+	}
+	if source == StorageRead {
+		return accountHash
+	}
+	return accounts.InternCodeHash(crypto.Keccak256Hash(c.Bytes))
 }
 
 // readCodeSize returns the contract code size.
