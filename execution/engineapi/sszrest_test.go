@@ -20,6 +20,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	commonssz "github.com/erigontech/erigon/common/ssz"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
@@ -512,6 +513,51 @@ func TestSSZRESTHashListRequestRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	_, err = decodeHashListRequest(oversized, sszMaxBodiesRequest)
 	require.Error(t, err)
+}
+
+func TestSSZRESTHashListRequestRejectsInvalidOffset(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		size   int
+		offset uint32
+	}{
+		{"before fixed section", 32, 0},
+		{"after fixed section", 40, 8},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := make([]byte, tc.size)
+			binary.LittleEndian.PutUint32(body, tc.offset)
+
+			_, err := decodeHashListRequest(body, sszMaxBodiesRequest)
+
+			require.ErrorIs(t, err, commonssz.ErrBadOffset)
+		})
+	}
+}
+
+func TestSSZRESTNewPayloadEnvelopeRejectsInvalidOffset(t *testing.T) {
+	payload := engine_types.NewExecutionPayloadSSZ(clparams.BellatrixVersion)
+	body, err := encodeNewPayloadEnvelope(clparams.BellatrixVersion, payload, common.Hash{}, nil)
+	require.NoError(t, err)
+
+	malformed := make([]byte, len(body)+4)
+	binary.LittleEndian.PutUint32(malformed, 8)
+	copy(malformed[8:], body[4:])
+
+	_, _, _, err = decodeNewPayloadEnvelope(malformed, clparams.BellatrixVersion)
+	require.ErrorIs(t, err, commonssz.ErrBadOffset)
+}
+
+func TestSSZRESTForkchoiceUpdateRejectsInvalidOffset(t *testing.T) {
+	body, err := encodeForkchoiceUpdate(clparams.BellatrixVersion, &engine_types.ForkChoiceState{}, nil, nil)
+	require.NoError(t, err)
+
+	malformed := make([]byte, len(body)+4)
+	copy(malformed, body)
+	binary.LittleEndian.PutUint32(malformed[96:], uint32(len(malformed)))
+
+	_, _, _, err = decodeForkchoiceUpdate(malformed, clparams.BellatrixVersion)
+	require.ErrorIs(t, err, commonssz.ErrBadOffset)
 }
 
 // A reused PayloadStatus must not leak optional fields from a previous decode.

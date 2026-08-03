@@ -138,7 +138,7 @@ func encodeHashListRequest(hashes []common.Hash, limit int) ([]byte, error) {
 
 func decodeHashListRequest(buf []byte, limit int) ([]common.Hash, error) {
 	list := solid.NewHashList(limit)
-	if err := ssz2.UnmarshalSSZ(buf, 0, list); err != nil {
+	if err := ssz2.UnmarshalSSZStrict(buf, 0, list); err != nil {
 		return nil, err
 	}
 	if list.Length() > limit {
@@ -191,7 +191,7 @@ func decodeNewPayloadEnvelope(buf []byte, version clparams.StateVersion) (*engin
 	payload := engine_types.NewExecutionPayloadSSZ(version)
 	parentRoot := common.Hash{}
 	requests := solid.NewTransactionsSSZWithLimits(sszMaxExecutionRequests, sszMaxBytesPerExecutionRequest)
-	if err := ssz2.UnmarshalSSZ(buf, int(version), newPayloadEnvelopeSchema(version, payload, &parentRoot, requests)...); err != nil {
+	if err := ssz2.UnmarshalSSZStrict(buf, int(version), newPayloadEnvelopeSchema(version, payload, &parentRoot, requests)...); err != nil {
 		return nil, common.Hash{}, nil, err
 	}
 	return payload, parentRoot, transactionsBytes(requests), nil
@@ -235,7 +235,7 @@ func decodeForkchoiceUpdate(buf []byte, version clparams.StateVersion) (engine_t
 	state := engine_types.ForkChoiceState{}
 	attrsList := solid.NewDynamicListSSZ[*engine_types.PayloadAttributes](1)
 	custodyList := solid.NewByteListSSZ(sszCustodyBitvectorBytes)
-	if err := ssz2.UnmarshalSSZ(buf, int(version), forkchoiceUpdateSchema(version, &state, attrsList, custodyList)...); err != nil {
+	if err := ssz2.UnmarshalSSZStrict(buf, int(version), forkchoiceUpdateSchema(version, &state, attrsList, custodyList)...); err != nil {
 		return state, nil, nil, err
 	}
 	var custody []byte
