@@ -44,7 +44,7 @@ kill -SIGUSR1 $(pidof erigon)
 # Stack traces are printed to the erigon log / stdout
 ```
 
-If the node is wedged and you are ready to lose it, `kill -6 <pid>` (`SIGABRT`) dumps the stacks and terminates that process in one step. Pass an explicit PID rather than `$(pidof erigon)`: `SIGABRT` is destructive, and on a host running more than one instance `pidof` would abort all of them.
+If the node is wedged and you are ready to lose it, `kill -SIGABRT <pid>` dumps the stacks and terminates that process in one step. Pass an explicit PID rather than `$(pidof erigon)`: `SIGABRT` is destructive, and on a host running more than one instance `pidof` would abort all of them.
 
 **Capture a CPU or heap profile via pprof** (requires `--pprof` flag at startup — default address `localhost:6060`; override with `--pprof.addr` and `--pprof.port`):
 

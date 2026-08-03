@@ -58,7 +58,7 @@ A locally mounted **SSD** (Solid-State Drive) or **NVMe** (Non-Volatile Memory E
 | Component | Recommendation | Notes |
 | --- | --- | --- |
 | Disk Type | Use high-end NVMe SSDs. | Avoid HDDs. SSD performance may degrade when nearing full capacity. |
-| Disk Configuration | A single NVMe device is enough for any pruning mode. | An archive node fits on one 4 TB drive, so RAID 0 striping is not needed. For failure protection use a mirrored array, not RAID 0. See [Filesystem](#filesystem). |
+| Disk Configuration | A single NVMe device is enough for any pruning mode. | An archive node fits on one 4 TB drive, so RAID 0 striping is not needed. For failure protection, use a mirrored array, not RAID 0. See [Filesystem](#filesystem). |
 | Filesystem | ext4 or XFS | See [Filesystem](#filesystem) below. |
 | RAM | Adequate memory is crucial | Reduces bottlenecks during sync and improves performance under load. |
 | CPU | 4–8 cores for Full nodes8–16 cores for Archive nodes | More cores are generally better for intense sync and query operations. |
@@ -112,7 +112,7 @@ _Current Disk Usage measured as of 2026-07-21; usage grows over time as the chai
 | Full (Default) | -                      |
 | Minimal        | -                      |
 
-_Current Disk Usage measured as of 2026-07-29; usage grows over time as the chain grows. Execution layer only. Archive is the only mode measured on this network._
+_Current Disk Usage measured as of 2026-07-29; usage grows over time as the chain grows. Execution layer only. Archive is the only mode measured for Sepolia._
 
 | **Pruning Mode**  | **Current Disk Usage** |
 | -------------- | ---------------------- |
@@ -120,7 +120,7 @@ _Current Disk Usage measured as of 2026-07-29; usage grows over time as the chai
 | Full (Default) | -                      |
 | Minimal        | -                      |
 
-_Current Disk Usage measured as of 2026-07-29; usage grows over time as the chain grows. Execution layer only. Archive is the only mode measured on this network._
+_Current Disk Usage measured as of 2026-07-29; usage grows over time as the chain grows. Execution layer only. Archive is the only mode measured for Hoodi._
 
 | **Pruning Mode**  | **Current Disk Usage** |
 | -------------- | ---------------------- |
@@ -128,7 +128,7 @@ _Current Disk Usage measured as of 2026-07-29; usage grows over time as the chai
 | Full (Default) | -                      |
 | Minimal        | -                      |
 
-_Current Disk Usage measured as of 2026-07-29; usage grows over time as the chain grows. Execution layer only. Archive is the only mode measured on this network._
+_Current Disk Usage measured as of 2026-07-29; usage grows over time as the chain grows. Execution layer only. Archive is the only mode measured for Chiado._
 
 :::tip
 See also how you can [optimize storage](../fundamentals/optimizing-storage).
@@ -7792,7 +7792,7 @@ kill -SIGUSR1 $(pidof erigon)
 # Stack traces are printed to the erigon log / stdout
 ```
 
-If the node is wedged and you are ready to lose it, `kill -6 <pid>` (`SIGABRT`) dumps the stacks and terminates that process in one step. Pass an explicit PID rather than `$(pidof erigon)`: `SIGABRT` is destructive, and on a host running more than one instance `pidof` would abort all of them.
+If the node is wedged and you are ready to lose it, `kill -SIGABRT <pid>` dumps the stacks and terminates that process in one step. Pass an explicit PID rather than `$(pidof erigon)`: `SIGABRT` is destructive, and on a host running more than one instance `pidof` would abort all of them.
 
 **Capture a CPU or heap profile via pprof** (requires `--pprof` flag at startup — default address `localhost:6060`; override with `--pprof.addr` and `--pprof.port`):
 
