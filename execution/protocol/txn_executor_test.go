@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"slices"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -1053,6 +1054,84 @@ func BenchmarkExecuteStaleNonceReject(b *testing.B) {
 					b.Fatalf("want ErrNonceTooHigh, got %v", err)
 				}
 			}
+		})
+	}
+}
+
+// TestPreCheckIntrinsicGasMatchesMessage pins that the intrinsic gas preCheck
+// leaves behind equals what the message's own fields imply, across the shapes
+// that feed the calculation.
+func TestPreCheckIntrinsicGasMatchesMessage(t *testing.T) {
+	t.Parallel()
+
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+	auth, _ := eip2780TestAuthorization()
+
+	al := types.AccessList{
+		{Address: common.HexToAddress("0xaa"), StorageKeys: []common.Hash{{0x1}, {0x2}, {0x3}}},
+		{Address: common.HexToAddress("0xbb"), StorageKeys: []common.Hash{{0x4}}},
+	}
+
+	cases := []struct {
+		name   string
+		to     accounts.Address
+		data   []byte
+		al     types.AccessList
+		auths  []types.Authorization
+		amount *uint256.Int
+	}{
+		{"plain transfer", recipient, nil, nil, nil, uint256.NewInt(0)},
+		{"with value", recipient, nil, nil, nil, uint256.NewInt(7)},
+		{"with data", recipient, []byte{0, 1, 0, 2, 3}, nil, nil, uint256.NewInt(0)},
+		{"with access list", recipient, nil, al, nil, uint256.NewInt(0)},
+		{"with authorizations", recipient, nil, al, []types.Authorization{auth}, uint256.NewInt(0)},
+		{"contract creation", accounts.NilAddress, []byte{0x60, 0x01}, al, nil, uint256.NewInt(0)},
+		{"self transfer", sender, nil, al, nil, uint256.NewInt(1)},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ibs := state.New(state.NewNoopReader())
+			defer ibs.Close()
+			ibs.SetBalance(sender, *uint256.NewInt(1_000_000), tracing.BalanceChangeUnspecified)
+			evm := newTestEVM(ibs, chain.TestChainOsakaConfig, 30_000_000)
+			msg := types.NewMessage(
+				sender, tc.to, 0, tc.amount, 10_000_000,
+				uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
+				tc.data, tc.al,
+				false, false, true, false, nil,
+			)
+			msg.SetAuthorizations(tc.auths)
+
+			st := NewTxnExecutor(evm, msg, new(GasPool).AddGas(30_000_000))
+			require.NoError(t, st.preCheck(false))
+
+			// Derive the arguments the way Execute used to, from a cloned access
+			// list, and compare against what preCheck stored.
+			accessTuples := slices.Clone[types.AccessList](msg.AccessList())
+			contractCreation := msg.To().IsNil()
+			rules := evm.ChainRules()
+			vmConfig := evm.Config()
+			want, overflow := mdgas.IntrinsicGas(mdgas.IntrinsicGasCalcArgs{
+				Data:               tc.data,
+				AuthorizationsLen:  uint64(len(msg.Authorizations())),
+				AccessListLen:      uint64(len(accessTuples)),
+				StorageKeysLen:     uint64(accessTuples.StorageKeys()),
+				IsContractCreation: contractCreation,
+				IsSelfTransfer:     !contractCreation && msg.To() == msg.From(),
+				HasValue:           !msg.Value().IsZero(),
+				IsEIP2:             rules.IsHomestead,
+				IsEIP2028:          rules.IsIstanbul,
+				IsEIP3860:          vmConfig.HasEip3860(rules),
+				IsEIP7623:          rules.IsPrague,
+				IsEIP7976:          rules.IsAmsterdam,
+				IsEIP7981:          rules.IsAmsterdam,
+				IsEIP2780:          rules.IsAmsterdam,
+			})
+			require.False(t, overflow)
+			require.Equal(t, want, st.intrinsicGas)
+			require.NotZero(t, st.intrinsicGas.ExecutionGas, "preCheck must have populated the field")
 		})
 	}
 }
