@@ -184,9 +184,8 @@ func TestCachePopulatingGetterWarmsColdKeys(t *testing.T) {
 	got, ok := sc.Get(kv.CodeDomain, key)
 	require.True(t, ok)
 	require.Equal(t, code, got)
-	gotHash, ok := sc.GetAddrCodeHash(key)
-	require.True(t, ok)
-	require.Equal(t, [32]byte(crypto.Keccak256Hash(code)), gotHash)
+	_, ok = sc.GetAddrCodeHash(key)
+	require.False(t, ok, "a code-only read cannot publish an account-derived binding")
 
 	// Negative results (missing account, empty slot) are cached as nil hits.
 	sc = newTestStateCache()
@@ -232,7 +231,7 @@ func TestCachePopulatingGetterDeduplicatesCodeByHash(t *testing.T) {
 	require.Equal(t, code, got)
 }
 
-func TestCachePopulatingGetterBindsUnknownAddrToCachedCodeHash(t *testing.T) {
+func TestCachePopulatingGetterCachesUnknownAddrWithoutPublishingAccountBinding(t *testing.T) {
 	addr := common.Address{1}
 	contentAddr := common.Address{2}
 	code := []byte{0xaa, 0xbb, 0xcc}
@@ -252,8 +251,8 @@ func TestCachePopulatingGetterBindsUnknownAddrToCachedCodeHash(t *testing.T) {
 	require.Equal(t, code, got)
 	require.Equal(t, 1, g.codeReads, "an unknown address must read its code once to derive the hash")
 	gotHash, ok := sc.GetAddrCodeHash(addr[:])
-	require.True(t, ok)
-	require.Equal(t, [32]byte(codeHash), gotHash)
+	require.False(t, ok, "a code-only read cannot safely publish an account-derived binding")
+	require.Zero(t, gotHash)
 
 	got, _, err = cpg.GetLatest(kv.CodeDomain, addr[:])
 	require.NoError(t, err)

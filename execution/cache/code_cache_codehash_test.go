@@ -23,6 +23,9 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 // makeCodeHash builds a deterministic 32-byte codeHash for tests/benchmarks.
@@ -108,6 +111,63 @@ func TestCodeCache_GetByCodeHash_DistinctAddrsSameCode(t *testing.T) {
 	addr2 := makeAddr(2)
 	_, ok = c.Get(addr2)
 	require.False(t, ok)
+}
+
+func TestStateCache_PutCodeIfAbsentHashesUnmappedCodeWithoutPublishingBinding(t *testing.T) {
+	c := closeOnCleanup(t, NewStateCache(1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB))
+	addr := makeAddr(1)
+	code := []byte{0x60, 0x80, 0x60, 0x40, 0x52}
+	codeHash := crypto.Keccak256Hash(code)
+
+	c.PutCodeIfAbsent(addr, code, 10)
+
+	_, ok := c.GetAddrCodeHash(addr)
+	require.False(t, ok, "a CodeDomain read alone cannot publish a view-safe account binding")
+	gotByHash, ok := c.GetCodeByHash(codeHash[:])
+	require.True(t, ok)
+	require.Equal(t, code, gotByHash)
+	gotByAddr, ok := c.Get(kv.CodeDomain, addr)
+	require.True(t, ok)
+	require.Equal(t, code, gotByAddr)
+}
+
+func TestStateCache_PutCodeIfAbsentReusesKnownHashAndContent(t *testing.T) {
+	c := closeOnCleanup(t, NewStateCache(1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB))
+	contentAddr := makeAddr(1)
+	addr := makeAddr(2)
+	code := []byte{0x60, 0x80, 0x60, 0x40, 0x52}
+	codeHash := crypto.Keccak256Hash(code)
+
+	c.PutCodeWithHash(contentAddr, code, codeHash[:], 10)
+	c.PutAddrCodeHash(addr, codeHash, 10)
+	c.PutCodeIfAbsent(addr, code, 10)
+
+	got, ok := c.Get(kv.CodeDomain, addr)
+	require.True(t, ok)
+	require.Equal(t, code, got)
+	gotByHash, ok := c.GetCodeByHash(codeHash[:])
+	require.True(t, ok)
+	require.True(t, &got[0] == &gotByHash[0], "the addr binding must reuse cache-owned content bytes")
+}
+
+func TestStateCache_PutCodeIfAbsentDoesNotTrustUnverifiedAddressHash(t *testing.T) {
+	c := closeOnCleanup(t, NewStateCache(1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB))
+	addr := makeAddr(1)
+	code := []byte{0x60, 0x80, 0x60, 0x40, 0x52}
+	codeHash := crypto.Keccak256Hash(code)
+	newerMapping := crypto.Keccak256Hash([]byte("newer snapshot code"))
+	c.PutAddrCodeHash(addr, newerMapping, 20)
+
+	c.PutCodeIfAbsent(addr, code, 10)
+
+	_, ok := c.GetCodeByHash(newerMapping[:])
+	require.False(t, ok, "old snapshot bytes must not be stored under a newer mapping")
+	got, ok := c.GetCodeByHash(codeHash[:])
+	require.True(t, ok)
+	require.Equal(t, code, got)
+	gotMapping, ok := c.GetAddrCodeHash(addr)
+	require.True(t, ok)
+	require.Equal(t, [32]byte(newerMapping), gotMapping, "the older read-fill must not rebind the address")
 }
 
 func TestCodeCache_PutWithCodeHash_EmptyHashOrCodeIsNoOp(t *testing.T) {

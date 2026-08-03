@@ -883,8 +883,11 @@ type cacheUpdate struct {
 	domain kv.Domain
 	key    []byte
 	val    []byte
-	step   kv.Step
-	txN    uint64
+	// codeHash is populated for non-empty CodeDomain updates so the code-store
+	// write and post-commit StateCache apply share one Keccak.
+	codeHash []byte
+	step     kv.Step
+	txN      uint64
 }
 
 // Commit flushes the in-memory batch into tx, commits tx, and only then applies
@@ -953,16 +956,21 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	var codeStoreWrites [][2][]byte
 	if sd.stateCache != nil || sd.codeStore != nil {
 		opts = append(opts, kv.WithFlushCallback(kv.CodeDomain, func(k []byte, v []byte, step kv.Step, txNum uint64) {
+			var codeHash []byte
+			if len(v) > 0 {
+				codeHash = crypto.Keccak256(v)
+			}
 			if sd.codeStore != nil && len(v) > 0 {
-				codeStoreWrites = append(codeStoreWrites, [2][]byte{crypto.Keccak256(v), append([]byte(nil), v...)})
+				codeStoreWrites = append(codeStoreWrites, [2][]byte{codeHash, append([]byte(nil), v...)})
 			}
 			if sd.stateCache != nil {
 				pending = append(pending, cacheUpdate{
-					domain: kv.CodeDomain,
-					key:    append([]byte(nil), k...),
-					val:    append([]byte(nil), v...),
-					step:   step,
-					txN:    txNum,
+					domain:   kv.CodeDomain,
+					key:      append([]byte(nil), k...),
+					val:      append([]byte(nil), v...),
+					codeHash: codeHash,
+					step:     step,
+					txN:      txNum,
 				})
 			}
 		}))
@@ -1061,13 +1069,9 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 			if len(u.val) == 0 {
 				sd.stateCache.Delete(kv.CodeDomain, u.key)
 			} else {
-				// Validated committed code: populate the addr layer AND the
-				// content-addressed codeHash->code map, keyed by keccak(v) so each
-				// entry is self-consistent by construction. The read-fill path
-				// (PutCodeWithHash on a cold GetLatest, below) populates the same
-				// way — both key on keccak(v), never a separately-read account
-				// codeHash, so the shared map only ever holds self-consistent entries.
-				sd.stateCache.PutCodeWithHash(u.key, u.val, crypto.Keccak256(u.val), u.txN)
+				// The flush callback derived this hash from the committed code bytes
+				// once; CodeStore and StateCache deliberately share it.
+				sd.stateCache.PutCodeWithHash(u.key, u.val, u.codeHash, u.txN)
 			}
 		}
 	}
@@ -1243,13 +1247,10 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 		readTxNum := (uint64(step)+1)*sd.StepSize() - 1
 		if domain == kv.CodeDomain {
 			if len(v) > 0 {
-				// This SD getter is the single place that populates the code cache
-				// on a read. Key the content-addressed entry by the code's OWN hash,
-				// keccak(v) — NEVER a separately-read account codeHash, which under
-				// parallel exec can be a skewed or cross-account value and would
-				// poison the shared codeHash→code map for every account sharing
-				// that hash.
-				sd.stateCache.PutCodeWithHashIfAbsent(k, v, crypto.Keccak256(v), readTxNum)
+				// StateCache owns content dedup. It only reuses an addr→codeHash
+				// mapping when the corresponding cached bytes prove the pair; a cold
+				// or view-skewed mapping falls back to hashing v itself.
+				sd.stateCache.PutCodeIfAbsent(k, v, readTxNum)
 			}
 		} else {
 			if len(v) == 0 && sd.stateCache.GetCache(domain) != nil {

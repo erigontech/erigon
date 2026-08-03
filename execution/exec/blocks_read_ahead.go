@@ -11,7 +11,6 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -138,33 +137,28 @@ func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte) ([]byte, k
 }
 
 func (cpg *cachePopulatingGetter) getLatestCode(addr []byte) ([]byte, kv.Step, error) {
-	codeHash, hashKnown := cpg.sc.GetAddrCodeHash(addr)
-	if hashKnown && codeHash != ([length.Hash]byte{}) {
-		if code, ok := cpg.sc.GetCodeByHash(codeHash[:]); ok {
-			// ReaderV3 discards the step for code reads. The content cache is
-			// hash-keyed rather than address-versioned, so there is no exact
-			// address-specific CodeDomain step to return on this fast path.
-			return code, 0, nil
-		}
+	if code, ok := cpg.sc.Get(kv.CodeDomain, addr); ok {
+		return code, 0, nil
+	}
+	if code, ok := cpg.sc.GetCodeByAddrHash(addr); ok {
+		// ReaderV3 discards the step for code reads. The content cache is
+		// hash-keyed rather than address-versioned, so there is no exact
+		// address-specific CodeDomain step to return on this fast path.
+		return code, 0, nil
 	}
 
 	code, step, err := cpg.g.GetLatest(kv.CodeDomain, addr)
 	if err != nil || len(code) == 0 {
 		return code, step, err
 	}
-	if !hashKnown || codeHash == ([length.Hash]byte{}) {
-		copy(codeHash[:], crypto.Keccak256(code))
-	}
 
 	readTxNum := (uint64(step)+1)*cpg.stepSize - 1
-	cpg.sc.PutAddrCodeHash(addr, codeHash, readTxNum)
-	// Another worker may have populated the shared content entry while this
-	// worker was reading the address-keyed value. Avoid cloning and inserting
-	// the same bytes again when that happened.
-	if cached, ok := cpg.sc.GetCodeByHash(codeHash[:]); ok {
+	cpg.sc.PutCodeIfAbsent(addr, code, readTxNum)
+	// A concurrent authoritative fill may have won the if-absent address bind.
+	// Return the cache winner when present instead of the discarded snapshot.
+	if cached, ok := cpg.sc.Get(kv.CodeDomain, addr); ok {
 		return cached, step, nil
 	}
-	cpg.sc.PutCodeWithHashIfAbsent(addr, code, codeHash[:], readTxNum)
 	return code, step, nil
 }
 

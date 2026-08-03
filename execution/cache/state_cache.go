@@ -22,6 +22,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -144,6 +145,21 @@ func (c *StateCache) GetCodeByHash(codeHash []byte) ([]byte, bool) {
 	return cc.GetByCodeHash(codeHash)
 }
 
+// GetCodeByAddrHash resolves addr through the committed addr → codeHash
+// binding and probes the content-addressed code layer. It deliberately does
+// not fall back to the ordinary addr-keyed cache or any backing database.
+func (c *StateCache) GetCodeByAddrHash(addr []byte) ([]byte, bool) {
+	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
+	if !ok {
+		return nil, false
+	}
+	codeHash, ok := cc.GetAddrCodeHash(addr)
+	if !ok || codeHash == ([32]byte{}) {
+		return nil, false
+	}
+	return cc.GetByCodeHash(codeHash[:])
+}
+
 // PutCodeWithHash stores code populating both the addr-keyed path and the
 // codeHash-keyed codeHashToCode layer. Callers should prefer this over Put when they
 // have the codeHash from the account record — avoids a redundant keccak.
@@ -155,6 +171,36 @@ func (c *StateCache) PutCodeWithHash(addr, code, codeHash []byte, txNum uint64) 
 // (see Cache.PutIfAbsent).
 func (c *StateCache) PutCodeWithHashIfAbsent(addr, code, codeHash []byte, txNum uint64) {
 	c.putCodeWithHash(addr, code, codeHash, txNum, false)
+}
+
+// PutCodeIfAbsent read-fills every code-cache layer without ever trusting an
+// addr → codeHash binding alone to label caller-supplied bytes. The mapping
+// may have advanced beyond the caller's backing transaction snapshot. It is
+// reusable without hashing only when codeHash → code is already resident and
+// those cache-owned bytes equal code; otherwise the key is derived from code.
+//
+// This method deliberately does not publish a previously unknown addr →
+// codeHash binding from a CodeDomain read. That binding must come from an
+// AccountsDomain value whose cache publication won the same-view race.
+func (c *StateCache) PutCodeIfAbsent(addr, code []byte, txNum uint64) {
+	if len(code) == 0 {
+		return
+	}
+	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
+	if !ok {
+		return
+	}
+
+	codeHash, hashKnown := cc.GetAddrCodeHash(addr)
+	if hashKnown && codeHash != ([32]byte{}) {
+		if cached, ok := cc.GetByCodeHash(codeHash[:]); ok && bytes.Equal(cached, code) {
+			cc.PutWithCodeHashIfAbsent(addr, cached, codeHash[:], txNum)
+			return
+		}
+	}
+
+	codeHash = crypto.Keccak256Hash(code)
+	cc.PutWithCodeHashIfAbsent(addr, bytes.Clone(code), codeHash[:], txNum)
 }
 
 func (c *StateCache) putCodeWithHash(addr, code, codeHash []byte, txNum uint64, overwrite bool) {
