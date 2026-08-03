@@ -226,10 +226,16 @@ func TestSplitParamsFanoutBound(t *testing.T) {
 		if leafSize >= 7 {
 			secondaryAggrBound = primaryAggrBound * uint16(math.Ceil(0.21*float64(leafSize)+9./10.))
 		}
-		for m := leafSize + 1; m <= 4000; m++ {
+		// m == MaxUint16 is excluded: splitParams computes m+1, which wraps to 0 and
+		// yields unit 0. Unreachable for real bucket sizes and unrelated to the mask.
+		for m := leafSize + 1; m < math.MaxUint16; m++ {
 			fanout, unit := splitParams(m, leafSize, primaryAggrBound, secondaryAggrBound)
-			require.LessOrEqual(t, fanout, uint16(maxFanout), "leafSize=%d m=%d", leafSize, m)
-			require.Less(t, (m-1)/unit, fanout, "leafSize=%d m=%d unit=%d", leafSize, m, unit)
+			if fanout > maxFanout {
+				t.Fatalf("fanout %d > maxFanout %d at leafSize=%d m=%d", fanout, maxFanout, leafSize, m)
+			}
+			if j := (m - 1) / unit; j >= fanout {
+				t.Fatalf("index %d >= fanout %d at leafSize=%d m=%d unit=%d", j, fanout, leafSize, m, unit)
+			}
 		}
 	}
 }

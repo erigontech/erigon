@@ -362,8 +362,8 @@ func (sc *recsplitScratch) preAlloc(n int) {
 // the Golomb parameter for m. Each scratch owns its own slice, so this is safe
 // to call concurrently from different workers without any locking.
 func (sc *recsplitScratch) golombParam(m uint16) int {
-	if table := sc.golombRice; int(m) < len(table) {
-		return int(table[m] >> 27)
+	if i, table := int(m), sc.golombRice; i < len(table) {
+		return int(table[i] >> 27)
 	}
 	return sc.golombParamSlow(m)
 }
