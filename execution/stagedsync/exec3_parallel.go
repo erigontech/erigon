@@ -2598,10 +2598,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 		}
 
-		tracePrefix := fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txVersion.Incarnation)
-
-		var trace bool
-		if trace = dbg.TraceTransactionIO && dbg.TraceTx(be.blockNum, txVersion.TxIndex); trace {
+		if dbg.TraceTransactionIO && dbg.TraceTx(be.blockNum, txVersion.TxIndex) {
+			tracePrefix := fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txVersion.Incarnation)
 			fmt.Println(tracePrefix, "RD", be.blockIO.ReadSet(txVersion.TxIndex).Len(), "WRT", be.blockIO.WriteSet(txVersion.TxIndex).Count())
 			be.blockIO.ReadSet(txVersion.TxIndex).TraceReads(tracePrefix)
 			for h := range be.blockIO.WriteSet(txVersion.TxIndex).AllHeaders() {
