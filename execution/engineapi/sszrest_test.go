@@ -5,6 +5,7 @@ package engineapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -24,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 )
@@ -40,6 +42,23 @@ func allForksConfig() *chain.Config {
 
 func newTestEngineServer(cfg *chain.Config, consuming bool) *EngineServer {
 	return NewEngineServer(log.New(), cfg, nil, nil, false, true, false, consuming, nil, nil, 0, 0)
+}
+
+type bodiesRangeExecutionModule struct {
+	execmodule.ExecutionModule
+	bodies  []*execmodule.PayloadBody
+	headers map[uint64]*types.Header
+}
+
+func (m *bodiesRangeExecutionModule) GetPayloadBodiesByRange(context.Context, uint64, uint64) ([]*execmodule.PayloadBody, error) {
+	return m.bodies, nil
+}
+
+func (m *bodiesRangeExecutionModule) GetHeader(_ context.Context, _ *common.Hash, blockNumber *uint64) (*types.Header, error) {
+	if blockNumber == nil {
+		return nil, nil
+	}
+	return m.headers[*blockNumber], nil
 }
 
 func newSSZRequest(method, path, fork string, body []byte) *http.Request {
@@ -448,6 +467,32 @@ func TestSSZRESTBodiesResponseRoundTrip(t *testing.T) {
 			require.Empty(t, entries[1].Transactions)
 		})
 	}
+}
+
+func TestSSZRESTBodiesByRangePreservesTrailingUnavailableBody(t *testing.T) {
+	const (
+		from      = uint64(10)
+		blockTime = uint64(250)
+	)
+	module := &bodiesRangeExecutionModule{
+		bodies: []*execmodule.PayloadBody{{Transactions: [][]byte{{0x01}}}},
+		headers: map[uint64]*types.Header{
+			from:     {Number: *uint256.NewInt(from), Time: blockTime},
+			from + 1: {Number: *uint256.NewInt(from + 1), Time: blockTime},
+		},
+	}
+	srv := NewEngineServer(log.New(), allForksConfig(), module, nil, false, true, false, true, nil, nil, 0, 0)
+
+	rec := httptest.NewRecorder()
+	srv.SSZRESTHandler().ServeHTTP(rec,
+		newSSZRequest(http.MethodGet, "/engine/v1/bodies?from=10&count=3", "cancun", nil))
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	entries, err := decodeBodiesResponse(rec.Body.Bytes(), clparams.DenebVersion)
+	require.NoError(t, err)
+	require.Len(t, entries, 2)
+	require.True(t, entries[0].Available)
+	require.False(t, entries[1].Available)
 }
 
 func TestSSZRESTBlobsResponseRoundTrip(t *testing.T) {

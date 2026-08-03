@@ -374,20 +374,18 @@ func (e *EngineServer) handleSSZBodiesByRange(w http.ResponseWriter, r *http.Req
 		writeEngineProblem(w, err)
 		return
 	}
-	// The response is truncated at the latest known block: GetPayloadBodiesByRange
-	// stops at head and trims trailing nils, so past-head blocks are omitted rather
-	// than padded with available=false. In-range blocks outside the header fork's time
-	// range still come back as available=false.
-	entries := make([]*engine_types.ExecutionPayloadBodyV2, len(bodies))
-	for i := range bodies {
-		if bodies[i] == nil {
-			continue
+	// Canonical headers distinguish trailing unavailable bodies from blocks past head.
+	entries := make([]*engine_types.ExecutionPayloadBodyV2, 0, count)
+	for i := range count {
+		header := e.chainRW.GetHeaderByNumber(r.Context(), from+i)
+		if header == nil {
+			break
 		}
-		header := e.chainRW.GetHeaderByNumber(r.Context(), from+uint64(i))
-		if header == nil || forkNameAtTime(e.config, header.Time) != forkName {
-			continue
+		var body *engine_types.ExecutionPayloadBodyV2
+		if i < uint64(len(bodies)) && bodies[i] != nil && forkNameAtTime(e.config, header.Time) == forkName {
+			body = bodies[i]
 		}
-		entries[i] = bodies[i]
+		entries = append(entries, body)
 	}
 	out, err := encodeBodiesResponse(entries, version)
 	if err != nil {
