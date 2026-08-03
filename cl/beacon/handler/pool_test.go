@@ -298,6 +298,41 @@ func TestPoolAggregatesAndProofs(t *testing.T) {
 	require.Equal(t, msg[1].Message.Aggregate, out.Data[1])
 }
 
+func TestPoolAggregatesAndProofsReportsRequestIndex(t *testing.T) {
+	msg := []*cltypes.SignedAggregateAndProof{
+		{
+			Message: &cltypes.AggregateAndProof{
+				Aggregate: &solid.Attestation{
+					AggregationBits: solid.BitlistFromBytes([]byte{1, 2}, 2048),
+					Data:            &solid.AttestationData{},
+					Signature:       common.Bytes96{3, 45, 6},
+				},
+			},
+			Signature: common.Bytes96{2},
+		},
+		nil,
+	}
+	_, _, _, _, _, handler, _, syncedDataMgr, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
+	mockBeaconState := &state.CachingBeaconState{BeaconState: raw.New(&clparams.BeaconChainConfig{})}
+	mockBeaconState.SetVersion(clparams.DenebVersion)
+	syncedDataMgr.(*sync_mock_services.MockSyncedData).EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(vhsf synced_data.ViewHeadStateFn) error {
+		vhsf(mockBeaconState)
+		return nil
+	}).AnyTimes()
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+	requestBody, err := json.Marshal(msg)
+	require.NoError(t, err)
+
+	resp, err := server.Client().Post(server.URL+"/eth/v1/validator/aggregate_and_proofs", "application/json", bytes.NewBuffer(requestBody))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, 400, resp.StatusCode)
+	var response poolingError
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&response))
+	require.Equal(t, []poolingFailure{{Index: 1, Message: "invalid aggregate and proof"}}, response.Failures)
+}
+
 func TestPoolSyncCommittees(t *testing.T) {
 	msgs := []*cltypes.SyncCommitteeMessage{
 		{

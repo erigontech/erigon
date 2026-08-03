@@ -255,7 +255,7 @@ func progressiveSchemaRoots(schema []any) ([][32]byte, error) {
 			}
 			roots[i] = root
 		default:
-			panic(fmt.Sprintf("Can't create TreeRoot: unsported type %T at index %d", i, obj))
+			panic(fmt.Sprintf("Can't create TreeRoot: unsupported type %T at index %d", i, obj))
 		}
 	}
 	return roots, nil

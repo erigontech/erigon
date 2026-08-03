@@ -346,7 +346,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolBlsToExecutionChanges(w http.ResponseWri
 		return
 	}
 	failures := []poolingFailure{}
-	for _, v := range req {
+	for idx, v := range req {
 		encodedSSZ, err := v.EncodeSSZ(nil)
 		if err != nil {
 			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
@@ -356,7 +356,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolBlsToExecutionChanges(w http.ResponseWri
 		if err := a.blsToExecutionChangeService.ProcessMessage(r.Context(), nil, &services.SignedBLSToExecutionChangeForGossip{
 			SignedBLSToExecutionChange: v,
 		}); err != nil && !errors.Is(err, services.ErrIgnore) {
-			failures = append(failures, poolingFailure{Index: len(failures), Message: err.Error()})
+			failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
 			continue
 		}
 
@@ -383,20 +383,20 @@ func (a *ApiHandler) PostEthV1ValidatorAggregatesAndProof(w http.ResponseWriter,
 	}
 
 	failures := []poolingFailure{}
-	for _, v := range req {
+	for idx, v := range req {
 		if v == nil || v.Message == nil || v.Message.Aggregate == nil || v.Message.Aggregate.Data == nil || v.Message.Aggregate.AggregationBits == nil {
-			failures = append(failures, poolingFailure{Index: len(failures), Message: "invalid aggregate and proof"})
+			failures = append(failures, poolingFailure{Index: idx, Message: "invalid aggregate and proof"})
 			continue
 		}
 		epoch := v.Message.Aggregate.Data.Slot / a.beaconChainCfg.SlotsPerEpoch
 		version := a.beaconChainCfg.GetCurrentStateVersion(epoch)
 		if version >= clparams.ElectraVersion && v.Message.Aggregate.CommitteeBits == nil {
-			failures = append(failures, poolingFailure{Index: len(failures), Message: "invalid aggregate and proof: missing committee bits"})
+			failures = append(failures, poolingFailure{Index: idx, Message: "invalid aggregate and proof: missing committee bits"})
 			continue
 		}
 		v.SetVersion(version)
 		if err := v.Message.Aggregate.ValidateForConfig(a.beaconChainCfg, version); err != nil {
-			failures = append(failures, poolingFailure{Index: len(failures), Message: err.Error()})
+			failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
 			continue
 		}
 		encodedSSZ, err := v.EncodeSSZ(nil)
@@ -414,7 +414,7 @@ func (a *ApiHandler) PostEthV1ValidatorAggregatesAndProof(w http.ResponseWriter,
 			log.Debug("[Beacon REST] aggregate ignored", "err", err, "slot", v.Message.Aggregate.Data.Slot)
 		} else if err != nil {
 			log.Warn("[Beacon REST] failed to process aggregate", "err", err)
-			failures = append(failures, poolingFailure{Index: len(failures), Message: err.Error()})
+			failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
 			continue
 		}
 		if err := a.gossipManager.Publish(r.Context(), gossip.TopicNameBeaconAggregateAndProof, encodedSSZ); err != nil {

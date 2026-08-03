@@ -308,7 +308,10 @@ func maxBlobCommitmentsForConfig(beaconCfg *clparams.BeaconChainConfig) int {
 }
 
 func maxPayloadAttestationsForConfig(beaconCfg *clparams.BeaconChainConfig) int {
-	fallback := saturatingPositiveInt(clparams.GetBeaconConfig().MaxPayloadAttestations, int(clparams.MainnetBeaconConfig.MaxPayloadAttestations))
+	fallback := int(clparams.MainnetBeaconConfig.MaxPayloadAttestations)
+	if globalCfg := clparams.GetBeaconConfig(); globalCfg != nil {
+		fallback = saturatingPositiveInt(globalCfg.MaxPayloadAttestations, fallback)
+	}
 	if beaconCfg != nil && beaconCfg.MaxPayloadAttestations > 0 {
 		return saturatingPositiveInt(beaconCfg.MaxPayloadAttestations, fallback)
 	}
