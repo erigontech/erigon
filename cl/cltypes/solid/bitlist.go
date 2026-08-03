@@ -283,16 +283,18 @@ func (u *BitList) UnmarshalJSON(input []byte) error {
 }
 
 func (u *BitList) Merge(other *BitList) (*BitList, error) {
+	uBytes, otherBytes := u.Bytes(), other.Bytes()
+	if len(uBytes) != len(otherBytes) {
+		return nil, errors.New("bitlist union: different length")
+	}
 	if u.Bits() != other.Bits() {
 		log.Warn("bitlist union: different length", "u", u.Bits(), "other", other.Bits())
 		return nil, errors.New("bitlist union: different length")
 	}
-	// copy by the longer one
-	var ret, unionFrom *BitList
-	ret = other.Copy()
-	unionFrom = u
-	for i := 0; i < len(unionFrom.u); i++ {
-		ret.u[i] |= unionFrom.u[i]
+	ret := other.Copy()
+	retBytes := ret.Bytes()
+	for i := range uBytes {
+		retBytes[i] |= uBytes[i]
 	}
 	return ret, nil
 }

@@ -65,15 +65,24 @@ func TestBitListBitsIgnoresBackingBytesPastLength(t *testing.T) {
 }
 
 func TestBitListMergeIgnoresBackingBytesPastLength(t *testing.T) {
-	bitlist := solid.NewBitList(1, 2048)
-	bitlist.Set(0, 0b00000010)
-	bitlist.Set(32, 1)
-	other := solid.NewBitList(1, 2048)
-	other.Set(0, 0b00000010)
+	padded := solid.NewBitList(1, 2048)
+	padded.Set(0, 0b00000010)
+	padded.Set(32, 1)
+	compact := solid.BitlistFromBytes([]byte{0b00000010}, 2048)
 
-	merged, err := bitlist.Merge(other)
-	require.NoError(t, err)
-	require.Equal(t, []byte{0b00000010}, merged.Bytes())
+	for _, test := range []struct {
+		name        string
+		left, right *solid.BitList
+	}{
+		{name: "padded into compact", left: padded, right: compact},
+		{name: "compact into padded", left: compact, right: padded},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			merged, err := test.left.Merge(test.right)
+			require.NoError(t, err)
+			require.Equal(t, []byte{0b00000010}, merged.Bytes())
+		})
+	}
 }
 
 func TestBitListCopyTo(t *testing.T) {
