@@ -30,21 +30,22 @@ import (
 )
 
 const (
-	sszMaxGetBlobHashes         = 128
-	sszMaxBodiesRequest         = 32
-	sszMaxPayloadRequestBody    = 64 << 20 // MAX_REQUEST_BODY_SIZE = 2**26
-	sszMaxForkchoiceRequestBody = 1 << 10
-	sszContainerOffsetBytes     = 4
-	sszHashBytes                = 32
-	sszMaxBodiesRequestBody     = sszContainerOffsetBytes + sszMaxBodiesRequest*sszHashBytes
-	sszMaxBlobsRequestBody      = sszContainerOffsetBytes + sszMaxGetBlobHashes*sszHashBytes
-	sszBlobBytes                = 0x20000
-	sszKZGBytes                 = 48
-	sszCellsPerExtBlob          = 128
-	sszCustodyBitvectorBytes    = sszCellsPerExtBlob / 8
-	sszMaxBALBytes              = 0x40000000
-	sszMaxWithdrawals           = 16
-	sszWithdrawalBytes          = 44
+	sszMaxGetBlobHashes            = 128
+	sszMaxBodiesRequest            = 32
+	sszMaxPayloadRequestBody       = 64 << 20 // MAX_REQUEST_BODY_SIZE = 2**26
+	sszMaxForkchoiceRequestBody    = 1 << 10
+	sszPayloadAttributesParisBytes = 60
+	sszContainerOffsetBytes        = 4
+	sszHashBytes                   = 32
+	sszMaxBodiesRequestBody        = sszContainerOffsetBytes + sszMaxBodiesRequest*sszHashBytes
+	sszMaxBlobsRequestBody         = sszContainerOffsetBytes + sszMaxGetBlobHashes*sszHashBytes
+	sszBlobBytes                   = 0x20000
+	sszKZGBytes                    = 48
+	sszCellsPerExtBlob             = 128
+	sszCustodyBitvectorBytes       = sszCellsPerExtBlob / 8
+	sszMaxBALBytes                 = 0x40000000
+	sszMaxWithdrawals              = 16
+	sszWithdrawalBytes             = 44
 )
 
 var engineForkOrder = []string{"paris", "shanghai", "cancun", "prague", "osaka", "amsterdam"}
@@ -224,6 +225,13 @@ func blobVersionedHashesFromTxs(txs []hexutil.Bytes) []common.Hash {
 
 // ForkchoiceUpdate is the request body of POST /forkchoice.
 // custody_columns (Optional[Bitvector[CELLS_PER_EXT_BLOB]]) exists since Amsterdam.
+func newOptionalPayloadAttributes(version clparams.StateVersion) *solid.ListSSZ[*engine_types.PayloadAttributes] {
+	if version < clparams.CapellaVersion {
+		return solid.NewStaticListSSZ[*engine_types.PayloadAttributes](1, sszPayloadAttributesParisBytes)
+	}
+	return solid.NewDynamicListSSZ[*engine_types.PayloadAttributes](1)
+}
+
 func forkchoiceUpdateSchema(version clparams.StateVersion, state *engine_types.ForkChoiceState, attrs *solid.ListSSZ[*engine_types.PayloadAttributes], custody *solid.ByteListSSZ) []any {
 	if version < clparams.GloasVersion {
 		return []any{state, attrs}
@@ -233,7 +241,7 @@ func forkchoiceUpdateSchema(version clparams.StateVersion, state *engine_types.F
 
 func decodeForkchoiceUpdate(buf []byte, version clparams.StateVersion) (engine_types.ForkChoiceState, *engine_types.PayloadAttributes, []byte, error) {
 	state := engine_types.ForkChoiceState{}
-	attrsList := solid.NewDynamicListSSZ[*engine_types.PayloadAttributes](1)
+	attrsList := newOptionalPayloadAttributes(version)
 	custodyList := solid.NewByteListSSZ(sszCustodyBitvectorBytes)
 	if err := ssz2.UnmarshalSSZStrict(buf, int(version), forkchoiceUpdateSchema(version, &state, attrsList, custodyList)...); err != nil {
 		return state, nil, nil, err
@@ -254,7 +262,7 @@ func decodeForkchoiceUpdate(buf []byte, version clparams.StateVersion) (engine_t
 }
 
 func encodeForkchoiceUpdate(version clparams.StateVersion, state *engine_types.ForkChoiceState, attrs *engine_types.PayloadAttributes, custody []byte) ([]byte, error) {
-	attrsList := solid.NewDynamicListSSZ[*engine_types.PayloadAttributes](1)
+	attrsList := newOptionalPayloadAttributes(version)
 	if attrs != nil {
 		attrs.SSZVersion = version
 		attrsList.Append(attrs)

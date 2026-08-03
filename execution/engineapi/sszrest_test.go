@@ -207,6 +207,45 @@ func TestSSZRESTForkchoiceUpdateRoundTrip(t *testing.T) {
 		require.Nil(t, outCustody)
 	})
 
+	t.Run("paris attributes encode as a fixed optional element", func(t *testing.T) {
+		attrs := &engine_types.PayloadAttributes{
+			Timestamp:             99,
+			PrevRandao:            common.HexToHash("0x04"),
+			SuggestedFeeRecipient: common.HexToAddress("0x05"),
+			SSZVersion:            clparams.BellatrixVersion,
+		}
+		attrBytes, err := attrs.EncodeSSZ(nil)
+		require.NoError(t, err)
+		require.Len(t, attrBytes, 60)
+
+		enc, err := encodeForkchoiceUpdate(clparams.BellatrixVersion, &state, attrs, nil)
+		require.NoError(t, err)
+		require.Len(t, enc, 160)
+		require.Equal(t, uint32(100), binary.LittleEndian.Uint32(enc[96:100]))
+		require.Equal(t, attrBytes, enc[100:])
+	})
+
+	t.Run("paris canonical attributes decode", func(t *testing.T) {
+		attrs := &engine_types.PayloadAttributes{
+			Timestamp:             99,
+			PrevRandao:            common.HexToHash("0x04"),
+			SuggestedFeeRecipient: common.HexToAddress("0x05"),
+			SSZVersion:            clparams.BellatrixVersion,
+		}
+		stateBytes, err := state.EncodeSSZ(nil)
+		require.NoError(t, err)
+		attrBytes, err := attrs.EncodeSSZ(nil)
+		require.NoError(t, err)
+		enc := binary.LittleEndian.AppendUint32(stateBytes, 100)
+		enc = append(enc, attrBytes...)
+
+		outState, outAttrs, outCustody, err := decodeForkchoiceUpdate(enc, clparams.BellatrixVersion)
+		require.NoError(t, err)
+		require.Equal(t, state, outState)
+		require.Equal(t, attrs, outAttrs)
+		require.Nil(t, outCustody)
+	})
+
 	t.Run("prague attributes use the cancun schema", func(t *testing.T) {
 		root := common.HexToHash("0x04")
 		attrs := &engine_types.PayloadAttributes{
