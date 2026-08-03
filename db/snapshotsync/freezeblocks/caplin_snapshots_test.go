@@ -137,7 +137,7 @@ func TestFrozenBlobsReportsVisibleSegmentEnd(t *testing.T) {
 // Blocks run ahead of blobs (blobs only start at Deneb) and the block tip is
 // dumped before it is indexed, so the four watermarks legitimately disagree.
 // The exact numbers below are the equivalence net for the BaseRoSnapshots embed:
-// only IndicesMax may move, and only from To to To-1.
+// only IndicesMax may move, from To to To-1, dragging BlocksAvailable with it.
 func TestCaplinWatermarks(t *testing.T) {
 	const limit = snaptype.CaplinMergeLimit
 
@@ -158,9 +158,10 @@ func TestCaplinWatermarks(t *testing.T) {
 
 	// dirty-backed: counts the unindexed tail, inclusive To-1.
 	require.Equal(t, uint64(3*limit-1), sn.SegmentsMax())
-	// visible-backed, exclusive To.
-	require.Equal(t, uint64(2*limit), sn.IndicesMax())
-	require.Equal(t, uint64(2*limit), sn.BlocksAvailable())
+	// visible-backed, inclusive To-1. BlocksAvailable is min(SegmentsMax, IndicesMax),
+	// so it follows IndicesMax whenever the tip is dumped but not yet indexed.
+	require.Equal(t, uint64(2*limit-1), sn.IndicesMax())
+	require.Equal(t, uint64(2*limit-1), sn.BlocksAvailable())
 	// visible-backed, exclusive To — cl/beacon/handler/blobs.go compares slot < FrozenBlobs().
 	require.Equal(t, uint64(limit), sn.FrozenBlobs())
 }
@@ -213,9 +214,9 @@ func writeEmptyCaplinSegment(t *testing.T, dirs datadir.Dirs, sType snaptype.Typ
 	require.NoError(t, snapshotsync.BeaconSimpleIdx(t.Context(), f, 1, dirs.Tmp, &background.Progress{}, log.LvlDebug, log.New()))
 }
 
-// FrozenBlobs must take visibleLock: recalcVisibleFiles (via OpenFolder)
-// reassigns s.visible under the write lock. Meaningful under -race.
-func TestFrozenBlobsVisibleLockRace(t *testing.T) {
+// FrozenBlobs reads the visible generation OpenFolder republishes, so it must go
+// through a pinned view rather than the raw slice. Meaningful under -race.
+func TestFrozenBlobsConcurrentWithOpenFolder(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
 	t.Cleanup(sn.Close)
@@ -252,7 +253,7 @@ func TestCloseClearsVisibleSegments(t *testing.T) {
 
 	view := sn.View()
 	defer view.Close()
-	require.Empty(t, view.BlobSidecarRotx.Segments)
+	require.Empty(t, view.BlobSidecars())
 }
 
 // The antiquary and the history-download stage both call OpenFolder on the same

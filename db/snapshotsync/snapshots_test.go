@@ -1364,6 +1364,31 @@ func TestSetIndexBuilder(t *testing.T) {
 	require.Nil(s.IndexBuilder(snaptype2.Transactions))
 }
 
+// A producer writes the tip .seg before indexing it. DirtyBlocksAvailable stops at the
+// first unindexed segment, so it cannot answer "how far has data been dumped" —
+// DirtySegmentsMax must count that tail.
+func TestDirtySegmentsMaxCountsUnindexedTail(t *testing.T) {
+	logger := testlog.Logger(t, log.LvlCrit)
+	dir, require := t.TempDir(), require.New(t)
+	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
+
+	s := NewBaseRoSnapshots(cfg, dir, []snaptype.Type{snaptype2.Headers}, snaptype2.Headers, false, logger)
+	defer s.Close()
+	require.NoError(s.OpenFolder())
+	require.Equal(uint64(0), s.DirtySegmentsMax(snaptype2.Enums.Headers))
+
+	for i := range uint64(3) {
+		createTestSegmentFile(t, i*10_000, (i+1)*10_000, snaptype2.Enums.Headers, dir, version.V1_0, logger)
+	}
+	missingIdx := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, 20_000, 30_000, snaptype2.Headers.Name()))
+	require.NoError(dir2.RemoveFile(missingIdx))
+	require.NoError(s.OpenFolder())
+
+	require.Equal(uint64(20_000-1), s.DirtyBlocksAvailable(snaptype2.Enums.Headers))
+	require.Equal(uint64(20_000-1), s.VisibleBlocksAvailable(snaptype2.Enums.Headers))
+	require.Equal(uint64(30_000-1), s.DirtySegmentsMax(snaptype2.Enums.Headers))
+}
+
 func TestOpenListOpensOnlyNamedFiles(t *testing.T) {
 	logger := log.New()
 	dir, require := t.TempDir(), require.New(t)

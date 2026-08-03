@@ -650,6 +650,10 @@ func (s *BaseRoSnapshots) VisibleBlocksAvailable(t snaptype.Enum) uint64 {
 	return s.visibleIdxAvailability(t)
 }
 
+func (s *BaseRoSnapshots) DirtySegmentsMax(t snaptype.Enum) uint64 {
+	return s.dirtySegmentsMax(t)
+}
+
 func (s *BaseRoSnapshots) DownloadComplete() {
 	wasReady := s.downloadReady.Swap(true)
 	if !wasReady {
@@ -1020,6 +1024,33 @@ func (s *BaseRoSnapshots) dirtyIdxAvailability(segtype snaptype.Enum) uint64 {
 			}
 
 			_max = seg.to - 1
+		}
+
+		return true
+	})
+
+	return _max
+}
+
+// dirtySegmentsMax is the tip of the data on disk, index or no index: unlike
+// dirtyIdxAvailability it does not stop at the first unindexed segment, so a producer
+// can see a range it has dumped but not yet indexed.
+func (s *BaseRoSnapshots) dirtySegmentsMax(segtype snaptype.Enum) uint64 {
+	s.dirtyLock.RLock()
+	defer s.dirtyLock.RUnlock()
+
+	dirty := s.dirty[segtype]
+	if dirty == nil {
+		return 0
+	}
+
+	var _max uint64
+
+	dirty.Walk(func(segments []*DirtySegment) bool {
+		for _, seg := range segments {
+			if seg.to > 0 && seg.to-1 > _max {
+				_max = seg.to - 1
+			}
 		}
 
 		return true

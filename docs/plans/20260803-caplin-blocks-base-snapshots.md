@@ -281,17 +281,41 @@ return `19999`.
    Decide explicitly: widen the declared shift to both accessors, or keep
    `BlocksAvailable` caplin-owned as `min(SegmentsMax, IndicesMax)`.
 
-- [ ] embed `snapshotsync.BaseRoSnapshots` by value; construct via
+**Resolutions.**
+
+1. Added base `DirtySegmentsMax(t snaptype.Enum)` — same dirty walk as
+   `dirtyIdxAvailability` minus the `IsIndexed()` break, so it reports the dumped
+   tip. `SegmentsMax()` rides it and keeps returning `3L-1`.
+2. Widened the declared shift to `BlocksAvailable`. It is not an independent
+   move: `BlocksAvailable` is `min(SegmentsMax, IndicesMax)` and visible ⊆ dirty,
+   so it always equals `IndicesMax` — it shifts exactly when and because
+   `IndicesMax` does. Both are inherited from the base.
+3. ➕ `OpenFolder` stays caplin-owned (a directory scan, not lifecycle): base's
+   scan is `AllTypedSegments`, which has no gap filter, while
+   `SegmentsCaplin` drops beacon-block segments past a gap. Keeping it means
+   a post-gap segment never reaches dirty, so the now-dirty-backed `SegmentsMax`
+   cannot report data the backfill can't walk back to. It delegates to base
+   `OpenList`.
+
+- [x] embed `snapshotsync.BaseRoSnapshots` by value; construct via
   `NewBaseRoSnapshots(cfg, dirs.Snap, snaptype.CaplinSnapshotTypes,
   snaptype.BeaconBlocks, false, logger)`; keep `beaconCfg`
-- [ ] register `BeaconSimpleIdx` as the `IndexBuilder` for both caplin types
-- [ ] re-express `SegmentsMax()` on `DirtyBlocksAvailable`, `FrozenBlobs()` on a
+- [x] register `BeaconSimpleIdx` as the `IndexBuilder` for both caplin types
+- [x] re-express `SegmentsMax()` on `DirtySegmentsMax`, `FrozenBlobs()` on a
   pinned `View()` with the Deneb short-circuit and empty guard (both per
   Technical Details); let `BlocksAvailable`/`IndicesMax` come from the base
-- [ ] update the Task 2 fixture ONLY for the declared `IndicesMax` `To`→`To-1`
-  shift; every other assertion must pass untouched
-- [ ] wire `GetIndexSalt(dirs.Snap, logger)` with zero-value fallback
-- [ ] run `go test ./db/snapshotsync/freezeblocks/... ./cl/...` — green
+- [x] update the Task 2 fixture ONLY for the declared `IndicesMax` `To`→`To-1`
+  shift (and `BlocksAvailable`, which it drags); every other assertion passes
+  untouched
+- [x] wire `GetIndexSalt(dirs.Snap, logger)` with zero-value fallback
+- [x] run `go test ./db/snapshotsync/freezeblocks/... ./cl/...` — green
+
+Landed with the caplin-owned dirty/visible state deleted (own `dirty`/`visible`
+fields and locks, `recalcVisibleFiles`, `closeWhatNotInList`, `idxAvailability`,
+own `OpenList`/`Close`) — required, since the base's dirty set has to be the live
+one for the inherited watermarks to read anything. `CaplinView` now wraps the
+base's pinned `View`. Task 4 keeps the `-race` test, the `ReadHeader`/
+`ReadBlobSidecars` read path, and the `BuildMissingIndices` rewrite.
 
 ### Task 4: delete the duplicated lifecycle, move reads onto pinned views
 
@@ -303,9 +327,10 @@ return `19999`.
 - [ ] write red `-race` test: a reader holding a caplin view while a
   concurrent `OpenFolder` drops a file must never touch a closed mmap
   (today `closeWhatNotInList` closes inline and views pin nothing)
-- [ ] delete the duplicates: own `dirty`/`visible` fields and locks,
-  `recalcVisibleFiles`, `closeWhatNotInList`, own `OpenFolder`,
-  `idxAvailability`, unpinned `CaplinView`; route `OpenList` to the base
+- [ ] verify no duplicates remain (Task 3 deleted own `dirty`/`visible` fields
+  and locks, `recalcVisibleFiles`, `closeWhatNotInList`, `idxAvailability`,
+  unpinned `CaplinView`, own `OpenList`; `OpenFolder` stays by design — see
+  Task 3's resolution 3)
 - [ ] move `ReadHeader`/`ReadBlobSidecars`/segment lookups onto base
   `View`/`ViewType` pinned `RoTx`; keep the zstd pooling and per-slot lookup
   helpers as caplin-specific
