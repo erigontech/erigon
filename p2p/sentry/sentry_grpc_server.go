@@ -40,8 +40,6 @@ import (
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/time/rate"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/health"
-	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/common"
@@ -802,7 +800,7 @@ func runWitPeer(
 
 			var query wit.NewWitnessPacket
 			if err := rlp.DecodeBytes(b, &query); err != nil {
-				logger.Error("decoding NewWitnessMsg: %w, data: %x", err, b)
+				logger.Error("[sentry] decoding NewWitnessMsg", "err", err, "data", hex.EncodeToString(b))
 				return p2p.NewPeerError(p2p.PeerErrorInvalidMessage, p2p.DiscSubprotocolError, err, "decoding NewWitnessMsg")
 			}
 
@@ -822,7 +820,7 @@ func runWitPeer(
 
 			var query wit.NewWitnessHashesPacket
 			if err := rlp.DecodeBytes(b, &query); err != nil {
-				logger.Error("decoding NewWitnessHashesMsg: %w, data: %x", err, b)
+				logger.Error("[sentry] decoding NewWitnessHashesMsg", "err", err, "data", hex.EncodeToString(b))
 				return p2p.NewPeerError(p2p.PeerErrorInvalidMessage, p2p.DiscSubprotocolError, err, "decoding NewWitnessHashesMsg")
 			}
 
@@ -887,20 +885,7 @@ func grpcSentryServer(ctx context.Context, sentryAddr string, ss *GrpcServer, he
 	}
 	grpcServer := grpcutil.NewServer(100, nil)
 	sentryproto.RegisterSentryServer(grpcServer, ss)
-	var healthServer *health.Server
-	if healthCheck {
-		healthServer = health.NewServer()
-		grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
-	}
-
-	go func() {
-		if healthCheck {
-			defer healthServer.Shutdown()
-		}
-		if err1 := grpcServer.Serve(lis); err1 != nil {
-			ss.logger.Error("Sentry gRPC server fail", "err", err1)
-		}
-	}()
+	grpcutil.StartServerOnListener(grpcServer, lis, healthCheck, ss.logger, "Sentry gRPC server fail")
 	return grpcServer, nil
 }
 
@@ -1398,10 +1383,8 @@ func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgID sent
 		err := rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(data)), Payload: bytes.NewReader(data)})
 		if err != nil {
 			ss.removePeer(peerInfo.ID(), p2p.NewPeerError(p2p.PeerErrorMessageSend, p2p.DiscNetworkError, err, fmt.Sprintf("%s writePeer msgcode=%d", logPrefix, msgcode)))
-		} else {
-			if ttl > 0 {
-				peerInfo.AddDeadline(time.Now().Add(ttl))
-			}
+		} else if ttl > 0 {
+			peerInfo.AddDeadline(time.Now().Add(ttl))
 		}
 	}, ss.logger)
 }

@@ -131,7 +131,7 @@ func TestMiningBenchmark(t *testing.T) {
 	var txInTxpool = 5000
 	var txs []*types.Transaction
 
-	for i := 0; i < 1; i++ {
+	for i := range 1 {
 		stack, ethBackend, err := helper.InitMiner(ctx, logger, t.TempDir(), &genesis, pkeys[i], true)
 		if err != nil {
 			panic(err)
@@ -170,7 +170,7 @@ func TestMiningBenchmark(t *testing.T) {
 	// nonce starts from 0 because have no txs yet
 	initNonce := uint64(0)
 
-	for i := 0; i < txInTxpool; i++ {
+	for i := range txInTxpool {
 		txn, err := newRandomTxWithNonce(false, initNonce+uint64(i), ethbackends[0].TxpoolServer())
 		if err != nil {
 			panic(err)

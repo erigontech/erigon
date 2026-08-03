@@ -89,7 +89,7 @@ MIN_BUILDER_WITHDRAWABILITY_DELAY: 8192
 `
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.yaml")
-	require.NoError(t, os.WriteFile(configPath, []byte(yamlContent), 0644))
+	require.NoError(t, os.WriteFile(configPath, []byte(yamlContent), 0o644))
 
 	beaconCfg, _, err := CustomConfig(configPath)
 	require.NoError(t, err)
@@ -128,6 +128,51 @@ MIN_BUILDER_WITHDRAWABILITY_DELAY: 8192
 	require.Equal(t, GloasVersion, beaconCfg.GetCurrentStateVersion(100))
 }
 
+func TestCustomConfigRejectsGloasRequestTypeMismatch(t *testing.T) {
+	yamlContent := `
+PRESET_BASE: minimal
+GLOAS_FORK_EPOCH: 1
+BUILDER_DEPOSIT_REQUEST_TYPE: 0x09
+`
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte(yamlContent), 0o644))
+
+	_, _, err := CustomConfig(configPath)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "BUILDER_DEPOSIT_REQUEST_TYPE mismatch")
+}
+
+func TestCustomConfigRejectsElectraRequestTypeMismatchWithoutGloas(t *testing.T) {
+	yamlContent := `
+PRESET_BASE: minimal
+ELECTRA_FORK_EPOCH: 1
+DEPOSIT_REQUEST_TYPE: 0x09
+`
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte(yamlContent), 0o644))
+
+	_, _, err := CustomConfig(configPath)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "DEPOSIT_REQUEST_TYPE mismatch")
+}
+
+func TestCustomConfigRejectsBaseRequestTypeMismatchWhenOnlyGloasScheduled(t *testing.T) {
+	yamlContent := `
+PRESET_BASE: minimal
+GLOAS_FORK_EPOCH: 1
+DEPOSIT_REQUEST_TYPE: 0x09
+`
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte(yamlContent), 0o644))
+
+	_, _, err := CustomConfig(configPath)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "DEPOSIT_REQUEST_TYPE mismatch")
+}
+
 // TestCustomConfigUnsetForksAreFarFuture verifies that fork epochs omitted from a
 // custom config default to far-future, like other clients, rather than inheriting
 // the finite epochs of the mainnet base config.
@@ -142,7 +187,7 @@ ELECTRA_FORK_EPOCH: 100000000
 `
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.yaml")
-	require.NoError(t, os.WriteFile(configPath, []byte(yamlContent), 0644))
+	require.NoError(t, os.WriteFile(configPath, []byte(yamlContent), 0o644))
 
 	beaconCfg, _, err := CustomConfig(configPath)
 	require.NoError(t, err)
@@ -172,4 +217,48 @@ func TestMaxBlobsPerBlockUpperBound(t *testing.T) {
 	// With no schedule it falls back to the larger of the base limits.
 	noSchedule := &BeaconChainConfig{MaxBlobsPerBlock: 6, MaxBlobsPerBlockElectra: 9}
 	require.EqualValues(t, 9, noSchedule.MaxBlobsPerBlockUpperBound())
+}
+
+func TestForkSchemaMatchesSlot(t *testing.T) {
+	cfg := MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 1
+	cfg.GloasForkEpoch = 2
+	cfg.InitializeForkSchedule()
+	spe := cfg.SlotsPerEpoch
+
+	for _, tc := range []struct {
+		name           string
+		slot           uint64
+		decodedVersion StateVersion
+		want           bool
+	}{
+		// Schemas diverge only across the Gloas boundary, so a disagreement
+		// below it is not a mismatch.
+		{"both pre-Gloas", spe, DenebVersion, true},
+		{"both Gloas", 2 * spe, GloasVersion, true},
+		{"Gloas schema at a pre-Gloas slot", spe, GloasVersion, false},
+		{"pre-Gloas schema at a Gloas slot", 2 * spe, FuluVersion, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, cfg.ForkSchemaMatchesSlot(tc.slot, tc.decodedVersion))
+		})
+	}
+}
+
+// Mainnet keeps Gloas at FAR_FUTURE_EPOCH, so no slot maps to it and every
+// Gloas-schema object is inconsistent whatever slot it claims.
+func TestForkSchemaMatchesSlotFarFutureGloas(t *testing.T) {
+	cfg := MainnetBeaconConfig
+	cfg.InitializeForkSchedule()
+	require.Equal(t, uint64(math.MaxUint64), cfg.GloasForkEpoch)
+
+	fuluSlot := cfg.FuluForkEpoch * cfg.SlotsPerEpoch
+	require.True(t, cfg.ForkSchemaMatchesSlot(fuluSlot, FuluVersion))
+	require.False(t, cfg.ForkSchemaMatchesSlot(fuluSlot, GloasVersion))
+	require.False(t, cfg.ForkSchemaMatchesSlot(math.MaxUint64/cfg.SlotsPerEpoch, GloasVersion))
 }

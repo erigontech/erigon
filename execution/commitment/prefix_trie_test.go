@@ -196,7 +196,7 @@ func TestPrefixTrieDeepInsert(t *testing.T) {
 func TestPrefixTrieSubtreeCountAccumulation(t *testing.T) {
 	tr := newPrefixTrie()
 	const N = 50
-	for i := 0; i < N; i++ {
+	for i := range N {
 		k := []byte{0x01, 0x02, 0x03, byte(i & 0x0F), byte((i >> 4) & 0x0F), byte(i & 0x0F)}
 		tr.Insert(k, nil, nil)
 	}
@@ -228,7 +228,7 @@ func TestPrefixTrieArenaReuse(t *testing.T) {
 func TestPrefixTrieArenaSpansMultipleSlabs(t *testing.T) {
 	tr := newPrefixTrie()
 	// Allocate directly to cross the slab boundary; reaching it via inserts needs >prefixSlabSize keys.
-	for i := 0; i < prefixSlabSize+5; i++ {
+	for range prefixSlabSize + 5 {
 		tr.arena.allocNode()
 	}
 	assert.Equal(t, prefixSlabSize+5+1 /*root*/, tr.arena.nodeCount())
@@ -383,16 +383,14 @@ func TestParallelUpdateAppendDeferredConcurrent(t *testing.T) {
 	)
 
 	var wg sync.WaitGroup
-	wg.Add(workers)
 	for range workers {
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			batch := make([]*DeferredBranchUpdate, perWorker)
 			for i := range batch {
 				batch[i] = &DeferredBranchUpdate{}
 			}
 			pu.appendDeferred(batch)
-		}()
+		})
 	}
 	wg.Wait()
 

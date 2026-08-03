@@ -9,6 +9,7 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/seg"
@@ -73,7 +74,6 @@ func Configure(Schema SchemaGen, a AggSetters, dirs datadir.Dirs, salt *uint32, 
 	return nil
 }
 
-const AggregatorSqueezeCommitmentValues = true
 const MaxNonFuriousDirtySpacePerTx = 64 * datasize.MB
 
 var dbgCommBtIndex = dbg.EnvBool("AGG_COMMITMENT_BT", false)
@@ -187,9 +187,19 @@ func (s *SchemaGen) GetBlockIdxFilesCfg(name string) BlockIdxFilesCfg {
 	return v
 }
 
+// commitmentKVWriteVersion stamps v2.1 on referenced commitment files (matching main's referenced
+// default) and v2.2 on plain ones; the read ceiling (DataKV.Current = v2.2) accepts both.
+func commitmentKVWriteVersion(c *DomainCfg) version.Version {
+	if c.ReferencesInCommitmentBranches {
+		return version.V2_1
+	}
+	return version.V2_2
+}
+
 // ExperimentalParallelCommitment toggles the ParallelPatriciaHashed trie path
-// (commitment.ModeParallel + VariantParallelHexPatricia). Default false.
-var ExperimentalParallelCommitment = false
+// (commitment.ModeParallel + VariantParallelHexPatricia). Default false; the
+// COMMITMENT_PARALLEL env var (or the CLI flag) turns it on.
+var ExperimentalParallelCommitment = dbg.EnvBool("COMMITMENT_PARALLEL", false)
 
 // ExperimentalStreamingCommitment toggles the StreamingCommitter trie path
 // (commitment.ModeParallel + VariantStreamingHexPatricia), which overlaps
@@ -266,8 +276,9 @@ var Schema = SchemaGen{
 		Name: kv.CommitmentDomain, ValuesTable: kv.TblCommitmentVals,
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressKeys,
 
-		Accessors:           AccessorHashMap,
-		ReplaceKeysInValues: AggregatorSqueezeCommitmentValues, // when true, keys are replaced in values during merge once file range reaches threshold
+		Accessors:                      AccessorHashMap,
+		ReferencesInCommitmentBranches: config3.DefaultReferencesInCommitmentBranches, // when true, keys are replaced in values during merge once file range reaches threshold
+		KVWriteVersion:                 commitmentKVWriteVersion,
 
 		Hist: HistCfg{
 			ValuesTable:   kv.TblCommitmentHistoryVals,

@@ -88,7 +88,7 @@ func ExecuteBlockEphemerally(
 ) (res *EphemeralExecResult, executeBlockErr error) {
 	defer blockExecutionTimer.ObserveDuration(time.Now())
 	ibs := state.New(stateReader)
-	defer ibs.Release(false)
+	defer ibs.Close()
 	ibs.SetHooks(vmConfig.Tracer)
 	header := block.Header()
 
@@ -172,7 +172,9 @@ func ExecuteBlockEphemerally(
 
 	var bloom types.Bloom
 	if !vmConfig.NoReceipts {
-		bloom = types.CreateBloom(receipts)
+		// ApplyTransaction populated each receipt's Bloom, so merge those
+		// instead of hashing all logs again.
+		bloom = receipts.MergedBloom()
 		if !vmConfig.StatelessExec && bloom != header.Bloom {
 			return nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", bloom, header.Bloom)
 		}
@@ -186,14 +188,13 @@ func ExecuteBlockEphemerally(
 			return nil, err
 		}
 	}
-	blockLogs := ibs.Logs()
 	newRoot := newBlock.Root()
 	execRs := &EphemeralExecResult{
 		StateRoot:   newRoot,
 		TxRoot:      types.DeriveSha(includedTxs),
 		ReceiptRoot: receiptSha,
 		Bloom:       bloom,
-		LogsHash:    rlpHash(blockLogs),
+		LogsHash:    ibs.LogsRlpHash(),
 		Receipts:    receipts,
 		Difficulty:  (*math.HexOrDecimal256)(header.Difficulty.ToBig()),
 		GasUsed:     math.HexOrDecimal64(blockGasUsed),
@@ -201,6 +202,7 @@ func ExecuteBlockEphemerally(
 	}
 
 	if chainConfig.Bor != nil {
+		blockLogs := ibs.Logs()
 		var logs []*types.Log
 		for _, receipt := range receipts {
 			logs = append(logs, receipt.Logs...)
@@ -224,8 +226,6 @@ func ExecuteBlockEphemerally(
 
 	return execRs, nil
 }
-
-var rlpHash = types.RlpHash
 
 func SysCallContract(contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header, engine rules.EngineReader, constCall bool, vmCfg vm.Config) (result []byte, err error) {
 	isBor := chainConfig.Bor != nil
@@ -268,11 +268,11 @@ func SysCallContractWithBlockContext(contract accounts.Address, data []byte, cha
 	}
 	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
 	mdGas := mdgas.MdGas{
-		Regular: msg.Gas(),
-		State:   0, // pre-Amsterdam: state-gas reservoir not used; spills into regular gas
+		Execution: msg.Gas(),
+		State:     0, // pre-Amsterdam: state-gas reservoir not used; spills into execution gas
 	}
 	if evm.ChainRules().IsAmsterdam {
-		// EIP-8037: extra state-gas reservoir on top of the 30M regular budget
+		// EIP-8037: extra state-gas reservoir on top of the 30M execution budget
 		// so system calls keep their pre-EIP-8037 execution margin.
 		mdGas.State = params.StateGasSystemMaxSstores
 	}
@@ -314,8 +314,8 @@ func SysCreate(contract accounts.Address, data []byte, chainConfig *chain.Config
 	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), nil, author, chainConfig)
 	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
 	mdGas := mdgas.MdGas{
-		Regular: msg.Gas(),
-		State:   0, // state gas reservoir will consume from regular gas for sys calls
+		Execution: msg.Gas(),
+		State:     0, // state gas reservoir will consume from execution gas for sys calls
 	}
 	ret, _, err := evm.SysCreate(
 		msg.From(),
@@ -342,6 +342,10 @@ func FinalizeBlockExecution(
 		return ret, err
 	}
 
+	if ibs.IsVersioned() {
+		ibs.StartAccessRecording()
+	}
+
 	if isMining {
 		newBlock, retRequests, err = engine.FinalizeAndAssemble(cc, header, ibs, txs, uncles, receipts, withdrawals, chainReader, syscall, nil, logger)
 	} else {
@@ -351,9 +355,15 @@ func FinalizeBlockExecution(
 		return nil, nil, err
 	}
 
-	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, accounts.NilAddress, cc)
-	if err := ibs.CommitBlock(blockContext.Rules(cc), stateWriter); err != nil {
-		return nil, nil, fmt.Errorf("committing block %d failed: %w", header.Number.Uint64(), err)
+	// A versioned ibs (parallel-mode block assembly) commits from the versionMap
+	// write-set — the caller applies ba.BalIO() via WriteSet.Normalize/Apply after
+	// assembly, so so.data must not also be flushed here. versionMap==nil callers
+	// (ExecuteBlockEphemerally, RPC) keep the so.data CommitBlock.
+	if !ibs.IsVersioned() {
+		blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, accounts.NilAddress, cc)
+		if err := ibs.CommitBlock(blockContext.Rules(cc), stateWriter); err != nil {
+			return nil, nil, fmt.Errorf("committing block %d failed: %w", header.Number.Uint64(), err)
+		}
 	}
 
 	return newBlock, retRequests, nil

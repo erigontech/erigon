@@ -243,11 +243,11 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenIncorrectSubnet_Retu
 
 	// Mock fork choice methods to avoid panic
 	t.mockForkChoice.Headers[testParentRoot] = &cltypes.BeaconBlockHeader{
-		//Slot: testSlot - 1,
+		// Slot: testSlot - 1,
 	}
 	t.mockForkChoice.FinalizedCheckpointVal = solid.Checkpoint{
-		//Epoch: (testSlot - 100) / 32,
-		//Root:  [32]byte{1},
+		// Epoch: (testSlot - 100) / 32,
+		// Root:  [32]byte{1},
 	}
 	//t.mockForkChoice.Ancestors[(testSlot-100)/32*32] = [32]byte{1}
 
@@ -299,13 +299,13 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenSlotTooOld_ReturnsEr
 
 	// Mock GetHeader to return a valid parent header
 	t.mockForkChoice.Headers[testParentRoot] = &cltypes.BeaconBlockHeader{
-		//Slot: testSlot - 1,
+		// Slot: testSlot - 1,
 	}
 
 	// Mock FinalizedCheckpoint and Ancestor methods
 	t.mockForkChoice.FinalizedCheckpointVal = solid.Checkpoint{
-		//Epoch: (testSlot + 100) / 32,
-		//Root:  [32]byte{1},
+		// Epoch: (testSlot + 100) / 32,
+		// Root:  [32]byte{1},
 	}
 	//t.mockForkChoice.Ancestors[(testSlot+100)/32*32] = [32]byte{1}
 
@@ -333,11 +333,11 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenInvalidInclusionProo
 
 	// Mock fork choice methods to avoid panic
 	t.mockForkChoice.Headers[testParentRoot] = &cltypes.BeaconBlockHeader{
-		//Slot: testSlot - 1,
+		// Slot: testSlot - 1,
 	}
 	t.mockForkChoice.FinalizedCheckpointVal = solid.Checkpoint{
-		//Epoch: (testSlot - 100) / 32,
-		//Root:  [32]byte{1},
+		// Epoch: (testSlot - 100) / 32,
+		// Root:  [32]byte{1},
 	}
 	//t.mockForkChoice.Ancestors[(testSlot-100)/32*32] = [32]byte{1}
 
@@ -373,11 +373,11 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenInvalidKZGProofs_Ret
 
 	// Mock fork choice methods to avoid panic
 	t.mockForkChoice.Headers[testParentRoot] = &cltypes.BeaconBlockHeader{
-		//Slot: testSlot - 1,
+		// Slot: testSlot - 1,
 	}
 	t.mockForkChoice.FinalizedCheckpointVal = solid.Checkpoint{
-		//Epoch: (testSlot - 100) / 32,
-		//Root:  [32]byte{1},
+		// Epoch: (testSlot - 100) / 32,
+		// Root:  [32]byte{1},
 	}
 	//t.mockForkChoice.Ancestors[(testSlot-100)/32*32] = [32]byte{1}
 

@@ -90,7 +90,7 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount2(f *testing.F) {
 		plainKeys := make([][]byte, keysCount)
 		updates := make([]Update, keysCount)
 
-		for k := uint16(0); k < keysCount; k++ {
+		for k := range keysCount {
 
 			aux := make([]byte, 32)
 
@@ -136,11 +136,10 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount2(f *testing.F) {
 		hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
 		hphAnother := NewHexPatriciaHashed(length.Addr, ms2, DefaultTrieConfig())
 
-		trace := false
-		hph.SetTrace(trace)
-		hphAnother.SetTrace(trace)
+		hph.SetTraceWriter(nil)
+		hphAnother.SetTraceWriter(nil)
 
-		for i := 0; i < len(plainKeys); i++ {
+		for i := range plainKeys {
 			err := ms.applyPlainUpdates(plainKeys[i:i+1], updates[i:i+1])
 			require.NoError(t, err)
 
@@ -235,7 +234,7 @@ func Fuzz_HexPatriciaHashed_ReviewKeys(f *testing.F) {
 		for i := 0; i < int(kc); i++ {
 			key := make([]byte, length.Addr)
 
-			for j := 0; j < len(key); j++ {
+			for j := range key {
 				key[j] = byte(rnd.Intn(256))
 			}
 			addr := hex.EncodeToString(key)

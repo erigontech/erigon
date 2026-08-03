@@ -48,7 +48,6 @@ import (
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/rulesconfig"
 )
 
@@ -57,8 +56,9 @@ import (
 func TestEmptyBlock(t *testing.T) {
 	require := require.New(t)
 	genesis := chainspec.GnosisGenesisBlock()
-	genesisBlock, _, err := genesiswrite.GenesisToBlock(t, genesis, datadir.New(t.TempDir()), log.Root())
+	genesisBlock, ibs, err := genesiswrite.GenesisToBlock(t, genesis, datadir.New(t.TempDir()), log.Root())
 	require.NoError(err)
+	defer ibs.Close()
 
 	genesis.Config.TerminalTotalDifficultyPassed = false
 
@@ -160,6 +160,7 @@ func TestEmptySystemAccountCreation(t *testing.T) {
 	// then MakeWriteSet writes it into the real shared domains.
 	genesisBlock, genesisIbs, err := genesiswrite.GenesisToBlock(t, genesis, dirs, logger)
 	require.NoError(err)
+	defer genesisIbs.Close()
 	domainWriter := state.NewWriter(domains.AsPutDel(tx), nil, 1)
 	err = genesisIbs.MakeWriteSet(&chain.Rules{}, domainWriter)
 	require.NoError(err)
@@ -169,7 +170,7 @@ func TestEmptySystemAccountCreation(t *testing.T) {
 	require.NoError(err)
 
 	config := genesis.Config
-	blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap, logger), nil)
+	blockReader := freezeblocks.NewBlockReader(db.(freezeblocks.HasBlockFiles).DebugBlockFiles(), nil)
 	chainRdr := stagedsync.ChainReader{Cfg: config, Db: tx, BlockReader: blockReader}
 	engine := rulesconfig.CreateRulesEngineBareBones(ctx, config, logger)
 	time := uint64(1)
@@ -190,6 +191,7 @@ func TestEmptySystemAccountCreation(t *testing.T) {
 	reader := state.NewBufferedReader(rs, state.NewReaderV3(rs.Domains().AsGetter(tx)))
 	writer := state.NewVersionedWriteCollector(rs)
 	ibs := state.New(reader)
+	defer ibs.Close()
 	err = protocol.InitializeBlockExecution(engine, chainRdr, header, config, ibs, writer, logger, nil)
 	require.NoError(err)
 	account, err := reader.ReadAccountData(params.SystemAddress)

@@ -26,7 +26,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -133,16 +133,12 @@ func TestImportClosesChaindataOnInitError(t *testing.T) {
 
 func loadImportFixtureCase(t *testing.T) importFixtureCase {
 	t.Helper()
-	fixturePath := filepath.Join("..", "..", "..", "execution", "tests", "legacy-tests",
-		"BlockchainTests", "InvalidBlocks", "bcMultiChainTest", "UncleFromSideChain.json")
+	fixturePath := filepath.Join("testdata", "import_reorg_unwind_to_genesis.json")
 	raw, err := os.ReadFile(fixturePath)
-	require.NoErrorf(t, err, "read fixture (legacy-tests submodule not initialized?)")
+	require.NoError(t, err)
 
-	var fixture map[string]importFixtureCase
-	require.NoError(t, json.Unmarshal(raw, &fixture))
-	const caseKey = "BlockchainTests/InvalidBlocks/bcMultiChainTest/UncleFromSideChain.json::UncleFromSideChain_Cancun"
-	tc, ok := fixture[caseKey]
-	require.Truef(t, ok, "case %q not found in fixture", caseKey)
+	var tc importFixtureCase
+	require.NoError(t, json.Unmarshal(raw, &tc))
 	require.NotEmpty(t, tc.Blocks)
 	return tc
 }
@@ -185,9 +181,9 @@ func writeImportBlocks(t *testing.T, dir string, tc importFixtureCase) []string 
 // ExitErrHandler makes a failing command return its error instead of calling
 // os.Exit, so import's expected invalid-block error is observable.
 func runErigonCommand(args ...string) error {
-	app := MakeApp("erigon", func(*cli.Context) error { return nil }, erigoncli.DefaultFlags)
-	app.ExitErrHandler = func(*cli.Context, error) {}
+	app := MakeApp("erigon", func(context.Context, *cli.Command) error { return nil }, erigoncli.DefaultFlags)
+	app.ExitErrHandler = func(context.Context, *cli.Command, error) {}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	return app.RunContext(ctx, append([]string{"erigon"}, args...))
+	return app.Run(ctx, append([]string{"erigon"}, args...))
 }

@@ -17,9 +17,12 @@
 package commitment
 
 import (
+	"context"
 	"encoding/hex"
 	"math/rand"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/length"
 )
@@ -89,4 +92,73 @@ func TestDeepFold_PreExistingWhale_SubsetTouched(t *testing.T) {
 	k1 = append(append([][]byte{}, fk...), k1...)
 	u1 = append(append([]Update{}, fu...), u1...)
 	requireAllEnginesParity(t, k1, u1, k2, u2, 4)
+}
+
+// A pre-existing on-disk whale whose storage all sits under a SINGLE first-storage-nibble
+// has no branch record exactly at the account prefix — its storage top is a deeper
+// extension. The next block touches other first-nibbles, crossing deepStorageThreshold and
+// driving the deep storage fold. unfoldStorageBase finds no branch at the account prefix;
+// it must still recover the untouched single-nibble subtree rather than seeding an empty
+// base and dropping it, so the parallel/streaming root matches sequential. Regression for
+// the empty-seed sibling drop (#22113).
+func TestDeepFold_PreExistingWhale_SingleNibbleOnDisk(t *testing.T) {
+	onDisk := nibs(0)   // all existing slots under one first-nibble -> no branch at the account prefix
+	touch := nibs(3, 7) // next block touches disjoint first-nibbles, crossing the deep-fold threshold
+	k1, u1, k2, u2 := buildSubsetTouchedWhale(20260702, onDisk, touch, 120, 700)
+	fk, fu := buildMixedCorpus(4242, 200)
+	k1 = append(append([][]byte{}, fk...), k1...)
+	u1 = append(append([]Update{}, fu...), u1...)
+	requireAllEnginesParity(t, k1, u1, k2, u2, 4)
+}
+
+// A FRESH whale — its account absent from the pre-state trie — provably has nothing on
+// disk beneath its storage prefix, so the deep fold seeds an empty base and folds the
+// slots concurrently instead of demoting to serial streaming.
+func TestDeepFold_FreshWhaleFoldsParallel(t *testing.T) {
+	k1, u1, _, _ := buildSubsetTouchedWhale(20260707, nibs(3, 7), nil, 700, 0)
+	fk, fu := buildMixedCorpus(555, 200)
+	keys := append(append([][]byte{}, fk...), k1...)
+	upds := append(append([]Update{}, fu...), u1...)
+
+	seqRoot, _ := engineRoot(t, modeSeq, 0, keys, upds)
+
+	ms := NewMockState(t)
+	ms.SetConcurrentCommitment(true)
+	require.NoError(t, ms.applyPlainUpdates(keys, upds))
+	sc := newStreamCommitter(t, ms, 4, false)
+	defer sc.Release()
+	touchAll(sc, keys)
+	got, err := sc.Process(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, seqRoot, got, "fresh-whale concurrent fold diverged from sequential")
+	require.Positive(t, sc.DeepLocalFolds(), "a fresh whale must take the concurrent deep fold, not the serial demotion")
+
+	parRoot, _ := engineRoot(t, modeParallel, 4, keys, upds)
+	require.Equal(t, seqRoot, parRoot)
+}
+
+// The demotion gate stays for accounts present in the pre-state without a branch record
+// at their prefix (single embedded slot): the influx still streams serially.
+func TestDeepFold_ExistingWhaleStillDemotes(t *testing.T) {
+	k1, u1, k2, u2 := buildSubsetTouchedWhale(20260708, nibs(0), nibs(3, 7), 1, 700)
+	fk, fu := buildMixedCorpus(556, 200)
+	k1 = append(append([][]byte{}, fk...), k1...)
+	u1 = append(append([]Update{}, fu...), u1...)
+
+	seqRoot, _ := incrementalRoot(t, modeSeq, 0, k1, u1, k2, u2)
+
+	ms := NewMockState(t)
+	ms.SetConcurrentCommitment(true)
+	sc := newStreamCommitter(t, ms, 4, false)
+	defer sc.Release()
+	require.NoError(t, ms.applyPlainUpdates(k1, u1))
+	touchAll(sc, k1)
+	_, err := sc.Process(context.Background())
+	require.NoError(t, err)
+	require.NoError(t, ms.applyPlainUpdates(k2, u2))
+	touchAll(sc, k2)
+	got, err := sc.Process(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, seqRoot, got)
+	require.Zero(t, sc.DeepLocalFolds(), "an account present in the pre-state must keep the serial demotion")
 }

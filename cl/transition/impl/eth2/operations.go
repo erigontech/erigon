@@ -34,6 +34,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/utils/bls"
 
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -46,11 +47,11 @@ const (
 	FullExitRequestAmount = 0
 )
 
-func (I *impl) FullValidate() bool {
-	return I.FullValidation
+func (imp *impl) FullValidate() bool {
+	return imp.FullValidation
 }
 
-func (I *impl) ProcessProposerSlashing(
+func (imp *impl) ProcessProposerSlashing(
 	s abstract.BeaconState,
 	propSlashing *cltypes.ProposerSlashing,
 ) error {
@@ -99,22 +100,25 @@ func (I *impl) ProcessProposerSlashing(
 		}
 		if clear {
 			payments := s.GetBuilderPendingPayments()
-			payments.Set(paymentIndex, &cltypes.BuilderPendingPayment{
-				Withdrawal: &cltypes.BuilderPendingWithdrawal{},
-			})
+			payment := payments.Get(paymentIndex)
+			if payment != nil && payment.ProposerIndex == h1.ProposerIndex {
+				payments.Set(paymentIndex, &cltypes.BuilderPendingPayment{
+					Withdrawal: &cltypes.BuilderPendingWithdrawal{},
+				})
+			}
 			s.SetBuilderPendingPayments(payments)
 		}
 	}
 
 	// Set whistleblower index to 0 so current proposer gets reward.
 	pr, err := s.SlashValidator(h1.ProposerIndex, nil)
-	if I.BlockRewardsCollector != nil {
-		I.BlockRewardsCollector.ProposerSlashings += pr
+	if imp.BlockRewardsCollector != nil {
+		imp.BlockRewardsCollector.ProposerSlashings += pr
 	}
 	return err
 }
 
-func (I *impl) ProcessAttesterSlashing(
+func (imp *impl) ProcessAttesterSlashing(
 	s abstract.BeaconState,
 	attSlashing *cltypes.AttesterSlashing,
 ) error {
@@ -145,7 +149,8 @@ func (I *impl) ProcessAttesterSlashing(
 	currentEpoch := state.GetEpochAtSlot(s.BeaconConfig(), s.Slot())
 	for _, ind := range solid.IntersectionOfSortedSets(
 		solid.IterableSSZ[uint64](att1.AttestingIndices),
-		solid.IterableSSZ[uint64](att2.AttestingIndices)) {
+		solid.IterableSSZ[uint64](att2.AttestingIndices),
+	) {
 		validator, err := s.ValidatorForValidatorIndex(int(ind))
 		if err != nil {
 			return err
@@ -155,8 +160,8 @@ func (I *impl) ProcessAttesterSlashing(
 			if err != nil {
 				return fmt.Errorf("unable to slash validator: %d: %s", ind, err)
 			}
-			if I.BlockRewardsCollector != nil {
-				I.BlockRewardsCollector.AttesterSlashings += pr
+			if imp.BlockRewardsCollector != nil {
+				imp.BlockRewardsCollector.AttesterSlashings += pr
 			}
 			slashedAny = true
 		}
@@ -168,7 +173,7 @@ func (I *impl) ProcessAttesterSlashing(
 	return nil
 }
 
-func (I *impl) ProcessDeposit(s abstract.BeaconState, deposit *cltypes.Deposit) error {
+func (imp *impl) ProcessDeposit(s abstract.BeaconState, deposit *cltypes.Deposit) error {
 	if deposit == nil {
 		return nil
 	}
@@ -187,7 +192,7 @@ func (I *impl) ProcessDeposit(s abstract.BeaconState, deposit *cltypes.Deposit) 
 		return true
 	})
 	// Validate merkle proof for deposit leaf.
-	if I.FullValidation && !utils.IsValidMerkleBranch(
+	if imp.FullValidation && !utils.IsValidMerkleBranch(
 		depositLeaf,
 		rawProof,
 		s.BeaconConfig().DepositContractTreeDepth+1,
@@ -253,18 +258,8 @@ func IsVoluntaryExitApplicable(s abstract.BeaconState, voluntaryExit *cltypes.Vo
 		return errors.New("ProcessVoluntaryExit: exit is happening in the future")
 	}
 
-	// [New in Gloas:EIP7732] Builder exit path
 	if s.Version() >= clparams.GloasVersion && state.IsBuilderIndex(voluntaryExit.ValidatorIndex) {
-		builderIndex := state.ConvertValidatorIndexToBuilderIndex(voluntaryExit.ValidatorIndex)
-		// Verify the builder is active
-		if !state.IsActiveBuilder(s, builderIndex) {
-			return errors.New("ProcessVoluntaryExit: builder is not active")
-		}
-		// Only exit builder if it has no pending withdrawals in the queue
-		if state.GetPendingBalanceToWithdrawForBuilder(s, builderIndex) != 0 {
-			return errors.New("ProcessVoluntaryExit: builder has pending balance to withdraw")
-		}
-		return nil
+		return errors.New("ProcessVoluntaryExit: builder index voluntary exits are not supported")
 	}
 
 	// Validator exit path
@@ -296,7 +291,7 @@ func IsVoluntaryExitApplicable(s abstract.BeaconState, voluntaryExit *cltypes.Vo
 }
 
 // ProcessVoluntaryExit takes a voluntary exit and applies state transition.
-func (I *impl) ProcessVoluntaryExit(
+func (imp *impl) ProcessVoluntaryExit(
 	s abstract.BeaconState,
 	signedVoluntaryExit *cltypes.SignedVoluntaryExit,
 ) error {
@@ -307,33 +302,26 @@ func (I *impl) ProcessVoluntaryExit(
 		return err
 	}
 
-	// [New in Gloas:EIP7732] Builder exit
-	if s.Version() >= clparams.GloasVersion && state.IsBuilderIndex(voluntaryExit.ValidatorIndex) {
-		builderIndex := state.ConvertValidatorIndexToBuilderIndex(voluntaryExit.ValidatorIndex)
-		s.InitiateBuilderExit(builderIndex)
-		return nil
-	}
-
 	// Do the exit (same process in slashing).
 	return s.InitiateValidatorExit(voluntaryExit.ValidatorIndex)
 }
 
 // ProcessWithdrawals processes withdrawals by decreasing the balance of each validator
 // and updating the next withdrawal index and validator index.
-func (I *impl) ProcessWithdrawals(
+func (imp *impl) ProcessWithdrawals(
 	s abstract.BeaconState,
 	withdrawals *solid.ListSSZ[*cltypes.Withdrawal],
 ) error {
 	// [Modified in Gloas:EIP7732]
 	if s.Version() >= clparams.GloasVersion {
-		return I.processWithdrawalsGloas(s)
+		return imp.processWithdrawalsGloas(s)
 	}
-	return I.processWithdrawalsPreGloas(s, withdrawals)
+	return imp.processWithdrawalsPreGloas(s, withdrawals)
 }
 
 // processWithdrawalsGloas implements the Gloas version of process_withdrawals.
 // The payload parameter is removed; withdrawals are computed internally.
-func (I *impl) processWithdrawalsGloas(s abstract.BeaconState) error {
+func (imp *impl) processWithdrawalsGloas(s abstract.BeaconState) error {
 	// [Modified in Gloas:EIP7732] Return early if the parent block is empty.
 	// Spec: if state.latest_block_hash != state.latest_execution_payload_bid.block_hash: return
 	latestBlockHash := s.GetLatestBlockHash()
@@ -382,7 +370,7 @@ func (I *impl) processWithdrawalsGloas(s abstract.BeaconState) error {
 }
 
 // processWithdrawalsPreGloas implements process_withdrawals for pre-Gloas versions.
-func (I *impl) processWithdrawalsPreGloas(
+func (imp *impl) processWithdrawalsPreGloas(
 	s abstract.BeaconState,
 	withdrawals *solid.ListSSZ[*cltypes.Withdrawal],
 ) error {
@@ -391,7 +379,7 @@ func (I *impl) processWithdrawalsPreGloas(
 	if err != nil {
 		return err
 	}
-	if I.FullValidation {
+	if imp.FullValidation {
 		if len(expectedWithdrawals.Withdrawals) != withdrawals.Len() {
 			return fmt.Errorf(
 				"ProcessWithdrawals: expected %d withdrawals, but got %d",
@@ -461,13 +449,23 @@ func applyWithdrawals(s abstract.BeaconState, withdrawals *solid.ListSSZ[*cltype
 	builders := s.GetBuilders()
 	buildersModified := false
 	err := solid.RangeErr[*cltypes.Withdrawal](withdrawals, func(_ int, w *cltypes.Withdrawal, _ int) error {
+		if w == nil {
+			return nil
+		}
 		// [Modified in Gloas:EIP7732]
 		if s.Version() >= clparams.GloasVersion && state.IsBuilderIndex(w.Validator) {
 			builderIndex := state.ConvertValidatorIndexToBuilderIndex(w.Validator)
 			if builders == nil || int(builderIndex) >= builders.Len() {
-				return fmt.Errorf("applyWithdrawals: builder_index %d out of range (builders length %d)", builderIndex, builders.Len())
+				buildersLen := 0
+				if builders != nil {
+					buildersLen = builders.Len()
+				}
+				return fmt.Errorf("applyWithdrawals: builder_index %d out of range (builders length %d)", builderIndex, buildersLen)
 			}
 			builder := builders.Get(int(builderIndex))
+			if builder == nil {
+				return fmt.Errorf("applyWithdrawals: builder_index %d is nil", builderIndex)
+			}
 			// Copy-on-write: create a new Builder to avoid mutating a shared pointer
 			// (ShallowCopy shares *Builder pointers across state copies).
 			newBuilder := *builder
@@ -514,7 +512,7 @@ func updateNextWithdrawalBuilderIndex(s abstract.BeaconState, processedBuildersS
 
 // ProcessExecutionPayloadBid processes the execution payload bid from the block.
 // [New in Gloas:EIP7732]
-func (I *impl) ProcessExecutionPayloadBid(s abstract.BeaconState, block cltypes.GenericBeaconBlock) error {
+func (imp *impl) ProcessExecutionPayloadBid(s abstract.BeaconState, block cltypes.GenericBeaconBlock) error {
 	signedBid := block.GetBody().GetSignedExecutionPayloadBid()
 	if signedBid == nil || signedBid.Message == nil {
 		return errors.New("processExecutionPayloadBid: signed bid or bid message is nil")
@@ -536,6 +534,13 @@ func (I *impl) ProcessExecutionPayloadBid(s abstract.BeaconState, block cltypes.
 		if !state.IsActiveBuilder(s, builderIndex) {
 			return errors.New("processExecutionPayloadBid: builder is not active")
 		}
+		builders := s.GetBuilders()
+		if builders == nil || int(builderIndex) >= builders.Len() || builders.Get(int(builderIndex)) == nil {
+			return errors.New("processExecutionPayloadBid: invalid builder index")
+		}
+		if builders.Get(int(builderIndex)).Version != s.BeaconConfig().PayloadBuilderVersion {
+			return errors.New("processExecutionPayloadBid: builder is not a payload builder")
+		}
 		// Verify that the builder has funds to cover the bid
 		if !state.CanBuilderCoverBid(s, builderIndex, amount) {
 			return errors.New("processExecutionPayloadBid: builder cannot cover bid")
@@ -553,15 +558,18 @@ func (I *impl) ProcessExecutionPayloadBid(s abstract.BeaconState, block cltypes.
 	// Verify commitments are under limit
 	epoch := state.Epoch(s)
 	if bid.BlobKzgCommitments.Len() > int(s.BeaconConfig().GetBlobParameters(epoch).MaxBlobsPerBlock) {
-		return fmt.Errorf("processExecutionPayloadBid: too many blob kzg commitments: %d > %d",
+		return fmt.Errorf(
+			"processExecutionPayloadBid: too many blob kzg commitments: %d > %d",
 			bid.BlobKzgCommitments.Len(),
 			s.BeaconConfig().GetBlobParameters(epoch).MaxBlobsPerBlock,
 		)
 	}
 
-	// Verify that the bid is for the current slot
-	if bid.Slot != block.GetSlot() {
-		return fmt.Errorf("processExecutionPayloadBid: bid slot %d does not match block slot %d", bid.Slot, block.GetSlot())
+	if bid.Slot != s.Slot() {
+		return fmt.Errorf("processExecutionPayloadBid: bid slot %d does not match state slot %d", bid.Slot, s.Slot())
+	}
+	if s.Slot() <= s.BeaconConfig().GenesisSlot {
+		return errors.New("processExecutionPayloadBid: bid at genesis slot")
 	}
 	parentBid := s.GetLatestExecutionPayloadBid()
 	if parentBid == nil {
@@ -571,7 +579,11 @@ func (I *impl) ProcessExecutionPayloadBid(s abstract.BeaconState, block cltypes.
 	if bid.ParentBlockHash != s.GetLatestBlockHash() {
 		return errors.New("processExecutionPayloadBid: parent block hash mismatch")
 	}
-	if bid.ParentBlockRoot != block.GetParentRoot() {
+	parentBlockRoot, err := s.GetBlockRootAtSlot(s.Slot() - 1)
+	if err != nil {
+		return fmt.Errorf("processExecutionPayloadBid: failed to get parent block root: %w", err)
+	}
+	if bid.ParentBlockRoot != parentBlockRoot {
 		return errors.New("processExecutionPayloadBid: parent block root mismatch")
 	}
 	if bid.PrevRandao != s.GetRandaoMixes(state.Epoch(s)) {
@@ -580,6 +592,10 @@ func (I *impl) ProcessExecutionPayloadBid(s abstract.BeaconState, block cltypes.
 
 	// Record the pending payment if there is some payment
 	if amount > 0 {
+		proposerIndex, err := s.GetBeaconProposerIndex()
+		if err != nil {
+			return fmt.Errorf("processExecutionPayloadBid: failed to get beacon proposer index: %w", err)
+		}
 		pendingPayment := &cltypes.BuilderPendingPayment{
 			Weight: 0,
 			Withdrawal: &cltypes.BuilderPendingWithdrawal{
@@ -587,6 +603,7 @@ func (I *impl) ProcessExecutionPayloadBid(s abstract.BeaconState, block cltypes.
 				Amount:       amount,
 				BuilderIndex: builderIndex,
 			},
+			ProposerIndex: proposerIndex,
 		}
 		slotsPerEpoch := s.BeaconConfig().SlotsPerEpoch
 		index := int(slotsPerEpoch + bid.Slot%slotsPerEpoch)
@@ -605,28 +622,42 @@ func (I *impl) ProcessExecutionPayloadBid(s abstract.BeaconState, block cltypes.
 // It processes execution requests (deposits, withdrawals, consolidations), queues the builder
 // payment, and updates latest_block_hash. This is the spec's apply_parent_execution_payload.
 // [New in Gloas:EIP7732]
-func (I *impl) ApplyParentExecutionPayload(s abstract.BeaconState, requests *cltypes.ExecutionRequests) error {
+func (imp *impl) ApplyParentExecutionPayload(s abstract.BeaconState, requests *cltypes.ExecutionRequests) error {
 	parentBid := s.GetLatestExecutionPayloadBid()
 	// Process execution requests (deposits, withdrawals, consolidations)
 	if requests.Deposits != nil {
 		if err := solid.RangeErr[*solid.DepositRequest](requests.Deposits, func(_ int, req *solid.DepositRequest, _ int) error {
-			return I.ProcessDepositRequest(s, req)
+			return imp.ProcessDepositRequest(s, req)
 		}); err != nil {
 			return fmt.Errorf("ApplyParentExecutionPayload: ProcessDepositRequest: %w", err)
 		}
 	}
 	if requests.Withdrawals != nil {
 		if err := solid.RangeErr[*solid.WithdrawalRequest](requests.Withdrawals, func(_ int, req *solid.WithdrawalRequest, _ int) error {
-			return I.ProcessWithdrawalRequest(s, req)
+			return imp.ProcessWithdrawalRequest(s, req)
 		}); err != nil {
 			return fmt.Errorf("ApplyParentExecutionPayload: ProcessWithdrawalRequest: %w", err)
 		}
 	}
 	if requests.Consolidations != nil {
 		if err := solid.RangeErr[*solid.ConsolidationRequest](requests.Consolidations, func(_ int, req *solid.ConsolidationRequest, _ int) error {
-			return I.ProcessConsolidationRequest(s, req)
+			return imp.ProcessConsolidationRequest(s, req)
 		}); err != nil {
 			return fmt.Errorf("ApplyParentExecutionPayload: ProcessConsolidationRequest: %w", err)
+		}
+	}
+	if requests.BuilderDeposits != nil {
+		if err := solid.RangeErr[*solid.BuilderDepositRequest](requests.BuilderDeposits, func(_ int, req *solid.BuilderDepositRequest, _ int) error {
+			return imp.ProcessBuilderDepositRequest(s, req)
+		}); err != nil {
+			return fmt.Errorf("ApplyParentExecutionPayload: ProcessBuilderDepositRequest: %w", err)
+		}
+	}
+	if requests.BuilderExits != nil {
+		if err := solid.RangeErr[*solid.BuilderExitRequest](requests.BuilderExits, func(_ int, req *solid.BuilderExitRequest, _ int) error {
+			return imp.ProcessBuilderExitRequest(s, req)
+		}); err != nil {
+			return fmt.Errorf("ApplyParentExecutionPayload: ProcessBuilderExitRequest: %w", err)
 		}
 	}
 
@@ -685,7 +716,7 @@ func (I *impl) ApplyParentExecutionPayload(s abstract.BeaconState, requests *clt
 // the committed bid and calls ApplyParentExecutionPayload. If the parent was empty, it
 // asserts no requests.
 // [New in Gloas:EIP7732]
-func (I *impl) ProcessParentExecutionPayload(s abstract.BeaconState, block cltypes.GenericBeaconBlock) error {
+func (imp *impl) ProcessParentExecutionPayload(s abstract.BeaconState, block cltypes.GenericBeaconBlock) error {
 	if s.Version() < clparams.GloasVersion {
 		return nil
 	}
@@ -711,7 +742,9 @@ func (I *impl) ProcessParentExecutionPayload(s abstract.BeaconState, block cltyp
 		if parentExecutionRequests != nil {
 			if (parentExecutionRequests.Deposits != nil && parentExecutionRequests.Deposits.Len() > 0) ||
 				(parentExecutionRequests.Withdrawals != nil && parentExecutionRequests.Withdrawals.Len() > 0) ||
-				(parentExecutionRequests.Consolidations != nil && parentExecutionRequests.Consolidations.Len() > 0) {
+				(parentExecutionRequests.Consolidations != nil && parentExecutionRequests.Consolidations.Len() > 0) ||
+				(parentExecutionRequests.BuilderDeposits != nil && parentExecutionRequests.BuilderDeposits.Len() > 0) ||
+				(parentExecutionRequests.BuilderExits != nil && parentExecutionRequests.BuilderExits.Len() > 0) {
 				return errors.New("ProcessParentExecutionPayload: parent was empty but parent_execution_requests is not empty")
 			}
 		}
@@ -730,7 +763,7 @@ func (I *impl) ProcessParentExecutionPayload(s abstract.BeaconState, block cltyp
 		return fmt.Errorf("ProcessParentExecutionPayload: parent_execution_requests root %v does not match committed bid execution_requests_root %v", requestsRoot, parentBid.ExecutionRequestsRoot)
 	}
 
-	return I.ApplyParentExecutionPayload(s, parentExecutionRequests)
+	return imp.ApplyParentExecutionPayload(s, parentExecutionRequests)
 }
 
 // verifyExecutionPayloadBidSignature verifies the BLS signature of a signed execution payload bid.
@@ -758,7 +791,7 @@ func verifyExecutionPayloadBidSignature(s abstract.BeaconState, signedBid *cltyp
 
 // ProcessExecutionPayloadEnvelope processes the execution payload envelope for the Gloas fork.
 // [New in Gloas:EIP7732]
-func (I *impl) ProcessExecutionPayloadEnvelope(s abstract.BeaconState, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
+func (imp *impl) ProcessExecutionPayloadEnvelope(s abstract.BeaconState, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
 	if signedEnvelope == nil || signedEnvelope.Message == nil {
 		return errors.New("ProcessExecutionPayloadEnvelope: signed envelope or envelope message is nil")
 	}
@@ -769,7 +802,7 @@ func (I *impl) ProcessExecutionPayloadEnvelope(s abstract.BeaconState, signedEnv
 	}
 
 	// Verify signature
-	if I.FullValidation {
+	if imp.FullValidation {
 		valid, err := verifyExecutionPayloadEnvelopeSignature(s, signedEnvelope)
 		if err != nil {
 			return fmt.Errorf("ProcessExecutionPayloadEnvelope: failed to verify signature: %w", err)
@@ -889,7 +922,7 @@ func (I *impl) ProcessExecutionPayloadEnvelope(s abstract.BeaconState, signedEnv
 }
 
 // ProcessExecutionPayload sets the latest payload header accordinly.
-func (I *impl) ProcessExecutionPayload(s abstract.BeaconState, body cltypes.GenericBeaconBody) error {
+func (imp *impl) ProcessExecutionPayload(s abstract.BeaconState, body cltypes.GenericBeaconBody) error {
 	payloadHeader, err := body.GetPayloadHeader()
 	if err != nil {
 		return err
@@ -929,23 +962,21 @@ func (I *impl) ProcessExecutionPayload(s abstract.BeaconState, body cltypes.Gene
 		if body.GetBlobKzgCommitments().Len() > int(blobParameters.MaxBlobsPerBlock) {
 			return errors.New("ProcessExecutionPayload: too many blob commitments")
 		}
-	} else {
+	} else if body.GetBlobKzgCommitments().Len() > int(s.BeaconConfig().MaxBlobsPerBlockByVersion(s.Version())) {
 		// assert len(body.blob_kzg_commitments) <= MAX_BLOBS_PER_BLOCK
-		if body.GetBlobKzgCommitments().Len() > int(s.BeaconConfig().MaxBlobsPerBlockByVersion(s.Version())) {
-			return errors.New("ProcessExecutionPayload: too many blob commitments")
-		}
+		return errors.New("ProcessExecutionPayload: too many blob commitments")
 	}
 
 	s.SetLatestExecutionPayloadHeader(payloadHeader)
 	return nil
 }
 
-func (I *impl) ProcessSyncAggregate(s abstract.BeaconState, sync *cltypes.SyncAggregate) error {
-	votedKeys, err := I.processSyncAggregate(s, sync)
+func (imp *impl) ProcessSyncAggregate(s abstract.BeaconState, sync *cltypes.SyncAggregate) error {
+	votedKeys, err := imp.processSyncAggregate(s, sync)
 	if err != nil {
 		return err
 	}
-	if I.FullValidation {
+	if imp.FullValidation {
 		previousSlot := s.PreviousSlot()
 
 		domain, err := fork.Domain(
@@ -961,7 +992,7 @@ func (I *impl) ProcessSyncAggregate(s abstract.BeaconState, sync *cltypes.SyncAg
 		if err != nil {
 			return err
 		}
-		msg := utils.Sha256(blockRoot[:], domain)
+		msg := crypto.Sha256(blockRoot[:], domain)
 		isValid, err := bls.VerifyAggregate(sync.SyncCommiteeSignature[:], msg[:], votedKeys)
 		if err != nil {
 			return err
@@ -976,7 +1007,7 @@ func (I *impl) ProcessSyncAggregate(s abstract.BeaconState, sync *cltypes.SyncAg
 // processSyncAggregate applies all the logic in the spec function `process_sync_aggregate` except
 // verifying the BLS signatures. It returns the modified beacons state and the list of validators'
 // public keys that voted, for future signature verification.
-func (I *impl) processSyncAggregate(
+func (imp *impl) processSyncAggregate(
 	s abstract.BeaconState,
 	sync *cltypes.SyncAggregate,
 ) ([][]byte, error) {
@@ -1029,14 +1060,14 @@ func (I *impl) processSyncAggregate(
 		}
 	}
 
-	if I.BlockRewardsCollector != nil {
-		I.BlockRewardsCollector.SyncAggregate = earnedProposerReward
+	if imp.BlockRewardsCollector != nil {
+		imp.BlockRewardsCollector.SyncAggregate = earnedProposerReward
 	}
 	return votedKeys, state.IncreaseBalance(s, proposerIndex, earnedProposerReward)
 }
 
 // ProcessBlsToExecutionChange processes a BLSToExecutionChange message by updating a validator's withdrawal credentials.
-func (I *impl) ProcessBlsToExecutionChange(
+func (imp *impl) ProcessBlsToExecutionChange(
 	s abstract.BeaconState,
 	signedChange *cltypes.SignedBLSToExecutionChange,
 ) error {
@@ -1052,33 +1083,34 @@ func (I *impl) ProcessBlsToExecutionChange(
 		return errors.New("ProcessBlsToExecutionChange: withdrawal credentials prefix mismatch")
 	}
 	// assert validator.withdrawal_credentials[1:] == hash(address_change.from_bls_pubkey)[1:]
-	hashKey := utils.Sha256(change.From[:])
+	hashKey := crypto.Sha256(change.From[:])
 	if !bytes.Equal(credentials[1:], hashKey[1:]) {
 		return errors.New("ProcessBlsToExecutionChange: withdrawal credentials mismatch")
 	}
 
-	// Fork-agnostic domain since address changes are valid across forks
-	domain, err := fork.ComputeDomain(
-		s.BeaconConfig().DomainBLSToExecutionChange[:],
-		utils.Uint32ToBytes4(uint32(s.BeaconConfig().GenesisForkVersion)),
-		s.GenesisValidatorsRoot())
-	if err != nil {
-		return err
-	}
-	signingRoot, err := fork.ComputeSigningRoot(change, domain)
-	if err != nil {
-		return err
-	}
-	// Verify the signature
-	ok, err := bls.Verify(signedChange.Signature[:], signingRoot[:], change.From[:])
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return errors.New("ProcessBlsToExecutionChange: invalid signature")
+	if imp.FullValidation {
+		// Fork-agnostic domain since address changes are valid across forks
+		domain, err := fork.ComputeDomain(
+			s.BeaconConfig().DomainBLSToExecutionChange[:],
+			utils.Uint32ToBytes4(uint32(s.BeaconConfig().GenesisForkVersion)),
+			s.GenesisValidatorsRoot(),
+		)
+		if err != nil {
+			return err
+		}
+		signingRoot, err := fork.ComputeSigningRoot(change, domain)
+		if err != nil {
+			return err
+		}
+		ok, err := bls.Verify(signedChange.Signature[:], signingRoot[:], change.From[:])
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return errors.New("ProcessBlsToExecutionChange: invalid signature")
+		}
 	}
 
-	// Perform full validation if requested.
 	// Reset the validator's withdrawal credentials.
 	credentials[0] = byte(beaconConfig.ETH1AddressWithdrawalPrefixByte)
 	copy(credentials[1:], make([]byte, 11))
@@ -1089,7 +1121,7 @@ func (I *impl) ProcessBlsToExecutionChange(
 	return nil
 }
 
-func (I *impl) ProcessAttestations(
+func (imp *impl) ProcessAttestations(
 	s abstract.BeaconState,
 	attestations *solid.ListSSZ[*solid.Attestation],
 ) error {
@@ -1098,7 +1130,7 @@ func (I *impl) ProcessAttestations(
 
 	var err error
 	if err := solid.RangeErr[*solid.Attestation](attestations, func(i int, a *solid.Attestation, _ int) error {
-		if attestingIndiciesSet[i], err = I.processAttestation(s, a, baseRewardPerIncrement); err != nil {
+		if attestingIndiciesSet[i], err = imp.processAttestation(s, a, baseRewardPerIncrement); err != nil {
 			return err
 		}
 		return nil
@@ -1109,7 +1141,7 @@ func (I *impl) ProcessAttestations(
 		return err
 	}
 	var valid bool
-	if I.FullValidation {
+	if imp.FullValidation {
 		start := time.Now()
 		valid, err = verifyAttestations(s, attestations, attestingIndiciesSet)
 		if err != nil {
@@ -1124,7 +1156,7 @@ func (I *impl) ProcessAttestations(
 	return nil
 }
 
-func (I *impl) processAttestationPostAltair(
+func (imp *impl) processAttestationPostAltair(
 	s abstract.BeaconState,
 	attestation *solid.Attestation,
 	baseRewardPerIncrement uint64,
@@ -1198,6 +1230,7 @@ func (I *impl) processAttestationPostAltair(
 	var payment *cltypes.BuilderPendingPayment
 	var paymentIndex int
 	var isSameSlot bool
+	var paymentWeightDelta uint64
 	if s.Version() >= clparams.GloasVersion {
 		slotsPerEpoch := beaconConfig.SlotsPerEpoch
 		if isCurrentEpoch {
@@ -1239,17 +1272,17 @@ func (I *impl) processAttestationPostAltair(
 			willSetNewFlag = true // [New in Gloas:EIP7732]
 		}
 
-		// [New in Gloas:EIP7732] Accumulate payment weight for same-slot attestations
 		if s.Version() >= clparams.GloasVersion &&
 			willSetNewFlag &&
 			isSameSlot &&
 			payment != nil && payment.Withdrawal != nil && payment.Withdrawal.Amount > 0 {
-			payment.Weight += val
+			paymentWeightDelta += val
 		}
 	}
 
-	// [New in Gloas:EIP7732] Write back updated payment weight
-	if s.Version() >= clparams.GloasVersion && payment != nil {
+	if s.Version() >= clparams.GloasVersion && payment != nil && paymentWeightDelta > 0 {
+		payment = payment.Clone().(*cltypes.BuilderPendingPayment)
+		payment.Weight += paymentWeightDelta
 		payments := s.GetBuilderPendingPayments()
 		payments.Set(paymentIndex, payment)
 		s.SetBuilderPendingPayments(payments)
@@ -1262,14 +1295,14 @@ func (I *impl) processAttestationPostAltair(
 	}
 	proposerRewardDenominator := (beaconConfig.WeightDenominator - beaconConfig.ProposerWeight) * beaconConfig.WeightDenominator / beaconConfig.ProposerWeight
 	reward := proposerRewardNumerator / proposerRewardDenominator
-	if I.BlockRewardsCollector != nil {
-		I.BlockRewardsCollector.Attestations += reward
+	if imp.BlockRewardsCollector != nil {
+		imp.BlockRewardsCollector.Attestations += reward
 	}
 	return attestingIndicies, state.IncreaseBalance(s, proposer, reward)
 }
 
 // processAttestationPhase0 implements the rules for phase0 processing.
-func (I *impl) processAttestationPhase0(
+func (imp *impl) processAttestationPhase0(
 	s abstract.BeaconState,
 	attestation *solid.Attestation,
 ) ([]uint64, error) {
@@ -1424,7 +1457,7 @@ func IsAttestationApplicable(s abstract.BeaconState, attestation *solid.Attestat
 }
 
 // ProcessAttestation takes an attestation and process it.
-func (I *impl) processAttestation(
+func (imp *impl) processAttestation(
 	s abstract.BeaconState,
 	attestation *solid.Attestation,
 	baseRewardPerIncrement uint64,
@@ -1435,9 +1468,9 @@ func (I *impl) processAttestation(
 	}
 	// check if we need to use rules for phase0 or post-altair.
 	if s.Version() == clparams.Phase0Version {
-		return I.processAttestationPhase0(s, attestation)
+		return imp.processAttestationPhase0(s, attestation)
 	}
-	return I.processAttestationPostAltair(s, attestation, baseRewardPerIncrement)
+	return imp.processAttestationPostAltair(s, attestation, baseRewardPerIncrement)
 }
 
 func verifyAttestations(
@@ -1476,7 +1509,7 @@ func batchVerifyAttestations(
 			}
 		}(idx)
 	}
-	for i := 0; i < len(indexedAttestations); i++ {
+	for range indexedAttestations {
 		result := <-c
 		if result.err != nil {
 			return false, result.err
@@ -1488,7 +1521,7 @@ func batchVerifyAttestations(
 	return true, nil
 }
 
-func (I *impl) ProcessBlockHeader(s abstract.BeaconState, slot, proposerIndex uint64, parentRoot common.Hash, bodyRoot [32]byte) error {
+func (imp *impl) ProcessBlockHeader(s abstract.BeaconState, slot, proposerIndex uint64, parentRoot common.Hash, bodyRoot [32]byte) error {
 	if slot != s.Slot() {
 		return fmt.Errorf("state slot: %d, not equal to block slot: %d", s.Slot(), slot)
 	}
@@ -1548,10 +1581,10 @@ func (I *impl) ProcessBlockHeader(s abstract.BeaconState, slot, proposerIndex ui
 	return nil
 }
 
-func (I *impl) ProcessRandao(s abstract.BeaconState, randao [96]byte, proposerIndex uint64) error {
+func (imp *impl) ProcessRandao(s abstract.BeaconState, randao [96]byte, proposerIndex uint64) error {
 	epoch := state.Epoch(s)
 	randaoMixes := s.GetRandaoMixes(epoch)
-	randaoHash := utils.Sha256(randao[:])
+	randaoHash := crypto.Sha256(randao[:])
 	mix := [32]byte{}
 	for i := range mix {
 		mix[i] = randaoMixes[i] ^ randaoHash[i]
@@ -1560,7 +1593,7 @@ func (I *impl) ProcessRandao(s abstract.BeaconState, randao [96]byte, proposerIn
 	return nil
 }
 
-func (I *impl) ProcessEth1Data(state abstract.BeaconState, eth1Data *cltypes.Eth1Data) error {
+func (imp *impl) ProcessEth1Data(state abstract.BeaconState, eth1Data *cltypes.Eth1Data) error {
 	state.AddEth1DataVote(eth1Data)
 	newVotes := state.Eth1DataVotes()
 
@@ -1579,7 +1612,7 @@ func (I *impl) ProcessEth1Data(state abstract.BeaconState, eth1Data *cltypes.Eth
 	return nil
 }
 
-func (I *impl) ProcessSlots(s abstract.BeaconState, slot uint64) error {
+func (imp *impl) ProcessSlots(s abstract.BeaconState, slot uint64) error {
 	beaconConfig := s.BeaconConfig()
 	sSlot := s.Slot()
 	if slot <= sSlot {
@@ -1653,25 +1686,11 @@ func (I *impl) ProcessSlots(s abstract.BeaconState, slot uint64) error {
 	return nil
 }
 
-func (I *impl) ProcessDepositRequest(s abstract.BeaconState, depositRequest *solid.DepositRequest) error {
+func (imp *impl) ProcessDepositRequest(s abstract.BeaconState, depositRequest *solid.DepositRequest) error {
 	// Set deposit request start index on first deposit request.
 	if s.Version() < clparams.FuluVersion {
 		if s.GetDepositRequestsStartIndex() == s.BeaconConfig().UnsetDepositRequestsStartIndex {
 			s.SetDepositRequestsStartIndex(depositRequest.Index)
-		}
-	}
-
-	// [New in Gloas:EIP7732] Route builder deposits immediately
-	if s.Version() >= clparams.GloasVersion {
-		isBuilder := state.IsBuilderPubkey(s, depositRequest.PubKey)
-		_, isExistingValidator := s.ValidatorIndexByPubkey(depositRequest.PubKey)
-		hasBuilderPrefix := state.IsBuilderWithdrawalCredential(depositRequest.WithdrawalCredentials, s.BeaconConfig())
-		isPendingValidator := state.IsPendingValidator(s.BeaconConfig(), s.GetPendingDeposits(), depositRequest.PubKey)
-		isValidator := isExistingValidator || isPendingValidator
-
-		if isBuilder || (hasBuilderPrefix && !isValidator) {
-			state.ApplyDepositForBuilder(s, depositRequest.PubKey, depositRequest.WithdrawalCredentials, depositRequest.Amount, depositRequest.Signature, s.Slot())
-			return nil
 		}
 	}
 
@@ -1686,7 +1705,7 @@ func (I *impl) ProcessDepositRequest(s abstract.BeaconState, depositRequest *sol
 	return nil
 }
 
-func (I *impl) ProcessWithdrawalRequest(s abstract.BeaconState, req *solid.WithdrawalRequest) error {
+func (imp *impl) ProcessWithdrawalRequest(s abstract.BeaconState, req *solid.WithdrawalRequest) error {
 	var (
 		amount            = req.Amount
 		isFullExitRequest = req.Amount == FullExitRequestAmount
@@ -1699,10 +1718,6 @@ func (I *impl) ProcessWithdrawalRequest(s abstract.BeaconState, req *solid.Withd
 	// Verify pubkey exists (check validators first, then builders)
 	vindex, exist := s.ValidatorIndexByPubkey(reqPubkey)
 	if !exist {
-		// [New in Gloas:EIP7732] Check if the pubkey belongs to a builder
-		if s.Version() >= clparams.GloasVersion {
-			return I.processBuilderWithdrawalRequest(s, req)
-		}
 		return nil
 	}
 	validator, err := s.ValidatorForValidatorIndex(int(vindex))
@@ -1760,11 +1775,17 @@ func (I *impl) ProcessWithdrawalRequest(s abstract.BeaconState, req *solid.Withd
 	return nil
 }
 
-// processBuilderWithdrawalRequest handles EL-triggered withdrawal requests for builders.
-// [New in Gloas:EIP7732]
-// For full exit requests (amount == 0): initiates builder exit if active and no pending withdrawals.
-// For partial withdrawal requests (amount > 0): no-op for builders.
-func (I *impl) processBuilderWithdrawalRequest(s abstract.BeaconState, req *solid.WithdrawalRequest) error {
+func (imp *impl) ProcessBuilderDepositRequest(s abstract.BeaconState, req *solid.BuilderDepositRequest) error {
+	if req == nil {
+		return errors.New("ProcessBuilderDepositRequest: nil request")
+	}
+	return state.ApplyBuilderDepositRequest(s, req)
+}
+
+func (imp *impl) ProcessBuilderExitRequest(s abstract.BeaconState, req *solid.BuilderExitRequest) error {
+	if req == nil {
+		return errors.New("ProcessBuilderExitRequest: nil request")
+	}
 	builders := s.GetBuilders()
 	if builders == nil {
 		return nil
@@ -1773,7 +1794,8 @@ func (I *impl) processBuilderWithdrawalRequest(s abstract.BeaconState, req *soli
 	// Find builder by pubkey
 	builderIndex := -1
 	for i := 0; i < builders.Len(); i++ {
-		if builders.Get(i).Pubkey == req.ValidatorPubKey {
+		builder := builders.Get(i)
+		if builder != nil && builder.Pubkey == req.PubKey {
 			builderIndex = i
 			break
 		}
@@ -1784,22 +1806,14 @@ func (I *impl) processBuilderWithdrawalRequest(s abstract.BeaconState, req *soli
 
 	builder := builders.Get(builderIndex)
 
-	// Verify source address matches builder's execution address
 	if req.SourceAddress != builder.ExecutionAddress {
 		return nil
 	}
 
-	// Check builder is active
 	if !state.IsActiveBuilder(s, uint64(builderIndex)) {
 		return nil
 	}
 
-	// Only full exit requests (amount == 0) are supported for builders
-	if req.Amount != FullExitRequestAmount {
-		return nil
-	}
-
-	// Only exit builder if it has no pending withdrawals in the queue
 	pendingBalance := state.GetPendingBalanceToWithdrawForBuilder(s, uint64(builderIndex))
 	if pendingBalance > 0 {
 		return nil
@@ -1809,7 +1823,7 @@ func (I *impl) processBuilderWithdrawalRequest(s abstract.BeaconState, req *soli
 	return nil
 }
 
-func (I *impl) ProcessConsolidationRequest(s abstract.BeaconState, consolidationRequest *solid.ConsolidationRequest) error {
+func (imp *impl) ProcessConsolidationRequest(s abstract.BeaconState, consolidationRequest *solid.ConsolidationRequest) error {
 	if isValidSwitchToCompoundingRequest(s, consolidationRequest) {
 		// source index
 		sourceIndex, exist := s.ValidatorIndexByPubkey(consolidationRequest.SourcePubKey)
@@ -1976,7 +1990,10 @@ func computeConsolidationEpochAndUpdateChurn(s abstract.BeaconState, consolidati
 
 // ProcessPayloadAttestation validates a single payload attestation.
 // [New in Gloas:EIP7732]
-func (I *impl) ProcessPayloadAttestation(s abstract.BeaconState, payloadAttestation *cltypes.PayloadAttestation) error {
+func (imp *impl) ProcessPayloadAttestation(s abstract.BeaconState, payloadAttestation *cltypes.PayloadAttestation) error {
+	if payloadAttestation == nil || payloadAttestation.Data == nil || payloadAttestation.AggregationBits == nil {
+		return errors.New("ProcessPayloadAttestation: nil payload attestation")
+	}
 	data := payloadAttestation.Data
 	// Check that the attestation is for the parent beacon block
 	header := s.LatestBlockHeader()

@@ -24,7 +24,6 @@ import (
 	"math"
 	"os"
 	"slices"
-	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -48,7 +47,6 @@ import (
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
-	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
@@ -298,7 +296,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 		var vi int
 		for i := 0; i < len(keyWords); i++ {
 			ints := intArrs[i]
-			for j := 0; j < len(ints); j++ {
+			for j := range ints {
 				var txKey [8]byte
 				binary.BigEndian.PutUint64(txKey[:], ints[j])
 				offset, ok := r.Lookup2(txKey[:], []byte(keyWords[i]))
@@ -570,7 +568,7 @@ func TestHistoryCanPrune(t *testing.T) {
 			err = writer.AddPrevValue(append(addr, val...), i, prev)
 			require.NoError(err)
 
-			prev = common.Copy(val)
+			prev = bytes.Clone(val)
 		}
 
 		require.NoError(writer.Flush(ctx, tx))
@@ -598,7 +596,7 @@ func TestHistoryCanPrune(t *testing.T) {
 			maxTxInSnaps := hc.files.EndTxNum()
 			require.Equal(t, (stepsTotal-stepKeepInDB)*16, maxTxInSnaps)
 
-			for i := uint64(0); i < stepsTotal; i++ {
+			for i := range stepsTotal {
 				cp, untilTx := hc.canPruneUntil(rwTx, h.stepSize*(i+1))
 				require.GreaterOrEqual(t, h.stepSize*(stepsTotal-stepKeepInDB), untilTx)
 				if i >= stepsTotal-stepKeepInDB {
@@ -634,7 +632,7 @@ func TestHistoryCanPrune(t *testing.T) {
 		hc := h.beginForTests()
 		defer hc.Close()
 
-		for i := uint64(0); i < stepsTotal; i++ {
+		for i := range stepsTotal {
 			t.Logf("step %d, until %d", i, (i+1)*h.stepSize)
 
 			cp, untilTx := hc.canPruneUntil(rwTx, (i+1)*h.stepSize)
@@ -849,7 +847,7 @@ func filledHistoryValues(tb testing.TB, largeValues bool, values map[string][]up
 		var flusher flusher
 		var keyFlushCount = 0
 		for key, upds := range values {
-			for i := 0; i < len(upds); i++ {
+			for i := range upds {
 				err := writer.AddPrevValue([]byte(key), upds[i].txNum, upds[i].value)
 				require.NoError(tb, err)
 			}
@@ -1113,7 +1111,7 @@ func checkHistoryNoDuplicates(t *testing.T, hc *HistoryRoTx) {
 				"duplicate history entry for key %x: same value %x at txNum=%d and txNum=%d",
 				key, val, prev.txNum, txNum)
 		}
-		prevByKey[ks] = prevEntry{val: common.Copy(val), txNum: txNum}
+		prevByKey[ks] = prevEntry{val: bytes.Clone(val), txNum: txNum}
 	}
 }
 
@@ -1215,7 +1213,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64, d
 			}
 			indexOuts, historyOuts, err := hc.staticFilesInRange(r)
 			require.NoError(err)
-			indexIn, historyIn, err := hc.mergeFiles(ctx, indexOuts, historyOuts, r, background.NewProgressSet(), nil)
+			indexIn, historyIn, err := hc.mergeFiles(ctx, indexOuts, historyOuts, r, background.NewProgressSet())
 			require.NoError(err)
 			h.integrateMergedDirtyFiles(indexIn, historyIn)
 			return false
@@ -1271,7 +1269,7 @@ func collateAndMergeHistoryWithCollisionRetry(tb testing.TB, db kv.RwDB, h *Hist
 			}
 			indexOuts, historyOuts, err := hc.staticFilesInRange(r)
 			require.NoError(err)
-			indexIn, historyIn, err := hc.mergeFiles(ctx, indexOuts, historyOuts, r, background.NewProgressSet(), nil)
+			indexIn, historyIn, err := hc.mergeFiles(ctx, indexOuts, historyOuts, r, background.NewProgressSet())
 			require.NoError(err)
 			h.integrateMergedDirtyFiles(indexIn, historyIn)
 			return false
@@ -1330,7 +1328,8 @@ func TestHistoryScanFiles(t *testing.T) {
 		// Recreate domain and re-scan the files
 		scanDirsRes, err := scanDirs(h.dirs)
 		require.NoError(err)
-		require.NoError(h.openFolder(scanDirsRes))
+		_, err = h.openFolder(t.Context(), scanDirsRes)
+		require.NoError(err)
 		// Check the history
 		checkHistoryHistory(t, h, txs)
 	}
@@ -1861,9 +1860,7 @@ func Test_HistoryIterate_VariousKeysLen(t *testing.T) {
 			//vals = append(vals, fmt.Sprintf("%x", v))
 		}
 
-		sort.Slice(writtenKeys, func(i, j int) bool {
-			return bytes.Compare(writtenKeys[i], writtenKeys[j]) < 0
-		})
+		slices.SortFunc(writtenKeys, bytes.Compare)
 
 		require.Equal(fmt.Sprintf("%#x", writtenKeys[0]), fmt.Sprintf("%#x", keys[0]))
 		require.Len(keys, len(writtenKeys))
@@ -1909,7 +1906,7 @@ func TestHistory_OpenFolder(t *testing.T) {
 
 	scanDirsRes, err := scanDirs(h.dirs)
 	require.NoError(t, err)
-	err = h.openFolder(scanDirsRes)
+	_, err = h.openFolder(t.Context(), scanDirsRes)
 	require.NoError(t, err)
 	h.Close()
 }
@@ -2502,97 +2499,6 @@ func BenchmarkHistoryRange_MultiFile(b *testing.B) {
 		}
 		it.Close()
 	}
-}
-
-// TestHistoryCompactRange pins the snapshot-rebuild dedup semantics: within one
-// file, a run of equal values for a key collapses to the run's last txNum (in
-// both .v and .ef), values across a file boundary are not deduplicated, and
-// HistorySeek answers are unchanged. Inputs are replaced in place: the tool is
-// run by a binary whose current file versions are newer than the files on disk.
-func TestHistoryCompactRange(t *testing.T) {
-	t.Parallel()
-
-	logger := log.New()
-	ctx := t.Context()
-	require := require.New(t)
-
-	vX, vY, vQ, vZ, vW := []byte("valX"), []byte("valY"), []byte("valQ"), []byte("valZ"), []byte("valW")
-	keyA, keyB, keyC := []byte("addr-aaaaaaa"), []byte("addr-bbbbbbb"), []byte("addr-ccccccc")
-	values := map[string][]upd{
-		string(keyA): {{1, nil}, {3, vX}, {5, vX}, {7, vX}, {9, vY}, {17, vY}, {19, vY}, {21, vY}, {23, vQ}},
-		string(keyB): {{2, nil}, {6, vX}, {10, vY}},
-		string(keyC): {{4, nil}, {14, vZ}, {18, vZ}, {25, vW}},
-	}
-	db, h := filledHistoryValues(t, true, values, logger)
-
-	rwTx, err := db.BeginRw(ctx)
-	require.NoError(err)
-	defer rwTx.Rollback()
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-	for step := kv.Step(0); step < 2; step++ {
-		require.NoError(h.collateBuildIntegrate(ctx, step, rwTx, background.NewProgressSet()))
-		hc := h.beginForTests()
-		_, err = hc.Prune(ctx, rwTx, step.ToTxNum(h.stepSize), (step + 1).ToTxNum(h.stepSize), math.MaxUint64, false, logEvery)
-		hc.Close()
-		require.NoError(err)
-	}
-	require.NoError(rwTx.Commit())
-
-	keys := [][]byte{keyA, keyB, keyC}
-	idxTxNums := func(hc *HistoryRoTx, tx kv.Tx, key []byte) []uint64 {
-		it, err := hc.IdxRange(key, -1, -1, order.Asc, -1, tx)
-		require.NoError(err)
-		res, err := stream.ToArrayU64(it)
-		require.NoError(err)
-		return res
-	}
-	seekAll := func(hc *HistoryRoTx, tx kv.Tx) map[string][]byte {
-		res := make(map[string][]byte)
-		for _, key := range keys {
-			for txNum := uint64(0); txNum <= 33; txNum++ {
-				v, ok, err := hc.HistorySeek(key, txNum, tx)
-				require.NoError(err)
-				if ok {
-					res[fmt.Sprintf("%s-%d", key, txNum)] = common.Copy(v)
-				}
-			}
-		}
-		return res
-	}
-
-	roTx, err := db.BeginRo(ctx)
-	require.NoError(err)
-	defer roTx.Rollback()
-	hc := h.beginForTests()
-	require.Equal([]uint64{1, 3, 5, 7, 9, 17, 19, 21, 23}, idxTxNums(hc, roTx, keyA))
-	seeksBefore := seekAll(hc, roTx)
-
-	bump := func(v *version.Versions) { v.Current.Minor++ }
-	bump(&h.FileVersion.DataV)
-	bump(&h.FileVersion.AccessorVI)
-	bump(&h.InvertedIndex.FileVersion.DataEF)
-	bump(&h.InvertedIndex.FileVersion.AccessorEFI)
-
-	require.NoError(hc.CompactRange(ctx, 0, 32))
-	hc.Close()
-	roTx.Rollback()
-
-	h.Close()
-	scanDirsRes, err := scanDirs(h.dirs)
-	require.NoError(err)
-	require.NoError(h.openFolder(scanDirsRes))
-
-	roTx2, err := db.BeginRo(ctx)
-	require.NoError(err)
-	defer roTx2.Rollback()
-	hc2 := h.beginForTests()
-	defer hc2.Close()
-
-	require.Equal([]uint64{1, 7, 9, 21, 23}, idxTxNums(hc2, roTx2, keyA))
-	require.Equal([]uint64{2, 6, 10}, idxTxNums(hc2, roTx2, keyB))
-	require.Equal([]uint64{4, 14, 18, 25}, idxTxNums(hc2, roTx2, keyC))
-	require.Equal(seeksBefore, seekAll(hc2, roTx2))
 }
 
 // BenchmarkRangeAsOf_MultiFile is like BenchmarkRangeAsOf but keeps all

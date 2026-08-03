@@ -29,6 +29,18 @@ func (e *EngineServer) SSZRESTHandler() http.Handler {
 	})
 }
 
+func (e *EngineServer) beaconChainConfig() *clparams.BeaconChainConfig {
+	if cfg := e.beaconCfg.Load(); cfg != nil {
+		return cfg
+	}
+	if e.config != nil {
+		if _, cfg, _, err := clparams.GetConfigsByNetworkName(e.config.ChainName); err == nil {
+			return cfg
+		}
+	}
+	return &clparams.MainnetBeaconConfig
+}
+
 func (e *EngineServer) handleSSZREST(w http.ResponseWriter, r *http.Request) {
 	path := strings.Trim(r.URL.Path, "/")
 	parts := strings.Split(path, "/")
@@ -225,7 +237,7 @@ func (e *EngineServer) handleSSZGetPayload(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		sv, _ := sszGetPayloadVersion(version)
-		out, err := encodeGetPayloadResponse(resp, sv)
+		out, err := encodeGetPayloadResponse(e.beaconChainConfig(), resp, sv)
 		if err != nil {
 			writeSSZError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -289,7 +301,7 @@ func (e *EngineServer) handleSSZForkchoice(w http.ResponseWriter, r *http.Reques
 	case 3:
 		resp, err = e.ForkchoiceUpdatedV3(r.Context(), &state, attrs)
 	case 4:
-		resp, err = e.ForkchoiceUpdatedV4(r.Context(), &state, attrs)
+		resp, err = e.ForkchoiceUpdatedV4(r.Context(), &state, attrs, nil)
 	}
 	if err != nil {
 		writeEngineError(w, err)

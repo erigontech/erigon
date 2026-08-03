@@ -71,9 +71,7 @@ func TestAllActiveSnapshotsConcurrentWithWrites(t *testing.T) {
 	var wg sync.WaitGroup
 	stop := make(chan struct{})
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for {
 			select {
 			case <-stop:
@@ -82,7 +80,7 @@ func TestAllActiveSnapshotsConcurrentWithWrites(t *testing.T) {
 				d.allActiveSnapshots()
 			}
 		}
-	}()
+	})
 	// Stop the reader on every exit path, including a require failure (Goexit).
 	defer func() {
 		close(stop)
@@ -94,6 +92,51 @@ func TestAllActiveSnapshotsConcurrentWithWrites(t *testing.T) {
 		ih := snaptype.Hex2InfoHash(fmt.Sprintf("%040x", i+1))
 		require.NoError(t, d.testStartSingleDownloadNoWait(ctx, ih, name))
 	}
+}
+
+// TestAddNewSeedableFileConcurrentWithAllActiveSnapshots pins that AddNewSeedableFile's
+// torrentsByName mutation holds d.lock, so it does not race allActiveSnapshots' iteration.
+// Without the lock the map write and the RLock'd read report a data race under -race — an
+// RLock cannot exclude a writer that holds no lock.
+func TestAddNewSeedableFileConcurrentWithAllActiveSnapshots(t *testing.T) {
+	test := newDownloaderTest(t)
+	d := test.downloader
+	ctx := t.Context()
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+
+	wg.Go(func() {
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				d.allActiveSnapshots()
+			}
+		}
+	})
+	defer func() {
+		close(stop)
+		wg.Wait()
+	}()
+
+	for i := range 64 {
+		name := fmt.Sprintf("v1-%06d-%06d-headers.seg", i, i+1)
+		require.NoError(t, os.WriteFile(filepath.Join(test.dirs.Snap, name), nil, 0o644))
+		require.NoError(t, d.AddNewSeedableFile(ctx, name))
+	}
+}
+
+// Caplin beacon-state snapshots (e.g. NextSyncCommittee) have no registered global
+// snaptype, so ParseFileName returns a nil Type for them. They are still seedable by
+// name, so AddNewSeedableFile must not reject them as malformed.
+func TestAddNewSeedableFileCaplinStateType(t *testing.T) {
+	test := newDownloaderTest(t)
+	name := filepath.Join("caplin", "v1.1-000000-007150-NextSyncCommittee.seg")
+	require.NoError(t, os.MkdirAll(filepath.Join(test.dirs.Snap, "caplin"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(test.dirs.Snap, name), nil, 0o644))
+	require.NoError(t, test.downloader.AddNewSeedableFile(t.Context(), name))
 }
 
 func TestChangeInfoHashOfSameFile(t *testing.T) {
