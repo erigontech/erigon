@@ -83,6 +83,21 @@ func (e ErrExecAbortError) IsError() bool {
 	return e.OriginError != nil
 }
 
+// nonceError formats lazily: under parallel execution a nonce mismatch is a
+// routine re-execution signal whose text is discarded.
+type nonceError struct {
+	err        error // ErrNonceTooHigh or ErrNonceTooLow
+	from       accounts.Address
+	txNonce    uint64
+	stateNonce uint64
+}
+
+func (e *nonceError) Error() string {
+	return fmt.Sprintf("%s: address %v, tx: %d state: %d", e.err, e.from, e.txNonce, e.stateNonce)
+}
+
+func (e *nonceError) Unwrap() error { return e.err }
+
 type TxnExecutor struct {
 	gp                    *GasPool
 	msg                   Message
@@ -319,11 +334,9 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 			return fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 		}
 		if msgNonce := st.msg.Nonce(); stNonce < msgNonce {
-			return fmt.Errorf("%w: address %v, tx: %d state: %d", ErrNonceTooHigh,
-				from, msgNonce, stNonce)
+			return &nonceError{err: ErrNonceTooHigh, from: from, txNonce: msgNonce, stateNonce: stNonce}
 		} else if stNonce > msgNonce {
-			return fmt.Errorf("%w: address %v, tx: %d state: %d", ErrNonceTooLow,
-				from, msgNonce, stNonce)
+			return &nonceError{err: ErrNonceTooLow, from: from, txNonce: msgNonce, stateNonce: stNonce}
 		} else if stNonce+1 < stNonce {
 			return fmt.Errorf("%w: address %v, nonce: %d", ErrNonceMax,
 				from, stNonce)
@@ -447,7 +460,7 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 		runtimeSnapshot = st.state.PushSnapshot()
 		defer st.state.PopSnapshot(runtimeSnapshot)
 	}
-	st.gasRemaining, _, err = st.verifyAuthorities(auths, contractCreation, rules.ChainID.String(), st.gasRemaining)
+	st.gasRemaining, _, err = st.verifyAuthorities(auths, contractCreation, rules.ChainID, st.gasRemaining)
 	if err == nil && !contractCreation {
 		st.gasRemaining, gasUsed.topLevel, err = st.prepareTopLevelCall(st.gasRemaining)
 	}
@@ -624,7 +637,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		runtimeSnapshot = st.state.PushSnapshot()
 		defer st.state.PopSnapshot(runtimeSnapshot)
 	}
-	st.gasRemaining, gasUsed.auth, vmerr = st.verifyAuthorities(auths, contractCreation, rules.ChainID.String(), st.gasRemaining)
+	st.gasRemaining, gasUsed.auth, vmerr = st.verifyAuthorities(auths, contractCreation, rules.ChainID, st.gasRemaining)
 	if vmerr == nil {
 		if contractCreation {
 			createNonce, vmerr = st.state.GetNonce(sender)
@@ -800,7 +813,7 @@ func (st *TxnExecutor) prepareTopLevelCreate(destination accounts.Address, gasRe
 	return gasRemaining, gasUsed, err
 }
 
-func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCreation bool, chainID string, gasRemaining mdgas.MdGas) (mdgas.MdGas, mdgas.MdGasUsage, error) {
+func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCreation bool, chainID *uint256.Int, gasRemaining mdgas.MdGas) (mdgas.MdGas, mdgas.MdGasUsage, error) {
 	var gasUsed mdgas.MdGasUsage
 	if auths == nil {
 		return gasRemaining, gasUsed, nil
@@ -828,7 +841,7 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 		data.Reset()
 
 		// 1. chainId check
-		if !auth.ChainID.IsZero() && chainID != auth.ChainID.String() {
+		if !auth.ChainID.IsZero() && !auth.ChainID.Eq(chainID) {
 			log.Debug("invalid chainID, skipping", "chainId", auth.ChainID, "authIndex", i)
 			continue
 		}
