@@ -462,6 +462,7 @@ type Progress struct {
 	prevExecutedTxNum              uint64
 	prevExecutedGas                int64
 	prevExecCount                  uint64
+	prevRepeatCount                uint64
 	prevActivations                int64
 	prevTaskDuration               time.Duration
 	prevTaskReadDuration           time.Duration
@@ -500,6 +501,15 @@ type executor interface {
 	LogExecution()
 	LogCommitments(committedTransactions uint64, stepsInDb float64, lastProgress commitment.CommitProgress)
 	LogComplete(stepsInDb float64)
+}
+
+func executionRepeatStats(execCount, prevExecCount, repeatCount, prevRepeatCount uint64) (execDiff, repeats uint64, ratio float64) {
+	execDiff = execCount - prevExecCount
+	repeats = repeatCount - prevRepeatCount
+	if execDiff > 0 {
+		ratio = 100 * float64(repeats) / float64(execDiff)
+	}
+	return execDiff, repeats, ratio
 }
 
 func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
@@ -595,7 +605,7 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 
 	switch ex.(type) {
 	case *parallelExecutor:
-		execCount := uint64(te.execCount.Load())
+		execCount, repeatCount := te.dispatchCounts.load()
 		abortCount := uint64(te.abortCount.Load())
 		invalidCount := uint64(te.invalidCount.Load())
 		readCount := te.readCount.Load()
@@ -607,14 +617,7 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 			readCount = storageReadCount
 		}
 
-		execDiff := execCount - p.prevExecCount
-
-		var repeats = max(int(execDiff)-max(int(te.lastExecutedTxNum.Load())-int(p.prevExecutedTxNum), 0), 0)
-		var repeatRatio float64
-
-		if repeats > 0 {
-			repeatRatio = 100.0 * float64(repeats) / float64(execDiff)
-		}
+		execDiff, repeats, repeatRatio := executionRepeatStats(execCount, p.prevExecCount, repeatCount, p.prevRepeatCount)
 
 		curReadCount := int64(readCount - p.prevReadCount)
 		curWriteCount := int64(writeCount - p.prevWriteCount)
@@ -650,10 +653,11 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 			"buf", fmt.Sprintf("%s/%s", common.ByteCount(uint64(sizeEstimate)), common.ByteCount(p.commitThreshold)),
 		}
 
-		mxExecRepeats.SetInt(repeats)
+		mxExecRepeats.SetUint64(repeats)
 		mxExecTriggers.SetInt(int(execCount))
 
 		p.prevExecCount = execCount
+		p.prevRepeatCount = repeatCount
 		p.prevAbortCount = abortCount
 		p.prevInvalidCount = invalidCount
 		p.prevReadCount = readCount
