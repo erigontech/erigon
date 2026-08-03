@@ -476,8 +476,9 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 		}
 	}
 
-	// Reject malformed SetCode frames before verifyAuthorities mutates state
-	// (SetCode/SetNonce), so a rejected frame leaves state untouched.
+	// Match the execution-spec error precedence: intrinsic gas and initcode size
+	// are checked before SetCode prerequisites. All validation completes before
+	// verifyAuthorities can update account code or nonces.
 	if err := checkSetCodeAuthorizations(auths, contractCreation, rules.IsPrague); err != nil {
 		return nil, err
 	}
