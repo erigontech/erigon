@@ -715,7 +715,7 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 		return nil, err
 	}
 
-	if version == clparams.FuluVersion {
+	if version >= clparams.FuluVersion {
 		if payload.BlobsBundle == nil {
 			payload.BlobsBundle = &engine_types.BlobsBundle{
 				Commitments: make([]hexutil.Bytes, 0),

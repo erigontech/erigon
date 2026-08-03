@@ -76,6 +76,45 @@ func TestGetPayloadV4AcceptsEmptyRequestsBundle(t *testing.T) {
 	require.Len(t, resp.ExecutionRequests, 0)
 }
 
+func TestGetPayloadRejectsInvalidAmsterdamBlobsBundle(t *testing.T) {
+	const payloadID uint64 = 44
+	cfg := allForksChainConfig()
+	to := common.Address{0x01}
+	wrappedTxn := &types.BlobTxWrapper{}
+	wrappedTxn.Tx.To = &to
+	wrappedTxn.Tx.ChainID = *cfg.ChainID
+	wrappedTxn.Tx.BlobVersionedHashes = []common.Hash{{0x01}, {0x01}}
+	wrappedTxn.Commitments = make(types.BlobKzgs, 2)
+	wrappedTxn.Blobs = make(types.Blobs, 2)
+	wrappedTxn.Proofs = make(types.KZGProofs, 1)
+
+	header := &types.Header{
+		Number:   *uint256.NewInt(101),
+		Time:     1,
+		BaseFee:  uint256.NewInt(1_000_000_000),
+		GasLimit: 30_000_000,
+	}
+	block := types.NewBlock(header, []types.Transaction{wrappedTxn}, nil, nil, nil)
+	stub := &getPayloadStubModule{
+		getAssembledBlockFunc: func(_ context.Context, id uint64) (execmodule.AssembledBlockResult, error) {
+			require.Equal(t, payloadID, id)
+			return execmodule.AssembledBlockResult{
+				Block: &types.BlockWithReceipts{
+					Block:    block,
+					Requests: make(types.FlatRequests, 0),
+				},
+				BlockValue: uint256.NewInt(0),
+			}, nil
+		},
+	}
+	srv := NewEngineServer(log.New(), cfg, stub, nil, false, false, true, true, nil, nil, 0, 0)
+
+	resp, err := srv.getPayload(context.Background(), payloadID, clparams.GloasVersion)
+
+	require.ErrorContains(t, err, "built invalid blobsBundle")
+	require.Nil(t, resp)
+}
+
 func TestAssembledBlockToPayloadResponseIncludesCanonicalEmptyBAL(t *testing.T) {
 	t.Parallel()
 
