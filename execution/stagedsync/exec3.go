@@ -513,12 +513,12 @@ type txExecutor struct {
 
 	execLoopGroup *commonerrors.Group
 
-	execRequests chan *execRequest
-	execCount    atomic.Int64
-	abortCount   atomic.Int64
-	invalidCount atomic.Int64
-	readCount    atomic.Int64
-	writeCount   atomic.Int64
+	execRequests   chan *execRequest
+	dispatchCounts parallelDispatchCounts
+	abortCount     atomic.Int64
+	invalidCount   atomic.Int64
+	readCount      atomic.Int64
+	writeCount     atomic.Int64
 
 	enableChaosMonkey bool
 	chaosFaults       chaos_monkey.Faults
