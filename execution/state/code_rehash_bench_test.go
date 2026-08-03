@@ -75,10 +75,10 @@ func BenchmarkGetStateObjectAfterCodeRead(b *testing.B) {
 	}
 }
 
-// TestContractBalanceReadDoesNotRehashCode pins that reading an account field
-// of a contract whose code came from committed state resolves the code hash
-// from the account record rather than re-hashing the bytecode.
-func TestContractBalanceReadDoesNotRehashCode(t *testing.T) {
+// TestCommittedCodeHashMatchesAccountRecord pins that a state object rebuilt
+// for a contract whose code came from committed state carries the account
+// record's code hash on both obj.data and obj.code.
+func TestCommittedCodeHashMatchesAccountRecord(t *testing.T) {
 	ibs, addr := benchContractIBS(t, 4096)
 
 	so, err := ibs.getStateObject(addr, false)
