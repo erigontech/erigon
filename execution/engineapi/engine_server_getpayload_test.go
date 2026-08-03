@@ -117,38 +117,48 @@ func TestGetPayloadRejectsInvalidAmsterdamBlobsBundle(t *testing.T) {
 	require.Nil(t, resp)
 }
 
-func TestGetPayloadRejectsParisShanghaiMismatch(t *testing.T) {
+func TestGetPayloadV1RejectsShanghaiPayload(t *testing.T) {
 	t.Parallel()
 
 	const payloadID uint64 = 44
-	for _, tc := range []struct {
-		name      string
-		timestamp uint64
-		version   clparams.StateVersion
-	}{
-		{"Shanghai payload with Paris schema", 100, clparams.BellatrixVersion},
-		{"Paris payload with Shanghai schema", 99, clparams.CapellaVersion},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			stub := &getPayloadStubModule{
-				getAssembledBlockFunc: func(_ context.Context, id uint64) (execmodule.AssembledBlockResult, error) {
-					require.Equal(t, payloadID, id)
-					return execmodule.AssembledBlockResult{
-						Block:      minimalPragueBlock(tc.timestamp, nil),
-						BlockValue: uint256.NewInt(0),
-					}, nil
-				},
-			}
-			srv := newProposingEngineServerWithConfig(parisShanghaiChainConfig(), stub)
-
-			resp, err := srv.getPayload(context.Background(), payloadID, tc.version)
-
-			require.Nil(t, resp)
-			var unsupported *rpc.UnsupportedForkError
-			require.ErrorAs(t, err, &unsupported)
-		})
+	stub := &getPayloadStubModule{
+		getAssembledBlockFunc: func(_ context.Context, id uint64) (execmodule.AssembledBlockResult, error) {
+			require.Equal(t, payloadID, id)
+			return execmodule.AssembledBlockResult{
+				Block:      minimalPragueBlock(100, nil),
+				BlockValue: uint256.NewInt(0),
+			}, nil
+		},
 	}
+	srv := newProposingEngineServerWithConfig(parisShanghaiChainConfig(), stub)
+
+	resp, err := srv.GetPayloadV1(context.Background(), payloadIDBytes(payloadID))
+
+	require.Nil(t, resp)
+	var unsupported *rpc.UnsupportedForkError
+	require.ErrorAs(t, err, &unsupported)
+}
+
+func TestGetPayloadV2AcceptsParisPayload(t *testing.T) {
+	t.Parallel()
+
+	const payloadID uint64 = 45
+	stub := &getPayloadStubModule{
+		getAssembledBlockFunc: func(_ context.Context, id uint64) (execmodule.AssembledBlockResult, error) {
+			require.Equal(t, payloadID, id)
+			return execmodule.AssembledBlockResult{
+				Block:      minimalPragueBlock(99, nil),
+				BlockValue: uint256.NewInt(0),
+			}, nil
+		},
+	}
+	srv := newProposingEngineServerWithConfig(parisShanghaiChainConfig(), stub)
+
+	resp, err := srv.GetPayloadV2(context.Background(), payloadIDBytes(payloadID))
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Nil(t, resp.ExecutionPayload.Withdrawals)
 }
 
 func TestAssembledBlockToPayloadResponseIncludesCanonicalEmptyBAL(t *testing.T) {

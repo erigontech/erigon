@@ -699,8 +699,7 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 	}
 
 	ts := header.Time
-	if (!s.config.IsShanghai(ts) && version >= clparams.CapellaVersion) ||
-		(s.config.IsShanghai(ts) && version < clparams.CapellaVersion) ||
+	if (s.config.IsShanghai(ts) && version < clparams.CapellaVersion) ||
 		(!s.config.IsCancun(ts) && version >= clparams.DenebVersion) ||
 		(s.config.IsCancun(ts) && version < clparams.DenebVersion) ||
 		(!s.config.IsPrague(ts) && version >= clparams.ElectraVersion) ||
