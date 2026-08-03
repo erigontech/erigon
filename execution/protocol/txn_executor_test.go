@@ -1105,7 +1105,8 @@ func TestPreCheckIntrinsicGasMatchesMessage(t *testing.T) {
 			msg.SetAuthorizations(tc.auths)
 
 			st := NewTxnExecutor(evm, msg, new(GasPool).AddGas(30_000_000))
-			require.NoError(t, st.preCheck(false))
+			got, err := st.preCheck(false)
+			require.NoError(t, err)
 
 			// Derive the arguments the way Execute used to, from a cloned access
 			// list, and compare against what preCheck stored.
@@ -1130,8 +1131,8 @@ func TestPreCheckIntrinsicGasMatchesMessage(t *testing.T) {
 				IsEIP2780:          rules.IsAmsterdam,
 			})
 			require.False(t, overflow)
-			require.Equal(t, want, st.intrinsicGas)
-			require.NotZero(t, st.intrinsicGas.ExecutionGas, "preCheck must have populated the field")
+			require.Equal(t, want, got)
+			require.NotZero(t, got.ExecutionGas)
 		})
 	}
 }
