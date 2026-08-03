@@ -106,11 +106,14 @@ func TestPBinStorageLayoutCost(t *testing.T) {
 // into one group and once spread one-per-group. Both are storage-zone keys of the
 // same width, so any difference is the shared group stem alone.
 //
-// Tree depth is the whole variable here. Co-location pays by traversing the path
-// from the root to a group ONCE instead of once per slot, so it can only show up
-// in a tree deep enough to have such a path. The filler accounts exist to create
-// that depth; at filler=0 the answer inverts, which is a property of the corpus
-// and not of the design.
+// Two things this has to get right, both of which were got wrong first:
+//
+//   - Measure the PRUNED witness. Witnesses returns a superset that callers prune
+//     with PBinWitnessNodesForKeys; the superset carries off-path siblings re-hashed
+//     during the fold, and counting those reverses the sign of the result.
+//   - Vary the right axis. Other accounts' storage diverges above this account's
+//     stem and cancels in the difference, so filler on other accounts cannot move
+//     the number. What matters is how many OTHER groups this account already holds.
 func TestPBinStorageGroupSharing(t *testing.T) {
 	t.Parallel()
 
@@ -121,14 +124,12 @@ func TestPBinStorageGroupSharing(t *testing.T) {
 	// second proves ONLY the 16 slots. Measuring the first pass would include every
 	// filler account and hide exactly the effect under test.
 	measure := func(filler int, step uint64) (nodes, total int) {
-		// Filler must be storage-zone keys. The zone byte is the first byte of every
-		// key, so account-zone filler diverges at bit 0 and cannot lengthen a
-		// storage-zone proof path.
+		// Filler is untouched storage on the SAME account: that is the axis the
+		// co-location property is about. Other accounts' keys diverge above this
+		// account's stem and cancel between the two arms.
 		full := new(pbinTestCorpus).account(addr, 1, 100, pbinTestCodeHash(0))
 		for i := 0; i < filler; i++ {
-			other := pbinOracleAddr(uint64(1000 + i))
-			full = full.account(other, 1, 1, pbinTestCodeHash(1)).
-				storage(other, pbinSlotAt(64+256*uint64(i)), 0x7f)
+			full = full.storage(addr, pbinSlotAt(1<<20+256*uint64(i)), 0x7f)
 		}
 		touched := new(pbinTestCorpus)
 		for i := 0; i < slots; i++ {
@@ -143,17 +144,19 @@ func TestPBinStorageGroupSharing(t *testing.T) {
 
 		pph.Reset()
 		upd := WrapKeyUpdates(t, ModeDirect, pbinKeyHasher(), touched.plainKeys, touched.updates)
-		got, _, _, err := pph.Witnesses(context.Background(), upd, false, "")
+		got, proved, root, err := pph.Witnesses(context.Background(), upd, false, "")
 		require.NoError(t, err)
-		for _, n := range got {
+		lean, err := PBinWitnessNodesForKeys(got, root, proved)
+		require.NoError(t, err)
+		for _, n := range lean {
 			total += len(n)
 			nodes++
 		}
 		return nodes, total
 	}
 
-	t.Logf("%8s %10s %10s %12s %10s", "filler", "adjacent", "per-group", "co-loc saves", "of total")
-	for _, filler := range []int{0, 64, 512, 4096, 16384} {
+	t.Logf("%8s %10s %10s %12s %10s", "other grps", "adjacent", "per-group", "co-loc saves", "of total")
+	for _, filler := range []int{0, 16, 64, 256, 1024, 4096} {
 		adjN, adjB := measure(filler, 1)
 		sepN, sepB := measure(filler, 256)
 		t.Logf("%8d %6d/%4dB %6d/%4dB %10dB %9.1f%%",
