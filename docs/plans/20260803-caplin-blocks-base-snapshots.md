@@ -6,22 +6,56 @@
 lifecycle that `snapshotsync.BaseRoSnapshots` already provides — its own
 `dirty`/`visible` fields and locks, `recalcVisibleFiles`, `OpenList`/
 `OpenFolder`/`closeWhatNotInList`, `idxAvailability`, an unpinned `CaplinView`,
-and its own `BuildMissingIndices`. Embedding the base deletes that copy and
-gives caplin the refcounted generation model: pinned reader views, drain-gated
-reclaim with `db/mvcc` retire reasons, `TryAcquireRange` build claims, and
+and its own `BuildMissingIndices`. Embedding the base replaces that copy with
+the refcounted generation model: pinned reader views, drain-gated reclaim with
+`db/mvcc` retire reasons, `TryAcquireRange` build claims, and
 `RetireFilesBelow/Above`.
+
+**Why this is worth doing** — the line count is incidental (~120 net deleted).
+Two reasons:
+
+1. *It reduces N before the extraction.* The program's endgame is EL and CL
+   sharing one erigondb implementation, reached in two phases: make CL operate
+   the same way, then extract the shared logic. The retire/reclaim fold exists
+   twice today — `db/state/dirty_files.go:350` `retire()` + `:916`
+   `retireFilesNotInList()` versus `db/snapshotsync/snapshots.go:940` + `:1259`,
+   whose comments read "mirrors db/state.retire" — with `db/mvcc` (24 lines,
+   the `RetireReason` enum) as the intended home. Caplin adopting the base
+   means the extraction unifies **two** implementations, not three.
+2. *It closes a latent use-after-close.* Caplin views pin nothing
+   (`VisibleSegments.BeginRo` returns `RoTx` with `release == nil`) and
+   `closeWhatNotInList` closes decompressors inline, so a reader iterating an
+   old visible slice can hit a closed mmap the moment anything removes a file.
+   Latent only because nothing deletes caplin segments yet — PR-3a's merge tier
+   changes that, and is blocked on this.
 
 This is PR-1 of the caplin-EL snapshot parity program (umbrella doc
 `20260729-caplin-el-snapshot-parity.md`, branch `awskii/caplin-snapshot-parity`
 — NOT on this branch; do not open it during execution). PR-0 landed as #22878
 (merged) and #22944 (open); this branch is stacked on #22944's branch.
 
-The value is not cosmetic: caplin views today pin nothing
-(`VisibleSegments.BeginRo` returns `RoTx` with `release == nil`) and
-`closeWhatNotInList` closes decompressors inline, so a reader iterating an old
-visible slice can hit a closed mmap the moment anything removes a file. That
-is latent only because nothing deletes caplin segments yet — PR-3a's merge
-tier changes that, and it is blocked on this.
+## Non-goals
+
+This is a **pure refactor: the numbers caplin reports must not move.** That is
+the correctness bar and the merge gate (Task 2's fixture).
+
+- **No convention normalization.** Caplin's watermarks use three different
+  conventions and all three are preserved as-is. `SegmentsMax` stays
+  dirty-backed, `FrozenBlobs` stays exclusive-`To`. Cleaning them up is a
+  behavioral change that belongs in its own PR — mixing it in here would make
+  any backfill regression ambiguous between the embed and the convention change.
+- **The one sanctioned change** is `IndicesMax` `To`→`To-1`, which is forced by
+  the base and incidentally fixes a `LogStat` off-by-one.
+- **No `.tmp`-sweep scoping, no antiquary semaphore re-enable.** Both are
+  behavior changes, and neither hazard is live here: embedding makes
+  `RemoveOverlaps` *reachable* on caplin, but nothing calls it until PR-3a's
+  merge tier. They move to PR-3a, where the sweep actually fires.
+- **No merge tier, no caplin state, no data columns.**
+
+Follow-up to file, not fix here: `SegmentsMax` is dirty-backed, so the archive
+backfill stop condition (`stage_history_download.go:281`) keys off data that
+exists on disk but may not be indexed or visible — arguably wrong, deliberately
+left standing.
 
 ## Context (from discovery)
 
@@ -86,12 +120,14 @@ MaxEnum=15` and `RegisterType` has no duplicate/range panic):
   (snapshots_cmd.go:3511,3515). So EL can never sweep its own in-flight temp.
   The one live window is a caplin antiquary dump running while EL's post-merge
   sweep fires — possible only because the caplin build semaphore is disabled
-  (below). Both are fixed here.
-- **Build semaphore is commented out AND buggy**: `cl/antiquary/antiquary.go`
-  ~403-408 and ~448-453 use `defer a.snBuildSema.TryAcquire(...)` where
-  `Release` is meant — a verbatim re-enable leaks the permit and permanently
-  wedges snapshot building. Source: `segmentsBuildLimiter`
-  (`node/eth/backend.go:410`, handed to caplin at :1026).
+  (below). **Both are PR-3a's problem, not this PR's** (see Non-goals): nothing
+  calls caplin's `RemoveOverlaps` until the merge tier exists. Recorded here so
+  PR-3a inherits the analysis.
+- **Build semaphore is commented out AND buggy** (also PR-3a):
+  `cl/antiquary/antiquary.go` ~403-408 and ~448-453 use
+  `defer a.snBuildSema.TryAcquire(...)` where `Release` is meant — a verbatim
+  re-enable leaks the permit and permanently wedges snapshot building. Source:
+  `segmentsBuildLimiter` (`node/eth/backend.go:410`, handed to caplin at :1026).
 - `CaplinSnapshots.Salt` is never assigned anywhere (node-built indices use
   salt 0); capcli uses `snaptype.GetIndexSalt` (cmd/capcli/cli.go:1382).
 - Commit convention: package-prefixed (`db/snapshotsync: …`), not `feat: …`.
@@ -111,9 +147,10 @@ MaxEnum=15` and `RegisterType` has no duplicate/range panic):
 ## Testing Strategy
 
 - **unit tests**: `db/snapshotsync/freezeblocks` (lifecycle + watermarks),
-  `db/snapshotsync` (new base APIs), `cl/antiquary` (semaphore).
+  `db/snapshotsync` (new base APIs).
 - **watermark equivalence fixture** (Task 2) is the safety net for the whole
-  refactor — it must exist and pass before the embed lands.
+  refactor — it must exist and pass before the embed lands, and stay green
+  after, with the single declared `IndicesMax` shift.
 - **race**: the reader-vs-removal test must run under `-race`.
 - no e2e.
 
@@ -135,8 +172,6 @@ then delete the duplicates.
    convention-divergent accessors stay caplin-owned and are re-expressed on
    base primitives (`DirtyBlocksAvailable`, a pinned `View`).
 4. Duplicated lifecycle code is deleted; the read path moves onto pinned views.
-5. The `.tmp` sweep is scoped to owned types; the antiquary semaphore is
-   re-enabled and fixed.
 
 `alignMin = false`: blobs start at Deneb and trail blocks, and alignMin clamps
 every type to `slices.Min` of visible tips (snapshots.go:844-864) — with it
@@ -167,11 +202,6 @@ true, block availability would be pinned to the blob tip.
   `OpenFolder`'s lock/retire/openSegments/recalc shape minus the directory
   scan (~15 lines), so `TestOpenListDirtyLockRace` keeps testing the same
   invariant.
-- `.tmp` scoping: in `RemoveOverlaps`, skip temps whose parsed name is not one
-  of the instance's types — `if info, _, ok := snaptype.ParseFileName(s.dir,
-  strings.TrimSuffix(filepath.Base(f), ".tmp")); ok && !s.HasType(info.Type)
-  { continue }`. Unparseable names keep today's behavior (deleted) so orphan
-  cleanup does not regress.
 - Salt: wire `snaptype.GetIndexSalt(dirs.Snap, logger)` at construction. If it
   errors on a fresh datadir, fall back to the current zero value rather than
   failing construction — index salt is stored inside each `.idx`, so mixed
@@ -257,37 +287,20 @@ true, block availability would be pinned to the blob tip.
   `BeaconSimpleIdx`
 - [ ] run `go test -race ./db/snapshotsync/... ./cl/antiquary/...` — green
 
-### Task 5: scope the .tmp sweep; re-enable and fix the antiquary semaphore
+### Task 5: Verify acceptance criteria
 
-**Files:**
-- Modify: `db/snapshotsync/snapshots.go`
-- Modify: `db/snapshotsync/snapshots_test.go`
-- Modify: `cl/antiquary/antiquary.go`
-
-- [ ] write red test: `RemoveOverlaps` on an instance owning only EL types
-  leaves a `beaconblocks`-named `.tmp` in the same dir intact, and still
-  removes an unparseable orphan `.tmp` (today every `.tmp` is deleted)
-- [ ] scope the sweep per Technical Details (skip temps whose parsed type the
-  instance does not own; unparseable names keep current behavior)
-- [ ] re-enable the antiquary build semaphore in BOTH blocks, fixing the
-  `defer TryAcquire` → `defer Release` bug; skip the cycle when the permit
-  cannot be acquired
-- [ ] write test: the antiquary releases the permit after a dump cycle (a
-  second acquire succeeds) — pins the leak the commented-out code would have
-  shipped
-- [ ] run `go test ./db/snapshotsync/... ./cl/antiquary/...` — green
-
-### Task 6: Verify acceptance criteria
-
-- [ ] watermark fixture passes with only the declared `IndicesMax` shift
+- [ ] watermark fixture passes with only the declared `IndicesMax` shift — no
+  other number moved
 - [ ] no caplin-owned dirty/visible lifecycle remains (grep the deleted
   symbols); views pin generations
+- [ ] confirm the Non-goals held: no `.tmp`-sweep change, no semaphore change,
+  no watermark convention normalized
 - [ ] `make lint` — repeat until clean
 - [ ] `make erigon integration` — both build
 - [ ] `go test -race ./db/snapshotsync/... ./cl/antiquary/... ./cl/phase1/...
   ./polygon/heimdall/...`
 
-### Task 7: [Final] Update documentation
+### Task 6: [Final] Update documentation
 
 - [ ] update `db/agents.md` if the caplin snapshot description drifts
 - [ ] move this plan to `docs/plans/completed/`
@@ -303,6 +316,16 @@ true, block availability would be pinned to the blob tip.
 - **Stacked on #22944** — base the PR on `awskii/caplin-snapshot-prefixes`, or
   rebase onto main once that merges.
 
-**Follow-ups** (not this PR): PR-3a still needs `Merger`'s `snaptype.Unknown`
-hardcode parameterized, a `chain.Config` for `NewMerger`, and a real caplin
-`MergeLimit` in snapcfg; PR-2 does the same adoption for caplin state.
+**Follow-ups** (not this PR):
+- **PR-3a inherits from here**: scope the `RemoveOverlaps` `.tmp` sweep to the
+  instance's own types (skip temps whose parsed type the instance does not own;
+  unparseable names keep current behavior) and re-enable the antiquary build
+  semaphore with the `defer TryAcquire`→`defer Release` fix. Both analyses are
+  in Context above. It also needs `Merger`'s `snaptype.Unknown` hardcode
+  parameterized, a `chain.Config` for `NewMerger`, and a real caplin
+  `MergeLimit` in snapcfg.
+- **File as an issue, do not fix here**: `SegmentsMax` is dirty-backed, so the
+  archive backfill stop condition keys off data that may not be readable yet.
+- PR-2 does the same adoption for caplin state; the extraction of the
+  retire/reclaim fold into `db/mvcc` is its own later PR, after CL and EL both
+  operate the same way.
