@@ -14,28 +14,32 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package pool
+package cltypes_test
 
 import (
-	"bytes"
-	"sync"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 )
 
-// Buffers that grew beyond MaxBufferCap are dropped on Put so that one oversized use cannot pin memory in the pool.
-const MaxBufferCap = 1 << 20
-
-var buffers = sync.Pool{New: func() any { return new(bytes.Buffer) }}
-
-// GetBuffer returns an empty buffer from the shared pool.
-func GetBuffer() *bytes.Buffer {
-	b := buffers.Get().(*bytes.Buffer)
-	b.Reset()
-	return b
-}
-
-func PutBuffer(b *bytes.Buffer) {
-	if b.Cap() > MaxBufferCap {
-		return
+func TestExecutionRequestsEncodingSizeSSZ(t *testing.T) {
+	tests := []struct {
+		name    string
+		version clparams.StateVersion
+	}{
+		{name: "electra", version: clparams.ElectraVersion},
+		{name: "gloas", version: clparams.GloasVersion},
 	}
-	buffers.Put(b)
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			requests := cltypes.NewExecutionRequestsWithVersion(&clparams.MainnetBeaconConfig, test.version)
+			encoded, err := requests.EncodeSSZ(nil)
+			require.NoError(t, err)
+			require.Len(t, encoded, requests.EncodingSizeSSZ())
+		})
+	}
 }

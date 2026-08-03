@@ -14,28 +14,17 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package pool
+package cltypes
 
-import (
-	"bytes"
-	"sync"
-)
+import "github.com/erigontech/erigon/common/length"
 
-// Buffers that grew beyond MaxBufferCap are dropped on Put so that one oversized use cannot pin memory in the pool.
-const MaxBufferCap = 1 << 20
-
-var buffers = sync.Pool{New: func() any { return new(bytes.Buffer) }}
-
-// GetBuffer returns an empty buffer from the shared pool.
-func GetBuffer() *bytes.Buffer {
-	b := buffers.Get().(*bytes.Buffer)
-	b.Reset()
-	return b
+// A signed container adds a 96-byte BLS signature to its message.
+func signedStaticSize(messageSize int) int {
+	return length.Bytes96 + messageSize
 }
 
-func PutBuffer(b *bytes.Buffer) {
-	if b.Cap() > MaxBufferCap {
-		return
-	}
-	buffers.Put(b)
+// A dynamic message also occupies a 4-byte offset in the fixed section.
+func signedDynamicSize(messageSize int) int {
+	const dynamicOffsetSize = 4
+	return signedStaticSize(messageSize) + dynamicOffsetSize
 }

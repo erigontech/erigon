@@ -91,7 +91,7 @@ func (s *SignedProposerPreferences) EncodingSizeSSZ() int {
 	if s.Message == nil {
 		return length.Bytes96
 	}
-	return s.Message.EncodingSizeSSZ() + length.Bytes96
+	return signedStaticSize(s.Message.EncodingSizeSSZ())
 }
 
 func (s *SignedProposerPreferences) Static() bool {
