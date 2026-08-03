@@ -328,55 +328,13 @@ func (f *ForkChoiceStore) newPayloadWithoutForkChoiceLock(
 	versionedHashes []common.Hash,
 	executionRequestsList []hexutil.Bytes,
 ) (execution_client.PayloadStatus, error) {
-	if f.payloadValidations == nil {
-		f.payloadValidations = make(map[common.Hash]*payloadValidationCall)
+	if f.payloadValidator == nil {
+		f.payloadValidator = execution_client.NewPayloadValidationCoordinator(f.engine)
 	}
-	if f.payloadValidationSlots == nil {
-		f.payloadValidationSlots = make(chan struct{}, 2)
-	}
-	if call, ok := f.payloadValidations[beaconBlockRoot]; ok {
-		f.mu.Unlock()
-		select {
-		case <-call.done:
-			f.mu.Lock()
-			return call.status, call.err
-		case <-ctx.Done():
-			f.mu.Lock()
-			return execution_client.PayloadStatusNone, ctx.Err()
-		}
-	}
-
-	call := &payloadValidationCall{done: make(chan struct{})}
-	f.payloadValidations[beaconBlockRoot] = call
+	payloadValidator := f.payloadValidator
 	f.mu.Unlock()
-	select {
-	case f.payloadValidationSlots <- struct{}{}:
-	case <-ctx.Done():
-		f.mu.Lock()
-		call.err = ctx.Err()
-		delete(f.payloadValidations, beaconBlockRoot)
-		close(call.done)
-		return execution_client.PayloadStatusNone, call.err
-	}
-	var status execution_client.PayloadStatus
-	var err error
-	var panicValue any
-	func() {
-		defer func() {
-			panicValue = recover()
-		}()
-		status, err = f.engine.NewPayload(ctx, payload, parentBlockRoot, versionedHashes, executionRequestsList)
-	}()
-	<-f.payloadValidationSlots
-	f.mu.Lock()
-	call.status = status
-	call.err = err
-	delete(f.payloadValidations, beaconBlockRoot)
-	close(call.done)
-	if panicValue != nil {
-		panic(panicValue)
-	}
-	return status, err
+	defer f.mu.Lock()
+	return payloadValidator.NewPayload(ctx, beaconBlockRoot, payload, parentBlockRoot, versionedHashes, executionRequestsList)
 }
 
 // applyEnvelope processes the envelope under f.mu: validates, verifies with CL and EL,

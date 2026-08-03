@@ -511,7 +511,23 @@ func retryGloasPayloadWithEL(ctx context.Context, cfg *Cfg, block *cltypes.Signe
 		return execution_client.PayloadStatusNone, err
 	}
 	parentRoot := block.Block.ParentRoot
-	return cfg.executionClient.NewPayload(ctx, envelope.Message.Payload, &parentRoot, versionedHashes, executionRequestsList)
+	validationKey, err := envelope.Message.HashSSZ()
+	if err != nil {
+		return execution_client.PayloadStatusNone, err
+	}
+	return cfg.newPayloadCoordinator().NewPayload(ctx, common.Hash(validationKey), envelope.Message.Payload, &parentRoot, versionedHashes, executionRequestsList)
+}
+
+func (c *Cfg) newPayloadCoordinator() *execution_client.PayloadValidationCoordinator {
+	if c.payloadValidator != nil {
+		return c.payloadValidator
+	}
+	if c.forkChoice != nil && c.forkChoice.PayloadValidationCoordinator() != nil {
+		c.payloadValidator = c.forkChoice.PayloadValidationCoordinator()
+	} else {
+		c.payloadValidator = execution_client.NewPayloadValidationCoordinator(c.executionClient)
+	}
+	return c.payloadValidator
 }
 
 func isGloasPayloadKnownInvalid(cfg *Cfg, envelope *cltypes.SignedExecutionPayloadEnvelope) bool {

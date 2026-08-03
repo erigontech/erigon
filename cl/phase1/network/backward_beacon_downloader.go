@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"math"
 	"net/http"
 	"slices"
@@ -834,7 +833,7 @@ func ValidateFetchedEnvelope(beaconCfg *clparams.BeaconChainConfig, block *cltyp
 // RecoverSkippedEnvelopes retries fetching envelopes for blocks that were
 // skipped during backward download. Returns a map of successfully fetched
 // envelopes keyed by beacon block root.
-func (b *BackwardBeaconDownloader) RecoverSkippedEnvelopes(ctx context.Context, skipped []SkippedFullBlock) map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope {
+func (b *BackwardBeaconDownloader) RecoverSkippedEnvelopes(ctx context.Context, skipped []SkippedFullBlock, blocks map[common.Hash]*cltypes.SignedBeaconBlock) map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope {
 	if len(skipped) == 0 {
 		return nil
 	}
@@ -846,7 +845,13 @@ func (b *BackwardBeaconDownloader) RecoverSkippedEnvelopes(ctx context.Context, 
 
 	envelopes := make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, len(roots))
 	if b.httpFallbackURL != "" {
-		b.fetchSkippedEnvelopesFromBeaconAPI(ctx, skipped, envelopes)
+		httpEnvelopes := make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, len(roots))
+		b.fetchSkippedEnvelopesFromBeaconAPI(ctx, skipped, httpEnvelopes)
+		for root, envelope := range httpEnvelopes {
+			if ValidateFetchedEnvelope(b.beaconCfg, blocks[root], root, envelope) == nil {
+				envelopes[root] = envelope
+			}
+		}
 	}
 	missingRoots := make([][32]byte, 0, len(roots)-len(envelopes))
 	for _, root := range roots {
@@ -860,7 +865,11 @@ func (b *BackwardBeaconDownloader) RecoverSkippedEnvelopes(ctx context.Context, 
 		if err != nil {
 			log.Debug("[BackwardBeaconDownloader] envelope recovery: P2P failed", "err", err)
 		}
-		maps.Copy(envelopes, p2pEnvelopes)
+		for root, envelope := range p2pEnvelopes {
+			if ValidateFetchedEnvelope(b.beaconCfg, blocks[root], root, envelope) == nil {
+				envelopes[root] = envelope
+			}
+		}
 	}
 
 	return envelopes

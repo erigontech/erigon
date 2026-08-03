@@ -52,6 +52,7 @@ type Cfg struct {
 	ethClock                eth_clock.EthereumClock
 	beaconCfg               *clparams.BeaconChainConfig
 	executionClient         execution_client.ExecutionEngine
+	payloadValidator        *execution_client.PayloadValidationCoordinator
 	state                   *state.CachingBeaconState
 	forkChoice              *forkchoice.ForkChoiceStore
 	indiciesDB              kv.RwDB
@@ -99,6 +100,10 @@ func ClStagesCfg(
 	attestationDataProducer attestation_producer.AttestationDataProducer,
 	peerDas das.PeerDas,
 ) *Cfg {
+	payloadValidator := execution_client.NewPayloadValidationCoordinator(executionClient)
+	if forkChoice != nil && forkChoice.PayloadValidationCoordinator() != nil {
+		payloadValidator = forkChoice.PayloadValidationCoordinator()
+	}
 	blobDownloader := network2.NewBlobHistoryDownloader(
 		ctx,
 		beaconCfg,
@@ -122,6 +127,7 @@ func ClStagesCfg(
 		beaconCfg:               beaconCfg,
 		state:                   state,
 		executionClient:         executionClient,
+		payloadValidator:        payloadValidator,
 		forkChoice:              forkChoice,
 		dirs:                    dirs,
 		indiciesDB:              indiciesDB,

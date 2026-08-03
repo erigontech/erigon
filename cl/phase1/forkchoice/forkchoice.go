@@ -195,10 +195,9 @@ type ForkChoiceStore struct {
 	// whose EL newPayload failed (e.g. because EL hasn't caught up after forward sync).
 	// The stages layer drains these into blockCollector before each Flush() so EL
 	// eventually receives the blocks.
-	pendingELPayloadsMu    sync.Mutex
-	pendingELPayloads      []PendingELPayload
-	payloadValidations     map[common.Hash]*payloadValidationCall
-	payloadValidationSlots chan struct{}
+	pendingELPayloadsMu sync.Mutex
+	pendingELPayloads   []PendingELPayload
+	payloadValidator    *execution_client.PayloadValidationCoordinator
 
 	// db is used to persist execution payload indices (block number/hash) when an envelope
 	// is accepted in OnExecutionPayload. May be nil (e.g. in tests), in which case the
@@ -210,12 +209,6 @@ type ForkChoiceStore struct {
 type PendingELPayload struct {
 	Block    *cltypes.SignedBeaconBlock
 	Envelope *cltypes.SignedExecutionPayloadEnvelope
-}
-
-type payloadValidationCall struct {
-	done   chan struct{}
-	status execution_client.PayloadStatus
-	err    error
 }
 
 type childrens struct {
@@ -401,6 +394,7 @@ func NewForkChoiceStore(
 		payloadStatusByRoot:            payloadStatusByRoot,
 		executionPayloadGasLimit:       executionPayloadGasLimit,
 		payloadAttestationContexts:     payloadAttestationContexts,
+		payloadValidator:               execution_client.NewPayloadValidationCoordinator(engine),
 		db:                             db,
 	}
 	f.justifiedCheckpoint.Store(anchorCheckpoint)
@@ -431,6 +425,10 @@ func NewForkChoiceStore(
 	f.gloasWeightTree = newGloasWeightTree(f)
 
 	return f, nil
+}
+
+func (f *ForkChoiceStore) PayloadValidationCoordinator() *execution_client.PayloadValidationCoordinator {
+	return f.payloadValidator
 }
 
 func (f *ForkChoiceStore) InitPeerDas(peerDas das.PeerDas) {
