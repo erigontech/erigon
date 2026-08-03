@@ -64,11 +64,35 @@ func newPendingJobQueue[K comparable, M any](
 
 // enqueue adds a job unless the queue is at capacity or the key is already queued.
 func (q *pendingJobQueue[K, M]) enqueue(key K, msg M) {
-	if q.count.Add(1) > q.capacity {
-		q.count.Add(-1)
+	if !q.reserve() {
 		return
 	}
+	q.storeReserved(key, msg)
+}
 
+func (q *pendingJobQueue[K, M]) enqueueLazy(msg M, buildKey func() (K, error)) error {
+	if !q.reserve() {
+		return nil
+	}
+
+	key, err := buildKey()
+	if err != nil {
+		q.count.Add(-1)
+		return err
+	}
+	q.storeReserved(key, msg)
+	return nil
+}
+
+func (q *pendingJobQueue[K, M]) reserve() bool {
+	if q.count.Add(1) > q.capacity {
+		q.count.Add(-1)
+		return false
+	}
+	return true
+}
+
+func (q *pendingJobQueue[K, M]) storeReserved(key K, msg M) {
 	if _, loaded := q.jobs.LoadOrStore(key, &pendingJob[M]{
 		msg:          msg,
 		creationTime: time.Now(),

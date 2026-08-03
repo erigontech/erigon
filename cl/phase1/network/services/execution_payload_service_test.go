@@ -346,7 +346,7 @@ func TestExecutionPayloadServiceMultiplePendingForSameBlock(t *testing.T) {
 	require.True(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 2}))
 }
 
-func TestExecutionPayloadServicePendingQueueCap(t *testing.T) {
+func TestExecutionPayloadServicePendingQueueCapSkipsHash(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
 
@@ -363,15 +363,21 @@ func TestExecutionPayloadServicePendingQueueCap(t *testing.T) {
 	impl.pending.count.Store(maxPendingEnvelopes)
 
 	blockRoot := common.HexToHash("0xffff")
-	envelope := newTestSignedEnvelope(100, blockRoot, 999)
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{
+		Message: &cltypes.ExecutionPayloadEnvelope{},
+	}
 
-	impl.queuePendingEnvelope(blockRoot, envelope)
+	require.NotPanics(t, func() {
+		impl.queuePendingEnvelope(blockRoot, envelope)
+	})
 
 	require.Equal(t, int32(maxPendingEnvelopes), impl.pending.count.Load())
-	envelopeHash, err := envelope.HashSSZ()
-	require.NoError(t, err)
-	_, exists := impl.pending.jobs.Load(pendingEnvelopeKey{blockRoot, envelopeHash})
-	require.False(t, exists)
+	stored := 0
+	impl.pending.jobs.Range(func(_, _ any) bool {
+		stored++
+		return true
+	})
+	require.Zero(t, stored)
 }
 
 func TestExecutionPayloadServicePendingQueueCapConcurrent(t *testing.T) {

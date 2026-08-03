@@ -198,17 +198,19 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 
 // queuePendingEnvelope adds an envelope to the pending queue for later processing
 func (s *executionPayloadService) queuePendingEnvelope(blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) {
-	// Compute envelope hash to allow multiple candidates per block
-	envelopeHash, err := envelope.HashSSZ()
+	err := s.pending.enqueueLazy(envelope, func() (pendingEnvelopeKey, error) {
+		envelopeHash, err := envelope.HashSSZ()
+		if err != nil {
+			return pendingEnvelopeKey{}, err
+		}
+		return pendingEnvelopeKey{
+			blockRoot:    blockRoot,
+			envelopeHash: envelopeHash,
+		}, nil
+	})
 	if err != nil {
 		log.Warn("Failed to hash envelope for pending queue", "blockRoot", blockRoot, "err", err)
-		return
 	}
-
-	s.pending.enqueue(pendingEnvelopeKey{
-		blockRoot:    blockRoot,
-		envelopeHash: envelopeHash,
-	}, envelope)
 }
 
 // tryProcessPendingEnvelope re-runs full validation via ProcessMessage once the block has arrived.
