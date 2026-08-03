@@ -1248,7 +1248,7 @@ func (pe *parallelExecutor) completeBlock(ctx context.Context, blockResult *bloc
 }
 
 func (pe *parallelExecutor) recordBlockExecMetrics(be *blockExecutor) {
-	pe.execCount.Add(int64(be.cntExec))
+	pe.dispatchCounts.add(uint64(be.cntExec), uint64(be.cntRepeat))
 	pe.abortCount.Add(int64(be.cntAbort))
 	pe.invalidCount.Add(int64(be.cntValidationFail))
 	pe.readCount.Add(be.blockIO.ReadCount())
@@ -2247,6 +2247,25 @@ type blockExecMetrics struct {
 	Duration   blockDuration
 }
 
+type parallelDispatchCounts struct {
+	mu     sync.Mutex
+	exec   uint64
+	repeat uint64
+}
+
+func (c *parallelDispatchCounts) add(exec, repeat uint64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.exec += exec
+	c.repeat += repeat
+}
+
+func (c *parallelDispatchCounts) load() (exec, repeat uint64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.exec, c.repeat
+}
+
 func newBlockExecMetrics() *blockExecMetrics {
 	return &blockExecMetrics{
 		Duration: blockDuration{Ema: metrics.NewEma[time.Duration](0, 0.3)},
@@ -2336,7 +2355,7 @@ type blockExecutor struct {
 	profile bool
 
 	// Stats for debugging purposes
-	cntExec, cntSpecExec, cntSuccess, cntAbort, cntTotalValidations, cntValidationFail, cntFinalized int
+	cntExec, cntRepeat, cntSpecExec, cntSuccess, cntAbort, cntTotalValidations, cntValidationFail, cntFinalized int
 
 	// finalizedResults stores the finalized execResult snapshot per TX.
 	// Prevents the publish loop from seeing a different incarnation's
@@ -3338,6 +3357,9 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 			}
 			if dbg.TraceTransactionIO && be.txIncarnations[nextTx] > 1 {
 				fmt.Println(be.blockNum, "EXEC", nextTx, be.txIncarnations[nextTx], "maxValidated", maxValidated, be.blockIO.HasReads(nextTx), "failed", be.execFailed[nextTx], "aborted", be.execAborted[nextTx])
+			}
+			if incarnation > 0 {
+				be.cntRepeat++
 			}
 			be.cntExec++
 			dispatched++
