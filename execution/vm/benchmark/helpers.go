@@ -61,11 +61,13 @@ func cancunConfig() *chain.Config {
 // reads resolve from the version map, as staged sync does.
 func benchConfig(b *testing.B, gasLimit uint64) *vm.EVM {
 	b.Helper()
-	cfg, _ := newBenchConfig(b, gasLimit, true)
-	return runtime.NewEnv(cfg)
+	return newBenchEnv(b, gasLimit, true)
 }
 
-func newBenchConfig(t testing.TB, gasLimit uint64, noMaterialize bool) (*runtime.Config, *state.IntraBlockState) {
+// newBenchEnv returns the env, not the runtime.Config it built: NewEnv ignores
+// Config.Value — only runtime.Call reads it — so a Value set here would never
+// reach the call.
+func newBenchEnv(t testing.TB, gasLimit uint64, noMaterialize bool) *vm.EVM {
 	t.Helper()
 
 	db := testutil.TemporalDB(t)
@@ -80,7 +82,7 @@ func newBenchConfig(t testing.TB, gasLimit uint64, noMaterialize bool) (*runtime
 	)
 	statedb.SetNoMaterialize(noMaterialize)
 
-	cfg := &runtime.Config{
+	return runtime.NewEnv(&runtime.Config{
 		ChainConfig: cancunConfig(),
 		Origin:      addrSender,
 		Coinbase:    accounts.ZeroAddress,
@@ -89,9 +91,7 @@ func newBenchConfig(t testing.TB, gasLimit uint64, noMaterialize bool) (*runtime
 		GasLimit:    gasLimit,
 		Difficulty:  uint256.NewInt(0),
 		State:       statedb,
-	}
-
-	return cfg, statedb
+	})
 }
 
 // deployContract deploys code at the given address in the state.
