@@ -60,7 +60,10 @@ Log flags, log levels and log files: [Logs](https://docs.erigon.tech/fundamental
 
 #### Torrent client logging
 
-The torrent client in the Downloader logs to `logs/torrent.log` at the level specified by `torrent.verbosity` or WARN, whichever is lower. Logs at `torrent.verbosity` or higher are also passed through to the top level Erigon dir and console loggers (which must have their own levels set low enough to log the messages in their respective handlers).
+The torrent client in the Downloader keeps its own file, `logs/torrent.log`. It is written at whichever is **more
+verbose** of `--torrent.verbosity` and `WARN`, so warnings and errors always reach it even at the default verbosity.
+Messages at `--torrent.verbosity` or above are additionally forwarded to Erigon's own file and console loggers, which
+emit them only if `--log.dir.verbosity` and `--verbosity` are themselves verbose enough.
 
 ### Block Production (PoS Validator)
 
@@ -102,6 +105,10 @@ Binaries land in `./build/bin`. Use `-j<n>` to parallelise the build. Packaged b
 per-platform install steps are on the
 [installation](https://docs.erigon.tech/get-started/installation) page; to build a specific release rather than `main`,
 check out its tag.
+
+On Windows, build natively (Chocolatey, MinGW, and the MinGW anti-virus false-positive workaround) or under WSL2:
+[Native compilation](https://docs.erigon.tech/get-started/installation/#install-native) and
+[WSL](https://docs.erigon.tech/get-started/installation/#install-wsl).
 
 ### Executables
 
@@ -166,29 +173,8 @@ Every default port, the flags that change them, and firewalling guidance:
 
 #### Hetzner expecting strict firewall rules
 
-```
-0.0.0.0/8             "This" Network             RFC 1122, Section 3.2.1.3
-10.0.0.0/8            Private-Use Networks       RFC 1918
-100.64.0.0/10         Carrier-Grade NAT (CGN)    RFC 6598, Section 7
-127.16.0.0/12         Private-Use Networks       RFC 1918
-169.254.0.0/16        Link Local                 RFC 3927
-172.16.0.0/12         Private-Use Networks       RFC 1918
-192.0.0.0/24          IETF Protocol Assignments  RFC 5736
-192.0.2.0/24          TEST-NET-1                 RFC 5737
-192.88.99.0/24        6to4 Relay Anycast         RFC 3068
-192.168.0.0/16        Private-Use Networks       RFC 1918
-198.18.0.0/15         Network Interconnect
-Device Benchmark Testing   RFC 2544
-198.51.100.0/24       TEST-NET-2                 RFC 5737
-203.0.113.0/24        TEST-NET-3                 RFC 5737
-224.0.0.0/4           Multicast                  RFC 3171
-240.0.0.0/4           Reserved for Future Use    RFC 1112, Section 4
-255.255.255.255/32    Limited Broadcast          RFC 919, Section 7
-RFC 922, Section 7
-```
-
-Same
-in [IpTables syntax](https://ethereum.stackexchange.com/questions/6386/how-to-prevent-being-blacklisted-for-running-an-ethereum-client/13068#13068)
+Ports to open and the reserved IPv4 ranges to block:
+[Hetzner firewall note](https://docs.erigon.tech/help-center/troubleshooting#hetzner-cloud--dedicated-server-firewall-note).
 
 ### Run as a separate user - `systemd` example
 
@@ -214,44 +200,6 @@ make DIST=/opt/erigon install
 ### How to change db pagesize
 
 [post](https://github.com/erigontech/erigon/blob/main/cmd/integration/Readme.md#copy-data-to-another-db)
-
-### Windows
-
-Windows users may run erigon in 3 possible ways:
-
-* Build executable binaries natively for Windows using `make`. Example: `make erigon` builds the erigon
-  executable. All binaries are placed in `.\build\bin\` subfolder. There are some requirements for a successful native
-  build on windows :
-    * [Git](https://git-scm.com/downloads) for Windows must be installed (provides bash and MSYS2 environment). If
-      you're cloning this repository is very likely you already have it
-  * [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.25
-    * [Chocolatey package manager](https://chocolatey.org/) for Windows must be installed. Then install the required
-      build tools: `choco install cmake make mingw` (provides GNU CC Compiler >= 13, GNU Make, and CMake). Make sure
-      Windows System "Path" variable has:
-      C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin
-
-  **Important note about Anti-Viruses**
-  During MinGW's compiler detection phase some temporary executables are generated to test compiler capabilities. It's
-  been reported some anti-virus programs detect those files as possibly infected by `Win64/Kryptic.CIS` trojan horse (or
-  a variant of it). Although those are false positives we have no control over 100+ vendors of security products for
-  Windows and their respective detection algorithms and we understand this might make your experience with Windows
-  builds uncomfortable. To workaround the issue you might either set exclusions for your antivirus specifically
-  for `build\bin\mdbx\CMakeFiles` sub-folder of the cloned repo or you can run erigon using the following other two
-  options
-
-* Use Docker :  see [docker-compose.yml](./docker-compose.yml)
-
-* Use WSL (Windows Subsystem for Linux) **strictly on version 2**. Under this option you can build Erigon just as you
-  would on a regular Linux distribution. You can point your data also to any of the mounted Windows partitions (
-  eg. `/mnt/c/[...]`, `/mnt/d/[...]` etc) but in such case be advised performance is impacted: this is due to the fact
-  those mount points use `DrvFS` which is
-  a [network file system](https://docs.erigon.tech/help-center/known-issues#cloud-network-drives)
-  and, additionally, MDBX locks the db for exclusive access which implies only one process at a time can access data.
-  This has consequences on the running of `rpcdaemon` which has to be configured as [Remote DB](#json-rpc-daemon) even if
-  it is executed on the very same computer. If instead your data is hosted on the native Linux filesystem non
-  limitations apply.
-  **Please also note the default WSL2 environment has its own IP address which does not match the one of the network
-  interface of Windows host: take this into account when configuring NAT for port 30303 on your router.**
 
 Getting in touch
 ================
