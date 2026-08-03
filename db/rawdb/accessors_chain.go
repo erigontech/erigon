@@ -1383,3 +1383,15 @@ func WriteReceiptCacheV2(tx kv.TemporalPutDel, receipt *types.Receipt, txNum uin
 var (
 	receiptCacheKey = []byte{0x0}
 )
+
+// RCacheRawStream streams raw, still-encoded rcache values over [fromTxNum, toTxNum]
+// via the same domain trace ReceiptCacheV2Stream uses. For debugging only.
+func RCacheRawStream(tx kv.TemporalTx, fromTxNum, toTxNum uint64) (stream.U64V, error) {
+	return tx.Debug().TraceKey(kv.RCacheDomain, receiptCacheKey, fromTxNum, toTxNum)
+}
+
+// RCacheRawHistorySeek returns the raw, still-encoded rcache value the RPC read
+// path would see at txNum. For debugging only.
+func RCacheRawHistorySeek(tx kv.TemporalTx, txNum uint64) ([]byte, bool, error) {
+	return tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txNum+1)
+}

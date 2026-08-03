@@ -78,7 +78,9 @@ import (
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/mem"
 	"github.com/erigontech/erigon/execution/chain/networkname"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/verify"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -508,6 +510,24 @@ var snapshotCommand = cli.Command{
 				&cli.Int64Flag{Name: "seed", Usage: "random seed for block sampling (auto-generated if not set)"},
 				&cli.Float64Flag{Name: "sample", Usage: "fraction of blocks to check via pseudo-random sampling (0.0-1.0)", Value: 1.0},
 				&cli.BoolFlag{Name: "failFast", Value: true, Usage: "stop on first mismatch (otherwise log and continue)"},
+			}),
+		},
+		{
+			Name: "rcache",
+			Action: func(cliCtx *cli.Context) error {
+				logger := log.Root()
+				if err := doRCacheDump(cliCtx, logger); err != nil {
+					log.Error("[rcache] failure", "err", err)
+					return err
+				}
+				return nil
+			},
+			Description: "TEMP DEBUG: dump every deserialized RCache value for a block, on both the domain-trace and history-seek read paths",
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.Uint64Flag{Name: "block", Usage: "block number to dump", Required: true},
+				&cli.BoolFlag{Name: "raw", Usage: "also print the raw RLP of each value"},
+				&cli.BoolFlag{Name: "logs", Usage: "print each receipt's logs"},
 			}),
 		},
 		{
@@ -1935,6 +1955,148 @@ func doCheckRCacheRootAtBlkRange(cliCtx *cli.Context, logger log.Logger) error {
 	failFast := cliCtx.Bool("failFast")
 	logger.Info("[check-rcache-root-at-blk-range] sampling config", "seed", sc.Seed, "sampleRatio", sc.SampleRatio)
 	return integrity.CheckRCacheRootAtBlkRange(ctx, sc, db, blockReader, chainConfig, from, to, failFast, logger)
+}
+
+// doRCacheDump is a temporary debug helper for the receipt-root mismatch
+// investigation: it prints every RCache value covering a block on both read
+// paths, so a value present on one but not the other is visible.
+func doRCacheDump(cliCtx *cli.Context, logger log.Logger) error {
+	ctx := cliCtx.Context
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+	defer chainDB.Close()
+	chainConfig := fromdb.ChainConfig(chainDB)
+	cfg := ethconfig.NewSnapCfg(false /*keepBlocks*/, true /*produceE2*/, true /*produceE3*/, chainConfig.ChainName)
+	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	if err != nil {
+		return err
+	}
+	defer clean()
+	blockRetire, agg := res.BlockRetire, res.Aggregator
+	defer blockRetire.MadvNormal().DisableReadAhead()
+	defer agg.MadvNormal().DisableReadAhead()
+	db, err := temporal.New(chainDB, agg)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	blockReader, _ := blockRetire.IO()
+
+	blockNum := cliCtx.Uint64("block")
+	showRaw := cliCtx.Bool("raw")
+	showLogs := cliCtx.Bool("logs")
+
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	txNumsReader := blockReader.TxnumReader()
+	minTxNum, err := txNumsReader.Min(ctx, tx, blockNum)
+	if err != nil {
+		return fmt.Errorf("minTxNum(%d): %w", blockNum, err)
+	}
+	maxTxNum, err := txNumsReader.Max(ctx, tx, blockNum)
+	if err != nil {
+		return fmt.Errorf("maxTxNum(%d): %w", blockNum, err)
+	}
+	block, err := blockReader.BlockByNumber(ctx, tx, blockNum)
+	if err != nil {
+		return fmt.Errorf("blockByNumber(%d): %w", blockNum, err)
+	}
+	if block == nil {
+		return fmt.Errorf("block %d not found", blockNum)
+	}
+	header := block.Header()
+
+	rcacheProgress := tx.Debug().DomainProgress(kv.RCacheDomain)
+	fmt.Printf("block=%d txNumRange=[%d,%d] txs=%d header.ReceiptHash=%s rcacheDomainProgress=%d\n",
+		blockNum, minTxNum, maxTxNum, block.Transactions().Len(), header.ReceiptHash, rcacheProgress)
+
+	printReceipt := func(prefix string, txNum uint64, v []byte) {
+		if len(v) == 0 {
+			fmt.Printf("%s txNum=%d <empty>\n", prefix, txNum)
+			return
+		}
+		if showRaw {
+			fmt.Printf("%s txNum=%d len=%d raw=%x\n", prefix, txNum, len(v), v)
+		}
+		r := &types.ReceiptForStorage{}
+		if err := rlp.DecodeBytes(v, r); err != nil {
+			fmt.Printf("%s txNum=%d len=%d DECODE ERROR: %v\n", prefix, txNum, len(v), err)
+			return
+		}
+		fmt.Printf("%s txNum=%d len=%d type=%d status=%d cumGasUsed=%d txIndex=%d firstLogIdx=%d logs=%d contractAddr=%x postState=%x blobGasUsed=%d\n",
+			prefix, txNum, len(v), r.Type, r.Status, r.CumulativeGasUsed, r.TransactionIndex,
+			r.FirstLogIndexWithinBlock, len(r.Logs), r.ContractAddress, r.PostState, r.BlobGasUsed)
+		if showLogs {
+			for i, l := range r.Logs {
+				fmt.Printf("%s   log[%d] addr=%x topics=%d dataLen=%d index=%d\n", prefix, i, l.Address, len(l.Topics), len(l.Data), l.Index)
+			}
+		}
+	}
+
+	fmt.Printf("--- domain-trace path (TraceKey; what the integrity check reads) ---\n")
+	it, err := rawdb.RCacheRawStream(tx, minTxNum, maxTxNum)
+	if err != nil {
+		return fmt.Errorf("rcacheRawStream: %w", err)
+	}
+	defer it.Close()
+	var traced types.Receipts
+	seen := 0
+	for it.HasNext() {
+		txNum, v, err := it.Next()
+		if err != nil {
+			return fmt.Errorf("rcacheRawStream.Next: %w", err)
+		}
+		seen++
+		printReceipt(" [trace]", txNum, v)
+		if len(v) == 0 {
+			continue
+		}
+		r := &types.ReceiptForStorage{}
+		if err := rlp.DecodeBytes(v, r); err != nil {
+			continue
+		}
+		rr := (*types.Receipt)(r)
+		rr.Bloom = types.CreateBloom(types.Receipts{rr})
+		traced = append(traced, rr)
+	}
+	it.Close()
+	if seen == 0 {
+		fmt.Printf(" [trace] NO ENTRIES in [%d,%d]\n", minTxNum, maxTxNum)
+	}
+	fmt.Printf(" [trace] receipts=%d derivedReceiptRoot=%s match=%v\n",
+		len(traced), types.DeriveSha(traced), types.DeriveSha(traced) == header.ReceiptHash)
+
+	fmt.Printf("--- history-seek path (HistorySeek; what the RPC reads) ---\n")
+	var sought types.Receipts
+	for txNum := minTxNum; txNum <= maxTxNum; txNum++ {
+		v, ok, err := rawdb.RCacheRawHistorySeek(tx, txNum)
+		if err != nil {
+			return fmt.Errorf("rcacheRawHistorySeek(%d): %w", txNum, err)
+		}
+		if !ok {
+			fmt.Printf(" [hist] txNum=%d <not found>\n", txNum)
+			continue
+		}
+		printReceipt(" [hist]", txNum, v)
+		if len(v) == 0 {
+			continue
+		}
+		r := &types.ReceiptForStorage{}
+		if err := rlp.DecodeBytes(v, r); err != nil {
+			continue
+		}
+		rr := (*types.Receipt)(r)
+		rr.Bloom = types.CreateBloom(types.Receipts{rr})
+		sought = append(sought, rr)
+	}
+	fmt.Printf(" [hist] receipts=%d derivedReceiptRoot=%s match=%v\n",
+		len(sought), types.DeriveSha(sought), types.DeriveSha(sought) == header.ReceiptHash)
+
+	return nil
 }
 
 func doVerifyState(cliCtx *cli.Context, logger log.Logger) error {
