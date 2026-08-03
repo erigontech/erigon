@@ -108,3 +108,43 @@ func TestSequentialViewLeavesSharedMappingRandom(t *testing.T) {
 	require.ElementsMatch(t, []string{"random", "sequential"}, advices,
 		"two mmaps of one fd must hold independent advice")
 }
+
+// TestMadviseSubPageMapping pins that a mapping shorter than one page still gets
+// its advice. mmap hands out whole pages and madvise(2) rounds the length up, so
+// trimming the tail down to a page boundary drops the only page there is.
+func TestMadviseSubPageMapping(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tiny.bin")
+	require.NoError(t, os.WriteFile(path, make([]byte, 300), 0o600))
+
+	f, err := os.Open(path)
+	require.NoError(t, err)
+	defer f.Close()
+
+	st, err := f.Stat()
+	require.NoError(t, err)
+	require.Less(t, st.Size(), int64(os.Getpagesize()))
+
+	h1, h2, err := mmap.Mmap(f, int(st.Size()))
+	require.NoError(t, err)
+	defer func() { require.NoError(t, mmap.Munmap(h1, h2)) }()
+
+	if runtime.GOOS != "linux" {
+		got, err := syscheck.FileMappings()
+		require.NoError(t, err)
+		require.Nil(t, got)
+		return
+	}
+
+	require.NoError(t, mmap.MadviseNormal(h1))
+	require.NoError(t, mmap.MadviseRandom(h1))
+
+	all, err := syscheck.FileMappings()
+	require.NoError(t, err)
+	for _, m := range all {
+		if m.Path == path {
+			require.Equal(t, "random", m.Advice(), "sub-page mapping must still be advised")
+			return
+		}
+	}
+	t.Fatalf("mapping for %s not found", path)
+}
