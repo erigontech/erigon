@@ -957,10 +957,8 @@ func TestBuyGas_NilMaxFeePerBlobGasWithBlobs(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// TestPreCheckNonceMismatchError pins the wire format and the errors.Is
-// identity of the nonce-mismatch errors. The parallel executor matches on the
-// sentinel and RPC surfaces the text, so both must survive changes to how the
-// error is built.
+// TestPreCheckNonceMismatchError pins the message text and the errors.Is
+// identity: the parallel executor matches the sentinel, RPC surfaces the text.
 func TestPreCheckNonceMismatchError(t *testing.T) {
 	t.Parallel()
 

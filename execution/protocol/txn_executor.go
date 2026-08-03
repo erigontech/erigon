@@ -84,8 +84,7 @@ func (e ErrExecAbortError) IsError() bool {
 }
 
 // nonceError formats lazily: under parallel execution a nonce mismatch is a
-// re-execution signal whose text is discarded, so eager formatting would
-// hex-encode the sender on every speculative miss.
+// routine re-execution signal whose text is discarded.
 type nonceError struct {
 	err        error // ErrNonceTooHigh or ErrNonceTooLow
 	from       accounts.Address
