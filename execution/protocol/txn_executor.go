@@ -381,7 +381,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 
 	// Match geth's EIP-7702 prerequisite precedence: after fee caps, before
 	// affordability and intrinsic gas.
-	if err := checkSetCodeAuthorizations(st.msg.Authorizations(), st.msg.To().IsNil(), rules.IsPrague); err != nil {
+	if err := validateSetCodePrerequisites(st.msg.Authorizations(), st.msg.To().IsNil(), rules.IsPrague); err != nil {
 		return txnFees{}, err
 	}
 
@@ -485,7 +485,7 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	// Match the execution-spec error precedence: intrinsic gas and initcode size
 	// are checked before SetCode prerequisites. All validation completes before
 	// verifyAuthorities can update account code or nonces.
-	if err := checkSetCodeAuthorizations(auths, contractCreation, rules.IsPrague); err != nil {
+	if err := validateSetCodePrerequisites(auths, contractCreation, rules.IsPrague); err != nil {
 		return nil, err
 	}
 	st.gasRemaining = mdgas.SplitTxnGasLimit(st.msg.Gas(), intrinsicGas, rules)
@@ -812,7 +812,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	return result, nil
 }
 
-func checkSetCodeAuthorizations(auths []types.Authorization, contractCreation, isPrague bool) error {
+func validateSetCodePrerequisites(auths []types.Authorization, contractCreation, isPrague bool) error {
 	if auths == nil {
 		return nil
 	}
@@ -849,7 +849,7 @@ func (st *TxnExecutor) prepareTopLevelCreate(destination accounts.Address, gasRe
 }
 
 // verifyAuthorities applies the EIP-7702 authorization list, mutating state;
-// callers must first validate the list with checkSetCodeAuthorizations.
+// callers must first validate the list with validateSetCodePrerequisites.
 func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *uint256.Int, gasRemaining mdgas.MdGas) (mdgas.MdGas, mdgas.MdGasUsage, error) {
 	var gasUsed mdgas.MdGasUsage
 	if auths == nil {
