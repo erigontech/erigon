@@ -33,119 +33,8 @@ The [Erigon documentation](https://docs.erigon.tech/) answers most questions. Us
 
 <code>In-depth links are marked by the microscope sign (🔬) </code>
 
-System Requirements
-===================
-
-RAM: >=32GB, [Golang >= 1.25](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4. 64-bit
-architecture.
-
-Disk space, July 2026:
-
-| Chain            | Archive | Full   | Minimal |
-|------------------|---------|--------|---------|
-| Ethereum Mainnet | 2TB     | 420GB  | 380GB   |
-| Gnosis           | 675GB   | 220GB  | 205GB   |
-| Sepolia          | 1.1TB   | -      | -       |
-| Hoodi            | 134GB   | -      | -       |
-| Chiado           | 30GB    | -      | -       |
-
-Sizes grow with the chain. Archive figures are measured on Erigon 3.6 nodes running `--prune.mode=archive` with default
-pruning options; enabling receipts or commitment history adds a lot on top — see [Erigon3 datadir size](#erigon3-datadir-size).
-The same figures are published, with more detail, on the
-[hardware requirements](https://docs.erigon.tech/get-started/hardware-requirements) page.
-
-SSD or NVMe. We do not recommend HDD — on HDD, Erigon will always stay a few blocks behind the chain tip but will not fall further behind.
-Bear in mind that SSD performance deteriorates when close to capacity. CloudDrives (like
-gp3): Blocks Execution is slow
-on [cloud-network-drives](https://docs.erigon.tech/help-center/known-issues#cloud-network-drives)
-
-🔬 More details on [Erigon3 datadir size](#erigon3-datadir-size)
-
-🔬 More details on what type of data stored [here](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space)
-
-Sync Times
-==========
-
-These are the approximate sync times for syncing from scratch to the tip of the chain (results may vary depending on hardware and bandwidth).
-
-
-| Chain      | Archive         | Full           | Minimal        |
-|------------|-----------------|----------------|----------------|
-| Ethereum   | 7 Hours, 55 Minutes | 4 Hours, 23 Minutes | 1 Hour, 41 Minutes |
-| Gnosis     | 2 Hours, 10 Minutes | 1 Hour, 5 Minutes  | 33 Minutes      |
-
 Usage
 =====
-
-### Getting Started
-
-[Release Notes and Binaries](https://github.com/erigontech/erigon/releases)
-
-Build latest release (this will be suitable for most users just wanting to run a node):
-
-```sh
-git clone --branch release/<x.xx> --single-branch https://github.com/erigontech/erigon.git
-cd erigon
-make erigon
-./build/bin/erigon
-```
-
-Use `--datadir` to choose where to store data.
-
-Use `--chain=gnosis` for [Gnosis Chain](https://www.gnosis.io/).
-For Gnosis Chain you need a [Consensus Layer](#beacon-chain-consensus-layer) client alongside
-Erigon (https://docs.gnosischain.com/category/step--3---run-consensus-client).
-
-Running `make help` will list and describe the convenience commands available in the [Makefile](./Makefile).
-
-### Datadir structure
-
-```sh
-datadir        
-    chaindata     # "Recently-updated Latest State", "Recent History", "Recent Blocks"
-    snapshots     # contains `.seg` files - it's old blocks
-        domain    # Latest State
-        history   # Historical values 
-        idx       # InvertedIndices: can search/filtering/union/intersect them - to find historical data. like eth_getLogs or trace_transaction
-        accessor # Additional (generated) indices of history - have "random-touch" read-pattern. They can serve only `Get` requests (no search/filters).
-    caplin        # embedded Consensus Layer: beacon chain db and its snapshots
-    txpool        # pending transactions. safe to remove.
-    nodes         # p2p peers. safe to remove.
-    temp          # used to sort data bigger than RAM. can grow to ~100gb. cleaned at startup.
-   
-# There are 6 domains: account, storage, code, commitment, receipt, rcache. Last one only with `--prune.include-receipts`.
-```
-
-See the [lib](db/downloader/README.md) and [cmd](cmd/downloader/README.md) READMEs for more information.
-
-### Erigon3 datadir size
-
-Measured on Erigon 3.6 `--prune.mode=archive` nodes, July 2026. The `snapshots/*.seg` row is only the block files —
-headers, bodies and transactions — that sit directly in `snapshots/`; the rows below it are its sub-folders. Each
-column is one node, so totals can differ a few percent from the table above, which is measured on freshly synced
-nodes.
-
-| Path                 | eth-mainnet | gnosis    | sepolia   | hoodi     | chiado   |
-|----------------------|-------------|-----------|-----------|-----------|----------|
-| `chaindata`          | 22.75 GB    | 9.63 GB   | 12.87 GB  | 6.78 GB   | 2.40 GB  |
-| `snapshots/*.seg`    | 996.40 GB   | 284.82 GB | 614.90 GB | 33.38 GB  | 12.91 GB |
-| `snapshots/domain`   | 417.66 GB   | 227.03 GB | 237.26 GB | 52.39 GB  | 7.17 GB  |
-| `snapshots/idx`      | 332.72 GB   | 136.67 GB | 115.95 GB | 25.47 GB  | 3.44 GB  |
-| `snapshots/history`  | 255.60 GB   | 39.28 GB  | 68.93 GB  | 8.00 GB   | 2.33 GB  |
-| `snapshots/accessor` | 141.61 GB   | 33.73 GB  | 45.85 GB  | 7.70 GB   | 1.39 GB  |
-| total                | 2.17 TB     | 731.16 GB | 1.10 TB   | 133.73 GB | 29.64 GB |
-
-Data that is off by default, measured on the same nodes:
-
-| Flag                                 | eth-mainnet | gnosis     | sepolia    | hoodi      | chiado    |
-|--------------------------------------|-------------|------------|------------|------------|-----------|
-| `--prune.include-receipts`           | +441.42 GB  | +246.74 GB | +135.15 GB | +11.31 GB  | +3.38 GB  |
-| `--prune.include-commitment-history` | +4.40 TB    | -          | +1.09 TB   | +182.27 GB | +57.35 GB |
-| `--caplin.blocks-archive`, `--caplin.blobs-archive`, `--caplin.states-archive` | +2.48 TB | +501.00 GB | +1.40 TB | +135.28 GB | - |
-
-Caplin numbers are the backfilled beacon blocks, blob sidecars and beacon state snapshots. They exclude the beacon
-chain db that every node with the embedded Consensus Layer keeps anyway. Blob sidecars dominate: on mainnet they are
-2.17 TB of the 2.48 TB total.
 
 ### Erigon3 changes from Erigon2
 
@@ -185,31 +74,12 @@ Erigon can be used as an Execution Layer for external Consensus Layer clients. S
 
 ### Caplin
 
-Caplin is a full-fledged validating Consensus Client like Prysm, Lighthouse, Teku, Nimbus and Lodestar. Its goal is:
+Caplin is Erigon's embedded Consensus Layer, enabled by default. Flags, archival modes and Beacon API configuration:
+[Caplin](https://docs.erigon.tech/fundamentals/caplin) and [Caplin for staking](https://docs.erigon.tech/staking/caplin).
 
-* provide better stability
-* Validation of the chain
-* Stay in sync
-* keep the execution of blocks on chain tip
-* serve the Beacon API using a fast and compact data model alongside low CPU and memory usage.
-
-The main reason we developed a new Consensus Layer is to explore the potential benefits it can bring.
-For example, The Engine API does not work well with Erigon. The Engine API sends data one block at a time, which does
-not suit how Erigon works. Erigon is designed to handle many blocks simultaneously and needs to sort and process data
-efficiently. Therefore, it would be better for Erigon to handle the blocks independently instead of relying on the
-Engine API.
-
-#### Caplin's Usage
-
-Caplin is enabled by default. To disable it and use the Engine API instead, use the `--externalcl` flag. From that point
-on, an external Consensus Layer will no longer be needed.
-
-Caplin also has an archival mode for historical blocks, blobs and states, enabled through `--caplin.blocks-archive`,
-`--caplin.blobs-archive` and `--caplin.states-archive` (the latter turns on block archival as well). All three are off
-by default and cost a lot of disk — see [Erigon3 datadir size](#erigon3-datadir-size).
-In order to enable the caplin's Beacon API, the flag `--beacon.api=<namespaces>` must be added.
-e.g: `--beacon.api=beacon,builder,config,debug,node,validator,lighthouse` will enable all endpoints. 
-Note: enabling the Beacon API will lead to a 6 GB higher RAM usage
+Why a new Consensus Layer rather than the Engine API: the Engine API delivers blocks one at a time, which does not suit
+Erigon's bulk model — Erigon is built to handle many blocks simultaneously and to sort and process data in batches.
+Owning the consensus layer lets Erigon drive block handling on its own terms instead of being paced by the Engine API.
 
 ### Dev Chain
 
@@ -217,6 +87,21 @@ Note: enabling the Beacon API will lead to a 6 GB higher RAM usage
 
 For developers
 ==============
+
+### Building
+
+Toolchain: [Go >= 1.25](https://golang.org/doc/install), GCC 10+ or Clang, 64-bit architecture. On Linux, kernel > v4.
+
+```sh
+git clone https://github.com/erigontech/erigon.git
+cd erigon
+make erigon
+```
+
+Binaries land in `./build/bin`. Use `-j<n>` to parallelise the build. Packaged binaries, Docker images and the
+per-platform install steps are on the
+[installation](https://docs.erigon.tech/get-started/installation) page; to build a specific release rather than `main`,
+check out its tag.
 
 ### Executables
 
@@ -261,6 +146,7 @@ go mod tidy
 - [docker-compose.yml](./docker-compose.yml) — how the services are wired when run as separate processes
 - [db/etl/README.md](./db/etl/README.md) — the ETL framework used to preprocess data before DB inserts
 - [db/downloader/README.md](./db/downloader/README.md) — snapshot downloader internals
+- [cmd/downloader/readme.md](./cmd/downloader/readme.md) — snapshots overview: what they are, when they are created and pulled
 - [cmd/rpcdaemon/README.md](./cmd/rpcdaemon/README.md) — RPC daemon, including running it remotely
 - [cmd/prometheus/Readme.md](./cmd/prometheus/Readme.md) — metrics and dashboards
 - [CI-GUIDELINES.md](./CI-GUIDELINES.md) — read before changing workflows
