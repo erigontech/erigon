@@ -956,3 +956,57 @@ func TestBuyGas_NilMaxFeePerBlobGasWithBlobs(t *testing.T) {
 	require.NotPanics(t, func() { err = st.buyGas(false) })
 	require.NoError(t, err)
 }
+
+// TestPreCheckNonceMismatchError pins the wire format and the errors.Is
+// identity of the nonce-mismatch errors. The parallel executor matches on the
+// sentinel and RPC surfaces the text, so both must survive changes to how the
+// error is built.
+func TestPreCheckNonceMismatchError(t *testing.T) {
+	t.Parallel()
+
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+
+	preCheckWithNonce := func(t *testing.T, stateNonce, msgNonce uint64) error {
+		t.Helper()
+		ibs := state.New(state.NewNoopReader())
+		defer ibs.Close()
+		require.NoError(t, ibs.SetNonce(sender, stateNonce, tracing.NonceChangeGenesis))
+
+		evm := newTestEVM(ibs, chain.TestChainOsakaConfig, 30_000_000)
+		msg := types.NewMessage(
+			sender, recipient, msgNonce, uint256.NewInt(0), 100_000,
+			uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
+			nil, nil,
+			true,  // checkNonce
+			false, // checkTransaction
+			false, // checkGas
+			false, // isFree
+			nil,   // maxFeePerBlobGas
+		)
+		st := NewTxnExecutor(evm, msg, new(GasPool).AddGas(30_000_000))
+		return st.preCheck(false, mdgas.IntrinsicGasCalcResult{})
+	}
+
+	t.Run("nonce too high", func(t *testing.T) {
+		err := preCheckWithNonce(t, 3, 7)
+		require.ErrorIs(t, err, ErrNonceTooHigh)
+		require.NotErrorIs(t, err, ErrNonceTooLow)
+		require.Equal(t,
+			"nonce too high: address 0x1111111111111111111111111111111111111111, tx: 7 state: 3",
+			err.Error())
+	})
+
+	t.Run("nonce too low", func(t *testing.T) {
+		err := preCheckWithNonce(t, 7, 3)
+		require.ErrorIs(t, err, ErrNonceTooLow)
+		require.NotErrorIs(t, err, ErrNonceTooHigh)
+		require.Equal(t,
+			"nonce too low: address 0x1111111111111111111111111111111111111111, tx: 3 state: 7",
+			err.Error())
+	})
+
+	t.Run("matching nonce passes", func(t *testing.T) {
+		require.NoError(t, preCheckWithNonce(t, 5, 5))
+	})
+}

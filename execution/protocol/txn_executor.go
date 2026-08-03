@@ -83,6 +83,22 @@ func (e ErrExecAbortError) IsError() bool {
 	return e.OriginError != nil
 }
 
+// nonceError formats lazily: under parallel execution a nonce mismatch is a
+// re-execution signal whose text is discarded, so eager formatting would
+// hex-encode the sender on every speculative miss.
+type nonceError struct {
+	err        error // ErrNonceTooHigh or ErrNonceTooLow
+	from       accounts.Address
+	txNonce    uint64
+	stateNonce uint64
+}
+
+func (e *nonceError) Error() string {
+	return fmt.Sprintf("%s: address %v, tx: %d state: %d", e.err, e.from, e.txNonce, e.stateNonce)
+}
+
+func (e *nonceError) Unwrap() error { return e.err }
+
 type TxnExecutor struct {
 	gp                    *GasPool
 	msg                   Message
@@ -319,11 +335,9 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 			return fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 		}
 		if msgNonce := st.msg.Nonce(); stNonce < msgNonce {
-			return fmt.Errorf("%w: address %v, tx: %d state: %d", ErrNonceTooHigh,
-				from, msgNonce, stNonce)
+			return &nonceError{ErrNonceTooHigh, from, msgNonce, stNonce}
 		} else if stNonce > msgNonce {
-			return fmt.Errorf("%w: address %v, tx: %d state: %d", ErrNonceTooLow,
-				from, msgNonce, stNonce)
+			return &nonceError{ErrNonceTooLow, from, msgNonce, stNonce}
 		} else if stNonce+1 < stNonce {
 			return fmt.Errorf("%w: address %v, nonce: %d", ErrNonceMax,
 				from, stNonce)
