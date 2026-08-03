@@ -20,6 +20,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -215,6 +216,24 @@ func TestFindBijectionSmallBuckets(t *testing.T) {
 	}
 }
 
+// findSplit masks partition indexes with maxFanout-1 instead of bounds-checking them.
+// That is only correct while every reachable (leafSize, m) keeps fanout - and the
+// largest index a key can land in - below maxFanout.
+func TestSplitParamsFanoutBound(t *testing.T) {
+	for leafSize := uint16(1); leafSize <= MaxLeafSize; leafSize++ {
+		primaryAggrBound := leafSize * uint16(math.Max(2, math.Ceil(0.35*float64(leafSize)+1./2.)))
+		secondaryAggrBound := primaryAggrBound * 2
+		if leafSize >= 7 {
+			secondaryAggrBound = primaryAggrBound * uint16(math.Ceil(0.21*float64(leafSize)+9./10.))
+		}
+		for m := leafSize + 1; m <= 4000; m++ {
+			fanout, unit := splitParams(m, leafSize, primaryAggrBound, secondaryAggrBound)
+			require.LessOrEqual(t, fanout, uint16(maxFanout), "leafSize=%d m=%d", leafSize, m)
+			require.Less(t, (m-1)/unit, fanout, "leafSize=%d m=%d unit=%d", leafSize, m, unit)
+		}
+	}
+}
+
 func TestFindSplit(t *testing.T) {
 	const (
 		leafSize           = uint16(8)
@@ -232,9 +251,8 @@ func TestFindSplit(t *testing.T) {
 	}
 
 	fanout, unit := splitParams(m, leafSize, primaryAggrBound, secondaryAggrBound)
-	count := make([]uint16, secondaryAggrBound)
 
-	salt := findSplit(bucket, 0, fanout, unit, count)
+	salt := findSplit(bucket, 0, fanout, unit)
 
 	// Verify: each partition gets exactly 'unit' keys (except possibly the last)
 	partitionCounts := make([]uint16, fanout)
@@ -267,9 +285,8 @@ func TestFindSplitSecondaryAggr(t *testing.T) {
 	}
 
 	fanout, unit := splitParams(m, leafSize, primaryAggrBound, secondaryAggrBound)
-	count := make([]uint16, secondaryAggrBound)
 
-	salt := findSplit(bucket, 0, fanout, unit, count)
+	salt := findSplit(bucket, 0, fanout, unit)
 
 	partitionCounts := make([]uint16, fanout)
 	for _, key := range bucket {
@@ -308,11 +325,10 @@ func BenchmarkFindSplit(b *testing.B) {
 	}
 	fanout, unit := splitParams(m, leafSize, primaryAggrBound, secondaryAggrBound)
 	salt := uint64(0x6453cec3f7376937) // startSeed[1]
-	count := make([]uint16, secondaryAggrBound)
 
 	for b.Loop() {
 		for i := range buckets {
-			findSplit(buckets[i][:], salt, fanout, unit, count)
+			findSplit(buckets[i][:], salt, fanout, unit)
 		}
 	}
 }
