@@ -264,22 +264,17 @@ type BeaconBody struct {
 }
 
 func NewBeaconBody(beaconCfg *clparams.BeaconChainConfig, version clparams.StateVersion) *BeaconBody {
-	maxAttSlashing := MaxAttesterSlashings
-	maxAttestation := MaxAttestations
-	if version >= clparams.ElectraVersion {
-		maxAttSlashing = int(beaconCfg.MaxAttesterSlashingsElectra)
-		maxAttestation = int(beaconCfg.MaxAttestationsElectra)
-	}
+	limits := beaconBodyLimitsForConfig(beaconCfg, version)
 
 	body := &BeaconBody{
 		beaconCfg:         beaconCfg,
 		Eth1Data:          &Eth1Data{},
-		ProposerSlashings: solid.NewStaticListSSZ[*ProposerSlashing](MaxProposerSlashings, 416),
-		AttesterSlashings: solid.NewDynamicListSSZ[*AttesterSlashing](maxAttSlashing),
-		Attestations:      solid.NewDynamicListSSZ[*solid.Attestation](maxAttestation),
-		Deposits:          solid.NewStaticListSSZ[*Deposit](MaxDeposits, 1240),
-		VoluntaryExits:    solid.NewStaticListSSZ[*SignedVoluntaryExit](MaxVoluntaryExits, 112),
-		ExecutionChanges:  solid.NewStaticListSSZ[*SignedBLSToExecutionChange](MaxExecutionChanges, 172),
+		ProposerSlashings: solid.NewStaticListSSZ[*ProposerSlashing](limits.proposerSlashings, 416),
+		AttesterSlashings: solid.NewDynamicListSSZ[*AttesterSlashing](limits.attesterSlashings),
+		Attestations:      solid.NewDynamicListSSZ[*solid.Attestation](limits.attestations),
+		Deposits:          solid.NewStaticListSSZ[*Deposit](limits.deposits, 1240),
+		VoluntaryExits:    solid.NewStaticListSSZ[*SignedVoluntaryExit](limits.voluntaryExits, 112),
+		ExecutionChanges:  solid.NewStaticListSSZ[*SignedBLSToExecutionChange](limits.executionChanges, 172),
 		Version:           version,
 	}
 
@@ -287,11 +282,7 @@ func NewBeaconBody(beaconCfg *clparams.BeaconChainConfig, version clparams.State
 	if version < clparams.GloasVersion {
 		// Pre-GLOAS: ExecutionPayload, BlobKzgCommitments in BeaconBody
 		body.ExecutionPayload = NewEth1Block(version, beaconCfg)
-		maxBlobCommitments := MaxBlobsCommittmentsPerBlock
-		if beaconCfg != nil && beaconCfg.MaxBlobCommittmentsPerBlock > 0 {
-			maxBlobCommitments = int(beaconCfg.MaxBlobCommittmentsPerBlock)
-		}
-		body.BlobKzgCommitments = solid.NewStaticListSSZ[*KZGCommitment](maxBlobCommitments, 48)
+		body.BlobKzgCommitments = solid.NewStaticListSSZ[*KZGCommitment](maxBlobCommitmentsForConfig(beaconCfg), 48)
 		if version >= clparams.ElectraVersion {
 			body.ExecutionRequests = NewExecutionRequestsWithVersion(beaconCfg, version)
 		}
@@ -311,31 +302,77 @@ func NewBeaconBody(beaconCfg *clparams.BeaconChainConfig, version clparams.State
 
 func maxBlobCommitmentsForConfig(beaconCfg *clparams.BeaconChainConfig) int {
 	if beaconCfg != nil && beaconCfg.MaxBlobCommittmentsPerBlock > 0 {
-		return int(beaconCfg.MaxBlobCommittmentsPerBlock)
+		return saturatingPositiveInt(beaconCfg.MaxBlobCommittmentsPerBlock, MaxBlobsCommittmentsPerBlock)
 	}
 	return MaxBlobsCommittmentsPerBlock
 }
 
 func maxPayloadAttestationsForConfig(beaconCfg *clparams.BeaconChainConfig) int {
+	fallback := saturatingPositiveInt(clparams.GetBeaconConfig().MaxPayloadAttestations, int(clparams.MainnetBeaconConfig.MaxPayloadAttestations))
 	if beaconCfg != nil && beaconCfg.MaxPayloadAttestations > 0 {
-		return int(beaconCfg.MaxPayloadAttestations)
+		return saturatingPositiveInt(beaconCfg.MaxPayloadAttestations, fallback)
 	}
-	return int(clparams.GetBeaconConfig().MaxPayloadAttestations)
+	return fallback
+}
+
+type beaconBodyListLimits struct {
+	proposerSlashings int
+	attesterSlashings int
+	attestations      int
+	deposits          int
+	voluntaryExits    int
+	executionChanges  int
+}
+
+func beaconBodyLimitsForConfig(beaconCfg *clparams.BeaconChainConfig, version clparams.StateVersion) beaconBodyListLimits {
+	limits := beaconBodyListLimits{
+		proposerSlashings: MaxProposerSlashings,
+		attesterSlashings: MaxAttesterSlashings,
+		attestations:      MaxAttestations,
+		deposits:          MaxDeposits,
+		voluntaryExits:    MaxVoluntaryExits,
+		executionChanges:  MaxExecutionChanges,
+	}
+	if version.AfterOrEqual(clparams.ElectraVersion) {
+		limits.attesterSlashings = MaxAttesterSlashingsElectra
+		limits.attestations = MaxAttestationsElectra
+	}
+	if beaconCfg == nil {
+		return limits
+	}
+	limits.proposerSlashings = saturatingPositiveInt(beaconCfg.MaxProposerSlashings, limits.proposerSlashings)
+	limits.deposits = saturatingPositiveInt(beaconCfg.MaxDeposits, limits.deposits)
+	limits.voluntaryExits = saturatingPositiveInt(beaconCfg.MaxVoluntaryExits, limits.voluntaryExits)
+	limits.executionChanges = saturatingPositiveInt(beaconCfg.MaxBlsToExecutionChanges, limits.executionChanges)
+	if version.AfterOrEqual(clparams.ElectraVersion) {
+		limits.attesterSlashings = saturatingPositiveInt(beaconCfg.MaxAttesterSlashingsElectra, limits.attesterSlashings)
+		limits.attestations = saturatingPositiveInt(beaconCfg.MaxAttestationsElectra, limits.attestations)
+	} else {
+		limits.attesterSlashings = saturatingPositiveInt(beaconCfg.MaxAttesterSlashings, limits.attesterSlashings)
+		limits.attestations = saturatingPositiveInt(beaconCfg.MaxAttestations, limits.attestations)
+	}
+	return limits
+}
+
+func saturatingPositiveInt(value uint64, fallback int) int {
+	if value == 0 {
+		return fallback
+	}
+	maxInt := int(^uint(0) >> 1)
+	if value > uint64(maxInt) {
+		return maxInt
+	}
+	return int(value)
 }
 
 func (b *BeaconBody) resetGloasProgressiveLists() {
-	maxAttesterSlashings := MaxAttesterSlashings
-	maxAttestations := MaxAttestations
-	if b.Version.AfterOrEqual(clparams.ElectraVersion) {
-		maxAttesterSlashings = MaxAttesterSlashingsElectra
-		maxAttestations = MaxAttestationsElectra
-	}
-	b.ProposerSlashings = solid.NewStaticProgressiveListSSZ[*ProposerSlashing](MaxProposerSlashings, 416)
-	b.AttesterSlashings = solid.NewDynamicProgressiveListSSZ[*AttesterSlashing](maxAttesterSlashings)
-	b.Attestations = solid.NewDynamicProgressiveListSSZ[*solid.Attestation](maxAttestations)
-	b.Deposits = solid.NewStaticProgressiveListSSZ[*Deposit](MaxDeposits, 1240)
-	b.VoluntaryExits = solid.NewStaticProgressiveListSSZ[*SignedVoluntaryExit](MaxVoluntaryExits, 112)
-	b.ExecutionChanges = solid.NewStaticProgressiveListSSZ[*SignedBLSToExecutionChange](MaxExecutionChanges, 172)
+	limits := beaconBodyLimitsForConfig(b.beaconCfg, b.Version)
+	b.ProposerSlashings = solid.NewStaticProgressiveListSSZ[*ProposerSlashing](limits.proposerSlashings, 416)
+	b.AttesterSlashings = solid.NewDynamicProgressiveListSSZ[*AttesterSlashing](limits.attesterSlashings)
+	b.Attestations = solid.NewDynamicProgressiveListSSZ[*solid.Attestation](limits.attestations)
+	b.Deposits = solid.NewStaticProgressiveListSSZ[*Deposit](limits.deposits, 1240)
+	b.VoluntaryExits = solid.NewStaticProgressiveListSSZ[*SignedVoluntaryExit](limits.voluntaryExits, 112)
+	b.ExecutionChanges = solid.NewStaticProgressiveListSSZ[*SignedBLSToExecutionChange](limits.executionChanges, 172)
 	ptcSize := clparams.MaxPtcSize
 	if b.beaconCfg != nil && b.beaconCfg.PtcSize > 0 {
 		ptcSize = b.beaconCfg.PtcSize
@@ -346,14 +383,7 @@ func (b *BeaconBody) resetGloasProgressiveLists() {
 // ensureNilFields initializes any nil fields that must be present for SSZ encoding,
 // hashing, and size computation. It is idempotent and safe to call multiple times.
 func (b *BeaconBody) ensureNilFields() {
-	var (
-		maxAttSlashing = MaxAttesterSlashings
-		maxAttestation = MaxAttestations
-	)
-	if b.Version.AfterOrEqual(clparams.ElectraVersion) {
-		maxAttSlashing = MaxAttesterSlashingsElectra
-		maxAttestation = MaxAttestationsElectra
-	}
+	limits := beaconBodyLimitsForConfig(b.beaconCfg, b.Version)
 	if b.Eth1Data == nil {
 		b.Eth1Data = &Eth1Data{}
 	}
@@ -366,37 +396,37 @@ func (b *BeaconBody) ensureNilFields() {
 	}
 	if b.ProposerSlashings == nil {
 		if b.Version >= clparams.GloasVersion {
-			b.ProposerSlashings = solid.NewStaticProgressiveListSSZ[*ProposerSlashing](MaxProposerSlashings, 416)
+			b.ProposerSlashings = solid.NewStaticProgressiveListSSZ[*ProposerSlashing](limits.proposerSlashings, 416)
 		} else {
-			b.ProposerSlashings = solid.NewStaticListSSZ[*ProposerSlashing](MaxProposerSlashings, 416)
+			b.ProposerSlashings = solid.NewStaticListSSZ[*ProposerSlashing](limits.proposerSlashings, 416)
 		}
 	}
 	if b.AttesterSlashings == nil {
 		if b.Version >= clparams.GloasVersion {
-			b.AttesterSlashings = solid.NewDynamicProgressiveListSSZ[*AttesterSlashing](maxAttSlashing)
+			b.AttesterSlashings = solid.NewDynamicProgressiveListSSZ[*AttesterSlashing](limits.attesterSlashings)
 		} else {
-			b.AttesterSlashings = solid.NewDynamicListSSZ[*AttesterSlashing](maxAttSlashing)
+			b.AttesterSlashings = solid.NewDynamicListSSZ[*AttesterSlashing](limits.attesterSlashings)
 		}
 	}
 	if b.Attestations == nil {
 		if b.Version >= clparams.GloasVersion {
-			b.Attestations = solid.NewDynamicProgressiveListSSZ[*solid.Attestation](maxAttestation)
+			b.Attestations = solid.NewDynamicProgressiveListSSZ[*solid.Attestation](limits.attestations)
 		} else {
-			b.Attestations = solid.NewDynamicListSSZ[*solid.Attestation](maxAttestation)
+			b.Attestations = solid.NewDynamicListSSZ[*solid.Attestation](limits.attestations)
 		}
 	}
 	if b.Deposits == nil {
 		if b.Version >= clparams.GloasVersion {
-			b.Deposits = solid.NewStaticProgressiveListSSZ[*Deposit](MaxDeposits, 1240)
+			b.Deposits = solid.NewStaticProgressiveListSSZ[*Deposit](limits.deposits, 1240)
 		} else {
-			b.Deposits = solid.NewStaticListSSZ[*Deposit](MaxDeposits, 1240)
+			b.Deposits = solid.NewStaticListSSZ[*Deposit](limits.deposits, 1240)
 		}
 	}
 	if b.VoluntaryExits == nil {
 		if b.Version >= clparams.GloasVersion {
-			b.VoluntaryExits = solid.NewStaticProgressiveListSSZ[*SignedVoluntaryExit](MaxVoluntaryExits, 112)
+			b.VoluntaryExits = solid.NewStaticProgressiveListSSZ[*SignedVoluntaryExit](limits.voluntaryExits, 112)
 		} else {
-			b.VoluntaryExits = solid.NewStaticListSSZ[*SignedVoluntaryExit](MaxVoluntaryExits, 112)
+			b.VoluntaryExits = solid.NewStaticListSSZ[*SignedVoluntaryExit](limits.voluntaryExits, 112)
 		}
 	}
 	// [Modified in Gloas:EIP7732] ExecutionPayload removed in GLOAS
@@ -405,18 +435,14 @@ func (b *BeaconBody) ensureNilFields() {
 	}
 	if b.ExecutionChanges == nil {
 		if b.Version >= clparams.GloasVersion {
-			b.ExecutionChanges = solid.NewStaticProgressiveListSSZ[*SignedBLSToExecutionChange](MaxExecutionChanges, 172)
+			b.ExecutionChanges = solid.NewStaticProgressiveListSSZ[*SignedBLSToExecutionChange](limits.executionChanges, 172)
 		} else {
-			b.ExecutionChanges = solid.NewStaticListSSZ[*SignedBLSToExecutionChange](MaxExecutionChanges, 172)
+			b.ExecutionChanges = solid.NewStaticListSSZ[*SignedBLSToExecutionChange](limits.executionChanges, 172)
 		}
 	}
 	// [Modified in Gloas:EIP7732] BlobKzgCommitments removed in GLOAS
 	if b.BlobKzgCommitments == nil && b.Version < clparams.GloasVersion {
-		maxBlobCommitments := MaxBlobsCommittmentsPerBlock
-		if b.beaconCfg != nil && b.beaconCfg.MaxBlobCommittmentsPerBlock > 0 {
-			maxBlobCommitments = int(b.beaconCfg.MaxBlobCommittmentsPerBlock)
-		}
-		b.BlobKzgCommitments = solid.NewStaticListSSZ[*KZGCommitment](maxBlobCommitments, 48)
+		b.BlobKzgCommitments = solid.NewStaticListSSZ[*KZGCommitment](maxBlobCommitmentsForConfig(b.beaconCfg), 48)
 	}
 	// [New in Electra] ExecutionRequests — removed in GLOAS
 	if b.ExecutionRequests == nil && b.Version.AfterOrEqual(clparams.ElectraVersion) && b.Version < clparams.GloasVersion {
@@ -713,14 +739,7 @@ func (b *BeaconBody) KzgCommitmentsInclusionProof() ([][32]byte, error) {
 }
 
 func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
-	var (
-		maxAttSlashing = MaxAttesterSlashings
-		maxAttestation = MaxAttestations
-	)
-	if b.Version.AfterOrEqual(clparams.ElectraVersion) {
-		maxAttSlashing = MaxAttesterSlashingsElectra
-		maxAttestation = MaxAttestationsElectra
-	}
+	limits := beaconBodyLimitsForConfig(b.beaconCfg, b.Version)
 
 	var tmp struct {
 		RandaoReveal       common.Bytes96                              `json:"randao_reveal"`
@@ -741,30 +760,26 @@ func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
 		PayloadAttestations       *solid.ListSSZ[*PayloadAttestation] `json:"payload_attestations,omitempty"`
 		ParentExecutionRequests   *ExecutionRequests                  `json:"parent_execution_requests,omitempty"`
 	}
-	tmp.ProposerSlashings = solid.NewStaticListSSZ[*ProposerSlashing](MaxProposerSlashings, 416)
-	tmp.AttesterSlashings = solid.NewDynamicListSSZ[*AttesterSlashing](maxAttSlashing)
-	tmp.Attestations = solid.NewDynamicListSSZ[*solid.Attestation](maxAttestation)
-	tmp.Deposits = solid.NewStaticListSSZ[*Deposit](MaxDeposits, 1240)
-	tmp.VoluntaryExits = solid.NewStaticListSSZ[*SignedVoluntaryExit](MaxVoluntaryExits, 112)
-	tmp.ExecutionChanges = solid.NewStaticListSSZ[*SignedBLSToExecutionChange](MaxExecutionChanges, 172)
+	tmp.ProposerSlashings = solid.NewStaticListSSZ[*ProposerSlashing](limits.proposerSlashings, 416)
+	tmp.AttesterSlashings = solid.NewDynamicListSSZ[*AttesterSlashing](limits.attesterSlashings)
+	tmp.Attestations = solid.NewDynamicListSSZ[*solid.Attestation](limits.attestations)
+	tmp.Deposits = solid.NewStaticListSSZ[*Deposit](limits.deposits, 1240)
+	tmp.VoluntaryExits = solid.NewStaticListSSZ[*SignedVoluntaryExit](limits.voluntaryExits, 112)
+	tmp.ExecutionChanges = solid.NewStaticListSSZ[*SignedBLSToExecutionChange](limits.executionChanges, 172)
 	// [Modified in Gloas:EIP7732] Only initialize pre-GLOAS fields when needed
 	if b.Version < clparams.GloasVersion {
-		maxBlobCommitments := MaxBlobsCommittmentsPerBlock
-		if b.beaconCfg != nil && b.beaconCfg.MaxBlobCommittmentsPerBlock > 0 {
-			maxBlobCommitments = int(b.beaconCfg.MaxBlobCommittmentsPerBlock)
-		}
-		tmp.BlobKzgCommitments = solid.NewStaticListSSZ[*KZGCommitment](maxBlobCommitments, 48)
+		tmp.BlobKzgCommitments = solid.NewStaticListSSZ[*KZGCommitment](maxBlobCommitmentsForConfig(b.beaconCfg), 48)
 		tmp.ExecutionRequests = NewExecutionRequestsWithVersion(b.beaconCfg, b.Version)
 		tmp.ExecutionPayload = NewEth1Block(b.Version, b.beaconCfg)
 	}
 	// [New in Gloas:EIP7732] Initialize GLOAS fields
 	if b.Version >= clparams.GloasVersion {
-		tmp.ProposerSlashings = solid.NewStaticProgressiveListSSZ[*ProposerSlashing](MaxProposerSlashings, 416)
-		tmp.AttesterSlashings = solid.NewDynamicProgressiveListSSZ[*AttesterSlashing](maxAttSlashing)
-		tmp.Attestations = solid.NewDynamicProgressiveListSSZ[*solid.Attestation](maxAttestation)
-		tmp.Deposits = solid.NewStaticProgressiveListSSZ[*Deposit](MaxDeposits, 1240)
-		tmp.VoluntaryExits = solid.NewStaticProgressiveListSSZ[*SignedVoluntaryExit](MaxVoluntaryExits, 112)
-		tmp.ExecutionChanges = solid.NewStaticProgressiveListSSZ[*SignedBLSToExecutionChange](MaxExecutionChanges, 172)
+		tmp.ProposerSlashings = solid.NewStaticProgressiveListSSZ[*ProposerSlashing](limits.proposerSlashings, 416)
+		tmp.AttesterSlashings = solid.NewDynamicProgressiveListSSZ[*AttesterSlashing](limits.attesterSlashings)
+		tmp.Attestations = solid.NewDynamicProgressiveListSSZ[*solid.Attestation](limits.attestations)
+		tmp.Deposits = solid.NewStaticProgressiveListSSZ[*Deposit](limits.deposits, 1240)
+		tmp.VoluntaryExits = solid.NewStaticProgressiveListSSZ[*SignedVoluntaryExit](limits.voluntaryExits, 112)
+		tmp.ExecutionChanges = solid.NewStaticProgressiveListSSZ[*SignedBLSToExecutionChange](limits.executionChanges, 172)
 		tmp.SignedExecutionPayloadBid = &SignedExecutionPayloadBid{
 			Message: &ExecutionPayloadBid{
 				BlobKzgCommitments: *solid.NewStaticProgressiveListSSZ[*KZGCommitment](maxBlobCommitmentsForConfig(b.beaconCfg), 48),

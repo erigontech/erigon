@@ -1,9 +1,12 @@
 package cltypes
 
 import (
+	"errors"
 	"testing"
 
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/ssz"
 	"github.com/stretchr/testify/require"
 )
 
@@ -54,4 +57,55 @@ func TestBuilderPendingPaymentCloneCopiesFields(t *testing.T) {
 
 	require.Equal(t, payment, cloned)
 	require.NotSame(t, payment.Withdrawal, cloned.Withdrawal)
+}
+
+func TestExecutionPayloadBidDecodePreservesProgressiveLimit(t *testing.T) {
+	encoded := encodedExecutionPayloadBidWithCommitments(t, 17)
+	target := &ExecutionPayloadBid{
+		BlobKzgCommitments: *solid.NewStaticProgressiveListSSZ[*KZGCommitment](1, 48),
+	}
+
+	require.ErrorIs(t, target.DecodeSSZ(encoded, 0), ssz.ErrTooBigList)
+
+	encoded = encodedExecutionPayloadBidWithCommitments(t, 2)
+	require.NoError(t, target.DecodeSSZ(encoded, 0))
+}
+
+func TestSignedExecutionPayloadBidDecodePreservesMessageLimit(t *testing.T) {
+	message := &ExecutionPayloadBid{
+		BlobKzgCommitments: *solid.NewStaticProgressiveListSSZ[*KZGCommitment](1, 48),
+	}
+	target := &SignedExecutionPayloadBid{Message: message}
+	source := &SignedExecutionPayloadBid{Message: executionPayloadBidWithCommitments(17)}
+	encoded, err := source.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	err = target.DecodeSSZ(encoded, 0)
+	require.True(t, errors.Is(err, ssz.ErrTooBigList), err)
+	require.Same(t, message, target.Message)
+}
+
+func TestExecutionPayloadBidClonePreservesProgressiveLimit(t *testing.T) {
+	bid := &ExecutionPayloadBid{
+		BlobKzgCommitments: *solid.NewStaticProgressiveListSSZ[*KZGCommitment](1, 48),
+	}
+	cloned := bid.Clone().(*ExecutionPayloadBid)
+	encoded := make([]byte, 17*48)
+
+	require.ErrorIs(t, cloned.BlobKzgCommitments.DecodeSSZ(encoded, 0), ssz.ErrTooBigList)
+}
+
+func encodedExecutionPayloadBidWithCommitments(t *testing.T, count int) []byte {
+	t.Helper()
+	encoded, err := executionPayloadBidWithCommitments(count).EncodeSSZ(nil)
+	require.NoError(t, err)
+	return encoded
+}
+
+func executionPayloadBidWithCommitments(count int) *ExecutionPayloadBid {
+	commitments := solid.NewStaticProgressiveListSSZ[*KZGCommitment](1, 48)
+	for range count {
+		commitments.Append(new(KZGCommitment))
+	}
+	return &ExecutionPayloadBid{BlobKzgCommitments: *commitments}
 }

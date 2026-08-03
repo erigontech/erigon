@@ -71,6 +71,21 @@ func NewStaticProgressiveListSSZ[T EncodableHashableSSZ](limit int, bytesPerElem
 	return &ListSSZ[T]{list: make([]T, 0), limit: progressiveDecodeLimit(limit), static: true, bytesPerElement: bytesPerElement, progressive: true}
 }
 
+func (l *ListSSZ[T]) EnsureStaticProgressive(limit int, bytesPerElement int) {
+	if l.progressive && l.static && l.bytesPerElement == bytesPerElement {
+		return
+	}
+	if l.static && l.limit > 0 && l.bytesPerElement == bytesPerElement {
+		l.limit = progressiveDecodeLimit(l.limit)
+	} else {
+		l.list = make([]T, 0)
+		l.limit = progressiveDecodeLimit(limit)
+		l.static = true
+		l.bytesPerElement = bytesPerElement
+	}
+	l.progressive = true
+}
+
 // Progressive lists are semantically unbounded, so decode limits are resource guards rather than protocol maxima.
 func progressiveDecodeLimit(semanticLimit int) int {
 	const minimum = 16

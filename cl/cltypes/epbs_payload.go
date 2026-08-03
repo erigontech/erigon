@@ -17,6 +17,10 @@
 package cltypes
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
@@ -345,7 +349,7 @@ func (e *ExecutionPayloadBid) EncodeSSZ(buf []byte) ([]byte, error) {
 }
 
 func (e *ExecutionPayloadBid) DecodeSSZ(buf []byte, version int) error {
-	e.BlobKzgCommitments = *solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsCommittmentsPerBlock, 48)
+	e.BlobKzgCommitments.EnsureStaticProgressive(maxBlobCommitmentsForConfig(clparams.GetBeaconConfig()), 48)
 	return ssz2.UnmarshalSSZ(
 		buf, version,
 		e.ParentBlockHash[:],
@@ -364,9 +368,24 @@ func (e *ExecutionPayloadBid) DecodeSSZ(buf []byte, version int) error {
 }
 
 func (e *ExecutionPayloadBid) Clone() clonable.Clonable {
+	commitments := e.BlobKzgCommitments.Clone().(*solid.ListSSZ[*KZGCommitment])
+	commitments.EnsureStaticProgressive(maxBlobCommitmentsForConfig(clparams.GetBeaconConfig()), 48)
 	return &ExecutionPayloadBid{
-		BlobKzgCommitments: *solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsCommittmentsPerBlock, 48),
+		BlobKzgCommitments: *commitments,
 	}
+}
+
+func (e *ExecutionPayloadBid) UnmarshalJSON(data []byte) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	commitments, ok := fields["blob_kzg_commitments"]
+	if !ok || bytes.Equal(bytes.TrimSpace(commitments), []byte("null")) {
+		return errors.New("execution payload bid contains null blob KZG commitments")
+	}
+	type executionPayloadBid ExecutionPayloadBid
+	return json.Unmarshal(data, (*executionPayloadBid)(e))
 }
 
 func (e *ExecutionPayloadBid) Copy() *ExecutionPayloadBid {
@@ -409,7 +428,11 @@ func (s *SignedExecutionPayloadBid) EncodeSSZ(buf []byte) ([]byte, error) {
 }
 
 func (s *SignedExecutionPayloadBid) DecodeSSZ(buf []byte, version int) error {
-	s.Message = new(ExecutionPayloadBid)
+	if s.Message == nil {
+		s.Message = &ExecutionPayloadBid{
+			BlobKzgCommitments: *solid.NewStaticProgressiveListSSZ[*KZGCommitment](maxBlobCommitmentsForConfig(clparams.GetBeaconConfig()), 48),
+		}
+	}
 	return ssz2.UnmarshalSSZ(buf, version, s.Message, s.Signature[:])
 }
 
