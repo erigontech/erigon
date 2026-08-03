@@ -958,11 +958,12 @@ func TestBuyGas_NilMaxFeePerBlobGasWithBlobs(t *testing.T) {
 }
 
 // TestPreCheckNonceMismatchError pins the message text and the errors.Is
-// identity: the parallel executor matches the sentinel, RPC surfaces the text.
+// identity that block assembly and eth_simulate match on. The sender address
+// carries letters so the pinned text also covers EIP-55 casing.
 func TestPreCheckNonceMismatchError(t *testing.T) {
 	t.Parallel()
 
-	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	sender := accounts.InternAddress(common.HexToAddress("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"))
 	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
 
 	preCheckWithNonce := func(t *testing.T, stateNonce, msgNonce uint64) error {
@@ -991,7 +992,7 @@ func TestPreCheckNonceMismatchError(t *testing.T) {
 		require.ErrorIs(t, err, ErrNonceTooHigh)
 		require.NotErrorIs(t, err, ErrNonceTooLow)
 		require.Equal(t,
-			"nonce too high: address 0x1111111111111111111111111111111111111111, tx: 7 state: 3",
+			"nonce too high: address 0xDeaDbeefdEAdbeefdEadbEEFdeadbeEFdEaDbeeF, tx: 7 state: 3",
 			err.Error())
 	})
 
@@ -1000,7 +1001,7 @@ func TestPreCheckNonceMismatchError(t *testing.T) {
 		require.ErrorIs(t, err, ErrNonceTooLow)
 		require.NotErrorIs(t, err, ErrNonceTooHigh)
 		require.Equal(t,
-			"nonce too low: address 0x1111111111111111111111111111111111111111, tx: 3 state: 7",
+			"nonce too low: address 0xDeaDbeefdEAdbeefdEadbEEFdeadbeEFdEaDbeeF, tx: 3 state: 7",
 			err.Error())
 	})
 
