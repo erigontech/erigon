@@ -2014,7 +2014,8 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 		}
 	}
 
-	var code []byte
+	var code refreshedCode
+	var codeSource ReadSource
 
 	if sdb.versionMap != nil {
 		account = readAccount
@@ -2046,7 +2047,7 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 			}
 		}
 
-		code, _, _, err = refreshCode(sdb, addr)
+		code, codeSource, _, err = refreshCode(sdb, addr)
 		if err != nil {
 			return nil, err
 		}
@@ -2058,15 +2059,15 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 		sdb.accountRead(addr, account, accountSource, accountVersion)
 	}
 	obj := newObject(sdb, addr, account, account)
-	if code != nil {
+	if code.Bytes != nil {
 		// When code is loaded from the version map (written by a prior tx),
 		// synchronise the stateObject's CodeHash with the actual code.
 		// Without this fix, the stale CodeHash causes the "revert to original"
 		// optimisation in SetCode to incorrectly delete code writes when
 		// clearing a delegation that was set by a prior transaction in the
 		// same block.
-		codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
-		obj.code = accounts.Code{Hash: codeHash, Bytes: code}
+		codeHash := code.codeHash(codeSource, obj.data.CodeHash)
+		obj.code = accounts.Code{Hash: codeHash, Bytes: code.Bytes}
 		if codeHash != obj.data.CodeHash {
 			obj.data.CodeHash = codeHash
 			obj.original.CodeHash = codeHash
@@ -3228,12 +3229,12 @@ func (sdb *IntraBlockState) reconstructCellFlags(obj *stateObject, addr accounts
 	if obj.code.Bytes != nil {
 		return
 	}
-	code, _, _, err := refreshCode(sdb, addr)
-	if err != nil || code == nil {
+	code, codeSource, _, err := refreshCode(sdb, addr)
+	if err != nil || code.Bytes == nil {
 		return
 	}
-	codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
-	obj.code = accounts.Code{Hash: codeHash, Bytes: code}
+	codeHash := code.codeHash(codeSource, obj.data.CodeHash)
+	obj.code = accounts.Code{Hash: codeHash, Bytes: code.Bytes}
 	obj.data.CodeHash = codeHash
 	obj.original.CodeHash = codeHash
 }
