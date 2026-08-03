@@ -19,6 +19,8 @@ package protocol
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -955,4 +957,102 @@ func TestBuyGas_NilMaxFeePerBlobGasWithBlobs(t *testing.T) {
 	var err error
 	require.NotPanics(t, func() { err = st.buyGas(false) })
 	require.NoError(t, err)
+}
+
+// accessListCountingMsg counts AccessList reads, which both the intrinsic-gas
+// calculation and the access-list clone perform.
+type accessListCountingMsg struct {
+	*types.Message
+	reads *int
+}
+
+func (m accessListCountingMsg) AccessList() types.AccessList {
+	*m.reads++
+	return m.Message.AccessList()
+}
+
+// TestPreCheckDefersIntrinsicGasUntilNeeded pins that a transaction rejected by
+// a state check never pays for the intrinsic-gas calculation. Under parallel
+// execution a stale-nonce rejection is a routine re-execution signal, so work
+// done ahead of it is repeated for every speculative attempt.
+func TestPreCheckDefersIntrinsicGasUntilNeeded(t *testing.T) {
+	t.Parallel()
+
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+
+	run := func(t *testing.T, stateNonce, msgNonce uint64) (int, error) {
+		t.Helper()
+		ibs := state.New(state.NewNoopReader())
+		defer ibs.Close()
+		require.NoError(t, ibs.SetNonce(sender, stateNonce, tracing.NonceChangeGenesis))
+
+		evm := newTestEVM(ibs, chain.TestChainOsakaConfig, 30_000_000)
+		inner := types.NewMessage(
+			sender, recipient, msgNonce, uint256.NewInt(0), 100_000,
+			uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
+			nil, types.AccessList{{Address: recipient.Value()}},
+			true,  // checkNonce
+			false, // checkTransaction
+			true,  // checkGas
+			false, // isFree
+			nil,   // maxFeePerBlobGas
+		)
+		reads := 0
+		msg := accessListCountingMsg{Message: inner, reads: &reads}
+		st := NewTxnExecutor(evm, msg, new(GasPool).AddGas(30_000_000))
+		_, err := st.Execute(true, false)
+		return reads, err
+	}
+
+	t.Run("stale nonce rejects before intrinsic gas is computed", func(t *testing.T) {
+		reads, err := run(t, 3, 7)
+		require.ErrorIs(t, err, ErrNonceTooHigh)
+		require.Zero(t, reads, "rejected tx must not read the access list")
+	})
+
+	t.Run("accepted tx still computes intrinsic gas", func(t *testing.T) {
+		reads, err := run(t, 5, 5)
+		require.NoError(t, err)
+		require.NotZero(t, reads, "accepted tx must compute intrinsic gas")
+	})
+}
+
+// BenchmarkExecuteStaleNonceReject measures a transaction rejected on a stale
+// nonce, the routine outcome of a speculative parallel attempt. Access-list
+// size drives both the intrinsic-gas calculation and the tuple copy.
+func BenchmarkExecuteStaleNonceReject(b *testing.B) {
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+
+	for _, alLen := range []int{0, 8, 64} {
+		b.Run(fmt.Sprintf("accesslist=%d", alLen), func(b *testing.B) {
+			al := make(types.AccessList, alLen)
+			for i := range al {
+				al[i] = types.AccessTuple{
+					Address:     common.BigToAddress(big.NewInt(int64(i + 1))),
+					StorageKeys: []common.Hash{{byte(i)}, {byte(i), 0x01}},
+				}
+			}
+			ibs := state.New(state.NewNoopReader())
+			defer ibs.Close()
+			require.NoError(b, ibs.SetNonce(sender, 3, tracing.NonceChangeGenesis))
+
+			msg := types.NewMessage(
+				sender, recipient, 7, uint256.NewInt(0), 100_000,
+				uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
+				nil, al,
+				true, false, true, false, nil,
+			)
+
+			b.ReportAllocs()
+			for b.Loop() {
+				evm := newTestEVM(ibs, chain.TestChainOsakaConfig, 30_000_000)
+				st := NewTxnExecutor(evm, msg, new(GasPool).AddGas(30_000_000))
+				if _, err := st.Execute(true, false); !errors.Is(err, ErrNonceTooHigh) {
+					b.Fatalf("want ErrNonceTooHigh, got %v", err)
+				}
+			}
+		})
+	}
 }

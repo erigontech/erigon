@@ -303,9 +303,10 @@ func CheckEip1559TxGasFeeCap(from accounts.Address, feeCap, tipCap, baseFee *uin
 	return nil
 }
 
-// preCheck validates consensus rules (nonce, fees, EIP-7825 gas cap) and buys gas.
+// preCheck validates the consensus rules that need no gas accounting: blob
+// count, nonce, sender EOA-ness, block gas inclusion and fee caps.
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
-func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.IntrinsicGasCalcResult) error {
+func (st *TxnExecutor) preCheck() error {
 	rules := st.evm.ChainRules()
 	from := st.msg.From()
 	if rules.IsOsaka && len(st.msg.BlobHashes()) > params.MaxBlobsPerTxn {
@@ -378,10 +379,14 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		}
 	}
 
-	// EIP-7825: Transaction Gas Limit Cap.
-	// Intrinsic gas is computed before preCheck() in Execute so that the
-	// fork-dependent cap can be validated here, before buyGas(), so pool gas
-	// is never consumed for rejected txs.
+	return nil
+}
+
+// checkGasCap applies the EIP-7825 transaction gas cap and buys gas. Split from
+// preCheck so the cap still runs before buyGas consumes pool gas, while the
+// intrinsic-gas calculation it needs stays off the rejection paths above.
+func (st *TxnExecutor) checkGasCap(gasBailout bool, intrinsicGasResult mdgas.IntrinsicGasCalcResult) error {
+	rules := st.evm.ChainRules()
 	if st.msg.CheckGas() && rules.IsOsaka {
 		if rules.IsAmsterdam {
 			// EIP-8037: TX_MAX_GAS_LIMIT applies to the execution gas dimension only.
@@ -391,7 +396,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 					ErrIntrinsicGas, gasToCap, params.MaxTxnGasLimit)
 			}
 		} else if st.msg.Gas() > params.MaxTxnGasLimit {
-			return fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, from, st.msg.Gas())
+			return fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, st.msg.From(), st.msg.Gas())
 		}
 	}
 
@@ -550,20 +555,27 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	msg := st.msg
 	sender := msg.From()
 	contractCreation := msg.To().IsNil()
-	accessTuples := slices.Clone[types.AccessList](msg.AccessList())
 	auths := msg.Authorizations()
 
-	// Check clause 1: compute intrinsic gas before preCheck so the EIP-7825
-	// cap can be checked there (before buyGas) for all fork variants.
-	intrinsicGasResult, overflow := st.calcIntrinsicGas(contractCreation, auths, accessTuples)
+	// Check clauses 3-6. These reject without touching intrinsic gas, so a tx
+	// they reject -- routinely, a speculative parallel attempt on a stale nonce
+	// -- never pays for the calculation or the access-list copy below.
+	if err := st.preCheck(); err != nil {
+		return nil, err
+	}
+
+	// Check clause 1.
+	intrinsicGasResult, overflow := st.calcIntrinsicGas(contractCreation, auths, msg.AccessList())
 	if overflow {
 		return nil, ErrGasUintOverflow
 	}
 
-	// Check clauses 2-6, buy gas if everything is correct
-	if err := st.preCheck(gasBailout, intrinsicGasResult); err != nil {
+	// Check clause 2, buy gas if everything is correct.
+	if err := st.checkGasCap(gasBailout, intrinsicGasResult); err != nil {
 		return nil, err
 	}
+
+	accessTuples := slices.Clone[types.AccessList](msg.AccessList())
 
 	rules := st.evm.ChainRules()
 	vmConfig := st.evm.Config()
