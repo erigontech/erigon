@@ -62,12 +62,6 @@ This section details common error messages and provides clear, actionable steps 
 
 ## Chain-Specific Issues
 
-### Bad block / Invalid Merkle on Polygon network
-
-* **Error Description:** The node stops importing new blocks, and the logs show errors related to bad blocks.
-* **Cause:** This is a Polygon-specific issue that occurs when the Heimdall and Bor layers are out of sync.
-* **Solution:** Verify that your Heimdall and REST servers are running. Restarting the Bor and Heimdall services on both the sentry and validator nodes should resolve the issue by bringing the layers back into sync. See the [Polygon Node](/get-started/easy-nodes/how-to-run-a-polygon-node) guide.
-
 ## Build and Installation
 
 ### `libsilkworm_capi.so`: missing shared library
