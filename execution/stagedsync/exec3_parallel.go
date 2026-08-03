@@ -572,7 +572,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 						}
 						return fail.err
 					}
-					if err := applyLoopMissingBlocksError(lastBlockResult.BlockNum, pe.maxBlockNum, txResultBlocks, appliedBlocks); err != nil {
+					if err := applyLoopMissingBlocksError(ctx, lastBlockResult.BlockNum, pe.maxBlockNum, txResultBlocks, appliedBlocks); err != nil {
 						return err
 					}
 					// The stop kind rides in the shared context's cause: stopReachedMax
@@ -1441,10 +1441,13 @@ func applyLoopMissingBlocks(txResultBlocks, appliedBlocks map[uint64]struct{}) [
 	return missing
 }
 
-func applyLoopMissingBlocksError(lastBlockResult, maxBlockNum uint64, txResultBlocks, appliedBlocks map[uint64]struct{}) error {
+func applyLoopMissingBlocksError(ctx context.Context, lastBlockResult, maxBlockNum uint64, txResultBlocks, appliedBlocks map[uint64]struct{}) error {
 	missing := applyLoopMissingBlocks(txResultBlocks, appliedBlocks)
 	if len(missing) == 0 {
 		return nil
+	}
+	if cause := context.Cause(ctx); cause != nil {
+		return cause
 	}
 	return fmt.Errorf("parallel exec apply loop exited (lastBlockResult=%d maxBlockNum=%d) but %d block(s) had tx-results without a blockResult: %v",
 		lastBlockResult, maxBlockNum, len(missing), missing)

@@ -1306,7 +1306,7 @@ func TestApplyLoopCloseBranchSurfacesDeferredRootBeforeMissing(t *testing.T) {
 		if deferredRootErr != nil {
 			return deferredRootErr
 		}
-		return applyLoopMissingBlocksError(5, 10, txResultBlocks, appliedBlocks)
+		return applyLoopMissingBlocksError(context.Background(), 5, 10, txResultBlocks, appliedBlocks)
 	}
 
 	mkSet := func(ns ...uint64) map[uint64]struct{} {
@@ -1330,6 +1330,25 @@ func TestApplyLoopCloseBranchSurfacesDeferredRootBeforeMissing(t *testing.T) {
 		require.NotErrorIs(t, err, rules.ErrInvalidBlock)
 		require.NotErrorIs(t, err, ErrWrongTrieRoot)
 		require.Contains(t, err.Error(), "without a blockResult")
+	})
+
+	t.Run("missing block during routine cancellation returns cancellation", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		err := applyLoopMissingBlocksError(ctx, 5, 10, mkSet(5, 6), mkSet(5))
+		require.ErrorIs(t, err, context.Canceled)
+		require.True(t, common.IsOnlyCanceled(err))
+	})
+
+	t.Run("missing block during cancellation preserves a real cause", func(t *testing.T) {
+		cause := errors.New("worker failed")
+		ctx, cancel := context.WithCancelCause(context.Background())
+		cancel(cause)
+
+		err := applyLoopMissingBlocksError(ctx, 5, 10, mkSet(5, 6), mkSet(5))
+		require.ErrorIs(t, err, cause)
+		require.False(t, common.IsOnlyCanceled(err))
 	})
 
 	t.Run("deferred root + no missing block — root error surfaces", func(t *testing.T) {
