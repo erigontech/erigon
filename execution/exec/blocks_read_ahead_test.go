@@ -22,9 +22,11 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/cache"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // stubTemporalGetter stands in for the committed-state snapshot a warmup
@@ -43,6 +45,18 @@ func (s stubTemporalGetter) HasPrefix(kv.Domain, []byte) ([]byte, []byte, bool, 
 }
 
 func (s stubTemporalGetter) StepsInFiles(...kv.Domain) kv.Step { return 0 }
+
+type countingTemporalGetter struct {
+	stubTemporalGetter
+	codeReads int
+}
+
+func (s *countingTemporalGetter) GetLatest(domain kv.Domain, key []byte) ([]byte, kv.Step, error) {
+	if domain == kv.CodeDomain {
+		s.codeReads++
+	}
+	return s.stubTemporalGetter.GetLatest(domain, key)
+}
 
 func newTestStateCache() *cache.StateCache {
 	b := 1 * datasize.MB
@@ -122,6 +136,26 @@ func TestCachePopulatingGetterWarmsColdKeys(t *testing.T) {
 	got, ok = sc.Get(kv.AccountsDomain, key)
 	require.True(t, ok)
 	require.Empty(t, got)
+}
+
+func TestCachePopulatingGetterDeduplicatesCodeByHash(t *testing.T) {
+	code := make([]byte, 24*1024)
+	for i := range code {
+		code[i] = byte(i)
+	}
+	codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
+	g := &countingTemporalGetter{stubTemporalGetter: stubTemporalGetter{v: code, step: 7}}
+	sc := newTestStateCache()
+	cpg := &cachePopulatingGetter{g: g, sc: sc, stepSize: 16}
+
+	require.NoError(t, cpg.warmCode(accounts.InternAddress(common.Address{1}), codeHash))
+	require.NoError(t, cpg.warmCode(accounts.InternAddress(common.Address{2}), codeHash))
+	require.Equal(t, 1, g.codeReads, "shared bytecode must only be read once")
+
+	hash := codeHash.Value()
+	got, ok := sc.GetCodeByHash(hash[:])
+	require.True(t, ok)
+	require.Equal(t, code, got)
 }
 
 // A negative (missing account, empty slot) carries no write step, so a

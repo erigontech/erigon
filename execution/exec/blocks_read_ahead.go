@@ -129,6 +129,41 @@ func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte) ([]byte, k
 	return v, step, err
 }
 
+// warmCode prefetches code using the code hash already decoded from the same
+// committed account snapshot. Unlike ReadAccountCode through GetLatest, it can
+// skip the address-keyed CodeDomain read when another address has already
+// populated the content-addressed code cache. This matters for clone-style
+// workloads where thousands of accounts share one large bytecode.
+//
+// The account and code reads use the same read-only transaction, so the hash is
+// authoritative for these bytes. If a concurrent authoritative cache update
+// wins the race, PutCodeWithHashIfAbsent preserves that newer address binding.
+func (cpg *cachePopulatingGetter) warmCode(addr accounts.Address, codeHash accounts.CodeHash) error {
+	if codeHash.IsEmpty() {
+		return nil
+	}
+	hash := codeHash.Value()
+	if _, ok := cpg.sc.GetCodeByHash(hash[:]); ok {
+		return nil
+	}
+
+	addrValue := addr.Value()
+	code, step, err := cpg.g.GetLatest(kv.CodeDomain, addrValue[:])
+	if err != nil || len(code) == 0 {
+		return err
+	}
+	cpg.sc.PutCodeWithHashIfAbsent(addrValue[:], code, hash[:], (uint64(step)+1)*cpg.stepSize-1)
+	return nil
+}
+
+func warmAccountCode(stateReader *state.ReaderV3, cpg *cachePopulatingGetter, addr accounts.Address, codeHash accounts.CodeHash) {
+	if cpg != nil {
+		_ = cpg.warmCode(addr, codeHash)
+		return
+	}
+	_, _ = stateReader.ReadAccountCode(addr)
+}
+
 func (cpg *cachePopulatingGetter) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
 	return cpg.g.HasPrefix(name, prefix)
 }
@@ -240,8 +275,10 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 					return nil
 				}
 				var getter kv.TemporalGetter = ttx
+				var cpg *cachePopulatingGetter
 				if bra.stateCache != nil {
-					getter = newCachePopulatingGetter(ttx, bra.stateCache)
+					cpg = newCachePopulatingGetter(ttx, bra.stateCache)
+					getter = cpg
 				}
 				stateReader := state.NewReaderV3(getter)
 
@@ -256,9 +293,9 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 					acct, _ := stateReader.ReadAccountData(acctChanges.Address)
 					// Warm code if account has code or if there are code changes.
 					if acct != nil && !acct.CodeHash.IsEmpty() {
-						stateReader.ReadAccountCode(acctChanges.Address)
+						warmAccountCode(stateReader, cpg, acctChanges.Address, acct.CodeHash)
 					} else if len(acctChanges.CodeChanges) > 0 {
-						stateReader.ReadAccountCode(acctChanges.Address)
+						_, _ = stateReader.ReadAccountCode(acctChanges.Address)
 					}
 					for _, slotChanges := range acctChanges.StorageChanges {
 						stateReader.ReadAccountStorage(acctChanges.Address, slotChanges.Slot)
@@ -330,7 +367,7 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 				if toAddr := txn.GetTo(); toAddr != nil {
 					to := accounts.InternAddress(*toAddr)
 					if acct, _ := stateReader.ReadAccountData(to); acct != nil && !acct.CodeHash.IsEmpty() {
-						stateReader.ReadAccountCode(to)
+						warmAccountCode(stateReader, cpg, to, acct.CodeHash)
 					}
 				}
 
@@ -338,7 +375,7 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 				for _, entry := range txn.GetAccessList() {
 					addr := accounts.InternAddress(entry.Address)
 					if acct, _ := stateReader.ReadAccountData(addr); acct != nil && !acct.CodeHash.IsEmpty() {
-						stateReader.ReadAccountCode(addr)
+						warmAccountCode(stateReader, cpg, addr, acct.CodeHash)
 					}
 					for _, slot := range entry.StorageKeys {
 						stateReader.ReadAccountStorage(addr, accounts.InternKey(slot))
