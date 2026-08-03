@@ -513,9 +513,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, kvGetter *seg.Reader) (bt 
 	}
 	// MapRegion leaves the kernel default; seg.Mmap does this itself. The btree is
 	// read by point lookups over data far bigger than RAM, so readahead is waste.
-	if err := mm.MadviseRandom(idx.m); err != nil {
-		return nil, err
-	}
+	_ = mm.MadviseRandom(idx.m)
 	idx.data = idx.m[:idx.size]
 
 	var nodeOfftEF *eliasfano32.EliasFano

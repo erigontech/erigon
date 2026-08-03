@@ -64,16 +64,14 @@ func NewReader(filePath string) (_ *Reader, err error) {
 	if err != nil {
 		return nil, err
 	}
-	// MapRegion leaves the kernel default; seg.Mmap does this itself. The filter is
-	// probed at random offsets over data far bigger than RAM, so readahead is waste.
-	if err := mm.MadviseRandom(m); err != nil {
-		return nil, err
-	}
 	defer func() {
 		if err != nil {
 			_ = m.Unmap() //nolint
 		}
 	}()
+	// MapRegion leaves the kernel default; seg.Mmap does this itself. The filter is
+	// probed at random offsets over data far bigger than RAM, so readahead is waste.
+	_ = mm.MadviseRandom(m)
 	_, fileName := filepath.Split(filePath)
 	r, _, err := NewReaderOnBytes(m, fileName)
 	if err != nil {
@@ -239,16 +237,14 @@ func NewReaderSharded(filePath string) (_ *ReaderSharded, err error) {
 	if err != nil {
 		return nil, err
 	}
-	// MapRegion leaves the kernel default; seg.Mmap does this itself. The filter is
-	// probed at random offsets over data far bigger than RAM, so readahead is waste.
-	if err := mm.MadviseRandom(m); err != nil {
-		return nil, err
-	}
 	defer func() {
 		if err != nil {
 			_ = m.Unmap() //nolint
 		}
 	}()
+	// MapRegion leaves the kernel default; seg.Mmap does this itself. The filter is
+	// probed at random offsets over data far bigger than RAM, so readahead is waste.
+	_ = mm.MadviseRandom(m)
 	_, fileName := filepath.Split(filePath)
 	r, _, err := NewReaderShardedOnBytes(m, fileName)
 	if err != nil {
