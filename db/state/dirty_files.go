@@ -417,7 +417,7 @@ func openDirtyAccessor(mask string, dirEntries []string, dirPath string, ver ver
 	}
 }
 
-func (d *Domain) openDirtyFiles(ctx context.Context, dirEntries []string) (err error) {
+func (d *Domain) openDirtyFiles(ctx context.Context, dirEntries []string) error {
 	var invalidFileItems []*FilesItem
 	iter := d.dirtyFiles.Iter()
 	for ok := iter.First(); ok; ok = iter.Next() {
