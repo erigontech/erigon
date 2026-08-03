@@ -313,10 +313,6 @@ func TestOpenDirtyFilesReopensV4RawTxNFile(t *testing.T) {
 	logger := log.New()
 	const stepSize = uint64(16)
 	_, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, stepSize, logger)
-	// Bump the DataKV read ceiling to V4_0 — the schema's default
-	// current version predates the v4 naming pivot, so MustSupport
-	// would reject a legitimate v4 file at load time.
-	d.FileVersion.DataKV = version.Versions{Current: version.V4_0, MinSupported: version.V1_0}
 
 	// Mode-C boundary emit shape: fromTxN step-aligned (272*16),
 	// endTxN mid-step (4360 lands inside step 272..273 which spans

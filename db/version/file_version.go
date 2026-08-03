@@ -213,6 +213,16 @@ func (v Versions) Supports(ver Version) bool {
 	if ver.Major == v.Current.Major {
 		return true
 	}
+	// TxNumNamingPivot (V4_0) is a filename-convention change — raw txnums
+	// in the name instead of step indices — not a content-format change.
+	// A v4-named file's on-disk bytes are compatible with any reader that
+	// already understands the domain's current major (v2+). Mode-C unwind
+	// emits transient v4 files (see mode-c-completeness-plan-2026-08-03);
+	// without this the aggregator re-scans them post-emit and MustSupport
+	// panics because 4 > 2.
+	if ver.Eq(TxNumNamingPivot) && !v.Current.Less(Version{2, 0}) {
+		return true
+	}
 	return ver.LessOrEqual(v.Current)
 }
 

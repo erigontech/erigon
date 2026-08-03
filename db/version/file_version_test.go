@@ -483,6 +483,39 @@ func TestMustSupport(t *testing.T) {
 	})
 }
 
+// TestSupportsTxNumNamingPivot pins that TxNumNamingPivot (V4_0) is
+// treated as a filename-convention pivot, not a content-format bump:
+// a v4-named file is accepted by any reader whose Current is v2.0+.
+// The concrete case this guards: mode-C unwind emits transient v4
+// files (see mode-c-completeness-plan-2026-08-03). Aggregator's
+// post-emit OpenFolder → openDirtyFiles → MustSupport rejected them
+// before the pivot exception because 4 > 2, panicking with
+// "highest_supported=v2.x" while the file was written seconds ago
+// by the same build.
+func TestSupportsTxNumNamingPivot(t *testing.T) {
+	cases := []struct {
+		name    string
+		current Version
+		want    bool
+	}{
+		{"current v2.0 accepts v4.0 pivot", V2_0, true},
+		{"current v2.2 accepts v4.0 pivot", V2_2, true},
+		{"current v3.0 accepts v4.0 pivot", V3_0, true},
+		// v1.x readers predate the naming pivot AND the state-domain
+		// format the pivot rides on top of — hold the line.
+		{"current v1.2 rejects v4.0 pivot", V1_2, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			supported := Versions{Current: tc.current, MinSupported: V1_0}
+			got := supported.Supports(TxNumNamingPivot)
+			if got != tc.want {
+				t.Errorf("Supports(TxNumNamingPivot) with Current=%s: got %v, want %v", tc.current, got, tc.want)
+			}
+		})
+	}
+}
+
 func BenchmarkMatchVersionedFile(b *testing.B) {
 	// Simulate a large directory with thousands of snapshot files (realistic scenario)
 	dirEntries := make([]string, 0, 2000)
