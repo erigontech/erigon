@@ -1,6 +1,7 @@
 package cltypes
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -93,6 +94,36 @@ func TestExecutionPayloadBidClonePreservesProgressiveLimit(t *testing.T) {
 	encoded := make([]byte, 17*48)
 
 	require.ErrorIs(t, cloned.BlobKzgCommitments.DecodeSSZ(encoded, 0), ssz.ErrTooBigList)
+}
+
+func TestSignedExecutionPayloadBidJSONInitializesStaticProgressiveList(t *testing.T) {
+	source := &SignedExecutionPayloadBid{Message: executionPayloadBidWithCommitments(2)}
+	input, err := json.Marshal(source)
+	require.NoError(t, err)
+
+	var decoded SignedExecutionPayloadBid
+	require.NoError(t, json.Unmarshal(input, &decoded))
+	got, err := decoded.EncodeSSZ(nil)
+	require.NoError(t, err)
+	want, err := source.EncodeSSZ(nil)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+
+	var roundTrip SignedExecutionPayloadBid
+	require.NoError(t, roundTrip.DecodeSSZ(got, 0))
+	require.Equal(t, decoded.Message.BlobKzgCommitments.Len(), roundTrip.Message.BlobKzgCommitments.Len())
+}
+
+func TestExecutionPayloadBidJSONPreservesPreseededProgressiveLimit(t *testing.T) {
+	input, err := json.Marshal(executionPayloadBidWithCommitments(2))
+	require.NoError(t, err)
+	target := &ExecutionPayloadBid{
+		BlobKzgCommitments: *solid.NewStaticProgressiveListSSZ[*KZGCommitment](1, 48),
+	}
+	require.NoError(t, json.Unmarshal(input, target))
+
+	cloned := target.Clone().(*ExecutionPayloadBid)
+	require.ErrorIs(t, cloned.BlobKzgCommitments.DecodeSSZ(make([]byte, 17*48), 0), ssz.ErrTooBigList)
 }
 
 func encodedExecutionPayloadBidWithCommitments(t *testing.T, count int) []byte {

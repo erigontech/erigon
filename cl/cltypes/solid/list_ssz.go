@@ -78,7 +78,6 @@ func (l *ListSSZ[T]) EnsureStaticProgressive(limit int, bytesPerElement int) {
 	if l.static && l.limit > 0 && l.bytesPerElement == bytesPerElement {
 		l.limit = progressiveDecodeLimit(l.limit)
 	} else {
-		l.list = make([]T, 0)
 		l.limit = progressiveDecodeLimit(limit)
 		l.static = true
 		l.bytesPerElement = bytesPerElement
