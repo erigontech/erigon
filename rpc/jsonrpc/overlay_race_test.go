@@ -102,6 +102,9 @@ func newOverlayAheadTestAPI(t *testing.T) (base *BaseAPI, m *execmoduletester.Ex
 	rawdb.WriteForkchoiceHead(overlay, hash)
 	require.NoError(t, rawdb.WriteCanonicalHash(overlay, hash, overlayNumber))
 	require.NoError(t, rawdb.WriteBody(overlay, hash, overlayNumber, &types.Body{}))
+	// The forkchoice marker is what rpchelper.GetLatestBlockNumber resolves the head from,
+	// so readers that go through it (the gas oracle, "latest" tag resolution) see this block.
+	rawdb.WriteForkchoiceHead(overlay, hash)
 
 	events := shards.NewEvents()
 	events.PublishOverlay(doms)
@@ -248,4 +251,39 @@ func TestTxPoolContentFrom_UsesOverlayHead(t *testing.T) {
 	require.NotNil(t, got)
 	require.Equal(t, overlayHeader.BaseFee.ToBig(), got.GasPrice.ToInt(),
 		"pending tx gas price must be derived from the overlay head's base fee, not the stale MDBX head")
+}
+
+// TestFeeHistory_SeesOverlayHead pins that eth_feeHistory resolves "latest" through the
+// block overlay: the gas oracle's head must be the in-flight block, so the window ends
+// there and oldestBlock is that block. Resolving on the committed view instead leaves the
+// whole window one block (or more, while a commit backlog drains) behind the head the node
+// publishes via eth_blockNumber.
+func TestFeeHistory_SeesOverlayHead(t *testing.T) {
+	t.Parallel()
+	base, m, overlayHeader := newOverlayAheadTestAPI(t)
+	api := newEthApiForTest(base, m.DB, nil, nil)
+
+	got, err := api.FeeHistory(m.Ctx, 1, rpc.LatestBlockNumber, nil)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, overlayHeader.Number.ToBig(), got.OldestBlock.ToInt(),
+		"the fee history window must end on the overlay head, not the stale MDBX-committed head")
+	require.NotEmpty(t, got.BaseFee)
+	require.Equal(t, overlayHeader.BaseFee.ToBig(), got.BaseFee[0].ToInt(),
+		"the first base fee must come from the overlay head's header")
+}
+
+// TestFeeHistory_OverlayHeadWithRewards is TestFeeHistory_SeesOverlayHead with reward
+// percentiles requested, which makes the per-block fetch read the in-flight block and its
+// receipts instead of just the header — the path that runs on the tx opened by Fork.
+func TestFeeHistory_OverlayHeadWithRewards(t *testing.T) {
+	t.Parallel()
+	base, m, overlayHeader := newOverlayAheadTestAPI(t)
+	api := newEthApiForTest(base, m.DB, nil, nil)
+
+	got, err := api.FeeHistory(m.Ctx, 1, rpc.LatestBlockNumber, []float64{50})
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, overlayHeader.Number.ToBig(), got.OldestBlock.ToInt(),
+		"the fee history window must end on the overlay head, not the stale MDBX-committed head")
 }
