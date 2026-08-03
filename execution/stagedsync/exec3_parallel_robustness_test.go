@@ -176,11 +176,17 @@ func TestApplyLoopMissingBlocks(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			got := applyLoopMissingBlocks(tc.txResultBlocks, tc.appliedBlocks)
-			if !sameSet(got, tc.wantMissing) {
-				t.Fatalf("applyLoopMissingBlocks() = %v, want (set-equal) %v", got, tc.wantMissing)
-			}
+			require.Equal(t, tc.wantMissing, got)
 		})
 	}
+
+	t.Run("missing blocks are sorted", func(t *testing.T) {
+		txResultBlocks := mkSet(17, 1, 31, 9, 25, 5, 21, 13, 29, 3, 19, 7, 23, 11, 27, 15)
+		want := []uint64{1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31}
+		for range 32 {
+			require.Equal(t, want, applyLoopMissingBlocks(txResultBlocks, nil))
+		}
+	})
 }
 
 // TestBlockValidatorWaitNil verifies the per-block validator is
@@ -791,30 +797,6 @@ func TestShouldMarkExhaustedAtBlock(t *testing.T) {
 			}
 		})
 	}
-}
-
-// sameSet compares two slices ignoring order. Used because
-// applyLoopMissingBlocks iterates a map; order is non-deterministic.
-func sameSet(a, b []uint64) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	seen := make(map[uint64]int, len(a))
-	for _, v := range a {
-		seen[v]++
-	}
-	for _, v := range b {
-		seen[v]--
-		if seen[v] < 0 {
-			return false
-		}
-	}
-	for _, c := range seen {
-		if c != 0 {
-			return false
-		}
-	}
-	return true
 }
 
 // TestApplyLoopFlushAsComplete covers the helper that decides the `complete`

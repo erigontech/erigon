@@ -1429,6 +1429,7 @@ func applyLoopMissingBlocks(txResultBlocks, appliedBlocks map[uint64]struct{}) [
 			missing = append(missing, n)
 		}
 	}
+	slices.Sort(missing)
 	return missing
 }
 
