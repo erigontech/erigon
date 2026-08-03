@@ -17,12 +17,58 @@
 package storage
 
 import (
+	"context"
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
 )
+
+// pathSpyAggregator captures every DomainKVFilePathV4 call so a test
+// can assert both that it was invoked (not skipped) and that the
+// (domain, fromTxN, toTxN) arguments match the mode-C v4 emit
+// contract. StepSize/DomainCompression carry the minimum a caller
+// needs to drive the path selection.
+type pathSpyAggregator struct {
+	stepSize uint64
+	calls    []pathSpyCall
+}
+
+type pathSpyCall struct {
+	domain          kv.Domain
+	fromTxN, toTxN  uint64
+	returnedPathTag string
+}
+
+func (a *pathSpyAggregator) Files() []string   { return nil }
+func (a *pathSpyAggregator) OpenFolder() error { return nil }
+func (a *pathSpyAggregator) BuildMissedAccessors(_ context.Context, _ int, _ ...kv.BuildAccessorsOption) error {
+	return nil
+}
+func (a *pathSpyAggregator) LockCollation()   {}
+func (a *pathSpyAggregator) UnlockCollation() {}
+func (a *pathSpyAggregator) StepSize() uint64 { return a.stepSize }
+func (a *pathSpyAggregator) WipeWritableShadowPast(_ context.Context, _ kv.TemporalRwTx, _ uint64) error {
+	return nil
+}
+func (a *pathSpyAggregator) DomainCompression(_ kv.Domain) seg.FileCompression {
+	return seg.CompressNone
+}
+func (a *pathSpyAggregator) Unwind(_ uint64)            {}
+func (a *pathSpyAggregator) SetUnwindInProgress(_ bool) {}
+func (a *pathSpyAggregator) WaitForBuildAndMergeQuiescence(_ time.Duration) error {
+	return nil
+}
+func (a *pathSpyAggregator) DomainKVFilePathV4(domain kv.Domain, fromTxN, toTxN uint64) string {
+	tag := fmt.Sprintf("v4.0-%s.%d-%d.kv", domain, fromTxN, toTxN)
+	a.calls = append(a.calls, pathSpyCall{domain: domain, fromTxN: fromTxN, toTxN: toTxN, returnedPathTag: tag})
+	return tag
+}
 
 // These tests pin boundaryStepFileForDomain's lookup predicate. The
 // soak v14 iter-3 mode-B wedge (depth 30k, target=3,006,443) surfaced
@@ -179,4 +225,72 @@ func TestRegenPathNoSubdirDoubling(t *testing.T) {
 		snapDir+"/domain/v2.0-accounts.272-278.kv",
 		snapDir+"/domain/"+truncatedBaseName,
 		"truncated path must live under one kind subdir, not two")
+}
+
+// TestBoundaryRegenFinalPath_TruncateGoesToV4 pins the mode-C v4 emit
+// invariant: for actionRegenTruncate, the final path is the
+// aggregator's v4.0 raw-txnum-named path with endTxN = lastTxNum+1.
+// This is the whole point of the 2026-08-03 mode-C completeness fix —
+// the file's advertised horizon must match its as-of-lastTxNum content
+// rather than lying via the step-boundary convention.
+func TestBoundaryRegenFinalPath_TruncateGoesToV4(t *testing.T) {
+	t.Parallel()
+	const stepSize = uint64(390_625)
+	agg := &pathSpyAggregator{stepSize: stepSize}
+
+	// Straddler covering steps [272, 280). Mid-step target with
+	// lastTxNum such that (lastTxNum+1) lands strictly inside the
+	// file's range (i.e. between 272*stepSize and 280*stepSize).
+	const fromStep = uint64(272)
+	const lastTxNum = uint64(109_000_000)
+	oldPath := "/tmp/snap/domain/v2.0-accounts.272-280.kv"
+
+	got := boundaryRegenFinalPath(agg, kv.AccountsDomain, fromStep, stepSize, actionRegenTruncate, lastTxNum, oldPath)
+
+	require.Len(t, agg.calls, 1, "actionRegenTruncate must dispatch to DomainKVFilePathV4 exactly once")
+	call := agg.calls[0]
+	require.Equal(t, kv.AccountsDomain, call.domain)
+	require.Equal(t, fromStep*stepSize, call.fromTxN,
+		"v4 file's fromTxN must be the straddler's FromStep*stepSize (aligns with the retained state before the boundary)")
+	require.Equal(t, lastTxNum+1, call.toTxN,
+		"v4 file's toTxN must be lastTxNum+1 (honest endTxN matching the as-of-lastTxN content)")
+	require.Equal(t, "v4.0-accounts.106250000-109000001.kv", got,
+		"finalPath must be the aggregator-computed v4 path, not oldPath")
+}
+
+// TestBoundaryRegenFinalPath_InPlaceKeepsOldPath pins the aligned
+// case: when the file's endStep already equals the unwind target's
+// step boundary, no v4 path is needed — the file's step-aligned name
+// already matches its as-of-lastTxN content. DomainKVFilePathV4 must
+// NOT be called (otherwise the wire would produce an unnecessary v4
+// file that retire would have to supersede later).
+func TestBoundaryRegenFinalPath_InPlaceKeepsOldPath(t *testing.T) {
+	t.Parallel()
+	agg := &pathSpyAggregator{stepSize: 390_625}
+
+	oldPath := "/tmp/snap/domain/v2.0-accounts.272-280.kv"
+	got := boundaryRegenFinalPath(agg, kv.AccountsDomain, 272, 390_625, actionRegenInPlace, 109_000_000, oldPath)
+
+	require.Empty(t, agg.calls, "actionRegenInPlace must NOT dispatch to DomainKVFilePathV4 — the aligned file keeps its own name")
+	require.Equal(t, oldPath, got, "actionRegenInPlace must return the OLD path unchanged")
+}
+
+// TestBoundaryRegenFinalPath_CommitmentTruncateSameV4Shape verifies
+// commitment straddlers get the same v4 treatment as state domains.
+// This is what the 2026-08-03 drop-of-override-1 (commit bc2107ac7d)
+// enables — commitment now takes the same emit path, no domain-
+// specific special-case in the finalPath calculation. The domain
+// argument is passed straight through to DomainKVFilePathV4, which
+// namespaces the filename by domain.
+func TestBoundaryRegenFinalPath_CommitmentTruncateSameV4Shape(t *testing.T) {
+	t.Parallel()
+	agg := &pathSpyAggregator{stepSize: 390_625}
+
+	oldPath := "/tmp/snap/domain/v2.0-commitment.272-280.kv"
+	got := boundaryRegenFinalPath(agg, kv.CommitmentDomain, 272, 390_625, actionRegenTruncate, 109_000_000, oldPath)
+
+	require.Len(t, agg.calls, 1)
+	require.Equal(t, kv.CommitmentDomain, agg.calls[0].domain,
+		"commitment must reach DomainKVFilePathV4 unchanged — no special-case dispatch")
+	require.Equal(t, "v4.0-commitment.106250000-109000001.kv", got)
 }

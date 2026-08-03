@@ -215,21 +215,7 @@ func (p *Provider) regenerateBoundaryStepFiles(
 			// legacy flat-layout case.
 			oldPath := snapshot.ResolveExistingPath(p.snapDir, fileEntry.Name)
 
-			// Two emit shapes:
-			//   - actionRegenInPlace: file's endStep already equals the
-			//     unwind target's step boundary. Rewrite in place under
-			//     its own step-aligned name.
-			//   - actionRegenTruncate: file straddles a mid-step unwind
-			//     target. Emit under a v4.0 raw-txnum-named path with
-			//     endTxN = lastTxN+1 so the file's advertised horizon
-			//     matches its as-of-lastTxN content.
-			var finalPath string
-			if action == actionRegenTruncate {
-				fromTxN := uint64(fileEntry.FromStep) * stepSize
-				finalPath = p.Aggregator.DomainKVFilePathV4(kvDomain, fromTxN, lastTxNum+1)
-			} else {
-				finalPath = oldPath
-			}
+			finalPath := boundaryRegenFinalPath(p.Aggregator, kvDomain, uint64(fileEntry.FromStep), stepSize, action, lastTxNum, oldPath)
 			regenPath := finalPath + ".regen"
 
 			// Commitment mode-C: emit the v4 file directly from the
@@ -269,6 +255,27 @@ func (p *Provider) regenerateBoundaryStepFiles(
 		return nil, nil
 	}
 	return &pendingRegenState{pairs: pairs, removals: removals}, nil
+}
+
+// boundaryRegenFinalPath picks the destination path a mode-B/C regen
+// writes to for a single straddler or aligned boundary file.
+//
+//   - actionRegenTruncate: file straddles a mid-step unwind target.
+//     Emit under a v4.0 raw-txnum-named path with endTxN = lastTxN+1
+//     so the file's advertised horizon matches its as-of-lastTxN
+//     content (the mode-C completeness invariant restored 2026-08-03).
+//   - actionRegenInPlace (or anything else that reaches this helper):
+//     file's endStep already equals the unwind target's step boundary.
+//     Rewrite in place under its own step-aligned name.
+//
+// Pure logic — no I/O, no side effects — so its two branches can be
+// pinned with a stub-aggregator unit test without any real disk or tx.
+func boundaryRegenFinalPath(agg StateAggregator, kvDomain kv.Domain, fromStep, stepSize uint64, action stateFileAction, lastTxNum uint64, oldPath string) string {
+	if action != actionRegenTruncate {
+		return oldPath
+	}
+	fromTxN := fromStep * stepSize
+	return agg.DomainKVFilePathV4(kvDomain, fromTxN, lastTxNum+1)
 }
 
 // boundaryStepFileForDomain returns the FileEntry for the .kv file
