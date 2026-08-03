@@ -68,7 +68,7 @@ func (ath *Authorization) RecoverSigner(data *bytes.Buffer, buf []byte) (*common
 		return nil, err
 	}
 
-	return RecoverSignerFromRLP(data.Bytes(), ath.YParity, ath.R, ath.S)
+	return recoverSignerFromRLP(data.Bytes(), ath.YParity, ath.R, ath.S)
 }
 
 // SignAuthorization returns an EIP-7702 authorization signed by key. A non-zero
@@ -102,7 +102,7 @@ func SignAuthorization(key *ecdsa.PrivateKey, chainID uint256.Int, address commo
 	return auth, nil
 }
 
-func RecoverSignerFromRLP(rlp []byte, yParity uint8, r uint256.Int, s uint256.Int) (*common.Address, error) {
+func recoverSignerFromRLP(rlp []byte, yParity uint8, r uint256.Int, s uint256.Int) (*common.Address, error) {
 	hashData := make([]byte, 0, 1+len(rlp))
 	hashData = append(hashData, params.SetCodeMagicPrefix)
 	hashData = append(hashData, rlp...)
