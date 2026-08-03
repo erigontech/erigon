@@ -497,10 +497,11 @@ func rotateTimedOutEnvelopeRecovery(skipped []network.SkippedFullBlock, unattemp
 }
 
 func recoverSkippedEnvelopeBatch(fetchCtx, persistCtx context.Context, cfg StageHistoryReconstructionCfg, batch []network.SkippedFullBlock) []network.SkippedFullBlock {
-	envelopes := cfg.downloader.RecoverSkippedEnvelopes(fetchCtx, batch)
-	if cfg.indiciesDB == nil {
+	if cfg.indiciesDB == nil || cfg.blockReader == nil {
 		return append([]network.SkippedFullBlock(nil), batch...)
 	}
+	blocks := readSkippedEnvelopeBlocks(persistCtx, cfg, batch)
+	envelopes := cfg.downloader.RecoverSkippedEnvelopes(fetchCtx, batch, blocks)
 	tx, err := cfg.indiciesDB.BeginRo(persistCtx)
 	if err != nil {
 		return append([]network.SkippedFullBlock(nil), batch...)
@@ -535,6 +536,27 @@ func recoverSkippedEnvelopeBatch(fetchCtx, persistCtx context.Context, cfg Stage
 		}
 	}
 	return remaining
+}
+
+func readSkippedEnvelopeBlocks(ctx context.Context, cfg StageHistoryReconstructionCfg, batch []network.SkippedFullBlock) map[common.Hash]*cltypes.SignedBeaconBlock {
+	blocks := make(map[common.Hash]*cltypes.SignedBeaconBlock, len(batch))
+	tx, err := cfg.indiciesDB.BeginRo(ctx)
+	if err != nil {
+		return blocks
+	}
+	defer tx.Rollback()
+	for _, item := range batch {
+		root := common.Hash(item.Root)
+		block, err := cfg.blockReader.ReadBlockByRoot(ctx, tx, root)
+		if err != nil || block == nil || block.Block == nil || block.Block.Body == nil {
+			continue
+		}
+		decodedRoot, err := block.Block.HashSSZ()
+		if err == nil && decodedRoot == item.Root {
+			blocks[root] = block
+		}
+	}
+	return blocks
 }
 
 func recoverSkippedEnvelope(ctx context.Context, cfg StageHistoryReconstructionCfg, s network.SkippedFullBlock, block *cltypes.SignedBeaconBlock, env *cltypes.SignedExecutionPayloadEnvelope) bool {

@@ -583,6 +583,29 @@ func TestMalformedP2PEnvelopeFallsBackToValidHTTPEnvelope(t *testing.T) {
 	require.NoError(t, ValidateFetchedEnvelope(&clparams.MainnetBeaconConfig, block, common.Hash(blockRoot), got[common.Hash(blockRoot)]))
 }
 
+func TestMalformedHTTPRecoveryEnvelopeRemainsMissing(t *testing.T) {
+	block := makeGloasBlock(100, hash(0xAA), hash(0x10))
+	blockRoot, malformed := makeValidGloasEnvelope(t, block)
+	malformed.Message.Payload.GasUsed++
+	encoded, err := malformed.EncodeSSZ(nil)
+	require.NoError(t, err)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(encoded)
+	}))
+	defer server.Close()
+
+	downloader := &BackwardBeaconDownloader{
+		httpFallbackURL: server.URL,
+		beaconCfg:       &clparams.MainnetBeaconConfig,
+	}
+	got := downloader.RecoverSkippedEnvelopes(
+		context.Background(),
+		[]SkippedFullBlock{{Slot: block.Block.Slot, Root: blockRoot}},
+		map[common.Hash]*cltypes.SignedBeaconBlock{common.Hash(blockRoot): block},
+	)
+	require.Empty(t, got)
+}
+
 func TestValidateFetchedEnvelopesDropsMalformedSameRoot(t *testing.T) {
 	block := makeGloasBlock(100, hash(0xAA), hash(0x10))
 	blockRoot, err := block.Block.HashSSZ()
