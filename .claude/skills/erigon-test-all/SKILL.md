@@ -20,6 +20,8 @@ make eest-spec-blocktests-stable-sequential  # blockchain tests vs eest_stable f
 make eest-spec-blocktests-stable-parallel    # same, but with parallel commitment
 make eest-spec-enginextests-stable-sequential # engine-x tests vs eest_stable (serial commitment)
 make eest-spec-enginextests-stable-parallel  # same, but with parallel commitment
+make eest-spec-enginextests-devnet-{sequential,parallel}
+                                             # devnet engine-x tests in both commitment modes
 make eest-spec-statetests-devnet-{sequential,parallel}
                                              # state tests vs eest_devnet fixtures
 make eest-spec-blocktests-devnet-{sequential,parallel}

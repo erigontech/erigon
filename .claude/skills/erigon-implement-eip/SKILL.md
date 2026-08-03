@@ -117,7 +117,7 @@ The most important tests when implementing a new EIP for the EL are the EEST spe
 
 - `make eest-spec-statetests-{stable,devnet}-{sequential,parallel}` — state tests against the stable/devnet EEST fixtures in both commitment modes.
 - `make eest-spec-blocktests-{stable,devnet}-{sequential,parallel}` — blockchain tests against the stable/devnet EEST fixtures in both commitment modes.
-- `make eest-spec-enginextests-stable-{sequential,parallel}` — engine-x tests against the stable EEST fixtures in both commitment modes. No devnet variant exists because the devnet tarball does not yet ship `blockchain_tests_engine_x/`.
+- `make eest-spec-enginextests-{stable,devnet}-{sequential,parallel}` — engine-x tests against the stable/devnet EEST fixtures in both commitment modes.
 - `make eest-spec-enginextests-benchmark-{1m,5m,10m,30m,60m,100m,150m}-{sequential,parallel}` — engine-x tests against the per-gas-target benchmark fixtures, with `--time` per-test stats and both commitment modes.
 - `make eest-spec-blocktests-stable-race-{pre-cancun,cancun,prague,osaka}-{sequential,parallel}` and `make eest-spec-blocktests-devnet-race-amsterdam-{sequential,parallel}` — race-detector variants split by fork and commitment mode.
 
