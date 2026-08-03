@@ -241,10 +241,8 @@ type readPathResult struct {
 	mapCodeSizeVal       int
 	mapStorageVal        uint256.Int
 
-	// hashOfMapCodeVal is the hash the CodePath source stored next to the bytes
-	// now in mapCodeVal, not a path value like the map*Val fields above. Assign
-	// it wherever mapCodeVal is assigned: NilCodeHash means that source kept
-	// bytes only and the caller has to resolve the hash itself.
+	// Hash the CodePath source stored with mapCodeVal; assign the two together.
+	// NilCodeHash means the caller must resolve it.
 	hashOfMapCodeVal accounts.CodeHash
 
 	// hdr is the skeleton header for the wrapper to record (with its typed
@@ -1110,10 +1108,8 @@ func readCode(s *IntraBlockState, addr accounts.Address, commited bool) ([]byte,
 	}
 }
 
-// refreshedCode is code resolved by refreshCode. KnownHash is the hash the
-// writing source recorded alongside the bytes, or NilCodeHash when that source
-// stored bytes only. Unlike accounts.Code it carries no Hash == Keccak256(Bytes)
-// invariant, so callers must resolve an unknown hash before building one.
+// refreshedCode is refreshCode's result. Unlike accounts.Code it promises no
+// Hash == Keccak256(Bytes): KnownHash is Nil when the source stored bytes only.
 type refreshedCode struct {
 	Bytes     []byte
 	KnownHash accounts.CodeHash
@@ -1143,10 +1139,8 @@ func refreshCode(s *IntraBlockState, addr accounts.Address) (refreshedCode, Read
 	}
 }
 
-// codeHash resolves the hash for refreshed bytes without re-hashing when the
-// source already knew it. A read-set value carries bytes only: recorded from
-// committed state the account record is authoritative, otherwise (a prior tx's
-// code write, which the account record can lag) the bytes must be hashed.
+// codeHash avoids re-hashing when the source knew the hash. For committed bytes
+// the account record is authoritative; a prior tx's write can outrun it.
 func (c refreshedCode) codeHash(source ReadSource, accountHash accounts.CodeHash) accounts.CodeHash {
 	if c.KnownHash != accounts.NilCodeHash {
 		return c.KnownHash

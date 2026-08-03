@@ -1969,9 +1969,8 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 	}
 	obj := newObject(sdb, addr, account, account)
 	if code.Bytes != nil {
-		// The account record's CodeHash lags a prior tx's code write, so the
-		// resolved hash wins over it — else SetCode's revert-to-original check
-		// compares against the stale hash and drops the write.
+		// The account record can lag a prior tx's code write, so the resolved
+		// hash wins: SetCode's revert-to-original check would drop the write.
 		codeHash := code.codeHash(codeSource, obj.data.CodeHash)
 		obj.code = accounts.Code{Hash: codeHash, Bytes: code.Bytes}
 		if codeHash != obj.data.CodeHash {

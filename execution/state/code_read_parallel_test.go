@@ -80,11 +80,9 @@ func TestCodeReadParallel_EmptyCodeHashIgnoresStaleCode(t *testing.T) {
 	assert.False(t, ok, "an empty-codehash account must not read as 7702-delegated")
 }
 
-// committedCodeIBS builds a noMaterialize IBS over one committed contract and
-// warms the CodePath read set the way an EVM call does, so the account-field
-// reads that follow take the getStateObject fall-through. accountHash overrides
-// the account record's CodeHash when non-nil, to model a CodeDomain entry that
-// disagrees with it.
+// committedCodeIBS builds a noMaterialize IBS over one committed contract with
+// its CodePath read set warmed. accountHash, when set, makes the account record
+// disagree with the CodeDomain bytes.
 func committedCodeIBS(tb testing.TB, codeLen int, accountHash *accounts.CodeHash) (*IntraBlockState, accounts.Address) {
 	tb.Helper()
 
@@ -115,10 +113,8 @@ func committedCodeIBS(tb testing.TB, codeLen int, accountHash *accounts.CodeHash
 	return ibs, addr
 }
 
-// BenchmarkGetStateObjectAfterCodeRead measures the state-object rebuild that
-// every account-field read falls through to on a contract whose code this tx
-// already read. Under noMaterialize nothing is cached, so a per-rebuild
-// re-hash of the bytecode shows up as growth across the code sizes.
+// BenchmarkGetStateObjectAfterCodeRead measures the rebuild every account-field
+// read falls through to. Cost growing with code size means the bytes are hashed.
 func BenchmarkGetStateObjectAfterCodeRead(b *testing.B) {
 	for _, codeLen := range []int{32, 1024, 24576} {
 		b.Run(fmt.Sprintf("code=%dB", codeLen), func(b *testing.B) {
@@ -133,12 +129,9 @@ func BenchmarkGetStateObjectAfterCodeRead(b *testing.B) {
 	}
 }
 
-// TestCommittedCodeHashComesFromAccountRecord pins that a state object rebuilt
-// for a contract whose code came from committed state takes its CodeHash from
-// the account record rather than from the bytes. The account record is
-// authoritative there: the CodeDomain is keyed by address, so it can hold bytes
-// that no longer belong to the account (a cleared 7702 delegation leaves them
-// behind), and deriving the hash from those bytes would let them win.
+// TestCommittedCodeHashComesFromAccountRecord pins the account record as the
+// authority for committed code. The CodeDomain is keyed by address, so it can
+// hold bytes the account no longer owns — a cleared 7702 delegation leaves them.
 func TestCommittedCodeHashComesFromAccountRecord(t *testing.T) {
 	t.Run("account hash agrees with the bytes", func(t *testing.T) {
 		ibs, addr := committedCodeIBS(t, 4096, nil)
@@ -166,10 +159,8 @@ func TestCommittedCodeHashComesFromAccountRecord(t *testing.T) {
 	})
 }
 
-// TestPriorTxCodeWriteHashComesFromTheCell pins that a code cell written by an
-// earlier tx hands its own hash to the rebuilt state object. The cell is the
-// authority for a prior-tx write, and deriving the hash from its bytes instead
-// would both re-hash the contract and mask a cell whose two halves disagree.
+// TestPriorTxCodeWriteHashComesFromTheCell pins the cell as the authority for a
+// prior-tx code write, so its hash is used rather than derived from its bytes.
 func TestPriorTxCodeWriteHashComesFromTheCell(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xC0, 0xDE})
 	priorCode := []byte{0xef, 0x01, 0x00, 0x11, 0x22, 0x33}
