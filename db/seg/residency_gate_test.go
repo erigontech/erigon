@@ -47,7 +47,7 @@ func regionAround(g *Getter, offset uint64, window int) []byte {
 
 func TestResidencyGateWarmsOnReset(t *testing.T) {
 	if !iouring.Available() {
-		t.Skip("io_uring unavailable; the gate's warm path would exit the process")
+		t.Skip("io_uring unavailable; the gate's warm path no-ops, so the warmed-page assertion below would fail")
 	}
 	tmp := t.TempDir()
 	file := filepath.Join(tmp, "test.kv")

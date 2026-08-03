@@ -93,9 +93,9 @@ func (g *Getter) residencyBitmap() *residencyBitmap {
 	return g.d.residency.Load()
 }
 
-// warm pulls the byte range into the page cache so the following mmap access is a
-// minor fault. There is no fallback: if io_uring is unavailable the process exits
-// on the first warm (see iouring.WarmOne).
+// warm pulls the byte range into the page cache via io_uring so the following
+// mmap access is a minor fault. If io_uring is unavailable, WarmOne no-ops —
+// the range is simply left cold, not warmed.
 func (g *Getter) warm(fileOffset int64, n int) {
 	iouring.WarmOne(int(g.d.f.Fd()), fileOffset, n)
 }
