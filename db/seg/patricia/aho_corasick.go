@@ -359,34 +359,40 @@ func (m *ACMatcher) FindLongestMatches(data []byte) []Match {
 
 	// Emission is fused into the scan below, reusing the just-loaded nodes[cur]
 	// line. The prefix region [0,k) gets no fresh scan, so it emits here.
-	for j := range k {
-		st := states[j]
+	prefix := states[:k]
+	for j, st := range prefix {
 		if mi := nodes[st].match; mi >= 0 {
 			out = appendLongest(out, j+1-int(patLen[mi]), j+1, patVal[mi])
 		}
 	}
 
 	cur := int32(0)
-	if k > 0 {
-		cur = states[k-1]
+	if len(prefix) > 0 {
+		cur = prefix[len(prefix)-1]
 	}
-	for j := k; j < n; j++ {
+	// nd is nodes[cur], carried across bytes: the state a byte ends on is the
+	// state the next byte starts from, so it is loaded once per transition
+	// instead of once per lookup and once per emission.
+	nd := nodes[cur]
+	for j := k; j < len(data); j++ {
 		b := data[j]
 		for {
 			if cur == 0 {
 				if nx := rootNext[b]; nx >= 0 {
 					cur = nx
+					nd = nodes[cur]
 				}
 				break
 			}
-			nd := &nodes[cur]
 			e := nd.edge
 			if e >= 0 { // lone edge to the next state
 				if byte(e) == b {
 					cur++
+					nd = nodes[cur]
 					break
 				}
 				cur = nd.fail
+				nd = nodes[cur]
 				continue
 			}
 			if e < noEdge { // spilled run
@@ -400,13 +406,15 @@ func (m *ACMatcher) FindLongestMatches(data []byte) []Match {
 				}
 				if found >= 0 {
 					cur = found
+					nd = nodes[cur]
 					break
 				}
 			}
 			cur = nd.fail
+			nd = nodes[cur]
 		}
 		states[j] = cur
-		if mi := nodes[cur].match; mi >= 0 {
+		if mi := nd.match; mi >= 0 {
 			out = appendLongest(out, j+1-int(patLen[mi]), j+1, patVal[mi])
 		}
 	}
