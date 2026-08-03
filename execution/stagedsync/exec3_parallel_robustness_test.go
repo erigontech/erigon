@@ -388,63 +388,29 @@ func TestCheckBlocksDrainedConcurrentReads(t *testing.T) {
 	// Test passes iff no race detector fires AND no deadlock.
 }
 
-// TestApplyLoopPartialBatchReturnsErrLoopExhausted exercises the
-// apply-loop exit decision tree end-to-end with channel orchestration:
-// when applyResults closes after the exec loop hit its size-limit
-// (lastBlockResult < maxBlockNum, no missing blocks), the apply loop
-// must return ErrLoopExhausted so the stage loop resumes from the next
-// block. The previous bug spuriously flagged maxBlockNum as missing
-// because it wasn't applied — turning every legitimate partial batch
-// into an InvalidBlock error. This test locks in the corrected
-// behavior: completeness check sees no missing → exhausted → stage
-// loop continues — no re-execution.
-//
-// IMPORTANT: this test models the apply-loop's exit-branch decision
-// rather than driving the production apply loop end-to-end (which would
-// require full parallel-executor + workers + calculator setup). The
-// `run` closure is a hand-coded mirror of the production sequence in
-// exec3_parallel.go around line 355: applyLoopMissingBlocks → reachedMaxBlock
-// check → ErrLoopExhausted. If those production lines change, this
-// closure must be updated in lock-step or the test will pass vacuously.
-func TestApplyLoopPartialBatchReturnsErrLoopExhausted(t *testing.T) {
-	// Simulate the apply loop's exit-branch decision sequence.
-	// (We cannot run the full apply loop in a unit test — requires the
-	// parallel executor + workers + commitment calculator. Instead this
-	// test covers the same decision tree that exec3_parallel.go runs
-	// after the applyResults channel closes.)
-	type result struct {
-		err         error
-		isExhausted bool
-		isInvalid   bool
-		isOK        bool
-	}
-
-	run := func(txResultBlocks, appliedBlocks map[uint64]struct{}, sc *stopCause, lastBlockResult, maxBlockNum, startBlockNum uint64) result {
-		// The decision tree (mirroring exec3_parallel.go's applyResults-close
-		// branch in execErr's anonymous func — keep these branches in sync with
-		// the production sequence): missing check → stopCause kind → maxBlock
-		// fallback → ErrLoopExhausted.
-		if missing := applyLoopMissingBlocks(txResultBlocks, appliedBlocks); len(missing) > 0 {
-			return result{
-				err:       errors.New("invalid block: missing blocks"),
-				isInvalid: true,
-			}
+// TestApplyLoopCloseClassification covers the apply-loop close decisions.
+// A partial batch with every terminal result is resumable, a fully applied
+// batch is clean, and a missing terminal result is an operational executor
+// error rather than an invalid-block verdict.
+func TestApplyLoopCloseClassification(t *testing.T) {
+	// Reuse the production completeness and clean-close helpers so their
+	// classifications cannot drift from this test.
+	run := func(txResultBlocks, appliedBlocks map[uint64]struct{}, sc *stopCause, lastBlockResult, maxBlockNum, startBlockNum uint64) error {
+		if err := applyLoopMissingBlocksError(context.Background(), lastBlockResult, maxBlockNum, txResultBlocks, appliedBlocks); err != nil {
+			return err
 		}
 		if sc != nil {
 			switch sc.kind {
 			case stopReachedMax:
-				return result{isOK: true}
+				return nil
 			case stopMoreWork:
-				return result{err: &ErrLoopExhausted{From: startBlockNum, To: lastBlockResult, Reason: "block batch is full"}, isExhausted: true}
+				return &ErrLoopExhausted{From: startBlockNum, To: lastBlockResult, Reason: "block batch is full"}
 			}
 		}
-		if lastBlockResult >= maxBlockNum {
-			return result{isOK: true}
+		if applyLoopCloseIsClean(lastBlockResult, maxBlockNum, len(txResultBlocks)) {
+			return nil
 		}
-		return result{
-			err:         &ErrLoopExhausted{From: startBlockNum, To: lastBlockResult, Reason: "block batch is full"},
-			isExhausted: true,
-		}
+		return &ErrLoopExhausted{From: startBlockNum, To: lastBlockResult, Reason: "block batch is full"}
 	}
 
 	mkSet := func(ns ...uint64) map[uint64]struct{} {
@@ -456,35 +422,24 @@ func TestApplyLoopPartialBatchReturnsErrLoopExhausted(t *testing.T) {
 	}
 
 	t.Run("partial batch, size-limit hit — exhausted (the regression case)", func(t *testing.T) {
-		got := run(mkSet(1, 2, 3, 4, 5), mkSet(1, 2, 3, 4, 5), &stopCause{kind: stopMoreWork}, 5, 200, 1)
-		if !got.isExhausted {
-			t.Fatalf("expected ErrLoopExhausted, got: %+v", got)
-		}
-		if !errors.Is(got.err, &ErrLoopExhausted{}) {
-			t.Errorf("err must wrap *ErrLoopExhausted, got: %v", got.err)
-		}
+		err := run(mkSet(1, 2, 3, 4, 5), mkSet(1, 2, 3, 4, 5), &stopCause{kind: stopMoreWork}, 5, 200, 1)
+		require.ErrorIs(t, err, &ErrLoopExhausted{})
 	})
 
 	t.Run("full batch, max reached — clean nil", func(t *testing.T) {
-		got := run(mkSet(1, 2, 3), mkSet(1, 2, 3), &stopCause{kind: stopReachedMax}, 3, 3, 1)
-		if !got.isOK {
-			t.Fatalf("expected clean nil, got: %+v", got)
-		}
+		require.NoError(t, run(mkSet(1, 2, 3), mkSet(1, 2, 3), &stopCause{kind: stopReachedMax}, 3, 3, 1))
 	})
 
-	t.Run("genuine silent failure mid-batch — InvalidBlock", func(t *testing.T) {
-		// Block 3 had tx-results but no blockResult. Real bug — must surface.
-		got := run(mkSet(1, 2, 3), mkSet(1, 2), nil, 2, 5, 1)
-		if !got.isInvalid {
-			t.Fatalf("expected InvalidBlock error, got: %+v", got)
-		}
+	t.Run("missing terminal result is an operational error", func(t *testing.T) {
+		err := run(mkSet(1, 2, 3), mkSet(1, 2), nil, 2, 5, 1)
+		require.Error(t, err)
+		require.NotErrorIs(t, err, rules.ErrInvalidBlock)
+		require.Contains(t, err.Error(), "without a blockResult")
 	})
 
 	t.Run("partial batch with single block — exhausted", func(t *testing.T) {
-		got := run(mkSet(1), mkSet(1), &stopCause{kind: stopMoreWork}, 1, 200, 1)
-		if !got.isExhausted {
-			t.Fatalf("expected ErrLoopExhausted, got: %+v", got)
-		}
+		err := run(mkSet(1), mkSet(1), &stopCause{kind: stopMoreWork}, 1, 200, 1)
+		require.ErrorIs(t, err, &ErrLoopExhausted{})
 	})
 }
 
