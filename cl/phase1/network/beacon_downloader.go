@@ -260,7 +260,7 @@ Process:
 	processBlocks := completeBeaconBlocks(resp.blocks)
 	pid := resp.peerId
 	if len(processBlocks) == 0 {
-		if pid != "" && pid != "http-fallback" && f.rpc != nil {
+		if shouldBanIncompleteBlockResponse(pid, len(resp.blocks), len(processBlocks)) && f.rpc != nil {
 			f.rpc.BanPeer(pid)
 		}
 		return
@@ -338,6 +338,10 @@ func validateAndFetchMissingEnvelopes(ctx context.Context, httpFallbackURL strin
 		fetchEnvelopesFromBeaconAPI(ctx, httpFallbackURL, blocks, fullRoots, envelopes, beaconCfg)
 	}
 	return validateFetchedEnvelopes(beaconCfg, blocks, envelopes)
+}
+
+func shouldBanIncompleteBlockResponse(peerID string, received, complete int) bool {
+	return peerID != "" && peerID != "http-fallback" && received > 0 && complete == 0
 }
 
 func completeBeaconBlocks(blocks []*cltypes.SignedBeaconBlock) []*cltypes.SignedBeaconBlock {
