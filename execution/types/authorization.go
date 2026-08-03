@@ -71,10 +71,10 @@ func (ath *Authorization) RecoverSigner(data *bytes.Buffer, buf []byte) (*common
 	return RecoverSignerFromRLP(data.Bytes(), ath.YParity, ath.R, ath.S)
 }
 
-// SignAuthorization returns an EIP-7702 authorization that delegates the
-// signer's account to address. It signs the authorization preimage with key and
-// rejects a nil key or the maximum uint64 nonce, which cannot be incremented
-// during authorization processing.
+// SignAuthorization returns an EIP-7702 authorization signed by key. A non-zero
+// address delegates the signer's account to that address; the zero address
+// clears the signer's delegation. It rejects a nil key or the maximum uint64
+// nonce, which cannot be incremented during authorization processing.
 func SignAuthorization(key *ecdsa.PrivateKey, chainID uint256.Int, address common.Address, nonce uint64) (Authorization, error) {
 	if nonce == math.MaxUint64 {
 		return Authorization{}, errAuthNonceOverflow
@@ -91,14 +91,15 @@ func SignAuthorization(key *ecdsa.PrivateKey, chainID uint256.Int, address commo
 		return Authorization{}, err
 	}
 
-	return Authorization{
+	auth := Authorization{
 		ChainID: chainID,
 		Address: address,
 		Nonce:   nonce,
 		YParity: sig[64],
-		R:       *new(uint256.Int).SetBytes(sig[:32]),
-		S:       *new(uint256.Int).SetBytes(sig[32:64]),
-	}, nil
+	}
+	auth.R.SetBytes(sig[:32])
+	auth.S.SetBytes(sig[32:64])
+	return auth, nil
 }
 
 func RecoverSignerFromRLP(rlp []byte, yParity uint8, r uint256.Int, s uint256.Int) (*common.Address, error) {

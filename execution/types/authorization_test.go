@@ -45,13 +45,12 @@ func TestRecoverSigner(t *testing.T) {
 	data := bytes.NewBuffer(nil)
 	authorityPtr, err := auth.RecoverSigner(data, b[:])
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
 	expectedSigner := common.HexToAddress("0x8ED5ABe9DE62dB2F266b06b86203f71e4C1e357f")
 	if *authorityPtr != expectedSigner {
 		t.Errorf("mismatch in recovered signer: got %v, want %v", *authorityPtr, expectedSigner)
 	}
-
 }
 
 func TestSignAuthorizationRoundTrip(t *testing.T) {

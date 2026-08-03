@@ -209,7 +209,7 @@ func rlpPayloadHash(encode func(w io.Writer, buf []byte) error) common.Hash {
 	return crypto.FinalizeHash(sha)
 }
 
-// prefixedPayloadHash hashes keccak256(prefix || payload) for typed transactions.
+// prefixedPayloadHash hashes keccak256(prefix || payload).
 func prefixedPayloadHash(prefix byte, encode func(w io.Writer, buf []byte) error) common.Hash {
 	return rlpPayloadHash(func(w io.Writer, buf []byte) error {
 		if _, err := w.Write(prefixSlices[prefix]); err != nil {
