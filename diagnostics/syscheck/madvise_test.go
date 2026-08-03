@@ -135,16 +135,26 @@ func TestMadviseSubPageMapping(t *testing.T) {
 		return
 	}
 
-	require.NoError(t, mmap.MadviseNormal(h1))
-	require.NoError(t, mmap.MadviseRandom(h1))
-
-	all, err := syscheck.FileMappings()
-	require.NoError(t, err)
-	for _, m := range all {
-		if m.Path == path {
-			require.Equal(t, "random", m.Advice(), "sub-page mapping must still be advised")
-			return
+	advice := func() (string, int) {
+		all, err := syscheck.FileMappings()
+		require.NoError(t, err)
+		var got string
+		var n int
+		for _, m := range all {
+			if m.Path == path {
+				got, n = m.Advice(), n+1
+			}
 		}
+		require.Positive(t, n, "mapping for %s not found", path)
+		return got, n
 	}
-	t.Fatalf("mapping for %s not found", path)
+
+	// Mmap madvises random itself, so start from a state a later call must change.
+	got, _ := advice()
+	require.Equal(t, "random", got)
+
+	require.NoError(t, mmap.MadviseNormal(h1))
+	got, n := advice()
+	require.Equal(t, "normal", got, "advice on a sub-page mapping must take effect")
+	require.Equal(t, 1, n, "advising a whole mapping must not split its VMA")
 }
