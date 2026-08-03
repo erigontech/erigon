@@ -50,6 +50,20 @@ type Unmarshaler interface {
 	clonable.Clonable
 }
 
+// StrictUnmarshaler supports canonical offset validation during recursive decoding.
+type StrictUnmarshaler interface {
+	DecodeSSZStrict(buf []byte, version int) error
+}
+
+func decodeObject(obj Unmarshaler, buf []byte, version int, strict bool) error {
+	if strict {
+		if obj, ok := obj.(StrictUnmarshaler); ok {
+			return obj.DecodeSSZStrict(buf, version)
+		}
+	}
+	return obj.DecodeSSZ(buf, version)
+}
+
 func MarshalUint64SSZ(buf []byte, x uint64) {
 	binary.LittleEndian.PutUint64(buf, x)
 }
@@ -85,12 +99,31 @@ func UnmarshalUint64SSZ(x []byte) uint64 {
 }
 
 func DecodeDynamicList[T Unmarshaler](bytes []byte, start, end uint32, _max uint64, version int) ([]T, error) {
+	return decodeDynamicList[T](bytes, start, end, _max, version, false)
+}
+
+// DecodeDynamicListStrict rejects non-canonical offset tables and propagates
+// strict decoding to elements that support it.
+func DecodeDynamicListStrict[T Unmarshaler](bytes []byte, start, end uint32, _max uint64, version int) ([]T, error) {
+	return decodeDynamicList[T](bytes, start, end, _max, version, true)
+}
+
+func decodeDynamicList[T Unmarshaler](bytes []byte, start, end uint32, _max uint64, version int, strict bool) ([]T, error) {
 	if start > end || len(bytes) < int(end) {
 		return nil, ErrBadOffset
 	}
 	buf := bytes[start:end]
 	var elementsNum, currentOffset uint32
-	if len(buf) > 4 {
+	if strict && len(buf) != 0 {
+		if len(buf) < 4 {
+			return nil, ErrLowBufferSize
+		}
+		currentOffset = DecodeOffset(buf)
+		if currentOffset == 0 || currentOffset%4 != 0 || currentOffset > uint32(len(buf)) {
+			return nil, ErrBadOffset
+		}
+		elementsNum = currentOffset / 4
+	} else if len(buf) > 4 {
 		currentOffset = DecodeOffset(buf)
 		elementsNum = currentOffset / 4
 	}
@@ -112,7 +145,7 @@ func DecodeDynamicList[T Unmarshaler](bytes []byte, start, end uint32, _max uint
 			return nil, ErrBadOffset
 		}
 		objs[i] = objs[i].Clone().(T)
-		if err := objs[i].DecodeSSZ(buf[currentOffset:endOffset], version); err != nil {
+		if err := decodeObject(objs[i], buf[currentOffset:endOffset], version, strict); err != nil {
 			return nil, err
 		}
 		currentOffset = endOffset

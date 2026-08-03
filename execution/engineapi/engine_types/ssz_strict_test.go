@@ -1,0 +1,76 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package engine_types
+
+import (
+	"encoding/binary"
+	"testing"
+
+	"github.com/erigontech/erigon/cl/clparams"
+	commonssz "github.com/erigontech/erigon/common/ssz"
+	"github.com/stretchr/testify/require"
+)
+
+func insertSSZGap(buf []byte, insertAt int, offsetPositions ...int) []byte {
+	malformed := make([]byte, len(buf)+1)
+	copy(malformed[:insertAt], buf[:insertAt])
+	copy(malformed[insertAt+1:], buf[insertAt:])
+	for _, offsetAt := range offsetPositions {
+		offset := binary.LittleEndian.Uint32(malformed[offsetAt:])
+		binary.LittleEndian.PutUint32(malformed[offsetAt:], offset+1)
+	}
+	return malformed
+}
+
+func TestExecutionPayloadDecodeSSZStrictRejectsNonCanonicalOffset(t *testing.T) {
+	payload := NewExecutionPayloadSSZ(clparams.BellatrixVersion)
+	encoded, err := payload.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	const (
+		payloadFixedSize        = 508
+		extraDataOffsetPosition = 436
+		txsOffsetPosition       = 504
+	)
+	malformed := insertSSZGap(encoded, payloadFixedSize, extraDataOffsetPosition, txsOffsetPosition)
+
+	require.NoError(t, NewExecutionPayloadSSZ(clparams.BellatrixVersion).DecodeSSZ(malformed, int(clparams.BellatrixVersion)))
+	require.ErrorIs(
+		t,
+		NewExecutionPayloadSSZ(clparams.BellatrixVersion).DecodeSSZStrict(malformed, int(clparams.BellatrixVersion)),
+		commonssz.ErrBadOffset,
+	)
+}
+
+func TestPayloadAttributesDecodeSSZStrictRejectsNonCanonicalOffset(t *testing.T) {
+	attributes := NewPayloadAttributesSSZ(clparams.CapellaVersion)
+	encoded, err := attributes.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	const (
+		attributesFixedSize       = 64
+		withdrawalsOffsetPosition = 60
+	)
+	malformed := insertSSZGap(encoded, attributesFixedSize, withdrawalsOffsetPosition)
+
+	require.NoError(t, NewPayloadAttributesSSZ(clparams.CapellaVersion).DecodeSSZ(malformed, int(clparams.CapellaVersion)))
+	require.ErrorIs(
+		t,
+		NewPayloadAttributesSSZ(clparams.CapellaVersion).DecodeSSZStrict(malformed, int(clparams.CapellaVersion)),
+		commonssz.ErrBadOffset,
+	)
+}

@@ -1,0 +1,57 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package ssz2_test
+
+import (
+	"encoding/binary"
+	"testing"
+
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	commonssz "github.com/erigontech/erigon/common/ssz"
+	"github.com/stretchr/testify/require"
+)
+
+func TestUnmarshalSSZStrictRejectsNonCanonicalOffset(t *testing.T) {
+	malformed := []byte{5, 0, 0, 0, 0, 1}
+
+	require.NoError(t, ssz2.UnmarshalSSZ(malformed, 0, solid.NewByteListSSZ(2)))
+	require.ErrorIs(t, ssz2.UnmarshalSSZStrict(malformed, 0, solid.NewByteListSSZ(2)), commonssz.ErrBadOffset)
+}
+
+func TestUnmarshalSSZStrictPropagatesToNestedList(t *testing.T) {
+	list := solid.NewDynamicListSSZ[solid.Validator](1)
+	list.Append(solid.NewValidator())
+	encoded, err := list.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	nested := make([]byte, len(encoded)+1)
+	copy(nested[:4], encoded[:4])
+	copy(nested[5:], encoded[4:])
+	binary.LittleEndian.PutUint32(nested, 5)
+
+	malformed := make([]byte, 4, 4+len(nested))
+	binary.LittleEndian.PutUint32(malformed, 4)
+	malformed = append(malformed, nested...)
+
+	require.NoError(t, ssz2.UnmarshalSSZ(malformed, 0, solid.NewDynamicListSSZ[solid.Validator](1)))
+	require.ErrorIs(
+		t,
+		ssz2.UnmarshalSSZStrict(malformed, 0, solid.NewDynamicListSSZ[solid.Validator](1)),
+		commonssz.ErrBadOffset,
+	)
+}

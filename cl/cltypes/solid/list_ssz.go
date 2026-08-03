@@ -113,6 +113,16 @@ func (l *ListSSZ[T]) DecodeSSZ(buf []byte, version int) (err error) {
 	return
 }
 
+func (l *ListSSZ[T]) DecodeSSZStrict(buf []byte, version int) (err error) {
+	if l.static {
+		l.list, err = ssz.DecodeStaticList[T](buf, 0, uint32(len(buf)), uint32(l.bytesPerElement), uint64(l.limit), version)
+	} else {
+		l.list, err = ssz.DecodeDynamicListStrict[T](buf, 0, uint32(len(buf)), uint64(l.limit), version)
+	}
+	l.root = common.Hash{}
+	return
+}
+
 func (l *ListSSZ[T]) EncodingSizeSSZ() (size int) {
 	if l.static {
 		return len(l.list) * l.bytesPerElement

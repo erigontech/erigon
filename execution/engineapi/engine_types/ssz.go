@@ -49,9 +49,23 @@ func (p *ExecutionPayload) EncodeSSZ(dst []byte) ([]byte, error) {
 }
 
 func (p *ExecutionPayload) DecodeSSZ(buf []byte, version int) error {
+	return p.decodeSSZ(buf, version, false)
+}
+
+func (p *ExecutionPayload) DecodeSSZStrict(buf []byte, version int) error {
+	return p.decodeSSZ(buf, version, true)
+}
+
+func (p *ExecutionPayload) decodeSSZ(buf []byte, version int, strict bool) error {
 	p.SSZVersion = clparams.StateVersion(version)
 	block := cltypes.NewEth1Block(p.SSZVersion, mainnetBeaconCfg)
-	if err := block.DecodeSSZ(buf, version); err != nil {
+	var err error
+	if strict {
+		err = block.DecodeSSZStrict(buf, version)
+	} else {
+		err = block.DecodeSSZ(buf, version)
+	}
+	if err != nil {
 		return err
 	}
 	*p = *ExecutionPayloadFromSSZBlock(block, p.SSZVersion)
@@ -317,30 +331,42 @@ func (a *PayloadAttributes) EncodeSSZ(dst []byte) ([]byte, error) {
 }
 
 func (a *PayloadAttributes) DecodeSSZ(buf []byte, version int) error {
+	return a.decodeSSZ(buf, version, false)
+}
+
+func (a *PayloadAttributes) DecodeSSZStrict(buf []byte, version int) error {
+	return a.decodeSSZ(buf, version, true)
+}
+
+func (a *PayloadAttributes) decodeSSZ(buf []byte, version int, strict bool) error {
 	a.SSZVersion = clparams.StateVersion(version)
 	withdrawals := newWithdrawalList(nil)
 	var timestamp uint64
 	var root common.Hash
 	var slot uint64
+	unmarshal := ssz2.UnmarshalSSZ
+	if strict {
+		unmarshal = ssz2.UnmarshalSSZStrict
+	}
 	switch a.SSZVersion {
 	case clparams.BellatrixVersion:
-		if err := ssz2.UnmarshalSSZ(buf, version, &timestamp, a.PrevRandao[:], a.SuggestedFeeRecipient[:]); err != nil {
+		if err := unmarshal(buf, version, &timestamp, a.PrevRandao[:], a.SuggestedFeeRecipient[:]); err != nil {
 			return err
 		}
 	case clparams.CapellaVersion:
-		if err := ssz2.UnmarshalSSZ(buf, version, &timestamp, a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals); err != nil {
+		if err := unmarshal(buf, version, &timestamp, a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals); err != nil {
 			return err
 		}
 		a.Withdrawals = withdrawalsFromList(withdrawals)
 	case clparams.DenebVersion:
-		if err := ssz2.UnmarshalSSZ(buf, version, &timestamp, a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals, root[:]); err != nil {
+		if err := unmarshal(buf, version, &timestamp, a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals, root[:]); err != nil {
 			return err
 		}
 		a.Withdrawals = withdrawalsFromList(withdrawals)
 		a.ParentBeaconBlockRoot = &root
 	default: // GloasVersion+
 		var targetGasLimit uint64
-		if err := ssz2.UnmarshalSSZ(buf, version, &timestamp, a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals, root[:], &slot, &targetGasLimit); err != nil {
+		if err := unmarshal(buf, version, &timestamp, a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals, root[:], &slot, &targetGasLimit); err != nil {
 			return err
 		}
 		a.Withdrawals = withdrawalsFromList(withdrawals)

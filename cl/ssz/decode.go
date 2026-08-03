@@ -52,7 +52,26 @@ The Decode function is used to decode an SSZ-encoded byte slice into the specifi
 types such as uint64, []byte, and objects that implement the SizedObjectSSZ interface.
 It handles both static (fixed size) and dynamic (variable size) objects based on their respective decoding methods and offsets.
 */
-func UnmarshalSSZ(buf []byte, version int, schema ...any) (err error) {
+func UnmarshalSSZ(buf []byte, version int, schema ...any) error {
+	return unmarshalSSZ(buf, version, false, schema...)
+}
+
+// UnmarshalSSZStrict rejects non-canonical container offsets and propagates
+// strict decoding to nested objects that support it.
+func UnmarshalSSZStrict(buf []byte, version int, schema ...any) error {
+	return unmarshalSSZ(buf, version, true, schema...)
+}
+
+func decodeObjectSSZ(obj SizedObjectSSZ, buf []byte, version int, strict bool) error {
+	if strict {
+		if obj, ok := obj.(ssz.StrictUnmarshaler); ok {
+			return obj.DecodeSSZStrict(buf, version)
+		}
+	}
+	return obj.DecodeSSZ(buf, version)
+}
+
+func unmarshalSSZ(buf []byte, version int, strict bool, schema ...any) (err error) {
 	defer func() {
 		if err2 := recover(); err2 != nil {
 			err = fmt.Errorf("panic while decoding: %v", err2)
@@ -93,7 +112,7 @@ func UnmarshalSSZ(buf []byte, version int, schema ...any) (err error) {
 					return ssz.ErrLowBufferSize
 				}
 				// If the object is static (fixed size), decode it from the buf and update the position
-				if err = obj.DecodeSSZ(buf[position:], version); err != nil {
+				if err = decodeObjectSSZ(obj, buf[position:], version, strict); err != nil {
 					return fmt.Errorf("static element %d: %w", i, err)
 				}
 				position += obj.EncodingSizeSSZ()
@@ -113,6 +132,10 @@ func UnmarshalSSZ(buf []byte, version int, schema ...any) (err error) {
 		}
 	}
 
+	if strict && len(offsets) != 0 && offsets[0] != position {
+		return ssz.ErrBadOffset
+	}
+
 	// Iterate over the dynamic objects and decode them using the stored offsets
 	for i, obj := range dynamicObjs {
 		endOffset := len(buf)
@@ -125,7 +148,7 @@ func UnmarshalSSZ(buf []byte, version int, schema ...any) (err error) {
 		if len(buf) < endOffset {
 			return ssz.ErrLowBufferSize
 		}
-		if err = obj.DecodeSSZ(buf[offsets[i]:endOffset], version); err != nil {
+		if err = decodeObjectSSZ(obj, buf[offsets[i]:endOffset], version, strict); err != nil {
 			return fmt.Errorf("dynamic element (sz:%d) %d/%s: %w", endOffset-offsets[i], i, reflect.TypeOf(obj), err)
 		}
 	}
