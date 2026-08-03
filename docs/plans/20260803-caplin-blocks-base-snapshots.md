@@ -324,20 +324,41 @@ base's pinned `View`. Task 4 keeps the `-race` test, the `ReadHeader`/
 - Modify: `db/snapshotsync/freezeblocks/beacon_block_reader.go`
 - Modify: `db/snapshotsync/freezeblocks/caplin_snapshots_test.go`
 
-- [ ] write red `-race` test: a reader holding a caplin view while a
+- [x] write red `-race` test: a reader holding a caplin view while a
   concurrent `OpenFolder` drops a file must never touch a closed mmap
   (today `closeWhatNotInList` closes inline and views pin nothing)
-- [ ] verify no duplicates remain (Task 3 deleted own `dirty`/`visible` fields
+- [x] verify no duplicates remain (Task 3 deleted own `dirty`/`visible` fields
   and locks, `recalcVisibleFiles`, `closeWhatNotInList`, `idxAvailability`,
   unpinned `CaplinView`, own `OpenList`; `OpenFolder` stays by design — see
   Task 3's resolution 3)
-- [ ] move `ReadHeader`/`ReadBlobSidecars`/segment lookups onto base
+- [x] move `ReadHeader`/`ReadBlobSidecars`/segment lookups onto base
   `View`/`ViewType` pinned `RoTx`; keep the zstd pooling and per-slot lookup
   helpers as caplin-specific
-- [ ] rewrite `BuildMissingIndices` to walk base dirty btrees on
+- [x] rewrite `BuildMissingIndices` to walk base dirty btrees on
   `!IsIndexed()` with `TryAcquireRange`/`ReleaseRange`, dispatching
   `BeaconSimpleIdx`
-- [ ] run `go test -race ./db/snapshotsync/... ./cl/antiquary/...` — green
+- [x] run `go test -race ./db/snapshotsync/... ./cl/antiquary/...` — green
+
+Landed as:
+
+- `TestViewSurvivesConcurrentSegmentRemoval` — a pinned `CaplinView` keeps reading
+  a segment whose `.seg`/`.idx` a concurrent `OpenFolder` drops. Red-verified by
+  closing the view before the removal: the read segfaults on the unmapped file.
+- `ReadHeader`/`ReadBlobSidecars` now take `ViewSingleFile` (pinned single-type
+  `RoTx`) and read through `VisibleSegment.Get`, which is byte-for-byte the
+  index-lookup+getter block they hand-rolled. The zstd pool and the SSZ decode stay
+  caplin-owned. `beacon_block_reader.go` was already on pinned `View()`s after Task
+  3 and keeps its own lookup: it interleaves a DB-fallback branch, and its
+  `slot < BaseDataID` guard is an error path base's `Get` does not have.
+- ➕ base gains `WalkDirtySegments(segtype, f)` (red test
+  `TestWalkDirtySegments`) — `BuildMissingIndices` needs the dumped-but-unindexed
+  segments themselves, which visible hides and `DirtySegmentsMax` only summarizes.
+- `BuildMissingIndices` walks that instead of re-scanning the directory, and now
+  claims each range (`TestBuildMissingIndicesSkipsClaimedRange`, red before the
+  rewrite: the old disk scan raced a dump/merge that owned the range). It calls
+  `OpenFolder` first — the dirty set only exists after an open, and the antiquary
+  calls this before its own `OpenFolder` — and releases every claim before the
+  final `OpenFolder`, since `openSegments` skips a claimed range.
 
 ### Task 5: Verify acceptance criteria
 

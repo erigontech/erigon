@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -196,6 +197,19 @@ func writeEmptyBlobSidecarsSegment(t *testing.T, dirs datadir.Dirs, from, to uin
 // visible generation while still counting as dirty.
 func writeEmptyCaplinSegment(t *testing.T, dirs datadir.Dirs, sType snaptype.Type, from, to uint64, withIndex bool) {
 	t.Helper()
+	writeCaplinSegment(t, dirs, sType, from, to, withIndex, func(uint64) []byte { return nil })
+}
+
+// slotWord makes each word the slot it is stored at, so a read can be checked against
+// the slot it asked for.
+func slotWord(slot uint64) []byte {
+	w := make([]byte, 8)
+	binary.BigEndian.PutUint64(w, slot)
+	return w
+}
+
+func writeCaplinSegment(t *testing.T, dirs datadir.Dirs, sType snaptype.Type, from, to uint64, withIndex bool, word func(slot uint64) []byte) {
+	t.Helper()
 	segName := sType.FileName(version.ZeroVersion, from, to)
 	f, _, ok := snaptype.ParseFileName(dirs.Snap, segName)
 	require.True(t, ok)
@@ -203,8 +217,8 @@ func writeEmptyCaplinSegment(t *testing.T, dirs datadir.Dirs, sType snaptype.Typ
 	c, err := seg.NewCompressor(t.Context(), "test "+sType.Name(), f.Path, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 	require.NoError(t, err)
 	defer c.Close()
-	for range to - from {
-		require.NoError(t, c.AddWord(nil))
+	for slot := from; slot < to; slot++ {
+		require.NoError(t, c.AddWord(word(slot)))
 	}
 	require.NoError(t, c.Compress())
 
@@ -254,6 +268,83 @@ func TestCloseClearsVisibleSegments(t *testing.T) {
 	view := sn.View()
 	defer view.Close()
 	require.Empty(t, view.BlobSidecars())
+}
+
+// A view pins the generation it read: a segment whose files a concurrent OpenFolder
+// drops must stay mapped and readable until that view closes. Meaningful under -race.
+func TestViewSurvivesConcurrentSegmentRemoval(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+
+	dirs := datadir.New(t.TempDir())
+	writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, limit, true, slotWord)
+	writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, limit, 2*limit, true, slotWord)
+
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+
+	view := sn.View()
+	defer view.Close()
+	tail, ok := view.BeaconBlocksSegment(limit)
+	require.True(t, ok)
+	files := tail.Src().FilePaths(dirs.Snap)
+	require.NotEmpty(t, files)
+
+	var eg errgroup.Group
+	eg.Go(func() error {
+		for _, f := range files {
+			if err := dir.RemoveFile(filepath.Join(dirs.Snap, f)); err != nil {
+				return err
+			}
+		}
+		return sn.OpenFolder()
+	})
+
+	for slot := uint64(limit); slot < limit+2_000; slot++ {
+		word, err := tail.Get(slot)
+		require.NoError(t, err)
+		require.Equal(t, slotWord(slot), word)
+	}
+	require.NoError(t, eg.Wait())
+
+	word, err := tail.Get(limit)
+	require.NoError(t, err)
+	require.Equal(t, slotWord(limit), word)
+
+	fresh := sn.View()
+	defer fresh.Close()
+	require.Len(t, fresh.BeaconBlocks(), 1, "the removed segment must have left the visible set")
+}
+
+// A dump or a merge owns its range while it works, and its .seg lands before its index.
+// BuildMissingIndices must leave a claimed range to its owner instead of racing it.
+func TestBuildMissingIndicesSkipsClaimedRange(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+
+	dirs := datadir.New(t.TempDir())
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, limit, false)
+
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+
+	require.True(t, sn.TryAcquireRange(snaptype.CaplinEnums.BeaconBlocks, 0, limit))
+	require.NoError(t, sn.BuildMissingIndices(t.Context(), log.New()))
+	require.Empty(t, caplinIdxFiles(t, dirs))
+
+	sn.ReleaseRange(snaptype.CaplinEnums.BeaconBlocks, 0, limit)
+	require.NoError(t, sn.BuildMissingIndices(t.Context(), log.New()))
+	require.Len(t, caplinIdxFiles(t, dirs), 1)
+
+	view := sn.View()
+	defer view.Close()
+	require.Len(t, view.BeaconBlocks(), 1, "a freshly indexed segment must be published")
+}
+
+func caplinIdxFiles(t *testing.T, dirs datadir.Dirs) []string {
+	t.Helper()
+	idx, err := filepath.Glob(filepath.Join(dirs.Snap, "*beaconblocks*.idx"))
+	require.NoError(t, err)
+	return idx
 }
 
 // The antiquary and the history-download stage both call OpenFolder on the same

@@ -1032,6 +1032,28 @@ func (s *BaseRoSnapshots) dirtyIdxAvailability(segtype snaptype.Enum) uint64 {
 	return _max
 }
 
+// WalkDirtySegments calls f for every dirty segment of segtype, lowest range first,
+// stopping when f returns false. dirtyLock is held for the walk, so f must not open,
+// close or republish files.
+func (s *BaseRoSnapshots) WalkDirtySegments(segtype snaptype.Enum, f func(*DirtySegment) bool) {
+	s.dirtyLock.RLock()
+	defer s.dirtyLock.RUnlock()
+
+	dirty := s.dirty[segtype]
+	if dirty == nil {
+		return
+	}
+
+	dirty.Walk(func(segments []*DirtySegment) bool {
+		for _, seg := range segments {
+			if !f(seg) {
+				return false
+			}
+		}
+		return true
+	})
+}
+
 // dirtySegmentsMax is the tip of the data on disk, index or no index: unlike
 // dirtyIdxAvailability it does not stop at the first unindexed segment, so a producer
 // can see a range it has dumped but not yet indexed.

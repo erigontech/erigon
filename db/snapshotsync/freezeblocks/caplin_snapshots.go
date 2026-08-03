@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"os"
 	"path/filepath"
 
 	"github.com/klauspost/compress/zstd"
@@ -379,50 +378,62 @@ func DumpBlobsSidecar(ctx context.Context, blobStorage blob_storage.BlobStorage,
 	return nil
 }
 
+type indexClaim struct {
+	enum     snaptype.Enum
+	from, to uint64
+	info     snaptype.FileInfo
+}
+
+// BuildMissingIndices indexes every caplin segment that is on disk but not indexed yet.
+// It opens the folder first because the dirty set it walks only exists after an open, and
+// the antiquary calls this before its own OpenFolder.
 func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Logger) error {
 	if s == nil {
 		return nil
 	}
-	// if !s.segmentsReady.Load() {
-	// 	return fmt.Errorf("not all snapshot segments are available")
-	// }
-
-	// wait for Downloader service to download all expected snapshots
-	segments, _, err := snapshotsync.SegmentsCaplin(s.Dir())
-	if err != nil {
+	if err := s.OpenFolder(); err != nil {
 		return err
 	}
 
-	//TODO: to walk over dirtyFiles and to use `.IsIndexed()` method - like in Block-Snapshots
-	des, err := os.ReadDir(s.Dir())
-	if err != nil {
-		return err
+	var claims []indexClaim
+	for _, t := range snaptype.CaplinSnapshotTypes {
+		enum := t.Enum()
+		s.WalkDirtySegments(enum, func(sn *snapshotsync.DirtySegment) bool {
+			if sn.IsIndexed() {
+				return true
+			}
+			from, to := sn.GetRange()
+			if !s.TryAcquireRange(enum, from, to) {
+				return true
+			}
+			claims = append(claims, indexClaim{enum: enum, from: from, to: to, info: sn.FileInfo(s.Dir())})
+			return true
+		})
 	}
-	dirEntries := make([]string, len(des))
-	for i, de := range des {
-		dirEntries[i] = de.Name()
-	}
-
-	noneDone := true
-	for index := range segments {
-		segment := segments[index]
-		// The same slot=>offset mapping is used for both beacon blocks and blob sidecars.
-		if segment.Type.Enum() != snaptype.CaplinEnums.BeaconBlocks && segment.Type.Enum() != snaptype.CaplinEnums.BlobSidecars {
-			continue
-		}
-		if segment.Type.HasIndexFiles(segment, dirEntries, logger) {
-			continue
-		}
-		p := &background.Progress{}
-		noneDone = false
-		if err := snapshotsync.BeaconSimpleIdx(ctx, segment, s.Salt, s.tmpdir, p, log.LvlDebug, logger); err != nil {
-			return err
-		}
-	}
-	if noneDone {
+	if len(claims) == 0 {
 		return nil
 	}
 
+	releaseClaims := func() {
+		for i := range claims {
+			s.ReleaseRange(claims[i].enum, claims[i].from, claims[i].to)
+		}
+	}
+	if err := func() error {
+		defer releaseClaims()
+		for i := range claims {
+			// The same slot=>offset mapping indexes both caplin types.
+			if err := snapshotsync.BeaconSimpleIdx(ctx, claims[i].info, s.Salt, s.tmpdir, &background.Progress{}, log.LvlDebug, logger); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
+		return err
+	}
+
+	// Claims must be gone before republishing: openSegments skips a claimed range, so a
+	// still-held claim would keep the fresh index out of the visible set.
 	return s.OpenFolder()
 }
 
@@ -433,30 +444,16 @@ func (s *CaplinSnapshots) ReadHeader(slot uint64, tx kv.Tx) (*cltypes.SignedBeac
 		}
 	}()
 
-	view := s.View()
-	defer view.Close()
-
-	var buf []byte
-
-	seg, ok := view.BeaconBlocksSegment(slot)
+	sn, ok, closeSegment := s.ViewSingleFile(snaptype.BeaconBlocks, slot)
+	defer closeSegment()
 	if !ok {
 		return nil, 0, common.Hash{}, nil
 	}
 
-	idxSlot := seg.Src().Index()
-
-	if idxSlot == nil {
-		return nil, 0, common.Hash{}, nil
+	buf, err := sn.Get(slot)
+	if err != nil {
+		return nil, 0, common.Hash{}, err
 	}
-	blockOffset := idxSlot.OrdinalLookup(slot - idxSlot.BaseDataID())
-
-	gg := seg.Src().MakeGetter()
-	gg.Reset(blockOffset)
-	if !gg.HasNext() {
-		return nil, 0, common.Hash{}, nil
-	}
-
-	buf, _ = gg.Next(buf[:0])
 	if len(buf) == 0 {
 		return nil, 0, common.Hash{}, nil
 	}
@@ -500,30 +497,16 @@ func (s *CaplinSnapshots) ReadHeader(slot uint64, tx kv.Tx) (*cltypes.SignedBeac
 }
 
 func (s *CaplinSnapshots) ReadBlobSidecars(slot uint64) ([]*cltypes.BlobSidecar, error) {
-	view := s.View()
-	defer view.Close()
-
-	var buf []byte
-
-	seg, ok := view.BlobSidecarsSegment(slot)
+	sn, ok, closeSegment := s.ViewSingleFile(snaptype.BlobSidecars, slot)
+	defer closeSegment()
 	if !ok {
 		return nil, nil
 	}
 
-	idxSlot := seg.Src().Index()
-
-	if idxSlot == nil {
-		return nil, nil
+	buf, err := sn.Get(slot)
+	if err != nil {
+		return nil, err
 	}
-	blockOffset := idxSlot.OrdinalLookup(slot - idxSlot.BaseDataID())
-
-	gg := seg.Src().MakeGetter()
-	gg.Reset(blockOffset)
-	if !gg.HasNext() {
-		return nil, nil
-	}
-
-	buf, _ = gg.Next(buf[:0])
 	if len(buf) == 0 {
 		return nil, nil
 	}

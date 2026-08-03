@@ -1389,6 +1389,47 @@ func TestDirtySegmentsMaxCountsUnindexedTail(t *testing.T) {
 	require.Equal(uint64(30_000-1), s.DirtySegmentsMax(snaptype2.Enums.Headers))
 }
 
+// An index builder needs the dumped-but-unindexed segments, which the visible set hides
+// and DirtySegmentsMax only summarizes into one number.
+func TestWalkDirtySegments(t *testing.T) {
+	logger := testlog.Logger(t, log.LvlCrit)
+	dir, require := t.TempDir(), require.New(t)
+	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
+
+	s := NewBaseRoSnapshots(cfg, dir, []snaptype.Type{snaptype2.Headers}, snaptype2.Headers, false, logger)
+	defer s.Close()
+
+	for i := range uint64(3) {
+		createTestSegmentFile(t, i*10_000, (i+1)*10_000, snaptype2.Enums.Headers, dir, version.V1_0, logger)
+	}
+	missingIdx := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, 20_000, 30_000, snaptype2.Headers.Name()))
+	require.NoError(dir2.RemoveFile(missingIdx))
+	require.NoError(s.OpenFolder())
+
+	var walked, unindexed [][2]uint64
+	s.WalkDirtySegments(snaptype2.Enums.Headers, func(sn *DirtySegment) bool {
+		from, to := sn.GetRange()
+		walked = append(walked, [2]uint64{from, to})
+		if !sn.IsIndexed() {
+			unindexed = append(unindexed, [2]uint64{from, to})
+		}
+		return true
+	})
+	require.Equal([][2]uint64{{0, 10_000}, {10_000, 20_000}, {20_000, 30_000}}, walked)
+	require.Equal([][2]uint64{{20_000, 30_000}}, unindexed)
+
+	visited := 0
+	s.WalkDirtySegments(snaptype2.Enums.Headers, func(*DirtySegment) bool { visited++; return false })
+	require.Equal(1, visited)
+
+	require.NotPanics(func() {
+		s.WalkDirtySegments(snaptype.BeaconBlocks.Enum(), func(*DirtySegment) bool {
+			require.Fail("collection does not manage this type")
+			return false
+		})
+	})
+}
+
 func TestOpenListOpensOnlyNamedFiles(t *testing.T) {
 	logger := log.New()
 	dir, require := t.TempDir(), require.New(t)
