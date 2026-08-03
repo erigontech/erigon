@@ -396,9 +396,8 @@ func (d *Domain) openDirtyFiles(ctx context.Context, dirEntries []string) (err e
 		default:
 		}
 		item := iter.Item()
-		fromStep, toStep := item.StepRange(d.stepSize)
 		if item.decompressor == nil {
-			fNameMask := d.kvFileNameMask(fromStep, toStep)
+			fNameMask := d.kvFileNameMaskForItem(item)
 			fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, dirEntries, d.dirs.SnapDomain)
 			if err != nil {
 				fName := filepath.Base(fPath)
@@ -428,7 +427,7 @@ func (d *Domain) openDirtyFiles(ctx context.Context, dirEntries []string) (err e
 		}
 
 		if item.index == nil && d.Accessors.Has(statecfg.AccessorHashMap) {
-			fNameMask := d.kviAccessorFileNameMask(fromStep, toStep)
+			fNameMask := d.kviAccessorFileNameMaskForItem(item)
 			fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, dirEntries, d.dirs.SnapDomain)
 			if err != nil {
 				fName := filepath.Base(fPath)
@@ -444,7 +443,7 @@ func (d *Domain) openDirtyFiles(ctx context.Context, dirEntries []string) (err e
 			}
 		}
 		if item.bindex == nil && d.Accessors.Has(statecfg.AccessorBTree) {
-			fNameMask := d.kvBtAccessorFileNameMask(fromStep, toStep)
+			fNameMask := d.kvBtAccessorFileNameMaskForItem(item)
 			fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, dirEntries, d.dirs.SnapDomain)
 			if err != nil {
 				fName := filepath.Base(fPath)
@@ -460,7 +459,7 @@ func (d *Domain) openDirtyFiles(ctx context.Context, dirEntries []string) (err e
 			}
 		}
 		if item.existence == nil && d.Accessors.Has(statecfg.AccessorExistence) {
-			fNameMask := d.kvExistenceIdxFileNameMask(fromStep, toStep)
+			fNameMask := d.kvExistenceIdxFileNameMaskForItem(item)
 			fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, dirEntries, d.dirs.SnapDomain)
 			if err != nil {
 				fName := filepath.Base(fPath)
@@ -887,10 +886,13 @@ func readDirNames(dir string) dirListing {
 }
 
 // fileItemsWithMissedAccessors returns list of files with missed accessors
-// here "accessors" are generated dynamically by `accessorsFor`
-func fileItemsWithMissedAccessors(dirtyFiles []*FilesItem, aggregationStep uint64, accessorsFor func(fromStep, toStep kv.Step) []string) (l []*FilesItem) {
+// here "accessors" are generated dynamically by `accessorsFor`. The
+// callback receives the FilesItem directly so it can dispatch its
+// name lookup on the item's actual coordinates — step-aligned items
+// use the legacy step mask, v4 mid-step items use raw-txnum masks.
+func fileItemsWithMissedAccessors(dirtyFiles []*FilesItem, accessorsFor func(item *FilesItem) []string) (l []*FilesItem) {
 	for _, item := range dirtyFiles {
-		for _, fName := range accessorsFor(item.StepRange(aggregationStep)) {
+		for _, fName := range accessorsFor(item) {
 			exists, err := dir.FileExist(fName)
 			if err != nil {
 				panic(err)

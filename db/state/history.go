@@ -192,7 +192,8 @@ func (h *History) missedMapAccessors(source []*FilesItem, dl dirListing) (l []*F
 	if !h.Accessors.Has(statecfg.AccessorHashMap) {
 		return nil
 	}
-	return fileItemsWithMissedAccessors(source, h.stepSize, func(fromStep, toStep kv.Step) []string {
+	return fileItemsWithMissedAccessors(source, func(item *FilesItem) []string {
+		fromStep, toStep := item.StepRange(h.stepSize)
 		fPath, _, _, err := version.MatchVersionedFile(h.vAccessorFileNameMask(fromStep, toStep), dl.names, dl.dir)
 		if err != nil {
 			panic(err)

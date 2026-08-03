@@ -213,6 +213,49 @@ func (d *Domain) kvBtAccessorNewFilePathIn(baseDir string, fromStep, toStep kv.S
 	return filepath.Join(baseDir, fmt.Sprintf("%s-%s.%d-%d.bt", d.FileVersion.AccessorBT.String(), d.FilenameBase, fromStep, toStep))
 }
 
+// v4 raw-txnum-named accessor destinations. BuildMissedAccessors uses
+// these when the source .kv item is a v4 (isRawTxNItem == true) so the
+// accessor filename tracks the .kv's raw-txN coordinates rather than
+// truncating them to a step-form name that wouldn't match.
+func (d *Domain) kviAccessorNewFilePathV4(fromTxN, toTxN uint64) string {
+	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.kvi", version.V4_0.String(), d.FilenameBase, fromTxN, toTxN))
+}
+func (d *Domain) kvExistenceIdxNewFilePathV4(fromTxN, toTxN uint64) string {
+	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.kvei", version.V4_0.String(), d.FilenameBase, fromTxN, toTxN))
+}
+func (d *Domain) kvBtAccessorNewFilePathV4(fromTxN, toTxN uint64) string {
+	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.bt", version.V4_0.String(), d.FilenameBase, fromTxN, toTxN))
+}
+
+// kvBtAccessorPathForItem returns the .bt destination path for a
+// specific FilesItem — v4 form for raw-txN items, legacy step form
+// otherwise. Sibling of kvFileNameMaskForItem on the write side.
+func (d *Domain) kvBtAccessorPathForItem(item *FilesItem) string {
+	if d.isRawTxNItem(item) {
+		return d.kvBtAccessorNewFilePathV4(item.startTxNum, item.endTxNum)
+	}
+	fromStep, toStep := item.StepRange(d.stepSize)
+	return d.kvBtAccessorNewFilePath(fromStep, toStep)
+}
+
+// kvExistenceIdxPathForItem — sibling of kvBtAccessorPathForItem for .kvei.
+func (d *Domain) kvExistenceIdxPathForItem(item *FilesItem) string {
+	if d.isRawTxNItem(item) {
+		return d.kvExistenceIdxNewFilePathV4(item.startTxNum, item.endTxNum)
+	}
+	fromStep, toStep := item.StepRange(d.stepSize)
+	return d.kvExistenceIdxNewFilePath(fromStep, toStep)
+}
+
+// kviAccessorPathForItem — sibling of kvBtAccessorPathForItem for .kvi.
+func (d *Domain) kviAccessorPathForItem(item *FilesItem) string {
+	if d.isRawTxNItem(item) {
+		return d.kviAccessorNewFilePathV4(item.startTxNum, item.endTxNum)
+	}
+	fromStep, toStep := item.StepRange(d.stepSize)
+	return d.kviAccessorNewFilePath(fromStep, toStep)
+}
+
 var domainExistenceForceInMem = dbg.EnvStrings("DOMAIN_EXISTENCE_MEM", ",", nil)
 var domainExistenceForceWillNeed = dbg.EnvStrings("DOMAIN_EXISTENCE_WILLNEED", ",", nil)
 var domainExistenceForceNormal = dbg.EnvStrings("DOMAIN_EXISTENCE_NORMAL", ",", nil)
@@ -283,6 +326,58 @@ func (d *Domain) kvExistenceIdxFileNameMask(fromStep, toStep kv.Step) string {
 }
 func (d *Domain) kvBtAccessorFileNameMask(fromStep, toStep kv.Step) string {
 	return fmt.Sprintf("*-%s.%d-%d.bt", d.FilenameBase, fromStep, toStep)
+}
+
+// isRawTxNItem reports whether a FilesItem should be looked up on
+// disk via a raw-txnum-named mask (v4.0+) rather than the legacy
+// step-indexed mask. True when endTxNum is not step-aligned — the
+// signature of a mode-C boundary-regen file whose honest endTxN =
+// lastTxN+1 lands mid-step. False for every step-aligned file, which
+// keeps the legacy naming.
+func (d *Domain) isRawTxNItem(item *FilesItem) bool {
+	return item.endTxNum%d.stepSize != 0
+}
+
+// kvFileNameMaskForItem returns the mask that MatchVersionedFile
+// applies against on-disk names for THIS item's actual coordinates.
+// Dispatches between the legacy step-indexed form and the v4 raw-
+// txnum form using isRawTxNItem. openDirtyFiles calls this instead
+// of picking one form manually — it doesn't know upfront which
+// naming an item's on-disk file uses.
+func (d *Domain) kvFileNameMaskForItem(item *FilesItem) string {
+	if d.isRawTxNItem(item) {
+		return fmt.Sprintf("*-%s.%d-%d.kv", d.FilenameBase, item.startTxNum, item.endTxNum)
+	}
+	fromStep, toStep := item.StepRange(d.stepSize)
+	return d.kvFileNameMask(fromStep, toStep)
+}
+
+// kviAccessorFileNameMaskForItem — sibling of kvFileNameMaskForItem
+// for the hash-map accessor. Same dispatch rule.
+func (d *Domain) kviAccessorFileNameMaskForItem(item *FilesItem) string {
+	if d.isRawTxNItem(item) {
+		return fmt.Sprintf("*-%s.%d-%d.kvi", d.FilenameBase, item.startTxNum, item.endTxNum)
+	}
+	fromStep, toStep := item.StepRange(d.stepSize)
+	return d.kviAccessorFileNameMask(fromStep, toStep)
+}
+
+// kvBtAccessorFileNameMaskForItem — sibling for the BT-index accessor.
+func (d *Domain) kvBtAccessorFileNameMaskForItem(item *FilesItem) string {
+	if d.isRawTxNItem(item) {
+		return fmt.Sprintf("*-%s.%d-%d.bt", d.FilenameBase, item.startTxNum, item.endTxNum)
+	}
+	fromStep, toStep := item.StepRange(d.stepSize)
+	return d.kvBtAccessorFileNameMask(fromStep, toStep)
+}
+
+// kvExistenceIdxFileNameMaskForItem — sibling for the existence-filter accessor.
+func (d *Domain) kvExistenceIdxFileNameMaskForItem(item *FilesItem) string {
+	if d.isRawTxNItem(item) {
+		return fmt.Sprintf("*-%s.%d-%d.kvei", d.FilenameBase, item.startTxNum, item.endTxNum)
+	}
+	fromStep, toStep := item.StepRange(d.stepSize)
+	return d.kvExistenceIdxFileNameMask(fromStep, toStep)
 }
 
 // maxStepInDB - return the latest available step in db (at-least 1 value in such step)
@@ -1188,12 +1283,12 @@ func (d *Domain) missedBtreeAccessors(source []*FilesItem, dl dirListing) (l []*
 	if !d.Accessors.Has(statecfg.AccessorBTree) {
 		return nil
 	}
-	return fileItemsWithMissedAccessors(source, d.stepSize, func(fromStep, toStep kv.Step) []string {
-		exF, _, _, err := version.MatchVersionedFile(d.kvExistenceIdxFileNameMask(fromStep, toStep), dl.names, dl.dir)
+	return fileItemsWithMissedAccessors(source, func(item *FilesItem) []string {
+		exF, _, _, err := version.MatchVersionedFile(d.kvExistenceIdxFileNameMaskForItem(item), dl.names, dl.dir)
 		if err != nil {
 			panic(err)
 		}
-		btF, _, _, err := version.MatchVersionedFile(d.kvBtAccessorFileNameMask(fromStep, toStep), dl.names, dl.dir)
+		btF, _, _, err := version.MatchVersionedFile(d.kvBtAccessorFileNameMaskForItem(item), dl.names, dl.dir)
 		if err != nil {
 			panic(err)
 		}
@@ -1209,8 +1304,8 @@ func (d *Domain) missedMapAccessors(source []*FilesItem, dl dirListing) (l []*Fi
 	if !d.Accessors.Has(statecfg.AccessorHashMap) {
 		return nil
 	}
-	return fileItemsWithMissedAccessors(source, d.stepSize, func(fromStep, toStep kv.Step) []string {
-		fPath, _, _, err := version.MatchVersionedFile(d.kviAccessorFileNameMask(fromStep, toStep), dl.names, dl.dir)
+	return fileItemsWithMissedAccessors(source, func(item *FilesItem) []string {
+		fPath, _, _, err := version.MatchVersionedFile(d.kviAccessorFileNameMaskForItem(item), dl.names, dl.dir)
 		if err != nil {
 			panic(err)
 		}
@@ -1237,8 +1332,8 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 		item := item
 
 		g.Go(func() error {
-			idxPath := d.kvBtAccessorNewFilePath(item.StepRange(d.stepSize))
-			kveiPath := d.kvExistenceIdxNewFilePath(item.StepRange(d.stepSize))
+			idxPath := d.kvBtAccessorPathForItem(item)
+			kveiPath := d.kvExistenceIdxPathForItem(item)
 			if err := btindex.BuildBtreeIndexWithDecompressor(idxPath, kveiPath, d.dataReader(item.decompressor), ps, d.dirs.Tmp, *d.salt.Load(), d.logger, d.noFsync, d.Accessors); err != nil {
 				return fmt.Errorf("failed to build btree index for %s:  %w", item.decompressor.FileName(), err)
 			}
@@ -1252,8 +1347,8 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 		}
 		item := item
 		g.Go(func() error {
-			fromStep, toStep := item.StepRange(d.stepSize)
-			err := d.buildHashMapAccessor(ctx, fromStep, toStep, item.decompressor, ps)
+			idxPath := d.kviAccessorPathForItem(item)
+			err := d.buildHashMapAccessorAt(ctx, idxPath, item.decompressor, ps)
 			if err != nil {
 				return fmt.Errorf("build %s values recsplit index: %w", d.FilenameBase, err)
 			}

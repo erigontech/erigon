@@ -81,25 +81,29 @@ func TestFileItemWithMissedAccessor(t *testing.T) {
 	df.Set(f2)
 	df.Set(f3)
 
-	accessorFor := func(fromStep, toStep kv.Step) []string {
+	accessorForStep := func(fromStep, toStep kv.Step) []string {
 		return []string{
 			filepath.Join(tmp, fmt.Sprintf("testacc_%d_%d.bin", fromStep, toStep)),
 			filepath.Join(tmp, fmt.Sprintf("testacc2_%d_%d.bin", fromStep, toStep)),
 		}
 	}
+	accessorFor := func(item *FilesItem) []string {
+		fromStep, toStep := item.StepRange(aggStep)
+		return accessorForStep(fromStep, toStep)
+	}
 
 	// create accesssor files for f1, f2
-	for _, fname := range accessorFor(f1.StepRange(aggStep)) {
+	for _, fname := range accessorForStep(f1.StepRange(aggStep)) {
 		os.WriteFile(fname, []byte("test"), 0644)
 		defer dir.RemoveFile(fname)
 	}
 
-	for _, fname := range accessorFor(f2.StepRange(aggStep)) {
+	for _, fname := range accessorForStep(f2.StepRange(aggStep)) {
 		os.WriteFile(fname, []byte("test"), 0644)
 		defer dir.RemoveFile(fname)
 	}
 
-	fileItems := fileItemsWithMissedAccessors(df.Items(), aggStep, accessorFor)
+	fileItems := fileItemsWithMissedAccessors(df.Items(), accessorFor)
 	require.Len(t, fileItems, 1)
 	require.Equal(t, f3, fileItems[0])
 }
@@ -292,4 +296,48 @@ func writeTestKVFile(t *testing.T, path, tmp string, logger log.Logger) {
 	require.NoError(t, comp.AddWord([]byte("k")))
 	require.NoError(t, comp.AddWord([]byte("v")))
 	require.NoError(t, comp.Compress())
+}
+
+// TestOpenDirtyFilesReopensV4RawTxNFile pins the restart-safety
+// invariant for mode-C v4 emit: a v4-named .kv file with mid-step
+// endTxN written pre-restart must be successfully re-opened on the
+// next process start. The bug this guards: openDirtyFiles used to
+// call kvFileNameMask(fromStep, toStep) which produces "*-<domain>.
+// <step>-<step>.kv" — never matches a v4 file whose actual name is
+// v4.0-<domain>.<startTxN>-<endTxN>.kv, so the item ended up in
+// invalidFileItems and the file was silently orphaned (Post-mortem:
+// GetLatest for keys in the v4 file's range would fall through to
+// the older step-aligned file it truncated — pre-unwind stale state).
+func TestOpenDirtyFilesReopensV4RawTxNFile(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+	const stepSize = uint64(16)
+	_, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, stepSize, logger)
+	// Bump the DataKV read ceiling to V4_0 — the schema's default
+	// current version predates the v4 naming pivot, so MustSupport
+	// would reject a legitimate v4 file at load time.
+	d.FileVersion.DataKV = version.Versions{Current: version.V4_0, MinSupported: version.V1_0}
+
+	// Mode-C boundary emit shape: fromTxN step-aligned (272*16),
+	// endTxN mid-step (4360 lands inside step 272..273 which spans
+	// [4352, 4368)). The prior bug: StepRange((272*16, 4360)) = (272,
+	// 272), kvFileNameMask produced "*-accounts.272-272.kv" — never
+	// matches the actual "v4.0-accounts.4352-4360.kv" filename.
+	const fromTxN = uint64(272 * 16)
+	const endTxN = uint64(4360)
+	require.NotEqual(t, uint64(0), endTxN%stepSize, "test premise: endTxN must be mid-step to exercise the v4 dispatch")
+
+	v4Name := "v4.0-accounts." + fmt.Sprintf("%d-%d", fromTxN, endTxN) + ".kv"
+	writeTestKVFile(t, filepath.Join(d.dirs.SnapDomain, v4Name), t.TempDir(), logger)
+
+	d.scanDirtyFiles([]string{v4Name})
+	require.NoError(t, d.openDirtyFiles(t.Context(), []string{v4Name}))
+
+	var opened *FilesItem
+	d.dirtyFiles.Scan(func(it *FilesItem) bool { opened = it; return true })
+	require.NotNil(t, opened, "v4 raw-txN file must survive scanDirtyFiles + openDirtyFiles as a live dirty item")
+	require.NotNil(t, opened.decompressor, "v4 file's decompressor must be opened (kvFileNameMaskForItem picked the raw-txN mask)")
+	require.Equal(t, fromTxN, opened.startTxNum)
+	require.Equal(t, endTxN, opened.endTxNum)
+	require.Equal(t, v4Name, filepath.Base(opened.decompressor.FilePath()))
 }
