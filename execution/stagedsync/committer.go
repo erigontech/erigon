@@ -82,6 +82,10 @@ type commitmentCalculator struct {
 	// execLoop or apply loop. Only this goroutine reads/writes it.
 	updates *commitment.Updates
 
+	// balUpdates is the per-block BAL fold buffer, Reset and reused across blocks
+	// instead of reallocated — avoids a fresh prefix-trie arena (16k-node slab) each block.
+	balUpdates *commitment.Updates
+
 	// state accumulates account/storage values across TX writes.
 	// At block boundary, the accumulated state is flushed to updates.
 	// Values are lazy-loaded from the domain on first touch via asOfReader.
@@ -260,6 +264,7 @@ func (cc *commitmentCalculator) Start(ctx context.Context) {
 func (cc *commitmentCalculator) Stop() {
 	close(cc.done)
 	cc.wg.Wait()
+	// balUpdates isn't closed here: the shared commitment context may still reference it post-exec.
 	if cc.roTx != nil {
 		cc.roTx.Rollback()
 	}
@@ -607,13 +612,16 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 	if err := balState.LazyLoadErr(); err != nil {
 		return nil, fmt.Errorf("lazy-load: %w", err)
 	}
-	balUpdates := cc.updates.NewEmpty()
-	// Match the calculator's constructor: only ModeDirect needs upgrading to
-	// ModeUpdate to carry compute-ahead's BAL-sourced values; ModeParallel already
-	// carries them (and ParallelPatriciaHashed rejects any other mode).
-	if balUpdates.Mode() != commitment.ModeParallel {
-		balUpdates.SetMode(commitment.ModeUpdate)
+	if cc.balUpdates == nil {
+		cc.balUpdates = cc.updates.NewEmpty()
+		// ModeDirect must upgrade to ModeUpdate to carry compute-ahead's BAL values.
+		if cc.balUpdates.Mode() != commitment.ModeParallel {
+			cc.balUpdates.SetMode(commitment.ModeUpdate)
+		}
+	} else {
+		cc.balUpdates.Reset()
 	}
+	balUpdates := cc.balUpdates
 	balState.FlushToUpdates(balUpdates)
 	return cc.computeRootFromUpdates(ctx, t, balUpdates, reader)
 }
