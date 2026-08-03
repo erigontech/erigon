@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -193,6 +194,9 @@ type Decompressor struct {
 	filePath, fileName string
 
 	readAheadRefcnt atomic.Int32 // ref-counter: allow enable/disable read-ahead from goroutines. only when refcnt=0 - disable read-ahead once
+
+	residency     atomic.Pointer[residencyBitmap] // page-residency bitmap for the async-io gate; nil unless enabled
+	residencyOnce sync.Once
 }
 
 const (
@@ -570,6 +574,10 @@ func (d *Decompressor) Close() {
 		return
 	}
 	d.checkFileLenChange()
+	if rb := d.residency.Load(); rb != nil {
+		rb.stop() // join the refresh goroutine before munmap so no mincore touches freed memory
+		d.residency.Store(nil)
+	}
 	if err := mmap.Munmap(d.mmapHandle1, d.mmapHandle2); err != nil {
 		log.Log(dbg.FileCloseLogLevel, "unmap", "err", err, "file", d.FileName(), "stack", dbg.Stack())
 	}
@@ -780,11 +788,12 @@ type Getter struct {
 	posEntries []posEntry // cached d.posDict.entries, avoids pointer chain on hot path
 	data       []byte
 	//less hot fields
-	posTables   []posTable // posArena.tables; only used for the subtable path
-	patternDict *patternTable
-	d           *Decompressor
-	fName       string
-	trace       bool
+	posTables     []posTable // posArena.tables; only used for the subtable path
+	patternDict   *patternTable
+	d             *Decompressor
+	fName         string
+	trace         bool
+	residencyGate bool
 }
 
 func (g *Getter) MadvNormal() MadvDisabler {
@@ -935,6 +944,9 @@ func (g *Getter) DataLen() int {
 func (g *Getter) Reset(offset uint64) {
 	g.dataP = offset
 	g.dataBit = 0
+	if g.residencyGate {
+		g.ensureResident(offset)
+	}
 }
 
 func (g *Getter) HasNext() bool {
