@@ -22,9 +22,11 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/cache"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // stubTemporalGetter stands in for the committed-state snapshot a warmup
@@ -43,6 +45,28 @@ func (s stubTemporalGetter) HasPrefix(kv.Domain, []byte) ([]byte, []byte, bool, 
 }
 
 func (s stubTemporalGetter) StepsInFiles(...kv.Domain) kv.Step { return 0 }
+
+type countingTemporalGetter struct {
+	stubTemporalGetter
+	account   []byte
+	code      []byte
+	codeReads int
+}
+
+func (s *countingTemporalGetter) GetLatest(domain kv.Domain, key []byte) ([]byte, kv.Step, error) {
+	switch domain {
+	case kv.AccountsDomain:
+		if s.account != nil {
+			return s.account, s.step, nil
+		}
+	case kv.CodeDomain:
+		s.codeReads++
+		if s.code != nil {
+			return s.code, s.step, nil
+		}
+	}
+	return s.stubTemporalGetter.GetLatest(domain, key)
+}
 
 func newTestStateCache() *cache.StateCache {
 	b := 1 * datasize.MB
@@ -72,6 +96,47 @@ func TestCachePopulatingGetterKeepsFresherEntry(t *testing.T) {
 	}
 }
 
+func TestCachePopulatingGetterDoesNotPublishStaleAddrCodeHash(t *testing.T) {
+	addr := []byte("\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff\x00\x11\x22\x33\x44")
+	freshHash := crypto.Keccak256Hash([]byte("fresh code"))
+	staleHash := crypto.Keccak256Hash([]byte("stale code"))
+	freshAccount := accounts.NewAccount()
+	freshAccount.CodeHash = accounts.InternCodeHash(freshHash)
+	staleAccount := accounts.NewAccount()
+	staleAccount.CodeHash = accounts.InternCodeHash(staleHash)
+
+	for _, tc := range []struct {
+		name             string
+		seedFreshMapping bool
+	}{
+		{name: "preserves fresh mapping", seedFreshMapping: true},
+		{name: "does not fill empty mapping", seedFreshMapping: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sc := newTestStateCache()
+			sc.Put(kv.AccountsDomain, addr, accounts.SerialiseV3(&freshAccount), 54)
+			if tc.seedFreshMapping {
+				sc.PutAddrCodeHash(addr, freshHash, 54)
+			}
+			cpg := &cachePopulatingGetter{
+				g:        stubTemporalGetter{v: accounts.SerialiseV3(&staleAccount), step: 2},
+				sc:       sc,
+				stepSize: 16,
+			}
+
+			_, _, err := cpg.GetLatest(kv.AccountsDomain, addr)
+			require.NoError(t, err)
+			got, ok := sc.GetAddrCodeHash(addr)
+			if tc.seedFreshMapping {
+				require.True(t, ok)
+				require.Equal(t, [32]byte(freshHash), got)
+			} else {
+				require.False(t, ok, "a rejected stale account fill must not publish its code hash")
+			}
+		})
+	}
+}
+
 // Same invariant for the code addr→code binding, which is rebound when an
 // account's code changes and is therefore just as clobber-able as accounts.
 func TestCachePopulatingGetterKeepsFresherCodeBinding(t *testing.T) {
@@ -79,15 +144,21 @@ func TestCachePopulatingGetterKeepsFresherCodeBinding(t *testing.T) {
 	freshCode := []byte{0xaa, 0x01, 0x02, 0x03}
 	staleCode := []byte{0xbb, 0x04, 0x05, 0x06}
 	sc := newTestStateCache()
-	sc.PutCodeWithHash(addr, freshCode, crypto.Keccak256(freshCode), 54)
+	freshHash := crypto.Keccak256Hash(freshCode)
+	sc.PutAddrCodeHash(addr, freshHash, 54)
+	sc.PutCodeWithHash(addr, freshCode, freshHash[:], 54)
 	cpg := &cachePopulatingGetter{g: stubTemporalGetter{v: staleCode}, sc: sc, stepSize: 1_562_500}
 
-	_, _, err := cpg.GetLatest(kv.CodeDomain, addr)
+	read, _, err := cpg.GetLatest(kv.CodeDomain, addr)
 	require.NoError(t, err)
+	require.Equal(t, freshCode, read, "known fresh hash must route to the cached fresh code")
 
 	got, ok := sc.Get(kv.CodeDomain, addr)
 	require.True(t, ok)
 	require.Equal(t, freshCode, got, "warmup must not rebind addr to older code")
+	gotHash, ok := sc.GetAddrCodeHash(addr)
+	require.True(t, ok)
+	require.Equal(t, [32]byte(freshHash), gotHash, "warmup must not rebind addr to an older code hash")
 }
 
 // Cold keys must still be warmed — that is the prefetcher's purpose.
@@ -113,6 +184,9 @@ func TestCachePopulatingGetterWarmsColdKeys(t *testing.T) {
 	got, ok := sc.Get(kv.CodeDomain, key)
 	require.True(t, ok)
 	require.Equal(t, code, got)
+	gotHash, ok := sc.GetAddrCodeHash(key)
+	require.True(t, ok)
+	require.Equal(t, [32]byte(crypto.Keccak256Hash(code)), gotHash)
 
 	// Negative results (missing account, empty slot) are cached as nil hits.
 	sc = newTestStateCache()
@@ -122,6 +196,69 @@ func TestCachePopulatingGetterWarmsColdKeys(t *testing.T) {
 	got, ok = sc.Get(kv.AccountsDomain, key)
 	require.True(t, ok)
 	require.Empty(t, got)
+}
+
+func TestCachePopulatingGetterDeduplicatesCodeByHash(t *testing.T) {
+	code := make([]byte, 24*1024)
+	for i := range code {
+		code[i] = byte(i)
+	}
+	codeHash := crypto.Keccak256Hash(code)
+	account := accounts.NewAccount()
+	account.CodeHash = accounts.InternCodeHash(codeHash)
+	g := &countingTemporalGetter{
+		stubTemporalGetter: stubTemporalGetter{step: 7},
+		account:            accounts.SerialiseV3(&account),
+		code:               code,
+	}
+	sc := newTestStateCache()
+	cpg := &cachePopulatingGetter{g: g, sc: sc, stepSize: 16, progress: func(kv.Domain) uint64 { return 127 }}
+
+	for _, addr := range []common.Address{{1}, {2}} {
+		_, _, err := cpg.GetLatest(kv.AccountsDomain, addr[:])
+		require.NoError(t, err)
+		got, _, err := cpg.GetLatest(kv.CodeDomain, addr[:])
+		require.NoError(t, err)
+		require.Equal(t, code, got)
+
+		gotHash, ok := sc.GetAddrCodeHash(addr[:])
+		require.True(t, ok, "account warmup must bind addr to its code hash")
+		require.Equal(t, [32]byte(codeHash), gotHash)
+	}
+	require.Equal(t, 1, g.codeReads, "shared bytecode must only be read once")
+
+	got, ok := sc.GetCodeByHash(codeHash[:])
+	require.True(t, ok)
+	require.Equal(t, code, got)
+}
+
+func TestCachePopulatingGetterBindsUnknownAddrToCachedCodeHash(t *testing.T) {
+	addr := common.Address{1}
+	contentAddr := common.Address{2}
+	code := []byte{0xaa, 0xbb, 0xcc}
+	codeHash := crypto.Keccak256Hash(code)
+	g := &countingTemporalGetter{
+		stubTemporalGetter: stubTemporalGetter{step: 7},
+		code:               code,
+	}
+	sc := newTestStateCache()
+	// Seed only the content-addressed entry. The target address deliberately
+	// has no addr→codeHash mapping yet.
+	sc.PutCodeWithHash(contentAddr[:], code, codeHash[:], 127)
+	cpg := &cachePopulatingGetter{g: g, sc: sc, stepSize: 16}
+
+	got, _, err := cpg.GetLatest(kv.CodeDomain, addr[:])
+	require.NoError(t, err)
+	require.Equal(t, code, got)
+	require.Equal(t, 1, g.codeReads, "an unknown address must read its code once to derive the hash")
+	gotHash, ok := sc.GetAddrCodeHash(addr[:])
+	require.True(t, ok)
+	require.Equal(t, [32]byte(codeHash), gotHash)
+
+	got, _, err = cpg.GetLatest(kv.CodeDomain, addr[:])
+	require.NoError(t, err)
+	require.Equal(t, code, got)
+	require.Equal(t, 1, g.codeReads, "the populated address mapping must route subsequent reads to cached content")
 }
 
 // A negative (missing account, empty slot) carries no write step, so a
