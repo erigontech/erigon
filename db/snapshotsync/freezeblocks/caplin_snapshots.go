@@ -85,11 +85,20 @@ func NewCaplinSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.Beacon
 	c.SetIndexBuilder(snaptype.BeaconBlocks, beaconIdx)
 	c.SetIndexBuilder(snaptype.BlobSidecars, beaconIdx)
 	// Each .idx stores the salt it was built with, so a datadir without salt-blocks.txt
-	// stays readable on the zero value - no reason to fail construction over it.
-	if salt, err := snaptype.GetIndexSalt(dirs.Snap, logger); err == nil {
-		c.Salt = salt
+	// stays readable on the zero value - no reason to fail construction over it. LoadSalt
+	// rather than GetIndexSalt: caplin is constructed before the snapshot stage downloads
+	// the salt file, and GetIndexSalt logs that absence at ERROR with a stack.
+	if salt, err := snaptype.LoadSalt(dirs.Snap, false, logger); err == nil && salt != nil {
+		c.Salt = *salt
 	}
 	return c
+}
+
+func (s *CaplinSnapshots) Close() {
+	if s == nil {
+		return
+	}
+	s.BaseRoSnapshots.Close()
 }
 
 // SegmentsMax is dirty-backed and counts a segment as soon as its .seg opens, index or
@@ -145,7 +154,13 @@ func (s *CaplinSnapshots) SegFileNames(from, to uint64) []string {
 
 // OpenFolder keeps caplin's own directory scan: SegmentsCaplin drops beacon-block
 // segments past a gap, so SegmentsMax never reports data the backfill can't walk back to.
-func (s *CaplinSnapshots) OpenFolder() error {
+func (s *CaplinSnapshots) OpenFolder() error { return s.openFolder(false) }
+
+// Shadowed so the promoted base version cannot reach the unfiltered directory scan:
+// Go embedding has no virtual dispatch, so it would call the base OpenFolder.
+func (s *CaplinSnapshots) OptimisticalyOpenFolder() { _ = s.OpenFolder() }
+
+func (s *CaplinSnapshots) openFolder(optimistic bool) error {
 	files, _, err := snapshotsync.SegmentsCaplin(s.Dir())
 	if err != nil {
 		return err
@@ -156,7 +171,7 @@ func (s *CaplinSnapshots) OpenFolder() error {
 		_, fName := filepath.Split(f.Path)
 		list = append(list, fName)
 	}
-	return s.OpenList(list, false)
+	return s.OpenList(list, optimistic)
 }
 
 type CaplinView struct {
@@ -178,10 +193,6 @@ func (v *CaplinView) BlobSidecars() []*snapshotsync.VisibleSegment {
 
 func (v *CaplinView) BeaconBlocksSegment(slot uint64) (*snapshotsync.VisibleSegment, bool) {
 	return v.base.Segment(snaptype.BeaconBlocks, slot)
-}
-
-func (v *CaplinView) BlobSidecarsSegment(slot uint64) (*snapshotsync.VisibleSegment, bool) {
-	return v.base.Segment(snaptype.BlobSidecars, slot)
 }
 
 func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, fromSlot uint64, toSlot uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger) error {
@@ -379,19 +390,21 @@ func DumpBlobsSidecar(ctx context.Context, blobStorage blob_storage.BlobStorage,
 }
 
 type indexClaim struct {
-	enum     snaptype.Enum
+	sType    snaptype.Type
 	from, to uint64
 	info     snaptype.FileInfo
 }
 
 // BuildMissingIndices indexes every caplin segment that is on disk but not indexed yet.
 // It opens the folder first because the dirty set it walks only exists after an open, and
-// the antiquary calls this before its own OpenFolder.
+// the antiquary calls this before its own OpenFolder. That open is optimistic so that a
+// corrupt .idx reaches the dirty set unindexed and gets rebuilt here, rather than failing
+// the open and leaving the node with no way to repair it.
 func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Logger) error {
 	if s == nil {
 		return nil
 	}
-	if err := s.OpenFolder(); err != nil {
+	if err := s.openFolder(true); err != nil {
 		return err
 	}
 
@@ -406,7 +419,7 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 			if !s.TryAcquireRange(enum, from, to) {
 				return true
 			}
-			claims = append(claims, indexClaim{enum: enum, from: from, to: to, info: sn.FileInfo(s.Dir())})
+			claims = append(claims, indexClaim{sType: t, from: from, to: to, info: sn.FileInfo(s.Dir())})
 			return true
 		})
 	}
@@ -414,26 +427,20 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 		return nil
 	}
 
-	releaseClaims := func() {
-		for i := range claims {
-			s.ReleaseRange(claims[i].enum, claims[i].from, claims[i].to)
+	// Every claim is released even after a failure: openSegments skips a claimed range, so a
+	// still-held claim would keep the range out of the visible set for the process lifetime.
+	var buildErr error
+	for i := range claims {
+		c := &claims[i]
+		if buildErr == nil {
+			buildErr = s.IndexBuilder(c.sType).Build(ctx, c.info, s.Salt, nil, s.tmpdir, &background.Progress{}, log.LvlDebug, logger)
 		}
+		s.ReleaseRange(c.sType.Enum(), c.from, c.to)
 	}
-	if err := func() error {
-		defer releaseClaims()
-		for i := range claims {
-			// The same slot=>offset mapping indexes both caplin types.
-			if err := snapshotsync.BeaconSimpleIdx(ctx, claims[i].info, s.Salt, s.tmpdir, &background.Progress{}, log.LvlDebug, logger); err != nil {
-				return err
-			}
-		}
-		return nil
-	}(); err != nil {
-		return err
+	if buildErr != nil {
+		return buildErr
 	}
 
-	// Claims must be gone before republishing: openSegments skips a claimed range, so a
-	// still-held claim would keep the fresh index out of the visible set.
 	return s.OpenFolder()
 }
 

@@ -650,8 +650,18 @@ func (s *BaseRoSnapshots) VisibleBlocksAvailable(t snaptype.Enum) uint64 {
 	return s.visibleIdxAvailability(t)
 }
 
+// DirtySegmentsMax is the tip of the data on disk, index or no index: unlike
+// DirtyBlocksAvailable it does not stop at the first unindexed segment, so a producer
+// can see a range it has dumped but not yet indexed.
 func (s *BaseRoSnapshots) DirtySegmentsMax(t snaptype.Enum) uint64 {
-	return s.dirtySegmentsMax(t)
+	var _max uint64
+	s.WalkDirtySegments(t, func(sn *DirtySegment) bool {
+		if sn.to > 0 && sn.to-1 > _max {
+			_max = sn.to - 1
+		}
+		return true
+	})
+	return _max
 }
 
 func (s *BaseRoSnapshots) DownloadComplete() {
@@ -1052,33 +1062,6 @@ func (s *BaseRoSnapshots) WalkDirtySegments(segtype snaptype.Enum, f func(*Dirty
 		}
 		return true
 	})
-}
-
-// dirtySegmentsMax is the tip of the data on disk, index or no index: unlike
-// dirtyIdxAvailability it does not stop at the first unindexed segment, so a producer
-// can see a range it has dumped but not yet indexed.
-func (s *BaseRoSnapshots) dirtySegmentsMax(segtype snaptype.Enum) uint64 {
-	s.dirtyLock.RLock()
-	defer s.dirtyLock.RUnlock()
-
-	dirty := s.dirty[segtype]
-	if dirty == nil {
-		return 0
-	}
-
-	var _max uint64
-
-	dirty.Walk(func(segments []*DirtySegment) bool {
-		for _, seg := range segments {
-			if seg.to > 0 && seg.to-1 > _max {
-				_max = seg.to - 1
-			}
-		}
-
-		return true
-	})
-
-	return _max
 }
 
 func (s *BaseRoSnapshots) visibleIdxAvailability(segtype snaptype.Enum) (maxVisibleIdx uint64) {
