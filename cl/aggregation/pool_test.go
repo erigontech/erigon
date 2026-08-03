@@ -199,6 +199,56 @@ func (t *PoolTestSuite) TestMergedGloasAttestationUsesProgressiveHash() {
 	t.Equal(want, got)
 }
 
+func (t *PoolTestSuite) TestFirstGloasAttestationIsCopiedAndVersioned() {
+	committeeBits := solid.NewBitVector(64)
+	committeeBits.SetBitAt(10, true)
+	att := &solid.Attestation{
+		AggregationBits: solid.BitlistFromBytes([]byte{0b00001001}, 2048*64),
+		Data:            attData1,
+		Signature:       [96]byte{'a'},
+		CommitteeBits:   committeeBits,
+	}
+	callerRoot, err := att.HashSSZ()
+	t.Require().NoError(err)
+	t.mockEthClock.EXPECT().GetEpochAtSlot(gomock.Any()).Return(uint64(1))
+	t.mockEthClock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.GloasVersion)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pool := NewAggregationPool(ctx, t.mockBeaconConfig, nil, t.mockEthClock)
+
+	t.Require().NoError(pool.AddAttestation(att))
+	afterAddRoot, err := att.HashSSZ()
+	t.Require().NoError(err)
+	t.Equal(callerRoot, afterAddRoot)
+	cached := pool.GetAggregatationByRootAndCommittee(attData1Root, 10)
+	t.NotSame(att, cached)
+	att.SetVersion(clparams.ElectraVersion)
+	got, err := cached.HashSSZ()
+	t.Require().NoError(err)
+	want, err := cached.HashSSZProgressive()
+	t.Require().NoError(err)
+	t.Equal(want, got)
+}
+
+func (t *PoolTestSuite) TestElectraAggregationErrorIsReturned() {
+	committeeBits := solid.NewBitVector(64)
+	committeeBits.SetBitAt(10, true)
+	att := &solid.Attestation{
+		AggregationBits: solid.BitlistFromBytes([]byte{0b00001001}, 2048*64),
+		Data:            attData1,
+		Signature:       [96]byte{'a'},
+		CommitteeBits:   committeeBits,
+	}
+	t.mockEthClock.EXPECT().GetEpochAtSlot(gomock.Any()).Return(uint64(1)).Times(2)
+	t.mockEthClock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.ElectraVersion).Times(2)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pool := NewAggregationPool(ctx, t.mockBeaconConfig, nil, t.mockEthClock)
+
+	t.Require().NoError(pool.AddAttestation(att))
+	t.ErrorIs(pool.AddAttestation(att.Copy()), ErrIsSuperset)
+}
+
 func (t *PoolTestSuite) TestAddAttestation() {
 	testcases := []struct {
 		name     string
@@ -266,7 +316,9 @@ func (t *PoolTestSuite) TestAddAttestation() {
 			pool.AddAttestation(tc.atts[i])
 		}
 		att := pool.GetAggregatationByRoot(tc.hashRoot)
-		t.Equal(tc.expect, att, tc.name)
+		expected := tc.expect.Copy()
+		expected.SetVersion(clparams.DenebVersion)
+		t.Equal(expected, att, tc.name)
 	}
 }
 

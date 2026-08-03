@@ -56,6 +56,26 @@ func TestBitListProgressiveHashIgnoresBackingBytesPastLength(t *testing.T) {
 	require.Equal(t, want, got)
 }
 
+func TestBitListBitsIgnoresBackingBytesPastLength(t *testing.T) {
+	bitlist := solid.NewBitList(1, 2048)
+	bitlist.Set(0, 0b00000010)
+	bitlist.Set(32, 1)
+
+	require.Equal(t, 1, bitlist.Bits())
+}
+
+func TestBitListMergeIgnoresBackingBytesPastLength(t *testing.T) {
+	bitlist := solid.NewBitList(1, 2048)
+	bitlist.Set(0, 0b00000010)
+	bitlist.Set(32, 1)
+	other := solid.NewBitList(1, 2048)
+	other.Set(0, 0b00000010)
+
+	merged, err := bitlist.Merge(other)
+	require.NoError(t, err)
+	require.Equal(t, []byte{0b00000010}, merged.Bytes())
+}
+
 func TestBitListCopyTo(t *testing.T) {
 	require := require.New(t)
 

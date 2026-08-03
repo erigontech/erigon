@@ -79,13 +79,14 @@ func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 
 	epoch := p.ethClock.GetEpochAtSlot(inAtt.Data.Slot)
 	clversion := p.ethClock.StateVersionByEpoch(epoch)
-	inAtt.SetVersion(clversion)
 	if clversion.BeforeOrEqual(clparams.DenebVersion) {
 		p.aggregatesLock.Lock()
 		defer p.aggregatesLock.Unlock()
 		att, ok := p.aggregates[hashRoot]
 		if !ok {
-			p.aggregates[hashRoot] = inAtt.Copy()
+			storedAttestation := inAtt.Copy()
+			storedAttestation.SetVersion(clversion)
+			p.aggregates[hashRoot] = storedAttestation
 			return nil
 		}
 
@@ -112,14 +113,16 @@ func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 			return err
 		}
 		// update attestation
-		p.aggregates[hashRoot] = &solid.Attestation{
+		mergedAttestation := &solid.Attestation{
 			AggregationBits: mergedBits,
 			Data:            att.Data,
 			Signature:       mergedSig,
 		}
+		mergedAttestation.SetVersion(clversion)
+		p.aggregates[hashRoot] = mergedAttestation
 	} else {
 		// Electra and after case, aggregate by committee
-		p.aggregateByCommittee(inAtt, clversion)
+		return p.aggregateByCommittee(inAtt, clversion)
 	}
 	return nil
 }
@@ -141,7 +144,9 @@ func (p *aggregationPoolImpl) aggregateByCommittee(inAtt *solid.Attestation, ver
 	}
 	att, exist := p.aggregatesInCommittee.Get(key)
 	if !exist {
-		p.aggregatesInCommittee.Add(key, inAtt)
+		storedAttestation := inAtt.Copy()
+		storedAttestation.SetVersion(version)
+		p.aggregatesInCommittee.Add(key, storedAttestation)
 		return nil
 	}
 

@@ -236,7 +236,7 @@ func (u *BitList) Clone() clonable.Clonable {
 
 // getBitlistLength return the amount of bits in given bitlist.
 func (u *BitList) Bits() int {
-	return bitlistBits(u.u)
+	return bitlistBits(u.Bytes())
 }
 
 func bitlistBits(data []byte) int {
