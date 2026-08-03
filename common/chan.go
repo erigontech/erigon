@@ -25,40 +25,6 @@ import (
 var ErrStopped = errors.New("stopped")
 var ErrUnwind = errors.New("unwound")
 
-// NilIfCanceled returns nil when err is nil or contains only context
-// cancellation. Mixed errors are preserved.
-func NilIfCanceled(err error) error {
-	if err == nil || IsOnlyCanceled(err) {
-		return nil
-	}
-	return err
-}
-
-// IsOnlyCanceled reports whether err is non-nil and every leaf in its unwrap
-// tree is context.Canceled.
-func IsOnlyCanceled(err error) bool {
-	if err == nil {
-		return false
-	}
-	switch x := err.(type) {
-	case interface{ Unwrap() []error }:
-		errs := x.Unwrap()
-		if len(errs) == 0 {
-			return false
-		}
-		for _, e := range errs {
-			if !IsOnlyCanceled(e) {
-				return false
-			}
-		}
-		return true
-	case interface{ Unwrap() error }:
-		return IsOnlyCanceled(x.Unwrap())
-	default:
-		return errors.Is(err, context.Canceled)
-	}
-}
-
 // FastContextErr is faster than ctx.Err() because usually it doesn't lock an internal mutex.
 // It locks it only if the context is done and at the first call.
 // See implementation of cancelCtx in context/context.go.

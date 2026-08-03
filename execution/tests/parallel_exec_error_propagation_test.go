@@ -55,7 +55,7 @@ func TestParallelExec_PreDispatchFailure_SurfacesInsteadOfInfiniteLoop(t *testin
 
 	chaosErr := errors.New("chaos monkey: simulated pre-dispatch failure (snapshot step misalignment)")
 	disarm := chaos_monkey.ArmPreExecutionError(chaosErr)
-	defer disarm()
+	t.Cleanup(disarm)
 
 	err = runParallelExecV3(t, m, maxBlockNum)
 
@@ -126,7 +126,7 @@ func TestParallelExec_WorkerPoolDeath_SurfacesInsteadOfHanging(t *testing.T) {
 
 	chaosErr := errors.New("chaos monkey: simulated worker panic")
 	disarm := chaos_monkey.ArmWorkerError(chaosErr)
-	defer disarm()
+	t.Cleanup(disarm)
 
 	err := runParallelExecV3(t, m, b2.NumberU64())
 
@@ -144,7 +144,7 @@ func TestParallelExec_ApplyLoopPanic_SurfacesInsteadOfCommitting(t *testing.T) {
 
 	chaosErr := errors.New("chaos monkey: simulated apply-loop panic")
 	disarm := chaos_monkey.ArmApplyLoopPanic(chaosErr)
-	defer disarm()
+	t.Cleanup(disarm)
 
 	err := runParallelExecV3(t, m, b2.NumberU64())
 
@@ -159,7 +159,7 @@ func TestParallelExec_ExecLoopPanic_SurfacesInsteadOfRetrying(t *testing.T) {
 
 	chaosErr := errors.New("chaos monkey: simulated exec-loop panic")
 	disarm := chaos_monkey.ArmExecLoopPanic(chaosErr)
-	defer disarm()
+	t.Cleanup(disarm)
 
 	err := runParallelExecV3(t, m, b2.NumberU64())
 

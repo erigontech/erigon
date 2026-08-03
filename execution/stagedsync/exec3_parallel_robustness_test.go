@@ -25,6 +25,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
+	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -1004,7 +1005,7 @@ func TestReconcileExecErrors(t *testing.T) {
 	t.Run("mixed canceled wait error surfaces", func(t *testing.T) {
 		got := reconcileExecErrors(nil, errors.Join(context.Canceled, waitFail))
 		require.ErrorIs(t, got, waitFail)
-		require.False(t, common.IsOnlyCanceled(got))
+		require.False(t, commonerrors.IsOnlyCanceled(got))
 		require.True(t, surfacesLoudly(got))
 	})
 }
@@ -1222,7 +1223,7 @@ func TestCanceledMemberCannotMaskRealError(t *testing.T) {
 		pe := &parallelExecutor{}
 		pe.execLoopGroup = &errgroup.Group{}
 		pe.execLoopGroup.Go(func() error {
-			err := common.NilIfCanceled(context.Canceled)
+			err := commonerrors.NilIfCanceled(context.Canceled)
 			close(cancellationFiltered)
 			return err
 		})
@@ -1275,7 +1276,7 @@ func TestApplyLoopCloseBranchSurfacesDeferredRootBeforeMissing(t *testing.T) {
 
 		err := applyLoopMissingBlocksError(ctx, 5, 10, mkSet(5, 6), mkSet(5))
 		require.ErrorIs(t, err, context.Canceled)
-		require.True(t, common.IsOnlyCanceled(err))
+		require.True(t, commonerrors.IsOnlyCanceled(err))
 	})
 
 	t.Run("missing block during cancellation preserves a real cause", func(t *testing.T) {
@@ -1285,7 +1286,7 @@ func TestApplyLoopCloseBranchSurfacesDeferredRootBeforeMissing(t *testing.T) {
 
 		err := applyLoopMissingBlocksError(ctx, 5, 10, mkSet(5, 6), mkSet(5))
 		require.ErrorIs(t, err, cause)
-		require.False(t, common.IsOnlyCanceled(err))
+		require.False(t, commonerrors.IsOnlyCanceled(err))
 	})
 
 	t.Run("deferred root + no missing block — root error surfaces", func(t *testing.T) {

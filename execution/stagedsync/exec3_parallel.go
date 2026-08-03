@@ -20,6 +20,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
@@ -886,7 +887,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 // isQuietExit reports whether err is routine teardown (cancellation-only) or a
 // resumable batch boundary rather than a failure.
 func isQuietExit(err error) bool {
-	return common.IsOnlyCanceled(err) || errors.Is(err, &ErrLoopExhausted{})
+	return commonerrors.IsOnlyCanceled(err) || errors.Is(err, &ErrLoopExhausted{})
 }
 
 func (pe *parallelExecutor) runApplyLoop(logPrefix string, applyResults <-chan applyResult, rootResults <-chan commitmentResult, apply func() error) (err error) {
@@ -1019,7 +1020,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 		if rec := recover(); rec != nil {
 			pe.logger.Warn("["+pe.logPrefix+"] exec loop panic", "rec", rec, "stack", dbg.Stack())
 			err = fmt.Errorf("exec loop panic: %v", rec)
-		} else if err != nil && !common.IsOnlyCanceled(err) {
+		} else if err != nil && !commonerrors.IsOnlyCanceled(err) {
 			pe.logger.Warn("["+pe.logPrefix+"] exec loop error", "err", err)
 		} else {
 			pe.logger.Debug("[" + pe.logPrefix + "] exec loop exit")
@@ -1742,7 +1743,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 		defer pe.rws.Close()
 		defer pe.in.Release()
 		pe.resetWorkers(workersCtx, pe.rs, nil)
-		return common.NilIfCanceled(pe.execLoop(execLoopCtx))
+		return commonerrors.NilIfCanceled(pe.execLoop(execLoopCtx))
 	})
 
 	return execLoopCtx, func(cause error) {
@@ -1758,7 +1759,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 
 // joinWorkers reports real worker failures and suppresses cancellation-only exits.
 func joinWorkers(waitWorkers func() error) error {
-	if err := common.NilIfCanceled(waitWorkers()); err != nil {
+	if err := commonerrors.NilIfCanceled(waitWorkers()); err != nil {
 		return fmt.Errorf("worker pool: %w", err)
 	}
 	return nil
@@ -1771,17 +1772,17 @@ func (pe *parallelExecutor) wait() error {
 	if pe.execLoopGroup == nil {
 		return nil
 	}
-	return common.NilIfCanceled(pe.execLoopGroup.Wait())
+	return commonerrors.NilIfCanceled(pe.execLoopGroup.Wait())
 }
 
 // reconcileExecErrors makes a real concurrent error authoritative over
 // resumable or cancellation-only apply results. Independent real errors are
 // preserved.
 func reconcileExecErrors(execErr, concurrentErr error) error {
-	if concurrentErr = common.NilIfCanceled(concurrentErr); concurrentErr == nil {
+	if concurrentErr = commonerrors.NilIfCanceled(concurrentErr); concurrentErr == nil {
 		return execErr
 	}
-	if execErr == nil || errors.Is(execErr, &ErrLoopExhausted{}) || common.IsOnlyCanceled(execErr) {
+	if execErr == nil || errors.Is(execErr, &ErrLoopExhausted{}) || commonerrors.IsOnlyCanceled(execErr) {
 		return concurrentErr
 	}
 	return errors.Join(execErr, concurrentErr)

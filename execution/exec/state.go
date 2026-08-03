@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
@@ -628,7 +629,7 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 	if background {
 		for i := range workerCount {
 			g.Go(func() error {
-				return common.NilIfCanceled(reconWorkers[i].Run())
+				return commonerrors.NilIfCanceled(reconWorkers[i].Run())
 			})
 		}
 		wait = func() error { return g.Wait() }
