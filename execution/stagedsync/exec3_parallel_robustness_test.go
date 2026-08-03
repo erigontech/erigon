@@ -920,9 +920,9 @@ func TestApplyLoopFlush_InvalidTxWritesAreEstimate(t *testing.T) {
 			"OCC must still see it as a dependency")
 }
 
-// Real wait errors take precedence over resumable or canceled apply results.
-// Cancellation-only wait results never override the apply-loop result.
-func TestReconcileExecAndWaitErr(t *testing.T) {
+// Real concurrent errors take precedence over resumable or canceled apply
+// results. Cancellation-only errors never override the apply-loop result.
+func TestReconcileExecErrors(t *testing.T) {
 	exhausted := &ErrLoopExhausted{From: 100, To: 0, Reason: "block batch is full"}
 	waitFail := errors.New("snapshot step misalignment: snapshot files need rebuilding")
 
@@ -931,23 +931,23 @@ func TestReconcileExecAndWaitErr(t *testing.T) {
 	}
 
 	t.Run("both nil", func(t *testing.T) {
-		require.NoError(t, reconcileExecAndWaitErr(nil, nil))
+		require.NoError(t, reconcileExecErrors(nil, nil))
 	})
 
 	t.Run("clean partial batch keeps ErrLoopExhausted", func(t *testing.T) {
-		got := reconcileExecAndWaitErr(exhausted, nil)
+		got := reconcileExecErrors(exhausted, nil)
 		require.ErrorIs(t, got, &ErrLoopExhausted{})
 		require.False(t, surfacesLoudly(got), "a clean partial batch must resume, not fail")
 	})
 
 	t.Run("wait error with no apply error surfaces", func(t *testing.T) {
-		got := reconcileExecAndWaitErr(nil, waitFail)
+		got := reconcileExecErrors(nil, waitFail)
 		require.Same(t, waitFail, got)
 		require.True(t, surfacesLoudly(got))
 	})
 
 	t.Run("wait error supersedes ErrLoopExhausted", func(t *testing.T) {
-		got := reconcileExecAndWaitErr(exhausted, waitFail)
+		got := reconcileExecErrors(exhausted, waitFail)
 		require.ErrorIs(t, got, waitFail)
 		require.False(t, errors.Is(got, &ErrLoopExhausted{}),
 			"ErrLoopExhausted must not survive, or execImpl retries a fatal error forever")
@@ -956,53 +956,53 @@ func TestReconcileExecAndWaitErr(t *testing.T) {
 
 	t.Run("specific apply error is kept alongside the wait error", func(t *testing.T) {
 		invalid := fmt.Errorf("%w: bad receipts", rules.ErrInvalidBlock)
-		got := reconcileExecAndWaitErr(invalid, waitFail)
+		got := reconcileExecErrors(invalid, waitFail)
 		require.ErrorIs(t, got, rules.ErrInvalidBlock)
 		require.ErrorIs(t, got, waitFail)
 		require.True(t, surfacesLoudly(got))
 	})
 
 	t.Run("canceled wait keeps a resumable batch resumable", func(t *testing.T) {
-		got := reconcileExecAndWaitErr(exhausted, context.Canceled)
+		got := reconcileExecErrors(exhausted, context.Canceled)
 		require.Same(t, exhausted, got,
 			"a canceled wait must not supersede ErrLoopExhausted, or every batch-full commit under cancellation fails hard")
 	})
 
 	t.Run("canceled wait after a clean batch stays clean", func(t *testing.T) {
-		require.NoError(t, reconcileExecAndWaitErr(nil, context.Canceled))
+		require.NoError(t, reconcileExecErrors(nil, context.Canceled))
 	})
 
 	t.Run("canceled wait does not contaminate a specific apply error", func(t *testing.T) {
 		invalid := fmt.Errorf("%w: bad receipts", rules.ErrInvalidBlock)
-		got := reconcileExecAndWaitErr(invalid, fmt.Errorf("worker: %w", context.Canceled))
+		got := reconcileExecErrors(invalid, fmt.Errorf("worker: %w", context.Canceled))
 		require.Same(t, invalid, got)
 		require.NotErrorIs(t, got, context.Canceled,
 			"joining a cancellation would flip execImpl's quiet-exit gate and skip the failure handling")
 	})
 
 	t.Run("wait error supersedes a canceled apply exit", func(t *testing.T) {
-		got := reconcileExecAndWaitErr(context.Canceled, waitFail)
+		got := reconcileExecErrors(context.Canceled, waitFail)
 		require.Same(t, waitFail, got)
 		require.True(t, surfacesLoudly(got),
 			"a Canceled-classified aggregate is dropped by execImpl's gate and ExecModule.Start")
 	})
 
 	t.Run("wait error supersedes a wrapped canceled apply exit", func(t *testing.T) {
-		got := reconcileExecAndWaitErr(fmt.Errorf("apply loop: open roTx: %w", context.Canceled), waitFail)
+		got := reconcileExecErrors(fmt.Errorf("apply loop: open roTx: %w", context.Canceled), waitFail)
 		require.Same(t, waitFail, got)
 		require.True(t, surfacesLoudly(got))
 	})
 
 	t.Run("mixed canceled apply error keeps its real branch", func(t *testing.T) {
 		applyFail := errors.New("apply loop: boom")
-		got := reconcileExecAndWaitErr(errors.Join(context.Canceled, applyFail), waitFail)
+		got := reconcileExecErrors(errors.Join(context.Canceled, applyFail), waitFail)
 		require.ErrorIs(t, got, applyFail)
 		require.ErrorIs(t, got, waitFail)
 		require.True(t, surfacesLoudly(got))
 	})
 
 	t.Run("mixed canceled wait error surfaces", func(t *testing.T) {
-		got := reconcileExecAndWaitErr(nil, errors.Join(context.Canceled, waitFail))
+		got := reconcileExecErrors(nil, errors.Join(context.Canceled, waitFail))
 		require.ErrorIs(t, got, waitFail)
 		require.False(t, common.IsOnlyCanceled(got))
 		require.True(t, surfacesLoudly(got))
@@ -1337,6 +1337,26 @@ func TestCheckBlocksDrained(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 		require.NoError(t, withPending().checkBlocksDrained(ctx, context.Background(), nil))
+	})
+
+	t.Run("real parent cancellation cause surfaces", func(t *testing.T) {
+		cause := errors.New("parent execution failed")
+		ctx, cancel := context.WithCancelCause(context.Background())
+		cancel(cause)
+
+		err := withPending().checkBlocksDrained(ctx, context.Background(), nil)
+		require.ErrorIs(t, err, cause)
+	})
+
+	t.Run("real parent cause preserves an existing error", func(t *testing.T) {
+		execErr := errors.New("apply loop failed")
+		cause := errors.New("parent execution failed")
+		ctx, cancel := context.WithCancelCause(context.Background())
+		cancel(cause)
+
+		err := withPending().checkBlocksDrained(ctx, context.Background(), execErr)
+		require.ErrorIs(t, err, execErr)
+		require.ErrorIs(t, err, cause)
 	})
 
 	t.Run("bad-block stop leaves undrained follow-on blocks alone", func(t *testing.T) {

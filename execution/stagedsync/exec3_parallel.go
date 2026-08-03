@@ -827,7 +827,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	}
 
 	// Wait for all goroutines to complete before reading shared state.
-	execErr = reconcileExecAndWaitErr(execErr, pe.wait())
+	execErr = reconcileExecErrors(execErr, pe.wait())
 	execErr = pe.checkBlocksDrained(ctx, executorContext, execErr)
 
 	// Commitment is computed per-block by the calculator. Stage progress
@@ -1606,7 +1606,7 @@ func (pe *parallelExecutor) closeApplyChannels() (closedOrder []string) {
 // Stops that deliberately cancel follow-on blocks are exempt.
 func (pe *parallelExecutor) checkBlocksDrained(ctx, executorCtx context.Context, execErr error) error {
 	if ctx.Err() != nil {
-		return execErr
+		return reconcileExecErrors(execErr, context.Cause(ctx))
 	}
 	if execErr != nil && !errors.Is(execErr, &ErrLoopExhausted{}) {
 		return execErr
@@ -1774,16 +1774,17 @@ func (pe *parallelExecutor) wait() error {
 	return common.NilIfCanceled(pe.execLoopGroup.Wait())
 }
 
-// reconcileExecAndWaitErr makes real wait errors authoritative over resumable
-// or cancellation-only apply results. Independent real errors are preserved.
-func reconcileExecAndWaitErr(execErr, waitErr error) error {
-	if waitErr = common.NilIfCanceled(waitErr); waitErr == nil {
+// reconcileExecErrors makes a real concurrent error authoritative over
+// resumable or cancellation-only apply results. Independent real errors are
+// preserved.
+func reconcileExecErrors(execErr, concurrentErr error) error {
+	if concurrentErr = common.NilIfCanceled(concurrentErr); concurrentErr == nil {
 		return execErr
 	}
 	if execErr == nil || errors.Is(execErr, &ErrLoopExhausted{}) || common.IsOnlyCanceled(execErr) {
-		return waitErr
+		return concurrentErr
 	}
-	return errors.Join(execErr, waitErr)
+	return errors.Join(execErr, concurrentErr)
 }
 
 type applyResult any
