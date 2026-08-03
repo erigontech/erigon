@@ -109,52 +109,22 @@ type classifiedFiles struct {
 }
 
 // overrideActionForDomain adjusts a per-file action after the
-// topological classifier based on domain-specific policy plus the
-// prune-mode IX-horizon check. Two independent overrides layer here:
+// topological classifier based on the prune-mode IX-horizon check.
 //
-// (1) Commitment straddler regen preserves stale branches (unconditional).
-// Commitment has HistoryDisabled, so its regen falls through
-// `DomainRoTx.GetAsOf → AggregatorRoTx.GetAsOf` to `GetLatest`.
-// `getLatestFromDb`'s file-endTxN filter (db/state/domain.go, look
-// for `if lastTxNumOfStep(step) >= files.EndTxN()`) then shadows the
-// compute's MDBX writes at step-of-lastTxN by the OLD boundary file's
-// EndTxN. Regen copies OLD file content wholesale into the new
-// `.regen`, preserving post-lastTxN over-writes (case a) and the
-// ~170K post-lastTxN-only branches (case c) that don't exist in the
-// trie at lastTxN. Forward-exec surfaces either as "Wrong trie root"
-// or "empty branch data during unfold". Map `actionRegenTruncate →
-// actionRemove` for commitment: FinalizeUnwind unlinks the file, and
-// `files.EndTxN(commitment)` drops back to the previous file's, so
-// the filter no longer shadows MDBX and compute's 5M+ branches serve
-// reads. Next retire materialises fresh files. `actionRegenInPlace`
-// stays: its file already ends at boundary and the anchor blob
-// injection at KeyCommitmentState is what regen exists for.
-//
-// (2) Domain IX pruned past target's txN (conditional on ixCoversTarget).
 // Under `--prune.mode=minimal` the IX only covers the last ~100k
 // blocks; a deep mode-B target below that horizon makes per-key AsOf
 // impossible. Per-domain policy:
 //   - Receipt: regen actions become actionRemove (forward-exec
 //     restores every value; receipt keys are re-written on every txN,
 //     so retire produces a fresh .kv naturally).
-//   - Commitment: pass through (regen uses encoded anchor, not
-//     per-key AsOf so IX horizon doesn't apply — override 1 above
-//     handles commitment).
+//   - Commitment: pass through — regen uses the compute's captured
+//     branches (via WriteCommitmentBoundaryFileV4) plus an encoded
+//     anchor, not per-key AsOf, so the IX horizon doesn't apply.
 //   - Accounts/storage/code: error (silent removal would lose state
 //     for keys last written pre-target and never touched since).
 //   - actionKeep / actionRemove: no AsOf lookup performed, always
 //     pass through.
 func overrideActionForDomain(action stateFileAction, domain kv.Domain, ixCoversTarget bool) (stateFileAction, error) {
-	// Override 1: commitment straddler regen is unsafe regardless of
-	// IX horizon. actionRegenTruncate rewrites a file whose EndTxN
-	// will still shadow compute's MDBX writes; remove the file so
-	// MDBX becomes authoritative for this step until next retire.
-	if domain == kv.CommitmentDomain && action == actionRegenTruncate {
-		return actionRemove, nil
-	}
-
-	// Override 2: IX-horizon-conditional overrides for the remaining
-	// regen actions.
 	if ixCoversTarget {
 		return action, nil
 	}

@@ -245,23 +245,13 @@ func TestPlan_EmptyInput(t *testing.T) {
 }
 
 // overrideActionForDomain: per-file, per-domain override rule that
-// applies AFTER classifyStateFileForUnwind. Two orthogonal overrides
-// layer here:
-//
-// (1) Commitment straddler regen is unsafe regardless of IX horizon.
-// Commitment's HistoryDisabled means regen falls through GetAsOf to
-// GetLatest; getLatestFromDb's file-endTxN filter then shadows the
-// compute's MDBX writes at step-of-lastTxN by the OLD file's EndTxN.
-// The regen copies OLD file content wholesale, preserving stale
-// post-lastTxN over-writes and phantom post-lastTxN-only branches.
-// Map actionRegenTruncate → actionRemove; MDBX becomes authoritative
-// until next retire.
-//
-// (2) Domain IX pruned past target's txN (conditional):
+// applies AFTER classifyStateFileForUnwind. Applies IX-horizon
+// policy under --prune.mode=minimal:
 //   - Receipt: regen → actionRemove (forward-exec restores; keys re-
 //     written every txN).
-//   - Commitment: pass through (regen uses encoded anchor, not AsOf
-//     — override 1 above already handled the truncate case).
+//   - Commitment: pass through — regen uses compute's captured
+//     branches via WriteCommitmentBoundaryFileV4 (mode-C v4 emit),
+//     not per-key AsOf, so IX horizon doesn't apply.
 //   - Accounts/storage/code: error (silent removal would lose state).
 //   - actionKeep / actionRemove: no AsOf, pass through.
 func TestOverrideActionForDomain(t *testing.T) {
@@ -274,9 +264,11 @@ func TestOverrideActionForDomain(t *testing.T) {
 		wantAction     stateFileAction
 		wantErr        bool
 	}{
-		// Commitment straddler regen override (fires regardless of IX horizon).
-		{"commitment truncate → remove (ix covered)", actionRegenTruncate, kv.CommitmentDomain, true, actionRemove, false},
-		{"commitment truncate → remove (ix pruned)", actionRegenTruncate, kv.CommitmentDomain, false, actionRemove, false},
+		// Commitment truncate passes through — mode-C v4 emit uses
+		// compute's captured branches, no per-key AsOf, so IX-horizon
+		// pass-through applies (see WriteCommitmentBoundaryFileV4).
+		{"commitment truncate unchanged (ix covered)", actionRegenTruncate, kv.CommitmentDomain, true, actionRegenTruncate, false},
+		{"commitment truncate unchanged (ix pruned)", actionRegenTruncate, kv.CommitmentDomain, false, actionRegenTruncate, false},
 
 		// Commitment aligned in-place stays as regen (anchor replacement).
 		{"commitment regen-in-place unchanged (ix covered)", actionRegenInPlace, kv.CommitmentDomain, true, actionRegenInPlace, false},

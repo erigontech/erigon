@@ -173,8 +173,7 @@ func (p *Provider) regenerateBoundaryStepFiles(
 		// only covers the last ~100k blocks; a deep unwind can target
 		// a txN below that horizon. Regen's per-key AsOf would then
 		// raise "data before txNum=<horizon> not available".
-		// overrideActionForDomain resolves this per-domain plus the
-		// commitment-straddler-preserves-stale-branches override.
+		// overrideActionForDomain resolves this per-domain.
 		ixStart := tx.Debug().HistoryStartFrom(kvDomain)
 		ixCoversTarget := ixStart <= lastTxNum+1
 		if !ixCoversTarget {
