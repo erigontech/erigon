@@ -28,6 +28,8 @@ import (
 
 	"github.com/edsrzf/mmap-go"
 
+	mm "github.com/erigontech/erigon/common/mmap"
+
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
@@ -507,6 +509,11 @@ func OpenBtreeIndexWithDecompressor(indexPath string, kvGetter *seg.Reader) (bt 
 
 	idx.m, err = mmap.MapRegion(idx.file, int(idx.size), mmap.RDONLY, 0, 0)
 	if err != nil {
+		return nil, err
+	}
+	// MapRegion leaves the kernel default; seg.Mmap does this itself. The btree is
+	// read by point lookups over data far bigger than RAM, so readahead is waste.
+	if err := mm.MadviseRandom(idx.m); err != nil {
 		return nil, err
 	}
 	idx.data = idx.m[:idx.size]
