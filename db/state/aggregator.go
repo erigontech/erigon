@@ -55,6 +55,7 @@ import (
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/diagnostics/syscheck"
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
@@ -1205,6 +1206,12 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethi
 		return true, err
 	}
 	a.integrateMergedDirtyFiles(in)
+	// A merge is the only thing that madvises snapshot files, so it is the only place
+	// a mapping can be left non-random. Reading smaps walks page tables, so it stays
+	// behind a debug flag.
+	if dbg.LogNonRandomMmap {
+		syscheck.LogNonRandomFileMappings(a.logger, a.dirs.Snap)
+	}
 	return true, nil
 }
 

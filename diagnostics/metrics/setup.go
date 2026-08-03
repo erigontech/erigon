@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/diagnostics/syscheck"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -35,6 +36,7 @@ func Setup(address string, logger log.Logger) *http.ServeMux {
 
 	prometheusMux := http.NewServeMux()
 	prometheusMux.Handle("/debug/metrics/prometheus", promhttp.Handler())
+	prometheusMux.HandleFunc("/debug/mmap", syscheck.ServeFileMappings)
 
 	promServer := &http.Server{
 		Addr:              address,
