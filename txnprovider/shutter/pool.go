@@ -327,20 +327,20 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 			)
 			continue
 		}
-		intrinsicGas := intrinsicGasResult.RegularGas
+		intrinsicGas := intrinsicGasResult.ExecutionGas
 		if isEIP7623 && intrinsicGasResult.FloorGasCost > intrinsicGas {
 			intrinsicGas = intrinsicGasResult.FloorGasCost
 		}
 		blobGas := txn.GetBlobGas()
-		if intrinsicGas > availableGas.Regular {
+		if intrinsicGas > availableGas.Execution {
 			sender, _ := txn.GetSender()
 			p.logger.Warn(
-				"skipping decrypted txn: insufficient regular gas",
+				"skipping decrypted txn: insufficient execution gas",
 				"hash", txn.Hash(),
 				"type", txn.Type(),
 				"sender", sender,
 				"intrinsicGas", intrinsicGas,
-				"availableRegular", availableGas.Regular,
+				"availableExecution", availableGas.Execution,
 			)
 			continue
 		}
@@ -368,7 +368,7 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 			)
 			continue
 		}
-		availableGas.Regular -= intrinsicGas
+		availableGas.Execution -= intrinsicGas
 		availableGas.Blob -= blobGas
 		decryptedTxnsGas += txn.GetGasLimit()
 		txns = append(txns, txn)
