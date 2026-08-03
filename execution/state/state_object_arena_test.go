@@ -115,8 +115,20 @@ func TestNoMaterializeOverflowSkipsPool(t *testing.T) {
 		require.True(t, ibs.allocStateObject().arena)
 	}
 
+	// Only a pool draw can hand a sentinel back. The reverse does not hold: a GC
+	// or a P migration between Put and Get empties the pool, so a drain can slip
+	// through - but a correct alloc can never fail this.
+	sentinels := make([]*stateObject, 4)
+	for i := range sentinels {
+		sentinels[i] = newHeapObject()
+		stateObjectPool.Put(sentinels[i])
+	}
+
 	overflow := ibs.allocStateObject()
 	require.False(t, overflow.arena, "overflow object is not an arena slot")
+	for i, sentinel := range sentinels {
+		require.NotSame(t, sentinel, overflow, "overflow drew sentinel %d from the shared pool", i)
+	}
 	overflow.setState(accounts.InternKey([32]byte{0x01}), *uint256.NewInt(1))
 	require.Len(t, overflow.dirtyStorage, 1, "overflow object must be usable")
 }

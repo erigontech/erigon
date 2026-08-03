@@ -46,7 +46,7 @@ func (a *stateObjectArena) alloc() *stateObject {
 }
 
 func (a *stateObjectArena) grow() bool {
-	if a.slab == arenaMaxSlabs {
+	if len(a.slabs) == arenaMaxSlabs {
 		return false
 	}
 	slab := new([arenaSlabSize]stateObject)
