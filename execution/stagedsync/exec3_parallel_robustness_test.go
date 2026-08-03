@@ -1267,18 +1267,14 @@ func TestCanceledMemberCannotMaskRealError(t *testing.T) {
 }
 
 // Pins the close-branch precedence: the deferred failure must surface ahead of
-// the missing-blocks completeness error, otherwise a deliberate cancel masks
-// ErrWrongTrieRoot behind a generic ErrInvalidBlock. The closure mirrors the
-// production order — keep them in lock-step.
+// the missing-blocks completeness error. Missing terminal results are an
+// executor failure, not proof that a block is invalid.
 func TestApplyLoopCloseBranchSurfacesDeferredRootBeforeMissing(t *testing.T) {
 	closeBranch := func(deferredRootErr error, txResultBlocks, appliedBlocks map[uint64]struct{}) error {
 		if deferredRootErr != nil {
 			return deferredRootErr
 		}
-		if missing := applyLoopMissingBlocks(txResultBlocks, appliedBlocks); len(missing) > 0 {
-			return fmt.Errorf("%w: %d missing blockResult(s) %v", rules.ErrInvalidBlock, len(missing), missing)
-		}
-		return nil
+		return applyLoopMissingBlocksError(5, 10, txResultBlocks, appliedBlocks)
 	}
 
 	mkSet := func(ns ...uint64) map[uint64]struct{} {
@@ -1296,11 +1292,12 @@ func TestApplyLoopCloseBranchSurfacesDeferredRootBeforeMissing(t *testing.T) {
 		require.Equal(t, rootErr.Error(), err.Error(), "exact rootErr message must be returned — not the missing-block wrapper")
 	})
 
-	t.Run("missing block only — invalid-block error stands", func(t *testing.T) {
+	t.Run("missing block only — operational error stands", func(t *testing.T) {
 		err := closeBranch(nil, mkSet(5, 6), mkSet(5))
-		require.ErrorIs(t, err, rules.ErrInvalidBlock)
+		require.Error(t, err)
+		require.NotErrorIs(t, err, rules.ErrInvalidBlock)
 		require.NotErrorIs(t, err, ErrWrongTrieRoot)
-		require.Contains(t, err.Error(), "missing blockResult")
+		require.Contains(t, err.Error(), "without a blockResult")
 	})
 
 	t.Run("deferred root + no missing block — root error surfaces", func(t *testing.T) {

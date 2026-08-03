@@ -572,9 +572,8 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 						}
 						return fail.err
 					}
-					if missing := applyLoopMissingBlocks(txResultBlocks, appliedBlocks); len(missing) > 0 {
-						return fmt.Errorf("%w: apply loop exited (lastBlockResult=%d maxBlockNum=%d) but %d block(s) had tx-results without a blockResult: %v",
-							rules.ErrInvalidBlock, lastBlockResult.BlockNum, pe.maxBlockNum, len(missing), missing)
+					if err := applyLoopMissingBlocksError(lastBlockResult.BlockNum, pe.maxBlockNum, txResultBlocks, appliedBlocks); err != nil {
+						return err
 					}
 					// The stop kind rides in the shared context's cause: stopReachedMax
 					// is a clean batch end (nil); stopMoreWork is a partial batch to
@@ -1440,6 +1439,15 @@ func applyLoopMissingBlocks(txResultBlocks, appliedBlocks map[uint64]struct{}) [
 		}
 	}
 	return missing
+}
+
+func applyLoopMissingBlocksError(lastBlockResult, maxBlockNum uint64, txResultBlocks, appliedBlocks map[uint64]struct{}) error {
+	missing := applyLoopMissingBlocks(txResultBlocks, appliedBlocks)
+	if len(missing) == 0 {
+		return nil
+	}
+	return fmt.Errorf("parallel exec apply loop exited (lastBlockResult=%d maxBlockNum=%d) but %d block(s) had tx-results without a blockResult: %v",
+		lastBlockResult, maxBlockNum, len(missing), missing)
 }
 
 // applyLoopFlushAsComplete returns the `complete` flag for
@@ -2393,7 +2401,7 @@ func (be *blockExecutor) sendResult(ctx context.Context, r applyResult, mustDeli
 	// mustDeliver (the terminal stop): the coordination ctx is already cancelled
 	// by the stopCause published just before this send, but blockResult(M) MUST
 	// still reach the apply loop (validation + progress) and the calculator — a
-	// dropped M surfaces as a spurious ErrInvalidBlock. Both consumers are alive
+	// dropped M surfaces as an incomplete executor drain. Both consumers are alive
 	// and draining, so block unconditionally rather than honour ctx.Done; a
 	// closed channel (batch shutdown) is caught by the recover above.
 	if mustDeliver {
