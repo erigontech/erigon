@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/backup"
 	"github.com/erigontech/erigon/db/kv/kvcfg"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	dbstate "github.com/erigontech/erigon/db/state"
@@ -106,6 +105,33 @@ func StageCustomTraceCfg(produce []string, db kv.TemporalRwDB, dirs datadir.Dirs
 	}
 }
 
+func unalignProduced(agg *dbstate.Aggregator, produce Produce) (realign func()) {
+	var undo []func()
+	if produce.ReceiptDomain {
+		undo = append(undo, agg.Unalign(kv.ReceiptDomain))
+	}
+	if produce.RCacheDomain {
+		undo = append(undo, agg.Unalign(kv.RCacheDomain))
+	}
+	if produce.LogAddr {
+		undo = append(undo, agg.UnalignIdx(kv.LogAddrIdx))
+	}
+	if produce.LogTopic {
+		undo = append(undo, agg.UnalignIdx(kv.LogTopicIdx))
+	}
+	if produce.TraceFrom {
+		undo = append(undo, agg.UnalignIdx(kv.TracesFromIdx))
+	}
+	if produce.TraceTo {
+		undo = append(undo, agg.UnalignIdx(kv.TracesToIdx))
+	}
+	return func() {
+		for _, f := range undo {
+			f()
+		}
+	}
+}
+
 func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger) error {
 	if cfg.Produce.RCacheDomain {
 		if err := cfg.db.View(context.Background(), func(tx kv.Tx) error {
@@ -117,6 +143,10 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 
 	log.Info("[stage_custom_trace] start params", "produce", cfg.Produce)
 	txNumsReader := cfg.ExecArgs.BlockReader.TxnumReader()
+
+	// what this re-derives lags the state until it finishes, and must not clamp the files it
+	// re-executes from
+	defer unalignProduced(cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator), cfg.Produce)()
 
 	//agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	//stepSize := agg.StepSize()
@@ -301,6 +331,8 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 	defer logEvery.Stop()
 
 	var cumulativeBlobGasUsedInBlock uint64
+	// The reduce side runs on a single goroutine, so one writer serves the whole batch.
+	var receipts rawtemporaldb.ReceiptWriter
 
 	txNumsReader := cfg.BlockReader.TxnumReader()
 	fromTxNum, _ := txNumsReader.Min(ctx, tx, fromBlock)
@@ -347,7 +379,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 					}
 				}
 
-				if err := rawtemporaldb.AppendReceipt(putter, logIndexAfterTx, cumGasUsed, cumulativeBlobGasUsedInBlock, txTask.TxNum); err != nil {
+				if err := receipts.AppendMetadata(putter, logIndexAfterTx, cumGasUsed, cumulativeBlobGasUsedInBlock, txTask.TxNum); err != nil {
 					return err
 				}
 
@@ -367,7 +399,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 						return fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNumber())
 					}
 				}
-				if err := rawdb.WriteReceiptCacheV2(putter, receipt, txTask.TxNum); err != nil {
+				if err := receipts.Append(putter, receipt, txTask.TxNum); err != nil {
 					return err
 				}
 			}

@@ -32,7 +32,7 @@ func TestFinalizedWritesWithholdCreatedEmptyAccount(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xe1})
 	vm := NewVersionMap(nil)
 	ibs := NewWithVersionMap(&minimalStateReader{}, vm)
-	t.Cleanup(func() { ibs.Release(false) })
+	t.Cleanup(ibs.Close)
 	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(1, 0)
 
@@ -48,7 +48,7 @@ func TestFinalizedWritesWithholdCreatedEmptyAccount(t *testing.T) {
 
 	vm.FlushVersionedWrites(writes, true, "")
 	next := NewWithVersionMap(&minimalStateReader{}, vm)
-	t.Cleanup(func() { next.Release(false) })
+	t.Cleanup(next.Close)
 	next.SetNoMaterialize(true)
 	next.SetTxContext(1, 1)
 	exists, err := next.Exist(addr)
@@ -60,7 +60,7 @@ func TestFinalizedWritesLeavesVersionMapForApplyLoop(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xe1})
 	vm := NewVersionMap(nil)
 	ibs := NewWithVersionMap(&minimalStateReader{}, vm)
-	t.Cleanup(func() { ibs.Release(false) })
+	t.Cleanup(ibs.Close)
 	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(1, 0)
 
@@ -156,7 +156,7 @@ func TestCreatedEmptyRequiresNoOtherWrites(t *testing.T) {
 
 func TestFinalizedWritesKeepCreatedEmptyBeforeEIP161(t *testing.T) {
 	ibs := NewWithVersionMap(&minimalStateReader{}, NewVersionMap(nil))
-	t.Cleanup(func() { ibs.Release(false) })
+	t.Cleanup(ibs.Close)
 	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(1, 0)
 
@@ -170,7 +170,7 @@ func TestFinalizedWritesKeepCreatedEmptyBeforeEIP161(t *testing.T) {
 
 func TestFinalizedWritesKeepCreatedEmptyAtGenesis(t *testing.T) {
 	ibs := NewWithVersionMap(&minimalStateReader{}, NewVersionMap(nil))
-	t.Cleanup(func() { ibs.Release(false) })
+	t.Cleanup(ibs.Close)
 	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(0, 0)
 
@@ -184,7 +184,7 @@ func TestFinalizedWritesKeepCreatedEmptyAtGenesis(t *testing.T) {
 
 func TestFinalizedWritesKeepCreatedEmptyAuraSystemAccount(t *testing.T) {
 	ibs := NewWithVersionMap(&minimalStateReader{}, NewVersionMap(nil))
-	t.Cleanup(func() { ibs.Release(false) })
+	t.Cleanup(ibs.Close)
 	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(1, 0)
 

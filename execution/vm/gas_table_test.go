@@ -129,7 +129,7 @@ func TestEIP2200(t *testing.T) {
 
 			r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 			s := state.New(r)
-			defer s.Release(false)
+			defer s.Close()
 
 			address := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
 			s.CreateAccount(address, true)
@@ -231,7 +231,7 @@ func TestEIP8038SStore(t *testing.T) {
 			require.NoError(t, err)
 			r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 			s := state.New(r)
-			defer s.Release(false)
+			defer s.Close()
 			address := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
 			s.CreateAccount(address, true)
 			s.SetCode(address, hexutil.MustDecode(tt.input), tracing.CodeChangeUnspecified)
@@ -272,7 +272,7 @@ func TestEIP7928SStoreReadRequiresAffordableAccess(t *testing.T) {
 			versionMap := state.NewVersionMap(nil)
 			reader := state.NewVersionedStateReader(0, state.ReadSet{}, versionMap, state.NewNoopReader())
 			statedb := state.NewWithVersionMap(reader, versionMap)
-			defer statedb.Release(false)
+			defer statedb.Close()
 			statedb.SetTxContext(1, 0)
 			contract := accounts.InternAddress(common.HexToAddress("0x1000"))
 			slot := accounts.InternKey(common.HexToHash("0x01"))
@@ -317,7 +317,7 @@ func TestEIP7928SystemCallReadsAbsentTarget(t *testing.T) {
 	versionMap := state.NewVersionMap(nil)
 	reader := state.NewVersionedStateReader(0, state.ReadSet{}, versionMap, state.NewNoopReader())
 	statedb := state.NewWithVersionMap(reader, versionMap)
-	defer statedb.Release(false)
+	defer statedb.Close()
 	statedb.SetTxContext(1, -1)
 	target := accounts.InternAddress(common.HexToAddress("0x1000"))
 	vmenv := vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, statedb, chain.AllProtocolChanges, vm.Config{})
@@ -386,7 +386,7 @@ func TestCallNewAccountSpillBefore63of64(t *testing.T) {
 			require.NoError(t, err)
 			r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 			s := state.New(r)
-			defer s.Release(false)
+			defer s.Close()
 			caller := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
 			s.CreateAccount(caller, true)
 			s.SetCode(caller, hexutil.MustDecode(callerCode), tracing.CodeChangeUnspecified)
@@ -418,7 +418,7 @@ func TestCreate2OntoExistingAccountSkipsNewAccountCharge(t *testing.T) {
 	require.NoError(t, err)
 	r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 	s := state.New(r)
-	defer s.Release(false)
+	defer s.Close()
 	initCode := program.New().Push(0).Push(400_000).Op(vm.MSTORE).Return(0, 0).Bytes()
 	salt := uint256.NewInt(0)
 	factoryAddress := common.HexToAddress("0xfac0")
@@ -484,7 +484,7 @@ func TestCreate2OntoStorageOnlyAccountChargesBeforeCollision(t *testing.T) {
 				require.NoError(t, err)
 				r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 				s := state.New(r)
-				defer s.Release(false)
+				defer s.Close()
 				initCode := []byte{byte(vm.STOP)}
 				salt := uint256.NewInt(0)
 				factoryAddress := common.HexToAddress("0xfac0")
@@ -555,7 +555,7 @@ func TestCreateTraceOnEarlyFailure(t *testing.T) {
 				require.NoError(t, err)
 				r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 				s := state.New(r)
-				defer s.Release(false)
+				defer s.Close()
 				initCode := program.New().Push(0).Return(0, 0).Bytes()
 				salt := uint256.NewInt(0)
 				factory := accounts.InternAddress(common.HexToAddress("0xfac0"))
@@ -613,7 +613,7 @@ func TestCreateTraceOnEarlyFailure(t *testing.T) {
 func TestCreatePropagatesAmsterdamPreparationError(t *testing.T) {
 	t.Parallel()
 	statedb := state.New(state.NewNoopReader())
-	defer statedb.Release(false)
+	defer statedb.Close()
 	backendErr := errors.New("can transfer failed")
 	factory := accounts.InternAddress(common.HexToAddress("0xfac0"))
 	initCode := []byte{byte(vm.STOP)}
@@ -650,7 +650,7 @@ func TestNestedCreateCollisionSeesOnEnterState(t *testing.T) {
 				require.NoError(t, err)
 				r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 				s := state.New(r)
-				defer s.Release(false)
+				defer s.Close()
 				initCode := program.New().Push(0xaa).Push(0).Op(vm.MSTORE8).Return(0, 1).Bytes()
 				replacementCreationCode := []byte{byte(vm.STOP)}
 				salt := uint256.NewInt(0)
@@ -739,7 +739,7 @@ func TestCreateGas(t *testing.T) {
 		stateWriter := rpchelper.NewLatestStateWriter(tx, domains, (*freezeblocks.BlockReader)(nil), 0)
 
 		s := state.New(stateReader)
-		defer s.Release(false)
+		defer s.Close()
 		s.CreateAccount(address, true)
 		s.SetCode(address, hexutil.MustDecode(tt.code), tracing.CodeChangeUnspecified)
 
@@ -785,7 +785,7 @@ func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
 
 	r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 	s := state.New(r)
-	defer s.Release(false)
+	defer s.Close()
 
 	address := accounts.InternAddress(common.BytesToAddress([]byte("callee")))
 

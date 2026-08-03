@@ -411,7 +411,7 @@ func BuildBtreeIndexWithDecompressor(indexPath string, existenceFilterPath strin
 	p := ps.AddNew(indexFileName, uint64(kv.Count()/2))
 	defer ps.Delete(p)
 
-	defer kv.MadvNormal().DisableReadAhead()
+	defer kv.MadvSequential().DisableReadAhead()
 
 	var existenceFilter *existence.Filter
 	if accessors.Has(statecfg.AccessorExistence) {
