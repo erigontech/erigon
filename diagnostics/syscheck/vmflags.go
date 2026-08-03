@@ -257,7 +257,7 @@ func parseSmaps(r io.Reader) ([]Mapping, error) {
 		}
 		if strings.HasPrefix(line, "VmFlags:") {
 			if cur >= 0 {
-				for _, fl := range strings.Fields(line[len("VmFlags:"):]) {
+				for fl := range strings.FieldsSeq(line[len("VmFlags:"):]) {
 					switch fl {
 					case "rr":
 						out[cur].Random = true
