@@ -221,16 +221,16 @@ true, block availability would be pinned to the blob tip.
 - Modify: `db/snapshotsync/snapshots.go`
 - Modify: `db/snapshotsync/snapshots_test.go`
 
-- [ ] write red test: registering an index builder via `SetIndexBuilder` makes
+- [x] write red test: registering an index builder via `SetIndexBuilder` makes
   `IndexBuilder(t)` return it (today there is no setter — the test does not
   compile / returns nil)
-- [ ] add `SetIndexBuilder(t snaptype.Type, b snaptype.IndexBuilder)` mirroring
+- [x] add `SetIndexBuilder(t snaptype.Type, b snaptype.IndexBuilder)` mirroring
   `SetRangeExtractor` (snapshots.go:678-687)
-- [ ] write red test: `OpenList` on a temp dir opens exactly the named files
+- [x] write red test: `OpenList` on a temp dir opens exactly the named files
   and leaves an unnamed on-disk segment unopened (no exported `OpenList` today)
-- [ ] add exported `OpenList(fileNames []string, optimistic bool) error`
+- [x] add exported `OpenList(fileNames []string, optimistic bool) error`
   mirroring `OpenFolder` minus the directory scan
-- [ ] run `go test ./db/snapshotsync/...` — green before task 2
+- [x] run `go test ./db/snapshotsync/...` — green before task 2
 
 ### Task 2: characterization fixture for caplin watermarks
 

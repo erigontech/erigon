@@ -686,6 +686,16 @@ func (s *BaseRoSnapshots) SetRangeExtractor(t snaptype.Type, rangeExtractor snap
 	}
 }
 
+func (s *BaseRoSnapshots) SetIndexBuilder(t snaptype.Type, indexBuilder snaptype.IndexBuilder) {
+	if operators, ok := s.operators[t.Enum()]; ok {
+		operators.indexBuilder = indexBuilder
+	} else {
+		s.operators[t.Enum()] = &retireOperators{
+			indexBuilder: indexBuilder,
+		}
+	}
+}
+
 func (s *BaseRoSnapshots) LogStat(label string) {
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
@@ -1192,6 +1202,32 @@ func (s *BaseRoSnapshots) OpenFolder() error {
 	}()
 	if err != nil {
 		return fmt.Errorf("OpenFolder: %w", err)
+	}
+
+	wasReady := s.segmentsReady.Swap(true)
+	if !wasReady {
+		if s.downloadReady.Load() {
+			s.ready.Set()
+		}
+	}
+	return nil
+}
+
+// OpenList opens exactly the named files, retiring whatever else the collection
+// still holds. Same shape as OpenFolder, but the caller supplies the list instead
+// of a directory scan. optimistic=true keeps going past a broken file.
+func (s *BaseRoSnapshots) OpenList(fileNames []string, optimistic bool) error {
+	var retired retiredSegments
+	err := func() error {
+		s.dirtyLock.Lock()
+		defer s.dirtyLock.Unlock()
+		defer func() { s.recalcVisibleFiles(s.alignMin, retired) }()
+
+		retired = s.retireSegmentsNotInList(mvcc.RetireReasonWasDeletedFromDisk, fileNames)
+		return s.openSegments(fileNames, true, optimistic)
+	}()
+	if err != nil {
+		return fmt.Errorf("OpenList: %w", err)
 	}
 
 	wasReady := s.segmentsReady.Swap(true)
