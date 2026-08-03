@@ -209,7 +209,7 @@ func TestDefaultGraffiti(t *testing.T) {
 			// Let the fetch goroutine finish before the mock controller is checked.
 			require.Eventually(t, func() bool {
 				return a.elClientVersion.Load() != nil && !a.elClientVersionFetching.Load()
-			}, time.Second, time.Millisecond)
+			}, 200*time.Millisecond, time.Millisecond)
 		}
 	})
 }
