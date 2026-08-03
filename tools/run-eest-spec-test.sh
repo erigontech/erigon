@@ -25,7 +25,8 @@
 #   blocktests-legacy-cancun-race-{berlin,shanghai,cancun,london,paris,other-forks}
 #                                              race-detector partition of the
 #                                              Hive legacy-cancun suite
-#   enginextests-stable-sequential             engine-x tests vs. eest_stable
+#   enginextests-stable-{sequential,parallel}  engine-x tests vs. eest_stable
+#   enginextests-devnet                        engine-x tests vs. eest_devnet
 #   enginextests-benchmark-{1m,5m,10m,30m,60m,100m,150m}-sequential
 #                                              engine-x benchmark fixtures per
 #                                              gas-target subdir; each value
@@ -156,7 +157,7 @@ case "$shard_route" in
 		cmd=blocktest;   paths=("$base/Constantinople/BlockchainTests") ;;
 	blocktests-legacy-cancun | blocktests-legacy-cancun-*)
 		cmd=blocktest;   paths=("$base/Cancun/BlockchainTests") ;;
-	enginextests-stable)
+	enginextests-stable | enginextests-devnet)
 		cmd=enginextest
 		paths=("$base/blockchain_tests_engine_x")
 		extra=(--pre-alloc-dir "${paths[0]}/pre_alloc") ;;
@@ -183,6 +184,13 @@ done < <(yq -o=json '.' "$manifest" | jq -r --arg s "$shard" '.[] | select(.shar
 workers="${EEST_SPEC_WORKERS:-$default_workers}"
 max="${EEST_SPEC_MAX_FAILURES:-$default_max}"
 evm_bin="${EVM_BIN:-build/bin/evm}"
+
+# Race-instrumented shards multiply RSS several-fold over the Go heap (TSAN
+# shadow + history). Bound the heap so allocation bursts trigger GC early
+# instead of growing the process into the CI runner's OOM range.
+if [[ "$shard" == *-race* ]]; then
+	export GOMEMLIMIT="${GOMEMLIMIT:-4GiB}"
+fi
 
 if [[ ! -x "$evm_bin" ]]; then
 	echo "$evm_bin not found or not executable; run 'make evm' first" >&2

@@ -509,10 +509,15 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 
 			//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
 			if genesis != nil {
-				_, ibs, err = genesiswrite.GenesisToBlock(nil, genesis, dirs, txTask.Logger)
+				var genesisIbs *state.IntraBlockState
+				_, genesisIbs, err = genesiswrite.GenesisToBlock(nil, genesis, dirs, txTask.Logger)
 				if err != nil {
 					panic(err)
 				}
+				// Deferred, not closed here: the result's read/write sets are taken
+				// from this state after the switch.
+				defer genesisIbs.Close()
+				ibs = genesisIbs
 			}
 			// For Genesis, rules should be empty, so that empty accounts can be included
 			rules = &chain.Rules{}
@@ -714,7 +719,7 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 	}
 
 	result.ExecutionResult.ReceiptGasUsed = gasUsed
-	result.ExecutionResult.BlockRegularGasUsed = gasUsed
+	result.ExecutionResult.BlockExecutionGasUsed = gasUsed
 	// The versionMap path produces its write-set from the recorded IO after
 	// the switch; only the serial path clears pending changes here.
 	if !ibs.IsVersioned() {

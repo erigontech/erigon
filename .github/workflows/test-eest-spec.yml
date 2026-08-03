@@ -19,9 +19,7 @@ permissions:
 jobs:
   # Matrix entries (shard / workers / max-allowed-failures) come from
   # tools/eest-spec-shards.yml so this workflow and tools/run-eest-spec-test.sh
-  # share a single source of truth. enginextests-devnet is intentionally absent
-  # from the manifest (the devnet tarball doesn't yet ship
-  # blockchain_tests_engine_x/); re-add it there when the fixture lands.
+  # share a single source of truth.
   load-matrix:
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -146,9 +144,9 @@ jobs:
           gh run cancel ${{ github.run_id }} || true
 
   # Fast guard (no fixture execution): catches coverage regressions a normal test
-  # run does NOT surface — the stable race / hive-consume-engine fork partitions
-  # (a fork silently unmatched by any shard) and glamsterdam-devnet EIP-filter
-  # liveness+completeness. Reads live config + corpus .meta/index.json. Part of
+  # run does NOT surface — the stable race and stable/devnet hive-consume-enginex
+  # fork partitions (a fork silently unmatched by any shard). Reads live config
+  # + corpus .meta/index.json. Part of
   # this reusable workflow, so ci-gate's eest-spec-tests dependency fails when
   # coverage regresses.
   eest-shard-coverage:

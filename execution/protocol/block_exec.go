@@ -88,7 +88,7 @@ func ExecuteBlockEphemerally(
 ) (res *EphemeralExecResult, executeBlockErr error) {
 	defer blockExecutionTimer.ObserveDuration(time.Now())
 	ibs := state.New(stateReader)
-	defer ibs.Release(false)
+	defer ibs.Close()
 	ibs.SetHooks(vmConfig.Tracer)
 	header := block.Header()
 
@@ -268,11 +268,11 @@ func SysCallContractWithBlockContext(contract accounts.Address, data []byte, cha
 	}
 	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
 	mdGas := mdgas.MdGas{
-		Regular: msg.Gas(),
-		State:   0, // pre-Amsterdam: state-gas reservoir not used; spills into regular gas
+		Execution: msg.Gas(),
+		State:     0, // pre-Amsterdam: state-gas reservoir not used; spills into execution gas
 	}
 	if evm.ChainRules().IsAmsterdam {
-		// EIP-8037: extra state-gas reservoir on top of the 30M regular budget
+		// EIP-8037: extra state-gas reservoir on top of the 30M execution budget
 		// so system calls keep their pre-EIP-8037 execution margin.
 		mdGas.State = params.StateGasSystemMaxSstores
 	}
@@ -314,8 +314,8 @@ func SysCreate(contract accounts.Address, data []byte, chainConfig *chain.Config
 	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), nil, author, chainConfig)
 	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
 	mdGas := mdgas.MdGas{
-		Regular: msg.Gas(),
-		State:   0, // state gas reservoir will consume from regular gas for sys calls
+		Execution: msg.Gas(),
+		State:     0, // state gas reservoir will consume from execution gas for sys calls
 	}
 	ret, _, err := evm.SysCreate(
 		msg.From(),

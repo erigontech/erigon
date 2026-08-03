@@ -229,11 +229,11 @@ func (s *testFinalizeScenario) buildExecResult() *execResult {
 	txResult := &exec.TxResult{
 		Task: task,
 		ExecutionResult: evmtypes.ExecutionResult{
-			FeeTipped:            s.feeTipped,
-			FeeBurnt:             s.feeBurnt,
-			BurntContractAddress: s.burntAddr,
-			ReceiptGasUsed:       21000,
-			BlockRegularGasUsed:  21000,
+			FeeTipped:             s.feeTipped,
+			FeeBurnt:              s.feeBurnt,
+			BurntContractAddress:  s.burntAddr,
+			ReceiptGasUsed:        21000,
+			BlockExecutionGasUsed: 21000,
 		},
 		Coinbase: s.coinbase,
 	}

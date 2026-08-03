@@ -245,6 +245,16 @@ func (a *AccessListTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, sc
 	}
 }
 
+// Close returns the state borrowed for CREATE nonce lookups to its pools.
+// Idempotent.
+func (a *AccessListTracer) Close() {
+	if a.state == nil {
+		return
+	}
+	a.state.Close()
+	a.state = nil
+}
+
 // AccessList returns the current accesslist maintained by the tracer.
 func (a *AccessListTracer) AccessList() types.AccessList {
 	return a.list.accessList()

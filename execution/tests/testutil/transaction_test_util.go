@@ -96,7 +96,7 @@ func (tt *TransactionTest) Run(chainID *uint256.Int) error {
 			IsEIP7981:          rules.IsAmsterdam,
 			IsEIP2780:          rules.IsAmsterdam,
 		})
-		requiredGas := intrinsicGasResult.RegularGas
+		requiredGas := intrinsicGasResult.ExecutionGas
 		if rules.IsPrague && intrinsicGasResult.FloorGasCost > requiredGas {
 			requiredGas = intrinsicGasResult.FloorGasCost
 		}
