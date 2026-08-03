@@ -207,6 +207,18 @@ var ExperimentalParallelCommitment = dbg.EnvBool("COMMITMENT_PARALLEL", false)
 // ExperimentalParallelCommitment.
 var ExperimentalStreamingCommitment = false
 
+// ExperimentalBinCommitment selects the EIP-8297 binary commitment trie
+// (commitment.ModeDirect + VariantBinPatriciaTrie). A whole-datadir property:
+// persisted to erigondb.toml on first start and adopted from it on later
+// starts, so a flagless restart of a bin datadir stays bin.
+var ExperimentalBinCommitment = dbg.EnvBool("COMMITMENT_BIN", false)
+
+// BinCommitmentHash names H for the binary trie ("keccak" or "blake3", empty
+// meaning keccak). Persisted and adopted exactly like ExperimentalBinCommitment:
+// roots are incomparable across a change, so a datadir keeps the hash it was
+// built with.
+var BinCommitmentHash = dbg.EnvString("COMMITMENT_BIN_HASH", "")
+
 var Schema = SchemaGen{
 	AccountsDomain: DomainCfg{
 		Name: kv.AccountsDomain, ValuesTable: kv.TblAccountVals,

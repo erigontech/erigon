@@ -379,7 +379,8 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 		return nil
 	}
 
-	if err := ExecV3(ctx, s, u, cfg, doms, rwTx, dbg.Exec3Parallel || cfg.experimentalBAL, to, logger); err != nil {
+	parallel := executeInParallel(doms.GetCommitmentCtx().Trie().Variant(), dbg.Exec3Parallel, cfg.experimentalBAL)
+	if err := ExecV3(ctx, s, u, cfg, doms, rwTx, parallel, to, logger); err != nil {
 		return err
 	}
 	return nil

@@ -70,6 +70,8 @@ jobs:
           - { name: patricia,                   pkg: db/seg/patricia,                fn: FuzzPatricia }
           - { name: patricia-longest-match,     pkg: db/seg/patricia,                fn: FuzzLongestMatch }
           - { name: abi,                        pkg: execution/abi,                  fn: FuzzABI }
+          - { name: pbin-bitpath-codec,         pkg: execution/commitment,           fn: FuzzPBinBitPathCodec }
+          - { name: pbin-process-oracle,        pkg: execution/commitment,           fn: FuzzPBinProcessMatchesOracle }
           - { name: nibbles-hexcompact,         pkg: execution/commitment/nibbles,   fn: FuzzHexCompactRoundtrip }
           - { name: rlp,                        pkg: execution/types,                fn: FuzzRLP }
           - { name: precompiles,                pkg: execution/vm,                   fn: FuzzPrecompiledContracts }
@@ -108,7 +110,10 @@ jobs:
         run: |
           mkdir -p "$ERIGON_BUILD/fuzz"
           echo "::group::go test -fuzz ${{ matrix.fn }} (./${{ matrix.pkg }}, ${FUZZTIME})"
-          go test "./${{ matrix.pkg }}/" -run '^$' -fuzz "^${{ matrix.fn }}$" -fuzztime "${FUZZTIME}"
+          # Minimization is capped: Go's 60s default lets an input found late in
+          # the run keep minimizing past the coordinator's deadline, which
+          # surfaces as "context deadline exceeded" rather than as the crash.
+          go test "./${{ matrix.pkg }}/" -run '^$' -fuzz "^${{ matrix.fn }}$" -fuzztime "${FUZZTIME}" -fuzzminimizetime 10s
           echo "::endgroup::"
 
       # On a crash, `go test` writes the minimized reproducing input to

@@ -57,6 +57,11 @@ var blobSchedule = map[string]*params.BlobConfig{
 }
 
 // Forks table defines supported forks and their chain config.
+// BinaryTree names the experimental EIP-8297 fork. Selecting it switches the
+// commitment engine process-wide, so a run covering it must not also cover a
+// Merkle-Patricia fork.
+const BinaryTree = "BinaryTree"
+
 var Forks = map[string]*chain.Config{}
 
 func init() {
@@ -218,6 +223,11 @@ func init() {
 	cAms = configCopy(cAms)
 	cAms.AmsterdamTime = common.NewUint64(0)
 	Forks["Amsterdam"] = cAms
+
+	// BinaryTree is Amsterdam with state committed through EIP-8297's binary tree
+	// instead of the MPT. The fork rules are identical; only the commitment engine
+	// differs, and the runner selects it from the network name.
+	Forks[BinaryTree] = configCopy(cAms)
 
 	// BPO3/BPO4 continue from BPO2 as a separate chain
 	c = configCopy(c)

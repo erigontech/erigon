@@ -1,0 +1,223 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package commitment
+
+import (
+	"bytes"
+	"context"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common"
+)
+
+// The binary engine runs in ModeDirect whatever mode the caller asks for:
+// ModeParallel's prefix trie is a hex-nibble structure with no meaning at
+// arity 2.
+func TestInitializeTrieAndUpdates_BinVariant(t *testing.T) {
+	t.Parallel()
+
+	cfg := DefaultTrieConfig()
+	cfg.Variant = VariantBinPatriciaTrie
+	trie, upd := InitializeTrieAndUpdates(ModeParallel, t.TempDir(), cfg)
+	defer upd.Close()
+	defer trie.Release()
+
+	require.IsType(t, (*PBinPatriciaHashed)(nil), trie)
+	require.Equal(t, VariantBinPatriciaTrie, trie.Variant())
+	require.Equal(t, ModeDirect, upd.Mode())
+	require.Nil(t, upd.parallel)
+	require.False(t, upd.IsConcurrentCommitment())
+}
+
+func TestParseTrieVariantBin(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, VariantBinPatriciaTrie, ParseTrieVariant("bin"))
+	require.Equal(t, VariantHexPatriciaTrie, ParseTrieVariant("hex"))
+	require.Equal(t, VariantParallelHexPatricia, ParseTrieVariant("parallel"))
+}
+
+// A run over a populated state depends only on what the context holds: an engine
+// that dropped its in-memory root and one that never had it must both reproduce
+// the root of the run that built it.
+func TestPBinResetReuse(t *testing.T) {
+	t.Parallel()
+
+	corpus := pbinTestMixedCorpus()
+	pph, ms := pbinTestEngine(t)
+	require.NoError(t, ms.applyPlainUpdates(corpus.plainKeys, corpus.updates))
+
+	want := corpus.oracleRoot(t)
+	require.Equal(t, want, pbinTestProcess(t, pph, corpus.plainKeys, corpus.updates))
+
+	pph.Reset()
+	require.Equal(t, want, pbinTestProcess(t, pph, corpus.plainKeys, corpus.updates), "reset engine re-reads the tree from the context")
+
+	fresh := NewPBinPatriciaHashed(ms)
+	require.Equal(t, want, pbinTestProcess(t, fresh, corpus.plainKeys, corpus.updates), "fresh engine over the same state agrees")
+}
+
+// Re-running the whole corpus hides this case: after Reset the engine must find
+// the leaves it is not told about again. A tree confined to one zone has a
+// non-empty root prefix, so its top record is not at the zero-bit key and only
+// the root cell record names it.
+func TestPBinResetReuseTouchingOneKey(t *testing.T) {
+	t.Parallel()
+
+	addr := pbinOracleAddr(71)
+	corpus := new(pbinTestCorpus).
+		storage(addr, pbinOracleSlot(256), 0x01).
+		storage(addr, pbinOracleSlot(257), 0x02)
+
+	pph, ms := pbinTestEngine(t)
+	require.NoError(t, ms.applyPlainUpdates(corpus.plainKeys, corpus.updates))
+	want := corpus.oracleRoot(t)
+	require.Equal(t, want, pbinTestProcess(t, pph, corpus.plainKeys, corpus.updates))
+
+	touchOne := new(pbinTestCorpus).storage(addr, pbinOracleSlot(257), 0x02)
+
+	pph.Reset()
+	require.Equal(t, want, pbinTestProcess(t, pph, touchOne.plainKeys, touchOne.updates),
+		"the untouched sibling must survive a reset")
+
+	fresh := NewPBinPatriciaHashed(ms)
+	require.Equal(t, want, pbinTestProcess(t, fresh, touchOne.plainKeys, touchOne.updates))
+}
+
+// A one-leaf tree writes no node record at all: it lives entirely in the root
+// cell record.
+func TestPBinResetReuseSingleLeaf(t *testing.T) {
+	t.Parallel()
+
+	addr := pbinOracleAddr(72)
+	first := new(pbinTestCorpus).storage(addr, pbinOracleSlot(1000), 0x01)
+	second := new(pbinTestCorpus).storage(pbinOracleAddr(73), pbinOracleSlot(2000), 0x02)
+
+	pph, ms := pbinTestEngine(t)
+	require.NoError(t, ms.applyPlainUpdates(first.plainKeys, first.updates))
+	require.Equal(t, first.oracleRoot(t), pbinTestProcess(t, pph, first.plainKeys, first.updates))
+
+	require.NoError(t, ms.applyPlainUpdates(second.plainKeys, second.updates))
+	both := new(pbinTestCorpus).
+		storage(addr, pbinOracleSlot(1000), 0x01).
+		storage(pbinOracleAddr(73), pbinOracleSlot(2000), 0x02)
+
+	pph.Reset()
+	require.Equal(t, both.oracleRoot(t), pbinTestProcess(t, pph, second.plainKeys, second.updates),
+		"the leaf that was the whole tree must survive a reset")
+}
+
+// Reset leaves the engine indistinguishable from a new one but keeps the
+// context, which the Trie interface hands over separately.
+func TestPBinResetClearsTrieState(t *testing.T) {
+	t.Parallel()
+
+	corpus := new(pbinTestCorpus).
+		storage(pbinOracleAddr(1), pbinOracleSlot(256), 0x01).
+		storage(pbinOracleAddr(1), pbinOracleSlot(257), 0x02)
+
+	pph, ms := pbinTestEngine(t)
+	require.NoError(t, ms.applyPlainUpdates(corpus.plainKeys, corpus.updates))
+	pbinTestProcess(t, pph, corpus.plainKeys, corpus.updates)
+	require.Equal(t, pbinNodeBranch, pph.grid.root.kind)
+
+	pph.Reset()
+	require.Equal(t, pbinNodeEmpty, pph.grid.root.kind)
+	require.Zero(t, pph.currentKey.bitLen)
+	require.Zero(t, pph.grid.activeRows)
+	require.False(t, pph.rootChecked)
+	require.False(t, pph.rootTouched)
+	require.False(t, pph.rootPresent)
+	require.Same(t, ms, pph.ctx)
+}
+
+// The domain layer asks for the root without processing anything, so RootHash
+// has to reach the stored tree rather than report the empty-tree hash.
+func TestPBinRootHashAfterResetLoadsStoredRoot(t *testing.T) {
+	t.Parallel()
+
+	corpus := new(pbinTestCorpus).
+		storage(pbinOracleAddr(81), pbinOracleSlot(256), 0x01).
+		storage(pbinOracleAddr(81), pbinOracleSlot(257), 0x02)
+
+	pph, ms := pbinTestEngine(t)
+	require.NoError(t, ms.applyPlainUpdates(corpus.plainKeys, corpus.updates))
+	want := corpus.oracleRoot(t)
+	require.Equal(t, want, pbinTestProcess(t, pph, corpus.plainKeys, corpus.updates))
+
+	pph.Reset()
+	root, err := pph.RootHash()
+	require.NoError(t, err)
+	require.Equal(t, want, root)
+
+	fresh := NewPBinPatriciaHashed(ms)
+	empty, err := fresh.Process(context.Background(), WrapKeyUpdates(t, ModeDirect, pbinKeyHasher(), nil, nil), "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	require.Equal(t, want, empty, "a run with no updates must not shrink the tree to empty")
+}
+
+func TestPBinResetContext(t *testing.T) {
+	t.Parallel()
+
+	corpus := new(pbinTestCorpus).account(pbinOracleAddr(7), 1, 2, common.Hash{0x07})
+
+	pph, _ := pbinTestEngine(t)
+	other := NewMockState(t)
+	require.NoError(t, other.applyPlainUpdates(corpus.plainKeys, corpus.updates))
+
+	pph.ResetContext(other)
+	require.Same(t, other, pph.ctx)
+	require.Equal(t, corpus.oracleRoot(t), pbinTestProcess(t, pph, corpus.plainKeys, corpus.updates))
+}
+
+// A released engine goes back to the pool, so it must carry no state into the
+// next run over a different context.
+func TestPBinReleaseReuse(t *testing.T) {
+	t.Parallel()
+
+	corpus := pbinTestMixedCorpus()
+	pph, ms := pbinTestEngine(t)
+	require.NoError(t, ms.applyPlainUpdates(corpus.plainKeys, corpus.updates))
+	pbinTestProcess(t, pph, corpus.plainKeys, corpus.updates)
+	pph.Release()
+
+	next := NewMockState(t)
+	require.NoError(t, next.applyPlainUpdates(corpus.plainKeys, corpus.updates))
+	reused := NewPBinPatriciaHashed(next)
+	require.Equal(t, corpus.oracleRoot(t), pbinTestProcess(t, reused, corpus.plainKeys, corpus.updates))
+}
+
+func TestPBinSetTraceWriter(t *testing.T) {
+	t.Parallel()
+
+	corpus := pbinTestDeepSharedPrefixCorpus()
+	pph, ms := pbinTestEngine(t)
+	require.NoError(t, ms.applyPlainUpdates(corpus.plainKeys, corpus.updates))
+
+	var trace bytes.Buffer
+	pph.SetTraceWriter(&trace)
+	pbinTestProcess(t, pph, corpus.plainKeys, corpus.updates)
+	require.Contains(t, trace.String(), "splitsInsidePrefix=")
+	require.Contains(t, trace.String(), "materializeReads=")
+
+	trace.Reset()
+	pph.SetTraceWriter(nil)
+	pbinTestProcess(t, pph, corpus.plainKeys, corpus.updates)
+	require.Empty(t, trace.String())
+}

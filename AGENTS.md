@@ -118,6 +118,8 @@ Commit messages: prefix with package(s) modified, e.g., `eth, rpc: make trace co
 
 Don't sign commits, pr's, issues, comments.
 
+`package commitment` holds two engines in one namespace. Every package-level identifier belonging to the EIP-8297 binary trie carries a `pbin` prefix (`PBin` for exported ones) — the hex engine already owns the generic names (`cell`, `fold`, `unfold`, `computeCellHash`), so an unprefixed addition is a collision waiting to happen. Test helpers included.
+
 Run `make lint` before every push. The linter is non-deterministic — run it repeatedly until clean.
 
 **Important**: Always run `make lint` after making code changes and before committing. Fix any linter errors before proceeding. PRs must pass `make lint` before being opened or updated.

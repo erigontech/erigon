@@ -43,15 +43,17 @@ type MockState struct {
 	mu     sync.RWMutex          // to protect sm and cm for concurrent trie
 	sm     map[string][]byte     // backbone of the state
 	cm     map[string]BranchData // backbone of the commitments
+	code   map[string][]byte     // bytecode by account plain key, what CodeDomain holds
 	numBuf [binary.MaxVarintLen64]byte
 }
 
 func NewMockState(t testing.TB) *MockState {
 	t.Helper()
 	return &MockState{
-		t:  t,
-		sm: make(map[string][]byte),
-		cm: make(map[string]BranchData),
+		t:    t,
+		sm:   make(map[string][]byte),
+		cm:   make(map[string]BranchData),
+		code: make(map[string][]byte),
 	}
 }
 
@@ -156,6 +158,19 @@ func (ms *MockState) Storage(plainKey []byte) (*Update, error) {
 		return nil, nil
 	}
 	return &ex, nil
+}
+
+// Code stands in for the CodeDomain read the binary trie's code chunking needs.
+func (ms *MockState) Code(plainKey []byte) ([]byte, error) {
+	if ms.concurrent.Load() {
+		ms.mu.RLock()
+		defer ms.mu.RUnlock()
+	}
+	return ms.code[string(plainKey)], nil
+}
+
+func (ms *MockState) setCode(addr, code []byte) {
+	ms.code[string(addr)] = bytes.Clone(code)
 }
 
 func (ms *MockState) TxNum() uint64 { return 0 }

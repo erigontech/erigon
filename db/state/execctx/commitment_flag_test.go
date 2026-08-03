@@ -122,6 +122,19 @@ func TestPickTrieVariant_StreamingFlag(t *testing.T) {
 	require.Equal(t, commitment.VariantParallelHexPatricia, execctx.PickTrieVariant())
 }
 
+func TestPickTrieVariant_BinFlag(t *testing.T) {
+	// No t.Parallel: mutates process-global statecfg flags.
+	origBin := statecfg.ExperimentalBinCommitment
+	t.Cleanup(func() { statecfg.ExperimentalBinCommitment = origBin })
+
+	statecfg.ExperimentalBinCommitment = true
+	require.Equal(t, commitment.VariantBinPatriciaTrie, execctx.PickTrieVariant())
+
+	// Bin is a persisted datadir property, so it wins over the runtime experiments.
+	withCommitmentFlag(t, commitment.VariantStreamingHexPatricia)
+	require.Equal(t, commitment.VariantBinPatriciaTrie, execctx.PickTrieVariant())
+}
+
 func TestSharedDomains_StreamingFlag_RootEquivalence(t *testing.T) {
 	if testing.Short() {
 		t.Skip()

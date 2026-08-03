@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	downloadertype "github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -1018,15 +1017,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		}
 		roTx.Rollback()
 
-		streaming := statecfg.ExperimentalStreamingCommitment
-		parallel := statecfg.ExperimentalParallelCommitment
-		trieVariant := commitment.VariantHexPatriciaTrie
-		switch {
-		case streaming:
-			trieVariant = commitment.VariantStreamingHexPatricia
-		case parallel:
-			trieVariant = commitment.VariantParallelHexPatricia
-		}
+		trieVariant := execctx.PickTrieVariant()
 
 		for shardFrom < lastShard { // recreate this file range 1+ steps
 			nextKey := func() (ok bool, k []byte) {
@@ -1061,7 +1052,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			domains.SetTxNum(lastTxnumInShard - 1)
 			currentTxNum := lastTxnumInShard - 1
 			domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewFilesOnlyStateReader(rwTx, lastTxnumInShard-1))
-			if parallel || streaming {
+			if trieVariant == commitment.VariantParallelHexPatricia || trieVariant == commitment.VariantStreamingHexPatricia {
 				domains.EnableParaTrieDB(rwDb)
 			}
 
@@ -1175,9 +1166,13 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 
 	sf := time.Now()
 	var processed uint64
+	// next() signals "no more keys" as (false, nil) but a shard boundary as
+	// (false, key), so the key has to be checked separately from ok.
 	for ok, key := next(); ; ok, key = next() {
-		sd.GetCommitmentCtx().TouchKey(kv.AccountsDomain, string(key), nil)
-		processed++
+		if len(key) > 0 {
+			sd.GetCommitmentCtx().TouchKey(kv.AccountsDomain, string(key), nil)
+			processed++
+		}
 		if !ok {
 			break
 		}

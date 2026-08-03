@@ -76,6 +76,7 @@ import (
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/engineapi"
 	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
 	"github.com/erigontech/erigon/execution/exec"
@@ -313,6 +314,15 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		if config.ExperimentalStreamingCommitment {
 			statecfg.ExperimentalStreamingCommitment = true
 		}
+		if config.ExperimentalBinCommitment {
+			statecfg.ExperimentalBinCommitment = true
+		}
+		if config.BinCommitmentHash != "" {
+			if err = commitment.SetPBinHashSuite(config.BinCommitmentHash); err != nil {
+				return err
+			}
+			statecfg.BinCommitmentHash = config.BinCommitmentHash
+		}
 
 		if err = stages.UpdateMetrics(tx); err != nil {
 			return err
@@ -326,6 +336,10 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		return nil
 	}); err != nil {
 		return nil, err
+	}
+
+	if !dbg.CheckHeaderStateRoot {
+		logger.Warn("HEADER STATE-ROOT CHECK IS DISABLED (CHECK_HEADER_STATE_ROOT=false): nothing cross-checks execution results against headers; a wrong chain will look healthy")
 	}
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
@@ -356,6 +370,11 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	// drops the flag. Seeding here first makes --commitment.plainValues stick.
 	if _, err := state.ResolveErigonDBSettingsWithRefsDefault(dirs, logger, config.Snapshot.NoDownloader, config.CommitmentRefsFirstStart()); err != nil {
 		return nil, err
+	}
+
+	// After the resolve: a flagless restart of a bin datadir adopts the variant there.
+	if statecfg.ExperimentalBinCommitment {
+		logger.Warn("EXPERIMENTAL BINARY COMMITMENT TRIE IS ENABLED: roots follow EIP-8297 over Keccak-256 and agree with no other client; witness, eth_getProof, eth_simulateV1, receipt regeneration, deferred commitment updates, collapse tracing and trie traces are unsupported and refuse rather than degrade")
 	}
 
 	var chainConfig *chain.Config

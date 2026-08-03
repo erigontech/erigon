@@ -38,7 +38,9 @@ import (
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -225,6 +227,18 @@ func (bt *BlockTest) newTester(tb testing.TB) (*execmoduletester.ExecModuleTeste
 	config, ok := testforks.Forks[bt.json.Network]
 	if !ok {
 		return nil, testforks.UnsupportedForkError{Name: bt.json.Network}
+	}
+	if bt.json.Network == testforks.BinaryTree {
+		// The commitment variant and its hash are datadir properties resolved
+		// process-wide, not per-tester options, so they are set here rather than
+		// passed through mOpts. Setting the statecfg field is what makes the
+		// settings resolver persist blake3 and re-apply it; calling
+		// SetPBinHashSuite alone would be undone by the resolver's keccak default.
+		statecfg.ExperimentalBinCommitment = true
+		statecfg.BinCommitmentHash = commitment.PBinHashBlake3
+		if err := commitment.SetPBinHashSuite(commitment.PBinHashBlake3); err != nil {
+			return nil, err
+		}
 	}
 	engine := rulesconfig.CreateRulesEngineBareBones(context.Background(), config, log.New())
 	mOpts := []execmoduletester.Option{

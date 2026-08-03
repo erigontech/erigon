@@ -98,6 +98,16 @@ func (p *ParallelPatriciaHashed) RootTrie() *HexPatriciaHashed {
 	return p.template
 }
 
+// EncodeCurrentState and SetState delegate to the template trie, which is where
+// the live root state lives; they make the parallel trie a StatefulTrie.
+func (p *ParallelPatriciaHashed) EncodeCurrentState(buf []byte) ([]byte, error) {
+	return p.template.EncodeCurrentState(buf)
+}
+
+func (p *ParallelPatriciaHashed) SetState(buf []byte) error {
+	return p.template.SetState(buf)
+}
+
 // Reset clears the published root hash and resets the template so the instance
 // can be reused; pooled workers stay cached for the next Process call.
 func (p *ParallelPatriciaHashed) Reset() {

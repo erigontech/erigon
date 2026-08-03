@@ -956,6 +956,7 @@ func TestUpdate_EncodeDecode(t *testing.T) {
 		{Flags: BalanceUpdate, Balance: *uint256.NewInt(123), CodeHash: empty.CodeHash},
 		{Flags: BalanceUpdate | NonceUpdate, Balance: *uint256.NewInt(45639015), Nonce: 123, CodeHash: empty.CodeHash},
 		{Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(45639015), Nonce: 123,
+			CodeSize: 24576,
 			CodeHash: common.Hash{
 				0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
 				0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
@@ -978,6 +979,7 @@ func TestUpdate_EncodeDecode(t *testing.T) {
 		require.Equal(t, update.Balance, decoded.Balance, i)
 		require.Equal(t, update.Nonce, decoded.Nonce, i)
 		require.Equal(t, update.CodeHash, decoded.CodeHash, i)
+		require.Equal(t, update.CodeSize, decoded.CodeSize, i)
 		require.Equal(t, update.Storage, decoded.Storage, i)
 		require.Equal(t, update.StorageLen, decoded.StorageLen, i)
 	}
