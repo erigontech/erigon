@@ -999,11 +999,30 @@ func (d *Downloader) testStartSingleDownloadNoWait(
 	return err
 }
 
+// A complete-looking local file here means we are about to hide data the node may already be
+// reading, leaving a hole in the snapshot tier that only surfaces much later as "nonce too high" or
+// a wrong trie root. https://github.com/erigontech/erigon/issues/21522
+func (d *Downloader) assertNoLocalDataLoss(name snapshotName, infoHash metainfo.Hash) {
+	filePath := d.filePathForName(name)
+	fi, statErr := os.Stat(filePath)
+	if statErr != nil {
+		return
+	}
+	localHash := "<no metainfo on disk>"
+	if miOpt, err := d.maybeLoadMetainfoFromDisk(name); err == nil && miOpt.Ok {
+		localHash = miOpt.Value.HashInfoBytes().HexString()
+	}
+	panic(fmt.Sprintf(
+		"downloader: refusing to rename complete local snapshot to .part: path=%s size=%d preverifiedInfoHash=%s localInfoHash=%s",
+		filePath, fi.Size(), infoHash.HexString(), localHash))
+}
+
 func (d *Downloader) invalidateData(name snapshotName, infoHash metainfo.Hash) (err error) {
 	_, ok := d.torrentClient.Torrent(infoHash)
 	// Torrent in use, bad idea to proceed. This shouldn't happen since we should have found
 	// the existing name earlier.
 	panicif.True(ok)
+	d.assertNoLocalDataLoss(name, infoHash)
 	// Ensure the data isn't reused. We're presuming the storage in use, but we can't afford
 	// to wait until another torrent is fetched, and then we mistake a non-partial file with
 	// the correct size as being complete.
