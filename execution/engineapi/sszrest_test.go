@@ -700,6 +700,8 @@ func TestSSZRESTRoutingErrors(t *testing.T) {
 		{"unknown fork header", http.MethodPost, "/engine/v1/payloads", "foobar", sszRestContentType, http.StatusBadRequest, problemUnsupportedFork},
 		{"missing fork header", http.MethodPost, "/engine/v1/payloads", "", sszRestContentType, http.StatusBadRequest, problemUnsupportedFork},
 		{"trailing slash", http.MethodPost, "/engine/v1/payloads/", "cancun", sszRestContentType, http.StatusNotFound, problemMethodNotFound},
+		{"unknown scoped route without fork", http.MethodPost, "/engine/v1/bodies/not-a-route", "", sszRestContentType, http.StatusNotFound, problemMethodNotFound},
+		{"method mismatch on scoped route without fork", http.MethodGet, "/engine/v1/forkchoice", "", "", http.StatusNotFound, problemMethodNotFound},
 		{"method mismatch on capabilities", http.MethodPost, "/engine/v1/capabilities", "", sszRestContentType, http.StatusNotFound, problemMethodNotFound},
 		{"wrong content type", http.MethodPost, "/engine/v1/payloads", "cancun", "application/json", http.StatusUnsupportedMediaType, problemUnsupportedMediaType},
 		{"bad ssz body", http.MethodPost, "/engine/v1/payloads", "cancun", sszRestContentType, http.StatusBadRequest, problemSSZDecodeError},

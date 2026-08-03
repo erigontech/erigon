@@ -85,26 +85,58 @@ func (e *EngineServer) handleSSZREST(w http.ResponseWriter, r *http.Request) {
 	writeProblem(w, http.StatusNotFound, problemMethodNotFound, "")
 }
 
+type sszForkRoute uint8
+
+const (
+	sszForkRouteNotFound sszForkRoute = iota
+	sszForkRouteNewPayload
+	sszForkRouteGetPayload
+	sszForkRouteForkchoice
+	sszForkRouteBodiesByHash
+	sszForkRouteBodiesByRange
+)
+
+func matchSSZForkRoute(method string, rest []string) sszForkRoute {
+	switch {
+	case len(rest) == 1 && rest[0] == "payloads" && method == http.MethodPost:
+		return sszForkRouteNewPayload
+	case len(rest) == 2 && rest[0] == "payloads" && method == http.MethodGet:
+		return sszForkRouteGetPayload
+	case len(rest) == 1 && rest[0] == "forkchoice" && method == http.MethodPost:
+		return sszForkRouteForkchoice
+	case len(rest) == 2 && rest[0] == "bodies" && rest[1] == "hash" && method == http.MethodPost:
+		return sszForkRouteBodiesByHash
+	case len(rest) == 1 && rest[0] == "bodies" && method == http.MethodGet:
+		return sszForkRouteBodiesByRange
+	default:
+		return sszForkRouteNotFound
+	}
+}
+
 func (e *EngineServer) handleSSZForkScoped(w http.ResponseWriter, r *http.Request, rest []string) {
+	route := matchSSZForkRoute(r.Method, rest)
+	if route == sszForkRouteNotFound {
+		writeProblem(w, http.StatusNotFound, problemMethodNotFound, "")
+		return
+	}
+
 	forkName := r.Header.Get(engineForkHeader)
 	version, ok := engineForkVersion(forkName)
 	if !ok || !forkScheduled(e.config, forkName) {
 		writeProblem(w, http.StatusBadRequest, problemUnsupportedFork, fmt.Sprintf("unsupported %s %q", engineForkHeader, forkName))
 		return
 	}
-	switch {
-	case len(rest) == 1 && rest[0] == "payloads" && r.Method == http.MethodPost:
+	switch route {
+	case sszForkRouteNewPayload:
 		e.handleSSZNewPayload(w, r, forkName, version)
-	case len(rest) == 2 && rest[0] == "payloads" && r.Method == http.MethodGet:
+	case sszForkRouteGetPayload:
 		e.handleSSZGetPayload(w, r, forkName, version, rest[1])
-	case len(rest) == 1 && rest[0] == "forkchoice" && r.Method == http.MethodPost:
+	case sszForkRouteForkchoice:
 		e.handleSSZForkchoice(w, r, forkName, version)
-	case len(rest) == 2 && rest[0] == "bodies" && rest[1] == "hash" && r.Method == http.MethodPost:
+	case sszForkRouteBodiesByHash:
 		e.handleSSZBodiesByHash(w, r, forkName, version)
-	case len(rest) == 1 && rest[0] == "bodies" && r.Method == http.MethodGet:
+	case sszForkRouteBodiesByRange:
 		e.handleSSZBodiesByRange(w, r, forkName, version)
-	default:
-		writeProblem(w, http.StatusNotFound, problemMethodNotFound, "")
 	}
 }
 
