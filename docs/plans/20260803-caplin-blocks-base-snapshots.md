@@ -237,22 +237,49 @@ true, block availability would be pinned to the blob tip.
 **Files:**
 - Modify: `db/snapshotsync/freezeblocks/caplin_snapshots_test.go`
 
-- [ ] build a fixture with several beaconblocks segments and blob segments
+- [x] build a fixture with several beaconblocks segments and blob segments
   covering a SHORTER range (mirrors Deneb trailing), at least one segment
   present-but-unindexed
-- [ ] assert today's exact numbers for `SegmentsMax`, `IndicesMax`,
+- [x] assert today's exact numbers for `SegmentsMax`, `IndicesMax`,
   `BlocksAvailable`, `FrozenBlobs` — including that `SegmentsMax` counts the
   unindexed segment (dirty) and `FrozenBlobs` is the exclusive `To`
-- [ ] assert `FrozenBlobs() == 0` when the chain config has no Deneb
-- [ ] run `go test ./db/snapshotsync/freezeblocks/...` — GREEN (this pins
+- [x] assert `FrozenBlobs() == 0` when the chain config has no Deneb
+- [x] run `go test ./db/snapshotsync/freezeblocks/...` — GREEN (this pins
   current behavior; it is the equivalence net for tasks 3-5 and must keep
   passing unchanged except the declared `IndicesMax` shift)
+
+Landed as `TestCaplinWatermarks` (beaconblocks `[0,L)`+`[L,2L)` indexed,
+`[2L,3L)` present-but-unindexed; blobs `[0,L)`) and
+`TestFrozenBlobsZeroBeforeDenebWithVisibleSegments`. Pinned numbers, `L =
+CaplinMergeLimit = 10_000`: `SegmentsMax=3L-1=29999`, `IndicesMax=2L=20000`,
+`BlocksAvailable=2L=20000`, `FrozenBlobs=L=10000`.
 
 ### Task 3: embed BaseRoSnapshots, keep the divergent accessors caplin-owned
 
 **Files:**
 - Modify: `db/snapshotsync/freezeblocks/caplin_snapshots.go`
 - Modify: `db/snapshotsync/freezeblocks/caplin_snapshots_test.go`
+
+⚠️ **Task 2's fixture invalidates two Context claims — resolve before embedding.**
+Measured on the fixture's layout (tail beaconblocks segment present-but-unindexed)
+against a real `BaseRoSnapshots` over the same dir: `DirtyBlocksAvailable`,
+`VisibleBlocksAvailable`, `IndicesMax`, `BlocksAvailable` and `SegmentsMax` **all**
+return `19999`.
+
+1. `DirtyBlocksAvailable` is NOT "no index required". `dirtyIdxAvailability`
+   (snapshots.go:1004-1029) `break`s on the first `!seg.IsIndexed()`, so it
+   returns the last **indexed** dirty `to-1` = `2L-1` = 19999, not today's
+   `SegmentsMax` = `3L-1` = 29999. Substituting it silently truncates the archive
+   backfill stop condition (`stage_history_download.go:281`) by a whole segment —
+   the exact regression this PR must not introduce. Either keep a caplin-owned
+   walk over the base dirty btree that does not require `IsIndexed()`, or add
+   that primitive to the base.
+2. `BlocksAvailable` shifts too. Today it is `min(dirty To-1, visible To)` =
+   `min(29999, 20000)` = 20000; base `BlocksAvailable` returns `idxMax` =
+   visible `To-1` = 19999. So the declared `IndicesMax` `To`→`To-1` shift drags
+   `BlocksAvailable` with it whenever the tip is dumped-but-not-yet-indexed.
+   Decide explicitly: widen the declared shift to both accessors, or keep
+   `BlocksAvailable` caplin-owned as `min(SegmentsMax, IndicesMax)`.
 
 - [ ] embed `snapshotsync.BaseRoSnapshots` by value; construct via
   `NewBaseRoSnapshots(cfg, dirs.Snap, snaptype.CaplinSnapshotTypes,
