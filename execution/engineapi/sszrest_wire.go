@@ -30,16 +30,21 @@ import (
 )
 
 const (
-	sszMaxGetBlobHashes      = 128
-	sszMaxBodiesRequest      = 32
-	sszMaxRequestBody        = 64 << 20 // MAX_REQUEST_BODY_SIZE = 2**26
-	sszBlobBytes             = 0x20000
-	sszKZGBytes              = 48
-	sszCellsPerExtBlob       = 128
-	sszCustodyBitvectorBytes = sszCellsPerExtBlob / 8
-	sszMaxBALBytes           = 0x40000000
-	sszMaxWithdrawals        = 16
-	sszWithdrawalBytes       = 44
+	sszMaxGetBlobHashes         = 128
+	sszMaxBodiesRequest         = 32
+	sszMaxPayloadRequestBody    = 64 << 20 // MAX_REQUEST_BODY_SIZE = 2**26
+	sszMaxForkchoiceRequestBody = 1 << 10
+	sszContainerOffsetBytes     = 4
+	sszHashBytes                = 32
+	sszMaxBodiesRequestBody     = sszContainerOffsetBytes + sszMaxBodiesRequest*sszHashBytes
+	sszMaxBlobsRequestBody      = sszContainerOffsetBytes + sszMaxGetBlobHashes*sszHashBytes
+	sszBlobBytes                = 0x20000
+	sszKZGBytes                 = 48
+	sszCellsPerExtBlob          = 128
+	sszCustodyBitvectorBytes    = sszCellsPerExtBlob / 8
+	sszMaxBALBytes              = 0x40000000
+	sszMaxWithdrawals           = 16
+	sszWithdrawalBytes          = 44
 )
 
 var engineForkOrder = []string{"paris", "shanghai", "cancun", "prague", "osaka", "amsterdam"}

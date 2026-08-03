@@ -781,3 +781,46 @@ func TestSSZRESTReadBodyNonSizeError(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.Equal(t, problemInvalidRequest, problemType(t, rec))
 }
+
+func TestSSZRESTRejectsOversizedContentLengthBeforeRead(t *testing.T) {
+	srv := newTestEngineServer(allForksConfig(), false)
+	for _, tc := range []struct {
+		name string
+		path string
+		fork string
+		max  int64
+	}{
+		{"payload", "/engine/v1/payloads", "cancun", 64 << 20},
+		{"forkchoice", "/engine/v1/forkchoice", "amsterdam", 1 << 10},
+		{"bodies", "/engine/v1/bodies/hash", "cancun", 4 + sszMaxBodiesRequest*32},
+		{"blobs", "/engine/v1/blobs/v1", "", 4 + sszMaxGetBlobHashes*32},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, tc.path, iotest.ErrReader(errors.New("body must not be read")))
+			req.ContentLength = tc.max + 1
+			req.Header.Set("Content-Type", sszRestContentType)
+			if tc.fork != "" {
+				req.Header.Set("Eth-Execution-Version", tc.fork)
+			}
+			rec := httptest.NewRecorder()
+
+			srv.SSZRESTHandler().ServeHTTP(rec, req)
+
+			require.Equal(t, http.StatusRequestEntityTooLarge, rec.Code)
+			require.Equal(t, problemRequestTooLarge, problemType(t, rec))
+		})
+	}
+}
+
+func TestSSZRESTRejectsOversizedStreamingBody(t *testing.T) {
+	srv := newTestEngineServer(allForksConfig(), false)
+	req := newSSZRequest(http.MethodPost, "/engine/v1/forkchoice", "amsterdam",
+		make([]byte, sszMaxForkchoiceRequestBody+1))
+	req.ContentLength = -1
+	rec := httptest.NewRecorder()
+
+	srv.SSZRESTHandler().ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusRequestEntityTooLarge, rec.Code)
+	require.Equal(t, problemRequestTooLarge, problemType(t, rec))
+}

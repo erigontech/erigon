@@ -160,9 +160,14 @@ func checkSSZContentType(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-func readSSZBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
+func readSSZBody(w http.ResponseWriter, r *http.Request, maxBytes int64) ([]byte, bool) {
 	defer r.Body.Close()
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, sszMaxRequestBody))
+	if r.ContentLength > maxBytes {
+		writeProblem(w, http.StatusRequestEntityTooLarge, problemRequestTooLarge,
+			fmt.Sprintf("content length %d exceeds limit %d", r.ContentLength, maxBytes))
+		return nil, false
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBytes))
 	if err != nil {
 		var maxBytesErr *http.MaxBytesError
 		if errors.As(err, &maxBytesErr) {
@@ -200,7 +205,7 @@ func (e *EngineServer) handleSSZNewPayload(w http.ResponseWriter, r *http.Reques
 	if !checkSSZContentType(w, r) {
 		return
 	}
-	body, ok := readSSZBody(w, r)
+	body, ok := readSSZBody(w, r, sszMaxPayloadRequestBody)
 	if !ok {
 		return
 	}
@@ -272,7 +277,7 @@ func (e *EngineServer) handleSSZForkchoice(w http.ResponseWriter, r *http.Reques
 	if !checkSSZContentType(w, r) {
 		return
 	}
-	body, ok := readSSZBody(w, r)
+	body, ok := readSSZBody(w, r, sszMaxForkchoiceRequestBody)
 	if !ok {
 		return
 	}
@@ -311,12 +316,8 @@ func (e *EngineServer) handleSSZBodiesByHash(w http.ResponseWriter, r *http.Requ
 	if !checkSSZContentType(w, r) {
 		return
 	}
-	body, ok := readSSZBody(w, r)
+	body, ok := readSSZBody(w, r, sszMaxBodiesRequestBody)
 	if !ok {
-		return
-	}
-	if len(body) > 4+sszMaxBodiesRequest*32 {
-		writeProblem(w, http.StatusRequestEntityTooLarge, problemRequestTooLarge, "too many block hashes")
 		return
 	}
 	blockHashes, err := decodeHashListRequest(body, sszMaxBodiesRequest)
@@ -405,12 +406,8 @@ func (e *EngineServer) handleSSZGetBlobs(w http.ResponseWriter, r *http.Request,
 	if !checkSSZContentType(w, r) {
 		return
 	}
-	body, ok := readSSZBody(w, r)
+	body, ok := readSSZBody(w, r, sszMaxBlobsRequestBody)
 	if !ok {
-		return
-	}
-	if len(body) > 4+sszMaxGetBlobHashes*32 {
-		writeProblem(w, http.StatusRequestEntityTooLarge, problemRequestTooLarge, "too many blob hashes")
 		return
 	}
 	blobHashes, err := decodeHashListRequest(body, sszMaxGetBlobHashes)
@@ -488,7 +485,7 @@ func (e *EngineServer) handleSSZCapabilities(w http.ResponseWriter) {
 		Limits: map[string]uint64{
 			"bodies.max_count":           sszMaxBodiesRequest,
 			"blobs.max_versioned_hashes": sszMaxGetBlobHashes,
-			"payload.max_bytes":          sszMaxRequestBody,
+			"payload.max_bytes":          sszMaxPayloadRequestBody,
 		},
 	})
 }
