@@ -44,7 +44,7 @@ func TestGetPayloadV4RejectsNilRequests(t *testing.T) {
 		getAssembledBlockFunc: func(_ context.Context, id uint64) (execmodule.AssembledBlockResult, error) {
 			require.Equal(t, payloadID, id)
 			return execmodule.AssembledBlockResult{
-				Block: minimalPragueBlock(1, nil /* nil Requests */),
+				Block: minimalPayloadBlock(1, nil /* nil Requests */),
 			}, nil
 		},
 	}
@@ -64,7 +64,7 @@ func TestGetPayloadV4AcceptsEmptyRequestsBundle(t *testing.T) {
 		getAssembledBlockFunc: func(_ context.Context, id uint64) (execmodule.AssembledBlockResult, error) {
 			require.Equal(t, payloadID, id)
 			return execmodule.AssembledBlockResult{
-				Block: minimalPragueBlock(1, make(types.FlatRequests, 0)),
+				Block: minimalPayloadBlock(1, make(types.FlatRequests, 0)),
 			}, nil
 		},
 	}
@@ -78,16 +78,18 @@ func TestGetPayloadV4AcceptsEmptyRequestsBundle(t *testing.T) {
 	require.Len(t, resp.ExecutionRequests, 0)
 }
 
-func TestGetPayloadRejectsInvalidAmsterdamBlobsBundle(t *testing.T) {
+func TestGetPayloadV6RejectsInvalidBlobsBundle(t *testing.T) {
+	t.Parallel()
+
 	const payloadID uint64 = 44
 	cfg := allForksChainConfig()
 	to := common.Address{0x01}
-	wrappedTxn := &types.BlobTxWrapper{}
+	wrappedTxn := &types.BlobTxWrapper{WrapperVersion: 1}
 	wrappedTxn.Tx.To = &to
 	wrappedTxn.Tx.ChainID = *cfg.ChainID
-	wrappedTxn.Tx.BlobVersionedHashes = []common.Hash{{0x01}, {0x01}}
-	wrappedTxn.Commitments = make(types.BlobKzgs, 2)
-	wrappedTxn.Blobs = make(types.Blobs, 2)
+	wrappedTxn.Tx.BlobVersionedHashes = []common.Hash{{0x01}}
+	wrappedTxn.Commitments = make(types.BlobKzgs, 1)
+	wrappedTxn.Blobs = make(types.Blobs, 1)
 	wrappedTxn.Proofs = make(types.KZGProofs, 1)
 
 	header := &types.Header{
@@ -109,9 +111,9 @@ func TestGetPayloadRejectsInvalidAmsterdamBlobsBundle(t *testing.T) {
 			}, nil
 		},
 	}
-	srv := NewEngineServer(log.New(), cfg, stub, nil, false, false, true, true, nil, nil, 0, 0)
+	srv := newProposingEngineServerWithConfig(cfg, stub)
 
-	resp, err := srv.getPayload(context.Background(), payloadID, clparams.GloasVersion)
+	resp, err := srv.GetPayloadV6(context.Background(), payloadIDBytes(payloadID))
 
 	require.ErrorContains(t, err, "built invalid blobsBundle")
 	require.Nil(t, resp)
@@ -125,7 +127,7 @@ func TestGetPayloadV1RejectsShanghaiPayload(t *testing.T) {
 		getAssembledBlockFunc: func(_ context.Context, id uint64) (execmodule.AssembledBlockResult, error) {
 			require.Equal(t, payloadID, id)
 			return execmodule.AssembledBlockResult{
-				Block:      minimalPragueBlock(100, nil),
+				Block:      minimalPayloadBlock(100, nil),
 				BlockValue: uint256.NewInt(0),
 			}, nil
 		},
@@ -147,7 +149,7 @@ func TestGetPayloadV2AcceptsParisPayload(t *testing.T) {
 		getAssembledBlockFunc: func(_ context.Context, id uint64) (execmodule.AssembledBlockResult, error) {
 			require.Equal(t, payloadID, id)
 			return execmodule.AssembledBlockResult{
-				Block:      minimalPragueBlock(99, nil),
+				Block:      minimalPayloadBlock(99, nil),
 				BlockValue: uint256.NewInt(0),
 			}, nil
 		},
@@ -221,9 +223,8 @@ func parisShanghaiChainConfig() *chain.Config {
 	return cfg
 }
 
-// minimalPragueBlock builds the smallest possible BlockWithReceipts for Prague
-// (timestamp=1, BaseFee set, no transactions) with the given requests slice.
-func minimalPragueBlock(timestamp uint64, requests types.FlatRequests) *types.BlockWithReceipts {
+// minimalPayloadBlock builds a transaction-free payload block with the given timestamp and execution requests.
+func minimalPayloadBlock(timestamp uint64, requests types.FlatRequests) *types.BlockWithReceipts {
 	baseFee := uint256.NewInt(1_000_000_000)
 	header := &types.Header{
 		Number:   *uint256.NewInt(101),
