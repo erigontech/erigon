@@ -58,7 +58,7 @@ func (d *dummyContractRef) Balance() *big.Int          { return new(big.Int) }
 func TestStoreCapture(t *testing.T) {
 	//c := vm.NewJumpDestCache(128)
 	ibs := state.New(state.NewNoopReader())
-	defer ibs.Release(false)
+	defer ibs.Close()
 	ibs.AddRefund(1337)
 
 	var (

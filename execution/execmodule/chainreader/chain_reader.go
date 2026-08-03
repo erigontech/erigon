@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -341,12 +340,9 @@ func (c ChainReaderWriterEth1) GetAssembledBlock(id uint64) (*cltypes.Eth1Block,
 	extraData.SetBytes(header.Extra)
 	blockHash := block.Hash()
 
-	// BaseFeePerGas in cltypes.Eth1Block is stored as little-endian bytes in a common.Hash.
 	var baseFeeLE common.Hash
 	if header.BaseFee != nil {
-		be := header.BaseFee.Bytes32() // big-endian [32]byte
-		copy(baseFeeLE[:], be[:])
-		utils.ReverseBytes(&baseFeeLE) // convert to little-endian
+		_, _ = header.BaseFee.MarshalSSZAppend(baseFeeLE[:0])
 	}
 
 	eth1Block := &cltypes.Eth1Block{
