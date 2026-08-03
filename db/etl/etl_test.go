@@ -143,15 +143,13 @@ func TestWriteAndReadBufferEntry(t *testing.T) {
 	m := &mmapBytesReader{data: bb, pos: 0}
 
 	for i := range entries {
-		k, err := readField(m)
-		require.NoError(t, err)
-		v, err := readField(m)
+		k, v, err := m.nextEntry()
 		require.NoError(t, err)
 		assert.Equal(t, string(entries[i].key), string(k))
 		assert.Equal(t, string(entries[i].value), string(v))
 	}
 
-	_, err := readField(m)
+	_, _, err := m.nextEntry()
 	assert.Equal(t, io.EOF, err)
 }
 

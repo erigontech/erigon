@@ -18,7 +18,6 @@ package etl
 
 import (
 	"bytes"
-	"encoding/binary"
 	"fmt"
 	"io"
 	"math"
@@ -47,34 +46,26 @@ const (
 	entryLocSize = 16 // sizeof(entryLoc): insertionOrder(4) + offset(4) + keyLen(4) + valLen(4)
 )
 
-// writeSortedEntries writes buffer entries to w in varint-length-prefixed format.
+// writeSortedEntries writes buffer entries to w in the spill record format.
 func writeSortedEntries(w io.Writer, entries []sortableBufferEntry) error {
-	var numBuf [binary.MaxVarintLen64]byte
+	var hdr [entryHeaderMaxSize]byte
 	for _, entry := range entries {
-		lk := int64(len(entry.key))
-		if entry.key == nil {
-			lk = -1
-		}
-		n := binary.PutVarint(numBuf[:], lk)
-		if _, err := w.Write(numBuf[:n]); err != nil {
-			return err
-		}
-		if _, err := w.Write(entry.key); err != nil {
-			return err
-		}
-		lv := int64(len(entry.value))
-		if entry.value == nil {
-			lv = -1
-		}
-		n = binary.PutVarint(numBuf[:], lv)
-		if _, err := w.Write(numBuf[:n]); err != nil {
-			return err
-		}
-		if _, err := w.Write(entry.value); err != nil {
+		if err := writeEntry(w, hdr[:], entry.key, entry.value); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func writeEntry(w io.Writer, hdr, k, v []byte) error {
+	if _, err := w.Write(putEntryHeader(hdr, k, v)); err != nil {
+		return err
+	}
+	if _, err := w.Write(k); err != nil {
+		return err
+	}
+	_, err := w.Write(v)
+	return err
 }
 
 var BufferOptimalSize = dbg.EnvDataSize("ETL_OPTIMAL", 256*datasize.MB) /*  var because we want to sometimes change it from tests or command-line flags */
@@ -231,34 +222,11 @@ func (b *sortableBuffer) CheckFlushSize() bool {
 }
 
 func (b *sortableBuffer) Write(w io.Writer) error {
-	var numBuf [binary.MaxVarintLen64]byte
+	var hdr [entryHeaderMaxSize]byte
 	for i := range b.entries {
-		e := &b.entries[i]
-		kLen, vLen := int(e.keyLen), int(e.valLen)
-		keyOffset := int(e.offset)
-		valOffset := keyOffset
-		if kLen > 0 {
-			valOffset += kLen
-		}
-		// write key
-		n := binary.PutVarint(numBuf[:], int64(e.keyLen))
-		if _, err := w.Write(numBuf[:n]); err != nil {
+		key, val := b.Get(i)
+		if err := writeEntry(w, hdr[:], key, val); err != nil {
 			return err
-		}
-		if kLen > 0 {
-			if _, err := w.Write(b.data[keyOffset : keyOffset+kLen]); err != nil {
-				return err
-			}
-		}
-		// write value
-		n = binary.PutVarint(numBuf[:], int64(e.valLen))
-		if _, err := w.Write(numBuf[:n]); err != nil {
-			return err
-		}
-		if vLen > 0 {
-			if _, err := w.Write(b.data[valOffset : valOffset+vLen]); err != nil {
-				return err
-			}
 		}
 	}
 	return nil

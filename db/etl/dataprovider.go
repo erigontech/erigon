@@ -17,7 +17,6 @@
 package etl
 
 import (
-	"encoding/binary"
 	"fmt"
 	"io"
 	"os"
@@ -45,12 +44,6 @@ type fileDataProvider struct {
 	mmapData    []byte                 // mmap'd file content
 	mmapHandle2 *[mmap.MaxMapSize]byte // pointer handle for cleanup
 	wg          *errgroup.Group
-}
-
-// mmapBytesReader tracks position for reading from mmap'd data
-type mmapBytesReader struct {
-	data []byte // mmap'd file content
-	pos  int    // current read position
 }
 
 // FlushToDiskAsync - `doFsync` is true only for 'critical' collectors (which should not loose).
@@ -125,15 +118,7 @@ func (p *fileDataProvider) Next() ([]byte, []byte, error) {
 			return nil, nil, err
 		}
 	}
-	key, err := readField(p.mmapReader)
-	if err != nil {
-		return nil, nil, err
-	}
-	val, err := readField(p.mmapReader)
-	if err != nil {
-		return nil, nil, err
-	}
-	return key, val, nil
+	return p.mmapReader.nextEntry()
 }
 
 func (p *fileDataProvider) initMmap() error {
@@ -151,41 +136,6 @@ func (p *fileDataProvider) initMmap() error {
 	_ = mmap.MadviseSequential(p.mmapData)
 	p.mmapReader = &mmapBytesReader{data: p.mmapData, pos: 0}
 	return nil
-}
-
-func (m *mmapBytesReader) readVarint() (int, error) {
-	v, n := binary.Varint(m.data[m.pos:])
-	if n <= 0 {
-		if n == 0 {
-			return 0, io.EOF
-		}
-		return 0, fmt.Errorf("varint overflow")
-	}
-	m.pos += n
-	return int(v), nil
-}
-
-// readAt returns a zero-copy slice directly from mmap'd memory
-func (m *mmapBytesReader) readAt(length int) ([]byte, error) {
-	if m.pos+length > len(m.data) {
-		return nil, io.ErrUnexpectedEOF
-	}
-	result := m.data[m.pos : m.pos+length]
-	m.pos += length
-	return result, nil
-}
-
-// readField reads a varint-prefixed byte slice from mmap data (zero-copy).
-// Negative length means nil.
-func readField(m *mmapBytesReader) ([]byte, error) {
-	n, err := m.readVarint()
-	if err != nil {
-		return nil, err
-	}
-	if n < 0 {
-		return nil, nil
-	}
-	return m.readAt(n)
 }
 
 func (p *fileDataProvider) Wait() error { return p.wg.Wait() }
