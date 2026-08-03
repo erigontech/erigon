@@ -239,7 +239,14 @@ func (hi *DomainLatestIterFile) initCursorOnDB(domainRoTx *DomainRoTx) error {
 			k := key[:len(key)-8]
 			stepBytes := key[len(key)-8:]
 			step := ^binary.BigEndian.Uint64(stepBytes)
-			endTxNum := step * domainRoTx.d.stepSize
+			// Use the step's LAST txN, not its first: the row's actual
+			// txN is somewhere in [step*ss, (step+1)*ss). Under a mid-
+			// step files horizon (mode-C v4 file), a row in the
+			// containing step may be post-horizon; the first-txN
+			// check would drop it, the last-txN check keeps it and
+			// gives the heap the correct upper-bound stamp so a newer
+			// DB row wins over an older file entry.
+			endTxNum := lastTxNumOfStep(kv.Step(step), domainRoTx.d.stepSize)
 			if endTxNum >= hi.filesEndTxNum {
 				heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: bytes.Clone(k), val: bytes.Clone(value), cNonDup: valsCursor, endTxNum: endTxNum, reverse: true})
 				pushed = true
@@ -269,7 +276,7 @@ func (hi *DomainLatestIterFile) initCursorOnDB(domainRoTx *DomainRoTx) error {
 			stepBytes := value[:8]
 			val := value[8:]
 			step := ^binary.BigEndian.Uint64(stepBytes)
-			endTxNum := step * domainRoTx.d.stepSize
+			endTxNum := lastTxNumOfStep(kv.Step(step), domainRoTx.d.stepSize)
 			if endTxNum >= hi.filesEndTxNum {
 				heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: bytes.Clone(key), val: bytes.Clone(val), cDup: valsCursor, endTxNum: endTxNum, reverse: true})
 				pushed = true
@@ -315,7 +322,7 @@ func (hi *DomainLatestIterFile) advanceLargeValsDBCursor(ci1 *CursorItem) error 
 		}
 		stepBytes := k[len(k)-8:]
 		step := ^binary.BigEndian.Uint64(stepBytes)
-		endTxNum := step * hi.aggStep
+		endTxNum := lastTxNumOfStep(kv.Step(step), hi.aggStep)
 		if endTxNum >= hi.filesEndTxNum {
 			ci1.key = bytes.Clone(k[:len(k)-8])
 			ci1.endTxNum = endTxNum
@@ -346,7 +353,7 @@ func (hi *DomainLatestIterFile) advanceDupSortDBCursor(ci1 *CursorItem) error {
 		stepBytes := stepBytesWithValue[:8]
 		v := stepBytesWithValue[8:]
 		step := ^binary.BigEndian.Uint64(stepBytes)
-		endTxNum := step * hi.aggStep
+		endTxNum := lastTxNumOfStep(kv.Step(step), hi.aggStep)
 		if endTxNum >= hi.filesEndTxNum {
 			ci1.key = bytes.Clone(k)
 			ci1.endTxNum = endTxNum
@@ -492,12 +499,18 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 	if k, v, err = valsCursor.Seek(prefix); err != nil {
 		return err
 	}
-	// Skip DB entries whose step falls within the file range — files are authoritative there.
+	// Skip DB entries whose step is entirely before the file horizon —
+	// files are authoritative there. Use the step's LAST txN as the
+	// keep-boundary so a step that straddles a mid-step files horizon
+	// (mode-C v4 file) stays visible, and stamp with the same upper
+	// bound so heap ordering favours the (potentially newer) DB row
+	// over the older file entry.
 	for len(k) > 0 && bytes.HasPrefix(k, prefix) {
 		step := kv.Step(^binary.BigEndian.Uint64(v[:8]))
-		if step.ToTxNum(dt.stepSize) >= filesEndTxNum {
+		endTxNum := lastTxNumOfStep(step, dt.stepSize)
+		if endTxNum >= filesEndTxNum {
 			val := v[8:]
-			heap.Push(cpPtr, &CursorItem{t: DB_CURSOR, key: bytes.Clone(k), val: bytes.Clone(val), cDup: valsCursor, endTxNum: step.ToTxNum(dt.stepSize), reverse: true})
+			heap.Push(cpPtr, &CursorItem{t: DB_CURSOR, key: bytes.Clone(k), val: bytes.Clone(val), cDup: valsCursor, endTxNum: endTxNum, reverse: true})
 			break
 		}
 		if k, v, err = valsCursor.NextNoDup(); err != nil {
@@ -578,9 +591,10 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 						break
 					}
 					step := kv.Step(^binary.BigEndian.Uint64(v[:8]))
-					if step.ToTxNum(dt.stepSize) >= filesEndTxNum {
+					endTxNum := lastTxNumOfStep(step, dt.stepSize)
+					if endTxNum >= filesEndTxNum {
 						ci1.key = bytes.Clone(k)
-						ci1.endTxNum = step.ToTxNum(dt.stepSize)
+						ci1.endTxNum = endTxNum
 						ci1.val = bytes.Clone(v[8:])
 						heap.Push(cpPtr, ci1)
 						pushed = true

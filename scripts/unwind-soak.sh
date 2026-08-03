@@ -21,6 +21,7 @@
 #   - Could not start execution service
 #   - invalid block
 #   - halting process
+#   - snapshot step misalignment (G7 exec-side invariant check)
 
 set -u  # not -e; we want explicit handling per step
 
@@ -387,7 +388,7 @@ scenario_test() {
             # surfaces the wedge in <30s instead of waiting hours
             # for the hard timeout.
             soft_wedge_errors=$(tail -c +"$((log_offset + 1))" "$LOG" 2>/dev/null \
-                | grep -cE "parent's total difficulty not found|Could not start execution service|invalid block|halting process")
+                | grep -cE "parent's total difficulty not found|Could not start execution service|invalid block|halting process|snapshot step misalignment")
             if [[ ${soft_wedge_errors:-0} -gt 0 ]]; then
                 echo "  SOFT-WEDGE: ${soft_wedge_errors} forbidden error line(s) detected — declaring stuck"
                 break
@@ -405,7 +406,7 @@ scenario_test() {
     PHASE_POST_HEAD=$post_head
     duration=$(( $(date +%s) - start_ts ))
     errors=$(tail -c +"$((log_offset + 1))" "$LOG" 2>/dev/null \
-        | grep -cE "parent's total difficulty not found|Could not start execution service|invalid block|halting process" \
+        | grep -cE "parent's total difficulty not found|Could not start execution service|invalid block|halting process|snapshot step misalignment" \
         || true)
     local post_missing post_extras
     read -r post_missing post_extras <<< "$(inventory_drift)"

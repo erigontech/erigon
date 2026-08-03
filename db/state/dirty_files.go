@@ -306,7 +306,6 @@ func filterDirtyFiles(fileNames []string, stepSize uint64, filenameBase, ext str
 		reVal, _ = filterDirtyFilesReCache.LoadOrStore(pattern, re)
 	}
 	re := reVal.(*regexp.Regexp)
-	var err error
 
 	for _, name := range fileNames {
 		subs := re.FindStringSubmatch(name)
@@ -316,27 +315,42 @@ func filterDirtyFiles(fileNames []string, stepSize uint64, filenameBase, ext str
 			}
 			continue
 		}
-		var startStep, endStep uint64
-		if startStep, err = strconv.ParseUint(subs[2], 10, 64); err != nil {
+		fileVer, err := version.ParseVersion("v" + subs[1])
+		if err != nil {
+			logger.Warn("File ignored by domain scan, parsing version", "error", err, "name", name)
+			continue
+		}
+		var fromRaw, toRaw uint64
+		if fromRaw, err = strconv.ParseUint(subs[2], 10, 64); err != nil {
 			logger.Warn("File ignored by domain scan, parsing startTxNum", "error", err, "name", name)
 			continue
 		}
-		if endStep, err = strconv.ParseUint(subs[3], 10, 64); err != nil {
+		if toRaw, err = strconv.ParseUint(subs[3], 10, 64); err != nil {
 			logger.Warn("File ignored by domain scan, parsing endTxNum", "error", err, "name", name)
 			continue
 		}
-		if startStep > endStep {
+		if fromRaw > toRaw {
 			logger.Warn("File ignored by domain scan, startTxNum > endTxNum", "name", name)
 			continue
 		}
 
-		// Semantic: [startTxNum, endTxNum)
-		// Example:
-		//   stepSize = 4
-		//   0-1.kv: [0, 8)
-		//   0-2.kv: [0, 16)
-		//   1-2.kv: [8, 16)
-		startTxNum, endTxNum := startStep*stepSize, endStep*stepSize
+		// Semantic: [startTxNum, endTxNum). Dispatch on the file's
+		// version against TxNumNamingPivot — matches E3SnapSchema.Parse's
+		// convention so the scan and the schema agree.
+		//   - legacy (< TxNumNamingPivot): fromRaw/toRaw are step indices.
+		//     Example (stepSize=4): v2.0-<base>.0-2.kv covers [0, 8).
+		//   - v4.0+: fromRaw/toRaw are raw exclusive txnums. Example:
+		//     v4.0-<base>.0-1000.kv covers txnums [0, 1000). This
+		//     branch is what lets mode-C's transient boundary file
+		//     (whose endTxNum is at lastTxNum+1, typically mid-step)
+		//     be read from disk with its real range instead of being
+		//     silently re-multiplied to a step boundary.
+		var startTxNum, endTxNum uint64
+		if fileVer.GreaterOrEqual(version.TxNumNamingPivot) {
+			startTxNum, endTxNum = fromRaw, toRaw
+		} else {
+			startTxNum, endTxNum = fromRaw*stepSize, toRaw*stepSize
+		}
 
 		var newFile = newFilesItem(startTxNum, endTxNum)
 		res = append(res, newFile)

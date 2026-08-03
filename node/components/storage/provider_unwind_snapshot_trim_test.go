@@ -54,6 +54,7 @@ func (stubAggregator) SetUnwindInProgress(_ bool) {}
 func (stubAggregator) WaitForBuildAndMergeQuiescence(_ time.Duration) error {
 	return nil
 }
+func (stubAggregator) DomainKVFilePathV4(_ kv.Domain, _, _ uint64) string { return "" }
 
 // TestCollectFilesPastBlock_StraddleFileSurvives pins the contract
 // that fixed live-rig issue #2 from the 2026-06-01 cycle: the block

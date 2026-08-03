@@ -182,6 +182,108 @@ func TestOpenDirtyFilesSameRangePrefersNewestVersion(t *testing.T) {
 	}
 }
 
+// TestFilterDirtyFiles_LegacyStepIndexedNaming pins the pre-v4.0 file-
+// naming convention where the filename encodes step indices and the
+// scan multiplies by stepSize to recover the txnum range. Anchor for
+// the current behaviour so the v4 dispatch below is a strict addition
+// rather than a replacement.
+func TestFilterDirtyFiles_LegacyStepIndexedNaming(t *testing.T) {
+	t.Parallel()
+	stepSize := uint64(1000)
+	logger := log.New()
+	names := []string{
+		"v1.0-accounts.0-256.kv",
+		"v2.0-accounts.256-288.kv",
+		"v2.2-accounts.288-289.kv",
+	}
+	got := filterDirtyFiles(names, stepSize, "accounts", "kv", logger)
+	require.Len(t, got, 3)
+	require.Equal(t, uint64(0), got[0].startTxNum)
+	require.Equal(t, uint64(256_000), got[0].endTxNum)
+	require.Equal(t, uint64(256_000), got[1].startTxNum)
+	require.Equal(t, uint64(288_000), got[1].endTxNum)
+	require.Equal(t, uint64(288_000), got[2].startTxNum)
+	require.Equal(t, uint64(289_000), got[2].endTxNum)
+}
+
+// TestFilterDirtyFiles_V4RawTxnumNaming pins the v4.0+ convention: the
+// filename encodes raw exclusive txnums directly. Without dispatch on
+// TxNumNamingPivot the scan would treat the numbers as step indices and
+// re-multiply by stepSize, producing wildly wrong ranges (e.g.
+// startTxNum=256_000_000_000 for a v4 file that actually covers
+// [256_000_000, 288_000_000)). This is the load-bearing correctness
+// gate for mode-C v4-emit — without it every v4 file on disk gets
+// silently mis-registered.
+func TestFilterDirtyFiles_V4RawTxnumNaming(t *testing.T) {
+	t.Parallel()
+	stepSize := uint64(1000)
+	logger := log.New()
+	names := []string{
+		"v4.0-accounts.256000-289250.kv", // covers [256000, 289250) — mid-step end
+		"v4.0-accounts.0-1000.kv",        // covers [0, 1000) — one full step
+	}
+	got := filterDirtyFiles(names, stepSize, "accounts", "kv", logger)
+	require.Len(t, got, 2)
+	require.Equal(t, uint64(256_000), got[0].startTxNum)
+	require.Equal(t, uint64(289_250), got[0].endTxNum,
+		"v4.0 endTxNum must be read raw (mid-step 289_250), not re-multiplied to 289_250_000")
+	require.Equal(t, uint64(0), got[1].startTxNum)
+	require.Equal(t, uint64(1000), got[1].endTxNum)
+}
+
+// TestFilterDirtyFiles_MixedVersionsInSameScan pins that a directory
+// holding BOTH legacy step-indexed and v4 raw-txnum files (which is the
+// on-disk state during mode-C's v4 window) scans each with the correct
+// convention.
+func TestFilterDirtyFiles_MixedVersionsInSameScan(t *testing.T) {
+	t.Parallel()
+	stepSize := uint64(1000)
+	logger := log.New()
+	names := []string{
+		"v2.0-accounts.256-288.kv",       // legacy: step indices → [256_000, 288_000)
+		"v4.0-accounts.288000-289250.kv", // v4: raw txnums → [288_000, 289_250)
+	}
+	got := filterDirtyFiles(names, stepSize, "accounts", "kv", logger)
+	require.Len(t, got, 2)
+	require.Equal(t, uint64(256_000), got[0].startTxNum)
+	require.Equal(t, uint64(288_000), got[0].endTxNum)
+	require.Equal(t, uint64(288_000), got[1].startTxNum)
+	require.Equal(t, uint64(289_250), got[1].endTxNum,
+		"v4 file in mixed scan retains mid-step endTxNum")
+}
+
+// TestLastFullyCoveredStep pins the step-boundary formula that
+// separates fully-covered from partially-covered steps. Called out
+// because the mid-step case (mode-C v4 file, endTxN mid-step) is the
+// specific correctness anchor for canPrune/StepsInFiles.
+func TestLastFullyCoveredStep(t *testing.T) {
+	t.Parallel()
+	const ss = uint64(1000)
+
+	require.Equal(t, kv.Step(0), lastFullyCoveredStep(0, ss), "endTxN=0: no data, no full step")
+	require.Equal(t, kv.Step(0), lastFullyCoveredStep(500, ss), "endTxN < ss: no full step")
+	require.Equal(t, kv.Step(0), lastFullyCoveredStep(999, ss), "endTxN one below boundary: still no full step")
+	require.Equal(t, kv.Step(0), lastFullyCoveredStep(1000, ss), "endTxN==ss: step 0 fully covered")
+	require.Equal(t, kv.Step(0), lastFullyCoveredStep(1500, ss), "endTxN mid-step-1: step 0 fully covered, step 1 partial")
+	require.Equal(t, kv.Step(1), lastFullyCoveredStep(2000, ss), "endTxN==2*ss: step 1 fully covered")
+	require.Equal(t, kv.Step(1), lastFullyCoveredStep(2999, ss), "endTxN one below 3*ss: step 1 still last full")
+	require.Equal(t, kv.Step(100), lastFullyCoveredStep(101_000_000, ss*1000), "aligned 101M with ss=1M: last full = step 100")
+	require.Equal(t, kv.Step(100), lastFullyCoveredStep(101_250_000, ss*1000), "mid-step 101.25M with ss=1M: last full = step 100 (step 101 partial)")
+}
+
+// TestFilterDirtyFiles_LowMajorParsesAsLegacy pins that any major
+// version below TxNumNamingPivot's takes the step-multiplied branch.
+func TestFilterDirtyFiles_LowMajorParsesAsLegacy(t *testing.T) {
+	t.Parallel()
+	stepSize := uint64(1000)
+	logger := log.New()
+	got := filterDirtyFiles([]string{"v0.0-accounts.5-6.kv"}, stepSize, "accounts", "kv", logger)
+	require.Len(t, got, 1)
+	require.Equal(t, uint64(5_000), got[0].startTxNum)
+	require.Equal(t, uint64(6_000), got[0].endTxNum)
+	_ = version.V4_0
+}
+
 func writeTestKVFile(t *testing.T, path, tmp string, logger log.Logger) {
 	t.Helper()
 	comp, err := seg.NewCompressor(t.Context(), "test", path, tmp, seg.DefaultCfg, log.LvlDebug, logger)

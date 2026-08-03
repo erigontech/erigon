@@ -19,7 +19,6 @@ package storage
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/seg"
@@ -214,21 +213,21 @@ func (p *Provider) regenerateBoundaryStepFiles(
 			// legacy flat-layout case.
 			oldPath := snapshot.ResolveExistingPath(p.snapDir, fileEntry.Name)
 
-			// Compute the truncated filename. Aligned (actionRegenInPlace)
-			// keeps the same basename; truncate (actionRegenTruncate)
-			// narrows the [FromStep, ToStep) → [FromStep, stepBoundary).
-			// Derive from filepath.Base(oldPath), NOT from
-			// fileEntry.Name — the latter carries the kind-subdir
-			// prefix and joining it back under filepath.Dir(oldPath)
-			// would double up the prefix (live-caught 2026-06-30
-			// iter-1 mode_a2 after the initial truncated-rename
-			// landing).
-			oldBaseName := filepath.Base(oldPath)
-			truncatedBaseName := oldBaseName
+			// Two emit shapes:
+			//   - actionRegenInPlace: file's endStep already equals the
+			//     unwind target's step boundary. Rewrite in place under
+			//     its own step-aligned name.
+			//   - actionRegenTruncate: file straddles a mid-step unwind
+			//     target. Emit under a v4.0 raw-txnum-named path with
+			//     endTxN = lastTxN+1 so the file's advertised horizon
+			//     matches its as-of-lastTxN content.
+			var finalPath string
 			if action == actionRegenTruncate {
-				truncatedBaseName = renameStepRange(oldBaseName, fileEntry.FromStep, fileEntry.ToStep, stepBoundary)
+				fromTxN := uint64(fileEntry.FromStep) * stepSize
+				finalPath = p.Aggregator.DomainKVFilePathV4(kvDomain, fromTxN, lastTxNum+1)
+			} else {
+				finalPath = oldPath
 			}
-			finalPath := filepath.Join(filepath.Dir(oldPath), truncatedBaseName)
 			regenPath := finalPath + ".regen"
 
 			if err := RegenerateBoundaryStepFile(

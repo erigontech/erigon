@@ -76,4 +76,11 @@ type StateAggregator interface {
 	// WaitForBuildAndMergeQuiescence blocks until in-flight
 	// build/merge goroutines exit, or the timeout elapses.
 	WaitForBuildAndMergeQuiescence(timeout time.Duration) error
+
+	// DomainKVFilePathV4 returns the v4.0 raw-txnum-named .kv path for
+	// the given domain. Mode-C unwind emits its boundary-step truncate
+	// under this name so the file's advertised endTxN matches its
+	// as-of-lastTxN content (rather than lying via the step-boundary
+	// convention).
+	DomainKVFilePathV4(domain kv.Domain, fromTxN, toTxN uint64) string
 }

@@ -185,6 +185,15 @@ func (d *Domain) kvNewFilePathIn(baseDir string, fromStep, toStep kv.Step) strin
 	}
 	return filepath.Join(baseDir, fmt.Sprintf("%s-%s.%d-%d.kv", d.kvWriteVersion().String(), d.FilenameBase, fromStep, toStep))
 }
+
+// kvNewFilePathV4 builds a v4.0 raw-txnum-named .kv path — used by
+// mode-C unwind's boundary-step truncate emit, where the file's
+// endTxNum is typically mid-step (lastTxN+1) and the legacy step-
+// indexed naming can't express that honestly. Caller supplies raw
+// txnum boundaries.
+func (d *Domain) kvNewFilePathV4(fromTxN, toTxN uint64) string {
+	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("%s-%s.%d-%d.kv", version.V4_0.String(), d.FilenameBase, fromTxN, toTxN))
+}
 func (d *Domain) kviAccessorNewFilePathIn(baseDir string, fromStep, toStep kv.Step) string {
 	if baseDir == "" {
 		baseDir = d.dirs.SnapDomain
@@ -1886,7 +1895,11 @@ func (dt *DomainRoTx) canBuild(dbtx kv.Tx) bool { //nolint
 
 func (dt *DomainRoTx) canPruneDomainTables(tx kv.Tx, untilTx uint64) (can bool, maxStepToPrune kv.Step) {
 	if m := dt.files.EndTxNum(); m > 0 {
-		maxStepToPrune = kv.Step((m - 1) / dt.stepSize)
+		// Prune only up to the last FULLY covered step. A mid-step
+		// endTxN (mode-C v4 file) means the containing step is
+		// partially in files, partially in MDBX; pruning to its end
+		// would delete unbacked MDBX rows.
+		maxStepToPrune = lastFullyCoveredStep(m, dt.stepSize)
 	}
 	var untilStep kv.Step
 	if untilTx > 0 {
@@ -1918,7 +1931,7 @@ func (dt *DomainRoTx) canPruneDomainTables(tx kv.Tx, untilTx uint64) (can bool, 
 // history.CanPrune should be called separately because it responsible for different tables
 func (dt *DomainRoTx) canScanPruneDomainTables(tx kv.Tx, untilTx uint64) (can bool, maxStepToPrune kv.Step) {
 	if m := dt.files.EndTxNum(); m > 0 {
-		maxStepToPrune = kv.Step((m - 1) / dt.stepSize)
+		maxStepToPrune = lastFullyCoveredStep(m, dt.stepSize)
 	}
 
 	prg, err := GetPruneValProgress(tx, []byte(dt.d.ValuesTable))

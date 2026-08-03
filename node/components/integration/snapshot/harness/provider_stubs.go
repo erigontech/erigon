@@ -51,6 +51,7 @@ func (mockAggregator) SetUnwindInProgress(bool)                        {}
 func (mockAggregator) WaitForBuildAndMergeQuiescence(time.Duration) error {
 	return nil
 }
+func (mockAggregator) DomainKVFilePathV4(kv.Domain, uint64, uint64) string { return "" }
 
 // noopDBEventNotifier is the harness stand-in for shards.Events — the
 // Provider only forwards OnNewSnapshot through it, which the harness has

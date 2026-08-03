@@ -1479,12 +1479,35 @@ type flusher interface {
 	Flush(ctx context.Context, tx kv.RwTx) error
 }
 
+// StepsInFiles returns the last fully-covered step index across the
+// given entity set — i.e. the highest step S where the file layer
+// holds data for every txnum in [S*ss, (S+1)*ss). For step-aligned
+// endTxN this is `endTxN/ss - 1`; for mid-step endTxN (mode-C's v4
+// file), it's the step BELOW the one containing endTxN, since the
+// containing step is only partially covered.
+//
+// Callers migrating to txN-granular reasoning should prefer
+// MaxTxnumInFiles. Step-based derivations are transitional.
 func (at *AggregatorRoTx) StepsInFiles(entitySet ...kv.Domain) kv.Step {
-	txNumInFiles := at.TxNumsInFiles(entitySet...)
-	if txNumInFiles > 0 {
-		txNumInFiles--
-	}
-	return kv.Step(txNumInFiles / at.StepSize())
+	return lastFullyCoveredStep(at.MaxTxnumInFiles(entitySet...), at.StepSize())
+}
+
+// MaxTxnumInFiles returns the minimum endTxN across the given entity
+// set — the highest txN below which every listed domain has data in
+// files. Preferred over StepsInFiles for new callers that don't need
+// step-index quantisation (mode-C v4 files have non-step-aligned
+// endTxN; step-quantised views under-count or misbehave).
+func (at *AggregatorRoTx) MaxTxnumInFiles(entitySet ...kv.Domain) uint64 {
+	return at.TxNumsInFiles(entitySet...)
+}
+
+// DomainKVFilePathV4 returns the v4.0 raw-txnum-named .kv path for the
+// given domain. Used by mode-C unwind's boundary-step truncate emit,
+// where the file's endTxN is typically mid-step (lastTxN+1) and the
+// legacy step-indexed naming would lie about the file's actual data
+// horizon.
+func (a *Aggregator) DomainKVFilePathV4(domain kv.Domain, fromTxN, toTxN uint64) string {
+	return a.d[domain].kvNewFilePathV4(fromTxN, toTxN)
 }
 
 func (at *AggregatorRoTx) TxNumsInFiles(entitySet ...kv.Domain) (minTxNum uint64) {
@@ -1885,6 +1908,25 @@ func firstTxNumOfStep(step kv.Step, stepSize uint64) uint64 {
 
 func lastTxNumOfStep(step kv.Step, stepSize uint64) uint64 {
 	return firstTxNumOfStep(step+1, stepSize) - 1
+}
+
+// lastFullyCoveredStep returns the highest step index whose entire txnum
+// range [S*ss, (S+1)*ss) is covered by data with endTxN as its upper
+// bound (exclusive). For step-aligned endTxN=k*ss, that's k-1; for
+// mid-step endTxN (mode-C's v4 file case), the containing step is only
+// partially covered so the answer is the step before it. Returns 0 when
+// no step is fully covered.
+//
+// Transitional helper: the whole "steps in files" derivation is being
+// migrated to txN-granular reasoning (see MaxTxnumInFiles). Callers
+// currently doing `endTxN/ss` or `(endTxN-1)/ss` should route through
+// this helper (or its "first-not-fully-covered" sibling) until the
+// migration completes.
+func lastFullyCoveredStep(endTxN, stepSize uint64) kv.Step {
+	if endTxN < stepSize {
+		return 0
+	}
+	return kv.Step(endTxN/stepSize) - 1
 }
 
 // firstTxNumOfStep returns txStepBeginning of given step.
