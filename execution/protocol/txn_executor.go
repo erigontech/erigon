@@ -291,7 +291,6 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 	rules := st.evm.ChainRules()
 	from := st.msg.From()
 
-	// Reject more blob hashes than the per-transaction limit (Osaka+).
 	if rules.IsOsaka && len(st.msg.BlobHashes()) > params.MaxBlobsPerTxn {
 		return txnFees{}, fmt.Errorf("%w: address %v, blobs: %d", ErrTooManyBlobs, from, len(st.msg.BlobHashes()))
 	}
@@ -335,7 +334,6 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		}
 	}
 
-	// The block must have enough execution, state, and blob gas left for the tx.
 	gas := st.msg.Gas()
 	blobGas := st.msg.BlobGas()
 	executionContribution, stateContribution := InclusionContributions(gas, rules.IsAmsterdam)
@@ -343,7 +341,6 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		return txnFees{}, err
 	}
 
-	// EIP-1559: the fee cap must cover the base fee, and the tip must not exceed the fee cap.
 	if rules.IsLondon {
 		// Skip the checks if gas fields are zero and baseFee was explicitly disabled (eth_call)
 		skipCheck := st.evm.Config().NoBaseFee && st.feeCap.IsZero() && st.tipCap.IsZero()
@@ -353,7 +350,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 			}
 		}
 	}
-	// EIP-4844: the max fee per blob gas must cover the blob gas price.
+	// EIP-4844.
 	var maxFeePerBlobGas uint256.Int
 	hasBlobGas := rules.IsCancun && blobGas > 0
 	if hasBlobGas {
@@ -368,7 +365,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		}
 	}
 
-	// EIP-7825: Transaction Gas Limit Cap.
+	// EIP-7825.
 	requiredIntrinsicGas := max(intrinsicGasResult.ExecutionGas, intrinsicGasResult.FloorGasCost)
 	if st.msg.CheckGas() && rules.IsOsaka {
 		if rules.IsAmsterdam {
@@ -382,8 +379,8 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		}
 	}
 
-	// EIP-7702: reject malformed SetCode transactions. Placed after the fee-cap
-	// checks and before the affordability/intrinsic checks, matching geth.
+	// Match geth's EIP-7702 prerequisite precedence: after fee caps, before
+	// affordability and intrinsic gas.
 	if err := checkSetCodeAuthorizations(st.msg.Authorizations(), st.msg.To().IsNil(), rules.IsPrague); err != nil {
 		return txnFees{}, err
 	}
@@ -404,8 +401,6 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		}
 	}
 
-	// The sender must afford the gas and blob fees plus the topmost call's
-	// value transfer.
 	if !gasBailout {
 		balanceCheck := fees.gasVal
 		if st.feeCap != nil {
@@ -441,8 +436,6 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		return txnFees{}, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, gas, requiredIntrinsicGas)
 	}
 
-	// Check EIP-3860 initcode size before buyGas so rejection leaves sender
-	// state and gas pools unchanged.
 	if st.msg.To().IsNil() {
 		vmConfig := st.evm.Config()
 		if err := vm.CheckMaxInitCodeSize(uint64(len(st.data)), vmConfig.HasEip3860(rules), rules.IsAmsterdam); err != nil {
