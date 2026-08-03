@@ -545,7 +545,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		}
 	}
 	// First check this message satisfies all consensus rules before
-	// applying the message. The rules include these clauses
+	// applying the message, in the order they run:
 	//
 	// 1. the nonce of the message caller is correct
 	// 2. the amount of gas required is available in the block
@@ -553,8 +553,8 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	// 4. there is no overflow when calculating intrinsic gas
 	// 5. the transaction gas limit does not exceed the EIP-7825 cap (Osaka+)
 	// 6. caller has enough balance to cover transaction fee(gaslimit * gasprice)
+	//    plus the asset transfer for the **topmost** call
 	// 7. the purchased gas is enough to cover intrinsic usage
-	// 8. caller has enough balance to cover asset transfer for **topmost** call
 
 	msg := st.msg
 	sender := msg.From()
