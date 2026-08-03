@@ -268,7 +268,9 @@ type readPathResult struct {
 // readValueUnchanged reports whether the prior recorded read's value for
 // (addr, path, key) equals the value just read into r — a spurious version-only
 // churn, not a real data dependency. AddressPath is existence-only: its
-// sub-fields are each recorded and validated as their own reads.
+// sub-fields are each recorded and validated as their own reads. Deliberately
+// narrower than validation's tiebreakers (no CodePath/CodeSizePath arms): the
+// default is "changed", which re-reads — fail-safe, never stale.
 func (s *IntraBlockState) readValueUnchanged(addr accounts.Address, path AccountPath, key accounts.StorageKey, r *readPathResult) bool {
 	switch path {
 	case AddressPath:
@@ -280,7 +282,7 @@ func (s *IntraBlockState) readValueUnchanged(addr accounts.Address, path Account
 		if pr.Val != nil {
 			prAcc = pr.Val.Account()
 		}
-		if prAcc.Empty() && r.mapAddressVal.Empty() {
+		if EIP161EmptyRemoval(s.eip161, s.isAura, addr) && prAcc.Empty() && r.mapAddressVal.Empty() {
 			return !s.versionMap.accountLiveAt(addr, s.txIndex)
 		}
 		return prAcc != nil && r.mapAddressVal != nil

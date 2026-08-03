@@ -628,28 +628,38 @@ func (vm *VersionMap) AnyDoneSelfDestructEquals(addr accounts.Address, txIdxLimi
 	return found
 }
 
-// destroyedAndUnrevived reports whether the latest SelfDestruct cell below
-// txIndex marks the account destroyed with no later cell showing life again.
-// Same-tx re-creation writes SelfDestructPath and AddressPath at the SAME
-// TxIdx, so AddressPath uses >= (not strict >). Destroyed does not imply dead:
-// a self-destruct that preserves a non-zero balance leaves the account alive,
-// so deadness additionally requires no live sub-field floor.
-func (vm *VersionMap) destroyedAndUnrevived(addr accounts.Address, txIndex int) bool {
-	destructed, sdRR, ok := vm.ReadSelfDestruct(addr, txIndex)
-	if !ok || sdRR.Status() != MVReadResultDone || !destructed {
-		return false
-	}
-	destructTxIndex := sdRR.DepIdx()
+// selfDestructRevived reports whether any cell written after the destruct
+// index (and below txIndex) shows the account alive again. Same-tx
+// re-creation (metamorphic SD+CREATE2) writes both SelfDestructPath and
+// AddressPath at the SAME TxIdx, so AddressPath uses >= (not strict >).
+func (vm *VersionMap) selfDestructRevived(addr accounts.Address, destructTxIndex int, txIndex int) bool {
 	revivalLimit := txIndex - 1
 	if hi, ok := vm.LatestTxIndex(addr, AddressPath, accounts.NilKey, revivalLimit); ok && hi >= destructTxIndex {
-		return false
+		return true
 	}
 	for _, p := range [...]AccountPath{BalancePath, NoncePath, CodeHashPath} {
 		if hi, ok := vm.LatestTxIndex(addr, p, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
-			return false
+			return true
 		}
 	}
-	return !vm.accountLiveSince(addr, destructTxIndex, txIndex)
+	return false
+}
+
+// destroyedAndUnrevived reports whether the latest destruct (highest Done
+// SelfDestruct=true below txIndex, immune to a shadowing revival cell above
+// it) has no later cell showing life again. Destroyed does not imply dead:
+// beyond the strictly-later revival cells, a self-destruct that preserves a
+// non-zero balance (EIP-8246) writes it AT the destruct index, so deadness
+// additionally requires no live sub-field floor from that index on.
+func (vm *VersionMap) destroyedAndUnrevived(addr accounts.Address, txIndex int) bool {
+	sdVer, ok := vm.FindDoneSelfDestructInRange(addr, 0, txIndex, true)
+	if !ok {
+		return false
+	}
+	if vm.selfDestructRevived(addr, sdVer.TxIndex, txIndex) {
+		return false
+	}
+	return !vm.accountLiveSince(addr, sdVer.TxIndex, txIndex)
 }
 
 // accountLiveSince reports whether any sub-field cell written at or after
@@ -994,6 +1004,7 @@ func validateRead[T any](vm *VersionMap, txIndex int, addr accounts.Address, pat
 	readVal T,
 	readLive func(*VersionMap, accounts.Address, accounts.StorageKey, int) (T, ReadResult, bool),
 	eq func(a, b T) bool,
+	isAbsent func(T) bool,
 	recordField func(*accounts.Account) T,
 	checkVersion func(readVersion, writeVersion Version) VersionValidity,
 	traceInvalid bool, tracePrefix string) VersionValidity {
@@ -1006,21 +1017,7 @@ func validateRead[T any](vm *VersionMap, txIndex int, addr accounts.Address, pat
 	// A recorded zero/absent value means the read concluded absence; the
 	// destroyed-account relaxations are only sound for those. Typed check —
 	// the eq helpers carry dead-equivalence semantics, not zero-ness.
-	absent := false
-	switch v := any(readVal).(type) {
-	case *accounts.Account:
-		absent = v == nil
-	case []byte:
-		absent = len(v) == 0
-	case uint256.Int:
-		absent = v.IsZero()
-	case uint64:
-		absent = v == 0
-	case int:
-		absent = v == 0
-	case accounts.CodeHash:
-		absent = v.IsEmpty() || v.IsZero()
-	}
+	absent := isAbsent(readVal)
 	// A read folded onto the account record tiebreaks against the live record's
 	// field: record churn that keeps the field unchanged is not a conflict. A
 	// non-Done or absent record cannot prove equality (fail-safe: re-execute).
@@ -1084,9 +1081,18 @@ func liveCodeSize(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx 
 }
 
 func eqUint256(a, b uint256.Int) bool { return a.Eq(&b) }
-func eqUint64(a, b uint64) bool       { return a == b }
-func eqInt(a, b int) bool             { return a == b }
-func eqCode(a, b []byte) bool         { return bytes.Equal(a, b) }
+
+// Typed absence predicates (threaded like eq, so validateRead never boxes the
+// recorded value): a zero/absent value means the read concluded absence.
+func absentAccount(a *accounts.Account) bool   { return a == nil }
+func absentBytes(b []byte) bool                { return len(b) == 0 }
+func absentUint256(v uint256.Int) bool         { return v.IsZero() }
+func absentUint64(v uint64) bool               { return v == 0 }
+func absentInt(v int) bool                     { return v == 0 }
+func absentCodeHash(ch accounts.CodeHash) bool { return ch.IsEmpty() || ch.IsZero() }
+func eqUint64(a, b uint64) bool                { return a == b }
+func eqInt(a, b int) bool                      { return a == b }
+func eqCode(a, b []byte) bool                  { return bytes.Equal(a, b) }
 func eqCodeHash(a, b accounts.CodeHash) bool {
 	return a == b
 }
@@ -1109,8 +1115,8 @@ func recordCodeHash(a *accounts.Account) accounts.CodeHash { return a.CodeHash }
 // The record cell is a creation-time snapshot: an account created empty and
 // funded afterwards keeps an empty-shaped record next to a non-zero sub-field
 // cell, so deadness must be assembled from the sub-field floors too.
-func (vm *VersionMap) eqAccountDead(txIdx int, addr accounts.Address, a *accounts.Account, b *accounts.Account) bool {
-	if a.Empty() && b.Empty() && !vm.accountLiveAt(addr, txIdx) {
+func (vm *VersionMap) eqAccountDead(txIdx int, addr accounts.Address, isAura bool, a *accounts.Account, b *accounts.Account) bool {
+	if EIP161EmptyRemoval(true, isAura, addr) && a.Empty() && b.Empty() && !vm.accountLiveAt(addr, txIdx) {
 		return true
 	}
 	return a != nil && b != nil
@@ -1189,30 +1195,23 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 		// for EIP-8246 preserved balances); the destroyer writes no cells for
 		// either path, so any Done cell here predates the destruct.
 		if valid == VersionValid && (path == AddressPath || path == CodePath) {
-			if destructed, sdRR, ok := vm.ReadSelfDestruct(addr, txIndex); ok && sdRR.Status() == MVReadResultDone && destructed &&
-				sdRR.DepIdx() > rr.Version().TxIndex && vm.destroyedAndUnrevived(addr, txIndex) {
+			if _, ok := vm.FindDoneSelfDestructInRange(addr, rr.Version().TxIndex+1, txIndex, true); ok &&
+				vm.destroyedAndUnrevived(addr, txIndex) {
 				valid = VersionInvalid
 				invReason = "sd-stale"
 			}
 		}
 		if valid == VersionValid && path != SelfDestructPath && path != AddressPath &&
 			path != IncarnationPath && path != CreateContractPath && path != CodePath {
-			if destructed, sdRR, ok := vm.ReadSelfDestruct(addr, txIndex); ok && sdRR.Status() == MVReadResultDone && destructed {
-				destructTxIndex := sdRR.DepIdx()
-				if destructTxIndex > rr.Version().TxIndex {
-					revivalLimit := txIndex - 1
-					revived := false
-					for _, p := range [...]AccountPath{BalancePath, NoncePath, CodeHashPath} {
-						if hi, ok := vm.LatestTxIndex(addr, p, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
-							revived = true
-							break
-						}
-					}
-					if !revived {
-						valid = VersionInvalid
-						invReason = "sd-stale"
-					}
-				}
+			// Range-scan strictly above the floor cell: a re-creation flushes
+			// SelfDestruct=false above the wiping true cell, so latest-only
+			// probing misses the destruct (the read path's floors range-scan the
+			// same way). No revival relaxation: re-establishing THIS field after
+			// the destruct writes a cell above it, which then is the floor, so
+			// any destruct above the floor means the value predates the wipe.
+			if _, ok := vm.FindDoneSelfDestructInRange(addr, rr.Version().TxIndex+1, txIndex, true); ok {
+				valid = VersionInvalid
+				invReason = "sd-stale"
 			}
 		}
 	case MVReadResultDependency:
@@ -1335,7 +1334,7 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 }
 
 // ValidateVersion check if transaction's readSet is still valid based on the current multi-versioned memory
-func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersion func(readVersion, writeVersion Version) VersionValidity, eip161 bool, traceInvalid bool, tracePrefix string) (valid VersionValidity) {
+func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersion func(readVersion, writeVersion Version) VersionValidity, eip161 bool, isAura bool, traceInvalid bool, tracePrefix string) (valid VersionValidity) {
 	rs := lastIO.ReadSet(txIdx)
 	valid = VersionValid
 	// ok checks one validity result, latching valid; ok==false stops the scan.
@@ -1351,8 +1350,6 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 	// Value paths go through the generic validateRead so the recorded value stays
 	// typed (never boxed) and the single typed read supplies both status and the
 	// tiebreaker value.
-	var deadAddr accounts.Address
-	eqAccountDead := func(x *accounts.Account, y *accounts.Account) bool { return vm.eqAccountDead(txIdx, deadAddr, x, y) }
 	for a, tr := range rs.address {
 		var rv *accounts.Account
 		if tr.Val != nil {
@@ -1360,36 +1357,35 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 		}
 		eqAccount := eqAccountStrict
 		if eip161 {
-			deadAddr = a
-			eqAccount = eqAccountDead
+			eqAccount = func(x *accounts.Account, y *accounts.Account) bool { return vm.eqAccountDead(txIdx, a, isAura, x, y) }
 		}
-		if !ok(validateRead(vm, txIdx, a, AddressPath, accounts.NilKey, tr.Source, tr.Version, rv, liveAddress, eqAccount, nil, checkVersion, traceInvalid, tracePrefix)) {
+		if !ok(validateRead(vm, txIdx, a, AddressPath, accounts.NilKey, tr.Source, tr.Version, rv, liveAddress, eqAccount, absentAccount, nil, checkVersion, traceInvalid, tracePrefix)) {
 			return
 		}
 	}
 	for a, tr := range rs.balance {
-		if !ok(validateRead(vm, txIdx, a, BalancePath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveBalance, eqUint256, recordBalance, checkVersion, traceInvalid, tracePrefix)) {
+		if !ok(validateRead(vm, txIdx, a, BalancePath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveBalance, eqUint256, absentUint256, recordBalance, checkVersion, traceInvalid, tracePrefix)) {
 			return
 		}
 	}
 	for a, tr := range rs.nonce {
-		if !ok(validateRead(vm, txIdx, a, NoncePath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveNonce, eqUint64, recordNonce, checkVersion, traceInvalid, tracePrefix)) {
+		if !ok(validateRead(vm, txIdx, a, NoncePath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveNonce, eqUint64, absentUint64, recordNonce, checkVersion, traceInvalid, tracePrefix)) {
 			return
 		}
 	}
 	for a, tr := range rs.incarnation {
-		if !ok(validateRead(vm, txIdx, a, IncarnationPath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveIncarnation, eqUint64, recordIncarnation, checkVersion, traceInvalid, tracePrefix)) {
+		if !ok(validateRead(vm, txIdx, a, IncarnationPath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveIncarnation, eqUint64, absentUint64, recordIncarnation, checkVersion, traceInvalid, tracePrefix)) {
 			return
 		}
 	}
 	for a, tr := range rs.codeHash {
-		if !ok(validateRead(vm, txIdx, a, CodeHashPath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveCodeHash, eqCodeHash, recordCodeHash, checkVersion, traceInvalid, tracePrefix)) {
+		if !ok(validateRead(vm, txIdx, a, CodeHashPath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveCodeHash, eqCodeHash, absentCodeHash, recordCodeHash, checkVersion, traceInvalid, tracePrefix)) {
 			return
 		}
 	}
 	for a, inner := range rs.storage {
 		for k, tr := range inner {
-			if !ok(validateRead(vm, txIdx, a, StoragePath, k, tr.Source, tr.Version, tr.Val, liveStorage, eqUint256, nil, checkVersion, traceInvalid, tracePrefix)) {
+			if !ok(validateRead(vm, txIdx, a, StoragePath, k, tr.Source, tr.Version, tr.Val, liveStorage, eqUint256, absentUint256, nil, checkVersion, traceInvalid, tracePrefix)) {
 				return
 			}
 		}
@@ -1405,12 +1401,12 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 		}
 	}
 	for a, tr := range rs.code {
-		if !ok(validateRead(vm, txIdx, a, CodePath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveCode, eqCode, nil, checkVersion, traceInvalid, tracePrefix)) {
+		if !ok(validateRead(vm, txIdx, a, CodePath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveCode, eqCode, absentBytes, nil, checkVersion, traceInvalid, tracePrefix)) {
 			return
 		}
 	}
 	for a, tr := range rs.codeSize {
-		if !ok(validateRead(vm, txIdx, a, CodeSizePath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveCodeSize, eqInt, nil, checkVersion, traceInvalid, tracePrefix)) {
+		if !ok(validateRead(vm, txIdx, a, CodeSizePath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveCodeSize, eqInt, absentInt, nil, checkVersion, traceInvalid, tracePrefix)) {
 			return
 		}
 	}

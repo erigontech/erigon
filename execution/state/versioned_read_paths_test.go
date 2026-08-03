@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -551,7 +552,7 @@ func TestVersionedRead_E2_StaleMapReadCaughtAtCommit(t *testing.T) {
 			return VersionValid
 		}
 		return VersionInvalid
-	}, true, false, "")
+	}, true, false, false, "")
 	assert.Equal(t, VersionInvalid, valid, "commit-time validation catches the stale read")
 }
 
@@ -619,4 +620,29 @@ func TestVersionedRead_D1_WriteSetHitWithStaleReadSetPanics(t *testing.T) {
 		assert.ErrorIs(t, err, ErrDependency)
 	}()
 	_, _ = ibs.GetBalance(addr)
+}
+
+// The nil≡empty arm of readValueUnchanged carries the same gates as
+// validation's dead-equivalence: no equivalence pre-EIP-161, and none for
+// AuRa's retained SystemAddress.
+func TestReadValueUnchanged_NilEmptyArmGated(t *testing.T) {
+	newIBS := func(addr accounts.Address, eip161 bool, isAura bool) *IntraBlockState {
+		ibs := NewWithVersionMap(&emptyReader{}, NewVersionMap(nil))
+		t.Cleanup(func() { ibs.Release(false) })
+		ibs.SetTxContext(0, 2)
+		ibs.eip161 = eip161
+		ibs.isAura = isAura
+		ibs.versionedReads.SetAddress(addr, VersionedRead[AccountView]{
+			ReadHeader: ReadHeader{Source: StorageRead, Version: UnknownVersion},
+		})
+		return ibs
+	}
+	r := &readPathResult{mapAddressVal: &accounts.Account{CodeHash: accounts.EmptyCodeHash}}
+	sys := params.SystemAddress
+	other := accounts.InternAddress([20]byte{0x18, 0x01})
+	require.True(t, newIBS(other, true, false).readValueUnchanged(other, AddressPath, accounts.NilKey, r))
+	require.False(t, newIBS(other, false, false).readValueUnchanged(other, AddressPath, accounts.NilKey, r))
+	require.False(t, newIBS(sys, true, true).readValueUnchanged(sys, AddressPath, accounts.NilKey, r))
+	require.True(t, newIBS(sys, true, false).readValueUnchanged(sys, AddressPath, accounts.NilKey, r))
+	require.True(t, newIBS(other, true, true).readValueUnchanged(other, AddressPath, accounts.NilKey, r))
 }

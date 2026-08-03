@@ -218,6 +218,11 @@ type IntraBlockState struct {
 	// SelfDestructPath=true account must read as a live, balance-preserving,
 	// empty-code account rather than a destroyed one.
 	eip8246 bool
+	// eip161 and isAura gate nil≡empty dead-equivalence on the read paths (AuRa
+	// retains its empty SystemAddress; pre-161 existing-empty is gas-observable).
+	// Set per-tx from the block rules in Prepare.
+	eip161 bool
+	isAura bool
 
 	revisions revisions
 }
@@ -1136,23 +1141,6 @@ func (sdb *IntraBlockState) TouchAccount(addr accounts.Address) error {
 	return nil
 }
 
-// selfDestructRevived reports whether any cell written after the destruct
-// index shows the account alive again. Same-tx re-creation (metamorphic
-// SD+CREATE2) writes both SelfDestructPath and AddressPath at the SAME TxIdx,
-// so AddressPath uses >= (not strict >).
-func (sdb *IntraBlockState) selfDestructRevived(addr accounts.Address, destructTxIndex int) bool {
-	revivalLimit := sdb.txIndex - 1
-	if hi, ok := sdb.versionMap.LatestTxIndex(addr, AddressPath, accounts.NilKey, revivalLimit); ok && hi >= destructTxIndex {
-		return true
-	}
-	for _, path := range [...]AccountPath{BalancePath, NoncePath, CodeHashPath} {
-		if hi, ok := sdb.versionMap.LatestTxIndex(addr, path, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
-			return true
-		}
-	}
-	return false
-}
-
 // synthesizeCreatedAccountBase reconstructs the record of an account that is
 // absent from both the versionMap AddressPath and the DB, from its sub-field
 // cells: an EIP-7928 BAL pre-populates balance/nonce/code but not the record
@@ -1401,8 +1389,8 @@ func (sdb *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 		}
 		// readAccount above recorded a nil map-read marker; the DB resolved
 		// the account, so reconcile the recorded read — a later record cell
-		// (e.g. the calcFees coinbase record) would otherwise spuriously
-		// invalidate the nil against a live account.
+		// would otherwise spuriously invalidate the nil against a live
+		// account.
 		sdb.accountRead(addr, readAccount, source, version)
 	}
 
@@ -2009,10 +1997,9 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 	sdb.stateReader.SetTrace(false, "")
 
 	accountSource := StorageRead
-	// A DB-loaded record is pre-block state — older than any in-block BAL cell.
-	// Stamp it UnknownVersion so refreshVersionedAccount's overlay guard
-	// (bversion > readVersion) does not drop lower-versioned BAL cells and leave a
-	// stale record (which shadows the BAL and re-executes at validation).
+	// A DB-loaded record is pre-block state — older than any in-block cell.
+	// Stamping it with the reader's own version would rank it above those
+	// cells; UnknownVersion keeps every cell overlay ahead of it.
 	accountVersion := UnknownVersion
 
 	if err != nil {
@@ -2074,7 +2061,7 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 		// SelfDestructPath directly from the versionMap (not via versionedReadCore
 		// which itself short-circuits on the same flag). Use the same pattern
 		// as CreateAccount (line 1628).
-		if destructed, res, ok := sdb.versionMap.ReadSelfDestruct(addr, sdb.txIndex); ok && res.Status() == MVReadResultDone && destructed && !sdb.selfDestructRevived(addr, res.DepIdx()) {
+		if sdVer, ok := sdb.versionMap.FindDoneSelfDestructInRange(addr, 0, sdb.txIndex, true); ok && !sdb.versionMap.selfDestructRevived(addr, sdVer.TxIndex, sdb.txIndex) {
 			// Revival must be evidenced by cells written after the destruct
 			// index (e.g. a BAL-funded balance): the DB record's own fields are
 			// pre-block state, so their non-emptiness says nothing about life
@@ -2839,6 +2826,8 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 		fmt.Printf("%d (%d.%d) ibs.Prepare: sender: %x, coinbase: %x, dest: %x, %x, %v, %v\n", sdb.blockNum, sdb.txIndex, sdb.version, sender, coinbase, dst, precompiles, list, rules)
 	}
 	sdb.eip8246 = rules.IsAmsterdam
+	sdb.eip161 = rules.IsEIP161Enabled()
+	sdb.isAura = rules.IsAura
 	if rules.IsBerlin {
 		// Clear out any leftover from previous executions
 		sdb.accessList.Reset()

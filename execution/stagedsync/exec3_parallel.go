@@ -2510,7 +2510,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 								return state.VersionInvalid
 							}
 							return state.VersionValid
-						}, be.tasks[tx].Task.Rules().IsEIP161Enabled(), false, "")
+						}, be.tasks[tx].Task.Rules().IsEIP161Enabled(), be.tasks[tx].Task.Rules().IsAura, false, "")
 					if validity == state.VersionValid {
 						return be.invalidBlockResult(fmt.Errorf("%w: could not apply tx %d:%d [%d:%v]: %w", rules.ErrInvalidBlock, be.blockNum, txVersion.TxIndex, txVersion.TxNum, task.TxHash(), execErr.OriginError)), nil
 					}
@@ -2720,7 +2720,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 
 				return vv
-			}, txTask.Rules().IsEIP161Enabled(), trace, tracePrefix)
+			}, txTask.Rules().IsEIP161Enabled(), txTask.Rules().IsAura, trace, tracePrefix)
 		be.versionMap.SetTrace(false)
 
 		if validity == state.VersionTooEarly {
@@ -3272,7 +3272,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 								return state.VersionValid
 							}
 							return state.VersionInvalid
-						}, execTask.Rules().IsEIP161Enabled(), false, "") != state.VersionValid {
+						}, execTask.Rules().IsEIP161Enabled(), execTask.Rules().IsAura, false, "") != state.VersionValid {
 					holdBack = append(holdBack, nextTx)
 					continue
 				}
