@@ -1941,8 +1941,8 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *visibleFilesFor
 	// re-shortening (flag off, or flag on below threshold) need neither and run in parallel.
 	comVals := r.domain[kv.CommitmentDomain].values
 	commitmentRefsEnabled := at.a.referencesInCommitmentBranches()
-	// With referenced commitment files present, concurrent dereference does random reads; keep the shared
-	// mmap at MADV_NORMAL during merge instead of a separate sequential view that would evict those pages.
+	// With referenced commitment files present, concurrent dereference does random reads; read through
+	// the shared mmap instead of a separate sequential view that would evict those pages.
 	seqReadahead := !at.commitmentVisibleFilesReferenced()
 	needCommitmentTransform := comVals.needMerge &&
 		commitmentMergeNeedsTransform(files.d[kv.CommitmentDomain], commitmentRefsEnabled, at.StepSize(), comVals.from, comVals.to)
