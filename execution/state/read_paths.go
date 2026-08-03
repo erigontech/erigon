@@ -237,10 +237,15 @@ type readPathResult struct {
 	mapSelfDestructVal   bool
 	mapCreateContractVal bool
 	mapCodeVal           []byte
-	mapCodeKnownHash     accounts.CodeHash // must be assigned with mapCodeVal; NilCodeHash when the source stored bytes only
 	mapCodeHashVal       accounts.CodeHash
 	mapCodeSizeVal       int
 	mapStorageVal        uint256.Int
+
+	// hashOfMapCodeVal is the hash the CodePath source stored next to the bytes
+	// now in mapCodeVal, not a path value like the map*Val fields above. Assign
+	// it wherever mapCodeVal is assigned: NilCodeHash means that source kept
+	// bytes only and the caller has to resolve the hash itself.
+	hashOfMapCodeVal accounts.CodeHash
 
 	// hdr is the skeleton header for the wrapper to record (with its typed
 	// value) via the typed recordX path when recordVR is true.
@@ -415,7 +420,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	case CodePath:
 		var mc accounts.Code
 		mc, res, _ = s.versionMap.ReadCode(addr, s.txIndex)
-		r.mapCodeVal, r.mapCodeKnownHash = mc.Bytes, mc.Hash
+		r.mapCodeVal, r.hashOfMapCodeVal = mc.Bytes, mc.Hash
 	case CodeHashPath:
 		r.mapCodeHashVal, res, _ = s.versionMap.ReadCodeHash(addr, s.txIndex)
 	case CodeSizePath:
@@ -705,7 +710,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 						r.version = UnknownVersion
 						return
 					}
-					r.mapCodeVal, r.mapCodeKnownHash = code, accounts.NilCodeHash
+					r.mapCodeVal, r.hashOfMapCodeVal = code, accounts.NilCodeHash
 				} else {
 					size, err := s.committedCodeSizeDirect(addr)
 					if err != nil {
@@ -1130,7 +1135,7 @@ func refreshCode(s *IntraBlockState, addr accounts.Address) (refreshedCode, Read
 		tr, _ := s.versionedReads.GetCode(addr)
 		return refreshedCode{Bytes: tr.Val}, r.source, r.version, nil
 	case outcomeMapDone:
-		return refreshedCode{r.mapCodeVal, r.mapCodeKnownHash}, r.source, r.version, nil
+		return refreshedCode{r.mapCodeVal, r.hashOfMapCodeVal}, r.source, r.version, nil
 	case outcomeReturnZero, outcomeReturnDefault:
 		return refreshedCode{}, r.source, r.version, nil
 	default:
