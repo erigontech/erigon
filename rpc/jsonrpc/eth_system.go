@@ -497,8 +497,13 @@ type GasPriceOracleBackend struct {
 	baseApi *BaseAPI
 }
 
+// NewGasPriceOracleBackend pins one block-overlay read view for every read the backend
+// does, so the head it resolves and the per-block data it samples come from the same view
+// (see rpchelper.GetBlockNumber). Without it the head would be resolved on the overlay by
+// the callers that wrap their own tx while the block data came from the committed view,
+// leaving the oracle a block or more behind the head the node publishes.
 func NewGasPriceOracleBackend(db kv.TemporalRoDB, tx kv.TemporalTx, baseApi *BaseAPI) *GasPriceOracleBackend {
-	return &GasPriceOracleBackend{db: db, tx: tx, baseApi: baseApi}
+	return &GasPriceOracleBackend{db: db, tx: baseApi.filters.WithTemporalOverlay(tx), baseApi: baseApi}
 }
 
 func (b *GasPriceOracleBackend) Fork(ctx context.Context) (gasprice.OracleBackend, func(), error) {
@@ -509,7 +514,9 @@ func (b *GasPriceOracleBackend) Fork(ctx context.Context) (gasprice.OracleBacken
 	if err != nil {
 		return nil, nil, err
 	}
-	return &GasPriceOracleBackend{db: b.db, tx: tx, baseApi: b.baseApi},
+	// Overlay-wrap the forked tx too: the per-block sampling of SuggestTipCap and
+	// FeeHistory runs on this one, not on b.tx.
+	return NewGasPriceOracleBackend(b.db, tx, b.baseApi),
 		func() { tx.Rollback() },
 		nil
 }
