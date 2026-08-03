@@ -44,7 +44,7 @@ kill -SIGUSR1 $(pidof erigon)
 # Stack traces are printed to the erigon log / stdout
 ```
 
-If the node is wedged and you are ready to lose the running instance, `kill -6 $(pidof erigon)` (`SIGABRT`) dumps the stacks and terminates the process in one step.
+If the node is wedged and you are ready to lose it, `kill -6 <pid>` (`SIGABRT`) dumps the stacks and terminates that process in one step. Pass an explicit PID rather than `$(pidof erigon)`: `SIGABRT` is destructive, and on a host running more than one instance `pidof` would abort all of them.
 
 **Capture a CPU or heap profile via pprof** (requires `--pprof` flag at startup — default address `localhost:6060`; override with `--pprof.addr` and `--pprof.port`):
 
@@ -72,7 +72,7 @@ Hetzner applies a stateless firewall at the network edge. Ensure the following p
 
 Without these, the node may appear to have peers (via the cloud dashboard) but will suffer poor block propagation. Configure the firewall in the Hetzner Cloud Console under **Firewalls** or via `hcloud firewall`.
 
-An Erigon node should also never attempt to peer with IPv4 ranges that are reserved for special use. Blocking them is good practice on any host and worth doing explicitly on Hetzner, whose stricter filtering is what prompted this note. The authoritative list is the [IANA IPv4 Special-Purpose Address Registry](https://www.iana.org/assignments/iana-ipv4-special-registry/iana-ipv4-special-registry.xhtml) ([RFC 6890](https://datatracker.ietf.org/doc/html/rfc6890)); the ranges below are the ones commonly blocked for an Ethereum node (`100.64.0.0/10` comes from [RFC 6598](https://datatracker.ietf.org/doc/html/rfc6598), and `192.88.99.0/24` has since been deprecated by [RFC 7526](https://datatracker.ietf.org/doc/html/rfc7526) — blocking it remains correct):
+A public-facing Erigon node should also not attempt to peer with IPv4 ranges that are reserved for special use. Blocking them is worth doing explicitly on Hetzner, whose abuse and netscan detection flags outbound dials to reserved ranges — that is what prompted this note, rather than their firewall filtering the traffic. Do not apply this to a node using `--caplin.local-discovery`, which deliberately peers over private IPs. The authoritative list is the [IANA IPv4 Special-Purpose Address Registry](https://www.iana.org/assignments/iana-ipv4-special-registry/iana-ipv4-special-registry.xhtml) ([RFC 6890](https://datatracker.ietf.org/doc/html/rfc6890)); the ranges below are the ones commonly blocked for an Ethereum node (`100.64.0.0/10` comes from [RFC 6598](https://datatracker.ietf.org/doc/html/rfc6598), and `192.88.99.0/24` has since been deprecated by [RFC 7526](https://datatracker.ietf.org/doc/html/rfc7526) — blocking it remains correct):
 
 ```text
 0.0.0.0/8             "This" Network                                RFC 1122, Section 3.2.1.3
