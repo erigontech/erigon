@@ -925,7 +925,7 @@ func TestDomainRoTx_CursorParentCheck(t *testing.T) {
 	defer writer.Close()
 
 	val := []byte("value1")
-	writer.addValue([]byte("key1"), val, kv.Step(1/d.stepSize))
+	require.NoError(writer.addValue([]byte("key1"), val, kv.Step(1/d.stepSize)))
 
 	err = writer.Flush(ctx, tx)
 	require.NoError(err)
@@ -1768,7 +1768,7 @@ func generateRandomKey(r *rndGen, size uint64) string {
 
 func generateRandomKeyBytes(r *rndGen, size uint64) []byte {
 	key := make([]byte, size)
-	r.Read(key)
+	_, _ = r.Read(key)
 	return key
 }
 
@@ -1782,7 +1782,7 @@ func generateUpdates(r *rndGen, totalTx, keyTxsLimit uint64) []upd {
 
 		if r.Rand.IntN(100) < 85 || i == keyTxsLimit-1 { // 15% rate for delete, last tx is never a deletion
 			up.value = make([]byte, 10)
-			r.Read(up.value)
+			_, _ = r.Read(up.value)
 		}
 
 		updates = append(updates, up)
@@ -1838,7 +1838,7 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 			if i > 0 {
 				pv = updates[i-1].value
 			}
-			writer.PutWithPrev([]byte(key), updates[i].value, updates[i].txNum, pv)
+			require.NoError(writer.PutWithPrev([]byte(key), updates[i].value, updates[i].txNum, pv))
 		}
 	}
 
@@ -2027,7 +2027,7 @@ func TestDomain_CanScanPruneAfterAggregation(t *testing.T) {
 	for key, updates := range data {
 		p := []byte{}
 		for i := range updates {
-			writer.PutWithPrev([]byte(key), updates[i].value, updates[i].txNum, p)
+			require.NoError(t, writer.PutWithPrev([]byte(key), updates[i].value, updates[i].txNum, p))
 			p = bytes.Clone(updates[i].value)
 		}
 	}
@@ -2128,7 +2128,7 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 	for key, updates := range data {
 		p := []byte{}
 		for i := range updates {
-			writer.PutWithPrev([]byte(key), updates[i].value, updates[i].txNum, p)
+			require.NoError(t, writer.PutWithPrev([]byte(key), updates[i].value, updates[i].txNum, p))
 			p = bytes.Clone(updates[i].value)
 		}
 	}
@@ -2560,7 +2560,7 @@ func TestDomain_Unwind(t *testing.T) {
 		currTx = unwindTo
 		require.NoError(t, err)
 		domainRoTx.Close()
-		tx.Commit()
+		require.NoError(t, tx.Commit())
 
 		t.Log("=====write expected data===== \n\n")
 		tmpDb, expected := testDbAndDomain(t, log.New())
@@ -2914,7 +2914,7 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 	for key, updates := range data {
 		p := []byte{}
 		for i := range updates {
-			writer.PutWithPrev([]byte(key), updates[i].value, updates[i].txNum, p)
+			require.NoError(t, writer.PutWithPrev([]byte(key), updates[i].value, updates[i].txNum, p))
 			p = bytes.Clone(updates[i].value)
 		}
 	}

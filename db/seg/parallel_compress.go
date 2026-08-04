@@ -396,8 +396,8 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 		return fmt.Errorf("create intermediate file: %w", err)
 	}
 	intermediatePath := intermediateFile.Name()
-	defer dir.RemoveFile(intermediatePath)
-	defer intermediateFile.Close()
+	defer dir.RemoveFile(intermediatePath) //nolint:errcheck
+	defer intermediateFile.Close()         //nolint:errcheck
 	intermediateW := bufiopool.Writer(intermediateFile)
 	defer bufiopool.PutWriter(intermediateW)
 
@@ -1179,7 +1179,7 @@ func PersistDictionary(fileName string, db *DictionaryBuilder) error {
 	}
 	w := bufiopool.Writer(df)
 	defer bufiopool.PutWriter(w)
-	db.ForEach(func(score uint64, word []byte) { fmt.Fprintf(w, "%d %x\n", score, word) })
+	db.ForEach(func(score uint64, word []byte) { fmt.Fprintf(w, "%d %x\n", score, word) }) //nolint:errcheck
 	if err := w.Flush(); err != nil {
 		return err
 	}
@@ -1196,7 +1196,7 @@ func ReadSimpleFile(fileName string, walker func(v []byte) error) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 	r := bufiopool.Reader(f)
 	defer bufiopool.PutReader(r)
 	buf := make([]byte, 4096)

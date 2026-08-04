@@ -860,8 +860,11 @@ func (ht *HistoryTraceKeyFiles) Next() (uint64, []byte, error) {
 	default:
 	}
 
-	defer ht.advance()
-	return ht.txNum, ht.v, nil
+	txNum, v := ht.txNum, ht.v
+	if err := ht.advance(); err != nil {
+		return 0, nil, err
+	}
+	return txNum, v, nil
 }
 
 type HistoryTraceKeyDB struct {
