@@ -387,8 +387,8 @@ func (st *TxnExecutor) preCheck(gasBailout bool) (fees upfrontTxnFees, intrinsic
 		}
 	}
 
-	// Match geth's EIP-7702 prerequisite precedence: after fee caps, before
-	// affordability and intrinsic gas.
+	// Match geth's EIP-7702 prerequisite precedence: after the fee caps, before
+	// the balance and intrinsic-gas checks.
 	if err := validateSetCodePrerequisites(st.msg.Authorizations(), st.msg.To().IsNil(), rules.IsPrague); err != nil {
 		return fees, intrinsicGas, err
 	}
@@ -593,8 +593,9 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 		}
 	}
-	// First check this message satisfies all consensus rules before
-	// applying the message, in the order they run:
+	// The main rules this message must satisfy, in the order preCheck runs
+	// them. The fork-gated checks (EIP-3607, 1559 and 4844 fee caps, EIP-7702
+	// prerequisites, EIP-3860 initcode size) interleave with these:
 	//
 	// 1. the nonce of the message caller is correct
 	// 2. the amount of gas required is available in the block
