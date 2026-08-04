@@ -41,7 +41,12 @@ func decodeObjectSSZStrict(obj SizedObjectSSZ, buf []byte, version int) error {
 	return obj.DecodeSSZ(buf, version)
 }
 
+// unmarshalSSZ decodes the fixed section first, recording offsets for
+// variable-size fields, then decodes each variable field from its offset range.
+// Strict mode also propagates strict decoding to nested values.
 func unmarshalSSZ(buf []byte, version int, strict bool, schema ...any) (err error) {
+	// The schema is runtime-typed, so convert unexpected schema or bounds
+	// panics into decode errors.
 	defer func() {
 		if err2 := recover(); err2 != nil {
 			err = fmt.Errorf("panic while decoding: %v", err2)
@@ -98,10 +103,13 @@ func unmarshalSSZ(buf []byte, version int, strict bool, schema ...any) (err erro
 		}
 	}
 
+	// Canonical SSZ has no gap between the fixed and variable sections.
 	if strict && len(offsets) != 0 && offsets[0] != position {
 		return ssz.ErrBadOffset
 	}
 
+	// Consecutive offsets delimit each variable-size field; the final field
+	// extends to the end of the container.
 	for i, obj := range dynamicObjs {
 		endOffset := len(buf)
 		if i != len(dynamicObjs)-1 {

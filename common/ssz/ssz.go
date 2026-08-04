@@ -82,10 +82,14 @@ func OffsetSSZ(x uint32) []byte {
 	return b
 }
 
+// EncodeOffset writes offset as a four-byte little-endian SSZ offset.
+// buf must contain at least four bytes.
 func EncodeOffset(buf []byte, offset uint32) {
 	binary.LittleEndian.PutUint32(buf, offset)
 }
 
+// DecodeOffset reads a four-byte little-endian SSZ offset.
+// x must contain at least four bytes.
 func DecodeOffset(x []byte) uint32 {
 	return binary.LittleEndian.Uint32(x)
 }
@@ -110,6 +114,8 @@ func decodeDynamicList[T Unmarshaler](bytes []byte, start, end uint32, _max uint
 	}
 	buf := bytes[start:end]
 	var elementsNum, currentOffset uint32
+	// In a canonical variable-element list, the first offset is the byte length
+	// of the offset table; dividing it by four yields the element count.
 	if strict && len(buf) != 0 {
 		if len(buf) < 4 {
 			return nil, ErrLowBufferSize
@@ -128,6 +134,8 @@ func decodeDynamicList[T Unmarshaler](bytes []byte, start, end uint32, _max uint
 		return nil, errors.Join(ErrTooBigList, fmt.Errorf("DecodeDynamicList: expected %d elements, got %d", _max, elementsNum))
 	}
 	objs := make([]T, elementsNum)
+	// Equal consecutive offsets are valid because variable-size elements may
+	// have empty encodings.
 	for i := range objs {
 		endOffset := uint32(len(buf))
 		if i != len(objs)-1 {

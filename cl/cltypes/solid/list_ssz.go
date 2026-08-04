@@ -35,10 +35,12 @@ type ListSSZ[T EncodableHashableSSZ] struct {
 	list []T
 
 	limit int
-	// static is true when elements have fixed-size encodings.
+	// static means elements have fixed-size encodings and bytesPerElement is
+	// valid. The list itself remains variable-size.
 	static          bool
 	bytesPerElement int
-	root            common.Hash
+	// root caches the hash-tree root computed by HashSSZ.
+	root common.Hash
 }
 
 func NewDynamicListSSZ[T EncodableHashableSSZ](limit int) *ListSSZ[T] {
