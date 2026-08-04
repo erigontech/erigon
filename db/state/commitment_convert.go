@@ -968,11 +968,11 @@ func writeRestoreManifestAtomic(path string, entries []string) error {
 		return err
 	}
 	if _, err := f.Write([]byte(strings.Join(entries, "\n"))); err != nil {
-		f.Close()
+		_ = f.Close()
 		return err
 	}
 	if err := f.Sync(); err != nil {
-		f.Close()
+		_ = f.Close()
 		return err
 	}
 	if err := f.Close(); err != nil {
@@ -998,7 +998,7 @@ func fsyncDir(path string) error {
 		return err
 	}
 	if err := d.Sync(); err != nil {
-		d.Close()
+		_ = d.Close()
 		return err
 	}
 	return d.Close()

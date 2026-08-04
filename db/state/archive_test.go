@@ -147,11 +147,11 @@ func TestArchiveWriter(t *testing.T) {
 func TestPrunableProgress(t *testing.T) {
 	t.Parallel()
 	_, tx := memdb.NewTestTx(t)
-	SaveExecV3PrunableProgress(tx, []byte("test"), 100)
+	require.NoError(t, SaveExecV3PrunableProgress(tx, []byte("test"), 100))
 	s, err := GetExecV3PrunableProgress(tx, []byte("test"))
 	require.NoError(t, err)
 	require.EqualValues(t, 100, s)
-	SaveExecV3PrunableProgress(tx, []byte("test"), 120)
+	require.NoError(t, SaveExecV3PrunableProgress(tx, []byte("test"), 120))
 	s, err = GetExecV3PrunableProgress(tx, []byte("test"))
 	require.NoError(t, err)
 	require.EqualValues(t, 120, s)

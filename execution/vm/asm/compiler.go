@@ -181,8 +181,9 @@ func (c *Compiler) compileElement(element token) error {
 		rvalue := c.next()
 		switch rvalue.typ {
 		case number:
-			// TODO figure out how to return the error properly
-			c.compileNumber(rvalue)
+			if _, err := c.compileNumber(rvalue); err != nil {
+				return err
+			}
 		case stringValue:
 			// strings are quoted, remove them.
 			c.pushBin(rvalue.text[1 : len(rvalue.text)-2])
