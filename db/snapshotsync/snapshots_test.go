@@ -656,25 +656,31 @@ func TestRemoveOverlaps_CrossingTypeString(t *testing.T) {
 }
 
 func TestCanRetire(t *testing.T) {
-	require := require.New(t)
 	cases := []struct {
-		inFrom, inTo, outFrom, outTo uint64
-		can                          bool
+		inFrom, inTo, outFrom, outTo, retireStep uint64
+		can                                      bool
 	}{
-		{0, 1234, 0, 1000, true},
-		{1_000_000, 1_120_000, 1_000_000, 1_100_000, true},
-		{2_500_000, 4_100_000, 2_500_000, 2_600_000, true},
-		{2_500_000, 2_500_100, 2_500_000, 2_500_000, false},
-		{1_001_000, 2_000_000, 1_001_000, 1_002_000, true},
+		{0, 1234, 0, 1000, 0, true},
+		{1_000_000, 1_120_000, 1_000_000, 1_100_000, 0, true},
+		{2_500_000, 4_100_000, 2_500_000, 2_600_000, 0, true},
+		{2_500_000, 2_500_100, 2_500_000, 2_500_000, 0, false},
+		{1_001_000, 2_000_000, 1_001_000, 1_002_000, 0, true},
+		{0, 10, 0, 10, 10, true},
+		{0, 12, 0, 10, 10, true},
+		{0, 9, 0, 0, 10, false},
+		{10, 20, 10, 20, 10, true},
+		{10, 22, 10, 20, 10, true},
+		{10, 18, 10, 10, 10, false},
 	}
 	snCfg := snapcfg.KnownCfgOrDevnet(networkname.Mainnet)
 	for i, tc := range cases {
-		from, to, can := CanRetire(tc.inFrom, tc.inTo, snaptype.Unknown, snCfg)
-		require.Equal(int(tc.outFrom), int(from), i)
-		require.Equal(int(tc.outTo), int(to), i)
-		require.Equal(tc.can, can, tc.inFrom, tc.inTo, i)
+		from, to, can := CanRetire(tc.inFrom, tc.inTo, snaptype.Unknown, snCfg, tc.retireStep)
+		require.Equal(t, int(tc.outFrom), int(from), i)
+		require.Equal(t, int(tc.outTo), int(to), i)
+		require.Equal(t, tc.can, can, "CanRetire(%d, %d) case %d", tc.inFrom, tc.inTo, i)
 	}
 }
+
 func TestOpenAllSnapshot(t *testing.T) {
 	logger := log.New()
 	baseDir, require := t.TempDir(), require.New(t)
