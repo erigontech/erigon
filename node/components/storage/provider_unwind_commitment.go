@@ -191,7 +191,7 @@ func (p *Provider) ensureCommitmentAtBlockApply(ctx context.Context, tx kv.Tempo
 	if result.branches != nil {
 		result.regenBranches = etl.NewCollectorWithAllocator(
 			"mode-C commitment v4 regen",
-			p.snapDir,
+			p.snapTmpDir,
 			etl.SmallSortableBuffers,
 			p.logger,
 		)
