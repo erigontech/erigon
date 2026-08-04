@@ -25,7 +25,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"os"
+	"slices"
 	"sync"
 
 	"github.com/c2h5oh/datasize"
@@ -281,7 +283,9 @@ func runStateTest(ctx *cli.Command, cfg vm.Config, traceOut *traceSink, env *sta
 	results := make([]testResult, 0, len(stateTests))
 	db := env.db
 
-	for key := range stateTests {
+	// Sorted, not map order: a differential-fuzzing consumer needs the same
+	// sequence of results for the same file on every run.
+	for _, key := range slices.Sorted(maps.Keys(stateTests)) {
 		if !filter.includeCase(fname, key) {
 			continue
 		}
@@ -328,6 +332,7 @@ func runStateTest(ctx *cli.Command, cfg vm.Config, traceOut *traceSink, env *sta
 				}
 			}()
 
+			traceOut.flush()
 			results = append(results, *result)
 		}
 	}
