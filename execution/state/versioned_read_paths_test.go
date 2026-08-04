@@ -77,6 +77,35 @@ func TestVersionedRead_B_DeletedStateObjectReturnsDefault(t *testing.T) {
 	assert.True(t, bal.IsZero(), "balance after selfdestruct is zero")
 }
 
+// B: a deleted stateObject wins over a slot this tx already read. The read-once
+// fast path must not serve the pre-destruct value.
+func TestVersionedRead_B_DeletedStateObjectBeatsWarmStorageRead(t *testing.T) {
+	t.Parallel()
+	_, tx, domains := NewTestRwTx(t)
+	mvhm := NewVersionMap(nil)
+	reader := NewReaderV3(domains.AsGetter(tx))
+	ibs := NewWithVersionMap(reader, mvhm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 5)
+
+	addr := accounts.InternAddress([20]byte{0xb2})
+	key := accounts.InternKey([32]byte{0x01})
+	mvhm.WriteStorage(addr, key, Version{TxIndex: 1, Incarnation: 0}, *uint256.NewInt(99), true)
+
+	v, err := ibs.GetState(addr, key)
+	require.NoError(t, err)
+	require.EqualValues(t, 99, v.Uint64(), "first read resolves from the version map")
+
+	// A prior tx's selfdestruct becomes visible: getStateObject parks a deleted
+	// resident object for the address on the materialized path.
+	mvhm.WriteSelfDestruct(addr, Version{TxIndex: 2, Incarnation: 0}, true, true)
+	ibs.setStateObject(addr, &stateObject{db: ibs, address: addr, selfdestructed: true, deleted: true})
+
+	v, err = ibs.GetState(addr, key)
+	require.NoError(t, err)
+	assert.True(t, v.IsZero(), "slot of a destructed account reads as zero, not as the recorded value")
+}
+
 // ------------------------------------------------------------------
 // Section C: SelfDestruct active in versionMap
 // ------------------------------------------------------------------
