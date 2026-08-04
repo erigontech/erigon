@@ -858,6 +858,25 @@ func (sd *SharedDomains) SetStateCache(stateCache *cache.StateCache) {
 	sd.cacheApplier = stateCache.Applier()
 }
 
+// GuardAggregatorForCache forbids visibility lowering on db's aggregator when
+// sc is a fill-enabled StateCache: fill admission relies on view frontiers
+// never decreasing. This is the one place that binds the invariant — call it
+// wherever a fill-enabled cache is wired over a DB. Duck-typed so the storage
+// layer need not know the cache type (and vice versa); a DB without an
+// aggregator is a no-op.
+func GuardAggregatorForCache(db any, sc *cache.StateCache) {
+	if sc == nil || !sc.FillsEnabled() {
+		return
+	}
+	h, ok := db.(interface{ Agg() any })
+	if !ok {
+		return
+	}
+	if f, ok := h.Agg().(interface{ ForbidVisibilityLowering() }); ok {
+		f.ForbidVisibilityLowering()
+	}
+}
+
 // SetCodeStore sets the persistent codehash-keyed code cache.
 func (sd *SharedDomains) SetCodeStore(codeStore *cache.CodeStore) {
 	sd.codeStore = codeStore

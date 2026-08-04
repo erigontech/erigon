@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/rawdb"
-	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/builder"
@@ -262,10 +261,7 @@ func NewExecModule(
 	if domainCache == nil {
 		domainCache = cache.NewDefaultStateCache()
 	}
-	if domainCache.FillsEnabled() {
-		// Fill admission relies on view frontiers never decreasing.
-		db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator).ForbidVisibilityLowering()
-	}
+	execctx.GuardAggregatorForCache(db, domainCache)
 	var codeStore *cache.CodeStore
 	if dbg.UseCodeStore {
 		codeStore = cache.NewCodeStore(cache.DefaultCodeStoreMemBytes, cache.DefaultCodeStoreTableBytes)
