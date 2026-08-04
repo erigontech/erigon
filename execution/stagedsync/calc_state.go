@@ -388,11 +388,10 @@ func (cs *calcState) ApplyEIP161Removal(emptyRemoval, isAura bool) {
 // always include the full current state (all fields) so the trie sees
 // complete values.
 func (cs *calcState) FlushToUpdates(updates *commitment.Updates) {
-	cs.flushToUpdates(updates, 0)
+	cs.flushToUpdates(updates)
 }
 
-func (cs *calcState) flushToUpdates(updates *commitment.Updates, blockNum uint64) {
-	dumpTI := commitment.TrieInputDumpActive(blockNum)
+func (cs *calcState) flushToUpdates(updates *commitment.Updates) {
 	for addr, acc := range cs.accounts {
 		if !acc.dirty {
 			continue
@@ -433,10 +432,6 @@ func (cs *calcState) flushToUpdates(updates *commitment.Updates, blockNum uint64
 		if cs.sdSubtree[addr] {
 			u.DeleteStorageSubtree = true
 		}
-		if dumpTI {
-			commitment.DumpTrieInputLine(blockNum, fmt.Sprintf("A %x flags=%d nonce=%d bal=%s ch=%x delsub=%t",
-				address[:], u.Flags, u.Nonce, u.Balance.String(), u.CodeHash[:], u.DeleteStorageSubtree))
-		}
 		updates.TouchPlainKeyDirect(key, &u)
 	}
 
@@ -458,9 +453,6 @@ func (cs *calcState) flushToUpdates(updates *commitment.Updates, blockNum uint64
 				u.Flags = commitment.StorageUpdate
 				u.StorageLen = int8(len(vBytes))
 				copy(u.Storage[:], vBytes)
-			}
-			if dumpTI {
-				commitment.DumpTrieInputLine(blockNum, fmt.Sprintf("S %x flags=%d val=%x", composite, u.Flags, vBytes))
 			}
 			updates.TouchPlainKeyDirect(string(composite), &u)
 		}

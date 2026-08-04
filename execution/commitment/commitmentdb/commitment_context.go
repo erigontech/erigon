@@ -434,12 +434,6 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	if sdc.pendingUpdate != nil {
 		panic("sdCtx.ComputeCommitment called directly with non-nil pendingUpdate; use SharedDomains.ComputeCommitment wrapper instead")
 	}
-	commitment.TrieInputDumpBlock.Store(blockNum)
-	if commitment.TrieInputDumpActive(blockNum) {
-		sdc.updates.ForEachPlainKey(func(pk []byte) {
-			commitment.DumpTrieInputLine(blockNum, fmt.Sprintf("K %x", pk))
-		})
-	}
 	if dbg.KVReadLevelledMetrics {
 		mxCommitmentRunning.Inc()
 		defer mxCommitmentRunning.Dec()
