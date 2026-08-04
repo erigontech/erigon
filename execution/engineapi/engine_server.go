@@ -482,11 +482,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	// inside InsertBlocks doesn't re-encode every tx
 	// via rlp.EncodeToBytes. Both slices reference the same underlying
 	// byte buffers from req.Transactions.
-	block := types.NewBlockFromStorageWithBinaryTxs(blockHash, &header, transactions, txs, nil /* uncles */, withdrawals)
-	// Carry the payload's BAL on the block so execution consumes it from the
-	// in-memory payload; InsertBlocks still stores it in the overlay (flushed at
-	// commit) as secondary storage.
-	block.SetBlockAccessList(blockAccessListBytes)
+	block := types.NewBlockFromStorageWithBinaryTxs(blockHash, &header, transactions, txs, nil /* uncles */, withdrawals, blockAccessListBytes)
 	payloadStatus, err := s.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes, blockAccessListBytes)
 	if err != nil {
 		if errors.Is(err, rules.ErrInvalidBlock) {

@@ -327,7 +327,7 @@ func makeAssembledBlock(blockHash, parentHash, stateRoot common.Hash, blockNumbe
 	h.BlobGasUsed = &blobGasUsed
 	h.ExcessBlobGas = &excessBlobGas
 
-	blk := types.NewBlockFromStorage(blockHash, h, nil, nil, []*types.Withdrawal{})
+	blk := types.NewBlockFromStorage(blockHash, h, nil, nil, []*types.Withdrawal{}, nil)
 	return &types.BlockWithReceipts{
 		Block:    blk,
 		Requests: make(types.FlatRequests, 0), // empty but non-nil: valid for Prague+

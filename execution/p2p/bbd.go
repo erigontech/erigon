@@ -584,7 +584,7 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 						}
 						break
 					}
-					blockBatch = append(blockBatch, types.NewBlockFromNetwork(header, body))
+					blockBatch = append(blockBatch, types.NewBlockFromNetwork(header, body, nil))
 				}
 				if len(blockBatch) == len(headerBatch) {
 					if bbd.balFetcher != nil {

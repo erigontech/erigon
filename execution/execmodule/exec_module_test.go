@@ -2437,7 +2437,7 @@ func runBatchedFCUBadBlockRecovery(t *testing.T, bgCommit bool) {
 		Transactions: chainPack.Blocks[5].Transactions(),
 		Uncles:       chainPack.Blocks[5].Uncles(),
 		Withdrawals:  chainPack.Blocks[5].Withdrawals(),
-	})
+	}, chainPack.Blocks[5].BlockAccessList())
 
 	badRes, err := m.InsertBlocks(ctx, []*types.Block{badBlock6})
 	require.NoError(t, err)

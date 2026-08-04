@@ -813,7 +813,7 @@ func (r RawBlock) AsBlock() (*Block, error) {
 		}
 	}
 	b.transactions = txs
-	b.blockAccessList = r.BlockAccessList
+	b.blockAccessList = bytes.Clone(r.BlockAccessList)
 
 	return b, nil
 }
@@ -1157,25 +1157,26 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 }
 
 // NewBlockForAsembling - creating new block - which allow mutation of fileds. Use it for block-assembly
-func NewBlockForAsembling(header *Header, txs []Transaction, uncles []*Header, receipts []*Receipt, withdrawals []*Withdrawal) *Block {
+func NewBlockForAsembling(header *Header, txs []Transaction, uncles []*Header, receipts []*Receipt, withdrawals []*Withdrawal, blockAccessList []byte) *Block {
 	b := NewBlock(header, txs, uncles, receipts, withdrawals)
+	b.blockAccessList = bytes.Clone(blockAccessList)
 	b.header.mutable = true
 	return b
 }
 
 // NewBlockFromStorage like NewBlock but used to create Block object when read it from DB
 // in this case no reason to copy parts, or re-calculate headers fields - they are all stored in DB
-func NewBlockFromStorage(hash common.Hash, header *Header, txs []Transaction, uncles []*Header, withdrawals []*Withdrawal) *Block {
+func NewBlockFromStorage(hash common.Hash, header *Header, txs []Transaction, uncles []*Header, withdrawals []*Withdrawal, blockAccessList []byte) *Block {
 	header.hash.Store(&hash)
-	b := &Block{header: header, transactions: txs, uncles: uncles, withdrawals: withdrawals}
+	b := &Block{header: header, transactions: txs, uncles: uncles, withdrawals: withdrawals, blockAccessList: bytes.Clone(blockAccessList)}
 	return b
 }
 
 // NewBlockFromStorageWithBinaryTxs is NewBlockFromStorage with a binaryTxs cache
 // (its length must match txs) that lets RawBody() skip re-encoding the transactions.
-func NewBlockFromStorageWithBinaryTxs(hash common.Hash, header *Header, txs []Transaction, binaryTxs BinaryTransactions, uncles []*Header, withdrawals []*Withdrawal) *Block {
+func NewBlockFromStorageWithBinaryTxs(hash common.Hash, header *Header, txs []Transaction, binaryTxs BinaryTransactions, uncles []*Header, withdrawals []*Withdrawal, blockAccessList []byte) *Block {
 	header.hash.Store(&hash)
-	b := &Block{header: header, transactions: txs, binaryTransactions: binaryTxs, uncles: uncles, withdrawals: withdrawals}
+	b := &Block{header: header, transactions: txs, binaryTransactions: binaryTxs, uncles: uncles, withdrawals: withdrawals, blockAccessList: bytes.Clone(blockAccessList)}
 	return b
 }
 
@@ -1188,12 +1189,13 @@ func NewBlockWithHeader(header *Header) *Block {
 
 // NewBlockFromNetwork like NewBlock but used to create Block object when assembled from devp2p network messages
 // when there is no reason to copy parts, or re-calculate headers fields.
-func NewBlockFromNetwork(header *Header, body *Body) *Block {
+func NewBlockFromNetwork(header *Header, body *Body, blockAccessList []byte) *Block {
 	b := &Block{
-		header:       header,
-		transactions: body.Transactions,
-		uncles:       body.Uncles,
-		withdrawals:  body.Withdrawals,
+		header:          header,
+		transactions:    body.Transactions,
+		uncles:          body.Uncles,
+		withdrawals:     body.Withdrawals,
+		blockAccessList: bytes.Clone(blockAccessList),
 	}
 	return b
 }
@@ -1396,10 +1398,6 @@ func (b *Block) BlockAccessListHash() *common.Hash   { return b.header.BlockAcce
 // BlockAccessList returns the RLP-encoded EIP-7928 BAL sidecar carried with the
 // payload (nil when absent). It is not part of the block's RLP encoding or hash.
 func (b *Block) BlockAccessList() []byte { return b.blockAccessList }
-
-// SetBlockAccessList attaches the RLP-encoded BAL sidecar to the block, copying
-// the input so a transaction-owned or later-mutated source cannot alias it.
-func (b *Block) SetBlockAccessList(bal []byte) { b.blockAccessList = bytes.Clone(bal) }
 
 // Header returns a deep-copy of the entire block header using CopyHeader()
 func (b *Block) Header() *Header       { return CopyHeader(b.header) }
