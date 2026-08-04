@@ -116,9 +116,9 @@ func newDomainCacheBytes(capacityBytes datasize.ByteSize, avgBytes uint32, mode 
 }
 
 // NewDefaultStateCache creates a new StateCache with the production byte budgets
-// (Account 1GB, Storage 150MB, Code 512MB, Addr 16MB). Test/CLI harnesses that
-// build many short-lived ExecModules pass an explicit small cache instead — via
-// ExecModuleTester, or via ethconfig.Config.StateCacheBudget for the eth.New path.
+// (Account 1GB, Storage 150MB, Code 512MB, Addr 16MB). Harnesses that build
+// many short-lived ExecModules set a small ethconfig.Config.StateCacheBudget
+// instead.
 func NewDefaultStateCache() *StateCache {
 	return NewStateCache(
 		DefaultAccountCacheBytes,

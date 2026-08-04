@@ -1614,6 +1614,10 @@ func (s *Ethereum) Stop() error {
 
 	s.chainDB.Close()
 
+	if s.execModule != nil {
+		s.execModule.Close()
+	}
+
 	if s.config.Downloader != nil {
 		_ = s.config.Downloader.CloseTorrentLogFile()
 	}
