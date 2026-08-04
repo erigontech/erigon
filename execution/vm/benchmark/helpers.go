@@ -57,8 +57,6 @@ func cancunConfig() *chain.Config {
 // benchmark, as staged sync keeps one per worker: building it per iteration
 // costs more than the cheap benchmarks measure and throws away the caches it
 // interns into.
-// State runs the parallel-execution path: the stateObject cache is off and
-// reads resolve from the version map, as staged sync does.
 func benchConfig(b *testing.B, gasLimit uint64) *vm.EVM {
 	b.Helper()
 	return newBenchEnv(b, gasLimit, true)

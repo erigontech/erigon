@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/tests/testutil"
@@ -59,6 +60,15 @@ var stateTestCommand = cli.Command{
 		&DisableStorageFlag,
 		&DisableReturnDataFlag,
 	},
+}
+
+func newStateTestSharedDomains(db kv.TemporalRoDB, tx kv.TemporalTx) (*execctx.SharedDomains, error) {
+	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	if err != nil {
+		return nil, err
+	}
+	sd.EnableParaTrieDB(db)
+	return sd, nil
 }
 
 func stateTestCmd(_ context.Context, ctx *cli.Command) error {
@@ -185,7 +195,7 @@ func runStateTest(ctx *cli.Command, cfg vm.Config, fname string, filter testFilt
 		return nil, err
 	}
 	var stateTests map[string]testutil.StateTest
-	if err = json.Unmarshal(src, &stateTests); err != nil {
+	if err := json.Unmarshal(src, &stateTests); err != nil {
 		return nil, err
 	}
 
@@ -224,7 +234,7 @@ func runStateTest(ctx *cli.Command, cfg vm.Config, fname string, filter testFilt
 				defer tx.Rollback()
 
 				// Per-subtest SD: closed without Flush so its writes never enter the branch cache.
-				sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+				sd, err := newStateTestSharedDomains(db, tx)
 				if err != nil {
 					result.Pass, result.Error = false, err.Error()
 					return

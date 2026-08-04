@@ -18,6 +18,7 @@ package state
 
 import (
 	"bytes"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -128,7 +129,9 @@ func TestAddLogKeepsCallerTxAndBlockHash(t *testing.T) {
 	require.Equal(t, common.HexToHash("0xad"), logs[0].BlockHash)
 }
 
-func TestRevertDropsOversizedLogBuffer(t *testing.T) {
+// Reverting hides an entry behind the slice length, so Reset has to scan the
+// whole buffer to see that this one is too big to keep.
+func TestResetDropsOversizedLogBufferHiddenByRevert(t *testing.T) {
 	t.Parallel()
 
 	ibs := New(nil)
@@ -145,6 +148,61 @@ func TestRevertDropsOversizedLogBuffer(t *testing.T) {
 	ibs.SetTxContext(2, 0)
 	lp := ibs.AllocLog(common.HexToAddress("0x2"), 0, 1)
 	require.LessOrEqual(t, cap(lp.Data), maxReusableLogDataCap)
+}
+
+// Entries survive Reset for reuse, so retention belongs to the IntraBlockState
+// and not to one block: a burst of logs at a fresh tx index every block adds a
+// high-water mark per block. Reset must hold the whole instance to the budget.
+func TestResetBoundsRetainedLogMemory(t *testing.T) {
+	t.Parallel()
+
+	const blocks, burst = 32, 1024
+	ibs := New(nil)
+	for blockNum := range blocks {
+		ibs.SetTxContext(uint64(blockNum+1), blockNum)
+		for range burst {
+			ibs.AddLog(&types.Log{Address: common.HexToAddress("0x1"), Data: make([]byte, 256)})
+		}
+		ibs.Reset()
+	}
+
+	entries, slotCap, dataBytes := retainedLogs(ibs)
+	require.LessOrEqual(t, entries, maxReusableLogEntries)
+	require.LessOrEqual(t, slotCap, maxReusableLogEntries)
+	require.LessOrEqual(t, dataBytes, maxReusableLogBytes)
+}
+
+// The budget must not touch a block that fits inside it.
+func TestResetKeepsLogsWithinBudget(t *testing.T) {
+	t.Parallel()
+
+	const burst = 512
+	ibs := New(nil)
+	ibs.SetTxContext(1, 0)
+	for range burst {
+		ibs.AddLog(&types.Log{Address: common.HexToAddress("0x1"), Data: make([]byte, 64)})
+	}
+	before := slices.Clone(ibs.logs[1])
+
+	ibs.Reset()
+	ibs.SetTxContext(2, 0)
+	for i := range burst {
+		require.Same(t, before[i], ibs.AllocLog(common.HexToAddress("0x2"), 0, 64), "entry %d", i)
+	}
+}
+
+func retainedLogs(ibs *IntraBlockState) (entries, slotCap, dataBytes int) {
+	for _, slot := range ibs.logs[:cap(ibs.logs)] {
+		slotCap += cap(slot)
+		for _, lp := range slot[:cap(slot)] {
+			if lp == nil {
+				continue
+			}
+			entries++
+			dataBytes += cap(lp.Data)
+		}
+	}
+	return entries, slotCap, dataBytes
 }
 
 func TestRevertKeepsNormalLogBufferForReuse(t *testing.T) {

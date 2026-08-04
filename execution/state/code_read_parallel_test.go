@@ -187,3 +187,43 @@ func TestPriorTxCodeWriteHashComesFromTheCell(t *testing.T) {
 	require.Equal(t, cellHash, so.code.Hash, "the cell's hash must win, not keccak(bytes)")
 	require.Equal(t, cellHash, so.data.CodeHash)
 }
+
+// TestPriorTxCodeWriteHashSurvivesReadSetHit pins the same authority once the
+// read is already recorded. A dirty address bypasses the read-once gate, so the
+// rebuild re-probes the version map and lands on the read-set hit instead.
+func TestPriorTxCodeWriteHashSurvivesReadSetHit(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xC0, 0xDE})
+	priorCode := []byte{0xef, 0x01, 0x00, 0x11, 0x22, 0x33}
+	cellHash := accounts.InternCodeHash(crypto.Keccak256Hash([]byte{0xBE, 0xEF}))
+
+	acc := accounts.NewAccount()
+	acc.Nonce = 1
+	acc.Incarnation = 1
+	acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash([]byte{0xFE, 0xED}))
+
+	vm := NewVersionMap(nil)
+	vm.WriteCode(addr, Version{TxIndex: 2, Incarnation: 0}, accounts.Code{Hash: cellHash, Bytes: priorCode}, true)
+
+	ibs := NewWithVersionMap(&codeReader{addr: addr, account: &acc, code: nil}, vm)
+	ibs.SetNoMaterialize(true)
+	ibs.SetTxContext(100, 7)
+	ibs.SetVersion(0)
+
+	got, err := ibs.GetCode(addr)
+	require.NoError(t, err)
+	require.Equal(t, priorCode, got)
+
+	tr, ok := ibs.versionedReads.GetCode(addr)
+	require.True(t, ok, "the first read must be recorded")
+	require.Equal(t, MapRead, tr.Source)
+
+	ibs.journal.dirties[addr] = 1
+
+	so, err := ibs.getStateObject(addr, false)
+	require.NoError(t, err)
+	require.NotNil(t, so)
+
+	require.Equal(t, priorCode, so.code.Bytes)
+	require.Equal(t, cellHash, so.code.Hash, "the cell's hash must win, not keccak(bytes)")
+	require.Equal(t, cellHash, so.data.CodeHash)
+}

@@ -169,16 +169,17 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 			originVal, origin, originOK := vm.ReadStorage(h.Address, h.Key, txIndex)
 			originValid := originOK && origin.Status() == MVReadResultDone &&
 				!(sdOk && sdTxIdx > origin.Version().TxIndex)
-			if originValid {
+			switch {
+			case originValid:
 				if writeVal.Eq(&originVal) {
 					continue // write-back same as prior TX's value — no-op
 				}
-			} else if sdOk {
+			case sdOk:
 				// SD'd earlier with no re-write since — baseline is 0.
 				if writeVal.IsZero() {
 					continue
 				}
-			} else if stateReader != nil {
+			case stateReader != nil:
 				// SD-then-revival: latest SelfDestructPath may be false (a
 				// later TxIdx revived), but the SD's per-slot DELETE cascade
 				// already fixed the baseline at zero for any post-SD write.

@@ -482,7 +482,8 @@ func RlpHashLogs(groups []Logs) common.Hash {
 	})
 }
 
-// Copy creates a deep copy of the Log.
+// Copy creates a deep copy of the Log. Nil Topics and Data become empty, which
+// is what keeps a LOG0 entry marshalling as `"topics":[]`.
 func (l *Log) Copy() *Log {
 	if l == nil {
 		return nil
