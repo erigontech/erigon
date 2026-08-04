@@ -62,9 +62,9 @@ type StateCache struct {
 	// against concurrent read-fills, which recheck freshness under RLock.
 	admissionMu sync.RWMutex
 	appliedEnd  [kv.DomainLen]uint64
-	// disableFills (STATE_CACHE_FILLS=false) turns off the admission-gated
-	// read fills, leaving applies as the only writer ("apply-only" mode) —
-	// an A/B lever and an operational kill switch.
+	// disableFills (STATE_CACHE_FILLS=false) turns off every reader fill
+	// (including the content-addressed ones), leaving applies as the only
+	// writer ("apply-only" mode) — an A/B lever and an operational kill switch.
 	disableFills bool
 }
 

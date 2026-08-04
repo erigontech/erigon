@@ -9,7 +9,7 @@ import (
 // external test package (which cannot import db/state to build a SharedDomains
 // internally without an import cycle).
 func (sd *SharedDomains) CodeHashForAddr(tx kv.TemporalTx, addr []byte, txNum uint64) []byte {
-	return sd.codeHashForAddr(tx, addr, txNum)
+	return sd.codeHashForAddr(tx, sd.cacheReader(), addr, txNum)
 }
 
 // SetStateCacheForTest attaches a cache unconditionally, bypassing the

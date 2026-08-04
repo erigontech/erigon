@@ -555,7 +555,7 @@ func (gt *temporalGetter) GetLatestContext(ctx context.Context, name kv.Domain, 
 // so the existing kv.TemporalGetter interface is unchanged. txNum is the
 // caller's read txNum, used to stamp any cache entry it populates.
 func (gt *temporalGetter) GetCodeSize(addr []byte, txNum uint64) (int, bool, error) {
-	return gt.sd.GetCodeSize(gt.tx, addr, txNum)
+	return gt.sd.getCodeSize(gt.tx, gt.view, addr, txNum)
 }
 
 // GetCode returns contract code via the content-addressed fast path (see
@@ -565,7 +565,7 @@ func (gt *temporalGetter) GetCodeSize(addr []byte, txNum uint64) (int, bool, err
 // (they resolve prevVal through GetLatest, which is addr-keyed). txNum is the
 // caller's read txNum, used to stamp any cache entry it populates.
 func (gt *temporalGetter) GetCode(addr []byte, txNum uint64) ([]byte, bool, error) {
-	return gt.sd.GetCode(gt.tx, addr, txNum)
+	return gt.sd.getCode(gt.tx, gt.view, addr, txNum)
 }
 
 func (gt *temporalGetter) HasPrefix(name kv.Domain, prefix []byte) (firstKey []byte, firstVal []byte, ok bool, err error) {
@@ -1364,6 +1364,10 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 // Returns (size, true, nil) on success and (0, false, nil) only when
 // CodeDomain itself confirms no code.
 func (sd *SharedDomains) GetCodeSize(tx kv.TemporalTx, addr []byte, txNum uint64) (int, bool, error) {
+	return sd.getCodeSize(tx, sd.cacheReader(), addr, txNum)
+}
+
+func (sd *SharedDomains) getCodeSize(tx kv.TemporalTx, view cache.ReadView, addr []byte, txNum uint64) (int, bool, error) {
 	if tx == nil {
 		return 0, false, errors.New("sd.GetCodeSize: unexpected nil tx")
 	}
@@ -1371,15 +1375,14 @@ func (sd *SharedDomains) GetCodeSize(tx kv.TemporalTx, addr []byte, txNum uint64
 	// Fast path: when we can resolve codeHash from the account cache AND
 	// the size is in the size cache, return without loading bytes.
 	if sd.stateCache != nil {
-		if codeHash := sd.codeHashForAddr(tx, addr, txNum); len(codeHash) > 0 {
-			reader := sd.cacheReader()
-			if size, ok := reader.GetCodeSizeByHash(codeHash); ok {
+		if codeHash := sd.codeHashForAddr(tx, view, addr, txNum); len(codeHash) > 0 {
+			if size, ok := view.GetCodeSizeByHash(codeHash); ok {
 				return size, true, nil
 			}
-			if cv, ok := reader.GetCodeByHash(codeHash); ok {
+			if cv, ok := view.GetCodeByHash(codeHash); ok {
 				// txNum is a conservative upper bound: >= the live code's write
 				// txNum, so the size drops on any unwind that drops the code.
-				reader.FillCodeSize(codeHash, len(cv), txNum)
+				view.FillCodeSize(codeHash, len(cv), txNum)
 				return len(cv), true, nil
 			}
 		}
@@ -1388,7 +1391,7 @@ func (sd *SharedDomains) GetCodeSize(tx kv.TemporalTx, addr []byte, txNum uint64
 	// Cold path: authoritative read via the normal SD.GetLatest chain.
 	// Populates L1, codeHashToCode, and (via PutWithCodeHash) the size layer for
 	// future callers.
-	v, _, err := sd.GetLatest(kv.CodeDomain, tx, addr)
+	v, _, err := sd.getLatestMetered(kv.CodeDomain, tx, addr, nil, view)
 	if err != nil {
 		return 0, false, err
 	}
@@ -1413,6 +1416,10 @@ func (sd *SharedDomains) GetCodeSize(tx kv.TemporalTx, addr []byte, txNum uint64
 // the write. Setters therefore resolve prevVal through GetLatest, which is
 // addr-keyed (domain-faithful); only getters use this codeHash shortcut.
 func (sd *SharedDomains) GetCode(tx kv.TemporalTx, addr []byte, txNum uint64) ([]byte, bool, error) {
+	return sd.getCode(tx, sd.cacheReader(), addr, txNum)
+}
+
+func (sd *SharedDomains) getCode(tx kv.TemporalTx, view cache.ReadView, addr []byte, txNum uint64) ([]byte, bool, error) {
 	if tx == nil {
 		return nil, false, errors.New("sd.GetCode: unexpected nil tx")
 	}
@@ -1423,9 +1430,9 @@ func (sd *SharedDomains) GetCode(tx kv.TemporalTx, addr []byte, txNum uint64) ([
 	// a stateObject's stale snapshot) is reorg-safe.
 	var codeHash []byte
 	if sd.stateCache != nil || sd.codeStore != nil {
-		if codeHash = sd.codeHashForAddr(tx, addr, txNum); len(codeHash) > 0 {
+		if codeHash = sd.codeHashForAddr(tx, view, addr, txNum); len(codeHash) > 0 {
 			if sd.stateCache != nil {
-				if cv, ok := sd.cacheReader().GetCodeByHash(codeHash); ok {
+				if cv, ok := view.GetCodeByHash(codeHash); ok {
 					return cv, true, nil
 				}
 			}
@@ -1438,7 +1445,7 @@ func (sd *SharedDomains) GetCode(tx kv.TemporalTx, addr []byte, txNum uint64) ([
 	}
 
 	// Cold path: authoritative addr-keyed read (also populates the caches).
-	v, _, err := sd.GetLatest(kv.CodeDomain, tx, addr)
+	v, _, err := sd.getLatestMetered(kv.CodeDomain, tx, addr, nil, view)
 	if err != nil {
 		return nil, false, err
 	}
@@ -1460,7 +1467,7 @@ func (sd *SharedDomains) GetCode(tx kv.TemporalTx, addr []byte, txNum uint64) ([
 // unwind invalidation). It is passed in by the caller — never read from the
 // shared sd.txNum, which a parallel exec worker on this read path must not
 // touch (the exec loop advances it concurrently).
-func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, addr []byte, txNum uint64) []byte {
+func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, view cache.ReadView, addr []byte, txNum uint64) []byte {
 	if len(addr) == 0 {
 		return nil
 	}
@@ -1481,7 +1488,7 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, addr []byte, txNum ui
 	// (flush-invalidated). The zero-hash sentinel means "no code / missing
 	// account" (negative cache).
 	if sd.stateCache != nil {
-		if h, ok := sd.cacheReader().GetAddrCodeHash(addr); ok {
+		if h, ok := view.GetAddrCodeHash(addr); ok {
 			if h == ([32]byte{}) {
 				return nil
 			}
@@ -1494,7 +1501,7 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, addr []byte, txNum ui
 	// reports whether the record was read from the tx's read view.
 	resolve := func() ([]byte, bool) {
 		if sd.stateCache != nil {
-			if v, ok := sd.cacheReader().Get(kv.AccountsDomain, addr); ok {
+			if v, ok := view.Get(kv.AccountsDomain, addr); ok {
 				return accounts.DeserialiseV3CodeHash(v), false
 			}
 		}
@@ -1520,7 +1527,13 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, addr []byte, txNum ui
 		// slipping pre-apply state past the gate. txNum is a conservative upper
 		// bound (>= the resolved account's write txNum), so the mapping drops
 		// on any unwind that reverts that account.
-		sd.cacheViewFor(tx).SeedAddrCodeHash(addr, fixed, txNum)
+		seedView := view
+		if !seedView.CanFill() {
+			// Frontier-less view from the plain wrappers: bind one on this cold
+			// seed path, where the boxing amortizes against the account read.
+			seedView = sd.cacheViewFor(tx)
+		}
+		seedView.SeedAddrCodeHash(addr, fixed, txNum)
 	}
 	return h
 }

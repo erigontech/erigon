@@ -128,7 +128,7 @@ func (c *Cache) View(_ context.Context, tx kv.TemporalTx) (kvcache.CacheView, er
 		context = c.publishedSD()
 	}
 
-	view := &CacheView{context: context, tx: tx, getter: tx}
+	view := &CacheView{context: context, getter: tx}
 	if context != nil {
 		view.getter = context.AsGetter(tx)
 	}
@@ -143,7 +143,6 @@ func (c *Cache) ValidateCurrentRoot(_ context.Context, _ kv.TemporalTx) (*kvcach
 
 type CacheView struct {
 	context *execctx.SharedDomains
-	tx      kv.TemporalTx
 	// getter is built once per view: it carries the per-tx cache ReadView, so
 	// per-read getter construction would cost an allocation on every call.
 	getter kv.TemporalGetter

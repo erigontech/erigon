@@ -1255,6 +1255,10 @@ func (iit *InvertedIndexRoTx) Progress(tx kv.Tx) uint64 {
 	return max(iit.files.EndTxNum(), iit.ii.maxTxNumInDB(tx))
 }
 
+// visibleEnd is the exclusive txNum bound of what this view can see: the max
+// of its two components, because GetLatest reads their union. Both sides are
+// required — on a snapshot-synced or fully-pruned datadir the DB side is empty
+// and the files carry the whole bound.
 func (iit *InvertedIndexRoTx) visibleEnd(tx kv.Tx) uint64 {
 	dbEnd, ok := iit.ii.lastTxNumInDB(tx)
 	if ok && dbEnd < math.MaxUint64 {

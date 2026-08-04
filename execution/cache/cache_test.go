@@ -423,7 +423,7 @@ func TestStateCache_NewStateCache(t *testing.T) {
 	c := closeOnCleanup(t, NewStateCache(10, 20, 30, 40))
 	require.NotNil(t, c)
 
-	// Account, Storage, Code, Commitment should be initialized
+	// Account, Storage, Code should be initialized
 	assert.NotNil(t, c.getCache(kv.AccountsDomain))
 	assert.NotNil(t, c.getCache(kv.StorageDomain))
 	assert.NotNil(t, c.getCache(kv.CodeDomain))
