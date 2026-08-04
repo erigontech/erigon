@@ -14,6 +14,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -240,6 +241,10 @@ type readPathResult struct {
 	mapCodeSizeVal       int
 	mapStorageVal        uint256.Int
 
+	// Hash the CodePath source stored with mapCodeVal; assign the two together.
+	// NilCodeHash means the caller must resolve it.
+	hashOfMapCodeVal accounts.CodeHash
+
 	// hdr is the skeleton header for the wrapper to record (with its typed
 	// value) via the typed recordX path when recordVR is true.
 	hdr      ReadHeader
@@ -454,7 +459,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	case CodePath:
 		var mc accounts.Code
 		mc, res, _ = s.versionMap.ReadCode(addr, s.txIndex)
-		r.mapCodeVal = mc.Bytes
+		r.mapCodeVal, r.hashOfMapCodeVal = mc.Bytes, mc.Hash
 	case CodeHashPath:
 		r.mapCodeHashVal, res, _ = s.versionMap.ReadCodeHash(addr, s.txIndex)
 	case CodeSizePath:
@@ -844,7 +849,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 						r.version = UnknownVersion
 						return
 					}
-					r.mapCodeVal = code
+					r.mapCodeVal, r.hashOfMapCodeVal = code, accounts.NilCodeHash
 				} else {
 					size, err := s.committedCodeSizeDirect(addr)
 					if err != nil {
@@ -1248,28 +1253,49 @@ func readCode(s *IntraBlockState, addr accounts.Address, commited bool) ([]byte,
 	}
 }
 
+// refreshedCode is refreshCode's result. Unlike accounts.Code it promises no
+// Hash == Keccak256(Bytes): KnownHash is Nil when the source stored bytes only.
+type refreshedCode struct {
+	Bytes     []byte
+	KnownHash accounts.CodeHash
+}
+
 // refreshCode is the in-memory-only variant for CodePath.
 // CodePath is never recorded via the skipStorage branch in legacy
 // (the `path != CodePath` guard), so no recording on the default case.
-func refreshCode(s *IntraBlockState, addr accounts.Address) ([]byte, ReadSource, Version, error) {
+func refreshCode(s *IntraBlockState, addr accounts.Address) (refreshedCode, ReadSource, Version, error) {
 	var r readPathResult
 	versionedReadCore(s, addr, CodePath, accounts.NilKey, false, true, &r)
 	if r.err != nil {
-		return nil, r.source, r.version, r.err
+		return refreshedCode{}, r.source, r.version, r.err
 	}
 	switch r.outcome {
 	case outcomeWriteSetHit:
-		return r.vwCode.Val.Bytes, r.source, r.version, nil
+		return refreshedCode{r.vwCode.Val.Bytes, r.vwCode.Val.Hash}, r.source, r.version, nil
 	case outcomeReadSetHit:
 		tr, _ := s.versionedReads.GetCode(addr)
-		return tr.Val, r.source, r.version, nil
+		// The recorded read and the probed cell share a version, so they are the
+		// same cell and its hash pairs with tr.Val. Nil when no probe ran.
+		return refreshedCode{tr.Val, r.hashOfMapCodeVal}, r.source, r.version, nil
 	case outcomeMapDone:
-		return r.mapCodeVal, r.source, r.version, nil
+		return refreshedCode{r.mapCodeVal, r.hashOfMapCodeVal}, r.source, r.version, nil
 	case outcomeReturnZero, outcomeReturnDefault:
-		return nil, r.source, r.version, nil
+		return refreshedCode{}, r.source, r.version, nil
 	default:
 		panic(fmt.Sprintf("refreshCode: unexpected outcome %d for %x", r.outcome, addr))
 	}
+}
+
+// codeHash avoids re-hashing when the source knew the hash. For committed bytes
+// the account record is authoritative; a prior tx's write can outrun it.
+func (c refreshedCode) codeHash(source ReadSource, accountHash accounts.CodeHash) accounts.CodeHash {
+	if c.KnownHash != accounts.NilCodeHash {
+		return c.KnownHash
+	}
+	if source == StorageRead {
+		return accountHash
+	}
+	return accounts.InternCodeHash(crypto.Keccak256Hash(c.Bytes))
 }
 
 // readCodeSize returns the contract code size.
@@ -1543,11 +1569,12 @@ func readSelfDestruct(s *IntraBlockState, addr accounts.Address) (bool, ReadSour
 	case outcomeStorageRead:
 		var v bool
 		if r.so != nil {
-			if r.so.deleted {
+			switch {
+			case r.so.deleted:
 				v = false
-			} else if r.so.createdContract {
+			case r.so.createdContract:
 				v = false
-			} else {
+			default:
 				v = r.so.selfdestructed
 			}
 		}

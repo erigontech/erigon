@@ -371,12 +371,12 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 	}
 
 	tx.ChainID = new(uint256.Int)
-	if err = s.ReadUint256(tx.ChainID); err != nil {
+	if err := s.ReadUint256(tx.ChainID); err != nil {
 		return err
 	}
 
 	tx.NonceKey = new(uint256.Int)
-	if err = s.ReadUint256(tx.NonceKey); err != nil {
+	if err := s.ReadUint256(tx.NonceKey); err != nil {
 		return err
 	}
 
@@ -385,7 +385,7 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 	}
 
 	var senderAddress common.Address
-	if err = s.ReadBytes(senderAddress[:]); err != nil {
+	if err := s.ReadBytes(senderAddress[:]); err != nil {
 		return err
 	}
 	tx.SenderAddress = accounts.InternAddress(senderAddress)
@@ -393,7 +393,7 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 
-	if err = DecodeOptionalAddress(&tx.Deployer, s); err != nil {
+	if err := DecodeOptionalAddress(&tx.Deployer, s); err != nil {
 		return err
 	}
 
@@ -401,7 +401,7 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 
-	if err = DecodeOptionalAddress(&tx.Paymaster, s); err != nil {
+	if err := DecodeOptionalAddress(&tx.Paymaster, s); err != nil {
 		return err
 	}
 
@@ -414,17 +414,17 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 	}
 
 	tx.BuilderFee = new(uint256.Int)
-	if err = s.ReadUint256(tx.BuilderFee); err != nil {
+	if err := s.ReadUint256(tx.BuilderFee); err != nil {
 		return err
 	}
 
 	tx.Tip = new(uint256.Int)
-	if err = s.ReadUint256(tx.Tip); err != nil {
+	if err := s.ReadUint256(tx.Tip); err != nil {
 		return err
 	}
 
 	tx.FeeCap = new(uint256.Int)
-	if err = s.ReadUint256(tx.FeeCap); err != nil {
+	if err := s.ReadUint256(tx.FeeCap); err != nil {
 		return err
 	}
 
@@ -446,13 +446,13 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 
 	// decode AccessList
 	tx.AccessList = AccessList{}
-	if err = decodeAccessList(&tx.AccessList, s); err != nil {
+	if err := decodeAccessList(&tx.AccessList, s); err != nil {
 		return err
 	}
 
 	// decode authorizations
 	tx.Authorizations = make([]Authorization, 0)
-	if err = decodeAuthorizations(&tx.Authorizations, s); err != nil {
+	if err := decodeAuthorizations(&tx.Authorizations, s); err != nil {
 		return err
 	}
 

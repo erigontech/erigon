@@ -699,7 +699,10 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 	}
 
 	ts := header.Time
-	if (!s.config.IsCancun(ts) && version >= clparams.DenebVersion) ||
+	// Unlike later forks, Shanghai does not require an exact version match:
+	// engine_getPayloadV2 serves both Paris and Shanghai payloads.
+	if (s.config.IsShanghai(ts) && version < clparams.CapellaVersion) ||
+		(!s.config.IsCancun(ts) && version >= clparams.DenebVersion) ||
 		(s.config.IsCancun(ts) && version < clparams.DenebVersion) ||
 		(!s.config.IsPrague(ts) && version >= clparams.ElectraVersion) ||
 		(s.config.IsPrague(ts) && version < clparams.ElectraVersion) ||
@@ -715,15 +718,12 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 		return nil, err
 	}
 
-	if version == clparams.FuluVersion {
-		if payload.BlobsBundle == nil {
-			payload.BlobsBundle = &engine_types.BlobsBundle{
-				Commitments: make([]hexutil.Bytes, 0),
-				Blobs:       make([]hexutil.Bytes, 0),
-				Proofs:      make([]hexutil.Bytes, 0),
-			}
+	if version >= clparams.DenebVersion {
+		proofsPerBlob := 1
+		if version >= clparams.FuluVersion {
+			proofsPerBlob = int(params.CellsPerExtBlob)
 		}
-		if len(payload.BlobsBundle.Commitments) != len(payload.BlobsBundle.Blobs) || len(payload.BlobsBundle.Proofs) != len(payload.BlobsBundle.Blobs)*int(params.CellsPerExtBlob) {
+		if len(payload.BlobsBundle.Commitments) != len(payload.BlobsBundle.Blobs) || len(payload.BlobsBundle.Proofs) != len(payload.BlobsBundle.Blobs)*proofsPerBlob {
 			return nil, fmt.Errorf("built invalid blobsBundle len(blobs)=%d len(commitments)=%d len(proofs)=%d", len(payload.BlobsBundle.Blobs), len(payload.BlobsBundle.Commitments), len(payload.BlobsBundle.Proofs))
 		}
 	}
@@ -1246,11 +1246,12 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 		ret := make([]*engine_types.BlobAndProofV2, len(blobHashes))
 		for i, bb := range bundles {
 			logHead := fmt.Sprintf("\n%x: ", blobHashes[i])
-			if len(bb.Blob) == 0 {
+			switch {
+			case len(bb.Blob) == 0:
 				logLine = append(logLine, logHead, "nil")
-			} else if len(bb.Proofs) != int(params.CellsPerExtBlob) {
+			case len(bb.Proofs) != int(params.CellsPerExtBlob):
 				logLine = append(logLine, logHead, fmt.Sprintf("pre-Fusaka proofs, len(proof)=%d", len(bb.Proofs)))
-			} else {
+			default:
 				ret[i] = &engine_types.BlobAndProofV2{Blob: bb.Blob, CellProofs: make([]hexutil.Bytes, params.CellsPerExtBlob)}
 				for c := range params.CellsPerExtBlob {
 					ret[i].CellProofs[c] = bb.Proofs[c][:]
@@ -1262,19 +1263,21 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 		return ret, nil
 	case clparams.ElectraVersion: // GetBlobsV2
 		ret := make([]*engine_types.BlobAndProofV2, len(blobHashes))
+	FOR_LOOP:
 		for i, bb := range bundles {
 			logHead := fmt.Sprintf("\n%x: ", blobHashes[i])
-			if len(bb.Blob) == 0 {
+			switch {
+			case len(bb.Blob) == 0:
 				// engine_getBlobsV2 MUST return null in case of any missing or older version blobs
 				ret = nil
 				logLine = append(logLine, logHead, "nil")
-				break
-			} else if len(bb.Proofs) != int(params.CellsPerExtBlob) {
+				break FOR_LOOP
+			case len(bb.Proofs) != int(params.CellsPerExtBlob):
 				// engine_getBlobsV2 MUST return null in case of any missing or older version blobs
 				ret = nil
 				logLine = append(logLine, logHead, fmt.Sprintf("pre-Fusaka proofs, len(proof)=%d", len(bb.Proofs)))
-				break
-			} else {
+				break FOR_LOOP
+			default:
 				ret[i] = &engine_types.BlobAndProofV2{Blob: bb.Blob, CellProofs: make([]hexutil.Bytes, params.CellsPerExtBlob)}
 				for c := range params.CellsPerExtBlob {
 					ret[i].CellProofs[c] = bb.Proofs[c][:]
@@ -1288,11 +1291,12 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 		ret := make([]*engine_types.BlobAndProofV1, len(blobHashes))
 		for i, bb := range bundles {
 			logHead := fmt.Sprintf("\n%x: ", blobHashes[i])
-			if len(bb.Blob) == 0 {
+			switch {
+			case len(bb.Blob) == 0:
 				logLine = append(logLine, logHead, "nil")
-			} else if len(bb.Proofs) != 1 {
+			case len(bb.Proofs) != 1:
 				logLine = append(logLine, logHead, fmt.Sprintf("post-Fusaka proofs, len(proof)=%d", len(bb.Proofs)))
-			} else {
+			default:
 				ret[i] = &engine_types.BlobAndProofV1{Blob: bb.Blob, Proof: bb.Proofs[0][:]}
 				logLine = append(logLine, logHead, fmt.Sprintf("OK, len(blob)=%d len(proof)=%d ", len(bb.Blob), len(bb.Proofs[0])))
 			}

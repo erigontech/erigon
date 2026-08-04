@@ -1166,17 +1166,18 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 	switch rr.Status() {
 	case MVReadResultDone:
 		if source != MapRead {
-			if recursive && matchesLive == nil {
+			switch {
+			case recursive && matchesLive == nil:
 				// Synthetic cross-validate probe (no recorded value of its
 				// own) — the outer entry's validation covers it. Without this
 				// guard a recursive AddressPath/SelfDestructPath probe that
 				// lands on a Done cell would over-invalidate.
-			} else if matchesLive != nil && matchesLive() {
+			case matchesLive != nil && matchesLive():
 				// Value tiebreaker: a Done entry now exists where the read
 				// saw storage, but it holds the same value (e.g. a no-op write
 				// of a BAL-pre-populated path) — read stays valid. Evaluated
 				// typed by the caller; no boxing.
-			} else {
+			default:
 				valid = VersionInvalid
 				invReason = "done-notmap"
 			}
@@ -1229,8 +1230,9 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 		valid = VersionInvalid
 		invReason = "dependency"
 	case MVReadResultNone:
-		if source == MapRead && !recursive &&
-			(path == BalancePath || path == NoncePath || path == IncarnationPath || path == CodeHashPath) {
+		switch {
+		case source == MapRead && !recursive &&
+			(path == BalancePath || path == NoncePath || path == IncarnationPath || path == CodeHashPath):
 			// A sub-field read with no dedicated cell is recorded folded onto
 			// AddressPath (its source/version), so validate it against AddressPath
 			// at that version — with the record-field value as the tiebreaker.
@@ -1239,10 +1241,10 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 			if valid == VersionInvalid {
 				invReason = "fold-addr"
 			}
-		} else if source != StorageRead && source != ProvisionalRead {
+		case source != StorageRead && source != ProvisionalRead:
 			valid = VersionInvalid
 			invReason = "none-notstorage"
-		} else {
+		default:
 			if valid = checkVersion(version, version); valid == VersionValid {
 				// Cross-validate any account property read against AddressPath
 				// and SelfDestructPath.  A prior tx may have created or

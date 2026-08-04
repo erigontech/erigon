@@ -243,7 +243,7 @@ func processRewardsAndPenaltiesPhase0(s abstract.BeaconState, eligibleValidators
 			}
 		}
 		currentBalance -= baseReward * missed
-		if err = s.SetValidatorBalance(int(index), currentBalance); err != nil {
+		if err := s.SetValidatorBalance(int(index), currentBalance); err != nil {
 			return err
 		}
 
