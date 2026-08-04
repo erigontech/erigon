@@ -158,6 +158,13 @@ type IntraBlockState struct {
 	blockNum        uint64
 	logs            []types.Logs
 	logIndexInBlock uint
+	// Slots of logs appended to since the last resetLogs, as [lo, hi). hi == 0
+	// means none.
+	logsFilledLo, logsFilledHi int
+	// Running totals of what the log buffers retain for reuse, against the
+	// maxReusableLog* budget. Overcounting is safe: it only pulls in a trimLogs
+	// pass, which recounts.
+	reusableLogEntries, reusableLogBytes int
 
 	// Per-transaction access list
 	accessList accessList
@@ -435,6 +442,8 @@ func (sdb *IntraBlockState) Close() {
 	stateObjects, journal := sdb.stateObjects, sdb.journal
 	sdb.stateObjects, sdb.journal = nil, nil
 	sdb.logs = nil
+	sdb.logsFilledLo, sdb.logsFilledHi = 0, 0
+	sdb.reusableLogEntries, sdb.reusableLogBytes = 0, 0
 	sdb.revisions.reset()
 	// Safe to pool: VersionedWrites/FinalizedWrites hand out deep clones, and the
 	// set is unexported, so nothing outside holds a raw VersionedWrite.
@@ -463,9 +472,32 @@ const (
 )
 
 // resetLogs truncates the per-tx buffers, keeping entries and their Topics/Data
-// for AllocLog to reuse, up to the budget. It scans buffers to cap: a reverted
-// entry hides behind the length and is retained memory all the same.
+// for AllocLog to reuse, up to the budget. It walks only the slots written since
+// the last reset, and those to cap: a reverted entry hides behind the length and
+// is retained memory all the same.
 func (sdb *IntraBlockState) resetLogs() {
+	if sdb.reusableLogEntries > maxReusableLogEntries || sdb.reusableLogBytes > maxReusableLogBytes {
+		sdb.trimLogs()
+		return
+	}
+	slots := sdb.logs[:cap(sdb.logs)]
+	for i := sdb.logsFilledLo; i < sdb.logsFilledHi; i++ {
+		buf := slots[i][:cap(slots[i])]
+		for j, lp := range buf {
+			if lp == nil || cap(lp.Data) <= maxReusableLogDataCap {
+				continue
+			}
+			sdb.reusableLogBytes -= cap(lp.Data)
+			buf[j] = nil
+		}
+		slots[i] = buf[:0]
+	}
+	sdb.logsFilledLo, sdb.logsFilledHi = 0, 0
+}
+
+// trimLogs truncates every buffer and drops what does not fit the budget,
+// recounting what is kept.
+func (sdb *IntraBlockState) trimLogs() {
 	entries, dataBytes := 0, 0
 	slots := sdb.logs[:cap(sdb.logs)]
 	for i, slot := range slots {
@@ -488,6 +520,8 @@ func (sdb *IntraBlockState) resetLogs() {
 		}
 		slots[i] = buf[:0]
 	}
+	sdb.reusableLogEntries, sdb.reusableLogBytes = entries, dataBytes
+	sdb.logsFilledLo, sdb.logsFilledHi = 0, 0
 }
 
 // AllocLog reserves the next log slot of the current tx and returns it sized for
@@ -502,7 +536,10 @@ func (sdb *IntraBlockState) AllocLog(addr common.Address, numTopics, dataSize in
 		sdb.logs = slices.Grow(sdb.logs, ti+1-len(sdb.logs))[:ti+1]
 	}
 	logIdx := len(sdb.logs[ti])
+	slotCap := cap(sdb.logs[ti])
 	sdb.logs[ti] = slices.Grow(sdb.logs[ti], 1)[:logIdx+1]
+	sdb.reusableLogEntries += cap(sdb.logs[ti]) - slotCap
+	sdb.markLogsFilled(ti)
 	logs := sdb.logs[ti]
 
 	lp := logs[logIdx] // a prior block's entry to reuse, or nil for a fresh slot
@@ -512,7 +549,9 @@ func (sdb *IntraBlockState) AllocLog(addr common.Address, numTopics, dataSize in
 	}
 	lp.Address = addr
 	lp.Topics = slices.Grow(lp.Topics[:0], numTopics)[:numTopics]
+	dataCap := cap(lp.Data)
 	lp.Data = slices.Grow(lp.Data[:0], dataSize)[:dataSize]
+	sdb.reusableLogBytes += cap(lp.Data) - dataCap
 	lp.Removed = false
 	lp.TxHash, lp.BlockHash = common.Hash{}, common.Hash{}
 	lp.TxIndex = hexutil.Uint(sdb.txIndex)
@@ -522,6 +561,15 @@ func (sdb *IntraBlockState) AllocLog(addr common.Address, numTopics, dataSize in
 	lp.Index = hexutil.Uint(sdb.logIndexInBlock)
 	sdb.logIndexInBlock++
 	return lp
+}
+
+func (sdb *IntraBlockState) markLogsFilled(ti int) {
+	if sdb.logsFilledHi == 0 {
+		sdb.logsFilledLo, sdb.logsFilledHi = ti, ti+1
+		return
+	}
+	sdb.logsFilledLo = min(sdb.logsFilledLo, ti)
+	sdb.logsFilledHi = max(sdb.logsFilledHi, ti+1)
 }
 
 // NotifyLog runs the OnLog hook after a log's fields are populated.

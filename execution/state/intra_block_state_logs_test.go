@@ -18,6 +18,7 @@ package state
 
 import (
 	"bytes"
+	"fmt"
 	"slices"
 	"testing"
 
@@ -191,6 +192,35 @@ func TestResetKeepsLogsWithinBudget(t *testing.T) {
 	}
 }
 
+// Reset enforces the budget from running totals instead of a full scan, so the
+// totals have to match what the buffers hold after emitting, reverting a whole
+// transaction's logs, and resetting.
+func TestResetLogsTotalsMatchRetained(t *testing.T) {
+	t.Parallel()
+
+	ibs := New(nil)
+	for blockNum := range 4 {
+		for txIndex := range 8 {
+			ibs.SetTxContext(uint64(blockNum+1), txIndex)
+			snap := ibs.PushSnapshot()
+			for i := range txIndex%3 + 1 {
+				ibs.AddLog(&types.Log{
+					Address: common.HexToAddress("0x1"),
+					Data:    make([]byte, 32*(i+1)),
+				})
+			}
+			if txIndex%2 == 1 {
+				ibs.RevertToSnapshot(snap, nil)
+			}
+			ibs.Reset()
+
+			_, slotCap, dataBytes := retainedLogs(ibs)
+			require.Equal(t, slotCap, ibs.reusableLogEntries, "block %d tx %d", blockNum, txIndex)
+			require.Equal(t, dataBytes, ibs.reusableLogBytes, "block %d tx %d", blockNum, txIndex)
+		}
+	}
+}
+
 func retainedLogs(ibs *IntraBlockState) (entries, slotCap, dataBytes int) {
 	for _, slot := range ibs.logs[:cap(ibs.logs)] {
 		slotCap += cap(slot)
@@ -281,6 +311,31 @@ func BenchmarkAddLog(b *testing.B) {
 }
 
 var sinkLog *types.Log
+
+// The parallel executor resets before every transaction, so a block costs one
+// Reset per transaction while the buffers hold the whole block's logs.
+func BenchmarkLogEmitAndResetPerTx(b *testing.B) {
+	log := &types.Log{
+		Address: common.HexToAddress("0x1"),
+		Topics:  []common.Hash{common.HexToHash("0xaa"), common.HexToHash("0xbb"), common.HexToHash("0xcc")},
+		Data:    bytes.Repeat([]byte{0x11}, 96),
+	}
+	for _, txs := range []int{16, 200} {
+		b.Run(fmt.Sprintf("txs=%d", txs), func(b *testing.B) {
+			ibs := New(nil)
+			b.ReportAllocs()
+			for b.Loop() {
+				for txIndex := range txs {
+					ibs.SetTxContext(1, txIndex)
+					for range 3 {
+						ibs.AddLog(log)
+					}
+					ibs.Reset()
+				}
+			}
+		})
+	}
+}
 
 func BenchmarkLogsRlpHash(b *testing.B) {
 	ibs := New(nil)
