@@ -284,34 +284,41 @@ type domainVisibleEnds struct {
 	state atomic.Uint32
 }
 
-// state packs a loaded and an available bit per domain — compile-time capacity check.
+// state packs two bits per domain into one word so a single atomic load
+// returns a consistent (loaded, ok) pair: loadedBit says ends[domain] is
+// memoized, okBit is the memoized ok answer of DomainVisibleEnd. The array
+// size asserts at compile time that both halves fit in uint32.
 var _ [32 - 2*int(kv.DomainLen)]struct{}
 
-func (v *domainVisibleEnds) get(tx *Tx, domain kv.Domain) (uint64, bool) {
-	bit := uint32(1) << uint32(domain)
-	state := v.state.Load()
-	if state&bit != 0 {
-		return v.ends[domain].Load(), state&(bit<<uint32(kv.DomainLen)) != 0
-	}
-	return v.load(tx, domain, bit)
+func visibleEndBits(domain kv.Domain) (loadedBit, okBit uint32) {
+	loadedBit = uint32(1) << uint32(domain)
+	return loadedBit, loadedBit << uint32(kv.DomainLen)
 }
 
-func (v *domainVisibleEnds) load(tx *Tx, domain kv.Domain, bit uint32) (uint64, bool) {
+func (v *domainVisibleEnds) get(tx *Tx, domain kv.Domain) (uint64, bool) {
+	loadedBit, okBit := visibleEndBits(domain)
+	state := v.state.Load()
+	if state&loadedBit != 0 {
+		return v.ends[domain].Load(), state&okBit != 0
+	}
+	return v.load(tx, domain, loadedBit, okBit)
+}
+
+func (v *domainVisibleEnds) load(tx *Tx, domain kv.Domain, loadedBit, okBit uint32) (uint64, bool) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
 	state := v.state.Load()
-	availableBit := bit << uint32(kv.DomainLen)
-	if state&bit == 0 {
+	if state&loadedBit == 0 {
 		end, ok := tx.aggtx.DomainVisibleEnd(domain, tx.Tx)
 		v.ends[domain].Store(end)
-		state |= bit
+		state |= loadedBit
 		if ok {
-			state |= availableBit
+			state |= okBit
 		}
 		v.state.Store(state)
 	}
-	return v.ends[domain].Load(), state&availableBit != 0
+	return v.ends[domain].Load(), state&okBit != 0
 }
 
 // reset takes mu so an in-flight load can't re-store pre-reset bits.

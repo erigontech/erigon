@@ -91,32 +91,40 @@ type domainVisibleEndMemo struct {
 	state  atomic.Uint32
 }
 
-// state packs a loaded and an ok bit per domain — compile-time capacity check.
+// state packs two bits per domain into one word so a single atomic load
+// returns a consistent (loaded, ok) pair: loadedBit says ends[domain] is
+// memoized, okBit is the memoized ok answer of DomainVisibleEnd. The array
+// size asserts at compile time that both halves fit in uint32.
 var _ [32 - 2*int(kv.DomainLen)]struct{}
+
+func visibleEndBits(domain kv.Domain) (loadedBit, okBit uint32) {
+	loadedBit = uint32(1) << uint32(domain)
+	return loadedBit, loadedBit << uint32(kv.DomainLen)
+}
 
 func (m *domainVisibleEndMemo) get(tx kv.TemporalTx, domain kv.Domain) (uint64, bool) {
 	viewID := tx.ViewID()
-	bit := uint32(1) << uint32(domain)
+	loadedBit, okBit := visibleEndBits(domain)
 	seq := m.seq.Load()
 	if seq&1 == 0 && m.viewID.Load() == viewID {
-		if state := m.state.Load(); state&bit != 0 {
+		if state := m.state.Load(); state&loadedBit != 0 {
 			end := m.ends[domain].Load()
 			if m.seq.Load() == seq {
-				return end, state&(bit<<uint32(kv.DomainLen)) != 0
+				return end, state&okBit != 0
 			}
 		}
 	}
-	return m.load(tx, domain, viewID, bit)
+	return m.load(tx, domain, viewID, loadedBit, okBit)
 }
 
-func (m *domainVisibleEndMemo) load(tx kv.TemporalTx, domain kv.Domain, viewID uint64, bit uint32) (uint64, bool) {
+func (m *domainVisibleEndMemo) load(tx kv.TemporalTx, domain kv.Domain, viewID uint64, loadedBit, okBit uint32) (uint64, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	cachedViewID := m.viewID.Load()
 	state := m.state.Load()
-	if cachedViewID == viewID && state&bit != 0 {
-		return m.ends[domain].Load(), state&(bit<<uint32(kv.DomainLen)) != 0
+	if cachedViewID == viewID && state&loadedBit != 0 {
+		return m.ends[domain].Load(), state&okBit != 0
 	}
 
 	m.seq.Add(1)
@@ -128,9 +136,9 @@ func (m *domainVisibleEndMemo) load(tx kv.TemporalTx, domain kv.Domain, viewID u
 	}
 	end, ok := tx.Debug().DomainVisibleEnd(domain)
 	m.ends[domain].Store(end)
-	state |= bit
+	state |= loadedBit
 	if ok {
-		state |= bit << uint32(kv.DomainLen)
+		state |= okBit
 	}
 	m.state.Store(state)
 	return end, ok
