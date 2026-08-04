@@ -37,7 +37,7 @@ Use the filesystem UUID (`blkid` prints it) rather than a `/dev/nvme…` name, w
 
 ### Why the filesystem matters
 
-Erigon's bottleneck is disk **latency**, not throughput or IOPS — see [Improving Performance](/help-center/known-issues#improving-performance). Two properties of the workload make its reads impossible to predict, and therefore impossible to pre-warm:
+Erigon's bottleneck is disk **latency**, not throughput or IOPS — see [Improving Performance](/help-center/known-issues#improving-performance). Erigon does pre-warm what it can, but two properties of the workload mean its reads cannot be fully predicted, so part of every block's reads lands cold:
 
 * **EVM execution reads arbitrary state.** Nothing tells you in advance which accounts or storage slots a block will touch. Once the working set no longer fits in RAM, some of those reads land on cold data no cache had reason to hold.
 * **Merkle trie updates pull in neighbours.** Updating one key requires reading the nodes next to it in the trie. Those may be accounts the EVM never touches — they are involved only because of where they sit in the trie.
@@ -48,7 +48,7 @@ Every layer the filesystem adds is added on top of each of those reads. That is 
 
 Prefer a plain journaling filesystem over a copy-on-write or database-like one:
 
-* **ZFS** behaves more like a database than a filesystem. It keeps its own write-ahead log and its own cache (**ARC**), and that cache competes with the OS page cache for the same RAM. Its features — compression, encryption, dedup — each cost latency, and tuning it for this workload is not a solved problem.
+* **ZFS** behaves more like a database than a filesystem. It keeps its own write-ahead log and its own cache (**ARC**), and that cache competes with the OS page cache for the same RAM. Optional features such as encryption and dedup add work to the read path this workload is bound by, and tuning ZFS for it is not a solved problem.
 * **Btrfs** is a copy-on-write B-tree of pages, and Erigon's MDBX database is itself a B-tree of pages, so you end up running a database inside a database. Its `autodefrag` feature is the sharpest edge: it can multiply write I/O by as much as 100x. See [Background File System Features Can Hurt Performance](/help-center/known-issues#background-file-system-features-can-hurt-performance).
 
 Filesystems other than ext4 and XFS are not part of what we measure, so treat their performance as unverified rather than assumed.

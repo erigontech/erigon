@@ -170,11 +170,48 @@ class TabItemLabelTests(unittest.TestCase):
         out = g.strip_mdx(text)
         self.assertIn('<TabItem value="a" label="Linux">', out)
 
-    def test_unlabelled_tabitem_emits_no_heading(self):
-        out = g.strip_mdx('## S\n\n<TabItem value="a">\nbody\n')
+    def test_unlabelled_tabitem_falls_back_to_value(self):
+        """Docusaurus renders `value` when `label` is absent, so a tab without a
+        label must still get a heading — otherwise it silently reintroduces the
+        unlabelled-tables problem.
+        """
+        out = g.strip_mdx('## S\n\n<TabItem value="linux">\nbody\n')
+        self.assertIn("### linux", out)
+        self.assertNotIn("TabItem", out)
+        self.assertIn("body", out)
+
+    def test_label_wins_over_value(self):
+        out = g.strip_mdx('## S\n\n<TabItem value="macos" label="macOS">\nbrew\n')
+        self.assertIn("### macOS", out)
+        self.assertNotIn("### macos", out)
+
+    def test_attributeless_tabitem_emits_no_heading(self):
+        out = g.strip_mdx("## S\n\n<TabItem>\nbody\n")
         self.assertNotIn("TabItem", out)
         self.assertIn("body", out)
         self.assertEqual(out.count("###"), 0)
+
+    def test_heading_inside_tab_body_does_not_split_the_set(self):
+        """A heading inside the first tab's body must not demote the tabs after
+        it: the set is delimited by <Tabs>…</Tabs>, not by heading positions.
+        """
+        text = (
+            "## Setup\n\n"
+            "<Tabs>\n"
+            '<TabItem value="linux" label="Linux">\n'
+            "#### Extra step\n"
+            "apt install\n"
+            "</TabItem>\n"
+            '<TabItem value="windows" label="Windows">\n'
+            "choco install\n"
+            "</TabItem>\n"
+            "</Tabs>\n"
+        )
+        out = g.strip_mdx(text)
+        self.assertIn("### Linux", out)
+        self.assertIn("### Windows", out)
+        # Both tabs sit at the same level despite the h4 inside the first body.
+        self.assertNotIn("##### Windows", out)
 
 
 class FrontmatterTests(unittest.TestCase):

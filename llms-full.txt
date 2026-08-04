@@ -78,7 +78,7 @@ Use the filesystem UUID (`blkid` prints it) rather than a `/dev/nvme…` name, w
 
 ### Why the filesystem matters
 
-Erigon's bottleneck is disk **latency**, not throughput or IOPS — see [Improving Performance](/help-center/known-issues#improving-performance). Two properties of the workload make its reads impossible to predict, and therefore impossible to pre-warm:
+Erigon's bottleneck is disk **latency**, not throughput or IOPS — see [Improving Performance](/help-center/known-issues#improving-performance). Erigon does pre-warm what it can, but two properties of the workload mean its reads cannot be fully predicted, so part of every block's reads lands cold:
 
 * **EVM execution reads arbitrary state.** Nothing tells you in advance which accounts or storage slots a block will touch. Once the working set no longer fits in RAM, some of those reads land on cold data no cache had reason to hold.
 * **Merkle trie updates pull in neighbours.** Updating one key requires reading the nodes next to it in the trie. Those may be accounts the EVM never touches — they are involved only because of where they sit in the trie.
@@ -89,7 +89,7 @@ Every layer the filesystem adds is added on top of each of those reads. That is 
 
 Prefer a plain journaling filesystem over a copy-on-write or database-like one:
 
-* **ZFS** behaves more like a database than a filesystem. It keeps its own write-ahead log and its own cache (**ARC**), and that cache competes with the OS page cache for the same RAM. Its features — compression, encryption, dedup — each cost latency, and tuning it for this workload is not a solved problem.
+* **ZFS** behaves more like a database than a filesystem. It keeps its own write-ahead log and its own cache (**ARC**), and that cache competes with the OS page cache for the same RAM. Optional features such as encryption and dedup add work to the read path this workload is bound by, and tuning ZFS for it is not a solved problem.
 * **Btrfs** is a copy-on-write B-tree of pages, and Erigon's MDBX database is itself a B-tree of pages, so you end up running a database inside a database. Its `autodefrag` feature is the sharpest edge: it can multiply write I/O by as much as 100x. See [Background File System Features Can Hurt Performance](/help-center/known-issues#background-file-system-features-can-hurt-performance).
 
 Filesystems other than ext4 and XFS are not part of what we measure, so treat their performance as unverified rather than assumed.
@@ -6694,6 +6694,10 @@ curl -s --data '{"jsonrpc":"2.0","method":"admin_removeTrustedPeer","params":["e
 URL: https://docs.erigon.tech/interacting-with-erigon/bor
 
 
+:::note
+The final Erigon release series that officially supports Polygon is 3.1.\*. The `bor` namespace is still wired and `--chain=bor-mainnet` remains selectable, so this reference is kept for those releases — but see [Supported Networks](/fundamentals/supported-networks) before planning a new Polygon deployment.
+:::
+
 The `bor` namespace provides Polygon-specific RPC methods that are only available when running Erigon on Polygon networks (Mainnet, Amoy testnet, etc.). These methods expose functionality specific to the Bor consensus engine, including validator information, snapshots, and proposer sequences.
 
 The bor namespace must be explicitly enabled using the `--http.api` flag when starting the RPC Daemon and is only functional when running on Polygon networks with the Bor consensus engine.
@@ -7791,7 +7795,7 @@ This list addresses the most common inquiries from the Erigon community, offerin
 2. **Is Erigon a good choice for client diversity?** Yes. The codebases have diverged so significantly from Geth that they are now considered separate clients, making Erigon an excellent choice to support Ethereum's client diversity goals.
 3. **What are the minimum hardware requirements?** The most critical component is a high-end NVMe or SSD with very low latency. While the exact requirements vary by network, 16GB of RAM and a fast SSD are generally the minimum for a full node. See [Hardware Requirements](/get-started/hardware-requirements) for detailed specs per network and pruning mode.
 4. **How long does it take to sync a node?** Initial synchronization time is highly dependent on hardware and bandwidth. A fast system with a high-end NVMe can sync a full node in as little as few hours, while on slower hardware, it can take several days.
-5. **How much disk space is required?** It depends on the network and the pruning mode, and it grows as the chain grows. See [Hardware Requirements](/get-started/hardware-requirements) for a measured figure and measurement date per network and pruning mode.
+5. **How much disk space is required?** It depends on the network and the pruning mode, and it grows as the chain grows. See [Hardware Requirements](/get-started/hardware-requirements) for a measured figure and measurement date, for the networks and pruning modes it measures.
 6. **Can I run Erigon on an HDD?** It is not recommended to run Erigon on an HDD. The client's performance is critically dependent on high-speed disk I/O, and an HDD will almost certainly cause the node to fall behind the blockchain tip.
 7. **What is the `--prune.mode` flag, and which mode should I use?** This flag determines which historical data is discarded. The `full` mode (the default for Erigon 3) is suitable for most users. The `minimal` mode is for validators with limited disk space. The `archive` mode is for those who need a full historical record for all past states. See [Pruning Modes](/fundamentals/pruning-modes) for a full comparison.
 8. **Can I change my pruning mode after starting the node?** No. The pruning mode is a permanent choice made at the first sync. Changing it requires deleting the `datadir` directory and a full re-sync from scratch.
@@ -7888,12 +7892,15 @@ Attach the `.pprof` files and the goroutine dump to your GitHub issue.
 
 ## Hetzner Cloud / Dedicated Server Firewall Note
 
-Hetzner applies a stateless firewall at the network edge. Ensure the following ports are open for **both TCP and UDP, inbound and outbound**:
+Hetzner filters traffic at the network edge. On **dedicated servers (Robot)** the firewall is stateless, so return traffic needs an explicit rule; the **Cloud** firewall is stateful and does not. Either way, make sure the following ports are reachable **inbound and outbound**:
 
-| Purpose        | Port  | Protocol |
-| -------------- | ----- | -------- |
-| P2P (Ethereum) | 30303 | TCP+UDP  |
-| P2P (Caplin)   | 9000  | TCP+UDP  |
+| Purpose                    | Port  | Protocol |
+| -------------------------- | ----- | -------- |
+| P2P (execution layer)      | 30303 | TCP+UDP  |
+| Caplin DISCV5 discovery    | 4000  | UDP      |
+| Caplin DISCV5              | 4001  | TCP      |
+
+The Caplin ports are its defaults (`--caplin.discovery.port` and `--caplin.discovery.tcpport`); change the rules to match if you override them. If you run an **external** consensus client instead of Caplin, open the port that client uses — conventionally `9000` TCP+UDP for Lighthouse, Prysm and friends — rather than the Caplin ports.
 
 Without these, the node may appear to have peers (via the cloud dashboard) but will suffer poor block propagation. Configure the firewall in the Hetzner Cloud Console under **Firewalls** or via `hcloud firewall`.
 

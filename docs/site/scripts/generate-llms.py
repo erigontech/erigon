@@ -81,28 +81,36 @@ DEFAULT_TAB_HEADING_DEPTH = 3
 MAX_HEADING_DEPTH = 6
 
 _TABITEM_TAG = re.compile(r"<TabItem\b[^>]*>")
+_TABS_OPEN = re.compile(r"<Tabs\b")
+_TABS_CLOSE = re.compile(r"</Tabs\s*>")
 _ATX_HEADING = re.compile(r"\s*(#{1,6})\s")
 # label="X" / label='X' / label={'X'} — Docusaurus accepts all three.
 _TAB_LABEL = re.compile(
     r"""\blabel\s*=\s*(?:"([^"]*)"|'([^']*)'|\{\s*['"]([^'"]*)['"]\s*\})"""
 )
+# Docusaurus falls back to rendering `value` when `label` is absent, so we do too.
+_TAB_VALUE = re.compile(
+    r"""\bvalue\s*=\s*(?:"([^"]*)"|'([^']*)'|\{\s*['"]([^'"]*)['"]\s*\})"""
+)
 
 
 def _label_of(tag):
-    """Extract a TabItem's label text, or '' when it carries none."""
-    m = _TAB_LABEL.search(tag)
-    if not m:
-        return ""
-    return next(g for g in m.groups() if g is not None).strip()
+    """A TabItem's visible text: its `label`, else its `value`, else ''."""
+    for pattern in (_TAB_LABEL, _TAB_VALUE):
+        m = pattern.search(tag)
+        if m:
+            return next(g for g in m.groups() if g is not None).strip()
+    return ""
 
 
 def _scan_tab_structure(text):
-    """Fence-aware scan returning (lines, headings, tabs).
+    """Fence-aware scan returning (lines, headings, tabs, blocks).
 
-    headings maps line index → heading level; tabs maps line index → label.
+    headings maps line index → heading level; tabs maps line index → visible
+    text; blocks is a list of (open, close) line indices for each <Tabs> set.
     """
     lines = text.splitlines()
-    headings, tabs, in_fence = {}, {}, False
+    headings, tabs, blocks, open_at, in_fence = {}, {}, [], None, False
     for i, line in enumerate(lines):
         if line.lstrip().startswith("```"):
             in_fence = not in_fence
@@ -113,22 +121,29 @@ def _scan_tab_structure(text):
         if heading:
             headings[i] = len(heading.group(1))
             continue
+        if _TABS_OPEN.search(line) and open_at is None:
+            open_at = i
+        if _TABS_CLOSE.search(line) and open_at is not None:
+            blocks.append((open_at, i))
+            open_at = None
         tag = _TABITEM_TAG.search(line)
         if tag:
             tabs[i] = _label_of(tag.group(0))
-    return lines, headings, tabs
+    if open_at is not None:  # unclosed <Tabs>: treat the rest of the doc as its body
+        blocks.append((open_at, len(lines)))
+    return lines, headings, tabs, blocks
 
 
-def _tab_heading_depth(idx, group, headings):
-    """Pick a heading level for one tab group that nests correctly both ways.
+def _tab_heading_depth(start, end, headings):
+    """Pick a heading level for one tab set that nests correctly both ways.
 
     One level below the enclosing section, so a tab never outranks the section
-    containing it — but never shallower than the first heading *after* the
-    group, so that heading stays a sibling of the tab set instead of being
-    swallowed as a subsection of the last tab.
+    containing it — but never shallower than the first heading *after* the set,
+    so that heading stays a sibling of the tab set instead of being swallowed
+    as a subsection of the last tab.
     """
-    before = [lvl for i, lvl in headings.items() if i < idx]
-    after = [lvl for i, lvl in headings.items() if i > group[-1]]
+    before = [lvl for i, lvl in headings.items() if i < start]
+    after = [lvl for i, lvl in sorted(headings.items()) if i > end]
     depth = (before[-1] if before else DEFAULT_TAB_HEADING_DEPTH - 1) + 1
     if after:
         depth = max(depth, after[0])
@@ -144,24 +159,22 @@ def _tabitem_labels_to_headings(text):
     which used to leave sibling tables and code blocks indistinguishable in the
     text output (five unlabelled disk-size tables in a row, for instance).
     """
-    lines, headings, tabs = _scan_tab_structure(text)
+    lines, headings, tabs, blocks = _scan_tab_structure(text)
     if not tabs:
         return text
 
-    # Group consecutive tabs — those with no heading between them form one tab
-    # set and share a heading level.
-    groups, current = [], []
-    for i in sorted(tabs):
-        if current and any(h for h in headings if current[-1] < h < i):
-            groups.append(current)
-            current = []
-        current.append(i)
-    groups.append(current)
-
+    # A tab set is delimited by <Tabs>…</Tabs>, not by "no heading in between":
+    # a heading inside one tab's body must not split the set and demote the
+    # tabs that follow it. Tabs outside any <Tabs> block are handled per-tab.
     depth_at = {}
-    for group in groups:
-        for i in group:
-            depth_at[i] = _tab_heading_depth(group[0], group, headings)
+    for start, end in blocks:
+        depth = _tab_heading_depth(start, end, headings)
+        for i in tabs:
+            if start < i < end:
+                depth_at[i] = depth
+    for i in tabs:
+        if i not in depth_at:
+            depth_at[i] = _tab_heading_depth(i, i, headings)
 
     out = []
     for i, line in enumerate(lines):

@@ -63,12 +63,15 @@ Attach the `.pprof` files and the goroutine dump to your GitHub issue.
 
 ## Hetzner Cloud / Dedicated Server Firewall Note
 
-Hetzner applies a stateless firewall at the network edge. Ensure the following ports are open for **both TCP and UDP, inbound and outbound**:
+Hetzner filters traffic at the network edge. On **dedicated servers (Robot)** the firewall is stateless, so return traffic needs an explicit rule; the **Cloud** firewall is stateful and does not. Either way, make sure the following ports are reachable **inbound and outbound**:
 
-| Purpose        | Port  | Protocol |
-| -------------- | ----- | -------- |
-| P2P (Ethereum) | 30303 | TCP+UDP  |
-| P2P (Caplin)   | 9000  | TCP+UDP  |
+| Purpose                    | Port  | Protocol |
+| -------------------------- | ----- | -------- |
+| P2P (execution layer)      | 30303 | TCP+UDP  |
+| Caplin DISCV5 discovery    | 4000  | UDP      |
+| Caplin DISCV5              | 4001  | TCP      |
+
+The Caplin ports are its defaults (`--caplin.discovery.port` and `--caplin.discovery.tcpport`); change the rules to match if you override them. If you run an **external** consensus client instead of Caplin, open the port that client uses — conventionally `9000` TCP+UDP for Lighthouse, Prysm and friends — rather than the Caplin ports.
 
 Without these, the node may appear to have peers (via the cloud dashboard) but will suffer poor block propagation. Configure the firewall in the Hetzner Cloud Console under **Firewalls** or via `hcloud firewall`.
 
