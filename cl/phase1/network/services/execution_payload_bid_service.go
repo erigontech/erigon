@@ -478,7 +478,9 @@ func (s *executionPayloadBidService) validateBuilderAvailability(
 
 // queuePendingBid defers a bid until its validation dependencies are available.
 func (s *executionPayloadBidService) queuePendingBid(msg *cltypes.SignedExecutionPayloadBid) {
-	s.pending.enqueue(pendingBidKeyFor(msg), msg)
+	_ = s.pending.enqueue(msg, func() (pendingBidKey, error) {
+		return pendingBidKeyFor(msg), nil
+	})
 }
 
 func pendingBidKeyFor(msg *cltypes.SignedExecutionPayloadBid) pendingBidKey {

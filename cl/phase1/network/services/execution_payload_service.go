@@ -198,7 +198,7 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 
 // queuePendingEnvelope defers an envelope until its referenced block is available.
 func (s *executionPayloadService) queuePendingEnvelope(blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) {
-	err := s.pending.enqueueLazy(envelope, func() (pendingEnvelopeKey, error) {
+	err := s.pending.enqueue(envelope, func() (pendingEnvelopeKey, error) {
 		envelopeHash, err := envelope.HashSSZ()
 		if err != nil {
 			return pendingEnvelopeKey{}, err

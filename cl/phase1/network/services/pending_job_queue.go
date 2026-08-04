@@ -62,17 +62,10 @@ func newPendingJobQueue[K comparable, M any](
 	}
 }
 
-// enqueue silently drops a duplicate or a job submitted at capacity.
-func (q *pendingJobQueue[K, M]) enqueue(key K, msg M) {
-	if !q.reserve() {
-		return
-	}
-	q.storeReserved(key, msg)
-}
-
-// enqueueLazy reserves capacity before building the key. A full queue is a
-// successful no-op; a key-building error releases the reservation.
-func (q *pendingJobQueue[K, M]) enqueueLazy(msg M, buildKey func() (K, error)) error {
+// enqueue reserves capacity before building the key, so a full queue skips key
+// construction. A full queue or a duplicate key is a silent no-op; a
+// key-building error releases the reservation.
+func (q *pendingJobQueue[K, M]) enqueue(msg M, buildKey func() (K, error)) error {
 	if !q.reserve() {
 		return nil
 	}

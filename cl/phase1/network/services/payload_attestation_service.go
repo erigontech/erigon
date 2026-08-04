@@ -196,7 +196,7 @@ func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint6
 
 // queuePendingAttestation defers an attestation until its referenced block is available.
 func (s *payloadAttestationService) queuePendingAttestation(blockRoot common.Hash, msg *cltypes.PayloadAttestationMessage) {
-	_ = s.pending.enqueueLazy(msg, func() (pendingPayloadAttestationKey, error) {
+	_ = s.pending.enqueue(msg, func() (pendingPayloadAttestationKey, error) {
 		return pendingPayloadAttestationKeyFor(blockRoot, msg), nil
 	})
 }
