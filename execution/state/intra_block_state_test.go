@@ -36,6 +36,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -252,7 +253,7 @@ func (test *snapshotTest) run(t *testing.T) bool {
 		snapshotRevs = make([]int, len(test.snapshots))
 		sindex       = 0
 	)
-	defer state.Release(false)
+	defer state.Close()
 	for i, action := range test.actions {
 		if len(test.snapshots) > sindex && i == test.snapshots[sindex] {
 			snapshotRevs[sindex] = state.PushSnapshot()
@@ -270,7 +271,7 @@ func (test *snapshotTest) run(t *testing.T) bool {
 		state.RevertToSnapshot(snapshotRevs[sindex], nil)
 		state.PopSnapshot(snapshotRevs[sindex])
 		err := test.checkEqual(state, checkstate)
-		checkstate.Release(false)
+		checkstate.Close()
 		if err != nil {
 			test.err = fmt.Errorf("state mismatch after revert to snapshot %d\n%w", sindex, err)
 			return false
@@ -404,7 +405,7 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 func TestTransientStorage(t *testing.T) {
 	t.Parallel()
 	state := New(nil)
-	defer state.Release(false)
+	defer state.Close()
 
 	key := accounts.InternKey(common.Hash{0x01})
 	value := uint256.NewInt(2)
@@ -427,6 +428,45 @@ func TestTransientStorage(t *testing.T) {
 	}
 }
 
+func TestCloseResetsRevisions(t *testing.T) {
+	t.Parallel()
+	state := New(nil)
+	t.Cleanup(state.Close)
+
+	state.PushSnapshot()
+	require.NotEmpty(t, state.revisions.valid)
+
+	state.Close()
+	require.Empty(t, state.revisions.valid)
+	require.Zero(t, state.revisions.nextId)
+}
+
+func TestCloseReleasesVersionedWrites(t *testing.T) {
+	t.Parallel()
+	state := NewWithVersionMap(&minimalStateReader{}, NewVersionMap(nil))
+	t.Cleanup(state.Close)
+	state.SetNoMaterialize(true)
+	state.SetTxContext(1, 0)
+
+	require.NoError(t, state.TouchAccount(accounts.InternAddress([20]byte{0xe1})))
+	require.NotZero(t, state.versionedWrites.Count())
+
+	handedOut := state.VersionedWrites()
+	state.Close()
+
+	require.Zero(t, state.versionedWrites.Count())
+	require.NotZero(t, handedOut.Count(), "the clone handed to callers must survive Close")
+}
+
+func TestCloseIsIdempotent(t *testing.T) {
+	t.Parallel()
+	state := New(nil)
+
+	state.PushSnapshot()
+	state.Close()
+	require.NotPanics(t, state.Close)
+}
+
 func TestVersionMapReadWriteDelete(t *testing.T) {
 	t.Parallel()
 
@@ -436,14 +476,14 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	reader := NewReaderV3(domains.AsGetter(tx))
 
 	s := NewWithVersionMap(reader, mvhm)
-	defer s.Release(false)
+	defer s.Close()
 
 	states := []*IntraBlockState{s}
 
 	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
 		sCopy := NewWithVersionMap(reader, mvhm)
-		defer sCopy.Release(false)
+		defer sCopy.Close()
 		sCopy.txIndex = i
 		states = append(states, sCopy)
 	}
@@ -517,14 +557,14 @@ func TestVersionMapRevert(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	s := NewWithVersionMap(reader, mvhm)
-	defer s.Release(false)
+	defer s.Close()
 
 	states := []*IntraBlockState{s}
 
 	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
 		sCopy := NewWithVersionMap(reader, mvhm)
-		defer sCopy.Release(false)
+		defer sCopy.Close()
 		sCopy.txIndex = i
 		states = append(states, sCopy)
 	}
@@ -581,13 +621,13 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	s := NewWithVersionMap(reader, mvhm)
-	defer s.Release(false)
+	defer s.Close()
 	states := []*IntraBlockState{s}
 
 	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
 		sCopy := NewWithVersionMap(reader, mvhm)
-		defer sCopy.Release(false)
+		defer sCopy.Close()
 		sCopy.txIndex = i
 		states = append(states, sCopy)
 	}
@@ -640,7 +680,7 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 	assert.NoError(t, err)
 
 	var io2 VersionedIO
-	states[2].MergeTxIOInto(&io2)
+	states[2].MergeTxIOInto(&io2, states[2].VersionedWrites())
 	valid := mvhm.ValidateVersion(2, &io2, func(rv, wv Version) VersionValidity {
 		if rv == wv {
 			return VersionValid
@@ -662,14 +702,14 @@ func TestVersionMapOverwrite(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	s := NewWithVersionMap(reader, mvhm)
-	defer s.Release(false)
+	defer s.Close()
 
 	states := []*IntraBlockState{s}
 
 	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
 		sCopy := NewWithVersionMap(reader, mvhm)
-		defer sCopy.Release(false)
+		defer sCopy.Close()
 		sCopy.txIndex = i
 		states = append(states, sCopy)
 	}
@@ -753,14 +793,14 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	s := NewWithVersionMap(reader, mvhm)
-	defer s.Release(false)
+	defer s.Close()
 
 	states := []*IntraBlockState{s}
 
 	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
 		sCopy := NewWithVersionMap(reader, mvhm)
-		defer sCopy.Release(false)
+		defer sCopy.Close()
 		sCopy.txIndex = i
 		states = append(states, sCopy)
 	}
@@ -895,19 +935,19 @@ func TestApplyVersionedWrites(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	s := NewWithVersionMap(reader, mvhm)
-	defer s.Release(false)
+	defer s.Close()
 
 	sClean := New(reader)
-	defer sClean.Release(false)
+	defer sClean.Close()
 	sSingleProcess := New(reader)
-	defer sSingleProcess.Release(false)
+	defer sSingleProcess.Close()
 
 	states := []*IntraBlockState{s}
 
 	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
 		sCopy := NewWithVersionMap(reader, mvhm)
-		defer sCopy.Release(false)
+		defer sCopy.Close()
 		sCopy.txIndex = i
 		states = append(states, sCopy)
 	}
@@ -994,7 +1034,7 @@ func TestMakeWriteSetClearsCodeDomainOnEmptyOverride(t *testing.T) {
 	code := []byte{0x60, 0x00, 0x60, 0x00, 0xf3}
 
 	deploy := New(NewReaderV3(domains.AsGetter(tx)))
-	defer deploy.Release(false)
+	defer deploy.Close()
 	require.NoError(t, deploy.CreateAccount(addr, true))
 	require.NoError(t, deploy.SetNonce(addr, 1, tracing.NonceChangeUnspecified))
 	require.NoError(t, deploy.SetCode(addr, code, tracing.CodeChangeUnspecified))
@@ -1005,11 +1045,162 @@ func TestMakeWriteSetClearsCodeDomainOnEmptyOverride(t *testing.T) {
 	require.Equal(t, code, got)
 
 	clear := New(NewReaderV3(domains.AsGetter(tx)))
-	defer clear.Release(false)
+	defer clear.Close()
 	require.NoError(t, clear.SetCode(addr, []byte{}, tracing.CodeChangeUnspecified))
 	require.NoError(t, clear.MakeWriteSet(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 1)))
 
 	got, _, err = domains.AsGetter(tx).GetLatest(kv.CodeDomain, addrVal[:])
 	require.NoError(t, err)
 	require.Empty(t, got, "clearing code must clear the CodeDomain entry")
+}
+
+// TestAddLogOnLogHookCopyContract pins the OnLog contract on the AddLog path:
+// the hook sees the emitted contents during the callback, and a copy taken then
+// stays intact after the buffer entry is reused by later blocks.
+func TestAddLogOnLogHookCopyContract(t *testing.T) {
+	t.Parallel()
+
+	ibs := New(NewNoopReader())
+	var copied []*types.Log
+	ibs.SetHooks(&tracing.Hooks{
+		OnLog: func(l *types.Log) { copied = append(copied, l.Copy()) },
+	})
+
+	ibs.SetTxContext(1, 0)
+	ibs.AddLog(&types.Log{Address: common.Address{0x11}, Topics: []common.Hash{{0x01}}, Data: []byte{0x01}})
+	require.Len(t, copied, 1)
+
+	for i := range 1000 {
+		ibs.AddLog(&types.Log{Address: common.Address{0x22}, Data: []byte{byte(i)}})
+	}
+	ibs.Reset()
+	ibs.SetTxContext(2, 0)
+	ibs.AddLog(&types.Log{Address: common.Address{0x33}, Data: []byte{0x99}})
+
+	require.Equal(t, common.Address{0x11}, copied[0].Address)
+	require.Equal(t, []common.Hash{{0x01}}, copied[0].Topics)
+	require.Equal(t, []byte{0x01}, []byte(copied[0].Data))
+}
+
+// TestNotifyLogHookGetsStableCopy pins the OnLog contract on the AllocLog path
+// the EVM's makeLog uses: the hook owns what it receives, so retaining it is
+// safe even though the buffer entry behind it is reused by a later block.
+func TestNotifyLogHookGetsStableCopy(t *testing.T) {
+	t.Parallel()
+
+	ibs := New(NewNoopReader())
+	var handed []*types.Log
+	ibs.SetHooks(&tracing.Hooks{
+		OnLog: func(l *types.Log) { handed = append(handed, l) },
+	})
+
+	emit := func(addr common.Address, topic common.Hash, data []byte) *types.Log {
+		lp := ibs.AllocLog(addr, 1, len(data))
+		lp.Topics[0] = topic
+		copy(lp.Data, data)
+		ibs.NotifyLog(lp)
+		return lp
+	}
+
+	ibs.SetTxContext(1, 0)
+	lp := emit(common.Address{0xaa}, common.Hash{0x01}, []byte{0x11, 0x22})
+	require.NotSame(t, lp, handed[0])
+
+	ibs.Reset()
+	ibs.SetTxContext(2, 0)
+	require.Same(t, lp, emit(common.Address{0xbb}, common.Hash{0x99}, []byte{0xde, 0xad}))
+
+	require.Equal(t, common.Hash{0x01}, handed[0].Topics[0])
+	require.Equal(t, []byte{0x11, 0x22}, []byte(handed[0].Data))
+	require.Equal(t, common.Hash{0x99}, handed[1].Topics[0])
+	require.Equal(t, []byte{0xde, 0xad}, []byte(handed[1].Data))
+}
+
+// TestAddLogKeepsCallerBlockNumber pins that BlockNumber stays a caller-assigned
+// field: execution/state does not know the block number, so a reused entry must
+// not carry the previous caller's value either.
+func TestAddLogKeepsCallerBlockNumber(t *testing.T) {
+	t.Parallel()
+
+	ibs := New(NewNoopReader())
+	ibs.SetTxContext(7, 0)
+	ibs.AddLog(&types.Log{Address: common.Address{0x01}, BlockNumber: 42})
+	ibs.AddLog(&types.Log{Address: common.Address{0x02}})
+
+	logs := ibs.GetRawLogs(0)
+	require.Len(t, logs, 2)
+	require.Equal(t, hexutil.Uint64(42), logs[0].BlockNumber)
+	require.Zero(t, logs[1].BlockNumber, "an unset BlockNumber must not inherit the previous log's")
+}
+
+// TestAllocLogPreservesCapacityAcrossRevert pins that fully reverting a tx's
+// logs (which truncates the outer buffer) and then logging again reuses the
+// inner buffer's capacity instead of dropping it — the same capacity Reset
+// preserves.
+func TestAllocLogPreservesCapacityAcrossRevert(t *testing.T) {
+	t.Parallel()
+
+	ibs := New(NewNoopReader())
+	ibs.SetTxContext(1, 0)
+	snap := ibs.PushSnapshot()
+	for i := range 8 {
+		ibs.AddLog(&types.Log{Address: common.Address{byte(i)}})
+	}
+	require.Len(t, ibs.logs, 2)
+	capBefore := cap(ibs.logs[1])
+	require.GreaterOrEqual(t, capBefore, 8)
+
+	ibs.RevertToSnapshot(snap, nil)
+	require.Len(t, ibs.logs, 1) // the tx's slot was truncated off the outer buffer
+
+	ibs.AddLog(&types.Log{Address: common.Address{0xff}})
+	require.Len(t, ibs.logs, 2)
+	require.Equal(t, capBefore, cap(ibs.logs[1]), "inner log buffer capacity must survive revert+relog")
+}
+
+func TestResetDropsOversizedLogDataBuffers(t *testing.T) {
+	t.Parallel()
+
+	ibs := New(NewNoopReader())
+	ibs.SetTxContext(1, 0)
+	small := ibs.AllocLog(common.Address{0x01}, 1, 8)
+	big := ibs.AllocLog(common.Address{0x02}, 1, maxReusableLogDataCap+1)
+
+	ibs.Reset()
+	ibs.SetTxContext(2, 0)
+	require.Same(t, small, ibs.AllocLog(common.Address{0x03}, 1, 8), "normal-size entry is reused")
+	relog := ibs.AllocLog(common.Address{0x04}, 1, 8)
+	require.NotSame(t, big, relog, "oversized entry must not survive Reset")
+	require.LessOrEqual(t, cap(relog.Data), maxReusableLogDataCap)
+}
+
+// TestLogIndexIsBlockWide pins that AddLog stamps a block-wide log index:
+// receipts.DeriveFields derives FirstLogIndexWithinBlock from Logs[0].Index, so
+// the counter must run across transactions, roll back with a reverted log, and
+// restart at zero on Reset.
+func TestLogIndexIsBlockWide(t *testing.T) {
+	t.Parallel()
+
+	ibs := New(NewNoopReader())
+	ibs.SetTxContext(1, 0)
+	ibs.AddLog(&types.Log{Address: common.Address{0x01}})
+	ibs.AddLog(&types.Log{Address: common.Address{0x02}})
+
+	ibs.SetTxContext(1, 1)
+	snap := ibs.PushSnapshot()
+	ibs.AddLog(&types.Log{Address: common.Address{0x03}})
+	ibs.RevertToSnapshot(snap, nil)
+	ibs.AddLog(&types.Log{Address: common.Address{0x04}})
+
+	tx0, tx1 := ibs.GetRawLogs(0), ibs.GetRawLogs(1)
+	require.Len(t, tx0, 2)
+	require.Len(t, tx1, 1)
+	require.Equal(t, hexutil.Uint(0), tx0[0].Index)
+	require.Equal(t, hexutil.Uint(1), tx0[1].Index)
+	require.Equal(t, hexutil.Uint(2), tx1[0].Index, "index continues across txs and reuses a reverted slot")
+
+	ibs.Reset()
+	ibs.SetTxContext(2, 0)
+	ibs.AddLog(&types.Log{Address: common.Address{0x05}})
+	require.Equal(t, hexutil.Uint(0), ibs.GetRawLogs(0)[0].Index, "next block restarts at zero")
 }

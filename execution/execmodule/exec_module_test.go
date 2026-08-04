@@ -59,8 +59,10 @@ import (
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/txnprovider"
+	txnpool "github.com/erigontech/erigon/txnprovider/txpool"
 )
 
 type blockingTxnProvider struct {
@@ -88,6 +90,64 @@ func (p *blockingTxnProvider) ProvideTxns(ctx context.Context, _ ...txnprovider.
 	}
 	p.emptyOnce.Do(func() { close(p.exhausted) })
 	return nil, nil
+}
+
+type rewindingTxnProvider struct {
+	pool  *txnpool.TxPool
+	head  *remoteproto.StateChangeBatch
+	ready chan struct{}
+	once  sync.Once
+	err   error
+}
+
+func (p *rewindingTxnProvider) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	p.once.Do(func() {
+		p.err = p.pool.OnNewBlock(ctx, p.head, txnpool.TxnSlots{}, txnpool.TxnSlots{}, txnpool.TxnSlots{})
+		close(p.ready)
+	})
+	if p.err != nil {
+		return nil, p.err
+	}
+	return p.pool.ProvideTxns(ctx, opts...)
+}
+
+type observingTxnProvider struct {
+	txnprovider.TxnProvider
+	txnCounts chan int
+}
+
+func (p *observingTxnProvider) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	txns, err := p.TxnProvider.ProvideTxns(ctx, opts...)
+	if err == nil {
+		p.txnCounts <- len(txns)
+	}
+	return txns, err
+}
+
+func waitForProvidedTxnCount(t *testing.T, txnCounts <-chan int, want int) {
+	t.Helper()
+	timer := time.NewTimer(10 * time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case got := <-txnCounts:
+			if got == want {
+				return
+			}
+		case <-timer.C:
+			t.Fatalf("transaction provider did not return %d transactions", want)
+		}
+	}
+}
+
+func txPoolHead(block *types.Block) *remoteproto.StateChangeBatch {
+	return &remoteproto.StateChangeBatch{
+		PendingBlockBaseFee: block.BaseFee().Uint64(),
+		BlockGasLimit:       block.GasLimit(),
+		ChangeBatch: []*remoteproto.StateChange{
+			{BlockHeight: block.NumberU64()},
+		},
+	}
 }
 
 func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
@@ -682,6 +742,65 @@ func TestAssembleBlockWithConcurrentSiblingCommit(t *testing.T) {
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
 }
 
+func TestGetAssembledBlockHonorsCanceledContextWhenTxPoolIsBehindParent(t *testing.T) {
+	ctx := t.Context()
+	m := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chainPack))
+
+	parent := chainPack.TopBlock
+	provider := &rewindingTxnProvider{
+		pool:  m.TxPool,
+		head:  txPoolHead(chainPack.Blocks[len(chainPack.Blocks)-2]),
+		ready: make(chan struct{}),
+	}
+	parentBeaconBlockRoot := randomHash()
+	payloadID, err := assembleBlock(ctx, m.ExecModule, &builder.Parameters{
+		ParentHash:            parent.Hash(),
+		Timestamp:             parent.Time() + 1,
+		PrevRandao:            parent.Header().MixDigest,
+		SuggestedFeeRecipient: common.Address{1},
+		Withdrawals:           make([]*types.Withdrawal, 0),
+		ParentBeaconBlockRoot: &parentBeaconBlockRoot,
+		CustomTxnProvider:     provider,
+	})
+	require.NoError(t, err)
+
+	select {
+	case <-provider.ready:
+	case <-time.After(10 * time.Second):
+		t.Fatal("builder did not reach transaction selection")
+	}
+
+	requestCtx, cancel := context.WithCancel(ctx)
+	cancel()
+	resultCh := make(chan error, 1)
+	go func() {
+		_, err := m.ExecModule.GetAssembledBlock(requestCtx, payloadID)
+		resultCh <- err
+	}()
+
+	var requestErr error
+	blocked := false
+	select {
+	case requestErr = <-resultCh:
+	case <-time.After(time.Second):
+		blocked = true
+	}
+
+	require.NoError(t, m.TxPool.OnNewBlock(ctx, txPoolHead(parent), txnpool.TxnSlots{}, txnpool.TxnSlots{}, txnpool.TxnSlots{}))
+	if blocked {
+		select {
+		case <-resultCh:
+		case <-time.After(10 * time.Second):
+			t.Fatal("GetAssembledBlock did not return after restoring the txpool head")
+		}
+		t.Fatal("GetAssembledBlock remained blocked after context cancellation while the txpool was behind the builder parent")
+	}
+	require.ErrorIs(t, requestErr, context.Canceled)
+}
+
 func TestAssembleBlockWithFreshlyAddedTxns(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")
@@ -702,6 +821,10 @@ func TestAssembleBlockWithFreshlyAddedTxns(t *testing.T) {
 	require.NoError(t, err)
 	baseFee := chainPack.TopBlock.BaseFee().Uint64()
 	addTwoTxnsToPool(ctx, 1, t, m, txpool, baseFee)
+	provider := &observingTxnProvider{
+		TxnProvider: m.TxPool,
+		txnCounts:   make(chan int, 16),
+	}
 
 	var parentBeaconBlockRoot common.Hash
 	_, err = rand.Read(parentBeaconBlockRoot[:])
@@ -713,14 +836,16 @@ func TestAssembleBlockWithFreshlyAddedTxns(t *testing.T) {
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
 		ParentBeaconBlockRoot: &parentBeaconBlockRoot,
+		CustomTxnProvider:     provider,
 	})
 	require.NoError(t, err)
 
-	// Add new transactions with a delay
-	time.Sleep(300 * time.Millisecond)
+	waitForProvidedTxnCount(t, provider.txnCounts, 2)
+	waitForProvidedTxnCount(t, provider.txnCounts, 0)
 	addTwoTxnsToPool(ctx, 3, t, m, txpool, baseFee)
+	waitForProvidedTxnCount(t, provider.txnCounts, 2)
+	waitForProvidedTxnCount(t, provider.txnCounts, 0)
 
-	// The block should have all four transactions
 	block, err := getAssembledBlock(ctx, exec, payloadId)
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), block.NumberU64())
@@ -1769,12 +1894,12 @@ func drainHeaders(t *testing.T, ch <-chan [][]byte, timeout time.Duration) {
 }
 
 // TestAssembleBlockStateGasLimit verifies that the builder respects the EIP-8037
-// block validity invariant: gas_used = max(regular, state) <= gas_limit.
+// block validity invariant: gas_used = max(execution, state) <= gas_limit.
 //
 // Contract creations have high runtime state gas (~184K per create at
-// CostPerStateByte=1530, STATE_BYTES_PER_NEW_ACCOUNT=120) but low regular gas
+// CostPerStateByte=1530, STATE_BYTES_PER_NEW_ACCOUNT=120) but low execution gas
 // (~30K). With a 500K gas limit, about 3 creates would push state gas past
-// the limit even though regular gas has room. Without the fix the builder
+// the limit even though execution gas has room. Without the fix the builder
 // would produce an invalid block.
 func TestAssembleBlockStateGasLimit(t *testing.T) {
 	t.Parallel()
@@ -1808,7 +1933,7 @@ func TestAssembleBlockStateGasLimit(t *testing.T) {
 	require.NoError(t, err)
 
 	// Submit 10 contract creation txns to the pool.
-	// Each has ~184K runtime state gas but only ~30K regular gas.
+	// Each has ~184K runtime state gas but only ~30K execution gas.
 	baseFee := chainPack.TopBlock.BaseFee().Uint64()
 	deployCode := []byte{0x60, 0x00} // PUSH1 0x00 — minimal contract
 	rlpTxs := make([][]byte, 10)
@@ -1851,7 +1976,7 @@ func TestAssembleBlockStateGasLimit(t *testing.T) {
 
 	// EIP-8037 invariant: gas_used <= gas_limit.
 	require.LessOrEqual(t, block.GasUsed(), block.GasLimit(),
-		"gas_used (max of regular, state) must not exceed gas_limit")
+		"gas_used (max of execution, state) must not exceed gas_limit")
 
 	// Block must pass full validation (insert + validate + FCU).
 	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
@@ -1863,7 +1988,7 @@ func TestAssembleBlockStateGasLimit(t *testing.T) {
 // for contract creations tested above.
 //
 // A deployed contract writes 4 new storage slots per call (~150K state gas
-// and ~41K regular gas). The txpool cannot filter these by state gas; the
+// and ~41K execution gas). The txpool cannot filter these by state gas; the
 // check inside applyTransaction prevents the block from exceeding gas_limit.
 func TestAssembleBlockStateGasLimitSSTORE(t *testing.T) {
 	t.Parallel()
@@ -1913,8 +2038,8 @@ func TestAssembleBlockStateGasLimitSSTORE(t *testing.T) {
 	require.NoError(t, err)
 
 	// Submit 10 call txns. Each writes 4 new slots (~150K state gas, ~41K
-	// regular gas). With a 500K gas limit, 3 calls fit (~451K state gas)
-	// but the 4th would push to ~601K. The txpool's regular-gas filter lets
+	// execution gas). With a 500K gas limit, 3 calls fit (~451K state gas)
+	// but the 4th would push to ~601K. The txpool's execution-gas filter lets
 	// them all through, so the applyTransaction check is the only defense.
 	baseFee = chainPack.TopBlock.BaseFee().Uint64()
 	rlpTxs := make([][]byte, 10)
@@ -1958,7 +2083,7 @@ func TestAssembleBlockStateGasLimitSSTORE(t *testing.T) {
 
 	// EIP-8037 invariant: gas_used <= gas_limit.
 	require.LessOrEqual(t, block.GasUsed(), block.GasLimit(),
-		"gas_used (max of regular, state) must not exceed gas_limit")
+		"gas_used (max of execution, state) must not exceed gas_limit")
 
 	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
 	require.NoError(t, err)
@@ -1966,8 +2091,8 @@ func TestAssembleBlockStateGasLimitSSTORE(t *testing.T) {
 
 // TestAssembleBlockGasPoolSnapshotRestoreBug exercises the per-tx gas pool
 // snapshot/restore in the block assembler's commitTx path. Under EIP-8037 the
-// pool tracks regular and state gas as separate dimensions, so a restore that
-// only captures the regular dimension and seeds both on restore wrongly
+// pool tracks execution and state gas as separate dimensions, so a restore that
+// only captures the execution dimension and seeds both on restore wrongly
 // inflates the state pool, letting a follow-up tx exceed the block's
 // state-gas limit.
 //
@@ -1983,7 +2108,7 @@ func TestAssembleBlockGasPoolSnapshotRestoreBug(t *testing.T) {
 	ctx := t.Context()
 
 	// Initcode that deploys a 100-byte runtime (100 zero bytes) via CODECOPY.
-	// Per byte deployed: 1530 state gas (CPSB) + 200 regular gas. So each
+	// Per byte deployed: 1530 state gas (CPSB) + 200 execution gas. So each
 	// CREATE consumes ~153K code-deposit state gas on top of the 183.6K runtime
 	// NEW_ACCOUNT charge — a total of ~337K state per tx.
 	const runtimeLen = 100
@@ -2074,7 +2199,7 @@ func TestAssembleBlockGasPoolSnapshotRestoreBug(t *testing.T) {
 
 	require.Greater(t, len(block.Transactions()), 0, "block should contain at least one tx")
 	require.LessOrEqual(t, block.GasUsed(), block.GasLimit(),
-		"gas_used (max of regular, state) must not exceed gas_limit")
+		"gas_used (max of execution, state) must not exceed gas_limit")
 
 	require.NoError(t, insertValidateAndUfc1By1(ctx, exec, []*types.Block{block}))
 }
@@ -2083,16 +2208,16 @@ func TestAssembleBlockGasPoolSnapshotRestoreBug(t *testing.T) {
 // per-batch gas-pool initialisation. The block builder calls AddTransactions
 // repeatedly with batches of up to 50 txs from the txpool. Each call must
 // build the pool with the *per-dimension* remaining budget; seeding both
-// dimensions from the regular-only cumulative gas wrongly inflates the state
-// pool when state gas has run ahead of regular gas after the previous batch,
+// dimensions from the execution-only cumulative gas wrongly inflates the state
+// pool when state gas has run ahead of execution gas after the previous batch,
 // letting a tx in the next batch consume state past gas_limit.
 //
 // The scenario: 50 contract creations in batch 1 push cumulative state gas
-// near the block gas limit while keeping cumulative regular gas low (CREATE
-// has ~184K runtime state vs ~30K intrinsic regular per tx). The 51st tx has
+// near the block gas limit while keeping cumulative execution gas low (CREATE
+// has ~184K runtime state vs ~30K intrinsic execution per tx). The 51st tx has
 // a large code-deposit state charge. With the pool
-// init seeded from regular gas only, batch 2 starts with a state pool that
-// matches the regular dimension — i.e. far more than the real remaining
+// init seeded from execution gas only, batch 2 starts with a state pool that
+// matches the execution dimension — i.e. far more than the real remaining
 // state budget — and the 51st tx is wrongly accepted.
 func TestAssembleBlockGasPoolMultiBatchInitBug(t *testing.T) {
 	t.Parallel()
@@ -2148,7 +2273,7 @@ func TestAssembleBlockGasPoolMultiBatchInitBug(t *testing.T) {
 	batch1Init := []byte{0x60, 0x00, 0x60, 0x00, 0xf3}
 
 	// Batch 2 initcode deploys a ~660-byte runtime via CODECOPY. Per-byte
-	// deposit cost: 1530 state + 200 regular. ~660 bytes → ~1M state on top
+	// deposit cost: 1530 state + 200 execution. ~660 bytes → ~1M state on top
 	// of the 184K runtime charge.
 	const triggerRuntimeLen = 660
 	triggerInit := []byte{
@@ -2205,7 +2330,7 @@ func TestAssembleBlockGasPoolMultiBatchInitBug(t *testing.T) {
 
 	require.Greater(t, len(block.Transactions()), 0, "block should contain at least one tx")
 	require.LessOrEqual(t, block.GasUsed(), block.GasLimit(),
-		"gas_used (max of regular, state) must not exceed gas_limit")
+		"gas_used (max of execution, state) must not exceed gas_limit")
 
 	require.NoError(t, insertValidateAndUfc1By1(ctx, exec, []*types.Block{block}))
 }

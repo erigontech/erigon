@@ -147,7 +147,7 @@ func (e EventRangeExtractor) Extract(ctx context.Context, blockFrom, blockTo uin
 			if lvl >= log.LvlInfo {
 				dbg.ReadMemStats(&m)
 			}
-			logger.Log(lvl, "[bor snapshots] Dumping bor events", "block num", blockNum,
+			logger.Log(lvl, "[bor snapshots] Dumping bor events", "blockNum", blockNum,
 				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 			)
 		default:
@@ -539,7 +539,7 @@ func buildValueIndex(ctx context.Context, version version.Versions, sn snaptype.
 			nextPos, _ = g.Skip()
 			binary.BigEndian.PutUint64(key[:], i)
 			i++
-			if err = rs.AddKey(key[:], offset); err != nil {
+			if err := rs.AddKey(key[:], offset); err != nil {
 				return err
 			}
 			select {

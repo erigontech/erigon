@@ -539,7 +539,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		}
 	}
 
-	if err = kvWriter.Compress(); err != nil {
+	if err := kvWriter.Compress(); err != nil {
 		return nil, nil, nil, err
 	}
 	kvWriter.Close()
@@ -555,11 +555,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	if dt.d.Accessors.Has(statecfg.AccessorBTree) {
 		btPath := dt.d.kvBtAccessorNewFilePath(fromStep, toStep)
 		kveiPath := dt.d.kvExistenceIdxNewFilePath(fromStep, toStep)
-		btM := btindex.DefaultBtreeM
-		if toStep == 0 && dt.d.FilenameBase == "commitment" {
-			btM = 128
-		}
-		valuesIn.bindex, err = btindex.CreateBtreeIndexWithDecompressor(btPath, kveiPath, btM, dt.dataReader(valuesIn.decompressor), *dt.salt, ps, dt.d.dirs.Tmp, dt.d.logger, dt.d.noFsync, dt.d.Accessors)
+		valuesIn.bindex, err = btindex.CreateBtreeIndexWithDecompressor(btPath, kveiPath, dt.dataReader(valuesIn.decompressor), *dt.salt, ps, dt.d.dirs.Tmp, dt.d.logger, dt.d.noFsync, dt.d.Accessors)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s btindex [%d-%d]: %w", dt.d.FilenameBase, r.values.from, r.values.to, err)
 		}
@@ -722,7 +718,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 			p.Processed.Store(i)
 		}
 	}
-	if err = write.Compress(); err != nil {
+	if err := write.Compress(); err != nil {
 		return nil, err
 	}
 	comp.Close()
@@ -885,7 +881,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 
 					histKeyBuf = historyKey(txNum, ci1.key, histKeyBuf)
 
-					if err = pagedWr.Add(histKeyBuf, v); err != nil {
+					if err := pagedWr.Add(histKeyBuf, v); err != nil {
 						return nil, nil, err
 					}
 				}
@@ -909,7 +905,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		}
 		ps.Delete(p)
 
-		if err = ht.h.buildVI(ctx, idxPath, decomp, indexIn.decompressor, indexIn.startTxNum, ps); err != nil {
+		if err := ht.h.buildVI(ctx, idxPath, decomp, indexIn.decompressor, indexIn.startTxNum, ps); err != nil {
 			return nil, nil, err
 		}
 

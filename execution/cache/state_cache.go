@@ -185,8 +185,7 @@ func (c *StateCache) PutCodeSizeByHash(codeHash []byte, size int, txNum uint64) 
 }
 
 // GetAddrCodeHash returns the Ethereum codeHash for addr without an
-// account-domain round-trip. (0xff..ff/false, no entry on miss; (h, true)
-// on hit.)
+// account-domain round-trip. The hash is zero when ok is false.
 func (c *StateCache) GetAddrCodeHash(addr []byte) ([32]byte, bool) {
 	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok {

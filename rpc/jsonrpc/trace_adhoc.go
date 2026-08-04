@@ -442,7 +442,8 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 	}
 	trace.TraceAddress = make([]int, len(ot.traceAddr))
 	copy(trace.TraceAddress, ot.traceAddr)
-	if create {
+	switch {
+	case create:
 		action := CreateTraceAction{}
 		action.From = from.Value()
 		action.CreationMethod = strings.ToLower(typ.String())
@@ -450,7 +451,7 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 		action.Init = bytes.Clone(input)
 		action.Value.ToInt().Set(value.ToBig())
 		trace.Action = &action
-	} else if typ == vm.SELFDESTRUCT {
+	case typ == vm.SELFDESTRUCT:
 		trace.Type = SUICIDE
 		trace.Result = nil
 		action := &SuicideTraceAction{}
@@ -458,7 +459,7 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 		action.RefundAddress = to.Value()
 		action.Balance.ToInt().Set(value.ToBig())
 		trace.Action = action
-	} else {
+	default:
 		action := CallTraceAction{}
 		switch typ {
 		case vm.CALL:
@@ -585,10 +586,10 @@ func (ot *OeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing
 			}
 			switch ot.lastOp {
 			case vm.CALLDATALOAD, vm.SLOAD, vm.MLOAD, vm.CALLDATASIZE, vm.LT, vm.GT, vm.DIV, vm.SDIV, vm.SAR, vm.AND, vm.EQ, vm.CALLVALUE, vm.ISZERO,
-				vm.ADD, vm.EXP, vm.CALLER, vm.KECCAK256, vm.SUB, vm.ADDRESS, vm.GAS, vm.MUL, vm.RETURNDATASIZE, vm.NOT, vm.SHR, vm.SHL,
-				vm.EXTCODESIZE, vm.SLT, vm.OR, vm.NUMBER, vm.PC, vm.TIMESTAMP, vm.BALANCE, vm.SELFBALANCE, vm.MULMOD, vm.ADDMOD, vm.BASEFEE,
-				vm.BLOCKHASH, vm.BYTE, vm.XOR, vm.ORIGIN, vm.CODESIZE, vm.MOD, vm.SIGNEXTEND, vm.GASLIMIT, vm.DIFFICULTY, vm.SGT, vm.GASPRICE,
-				vm.MSIZE, vm.EXTCODEHASH, vm.SMOD, vm.CHAINID, vm.COINBASE, vm.TLOAD:
+				vm.ADD, vm.EXP, vm.CALLER, vm.KECCAK256, vm.SUB, vm.ADDRESS, vm.GAS, vm.MUL, vm.RETURNDATASIZE, vm.NOT, vm.SHR, vm.SHL, vm.CLZ,
+				vm.EXTCODESIZE, vm.SLT, vm.OR, vm.NUMBER, vm.SLOTNUM, vm.PC, vm.TIMESTAMP, vm.BALANCE, vm.SELFBALANCE, vm.MULMOD, vm.ADDMOD, vm.BASEFEE,
+				vm.BLOBHASH, vm.BLOBBASEFEE, vm.BLOCKHASH, vm.BYTE, vm.XOR, vm.ORIGIN, vm.CODESIZE, vm.MOD, vm.SIGNEXTEND, vm.GASLIMIT, vm.DIFFICULTY,
+				vm.SGT, vm.GASPRICE, vm.MSIZE, vm.EXTCODEHASH, vm.SMOD, vm.CHAINID, vm.COINBASE, vm.TLOAD:
 				showStack = 1
 			}
 			for i := showStack - 1; i >= 0; i-- {
@@ -768,7 +769,8 @@ func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) error
 		if err != nil {
 			return err
 		}
-		if initialExist {
+		switch {
+		case initialExist:
 			if exist {
 				var allEqual = len(accountDiff.Storage) == 0
 				ifromBalance, err := initialIbs.GetBalance(addr)
@@ -853,7 +855,7 @@ func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) error
 					accountDiff.Nonce = m
 				}
 			}
-		} else if exist {
+		case exist:
 			{
 				balance, err := ibs.GetBalance(addr)
 				if err != nil {
@@ -887,7 +889,7 @@ func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) error
 				delete(sm, "*")
 				sm["+"] = &str.To
 			}
-		} else {
+		default:
 			toRemove = append(toRemove, addr)
 		}
 	}
@@ -1016,7 +1018,7 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 	}
 
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, wdiffs, _, err := api.callBlock(ctx, tx, block, traceTypes, *gasBailOut, chainConfig, traceConfig)
+	traces, wdiffs, err := api.callBlock(ctx, tx, block, traceTypes, *gasBailOut, chainConfig, traceConfig, nil /* withSyscall */)
 	if err != nil {
 		return nil, err
 	}
@@ -1142,6 +1144,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	}
 
 	ibs := state.New(stateReader)
+	defer ibs.Close()
 
 	_, storeEVM, cleanup := setupEVMTimeout(ctx, api.evmCallTimeout)
 	defer cleanup()
@@ -1235,12 +1238,13 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		sdMap := make(map[accounts.Address]*StateDiffAccount)
 		traceResult.StateDiff = sdMap
 		sd := &StateDiff{sdMap: sdMap}
-		if err = ibs.FinalizeTx(evm.ChainRules(), sd); err != nil {
+		if err := ibs.FinalizeTx(evm.ChainRules(), sd); err != nil {
 			return nil, err
 		}
 		// Create initial IntraBlockState, we will compare it with ibs (IntraBlockState after the transaction)
 		initialIbs := state.New(stateReader)
-		if err = sd.CompareStates(initialIbs, ibs); err != nil {
+		defer initialIbs.Close()
+		if err := sd.CompareStates(initialIbs, ibs); err != nil {
 			return nil, err
 		}
 	}
@@ -1279,10 +1283,10 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 		}
 		callParams = append(callParams, TraceCallParam{})
 		args := &callParams[len(callParams)-1]
-		if err = dec.Decode(args); err != nil {
+		if err := dec.Decode(args); err != nil {
 			return nil, err
 		}
-		if err = dec.Decode(&args.traceTypes); err != nil {
+		if err := dec.Decode(&args.traceTypes); err != nil {
 			return nil, err
 		}
 		tok, err = dec.Token()
@@ -1358,6 +1362,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	noop := state.NewNoopWriter()
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 	ibs := state.New(cachedReader)
+	defer ibs.Close()
 
 	trace, _, err := api.doCallBlock(ctx, tx, stateReader, stateCache, cachedWriter, ibs,
 		txns, msgs, callParams, parentNrOrHash, parentHeader, true /* gasBailout */, traceConfig)
@@ -1553,26 +1558,31 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 		chainRules := blockCtx.Rules(chainConfig)
 		traceResult.Output = bytes.Clone(execResult.ReturnData)
 		if traceTypeStateDiff {
-			initialIbs := state.New(cloneReader)
-			if !txFinalized {
-				if err = ibs.FinalizeTx(chainRules, sd); err != nil {
-					return nil, nil, err
+			// Closure so the per-tx state is closed on every exit path.
+			if err := func() error {
+				initialIbs := state.New(cloneReader)
+				defer initialIbs.Close()
+				if !txFinalized {
+					if err := ibs.FinalizeTx(chainRules, sd); err != nil {
+						return err
+					}
 				}
-			}
-			if sd != nil {
-				if err = sd.CompareStates(initialIbs, ibs); err != nil {
-					return nil, nil, err
+				if sd != nil {
+					return sd.CompareStates(initialIbs, ibs)
 				}
+				return nil
+			}(); err != nil {
+				return nil, nil, err
 			}
 		} else if !txFinalized {
-			if err = ibs.FinalizeTx(chainRules, noop); err != nil {
+			if err := ibs.FinalizeTx(chainRules, noop); err != nil {
 				return nil, nil, err
 			}
 		}
 		if traceTypeStateDiff {
 			// CommitBlock after each tx to flush ibs changes into stateCache,
 			// so the next tx's cloneReader captures the correct "before" state
-			if err = ibs.CommitBlock(chainRules, cachedWriter); err != nil {
+			if err := ibs.CommitBlock(chainRules, cachedWriter); err != nil {
 				return nil, nil, err
 			}
 		}
@@ -1756,28 +1766,29 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 	traceResult.Output = bytes.Clone(execResult.ReturnData)
 	if traceTypeStateDiff {
 		initialIbs := state.New(cloneReader)
+		defer initialIbs.Close()
 		if !txFinalized {
-			if err = ibs.FinalizeTx(chainRules, sd); err != nil {
+			if err := ibs.FinalizeTx(chainRules, sd); err != nil {
 				return nil, err
 			}
 		}
 
 		if sd != nil {
-			if err = sd.CompareStates(initialIbs, ibs); err != nil {
+			if err := sd.CompareStates(initialIbs, ibs); err != nil {
 				return nil, err
 			}
 		}
 
-		if err = ibs.CommitBlock(chainRules, cachedWriter); err != nil {
+		if err := ibs.CommitBlock(chainRules, cachedWriter); err != nil {
 			return nil, err
 		}
 	} else {
 		if !txFinalized {
-			if err = ibs.FinalizeTx(chainRules, noop); err != nil {
+			if err := ibs.FinalizeTx(chainRules, noop); err != nil {
 				return nil, err
 			}
 		}
-		if err = ibs.CommitBlock(chainRules, cachedWriter); err != nil {
+		if err := ibs.CommitBlock(chainRules, cachedWriter); err != nil {
 			return nil, err
 		}
 	}
@@ -1860,6 +1871,7 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	}
 
 	ibs := state.New(stateReader)
+	defer ibs.Close()
 
 	var ot OeTracer
 	ot.config, err = parseOeTracerConfig(nil)
@@ -1917,11 +1929,12 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 		sdMap := make(map[accounts.Address]*StateDiffAccount)
 		traceResult.StateDiff = sdMap
 		sd := &StateDiff{sdMap: sdMap}
-		if err = ibs.FinalizeTx(evm.ChainRules(), sd); err != nil {
+		if err := ibs.FinalizeTx(evm.ChainRules(), sd); err != nil {
 			return nil, err
 		}
 		initialIbs := state.New(stateReader)
-		if err = sd.CompareStates(initialIbs, ibs); err != nil {
+		defer initialIbs.Close()
+		if err := sd.CompareStates(initialIbs, ibs); err != nil {
 			return nil, err
 		}
 	}

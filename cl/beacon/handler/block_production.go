@@ -531,14 +531,15 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	rewardsCollector := blockBuldingMachine.BlockRewardsCollector
 	consensusValue := rewardsCollector.Attestations + rewardsCollector.ProposerSlashings + rewardsCollector.AttesterSlashings + rewardsCollector.SyncAggregate
 	var resp *beaconhttp.BeaconResponse
-	if block.IsBlinded() {
+	switch {
+	case block.IsBlinded():
 		resp = newBeaconResponse(block.ToBlinded())
-	} else if block.Version() >= clparams.GloasVersion {
+	case block.Version() >= clparams.GloasVersion:
 		// [Modified in Gloas:EIP7732] Return bare BeaconBlock (not BlockContents wrapper).
 		// In GLOAS/ePBS, blobs are delivered via the ExecutionPayloadEnvelope, not the
 		// block production response. The VC (Lighthouse v4) expects a plain BeaconBlock.
 		resp = newBeaconResponse(block.ToExecution().Block)
-	} else {
+	default:
 		resp = newBeaconResponse(block.ToExecution())
 	}
 	resp = resp.WithVersion(block.Version()).With("execution_payload_blinded", block.IsBlinded()).
@@ -885,11 +886,12 @@ func (a *ApiHandler) produceBeaconBody(
 			// parent bid. Pre-GLOAS blocks always had their payloads executed, so
 			// the EL head is parentBid.BlockHash (the last pre-GLOAS block hash).
 			isPreGloasParent := parentBid.ParentBlockHash == (common.Hash{}) && parentBid.Slot == 0
-			if isPreGloasParent {
+			switch {
+			case isPreGloasParent:
 				head = parentBid.BlockHash
-			} else if a.forkchoiceStore.GetHeadPayloadStatus() == cltypes.PayloadStatusFull &&
+			case a.forkchoiceStore.GetHeadPayloadStatus() == cltypes.PayloadStatusFull &&
 				a.forkchoiceStore.HasEnvelope(baseBlockRoot) &&
-				a.forkchoiceStore.ShouldBuildOnFull(forkchoice.ForkChoiceNode{Root: baseBlockRoot, PayloadStatus: cltypes.PayloadStatusFull}) {
+				a.forkchoiceStore.ShouldBuildOnFull(forkchoice.ForkChoiceNode{Root: baseBlockRoot, PayloadStatus: cltypes.PayloadStatusFull}):
 				head = parentBid.BlockHash
 				// Copy state and apply parent execution payload to compute correct withdrawals
 				stateCopy, err := baseState.Copy()
@@ -912,7 +914,7 @@ func (a *ApiHandler) produceBeaconBody(
 				// ProcessParentExecutionPayload can verify the root match
 				// against the parent bid's ExecutionRequestsRoot.
 				beaconBody.ParentExecutionRequests = envelope.Message.ExecutionRequests
-			} else {
+			default:
 				head = parentBid.ParentBlockHash
 			}
 		} else {
@@ -972,7 +974,8 @@ func (a *ApiHandler) produceBeaconBody(
 		retryTime := 10 * time.Millisecond
 		feeRecipient, _ := a.validatorParams.GetFeeRecipient(proposerIndex)
 		var withdrawals []*types.Withdrawal
-		if gloasWithdrawalsState != nil {
+		switch {
+		case gloasWithdrawalsState != nil:
 			// GLOAS FULL: compute withdrawals from the state copy with parent payload applied
 			clWithdrawals, err := state.GetExpectedWithdrawals(
 				gloasWithdrawalsState,
@@ -991,7 +994,7 @@ func (a *ApiHandler) produceBeaconBody(
 					Address:   w.Address,
 				})
 			}
-		} else if stateVersion >= clparams.GloasVersion && gloasWithdrawalsState == nil {
+		case stateVersion >= clparams.GloasVersion && gloasWithdrawalsState == nil:
 			// GLOAS EMPTY: use cached payload_expected_withdrawals from state
 			cachedWithdrawals := baseState.GetPayloadExpectedWithdrawals()
 			if cachedWithdrawals != nil {
@@ -1006,7 +1009,7 @@ func (a *ApiHandler) produceBeaconBody(
 					})
 				}
 			}
-		} else {
+		default:
 			// Pre-GLOAS: compute withdrawals normally
 			clWithdrawals, err := state.GetExpectedWithdrawals(
 				baseState,
@@ -1387,8 +1390,8 @@ AttLoop:
 		wc := s.ValidatorSet().
 			Get(int(blsExecutionChange.Message.ValidatorIndex)).
 			WithdrawalCredentials()
-		// Check the validator's withdrawal credentials prefix.
-		if wc[0] != byte(a.beaconChainCfg.ETH1AddressWithdrawalPrefixByte) {
+		// A change is only valid while the validator still has BLS withdrawal credentials.
+		if wc[0] != byte(a.beaconChainCfg.BLSWithdrawalPrefixByte) {
 			continue
 		}
 
@@ -1399,6 +1402,9 @@ AttLoop:
 		}
 		blsToExecutionChanges.Append(blsExecutionChange)
 		slashedIndicies = append(slashedIndicies, blsExecutionChange.Message.ValidatorIndex)
+		if blsToExecutionChanges.Len() >= int(a.beaconChainCfg.MaxBlsToExecutionChanges) {
+			break
+		}
 	}
 	return attesterSlashings, proposerSlashings, voluntaryExits, blsToExecutionChanges
 }
@@ -2152,7 +2158,7 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) 
 		}
 		committeeBits := candidate.CommitteeBits.GetOnIndices()
 		if len(committeeBits) != 1 {
-			log.Warn("invalid candidate commitee bit length %v in attestation pool.", len(committeeBits))
+			log.Warn("invalid candidate committee bit length in attestation pool", "len", len(committeeBits))
 			continue
 		}
 		candCommitteeBit := uint64(committeeBits[0])
@@ -2295,12 +2301,13 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) 
 		}
 		// aggregate signatures
 		var buf [96]byte
-		if len(signatures) == 0 {
+		switch len(signatures) {
+		case 0:
 			// no candidates to merge
 			return nil
-		} else if len(signatures) == 1 {
+		case 1:
 			copy(buf[:], signatures[0])
-		} else {
+		default:
 			aggSig, err := bls.AggregateSignatures(signatures)
 			if err != nil {
 				log.Warn("Cannot aggregate signatures", "err", err)

@@ -721,7 +721,7 @@ func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, label s
 		log.Warn("[dbg] no accessor found, assuming file may have state", "file", filePath)
 		return true, false, "", nil
 	}
-	rd, bti, err := btindex.OpenBtreeIndexAndDataFile(bt, filePath, btindex.DefaultBtreeM, statecfg.Schema.CommitmentDomain.Compression, false)
+	rd, bti, err := btindex.OpenBtreeIndexAndDataFile(bt, filePath, statecfg.Schema.CommitmentDomain.Compression, false)
 	if err != nil {
 		return false, false, "", err
 	}
@@ -1442,7 +1442,7 @@ func doBtSearch(ctx context.Context, cliCtx *cli.Command) error {
 	dbg.ReadMemStats(&m)
 	logger.Info("before open", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 	compress := seg.CompressKeys | seg.CompressVals
-	kv, idx, err := btindex.OpenBtreeIndexAndDataFile(srcF, dataFilePath, btindex.DefaultBtreeM, compress, false)
+	kv, idx, err := btindex.OpenBtreeIndexAndDataFile(srcF, dataFilePath, compress, false)
 	if err != nil {
 		return err
 	}
@@ -2810,7 +2810,7 @@ func doMeta(ctx context.Context, cliCtx *cli.Command) error {
 			panic(err)
 		}
 		defer src.Close()
-		bt, err := btindex.OpenBtreeIndexWithDecompressor(fname, btindex.DefaultBtreeM, seg.NewReader(src.MakeGetter(), seg.CompressNone))
+		bt, err := btindex.OpenBtreeIndexWithDecompressor(fname, seg.NewReader(src.MakeGetter(), seg.CompressNone))
 		if err != nil {
 			return err
 		}
@@ -3099,7 +3099,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		snTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(indexDB)
 		blkFreezeCfg := ethconfig.BlocksFreezing{ChainName: beaconConfig.ConfigName}
 		res.CaplinStateSnaps = snapshotsync.NewCaplinStateSnapshots(blkFreezeCfg, beaconConfig, dirs, snTypes, logger)
-		if err = res.CaplinStateSnaps.OpenFolder(); err != nil {
+		if err := res.CaplinStateSnaps.OpenFolder(); err != nil {
 			return res, nil, err
 		}
 		res.CaplinStateSnaps.LogStat("caplin-state")
@@ -3339,11 +3339,12 @@ func doUnmerge(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) erro
 	compresCfg.Workers = workers
 	var word = make([]byte, 0, 4096)
 
-	if info.Type.Enum() == snaptype2.Enums.Headers || info.Type.Enum() == snaptype2.Enums.Bodies {
+	switch {
+	case info.Type.Enum() == snaptype2.Enums.Headers || info.Type.Enum() == snaptype2.Enums.Bodies:
 		for g.HasNext() {
 			if blockFrom%1000 == 0 {
 				if compressor != nil {
-					if err = compressor.Compress(); err != nil {
+					if err := compressor.Compress(); err != nil {
 						return err
 					}
 					compressor.Close()
@@ -3369,9 +3370,9 @@ func doUnmerge(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) erro
 			}
 			compressor.Close()
 		}
-	} else if info.Type.Enum() != snaptype2.Enums.Transactions {
+	case info.Type.Enum() != snaptype2.Enums.Transactions:
 		return fmt.Errorf("unsupported type %s", info.Type.Enum().String())
-	} else {
+	default:
 		// tx unmerge
 		for ; blockFrom < blockTo; blockFrom += 1000 {
 			um_fileinfo := snaptype2.Enums.Bodies.Type().FileInfo(dirs.Snap, blockFrom, blockFrom+1000)
@@ -3404,7 +3405,7 @@ func doUnmerge(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) erro
 				return fmt.Errorf("unexpected count %d", expectedCount)
 			}
 
-			if err = compressor.Compress(); err != nil {
+			if err := compressor.Compress(); err != nil {
 				return err
 			}
 			compressor.Close()
@@ -3518,7 +3519,7 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 		allDeletedBlocks += deletedBlocks
 	}
 
-	logger.Info("Pruning has ended", "deleted blocks", allDeletedBlocks)
+	logger.Info("Pruning has ended", "deletedBlocks", allDeletedBlocks)
 
 	temporalDb, err := temporal.New(db, agg, res.BlockSnaps)
 	if err != nil {
@@ -3528,7 +3529,7 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 
 	logger.Info("Work on state history snapshots")
 	indexWorkers := estimate.IndexSnapshot.Workers()
-	if err = temporalDb.BuildMissedAccessors(ctx, indexWorkers); err != nil {
+	if err := temporalDb.BuildMissedAccessors(ctx, indexWorkers); err != nil {
 		return err
 	}
 
@@ -3543,7 +3544,7 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 	}
 
 	logger.Info("Build state history snapshots")
-	if err = agg.BuildFiles(lastTxNum); err != nil {
+	if err := agg.BuildFiles(lastTxNum); err != nil {
 		return err
 	}
 
@@ -3560,10 +3561,10 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 	logger.Info("waiting for background build/merge to drain")
 	agg.WaitForFiles()
 
-	if err = agg.MergeLoop(ctx); err != nil {
+	if err := agg.MergeLoop(ctx); err != nil {
 		return err
 	}
-	if err = agg.RemoveOverlapsAfterMerge(ctx); err != nil {
+	if err := agg.RemoveOverlapsAfterMerge(ctx); err != nil {
 		return err
 	}
 
@@ -3749,10 +3750,22 @@ func duClassifyFile(dir, name string) string {
 	// Files directly under snapshots/ — only known segment extensions are block segments.
 	switch {
 	case strings.HasSuffix(lname, ".seg"), strings.HasSuffix(lname, ".idx"), strings.HasSuffix(lname, ".dat"):
+		if duIsCaplinSegment(lname) {
+			return duCatCaplin
+		}
 		return duCatBlocks
 	default:
 		return duCatOther
 	}
+}
+
+// duIsCaplinSegment reports whether a segment in the top-level snapshots dir holds
+// consensus-layer data. Caplin writes these alongside the execution block segments,
+// but they are retained by the --caplin.*-archive flags rather than --prune.mode.
+func duIsCaplinSegment(lname string) bool {
+	return strings.Contains(lname, "beaconblocks") ||
+		strings.Contains(lname, "blobsidecars") ||
+		strings.Contains(lname, "blocksidecars")
 }
 
 // duWalkSnapshots walks all snapshot subdirectories and collects file metadata.
@@ -3841,6 +3854,17 @@ func duIsRcacheDomainFile(f duFileInfo) bool {
 	return f.Category == duCatRcache && strings.Contains(normalized, "/domain/")
 }
 
+// duCaplinBytes sums consensus-layer files, which the per-mode estimates leave out.
+func duCaplinBytes(files []duFileInfo) int64 {
+	var total int64
+	for _, f := range files {
+		if f.Category == duCatCaplin {
+			total += f.Size
+		}
+	}
+	return total
+}
+
 // duComputeEstimates computes estimated sizes for archive/full/blocks/minimal
 // modes by summing files that survive each mode's pruning rules.
 // maxBlock is the highest block number across all block segment files.
@@ -3886,6 +3910,12 @@ func duComputeEstimates(files []duFileInfo, maxBlock, maxStep uint64) []duEstima
 	var archiveTotal, fullTotal, blocksTotal, minimalTotal int64
 
 	for _, f := range files {
+		// Consensus-layer data is retained by the caplin flags, not --prune.mode. It
+		// would add the same amount to every mode, so it is reported on its own line.
+		if f.Category == duCatCaplin {
+			continue
+		}
+
 		archiveTotal += f.Size
 
 		// commitHist is archive-only across non-archive modes — pre-shared
@@ -4054,6 +4084,7 @@ type duResult struct {
 	Subcategories   map[string]map[string]duCategoryStat `json:"subcategories,omitempty"` // category → subcategory → stat
 	OtherExtensions []string                             `json:"other_extensions,omitempty"`
 	Estimates       []duEstimate                         `json:"estimates"`
+	CaplinBytes     int64                                `json:"caplin_bytes"` // excluded from Estimates
 }
 
 // duAggregateCategories computes per-category byte totals and file counts.
@@ -4230,6 +4261,10 @@ func duFormatHuman(w io.Writer, result duResult, verbose bool) {
 			est.Mode, duFormatSize(est.TotalBytes), deltaStr,
 			est.BlocksDesc, est.HistoryDesc)
 	}
+	if result.CaplinBytes > 0 {
+		fmt.Fprintf(w, "\n  caplin %s is on top of every mode above: --prune.mode does not\n"+
+			"  govern it, the --caplin.*-archive flags do.\n", duFormatSize(result.CaplinBytes))
+	}
 }
 
 // duFormatJSON writes the du result as JSON to w.
@@ -4307,6 +4342,7 @@ func doDU(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) error {
 		Subcategories:   duAggregateSubcategories(files),
 		OtherExtensions: duOtherExtensions(files),
 		Estimates:       estimates,
+		CaplinBytes:     duCaplinBytes(files),
 	}
 
 	verbose := cliCtx.Bool("v")

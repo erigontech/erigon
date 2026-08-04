@@ -282,7 +282,7 @@ func (e *ExecModule) unwindIfNeeded(
 		if err := e.pipelineExecutor.UnwindTo(unwindTarget, stagedsync.ForkChoice, tx); err != nil {
 			return nil, err
 		}
-		if err = e.hook.BeforeRun(tx, isSynced); err != nil {
+		if err := e.hook.BeforeRun(tx, isSynced); err != nil {
 			return nil, err
 		}
 		// Run the unwind
@@ -647,7 +647,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			if blockHashBlockNum != nil {
 				hashBlockNum = strconv.FormatUint(*blockHashBlockNum, 10)
 			}
-			e.logger.Warn("bad forkchoice", "head", headHash, "head block", headNum, "hash", blockHash, "hash block", hashBlockNum)
+			e.logger.Warn("bad forkchoice", "head", headHash, "headBlock", headNum, "hash", blockHash, "hashBlockNum", hashBlockNum)
 		}
 		currentContext.Close()
 		currentContext = nil

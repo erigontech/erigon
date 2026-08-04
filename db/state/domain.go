@@ -998,7 +998,7 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo kv.Step, c
 	if d.Accessors.Has(statecfg.AccessorBTree) {
 		btPath := d.kvBtAccessorNewFilePathIn(dstDir, stepFrom, stepTo)
 		kveiPath := d.kvExistenceIdxNewFilePathIn(dstDir, stepFrom, stepTo)
-		bt, err = btindex.CreateBtreeIndexWithDecompressor(btPath, kveiPath, btindex.DefaultBtreeM, d.dataReader(valuesDecomp), *d.salt.Load(), ps, d.dirs.Tmp, d.logger, d.noFsync, d.Accessors)
+		bt, err = btindex.CreateBtreeIndexWithDecompressor(btPath, kveiPath, d.dataReader(valuesDecomp), *d.salt.Load(), ps, d.dirs.Tmp, d.logger, d.noFsync, d.Accessors)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s .bt idx: %w", d.FilenameBase, err)
 		}
@@ -1101,7 +1101,7 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 	if d.Accessors.Has(statecfg.AccessorBTree) {
 		btPath := d.kvBtAccessorNewFilePath(step, step+1)
 		kveiPath := d.kvExistenceIdxNewFilePath(step, step+1)
-		bt, err = btindex.CreateBtreeIndexWithDecompressor(btPath, kveiPath, btindex.DefaultBtreeM, d.dataReader(valuesDecomp), *d.salt.Load(), ps, d.dirs.Tmp, d.logger, d.noFsync, d.Accessors)
+		bt, err = btindex.CreateBtreeIndexWithDecompressor(btPath, kveiPath, d.dataReader(valuesDecomp), *d.salt.Load(), ps, d.dirs.Tmp, d.logger, d.noFsync, d.Accessors)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s .bt idx: %w", d.FilenameBase, err)
 		}
@@ -1575,7 +1575,11 @@ func (d *Domain) dataReader(f *seg.Decompressor) *seg.Reader {
 	if !strings.Contains(f.FileName(), ".kv") {
 		panic("assert: miss-use " + f.FileName())
 	}
-	return seg.NewReader(f.MakeGetter(), d.Compression)
+	g := f.MakeGetter()
+	if dbg.FilesAsyncIO {
+		g.EnableResidencyGate()
+	}
+	return seg.NewReader(g, d.Compression)
 }
 func (d *Domain) dataWriter(f *seg.Compressor, forceNoCompress bool) *seg.Writer {
 	if !strings.Contains(f.FileName(), ".kv") {

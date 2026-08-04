@@ -85,7 +85,11 @@ type Aggregator struct {
 	// visible is CoW field updated only by `recalcVisibleFiles`.
 	visible atomic.Pointer[aggregatorVisible]
 	// oldestVisible head of linked-list of visibleFiles objects (oldest still-have-reader object). Mutated only under dirtyFilesLock.
-	oldestVisible     *aggregatorVisible
+	oldestVisible *aggregatorVisible
+	// unaligned entities are left out of the shared visible-file ceiling while tooling
+	// regenerates them. Guarded by dirtyFilesLock.
+	unalignedDomain   [kv.DomainLen]bool
+	unalignedIdx      [kv.StandaloneIdxLen]bool
 	snapshotBuildSema *semaphore.Weighted
 
 	disableHistory      bool
@@ -497,9 +501,9 @@ func (a *Aggregator) EnableAllDependencies() {
 	if a.checker == nil {
 		return
 	}
-	a.checker.Enable()
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
+	a.checker.Enable()
 	a.recalcVisibleFiles(nil)
 }
 
@@ -507,9 +511,48 @@ func (a *Aggregator) DisableAllDependencies() {
 	if a.checker == nil {
 		return
 	}
-	a.checker.Disable()
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
+	a.checker.Disable()
+	a.recalcVisibleFiles(nil)
+}
+
+// Unalign leaves a domain out of the shared visible-file ceiling while tooling regenerates
+// it: it stops clamping the others and stays clamped by them, so it can lag them and never
+// lead. Not persisted - an interrupted rebuild reopens aligned.
+//
+// Accounts, storage and code hold the state a rebuild reads: unaligning one panics.
+func (a *Aggregator) Unalign(d kv.Domain) (realign func()) {
+	switch d {
+	case kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain:
+		panic(fmt.Sprintf("assert: %s holds the state a rebuild reads, it can not lag it", d))
+	}
+	a.setUnalignedDomain(d, true)
+	return func() { a.setUnalignedDomain(d, false) }
+}
+
+// UnalignIdx is Unalign for a standalone index.
+func (a *Aggregator) UnalignIdx(name kv.InvertedIdx) (realign func()) {
+	for id, ii := range a.standaloneIIs() {
+		if ii.Name == name {
+			a.setUnalignedIdx(id, true)
+			return func() { a.setUnalignedIdx(id, false) }
+		}
+	}
+	return func() {}
+}
+
+func (a *Aggregator) setUnalignedDomain(d kv.Domain, v bool) {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	a.unalignedDomain[d] = v
+	a.recalcVisibleFiles(nil)
+}
+
+func (a *Aggregator) setUnalignedIdx(id int, v bool) {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	a.unalignedIdx[id] = v
 	a.recalcVisibleFiles(nil)
 }
 
@@ -517,9 +560,9 @@ func (a *Aggregator) DisableInterDomainDependencies() {
 	if a.checker == nil {
 		return
 	}
-	a.checker.DisableInterDomain()
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
+	a.checker.DisableInterDomain()
 	a.recalcVisibleFiles(nil)
 }
 
@@ -851,8 +894,8 @@ func (a *Aggregator) WaitForBuildAndMerge(ctx context.Context) chan struct{} {
 				return
 			case <-chkEvery.C:
 				a.logger.Trace("[agg] waiting for files",
-					"building files", a.buildingFiles.Load(),
-					"merging files", a.mergingFiles.Load())
+					"buildingFiles", a.buildingFiles.Load(),
+					"mergingFiles", a.mergingFiles.Load())
 			}
 		}
 	}()
@@ -1400,7 +1443,7 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 				fullStat.Accumulate(stat)
 				return true, nil
 			}
-			at.a.logger.Warn("[snapshots] PruneSmallBatches failed", "err", err, "is deadline?", errors.Is(err, context.DeadlineExceeded))
+			at.a.logger.Warn("[snapshots] PruneSmallBatches failed", "err", err, "isDeadline", errors.Is(err, context.DeadlineExceeded))
 			return false, err
 		}
 		if stat == nil || stat.PrunedNothing() {
@@ -1439,7 +1482,7 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 				)
 			} else {
 				at.a.logger.Info("[prune] state",
-					"until commit", time.Until(started.Add(timeout)).String(),
+					"untilCommit", time.Until(started.Add(timeout)).String(),
 					//"pruneLimit", pruneLimit,
 					//"aggregatedStep", at.StepsInFiles(kv.AccountsDomain),
 					"stepsRangeInDB", at.stepsRangeInDBAsStr(tx),
@@ -1736,26 +1779,35 @@ func (a *Aggregator) FirstTxNumOfStep(step kv.Step) uint64 { // could have some 
 	return firstTxNumOfStep(step, a.StepSize())
 }
 
+// dirtyFilesEndTxNumMinimax is the ceiling shared by all visible files: no entity is visible
+// past a range another one misses. Left out: entities with no files at all (a fresh node, or
+// optional indexes never downloaded, would otherwise see nothing) and unaligned ones.
 func (a *Aggregator) dirtyFilesEndTxNumMinimax() uint64 {
-	if a.d[kv.AccountsDomain] == nil || a.d[kv.StorageDomain] == nil || a.d[kv.CodeDomain] == nil {
+	// end == 0 means "entity has no files", it does not lower the ceiling
+	_min := func(ceiling, end uint64) uint64 {
+		if end == 0 {
+			return ceiling
+		}
+		return min(ceiling, end)
+	}
+
+	ceiling := uint64(math.MaxUint64)
+	for id, d := range a.d {
+		if d == nil || d.Disable || a.unalignedDomain[id] {
+			continue
+		}
+		ceiling = _min(ceiling, d.dirtyFilesEndTxNumMinimax())
+	}
+	for id, ii := range a.standaloneIIs() {
+		if ii == nil || ii.Disable || a.unalignedIdx[id] {
+			continue
+		}
+		ceiling = _min(ceiling, ii.dirtyFilesEndTxNumMinimax())
+	}
+	if ceiling == math.MaxUint64 {
 		return 0
 	}
-	m := min(
-		a.d[kv.AccountsDomain].dirtyFilesEndTxNumMinimax(),
-		a.d[kv.StorageDomain].dirtyFilesEndTxNumMinimax(),
-		a.d[kv.CodeDomain].dirtyFilesEndTxNumMinimax(),
-		// a.d[kv.CommitmentDomain].dirtyFilesEndTxNumMinimax(),
-	)
-	// TODO(awskii) have two different functions including commitment/without it
-	//  Usually its skipped because commitment either have MaxUint64 due to no history or equal to other domains
-
-	//log.Warn("dirtyFilesEndTxNumMinimax", "min", m,
-	//	"acc", a.d[kv.AccountsDomain].dirtyFilesEndTxNumMinimax(),
-	//	"sto", a.d[kv.StorageDomain].dirtyFilesEndTxNumMinimax(),
-	//	"cod", a.d[kv.CodeDomain].dirtyFilesEndTxNumMinimax(),
-	//	"com", a.d[kv.CommitmentDomain].dirtyFilesEndTxNumMinimax(),
-	//)
-	return m
+	return ceiling
 }
 
 // aggregatorVisible immutable visible-for-application files (no gaps, no overlaps, indexed)
@@ -1943,8 +1995,8 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *visibleFilesFor
 	// re-shortening (flag off, or flag on below threshold) need neither and run in parallel.
 	comVals := r.domain[kv.CommitmentDomain].values
 	commitmentRefsEnabled := at.a.referencesInCommitmentBranches()
-	// With referenced commitment files present, concurrent dereference does random reads; keep the shared
-	// mmap at MADV_NORMAL during merge instead of a separate sequential view that would evict those pages.
+	// With referenced commitment files present, concurrent dereference does random reads; read through
+	// the shared mmap instead of a separate sequential view that would evict those pages.
 	seqReadahead := !at.commitmentVisibleFilesReferenced()
 	needCommitmentTransform := comVals.needMerge &&
 		commitmentMergeNeedsTransform(files.d[kv.CommitmentDomain], commitmentRefsEnabled, at.StepSize(), comVals.from, comVals.to)

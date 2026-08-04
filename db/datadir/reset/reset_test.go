@@ -394,7 +394,8 @@ func makeEntries(t *testing.T, entries []fsEntry, root *os.Root) {
 		localName, err := filepath.Localize(string(entry.Name))
 		qt.Assert(t, qt.IsNil(err), qt.Commentf("localizing entry name %q", entry.Name))
 		root.MkdirAll(filepath.Dir(localName), dir.DirPerm)
-		if entry.Mode&fs.ModeSymlink != 0 {
+		switch {
+		case entry.Mode&fs.ModeSymlink != 0:
 			// Windows doesn't seem to create SYMLINKD types when going through os.Root. So we do
 			// appropriate path conversions going into Symlink. That's on top of having to make sure
 			// the target exists if we want a SYMLINKD and not just a SYMLINK.
@@ -404,9 +405,9 @@ func makeEntries(t *testing.T, entries []fsEntry, root *os.Root) {
 			if err != nil {
 				panic(fmt.Sprintf("creating symlink %q -> %q: %v", localName, targetFilePath, err))
 			}
-		} else if entry.Mode&fs.ModeDir != 0 {
+		case entry.Mode&fs.ModeDir != 0:
 			assertNoErr(root.Mkdir(localName, dir.DirPerm))
-		} else {
+		default:
 			f, err := root.Create(localName)
 			assertNoErr(err)
 			if entry.Data != "" {

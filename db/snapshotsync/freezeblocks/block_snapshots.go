@@ -323,12 +323,12 @@ func (br *BlockRetire) MergeBlocks(
 
 		return seeder.Seed(ctx, mergedFileNames)
 	}
-	if err = merger.Merge(ctx, &snapshots.BaseRoSnapshots, snapshots.Types(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, seeder.Delete); err != nil {
+	if err := merger.Merge(ctx, &snapshots.BaseRoSnapshots, snapshots.Types(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, seeder.Delete); err != nil {
 		return false, err
 	}
 
 	// remove old garbage files
-	if err = snapshots.RemoveOverlaps(func(l []string) error {
+	if err := snapshots.RemoveOverlaps(func(l []string) error {
 		return seeder.Delete(ctx, l)
 	}); err != nil {
 		return false, err
@@ -867,9 +867,9 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 			if lvl >= log.LvlInfo {
 				var m runtime.MemStats
 				dbg.ReadMemStats(&m)
-				logger.Log(lvl, "[snapshots] Dumping txs", "block num", blockNum, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+				logger.Log(lvl, "[snapshots] Dumping txs", "blockNum", blockNum, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 			} else {
-				logger.Log(lvl, "[snapshots] Dumping txs", "block num", blockNum)
+				logger.Log(lvl, "[snapshots] Dumping txs", "blockNum", blockNum)
 			}
 		default:
 		}
@@ -954,7 +954,7 @@ func DumpHeadersRaw(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom,
 			if lvl >= log.LvlInfo {
 				dbg.ReadMemStats(&m)
 			}
-			logger.Log(lvl, "[snapshots] Dumping headers", "block num", blockNum,
+			logger.Log(lvl, "[snapshots] Dumping headers", "blockNum", blockNum,
 				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 			)
 		default:
@@ -1036,7 +1036,7 @@ func DumpBodies(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blo
 			if lvl >= log.LvlInfo {
 				dbg.ReadMemStats(&m)
 			}
-			logger.Log(lvl, "[snapshots] Wrote into file", "block num", blockNum,
+			logger.Log(lvl, "[snapshots] Wrote into file", "blockNum", blockNum,
 				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 			)
 		default:

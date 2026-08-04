@@ -621,6 +621,9 @@ type CanReopenUnderlyingFilesTx interface {
 	ForceReopenUnderlyingFilesTx()
 }
 
+// TemporalPutDel does not borrow `k`/`v`/`prevVal` past the call: an
+// implementation that keeps them must copy. Callers are free to hand it reused
+// scratch, and some do.
 type TemporalPutDel interface {
 	// DomainPut
 	// Optimizations:
