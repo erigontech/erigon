@@ -192,11 +192,12 @@ func TestBlsToExecutionChangeProcessMessage(t *testing.T) {
 			tt.prepare(t, testCtx, st, msg)
 
 			err := testCtx.service.ProcessMessage(context.Background(), nil, msg)
-			if tt.wantErr != nil {
+			switch {
+			case tt.wantErr != nil:
 				require.ErrorIs(t, err, tt.wantErr)
-			} else if tt.wantErrString != "" {
+			case tt.wantErrString != "":
 				require.ErrorContains(t, err, tt.wantErrString)
-			} else {
+			default:
 				require.NoError(t, err)
 			}
 			require.Equal(t, tt.wantInPool, testCtx.operationsPool.BLSToExecutionChangesPool.Has(msg.SignedBLSToExecutionChange.Signature))
