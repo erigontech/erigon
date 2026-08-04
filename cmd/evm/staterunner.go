@@ -130,7 +130,7 @@ func stateTestCmd(_ context.Context, ctx *cli.Command) error {
 		}
 		report(ctx, results)
 	}
-	return nil
+	return scanner.Err()
 }
 
 // stateTestEnv is the scratch database the tests run against. Building one

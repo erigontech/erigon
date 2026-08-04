@@ -117,6 +117,7 @@ func runStateTestBatch(t *testing.T, files []string) []testResult {
 	_, err = stdout.Seek(0, io.SeekStart)
 	require.NoError(t, err)
 	var results []testResult
+	batches := 0
 	dec := json.NewDecoder(stdout)
 	for {
 		var batch []testResult
@@ -125,8 +126,10 @@ func runStateTestBatch(t *testing.T, files []string) []testResult {
 		} else if err != nil {
 			t.Fatal(err)
 		}
+		batches++
 		results = append(results, batch...)
 	}
-	require.Len(t, results, len(files))
+	require.Equal(t, len(files), batches, "one JSON report per input file")
+	require.NotEmpty(t, results)
 	return results
 }
