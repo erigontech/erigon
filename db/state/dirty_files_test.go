@@ -1,6 +1,8 @@
 package state
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -108,6 +110,72 @@ func TestVisibleFileVersion(t *testing.T) {
 	t.Parallel()
 	vf := visibleFile{src: &FilesItem{version: version.V2_1}}
 	require.Equal(t, version.V2_1, vf.Version())
+}
+
+func TestOpenDirtyFileHelpersLogInvalidMask(t *testing.T) {
+	t.Parallel()
+	const mask = "[invalid"
+	dirEntries := []string{"v1.0-file"}
+
+	tests := []struct {
+		name string
+		open func(t *testing.T, logger log.Logger)
+	}{
+		{
+			name: "data",
+			open: func(t *testing.T, logger log.Logger) {
+				require.False(t, openDirtyDataFile(&FilesItem{}, mask, dirEntries, t.TempDir(), version.Versions{}, "test", logger))
+			},
+		},
+		{
+			name: "accessor",
+			open: func(t *testing.T, logger log.Logger) {
+				openDirtyAccessor(mask, dirEntries, t.TempDir(), version.Versions{}, func(string) error { return nil }, "test", logger)
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			logger, output := newBufferedTestLogger()
+
+			test.open(t, logger)
+
+			require.Contains(t, output.String(), "f="+mask)
+			require.Contains(t, output.String(), "lvl=dbug")
+		})
+	}
+}
+
+func TestOpenDirtyDataFileDoesNotLogNonCorruptionOpenError(t *testing.T) {
+	t.Parallel()
+	logger, output := newBufferedTestLogger()
+	fileName := "v1.0-accounts.0-1.kv"
+	versions := version.Versions{Current: version.V1_0, MinSupported: version.V1_0}
+
+	require.False(t, openDirtyDataFile(&FilesItem{}, "*-accounts.0-1.kv", []string{fileName}, t.TempDir(), versions, "test", logger))
+	require.Empty(t, output.String())
+}
+
+func TestOpenDirtyAccessorLogsOpenErrorAtDebug(t *testing.T) {
+	t.Parallel()
+	logger, output := newBufferedTestLogger()
+	fileName := "v1.0-accounts.0-1.kvi"
+	versions := version.Versions{Current: version.V1_0, MinSupported: version.V1_0}
+
+	openDirtyAccessor("*-accounts.0-1.kvi", []string{fileName}, t.TempDir(), versions, func(string) error {
+		return errors.New("open failed")
+	}, "test", logger)
+
+	require.Contains(t, output.String(), "lvl=dbug")
+	require.Contains(t, output.String(), `err="open failed"`)
+}
+
+func newBufferedTestLogger() (log.Logger, *bytes.Buffer) {
+	output := new(bytes.Buffer)
+	logger := log.New()
+	logger.SetHandler(log.StreamHandler(output, log.LogfmtFormat()))
+	return logger, output
 }
 
 // openDirtyFiles must accept a mixed-version file set (v1.0/v2.0/v2.1) without tripping the
