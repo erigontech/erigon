@@ -873,12 +873,12 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *u
 		}
 
 		// 2. authority recover
-		authorityPtr, err := auth.RecoverSigner()
+		recovered, err := auth.RecoverSigner()
 		if err != nil {
 			log.Trace("authority recover failed, skipping", "err", err, "authIndex", i)
 			continue
 		}
-		authority := accounts.InternAddress(*authorityPtr)
+		authority := accounts.InternAddress(recovered)
 
 		// 3. add authority account to accesses_addresses
 		st.state.AddAddressToAccessList(authority)

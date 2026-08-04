@@ -67,19 +67,20 @@ func authorizationSigningHash(chainID uint256.Int, address common.Address, nonce
 	})
 }
 
-func (ath *Authorization) RecoverSigner() (*common.Address, error) {
+func (ath *Authorization) RecoverSigner() (common.Address, error) {
 	if ath.Nonce == math.MaxUint64 {
-		return nil, errAuthNonceOverflow
+		return common.Address{}, errAuthNonceOverflow
 	}
 
 	hash := authorizationSigningHash(ath.ChainID, ath.Address, ath.Nonce)
 	return recoverSignerFromHash(hash, ath.YParity, ath.R, ath.S)
 }
 
-// SignAuthorization returns an EIP-7702 authorization signed by key. A non-zero
-// address delegates the signer's account to that address; the zero address
-// clears the signer's delegation. It rejects a nil key or the maximum uint64
-// nonce, which cannot be incremented during authorization processing.
+// SignAuthorization returns an EIP-7702 authorization signed by key. The
+// address is the delegation target; the zero address requests that an existing
+// delegation be cleared when the authorization is applied. It rejects a nil
+// key or the maximum uint64 nonce, which cannot be incremented during
+// authorization processing.
 func SignAuthorization(key *ecdsa.PrivateKey, chainID uint256.Int, address common.Address, nonce uint64) (Authorization, error) {
 	if key == nil {
 		return Authorization{}, errAuthNilPrivateKey
@@ -105,31 +106,31 @@ func SignAuthorization(key *ecdsa.PrivateKey, chainID uint256.Int, address commo
 	return auth, nil
 }
 
-func recoverSignerFromHash(hash common.Hash, yParity uint8, r uint256.Int, s uint256.Int) (*common.Address, error) {
+func recoverSignerFromHash(hash common.Hash, yParity uint8, r uint256.Int, s uint256.Int) (common.Address, error) {
 	var sig [65]byte
 	r.PutUint256(sig[:32])
 	s.PutUint256(sig[32:64])
 
 	if yParity > 1 {
-		return nil, fmt.Errorf("invalid y parity value: %d", yParity)
+		return common.Address{}, fmt.Errorf("invalid y parity value: %d", yParity)
 	}
 	sig[64] = yParity
 
 	if !crypto.TransactionSignatureIsValid(sig[64], &r, &s, false /* allowPreEip2s */) {
-		return nil, errors.New("invalid signature")
+		return common.Address{}, errors.New("invalid signature")
 	}
 
 	pubKey, err := crypto.Ecrecover(hash[:], sig[:])
 	if err != nil {
-		return nil, err
+		return common.Address{}, err
 	}
 	if len(pubKey) == 0 || pubKey[0] != 4 {
-		return nil, errors.New("invalid public key")
+		return common.Address{}, errors.New("invalid public key")
 	}
 
 	var authority common.Address
 	copy(authority[:], crypto.Keccak256(pubKey[1:])[12:])
-	return &authority, nil
+	return authority, nil
 }
 
 func authorizationSize(auth Authorization) (authLen int) {

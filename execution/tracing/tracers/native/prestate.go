@@ -237,7 +237,7 @@ func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction,
 		if err != nil {
 			continue
 		}
-		t.lookupAccount(accounts.InternAddress(*addr))
+		t.lookupAccount(accounts.InternAddress(addr))
 	}
 
 	if t.create && t.config.DiffMode {

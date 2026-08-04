@@ -1012,11 +1012,11 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 			if (!auth.ChainID.IsZero() && auth.ChainID.Cmp(rules.ChainID) != 0) || auth.Nonce+1 < auth.Nonce {
 				continue
 			}
-			authorityPtr, err := auth.RecoverSigner()
+			authority, err := auth.RecoverSigner()
 			if err != nil {
 				continue
 			}
-			excl[*authorityPtr] = struct{}{}
+			excl[authority] = struct{}{}
 		}
 	}
 

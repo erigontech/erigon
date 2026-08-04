@@ -410,7 +410,7 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 			if err != nil {
 				continue
 			}
-			slot.AuthAndNonces = append(slot.AuthAndNonces, AuthAndNonce{*authority, auth.Nonce})
+			slot.AuthAndNonces = append(slot.AuthAndNonces, AuthAndNonce{authority, auth.Nonce})
 		}
 	}
 

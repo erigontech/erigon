@@ -40,13 +40,13 @@ func TestRecoverSigner(t *testing.T) {
 		R:       uint256.Int{11238962557009670571, 14017651393191758745, 18358999445216475025, 5549385460848219779},
 		S:       uint256.Int{6390522493159340108, 17630603794136184458, 14442462445950880280, 846710983706847255},
 	}
-	authorityPtr, err := auth.RecoverSigner()
+	authority, err := auth.RecoverSigner()
 	if err != nil {
 		t.Fatal(err)
 	}
 	expectedSigner := common.HexToAddress("0x8ED5ABe9DE62dB2F266b06b86203f71e4C1e357f")
-	if *authorityPtr != expectedSigner {
-		t.Errorf("mismatch in recovered signer: got %v, want %v", *authorityPtr, expectedSigner)
+	if authority != expectedSigner {
+		t.Errorf("mismatch in recovered signer: got %v, want %v", authority, expectedSigner)
 	}
 }
 
@@ -83,8 +83,8 @@ func TestSignAuthorizationRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if *recovered != authority {
-		t.Fatalf("unexpected authority: got %s, want %s", *recovered, authority)
+	if recovered != authority {
+		t.Fatalf("unexpected authority: got %s, want %s", recovered, authority)
 	}
 }
 
