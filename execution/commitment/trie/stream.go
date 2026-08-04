@@ -804,29 +804,15 @@ func HashWithModifications(
 			storageKeyHex = storageKeyHex[:len(storageKeyHex)-1]
 			si++
 		}
-		switch {
-		case accountKeyHex == nil:
-			copy(stream.keyBytes[offset:], storageKeyHex)
-			stream.keySizes[ki] = uint8(len(storageKeyHex))
-			stream.itemTypes[ki] = StorageStreamItem
-			ki++
-			offset += len(storageKeyHex)
-			storageKeyHex = nil // consumed
-		case storageKeyHex == nil:
+		emitAccount := accountKeyHex != nil && (storageKeyHex == nil || bytes.Compare(accountKeyHex, storageKeyHex) < 0)
+		if emitAccount {
 			copy(stream.keyBytes[offset:], accountKeyHex)
 			stream.keySizes[ki] = uint8(len(accountKeyHex))
 			stream.itemTypes[ki] = AccountStreamItem
 			ki++
 			offset += len(accountKeyHex)
 			accountKeyHex = nil // consumed
-		case bytes.Compare(accountKeyHex, storageKeyHex) < 0:
-			copy(stream.keyBytes[offset:], accountKeyHex)
-			stream.keySizes[ki] = uint8(len(accountKeyHex))
-			stream.itemTypes[ki] = AccountStreamItem
-			ki++
-			offset += len(accountKeyHex)
-			accountKeyHex = nil // consumed
-		default:
+		} else {
 			copy(stream.keyBytes[offset:], storageKeyHex)
 			stream.keySizes[ki] = uint8(len(storageKeyHex))
 			stream.itemTypes[ki] = StorageStreamItem
