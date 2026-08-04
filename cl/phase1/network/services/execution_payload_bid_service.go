@@ -46,7 +46,7 @@ type seenBidKey struct {
 	slot         uint64
 }
 
-// pendingBidKey tracks bids waiting for proposer preferences.
+// pendingBidKey identifies a queued bid.
 type pendingBidKey struct {
 	builderIndex uint64
 	slot         uint64
@@ -90,7 +90,7 @@ type executionPayloadBidService struct {
 	validationStateMu    sync.Mutex
 	validationStateCache *lru.CacheWithTTL[bidValidationStateKey, *bidValidationStateEntry]
 
-	// Pending bids waiting for proposer preferences
+	// Pending bids waiting for validation dependencies
 	pending *pendingJobQueue[pendingBidKey, *cltypes.SignedExecutionPayloadBid]
 }
 
@@ -476,7 +476,7 @@ func (s *executionPayloadBidService) validateBuilderAvailability(
 	return builder, nil
 }
 
-// queuePendingBid adds a bid to the pending queue for later processing when preferences arrive.
+// queuePendingBid defers a bid until its validation dependencies are available.
 func (s *executionPayloadBidService) queuePendingBid(msg *cltypes.SignedExecutionPayloadBid) {
 	s.pending.enqueue(pendingBidKeyFor(msg), msg)
 }
@@ -490,8 +490,8 @@ func pendingBidKeyFor(msg *cltypes.SignedExecutionPayloadBid) pendingBidKey {
 	}
 }
 
-// tryProcessPendingBid validates and stores the bid once its proposer preferences have arrived,
-// dropping bids whose slot is no longer current or whose preference matching fails.
+// tryProcessPendingBid retains bids with unavailable dependencies and removes
+// stale, invalid, or successfully stored bids.
 func (s *executionPayloadBidService) tryProcessPendingBid(_ context.Context, key pendingBidKey, msg *cltypes.SignedExecutionPayloadBid) (func(), bool) {
 	currentSlot := s.ethClock.GetCurrentSlot()
 	if key.slot != currentSlot && key.slot != currentSlot+1 {
@@ -516,7 +516,7 @@ func (s *executionPayloadBidService) tryProcessPendingBid(_ context.Context, key
 		return nil, true
 	}
 	if !ok {
-		return nil, false // Preferences still not here, keep waiting
+		return nil, false
 	}
 
 	if err := s.validateAndStoreBid(msg, preferences); err != nil {

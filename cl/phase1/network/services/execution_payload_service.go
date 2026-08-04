@@ -196,7 +196,7 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 	return nil
 }
 
-// queuePendingEnvelope adds an envelope to the pending queue for later processing
+// queuePendingEnvelope defers an envelope until its referenced block is available.
 func (s *executionPayloadService) queuePendingEnvelope(blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) {
 	err := s.pending.enqueueLazy(envelope, func() (pendingEnvelopeKey, error) {
 		envelopeHash, err := envelope.HashSSZ()
@@ -213,11 +213,11 @@ func (s *executionPayloadService) queuePendingEnvelope(blockRoot common.Hash, en
 	}
 }
 
-// tryProcessPendingEnvelope re-runs full validation via ProcessMessage once the block has arrived.
+// tryProcessPendingEnvelope removes and revalidates an envelope once its block arrives.
 func (s *executionPayloadService) tryProcessPendingEnvelope(ctx context.Context, key pendingEnvelopeKey, envelope *cltypes.SignedExecutionPayloadEnvelope) (func(), bool) {
 	block, ok := s.forkchoiceStore.GetBlock(key.blockRoot)
 	if !ok || block == nil {
-		return nil, false // Block still not here, keep waiting
+		return nil, false
 	}
 
 	return func() {

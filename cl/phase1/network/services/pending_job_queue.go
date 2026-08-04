@@ -28,16 +28,16 @@ type pendingJob[M any] struct {
 	creationTime time.Time
 }
 
-// pendingJobQueue holds gossip messages whose processing dependencies have not
-// arrived yet and retries them periodically until processed or expired.
+// pendingJobQueue retries dependency-blocked jobs until their service callback
+// removes them or they expire.
 type pendingJobQueue[K comparable, M any] struct {
 	capacity int32
 	expiry   time.Duration
 	tick     time.Duration
-	// tryProcess decides a job's fate: done=false keeps it queued for the next
-	// tick; done=true removes it. A non-nil process func runs after the removal,
-	// so that a concurrent re-enqueue under the same key is not lost.
-	tryProcess func(ctx context.Context, key K, msg M) (process func(), done bool)
+	// tryProcess returns whether to remove the current job and an optional
+	// callback that runs only after identity-checked removal. This lets the
+	// callback enqueue the same key without the new job being deleted.
+	tryProcess func(ctx context.Context, key K, msg M) (afterRemove func(), remove bool)
 	onExpired  func(key K)
 
 	jobs  sync.Map // K -> *pendingJob[M]
@@ -49,7 +49,7 @@ func newPendingJobQueue[K comparable, M any](
 	capacity int32,
 	expiry time.Duration,
 	tick time.Duration,
-	tryProcess func(ctx context.Context, key K, msg M) (func(), bool),
+	tryProcess func(ctx context.Context, key K, msg M) (afterRemove func(), remove bool),
 	onExpired func(key K),
 ) *pendingJobQueue[K, M] {
 	return &pendingJobQueue[K, M]{
@@ -62,7 +62,7 @@ func newPendingJobQueue[K comparable, M any](
 	}
 }
 
-// enqueue adds a job unless the queue is at capacity or the key is already queued.
+// enqueue silently drops a duplicate or a job submitted at capacity.
 func (q *pendingJobQueue[K, M]) enqueue(key K, msg M) {
 	if !q.reserve() {
 		return
@@ -70,6 +70,8 @@ func (q *pendingJobQueue[K, M]) enqueue(key K, msg M) {
 	q.storeReserved(key, msg)
 }
 
+// enqueueLazy reserves capacity before building the key. A full queue is a
+// successful no-op; a key-building error releases the reservation.
 func (q *pendingJobQueue[K, M]) enqueueLazy(msg M, buildKey func() (K, error)) error {
 	if !q.reserve() {
 		return nil
@@ -124,7 +126,6 @@ func (q *pendingJobQueue[K, M]) loop(ctx context.Context) {
 	}()
 
 	for {
-		// Wait until there are pending jobs
 		q.cond.L.Lock()
 		for q.count.Load() == 0 {
 			select {
@@ -137,7 +138,6 @@ func (q *pendingJobQueue[K, M]) loop(ctx context.Context) {
 		}
 		q.cond.L.Unlock()
 
-		// Poll until all pending jobs are processed
 		ticker := time.NewTicker(q.tick)
 		for q.count.Load() > 0 {
 			select {
@@ -164,15 +164,15 @@ func (q *pendingJobQueue[K, M]) processPending(ctx context.Context) {
 			return true
 		}
 
-		process, done := q.tryProcess(ctx, k, job.msg)
-		if !done {
+		afterRemove, remove := q.tryProcess(ctx, k, job.msg)
+		if !remove {
 			return true
 		}
 		if !q.remove(k, job) {
 			return true
 		}
-		if process != nil {
-			process()
+		if afterRemove != nil {
+			afterRemove()
 		}
 		return true
 	})

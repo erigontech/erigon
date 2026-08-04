@@ -194,7 +194,7 @@ func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint6
 	return nil
 }
 
-// queuePendingAttestation adds an attestation to the pending queue for later processing.
+// queuePendingAttestation defers an attestation until its referenced block is available.
 func (s *payloadAttestationService) queuePendingAttestation(blockRoot common.Hash, msg *cltypes.PayloadAttestationMessage) {
 	_ = s.pending.enqueueLazy(msg, func() (pendingPayloadAttestationKey, error) {
 		return pendingPayloadAttestationKeyFor(blockRoot, msg), nil
@@ -210,8 +210,8 @@ func pendingPayloadAttestationKeyFor(blockRoot common.Hash, msg *cltypes.Payload
 	}
 }
 
-// tryProcessPendingAttestation re-runs validation via ProcessMessage once the block has arrived,
-// dropping attestations that are no longer for the current slot.
+// tryProcessPendingAttestation drops stale messages and revalidates the rest
+// once their referenced block arrives.
 func (s *payloadAttestationService) tryProcessPendingAttestation(ctx context.Context, key pendingPayloadAttestationKey, msg *cltypes.PayloadAttestationMessage) (func(), bool) {
 	if !s.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(msg.Data.Slot) {
 		log.Trace("Pending payload attestation slot mismatch", "blockRoot", key.blockRoot)
@@ -219,7 +219,7 @@ func (s *payloadAttestationService) tryProcessPendingAttestation(ctx context.Con
 	}
 
 	if _, ok := s.forkchoiceStore.GetHeader(key.blockRoot); !ok {
-		return nil, false // Block still not here, keep waiting
+		return nil, false
 	}
 
 	return func() {
