@@ -21,7 +21,9 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/common/hexutil"
 	commonssz "github.com/erigontech/erigon/common/ssz"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -34,6 +36,24 @@ func insertSSZGap(buf []byte, insertAt int, offsetPositions ...int) []byte {
 		binary.LittleEndian.PutUint32(malformed[offsetAt:], offset+1)
 	}
 	return malformed
+}
+
+func TestExecutionPayloadDecodeSSZStrictRoundTrip(t *testing.T) {
+	const version = clparams.CapellaVersion
+	payload := NewExecutionPayloadSSZ(version)
+	payload.ExtraData = hexutil.Bytes{0x01, 0x02}
+	payload.Transactions = []hexutil.Bytes{{0x03}, {0x04, 0x05}}
+	payload.Withdrawals = []*types.Withdrawal{{Index: 1, Validator: 2, Amount: 3}}
+
+	encoded, err := payload.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	decoded := NewExecutionPayloadSSZ(version)
+	require.NoError(t, decoded.DecodeSSZStrict(encoded, int(version)))
+
+	reencoded, err := decoded.EncodeSSZ(nil)
+	require.NoError(t, err)
+	require.Equal(t, encoded, reencoded)
 }
 
 func TestExecutionPayloadDecodeSSZStrictRejectsNonCanonicalOffset(t *testing.T) {
