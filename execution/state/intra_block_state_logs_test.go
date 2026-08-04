@@ -183,7 +183,7 @@ func TestResetKeepsLogsWithinBudget(t *testing.T) {
 	for range burst {
 		ibs.AddLog(&types.Log{Address: common.HexToAddress("0x1"), Data: make([]byte, 64)})
 	}
-	before := slices.Clone(ibs.logs[1])
+	before := slices.Clone(ibs.logs.groups[1])
 
 	ibs.Reset()
 	ibs.SetTxContext(2, 0)
@@ -215,14 +215,14 @@ func TestResetLogsTotalsMatchRetained(t *testing.T) {
 			ibs.Reset()
 
 			_, slotCap, dataBytes := retainedLogs(ibs)
-			require.Equal(t, slotCap, ibs.reusableLogEntries, "block %d tx %d", blockNum, txIndex)
-			require.Equal(t, dataBytes, ibs.reusableLogBytes, "block %d tx %d", blockNum, txIndex)
+			require.Equal(t, slotCap, ibs.logs.reusableEntries, "block %d tx %d", blockNum, txIndex)
+			require.Equal(t, dataBytes, ibs.logs.reusableBytes, "block %d tx %d", blockNum, txIndex)
 		}
 	}
 }
 
 func retainedLogs(ibs *IntraBlockState) (entries, slotCap, dataBytes int) {
-	for _, slot := range ibs.logs[:cap(ibs.logs)] {
+	for _, slot := range ibs.logs.groups[:cap(ibs.logs.groups)] {
 		slotCap += cap(slot)
 		for _, lp := range slot[:cap(slot)] {
 			if lp == nil {
@@ -246,7 +246,7 @@ func TestRevertKeepsNormalLogBufferForReuse(t *testing.T) {
 		Address: common.HexToAddress("0x1"),
 		Data:    []byte{1, 2, 3},
 	})
-	first := ibs.logs[1][0]
+	first := ibs.logs.groups[1][0]
 	ibs.RevertToSnapshot(snap, nil)
 
 	lp := ibs.AllocLog(common.HexToAddress("0x2"), 0, 2)

@@ -1146,16 +1146,16 @@ func TestAllocLogPreservesCapacityAcrossRevert(t *testing.T) {
 	for i := range 8 {
 		ibs.AddLog(&types.Log{Address: common.Address{byte(i)}})
 	}
-	require.Len(t, ibs.logs, 2)
-	capBefore := cap(ibs.logs[1])
+	require.Len(t, ibs.logs.groups, 2)
+	capBefore := cap(ibs.logs.groups[1])
 	require.GreaterOrEqual(t, capBefore, 8)
 
 	ibs.RevertToSnapshot(snap, nil)
-	require.Len(t, ibs.logs, 1) // the tx's slot was truncated off the outer buffer
+	require.Len(t, ibs.logs.groups, 1) // the tx's slot was truncated off the outer buffer
 
 	ibs.AddLog(&types.Log{Address: common.Address{0xff}})
-	require.Len(t, ibs.logs, 2)
-	require.Equal(t, capBefore, cap(ibs.logs[1]), "inner log buffer capacity must survive revert+relog")
+	require.Len(t, ibs.logs.groups, 2)
+	require.Equal(t, capBefore, cap(ibs.logs.groups[1]), "inner log buffer capacity must survive revert+relog")
 }
 
 func TestResetDropsOversizedLogDataBuffers(t *testing.T) {
