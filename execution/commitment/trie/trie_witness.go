@@ -24,17 +24,7 @@ func (t *Trie) ExtractWitnessForPrefix(prefix []byte, trace bool, rl RetainDecid
 func ExtractWitnesses(subTries SubTries, trace bool, retainDec RetainDecider) ([]*Witness, error) {
 	var witnesses []*Witness
 	for _, root := range subTries.roots {
-		builder := NewWitnessBuilder(root, trace)
-		var limiter *MerklePathLimiter = nil
-		var hr *hasher
-		if retainDec != nil {
-			hr = newHasher(false)
-			limiter = &MerklePathLimiter{retainDec, hr.hash}
-		}
-		witness, err := builder.Build(limiter)
-		if hr != nil {
-			returnHasherToPool(hr)
-		}
+		witness, err := extractWitnessFromRootNode(root, trace, retainDec)
 		if err != nil {
 			return witnesses, err
 		}
