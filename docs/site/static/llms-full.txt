@@ -76,14 +76,30 @@ UUID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx  /data  ext4  defaults,noatime  0 2
 
 Use the filesystem UUID (`blkid` prints it) rather than a `/dev/nvme…` name, which can move between boots. The final `2` is the `fsck` pass for a non-root filesystem.
 
-Filesystems other than these two are not part of what we measure, so treat their performance as unverified rather than assumed.
+### Why the filesystem matters
 
-A few points that follow from Erigon's storage model — see [Database](../fundamentals/database) for the layout:
+Erigon's bottleneck is disk **latency**, not throughput or IOPS — see [Improving Performance](/help-center/known-issues#improving-performance). Two properties of the workload make its reads impossible to predict, and therefore impossible to pre-warm:
+
+* **EVM execution reads arbitrary state.** Nothing tells you in advance which accounts or storage slots a block will touch. Once the working set no longer fits in RAM, some of those reads land on cold data no cache had reason to hold.
+* **Merkle trie updates pull in neighbours.** Updating one key requires reading the nodes next to it in the trie. Those may be accounts the EVM never touches — they are involved only because of where they sit in the trie.
+
+Every layer the filesystem adds is added on top of each of those reads. That is what favours a thin filesystem here: ext4 and XFS store a file and leave caching to the OS page cache, which is what Erigon's memory-mapped database is built to use.
+
+### Filesystems to avoid
+
+Prefer a plain journaling filesystem over a copy-on-write or database-like one:
+
+* **ZFS** behaves more like a database than a filesystem. It keeps its own write-ahead log and its own cache (**ARC**), and that cache competes with the OS page cache for the same RAM. Its features — compression, encryption, dedup — each cost latency, and tuning it for this workload is not a solved problem.
+* **Btrfs** is a copy-on-write B-tree of pages, and Erigon's MDBX database is itself a B-tree of pages, so you end up running a database inside a database. Its `autodefrag` feature is the sharpest edge: it can multiply write I/O by as much as 100x. See [Background File System Features Can Hurt Performance](/help-center/known-issues#background-file-system-features-can-hurt-performance).
+
+Filesystems other than ext4 and XFS are not part of what we measure, so treat their performance as unverified rather than assumed.
+
+A few more points that follow from Erigon's storage model — see [Database](../fundamentals/database) for the layout:
 
 * **One device is enough.** An archive node fits on a single 4 TB drive, so RAID 0 gains you no capacity you need while doubling the chance of losing the datadir. Stripe only if no single drive you have is large enough.
 * **For failure protection, use redundancy — not RAID 0.** A mirrored array and ECC memory guard against a failing disk or bad RAM, which is what [Best Practices](/help-center/best-practices) recommends. RAID 0 does the opposite.
 * **Most of the datadir is re-downloadable.** Snapshot files are content-addressed and refetched from peers, so `chaindata/` is the part worth backing up.
-* **Erigon memory-maps its database.** Leave RAM for the page cache and avoid layers that keep a second cache of their own.
+* **Erigon memory-maps its database.** Leave RAM free for the page cache rather than handing it to a filesystem or volume manager to cache on its own.
 * **Network and cloud block storage are slow for block execution.** See [known issues](/help-center/known-issues#cloud-network-drives).
 
 If you must split the datadir across a fast and a slow device, see [Optimizing Storage](../fundamentals/optimizing-storage).
