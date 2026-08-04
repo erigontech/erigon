@@ -56,10 +56,10 @@ func (v TxnInclusionVerifier) VerifyTxnsInclusion(
 		// fcu persistance is now asynchronous so this can get called
 		// in the test loop before the tx data is coommited in which
 		// case it will fail and needs to retry
-		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		backOff := backoff.WithContext(backoff.BackOff(backoff.NewConstantBackOff(50*time.Millisecond)), ctx)
+		txCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		backOff := backoff.WithContext(backoff.BackOff(backoff.NewConstantBackOff(50*time.Millisecond)), txCtx)
 		r, err := backoff.RetryWithData(func() (*types.Receipt, error) {
-			return v.rpcApiClient.GetTransactionReceipt(ctx, txn.Hash())
+			return v.rpcApiClient.GetTransactionReceipt(txCtx, txn.Hash())
 		}, backOff)
 		cancel()
 
@@ -111,10 +111,10 @@ func (v TxnInclusionVerifier) VerifyTxnsOrderedInclusion(
 		// fcu persistance is now asynchronous so this can get called
 		// in the test loop before the tx data is coommited in which
 		// case it will fail and needs to retry
-		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		backOff := backoff.WithContext(backoff.BackOff(backoff.NewConstantBackOff(50*time.Millisecond)), ctx)
+		txCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		backOff := backoff.WithContext(backoff.BackOff(backoff.NewConstantBackOff(50*time.Millisecond)), txCtx)
 		r, err := backoff.RetryWithData(func() (*types.Receipt, error) {
-			return v.rpcApiClient.GetTransactionReceipt(ctx, txn.Hash())
+			return v.rpcApiClient.GetTransactionReceipt(txCtx, txn.Hash())
 		}, backOff)
 		cancel()
 		if err != nil {
