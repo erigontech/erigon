@@ -73,7 +73,7 @@ func (a *SignedAggregateAndProof) DecodeSSZ(buf []byte, version int) error {
 }
 
 func (a *SignedAggregateAndProof) EncodingSizeSSZ() int {
-	return 100 + a.Message.EncodingSizeSSZ()
+	return signedDynamicSize(a.Message.EncodingSizeSSZ())
 }
 
 func (a *SignedAggregateAndProof) HashSSZ() ([32]byte, error) {
