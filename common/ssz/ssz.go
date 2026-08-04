@@ -82,12 +82,10 @@ func OffsetSSZ(x uint32) []byte {
 	return b
 }
 
-// EncodeOffset marshals a little endian uint32 to buf
 func EncodeOffset(buf []byte, offset uint32) {
 	binary.LittleEndian.PutUint32(buf, offset)
 }
 
-// ReadOffset unmarshals a little endian uint32 to dst
 func DecodeOffset(x []byte) uint32 {
 	return binary.LittleEndian.Uint32(x)
 }

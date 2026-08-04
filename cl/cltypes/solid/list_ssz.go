@@ -35,15 +35,10 @@ type ListSSZ[T EncodableHashableSSZ] struct {
 	list []T
 
 	limit int
-	// this needs to be set to true if the underlying schema of the object
-	// includes an offset in any of its sub elements.
-	static bool
-	// If the underlying object has static size, aka static=true
-	// then we can cache its size instead of calling EncodeSizeSSZ on
-	// an always newly created object
+	// static is true when elements have fixed-size encodings.
+	static          bool
 	bytesPerElement int
-	// We can keep hash_tree_root result cached
-	root common.Hash
+	root            common.Hash
 }
 
 func NewDynamicListSSZ[T EncodableHashableSSZ](limit int) *ListSSZ[T] {
