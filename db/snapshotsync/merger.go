@@ -372,7 +372,7 @@ func (m *Merger) merge(ctx context.Context, v *View, toMerge []*DirtySegment, ta
 	if f.Count() != expectedTotal {
 		return nil, fmt.Errorf("unexpected amount after segments merge. got: %d, expected: %d", f.Count(), expectedTotal)
 	}
-	if err = f.Compress(); err != nil {
+	if err := f.Compress(); err != nil {
 		return nil, err
 	}
 	sn := &DirtySegment{

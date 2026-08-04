@@ -151,7 +151,7 @@ func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.TemporalTx, ha
 	if err != nil {
 		return nil, err
 	}
-	defer ibs.Release(false)
+	defer ibs.Close()
 
 	msg, txCtx, err := transactions.ComputeTxContext(ibs, engine, rules, signer, block, chainConfig, int(txIndex))
 	if err != nil {
@@ -376,7 +376,7 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 			}
 			return nil, err
 		}
-		if err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum); err != nil {
+		if err := api.BaseAPI.checkPruneHistory(ctx, tx, blockNum); err != nil {
 			return nil, err
 		}
 		b, _, err = api.getBlockWithSenders(ctx, rpc.BlockNumber(blockNum), tx)

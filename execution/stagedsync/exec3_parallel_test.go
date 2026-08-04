@@ -296,13 +296,14 @@ func taskFactory(numTask int, sender Sender, readsPerT int, writesPerT int, nonI
 
 		// Generate time and key path for each op except first two that are always read and write nonce
 		for j := 2; j < len(ops); j++ {
-			if ops[j].opType == readType {
+			switch ops[j].opType {
+			case readType:
 				ops[j].key = pathGenerator(i, j, len(ops))
 				ops[j].duration = readTime(i, j)
-			} else if ops[j].opType == writeType {
+			case writeType:
 				ops[j].key = pathGenerator(i, j, len(ops))
 				ops[j].duration = writeTime(i, j)
-			} else {
+			default:
 				ops[j].duration = nonIOTime(i, j)
 			}
 
@@ -1409,7 +1410,7 @@ func TestParallelResumeBoundaryOffsets(t *testing.T) {
 
 	// Write mock receipt for transaction 0 in the database at txNum = 1
 	seedResumeTestDB(t, db, func(putter kv.TemporalPutDel) error {
-		return rawtemporaldb.AppendReceipt(putter, 5, 21000, 12000, 1)
+		return rawtemporaldb.AppendReceiptMetadata(putter, 5, 21000, 12000, 1)
 	})
 
 	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
@@ -1500,7 +1501,7 @@ func TestParallelResumeReconstructsPriorReceipts(t *testing.T) {
 		if err := putter.DomainPut(kv.AccountsDomain, senderIsCoinbaseKey.rawAddress[:], accounts.SerialiseV3(&acc), 0, nil); err != nil {
 			return err
 		}
-		return rawtemporaldb.AppendReceipt(putter, 0, 21000, 0, 1)
+		return rawtemporaldb.AppendReceiptMetadata(putter, 0, 21000, 0, 1)
 	})
 
 	txTask := &exec.TxTask{
@@ -1573,7 +1574,7 @@ func TestParallelResumeReconstructionFailureIsNonFatal(t *testing.T) {
 	// Store tx0's receipt values but leave the sender unfunded: the RCacheV2
 	// probe misses and the prefix replay fails on insufficient funds.
 	seedResumeTestDB(t, db, func(putter kv.TemporalPutDel) error {
-		return rawtemporaldb.AppendReceipt(putter, 0, 21000, 0, 1)
+		return rawtemporaldb.AppendReceiptMetadata(putter, 0, 21000, 0, 1)
 	})
 
 	txTask := &exec.TxTask{

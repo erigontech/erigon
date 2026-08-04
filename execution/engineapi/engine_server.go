@@ -483,6 +483,10 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	// via rlp.EncodeToBytes. Both slices reference the same underlying
 	// byte buffers from req.Transactions.
 	block := types.NewBlockFromStorageWithBinaryTxs(blockHash, &header, transactions, txs, nil /* uncles */, withdrawals)
+	// Carry the payload's BAL on the block so execution consumes it from the
+	// in-memory payload; InsertBlocks still stores it in the overlay (flushed at
+	// commit) as secondary storage.
+	block.SetBlockAccessList(blockAccessListBytes)
 	payloadStatus, err := s.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes, blockAccessListBytes)
 	if err != nil {
 		if errors.Is(err, rules.ErrInvalidBlock) {
@@ -1198,7 +1202,10 @@ func (e *EngineServer) HandleForkChoice(
 	if status == execmodule.ExecutionStatusReorgTooDeep {
 		return nil, &engine_helpers.ReorgTooDeepErr
 	}
-	if status == execmodule.ExecutionStatusBusy {
+	// engine_forkchoiceUpdated restricts payload statuses to VALID, INVALID, and SYNCING — never ACCEPTED.
+	if status == execmodule.ExecutionStatusBusy ||
+		status == execmodule.ExecutionStatusMissingSegment ||
+		status == execmodule.ExecutionStatusTooFarAway {
 		return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 	}
 	if status == execmodule.ExecutionStatusBadBlock {
@@ -1239,11 +1246,12 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 		ret := make([]*engine_types.BlobAndProofV2, len(blobHashes))
 		for i, bb := range bundles {
 			logHead := fmt.Sprintf("\n%x: ", blobHashes[i])
-			if len(bb.Blob) == 0 {
+			switch {
+			case len(bb.Blob) == 0:
 				logLine = append(logLine, logHead, "nil")
-			} else if len(bb.Proofs) != int(params.CellsPerExtBlob) {
+			case len(bb.Proofs) != int(params.CellsPerExtBlob):
 				logLine = append(logLine, logHead, fmt.Sprintf("pre-Fusaka proofs, len(proof)=%d", len(bb.Proofs)))
-			} else {
+			default:
 				ret[i] = &engine_types.BlobAndProofV2{Blob: bb.Blob, CellProofs: make([]hexutil.Bytes, params.CellsPerExtBlob)}
 				for c := range params.CellsPerExtBlob {
 					ret[i].CellProofs[c] = bb.Proofs[c][:]
@@ -1255,19 +1263,21 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 		return ret, nil
 	case clparams.ElectraVersion: // GetBlobsV2
 		ret := make([]*engine_types.BlobAndProofV2, len(blobHashes))
+	FOR_LOOP:
 		for i, bb := range bundles {
 			logHead := fmt.Sprintf("\n%x: ", blobHashes[i])
-			if len(bb.Blob) == 0 {
+			switch {
+			case len(bb.Blob) == 0:
 				// engine_getBlobsV2 MUST return null in case of any missing or older version blobs
 				ret = nil
 				logLine = append(logLine, logHead, "nil")
-				break
-			} else if len(bb.Proofs) != int(params.CellsPerExtBlob) {
+				break FOR_LOOP
+			case len(bb.Proofs) != int(params.CellsPerExtBlob):
 				// engine_getBlobsV2 MUST return null in case of any missing or older version blobs
 				ret = nil
 				logLine = append(logLine, logHead, fmt.Sprintf("pre-Fusaka proofs, len(proof)=%d", len(bb.Proofs)))
-				break
-			} else {
+				break FOR_LOOP
+			default:
 				ret[i] = &engine_types.BlobAndProofV2{Blob: bb.Blob, CellProofs: make([]hexutil.Bytes, params.CellsPerExtBlob)}
 				for c := range params.CellsPerExtBlob {
 					ret[i].CellProofs[c] = bb.Proofs[c][:]
@@ -1281,11 +1291,12 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 		ret := make([]*engine_types.BlobAndProofV1, len(blobHashes))
 		for i, bb := range bundles {
 			logHead := fmt.Sprintf("\n%x: ", blobHashes[i])
-			if len(bb.Blob) == 0 {
+			switch {
+			case len(bb.Blob) == 0:
 				logLine = append(logLine, logHead, "nil")
-			} else if len(bb.Proofs) != 1 {
+			case len(bb.Proofs) != 1:
 				logLine = append(logLine, logHead, fmt.Sprintf("post-Fusaka proofs, len(proof)=%d", len(bb.Proofs)))
-			} else {
+			default:
 				ret[i] = &engine_types.BlobAndProofV1{Blob: bb.Blob, Proof: bb.Proofs[0][:]}
 				logLine = append(logLine, logHead, fmt.Sprintf("OK, len(blob)=%d len(proof)=%d ", len(bb.Blob), len(bb.Proofs[0])))
 			}

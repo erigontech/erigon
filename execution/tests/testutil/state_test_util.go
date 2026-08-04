@@ -284,10 +284,11 @@ func (t *StateTest) RunNoVerify(tb testing.TB, sd *execctx.SharedDomains, tx kv.
 		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
 	}
 	vmconfig.ExtraEips = eips
-	block, _, err := genesiswrite.GenesisToBlock(nil, t.genesis(config), dirs, log.Root())
+	block, ibs, err := genesiswrite.GenesisToBlock(nil, t.genesis(config), dirs, log.Root())
 	if err != nil {
 		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
 	}
+	defer ibs.Close()
 
 	readBlockNr := block.NumberU64()
 	writeBlockNr := readBlockNr + 1
@@ -410,10 +411,10 @@ func (t *StateTest) RunNoVerify(tb testing.TB, sd *execctx.SharedDomains, tx kv.
 	// touched. Matches go-ethereum's state-test runner.
 	statedb.AddBalance(accounts.InternAddress(t.Json.Env.Coinbase), *uint256.NewInt(0), tracing.BalanceChangeUnspecified)
 
-	if err = statedb.FinalizeTx(evm.ChainRules(), w); err != nil {
+	if err := statedb.FinalizeTx(evm.ChainRules(), w); err != nil {
 		return nil, root, gasUsed, err
 	}
-	if err = statedb.CommitBlock(evm.ChainRules(), w); err != nil {
+	if err := statedb.CommitBlock(evm.ChainRules(), w); err != nil {
 		return nil, root, gasUsed, err
 	}
 

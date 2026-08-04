@@ -51,7 +51,7 @@ func TestWitnessSubscriptionEncodingValidation(t *testing.T) {
 }
 
 func TestWitnessSubscriptionRejectsEncodingThroughEndpoint(t *testing.T) {
-	api := &DebugAPIImpl{witnessCache: newWitnessResultCache(4)}
+	api := &DebugAPIImpl{witnessCache: newWitnessResultCache(4, 0, false, false)}
 	_, err := api.ExecutionWitnesses(context.Background(), &WitnessSubscriptionOpts{Encoding: "rlp"})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "unsupported witness encoding")
@@ -66,7 +66,7 @@ func TestWitnessSubscriptionNilCache(t *testing.T) {
 }
 
 func TestWitnessSubscriptionNoNotifier(t *testing.T) {
-	api := &DebugAPIImpl{witnessCache: newWitnessResultCache(4)}
+	api := &DebugAPIImpl{witnessCache: newWitnessResultCache(4, 0, false, false)}
 	sub, err := api.ExecutionWitnesses(context.Background(), nil)
 	require.ErrorIs(t, err, rpc.ErrNotificationsUnsupported)
 	require.NotNil(t, sub)
@@ -89,7 +89,7 @@ func TestWitnessNotificationWireKeys(t *testing.T) {
 }
 
 func TestWitnessSubscriptionDelivers(t *testing.T) {
-	cache := newWitnessResultCache(4)
+	cache := newWitnessResultCache(4, 0, false, false)
 	api := &DebugAPIImpl{witnessCache: cache}
 
 	ctx, resc, closec := witnessTestNotifier(t)
@@ -118,7 +118,7 @@ func TestWitnessSubscriptionDelivers(t *testing.T) {
 // TestWitnessSubscriptionWireDispatch checks debug_subscribe("executionWitnesses")
 // end-to-end over a real in-process RPC server, including teardown on unsubscribe.
 func TestWitnessSubscriptionWireDispatch(t *testing.T) {
-	cache := newWitnessResultCache(4)
+	cache := newWitnessResultCache(4, 0, false, false)
 	api := &DebugAPIImpl{witnessCache: cache}
 
 	server := rpc.NewServer(50, false, false, true, log.New(), 100)

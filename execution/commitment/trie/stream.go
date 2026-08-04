@@ -486,7 +486,8 @@ func (smi *StreamMergeIterator) Next() (itemType1 StreamItem, hex1 []byte, aValu
 			smi.offset += size
 		}
 		hex := smi.hex // Save it to be able to use it even after assigning to nil
-		if smi.oldHex == nil {
+		switch {
+		case smi.oldHex == nil:
 			smi.hex = nil // To be consumed
 			switch smi.itemType {
 			case AccountStreamItem:
@@ -504,7 +505,7 @@ func (smi *StreamMergeIterator) Next() (itemType1 StreamItem, hex1 []byte, aValu
 			default:
 				panic(fmt.Errorf("unexpected stream item type (oldHex == nil): %d", smi.itemType))
 			}
-		} else if hex == nil {
+		case hex == nil:
 			if len(smi.oldHexCopy) > 0 {
 				smi.oldHexCopy = smi.oldHexCopy[:0]
 			}
@@ -518,7 +519,7 @@ func (smi *StreamMergeIterator) Next() (itemType1 StreamItem, hex1 []byte, aValu
 			oldVal := smi.oldVal
 			smi.oldItemType, smi.oldHex, smi.oldAVal, smi.oldHash, smi.oldVal = smi.it.Next()
 			return oldItemType, smi.oldHexCopy, oldAVal, nil, smi.oldHashCopy, oldVal
-		} else {
+		default:
 			// Special case - account gets deleted
 			if smi.itemType == AccountStreamItem && smi.s.aValues[smi.ai] == nil && bytes.HasPrefix(smi.oldHex, hex) {
 				smi.oldItemType, smi.oldHex, smi.oldAVal, smi.oldHash, smi.oldVal = smi.it.Next()
@@ -607,13 +608,14 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 	currStorage.Reset()
 
 	makeData := func(fieldSet uint32, hashRef []byte) GenStructStepData {
-		if hashRef != nil {
+		switch {
+		case hashRef != nil:
 			copy(hashData.Hash[:], hashRef)
 			return &hashData
-		} else if !isAccount {
+		case !isAccount:
 			leafData.Value = rlp.RlpSerializableBytes(value.Bytes())
 			return &leafData
-		} else {
+		default:
 			accData.FieldSet = fieldSet
 			return &accData
 		}
@@ -802,28 +804,29 @@ func HashWithModifications(
 			storageKeyHex = storageKeyHex[:len(storageKeyHex)-1]
 			si++
 		}
-		if accountKeyHex == nil {
+		switch {
+		case accountKeyHex == nil:
 			copy(stream.keyBytes[offset:], storageKeyHex)
 			stream.keySizes[ki] = uint8(len(storageKeyHex))
 			stream.itemTypes[ki] = StorageStreamItem
 			ki++
 			offset += len(storageKeyHex)
 			storageKeyHex = nil // consumed
-		} else if storageKeyHex == nil {
+		case storageKeyHex == nil:
 			copy(stream.keyBytes[offset:], accountKeyHex)
 			stream.keySizes[ki] = uint8(len(accountKeyHex))
 			stream.itemTypes[ki] = AccountStreamItem
 			ki++
 			offset += len(accountKeyHex)
 			accountKeyHex = nil // consumed
-		} else if bytes.Compare(accountKeyHex, storageKeyHex) < 0 {
+		case bytes.Compare(accountKeyHex, storageKeyHex) < 0:
 			copy(stream.keyBytes[offset:], accountKeyHex)
 			stream.keySizes[ki] = uint8(len(accountKeyHex))
 			stream.itemTypes[ki] = AccountStreamItem
 			ki++
 			offset += len(accountKeyHex)
 			accountKeyHex = nil // consumed
-		} else {
+		default:
 			copy(stream.keyBytes[offset:], storageKeyHex)
 			stream.keySizes[ki] = uint8(len(storageKeyHex))
 			stream.itemTypes[ki] = StorageStreamItem

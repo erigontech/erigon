@@ -556,7 +556,7 @@ func decodeBlockAccessList(out *BlockAccessList, s *rlp.Stream) error {
 		prevAddr = address
 		hasPrev = true
 	}
-	if err = checkErrListEnd(s, err); err != nil {
+	if err := checkErrListEnd(s, err); err != nil {
 		return err
 	}
 	if len(changes) == 0 {
@@ -632,7 +632,7 @@ func decodeSlotChangesList(s *rlp.Stream) ([]*SlotChanges, error) {
 		prevSlot = slot
 		hasPrev = true
 	}
-	if err = checkErrListEnd(s, err); err != nil {
+	if err := checkErrListEnd(s, err); err != nil {
 		return nil, err
 	}
 	if err := validateSlotChangeList(out); err != nil {
@@ -661,7 +661,7 @@ func decodeStorageChanges(s *rlp.Stream) ([]*StorageChange, error) {
 			break
 		}
 	}
-	if err = checkErrListEnd(s, err); err != nil {
+	if err := checkErrListEnd(s, err); err != nil {
 		return nil, err
 	}
 	if err := validateStorageChangeEntries(out); err != nil {
@@ -690,7 +690,7 @@ func decodeBalanceChanges(s *rlp.Stream) ([]*BalanceChange, error) {
 			break
 		}
 	}
-	if err = checkErrListEnd(s, err); err != nil {
+	if err := checkErrListEnd(s, err); err != nil {
 		return nil, err
 	}
 	if err := validateBalanceChangeList(out); err != nil {
@@ -727,7 +727,7 @@ func decodeNonceChanges(s *rlp.Stream) ([]*NonceChange, error) {
 		lastIdx = change.Index
 		hasLast = true
 	}
-	if err = checkErrListEnd(s, err); err != nil {
+	if err := checkErrListEnd(s, err); err != nil {
 		return nil, err
 	}
 	if err := validateNonceChangeList(out); err != nil {
@@ -764,7 +764,7 @@ func decodeCodeChanges(s *rlp.Stream) ([]*CodeChange, error) {
 		lastIdx = change.Index
 		hasLast = true
 	}
-	if err = checkErrListEnd(s, err); err != nil {
+	if err := checkErrListEnd(s, err); err != nil {
 		return nil, err
 	}
 	if err := validateCodeChangeList(out); err != nil {
@@ -798,7 +798,7 @@ func decodeStorageKeys(s *rlp.Stream) ([]accounts.StorageKey, error) {
 			break
 		}
 	}
-	if err = checkErrListEnd(s, err); err != nil {
+	if err := checkErrListEnd(s, err); err != nil {
 		return nil, err
 	}
 	if err := validateStorageReads(hashes); err != nil {

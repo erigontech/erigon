@@ -29,6 +29,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -583,11 +585,12 @@ func TestAppend(t *testing.T) {
 	require.NoError(collector.Collect([]byte{3}, nil))
 	require.NoError(collector.Load(nil, "", func(k, v []byte, table CurrentTableReader, next LoadNextFunc) error {
 		fmt.Printf("%x %x\n", k, v)
-		if k[0] == 1 {
+		switch k[0] {
+		case 1:
 			require.Equal([]byte{1, 2, 3, 4, 5, 6, 7}, v)
-		} else if k[0] == 2 {
+		case 2:
 			require.Equal([]byte{10, 20, 30, 40, 50}, v)
-		} else {
+		default:
 			require.Nil(v)
 		}
 		return nil
@@ -659,7 +662,7 @@ func TestAppendAcrossMemProviders(t *testing.T) {
 	}
 
 	err = mergeSortFiles("test", providers, loadFunc,
-		TransformArgs{BufferType: SortableAppendBuffer}, NewAppendBuffer(1))
+		TransformArgs{BufferType: SortableAppendBuffer})
 	require.NoError(t, err)
 
 	require.Len(t, results, 4)
@@ -835,7 +838,7 @@ func TestMixedProvidersMergeSortFiles(t *testing.T) {
 		return nil
 	}
 
-	err = mergeSortFiles("test", providers, loadFunc, TransformArgs{}, NewSortableBuffer(1))
+	err = mergeSortFiles("test", providers, loadFunc, TransformArgs{})
 	require.NoError(t, err)
 
 	// Should have all 10 entries in sorted order
@@ -893,7 +896,7 @@ func TestMixedProvidersInterleavedKeys(t *testing.T) {
 		return nil
 	}
 
-	err = mergeSortFiles("test", providers, loadFunc, TransformArgs{}, NewSortableBuffer(1))
+	err = mergeSortFiles("test", providers, loadFunc, TransformArgs{})
 	require.NoError(t, err)
 
 	require.Len(t, keys, 10)
@@ -946,7 +949,7 @@ func TestMixedProvidersZeroCopyIntegrity(t *testing.T) {
 		return nil
 	}
 
-	err = mergeSortFiles("test", providers, loadFunc, TransformArgs{}, NewSortableBuffer(1))
+	err = mergeSortFiles("test", providers, loadFunc, TransformArgs{})
 	require.NoError(t, err)
 
 	require.Len(t, entries, 4)
@@ -1535,4 +1538,38 @@ func TestVmtouchMmap(t *testing.T) {
 		}
 	}
 	vmtouch("AFTER full scan")
+}
+
+// TestCollectorWithAllocatorDrawsBufferLazily pins the lazy-draw contract:
+// an allocator-backed collector must not take a pooled buffer until the
+// first Collect, so never-written collectors (common when a batch writer
+// set is built upfront) cost no buffer at all.
+func TestCollectorWithAllocatorDrawsBufferLazily(t *testing.T) {
+	logger := log.New()
+	_, tx := memdb.NewTestTx(t)
+	require := require.New(t)
+	table := kv.ChaindataTables[0]
+
+	var draws atomic.Int64
+	pool := &sync.Pool{New: func() any {
+		draws.Add(1)
+		return NewSortableBuffer(BufferOptimalSize)
+	}}
+	allocator := NewAllocator(pool)
+
+	empty := NewCollectorWithAllocator(t.Name()+"-empty", "", allocator, logger)
+	defer empty.Close()
+	require.NoError(empty.Flush())
+	require.NoError(empty.Load(tx, table, IdentityLoadFunc, TransformArgs{}))
+	empty.Close()
+	require.Zero(draws.Load(), "empty collector must not draw from the pool")
+
+	c := NewCollectorWithAllocator(t.Name(), "", allocator, logger)
+	defer c.Close()
+	require.NoError(c.Collect([]byte{1}, []byte{1}))
+	require.EqualValues(1, draws.Load(), "first Collect draws exactly one pooled buffer")
+	require.NoError(c.Load(tx, table, IdentityLoadFunc, TransformArgs{}))
+	v, err := tx.GetOne(table, []byte{1})
+	require.NoError(err)
+	require.Equal([]byte{1}, v)
 }
