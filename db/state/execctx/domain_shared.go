@@ -861,11 +861,13 @@ func (sd *SharedDomains) SetStateCache(stateCache *cache.StateCache) {
 // GuardAggregatorForCache forbids visibility lowering on db's aggregator when
 // sc is a fill-enabled StateCache: fill admission relies on view frontiers
 // never decreasing. This is the one place that binds the invariant — call it
-// wherever a fill-enabled cache is wired over a DB. Duck-typed so the storage
+// wherever a fill-enabled cache is wired over a DB. It mirrors SetStateCache's
+// gate: with USE_STATE_CACHE=false the cache is never wired and no fill can
+// happen, so the aggregator stays unconstrained. Duck-typed so the storage
 // layer need not know the cache type (and vice versa); a DB without an
 // aggregator is a no-op.
 func GuardAggregatorForCache(db any, sc *cache.StateCache) {
-	if sc == nil || !sc.FillsEnabled() {
+	if sc == nil || !dbg.UseStateCache || !sc.FillsEnabled() {
 		return
 	}
 	h, ok := db.(interface{ Agg() any })

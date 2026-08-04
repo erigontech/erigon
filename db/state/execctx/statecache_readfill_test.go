@@ -344,3 +344,30 @@ func TestReadFill_NegativeUsesLastVisibleTxNum(t *testing.T) {
 	_, ok = sc.View(nil).Get(kv.AccountsDomain, missing)
 	require.False(t, ok, "an unwind of the view's last included txNum must invalidate the negative")
 }
+
+type fakeForbidder struct{ called bool }
+
+func (f *fakeForbidder) ForbidVisibilityLowering() { f.called = true }
+
+type fakeHasAgg struct{ f *fakeForbidder }
+
+func (h fakeHasAgg) Agg() any { return h.f }
+
+// GuardAggregatorForCache must mirror SetStateCache's gate: with
+// USE_STATE_CACHE=false no SD ever wires the cache, so no fills can happen and
+// the aggregator must stay free to lower visibility.
+func TestGuardAggregatorForCache_RespectsUseStateCache(t *testing.T) {
+	sc := newSmallStateCache()
+	t.Cleanup(sc.Close)
+	old := dbg.UseStateCache
+	t.Cleanup(func() { dbg.SetUseStateCache(old) })
+
+	dbg.SetUseStateCache(false)
+	f := &fakeForbidder{}
+	execctx.GuardAggregatorForCache(fakeHasAgg{f}, sc)
+	require.False(t, f.called, "a disabled cache is never wired — the aggregator must not be constrained")
+
+	dbg.SetUseStateCache(true)
+	execctx.GuardAggregatorForCache(fakeHasAgg{f}, sc)
+	require.True(t, f.called)
+}
