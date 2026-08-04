@@ -78,35 +78,62 @@ func TestGetPayloadV4AcceptsEmptyRequestsBundle(t *testing.T) {
 	require.Len(t, resp.ExecutionRequests, 0)
 }
 
+func TestGetPayloadV4AcceptsValidBlobsBundle(t *testing.T) {
+	t.Parallel()
+
+	const payloadID uint64 = 48
+	cfg := preOsakaChainConfig()
+	stub := &getPayloadStubModule{
+		getAssembledBlockFunc: func(_ context.Context, id uint64) (execmodule.AssembledBlockResult, error) {
+			require.Equal(t, payloadID, id)
+			return execmodule.AssembledBlockResult{
+				Block:      blobPayloadBlock(cfg.ChainID, 0 /* wrapperVersion */, 1 /* commitments */, 1 /* blobs */, 1 /* proofs */),
+				BlockValue: uint256.NewInt(0),
+			}, nil
+		},
+	}
+	srv := newProposingEngineServerWithConfig(cfg, stub)
+
+	resp, err := srv.GetPayloadV4(context.Background(), payloadIDBytes(payloadID))
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Len(t, resp.BlobsBundle.Blobs, 1)
+	require.Len(t, resp.BlobsBundle.Proofs, 1)
+}
+
+func TestGetPayloadV3RejectsInvalidBlobsBundle(t *testing.T) {
+	t.Parallel()
+
+	const payloadID uint64 = 47
+	cfg := prePragueChainConfig()
+	stub := &getPayloadStubModule{
+		getAssembledBlockFunc: func(_ context.Context, id uint64) (execmodule.AssembledBlockResult, error) {
+			require.Equal(t, payloadID, id)
+			return execmodule.AssembledBlockResult{
+				Block:      blobPayloadBlock(cfg.ChainID, 0 /* wrapperVersion */, 1 /* commitments */, 1 /* blobs */, 2 /* proofs */),
+				BlockValue: uint256.NewInt(0),
+			}, nil
+		},
+	}
+	srv := newProposingEngineServerWithConfig(cfg, stub)
+
+	resp, err := srv.GetPayloadV3(context.Background(), payloadIDBytes(payloadID))
+
+	require.ErrorContains(t, err, "built invalid blobsBundle")
+	require.Nil(t, resp)
+}
+
 func TestGetPayloadV6RejectsInvalidBlobsBundle(t *testing.T) {
 	t.Parallel()
 
 	const payloadID uint64 = 44
 	cfg := allForksChainConfig()
-	to := common.Address{0x01}
-	wrappedTxn := &types.BlobTxWrapper{WrapperVersion: 1}
-	wrappedTxn.Tx.To = &to
-	wrappedTxn.Tx.ChainID = *cfg.ChainID
-	wrappedTxn.Tx.BlobVersionedHashes = []common.Hash{{0x01}}
-	wrappedTxn.Commitments = make(types.BlobKzgs, 1)
-	wrappedTxn.Blobs = make(types.Blobs, 1)
-	wrappedTxn.Proofs = make(types.KZGProofs, 1)
-
-	header := &types.Header{
-		Number:   *uint256.NewInt(101),
-		Time:     1,
-		BaseFee:  uint256.NewInt(1_000_000_000),
-		GasLimit: 30_000_000,
-	}
-	block := types.NewBlock(header, []types.Transaction{wrappedTxn}, nil, nil, nil)
 	stub := &getPayloadStubModule{
 		getAssembledBlockFunc: func(_ context.Context, id uint64) (execmodule.AssembledBlockResult, error) {
 			require.Equal(t, payloadID, id)
 			return execmodule.AssembledBlockResult{
-				Block: &types.BlockWithReceipts{
-					Block:    block,
-					Requests: make(types.FlatRequests, 0),
-				},
+				Block:      blobPayloadBlock(cfg.ChainID, 1 /* wrapperVersion */, 1 /* commitments */, 1 /* blobs */, 1 /* proofs */),
 				BlockValue: uint256.NewInt(0),
 			}, nil
 		},
@@ -208,13 +235,10 @@ func TestAssembledBlockToPayloadResponseIncludesCanonicalEmptyBAL(t *testing.T) 
 	require.Equal(t, hexutil.Bytes(emptyBAL), *resp.ExecutionPayload.BlockAccessList)
 }
 
+// newProposingEngineServerForGetPayloadTests returns a server on a Prague-window
+// config: GetPayloadV4 is valid on Prague but invalid once Osaka activates.
 func newProposingEngineServerForGetPayloadTests(stub execmodule.ExecutionModule) *EngineServer {
-	cfg := allForksChainConfig()
-	// GetPayloadV4 is valid on Prague but invalid once Osaka activates.
-	cfg.OsakaTime = nil
-	cfg.AmsterdamTime = nil
-
-	return newProposingEngineServerWithConfig(cfg, stub)
+	return newProposingEngineServerWithConfig(preOsakaChainConfig(), stub)
 }
 
 func newProposingEngineServerWithConfig(cfg *chain.Config, stub execmodule.ExecutionModule) *EngineServer {
@@ -253,6 +277,31 @@ func minimalPayloadBlock(timestamp uint64, requests types.FlatRequests) *types.B
 	return &types.BlockWithReceipts{
 		Block:    block,
 		Requests: requests,
+	}
+}
+
+// blobPayloadBlock builds a payload block containing a single blob transaction
+// with the given wrapper version and commitment/blob/proof counts.
+func blobPayloadBlock(chainID *uint256.Int, wrapperVersion byte, commitments, blobs, proofs int) *types.BlockWithReceipts {
+	to := common.Address{0x01}
+	wrappedTxn := &types.BlobTxWrapper{WrapperVersion: wrapperVersion}
+	wrappedTxn.Tx.To = &to
+	wrappedTxn.Tx.ChainID = *chainID
+	wrappedTxn.Tx.BlobVersionedHashes = []common.Hash{{0x01}}
+	wrappedTxn.Commitments = make(types.BlobKzgs, commitments)
+	wrappedTxn.Blobs = make(types.Blobs, blobs)
+	wrappedTxn.Proofs = make(types.KZGProofs, proofs)
+
+	header := &types.Header{
+		Number:   *uint256.NewInt(101),
+		Time:     1,
+		BaseFee:  uint256.NewInt(1_000_000_000),
+		GasLimit: 30_000_000,
+	}
+	block := types.NewBlock(header, []types.Transaction{wrappedTxn}, nil, nil, nil)
+	return &types.BlockWithReceipts{
+		Block:    block,
+		Requests: make(types.FlatRequests, 0),
 	}
 }
 
