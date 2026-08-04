@@ -20,7 +20,6 @@
 package protocol
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"slices"
@@ -701,37 +700,39 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	}
 
 	totalGasUsed := gasUsed.total()
-	if refunds && !gasBailout {
+	switch {
+	case refunds && !gasBailout:
 		refundQuotient := params.RefundQuotient
 		if rules.IsLondon {
 			refundQuotient = params.RefundQuotientEIP3529
 		}
-		if rules.IsAmsterdam {
+		switch {
+		case rules.IsAmsterdam:
 			combined := totalGasUsed.PlusIntrinsic(intrinsicGas)
 			st.blockStateGasUsed = combined.StateClamped()
 			st.blockExecutionGasUsed = max(combined.Execution, intrinsicGasResult.FloorGasCost)
 			st.txnGasUsedB4Refunds = combined.Total()
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
 			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
-		} else if rules.IsPrague {
+		case rules.IsPrague:
 			st.txnGasUsedB4Refunds = intrinsicGas + totalGasUsed.Execution
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
 			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
 			st.blockExecutionGasUsed = st.txnGasUsed
-		} else {
+		default:
 			st.txnGasUsedB4Refunds = intrinsicGas + totalGasUsed.Execution
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
 			st.txnGasUsed = st.txnGasUsedB4Refunds - refund
 			st.blockExecutionGasUsed = st.txnGasUsed
 		}
 		st.refundGas()
-	} else if rules.IsAmsterdam {
+	case rules.IsAmsterdam:
 		combined := totalGasUsed.PlusIntrinsic(intrinsicGas)
 		st.blockStateGasUsed = combined.StateClamped()
 		st.blockExecutionGasUsed = max(combined.Execution, intrinsicGasResult.FloorGasCost)
 		st.txnGasUsedB4Refunds = combined.Total()
 		st.txnGasUsed = max(st.txnGasUsedB4Refunds, intrinsicGasResult.FloorGasCost)
-	} else {
+	default:
 		// No-refund path: gasBailout (trace_call) or !refunds.
 		// Don't apply Prague floor or refunds — just record raw gas used.
 		st.txnGasUsedB4Refunds = intrinsicGas + totalGasUsed.Execution
@@ -862,11 +863,8 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *u
 	}
 	preTxDelegates := make(map[accounts.Address]bool)
 	delegationSetFor := make(map[accounts.Address]bool)
-	var b [32]byte
-	data := bytes.NewBuffer(nil)
 	for i := range auths {
 		auth := &auths[i]
-		data.Reset()
 
 		// 1. chainId check
 		if !auth.ChainID.IsZero() && !auth.ChainID.Eq(chainID) {
@@ -875,12 +873,12 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *u
 		}
 
 		// 2. authority recover
-		authorityPtr, err := auth.RecoverSigner(data, b[:])
+		recovered, err := auth.RecoverSigner()
 		if err != nil {
 			log.Trace("authority recover failed, skipping", "err", err, "authIndex", i)
 			continue
 		}
-		authority := accounts.InternAddress(*authorityPtr)
+		authority := accounts.InternAddress(recovered)
 
 		// 3. add authority account to accesses_addresses
 		st.state.AddAddressToAccessList(authority)

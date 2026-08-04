@@ -25,7 +25,7 @@ func BenchmarkSnailtracer(b *testing.B) {
 
 	vmenv := benchConfig(b, 1_000_000_000)
 	statedb := vmenv.IntraBlockState()
-	deployContract(statedb, addrContract, code)
+	deployContract(b, statedb, addrContract, code)
 
 	// callComplete checks the call did work; only this benchmark also has a
 	// rendered frame to check.
@@ -48,7 +48,7 @@ func TestSnailtracerPathsAgree(t *testing.T) {
 
 	render := func(noMaterialize bool) []byte {
 		vmenv := newBenchEnv(t, 1_000_000_000, noMaterialize)
-		deployContract(vmenv.IntraBlockState(), addrContract, code)
+		deployContract(t, vmenv.IntraBlockState(), addrContract, code)
 		ret, _, err := prepareAndCall(vmenv, addrContract, input)
 		require.NoError(t, err)
 		require.NotEmpty(t, ret)

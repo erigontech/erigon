@@ -1055,7 +1055,7 @@ func (ii *InvertedIndex) collate(ctx context.Context, step kv.Step, roTx kv.Tx) 
 		return InvertedIndexCollation{}, err
 	}
 	if len(offsets) > 0 {
-		if err = loadBitmapsFunc(nil, make([]byte, 8), nil, nil); err != nil {
+		if err := loadBitmapsFunc(nil, make([]byte, 8), nil, nil); err != nil {
 			return InvertedIndexCollation{}, err
 		}
 	}
