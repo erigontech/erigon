@@ -58,6 +58,21 @@ func ReadChainConfig(db kv.Getter, hash common.Hash) (*chain.Config, error) {
 		}
 		config.Bor = borConfig
 	}
+
+	// Config.Precompiles is json:"-", so it is dropped by the unmarshal above. Re-attach the
+	// node's registered runtime precompile set (by chain id) so EVERY consumer of a
+	// DB-materialised config — the staged-sync execution stage, the block builder, AND the
+	// RPC receipt/eth_getLogs re-execution — sees the same custom precompiles the in-memory
+	// genesis config carried. Without this, a tx that staticcalls a custom precompile (e.g.
+	// SpentBook.spendRingCt → 0x27) reverts during canonical execution (empty return) while
+	// RPC re-execution — which used to re-attach on its own — regenerates a divergent success
+	// receipt, so the tx's state writes silently never land. Registered at chain init, before
+	// any block executes; a no-op for chains with no registered set.
+	if config.Precompiles == nil {
+		if cp := chain.RegisteredPrecompiles(config.ChainID); cp != nil {
+			config.Precompiles = cp
+		}
+	}
 	return &config, nil
 }
 
