@@ -167,8 +167,8 @@ func (a Applier) Unwind(unwindToTxNum uint64) {
 	a.c.unwind(unwindToTxNum)
 }
 
-// Clear removes all mutable entries from all caches and resets the applied
-// frontiers.
+// Clear removes all mutable entries from all caches. The applied frontiers
+// survive — clearing is not a canonical-state rewind (that is Unwind).
 func (a Applier) Clear() {
 	if a.c == nil {
 		return

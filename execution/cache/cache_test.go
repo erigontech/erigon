@@ -905,7 +905,8 @@ func TestStateCache_AppliedEndLifecycle(t *testing.T) {
 	require.Equal(t, uint64(15), sc.appliedEnd[kv.AccountsDomain])
 
 	sc.clear()
-	require.Zero(t, sc.appliedEnd[kv.AccountsDomain])
+	require.Equal(t, uint64(15), sc.appliedEnd[kv.AccountsDomain],
+		"clear drops entries, not admission history")
 }
 
 func TestStateCache_StaleViewCannotFillAfterDelete(t *testing.T) {
@@ -1097,4 +1098,29 @@ func TestStateCacheFillsSwitchDisablesReadFills(t *testing.T) {
 	got, ok := c.View(nil).Get(kv.AccountsDomain, key)
 	require.True(t, ok, "applies must keep working")
 	require.Equal(t, []byte("applied"), got)
+}
+
+// Clearing entries does not rewind canonical state, so the admission frontier
+// must survive Clear: a still-live older ReadView must not refill pre-apply
+// data into the emptied cache.
+func TestStateCache_StaleViewCannotFillAfterClear(t *testing.T) {
+	b := 1 * datasize.MB
+	sc := NewStateCache(b, b, b, b)
+	t.Cleanup(sc.Close)
+
+	key := makeAddr(1)
+	oldView := sc.View(FrontierFunc(func(kv.Domain) (uint64, bool) { return 11, true }))
+
+	sc.Applier().Apply(kv.AccountsDomain, key, nil, 20) // canonical delete
+	sc.Applier().Clear()
+
+	oldView.Fill(kv.AccountsDomain, key, []byte("pre-delete"), 10)
+	_, ok := sc.View(nil).Get(kv.AccountsDomain, key)
+	require.False(t, ok, "a pre-apply view must not resurrect the deleted value through Clear")
+
+	freshView := sc.View(FrontierFunc(func(kv.Domain) (uint64, bool) { return 21, true }))
+	freshView.Fill(kv.AccountsDomain, key, []byte("current"), 20)
+	got, ok := sc.View(nil).Get(kv.AccountsDomain, key)
+	require.True(t, ok, "a view at the applied frontier must still fill after Clear")
+	require.Equal(t, []byte("current"), got)
 }

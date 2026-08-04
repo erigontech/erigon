@@ -339,7 +339,9 @@ func (c *StateCache) noteApplied(domain kv.Domain, txNum uint64) {
 	}
 }
 
-// clear removes all mutable entries from all caches.
+// clear removes all mutable entries from all caches. The admission frontier
+// survives: clearing drops entries, it does not rewind canonical state, and a
+// zeroed frontier would let a still-live older ReadView refill pre-apply data.
 func (c *StateCache) clear() {
 	c.admissionMu.Lock()
 	defer c.admissionMu.Unlock()
@@ -348,7 +350,6 @@ func (c *StateCache) clear() {
 			cache.Clear()
 		}
 	}
-	c.appliedEnd = [kv.DomainLen]uint64{}
 }
 
 // Close releases every sub-cache's slot in the shared memory envelope so later
