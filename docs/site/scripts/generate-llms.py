@@ -77,6 +77,106 @@ def _is_placeholder_brace(match):
     return bool(_IDENT_BRACE_INNER.match(inner))
 
 
+DEFAULT_TAB_HEADING_DEPTH = 3
+MAX_HEADING_DEPTH = 6
+
+_TABITEM_TAG = re.compile(r"<TabItem\b[^>]*>")
+_ATX_HEADING = re.compile(r"\s*(#{1,6})\s")
+# label="X" / label='X' / label={'X'} — Docusaurus accepts all three.
+_TAB_LABEL = re.compile(
+    r"""\blabel\s*=\s*(?:"([^"]*)"|'([^']*)'|\{\s*['"]([^'"]*)['"]\s*\})"""
+)
+
+
+def _label_of(tag):
+    """Extract a TabItem's label text, or '' when it carries none."""
+    m = _TAB_LABEL.search(tag)
+    if not m:
+        return ""
+    return next(g for g in m.groups() if g is not None).strip()
+
+
+def _scan_tab_structure(text):
+    """Fence-aware scan returning (lines, headings, tabs).
+
+    headings maps line index → heading level; tabs maps line index → label.
+    """
+    lines = text.splitlines()
+    headings, tabs, in_fence = {}, {}, False
+    for i, line in enumerate(lines):
+        if line.lstrip().startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        heading = _ATX_HEADING.match(line)
+        if heading:
+            headings[i] = len(heading.group(1))
+            continue
+        tag = _TABITEM_TAG.search(line)
+        if tag:
+            tabs[i] = _label_of(tag.group(0))
+    return lines, headings, tabs
+
+
+def _tab_heading_depth(idx, group, headings):
+    """Pick a heading level for one tab group that nests correctly both ways.
+
+    One level below the enclosing section, so a tab never outranks the section
+    containing it — but never shallower than the first heading *after* the
+    group, so that heading stays a sibling of the tab set instead of being
+    swallowed as a subsection of the last tab.
+    """
+    before = [lvl for i, lvl in headings.items() if i < idx]
+    after = [lvl for i, lvl in headings.items() if i > group[-1]]
+    depth = (before[-1] if before else DEFAULT_TAB_HEADING_DEPTH - 1) + 1
+    if after:
+        depth = max(depth, after[0])
+    return min(depth, MAX_HEADING_DEPTH)
+
+
+def _tabitem_labels_to_headings(text):
+    """Turn each `<TabItem label="X">` into a heading carrying X.
+
+    Tabs are a browser affordance, but the label is often the only thing saying
+    *which* variant the block below describes — which network, OS, or install
+    method. The generic component strip in strip_mdx() drops the tag wholesale,
+    which used to leave sibling tables and code blocks indistinguishable in the
+    text output (five unlabelled disk-size tables in a row, for instance).
+    """
+    lines, headings, tabs = _scan_tab_structure(text)
+    if not tabs:
+        return text
+
+    # Group consecutive tabs — those with no heading between them form one tab
+    # set and share a heading level.
+    groups, current = [], []
+    for i in sorted(tabs):
+        if current and any(h for h in headings if current[-1] < h < i):
+            groups.append(current)
+            current = []
+        current.append(i)
+    groups.append(current)
+
+    depth_at = {}
+    for group in groups:
+        for i in group:
+            depth_at[i] = _tab_heading_depth(group[0], group, headings)
+
+    out = []
+    for i, line in enumerate(lines):
+        if i not in tabs:
+            out.append(line)
+            continue
+        tag = _TABITEM_TAG.search(line)
+        rest = (line[: tag.start()] + line[tag.end() :]).strip()
+        if tabs[i]:
+            out.extend(["", "#" * depth_at[i] + f" {tabs[i]}", ""])
+        if rest:
+            out.append(rest)
+    return "\n".join(out)
+
+
 def _strip_jsx_expr(match):
     """re.sub callback: drop JSX expressions, preserve placeholder identifiers.
 
@@ -243,6 +343,9 @@ def strip_mdx(text):
     # Remove MDX import/export statements only outside fenced code blocks.
     # This preserves shell `export VAR=...` inside ```bash fences.
     text = _strip_mdx_module_syntax(text)
+    # Promote TabItem labels to headings before the generic component strip
+    # below erases them along with the tag.
+    text = _tabitem_labels_to_headings(text)
     # Remove JSX block comments and multi-line component tags (fence-aware).
     # [^>]* in the component regexes matches newlines (char class), consuming
     # <Link\n  prop="val"\n> in one shot without DOTALL.
