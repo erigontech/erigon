@@ -840,16 +840,11 @@ func (sd *SharedDomains) GetCommitmentCtx() *commitmentdb.SharedDomainsCommitmen
 
 func (sd *SharedDomains) Logger() log.Logger { return sd.logger }
 
-// SetStateCache hands this SD the process-global state cache to manage.
-//
-// Coherence is structural, enforced by the architecture rather than by
-// remembering to call this: app components reach state only through the SD, and
-// the SD owns cache population (on flush) and invalidation (sd.Unwind →
-// Applier.Unwind). It is not *additionally* type-enforced only because the
-// cache crosses the app/storage boundary — the storage layer can't depend on an
-// app-level cache type. The single desync vector is a component that
-// deliberately bypasses the SD (raw domain reads + direct cache writes, e.g.
-// read-ahead warmup), which then owns its cache coherence explicitly.
+// SetStateCache hands this SD the process-global state cache to manage:
+// Commit applies committed updates after a successful DB commit, Unwind
+// invalidates them, and reads populate it through admission-gated fills —
+// the SD's own, and read-ahead warmup's through its own ReadView. No-op when
+// USE_STATE_CACHE is off or the cache is nil.
 func (sd *SharedDomains) SetStateCache(stateCache *cache.StateCache) {
 	if !dbg.UseStateCache || stateCache == nil {
 		return
@@ -861,22 +856,23 @@ func (sd *SharedDomains) SetStateCache(stateCache *cache.StateCache) {
 // GuardAggregatorForCache forbids visibility lowering on db's aggregator when
 // sc is a fill-enabled StateCache: fill admission relies on view frontiers
 // never decreasing. This is the one place that binds the invariant — call it
-// wherever a fill-enabled cache is wired over a DB. It mirrors SetStateCache's
-// gate: with USE_STATE_CACHE=false the cache is never wired and no fill can
-// happen, so the aggregator stays unconstrained. Duck-typed so the storage
-// layer need not know the cache type (and vice versa); a DB without an
-// aggregator is a no-op.
+// wherever a fill-enabled cache is wired over a DB. Duck-typed so the storage
+// layer need not know the cache type (and vice versa) — but load-bearing, so
+// a db that cannot produce its aggregator fails loudly instead of silently
+// dropping the guard. A nil or apply-only cache needs no guard.
 func GuardAggregatorForCache(db any, sc *cache.StateCache) {
-	if sc == nil || !dbg.UseStateCache || !sc.FillsEnabled() {
+	if sc == nil || !sc.FillsEnabled() {
 		return
 	}
 	h, ok := db.(interface{ Agg() any })
 	if !ok {
-		return
+		panic(fmt.Sprintf("assert: fill-enabled StateCache wired over %T, which cannot produce its aggregator — the visibility-lowering guard would be silently dropped", db))
 	}
-	if f, ok := h.Agg().(interface{ ForbidVisibilityLowering() }); ok {
-		f.ForbidVisibilityLowering()
+	f, ok := h.Agg().(interface{ ForbidVisibilityLowering() })
+	if !ok {
+		panic(fmt.Sprintf("assert: aggregator %T lacks ForbidVisibilityLowering — the visibility-lowering guard would be silently dropped", h.Agg()))
 	}
+	f.ForbidVisibilityLowering()
 }
 
 // SetCodeStore sets the persistent codehash-keyed code cache.

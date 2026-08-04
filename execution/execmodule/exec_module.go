@@ -255,11 +255,14 @@ func NewExecModule(
 ) *ExecModule {
 	// Production passes nil → full-size default cache. Test/CLI harnesses pass a
 	// small cache so building one ExecModule per fixture doesn't allocate
-	// hundreds of MB of LRU tables each (which stalled the parallel eest
-	// blocktest). Per-instance, so it never mutates the process-wide default.
-	domainCache := domainStateCache
-	if domainCache == nil {
-		domainCache = cache.NewDefaultStateCache()
+	// hundreds of MB of LRU tables each. USE_STATE_CACHE=false constructs no
+	// cache at all: neither SharedDomains nor read-ahead gets one to touch.
+	var domainCache *cache.StateCache
+	if dbg.UseStateCache {
+		domainCache = domainStateCache
+		if domainCache == nil {
+			domainCache = cache.NewDefaultStateCache()
+		}
 	}
 	execctx.GuardAggregatorForCache(db, domainCache)
 	var codeStore *cache.CodeStore

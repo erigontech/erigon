@@ -353,21 +353,31 @@ type fakeHasAgg struct{ f *fakeForbidder }
 
 func (h fakeHasAgg) Agg() any { return h.f }
 
-// GuardAggregatorForCache must mirror SetStateCache's gate: with
-// USE_STATE_CACHE=false no SD ever wires the cache, so no fills can happen and
-// the aggregator must stay free to lower visibility.
-func TestGuardAggregatorForCache_RespectsUseStateCache(t *testing.T) {
+// The guard is load-bearing: for a fill-enabled cache it must either bind the
+// invariant or fail loudly — never silently drop it on a DB shape mismatch.
+// A nil or apply-only cache needs no guard at all.
+func TestGuardAggregatorForCache(t *testing.T) {
 	sc := newSmallStateCache()
 	t.Cleanup(sc.Close)
-	old := dbg.UseStateCache
-	t.Cleanup(func() { dbg.SetUseStateCache(old) })
 
-	dbg.SetUseStateCache(false)
 	f := &fakeForbidder{}
 	execctx.GuardAggregatorForCache(fakeHasAgg{f}, sc)
-	require.False(t, f.called, "a disabled cache is never wired — the aggregator must not be constrained")
-
-	dbg.SetUseStateCache(true)
-	execctx.GuardAggregatorForCache(fakeHasAgg{f}, sc)
 	require.True(t, f.called)
+
+	require.NotPanics(t, func() { execctx.GuardAggregatorForCache(struct{}{}, nil) },
+		"no cache, no invariant to bind — shape is irrelevant")
+	require.Panics(t, func() { execctx.GuardAggregatorForCache(struct{}{}, sc) },
+		"a db that cannot produce its aggregator must fail loudly, not drop the guard")
+}
+
+// An apply-only cache (STATE_CACHE_FILLS=false) has no fills for a lowered
+// frontier to poison, so the guard must not constrain the aggregator.
+func TestGuardAggregatorForCache_ApplyOnlySkips(t *testing.T) {
+	t.Setenv("STATE_CACHE_FILLS", "false")
+	sc := newSmallStateCache()
+	t.Cleanup(sc.Close)
+
+	f := &fakeForbidder{}
+	execctx.GuardAggregatorForCache(fakeHasAgg{f}, sc)
+	require.False(t, f.called)
 }
