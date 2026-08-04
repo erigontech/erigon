@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -343,4 +344,53 @@ func TestReadFill_NegativeUsesLastVisibleTxNum(t *testing.T) {
 	sc.Applier().Unwind(visibleEnd - 1)
 	_, ok = sc.View(nil).Get(kv.AccountsDomain, missing)
 	require.False(t, ok, "an unwind of the view's last included txNum must invalidate the negative")
+}
+
+// Getter code reads must record into the getter's own metrics instance, like
+// every other read through getLatestMetered.
+func TestGetterCodeReadsAreMetered(t *testing.T) {
+	old := dbg.KVReadLevelledMetrics
+	dbg.KVReadLevelledMetrics = true
+	t.Cleanup(func() { dbg.KVReadLevelledMetrics = old })
+
+	const stepSize = uint64(16)
+	ctx := t.Context()
+	db := newTestDb(t, stepSize)
+
+	addr := make([]byte, 20)
+	addr[0] = 0xcd
+	code := []byte{0xaa, 9, 9, 9}
+
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	sd, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	sd.SetTxNum(10)
+	require.NoError(t, sd.DomainPut(kv.CodeDomain, rwTx, addr, code, 10, nil))
+	require.NoError(t, sd.Commit(ctx, rwTx))
+	sd.Close()
+
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	sd2, err := execctx.NewSharedDomains(ctx, roTx, log.New())
+	require.NoError(t, err)
+	defer sd2.Close()
+
+	wm := kvmetrics.NewDomainMetrics()
+	getter := sd2.AsGetterMetered(roTx, wm)
+	sizer, ok := getter.(interface {
+		GetCodeSize(addr []byte, txNum uint64) (int, bool, error)
+	})
+	require.True(t, ok)
+	size, found, err := sizer.GetCodeSize(addr, 20)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, len(code), size)
+
+	wm.RLock()
+	defer wm.RUnlock()
+	require.NotNil(t, wm.Domains[kv.CodeDomain], "the code read must be recorded in the getter's metrics")
 }
