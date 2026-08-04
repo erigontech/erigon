@@ -113,6 +113,7 @@ func TestVisibleFileVersion(t *testing.T) {
 }
 
 func TestOpenDirtyFileHelpersLogInvalidMask(t *testing.T) {
+	t.Parallel()
 	const mask = "[invalid"
 	dirEntries := []string{"v1.0-file"}
 
@@ -147,6 +148,7 @@ func TestOpenDirtyFileHelpersLogInvalidMask(t *testing.T) {
 }
 
 func TestOpenDirtyDataFileDoesNotLogNonCorruptionOpenError(t *testing.T) {
+	t.Parallel()
 	logger, output := newBufferedTestLogger()
 	fileName := "v1.0-accounts.0-1.kv"
 	versions := version.Versions{Current: version.V1_0, MinSupported: version.V1_0}
@@ -156,6 +158,7 @@ func TestOpenDirtyDataFileDoesNotLogNonCorruptionOpenError(t *testing.T) {
 }
 
 func TestOpenDirtyAccessorLogsOpenErrorAtDebug(t *testing.T) {
+	t.Parallel()
 	logger, output := newBufferedTestLogger()
 	fileName := "v1.0-accounts.0-1.kvi"
 	versions := version.Versions{Current: version.V1_0, MinSupported: version.V1_0}
