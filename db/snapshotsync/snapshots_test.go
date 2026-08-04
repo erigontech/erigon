@@ -17,6 +17,7 @@
 package snapshotsync
 
 import (
+	"context"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -26,10 +27,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/btree"
 
+	"github.com/erigontech/erigon/common/background"
 	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/testlog"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/mvcc"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
@@ -37,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -1324,6 +1328,134 @@ func TestNewRoSnapshotsRejectsBadBaseSegType(t *testing.T) {
 	require.PanicsWithValue("baseSegType beaconblocks is not in types", func() {
 		NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, snaptype.BeaconBlocks, true, logger)
 	})
+}
+
+func TestSetIndexBuilder(t *testing.T) {
+	logger := log.New()
+	dir, require := t.TempDir(), require.New(t)
+	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
+	s := NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+
+	require.Nil(s.IndexBuilder(snaptype2.Headers))
+
+	built := false
+	builder := snaptype.IndexBuilderFunc(func(ctx context.Context, info snaptype.FileInfo, salt uint32, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
+		built = true
+		return nil
+	})
+	s.SetIndexBuilder(snaptype2.Headers, builder)
+
+	got := s.IndexBuilder(snaptype2.Headers)
+	require.NotNil(got)
+	require.NoError(got.Build(t.Context(), snaptype.FileInfo{}, 0, nil, dir, nil, log.LvlDebug, logger))
+	require.True(built)
+
+	// setter for one operator must not drop the other
+	extractor := snaptype.RangeExtractorFunc(func(ctx context.Context, blockFrom, blockTo uint64, firstKey snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger, hashResolver snaptype.BlockHashResolver) (uint64, error) {
+		return 0, nil
+	})
+	s.SetRangeExtractor(snaptype2.Headers, extractor)
+	require.NotNil(s.IndexBuilder(snaptype2.Headers))
+	require.NotNil(s.RangeExtractor(snaptype2.Headers))
+
+	s.SetIndexBuilder(snaptype2.Bodies, builder)
+	require.NotNil(s.IndexBuilder(snaptype2.Bodies))
+	require.Nil(s.IndexBuilder(snaptype2.Transactions))
+}
+
+// A producer writes the tip .seg before indexing it. DirtyBlocksAvailable stops at the
+// first unindexed segment, so it cannot answer "how far has data been dumped" —
+// DirtySegmentsMax must count that tail.
+func TestDirtySegmentsMaxCountsUnindexedTail(t *testing.T) {
+	logger := testlog.Logger(t, log.LvlCrit)
+	dir, require := t.TempDir(), require.New(t)
+	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
+
+	s := NewBaseRoSnapshots(cfg, dir, []snaptype.Type{snaptype2.Headers}, snaptype2.Headers, false, logger)
+	defer s.Close()
+	require.NoError(s.OpenFolder())
+	require.Equal(uint64(0), s.DirtySegmentsMax(snaptype2.Enums.Headers))
+
+	for i := range uint64(3) {
+		createTestSegmentFile(t, i*10_000, (i+1)*10_000, snaptype2.Enums.Headers, dir, version.V1_0, logger)
+	}
+	missingIdx := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, 20_000, 30_000, snaptype2.Headers.Name()))
+	require.NoError(dir2.RemoveFile(missingIdx))
+	require.NoError(s.OpenFolder())
+
+	require.Equal(uint64(20_000-1), s.DirtyBlocksAvailable(snaptype2.Enums.Headers))
+	require.Equal(uint64(20_000-1), s.VisibleBlocksAvailable(snaptype2.Enums.Headers))
+	require.Equal(uint64(30_000-1), s.DirtySegmentsMax(snaptype2.Enums.Headers))
+}
+
+// An index builder needs the dumped-but-unindexed segments, which the visible set hides
+// and DirtySegmentsMax only summarizes into one number.
+func TestWalkDirtySegments(t *testing.T) {
+	logger := testlog.Logger(t, log.LvlCrit)
+	dir, require := t.TempDir(), require.New(t)
+	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
+
+	s := NewBaseRoSnapshots(cfg, dir, []snaptype.Type{snaptype2.Headers}, snaptype2.Headers, false, logger)
+	defer s.Close()
+
+	for i := range uint64(3) {
+		createTestSegmentFile(t, i*10_000, (i+1)*10_000, snaptype2.Enums.Headers, dir, version.V1_0, logger)
+	}
+	missingIdx := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, 20_000, 30_000, snaptype2.Headers.Name()))
+	require.NoError(dir2.RemoveFile(missingIdx))
+	require.NoError(s.OpenFolder())
+
+	var walked, unindexed [][2]uint64
+	s.WalkDirtySegments(snaptype2.Enums.Headers, func(sn *DirtySegment) bool {
+		from, to := sn.GetRange()
+		walked = append(walked, [2]uint64{from, to})
+		if !sn.IsIndexed() {
+			unindexed = append(unindexed, [2]uint64{from, to})
+		}
+		return true
+	})
+	require.Equal([][2]uint64{{0, 10_000}, {10_000, 20_000}, {20_000, 30_000}}, walked)
+	require.Equal([][2]uint64{{20_000, 30_000}}, unindexed)
+
+	visited := 0
+	s.WalkDirtySegments(snaptype2.Enums.Headers, func(*DirtySegment) bool { visited++; return false })
+	require.Equal(1, visited)
+
+	require.NotPanics(func() {
+		s.WalkDirtySegments(snaptype.BeaconBlocks.Enum(), func(*DirtySegment) bool {
+			require.Fail("collection does not manage this type")
+			return false
+		})
+	})
+}
+
+func TestOpenListOpensOnlyNamedFiles(t *testing.T) {
+	logger := log.New()
+	dir, require := t.TempDir(), require.New(t)
+	for i := range uint64(3) {
+		createTestSegmentFile(t, i*10_000, (i+1)*10_000, snaptype2.Enums.Headers, dir, version.V1_0, logger)
+	}
+	name := func(i uint64) string {
+		return snaptype.SegmentFileName(version.V1_0, i*10_000, (i+1)*10_000, snaptype2.Enums.Headers)
+	}
+
+	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
+	s := NewBaseRoSnapshots(cfg, dir, []snaptype.Type{snaptype2.Headers}, snaptype2.Headers, false, logger)
+	defer s.Close()
+
+	require.NoError(s.OpenList([]string{name(0), name(1)}, false))
+	require.Equal(2, s.dirty[snaptype2.Enums.Headers].Len())
+	require.True(visibleHas(s, snaptype2.Enums.Headers, 0, 10_000))
+	require.True(visibleHas(s, snaptype2.Enums.Headers, 10_000, 20_000))
+	// on disk but not named: base must not pick it up
+	require.False(visibleHas(s, snaptype2.Enums.Headers, 20_000, 30_000))
+
+	// a name dropped from the list leaves dirty, like OpenFolder does for a vanished file
+	require.NoError(s.OpenList([]string{name(0)}, false))
+	require.Equal(1, s.dirty[snaptype2.Enums.Headers].Len())
+	require.False(visibleHas(s, snaptype2.Enums.Headers, 10_000, 20_000))
+	require.Equal(10_000-1, int(s.IndicesMax()))
 }
 
 func TestViewSegmentsOfUnmanagedType(t *testing.T) {

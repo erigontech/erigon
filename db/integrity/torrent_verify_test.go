@@ -93,9 +93,9 @@ func TestVerifyTorrentFilesWithoutFailFast(t *testing.T) {
 	require.ErrorContains(t, err, "2 file(s) failed verification")
 }
 
-// An interrupted run must not be reported as a successful verification: without
-// failFast the per-piece cancellation error is only warned about, so the
-// cancellation has to be re-checked after the workers finish.
+// An interrupted run must not be reported as a successful verification. This pins the
+// outcome, not the mechanism: here the workers themselves observe the cancellation,
+// while the post-Wait re-check covers a cancellation that lands after they all finish.
 func TestVerifyTorrentFilesCancelled(t *testing.T) {
 	dir := t.TempDir()
 	writeTorrentPair(t, dir, "test.seg", false)

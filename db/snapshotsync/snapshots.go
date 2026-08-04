@@ -650,6 +650,20 @@ func (s *BaseRoSnapshots) VisibleBlocksAvailable(t snaptype.Enum) uint64 {
 	return s.visibleIdxAvailability(t)
 }
 
+// DirtySegmentsMax is the tip of the data on disk, index or no index: unlike
+// DirtyBlocksAvailable it does not stop at the first unindexed segment, so a producer
+// can see a range it has dumped but not yet indexed.
+func (s *BaseRoSnapshots) DirtySegmentsMax(t snaptype.Enum) uint64 {
+	var _max uint64
+	s.WalkDirtySegments(t, func(sn *DirtySegment) bool {
+		if sn.to > 0 && sn.to-1 > _max {
+			_max = sn.to - 1
+		}
+		return true
+	})
+	return _max
+}
+
 func (s *BaseRoSnapshots) DownloadComplete() {
 	wasReady := s.downloadReady.Swap(true)
 	if !wasReady {
@@ -683,6 +697,16 @@ func (s *BaseRoSnapshots) SetRangeExtractor(t snaptype.Type, rangeExtractor snap
 			rangeExtractor: rangeExtractor,
 		}
 
+	}
+}
+
+func (s *BaseRoSnapshots) SetIndexBuilder(t snaptype.Type, indexBuilder snaptype.IndexBuilder) {
+	if operators, ok := s.operators[t.Enum()]; ok {
+		operators.indexBuilder = indexBuilder
+	} else {
+		s.operators[t.Enum()] = &retireOperators{
+			indexBuilder: indexBuilder,
+		}
 	}
 }
 
@@ -1018,6 +1042,28 @@ func (s *BaseRoSnapshots) dirtyIdxAvailability(segtype snaptype.Enum) uint64 {
 	return _max
 }
 
+// WalkDirtySegments calls f for every dirty segment of segtype, lowest range first,
+// stopping when f returns false. dirtyLock is held for the walk, so f must not open,
+// close or republish files.
+func (s *BaseRoSnapshots) WalkDirtySegments(segtype snaptype.Enum, f func(*DirtySegment) bool) {
+	s.dirtyLock.RLock()
+	defer s.dirtyLock.RUnlock()
+
+	dirty := s.dirty[segtype]
+	if dirty == nil {
+		return
+	}
+
+	dirty.Walk(func(segments []*DirtySegment) bool {
+		for _, seg := range segments {
+			if !f(seg) {
+				return false
+			}
+		}
+		return true
+	})
+}
+
 func (s *BaseRoSnapshots) visibleIdxAvailability(segtype snaptype.Enum) (maxVisibleIdx uint64) {
 	visibleFiles := s.visible.Load().segments[segtype]
 	if len(visibleFiles) > 0 {
@@ -1192,6 +1238,32 @@ func (s *BaseRoSnapshots) OpenFolder() error {
 	}()
 	if err != nil {
 		return fmt.Errorf("OpenFolder: %w", err)
+	}
+
+	wasReady := s.segmentsReady.Swap(true)
+	if !wasReady {
+		if s.downloadReady.Load() {
+			s.ready.Set()
+		}
+	}
+	return nil
+}
+
+// OpenList opens exactly the named files, retiring whatever else the collection
+// still holds. Same shape as OpenFolder, but the caller supplies the list instead
+// of a directory scan. optimistic=true keeps going past a broken file.
+func (s *BaseRoSnapshots) OpenList(fileNames []string, optimistic bool) error {
+	var retired retiredSegments
+	err := func() error {
+		s.dirtyLock.Lock()
+		defer s.dirtyLock.Unlock()
+		defer func() { s.recalcVisibleFiles(s.alignMin, retired) }()
+
+		retired = s.retireSegmentsNotInList(mvcc.RetireReasonWasDeletedFromDisk, fileNames)
+		return s.openSegments(fileNames, true, optimistic)
+	}()
+	if err != nil {
+		return fmt.Errorf("OpenList: %w", err)
 	}
 
 	wasReady := s.segmentsReady.Swap(true)

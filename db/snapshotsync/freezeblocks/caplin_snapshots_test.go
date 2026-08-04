@@ -17,18 +17,25 @@
 package freezeblocks
 
 import (
+	"bytes"
 	"encoding/binary"
 	"math"
+	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/klauspost/compress/zstd"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -134,28 +141,207 @@ func TestFrozenBlobsReportsVisibleSegmentEnd(t *testing.T) {
 	require.Equal(t, uint64(snaptype.CaplinMergeLimit), sn.FrozenBlobs())
 }
 
+// Blocks run ahead of blobs (blobs only start at Deneb) and the block tip is
+// dumped before it is indexed, so the four watermarks legitimately disagree.
+// The exact numbers below are the equivalence net for the BaseRoSnapshots embed:
+// only IndicesMax may move, from To to To-1, dragging BlocksAvailable with it.
+func TestCaplinWatermarks(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+
+	dirs := datadir.New(t.TempDir())
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, limit, 2*limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 2*limit, 3*limit, false)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BlobSidecars, 0, limit, true)
+
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+
+	view := sn.View()
+	defer view.Close()
+	require.Len(t, view.BeaconBlocks(), 2, "the unindexed tail segment must not be visible")
+	require.Len(t, view.BlobSidecars(), 1)
+
+	// dirty-backed: counts the unindexed tail, inclusive To-1.
+	require.Equal(t, uint64(3*limit-1), sn.SegmentsMax())
+	// visible-backed, inclusive To-1. BlocksAvailable is min(SegmentsMax, IndicesMax),
+	// so it follows IndicesMax whenever the tip is dumped but not yet indexed.
+	require.Equal(t, uint64(2*limit-1), sn.IndicesMax())
+	require.Equal(t, uint64(2*limit-1), sn.BlocksAvailable())
+	// visible-backed, exclusive To — cl/beacon/handler/blobs.go compares slot < FrozenBlobs().
+	require.Equal(t, uint64(limit), sn.FrozenBlobs())
+}
+
+// The Deneb short-circuit wins over visible blob segments, so a pre-Deneb chain
+// reports 0 even with blobs on disk.
+func TestFrozenBlobsZeroBeforeDenebWithVisibleSegments(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.DenebForkEpoch = math.MaxUint64
+
+	dirs := datadir.New(t.TempDir())
+	writeEmptyBlobSidecarsSegment(t, dirs, 0, snaptype.CaplinMergeLimit)
+
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &cfg, dirs, log.New())
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+
+	view := sn.View()
+	defer view.Close()
+	require.Len(t, view.BlobSidecars(), 1)
+	require.Equal(t, uint64(0), sn.FrozenBlobs())
+}
+
 // A blob segment with one empty word per slot: enough for OpenFolder to make it
 // visible, without needing a populated blob store.
 func writeEmptyBlobSidecarsSegment(t *testing.T, dirs datadir.Dirs, from, to uint64) {
 	t.Helper()
-	segName := snaptype.BlobSidecars.FileName(version.ZeroVersion, from, to)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BlobSidecars, from, to, true)
+}
+
+// withIndex=false leaves the .seg on disk unindexed, which keeps it out of the
+// visible generation while still counting as dirty.
+func writeEmptyCaplinSegment(t *testing.T, dirs datadir.Dirs, sType snaptype.Type, from, to uint64, withIndex bool) {
+	t.Helper()
+	writeCaplinSegment(t, dirs, sType, from, to, withIndex, func(uint64) []byte { return nil })
+}
+
+// slotWord makes each word the slot it is stored at, so a read can be checked against
+// the slot it asked for.
+func slotWord(slot uint64) []byte {
+	w := make([]byte, 8)
+	binary.BigEndian.PutUint64(w, slot)
+	return w
+}
+
+func writeCaplinSegment(t *testing.T, dirs datadir.Dirs, sType snaptype.Type, from, to uint64, withIndex bool, word func(slot uint64) []byte) {
+	t.Helper()
+	segName := sType.FileName(version.ZeroVersion, from, to)
 	f, _, ok := snaptype.ParseFileName(dirs.Snap, segName)
 	require.True(t, ok)
 
-	c, err := seg.NewCompressor(t.Context(), "test blobs", f.Path, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
+	c, err := seg.NewCompressor(t.Context(), "test "+sType.Name(), f.Path, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 	require.NoError(t, err)
 	defer c.Close()
-	for range to - from {
-		require.NoError(t, c.AddWord(nil))
+	for slot := from; slot < to; slot++ {
+		require.NoError(t, c.AddWord(word(slot)))
 	}
 	require.NoError(t, c.Compress())
 
+	if !withIndex {
+		return
+	}
 	require.NoError(t, snapshotsync.BeaconSimpleIdx(t.Context(), f, 1, dirs.Tmp, &background.Progress{}, log.LvlDebug, log.New()))
 }
 
-// FrozenBlobs must take visibleLock: recalcVisibleFiles (via OpenFolder)
-// reassigns s.visible under the write lock. Meaningful under -race.
-func TestFrozenBlobsVisibleLockRace(t *testing.T) {
+// ReadHeader picks its segment through a pinned single-file view, so the word it decodes
+// has to be the one stored at the slot asked for - and a slot with no block, or one past
+// the last segment, has to come back empty rather than as a decode error.
+func TestReadHeaderReadsSlotFromSegment(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+	const blockSlot = 42
+
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+	block.Block.Slot = blockSlot
+	block.Block.ProposerIndex = 9
+	word := blockSnapshotWord(t, block)
+
+	dirs := datadir.New(t.TempDir())
+	writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, limit, true, func(slot uint64) []byte {
+		if slot == blockSlot {
+			return word
+		}
+		return nil
+	})
+
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+
+	header, elBlockNumber, elBlockHash, err := sn.ReadHeader(blockSlot, nil)
+	require.NoError(t, err)
+	require.NotNil(t, header)
+	require.Equal(t, uint64(blockSlot), header.Header.Slot)
+	require.Equal(t, uint64(9), header.Header.ProposerIndex)
+	require.Zero(t, elBlockNumber)
+	require.Equal(t, common.Hash{}, elBlockHash)
+
+	empty, _, _, err := sn.ReadHeader(blockSlot+1, nil)
+	require.NoError(t, err)
+	require.Nil(t, empty, "a slot with no block must not decode")
+
+	beyond, _, _, err := sn.ReadHeader(limit, nil)
+	require.NoError(t, err)
+	require.Nil(t, beyond, "a slot past the last segment has no view to read")
+}
+
+func blockSnapshotWord(t *testing.T, block *cltypes.SignedBeaconBlock) []byte {
+	t.Helper()
+	var b bytes.Buffer
+	enc, err := zstd.NewWriter(&b)
+	require.NoError(t, err)
+	_, err = snapshot_format.WriteBlockForSnapshot(enc, block, nil)
+	require.NoError(t, err)
+	require.NoError(t, enc.Close())
+	return b.Bytes()
+}
+
+// A blob word is the concatenated SSZ of every sidecar at that slot, so ReadBlobSidecars
+// has to split it on the fixed sidecar size and reject a word that is not a multiple of it.
+func TestReadBlobSidecars(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+	const blobSlot = 7
+	const truncatedSlot = 8
+
+	encoded, err := blobSidecar(blobSlot, 3).EncodeSSZ(nil)
+	require.NoError(t, err)
+	require.Len(t, encoded, sidecarSSZSize)
+
+	dirs := datadir.New(t.TempDir())
+	writeCaplinSegment(t, dirs, snaptype.BlobSidecars, 0, limit, true, func(slot uint64) []byte {
+		switch slot {
+		case blobSlot:
+			return encoded
+		case truncatedSlot:
+			return encoded[:len(encoded)-1]
+		default:
+			return nil
+		}
+	})
+
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+
+	sidecars, err := sn.ReadBlobSidecars(blobSlot)
+	require.NoError(t, err)
+	require.Len(t, sidecars, 1)
+	require.Equal(t, uint64(3), sidecars[0].Index)
+	require.Equal(t, uint64(blobSlot), sidecars[0].SignedBlockHeader.Header.Slot)
+
+	_, err = sn.ReadBlobSidecars(truncatedSlot)
+	require.ErrorContains(t, err, "invalid sidecar list length")
+
+	empty, err := sn.ReadBlobSidecars(blobSlot + 2)
+	require.NoError(t, err)
+	require.Empty(t, empty, "a slot with no sidecars must not decode")
+
+	beyond, err := sn.ReadBlobSidecars(limit)
+	require.NoError(t, err)
+	require.Empty(t, beyond, "a slot past the last segment has no view to read")
+}
+
+func blobSidecar(slot, index uint64) *cltypes.BlobSidecar {
+	return &cltypes.BlobSidecar{
+		Index:                    index,
+		SignedBlockHeader:        &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{Slot: slot}},
+		CommitmentInclusionProof: solid.NewHashVector(cltypes.CommitmentBranchSize),
+	}
+}
+
+// FrozenBlobs reads the visible generation OpenFolder republishes, so it must go
+// through a pinned view rather than the raw slice. Meaningful under -race.
+func TestFrozenBlobsConcurrentWithOpenFolder(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
 	t.Cleanup(sn.Close)
@@ -192,7 +378,131 @@ func TestCloseClearsVisibleSegments(t *testing.T) {
 
 	view := sn.View()
 	defer view.Close()
-	require.Empty(t, view.BlobSidecarRotx.Segments)
+	require.Empty(t, view.BlobSidecars())
+}
+
+// A view pins the generation it read: a segment whose files a concurrent OpenFolder
+// drops must stay mapped and readable until that view closes. Meaningful under -race.
+func TestViewSurvivesConcurrentSegmentRemoval(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+
+	dirs := datadir.New(t.TempDir())
+	writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, limit, true, slotWord)
+	writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, limit, 2*limit, true, slotWord)
+
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+
+	view := sn.View()
+	defer view.Close()
+	tail, ok := view.BeaconBlocksSegment(limit)
+	require.True(t, ok)
+	files := tail.Src().FilePaths(dirs.Snap)
+	require.NotEmpty(t, files)
+
+	var eg errgroup.Group
+	eg.Go(func() error {
+		for _, f := range files {
+			if err := dir.RemoveFile(filepath.Join(dirs.Snap, f)); err != nil {
+				return err
+			}
+		}
+		return sn.OpenFolder()
+	})
+
+	for slot := uint64(limit); slot < limit+2_000; slot++ {
+		word, err := tail.Get(slot)
+		require.NoError(t, err)
+		require.Equal(t, slotWord(slot), word)
+	}
+	require.NoError(t, eg.Wait())
+
+	word, err := tail.Get(limit)
+	require.NoError(t, err)
+	require.Equal(t, slotWord(limit), word)
+
+	fresh := sn.View()
+	defer fresh.Close()
+	require.Len(t, fresh.BeaconBlocks(), 1, "the removed segment must have left the visible set")
+}
+
+// A dump or a merge owns its range while it works, and its .seg lands before its index.
+// BuildMissingIndices must leave a claimed range to its owner instead of racing it.
+func TestBuildMissingIndicesSkipsClaimedRange(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+
+	dirs := datadir.New(t.TempDir())
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, limit, false)
+
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+
+	// The segment has to be dirty before the claim: openSegments skips a claimed range, so
+	// claiming first would keep it out of the walk and never exercise the guard.
+	require.NoError(t, sn.OpenFolder())
+	require.True(t, sn.TryAcquireRange(snaptype.CaplinEnums.BeaconBlocks, 0, limit))
+	require.NoError(t, sn.BuildMissingIndices(t.Context(), log.New()))
+	require.Empty(t, caplinIdxFiles(t, dirs))
+
+	sn.ReleaseRange(snaptype.CaplinEnums.BeaconBlocks, 0, limit)
+	require.NoError(t, sn.BuildMissingIndices(t.Context(), log.New()))
+	require.Len(t, caplinIdxFiles(t, dirs), 1)
+
+	view := sn.View()
+	defer view.Close()
+	require.Len(t, view.BeaconBlocks(), 1, "a freshly indexed segment must be published")
+}
+
+// A corrupt .idx is not a missing one: the strict open rejects it, so the discovery open
+// inside BuildMissingIndices has to be optimistic or the node can never repair itself.
+func TestBuildMissingIndicesRebuildsCorruptIndex(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+
+	dirs := datadir.New(t.TempDir())
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, limit, true)
+	idx := caplinIdxFiles(t, dirs)
+	require.Len(t, idx, 1)
+	require.NoError(t, os.WriteFile(idx[0], []byte("not an index"), 0o600))
+
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+	require.Error(t, sn.OpenFolder(), "a strict open must not accept a corrupt index")
+
+	require.NoError(t, sn.BuildMissingIndices(t.Context(), log.New()))
+	require.NoError(t, sn.OpenFolder())
+
+	view := sn.View()
+	defer view.Close()
+	require.Len(t, view.BeaconBlocks(), 1, "the reindexed segment must be published")
+}
+
+// SegmentsMax is dirty-backed and drives the archive backfill stop condition, so a segment
+// the backfill cannot walk back to must never reach the dirty set: caplin's own gap-filtered
+// scan is what keeps it out.
+func TestOpenFolderDropsSegmentsPastGap(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+
+	dirs := datadir.New(t.TempDir())
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, limit, true)
+	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 2*limit, 3*limit, true)
+
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+
+	require.Equal(t, uint64(limit-1), sn.SegmentsMax())
+
+	view := sn.View()
+	defer view.Close()
+	require.Len(t, view.BeaconBlocks(), 1, "the segment past the gap must not be visible")
+}
+
+func caplinIdxFiles(t *testing.T, dirs datadir.Dirs) []string {
+	t.Helper()
+	idx, err := filepath.Glob(filepath.Join(dirs.Snap, "*beaconblocks*.idx"))
+	require.NoError(t, err)
+	return idx
 }
 
 // The antiquary and the history-download stage both call OpenFolder on the same
