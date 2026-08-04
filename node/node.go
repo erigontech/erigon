@@ -394,7 +394,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 			if err != nil {
 				return nil, err
 			}
-			if err = migrator.Apply(db, migrationsDB, config.Dirs.DataDir, dbPath, logger); err != nil {
+			if err := migrator.Apply(db, migrationsDB, config.Dirs.DataDir, dbPath, logger); err != nil {
 				return nil, err
 			}
 			db.Close()

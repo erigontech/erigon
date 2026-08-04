@@ -184,15 +184,16 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 	putValueSize := 0
 	if domain == kv.StorageDomain {
 		if old, ok := sd.storage.Get(key); ok {
-			if old[len(old)-1].txNum == txNum {
+			switch {
+			case old[len(old)-1].txNum == txNum:
 				sameTxNumUpdate = true
 				putValueSize += len(val) - len(old[len(old)-1].data)
 				old[len(old)-1] = valWithStep
 				sd.storage.Set(key, old)
-			} else if sd.inMemHistoryReads {
+			case sd.inMemHistoryReads:
 				sd.storage.Set(key, append(old, valWithStep))
 				putValueSize += len(val)
-			} else {
+			default:
 				putValueSize += len(val) - len(old[len(old)-1].data)
 				old[0] = valWithStep
 				sd.storage.Set(key, old[:1])
@@ -208,15 +209,16 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 	}
 
 	if old, ok := sd.domains[domain][key]; ok {
-		if old[len(old)-1].txNum == txNum {
+		switch {
+		case old[len(old)-1].txNum == txNum:
 			sameTxNumUpdate = true
 			putValueSize += len(val) - len(old[len(old)-1].data)
 			old[len(old)-1] = valWithStep
 			sd.domains[domain][key] = old
-		} else if sd.inMemHistoryReads {
+		case sd.inMemHistoryReads:
 			sd.domains[domain][key] = append(old, valWithStep)
 			putValueSize += len(val)
-		} else {
+		default:
 			putValueSize += len(val) - len(old[len(old)-1].data)
 			old[0] = valWithStep
 			sd.domains[domain][key] = old[:1]

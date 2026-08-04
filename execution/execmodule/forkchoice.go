@@ -282,7 +282,7 @@ func (e *ExecModule) unwindIfNeeded(
 		if err := e.pipelineExecutor.UnwindTo(unwindTarget, stagedsync.ForkChoice, tx); err != nil {
 			return nil, err
 		}
-		if err = e.hook.BeforeRun(tx, isSynced); err != nil {
+		if err := e.hook.BeforeRun(tx, isSynced); err != nil {
 			return nil, err
 		}
 		// Run the unwind

@@ -30,8 +30,15 @@ import (
 )
 
 func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterSlashing, test bool) error {
+	if attesterSlashing == nil ||
+		attesterSlashing.Attestation_1 == nil ||
+		attesterSlashing.Attestation_2 == nil ||
+		attesterSlashing.Attestation_1.AttestingIndices == nil ||
+		attesterSlashing.Attestation_2.AttestingIndices == nil {
+		return errors.New("invalid attester slashing")
+	}
 	if f.operationsPool.AttesterSlashingsPool.Has(pool.ComputeKeyForAttesterSlashing(attesterSlashing)) {
-		return nil
+		return ErrIgnore
 	}
 	f.mu.Lock()
 	defer f.drainQueuedWork()
@@ -58,6 +65,17 @@ func (f *ForkChoiceStore) onProcessAttesterSlashing(attesterSlashing *cltypes.At
 	// Check if this attestation is even slashable.
 	attestation1 := attesterSlashing.Attestation_1
 	attestation2 := attesterSlashing.Attestation_2
+	if attestation1.AttestingIndices.Length() > attestation1.AttestingIndices.Cap() ||
+		attestation2.AttestingIndices.Length() > attestation2.AttestingIndices.Cap() {
+		return errors.New("attesting indices exceed limit")
+	}
+	intersection := intersectAttestingIndices(attestation1.AttestingIndices, attestation2.AttestingIndices)
+	if f.allAttesterSlashingIndicesSeen(intersection) {
+		return ErrIgnore
+	}
+	if attestation1.Data == nil || attestation2.Data == nil {
+		return errors.New("invalid attester slashing data")
+	}
 	if !cltypes.IsSlashableAttestationData(attestation1.Data, attestation2.Data) {
 		return errors.New("attestation data is not slashable")
 	}
@@ -108,7 +126,7 @@ func (f *ForkChoiceStore) onProcessAttesterSlashing(attesterSlashing *cltypes.At
 	}
 
 	var anySlashed bool
-	for _, index := range solid.IntersectionOfSortedSets(attestation1.AttestingIndices, attestation2.AttestingIndices) {
+	for _, index := range intersection {
 		f.setUnequivocating(index)
 		if !anySlashed {
 			v, err := s.ValidatorForValidatorIndex(int(index))
@@ -125,6 +143,34 @@ func (f *ForkChoiceStore) onProcessAttesterSlashing(attesterSlashing *cltypes.At
 		f.queueEmit(func() { f.emitters.Operation().SendAttesterSlashing(attesterSlashing) })
 	}
 	return nil
+}
+
+func intersectAttestingIndices(left, right solid.IterableSSZ[uint64]) []uint64 {
+	if left.Length() > right.Length() {
+		left, right = right, left
+	}
+	leftIndices := make(map[uint64]struct{}, left.Length())
+	for i := 0; i < left.Length(); i++ {
+		leftIndices[left.Get(i)] = struct{}{}
+	}
+	intersection := make([]uint64, 0, min(left.Length(), right.Length()))
+	for i := 0; i < right.Length(); i++ {
+		index := right.Get(i)
+		if _, ok := leftIndices[index]; ok {
+			intersection = append(intersection, index)
+			delete(leftIndices, index)
+		}
+	}
+	return intersection
+}
+
+func (f *ForkChoiceStore) allAttesterSlashingIndicesSeen(indices []uint64) bool {
+	for _, index := range indices {
+		if !f.isUnequivocating(index) {
+			return false
+		}
+	}
+	return true
 }
 
 func getIndexedAttestationPublicKeys(b *state.CachingBeaconState, att *cltypes.IndexedAttestation) ([][]byte, error) {
