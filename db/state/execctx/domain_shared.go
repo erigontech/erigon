@@ -968,9 +968,14 @@ func (sd *SharedDomains) Close() {
 // conservative upper-bound txNum. It is that txNum stamp, not population
 // timing, that keeps the cache correct: an unwind lowers the floor so every
 // entry reflecting a now-dead fork is evicted, and mem-first masking means a
-// later in-memory write shadows a stale cached read. Callers that flush a tx
-// they commit themselves get a cache-safe (cold-but-correct) result; use
-// Commit to also keep the cache warm.
+// later in-memory write shadows a stale cached read.
+//
+// An SD with an attached state cache must route every flush through Commit:
+// Flush neither applies nor invalidates, so a populated cache would keep
+// serving pre-flush values for the flushed keys after the caller's own
+// commit — and Commit collects its cache updates only from its own flush, so
+// an earlier plain Flush's keys would never be applied. Cache-less callers
+// may Flush and commit themselves.
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	defer mxFlushTook.ObserveDuration(time.Now())
 	return sd.flushMem(ctx, tx)
