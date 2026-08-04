@@ -49,7 +49,8 @@ func newHeapObject() *stateObject {
 
 type Storage map[accounts.StorageKey]uint256.Int
 
-// set lazy-allocate Storage map. In Golang nil-map reads are safe
+// set allocates the map on first write. The arena hands out objects with a nil
+// Storage because reads of one are safe and most objects never write.
 func (s *Storage) set(key accounts.StorageKey, value uint256.Int) {
 	if *s == nil {
 		*s = make(Storage)
