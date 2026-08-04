@@ -108,7 +108,7 @@ func (ln *LocalNode) Node() *Node {
 
 	// Double check the current record, since multiple goroutines might be waiting
 	// on the write mutex.
-	if n = ln.cur.Load(); n != nil {
+	if n := ln.cur.Load(); n != nil {
 		return n
 	}
 

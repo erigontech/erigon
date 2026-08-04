@@ -175,11 +175,12 @@ func (cl *MockCl) GetBuiltPayload(ctx context.Context, payloadId hexutil.Bytes) 
 		func() (*enginetypes.GetPayloadResponse, enginetypes.EngineStatus, error) {
 			var r *enginetypes.GetPayloadResponse
 			var err error
-			if cl.chainConfig.AmsterdamTime != nil {
+			switch {
+			case cl.chainConfig.AmsterdamTime != nil:
 				r, err = cl.engineApiClient.GetPayloadV6(ctx, payloadId)
-			} else if cl.chainConfig.OsakaTime != nil {
+			case cl.chainConfig.OsakaTime != nil:
 				r, err = cl.engineApiClient.GetPayloadV5(ctx, payloadId)
-			} else {
+			default:
 				r, err = cl.engineApiClient.GetPayloadV4(ctx, payloadId)
 			}
 			if err != nil {

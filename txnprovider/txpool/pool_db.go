@@ -153,7 +153,7 @@ func SaveChainConfigIfNeed(
 	poolDB kv.RwDB,
 	logger log.Logger,
 ) (cc *chain.Config, blockNum uint64, err error) {
-	if err = poolDB.View(ctx, func(tx kv.Tx) error {
+	if err := poolDB.View(ctx, func(tx kv.Tx) error {
 		cc, err = ChainConfig(tx)
 		if err != nil {
 			return err
@@ -193,11 +193,11 @@ func SaveChainConfigIfNeed(
 		break
 	}
 
-	if err = poolDB.Update(ctx, func(tx kv.RwTx) error {
-		if err = PutChainConfig(tx, cc, nil); err != nil {
+	if err := poolDB.Update(ctx, func(tx kv.RwTx) error {
+		if err := PutChainConfig(tx, cc, nil); err != nil {
 			return err
 		}
-		if err = PutLastSeenBlock(tx, blockNum, nil); err != nil {
+		if err := PutLastSeenBlock(tx, blockNum, nil); err != nil {
 			return err
 		}
 		return nil

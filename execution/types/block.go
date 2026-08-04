@@ -935,7 +935,7 @@ func (rb *RawBody) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// end of Transactions
-	if err = s.ListEnd(); err != nil {
+	if err := s.ListEnd(); err != nil {
 		return err
 	}
 	// decode Uncles
@@ -1135,12 +1135,13 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 		}
 	}
 
-	if withdrawals == nil {
+	switch {
+	case withdrawals == nil:
 		b.header.WithdrawalsHash = nil
-	} else if len(withdrawals) == 0 {
+	case len(withdrawals) == 0:
 		b.header.WithdrawalsHash = &empty.WithdrawalsHash
 		b.withdrawals = make(Withdrawals, len(withdrawals))
-	} else {
+	default:
 		h := DeriveSha(Withdrawals(withdrawals))
 		b.header.WithdrawalsHash = &h
 		b.withdrawals = make(Withdrawals, len(withdrawals))
@@ -1270,7 +1271,7 @@ func (bb *Block) DecodeRLP(s *rlp.Stream) error {
 
 	// decode header
 	var h Header
-	if err = h.DecodeRLP(s); err != nil {
+	if err := h.DecodeRLP(s); err != nil {
 		return err
 	}
 	bb.header = &h
@@ -1697,7 +1698,7 @@ func checkErrListEnd(s *rlp.Stream, err error) error {
 	if err != rlp.EOL {
 		return err
 	}
-	if err = s.ListEnd(); err != nil {
+	if err := s.ListEnd(); err != nil {
 		return err
 	}
 	return nil

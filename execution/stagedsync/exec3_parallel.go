@@ -462,7 +462,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 				if !errors.Is(cr.err, ErrWrongTrieRoot) {
 					return fmt.Errorf("[%s] commitment: %w", pe.logPrefix, cr.err)
 				}
-				pe.logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x (%v)",
+				pe.logWrongTrieRoot(fmt.Sprintf("[%s] Wrong trie root of block %d: %x (%v)",
 					pe.logPrefix, cr.blockNum, cr.rootHash, cr.err))
 				return fmt.Errorf("%w, block=%d", ErrWrongTrieRoot, cr.blockNum)
 			}
@@ -885,11 +885,11 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	if (execErr == nil || errors.Is(execErr, &ErrLoopExhausted{})) && rwTx != nil {
 		overlay := pe.doms.BlockOverlay()
 		if overlay != nil {
-			if err = execStage.Update(overlay, pe.lastCommittedBlockNum.Load()); err != nil {
+			if err := execStage.Update(overlay, pe.lastCommittedBlockNum.Load()); err != nil {
 				return nil, rwTx, err
 			}
 		} else {
-			if err = execStage.Update(rwTx, pe.lastCommittedBlockNum.Load()); err != nil {
+			if err := execStage.Update(rwTx, pe.lastCommittedBlockNum.Load()); err != nil {
 				return nil, rwTx, err
 			}
 		}
@@ -2741,8 +2741,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				if txn := txTask.Tx(); txn != nil {
 					executionContribution, stateContribution := protocol.InclusionContributions(txn.GetGasLimit(), txTask.Rules().IsAmsterdam)
-					if err := protocol.CheckBlockGasInclusion(be.gasPool, executionContribution, stateContribution); err != nil {
-						return be.invalidBlockResult(fmt.Errorf("%w: block gas used overflow at block=%d txIdx=%d: %w", rules.ErrInvalidBlock, be.blockNum, txVersion.TxIndex, err)), nil
+					if err := protocol.CheckBlockGasInclusion(be.gasPool, executionContribution, stateContribution, txn.GetBlobGas()); err != nil {
+						return be.invalidBlockResult(fmt.Errorf("%w: tx exceeds block gas budget at block=%d txIdx=%d: %w", rules.ErrInvalidBlock, be.blockNum, txVersion.TxIndex, err)), nil
 					}
 				}
 

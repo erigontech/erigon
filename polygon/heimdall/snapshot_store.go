@@ -577,11 +577,12 @@ OUTER:
 
 			entityStart := entity.BlockNumRange().Start
 			entityEnd := entity.BlockNumRange().End
-			if fromEntityStart > 0 && entityStart >= fromEntityStart {
+			switch {
+			case fromEntityStart > 0 && entityStart >= fromEntityStart:
 				continue
-			} else if entityEnd < toEntityEnd {
+			case entityEnd < toEntityEnd:
 				break OUTER
-			} else {
+			default:
 				snapshotEntities = append(snapshotEntities, entity)
 			}
 		}

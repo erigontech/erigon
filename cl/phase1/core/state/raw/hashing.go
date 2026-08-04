@@ -29,7 +29,7 @@ import (
 func (b *BeaconState) HashSSZ() (out [32]byte, err error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if err = b.computeDirtyLeaves(); err != nil {
+	if err := b.computeDirtyLeaves(); err != nil {
 		return [32]byte{}, err
 	}
 	// for i := 0; i < len(b.leaves); i += 32 {

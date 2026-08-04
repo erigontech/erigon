@@ -125,7 +125,7 @@ func decodeAuthorizations(auths *[]Authorization, s *rlp.Stream) error {
 	for _, err = s.List(); err == nil; _, err = s.List() {
 		auth := Authorization{}
 
-		if err = s.ReadUint256(&auth.ChainID); err != nil {
+		if err := s.ReadUint256(&auth.ChainID); err != nil {
 			return err
 		}
 
@@ -150,12 +150,12 @@ func decodeAuthorizations(auths *[]Authorization, s *rlp.Stream) error {
 		auth.YParity = uint8(yParity)
 
 		// r
-		if err = s.ReadUint256(&auth.R); err != nil {
+		if err := s.ReadUint256(&auth.R); err != nil {
 			return err
 		}
 
 		// s
-		if err = s.ReadUint256(&auth.S); err != nil {
+		if err := s.ReadUint256(&auth.S); err != nil {
 			return err
 		}
 
