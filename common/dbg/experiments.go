@@ -180,9 +180,8 @@ func PruneTotalDifficulty() bool    { return pruneTotalDifficulty }
 // CLI-override setters for the performance toggles that also have env-var
 // twins. The env var sets the initial value at package init; the CLI layer
 // calls these at node startup only when the user explicitly set the flag.
-func SetIgnoreBAL(b bool)     { IgnoreBAL = b }
-func SetUseStateCache(b bool) { UseStateCache = b }
-
+func SetIgnoreBAL(b bool)               { IgnoreBAL = b }
+func SetUseStateCache(b bool)           { UseStateCache = b }
 func SetReadAhead(b bool)               { ReadAhead = b }
 func SetExec3Workers(n int)             { Exec3Workers = n }
 func SetNoPrune(b bool)                 { noPrune = b }
