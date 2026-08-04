@@ -170,6 +170,7 @@ func (e *ExecModule) unwindIfNeeded(
 	canonicalHash common.Hash,
 	finishProgressBefore uint64,
 	isSynced bool,
+	suspendReadAhead func() error,
 ) (*ForkChoiceResult, error) {
 	var finalisedBlockNum uint64
 	lastKnownFinalisedHash := rawdb.ReadForkchoiceFinalized(tx)
@@ -279,6 +280,9 @@ func (e *ExecModule) unwindIfNeeded(
 				Status:          ExecutionStatusReorgTooDeep,
 			}, nil
 		}
+		if err := suspendReadAhead(); err != nil {
+			return nil, fmt.Errorf("suspend read-ahead: %w", err)
+		}
 		if err := e.pipelineExecutor.UnwindTo(unwindTarget, stagedsync.ForkChoice, tx); err != nil {
 			return nil, err
 		}
@@ -360,11 +364,20 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	})
 	defer cleanupBeforeSemaRelease()
 
-	resumeReadAhead, err := e.suspendReadAhead(ctx)
-	if err != nil {
-		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("suspend read-ahead: %w", err), false)
+	var resumeReadAhead func()
+	defer func() {
+		if resumeReadAhead != nil {
+			resumeReadAhead()
+		}
+	}()
+	suspendReadAhead := func() error {
+		resume, err := e.suspendReadAhead(ctx)
+		if err != nil {
+			return err
+		}
+		resumeReadAhead = resume
+		return nil
 	}
-	defer resumeReadAhead()
 
 	var validationError string
 
@@ -489,7 +502,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 	}
 
-	result, err := e.unwindIfNeeded(ctx, tx, currentContext, fcuHeader, blockHash, safeHash, finalizedHash, canonicalHash, finishProgressBefore, isSynced)
+	result, err := e.unwindIfNeeded(ctx, tx, currentContext, fcuHeader, blockHash, safeHash, finalizedHash, canonicalHash, finishProgressBefore, isSynced, suspendReadAhead)
 	if err != nil {
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 	}
