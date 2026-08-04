@@ -267,20 +267,16 @@ func CopyLogGroups(groups []Logs) Logs {
 	}
 	topics := make([]common.Hash, totalTopics)
 	data := make([]byte, totalData)
-	backing := make([]Log, total)
 	out := make(Logs, total)
 	i := 0
 	for _, g := range groups {
 		for _, l := range g {
-			if l != nil {
-				dst := &backing[i]
-				nt, nd := len(l.Topics), len(l.Data)
-				// Capped so a later append to one copied log cannot bleed into the next.
-				dst.Topics, dst.Data = topics[:nt:nt], data[:nd:nd]
-				topics, data = topics[nt:], data[nd:]
-				l.copyTo(dst)
-				out[i] = dst
-			}
+			dst := &out[i]
+			nt, nd := len(l.Topics), len(l.Data)
+			// Capped so a later append to one copied log cannot bleed into the next.
+			dst.Topics, dst.Data = topics[:nt:nt], data[:nd:nd]
+			topics, data = topics[nt:], data[nd:]
+			l.copyTo(dst)
 			i++
 		}
 	}
