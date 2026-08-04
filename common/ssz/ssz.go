@@ -50,7 +50,8 @@ type Unmarshaler interface {
 	clonable.Clonable
 }
 
-// StrictUnmarshaler supports canonical offset validation during recursive decoding.
+// StrictUnmarshaler supports recursive strict decoding, which rejects
+// non-canonical offsets and trailing bytes.
 type StrictUnmarshaler interface {
 	DecodeSSZStrict(buf []byte, version int) error
 }

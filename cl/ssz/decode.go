@@ -28,9 +28,9 @@ func UnmarshalSSZ(buf []byte, version int, schema ...any) error {
 	return unmarshalSSZ(buf, version, false, schema...)
 }
 
-// UnmarshalSSZStrict rejects non-canonical container offsets and trailing
-// bytes after an all-static schema, and propagates strict decoding to nested
-// objects that support it.
+// UnmarshalSSZStrict rejects non-canonical container offsets, rejects
+// trailing bytes when the schema has no variable-size fields, and propagates
+// strict decoding to nested objects that support it.
 func UnmarshalSSZStrict(buf []byte, version int, schema ...any) error {
 	return unmarshalSSZ(buf, version, true, schema...)
 }
