@@ -210,6 +210,25 @@ func TestWitnessCacheStorePublishes(t *testing.T) {
 	}
 }
 
+// TestCacheAddAloneDoesNotPublish names the bypass the build paths are exposed to: the
+// promoted LRU Add caches without publishing, so a path that reaches for it directly
+// serves witnesses and pushes nothing. store is what couples the two.
+func TestCacheAddAloneDoesNotPublish(t *testing.T) {
+	cache := newWitnessResultCache(96, 0, false, false)
+	ch := cache.subscribe()
+	defer cache.unsubscribe(ch)
+
+	hash := hashN(0x77)
+	enc := json.RawMessage(`{"state":["0x02"],"codes":[],"keys":[],"headers":[]}`)
+
+	cache.Add(hash, &ExecutionWitnessResult{cachedJSON: enc})
+	require.True(t, cache.Contains(hash), "Add caches")
+	require.Empty(t, ch, "Add alone must not publish")
+
+	cache.store(9, hash, enc)
+	require.Len(t, ch, 1, "store caches and publishes")
+}
+
 // TestBuildPathsPublish pins the feed hookup on both build paths, durable and
 // head-capture. Either one can be refactored to insert into the cache directly
 // instead of through store, which stops the push with nothing else failing.
@@ -263,7 +282,9 @@ func TestBuildPathsPublish(t *testing.T) {
 	})
 }
 
-// requireBuildPublished asserts a build published (num, hash) carrying the bytes it cached.
+// requireBuildPublished asserts a build published (num, hash) exactly once carrying the
+// bytes it cached. A witness that lands in the cache with no push is the bypass this
+// guards: the insert went somewhere other than store.
 func requireBuildPublished(t *testing.T, ch chan witnessPush, cache *witnessResultCache, num uint64, hash common.Hash) {
 	t.Helper()
 	select {
@@ -273,8 +294,12 @@ func requireBuildPublished(t *testing.T, ch chan witnessPush, cache *witnessResu
 		cached, ok := cache.Get(hash)
 		require.True(t, ok, "a published witness must also be cached")
 		require.True(t, bytes.Equal(cached.cachedJSON, push.json), "pushed bytes must be the cached bytes")
+		require.Empty(t, ch, "one build publishes exactly once")
 	case <-time.After(30 * time.Second):
-		t.Fatal("build path did not publish to the feed")
+		if cache.Contains(hash) {
+			t.Fatal("build cached the witness but never published it: this path inserts without going through store")
+		}
+		t.Fatal("build path produced no witness at all")
 	}
 }
 
