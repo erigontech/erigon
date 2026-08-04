@@ -110,6 +110,8 @@ func (l *ListSSZ[T]) DecodeSSZStrict(buf []byte, version int) error {
 
 func (l *ListSSZ[T]) decodeSSZ(buf []byte, version int, strict bool) (err error) {
 	switch {
+	case l.static && strict:
+		l.list, err = ssz.DecodeStaticListStrict[T](buf, 0, uint32(len(buf)), uint32(l.bytesPerElement), uint64(l.limit), version)
 	case l.static:
 		l.list, err = ssz.DecodeStaticList[T](buf, 0, uint32(len(buf)), uint32(l.bytesPerElement), uint64(l.limit), version)
 	case strict:

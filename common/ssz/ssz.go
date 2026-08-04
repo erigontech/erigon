@@ -165,6 +165,15 @@ func decodeDynamicList[T Unmarshaler](bytes []byte, start, end uint32, _max uint
 }
 
 func DecodeStaticList[T Unmarshaler](bytes []byte, start, end, bytesPerElement uint32, _max uint64, version int) ([]T, error) {
+	return decodeStaticList[T](bytes, start, end, bytesPerElement, _max, version, false)
+}
+
+// DecodeStaticListStrict propagates strict decoding to elements that support it.
+func DecodeStaticListStrict[T Unmarshaler](bytes []byte, start, end, bytesPerElement uint32, _max uint64, version int) ([]T, error) {
+	return decodeStaticList[T](bytes, start, end, bytesPerElement, _max, version, true)
+}
+
+func decodeStaticList[T Unmarshaler](bytes []byte, start, end, bytesPerElement uint32, _max uint64, version int, strict bool) ([]T, error) {
 	if start > end || len(bytes) < int(end) {
 		return nil, ErrBadOffset
 	}
@@ -182,7 +191,13 @@ func DecodeStaticList[T Unmarshaler](bytes []byte, start, end, bytesPerElement u
 		objs[i] = objs[i].Clone().(T)
 		elemStart := i * int(bytesPerElement)
 		elemEnd := elemStart + int(bytesPerElement)
-		if err := objs[i].DecodeSSZ(buf[elemStart:elemEnd], version); err != nil {
+		var err error
+		if strict {
+			err = decodeObjectStrict(objs[i], buf[elemStart:elemEnd], version)
+		} else {
+			err = objs[i].DecodeSSZ(buf[elemStart:elemEnd], version)
+		}
+		if err != nil {
 			return nil, err
 		}
 	}
