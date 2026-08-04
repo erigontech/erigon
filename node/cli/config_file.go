@@ -19,6 +19,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -34,7 +35,8 @@ func SetFlagsFromConfigFile(cmd *cli.Command, filePath string) error {
 
 	fileConfig := make(map[string]any)
 
-	if fileExtension == ".yml" || fileExtension == ".yaml" {
+	switch {
+	case fileExtension == ".yml" || fileExtension == ".yaml":
 		yamlFile, err := os.ReadFile(filePath)
 		if err != nil {
 			return err
@@ -43,7 +45,7 @@ func SetFlagsFromConfigFile(cmd *cli.Command, filePath string) error {
 		if err != nil {
 			return err
 		}
-	} else if fileExtension == ".toml" {
+	case fileExtension == ".toml":
 		tomlFile, err := os.ReadFile(filePath)
 		if err != nil {
 			return err
@@ -52,7 +54,7 @@ func SetFlagsFromConfigFile(cmd *cli.Command, filePath string) error {
 		if err != nil {
 			return err
 		}
-	} else {
+	default:
 		return errors.New("config files only accepted are .yaml and .toml")
 	}
 
@@ -98,9 +100,7 @@ func flattenConfig(m map[string]any, prefix string) map[string]any {
 			key = prefix + "." + k
 		}
 		if nested, ok := v.(map[string]any); ok {
-			for fk, fv := range flattenConfig(nested, key) {
-				result[fk] = fv
-			}
+			maps.Copy(result, flattenConfig(nested, key))
 		} else {
 			result[key] = v
 		}

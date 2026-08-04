@@ -136,6 +136,7 @@ func TestVersionedWriteVersion(t *testing.T) {
 // TX executions on the same worker.
 func TestAccessListResetInIBSReset(t *testing.T) {
 	ibs := New(nil)
+	defer ibs.Close()
 
 	// Add an address to the access list
 	testAddr := accounts.InternAddress([20]byte{0x42})
@@ -157,22 +158,24 @@ func TestAccessListResetInIBSReset(t *testing.T) {
 // its own block's access list as phantom entries.
 func TestAddressAccessResetInIBSReset(t *testing.T) {
 	ibs := New(nil)
+	defer ibs.Close()
 	sender := accounts.InternAddress([20]byte{0x01})
 	coinbase := accounts.InternAddress([20]byte{0x02})
 	leaked := accounts.InternAddress([20]byte{0x42})
 	// Prepare enables access recording at tx start.
-	require.NoError(t, ibs.Prepare(&chain.Rules{}, sender, coinbase, accounts.NilAddress, nil, nil, nil))
+	ibs.Prepare(&chain.Rules{}, sender, coinbase, accounts.NilAddress, nil, nil)
 	ibs.MarkAddressAccess(leaked, false)
 	// Tx aborts: AccessedAddresses is never harvested. The worker resets
 	// the shared IBS before the next task.
 	ibs.Reset()
-	assert.Empty(t, ibs.AccessedAddresses(), "no recorded accesses should survive Reset")
+	assert.Empty(t, ibs.versionedReads.access, "no recorded accesses should survive Reset")
 }
 
 // TestTransientStorageResetInIBSReset verifies that IBS.Reset() clears
 // transient storage (EIP-1153).
 func TestTransientStorageResetInIBSReset(t *testing.T) {
 	ibs := New(nil)
+	defer ibs.Close()
 
 	testAddr := accounts.InternAddress([20]byte{0x42})
 	testKey := accounts.InternKey([32]byte{0x01})
@@ -437,7 +440,7 @@ func TestBlockStateCacheDeleteAccount_RecreateThenDeleteRecords(t *testing.T) {
 // spurious zero writes made same-tx re-reads return 0 — wrong gas
 // (SSTORE_SET vs dirty-update, +19900) and a wrong written value
 // (EEST cancun/eip6780_selfdestruct/* under EXEC3_PARALLEL). The calc now
-// gets per-slot DELETEs from normalizeWriteSet's SD cascade instead.
+// gets per-slot DELETEs from Normalize's SD cascade instead.
 func TestSelfDestructKeepsDirtyStorageReadableSameTx(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xAA})
 	slot0 := accounts.InternKey([32]byte{0x00})
@@ -446,6 +449,7 @@ func TestSelfDestructKeepsDirtyStorageReadableSameTx(t *testing.T) {
 	vm := NewVersionMap(nil)
 
 	ibs := New(&emptyReader{})
+	defer ibs.Close()
 	ibs.SetVersionMap(vm)
 	ibs.SetTxContext(100, 0)
 	ibs.SetVersion(0)
@@ -454,7 +458,7 @@ func TestSelfDestructKeepsDirtyStorageReadableSameTx(t *testing.T) {
 	require.NoError(t, ibs.SetState(addr, slot0, *uint256.NewInt(42)))
 	require.NoError(t, ibs.SetState(addr, slot1, *uint256.NewInt(99)))
 
-	_, err := ibs.Selfdestruct(addr)
+	_, err := ibs.Selfdestruct(addr, false)
 	require.NoError(t, err)
 
 	// After SELFDESTRUCT, same-tx reads must still see the dirty values.
@@ -471,7 +475,7 @@ func TestSelfDestructKeepsDirtyStorageReadableSameTx(t *testing.T) {
 	assert.True(t, destructed)
 
 	// And it must NOT have emitted spurious StoragePath=0 writes.
-	for waddr, slots := range ibs.VersionedWrites(false).Storages() {
+	for waddr, slots := range ibs.VersionedWrites().Storages() {
 		if waddr != addr {
 			continue
 		}

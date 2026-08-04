@@ -52,7 +52,7 @@ func ExampleMsgPipe() {
 
 func TestMsgPipeUnblockWrite(t *testing.T) {
 loop:
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		rw1, rw2 := MsgPipe()
 		done := make(chan struct{})
 		go func() {
@@ -83,7 +83,7 @@ loop:
 // This test should panic if concurrent close isn't implemented correctly.
 func TestMsgPipeConcurrentClose(t *testing.T) {
 	rw1, _ := MsgPipe()
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		go rw1.Close()
 	}
 }

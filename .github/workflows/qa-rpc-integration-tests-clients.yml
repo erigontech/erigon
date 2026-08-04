@@ -9,6 +9,9 @@ concurrency:
   group: rpc-clients-integration-${{ github.run_id }}
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   client-rpc-integ-tests:
     name: RPC Integration Tests - ${{ matrix.client }}
@@ -33,6 +36,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Read RPC version
         run: |
@@ -92,33 +97,23 @@ jobs:
           fi
 
       - name: Generate Summary
-        if: always() && steps.test_step.outputs.test_executed == 'true'
+        if: always()
         env:
-          WORKFLOW: ${{ github.workflow }}
-          CLIENT: ${{ matrix.client }}
-          TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
+          RESULT: ${{ steps.test_step.outputs.TEST_RESULT || job.status }}
+          TITLE_SUFFIX: ${{ matrix.client }}
         run: |
-          SUMMARY_FILE="$TEST_RESULT_DIR/summary.md"
-          LOG_FILE="$TEST_RESULT_DIR/output.log"
-
-          {
-            echo "# $WORKFLOW - $CLIENT Report"
-            echo
-            echo "## Test Configuration"
-            echo "- **Client:** $CLIENT"
-            echo "- **Chain:** $CHAIN"
-            echo "- **Result:** $TEST_RESULT"
-            echo
-            echo "## Test Output"
-            echo '```'
-          } > "$SUMMARY_FILE"
-
-          cat "$LOG_FILE" >> "$SUMMARY_FILE"
-
-          echo '```' >> "$SUMMARY_FILE"
-
-          cat "$SUMMARY_FILE"
-          cat "$SUMMARY_FILE" >> "$GITHUB_STEP_SUMMARY"
+          # Render structured results (which tests failed + overall stats) into the
+          # run summary page. The reporter never fails the job and always prints
+          # something, even when the run died before producing a report.
+          SUMMARY=$(python3 "$GITHUB_WORKSPACE/.github/workflows/scripts/render_rpc_summary.py" \
+            --result-dir "$TEST_RESULT_DIR" \
+            --workflow "$GITHUB_WORKFLOW" \
+            --title-suffix "$TITLE_SUFFIX" \
+            --chain "$CHAIN" \
+            --result "$RESULT")
+          printf '%s\n' "$SUMMARY"
+          printf '%s\n' "$SUMMARY" >> "$GITHUB_STEP_SUMMARY"
+          mkdir -p "$TEST_RESULT_DIR" 2>/dev/null && printf '%s\n' "$SUMMARY" > "$TEST_RESULT_DIR/summary.md" || true
 
       - name: Upload test results
         if: always() && steps.test_step.outputs.test_executed == 'true'

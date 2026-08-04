@@ -240,11 +240,6 @@ func SetupTracerCtx(ctx *cli.Command) (*tracers.Tracer, error) {
 // Setup initializes profiling and logging based on the CLI flags.
 // It should be called as early as possible in the program.
 func Setup(nodeCtx context.Context, ctx *cli.Command, rootLogger bool) (log.Logger, *tracers.Tracer, *http.ServeMux, *http.ServeMux, error) {
-	// ensure we've read in config file details before setting up metrics etc.
-	if err := SetFlagsFromConfigFile(ctx); err != nil {
-		log.Warn("failed setting config flags from yaml/toml file", "err", err)
-	}
-
 	RaiseFdLimit()
 
 	logger := logging.SetupLoggerCtx("erigon", ctx, log.LvlInfo, log.LvlInfo, rootLogger)
@@ -305,9 +300,8 @@ func Setup(nodeCtx context.Context, ctx *cli.Command, rootLogger bool) (log.Logg
 	if pyroscopeEnabled {
 		tags := make(map[string]string)
 		for _, rawTag := range pyroscopeTags {
-			parts := strings.Split(rawTag, "=")
-			if len(parts) == 2 { // Ignore invalid tags
-				tags[parts[0]] = parts[1]
+			if k, v, ok := strings.Cut(rawTag, "="); ok && !strings.Contains(v, "=") { // Ignore invalid tags
+				tags[k] = v
 			}
 		}
 		if err := Handler.StartPyroscopeProfiler(
@@ -399,29 +393,6 @@ var (
 	metricsConfigs = []string{metricsEnabledFlag.Name, metricsAddrFlag.Name, metricsPortFlag.Name}
 )
 
-func SetFlagsFromConfigFile(ctx *cli.Command) error {
-	filePath := ctx.String(configFlag.Name)
-	if filePath == "" {
-		return nil
-	}
-
-	fileConfig, err := readConfigAsMap(filePath)
-	if err != nil {
-		return err
-	}
-
-	for _, flag := range metricsConfigs {
-		if v, ok := fileConfig[flag]; ok {
-			err = ctx.Set(flag, fmt.Sprintf("%v", v))
-			if err != nil {
-				return err
-			}
-		}
-	}
-
-	return nil
-}
-
 func SetCobraFlagsFromConfigFile(cmd *cobra.Command) error {
 	flags := cmd.Flags()
 
@@ -461,7 +432,8 @@ func readConfigAsMap(filePath string) (map[string]any, error) {
 
 	fileConfig := make(map[string]any)
 
-	if fileExtension == ".yaml" || fileExtension == ".yml" {
+	switch {
+	case fileExtension == ".yaml" || fileExtension == ".yml":
 		yamlFile, err := os.ReadFile(filePath)
 		if err != nil {
 			return fileConfig, err
@@ -470,7 +442,7 @@ func readConfigAsMap(filePath string) (map[string]any, error) {
 		if err != nil {
 			return fileConfig, err
 		}
-	} else if fileExtension == ".toml" {
+	case fileExtension == ".toml":
 		tomlFile, err := os.ReadFile(filePath)
 		if err != nil {
 			return fileConfig, err
@@ -479,7 +451,7 @@ func readConfigAsMap(filePath string) (map[string]any, error) {
 		if err != nil {
 			return fileConfig, err
 		}
-	} else {
+	default:
 		return fileConfig, errors.New("config files only accepted are .yaml, .yml, and .toml")
 	}
 

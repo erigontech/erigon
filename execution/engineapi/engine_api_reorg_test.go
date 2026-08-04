@@ -320,7 +320,7 @@ func TestNewPayloadShouldReturnValidWhenSideChainGoingBackIsLtMaxReorgDepth(t *t
 	})
 	eatCanonical.Run(t, func(ctx context.Context, t *testing.T, eatCanonical engineapitester.EngineApiTester) {
 		// build the canonical chain up to canonicalChainLen
-		for i := 0; i < canonicalChainLen; i++ {
+		for range canonicalChainLen {
 			txn, err := eatCanonical.Transactor.SubmitSimpleTransfer(eatCanonical.CoinbaseKey, receiver1, big.NewInt(1))
 			require.NoError(t, err)
 			clPayload, err := eatCanonical.MockCl.BuildCanonicalBlock(ctx)
@@ -467,7 +467,7 @@ func TestEngineApiForkchoiceToGenesisRewindsHead(t *testing.T) {
 		}
 		var r *enginetypes.ForkChoiceUpdatedResponse
 		if eat.ChainConfig.AmsterdamTime != nil {
-			r, err = eat.EngineApiClient.ForkchoiceUpdatedV4(ctx, &fcu, nil)
+			r, err = eat.EngineApiClient.ForkchoiceUpdatedV4(ctx, &fcu, nil, nil)
 		} else {
 			r, err = eat.EngineApiClient.ForkchoiceUpdatedV3(ctx, &fcu, nil)
 		}

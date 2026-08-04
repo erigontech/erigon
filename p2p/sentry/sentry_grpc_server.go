@@ -800,7 +800,7 @@ func runWitPeer(
 
 			var query wit.NewWitnessPacket
 			if err := rlp.DecodeBytes(b, &query); err != nil {
-				logger.Error("decoding NewWitnessMsg: %w, data: %x", err, b)
+				logger.Error("[sentry] decoding NewWitnessMsg", "err", err, "data", hex.EncodeToString(b))
 				return p2p.NewPeerError(p2p.PeerErrorInvalidMessage, p2p.DiscSubprotocolError, err, "decoding NewWitnessMsg")
 			}
 
@@ -820,7 +820,7 @@ func runWitPeer(
 
 			var query wit.NewWitnessHashesPacket
 			if err := rlp.DecodeBytes(b, &query); err != nil {
-				logger.Error("decoding NewWitnessHashesMsg: %w, data: %x", err, b)
+				logger.Error("[sentry] decoding NewWitnessHashesMsg", "err", err, "data", hex.EncodeToString(b))
 				return p2p.NewPeerError(p2p.PeerErrorInvalidMessage, p2p.DiscSubprotocolError, err, "decoding NewWitnessHashesMsg")
 			}
 
@@ -1383,10 +1383,8 @@ func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgID sent
 		err := rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(data)), Payload: bytes.NewReader(data)})
 		if err != nil {
 			ss.removePeer(peerInfo.ID(), p2p.NewPeerError(p2p.PeerErrorMessageSend, p2p.DiscNetworkError, err, fmt.Sprintf("%s writePeer msgcode=%d", logPrefix, msgcode)))
-		} else {
-			if ttl > 0 {
-				peerInfo.AddDeadline(time.Now().Add(ttl))
-			}
+		} else if ttl > 0 {
+			peerInfo.AddDeadline(time.Now().Add(ttl))
 		}
 	}, ss.logger)
 }

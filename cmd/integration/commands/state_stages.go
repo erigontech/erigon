@@ -62,8 +62,7 @@ Examples:
 		`,
 	Example: "go run ./cmd/integration state_stages --datadir=... --verbosity=3 --unwind=100 --unwind.every=100000 --block=2000000",
 	Run: func(cmd *cobra.Command, args []string) {
-		logger := debug.SetupCobra(cmd, "integration")
-		ctx := cmd.Context()
+		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
 		cfg := &nodecfg.DefaultConfig
 		utils.SetNodeConfigCobra(cmd, cfg)
 		ethConfig := &ethconfig.Defaults
@@ -75,7 +74,7 @@ Examples:
 		erigoncli.ApplyFlagsForEthConfigCobra(cmd.Flags(), ethConfig)
 		builderConfig := buildercfg.BuilderConfig{}
 		utils.SetupMinerCobra(cmd, &builderConfig)
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
+		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -103,9 +102,8 @@ Examples:
 var loopExecCmd = &cobra.Command{
 	Use: "loop_exec",
 	Run: func(cmd *cobra.Command, args []string) {
-		logger := debug.SetupCobra(cmd, "integration")
-		ctx := cmd.Context()
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
+		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
+		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -200,14 +198,15 @@ func syncBySmallSteps(db kv.TemporalRwDB, builderConfig buildercfg.BuilderConfig
 	var stopAt = senderAtBlock
 	onlyOneUnwind := block == 0 && unwindEvery == 0 && unwind > 0
 	backward := unwindEvery < unwind
-	if onlyOneUnwind {
+	switch {
+	case onlyOneUnwind:
 		if unwind > execAtBlock {
 			return errors.New("cannot unwind past 0")
 		}
 		stopAt = progress(tx, stages.Execution) - unwind
-	} else if block > 0 && block < senderAtBlock {
+	case block > 0 && block < senderAtBlock:
 		stopAt = block
-	} else if backward {
+	case backward:
 		stopAt = 1
 	}
 
@@ -283,7 +282,7 @@ func syncBySmallSteps(db kv.TemporalRwDB, builderConfig buildercfg.BuilderConfig
 				return err
 			}
 
-			if err = sd.Commit(ctx, tx); err != nil {
+			if err := sd.Commit(ctx, tx); err != nil {
 				return err
 			}
 			sd.Close()
@@ -401,7 +400,7 @@ func loopExec(db kv.TemporalRwDB, ctx context.Context, unwind uint64, logger log
 		if _, err = sync.Run(sd, tx, initialCycle, false); err != nil {
 			return err
 		}
-		logger.Info("[Integration] ", "loop time", time.Since(t))
+		logger.Info("[Integration] ", "loopTime", time.Since(t))
 		sd.Close()
 		tx.Rollback()
 		tx, err = db.BeginTemporalRw(ctx)

@@ -149,7 +149,7 @@ const (
 	MaxCodeSize              = 24 * 1024                // Maximum bytecode to permit for a contract
 	MaxCodeSizeAhmedabad     = 32 * 1024                // Maximum bytecode to permit for a contract post Ahmedabad hard fork (bor / polygon pos) (32KB)
 	MaxInitCodeSize          = 2 * MaxCodeSize          // Maximum initcode to permit in a creation transaction and create instructions
-	MaxCodeSizeAmsterdam     = 32 * 1024                // EIP-7954: Increase Maximum Contract Size
+	MaxCodeSizeAmsterdam     = 64 * 1024                // EIP-7954: Increase Maximum Contract Size
 	MaxInitCodeSizeAmsterdam = 2 * MaxCodeSizeAmsterdam // EIP-7954: Increase Maximum Contract Size
 
 	// Precompiled contract gas prices
@@ -228,14 +228,13 @@ const (
 	CostPerStateByte        = 1530
 
 	// Pre-multiplied state-gas costs (StateBytesX * CostPerStateByte) for hot paths.
-	StateGasNewAccount        = StateBytesNewAccount * CostPerStateByte
-	StateGasPerStorageSet     = StateBytesPerStorageSet * CostPerStateByte
-	StateGasAuthBase          = StateBytesAuthBase * CostPerStateByte
-	StateGasNewAccountAndAuth = (StateBytesNewAccount + StateBytesAuthBase) * CostPerStateByte
-	StateGasSystemMaxSstores  = StateBytesPerStorageSet * CostPerStateByte * SystemMaxSstoresPerCall
+	StateGasNewAccount       = StateBytesNewAccount * CostPerStateByte
+	StateGasPerStorageSet    = StateBytesPerStorageSet * CostPerStateByte
+	StateGasAuthBase         = StateBytesAuthBase * CostPerStateByte
+	StateGasSystemMaxSstores = StateBytesPerStorageSet * CostPerStateByte * SystemMaxSstoresPerCall
 
 	// EIP-8038: State-access gas cost update. Reprices the EIP-2929 state-access
-	// costs and adds the regular-gas write components (ACCOUNT_WRITE, STORAGE_WRITE)
+	// costs and adds the execution-gas write components (ACCOUNT_WRITE, STORAGE_WRITE)
 	// that the EIP-8037 state-gas model is charged alongside.
 	ColdAccountAccessCostEIP8038      = uint64(3000)                                           // COLD_ACCOUNT_ACCESS (EIP-2929: 2600)
 	ColdStorageAccessCostEIP8038      = uint64(3000)                                           // COLD_STORAGE_ACCESS (EIP-2929 cold SLOAD: 2100)
@@ -247,10 +246,10 @@ const (
 	TxAccessListAddressGasEIP8038     = ColdAccountAccessCostEIP8038                           // ACCESS_LIST_ADDRESS_COST
 	TxAccessListStorageKeyGasEIP8038  = ColdStorageAccessCostEIP8038                           // ACCESS_LIST_STORAGE_KEY_COST
 	ExtCodeWarmAccessGasEIP8038       = 2 * WarmStorageReadCostEIP2929                         // EXTCODESIZE/EXTCODECOPY: account access + second read for the code
-	// REGULAR_PER_AUTH_BASE_COST = 101 auth-tuple bytes * 16 + ECRECOVER + COLD_ACCOUNT_ACCESS + 2*WARM_ACCESS = 7816
-	RegularPerAuthBaseCostEIP8038 = 101*TxDataNonZeroGasEIP2028 + EcrecoverGas + ColdAccountAccessCostEIP8038 + 2*WarmStorageReadCostEIP2929
-	// PER_AUTH regular intrinsic = ACCOUNT_WRITE + REGULAR_PER_AUTH_BASE_COST = 15816
-	PerAuthRegularCostEIP8038 = AccountWriteCostEIP8038 + RegularPerAuthBaseCostEIP8038
+	// EXECUTION_PER_AUTH_BASE_COST = 101 auth-tuple bytes * 16 + ECRECOVER + COLD_ACCOUNT_ACCESS + 2*WARM_ACCESS = 7816
+	ExecutionPerAuthBaseCostEIP8038 = 101*TxDataNonZeroGasEIP2028 + EcrecoverGas + ColdAccountAccessCostEIP8038 + 2*WarmStorageReadCostEIP2929
+	// PER_AUTH execution intrinsic = ACCOUNT_WRITE + EXECUTION_PER_AUTH_BASE_COST = 15816
+	PerAuthExecutionCostEIP8038 = AccountWriteCostEIP8038 + ExecutionPerAuthBaseCostEIP8038
 
 	// EIP-2780: Reduce intrinsic transaction gas (resource-based decomposition).
 	// COLD_ACCOUNT_ACCESS and CREATE_ACCESS take their values from EIP-8038.
@@ -291,11 +290,15 @@ var (
 
 // EIP-8282 - The Builder Deposit Addresses
 // Nick's-method derived address from the builder deposit contract deployment transaction.
-var BuilderDepositAddress = accounts.InternAddress(common.HexToAddress("0x0000884d2AA32eAa155F59A2f24eFa73D9008282"))
+var BuilderDepositAddress = accounts.InternAddress(
+	common.HexToAddress("0x0000BFF46984E3725691FA540A8C7589300D8282"),
+)
 
 // EIP-8282 - The Builder Exit Addresses
 // Nick's-method derived address from the builder exit contract deployment transaction.
-var BuilderExitAddress = accounts.InternAddress(common.HexToAddress("0x000014574A74c805590AFF9499fc7A690f008282"))
+var BuilderExitAddress = accounts.InternAddress(
+	common.HexToAddress("0x000064D678505AD48F8CCB093BC65613800E8282"),
+)
 
 // See EIP-7840: Add blob schedule to EL config files
 type BlobConfig struct {

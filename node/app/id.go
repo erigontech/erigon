@@ -54,7 +54,7 @@ type Identifiable interface {
 }
 
 type IdGenerator[T comparable] interface {
-	GenerateId(context context.Context, values ...interface{}) (T, error)
+	GenerateId(context context.Context, values ...any) (T, error)
 }
 
 type components[T comparable] struct {
@@ -92,7 +92,7 @@ func (i id[T]) Keys() Keys {
 	return KeyArray{value.domain.Value(), value.value.Value()}
 }
 
-func (i id[T]) Test(context context.Context, entity interface{}) bool {
+func (i id[T]) Test(context context.Context, entity any) bool {
 	if entity, ok := entity.(id[T]); ok {
 		return i == entity
 	}
@@ -110,7 +110,7 @@ func (i id[T]) Matches(other Id) bool {
 	return i.Equals(other) // TODO
 }
 
-func (i id[T]) CompareTo(other interface{}) int {
+func (i id[T]) CompareTo(other any) int {
 	if other, ok := other.(id[T]); ok {
 		otherComponents := ((unique.Handle[components[T]])(other)).Value()
 		components := ((unique.Handle[components[T]])(i)).Value()

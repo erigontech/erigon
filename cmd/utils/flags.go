@@ -44,10 +44,12 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clparams/devgenesis"
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
+	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/utils/flags"
 	"github.com/erigontech/erigon/common"
 	libkzg "github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/iouring"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -100,9 +102,9 @@ var (
 		Value: ethconfig.Defaults.NetworkID,
 	}
 	PersistReceiptsV2Flag = cli.BoolFlag{
-		Name:    "persist.receipts",
-		Aliases: []string{"experiment.persist.receipts.v2"},
-		Usage:   "Download historical Receipts. If disabled: using state-history to re-exec transactions and generate Receipts - all RPC: eth_getLogs, eth_getBlockReceipts will work (just higher latency)",
+		Name:    "prune.include-receipts",
+		Aliases: []string{"experiment.persist.receipts.v2", "persist.receipts"},
+		Usage:   "Download historical Receipts (stored on disk as the rcache domain: snapshots/history/*rcache*.v). If disabled: using state-history to re-exec transactions and generate Receipts - all RPC: eth_getLogs, eth_getBlockReceipts will work (just higher latency)",
 		Value:   ethconfig.Defaults.PersistReceiptsCacheV2,
 	}
 	DevValidatorSeedFlag = cli.StringFlag{
@@ -403,8 +405,8 @@ var (
 	}
 	DBReadConcurrencyFlag = cli.IntFlag{
 		Name:  "db.read.concurrency",
-		Usage: "Ceiling on concurrent open DB read transactions (MDBX read-tx semaphore); extra readers wait for a slot rather than error. Default scales as min(max(10, GOMAXPROCS*64), 9000) — kept well above CPU count because reads are I/O-bound, and capped below Go's ~10K OS-thread limit. Low values are fine for low read-concurrency nodes (e.g. validators); raise it for nodes serving heavy parallel RPC",
-		Value: min(max(10, runtime.GOMAXPROCS(-1)*64), 9_000),
+		Usage: "Ceiling on concurrent open DB read transactions (MDBX read-tx semaphore); extra readers wait for a slot by default, though some RPC paths (HTTP/WebSocket) fail fast with an overload response. Default scales as min(max(10, GOMAXPROCS*64), 9000) — kept well above CPU count because reads are I/O-bound, and capped below Go's ~10K OS-thread limit. A value below the parallel-exec worker count is raised to it (each worker holds a long-lived read tx, so a lower ceiling would deadlock); to actually reduce read concurrency, lower --exec.workers instead",
+		Value: httpcfg.DefaultDBReadConcurrency(),
 	}
 	RpcMaxConcurrentRequestsFlag = cli.IntFlag{
 		Name:  "rpc.max.concurrency",
@@ -436,6 +438,11 @@ var (
 		Usage: "Maximum number of logs returned by eth_getLogs, erigon_getLogs, erigon_getLatestLogs (0 = unlimited)",
 		Value: 20_000,
 	}
+	RpcLogQueryLimit = cli.IntFlag{
+		Name:  "rpc.logs.querylimit",
+		Usage: "Maximum number of alternative addresses or topics allowed per search position in eth_getLogs filter criteria (<=0 = unlimited)",
+		Value: 1_000,
+	}
 	RpcTraceCompatFlag = cli.BoolFlag{
 		Name:  "trace.compat",
 		Usage: "Bug for bug compatibility with OE for trace_ routines",
@@ -443,6 +450,20 @@ var (
 	RpcGethCompatFlag = cli.BoolFlag{
 		Name:  "rpc.gethcompat",
 		Usage: "Enables Geth-compatible storage iteration order for debug_storageRangeAt (sorted by keccak256 hash). Disabled by default for performance.",
+	}
+	WitnessCacheBlocksFlag = cli.UintFlag{
+		Name:  "witness.cache.blocks",
+		Usage: "Number of recent blocks whose legacy debug_executionWitness result is eagerly cached in memory, keyed by block hash in an LRU (embedded RPC only; requires either --prune.experimental.include-commitment-history for recompute-on-miss or --witness.cache.head-capture for cache-only serving on a minimal node). 0 disables the cache; capped at 96. Each witness is stored as serialized JSON so a hit is served verbatim; memory use is roughly this count times the per-block witness size.",
+		Value: 0,
+	}
+	WitnessCacheHeadCaptureFlag = cli.BoolFlag{
+		Name:  "witness.cache.head-capture",
+		Usage: "Serve recent-block debug_executionWitness on a minimal node without commitment-domain history: each head block's witness is built from a pinned parent commitment snapshot and the account/storage/code history the node keeps. Witnesses are served cache-only (out-of-window on miss, never a history recompute). Embedded RPC only.",
+	}
+	WitnessCacheMaxMBFlag = cli.UintFlag{
+		Name:  "witness.cache.maxmb",
+		Usage: "Resident-memory cap (in MB) for the witness cache; eviction triggers on whichever of the block count (--witness.cache.blocks, capped at 96) or this byte budget binds first. 0 = count-only (no byte cap).",
+		Value: 0,
 	}
 	RpcTxSyncDefaultTimeoutFlag = cli.DurationFlag{
 		Name:  "rpc.txsync.defaulttimeout",
@@ -1027,6 +1048,11 @@ var (
 		Usage: "disable checkpoint sync in caplin",
 		Value: false,
 	}
+	CaplinResumeMaxStalenessEpochsFlag = cli.Uint64Flag{
+		Name:  "caplin.resume-max-staleness-epochs",
+		Usage: "max epochs a locally-finalized state may be stale to resume from it on restart instead of remote checkpoint syncing (0 = default: the anchor fork's sidecar-retention window). Data-availability bound; larger values are clamped to the retention window",
+		Value: 0,
+	}
 
 	CaplinEnableSnapshotGeneration = cli.BoolFlag{
 		Name:  "caplin.snapgen",
@@ -1113,9 +1139,14 @@ var (
 		Usage:   "Enables blazing fast eth_getProof for executed block",
 		Aliases: []string{"experimental.commitment-history", "prune.experimental.include-commitment-history"},
 	}
-	CommitmentHistoryDistanceFlag = cli.Uint64Flag{
+	CommitmentHistoryDistanceFlag = cli.StringFlag{
 		Name:  "prune.commitment-history.distance",
-		Usage: "Keep commitment history only for the latest N blocks. Older snapshots are skipped at download time. 0 (default) keeps everything. Requires --prune.include-commitment-history.",
+		Usage: "Keep commitment history only for the latest N blocks, or \"keep-all\". Older snapshots are skipped at download time. Empty or 0 (default) keeps everything. Requires --prune.include-commitment-history",
+	}
+	PersistReceiptsDistanceFlag = cli.StringFlag{
+		Name:    "prune.receipts.distance",
+		Aliases: []string{"persist.receipts.distance"},
+		Usage:   "Keep the receipt cache only for the latest N blocks, or \"keep-all\" to keep it all. Empty or 0 (default) follows the state-history window (NOT keep-all). Older snapshots are skipped at download time. Requires --prune.include-receipts",
 	}
 	AlwaysGenerateChangesetsFlag = cli.BoolFlag{
 		Name:  "experimental.always-generate-changesets",
@@ -1740,11 +1771,12 @@ func setBorConfig(ctx *cli.Command, cfg *ethconfig.Config, nodeConfig *nodecfg.C
 func setBuilder(ctx *cli.Command, cfg *buildercfg.BuilderConfig) {
 	cfg.EnabledPOS = !ctx.IsSet(ProposingDisableFlag.Name)
 
-	if ctx.IsSet(MinerExtraDataFlag.Name) {
+	switch {
+	case ctx.IsSet(MinerExtraDataFlag.Name):
 		cfg.ExtraData = []byte(ctx.String(MinerExtraDataFlag.Name))
-	} else if len(version.GitCommit) > 0 {
+	case len(version.GitCommit) > 0:
 		cfg.ExtraData = []byte(ctx.Root().Name + "-" + version.VersionWithCommit(version.GitCommit))
-	} else {
+	default:
 		cfg.ExtraData = []byte(ctx.Root().Name + "-" + ctx.Root().Version)
 	}
 	maxExtra := min(int(params.MaximumExtraDataSize), types.ExtraVanityLength)
@@ -1771,17 +1803,17 @@ func setWhitelist(ctx *cli.Command, cfg *ethconfig.Config) {
 	}
 	cfg.Whitelist = make(map[uint64]common.Hash)
 	for _, entry := range common.CliString2Array(whitelist) {
-		parts := strings.Split(entry, "=")
-		if len(parts) != 2 {
+		numberStr, hashStr, ok := strings.Cut(entry, "=")
+		if !ok || strings.Contains(hashStr, "=") {
 			Fatalf("Invalid whitelist entry: %s", entry)
 		}
-		number, err := strconv.ParseUint(parts[0], 0, 64)
+		number, err := strconv.ParseUint(numberStr, 0, 64)
 		if err != nil {
-			Fatalf("Invalid whitelist block number %s: %v", parts[0], err)
+			Fatalf("Invalid whitelist block number %s: %v", numberStr, err)
 		}
 		var hash common.Hash
-		if err = hash.UnmarshalText([]byte(parts[1])); err != nil {
-			Fatalf("Invalid whitelist hash %s: %v", parts[1], err)
+		if err = hash.UnmarshalText([]byte(hashStr)); err != nil {
+			Fatalf("Invalid whitelist hash %s: %v", hashStr, err)
 		}
 		cfg.Whitelist[number] = hash
 	}
@@ -1838,6 +1870,7 @@ func setCaplin(ctx *cli.Command, cfg *ethconfig.Config) {
 	cfg.CaplinConfig.ImmediateBlobsBackfilling = ctx.Bool(CaplinImmediateBlobBackfillFlag.Name)
 	cfg.CaplinConfig.SnapshotGenerationEnabled = ctx.Bool(CaplinEnableSnapshotGeneration.Name)
 	cfg.CaplinConfig.DisabledCheckpointSync = ctx.Bool(CaplinDisableCheckpointSyncFlag.Name)
+	cfg.CaplinConfig.ResumeMaxStalenessEpochs = ctx.Uint64(CaplinResumeMaxStalenessEpochsFlag.Name)
 	cfg.CaplinConfig.ColumnKeepSlots = ctx.Uint64(CaplinColumnKeepSlotsFlag.Name)
 	// bunch of extra stuff
 	cfg.CaplinConfig.MevRelayUrl = ctx.String(CaplinMevRelayUrl.Name)
@@ -2020,6 +2053,20 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 	if ctx.IsSet(ExecSerialFlag.Name) && ctx.Bool(ExecSerialFlag.Name) {
 		dbg.SetExec3Workers(1)
 		cfg.ExecWorkerCount = 1
+	}
+	// If FILES_ASYNC_IO is set but io_uring is unavailable (old kernel, or blocked
+	// by a seccomp sandbox such as Docker's default profile), disable the gate at
+	// startup so it doesn't pay the per-read residency-probe cost for warms that
+	// would never run. Warming is an optimization; reads just use ordinary faults.
+	if dbg.FilesAsyncIO && runtime.GOOS == "linux" && !iouring.Available() {
+		log.Warn("FILES_ASYNC_IO is set but io_uring is unavailable (unsupported kernel, or blocked by a seccomp sandbox such as Docker's default profile); disabling it — reads will use ordinary blocking faults")
+		dbg.FilesAsyncIO = false
+	}
+	if c := ctx.Int(DBReadConcurrencyFlag.Name); c > 0 {
+		if limit := httpcfg.RoTxsLimit(c, cfg.ExecWorkerCount); int64(c) < limit {
+			logger.Warn("db.read.concurrency below the exec read-tx floor; raising to avoid a parallel-exec deadlock",
+				"configured", c, "using", limit, "execWorkers", cfg.ExecWorkerCount)
+		}
 	}
 	if ctx.IsSet(ExecNoMergeFlag.Name) {
 		dbg.SetNoMerge(ctx.Bool(ExecNoMergeFlag.Name))
@@ -2220,10 +2267,12 @@ func setDevnetEthConfig(ctx *cli.Command, cfg *ethconfig.Config, logger log.Logg
 	genesisTime := uint64(time.Now().Unix())
 	// Compute the EL genesis block hash so the beacon state's Eth1Data
 	// matches the actual chain genesis.
-	elGenesisBlock, _, err := genesiswrite.GenesisToBlock(nil, cfg.Genesis, cfg.Dirs, logger)
+	elGenesisBlock, ibs, err := genesiswrite.GenesisToBlock(nil, cfg.Genesis, cfg.Dirs, logger)
 	if err != nil {
 		Fatalf("Failed to compute dev EL genesis hash: %v", err)
 	}
+	defer ibs.Close()
+
 	elGenesisHash := elGenesisBlock.Hash()
 	beaconState, _, err := devgenesis.BuildGenesisState(seed, validatorCount, &beaconCfg, genesisTime, elGenesisHash)
 	if err != nil {
@@ -2325,10 +2374,8 @@ func SplitTagsFlag(tagsFlag string) map[string]string {
 
 	for _, t := range tags {
 		if t != "" {
-			kv := strings.Split(t, "=")
-
-			if len(kv) == 2 {
-				tagsMap[kv[0]] = kv[1]
+			if k, v, ok := strings.Cut(t, "="); ok && !strings.Contains(v, "=") {
+				tagsMap[k] = v
 			}
 		}
 	}

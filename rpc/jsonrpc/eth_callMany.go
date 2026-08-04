@@ -158,8 +158,9 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	}
 
 	st := state.New(stateReader)
+	defer st.Close()
 
-	header := block.Header()
+	header := block.HeaderNoCopy()
 
 	if header == nil {
 		return nil, fmt.Errorf("block %d(%x) not found", blockNum, hash)
@@ -224,7 +225,8 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		// first change blockContext
 		bundle.BlockOverride.OverrideBlockContext(&blockCtx, ethapi.BlockHashOverrides(overrideBlockHash))
 		results := []map[string]any{}
-		for _, txn := range bundle.Transactions {
+		for i := range bundle.Transactions {
+			txn := &bundle.Transactions[i]
 			if txn.Gas == nil || *(txn.Gas) == 0 {
 				txn.Gas = (*hexutil.Uint64)(&api.GasCap)
 			}

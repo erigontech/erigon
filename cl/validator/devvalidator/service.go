@@ -34,8 +34,8 @@ type Service struct {
 
 // NewService creates a dev validator service.
 func NewService(beaconAPIURL string, seed string, validatorCount int,
-	cfg *clparams.BeaconChainConfig, logger log.Logger) (*Service, error) {
-
+	cfg *clparams.BeaconChainConfig, logger log.Logger,
+) (*Service, error) {
 	keys, err := LoadKeys(seed, validatorCount)
 	if err != nil {
 		return nil, fmt.Errorf("load dev validator keys: %w", err)
@@ -66,7 +66,8 @@ func (s *Service) Start(ctx context.Context) {
 		return
 	}
 
-	s.logger.Info("[dev-validator] started",
+	s.logger.Info(
+		"[dev-validator] started",
 		"validators", len(s.keys),
 		"slotsPerEpoch", s.cfg.SlotsPerEpoch,
 		"secondsPerSlot", s.cfg.SecondsPerSlot,
@@ -109,7 +110,8 @@ func (s *Service) waitForReady(ctx context.Context) {
 			if err == nil && len(root) == 32 {
 				copy(s.genesisValidatorsRoot[:], root)
 			}
-			s.logger.Info("[dev-validator] beacon node ready",
+			s.logger.Info(
+				"[dev-validator] beacon node ready",
 				"genesisTime", s.genesisTime,
 				"validatorsRoot", s.genesisValidatorsRoot.Hex(),
 			)
@@ -268,7 +270,7 @@ func (s *Service) proposeBlock(ctx context.Context, slot uint64, key *ValidatorK
 
 	var blockResponse json.RawMessage
 	var getErr error
-	for attempt := 0; attempt < 5; attempt++ {
+	for range 5 {
 		getErr = s.client.get(ctx, path, &blockResponse)
 		if getErr == nil {
 			break
@@ -325,7 +327,7 @@ func (s *Service) proposeBlock(ctx context.Context, slot uint64, key *ValidatorK
 	// Submit the signed block. For Deneb+, wrap in DenebSignedBeaconBlock
 	// with empty blob sidecars.
 	versionStr := version.String()
-	var submitBody interface{} = block
+	var submitBody any = block
 	if version >= clparams.DenebVersion {
 		submitBody = &cltypes.DenebSignedBeaconBlock{
 			SignedBlock: block,

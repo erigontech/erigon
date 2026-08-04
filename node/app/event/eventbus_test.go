@@ -71,7 +71,7 @@ func TestHasCallback(t *testing.T) {
 
 	assert.Nil(t, err, "Subscribe failed")
 
-	if bus.HasCallback(reflect.TypeOf("String")) {
+	if bus.HasCallback(reflect.TypeFor[string]()) {
 		t.Fail()
 	}
 	if !bus.HasCallback() {

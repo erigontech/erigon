@@ -108,8 +108,8 @@ func authorizationSize(auth Authorization) (authLen int) {
 }
 
 func authorizationsSize(authorizations []Authorization) (totalSize int) {
-	for _, auth := range authorizations {
-		authLen := authorizationSize(auth)
+	for i := range authorizations {
+		authLen := authorizationSize(authorizations[i])
 		totalSize += rlp.ListPrefixLen(authLen) + authLen
 	}
 
@@ -125,13 +125,13 @@ func decodeAuthorizations(auths *[]Authorization, s *rlp.Stream) error {
 	for _, err = s.List(); err == nil; _, err = s.List() {
 		auth := Authorization{}
 
-		if err = s.ReadUint256(&auth.ChainID); err != nil {
+		if err := s.ReadUint256(&auth.ChainID); err != nil {
 			return err
 		}
 
 		// address
-		if err = s.ReadBytes(auth.Address[:]); err != nil {
-			return err
+		if auth.Address, err = s.Addr(); err != nil {
+			return fmt.Errorf("read Address: %w", err)
 		}
 
 		// nonce
@@ -150,12 +150,12 @@ func decodeAuthorizations(auths *[]Authorization, s *rlp.Stream) error {
 		auth.YParity = uint8(yParity)
 
 		// r
-		if err = s.ReadUint256(&auth.R); err != nil {
+		if err := s.ReadUint256(&auth.R); err != nil {
 			return err
 		}
 
 		// s
-		if err = s.ReadUint256(&auth.S); err != nil {
+		if err := s.ReadUint256(&auth.S); err != nil {
 			return err
 		}
 
@@ -176,7 +176,7 @@ func decodeAuthorizations(auths *[]Authorization, s *rlp.Stream) error {
 }
 
 func encodeAuthorizations(authorizations []Authorization, w io.Writer, b []byte) error {
-	for i := 0; i < len(authorizations); i++ {
+	for i := range authorizations {
 		authLen := authorizationSize(authorizations[i])
 		if err := rlp.EncodeListPrefix(authLen, w, b); err != nil {
 			return err

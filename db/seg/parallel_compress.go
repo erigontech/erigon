@@ -46,8 +46,8 @@ const posCounterSmall = 512
 // posCounter counts position-code frequencies. Positions are bounded by word
 // length, so nearly all increments hit the array; the map is the overflow path.
 type posCounter struct {
-	small [posCounterSmall]uint64
 	big   map[uint64]uint64
+	small [posCounterSmall]uint64
 }
 
 func (p *posCounter) add(k uint64) {
@@ -132,7 +132,8 @@ func coverWordByPatterns(trace bool, input []byte, mf3 *patricia.ACMatcher, outp
 			// optimStart > f.End, i.e. the largest physical index with that property).
 			if cell.compression+flen4 < maxCompression {
 				scannedAll = false
-				if cells[cellStart].optimStart > f.End {
+				switch {
+				case cells[cellStart].optimStart > f.End:
 					lo, hi := cellStart, e
 					for lo < hi {
 						mid := (lo + hi + 1) / 2
@@ -144,9 +145,9 @@ func coverWordByPatterns(trace bool, input []byte, mf3 *patricia.ACMatcher, outp
 					}
 					cellStart = lo + 1
 					virtLo, virtHi = 1, 0 // virtual region is logically beyond the trigger
-				} else if virtLo > f.End {
+				case virtLo > f.End:
 					virtLo, virtHi = 1, 0
-				} else if virtHi > f.End {
+				case virtHi > f.End:
 					virtHi = f.End
 				}
 				break
@@ -174,7 +175,8 @@ func coverWordByPatterns(trace bool, input []byte, mf3 *patricia.ACMatcher, outp
 			// single virtual candidate: compression 0, coverStart len(input) >= f.End
 			comp := flen4
 			score := p.score
-			if comp > maxCompression || (comp == maxCompression && score > maxScore) {
+			switch {
+			case comp > maxCompression || (comp == maxCompression && score > maxScore):
 				maxCompression = comp
 				maxScore = score
 				maxInclude = true
@@ -182,9 +184,9 @@ func coverWordByPatterns(trace bool, input []byte, mf3 *patricia.ACMatcher, outp
 				if virtHi > f.End {
 					virtHi = max(virtLo, f.End)
 				}
-			} else if virtLo > f.End {
+			case virtLo > f.End:
 				virtLo, virtHi = 1, 0
-			} else if virtHi > f.End {
+			case virtHi > f.End:
 				virtHi = f.End
 			}
 		}
@@ -272,8 +274,7 @@ func coverWordByPatterns(trace bool, input []byte, mf3 *patricia.ACMatcher, outp
 	return output, patterns, uncovered, cells
 }
 
-func coverWordsByPatternsWorker(trace bool, inputCh chan *CompressionWord, outCh chan *CompressionWord, completion *sync.WaitGroup, ac *patricia.AhoCorasick, inputSize, outputSize *atomic.Uint64, posMap *posCounter) {
-	defer completion.Done()
+func coverWordsByPatternsWorker(trace bool, inputCh chan *CompressionWord, outCh chan *CompressionWord, ac *patricia.AhoCorasick, inputSize, outputSize *atomic.Uint64, posMap *posCounter) {
 	var output = make([]byte, 0, 256)
 	var uncovered = make([]int, 256)
 	var patterns = make([]int, 0, 256)
@@ -381,8 +382,9 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 		for i := 0; i < cfg.Workers; i++ {
 			posMap := &posCounter{}
 			posMaps = append(posMaps, posMap)
-			wg.Add(1)
-			go coverWordsByPatternsWorker(trace, ch, out, &wg, ac, inputSize, outputSize, posMap)
+			wg.Go(func() {
+				coverWordsByPatternsWorker(trace, ch, out, ac, inputSize, outputSize, posMap)
+			})
 		}
 	}
 	t := time.Now()
@@ -404,7 +406,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	totalWords := uncompressedFile.count
 
 	ii := 0
-	if err = uncompressedFile.ForEach(func(v []byte, compression bool) error {
+	if err := uncompressedFile.ForEach(func(v []byte, compression bool) error {
 		ii++
 		if ii%1024 == 0 {
 			select {
@@ -452,16 +454,17 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 				compW = &CompressionWord{}
 			}
 			compW.order = inCount
-			if len(v) == 0 {
+			switch {
+			case len(v) == 0:
 				// Empty word, cannot be compressed
 				compW.word = append(compW.word[:0], 0)
 				uncompPosMap.add(1)
 				uncompPosMap.add(0)
 				heap.Push(&compressionQueue, compW) // Push to the queue directly, bypassing compression
-			} else if compression {
+			case compression:
 				compW.word = append(compW.word[:0], v...)
 				ch <- compW // Send for compression
-			} else {
+			default:
 				// Prepend word with encoding of length + zero byte, which indicates no patterns to be found in this word
 				wordLen := uint64(len(v))
 				n := binary.PutUvarint(numBuf[:], wordLen)
@@ -536,7 +539,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 			}
 		}
 	}
-	if err = intermediateW.Flush(); err != nil {
+	if err := intermediateW.Flush(); err != nil {
 		return err
 	}
 	wg.Wait()
@@ -703,12 +706,12 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	for l, e = binary.ReadUvarint(r); e == nil; l, e = binary.ReadUvarint(r) {
 		posCode := pos2codeAt(l + 1)
 		if posCode != nil {
-			if e = hc.encode(posCode.code, posCode.codeBits); e != nil {
+			if e := hc.encode(posCode.code, posCode.codeBits); e != nil {
 				return e
 			}
 		}
 		if l == 0 {
-			if e = hc.flush(); e != nil {
+			if e := hc.flush(); e != nil {
 				return e
 			}
 		} else {
@@ -728,7 +731,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 				posCode = pos2codeAt(pos - lastPos + 1)
 				lastPos = pos
 				if posCode != nil {
-					if e = hc.encode(posCode.code, posCode.codeBits); e != nil {
+					if e := hc.encode(posCode.code, posCode.codeBits); e != nil {
 						return e
 					}
 				}
@@ -742,7 +745,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 				}
 				lastUncovered = int(pos) + len(patternCode.word)
 				if patternCode != nil {
-					if e = hc.encode(patternCode.code, patternCode.codeBits); e != nil {
+					if e := hc.encode(patternCode.code, patternCode.codeBits); e != nil {
 						return e
 					}
 				}
@@ -752,15 +755,15 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 			}
 			// Terminating position and flush
 			posCode = pos2codeAt(0)
-			if e = hc.encode(posCode.code, posCode.codeBits); e != nil {
+			if e := hc.encode(posCode.code, posCode.codeBits); e != nil {
 				return e
 			}
-			if e = hc.flush(); e != nil {
+			if e := hc.flush(); e != nil {
 				return e
 			}
 			// Copy uncovered characters
 			if uncoveredCount > 0 {
-				if e = copyN(r, cw, uncoveredCount, copyNBuf); e != nil {
+				if e := copyN(r, cw, uncoveredCount, copyNBuf); e != nil {
 					return e
 				}
 			}
@@ -779,10 +782,10 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	if !errors.Is(e, io.EOF) {
 		return e
 	}
-	if err = intermediateFile.Close(); err != nil {
+	if err := intermediateFile.Close(); err != nil {
 		return err
 	}
-	if err = cw.Flush(); err != nil {
+	if err := cw.Flush(); err != nil {
 		return err
 	}
 	return nil
@@ -964,9 +967,8 @@ var saisBufPool = sync.Pool{New: func() any { return new([]int32) }}
 // into the collector, using lock to mutual exclusion. At the end (when the input channel is closed),
 // it notifies the waitgroup before exiting, so that the caller known when all work is done
 // No error channels for now
-func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []uint16, dictCollector *etl.Collector, cfg Cfg, completion *sync.WaitGroup, logger log.Logger) {
+func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []uint16, dictCollector *etl.Collector, cfg Cfg, logger log.Logger) {
 	minPatternScore, minPatternLen, maxPatternLen := cfg.MinPatternScore, cfg.MinPatternLen, cfg.MaxPatternLen
-	defer completion.Done()
 	dictVal := make([]byte, 8)
 	dictKey := make([]byte, maxPatternLen)
 	saisBuf := saisBufPool.Get().(*[]int32)
@@ -1017,7 +1019,7 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []uin
 		} else {
 			lcp = lcp[:n]
 		}
-		for i := 0; i < n; i++ {
+		for i := range n {
 			/* If the current suffix is at n-1, then we don’t
 			   have next substring to consider. So lcp is not
 			   defined for this substring, we put zero. */
@@ -1178,7 +1180,7 @@ func PersistDictionary(fileName string, db *DictionaryBuilder) error {
 	w := bufiopool.Writer(df)
 	defer bufiopool.PutWriter(w)
 	db.ForEach(func(score uint64, word []byte) { fmt.Fprintf(w, "%d %x\n", score, word) })
-	if err = w.Flush(); err != nil {
+	if err := w.Flush(); err != nil {
 		return err
 	}
 	if err := df.Sync(); err != nil {

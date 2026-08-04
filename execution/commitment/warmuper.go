@@ -19,6 +19,7 @@ package commitment
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -31,8 +32,11 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
-// TrieContextFactory creates new PatriciaContext instances for parallel warmup.
-type TrieContextFactory func() (PatriciaContext, func())
+// TrieContextFactory creates new PatriciaContext instances for parallel trie processing.
+// The factory must honor ctx and return promptly once it is cancelled (e.g. a read-tx
+// open blocked on the read-tx semaphore must abort), so callers waiting on their workers
+// to exit — such as Warmuper.CloseAndWait — cannot hang.
+type TrieContextFactory func(ctx context.Context) (PatriciaContext, func())
 
 // WarmupConfig contains configuration for pre-warming MDBX page cache
 // during commitment processing.
@@ -116,9 +120,15 @@ func (w *Warmuper) Start() {
 
 	for i := 0; i < w.numWorkers; i++ {
 		w.g.Go(func() error {
-			trieCtx, cleanup := w.ctxFactory()
+			trieCtx, cleanup := w.ctxFactory(w.ctx)
 			if cleanup != nil {
 				defer cleanup()
+			}
+			if trieCtx == nil {
+				if err := w.ctx.Err(); err != nil {
+					return err
+				}
+				return errors.New("warmup trie context factory returned nil PatriciaContext")
 			}
 
 			for {
@@ -182,7 +192,7 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 
 		// Find position of our child's data
 		pos := 2
-		for n := 0; n < nextNibble; n++ {
+		for n := range nextNibble {
 			if bitmap&(uint16(1)<<n) != 0 {
 				if pos >= len(branchData) {
 					break

@@ -51,7 +51,6 @@ var (
 	errExceedBlockRange                = "query block range exceeds server limit, narrow your filter"
 	errBlockHashWithRange              = "can't specify fromBlock/toBlock with blockHash"
 	errExceedMaxTopics                 = fmt.Sprintf("query exceeds the maximum of %d topics", maxTopics)
-	errExceedLogQueryLimit             = fmt.Sprintf("query exceeds the maximum of %d addresses or topics per search position", logQueryLimit)
 	errExceedLogResults                = "query returns too many logs, narrow your filter"
 	errRequestedBlockCountExceedsLimit = "requested blockCount exceeds server limit"
 	errRequestedLogCountExceedsLimit   = "requested logCount exceeds server limit"
@@ -59,8 +58,9 @@ var (
 
 const (
 	// The maximum number of topic criteria allowed, vm.LOG4 - vm.LOG0
-	maxTopics     = 4
-	logQueryLimit = 1000
+	maxTopics = 4
+
+	errExceedLogQueryLimit = "query exceeds the maximum of %d addresses or topics per search position"
 )
 
 // getReceipts - checking in-mem cache, or else fallback to db, or else fallback to re-exec of block to re-gen receipts
@@ -118,6 +118,23 @@ func (api *BaseAPI) getReceiptsGasUsed(ctx context.Context, tx kv.TemporalTx, bl
 
 func (api *BaseAPI) getCachedReceipts(ctx context.Context, hash common.Hash) (types.Receipts, bool) {
 	return api.receiptsGenerator.GetCachedReceipts(ctx, hash)
+}
+
+// exceedsLogQueryLimit reports whether the filter has more addresses, or more
+// alternatives in one topic position, than limit allows (<=0 = unlimited).
+func exceedsLogQueryLimit(crit filters.FilterCriteria, limit int) bool {
+	if limit <= 0 {
+		return false
+	}
+	if len(crit.Addresses) > limit {
+		return true
+	}
+	for _, topics := range crit.Topics {
+		if len(topics) > limit {
+			return true
+		}
+	}
+	return false
 }
 
 // resolveLogsRange resolves a filter's block range. A BlockHash pins the range to that
@@ -194,13 +211,8 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		return nil, &rpc.CustomError{Message: errExceedMaxTopics, Code: rpc.ErrCodeInvalidParams}
 	}
 
-	if len(crit.Addresses) > logQueryLimit {
-		return nil, &rpc.CustomError{Message: errExceedLogQueryLimit, Code: rpc.ErrCodeInvalidParams}
-	}
-	for _, topics := range crit.Topics {
-		if len(topics) > logQueryLimit {
-			return nil, &rpc.CustomError{Message: errExceedLogQueryLimit, Code: rpc.ErrCodeInvalidParams}
-		}
+	if exceedsLogQueryLimit(crit, api.logQueryLimit) {
+		return nil, &rpc.CustomError{Message: fmt.Sprintf(errExceedLogQueryLimit, api.logQueryLimit), Code: rpc.ErrCodeInvalidParams}
 	}
 
 	if crit.BlockHash != nil && (crit.FromBlock != nil || crit.ToBlock != nil) {
@@ -239,7 +251,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		return nil, fmt.Errorf("node is still initializing")
 	}
 
-	if err = api.BaseAPI.checkReceiptsAvailable(ctx, tx, begin); err != nil {
+	if err := api.BaseAPI.checkReceiptsAvailable(ctx, tx, begin); err != nil {
 		return nil, err
 	}
 
@@ -368,7 +380,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	defer it.Close()
 
 	for it.HasNext() {
-		if err = ctx.Err(); err != nil {
+		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err := it.Next()
@@ -440,11 +452,11 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			continue
 		}
 
-		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
+		txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
 		if err != nil {
 			return nil, err
 		}
-		if txn == nil {
+		if !ok {
 			continue
 		}
 
@@ -594,9 +606,12 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return ethutils.MarshalReceipt(borReceipt, bortypes.NewBorTransaction(), chainConfig, block.HeaderNoCopy(), txnHash, false, false), nil
 	}
 
-	txn, err := api._blockReader.TxnByIdxInBlock(ctx, overlayTx, header.Number.Uint64(), txnIndex)
+	txn, ok, err := api._blockReader.TxnByIdxInBlock(ctx, overlayTx, header.Number.Uint64(), txnIndex)
 	if err != nil {
 		return nil, err
+	}
+	if !ok {
+		return nil, nil
 	}
 
 	// Check if we have commitment history: this is required to know if state root will be computed for historical state.

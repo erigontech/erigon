@@ -82,7 +82,7 @@ func (r ResponseCode) ErrorMessage(resp *http.Response) (string, error) {
 	// Error response bodies are length-prefixed before the snappy payload.
 	rawReader := bufio.NewReader(resp.Body)
 	lengthDone := false
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		b, err := rawReader.ReadByte()
 		if err != nil {
 			return "", err

@@ -21,6 +21,7 @@
 package types
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -605,6 +606,16 @@ func (h *Header) Size() common.StorageSize {
 	return s
 }
 
+// HasBAL reports whether the header contains an EIP-7928 block access list commitment.
+func (h *Header) HasBAL() bool {
+	return h.BlockAccessListHash != nil
+}
+
+// HasNonEmptyBAL reports whether the commitment is for a non-empty block access list.
+func (h *Header) HasNonEmptyBAL() bool {
+	return h.HasBAL() && *h.BlockAccessListHash != empty.BlockAccessListHash
+}
+
 // SanityCheck checks a few basic things -- these checks are way beyond what
 // any 'sane' production values should hold, and can mainly be used to prevent
 // that the unbounded fields are stuffed with junk data to add processing
@@ -711,7 +722,7 @@ func (b BaseTxnID) LastSystemTx(txAmount uint32) uint64 { return b.U64() + uint6
 // this structure does rlp decode only for
 // "tx related" data
 //
-// must use `rlp.DecodeBytesPartial` to decode
+// decode from bytes with `DecodeRLPBytes`, not `rlp.DecodeBytes`
 type BodyOnlyTxn struct {
 	BaseTxnID BaseTxnID
 	TxCount   uint32
@@ -723,15 +734,25 @@ func (b *BodyOnlyTxn) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return err
 	}
-	// decode BaseTxId
-	if err = s.Decode(&b.BaseTxnID); err != nil {
-		return err
+	baseTxnID, err := s.Uint64()
+	if err != nil {
+		return fmt.Errorf("read BaseTxnID: %w", err)
 	}
-	// decode TxCount
-	if err = s.Decode(&b.TxCount); err != nil {
-		return err
+	txCount, err := s.Uint32()
+	if err != nil {
+		return fmt.Errorf("read TxCount: %w", err)
 	}
+	b.BaseTxnID, b.TxCount = BaseTxnID(baseTxnID), txCount
 	return nil
+}
+
+// DecodeRLPBytes reads only the leading txn fields, so rlp.DecodeBytes would reject
+// the unread tail. Going through DecodeRLP directly also skips a reflect dispatch
+// that costs more than the decode itself.
+func (b *BodyOnlyTxn) DecodeRLPBytes(buf []byte) error {
+	s := rlp.NewBytesStream(buf)
+	defer rlp.PutStream(s)
+	return b.DecodeRLP(s)
 }
 
 type BodyForStorage struct {
@@ -792,6 +813,7 @@ func (r RawBlock) AsBlock() (*Block, error) {
 		}
 	}
 	b.transactions = txs
+	b.blockAccessList = r.BlockAccessList
 
 	return b, nil
 }
@@ -802,6 +824,12 @@ type Block struct {
 	uncles       []*Header
 	transactions Transactions
 	withdrawals  []*Withdrawal
+
+	// blockAccessList is the RLP-encoded EIP-7928 Block Access List sidecar
+	// carried with the payload (nil pre-Amsterdam). It is NOT part of the block's
+	// RLP/consensus encoding or hash — never add it to EncodeRLP/DecodeRLP/
+	// payloadSize. The header's BlockAccessListHash is the consensus commitment.
+	blockAccessList []byte
 
 	// binaryTransactions optionally caches the transactions' encodings (e.g. from
 	// an engine_newPayload payload) so RawBody() can skip re-encoding them.
@@ -907,7 +935,7 @@ func (rb *RawBody) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// end of Transactions
-	if err = s.ListEnd(); err != nil {
+	if err := s.ListEnd(); err != nil {
 		return err
 	}
 	// decode Uncles
@@ -981,19 +1009,18 @@ func (bfs *BodyForStorage) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 
-	// decode BaseTxId
-	if err = s.Decode(&bfs.BaseTxnID); err != nil {
-		return err
+	baseTxnID, err := s.Uint64()
+	if err != nil {
+		return fmt.Errorf("read BaseTxnID: %w", err)
 	}
-	// decode TxCount
-	if err = s.Decode(&bfs.TxCount); err != nil {
-		return err
+	txCount, err := s.Uint32()
+	if err != nil {
+		return fmt.Errorf("read TxCount: %w", err)
 	}
-	// decode Uncles
+	bfs.BaseTxnID, bfs.TxCount = BaseTxnID(baseTxnID), txCount
 	if err := decodeUncles(&bfs.Uncles, s); err != nil {
 		return err
 	}
-	// decode Withdrawals
 	bfs.Withdrawals = []*Withdrawal{}
 	if err := decodeWithdrawals(&bfs.Withdrawals, s); err != nil {
 		return err
@@ -1108,12 +1135,13 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 		}
 	}
 
-	if withdrawals == nil {
+	switch {
+	case withdrawals == nil:
 		b.header.WithdrawalsHash = nil
-	} else if len(withdrawals) == 0 {
+	case len(withdrawals) == 0:
 		b.header.WithdrawalsHash = &empty.WithdrawalsHash
 		b.withdrawals = make(Withdrawals, len(withdrawals))
-	} else {
+	default:
 		h := DeriveSha(Withdrawals(withdrawals))
 		b.header.WithdrawalsHash = &h
 		b.withdrawals = make(Withdrawals, len(withdrawals))
@@ -1243,7 +1271,7 @@ func (bb *Block) DecodeRLP(s *rlp.Stream) error {
 
 	// decode header
 	var h Header
-	if err = h.DecodeRLP(s); err != nil {
+	if err := h.DecodeRLP(s); err != nil {
 		return err
 	}
 	bb.header = &h
@@ -1352,7 +1380,7 @@ func (b *Block) ParentHash() common.Hash  { return b.header.ParentHash }
 func (b *Block) TxHash() common.Hash      { return b.header.TxHash }
 func (b *Block) ReceiptHash() common.Hash { return b.header.ReceiptHash }
 func (b *Block) UncleHash() common.Hash   { return b.header.UncleHash }
-func (b *Block) Extra() []byte            { return common.Copy(b.header.Extra) }
+func (b *Block) Extra() []byte            { return bytes.Clone(b.header.Extra) }
 func (b *Block) BaseFee() *uint256.Int {
 	if b.header.BaseFee == nil {
 		return nil
@@ -1364,6 +1392,14 @@ func (b *Block) Withdrawals() Withdrawals            { return b.withdrawals }
 func (b *Block) ParentBeaconBlockRoot() *common.Hash { return b.header.ParentBeaconBlockRoot }
 func (b *Block) RequestsHash() *common.Hash          { return b.header.RequestsHash }
 func (b *Block) BlockAccessListHash() *common.Hash   { return b.header.BlockAccessListHash }
+
+// BlockAccessList returns the RLP-encoded EIP-7928 BAL sidecar carried with the
+// payload (nil when absent). It is not part of the block's RLP encoding or hash.
+func (b *Block) BlockAccessList() []byte { return b.blockAccessList }
+
+// SetBlockAccessList attaches the RLP-encoded BAL sidecar to the block, copying
+// the input so a transaction-owned or later-mutated source cannot alias it.
+func (b *Block) SetBlockAccessList(bal []byte) { b.blockAccessList = bytes.Clone(bal) }
 
 // Header returns a deep-copy of the entire block header using CopyHeader()
 func (b *Block) Header() *Header       { return CopyHeader(b.header) }
@@ -1525,10 +1561,11 @@ func (b *Block) Copy() *Block {
 	}
 
 	newB := &Block{
-		header:       CopyHeader(b.header),
-		uncles:       uncles,
-		transactions: CopyTxs(b.transactions),
-		withdrawals:  withdrawals,
+		header:          CopyHeader(b.header),
+		uncles:          uncles,
+		transactions:    CopyTxs(b.transactions),
+		withdrawals:     withdrawals,
+		blockAccessList: bytes.Clone(b.blockAccessList),
 	}
 	szCopy := b.size.Load()
 	newB.size.Store(szCopy)
@@ -1542,10 +1579,11 @@ func (b *Block) WithSeal(header *Header) *Block {
 	headerCopy.mutable = false
 	headerCopy.hash.Store(nil) // invalidate cached hash
 	return &Block{
-		header:       headerCopy,
-		transactions: b.transactions,
-		uncles:       b.uncles,
-		withdrawals:  b.withdrawals,
+		header:          headerCopy,
+		transactions:    b.transactions,
+		uncles:          b.uncles,
+		withdrawals:     b.withdrawals,
+		blockAccessList: b.blockAccessList,
 	}
 }
 
@@ -1660,7 +1698,7 @@ func checkErrListEnd(s *rlp.Stream, err error) error {
 	if err != rlp.EOL {
 		return err
 	}
-	if err = s.ListEnd(); err != nil {
+	if err := s.ListEnd(); err != nil {
 		return err
 	}
 	return nil

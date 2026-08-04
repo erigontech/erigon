@@ -108,6 +108,7 @@ export default async function createConfig(): Promise<Config> {
           path: 'help-center',
           routeBasePath: 'help-center',
           sidebarPath: './sidebars-help-center.ts',
+          showLastUpdateTime: true,
         },
       ],
       [
@@ -132,14 +133,24 @@ export default async function createConfig(): Promise<Config> {
           lastVersion: 'current',
           versions: {
             current: {
-              label: 'v3.4',
+              label: 'v3.6',
               badge: false,
             },
           },
           remarkPlugins: [[versionReplace, {currentVersion: latestVersion, versionStrings}]],
+          showLastUpdateTime: true,
         },
         blog: false as false,
         theme: {customCss: './src/css/custom.css'},
+        sitemap: {
+          // Emit <lastmod> per URL (from git history via showLastUpdateTime) so
+          // crawlers can prioritise changed pages. Exclude /search from the
+          // sitemap — it has no indexable content (the route itself still exists).
+          lastmod: 'date',
+          changefreq: 'weekly',
+          priority: 0.5,
+          ignorePatterns: ['/search'],
+        },
       } satisfies Preset.Options],
     ],
 

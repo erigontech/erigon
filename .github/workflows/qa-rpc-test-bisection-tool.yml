@@ -13,6 +13,9 @@ on:
         description: 'Name of the test to run'
         required: true
 
+permissions:
+  contents: read
+
 jobs:
   rpc-test-bisect:
     runs-on: [self-hosted, qa, RpcSpecific]
@@ -26,6 +29,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
+          persist-credentials: false
           fetch-depth: 0  # Fetch all history for git bisect
 
       - name: Set up Git user
@@ -147,6 +151,9 @@ jobs:
 
       - name: Output Offending Commit
         if: success()
+        env:
+          BISECT_COMMIT: ${{ steps.bisect_result.outputs.BISECT_COMMIT }}
+          BISECT_MESSAGE: ${{ steps.bisect_result.outputs.BISECT_MESSAGE }}
         run: |
-          echo "The first bad commit is ${{ steps.bisect_result.outputs.BISECT_COMMIT }}"
-          echo "Commit message: ${{ steps.bisect_result.outputs.BISECT_MESSAGE }}"
+          echo "The first bad commit is $BISECT_COMMIT"
+          echo "Commit message: $BISECT_MESSAGE"

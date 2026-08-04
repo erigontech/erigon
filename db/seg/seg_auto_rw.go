@@ -89,6 +89,10 @@ func (g *Reader) MadvNormal() MadvDisabler {
 	g.d.MadvNormal()
 	return g
 }
+func (g *Reader) MadvSequential() MadvDisabler {
+	g.d.MadvSequential()
+	return g
+}
 func (g *Reader) DisableReadAhead() { g.d.DisableReadAhead() }
 func (g *Reader) FileName() string  { return g.Getter.FileName() }
 func (g *Reader) Next(buf []byte) ([]byte, uint64) {
@@ -176,7 +180,7 @@ func DetectCompressType(getter *Getter) (compressed FileCompression) {
 			}
 		}()
 		getter.Reset(0)
-		for i := 0; i < 100; i++ {
+		for range 100 {
 			if getter.HasNext() {
 				_, _ = getter.SkipUncompressed()
 			}
@@ -194,7 +198,7 @@ func DetectCompressType(getter *Getter) (compressed FileCompression) {
 			}
 		}()
 		getter.Reset(0)
-		for i := 0; i < 100; i++ {
+		for range 100 {
 			if getter.HasNext() {
 				_, _ = getter.Skip()
 			}

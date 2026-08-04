@@ -17,12 +17,15 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"slices"
 	"sync"
 	"time"
+
+	"github.com/libp2p/go-libp2p/core/peer"
 
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -36,13 +39,12 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/pool"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
-	"github.com/erigontech/erigon/common"
+
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
-	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 // SignedAggregateAndProofData is passed to SignedAggregateAndProof service. The service does the signature verification
@@ -366,7 +368,6 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 
 	a.batchSignatureVerifier.AsyncVerifyAggregateProof(aggregateVerificationData)
 	return nil
-
 }
 
 func GetSignaturesOnAggregate(
@@ -416,7 +417,7 @@ func AggregateAndProofSignature(
 		return nil, nil, nil, err
 	}
 	slotRoot := merkle_tree.Uint64Root(slot)
-	signingRoot := utils.Sha256(slotRoot[:], domain)
+	signingRoot := crypto.Sha256(slotRoot[:], domain)
 	return aggregate.SelectionProof[:], signingRoot[:], publicKey[:], nil
 }
 
@@ -461,7 +462,7 @@ func AggregateMessageSignature(
 			return err
 		}
 		pk := val.PublicKeyBytes()
-		pks = append(pks, common.Copy(pk))
+		pks = append(pks, bytes.Clone(pk))
 		return nil
 	}); err != nil {
 		return nil, nil, nil, err

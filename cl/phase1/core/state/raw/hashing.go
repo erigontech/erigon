@@ -29,7 +29,7 @@ import (
 func (b *BeaconState) HashSSZ() (out [32]byte, err error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if err = b.computeDirtyLeaves(); err != nil {
+	if err := b.computeDirtyLeaves(); err != nil {
 		return [32]byte{}, err
 	}
 	// for i := 0; i < len(b.leaves); i += 32 {
@@ -145,15 +145,13 @@ type beaconStateHasher struct {
 }
 
 func (p *beaconStateHasher) run() {
-	wg := sync.WaitGroup{}
+	var wg sync.WaitGroup
 	if p.jobs == nil {
 		p.jobs = make(map[StateLeafIndex]any)
 	}
 
 	for idx, job := range p.jobs {
-		wg.Add(1)
-		go func(idx StateLeafIndex, job any) {
-			defer wg.Done()
+		wg.Go(func() {
 			switch obj := job.(type) {
 			case ssz.HashableSSZ:
 				root, err := obj.HashSSZ()
@@ -166,8 +164,7 @@ func (p *beaconStateHasher) run() {
 			case common.Hash:
 				p.b.updateLeaf(idx, obj)
 			}
-
-		}(idx, job)
+		})
 	}
 	wg.Wait()
 }
