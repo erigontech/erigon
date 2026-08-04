@@ -27,7 +27,10 @@ var (
 	witnessCacheStalePinSkipCounter    = metrics.GetOrCreateCounter("witness_cache_stale_pin_skip_total")
 	witnessCacheCoalesceDropCounter    = metrics.GetOrCreateCounter("witness_cache_coalesce_drop_total")
 
+	witnessFeedDropCounter = metrics.GetOrCreateCounter("witness_feed_drop_total")
+
 	witnessCacheEntriesResidentGauge = metrics.GetOrCreateGauge("witness_cache_entries_resident")
+	witnessFeedSubscribersGauge      = metrics.GetOrCreateGauge("witness_feed_subscribers")
 
 	witnessCacheBuildDuration = metrics.GetOrCreateHistogram("witness_cache_build_duration_seconds")
 )

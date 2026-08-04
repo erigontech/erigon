@@ -60,7 +60,7 @@ func TestWitnessSubscriptionRejectsEncodingThroughEndpoint(t *testing.T) {
 func TestWitnessSubscriptionNilCache(t *testing.T) {
 	api := &DebugAPIImpl{}
 	_, err := api.ExecutionWitnesses(context.Background(), nil)
-	require.Error(t, err)
+	require.ErrorIs(t, err, errWitnessSubscriptionNeedsCache)
 	require.Contains(t, err.Error(), "--witness.cache.blocks")
 	require.Contains(t, err.Error(), "debug_executionWitness")
 }

@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/erigontech/erigon/common"
@@ -52,16 +53,18 @@ func validateWitnessEncoding(opts *WitnessSubscriptionOpts) error {
 	}
 }
 
+var errWitnessSubscriptionNeedsCache = errors.New("executionWitnesses subscription requires the embedded eager witness cache (start the node with --witness.cache.blocks); use debug_executionWitness for on-demand witnesses")
+
 // ExecutionWitnesses implements debug_subscribe("executionWitnesses"): every witness the
 // eager cache builds after the subscription starts is pushed as a subscription
 // notification. Fresh-only and stateless — no past witnesses are replayed; behind-tip
 // catch-up stays on the debug_executionWitness request path.
 func (api *DebugAPIImpl) ExecutionWitnesses(ctx context.Context, opts *WitnessSubscriptionOpts) (*rpc.Subscription, error) {
 	if err := validateWitnessEncoding(opts); err != nil {
-		return nil, err
+		return &rpc.Subscription{}, err
 	}
 	if api.witnessCache == nil {
-		return nil, fmt.Errorf("executionWitnesses subscription requires the embedded eager witness cache (start the node with --witness.cache.blocks); use debug_executionWitness for on-demand witnesses")
+		return &rpc.Subscription{}, errWitnessSubscriptionNeedsCache
 	}
 	return subscribeRPC(ctx,
 		func() (<-chan witnessPush, func(), error) {

@@ -210,6 +210,74 @@ func TestWitnessCacheStorePublishes(t *testing.T) {
 	}
 }
 
+// TestBuildPathsPublish pins the feed hookup on both build paths, durable and
+// head-capture. Either one can be refactored to insert into the cache directly
+// instead of through store, which stops the push with nothing else failing.
+func TestBuildPathsPublish(t *testing.T) {
+	t.Run("durable", func(t *testing.T) {
+		previousSchema := statecfg.Schema
+		statecfg.EnableHistoricalCommitment()
+		t.Cleanup(func() { statecfg.Schema = previousSchema })
+
+		m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+			return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+		}))
+
+		cache := newWitnessResultCache(96, 0, false, false)
+		builder := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+		builder.witnessCache = cache
+
+		ch := cache.subscribe()
+		defer cache.unsubscribe(ch)
+
+		headerCh := make(chan [][]byte, 8)
+		builderDone := make(chan struct{})
+		go func() { defer close(builderDone); RunWitnessCacheBuilder(ctx, builder, headerCh) }()
+		defer func() { cancel(); <-builderDone }()
+
+		const blockNum = uint64(3)
+		hash, headerRLP := buildTestChainHeader(t, m, blockNum)
+		headerCh <- [][]byte{headerRLP}
+
+		requireBuildPublished(t, ch, cache, blockNum, hash)
+	})
+
+	t.Run("head-capture", func(t *testing.T) {
+		ctx := context.Background()
+		const buildNum = uint64(6)
+		m, pin, hash := insertHeadCaptureChain(t, ctx, buildNum)
+
+		api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+		api.witnessCache = newWitnessResultCache(96, 0, true, true)
+
+		ch := api.witnessCache.subscribe()
+		defer api.witnessCache.unsubscribe(ch)
+
+		next := api.buildAndCacheHeadCapture(ctx, pin, buildNum, hash)
+		defer next.close()
+
+		requireBuildPublished(t, ch, api.witnessCache, buildNum, hash)
+	})
+}
+
+// requireBuildPublished asserts a build published (num, hash) carrying the bytes it cached.
+func requireBuildPublished(t *testing.T, ch chan witnessPush, cache *witnessResultCache, num uint64, hash common.Hash) {
+	t.Helper()
+	select {
+	case push := <-ch:
+		require.Equal(t, num, push.num)
+		require.Equal(t, hash, push.hash)
+		cached, ok := cache.Get(hash)
+		require.True(t, ok, "a published witness must also be cached")
+		require.True(t, bytes.Equal(cached.cachedJSON, push.json), "pushed bytes must be the cached bytes")
+	case <-time.After(30 * time.Second):
+		t.Fatal("build path did not publish to the feed")
+	}
+}
+
 func TestDecidePin(t *testing.T) {
 	t.Parallel()
 	parent := hashN(0x11)

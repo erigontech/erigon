@@ -152,10 +152,11 @@ func (api *APIImpl) GetFilterLogs(_ context.Context, index string) ([]*types.Log
 
 // subscribeRPC runs the shared subscription skeleton: subscription creation and a
 // goroutine that pumps items from the source channel into notify until the channel
-// closes or the client goes away. Callers guard their own preconditions before
-// calling. subscribe is called inside the goroutine and must return the item channel
-// plus an unsubscribe func. notify receives an emit func that sends a payload to the
-// client, logging on failure.
+// closes or the client goes away. Callers guard their own preconditions before calling.
+// subscribe runs synchronously, before the subscription exists, so an item produced
+// while the client is still receiving its subscription ID queues instead of being lost;
+// it returns the item channel plus an unsubscribe func. notify receives an emit func
+// that sends a payload to the client, logging on failure.
 func subscribeRPC[T any](ctx context.Context, subscribe func() (<-chan T, func(), error), notify func(emit func(payload any), item T), closedWarn string) (*rpc.Subscription, error) {
 	notifier, supported := rpc.NotifierFromContext(ctx)
 	if !supported {
