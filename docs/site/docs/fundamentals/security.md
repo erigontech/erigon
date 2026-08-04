@@ -21,7 +21,7 @@ Based on best practices for execution clients, your local machine's firewall set
 | 9090     | TCP          | Private API Communication     | Block all traffic except for communication between your internal components (e.g., RPC Daemon and core node).                            |
 
 :::note
-Some hosting providers impose additional firewall requirements on top of these. If you run on Hetzner Cloud or a Hetzner dedicated server, see the [Hetzner firewall note](/help-center/troubleshooting#hetzner-cloud--dedicated-server-firewall-note) for the ports to open and the reserved ranges to block.
+Some hosting providers add firewall requirements and operational pitfalls on top of these. If you run on Hetzner Cloud or a Hetzner dedicated server, see the [Hetzner firewall note](/help-center/troubleshooting#hetzner-cloud--dedicated-server-firewall-note) for the ports their edge firewall must allow, and for the reserved IPv4 ranges worth blocking yourself so outbound dials do not trip their abuse detection.
 :::
 
 #### CORS Protection
