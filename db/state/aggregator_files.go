@@ -95,12 +95,18 @@ type MergeResult struct {
 	iis   [kv.StandaloneIdxLen]*FilesItem
 }
 
+// A single per-domain merge round can populate any subset of {values,
+// history, idx}. Values-only, values+history+idx, and history+idx-only
+// are all valid outputs — history/idx merge when values doesn't need
+// it (see DomainRoTx.findMergeRange: history only runs when !r.any()
+// on values). Each slot must be checked independently or the Inventory
+// notification silently drops the ones the caller did produce and
+// NotifyOnFilesChange panics on empty names.
 func (mf MergeResult) FilePaths(relative string) (fPaths []string) {
-	for id, d := range mf.d {
-		if d == nil {
-			continue
+	for id := range mf.d {
+		if mf.d[id] != nil {
+			fPaths = append(fPaths, mf.d[id].FilePaths(relative)...)
 		}
-		fPaths = append(fPaths, d.FilePaths(relative)...)
 		if mf.dHist[id] != nil {
 			fPaths = append(fPaths, mf.dHist[id].FilePaths(relative)...)
 		}
