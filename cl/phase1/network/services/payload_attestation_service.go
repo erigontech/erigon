@@ -41,8 +41,8 @@ type seenPayloadAttestationKey struct {
 	validatorIndex uint64
 }
 
-// pendingPayloadAttestationKey tracks attestations waiting for their block to arrive.
-// Key is (blockRoot, validatorIndex) since each validator can only submit one attestation per block.
+// pendingPayloadAttestationKey identifies a queued attestation. messageRoot keeps
+// messages with the same block and validator distinct until validation.
 type pendingPayloadAttestationKey struct {
 	blockRoot      common.Hash
 	validatorIndex uint64
