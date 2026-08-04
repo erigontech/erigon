@@ -50,7 +50,7 @@ func (a *stateObjectArena) alloc() *stateObject {
 }
 
 func (a *stateObjectArena) grow() bool {
-	if a.slab == arenaMaxSlabs {
+	if len(a.slabs) == arenaMaxSlabs {
 		a.miss++
 		if a.miss%1_000 == 0 {
 			log.Warn("[dbg] stateObjectArena", "requested_over_limit", a.miss)
