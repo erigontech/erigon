@@ -1221,7 +1221,7 @@ func TestPreCheckNonceMismatchError(t *testing.T) {
 			nil,   // maxFeePerBlobGas
 		)
 		st := NewTxnExecutor(evm, msg, new(GasPool).AddGas(30_000_000))
-		_, _, err := st.preCheck(false)
+		_, err := st.preCheck(false)
 		return err
 	}
 
@@ -1393,7 +1393,7 @@ func TestPreCheckIntrinsicGasMatchesMessage(t *testing.T) {
 			msg.SetAuthorizations(tc.auths)
 
 			st := NewTxnExecutor(evm, msg, new(GasPool).AddGas(30_000_000))
-			_, got, err := st.preCheck(false)
+			fees, err := st.preCheck(false)
 			require.NoError(t, err)
 
 			// Derive the arguments the way Execute used to, from a cloned access
@@ -1419,8 +1419,8 @@ func TestPreCheckIntrinsicGasMatchesMessage(t *testing.T) {
 				IsEIP2780:          rules.IsAmsterdam,
 			})
 			require.False(t, overflow)
-			require.Equal(t, want, got)
-			require.NotZero(t, got.ExecutionGas)
+			require.Equal(t, want, fees.intrinsicGas)
+			require.NotZero(t, fees.intrinsicGas.ExecutionGas)
 		})
 	}
 }
