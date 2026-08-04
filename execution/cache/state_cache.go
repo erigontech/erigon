@@ -74,6 +74,9 @@ type StateCache struct {
 // is not gated by this knob.
 func NewStateCache(accountBytes, storageBytes, codeBytes, addrBytes datasize.ByteSize) *StateCache {
 	mode := stateCacheModeFromEnv()
+	// Fill admission relies on view frontiers never decreasing; the
+	// aggregator's visibility-lowering APIs assert against this marker.
+	dbg.WireStateCache()
 	sc := &StateCache{}
 	if !dbg.EnvBool("STATE_CACHE_FILLS", true) {
 		sc.disableFills = true

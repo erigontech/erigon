@@ -19,6 +19,7 @@ package cache
 import (
 	"bytes"
 	"encoding/binary"
+	"github.com/erigontech/erigon/common/dbg"
 	"sync"
 	"testing"
 
@@ -1157,4 +1158,12 @@ func TestStateCache_AccountDeletionGatesStaleCodeFill(t *testing.T) {
 	fresh.Fill(kv.CodeDomain, other, otherCode, 100)
 	_, ok = c.View(nil).Get(kv.CodeDomain, other)
 	require.True(t, ok, "unrelated code fills from a current view must stay admitted")
+}
+
+func TestNewStateCacheMarksProcessWired(t *testing.T) {
+	b := 1 * datasize.MB
+	c := NewStateCache(b, b, b, b)
+	t.Cleanup(c.Close)
+	require.True(t, dbg.StateCacheWired(),
+		"constructing a cache must forbid visibility-lowering aggregator APIs in this process")
 }

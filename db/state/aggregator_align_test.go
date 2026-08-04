@@ -19,6 +19,8 @@ package state
 import (
 	"testing"
 
+	"github.com/erigontech/erigon/common/dbg"
+
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/db/datadir"
@@ -158,4 +160,16 @@ func TestUnalign_RejectsStateDomain(t *testing.T) {
 	for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
 		require.Panics(t, func() { agg.Unalign(d) }, "domain %s", d)
 	}
+}
+
+// Fill admission relies on view frontiers never decreasing, which holds only
+// while no process both fills a StateCache and lowers visible file ends —
+// Unalign must refuse to run beside a wired cache.
+func TestUnalign_PanicsWithWiredStateCache(t *testing.T) {
+	dbg.SetStateCacheWired(true)
+	t.Cleanup(func() { dbg.SetStateCacheWired(false) })
+
+	_, agg := testDbAndAggregatorv3(t, alignStepSize)
+	require.Panics(t, func() { agg.Unalign(kv.ReceiptDomain) })
+	require.Panics(t, func() { agg.UnalignIdx(kv.LogAddrIdx) })
 }

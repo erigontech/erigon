@@ -523,6 +523,7 @@ func (a *Aggregator) DisableAllDependencies() {
 //
 // Accounts, storage and code hold the state a rebuild reads: unaligning one panics.
 func (a *Aggregator) Unalign(d kv.Domain) (realign func()) {
+	assertNoStateCache()
 	switch d {
 	case kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain:
 		panic(fmt.Sprintf("assert: %s holds the state a rebuild reads, it can not lag it", d))
@@ -533,6 +534,7 @@ func (a *Aggregator) Unalign(d kv.Domain) (realign func()) {
 
 // UnalignIdx is Unalign for a standalone index.
 func (a *Aggregator) UnalignIdx(name kv.InvertedIdx) (realign func()) {
+	assertNoStateCache()
 	for id, ii := range a.standaloneIIs() {
 		if ii.Name == name {
 			a.setUnalignedIdx(id, true)
@@ -540,6 +542,15 @@ func (a *Aggregator) UnalignIdx(name kv.InvertedIdx) (realign func()) {
 		}
 	}
 	return func() {}
+}
+
+// assertNoStateCache: unaligning (and the later realign) lowers visible file
+// ends, and StateCache fill admission relies on view frontiers never
+// decreasing. Only flows without a wired cache (tooling) may do it.
+func assertNoStateCache() {
+	if dbg.StateCacheWired() {
+		panic("assert: visibility lowering with a wired StateCache breaks fill-admission monotonicity")
+	}
 }
 
 func (a *Aggregator) setUnalignedDomain(d kv.Domain, v bool) {

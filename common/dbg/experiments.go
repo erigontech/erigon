@@ -27,6 +27,7 @@ import (
 	"runtime/pprof"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unique"
 
@@ -180,8 +181,18 @@ func PruneTotalDifficulty() bool    { return pruneTotalDifficulty }
 // CLI-override setters for the performance toggles that also have env-var
 // twins. The env var sets the initial value at package init; the CLI layer
 // calls these at node startup only when the user explicitly set the flag.
-func SetIgnoreBAL(b bool)               { IgnoreBAL = b }
-func SetUseStateCache(b bool)           { UseStateCache = b }
+func SetIgnoreBAL(b bool)     { IgnoreBAL = b }
+func SetUseStateCache(b bool) { UseStateCache = b }
+
+// stateCacheWired records that this process constructed a StateCache. The
+// aggregator's visibility-lowering APIs assert against it: fill admission
+// relies on view frontiers never decreasing, which holds only while no flow
+// both fills the cache and lowers visible file ends.
+var stateCacheWired atomic.Bool
+
+func WireStateCache()                   { stateCacheWired.Store(true) }
+func StateCacheWired() bool             { return stateCacheWired.Load() }
+func SetStateCacheWired(b bool)         { stateCacheWired.Store(b) }
 func SetReadAhead(b bool)               { ReadAhead = b }
 func SetExec3Workers(n int)             { Exec3Workers = n }
 func SetNoPrune(b bool)                 { noPrune = b }
