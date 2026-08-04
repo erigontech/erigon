@@ -81,11 +81,11 @@ func (ath *Authorization) RecoverSigner() (*common.Address, error) {
 // clears the signer's delegation. It rejects a nil key or the maximum uint64
 // nonce, which cannot be incremented during authorization processing.
 func SignAuthorization(key *ecdsa.PrivateKey, chainID uint256.Int, address common.Address, nonce uint64) (Authorization, error) {
-	if nonce == math.MaxUint64 {
-		return Authorization{}, errAuthNonceOverflow
-	}
 	if key == nil {
 		return Authorization{}, errAuthNilPrivateKey
+	}
+	if nonce == math.MaxUint64 {
+		return Authorization{}, errAuthNonceOverflow
 	}
 
 	hash := authorizationSigningHash(chainID, address, nonce)

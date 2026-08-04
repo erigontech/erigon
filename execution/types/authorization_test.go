@@ -128,3 +128,12 @@ func TestSignAuthorizationRejectsNilKey(t *testing.T) {
 		t.Fatalf("expected nil private key to be rejected, got %v", err)
 	}
 }
+
+func TestSignAuthorizationRejectsNilKeyBeforeMaxNonce(t *testing.T) {
+	t.Parallel()
+
+	_, err := SignAuthorization(nil, uint256.Int{}, common.Address{}, math.MaxUint64)
+	if !errors.Is(err, errAuthNilPrivateKey) {
+		t.Fatalf("expected nil private key to be rejected first, got %v", err)
+	}
+}
