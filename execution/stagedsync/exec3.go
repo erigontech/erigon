@@ -416,6 +416,16 @@ type txExecutor struct {
 	enableChaosMonkey bool
 }
 
+// A wrong root under fork validation means a payload the CL offered was rejected,
+// which is the answer the CL asked for, not a fault of this node.
+func (te *txExecutor) logWrongTrieRoot(msg string) {
+	if te.isForkValidation {
+		te.logger.Warn(msg)
+		return
+	}
+	te.logger.Error(msg)
+}
+
 func (te *txExecutor) readState() *state.StateV3Buffered {
 	return te.rs
 }
