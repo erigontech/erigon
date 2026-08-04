@@ -501,6 +501,7 @@ func (a *Aggregator) EnableAllDependencies() {
 	if a.checker == nil {
 		return
 	}
+	assertNoStateCache()
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 	a.checker.Enable()
@@ -523,7 +524,6 @@ func (a *Aggregator) DisableAllDependencies() {
 //
 // Accounts, storage and code hold the state a rebuild reads: unaligning one panics.
 func (a *Aggregator) Unalign(d kv.Domain) (realign func()) {
-	assertNoStateCache()
 	switch d {
 	case kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain:
 		panic(fmt.Sprintf("assert: %s holds the state a rebuild reads, it can not lag it", d))
@@ -534,7 +534,6 @@ func (a *Aggregator) Unalign(d kv.Domain) (realign func()) {
 
 // UnalignIdx is Unalign for a standalone index.
 func (a *Aggregator) UnalignIdx(name kv.InvertedIdx) (realign func()) {
-	assertNoStateCache()
 	for id, ii := range a.standaloneIIs() {
 		if ii.Name == name {
 			a.setUnalignedIdx(id, true)
@@ -544,9 +543,13 @@ func (a *Aggregator) UnalignIdx(name kv.InvertedIdx) (realign func()) {
 	return func() {}
 }
 
-// assertNoStateCache: unaligning (and the later realign) lowers visible file
-// ends, and StateCache fill admission relies on view frontiers never
-// decreasing. Only flows without a wired cache (tooling) may do it.
+// assertNoStateCache guards the entry points that can lower visible file
+// ends — un/re-aligning (both directions of the toggle can shrink someone's
+// ceiling), re-enabling the dependency checker, and a folder rescan — because
+// StateCache fill admission relies on view frontiers never decreasing. Only
+// flows without a fill-enabled cache (tooling) may lower visibility. Close and
+// OpenFolder are deliberately unguarded: shutdown and startup are not fill
+// windows.
 func assertNoStateCache() {
 	if dbg.StateCacheWired() {
 		panic("assert: visibility lowering with a wired StateCache breaks fill-admission monotonicity")
@@ -554,6 +557,7 @@ func assertNoStateCache() {
 }
 
 func (a *Aggregator) setUnalignedDomain(d kv.Domain, v bool) {
+	assertNoStateCache()
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 	a.unalignedDomain[d] = v
@@ -561,6 +565,7 @@ func (a *Aggregator) setUnalignedDomain(d kv.Domain, v bool) {
 }
 
 func (a *Aggregator) setUnalignedIdx(id int, v bool) {
+	assertNoStateCache()
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 	a.unalignedIdx[id] = v
@@ -667,6 +672,7 @@ func (a *Aggregator) openFolder() error {
 }
 
 func (a *Aggregator) ReloadFiles() error {
+	assertNoStateCache()
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 	a.closeDirtyFiles()

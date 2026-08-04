@@ -1167,3 +1167,17 @@ func TestNewStateCacheMarksProcessWired(t *testing.T) {
 	require.True(t, dbg.StateCacheWired(),
 		"constructing a cache must forbid visibility-lowering aggregator APIs in this process")
 }
+
+// An apply-only cache (STATE_CACHE_FILLS=false) has no fill for a lowered
+// frontier to poison, so it must not forbid visibility lowering.
+func TestApplyOnlyCacheDoesNotMarkProcessWired(t *testing.T) {
+	t.Setenv("STATE_CACHE_FILLS", "false")
+	was := dbg.StateCacheWired()
+	dbg.SetStateCacheWired(false)
+	t.Cleanup(func() { dbg.SetStateCacheWired(was) })
+
+	b := 1 * datasize.MB
+	c := NewStateCache(b, b, b, b)
+	t.Cleanup(c.Close)
+	require.False(t, dbg.StateCacheWired())
+}

@@ -184,10 +184,12 @@ func PruneTotalDifficulty() bool    { return pruneTotalDifficulty }
 func SetIgnoreBAL(b bool)     { IgnoreBAL = b }
 func SetUseStateCache(b bool) { UseStateCache = b }
 
-// stateCacheWired records that this process constructed a StateCache. The
-// aggregator's visibility-lowering APIs assert against it: fill admission
-// relies on view frontiers never decreasing, which holds only while no flow
-// both fills the cache and lowers visible file ends.
+// stateCacheWired records that this process constructed a fill-enabled
+// StateCache. The aggregator's visibility-lowering entry points assert
+// against it: fill admission relies on view frontiers never decreasing,
+// which holds only while no flow both fills a cache and lowers visible file
+// ends. Deliberately sticky for the process lifetime — the hazard is about
+// mixing flows in one process, not about a particular cache's lifetime.
 var stateCacheWired atomic.Bool
 
 func WireStateCache()                   { stateCacheWired.Store(true) }

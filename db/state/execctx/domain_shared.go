@@ -555,7 +555,7 @@ func (gt *temporalGetter) GetLatestContext(ctx context.Context, name kv.Domain, 
 // so the existing kv.TemporalGetter interface is unchanged. txNum is the
 // caller's read txNum, used to stamp any cache entry it populates.
 func (gt *temporalGetter) GetCodeSize(addr []byte, txNum uint64) (int, bool, error) {
-	return gt.sd.getCodeSize(gt.tx, gt.view, gt.m, addr, txNum)
+	return gt.sd.getCodeSize(gt.tx, gt.view, addr, txNum)
 }
 
 // GetCode returns contract code via the content-addressed fast path (see
@@ -565,7 +565,7 @@ func (gt *temporalGetter) GetCodeSize(addr []byte, txNum uint64) (int, bool, err
 // (they resolve prevVal through GetLatest, which is addr-keyed). txNum is the
 // caller's read txNum, used to stamp any cache entry it populates.
 func (gt *temporalGetter) GetCode(addr []byte, txNum uint64) ([]byte, bool, error) {
-	return gt.sd.getCode(gt.tx, gt.view, gt.m, addr, txNum)
+	return gt.sd.getCode(gt.tx, gt.view, addr, txNum)
 }
 
 func (gt *temporalGetter) HasPrefix(name kv.Domain, prefix []byte) (firstKey []byte, firstVal []byte, ok bool, err error) {
@@ -1364,10 +1364,10 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 // Returns (size, true, nil) on success and (0, false, nil) only when
 // CodeDomain itself confirms no code.
 func (sd *SharedDomains) GetCodeSize(tx kv.TemporalTx, addr []byte, txNum uint64) (int, bool, error) {
-	return sd.getCodeSize(tx, sd.cacheReader(), nil, addr, txNum)
+	return sd.getCodeSize(tx, sd.cacheReader(), addr, txNum)
 }
 
-func (sd *SharedDomains) getCodeSize(tx kv.TemporalTx, view cache.ReadView, wm *kvmetrics.DomainMetrics, addr []byte, txNum uint64) (int, bool, error) {
+func (sd *SharedDomains) getCodeSize(tx kv.TemporalTx, view cache.ReadView, addr []byte, txNum uint64) (int, bool, error) {
 	if tx == nil {
 		return 0, false, errors.New("sd.GetCodeSize: unexpected nil tx")
 	}
@@ -1391,7 +1391,7 @@ func (sd *SharedDomains) getCodeSize(tx kv.TemporalTx, view cache.ReadView, wm *
 	// Cold path: authoritative read via the normal SD.GetLatest chain.
 	// Populates L1, codeHashToCode, and (via PutWithCodeHash) the size layer for
 	// future callers.
-	v, _, err := sd.getLatestMetered(kv.CodeDomain, tx, addr, wm, view)
+	v, _, err := sd.getLatestMetered(kv.CodeDomain, tx, addr, nil, view)
 	if err != nil {
 		return 0, false, err
 	}
@@ -1416,10 +1416,10 @@ func (sd *SharedDomains) getCodeSize(tx kv.TemporalTx, view cache.ReadView, wm *
 // the write. Setters therefore resolve prevVal through GetLatest, which is
 // addr-keyed (domain-faithful); only getters use this codeHash shortcut.
 func (sd *SharedDomains) GetCode(tx kv.TemporalTx, addr []byte, txNum uint64) ([]byte, bool, error) {
-	return sd.getCode(tx, sd.cacheReader(), nil, addr, txNum)
+	return sd.getCode(tx, sd.cacheReader(), addr, txNum)
 }
 
-func (sd *SharedDomains) getCode(tx kv.TemporalTx, view cache.ReadView, wm *kvmetrics.DomainMetrics, addr []byte, txNum uint64) ([]byte, bool, error) {
+func (sd *SharedDomains) getCode(tx kv.TemporalTx, view cache.ReadView, addr []byte, txNum uint64) ([]byte, bool, error) {
 	if tx == nil {
 		return nil, false, errors.New("sd.GetCode: unexpected nil tx")
 	}
@@ -1445,7 +1445,7 @@ func (sd *SharedDomains) getCode(tx kv.TemporalTx, view cache.ReadView, wm *kvme
 	}
 
 	// Cold path: authoritative addr-keyed read (also populates the caches).
-	v, _, err := sd.getLatestMetered(kv.CodeDomain, tx, addr, wm, view)
+	v, _, err := sd.getLatestMetered(kv.CodeDomain, tx, addr, nil, view)
 	if err != nil {
 		return nil, false, err
 	}

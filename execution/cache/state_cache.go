@@ -74,13 +74,16 @@ type StateCache struct {
 // is not gated by this knob.
 func NewStateCache(accountBytes, storageBytes, codeBytes, addrBytes datasize.ByteSize) *StateCache {
 	mode := stateCacheModeFromEnv()
-	// Fill admission relies on view frontiers never decreasing; the
-	// aggregator's visibility-lowering APIs assert against this marker.
-	dbg.WireStateCache()
 	sc := &StateCache{}
 	if !dbg.EnvBool("STATE_CACHE_FILLS", true) {
 		sc.disableFills = true
 		log.Info("[cache] STATE_CACHE_FILLS=false — read fills disabled, only flush applies populate the cache")
+	} else {
+		// Fill admission relies on view frontiers never decreasing; the
+		// aggregator's visibility-lowering entry points assert against this
+		// marker. Apply-only caches skip it — with no fills there is nothing
+		// for a lowered frontier to poison.
+		dbg.WireStateCache()
 	}
 	sc.caches[kv.AccountsDomain] = newDomainCacheBytes(accountBytes, avgAccountEntryBytes, mode)
 	sc.caches[kv.StorageDomain] = newDomainCacheBytes(storageBytes, avgStorageEntryBytes, mode)

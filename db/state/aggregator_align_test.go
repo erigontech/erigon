@@ -173,3 +173,18 @@ func TestUnalign_PanicsWithWiredStateCache(t *testing.T) {
 	require.Panics(t, func() { agg.Unalign(kv.ReceiptDomain) })
 	require.Panics(t, func() { agg.UnalignIdx(kv.LogAddrIdx) })
 }
+
+// The recheck must also cover the realign closure and the other
+// visibility-lowering entry points: a cache wired between Unalign and realign
+// still breaks frontier monotonicity.
+func TestVisibilityLowering_RechecksAtEveryEntryPoint(t *testing.T) {
+	dbg.SetStateCacheWired(false)
+	_, agg := testDbAndAggregatorv3(t, alignStepSize)
+	realign := agg.Unalign(kv.ReceiptDomain) // no cache yet: allowed
+
+	dbg.SetStateCacheWired(true)
+	t.Cleanup(func() { dbg.SetStateCacheWired(false) })
+	require.Panics(t, func() { realign() })
+	require.Panics(t, func() { agg.EnableAllDependencies() })
+	require.Panics(t, func() { _ = agg.ReloadFiles() })
+}
