@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/execution/vm/runtime"
 )
 
 //go:embed testdata/snailtracer.hex
@@ -48,9 +47,9 @@ func TestSnailtracerPathsAgree(t *testing.T) {
 	input := common.FromHex(snailtracerSelector)
 
 	render := func(noMaterialize bool) []byte {
-		cfg, statedb := newBenchConfig(t, 1_000_000_000, noMaterialize)
-		deployContract(statedb, addrContract, code)
-		ret, _, err := prepareAndCall(runtime.NewEnv(cfg), addrContract, input)
+		vmenv := newBenchEnv(t, 1_000_000_000, noMaterialize)
+		deployContract(vmenv.IntraBlockState(), addrContract, code)
+		ret, _, err := prepareAndCall(vmenv, addrContract, input)
 		require.NoError(t, err)
 		require.NotEmpty(t, ret)
 		return ret
