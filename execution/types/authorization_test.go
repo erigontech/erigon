@@ -118,6 +118,9 @@ func TestSignAuthorizationRejectsMaxNonce(t *testing.T) {
 	if !errors.Is(err, errAuthNonceOverflow) {
 		t.Fatalf("expected maximum nonce to be rejected, got %v", err)
 	}
+	if got, want := err.Error(), "authorization nonce has max value"; got != want {
+		t.Fatalf("unexpected error: got %q, want %q", got, want)
+	}
 }
 
 func TestSignAuthorizationRejectsNilKey(t *testing.T) {

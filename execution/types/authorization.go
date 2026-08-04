@@ -17,7 +17,7 @@ import (
 )
 
 var (
-	errAuthNonceOverflow = errors.New("failed assertion: auth.nonce < 2**64 - 1")
+	errAuthNonceOverflow = errors.New("authorization nonce has max value")
 	errAuthNilPrivateKey = errors.New("private key is nil")
 )
 
