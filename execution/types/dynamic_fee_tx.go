@@ -22,6 +22,7 @@ package types
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 
 	"github.com/holiman/uint256"
@@ -228,48 +229,51 @@ func (tx *DynamicFeeTransaction) EncodeRLP(w io.Writer) error {
 func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 	_, err := s.List()
 	if err != nil {
-		return err
+		return fmt.Errorf("read DynamicFeeTransaction list: %w", err)
 	}
 	if err := s.ReadUint256(&tx.ChainID); err != nil {
-		return err
+		return fmt.Errorf("read ChainID: %w", err)
 	}
 	if tx.Nonce, err = s.Uint64(); err != nil {
-		return err
+		return fmt.Errorf("read Nonce: %w", err)
 	}
 	if err := s.ReadUint256(&tx.TipCap); err != nil {
-		return err
+		return fmt.Errorf("read TipCap: %w", err)
 	}
 	if err := s.ReadUint256(&tx.FeeCap); err != nil {
-		return err
+		return fmt.Errorf("read FeeCap: %w", err)
 	}
 	if tx.GasLimit, err = s.Uint64(); err != nil {
-		return err
+		return fmt.Errorf("read GasLimit: %w", err)
 	}
 	if err := DecodeOptionalAddress(&tx.To, s); err != nil {
-		return err
+		return fmt.Errorf("read To: %w", err)
 	}
 	if err := s.ReadUint256(&tx.Value); err != nil {
-		return err
+		return fmt.Errorf("read Value: %w", err)
 	}
 	if tx.Data, err = s.Bytes(); err != nil {
-		return err
+		return fmt.Errorf("read Data: %w", err)
 	}
 	// decode AccessList
 	tx.AccessList = AccessList{}
 	if err := decodeAccessList(&tx.AccessList, s); err != nil {
-		return err
+		return fmt.Errorf("read AccessList: %w", err)
 	}
 	// decode V
 	if err := s.ReadUint256(&tx.V); err != nil {
-		return err
+		return fmt.Errorf("read V: %w", err)
 	}
 	if err := s.ReadUint256(&tx.R); err != nil {
-		return err
+		return fmt.Errorf("read R: %w", err)
 	}
 	if err := s.ReadUint256(&tx.S); err != nil {
-		return err
+		return fmt.Errorf("read S: %w", err)
 	}
-	return s.ListEnd()
+	if err = s.ListEnd(); err != nil {
+		return fmt.Errorf("close DynamicFeeTransaction: %w", err)
+	}
+	return nil
 }
 
 // AsMessage returns the transaction as a core.Message.
