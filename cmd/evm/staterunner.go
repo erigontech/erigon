@@ -24,9 +24,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"sync"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/common"
@@ -86,17 +88,20 @@ func stateTestCmd(_ context.Context, ctx *cli.Command) error {
 		DisableStorage:   ctx.Bool(DisableStorageFlag.Name),
 		EnableReturnData: !ctx.Bool(DisableReturnDataFlag.Name),
 	}
-	cfg := vm.Config{}
-	if machineFriendlyOutput {
-		cfg.Tracer = logger.NewJSONLogger(config, os.Stderr).Tracer().Hooks
-	} else if ctx.Bool(DebugFlag.Name) {
-		cfg.Tracer = logger.NewStructLogger(config).Tracer().Hooks
-	}
-
 	workers := ctx.Uint64(WorkersFlag.Name)
 	if workers == 0 {
 		return fmt.Errorf("--%s must be >= 1", WorkersFlag.Name)
 	}
+
+	cfg := vm.Config{}
+	traceOut := newTraceSink(workers)
+	defer traceOut.flush()
+	if machineFriendlyOutput {
+		cfg.Tracer = logger.NewJSONLogger(config, traceOut).Tracer().Hooks
+	} else if ctx.Bool(DebugFlag.Name) {
+		cfg.Tracer = logger.NewStructLogger(config).Tracer().Hooks
+	}
+
 	filter, err := compileTestFilter(ctx.String(RunFlag.Name), ctx.StringSlice(ExcludeFlag.Name))
 	if err != nil {
 		return err
@@ -105,7 +110,7 @@ func stateTestCmd(_ context.Context, ctx *cli.Command) error {
 	path := ctx.Args().First()
 	if len(path) != 0 {
 		collected := filter.filterFiles(collectFiles(path))
-		results, err := runStateTestsParallel(ctx, cfg, collected, workers, filter)
+		results, err := runStateTestsParallel(ctx, cfg, traceOut, collected, workers, filter)
 		if err != nil {
 			return err
 		}
@@ -124,13 +129,41 @@ func stateTestCmd(_ context.Context, ctx *cli.Command) error {
 		if len(fname) == 0 {
 			return nil
 		}
-		results, err := runStateTest(ctx, cfg, env, fname, filter)
+		results, err := runStateTest(ctx, cfg, traceOut, env, fname, filter)
 		if err != nil {
 			return err
 		}
 		report(ctx, results)
 	}
 	return scanner.Err()
+}
+
+// traceSink receives the --json opcode trace and the per-test stateRoot line.
+// The tracer emits one line per opcode, so unbuffered stderr costs a write(2)
+// each; buffering is only safe while tests run sequentially, since with
+// workers > 1 every goroutine shares this writer.
+type traceSink struct {
+	io.Writer
+	buffered *bufio.Writer
+}
+
+func newTraceSink(workers uint64) *traceSink {
+	if workers > 1 {
+		return &traceSink{Writer: os.Stderr}
+	}
+	bw := bufio.NewWriterSize(os.Stderr, int(64*datasize.KB))
+	return &traceSink{Writer: bw, buffered: bw}
+}
+
+// flush is called once per subtest, so a consumer streaming stderr still sees
+// whole tests, in order, without waiting for the run to end.
+func (s *traceSink) flush() {
+	if s.buffered == nil {
+		return
+	}
+	if err := s.buffered.Flush(); err != nil {
+		log.Warn("Failed to flush stderr", "err", err)
+	}
 }
 
 // stateTestEnv is the scratch database the tests run against. Building one
@@ -154,7 +187,7 @@ func (e *stateTestEnv) Close() {
 	dir.RemoveAll(e.tmpDir)
 }
 
-func runStateTestsParallel(ctx *cli.Command, cfg vm.Config, files []string, workers uint64, filter testFilter) ([]testResult, error) {
+func runStateTestsParallel(ctx *cli.Command, cfg vm.Config, traceOut *traceSink, files []string, workers uint64, filter testFilter) ([]testResult, error) {
 	if workers == 1 {
 		env, err := newStateTestEnv()
 		if err != nil {
@@ -163,7 +196,7 @@ func runStateTestsParallel(ctx *cli.Command, cfg vm.Config, files []string, work
 		defer env.Close()
 		results := make([]testResult, 0, len(files)*4) // pre-allocate
 		for _, fname := range files {
-			r, err := runStateTest(ctx, cfg, env, fname, filter)
+			r, err := runStateTest(ctx, cfg, traceOut, env, fname, filter)
 			if err != nil {
 				return nil, err
 			}
@@ -199,7 +232,7 @@ func runStateTestsParallel(ctx *cli.Command, cfg vm.Config, files []string, work
 			}
 			defer env.Close()
 			for item := range fileCh {
-				r, err := runStateTest(ctx, cfg, env, item.fname, filter)
+				r, err := runStateTest(ctx, cfg, traceOut, env, item.fname, filter)
 				resultCh <- fileResult{index: item.index, results: r, err: err}
 			}
 		})
@@ -229,7 +262,7 @@ func runStateTestsParallel(ctx *cli.Command, cfg vm.Config, files []string, work
 }
 
 // runStateTest loads the state-test given by fname, and executes the test.
-func runStateTest(ctx *cli.Command, cfg vm.Config, env *stateTestEnv, fname string, filter testFilter) ([]testResult, error) {
+func runStateTest(ctx *cli.Command, cfg vm.Config, traceOut *traceSink, env *stateTestEnv, fname string, filter testFilter) ([]testResult, error) {
 	src, err := os.ReadFile(fname)
 	if err != nil {
 		return nil, err
@@ -280,7 +313,7 @@ func runStateTest(ctx *cli.Command, cfg vm.Config, env *stateTestEnv, fname stri
 					h := common.Hash(root)
 					result.Root = &h
 					if emitStateRoot {
-						if _, printErr := fmt.Fprintf(os.Stderr, "{\"stateRoot\": \"%#x\"}\n", h[:]); printErr != nil {
+						if _, printErr := fmt.Fprintf(traceOut, "{\"stateRoot\": \"%#x\"}\n", h[:]); printErr != nil {
 							log.Warn("Failed to write to stderr", "err", printErr)
 						}
 					}
