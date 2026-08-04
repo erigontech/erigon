@@ -2280,8 +2280,8 @@ type blockExecutor struct {
 	results []*execResult
 
 	// feeMergeTemp[tx] is the write set the fee merge created and recorded for
-	// tx. The finalize merge may release that one; every other recorded set is
-	// some execResult's TxOut, which stays live.
+	// tx. A revalidation round merges again and supersedes it; every other
+	// recorded set is some execResult's TxOut, which stays live.
 	feeMergeTemp map[int]*state.WriteSet
 
 	// settledInput[tx]==true marks a task that was dispatched when every
@@ -2449,6 +2449,18 @@ func (be *blockExecutor) invalidBlockResult(err error) *blockResult {
 		BlockHash: be.blockHash,
 		Err:       err,
 	}
+}
+
+// recordFeeMerge takes ownership of the set the fee merge just recorded for tx
+// and reclaims the one it superseded. Only a set an earlier fee merge created
+// may be released: prev is otherwise some execResult's TxOut, which stays live.
+// MergeInto shares VersionedWrite pointers rather than the maps holding them,
+// so pooling prev's maps leaves the writes merged now holds intact.
+func (be *blockExecutor) recordFeeMerge(tx int, prev, merged *state.WriteSet) {
+	if temp := be.feeMergeTemp[tx]; temp != nil && temp == prev && merged != temp {
+		temp.ReleaseMaps()
+	}
+	be.feeMergeTemp[tx] = merged
 }
 
 // tooManyRetries returns an invalid-block result when tx has exceeded its
@@ -2686,9 +2698,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
 				merged := existingWrites.MergeInto(tipWrites)
 				be.blockIO.RecordWrites(txVersion, merged)
-				// Only a set this merge created may later be released: the
-				// recorded slot is otherwise some execResult's TxOut.
-				be.feeMergeTemp[tx] = merged
+				be.recordFeeMerge(tx, existingWrites, merged)
 			}
 		}
 
@@ -2806,10 +2816,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
 					merged := existingWrites.MergeInto(addWrites)
 					be.blockIO.RecordWrites(txVersion, merged)
-					if temp := be.feeMergeTemp[tx]; temp != nil && temp == existingWrites && merged != temp {
-						delete(be.feeMergeTemp, tx)
-						temp.ReleaseMaps()
-					}
 
 					// Flush the merged writes (including fee calc changes)
 					// to the version map so that subsequent per-tx
