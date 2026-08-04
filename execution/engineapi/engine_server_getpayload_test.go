@@ -163,6 +163,27 @@ func TestGetPayloadV2AcceptsParisPayload(t *testing.T) {
 	require.Nil(t, resp.ExecutionPayload.Withdrawals)
 }
 
+func TestGetPayloadV2AcceptsShanghaiPayload(t *testing.T) {
+	t.Parallel()
+
+	const payloadID uint64 = 46
+	stub := &getPayloadStubModule{
+		getAssembledBlockFunc: func(_ context.Context, id uint64) (execmodule.AssembledBlockResult, error) {
+			require.Equal(t, payloadID, id)
+			return execmodule.AssembledBlockResult{
+				Block:      minimalPayloadBlock(100, nil),
+				BlockValue: uint256.NewInt(0),
+			}, nil
+		},
+	}
+	srv := newProposingEngineServerWithConfig(parisShanghaiChainConfig(), stub)
+
+	resp, err := srv.GetPayloadV2(context.Background(), payloadIDBytes(payloadID))
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+}
+
 func TestAssembledBlockToPayloadResponseIncludesCanonicalEmptyBAL(t *testing.T) {
 	t.Parallel()
 
@@ -214,12 +235,8 @@ func newProposingEngineServerWithConfig(cfg *chain.Config, stub execmodule.Execu
 }
 
 func parisShanghaiChainConfig() *chain.Config {
-	cfg := allForksChainConfig()
+	cfg := preCancunChainConfig()
 	cfg.ShanghaiTime = common.NewUint64(100)
-	cfg.CancunTime = nil
-	cfg.PragueTime = nil
-	cfg.OsakaTime = nil
-	cfg.AmsterdamTime = nil
 	return cfg
 }
 
