@@ -78,7 +78,7 @@ func TestGetPayloadV4AcceptsEmptyRequestsBundle(t *testing.T) {
 	require.Len(t, resp.ExecutionRequests, 0)
 }
 
-func TestGetPayloadV4AcceptsValidBlobsBundle(t *testing.T) {
+func TestGetPayloadV4AcceptsMatchingBlobsBundleCounts(t *testing.T) {
 	t.Parallel()
 
 	const payloadID uint64 = 48
@@ -102,7 +102,7 @@ func TestGetPayloadV4AcceptsValidBlobsBundle(t *testing.T) {
 	require.Len(t, resp.BlobsBundle.Proofs, 1)
 }
 
-func TestGetPayloadV3RejectsInvalidBlobsBundle(t *testing.T) {
+func TestGetPayloadV3RejectsMismatchedBlobsBundleCounts(t *testing.T) {
 	t.Parallel()
 
 	const payloadID uint64 = 47
@@ -124,7 +124,7 @@ func TestGetPayloadV3RejectsInvalidBlobsBundle(t *testing.T) {
 	require.Nil(t, resp)
 }
 
-func TestGetPayloadV6RejectsInvalidBlobsBundle(t *testing.T) {
+func TestGetPayloadV6RejectsMismatchedBlobsBundleCounts(t *testing.T) {
 	t.Parallel()
 
 	const payloadID uint64 = 44
@@ -286,7 +286,6 @@ func parisShanghaiChainConfig() *chain.Config {
 	return cfg
 }
 
-// minimalPayloadBlock builds a transaction-free payload block with the given timestamp and execution requests.
 func minimalPayloadBlock(timestamp uint64, requests types.FlatRequests) *types.BlockWithReceipts {
 	baseFee := uint256.NewInt(1_000_000_000)
 	header := &types.Header{
@@ -302,8 +301,6 @@ func minimalPayloadBlock(timestamp uint64, requests types.FlatRequests) *types.B
 	}
 }
 
-// blobPayloadBlock builds a payload block containing a single blob transaction
-// with the given wrapper version and commitment/blob/proof counts.
 func blobPayloadBlock(chainID *uint256.Int, wrapperVersion byte, commitments, blobs, proofs int) *types.BlockWithReceipts {
 	to := common.Address{0x01}
 	wrappedTxn := &types.BlobTxWrapper{WrapperVersion: wrapperVersion}
