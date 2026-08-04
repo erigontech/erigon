@@ -1002,8 +1002,6 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		if uint64(len(args.AuthorizationList)) > gasCap/params.CallNewAccountGas {
 			return nil, errors.New("insufficient gas to process all authorizations")
 		}
-		var data bytes.Buffer
-		var buf [32]byte
 		rules := blockCtx.Rules(chainConfig)
 		for i := range args.AuthorizationList {
 			jsonAuth := &args.AuthorizationList[i]
@@ -1014,8 +1012,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 			if (!auth.ChainID.IsZero() && auth.ChainID.Cmp(rules.ChainID) != 0) || auth.Nonce+1 < auth.Nonce {
 				continue
 			}
-			data.Reset()
-			authorityPtr, err := auth.RecoverSigner(&data, buf[:])
+			authorityPtr, err := auth.RecoverSigner()
 			if err != nil {
 				continue
 			}

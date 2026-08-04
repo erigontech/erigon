@@ -20,7 +20,6 @@
 package protocol
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"slices"
@@ -864,11 +863,8 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *u
 	}
 	preTxDelegates := make(map[accounts.Address]bool)
 	delegationSetFor := make(map[accounts.Address]bool)
-	var b [32]byte
-	data := bytes.NewBuffer(nil)
 	for i := range auths {
 		auth := &auths[i]
-		data.Reset()
 
 		// 1. chainId check
 		if !auth.ChainID.IsZero() && !auth.ChainID.Eq(chainID) {
@@ -877,7 +873,7 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *u
 		}
 
 		// 2. authority recover
-		authorityPtr, err := auth.RecoverSigner(data, b[:])
+		authorityPtr, err := auth.RecoverSigner()
 		if err != nil {
 			log.Trace("authority recover failed, skipping", "err", err, "authIndex", i)
 			continue

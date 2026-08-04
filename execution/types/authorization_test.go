@@ -17,7 +17,6 @@
 package types
 
 import (
-	"bytes"
 	"errors"
 	"math"
 	"testing"
@@ -41,9 +40,7 @@ func TestRecoverSigner(t *testing.T) {
 		R:       uint256.Int{11238962557009670571, 14017651393191758745, 18358999445216475025, 5549385460848219779},
 		S:       uint256.Int{6390522493159340108, 17630603794136184458, 14442462445950880280, 846710983706847255},
 	}
-	var b [32]byte
-	data := bytes.NewBuffer(nil)
-	authorityPtr, err := auth.RecoverSigner(data, b[:])
+	authorityPtr, err := auth.RecoverSigner()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,13 +79,30 @@ func TestSignAuthorizationRoundTrip(t *testing.T) {
 		t.Fatalf("unexpected nonce: got %d, want %d", auth.Nonce, nonce)
 	}
 
-	var buf [32]byte
-	recovered, err := auth.RecoverSigner(bytes.NewBuffer(nil), buf[:])
+	recovered, err := auth.RecoverSigner()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if *recovered != authority {
 		t.Fatalf("unexpected authority: got %s, want %s", *recovered, authority)
+	}
+}
+
+func BenchmarkAuthorizationRecoverSigner(b *testing.B) {
+	privateKey, err := crypto.GenerateKey()
+	if err != nil {
+		b.Fatal(err)
+	}
+	auth, err := SignAuthorization(privateKey, *uint256.NewInt(7078815900), common.Address{0xaa}, 7)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := auth.RecoverSigner(); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 

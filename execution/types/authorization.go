@@ -1,7 +1,6 @@
 package types
 
 import (
-	"bytes"
 	"crypto/ecdsa"
 	"errors"
 	"fmt"
@@ -59,16 +58,19 @@ func encodeSigningPayload(chainID uint256.Int, address common.Address, nonce uin
 	return rlp.EncodeU64(nonce, w, buf)
 }
 
-func (ath *Authorization) RecoverSigner(data *bytes.Buffer, buf []byte) (*common.Address, error) {
+func authorizationSigningHash(chainID uint256.Int, address common.Address, nonce uint64) common.Hash {
+	return prefixedPayloadHash(params.SetCodeMagicPrefix, func(w io.Writer, buf []byte) error {
+		return encodeSigningPayload(chainID, address, nonce, w, buf)
+	})
+}
+
+func (ath *Authorization) RecoverSigner() (*common.Address, error) {
 	if ath.Nonce == math.MaxUint64 {
 		return nil, errAuthNonceOverflow
 	}
 
-	if err := encodeSigningPayload(ath.ChainID, ath.Address, ath.Nonce, data, buf); err != nil {
-		return nil, err
-	}
-
-	return recoverSignerFromRLP(data.Bytes(), ath.YParity, ath.R, ath.S)
+	hash := authorizationSigningHash(ath.ChainID, ath.Address, ath.Nonce)
+	return recoverSignerFromHash(hash, ath.YParity, ath.R, ath.S)
 }
 
 // SignAuthorization returns an EIP-7702 authorization signed by key. A non-zero
@@ -83,9 +85,7 @@ func SignAuthorization(key *ecdsa.PrivateKey, chainID uint256.Int, address commo
 		return Authorization{}, errors.New("private key is nil")
 	}
 
-	hash := prefixedPayloadHash(params.SetCodeMagicPrefix, func(w io.Writer, buf []byte) error {
-		return encodeSigningPayload(chainID, address, nonce, w, buf)
-	})
+	hash := authorizationSigningHash(chainID, address, nonce)
 	sig, err := crypto.Sign(hash[:], key)
 	if err != nil {
 		return Authorization{}, err
@@ -102,17 +102,10 @@ func SignAuthorization(key *ecdsa.PrivateKey, chainID uint256.Int, address commo
 	return auth, nil
 }
 
-func recoverSignerFromRLP(rlp []byte, yParity uint8, r uint256.Int, s uint256.Int) (*common.Address, error) {
-	hashData := make([]byte, 0, 1+len(rlp))
-	hashData = append(hashData, params.SetCodeMagicPrefix)
-	hashData = append(hashData, rlp...)
-	hash := crypto.Keccak256Hash(hashData)
-
+func recoverSignerFromHash(hash common.Hash, yParity uint8, r uint256.Int, s uint256.Int) (*common.Address, error) {
 	var sig [65]byte
-	rBytes := r.Bytes()
-	sBytes := s.Bytes()
-	copy(sig[32-len(rBytes):32], rBytes)
-	copy(sig[64-len(sBytes):64], sBytes)
+	r.PutUint256(sig[:32])
+	s.PutUint256(sig[32:64])
 
 	if yParity > 1 {
 		return nil, fmt.Errorf("invalid y parity value: %d", yParity)
