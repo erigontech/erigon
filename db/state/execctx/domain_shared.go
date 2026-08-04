@@ -842,9 +842,8 @@ func (sd *SharedDomains) Logger() log.Logger { return sd.logger }
 
 // SetStateCache hands this SD the process-global state cache to manage:
 // Commit applies committed updates after a successful DB commit, Unwind
-// invalidates them, and reads populate it through admission-gated fills —
-// the SD's own, and read-ahead warmup's through its own ReadView. No-op when
-// USE_STATE_CACHE is off or the cache is nil.
+// invalidates them, and the SD's reads populate it through admission-gated
+// fills. No-op when USE_STATE_CACHE is off or the cache is nil.
 func (sd *SharedDomains) SetStateCache(stateCache *cache.StateCache) {
 	if !dbg.UseStateCache || stateCache == nil {
 		return
@@ -868,9 +867,10 @@ func GuardAggregatorForCache(db any, sc *cache.StateCache) {
 	if !ok {
 		panic(fmt.Sprintf("assert: fill-enabled StateCache wired over %T, which cannot produce its aggregator — the visibility-lowering guard would be silently dropped", db))
 	}
-	f, ok := h.Agg().(interface{ ForbidVisibilityLowering() })
+	agg := h.Agg()
+	f, ok := agg.(interface{ ForbidVisibilityLowering() })
 	if !ok {
-		panic(fmt.Sprintf("assert: aggregator %T lacks ForbidVisibilityLowering — the visibility-lowering guard would be silently dropped", h.Agg()))
+		panic(fmt.Sprintf("assert: aggregator %T lacks ForbidVisibilityLowering — the visibility-lowering guard would be silently dropped", agg))
 	}
 	f.ForbidVisibilityLowering()
 }

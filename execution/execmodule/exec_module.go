@@ -27,7 +27,9 @@ import (
 	"github.com/holiman/uint256"
 	"golang.org/x/sync/semaphore"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon/common"
+
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
@@ -243,7 +245,7 @@ func NewExecModule(
 	hook *stageloop.Hook,
 	accum *Accumulation,
 	stateCache *Cache,
-	domainStateCache *cache.StateCache,
+	stateCacheBudget datasize.ByteSize,
 	logger log.Logger,
 	engine rules.Engine,
 	syncCfg ethconfig.Sync,
@@ -253,17 +255,7 @@ func NewExecModule(
 	readAheader *exec.BlockReadAheader,
 	stopNode func() error,
 ) *ExecModule {
-	// Production passes nil → full-size default cache. Test/CLI harnesses pass a
-	// small cache so building one ExecModule per fixture doesn't allocate
-	// hundreds of MB of LRU tables each. USE_STATE_CACHE=false constructs no
-	// cache at all: neither SharedDomains nor read-ahead gets one to touch.
-	var domainCache *cache.StateCache
-	if dbg.UseStateCache {
-		domainCache = domainStateCache
-		if domainCache == nil {
-			domainCache = cache.NewDefaultStateCache()
-		}
-	}
+	domainCache := newDomainStateCache(stateCacheBudget)
 	execctx.GuardAggregatorForCache(db, domainCache)
 	var codeStore *cache.CodeStore
 	if dbg.UseCodeStore {
@@ -316,6 +308,30 @@ func (e *ExecModule) WaitIdle(ctx context.Context) {
 		return // context cancelled — best effort
 	}
 	e.semaphore.Release(1)
+}
+
+// newDomainStateCache is the module's one construction site of the domain
+// state cache: USE_STATE_CACHE=false builds none, so nothing upstream can
+// allocate a cache that would only be discarded. A budget > 0 overrides the
+// production per-domain byte budget (test harnesses keep per-fixture modules
+// small); 0 means the production default.
+func newDomainStateCache(budget datasize.ByteSize) *cache.StateCache {
+	if !dbg.UseStateCache {
+		return nil
+	}
+	if budget > 0 {
+		return cache.NewStateCache(budget, budget, budget, budget)
+	}
+	return cache.NewDefaultStateCache()
+}
+
+// Close releases the domain state cache's reservation in the shared memory
+// envelope. For harnesses that build many modules per process; production
+// modules live for the process.
+func (e *ExecModule) Close() {
+	if e.stateCache != nil {
+		e.stateCache.Close()
+	}
 }
 
 // closeModuleContext closes and clears e.currentContext. The nil swap happens

@@ -353,6 +353,10 @@ type fakeHasAgg struct{ f *fakeForbidder }
 
 func (h fakeHasAgg) Agg() any { return h.f }
 
+type fakeHasBadAgg struct{}
+
+func (fakeHasBadAgg) Agg() any { return struct{}{} }
+
 // The guard is load-bearing: for a fill-enabled cache it must either bind the
 // invariant or fail loudly — never silently drop it on a DB shape mismatch.
 // A nil or apply-only cache needs no guard at all.
@@ -368,6 +372,8 @@ func TestGuardAggregatorForCache(t *testing.T) {
 		"no cache, no invariant to bind — shape is irrelevant")
 	require.Panics(t, func() { execctx.GuardAggregatorForCache(struct{}{}, sc) },
 		"a db that cannot produce its aggregator must fail loudly, not drop the guard")
+	require.Panics(t, func() { execctx.GuardAggregatorForCache(fakeHasBadAgg{}, sc) },
+		"an aggregator without ForbidVisibilityLowering must fail loudly, not drop the guard")
 }
 
 // An apply-only cache (STATE_CACHE_FILLS=false) has no fills for a lowered

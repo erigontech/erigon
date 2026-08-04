@@ -551,7 +551,13 @@ func (a *Aggregator) UnalignIdx(name kv.InvertedIdx) (realign func()) {
 // ForbidVisibilityLowering marks this aggregator as backing a fill-enabled
 // StateCache: from then on recalcVisibleFiles panics instead of lowering a
 // cached state domain's visible end, whichever entry point caused it.
-func (a *Aggregator) ForbidVisibilityLowering() { a.visibilityLoweringForbidden.Store(true) }
+// Serialized with recalcVisibleFiles via dirtyFilesLock so "from then on"
+// holds against a recalculation already in flight.
+func (a *Aggregator) ForbidVisibilityLowering() {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	a.visibilityLoweringForbidden.Store(true)
+}
 
 func (a *Aggregator) setUnalignedDomain(d kv.Domain, v bool) {
 	a.dirtyFilesLock.Lock()
