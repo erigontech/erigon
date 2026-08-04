@@ -474,6 +474,18 @@ func (p *Provider) Initialize(deps Deps) error {
 			// no-op when Inventory is nil.
 			if inv != nil {
 				for _, name := range frozenFileNames {
+					// Aggregator's NotifyOnFilesChange passes basePath-
+					// relative paths (e.g. "domain/v2.0-accounts.0-256.kv");
+					// the bootstrap path adds via filepath.Base (bare
+					// basename). Inventory keys entries by exact Name match,
+					// so the two paths would deposit two entries for the
+					// same file. Normalize to bare basename here so both
+					// producers converge on the same key — a double-entry
+					// on state files makes regenerateBoundaryStepFiles fire
+					// WriteCommitmentBoundaryFileV4 twice on the same
+					// regenBranches collector, and the second Load panics
+					// on the exhausted providers.
+					name = filepath.Base(name)
 					if state, ok := inv.LifecycleState(name); ok {
 						if state < snapshot.LifecycleAdvertisable {
 							inv.AdvanceTo(name, snapshot.LifecycleAdvertisable)
