@@ -124,7 +124,7 @@ func TestSignAuthorizationRejectsNilKey(t *testing.T) {
 	t.Parallel()
 
 	_, err := SignAuthorization(nil, uint256.Int{}, common.Address{}, 0)
-	if err == nil {
-		t.Fatal("expected nil private key to be rejected")
+	if !errors.Is(err, errAuthNilPrivateKey) {
+		t.Fatalf("expected nil private key to be rejected, got %v", err)
 	}
 }

@@ -16,7 +16,10 @@ import (
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
-var errAuthNonceOverflow = errors.New("failed assertion: auth.nonce < 2**64 - 1")
+var (
+	errAuthNonceOverflow = errors.New("failed assertion: auth.nonce < 2**64 - 1")
+	errAuthNilPrivateKey = errors.New("private key is nil")
+)
 
 type Authorization struct {
 	ChainID uint256.Int
@@ -82,7 +85,7 @@ func SignAuthorization(key *ecdsa.PrivateKey, chainID uint256.Int, address commo
 		return Authorization{}, errAuthNonceOverflow
 	}
 	if key == nil {
-		return Authorization{}, errors.New("private key is nil")
+		return Authorization{}, errAuthNilPrivateKey
 	}
 
 	hash := authorizationSigningHash(chainID, address, nonce)
