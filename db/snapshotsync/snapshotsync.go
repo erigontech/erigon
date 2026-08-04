@@ -425,7 +425,7 @@ func SyncSnapshots(
 			log.Debug(fmt.Sprintf("[%s] filtering", logPrefix), "toBlock", toBlock, "toStep", toStep, "toTxNum", toTxNum)
 			// we downloaded extra seg files during the header chain download (the ones containing the toBlock)
 			// so that we can correctly calculate toTxNum above (now we should delete these)
-			if err = blockReader.Snapshots().RetireFilesAbove(toBlock, func(files []string) error {
+			if err := blockReader.Snapshots().RetireFilesAbove(toBlock, func(files []string) error {
 				return snapshotDownloader.Delete(ctx, files)
 			}); err != nil {
 				return err

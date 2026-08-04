@@ -423,13 +423,14 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	}
 
 	// It is allowed to call precompiles, even via delegatecall
-	if isPrecompile {
+	switch {
+	case isPrecompile:
 		ret, gasRemaining.Execution, err = RunPrecompiledContract(p, input, gasRemaining.Execution, evm.Config().Tracer)
-	} else if len(code) == 0 {
+	case len(code) == 0:
 		// If the account has no code, we can abort here
 		// The depth-check is already done, and precompiles handled above
 		ret, err = nil, nil // gas is unchanged
-	} else {
+	default:
 		// Initialise a new contract and set the code that is to be used by the EVM.
 		// The contract is a scoped environment for this execution context only.
 		var codeHash accounts.CodeHash
@@ -438,7 +439,8 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 			return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 		}
 		var contract Contract
-		if typ == CALLCODE {
+		switch typ {
+		case CALLCODE:
 			contract = Contract{
 				caller:   caller,
 				addr:     caller,
@@ -446,7 +448,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 				Code:     code,
 				CodeHash: codeHash,
 			}
-		} else if typ == DELEGATECALL {
+		case DELEGATECALL:
 			contract = Contract{
 				caller:   callerAddress,
 				addr:     caller,
@@ -454,7 +456,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 				Code:     code,
 				CodeHash: codeHash,
 			}
-		} else {
+		default:
 			contract = Contract{
 				caller:   caller,
 				addr:     addr,

@@ -30,16 +30,17 @@ func BenchmarkAddressDiversity(b *testing.B) {
 
 		b.Run(fmt.Sprintf("%daccounts", n), func(b *testing.B) {
 			b.ReportAllocs()
-			cfg, statedb := benchConfig(b, 100_000_000)
+			vmenv := benchConfig(b, 100_000_000)
+			statedb := vmenv.IntraBlockState()
 			deployContract(statedb, addrContract, code)
 			for i, a := range addrs {
 				addr := accounts.InternAddress(a)
 				statedb.CreateAccount(addr, false)
 				statedb.SetBalance(addr, *uint256.NewInt(uint64(i) + 1), 0)
 			}
-			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
+			prepareAndCall(vmenv, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
 			for b.Loop() {
-				prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+				prepareAndCall(vmenv, addrContract, nil) //nolint:errcheck
 			}
 		})
 	}

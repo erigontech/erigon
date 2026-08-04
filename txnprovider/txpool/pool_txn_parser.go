@@ -188,15 +188,16 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	// Detect actual envelope from the RLP prefix: dataPos > pos means a multi-byte
 	// string prefix wraps the typed transaction bytes.
 	var txBytes []byte
-	if legacy {
+	switch {
+	case legacy:
 		// Legacy tx: full RLP list
 		txBytes = payload[pos : dataPos+dataLen]
 		p = dataPos + dataLen
-	} else if dataPos > pos {
+	case dataPos > pos:
 		// Typed tx with RLP string envelope: inner bytes are the binary encoding
 		txBytes = payload[dataPos : dataPos+dataLen]
 		p = dataPos + dataLen
-	} else {
+	default:
 		// Typed tx without envelope: type byte at pos, followed by RLP list
 		listPos, listLen, err := rlp.ParseList(payload, pos+1)
 		if err != nil {
