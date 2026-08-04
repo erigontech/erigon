@@ -140,7 +140,7 @@ func benchRunVersioned(b *testing.B, self accounts.Address, code []byte) func() 
 func BenchmarkFrameSlotCache_RepeatedSload(b *testing.B) {
 	self := accounts.InternAddress(common.BytesToAddress([]byte("self")))
 	var buf []byte
-	for i := 0; i < 64; i++ {
+	for range 64 {
 		buf = append(buf, 0x60, 0x00, 0x54, 0x50) // PUSH1 0; SLOAD; POP
 	}
 	buf = append(buf, 0x60, 0x00, 0x60, 0x00, 0xf3) // PUSH1 0; PUSH1 0; RETURN (empty)

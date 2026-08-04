@@ -221,6 +221,16 @@ func (cs *calcState) ApplyWrites(writes state.WriteSetView, eip8246 bool) {
 		acc.dirty = true
 	}
 	for addr, inner := range writes.Storages() {
+		// A storage change dirties the account: the commitment must refold the
+		// account leaf's storageRoot, which requires the account key in the update
+		// set. ensureAccount lazy-loads the real balance/nonce/codeHash so
+		// flushToUpdates emits the (otherwise unchanged) account — matching serial's
+		// UpdateAccountData for every dirty object. Without this a storage-only
+		// account (no field write — the common case under rawViewCollapse, which
+		// bypasses Normalize's account-field fill) is never in cs.accounts, so its
+		// account key is dropped and the stale storageRoot yields a wrong root.
+		acc := cs.ensureAccount(addr)
+		acc.dirty = true
 		// Skip lazy-loading the prior slot value: the only downstream consumer
 		// (FlushToUpdates) reads exactly the value set below, so the cold
 		// GetAsOf seek it would cost is wasted.
@@ -378,6 +388,11 @@ func (cs *calcState) ApplyEIP161Removal(emptyRemoval, isAura bool) {
 // always include the full current state (all fields) so the trie sees
 // complete values.
 func (cs *calcState) FlushToUpdates(updates *commitment.Updates) {
+	cs.flushToUpdates(updates, 0)
+}
+
+func (cs *calcState) flushToUpdates(updates *commitment.Updates, blockNum uint64) {
+	dumpTI := commitment.TrieInputDumpActive(blockNum)
 	for addr, acc := range cs.accounts {
 		if !acc.dirty {
 			continue
@@ -418,6 +433,10 @@ func (cs *calcState) FlushToUpdates(updates *commitment.Updates) {
 		if cs.sdSubtree[addr] {
 			u.DeleteStorageSubtree = true
 		}
+		if dumpTI {
+			commitment.DumpTrieInputLine(blockNum, fmt.Sprintf("A %x flags=%d nonce=%d bal=%s ch=%x delsub=%t",
+				address[:], u.Flags, u.Nonce, u.Balance.String(), u.CodeHash[:], u.DeleteStorageSubtree))
+		}
 		updates.TouchPlainKeyDirect(key, &u)
 	}
 
@@ -439,6 +458,9 @@ func (cs *calcState) FlushToUpdates(updates *commitment.Updates) {
 				u.Flags = commitment.StorageUpdate
 				u.StorageLen = int8(len(vBytes))
 				copy(u.Storage[:], vBytes)
+			}
+			if dumpTI {
+				commitment.DumpTrieInputLine(blockNum, fmt.Sprintf("S %x flags=%d val=%x", composite, u.Flags, vBytes))
 			}
 			updates.TouchPlainKeyDirect(string(composite), &u)
 		}

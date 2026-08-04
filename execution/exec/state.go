@@ -103,14 +103,13 @@ type WorkerContext struct {
 	lock    *sync.RWMutex
 	logger  log.Logger
 	chainDb kv.TemporalRoDB
-	// chainRoTx is the raw MDBX roTx that owns this worker's snapshot — the
-	// only handle that may be Rolled back. chainTx is the overlay-aware view
-	// (chainRoTx wrapped with the SharedDomains BlockOverlay if one is active);
-	// all reads must go through chainTx so any new consumer is overlay-aware
-	// by construction.
-	chainRoTx   kv.TemporalTx
+	// chainTx is the overlay-aware read view (the dispatch goroutine's roTx
+	// wrapped with the SharedDomains BlockOverlay if one is active). All reads go
+	// through it so any consumer is overlay-aware by construction. The context
+	// only borrows the tx and never rolls it back — the dispatch goroutine owns
+	// the tx for its whole lifetime and rolls it back on exit.
 	chainTx     kv.TemporalTx
-	background  bool // if true - worker does manage RoTx (begin/rollback) in .ResetTx()
+	background  bool
 	blockReader dbservices.FullBlockReader
 	rs          *state.StateV3Buffered
 	stateWriter state.StateWriter
@@ -202,40 +201,32 @@ func (rw *WorkerContext) ResetState(rs *state.StateV3Buffered, chainTx kv.Tempor
 	if stateReader != nil {
 		rw.SetReader(stateReader)
 	} else {
-		var getter kv.TemporalGetter
-		if chainTx != nil {
-			getter = rs.Domains().AsGetterMetered(chainTx, rw.readMetrics)
-		}
-		// Use CachedReaderV3 for parallel workers — caches account data
-		// on first read per block, providing a stable pre-block committed
-		// view for GetCommittedState. The blockStateCache is set per block
-		// via SetBlockStateCache before workers start.
-		rw.SetReader(state.NewCachedReaderV3(getter, nil))
+		// CachedReaderV3 caches account data on first read per block, giving a
+		// stable pre-block committed view for GetCommittedState. bindTx points
+		// its getter at chainTx (nil until a dispatch goroutine binds its roTx).
+		rw.SetReader(state.NewCachedReaderV3(nil, nil))
 	}
 
 	if stateWriter != nil {
 		rw.stateWriter = stateWriter
 	} else {
-		var putdel kv.TemporalPutDel
-		if chainTx != nil {
-			putdel = rs.Domains().AsPutDel(chainTx)
-		}
-		rw.stateWriter = state.NewWriter(putdel, accumulator, 0)
+		rw.stateWriter = state.NewWriter(nil, accumulator, 0)
 	}
 
-	if chainTx != nil {
-		if err := rw.resetTx(chainTx); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return rw.bindTx(chainTx)
 }
 
 func (rw *WorkerContext) ResetTx(chainTx kv.TemporalTx) error {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
-	return rw.resetTx(chainTx)
+	return rw.bindTx(chainTx)
+}
+
+// BindTxHeld rebinds the worker to chainTx assuming the caller already holds
+// rw.lock — used for a mid-execution rebind from inside RunTxTask (which holds
+// the lock for the whole run), where ResetTx would re-lock and self-deadlock.
+func (rw *WorkerContext) BindTxHeld(chainTx kv.TemporalTx) error {
+	return rw.bindTx(chainTx)
 }
 
 func (rw *WorkerContext) resetTxNum(txNum uint64) {
@@ -252,17 +243,19 @@ func (rw *WorkerContext) resetTxNum(txNum uint64) {
 	}
 }
 
-func (rw *WorkerContext) resetTx(chainTx kv.TemporalTx) error {
-	if rw.background && rw.chainRoTx != nil {
-		rw.chainRoTx.Rollback()
+// bindTx points this worker's reader, writer, and chain reader at chainTx,
+// overlay-wrapped so block metadata staged in the SharedDomains BlockOverlay
+// (headers/bodies/td from InsertBlocks at chaintip) is visible. The worker only
+// borrows the tx — the dispatch goroutine owns its lifetime and rolls it back on
+// exit. A nil tx detaches (teardown); readers/writer keep their type and are
+// re-pointed on the next bind.
+func (rw *WorkerContext) bindTx(chainTx kv.TemporalTx) error {
+	if chainTx == nil {
+		rw.chainTx = nil
+		return nil
 	}
 
-	rw.chainRoTx = chainTx
-	// Wrap with BlockOverlay so block-metadata reads (headers/bodies/td
-	// staged by InsertBlocks at chaintip) are visible. Mirrors the blockTx
-	// pattern in executeBlocks (exec3.go:538-543). Single wrap here so every
-	// consumer of rw.chainTx is overlay-aware by construction.
-	if chainTx != nil && rw.rs != nil {
+	if rw.rs != nil {
 		if sd := rw.rs.Domains(); sd != nil {
 			if overlay := sd.BlockOverlay(); overlay != nil {
 				chainTx = overlay.NewReadView(chainTx)
@@ -271,52 +264,31 @@ func (rw *WorkerContext) resetTx(chainTx kv.TemporalTx) error {
 	}
 	rw.chainTx = chainTx
 
-	if rw.chainTx != nil {
-		type latest interface {
-			SetGetter(kv.TemporalGetter)
+	type latest interface{ SetGetter(kv.TemporalGetter) }
+	type historic interface{ SetTx(kv.TemporalTx) }
+	switch typedReader := rw.stateReader.(type) {
+	case latest:
+		typedReader.SetGetter(rw.rs.Domains().AsGetterMetered(chainTx, rw.readMetrics))
+	case historic:
+		typedReader.SetTx(chainTx)
+	default:
+		if rw.stateReader != nil {
+			return fmt.Errorf("can't set tx for reader: %T", rw.stateReader)
 		}
-
-		type historic interface {
-			SetTx(kv.TemporalTx)
-		}
-
-		switch typedReader := rw.stateReader.(type) {
-		case latest:
-			typedReader.SetGetter(rw.rs.Domains().AsGetterMetered(rw.chainTx, rw.readMetrics))
-		case historic:
-			typedReader.SetTx(rw.chainTx)
-		default:
-			if rw.stateReader != nil {
-				return fmt.Errorf("can't set tx for reader: %T", rw.stateReader)
-			}
-		}
-
-		type withPutter interface {
-			SetPutDel(kv.TemporalPutDel)
-		}
-
-		type withTx interface {
-			SetTx(kv.TemporalTx)
-		}
-
-		switch typedWriter := rw.stateWriter.(type) {
-		case withPutter:
-			typedWriter.SetPutDel(rw.rs.Domains().AsPutDel(rw.chainTx))
-		case withTx:
-			typedWriter.SetTx(rw.chainTx)
-		default:
-			// Writers that don't implement withPutter or withTx (e.g.
-			// NoopWriter, LightCollector) don't need a DB transaction —
-			// they accumulate writes in memory only. This is not an error.
-		}
-
-		rw.chain = consensuschain.NewReader(rw.chainConfig, rw.chainTx, rw.blockReader, rw.logger)
-	} else {
-		rw.chain = nil
-		rw.stateReader = nil
-		rw.stateWriter = nil
 	}
 
+	// Writers that implement neither (NoopWriter, LightCollector) accumulate in
+	// memory and need no tx — not an error.
+	type withPutter interface{ SetPutDel(kv.TemporalPutDel) }
+	type withTx interface{ SetTx(kv.TemporalTx) }
+	switch typedWriter := rw.stateWriter.(type) {
+	case withPutter:
+		typedWriter.SetPutDel(rw.rs.Domains().AsPutDel(chainTx))
+	case withTx:
+		typedWriter.SetTx(chainTx)
+	}
+
+	rw.chain = consensuschain.NewReader(rw.chainConfig, chainTx, rw.blockReader, rw.logger)
 	return nil
 }
 
@@ -423,20 +395,9 @@ func (rw *WorkerContext) RunTxTaskNoLock(txTask Task) *TxResult {
 	}
 
 	if rw.background && rw.chainTx == nil {
-		chainTx, err := rw.chainDb.BeginTemporalRo(rw.ctx) //nolint
-
-		if err != nil {
-			return &TxResult{
-				Task: txTask,
-				Err:  err,
-			}
-		}
-
-		if err = rw.resetTx(chainTx); err != nil {
-			return &TxResult{
-				Task: txTask,
-				Err:  err,
-			}
+		return &TxResult{
+			Task: txTask,
+			Err:  fmt.Errorf("worker run without a bound roTx: the dispatch goroutine must bind a roTx before RunTxTask"),
 		}
 	}
 

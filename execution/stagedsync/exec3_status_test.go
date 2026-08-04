@@ -38,7 +38,7 @@ func TestExecStatusList_TakeNextPending_MinFirst(t *testing.T) {
 
 func TestExecStatusList_MaxCompleteContiguous(t *testing.T) {
 	var m execStatusList
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		m.pushPending(i)
 	}
 	drainPending(&m) // all in-progress
@@ -61,7 +61,7 @@ func TestExecStatusList_MaxCompleteContiguous(t *testing.T) {
 
 func TestExecStatusList_Dependency_Requeue(t *testing.T) {
 	var m execStatusList
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		m.pushPending(i)
 	}
 	drainPending(&m)
@@ -113,11 +113,11 @@ func TestExecStatusList_DrainDeferredIfReady(t *testing.T) {
 
 func TestExecStatusList_RevalidationRange(t *testing.T) {
 	var m execStatusList
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		m.pushPending(i)
 	}
 	drainPending(&m)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		m.markComplete(i)
 	}
 	// tx3 re-dispatched (in-progress again) → excluded from the range.
@@ -135,7 +135,7 @@ func TestExecStatusList_RevalidationRange(t *testing.T) {
 
 func TestExecStatusList_TakePendingWhere_SelectsNonContiguously(t *testing.T) {
 	var m execStatusList
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		m.pushPending(i)
 	}
 

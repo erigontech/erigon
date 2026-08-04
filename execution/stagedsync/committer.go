@@ -690,7 +690,7 @@ func (cc *commitmentCalculator) shadowCrossCheck(ctx context.Context, r *blockRe
 		cc.fail(ctx, r, fmt.Errorf("shadow incremental lazy-load: %w", err))
 		return
 	}
-	cc.state.FlushToUpdates(cc.updates)
+	cc.state.flushToUpdates(cc.updates, r.BlockNum)
 	cc.state.ResetBlockFlags()
 	incUpdates := cc.updates
 	cc.updates = cc.updates.NewEmpty()
@@ -784,7 +784,7 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 		emptyRemoval := t.blockNum != 0 && cc.chainConfig.IsEIP161Enabled(t.blockNum)
 		cc.state.ApplyEIP161Removal(emptyRemoval, cc.chainConfig.Aura != nil)
 	}
-	cc.state.FlushToUpdates(cc.updates)
+	cc.state.flushToUpdates(cc.updates, t.blockNum)
 	if !m.midBlock {
 		cc.state.ResetBlockFlags()
 	}

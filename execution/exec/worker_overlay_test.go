@@ -92,16 +92,11 @@ func TestWorker_ChainReader_SeesOverlayHeader(t *testing.T) {
 		&chain.Config{ChainID: uint256.NewInt(1)}, nil, nil, dirs, logger)
 	rw.rs = rs
 
-	// workerRoTx ownership transfers to rw on ResetTx; rolling it back
-	// directly here would double-Rollback against rw.chainRoTx.
+	// The worker only borrows the tx (bindTx never rolls it back), so the caller
+	// owns workerRoTx and rolls it back here — mirroring the dispatch goroutine.
 	workerRoTx, err := db.BeginTemporalRo(t.Context()) //nolint:gocritic
 	require.NoError(t, err)
-	t.Cleanup(func() {
-		if rw.chainRoTx != nil {
-			rw.chainRoTx.Rollback()
-			rw.chainRoTx = nil
-		}
-	})
+	t.Cleanup(workerRoTx.Rollback)
 	require.NoError(t, rw.ResetTx(workerRoTx))
 
 	got := rw.chain.GetHeaderByHash(hash)
@@ -163,16 +158,11 @@ func TestWorker_ChainReader_NoOverlayStillWorks(t *testing.T) {
 		&chain.Config{ChainID: uint256.NewInt(1)}, nil, nil, dirs, logger)
 	rw.rs = rs
 
-	// workerRoTx ownership transfers to rw on ResetTx; rolling it back
-	// directly here would double-Rollback against rw.chainRoTx.
+	// The worker only borrows the tx (bindTx never rolls it back), so the caller
+	// owns workerRoTx and rolls it back here — mirroring the dispatch goroutine.
 	workerRoTx, err := db.BeginTemporalRo(t.Context()) //nolint:gocritic
 	require.NoError(t, err)
-	t.Cleanup(func() {
-		if rw.chainRoTx != nil {
-			rw.chainRoTx.Rollback()
-			rw.chainRoTx = nil
-		}
-	})
+	t.Cleanup(workerRoTx.Rollback)
 	require.NoError(t, rw.ResetTx(workerRoTx))
 
 	got := rw.chain.GetHeaderByHash(hash)

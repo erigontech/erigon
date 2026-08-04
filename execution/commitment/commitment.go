@@ -1637,6 +1637,21 @@ func (t *Updates) Size() (updates uint64) {
 	}
 }
 
+// ForEachPlainKey calls fn for every touched plain key, regardless of mode.
+// Diagnostic only: dumps the trie-input key SET for serial-vs-parallel comparison.
+func (t *Updates) ForEachPlainKey(fn func(pk []byte)) {
+	switch t.mode {
+	case ModeUpdate:
+		for k := range t.treeIdx {
+			fn(common.ToBytesZeroCopy(k))
+		}
+	case ModeDirect, ModeParallel:
+		for k := range t.keys {
+			fn(common.ToBytesZeroCopy(k))
+		}
+	}
+}
+
 // TouchPlainKey marks plainKey as updated and applies different fn for different key types
 // (different behaviour for Code, Account and Storage key modifications).
 func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, val []byte)) {
@@ -2014,6 +2029,17 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 
 			hk := t.arenaAlloc(item.hashedKey)
 			t.batchSlab = append(t.batchSlab, KeyUpdate{hashedKey: hk, plainKey: item.plainKey, update: item.update})
+
+			if bn := TrieInputDumpBlock.Load(); TrieInputDumpActive(bn) && item.update != nil {
+				pk := []byte(item.plainKey)
+				u := item.update
+				if len(pk) == 20 {
+					DumpTrieInputLine(bn, fmt.Sprintf("A %x flags=%d nonce=%d bal=%s ch=%x delsub=%t",
+						pk, u.Flags, u.Nonce, u.Balance.String(), u.CodeHash[:], u.DeleteStorageSubtree))
+				} else {
+					DumpTrieInputLine(bn, fmt.Sprintf("S %x flags=%d val=%x", pk, u.Flags, u.Storage[:u.StorageLen]))
+				}
+			}
 
 			if warmuper != nil {
 				startDepth := 0

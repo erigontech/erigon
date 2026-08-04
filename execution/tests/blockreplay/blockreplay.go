@@ -12,6 +12,7 @@
 package blockreplay
 
 import (
+	"bytes"
 	"encoding/gob"
 	"os"
 	"time"
@@ -184,7 +185,7 @@ func (r *recordingReader) ReadAccountCode(address accounts.Address) ([]byte, err
 	}
 	k := address.Value()
 	if _, ok := r.fx.Code[k]; !ok {
-		r.fx.Code[k] = common.Copy(c)
+		r.fx.Code[k] = bytes.Clone(c)
 	}
 	return c, nil
 }

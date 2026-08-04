@@ -123,11 +123,11 @@ func TestEphemeralMultiBlockReplay(t *testing.T) {
 
 	diagContinue := os.Getenv("DIAG_CONTINUE") != ""
 	fails := 0
-	for it := 0; it < iters; it++ {
+	for it := range iters {
 		if os.Getenv("CB_TRACE") == "true" {
 			fmt.Printf("[ITER %d]\n", it)
 		}
-		tx, err := db.BeginTemporalRw(ctx)
+		tx, err := db.BeginTemporalRw(ctx) //nolint:gocritic
 		require.NoError(t, err)
 		doms, err := blockreplay.NewWitnessDomains(ctx, tx, merged, seedTxNum, logger)
 		require.NoError(t, err)

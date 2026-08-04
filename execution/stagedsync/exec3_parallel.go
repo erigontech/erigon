@@ -322,6 +322,14 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	// Set accumulator before pe.run() so execLoop sees it without a race.
 	pe.accumulator = accumulator
 
+	// prevBlocks must exist before pe.run() and resetWorkers: both reset paths call
+	// EnablePrevBlockReads(pe.prevBlocks), and a nil registry panics on the first
+	// per-task SetBlock. run() resets workers on its own goroutine, so setting this
+	// after run() is a race.
+	if prevBlockReads {
+		pe.prevBlocks = state.NewPrevBlockList()
+	}
+
 	executorContext, executorCancel, err := pe.run(ctx)
 	defer executorCancel(nil)
 
@@ -369,9 +377,6 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	pe.consumers = newResultStream()
 	pe.consumers.register("applyResults", applyResults, true)
 	pe.consumers.register("commitResults", commitResults, false)
-	if prevBlockReads {
-		pe.prevBlocks = state.NewPrevBlockList()
-	}
 	pe.maxBlockNum = maxBlockNum
 
 	// Configure changeset capture and seed the initial accumulator BEFORE
@@ -1266,9 +1271,6 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 		if err != nil {
 			return err
 		}
-		if blockResult == nil {
-			continue
-		}
 
 		if blockResult != nil {
 			pe.RLock()
@@ -1300,20 +1302,8 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						"tasks", len(blockExecutor.tasks), "exec", blockExecutor.cntExec,
 						"spec", blockExecutor.cntSpecExec, "abort", blockExecutor.cntAbort,
 						"valFail", blockExecutor.cntValidationFail,
-						"valLoopMs", blockExecutor.valLoopNanos/1e6, "calcFeesMs", blockExecutor.calcFeesNanos/1e6,
-						"validateMs", blockExecutor.validateNanos/1e6, "flushMs", blockExecutor.flushNanos/1e6,
-						"stateWritesMs", blockExecutor.stateWritesNanos/1e6, "finalizeMs", blockExecutor.finalizeNanos/1e6,
-						"normalizeMs", blockExecutor.normalizeNanos/1e6, "scheduleMs", blockExecutor.scheduleNanos/1e6,
-						"publishMs", blockExecutor.publishNanos/1e6, "serialMs", blockExecutor.serialNanos/1e6,
-						"valLoopUs", blockExecutor.valLoopNanos/1e3, "sweepUs", blockExecutor.sweepNanos/1e3,
-						"calcFeesUs", blockExecutor.calcFeesNanos/1e3, "finalizeUs", blockExecutor.finalizeNanos/1e3,
-						"normalizeUs", blockExecutor.normalizeNanos/1e3, "commitUs", blockExecutor.commitNanos/1e3,
-						"validateUs", blockExecutor.validateNanos/1e3, "revalUs", blockExecutor.revalNanos/1e3,
-						"selectUs", blockExecutor.selectNanos/1e3, "flushUs", blockExecutor.flushNanos/1e3,
-						"idxReadsUs", blockExecutor.idxReadsNanos/1e3, "fixpIters", blockExecutor.fixpointIters,
 						"blockEndApplyMs", fmt.Sprintf("%.1f", float64(blockResult.flushDur.Nanoseconds())/1e6),
-						"spineUsPerIter", fmt.Sprintf("%.1f", float64(npProc.Nanoseconds())/float64(max(1, blockExecutor.cntExec))/1e3),
-						"maxReadyEarly", blockExecutor.maxReadyEarly)
+						"spineUsPerIter", fmt.Sprintf("%.1f", float64(npProc.Nanoseconds())/float64(max(1, blockExecutor.cntExec))/1e3))
 					npWait, npProc = 0, 0
 				}
 				// Snapshot the just-completed block's changeset BEFORE sending the
@@ -1507,7 +1497,13 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 		switch {
 		case len(t.Dependencies()) > 0:
 			for _, depTxIndex := range t.Dependencies() {
-				executor.execTasks.addDependency(depTxIndex+1, i)
+				// Dependencies() are versionMap TxIndexes; translate to task-index space.
+				depTask := executor.taskIndexOf(depTxIndex)
+				if depTask >= i {
+					panic(fmt.Sprintf("[self-loop] block %d: task %d declares dependency on HIGHER task %d (dep TxIndex %d) — forward dependency",
+						executor.blockNum, i, depTask, depTxIndex))
+				}
+				executor.execTasks.addDependency(depTask, i)
 			}
 			executor.execTasks.clearPending(i)
 		case len(execRequest.accessList) != 0:
@@ -1798,12 +1794,6 @@ func (pe *parallelExecutor) processSingleResult(ctx context.Context, applyTx kv.
 	// preceding blockResult to trigger the fast-path install above).
 	pe.ensureChangesetAccumulator(txResult.Version().BlockNum)
 
-	if depShapeEnabled {
-		serialStart := time.Now()
-		blockResult, err := blockExecutor.nextResult(ctx, pe, txResult, applyTx)
-		blockExecutor.serialNanos += time.Since(serialStart).Nanoseconds()
-		return blockResult, err
-	}
 	return blockExecutor.nextResult(ctx, pe, txResult, applyTx)
 }
 
@@ -1859,7 +1849,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 			slots = len(pe.execWorkers)
 		}
 		pe.execSem = make(chan struct{}, slots)
-		for i := 0; i < slots; i++ {
+		for range slots {
 			pe.execSem <- struct{}{}
 		}
 		pe.results = make(chan *exec.TxResult, len(pe.execWorkers)*8)
@@ -2135,11 +2125,19 @@ const elasticWorkerCap = 4096
 // tasks execute concurrently.
 func (pe *parallelExecutor) dispatchRun(t exec.Task) {
 	pe.runWG.Go(func() {
+		goRoTx, roErr := pe.cfg.db.BeginTemporalRo(pe.workersCtx)
+		if roErr != nil {
+			return
+		}
+		defer goRoTx.Rollback()
 		w := pe.acquireWorker()
 		if w == nil {
 			return
 		}
 		defer func() { pe.releaseWorker(w) }()
+		if err := w.ResetTx(goRoTx); err != nil {
+			return
+		}
 		result := w.RunTxTask(t)
 		select {
 		case pe.results <- result:
@@ -2164,6 +2162,13 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 	go func() {
 		defer pe.runWG.Done()
 		defer be.slInflight.Add(-1)
+		// The roTx is bound to the execution slot, not the goroutine: opened when a
+		// slot is acquired and rolled back when it is released — across a mid-EVM
+		// dependency wait and while parked committed-valid awaiting re-exec. This
+		// bounds concurrent roTxs to the slot count rather than the far larger
+		// parked-goroutine count, so idle parked workers can't exhaust the MDBX
+		// read-tx limiter and starve the in-order task into a deadlock.
+		var goRoTx kv.TemporalTx
 		var w *exec.WorkerContext
 		acquire := func() bool {
 			w = pe.acquireWorker()
@@ -2174,19 +2179,35 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 		// not reduce available concurrency.
 		slotHeld := false
 		releaseSlot := func() {
-			if slotHeld {
-				pe.execSem <- struct{}{}
-				slotHeld = false
+			if !slotHeld {
+				return
 			}
+			if goRoTx != nil {
+				goRoTx.Rollback()
+				goRoTx = nil
+			}
+			pe.execSem <- struct{}{}
+			slotHeld = false
 		}
+		// acquireSlot takes an execution slot and opens the slot's roTx. Binding the
+		// roTx to the worker is the caller's job because the lock discipline differs:
+		// the loop binds via ResetTx (lock free), while the mid-EVM waitCommit rebinds
+		// via BindTxHeld (RunTxTask already holds the worker lock).
 		acquireSlot := func() bool {
 			select {
 			case <-pe.execSem:
 				slotHeld = true
-				return true
 			case <-pe.workersCtx.Done():
 				return false
 			}
+			tx, err := pe.cfg.db.BeginTemporalRo(pe.workersCtx)
+			if err != nil {
+				pe.execSem <- struct{}{}
+				slotHeld = false
+				return false
+			}
+			goRoTx = tx
+			return true
 		}
 		defer releaseSlot()
 		// Mid-flow dep-pause hook: a read observing an in-flight (estimate) write
@@ -2196,10 +2217,16 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 		// a read never aborts/re-executes on an in-flight predecessor.
 		tv.waitCommit = func(dep int) bool {
 			releaseSlot()
-			if !be.waitDep(tv.index, dep+1) {
+			// dep is a versionMap TxIndex (predecessor writer); translate to the
+			// scheduler's task-index frontier space before parking.
+			if !be.waitDep(tv.index, be.taskIndexOf(dep)) {
 				return false
 			}
-			return acquireSlot()
+			if !acquireSlot() {
+				return false
+			}
+			// RunTxTask holds the worker lock across this mid-EVM rebind.
+			return w.BindTxHeld(goRoTx) == nil
 		}
 		send := func(r *exec.TxResult) {
 			be.slSent.Add(1)
@@ -2230,9 +2257,6 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 		// false on the incarnation limit or shutdown.
 		reExec := func() bool {
 			be.slReExec.Add(1)
-			if be.slReExecPerTx != nil {
-				be.slReExecPerTx[tv.index].Add(1)
-			}
 			return bumpInc() && acquire()
 		}
 		// waitTo releases the context, waits for the commit frontier to reach t, then
@@ -2241,14 +2265,7 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 			if be.slTgt != nil {
 				be.slTgt[tv.index].Store(int64(t))
 			}
-			var parkStart time.Time
-			if depShapeEnabled {
-				parkStart = time.Now()
-			}
 			ok := be.waitDep(tv.index, t)
-			if depShapeEnabled {
-				be.slParkNanos.Add(time.Since(parkStart).Nanoseconds())
-			}
 			if be.slTgt != nil {
 				be.slTgt[tv.index].Store(-4)
 			}
@@ -2266,9 +2283,9 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 			if !acquireSlot() {
 				return
 			}
-			var execStart time.Time
-			if depShapeEnabled {
-				execStart = time.Now()
+			if err := w.ResetTx(goRoTx); err != nil {
+				releaseSlot()
+				return
 			}
 			// Invariant: each RUN of a tx uses a strictly ascending incarnation. Two
 			// runs sharing one incarnation (an in-place bumpInc racing a fresh
@@ -2290,9 +2307,6 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 					tip = result.ExecutionResult.FeeTipped
 				}
 				be.coinbaseDeltas.Set(tv.index, &tip)
-			}
-			if depShapeEnabled {
-				be.slExecNanos.Add(time.Since(execStart).Nanoseconds())
 			}
 			releaseSlot()
 			if result.Err != nil {
@@ -2357,10 +2371,6 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 				// wake (buffered channel full, or set just before we parked) is
 				// recovered by re-checking the flag on the next wake. slFin/slDone
 				// only fire once the tx can never be re-checked again.
-				var parkStart time.Time
-				if depShapeEnabled {
-					parkStart = time.Now()
-				}
 				reexec := false
 				for {
 					if be.slReexecFlag[tv.index].Swap(false) {
@@ -2379,9 +2389,6 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 					if done {
 						break
 					}
-				}
-				if depShapeEnabled {
-					be.slParkNanos.Add(time.Since(parkStart).Nanoseconds())
 				}
 				if !reexec {
 					return
@@ -2443,6 +2450,13 @@ func (be *blockExecutor) selfLoopEvaluate(tv *taskVersion, result *exec.TxResult
 		func(rv, wv state.Version) state.VersionValidity {
 			if rv != wv {
 				if b := be.taskIndexOf(wv.TxIndex); b > blocker {
+					// Invariant: a read can only be invalidated by a PREDECESSOR write.
+					// A blocker >= this task is a forward dependency (a future write
+					// invalidating a past read) — impossible in Block-STM; fail loud.
+					if b >= tv.index {
+						panic(fmt.Sprintf("[self-loop] block %d: task %d (TxIndex %d) invalidated by HIGHER task %d (writer TxIndex %d) — forward validation dependency",
+							be.blockNum, tv.index, tv.version.TxIndex, b, wv.TxIndex))
+					}
 					blocker = b
 				}
 				return state.VersionInvalid
@@ -2895,7 +2909,7 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	calcFees bool) (result *exec.TxResult) {
 
 	var start time.Time
-	if ev.profile || depShapeEnabled || logNpPhases {
+	if ev.profile || logNpPhases {
 		start = time.Now()
 	}
 
@@ -2924,7 +2938,7 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 		return result
 	}
 
-	if ev.profile || depShapeEnabled {
+	if ev.profile {
 		end := time.Now()
 		ev.statsMutex.Lock()
 		ev.stats[ev.version.TxIndex] = ExecutionStat{
@@ -3079,33 +3093,8 @@ type blockExecutor struct {
 	applyCount  int
 	exhausted   *ErrLoopExhausted
 
-	// Serial-spine timing (DEP_SHAPE only): total wall spent in the single-
-	// threaded exec-loop apply path (nextResult), and the per-component split
-	// of the in-order validation loop. serialNanos / (exec wall) is the Amdahl
-	// serial floor; the components rank what to attack.
-	serialNanos      int64
-	valLoopNanos     int64
-	commitNanos      int64
-	scheduleNanos    int64
-	publishNanos     int64
-	stateWritesNanos int64
-	txIndexNanos     int64
-	calcFeesNanos    int64
-	validateNanos    int64
-	flushNanos       int64
-	finalizeNanos    int64
-	normalizeNanos   int64
-	sweepNanos       int64
-	selectNanos      int64
-	finRevalChecks   int64
-	finRevalFires    int64
-	idxReadsNanos    int64
-	recordIONanos    int64
-	revalNanos       int64
-	revalCalls       int64
-	revalScanned     int64
-	revalReValidated int64
-	fixpointIters    int64
+	finRevalChecks int64
+	finRevalFires  int64
 
 	// blockStateCache provides a stable pre-block snapshot of account data
 	// for GetCommittedState reads, unaffected by intra-block ApplyStateWrites.
@@ -3114,12 +3103,6 @@ type blockExecutor struct {
 	// execCpuNanos sums exec CPU across ALL incarnations (NEWPAYLOAD_PHASES only)
 	// for worker-occupancy attribution vs the npWait/npProc wall.
 	execCpuNanos atomic.Int64
-
-	// maxReadyEarly (diagnostic) is the peak count of exec-complete, not-yet-
-	// validated txs whose read-dependencies are ALL already validated — the set
-	// dependency-ordered validation could commit now but the contiguous
-	// maxComplete/maxValidated gate blocks. Sizes the early-validation opportunity.
-	maxReadyEarly int
 
 	// coinbase is the block's fee recipient, cached from the first tx result;
 	// dependency-ordered validation needs it to gate coinbase readers.
@@ -3183,9 +3166,6 @@ type blockExecutor struct {
 	slReexecConsumed atomic.Int64
 	slHazardSkip     atomic.Int64   // base-read hazard: finalized dependent skipped by revalidation (would be stale)
 	slLateFinalized  atomic.Int64   // late-result hazard: a result landed on an already-finalized tx (committed-prefix corruption)
-	slExecNanos      atomic.Int64   // profiling (DEP_SHAPE): total worker wall in RunTxTask
-	slParkNanos      atomic.Int64   // profiling (DEP_SHAPE): total worker wall parked/waiting for the commit frontier
-	slReExecPerTx    []atomic.Int32 // profiling (DEP_SHAPE): per-task re-execution count
 	slProcessed      atomic.Int64   // exec-loop heartbeat: results processed by nextResult
 	slTgt            []atomic.Int64 // per-task state: -2 undispatched, -4 active, -3 sent, >=0 parked-on-target
 	// selfLoopDispatched guards against re-dispatching a task the self-loop
@@ -3193,23 +3173,6 @@ type blockExecutor struct {
 	// the exec-loop scheduler must dispatch each task exactly once. Touched only
 	// on the exec-loop goroutine (dispatch()).
 	selfLoopDispatched map[int]bool
-}
-
-// countReadyEarly returns how many exec-complete, not-yet-validated txs have all
-// their read-dependencies (MapRead predecessors) already validated — i.e. txs
-// that dependency-ordered validation could validate/commit immediately but the
-// contiguous in-order gate currently defers. Diagnostic only.
-func (be *blockExecutor) countReadyEarly() int {
-	n := 0
-	for tx := 0; tx < len(be.tasks); tx++ {
-		if !be.execTasks.checkComplete(tx) || be.validateTasks.checkComplete(tx) {
-			continue
-		}
-		if be.depsValidated(tx) {
-			n++
-		}
-	}
-	return n
 }
 
 // readyForDepOrderValidation decides whether tx may be validated out of
@@ -3312,10 +3275,6 @@ type readerKey struct {
 // incarnations; the precise HasReadDep re-check in revalidateCommittedDependents
 // filters any stale entry, so over-inclusion only costs a redundant check.
 func (be *blockExecutor) indexReads(taskIdx int, rs state.ReadSet) {
-	if depShapeEnabled {
-		s := time.Now()
-		defer func() { be.idxReadsNanos += time.Since(s).Nanoseconds() }()
-	}
 	rs.RangeFullHeaders(func(a accounts.Address, p state.AccountPath, k accounts.StorageKey, _ state.ReadHeader) bool {
 		rk := readerKey{a, p, k}
 		be.readerIdx[rk] = append(be.readerIdx[rk], taskIdx)
@@ -3426,14 +3385,7 @@ func (be *blockExecutor) finalizeValidatedTx(pe *parallelExecutor, applyTx kv.Te
 		}
 	}
 
-	var finalizeStart time.Time
-	if depShapeEnabled {
-		finalizeStart = time.Now()
-	}
 	_, addReads, finalizeWrites, err := txResult.finalize(cumulativeGasUsed, firstLogIndex, pe.cfg.engine, be.versionMap, *stateReader)
-	if depShapeEnabled {
-		be.finalizeNanos += time.Since(finalizeStart).Nanoseconds()
-	}
 	if err != nil {
 		return nil, err
 	}
@@ -3504,14 +3456,7 @@ func (be *blockExecutor) finalizeValidatedTx(pe *parallelExecutor, applyTx kv.Te
 			}
 			// Mirror txtask.go's genesis rules-clobber so empty allocs (AuRa ZeroAddress) survive.
 			emptyRemoval := be.blockNum != 0 && pe.cfg.chainConfig.IsEIP161Enabled(be.blockNum)
-			var normalizeStart time.Time
-			if depShapeEnabled {
-				normalizeStart = time.Now()
-			}
 			normWrites, normErr := rawWrites.Normalize(be.versionMap, txVersion.TxIndex, resultIncarnation, *stateReader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil, txTask.Rules().IsAmsterdam)
-			if depShapeEnabled {
-				be.normalizeNanos += time.Since(normalizeStart).Nanoseconds()
-			}
 			if domainKeysErr != nil {
 				return nil, fmt.Errorf("[parallel] iterate storage prefix for block write normalization: %w", domainKeysErr)
 			}
@@ -3604,9 +3549,6 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 					return state.VersionValid
 				}, false, "") != state.VersionValid {
 				be.finRevalFires++
-				if depShapeEnabled {
-					fmt.Printf("[FINREVAL-FIRE] blk=%d tx=%d txIdx=%d\n", be.blockNum, tx, txVersion.TxIndex)
-				}
 				be.validateTasks.clearComplete(tx)
 				be.preValidated[tx] = false
 				if selfLoop {
@@ -3631,14 +3573,7 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 					*stateReader = pe.prevBlockBase(state.NewCurrentCachedReaderV3(pe.domainsRead().AsGetter(applyTx), be.blockStateCache), be.blockNum)
 				}
 			}
-			var calcFeesStart time.Time
-			if depShapeEnabled {
-				calcFeesStart = time.Now()
-			}
 			tipWrites, err := txResult.calcFees(taskVer, be.versionMap, *stateReader, txTask.Rules())
-			if depShapeEnabled {
-				be.calcFeesNanos += time.Since(calcFeesStart).Nanoseconds()
-			}
 			if err != nil {
 				return nil, err
 			}
@@ -3728,6 +3663,13 @@ func (be *blockExecutor) waitDep(tx, target int) bool {
 			"a dependency reached waitDep in versionMap space (missing taskIndexOf translation); "+
 			"block start TxIndex=%d", be.blockNum, target, len(be.tasks), tx, be.tasks[0].Version().TxIndex))
 	}
+	// Invariant: a task never waits for a HIGHER task to commit — that is a forward
+	// dependency the in-order frontier can never satisfy (deadlock). Fail loud at
+	// the exact site so the stack shows which caller produced the forward target.
+	if target > tx {
+		panic(fmt.Sprintf("[self-loop] block %d: task %d waiting for HIGHER target %d (forward dependency — invariant violation); "+
+			"block start TxIndex=%d", be.blockNum, tx, target, be.tasks[0].Version().TxIndex))
+	}
 	be.slParked.Add(1)
 	defer be.slParked.Add(-1)
 	for {
@@ -3801,16 +3743,8 @@ func (be *blockExecutor) revalidateCommittedDependents(changedTx int, oldWrites 
 	// be.tasks / the status lists are keyed by task index; be.blockIO is keyed by
 	// the block-level TxIndex. They differ by the block's leading system tx, so
 	// blockIO reads must map through be.tasks[i].Task.Version().TxIndex.
-	if depShapeEnabled {
-		be.revalCalls++
-		revalStart := time.Now()
-		defer func() { be.revalNanos += time.Since(revalStart).Nanoseconds() }()
-	}
 	newWrites := be.blockIO.WriteSet(be.tasks[changedTx].Task.Version().TxIndex)
 	for _, tx := range be.revalCandidates(changedTx, newWrites, oldWrites) {
-		if depShapeEnabled {
-			be.revalScanned++
-		}
 		if !be.validateTasks.checkComplete(tx) || be.publishTasks.checkComplete(tx) {
 			continue
 		}
@@ -3836,9 +3770,6 @@ func (be *blockExecutor) revalidateCommittedDependents(changedTx int, oldWrites 
 		txResult := be.finalizedResults[tx]
 		if txResult == nil {
 			continue
-		}
-		if depShapeEnabled {
-			be.revalReValidated++
 		}
 		txVersion := txResult.Task.Version()
 		if be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
@@ -3937,32 +3868,15 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 	// next worker result, which may never arrive once the pipeline drains — the
 	// dep-order hang. Loop until a pass validates nothing and the frontier is stable.
 	for {
-		if depShapeEnabled {
-			be.fixpointIters++
-		}
 		beforeCb := be.coinbaseFlushedUpTo
-		var sweepStart time.Time
-		if depShapeEnabled {
-			sweepStart = time.Now()
-		}
 		if r, ferr := be.advanceCoinbaseAndFinalize(pe, applyTx, stateReader); ferr != nil || r != nil {
 			return r, ferr
 		}
-		if depShapeEnabled {
-			be.sweepNanos += time.Since(sweepStart).Nanoseconds()
-		}
 
 		coinbase := be.coinbase
-		var selStart time.Time
-		if depShapeEnabled {
-			selStart = time.Now()
-		}
 		toValidate := be.validateTasks.takePendingWhere(func(t int) bool {
 			return be.readyForDepOrderValidation(t, coinbase, be.coinbaseFlushedUpTo)
 		})
-		if depShapeEnabled {
-			be.selectNanos += time.Since(selStart).Nanoseconds()
-		}
 
 		for _, tx := range toValidate {
 			be.cntTotalValidations++
@@ -3975,10 +3889,6 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 				tracePrefix = fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txVersion.Incarnation)
 			}
 
-			var validateStart time.Time
-			if depShapeEnabled {
-				validateStart = time.Now()
-			}
 			blockerTxIndex := -1
 			// The worker's read-set verdict is a parallel pre-filter, not
 			// authoritative: a lower tx can write a key this tx read AFTER the worker
@@ -3997,9 +3907,6 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 					}
 					return state.VersionValid
 				}, trace, tracePrefix)
-			if depShapeEnabled {
-				be.validateNanos += time.Since(validateStart).Nanoseconds()
-			}
 			// SetTrace mutates the shared versionMap; under selfLoop workers validate it
 			// concurrently, so only touch the flag when tracing is actually on.
 			if dbg.TraceTransactionIO {
@@ -4012,10 +3919,6 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 				be.versionMap.SetTrace(trace)
 			}
 			writeSet := be.blockIO.WriteSet(txVersion.TxIndex)
-			var flushStart time.Time
-			if depShapeEnabled {
-				flushStart = time.Now()
-			}
 			if coinbaseSum && valid && !be.coinbase.IsNil() {
 				cb := be.coinbase
 				isCoinbaseBal := func(h state.WriteHeader) bool {
@@ -4027,9 +3930,6 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 				be.versionMap.FlushVersionedWrites(writeSet.Filter(isCoinbaseBal), false, tracePrefix)
 			} else {
 				be.versionMap.FlushVersionedWrites(writeSet, valid, tracePrefix)
-			}
-			if depShapeEnabled {
-				be.flushNanos += time.Since(flushStart).Nanoseconds()
 			}
 			if dbg.TraceTransactionIO {
 				be.versionMap.SetTrace(false)
@@ -4083,7 +3983,13 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 			// blocker could be registered (the writer already completed).
 			blocked := false
 			if depTrueDepsOnly && blockerTxIndex >= 0 {
-				blocked = be.execTasks.addDependency(blockerTxIndex+1, tx)
+				// blockerTxIndex is a versionMap TxIndex; translate to task-index space.
+				depTask := be.taskIndexOf(blockerTxIndex)
+				if depTask >= tx {
+					panic(fmt.Sprintf("[self-loop] block %d: task %d re-dispatch depends on HIGHER task %d (writer TxIndex %d) — forward dependency",
+						be.blockNum, tx, depTask, blockerTxIndex))
+				}
+				blocked = be.execTasks.addDependency(depTask, tx)
 			}
 			if !blocked {
 				be.execTasks.pushDeferred(tx)
@@ -4095,15 +4001,8 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 			}
 		}
 
-		var sweep2Start time.Time
-		if depShapeEnabled {
-			sweep2Start = time.Now()
-		}
 		if r, ferr := be.advanceCoinbaseAndFinalize(pe, applyTx, stateReader); ferr != nil || r != nil {
 			return r, ferr
-		}
-		if depShapeEnabled {
-			be.sweepNanos += time.Since(sweep2Start).Nanoseconds()
 		}
 		// Fixpoint reached: this pass validated nothing and the coinbase frontier
 		// did not advance, so no further validation can proceed without a fresh
@@ -4234,11 +4133,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	// do validations ...
 	var stateReader state.StateReader
 
-	var valLoopStart time.Time
-	if depShapeEnabled {
-		valLoopStart = time.Now()
-	}
-
 	if depOrderVal {
 		if r, derr := be.runDepOrderValidation(pe, applyTx, &stateReader); derr != nil || r != nil {
 			return r, derr
@@ -4293,14 +4187,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 						stateReader = pe.prevBlockBase(state.NewCurrentCachedReaderV3(pe.domainsRead().AsGetter(applyTx), be.blockStateCache), be.blockNum)
 					}
 				}
-				var calcFeesStart time.Time
-				if depShapeEnabled {
-					calcFeesStart = time.Now()
-				}
 				tipWrites, err := txResult.calcFees(taskVer, be.versionMap, stateReader, txTask.Rules())
-				if depShapeEnabled {
-					be.calcFeesNanos += time.Since(calcFeesStart).Nanoseconds()
-				}
 				if err != nil {
 					return nil, err
 				}
@@ -4311,10 +4198,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 			}
 
-			var validateStart time.Time
-			if depShapeEnabled {
-				validateStart = time.Now()
-			}
 			validity := be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
 				func(readVersion, writtenVersion state.Version) state.VersionValidity {
 					vv := state.VersionValid
@@ -4327,9 +4210,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 					return vv
 				}, trace, tracePrefix)
-			if depShapeEnabled {
-				be.validateNanos += time.Since(validateStart).Nanoseconds()
-			}
 			be.versionMap.SetTrace(false)
 
 			if validity == state.VersionTooEarly {
@@ -4343,29 +4223,15 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 			be.versionMap.SetTrace(trace)
 			writeSet := be.blockIO.WriteSet(txVersion.TxIndex)
-			var flushStart time.Time
-			if depShapeEnabled {
-				flushStart = time.Now()
-			}
 			be.versionMap.FlushVersionedWrites(writeSet, applyLoopFlushAsComplete(valid, cntInvalid), tracePrefix)
-			if depShapeEnabled {
-				be.flushNanos += time.Since(flushStart).Nanoseconds()
-			}
 			be.versionMap.SetTrace(false)
 
 			if valid {
 				if cntInvalid == 0 {
-					var commitStart time.Time
-					if depShapeEnabled {
-						commitStart = time.Now()
-					}
 					be.validateTasks.markComplete(tx)
 
 					if r, ferr := be.finalizeValidatedTx(pe, applyTx, tx, txTask, txResult, txVersion, &stateReader); ferr != nil || r != nil {
 						return r, ferr
-					}
-					if depShapeEnabled {
-						be.commitNanos += time.Since(commitStart).Nanoseconds()
 					}
 				}
 			} else {
@@ -4393,27 +4259,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		}
 	}
 
-	if depShapeEnabled {
-		be.valLoopNanos += time.Since(valLoopStart).Nanoseconds()
-		if re := be.countReadyEarly(); re > be.maxReadyEarly {
-			be.maxReadyEarly = re
-		}
-	}
-
 	maxValidated := be.validateTasks.maxComplete()
-	var scheduleStart time.Time
-	if depShapeEnabled {
-		scheduleStart = time.Now()
-	}
 	be.scheduleExecution(ctx, pe)
-	if depShapeEnabled {
-		be.scheduleNanos += time.Since(scheduleStart).Nanoseconds()
-	}
 
-	var publishStart time.Time
-	if depShapeEnabled {
-		publishStart = time.Now()
-	}
 	if be.publishTasks.minPending() != -1 {
 		toPublish := make(sort.IntSlice, 0, 2)
 
@@ -4495,28 +4343,14 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			// folds the versionMap views the txResults carry at block end, keeping
 			// sd.mem at N-1 during exec so seedOrigin reads the committed base.
 			if !splitApply && !discardApply {
-				var stateWritesStart time.Time
-				if depShapeEnabled {
-					stateWritesStart = time.Now()
-				}
 				if err := pe.rs.ApplyStateWrites(ctx, applyTx, applyResult.blockNum, applyResult.txNum, applyResult.writes,
 					nil, applyResult.rules, be.blockStateCache); err != nil {
 					return nil, err
 				}
-				if depShapeEnabled {
-					be.stateWritesNanos += time.Since(stateWritesStart).Nanoseconds()
-				}
 
-				var txIndexStart time.Time
-				if depShapeEnabled {
-					txIndexStart = time.Now()
-				}
 				if err := pe.rs.ApplyTxIndexes(applyTx, applyResult.txNum, applyResult.receipt, applyResult.cumulativeBlobGasUsed,
 					applyResult.logs, applyResult.traceFroms, applyResult.traceTos); err != nil {
 					return nil, fmt.Errorf("ApplyTxIndexes block=%d txNum=%d: %w", applyResult.blockNum, applyResult.txNum, err)
-				}
-				if depShapeEnabled {
-					be.txIndexNanos += time.Since(txIndexStart).Nanoseconds()
 				}
 			}
 
@@ -4524,9 +4358,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				return nil, err
 			}
 		}
-	}
-	if depShapeEnabled {
-		be.publishNanos += time.Since(publishStart).Nanoseconds()
 	}
 
 	if be.publishTasks.countComplete() == len(be.tasks) && be.execTasks.countComplete() == len(be.tasks) {
@@ -4769,42 +4600,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			execEndedAt:      time.Now(),
 			flushDur:         flushDur,
 		}
-		if depShapeEnabled && !be.execStarted.IsZero() {
-			logDepShape(pe.logger, be.blockNum, be.blockIO, be.stats, time.Since(be.execStarted), be.serialTiming())
-		}
-		if selfLoop && depShapeEnabled {
-			// Re-exec distribution: how many tasks re-ran 0/1/2/3+ times, and the
-			// worst offenders — shows whether the ~re-exec waste clusters on a few
-			// hot tasks (targetable) or is spread across the block.
-			var rx0, rx1, rx2, rx3 int
-			type txrx struct{ tx, n int }
-			var worst []txrx
-			for i := range be.slReExecPerTx {
-				n := int(be.slReExecPerTx[i].Load())
-				switch {
-				case n == 0:
-					rx0++
-				case n == 1:
-					rx1++
-				case n == 2:
-					rx2++
-				default:
-					rx3++
-				}
-				if n >= 3 {
-					worst = append(worst, txrx{i, n})
-				}
-			}
-			sort.Slice(worst, func(a, b int) bool { return worst[a].n > worst[b].n })
-			if len(worst) > 8 {
-				worst = worst[:8]
-			}
-			log.Warn("[self-loop] done", "blk", be.blockNum, "tasks", len(be.tasks), "sent", be.slSent.Load(), "reExec", be.slReExec.Load(),
-				"hazardSkip", be.slHazardSkip.Load(), "lateFinalized", be.slLateFinalized.Load(),
-				"execMs", be.slExecNanos.Load()/1e6, "parkMs", be.slParkNanos.Load()/1e6,
-				"rxDist", fmt.Sprintf("0:%d 1:%d 2:%d 3+:%d", rx0, rx1, rx2, rx3),
-				"rxWorst", fmt.Sprintf("%v", worst))
-		}
 		return be.result, nil
 	}
 
@@ -4829,9 +4624,6 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 		be.wakeAt = map[int][]int{}
 		if coinbaseVec {
 			be.coinbaseDeltas = state.NewFeeDeltaVec(len(be.tasks))
-		}
-		if depShapeEnabled {
-			be.slReExecPerTx = make([]atomic.Int32, len(be.tasks))
 		}
 		if selfLoopDebug {
 			be.slTgt = make([]atomic.Int64, len(be.tasks))

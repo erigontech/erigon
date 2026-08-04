@@ -71,7 +71,6 @@ func TestInlineDispatch_EquivalenceOracle(t *testing.T) {
 		"run_off_end_no_stop":     "6001600280", // ends mid-stack, no STOP -> implicit halt
 	}
 	for name, hexProg := range corpus {
-		name, hexProg := name, hexProg
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			code := hexcode(t, hexProg)
@@ -119,7 +118,7 @@ func BenchmarkInlineDispatch(b *testing.B) {
 	self := accounts.InternAddress(common.BytesToAddress([]byte("self")))
 	var buf []byte
 	buf = append(buf, 0x60, 0x01) // PUSH1 1
-	for i := 0; i < 256; i++ {
+	for range 256 {
 		buf = append(buf, 0x60, 0x02, 0x80, 0x81, 0x90, 0x50, 0x50) // PUSH1 2; DUP1; DUP2; SWAP1; POP; POP
 	}
 	buf = append(buf, 0x00) // STOP
@@ -130,7 +129,7 @@ func BenchmarkInlineDispatch(b *testing.B) {
 		b.Run(tc.name, func(b *testing.B) {
 			run := benchRunVersionedCfg(b, self, buf, vm.Config{NoInlineDispatch: tc.noInline})
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for range b.N {
 				run()
 			}
 		})

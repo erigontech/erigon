@@ -131,7 +131,6 @@ func TestRawViewVsNormalize_CalcParity(t *testing.T) {
 			newWS().bal(A, ver, uint256.Int{}).nonce(A, ver, 0).codeHash(A, ver, accounts.EmptyCodeHash).build()},
 	}
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			vm := state.NewVersionMap(nil)
 			vm.FlushVersionedWrites(tc.ws, true, "")

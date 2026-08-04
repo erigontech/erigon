@@ -2636,6 +2636,28 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		default:
 		}
 
+		if bn := TrieInputDumpBlock.Load(); TrieInputDumpActive(bn) {
+			u := stateUpdate
+			if u == nil {
+				var derr error
+				if int16(len(plainKey)) == hph.accountKeyLen {
+					u, derr = hph.accountFromCacheOrDB(plainKey)
+				} else {
+					u, derr = hph.storageFromCacheOrDB(plainKey)
+				}
+				if derr != nil {
+					return derr
+				}
+			}
+			if u != nil {
+				if int16(len(plainKey)) == hph.accountKeyLen {
+					DumpTrieInputLine(bn, fmt.Sprintf("KV A %x nonce=%d bal=%s ch=%x", plainKey, u.Nonce, u.Balance.String(), u.CodeHash[:]))
+				} else {
+					DumpTrieInputLine(bn, fmt.Sprintf("KV S %x val=%x", plainKey, u.Storage[:u.StorageLen]))
+				}
+			}
+		}
+
 		if hph.traceW != nil {
 			update := stateUpdate
 

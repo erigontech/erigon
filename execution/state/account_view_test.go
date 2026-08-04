@@ -48,7 +48,6 @@ func TestVersionedAccountView_MatchesMaterialized(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			vm := NewVersionMap(nil)
@@ -108,7 +107,6 @@ func TestVersionedAccountView_GetCode_MatchesMaterialized(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			vm := NewVersionMap(nil)
