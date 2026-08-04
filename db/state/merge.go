@@ -141,7 +141,7 @@ func findMergeRangeInFiles(files visibleFiles, stepSize, maxEndTxNum, maxSpan ui
 		if start >= item.startTxNum {
 			continue
 		}
-		if !filesCoverBackwardTo(files, i, start) {
+		if !filesCoverBackwardTo(files, i, start, stepSize) {
 			continue
 		}
 		if r.needMerge && start > r.from {
@@ -172,13 +172,30 @@ func findMergeRangeInFiles(files visibleFiles, stepSize, maxEndTxNum, maxSpan ui
 // writes `.256-288.v` containing only the .287-288 content, and every
 // subsequent reader (mode-B compute in particular) sees a file whose
 // step range lies about its data coverage.
-func filesCoverBackwardTo(files visibleFiles, i int, start uint64) bool {
+//
+// Mode-C v4 bridge: a file whose endTxN is not step-aligned (i.e. mode-C
+// boundary regen at a mid-step target) overlaps its per-step successor
+// (successor.startTxN falls inside the v4 range). Strict adjacency
+// would break the walk at v4 and no merge including v4 would ever be
+// proposed → v4 accumulates on disk forever. When the current pair is
+// f[j].endTxN not step-aligned AND f[j] straddles coverStart
+// (start ≤ coverStart ≤ end), treat it as adjacent and continue the
+// walk from f[j].startTxN. Constrained to non-step-aligned endTxN so
+// a real gap between legacy step-aligned files is still surfaced (the
+// data-corruption case the guard above catches).
+func filesCoverBackwardTo(files visibleFiles, i int, start, stepSize uint64) bool {
 	coverStart := files[i].startTxNum
 	for j := i - 1; j >= 0; j-- {
-		if files[j].endTxNum != coverStart {
-			break
+		f := files[j]
+		switch {
+		case f.endTxNum == coverStart:
+			// strict adjacency (legacy step-aligned chain)
+		case f.endTxNum%stepSize != 0 && f.startTxNum <= coverStart && f.endTxNum >= coverStart:
+			// mode-C v4 bridge over a real overlap
+		default:
+			return coverStart <= start
 		}
-		coverStart = files[j].startTxNum
+		coverStart = f.startTxNum
 		if coverStart <= start {
 			return true
 		}

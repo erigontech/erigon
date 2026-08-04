@@ -1058,6 +1058,58 @@ func TestFindMergeRangeInFiles(t *testing.T) {
 		assert.Equal(t, uint64(256), mr.from)
 		assert.Equal(t, uint64(288), mr.to)
 	})
+
+	// --- Mode-C v4 bridge: a file with non-step-aligned endTxN
+	// (emitted by mode-C boundary regen at a mid-step target) overlaps
+	// with the per-step successor that lands during forward-exec.
+	// filesCoverBackwardTo must bridge over the v4 file so a wider
+	// merge can consume both v4 and its per-step successors, producing
+	// a step-aligned superset that StaleNonMaximal culls v4 against.
+	// Without the bridge, retire never supersedes v4 → v4 accumulates
+	// on disk forever.
+
+	t.Run("v4_bridge_allows_wider_merge_over_mode_c_overlap", func(t *testing.T) {
+		// stepSize=4. v4 at (8, 14): step-aligned start (step 2), mid-step end.
+		// Per-step successors start INSIDE v4's raw-txnum range (12 ∈ [8, 14)).
+		// Walk from f(24,32) with endStep=8 (span=8*4=32) needs to reach 0.
+		// Without bridge: walk breaks at v4 (14 ≠ 12) → no merge.
+		// With bridge: v4's start=8 <= 12 and end=14 >= 12 → coverStart drops to 8,
+		//              then legacy f(0,8) closes the walk to 0. Merge (0, 32) fires.
+		files := visibleFiles{
+			f(0, 8),   // legacy
+			f(8, 14),  // v4: mid-step end (14 % 4 == 2)
+			f(12, 16), // per-step overlapping v4
+			f(16, 20),
+			f(20, 24),
+			f(24, 32),
+		}
+		mr := findMergeRangeInFiles(files, uint64(4), 32, uint64(32), false)
+		assert.True(t, mr.needMerge, "mid-step v4 file must not block merges that span across it")
+		assert.Equal(t, uint64(0), mr.from)
+		assert.Equal(t, uint64(32), mr.to)
+	})
+
+	t.Run("v4_bridge_leaves_real_gaps_intact", func(t *testing.T) {
+		// Guard: the relaxation only activates on mid-step endTxN AND
+		// only when the bridge file actually overlaps coverStart. A
+		// real gap between step-aligned files (both ends % stepSize == 0,
+		// end < coverStart) must still break the walk so corrupted
+		// coverage doesn't get silently merged over.
+		//
+		// Layout: f(0,4) then GAP then f(8,12), f(12,16). No v4-shaped
+		// file. Walk from f(12,16) reaches coverStart=8 via f(8,12),
+		// then f(0,4).end=4 ≠ 8 AND f(0,4) is step-aligned → break.
+		// No bridge. calculateMergeStartTxNum(16, 4, 16) proposes
+		// start=0, walk fails to reach it → no merge.
+		files := visibleFiles{
+			f(0, 4),
+			f(8, 12),
+			f(12, 16),
+		}
+		mr := findMergeRangeInFiles(files, uint64(4), 16, uint64(16), false)
+		assert.False(t, mr.needMerge,
+			"real gap in step-aligned partition must not be bridged")
+	})
 }
 
 func Test_mergeEliasFano(t *testing.T) {
