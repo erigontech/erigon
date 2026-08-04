@@ -2500,6 +2500,10 @@ http = true
 
 Erigon supports configuration through environment variables, primarily for experimental features and advanced settings.
 
+:::tip
+Erigon's own variables — everything below except the [Docker](#docker-environment-variables) ones, which are read by Docker rather than by Erigon — can be set with or without an `ERIGON_` prefix. `ERIGON_SNAPSHOT_MADV_RND` and `SNAPSHOT_MADV_RND` both work. Prefer the prefixed form: Erigon logs a warning when it reads the bare name, and the prefix keeps these from colliding with unrelated variables in your environment. The examples below use it.
+:::
+
 ### Core Environment Variables
 
 **Database and Performance:**
@@ -2548,16 +2552,16 @@ When running Erigon in [Docker](/fundamentals/docker-compose), you can configure
 **Basic Performance Tuning:**
 
 ```bash
-export MDBX_LOCK_IN_RAM=true
-export SNAPSHOT_MADV_RND=false
+export ERIGON_MDBX_LOCK_IN_RAM=true
+export ERIGON_SNAPSHOT_MADV_RND=false
 ./build/bin/erigon --datadir=/path/to/data
 ```
 
 **Memory Debugging:**
 
 ```bash
-export SAVE_HEAP_PROFILE=true
-export HEAP_PROFILE_THRESHOLD=45
+export ERIGON_SAVE_HEAP_PROFILE=true
+export ERIGON_HEAP_PROFILE_THRESHOLD=45
 ./build/bin/erigon --datadir=/path/to/data
 ```
 
@@ -2916,10 +2920,10 @@ These instructions are designed to improve the performance of Erigon 3, particul
 
 ## Optimize for Cloud Drives
 
-* Set `SNAPSHOT_MADV_RND=false` to enable the operating system's cache prefetching for better performance on cloud drives with good throughput but bad latency.
+* Set `ERIGON_SNAPSHOT_MADV_RND=false` to enable the operating system's cache prefetching for better performance on cloud drives with good throughput but bad latency.
 
 ```bash
-SNAPSHOT_MADV_RND=false
+export ERIGON_SNAPSHOT_MADV_RND=false
 ```
 
 ## Lock Latest State in RAM
