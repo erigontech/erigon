@@ -1560,6 +1560,10 @@ func (dt *DomainRoTx) getLatestFromFilesValSize(k []byte, maxTxNum uint64) (size
 }
 
 func (dt *DomainRoTx) GetLatestValSize(key []byte, roTx kv.Tx) (size int, found bool, err error) {
+	return dt.getLatestValSize(key, roTx, nil, time.Time{})
+}
+
+func (dt *DomainRoTx) getLatestValSize(key []byte, roTx kv.Tx, metrics *kvmetrics.DomainMetrics, start time.Time) (size int, found bool, err error) {
 	if dt.d.Disable {
 		return 0, false, nil
 	}
@@ -1568,9 +1572,16 @@ func (dt *DomainRoTx) GetLatestValSize(key []byte, roTx kv.Tx) (size int, found 
 		return 0, false, fmt.Errorf("getLatestFromDb: %w", err)
 	}
 	if found {
+		if metrics != nil && dbg.KVReadLevelledMetrics {
+			metrics.UpdateDbReads(dt.name, start)
+		}
 		return len(v), true, nil
 	}
-	return dt.getLatestFromFilesValSize(key, 0)
+	size, found, err = dt.getLatestFromFilesValSize(key, 0)
+	if metrics != nil && dbg.KVReadLevelledMetrics {
+		metrics.UpdateFileReadsUnique(dt.name, key, start)
+	}
+	return size, found, err
 }
 
 // Returns the first txNum from available history

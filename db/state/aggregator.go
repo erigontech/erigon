@@ -2742,6 +2742,10 @@ func (at *AggregatorRoTx) GetLatestValSize(domain kv.Domain, k []byte, tx kv.Tx)
 	return at.d[domain].GetLatestValSize(k, tx)
 }
 
+func (at *AggregatorRoTx) MeteredGetLatestValSize(domain kv.Domain, k []byte, tx kv.Tx, metrics *kvmetrics.DomainMetrics, start time.Time) (size int, ok bool, err error) {
+	return at.d[domain].getLatestValSize(k, tx, metrics, start)
+}
+
 // MeteredGetLatestWithTxN returns the high-water txN alongside (value,
 // step) for tagging BranchCache entries so a lazy unwind can drop them by
 // (txN, epoch). Non-CommitmentDomain reads return txN=0.

@@ -630,7 +630,7 @@ func (gt *temporalGetter) GetLatestContext(ctx context.Context, name kv.Domain, 
 // so the existing kv.TemporalGetter interface is unchanged. txNum is the
 // caller's read txNum, used to stamp any cache entry it populates.
 func (gt *temporalGetter) GetCodeSize(addr []byte, txNum uint64) (int, bool, error) {
-	return gt.sd.getCodeSize(gt.tx, gt.view, addr, txNum)
+	return gt.sd.getCodeSize(gt.tx, gt.view, gt.m, addr, txNum)
 }
 
 // GetCode returns contract code via the content-addressed fast path (see
@@ -640,7 +640,7 @@ func (gt *temporalGetter) GetCodeSize(addr []byte, txNum uint64) (int, bool, err
 // (they resolve prevVal through GetLatest, which is addr-keyed). txNum is the
 // caller's read txNum, used to stamp any cache entry it populates.
 func (gt *temporalGetter) GetCode(addr []byte, txNum uint64) ([]byte, bool, error) {
-	return gt.sd.getCode(gt.tx, gt.view, addr, txNum)
+	return gt.sd.getCode(gt.tx, gt.view, gt.m, addr, txNum)
 }
 
 func (gt *temporalGetter) HasPrefix(name kv.Domain, prefix []byte) (firstKey []byte, firstVal []byte, ok bool, err error) {
@@ -1559,10 +1559,10 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 // Returns (size, true, nil) on success and (0, false, nil) only when
 // CodeDomain itself confirms no code.
 func (sd *SharedDomains) GetCodeSize(tx kv.TemporalTx, addr []byte, txNum uint64) (int, bool, error) {
-	return sd.getCodeSize(tx, sd.cacheReader(), addr, txNum)
+	return sd.getCodeSize(tx, sd.cacheReader(), nil, addr, txNum)
 }
 
-func (sd *SharedDomains) getCodeSize(tx kv.TemporalTx, view cache.ReadView, addr []byte, txNum uint64) (int, bool, error) {
+func (sd *SharedDomains) getCodeSize(tx kv.TemporalTx, view cache.ReadView, wm *kvmetrics.DomainMetrics, addr []byte, txNum uint64) (int, bool, error) {
 	if tx == nil {
 		return 0, false, errors.New("sd.GetCodeSize: unexpected nil tx")
 	}
@@ -1584,7 +1584,7 @@ func (sd *SharedDomains) getCodeSize(tx kv.TemporalTx, view cache.ReadView, addr
 		}
 	}
 
-	size, found, answered, err := sd.getLatestValSize(kv.CodeDomain, tx, addr, view)
+	size, found, answered, err := sd.getLatestValSize(kv.CodeDomain, tx, addr, wm, view)
 	if err != nil {
 		return 0, false, err
 	}
@@ -1598,7 +1598,7 @@ func (sd *SharedDomains) getCodeSize(tx kv.TemporalTx, view cache.ReadView, addr
 		return size, true, nil
 	}
 
-	v, _, err := sd.getLatestMetered(kv.CodeDomain, tx, addr, nil, view, withCodeHash(codeHash))
+	v, _, err := sd.getLatestMetered(kv.CodeDomain, tx, addr, wm, view, withCodeHash(codeHash))
 	if err != nil {
 		return 0, false, err
 	}
@@ -1608,20 +1608,45 @@ func (sd *SharedDomains) getCodeSize(tx kv.TemporalTx, view cache.ReadView, addr
 	return len(v), true, nil
 }
 
-func (sd *SharedDomains) getLatestValSize(domain kv.Domain, tx kv.TemporalTx, k []byte, view cache.ReadView) (size int, found bool, answered bool, err error) {
+func (sd *SharedDomains) getLatestValSize(domain kv.Domain, tx kv.TemporalTx, k []byte, wm *kvmetrics.DomainMetrics, view cache.ReadView) (size int, found bool, answered bool, err error) {
+	var start time.Time
+	if dbg.KVReadLevelledMetrics {
+		start = time.Now()
+		if wm == nil {
+			wm = sd.reqMetrics
+		}
+	}
 	v, _, maxStep, ok := sd.latestFromMem(domain, k)
 	if ok {
+		if dbg.KVReadLevelledMetrics {
+			wm.UpdateCacheReads(domain, start)
+		}
 		return len(v), true, true, nil
 	}
 	if sd.stateCache != nil {
-		if v, txNum, ok := view.GetWithTxNum(domain, k); ok && servableUnderBound(kv.Step(txNum/sd.StepSize()), maxStep) {
+		v, txNum, ok := view.GetWithTxNum(domain, k)
+		ok = ok && servableUnderBound(kv.Step(txNum/sd.StepSize()), maxStep)
+		if ok {
+			if dbg.KVReadLevelledMetrics {
+				wm.UpdateStateCacheHit(domain)
+			}
 			return len(v), true, true, nil
 		}
 	}
 	if maxStep != kv.NoStepBound {
 		return 0, false, false, nil
 	}
-	size, found, err = tx.GetLatestValSize(domain, k)
+	if dbg.KVReadLevelledMetrics && sd.stateCache != nil {
+		wm.UpdateStateCacheMiss(domain)
+	}
+	type meteredValSizeGetter interface {
+		MeteredGetLatestValSize(domain kv.Domain, k []byte, tx kv.Tx, metrics *kvmetrics.DomainMetrics, start time.Time) (int, bool, error)
+	}
+	if getter, ok := tx.AggTx().(meteredValSizeGetter); ok {
+		size, found, err = getter.MeteredGetLatestValSize(domain, k, tx, wm, start)
+	} else {
+		size, found, err = tx.GetLatestValSize(domain, k)
+	}
 	return size, found, true, err
 }
 
@@ -1640,10 +1665,10 @@ func (sd *SharedDomains) getLatestValSize(domain kv.Domain, tx kv.TemporalTx, k 
 // the write. Setters therefore resolve prevVal through GetLatest, which is
 // addr-keyed (domain-faithful); only getters use this codeHash shortcut.
 func (sd *SharedDomains) GetCode(tx kv.TemporalTx, addr []byte, txNum uint64) ([]byte, bool, error) {
-	return sd.getCode(tx, sd.cacheReader(), addr, txNum)
+	return sd.getCode(tx, sd.cacheReader(), nil, addr, txNum)
 }
 
-func (sd *SharedDomains) getCode(tx kv.TemporalTx, view cache.ReadView, addr []byte, txNum uint64) ([]byte, bool, error) {
+func (sd *SharedDomains) getCode(tx kv.TemporalTx, view cache.ReadView, wm *kvmetrics.DomainMetrics, addr []byte, txNum uint64) ([]byte, bool, error) {
 	if tx == nil {
 		return nil, false, errors.New("sd.GetCode: unexpected nil tx")
 	}
@@ -1669,7 +1694,7 @@ func (sd *SharedDomains) getCode(tx kv.TemporalTx, view cache.ReadView, addr []b
 	}
 
 	// Cold path: authoritative addr-keyed read (also populates the caches).
-	v, _, err := sd.getLatestMetered(kv.CodeDomain, tx, addr, nil, view, withCodeHash(codeHash))
+	v, _, err := sd.getLatestMetered(kv.CodeDomain, tx, addr, wm, view, withCodeHash(codeHash))
 	if err != nil {
 		return nil, false, err
 	}
