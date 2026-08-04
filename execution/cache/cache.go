@@ -20,8 +20,9 @@
 // and code domains, so repeated GetLatest reads skip the file-accessor/MDBX
 // stack. It is not a snapshot and gives readers no isolation: a hit can be
 // newer than the reader's tx (snapshot-isolated caching is kvcache's job,
-// node/shards). Its invariant is monotonicity: content never regresses behind
-// what has been applied.
+// node/shards). In the forward direction its invariant is monotonicity:
+// content never regresses behind what has been applied. Unwinds invalidate
+// by epoch and floor instead.
 //
 // StateCache itself has no data methods. A ReadView — bound to one tx's read
 // view and not outliving it — serves reads and fills (cache writes made on

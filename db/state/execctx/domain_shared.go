@@ -954,11 +954,12 @@ func (sd *SharedDomains) Close() {
 	sd.sdCtx = nil
 }
 
-// The state caches (the account/storage StateCache and the commitment
-// BranchCache) are an internal implementation detail of SharedDomains. No
-// external entity accesses or mutates them directly — callers drive state
-// through Flush / Commit / GetLatest / DomainPut, and the cache lifecycle
-// (population, invalidation, commit-gating) is owned entirely here.
+// SharedDomains owns the cache lifecycle for the account/storage StateCache
+// and the commitment BranchCache: population, invalidation and commit-gating
+// all happen here, and callers drive state through Flush / Commit /
+// GetLatest / DomainPut. The one exception is read-ahead warmup, which fills
+// the StateCache directly through its own ReadView, under the same
+// admission.
 
 // Flush writes the in-memory batch into tx without committing. It deliberately
 // does NOT touch the caches: plain Flush leaves the commit to the caller (who
@@ -1330,9 +1331,9 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 		readTxNum := (uint64(step)+1)*sd.StepSize() - 1
 		fillView := view
 		if !fillView.CanFill() {
-			// Read-only view from the plain GetLatest wrappers: bind a frontier
-			// here, on the miss path, where the boxing amortizes against the
-			// backing read it follows.
+			// Frontier-less view from the plain GetLatest wrappers: bind a
+			// frontier here, on the miss path, where the boxing amortizes
+			// against the backing read it follows.
 			fillView = sd.cacheViewFor(tx)
 		}
 		fillView.Fill(domain, k, v, readTxNum)

@@ -383,9 +383,8 @@ func (e *ExecModule) canonicalHash(ctx context.Context, tx kv.Tx, blockNumber ui
 // it is still running when an unwind bumps the cache epoch, it can fill a
 // pre-unwind (dead-fork) value stamped with the post-unwind epoch — IsStale then
 // returns false and the stale value is served as canonical (wrong root). Fill
-// admission does not cover this direction (an unwind lowers the applied
-// frontier, so a pre-unwind view passes) — see the tracking issue for
-// two-sided admission. Call before any unwind epoch-bump.
+// admission does not cover this direction: an unwind lowers the applied
+// frontier, so a pre-unwind view passes. Call before any unwind epoch-bump.
 func (e *ExecModule) drainReadAhead() {
 	if e.readAheader == nil {
 		return

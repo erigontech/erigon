@@ -281,10 +281,10 @@ type domainVisibleEnds struct {
 	// the same slot without a data race. A torn read (state bit from one
 	// generation, end from another) can only be stale-low, which merely
 	// over-rejects fills: a view's frontier never decreases in a process that
-	// fills the cache — the DB component is frozen at tx begin, and a files
-	// reopen only extends it, since the visibility-lowering aggregator APIs
-	// (Unalign, ReloadFiles, dependency toggles) run only in tooling flows
-	// that do not wire a StateCache.
+	// fills a cache — the DB component is frozen at tx begin, and a files
+	// reopen only extends it, an invariant the aggregator enforces by
+	// asserting its visibility-lowering entry points against the wired-cache
+	// marker.
 	ends  [kv.DomainLen]atomic.Uint64
 	mu    sync.Mutex
 	state atomic.Uint32

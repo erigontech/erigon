@@ -45,8 +45,9 @@ func (f FrontierFunc) DomainVisibleEnd(domain kv.Domain) (uint64, bool) { return
 //
 // A ReadView does not isolate reads: the cache holds latest-applied state, so
 // a hit can be newer than the view — the same direction the exec overlay
-// already serves. The cache's invariant is monotonicity (content never
-// regresses behind the applied frontier), enforced on the fill side.
+// already serves. In the forward direction the cache's invariant is
+// monotonicity (content never regresses behind the applied frontier),
+// enforced on the fill side; unwinds invalidate by epoch and floor.
 // Snapshot-isolated caching is kvcache's job (node/shards).
 type ReadView struct {
 	c        *StateCache
