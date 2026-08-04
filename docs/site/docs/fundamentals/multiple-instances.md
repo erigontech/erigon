@@ -129,13 +129,17 @@ For Prometheus monitoring, each instance should expose metrics on different port
 
 If using network-attached storage, apply these optimizations:
 
-```bash
-# Reduce disk latency impact
-export SNAPSHOT_MADV_RND=false
---db.pagesize=64kb
+Set the environment variable before starting Erigon:
 
-# For Polygon networks
---sync.loop.block.limit=10000
+```bash
+export ERIGON_SNAPSHOT_MADV_RND=false   # let the OS prefetch; needs spare RAM
+```
+
+And pass these flags:
+
+```bash
+--db.pagesize=64kb              # less fragmentation; must be set before the first sync
+--sync.loop.block.limit=10000   # blocks per loop iteration (default 5000)
 ```
 
 ### Memory Locking for Performance
