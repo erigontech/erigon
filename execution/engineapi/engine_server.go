@@ -699,7 +699,10 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 	}
 
 	ts := header.Time
-	if (!s.config.IsCancun(ts) && version >= clparams.DenebVersion) ||
+	// Unlike later forks, Shanghai does not require an exact version match:
+	// engine_getPayloadV2 serves both Paris and Shanghai payloads.
+	if (s.config.IsShanghai(ts) && version < clparams.CapellaVersion) ||
+		(!s.config.IsCancun(ts) && version >= clparams.DenebVersion) ||
 		(s.config.IsCancun(ts) && version < clparams.DenebVersion) ||
 		(!s.config.IsPrague(ts) && version >= clparams.ElectraVersion) ||
 		(s.config.IsPrague(ts) && version < clparams.ElectraVersion) ||
@@ -715,15 +718,12 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 		return nil, err
 	}
 
-	if version == clparams.FuluVersion {
-		if payload.BlobsBundle == nil {
-			payload.BlobsBundle = &engine_types.BlobsBundle{
-				Commitments: make([]hexutil.Bytes, 0),
-				Blobs:       make([]hexutil.Bytes, 0),
-				Proofs:      make([]hexutil.Bytes, 0),
-			}
+	if version >= clparams.DenebVersion {
+		proofsPerBlob := 1
+		if version >= clparams.FuluVersion {
+			proofsPerBlob = int(params.CellsPerExtBlob)
 		}
-		if len(payload.BlobsBundle.Commitments) != len(payload.BlobsBundle.Blobs) || len(payload.BlobsBundle.Proofs) != len(payload.BlobsBundle.Blobs)*int(params.CellsPerExtBlob) {
+		if len(payload.BlobsBundle.Commitments) != len(payload.BlobsBundle.Blobs) || len(payload.BlobsBundle.Proofs) != len(payload.BlobsBundle.Blobs)*proofsPerBlob {
 			return nil, fmt.Errorf("built invalid blobsBundle len(blobs)=%d len(commitments)=%d len(proofs)=%d", len(payload.BlobsBundle.Blobs), len(payload.BlobsBundle.Commitments), len(payload.BlobsBundle.Proofs))
 		}
 	}

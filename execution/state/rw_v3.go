@@ -79,12 +79,12 @@ func (rs *StateV3) SetTxNum(txNum uint64) {
 // the parallel executor and block production. trace gates the dbg.TraceApply
 // logging StateV3 used to read from its own flag.
 //
-// Writes carry complete account state (all fields emitted by UpdateAccountData),
-// so no domain reads are needed to reconstruct the full serialised account.
-// SelfDestructPath=true signals either:
-//   - pure account deletion (no account fields follow) — from DeleteAccount
-//   - code+storage cleanup before recreation — from UpdateAccountData when
-//     original.Incarnation > account.Incarnation (followed by account fields)
+// A write set may carry only the account fields that changed, so Apply overlays
+// it on the current account, read from the block cache or AccountsDomain. A
+// self-destructed address is the exception: its base stays empty so cleared
+// fields cannot be resurrected, and it carries at most the balance EIP-8246
+// preserves plus its storage-delete cascade — Normalize drops the nonce,
+// incarnation and code hash, and assertSelfDestructNormalized pins that.
 func (writes *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx, blockNum, txNum uint64, balanceIncreases map[accounts.Address]uint256.Int, rules *chain.Rules, blockCache *BlockStateCache, trace bool) error {
 	if writes != nil && !writes.IsEmpty() {
 		if dbg.AssertEnabled {
@@ -218,8 +218,8 @@ func (writes *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx
 						continue
 					}
 				}
-				// Otherwise: cleanup code+storage before recreating account
-				// (originalIncarnation > account.Incarnation case).
+				// Otherwise an EIP-8246 balance survives: code and storage are
+				// gone, and the account is written back from an empty base below.
 			}
 
 			// Contract creation: clear stale storage before writing new account.
