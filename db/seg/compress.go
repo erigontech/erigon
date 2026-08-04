@@ -315,8 +315,8 @@ func (c *Compressor) Compress() error {
 		return err
 	}
 	tmpFileName := cf.Name()
-	defer dir.RemoveFile(tmpFileName)
-	defer cf.Close()
+	defer dir.RemoveFile(tmpFileName) //nolint:errcheck
+	defer cf.Close()                  //nolint:errcheck
 
 	if c.version == FileCompressionFormatV1 {
 		if _, err := cf.Write([]byte{c.version, byte(c.featureFlagBitmask)}); err != nil {
@@ -960,8 +960,8 @@ func (f *RawWordsFile) Flush() error {
 }
 func (f *RawWordsFile) Close() {
 	if f.w != nil {
-		f.w.Flush()
-		f.f.Close()
+		f.w.Flush() //nolint:errcheck
+		f.f.Close() //nolint:errcheck
 		bufiopool.PutWriter(f.w)
 		f.w = nil
 		f.f = nil
@@ -969,7 +969,7 @@ func (f *RawWordsFile) Close() {
 }
 func (f *RawWordsFile) CloseAndRemove() {
 	f.Close()
-	dir2.RemoveFile(f.filePath)
+	dir2.RemoveFile(f.filePath) //nolint:errcheck
 }
 func (f *RawWordsFile) Append(v []byte) error {
 	f.count++
