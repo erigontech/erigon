@@ -63,19 +63,20 @@ Snapshots are organised into several subdirectories. The main ones are:
 
 ## What does it cost on disk?
 
-Real numbers from a Nov 2024 mainnet archive node:
+Measured on a mainnet archive node on 2026-08-04:
 
 ```sh
-# eth-mainnet — archive — prune.mode=archive
-chaindata           15 GB
-snapshots/accessor 120 GB
-snapshots/domain   300 GB
-snapshots/history  280 GB
-snapshots/idx      430 GB
-snapshots TOTAL    2.3 TB
+# eth-mainnet — prune.mode=archive
+chaindata             9.82 GB
+snapshots/idx       330.89 GB
+snapshots/domain    321.58 GB
+snapshots/history   254.43 GB
+snapshots/accessor  140.92 GB
+snapshots/*.seg     993.33 GB   # block and transaction segments
+snapshots TOTAL    2041.15 GB   # 2.04 TB
 ```
 
-The breakdown above lists the state/history snapshot subdirectories. The remaining ~1.2 TB is mostly block/transaction `.seg` data, which is not broken out separately here.
+Block and transaction segments are about half the datadir on their own; the state and history subdirectories account for the rest. Note how small `chaindata` stays even on an archive node — under 10 GB, because the bulk lives in the immutable snapshot files.
 
 For up-to-date totals across all networks and pruning modes, see [Hardware Requirements](../get-started/hardware-requirements).
 

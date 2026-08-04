@@ -1630,19 +1630,20 @@ Snapshots are organised into several subdirectories. The main ones are:
 
 ## What does it cost on disk?
 
-Real numbers from a Nov 2024 mainnet archive node:
+Measured on a mainnet archive node on 2026-08-04:
 
 ```sh
-# eth-mainnet — archive — prune.mode=archive
-chaindata           15 GB
-snapshots/accessor 120 GB
-snapshots/domain   300 GB
-snapshots/history  280 GB
-snapshots/idx      430 GB
-snapshots TOTAL    2.3 TB
+# eth-mainnet — prune.mode=archive
+chaindata             9.82 GB
+snapshots/idx       330.89 GB
+snapshots/domain    321.58 GB
+snapshots/history   254.43 GB
+snapshots/accessor  140.92 GB
+snapshots/*.seg     993.33 GB   # block and transaction segments
+snapshots TOTAL    2041.15 GB   # 2.04 TB
 ```
 
-The breakdown above lists the state/history snapshot subdirectories. The remaining ~1.2 TB is mostly block/transaction `.seg` data, which is not broken out separately here.
+Block and transaction segments are about half the datadir on their own; the state and history subdirectories account for the rest. Note how small `chaindata` stays even on an archive node — under 10 GB, because the bulk lives in the immutable snapshot files.
 
 For up-to-date totals across all networks and pruning modes, see [Hardware Requirements](../get-started/hardware-requirements).
 
@@ -3115,7 +3116,7 @@ What can be done:
   * use latency-critical cloud-drives
   * or attached-NVMe (at least for initial sync)
 * increase RAM
-* if you throw enough RAM, then can set env variable `SNAPSHOT_MADV_RND=false`
+* if you throw enough RAM, then can set env variable `ERIGON_SNAPSHOT_MADV_RND=false`
 * Use `--db.pagesize=64kb` (less fragmentation, more IO)
 * Or use Erigon 3 (it also sensitive for disk-latency - but it will download 99% of history)
 
@@ -7786,7 +7787,7 @@ This list addresses the most common inquiries from the Erigon community, offerin
 2. **Is Erigon a good choice for client diversity?** Yes. The codebases have diverged so significantly from Geth that they are now considered separate clients, making Erigon an excellent choice to support Ethereum's client diversity goals.
 3. **What are the minimum hardware requirements?** The most critical component is a high-end NVMe or SSD with very low latency. While the exact requirements vary by network, 16GB of RAM and a fast SSD are generally the minimum for a full node. See [Hardware Requirements](/get-started/hardware-requirements) for detailed specs per network and pruning mode.
 4. **How long does it take to sync a node?** Initial synchronization time is highly dependent on hardware and bandwidth. A fast system with a high-end NVMe can sync a full node in as little as few hours, while on slower hardware, it can take several days.
-5. **How much disk space is required?** It depends on the network and the pruning mode, and it grows as the chain grows — an archive node needs several times what a full node does. Rather than repeat figures that go stale, see [Hardware Requirements](/get-started/hardware-requirements), which carries a measured figure and a measurement date for every network and pruning mode.
+5. **How much disk space is required?** It depends on the network and the pruning mode, and it grows as the chain grows. See [Hardware Requirements](/get-started/hardware-requirements) for a measured figure and measurement date per network and pruning mode.
 6. **Can I run Erigon on an HDD?** It is not recommended to run Erigon on an HDD. The client's performance is critically dependent on high-speed disk I/O, and an HDD will almost certainly cause the node to fall behind the blockchain tip.
 7. **What is the `--prune.mode` flag, and which mode should I use?** This flag determines which historical data is discarded. The `full` mode (the default for Erigon 3) is suitable for most users. The `minimal` mode is for validators with limited disk space. The `archive` mode is for those who need a full historical record for all past states. See [Pruning Modes](/fundamentals/pruning-modes) for a full comparison.
 8. **Can I change my pruning mode after starting the node?** No. The pruning mode is a permanent choice made at the first sync. Changing it requires deleting the `datadir` directory and a full re-sync from scratch.
