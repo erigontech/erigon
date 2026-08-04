@@ -1094,6 +1094,11 @@ func TestStateCacheFillsSwitchDisablesReadFills(t *testing.T) {
 	_, ok = c.View(nil).GetAddrCodeHash(key)
 	require.False(t, ok, "mapping seeds must be disabled")
 
+	codeHash := crypto.Keccak256([]byte{0xaa, 1, 2, 3})
+	view.FillCodeSize(codeHash, 4, 10)
+	_, ok = c.View(nil).GetCodeSizeByHash(codeHash)
+	require.False(t, ok, "content-addressed fills must be disabled too: the switch means no reader writes at all")
+
 	c.Applier().Apply(kv.AccountsDomain, key, []byte("applied"), 20)
 	got, ok := c.View(nil).Get(kv.AccountsDomain, key)
 	require.True(t, ok, "applies must keep working")

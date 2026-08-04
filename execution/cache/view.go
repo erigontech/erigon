@@ -35,7 +35,8 @@ func (f FrontierFunc) DomainVisibleEnd(domain kv.Domain) (uint64, bool) { return
 // ReadView is the read-and-fill handle of a StateCache, bound to one
 // transaction's read view: values filled through it are vouched for by that
 // view's frontier alone, and it must not outlive the transaction. A nil
-// frontier gives a read-only view (fills become no-ops). The zero value is
+// frontier disables the admission-gated fills (Fill, SeedAddrCodeHash);
+// FillCodeSize is content-addressed and works on any view. The zero value is
 // inert: reads miss, fills no-op.
 //
 // A ReadView does not isolate reads: the cache holds latest-applied state, so
@@ -48,7 +49,7 @@ type ReadView struct {
 	frontier Frontier
 }
 
-// View creates a ReadView vouched for by f. Pass nil for a read-only view.
+// View creates a ReadView vouched for by f. A nil f disables admission-gated fills.
 func (c *StateCache) View(f Frontier) ReadView { return ReadView{c: c, frontier: f} }
 
 // Get retrieves data for the given domain and key.
@@ -129,18 +130,18 @@ func (v ReadView) SeedAddrCodeHash(addr []byte, h [32]byte, txNum uint64) {
 }
 
 // FillCodeSize records the code length for codeHash. Content-addressed and
-// immutable for a given hash, so it needs no admission and works on a
-// read-only view.
+// immutable for a given hash, so it needs no admission and no frontier — but
+// it is still a reader write, so the fills switch covers it.
 func (v ReadView) FillCodeSize(codeHash []byte, size int, txNum uint64) {
-	if v.c == nil {
+	if v.c == nil || v.c.disableFills {
 		return
 	}
 	v.c.putCodeSizeByHash(codeHash, size, txNum)
 }
 
 // Applier is the authoritative writer handle of a StateCache: committed
-// updates, unwinds and clears. Exactly one holder is expected — the
-// SharedDomains flush/unwind path. The zero value is a no-op.
+// updates, unwinds and clears. It belongs to the authoritative mutation path
+// — the SharedDomains flush/unwind code. The zero value is a no-op.
 type Applier struct {
 	c *StateCache
 }

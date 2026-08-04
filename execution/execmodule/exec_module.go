@@ -173,11 +173,7 @@ func (c *CacheView) GetAsOf(key []byte, ts uint64) (v []byte, ok bool, err error
 }
 
 func (c *CacheView) HasStorage(address common.Address) (bool, error) {
-	var getter kv.TemporalGetter = c.tx
-	if c.context != nil {
-		getter = c.context.AsGetter(c.tx)
-	}
-	_, _, hasStorage, err := getter.HasPrefix(kv.StorageDomain, address[:])
+	_, _, hasStorage, err := c.getter.HasPrefix(kv.StorageDomain, address[:])
 	return hasStorage, err
 }
 
@@ -385,11 +381,12 @@ func (e *ExecModule) canonicalHash(ctx context.Context, tx kv.Tx, blockNumber ui
 
 // drainReadAhead blocks until any in-flight block-assembly warmup finishes.
 // warmBody is fire-and-forget and populates the shared state/branch caches; if
-// it is still running when an unwind bumps the cache epoch, it can Put a
+// it is still running when an unwind bumps the cache epoch, it can fill a
 // pre-unwind (dead-fork) value stamped with the post-unwind epoch — IsStale then
-// returns false and the stale value is served as canonical (wrong root). A
-// laggard Put can likewise land after a flush's cache-apply and pin the
-// pre-flush snapshot. Call before any unwind epoch-bump or flush cache-apply.
+// returns false and the stale value is served as canonical (wrong root). Fill
+// admission does not cover this direction (an unwind lowers the applied
+// frontier, so a pre-unwind view passes) — see the tracking issue for
+// two-sided admission. Call before any unwind epoch-bump.
 func (e *ExecModule) drainReadAhead() {
 	if e.readAheader == nil {
 		return

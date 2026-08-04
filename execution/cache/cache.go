@@ -26,8 +26,9 @@
 // StateCache itself has no data methods. A ReadView — bound to one tx's read
 // view and not outliving it — serves reads and fills (cache writes made on
 // behalf of a database reader after a miss); admission compares the view's
-// frontier, the highest txNum its tx can see, against the applied end, under
-// the same lock applies take. The Applier handle, held by the SharedDomains
+// frontier — the exclusive txNum end of what its tx can see, so a view with
+// frontier N sees txNums < N — against the applied end, under the same lock
+// applies take. The Applier handle, held by the SharedDomains
 // flush/unwind path, performs the authoritative writes: committed updates,
 // unwinds, clears.
 package cache

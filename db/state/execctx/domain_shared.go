@@ -174,7 +174,8 @@ func (sd *SharedDomains) cacheViewFor(tx kv.TemporalTx) cache.ReadView {
 	return sd.stateCache.View(sdFrontier{sd: sd, tx: tx})
 }
 
-// cacheReader is a read-only view (no fill rights); safe on a nil cache.
+// cacheReader is a frontier-less view: admission-gated fills are disabled,
+// content-addressed fills still work. Safe on a nil cache.
 func (sd *SharedDomains) cacheReader() cache.ReadView { return sd.stateCache.View(nil) }
 
 func IsDomainAheadOfBlocks(ctx context.Context, tx kv.TemporalRwTx, logger log.Logger) bool {

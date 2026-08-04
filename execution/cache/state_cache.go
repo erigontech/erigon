@@ -162,16 +162,6 @@ func (c *StateCache) getCodeByHash(codeHash []byte) ([]byte, bool) {
 	return cc.GetByCodeHash(codeHash)
 }
 
-// putCodeWithHash stores code populating both the addr-keyed path and the
-// codeHash-keyed codeHashToCode layer, bypassing fill admission.
-func (c *StateCache) putCodeWithHash(addr, code, codeHash []byte, txNum uint64) {
-	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
-	if !ok {
-		return
-	}
-	cc.PutWithCodeHash(addr, bytes.Clone(code), codeHash, txNum)
-}
-
 // getCodeSizeByHash returns the size of code by its Ethereum codeHash
 // without loading the bytes. Returns (0, false) when the size-only layer
 // is not populated for this hash.
