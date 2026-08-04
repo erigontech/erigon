@@ -99,7 +99,10 @@ func TestVersionedRead_B_DeletedStateObjectBeatsWarmStorageRead(t *testing.T) {
 	// A prior tx's selfdestruct becomes visible: getStateObject parks a deleted
 	// resident object for the address on the materialized path.
 	mvhm.WriteSelfDestruct(addr, Version{TxIndex: 2, Incarnation: 0}, true, true)
-	ibs.setStateObject(addr, &stateObject{db: ibs, address: addr, selfdestructed: true, deleted: true})
+	destructed := accounts.NewAccount()
+	so := newObject(ibs, addr, &destructed, &destructed)
+	so.selfdestructed, so.deleted = true, true
+	ibs.setStateObject(addr, so)
 
 	v, err = ibs.GetState(addr, key)
 	require.NoError(t, err)
