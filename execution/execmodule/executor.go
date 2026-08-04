@@ -191,7 +191,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 	defer func() { tx.Rollback() }()
 
 	// Run snapshots stage — downloads block files.
-	if err = pe.sync.RunSnapshots(nil, tx); err != nil {
+	if err := pe.sync.RunSnapshots(nil, tx); err != nil {
 		return err
 	}
 	if onlySnapDownload {
@@ -216,7 +216,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 		if err != nil {
 			return err
 		}
-		if err = hook.BeforeRun(tx, false); err != nil {
+		if err := hook.BeforeRun(tx, false); err != nil {
 			return err
 		}
 	}
@@ -279,10 +279,10 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 			}
 			// Before UpdateHead, which publishes the sync state computed from it.
 			hook.LastNewBlockSeen(headersProgress)
-			if err = hook.SendNotifications(tx, finishStageBeforeSync); err != nil {
+			if err := hook.SendNotifications(tx, finishStageBeforeSync); err != nil {
 				return err
 			}
-			if err = hook.UpdateHead(tx, finishStageBeforeSync, false); err != nil {
+			if err := hook.UpdateHead(tx, finishStageBeforeSync, false); err != nil {
 				return err
 			}
 			return nil

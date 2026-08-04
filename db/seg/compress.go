@@ -350,7 +350,7 @@ func (c *Compressor) Compress() error {
 			coll.Close()
 		}
 		c.suffixCollectors = nil
-		if err = compressNoWordPatterns(c.logPrefix, cf, c.uncompressedFile, c.lvl, c.logger); err != nil {
+		if err := compressNoWordPatterns(c.logPrefix, cf, c.uncompressedFile, c.lvl, c.logger); err != nil {
 			return err
 		}
 	} else {
@@ -368,14 +368,14 @@ func (c *Compressor) Compress() error {
 				return err
 			}
 		}
-		if err = compressWithPatternCandidates(c.ctx, c.trace, c.Cfg, c.logPrefix, tmpFileName, cf, c.uncompressedFile, db, c.lvl, c.logger); err != nil {
+		if err := compressWithPatternCandidates(c.ctx, c.trace, c.Cfg, c.logPrefix, tmpFileName, cf, c.uncompressedFile, db, c.lvl, c.logger); err != nil {
 			return err
 		}
 	}
-	if err = c.fsync(cf); err != nil {
+	if err := c.fsync(cf); err != nil {
 		return err
 	}
-	if err = cf.Close(); err != nil {
+	if err := cf.Close(); err != nil {
 		return err
 	}
 	if err := os.Rename(tmpFileName, c.outputFile); err != nil {
