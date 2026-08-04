@@ -191,13 +191,29 @@ INVENTORY_CHECK="${INVENTORY_CHECK:-1}"
 # regression we care about is *new* drift introduced by the unwind —
 # captured by the delta, not the absolute.
 inventory_drift() {
+    if [[ "$INVENTORY_CHECK" != "1" ]]; then
+        # Escape valve for runs where the toml/disk delta is dominated
+        # by pipelines the check can't reason about — e.g. under
+        # --prune.mode=minimal chain.toml legitimately advertises files
+        # the local node deliberately doesn't download, producing large
+        # baseline drift and any advertise-side republish flakes.
+        echo "0 0"
+        return
+    fi
     if [[ -z "$SNAP_DIR" || ! -r "$SNAP_DIR/chain.toml" ]]; then
         echo "0 0"
         return
     fi
+    # Scope: top-level block snapshots (v1.1-*.seg) only. chain.toml
+    # also lists consensus-layer state under caplin/ but the disk scan
+    # is non-recursive so those never match — every caplin entry looks
+    # "missing" and drift deltas fire spuriously when Caplin advertises
+    # a new state-slot boundary during a run (routine, unrelated to
+    # setHead). setHead's assertion cares about EL block snapshots, so
+    # filter both sides to that scope with a matching predicate.
     local toml_files disk_files missing_on_disk on_disk_not_in_toml
     toml_files=$(grep -oE '^"[^"]+\.seg"' "$SNAP_DIR/chain.toml" 2>/dev/null \
-        | tr -d '"' | sort -u || true)
+        | tr -d '"' | grep -v '/' | sort -u || true)
     disk_files=$(ls "$SNAP_DIR" 2>/dev/null | grep -E '\.seg$' | sort -u || true)
     missing_on_disk=$(comm -23 <(echo "$toml_files") <(echo "$disk_files") | wc -l)
     on_disk_not_in_toml=$(comm -13 <(echo "$toml_files") <(echo "$disk_files") | wc -l)
@@ -213,13 +229,16 @@ inventory_drift_names() {
     if [[ "${INVENTORY_DRIFT_NAMES:-0}" != "1" ]]; then
         return
     fi
+    if [[ "$INVENTORY_CHECK" != "1" ]]; then
+        return
+    fi
     if [[ -z "$SNAP_DIR" || ! -r "$SNAP_DIR/chain.toml" ]]; then
         return
     fi
     local tag="$1"
     local toml_files disk_files
     toml_files=$(grep -oE '^"[^"]+\.seg"' "$SNAP_DIR/chain.toml" 2>/dev/null \
-        | tr -d '"' | sort -u || true)
+        | tr -d '"' | grep -v '/' | sort -u || true)
     disk_files=$(ls "$SNAP_DIR" 2>/dev/null | grep -E '\.seg$' | sort -u || true)
     local extras missing
     extras=$(comm -13 <(echo "$toml_files") <(echo "$disk_files"))
