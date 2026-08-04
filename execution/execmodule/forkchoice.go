@@ -279,6 +279,12 @@ func (e *ExecModule) unwindIfNeeded(
 				Status:          ExecutionStatusReorgTooDeep,
 			}, nil
 		}
+		// Pre-unwind warmup fills would survive the unwind's epoch bump as live
+		// entries (see drainReadAhead); no new warmup can start while this FCU
+		// holds the semaphore, so draining here covers the whole unwind. Forward
+		// FCUs skip the drain: fill admission orders fills against the flush
+		// cache-apply.
+		e.drainReadAhead()
 		if err := e.pipelineExecutor.UnwindTo(unwindTarget, stagedsync.ForkChoice, tx); err != nil {
 			return nil, err
 		}
@@ -359,12 +365,6 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		e.forkValidator.ClearWithUnwind()
 	})
 	defer cleanupBeforeSemaRelease()
-
-	// Drain any warmup a preceding newPayload spawned: its Puts reflect a
-	// pre-FCU snapshot and must land before this FCU's unwind epoch-bump and
-	// flush cache-apply, not after them (no new warmup starts while we hold
-	// the semaphore).
-	e.drainReadAhead()
 
 	var validationError string
 

@@ -380,7 +380,7 @@ func (e *ExecModule) canonicalHash(ctx context.Context, tx kv.Tx, blockNumber ui
 }
 
 // drainReadAhead blocks until any in-flight block-assembly warmup finishes.
-// warmBody is fire-and-forget and populates the shared state/branch caches; if
+// warmBody is fire-and-forget and fills the shared state cache; if
 // it is still running when an unwind bumps the cache epoch, it can fill a
 // pre-unwind (dead-fork) value stamped with the post-unwind epoch — IsStale then
 // returns false and the stale value is served as canonical (wrong root). Fill
