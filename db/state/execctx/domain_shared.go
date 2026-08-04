@@ -1363,13 +1363,14 @@ func (sd *SharedDomains) GetCodeSize(tx kv.TemporalTx, addr []byte, txNum uint64
 	// the size is in the size cache, return without loading bytes.
 	if sd.stateCache != nil {
 		if codeHash := sd.codeHashForAddr(tx, addr, txNum); len(codeHash) > 0 {
-			if size, ok := sd.cacheReader().GetCodeSizeByHash(codeHash); ok {
+			reader := sd.cacheReader()
+			if size, ok := reader.GetCodeSizeByHash(codeHash); ok {
 				return size, true, nil
 			}
-			if cv, ok := sd.cacheReader().GetCodeByHash(codeHash); ok {
+			if cv, ok := reader.GetCodeByHash(codeHash); ok {
 				// txNum is a conservative upper bound: >= the live code's write
 				// txNum, so the size drops on any unwind that drops the code.
-				sd.cacheReader().FillCodeSize(codeHash, len(cv), txNum)
+				reader.FillCodeSize(codeHash, len(cv), txNum)
 				return len(cv), true, nil
 			}
 		}
