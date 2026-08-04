@@ -763,7 +763,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 // to resolve sibling-account reads without taking a typed callback.
 func readAccountInternal(s *IntraBlockState, addr accounts.Address) (*accounts.Account, ReadSource, Version, error) {
 	if s.warmReadable(addr) {
-		if tr, ok := s.versionedReads.GetAddress(addr); ok && warmSource(tr.Source) {
+		if tr, ok := s.versionedReads.GetAddress(addr); ok && s.warmHit(addr, tr.Source) {
 			if tr.Val != nil {
 				return tr.Val.Account(), tr.Source, tr.Version, nil
 			}
@@ -814,11 +814,33 @@ func (s *IntraBlockState) warmReadable(addr accounts.Address) bool {
 	return !dirty
 }
 
+// warmHit reports whether a recorded read may be served for addr.
+func (s *IntraBlockState) warmHit(addr accounts.Address, src ReadSource) bool {
+	if !warmSource(src) {
+		return false
+	}
+	if dbg.AssertEnabled {
+		assertNoDeletedResident(s.stateObjects, addr)
+	}
+	return true
+}
+
+// assertNoDeletedResident pins what the read-once fast path depends on: a
+// versioned IBS that also materializes stateObjects can hold an object deleted
+// by a prior tx's selfdestruct, and serving a recorded read for that address
+// would return its pre-destruct value. Tx-execution paths run versioned with
+// noMaterialize, which keeps stateObjects empty and the case unreachable.
+func assertNoDeletedResident(stateObjects map[accounts.Address]*stateObject, addr accounts.Address) {
+	if so, ok := stateObjects[addr]; ok && so.deleted {
+		panic(fmt.Sprintf("assert: warm read of %x with a deleted resident object; versioned tx execution must set noMaterialize", addr))
+	}
+}
+
 // readBalance returns the address's balance using the version-aware
 // read pipeline.  Inlines the storage-read fallback.
 func readBalance(s *IntraBlockState, addr accounts.Address) (uint256.Int, ReadSource, Version, error) {
 	if s.warmReadable(addr) {
-		if tr, ok := s.versionedReads.GetBalance(addr); ok && warmSource(tr.Source) {
+		if tr, ok := s.versionedReads.GetBalance(addr); ok && s.warmHit(addr, tr.Source) {
 			return tr.Val, tr.Source, tr.Version, nil
 		}
 	}
@@ -865,7 +887,7 @@ func readBalance(s *IntraBlockState, addr accounts.Address) (uint256.Int, ReadSo
 // recordVR, records the read with currentBalance as the typed default.
 func refreshBalance(s *IntraBlockState, addr accounts.Address, currentBalance uint256.Int) (uint256.Int, ReadSource, Version, error) {
 	if s.warmReadable(addr) {
-		if tr, ok := s.versionedReads.GetBalance(addr); ok && warmSource(tr.Source) {
+		if tr, ok := s.versionedReads.GetBalance(addr); ok && s.warmHit(addr, tr.Source) {
 			return tr.Val, tr.Source, tr.Version, nil
 		}
 	}
@@ -906,7 +928,7 @@ func refreshBalance(s *IntraBlockState, addr accounts.Address, currentBalance ui
 // readNonce returns the nonce using the version-aware read pipeline.
 func readNonce(s *IntraBlockState, addr accounts.Address) (uint64, ReadSource, Version, error) {
 	if s.warmReadable(addr) {
-		if tr, ok := s.versionedReads.GetNonce(addr); ok && warmSource(tr.Source) {
+		if tr, ok := s.versionedReads.GetNonce(addr); ok && s.warmHit(addr, tr.Source) {
 			return tr.Val, tr.Source, tr.Version, nil
 		}
 	}
@@ -950,7 +972,7 @@ func readNonce(s *IntraBlockState, addr accounts.Address) (uint64, ReadSource, V
 
 func refreshNonce(s *IntraBlockState, addr accounts.Address, currentNonce uint64) (uint64, ReadSource, Version, error) {
 	if s.warmReadable(addr) {
-		if tr, ok := s.versionedReads.GetNonce(addr); ok && warmSource(tr.Source) {
+		if tr, ok := s.versionedReads.GetNonce(addr); ok && s.warmHit(addr, tr.Source) {
 			return tr.Val, tr.Source, tr.Version, nil
 		}
 	}
@@ -985,7 +1007,7 @@ func refreshNonce(s *IntraBlockState, addr accounts.Address, currentNonce uint64
 // readIncarnation returns the incarnation counter.
 func readIncarnation(s *IntraBlockState, addr accounts.Address) (uint64, ReadSource, Version, error) {
 	if s.warmReadable(addr) {
-		if tr, ok := s.versionedReads.GetIncarnation(addr); ok && warmSource(tr.Source) {
+		if tr, ok := s.versionedReads.GetIncarnation(addr); ok && s.warmHit(addr, tr.Source) {
 			return tr.Val, tr.Source, tr.Version, nil
 		}
 	}
@@ -1057,7 +1079,7 @@ func refreshIncarnation(s *IntraBlockState, addr accounts.Address, currentIncarn
 // the version-aware lookup honours the committed-only contract.
 func readCode(s *IntraBlockState, addr accounts.Address, commited bool) ([]byte, ReadSource, Version, error) {
 	if s.warmReadable(addr) {
-		if tr, ok := s.versionedReads.GetCode(addr); ok && warmSource(tr.Source) {
+		if tr, ok := s.versionedReads.GetCode(addr); ok && s.warmHit(addr, tr.Source) {
 			return tr.Val, tr.Source, tr.Version, nil
 		}
 	}
@@ -1156,7 +1178,7 @@ func (c refreshedCode) codeHash(source ReadSource, accountHash accounts.CodeHash
 // readCodeSize returns the contract code size.
 func readCodeSize(s *IntraBlockState, addr accounts.Address) (int, ReadSource, Version, error) {
 	if s.warmReadable(addr) {
-		if tr, ok := s.versionedReads.GetCodeSize(addr); ok && warmSource(tr.Source) {
+		if tr, ok := s.versionedReads.GetCodeSize(addr); ok && s.warmHit(addr, tr.Source) {
 			return tr.Val, tr.Source, tr.Version, nil
 		}
 	}
@@ -1211,7 +1233,7 @@ func readCodeSize(s *IntraBlockState, addr accounts.Address) (int, ReadSource, V
 // readCodeHash returns the contract code hash.
 func readCodeHash(s *IntraBlockState, addr accounts.Address) (accounts.CodeHash, ReadSource, Version, error) {
 	if s.warmReadable(addr) {
-		if tr, ok := s.versionedReads.GetCodeHash(addr); ok && warmSource(tr.Source) {
+		if tr, ok := s.versionedReads.GetCodeHash(addr); ok && s.warmHit(addr, tr.Source) {
 			return tr.Val, tr.Source, tr.Version, nil
 		}
 	}
@@ -1258,7 +1280,7 @@ func readCodeHash(s *IntraBlockState, addr accounts.Address) (accounts.CodeHash,
 // refreshCodeHash is the in-memory-only variant for CodeHashPath.
 func refreshCodeHash(s *IntraBlockState, addr accounts.Address, currentHash accounts.CodeHash) (accounts.CodeHash, ReadSource, Version, error) {
 	if s.warmReadable(addr) {
-		if tr, ok := s.versionedReads.GetCodeHash(addr); ok && warmSource(tr.Source) {
+		if tr, ok := s.versionedReads.GetCodeHash(addr); ok && s.warmHit(addr, tr.Source) {
 			return tr.Val, tr.Source, tr.Version, nil
 		}
 	}
@@ -1400,7 +1422,7 @@ func readCommittedState(s *IntraBlockState, addr accounts.Address, key accounts.
 // readSelfDestruct returns whether the account is selfdestructed.
 func readSelfDestruct(s *IntraBlockState, addr accounts.Address) (bool, ReadSource, Version, error) {
 	if s.warmReadable(addr) {
-		if tr, ok := s.versionedReads.GetSelfDestruct(addr); ok && warmSource(tr.Source) {
+		if tr, ok := s.versionedReads.GetSelfDestruct(addr); ok && s.warmHit(addr, tr.Source) {
 			return tr.Val, tr.Source, tr.Version, nil
 		}
 	}
