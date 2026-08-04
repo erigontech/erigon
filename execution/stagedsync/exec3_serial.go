@@ -369,7 +369,8 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			if txTask.Tx() != nil {
 				se.blobGasUsed += txTask.Tx().GetBlobGas()
 			}
-			if txTask.IsBlockEnd() && txTask.BlockNumber() > 0 {
+			switch {
+			case txTask.IsBlockEnd() && txTask.BlockNumber() > 0:
 				//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 				// End of block transaction in a block
 				ibs := state.New(state.NewReaderV3(se.rs.Domains().AsGetter(se.applyTx)))
@@ -437,15 +438,16 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				if err = ibs.MakeWriteSet(txTask.Rules(), stateWriter); err != nil {
 					panic(err)
 				}
-			} else if txTask.TxIndex >= 0 {
+			case txTask.TxIndex >= 0:
 				var prev, receipt *types.Receipt
-				if txTask.TxIndex > 0 && txTask.TxIndex-startTxIndex > 0 {
+				switch {
+				case txTask.TxIndex > 0 && txTask.TxIndex-startTxIndex > 0:
 					prev = blockReceipts[txTask.TxIndex-startTxIndex-1]
 					receipt, err = result.CreateNextReceipt(prev)
 					if err != nil {
 						return err
 					}
-				} else if txTask.TxIndex > 0 {
+				case txTask.TxIndex > 0:
 					// reconstruct receipt from previous receipt values
 					cumGasUsed, cumBlobGasUsed, logIndexAfterTx, err := rawtemporaldb.ReceiptAsOf(se.applyTx, txTask.TxNum)
 					if err != nil {
@@ -458,7 +460,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					if err != nil {
 						return err
 					}
-				} else {
+				default:
 					receipt, err = result.CreateNextReceipt(nil)
 					if err != nil {
 						return err
@@ -469,7 +471,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				if hooks := result.TracingHooks(); hooks != nil && hooks.OnTxEnd != nil {
 					hooks.OnTxEnd(receipt, result.Err)
 				}
-			} else {
+			default:
 				se.onBlockStart(ctx, txTask.BlockNumber(), txTask.BlockHash())
 			}
 

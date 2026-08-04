@@ -240,13 +240,14 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	}
 
 	var feeCap *big.Int
-	if args.GasPrice != nil && (args.MaxFeePerGas != nil || args.MaxPriorityFeePerGas != nil) {
+	switch {
+	case args.GasPrice != nil && (args.MaxFeePerGas != nil || args.MaxPriorityFeePerGas != nil):
 		return 0, errors.New("both gasPrice and (maxFeePerGas or maxPriorityFeePerGas) specified")
-	} else if args.GasPrice != nil {
+	case args.GasPrice != nil:
 		feeCap = args.GasPrice.ToInt()
-	} else if args.MaxFeePerGas != nil {
+	case args.MaxFeePerGas != nil:
 		feeCap = args.MaxFeePerGas.ToInt()
-	} else {
+	default:
 		feeCap = common.Big0
 	}
 
@@ -673,7 +674,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		return nil, errWitnessOutOfWindow
 	}
 
-	if err = api.checkPruneHistory(ctx, tx, blockNr); err != nil {
+	if err := api.checkPruneHistory(ctx, tx, blockNr); err != nil {
 		return nil, err
 	}
 

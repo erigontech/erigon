@@ -157,11 +157,12 @@ func CanRetire(from, to uint64, snapType snaptype.Enum, snCfg *snapcfg.Cfg) (blo
 
 	mergeLimit := snapcfg.MergeLimitFromCfg(snCfg, snapType, blockFrom)
 
-	if blockFrom%mergeLimit == 0 {
+	switch {
+	case blockFrom%mergeLimit == 0:
 		maxJump = mergeLimit
-	} else if blockFrom%100_000 == 0 {
+	case blockFrom%100_000 == 0:
 		maxJump = 100_000
-	} else if blockFrom%10_000 == 0 {
+	case blockFrom%10_000 == 0:
 		maxJump = 10_000
 	}
 	//roundedTo1K := (to / 1_000) * 1_000

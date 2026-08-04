@@ -355,16 +355,16 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return err
 	}
-	if err = s.ReadUint256(&stx.ChainID); err != nil {
+	if err := s.ReadUint256(&stx.ChainID); err != nil {
 		return err
 	}
 	if stx.Nonce, err = s.Uint64(); err != nil {
 		return err
 	}
-	if err = s.ReadUint256(&stx.TipCap); err != nil {
+	if err := s.ReadUint256(&stx.TipCap); err != nil {
 		return err
 	}
-	if err = s.ReadUint256(&stx.FeeCap); err != nil {
+	if err := s.ReadUint256(&stx.FeeCap); err != nil {
 		return err
 	}
 	if stx.GasLimit, err = s.Uint64(); err != nil {
@@ -382,7 +382,7 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	stx.To = &to
-	if err = s.ReadUint256(&stx.Value); err != nil {
+	if err := s.ReadUint256(&stx.Value); err != nil {
 		return err
 	}
 	if stx.Data, err = s.Bytes(); err != nil {
@@ -390,11 +390,11 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 	}
 	// decode AccessList
 	stx.AccessList = AccessList{}
-	if err = decodeAccessList(&stx.AccessList, s); err != nil {
+	if err := decodeAccessList(&stx.AccessList, s); err != nil {
 		return err
 	}
 	// decode MaxFeePerBlobGas
-	if err = s.ReadUint256(&stx.MaxFeePerBlobGas); err != nil {
+	if err := s.ReadUint256(&stx.MaxFeePerBlobGas); err != nil {
 		return err
 	}
 	// decode BlobVersionedHashes
@@ -405,13 +405,13 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 		return errors.New("a blob stx must contain at least one blob")
 	}
 	// decode V
-	if err = s.ReadUint256(&stx.V); err != nil {
+	if err := s.ReadUint256(&stx.V); err != nil {
 		return err
 	}
-	if err = s.ReadUint256(&stx.R); err != nil {
+	if err := s.ReadUint256(&stx.R); err != nil {
 		return err
 	}
-	if err = s.ReadUint256(&stx.S); err != nil {
+	if err := s.ReadUint256(&stx.S); err != nil {
 		return err
 	}
 	return s.ListEnd()
