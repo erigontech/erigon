@@ -70,6 +70,8 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 	domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
 	require.NoError(b, err)
 	defer domains.Close()
+	domains.EnableParaTrieDB(db)
+	require.Equal(b, execctx.PickTrieVariant(), domains.GetCommitmentCtx().Trie().Variant())
 
 	b.ReportAllocs()
 
