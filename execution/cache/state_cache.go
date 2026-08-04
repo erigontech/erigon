@@ -82,6 +82,9 @@ func NewStateCache(accountBytes, storageBytes, codeBytes, addrBytes datasize.Byt
 	sc.caches[kv.AccountsDomain] = newDomainCacheBytes(accountBytes, avgAccountEntryBytes, mode)
 	sc.caches[kv.StorageDomain] = newDomainCacheBytes(storageBytes, avgStorageEntryBytes, mode)
 	sc.caches[kv.CodeDomain] = NewCodeCache(codeBytes, addrBytes)
+	// CommitmentDomain deliberately gets no cache: commitment data lives in the
+	// BranchCache, and the nil slot short-circuits every StateCache path for it
+	// (including writes of commitmentdb.KeyCommitmentState).
 	return sc
 }
 
@@ -230,29 +233,17 @@ func (c *StateCache) put(domain kv.Domain, key []byte, value []byte, txNum uint6
 	cache.Put(key, bytes.Clone(value), txNum)
 }
 
-// fillIfFresh conditionally inserts a value read from a read view without
-// replacing an authoritative entry. Negatives use the view's last included txNum.
+// fillIfFresh conditionally inserts an accounts or storage value read from a
+// read view without replacing an authoritative entry. Negatives use the view's
+// last included txNum. Code goes through fillCodeIfFresh.
 func (c *StateCache) fillIfFresh(domain kv.Domain, key []byte, value []byte, readTxNum, visibleEnd uint64) {
 	cache := c.caches[domain]
-	if cache == nil || (domain == kv.CodeDomain && len(value) == 0) {
+	if cache == nil {
 		return
 	}
-
-	var codeHash []byte
-	if domain == kv.CodeDomain {
-		codeHash = crypto.Keccak256(value)
-	}
-
 	c.admissionMu.RLock()
 	defer c.admissionMu.RUnlock()
 	if visibleEnd < c.appliedEnd[domain] {
-		return
-	}
-
-	if domain == kv.CodeDomain {
-		if codeCache, ok := cache.(*CodeCache); ok {
-			codeCache.PutWithCodeHashIfAbsent(key, bytes.Clone(value), codeHash, readTxNum)
-		}
 		return
 	}
 	if len(value) == 0 {
@@ -262,6 +253,25 @@ func (c *StateCache) fillIfFresh(domain kv.Domain, key []byte, value []byte, rea
 		}
 	}
 	cache.PutIfAbsent(key, bytes.Clone(value), readTxNum)
+}
+
+// fillCodeIfFresh is fillIfFresh for the code domain. An addr-keyed code entry
+// derives from the account — an account deletion drops it without advancing the
+// code frontier — so admission also checks the accounts frontier. Code
+// negatives are not cached here: "no code" is cached at the addr→codeHash
+// mapping instead (the zero-hash sentinel seeded by SeedAddrCodeHash).
+func (c *StateCache) fillCodeIfFresh(key []byte, value []byte, readTxNum, visibleEnd, accountsVisibleEnd uint64) {
+	codeCache, ok := c.caches[kv.CodeDomain].(*CodeCache)
+	if !ok || len(value) == 0 {
+		return
+	}
+	codeHash := crypto.Keccak256(value)
+	c.admissionMu.RLock()
+	defer c.admissionMu.RUnlock()
+	if visibleEnd < c.appliedEnd[kv.CodeDomain] || accountsVisibleEnd < c.appliedEnd[kv.AccountsDomain] {
+		return
+	}
+	codeCache.PutWithCodeHashIfAbsent(key, bytes.Clone(value), codeHash, readTxNum)
 }
 
 // deleteKey removes the data for the given domain and key. Authoritative
@@ -297,6 +307,11 @@ func (c *StateCache) apply(domain kv.Domain, key, value []byte, txNum uint64) {
 		putOrDelete(cache, key, value, txNum)
 		c.deleteAddrCodeHash(key)
 		if len(value) == 0 {
+			// SharedDomains pairs an account deletion with a code-domain apply;
+			// that paired apply is what advances the code frontier — this cascade
+			// only drops the entry. Code-fill admission also checks the accounts
+			// frontier (fillCodeIfFresh), so the cache holds even for a caller
+			// that does not pair the deletes.
 			c.deleteKey(kv.CodeDomain, key)
 		}
 	case kv.CodeDomain:

@@ -1129,3 +1129,32 @@ func TestStateCache_StaleViewCannotFillAfterClear(t *testing.T) {
 	require.True(t, ok, "a view at the applied frontier must still fill after Clear")
 	require.Equal(t, []byte("current"), got)
 }
+
+// An addr-keyed code entry derives from the account: an account deletion drops
+// it without advancing the code frontier, so code-fill admission must check the
+// accounts frontier too — otherwise a pre-deletion view refills the dead code.
+func TestStateCache_AccountDeletionGatesStaleCodeFill(t *testing.T) {
+	b := 1 * datasize.MB
+	c := NewStateCache(b, b, b, b)
+	t.Cleanup(c.Close)
+	addr, code := makeAddr(1), makeCode(1)
+	other, otherCode := makeAddr(2), makeCode(2)
+
+	c.Applier().Apply(kv.CodeDomain, addr, code, 100)
+	c.Applier().Apply(kv.AccountsDomain, addr, nil, 200)
+
+	stale := c.View(FrontierFunc(func(kv.Domain) (uint64, bool) { return 101, true }))
+	stale.Fill(kv.CodeDomain, addr, code, 100)
+	_, ok := c.View(nil).Get(kv.CodeDomain, addr)
+	require.False(t, ok, "code of a deleted account must not be refillable from a pre-deletion view")
+
+	fresh := c.View(FrontierFunc(func(d kv.Domain) (uint64, bool) {
+		if d == kv.AccountsDomain {
+			return 201, true
+		}
+		return 101, true
+	}))
+	fresh.Fill(kv.CodeDomain, other, otherCode, 100)
+	_, ok = c.View(nil).Get(kv.CodeDomain, other)
+	require.True(t, ok, "unrelated code fills from a current view must stay admitted")
+}

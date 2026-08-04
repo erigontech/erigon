@@ -103,13 +103,24 @@ func (v ReadView) CanFill() bool { return v.c != nil && v.frontier != nil }
 
 // Fill offers a value read from this view without replacing an authoritative
 // entry. Admission is checked against the view's frontier for the domain;
-// views without an exact frontier skip the fill.
+// views without an exact frontier skip the fill. A code fill also checks the
+// accounts frontier: an addr-keyed code entry derives from the account — an
+// account deletion drops it without advancing the code frontier — so a view
+// that predates the deletion must not refill it (mirrors SeedAddrCodeHash).
 func (v ReadView) Fill(domain kv.Domain, key []byte, value []byte, readTxNum uint64) {
 	if v.c == nil || v.c.disableFills || v.frontier == nil {
 		return
 	}
 	visibleEnd, ok := v.frontier.DomainVisibleEnd(domain)
 	if !ok {
+		return
+	}
+	if domain == kv.CodeDomain {
+		accountsEnd, ok := v.frontier.DomainVisibleEnd(kv.AccountsDomain)
+		if !ok {
+			return
+		}
+		v.c.fillCodeIfFresh(key, value, readTxNum, visibleEnd, accountsEnd)
 		return
 	}
 	v.c.fillIfFresh(domain, key, value, readTxNum, visibleEnd)
