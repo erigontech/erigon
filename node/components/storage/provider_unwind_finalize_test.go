@@ -119,6 +119,61 @@ func TestProvider_FinalizeUnwind_DeletesStagedFiles(t *testing.T) {
 	require.Nil(t, p.pendingTrim, "FinalizeUnwind must drain the staged list")
 }
 
+// TestProvider_FinalizeUnwind_StagedTrimRemovesAccessorSiblings pins
+// the follow-up-3 fix: the staged (pendingTrim) path removes the .kv
+// AND every accessor sibling (.bt / .kvi / .kvei plus their .torrent
+// sidecars). Pre-fix, only .kv + .kv.torrent were unlinked, leaving
+// accessor siblings orphaned on disk. Mode-C's snapshot-trim of files
+// past the target step exhibited this at scale: leg P v5 iter 5 left
+// 45 orphaned accessors across step ranges 296-300 and 300-302.
+//
+// Orphaned accessors are more than clutter: a subsequent retire round
+// re-emits a .kv at the same step range with different content; the
+// stale .bt / .kvi / .kvei point at the old file's byte offsets and,
+// once the aggregator's mmap references them, produce wrong reads.
+func TestProvider_FinalizeUnwind_StagedTrimRemovesAccessorSiblings(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+
+	kvName := "v2.2-accounts.296-300.kv"
+	kvPath := filepath.Join(tmpDir, kvName)
+	torrentPath := kvPath + ".torrent"
+	prefix := strings.TrimSuffix(kvPath, ".kv")
+	btPath := prefix + ".bt"
+	kviPath := prefix + ".kvi"
+	kveiPath := prefix + ".kvei"
+	btTorrentPath := btPath + ".torrent"
+	kviTorrentPath := kviPath + ".torrent"
+
+	for _, path := range []string{kvPath, torrentPath, btPath, kviPath, kveiPath, btTorrentPath, kviTorrentPath} {
+		require.NoError(t, os.WriteFile(path, []byte("test"), 0o600))
+	}
+
+	stub := &recordingDownloaderClient{}
+	p := &Provider{snapDir: tmpDir, downloaderClient: stub}
+	p.pendingTrim = &pendingTrimState{
+		names: []string{kvName},
+		paths: []string{kvPath},
+	}
+
+	require.NoError(t, p.FinalizeUnwind())
+
+	for _, path := range []string{kvPath, torrentPath, btPath, kviPath, kveiPath, btTorrentPath, kviTorrentPath} {
+		_, err := os.Stat(path)
+		require.True(t, os.IsNotExist(err),
+			"staged-trim must unlink accessor sibling: %s", filepath.Base(path))
+	}
+
+	deletes := stub.snapshotDeletes()
+	require.Len(t, deletes, 1, "downloaderClient.Delete must fire once")
+	require.Contains(t, deletes[0], kvName,
+		"Delete batch must announce the .kv basename")
+	require.Contains(t, deletes[0], filepath.Base(btPath),
+		"Delete batch must announce accessor basenames so in-flight torrents are cancelled")
+	require.Contains(t, deletes[0], filepath.Base(kviPath))
+	require.Contains(t, deletes[0], filepath.Base(kveiPath))
+}
+
 // TestProvider_FinalizeUnwind_NothingStaged pins that calling
 // FinalizeUnwind with an empty stage is a safe no-op — covers the
 // Provider-with-no-Inventory path in setHeadModeB where Unwind

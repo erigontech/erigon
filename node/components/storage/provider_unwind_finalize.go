@@ -73,16 +73,22 @@ func (p *Provider) FinalizeUnwind() error {
 			}
 		}
 
+		var accessorBases []string
 		for _, path := range staged.paths {
 			_ = dir.RemoveFile(path)
 			_ = dir.RemoveFile(path + ".torrent")
+			if strings.HasSuffix(path, ".kv") {
+				accessorBases = append(accessorBases, p.removeAccessorSiblings(path)...)
+			}
 		}
 
 		sweptNames := p.sweepBlockOrphansPastBlock(staged.toBlock)
 
 		deleteNames := staged.names
-		if len(sweptNames) > 0 {
-			deleteNames = append(append([]string{}, staged.names...), sweptNames...)
+		if len(sweptNames) > 0 || len(accessorBases) > 0 {
+			deleteNames = append([]string{}, staged.names...)
+			deleteNames = append(deleteNames, sweptNames...)
+			deleteNames = append(deleteNames, accessorBases...)
 		}
 		if p.downloaderClient != nil {
 			if err := p.downloaderClient.Delete(context.Background(), deleteNames); err != nil && p.logger != nil {
@@ -418,6 +424,43 @@ func (p *Provider) sweepBlockOrphansPastBlock(toBlock uint64) []string {
 		p.logger.Info("[storage] Provider.FinalizeUnwind: orphan-past-toBlock sweep", "files", len(removedPrimaries), "toBlock", toBlock, "newTo", newTo)
 	}
 	return removedPrimaries
+}
+
+// removeAccessorSiblings unlinks every accessor file (.bt / .kvi /
+// .kvei) sharing the trimmed .kv's domain + step-range, plus any
+// .torrent sidecars carrying that accessor's hash. Symmetric to
+// renameAccessorsToOld but for the staged-trim path where the file is
+// gone for good (no regen-in-place, no need for the .old dance).
+// Returns the basenames of every accessor removed so the caller can
+// pass them to downloaderClient.Delete alongside the .kv basename —
+// otherwise the downloader keeps policing the retired torrents.
+func (p *Provider) removeAccessorSiblings(kvPath string) []string {
+	kvBase := filepath.Base(kvPath)
+	_, after, ok := strings.Cut(kvBase, "-")
+	if !ok {
+		return nil
+	}
+	suffix := strings.TrimSuffix(after, ".kv")
+	if suffix == after {
+		return nil
+	}
+	kvDir := filepath.Dir(kvPath)
+	var removedBases []string
+	for _, ext := range []string{".bt", ".kvi", ".kvei"} {
+		matches, err := filepath.Glob(filepath.Join(kvDir, "v*-"+suffix+ext))
+		if err != nil {
+			continue
+		}
+		for _, m := range matches {
+			if err := dir.RemoveFile(m); err != nil && !os.IsNotExist(err) && p.logger != nil {
+				p.logger.Warn("[storage] Provider.FinalizeUnwind: remove accessor sibling failed (continuing)", "err", err, "path", m)
+				continue
+			}
+			_ = dir.RemoveFile(m + ".torrent")
+			removedBases = append(removedBases, filepath.Base(m))
+		}
+	}
+	return removedBases
 }
 
 // renameAccessorsToOld renames every accessor file (.bt / .kvi /
