@@ -62,6 +62,10 @@ type StateCache struct {
 	// against concurrent read-fills, which recheck freshness under RLock.
 	admissionMu sync.RWMutex
 	appliedEnd  [kv.DomainLen]uint64
+	// disableFills (STATE_CACHE_FILLS=false) turns off the admission-gated
+	// read fills, leaving applies as the only writer ("apply-only" mode) —
+	// an A/B lever and an operational kill switch.
+	disableFills bool
 }
 
 // NewStateCache creates a new StateCache with the specified byte capacities.
@@ -71,6 +75,10 @@ type StateCache struct {
 func NewStateCache(accountBytes, storageBytes, codeBytes, addrBytes datasize.ByteSize) *StateCache {
 	mode := stateCacheModeFromEnv()
 	sc := &StateCache{}
+	if !dbg.EnvBool("STATE_CACHE_FILLS", true) {
+		sc.disableFills = true
+		log.Info("[cache] STATE_CACHE_FILLS=false — read fills disabled, only flush applies populate the cache")
+	}
 	sc.caches[kv.AccountsDomain] = newDomainCacheBytes(accountBytes, avgAccountEntryBytes, mode)
 	sc.caches[kv.StorageDomain] = newDomainCacheBytes(storageBytes, avgStorageEntryBytes, mode)
 	sc.caches[kv.CodeDomain] = NewCodeCache(codeBytes, addrBytes)

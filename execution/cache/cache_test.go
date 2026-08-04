@@ -1071,3 +1071,30 @@ func TestDomainCache_ClearAtomicWithPut_NoSizeDrift(t *testing.T) {
 		require.Equal(t, wantSize, c.SizeBytes(), "round %d: size accounting drifted", round)
 	}
 }
+
+// STATE_CACHE_FILLS=false turns off the admission-gated read fills (apply-only
+// mode): the A/B lever for measuring what fills contribute, and the ops kill
+// switch. Applies keep working.
+func TestStateCacheFillsSwitchDisablesReadFills(t *testing.T) {
+	t.Setenv("STATE_CACHE_FILLS", "false")
+	b := 1 * datasize.MB
+	c := NewStateCache(b, b, b, b)
+	defer c.Close()
+
+	key := make([]byte, 20)
+	key[0] = 0xaa
+	view := c.View(FrontierFunc(func(kv.Domain) (uint64, bool) { return 100, true }))
+
+	view.Fill(kv.AccountsDomain, key, []byte("value"), 10)
+	_, ok := c.View(nil).Get(kv.AccountsDomain, key)
+	require.False(t, ok, "fills must be disabled")
+
+	view.SeedAddrCodeHash(key, [32]byte{1}, 10)
+	_, ok = c.View(nil).GetAddrCodeHash(key)
+	require.False(t, ok, "mapping seeds must be disabled")
+
+	c.Applier().Apply(kv.AccountsDomain, key, []byte("applied"), 20)
+	got, ok := c.View(nil).Get(kv.AccountsDomain, key)
+	require.True(t, ok, "applies must keep working")
+	require.Equal(t, []byte("applied"), got)
+}

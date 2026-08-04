@@ -104,7 +104,7 @@ func (v ReadView) CanFill() bool { return v.c != nil && v.frontier != nil }
 // entry. Admission is checked against the view's frontier for the domain;
 // views without an exact frontier skip the fill.
 func (v ReadView) Fill(domain kv.Domain, key []byte, value []byte, readTxNum uint64) {
-	if v.c == nil || v.frontier == nil {
+	if v.c == nil || v.c.disableFills || v.frontier == nil {
 		return
 	}
 	visibleEnd, ok := v.frontier.DomainVisibleEnd(domain)
@@ -118,7 +118,7 @@ func (v ReadView) Fill(domain kv.Domain, key []byte, value []byte, readTxNum uin
 // record read from this view, so admission checks the accounts frontier even
 // though the mapping lives in the code cache.
 func (v ReadView) SeedAddrCodeHash(addr []byte, h [32]byte, txNum uint64) {
-	if v.c == nil || v.frontier == nil {
+	if v.c == nil || v.c.disableFills || v.frontier == nil {
 		return
 	}
 	visibleEnd, ok := v.frontier.DomainVisibleEnd(kv.AccountsDomain)
