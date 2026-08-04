@@ -140,7 +140,7 @@ func TestLocalKVRanges_Iter3HoodiLayout(t *testing.T) {
 	files, ranges := localKVRanges(entries)
 	require.Len(t, files, 7, "exactly the 7 local .kv entries — peer-claimed .280-284 must be excluded")
 
-	classified := planStateFileActions(ranges, 282)
+	classified := planStateFileActions(ranges, 282, true)
 	require.Equal(t, []stateFileRange{
 		{0, 256}, {256, 272}, {272, 276}, {272, 280}, {276, 278}, {278, 279},
 	}, classified.keep, "every local file below the boundary stays put")

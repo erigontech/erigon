@@ -25,41 +25,56 @@ import (
 )
 
 // classifyStateFileForUnwind: per-file rule tests. Each case is one
-// (FromStep, ToStep, stepBoundary) tuple and the expected action.
-// Boundary-value coverage at each of the four action regions.
+// (FromStep, ToStep, stepBoundary, boundaryAligned) tuple and the
+// expected action. Boundary-value coverage at each of the four
+// action regions. boundaryAligned=true means lastTxNum+1 lands
+// exactly on a step edge (stepBoundary*stepSize); false means the
+// unwind target is mid-step within [(stepBoundary-1)*stepSize,
+// stepBoundary*stepSize).
 func TestClassifyStateFileForUnwind(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name     string
 		from, to uint64
 		boundary uint64
+		aligned  bool
 		want     stateFileAction
 	}{
 		// === actionKeep: ToStep <= stepBoundary - 1 (file entirely below boundary)
-		{"keep — well below boundary", 0, 256, 278, actionKeep},
-		{"keep — ToStep one below boundary", 272, 277, 278, actionKeep},
-		{"keep — equal-step file deep below", 100, 101, 278, actionKeep},
+		{"keep — well below boundary", 0, 256, 278, true, actionKeep},
+		{"keep — ToStep one below boundary", 272, 277, 278, true, actionKeep},
+		{"keep — equal-step file deep below", 100, 101, 278, true, actionKeep},
+		// Alignment irrelevant for below-boundary — file's content is entirely valid.
+		{"keep — mid-step alignment doesn't change below-boundary verdict", 272, 277, 278, false, actionKeep},
 
-		// === actionRegenInPlace: ToStep == stepBoundary (aligned at boundary)
-		{"in-place — ToStep equals boundary, narrow file", 277, 278, 278, actionRegenInPlace},
-		{"in-place — ToStep equals boundary, broad file", 272, 278, 278, actionRegenInPlace},
-		{"in-place — boundary at 0 + simple aligned file", 0, 1, 1, actionRegenInPlace},
+		// === actionRegenInPlace: ToStep == stepBoundary AND target lands exactly on step edge
+		{"in-place — ToStep equals boundary, narrow file, aligned", 277, 278, 278, true, actionRegenInPlace},
+		{"in-place — ToStep equals boundary, broad file, aligned", 272, 278, 278, true, actionRegenInPlace},
+		{"in-place — boundary at 0 + simple aligned file", 0, 1, 1, true, actionRegenInPlace},
 
-		// === actionRegenTruncate: FromStep < stepBoundary < ToStep (straddler)
-		{"truncate — broad straddler crosses boundary", 272, 280, 278, actionRegenTruncate},
-		{"truncate — narrow straddler", 277, 280, 278, actionRegenTruncate},
-		{"truncate — boundary near range start", 272, 273, 272, actionRemove}, // F == boundary → remove, not truncate
+		// === actionRegenTruncate: mid-step boundary reclassifies aligned-ToStep as straddler
+		// (the file's [(ToStep-1)*stepSize, ToStep*stepSize) range spans past lastTxNum's mid-step position).
+		// This is the load-bearing rule for the mode-C completeness bug: a mid-step mode-B unwind
+		// target must NOT overwrite the step-aligned .kv name; emit a v4 mid-step file instead.
+		{"truncate — ToStep equals boundary but mid-step target (mode-C completeness)", 302, 303, 303, false, actionRegenTruncate},
+		{"truncate — broad boundary-file at mid-step target", 272, 278, 278, false, actionRegenTruncate},
+
+		// === actionRegenTruncate: FromStep < stepBoundary < ToStep (topological straddler)
+		{"truncate — broad straddler crosses boundary, aligned", 272, 280, 278, true, actionRegenTruncate},
+		{"truncate — narrow straddler, aligned", 277, 280, 278, true, actionRegenTruncate},
+		{"truncate — broad straddler crosses boundary, mid-step", 272, 280, 278, false, actionRegenTruncate},
+		{"truncate — boundary near range start", 272, 273, 272, true, actionRemove}, // F == boundary → remove, not truncate
 
 		// === actionRemove: FromStep >= stepBoundary (entirely past)
-		{"remove — entirely past boundary", 280, 284, 278, actionRemove},
-		{"remove — starts at boundary step", 278, 279, 278, actionRemove},
-		{"remove — far past boundary", 500, 600, 278, actionRemove},
+		{"remove — entirely past boundary", 280, 284, 278, true, actionRemove},
+		{"remove — starts at boundary step", 278, 279, 278, true, actionRemove},
+		{"remove — far past boundary", 500, 600, 278, true, actionRemove},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := classifyStateFileForUnwind(stateFileRange{tc.from, tc.to}, tc.boundary)
+			got := classifyStateFileForUnwind(stateFileRange{tc.from, tc.to}, tc.boundary, tc.aligned)
 			require.Equal(t, tc.want, got,
-				"file [%d, %d) at stepBoundary=%d", tc.from, tc.to, tc.boundary)
+				"file [%d, %d) at stepBoundary=%d aligned=%v", tc.from, tc.to, tc.boundary, tc.aligned)
 		})
 	}
 }
@@ -75,7 +90,7 @@ func TestPlan_NoFilesPastBoundary(t *testing.T) {
 		{0, 256},
 		{256, 272},
 	}
-	got := planStateFileActions(files, 278)
+	got := planStateFileActions(files, 278, true)
 	require.Equal(t, files, got.keep)
 	require.Empty(t, got.regen)
 	require.Empty(t, got.remove)
@@ -92,7 +107,7 @@ func TestPlan_AlignedBoundary(t *testing.T) {
 		{256, 272},
 		{272, 278}, // exactly at boundary
 	}
-	got := planStateFileActions(files, 278)
+	got := planStateFileActions(files, 278, true)
 	require.Equal(t, []stateFileRange{{0, 256}, {256, 272}}, got.keep)
 	require.Equal(t, []stateFileRange{{272, 278}}, got.regen)
 	require.Equal(t, []bool{true}, got.inPlace, "aligned boundary file must regen in place")
@@ -108,7 +123,7 @@ func TestPlan_SingleStraddler(t *testing.T) {
 		{256, 272},
 		{272, 280}, // straddles 278
 	}
-	got := planStateFileActions(files, 278)
+	got := planStateFileActions(files, 278, true)
 	require.Equal(t, []stateFileRange{{0, 256}, {256, 272}}, got.keep)
 	require.Equal(t, []stateFileRange{{272, 280}}, got.regen)
 	require.Equal(t, []bool{false}, got.inPlace, "straddler must regen with truncation")
@@ -130,7 +145,7 @@ func TestPlan_FilesEntirelyPastBoundary(t *testing.T) {
 		{278, 282}, // entirely past — REMOVE
 		{282, 284}, // entirely past — REMOVE
 	}
-	got := planStateFileActions(files, 278)
+	got := planStateFileActions(files, 278, true)
 	require.Equal(t, []stateFileRange{{0, 256}, {256, 272}}, got.keep)
 	require.Equal(t, []stateFileRange{{272, 278}}, got.regen)
 	require.Equal(t, []bool{true}, got.inPlace)
@@ -150,7 +165,7 @@ func TestPlan_StraddlerPlusEntirelyPast(t *testing.T) {
 		{280, 282}, // entirely past
 		{282, 284}, // entirely past
 	}
-	got := planStateFileActions(files, 278)
+	got := planStateFileActions(files, 278, true)
 	require.Equal(t, []stateFileRange{{0, 256}, {256, 272}}, got.keep)
 	require.Equal(t, []stateFileRange{{272, 280}}, got.regen)
 	require.Equal(t, []bool{false}, got.inPlace)
@@ -187,7 +202,7 @@ func TestPlan_Iter3ModeBLayout(t *testing.T) {
 		{280, 282},
 		{280, 284},
 	}
-	got := planStateFileActions(files, 278)
+	got := planStateFileActions(files, 278, true)
 
 	require.Equal(t,
 		[]stateFileRange{{0, 256}, {256, 272}, {272, 276}}, got.keep,
@@ -205,6 +220,41 @@ func TestPlan_Iter3ModeBLayout(t *testing.T) {
 		"files entirely past boundary (incl. boundary-start) must be removed")
 }
 
+// TestPlan_MidStepBoundary_AlignedNameStraddles reproduces the leg P
+// v6 iter 4 mode_b layout that landed corrupt per-step regen files on
+// disk. Target lastTxNum was mid-step 302 (rounds up to stepBoundary
+// 303), so the file [302, 303) was structurally aligned to boundary
+// (ToStep==303) but its content genuinely spanned past the true
+// endTxN. Under the pre-fix classifier this got actionRegenInPlace —
+// the regen writer overwrote v2.0-<domain>.302-303.kv with content
+// that only reflected state as-of the mid-step target, while the
+// filename still advertised full-step coverage. That violated the
+// mode-C completeness invariant.
+//
+// After the fix: the aligned-name file at stepBoundary is reclassified
+// as a straddler (actionRegenTruncate) when the target is mid-step.
+// The regen wires that through boundaryRegenFinalPath → v4 mid-step
+// name so the advertised endTxN matches the content.
+func TestPlan_MidStepBoundary_AlignedNameStraddles(t *testing.T) {
+	t.Parallel()
+	files := []stateFileRange{
+		{0, 256},
+		{256, 288},
+		{288, 296},
+		{296, 300},
+		{300, 302},
+		{302, 303}, // aligned-name but content straddles the mid-step target
+	}
+	got := planStateFileActions(files, 303, false /* mid-step */)
+	require.Equal(t,
+		[]stateFileRange{{0, 256}, {256, 288}, {288, 296}, {296, 300}, {300, 302}},
+		got.keep, "below-boundary files unaffected")
+	require.Equal(t, []stateFileRange{{302, 303}}, got.regen)
+	require.Equal(t, []bool{false}, got.inPlace,
+		"mid-step target: aligned-name boundary file must regen with truncation (v4 mid-step emit)")
+	require.Empty(t, got.remove)
+}
+
 // TestPlan_BoundaryAtZero: edge case — stepBoundary=0 means unwind to
 // before-any-step. Every file is entirely past.
 func TestPlan_BoundaryAtZero(t *testing.T) {
@@ -213,7 +263,7 @@ func TestPlan_BoundaryAtZero(t *testing.T) {
 		{0, 256},
 		{256, 272},
 	}
-	got := planStateFileActions(files, 0)
+	got := planStateFileActions(files, 0, true)
 	require.Empty(t, got.keep)
 	require.Empty(t, got.regen)
 	require.Equal(t, files, got.remove)
@@ -228,7 +278,7 @@ func TestPlan_BoundaryAboveAllFiles(t *testing.T) {
 		{256, 272},
 		{272, 278},
 	}
-	got := planStateFileActions(files, 9999)
+	got := planStateFileActions(files, 9999, true)
 	require.Equal(t, files, got.keep)
 	require.Empty(t, got.regen)
 	require.Empty(t, got.remove)
@@ -238,7 +288,7 @@ func TestPlan_BoundaryAboveAllFiles(t *testing.T) {
 // domain that hasn't retired yet). No-op.
 func TestPlan_EmptyInput(t *testing.T) {
 	t.Parallel()
-	got := planStateFileActions(nil, 278)
+	got := planStateFileActions(nil, 278, true)
 	require.Empty(t, got.keep)
 	require.Empty(t, got.regen)
 	require.Empty(t, got.remove)

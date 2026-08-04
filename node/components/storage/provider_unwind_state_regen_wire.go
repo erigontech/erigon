@@ -122,6 +122,11 @@ func (p *Provider) regenerateBoundaryStepFiles(
 		return nil, fmt.Errorf("aggregator StepSize() == 0")
 	}
 	stepBoundary := (lastTxNum / stepSize) + 1
+	// True when lastTxNum is the last txN of its step (i.e. lastTxNum+1
+	// is a step edge). Mid-step targets require classifying the file
+	// whose ToStep equals stepBoundary as a straddler so it emits a v4
+	// mid-step file instead of overwriting the step-aligned name.
+	boundaryAligned := (lastTxNum+1)%stepSize == 0
 
 	// Encode the commitment anchor once — every regen of the
 	// commitment domain plants the same blob.
@@ -183,7 +188,7 @@ func (p *Provider) regenerateBoundaryStepFiles(
 
 		// Walk every file; map each to an action via classifyStateFileForUnwind.
 		for i, fileEntry := range domainFiles {
-			action := classifyStateFileForUnwind(ranges[i], stepBoundary)
+			action := classifyStateFileForUnwind(ranges[i], stepBoundary, boundaryAligned)
 			action, err = overrideActionForDomain(action, kvDomain, ixCoversTarget)
 			if err != nil {
 				return nil, fmt.Errorf("classify %s file %s: %w", sd, fileEntry.Name, err)

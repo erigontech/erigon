@@ -64,7 +64,17 @@ type stateFileRange struct {
 }
 
 // classifyStateFileForUnwind returns the action the mode-B unwind
-// planner should take for a single file given a new stepBoundary.
+// planner should take for a single file given a new stepBoundary and
+// whether the unwind target lands exactly on a step edge.
+//
+// stepBoundary = ceil((lastTxNum+1)/stepSize). boundaryAligned is
+// true when (lastTxNum+1) is an integer multiple of stepSize — i.e.
+// the target is the last txN of the step just below stepBoundary.
+// When false, the target is mid-step and the file whose ToStep
+// equals stepBoundary spans past the true endTxN of the target;
+// treating it as a straddler emits a v4 mid-step file rather than
+// overwriting the step-aligned name with content that would lie
+// about its coverage (mode-C completeness invariant).
 //
 // The classification is purely topological — no I/O, no Inventory
 // access. The four actions are mutually exclusive and exhaustive over
@@ -73,23 +83,19 @@ type stateFileRange struct {
 // Rules (in declaration order; the first matching rule wins):
 //
 //	ToStep <= stepBoundary - 1   →  actionKeep
-//	ToStep == stepBoundary       →  actionRegenInPlace      (FromStep < stepBoundary guaranteed by FromStep<ToStep)
-//	FromStep < stepBoundary      →  actionRegenTruncate     (and ToStep > stepBoundary)
+//	ToStep == stepBoundary       →  actionRegenInPlace when boundaryAligned,
+//	                                 else actionRegenTruncate (mid-step target)
+//	FromStep < stepBoundary      →  actionRegenTruncate      (and ToStep > stepBoundary)
 //	FromStep >= stepBoundary     →  actionRemove
-//
-// Equivalently expressed by which side of stepBoundary the file's
-// range falls on:
-//
-//	[F, T) entirely before boundary  →  keep
-//	[F, T) ends at boundary           →  regen in place
-//	[F, T) straddles boundary         →  regen with truncation
-//	[F, T) entirely past boundary     →  remove
-func classifyStateFileForUnwind(r stateFileRange, stepBoundary uint64) stateFileAction {
+func classifyStateFileForUnwind(r stateFileRange, stepBoundary uint64, boundaryAligned bool) stateFileAction {
 	if r.ToStep < stepBoundary {
 		return actionKeep
 	}
 	if r.ToStep == stepBoundary {
-		return actionRegenInPlace
+		if boundaryAligned {
+			return actionRegenInPlace
+		}
+		return actionRegenTruncate
 	}
 	// ToStep > stepBoundary
 	if r.FromStep < stepBoundary {
@@ -149,10 +155,10 @@ func overrideActionForDomain(action stateFileAction, domain kv.Domain, ixCoversT
 // per-action partition. Used by regenerateBoundaryStepFiles to drive
 // the post-mode-B file-set transformation; pure-function shape lets
 // it be tested without a Provider or Aggregator.
-func planStateFileActions(files []stateFileRange, stepBoundary uint64) classifiedFiles {
+func planStateFileActions(files []stateFileRange, stepBoundary uint64, boundaryAligned bool) classifiedFiles {
 	var out classifiedFiles
 	for _, f := range files {
-		switch classifyStateFileForUnwind(f, stepBoundary) {
+		switch classifyStateFileForUnwind(f, stepBoundary, boundaryAligned) {
 		case actionKeep:
 			out.keep = append(out.keep, f)
 		case actionRegenInPlace:
