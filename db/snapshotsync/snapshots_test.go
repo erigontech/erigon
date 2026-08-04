@@ -770,18 +770,19 @@ func TestOpenAllSnapshot(t *testing.T) {
 func TestParseCompressedFileName(t *testing.T) {
 	require := require.New(t)
 	fs := fstest.MapFS{
-		"a":                      &fstest.MapFile{},
-		"1-a":                    &fstest.MapFile{},
-		"1-2-a":                  &fstest.MapFile{},
-		"1-2-bodies.info":        &fstest.MapFile{},
-		"1-2-bodies.seg":         &fstest.MapFile{},
-		"v2-1-2-bodies.seg":      &fstest.MapFile{},
-		"v0-1-2-bodies.seg":      &fstest.MapFile{},
-		"v1-1-2-bodies.seg":      &fstest.MapFile{},
-		"v1.0-1-2-bodies.seg":    &fstest.MapFile{},
-		"v1-accounts.24-28.ef":   &fstest.MapFile{},
-		"v1.0-accounts.24-28.ef": &fstest.MapFile{},
-		"salt-blocks.txt":        &fstest.MapFile{},
+		"a":                                   &fstest.MapFile{},
+		"1-a":                                 &fstest.MapFile{},
+		"1-2-a":                               &fstest.MapFile{},
+		"1-2-bodies.info":                     &fstest.MapFile{},
+		"1-2-bodies.seg":                      &fstest.MapFile{},
+		"v2-000001-000002-bodies.seg":         &fstest.MapFile{},
+		"v0-000001-000002-bodies.seg":         &fstest.MapFile{},
+		"v1-000001-000002-bodies.seg":         &fstest.MapFile{},
+		"v1.0-000001-000002-bodies.seg":       &fstest.MapFile{},
+		"v1.0-000000001-000000002-bodies.seg": &fstest.MapFile{},
+		"v1-accounts.24-28.ef":                &fstest.MapFile{},
+		"v1.0-accounts.24-28.ef":              &fstest.MapFile{},
+		"salt-blocks.txt":                     &fstest.MapFile{},
 		"v1.0-022695-022696-transactions-to-block.idx":                     &fstest.MapFile{},
 		"v1-022695-022696-transactions-to-block.idx":                       &fstest.MapFile{},
 		"preverified.toml":                                                 &fstest.MapFile{},
@@ -811,11 +812,11 @@ func TestParseCompressedFileName(t *testing.T) {
 	require.False(ok)
 	_, _, ok = snaptype.ParseFileName("", stat("1-2-bodies.seg"))
 	require.False(ok)
-	_, _, ok = snaptype.ParseFileName("", stat("v2-1-2-bodies.seg"))
+	_, _, ok = snaptype.ParseFileName("", stat("v2-000001-000002-bodies.seg"))
 	require.True(ok)
-	_, _, ok = snaptype.ParseFileName("", stat("v0-1-2-bodies.seg"))
+	_, _, ok = snaptype.ParseFileName("", stat("v0-000001-000002-bodies.seg"))
 	require.True(ok)
-	f, _, ok := snaptype.ParseFileName("", stat("v1-1-2-bodies.seg"))
+	f, _, ok := snaptype.ParseFileName("", stat("v1-000001-000002-bodies.seg"))
 	require.True(ok)
 	require.Equal(f.Type.Enum(), snaptype2.Bodies.Enum())
 	require.Equal(1_000, int(f.From))
@@ -878,12 +879,18 @@ func TestParseCompressedFileName(t *testing.T) {
 	require.Equal(22695000, int(f.From))
 	require.Equal(22696000, int(f.To))
 
-	f, e3, ok = snaptype.ParseFileName("", stat("v1.0-1-2-bodies.seg"))
+	f, e3, ok = snaptype.ParseFileName("", stat("v1.0-000001-000002-bodies.seg"))
+	require.True(ok)
+	require.False(e3)
+	require.Equal(1_000, int(f.From))
+	require.Equal(2_000, int(f.To))
+	require.Equal("bodies", f.TypeString)
+	f, e3, ok = snaptype.ParseFileName("", stat("v1.0-000000001-000000002-bodies.seg"))
 	require.True(ok)
 	require.False(e3)
 	require.Equal(f.Type.Enum(), snaptype2.Bodies.Enum())
-	require.Equal(1_000, int(f.From))
-	require.Equal(2_000, int(f.To))
+	require.Equal(1, int(f.From))
+	require.Equal(2, int(f.To))
 	require.Equal("bodies", f.TypeString)
 
 	f, e3, ok = snaptype.ParseFileName("", stat("v1.0-070200-070300-bodies.seg.torrent4014494284"))
