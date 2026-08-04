@@ -151,21 +151,28 @@ func (f *ForkChoiceStore) getHeadGloas() (common.Hash, uint64, error) {
 		// a nil state degrades to zero attestation weight, as before.
 		cs, _ := f.getCheckpointState(justifiedCheckpoint)
 
-		f.mu.Lock()
-		if f.justifiedCheckpoint.Load().(solid.Checkpoint) != justifiedCheckpoint {
-			f.mu.Unlock()
-			continue
-		}
-		head, slot, err := f.computeHeadGloasWithAnchorFallback(justifiedCheckpoint, cs)
+		headHash, headSlot, ok, err := func() (common.Hash, uint64, bool, error) {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+
+			if f.justifiedCheckpoint.Load().(solid.Checkpoint) != justifiedCheckpoint {
+				return common.Hash{}, 0, false, nil
+			}
+			head, slot, err := f.computeHeadGloasWithAnchorFallback(justifiedCheckpoint, cs)
+			if err != nil {
+				return common.Hash{}, 0, false, err
+			}
+			f.headHash = head.Root
+			f.headSlot = slot
+			f.headPayloadStatus = head.PayloadStatus
+			return f.headHash, f.headSlot, true, nil
+		}()
 		if err != nil {
-			f.mu.Unlock()
 			return common.Hash{}, 0, err
 		}
-		f.headHash = head.Root
-		f.headSlot = slot
-		f.headPayloadStatus = head.PayloadStatus
-		f.mu.Unlock()
-		return f.headHash, f.headSlot, nil
+		if ok {
+			return headHash, headSlot, nil
+		}
 	}
 }
 
