@@ -128,7 +128,11 @@ func (c *Cache) View(_ context.Context, tx kv.TemporalTx) (kvcache.CacheView, er
 		context = c.publishedSD()
 	}
 
-	return &CacheView{context: context, tx: tx}, nil
+	view := &CacheView{context: context, tx: tx, getter: tx}
+	if context != nil {
+		view.getter = context.AsGetter(tx)
+	}
+	return view, nil
 }
 func (c *Cache) OnNewBlock(sc *remoteproto.StateChangeBatch) {}
 func (c *Cache) Evict() int                                  { return 0 }
@@ -140,26 +144,21 @@ func (c *Cache) ValidateCurrentRoot(_ context.Context, _ kv.TemporalTx) (*kvcach
 type CacheView struct {
 	context *execctx.SharedDomains
 	tx      kv.TemporalTx
+	// getter is built once per view: it carries the per-tx cache ReadView, so
+	// per-read getter construction would cost an allocation on every call.
+	getter kv.TemporalGetter
 }
 
 func (c *CacheView) Get(k []byte) ([]byte, error) {
-	var getter kv.TemporalGetter = c.tx
-	if c.context != nil {
-		getter = c.context.AsGetter(c.tx)
-	}
 	if len(k) == 20 {
-		v, _, err := getter.GetLatest(kv.AccountsDomain, k)
+		v, _, err := c.getter.GetLatest(kv.AccountsDomain, k)
 		return v, err
 	}
-	v, _, err := getter.GetLatest(kv.StorageDomain, k)
+	v, _, err := c.getter.GetLatest(kv.StorageDomain, k)
 	return v, err
 }
 func (c *CacheView) GetCode(k []byte) ([]byte, error) {
-	var getter kv.TemporalGetter = c.tx
-	if c.context != nil {
-		getter = c.context.AsGetter(c.tx)
-	}
-	v, _, err := getter.GetLatest(kv.CodeDomain, k)
+	v, _, err := c.getter.GetLatest(kv.CodeDomain, k)
 	return v, err
 }
 
@@ -174,11 +173,7 @@ func (c *CacheView) GetAsOf(key []byte, ts uint64) (v []byte, ok bool, err error
 }
 
 func (c *CacheView) HasStorage(address common.Address) (bool, error) {
-	var getter kv.TemporalGetter = c.tx
-	if c.context != nil {
-		getter = c.context.AsGetter(c.tx)
-	}
-	_, _, hasStorage, err := getter.HasPrefix(kv.StorageDomain, address[:])
+	_, _, hasStorage, err := c.getter.HasPrefix(kv.StorageDomain, address[:])
 	return hasStorage, err
 }
 
@@ -385,12 +380,13 @@ func (e *ExecModule) canonicalHash(ctx context.Context, tx kv.Tx, blockNumber ui
 }
 
 // drainReadAhead blocks until any in-flight block-assembly warmup finishes.
-// warmBody is fire-and-forget and populates the shared state/branch caches; if
-// it is still running when an unwind bumps the cache epoch, it can Put a
+// warmBody is fire-and-forget and fills the shared state cache; if
+// it is still running when an unwind bumps the cache epoch, it can fill a
 // pre-unwind (dead-fork) value stamped with the post-unwind epoch — IsStale then
-// returns false and the stale value is served as canonical (wrong root). A
-// laggard Put can likewise land after a flush's cache-apply and pin the
-// pre-flush snapshot. Call before any unwind epoch-bump or flush cache-apply.
+// returns false and the stale value is served as canonical (wrong root). Fill
+// admission does not cover this direction (an unwind lowers the applied
+// frontier, so a pre-unwind view passes) — see the tracking issue for
+// two-sided admission. Call before any unwind epoch-bump.
 func (e *ExecModule) drainReadAhead() {
 	if e.readAheader == nil {
 		return

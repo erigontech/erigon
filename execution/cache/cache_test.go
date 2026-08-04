@@ -424,22 +424,22 @@ func TestStateCache_NewStateCache(t *testing.T) {
 	require.NotNil(t, c)
 
 	// Account, Storage, Code, Commitment should be initialized
-	assert.NotNil(t, c.GetCache(kv.AccountsDomain))
-	assert.NotNil(t, c.GetCache(kv.StorageDomain))
-	assert.NotNil(t, c.GetCache(kv.CodeDomain))
+	assert.NotNil(t, c.getCache(kv.AccountsDomain))
+	assert.NotNil(t, c.getCache(kv.StorageDomain))
+	assert.NotNil(t, c.getCache(kv.CodeDomain))
 
 	// Other domains should be nil
-	assert.Nil(t, c.GetCache(kv.ReceiptDomain))
-	assert.Nil(t, c.GetCache(kv.RCacheDomain))
+	assert.Nil(t, c.getCache(kv.ReceiptDomain))
+	assert.Nil(t, c.getCache(kv.RCacheDomain))
 }
 
 func TestStateCache_NewDefaultStateCache(t *testing.T) {
 	c := closeOnCleanup(t, NewDefaultStateCache())
 	require.NotNil(t, c)
 
-	assert.NotNil(t, c.GetCache(kv.AccountsDomain))
-	assert.NotNil(t, c.GetCache(kv.StorageDomain))
-	assert.NotNil(t, c.GetCache(kv.CodeDomain))
+	assert.NotNil(t, c.getCache(kv.AccountsDomain))
+	assert.NotNil(t, c.getCache(kv.StorageDomain))
+	assert.NotNil(t, c.getCache(kv.CodeDomain))
 }
 
 func TestStateCache_GetPut_Account(t *testing.T) {
@@ -449,13 +449,13 @@ func TestStateCache_GetPut_Account(t *testing.T) {
 	value := makeValue(1)
 
 	// Get non-existent
-	v, ok := c.Get(kv.AccountsDomain, addr)
+	v, ok := c.get(kv.AccountsDomain, addr)
 	assert.False(t, ok)
 	assert.Nil(t, v)
 
 	// Put and Get
-	c.Put(kv.AccountsDomain, addr, value, 0)
-	v, ok = c.Get(kv.AccountsDomain, addr)
+	c.put(kv.AccountsDomain, addr, value, 0)
+	v, ok = c.get(kv.AccountsDomain, addr)
 	assert.True(t, ok)
 	assert.Equal(t, value, v)
 }
@@ -468,8 +468,8 @@ func TestStateCache_GetPut_Storage(t *testing.T) {
 	key[51] = 1
 	value := makeValue(1)
 
-	c.Put(kv.StorageDomain, key, value, 0)
-	v, ok := c.Get(kv.StorageDomain, key)
+	c.put(kv.StorageDomain, key, value, 0)
+	v, ok := c.get(kv.StorageDomain, key)
 	assert.True(t, ok)
 	assert.Equal(t, value, v)
 }
@@ -480,8 +480,8 @@ func TestStateCache_GetPut_Code(t *testing.T) {
 	addr := makeAddr(1)
 	code := makeCode(1)
 
-	c.Put(kv.CodeDomain, addr, code, 0)
-	v, ok := c.Get(kv.CodeDomain, addr)
+	c.put(kv.CodeDomain, addr, code, 0)
+	v, ok := c.get(kv.CodeDomain, addr)
 	assert.True(t, ok)
 	assert.Equal(t, code, v)
 }
@@ -490,8 +490,8 @@ func TestStateCache_GetPut_UnsupportedDomain(t *testing.T) {
 	c := closeOnCleanup(t, NewStateCache(100, 100, 100, 100))
 
 	// ReceiptDomain is not supported
-	c.Put(kv.ReceiptDomain, makeAddr(1), makeValue(1), 0)
-	v, ok := c.Get(kv.ReceiptDomain, makeAddr(1))
+	c.put(kv.ReceiptDomain, makeAddr(1), makeValue(1), 0)
+	v, ok := c.get(kv.ReceiptDomain, makeAddr(1))
 	assert.False(t, ok)
 	assert.Nil(t, v)
 }
@@ -500,10 +500,10 @@ func TestStateCache_Delete(t *testing.T) {
 	c := closeOnCleanup(t, NewStateCache(100, 100, 100, 100))
 
 	addr := makeAddr(1)
-	c.Put(kv.AccountsDomain, addr, makeValue(1), 0)
-	c.Delete(kv.AccountsDomain, addr)
+	c.put(kv.AccountsDomain, addr, makeValue(1), 0)
+	c.deleteKey(kv.AccountsDomain, addr)
 
-	_, ok := c.Get(kv.AccountsDomain, addr)
+	_, ok := c.get(kv.AccountsDomain, addr)
 	assert.False(t, ok)
 }
 
@@ -517,9 +517,9 @@ func TestStateCache_PutEmpty_ThenGet_IsCacheHit(t *testing.T) {
 	key[0] = 0x1d
 	key[51] = 0xa2
 
-	c.Put(kv.StorageDomain, key, nil, 0)
+	c.put(kv.StorageDomain, key, nil, 0)
 
-	v, ok := c.Get(kv.StorageDomain, key)
+	v, ok := c.get(kv.StorageDomain, key)
 	assert.True(t, ok, "Get after Put(nil) must be a cache hit, not a miss")
 	assert.Empty(t, v, "cached value for a deleted key must be empty")
 }
@@ -532,9 +532,9 @@ func TestStateCache_PutEmptySlice_ThenGet_IsCacheHit(t *testing.T) {
 	key[0] = 0x1d
 	key[51] = 0xa2
 
-	c.Put(kv.StorageDomain, key, []byte{}, 0)
+	c.put(kv.StorageDomain, key, []byte{}, 0)
 
-	v, ok := c.Get(kv.StorageDomain, key)
+	v, ok := c.get(kv.StorageDomain, key)
 	assert.True(t, ok, "Get after Put([]byte{}) must be a cache hit")
 	assert.Empty(t, v)
 }
@@ -543,21 +543,21 @@ func TestStateCache_Delete_UnsupportedDomain(t *testing.T) {
 	c := closeOnCleanup(t, NewStateCache(100, 100, 100, 100))
 
 	// Should not panic
-	c.Delete(kv.ReceiptDomain, makeAddr(1))
+	c.deleteKey(kv.ReceiptDomain, makeAddr(1))
 }
 
 func TestStateCache_Clear(t *testing.T) {
 	c := closeOnCleanup(t, NewStateCache(100, 100, 100, 100))
 
-	c.Put(kv.AccountsDomain, makeAddr(1), makeValue(1), 0)
-	c.Put(kv.StorageDomain, makeAddr(2), makeValue(2), 0)
-	c.Put(kv.CodeDomain, makeAddr(3), makeCode(3), 0)
+	c.put(kv.AccountsDomain, makeAddr(1), makeValue(1), 0)
+	c.put(kv.StorageDomain, makeAddr(2), makeValue(2), 0)
+	c.put(kv.CodeDomain, makeAddr(3), makeCode(3), 0)
 
-	c.Clear()
+	c.clear()
 
-	_, ok1 := c.Get(kv.AccountsDomain, makeAddr(1))
-	_, ok2 := c.Get(kv.StorageDomain, makeAddr(2))
-	_, ok3 := c.Get(kv.CodeDomain, makeAddr(3))
+	_, ok1 := c.get(kv.AccountsDomain, makeAddr(1))
+	_, ok2 := c.get(kv.StorageDomain, makeAddr(2))
+	_, ok3 := c.get(kv.CodeDomain, makeAddr(3))
 
 	assert.False(t, ok1)
 	assert.False(t, ok2)
@@ -568,10 +568,10 @@ func TestStateCache_GetCache_OutOfBounds(t *testing.T) {
 	c := closeOnCleanup(t, NewStateCache(100, 100, 100, 100))
 
 	// Domain >= DomainLen should return nil
-	cache := c.GetCache(kv.DomainLen)
+	cache := c.getCache(kv.DomainLen)
 	assert.Nil(t, cache)
 
-	cache = c.GetCache(kv.Domain(100))
+	cache = c.getCache(kv.Domain(100))
 	assert.Nil(t, cache)
 }
 
@@ -641,13 +641,13 @@ func TestStateCache_DomainIsolation(t *testing.T) {
 	storageData := []byte("storage")
 	codeData := []byte{0x60, 0x00, 0x60, 0x00} // valid code
 
-	c.Put(kv.AccountsDomain, addr, accountData, 0)
-	c.Put(kv.StorageDomain, addr, storageData, 0)
-	c.Put(kv.CodeDomain, addr, codeData, 0)
+	c.put(kv.AccountsDomain, addr, accountData, 0)
+	c.put(kv.StorageDomain, addr, storageData, 0)
+	c.put(kv.CodeDomain, addr, codeData, 0)
 
-	v1, ok1 := c.Get(kv.AccountsDomain, addr)
-	v2, ok2 := c.Get(kv.StorageDomain, addr)
-	v3, ok3 := c.Get(kv.CodeDomain, addr)
+	v1, ok1 := c.get(kv.AccountsDomain, addr)
+	v2, ok2 := c.get(kv.StorageDomain, addr)
+	v3, ok3 := c.get(kv.CodeDomain, addr)
 
 	assert.True(t, ok1)
 	assert.True(t, ok2)
@@ -890,6 +890,126 @@ func TestDomainCache_PutIfAbsentAtomicWithPut(t *testing.T) {
 	}
 }
 
+func TestStateCache_AppliedEndLifecycle(t *testing.T) {
+	b := 1 * datasize.MB
+	sc := NewStateCache(b, b, b, b)
+	t.Cleanup(sc.Close)
+	require.Zero(t, sc.appliedEnd[kv.AccountsDomain])
+
+	sc.apply(kv.AccountsDomain, makeAddr(1), makeValue(1), 20)
+	sc.apply(kv.AccountsDomain, makeAddr(2), makeValue(2), 10)
+	require.Equal(t, uint64(21), sc.appliedEnd[kv.AccountsDomain])
+	require.Zero(t, sc.appliedEnd[kv.StorageDomain])
+
+	sc.unwind(15)
+	require.Equal(t, uint64(15), sc.appliedEnd[kv.AccountsDomain])
+
+	sc.clear()
+	require.Equal(t, uint64(15), sc.appliedEnd[kv.AccountsDomain],
+		"clear drops entries, not admission history")
+}
+
+func TestStateCache_StaleViewCannotFillAfterDelete(t *testing.T) {
+	b := 1 * datasize.MB
+	sc := NewStateCache(b, b, b, b)
+	t.Cleanup(sc.Close)
+
+	key := makeAddr(1)
+	stale := makeValue(1)
+	sc.apply(kv.AccountsDomain, key, stale, 10)
+	sc.apply(kv.AccountsDomain, key, nil, 20)
+	_, ok := sc.get(kv.AccountsDomain, key)
+	require.False(t, ok, "an authoritative deletion must physically remove the entry")
+
+	sc.fillIfFresh(kv.AccountsDomain, key, stale, 10, 11)
+	_, ok = sc.get(kv.AccountsDomain, key)
+	require.False(t, ok, "a view older than the deletion must not fill afterward")
+}
+
+func TestStateCache_FileEndViewCannotFillAtAppliedTx(t *testing.T) {
+	b := 1 * datasize.MB
+	sc := NewStateCache(b, b, b, b)
+	t.Cleanup(sc.Close)
+
+	key := makeAddr(1)
+	stale := makeValue(1)
+	sc.apply(kv.AccountsDomain, key, nil, 100)
+
+	sc.fillIfFresh(kv.AccountsDomain, key, stale, 99, 100)
+	_, ok := sc.get(kv.AccountsDomain, key)
+	require.False(t, ok, "a [0,100) view does not contain the applied tx 100")
+
+	fresh := makeValue(2)
+	sc.fillIfFresh(kv.AccountsDomain, key, fresh, 100, 101)
+	got, ok := sc.get(kv.AccountsDomain, key)
+	require.True(t, ok)
+	require.Equal(t, fresh, got)
+}
+
+func TestStateCache_ApplyDeleteAtomicWithFill(t *testing.T) {
+	b := 1 * datasize.MB
+	sc := NewStateCache(b, b, b, b)
+	t.Cleanup(sc.Close)
+
+	progressKey := makeAddr(1)
+	key := makeAddr(2)
+	value := makeValue(1)
+	for round := range 20000 {
+		appliedTxNum := uint64(round*2 + 1)
+		visibleEnd := appliedTxNum + 1
+		sc.apply(kv.AccountsDomain, progressKey, value, appliedTxNum)
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			sc.apply(kv.AccountsDomain, key, nil, visibleEnd)
+		}()
+		go func() {
+			defer wg.Done()
+			sc.fillIfFresh(kv.AccountsDomain, key, value, appliedTxNum, visibleEnd)
+		}()
+		wg.Wait()
+
+		_, ok := sc.get(kv.AccountsDomain, key)
+		require.False(t, ok, "round %d: stale fill survived the authoritative delete", round)
+	}
+}
+
+func TestStateCache_ApplyCodeDeleteDropsAddrCodeHash(t *testing.T) {
+	b := 1 * datasize.MB
+	sc := NewStateCache(b, b, b, b)
+	t.Cleanup(sc.Close)
+
+	addr := makeAddr(1)
+	var h [32]byte
+	h[0] = 0xaa
+	sc.seedAddrCodeHash(addr, h, 10, 0)
+	_, ok := sc.getAddrCodeHash(addr)
+	require.True(t, ok)
+
+	sc.apply(kv.CodeDomain, addr, nil, 20)
+	_, ok = sc.getAddrCodeHash(addr)
+	require.False(t, ok, "a code deletion must drop the derived addr→codeHash mapping")
+}
+
+func TestStateCache_AccountDeleteDropsCodeBinding(t *testing.T) {
+	b := 1 * datasize.MB
+	sc := NewStateCache(b, b, b, b)
+	t.Cleanup(sc.Close)
+
+	addr := makeAddr(1)
+	code := makeCode(1)
+
+	sc.apply(kv.CodeDomain, addr, code, 10)
+	_, ok := sc.get(kv.CodeDomain, addr)
+	require.True(t, ok)
+
+	sc.apply(kv.AccountsDomain, addr, nil, 20)
+	_, ok = sc.get(kv.CodeDomain, addr)
+	require.False(t, ok, "an account deletion must drop the addr→code binding")
+}
+
 // A Delete racing an update-in-place put must not double-subtract the
 // displaced entry's size: freelru's OnEvict subtracts it for the Remove, and
 // put's update delta subtracts it again unless the two writers share the
@@ -951,4 +1071,61 @@ func TestDomainCache_ClearAtomicWithPut_NoSizeDrift(t *testing.T) {
 		}
 		require.Equal(t, wantSize, c.SizeBytes(), "round %d: size accounting drifted", round)
 	}
+}
+
+// STATE_CACHE_FILLS=false turns off the admission-gated read fills (apply-only
+// mode): the A/B lever for measuring what fills contribute, and the ops kill
+// switch. Applies keep working.
+func TestStateCacheFillsSwitchDisablesReadFills(t *testing.T) {
+	t.Setenv("STATE_CACHE_FILLS", "false")
+	b := 1 * datasize.MB
+	c := NewStateCache(b, b, b, b)
+	defer c.Close()
+
+	key := make([]byte, 20)
+	key[0] = 0xaa
+	view := c.View(FrontierFunc(func(kv.Domain) (uint64, bool) { return 100, true }))
+
+	view.Fill(kv.AccountsDomain, key, []byte("value"), 10)
+	_, ok := c.View(nil).Get(kv.AccountsDomain, key)
+	require.False(t, ok, "fills must be disabled")
+
+	view.SeedAddrCodeHash(key, [32]byte{1}, 10)
+	_, ok = c.View(nil).GetAddrCodeHash(key)
+	require.False(t, ok, "mapping seeds must be disabled")
+
+	codeHash := crypto.Keccak256([]byte{0xaa, 1, 2, 3})
+	view.FillCodeSize(codeHash, 4, 10)
+	_, ok = c.View(nil).GetCodeSizeByHash(codeHash)
+	require.False(t, ok, "content-addressed fills must be disabled too: the switch means no reader writes at all")
+
+	c.Applier().Apply(kv.AccountsDomain, key, []byte("applied"), 20)
+	got, ok := c.View(nil).Get(kv.AccountsDomain, key)
+	require.True(t, ok, "applies must keep working")
+	require.Equal(t, []byte("applied"), got)
+}
+
+// Clearing entries does not rewind canonical state, so the admission frontier
+// must survive Clear: a still-live older ReadView must not refill pre-apply
+// data into the emptied cache.
+func TestStateCache_StaleViewCannotFillAfterClear(t *testing.T) {
+	b := 1 * datasize.MB
+	sc := NewStateCache(b, b, b, b)
+	t.Cleanup(sc.Close)
+
+	key := makeAddr(1)
+	oldView := sc.View(FrontierFunc(func(kv.Domain) (uint64, bool) { return 11, true }))
+
+	sc.Applier().Apply(kv.AccountsDomain, key, nil, 20) // canonical delete
+	sc.Applier().Clear()
+
+	oldView.Fill(kv.AccountsDomain, key, []byte("pre-delete"), 10)
+	_, ok := sc.View(nil).Get(kv.AccountsDomain, key)
+	require.False(t, ok, "a pre-apply view must not resurrect the deleted value through Clear")
+
+	freshView := sc.View(FrontierFunc(func(kv.Domain) (uint64, bool) { return 21, true }))
+	freshView.Fill(kv.AccountsDomain, key, []byte("current"), 20)
+	got, ok := sc.View(nil).Get(kv.AccountsDomain, key)
+	require.True(t, ok, "a view at the applied frontier must still fill after Clear")
+	require.Equal(t, []byte("current"), got)
 }
