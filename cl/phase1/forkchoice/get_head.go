@@ -156,15 +156,15 @@ func (f *ForkChoiceStore) getHeadGloas() (common.Hash, uint64, error) {
 			f.mu.Unlock()
 			continue
 		}
-		defer f.mu.Unlock()
-
 		head, slot, err := f.computeHeadGloasWithAnchorFallback(justifiedCheckpoint, cs)
 		if err != nil {
+			f.mu.Unlock()
 			return common.Hash{}, 0, err
 		}
 		f.headHash = head.Root
 		f.headSlot = slot
 		f.headPayloadStatus = head.PayloadStatus
+		f.mu.Unlock()
 		return f.headHash, f.headSlot, nil
 	}
 }

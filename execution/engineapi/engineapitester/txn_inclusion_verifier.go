@@ -58,10 +58,10 @@ func (v TxnInclusionVerifier) VerifyTxnsInclusion(
 		// case it will fail and needs to retry
 		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		backOff := backoff.WithContext(backoff.BackOff(backoff.NewConstantBackOff(50*time.Millisecond)), ctx)
-		defer cancel()
 		r, err := backoff.RetryWithData(func() (*types.Receipt, error) {
 			return v.rpcApiClient.GetTransactionReceipt(ctx, txn.Hash())
 		}, backOff)
+		cancel()
 
 		if err != nil {
 			return err
@@ -113,10 +113,10 @@ func (v TxnInclusionVerifier) VerifyTxnsOrderedInclusion(
 		// case it will fail and needs to retry
 		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		backOff := backoff.WithContext(backoff.BackOff(backoff.NewConstantBackOff(50*time.Millisecond)), ctx)
-		defer cancel()
 		r, err := backoff.RetryWithData(func() (*types.Receipt, error) {
 			return v.rpcApiClient.GetTransactionReceipt(ctx, txn.Hash())
 		}, backOff)
+		cancel()
 		if err != nil {
 			return err
 		}

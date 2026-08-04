@@ -800,12 +800,16 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 		parsers.SetLimit(workers)
 
 		valueBufs := make([][]byte, workers)
-
+		rawBufs := make([]*[16 * 4096]byte, workers)
 		for i := 0; i < workers; i++ {
-			valueBuf := bufPool.Get().(*[16 * 4096]byte)
-			defer bufPool.Put(valueBuf)
-			valueBufs[i] = valueBuf[:]
+			rawBufs[i] = bufPool.Get().(*[16 * 4096]byte)
+			valueBufs[i] = rawBufs[i][:]
 		}
+		defer func() {
+			for _, buf := range rawBufs {
+				bufPool.Put(buf)
+			}
+		}()
 
 		if err := addSystemTx(tx, body.BaseTxnID); err != nil {
 			return false, err

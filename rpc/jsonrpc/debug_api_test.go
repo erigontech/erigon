@@ -1150,7 +1150,7 @@ func TestGetRawTransaction(t *testing.T) {
 	for i := range number {
 		tx, err := m.DB.BeginRo(ctx)
 		require.NoError(err)
-		defer tx.Rollback()
+		defer tx.Rollback() //nolint:gocritic
 		block, err := api._blockReader.BlockByNumber(ctx, tx, i)
 		require.NoError(err)
 		txns := block.Transactions()

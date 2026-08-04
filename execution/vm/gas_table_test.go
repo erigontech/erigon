@@ -739,7 +739,7 @@ func TestCreateGas(t *testing.T) {
 		stateWriter := rpchelper.NewLatestStateWriter(tx, domains, (*freezeblocks.BlockReader)(nil), 0)
 
 		s := state.New(stateReader)
-		defer s.Close()
+		defer s.Close() //nolint:gocritic
 		s.CreateAccount(address, true)
 		s.SetCode(address, hexutil.MustDecode(tt.code), tracing.CodeChangeUnspecified)
 

@@ -228,7 +228,7 @@ func BenchmarkWriteDiffSet(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-		defer tx.Rollback()
+		defer tx.Rollback() //nolint:gocritic
 		if err := changeset.WriteDiffSet(tx, uint64(i), blockHash, diffSet); err != nil {
 			tx.Rollback()
 			b.Fatal(err)
@@ -256,7 +256,7 @@ func BenchmarkWriteDiffSetLarge(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-		defer tx.Rollback()
+		defer tx.Rollback() //nolint:gocritic
 		if err := changeset.WriteDiffSet(tx, uint64(i), blockHash, diffSet); err != nil {
 			tx.Rollback()
 			b.Fatal(err)

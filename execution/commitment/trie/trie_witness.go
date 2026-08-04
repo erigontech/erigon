@@ -26,16 +26,19 @@ func ExtractWitnesses(subTries SubTries, trace bool, retainDec RetainDecider) ([
 	for _, root := range subTries.roots {
 		builder := NewWitnessBuilder(root, trace)
 		var limiter *MerklePathLimiter = nil
+		var hr *hasher
 		if retainDec != nil {
-			hr := newHasher(false)
-			defer returnHasherToPool(hr)
+			hr = newHasher(false)
 			limiter = &MerklePathLimiter{retainDec, hr.hash}
 		}
-		if witness, err := builder.Build(limiter); err == nil {
-			witnesses = append(witnesses, witness)
-		} else {
+		witness, err := builder.Build(limiter)
+		if hr != nil {
+			returnHasherToPool(hr)
+		}
+		if err != nil {
 			return witnesses, err
 		}
+		witnesses = append(witnesses, witness)
 	}
 	return witnesses, nil
 }
