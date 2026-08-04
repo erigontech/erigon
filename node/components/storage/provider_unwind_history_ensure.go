@@ -26,6 +26,7 @@ import (
 
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/dbservices"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snapshotsync"
@@ -140,8 +141,17 @@ func (p *Provider) ensureHistoryForUnwindWalk(ctx context.Context, opts UnwindOp
 		p.discardDownloadedHistory(ctx, downloadedPaths, downloadedNames)
 		return noop, fmt.Errorf("OpenFolder after history download: %w", err)
 	}
-	// TODO: post-merge — aggregator's pin/reclaim model may already refresh
-	// visibility on OpenFolder; verify no explicit tx re-pin is needed.
+	// OpenFolder publishes a new visible-file generation carrying the just-
+	// downloaded history files, but opts.Tx still pins the generation captured
+	// at BeginTemporalRw time. Repin it so the compute walk (which reads
+	// through opts.Tx) sees the new files. Safe under the retire+refcount
+	// mechanism — the old generation stays live until every reader releases.
+	reopener, ok := opts.Tx.(kv.CanReopenUnderlyingFilesTx)
+	if !ok {
+		p.discardDownloadedHistory(ctx, downloadedPaths, downloadedNames)
+		return noop, fmt.Errorf("opts.Tx (%T) does not implement kv.CanReopenUnderlyingFilesTx", opts.Tx)
+	}
+	reopener.ForceReopenUnderlyingFilesTx()
 
 	return func() {
 		p.discardDownloadedHistory(ctx, downloadedPaths, downloadedNames)
