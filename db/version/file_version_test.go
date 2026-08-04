@@ -485,25 +485,31 @@ func TestMustSupport(t *testing.T) {
 
 // TestSupportsTxNumNamingPivot pins that TxNumNamingPivot (V4_0) is
 // treated as a filename-convention pivot, not a content-format bump:
-// a v4-named file is accepted by any reader whose Current is v2.0+.
-// The concrete case this guards: mode-C unwind emits transient v4
-// files (see mode-c-completeness-plan-2026-08-03). Aggregator's
-// post-emit OpenFolder → openDirtyFiles → MustSupport rejected them
-// before the pivot exception because 4 > 2, panicking with
-// "highest_supported=v2.x" while the file was written seconds ago
-// by the same build.
+// a v4-named file is accepted by any reader (subject only to
+// MinSupported). The pivot applies uniformly to state data (.kv)
+// AND its accessors (.kvi/.bt/.kvei), whose Versions families have
+// wildly different Current values (DataKV: v2/v3, AccessorKVEI:
+// v1.x). The concrete case this guards: mode-C unwind emits
+// transient v4 files (see mode-c-completeness-plan-2026-08-03).
+// Aggregator's post-emit OpenFolder → openDirtyFiles → MustSupport
+// rejects them without the pivot exception, panicking with
+// "highest_supported=vN.x" on whichever family's Current is < 4 —
+// v2.x for .kv, v1.x for .kvei — while the file was written
+// seconds ago by the same build.
 func TestSupportsTxNumNamingPivot(t *testing.T) {
 	cases := []struct {
 		name    string
 		current Version
 		want    bool
 	}{
-		{"current v2.0 accepts v4.0 pivot", V2_0, true},
-		{"current v2.2 accepts v4.0 pivot", V2_2, true},
-		{"current v3.0 accepts v4.0 pivot", V3_0, true},
-		// v1.x readers predate the naming pivot AND the state-domain
-		// format the pivot rides on top of — hold the line.
-		{"current v1.2 rejects v4.0 pivot", V1_2, false},
+		// State-domain content readers (.kv)
+		{"data v2.0 accepts v4.0 pivot", V2_0, true},
+		{"data v2.2 accepts v4.0 pivot", V2_2, true},
+		{"data v3.0 accepts v4.0 pivot", V3_0, true},
+		// Accessor readers (.kvei/.kvi) — Current is v1.x, but they
+		// still get v4-named siblings from mode-C emit and must accept.
+		{"accessor v1.2 accepts v4.0 pivot", V1_2, true},
+		{"accessor v1.3 accepts v4.0 pivot", Version{Major: 1, Minor: 3}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
