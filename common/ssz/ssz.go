@@ -55,11 +55,9 @@ type StrictUnmarshaler interface {
 	DecodeSSZStrict(buf []byte, version int) error
 }
 
-func decodeObject(obj Unmarshaler, buf []byte, version int, strict bool) error {
-	if strict {
-		if obj, ok := obj.(StrictUnmarshaler); ok {
-			return obj.DecodeSSZStrict(buf, version)
-		}
+func decodeObjectStrict(obj Unmarshaler, buf []byte, version int) error {
+	if obj, ok := obj.(StrictUnmarshaler); ok {
+		return obj.DecodeSSZStrict(buf, version)
 	}
 	return obj.DecodeSSZ(buf, version)
 }
@@ -145,7 +143,13 @@ func decodeDynamicList[T Unmarshaler](bytes []byte, start, end uint32, _max uint
 			return nil, ErrBadOffset
 		}
 		objs[i] = objs[i].Clone().(T)
-		if err := decodeObject(objs[i], buf[currentOffset:endOffset], version, strict); err != nil {
+		var err error
+		if strict {
+			err = decodeObjectStrict(objs[i], buf[currentOffset:endOffset], version)
+		} else {
+			err = objs[i].DecodeSSZ(buf[currentOffset:endOffset], version)
+		}
+		if err != nil {
 			return nil, err
 		}
 		currentOffset = endOffset
