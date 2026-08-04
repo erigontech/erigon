@@ -146,6 +146,28 @@ func TestGetPayloadV6RejectsInvalidBlobsBundle(t *testing.T) {
 	require.Nil(t, resp)
 }
 
+func TestGetPayloadV1AcceptsParisPayload(t *testing.T) {
+	t.Parallel()
+
+	const payloadID uint64 = 49
+	stub := &getPayloadStubModule{
+		getAssembledBlockFunc: func(_ context.Context, id uint64) (execmodule.AssembledBlockResult, error) {
+			require.Equal(t, payloadID, id)
+			return execmodule.AssembledBlockResult{
+				Block:      minimalPayloadBlock(99, nil),
+				BlockValue: uint256.NewInt(0),
+			}, nil
+		},
+	}
+	srv := newProposingEngineServerWithConfig(parisShanghaiChainConfig(), stub)
+
+	resp, err := srv.GetPayloadV1(context.Background(), payloadIDBytes(payloadID))
+
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Nil(t, resp.Withdrawals)
+}
+
 func TestGetPayloadV1RejectsShanghaiPayload(t *testing.T) {
 	t.Parallel()
 
