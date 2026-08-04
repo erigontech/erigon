@@ -400,7 +400,8 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	// workCtx (ctx) runs the calculator's roTx/compute/publish; signalCtx
 	// (executorContext) carries the stopCause. Separating them lets a clean-stop
 	// cancel signal the calculator without aborting an in-flight commitment.
-	calculator, err := newCommitmentCalculator(ctx, executorContext, pe.rs.Domains(), pe.cfg.db, pe.cfg.chainConfig, pe.logPrefix, pe.logger, forcePerBlockCompute, pe.changesetWindowStart, commitResults, blockRequests, rootResults)
+	commitDomainReader := state.NewLayeredDomainReader(pe.rs.Domains(), nil, pe.prevBlocks)
+	calculator, err := newCommitmentCalculator(ctx, executorContext, pe.rs.Domains(), pe.cfg.db, pe.cfg.chainConfig, pe.logPrefix, pe.logger, forcePerBlockCompute, pe.changesetWindowStart, commitResults, blockRequests, rootResults, commitDomainReader)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -4571,7 +4572,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		// the versionMap. Publish it as an overlay so the next block reads its
 		// writes before apply drains them to sd.mem; dropped on commit.
 		if prevBlockReads {
-			pe.prevBlocks.PushHead(be.blockNum, be.versionMap)
+			pe.prevBlocks.PushHead(be.blockNum, txTask.Version().TxNum, be.versionMap)
 		}
 
 		be.result = &blockResult{

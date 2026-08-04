@@ -19,6 +19,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/state"
 )
 
 // commitmentResult is the outcome of a single commitment computation.
@@ -208,6 +209,7 @@ func newCommitmentCalculator(
 	in chan applyResult,
 	blockRequests chan *blockRequest,
 	out chan commitmentResult,
+	drTemplate *state.LayeredDomainReader,
 ) (*commitmentCalculator, error) {
 	// ModeUpdate carries values in its btree for the trie to read; the parallel
 	// trie reads leaf values from the as-of reader, so keep its ModeParallel buffer.
@@ -235,7 +237,7 @@ func newCommitmentCalculator(
 	// methods (fold/unfold sibling reads). Uses GetAsOf for account/storage
 	// (avoids future sd.mem state) and GetLatest for commitment branches
 	// (written sequentially by this calculator).
-	asOfReader := &asOfStateReader{sd: doms, roTx: roTx, txNum: 0}
+	asOfReader := &asOfStateReader{sd: doms, roTx: roTx, txNum: 0, dr: drTemplate.CloneWithTx(roTx)}
 
 	return &commitmentCalculator{
 		doms:                 doms,
@@ -642,7 +644,7 @@ func (cc *commitmentCalculator) checkpointStepsFromBAL(ctx context.Context, req 
 // flushes it to a fresh updates buffer, and computes the root at t. Shared by
 // the block-end compute-ahead and the mid-block step checkpoints so the two can't drift.
 func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blockRequest, maxTxIndex uint32, emptyRemoval bool, eip8246 bool, t commitTarget) ([]byte, error) {
-	reader := &asOfStateReader{sd: cc.doms, roTx: cc.roTx, txNum: t.lastTxNum + 1}
+	reader := &asOfStateReader{sd: cc.doms, roTx: cc.roTx, txNum: t.lastTxNum + 1, dr: cc.asOfReader.dr}
 	balState := newCalcState(reader, cc.logger, cc.logPrefix)
 	balState.LoadFromBALUpTo(req.bal, maxTxIndex, emptyRemoval, cc.chainConfig.Aura != nil, eip8246)
 	if err := balState.LazyLoadErr(); err != nil {
@@ -993,6 +995,13 @@ type asOfStateReader struct {
 	// a concurrent trie-warmup worker doesn't write the shared main accumulator
 	// (a race) or take the global metrics lock. Nil on the main reader.
 	workerCtx context.Context
+
+	// dr is the shared account/storage/code reader created by the outer layer:
+	// the multi-block versionMap window composed over sd.mem + files (see
+	// state.LayeredDomainReader). It carries this reader's own files-fallback tx,
+	// so concurrent users never share one. Commitment-branch reads stay on sd
+	// (written sequentially by this calculator, so a plain GetLatest is correct).
+	dr *state.LayeredDomainReader
 }
 
 func (r *asOfStateReader) WithHistory() bool { return false }
@@ -1005,38 +1014,26 @@ func (r *asOfStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (e
 	if d == kv.CommitmentDomain {
 		// Branches: use GetLatest — written only by this calculator, sequential.
 		if r.workerCtx != nil {
-			enc, step, err = r.sd.GetLatestContext(r.workerCtx, d, r.roTx, plainKey)
-		} else {
-			enc, step, err = r.sd.GetLatest(d, r.roTx, plainKey)
+			return r.sd.GetLatestContext(r.workerCtx, d, r.roTx, plainKey)
 		}
-	} else {
-		// Account/storage/code: use GetAsOf to avoid reading future state.
-		// Check sd.mem first (in-memory data from current batch), then
-		// fall through to DB files for data not in the batch.
-		var ok bool
-		enc, ok, err = r.sd.GetAsOf(d, plainKey, r.txNum)
-		if err != nil {
-			return nil, 0, err
-		}
-		if !ok {
-			// Not in sd.mem — read from DB files
-			enc, ok, err = r.roTx.GetAsOf(d, plainKey, r.txNum)
-			if err != nil {
-				return nil, 0, err
-			}
-			if !ok {
-				enc = nil
-			}
-		}
-		if stepSize > 0 {
-			step = kv.Step(r.txNum / stepSize)
-		}
+		return r.sd.GetLatest(d, r.roTx, plainKey)
 	}
-	return enc, step, err
+	// Account/storage/code: the window layered over sd.mem + files.
+	enc, ok, err := r.dr.ReadDomain(d, plainKey, r.txNum)
+	if err != nil {
+		return nil, 0, err
+	}
+	if !ok {
+		enc = nil
+	}
+	if stepSize > 0 {
+		step = kv.Step(r.txNum / stepSize)
+	}
+	return enc, step, nil
 }
 
 func (r *asOfStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
-	return &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum}
+	return &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum, dr: r.dr.CloneWithTx(tx)}
 }
 
 // CloneForWorker meters the worker's CommitmentDomain reads into the per-worker
@@ -1044,5 +1041,5 @@ func (r *asOfStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
 // reader during block assembly, where trie-warmup runs concurrently — so it
 // must not write the shared main accumulator).
 func (r *asOfStateReader) CloneForWorker(workerCtx context.Context, tx kv.TemporalTx) commitmentdb.StateReader {
-	return &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum, workerCtx: workerCtx}
+	return &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum, workerCtx: workerCtx, dr: r.dr.CloneWithTx(tx)}
 }

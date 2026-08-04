@@ -17,7 +17,7 @@ func TestPrevBlockReader_SwitchesPerBlock(t *testing.T) {
 	addr := getAddress(1)
 	base := &fakeBaseReader{accts: map[accounts.Address]*accounts.Account{addr: acctBal(5)}}
 	reg := NewPrevBlockList()
-	reg.PushHead(10, mapWithBalance(addr, 100))
+	reg.PushHead(10, 10, mapWithBalance(addr, 100))
 
 	o := NewPrevBlockReader(base, reg)
 

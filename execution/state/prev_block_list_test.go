@@ -15,9 +15,9 @@ func TestPrevBlockList_BeforeIsEarlierBlocksOldestFirst(t *testing.T) {
 	t.Parallel()
 	addr := getAddress(1)
 	l := NewPrevBlockList()
-	l.PushHead(10, mapWithBalance(addr, 10))
-	l.PushHead(11, mapWithBalance(addr, 11))
-	l.PushHead(12, mapWithBalance(addr, 12))
+	l.PushHead(10, 10, mapWithBalance(addr, 10))
+	l.PushHead(11, 11, mapWithBalance(addr, 11))
+	l.PushHead(12, 12, mapWithBalance(addr, 12))
 
 	// A reader for block 12 sees 10 and 11 (not 12), oldest→newest.
 	got := l.Before(12)
@@ -32,8 +32,8 @@ func TestPrevBlockList_RemoveTailDropsOldest(t *testing.T) {
 	t.Parallel()
 	addr := getAddress(2)
 	l := NewPrevBlockList()
-	l.PushHead(10, mapWithBalance(addr, 10))
-	l.PushHead(11, mapWithBalance(addr, 11))
+	l.PushHead(10, 10, mapWithBalance(addr, 10))
+	l.PushHead(11, 11, mapWithBalance(addr, 11))
 	require.Equal(t, 2, l.Len())
 
 	l.RemoveTail() // block 10 committed to the shared domain
@@ -56,7 +56,7 @@ func TestPrevBlockList_LengthStaysBounded(t *testing.T) {
 	// 5000 blocks, commit staying at most 2 behind: push N, remove-tail once N>=2.
 	maxLen := 0
 	for n := uint64(1); n <= 5000; n++ {
-		l.PushHead(n, mapWithBalance(addr, n))
+		l.PushHead(n, n, mapWithBalance(addr, n))
 		if n >= 2 {
 			l.RemoveTail()
 		}
@@ -71,6 +71,6 @@ func TestPrevBlockList_EmptyAndNoEarlier(t *testing.T) {
 	t.Parallel()
 	l := NewPrevBlockList()
 	assert.Nil(t, l.Before(5))
-	l.PushHead(10, NewVersionMap(nil))
+	l.PushHead(10, 10, NewVersionMap(nil))
 	assert.Nil(t, l.Before(10), "no block earlier than 10")
 }

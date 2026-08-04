@@ -23,6 +23,7 @@ type PrevBlockList struct {
 
 type prevBlockNode struct {
 	blockNum uint64
+	endTxNum uint64 // the block's last (block-end) txNum
 	vm       *VersionMap
 	older    *prevBlockNode // toward the tail
 	newer    *prevBlockNode // toward the head
@@ -30,11 +31,13 @@ type prevBlockNode struct {
 
 func NewPrevBlockList() *PrevBlockList { return &PrevBlockList{} }
 
-// PushHead adds a newly finished block at the head (newest).
-func (l *PrevBlockList) PushHead(blockNum uint64, vm *VersionMap) {
+// PushHead adds a newly finished block at the head (newest). endTxNum is the
+// block's last txNum, so a reader can select the window by txNum (matching the
+// per-tx apply) rather than blockNum.
+func (l *PrevBlockList) PushHead(blockNum, endTxNum uint64, vm *VersionMap) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	node := &prevBlockNode{blockNum: blockNum, vm: vm, older: l.head}
+	node := &prevBlockNode{blockNum: blockNum, endTxNum: endTxNum, vm: vm, older: l.head}
 	if l.head != nil {
 		l.head.newer = node
 	} else {
@@ -71,6 +74,22 @@ func (l *PrevBlockList) Before(blockNum uint64) []*VersionMap {
 	var out []*VersionMap
 	for node := l.tail; node != nil; node = node.newer {
 		if node.blockNum < blockNum {
+			out = append(out, node.vm)
+		}
+	}
+	return out
+}
+
+// BeforeTxNum returns the versionMaps of blocks whose block-end txNum is < txNum,
+// tail→head (oldest→newest) so a layered reader wraps the newest outermost. This
+// is the txNum-keyed selection (matching the per-tx apply): a reader positioned
+// at txNum sees every finished-but-uncommitted block up to that point.
+func (l *PrevBlockList) BeforeTxNum(txNum uint64) []*VersionMap {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	var out []*VersionMap
+	for node := l.tail; node != nil; node = node.newer {
+		if node.endTxNum < txNum {
 			out = append(out, node.vm)
 		}
 	}

@@ -34,6 +34,16 @@ func PrevBlockBase(raw StateReader, list *PrevBlockList, blockNum uint64) StateR
 	return layerVersionMaps(raw, list.Before(blockNum))
 }
 
+// PrevBlockBaseTxNum is PrevBlockBase keyed by txNum: it layers every finished-
+// but-uncommitted block whose block-end txNum is < txNum. Matches the per-tx
+// apply, so a reader positioned at txNum needs no blockNum.
+func PrevBlockBaseTxNum(raw StateReader, list *PrevBlockList, txNum uint64) StateReader {
+	if list == nil {
+		return raw
+	}
+	return layerVersionMaps(raw, list.BeforeTxNum(txNum))
+}
+
 // SetBlock re-layers the prev-block for the block a task belongs to: the finalized
 // maps of blocks < blockNum in front of the raw base. Committed (dropped) blocks
 // are already gone from the registry, so the chain is at most window-deep.
