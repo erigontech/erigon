@@ -49,7 +49,7 @@ func validateWitnessEncoding(opts *WitnessSubscriptionOpts) error {
 	case "", "json":
 		return nil
 	default:
-		return fmt.Errorf("unsupported witness encoding %q (supported: json)", opts.Encoding)
+		return &rpc.InvalidParamsError{Message: fmt.Sprintf("unsupported witness encoding %q (supported: json)", opts.Encoding)}
 	}
 }
 

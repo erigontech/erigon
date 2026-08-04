@@ -47,6 +47,10 @@ func TestWitnessSubscriptionEncodingValidation(t *testing.T) {
 		err := validateWitnessEncoding(&WitnessSubscriptionOpts{Encoding: enc})
 		require.Error(t, err, "encoding %q must be rejected", enc)
 		require.Contains(t, err.Error(), "unsupported witness encoding")
+
+		var invalid *rpc.InvalidParamsError
+		require.ErrorAs(t, err, &invalid, "a bad encoding is a parameter error")
+		require.Equal(t, -32602, invalid.ErrorCode())
 	}
 }
 
