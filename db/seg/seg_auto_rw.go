@@ -89,6 +89,10 @@ func (g *Reader) MadvNormal() MadvDisabler {
 	g.d.MadvNormal()
 	return g
 }
+func (g *Reader) MadvSequential() MadvDisabler {
+	g.d.MadvSequential()
+	return g
+}
 func (g *Reader) DisableReadAhead() { g.d.DisableReadAhead() }
 func (g *Reader) FileName() string  { return g.Getter.FileName() }
 func (g *Reader) Next(buf []byte) ([]byte, uint64) {
