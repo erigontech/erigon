@@ -2201,7 +2201,7 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 			case <-pe.workersCtx.Done():
 				return false
 			}
-			tx, err := pe.cfg.db.BeginTemporalRo(pe.workersCtx)
+			tx, err := pe.cfg.db.BeginTemporalRo(pe.workersCtx) //nolint:gocritic // slot-tied rotx: rolled back on slot release (releaseSlot), not a defer here — it outlives this function
 			if err != nil {
 				pe.execSem <- struct{}{}
 				slotHeld = false
