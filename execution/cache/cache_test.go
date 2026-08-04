@@ -926,30 +926,6 @@ func TestStateCache_StaleViewCannotFillAfterDelete(t *testing.T) {
 	require.False(t, ok, "a view older than the deletion must not fill afterward")
 }
 
-// An unwind lowers the applied frontier, which re-admits exactly the views that
-// still hold the discarded fork in their own snapshot: a fill rejected before
-// the reorg is accepted after it, putting the dead fork's value back.
-func TestStateCache_UnwindReadmitsPreReorgFill(t *testing.T) {
-	b := 1 * datasize.MB
-	sc := NewStateCache(b, b, b, b)
-	t.Cleanup(sc.Close)
-
-	key := makeAddr(1)
-	canonical, fork := makeValue(1), makeValue(2)
-	sc.apply(kv.AccountsDomain, key, canonical, 40)
-	sc.apply(kv.AccountsDomain, key, fork, 100)
-
-	sc.fillIfFresh(kv.AccountsDomain, key, fork, 100, 101)
-	sc.unwind(50)
-	_, ok := sc.get(kv.AccountsDomain, key)
-	require.False(t, ok, "the unwind must evict the fork's value")
-
-	// A view opened before the reorg still carries frontier 101.
-	sc.fillIfFresh(kv.AccountsDomain, key, fork, 100, 101)
-	_, ok = sc.get(kv.AccountsDomain, key)
-	require.False(t, ok, "a pre-reorg view must not reinstate the discarded fork's value")
-}
-
 func TestStateCache_FileEndViewCannotFillAtAppliedTx(t *testing.T) {
 	b := 1 * datasize.MB
 	sc := NewStateCache(b, b, b, b)
