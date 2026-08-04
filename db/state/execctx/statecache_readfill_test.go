@@ -18,6 +18,7 @@ package execctx_test
 
 import (
 	"encoding/binary"
+	"math"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -73,6 +74,22 @@ func twoStepRows(t *testing.T, db kv.TemporalRwDB, sc *cache.StateCache) (key, v
 func newSmallStateCache() *cache.StateCache {
 	b := 1 * datasize.MB
 	return cache.NewStateCache(b, b, b, b)
+}
+
+func frontierAt(end uint64) cache.Frontier {
+	return cache.FrontierFunc(func(kv.Domain) (uint64, bool) { return end, true })
+}
+
+// seed places an entry with an exact txNum stamp through the public fill API
+// without moving the applied frontier. A positive passes admission at any
+// applied end; a negative is stamped frontier-1 by the fill path, so it must
+// be seeded while the applied end is at most txNum+1.
+func seed(sc *cache.StateCache, domain kv.Domain, k, v []byte, txNum uint64) {
+	end := uint64(math.MaxUint64)
+	if len(v) == 0 {
+		end = txNum + 1
+	}
+	sc.View(frontierAt(end)).Fill(domain, k, v, txNum)
 }
 
 type visibleEndCountingDebugTx struct {
@@ -165,9 +182,10 @@ func TestAssertStateCache_NoFalsePanicDuringInFlightUnwind(t *testing.T) {
 	defer sd.Close()
 	sd.SetStateCacheForTest(sc)
 
-	// A live cache entry below the unwind floor: the restored (correct) value.
-	sc.Put(kv.AccountsDomain, key, v1, 5)
 	sd.Unwind(10, &diffs) // in-flight: mem publishes maxStep=1; MDBX still holds the step-1 row
+	// A live cache entry below the unwind floor: the restored (correct) value,
+	// as a post-unwind fill would insert it.
+	seed(sc, kv.AccountsDomain, key, v1, 5)
 
 	old := dbg.AssertStateCache
 	dbg.AssertStateCache = true
@@ -222,8 +240,8 @@ func TestAssertStateCache_NoFalsePanicDuringInFlightUnwindStepZero(t *testing.T)
 	defer sd2.Close()
 	sd2.SetStateCacheForTest(sc)
 
-	sc.Put(kv.AccountsDomain, key, nil, 2)
 	sd2.Unwind(3, &diffs)
+	seed(sc, kv.AccountsDomain, key, nil, 2)
 
 	old := dbg.AssertStateCache
 	dbg.AssertStateCache = true
@@ -263,13 +281,13 @@ func TestReadFill_DoesNotClobberLiveEntry(t *testing.T) {
 	// A live (current-epoch) entry above the read bound: the maxStep gate turns
 	// the hit into a miss, so the read falls through to the bounded DB read.
 	v3 := encAccount(3)
-	sc.Put(kv.AccountsDomain, key, v3, 40)
+	seed(sc, kv.AccountsDomain, key, v3, 40)
 
 	v, _, err := sd.GetLatest(kv.AccountsDomain, roTx, key)
 	require.NoError(t, err)
 	require.Equal(t, v2, v, "fall-through read serves the maxStep-bounded DB row")
 
-	got, ok := sc.Get(kv.AccountsDomain, key)
+	got, ok := sc.View(nil).Get(kv.AccountsDomain, key)
 	require.True(t, ok)
 	require.Equal(t, v3, got, "read-fill must not clobber the live entry")
 }
@@ -315,14 +333,14 @@ func TestReadFill_NegativeUsesLastVisibleTxNum(t *testing.T) {
 	v, _, err := sd2.GetLatest(kv.AccountsDomain, roTx, missing)
 	require.NoError(t, err)
 	require.Empty(t, v)
-	_, ok = sc.Get(kv.AccountsDomain, missing)
+	_, ok = sc.View(nil).Get(kv.AccountsDomain, missing)
 	require.True(t, ok, "the negative result must be cached")
 
-	sc.Unwind(visibleEnd)
-	_, ok = sc.Get(kv.AccountsDomain, missing)
+	sc.Applier().Unwind(visibleEnd)
+	_, ok = sc.View(nil).Get(kv.AccountsDomain, missing)
 	require.True(t, ok, "an unwind starting after the read view must preserve the negative")
 
-	sc.Unwind(visibleEnd - 1)
-	_, ok = sc.Get(kv.AccountsDomain, missing)
+	sc.Applier().Unwind(visibleEnd - 1)
+	_, ok = sc.View(nil).Get(kv.AccountsDomain, missing)
 	require.False(t, ok, "an unwind of the view's last included txNum must invalidate the negative")
 }

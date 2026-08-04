@@ -18,4 +18,5 @@ func (sd *SharedDomains) CodeHashForAddr(tx kv.TemporalTx, addr []byte, txNum ui
 // — without mutating the process-global flag (which would race t.Parallel tests).
 func (sd *SharedDomains) SetStateCacheForTest(sc *cache.StateCache) {
 	sd.stateCache = sc
+	sd.cacheApplier = sc.Applier()
 }

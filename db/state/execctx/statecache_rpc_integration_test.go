@@ -111,7 +111,7 @@ func TestAccountOnlyDeleteDoesNotBlockUnrelatedCodeFill(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, code, got)
 
-	cached, ok := stateCache.Get(kv.CodeDomain, contractAddr)
+	cached, ok := stateCache.View(nil).Get(kv.CodeDomain, contractAddr)
 	require.True(t, ok, "an account-only deletion must not block unrelated code fills")
 	require.Equal(t, code, cached)
 }
@@ -160,16 +160,16 @@ func TestSharedDomainsNegativeCacheEntryUsesLastVisibleTxNum(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, got)
 
-	cached, ok := stateCache.Get(kv.AccountsDomain, missingKey)
+	cached, ok := stateCache.View(nil).Get(kv.AccountsDomain, missingKey)
 	require.True(t, ok)
 	require.Empty(t, cached)
 
-	stateCache.Unwind(visibleEnd)
-	_, ok = stateCache.Get(kv.AccountsDomain, missingKey)
+	stateCache.Applier().Unwind(visibleEnd)
+	_, ok = stateCache.View(nil).Get(kv.AccountsDomain, missingKey)
 	require.True(t, ok, "a negative observed before the unwind floor must remain cached")
 
-	stateCache.Unwind(visibleEnd - 1)
-	_, ok = stateCache.Get(kv.AccountsDomain, missingKey)
+	stateCache.Applier().Unwind(visibleEnd - 1)
+	_, ok = stateCache.View(nil).Get(kv.AccountsDomain, missingKey)
 	require.False(t, ok, "a negative observed at the unwind floor must be invalidated")
 }
 

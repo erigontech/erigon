@@ -72,18 +72,17 @@ func (bra *BlockReadAheader) SetStateCache(sc *cache.StateCache) {
 	bra.stateCache = sc
 }
 
-// cachePopulatingGetter wraps a kv.TemporalGetter and writes successful
-// reads through to a cache.StateCache as a side effect. Used by warmBody
-// to make read-ahead prefetches populate the same in-process cache layer
-// that SharedDomains.GetLatest consults — eliminating the file-accessor
-// stack cost on the EVM's first touch of any prefetched address.
+// cachePopulatingGetter wraps a kv.TemporalGetter and fills a StateCache
+// ReadView as a side effect. Used by warmBody to make read-ahead prefetches
+// populate the same in-process cache layer that SharedDomains.GetLatest
+// consults — eliminating the file-accessor stack cost on the EVM's first
+// touch of any prefetched address.
 //
 // Code reads also populate the content-addressed and size-cache layers.
 type cachePopulatingGetter struct {
 	kv.TemporalGetter
-	sc         *cache.StateCache
-	stepSize   uint64 // for the read txNum upper bound (last txNum of the read's step)
-	visibleEnd func(kv.Domain) (uint64, bool)
+	view     cache.ReadView
+	stepSize uint64 // for the read txNum upper bound (last txNum of the read's step)
 }
 
 func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache) kv.TemporalGetter {
@@ -91,16 +90,14 @@ func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache) kv.TemporalGetter 
 		return ttx
 	}
 	debug := ttx.Debug()
-	return &cachePopulatingGetter{TemporalGetter: ttx, sc: sc, stepSize: debug.StepSize(), visibleEnd: debug.DomainVisibleEnd}
+	return &cachePopulatingGetter{TemporalGetter: ttx, view: sc.View(debug), stepSize: debug.StepSize()}
 }
 
 func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte) ([]byte, kv.Step, error) {
 	v, step, err := cpg.TemporalGetter.GetLatest(name, k)
 	if err == nil {
-		if viewEnd, ok := cpg.visibleEnd(name); ok {
-			readTxNum := (uint64(step)+1)*cpg.stepSize - 1
-			cpg.sc.FillIfFresh(name, k, v, readTxNum, viewEnd)
-		}
+		readTxNum := (uint64(step)+1)*cpg.stepSize - 1
+		cpg.view.Fill(name, k, v, readTxNum)
 	}
 	return v, step, err
 }
