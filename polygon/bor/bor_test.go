@@ -172,7 +172,7 @@ type validator struct {
 }
 
 func (v validator) generateChain(length int) (*blockgen.ChainPack, error) {
-	return blockgen.GenerateChain(v.ChainConfig, v.Genesis, v.Engine, v.DB, length, func(i int, block *blockgen.BlockGen) {
+	return v.GenerateChain(length, func(i int, block *blockgen.BlockGen) {
 		v.blocks[block.GetParent().NumberU64()] = block.GetParent()
 	})
 }
