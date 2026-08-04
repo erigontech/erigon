@@ -462,7 +462,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 				if !errors.Is(cr.err, ErrWrongTrieRoot) {
 					return fmt.Errorf("[%s] commitment: %w", pe.logPrefix, cr.err)
 				}
-				pe.logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x (%v)",
+				pe.logWrongTrieRoot(fmt.Sprintf("[%s] Wrong trie root of block %d: %x (%v)",
 					pe.logPrefix, cr.blockNum, cr.rootHash, cr.err))
 				return fmt.Errorf("%w, block=%d", ErrWrongTrieRoot, cr.blockNum)
 			}
