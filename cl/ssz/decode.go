@@ -28,8 +28,9 @@ func UnmarshalSSZ(buf []byte, version int, schema ...any) error {
 	return unmarshalSSZ(buf, version, false, schema...)
 }
 
-// UnmarshalSSZStrict rejects non-canonical container offsets and propagates
-// strict decoding to nested objects that support it.
+// UnmarshalSSZStrict rejects non-canonical container offsets and trailing
+// bytes after an all-static schema, and propagates strict decoding to nested
+// objects that support it.
 func UnmarshalSSZStrict(buf []byte, version int, schema ...any) error {
 	return unmarshalSSZ(buf, version, true, schema...)
 }
@@ -82,7 +83,8 @@ func unmarshalSSZ(buf []byte, version int, strict bool, schema ...any) (err erro
 					return ssz.ErrLowBufferSize
 				}
 				if strict {
-					err = decodeObjectSSZStrict(obj, buf[position:], version)
+					// The exact range lets nested strict decoders reject trailing bytes.
+					err = decodeObjectSSZStrict(obj, buf[position:position+obj.EncodingSizeSSZ()], version)
 				} else {
 					err = obj.DecodeSSZ(buf[position:], version)
 				}
@@ -106,6 +108,10 @@ func unmarshalSSZ(buf []byte, version int, strict bool, schema ...any) (err erro
 	// Canonical SSZ has no gap between the fixed and variable sections.
 	if strict && len(offsets) != 0 && offsets[0] != position {
 		return ssz.ErrBadOffset
+	}
+	// Without variable-size fields, a canonical encoding is exactly the fixed section.
+	if strict && len(offsets) == 0 && position != len(buf) {
+		return ssz.ErrTrailingBytes
 	}
 
 	// Consecutive offsets delimit each variable-size field; the final field

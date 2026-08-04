@@ -18,10 +18,12 @@ package ssz2_test
 
 import (
 	"encoding/binary"
+	"fmt"
 	"testing"
 
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/common/clonable"
 	commonssz "github.com/erigontech/erigon/common/ssz"
 	"github.com/stretchr/testify/require"
 )
@@ -31,6 +33,43 @@ func TestUnmarshalSSZStrictRejectsNonCanonicalOffset(t *testing.T) {
 
 	require.NoError(t, ssz2.UnmarshalSSZ(malformed, 0, solid.NewByteListSSZ(2)))
 	require.ErrorIs(t, ssz2.UnmarshalSSZStrict(malformed, 0, solid.NewByteListSSZ(2)), commonssz.ErrBadOffset)
+}
+
+func TestUnmarshalSSZStrictRejectsTrailingBytes(t *testing.T) {
+	var x uint64
+	buf := make([]byte, 9)
+
+	require.NoError(t, ssz2.UnmarshalSSZ(buf, 0, &x))
+	require.ErrorIs(t, ssz2.UnmarshalSSZStrict(buf, 0, &x), commonssz.ErrTrailingBytes)
+}
+
+// staticStubSSZ is a fixed-size schema field whose strict decoding fails
+// unless it receives exactly its own encoding.
+type staticStubSSZ struct{}
+
+func (*staticStubSSZ) Static() bool         { return true }
+func (*staticStubSSZ) EncodingSizeSSZ() int { return 4 }
+
+func (*staticStubSSZ) EncodeSSZ(dst []byte) ([]byte, error) {
+	return append(dst, 0, 0, 0, 0), nil
+}
+
+func (*staticStubSSZ) DecodeSSZ([]byte, int) error { return nil }
+
+func (*staticStubSSZ) DecodeSSZStrict(buf []byte, _ int) error {
+	if len(buf) != 4 {
+		return fmt.Errorf("static stub got %d bytes, want exactly 4", len(buf))
+	}
+	return nil
+}
+
+func (*staticStubSSZ) Clone() clonable.Clonable { return &staticStubSSZ{} }
+
+func TestUnmarshalSSZStrictGivesStaticFieldsExactRanges(t *testing.T) {
+	var tail uint64
+	buf := make([]byte, 12)
+
+	require.NoError(t, ssz2.UnmarshalSSZStrict(buf, 0, &staticStubSSZ{}, &tail))
 }
 
 func TestUnmarshalSSZStrictPropagatesToNestedList(t *testing.T) {

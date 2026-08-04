@@ -18,6 +18,7 @@ package engine_types
 
 import (
 	"encoding/binary"
+	"slices"
 	"testing"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -73,6 +74,21 @@ func TestExecutionPayloadDecodeSSZStrictRejectsNonCanonicalOffset(t *testing.T) 
 		t,
 		NewExecutionPayloadSSZ(clparams.BellatrixVersion).DecodeSSZStrict(malformed, int(clparams.BellatrixVersion)),
 		commonssz.ErrBadOffset,
+	)
+}
+
+func TestPayloadAttributesDecodeSSZStrictRejectsTrailingBytes(t *testing.T) {
+	attributes := NewPayloadAttributesSSZ(clparams.BellatrixVersion)
+	encoded, err := attributes.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	malformed := slices.Concat(encoded, []byte{0xff})
+
+	require.NoError(t, NewPayloadAttributesSSZ(clparams.BellatrixVersion).DecodeSSZ(malformed, int(clparams.BellatrixVersion)))
+	require.ErrorIs(
+		t,
+		NewPayloadAttributesSSZ(clparams.BellatrixVersion).DecodeSSZStrict(malformed, int(clparams.BellatrixVersion)),
+		commonssz.ErrTrailingBytes,
 	)
 }
 
