@@ -390,14 +390,15 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 				}
 
 				fees := &blockFees{blockNumber: blockNumber}
-				if isPending {
+				switch {
+				case isPending:
 					fees.block, fees.receipts = pendingBlock, pendingReceipts
-				} else if len(rewardPercentiles) != 0 {
+				case len(rewardPercentiles) != 0:
 					fees.block, fees.err = localBackend.BlockByNumber(fetchCtx, rpc.BlockNumber(blockNumber))
 					if fees.block != nil && fees.err == nil {
 						fees.receipts, fees.err = localBackend.GetReceiptsGasUsed(fetchCtx, fees.block)
 					}
-				} else {
+				default:
 					fees.header, fees.err = localBackend.HeaderByNumber(fetchCtx, rpc.BlockNumber(blockNumber))
 				}
 				if fees.block != nil {
@@ -425,7 +426,7 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 			}
 		})
 	}
-	if err = g.Wait(); err != nil {
+	if err := g.Wait(); err != nil {
 		return common.Big0, nil, nil, nil, nil, nil, err
 	}
 

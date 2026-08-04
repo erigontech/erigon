@@ -669,12 +669,13 @@ func (imp *impl) ApplyParentExecutionPayload(s abstract.BeaconState, requests *c
 	currentEpoch := state.Epoch(s)
 
 	var paymentIndex int
-	if parentEpoch == currentEpoch {
+	switch {
+	case parentEpoch == currentEpoch:
 		paymentIndex = int(slotsPerEpoch + parentSlot%slotsPerEpoch)
-	} else if parentEpoch+1 == currentEpoch {
+	case parentEpoch+1 == currentEpoch:
 		// previous epoch
 		paymentIndex = int(parentSlot % slotsPerEpoch)
-	} else if parentBid.Value > 0 {
+	case parentBid.Value > 0:
 		// Parent is older than the previous epoch, its payment entry has been
 		// evicted from builder_pending_payments. Append the withdrawal directly.
 		withdrawals := s.GetBuilderPendingWithdrawals()
@@ -685,7 +686,7 @@ func (imp *impl) ApplyParentExecutionPayload(s abstract.BeaconState, requests *c
 		})
 		s.SetBuilderPendingWithdrawals(withdrawals)
 		paymentIndex = -1
-	} else {
+	default:
 		paymentIndex = -1
 	}
 
