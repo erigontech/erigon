@@ -111,6 +111,12 @@ func codeSizeWrite(addr accounts.Address, val int) *VersionedWrite[int] {
 // value — so "next wins on a matched key" is exercised per-path instead of
 // passing vacuously. b is prev-only, c is next-only, and storage carries all
 // three shapes: k1 conflicts, k2 is prev-only, k3 is next-only.
+//
+// b's writes are the ones a merged set shares with prev, so they are what a
+// release test must assert. Its address and code writes make an accidental
+// release of a shared value fail deterministically: releaseVWAddress nils Val
+// and releaseVWCode clears the bytecode, while the other release funcs are
+// bare pool-Puts that leave the value readable until reuse.
 func mergeIntoFixture() (prev, next *WriteSet) {
 	a, b, c := mergeAddr(0xa1), mergeAddr(0xb2), mergeAddr(0xc3)
 	k1, k2, k3 := mergeKey(0x01), mergeKey(0x02), mergeKey(0x03)
@@ -126,8 +132,10 @@ func mergeIntoFixture() (prev, next *WriteSet) {
 		codeSizeWrite(a, 2),
 		storageWrite(a, k1, 10),
 		storageWrite(a, k2, 20),
+		addressWrite(b, 6),
 		balanceWrite(b, 2, 0),
 		nonceWrite(b, 7, 0),
+		codeWrite(b, []byte{0x60, 0xaa}),
 		codeSizeWrite(b, 9),
 	)
 	next = newWriteSet(
@@ -304,8 +312,8 @@ func BenchmarkWriteSetMergeInto(b *testing.B) {
 // ReleaseMaps returns the map containers to their pools without touching the
 // VersionedWrite values, which may be shared with other sets after MergeInto.
 func TestWriteSetReleaseMaps(t *testing.T) {
-	a := mergeAddr(0xa1)
-	k1 := mergeKey(0x01)
+	a, b := mergeAddr(0xa1), mergeAddr(0xb2)
+	k2 := mergeKey(0x02)
 
 	prev, next := mergeIntoFixture()
 	merged := prev.MergeInto(next)
@@ -313,13 +321,27 @@ func TestWriteSetReleaseMaps(t *testing.T) {
 	prev.ReleaseMaps()
 	assert.True(t, prev.IsEmpty(), "released set must be empty")
 
-	// Shared VWs must survive the release of the other set's maps.
-	bw, ok := merged.balance[a]
+	// The entries merged shares with prev are prev's non-conflicting ones —
+	// prev's writes on a lost the merge and never entered merged.
+	aw, ok := merged.address[b]
 	require.True(t, ok)
-	assert.Equal(t, *uint256.NewInt(100), bw.Val)
-	sw, ok := merged.storage[a][k1]
+	require.NotNil(t, aw.Val, "shared address write must not be released")
+	assert.Equal(t, uint64(6), aw.Val.Nonce)
+	cw, ok := merged.code[b]
 	require.True(t, ok)
-	assert.Equal(t, *uint256.NewInt(111), sw.Val)
+	assert.Equal(t, []byte{0x60, 0xaa}, cw.Val.Bytes, "shared code write must not be released")
+	bw, ok := merged.balance[b]
+	require.True(t, ok)
+	assert.Equal(t, *uint256.NewInt(2), bw.Val)
+	nw, ok := merged.nonce[b]
+	require.True(t, ok)
+	assert.Equal(t, uint64(7), nw.Val)
+	csw, ok := merged.codeSize[b]
+	require.True(t, ok)
+	assert.Equal(t, 9, csw.Val)
+	sw, ok := merged.storage[a][k2]
+	require.True(t, ok)
+	assert.Equal(t, *uint256.NewInt(20), sw.Val)
 
 	// A released set must be reusable.
 	prev.SetBalance(a, balanceWrite(a, 7, 2))
