@@ -44,14 +44,14 @@ import (
 // context fails the call, since a partial or failed scan must never pass as a
 // complete verification.
 func VerifyTorrentFiles(ctx context.Context, dir string, failFast bool, logger log.Logger) error {
-	torrentFiles, scanErr := collectTorrentFiles(dir, logger)
+	torrentFiles, scanErr := collectTorrentFiles(ctx, dir, logger)
 	if scanErr != nil {
 		scanErr = fmt.Errorf("listing torrent files: %w", scanErr)
 	}
 
 	if len(torrentFiles) == 0 {
 		logger.Info("[verify] no torrent files found", "dir", dir)
-		return scanErr
+		return errors.Join(scanErr, ctx.Err())
 	}
 
 	var totalBytes int64
@@ -81,7 +81,7 @@ func VerifyTorrentFiles(ctx context.Context, dir string, failFast bool, logger l
 
 	if len(toVerify) == 0 {
 		logger.Info("[verify] no data files to verify", "dir", dir)
-		return scanErr
+		return errors.Join(scanErr, ctx.Err())
 	}
 
 	logger.Info("[verify] starting", "files", len(toVerify), "totalGB", totalBytes>>30)
@@ -122,6 +122,11 @@ func VerifyTorrentFiles(ctx context.Context, dir string, failFast bool, logger l
 				if failFast {
 					return err
 				}
+				// A cancelled run is a shutdown, not corruption: counting it would
+				// report every in-flight file as a verification failure.
+				if ctx.Err() != nil {
+					return nil
+				}
 				logger.Warn("[verify] file failed", "file", torrentFile, "err", err)
 				failedMu.Lock()
 				failed++
@@ -161,7 +166,7 @@ func VerifyTorrentFiles(ctx context.Context, dir string, failFast bool, logger l
 // cycle guard. Paths that could not be read are reported through the error
 // together with the files that were reached: they may hide any number of
 // torrents, so the caller verifies what it got and still fails the run.
-func collectTorrentFiles(dir string, logger log.Logger) (files []string, err error) {
+func collectTorrentFiles(ctx context.Context, dir string, logger log.Logger) (files []string, err error) {
 	visited := map[string]struct{}{}
 	var skipped int
 	var firstSkipped error
@@ -200,7 +205,16 @@ func collectTorrentFiles(dir string, logger log.Logger) (files []string, err err
 				isDir = info.IsDir()
 			}
 			if isDir {
+				// Cancellation stops the descent, which is where the cost is; entries
+				// already reached stay in the report so the caller still learns what
+				// was wrong with them.
+				if err := ctx.Err(); err != nil {
+					return err
+				}
 				if err := walk(child); err != nil {
+					if ctx.Err() != nil {
+						return err
+					}
 					skip(child, err)
 				}
 				continue
@@ -212,11 +226,12 @@ func collectTorrentFiles(dir string, logger log.Logger) (files []string, err err
 		return nil
 	}
 
-	if err := walk(dir); err != nil {
-		return nil, err
-	}
+	walkErr := walk(dir)
 	if skipped > 0 {
-		return files, fmt.Errorf("%d unreadable path(s), first: %w", skipped, firstSkipped)
+		walkErr = errors.Join(walkErr, fmt.Errorf("%d unreadable path(s), first: %w", skipped, firstSkipped))
+	}
+	if walkErr != nil {
+		return files, walkErr
 	}
 	return files, nil
 }

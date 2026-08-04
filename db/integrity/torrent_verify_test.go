@@ -217,3 +217,43 @@ func TestVerifyTorrentFilesSymlinkCycle(t *testing.T) {
 	require.Error(t, err)
 	require.ErrorContains(t, err, "hash mismatch")
 }
+
+// An empty directory still has to honour cancellation: the early returns must not
+// report a cancelled run as a clean one.
+func TestVerifyTorrentFilesCancelledEmptyDir(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := VerifyTorrentFiles(ctx, t.TempDir(), false, log.New())
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+// A directory holding torrents but no data files takes the second early return,
+// which must preserve cancellation too.
+func TestVerifyTorrentFilesCancelledNoDataFiles(t *testing.T) {
+	dir := t.TempDir()
+	writeTorrentPair(t, dir, "test.seg", false)
+	require.NoError(t, dir2.RemoveFile(filepath.Join(dir, "test.seg")))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := VerifyTorrentFiles(ctx, dir, false, log.New())
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+// Cancelling a non-fail-fast run must read as a shutdown, not as corruption:
+// the operator gets the cancellation, never "N file(s) failed verification".
+func TestVerifyTorrentFilesCancelledIsNotCorruption(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"a.seg", "b.seg", "c.seg"} {
+		writeTorrentPair(t, dir, name, false)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := VerifyTorrentFiles(ctx, dir, false, log.New())
+	require.ErrorIs(t, err, context.Canceled)
+	require.NotContains(t, err.Error(), "failed verification")
+}

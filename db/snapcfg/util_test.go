@@ -60,20 +60,21 @@ func TestTypedCaplinDropsUnparseableVersion(t *testing.T) {
 	require.Equal(t, []string{"caplin/v1.1-000000-000100-BlockRoot.seg"}, names)
 }
 
-// keepNewest is shared by the caplin and the generic branch, and the generic branch
-// carries no "caplin/" prefix to trim - the newest version per name still has to win.
+// keepNewest is shared by the caplin and the generic branch, and it compares the
+// versions it was given rather than re-deriving them from the stored item's name.
 func TestKeepNewestPrefersHigherVersion(t *testing.T) {
 	var best btree.Map[string, PreverifiedItem]
+	var kept btree.Map[string, snaptype.Version]
 	older := PreverifiedItem{Name: "v1.0-000000-000100-headers.seg", Hash: "old"}
 	newer := PreverifiedItem{Name: "v1.1-000000-000100-headers.seg", Hash: "new"}
 
-	keepNewest(&best, "000000-000100-headers.seg", older, version.V1_0)
-	keepNewest(&best, "000000-000100-headers.seg", newer, version.V1_1)
+	keepNewest(&best, &kept, "000000-000100-headers.seg", older, version.V1_0)
+	keepNewest(&best, &kept, "000000-000100-headers.seg", newer, version.V1_1)
 	got, ok := best.Get("000000-000100-headers.seg")
 	require.True(t, ok)
 	require.Equal(t, newer, got)
 
-	keepNewest(&best, "000000-000100-headers.seg", older, version.V1_0)
+	keepNewest(&best, &kept, "000000-000100-headers.seg", older, version.V1_0)
 	got, _ = best.Get("000000-000100-headers.seg")
 	require.Equal(t, newer, got, "an older version must not displace the one already stored")
 }
