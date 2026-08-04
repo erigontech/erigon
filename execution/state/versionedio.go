@@ -1062,6 +1062,7 @@ func (s *WriteSet) deleteAddr(addr accounts.Address) {
 type createWriteSnapshot struct {
 	address        *VersionedWrite[*accounts.Account]
 	balance        *VersionedWrite[uint256.Int]
+	nonce          *VersionedWrite[uint64]
 	incarnation    *VersionedWrite[uint64]
 	selfDestruct   *VersionedWrite[bool]
 	createContract *VersionedWrite[bool]
@@ -1070,8 +1071,10 @@ type createWriteSnapshot struct {
 
 // snapshotCreateFields clones the account-record writes that a subsequent
 // createObject/createAccount will overwrite, so a reverted recreation can
-// restore them. Fields creation never writes (nonce/code/codeSize/storage) are
-// not captured — they survive the recreation untouched.
+// restore them. createObject stamps NoncePath and CodeHashPath (to zero the
+// prior incarnation), so both are captured alongside the account-record cells.
+// code/codeSize/storage are not: they carry their own field-level journal
+// entries that self-revert.
 func (s *WriteSet) snapshotCreateFields(addr accounts.Address) *createWriteSnapshot {
 	snap := &createWriteSnapshot{}
 	if vw, ok := s.address[addr]; ok {
@@ -1079,6 +1082,9 @@ func (s *WriteSet) snapshotCreateFields(addr accounts.Address) *createWriteSnaps
 	}
 	if vw, ok := s.balance[addr]; ok {
 		snap.balance = cloneVW(vw)
+	}
+	if vw, ok := s.nonce[addr]; ok {
+		snap.nonce = cloneVW(vw)
 	}
 	if vw, ok := s.incarnation[addr]; ok {
 		snap.incarnation = cloneVW(vw)
@@ -1101,6 +1107,7 @@ func (s *WriteSet) snapshotCreateFields(addr accounts.Address) *createWriteSnaps
 func (s *WriteSet) restoreCreateFields(addr accounts.Address, snap *createWriteSnapshot) {
 	delete(s.address, addr)
 	delete(s.balance, addr)
+	delete(s.nonce, addr)
 	delete(s.incarnation, addr)
 	delete(s.selfDestruct, addr)
 	delete(s.createContract, addr)
@@ -1113,6 +1120,9 @@ func (s *WriteSet) restoreCreateFields(addr accounts.Address, snap *createWriteS
 	}
 	if snap.balance != nil {
 		s.SetBalance(addr, snap.balance)
+	}
+	if snap.nonce != nil {
+		s.SetNonce(addr, snap.nonce)
 	}
 	if snap.incarnation != nil {
 		s.SetIncarnation(addr, snap.incarnation)
