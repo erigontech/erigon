@@ -91,12 +91,12 @@ func TestFileItemWithMissedAccessor(t *testing.T) {
 	// create accesssor files for f1, f2
 	for _, fname := range accessorFor(f1.StepRange(aggStep)) {
 		require.NoError(t, os.WriteFile(fname, []byte("test"), 0644))
-		defer dir.RemoveFile(fname) //nolint:errcheck
+		t.Cleanup(func() { _ = dir.RemoveFile(fname) })
 	}
 
 	for _, fname := range accessorFor(f2.StepRange(aggStep)) {
 		require.NoError(t, os.WriteFile(fname, []byte("test"), 0644))
-		defer dir.RemoveFile(fname) //nolint:errcheck
+		t.Cleanup(func() { _ = dir.RemoveFile(fname) })
 	}
 
 	fileItems := fileItemsWithMissedAccessors(df.Items(), aggStep, accessorFor)
