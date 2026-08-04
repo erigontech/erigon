@@ -632,6 +632,10 @@ func (vm *VersionMap) AnyDoneSelfDestructEquals(addr accounts.Address, txIdxLimi
 // index (and below txIndex) shows the account alive again. Same-tx
 // re-creation (metamorphic SD+CREATE2) writes both SelfDestructPath and
 // AddressPath at the SAME TxIdx, so AddressPath uses >= (not strict >).
+// LatestTxIndex counts Estimate cells: an in-flight post-destruct write is
+// a possible revival, and treating it as one keeps the dead-account
+// relaxations off until it resolves (fail-safe: the reader re-executes),
+// mirroring accountLiveSince's estimate handling.
 func (vm *VersionMap) selfDestructRevived(addr accounts.Address, destructTxIndex int, txIndex int) bool {
 	revivalLimit := txIndex - 1
 	if hi, ok := vm.LatestTxIndex(addr, AddressPath, accounts.NilKey, revivalLimit); ok && hi >= destructTxIndex {
@@ -1188,28 +1192,35 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 				invReason = "done-vercheck"
 			}
 		}
-		// A later tx self-destructed the account (no revival), so a read predating
-		// the destruct is stale; checkVersion alone misses it because the SD doesn't
-		// write the read's own path. AddressPath and CodePath use the shared
-		// lifecycle probe (>= arm for same-tx re-creation, post-destruct liveness
-		// for EIP-8246 preserved balances); the destroyer writes no cells for
-		// either path, so any Done cell here predates the destruct.
-		if valid == VersionValid && (path == AddressPath || path == CodePath) {
+		// A later destruct makes a read predating it stale; checkVersion alone
+		// misses it because the SD doesn't write the read's own path. AddressPath
+		// is existence-only, so it stays valid unless the account is dead
+		// (destroyed, unrevived, no live floor).
+		if valid == VersionValid && path == AddressPath {
 			if _, ok := vm.FindDoneSelfDestructInRange(addr, rr.Version().TxIndex+1, txIndex, true); ok &&
 				vm.destroyedAndUnrevived(addr, txIndex) {
 				valid = VersionInvalid
 				invReason = "sd-stale"
 			}
 		}
-		if valid == VersionValid && path != SelfDestructPath && path != AddressPath &&
-			path != IncarnationPath && path != CreateContractPath && path != CodePath {
-			// Range-scan strictly above the floor cell: a re-creation flushes
-			// SelfDestruct=false above the wiping true cell, so latest-only
-			// probing misses the destruct (the read path's floors range-scan the
-			// same way). No revival relaxation: re-establishing THIS field after
-			// the destruct writes a cell above it, which then is the floor, so
-			// any destruct above the floor means the value predates the wipe.
-			if _, ok := vm.FindDoneSelfDestructInRange(addr, rr.Version().TxIndex+1, txIndex, true); ok {
+		if valid == VersionValid && !absent && path != SelfDestructPath && path != AddressPath &&
+			path != IncarnationPath && path != CreateContractPath {
+			// Range-scan mirroring the read path's per-path destruct resolution
+			// (a re-creation flushes SelfDestruct=false above the wiping true
+			// cell, so latest-only probing misses it). Only non-absent reads
+			// consult the net: a destruct makes absence the truth, and a later
+			// re-establishment writes a cell that becomes the floor, so a stale
+			// absent read version-mismatches on its own. No revival relaxation,
+			// for the same reason. Deploy-derived paths scan inclusive of the
+			// floor index (a same-tx write+destruct wipes the cell itself);
+			// Balance/CodeHash stay strictly-above — the destroyer's own cells
+			// there (EIP-8246 preserved balance, reset code hash) are
+			// post-destruct truth.
+			lo := rr.Version().TxIndex + 1
+			if path == StoragePath || path == CodePath || path == CodeSizePath || path == NoncePath {
+				lo = rr.Version().TxIndex
+			}
+			if _, ok := vm.FindDoneSelfDestructInRange(addr, lo, txIndex, true); ok {
 				valid = VersionInvalid
 				invReason = "sd-stale"
 			}

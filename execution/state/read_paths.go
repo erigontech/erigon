@@ -602,9 +602,12 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 			s.versionedReads.SetHeader(addr, path, key, hdr)
 			panic(ErrDependency)
 		}
-		// CodePath trumped by SelfDestruct at >= DepIdx
+		// CodePath trumped by a destruct at >= the cell index: account revival is
+		// not code revival, so scan the range — a later SelfDestruct=false cell
+		// (transfer-revival) must not shadow the wipe. A revival that re-deploys
+		// writes a fresh Code cell above the destruct, which then is the floor.
 		if path == CodePath {
-			if destructed, sdres, ok := s.versionMap.ReadSelfDestruct(addr, s.txIndex); ok && sdres.Status() == MVReadResultDone && destructed && sdres.DepIdx() >= res.DepIdx() {
+			if _, ok := s.versionMap.FindDoneSelfDestructInRange(addr, res.DepIdx(), s.txIndex, true); ok {
 				r.outcome = outcomeReturnDefault
 				r.source = MapRead
 				r.version = Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}
