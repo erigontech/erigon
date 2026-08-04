@@ -112,6 +112,7 @@ func (o *OperationsPool) PruneFinalized(finalizedState abstract.BeaconState, fin
 			continue
 		}
 		validatorIndex := exit.VoluntaryExit.ValidatorIndex
+		// Builder indices are reusable, so finalized validator state cannot prove a builder exit terminal.
 		if validatorIndex&clparams.BuilderIndexFlag != 0 {
 			continue
 		}

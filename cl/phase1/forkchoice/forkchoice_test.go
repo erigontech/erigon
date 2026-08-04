@@ -190,7 +190,24 @@ func TestAllAttesterSlashingIndicesSeen(t *testing.T) {
 
 	require.True(t, store.allAttesterSlashingIndicesSeen([]uint64{1, 2}))
 	require.False(t, store.allAttesterSlashingIndicesSeen([]uint64{1, 3}))
-	require.False(t, store.allAttesterSlashingIndicesSeen(nil))
+	require.True(t, store.allAttesterSlashingIndicesSeen(nil))
+}
+
+func TestAttesterSlashingIgnoresDisjointIndices(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	store := &ForkChoiceStore{}
+	slashing := &cltypes.AttesterSlashing{
+		Attestation_1: &cltypes.IndexedAttestation{
+			AttestingIndices: solid.NewRawUint64List(2048, []uint64{1}),
+		},
+		Attestation_2: &cltypes.IndexedAttestation{
+			AttestingIndices: solid.NewRawUint64List(2048, []uint64{2}),
+		},
+	}
+
+	err := store.onProcessAttesterSlashing(slashing, state.New(&cfg), false)
+
+	require.ErrorIs(t, err, ErrIgnore)
 }
 
 func TestAttesterSlashingSeenCheckPrecedesValidation(t *testing.T) {

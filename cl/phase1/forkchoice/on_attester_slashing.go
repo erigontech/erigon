@@ -87,7 +87,6 @@ func (f *ForkChoiceStore) onProcessAttesterSlashing(attesterSlashing *cltypes.At
 	if err != nil {
 		return err
 	}
-	intersection = solid.IntersectionOfSortedSets(attestation1.AttestingIndices, attestation2.AttestingIndices)
 	domain1, err := s.GetDomain(s.BeaconConfig().DomainBeaconAttester, attestation1.Data.Target.Epoch)
 	if err != nil {
 		return fmt.Errorf("unable to get the domain: %v", err)
@@ -166,9 +165,6 @@ func intersectAttestingIndices(left, right solid.IterableSSZ[uint64]) []uint64 {
 }
 
 func (f *ForkChoiceStore) allAttesterSlashingIndicesSeen(indices []uint64) bool {
-	if len(indices) == 0 {
-		return false
-	}
 	for _, index := range indices {
 		if !f.isUnequivocating(index) {
 			return false
