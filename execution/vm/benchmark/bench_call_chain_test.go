@@ -32,7 +32,7 @@ func BenchmarkNestedStaticCalls(b *testing.B) {
 
 			// Deploy depth chain: addr[0] → addr[1] → ... → addr[depth-1]
 			addrs := makeAddrs(depth)
-			deployCallChain(statedb, addrs) // staticcall chain
+			deployCallChain(b, statedb, addrs) // staticcall chain
 
 			// Entry point loops: JUMPDEST, STATICCALL(addr[0]), POP, JUMP
 			entry, lbl := program.New().Jumpdest()
@@ -40,7 +40,7 @@ func BenchmarkNestedStaticCalls(b *testing.B) {
 				StaticCall(nil, addrs[0].raw, 0, 0, 0, 0).
 				Op(vm.POP).
 				Jump(lbl).Bytes()
-			deployContract(statedb, addrContract, entryCode)
+			deployContract(b, statedb, addrContract, entryCode)
 
 			callOOG(b, vmenv, addrContract)
 			for b.Loop() {
@@ -59,7 +59,7 @@ func BenchmarkDelegateCallProxy(b *testing.B) {
 			statedb := vmenv.IntraBlockState()
 
 			addrs := makeAddrs(layers)
-			deployDelegateChain(statedb, addrs)
+			deployDelegateChain(b, statedb, addrs)
 
 			// Entry: loop calling first proxy
 			entry, lbl := program.New().Jumpdest()
@@ -67,7 +67,7 @@ func BenchmarkDelegateCallProxy(b *testing.B) {
 				DelegateCall(nil, addrs[0].raw, 0, 0, 0, 0).
 				Op(vm.POP).
 				Jump(lbl).Bytes()
-			deployContract(statedb, addrContract, entryCode)
+			deployContract(b, statedb, addrContract, entryCode)
 
 			callOOG(b, vmenv, addrContract)
 			for b.Loop() {
@@ -87,11 +87,11 @@ func BenchmarkCallWithValue(b *testing.B) {
 		vmenv := benchConfig(b, 100_000_000)
 		statedb := vmenv.IntraBlockState()
 
-		deployContract(statedb, addrPair, targetCode)
+		deployContract(b, statedb, addrPair, targetCode)
 		// Caller loops: CALL with value=0
 		p, lbl := program.New().Jumpdest()
 		code := p.Call(nil, rawPair, 0, 0, 0, 0, 0).Op(vm.POP).Jump(lbl).Bytes()
-		deployContract(statedb, addrContract, code)
+		deployContract(b, statedb, addrContract, code)
 
 		callOOG(b, vmenv, addrContract)
 		for b.Loop() {
@@ -104,11 +104,11 @@ func BenchmarkCallWithValue(b *testing.B) {
 		vmenv := benchConfig(b, 100_000_000)
 		statedb := vmenv.IntraBlockState()
 
-		deployContract(statedb, addrPair, targetCode)
+		deployContract(b, statedb, addrPair, targetCode)
 		// Caller loops: CALL with value=1 wei
 		p, lbl := program.New().Jumpdest()
 		code := p.Call(nil, rawPair, 1, 0, 0, 0, 0).Op(vm.POP).Jump(lbl).Bytes()
-		deployContractWithBalance(statedb, addrContract, code, uint256.NewInt(1_000_000_000))
+		deployContractWithBalance(b, statedb, addrContract, code, uint256.NewInt(1_000_000_000))
 
 		callOOG(b, vmenv, addrContract)
 		for b.Loop() {
@@ -125,7 +125,7 @@ func BenchmarkDeFiSwapChain(b *testing.B) {
 		vmenv := benchConfig(b, 100_000_000)
 		statedb := vmenv.IntraBlockState()
 
-		deployDeFiContracts(statedb)
+		deployDeFiContracts(b, statedb)
 
 		// Entry contract loops: CALL router
 		entry, lbl := program.New().Jumpdest()
@@ -133,7 +133,7 @@ func BenchmarkDeFiSwapChain(b *testing.B) {
 			Call(nil, rawRouter, 0, 0, 0, 0, 0).
 			Op(vm.POP).
 			Jump(lbl).Bytes()
-		deployContract(statedb, addrContract, entryCode)
+		deployContract(b, statedb, addrContract, entryCode)
 
 		callOOG(b, vmenv, addrContract)
 		for b.Loop() {
@@ -164,31 +164,31 @@ func makeAddrs(n int) []chainAddr {
 
 // deployCallChain deploys a chain where each contract STATICCALLs the next.
 // The last contract just does PUSH+POP+STOP.
-func deployCallChain(statedb *state.IntraBlockState, addrs []chainAddr) {
+func deployCallChain(b testing.TB, statedb *state.IntraBlockState, addrs []chainAddr) {
 	for i, a := range addrs {
 		if i == len(addrs)-1 {
 			// Leaf: minimal work
 			code := program.New().Push(42).Op(vm.POP, vm.STOP).Bytes()
-			deployContract(statedb, a.interned, code)
+			deployContract(b, statedb, a.interned, code)
 		} else {
 			// Intermediate: STATICCALL next, POP result, STOP
 			p := program.New()
 			code := p.StaticCall(nil, addrs[i+1].raw, 0, 0, 0, 0).Op(vm.POP, vm.STOP).Bytes()
-			deployContract(statedb, a.interned, code)
+			deployContract(b, statedb, a.interned, code)
 		}
 	}
 }
 
 // deployDelegateChain deploys a chain where each contract DELEGATECALLs the next.
-func deployDelegateChain(statedb *state.IntraBlockState, addrs []chainAddr) {
+func deployDelegateChain(b testing.TB, statedb *state.IntraBlockState, addrs []chainAddr) {
 	for i, a := range addrs {
 		if i == len(addrs)-1 {
 			code := program.New().Push(42).Op(vm.POP, vm.STOP).Bytes()
-			deployContract(statedb, a.interned, code)
+			deployContract(b, statedb, a.interned, code)
 		} else {
 			p := program.New()
 			code := p.DelegateCall(nil, addrs[i+1].raw, 0, 0, 0, 0).Op(vm.POP, vm.STOP).Bytes()
-			deployContract(statedb, a.interned, code)
+			deployContract(b, statedb, a.interned, code)
 		}
 	}
 }
@@ -198,15 +198,15 @@ func deployDelegateChain(statedb *state.IntraBlockState, addrs []chainAddr) {
 //	Router: STATICCALL Pair (getReserves), CALL TokenA.transfer, CALL TokenB.transfer
 //	Pair: SLOAD reserve0, SLOAD reserve1, RETURN (simplified getReserves)
 //	TokenA/B: SLOAD balance(from), SLOAD balance(to), SSTORE×2, LOG3 (transfer)
-func deployDeFiContracts(statedb *state.IntraBlockState) {
+func deployDeFiContracts(b testing.TB, statedb *state.IntraBlockState) {
 	// Pair contract: load 2 reserves, return them
 	pairCode := program.New().
 		Push(0).Op(vm.SLOAD). // reserve0
 		Push(1).Op(vm.SLOAD). // reserve1
 		Op(vm.POP, vm.POP, vm.STOP).
 		Bytes()
-	deployContract(statedb, addrPair, pairCode)
-	setStorage(statedb, addrPair, map[uint256.Int]uint256.Int{
+	deployContract(b, statedb, addrPair, pairCode)
+	setStorage(b, statedb, addrPair, map[uint256.Int]uint256.Int{
 		*uint256.NewInt(0): *uint256.NewInt(1_000_000), // reserve0
 		*uint256.NewInt(1): *uint256.NewInt(2_000_000), // reserve1
 	})
@@ -226,8 +226,8 @@ func deployDeFiContracts(statedb *state.IntraBlockState) {
 		Op(vm.STOP).Bytes()
 
 	for _, addr := range []accounts.Address{addrTokenA, addrTokenB} {
-		deployContract(statedb, addr, tokenCode)
-		setStorage(statedb, addr, map[uint256.Int]uint256.Int{
+		deployContract(b, statedb, addr, tokenCode)
+		setStorage(b, statedb, addr, map[uint256.Int]uint256.Int{
 			*uint256.NewInt(0): *uint256.NewInt(1_000_000_000),
 			*uint256.NewInt(1): *uint256.NewInt(1_000_000_000),
 		})
@@ -239,5 +239,5 @@ func deployDeFiContracts(statedb *state.IntraBlockState) {
 		Call(nil, rawTokenA, 0, 0, 0, 0, 0).Op(vm.POP).
 		Call(nil, rawTokenB, 0, 0, 0, 0, 0).Op(vm.POP).
 		Op(vm.STOP).Bytes()
-	deployContract(statedb, addrRouter, routerCode)
+	deployContract(b, statedb, addrRouter, routerCode)
 }
