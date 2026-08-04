@@ -20,11 +20,22 @@ import (
 	"testing"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/membatchwithdb"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/cache"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // stubTemporalGetter stands in for the committed-state snapshot a warmup
@@ -47,6 +58,85 @@ func (s stubTemporalGetter) StepsInFiles(...kv.Domain) kv.Step { return 0 }
 func newTestStateCache() *cache.StateCache {
 	b := 1 * datasize.MB
 	return cache.NewStateCache(b, b, b, b)
+}
+
+func TestMakeBALWarmupTasksSplitsStorageHeavyAccount(t *testing.T) {
+	bal := types.BlockAccessList{{
+		StorageChanges: make([]*types.SlotChanges, 5),
+		StorageReads:   make([]accounts.StorageKey, 3),
+	}}
+	tasks, workers := makeBALWarmupPlan(bal, 4)
+	require.Equal(t, 4, workers)
+	require.Equal(t, []balWarmupTask{
+		{accountIndex: 0, kind: balWarmAccount},
+		{accountIndex: 0, kind: balWarmStorageChanges, slotIndex: 0},
+		{accountIndex: 0, kind: balWarmStorageChanges, slotIndex: 1},
+		{accountIndex: 0, kind: balWarmStorageChanges, slotIndex: 2},
+		{accountIndex: 0, kind: balWarmStorageChanges, slotIndex: 3},
+		{accountIndex: 0, kind: balWarmStorageChanges, slotIndex: 4},
+		{accountIndex: 0, kind: balWarmStorageReads, slotIndex: 0},
+		{accountIndex: 0, kind: balWarmStorageReads, slotIndex: 1},
+		{accountIndex: 0, kind: balWarmStorageReads, slotIndex: 2},
+	}, tasks)
+}
+
+func TestBlockReadAheaderWarmsOverlayBlockAccessList(t *testing.T) {
+	oldReadAhead := dbg.ReadAhead
+	dbg.SetReadAhead(true)
+	t.Cleanup(func() { dbg.SetReadAhead(oldReadAhead) })
+	ctx := t.Context()
+	dirs := datadir.New(t.TempDir())
+	db := temporaltest.NewTestDB(t, dirs)
+	address := common.Address{19: 0x42}
+	account := accounts.Account{
+		Nonce:    1,
+		Balance:  *uint256.NewInt(1),
+		CodeHash: accounts.EmptyCodeHash,
+	}
+	accountBytes := accounts.SerialiseV3(&account)
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	domains.SetTxNum(1)
+	require.NoError(t, domains.DomainPut(kv.AccountsDomain, rwTx, address[:], accountBytes, 1, nil))
+	require.NoError(t, domains.Commit(ctx, rwTx))
+	domains.Close()
+	bal := types.BlockAccessList{{Address: accounts.InternAddress(address)}}
+	balBytes, err := types.EncodeBlockAccessListBytes(bal)
+	require.NoError(t, err)
+	balHash := bal.Hash()
+	header := &types.Header{
+		Number:              *uint256.NewInt(1),
+		BlockAccessListHash: &balHash,
+	}
+	body := new(types.Body)
+	baseTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer baseTx.Rollback()
+	overlay, err := membatchwithdb.NewMemoryBatch(baseTx, dirs.Tmp, log.New())
+	require.NoError(t, err)
+	require.NoError(t, rawdb.WriteBlockAccessListBytes(overlay, header.Hash(), header.Number.Uint64(), balBytes))
+	// The regression requires the BAL to be present only in BlockOverlay.
+	require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
+		stored, err := rawdb.ReadBlockAccessListBytes(tx, header.Hash(), header.Number.Uint64())
+		require.NoError(t, err)
+		require.Empty(t, stored)
+		return nil
+	}))
+	stateCache := newTestStateCache()
+	readAheader := NewBlockReadAheader()
+	readAheader.SetStateCache(stateCache)
+	readAheader.AddHeaderAndBody(ctx, db, overlay, header, body)
+	// AddHeaderAndBody must have copied the sidecar synchronously; its caller may
+	// release the overlay before the asynchronous state warming completes.
+	overlay.Close()
+	baseTx.Rollback()
+	readAheader.WaitForWarmup(ctx)
+	got, ok := stateCache.Get(kv.AccountsDomain, address[:])
+	require.True(t, ok, "overlay-only BAL account was not warmed")
+	require.Equal(t, accountBytes, got)
 }
 
 // A warmup read-through must never replace a fresher entry an authoritative

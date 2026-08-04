@@ -136,6 +136,7 @@ var (
 	DisableAdaptivePin   = EnvBool("DISABLE_ADAPTIVE_PIN", false)
 	AssertStateCache     = EnvBool("ASSERT_STATE_CACHE", false)
 	ReadAhead            = EnvBool("READ_AHEAD", true)
+	ReadAheadWorkers     = EnvInt("READ_AHEAD_WORKERS", runtime.NumCPU())
 	// FilesAsyncIO warms cold state .kv pages via io_uring before the mmap read, so
 	// a would-be blocking page fault becomes a non-blocking read that releases the
 	// goroutine's P. Linux + io_uring only; self-disables (reads use ordinary faults)
