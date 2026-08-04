@@ -43,6 +43,11 @@ DEPTHS="${DEPTHS:-}"
 # integration binary path — used by Phase 3.5 to compute regime targets.
 INTEGRATION_BIN="${INTEGRATION_BIN:-./build/bin/integration}"
 SYNC_TIMEOUT_SEC="${SYNC_TIMEOUT_SEC:-1800}"
+# Aggregator step size in txnums. Phase 5's disk-clean assertion needs
+# this to convert v4 raw-txnum filenames to step indices for the shared
+# partition check. Default is hoodi/mainnet (390625). If the launcher
+# targets a chain with a different step size, override via env.
+STEP_SIZE="${STEP_SIZE:-390625}"
 SNAP_DIR_DEFAULT="$DATADIR/snapshots"
 SNAP_DIR="${SNAP_DIR:-$SNAP_DIR_DEFAULT}"
 
@@ -408,22 +413,43 @@ set +o pipefail
 # no overlaps). Every sidecar (.torrent) and accessor (.kvi, .bt,
 # .kvei) must have a matching .kv. Failures indicate Provider.Unwind
 # cleanup didn't fully run.
+#
+# V4 files (v4.0-<domain>.<fromTxN>-<toTxN>.kv, mode-C emit) encode
+# raw txnums in the filename per TxNumNamingPivot. The check converts
+# their endpoints to step indices via STEP_SIZE so the partition rule
+# applies uniformly with legacy step-indexed files. A mid-step endTxN
+# rounds UP for the "next file starts at" comparison, so an overlap
+# with a per-step successor still surfaces (this is the follow-up-2
+# retire-supersede gap; the driver reports it, doesn't hide it).
+# A separate V4_TRANSIENT count tracks how many v4 files remain post
+# quiescence — non-zero means a wider merge hasn't superseded them.
 stage "Phase 5: disk-clean assertion"
 if [[ "$SOAK_RC" -eq 0 ]]; then
     OVERLAP_COUNT=0
     GAP_COUNT=0
     ORPHAN_COUNT=0
+    V4_TRANSIENT_COUNT=0
     for DOMAIN in accounts storage code commitment receipt rcache; do
-        # Collect (fromStep, toStep, name) triples for this domain, sorted by fromStep.
+        # Collect (fromStep, toStep, name, isV4) tuples for this
+        # domain, sorted by fromStep. For v4.* files, from/to are raw
+        # txnums → divide by STEP_SIZE; for legacy files they're step
+        # indices already.
         LAYOUT=$(ls "$SNAP_DIR"/domain/v*-"$DOMAIN".*.kv 2>/dev/null \
             | while read -r f; do
                 name=$(basename "$f")
-                # Filename shape: v<ver>-<domain>.<from>-<to>.kv
+                ver=$(echo "$name" | grep -oE '^v[0-9]+\.[0-9]+' | head -1)
+                major=$(echo "$ver" | sed -E 's/^v([0-9]+)\..*/\1/')
                 range=$(echo "$name" | grep -oE '\.[0-9]+-[0-9]+\.kv$' | sed 's/^\.\(.*\)\.kv$/\1/')
                 from=$(echo "$range" | cut -d- -f1)
                 to=$(echo "$range" | cut -d- -f2)
-                if [[ -n "$from" && -n "$to" ]]; then
-                    echo "$from $to $name"
+                [[ -z "$from" || -z "$to" ]] && continue
+                if [[ -n "$major" && "$major" -ge 4 ]]; then
+                    # v4: raw-txnum filename. Convert to step indices.
+                    from_step=$(( from / STEP_SIZE ))
+                    to_step=$(( (to + STEP_SIZE - 1) / STEP_SIZE ))
+                    echo "$from_step $to_step $name v4"
+                else
+                    echo "$from $to $name legacy"
                 fi
             done | sort -n)
         if [[ -z "$LAYOUT" ]]; then
@@ -431,13 +457,14 @@ if [[ "$SOAK_RC" -eq 0 ]]; then
         fi
         # Check consecutive files: prev.toStep must equal cur.fromStep.
         prev_to=""
-        while read -r from to name; do
+        while read -r from to name kind; do
+            [[ "$kind" == "v4" ]] && V4_TRANSIENT_COUNT=$((V4_TRANSIENT_COUNT + 1))
             if [[ -n "$prev_to" && "$prev_to" != "$from" ]]; then
                 if [[ "$prev_to" -gt "$from" ]]; then
-                    echo "  OVERLAP: $DOMAIN — prev.toStep=$prev_to > cur.fromStep=$from ($name)"
+                    echo "  OVERLAP: $DOMAIN — prev.toStep=$prev_to > cur.fromStep=$from ($name kind=$kind)"
                     OVERLAP_COUNT=$((OVERLAP_COUNT + 1))
                 else
-                    echo "  GAP: $DOMAIN — prev.toStep=$prev_to < cur.fromStep=$from ($name)"
+                    echo "  GAP: $DOMAIN — prev.toStep=$prev_to < cur.fromStep=$from ($name kind=$kind)"
                     GAP_COUNT=$((GAP_COUNT + 1))
                 fi
             fi
@@ -469,10 +496,12 @@ if [[ "$SOAK_RC" -eq 0 ]]; then
 
     TOTAL=$((OVERLAP_COUNT + GAP_COUNT + ORPHAN_COUNT))
     if [[ $TOTAL -gt 0 ]]; then
-        echo "FAIL: disk-clean assertion — overlaps=$OVERLAP_COUNT gaps=$GAP_COUNT orphans=$ORPHAN_COUNT"
+        echo "FAIL: disk-clean assertion — overlaps=$OVERLAP_COUNT gaps=$GAP_COUNT orphans=$ORPHAN_COUNT v4_transient=$V4_TRANSIENT_COUNT"
         SOAK_RC=2
+    elif [[ $V4_TRANSIENT_COUNT -gt 0 ]]; then
+        echo "  disk-clean: partition+orphan OK, but $V4_TRANSIENT_COUNT v4 file(s) still on disk (mode-C emit not yet superseded by merge)"
     else
-        echo "  disk-clean: OK (partitions clean, no orphan sidecars)"
+        echo "  disk-clean: OK (partitions clean, no orphan sidecars, no v4 residue)"
     fi
 fi
 
