@@ -28,8 +28,8 @@ type pendingJob[M any] struct {
 	creationTime time.Time
 }
 
-// pendingJobQueue retries dependency-blocked jobs until their service callback
-// removes them or they expire.
+// pendingJobQueue retries dependency-blocked jobs until the service callback
+// requests their removal or they expire.
 type pendingJobQueue[K comparable, M any] struct {
 	capacity int32
 	expiry   time.Duration

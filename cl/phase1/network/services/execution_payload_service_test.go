@@ -341,7 +341,7 @@ func TestExecutionPayloadServiceMultiplePendingForSameBlock(t *testing.T) {
 	require.True(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 2}))
 }
 
-func TestExecutionPayloadServicePendingQueueCapSkipsHash(t *testing.T) {
+func TestExecutionPayloadServicePendingQueueCapSkipsKeyConstruction(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
 
@@ -358,6 +358,8 @@ func TestExecutionPayloadServicePendingQueueCapSkipsHash(t *testing.T) {
 	impl.pending.count.Store(maxPendingEnvelopes)
 
 	blockRoot := common.HexToHash("0xffff")
+	// Building the key for this envelope panics, so the enqueue only stays
+	// panic-free if a full queue skips key construction.
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{
 		Message: &cltypes.ExecutionPayloadEnvelope{},
 	}
