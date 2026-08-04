@@ -96,7 +96,7 @@ type Aggregator struct {
 	// domains' visible ends while set; Close clears it (shutdown is not a
 	// fill window).
 	visibilityLoweringForbidden atomic.Bool
-	snapshotBuildSema *semaphore.Weighted
+	snapshotBuildSema           *semaphore.Weighted
 
 	disableHistory      bool
 	branchCacheDisabled bool
