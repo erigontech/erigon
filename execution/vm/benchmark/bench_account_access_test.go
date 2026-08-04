@@ -38,9 +38,9 @@ func BenchmarkAddressDiversity(b *testing.B) {
 				statedb.CreateAccount(addr, false)
 				statedb.SetBalance(addr, *uint256.NewInt(uint64(i) + 1), 0)
 			}
-			prepareAndCall(vmenv, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
+			callOOG(b, vmenv, addrContract)
 			for b.Loop() {
-				prepareAndCall(vmenv, addrContract, nil) //nolint:errcheck
+				callOOG(b, vmenv, addrContract)
 			}
 		})
 	}
