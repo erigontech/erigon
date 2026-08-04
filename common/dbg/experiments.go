@@ -27,7 +27,6 @@ import (
 	"runtime/pprof"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 	"unique"
 
@@ -184,17 +183,6 @@ func PruneTotalDifficulty() bool    { return pruneTotalDifficulty }
 func SetIgnoreBAL(b bool)     { IgnoreBAL = b }
 func SetUseStateCache(b bool) { UseStateCache = b }
 
-// stateCacheWired records that this process constructed a fill-enabled
-// StateCache. The aggregator's visibility-lowering entry points assert
-// against it: fill admission relies on view frontiers never decreasing,
-// which holds only while no flow both fills a cache and lowers visible file
-// ends. Deliberately sticky for the process lifetime — the hazard is about
-// mixing flows in one process, not about a particular cache's lifetime.
-var stateCacheWired atomic.Bool
-
-func WireStateCache()                   { stateCacheWired.Store(true) }
-func StateCacheWired() bool             { return stateCacheWired.Load() }
-func SetStateCacheWired(b bool)         { stateCacheWired.Store(b) }
 func SetReadAhead(b bool)               { ReadAhead = b }
 func SetExec3Workers(n int)             { Exec3Workers = n }
 func SetNoPrune(b bool)                 { noPrune = b }

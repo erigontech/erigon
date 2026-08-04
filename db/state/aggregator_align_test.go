@@ -19,8 +19,6 @@ package state
 import (
 	"testing"
 
-	"github.com/erigontech/erigon/common/dbg"
-
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/db/datadir"
@@ -162,29 +160,22 @@ func TestUnalign_RejectsStateDomain(t *testing.T) {
 	}
 }
 
-// Fill admission relies on view frontiers never decreasing, which holds only
-// while no process both fills a StateCache and lowers visible file ends —
-// Unalign must refuse to run beside a wired cache.
-func TestUnalign_PanicsWithWiredStateCache(t *testing.T) {
-	dbg.SetStateCacheWired(true)
-	t.Cleanup(func() { dbg.SetStateCacheWired(false) })
-
+// Fill admission relies on view frontiers never decreasing. Raising
+// visibility (unaligning a lagging entity) is allowed even on a forbidden
+// aggregator; the transition that lowers a cached state domain's visible end
+// (here: realigning while receipt still lags, which drops the shared ceiling)
+// must panic, whichever entry point caused it.
+func TestVisibilityLowering_ForbiddenAggregatorPanicsOnLoweringOnly(t *testing.T) {
+	t.Parallel()
 	_, agg := testDbAndAggregatorv3(t, alignStepSize)
-	require.Panics(t, func() { agg.Unalign(kv.ReceiptDomain) })
-	require.Panics(t, func() { agg.UnalignIdx(kv.LogAddrIdx) })
-}
 
-// The recheck must also cover the realign closure and the other
-// visibility-lowering entry points: a cache wired between Unalign and realign
-// still breaks frontier monotonicity.
-func TestVisibilityLowering_RechecksAtEveryEntryPoint(t *testing.T) {
-	dbg.SetStateCacheWired(false)
-	_, agg := testDbAndAggregatorv3(t, alignStepSize)
-	realign := agg.Unalign(kv.ReceiptDomain) // no cache yet: allowed
+	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	generateStandaloneIIFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	generateDomainFiles(t, "receipt", agg.Dirs(), []testFileRange{{0, 1}})
+	require.NoError(t, agg.OpenFolder())
 
-	dbg.SetStateCacheWired(true)
-	t.Cleanup(func() { dbg.SetStateCacheWired(false) })
-	require.Panics(t, func() { realign() })
-	require.Panics(t, func() { agg.EnableAllDependencies() })
-	require.Panics(t, func() { _ = agg.ReloadFiles() })
+	agg.ForbidVisibilityLowering()
+	realign := agg.Unalign(kv.ReceiptDomain) // raises the ceiling: allowed
+	require.Panics(t, func() { realign() }, "realigning a still-lagging receipt lowers the state domains' ends")
 }

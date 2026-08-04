@@ -88,8 +88,14 @@ type Aggregator struct {
 	oldestVisible *aggregatorVisible
 	// unaligned entities are left out of the shared visible-file ceiling while tooling
 	// regenerates them. Guarded by dirtyFilesLock.
-	unalignedDomain   [kv.DomainLen]bool
-	unalignedIdx      [kv.StandaloneIdxLen]bool
+	unalignedDomain [kv.DomainLen]bool
+	unalignedIdx    [kv.StandaloneIdxLen]bool
+	// visibilityLoweringForbidden: a fill-enabled StateCache is wired over
+	// this aggregator, and its fill admission relies on view frontiers never
+	// decreasing. recalcVisibleFiles refuses to lower the cached state
+	// domains' visible ends while set; Close clears it (shutdown is not a
+	// fill window).
+	visibilityLoweringForbidden atomic.Bool
 	snapshotBuildSema *semaphore.Weighted
 
 	disableHistory      bool
@@ -501,7 +507,6 @@ func (a *Aggregator) EnableAllDependencies() {
 	if a.checker == nil {
 		return
 	}
-	assertNoStateCache()
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 	a.checker.Enable()
@@ -543,21 +548,12 @@ func (a *Aggregator) UnalignIdx(name kv.InvertedIdx) (realign func()) {
 	return func() {}
 }
 
-// assertNoStateCache guards the entry points that can lower visible file
-// ends — un/re-aligning (both directions of the toggle can shrink someone's
-// ceiling), re-enabling the dependency checker, and a folder rescan — because
-// StateCache fill admission relies on view frontiers never decreasing. Only
-// flows without a fill-enabled cache (tooling) may lower visibility. Close and
-// OpenFolder are deliberately unguarded: shutdown and startup are not fill
-// windows.
-func assertNoStateCache() {
-	if dbg.StateCacheWired() {
-		panic("assert: visibility lowering with a wired StateCache breaks fill-admission monotonicity")
-	}
-}
+// ForbidVisibilityLowering marks this aggregator as backing a fill-enabled
+// StateCache: from then on recalcVisibleFiles panics instead of lowering a
+// cached state domain's visible end, whichever entry point caused it.
+func (a *Aggregator) ForbidVisibilityLowering() { a.visibilityLoweringForbidden.Store(true) }
 
 func (a *Aggregator) setUnalignedDomain(d kv.Domain, v bool) {
-	assertNoStateCache()
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 	a.unalignedDomain[d] = v
@@ -565,7 +561,6 @@ func (a *Aggregator) setUnalignedDomain(d kv.Domain, v bool) {
 }
 
 func (a *Aggregator) setUnalignedIdx(id int, v bool) {
-	assertNoStateCache()
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 	a.unalignedIdx[id] = v
@@ -672,7 +667,6 @@ func (a *Aggregator) openFolder() error {
 }
 
 func (a *Aggregator) ReloadFiles() error {
-	assertNoStateCache()
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 	a.closeDirtyFiles()
@@ -700,6 +694,7 @@ func (a *Aggregator) WaitForFiles() {
 }
 
 func (a *Aggregator) Close() {
+	a.visibilityLoweringForbidden.Store(false) // shutdown is not a fill window
 	a.WaitForFiles()
 	if !a.background.BeginClose() { // idempotent: safe to call Close multiple times
 		return
@@ -1868,6 +1863,20 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 		next.iis[id] = ii.calcVisibleFiles(toTxNum)
 	}
 	next.minimaxTxNum = next.stateMinimaxTxNum()
+
+	if a.visibilityLoweringForbidden.Load() {
+		prev := a.visible.Load()
+		for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+			if prev.d[d] == nil || next.d[d] == nil {
+				continue
+			}
+			prevEnd := visibleFiles(prev.d[d].files).EndTxNum()
+			nextEnd := visibleFiles(next.d[d].files).EndTxNum()
+			if nextEnd < prevEnd {
+				panic(fmt.Sprintf("assert: %s visible end lowered %d -> %d while a fill-enabled StateCache is wired — fill admission relies on view frontiers never decreasing", d, prevEnd, nextEnd))
+			}
+		}
+	}
 
 	old := a.visible.Load()
 	old.retired = retired

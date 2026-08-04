@@ -846,6 +846,9 @@ func execBlocksBatch(ctx context.Context, db kv.TemporalRwDB, st *stagedsync.Syn
 	doms.SetInMemHistoryReads(false)
 	doms.SetStateCache(stateCache)
 	doms.SetCodeStore(codeStore)
+	if stateCache != nil && stateCache.FillsEnabled() {
+		db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator).ForbidVisibilityLowering()
+	}
 
 	s, err := st.StageState(stages.Execution, tx, initialCycle, false)
 	if err != nil {

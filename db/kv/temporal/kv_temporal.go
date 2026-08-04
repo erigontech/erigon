@@ -282,9 +282,8 @@ type domainVisibleEnds struct {
 	// generation, end from another) can only be stale-low, which merely
 	// over-rejects fills: a view's frontier never decreases in a process that
 	// fills a cache — the DB component is frozen at tx begin, and a files
-	// reopen only extends it, an invariant the aggregator enforces by
-	// asserting its visibility-lowering entry points against the wired-cache
-	// marker.
+	// reopen only extends it, an invariant the aggregator enforces once a
+	// fill-enabled cache is wired over it (ForbidVisibilityLowering).
 	ends  [kv.DomainLen]atomic.Uint64
 	mu    sync.Mutex
 	state atomic.Uint32

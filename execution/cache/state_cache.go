@@ -78,12 +78,6 @@ func NewStateCache(accountBytes, storageBytes, codeBytes, addrBytes datasize.Byt
 	if !dbg.EnvBool("STATE_CACHE_FILLS", true) {
 		sc.disableFills = true
 		log.Info("[cache] STATE_CACHE_FILLS=false — read fills disabled, only flush applies populate the cache")
-	} else {
-		// Fill admission relies on view frontiers never decreasing; the
-		// aggregator's visibility-lowering entry points assert against this
-		// marker. Apply-only caches skip it — with no fills there is nothing
-		// for a lowered frontier to poison.
-		dbg.WireStateCache()
 	}
 	sc.caches[kv.AccountsDomain] = newDomainCacheBytes(accountBytes, avgAccountEntryBytes, mode)
 	sc.caches[kv.StorageDomain] = newDomainCacheBytes(storageBytes, avgStorageEntryBytes, mode)
@@ -192,6 +186,13 @@ func (c *StateCache) putCodeSizeByHash(codeHash []byte, size int, txNum uint64) 
 	}
 	cc.PutCodeSizeByCodeHash(codeHash, size, txNum)
 }
+
+// FillsEnabled reports whether reader fills are active (STATE_CACHE_FILLS).
+// Wire-up code uses it to decide whether the backing aggregator must forbid
+// visibility lowering: fill admission relies on view frontiers never
+// decreasing, and apply-only caches have nothing for a lowered frontier to
+// poison.
+func (c *StateCache) FillsEnabled() bool { return !c.disableFills }
 
 // getAddrCodeHash returns the Ethereum codeHash for addr without an
 // account-domain round-trip. The hash is zero when ok is false.
