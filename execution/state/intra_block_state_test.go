@@ -1170,8 +1170,8 @@ func TestResetDropsOversizedLogDataBuffers(t *testing.T) {
 	ibs.SetTxContext(2, 0)
 	require.Same(t, small, ibs.AllocLog(common.Address{0x03}, 1, 8), "normal-size entry is reused")
 	relog := ibs.AllocLog(common.Address{0x04}, 1, 8)
-	require.NotSame(t, big, relog, "oversized entry must not survive Reset")
-	require.LessOrEqual(t, cap(relog.Data), maxReusableLogDataCap)
+	require.Same(t, big, relog, "the entry itself is small enough to keep")
+	require.LessOrEqual(t, cap(relog.Data), maxReusableLogDataCap, "its oversized Data must not survive Reset")
 }
 
 // TestLogIndexIsBlockWide pins that AddLog stamps a block-wide log index:

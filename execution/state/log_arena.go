@@ -45,9 +45,13 @@ type logArena struct {
 	// What the entries retain for reuse, against the maxReusableLog budget.
 	// Overcounting is safe: it only pulls in a trim, which recounts.
 	reusableEntries, reusableBytes int
-	hasOversized                   bool // an entry outgrew maxReusableLogDataCap and reset has to drop it
+	oversized                      []logPos // entries that outgrew maxReusableLogDataCap, for reset to drop
 	indexInBlock                   uint
 }
+
+// logPos addresses one entry: its transaction, then its place in that
+// transaction. Entries never move, so a position stays valid until reset.
+type logPos struct{ ti, idx int }
 
 // alloc journals the allocation for revertLast, then reserves the next entry of
 // txIndex and returns it sized for numTopics/dataSize. The caller must write
@@ -60,12 +64,13 @@ func (a *logArena) alloc(j *journal, addr common.Address, txIndex, numTopics, da
 	if len(a.byTx) <= ti {
 		a.byTx = slices.Grow(a.byTx, ti+1-len(a.byTx))[:ti+1]
 	}
-	logIdx := len(a.byTx[ti])
-	entriesCap := cap(a.byTx[ti])
-	a.byTx[ti] = slices.Grow(a.byTx[ti], 1)[:logIdx+1]
-	a.reusableEntries += cap(a.byTx[ti]) - entriesCap
+	byTx := a.byTx
+	entries := byTx[ti]
+	logIdx, entriesCap := len(entries), cap(entries)
+	entries = slices.Grow(entries, 1)[:logIdx+1]
+	byTx[ti] = entries
+	a.reusableEntries += cap(entries) - entriesCap
 	a.markFilled(ti)
-	entries := a.byTx[ti]
 
 	lp := entries[logIdx] // a prior block's entry to reuse, or nil for a fresh slot
 	if lp == nil {
@@ -78,7 +83,7 @@ func (a *logArena) alloc(j *journal, addr common.Address, txIndex, numTopics, da
 	lp.Data = slices.Grow(lp.Data[:0], dataSize)[:dataSize]
 	a.reusableBytes += cap(lp.Data) - dataCap
 	if cap(lp.Data) > maxReusableLogDataCap {
-		a.hasOversized = true
+		a.oversized = append(a.oversized, logPos{ti, logIdx})
 	}
 	lp.Removed = false
 	lp.TxHash, lp.BlockHash = common.Hash{}, common.Hash{}
@@ -109,31 +114,28 @@ func (a *logArena) reset() {
 		return
 	}
 	all := a.byTx[:cap(a.byTx)]
-	if a.hasOversized {
-		a.dropOversized(all)
-	}
-	for i := a.filledLo; i < a.filledHi; i++ {
-		all[i] = all[i][:0]
+	a.dropOversized(all)
+	filled := all[a.filledLo:a.filledHi]
+	for i := range filled {
+		filled[i] = filled[i][:0]
 	}
 	a.filledLo, a.filledHi = 0, 0
 }
 
-// dropOversized frees the entries whose Data outgrew the per-entry cap. Only
-// alloc grows Data, so they all sit in what the transactions wrote, and it scans
-// those to cap: a reverted entry hides behind the length and is retained memory
-// all the same.
+// dropOversized frees the Data that outgrew the per-entry cap, keeping the entry
+// and its Topics for reuse. A revert can put a different entry at a recorded
+// position; freeing that one's Data instead is a lost buffer, not a leak.
 func (a *logArena) dropOversized(all []types.Logs) {
-	for i := a.filledLo; i < a.filledHi; i++ {
-		entries := all[i][:cap(all[i])]
-		for j, lp := range entries {
-			if lp == nil || cap(lp.Data) <= maxReusableLogDataCap {
-				continue
-			}
-			a.reusableBytes -= cap(lp.Data)
-			entries[j] = nil
+	for _, p := range a.oversized {
+		entries := all[p.ti]
+		lp := entries[:cap(entries)][p.idx] // a revert can hide the entry behind the length
+		if lp == nil {
+			continue
 		}
+		a.reusableBytes -= cap(lp.Data)
+		lp.Data = nil
 	}
-	a.hasOversized = false
+	a.oversized = a.oversized[:0]
 }
 
 // trim truncates every transaction and drops what does not fit the budget,
@@ -163,7 +165,7 @@ func (a *logArena) trim() {
 	}
 	a.reusableEntries, a.reusableBytes = entryCount, dataBytes
 	a.filledLo, a.filledHi = 0, 0
-	a.hasOversized = false
+	a.oversized = a.oversized[:0]
 }
 
 // revertLast drops the entry txIndex allocated last.
