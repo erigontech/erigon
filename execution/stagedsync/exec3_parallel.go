@@ -2145,7 +2145,7 @@ func (result *execResult) runPostApplyMessageOnMinIBS(
 	}
 	blockNum := task.Version().BlockNum
 	txIndex := task.Version().TxIndex
-	chainRules := txTask.Rules()
+	chainRules := txTask.EvmBlockContext.Rules(txTask.Config)
 	execResult := result.ExecutionResult
 	cbReader := state.NewVersionedStateReader(txIndex, state.ReadSet{}, vm, stateReader)
 	coinbase, err := cbReader.ReadAccountData(result.Coinbase)

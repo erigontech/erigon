@@ -450,7 +450,8 @@ func releaseResources(stateObjects map[accounts.Address]*stateObject, journal *j
 
 // AllocLog reserves the next log slot of the current tx and returns it sized for
 // numTopics/dataSize. The caller must write every topic and every data byte, then
-// call NotifyLog; whatever it leaves unwritten is the previous block's. The entry
+// call NotifyLog; whatever it leaves unwritten belongs to whichever transaction
+// held the entry before. The entry
 // is owned by the arena and reused by later blocks, so it must never be handed
 // out without copying.
 func (sdb *IntraBlockState) AllocLog(addr common.Address, numTopics, dataSize int) *types.Log {

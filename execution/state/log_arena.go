@@ -47,9 +47,10 @@ const (
 	// that makes a block of large logs cheap.
 	maxPooledLogDataCap = maxPooledLogBytes / 8
 
-	// Slots the arena keeps between resets. One array, so this is the whole of
-	// it: 4473 pointers is 35KB.
-	maxRetainedLogSlots = maxPooledLogEntries
+	// Slots the arena keeps between resets. The run is a block for a caller that
+	// resets per block, so this is bounded by the memory it costs rather than by
+	// a transaction's budget: 32KB of pointers, holding the p99 block of 1706.
+	maxRetainedLogSlots = 32 * 1024 / 8
 )
 
 // logArena owns a block's log entries and recycles them through a pool, so what
@@ -70,11 +71,10 @@ func (a *logArena) alloc(j *journal, addr common.Address, txIndex, numTopics, da
 	logIdx := len(a.entries)
 	a.entries = slices.Grow(a.entries, 1)[:logIdx+1]
 
-	lp := a.entries[logIdx]
-	if lp == nil {
-		lp = a.take()
-		a.entries[logIdx] = lp
-	}
+	// Always take: reset and revertLast empty a slot before shrinking past it, so
+	// a slot that still held an entry would be one two transactions share.
+	lp := a.take()
+	a.entries[logIdx] = lp
 	lp.Address = addr
 	lp.Topics = slices.Grow(lp.Topics[:0], numTopics)[:numTopics]
 	lp.Data = slices.Grow(lp.Data[:0], dataSize)[:dataSize]
