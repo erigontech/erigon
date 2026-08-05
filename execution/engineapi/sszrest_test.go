@@ -956,3 +956,29 @@ func TestSSZRESTRejectsOversizedStreamingBody(t *testing.T) {
 	require.Equal(t, http.StatusRequestEntityTooLarge, rec.Code)
 	require.Equal(t, problemRequestTooLarge, problemType(t, rec))
 }
+
+// A maximal valid ForkchoiceUpdate — max withdrawals with every optional
+// field set — must fit within sszMaxForkchoiceRequestBody.
+func TestSSZRESTMaximalForkchoiceUpdateFitsBodyLimit(t *testing.T) {
+	root := common.HexToHash("0x01")
+	slot := hexutil.Uint64(1)
+	targetGasLimit := hexutil.Uint64(30000000)
+	withdrawals := make([]*types.Withdrawal, sszMaxWithdrawals)
+	for i := range withdrawals {
+		withdrawals[i] = &types.Withdrawal{Index: uint64(i), Validator: uint64(i), Address: common.Address{byte(i)}, Amount: uint64(i)}
+	}
+	attrs := &engine_types.PayloadAttributes{
+		Timestamp:             500,
+		PrevRandao:            common.HexToHash("0x02"),
+		SuggestedFeeRecipient: common.HexToAddress("0x03"),
+		Withdrawals:           withdrawals,
+		ParentBeaconBlockRoot: &root,
+		SlotNumber:            &slot,
+		TargetGasLimit:        &targetGasLimit,
+	}
+	custody := bytes.Repeat([]byte{0xff}, sszCustodyBitvectorBytes)
+
+	enc, err := encodeForkchoiceUpdate(clparams.GloasVersion, &engine_types.ForkChoiceState{}, attrs, custody)
+	require.NoError(t, err)
+	require.LessOrEqual(t, len(enc), sszMaxForkchoiceRequestBody)
+}
