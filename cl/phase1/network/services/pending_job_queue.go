@@ -52,6 +52,12 @@ func newPendingJobQueue[K comparable, M any](
 	tryProcess func(ctx context.Context, key K, msg M) (afterRemove func(), remove bool),
 	onExpired func(key K),
 ) *pendingJobQueue[K, M] {
+	if tryProcess == nil {
+		panic("pending job queue requires tryProcess")
+	}
+	if onExpired == nil {
+		panic("pending job queue requires onExpired")
+	}
 	return &pendingJobQueue[K, M]{
 		capacity:   capacity,
 		expiry:     expiry,

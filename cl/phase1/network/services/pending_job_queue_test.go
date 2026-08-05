@@ -17,14 +17,50 @@
 package services
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 )
 
+func newTestPendingJobQueue() *pendingJobQueue[int, string] {
+	return newPendingJobQueue(1, time.Minute, time.Millisecond,
+		func(context.Context, int, string) (func(), bool) {
+			return nil, false
+		},
+		func(int) {},
+	)
+}
+
+func TestNewPendingJobQueueRejectsNilTryProcess(t *testing.T) {
+	require.Panics(t, func() {
+		newPendingJobQueue[int, string](
+			1,
+			time.Minute,
+			time.Millisecond,
+			nil,
+			func(int) {},
+		)
+	})
+}
+
+func TestNewPendingJobQueueRejectsNilOnExpired(t *testing.T) {
+	require.Panics(t, func() {
+		newPendingJobQueue[int, string](
+			1,
+			time.Minute,
+			time.Millisecond,
+			func(context.Context, int, string) (func(), bool) {
+				return nil, false
+			},
+			nil,
+		)
+	})
+}
+
 func TestPendingJobQueueEnqueueSkipsKeyBuildAtCapacity(t *testing.T) {
-	queue := newPendingJobQueue[int, string](1, time.Minute, time.Millisecond, nil, nil)
+	queue := newTestPendingJobQueue()
 	queue.count.Store(queue.capacity)
 
 	keyBuilt := false
@@ -39,7 +75,7 @@ func TestPendingJobQueueEnqueueSkipsKeyBuildAtCapacity(t *testing.T) {
 }
 
 func TestPendingJobQueueEnqueueReleasesReservationOnKeyBuildPanic(t *testing.T) {
-	queue := newPendingJobQueue[int, string](1, time.Minute, time.Millisecond, nil, nil)
+	queue := newTestPendingJobQueue()
 
 	require.Panics(t, func() {
 		_ = queue.enqueue("message", func() (int, error) {
