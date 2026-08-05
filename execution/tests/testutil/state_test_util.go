@@ -38,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
-	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -250,8 +249,8 @@ func (t *StateTest) checkError(subtest StateSubtest, err error) error {
 // Run executes a specific subtest and verifies the post-state and logs.
 // sd is the caller-owned SharedDomains: discard (Close without Flush) to
 // prevent per-subtest state from polluting the long-lived branch cache.
-func (t *StateTest) Run(tb testing.TB, sd *execctx.SharedDomains, tx kv.TemporalRwTx, subtest StateSubtest, vmconfig vm.Config, dirs datadir.Dirs) (*state.IntraBlockState, common.Hash, error) {
-	st, root, _, err := t.RunNoVerify(tb, sd, tx, subtest, vmconfig, dirs)
+func (t *StateTest) Run(tb testing.TB, sd *execctx.SharedDomains, tx kv.TemporalRwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, common.Hash, error) {
+	st, root, _, err := t.RunNoVerify(tb, sd, tx, subtest, vmconfig)
 
 	checkedErr := t.checkError(subtest, err)
 	if checkedErr != nil {
@@ -280,18 +279,18 @@ func (t *StateTest) Run(tb testing.TB, sd *execctx.SharedDomains, tx kv.Temporal
 // into it via MakePreStateInto so the per-subtest writes can be discarded by
 // closing sd without Flush — keeping ephemeral test state out of the long-lived
 // branch cache.
-func (t *StateTest) RunNoVerify(tb testing.TB, sd *execctx.SharedDomains, tx kv.TemporalRwTx, subtest StateSubtest, vmconfig vm.Config, dirs datadir.Dirs) (statedb *state.IntraBlockState, root common.Hash, gasUsed uint64, err error) {
+func (t *StateTest) RunNoVerify(tb testing.TB, sd *execctx.SharedDomains, tx kv.TemporalRwTx, subtest StateSubtest, vmconfig vm.Config) (statedb *state.IntraBlockState, root common.Hash, gasUsed uint64, err error) {
 	config, eips, err := GetChainConfig(subtest.Fork)
 	if err != nil {
 		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
 	}
 	vmconfig.ExtraEips = eips
-	block, _, err := genesiswrite.GenesisToBlock(nil, t.genesis(config), dirs, log.Root())
-	if err != nil {
-		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
-	}
+	// Only header fields feed the block context, and the genesis state root is not
+	// one of them: computing it would mean a throwaway DB plus a commitment over
+	// Pre, which MakePreStateInto redoes below anyway.
+	header, _ := genesiswrite.GenesisWithoutStateToBlock(t.genesis(config))
 
-	readBlockNr := block.NumberU64()
+	readBlockNr := header.Number.Uint64()
 	writeBlockNr := readBlockNr + 1
 
 	_, err = MakePreStateInto(&chain.Rules{}, sd, tx, t.Json.Pre, readBlockNr)
@@ -329,7 +328,6 @@ func (t *StateTest) RunNoVerify(tb testing.TB, sd *execctx.SharedDomains, tx kv.
 		}
 	}
 	post := t.Json.Post[subtest.Fork][subtest.Index]
-	header := block.HeaderNoCopy()
 
 	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), nil, accounts.InternAddress(t.Json.Env.Coinbase), config)
 	blockContext.GetHash = vmTestBlockHash
@@ -344,7 +342,7 @@ func (t *StateTest) RunNoVerify(tb testing.TB, sd *execctx.SharedDomains, tx kv.
 		blockContext.PrevRanDao = &rnd
 		blockContext.Difficulty.Clear()
 	}
-	if config.IsCancun(block.Time()) && t.Json.Env.ExcessBlobGas != nil {
+	if config.IsCancun(header.Time) && t.Json.Env.ExcessBlobGas != nil {
 		blockContext.BlobBaseFee, err = misc.GetBlobGasPrice(config, *t.Json.Env.ExcessBlobGas, header.Time)
 		if err != nil {
 			return nil, common.Hash{}, 0, err
@@ -390,7 +388,7 @@ func (t *StateTest) RunNoVerify(tb testing.TB, sd *execctx.SharedDomains, tx kv.
 	// Execute the message.
 	snapshot := statedb.PushSnapshot()
 	gaspool := new(protocol.GasPool)
-	gaspool.AddGas(block.GasLimit()).AddBlobGas(config.GetMaxBlobGasPerBlock(header.Time))
+	gaspool.AddGas(header.GasLimit).AddBlobGas(config.GetMaxBlobGasPerBlock(header.Time))
 	res, err := protocol.ApplyMessage(evm, msg, gaspool, true /* refunds */, false /* gasBailout */, nil /* engine */)
 	if res != nil {
 		gasUsed = res.ReceiptGasUsed
