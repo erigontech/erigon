@@ -181,6 +181,35 @@ func TestPayloadAttributesDecodeSSZStrictRoundTrip(t *testing.T) {
 	}
 }
 
+func TestPayloadAttributesSSZForkEncodingSizes(t *testing.T) {
+	tests := []struct {
+		version clparams.StateVersion
+		size    int
+	}{
+		{version: clparams.BellatrixVersion, size: 60},
+		{version: clparams.CapellaVersion, size: 64},
+		{version: clparams.DenebVersion, size: 96},
+		{version: clparams.ElectraVersion, size: 96},
+		{version: clparams.FuluVersion, size: 96},
+		{version: clparams.GloasVersion, size: 112},
+	}
+	for _, test := range tests {
+		t.Run(test.version.String(), func(t *testing.T) {
+			attributes := NewPayloadAttributesSSZ(test.version)
+			encoded, err := attributes.EncodeSSZ(nil)
+			require.NoError(t, err)
+			require.Len(t, encoded, test.size)
+
+			decoded := NewPayloadAttributesSSZ(test.version)
+			require.NoError(t, decoded.DecodeSSZStrict(encoded, int(test.version)))
+			if test.version < clparams.GloasVersion {
+				require.Nil(t, decoded.SlotNumber)
+				require.Nil(t, decoded.TargetGasLimit)
+			}
+		})
+	}
+}
+
 func TestExecutionPayloadDecodeSSZStrictRejectsNonCanonicalOffset(t *testing.T) {
 	payload := NewExecutionPayloadSSZ(clparams.BellatrixVersion)
 	encoded, err := payload.EncodeSSZ(nil)

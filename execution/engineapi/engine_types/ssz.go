@@ -323,7 +323,7 @@ func (a *PayloadAttributes) EncodeSSZ(dst []byte) ([]byte, error) {
 		return ssz2.MarshalSSZ(dst, uint64(a.Timestamp), a.PrevRandao[:], a.SuggestedFeeRecipient[:])
 	case clparams.CapellaVersion:
 		return ssz2.MarshalSSZ(dst, uint64(a.Timestamp), a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals)
-	case clparams.DenebVersion:
+	case clparams.DenebVersion, clparams.ElectraVersion, clparams.FuluVersion:
 		return ssz2.MarshalSSZ(dst, uint64(a.Timestamp), a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals, root[:])
 	default: // GloasVersion+
 		return ssz2.MarshalSSZ(dst, uint64(a.Timestamp), a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals, root[:], slot, targetGasLimit)
@@ -352,7 +352,7 @@ func (a *PayloadAttributes) decodeSSZSchema(fields *payloadAttributesDecodeField
 	case clparams.BellatrixVersion:
 	case clparams.CapellaVersion:
 		schema = append(schema, fields.withdrawals)
-	case clparams.DenebVersion:
+	case clparams.DenebVersion, clparams.ElectraVersion, clparams.FuluVersion:
 		schema = append(schema, fields.withdrawals, fields.parentBeaconBlockRoot[:])
 	default: // GloasVersion+
 		schema = append(schema, fields.withdrawals, fields.parentBeaconBlockRoot[:], &fields.slotNumber, &fields.targetGasLimit)
@@ -374,7 +374,7 @@ func (a *PayloadAttributes) decodeSSZ(buf []byte, version int, strict bool) erro
 	case clparams.BellatrixVersion:
 	case clparams.CapellaVersion:
 		a.Withdrawals = withdrawalsFromList(fields.withdrawals)
-	case clparams.DenebVersion:
+	case clparams.DenebVersion, clparams.ElectraVersion, clparams.FuluVersion:
 		a.Withdrawals = withdrawalsFromList(fields.withdrawals)
 		a.ParentBeaconBlockRoot = &fields.parentBeaconBlockRoot
 	default: // GloasVersion+
