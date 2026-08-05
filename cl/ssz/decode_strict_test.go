@@ -35,6 +35,16 @@ func TestUnmarshalSSZStrictRejectsNonCanonicalOffset(t *testing.T) {
 	require.ErrorIs(t, ssz2.UnmarshalSSZStrict(malformed, 0, solid.NewByteListSSZ(2)), commonssz.ErrBadOffset)
 }
 
+func TestUnmarshalSSZStrictRejectsDescendingOffsets(t *testing.T) {
+	malformed := []byte{8, 0, 0, 0, 7, 0, 0, 0}
+
+	require.ErrorIs(
+		t,
+		ssz2.UnmarshalSSZStrict(malformed, 0, solid.NewByteListSSZ(1), solid.NewByteListSSZ(1)),
+		commonssz.ErrBadOffset,
+	)
+}
+
 func TestUnmarshalSSZStrictRejectsTrailingBytes(t *testing.T) {
 	var x uint64
 	buf := make([]byte, 9)

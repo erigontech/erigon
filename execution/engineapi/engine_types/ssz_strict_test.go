@@ -23,6 +23,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	commonssz "github.com/erigontech/erigon/common/ssz"
 	"github.com/erigontech/erigon/execution/types"
@@ -74,21 +75,110 @@ func TestPayloadAttributesStrictSchemaCoverage(t *testing.T) {
 }
 
 func TestExecutionPayloadDecodeSSZStrictRoundTrip(t *testing.T) {
-	const version = clparams.CapellaVersion
-	payload := NewExecutionPayloadSSZ(version)
-	payload.ExtraData = hexutil.Bytes{0x01, 0x02}
-	payload.Transactions = []hexutil.Bytes{{0x03}, {0x04, 0x05}}
-	payload.Withdrawals = []*types.Withdrawal{{Index: 1, Validator: 2, Amount: 3}}
+	tests := []struct {
+		name         string
+		transactions []hexutil.Bytes
+		withdrawals  []*types.Withdrawal
+	}{
+		{
+			name:         "empty lists",
+			transactions: []hexutil.Bytes{},
+			withdrawals:  []*types.Withdrawal{},
+		},
+		{
+			name:         "single empty transaction",
+			transactions: []hexutil.Bytes{{}},
+			withdrawals:  []*types.Withdrawal{},
+		},
+		{
+			name:         "populated lists",
+			transactions: []hexutil.Bytes{{0x03}, {0x04, 0x05}},
+			withdrawals:  []*types.Withdrawal{{Index: 1, Validator: 2, Amount: 3}},
+		},
+	}
+	for version := clparams.BellatrixVersion; version <= clparams.GloasVersion; version++ {
+		for _, test := range tests {
+			t.Run(version.String()+"/"+test.name, func(t *testing.T) {
+				payload := NewExecutionPayloadSSZ(version)
+				payload.ExtraData = hexutil.Bytes{0x01, 0x02}
+				payload.Transactions = test.transactions
+				if version >= clparams.CapellaVersion {
+					payload.Withdrawals = test.withdrawals
+				}
+				if version >= clparams.DenebVersion {
+					blobGasUsed := hexutil.Uint64(6)
+					excessBlobGas := hexutil.Uint64(7)
+					payload.BlobGasUsed = &blobGasUsed
+					payload.ExcessBlobGas = &excessBlobGas
+				}
+				if version >= clparams.GloasVersion {
+					slotNumber := hexutil.Uint64(8)
+					blockAccessList := hexutil.Bytes{0x09}
+					payload.SlotNumber = &slotNumber
+					payload.BlockAccessList = &blockAccessList
+				}
 
-	encoded, err := payload.EncodeSSZ(nil)
-	require.NoError(t, err)
+				encoded, err := payload.EncodeSSZ(nil)
+				require.NoError(t, err)
 
-	decoded := NewExecutionPayloadSSZ(version)
-	require.NoError(t, decoded.DecodeSSZStrict(encoded, int(version)))
+				decoded := NewExecutionPayloadSSZ(version)
+				require.NoError(t, decoded.DecodeSSZStrict(encoded, int(version)))
 
-	reencoded, err := decoded.EncodeSSZ(nil)
-	require.NoError(t, err)
-	require.Equal(t, encoded, reencoded)
+				reencoded, err := decoded.EncodeSSZ(nil)
+				require.NoError(t, err)
+				require.Equal(t, encoded, reencoded)
+			})
+		}
+	}
+}
+
+func TestPayloadAttributesDecodeSSZStrictRoundTrip(t *testing.T) {
+	tests := []struct {
+		name        string
+		withdrawals []*types.Withdrawal
+	}{
+		{
+			name:        "empty withdrawals",
+			withdrawals: []*types.Withdrawal{},
+		},
+		{
+			name:        "populated withdrawals",
+			withdrawals: []*types.Withdrawal{{Index: 1, Validator: 2, Amount: 3}},
+		},
+	}
+	for version := clparams.BellatrixVersion; version <= clparams.GloasVersion; version++ {
+		for _, test := range tests {
+			t.Run(version.String()+"/"+test.name, func(t *testing.T) {
+				attributes := NewPayloadAttributesSSZ(version)
+				attributes.Timestamp = 1
+				attributes.PrevRandao[0] = 2
+				attributes.SuggestedFeeRecipient[0] = 3
+				if version >= clparams.CapellaVersion {
+					attributes.Withdrawals = test.withdrawals
+				}
+				if version >= clparams.DenebVersion {
+					root := common.Hash{4}
+					attributes.ParentBeaconBlockRoot = &root
+				}
+				if version >= clparams.GloasVersion {
+					slotNumber := hexutil.Uint64(5)
+					targetGasLimit := hexutil.Uint64(6)
+					attributes.SlotNumber = &slotNumber
+					attributes.TargetGasLimit = &targetGasLimit
+				}
+
+				encoded, err := attributes.EncodeSSZ(nil)
+				require.NoError(t, err)
+
+				decoded := NewPayloadAttributesSSZ(version)
+				require.NoError(t, decoded.DecodeSSZStrict(encoded, int(version)))
+
+				reencoded, err := decoded.EncodeSSZ(nil)
+				require.NoError(t, err)
+				require.Equal(t, encoded, reencoded)
+			})
+		}
+	}
 }
 
 func TestExecutionPayloadDecodeSSZStrictRejectsNonCanonicalOffset(t *testing.T) {
