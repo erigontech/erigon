@@ -18,7 +18,6 @@ package executiontests
 
 import (
 	"bytes"
-	"crypto/ecdsa"
 	"math/big"
 	"testing"
 
@@ -29,38 +28,13 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
-	"github.com/erigontech/erigon/execution/protocol/params"
-	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
-
-func signAuthorization(t *testing.T, key *ecdsa.PrivateKey, chainID uint256.Int, delegate common.Address, nonce uint64) types.Authorization {
-	t.Helper()
-	auth := types.Authorization{ChainID: chainID, Address: delegate, Nonce: nonce}
-	payloadLen := rlp.Uint256Len(auth.ChainID) + 1 + length.Addr + rlp.U64Len(auth.Nonce)
-	var buf [32]byte
-	data := bytes.NewBuffer(nil)
-	require.NoError(t, rlp.EncodeListPrefix(payloadLen, data, buf[:]))
-	require.NoError(t, rlp.EncodeUint256(auth.ChainID, data, buf[:]))
-	require.NoError(t, types.EncodeOptionalAddress(&auth.Address, data, buf[:]))
-	require.NoError(t, rlp.EncodeU64(auth.Nonce, data, buf[:]))
-	sighash := crypto.Keccak256Hash(append([]byte{params.SetCodeMagicPrefix}, data.Bytes()...))
-	sig, err := crypto.Sign(sighash[:], key)
-	require.NoError(t, err)
-	auth.R.SetBytes(sig[:32])
-	auth.S.SetBytes(sig[32:64])
-	auth.YParity = sig[64]
-	recovered, err := auth.RecoverSigner(bytes.NewBuffer(nil), buf[:])
-	require.NoError(t, err)
-	require.Equal(t, crypto.PubkeyToAddress(key.PublicKey), *recovered)
-	return auth
-}
 
 // TestSetCodeClearDelegationPurgesCodeDomain verifies the account/code invariant
 // across the EIP-7702 delegation lifecycle: setting a delegation stores its
@@ -91,6 +65,10 @@ func TestSetCodeClearDelegationPurgesCodeDomain(t *testing.T) {
 			pragueConfig := new(chain.Config)
 			require.NoError(t, copier.CopyWithOption(pragueConfig, chain.TestChainOsakaConfig, copier.Option{DeepCopy: true}))
 			pragueConfig.OsakaTime = nil
+			setAuth, err := types.SignAuthorization(authorityKey, *pragueConfig.ChainID, delegate, 0)
+			require.NoError(t, err)
+			clearAuth, err := types.SignAuthorization(authorityKey, *pragueConfig.ChainID, common.Address{}, 1)
+			require.NoError(t, err)
 			gspec := &types.Genesis{
 				Config: pragueConfig,
 				Alloc: types.GenesisAlloc{
@@ -120,9 +98,9 @@ func TestSetCodeClearDelegationPurgesCodeDomain(t *testing.T) {
 				b.SetCoinbase(common.Address{1})
 				switch i {
 				case 0:
-					b.AddTx(mkSetCodeTx(b.TxNonce(sender), signAuthorization(t, authorityKey, *pragueConfig.ChainID, delegate, 0)))
+					b.AddTx(mkSetCodeTx(b.TxNonce(sender), setAuth))
 				case 1:
-					b.AddTx(mkSetCodeTx(b.TxNonce(sender), signAuthorization(t, authorityKey, *pragueConfig.ChainID, common.Address{}, 1)))
+					b.AddTx(mkSetCodeTx(b.TxNonce(sender), clearAuth))
 				}
 			})
 			require.NoError(t, err)

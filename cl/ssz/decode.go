@@ -79,19 +79,19 @@ func unmarshalSSZ(buf []byte, version int, strict bool, schema ...any) (err erro
 			position += 1
 		case SizedObjectSSZ:
 			if obj.Static() {
-				if len(buf) < position+obj.EncodingSizeSSZ() {
+				size := obj.EncodingSizeSSZ()
+				if len(buf) < position+size {
 					return ssz.ErrLowBufferSize
 				}
 				if strict {
-					// The exact range lets nested strict decoders reject trailing bytes.
-					err = decodeObjectSSZStrict(obj, buf[position:position+obj.EncodingSizeSSZ()], version)
+					err = decodeObjectSSZStrict(obj, buf[position:position+size], version)
 				} else {
-					err = obj.DecodeSSZ(buf[position:], version)
+					err = obj.DecodeSSZ(buf[position:position+size], version)
 				}
 				if err != nil {
 					return fmt.Errorf("static element %d: %w", i, err)
 				}
-				position += obj.EncodingSizeSSZ()
+				position += size
 			} else {
 				if len(buf) < position+4 {
 					return ssz.ErrLowBufferSize

@@ -309,17 +309,17 @@ func (btw *BtIndexWriter) Build() error {
 	btw.logger.Log(btw.args.Lvl, "[index] write", "file", btw.indexFileName)
 	btw.built = true
 
-	if err = btw.writer.Flush(); err != nil {
+	if err := btw.writer.Flush(); err != nil {
 		return err
 	}
-	if err = btw.fsync(); err != nil {
+	if err := btw.fsync(); err != nil {
 		return err
 	}
 	tmpName := btw.indexF.Name()
-	if err = btw.indexF.Close(); err != nil {
+	if err := btw.indexF.Close(); err != nil {
 		return err
 	}
-	if err = os.Rename(tmpName, btw.args.IndexFile); err != nil {
+	if err := os.Rename(tmpName, btw.args.IndexFile); err != nil {
 		return err
 	}
 	btw.indexF = nil
@@ -446,7 +446,7 @@ func BuildBtreeIndexWithDecompressor(indexPath string, existenceFilterPath strin
 
 	for kv.HasNext() {
 		key, _ = kv.Next(key[:0])
-		if err = iw.AddKey(key, pos); err != nil {
+		if err := iw.AddKey(key, pos); err != nil {
 			return err
 		}
 		hi, _ := murmur3.Sum128WithSeed(key, salt)

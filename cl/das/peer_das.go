@@ -1135,12 +1135,13 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 					return true
 				}
 				available, err := d.IsDataAvailable(block.GetSlot(), root)
-				if err != nil {
+				switch {
+				case err != nil:
 					log.Warn("failed to check if data is available", "err", err)
-				} else if available {
+				case available:
 					log.Trace("[syncColumnDataWorker] column data is already available, removing from sync queue", "slot", block.GetSlot(), "blockRoot", root)
 					d.blocksToCheckSync.Delete(root)
-				} else {
+				default:
 					blocks = append(blocks, block)
 					roots = append(roots, root)
 				}
