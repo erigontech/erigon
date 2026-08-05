@@ -24,18 +24,9 @@ import (
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
-// A typed-tx envelope truncated to just its ChainID field must be rejected by
-// the block body decoder, not silently dropped. Before the fix, the typed-tx
-// DecodeRLP methods returned scalar field-read failures bare (`return err`), so
-// a truncated tx yielded a bare rlp.EOL. decodeTxns/checkErrListEnd mistook it
-// for a clean end of the transactions list, silently dropping the
-// malformed transaction instead of rejecting the block (erigon would then
-// accept a block other clients reject).
-//
-// The header built below declares the canonical EMPTY transactionsRoot,
-// modeling the exact attacker scenario this bug enabled: a block that
-// *looks* self-consistent (root matches "zero decoded txs") if and only if
-// the malformed extra tx is swallowed rather than rejected.
+// The outer transaction list and each typed transaction payload have distinct
+// RLP boundaries. Reaching the end of a payload while required fields are
+// missing is an error, not the end of the outer list.
 func TestDecodeEOLRegressionTruncatedTypedTx(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -61,14 +52,10 @@ func TestDecodeEOLRegressionTruncatedTypedTx(t *testing.T) {
 	}
 }
 
-// buildBlockWithTruncatedTypedTx returns the raw RLP bytes of a block whose
-// header declares the empty transactionsRoot but whose body's transactions
-// list contains exactly one truncated typed-tx element: an envelope
-// containing only [chainID] and nothing else. E.g. for DynamicFeeTx
-// (type 0x02) the tx-list element is 0x83 0x02 0xc1 0x01 -- a 3-byte RLP
-// string "02 c1 01" (type byte 0x02 followed by the payload list 0xc1 0x01
-// = [chainID=1]), itself wrapped in a 0xc4-prefixed one-element
-// transactions list.
+// buildBlockWithTruncatedTypedTx builds a pre-Shanghai block whose only invalid
+// component is a typed transaction payload ending after its chain ID. Canonical
+// empty transaction and receipt roots ensure unrelated body checks do not mask
+// the decoder behavior.
 func buildBlockWithTruncatedTypedTx(t *testing.T, txType byte) []byte {
 	t.Helper()
 	header := &Header{
