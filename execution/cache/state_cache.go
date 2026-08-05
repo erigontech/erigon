@@ -67,11 +67,6 @@ type StateCache struct {
 	// on its own writes, so a single global applied end would reject every
 	// quiet domain's fills.
 	appliedEnd [kv.DomainLen]uint64
-	// fillsAdmitted/fillsRejected count admission-gate outcomes, reported by
-	// PrintStatsAndReset — the lens on how much reader warming survives at a
-	// given commit cadence.
-	fillsAdmitted atomic.Uint64
-	fillsRejected atomic.Uint64
 	// aggBound records that BindAggregator ran; SetStateCache asserts it
 	// before wiring a fill-enabled cache.
 	aggBound atomic.Bool
@@ -79,6 +74,14 @@ type StateCache struct {
 	// (including the content-addressed ones), leaving applies as the only
 	// writer ("apply-only" mode) — an A/B lever and an operational kill switch.
 	disableFills bool
+	// The pad keeps the counters — RMWed by every fill — off the cache line
+	// of the read-mostly fields above, which every fill reads.
+	_ [64]byte
+	// fillsAdmitted/fillsRejected count admission-gate outcomes, reported by
+	// PrintStatsAndReset — the lens on how much reader warming survives at a
+	// given commit cadence.
+	fillsAdmitted atomic.Uint64
+	fillsRejected atomic.Uint64
 }
 
 // NewStateCache creates a new StateCache with the specified byte capacities.

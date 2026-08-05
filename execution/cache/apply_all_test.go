@@ -20,6 +20,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"testing"
+	"unsafe"
 
 	"github.com/stretchr/testify/require"
 
@@ -212,4 +213,22 @@ func BenchmarkApplierApply(b *testing.B) {
 			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N)/n, "ns/update")
 		})
 	}
+}
+
+// Every fill RMWs the admission counters; every fill also reads appliedEnd
+// and disableFills. If they share a cache line, the counters invalidate it
+// for every concurrent fill — handing back the contention the batched apply
+// work bought.
+func TestFillCountersLiveOnTheirOwnCacheLine(t *testing.T) {
+	var c StateCache
+	const line = 64
+	countersFirst := unsafe.Offsetof(c.fillsAdmitted) / line
+	countersLast := (unsafe.Offsetof(c.fillsRejected) + 7) / line
+	appliedEndFirst := unsafe.Offsetof(c.appliedEnd) / line
+	appliedEndLast := (unsafe.Offsetof(c.appliedEnd) + uintptr(len(c.appliedEnd))*8 - 1) / line
+	require.True(t, countersFirst > appliedEndLast || countersLast < appliedEndFirst,
+		"fill counters must not share a cache line with appliedEnd")
+	disableFillsLine := unsafe.Offsetof(c.disableFills) / line
+	require.True(t, disableFillsLine < countersFirst || disableFillsLine > countersLast,
+		"fill counters must not share a cache line with disableFills")
 }
