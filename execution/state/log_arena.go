@@ -35,7 +35,7 @@ import (
 // gasLimit/375 entries (LogGas) — 5.6MB and 120k at a 45M limit. Both budgets
 // sit below that, so an outlier block is trimmed rather than held.
 const (
-	maxReusableLogEntries = 4096
+	maxReusableLogEntries = 16384
 	maxReusableLogBytes   = 4 * 1024 * 1024
 	maxReusableLogDataCap = 64 * 1024
 )
