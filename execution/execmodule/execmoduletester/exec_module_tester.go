@@ -19,6 +19,7 @@ package execmoduletester
 import (
 	"context"
 	"crypto/ecdsa"
+	"errors"
 	"fmt"
 	"math/big"
 	"os"
@@ -27,6 +28,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/cenkalti/backoff/v4"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -37,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/generics"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbservices"
@@ -55,7 +58,6 @@ import (
 	"github.com/erigontech/erigon/db/snaptype"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/builder"
-	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
@@ -126,7 +128,6 @@ type ExecModuleTester struct {
 	ForkValidator   *execmodule.ForkValidator
 	ExecModule      *execmodule.ExecModule
 	StateCache      *execmodule.Cache
-	domainCache     *cache.StateCache
 	retirementStart chan bool
 	retirementDone  chan struct{}
 	retirementWg    sync.WaitGroup
@@ -169,8 +170,8 @@ func (emt *ExecModuleTester) Close() {
 	if emt.DB != nil {
 		emt.DB.Close()
 	}
-	if emt.domainCache != nil {
-		emt.domainCache.Close()
+	if emt.ExecModule != nil {
+		emt.ExecModule.Close()
 	}
 	if emt.tb == nil && emt.Dirs.DataDir != "" {
 		dir.RemoveAll(emt.Dirs.DataDir)
@@ -776,10 +777,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		Accumulator:    mock.Notifications.Accumulator,
 		RecentReceipts: mock.Notifications.RecentReceipts,
 	}
-	// Per-instance domain cache, held on the tester so Close releases its
-	// envelope reservation. Uses the production default — the caches jump-grow on
-	// demand, so a small-working-set fixture stays small.
-	mock.domainCache = cache.NewDefaultStateCache()
 	mock.ExecModule = execmodule.NewExecModule(
 		ctx,
 		mock.BlockReader,
@@ -791,7 +788,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		hook,
 		accum,
 		mock.StateCache,
-		mock.domainCache,
+		0, // stateCacheBudget: production default; the caches jump-grow on demand
 		logger,
 		engine,
 		cfg.Sync,
@@ -852,6 +849,139 @@ func (emt *ExecModuleTester) EnableLogs() {
 
 func (emt *ExecModuleTester) Cfg() ethconfig.Config { return emt.cfg }
 
+func (emt *ExecModuleTester) GenerateChain(n int, gen func(int, *blockgen.BlockGen)) (*blockgen.ChainPack, error) {
+	return emt.GenerateChainFrom(emt.Genesis, n, gen)
+}
+
+func (emt *ExecModuleTester) GenerateChainFrom(parent *types.Block, n int, gen func(int, *blockgen.BlockGen)) (*blockgen.ChainPack, error) {
+	return emt.GenerateChainWithConfig(emt.ChainConfig, parent, n, gen)
+}
+
+func (emt *ExecModuleTester) GenerateChainWithConfig(config *chain.Config, parent *types.Block, n int, gen func(int, *blockgen.BlockGen)) (*blockgen.ChainPack, error) {
+	return blockgen.GenerateChain(config, parent, emt.Engine, emt.DB, n, gen)
+}
+
+func (emt *ExecModuleTester) InsertBlocks(ctx context.Context, blocks []*types.Block) (execmodule.ExecutionStatus, error) {
+	rawBlocks := make([]*types.RawBlock, len(blocks))
+	for i, block := range blocks {
+		rawBlocks[i] = &types.RawBlock{
+			Header:          block.HeaderNoCopy(),
+			Body:            block.RawBody(),
+			BlockAccessList: block.BlockAccessList(),
+		}
+	}
+	return retryBusy(ctx, func() (execmodule.ExecutionStatus, bool, error) {
+		status, err := emt.ExecModule.InsertBlocks(ctx, rawBlocks)
+		if err != nil {
+			return execmodule.ExecutionStatusBusy, false, err
+		}
+		return status, status == execmodule.ExecutionStatusBusy, nil
+	})
+}
+
+func (emt *ExecModuleTester) ValidateChain(ctx context.Context, header *types.Header) (execmodule.ValidationResult, error) {
+	return retryBusy(ctx, func() (execmodule.ValidationResult, bool, error) {
+		result, err := emt.ExecModule.ValidateChain(ctx, header.Hash(), header.Number.Uint64())
+		if err != nil {
+			return execmodule.ValidationResult{}, false, err
+		}
+		return result, result.ValidationStatus == execmodule.ExecutionStatusBusy, nil
+	})
+}
+
+func (emt *ExecModuleTester) UpdateForkChoice(ctx context.Context, header *types.Header) (execmodule.ForkChoiceResult, error) {
+	return retryBusy(ctx, func() (execmodule.ForkChoiceResult, bool, error) {
+		result, err := emt.ExecModule.UpdateForkChoice(ctx, header.Hash(), common.Hash{}, common.Hash{})
+		if err != nil {
+			return execmodule.ForkChoiceResult{}, false, err
+		}
+		return result, result.Status == execmodule.ExecutionStatusBusy, nil
+	})
+}
+
+func (emt *ExecModuleTester) InsertValidateAndUfc1By1(ctx context.Context, blocks []*types.Block) error {
+	insertStatus, err := emt.InsertBlocks(ctx, blocks)
+	if err != nil {
+		return err
+	}
+	if insertStatus != execmodule.ExecutionStatusSuccess {
+		return fmt.Errorf("unexpected insertBlocks status: %s", insertStatus)
+	}
+	for _, block := range blocks {
+		header := block.Header()
+		validationResult, err := emt.ValidateChain(ctx, header)
+		if err != nil {
+			return err
+		}
+		if validationResult.ValidationStatus != execmodule.ExecutionStatusSuccess {
+			return fmt.Errorf("unexpected validateChain status: %s", validationResult.ValidationStatus)
+		}
+		forkChoiceResult, err := emt.UpdateForkChoice(ctx, header)
+		if err != nil {
+			return err
+		}
+		if forkChoiceResult.Status != execmodule.ExecutionStatusSuccess {
+			return fmt.Errorf("unexpected updateForkChoice status: %s", forkChoiceResult.Status)
+		}
+	}
+	if len(blocks) > 0 {
+		_, err = emt.UpdateForkChoice(ctx, blocks[len(blocks)-1].Header())
+	}
+	return err
+}
+
+func (emt *ExecModuleTester) AssembleBlock(ctx context.Context, params *builder.Parameters) (uint64, error) {
+	return retryBusy(ctx, func() (uint64, bool, error) {
+		result, err := emt.ExecModule.AssembleBlock(ctx, params)
+		if err != nil {
+			return 0, false, err
+		}
+		return result.PayloadID, result.Busy, nil
+	})
+}
+
+func (emt *ExecModuleTester) GetAssembledBlock(ctx context.Context, payloadID uint64) (*types.Block, error) {
+	return retryBusy(ctx, func() (*types.Block, bool, error) {
+		result, err := emt.ExecModule.GetAssembledBlock(ctx, payloadID)
+		if err != nil {
+			return nil, false, err
+		}
+		if result.Block == nil {
+			return nil, result.Busy, nil
+		}
+		return result.Block.Block, result.Busy, nil
+	})
+}
+
+func retryBusy[T any](ctx context.Context, f func() (T, bool, error)) (T, error) {
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	var retryBackoff backoff.BackOff
+	retryBackoff = backoff.NewConstantBackOff(time.Millisecond)
+	retryBackoff = backoff.WithContext(retryBackoff, ctx)
+	return backoff.RetryWithData(
+		func() (T, error) {
+			result, busy, err := f()
+			if err != nil {
+				return generics.Zero[T](), backoff.Permanent(err)
+			}
+			if busy {
+				return generics.Zero[T](), errors.New("retrying busy")
+			}
+			return result, nil
+		},
+		retryBackoff,
+	)
+}
+
+func blockAccessLists(blocks []*types.Block) [][]byte {
+	bals := make([][]byte, len(blocks))
+	for i, block := range blocks {
+		bals[i] = block.BlockAccessList()
+	}
+	return bals
+}
+
 func (emt *ExecModuleTester) insertChain(chain *blockgen.ChainPack) error {
 	wr := chainreader.NewChainReaderEth1(emt.ChainConfig, emt.ExecModule, time.Hour)
 
@@ -871,7 +1001,7 @@ func (emt *ExecModuleTester) insertChain(chain *blockgen.ChainPack) error {
 		insertedBlocks[chain.Blocks[i].NumberU64()] = struct{}{}
 	}
 
-	if err := wr.InsertBlocks(emt.Ctx, chain.Blocks, chain.BlockAccessLists); err != nil {
+	if err := wr.InsertBlocks(emt.Ctx, chain.Blocks, blockAccessLists(chain.Blocks)); err != nil {
 		return err
 	}
 
@@ -982,7 +1112,7 @@ func (emt *ExecModuleTester) insertChainPoW(chain *blockgen.ChainPack) error {
 				return err
 			}
 		}
-		return wr.InsertBlocks(emt.Ctx, chain.Blocks, chain.BlockAccessLists)
+		return wr.InsertBlocks(emt.Ctx, chain.Blocks, blockAccessLists(chain.Blocks))
 	}
 	return emt.insertChain(chain)
 }
