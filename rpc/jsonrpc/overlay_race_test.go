@@ -58,11 +58,16 @@ type overlayAheadHarness struct {
 	base          *BaseAPI
 	m             *execmoduletester.ExecModuleTester
 	overlayHeader *types.Header
-	overlayTxs    types.Transactions
 	events        *shards.Events
 }
 
-// newOverlayAheadTestAPI builds overlayRaceChainSize committed MDBX blocks,
+func newOverlayAheadTestAPI(t *testing.T) (base *BaseAPI, m *execmoduletester.ExecModuleTester, overlayHeader *types.Header) {
+	t.Helper()
+	h := newOverlayAheadHarness(t, false)
+	return h.base, h.m, h.overlayHeader
+}
+
+// newOverlayAheadHarness builds overlayRaceChainSize committed MDBX blocks,
 // then publishes a fabricated block one past them (overlayRaceChainSize+1)
 // into the block overlay only, never committed to MDBX. This reproduces the
 // window where forkchoice publishes the overlay before the MDBX commit
@@ -71,16 +76,9 @@ type overlayAheadHarness struct {
 // The overlay block's GasUsed is set to exactly its EIP-1559 target so
 // misc.CalcBaseFee leaves BaseFee unchanged, making overlayRaceBaseFee a
 // reliable, deterministic fingerprint for "the code read the overlay head".
-func newOverlayAheadTestAPI(t *testing.T) (base *BaseAPI, m *execmoduletester.ExecModuleTester, overlayHeader *types.Header) {
-	t.Helper()
-	h := newOverlayAheadHarness(t, false)
-	return h.base, h.m, h.overlayHeader
-}
-
-// With withOverlayTxs the overlay block carries two transactions with distinct
+// With withOverlayTxs the block instead carries two transactions with distinct
 // tips plus their receipt-domain entries, and GasUsed equals the transactions'
-// real total (not the EIP-1559 target) so reward percentile thresholds relate
-// to the receipts' gas.
+// real total so reward percentile thresholds relate to the receipts' gas.
 func newOverlayAheadHarness(t *testing.T, withOverlayTxs bool) *overlayAheadHarness {
 	t.Helper()
 
@@ -163,7 +161,7 @@ func newOverlayAheadHarness(t *testing.T, withOverlayTxs bool) *overlayAheadHarn
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	base := newBaseApiWithFiltersForTest(filters, stateCache, m)
 
-	return &overlayAheadHarness{base: base, m: m, overlayHeader: overlayHeader, overlayTxs: overlayTxs, events: events}
+	return &overlayAheadHarness{base: base, m: m, overlayHeader: overlayHeader, events: events}
 }
 
 // overlayRaceTxPoolClient extends stubTxPoolClient with canned replies for
@@ -183,6 +181,7 @@ func (c *overlayRaceTxPoolClient) All(context.Context, *txpoolproto.AllRequest, 
 }
 
 func signOverlayRaceTestTx(t *testing.T, m *execmoduletester.ExecModuleTester, nonce uint64) types.Transaction {
+	t.Helper()
 	return signOverlayRaceTestTxWithTip(t, m, nonce, 0)
 }
 
