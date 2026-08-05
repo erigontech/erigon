@@ -754,7 +754,7 @@ func (c *AuRa) Finalize(config *chain.Config, header *types.Header, state *state
 		if header.Number.Uint64() >= DEBUG_LOG_FROM {
 			fmt.Printf("insert_pending_transition: %d,receipts=%d, lenProof=%d\n", header.Number.Uint64(), len(receipts), len(pendingTransitionProof))
 		}
-		if err = c.e.PutPendingEpoch(header.Hash(), header.Number.Uint64(), pendingTransitionProof); err != nil {
+		if err := c.e.PutPendingEpoch(header.Hash(), header.Number.Uint64(), pendingTransitionProof); err != nil {
 			return nil, err
 		}
 	}

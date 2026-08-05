@@ -264,7 +264,8 @@ func compareResults(trace, traceg *fastjson.Value) error {
 }
 
 func compareErrors(errVal *fastjson.Value, errValg *fastjson.Value, methodName string, errCtx string, errs *bufio.Writer) error {
-	if errVal != nil && errValg == nil {
+	switch {
+	case errVal != nil && errValg == nil:
 		if errs != nil {
 			fmt.Printf("different results for method %s, errCtx: %s\n", methodName, errCtx)
 			fmt.Fprintf(errs, "Different results for method %s, errCtx: %s\n", methodName, errCtx)
@@ -273,7 +274,7 @@ func compareErrors(errVal *fastjson.Value, errValg *fastjson.Value, methodName s
 		} else {
 			return fmt.Errorf("different result (Erigon) returns error code=%d message=%s, while G/OE returns OK", errVal.GetInt("code"), errVal.GetStringBytes("message"))
 		}
-	} else if errVal == nil && errValg != nil {
+	case errVal == nil && errValg != nil:
 		if errs != nil {
 			fmt.Printf("different results for method %s, errCtx: %s\n", methodName, errCtx)
 			fmt.Fprintf(errs, "Different results for method %s, errCtx: %s\n", methodName, errCtx)
@@ -282,7 +283,7 @@ func compareErrors(errVal *fastjson.Value, errValg *fastjson.Value, methodName s
 		} else {
 			return fmt.Errorf("different result (Erigon) returns OK, while G/OE returns error code=%d message=%s", errValg.GetInt("code"), errValg.GetStringBytes("message"))
 		}
-	} else {
+	default:
 		s1 := strings.ToUpper(string(errVal.GetStringBytes("message")))
 		s2 := strings.ToUpper(string(errValg.GetStringBytes("message")))
 		if strings.Compare(s1, s2) != 0 {

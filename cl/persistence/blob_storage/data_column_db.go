@@ -71,11 +71,12 @@ func (s *dataColumnStorageImpl) WriteColumnSidecars(ctx context.Context, blockRo
 	// For Fulu: slot is in SignedBlockHeader.Header.Slot
 	// For GLOAS: slot is directly in Slot field
 	var slot uint64
-	if columnData.Version() >= clparams.GloasVersion {
+	switch {
+	case columnData.Version() >= clparams.GloasVersion:
 		slot = columnData.Slot
-	} else if columnData.SignedBlockHeader != nil {
+	case columnData.SignedBlockHeader != nil:
 		slot = columnData.SignedBlockHeader.Header.Slot
-	} else {
+	default:
 		slot = columnData.Slot // fallback
 	}
 
@@ -105,10 +106,10 @@ func (s *dataColumnStorageImpl) WriteColumnSidecars(ctx context.Context, blockRo
 		}
 	}()
 	// snappy of | length | ssz data |
-	if err = ssz_snappy.EncodeAndWrite(fh, columnData); err != nil {
+	if err := ssz_snappy.EncodeAndWrite(fh, columnData); err != nil {
 		return err
 	}
-	if err = fh.Sync(); err != nil {
+	if err := fh.Sync(); err != nil {
 		return err
 	}
 	s.emitters.Operation().SendDataColumnSidecar(beaconevents.NewDataColumnSidecarData(columnData))

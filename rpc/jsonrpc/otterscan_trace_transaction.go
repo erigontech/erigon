@@ -93,25 +93,26 @@ func (t *TransactionTracer) OnEnter(depth int, typRaw byte, from accounts.Addres
 	_value.Set(value.ToBig())
 
 	var entry *TraceEntry
-	if typ == vm.CALL {
+	switch typ {
+	case vm.CALL:
 		entry = &TraceEntry{"CALL", t.depth, from.Value(), to.Value(), (*hexutil.Big)(_value), inputCopy, nil}
-	} else if typ == vm.STATICCALL {
+	case vm.STATICCALL:
 		entry = &TraceEntry{"STATICCALL", t.depth, from.Value(), to.Value(), nil, inputCopy, nil}
-	} else if typ == vm.DELEGATECALL {
+	case vm.DELEGATECALL:
 		entry = &TraceEntry{"DELEGATECALL", t.depth, from.Value(), to.Value(), nil, inputCopy, nil}
-	} else if typ == vm.CALLCODE {
+	case vm.CALLCODE:
 		entry = &TraceEntry{"CALLCODE", t.depth, from.Value(), to.Value(), (*hexutil.Big)(_value), inputCopy, nil}
-	} else if typ == vm.CREATE {
+	case vm.CREATE:
 		entry = &TraceEntry{"CREATE", t.depth, from.Value(), to.Value(), (*hexutil.Big)(value.ToBig()), inputCopy, nil}
-	} else if typ == vm.CREATE2 {
+	case vm.CREATE2:
 		entry = &TraceEntry{"CREATE2", t.depth, from.Value(), to.Value(), (*hexutil.Big)(value.ToBig()), inputCopy, nil}
-	} else if typ == vm.SELFDESTRUCT {
+	case vm.SELFDESTRUCT:
 		selfDestructDepth := depth
 		if len(t.Results) > 0 {
 			selfDestructDepth = t.Results[len(t.Results)-1].Depth + 1
 		}
 		entry = &TraceEntry{"SELFDESTRUCT", selfDestructDepth, from.Value(), to.Value(), (*hexutil.Big)(value.ToBig()), nil, nil}
-	} else {
+	default:
 		// safeguard in case new CALL-like opcodes are introduced but not handled,
 		// otherwise CaptureExit/stack will get out of sync
 		entry = &TraceEntry{"UNKNOWN", t.depth, from.Value(), to.Value(), (*hexutil.Big)(value.ToBig()), inputCopy, nil}

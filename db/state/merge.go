@@ -539,7 +539,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		}
 	}
 
-	if err = kvWriter.Compress(); err != nil {
+	if err := kvWriter.Compress(); err != nil {
 		return nil, nil, nil, err
 	}
 	kvWriter.Close()
@@ -718,7 +718,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 			p.Processed.Store(i)
 		}
 	}
-	if err = write.Compress(); err != nil {
+	if err := write.Compress(); err != nil {
 		return nil, err
 	}
 	comp.Close()
@@ -881,7 +881,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 
 					histKeyBuf = historyKey(txNum, ci1.key, histKeyBuf)
 
-					if err = pagedWr.Add(histKeyBuf, v); err != nil {
+					if err := pagedWr.Add(histKeyBuf, v); err != nil {
 						return nil, nil, err
 					}
 				}
@@ -905,7 +905,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		}
 		ps.Delete(p)
 
-		if err = ht.h.buildVI(ctx, idxPath, decomp, indexIn.decompressor, indexIn.startTxNum, ps); err != nil {
+		if err := ht.h.buildVI(ctx, idxPath, decomp, indexIn.decompressor, indexIn.startTxNum, ps); err != nil {
 			return nil, nil, err
 		}
 

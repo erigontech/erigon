@@ -935,7 +935,7 @@ func (rb *RawBody) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// end of Transactions
-	if err = s.ListEnd(); err != nil {
+	if err := s.ListEnd(); err != nil {
 		return err
 	}
 	// decode Uncles
@@ -1135,12 +1135,13 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 		}
 	}
 
-	if withdrawals == nil {
+	switch {
+	case withdrawals == nil:
 		b.header.WithdrawalsHash = nil
-	} else if len(withdrawals) == 0 {
+	case len(withdrawals) == 0:
 		b.header.WithdrawalsHash = &empty.WithdrawalsHash
 		b.withdrawals = make(Withdrawals, len(withdrawals))
-	} else {
+	default:
 		h := DeriveSha(Withdrawals(withdrawals))
 		b.header.WithdrawalsHash = &h
 		b.withdrawals = make(Withdrawals, len(withdrawals))
@@ -1270,7 +1271,7 @@ func (bb *Block) DecodeRLP(s *rlp.Stream) error {
 
 	// decode header
 	var h Header
-	if err = h.DecodeRLP(s); err != nil {
+	if err := h.DecodeRLP(s); err != nil {
 		return err
 	}
 	bb.header = &h
@@ -1644,16 +1645,18 @@ func encodeRLPGeneric[T rlpEncodable](arr []T, _len int, w io.Writer, b []byte) 
 }
 
 func decodeTxns(appendList *[]Transaction, s *rlp.Stream) error {
-	var err error
-	if _, err = s.List(); err != nil {
+	if _, err := s.List(); err != nil {
 		return err
 	}
-	var txn Transaction
 	blobTxnsAreWrappedWithBlobs := false
-	for txn, err = DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs); err == nil; txn, err = DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs) {
+	for s.MoreDataInList() {
+		txn, err := DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs)
+		if err != nil {
+			return err
+		}
 		*appendList = append(*appendList, txn)
 	}
-	return checkErrListEnd(s, err)
+	return s.ListEnd()
 }
 
 func decodeUncles(appendList *[]*Header, s *rlp.Stream) error {
@@ -1697,7 +1700,7 @@ func checkErrListEnd(s *rlp.Stream, err error) error {
 	if err != rlp.EOL {
 		return err
 	}
-	if err = s.ListEnd(); err != nil {
+	if err := s.ListEnd(); err != nil {
 		return err
 	}
 	return nil

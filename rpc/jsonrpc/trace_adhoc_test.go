@@ -477,7 +477,7 @@ func rawTxFromBlock(t *testing.T, m *execmoduletester.ExecModuleTester, blockNum
 		}
 		txn := b.Transactions()[0]
 		var buf bytes.Buffer
-		if err = txn.MarshalBinary(&buf); err != nil {
+		if err := txn.MarshalBinary(&buf); err != nil {
 			return err
 		}
 		encoded = buf.Bytes()
@@ -711,7 +711,7 @@ func newBaseFeeTestChain(t *testing.T, cfg *chain.Config) *baseFeeTestChain {
 func (c *baseFeeTestChain) mineBlock(t *testing.T, gen func(*blockgen.BlockGen)) *blockgen.ChainPack {
 	t.Helper()
 
-	chainB, err := blockgen.GenerateChain(c.m.ChainConfig, c.head, c.m.Engine, c.m.DB, 1, func(_ int, block *blockgen.BlockGen) {
+	chainB, err := c.m.GenerateChainFrom(c.head, 1, func(_ int, block *blockgen.BlockGen) {
 		gen(block)
 	})
 	require.NoError(t, err)
