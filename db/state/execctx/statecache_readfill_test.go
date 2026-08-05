@@ -458,6 +458,10 @@ func TestBindAggregator(t *testing.T) {
 	t.Cleanup(sc2.Close)
 	require.Panics(t, func() { sc2.BindAggregator(fakeTemporalDB{agg: struct{}{}}) },
 		"an aggregator without ForbidVisibilityLowering must fail loudly, not drop the binding")
+	require.PanicsWithValue(t,
+		"assert: fill-enabled StateCache bound to a DB without an aggregator — the visibility-lowering guard would be silently dropped",
+		func() { sc2.BindAggregator(fakeTemporalDB{}) },
+		"a DB without an aggregator must name that case, not report a nil type mismatch")
 }
 
 type nilDebugRwTx struct {

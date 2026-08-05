@@ -436,6 +436,9 @@ func (c *StateCache) BindAggregator(db kv.TemporalRwDB) {
 		return
 	}
 	agg := db.Agg()
+	if agg == nil {
+		panic("assert: fill-enabled StateCache bound to a DB without an aggregator — the visibility-lowering guard would be silently dropped")
+	}
 	f, ok := agg.(interface{ ForbidVisibilityLowering() })
 	if !ok {
 		panic(fmt.Sprintf("assert: fill-enabled StateCache bound to a DB whose aggregator %T lacks ForbidVisibilityLowering — the visibility-lowering guard would be silently dropped", agg))
