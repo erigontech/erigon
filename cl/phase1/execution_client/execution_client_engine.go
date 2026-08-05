@@ -108,11 +108,6 @@ func (cc *ExecutionClientEngine) isLocal() bool {
 
 func (cc *ExecutionClientEngine) SetBeaconChainConfig(beaconCfg *clparams.BeaconChainConfig) {
 	cc.beaconCfg = beaconCfg
-	if engineWithCfg, ok := cc.engine.(interface {
-		SetBeaconChainConfig(*clparams.BeaconChainConfig)
-	}); ok {
-		engineWithCfg.SetBeaconChainConfig(beaconCfg)
-	}
 }
 
 func (cc *ExecutionClientEngine) Close() {
