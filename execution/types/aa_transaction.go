@@ -3,6 +3,7 @@ package types
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"math/big"
 
@@ -367,96 +368,99 @@ func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, pa
 func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 	_, err := s.List()
 	if err != nil {
-		return err
+		return fmt.Errorf("read AccountAbstractionTransaction list: %w", err)
 	}
 
 	tx.ChainID = new(uint256.Int)
 	if err := s.ReadUint256(tx.ChainID); err != nil {
-		return err
+		return fmt.Errorf("read ChainID: %w", err)
 	}
 
 	tx.NonceKey = new(uint256.Int)
 	if err := s.ReadUint256(tx.NonceKey); err != nil {
-		return err
+		return fmt.Errorf("read NonceKey: %w", err)
 	}
 
 	if tx.Nonce, err = s.Uint64(); err != nil {
-		return err
+		return fmt.Errorf("read Nonce: %w", err)
 	}
 
 	var senderAddress common.Address
 	if err := s.ReadBytes(senderAddress[:]); err != nil {
-		return err
+		return fmt.Errorf("read SenderAddress: %w", err)
 	}
 	tx.SenderAddress = accounts.InternAddress(senderAddress)
 	if tx.SenderValidationData, err = s.Bytes(); err != nil {
-		return err
+		return fmt.Errorf("read SenderValidationData: %w", err)
 	}
 
 	if err := DecodeOptionalAddress(&tx.Deployer, s); err != nil {
-		return err
+		return fmt.Errorf("read Deployer: %w", err)
 	}
 
 	if tx.DeployerData, err = s.Bytes(); err != nil {
-		return err
+		return fmt.Errorf("read DeployerData: %w", err)
 	}
 
 	if err := DecodeOptionalAddress(&tx.Paymaster, s); err != nil {
-		return err
+		return fmt.Errorf("read Paymaster: %w", err)
 	}
 
 	if tx.PaymasterData, err = s.Bytes(); err != nil {
-		return err
+		return fmt.Errorf("read PaymasterData: %w", err)
 	}
 
 	if tx.ExecutionData, err = s.Bytes(); err != nil {
-		return err
+		return fmt.Errorf("read ExecutionData: %w", err)
 	}
 
 	tx.BuilderFee = new(uint256.Int)
 	if err := s.ReadUint256(tx.BuilderFee); err != nil {
-		return err
+		return fmt.Errorf("read BuilderFee: %w", err)
 	}
 
 	tx.Tip = new(uint256.Int)
 	if err := s.ReadUint256(tx.Tip); err != nil {
-		return err
+		return fmt.Errorf("read Tip: %w", err)
 	}
 
 	tx.FeeCap = new(uint256.Int)
 	if err := s.ReadUint256(tx.FeeCap); err != nil {
-		return err
+		return fmt.Errorf("read FeeCap: %w", err)
 	}
 
 	if tx.ValidationGasLimit, err = s.Uint64(); err != nil {
-		return err
+		return fmt.Errorf("read ValidationGasLimit: %w", err)
 	}
 
 	if tx.PaymasterValidationGasLimit, err = s.Uint64(); err != nil {
-		return err
+		return fmt.Errorf("read PaymasterValidationGasLimit: %w", err)
 	}
 
 	if tx.PostOpGasLimit, err = s.Uint64(); err != nil {
-		return err
+		return fmt.Errorf("read PostOpGasLimit: %w", err)
 	}
 
 	if tx.GasLimit, err = s.Uint64(); err != nil {
-		return err
+		return fmt.Errorf("read GasLimit: %w", err)
 	}
 
 	// decode AccessList
 	tx.AccessList = AccessList{}
 	if err := decodeAccessList(&tx.AccessList, s); err != nil {
-		return err
+		return fmt.Errorf("read AccessList: %w", err)
 	}
 
 	// decode authorizations
 	tx.Authorizations = make([]Authorization, 0)
 	if err := decodeAuthorizations(&tx.Authorizations, s); err != nil {
-		return err
+		return fmt.Errorf("read Authorizations: %w", err)
 	}
 
-	return s.ListEnd()
+	if err = s.ListEnd(); err != nil {
+		return fmt.Errorf("close AccountAbstractionTransaction: %w", err)
+	}
+	return nil
 }
 
 func (tx *AccountAbstractionTransaction) MarshalBinary(w io.Writer) error {

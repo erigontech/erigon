@@ -26,10 +26,9 @@ import (
 
 // A typed-tx envelope truncated to just its ChainID field must be rejected by
 // the block body decoder, not silently dropped. Before the fix, the typed-tx
-// DecodeRLP methods (DynamicFeeTransaction, BlobTx, SetCodeTransaction)
-// returned scalar field-read failures bare (`return err`), so a truncated tx
-// yielded a bare rlp.EOL. decodeTxns/checkErrListEnd mistook that bare
-// rlp.EOL for a clean end of the transactions list, silently dropping the
+// DecodeRLP methods returned scalar field-read failures bare (`return err`), so
+// a truncated tx yielded a bare rlp.EOL. decodeTxns/checkErrListEnd mistook it
+// for a clean end of the transactions list, silently dropping the
 // malformed transaction instead of rejecting the block (erigon would then
 // accept a block other clients reject).
 //
@@ -45,6 +44,7 @@ func TestDecodeEOLRegressionTruncatedTypedTx(t *testing.T) {
 		{"DynamicFeeTx", DynamicFeeTxType},
 		{"BlobTx", BlobTxType},
 		{"SetCodeTx", SetCodeTxType},
+		{"AccountAbstractionTx", AccountAbstractionTxType},
 	}
 
 	for _, tc := range tests {
