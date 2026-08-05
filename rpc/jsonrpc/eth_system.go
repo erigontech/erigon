@@ -499,11 +499,8 @@ type GasPriceOracleBackend struct {
 	overlay *membatchwithdb.MemoryMutation // pinned at construction; nil when no overlay was published
 }
 
-// NewGasPriceOracleBackend pins the block overlay once for every read the backend
-// does, so the head it resolves and the per-block data it samples come from the same
-// view (see rpchelper.GetBlockNumber). Without it the head would be resolved on the
-// overlay by the callers that wrap their own tx while the block data came from the
-// committed view, leaving the oracle a block or more behind the head the node publishes.
+// NewGasPriceOracleBackend pins the block overlay once so the head the oracle
+// resolves stays readable for the whole request, including on the txs Fork opens.
 func NewGasPriceOracleBackend(db kv.TemporalRoDB, tx kv.TemporalTx, baseApi *BaseAPI) *GasPriceOracleBackend {
 	b := &GasPriceOracleBackend{db: db, baseApi: baseApi, overlay: baseApi.filters.LatestOverlay()}
 	b.tx = b.withOverlay(tx)
@@ -525,10 +522,8 @@ func (b *GasPriceOracleBackend) Fork(ctx context.Context) (gasprice.OracleBacken
 	if err != nil {
 		return nil, nil, err
 	}
-	// Wrap the forked tx (the one SuggestTipCap and FeeHistory sample on) with the
-	// pinned overlay rather than re-resolving it: the overlay may have been
-	// unpublished since the request started, and re-resolving would leave the fork
-	// without the head block the parent already resolved.
+	// Reuse the pinned overlay instead of re-resolving: it may have been
+	// unpublished since the request started.
 	return &GasPriceOracleBackend{db: b.db, tx: b.withOverlay(tx), baseApi: b.baseApi, overlay: b.overlay},
 		func() { tx.Rollback() },
 		nil

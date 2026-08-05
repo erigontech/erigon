@@ -1176,14 +1176,7 @@ func (ff *Filters) LatestSD() *execctx.SharedDomains {
 // for data not in the overlay.
 // Safe to call on a nil receiver.
 func (ff *Filters) WithOverlay(tx kv.Tx) kv.Tx {
-	if ff == nil {
-		return tx
-	}
-	sd := ff.LatestSD()
-	if sd == nil {
-		return tx
-	}
-	if overlay := sd.BlockOverlay(); overlay != nil {
+	if overlay := ff.LatestOverlay(); overlay != nil {
 		return overlay.NewReadView(tx)
 	}
 	return tx
@@ -1207,14 +1200,7 @@ func (ff *Filters) LatestOverlay() *membatchwithdb.MemoryMutation {
 // WithTemporalOverlay is like WithOverlay but returns kv.TemporalTx directly,
 // avoiding repeated type assertions at callsites that need temporal access.
 func (ff *Filters) WithTemporalOverlay(tx kv.TemporalTx) kv.TemporalTx {
-	if ff == nil {
-		return tx
-	}
-	sd := ff.LatestSD()
-	if sd == nil {
-		return tx
-	}
-	if overlay := sd.BlockOverlay(); overlay != nil {
+	if overlay := ff.LatestOverlay(); overlay != nil {
 		return overlay.NewReadView(tx)
 	}
 	return tx
