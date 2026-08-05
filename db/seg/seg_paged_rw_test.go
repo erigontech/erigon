@@ -28,7 +28,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
@@ -105,7 +104,7 @@ type multyBytesWriter struct {
 }
 
 func (w *multyBytesWriter) Write(p []byte) (n int, err error) {
-	w.buffer = append(w.buffer, common.Copy(p))
+	w.buffer = append(w.buffer, bytes.Clone(p))
 	return len(p), nil
 }
 func (w *multyBytesWriter) Bytes() [][]byte                { return w.buffer }

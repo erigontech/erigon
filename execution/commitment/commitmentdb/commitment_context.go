@@ -989,7 +989,7 @@ func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
 	if sdc.traceW != nil {
 		fmt.Fprintf(sdc.traceW, "[SDC] Branch read %x => %x\n", pref, enc)
 	}
-	return common.Copy(enc), step, nil
+	return bytes.Clone(enc), step, nil
 }
 
 func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) error {

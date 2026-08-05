@@ -17,6 +17,7 @@
 package solid
 
 import (
+	"bytes"
 	"encoding/json"
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
@@ -212,7 +213,7 @@ func (l *ListSSZ[T]) ShallowCopy() *ListSSZ[T] {
 		limit:           l.limit,
 		static:          l.static,
 		bytesPerElement: l.bytesPerElement,
-		root:            common.Hash(common.Copy(l.root[:])),
+		root:            common.Hash(bytes.Clone(l.root[:])),
 	}
 	copy(cpy.list, l.list)
 	return cpy

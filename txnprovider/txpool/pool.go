@@ -603,7 +603,7 @@ func (p *TxPool) GetRlp(tx kv.Tx, hash []byte) ([]byte, error) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	rlpTx, _, _, err := p.getRlpLocked(tx, hash)
-	return common.Copy(rlpTx), err
+	return bytes.Clone(rlpTx), err
 }
 
 func (p *TxPool) AppendAllAnnouncements(types []byte, sizes []uint32, hashes []byte) ([]byte, []uint32, []byte) {
@@ -686,7 +686,7 @@ func (p *TxPool) getCachedBlobTxnLocked(tx kv.Tx, hash []byte) (*metaTxn, error)
 	if len(v) == 0 {
 		return nil, nil
 	}
-	txnRlp := common.Copy(v[20:])
+	txnRlp := bytes.Clone(v[20:])
 	parseCtx := NewTxnParseContext(p.chainID)
 	parseCtx.WithSender(false)
 	txnSlot := &TxnSlot{}
