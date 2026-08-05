@@ -18,6 +18,7 @@ package cache
 
 import (
 	"bytes"
+	"fmt"
 	"math"
 	"strings"
 	"sync"
@@ -71,6 +72,9 @@ type StateCache struct {
 	// given commit cadence.
 	fillsAdmitted atomic.Uint64
 	fillsRejected atomic.Uint64
+	// aggBound records that BindAggregator ran; SetStateCache asserts it
+	// before wiring a fill-enabled cache.
+	aggBound atomic.Bool
 	// disableFills (STATE_CACHE_FILLS=false) turns off every reader fill
 	// (including the content-addressed ones), leaving applies as the only
 	// writer ("apply-only" mode) — an A/B lever and an operational kill switch.
@@ -419,6 +423,29 @@ func (c *StateCache) clear() {
 		}
 	}
 }
+
+// BindAggregator forbids visibility lowering on db's aggregator for a
+// fill-enabled cache: fill admission relies on view frontiers never
+// decreasing. SharedDomains.SetStateCache asserts this binding, so wiring
+// cannot forget it. The aggregator side is duck-typed (the concrete type
+// lives in db/state, above this package) but load-bearing: an aggregator
+// without the forbid fails loudly. A nil or apply-only cache needs no
+// binding.
+func (c *StateCache) BindAggregator(db kv.TemporalRwDB) {
+	if c == nil || !c.FillsEnabled() {
+		return
+	}
+	agg := db.Agg()
+	f, ok := agg.(interface{ ForbidVisibilityLowering() })
+	if !ok {
+		panic(fmt.Sprintf("assert: fill-enabled StateCache bound to a DB whose aggregator %T lacks ForbidVisibilityLowering — the visibility-lowering guard would be silently dropped", agg))
+	}
+	f.ForbidVisibilityLowering()
+	c.aggBound.Store(true)
+}
+
+// AggregatorBound reports whether BindAggregator ran.
+func (c *StateCache) AggregatorBound() bool { return c.aggBound.Load() }
 
 // Close releases every sub-cache's slot in the shared memory envelope so later
 // caches size against real concurrency. Idempotent.

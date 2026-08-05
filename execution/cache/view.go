@@ -99,9 +99,10 @@ func (v ReadView) GetAddrCodeHash(addr []byte) ([32]byte, bool) {
 	return v.c.getAddrCodeHash(addr)
 }
 
-// CanFill reports whether this view carries a frontier, i.e. Fill and
-// SeedAddrCodeHash can admit values through it.
-func (v ReadView) CanFill() bool { return v.c != nil && v.frontier != nil }
+// CanFill reports whether fills can go through this view: it carries a
+// frontier and fills are enabled. A frontier answering ok=false for a domain
+// is still decided at fill time.
+func (v ReadView) CanFill() bool { return v.c != nil && !v.c.disableFills && v.frontier != nil }
 
 // Fill offers a value read from this view without replacing an authoritative
 // entry. Admission is checked against the view's frontier for the domain;

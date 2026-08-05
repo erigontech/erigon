@@ -858,27 +858,11 @@ func (sd *SharedDomains) SetStateCache(stateCache *cache.StateCache) {
 	if !dbg.UseStateCache || stateCache == nil {
 		return
 	}
+	if stateCache.FillsEnabled() && !stateCache.AggregatorBound() {
+		panic("assert: fill-enabled StateCache wired before BindAggregator — the visibility-lowering guard is not bound")
+	}
 	sd.stateCache = stateCache
 	sd.cacheApplier = stateCache.Applier()
-}
-
-// GuardAggregatorForCache forbids visibility lowering on db's aggregator when
-// sc is a fill-enabled StateCache: fill admission relies on view frontiers
-// never decreasing. This is the one place that binds the invariant — call it
-// wherever a fill-enabled cache is wired over a DB. The aggregator side stays
-// duck-typed (this package cannot import db/state) but load-bearing: an
-// aggregator without the forbid fails loudly instead of silently dropping the
-// guard. A nil or apply-only cache needs no guard.
-func GuardAggregatorForCache(db kv.TemporalRwDB, sc *cache.StateCache) {
-	if sc == nil || !sc.FillsEnabled() {
-		return
-	}
-	agg := db.Agg()
-	f, ok := agg.(interface{ ForbidVisibilityLowering() })
-	if !ok {
-		panic(fmt.Sprintf("assert: fill-enabled StateCache wired over a DB whose aggregator %T lacks ForbidVisibilityLowering — the visibility-lowering guard would be silently dropped", agg))
-	}
-	f.ForbidVisibilityLowering()
 }
 
 // SetCodeStore sets the persistent codehash-keyed code cache.
@@ -1347,8 +1331,9 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 	}
 
 	// View freshness is rechecked while the fill is serialized against
-	// committed cache updates.
-	if sd.stateCache != nil && sd.stateCache.Caches(domain) {
+	// committed cache updates. Apply-only mode skips the block: binding a
+	// frontier for a fill that will no-op is a wasted allocation.
+	if sd.stateCache != nil && sd.stateCache.FillsEnabled() && sd.stateCache.Caches(domain) {
 		readTxNum := (uint64(step)+1)*sd.StepSize() - 1
 		fillView := view
 		if !fillView.CanFill() {
@@ -1543,7 +1528,7 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, view cache.ReadView, 
 	}
 
 	h, fromReadView := resolve()
-	if fromReadView && sd.stateCache != nil {
+	if fromReadView && sd.stateCache != nil && sd.stateCache.FillsEnabled() {
 		var fixed [32]byte
 		if len(h) == 32 {
 			copy(fixed[:], h)

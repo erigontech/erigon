@@ -255,7 +255,7 @@ func NewExecModule(
 	stopNode func() error,
 ) *ExecModule {
 	domainCache := newDomainStateCache(stateCacheBudget)
-	execctx.GuardAggregatorForCache(db, domainCache)
+	domainCache.BindAggregator(db)
 	var codeStore *cache.CodeStore
 	if dbg.UseCodeStore {
 		codeStore = cache.NewCodeStore(cache.DefaultCodeStoreMemBytes, cache.DefaultCodeStoreTableBytes)
