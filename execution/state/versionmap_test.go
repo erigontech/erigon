@@ -2080,3 +2080,55 @@ func TestCodeHashCellBelowShadowedDestruct(t *testing.T) {
 	io.RecordReads(Version{TxIndex: 4, Incarnation: 0}, ibs.versionedReads)
 	require.Equal(t, VersionValid, vm.ValidateVersion(4, io, validateEqualVersion, true, false, false, ""))
 }
+
+// A transaction can consume wipes from TWO distinct destructs of the same
+// address (different slots, destroy/recreate cycles). Each wiped read records
+// its destruct witness; both must be retained and validated — if the later
+// witness silently replaces the earlier one (or vice versa), re-executing the
+// lost destruct away leaves a stale wiped read undetected.
+func TestValidateRead_DistinctDestructWitnessesBothValidated(t *testing.T) {
+	addr := getAddress(230)
+	keyA := accounts.InternKey(common.BigToHash(big.NewInt(1)))
+	val := *uint256.NewInt(7)
+	newVM := func(withSecondDestruct bool) *VersionMap {
+		vm := NewVersionMap(nil)
+		vm.WriteSelfDestruct(addr, Version{TxIndex: 10}, true, true)
+		vm.WriteIncarnation(addr, Version{TxIndex: 10}, 1, true)
+		vm.WriteSelfDestruct(addr, Version{TxIndex: 11}, false, true)
+		vm.WriteAddress(addr, Version{TxIndex: 11}, &accounts.Account{Nonce: 1, CodeHash: accounts.EmptyCodeHash}, true)
+		vm.WriteStorage(addr, keyA, Version{TxIndex: 15}, val, true)
+		if withSecondDestruct {
+			vm.WriteSelfDestruct(addr, Version{TxIndex: 20}, true, true)
+			vm.WriteIncarnation(addr, Version{TxIndex: 20}, 2, true)
+			vm.WriteSelfDestruct(addr, Version{TxIndex: 21}, false, true)
+			vm.WriteAddress(addr, Version{TxIndex: 21}, &accounts.Account{Nonce: 1, CodeHash: accounts.EmptyCodeHash}, true)
+		}
+		return vm
+	}
+	newIO := func() *VersionedIO {
+		io := NewVersionedIO(31)
+		rs := ReadSet{}
+		// Slot A read as the post-tx20 wipe: zero, floored at the pre-wipe cell.
+		rs.SetStorage(addr, keyA, VersionedRead[uint256.Int]{
+			ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 15}},
+		})
+		// Witness of the tx20 destruct, recorded first...
+		rs.SetSelfDestruct(addr, VersionedRead[bool]{
+			ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 20}},
+			Val:        true,
+		})
+		// ...then a wiped read of another slot records the tx10 destruct.
+		rs.SetSelfDestruct(addr, VersionedRead[bool]{
+			ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 10}},
+			Val:        true,
+		})
+		io.RecordReads(Version{TxIndex: 30, Incarnation: 0}, rs)
+		return io
+	}
+	t.Run("both destructs present validates", func(t *testing.T) {
+		require.Equal(t, VersionValid, newVM(true).ValidateVersion(30, newIO(), validateEqualVersion, true, false, false, ""))
+	})
+	t.Run("the tx20 destruct re-executed away must invalidate", func(t *testing.T) {
+		require.Equal(t, VersionInvalid, newVM(false).ValidateVersion(30, newIO(), validateEqualVersion, true, false, false, ""))
+	})
+}

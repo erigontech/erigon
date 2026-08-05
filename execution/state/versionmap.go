@@ -1413,7 +1413,7 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 			}
 		}
 	}
-	for a, tr := range rs.selfDestruct {
+	validateSelfDestruct := func(a accounts.Address, tr VersionedRead[bool]) bool {
 		// A MapRead record names the concrete SelfDestruct cell it consumed —
 		// e.g. the historical destruct behind a wiped read — and a later
 		// revival cell must not shadow it: valid iff the cell at the recorded
@@ -1427,12 +1427,23 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 						txIdx, a, tr.Source, tr.Version.TxIndex, tr.Version.Incarnation)
 				}
 				valid = VersionInvalid
+				return false
+			}
+			return true
+		}
+		return ok(noValueRead(a, SelfDestructPath, accounts.NilKey, tr.ReadHeader))
+	}
+	// Every distinct destruct a tx consumed is re-checked: a conclusion can
+	// rest on several destroy/recreate cycles of one address, and losing any
+	// one of them to re-execution invalidates the tx.
+	for a, tr := range rs.selfDestruct {
+		if !validateSelfDestruct(a, tr) {
+			return
+		}
+		for _, w := range rs.selfDestructWitnesses[a] {
+			if !validateSelfDestruct(a, w) {
 				return
 			}
-			continue
-		}
-		if !ok(noValueRead(a, SelfDestructPath, accounts.NilKey, tr.ReadHeader)) {
-			return
 		}
 	}
 	for a, tr := range rs.createContract {
