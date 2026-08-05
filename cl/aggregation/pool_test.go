@@ -21,11 +21,12 @@ import (
 	"log"
 	"testing"
 
+	"github.com/stretchr/testify/suite"
+	"go.uber.org/mock/gomock"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
-	"github.com/stretchr/testify/suite"
-	"go.uber.org/mock/gomock"
 )
 
 var (
@@ -113,6 +114,13 @@ func (t *PoolTestSuite) TestAddAttestationElectra() {
 	expectedCommitteeBits := solid.NewBitVector(64)
 	expectedCommitteeBits.SetBitAt(10, true)
 	expectedCommitteeBits.SetBitAt(10, true)
+	expected := &solid.Attestation{
+		AggregationBits: solid.BitlistFromBytes([]byte{0b00001101}, 2048*64),
+		Data:            attData1,
+		Signature:       mockAggrResult,
+		CommitteeBits:   expectedCommitteeBits,
+	}
+	expected.SetVersion(clparams.ElectraVersion)
 
 	att1 := &solid.Attestation{
 		AggregationBits: solid.BitlistFromBytes([]byte{0b00001001}, 2048*64),
@@ -144,12 +152,7 @@ func (t *PoolTestSuite) TestAddAttestationElectra() {
 				t.mockEthClock.EXPECT().GetEpochAtSlot(gomock.Any()).Return(uint64(1)).Times(2)
 				t.mockEthClock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.ElectraVersion).Times(2)
 			},
-			expect: &solid.Attestation{
-				AggregationBits: solid.BitlistFromBytes([]byte{0b00001101}, 2048*64),
-				Data:            attData1,
-				Signature:       mockAggrResult,
-				CommitteeBits:   expectedCommitteeBits,
-			},
+			expect: expected,
 		},
 	}
 
@@ -167,6 +170,84 @@ func (t *PoolTestSuite) TestAddAttestationElectra() {
 		att := pool.GetAggregatationByRootAndCommittee(tc.hashRoot, 10)
 		t.Equal(tc.expect, att, tc.name)
 	}
+}
+
+func (t *PoolTestSuite) TestMergedGloasAttestationUsesProgressiveHash() {
+	committeeBits := solid.NewBitVector(64)
+	committeeBits.SetBitAt(10, true)
+	att1 := &solid.Attestation{
+		AggregationBits: solid.BitlistFromBytes([]byte{0b00001001}, 2048*64),
+		Data:            attData1,
+		Signature:       [96]byte{'a'},
+		CommitteeBits:   committeeBits,
+	}
+	att2 := att1.Copy()
+	att2.AggregationBits = solid.BitlistFromBytes([]byte{0b00001100}, 2048*64)
+	att2.Signature = [96]byte{'b'}
+	t.mockEthClock.EXPECT().GetEpochAtSlot(gomock.Any()).Return(uint64(1)).Times(2)
+	t.mockEthClock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.GloasVersion).Times(2)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pool := NewAggregationPool(ctx, t.mockBeaconConfig, nil, t.mockEthClock)
+
+	t.Require().NoError(pool.AddAttestation(att1))
+	t.Require().NoError(pool.AddAttestation(att2))
+	merged := pool.GetAggregatationByRootAndCommittee(attData1Root, 10)
+	got, err := merged.HashSSZ()
+	t.Require().NoError(err)
+	want, err := merged.HashSSZProgressive()
+	t.Require().NoError(err)
+	t.Equal(want, got)
+}
+
+func (t *PoolTestSuite) TestFirstGloasAttestationIsCopiedAndVersioned() {
+	committeeBits := solid.NewBitVector(64)
+	committeeBits.SetBitAt(10, true)
+	att := &solid.Attestation{
+		AggregationBits: solid.BitlistFromBytes([]byte{0b00001001}, 2048*64),
+		Data:            attData1,
+		Signature:       [96]byte{'a'},
+		CommitteeBits:   committeeBits,
+	}
+	callerRoot, err := att.HashSSZ()
+	t.Require().NoError(err)
+	t.mockEthClock.EXPECT().GetEpochAtSlot(gomock.Any()).Return(uint64(1))
+	t.mockEthClock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.GloasVersion)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pool := NewAggregationPool(ctx, t.mockBeaconConfig, nil, t.mockEthClock)
+
+	t.Require().NoError(pool.AddAttestation(att))
+	afterAddRoot, err := att.HashSSZ()
+	t.Require().NoError(err)
+	t.Equal(callerRoot, afterAddRoot)
+	cached := pool.GetAggregatationByRootAndCommittee(attData1Root, 10)
+	t.NotSame(att, cached)
+	att.SetVersion(clparams.ElectraVersion)
+	got, err := cached.HashSSZ()
+	t.Require().NoError(err)
+	want, err := cached.HashSSZProgressive()
+	t.Require().NoError(err)
+	t.Equal(want, got)
+}
+
+func (t *PoolTestSuite) TestElectraAggregationErrorIsReturned() {
+	committeeBits := solid.NewBitVector(64)
+	committeeBits.SetBitAt(10, true)
+	att := &solid.Attestation{
+		AggregationBits: solid.BitlistFromBytes([]byte{0b00001001}, 2048*64),
+		Data:            attData1,
+		Signature:       [96]byte{'a'},
+		CommitteeBits:   committeeBits,
+	}
+	t.mockEthClock.EXPECT().GetEpochAtSlot(gomock.Any()).Return(uint64(1)).Times(2)
+	t.mockEthClock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.ElectraVersion).Times(2)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pool := NewAggregationPool(ctx, t.mockBeaconConfig, nil, t.mockEthClock)
+
+	t.Require().NoError(pool.AddAttestation(att))
+	t.ErrorIs(pool.AddAttestation(att.Copy()), ErrIsSuperset)
 }
 
 func (t *PoolTestSuite) TestAddAttestation() {
@@ -236,7 +317,9 @@ func (t *PoolTestSuite) TestAddAttestation() {
 			pool.AddAttestation(tc.atts[i])
 		}
 		att := pool.GetAggregatationByRoot(tc.hashRoot)
-		t.Equal(tc.expect, att, tc.name)
+		expected := tc.expect.Copy()
+		expected.SetVersion(clparams.DenebVersion)
+		t.Equal(expected, att, tc.name)
 	}
 }
 
