@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 )
 
@@ -888,6 +889,28 @@ func TestDomainCache_PutIfAbsentAtomicWithPut(t *testing.T) {
 		require.True(t, ok)
 		require.Equal(t, fresh, v, "round %d: PutIfAbsent raced past a concurrent Put", round)
 	}
+}
+
+// The drain-before-unwind convention (drainReadAhead ordered before every
+// epoch bump) is enforced here: a cache-populating warmup still in flight at
+// Unwind time can stamp a dead-fork value with the post-unwind epoch.
+func TestStateCache_UnwindAssertsWarmupInFlight(t *testing.T) {
+	old := dbg.AssertStateCache
+	dbg.AssertStateCache = true
+	t.Cleanup(func() { dbg.AssertStateCache = old })
+
+	b := 1 * datasize.MB
+	sc := NewStateCache(b, b, b, b)
+	sc.WarmupStarted()
+	require.Panics(t, func() { sc.Unwind(10) }, "epoch bump with a warmup in flight must fail loud")
+	sc.WarmupDone()
+	require.NotPanics(t, func() { sc.Unwind(10) })
+
+	// Without the assert flag the gauge is inert.
+	dbg.AssertStateCache = false
+	sc.WarmupStarted()
+	defer sc.WarmupDone()
+	require.NotPanics(t, func() { sc.Unwind(10) })
 }
 
 // A Delete racing an update-in-place put must not double-subtract the

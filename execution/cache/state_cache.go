@@ -18,7 +18,9 @@ package cache
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
+	"sync/atomic"
 
 	"github.com/c2h5oh/datasize"
 
@@ -52,6 +54,12 @@ const (
 // Code uses CodeCache (two-level for deduplication).
 type StateCache struct {
 	caches [kv.DomainLen]Cache
+
+	// warmupsInFlight counts fire-and-forget cache-populating prefetches
+	// (WarmupStarted/WarmupDone). Unwind asserts it is zero: a prefetch put
+	// racing the epoch bump could stamp a dead-fork value with the post-unwind
+	// epoch and have it served as canonical.
+	warmupsInFlight atomic.Int64
 }
 
 // NewStateCache creates a new StateCache with the specified byte capacities.
@@ -280,13 +288,28 @@ func (c *StateCache) Close() {
 // GenericCaches and the CodeCache, all layers) bumps an epoch + lowers a floor
 // and drops stale entries lazily on read. This is the sole cache-invalidation
 // path on unwind — the executor never touches the cache during forward execution.
+//
+// Callers must drain any in-flight cache-populating warmup first (see
+// WarmupStarted); the assert converts that convention into a loud failure.
 func (c *StateCache) Unwind(unwindToTxNum uint64) {
+	if dbg.AssertStateCache {
+		if n := c.warmupsInFlight.Load(); n != 0 {
+			panic(fmt.Sprintf("StateCache.Unwind with %d cache-populating warmup(s) in flight — missing drain before the epoch bump", n))
+		}
+	}
 	for _, cache := range c.caches {
 		if cache != nil {
 			cache.Unwind(unwindToTxNum)
 		}
 	}
 }
+
+// WarmupStarted and WarmupDone bracket a fire-and-forget cache-populating
+// prefetch; see warmupsInFlight.
+func (c *StateCache) WarmupStarted() { c.warmupsInFlight.Add(1) }
+
+// WarmupDone is the counterpart of WarmupStarted.
+func (c *StateCache) WarmupDone() { c.warmupsInFlight.Add(-1) }
 
 // GetCache returns the cache for the given domain.
 // Returns nil if the domain is not supported.

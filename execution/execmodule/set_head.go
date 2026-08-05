@@ -113,8 +113,10 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 
 	// Drain in-flight warmup before the unwind bumps the cache epoch, so a
 	// fire-and-forget warmup can't Put a dead-fork value stamped with the new
-	// epoch (cross-fork contamination).
-	e.drainReadAhead()
+	// epoch (cross-fork contamination). An interrupted drain means shutdown.
+	if !e.drainReadAhead() {
+		return fmt.Errorf("read-ahead drain interrupted before unwind: %w", e.bacgroundCtx.Err())
+	}
 
 	// Set the unwind point and run the unwind
 	if err := e.pipelineExecutor.UnwindTo(targetBlock, stagedsync.StagedUnwind, tx); err != nil {
