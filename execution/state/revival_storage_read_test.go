@@ -137,3 +137,39 @@ func TestRangeDepEdgeOnlyFromTheDestructingTx(t *testing.T) {
 	require.True(t, HasReadDep(sdWrite(41, true), rs), "the destruct the dep names is a real edge")
 	require.False(t, HasReadDep(sdWrite(42, false), rs), "the revival above the destruct is not")
 }
+
+// The zero is justified by two facts: the destruct exists, and the storage floor
+// the range was scanned from is still the newest write. Recording only the first
+// lets a storage write published above the destruct go unnoticed, and the reader
+// keeps a zero that is no longer the right answer.
+func TestStorageReadInvalidatesWhenAPostDestructWritePublishes(t *testing.T) {
+	t.Parallel()
+	addr := getAddress(95)
+	key := accounts.InternKey(common.HexToHash("0x35"))
+
+	vm := NewVersionMap(nil)
+	writeFor(vm, addr, StoragePath, key, Version{TxIndex: 16}, *uint256.NewInt(7), true)
+	writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 41}, true, true)
+	writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 42}, false, true)
+	writeFor(vm, addr, IncarnationPath, accounts.NilKey, Version{TxIndex: 42}, uint64(3), true)
+
+	reader := newAccountStateReader(addr)
+	ibs := NewWithVersionMap(NewVersionedStateReader(44, ReadSet{}, vm, reader), vm)
+	ibs.SetNoMaterialize(true)
+	ibs.SetTxContext(0, 44)
+	ibs.SetVersion(0)
+
+	got, err := ibs.GetState(addr, key)
+	require.NoError(t, err)
+	require.True(t, got.IsZero(), "the destruct wiped the slot")
+
+	io := NewVersionedIO(45)
+	io.RecordReads(Version{TxIndex: 44}, ibs.VersionedReads())
+	require.Equal(t, VersionValid, vm.ValidateVersion(44, io, validateEqualVersion, false, ""),
+		"nothing has changed yet")
+
+	// A tx between the destruct and this reader publishes a new value for the slot.
+	writeFor(vm, addr, StoragePath, key, Version{TxIndex: 43}, *uint256.NewInt(9), true)
+	require.Equal(t, VersionInvalid, vm.ValidateVersion(44, io, validateEqualVersion, false, ""),
+		"the floor the zero was derived from moved, so the read must be re-run")
+}

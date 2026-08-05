@@ -169,11 +169,13 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 			originVal, origin, originOK := vm.ReadStorage(h.Address, h.Key, txIndex)
 			originValid := originOK && origin.Status() == MVReadResultDone
 			if originValid {
-				// A destruct above the baseline write wiped the slot, so the baseline
-				// is 0 rather than what that write left, and re-writing the old value
-				// is a real change. Only a range scan sees this: once the account is
-				// revived, the latest SelfDestruct entry is the revival.
-				if _, wiped := vm.FindDoneSelfDestructInRange(h.Address, origin.Version().TxIndex+1, txIndex, true); wiped {
+				// A destruct at or above the baseline write wiped the slot, so the
+				// baseline is 0 rather than what that write left, and re-writing the
+				// old value is a real change. Only a range scan sees this: once the
+				// account is revived, the latest SelfDestruct entry is the revival.
+				// The origin's own TxIndex counts — a tx that writes a slot and then
+				// destructs leaves both cells at that index, and the destruct wins.
+				if _, wiped := vm.FindDoneSelfDestructInRange(h.Address, origin.Version().TxIndex, txIndex, true); wiped {
 					originValid = false
 				}
 			}

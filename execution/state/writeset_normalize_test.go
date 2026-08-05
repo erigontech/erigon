@@ -309,3 +309,29 @@ func TestNormalize_DropsNoOpWhenDestructPrecedesBaselineWrite(t *testing.T) {
 	_, ok := out.GetStorage(addr, key)
 	require.False(t, ok, "no destruct after the baseline write, so writing the same value is a no-op")
 }
+
+// A tx that writes a slot and then self-destructs leaves both cells at its own
+// TxIndex, and the destruct wins: the slot is gone. A later revival re-writing
+// that value is a real change, so the baseline scan has to include the origin
+// write's own TxIndex, not start above it.
+func TestNormalize_KeepsRewriteWhenDestructSharesTheOriginTxIndex(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0x7d"))
+	key := accounts.InternKey(common.HexToHash("0x32"))
+	val := *uint256.NewInt(5)
+
+	vm := NewVersionMap(nil)
+	vm.WriteStorage(addr, key, Version{TxIndex: 10}, val, true)
+	vm.WriteSelfDestruct(addr, Version{TxIndex: 10}, true, true)
+
+	ws := &WriteSet{}
+	ws.SetStorage(addr, key, &VersionedWrite[uint256.Int]{
+		WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key, Version: Version{TxIndex: 20}},
+		Val:         val,
+	})
+
+	out, err := ws.Normalize(vm, 20, 0, &minimalStateReader{}, nil, false, false, false)
+	require.NoError(t, err)
+	_, ok := out.GetStorage(addr, key)
+	require.True(t, ok, "the destruct at the same TxIndex wiped the slot, so the re-write is a real change")
+}

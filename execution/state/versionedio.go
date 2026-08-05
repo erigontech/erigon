@@ -471,6 +471,9 @@ func (s ReadSet) TraceReads(prefix string) {
 	for addr, tr := range s.selfDestruct {
 		fmt.Println(prefix, "RD", traceReadStr(addr, SelfDestructPath, accounts.NilKey, tr.ReadHeader, valueString(SelfDestructPath, tr.Val)))
 	}
+	for addr, tr := range s.selfDestructInRange {
+		fmt.Println(prefix, "RD in-range", traceReadStr(addr, SelfDestructPath, accounts.NilKey, tr.ReadHeader, valueString(SelfDestructPath, tr.Val)))
+	}
 	for addr, tr := range s.createContract {
 		fmt.Println(prefix, "RD", traceReadStr(addr, CreateContractPath, accounts.NilKey, tr.ReadHeader, valueString(CreateContractPath, tr.Val)))
 	}
@@ -518,6 +521,7 @@ func (s ReadSet) eachHeader(yield func(ReadHeader) bool) {
 		!eachHeaderOf(s.nonce, yield) ||
 		!eachHeaderOf(s.incarnation, yield) ||
 		!eachHeaderOf(s.selfDestruct, yield) ||
+		!eachHeaderOf(s.selfDestructInRange, yield) ||
 		!eachHeaderOf(s.createContract, yield) ||
 		!eachHeaderOf(s.code, yield) ||
 		!eachHeaderOf(s.codeHash, yield) ||

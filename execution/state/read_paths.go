@@ -517,6 +517,11 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 						ReadHeader: ReadHeader{Source: MapRead, Version: sdVer},
 						Val:        true,
 					})
+					// The zero also depends on this floor still being the newest
+					// write: a storage write published above the destruct makes it
+					// the wrong answer. MapRead validates on version alone, so the
+					// recorded zero value is never compared.
+					s.versionedReads.SetHeader(addr, path, key, hdr)
 				}
 				r.outcome = outcomeReturnZero
 				r.source = MapRead
