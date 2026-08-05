@@ -53,9 +53,9 @@ func TestDecodeEOLRegressionTruncatedTypedTx(t *testing.T) {
 }
 
 // buildBlockWithTruncatedTypedTx builds a pre-Shanghai block whose only invalid
-// component is a typed transaction payload ending after its chain ID. Canonical
-// empty transaction and receipt roots ensure unrelated body checks do not mask
-// the decoder behavior.
+// component is a typed transaction payload ending after its chain ID. The
+// canonical empty transaction and receipt roots make the block consistent with
+// zero transactions, which is what a decoder that drops the payload would see.
 func buildBlockWithTruncatedTypedTx(t *testing.T, txType byte) []byte {
 	t.Helper()
 	header := &Header{
