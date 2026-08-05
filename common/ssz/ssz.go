@@ -104,7 +104,8 @@ func DecodeDynamicList[T Unmarshaler](bytes []byte, start, end uint32, _max uint
 }
 
 // DecodeDynamicListStrict rejects non-canonical offset tables and propagates
-// strict decoding to elements that support it.
+// strict decoding to elements that support it. Elements without
+// DecodeSSZStrict are decoded with DecodeSSZ.
 func DecodeDynamicListStrict[T Unmarshaler](bytes []byte, start, end uint32, _max uint64, version int) ([]T, error) {
 	return decodeDynamicList[T](bytes, start, end, _max, version, true)
 }
@@ -168,7 +169,8 @@ func DecodeStaticList[T Unmarshaler](bytes []byte, start, end, bytesPerElement u
 	return decodeStaticList[T](bytes, start, end, bytesPerElement, _max, version, false)
 }
 
-// DecodeStaticListStrict propagates strict decoding to elements that support it.
+// DecodeStaticListStrict propagates strict decoding to elements that support
+// it. Elements without DecodeSSZStrict are decoded with DecodeSSZ.
 func DecodeStaticListStrict[T Unmarshaler](bytes []byte, start, end, bytesPerElement uint32, _max uint64, version int) ([]T, error) {
 	return decodeStaticList[T](bytes, start, end, bytesPerElement, _max, version, true)
 }

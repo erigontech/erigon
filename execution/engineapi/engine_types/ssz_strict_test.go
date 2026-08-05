@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/common/hexutil"
 	commonssz "github.com/erigontech/erigon/common/ssz"
 	"github.com/erigontech/erigon/execution/types"
@@ -37,6 +38,39 @@ func insertSSZGap(buf []byte, insertAt int, offsetPositions ...int) []byte {
 		binary.LittleEndian.PutUint32(malformed[offsetAt:], offset+1)
 	}
 	return malformed
+}
+
+func payloadAttributesStrictDecodeFallbackAllowed(obj commonssz.Unmarshaler) bool {
+	_, ok := obj.(*cltypes.Withdrawal)
+	return ok
+}
+
+func TestPayloadAttributesStrictSchemaCoverage(t *testing.T) {
+	for version := clparams.BellatrixVersion; version <= clparams.GloasVersion; version++ {
+		t.Run(version.String(), func(t *testing.T) {
+			attributes := NewPayloadAttributesSSZ(version)
+			fields := payloadAttributesDecodeFields{withdrawals: newWithdrawalList(nil)}
+			schema := attributes.decodeSSZSchema(&fields)
+			if version >= clparams.CapellaVersion {
+				schema = append(schema, (*cltypes.Withdrawal)(nil))
+			}
+			for _, field := range schema {
+				obj, ok := field.(commonssz.Unmarshaler)
+				if !ok {
+					continue
+				}
+				if _, ok := obj.(commonssz.StrictUnmarshaler); ok {
+					continue
+				}
+				require.Truef(
+					t,
+					payloadAttributesStrictDecodeFallbackAllowed(obj),
+					"%T must implement StrictUnmarshaler or be explicitly allowed",
+					obj,
+				)
+			}
+		})
+	}
 }
 
 func TestExecutionPayloadDecodeSSZStrictRoundTrip(t *testing.T) {

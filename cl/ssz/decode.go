@@ -30,7 +30,8 @@ func UnmarshalSSZ(buf []byte, version int, schema ...any) error {
 
 // UnmarshalSSZStrict rejects non-canonical container offsets, rejects
 // trailing bytes when the schema has no variable-size fields, and propagates
-// strict decoding to nested objects that support it.
+// strict decoding to nested objects that support it. Nested objects without
+// DecodeSSZStrict are decoded with DecodeSSZ.
 func UnmarshalSSZStrict(buf []byte, version int, schema ...any) error {
 	return unmarshalSSZ(buf, version, true, schema...)
 }
