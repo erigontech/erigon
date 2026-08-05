@@ -38,7 +38,7 @@ import (
 
 func FileName(version Version, from, to uint64, fileType string) string {
 	if to < from {
-		panic(fmt.Errorf("snap file name from < to: %d < %d", from, to))
+		panic(fmt.Errorf("snap file name to < from: %d < %d", to, from))
 	}
 	if to-from < 1000 {
 		return fmt.Sprintf("%s-%09d-%09d-%s", version.String(), from, to, fileType)
@@ -48,7 +48,7 @@ func FileName(version Version, from, to uint64, fileType string) string {
 
 func FileMask(from, to uint64, fileType string) string {
 	if to < from {
-		panic(fmt.Errorf("snap file name from < to: %d < %d", from, to))
+		panic(fmt.Errorf("snap file name to < from: %d < %d", to, from))
 	}
 	if to-from < 1000 {
 		return fmt.Sprintf("*-%09d-%09d-%s", from, to, fileType)
@@ -216,12 +216,10 @@ func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bo
 		}
 		var multiplier uint64
 		switch len(fromStr) {
-		case 6: // smallest number in file name is > 1_000, so we represent it as /1000
-			multiplier = 1_000
 		case 9: // smallest number in file name is < 1_000, so we represent it as it is
 			multiplier = 1
-		default: // unexpected number length in file name
-			return res, false, false
+		default: // smallest number in file name is > 1_000, so we represent it as /1000
+			multiplier = 1_000
 		}
 		res.From, res.To, res.TypeString, res.CaplinTypeString = uint64(from)*multiplier, uint64(to)*multiplier, typeString, typeString
 		res.Type, ok = ParseFileType(typeString)

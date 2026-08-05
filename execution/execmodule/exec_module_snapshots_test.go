@@ -59,6 +59,8 @@ func TestExecModuleProducesE2Snapshots(t *testing.T) {
 		gen.AddTx(tx)
 	})
 	require.NoError(t, err)
+	retirementDoneSub, retirementDoneSubClose := emt.Notifications.Events.AddRetirementDoneSubscription()
+	t.Cleanup(retirementDoneSubClose)
 	status, err := emt.InsertBlocks(ctx, cp.Blocks)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
@@ -68,10 +70,16 @@ func TestExecModuleProducesE2Snapshots(t *testing.T) {
 	result, err = emt.UpdateForkChoice(ctx, cp.TopBlock.Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
-	retired := func() bool {
-		err = emt.BlockSnapshots.OpenFolder()
-		require.NoError(t, err)
-		return 9 == emt.BlockSnapshots.BlocksAvailable()
+	// wait for 2 retirement loops to be done since there are 2 UFCs
+	timeoutC := time.After(time.Minute)
+	for range 2 {
+		select {
+		case <-retirementDoneSub:
+		case <-timeoutC:
+			t.Fatal("retirement done timed out")
+		}
 	}
-	require.Eventuallyf(t, retired, time.Minute, time.Millisecond, "expected files to be retired")
+	err = emt.BlockSnapshots.OpenFolder()
+	require.NoError(t, err)
+	require.Equal(t, uint64(9), emt.BlockSnapshots.BlocksAvailable())
 }

@@ -166,7 +166,6 @@ func CanRetire(from, to uint64, snapType snaptype.Enum, snCfg *snapcfg.Cfg, reti
 	case blockFrom%10_000 == 0:
 		maxJump = 10_000
 	}
-	//roundedTo1K := (to / 1_000) * 1_000
 	jump := min(maxJump, roundedToRetireStep-blockFrom)
 	switch { // only next segment sizes are allowed
 	case jump >= mergeLimit:

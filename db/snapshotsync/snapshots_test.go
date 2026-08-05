@@ -675,8 +675,8 @@ func TestCanRetire(t *testing.T) {
 	snCfg := snapcfg.KnownCfgOrDevnet(networkname.Mainnet)
 	for i, tc := range cases {
 		from, to, can := CanRetire(tc.inFrom, tc.inTo, snaptype.Unknown, snCfg, tc.retireStep)
-		require.Equal(t, int(tc.outFrom), int(from), i)
-		require.Equal(t, int(tc.outTo), int(to), i)
+		require.Equal(t, tc.outFrom, from, i)
+		require.Equal(t, tc.outTo, to, i)
 		require.Equal(t, tc.can, can, "CanRetire(%d, %d) case %d", tc.inFrom, tc.inTo, i)
 	}
 }
