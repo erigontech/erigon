@@ -37,3 +37,14 @@ func TestPendingJobQueueEnqueueSkipsKeyBuildAtCapacity(t *testing.T) {
 	require.False(t, keyBuilt)
 	require.Equal(t, queue.capacity, queue.count.Load())
 }
+
+func TestPendingJobQueueEnqueueReleasesReservationOnKeyBuildPanic(t *testing.T) {
+	queue := newPendingJobQueue[int, string](1, time.Minute, time.Millisecond, nil, nil)
+
+	require.Panics(t, func() {
+		_ = queue.enqueue("message", func() (int, error) {
+			panic("key build failed")
+		})
+	})
+	require.Zero(t, queue.count.Load())
+}

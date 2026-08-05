@@ -70,12 +70,19 @@ func (q *pendingJobQueue[K, M]) enqueue(msg M, buildKey func() (K, error)) error
 		return nil
 	}
 
+	reservationOwned := true
+	defer func() {
+		if reservationOwned {
+			q.count.Add(-1)
+		}
+	}()
+
 	key, err := buildKey()
 	if err != nil {
-		q.count.Add(-1)
 		return err
 	}
 	q.storeReserved(key, msg)
+	reservationOwned = false
 	return nil
 }
 
