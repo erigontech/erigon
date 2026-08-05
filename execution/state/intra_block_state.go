@@ -514,7 +514,7 @@ func (sdb *IntraBlockState) Logs() types.Logs {
 
 // LogsRlpHash is rlpHash of Logs, without building the flattened slice.
 func (sdb *IntraBlockState) LogsRlpHash() common.Hash {
-	return types.RlpHash(sdb.logs.entries)
+	return types.RlpHashLogs(sdb.logs.entries)
 }
 
 // AddRefund adds gas to the refund counter
