@@ -27,7 +27,13 @@ import (
 
 // Entries outlive the block that emitted them, so what the arena keeps must be
 // capped: a burst of logs at a fresh tx index every block would otherwise add a
-// high-water mark per block, forever. The budget holds any realistic block.
+// high-water mark per block, forever. Every IntraBlockState carries an arena,
+// and the ones that reset across blocks — exec workers, and the trace workers
+// an RPC request spawns — sit at that mark, so the budget multiplies by them.
+//
+// A block cannot exceed gasLimit/8 bytes of log data (LogDataGas) or
+// gasLimit/375 entries (LogGas) — 5.6MB and 120k at a 45M limit. Both budgets
+// sit below that, so an outlier block is trimmed rather than held.
 const (
 	maxReusableLogEntries = 4096
 	maxReusableLogBytes   = 4 * 1024 * 1024
