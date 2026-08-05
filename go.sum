@@ -330,8 +330,8 @@ github.com/erigontech/fastkeccak v0.1.1-0.20260408010752-08e7b6602268 h1:NHl4+Dj
 github.com/erigontech/fastkeccak v0.1.1-0.20260408010752-08e7b6602268/go.mod h1:CwJFJVKFVWpQyKSfRrQyY56IqV16sR5xnQoFThGHiZA=
 github.com/erigontech/go-eth-kzg v0.0.0-20260401161010-070339460d07 h1:0VpFIthaJzGs3iwyrKCj67wptrNq7KKiLhilDCRPqwk=
 github.com/erigontech/go-eth-kzg v0.0.0-20260401161010-070339460d07/go.mod h1:J9/u5sWfznSObptgfa92Jq8rTswn6ahQWEuiLHOjCUI=
-github.com/erigontech/mdbx-go v0.40.3 h1:tNFzVF4gs0DxCWGBb91jRKQNA+IeMonOK3LHvuxh5qo=
-github.com/erigontech/mdbx-go v0.40.3/go.mod h1:QmkpLmcJX5+Fyu9u8eGsyPwoBDrIZJBBLgJHBMFStWE=
+github.com/erigontech/mdbx-go v0.42.0 h1:ZXQ0UqtxZLC/wDZJL4ACBLuNznD1vJQKhayp2HD1JH4=
+github.com/erigontech/mdbx-go v0.42.0/go.mod h1:Ps2n0MMTlU+BgecMWznc/Z7oGJWDJX/EQk+gUCTSaRo=
 github.com/erigontech/secp256k1 v1.3.0 h1:lf/lNUBtgZ21yJjn1sYNkYnEy4bkZIcxvcEdlrHs14I=
 github.com/erigontech/secp256k1 v1.3.0/go.mod h1:CnigLRUsfobnTYoUzwdT/De67fw9OhTA0KTkxa+svik=
 github.com/ettle/strcase v0.2.0 h1:fGNiVF21fHXpX1niBgk0aROov1LagYsOwV/xqKDKR/Q=
