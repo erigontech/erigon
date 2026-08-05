@@ -42,7 +42,7 @@ func TestExecModuleProducesE2Snapshots(t *testing.T) {
 		execmoduletester.WithE2RetireStep(retireStep),
 		execmoduletester.WithMaxReorgDepth(1),
 	)
-	cp, err := blockgen.GenerateChain(emt.ChainConfig, emt.Genesis, emt.Engine, emt.DB, chainLen, func(i int, gen *blockgen.BlockGen) {
+	cp, err := emt.GenerateChain(chainLen, func(i int, gen *blockgen.BlockGen) {
 		tx, err := types.SignTx(
 			types.NewTransaction(
 				gen.TxNonce(emt.Address),
@@ -59,13 +59,13 @@ func TestExecModuleProducesE2Snapshots(t *testing.T) {
 		gen.AddTx(tx)
 	})
 	require.NoError(t, err)
-	status, err := insertBlocks(ctx, emt.ExecModule, cp.Blocks)
+	status, err := emt.InsertBlocks(ctx, cp.Blocks)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
-	result, err := updateForkChoice(ctx, emt.ExecModule, cp.Blocks[len(cp.Blocks)-2].Header())
+	result, err := emt.UpdateForkChoice(ctx, cp.Blocks[len(cp.Blocks)-2].Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
-	result, err = updateForkChoice(ctx, emt.ExecModule, cp.TopBlock.Header())
+	result, err = emt.UpdateForkChoice(ctx, cp.TopBlock.Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
 	retired := func() bool {
