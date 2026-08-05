@@ -138,13 +138,14 @@ func NewEth1BlockFromHeaderAndBody(header *types.Header, body *types.RawBody, be
 		beaconCfg:     beaconCfg,
 	}
 
-	if header.BlobGasUsed != nil && header.ExcessBlobGas != nil {
+	switch {
+	case header.BlobGasUsed != nil && header.ExcessBlobGas != nil:
 		block.BlobGasUsed = *header.BlobGasUsed
 		block.ExcessBlobGas = *header.ExcessBlobGas
 		block.version = clparams.DenebVersion
-	} else if header.WithdrawalsHash != nil {
+	case header.WithdrawalsHash != nil:
 		block.version = clparams.CapellaVersion
-	} else {
+	default:
 		block.version = clparams.BellatrixVersion
 	}
 
@@ -420,7 +421,46 @@ func (b *Eth1Block) EncodeSSZ(dst []byte) ([]byte, error) {
 // HashSSZ calculates the SSZ hash of the Eth1Block's payload header.
 func (b *Eth1Block) HashSSZ() ([32]byte, error) {
 	b.ensureSSZFields()
+	if b.version >= clparams.GloasVersion {
+		return b.hashSSZGloas()
+	}
 	return merkle_tree.HashTreeRoot(b.getSchema()...)
+}
+
+func (b *Eth1Block) hashSSZGloas() ([32]byte, error) {
+	transactionsRoot, err := b.Transactions.HashSSZProgressive()
+	if err != nil {
+		return [32]byte{}, err
+	}
+	withdrawalsRoot, err := b.Withdrawals.HashSSZProgressive(nil)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	blockAccessListRoot, err := b.BlockAccessList.HashSSZProgressive()
+	if err != nil {
+		return [32]byte{}, err
+	}
+	return merkle_tree.ProgressiveContainerRootAll(
+		b.ParentHash[:],
+		b.FeeRecipient[:],
+		b.StateRoot[:],
+		b.ReceiptsRoot[:],
+		b.LogsBloom[:],
+		b.PrevRandao[:],
+		b.BlockNumber,
+		b.GasLimit,
+		b.GasUsed,
+		b.Time,
+		b.Extra,
+		b.BaseFeePerGas[:],
+		b.BlockHash[:],
+		transactionsRoot[:],
+		withdrawalsRoot[:],
+		b.BlobGasUsed,
+		b.ExcessBlobGas,
+		blockAccessListRoot[:],
+		b.SlotNumber,
+	)
 }
 
 // ensureSSZFields lazily initializes nil slice/list fields that getSchema()

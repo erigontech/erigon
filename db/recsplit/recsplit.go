@@ -476,13 +476,14 @@ func (rs *RecSplit) ResetNextSalt() {
 }
 
 func splitParams(m, leafSize, primaryAggrBound, secondaryAggrBound uint16) (fanout, unit uint16) {
-	if m > secondaryAggrBound { // High-level aggregation (fanout 2)
+	switch {
+	case m > secondaryAggrBound: // High-level aggregation (fanout 2)
 		unit = secondaryAggrBound * (((m+1)/2 + secondaryAggrBound - 1) / secondaryAggrBound)
 		fanout = 2
-	} else if m > primaryAggrBound { // Second-level aggregation
+	case m > primaryAggrBound: // Second-level aggregation
 		unit = primaryAggrBound
 		fanout = (m + primaryAggrBound - 1) / primaryAggrBound
-	} else { // First-level aggregation
+	default: // First-level aggregation
 		unit = leafSize
 		fanout = (m + leafSize - 1) / leafSize
 	}
@@ -1077,13 +1078,13 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		return fmt.Errorf("writing elias fano: %w", err)
 	}
 
-	if err = rs.indexW.Flush(); err != nil {
+	if err := rs.indexW.Flush(); err != nil {
 		return err
 	}
-	if err = rs.fsync(); err != nil {
+	if err := rs.fsync(); err != nil {
 		return err
 	}
-	if err = rs.indexF.Close(); err != nil {
+	if err := rs.indexF.Close(); err != nil {
 		return err
 	}
 
