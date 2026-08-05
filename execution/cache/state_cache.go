@@ -483,7 +483,7 @@ func (c *StateCache) BindAggregator(db kv.TemporalRwDB) {
 }
 
 // AggregatorBound reports whether BindAggregator ran.
-func (c *StateCache) AggregatorBound() bool { return c.aggBound.Load() }
+func (c *StateCache) AggregatorBound() bool { return c != nil && c.aggBound.Load() }
 
 // Close releases every sub-cache's slot in the shared memory envelope so later
 // caches size against real concurrency. Idempotent.

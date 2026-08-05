@@ -455,6 +455,8 @@ func TestBindAggregator(t *testing.T) {
 	var nilCache *cache.StateCache
 	require.NotPanics(t, func() { nilCache.BindAggregator(fakeTemporalDB{}) },
 		"no cache, no invariant to bind — the aggregator is never consulted")
+	require.NotPanics(t, func() { require.False(t, nilCache.AggregatorBound()) },
+		"the query must be as nil-safe as the binding")
 	sc2 := newSmallStateCache()
 	t.Cleanup(sc2.Close)
 	require.Panics(t, func() { sc2.BindAggregator(fakeTemporalDB{agg: struct{}{}}) },
