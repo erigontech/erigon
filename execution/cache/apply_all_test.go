@@ -86,7 +86,10 @@ func TestApplierApplyAllMatchesPerKeyApply(t *testing.T) {
 }
 
 // One batch may span several chunks; entries on both sides of the chunk
-// boundary must land.
+// boundary must land. Only the last-inserted indices are asserted: the LRU
+// grows into the process-global memory envelope, so under pressure (CI, race
+// detector, parallel tests) early entries can be legitimately evicted —
+// presence of index 0 is not a property of chunking.
 func TestApplierApplyAllCrossesChunkBoundary(t *testing.T) {
 	t.Parallel()
 
@@ -100,7 +103,7 @@ func TestApplierApplyAllCrossesChunkBoundary(t *testing.T) {
 	}
 	c.Applier().ApplyAll(updates)
 
-	for _, i := range []int{0, applyChunkSize - 1, applyChunkSize, n - 1} {
+	for _, i := range []int{applyChunkSize - 1, applyChunkSize, n - 1} {
 		key := make([]byte, 20)
 		binary.BigEndian.PutUint32(key, uint32(i))
 		_, ok := c.View(nil).Get(kv.AccountsDomain, key)
