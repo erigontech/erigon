@@ -31,14 +31,22 @@ import (
 // and the ones that reset across blocks — exec workers, and the trace workers
 // an RPC request spawns — sit at that mark, so the budget multiplies by them.
 //
-// A block cannot exceed gasLimit/8 bytes of log data (LogDataGas) or
-// gasLimit/375 entries (LogGas) — 7.1MB and 160k at a 60M limit. EIP-7825 caps
-// one transaction at MaxTxnGasLimit, holding a single tx under 2MB and 44k
-// entries. Both budgets sit below the block ceiling: an outlier is trimmed, not
-// held.
+// A caller resetting per transaction needs room for one transaction — GetLogs
+// copied the rest out — so what is held above that is cache; a caller resetting
+// per block needs the whole block live at once.
+//
+// Each budget sits below what one block can produce, so an outlier is trimmed
+// rather than held.
 const (
+	// Entry slots, ~304 bytes each. A block cannot hold more than gasLimit/375
+	// logs (LogGas) — 160k at a 60M limit.
 	maxReusableLogEntries = 16384
-	maxReusableLogBytes   = 4 * 1024 * 1024
+
+	// Data bytes. A block cannot emit more than gasLimit/8 (LogDataGas) — 7.1MB
+	// at a 60M limit — and EIP-7825 holds one transaction under 2MB.
+	maxReusableLogBytes = 4 * 1024 * 1024
+
+	// Data past this is evicted first, being worth hundreds of ordinary entries.
 	maxReusableLogDataCap = 64 * 1024
 )
 
