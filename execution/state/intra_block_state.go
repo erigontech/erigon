@@ -506,16 +506,15 @@ func (sdb *IntraBlockState) GetRawLogs(txIndex int) types.Logs {
 }
 
 func (sdb *IntraBlockState) Logs() types.Logs {
-	var all types.Logs
-	for _, txLogs := range sdb.logs.byTx {
-		all = append(all, txLogs.Copy()...)
+	if len(sdb.logs.entries) == 0 {
+		return nil
 	}
-	return all
+	return sdb.logs.entries.Copy()
 }
 
 // LogsRlpHash is rlpHash of Logs, without building the flattened slice.
 func (sdb *IntraBlockState) LogsRlpHash() common.Hash {
-	return types.RlpHashLogs(sdb.logs.byTx)
+	return types.RlpHash(sdb.logs.entries)
 }
 
 // AddRefund adds gas to the refund counter
@@ -2658,8 +2657,8 @@ func (sdb *IntraBlockState) Print(chainRules chain.Rules, all bool) {
 // transaction execution.
 func (sdb *IntraBlockState) SetTxContext(bn uint64, ti int) {
 	/* Not sure what this test is for it seems to break some tests
-	if len(sdb.logs.byTx) > 0 && ti == 0 {
-		err := fmt.Errorf("seems you forgot `ibs.Reset` or `ibs.TxIndex()`. len(sdb.logs.byTx)=%d, ti=%d", len(sdb.logs.byTx), ti)
+	if len(sdb.logs.entries) > 0 && ti == 0 {
+		err := fmt.Errorf("seems you forgot `ibs.Reset` or `ibs.TxIndex()`. len(sdb.logs.entries)=%d, ti=%d", len(sdb.logs.entries), ti)
 		panic(err)
 	}
 	if sdb.txIndex >= 0 && sdb.txIndex > ti {

@@ -21,6 +21,7 @@ import (
 	"slices"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
@@ -46,18 +47,18 @@ const (
 	// that makes a block of large logs cheap.
 	maxPooledLogDataCap = maxPooledLogBytes / 8
 
-	// The pointers alone are retention.
-	maxLogSlotsPerTx = maxPooledLogEntries
+	// Slots the arena keeps between resets. One array, so this is the whole of
+	// it: 4473 pointers is 35KB.
+	maxRetainedLogSlots = maxPooledLogEntries
 )
 
 // logArena owns a block's log entries and recycles them through a pool, so what
 // it holds follows the largest transaction rather than the widest block.
 type logArena struct {
-	byTx               []types.Logs // by txIndex+1; index 0 is the pre-transaction system calls
-	filledLo, filledHi int          // transactions written since the last reset, as [lo, hi); hi == 0 means none
-	pool               []*types.Log // entries taken back at reset, for any transaction to reuse
-	poolBytes          int          // Data the pool holds
-	indexInBlock       uint
+	entries      types.Logs   // the block so far, in order — one transaction, for a caller that resets per transaction
+	pool         []*types.Log // entries taken back at reset, for any transaction to reuse
+	poolBytes    int          // Data the pool holds
+	indexInBlock uint
 }
 
 // alloc journals the allocation for revertLast, then returns txIndex's next
@@ -66,22 +67,13 @@ type logArena struct {
 // the entry, so it must never be handed out without copying.
 func (a *logArena) alloc(j *journal, addr common.Address, txIndex, numTopics, dataSize int) *types.Log {
 	j.addLogChange(txIndex)
-	ti := txIndex + 1
-	byTx := a.byTx
-	if len(byTx) <= ti {
-		byTx = slices.Grow(byTx, ti+1-len(byTx))[:ti+1]
-		a.byTx = byTx
-	}
-	entries := byTx[ti]
-	logIdx := len(entries)
-	entries = slices.Grow(entries, 1)[:logIdx+1]
-	byTx[ti] = entries
-	a.markFilled(ti)
+	logIdx := len(a.entries)
+	a.entries = slices.Grow(a.entries, 1)[:logIdx+1]
 
-	lp := entries[logIdx]
+	lp := a.entries[logIdx]
 	if lp == nil {
 		lp = a.take()
-		entries[logIdx] = lp
+		a.entries[logIdx] = lp
 	}
 	lp.Address = addr
 	lp.Topics = slices.Grow(lp.Topics[:0], numTopics)[:numTopics]
@@ -122,67 +114,53 @@ func (a *logArena) put(lp *types.Log) {
 	a.pool = append(a.pool, lp)
 }
 
-func (a *logArena) markFilled(ti int) {
-	if a.filledHi == 0 {
-		a.filledLo, a.filledHi = ti, ti+1
-		return
-	}
-	a.filledLo = min(a.filledLo, ti)
-	a.filledHi = max(a.filledHi, ti+1)
-}
-
-// reset takes back what the transactions wrote: the entries return to the pool
-// and their slots go empty. It walks only what was written, so it costs the
-// caller's own work and not the block's.
+// reset takes back what was written: the entries return to the pool and the
+// block goes empty. It walks only what the caller wrote, not the block's width.
 func (a *logArena) reset() {
 	a.indexInBlock = 0
-	all := a.byTx[:cap(a.byTx)]
-	for i := a.filledLo; i < a.filledHi; i++ {
-		entries := all[i]
-		for j, lp := range entries {
-			if lp == nil {
-				continue
-			}
-			a.put(lp)
-			entries[j] = nil
-		}
-		if cap(entries) > maxLogSlotsPerTx {
-			all[i] = nil // an outlier transaction keeps its entries, not its slots
+	for i, lp := range a.entries {
+		if lp == nil {
 			continue
 		}
-		all[i] = entries[:0]
+		a.put(lp)
+		a.entries[i] = nil
 	}
-	a.filledLo, a.filledHi = 0, 0
+	if cap(a.entries) > maxRetainedLogSlots {
+		a.entries = nil // an outlier keeps its entries, not the array that held them
+	} else {
+		a.entries = a.entries[:0]
+	}
 }
 
-// revertLast drops the entry txIndex allocated last, returning it to the pool:
-// behind the length, only a transaction re-emitting that many logs could reach
-// it again.
+// revertLast drops the entry allocated last, returning it to the pool.
 func (a *logArena) revertLast(txIndex int) {
-	if txIndex+1 >= len(a.byTx) || len(a.byTx[txIndex+1]) == 0 {
-		panic(fmt.Sprintf("can't revert log index %v, max: %v", txIndex, len(a.byTx)-1))
+	last := len(a.entries) - 1
+	if last < 0 {
+		panic(fmt.Sprintf("can't revert log of tx %d: none were emitted", txIndex))
 	}
-	ti := txIndex + 1
-	txnLogs := a.byTx[ti]
-	last := len(txnLogs) - 1
-	if lp := txnLogs[last]; lp != nil {
+	if lp := a.entries[last]; lp != nil {
 		a.put(lp)
-		txnLogs[last] = nil
+		a.entries[last] = nil
 	}
-	a.byTx[ti] = txnLogs[:last] // revert 1 log
-	if last == 0 && ti+1 == len(a.byTx) {
-		a.byTx = a.byTx[:ti] // revert txn, only ever the last one
-	}
+	a.entries = a.entries[:last]
 	a.indexInBlock--
 }
 
-// forTx returns the entries of txIndex, owned by the arena.
+// forTx returns the entries txIndex emitted, owned by the arena. They are held
+// in one run rather than grouped, and a transaction's own are the tail of it,
+// so any other transaction reads as empty.
 func (a *logArena) forTx(txIndex int) types.Logs {
-	ti := txIndex + 1
-	if ti >= len(a.byTx) {
-		return nil
+	i := len(a.entries)
+	if dbg.AssertEnabled && i > 0 && txIndex < int(a.entries[i-1].TxIndex) {
+		// Newer than the tail is a transaction that emitted nothing, which is
+		// how most of them end. Older is a caller reading what it has left.
+		panic(fmt.Sprintf("logs of tx %d asked for, the run has reached tx %d",
+			txIndex, int(a.entries[i-1].TxIndex)))
 	}
-	return a.byTx[ti]
+	for i > 0 && int(a.entries[i-1].TxIndex) == txIndex {
+		i--
+	}
+	return a.entries[i:]
 }
 
 func (a *logArena) release() { *a = logArena{} }
