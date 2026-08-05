@@ -72,8 +72,9 @@ func TestDecodeEOLRegressionTruncatedTypedTx(t *testing.T) {
 func buildBlockWithTruncatedTypedTx(t *testing.T, txType byte) []byte {
 	t.Helper()
 	header := &Header{
-		UncleHash: empty.UncleHash,
-		TxHash:    empty.TxsHash,
+		UncleHash:   empty.UncleHash,
+		TxHash:      empty.TxsHash,
+		ReceiptHash: empty.RootHash,
 	}
 	var headerBuf bytes.Buffer
 	if err := header.EncodeRLP(&headerBuf); err != nil {
@@ -82,9 +83,8 @@ func buildBlockWithTruncatedTypedTx(t *testing.T, txType byte) []byte {
 
 	txsList := []byte{0xc4, 0x83, txType, 0xc1, 0x01}
 	unclesList := []byte{0xc0}
-	withdrawalsList := []byte{0xc0}
 
-	payloadSize := headerBuf.Len() + len(txsList) + len(unclesList) + len(withdrawalsList)
+	payloadSize := headerBuf.Len() + len(txsList) + len(unclesList)
 	var buf bytes.Buffer
 	b := rlp.NewEncodingBuf()
 	defer b.Release()
@@ -94,6 +94,5 @@ func buildBlockWithTruncatedTypedTx(t *testing.T, txType byte) []byte {
 	buf.Write(headerBuf.Bytes())
 	buf.Write(txsList)
 	buf.Write(unclesList)
-	buf.Write(withdrawalsList)
 	return buf.Bytes()
 }
