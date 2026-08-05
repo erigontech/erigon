@@ -2643,11 +2643,13 @@ func (at *AggregatorRoTx) DomainVisibleEnd(name kv.Domain, tx kv.Tx) (uint64, bo
 	if d.d.HistoryDisabled {
 		return 0, false
 	}
-	// A dependency checker can clamp the values view below the history-II end;
-	// reads in that gap fall back to older file values, so the frontier must
-	// not overstate the values coverage.
-	if valuesEnd := d.files.EndTxNum(); valuesEnd < d.ht.iit.files.EndTxNum() {
-		return valuesEnd, true
+	// A dependency checker can clamp the values view below the history-II end.
+	// Such a view has no exact frontier: reads mix fresh DB-resident keys with
+	// older file values for the gap, and raising the dependent file's
+	// visibility later reveals state without any cache apply — a fill made
+	// during the clamp would never be invalidated.
+	if d.files.EndTxNum() < d.ht.iit.files.EndTxNum() {
+		return 0, false
 	}
 	return d.ht.iit.visibleEnd(tx), true
 }
