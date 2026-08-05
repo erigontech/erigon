@@ -249,7 +249,7 @@ func TestTraceBlockByHashPrestateTracerCreate2MemoryOverflow(t *testing.T) {
 	require.NoError(t, err)
 	defer dbtx.Rollback()
 	st := state.New(m.NewStateReader(dbtx))
-	defer st.Release(false)
+	defer st.Close()
 	senderBalance, err := st.GetBalance(accounts.InternAddress(sender))
 	require.NoError(t, err)
 	require.Equal(t, uint256.MustFromHex("0x2869323611617c47"), &senderBalance)
@@ -1358,7 +1358,7 @@ func TestExecutionWitnessCacheServe(t *testing.T) {
 	sentinel := &ExecutionWitnessResult{State: []hexutil.Bytes{{0xde, 0xad, 0xbe, 0xef}}}
 
 	t.Run("legacy hit returns cached pointer", func(t *testing.T) {
-		cache := newWitnessResultCache(96)
+		cache := newWitnessResultCache(96, 0, false, false)
 		cache.Add(block1Hash, sentinel)
 		api.witnessCache = cache
 		t.Cleanup(func() { api.witnessCache = nil })
@@ -1371,7 +1371,7 @@ func TestExecutionWitnessCacheServe(t *testing.T) {
 	})
 
 	t.Run("canonical request bypasses the cache", func(t *testing.T) {
-		cache := newWitnessResultCache(96)
+		cache := newWitnessResultCache(96, 0, false, false)
 		cache.Add(block1Hash, sentinel)
 		api.witnessCache = cache
 		t.Cleanup(func() { api.witnessCache = nil })
@@ -1384,7 +1384,7 @@ func TestExecutionWitnessCacheServe(t *testing.T) {
 	})
 
 	t.Run("empty-cache miss falls through to on-demand", func(t *testing.T) {
-		api.witnessCache = newWitnessResultCache(96)
+		api.witnessCache = newWitnessResultCache(96, 0, false, false)
 		t.Cleanup(func() { api.witnessCache = nil })
 
 		missBefore := witnessCacheMissCounter.GetValueUint64()

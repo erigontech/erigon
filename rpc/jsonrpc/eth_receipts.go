@@ -251,7 +251,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		return nil, fmt.Errorf("node is still initializing")
 	}
 
-	if err = api.BaseAPI.checkReceiptsAvailable(ctx, tx, begin); err != nil {
+	if err := api.BaseAPI.checkReceiptsAvailable(ctx, tx, begin); err != nil {
 		return nil, err
 	}
 
@@ -380,7 +380,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	defer it.Close()
 
 	for it.HasNext() {
-		if err = ctx.Err(); err != nil {
+		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err := it.Next()

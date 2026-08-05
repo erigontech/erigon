@@ -154,10 +154,10 @@ type IntraBlockState struct {
 	// The refund counter, also used by state transitioning.
 	refund uint64
 
-	txIndex  int
-	blockNum uint64
-	logs     []types.Logs
-	logSize  uint
+	txIndex         int
+	blockNum        uint64
+	logs            []types.Logs
+	logIndexInBlock uint
 
 	// Per-transaction access list
 	accessList accessList
@@ -384,17 +384,14 @@ func (sdb *IntraBlockState) Reset() {
 	}
 	clear(sdb.stateObjects)
 	clear(sdb.stateObjectsDirty)
-	for i := range sdb.logs {
-		clear(sdb.logs[i]) // free pointers
-		sdb.logs[i] = sdb.logs[i][:0]
-	}
+	sdb.resetLogs()
 	clear(sdb.balanceInc)
 	sdb.journal.Reset()
 	sdb.revisions.reset()
 	sdb.refund = uint64(0)
 	sdb.txIndex = 0
 	sdb.sdProbeEpoch++
-	sdb.logSize = 0
+	sdb.logIndexInBlock = 0
 	sdb.accessList.Reset()
 	clear(sdb.transientStorage)
 	sdb.versionMap = nil
@@ -423,20 +420,27 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.dep = UnknownDep
 }
 
-// Release returns pooled resources (like journal, stateObjects) back to their pools.
-// Call this when the IntraBlockState is no longer needed.
-// If parallel is true, cleanup happens in a goroutine for faster return.
-func (sdb *IntraBlockState) Release(parallel bool) {
-	stateObjects := sdb.stateObjects
-	journal := sdb.journal
-	sdb.stateObjects = nil
-	sdb.journal = nil
+// Release Deprecated use Close
+func (sdb *IntraBlockState) Release(bool) { sdb.Close() }
 
-	if parallel {
-		go releaseResources(stateObjects, journal)
-	} else {
-		releaseResources(stateObjects, journal)
+// Close returns pooled resources (like journal, stateObjects, versioned writes)
+// back to their pools. Call this when the IntraBlockState is no longer needed.
+// Call Reset() to re-use IntraBlockState object
+// Idempotent, thread-unsafe
+func (sdb *IntraBlockState) Close() {
+	if sdb == nil || sdb.stateObjects == nil {
+		return
 	}
+
+	stateObjects, journal := sdb.stateObjects, sdb.journal
+	sdb.stateObjects, sdb.journal = nil, nil
+	sdb.logs = nil
+	sdb.revisions.reset()
+	// Safe to pool: VersionedWrites/FinalizedWrites hand out deep clones, and the
+	// set is unexported, so nothing outside holds a raw VersionedWrite.
+	sdb.versionedWrites.ReleaseAndReset()
+
+	releaseResources(stateObjects, journal)
 }
 
 func releaseResources(stateObjects map[accounts.Address]*stateObject, journal *journal) {
@@ -448,41 +452,121 @@ func releaseResources(stateObjects map[accounts.Address]*stateObject, journal *j
 	}
 }
 
-func (sdb *IntraBlockState) AddLog(log *types.Log) {
+// Log entries outlive the block that emitted them, so what one IntraBlockState
+// keeps for reuse must be capped in total: a burst of logs at a fresh tx index
+// every block would otherwise add a high-water-mark buffer per block, forever.
+// The budget holds any realistic block in full.
+const (
+	maxReusableLogEntries = 4096
+	maxReusableLogBytes   = 4 * 1024 * 1024
+	maxReusableLogDataCap = 64 * 1024
+)
+
+// resetLogs truncates the per-tx buffers, keeping entries and their Topics/Data
+// for AllocLog to reuse, up to the budget. It scans buffers to cap: a reverted
+// entry hides behind the length and is retained memory all the same.
+func (sdb *IntraBlockState) resetLogs() {
+	entries, dataBytes := 0, 0
+	slots := sdb.logs[:cap(sdb.logs)]
+	for i, slot := range slots {
+		buf := slot[:cap(slot)]
+		if entries+cap(buf) > maxReusableLogEntries {
+			slots[i] = nil // an all-nil buffer is retention too
+			continue
+		}
+		entries += cap(buf)
+		for j, lp := range buf {
+			if lp == nil {
+				continue
+			}
+			data := cap(lp.Data)
+			if data > maxReusableLogDataCap || dataBytes+data > maxReusableLogBytes {
+				buf[j] = nil
+				continue
+			}
+			dataBytes += data
+		}
+		slots[i] = buf[:0]
+	}
+}
+
+// AllocLog reserves the next log slot of the current tx and returns it sized for
+// numTopics/dataSize. The caller must write every topic and every data byte, then
+// call NotifyLog; whatever it leaves unwritten is the previous block's. The entry
+// is owned by the buffer and reused by later blocks, so it must never be handed
+// out without copying.
+func (sdb *IntraBlockState) AllocLog(addr common.Address, numTopics, dataSize int) *types.Log {
 	sdb.journal.addLogChange(sdb.txIndex)
-	log.TxIndex = hexutil.Uint(sdb.txIndex)
-	log.Index = hexutil.Uint(sdb.logSize)
-	if dbg.TraceLogs && (sdb.trace || dbg.TraceAccount(accounts.InternAddress(log.Address).Handle())) {
+	ti := sdb.txIndex + 1
+	if len(sdb.logs) <= ti {
+		sdb.logs = slices.Grow(sdb.logs, ti+1-len(sdb.logs))[:ti+1]
+	}
+	logIdx := len(sdb.logs[ti])
+	sdb.logs[ti] = slices.Grow(sdb.logs[ti], 1)[:logIdx+1]
+	logs := sdb.logs[ti]
+
+	lp := logs[logIdx] // a prior block's entry to reuse, or nil for a fresh slot
+	if lp == nil {
+		lp = &types.Log{}
+		logs[logIdx] = lp
+	}
+	lp.Address = addr
+	lp.Topics = slices.Grow(lp.Topics[:0], numTopics)[:numTopics]
+	lp.Data = slices.Grow(lp.Data[:0], dataSize)[:dataSize]
+	lp.Removed = false
+	lp.TxHash, lp.BlockHash = common.Hash{}, common.Hash{}
+	lp.TxIndex = hexutil.Uint(sdb.txIndex)
+	lp.BlockNumber = 0 // non-consensus field, assigned by the caller
+	// Block-wide, not per-tx: receipts.DeriveFields reads Logs[0].Index to
+	// recover FirstLogIndexWithinBlock.
+	lp.Index = hexutil.Uint(sdb.logIndexInBlock)
+	sdb.logIndexInBlock++
+	return lp
+}
+
+// NotifyLog runs the OnLog hook after a log's fields are populated.
+func (sdb *IntraBlockState) NotifyLog(lp *types.Log) {
+	if dbg.TraceLogs && (sdb.trace || dbg.TraceAccount(accounts.InternAddress(lp.Address).Handle())) {
 		var topics string
-		for i := 0; i < 4 && i < len(log.Topics); i++ {
-			topics += "[" + hex.EncodeToString(log.Topics[i][:]) + "]"
+		for i := 0; i < len(lp.Topics); i++ {
+			topics += "[" + hex.EncodeToString(lp.Topics[i][:]) + "]"
 		}
 		if topics == "" {
 			topics = "[]"
 		}
-		fmt.Printf("%d (%d.%d) Log: Index:%d Account:%x Topics: %s Data:%x\n", sdb.blockNum, sdb.txIndex, sdb.version, log.Index, log.Address, topics, log.Data)
+		fmt.Printf("%d (%d.%d) Log: Index:%d Account:%x Topics: %s Data:%x\n", sdb.blockNum, sdb.txIndex, sdb.version, lp.Index, lp.Address, topics, lp.Data)
 	}
 	if sdb.tracingHooks != nil && sdb.tracingHooks.OnLog != nil {
-		sdb.tracingHooks.OnLog(log)
+		// The hook may retain the value; the buffer entry is reused by later blocks.
+		sdb.tracingHooks.OnLog(lp.Copy())
 	}
-	sdb.logSize++
-	for len(sdb.logs) <= sdb.txIndex+1 {
-		sdb.logs = append(sdb.logs, nil)
-	}
-	sdb.logs[sdb.txIndex+1] = append(sdb.logs[sdb.txIndex+1], log)
 }
 
+// AddLog copies log into the next slot. TxIndex and Index are assigned by the
+// state; every other field comes from the caller.
+func (sdb *IntraBlockState) AddLog(log *types.Log) {
+	lp := sdb.AllocLog(log.Address, len(log.Topics), len(log.Data))
+	copy(lp.Topics, log.Topics)
+	copy(lp.Data, log.Data)
+	lp.Removed = log.Removed
+	lp.BlockNumber = log.BlockNumber
+	lp.TxHash, lp.BlockHash = log.TxHash, log.BlockHash
+	sdb.NotifyLog(lp)
+}
+
+// GetLogs deep-copies the tx's logs, so the result is safe to hold after the
+// emit buffer is reused.
 func (sdb *IntraBlockState) GetLogs(txIndex int, txnHash common.Hash, blockNumber uint64, blockHash common.Hash) types.Logs {
 	if txIndex+1 >= len(sdb.logs) {
 		return nil
 	}
-	logs := sdb.logs[txIndex+1]
+	logs := sdb.logs[txIndex+1].Copy()
 	for _, l := range logs {
 		l.TxHash = txnHash
-		l.BlockNumber = hexutil.Uint64(blockNumber)
 		l.BlockHash = blockHash
+		l.BlockNumber = hexutil.Uint64(blockNumber)
 	}
-	return slices.Clone(logs)
+	return logs
 }
 
 // GetRawLogs - is like GetLogs, but allow postpone calculation of `txn.Hash()`.
@@ -491,15 +575,11 @@ func (sdb *IntraBlockState) GetRawLogs(txIndex int) types.Logs {
 	if txIndex+1 >= len(sdb.logs) {
 		return nil
 	}
-	return slices.Clone(sdb.logs[txIndex+1])
+	return sdb.logs[txIndex+1].Copy()
 }
 
 func (sdb *IntraBlockState) Logs() types.Logs {
-	var logs types.Logs
-	for _, lgs := range sdb.logs {
-		logs = append(logs, lgs...)
-	}
-	return logs
+	return types.CopyLogGroups(sdb.logs)
 }
 
 // LogsRlpHash is rlpHash of Logs, without building the flattened slice.
@@ -1917,7 +1997,8 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 		}
 	}
 
-	var code []byte
+	var code refreshedCode
+	var codeSource ReadSource
 
 	if sdb.versionMap != nil {
 		account = readAccount
@@ -1949,7 +2030,7 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 			}
 		}
 
-		code, _, _, err = refreshCode(sdb, addr)
+		code, codeSource, _, err = refreshCode(sdb, addr)
 		if err != nil {
 			return nil, err
 		}
@@ -1961,15 +2042,11 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 		sdb.accountRead(addr, account, accountSource, accountVersion)
 	}
 	obj := newObject(sdb, addr, account, account)
-	if code != nil {
-		// When code is loaded from the version map (written by a prior tx),
-		// synchronise the stateObject's CodeHash with the actual code.
-		// Without this fix, the stale CodeHash causes the "revert to original"
-		// optimisation in SetCode to incorrectly delete code writes when
-		// clearing a delegation that was set by a prior transaction in the
-		// same block.
-		codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
-		obj.code = accounts.Code{Hash: codeHash, Bytes: code}
+	if code.Bytes != nil {
+		// The account record can lag a prior tx's code write, so the resolved
+		// hash wins: SetCode's revert-to-original check would drop the write.
+		codeHash := code.codeHash(codeSource, obj.data.CodeHash)
+		obj.code = accounts.Code{Hash: codeHash, Bytes: code.Bytes}
 		if codeHash != obj.data.CodeHash {
 			obj.data.CodeHash = codeHash
 			obj.original.CodeHash = codeHash
@@ -2593,48 +2670,47 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 	return nil
 }
 
-// FinalizedWrites returns the tx's committable write-set on the parallel
-// (versionMap) path: WriteSet.Finalize applies the EIP-6780 wipe and snapshots
-// the recorded IO. No journal reset here — Reset() does that before the next tx.
-func (sdb *IntraBlockState) FinalizedWrites() *WriteSet {
-	return sdb.versionedWrites.Finalize()
+// FinalizedWrites applies EIP-6780 normalization and EIP-161 filtering, then
+// returns a detached committable snapshot.
+func (sdb *IntraBlockState) FinalizedWrites(chainRules *chain.Rules) *WriteSet {
+	writes := sdb.versionedWrites.Finalize()
+	sdb.withholdCreatedEmptyAccounts(chainRules, writes)
+	return writes
 }
 
-// MergeTxIOInto folds the current transaction's recorded reads, writes and
-// accesses into io at the current tx index, without building an intermediate
-// VersionedIO.
-func (sdb *IntraBlockState) MergeTxIOInto(io *VersionedIO) {
+// withholdCreatedEmptyAccounts drops writes for accounts the tx observed as
+// absent and left empty (EIP-161): such an account is absent both before and
+// after the tx, so omitting its writes is exact and no deletion marker is
+// needed. An account that existed before is kept even when it ends empty —
+// clearing it needs an explicit delete, which commit-time normalization emits.
+func (sdb *IntraBlockState) withholdCreatedEmptyAccounts(chainRules *chain.Rules, writes *WriteSet) {
+	if sdb.blockNum == 0 || chainRules == nil {
+		return
+	}
+	for addr := range writes.address {
+		if !EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, addr) {
+			continue
+		}
+		read, ok := sdb.versionedReads.GetAddress(addr)
+		if !ok || (read.Val != nil && !read.Val.IsNil()) || !writes.createdEmpty(addr) {
+			continue
+		}
+		writes.deleteAddr(addr)
+	}
+}
+
+// MergeTxIOInto folds the current transaction's reads and supplied writes into io.
+func (sdb *IntraBlockState) MergeTxIOInto(io *VersionedIO, writes *WriteSet) {
 	version := Version{BlockNum: sdb.blockNum, TxIndex: sdb.txIndex, Incarnation: sdb.version}
-	io.mergeTx(version, sdb.versionedReads, sdb.VersionedWrites())
+	io.mergeTx(version, sdb.versionedReads, writes)
 }
 
-// FlushWritesToVersionMap publishes the current tx's writes into this IBS's own
-// versionMap, positioned by each write's (txIndex, incarnation). The single-IBS
-// block assembler resets the per-tx versionedWrites between txs (for per-tx BAL
-// recording), so without this a later tx would not observe an earlier tx's state
-// — the versionMap is the cross-tx carrier, matching how the parallel executor
-// persists each committed tx before the next reads it.
-// FlushWritesToVersionMap publishes this tx's writes to the version map on the
-// block-builder path. It flushes the RAW versionedWrites, not the SD-filtered
-// FinalizedWrites() the parallel worker flushes — so a builder map may carry a
-// same-index AddressPath + SelfDestruct=true pair the executor never produces.
-// Safe under the strict-`>` gate in versionedReadCore and the committed
-// fallback; a consumer leaning on the AccountLifecycle `>=` arm must account for
-// it (or this should be unified onto FinalizedWrites()).
-func (sdb *IntraBlockState) FlushWritesToVersionMap() {
+// FlushWritesToVersionMap publishes the supplied writes to this state's version map.
+func (sdb *IntraBlockState) FlushWritesToVersionMap(writes *WriteSet) {
 	if sdb.versionMap == nil {
 		return
 	}
-	sdb.versionMap.FlushVersionedWrites(&sdb.versionedWrites, true, "")
-}
-
-// ApplyEIP6780StorageWipe zeroes the current tx's storage writes for any account
-// it both created and self-destructed (EIP-6780/EIP-7928), so the BAL records the
-// slots as reads (net-zero) rather than changes. On the noMaterialize builder path
-// this replaces the stateObject-driven wipe MakeWriteSet performs; it is derived
-// purely from the CreateContract/SelfDestruct write cells.
-func (sdb *IntraBlockState) ApplyEIP6780StorageWipe() {
-	sdb.versionedWrites.zeroSameTxCreateDestructStorage()
+	sdb.versionMap.FlushVersionedWrites(writes, true, "")
 }
 
 func (sdb *IntraBlockState) Print(chainRules chain.Rules, all bool) {
@@ -2761,6 +2837,13 @@ func (sdb *IntraBlockState) SlotInAccessList(addr accounts.Address, slot account
 	return sdb.accessList.Contains(addr, slot)
 }
 
+// SlotKnownWarm is a conservative fast check: true means the (addr, slot) pair
+// is warm; false means unknown — callers must fall back to AddSlotToAccessList.
+// It stays cheap enough to inline at every SLOAD/SSTORE gas-charge site.
+func (sdb *IntraBlockState) SlotKnownWarm(addr accounts.Address, slot accounts.StorageKey) bool {
+	return sdb.accessList.lastSlots != nil && sdb.accessList.lastAddr == addr && slot == sdb.accessList.lastWarmSlot
+}
+
 func (sdb *IntraBlockState) MarkAddressAccess(addr accounts.Address, revertable bool) {
 	if !sdb.recordAccess {
 		return
@@ -2776,6 +2859,15 @@ func (sdb *IntraBlockState) MarkAddressAccess(addr accounts.Address, revertable 
 	} else {
 		sdb.versionedReads.access[addr] = accessOptions{revertable: revertable}
 	}
+}
+
+// StartAccessRecording enables versioned access tracking until ResetVersionedIO.
+// Block finalization re-enables it (Prepare only runs for user txs) so that an
+// address touched but left absent — e.g. a zero-amount withdrawal recipient —
+// still reaches the BAL as an access-only entry: its reads are validation-only
+// and FinalizedWrites withholds its created-empty writes.
+func (sdb *IntraBlockState) StartAccessRecording() {
+	sdb.recordAccess = true
 }
 
 // MarkReadsInternal marks all versioned reads for addr as internal.
@@ -3108,12 +3200,12 @@ func (sdb *IntraBlockState) reconstructCellFlags(obj *stateObject, addr accounts
 	if obj.code.Bytes != nil {
 		return
 	}
-	code, _, _, err := refreshCode(sdb, addr)
-	if err != nil || code == nil {
+	code, codeSource, _, err := refreshCode(sdb, addr)
+	if err != nil || code.Bytes == nil {
 		return
 	}
-	codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
-	obj.code = accounts.Code{Hash: codeHash, Bytes: code}
+	codeHash := code.codeHash(codeSource, obj.data.CodeHash)
+	obj.code = accounts.Code{Hash: codeHash, Bytes: code.Bytes}
 	obj.data.CodeHash = codeHash
 	obj.original.CodeHash = codeHash
 }

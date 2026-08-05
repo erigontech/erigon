@@ -477,7 +477,7 @@ func rawTxFromBlock(t *testing.T, m *execmoduletester.ExecModuleTester, blockNum
 		}
 		txn := b.Transactions()[0]
 		var buf bytes.Buffer
-		if err = txn.MarshalBinary(&buf); err != nil {
+		if err := txn.MarshalBinary(&buf); err != nil {
 			return err
 		}
 		encoded = buf.Bytes()

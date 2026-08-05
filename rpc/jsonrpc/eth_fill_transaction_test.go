@@ -76,6 +76,17 @@ func newLondonApiForTest(t *testing.T) *APIImpl {
 	return newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), stubTxPoolClient{}, nil)
 }
 
+func testJsonAuthorization(addr common.Address) types.JsonAuthorization {
+	return types.JsonAuthorization{}.FromAuthorization(types.Authorization{
+		ChainID: *uint256.NewInt(1337),
+		Address: addr,
+		Nonce:   1,
+		YParity: 1,
+		R:       *uint256.NewInt(0x1111),
+		S:       *uint256.NewInt(0x2222),
+	})
+}
+
 func TestFillTransactionFillsDefaults(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), stubTxPoolClient{}, nil)
@@ -260,6 +271,55 @@ func TestFillTransactionGasPriceWithAccessListIsTypeOne(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, hexutil.Uint64(types.AccessListTxType), result.Tx.Type)
+}
+
+func TestFillTransactionGasPriceWithAuthorizationList(t *testing.T) {
+	api := newLondonApiForTest(t)
+	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	gas := hexutil.Uint64(46000)
+
+	_, err := api.FillTransaction(context.Background(), ethapi.CallArgs{
+		To:                &to,
+		Gas:               &gas,
+		GasPrice:          (*hexutil.Big)(big.NewInt(10_000_000_000)),
+		AuthorizationList: []types.JsonAuthorization{testJsonAuthorization(to)},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "both gasPrice and authorizationList specified")
+}
+
+// The gasPrice guard must not reject an authorizationList paired with 1559 fees.
+func TestFillTransactionAuthorizationListIsTypeFour(t *testing.T) {
+	api := newLondonApiForTest(t)
+	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	gas := hexutil.Uint64(46000)
+
+	result, err := api.FillTransaction(context.Background(), ethapi.CallArgs{
+		To:                   &to,
+		Gas:                  &gas,
+		MaxFeePerGas:         (*hexutil.Big)(big.NewInt(10_000_000_000)),
+		MaxPriorityFeePerGas: (*hexutil.Big)(big.NewInt(1_000_000_000)),
+		AuthorizationList:    []types.JsonAuthorization{testJsonAuthorization(to)},
+	})
+	require.NoError(t, err)
+	require.Equal(t, hexutil.Uint64(types.SetCodeTxType), result.Tx.Type)
+	require.Len(t, *result.Tx.Authorizations, 1)
+}
+
+func TestFillTransactionEmptyAuthorizationList(t *testing.T) {
+	api := newLondonApiForTest(t)
+	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	gas := hexutil.Uint64(46000)
+
+	_, err := api.FillTransaction(context.Background(), ethapi.CallArgs{
+		To:                   &to,
+		Gas:                  &gas,
+		MaxFeePerGas:         (*hexutil.Big)(big.NewInt(10_000_000_000)),
+		MaxPriorityFeePerGas: (*hexutil.Big)(big.NewInt(1_000_000_000)),
+		AuthorizationList:    []types.JsonAuthorization{},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "need at least one authorization")
 }
 
 func TestFillTransactionUserGasAboveCapPreserved(t *testing.T) {

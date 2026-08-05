@@ -18,6 +18,7 @@ package execctx_test
 
 import (
 	"encoding/binary"
+	"math"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -75,6 +76,88 @@ func newSmallStateCache() *cache.StateCache {
 	return cache.NewStateCache(b, b, b, b)
 }
 
+func frontierAt(end uint64) cache.Frontier {
+	return cache.FrontierFunc(func(kv.Domain) (uint64, bool) { return end, true })
+}
+
+// seed places an entry with an exact txNum stamp through the public fill API
+// without moving the applied frontier. A positive passes admission at any
+// applied end; a negative is stamped frontier-1 by the fill path, so it must
+// be seeded while the applied end is at most txNum+1.
+func seed(sc *cache.StateCache, domain kv.Domain, k, v []byte, txNum uint64) {
+	end := uint64(math.MaxUint64)
+	if len(v) == 0 {
+		end = txNum + 1
+	}
+	sc.View(frontierAt(end)).Fill(domain, k, v, txNum)
+}
+
+type visibleEndCountingDebugTx struct {
+	kv.TemporalDebugTx
+	calls uint64
+	last  uint64
+}
+
+func (tx *visibleEndCountingDebugTx) DomainVisibleEnd(domain kv.Domain) (uint64, bool) {
+	tx.calls++
+	end, ok := tx.TemporalDebugTx.DomainVisibleEnd(domain)
+	tx.last = end
+	return end, ok
+}
+
+type visibleEndCountingRwTx struct {
+	kv.TemporalRwTx
+	debug *visibleEndCountingDebugTx
+}
+
+func (tx *visibleEndCountingRwTx) Debug() kv.TemporalDebugTx {
+	return tx.debug
+}
+
+func TestReadFill_MemoizesWritableVisibleEndUntilFlush(t *testing.T) {
+	t.Parallel()
+
+	const stepSize = uint64(16)
+	ctx := t.Context()
+	db := newTestDb(t, stepSize)
+
+	baseTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer baseTx.Rollback()
+	debug := &visibleEndCountingDebugTx{TemporalDebugTx: baseTx.Debug()}
+	rwTx := &visibleEndCountingRwTx{TemporalRwTx: baseTx, debug: debug}
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+	stateCache := newSmallStateCache()
+	t.Cleanup(stateCache.Close)
+	domains.SetStateCacheForTest(stateCache)
+
+	for i := byte(2); i <= 3; i++ {
+		missing := make([]byte, 20)
+		missing[0] = i
+		value, _, err := domains.GetLatest(kv.AccountsDomain, rwTx, missing)
+		require.NoError(t, err)
+		require.Empty(t, value)
+	}
+	require.Equal(t, uint64(1), debug.calls)
+	initialEnd := debug.last
+
+	written := make([]byte, 20)
+	written[0] = 4
+	domains.SetTxNum(20)
+	require.NoError(t, domains.DomainPut(kv.AccountsDomain, rwTx, written, encAccount(2), 20, nil))
+	require.NoError(t, domains.Flush(ctx, rwTx))
+
+	missing := make([]byte, 20)
+	missing[0] = 5
+	value, _, err := domains.GetLatest(kv.AccountsDomain, rwTx, missing)
+	require.NoError(t, err)
+	require.Empty(t, value)
+	require.Equal(t, uint64(2), debug.calls)
+	require.Greater(t, debug.last, initialEnd)
+}
+
 // During an in-flight unwind the mem overlay bounds reads of an affected key
 // by maxStep while MDBX still holds the not-yet-deleted dying row inside that
 // bound. A cache hit legitimately below the unwind floor then diverges from
@@ -99,9 +182,10 @@ func TestAssertStateCache_NoFalsePanicDuringInFlightUnwind(t *testing.T) {
 	defer sd.Close()
 	sd.SetStateCacheForTest(sc)
 
-	// A live cache entry below the unwind floor: the restored (correct) value.
-	sc.Put(kv.AccountsDomain, key, v1, 5)
 	sd.Unwind(10, &diffs) // in-flight: mem publishes maxStep=1; MDBX still holds the step-1 row
+	// A live cache entry below the unwind floor: the restored (correct) value,
+	// as a post-unwind fill would insert it.
+	seed(sc, kv.AccountsDomain, key, v1, 5)
 
 	old := dbg.AssertStateCache
 	dbg.AssertStateCache = true
@@ -156,8 +240,8 @@ func TestAssertStateCache_NoFalsePanicDuringInFlightUnwindStepZero(t *testing.T)
 	defer sd2.Close()
 	sd2.SetStateCacheForTest(sc)
 
-	sc.Put(kv.AccountsDomain, key, nil, 2)
 	sd2.Unwind(3, &diffs)
+	seed(sc, kv.AccountsDomain, key, nil, 2)
 
 	old := dbg.AssertStateCache
 	dbg.AssertStateCache = true
@@ -172,7 +256,7 @@ func TestAssertStateCache_NoFalsePanicDuringInFlightUnwindStepZero(t *testing.T)
 }
 
 // The read-fill after a fall-through read must not replace a live cache
-// entry: it never carries newer information than a flush-apply, and during an
+// entry: it never carries newer information than a post-commit apply, and during an
 // in-flight unwind the bounded DB read can even return the not-yet-deleted
 // dying row.
 func TestReadFill_DoesNotClobberLiveEntry(t *testing.T) {
@@ -197,21 +281,20 @@ func TestReadFill_DoesNotClobberLiveEntry(t *testing.T) {
 	// A live (current-epoch) entry above the read bound: the maxStep gate turns
 	// the hit into a miss, so the read falls through to the bounded DB read.
 	v3 := encAccount(3)
-	sc.Put(kv.AccountsDomain, key, v3, 40)
+	seed(sc, kv.AccountsDomain, key, v3, 40)
 
 	v, _, err := sd.GetLatest(kv.AccountsDomain, roTx, key)
 	require.NoError(t, err)
 	require.Equal(t, v2, v, "fall-through read serves the maxStep-bounded DB row")
 
-	got, ok := sc.Get(kv.AccountsDomain, key)
+	got, ok := sc.View(nil).Get(kv.AccountsDomain, key)
 	require.True(t, ok)
 	require.Equal(t, v3, got, "read-fill must not clobber the live entry")
 }
 
-// Negative results (missing account) must be stamped with the domain's
-// progress at observation time, not a synthetic step-0 bound that survives
-// every unwind.
-func TestReadFill_NegativeStampedWithProgress(t *testing.T) {
+// A negative reflects transactions below the read view's exclusive frontier,
+// so its unwind stamp is the last included txNum.
+func TestReadFill_NegativeUsesLastVisibleTxNum(t *testing.T) {
 	t.Parallel()
 
 	const stepSize = uint64(16)
@@ -237,6 +320,9 @@ func TestReadFill_NegativeStampedWithProgress(t *testing.T) {
 	roTx, err := db.BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer roTx.Rollback()
+	visibleEnd, ok := roTx.Debug().DomainVisibleEnd(kv.AccountsDomain)
+	require.True(t, ok)
+	require.NotZero(t, visibleEnd)
 	sd2, err := execctx.NewSharedDomains(ctx, roTx, log.New())
 	require.NoError(t, err)
 	defer sd2.Close()
@@ -247,12 +333,57 @@ func TestReadFill_NegativeStampedWithProgress(t *testing.T) {
 	v, _, err := sd2.GetLatest(kv.AccountsDomain, roTx, missing)
 	require.NoError(t, err)
 	require.Empty(t, v)
-	_, ok := sc.Get(kv.AccountsDomain, missing)
+	_, ok = sc.View(nil).Get(kv.AccountsDomain, missing)
 	require.True(t, ok, "the negative result must be cached")
 
-	// The domain's progress is 100 (the committed write), so any unwind at or
-	// below it must drop the negative instead of letting it outlive the fact.
-	sc.Unwind(50)
-	_, ok = sc.Get(kv.AccountsDomain, missing)
-	require.False(t, ok, "a negative observed at progress 100 must not survive an unwind to 50")
+	sc.Applier().Unwind(visibleEnd)
+	_, ok = sc.View(nil).Get(kv.AccountsDomain, missing)
+	require.True(t, ok, "an unwind starting after the read view must preserve the negative")
+
+	sc.Applier().Unwind(visibleEnd - 1)
+	_, ok = sc.View(nil).Get(kv.AccountsDomain, missing)
+	require.False(t, ok, "an unwind of the view's last included txNum must invalidate the negative")
+}
+
+type fakeForbidder struct{ called bool }
+
+func (f *fakeForbidder) ForbidVisibilityLowering() { f.called = true }
+
+type fakeHasAgg struct{ f *fakeForbidder }
+
+func (h fakeHasAgg) Agg() any { return h.f }
+
+type fakeHasBadAgg struct{}
+
+func (fakeHasBadAgg) Agg() any { return struct{}{} }
+
+// The guard is load-bearing: for a fill-enabled cache it must either bind the
+// invariant or fail loudly — never silently drop it on a DB shape mismatch.
+// A nil or apply-only cache needs no guard at all.
+func TestGuardAggregatorForCache(t *testing.T) {
+	sc := newSmallStateCache()
+	t.Cleanup(sc.Close)
+
+	f := &fakeForbidder{}
+	execctx.GuardAggregatorForCache(fakeHasAgg{f}, sc)
+	require.True(t, f.called)
+
+	require.NotPanics(t, func() { execctx.GuardAggregatorForCache(struct{}{}, nil) },
+		"no cache, no invariant to bind — shape is irrelevant")
+	require.Panics(t, func() { execctx.GuardAggregatorForCache(struct{}{}, sc) },
+		"a db that cannot produce its aggregator must fail loudly, not drop the guard")
+	require.Panics(t, func() { execctx.GuardAggregatorForCache(fakeHasBadAgg{}, sc) },
+		"an aggregator without ForbidVisibilityLowering must fail loudly, not drop the guard")
+}
+
+// An apply-only cache (STATE_CACHE_FILLS=false) has no fills for a lowered
+// frontier to poison, so the guard must not constrain the aggregator.
+func TestGuardAggregatorForCache_ApplyOnlySkips(t *testing.T) {
+	t.Setenv("STATE_CACHE_FILLS", "false")
+	sc := newSmallStateCache()
+	t.Cleanup(sc.Close)
+
+	f := &fakeForbidder{}
+	execctx.GuardAggregatorForCache(fakeHasAgg{f}, sc)
+	require.False(t, f.called)
 }

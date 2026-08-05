@@ -215,11 +215,12 @@ func TestFilterAddressIntersection(t *testing.T) {
 		once.Do(func() { block.SetCoinbase(common.Address{4}) })
 
 		var rcv common.Address
-		if i < 5 {
+		switch {
+		case i < 5:
 			rcv = toAddress1
-		} else if i < 10 {
+		case i < 10:
 			rcv = toAddress2
-		} else {
+		default:
 			rcv = other
 		}
 

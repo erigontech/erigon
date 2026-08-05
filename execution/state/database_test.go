@@ -130,7 +130,7 @@ func TestCreate2Revive(t *testing.T) {
 
 	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -152,7 +152,7 @@ func TestCreate2Revive(t *testing.T) {
 
 	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -171,7 +171,7 @@ func TestCreate2Revive(t *testing.T) {
 	var check2 uint256.Int
 	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(create2address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -194,7 +194,7 @@ func TestCreate2Revive(t *testing.T) {
 	}
 	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(create2address); err != nil {
 			t.Error(err)
 		} else if exist {
@@ -210,7 +210,7 @@ func TestCreate2Revive(t *testing.T) {
 	}
 	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(create2address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -355,7 +355,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -377,7 +377,7 @@ func TestCreate2Polymorth(t *testing.T) {
 
 	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -394,7 +394,7 @@ func TestCreate2Polymorth(t *testing.T) {
 
 	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(create2address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -426,7 +426,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	}
 	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(create2address); err != nil {
 			t.Error(err)
 		} else if exist {
@@ -442,7 +442,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	}
 	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(create2address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -474,7 +474,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	}
 	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(create2address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -595,7 +595,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -618,7 +618,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	var correctValueX uint256.Int
 	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -640,7 +640,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 
 	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
 		} else if exist {
@@ -655,7 +655,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	}
 	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -754,7 +754,7 @@ func TestReorgOverStateChange(t *testing.T) {
 
 	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -779,7 +779,7 @@ func TestReorgOverStateChange(t *testing.T) {
 	var correctValueX uint256.Int
 	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -805,7 +805,7 @@ func TestReorgOverStateChange(t *testing.T) {
 	}
 	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -898,7 +898,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 
 	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -920,7 +920,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 	var check0 uint256.Int
 	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -959,7 +959,7 @@ func TestReproduceCrash(t *testing.T) {
 	tsr := state.NewReaderV3(sd.AsGetter(tx))
 
 	intraBlockState := state.New(tsr)
-	defer intraBlockState.Release(false)
+	defer intraBlockState.Close()
 	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
 	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
@@ -1050,7 +1050,7 @@ func TestEip2200Gas(t *testing.T) {
 	var balanceBefore uint256.Int
 	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -1073,7 +1073,7 @@ func TestEip2200Gas(t *testing.T) {
 
 	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -1152,7 +1152,7 @@ func TestWrongIncarnation(t *testing.T) {
 
 	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -1187,7 +1187,7 @@ func TestWrongIncarnation(t *testing.T) {
 		}
 
 		st := state.New(stateReader)
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -1313,7 +1313,7 @@ func TestWrongIncarnation2(t *testing.T) {
 
 	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(address); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -1335,7 +1335,7 @@ func TestWrongIncarnation2(t *testing.T) {
 
 	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -1389,7 +1389,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 
 	r, tsw := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 	intraBlockState := state.New(r)
-	defer intraBlockState.Release(false)
+	defer intraBlockState.Close()
 	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
 
@@ -1437,7 +1437,7 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 
 	intraBlockState := state.New(r)
-	defer intraBlockState.Release(false)
+	defer intraBlockState.Close()
 	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
 
@@ -1475,7 +1475,7 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 
 	intraBlockState := state.New(r)
-	defer intraBlockState.Release(false)
+	defer intraBlockState.Close()
 	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
 
@@ -1655,7 +1655,7 @@ func TestRecreateAndRewind(t *testing.T) {
 	var check0 uint256.Int
 	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(accounts.InternAddress(phoenixAddress)); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -1677,7 +1677,7 @@ func TestRecreateAndRewind(t *testing.T) {
 	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(accounts.InternAddress(phoenixAddress)); err != nil {
 			t.Error(err)
 		} else if !exist {
@@ -1699,7 +1699,7 @@ func TestRecreateAndRewind(t *testing.T) {
 	}
 	err = m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		defer st.Release(false)
+		defer st.Close()
 		if exist, err := st.Exist(accounts.InternAddress(phoenixAddress)); err != nil {
 			t.Error(err)
 		} else if !exist {

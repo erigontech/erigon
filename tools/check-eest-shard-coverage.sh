@@ -1,23 +1,15 @@
 #!/usr/bin/env bash
 # Fails when the EEST shards stop covering their corpus, so a fixtures bump
 # can't silently drop tests. It targets the failures a normal test run does NOT
-# surface — a fork or EIP quietly dropped while the shard still runs enough tests
-# to look green. Two invariants, read from the live config and the corpus
+# surface — a fork quietly dropped while the shard still runs enough tests to
+# look green. The partition is read from the live config and corpus
 # manifests (.meta/index.json); nothing is hard-coded:
 #
-#   1. partition (stable): the fork-split families each run every fork exactly
-#      once — spec race shards (eest-spec-shards.yml `run` regexes) over
-#      blockchain_test, and hive consume-enginex (test-hive-eest.yml sim-limit)
-#      over blockchain_test_engine_x. A gap silently never runs a fork; an overlap
-#      runs it twice.
-#   2. EIP-filter liveness + completeness (devnet): the hive glamsterdam-devnet
-#      sim-limit hand-picks the target fork's EIPs. Liveness — every token still
-#      matches a fixture (a renamed/dropped EIP can't silently shrink the shard
-#      while it still runs enough tests to look healthy). Completeness — every EIP
-#      module under the source-fork dir(s) the filter targets is in the filter, so
-#      a NEW EIP added to that fork on a devnet bump can't be silently left out.
-#      The target dir(s) are derived from where the filter's own EIPs live (no
-#      hard-coded fork name).
+# The fork-split families each run every fork exactly once — spec race shards
+# (eest-spec-shards.yml `run` regexes) over blockchain_test, and stable/devnet
+# hive consume-enginex shards (test-hive-eest.yml sim-limit) over
+# blockchain_test_engine_x. A gap silently never runs a fork; an overlap runs
+# it twice.
 #
 # The devnet check is skipped (not failed) when the devnet corpus isn't staged,
 # so a stable-only local run still works; `make check-eest-shards` stages both.
@@ -76,8 +68,9 @@ check_race_mode_parity() {
 		}'
 }
 hive_consume_enginex_regexes() {
+	local fixture_set="$1"
 	yq -o=json '.jobs.test-hive-eest.strategy.matrix.include' "$hive" \
-		| jq -r '.[] | select(.sim=="consume-enginex" and .["fixtures-tarball"]=="eest_stable") | "\(.shard)=\(.["sim-limit"])"' \
+		| jq -r --arg fixture_set "$fixture_set" '.[] | select(.sim=="consume-enginex" and .["fixtures-tarball"]==$fixture_set) | "\(.shard)=\(.["sim-limit"])"' \
 		| sort -u
 }
 
@@ -110,61 +103,15 @@ check_partition() {
 	' <(printf '%s\n' "$regexes") -
 }
 
-# --- 2. EIP-filter liveness + completeness ---
-check_hive_eip_filter() {
-	local index="$1"
-	echo "==== EIP filter: hive glamsterdam-devnet (liveness + target-fork completeness) ===="
-	local simlimit
-	simlimit=$(yq -o=json '.jobs.test-hive-eest.strategy.matrix.include' "$hive" \
-		| jq -r '.[] | select(.shard=="glamsterdam-devnet") | .["sim-limit"]' | head -1)
-	[[ -n "$simlimit" ]] || { echo "  glamsterdam-devnet shard not found" >&2; return 1; }
-	local rc=0 e hits ids targets filter
-	filter=$(printf '%s' "$simlimit" | grep -oE '[0-9]{4,}' | sort -u)
-	ids=$(mktemp); targets=$(mktemp)
-	jq -r '.test_cases[] | select(.format=="blockchain_test_engine") | .id' "$index" > "$ids"
-	# liveness: each filter token must match a fixture; collect its source-fork dir
-	for e in $filter; do
-		hits=$(grep -cE "eip$e" "$ids" || true)
-		if [[ "$hits" -eq 0 ]]; then echo "  DEAD TOKEN  eip$e  matches 0 devnet engine tests"; rc=1; continue; fi
-		printf '  live  eip%-6s %6d engine tests\n' "$e" "$hits"
-		grep -oE "tests/[a-z0-9]+/eip$e" "$ids" | grep -oE 'tests/[a-z0-9]+/' >> "$targets"
-	done
-	# completeness: every EIP module under those target dir(s) must be in the filter
-	local tdirs corpus missing d n
-	tdirs=$(sort -u "$targets")
-	if [[ -z "${tdirs//[[:space:]]/}" ]]; then
-		echo "  ERROR: no target fork dir derived from filter EIPs (fixture id path format changed?)" >&2
-		rm -f "$ids" "$targets"; return 1
-	fi
-	echo "  target source-fork dir(s): $(printf '%s ' $tdirs)"
-	corpus=$(for d in $tdirs; do grep -oE "^${d}eip[0-9]+" "$ids"; done | grep -oE '[0-9]+' | sort -u)
-	if [[ -z "${corpus//[[:space:]]/}" ]]; then
-		echo "  ERROR: no EIP modules found under target dir(s)" >&2
-		rm -f "$ids" "$targets"; return 1
-	fi
-	missing=$(comm -23 <(printf '%s\n' $corpus) <(printf '%s\n' $filter))
-	if [[ -n "$missing" ]]; then
-		for e in $missing; do
-			n=$(grep -cE "eip$e" "$ids" || true)
-			echo "  MISSING FROM FILTER  eip$e  ($n engine tests under the target fork, not matched by sim-limit)"
-		done
-		echo "  => add the new EIP(s) to the glamsterdam-devnet sim-limit in .github/workflows/test-hive-eest.yml" >&2
-		rc=1
-	fi
-	rm -f "$ids" "$targets"
-	[[ "$rc" -eq 0 ]] && echo "  OK: all filter tokens live and cover every EIP module under the target fork dir(s)"
-	return $rc
-}
-
 rc=0
 check_partition "spec race shards (blocktest --run)"  "$stable_index" blockchain_test        ""                     "$(race_regexes)" || rc=1
 echo
 check_race_mode_parity || rc=1
 echo
-check_partition "hive consume-enginex (sim-limit)"    "$stable_index" blockchain_test_engine_x "eels/consume-enginex/" "$(hive_consume_enginex_regexes)" || rc=1
+check_partition "hive stable consume-enginex (sim-limit)" "$stable_index" blockchain_test_engine_x "eels/consume-enginex/" "$(hive_consume_enginex_regexes eest_stable)" || rc=1
 echo
 if [[ -f "$devnet_index" ]]; then
-	check_hive_eip_filter "$devnet_index" || rc=1
+	check_partition "hive devnet consume-enginex (sim-limit)" "$devnet_index" blockchain_test_engine_x "eels/consume-enginex/" "$(hive_consume_enginex_regexes eest_devnet)" || rc=1
 	echo
 else
 	echo "==== devnet check SKIPPED (index not found: $devnet_index) ===="
@@ -173,6 +120,6 @@ fi
 if (( rc == 0 )); then
 	echo "EEST shard coverage OK."
 else
-	echo "EEST shard coverage FAILED: fix the race run regexes in tools/eest-spec-shards.yml and/or the hive sim-limit in .github/workflows/test-hive-eest.yml." >&2
+	echo "EEST shard coverage FAILED: fix the race run regexes in tools/eest-spec-shards.yml or the hive matrix in .github/workflows/test-hive-eest.yml." >&2
 fi
 exit $rc

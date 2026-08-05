@@ -23,8 +23,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -58,4 +61,20 @@ func TestOverlayGetBeginEnd(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint64(1), begin)
 	require.Equal(t, uint64(1), end)
+}
+
+func TestCallConstructorReturnsOverlayError(t *testing.T) {
+	m, _, contractAddress, _ := chainWithDeployedContract(t)
+	base := newBaseApiForTest(m)
+	api := NewOverlayAPI(
+		base,
+		m.DB,
+		&rpccfg.OverlayApiConfig{GasCap: 1_000_000},
+		NewOtterscanAPI(base, m.DB, 25),
+	)
+	code := hexutil.Bytes{byte(vm.INVALID)}
+	result, err := api.CallConstructor(m.Ctx, contractAddress, &code)
+	require.Nil(t, result)
+	var invalidOpcode *vm.ErrInvalidOpCode
+	require.ErrorAs(t, err, &invalidOpcode)
 }

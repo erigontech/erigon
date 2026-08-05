@@ -147,7 +147,7 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, parentSD *execct
 	filterReader := state.NewReaderV3(filterSd.AsGetter(filterMb))
 
 	ibs := state.New(stateReader)
-	defer ibs.Release(false)
+	defer ibs.Close()
 	ibs.SetTxContext(current.Header.Number.Uint64(), -1)
 
 	current.PayloadId = cfg.payloadId
@@ -328,7 +328,7 @@ func getNextTransactions(
 		// EIP-8037: runtime state gas is enforced by post-execution rollback
 		// in the block assembler.
 		txnprovider.WithGasTarget(mdgas.NewFullMdGas(
-			header.GasLimit-gasUsed.BlockRegular,
+			header.GasLimit-gasUsed.BlockExecution,
 			header.GasLimit-gasUsed.BlockState,
 			remainingBlobGas,
 		)),

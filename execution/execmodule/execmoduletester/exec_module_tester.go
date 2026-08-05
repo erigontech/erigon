@@ -804,7 +804,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		hook,
 		accum,
 		mock.StateCache,
-		mock.domainCache,
+		0, // stateCacheBudget: production default; caches jump-grow on demand
 		logger,
 		engine,
 		cfg.Sync,

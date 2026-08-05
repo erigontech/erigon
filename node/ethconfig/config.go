@@ -127,16 +127,17 @@ func init() {
 			home = user.HomeDir
 		}
 	}
-	if runtime.GOOS == "darwin" {
+	switch runtime.GOOS {
+	case "darwin":
 		Defaults.Ethash.DatasetDir = filepath.Join(home, "Library", "erigon-ethash")
-	} else if runtime.GOOS == "windows" {
+	case "windows":
 		localappdata := os.Getenv("LOCALAPPDATA")
 		if localappdata != "" {
 			Defaults.Ethash.DatasetDir = filepath.Join(localappdata, "erigon-thash")
 		} else {
 			Defaults.Ethash.DatasetDir = filepath.Join(home, "AppData", "Local", "erigon-ethash")
 		}
-	} else {
+	default:
 		if xdgDataDir := os.Getenv("XDG_DATA_HOME"); xdgDataDir != "" {
 			Defaults.Ethash.DatasetDir = filepath.Join(xdgDataDir, "erigon-ethash")
 		}

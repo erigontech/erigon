@@ -517,7 +517,14 @@ type TemporalDebugTx interface {
 	// HistoryStartFrom return the earliest known txnum in history of a given domain
 	HistoryStartFrom(domainName Domain) uint64
 
+	// DomainProgress is a best-effort progress number for reporting: it mixes
+	// an exclusive files end with an inclusive DB txNum (so it is ±1 depending
+	// on which side wins) and falls back to step granularity when history is
+	// disabled. For an exact bound use DomainVisibleEnd.
 	DomainProgress(domain Domain) (txNum uint64)
+	// DomainVisibleEnd returns the exact exclusive txNum bound of the tx's
+	// domain read view. ok is false when the backend cannot provide an exact bound.
+	DomainVisibleEnd(domain Domain) (visibleEnd uint64, ok bool)
 	IIProgress(name InvertedIdx) (txNum uint64)
 	StepSize() uint64
 	// Retire retires frozen history files entirely below their
@@ -621,6 +628,9 @@ type CanReopenUnderlyingFilesTx interface {
 	ForceReopenUnderlyingFilesTx()
 }
 
+// TemporalPutDel does not borrow `k`/`v`/`prevVal` past the call: an
+// implementation that keeps them must copy. Callers are free to hand it reused
+// scratch, and some do.
 type TemporalPutDel interface {
 	// DomainPut
 	// Optimizations:

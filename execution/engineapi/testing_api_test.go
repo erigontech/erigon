@@ -54,6 +54,7 @@ import (
 
 type stubExecutionModule struct {
 	getHeaderFunc         func(ctx context.Context, blockHash *common.Hash, blockNumber *uint64) (*types.Header, error)
+	headerNumberFunc      func(ctx context.Context, hash common.Hash) (*uint64, error)
 	assembleBlockFunc     func(ctx context.Context, params *builder.Parameters) (execmodule.AssembleBlockResult, error)
 	getAssembledBlockFunc func(ctx context.Context, payloadID uint64) (execmodule.AssembledBlockResult, error)
 	getForkChoiceFunc     func(ctx context.Context) (execmodule.ForkChoiceState, error)
@@ -139,7 +140,10 @@ func (s *stubExecutionModule) GetPayloadBodiesByRange(_ context.Context, _, _ ui
 func (s *stubExecutionModule) IsCanonicalHash(_ context.Context, _ common.Hash) (bool, error) {
 	return false, nil
 }
-func (s *stubExecutionModule) GetHeaderHashNumber(_ context.Context, _ common.Hash) (*uint64, error) {
+func (s *stubExecutionModule) GetHeaderHashNumber(ctx context.Context, hash common.Hash) (*uint64, error) {
+	if s.headerNumberFunc != nil {
+		return s.headerNumberFunc(ctx, hash)
+	}
 	return nil, nil
 }
 func (s *stubExecutionModule) GetTD(_ context.Context, _ *common.Hash, _ *uint64) (*uint256.Int, error) {
@@ -200,6 +204,25 @@ func preCancunChainConfig() *chain.Config {
 	cfg := allForksChainConfig()
 	cfg.CancunTime = nil
 	cfg.PragueTime = nil
+	cfg.OsakaTime = nil
+	cfg.AmsterdamTime = nil
+	return cfg
+}
+
+// prePragueChainConfig returns a chain config where Cancun is active but
+// Prague and later forks are NOT activated.
+func prePragueChainConfig() *chain.Config {
+	cfg := allForksChainConfig()
+	cfg.PragueTime = nil
+	cfg.OsakaTime = nil
+	cfg.AmsterdamTime = nil
+	return cfg
+}
+
+// preOsakaChainConfig returns a chain config where Prague is active but
+// Osaka and later forks are NOT activated.
+func preOsakaChainConfig() *chain.Config {
+	cfg := allForksChainConfig()
 	cfg.OsakaTime = nil
 	cfg.AmsterdamTime = nil
 	return cfg
@@ -1412,6 +1435,49 @@ func TestValidatePayloadAttributesPostFCU_AmsterdamGate(t *testing.T) {
 		err := srv.validatePayloadAttributesPostFCU(clparams.FuluVersion, attrs)
 		require.NoError(t, err)
 	})
+}
+
+func TestForkchoiceUpdatedReturnsSyncingForIncompleteExecution(t *testing.T) {
+	t.Parallel()
+
+	headHash := common.Hash{0x1}
+	headNumber := uint64(1)
+	header := &types.Header{}
+	header.Number.SetUint64(headNumber)
+
+	for _, executionStatus := range []execmodule.ExecutionStatus{
+		execmodule.ExecutionStatusMissingSegment,
+		execmodule.ExecutionStatusTooFarAway,
+	} {
+		t.Run(executionStatus.String(), func(t *testing.T) {
+			t.Parallel()
+
+			stub := &stubExecutionModule{
+				getHeaderFunc: getHeaderReturning(headHash, header),
+				headerNumberFunc: func(context.Context, common.Hash) (*uint64, error) {
+					return &headNumber, nil
+				},
+				updateForkChoiceFunc: func(context.Context, common.Hash, common.Hash, common.Hash) (execmodule.ForkChoiceResult, error) {
+					return execmodule.ForkChoiceResult{
+						Status:          executionStatus,
+						LatestValidHash: common.Hash{0x2},
+						ValidationError: "not validated",
+					}, nil
+				},
+			}
+			cfg := preCancunChainConfig()
+			ctx := context.Background()
+			downloader := engine_block_downloader.NewEngineBlockDownloader(ctx, log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
+			srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, false, true, nil, nil, 0, 0)
+
+			resp, err := srv.ForkchoiceUpdatedV1(ctx, &engine_types.ForkChoiceState{HeadHash: headHash}, nil)
+			require.NoError(t, err)
+			require.Equal(t, engine_types.SyncingStatus, resp.PayloadStatus.Status)
+			require.Nil(t, resp.PayloadStatus.LatestValidHash)
+			require.Nil(t, resp.PayloadStatus.ValidationError)
+			require.Nil(t, resp.PayloadId)
+		})
+	}
 }
 
 func ptrUint64(v uint64) *uint64 {

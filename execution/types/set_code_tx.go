@@ -240,16 +240,16 @@ func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return err
 	}
-	if err = s.ReadUint256(&tx.ChainID); err != nil {
+	if err := s.ReadUint256(&tx.ChainID); err != nil {
 		return err
 	}
 	if tx.Nonce, err = s.Uint64(); err != nil {
 		return err
 	}
-	if err = s.ReadUint256(&tx.TipCap); err != nil {
+	if err := s.ReadUint256(&tx.TipCap); err != nil {
 		return err
 	}
-	if err = s.ReadUint256(&tx.FeeCap); err != nil {
+	if err := s.ReadUint256(&tx.FeeCap); err != nil {
 		return err
 	}
 	if tx.GasLimit, err = s.Uint64(); err != nil {
@@ -267,7 +267,7 @@ func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	tx.To = &to
-	if err = s.ReadUint256(&tx.Value); err != nil {
+	if err := s.ReadUint256(&tx.Value); err != nil {
 		return err
 	}
 	if tx.Data, err = s.Bytes(); err != nil {
@@ -275,24 +275,24 @@ func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {
 	}
 	// decode AccessList
 	tx.AccessList = AccessList{}
-	if err = decodeAccessList(&tx.AccessList, s); err != nil {
+	if err := decodeAccessList(&tx.AccessList, s); err != nil {
 		return err
 	}
 
 	// decode authorizations
 	tx.Authorizations = make([]Authorization, 0)
-	if err = decodeAuthorizations(&tx.Authorizations, s); err != nil {
+	if err := decodeAuthorizations(&tx.Authorizations, s); err != nil {
 		return err
 	}
 
 	// decode V
-	if err = s.ReadUint256(&tx.V); err != nil {
+	if err := s.ReadUint256(&tx.V); err != nil {
 		return err
 	}
-	if err = s.ReadUint256(&tx.R); err != nil {
+	if err := s.ReadUint256(&tx.R); err != nil {
 		return err
 	}
-	if err = s.ReadUint256(&tx.S); err != nil {
+	if err := s.ReadUint256(&tx.S); err != nil {
 		return err
 	}
 	return s.ListEnd()
