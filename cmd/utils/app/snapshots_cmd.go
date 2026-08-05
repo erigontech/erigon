@@ -2130,6 +2130,10 @@ func checkIfCaplinSnapshotsPublishable(dirs datadir.Dirs, emptyOk bool) error {
 }
 
 func checkIfBlockSnapshotsPublishable(snapDir string) error {
+	if err := checkNoDuplicateFileVersions(snapDir); err != nil {
+		return err
+	}
+
 	var sum uint64
 	var maxTo uint64
 	verMap := map[string]map[string]version.Versions{
@@ -2291,9 +2295,54 @@ var (
 	ErrSnapGap             = errors.New("gap in snapshot ranges")
 	ErrSnapMissingFile     = errors.New("missing snapshot file")
 	ErrSnapMaxStepMismatch = errors.New("max step mismatch across directories")
+
+	ErrSnapDuplicateVersions = errors.New("same snapshot range published under multiple versions")
 )
 
+// checkNoDuplicateFileVersions rejects publishing the same file twice under different
+// versions (e.g. v1.0-code.0-32.vi next to v1.1-code.0-32.vi): readers pick the highest
+// version, so the lower one is dead weight in the torrent and its hash mapping is ambiguous.
+// Subdirectories are skipped, so callers pass each snapshot directory they own.
+func checkNoDuplicateFileVersions(dirPaths ...string) error {
+	for _, dirPath := range dirPaths {
+		seen := map[string]string{}
+		if err := filepath.WalkDir(dirPath, func(path string, info fs.DirEntry, err error) error {
+			if err != nil {
+				if os.IsNotExist(err) { //it's ok if some file get removed during walk
+					return nil
+				}
+				return err
+			}
+			if info.IsDir() {
+				if path == dirPath {
+					return nil
+				}
+				return fs.SkipDir
+			}
+			if filepath.Ext(info.Name()) == ".tmp" {
+				return nil
+			}
+			masked, err := version.ReplaceVersionWithMask(info.Name())
+			if err != nil {
+				return nil // unversioned file, e.g. salt-blocks.txt
+			}
+			if prev, ok := seen[masked]; ok {
+				return fmt.Errorf("%w: %s and %s in %s", ErrSnapDuplicateVersions, prev, info.Name(), dirPath)
+			}
+			seen[masked] = info.Name()
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func checkStateSnapshotFiles(dirs datadir.Dirs, persistReceiptCache, commitmentHistory bool) error {
+	if err := checkNoDuplicateFileVersions(dirs.SnapDomain, dirs.SnapHistory, dirs.SnapIdx, dirs.SnapAccessors); err != nil {
+		return err
+	}
+
 	var maxStepDomain uint64 // across all files in SnapDomain
 	var accFiles []snaptype.FileInfo
 

@@ -809,3 +809,102 @@ func Test_CheckStateSnapshotFiles_IdxDomainMaxStepMismatch(t *testing.T) {
 	err := checkStateSnapshotFiles(dirs, false, false)
 	require.ErrorIs(t, err, ErrSnapMaxStepMismatch)
 }
+
+// --- Duplicate version checks: same type and range published under two versions ---
+
+func Test_CheckStateSnapshotFiles_DuplicateVersionsDomainKV(t *testing.T) {
+	t.Parallel()
+	dirs := setupWorkingStateMockDatadir(t)
+	createMockFile(t, dirs.SnapDomain, "v1.2-storage.0-128.kv")
+	err := checkStateSnapshotFiles(dirs, false, false)
+	require.ErrorIs(t, err, ErrSnapDuplicateVersions)
+}
+
+func Test_CheckStateSnapshotFiles_DuplicateVersionsDomainBT(t *testing.T) {
+	t.Parallel()
+	dirs := setupWorkingStateMockDatadir(t)
+	createMockFile(t, dirs.SnapDomain, "v1.2-accounts.0-128.bt")
+	err := checkStateSnapshotFiles(dirs, false, false)
+	require.ErrorIs(t, err, ErrSnapDuplicateVersions)
+}
+
+func Test_CheckStateSnapshotFiles_DuplicateVersionsHistoryV(t *testing.T) {
+	t.Parallel()
+	dirs := setupWorkingStateMockDatadir(t)
+	createMockFile(t, dirs.SnapHistory, "v2.0-accounts.0-128.v")
+	err := checkStateSnapshotFiles(dirs, false, false)
+	require.ErrorIs(t, err, ErrSnapDuplicateVersions)
+}
+
+func Test_CheckStateSnapshotFiles_DuplicateVersionsIdxEF(t *testing.T) {
+	t.Parallel()
+	dirs := setupWorkingStateMockDatadir(t)
+	createMockFile(t, dirs.SnapIdx, "v2.1-logaddrs.0-128.ef")
+	err := checkStateSnapshotFiles(dirs, false, false)
+	require.ErrorIs(t, err, ErrSnapDuplicateVersions)
+}
+
+func Test_CheckStateSnapshotFiles_DuplicateVersionsAccessorVI(t *testing.T) {
+	t.Parallel()
+	dirs := setupWorkingStateMockDatadir(t)
+	createMockFile(t, dirs.SnapAccessors, "v1.2-code.0-128.vi")
+	err := checkStateSnapshotFiles(dirs, false, false)
+	require.ErrorIs(t, err, ErrSnapDuplicateVersions)
+}
+
+func Test_CheckStateSnapshotFiles_DuplicateVersionsAccessorEFI(t *testing.T) {
+	t.Parallel()
+	dirs := setupWorkingStateMockDatadir(t)
+	createMockFile(t, dirs.SnapAccessors, "v1.2-tracesto.0-128.efi")
+	err := checkStateSnapshotFiles(dirs, false, false)
+	require.ErrorIs(t, err, ErrSnapDuplicateVersions)
+}
+
+func Test_CheckStateSnapshotFiles_DuplicateVersionsTorrent(t *testing.T) {
+	t.Parallel()
+	dirs := setupWorkingStateMockDatadir(t)
+	createMockFile(t, dirs.SnapAccessors, "v1.2-code.0-128.vi.torrent")
+	err := checkStateSnapshotFiles(dirs, false, false)
+	require.ErrorIs(t, err, ErrSnapDuplicateVersions)
+}
+
+// A .tmp leftover isn't a published file, so it must not trip the duplicate check.
+func Test_CheckStateSnapshotFiles_TmpFileIsNotDuplicate(t *testing.T) {
+	t.Parallel()
+	dirs := setupWorkingStateMockDatadir(t)
+	createMockFile(t, dirs.SnapDomain, "v1.2-storage.0-128.kv.tmp")
+	err := checkStateSnapshotFiles(dirs, false, false)
+	require.NoError(t, err)
+}
+
+// --- Block snapshot checks ---
+
+func Test_CheckIfBlockSnapshotsPublishable_SuccessCase(t *testing.T) {
+	t.Parallel()
+	dirs := setupWorkingStateMockDatadir(t)
+	require.NoError(t, checkIfBlockSnapshotsPublishable(dirs.Snap))
+}
+
+func Test_CheckIfBlockSnapshotsPublishable_DuplicateVersionsSeg(t *testing.T) {
+	t.Parallel()
+	dirs := setupWorkingStateMockDatadir(t)
+	createMockFile(t, dirs.Snap, "v1.2-000000-000100-headers.seg")
+	err := checkIfBlockSnapshotsPublishable(dirs.Snap)
+	require.ErrorIs(t, err, ErrSnapDuplicateVersions)
+}
+
+func Test_CheckIfBlockSnapshotsPublishable_DuplicateVersionsIdx(t *testing.T) {
+	t.Parallel()
+	dirs := setupWorkingStateMockDatadir(t)
+	createMockFile(t, dirs.Snap, "v2.1-000000-000100-bodies.idx")
+	err := checkIfBlockSnapshotsPublishable(dirs.Snap)
+	require.ErrorIs(t, err, ErrSnapDuplicateVersions)
+}
+
+// The block check owns the snapshots root only; state subdirectories are the state check's business.
+func Test_CheckIfBlockSnapshotsPublishable_IgnoresStateSubdirs(t *testing.T) {
+	t.Parallel()
+	dirs := setupWorkingStateMockDatadir(t)
+	createMockFile(t, dirs.SnapDomain, "v1.2-storage.0-128.kv")
+	require.NoError(t, checkIfBlockSnapshotsPublishable(dirs.Snap))
+}
