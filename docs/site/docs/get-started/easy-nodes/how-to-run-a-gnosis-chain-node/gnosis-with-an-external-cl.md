@@ -13,7 +13,7 @@ Alternatively, you can also run a Gnosis Chain node as an Execution Layer (EL) a
 Start Erigon adding the `--externalcl` flag.
 
 ```bash
-erigon --chain=gnosis --externalcl 
+erigon --chain=gnosis --externalcl
 ```
 
 If your CL client is on a different device, add the following flags:
@@ -25,11 +25,15 @@ If your CL client is on a different device, add the following flags:
 
 Install Lighthouse, following instructions at [https://lighthouse-book.sigmaprime.io/installation.html](https://lighthouse-book.sigmaprime.io/installation.html).
 
-* Compile it with a feature flag to enable Gnosis Chain:
+The official pre-built binaries already support Gnosis Chain and Chiado, so no special build is required. You can confirm this with `lighthouse --help`, which lists `gnosis` and `chiado` among the accepted `--network` values.
+
+:::note
+Only if you build Lighthouse **from source** do you need to enable the Gnosis Chain support explicitly, since it is not one of the default Cargo features:
 
 ```bash
 env FEATURES=gnosis make
 ```
+:::
 
 ### 3. Sync Lighthouse to a public checkpoint
 
@@ -44,30 +48,26 @@ To communicate with Erigon, the execution endpoint must be specified as `<erigon
 
 1.  Lighthouse must point to the [JWT secret](../../../fundamentals/jwt) automatically created by Erigon in the `--datadir` directory. In the following example the default data directory is used.
 
-    Copy
-
-    ```text
-     lighthouse \
-     --network gnosis beacon_node \
-     --datadir=data \
-     --http \
-     --execution-endpoint http://localhost:8551 \
-     --execution-jwt /home/user/.local/share/erigon/jwt.hex \
-     --checkpoint-sync-url "https://checkpoint.gnosischain.com"
+    ```bash
+    lighthouse bn \
+    --network gnosis \
+    --datadir=data \
+    --http \
+    --execution-endpoint http://localhost:8551 \
+    --execution-jwt /home/user/.local/share/erigon/jwt.hex \
+    --checkpoint-sync-url "https://checkpoint.gnosischain.com"
     ```
 
     Here is an example of Lighthouse running the Chiado testnet:
 
-    Copy
-
-    ```text
-     lighthouse \
-     --network chiado \
-     --datadir=data \
-     --http \
-     --execution-endpoint http://localhost:8551 \
-     --execution-jwt /home/user/.local/share/erigon/jwt.hex \
-     --checkpoint-sync-url "https://checkpoint.chiadochain.net"
+    ```bash
+    lighthouse bn \
+    --network chiado \
+    --datadir=data \
+    --http \
+    --execution-endpoint http://localhost:8551 \
+    --execution-jwt /home/user/.local/share/erigon/jwt.hex \
+    --checkpoint-sync-url "https://checkpoint.chiadochain.net"
     ```
 
 Check the Erigon and Lighthouse logs to make sure that the EL and CL are communicating and that your node is syncing correctly.

@@ -22,7 +22,7 @@ Follow these steps to configure and launch the All-in-One Client. Erigon uses it
 
 Create a new file named `docker-compose.yml` in a directory where you want to manage your Erigon setup, and paste the following content into it:
 
-```sh
+```yaml
 services:
   erigon:
     image: erigontech/erigon:v{ERIGON_VERSION}
@@ -31,10 +31,8 @@ services:
     command:
       # --- Basic Configuration ---
       - --chain=gnosis
-      - --http.addr="0.0.0.0"
+      - --http.addr=0.0.0.0
       - --http.api=eth,web3,net,debug,trace,txpool
-      # --- Performance Tweaks ---
-      - --torrent.download.rate=512mb
       # --- Pruning Mode (Optional) ---
       # To change Pruning Mode, uncomment the line below:
       # - --prune.mode=archive
@@ -44,7 +42,7 @@ services:
       - "8545:8545" # Exposes the RPC port (needed for wallets/dApps)
     volumes:
       # *** IMPORTANT: CHANGE THIS PATH! ***
-      # Replace the path below with an actual directory on your machine 
+      # Replace the path below with an actual directory on your machine
       # where you want the blockchain data stored (e.g., /mnt/ssd/erigon-data)
       - /path/to/erigon/data:/var/lib/erigon
 ```
@@ -57,7 +55,7 @@ services:
 
 Open your terminal in the directory where you saved `docker-compose.yml`. To start the node and immediately see the sync process type:
 
-```text
+```bash
 docker compose up
 ```
 
@@ -65,8 +63,8 @@ docker compose up
 
 * `--chain=gnosis` specifies to run on Gnosis Chain, use `--chain=chiado` for Chiado testnet
 * Add `--prune.mode=minimal` to run minimal [Pruning Mode](/fundamentals/pruning-modes) or `--prune.mode=archive` to run an archive node
-* `--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](/fundamentals/web3-wallet)
-* `--torrent.download.rate=512mb` to increase download speed. While the default downloading speed is 128mb, with this flag Erigon will use as much download speed as it can, up to a maximum of 512 megabytes per second. This means it will try to download data as quickly as possible, but it won't exceed the 512 MB/s limit you've set
+* `--http.addr=0.0.0.0 --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](/fundamentals/web3-wallet)
+* `--torrent.download.rate` is deliberately not set above, because its default of `512mb` (megabytes per second) is already the maximum this recipe would ask for. During initial sync Erigon uses the full allowance, which is what you want on a dedicated machine. Add the flag only to **lower** the cap if you share the machine with other work (e.g. `--torrent.download.rate=128mb`), or set `--torrent.download.rate=Inf` to remove the limit entirely.
 
 When you get familiar with running Erigon from CLI you may also consider [staking](/staking/caplin) and/or run a Gnosis node with an [external Consensus Layer](/get-started/easy-nodes/how-to-run-a-gnosis-chain-node/gnosis-with-an-external-cl).
 
