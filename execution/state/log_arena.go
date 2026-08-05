@@ -21,55 +21,50 @@ import (
 	"slices"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
 )
 
-// Entries outlive the block that emitted them, so what the arena keeps must be
-// capped: a burst of logs at a fresh tx index every block would otherwise add a
-// high-water mark per block, forever. Every IntraBlockState carries an arena,
-// and the ones that reset across blocks — exec workers, and the trace workers
-// an RPC request spawns — sit at that mark, so the budget multiplies by them.
-//
-// A caller resetting per transaction only needs one transaction live — GetLogs
-// copied the rest out — but the entries are cached per tx index, so serving the
-// next block still takes a block's worth. The budgets are sized for a block.
-//
-// Each budget sits below what one block can produce, so an outlier is trimmed
-// rather than held.
+// reset is the ownership boundary: everything handed out since the last one is
+// live, and reset takes it back. So what the arena has to hold is one caller's
+// unit of work — a transaction for the executor and the trace workers, a block
+// for the assembler and the tooling, which reset only once it is built. The pool
+// is sized for the transaction: EIP-7825 caps one at MaxTxnGasLimit, which is
+// 44k entries or 2MB of log data, and a real one emits a hundred at most.
 const (
-	// Entry slots, ~304 bytes each. A block cannot hold more than gasLimit/375
-	// logs (LogGas) — 160k at a 60M limit.
-	maxReusableLogEntries = 16384
+	// Entries kept for reuse, ~304 bytes each.
+	maxPooledLogEntries = 1024
 
-	// Data bytes. A block cannot emit more than gasLimit/8 (LogDataGas) — 7.1MB
-	// at a 60M limit — and EIP-7825 holds one transaction under 2MB.
-	maxReusableLogBytes = 4 * 1024 * 1024
+	// Data kept with them.
+	maxPooledLogBytes = 1024 * 1024
 
-	// Data past this is evicted first, being worth hundreds of ordinary entries.
-	maxReusableLogDataCap = 64 * 1024
+	// No entry may hold more than an eighth of that. A single large log would
+	// otherwise take the whole budget and starve the small entries that real
+	// traffic is made of, while a cap far below it would throw away the reuse
+	// that makes a block of large logs cheap.
+	maxPooledLogDataCap = maxPooledLogBytes / 8
+
+	// Slots one transaction may leave behind: the pointers alone are retention.
+	maxLogSlotsPerTx = 4096
 )
 
-// logArena owns a block's log entries and keeps them for the next block to
-// reuse. The executor resets once per transaction, so the budget is tracked as
-// entries are allocated, not rescanned.
+// logArena owns a block's log entries and recycles them through a pool, so what
+// it holds follows the largest transaction rather than the widest block.
 type logArena struct {
 	byTx               []types.Logs // by txIndex+1; index 0 is the pre-transaction system calls
 	filledLo, filledHi int          // transactions written since the last reset, as [lo, hi); hi == 0 means none
-	// Against the maxReusableLog budget. Overcounting is safe: it only pulls in
-	// a trim, which recounts.
-	reusableEntries, reusableBytes int
-	oversized                      []logPos // buffers past maxReusableLogDataCap, newest last
-	indexInBlock                   uint
+	pool               []*types.Log // entries taken back at reset, for any transaction to reuse
+	poolBytes          int          // Data the pool holds
+	indexInBlock       uint
+	gen                uint32   // reset counter
+	writtenGen         []uint32 // gen each transaction last wrote in; kept only under dbg.AssertEnabled
 }
-
-// logPos addresses one entry. Entries never move, so it stays valid.
-type logPos struct{ ti, idx int }
 
 // alloc journals the allocation for revertLast, then returns txIndex's next
 // entry sized for numTopics/dataSize. The caller must write every topic and data
-// byte; what it leaves unwritten is the previous block's. The arena owns the
-// entry, so it must never be handed out without copying.
+// byte; what it leaves unwritten is the previous transaction's. The arena owns
+// the entry, so it must never be handed out without copying.
 func (a *logArena) alloc(j *journal, addr common.Address, txIndex, numTopics, dataSize int) *types.Log {
 	j.addLogChange(txIndex)
 	ti := txIndex + 1
@@ -79,25 +74,22 @@ func (a *logArena) alloc(j *journal, addr common.Address, txIndex, numTopics, da
 		a.byTx = byTx
 	}
 	entries := byTx[ti]
-	logIdx, entriesCap := len(entries), cap(entries)
+	logIdx := len(entries)
 	entries = slices.Grow(entries, 1)[:logIdx+1]
 	byTx[ti] = entries
-	a.reusableEntries += cap(entries) - entriesCap
 	a.markFilled(ti)
+	if dbg.AssertEnabled {
+		a.stampWrite(ti)
+	}
 
-	lp := entries[logIdx] // a prior block's entry to reuse, or nil for a fresh slot
+	lp := entries[logIdx]
 	if lp == nil {
-		lp = &types.Log{}
+		lp = a.take()
 		entries[logIdx] = lp
 	}
 	lp.Address = addr
 	lp.Topics = slices.Grow(lp.Topics[:0], numTopics)[:numTopics]
-	dataCap := cap(lp.Data)
 	lp.Data = slices.Grow(lp.Data[:0], dataSize)[:dataSize]
-	a.reusableBytes += cap(lp.Data) - dataCap
-	if cap(lp.Data) > maxReusableLogDataCap && dataCap <= maxReusableLogDataCap {
-		a.oversized = append(a.oversized, logPos{ti, logIdx})
-	}
 	lp.Removed = false
 	lp.TxHash, lp.BlockHash = common.Hash{}, common.Hash{}
 	lp.TxIndex = hexutil.Uint(txIndex)
@@ -109,6 +101,32 @@ func (a *logArena) alloc(j *journal, addr common.Address, txIndex, numTopics, da
 	return lp
 }
 
+// take returns a pooled entry, keeping its Topics and Data for alloc to grow
+// into, or a fresh one when the pool is empty.
+func (a *logArena) take() *types.Log {
+	n := len(a.pool) - 1
+	if n < 0 {
+		return &types.Log{}
+	}
+	lp := a.pool[n]
+	a.pool = a.pool[:n]
+	a.poolBytes -= cap(lp.Data)
+	return lp
+}
+
+// put keeps an entry for the next transaction, dropping the Data it may not
+// hold. The entry itself is small enough to keep either way.
+func (a *logArena) put(lp *types.Log) {
+	if len(a.pool) >= maxPooledLogEntries {
+		return
+	}
+	if cap(lp.Data) > maxPooledLogDataCap || a.poolBytes+cap(lp.Data) > maxPooledLogBytes {
+		lp.Data = nil
+	}
+	a.poolBytes += cap(lp.Data)
+	a.pool = append(a.pool, lp)
+}
+
 func (a *logArena) markFilled(ti int) {
 	if a.filledHi == 0 {
 		a.filledLo, a.filledHi = ti, ti+1
@@ -118,97 +136,43 @@ func (a *logArena) markFilled(ti int) {
 	a.filledHi = max(a.filledHi, ti+1)
 }
 
-// reset truncates what the transactions wrote, keeping the entries and their
-// Topics/Data for alloc to reuse, up to the budget.
+// reset takes back what the transactions wrote: the entries return to the pool
+// and their slots go empty. It walks only what was written, so it costs the
+// caller's own work and not the block's.
 func (a *logArena) reset() {
 	a.indexInBlock = 0
+	a.gen++
 	all := a.byTx[:cap(a.byTx)]
-	if a.reusableBytes > maxReusableLogBytes {
-		a.drainOversized(all)
-	}
-	if a.reusableEntries > maxReusableLogEntries || a.reusableBytes > maxReusableLogBytes {
-		a.trim()
-		return
-	}
-	filled := all[a.filledLo:a.filledHi]
-	for i := range filled {
-		filled[i] = filled[i][:0]
-	}
-	a.filledLo, a.filledHi = 0, 0
-}
-
-// drainOversized frees Data past the per-entry cap until the arena is back
-// inside its budget. It goes first because one such buffer holds as much as
-// hundreds of ordinary entries. Newest first: transactions take their positions
-// in order, so freeing the oldest frees what the next block asks for first.
-func (a *logArena) drainOversized(all []types.Logs) {
-	i := len(a.oversized) - 1
-	for ; i >= 0 && a.reusableBytes > maxReusableLogBytes; i-- {
-		p := a.oversized[i]
-		entries := all[p.ti]
-		lp := entries[:cap(entries)][p.idx]
-		if lp == nil {
+	for i := a.filledLo; i < a.filledHi; i++ {
+		entries := all[i]
+		if cap(entries) > maxLogSlotsPerTx {
+			all[i] = nil // one outlier transaction must not leave its slots behind
 			continue
 		}
-		a.reusableBytes -= cap(lp.Data)
-		lp.Data = nil
-	}
-	a.oversized = a.oversized[:i+1]
-}
-
-// forget removes a position from the eviction queue.
-func (a *logArena) forget(p logPos) {
-	for i := len(a.oversized) - 1; i >= 0; i-- {
-		if a.oversized[i] == p {
-			a.oversized = append(a.oversized[:i], a.oversized[i+1:]...)
-			return
-		}
-	}
-}
-
-// trim truncates every transaction and drops what does not fit the budget,
-// recounting what is kept.
-func (a *logArena) trim() {
-	entryCount, dataBytes := 0, 0
-	all := a.byTx[:cap(a.byTx)]
-	for i, txLogs := range all {
-		entries := txLogs[:cap(txLogs)]
-		if entryCount+cap(entries) > maxReusableLogEntries {
-			all[i] = nil // the slots are retention even when every entry is nil
-			continue
-		}
-		entryCount += cap(entries)
 		for j, lp := range entries {
 			if lp == nil {
 				continue
 			}
-			data := cap(lp.Data)
-			if data > maxReusableLogDataCap || dataBytes+data > maxReusableLogBytes {
-				entries[j] = nil
-				continue
-			}
-			dataBytes += data
+			a.put(lp)
+			entries[j] = nil
 		}
 		all[i] = entries[:0]
 	}
-	a.reusableEntries, a.reusableBytes = entryCount, dataBytes
 	a.filledLo, a.filledHi = 0, 0
-	a.oversized = a.oversized[:0]
 }
 
-// revertLast drops the entry txIndex allocated last. Oversized Data goes with
-// it: behind the length, only a transaction re-emitting that many logs could
-// reach it again.
+// revertLast drops the entry txIndex allocated last, returning it to the pool:
+// behind the length, only a transaction re-emitting that many logs could reach
+// it again.
 func (a *logArena) revertLast(txIndex int) {
 	if txIndex+1 >= len(a.byTx) {
 		panic(fmt.Sprintf("can't revert log index %v, max: %v", txIndex, len(a.byTx)-1))
 	}
 	txnLogs := a.byTx[txIndex+1]
 	last := len(txnLogs) - 1
-	if lp := txnLogs[last]; lp != nil && cap(lp.Data) > maxReusableLogDataCap {
-		a.reusableBytes -= cap(lp.Data)
-		lp.Data = nil
-		a.forget(logPos{txIndex + 1, last})
+	if lp := txnLogs[last]; lp != nil {
+		a.put(lp)
+		txnLogs[last] = nil
 	}
 	a.byTx[txIndex+1] = txnLogs[:last] // revert 1 log
 	if last == 0 {
@@ -219,10 +183,32 @@ func (a *logArena) revertLast(txIndex int) {
 
 // forTx returns the entries of txIndex, owned by the arena.
 func (a *logArena) forTx(txIndex int) types.Logs {
-	if txIndex+1 >= len(a.byTx) {
+	ti := txIndex + 1
+	if ti >= len(a.byTx) {
 		return nil
 	}
-	return a.byTx[txIndex+1]
+	if dbg.AssertEnabled {
+		a.assertLive(ti)
+	}
+	return a.byTx[ti]
+}
+
+// stampWrite records the reset cycle a transaction wrote in. The offset keeps
+// zero meaning never written.
+func (a *logArena) stampWrite(ti int) {
+	if len(a.writtenGen) <= ti {
+		a.writtenGen = slices.Grow(a.writtenGen, ti+1-len(a.writtenGen))[:ti+1]
+	}
+	a.writtenGen[ti] = a.gen + 1
+}
+
+// assertLive catches a read of logs the arena already took back. The answer
+// would be an empty set, which a receipt records as "emitted no logs".
+func (a *logArena) assertLive(ti int) {
+	if ti < len(a.writtenGen) && a.writtenGen[ti] != 0 && a.writtenGen[ti] != a.gen+1 {
+		panic(fmt.Sprintf("logs of tx %d were reclaimed by Reset: written in cycle %d, now %d",
+			ti-1, a.writtenGen[ti]-1, a.gen))
+	}
 }
 
 // release drops the entries.

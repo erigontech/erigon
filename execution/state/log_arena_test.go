@@ -19,12 +19,12 @@ package state
 import (
 	"bytes"
 	"fmt"
-	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -130,9 +130,9 @@ func TestAddLogKeepsCallerTxAndBlockHash(t *testing.T) {
 	require.Equal(t, common.HexToHash("0xad"), logs[0].BlockHash)
 }
 
-// Reverting hides an entry behind the slice length, so Reset has to scan the
-// whole buffer to see that this one is too big to keep.
-func TestResetDropsOversizedLogBufferHiddenByRevert(t *testing.T) {
+// A reverted entry goes back to the pool, and Data past the per-entry cap does
+// not go with it.
+func TestRevertDropsOversizedLogData(t *testing.T) {
 	t.Parallel()
 
 	ibs := New(nil)
@@ -141,19 +141,19 @@ func TestResetDropsOversizedLogBufferHiddenByRevert(t *testing.T) {
 	snap := ibs.PushSnapshot()
 	ibs.AddLog(&types.Log{
 		Address: common.HexToAddress("0x1"),
-		Data:    make([]byte, maxReusableLogDataCap+1),
+		Data:    make([]byte, maxPooledLogDataCap+1),
 	})
 	ibs.RevertToSnapshot(snap, nil)
 
 	ibs.Reset()
 	ibs.SetTxContext(2, 0)
 	lp := ibs.AllocLog(common.HexToAddress("0x2"), 0, 1)
-	require.LessOrEqual(t, cap(lp.Data), maxReusableLogDataCap)
+	require.LessOrEqual(t, cap(lp.Data), maxPooledLogDataCap)
 }
 
 // Entries survive Reset for reuse, so retention belongs to the IntraBlockState
-// and not to one block: a burst of logs at a fresh tx index every block adds a
-// high-water mark per block. Reset must hold the whole instance to the budget.
+// and not to one block: a burst of logs at a fresh tx index every block would
+// otherwise add a high-water mark per block. The pool is the whole of it.
 func TestResetBoundsRetainedLogMemory(t *testing.T) {
 	t.Parallel()
 
@@ -167,13 +167,17 @@ func TestResetBoundsRetainedLogMemory(t *testing.T) {
 		ibs.Reset()
 	}
 
-	entries, slotCap, dataBytes := retainedLogs(ibs)
-	require.LessOrEqual(t, entries, maxReusableLogEntries)
-	require.LessOrEqual(t, slotCap, maxReusableLogEntries)
-	require.LessOrEqual(t, dataBytes, maxReusableLogBytes)
+	require.LessOrEqual(t, len(ibs.logs.pool), maxPooledLogEntries)
+	require.LessOrEqual(t, ibs.logs.poolBytes, maxPooledLogBytes)
+
+	// The tx groups keep their slots, but every entry is in the pool.
+	entries, _, dataBytes := retainedLogs(ibs)
+	require.Zero(t, entries, "entries live outside the pool")
+	require.Zero(t, dataBytes)
 }
 
-// The budget must not touch a block that fits inside it.
+// A transaction that fits the pool costs no entry the next time round. The pool
+// hands them back in its own order, so what is pinned is the set, not the place.
 func TestResetKeepsLogsWithinBudget(t *testing.T) {
 	t.Parallel()
 
@@ -183,19 +187,21 @@ func TestResetKeepsLogsWithinBudget(t *testing.T) {
 	for range burst {
 		ibs.AddLog(&types.Log{Address: common.HexToAddress("0x1"), Data: make([]byte, 64)})
 	}
-	before := slices.Clone(ibs.logs.byTx[1])
+	before := make(map[*types.Log]struct{}, burst)
+	for _, lp := range ibs.logs.byTx[1] {
+		before[lp] = struct{}{}
+	}
 
 	ibs.Reset()
 	ibs.SetTxContext(2, 0)
 	for i := range burst {
-		require.Same(t, before[i], ibs.AllocLog(common.HexToAddress("0x2"), 0, 64), "entry %d", i)
+		require.Contains(t, before, ibs.AllocLog(common.HexToAddress("0x2"), 0, 64), "entry %d", i)
 	}
 }
 
-// Reset enforces the budget from running totals instead of a full scan, so the
-// totals have to match what the buffers hold after emitting, reverting a whole
-// transaction's logs, and resetting.
-func TestResetLogsTotalsMatchRetained(t *testing.T) {
+// poolBytes is what the pool admits itself against, so it has to match the Data
+// the pooled entries actually hold, through emit, revert and reset.
+func TestLogPoolBytesMatchPooledData(t *testing.T) {
 	t.Parallel()
 
 	ibs := New(nil)
@@ -214,52 +220,82 @@ func TestResetLogsTotalsMatchRetained(t *testing.T) {
 			}
 			ibs.Reset()
 
-			_, slotCap, dataBytes := retainedLogs(ibs)
-			require.Equal(t, slotCap, ibs.logs.reusableEntries, "block %d tx %d", blockNum, txIndex)
-			require.Equal(t, dataBytes, ibs.logs.reusableBytes, "block %d tx %d", blockNum, txIndex)
+			held := 0
+			for _, lp := range ibs.logs.pool {
+				held += cap(lp.Data)
+			}
+			require.Equal(t, held, ibs.logs.poolBytes, "block %d tx %d", blockNum, txIndex)
+			require.LessOrEqual(t, ibs.logs.poolBytes, maxPooledLogBytes)
+			require.LessOrEqual(t, len(ibs.logs.pool), maxPooledLogEntries)
 		}
 	}
 }
 
-// Both budget paths recount what they keep, so the totals must still match the
-// buffers after an eviction and after a trim.
-func TestLogTotalsMatchRetainedPastBudget(t *testing.T) {
+// A block of large logs is what the pool is for: the transactions run one after
+// another, so one buffer serves them all instead of one per transaction.
+func TestLogPoolReusesLargeDataAcrossTxs(t *testing.T) {
 	t.Parallel()
 
-	const dataSize = maxReusableLogDataCap + 1
+	const dataSize = maxPooledLogDataCap / 2
 	ibs := New(nil)
-	for txIndex := range maxReusableLogBytes/dataSize + 4 {
-		ibs.SetTxContext(1, txIndex)
-		ibs.AllocLog(common.HexToAddress("0x1"), 0, dataSize)
-		ibs.Reset()
-	}
-	_, slotCap, dataBytes := retainedLogs(ibs)
-	require.Equal(t, slotCap, ibs.logs.reusableEntries, "after evicting oversized")
-	require.Equal(t, dataBytes, ibs.logs.reusableBytes, "after evicting oversized")
+	ibs.SetTxContext(1, 0)
+	first := ibs.AllocLog(common.HexToAddress("0x1"), 0, dataSize)
+	firstData := &first.Data[0]
+	ibs.Reset()
 
-	for txIndex := range maxReusableLogEntries {
-		ibs.SetTxContext(2, txIndex)
-		ibs.AllocLog(common.HexToAddress("0x2"), 0, 8)
+	for txIndex := 1; txIndex < 64; txIndex++ {
+		ibs.SetTxContext(1, txIndex)
+		lp := ibs.AllocLog(common.HexToAddress("0x2"), 0, dataSize)
+		require.Same(t, first, lp, "tx %d", txIndex)
+		require.Equal(t, firstData, &lp.Data[0], "tx %d reallocated the buffer", txIndex)
 		ibs.Reset()
 	}
-	_, slotCap, dataBytes = retainedLogs(ibs)
-	require.Equal(t, slotCap, ibs.logs.reusableEntries, "after trim")
-	require.Equal(t, dataBytes, ibs.logs.reusableBytes, "after trim")
-	require.LessOrEqual(t, slotCap, maxReusableLogEntries)
+	require.Len(t, ibs.logs.pool, 1)
 }
 
-// A buffer is queued for eviction when it grows past the cap, not when it is
-// used: reuse must not queue it again, or the queue grows by one every block.
-func TestOversizedLogIsQueuedOnce(t *testing.T) {
+// Data past the per-entry cap is not pooled: one buffer that size would take the
+// whole budget and leave nothing for the small entries.
+func TestLogPoolRejectsOversizedData(t *testing.T) {
 	t.Parallel()
 
 	ibs := New(nil)
-	for blockNum := range 4 {
-		ibs.SetTxContext(uint64(blockNum+1), 0)
-		ibs.AllocLog(common.HexToAddress("0x1"), 0, maxReusableLogDataCap+1)
-		ibs.Reset()
-		require.Len(t, ibs.logs.oversized, 1, "block %d", blockNum)
+	ibs.SetTxContext(1, 0)
+	ibs.AllocLog(common.HexToAddress("0x1"), 0, maxPooledLogDataCap+1)
+	ibs.Reset()
+
+	require.Len(t, ibs.logs.pool, 1, "the entry is small enough to keep")
+	require.Zero(t, ibs.logs.poolBytes, "its Data is not")
+	require.Nil(t, ibs.logs.pool[0].Data)
+}
+
+// One outlier transaction must not leave its slots behind.
+func TestResetDropsOutsizedTxSlots(t *testing.T) {
+	t.Parallel()
+
+	ibs := New(nil)
+	ibs.SetTxContext(1, 0)
+	for range maxLogSlotsPerTx + 1 {
+		ibs.AllocLog(common.HexToAddress("0x1"), 0, 8)
 	}
+	require.Greater(t, cap(ibs.logs.byTx[1]), maxLogSlotsPerTx)
+
+	ibs.Reset()
+	require.Nil(t, ibs.logs.byTx[:cap(ibs.logs.byTx)][1])
+}
+
+// Reading a transaction's logs after Reset took them back answers "emitted no
+// logs", which a receipt records as consensus data. Asserts must catch it.
+func TestGetLogsAfterResetAsserts(t *testing.T) {
+	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
+	dbg.AssertEnabled = true
+
+	ibs := New(nil)
+	ibs.SetTxContext(1, 0)
+	ibs.AddLog(&types.Log{Address: common.HexToAddress("0x1")})
+	require.Len(t, ibs.GetRawLogs(0), 1, "readable before Reset")
+
+	ibs.Reset()
+	require.Panics(t, func() { ibs.GetRawLogs(0) })
 }
 
 func retainedLogs(ibs *IntraBlockState) (entries, slotCap, dataBytes int) {
@@ -353,14 +389,14 @@ func BenchmarkAddLog(b *testing.B) {
 
 var sinkLog *types.Log
 
-// Blocks whose transactions each emit a log past the per-entry reuse cap — the
-// shape an attack sends. txs=16 fits the byte budget, txs=100 exceeds it, so the
-// two cases split reuse from eviction.
+// Blocks whose transactions each emit a 64KB log — the shape an attack sends.
+// The size is fixed rather than tied to a budget, so runs stay comparable when
+// the budgets move.
 func BenchmarkLogEmitLargeDataPerTx(b *testing.B) {
 	log := &types.Log{
 		Address: common.HexToAddress("0x1"),
 		Topics:  []common.Hash{common.HexToHash("0xaa")},
-		Data:    bytes.Repeat([]byte{0x11}, maxReusableLogDataCap+1),
+		Data:    bytes.Repeat([]byte{0x11}, 64*1024+1),
 	}
 	for _, txs := range []int{16, 100} {
 		b.Run(fmt.Sprintf("txs=%d", txs), func(b *testing.B) {
@@ -379,6 +415,37 @@ func BenchmarkLogEmitLargeDataPerTx(b *testing.B) {
 
 // The parallel executor resets before every transaction, so a block costs one
 // Reset per transaction while the buffers hold the whole block's logs.
+// Blocks do not repeat their shape: the same logs land at different tx indexes
+// from one block to the next. An arena keyed by tx index keeps a slot for every
+// shape it has seen, while what a reset-per-tx caller needs live is one
+// transaction. Reports what is retained, which ns/op cannot show.
+func BenchmarkLogEmitShiftingShape(b *testing.B) {
+	shapes := []struct{ txs, logsPerTx int }{{200, 3}, {60, 10}, {400, 1}, {120, 5}}
+	log := &types.Log{
+		Address: common.HexToAddress("0x1"),
+		Topics:  []common.Hash{common.HexToHash("0xaa"), common.HexToHash("0xbb")},
+		Data:    bytes.Repeat([]byte{0x11}, 96),
+	}
+	ibs := New(nil)
+	i := 0
+	b.ReportAllocs()
+	for b.Loop() {
+		s := shapes[i%len(shapes)]
+		i++
+		for txIndex := range s.txs {
+			ibs.SetTxContext(1, txIndex)
+			for range s.logsPerTx {
+				ibs.AddLog(log)
+			}
+			ibs.Reset()
+		}
+	}
+	entries, slotCap, dataBytes := retainedLogs(ibs)
+	b.ReportMetric(float64(slotCap), "slots")
+	b.ReportMetric(float64(entries), "entries")
+	b.ReportMetric(float64(dataBytes)/1024, "retainedKB")
+}
+
 func BenchmarkLogEmitAndResetPerTx(b *testing.B) {
 	log := &types.Log{
 		Address: common.HexToAddress("0x1"),
@@ -533,47 +600,6 @@ func TestAllocLogPreservesCapacityAcrossRevert(t *testing.T) {
 	require.Equal(t, capBefore, cap(ibs.logs.byTx[1]), "inner log buffer capacity must survive revert+relog")
 }
 
-// A block of large logs must not pay for them again next block: inside the
-// budget an oversized buffer is kept, like any other.
-func TestResetKeepsOversizedLogDataWithinBudget(t *testing.T) {
-	t.Parallel()
-
-	ibs := New(NewNoopReader())
-	ibs.SetTxContext(1, 0)
-	small := ibs.AllocLog(common.Address{0x01}, 1, 8)
-	big := ibs.AllocLog(common.Address{0x02}, 1, maxReusableLogDataCap+1)
-	bigData := big.Data[:1]
-
-	ibs.Reset()
-	ibs.SetTxContext(2, 0)
-	require.Same(t, small, ibs.AllocLog(common.Address{0x03}, 1, 8), "normal-size entry is reused")
-	relog := ibs.AllocLog(common.Address{0x04}, 1, maxReusableLogDataCap+1)
-	require.Same(t, big, relog, "the entry is reused")
-	require.Equal(t, &bigData[0], &relog.Data[0], "and so is its Data buffer")
-}
-
-// Past the byte budget the oversized buffers are what goes, and the newest go
-// first: transactions take positions in order, so the head is what the next
-// block asks for first.
-func TestResetEvictsOversizedLogDataFirst(t *testing.T) {
-	t.Parallel()
-
-	const dataSize = maxReusableLogDataCap + 1
-	txs := maxReusableLogBytes/dataSize + 2
-
-	ibs := New(NewNoopReader())
-	for txIndex := range txs {
-		ibs.SetTxContext(1, txIndex)
-		ibs.AllocLog(common.Address{0x01}, 0, dataSize)
-	}
-	ibs.Reset()
-
-	_, _, dataBytes := retainedLogs(ibs)
-	require.LessOrEqual(t, dataBytes, maxReusableLogBytes)
-	require.Nil(t, entryAt(ibs, txs, 0).Data, "the newest buffer goes first")
-	require.NotNil(t, entryAt(ibs, 1, 0).Data, "the head stays warm for the next block")
-}
-
 // TestLogIndexIsBlockWide pins that AddLog stamps a block-wide log index:
 // receipts.DeriveFields derives FirstLogIndexWithinBlock from Logs[0].Index, so
 // the counter must run across transactions, roll back with a reverted log, and
@@ -603,9 +629,4 @@ func TestLogIndexIsBlockWide(t *testing.T) {
 	ibs.SetTxContext(2, 0)
 	ibs.AddLog(&types.Log{Address: common.Address{0x05}})
 	require.Equal(t, hexutil.Uint(0), ibs.GetRawLogs(0)[0].Index, "next block restarts at zero")
-}
-
-func entryAt(ibs *IntraBlockState, ti, idx int) *types.Log {
-	entries := ibs.logs.byTx[ti]
-	return entries[:cap(entries)][idx]
 }
