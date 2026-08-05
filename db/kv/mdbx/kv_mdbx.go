@@ -789,7 +789,7 @@ type MdbxTx struct {
 
 type MdbxCursor struct {
 	toCloseMap map[uint64]kv.Closer
-	c          *mdbx.Cursor
+	c          mdbx.Cursor
 	bucketName string
 	isDupSort  bool
 	id         uint64
@@ -891,9 +891,9 @@ func (db *MdbxKV) View(ctx context.Context, f func(tx kv.Tx) error) (err error) 
 
 func rawCursor(c kv.Cursor) *mdbx.Cursor {
 	if dc, ok := c.(*MdbxDupSortCursor); ok {
-		return dc.c
+		return &dc.c
 	}
-	return c.(*MdbxCursor).c
+	return &c.(*MdbxCursor).c
 }
 
 const maxDistributeCursors = 4096
@@ -1536,9 +1536,7 @@ func (tx *MdbxTx) stdCursor(bucket string) (kv.RwCursor, error) {
 	if tx.tx == nil {
 		panic("assert: tx.tx nil. seems this `tx` was Rollback'ed")
 	}
-	var err error
-	c.c, err = tx.tx.OpenCursor(mdbx.DBI(tx.db.buckets[c.bucketName].DBI))
-	if err != nil {
+	if err := c.c.Open(tx.tx, mdbx.DBI(tx.db.buckets[c.bucketName].DBI)); err != nil {
 		return nil, fmt.Errorf("table: %s, %w, stack: %s", c.bucketName, err, dbg.Stack())
 	}
 
@@ -1688,14 +1686,13 @@ func (c *MdbxCursor) Append(k []byte, v []byte) error {
 }
 
 func (c *MdbxCursor) Close() {
-	if c.c != nil {
+	if !c.c.IsClosed() {
 		c.c.Close()
 		delete(c.toCloseMap, c.id)
-		c.c = nil
 	}
 }
 
-func (c *MdbxCursor) IsClosed() bool { return c.c == nil }
+func (c *MdbxCursor) IsClosed() bool { return c.c.IsClosed() }
 
 type MdbxCursorPseudoDupSort struct {
 	*MdbxCursor

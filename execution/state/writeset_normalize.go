@@ -17,6 +17,8 @@
 package state
 
 import (
+	"time"
+
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -29,6 +31,39 @@ import (
 // the recovered bytes didn't hash to the emitted codeHash; surfaced so the skip
 // isn't silent.
 var codePathRecoveryHashMismatch = metrics.GetOrCreateCounter("exec3_codepath_recovery_hash_mismatch")
+
+// slowNormalizeThreshold is the debug-branch trigger for dumping write-set
+// geometry, so outlier shapes can be reproduced in the benchmark.
+const slowNormalizeThreshold = 100 * time.Millisecond
+
+// logSlowNormalize dumps the geometry of a write set whose Normalize ran long.
+// Everything it counts is walked only on the slow path.
+func logSlowNormalize(writes, filtered *WriteSet, took time.Duration, txIndex, incarnation int) {
+	dirty := make(map[accounts.Address]struct{})
+	writes.forEachFieldAddr(func(addr accounts.Address) { dirty[addr] = struct{}{} })
+
+	selfDestructs, storageAddrs, storageSlots, widestAddr := 0, 0, 0, 0
+	for _, vw := range writes.selfDestruct {
+		if vw.Val {
+			selfDestructs++
+		}
+	}
+	for _, inner := range writes.storage {
+		storageAddrs++
+		storageSlots += len(inner)
+		widestAddr = max(widestAddr, len(inner))
+	}
+
+	log.Warn("[dbg] slow WriteSet.Normalize",
+		"took", took, "txIndex", txIndex, "incarnation", incarnation,
+		"dirtyAddrs", len(dirty), "selfDestructs", selfDestructs,
+		"storageAddrs", storageAddrs, "storageSlots", storageSlots, "widestAddr", widestAddr,
+		"balance", len(writes.balance), "nonce", len(writes.nonce),
+		"incarnations", len(writes.incarnation), "codeHash", len(writes.codeHash),
+		"code", len(writes.code), "codeSize", len(writes.codeSize),
+		"createContract", len(writes.createContract),
+		"in", writes.Count(), "out", filtered.Count())
+}
 
 // Normalize produces a clean write set from the versionMap's WriteSet
 // for a given TX. It matches the serial IBS MakeWriteSet behaviour:
@@ -62,6 +97,13 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 	if writes == nil {
 		return filtered, nil
 	}
+
+	normalizeStarted := time.Now()
+	defer func() {
+		if took := time.Since(normalizeStarted); took >= slowNormalizeThreshold {
+			logSlowNormalize(writes, filtered, took, txIndex, incarnation)
+		}
+	}()
 
 	// sdStorageSlots returns the union of vm.StorageKeys (this batch) and
 	// domainStorageKeys (committed before this batch), deduped — the complete
