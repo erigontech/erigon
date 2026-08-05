@@ -233,23 +233,30 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 	// reaches the output nor marks an address dirty for the fill loop.
 
 	for _, inner := range writes.storage {
+		// If addr was self-destructed by an earlier TX in this block, its
+		// storage was wiped — the effective baseline for any slot not
+		// re-written since is 0, regardless of what the versionMap (prior
+		// TX) or the domain (pre-block) still holds. The SD's per-slot
+		// zeroing is only re-emitted into the calc's writeset below, never
+		// flushed back to the versionMap, so without this a resurrect TX
+		// that re-writes a slot to its pre-SD value is wrongly dropped as a
+		// no-op (TestDeleteRecreateSlotsAcrossManyBlocks).
+		//
+		// The probe is per address, so it is resolved once for the whole slot
+		// group rather than per slot.
+		sdTxIdx, sdOk, sdLoaded := -1, false, false
+		revived, revivedLoaded := false, false
 		for _, sw := range inner {
 			allAddresses[sw.Address] = true
 			if sdSet[sw.Address] || sw.Version.Incarnation != incarnation {
 				continue
 			}
 			writeVal := sw.Val
-			// If addr was self-destructed by an earlier TX in this block, its
-			// storage was wiped — the effective baseline for any slot not
-			// re-written since is 0, regardless of what the versionMap (prior
-			// TX) or the domain (pre-block) still holds. The SD's per-slot
-			// zeroing is only re-emitted into the calc's writeset below, never
-			// flushed back to the versionMap, so without this a resurrect TX
-			// that re-writes a slot to its pre-SD value is wrongly dropped as a
-			// no-op (TestDeleteRecreateSlotsAcrossManyBlocks).
-			sdTxIdx, sdOk := -1, false
-			if v, sd, _ := vm.ReadSelfDestruct(sw.Address, txIndex); sd.Status() == MVReadResultDone && v {
-				sdTxIdx, sdOk = sd.Version().TxIndex, true
+			if !sdLoaded {
+				sdLoaded = true
+				if v, sd, _ := vm.ReadSelfDestruct(sw.Address, txIndex); sd.Status() == MVReadResultDone && v {
+					sdTxIdx, sdOk = sd.Version().TxIndex, true
+				}
 			}
 			// No-op filter: compare against origin (what this TX would have read).
 			// First check versionMap floor (prior TX's write in this block).
@@ -275,7 +282,11 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 				// misses it. Narrower than an IncarnationPath probe: pure
 				// CREATE (no prior SD=true) doesn't wipe pre-existing storage,
 				// so its same-value SSTOREs still no-op against pre-block.
-				if vm.AnyDoneSelfDestructEquals(sw.Address, txIndex-1, true) {
+				if !revivedLoaded {
+					revivedLoaded = true
+					revived = vm.AnyDoneSelfDestructEquals(sw.Address, txIndex-1, true)
+				}
+				if revived {
 					if writeVal.IsZero() {
 						continue
 					}
