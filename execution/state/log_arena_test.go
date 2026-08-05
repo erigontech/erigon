@@ -392,12 +392,13 @@ var sinkLog *types.Log
 // One transaction spending MaxTxnGasLimit entirely on logs: the most an arena
 // can be asked to hold before it resets. Reports what survives the reset.
 func BenchmarkLogEmitWorstCaseTx(b *testing.B) {
+	addr := common.HexToAddress("0x1")
 	ibs := New(nil)
 	b.ReportAllocs()
 	for b.Loop() {
 		ibs.SetTxContext(1, 0)
 		for range maxLogsPerTxn {
-			ibs.AllocLog(common.HexToAddress("0x1"), 0, 0)
+			ibs.AllocLog(addr, 0, 0)
 		}
 		ibs.Reset()
 	}
