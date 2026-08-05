@@ -31,9 +31,9 @@ import (
 // and the ones that reset across blocks — exec workers, and the trace workers
 // an RPC request spawns — sit at that mark, so the budget multiplies by them.
 //
-// A caller resetting per transaction needs room for one transaction — GetLogs
-// copied the rest out — so what is held above that is cache; a caller resetting
-// per block needs the whole block live at once.
+// A caller resetting per transaction only needs one transaction live — GetLogs
+// copied the rest out — but the entries are cached per tx index, so serving the
+// next block still takes a block's worth. The budgets are sized for a block.
 //
 // Each budget sits below what one block can produce, so an outlier is trimmed
 // rather than held.
