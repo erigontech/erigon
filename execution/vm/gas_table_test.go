@@ -132,9 +132,9 @@ func TestEIP2200(t *testing.T) {
 			defer s.Close()
 
 			address := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
-			s.CreateAccount(address, true)
-			s.SetCode(address, hexutil.MustDecode(tt.input), tracing.CodeChangeUnspecified)
-			s.SetState(address, accounts.ZeroKey, *uint256.NewInt(uint64(tt.original)))
+			require.NoError(t, s.CreateAccount(address, true))
+			require.NoError(t, s.SetCode(address, hexutil.MustDecode(tt.input), tracing.CodeChangeUnspecified))
+			require.NoError(t, s.SetState(address, accounts.ZeroKey, *uint256.NewInt(uint64(tt.original))))
 
 			vmctx := evmtypes.BlockContext{
 				CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
@@ -233,9 +233,9 @@ func TestEIP8038SStore(t *testing.T) {
 			s := state.New(r)
 			defer s.Close()
 			address := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
-			s.CreateAccount(address, true)
-			s.SetCode(address, hexutil.MustDecode(tt.input), tracing.CodeChangeUnspecified)
-			s.SetState(address, accounts.ZeroKey, *uint256.NewInt(uint64(tt.original)))
+			require.NoError(t, s.CreateAccount(address, true))
+			require.NoError(t, s.SetCode(address, hexutil.MustDecode(tt.input), tracing.CodeChangeUnspecified))
+			require.NoError(t, s.SetState(address, accounts.ZeroKey, *uint256.NewInt(uint64(tt.original))))
 			vmctx := evmtypes.BlockContext{
 				CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
 				Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
@@ -276,7 +276,7 @@ func TestEIP7928SStoreReadRequiresAffordableAccess(t *testing.T) {
 			statedb.SetTxContext(1, 0)
 			contract := accounts.InternAddress(common.HexToAddress("0x1000"))
 			slot := accounts.InternKey(common.HexToHash("0x01"))
-			statedb.CreateAccount(contract, true)
+			require.NoError(t, statedb.CreateAccount(contract, true))
 			require.NoError(t, statedb.SetCode(contract, hexutil.MustDecode("0x6001600155"), tracing.CodeChangeUnspecified))
 			statedb.ResetVersionedReads()
 			blockCtx := evmtypes.BlockContext{
@@ -388,8 +388,8 @@ func TestCallNewAccountSpillBefore63of64(t *testing.T) {
 			s := state.New(r)
 			defer s.Close()
 			caller := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
-			s.CreateAccount(caller, true)
-			s.SetCode(caller, hexutil.MustDecode(callerCode), tracing.CodeChangeUnspecified)
+			require.NoError(t, s.CreateAccount(caller, true))
+			require.NoError(t, s.SetCode(caller, hexutil.MustDecode(callerCode), tracing.CodeChangeUnspecified))
 			vmctx := evmtypes.BlockContext{
 				CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
 				Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
@@ -425,10 +425,10 @@ func TestCreate2OntoExistingAccountSkipsNewAccountCharge(t *testing.T) {
 	factory := accounts.InternAddress(factoryAddress)
 	target := accounts.InternAddress(types.CreateAddress2(factoryAddress, salt.Bytes32(), accounts.InternCodeHash(crypto.Keccak256Hash(initCode))))
 	factoryCode := program.New().Create2(initCode, salt).Push(0).Op(vm.MSTORE).Return(0, 32).Bytes()
-	s.CreateAccount(factory, true)
-	s.SetCode(factory, factoryCode, tracing.CodeChangeUnspecified)
-	s.CreateAccount(target, false)
-	s.AddBalance(target, *uint256.NewInt(1), tracing.BalanceChangeUnspecified)
+	require.NoError(t, s.CreateAccount(factory, true))
+	require.NoError(t, s.SetCode(factory, factoryCode, tracing.CodeChangeUnspecified))
+	require.NoError(t, s.CreateAccount(target, false))
+	require.NoError(t, s.AddBalance(target, *uint256.NewInt(1), tracing.BalanceChangeUnspecified))
 	vmctx := evmtypes.BlockContext{
 		CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
 		Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
@@ -491,8 +491,8 @@ func TestCreate2OntoStorageOnlyAccountChargesBeforeCollision(t *testing.T) {
 				factory := accounts.InternAddress(factoryAddress)
 				target := accounts.InternAddress(types.CreateAddress2(factoryAddress, salt.Bytes32(), accounts.InternCodeHash(crypto.Keccak256Hash(initCode))))
 				factoryCode := program.New().Create2(initCode, salt).Push(0).Op(vm.MSTORE).Return(0, 32).Bytes()
-				s.CreateAccount(factory, true)
-				s.SetCode(factory, factoryCode, tracing.CodeChangeUnspecified)
+				require.NoError(t, s.CreateAccount(factory, true))
+				require.NoError(t, s.SetCode(factory, factoryCode, tracing.CodeChangeUnspecified))
 				vmctx := evmtypes.BlockContext{
 					CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
 					Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
@@ -500,7 +500,7 @@ func TestCreate2OntoStorageOnlyAccountChargesBeforeCollision(t *testing.T) {
 					},
 				}
 				_ = s.CommitBlock(vmctx.Rules(chain.AllProtocolChanges), w)
-				s.CreateAccount(target, true)
+				require.NoError(t, s.CreateAccount(target, true))
 				require.NoError(t, s.SetState(target, accounts.ZeroKey, *uint256.NewInt(1)))
 				empty, err := s.Empty(target)
 				require.NoError(t, err)
@@ -560,8 +560,8 @@ func TestCreateTraceOnEarlyFailure(t *testing.T) {
 				salt := uint256.NewInt(0)
 				factory := accounts.InternAddress(common.HexToAddress("0xfac0"))
 				factoryCode := program.New().Mstore(initCode, 0).Push(salt).Push(len(initCode)).Push(0).Push(1).Op(vm.CREATE2).Bytes()
-				s.CreateAccount(factory, true)
-				s.SetCode(factory, factoryCode, tracing.CodeChangeUnspecified)
+				require.NoError(t, s.CreateAccount(factory, true))
+				require.NoError(t, s.SetCode(factory, factoryCode, tracing.CodeChangeUnspecified))
 				vmctx := evmtypes.BlockContext{
 					CanTransfer: func(_ evmtypes.IntraBlockState, _ accounts.Address, value uint256.Int) (bool, error) {
 						return value.IsZero(), nil
@@ -618,8 +618,8 @@ func TestCreatePropagatesAmsterdamPreparationError(t *testing.T) {
 	factory := accounts.InternAddress(common.HexToAddress("0xfac0"))
 	initCode := []byte{byte(vm.STOP)}
 	factoryCode := program.New().Create2(initCode, uint256.NewInt(0)).Bytes()
-	statedb.CreateAccount(factory, true)
-	statedb.SetCode(factory, factoryCode, tracing.CodeChangeUnspecified)
+	require.NoError(t, statedb.CreateAccount(factory, true))
+	require.NoError(t, statedb.SetCode(factory, factoryCode, tracing.CodeChangeUnspecified))
 	vmctx := evmtypes.BlockContext{
 		CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) {
 			return false, backendErr
@@ -658,8 +658,8 @@ func TestNestedCreateCollisionSeesOnEnterState(t *testing.T) {
 				factory := accounts.InternAddress(factoryAddress)
 				target := accounts.InternAddress(types.CreateAddress2(factoryAddress, salt.Bytes32(), accounts.InternCodeHash(crypto.Keccak256Hash(initCode))))
 				factoryCode := program.New().Create2(initCode, salt).Push(0).Op(vm.MSTORE).Return(0, 32).Bytes()
-				s.CreateAccount(factory, true)
-				s.SetCode(factory, factoryCode, tracing.CodeChangeUnspecified)
+				require.NoError(t, s.CreateAccount(factory, true))
+				require.NoError(t, s.SetCode(factory, factoryCode, tracing.CodeChangeUnspecified))
 				vmctx := evmtypes.BlockContext{
 					CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
 					Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
@@ -740,8 +740,8 @@ func TestCreateGas(t *testing.T) {
 
 		s := state.New(stateReader)
 		defer s.Close()
-		s.CreateAccount(address, true)
-		s.SetCode(address, hexutil.MustDecode(tt.code), tracing.CodeChangeUnspecified)
+		require.NoError(t, s.CreateAccount(address, true))
+		require.NoError(t, s.SetCode(address, hexutil.MustDecode(tt.code), tracing.CodeChangeUnspecified))
 
 		vmctx := evmtypes.BlockContext{
 			CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },

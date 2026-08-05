@@ -323,12 +323,12 @@ func (br *BlockRetire) MergeBlocks(
 
 		return seeder.Seed(ctx, mergedFileNames)
 	}
-	if err = merger.Merge(ctx, &snapshots.BaseRoSnapshots, snapshots.Types(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, seeder.Delete); err != nil {
+	if err := merger.Merge(ctx, &snapshots.BaseRoSnapshots, snapshots.Types(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, seeder.Delete); err != nil {
 		return false, err
 	}
 
 	// remove old garbage files
-	if err = snapshots.RemoveOverlaps(func(l []string) error {
+	if err := snapshots.RemoveOverlaps(func(l []string) error {
 		return seeder.Delete(ctx, l)
 	}); err != nil {
 		return false, err

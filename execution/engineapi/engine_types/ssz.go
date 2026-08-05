@@ -48,9 +48,23 @@ func (p *ExecutionPayload) EncodeSSZ(dst []byte) ([]byte, error) {
 }
 
 func (p *ExecutionPayload) DecodeSSZ(buf []byte, version int) error {
+	return p.decodeSSZ(buf, version, false)
+}
+
+func (p *ExecutionPayload) DecodeSSZStrict(buf []byte, version int) error {
+	return p.decodeSSZ(buf, version, true)
+}
+
+func (p *ExecutionPayload) decodeSSZ(buf []byte, version int, strict bool) error {
 	p.SSZVersion = clparams.StateVersion(version)
 	block := cltypes.NewEth1Block(p.SSZVersion, mainnetBeaconCfg)
-	if err := block.DecodeSSZ(buf, version); err != nil {
+	var err error
+	if strict {
+		err = block.DecodeSSZStrict(buf, version)
+	} else {
+		err = block.DecodeSSZ(buf, version)
+	}
+	if err != nil {
 		return err
 	}
 	*p = *ExecutionPayloadFromSSZBlock(block, p.SSZVersion)
@@ -358,40 +372,61 @@ func (a *PayloadAttributes) EncodeSSZ(dst []byte) ([]byte, error) {
 }
 
 func (a *PayloadAttributes) DecodeSSZ(buf []byte, version int) error {
-	a.SSZVersion = clparams.StateVersion(version)
-	withdrawals := newWithdrawalList(nil)
-	var timestamp uint64
-	var root common.Hash
-	var slot uint64
+	return a.decodeSSZ(buf, version, false)
+}
+
+func (a *PayloadAttributes) DecodeSSZStrict(buf []byte, version int) error {
+	return a.decodeSSZ(buf, version, true)
+}
+
+type payloadAttributesDecodeFields struct {
+	timestamp             uint64
+	withdrawals           *solid.ListSSZ[*cltypes.Withdrawal]
+	parentBeaconBlockRoot common.Hash
+	slotNumber            uint64
+	targetGasLimit        uint64
+}
+
+func (a *PayloadAttributes) decodeSSZSchema(fields *payloadAttributesDecodeFields) []any {
+	schema := []any{&fields.timestamp, a.PrevRandao[:], a.SuggestedFeeRecipient[:]}
 	switch a.SSZVersion {
 	case clparams.BellatrixVersion:
-		if err := ssz2.UnmarshalSSZ(buf, version, &timestamp, a.PrevRandao[:], a.SuggestedFeeRecipient[:]); err != nil {
-			return err
-		}
 	case clparams.CapellaVersion:
-		if err := ssz2.UnmarshalSSZ(buf, version, &timestamp, a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals); err != nil {
-			return err
-		}
-		a.Withdrawals = withdrawalsFromList(withdrawals)
+		schema = append(schema, fields.withdrawals)
 	case clparams.DenebVersion, clparams.ElectraVersion, clparams.FuluVersion:
-		if err := ssz2.UnmarshalSSZ(buf, version, &timestamp, a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals, root[:]); err != nil {
-			return err
-		}
-		a.Withdrawals = withdrawalsFromList(withdrawals)
-		a.ParentBeaconBlockRoot = &root
+		schema = append(schema, fields.withdrawals, fields.parentBeaconBlockRoot[:])
 	default: // GloasVersion+
-		var targetGasLimit uint64
-		if err := ssz2.UnmarshalSSZ(buf, version, &timestamp, a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals, root[:], &slot, &targetGasLimit); err != nil {
-			return err
-		}
-		a.Withdrawals = withdrawalsFromList(withdrawals)
-		a.ParentBeaconBlockRoot = &root
-		slotNumber := hexutil.Uint64(slot)
+		schema = append(schema, fields.withdrawals, fields.parentBeaconBlockRoot[:], &fields.slotNumber, &fields.targetGasLimit)
+	}
+	return schema
+}
+
+func (a *PayloadAttributes) decodeSSZ(buf []byte, version int, strict bool) error {
+	a.SSZVersion = clparams.StateVersion(version)
+	fields := payloadAttributesDecodeFields{withdrawals: newWithdrawalList(nil)}
+	unmarshal := ssz2.UnmarshalSSZ
+	if strict {
+		unmarshal = ssz2.UnmarshalSSZStrict
+	}
+	if err := unmarshal(buf, version, a.decodeSSZSchema(&fields)...); err != nil {
+		return err
+	}
+	switch a.SSZVersion {
+	case clparams.BellatrixVersion:
+	case clparams.CapellaVersion:
+		a.Withdrawals = withdrawalsFromList(fields.withdrawals)
+	case clparams.DenebVersion, clparams.ElectraVersion, clparams.FuluVersion:
+		a.Withdrawals = withdrawalsFromList(fields.withdrawals)
+		a.ParentBeaconBlockRoot = &fields.parentBeaconBlockRoot
+	default: // GloasVersion+
+		a.Withdrawals = withdrawalsFromList(fields.withdrawals)
+		a.ParentBeaconBlockRoot = &fields.parentBeaconBlockRoot
+		slotNumber := hexutil.Uint64(fields.slotNumber)
 		a.SlotNumber = &slotNumber
-		tgl := hexutil.Uint64(targetGasLimit)
+		tgl := hexutil.Uint64(fields.targetGasLimit)
 		a.TargetGasLimit = &tgl
 	}
-	a.Timestamp = hexutil.Uint64(timestamp)
+	a.Timestamp = hexutil.Uint64(fields.timestamp)
 	return nil
 }
 

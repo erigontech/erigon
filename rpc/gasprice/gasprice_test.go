@@ -179,11 +179,12 @@ func findKthUint256(values []*uint256.Int, k int) *uint256.Int {
 		pivot := left + rand.Intn(right-left+1)
 		values[pivot], values[right] = values[right], values[pivot]
 		pos := partitionUint256(values, left, right)
-		if pos == k {
+		switch {
+		case pos == k:
 			return values[k]
-		} else if pos < k {
+		case pos < k:
 			left = pos + 1
-		} else {
+		default:
 			right = pos - 1
 		}
 	}

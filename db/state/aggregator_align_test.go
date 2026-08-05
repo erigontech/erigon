@@ -17,6 +17,7 @@
 package state
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -158,4 +159,104 @@ func TestUnalign_RejectsStateDomain(t *testing.T) {
 	for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
 		require.Panics(t, func() { agg.Unalign(d) }, "domain %s", d)
 	}
+}
+
+// Fill admission relies on view frontiers never decreasing. Raising
+// visibility (unaligning a lagging entity) is allowed even on a forbidden
+// aggregator; the transition that lowers a cached state domain's visible end
+// (here: realigning while receipt still lags, which drops the shared ceiling)
+// must panic, whichever entry point caused it.
+func TestVisibilityLowering_ForbiddenAggregatorPanicsOnLoweringOnly(t *testing.T) {
+	t.Parallel()
+	_, agg := testDbAndAggregatorv3(t, alignStepSize)
+
+	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	generateStandaloneIIFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	generateDomainFiles(t, "receipt", agg.Dirs(), []testFileRange{{0, 1}})
+	require.NoError(t, agg.OpenFolder())
+
+	agg.ForbidVisibilityLowering()
+	realign := agg.Unalign(kv.ReceiptDomain) // raises the ceiling: allowed
+	require.Panics(t, func() { realign() }, "realigning a still-lagging receipt lowers the state domains' ends")
+}
+
+// craftedClampedVisible replaces the current visible bundle with one where
+// every state domain's values files end one segment below its history-II end
+// — the divergence a dependency checker produces when a dependent file is
+// missing.
+func craftedClampedVisible(t *testing.T, agg *Aggregator) {
+	t.Helper()
+	agg.dirtyFilesLock.Lock()
+	defer agg.dirtyFilesLock.Unlock()
+	v := agg.visible.Load()
+	crafted := &aggregatorVisible{minimaxTxNum: v.minimaxTxNum}
+	crafted.d, crafted.dh, crafted.dhii, crafted.iis = v.d, v.dh, v.dhii, v.iis
+	for _, dom := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+		files := v.d[dom].files
+		require.GreaterOrEqual(t, len(files), 2)
+		crafted.d[dom] = newDomainVisible(dom, files[:len(files)-1])
+	}
+	v.next = crafted
+	agg.visible.Store(crafted)
+}
+
+// A dependency-clamped values view has no exact frontier: reads mix fresh
+// DB-resident keys with older file values for gap keys, and raising the
+// dependent file's visibility later reveals state without any cache apply —
+// nothing would invalidate a fill made during the clamp. DomainVisibleEnd
+// must report ok=false so such views never fill.
+func TestDomainVisibleEnd_ClampedViewHasNoExactFrontier(t *testing.T) {
+	t.Parallel()
+	db, agg := testDbAndAggregatorv3(t, alignStepSize)
+
+	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	generateStandaloneIIFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	require.NoError(t, agg.OpenFolder())
+
+	craftedClampedVisible(t, agg)
+
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	tx, err := db.BeginRo(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	_, ok := at.DomainVisibleEnd(kv.AccountsDomain, tx)
+	require.False(t, ok, "a dependency-clamped values view has no exact frontier")
+}
+
+// The forbid assert must also watch the history-II ends: they are the base of
+// what DomainVisibleEnd reports, and with values dependency-clamped below the
+// ceiling they can lower while every values end stays put.
+func TestVisibilityLowering_GuardsHistoryIIEnd(t *testing.T) {
+	t.Parallel()
+	_, agg := testDbAndAggregatorv3(t, alignStepSize)
+
+	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	generateStandaloneIIFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	require.NoError(t, agg.OpenFolder())
+
+	craftedClampedVisible(t, agg)
+	agg.ForbidVisibilityLowering()
+
+	// Drop the accounts history-II {1,2} segment in memory rather than from
+	// disk (Windows forbids removing a mapped file): the recalculation lowers
+	// the ii end while every values end stays put.
+	agg.dirtyFilesLock.Lock()
+	defer agg.dirtyFilesLock.Unlock()
+	dropped := 0
+	agg.d[kv.AccountsDomain].History.InvertedIndex.dirtyFiles.CloseIf(func(item *FilesItem) bool {
+		if item.endTxNum == 2*alignStepSize {
+			dropped++
+			return true
+		}
+		return false
+	})
+	require.Equal(t, 1, dropped)
+
+	require.Panics(t, func() { agg.recalcVisibleFiles(nil) },
+		"lowering a history-II end while values ends stay put must trip the forbid assert")
 }

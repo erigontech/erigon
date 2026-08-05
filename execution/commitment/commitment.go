@@ -535,7 +535,7 @@ func (be *BranchEncoder) CollectUpdate(
 
 	prefixCopy := bytes.Clone(prefix)
 	updateCopy := bytes.Clone(update)
-	if err = ctx.PutBranch(prefixCopy, updateCopy, prev); err != nil {
+	if err := ctx.PutBranch(prefixCopy, updateCopy, prev); err != nil {
 		return err
 	}
 	// BranchCache population is owned by SharedDomains.Commit, not the encoder.
@@ -1030,10 +1030,10 @@ func (branchData BranchData) Validate(branchKey []byte) error {
 	if err != nil {
 		return err
 	}
-	if err = validateAfterMap(afterMap, row); err != nil {
+	if err := validateAfterMap(afterMap, row); err != nil {
 		return err
 	}
-	if err = validatePlainKeys(branchKey, row, keccak.NewFastKeccak()); err != nil {
+	if err := validatePlainKeys(branchKey, row, keccak.NewFastKeccak()); err != nil {
 		return err
 	}
 	return nil

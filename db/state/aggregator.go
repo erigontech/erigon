@@ -88,12 +88,19 @@ type Aggregator struct {
 	oldestVisible *aggregatorVisible
 	// unaligned entities are left out of the shared visible-file ceiling while tooling
 	// regenerates them. Guarded by dirtyFilesLock.
-	unalignedDomain   [kv.DomainLen]bool
-	unalignedIdx      [kv.StandaloneIdxLen]bool
-	snapshotBuildSema *semaphore.Weighted
+	unalignedDomain [kv.DomainLen]bool
+	unalignedIdx    [kv.StandaloneIdxLen]bool
+	// visibilityLoweringForbidden: a fill-enabled StateCache is wired over
+	// this aggregator, and its fill admission relies on view frontiers never
+	// decreasing. recalcVisibleFiles refuses to lower the cached state
+	// domains' visible ends while set; Close clears it (shutdown is not a
+	// fill window).
+	visibilityLoweringForbidden atomic.Bool
+	snapshotBuildSema           *semaphore.Weighted
 
 	disableHistory      bool
 	branchCacheDisabled bool
+	skipFilesDBGapCheck bool
 	workers             workersCfg
 
 	// To keep DB small - need move data to small files ASAP.
@@ -542,6 +549,17 @@ func (a *Aggregator) UnalignIdx(name kv.InvertedIdx) (realign func()) {
 	return func() {}
 }
 
+// ForbidVisibilityLowering marks this aggregator as backing a fill-enabled
+// StateCache: from then on recalcVisibleFiles panics instead of lowering a
+// cached state domain's visible end, whichever entry point caused it.
+// Serialized with recalcVisibleFiles via dirtyFilesLock so "from then on"
+// holds against a recalculation already in flight.
+func (a *Aggregator) ForbidVisibilityLowering() {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	a.visibilityLoweringForbidden.Store(true)
+}
+
 func (a *Aggregator) setUnalignedDomain(d kv.Domain, v bool) {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
@@ -567,15 +585,41 @@ func (a *Aggregator) DisableInterDomainDependencies() {
 }
 
 func (a *Aggregator) OpenFolder() error {
-	a.dirtyFilesLock.Lock()
-	defer a.dirtyFilesLock.Unlock()
-	if err := a.reloadSalt(); err != nil {
+	if err := func() error {
+		a.dirtyFilesLock.Lock()
+		defer a.dirtyFilesLock.Unlock()
+		if err := a.reloadSalt(); err != nil {
+			return err
+		}
+		if err := a.openFolder(); err != nil {
+			return fmt.Errorf("OpenFolder: %w", err)
+		}
+		return nil
+	}(); err != nil {
 		return err
 	}
-	if err := a.openFolder(); err != nil {
-		return fmt.Errorf("OpenFolder: %w", err)
+	return a.checkFilesDBGap()
+}
+
+// checkFilesDBGap refuses to open a datadir where the DB was pruned past where the
+// snapshot files end (the hole `rm-state --latest` leaves without a reset — reads
+// below it silently return stale data). Skipped when SkipFilesDBGapCheck is set so
+// `--reset` tooling can open and fix it.
+func (a *Aggregator) checkFilesDBGap() error {
+	if a.skipFilesDBGapCheck || a.db == nil {
+		return nil
 	}
-	return nil
+	return a.db.View(context.Background(), func(tx kv.Tx) error {
+		at := a.BeginFilesRo()
+		defer at.Close()
+		if err := at.CheckFilesDBGap(tx); err != nil {
+			// The datadir is corrupt and can't be executed on; exit hard rather than
+			// let the error be swallowed/retried up the stack.
+			a.logger.Error("[snapshots] " + err.Error())
+			os.Exit(1)
+		}
+		return nil
+	})
 }
 
 func scanDirs(dirs datadir.Dirs) (r *ScanDirsResult, err error) {
@@ -683,6 +727,9 @@ func (a *Aggregator) WaitForFiles() {
 }
 
 func (a *Aggregator) Close() {
+	a.dirtyFilesLock.Lock()
+	a.visibilityLoweringForbidden.Store(false) // shutdown is not a fill window
+	a.dirtyFilesLock.Unlock()
 	a.WaitForFiles()
 	if !a.background.BeginClose() { // idempotent: safe to call Close multiple times
 		return
@@ -1852,6 +1899,28 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 	}
 	next.minimaxTxNum = next.stateMinimaxTxNum()
 
+	if a.visibilityLoweringForbidden.Load() {
+		prev := a.visible.Load()
+		for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+			if prev.d[d] == nil || next.d[d] == nil {
+				continue
+			}
+			prevEnd := visibleFiles(prev.d[d].files).EndTxNum()
+			nextEnd := visibleFiles(next.d[d].files).EndTxNum()
+			if nextEnd < prevEnd {
+				panic(fmt.Sprintf("assert: %s visible end lowered %d -> %d while a fill-enabled StateCache is wired — fill admission relies on view frontiers never decreasing", d, prevEnd, nextEnd))
+			}
+			if prev.dhii[d] == nil || next.dhii[d] == nil {
+				continue
+			}
+			prevII := prev.dhii[d].files.EndTxNum()
+			nextII := next.dhii[d].files.EndTxNum()
+			if nextII < prevII {
+				panic(fmt.Sprintf("assert: %s history-II visible end lowered %d -> %d while a fill-enabled StateCache is wired — DomainVisibleEnd derives view frontiers from it", d, prevII, nextII))
+			}
+		}
+	}
+
 	old := a.visible.Load()
 	old.retired = retired
 	old.next = next
@@ -2428,6 +2497,29 @@ type AggregatorRoTx struct {
 	_leakID uint64 // set only if TRACE_AGG=true
 }
 
+// CheckFilesDBGap detects a gap between the snapshot files and the DB. It can arise from
+// snapshot/DB management operations — e.g. `seg rm-state --latest` and then starting
+// erigon without `integration stage_exec --reset`. Meant to run once at startup.
+func (at *AggregatorRoTx) CheckFilesDBGap(tx kv.Tx) error {
+	for _, dt := range at.d {
+		if dt == nil || dt.d.Disable {
+			continue
+		}
+		if err := dt.checkFilesDBGap(tx); err != nil {
+			return err
+		}
+	}
+	for _, iit := range at.iis {
+		if iit == nil || iit.ii.Disable {
+			continue
+		}
+		if err := iit.checkFilesDBGap(tx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (a *Aggregator) acquireVisibleFiles() (v *aggregatorVisible) {
 	// Load+Increment: is not atomic operation. Means: between them "existing last reader may End" (and close files)
 	// Means: must check that latest view didn't change
@@ -2595,6 +2687,21 @@ func (at *AggregatorRoTx) DomainProgress(name kv.Domain, tx kv.Tx) uint64 {
 		return at.d[name].d.maxStepInDBNoHistory(tx).ToTxNum(at.a.stepSize.Load())
 	}
 	return at.d[name].ht.iit.Progress(tx)
+}
+func (at *AggregatorRoTx) DomainVisibleEnd(name kv.Domain, tx kv.Tx) (uint64, bool) {
+	d := at.d[name]
+	if d.d.HistoryDisabled {
+		return 0, false
+	}
+	// A dependency checker can clamp the values view below the history-II end.
+	// Such a view has no exact frontier: reads mix fresh DB-resident keys with
+	// older file values for the gap, and raising the dependent file's
+	// visibility later reveals state without any cache apply — a fill made
+	// during the clamp would never be invalidated.
+	if d.files.EndTxNum() < d.ht.iit.files.EndTxNum() {
+		return 0, false
+	}
+	return d.ht.iit.visibleEnd(tx), true
 }
 func (at *AggregatorRoTx) IIProgress(name kv.InvertedIdx, tx kv.Tx) uint64 {
 	return at.searchII(name).Progress(tx)
