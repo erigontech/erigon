@@ -201,11 +201,12 @@ func craftedClampedVisible(t *testing.T, agg *Aggregator) {
 	agg.visible.Store(crafted)
 }
 
-// A view's frontier must not overstate what its values view can serve: with
-// domain values clamped below the history-II end (dependency checker), reads
-// above the values end fall back to older file values, so DomainVisibleEnd
-// must report the values end, not the II end.
-func TestDomainVisibleEnd_ClampedToValuesCoverage(t *testing.T) {
+// A dependency-clamped values view has no exact frontier: reads mix fresh
+// DB-resident keys with older file values for gap keys, and raising the
+// dependent file's visibility later reveals state without any cache apply —
+// nothing would invalidate a fill made during the clamp. DomainVisibleEnd
+// must report ok=false so such views never fill.
+func TestDomainVisibleEnd_ClampedViewHasNoExactFrontier(t *testing.T) {
 	t.Parallel()
 	db, agg := testDbAndAggregatorv3(t, alignStepSize)
 
@@ -222,10 +223,8 @@ func TestDomainVisibleEnd_ClampedToValuesCoverage(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	end, ok := at.DomainVisibleEnd(kv.AccountsDomain, tx)
-	require.True(t, ok)
-	require.Equal(t, uint64(1*alignStepSize), end,
-		"the frontier must not overstate the values coverage")
+	_, ok := at.DomainVisibleEnd(kv.AccountsDomain, tx)
+	require.False(t, ok, "a dependency-clamped values view has no exact frontier")
 }
 
 // The forbid assert must also watch the history-II ends: they are the base of
