@@ -126,7 +126,7 @@ func decodeDynamicList[T Unmarshaler](bytes []byte, start, end uint32, _max uint
 			return nil, ErrBadOffset
 		}
 		elementsNum = currentOffset / 4
-	} else if len(buf) > 4 {
+	} else if len(buf) >= 4 {
 		currentOffset = DecodeOffset(buf)
 		elementsNum = currentOffset / 4
 	}

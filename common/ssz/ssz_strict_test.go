@@ -26,6 +26,14 @@ import (
 
 type strictListTestElement struct{}
 
+func (*strictListTestElement) EncodeSSZ(dst []byte) ([]byte, error) {
+	return dst, nil
+}
+
+func (*strictListTestElement) EncodingSizeSSZ() int {
+	return 0
+}
+
 func (*strictListTestElement) DecodeSSZ([]byte, int) error {
 	return nil
 }
@@ -82,4 +90,39 @@ func TestDecodeDynamicListStrictPropagatesToElements(t *testing.T) {
 	require.NoError(t, err)
 	_, err = DecodeDynamicListStrict[*strictRejectingListTestElement](encoded, 0, uint32(len(encoded)), 1, 0)
 	require.ErrorIs(t, err, errStrictListTest)
+}
+
+func TestDynamicListSingleEmptyElementRoundTrip(t *testing.T) {
+	encoded, err := EncodeDynamicList(nil, []*strictListTestElement{{}})
+	require.NoError(t, err)
+	require.Equal(t, []byte{4, 0, 0, 0}, encoded)
+
+	tests := []struct {
+		name   string
+		decode func([]byte) ([]*strictListTestElement, error)
+	}{
+		{
+			name: "permissive",
+			decode: func(buf []byte) ([]*strictListTestElement, error) {
+				return DecodeDynamicList[*strictListTestElement](buf, 0, uint32(len(buf)), 1, 0)
+			},
+		},
+		{
+			name: "strict",
+			decode: func(buf []byte) ([]*strictListTestElement, error) {
+				return DecodeDynamicListStrict[*strictListTestElement](buf, 0, uint32(len(buf)), 1, 0)
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			decoded, err := test.decode(encoded)
+			require.NoError(t, err)
+			require.Len(t, decoded, 1)
+
+			roundTripped, err := EncodeDynamicList(nil, decoded)
+			require.NoError(t, err)
+			require.Equal(t, encoded, roundTripped)
+		})
+	}
 }
