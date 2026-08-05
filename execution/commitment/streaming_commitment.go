@@ -17,6 +17,7 @@
 package commitment
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -29,7 +30,6 @@ import (
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 )
 
@@ -656,7 +656,7 @@ func (o *overlayContext) PutBranch(prefix, data, _ []byte) error {
 	if o.writes == nil {
 		o.writes = make(map[string][]byte)
 	}
-	o.writes[string(prefix)] = common.Copy(data)
+	o.writes[string(prefix)] = bytes.Clone(data)
 	o.flushed = true
 	return nil
 }
@@ -889,13 +889,13 @@ func applyDeferredGuarded(ctx PatriciaContext, deferred []*DeferredBranchUpdate,
 		}
 		key := string(upd.prefix)
 		if prev, ok := applied[key]; ok {
-			upd.prev = common.Copy(prev)
+			upd.prev = bytes.Clone(prev)
 		} else {
 			prev, _, err := ctx.Branch(upd.prefix)
 			if err != nil {
 				return err
 			}
-			upd.prev = common.Copy(prev)
+			upd.prev = bytes.Clone(prev)
 		}
 		if err := mergeDeferredUpdate(upd, merger); err != nil {
 			return err
@@ -907,7 +907,7 @@ func applyDeferredGuarded(ctx PatriciaContext, deferred []*DeferredBranchUpdate,
 		if err := ctx.PutBranch(upd.prefix, upd.encoded, upd.prev); err != nil {
 			return err
 		}
-		applied[key] = common.Copy(upd.encoded)
+		applied[key] = bytes.Clone(upd.encoded)
 	}
 	return nil
 }

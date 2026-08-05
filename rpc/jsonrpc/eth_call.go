@@ -853,7 +853,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		logger.Warn("state root mismatch after stateless execution", "actual", newStateRoot, "expected", block.Root())
 	}
 
-	return common.Copy(witnessBuffer.Bytes()), nil
+	return bytes.Clone(witnessBuffer.Bytes()), nil
 }
 
 // emptyWitnessBytes serializes an empty op-stream witness, used for genesis and

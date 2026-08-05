@@ -20,6 +20,7 @@
 package blockgen
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"errors"
@@ -559,7 +560,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		// Mutate the state and block according to any hard-fork specs
 		if daoBlock := config.DAOForkBlock; daoBlock != nil {
 			if b.header.Number.Uint64() >= *daoBlock && b.header.Number.Uint64() < *daoBlock+misc.DAOForkExtraRange {
-				b.header.Extra = common.Copy(misc.DAOForkBlockExtra)
+				b.header.Extra = bytes.Clone(misc.DAOForkBlockExtra)
 			}
 		}
 		// Set ParentBeaconBlockRoot for Cancun+ blocks before InitializeBlockExecution

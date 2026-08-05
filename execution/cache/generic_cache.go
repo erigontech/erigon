@@ -26,7 +26,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/elastic/go-freelru"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/cachebudget"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
@@ -442,7 +441,7 @@ func (c *GenericCache[T]) putStriped(key []byte, value T, txNum uint64, overwrit
 	if hasExisting {
 		lru.Remove(h)
 	}
-	keyCopy := common.Copy(key)
+	keyCopy := bytes.Clone(key)
 	if lru.Add(h, entry[T]{key: keyCopy, val: value, size: newSize, txNum: txNum, epoch: ep}) {
 		c.evictions.Add(1)
 	}

@@ -17,6 +17,7 @@
 package integrity_test
 
 import (
+	"bytes"
 	"context"
 	"math/rand"
 	"strings"
@@ -25,7 +26,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -108,7 +108,7 @@ func writeAndBuild(t *testing.T, ctx context.Context, db kv.TemporalRwDB, agg *s
 		acc := accounts.Account{Nonce: txNum, Balance: *uint256.NewInt(txNum * 1000), CodeHash: accounts.EmptyCodeHash}
 		require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addr, accounts.SerialiseV3(&acc), txNum, nil))
 
-		storageKey := append(common.Copy(addr), loc...)
+		storageKey := append(bytes.Clone(addr), loc...)
 		require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, storageKey, []byte{addr[0], loc[0]}, txNum, nil))
 
 		_, err = domains.ComputeCommitment(ctx, tx, true, txNum, txNum, "test", nil)
