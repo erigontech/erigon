@@ -17,10 +17,13 @@
 package state
 
 import (
+	"context"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 )
@@ -178,4 +181,82 @@ func TestVisibilityLowering_ForbiddenAggregatorPanicsOnLoweringOnly(t *testing.T
 	agg.ForbidVisibilityLowering()
 	realign := agg.Unalign(kv.ReceiptDomain) // raises the ceiling: allowed
 	require.Panics(t, func() { realign() }, "realigning a still-lagging receipt lowers the state domains' ends")
+}
+
+// craftedClampedVisible replaces the current visible bundle with one where
+// every state domain's values files end one segment below its history-II end
+// — the divergence a dependency checker produces when a dependent file is
+// missing.
+func craftedClampedVisible(t *testing.T, agg *Aggregator) {
+	t.Helper()
+	agg.dirtyFilesLock.Lock()
+	defer agg.dirtyFilesLock.Unlock()
+	v := agg.visible.Load()
+	crafted := &aggregatorVisible{minimaxTxNum: v.minimaxTxNum}
+	crafted.d, crafted.dh, crafted.dhii, crafted.iis = v.d, v.dh, v.dhii, v.iis
+	for _, dom := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+		files := v.d[dom].files
+		require.GreaterOrEqual(t, len(files), 2)
+		crafted.d[dom] = newDomainVisible(dom, files[:len(files)-1])
+	}
+	v.next = crafted
+	agg.visible.Store(crafted)
+}
+
+// A view's frontier must not overstate what its values view can serve: with
+// domain values clamped below the history-II end (dependency checker), reads
+// above the values end fall back to older file values, so DomainVisibleEnd
+// must report the values end, not the II end.
+func TestDomainVisibleEnd_ClampedToValuesCoverage(t *testing.T) {
+	t.Parallel()
+	db, agg := testDbAndAggregatorv3(t, alignStepSize)
+
+	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	generateStandaloneIIFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	require.NoError(t, agg.OpenFolder())
+
+	craftedClampedVisible(t, agg)
+
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	tx, err := db.BeginRo(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	end, ok := at.DomainVisibleEnd(kv.AccountsDomain, tx)
+	require.True(t, ok)
+	require.Equal(t, uint64(1*alignStepSize), end,
+		"the frontier must not overstate the values coverage")
+}
+
+// The forbid assert must also watch the history-II ends: they are the base of
+// what DomainVisibleEnd reports, and with values dependency-clamped below the
+// ceiling they can lower while every values end stays put.
+func TestVisibilityLowering_GuardsHistoryIIEnd(t *testing.T) {
+	t.Parallel()
+	_, agg := testDbAndAggregatorv3(t, alignStepSize)
+
+	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	generateStandaloneIIFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	require.NoError(t, agg.OpenFolder())
+
+	craftedClampedVisible(t, agg)
+	agg.ForbidVisibilityLowering()
+
+	for _, pattern := range []string{
+		filepath.Join(agg.Dirs().SnapIdx, "*accounts.1-2.ef"),
+		filepath.Join(agg.Dirs().SnapAccessors, "*accounts.1-2.efi"),
+	} {
+		matches, err := filepath.Glob(pattern)
+		require.NoError(t, err)
+		require.NotEmpty(t, matches, pattern)
+		for _, m := range matches {
+			require.NoError(t, dir.RemoveFile(m))
+		}
+	}
+
+	require.Panics(t, func() { _ = agg.ReloadFiles() },
+		"lowering a history-II end while values ends stay put must trip the forbid assert")
 }

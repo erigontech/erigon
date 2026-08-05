@@ -1883,6 +1883,14 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 			if nextEnd < prevEnd {
 				panic(fmt.Sprintf("assert: %s visible end lowered %d -> %d while a fill-enabled StateCache is wired — fill admission relies on view frontiers never decreasing", d, prevEnd, nextEnd))
 			}
+			if prev.dhii[d] == nil || next.dhii[d] == nil {
+				continue
+			}
+			prevII := prev.dhii[d].files.EndTxNum()
+			nextII := next.dhii[d].files.EndTxNum()
+			if nextII < prevII {
+				panic(fmt.Sprintf("assert: %s history-II visible end lowered %d -> %d while a fill-enabled StateCache is wired — DomainVisibleEnd derives view frontiers from it", d, prevII, nextII))
+			}
 		}
 	}
 
@@ -2634,6 +2642,12 @@ func (at *AggregatorRoTx) DomainVisibleEnd(name kv.Domain, tx kv.Tx) (uint64, bo
 	d := at.d[name]
 	if d.d.HistoryDisabled {
 		return 0, false
+	}
+	// A dependency checker can clamp the values view below the history-II end;
+	// reads in that gap fall back to older file values, so the frontier must
+	// not overstate the values coverage.
+	if valuesEnd := d.files.EndTxNum(); valuesEnd < d.ht.iit.files.EndTxNum() {
+		return valuesEnd, true
 	}
 	return d.ht.iit.visibleEnd(tx), true
 }

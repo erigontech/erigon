@@ -1063,7 +1063,9 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 
 	// Stash every cache-bound domain tuple during the flush; apply them only
 	// after the commit succeeds. On a failed commit the stash is discarded, so
-	// no cache is ever advanced past durable MDBX state.
+	// no cache apply ever runs ahead of durable MDBX state. (Reads through
+	// this SD between flush and a failed commit can still fill flushed
+	// values; a failed commit is fatal, so they die with the process.)
 	var pending []cacheUpdate
 	stash := func(domain kv.Domain) kv.FlushOption {
 		return kv.WithFlushCallback(domain, func(k []byte, v []byte, step kv.Step, txNum uint64) {
