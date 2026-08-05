@@ -1158,20 +1158,50 @@ func TestAllocLogPreservesCapacityAcrossRevert(t *testing.T) {
 	require.Equal(t, capBefore, cap(ibs.logs.byTx[1]), "inner log buffer capacity must survive revert+relog")
 }
 
-func TestResetDropsOversizedLogDataBuffers(t *testing.T) {
+// A block of large logs must not pay for them again next block: inside the
+// budget an oversized buffer is kept, like any other.
+func TestResetKeepsOversizedLogDataWithinBudget(t *testing.T) {
 	t.Parallel()
 
 	ibs := New(NewNoopReader())
 	ibs.SetTxContext(1, 0)
 	small := ibs.AllocLog(common.Address{0x01}, 1, 8)
 	big := ibs.AllocLog(common.Address{0x02}, 1, maxReusableLogDataCap+1)
+	bigData := big.Data[:1]
 
 	ibs.Reset()
 	ibs.SetTxContext(2, 0)
 	require.Same(t, small, ibs.AllocLog(common.Address{0x03}, 1, 8), "normal-size entry is reused")
-	relog := ibs.AllocLog(common.Address{0x04}, 1, 8)
-	require.Same(t, big, relog, "the entry itself is small enough to keep")
-	require.LessOrEqual(t, cap(relog.Data), maxReusableLogDataCap, "its oversized Data must not survive Reset")
+	relog := ibs.AllocLog(common.Address{0x04}, 1, maxReusableLogDataCap+1)
+	require.Same(t, big, relog, "the entry is reused")
+	require.Equal(t, &bigData[0], &relog.Data[0], "and so is its Data buffer")
+}
+
+// Past the byte budget the oversized buffers are what goes, and the newest go
+// first: transactions take positions in order, so the head is what the next
+// block asks for first.
+func TestResetEvictsOversizedLogDataFirst(t *testing.T) {
+	t.Parallel()
+
+	const dataSize = maxReusableLogDataCap + 1
+	txs := maxReusableLogBytes/dataSize + 2
+
+	ibs := New(NewNoopReader())
+	for txIndex := range txs {
+		ibs.SetTxContext(1, txIndex)
+		ibs.AllocLog(common.Address{0x01}, 0, dataSize)
+	}
+	ibs.Reset()
+
+	_, _, dataBytes := retainedLogs(ibs)
+	require.LessOrEqual(t, dataBytes, maxReusableLogBytes)
+	require.Nil(t, entryAt(ibs, txs, 0).Data, "the newest buffer goes first")
+	require.NotNil(t, entryAt(ibs, 1, 0).Data, "the head stays warm for the next block")
+}
+
+func entryAt(ibs *IntraBlockState, ti, idx int) *types.Log {
+	entries := ibs.logs.byTx[ti]
+	return entries[:cap(entries)][idx]
 }
 
 // TestLogIndexIsBlockWide pins that AddLog stamps a block-wide log index:

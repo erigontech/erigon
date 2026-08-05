@@ -312,6 +312,30 @@ func BenchmarkAddLog(b *testing.B) {
 
 var sinkLog *types.Log
 
+// Blocks whose transactions each emit a log past the per-entry reuse cap — the
+// shape an attack sends. txs=16 fits the byte budget, txs=100 exceeds it, so the
+// two cases split reuse from eviction.
+func BenchmarkLogEmitLargeDataPerTx(b *testing.B) {
+	log := &types.Log{
+		Address: common.HexToAddress("0x1"),
+		Topics:  []common.Hash{common.HexToHash("0xaa")},
+		Data:    bytes.Repeat([]byte{0x11}, maxReusableLogDataCap+1),
+	}
+	for _, txs := range []int{16, 100} {
+		b.Run(fmt.Sprintf("txs=%d", txs), func(b *testing.B) {
+			ibs := New(nil)
+			b.ReportAllocs()
+			for b.Loop() {
+				for txIndex := range txs {
+					ibs.SetTxContext(1, txIndex)
+					ibs.AddLog(log)
+					ibs.Reset()
+				}
+			}
+		})
+	}
+}
+
 // The parallel executor resets before every transaction, so a block costs one
 // Reset per transaction while the buffers hold the whole block's logs.
 func BenchmarkLogEmitAndResetPerTx(b *testing.B) {

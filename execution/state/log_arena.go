@@ -82,7 +82,7 @@ func (a *logArena) alloc(j *journal, addr common.Address, txIndex, numTopics, da
 	dataCap := cap(lp.Data)
 	lp.Data = slices.Grow(lp.Data[:0], dataSize)[:dataSize]
 	a.reusableBytes += cap(lp.Data) - dataCap
-	if cap(lp.Data) > maxReusableLogDataCap {
+	if cap(lp.Data) > maxReusableLogDataCap && dataCap <= maxReusableLogDataCap {
 		a.oversized = append(a.oversized, logPos{ti, logIdx})
 	}
 	lp.Removed = false
@@ -109,12 +109,14 @@ func (a *logArena) markFilled(ti int) {
 // Topics/Data for alloc to reuse, up to the budget.
 func (a *logArena) reset() {
 	a.indexInBlock = 0
+	all := a.byTx[:cap(a.byTx)]
+	if a.reusableBytes > maxReusableLogBytes {
+		a.drainOversized(all)
+	}
 	if a.reusableEntries > maxReusableLogEntries || a.reusableBytes > maxReusableLogBytes {
 		a.trim()
 		return
 	}
-	all := a.byTx[:cap(a.byTx)]
-	a.dropOversized(all)
 	filled := all[a.filledLo:a.filledHi]
 	for i := range filled {
 		filled[i] = filled[i][:0]
@@ -122,20 +124,34 @@ func (a *logArena) reset() {
 	a.filledLo, a.filledHi = 0, 0
 }
 
-// dropOversized frees the Data that outgrew the per-entry cap, keeping the entry
-// and its Topics for reuse. A revert can put a different entry at a recorded
-// position; freeing that one's Data instead is a lost buffer, not a leak.
-func (a *logArena) dropOversized(all []types.Logs) {
-	for _, p := range a.oversized {
+// drainOversized frees Data that outgrew the per-entry cap until the arena is
+// back inside its budget, newest first. These go before anything else: one of
+// them holds as many bytes as hundreds of ordinary entries. Newest first because
+// transactions take their positions in order — freeing the oldest frees exactly
+// what the next block asks for first, and then nothing is ever reused.
+func (a *logArena) drainOversized(all []types.Logs) {
+	i := len(a.oversized) - 1
+	for ; i >= 0 && a.reusableBytes > maxReusableLogBytes; i-- {
+		p := a.oversized[i]
 		entries := all[p.ti]
-		lp := entries[:cap(entries)][p.idx] // a revert can hide the entry behind the length
+		lp := entries[:cap(entries)][p.idx]
 		if lp == nil {
 			continue
 		}
 		a.reusableBytes -= cap(lp.Data)
 		lp.Data = nil
 	}
-	a.oversized = a.oversized[:0]
+	a.oversized = a.oversized[:i+1]
+}
+
+// forget removes a position from the eviction queue, newest match first.
+func (a *logArena) forget(p logPos) {
+	for i := len(a.oversized) - 1; i >= 0; i-- {
+		if a.oversized[i] == p {
+			a.oversized = append(a.oversized[:i], a.oversized[i+1:]...)
+			return
+		}
+	}
 }
 
 // trim truncates every transaction and drops what does not fit the budget,
@@ -168,14 +184,22 @@ func (a *logArena) trim() {
 	a.oversized = a.oversized[:0]
 }
 
-// revertLast drops the entry txIndex allocated last.
+// revertLast drops the entry txIndex allocated last. Oversized Data goes with
+// it: behind the length it is reachable again only if the transaction re-emits
+// that many logs, so keeping it is retention without reuse.
 func (a *logArena) revertLast(txIndex int) {
 	if txIndex+1 >= len(a.byTx) {
 		panic(fmt.Sprintf("can't revert log index %v, max: %v", txIndex, len(a.byTx)-1))
 	}
 	txnLogs := a.byTx[txIndex+1]
-	a.byTx[txIndex+1] = txnLogs[:len(txnLogs)-1] // revert 1 log
-	if len(a.byTx[txIndex+1]) == 0 {
+	last := len(txnLogs) - 1
+	if lp := txnLogs[last]; lp != nil && cap(lp.Data) > maxReusableLogDataCap {
+		a.reusableBytes -= cap(lp.Data)
+		lp.Data = nil
+		a.forget(logPos{txIndex + 1, last})
+	}
+	a.byTx[txIndex+1] = txnLogs[:last] // revert 1 log
+	if last == 0 {
 		a.byTx = a.byTx[:len(a.byTx)-1] // revert txn
 	}
 	a.indexInBlock--
