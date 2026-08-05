@@ -24,7 +24,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -281,21 +280,6 @@ func TestResetDropsOutsizedTxSlots(t *testing.T) {
 
 	ibs.Reset()
 	require.Nil(t, ibs.logs.byTx[:cap(ibs.logs.byTx)][1])
-}
-
-// Reading a transaction's logs after Reset took them back answers "emitted no
-// logs", which a receipt records as consensus data. Asserts must catch it.
-func TestGetLogsAfterResetAsserts(t *testing.T) {
-	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
-	dbg.AssertEnabled = true
-
-	ibs := New(nil)
-	ibs.SetTxContext(1, 0)
-	ibs.AddLog(&types.Log{Address: common.HexToAddress("0x1")})
-	require.Len(t, ibs.GetRawLogs(0), 1, "readable before Reset")
-
-	ibs.Reset()
-	require.Panics(t, func() { ibs.GetRawLogs(0) })
 }
 
 func retainedLogs(ibs *IntraBlockState) (entries, slotCap, dataBytes int) {

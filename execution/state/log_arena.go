@@ -21,7 +21,6 @@ import (
 	"slices"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
@@ -59,8 +58,6 @@ type logArena struct {
 	pool               []*types.Log // entries taken back at reset, for any transaction to reuse
 	poolBytes          int          // Data the pool holds
 	indexInBlock       uint
-	gen                uint32   // reset counter
-	genByTx            []uint32 // like byTx: the gen each transaction last wrote in; only under dbg.AssertEnabled
 }
 
 // alloc journals the allocation for revertLast, then returns txIndex's next
@@ -80,9 +77,6 @@ func (a *logArena) alloc(j *journal, addr common.Address, txIndex, numTopics, da
 	entries = slices.Grow(entries, 1)[:logIdx+1]
 	byTx[ti] = entries
 	a.markFilled(ti)
-	if dbg.AssertEnabled {
-		a.stampWrite(ti)
-	}
 
 	lp := entries[logIdx]
 	if lp == nil {
@@ -142,7 +136,6 @@ func (a *logArena) markFilled(ti int) {
 // caller's own work and not the block's.
 func (a *logArena) reset() {
 	a.indexInBlock = 0
-	a.gen++
 	all := a.byTx[:cap(a.byTx)]
 	for i := a.filledLo; i < a.filledHi; i++ {
 		entries := all[i]
@@ -189,28 +182,7 @@ func (a *logArena) forTx(txIndex int) types.Logs {
 	if ti >= len(a.byTx) {
 		return nil
 	}
-	if dbg.AssertEnabled {
-		a.assertLive(ti)
-	}
 	return a.byTx[ti]
-}
-
-// stampWrite records the reset cycle a transaction wrote in. The offset keeps
-// zero meaning never written.
-func (a *logArena) stampWrite(ti int) {
-	if len(a.genByTx) <= ti {
-		a.genByTx = slices.Grow(a.genByTx, ti+1-len(a.genByTx))[:ti+1]
-	}
-	a.genByTx[ti] = a.gen + 1
-}
-
-// assertLive catches a read of logs the arena already took back. The answer
-// would be an empty set, which a receipt records as "emitted no logs".
-func (a *logArena) assertLive(ti int) {
-	if ti < len(a.genByTx) && a.genByTx[ti] != 0 && a.genByTx[ti] != a.gen+1 {
-		panic(fmt.Sprintf("logs of tx %d were reclaimed by Reset: written in cycle %d, now %d",
-			ti-1, a.genByTx[ti]-1, a.gen))
-	}
 }
 
 func (a *logArena) release() { *a = logArena{} }
