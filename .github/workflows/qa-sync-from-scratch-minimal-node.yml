@@ -22,7 +22,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        chain: [ mainnet, gnosis ]  # Chain name as specified on the erigon command line
+        # chain: name as specified on the erigon command line.
+        # retirement_prune_distance: narrowed state-history window for the file
+        # retirement check, in blocks. It has to put the retirement cutoff between
+        # two snapshot-file boundaries, so it depends on how many blocks one step
+        # spans on that chain — see the file-retirement README in the QA repo.
+        include:
+          - chain: mainnet
+            retirement_prune_distance: 20000
+          - chain: gnosis
+            retirement_prune_distance: 50000
     env:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
@@ -30,7 +39,7 @@ jobs:
       TRACKING_TIME_SECONDS: 7200 # 2 hours
       TOTAL_TIME_SECONDS: 43200 # 18 hours
       CHAIN: ${{ matrix.chain }}
-      RETIREMENT_PRUNE_DISTANCE: 20000 # narrowed state-history window, in blocks
+      RETIREMENT_PRUNE_DISTANCE: ${{ matrix.retirement_prune_distance }}
       RETIREMENT_TIMEOUT_SECONDS: 1800 # 30 minutes to observe the first retirement
 
     steps:
@@ -148,11 +157,9 @@ jobs:
       # narrower than the one it was synced with. That moves the retirement
       # cutoff past whole snapshot-file boundaries, so aged history files become
       # deletable within minutes instead of the days the default minimal window
-      # would need at tip. Gnosis is excluded until its step density is measured:
-      # 20000 blocks is a mainnet-calibrated value.
+      # would need at tip. The distance is per-chain: see the matrix above.
       - name: Test old state-history file retirement (minimal node)
         id: retirement_step
-        if: ${{ success() && env.CHAIN == 'mainnet' }}
         run: |
           set +e # Disable exit on error
 
