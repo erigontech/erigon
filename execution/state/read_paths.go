@@ -1307,11 +1307,27 @@ func readState(s *IntraBlockState, addr accounts.Address, key accounts.StorageKe
 	return v, source, version, err
 }
 
+// warmStorageReadable is warmReadable plus versionedReadCore's resident-deleted
+// check: a stateObject deleted by a prior tx's selfdestruct must read as zero,
+// not as the slot value this tx recorded before that destruct became visible.
+func (s *IntraBlockState) warmStorageReadable(addr accounts.Address) bool {
+	if !s.warmReadable(addr) {
+		return false
+	}
+	so, ok := s.stateObjects[addr]
+	return !ok || !so.deleted
+}
+
 // readStateForSet is the SetState-specific variant.  Returns the
 // additional "clean" bool (the second return of stateObject.GetState),
 // which SetState uses to decide between deleting vs. updating the
 // versioned write on revert.
 func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey) (uint256.Int, ReadSource, Version, bool, error) {
+	if s.warmStorageReadable(addr) {
+		if tr, ok := s.versionedReads.GetStorage(addr, key); ok && warmSource(tr.Source) {
+			return tr.Val, tr.Source, tr.Version, false, nil
+		}
+	}
 	var r readPathResult
 	versionedReadCore(s, addr, StoragePath, key, false, false, &r)
 	if r.err != nil {
