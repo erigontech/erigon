@@ -98,11 +98,12 @@ func CheckMaxCodeSize(size int, rules *chain.Rules) error {
 	}
 
 	var maxSize int
-	if rules.IsAmsterdam {
+	switch {
+	case rules.IsAmsterdam:
 		maxSize = params.MaxCodeSizeAmsterdam
-	} else if rules.IsAhmedabad {
+	case rules.IsAhmedabad:
 		maxSize = params.MaxCodeSizeAhmedabad
-	} else {
+	default:
 		maxSize = params.MaxCodeSize
 	}
 	if size > maxSize {
@@ -114,11 +115,12 @@ func CheckMaxCodeSize(size int, rules *chain.Rules) error {
 // See EIP-3860 & EIP-7954
 func CheckMaxInitCodeSize(size uint64, eip3860, eip7954 bool) error {
 	var maxSize uint64
-	if eip7954 {
+	switch {
+	case eip7954:
 		maxSize = params.MaxInitCodeSizeAmsterdam
-	} else if eip3860 {
+	case eip3860:
 		maxSize = params.MaxInitCodeSize
-	} else {
+	default:
 		return nil
 	}
 	if size > maxSize {

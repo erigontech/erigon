@@ -55,7 +55,6 @@ import (
 	"github.com/erigontech/erigon/db/snaptype"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/builder"
-	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
@@ -126,7 +125,6 @@ type ExecModuleTester struct {
 	ForkValidator   *execmodule.ForkValidator
 	ExecModule      *execmodule.ExecModule
 	StateCache      *execmodule.Cache
-	domainCache     *cache.StateCache
 	retirementStart chan bool
 	retirementDone  chan struct{}
 	retirementWg    sync.WaitGroup
@@ -169,8 +167,8 @@ func (emt *ExecModuleTester) Close() {
 	if emt.DB != nil {
 		emt.DB.Close()
 	}
-	if emt.domainCache != nil {
-		emt.domainCache.Close()
+	if emt.ExecModule != nil {
+		emt.ExecModule.Close()
 	}
 	if emt.tb == nil && emt.Dirs.DataDir != "" {
 		dir.RemoveAll(emt.Dirs.DataDir)
@@ -776,10 +774,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		Accumulator:    mock.Notifications.Accumulator,
 		RecentReceipts: mock.Notifications.RecentReceipts,
 	}
-	// Per-instance domain cache, held on the tester so Close releases its
-	// envelope reservation. Uses the production default — the caches jump-grow on
-	// demand, so a small-working-set fixture stays small.
-	mock.domainCache = cache.NewDefaultStateCache()
 	mock.ExecModule = execmodule.NewExecModule(
 		ctx,
 		mock.BlockReader,
@@ -791,7 +785,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		hook,
 		accum,
 		mock.StateCache,
-		mock.domainCache,
+		0, // stateCacheBudget: production default; the caches jump-grow on demand
 		logger,
 		engine,
 		cfg.Sync,

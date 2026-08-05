@@ -73,7 +73,6 @@ import (
 	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/diagnostics/mem"
 	"github.com/erigontech/erigon/execution/builder"
-	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/engineapi"
@@ -314,7 +313,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			statecfg.ExperimentalStreamingCommitment = true
 		}
 
-		if err = stages.UpdateMetrics(tx); err != nil {
+		if err := stages.UpdateMetrics(tx); err != nil {
 			return err
 		}
 
@@ -598,11 +597,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	logger.Info("Initialising Ethereum protocol", "network", config.NetworkID)
 	var rulesConfig any
 
-	if chainConfig.Aura != nil {
+	switch {
+	case chainConfig.Aura != nil:
 		rulesConfig = &config.Aura
-	} else if chainConfig.Bor != nil {
+	case chainConfig.Bor != nil:
 		rulesConfig = chainConfig.Bor
-	} else {
+	default:
 		rulesConfig = &config.Ethash
 	}
 
@@ -943,14 +943,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		Accumulator:    backend.notifications.Accumulator,
 		RecentReceipts: backend.notifications.RecentReceipts,
 	}
-	// Test harnesses (e.g. EngineApiTester) set StateCacheBudget small so each
-	// per-fixture ExecModule doesn't allocate the full production cache; 0 keeps
-	// the production default.
-	var domainStateCache *cache.StateCache
-	if config.StateCacheBudget > 0 {
-		b := config.StateCacheBudget
-		domainStateCache = cache.NewStateCache(b, b, b, b)
-	}
 	backend.execModule = execmodule.NewExecModule(
 		ctx,
 		blockReader,
@@ -962,7 +954,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		hook,
 		accum,
 		execmoduleCache,
-		domainStateCache,
+		config.StateCacheBudget,
 		logger,
 		backend.engine,
 		config.Sync,
@@ -1121,10 +1113,9 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 	blockReader := s.blockReader
 	ctx := s.sentryCtx
 	chainKv := s.chainDB
-	var err error
 	emptyBadHash := config.BadBlockHash == common.Hash{}
 	if !emptyBadHash {
-		if err = chainKv.View(ctx, func(tx kv.Tx) error {
+		if err := chainKv.View(ctx, func(tx kv.Tx) error {
 			badBlockHeader, hErr := rawdb.ReadHeaderByHash(tx, config.BadBlockHash)
 			if badBlockHeader != nil {
 				unwindPoint := badBlockHeader.Number.Uint64() - 1
@@ -1622,6 +1613,10 @@ func (s *Ethereum) Stop() error {
 	}
 
 	s.chainDB.Close()
+
+	if s.execModule != nil {
+		s.execModule.Close()
+	}
 
 	if s.config.Downloader != nil {
 		_ = s.config.Downloader.CloseTorrentLogFile()
