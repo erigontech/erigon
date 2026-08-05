@@ -334,7 +334,9 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		// When the in-memory deletion reflects a prior tx's selfdestruct, surface
 		// the SD version rather than UnknownVersion, so synthetic CreateAccount read
 		// records match later SD-zero-path reads and don't force a version conflict.
-		if destructed, sdRes, ok := s.readSelfDestructMemo(addr); ok && sdRes.Status() == MVReadResultDone && destructed {
+		destructed, sdRes, sdOK := s.readSelfDestructMemo(addr)
+		switch {
+		case sdOK && sdRes.Status() == MVReadResultDone && destructed:
 			sdVer := Version{TxIndex: sdRes.DepIdx(), Incarnation: sdRes.Incarnation()}
 			if !commited {
 				s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
@@ -346,11 +348,17 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 			r.source = MapRead
 			r.version = sdVer
 			return
+		case sdOK && sdRes.Status() == MVReadResultDone && !destructed:
+			// A later tx revived the account: the cached deleted object is stale
+			// against the map, so fall through — map floors serve the revival's
+			// cells, and paths without cells resolve through the deleted object's
+			// committed fall-through, which correctly reads as wiped.
+		default:
+			r.outcome = outcomeReturnDefault
+			r.source = StorageRead
+			r.version = UnknownVersion
+			return
 		}
-		r.outcome = outcomeReturnDefault
-		r.source = StorageRead
-		r.version = UnknownVersion
-		return
 	}
 
 	// Read-side cache (warm read, Block-STM read-once): a Done value already
@@ -376,6 +384,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	var destructedVersion Version
 	if destructed, sdRes, ok := s.readSelfDestructMemo(addr); ok && sdRes.Status() == MVReadResultDone && destructed {
 		destructTxIndex := sdRes.DepIdx()
+		sdVer := Version{TxIndex: sdRes.DepIdx(), Incarnation: sdRes.Incarnation()}
 		// A tx's own same-tx write to this path is returned directly: it always
 		// observes its own write, even after a prior tx's self-destruct.
 		if !commited {
@@ -395,7 +404,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 			revived = true
 		}
 		if !revived && path != CodePath {
-			sdVersion := Version{TxIndex: destructTxIndex, Incarnation: sdRes.Incarnation()}
+			sdVersion := Version{TxIndex: destructTxIndex, Incarnation: sdVer.Incarnation}
 			if s.eip8246 && (path == BalancePath || path == CodeHashPath || path == IncarnationPath) {
 				// EIP-8246 removes the SELFDESTRUCT burn: a destroyed account keeps
 				// its balance and stays alive, so a concurrent reader must see the
@@ -429,6 +438,19 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 						ReadHeader: ReadHeader{Source: MapRead, Version: sdVersion},
 						Val:        true,
 					})
+					// Per-path revival misses account-level life: a balance-only
+					// credit (fee, transfer) revives the account without writing a
+					// CodeHash entry, and a live account's wiped code hash is
+					// keccak(''), not the nil hash of a nonexistent one.
+					if path == CodeHashPath && !s.versionMap.destroyedAndUnrevived(addr, s.txIndex) {
+						r.outcome = outcomeMapDone
+						r.mapCodeHashVal = accounts.EmptyCodeHash
+						r.hdr = ReadHeader{Source: MapRead, Version: sdVersion}
+						r.recordVR = !commited
+						r.source = MapRead
+						r.version = sdVersion
+						return
+					}
 					r.outcome = outcomeReturnZero
 					r.source = MapRead
 					r.version = sdVersion
@@ -567,34 +589,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 					hdr.Version.Incarnation,
 				)
 				if path == AddressPath {
-					balV, balRes, balOK := s.versionMap.ReadBalance(addr, s.txIndex)
-					nonV, nonRes, nonOK := s.versionMap.ReadNonce(addr, s.txIndex)
-					sdV, sdRes, sdOK := s.versionMap.ReadSelfDestruct(addr, s.txIndex)
-					pr, prOK := s.versionedReads.GetAddress(addr)
-					prNil := !prOK || pr.Val == nil || pr.Val.Account() == nil
-					mapValEmpty := true
-					if r.mapAddressVal != nil {
-						mapValEmpty = r.mapAddressVal.Empty()
-					}
-					fmt.Printf(
-						"DEP-RD-CTX %x prNil=%v mapValNil=%v mapValEmpty=%v bal=(ok=%v,v=%v,idx=%d,st=%d) nonce=(ok=%v,v=%d,idx=%d,st=%d) sd=(ok=%v,v=%v,idx=%d,st=%d)\n",
-						addr,
-						prNil,
-						r.mapAddressVal == nil,
-						mapValEmpty,
-						balOK,
-						&balV,
-						balRes.DepIdx(),
-						balRes.Status(),
-						nonOK,
-						nonV,
-						nonRes.DepIdx(),
-						nonRes.Status(),
-						sdOK,
-						sdV,
-						sdRes.DepIdx(),
-						sdRes.Status(),
-					)
+					s.traceDepReadContext(addr, r)
 				}
 			}
 			if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
@@ -607,35 +602,57 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 			s.versionedReads.SetHeader(addr, path, key, hdr)
 			panic(ErrDependency)
 		}
-		// CodePath trumped by a destruct at >= the cell index: account revival is
-		// not code revival, so scan the range — a later SelfDestruct=false cell
-		// (transfer-revival) must not shadow the wipe. A revival that re-deploys
-		// writes a fresh Code cell above the destruct, which then is the floor.
-		if path == CodePath {
-			if _, ok := s.versionMap.FindDoneSelfDestructInRange(addr, res.DepIdx(), s.txIndex, true); ok {
-				r.outcome = outcomeReturnDefault
-				r.source = MapRead
-				r.version = Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}
-				return
+		// The value we found may predate a SELFDESTRUCT that erased it. If a
+		// later transaction destroyed this account, the erased fields and
+		// slots must read as zero/empty even though the old value is still in
+		// the map — and asking only for the LATEST SelfDestruct entry is not
+		// enough, because re-creating the account writes SelfDestruct=false
+		// on top of the destruction. So scan the whole range between the
+		// value and this reader for a destruction. Per-path bound, matching
+		// validation: for storage/code/nonce a value written by the same tx
+		// that destroyed the account is erased too (scan includes that
+		// index); for balance and code hash the destroyer's own entries are
+		// what remains AFTER destruction (EIP-8246 keeps the balance, the
+		// code hash is reset) and must be served, so the scan starts above
+		// them. Incarnation alone cannot detect this: a plain CREATE bumps
+		// it without erasing storage. Record what we conclude, twice: the
+		// zero/empty value, stamped with the old entry's version so
+		// validation accepts it as long as nothing new is written there; and
+		// a SelfDestruct=true read of the destruction itself, so the
+		// conclusion is re-checked if that destruction is ever re-executed
+		// away.
+		if path == StoragePath || path == CodePath || path == CodeSizePath || path == NoncePath ||
+			path == CodeHashPath || path == BalancePath {
+			lo := hdr.Version.TxIndex
+			if path == CodeHashPath || path == BalancePath {
+				lo++
 			}
-		}
-		// A Done storage cell written before an in-block SELFDESTRUCT is stale:
-		// the destruct wipes the slot and a recreate leaves it unwritten, so a
-		// later read must see zero. Latest-only ReadSelfDestruct misses this when
-		// a revival (SelfDestruct=false) sits above the wiping write, so scan the
-		// [cellIdx, txIdx) range for a Done SelfDestruct=true. Incarnation alone
-		// is insufficient: a pure CREATE bumps incarnation without wiping storage.
-		if path == StoragePath {
-			if sdVer, ok := s.versionMap.FindDoneSelfDestructInRange(addr, hdr.Version.TxIndex, s.txIndex, true); ok {
+			if sdVer, ok := s.versionMap.FindDoneSelfDestructInRange(addr, lo, s.txIndex, true); ok {
 				if !commited {
+					s.recordWipedRead(addr, path, key, hdr.Version)
 					s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
 						ReadHeader: ReadHeader{Source: MapRead, Version: sdVer},
 						Val:        true,
 					})
 				}
+				// The code hash is account-level: a revival re-creates the
+				// account with a live empty-code hash even though nothing
+				// writes a CodeHash entry, so serve keccak('') for a revived
+				// account and the nil hash only while it stays dead. The other
+				// paths stay erased unless explicitly rewritten, which would
+				// be the entry above this scan.
+				if path == CodeHashPath && !s.versionMap.destroyedAndUnrevived(addr, s.txIndex) {
+					r.outcome = outcomeMapDone
+					r.mapCodeHashVal = accounts.EmptyCodeHash
+					r.hdr = ReadHeader{Source: MapRead, Version: hdr.Version}
+					r.recordVR = false
+					r.source = MapRead
+					r.version = hdr.Version
+					return
+				}
 				r.outcome = outcomeReturnZero
 				r.source = MapRead
-				r.version = sdVer
+				r.version = hdr.Version
 				return
 			}
 		}
@@ -712,15 +729,32 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		// reads as the post-SD zero, recorded as a dependency on the SelfDestructPath
 		// entry; a bare StorageRead/UnknownVersion would be rejected by the validator
 		// (path==AddressPath cross-check) and loop on validator-invalid retries.
+		// Range-scan: a revival's SelfDestruct=false cell must not shadow the
+		// destruct — a balance-only revival rewrites nothing here, so the wipe
+		// still stands. Record the wiped value at the destruct's version: with
+		// no cell for the path, validation accepts exactly that pairing, a
+		// later re-establishing cell version-mismatches it, and removing the
+		// destruct fails the recorded SelfDestruct witness. The wiped code
+		// hash of an account still alive (e.g. after that balance-only
+		// revival) is keccak(''), not the nil hash of a nonexistent account.
 		if path == BalancePath || path == NoncePath || path == IncarnationPath ||
 			path == CodeHashPath || path == CodePath || path == CodeSizePath {
-			if destructed, sd, ok := s.versionMap.ReadSelfDestruct(addr, s.txIndex); ok && sd.Status() == MVReadResultDone && destructed {
-				sdVer := Version{TxIndex: sd.DepIdx(), Incarnation: sd.Incarnation()}
+			if sdVer, ok := s.versionMap.FindDoneSelfDestructInRange(addr, 0, s.txIndex, true); ok {
 				if !commited {
 					s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
 						ReadHeader: ReadHeader{Source: MapRead, Version: sdVer},
 						Val:        true,
 					})
+					s.recordWipedRead(addr, path, key, sdVer)
+				}
+				if path == CodeHashPath && !s.versionMap.destroyedAndUnrevived(addr, s.txIndex) {
+					r.outcome = outcomeMapDone
+					r.mapCodeHashVal = accounts.EmptyCodeHash
+					r.hdr = ReadHeader{Source: MapRead, Version: sdVer}
+					r.recordVR = !commited
+					r.source = MapRead
+					r.version = sdVer
+					return
 				}
 				r.outcome = outcomeReturnZero
 				r.source = MapRead
@@ -942,6 +976,64 @@ func readAccountInternal(s *IntraBlockState, addr accounts.Address) (*accounts.A
 		return nil, r.source, r.version, nil
 	default:
 		panic(fmt.Sprintf("readAccountInternal: unexpected outcome %d for %x", r.outcome, addr))
+	}
+}
+
+// traceDepReadContext dumps the account-level version-map context behind an
+// AddressPath dependency, for the TraceReexec DEP-RD print.
+func (s *IntraBlockState) traceDepReadContext(addr accounts.Address, r *readPathResult) {
+	balV, balRes, balOK := s.versionMap.ReadBalance(addr, s.txIndex)
+	nonV, nonRes, nonOK := s.versionMap.ReadNonce(addr, s.txIndex)
+	sdV, sdRes, sdOK := s.versionMap.ReadSelfDestruct(addr, s.txIndex)
+	pr, prOK := s.versionedReads.GetAddress(addr)
+	prNil := !prOK || pr.Val == nil || pr.Val.Account() == nil
+	mapValEmpty := true
+	if r.mapAddressVal != nil {
+		mapValEmpty = r.mapAddressVal.Empty()
+	}
+	fmt.Printf(
+		"DEP-RD-CTX %x prNil=%v mapValNil=%v mapValEmpty=%v bal=(ok=%v,v=%v,idx=%d,st=%d) nonce=(ok=%v,v=%d,idx=%d,st=%d) sd=(ok=%v,v=%v,idx=%d,st=%d)\n",
+		addr,
+		prNil,
+		r.mapAddressVal == nil,
+		mapValEmpty,
+		balOK,
+		&balV,
+		balRes.DepIdx(),
+		balRes.Status(),
+		nonOK,
+		nonV,
+		nonRes.DepIdx(),
+		nonRes.Status(),
+		sdOK,
+		sdV,
+		sdRes.DepIdx(),
+		sdRes.Status(),
+	)
+}
+
+// recordWipedRead records a read that resolved to "erased by a SELFDESTRUCT":
+// the zero/empty value the reader returns, stamped with the version of the
+// stale entry it replaces.
+func (s *IntraBlockState) recordWipedRead(addr accounts.Address, path AccountPath, key accounts.StorageKey, ver Version) {
+	hdr := ReadHeader{Source: MapRead, Version: ver}
+	switch path {
+	case StoragePath:
+		s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{ReadHeader: hdr})
+	case CodePath:
+		s.versionedReads.SetCode(addr, VersionedRead[[]byte]{ReadHeader: hdr})
+	case CodeSizePath:
+		s.versionedReads.SetCodeSize(addr, VersionedRead[int]{ReadHeader: hdr})
+	case NoncePath:
+		s.versionedReads.SetNonce(addr, VersionedRead[uint64]{ReadHeader: hdr})
+	case CodeHashPath:
+		val := accounts.NilCodeHash
+		if !s.versionMap.destroyedAndUnrevived(addr, s.txIndex) {
+			val = accounts.EmptyCodeHash
+		}
+		s.versionedReads.SetCodeHash(addr, VersionedRead[accounts.CodeHash]{ReadHeader: hdr, Val: val})
+	case BalancePath:
+		s.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{ReadHeader: hdr})
 	}
 }
 

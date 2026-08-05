@@ -1939,3 +1939,144 @@ func TestValidateRead_CodeReadRevivedWithoutCode(t *testing.T) {
 		require.Equal(t, VersionValid, newVM().ValidateVersion(5, newIO(ReadHeader{Source: MapRead, Version: Version{TxIndex: 1}}, nil), validateEqualVersion, true, false, false, ""))
 	})
 }
+
+// The pre-EIP-6780 metamorphic shape end to end (cells @1, SD=true @2,
+// transfer-revival @3, reader @5): every conclusion the EVM consumes needs a
+// recorded witness that validation accepts as long as the conclusion holds —
+// wiped reads serve zero/empty, validate cleanly (no livelock), and a
+// post-read redeploy flush must invalidate the code conclusion.
+func TestMetamorphicShadowedDestruct_ReaderValidatorRoundTrip(t *testing.T) {
+	code := []byte{0x60, 0x00}
+	newVM := func(addr accounts.Address, withBalanceRevival bool) *VersionMap {
+		vm := NewVersionMap(nil)
+		vm.WriteCode(addr, Version{TxIndex: 1}, accounts.NewCode(code), true)
+		vm.WriteCodeHash(addr, Version{TxIndex: 1}, accounts.InternCodeHash([32]byte{0xaa}), true)
+		vm.WriteCodeSize(addr, Version{TxIndex: 1}, len(code), true)
+		vm.WriteNonce(addr, Version{TxIndex: 1}, 1, true)
+		vm.WriteStorage(addr, accounts.InternKey(common.BigToHash(big.NewInt(1))), Version{TxIndex: 1}, *uint256.NewInt(5), true)
+		vm.WriteSelfDestruct(addr, Version{TxIndex: 2}, true, true)
+		vm.WriteIncarnation(addr, Version{TxIndex: 2}, 1, true)
+		vm.WriteSelfDestruct(addr, Version{TxIndex: 3}, false, true)
+		vm.WriteAddress(addr, Version{TxIndex: 3}, &accounts.Account{Balance: *uint256.NewInt(1), CodeHash: accounts.EmptyCodeHash}, true)
+		if withBalanceRevival {
+			vm.WriteBalance(addr, Version{TxIndex: 3}, *uint256.NewInt(1), true)
+		}
+		return vm
+	}
+	newIBS := func(addr accounts.Address, vm *VersionMap) *IntraBlockState {
+		ibs := NewWithVersionMap(&emptyReader{}, vm)
+		t.Cleanup(func() { ibs.Release(false) })
+		ibs.SetTxContext(0, 5)
+		ibs.SetVersion(0)
+		return ibs
+	}
+	validate := func(vm *VersionMap, ibs *IntraBlockState) VersionValidity {
+		io := NewVersionedIO(6)
+		io.RecordReads(Version{TxIndex: 5, Incarnation: 0}, ibs.versionedReads)
+		return vm.ValidateVersion(5, io, validateEqualVersion, true, false, false, "")
+	}
+	t.Run("code read is witnessed and a redeploy flush invalidates it", func(t *testing.T) {
+		addr := getAddress(220)
+		vm := newVM(addr, true)
+		ibs := newIBS(addr, vm)
+		got, err := ibs.GetCode(addr)
+		require.NoError(t, err)
+		require.Empty(t, got)
+		_, recorded := ibs.versionedReads.GetCode(addr)
+		require.True(t, recorded)
+		require.Equal(t, VersionValid, validate(vm, ibs))
+		vm.WriteCode(addr, Version{TxIndex: 4}, accounts.NewCode(code), true)
+		require.Equal(t, VersionInvalid, validate(vm, ibs))
+	})
+	t.Run("nonce read serves the wipe and validates", func(t *testing.T) {
+		addr := getAddress(221)
+		vm := newVM(addr, true)
+		ibs := newIBS(addr, vm)
+		nonce, err := ibs.GetNonce(addr)
+		require.NoError(t, err)
+		require.Equal(t, uint64(0), nonce)
+		require.Equal(t, VersionValid, validate(vm, ibs))
+	})
+	t.Run("code size read serves the wipe and validates", func(t *testing.T) {
+		addr := getAddress(222)
+		vm := newVM(addr, true)
+		ibs := newIBS(addr, vm)
+		size, err := ibs.GetCodeSize(addr)
+		require.NoError(t, err)
+		require.Equal(t, 0, size)
+		require.Equal(t, VersionValid, validate(vm, ibs))
+	})
+	t.Run("code hash read serves the wipe and validates", func(t *testing.T) {
+		addr := getAddress(223)
+		vm := newVM(addr, true)
+		ibs := newIBS(addr, vm)
+		ch, err := ibs.GetCodeHash(addr)
+		require.NoError(t, err)
+		require.True(t, ch.IsEmpty() || ch.IsZero())
+		require.Equal(t, VersionValid, validate(vm, ibs))
+	})
+	t.Run("storage wiped-zero read validates without livelock", func(t *testing.T) {
+		addr := getAddress(224)
+		key := accounts.InternKey(common.BigToHash(big.NewInt(1)))
+		vm := newVM(addr, true)
+		ibs := newIBS(addr, vm)
+		v, err := ibs.GetState(addr, key)
+		require.NoError(t, err)
+		require.True(t, v.IsZero())
+		require.Equal(t, VersionValid, validate(vm, ibs))
+	})
+}
+
+// A balance-only revival (withdrawal/reward-style AddBalance, no account
+// record write) leaves no code/codeHash cells, so the committed fall-through
+// must still resolve the destruct: the account is alive with wiped code —
+// hash keccak(”), size 0 — and the recorded reads must validate, or the
+// reader retries the same conclusion forever.
+func TestCommittedReadsAfterDestructWithBalanceOnlyRevival(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xc0, 0xde})
+	reader := &codeReader{addr: addr, account: &accounts.Account{Nonce: 1, CodeHash: accounts.InternCodeHash([32]byte{0xaa})}, code: []byte{0x60, 0x00}}
+	vm := NewVersionMap(nil)
+	vm.WriteSelfDestruct(addr, Version{TxIndex: 1}, true, true)
+	vm.WriteIncarnation(addr, Version{TxIndex: 1}, 1, true)
+	vm.WriteSelfDestruct(addr, Version{TxIndex: 2}, false, true)
+	vm.WriteBalance(addr, Version{TxIndex: 2}, *uint256.NewInt(1), true)
+	ibs := NewWithVersionMap(reader, vm)
+	defer ibs.Release(false)
+	ibs.SetTxContext(1, 3)
+	ibs.SetVersion(0)
+	ch, err := ibs.GetCodeHash(addr)
+	require.NoError(t, err)
+	require.Equal(t, accounts.EmptyCodeHash, ch)
+	size, err := ibs.GetCodeSize(addr)
+	require.NoError(t, err)
+	require.Equal(t, 0, size)
+	bal, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	require.Equal(t, *uint256.NewInt(1), bal)
+	io := NewVersionedIO(4)
+	io.RecordReads(Version{TxIndex: 3, Incarnation: 0}, ibs.versionedReads)
+	require.Equal(t, VersionValid, vm.ValidateVersion(3, io, validateEqualVersion, true, false, false, ""))
+}
+
+// A Done CodeHash cell below a shadowed destruct must not be served to a
+// later reader: the wiped hash of an account still alive (revived balance-
+// only) is keccak(”), nil only while it stays dead.
+func TestCodeHashCellBelowShadowedDestruct(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xc0, 0xdf})
+	vm := NewVersionMap(nil)
+	vm.WriteCodeHash(addr, Version{TxIndex: 1}, accounts.InternCodeHash([32]byte{0xaa}), true)
+	vm.WriteSelfDestruct(addr, Version{TxIndex: 2}, true, true)
+	vm.WriteIncarnation(addr, Version{TxIndex: 2}, 1, true)
+	vm.WriteSelfDestruct(addr, Version{TxIndex: 3}, false, true)
+	vm.WriteBalance(addr, Version{TxIndex: 3}, *uint256.NewInt(1), true)
+	ibs := NewWithVersionMap(&emptyReader{}, vm)
+	defer ibs.Release(false)
+	ibs.SetTxContext(1, 4)
+	ibs.SetVersion(0)
+	ch, err := ibs.GetCodeHash(addr)
+	require.NoError(t, err)
+	require.Equal(t, accounts.EmptyCodeHash, ch)
+	io := NewVersionedIO(5)
+	io.RecordReads(Version{TxIndex: 4, Incarnation: 0}, ibs.versionedReads)
+	require.Equal(t, VersionValid, vm.ValidateVersion(4, io, validateEqualVersion, true, false, false, ""))
+}

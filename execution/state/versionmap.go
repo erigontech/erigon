@@ -1230,6 +1230,16 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 		valid = VersionInvalid
 		invReason = "dependency"
 	case MVReadResultNone:
+		// A wiped-by-destruct record: an absent value stamped with the version
+		// of a Done SelfDestruct=true cell, with still no cell for the path
+		// itself. Valid as recorded — a later re-establishment writes a cell
+		// (version mismatch against this record), and the destruct going away
+		// fails the recorded SelfDestruct witness.
+		if source == MapRead && absent && version.TxIndex >= 0 {
+			if _, ok := vm.FindDoneSelfDestructInRange(addr, version.TxIndex, version.TxIndex+1, true); ok {
+				break
+			}
+		}
 		switch {
 		case source == MapRead && !recursive &&
 			(path == BalancePath || path == NoncePath || path == IncarnationPath || path == CodeHashPath):
@@ -1404,6 +1414,23 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 		}
 	}
 	for a, tr := range rs.selfDestruct {
+		// A MapRead record names the concrete SelfDestruct cell it consumed —
+		// e.g. the historical destruct behind a wiped read — and a later
+		// revival cell must not shadow it: valid iff the cell at the recorded
+		// version is still Done with the recorded value (an Estimate or a
+		// changed value re-executes, fail-safe). Storage-versioned records
+		// keep the floor check: any destruct appearing invalidates them.
+		if tr.Source == MapRead && tr.Version.TxIndex >= 0 {
+			if _, found := vm.FindDoneSelfDestructInRange(a, tr.Version.TxIndex, tr.Version.TxIndex+1, tr.Val); !found {
+				if traceInvalid && dbg.TraceReexec {
+					fmt.Printf("VINV-R tx=%d %x SelfDestruct src=%s reason=sd-witness rv=(%d.%d)\n",
+						txIdx, a, tr.Source, tr.Version.TxIndex, tr.Version.Incarnation)
+				}
+				valid = VersionInvalid
+				return
+			}
+			continue
+		}
 		if !ok(noValueRead(a, SelfDestructPath, accounts.NilKey, tr.ReadHeader)) {
 			return
 		}
