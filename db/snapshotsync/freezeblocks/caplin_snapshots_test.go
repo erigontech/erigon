@@ -22,6 +22,8 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/klauspost/compress/zstd"
@@ -35,7 +37,6 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
-	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -370,19 +371,25 @@ func TestCloseClearsVisibleSegments(t *testing.T) {
 	writeEmptyBlobSidecarsSegment(t, dirs, 0, snaptype.CaplinMergeLimit)
 
 	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
-	t.Cleanup(sn.Close)
+	closeOnce := sync.OnceFunc(sn.Close)
+	t.Cleanup(closeOnce)
 	require.NoError(t, sn.OpenFolder())
 	require.Equal(t, uint64(snaptype.CaplinMergeLimit), sn.FrozenBlobs())
 
-	sn.Close()
+	closeOnce()
 
 	view := sn.View()
 	defer view.Close()
 	require.Empty(t, view.BlobSidecars())
 }
 
-// A view pins the generation it read: a segment whose files a concurrent OpenFolder
-// drops must stay mapped and readable until that view closes. Meaningful under -race.
+// A view pins the generation it read: a segment dropped from the set by a concurrent
+// republish must stay mapped and readable until that view closes. Meaningful under -race.
+//
+// The drop is driven by excluding the segment from OpenList rather than unlinking it:
+// Windows refuses to remove a file a reader still has mapped, and OpenList retires
+// what is missing from the list as RetireReasonWasDeletedFromDisk, which is the same
+// close-only generation path an on-disk removal takes.
 func TestViewSurvivesConcurrentSegmentRemoval(t *testing.T) {
 	const limit = snaptype.CaplinMergeLimit
 
@@ -398,17 +405,19 @@ func TestViewSurvivesConcurrentSegmentRemoval(t *testing.T) {
 	defer view.Close()
 	tail, ok := view.BeaconBlocksSegment(limit)
 	require.True(t, ok)
-	files := tail.Src().FilePaths(dirs.Snap)
-	require.NotEmpty(t, files)
+	dropped := tail.Src().FileName()
+
+	keep := make([]string, 0, 2)
+	for _, f := range sn.SegFileNames(0, 2*limit) {
+		if !strings.HasPrefix(f, strings.TrimSuffix(dropped, ".seg")) {
+			keep = append(keep, f)
+		}
+	}
+	require.NotEmpty(t, keep, "the first segment must survive the republish")
 
 	var eg errgroup.Group
 	eg.Go(func() error {
-		for _, f := range files {
-			if err := dir.RemoveFile(filepath.Join(dirs.Snap, f)); err != nil {
-				return err
-			}
-		}
-		return sn.OpenFolder()
+		return sn.OpenList(keep, false)
 	})
 
 	for slot := uint64(limit); slot < limit+2_000; slot++ {
@@ -424,7 +433,7 @@ func TestViewSurvivesConcurrentSegmentRemoval(t *testing.T) {
 
 	fresh := sn.View()
 	defer fresh.Close()
-	require.Len(t, fresh.BeaconBlocks(), 1, "the removed segment must have left the visible set")
+	require.Len(t, fresh.BeaconBlocks(), 1, "the dropped segment must have left the visible set")
 }
 
 // A dump or a merge owns its range while it works, and its .seg lands before its index.
