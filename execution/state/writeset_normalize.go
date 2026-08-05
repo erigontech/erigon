@@ -226,6 +226,11 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 	// field-level consumers.
 
 	for _, inner := range writes.storage {
+		// Both self-destruct probes below key on the address alone, so they are
+		// resolved once for the whole slot group — lazily, so a group whose
+		// slots are all filtered out pays for neither.
+		sdTxIdx, sdOk, sdLoaded := -1, false, false
+		revived, revivedLoaded := false, false
 		for _, h := range inner {
 			allAddresses[h.Address] = true
 			// Only include writes from the current (validated) incarnation.
@@ -241,9 +246,11 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 			// flushed back to the versionMap, so without this a resurrect TX
 			// that re-writes a slot to its pre-SD value is wrongly dropped as a
 			// no-op (TestDeleteRecreateSlotsAcrossManyBlocks).
-			sdTxIdx, sdOk := -1, false
-			if v, sd, _ := vm.ReadSelfDestruct(h.Address, txIndex); sd.Status() == MVReadResultDone && v {
-				sdTxIdx, sdOk = sd.Version().TxIndex, true
+			if !sdLoaded {
+				sdLoaded = true
+				if v, sd, _ := vm.ReadSelfDestruct(h.Address, txIndex); sd.Status() == MVReadResultDone && v {
+					sdTxIdx, sdOk = sd.Version().TxIndex, true
+				}
 			}
 			// No-op filter: compare against origin (what this TX would have read).
 			// First check versionMap floor (prior TX's write in this block).
@@ -269,7 +276,11 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 				// misses it. Narrower than an IncarnationPath probe: pure
 				// CREATE (no prior SD=true) doesn't wipe pre-existing storage,
 				// so its same-value SSTOREs still no-op against pre-block.
-				if vm.AnyDoneSelfDestructEquals(h.Address, txIndex-1, true) {
+				if !revivedLoaded {
+					revivedLoaded = true
+					revived = vm.AnyDoneSelfDestructEquals(h.Address, txIndex-1, true)
+				}
+				if revived {
 					if writeVal.IsZero() {
 						continue
 					}
