@@ -416,6 +416,29 @@ func BenchmarkLogEmitLargeDataPerTx(b *testing.B) {
 
 // The parallel executor resets before every transaction, so a block costs one
 // Reset per transaction while the buffers hold the whole block's logs.
+// The assembler and the tooling reset once a block is built, so a whole block's
+// entries reach the pool in one go — the shape that decides how small the pool
+// may be. p99 mainnet is ~1700 logs.
+func BenchmarkLogEmitBlockLevelReset(b *testing.B) {
+	log := &types.Log{
+		Address: common.HexToAddress("0x1"),
+		Topics:  []common.Hash{common.HexToHash("0xaa"), common.HexToHash("0xbb")},
+		Data:    bytes.Repeat([]byte{0x11}, 96),
+	}
+	ibs := New(nil)
+	b.ReportAllocs()
+	for b.Loop() {
+		for txIndex := range 200 {
+			ibs.SetTxContext(1, txIndex)
+			for range 9 { // 1800 logs, a p99 block
+				ibs.AddLog(log)
+			}
+		}
+		ibs.Reset() // once, when the block is built
+	}
+	b.ReportMetric(float64(len(ibs.logs.pool)), "pooled")
+}
+
 // Blocks do not repeat their shape: the same logs land at different tx indexes
 // from one block to the next. An arena keyed by tx index keeps a slot for every
 // shape it has seen, while what a reset-per-tx caller needs live is one
