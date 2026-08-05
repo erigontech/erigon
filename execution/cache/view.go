@@ -21,12 +21,15 @@ import (
 )
 
 // Frontier reports the exclusive txNum bound of one transaction's read view
-// per domain. ok=false means the backend has no exact frontier for the domain
-// (remote, history-disabled); fills sourced from such a view are skipped.
+// per domain. ok=false means the view has no exact frontier for the domain
+// (remote or history-disabled backends, dependency-clamped values views);
+// fills sourced from such a view are skipped.
 //
-// An implementation may report a stale-low bound — that only over-rejects
-// fills — but must never overstate what its tx can currently read: admission
-// safety rests on that.
+// An implementation may report a stale-low bound only for a coherent,
+// monotonically extended view — then it merely over-rejects fills. A view
+// serving mixed-age reads has no exact frontier and must answer ok=false.
+// Overstating what the tx can currently read is never safe: admission rests
+// on that.
 type Frontier interface {
 	DomainVisibleEnd(domain kv.Domain) (visibleEnd uint64, ok bool)
 }
