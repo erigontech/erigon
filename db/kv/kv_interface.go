@@ -592,6 +592,9 @@ type TemporalMemBatch interface {
 	SizeEstimate() uint64
 	Flush(ctx context.Context, tx RwTx, opts ...FlushOption) error
 	Close()
+	// MarkPublished flags the batch as reader-shared: ClearRam (including via
+	// Close) becomes a no-op, so the in-memory maps stay valid for readers.
+	MarkPublished()
 	DiscardWrites(domain Domain)
 	Unwind(txNumUnwindTo uint64, changeset *[DomainLen][]DomainEntryDiff)
 	GetAsOf(domain Domain, key []byte, ts uint64) (v []byte, ok bool, err error)

@@ -951,6 +951,9 @@ func (sd *SharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.
 	return sd.mem.IteratePrefix(domain, prefix, roTx, it)
 }
 
+// MarkPublished records that readers may hold views over this SD's in-memory state.
+func (sd *SharedDomains) MarkPublished() { sd.mem.MarkPublished() }
+
 func (sd *SharedDomains) Close() {
 	if sd.sdCtx == nil { //idempotency
 		return
