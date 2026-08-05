@@ -169,6 +169,18 @@ jobs:
           # Save the subsection reached status
           echo "test_executed=true" >> "$GITHUB_OUTPUT"
 
+          # Dump the measures into the log. They are also uploaded as an artifact,
+          # but whoever reads the workflow output should not need to know that.
+          # Before the verdict below, so a failing run prints them too.
+          RESULT_FILE="$GITHUB_WORKSPACE/result-retirement-$CHAIN.json"
+          echo "::group::File retirement measures (result-retirement-$CHAIN.json)"
+          if [ -f "$RESULT_FILE" ]; then
+            cat "$RESULT_FILE"
+          else
+            echo "no result file at $RESULT_FILE: the check script did not reach the point where it writes one"
+          fi
+          echo "::endgroup::"
+
           # Check the check script exit status
           if [ $test_exit_status -eq 0 ]; then
             echo "File retirement test completed successfully"
