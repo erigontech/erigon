@@ -58,7 +58,6 @@ import (
 	"github.com/erigontech/erigon/db/snaptype"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/builder"
-	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
@@ -129,7 +128,6 @@ type ExecModuleTester struct {
 	ForkValidator   *execmodule.ForkValidator
 	ExecModule      *execmodule.ExecModule
 	StateCache      *execmodule.Cache
-	domainCache     *cache.StateCache
 	retirementStart chan bool
 	retirementDone  chan struct{}
 	retirementWg    sync.WaitGroup
@@ -172,8 +170,8 @@ func (emt *ExecModuleTester) Close() {
 	if emt.DB != nil {
 		emt.DB.Close()
 	}
-	if emt.domainCache != nil {
-		emt.domainCache.Close()
+	if emt.ExecModule != nil {
+		emt.ExecModule.Close()
 	}
 	if emt.tb == nil && emt.Dirs.DataDir != "" {
 		dir.RemoveAll(emt.Dirs.DataDir)
@@ -289,6 +287,12 @@ func WithStepSize(stepSize uint64) Option {
 	}
 }
 
+func WithE2RetireStep(e2RetireStep uint64) Option {
+	return func(opts *options) {
+		opts.e2RetireStep = &e2RetireStep
+	}
+}
+
 func WithExperimentalBAL() Option {
 	return func(opts *options) {
 		opts.experimentalBAL = true
@@ -391,6 +395,7 @@ func WithSentryProtocol(protocol uint) Option {
 
 type options struct {
 	stepSize                      *uint64
+	e2RetireStep                  *uint64
 	experimentalBAL               bool
 	genesis                       *types.Genesis
 	chainConfig                   *chain.Config
@@ -509,6 +514,9 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	cfg.PersistReceiptsCacheV2 = true
 	cfg.ChaosMonkey = false
 	cfg.Snapshot.ChainName = gspec.Config.ChainName
+	if opt.e2RetireStep != nil {
+		cfg.Snapshot.E2RetireStep = *opt.e2RetireStep
+	}
 	cfg.Genesis = gspec
 	cfg.Prune = pruneMode
 	cfg.ExperimentalBAL = opt.experimentalBAL
@@ -516,7 +524,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	cfg.FcuBackgroundCommit = opt.fcuBackgroundCommit
 
 	logLvl := log.LvlError
-	if lvl, ok := os.LookupEnv("MOCK_SENTRY_LOG_LEVEL"); ok {
+	if lvl, ok := os.LookupEnv("EXEC_MODULE_TESTER_LOG_LEVEL"); ok {
 		logLvl, err = log.LvlFromString(lvl)
 		if err != nil {
 			panic(err)
@@ -779,10 +787,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		Accumulator:    mock.Notifications.Accumulator,
 		RecentReceipts: mock.Notifications.RecentReceipts,
 	}
-	// Per-instance domain cache, held on the tester so Close releases its
-	// envelope reservation. Uses the production default — the caches jump-grow on
-	// demand, so a small-working-set fixture stays small.
-	mock.domainCache = cache.NewDefaultStateCache()
 	mock.ExecModule = execmodule.NewExecModule(
 		ctx,
 		mock.BlockReader,
@@ -794,7 +798,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		hook,
 		accum,
 		mock.StateCache,
-		mock.domainCache,
+		0, // stateCacheBudget: production default; the caches jump-grow on demand
 		logger,
 		engine,
 		cfg.Sync,
