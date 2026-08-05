@@ -117,7 +117,8 @@ func seedPriorTx(vm *VersionMap, addrs, slots int) {
 
 func BenchmarkWriteSetNormalize(b *testing.B) {
 	const txIndex = 1
-	for _, size := range []struct{ addrs, slots int }{{4, 2}, {16, 8}} {
+	// {3,1} is the common mainnet shape; the wider ones are the p99 tail.
+	for _, size := range []struct{ addrs, slots int }{{3, 1}, {4, 2}, {16, 8}} {
 		b.Run(fmt.Sprintf("addrs=%d/slots=%d", size.addrs, size.slots), func(b *testing.B) {
 			ws := buildNormalizeInput(size.addrs, size.slots, txIndex)
 			vm := NewVersionMap(nil)
