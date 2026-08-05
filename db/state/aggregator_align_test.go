@@ -18,12 +18,10 @@ package state
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 )
@@ -245,18 +243,21 @@ func TestVisibilityLowering_GuardsHistoryIIEnd(t *testing.T) {
 	craftedClampedVisible(t, agg)
 	agg.ForbidVisibilityLowering()
 
-	for _, pattern := range []string{
-		filepath.Join(agg.Dirs().SnapIdx, "*accounts.1-2.ef"),
-		filepath.Join(agg.Dirs().SnapAccessors, "*accounts.1-2.efi"),
-	} {
-		matches, err := filepath.Glob(pattern)
-		require.NoError(t, err)
-		require.NotEmpty(t, matches, pattern)
-		for _, m := range matches {
-			require.NoError(t, dir.RemoveFile(m))
+	// Drop the accounts history-II {1,2} segment in memory rather than from
+	// disk (Windows forbids removing a mapped file): the recalculation lowers
+	// the ii end while every values end stays put.
+	agg.dirtyFilesLock.Lock()
+	defer agg.dirtyFilesLock.Unlock()
+	dropped := 0
+	agg.d[kv.AccountsDomain].History.InvertedIndex.dirtyFiles.CloseIf(func(item *FilesItem) bool {
+		if item.endTxNum == 2*alignStepSize {
+			dropped++
+			return true
 		}
-	}
+		return false
+	})
+	require.Equal(t, 1, dropped)
 
-	require.Panics(t, func() { _ = agg.ReloadFiles() },
+	require.Panics(t, func() { agg.recalcVisibleFiles(nil) },
 		"lowering a history-II end while values ends stay put must trip the forbid assert")
 }
