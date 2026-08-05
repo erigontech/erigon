@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/bal/tempbal"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -634,8 +635,13 @@ func (te *txExecutor) onBlockStart(ctx context.Context, block *types.Block) {
 	}
 }
 
-func blockAccessList(blockTx kv.Getter, block *types.Block, blockNum uint64) (types.BlockAccessList, error) {
+func blockAccessList(blockTx kv.Getter, block *types.Block, blockNum uint64, tempBAL *tempbal.Reader) (types.BlockAccessList, error) {
 	bal := block.BlockAccessList()
+	if bal == nil && tempBAL != nil {
+		if data, ok := tempBAL.Get(blockNum, block.Hash()); ok {
+			return types.DecodeBlockAccessListBytes(data)
+		}
+	}
 	if bal == nil && block.HeaderNoCopy().HasNonEmptyBAL() {
 		return rawdb.ReadBlockAccessList(blockTx, block.Hash(), blockNum)
 	}

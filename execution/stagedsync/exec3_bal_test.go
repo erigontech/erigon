@@ -7,6 +7,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/bal/tempbal"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -47,7 +48,7 @@ func TestBlockAccessList(t *testing.T) {
 			getter := &countingBlockAccessListGetter{data: test.storedBAL}
 			block := types.NewBlockFromStorage(common.Hash{}, &types.Header{BlockAccessListHash: test.hash}, nil, nil, nil, types.NewBlockAccessListSidecar(test.blockBAL))
 
-			got, err := blockAccessList(getter, block, 1)
+			got, err := blockAccessList(getter, block, 1, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -58,5 +59,51 @@ func TestBlockAccessList(t *testing.T) {
 				t.Fatalf("DB reads = %d, want %d", getter.calls, test.wantReads)
 			}
 		})
+	}
+}
+
+// TestBlockAccessListTempBAL pins that a stored temp BAL is served for a header
+// without a BAL commitment, keyed by block number and hash.
+func TestBlockAccessListTempBAL(t *testing.T) {
+	dir := t.TempDir()
+	tempBAL := types.BlockAccessList{{Address: common.Address{7}}}
+	tempBALBytes, err := types.EncodeBlockAccessListBytes(tempBAL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blockHash := common.Hash{0xAA}
+
+	w, err := tempbal.NewWriter(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Append(7, blockHash, tempBALBytes); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reader, err := tempbal.OpenReader(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+
+	block := types.NewBlockFromStorage(blockHash, &types.Header{}, nil, nil, nil, nil)
+	getter := &countingBlockAccessListGetter{}
+
+	got, err := blockAccessList(getter, block, 7, reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, tempBAL) {
+		t.Fatalf("temp BAL = %v, want %v", got, tempBAL)
+	}
+	if getter.calls != 0 {
+		t.Fatalf("DB reads = %d, want 0", getter.calls)
+	}
+
+	if got, err := blockAccessList(getter, block, 8, reader); err != nil || got != nil {
+		t.Fatalf("block 8 = %v,%v, want nil,nil", got, err)
 	}
 }

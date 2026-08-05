@@ -690,7 +690,11 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					// A partial block records only suffix I/O, so it cannot be checked
 					// against a full-block BAL.
 					if validateFullBlock && (isAmsterdam || pe.cfg.experimentalBAL) {
-						if err := bal.Process(header, block.BlockAccessList(), applyResult.TxIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger); err != nil {
+						var sink bal.BALSink
+						if pe.cfg.tempBALWriter != nil {
+							sink = pe.cfg.tempBALWriter
+						}
+						if err := bal.Process(header, block.BlockAccessList(), applyResult.TxIO, isAmsterdam, pe.cfg.experimentalBAL, sink, pe.cfg.dirs.DataDir, pe.logger); err != nil {
 							recordApplyFailure(err)
 							continue
 						}

@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/diagnostics/metrics"
+	"github.com/erigontech/erigon/execution/bal/tempbal"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -88,6 +89,11 @@ type ExecuteBlockCfg struct {
 	// the ephemeral single-block replay harness sets it directly since the env is
 	// read only at package init.
 	discardCommitment bool
+
+	// temp-BAL store: generate persists a synthetic BAL per block, use feeds
+	// stored BALs into execution/commitment. At most one is set.
+	tempBALWriter *tempbal.Writer
+	tempBALReader *tempbal.Reader
 }
 
 func StageExecuteBlocksCfg(
@@ -148,6 +154,15 @@ func (cfg ExecuteBlockCfg) DirsDataDir() string { return cfg.dirs.DataDir }
 // WithAuthor returns a copy of the config with the author set.
 func (cfg ExecuteBlockCfg) WithAuthor(author accounts.Address) ExecuteBlockCfg {
 	cfg.author = author
+	return cfg
+}
+
+// WithTempBAL returns a copy of the config wired to a temp-BAL store: a writer
+// to persist synthetic BALs during generation, or a reader to feed stored BALs
+// into execution. Pass nil for the one not in use.
+func (cfg ExecuteBlockCfg) WithTempBAL(w *tempbal.Writer, r *tempbal.Reader) ExecuteBlockCfg {
+	cfg.tempBALWriter = w
+	cfg.tempBALReader = r
 	return cfg
 }
 
