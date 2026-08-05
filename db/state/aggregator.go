@@ -94,6 +94,7 @@ type Aggregator struct {
 
 	disableHistory      bool
 	branchCacheDisabled bool
+	skipFilesDBGapCheck bool
 	workers             workersCfg
 
 	// To keep DB small - need move data to small files ASAP.
@@ -567,15 +568,41 @@ func (a *Aggregator) DisableInterDomainDependencies() {
 }
 
 func (a *Aggregator) OpenFolder() error {
-	a.dirtyFilesLock.Lock()
-	defer a.dirtyFilesLock.Unlock()
-	if err := a.reloadSalt(); err != nil {
+	if err := func() error {
+		a.dirtyFilesLock.Lock()
+		defer a.dirtyFilesLock.Unlock()
+		if err := a.reloadSalt(); err != nil {
+			return err
+		}
+		if err := a.openFolder(); err != nil {
+			return fmt.Errorf("OpenFolder: %w", err)
+		}
+		return nil
+	}(); err != nil {
 		return err
 	}
-	if err := a.openFolder(); err != nil {
-		return fmt.Errorf("OpenFolder: %w", err)
+	return a.checkFilesDBGap()
+}
+
+// checkFilesDBGap refuses to open a datadir where the DB was pruned past where the
+// snapshot files end (the hole `rm-state --latest` leaves without a reset — reads
+// below it silently return stale data). Skipped when SkipFilesDBGapCheck is set so
+// `--reset` tooling can open and fix it.
+func (a *Aggregator) checkFilesDBGap() error {
+	if a.skipFilesDBGapCheck || a.db == nil {
+		return nil
 	}
-	return nil
+	return a.db.View(context.Background(), func(tx kv.Tx) error {
+		at := a.BeginFilesRo()
+		defer at.Close()
+		if err := at.CheckFilesDBGap(tx); err != nil {
+			// The datadir is corrupt and can't be executed on; exit hard rather than
+			// let the error be swallowed/retried up the stack.
+			a.logger.Error("[snapshots] " + err.Error())
+			os.Exit(1)
+		}
+		return nil
+	})
 }
 
 func scanDirs(dirs datadir.Dirs) (r *ScanDirsResult, err error) {
@@ -2426,6 +2453,29 @@ type AggregatorRoTx struct {
 	iisCount int
 
 	_leakID uint64 // set only if TRACE_AGG=true
+}
+
+// CheckFilesDBGap detects a gap between the snapshot files and the DB. It can arise from
+// snapshot/DB management operations — e.g. `seg rm-state --latest` and then starting
+// erigon without `integration stage_exec --reset`. Meant to run once at startup.
+func (at *AggregatorRoTx) CheckFilesDBGap(tx kv.Tx) error {
+	for _, dt := range at.d {
+		if dt == nil || dt.d.Disable {
+			continue
+		}
+		if err := dt.checkFilesDBGap(tx); err != nil {
+			return err
+		}
+	}
+	for _, iit := range at.iis {
+		if iit == nil || iit.ii.Disable {
+			continue
+		}
+		if err := iit.checkFilesDBGap(tx); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (a *Aggregator) acquireVisibleFiles() (v *aggregatorVisible) {

@@ -729,6 +729,18 @@ func (iit *InvertedIndexRoTx) CanHashPrune(tx kv.Tx) bool {
 	return false
 }
 
+func (iit *InvertedIndexRoTx) checkFilesDBGap(tx kv.Tx) error {
+	prg, err := GetPruneValProgress(tx, []byte(iit.ii.ValuesTable))
+	if err != nil {
+		return err
+	}
+	if filesEnd := iit.files.EndTxNum(); prg.TxTo > filesEnd {
+		return fmt.Errorf("gap between snapshot files and DB for index %s: files end at txNum %d but the DB was pruned up to %d — [%d, %d) is in neither. Maybe you removed snapshot files (e.g. `snapshots rm-state --latest`) but forgot to run `integration stage_exec --reset`?",
+			iit.ii.FilenameBase, filesEnd, prg.TxTo, filesEnd, prg.TxTo)
+	}
+	return nil
+}
+
 func (iit *InvertedIndexRoTx) CanPrune(tx kv.Tx, untilTx uint64) bool {
 	stat, err := GetPruneValProgress(tx, []byte(iit.ii.ValuesTable))
 	if err != nil {
