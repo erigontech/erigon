@@ -51,6 +51,10 @@ func isCommitmentStateKey(prefix []byte) bool {
 // writer stripes only make stamped publications atomic with Clear; callers must
 // still ensure one logical mutation per prefix at the orchestrator.
 type BranchCache struct {
+	// putWatermark is the exclusive txNum end of the trie's own writes; a file
+	// extension at or below it covers state this cache already reflects.
+	putWatermark atomic.Uint64
+
 	// Root tier — single slot for the root branch (always hottest, always
 	// present). Atomic-pointer access so no lock is needed for the hot
 	// read path.
@@ -702,6 +706,12 @@ func (c *BranchCache) Put(prefix []byte, data []byte, step, txN uint64) {
 	dataCopy := make([]byte, len(data))
 	copy(dataCopy, data)
 
+	for w := c.putWatermark.Load(); txN+1 > w; w = c.putWatermark.Load() {
+		if c.putWatermark.CompareAndSwap(w, txN+1) {
+			break
+		}
+	}
+
 	stripe := c.putStripe(prefix)
 	stripe.Lock()
 	defer stripe.Unlock()
@@ -758,6 +768,28 @@ func (c *BranchCache) Unwind(unwindToTxN uint64) {
 // tiers are empty and coherence is reset, so a publication cannot cross
 // generations. Reset runs after every tier is cleared, so a reader cannot pair a
 // retired entry with the lifted unwind floor.
+// AbsorbFilesExtension reconciles the cache with commitment state published
+// by files rather than the trie's own writes (snapshot download): files
+// covering the process's writes stay at or below the put watermark and are a
+// no-op; anything beyond it carries foreign branch data that nothing would
+// ever overwrite, so drop every entry — a stale branch restores the trie to
+// the wrong state.
+func (c *BranchCache) AbsorbFilesExtension(filesEnd uint64) {
+	if c == nil {
+		return
+	}
+	for {
+		w := c.putWatermark.Load()
+		if filesEnd <= w {
+			return
+		}
+		if c.putWatermark.CompareAndSwap(w, filesEnd) {
+			break
+		}
+	}
+	c.Clear()
+}
+
 func (c *BranchCache) Clear() {
 	c.lockAllPutStripes()
 	defer c.unlockAllPutStripes()

@@ -459,13 +459,13 @@ func (c *StateCache) absorbFilesExtension(f Frontier) {
 	}
 }
 
-// BindAggregator forbids visibility lowering on db's aggregator for a
-// fill-enabled cache: fill admission relies on view frontiers never
-// decreasing. SharedDomains.SetStateCache asserts this binding, so wiring
-// cannot forget it. The aggregator side is duck-typed (the concrete type
-// lives in db/state, above this package) but load-bearing: an aggregator
-// without the forbid fails loudly. A nil or apply-only cache needs no
-// binding.
+// BindAggregator hands this fill-enabled cache to db's aggregator, which
+// forbids visibility lowering (fill admission relies on view frontiers never
+// decreasing) and reconciles the cache with every file publication.
+// SharedDomains.SetStateCache asserts this binding, so wiring cannot forget
+// it. The aggregator side is duck-typed (the concrete type lives in db/state,
+// above this package) but load-bearing: an aggregator that cannot take the
+// binding fails loudly. A nil or apply-only cache needs no binding.
 func (c *StateCache) BindAggregator(db kv.TemporalRwDB) {
 	if c == nil || !c.FillsEnabled() {
 		return
@@ -474,11 +474,11 @@ func (c *StateCache) BindAggregator(db kv.TemporalRwDB) {
 	if agg == nil {
 		panic("assert: fill-enabled StateCache bound to a DB without an aggregator — the visibility-lowering guard would be silently dropped")
 	}
-	f, ok := agg.(interface{ ForbidVisibilityLowering() })
+	b, ok := agg.(interface{ BindStateCache(*StateCache) })
 	if !ok {
-		panic(fmt.Sprintf("assert: fill-enabled StateCache bound to a DB whose aggregator %T lacks ForbidVisibilityLowering — the visibility-lowering guard would be silently dropped", agg))
+		panic(fmt.Sprintf("assert: fill-enabled StateCache bound to a DB whose aggregator %T lacks BindStateCache — the visibility-lowering guard would be silently dropped", agg))
 	}
-	f.ForbidVisibilityLowering()
+	b.BindStateCache(c)
 	c.aggBound.Store(true)
 }
 

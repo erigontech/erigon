@@ -428,7 +428,7 @@ func TestReadFill_NegativeUsesLastVisibleTxNum(t *testing.T) {
 
 type fakeForbidder struct{ called bool }
 
-func (f *fakeForbidder) ForbidVisibilityLowering() { f.called = true }
+func (f *fakeForbidder) BindStateCache(*cache.StateCache) { f.called = true }
 
 // fakeTemporalDB satisfies kv.TemporalRwDB by embedding (the interface now
 // carries Agg, so a DB shape without it no longer compiles); only Agg is
