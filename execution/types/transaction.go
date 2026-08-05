@@ -267,7 +267,7 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 		return nil, ErrTxTypeNotSupported
 	}
 	if err := t.DecodeRLP(s); err != nil {
-		return nil, fmt.Errorf("decode transaction type %#x: %w", data[0], err)
+		return nil, err
 	}
 	if s.Remaining() != 0 {
 		return nil, errTrailingBytes

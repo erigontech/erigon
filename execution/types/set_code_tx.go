@@ -238,25 +238,25 @@ func (tx *SetCodeTransaction) EncodeRLP(w io.Writer) error {
 func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {
 	_, err := s.List()
 	if err != nil {
-		return fmt.Errorf("read SetCodeTransaction list: %w", err)
+		return err
 	}
 	if err := s.ReadUint256(&tx.ChainID); err != nil {
-		return fmt.Errorf("read ChainID: %w", err)
+		return err
 	}
 	if tx.Nonce, err = s.Uint64(); err != nil {
-		return fmt.Errorf("read Nonce: %w", err)
+		return err
 	}
 	if err := s.ReadUint256(&tx.TipCap); err != nil {
-		return fmt.Errorf("read TipCap: %w", err)
+		return err
 	}
 	if err := s.ReadUint256(&tx.FeeCap); err != nil {
-		return fmt.Errorf("read FeeCap: %w", err)
+		return err
 	}
 	if tx.GasLimit, err = s.Uint64(); err != nil {
-		return fmt.Errorf("read GasLimit: %w", err)
+		return err
 	}
 	if kind, size, err := s.Kind(); err != nil {
-		return fmt.Errorf("read To: %w", err)
+		return err
 	} else if kind == rlp.Byte {
 		return errors.New("wrong size for To: 1")
 	} else if size != length.Addr {
@@ -264,41 +264,38 @@ func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {
 	}
 	to, err := s.Addr()
 	if err != nil {
-		return fmt.Errorf("read To: %w", err)
+		return err
 	}
 	tx.To = &to
 	if err := s.ReadUint256(&tx.Value); err != nil {
-		return fmt.Errorf("read Value: %w", err)
+		return err
 	}
 	if tx.Data, err = s.Bytes(); err != nil {
-		return fmt.Errorf("read Data: %w", err)
+		return err
 	}
 	// decode AccessList
 	tx.AccessList = AccessList{}
 	if err := decodeAccessList(&tx.AccessList, s); err != nil {
-		return fmt.Errorf("read AccessList: %w", err)
+		return err
 	}
 
 	// decode authorizations
 	tx.Authorizations = make([]Authorization, 0)
 	if err := decodeAuthorizations(&tx.Authorizations, s); err != nil {
-		return fmt.Errorf("read Authorizations: %w", err)
+		return err
 	}
 
 	// decode V
 	if err := s.ReadUint256(&tx.V); err != nil {
-		return fmt.Errorf("read V: %w", err)
+		return err
 	}
 	if err := s.ReadUint256(&tx.R); err != nil {
-		return fmt.Errorf("read R: %w", err)
+		return err
 	}
 	if err := s.ReadUint256(&tx.S); err != nil {
-		return fmt.Errorf("read S: %w", err)
+		return err
 	}
-	if err = s.ListEnd(); err != nil {
-		return fmt.Errorf("close SetCodeTransaction: %w", err)
-	}
-	return nil
+	return s.ListEnd()
 }
 
 func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, accessListLen, authorizationsLen int) error {

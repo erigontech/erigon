@@ -353,25 +353,25 @@ func (stx *BlobTx) MarshalBinary(w io.Writer) error {
 func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 	_, err := s.List()
 	if err != nil {
-		return fmt.Errorf("read BlobTx list: %w", err)
+		return err
 	}
 	if err := s.ReadUint256(&stx.ChainID); err != nil {
-		return fmt.Errorf("read ChainID: %w", err)
+		return err
 	}
 	if stx.Nonce, err = s.Uint64(); err != nil {
-		return fmt.Errorf("read Nonce: %w", err)
+		return err
 	}
 	if err := s.ReadUint256(&stx.TipCap); err != nil {
-		return fmt.Errorf("read TipCap: %w", err)
+		return err
 	}
 	if err := s.ReadUint256(&stx.FeeCap); err != nil {
-		return fmt.Errorf("read FeeCap: %w", err)
+		return err
 	}
 	if stx.GasLimit, err = s.Uint64(); err != nil {
-		return fmt.Errorf("read GasLimit: %w", err)
+		return err
 	}
 	if kind, size, err := s.Kind(); err != nil {
-		return fmt.Errorf("read To: %w", err)
+		return err
 	} else if kind == rlp.Byte {
 		return errors.New("wrong size for To: 1")
 	} else if size != length.Addr {
@@ -379,23 +379,23 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 	}
 	to, err := s.Addr()
 	if err != nil {
-		return fmt.Errorf("read To: %w", err)
+		return err
 	}
 	stx.To = &to
 	if err := s.ReadUint256(&stx.Value); err != nil {
-		return fmt.Errorf("read Value: %w", err)
+		return err
 	}
 	if stx.Data, err = s.Bytes(); err != nil {
-		return fmt.Errorf("read Data: %w", err)
+		return err
 	}
 	// decode AccessList
 	stx.AccessList = AccessList{}
 	if err := decodeAccessList(&stx.AccessList, s); err != nil {
-		return fmt.Errorf("read AccessList: %w", err)
+		return err
 	}
 	// decode MaxFeePerBlobGas
 	if err := s.ReadUint256(&stx.MaxFeePerBlobGas); err != nil {
-		return fmt.Errorf("read MaxFeePerBlobGas: %w", err)
+		return err
 	}
 	// decode BlobVersionedHashes
 	if stx.BlobVersionedHashes, err = decodeHashList(s); err != nil {
@@ -406,16 +406,13 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 	}
 	// decode V
 	if err := s.ReadUint256(&stx.V); err != nil {
-		return fmt.Errorf("read V: %w", err)
+		return err
 	}
 	if err := s.ReadUint256(&stx.R); err != nil {
-		return fmt.Errorf("read R: %w", err)
+		return err
 	}
 	if err := s.ReadUint256(&stx.S); err != nil {
-		return fmt.Errorf("read S: %w", err)
+		return err
 	}
-	if err = s.ListEnd(); err != nil {
-		return fmt.Errorf("close BlobTx: %w", err)
-	}
-	return nil
+	return s.ListEnd()
 }
