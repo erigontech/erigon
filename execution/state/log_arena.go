@@ -36,11 +36,11 @@ const (
 	maxLogsPerTxn     = int(params.MaxTxnGasLimit / params.LogGas)     // 44739
 	maxLogBytesPerTxn = int(params.MaxTxnGasLimit / params.LogDataGas) // 2MB
 
-	// The pool keeps a tenth of that, rounded down to a power of two. At 168B
-	// struct + 8B pointer + 128B topics, 4096 entries is ~1.2MB, and it covers
-	// the p99 block of 1706 logs, which the assembler pools in one go. The pool
-	// never shrinks, so sizing for maxLogsPerTxn would park 13MB in every arena.
-	maxPooledLogEntries = 1 << 12
+	// The pool keeps a tenth of that: 4473 entries at 168B struct + 8B pointer +
+	// 128B topics is ~1.3MB, and it covers the p99 block of 1706 logs, which the
+	// assembler pools in one go. The pool never shrinks, so sizing for the whole
+	// maxLogsPerTxn would park 13MB in every arena.
+	maxPooledLogEntries = maxLogsPerTxn / 10
 	maxPooledLogBytes   = maxLogBytesPerTxn / 2
 
 	// No entry may take more than an eighth of the Data. One large log would
@@ -53,10 +53,6 @@ const (
 	// the pointers alone are retention.
 	maxLogSlotsPerTx = maxPooledLogEntries
 )
-
-// The pool stays inside a tenth of what one transaction can emit. Raising it
-// past that stops compiling rather than quietly parking memory per arena.
-const _ = uint(maxLogsPerTxn/10 - maxPooledLogEntries)
 
 // logArena owns a block's log entries and recycles them through a pool, so what
 // it holds follows the largest transaction rather than the widest block.
