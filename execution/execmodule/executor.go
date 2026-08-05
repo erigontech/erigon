@@ -213,7 +213,11 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 	// Downloaded state files publish without applies; reconcile the cache
 	// before anything reads through it.
 	stateCache.Applier().AbsorbFilesExtension(cache.FrontierFunc(func(domain kv.Domain) (uint64, bool) {
-		return tx.Debug().DomainVisibleEnd(domain)
+		dbgTx := tx.Debug()
+		if dbgTx == nil {
+			return 0, false
+		}
+		return dbgTx.DomainVisibleEnd(domain)
 	}))
 	if onlySnapDownload {
 		return nil

@@ -297,8 +297,10 @@ func (c *StateCache) fillCodeIfFresh(key []byte, value []byte, readTxNum, visibl
 	if !ok || len(value) == 0 {
 		return
 	}
-	codeHash := crypto.Keccak256(value)
+	// Clone before hashing, like the apply paths: the stored bytes and their
+	// codeHash cannot diverge even if the caller's buffer is reused mid-call.
 	cloned := bytes.Clone(value)
+	codeHash := crypto.Keccak256(cloned)
 	c.admissionMu.RLock()
 	defer c.admissionMu.RUnlock()
 	if visibleEnd < c.appliedEnd[kv.CodeDomain] || accountsVisibleEnd < c.appliedEnd[kv.AccountsDomain] {
@@ -533,7 +535,7 @@ func (c *StateCache) PrintStatsAndReset() {
 	}
 	admitted, rejected, noFrontier := c.fillsAdmitted.Swap(0), c.fillsRejected.Swap(0), c.fillsNoFrontier.Swap(0)
 	if admitted+rejected+noFrontier > 0 {
-		log.Info("[cache] fill admission", "admitted", admitted, "rejected", rejected, "noFrontier", noFrontier)
+		log.Debug("[cache] fill admission", "admitted", admitted, "rejected", rejected, "noFrontier", noFrontier)
 	}
 	if acc, ok := c.caches[kv.AccountsDomain].(*DomainCache); ok {
 		acc.PrintStatsAndReset("Account")
