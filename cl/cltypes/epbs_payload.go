@@ -17,6 +17,10 @@
 package cltypes
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
@@ -126,7 +130,7 @@ type PayloadAttestation struct {
 }
 
 func (p *PayloadAttestation) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(p.AggregationBits, p.Data, p.Signature[:])
+	return merkle_tree.ProgressiveContainerRootAll(p.AggregationBits, p.Data, p.Signature[:])
 }
 
 func (p *PayloadAttestation) EncodingSizeSSZ() int {
@@ -242,7 +246,7 @@ func (i *IndexedPayloadAttestation) EncodingSizeSSZ() int {
 }
 
 func (i *IndexedPayloadAttestation) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(i.AttestingIndices, i.Data, i.Signature[:])
+	return merkle_tree.ProgressiveContainerRootAll(i.AttestingIndices, i.Data, i.Signature[:])
 }
 
 func (i *IndexedPayloadAttestation) Clone() clonable.Clonable {
@@ -275,7 +279,27 @@ type ExecutionPayloadBid struct {
 }
 
 func (e *ExecutionPayloadBid) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(
+	schema, err := e.hashSchema()
+	if err != nil {
+		return [32]byte{}, err
+	}
+	return merkle_tree.ProgressiveContainerRootAll(schema...)
+}
+
+func (e *ExecutionPayloadBid) ParentBlockHashMerkleProof() ([][32]byte, error) {
+	schema, err := e.hashSchema()
+	if err != nil {
+		return nil, err
+	}
+	return merkle_tree.ProgressiveContainerProofAll(0, schema...)
+}
+
+func (e *ExecutionPayloadBid) hashSchema() ([]any, error) {
+	blobRoot, err := e.BlobKzgCommitments.HashSSZProgressive(nil)
+	if err != nil {
+		return nil, err
+	}
+	return []any{
 		e.ParentBlockHash[:],
 		e.ParentBlockRoot[:],
 		e.BlockHash[:],
@@ -286,9 +310,9 @@ func (e *ExecutionPayloadBid) HashSSZ() ([32]byte, error) {
 		e.Slot,
 		e.Value,
 		e.ExecutionPayment,
-		&e.BlobKzgCommitments,
+		blobRoot[:],
 		e.ExecutionRequestsRoot[:],
-	)
+	}, nil
 }
 
 func (e *ExecutionPayloadBid) EncodingSizeSSZ() int {
@@ -325,7 +349,7 @@ func (e *ExecutionPayloadBid) EncodeSSZ(buf []byte) ([]byte, error) {
 }
 
 func (e *ExecutionPayloadBid) DecodeSSZ(buf []byte, version int) error {
-	e.BlobKzgCommitments = *solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsCommittmentsPerBlock, 48)
+	e.BlobKzgCommitments.EnsureStaticProgressive(maxBlobCommitmentsForConfig(clparams.GetBeaconConfig()), 48)
 	return ssz2.UnmarshalSSZ(
 		buf, version,
 		e.ParentBlockHash[:],
@@ -344,9 +368,28 @@ func (e *ExecutionPayloadBid) DecodeSSZ(buf []byte, version int) error {
 }
 
 func (e *ExecutionPayloadBid) Clone() clonable.Clonable {
+	commitments := e.BlobKzgCommitments.Clone().(*solid.ListSSZ[*KZGCommitment])
+	commitments.EnsureStaticProgressive(maxBlobCommitmentsForConfig(clparams.GetBeaconConfig()), 48)
 	return &ExecutionPayloadBid{
-		BlobKzgCommitments: *solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsCommittmentsPerBlock, 48),
+		BlobKzgCommitments: *commitments,
 	}
+}
+
+func (e *ExecutionPayloadBid) UnmarshalJSON(data []byte) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	commitments, ok := fields["blob_kzg_commitments"]
+	if !ok || bytes.Equal(bytes.TrimSpace(commitments), []byte("null")) {
+		return errors.New("execution payload bid contains null blob KZG commitments")
+	}
+	type executionPayloadBid ExecutionPayloadBid
+	if err := json.Unmarshal(data, (*executionPayloadBid)(e)); err != nil {
+		return err
+	}
+	e.BlobKzgCommitments.EnsureStaticProgressive(maxBlobCommitmentsForConfig(clparams.GetBeaconConfig()), 48)
+	return nil
 }
 
 func (e *ExecutionPayloadBid) Copy() *ExecutionPayloadBid {
@@ -389,7 +432,11 @@ func (s *SignedExecutionPayloadBid) EncodeSSZ(buf []byte) ([]byte, error) {
 }
 
 func (s *SignedExecutionPayloadBid) DecodeSSZ(buf []byte, version int) error {
-	s.Message = new(ExecutionPayloadBid)
+	if s.Message == nil {
+		s.Message = &ExecutionPayloadBid{
+			BlobKzgCommitments: *solid.NewStaticProgressiveListSSZ[*KZGCommitment](maxBlobCommitmentsForConfig(clparams.GetBeaconConfig()), 48),
+		}
+	}
 	return ssz2.UnmarshalSSZ(buf, version, s.Message, s.Signature[:])
 }
 
@@ -423,7 +470,7 @@ func NewExecutionPayloadEnvelope(cfg *clparams.BeaconChainConfig) *ExecutionPayl
 }
 
 func (e *ExecutionPayloadEnvelope) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(
+	return merkle_tree.ProgressiveContainerRootAll(
 		e.Payload,
 		e.ExecutionRequests,
 		e.BuilderIndex,
