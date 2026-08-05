@@ -1165,8 +1165,8 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 	}
 	// Range deps assert that a specific destruct happened, not what the latest
 	// SelfDestruct entry says — a revival above it does not make them stale.
-	for a, ver := range rs.selfDestructInRange {
-		if !vm.HasDoneSelfDestructAt(a, ver, true) {
+	for a, tr := range rs.selfDestructInRange {
+		if !vm.HasDoneSelfDestructAt(a, tr.Version, tr.Val) {
 			valid = VersionInvalid
 			return
 		}

@@ -115,7 +115,7 @@ type ReadSet struct {
 	// that destruct rather than by the latest SelfDestruct entry, which a later
 	// revival moves. Kept apart so the validator checks the destruct it actually
 	// depended on still exists, instead of comparing against the latest.
-	selfDestructInRange map[accounts.Address]Version
+	selfDestructInRange map[accounts.Address]VersionedRead[bool]
 	createContract      map[accounts.Address]VersionedRead[bool]
 	code                map[accounts.Address]VersionedRead[[]byte]
 	codeHash            map[accounts.Address]VersionedRead[accounts.CodeHash]
@@ -147,11 +147,8 @@ func (s *ReadSet) SetNonce(addr accounts.Address, tr VersionedRead[uint64]) {
 func (s *ReadSet) SetIncarnation(addr accounts.Address, tr VersionedRead[uint64]) {
 	readSetPut(&s.incarnation, addr, tr)
 }
-func (s *ReadSet) SetSelfDestructInRange(addr accounts.Address, ver Version) {
-	if s.selfDestructInRange == nil {
-		s.selfDestructInRange = map[accounts.Address]Version{}
-	}
-	s.selfDestructInRange[addr] = ver
+func (s *ReadSet) SetSelfDestructInRange(addr accounts.Address, tr VersionedRead[bool]) {
+	readSetPut(&s.selfDestructInRange, addr, tr)
 }
 
 func (s *ReadSet) SetSelfDestruct(addr accounts.Address, tr VersionedRead[bool]) {
@@ -319,6 +316,7 @@ func (s *ReadSet) ScanAddr(addr accounts.Address, fn func(path AccountPath, key 
 		scanAddrPath(s.nonce, addr, NoncePath, fn) +
 		scanAddrPath(s.incarnation, addr, IncarnationPath, fn) +
 		scanAddrPath(s.selfDestruct, addr, SelfDestructPath, fn) +
+		scanAddrPath(s.selfDestructInRange, addr, SelfDestructPath, fn) +
 		scanAddrPath(s.createContract, addr, CreateContractPath, fn) +
 		scanAddrPath(s.code, addr, CodePath, fn) +
 		scanAddrPath(s.codeHash, addr, CodeHashPath, fn) +
@@ -413,8 +411,8 @@ func (s *ReadSet) mergeFrom(src ReadSet) {
 	for a, tr := range src.selfDestruct {
 		readSetPut(&s.selfDestruct, a, tr)
 	}
-	for a, ver := range src.selfDestructInRange {
-		s.SetSelfDestructInRange(a, ver)
+	for a, tr := range src.selfDestructInRange {
+		readSetPut(&s.selfDestructInRange, a, tr)
 	}
 	for a, tr := range src.createContract {
 		readSetPut(&s.createContract, a, tr)
@@ -2479,6 +2477,12 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 			}
 			ensureAccountState(ac, addr)
 		}
+		for addr, tr := range rs.selfDestructInRange {
+			if addr.IsNil() || tr.internal {
+				continue
+			}
+			ensureAccountState(ac, addr)
+		}
 		for addr, tr := range rs.createContract {
 			if addr.IsNil() || tr.internal {
 				continue
@@ -2950,8 +2954,10 @@ func HasReadDep(txFrom *WriteSet, txTo ReadSet) bool {
 		if _, ok := txTo.getHeader(h.Address, h.Path, h.Key); ok {
 			return true
 		}
+		// A range dep names one specific destruct, so only its writer is a real
+		// edge — the revival that sits above it writes SelfDestructPath too.
 		if h.Path == SelfDestructPath {
-			if _, ok := txTo.selfDestructInRange[h.Address]; ok {
+			if tr, ok := txTo.selfDestructInRange[h.Address]; ok && tr.Version.TxIndex == h.Version.TxIndex {
 				return true
 			}
 		}

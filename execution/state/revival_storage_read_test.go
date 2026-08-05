@@ -67,7 +67,10 @@ func TestStorageReadRangeDepSurvivesMerge(t *testing.T) {
 	addr := getAddress(93)
 
 	var src ReadSet
-	src.SetSelfDestructInRange(addr, Version{TxIndex: 40, Incarnation: 1})
+	src.SetSelfDestructInRange(addr, VersionedRead[bool]{
+		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 40, Incarnation: 1}},
+		Val:        true,
+	})
 	require.Equal(t, 1, src.Len(), "the dep is an entry and must be counted")
 
 	var dst ReadSet
@@ -100,8 +103,37 @@ func TestStorageReadInvalidatesWhenDependedDestructVanishes(t *testing.T) {
 	io := NewVersionedIO(44)
 	rs := ReadSet{}
 	// A read that depended on a destruct at tx 40 — no such entry exists.
-	rs.SetSelfDestructInRange(addr, Version{TxIndex: 40, Incarnation: 1})
+	rs.SetSelfDestructInRange(addr, VersionedRead[bool]{
+		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 40, Incarnation: 1}},
+		Val:        true,
+	})
 	io.RecordReads(Version{TxIndex: 43}, rs)
 	require.Equal(t, VersionInvalid, vm.ValidateVersion(43, io, validateEqualVersion, false, ""),
 		"a read pinned to a destruct that is not in the map must invalidate")
+}
+
+// The DAG edge for a range dep belongs to the tx that did the destruct, not to
+// the revival sitting above it — both write SelfDestructPath, and an edge from
+// the revival is a dependency that isn't there.
+func TestRangeDepEdgeOnlyFromTheDestructingTx(t *testing.T) {
+	t.Parallel()
+	addr := getAddress(94)
+
+	var rs ReadSet
+	rs.SetSelfDestructInRange(addr, VersionedRead[bool]{
+		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 41, Incarnation: 1}},
+		Val:        true,
+	})
+
+	sdWrite := func(txIdx int, val bool) *WriteSet {
+		ws := &WriteSet{}
+		ws.SetSelfDestruct(addr, &VersionedWrite[bool]{
+			WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: Version{TxIndex: txIdx}},
+			Val:         val,
+		})
+		return ws
+	}
+
+	require.True(t, HasReadDep(sdWrite(41, true), rs), "the destruct the dep names is a real edge")
+	require.False(t, HasReadDep(sdWrite(42, false), rs), "the revival above the destruct is not")
 }
