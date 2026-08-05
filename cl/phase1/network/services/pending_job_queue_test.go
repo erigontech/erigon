@@ -92,3 +92,38 @@ func TestPendingJobQueueEnqueueReleasesReservationOnKeyBuildPanic(t *testing.T) 
 	})
 	require.Zero(t, queue.count.Load())
 }
+
+func TestPendingJobQueueAfterRemoveCanEnqueueSameKey(t *testing.T) {
+	var queue *pendingJobQueue[int, string]
+	afterRemoveCalled := false
+
+	queue = newPendingJobQueue(pendingJobQueueOptions{
+		capacity:      1,
+		expiry:        time.Minute,
+		checkInterval: time.Millisecond,
+	},
+		func(_ context.Context, key int, _ string) (func(), bool) {
+			return func() {
+				afterRemoveCalled = true
+				_, exists := queue.jobs.Load(key)
+				require.False(t, exists)
+				require.NoError(t, queue.enqueue("replacement", func() (int, error) {
+					return key, nil
+				}))
+			}, true
+		},
+		func(int) {},
+	)
+
+	require.NoError(t, queue.enqueue("original", func() (int, error) {
+		return 1, nil
+	}))
+
+	queue.processPending(t.Context())
+
+	require.True(t, afterRemoveCalled)
+	require.Equal(t, int32(1), queue.count.Load())
+	stored, exists := queue.jobs.Load(1)
+	require.True(t, exists)
+	require.Equal(t, "replacement", stored.(*pendingJob[string]).msg)
+}
