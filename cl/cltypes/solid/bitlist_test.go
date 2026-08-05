@@ -41,6 +41,50 @@ func TestBitListClear(t *testing.T) {
 	require.Zero(BitList.Length(), "BitList Clear did not reset the length to zero")
 }
 
+func TestBitListProgressiveHashIgnoresBackingBytesPastLength(t *testing.T) {
+	bitlist := solid.NewBitList(1, 2048)
+	bitlist.Set(0, 0b00000010)
+	bitlist.Set(32, 1)
+	want, err := solid.BitlistFromBytes([]byte{0b00000010}, 2048).HashSSZProgressive()
+	require.NoError(t, err)
+
+	var got [32]byte
+	require.NotPanics(t, func() {
+		got, err = bitlist.HashSSZProgressive()
+	})
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}
+
+func TestBitListBitsIgnoresBackingBytesPastLength(t *testing.T) {
+	bitlist := solid.NewBitList(1, 2048)
+	bitlist.Set(0, 0b00000010)
+	bitlist.Set(32, 1)
+
+	require.Equal(t, 1, bitlist.Bits())
+}
+
+func TestBitListMergeIgnoresBackingBytesPastLength(t *testing.T) {
+	padded := solid.NewBitList(1, 2048)
+	padded.Set(0, 0b00000010)
+	padded.Set(32, 1)
+	compact := solid.BitlistFromBytes([]byte{0b00000010}, 2048)
+
+	for _, test := range []struct {
+		name        string
+		left, right *solid.BitList
+	}{
+		{name: "padded into compact", left: padded, right: compact},
+		{name: "compact into padded", left: compact, right: padded},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			merged, err := test.left.Merge(test.right)
+			require.NoError(t, err)
+			require.Equal(t, []byte{0b00000010}, merged.Bytes())
+		})
+	}
+}
+
 func TestBitListCopyTo(t *testing.T) {
 	require := require.New(t)
 
@@ -121,6 +165,30 @@ func TestBitListCap(t *testing.T) {
 	capacity := BitList.Cap()
 
 	require.Equal(10, capacity, "BitList Cap did not return the expected value")
+}
+
+func TestBitListDecodeSSZRejectsNonCanonicalEncoding(t *testing.T) {
+	tests := []struct {
+		name string
+		data []byte
+	}{
+		{"empty", nil},
+		{"missing delimiter", []byte{0}},
+		{"trailing zero", []byte{1, 0}},
+		{"over limit", []byte{0, 2}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			bitlist := solid.NewBitList(0, 8)
+			require.Error(t, bitlist.DecodeSSZ(test.data, 0))
+		})
+	}
+}
+
+func TestBitListDecodeSSZAcceptsLimit(t *testing.T) {
+	bitlist := solid.NewBitList(0, 8)
+	require.NoError(t, bitlist.DecodeSSZ([]byte{0, 1}, 0))
+	require.Equal(t, 8, bitlist.Bits())
 }
 
 // Add more tests as needed for other functions in the BitList struct.

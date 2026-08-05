@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/monitor/shuffling_metrics"
+	corestate "github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
 	"github.com/erigontech/erigon/common"
@@ -180,8 +181,9 @@ func (c *checkpointState) getDomain(domainType [4]byte, epoch uint64) ([]byte, e
 // isValidIndexedAttestation verifies indexed attestation
 func (c *checkpointState) isValidIndexedAttestation(att *cltypes.IndexedAttestation) (bool, error) {
 	inds := att.AttestingIndices
-	if inds.Length() == 0 || !solid.IsUint64SortedSet(inds) {
-		return false, errors.New("isValidIndexedAttestation: attesting indices are not sorted or are null")
+	version := c.beaconConfig.GetCurrentStateVersion(att.Data.Target.Epoch)
+	if err := corestate.ValidateIndexedAttestationIndices(c.beaconConfig, version, inds); err != nil {
+		return false, err
 	}
 
 	domain, err := c.getDomain(c.beaconConfig.DomainBeaconAttester, att.Data.Target.Epoch)

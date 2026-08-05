@@ -89,14 +89,15 @@ func UnmarshalSSZ(buf []byte, version int, schema ...any) (err error) {
 		case SizedObjectSSZ:
 			// If the element implements the SizedObjectSSZ interface
 			if obj.Static() {
-				if len(buf) < position+obj.EncodingSizeSSZ() {
+				size := obj.EncodingSizeSSZ()
+				if len(buf) < position+size {
 					return ssz.ErrLowBufferSize
 				}
 				// If the object is static (fixed size), decode it from the buf and update the position
-				if err = obj.DecodeSSZ(buf[position:], version); err != nil {
+				if err = obj.DecodeSSZ(buf[position:position+size], version); err != nil {
 					return fmt.Errorf("static element %d: %w", i, err)
 				}
-				position += obj.EncodingSizeSSZ()
+				position += size
 			} else {
 				if len(buf) < position+4 {
 					return ssz.ErrLowBufferSize
