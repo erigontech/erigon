@@ -228,8 +228,10 @@ func (c *StateCache) seedAddrCodeHash(addr []byte, h [32]byte, txNum, visibleEnd
 	c.admissionMu.RLock()
 	defer c.admissionMu.RUnlock()
 	if visibleEnd < c.appliedEnd[kv.AccountsDomain] {
+		c.fillsRejected.Add(1)
 		return
 	}
+	c.fillsAdmitted.Add(1)
 	cc.PutAddrCodeHash(addr, h, txNum)
 }
 

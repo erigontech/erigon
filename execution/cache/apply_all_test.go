@@ -178,6 +178,12 @@ func TestFillAdmissionCounters(t *testing.T) {
 	stale.Fill(kv.AccountsDomain, key, []byte{1}, 50)
 	require.EqualValues(t, 1, c.fillsAdmitted.Load())
 	require.EqualValues(t, 1, c.fillsRejected.Load())
+
+	stale.SeedAddrCodeHash(key, [32]byte{7}, 50)
+	require.EqualValues(t, 2, c.fillsRejected.Load(), "a rejected addr-codehash seed must count")
+	fresh2 := c.View(FrontierFunc(func(kv.Domain) (uint64, bool) { return 300, true }))
+	fresh2.SeedAddrCodeHash(key, [32]byte{7}, 250)
+	require.EqualValues(t, 2, c.fillsAdmitted.Load(), "an admitted addr-codehash seed must count")
 }
 
 func BenchmarkApplierApply(b *testing.B) {
