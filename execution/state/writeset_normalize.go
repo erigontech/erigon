@@ -122,7 +122,15 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 		}
 	}
 
+	// Addresses of every field-level write in the raw input, collected here so
+	// the fill loop below needs no second walk. Filtering must not narrow it:
+	// an address whose writes are all dropped still needs its account fields.
+	allAddresses := make(map[accounts.Address]bool)
+
 	for h := range writes.AllHeaders() {
+		if h.Path != AddressPath {
+			allAddresses[h.Address] = true
+		}
 		// Drop account-field writes for SD'd addresses so applyVersionedWrites
 		// takes the pure-delete branch instead of cleanup-before-recreate; drop
 		// raw StoragePath writes too (the SelfDestructPath case re-emits an
@@ -280,9 +288,6 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 	// - Addresses with only storage writes (no balance/nonce changes)
 	// - Addresses whose storage writes were all filtered as no-ops
 	//   (the object was still dirty in the IBS)
-	allAddresses := make(map[accounts.Address]bool)
-	writes.forEachFieldAddr(func(addr accounts.Address) { allAddresses[addr] = true })
-
 	for addr := range allAddresses {
 		if sdSet[addr] {
 			// Don't fill account fields for SD'd addresses — same rationale as
