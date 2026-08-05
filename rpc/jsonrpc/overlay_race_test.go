@@ -66,7 +66,7 @@ func newOverlayAheadTestAPI(t *testing.T) (base *BaseAPI, m *execmoduletester.Ex
 	cfg.LondonBlock = common.NewUint64(0)
 	m = execmoduletester.New(t, execmoduletester.WithChainConfig(&cfg))
 
-	c, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, overlayRaceChainSize, func(i int, gen *blockgen.BlockGen) {
+	c, err := m.GenerateChain(overlayRaceChainSize, func(i int, gen *blockgen.BlockGen) {
 		gen.SetCoinbase(common.Address{1})
 	})
 	require.NoError(t, err)
