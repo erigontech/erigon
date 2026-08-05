@@ -341,6 +341,33 @@ func TestExecutionPayloadServiceMultiplePendingForSameBlock(t *testing.T) {
 	require.True(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 2}))
 }
 
+func TestExecutionPayloadServicePendingQueueCap(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
+
+	seenCache, err := lru.New[seenEnvelopeKey, struct{}]("seen_envelopes", seenEnvelopeCacheSize)
+	require.NoError(t, err)
+	impl := &executionPayloadService{
+		forkchoiceStore:    forkchoiceMock,
+		beaconCfg:          cfg,
+		emitters:           beaconevents.NewEventEmitter(),
+		seenEnvelopesCache: seenCache,
+	}
+	impl.pending = impl.newPendingQueue()
+	impl.pending.count.Store(maxPendingEnvelopes)
+
+	blockRoot := common.HexToHash("0xffff")
+	envelope := newTestSignedEnvelope(100, blockRoot, 999)
+
+	impl.queuePendingEnvelope(blockRoot, envelope)
+
+	require.Equal(t, int32(maxPendingEnvelopes), impl.pending.count.Load())
+	envelopeHash, err := envelope.HashSSZ()
+	require.NoError(t, err)
+	_, exists := impl.pending.jobs.Load(pendingEnvelopeKey{blockRoot, envelopeHash})
+	require.False(t, exists)
+}
+
 func TestExecutionPayloadServicePendingQueueCapSkipsKeyConstruction(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
