@@ -165,7 +165,7 @@ func subscribeRPC[T any](ctx context.Context, subscribe func() (<-chan T, func()
 
 	ch, unsubscribe, err := subscribe()
 	if err != nil {
-		return nil, err
+		return &rpc.Subscription{}, err
 	}
 	rpcSub := notifier.CreateSubscription()
 

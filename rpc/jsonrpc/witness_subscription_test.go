@@ -126,7 +126,9 @@ func TestWitnessSubscriptionWireDispatch(t *testing.T) {
 	api := &DebugAPIImpl{witnessCache: cache}
 
 	server := rpc.NewServer(50, false, false, true, log.New(), 100)
-	require.NoError(t, server.RegisterName("debug", api))
+	// Register through the interface daemon.go uses, so the test exercises the
+	// production registration shape rather than the concrete impl.
+	require.NoError(t, server.RegisterName("debug", PrivateDebugAPI(api)))
 	client := rpc.DialInProc(server, log.New())
 	t.Cleanup(client.Close)
 

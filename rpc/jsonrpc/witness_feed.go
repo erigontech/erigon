@@ -53,17 +53,17 @@ func newWitnessFeed() *witnessFeed {
 func (f *witnessFeed) subscribe() chan witnessPush {
 	ch := make(chan witnessPush, witnessFeedBuffer)
 	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.subs[ch] = struct{}{}
-	f.mu.Unlock()
-	witnessFeedSubscribersGauge.SetInt(f.subCount())
+	witnessFeedSubscribersGauge.SetInt(len(f.subs))
 	return ch
 }
 
 func (f *witnessFeed) unsubscribe(ch chan witnessPush) {
 	f.mu.Lock()
+	defer f.mu.Unlock()
 	delete(f.subs, ch)
-	f.mu.Unlock()
-	witnessFeedSubscribersGauge.SetInt(f.subCount())
+	witnessFeedSubscribersGauge.SetInt(len(f.subs))
 }
 
 func (f *witnessFeed) subCount() int {
@@ -79,7 +79,7 @@ func (f *witnessFeed) publish(p witnessPush) {
 		select {
 		case ch <- p:
 		default:
-			witnessFeedDropCounter.Inc()
+			witnessFeedOverflowCounter.Inc()
 			log.Debug("[witness-feed] dropping oldest queued pushes for a slow subscriber")
 			common.PrioritizedSend(ch, p)
 		}

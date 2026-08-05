@@ -59,6 +59,11 @@ var errWitnessSubscriptionNeedsCache = errors.New("executionWitnesses subscripti
 // eager cache builds after the subscription starts is pushed as a subscription
 // notification. Fresh-only and stateless — no past witnesses are replayed; behind-tip
 // catch-up stays on the debug_executionWitness request path.
+//
+// The stream is best-effort, not contiguous: the cache skips catch-up bursts and any
+// block whose build is skipped or fails, and a slow subscriber drops queued pushes. A
+// client that needs every height watches blockNumber for holes and re-requests them
+// with debug_executionWitness.
 func (api *DebugAPIImpl) ExecutionWitnesses(ctx context.Context, opts *WitnessSubscriptionOpts) (*rpc.Subscription, error) {
 	if err := validateWitnessEncoding(opts); err != nil {
 		return &rpc.Subscription{}, err
