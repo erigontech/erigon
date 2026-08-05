@@ -3369,9 +3369,12 @@ func normalizeWriteSet(writes *state.WriteSet, vm *state.VersionMap, txIndex int
 	//      already uses last-write-wins for d.selfDestruct, so this keeps the two
 	//      in agreement. (EIP-6780 narrows this pattern post-Cancun but doesn't
 	//      eliminate it; mainnet-rare, but cheap to get right.)
-	sdSet := make(map[accounts.Address]bool)
+	var sdSet map[accounts.Address]bool
 	for addr, vw := range writes.SelfDestructs() {
 		if vw.Version.Incarnation == incarnation && vw.Val {
+			if sdSet == nil {
+				sdSet = make(map[accounts.Address]bool)
+			}
 			sdSet[addr] = true
 		}
 	}
@@ -3541,18 +3544,6 @@ func normalizeWriteSet(writes *state.WriteSet, vm *state.VersionMap, txIndex int
 		}
 	}
 
-	// Track which fields each address already has in the output.
-	addrFields := make(map[accounts.Address]map[state.AccountPath]bool)
-	for h := range filtered.AllHeaders() {
-		switch h.Path {
-		case state.BalancePath, state.NoncePath, state.IncarnationPath, state.CodeHashPath:
-			if addrFields[h.Address] == nil {
-				addrFields[h.Address] = make(map[state.AccountPath]bool)
-			}
-			addrFields[h.Address][h.Path] = true
-		}
-	}
-
 	for addr := range allAddresses {
 		if sdSet[addr] {
 			// Don't fill account fields for SD'd addresses — same rationale as
@@ -3564,7 +3555,6 @@ func normalizeWriteSet(writes *state.WriteSet, vm *state.VersionMap, txIndex int
 			continue
 		}
 		ver := state.Version{TxIndex: txIndex, Incarnation: incarnation}
-		fields := addrFields[addr]
 
 		// If addr was self-destructed by an earlier TX in this block and this
 		// TX re-creates it (it isn't in sdSet — this TX didn't re-destruct it),
@@ -3593,9 +3583,15 @@ func normalizeWriteSet(writes *state.WriteSet, vm *state.VersionMap, txIndex int
 			hasCreateContract = true
 		}
 
+		// Every field falls back to the same pre-block account, so read (and
+		// decode) it at most once per address rather than per missing field —
+		// a storage-only dirty address misses all four.
+		var fallbackAcc *accounts.Account
+		fallbackLoaded := false
+
 		// For each missing field, try versionMap then stateReader.
 		for _, path := range []state.AccountPath{state.BalancePath, state.NoncePath, state.IncarnationPath, state.CodeHashPath} {
-			if fields != nil && fields[path] {
+			if filtered.Has(state.WriteHeader{Address: addr, Path: path}) {
 				continue // already in output
 			}
 			if sdEarlier && hasCreateContract {
@@ -3607,13 +3603,18 @@ func normalizeWriteSet(writes *state.WriteSet, vm *state.VersionMap, txIndex int
 			}
 			// Fall back to stateReader for pre-block account state.
 			if stateReader != nil {
-				acc, err := stateReader.ReadAccountData(addr)
-				if err == nil {
-					// New account (acc == nil) — doesn't exist in domain yet.
-					// SetAccountFieldFromAccount emits default values so the
-					// commitment sees a full account (not a delete).
-					state.SetAccountFieldFromAccount(filtered, addr, path, ver, acc)
+				if !fallbackLoaded {
+					acc, err := stateReader.ReadAccountData(addr)
+					if err != nil {
+						continue
+					}
+					fallbackAcc = acc
+					fallbackLoaded = true
 				}
+				// New account (fallbackAcc == nil) — doesn't exist in domain yet.
+				// SetAccountFieldFromAccount emits default values so the
+				// commitment sees a full account (not a delete).
+				state.SetAccountFieldFromAccount(filtered, addr, path, ver, fallbackAcc)
 			}
 		}
 	}
@@ -3625,16 +3626,12 @@ func normalizeWriteSet(writes *state.WriteSet, vm *state.VersionMap, txIndex int
 	// (versionMap, else stateReader post-state) and re-emit CodePath, bounded to
 	// 7702 designators so unchanged contract code isn't re-emitted. Forward-only:
 	// it can't repair codeHash-no-code already collated into snapshots.
-	codeInOutput := make(map[accounts.Address]bool)
-	for addr := range filtered.Codes() {
-		codeInOutput[addr] = true
-	}
-	codeHashInOutput := make(map[accounts.Address]accounts.CodeHash)
-	for addr, vw := range filtered.CodeHashes() {
-		codeHashInOutput[addr] = vw.Val
-	}
-	for addr, h := range codeHashInOutput {
-		if h.IsEmpty() || codeInOutput[addr] || sdSet[addr] {
+	for addr, hvw := range filtered.CodeHashes() {
+		h := hvw.Val
+		if h.IsEmpty() || sdSet[addr] {
+			continue
+		}
+		if _, ok := filtered.GetCode(addr); ok {
 			continue
 		}
 		// Recover the code whose hash this tx emitted. Prefer the versionMap
@@ -3701,29 +3698,24 @@ func normalizeWriteSet(writes *state.WriteSet, vm *state.VersionMap, txIndex int
 		hasNonce bool
 		hasCode  bool
 	}
-	acctStates := make(map[accounts.Address]*acctState)
-	ensureAcctState := func(addr accounts.Address) *acctState {
-		s := acctStates[addr]
-		if s == nil {
-			s = &acctState{}
-			acctStates[addr] = s
-		}
-		return s
-	}
+	acctStates := make(map[accounts.Address]acctState)
 	for addr, vw := range filtered.Balances() {
-		s := ensureAcctState(addr)
+		s := acctStates[addr]
 		s.balance = vw.Val
 		s.hasBal = true
+		acctStates[addr] = s
 	}
 	for addr, vw := range filtered.Nonces() {
-		s := ensureAcctState(addr)
+		s := acctStates[addr]
 		s.nonce = vw.Val
 		s.hasNonce = true
+		acctStates[addr] = s
 	}
 	for addr, vw := range filtered.CodeHashes() {
-		s := ensureAcctState(addr)
+		s := acctStates[addr]
 		s.codeHash = vw.Val
 		s.hasCode = true
+		acctStates[addr] = s
 	}
 
 	// Check for empty accounts and replace with Delete. Only when EIP-161
@@ -3731,16 +3723,16 @@ func normalizeWriteSet(writes *state.WriteSet, vm *state.VersionMap, txIndex int
 	// merely touched (e.g. a 0-value transfer) is created and persists, so
 	// converting it to a delete here would diverge from serial's trie root
 	// (TestEIP161AccountRemoval block 1, pre-SpuriousDragon).
-	emptyAddrs := make(map[accounts.Address]bool)
+	var emptyAddrs []accounts.Address
 	for addr, s := range acctStates {
 		if state.EIP161EmptyRemoval(emptyRemoval, isAura, addr) &&
 			s.hasBal && s.hasNonce && s.hasCode &&
 			s.balance.IsZero() && s.nonce == 0 && s.codeHash.IsEmpty() {
-			emptyAddrs[addr] = true
+			emptyAddrs = append(emptyAddrs, addr)
 		}
 	}
 
-	for addr := range emptyAddrs {
+	for _, addr := range emptyAddrs {
 		filtered.DeleteAccountFields(addr)
 		filtered.SetSelfDestruct(addr, &state.VersionedWrite[bool]{
 			WriteHeader: state.WriteHeader{
