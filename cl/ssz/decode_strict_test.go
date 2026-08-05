@@ -53,6 +53,15 @@ func TestUnmarshalSSZStrictRejectsTrailingBytes(t *testing.T) {
 	require.ErrorIs(t, ssz2.UnmarshalSSZStrict(buf, 0, &x), commonssz.ErrTrailingBytes)
 }
 
+func TestUnmarshalSSZStrictRejectsNonCanonicalBoolean(t *testing.T) {
+	for _, encoded := range []byte{0x02, 0xff} {
+		var decoded bool
+		require.NoError(t, ssz2.UnmarshalSSZ([]byte{encoded}, 0, &decoded))
+		require.True(t, decoded)
+		require.Error(t, ssz2.UnmarshalSSZStrict([]byte{encoded}, 0, &decoded))
+	}
+}
+
 // staticStubSSZ is a fixed-size schema field whose strict decoding fails
 // unless it receives exactly its own encoding.
 type staticStubSSZ struct{}

@@ -51,7 +51,7 @@ type Unmarshaler interface {
 }
 
 // StrictUnmarshaler supports recursive strict decoding, which rejects
-// non-canonical offsets and trailing bytes.
+// non-canonical offsets, non-canonical boolean encodings, and trailing bytes.
 type StrictUnmarshaler interface {
 	DecodeSSZStrict(buf []byte, version int) error
 }

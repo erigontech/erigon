@@ -28,10 +28,10 @@ func UnmarshalSSZ(buf []byte, version int, schema ...any) error {
 	return unmarshalSSZ(buf, version, false, schema...)
 }
 
-// UnmarshalSSZStrict rejects non-canonical container offsets, rejects
-// trailing bytes when the schema has no variable-size fields, and propagates
-// strict decoding to nested objects that support it. Nested objects without
-// DecodeSSZStrict are decoded with DecodeSSZ.
+// UnmarshalSSZStrict rejects non-canonical container offsets, boolean
+// encodings other than 0 or 1, and trailing bytes when the schema has no
+// variable-size fields. It propagates strict decoding to nested objects that
+// support it; objects without DecodeSSZStrict are decoded with DecodeSSZ.
 func UnmarshalSSZStrict(buf []byte, version int, schema ...any) error {
 	return unmarshalSSZ(buf, version, true, schema...)
 }
@@ -75,6 +75,9 @@ func unmarshalSSZ(buf []byte, version int, strict bool, schema ...any) (err erro
 		case *bool:
 			if len(buf) < position+1 {
 				return ssz.ErrLowBufferSize
+			}
+			if strict && buf[position] > 1 {
+				return fmt.Errorf("invalid SSZ boolean value %d", buf[position])
 			}
 			*obj = buf[position] != 0
 			position += 1
