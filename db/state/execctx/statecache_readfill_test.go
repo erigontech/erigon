@@ -184,7 +184,8 @@ func TestFlushRejectsCacheAttachedSD(t *testing.T) {
 	stateCache := newSmallStateCache()
 	t.Cleanup(stateCache.Close)
 	domains.SetStateCacheForTest(stateCache)
-	require.Error(t, domains.Flush(ctx, rwTx))
+	require.Panics(t, func() { _ = domains.Flush(ctx, rwTx) },
+		"a wiring bug must fail loudly, like the SetStateCache assert — an error can be swallowed")
 }
 
 // The incoherence the Flush rejection prevents, end to end: after v1 is
@@ -229,7 +230,7 @@ func TestFlushRejectionPreventsStaleCachedReads(t *testing.T) {
 	sd2.SetStateCacheForTest(stateCache)
 	sd2.SetTxNum(20)
 	require.NoError(t, sd2.DomainPut(kv.StorageDomain, tx2, slot, v2, 20, nil))
-	require.Error(t, sd2.Flush(ctx, tx2),
+	require.Panics(t, func() { _ = sd2.Flush(ctx, tx2) },
 		"the step that would split the cache (v1) from MDBX (v2) must be rejected")
 
 	require.NoError(t, sd2.Commit(ctx, tx2))

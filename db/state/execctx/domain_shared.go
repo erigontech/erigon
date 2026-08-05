@@ -972,10 +972,11 @@ func (sd *SharedDomains) Close() {
 // does not touch the caches — the caller may still roll back. An SD with a
 // state cache must route every flush through Commit: a plain Flush would
 // leave the cache serving pre-flush values for the flushed keys forever, so
-// it is rejected here.
+// it panics here, like the SetStateCache assert for the neighbouring wiring
+// bug — an error return can be swallowed.
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	if sd.stateCache != nil {
-		return errors.New("SharedDomains with a state cache must flush through Commit")
+		panic("assert: SharedDomains with a state cache must flush through Commit")
 	}
 	defer mxFlushTook.ObserveDuration(time.Now())
 	return sd.flushMem(ctx, tx)
