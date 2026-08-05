@@ -570,7 +570,7 @@ http = true
 Erigon supports configuration through environment variables, primarily for experimental features and advanced settings.
 
 :::tip
-Erigon's own variables — everything below except the [Docker](#docker-environment-variables) ones, which are read by Docker rather than by Erigon — can be set with or without an `ERIGON_` prefix. `ERIGON_SNAPSHOT_MADV_RND` and `SNAPSHOT_MADV_RND` both work. Prefer the prefixed form: Erigon logs a warning when it reads the bare name, and the prefix keeps these from colliding with unrelated variables in your environment. The examples below use it.
+Erigon's own variables — everything below except the [Docker](#docker-environment-variables) ones, which do not take the `ERIGON_` prefix — can be set with or without it. `ERIGON_SNAPSHOT_MADV_RND` and `SNAPSHOT_MADV_RND` both work. Prefer the prefixed form: Erigon logs a warning when it reads the bare name, and the prefix keeps these from colliding with unrelated variables in your environment. The examples below use it.
 :::
 
 ### Core Environment Variables

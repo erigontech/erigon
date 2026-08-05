@@ -81,6 +81,7 @@ DEFAULT_TAB_HEADING_DEPTH = 3
 MAX_HEADING_DEPTH = 6
 
 _TABITEM_TAG = re.compile(r"<TabItem\b[^>]*>")
+_TABITEM_OPEN = re.compile(r"<TabItem\b")
 _TABS_OPEN = re.compile(r"<Tabs\b")
 _TABS_CLOSE = re.compile(r"</Tabs\s*>")
 _ATX_HEADING = re.compile(r"\s*(#{1,6})\s")
@@ -111,7 +112,10 @@ def _scan_tab_structure(text):
     """
     lines = text.splitlines()
     headings, tabs, blocks, open_at, in_fence = {}, {}, [], None, False
+    skip_to = -1
     for i, line in enumerate(lines):
+        if i <= skip_to:  # continuation lines of a multiline <TabItem …> tag
+            continue
         if line.lstrip().startswith("```"):
             in_fence = not in_fence
             continue
@@ -126,12 +130,45 @@ def _scan_tab_structure(text):
         if _TABS_CLOSE.search(line) and open_at is not None:
             blocks.append((open_at, i))
             open_at = None
-        tag = _TABITEM_TAG.search(line)
+        tag = _tabitem_tag_at(lines, i)
         if tag:
-            tabs[i] = _label_of(tag.group(0))
+            text_, end, col_start, col_end = tag
+            skip_to = end
+            rest = (line[:col_start] + lines[end][col_end:]).strip()
+            tabs[i] = (_label_of(text_), end, rest)
     if open_at is not None:  # unclosed <Tabs>: treat the rest of the doc as its body
         blocks.append((open_at, len(lines)))
     return lines, headings, tabs, blocks
+
+
+def _tabitem_tag_at(lines, i):
+    """Assemble a `<TabItem …>` opening tag that starts on line `i`.
+
+    Returns `(tag_text, end_line, start_col, end_col)`, or None if no tag starts
+    there. MDX lets the attributes span several lines, and matching only within
+    one line would find no `label` — the heading would be dropped and the later
+    multi-line component strip would delete the label text with the tag. Quotes
+    are tracked so a `>` inside an attribute value does not end the tag early.
+    """
+    m = _TABITEM_OPEN.search(lines[i])
+    if not m:
+        return None
+    quote, buf = None, []
+    for j in range(i, len(lines)):
+        line = lines[j]
+        start = m.start() if j == i else 0
+        for col in range(start, len(line)):
+            ch = line[col]
+            if quote:
+                if ch == quote:
+                    quote = None
+            elif ch in "\"'":
+                quote = ch
+            elif ch == ">":
+                buf.append(line[start : col + 1])
+                return "\n".join(buf), j, m.start(), col + 1
+        buf.append(line[start:])
+    return None  # unterminated tag: leave it to the generic component strip
 
 
 def _tab_heading_depth(start, end, headings):
@@ -176,15 +213,17 @@ def _tabitem_labels_to_headings(text):
         if i not in depth_at:
             depth_at[i] = _tab_heading_depth(i, i, headings)
 
-    out = []
+    out, skip_to = [], -1
     for i, line in enumerate(lines):
+        if i <= skip_to:  # attribute lines of a multiline tag, already consumed
+            continue
         if i not in tabs:
             out.append(line)
             continue
-        tag = _TABITEM_TAG.search(line)
-        rest = (line[: tag.start()] + line[tag.end() :]).strip()
-        if tabs[i]:
-            out.extend(["", "#" * depth_at[i] + f" {tabs[i]}", ""])
+        label, end, rest = tabs[i]
+        skip_to = end
+        if label:
+            out.extend(["", "#" * depth_at[i] + f" {label}", ""])
         if rest:
             out.append(rest)
     return "\n".join(out)

@@ -98,6 +98,13 @@ export default async function createConfig(): Promise<Config> {
               from: '/fundamentals/configuring-erigon/nat',
               to: '/fundamentals/nat',
             },
+            // The Polygon easy-node guide is removed in this series: bor-mainnet
+            // has no chain config after 3.1. Inbound links land on the support
+            // statement; the guide itself is still readable in the v3.4 archive.
+            {
+              from: '/get-started/easy-nodes/how-to-run-a-polygon-node',
+              to: '/fundamentals/supported-networks',
+            },
           ],
         },
       ],

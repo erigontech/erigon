@@ -102,6 +102,39 @@ class TabItemLabelTests(unittest.TestCase):
         self.assertIn("### Ethereum mainnet", out)
         self.assertNotIn("TabItem", out)
 
+    def test_multiline_opening_tag_still_yields_heading(self):
+        """MDX allows the attributes to be spread over several lines. Matching
+        within one line found no label, so the heading was dropped and the
+        multi-line component strip then swallowed the label text as well.
+        """
+        text = (
+            "## Disk Size\n\n"
+            "<Tabs>\n"
+            "<TabItem\n"
+            '  value="ethereum-mainnet"\n'
+            '  label="Ethereum mainnet">\n'
+            "| Mode | Usage |\n"
+            "</TabItem>\n"
+            "</Tabs>"
+        )
+        out = g.strip_mdx(text)
+        self.assertIn("### Ethereum mainnet", out)
+        self.assertNotIn("TabItem", out)
+        self.assertNotIn("value=", out)
+
+    def test_angle_bracket_inside_label_does_not_end_the_tag(self):
+        text = (
+            "## Ports\n\n"
+            "<Tabs>\n"
+            '<TabItem value="gt" label="Version > 3.1">\n'
+            "body\n"
+            "</TabItem>\n"
+            "</Tabs>"
+        )
+        out = g.strip_mdx(text)
+        self.assertIn("### Version > 3.1", out)
+        self.assertNotIn("TabItem", out)
+
     def test_sibling_tabs_are_each_labelled(self):
         text = (
             "## Disk Size\n\n"

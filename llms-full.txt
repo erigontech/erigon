@@ -2501,7 +2501,7 @@ http = true
 Erigon supports configuration through environment variables, primarily for experimental features and advanced settings.
 
 :::tip
-Erigon's own variables — everything below except the [Docker](#docker-environment-variables) ones, which are read by Docker rather than by Erigon — can be set with or without an `ERIGON_` prefix. `ERIGON_SNAPSHOT_MADV_RND` and `SNAPSHOT_MADV_RND` both work. Prefer the prefixed form: Erigon logs a warning when it reads the bare name, and the prefix keeps these from colliding with unrelated variables in your environment. The examples below use it.
+Erigon's own variables — everything below except the [Docker](#docker-environment-variables) ones, which do not take the `ERIGON_` prefix — can be set with or without it. `ERIGON_SNAPSHOT_MADV_RND` and `SNAPSHOT_MADV_RND` both work. Prefer the prefixed form: Erigon logs a warning when it reads the bare name, and the prefix keeps these from colliding with unrelated variables in your environment. The examples below use it.
 :::
 
 ### Core Environment Variables
@@ -7892,17 +7892,25 @@ Attach the `.pprof` files and the goroutine dump to your GitHub issue.
 
 ## Hetzner Cloud / Dedicated Server Firewall Note
 
-Hetzner filters traffic at the network edge. On **dedicated servers (Robot)** the firewall is stateless, so return traffic needs an explicit rule; the **Cloud** firewall is stateful and does not. Either way, make sure the following ports are reachable **inbound and outbound**:
+Hetzner filters traffic at the network edge, and the two product lines need different rules:
 
-| Purpose                    | Port  | Protocol |
-| -------------------------- | ----- | -------- |
-| P2P (execution layer)      | 30303 | TCP+UDP  |
-| Caplin DISCV5 discovery    | 4000  | UDP      |
-| Caplin DISCV5              | 4001  | TCP      |
+* **Cloud** — the firewall is stateful, so return traffic is handled for you. Outbound is allow-all, but only for as long as no outbound rule exists: per Hetzner's FAQ, *"If you define one or more outbound rules, the outbound direction also changes to implicit 'deny'"*. Adding outbound rules for the ports below would therefore cut off DNS, NTP and HTTPS — including the snapshot webseeds — and break the initial download. Define **inbound rules only** and leave the outbound list empty.
+* **Dedicated servers (Robot)** — the firewall is stateless, so return traffic needs an explicit rule of its own. Here you do need rules in both directions.
 
-The Caplin ports are its defaults (`--caplin.discovery.port` and `--caplin.discovery.tcpport`); change the rules to match if you override them. If you run an **external** consensus client instead of Caplin, open the port that client uses — conventionally `9000` TCP+UDP for Lighthouse, Prysm and friends — rather than the Caplin ports.
+The ports to allow inbound:
 
-Without these, the node may appear to have peers (via the cloud dashboard) but will suffer poor block propagation. Configure the firewall in the Hetzner Cloud Console under **Firewalls** or via `hcloud firewall`.
+| Purpose                          | Port  | Protocol |
+| -------------------------------- | ----- | -------- |
+| P2P (execution layer)            | 30303 | TCP+UDP  |
+| Snapshot downloader (BitTorrent) | 42069 | TCP+UDP  |
+| Caplin DISCV5 discovery          | 4000  | UDP      |
+| Caplin DISCV5                    | 4001  | TCP      |
+
+This table is not exhaustive — it lists what a default node needs. See [Default ports](/fundamentals/default-ports) for every port Erigon can open, including the opt-in Shutter port.
+
+The Caplin ports are its defaults (`--caplin.discovery.port` and `--caplin.discovery.tcpport`); change the rules to match if you override them. If you run an **external** consensus client instead of Caplin, open the ports that client uses rather than the Caplin ones. Lighthouse, Teku and Nimbus default to `9000` TCP+UDP, and Lighthouse additionally uses `9001` UDP for QUIC; Prysm defaults to `13000` TCP and `12000` UDP. Check your client's own documentation rather than assuming `9000`.
+
+Without these, the node may appear to have peers (via the cloud dashboard) but will suffer poor block propagation. Configure Cloud firewalls in the Hetzner Cloud Console under **Firewalls** or via `hcloud firewall`; for dedicated servers the equivalent lives in the Robot panel under **Server → Firewall**.
 
 A public-facing Erigon node should also not attempt to peer with IPv4 ranges that are reserved for special use. Blocking them is worth doing explicitly on Hetzner, whose abuse and netscan detection flags outbound dials to reserved ranges — that is what prompted this note, rather than their firewall filtering the traffic. Do not apply this to a node using `--caplin.local-discovery`, which deliberately peers over private IPs. The authoritative list is the [IANA IPv4 Special-Purpose Address Registry](https://www.iana.org/assignments/iana-ipv4-special-registry/iana-ipv4-special-registry.xhtml) ([RFC 6890](https://datatracker.ietf.org/doc/html/rfc6890)); the ranges below are the ones commonly blocked for an Ethereum node (`100.64.0.0/10` comes from [RFC 6598](https://datatracker.ietf.org/doc/html/rfc6598), and `192.88.99.0/24` has since been deprecated by [RFC 7526](https://datatracker.ietf.org/doc/html/rfc7526) — blocking it remains correct):
 
@@ -7925,7 +7933,7 @@ A public-facing Erigon node should also not attempt to peer with IPv4 ranges tha
 255.255.255.255/32    Limited Broadcast                             RFC 919 and RFC 922, Section 7
 ```
 
-The same list expressed in [iptables syntax](https://ethereum.stackexchange.com/questions/6386/how-to-prevent-being-blacklisted-for-running-an-ethereum-client/13068#13068).
+A near-identical list expressed in [iptables syntax](https://ethereum.stackexchange.com/questions/6386/how-to-prevent-being-blacklisted-for-running-an-ethereum-client/13068#13068) is available on Stack Exchange. It covers 14 of the 16 ranges above, deliberately leaving out `127.0.0.0/8` and `255.255.255.255/32`: an `OUTPUT` drop on loopback would break Erigon's own inter-component traffic, such as the RPC Daemon reaching the core node on `127.0.0.1:9090`.
 
 ---
 
