@@ -445,7 +445,8 @@ func (c *StateCache) absorbFilesExtension(f Frontier) {
 	c.admissionMu.Lock()
 	defer c.admissionMu.Unlock()
 	extended := false
-	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+	for d := range kv.DomainLen {
+		domain := kv.Domain(d)
 		if c.caches[domain] == nil {
 			continue
 		}

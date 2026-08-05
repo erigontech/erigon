@@ -237,7 +237,7 @@ func TestFillCountersLiveOnTheirOwnCacheLine(t *testing.T) {
 	var c StateCache
 	const line = 64
 	countersFirst := unsafe.Offsetof(c.fillsAdmitted) / line
-	countersLast := (unsafe.Offsetof(c.fillsRejected) + 7) / line
+	countersLast := (unsafe.Offsetof(c.fillsNoFrontier) + 7) / line
 	appliedEndFirst := unsafe.Offsetof(c.appliedEnd) / line
 	appliedEndLast := (unsafe.Offsetof(c.appliedEnd) + uintptr(len(c.appliedEnd))*8 - 1) / line
 	require.True(t, countersFirst > appliedEndLast || countersLast < appliedEndFirst,
