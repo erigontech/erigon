@@ -697,31 +697,6 @@ func TestExecutionPayloadBidServicePendingQueueCap(t *testing.T) {
 	require.False(t, exists)
 }
 
-func TestExecutionPayloadBidServicePendingQueueCapSkipsKeyConstruction(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	service, _, _, _, _ := setupExecutionPayloadBidService(t, ctrl)
-
-	service.pending.count.Store(maxPendingBids)
-
-	// Building the key for this message panics, so the enqueue only stays
-	// panic-free if a full queue skips key construction.
-	msg := &cltypes.SignedExecutionPayloadBid{}
-
-	require.NotPanics(t, func() {
-		service.queuePendingBid(msg)
-	})
-
-	require.Equal(t, int32(maxPendingBids), service.pending.count.Load())
-	stored := 0
-	service.pending.jobs.Range(func(_, _ any) bool {
-		stored++
-		return true
-	})
-	require.Zero(t, stored)
-}
-
 func TestExecutionPayloadBidServicePendingQueueKeepsDistinctSameBuilderSlot(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()

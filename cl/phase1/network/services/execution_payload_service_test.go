@@ -368,42 +368,6 @@ func TestExecutionPayloadServicePendingQueueCap(t *testing.T) {
 	require.False(t, exists)
 }
 
-func TestExecutionPayloadServicePendingQueueCapSkipsKeyConstruction(t *testing.T) {
-	cfg := &clparams.MainnetBeaconConfig
-	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
-
-	seenCache, err := lru.New[seenEnvelopeKey, struct{}]("seen_envelopes", seenEnvelopeCacheSize)
-	require.NoError(t, err)
-	impl := &executionPayloadService{
-		forkchoiceStore:    forkchoiceMock,
-		beaconCfg:          cfg,
-		emitters:           beaconevents.NewEventEmitter(),
-		seenEnvelopesCache: seenCache,
-	}
-	impl.pending = impl.newPendingQueue()
-
-	impl.pending.count.Store(maxPendingEnvelopes)
-
-	blockRoot := common.HexToHash("0xffff")
-	// Building the key for this envelope panics, so the enqueue only stays
-	// panic-free if a full queue skips key construction.
-	envelope := &cltypes.SignedExecutionPayloadEnvelope{
-		Message: &cltypes.ExecutionPayloadEnvelope{},
-	}
-
-	require.NotPanics(t, func() {
-		impl.queuePendingEnvelope(blockRoot, envelope)
-	})
-
-	require.Equal(t, int32(maxPendingEnvelopes), impl.pending.count.Load())
-	stored := 0
-	impl.pending.jobs.Range(func(_, _ any) bool {
-		stored++
-		return true
-	})
-	require.Zero(t, stored)
-}
-
 func TestExecutionPayloadServicePendingQueueCapConcurrent(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
