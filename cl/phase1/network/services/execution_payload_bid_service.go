@@ -130,7 +130,11 @@ func NewExecutionPayloadBidService(
 }
 
 func (s *executionPayloadBidService) newPendingQueue() *pendingJobQueue[pendingBidKey, *cltypes.SignedExecutionPayloadBid] {
-	return newPendingJobQueue(maxPendingBids, pendingBidExpiry, pendingBidCheckInterval,
+	return newPendingJobQueue(pendingJobQueueOptions{
+		capacity:      maxPendingBids,
+		expiry:        pendingBidExpiry,
+		checkInterval: pendingBidCheckInterval,
+	},
 		s.tryProcessPendingBid,
 		func(key pendingBidKey) {
 			log.Trace("Pending execution payload bid expired",

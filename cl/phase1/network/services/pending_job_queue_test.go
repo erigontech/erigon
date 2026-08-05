@@ -25,7 +25,11 @@ import (
 )
 
 func newTestPendingJobQueue() *pendingJobQueue[int, string] {
-	return newPendingJobQueue(1, time.Minute, time.Millisecond,
+	return newPendingJobQueue(pendingJobQueueOptions{
+		capacity:      1,
+		expiry:        time.Minute,
+		checkInterval: time.Millisecond,
+	},
 		func(context.Context, int, string) (func(), bool) {
 			return nil, false
 		},
@@ -36,9 +40,11 @@ func newTestPendingJobQueue() *pendingJobQueue[int, string] {
 func TestNewPendingJobQueueRejectsNilTryProcess(t *testing.T) {
 	require.Panics(t, func() {
 		newPendingJobQueue[int, string](
-			1,
-			time.Minute,
-			time.Millisecond,
+			pendingJobQueueOptions{
+				capacity:      1,
+				expiry:        time.Minute,
+				checkInterval: time.Millisecond,
+			},
 			nil,
 			func(int) {},
 		)
@@ -48,9 +54,11 @@ func TestNewPendingJobQueueRejectsNilTryProcess(t *testing.T) {
 func TestNewPendingJobQueueRejectsNilOnExpired(t *testing.T) {
 	require.Panics(t, func() {
 		newPendingJobQueue[int, string](
-			1,
-			time.Minute,
-			time.Millisecond,
+			pendingJobQueueOptions{
+				capacity:      1,
+				expiry:        time.Minute,
+				checkInterval: time.Millisecond,
+			},
 			func(context.Context, int, string) (func(), bool) {
 				return nil, false
 			},

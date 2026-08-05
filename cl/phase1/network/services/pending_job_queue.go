@@ -28,6 +28,12 @@ type pendingJob[M any] struct {
 	creationTime time.Time
 }
 
+type pendingJobQueueOptions struct {
+	capacity      int32
+	expiry        time.Duration
+	checkInterval time.Duration
+}
+
 // pendingJobQueue retries dependency-blocked jobs until the service callback
 // requests their removal or they expire.
 type pendingJobQueue[K comparable, M any] struct {
@@ -46,9 +52,7 @@ type pendingJobQueue[K comparable, M any] struct {
 }
 
 func newPendingJobQueue[K comparable, M any](
-	capacity int32,
-	expiry time.Duration,
-	tick time.Duration,
+	options pendingJobQueueOptions,
 	tryProcess func(ctx context.Context, key K, msg M) (afterRemove func(), remove bool),
 	onExpired func(key K),
 ) *pendingJobQueue[K, M] {
@@ -59,9 +63,9 @@ func newPendingJobQueue[K comparable, M any](
 		panic("pending job queue requires onExpired")
 	}
 	return &pendingJobQueue[K, M]{
-		capacity:   capacity,
-		expiry:     expiry,
-		tick:       tick,
+		capacity:   options.capacity,
+		expiry:     options.expiry,
+		tick:       options.checkInterval,
 		tryProcess: tryProcess,
 		onExpired:  onExpired,
 		cond:       sync.NewCond(&sync.Mutex{}),

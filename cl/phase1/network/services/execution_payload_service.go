@@ -92,7 +92,11 @@ func NewExecutionPayloadService(
 }
 
 func (s *executionPayloadService) newPendingQueue() *pendingJobQueue[pendingEnvelopeKey, *cltypes.SignedExecutionPayloadEnvelope] {
-	return newPendingJobQueue(maxPendingEnvelopes, pendingEnvelopeExpiry, pendingEnvelopeCheckInterval,
+	return newPendingJobQueue(pendingJobQueueOptions{
+		capacity:      maxPendingEnvelopes,
+		expiry:        pendingEnvelopeExpiry,
+		checkInterval: pendingEnvelopeCheckInterval,
+	},
 		s.tryProcessPendingEnvelope,
 		func(key pendingEnvelopeKey) {
 			log.Trace("Pending envelope expired", "blockRoot", key.blockRoot)

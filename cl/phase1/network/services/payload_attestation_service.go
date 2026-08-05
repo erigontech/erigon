@@ -98,7 +98,11 @@ func NewPayloadAttestationService(
 }
 
 func (s *payloadAttestationService) newPendingQueue() *pendingJobQueue[pendingPayloadAttestationKey, *cltypes.PayloadAttestationMessage] {
-	return newPendingJobQueue(maxPendingAttestations, pendingPayloadAttestationExpiry, pendingPayloadAttestationCheckInterval,
+	return newPendingJobQueue(pendingJobQueueOptions{
+		capacity:      maxPendingAttestations,
+		expiry:        pendingPayloadAttestationExpiry,
+		checkInterval: pendingPayloadAttestationCheckInterval,
+	},
 		s.tryProcessPendingAttestation,
 		func(key pendingPayloadAttestationKey) {
 			log.Trace("Pending payload attestation expired", "blockRoot", key.blockRoot)
