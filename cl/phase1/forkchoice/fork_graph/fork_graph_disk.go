@@ -151,10 +151,14 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_d
 	anchorHeader := anchorState.LatestBlockHeader()
 	if anchorState.Version() >= clparams.GloasVersion && anchorState.Slot() > 0 {
 		stateHash := anchorState.PeekPreviousStateRoot()
-		if stateHash == (common.Hash{}) || anchorHeader.Root == (common.Hash{}) || anchorHeader.Slot < anchorState.Slot() {
-			stateHash, err = anchorState.HashSSZ()
-			if err != nil {
-				panic(err)
+		if stateHash == (common.Hash{}) {
+			if anchorHeader.Root != (common.Hash{}) && anchorHeader.Slot == anchorState.Slot() {
+				stateHash = anchorHeader.Root
+			} else {
+				stateHash, err = anchorState.HashSSZ()
+				if err != nil {
+					panic(err)
+				}
 			}
 		}
 		if anchorHeader.Root == (common.Hash{}) {

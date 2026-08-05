@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"net/http"
 	"slices"
@@ -93,7 +94,7 @@ const (
 	maxBeaconAPIResponseBytes = 64 << 20
 )
 
-// SkippedFullBlock records a GLOAS FULL block whose envelope was unavailable during backward download.
+// SkippedFullBlock records a GLOAS block that may need an envelope after degraded backward download.
 type SkippedFullBlock struct {
 	Slot uint64
 	Root [32]byte
@@ -350,6 +351,10 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 					return nil
 				}
 			}
+			if envelope == nil && b.envelopesSkipped && !b.canTrackSkippedFullBlock(block) {
+				log.Warn("[BackwardBeaconDownloader] skipped envelope recovery queue is full, will retry", "slot", block.Block.Slot)
+				return nil
+			}
 		}
 
 		// A FULL block whose envelope could not be fetched must not be treated as
@@ -369,7 +374,7 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 		}
 
 		// Record FULL blocks passing through without envelope for post-download recovery.
-		if _, isFull := fullRootSet[common.Hash(blockRoot)]; isFull && envelope == nil {
+		if _, isFull := fullRootSet[common.Hash(blockRoot)]; envelope == nil && (isFull || b.envelopesSkipped) {
 			b.skippedFullBlocks = append(b.skippedFullBlocks, SkippedFullBlock{Slot: block.Block.Slot, Root: blockRoot})
 		}
 
@@ -419,7 +424,7 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 						return nil
 					}
 					isFull = full
-					if full {
+					if full && !b.envelopesSkipped {
 						env, fetchErr := b.fetchSingleEnvelope(ctx, block)
 						if fetchErr == nil && env != nil {
 							if err := ValidateFetchedEnvelope(b.beaconCfg, block, common.Hash(blockRoot), env); err == nil {
@@ -434,6 +439,24 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 								"slot", block.Block.Slot, "err", fetchErr, "consecutiveFailures", b.consecutiveEnvelopeFailures)
 							return nil
 						}
+					} else if !full && !b.envelopesSkipped {
+						env, fetchErr := b.fetchSingleEnvelope(ctx, block)
+						if fetchErr != nil {
+							log.Warn("[BackwardBeaconDownloader] root-fetched EMPTY confirmation failed, will retry", "slot", block.Block.Slot, "err", fetchErr)
+							return nil
+						}
+						if env != nil {
+							if err := ValidateFetchedEnvelope(b.beaconCfg, block, common.Hash(blockRoot), env); err != nil {
+								log.Warn("[BackwardBeaconDownloader] root-fetched envelope does not match block", "slot", block.Block.Slot, "err", err)
+								return nil
+							}
+							envelope = env
+							isFull = true
+						}
+					}
+					if envelope == nil && b.envelopesSkipped && !b.canTrackSkippedFullBlock(block) {
+						log.Warn("[BackwardBeaconDownloader] skipped envelope recovery queue is full, will retry", "slot", block.Block.Slot)
+						return nil
 					}
 				}
 
@@ -442,7 +465,7 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 				if err != nil {
 					log.Warn("Error processing root-fetched block", "err", err)
 				} else {
-					if isFull && envelope == nil {
+					if envelope == nil && (isFull || b.envelopesSkipped) {
 						b.skippedFullBlocks = append(b.skippedFullBlocks, SkippedFullBlock{Slot: block.Block.Slot, Root: blockRoot})
 					}
 					b.prevBatchTopBlock = block
@@ -726,25 +749,102 @@ func (b *BackwardBeaconDownloader) fetchGloasEnvelopes(ctx context.Context, resp
 		fullRootSet[common.Hash(r)] = struct{}{}
 	}
 
-	if len(fullRoots) == 0 {
+	if b.envelopesSkipped {
 		return nil, fullRootSet, knownRootSet
 	}
 
 	var envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
-	if b.httpPreferred.Load() && b.httpFallbackURL != "" {
-		envelopes = validateAndFetchMissingEnvelopes(ctx, b.httpFallbackURL, responses, fullRoots, nil, b.beaconCfg)
-	} else {
-		var err error
-		envelopes, err = RequestEnvelopesFrantically(ctx, b.rpc, fullRoots)
-		if err != nil {
-			log.Debug("[BackwardBeaconDownloader] failed to fetch GLOAS envelopes via P2P", "err", err)
+	if len(fullRoots) > 0 {
+		if b.httpPreferred.Load() && b.httpFallbackURL != "" {
+			envelopes = validateAndFetchMissingEnvelopes(ctx, b.httpFallbackURL, responses, fullRoots, nil, b.beaconCfg)
+		} else {
+			var err error
+			envelopes, err = RequestEnvelopesFrantically(ctx, b.rpc, fullRoots)
+			if err != nil {
+				log.Debug("[BackwardBeaconDownloader] failed to fetch GLOAS envelopes via P2P", "err", err)
+			}
+			envelopes = validateAndFetchMissingEnvelopes(ctx, b.httpFallbackURL, responses, fullRoots, envelopes, b.beaconCfg)
 		}
-		envelopes = validateAndFetchMissingEnvelopes(ctx, b.httpFallbackURL, responses, fullRoots, envelopes, b.beaconCfg)
+		b.recordEnvelopeFetchResult(len(fullRoots), len(envelopes))
 	}
 
-	b.recordEnvelopeFetchResult(len(fullRoots), len(envelopes))
+	inferredEmptyRoots := make(map[common.Hash]struct{}, len(knownRootSet)-len(fullRootSet))
+	for root := range knownRootSet {
+		if _, full := fullRootSet[root]; !full {
+			inferredEmptyRoots[root] = struct{}{}
+			delete(knownRootSet, root)
+		}
+	}
+	if len(inferredEmptyRoots) > 0 && b.httpFallbackURL != "" {
+		probed, confirmedEmpty := b.probeGloasEmptyCandidates(ctx, responses, inferredEmptyRoots)
+		if envelopes == nil && len(probed) > 0 {
+			envelopes = make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, len(probed))
+		}
+		for root, envelope := range probed {
+			envelopes[root] = envelope
+			fullRootSet[root] = struct{}{}
+			knownRootSet[root] = struct{}{}
+		}
+		for root := range confirmedEmpty {
+			knownRootSet[root] = struct{}{}
+		}
+	}
 
 	return envelopes, fullRootSet, knownRootSet
+}
+
+func (b *BackwardBeaconDownloader) probeGloasEmptyCandidates(ctx context.Context, blocks []*cltypes.SignedBeaconBlock, roots map[common.Hash]struct{}) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, map[common.Hash]struct{}) {
+	type result struct {
+		root      common.Hash
+		envelope  *cltypes.SignedExecutionPayloadEnvelope
+		confirmed bool
+	}
+	results := make(chan result, len(roots))
+	sem := make(chan struct{}, 8)
+	var wg sync.WaitGroup
+	for _, block := range blocks {
+		if block == nil || block.Block == nil || block.Block.Body == nil {
+			continue
+		}
+		root, err := block.Block.HashSSZ()
+		if err != nil {
+			continue
+		}
+		if _, ok := roots[common.Hash(root)]; !ok {
+			continue
+		}
+		wg.Go(func() {
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			envelope, err := b.fetchSingleEnvelope(ctx, block)
+			if err != nil {
+				results <- result{root: common.Hash(root)}
+				return
+			}
+			if envelope == nil {
+				results <- result{root: common.Hash(root), confirmed: true}
+				return
+			}
+			if ValidateFetchedEnvelope(b.beaconCfg, block, common.Hash(root), envelope) != nil {
+				results <- result{root: common.Hash(root)}
+				return
+			}
+			results <- result{root: common.Hash(root), envelope: envelope}
+		})
+	}
+	wg.Wait()
+	close(results)
+
+	envelopes := make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)
+	confirmedEmpty := make(map[common.Hash]struct{})
+	for result := range results {
+		if result.envelope != nil {
+			envelopes[result.root] = result.envelope
+		} else if result.confirmed {
+			confirmedEmpty[result.root] = struct{}{}
+		}
+	}
+	return envelopes, confirmedEmpty
 }
 
 func validateFetchedEnvelopes(beaconCfg *clparams.BeaconChainConfig, blocks []*cltypes.SignedBeaconBlock, envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope {
@@ -843,35 +943,57 @@ func (b *BackwardBeaconDownloader) RecoverSkippedEnvelopes(ctx context.Context, 
 		roots[i] = s.Root
 	}
 
-	envelopes := make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, len(roots))
+	sources := make([]func(context.Context) map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, 0, 2)
 	if b.httpFallbackURL != "" {
-		httpEnvelopes := make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, len(roots))
-		b.fetchSkippedEnvelopesFromBeaconAPI(ctx, skipped, httpEnvelopes)
-		for root, envelope := range httpEnvelopes {
-			if ValidateFetchedEnvelope(b.beaconCfg, blocks[root], root, envelope) == nil {
-				envelopes[root] = envelope
-			}
-		}
+		sources = append(sources, func(ctx context.Context) map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope {
+			envelopes := make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, len(roots))
+			b.fetchSkippedEnvelopesFromBeaconAPI(ctx, skipped, envelopes)
+			return validateRecoveryEnvelopes(b.beaconCfg, blocks, envelopes)
+		})
 	}
-	missingRoots := make([][32]byte, 0, len(roots)-len(envelopes))
-	for _, root := range roots {
-		if _, ok := envelopes[common.Hash(root)]; !ok {
-			missingRoots = append(missingRoots, root)
-		}
-	}
-	if b.rpc != nil && len(missingRoots) > 0 && ctx.Err() == nil {
-		var err error
-		p2pEnvelopes, err := RequestEnvelopesFrantically(ctx, b.rpc, missingRoots)
-		if err != nil {
-			log.Debug("[BackwardBeaconDownloader] envelope recovery: P2P failed", "err", err)
-		}
-		for root, envelope := range p2pEnvelopes {
-			if ValidateFetchedEnvelope(b.beaconCfg, blocks[root], root, envelope) == nil {
-				envelopes[root] = envelope
+	if b.rpc != nil {
+		sources = append(sources, func(ctx context.Context) map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope {
+			envelopes, err := RequestEnvelopesFrantically(ctx, b.rpc, roots)
+			if err != nil {
+				log.Debug("[BackwardBeaconDownloader] envelope recovery: P2P failed", "err", err)
 			}
-		}
+			return validateRecoveryEnvelopes(b.beaconCfg, blocks, envelopes)
+		})
 	}
 
+	fetched := fetchEnvelopeRecoverySources(ctx, sources...)
+	envelopes := make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, len(fetched))
+	for root, envelope := range fetched {
+		if ValidateFetchedEnvelope(b.beaconCfg, blocks[root], root, envelope) == nil {
+			envelopes[root] = envelope
+		}
+	}
+	return envelopes
+}
+
+func validateRecoveryEnvelopes(beaconCfg *clparams.BeaconChainConfig, blocks map[common.Hash]*cltypes.SignedBeaconBlock, envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope {
+	valid := make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, len(envelopes))
+	for root, envelope := range envelopes {
+		if ValidateFetchedEnvelope(beaconCfg, blocks[root], root, envelope) == nil {
+			valid[root] = envelope
+		}
+	}
+	return valid
+}
+
+func fetchEnvelopeRecoverySources(ctx context.Context, sources ...func(context.Context) map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope {
+	results := make(chan map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, len(sources))
+	var wg sync.WaitGroup
+	for _, source := range sources {
+		wg.Go(func() { results <- source(ctx) })
+	}
+	wg.Wait()
+	close(results)
+
+	envelopes := make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)
+	for result := range results {
+		maps.Copy(envelopes, result)
+	}
 	return envelopes
 }
 

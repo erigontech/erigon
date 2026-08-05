@@ -70,15 +70,17 @@ func TestForkGraphInDisk(t *testing.T) {
 
 func TestNewForkGraphDiskCachesAnchorStateRoot(t *testing.T) {
 	for _, tc := range []struct {
-		name       string
-		stateSlot  uint64
-		headerSlot uint64
-		headerRoot common.Hash
-		cachedRoot common.Hash
+		name         string
+		stateSlot    uint64
+		headerSlot   uint64
+		headerRoot   common.Hash
+		cachedRoot   common.Hash
+		expectedRoot common.Hash
 	}{
 		{name: "skipped slot", stateSlot: 64, headerSlot: 63, headerRoot: common.Hash{1}},
 		{name: "block slot", stateSlot: 64, headerSlot: 64},
 		{name: "legacy block slot", stateSlot: 64, headerSlot: 64, headerRoot: common.Hash{1}, cachedRoot: common.Hash{1}},
+		{name: "legacy block slot without cached root", stateSlot: 64, headerSlot: 64, headerRoot: common.Hash{2}, expectedRoot: common.Hash{2}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			anchorState := state.New(&clparams.MainnetBeaconConfig)
@@ -91,6 +93,8 @@ func TestNewForkGraphDiskCachesAnchorStateRoot(t *testing.T) {
 			if tc.cachedRoot != (common.Hash{}) {
 				expectedStateRoot = tc.cachedRoot
 				anchorState.SetPreviousStateRoot(tc.cachedRoot)
+			} else if tc.expectedRoot != (common.Hash{}) {
+				expectedStateRoot = tc.expectedRoot
 			}
 			anchorRoot, err := anchorState.BlockRoot()
 			require.NoError(t, err)

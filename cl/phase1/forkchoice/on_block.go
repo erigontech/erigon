@@ -334,6 +334,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 
 	// [New in Gloas:EIP7732] GLOAS-specific on_block logic (post state transition)
 	var appliedEnvelope *cltypes.ExecutionPayloadEnvelope
+	stateMayBeStale := false
 	if blockVersion >= clparams.GloasVersion {
 		// Initialize payload timeliness and data availability votes for this block
 		f.payloadTimelinessVote.Store(common.Hash(blockRoot), [clparams.PtcSize]int8{})
@@ -360,6 +361,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		if pending, ok := f.pendingLocalSelfBuildEnvelopes.Get(common.Hash(blockRoot)); ok {
 			f.pendingLocalSelfBuildEnvelopes.Remove(common.Hash(blockRoot))
 			log.Trace("OnBlock: processing pending local self-build envelope", "blockRoot", common.Hash(blockRoot))
+			stateMayBeStale = true
 			applied, applyErr := f.applyLocalSelfBuildEnvelopeLocked(ctx, pending)
 			if applyErr != nil {
 				log.Warn("OnBlock: failed to process pending local self-build envelope", "blockRoot", common.Hash(blockRoot), "err", applyErr)
@@ -372,12 +374,19 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			// Always validate payload with EL for pending envelopes, regardless of the caller's newPayload flag.
 			// During forward sync newPayload is false, but the envelope still needs to reach the EL;
 			// otherwise the EL never learns about this block and the chain stalls.
+			stateMayBeStale = true
 			applied, applyErr := f.applyEnvelopeLocked(ctx, pending, checkDataAvaiability, true)
 			if applyErr != nil {
 				log.Warn("OnBlock: failed to process pending envelope", "blockRoot", common.Hash(blockRoot), "err", applyErr)
 			} else if applied {
 				appliedEnvelope = pending.Message
 			}
+		}
+	}
+	if stateMayBeStale {
+		lastProcessedState, err = f.refreshBlockStateAfterPayloadValidation(common.Hash(blockRoot))
+		if err != nil {
+			return err
 		}
 	}
 	if lastProcessedState.Slot()%f.beaconCfg.SlotsPerEpoch == 0 {
@@ -492,6 +501,17 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	}
 
 	return nil
+}
+
+func (f *ForkChoiceStore) refreshBlockStateAfterPayloadValidation(blockRoot common.Hash) (*state.CachingBeaconState, error) {
+	blockState, err := f.forkGraph.GetState(blockRoot, false)
+	if err != nil {
+		return nil, fmt.Errorf("OnBlock: failed to refresh block state after payload validation: %w", err)
+	}
+	if blockState == nil {
+		return nil, fmt.Errorf("OnBlock: block state disappeared after payload validation for block %v", blockRoot)
+	}
+	return blockState, nil
 }
 
 func (f *ForkChoiceStore) addChainSegmentAndQueueLightClientEvents(block *cltypes.SignedBeaconBlock, fullValidation bool) (*state.CachingBeaconState, fork_graph.ChainSegmentInsertionResult, error) {
