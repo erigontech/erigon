@@ -244,6 +244,11 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 	tx, doms, err = pe.RunLoop(ctx, doms, tx, RunLoopConfig{
 		InitialCycle: true,
 		PruneFn: func(ctx context.Context, initialCycle bool, rwtx kv.TemporalRwTx, sd *execctx.SharedDomains) error {
+			if codeStore != nil {
+				if err := codeStore.Evict(rwtx); err != nil {
+					return err
+				}
+			}
 			return pe.sync.RunPrune(ctx, rwtx, initialCycle, 0)
 		},
 		CommitCycle: func(ctx context.Context, hasMore bool, sd *execctx.SharedDomains) (kv.TemporalRwTx, *execctx.SharedDomains, error) {
