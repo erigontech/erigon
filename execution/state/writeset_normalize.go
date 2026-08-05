@@ -34,7 +34,7 @@ var codePathRecoveryHashMismatch = metrics.GetOrCreateCounter("exec3_codepath_re
 
 // slowNormalizeThreshold is the debug-branch trigger for dumping write-set
 // geometry, so outlier shapes can be reproduced in the benchmark.
-const slowNormalizeThreshold = 100 * time.Millisecond
+const slowNormalizeThreshold = 50 * time.Millisecond
 
 // logSlowNormalize dumps the geometry of a write set whose Normalize ran long.
 // Everything it counts is walked only on the slow path.
