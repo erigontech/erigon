@@ -223,13 +223,24 @@ func (p *Provider) regenerateBoundaryStepFiles(
 			finalPath := boundaryRegenFinalPath(p.Aggregator, kvDomain, uint64(fileEntry.FromStep), stepSize, action, lastTxNum, oldPath)
 			regenPath := finalPath + ".regen"
 
-			// Commitment mode-C: emit the v4 file directly from the
-			// mode-C compute's captured branches rather than iterating
-			// the OLD file. Iterating the OLD file replays its stale
-			// post-lastTxN branch set (the 2026-06-03 subversion); the
-			// compute's branches are the authoritative trie state at
-			// lastTxNum, freshly folded from accounts/storage/code.
-			if kvDomain == kv.CommitmentDomain && action == actionRegenTruncate {
+			// Mode-C boundary regen dispatch:
+			//   - Commitment truncate → WriteCommitmentBoundaryFileV4 (uses the
+			//     compute's captured branches; iterating the OLD file would
+			//     replay its stale post-lastTxN branch set — the 2026-06-03
+			//     subversion).
+			//   - Non-commitment truncate → WriteStateBoundaryFileV4 (walks
+			//     HistoryKeyTxNumRange over the file's advertised window; the
+			//     prior iterate-OLD-file emit missed keys first-written in the
+			//     window that weren't in the OLD file, causing forward-exec of
+			//     the very-next block to SLOAD-empty and mis-price SSTOREs by
+			//     hundreds of KB of gas — leg P v7 iter 4 mode_b symptom).
+			//     ensureHistoryForUnwindWalk guarantees the domain's .v file
+			//     covers the window on disk under --prune.mode=minimal.
+			//   - In-place regen (actionRegenInPlace) → RegenerateBoundaryStepFile
+			//     (aligned target: OLD file is complete for the step, so
+			//     iterating it is correct).
+			switch {
+			case kvDomain == kv.CommitmentDomain && action == actionRegenTruncate:
 				if recompute.regenBranches == nil {
 					return nil, fmt.Errorf("regenerateBoundaryStepFiles: commitment truncate needs recompute.regenBranches (Apply must run first)")
 				}
@@ -239,7 +250,16 @@ func (p *Provider) regenerateBoundaryStepFiles(
 				); err != nil {
 					return nil, fmt.Errorf("emit v4 commitment file %s: %w", regenPath, err)
 				}
-			} else {
+			case action == actionRegenTruncate:
+				fromTxN := uint64(fileEntry.FromStep) * stepSize
+				walker := historyKeyWalker(tx, kvDomain, fromTxN, lastTxNum)
+				if err := WriteStateBoundaryFileV4(
+					ctx, kvDomain, walker, lookup, lastTxNum,
+					regenPath, p.snapTmpDir, compression, p.logger,
+				); err != nil {
+					return nil, fmt.Errorf("emit v4 %s file %s: %w", sd, regenPath, err)
+				}
+			default:
 				if err := RegenerateBoundaryStepFile(
 					ctx, kvDomain, oldPath, regenPath, lookup, lastTxNum,
 					compression, anchor, p.snapTmpDir, p.logger,
