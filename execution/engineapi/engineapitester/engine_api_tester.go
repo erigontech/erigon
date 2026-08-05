@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
@@ -411,6 +412,7 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 	if aggHolder, ok := ethBackend.ChainDB().(state.HasAgg); ok {
 		stateAgg, _ = aggHolder.Agg().(*state.Aggregator)
 	}
+	temporalDB, _ := ethBackend.ChainDB().(kv.TemporalRwDB)
 	success = true
 	return EngineApiTester{
 		GenesisBlock:         genesisBlock,
@@ -428,6 +430,7 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 		Node:                 ethNode,
 		NodeKey:              nodeKey,
 		StateAgg:             stateAgg,
+		ChainDB:              temporalDB,
 		cleanup:              cleanup,
 	}, nil
 }
@@ -462,6 +465,7 @@ type EngineApiTester struct {
 	Node                 *node.Node
 	NodeKey              *ecdsa.PrivateKey
 	StateAgg             *state.Aggregator
+	ChainDB              kv.TemporalRwDB
 	cleanup              *cleanupHandle
 }
 

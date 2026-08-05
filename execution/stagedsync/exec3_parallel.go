@@ -245,6 +245,31 @@ func (pe *parallelExecutor) clearChangesetAccumulator() {
 	pe.currentChangeSetBlock = 0
 }
 
+// bindBlockChangesetForFold routes the apply loop's block-end state fold into
+// block N's own changeset so unwind can revert account/storage/code, not just
+// commitment. Under splitApply the apply loop — not the exec loop — is the sole
+// sd.mem state writer, so the exec loop's accumulator (the CS it saved by hash)
+// stays empty unless the fold's DomainPuts record into it here. The committer
+// finds the same CS by hash and adds commitment; each DomainPut serializes on
+// changesetMu (held throughout by the committer's compute), so the accumulator
+// stays this block's CS across the fold. Returns a restore closure; a no-op if
+// the block has no saved changeset (outside the changeset window). Mirrors the
+// committer's computeWithBlockAccumulator.
+func (pe *parallelExecutor) bindBlockChangesetForFold(blockNum uint64, blockHash common.Hash) (restore func()) {
+	pe.domains().LockChangesetAccumulator()
+	defer pe.domains().UnlockChangesetAccumulator()
+	cs := pe.domains().GetChangesetByHash(blockNum, blockHash)
+	if cs == nil {
+		return func() {}
+	}
+	unswap := pe.domains().SwapChangesetAccumulatorLocked(cs)
+	return func() {
+		pe.domains().LockChangesetAccumulator()
+		unswap()
+		pe.domains().UnlockChangesetAccumulator()
+	}
+}
+
 func (pe *parallelExecutor) exec(ctx context.Context,
 	startBlockNum uint64, offsetFromBlockBeginning uint64, maxBlockNum uint64, blockLimit uint64,
 	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
@@ -788,6 +813,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 								}
 							}
 						} else {
+							restoreCS := pe.bindBlockChangesetForFold(applyResult.BlockNum, applyResult.BlockHash)
 							var applyErr error
 							for _, r := range splitApplyBuf {
 								if err := pe.rs.ApplyStateWrites(ctx, rwTx, r.blockNum, r.txNum, r.writes, nil, r.rules, nil); err != nil {
@@ -801,6 +827,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 									}
 								}
 							}
+							restoreCS()
 							splitApplyBuf = splitApplyBuf[:0]
 							if applyErr != nil {
 								failInfra(applyErr)
@@ -2047,6 +2074,20 @@ var revalIndex = dbg.EnvBool("REVAL_INDEX", false)
 // readers over an empty cache fall through to sd.mem N-1 and see in-block writes
 // via the IBS versionMap overlay — no reader change needed.
 var splitApply = dbg.EnvBool("SPLIT_APPLY", false)
+
+// SetSplitApplyStackForTest enables the parallel-execution gate stack that
+// splitApply builds on (selfLoop + depOrderVal + the raw-view/reval/prev-block
+// reads) at runtime and returns a restore closure. The gates are otherwise fixed
+// at package init from env vars; splitApply alone is not a valid configuration.
+// Test-only; not concurrency-safe (mutates package globals).
+func SetSplitApplyStackForTest() (restore func()) {
+	prev := [6]bool{splitApply, selfLoop, depOrderVal, rawViewCollapse, revalIndex, prevBlockReads}
+	splitApply, selfLoop, depOrderVal, rawViewCollapse, revalIndex, prevBlockReads = true, true, true, true, true, true
+	return func() {
+		splitApply, selfLoop, depOrderVal, rawViewCollapse, revalIndex, prevBlockReads =
+			prev[0], prev[1], prev[2], prev[3], prev[4], prev[5]
+	}
+}
 
 // discardApply is a PERF DIAGNOSTIC ONLY (produces incorrect state): it skips the
 // apply work (ApplyStateWrites + ApplyTxIndexes + block-end Flush) so the benchmark
