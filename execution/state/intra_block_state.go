@@ -155,7 +155,7 @@ type IntraBlockState struct {
 
 	txIndex  int
 	blockNum uint64
-	logs     logBuffer
+	logs     logArena
 
 	// Per-transaction access list
 	accessList accessList
@@ -451,7 +451,7 @@ func releaseResources(stateObjects map[accounts.Address]*stateObject, journal *j
 // AllocLog reserves the next log slot of the current tx and returns it sized for
 // numTopics/dataSize. The caller must write every topic and every data byte, then
 // call NotifyLog; whatever it leaves unwritten is the previous block's. The entry
-// is owned by the buffer and reused by later blocks, so it must never be handed
+// is owned by the arena and reused by later blocks, so it must never be handed
 // out without copying.
 func (sdb *IntraBlockState) AllocLog(addr common.Address, numTopics, dataSize int) *types.Log {
 	return sdb.logs.alloc(sdb.journal, addr, sdb.txIndex, numTopics, dataSize)
@@ -470,7 +470,7 @@ func (sdb *IntraBlockState) NotifyLog(lp *types.Log) {
 		fmt.Printf("%d (%d.%d) Log: Index:%d Account:%x Topics: %s Data:%x\n", sdb.blockNum, sdb.txIndex, sdb.version, lp.Index, lp.Address, topics, lp.Data)
 	}
 	if sdb.tracingHooks != nil && sdb.tracingHooks.OnLog != nil {
-		// The hook may retain the value; the buffer entry is reused by later blocks.
+		// The hook may retain the value; the arena entry is reused by later blocks.
 		sdb.tracingHooks.OnLog(lp.Copy())
 	}
 }
@@ -488,7 +488,7 @@ func (sdb *IntraBlockState) AddLog(log *types.Log) {
 }
 
 // GetLogs deep-copies the tx's logs, so the result is safe to hold after the
-// emit buffer is reused.
+// arena reuses the entry.
 func (sdb *IntraBlockState) GetLogs(txIndex int, txnHash common.Hash, blockNumber uint64, blockHash common.Hash) types.Logs {
 	logs := sdb.logs.forTx(txIndex).Copy()
 	for _, l := range logs {
@@ -506,12 +506,12 @@ func (sdb *IntraBlockState) GetRawLogs(txIndex int) types.Logs {
 }
 
 func (sdb *IntraBlockState) Logs() types.Logs {
-	return types.CopyLogGroups(sdb.logs.groups)
+	return types.CopyLogGroups(sdb.logs.byTx)
 }
 
 // LogsRlpHash is rlpHash of Logs, without building the flattened slice.
 func (sdb *IntraBlockState) LogsRlpHash() common.Hash {
-	return types.RlpHashLogs(sdb.logs.groups)
+	return types.RlpHashLogs(sdb.logs.byTx)
 }
 
 // AddRefund adds gas to the refund counter
@@ -2654,8 +2654,8 @@ func (sdb *IntraBlockState) Print(chainRules chain.Rules, all bool) {
 // transaction execution.
 func (sdb *IntraBlockState) SetTxContext(bn uint64, ti int) {
 	/* Not sure what this test is for it seems to break some tests
-	if len(sdb.logs.groups) > 0 && ti == 0 {
-		err := fmt.Errorf("seems you forgot `ibs.Reset` or `ibs.TxIndex()`. len(sdb.logs.groups)=%d, ti=%d", len(sdb.logs.groups), ti)
+	if len(sdb.logs.byTx) > 0 && ti == 0 {
+		err := fmt.Errorf("seems you forgot `ibs.Reset` or `ibs.TxIndex()`. len(sdb.logs.byTx)=%d, ti=%d", len(sdb.logs.byTx), ti)
 		panic(err)
 	}
 	if sdb.txIndex >= 0 && sdb.txIndex > ti {
