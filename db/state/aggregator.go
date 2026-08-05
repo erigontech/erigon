@@ -700,7 +700,9 @@ func (a *Aggregator) WaitForFiles() {
 }
 
 func (a *Aggregator) Close() {
+	a.dirtyFilesLock.Lock()
 	a.visibilityLoweringForbidden.Store(false) // shutdown is not a fill window
+	a.dirtyFilesLock.Unlock()
 	a.WaitForFiles()
 	if !a.background.BeginClose() { // idempotent: safe to call Close multiple times
 		return

@@ -235,6 +235,9 @@ func testEmbeddedRPCCacheViewDoesNotResurrectDeletedValue(t *testing.T, domain k
 
 	require.NoError(t, deleteDomains.Commit(ctx, deleteTx))
 	events.PublishOverlay(nil)
+	// The view outlives the overlay teardown on purpose: a production RPC view
+	// built during a background commit keeps reading after PublishOverlay(nil)
+	// and the SD's Close.
 	deleteDomains.Close()
 
 	oldValue, _, err := rpcTx.GetLatest(domain, key)
@@ -324,6 +327,7 @@ func TestEmbeddedRPCCacheViewDoesNotRefillCodeOfDeletedAccount(t *testing.T) {
 
 	require.NoError(t, deleteDomains.Commit(ctx, deleteTx))
 	events.PublishOverlay(nil)
+	// The view outlives the overlay teardown on purpose, as above.
 	deleteDomains.Close()
 
 	_, ok := stateCache.View(nil).Get(kv.CodeDomain, addr)

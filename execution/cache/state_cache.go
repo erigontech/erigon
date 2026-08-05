@@ -248,18 +248,21 @@ func (c *StateCache) fillIfFresh(domain kv.Domain, key []byte, value []byte, rea
 	if cache == nil {
 		return
 	}
-	c.admissionMu.RLock()
-	defer c.admissionMu.RUnlock()
-	if visibleEnd < c.appliedEnd[domain] {
-		return
-	}
+	// Clone outside the lock: a rejected fill wastes one copy (rare), but
+	// Apply's write lock never waits on a fill's memcpy.
+	cloned := bytes.Clone(value)
 	if len(value) == 0 {
 		readTxNum = 0
 		if visibleEnd > 0 {
 			readTxNum = visibleEnd - 1
 		}
 	}
-	cache.PutIfAbsent(key, bytes.Clone(value), readTxNum)
+	c.admissionMu.RLock()
+	defer c.admissionMu.RUnlock()
+	if visibleEnd < c.appliedEnd[domain] {
+		return
+	}
+	cache.PutIfAbsent(key, cloned, readTxNum)
 }
 
 // fillCodeIfFresh is fillIfFresh for the code domain. An addr-keyed code entry
@@ -273,12 +276,13 @@ func (c *StateCache) fillCodeIfFresh(key []byte, value []byte, readTxNum, visibl
 		return
 	}
 	codeHash := crypto.Keccak256(value)
+	cloned := bytes.Clone(value)
 	c.admissionMu.RLock()
 	defer c.admissionMu.RUnlock()
 	if visibleEnd < c.appliedEnd[kv.CodeDomain] || accountsVisibleEnd < c.appliedEnd[kv.AccountsDomain] {
 		return
 	}
-	codeCache.PutWithCodeHashIfAbsent(key, bytes.Clone(value), codeHash, readTxNum)
+	codeCache.PutWithCodeHashIfAbsent(key, cloned, codeHash, readTxNum)
 }
 
 // deleteKey removes the data for the given domain and key. Authoritative
@@ -293,6 +297,10 @@ func (c *StateCache) deleteKey(domain kv.Domain, key []byte) {
 
 // apply makes a committed domain update authoritative for subsequent fills.
 func (c *StateCache) apply(domain kv.Domain, key, value []byte, txNum uint64) {
+	cache := c.caches[domain]
+	if cache == nil {
+		return
+	}
 	var codeHash []byte
 	if domain == kv.CodeDomain && len(value) > 0 {
 		// Clone before hashing so the stored bytes and their codeHash cannot
@@ -303,10 +311,6 @@ func (c *StateCache) apply(domain kv.Domain, key, value []byte, txNum uint64) {
 
 	c.admissionMu.Lock()
 	defer c.admissionMu.Unlock()
-	cache := c.caches[domain]
-	if cache == nil {
-		return
-	}
 	c.noteApplied(domain, txNum)
 
 	switch domain {
