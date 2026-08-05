@@ -38,7 +38,7 @@ import (
 func writeIndex(writes *WriteSet) map[AccountKey]any {
 	idx := make(map[AccountKey]any)
 	for h := range writes.AllHeaders() {
-		idx[AccountKey{Path: h.Path, Key: h.Key}] = writeSetVal(writes, h)
+		idx[AccountKey{Path: h.Path, Key: h.Key}] = writeSetVal(writes, *h)
 	}
 	return idx
 }
@@ -48,7 +48,7 @@ func addrWriteIndex(writes *WriteSet, addr accounts.Address) map[AccountKey]any 
 	idx := make(map[AccountKey]any)
 	for h := range writes.AllHeaders() {
 		if h.Address == addr {
-			idx[AccountKey{Path: h.Path, Key: h.Key}] = writeSetVal(writes, h)
+			idx[AccountKey{Path: h.Path, Key: h.Key}] = writeSetVal(writes, *h)
 		}
 	}
 	return idx

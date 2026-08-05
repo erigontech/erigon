@@ -3335,7 +3335,7 @@ func (sdb *IntraBlockState) ApplyVersionedWrites(writes *WriteSet) error {
 	// same-address write already loaded it, which changes the EIP-7928 BAL hash.
 	headers := make([]WriteHeader, 0, writes.Count())
 	for h := range writes.AllHeaders() {
-		headers = append(headers, h)
+		headers = append(headers, *h)
 	}
 	sortWriteHeaders(headers)
 	for _, hdr := range headers {
