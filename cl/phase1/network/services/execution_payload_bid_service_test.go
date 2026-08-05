@@ -828,8 +828,8 @@ func TestExecutionPayloadBidServiceLoopProcessesQueuedBid(t *testing.T) {
 
 	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100)).AnyTimes()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
 	go service.pending.loop(ctx)
 
 	// No preferences yet → queued as pending
