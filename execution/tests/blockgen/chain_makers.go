@@ -296,11 +296,10 @@ func (b *BlockGen) GetReceipts() []*types.Receipt {
 var GenerateTrace bool
 
 type ChainPack struct {
-	Headers          []*types.Header
-	Blocks           []*types.Block
-	Receipts         []types.Receipts
-	TopBlock         *types.Block // Convenience field to access the last block
-	BlockAccessLists [][]byte     // RLP-encoded block access list bytes, indexed parallel to Blocks (nil entry = no BAL)
+	Headers  []*types.Header
+	Blocks   []*types.Block
+	Receipts []types.Receipts
+	TopBlock *types.Block // Convenience field to access the last block
 }
 
 func (cp *ChainPack) Length() int {
@@ -310,16 +309,12 @@ func (cp *ChainPack) Length() int {
 // OneBlock returns a ChainPack which contains just one
 // block with given index
 func (cp *ChainPack) Slice(i, j int) *ChainPack {
-	result := &ChainPack{
+	return &ChainPack{
 		Headers:  cp.Headers[i:j],
 		Blocks:   cp.Blocks[i:j],
 		Receipts: cp.Receipts[i:j],
 		TopBlock: cp.Blocks[j-1],
 	}
-	if len(cp.BlockAccessLists) > 0 {
-		result.BlockAccessLists = cp.BlockAccessLists[i:j]
-	}
-	return result
 }
 
 // Copy creates a deep copy of the ChainPack.
@@ -345,23 +340,11 @@ func (cp *ChainPack) Copy() *ChainPack {
 
 	topBlock := cp.TopBlock.Copy()
 
-	var blockAccessLists [][]byte
-	if len(cp.BlockAccessLists) > 0 {
-		blockAccessLists = make([][]byte, len(cp.BlockAccessLists))
-		for i, bal := range cp.BlockAccessLists {
-			if bal != nil {
-				blockAccessLists[i] = make([]byte, len(bal))
-				copy(blockAccessLists[i], bal)
-			}
-		}
-	}
-
 	return &ChainPack{
-		Headers:          headers,
-		Blocks:           blocks,
-		Receipts:         receipts,
-		TopBlock:         topBlock,
-		BlockAccessLists: blockAccessLists,
+		Headers:  headers,
+		Blocks:   blocks,
+		Receipts: receipts,
+		TopBlock: topBlock,
 	}
 }
 
@@ -465,7 +448,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		stateWriter.SetTxNum(txNum)
 	}
 	genblock := func(i int, parent *types.Block, ibs *state.IntraBlockState, stateReader state.StateReader,
-		stateWriter state.StateWriter) (*types.Block, types.Receipts, []byte, error) {
+		stateWriter state.StateWriter) (*types.Block, types.Receipts, error) {
 		txNumIncrement()
 
 		var versionMap *state.VersionMap
@@ -513,7 +496,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		if config.IsCancun(b.header.Time) {
 			var beaconBlockRoot common.Hash
 			if _, err := rand.Read(beaconBlockRoot[:]); err != nil {
-				return nil, nil, nil, fmt.Errorf("can't create beacon block root: %w", err)
+				return nil, nil, fmt.Errorf("can't create beacon block root: %w", err)
 			}
 			b.header.ParentBeaconBlockRoot = &beaconBlockRoot
 		}
@@ -525,7 +508,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			}
 			err := protocol.InitializeBlockExecution(b.engine, chainreader, b.header, config, ibs, nil, logger, nil)
 			if err != nil {
-				return nil, nil, nil, fmt.Errorf("call to InitializeBlockExecution: %w", err)
+				return nil, nil, fmt.Errorf("call to InitializeBlockExecution: %w", err)
 			}
 			// Record system call I/O into blockIO for BAL computation
 			if ibs.IsVersioned() && b.blockIO != nil {
@@ -565,7 +548,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			_, requests, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, b.withdrawals, chainreader, syscall, nil, logger)
 
 			if err != nil {
-				return nil, nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)
+				return nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)
 			}
 			// Record finalize system call I/O into blockIO for BAL computation
 			if ibs.IsVersioned() && b.blockIO != nil {
@@ -614,17 +597,17 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 					}
 					normalized, normErr := ws.Normalize(b.versionMap, i-1, 0, stateReader, domainStorageKeys, emptyRemoval, isAura, config.IsAmsterdam(b.header.Time))
 					if domainKeysErr != nil {
-						return nil, nil, nil, fmt.Errorf("iterate storage prefix for block write normalization: %w", domainKeysErr)
+						return nil, nil, fmt.Errorf("iterate storage prefix for block write normalization: %w", domainKeysErr)
 					}
 					if normErr != nil {
-						return nil, nil, nil, fmt.Errorf("normalize block writes: %w", normErr)
+						return nil, nil, fmt.Errorf("normalize block writes: %w", normErr)
 					}
 					if err := normalized.Apply(domains, tx, blockNum, txNum, nil, blockRules, nil, false); err != nil {
-						return nil, nil, nil, fmt.Errorf("apply versioned block writes: %w", err)
+						return nil, nil, fmt.Errorf("apply versioned block writes: %w", err)
 					}
 				}
 			} else if err := ibs.CommitBlock(blockRules, stateWriter); err != nil {
-				return nil, nil, nil, fmt.Errorf("call to CommitBlock to stateWriter: %w", err)
+				return nil, nil, fmt.Errorf("call to CommitBlock to stateWriter: %w", err)
 			}
 
 			if config.IsPrague(b.header.Time) {
@@ -640,29 +623,29 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 				var encErr error
 				balBytes, encErr = types.EncodeBlockAccessListBytes(bal)
 				if encErr != nil {
-					return nil, nil, nil, fmt.Errorf("encode block access list: %w", encErr)
+					return nil, nil, fmt.Errorf("encode block access list: %w", encErr)
 				}
 			}
 
 			stateRoot, err := domains.ComputeCommitment(ctx, tx, true, b.header.Number.Uint64(), uint64(txNum), "", nil)
 			if err != nil {
-				return nil, nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)
+				return nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)
 			}
 			b.header.Root = common.BytesToHash(stateRoot)
 			// Recreating block to make sure Root makes it into the header
 			block := types.NewBlockForAsembling(b.header, b.txs, b.uncles, b.receipts, b.withdrawals)
-			return block, b.receipts, balBytes, nil
+			block.SetBlockAccessList(balBytes)
+			return block, b.receipts, nil
 		}
-		return nil, nil, nil, errors.New("no engine to generate blocks")
+		return nil, nil, errors.New("no engine to generate blocks")
 	}
 
-	blockAccessLists := make([][]byte, n)
 	for i := range n {
 		ibs := state.New(stateReader)
 		if dbg.TraceBlock(uint64(i)) {
 			ibs.SetTrace(true)
 		}
-		block, receipt, balBytes, err := genblock(i, parent, ibs, stateReader, stateWriter)
+		block, receipt, err := genblock(i, parent, ibs, stateReader, stateWriter)
 		ibs.SetTrace(false)
 		if err != nil {
 			return nil, fmt.Errorf("generating block %d: %w", i, err)
@@ -670,11 +653,10 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		headers[i] = block.Header()
 		blocks[i] = block
 		receipts[i] = receipt
-		blockAccessLists[i] = balBytes
 		parent = block
 	}
 
-	return &ChainPack{Headers: headers, Blocks: blocks, Receipts: receipts, BlockAccessLists: blockAccessLists, TopBlock: blocks[n-1]}, nil
+	return &ChainPack{Headers: headers, Blocks: blocks, Receipts: receipts, TopBlock: blocks[n-1]}, nil
 }
 
 func makeHeader(chain rules.ChainReader, parent *types.Block, state *state.IntraBlockState, engine rules.Engine) *types.Header {
