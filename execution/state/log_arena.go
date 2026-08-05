@@ -172,15 +172,16 @@ func (a *logArena) revertLast(txIndex int) {
 	if txIndex+1 >= len(a.byTx) || len(a.byTx[txIndex+1]) == 0 {
 		panic(fmt.Sprintf("can't revert log index %v, max: %v", txIndex, len(a.byTx)-1))
 	}
-	txnLogs := a.byTx[txIndex+1]
+	ti := txIndex + 1
+	txnLogs := a.byTx[ti]
 	last := len(txnLogs) - 1
 	if lp := txnLogs[last]; lp != nil {
 		a.put(lp)
 		txnLogs[last] = nil
 	}
-	a.byTx[txIndex+1] = txnLogs[:last] // revert 1 log
-	if last == 0 {
-		a.byTx = a.byTx[:len(a.byTx)-1] // revert txn
+	a.byTx[ti] = txnLogs[:last] // revert 1 log
+	if last == 0 && ti+1 == len(a.byTx) {
+		a.byTx = a.byTx[:ti] // revert txn, only ever the last one
 	}
 	a.indexInBlock--
 }
