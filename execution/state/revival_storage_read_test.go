@@ -60,6 +60,32 @@ func TestStorageReadAcrossDestructThenRevivalValidates(t *testing.T) {
 		"the reader justified the zero by an in-range destruct; the validator must accept the same justification")
 }
 
+// The dep lives in its own map, so every read-set operation has to carry it like
+// the per-path maps do — a merge that drops it silently retires the check.
+func TestStorageReadRangeDepSurvivesMerge(t *testing.T) {
+	t.Parallel()
+	addr := getAddress(93)
+
+	var src ReadSet
+	src.SetSelfDestructInRange(addr, Version{TxIndex: 40, Incarnation: 1})
+	require.Equal(t, 1, src.Len(), "the dep is an entry and must be counted")
+
+	var dst ReadSet
+	dst.MergeFrom(src)
+	require.True(t, dst.hasAddr(addr))
+
+	vm := NewVersionMap(nil)
+	writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 41}, true, true)
+
+	io := NewVersionedIO(44)
+	io.RecordReads(Version{TxIndex: 43}, dst)
+	require.Equal(t, VersionInvalid, vm.ValidateVersion(43, io, validateEqualVersion, false, ""),
+		"the merged dep names a destruct at tx 40 that is not in the map")
+
+	dst.Delete(addr)
+	require.False(t, dst.hasAddr(addr))
+}
+
 // The guard the fix must not trade away: when the destruct the read depended on
 // is gone from the map, the read is genuinely stale and must still invalidate.
 func TestStorageReadInvalidatesWhenDependedDestructVanishes(t *testing.T) {

@@ -350,6 +350,9 @@ func (s *ReadSet) hasAddr(addr accounts.Address) bool {
 	if _, ok := s.selfDestruct[addr]; ok {
 		return true
 	}
+	if _, ok := s.selfDestructInRange[addr]; ok {
+		return true
+	}
 	if _, ok := s.createContract[addr]; ok {
 		return true
 	}
@@ -373,6 +376,7 @@ func (s *ReadSet) Delete(addr accounts.Address) {
 	delete(s.nonce, addr)
 	delete(s.incarnation, addr)
 	delete(s.selfDestruct, addr)
+	delete(s.selfDestructInRange, addr)
 	delete(s.createContract, addr)
 	delete(s.code, addr)
 	delete(s.codeHash, addr)
@@ -384,7 +388,7 @@ func (s *ReadSet) Delete(addr accounts.Address) {
 // can be called on a function-returned read set directly.
 func (s ReadSet) Len() int {
 	n := len(s.address) + len(s.balance) + len(s.nonce) + len(s.incarnation) +
-		len(s.selfDestruct) + len(s.createContract) +
+		len(s.selfDestruct) + len(s.selfDestructInRange) + len(s.createContract) +
 		len(s.code) + len(s.codeHash) + len(s.codeSize)
 	for _, inner := range s.storage {
 		n += len(inner)
@@ -408,6 +412,9 @@ func (s *ReadSet) mergeFrom(src ReadSet) {
 	}
 	for a, tr := range src.selfDestruct {
 		readSetPut(&s.selfDestruct, a, tr)
+	}
+	for a, ver := range src.selfDestructInRange {
+		s.SetSelfDestructInRange(a, ver)
 	}
 	for a, tr := range src.createContract {
 		readSetPut(&s.createContract, a, tr)
@@ -2942,6 +2949,11 @@ func HasReadDep(txFrom *WriteSet, txTo ReadSet) bool {
 	for h := range txFrom.AllHeaders() {
 		if _, ok := txTo.getHeader(h.Address, h.Path, h.Key); ok {
 			return true
+		}
+		if h.Path == SelfDestructPath {
+			if _, ok := txTo.selfDestructInRange[h.Address]; ok {
+				return true
+			}
 		}
 	}
 	return false
