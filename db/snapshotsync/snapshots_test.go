@@ -675,6 +675,7 @@ func TestCanRetire(t *testing.T) {
 		require.Equal(tc.can, can, tc.inFrom, tc.inTo, i)
 	}
 }
+
 func TestOpenAllSnapshot(t *testing.T) {
 	logger := log.New()
 	baseDir, require := t.TempDir(), require.New(t)
