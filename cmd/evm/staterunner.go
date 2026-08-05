@@ -231,7 +231,7 @@ func runStateTest(ctx *cli.Command, cfg vm.Config, fname string) ([]testResult, 
 				}
 				defer sd.Close()
 
-				statedb, root, err := test.Run(nil, sd, tx, st, cfg, dirs)
+				statedb, root, err := test.Run(nil, sd, tx, st, cfg)
 				if err != nil {
 					result.Pass, result.Error = false, err.Error()
 				}
@@ -247,7 +247,7 @@ func runStateTest(ctx *cli.Command, cfg vm.Config, fname string) ([]testResult, 
 				if bench {
 					// Reuse the subtest's tx+sd: a second concurrent rwtx on the same env would deadlock.
 					_, stats, _ := timedExec(true, func() ([]byte, uint64, error) {
-						_, _, gasUsed, _ := test.RunNoVerify(nil, sd, tx, st, cfg, dirs)
+						_, _, gasUsed, _ := test.RunNoVerify(nil, sd, tx, st, cfg)
 						return nil, gasUsed, nil
 					})
 					result.Stats = &stats
