@@ -70,7 +70,7 @@ or by exporting it in your shell. Forward the `30303`, `42069`, `4000` and `4001
 ports on your router as well, otherwise peers still cannot reach you.
 
 :::warning
-⚠️ **Action Required**: You must change the volume path! Replace `/path/to/erigon/data` with a valid, empty directory on your machine where you want Erigon to store its files.
+⚠️ **Action Required**: the volume path should be changed to suit your setup — replace `/path/to/erigon/data` with a valid, empty directory on your machine where you want Erigon to store its files.
 
 The container runs as UID/GID `1000`, so the directory must be writable by that
 user — `sudo chown -R 1000:1000 /path/to/erigon/data`. See
@@ -86,6 +86,16 @@ Open your terminal in the directory where you saved `docker-compose.yml`. To sta
 docker compose up
 ```
 
+That keeps the logs in the foreground, which is what you want the first time.
+Once you are happy with the configuration, start it detached so the node keeps
+running after you close the terminal:
+
+```bash
+docker compose up -d
+```
+
+and follow the logs when you need them with `docker compose logs -f`.
+
 ## Flag explanation
 
 * `--chain=mainnet` specifies to run on Ethereum mainnet
@@ -100,5 +110,43 @@ When you get familiar with running Erigon from CLI you may also consider [stakin
 :::tip
 Press `Ctrl+C` in your terminal to stop Erigon.
 :::
+
+## Host networking as an alternative
+
+Publishing each port individually is explicit, but Docker's NAT is also what
+makes `--nat=extip:...` necessary in the first place. Adding `network_mode:
+host` to the service instead gives the container the host's network stack
+directly, so peers see the host's own address and there is nothing to map:
+
+```yaml
+services:
+  erigon:
+    image: erigontech/erigon:v{ERIGON_VERSION}
+    network_mode: host
+    command:
+      - --chain=mainnet
+      - --datadir=/var/lib/erigon
+      # With host networking these bind on the host directly, so keep the
+      # local-only services on loopback rather than 0.0.0.0.
+      - --http.addr=127.0.0.1
+      - --http.api=eth,web3,net,debug,trace,txpool
+      - --authrpc.addr=127.0.0.1
+      - --private.api.addr=127.0.0.1:9090
+    volumes:
+      - /path/to/erigon/data:/var/lib/erigon
+```
+
+Two things change with it, and both matter:
+
+* the `ports:` section is ignored — port publishing does not apply, so the
+  firewall on the host is what governs access;
+* every listener binds on the host, so anything you do not want exposed must be
+  bound explicitly to `127.0.0.1`. That is why RPC, the Engine API and the
+  internal gRPC address are pinned to loopback above. `--nat` and `--caplin.nat`
+  are no longer needed for the container, though you still need the p2p ports
+  forwarded on your router.
+
+Host networking is Linux-only in practice; on Docker Desktop for macOS and
+Windows it does not behave the same way, so keep the published-ports form there.
 
 Additional flags can be added to [configure](/fundamentals/configuring-erigon/) Erigon with several options.
