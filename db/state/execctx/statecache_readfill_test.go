@@ -524,31 +524,39 @@ func TestSetStateCacheRequiresBoundAggregator(t *testing.T) {
 }
 
 // Apply-only mode must not pay for fills it will never make: the plain miss
-// path used to box a frontier only for the fill to no-op.
+// path used to box a frontier only for the fill to no-op. Asserted as a
+// difference against the cache-less read, so unrelated allocations elsewhere
+// in the read path cannot fail this test.
 func TestApplyOnlyMissPathBindsNoFrontier(t *testing.T) {
 	t.Setenv("STATE_CACHE_FILLS", "false")
 
 	ctx := t.Context()
 	db := newTestDb(t, 16)
-	rwTx, err := db.BeginTemporalRw(ctx)
-	require.NoError(t, err)
-	defer rwTx.Rollback()
-	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
-	require.NoError(t, err)
-	defer domains.Close()
-	stateCache := newSmallStateCache()
-	t.Cleanup(stateCache.Close)
-	domains.SetStateCacheForTest(stateCache)
 
-	missing := make([]byte, 20)
-	missing[0] = 7
-	allocs := testing.AllocsPerRun(100, func() {
-		v, _, err := domains.GetLatest(kv.AccountsDomain, rwTx, missing)
-		if err != nil || len(v) != 0 {
-			t.Fatalf("expected a clean negative read, got %x %v", v, err)
+	missAllocs := func(withCache bool) float64 {
+		rwTx, err := db.BeginTemporalRw(ctx)
+		require.NoError(t, err)
+		defer rwTx.Rollback()
+		domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+		require.NoError(t, err)
+		defer domains.Close()
+		if withCache {
+			stateCache := newSmallStateCache()
+			t.Cleanup(stateCache.Close)
+			domains.SetStateCacheForTest(stateCache)
 		}
-	})
-	require.Zero(t, allocs, "an apply-only cache must not bind a frontier on the miss path")
+		missing := make([]byte, 20)
+		missing[0] = 7
+		return testing.AllocsPerRun(100, func() {
+			v, _, err := domains.GetLatest(kv.AccountsDomain, rwTx, missing)
+			if err != nil || len(v) != 0 {
+				t.Fatalf("expected a clean negative read, got %x %v", v, err)
+			}
+		})
+	}
+
+	require.Equal(t, missAllocs(false), missAllocs(true),
+		"an apply-only cache must add no allocations to the miss path")
 }
 
 // An apply-only cache (STATE_CACHE_FILLS=false) has no fills for a lowered
