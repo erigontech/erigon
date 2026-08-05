@@ -146,16 +146,16 @@ func (a *logArena) reset() {
 	all := a.byTx[:cap(a.byTx)]
 	for i := a.filledLo; i < a.filledHi; i++ {
 		entries := all[i]
-		if cap(entries) > maxLogSlotsPerTx {
-			all[i] = nil // one outlier transaction must not leave its slots behind
-			continue
-		}
 		for j, lp := range entries {
 			if lp == nil {
 				continue
 			}
 			a.put(lp)
 			entries[j] = nil
+		}
+		if cap(entries) > maxLogSlotsPerTx {
+			all[i] = nil // an outlier transaction keeps its entries, not its slots
+			continue
 		}
 		all[i] = entries[:0]
 	}

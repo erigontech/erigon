@@ -389,6 +389,22 @@ func BenchmarkAddLog(b *testing.B) {
 
 var sinkLog *types.Log
 
+// One transaction spending MaxTxnGasLimit entirely on logs: the most an arena
+// can be asked to hold before it resets. Reports what survives the reset.
+func BenchmarkLogEmitWorstCaseTx(b *testing.B) {
+	ibs := New(nil)
+	b.ReportAllocs()
+	for b.Loop() {
+		ibs.SetTxContext(1, 0)
+		for range maxLogsPerTxn {
+			ibs.AllocLog(common.HexToAddress("0x1"), 0, 0)
+		}
+		ibs.Reset()
+	}
+	b.ReportMetric(float64(len(ibs.logs.pool)), "pooled")
+	b.ReportMetric(float64(ibs.logs.poolBytes)/1024, "poolKB")
+}
+
 // Blocks whose transactions each emit a 64KB log — the shape an attack sends.
 // The size is fixed rather than tied to a budget, so runs stay comparable when
 // the budgets move.
