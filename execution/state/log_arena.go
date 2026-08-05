@@ -32,8 +32,10 @@ import (
 // an RPC request spawns — sit at that mark, so the budget multiplies by them.
 //
 // A block cannot exceed gasLimit/8 bytes of log data (LogDataGas) or
-// gasLimit/375 entries (LogGas) — 5.6MB and 120k at a 45M limit. Both budgets
-// sit below that, so an outlier block is trimmed rather than held.
+// gasLimit/375 entries (LogGas) — 7.1MB and 160k at a 60M limit. EIP-7825 caps
+// one transaction at MaxTxnGasLimit, holding a single tx under 2MB and 44k
+// entries. Both budgets sit below the block ceiling: an outlier is trimmed, not
+// held.
 const (
 	maxReusableLogEntries = 16384
 	maxReusableLogBytes   = 4 * 1024 * 1024
