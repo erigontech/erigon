@@ -61,7 +61,10 @@ func TestApplierApplyAllMatchesPerKeyApply(t *testing.T) {
 		perKey.Applier().Apply(u.Domain, u.Key, u.Val, u.TxNum)
 	}
 	batched := applyAllTestCache(t)
-	batched.Applier().ApplyAll(append([]Update(nil), updates...))
+	batchedUpdates := append([]Update(nil), updates...)
+	batched.Applier().ApplyAll(batchedUpdates)
+	require.Same(t, unsafe.SliceData(updates[3].Val), unsafe.SliceData(batchedUpdates[3].Val),
+		"ApplyAll must not rewrite the caller's updates")
 
 	for name, c := range map[string]*StateCache{"per-key": perKey, "batched": batched} {
 		v, ok := c.View(nil).Get(kv.AccountsDomain, addr)

@@ -343,15 +343,16 @@ const applyChunkSize = 4096
 func (c *StateCache) applyAll(updates []Update) {
 	for start := 0; start < len(updates); start += applyChunkSize {
 		chunk := updates[start:min(start+applyChunkSize, len(updates))]
-		var codeHashes [][]byte
+		var codeVals, codeHashes [][]byte
 		for i := range chunk {
 			u := &chunk[i]
 			if u.Domain == kv.CodeDomain && len(u.Val) > 0 {
 				if codeHashes == nil {
+					codeVals = make([][]byte, len(chunk))
 					codeHashes = make([][]byte, len(chunk))
 				}
-				u.Val = bytes.Clone(u.Val)
-				codeHashes[i] = crypto.Keccak256(u.Val)
+				codeVals[i] = bytes.Clone(u.Val)
+				codeHashes[i] = crypto.Keccak256(codeVals[i])
 			}
 		}
 		c.admissionMu.Lock()
@@ -361,11 +362,11 @@ func (c *StateCache) applyAll(updates []Update) {
 			if cache == nil {
 				continue
 			}
-			var codeHash []byte
-			if codeHashes != nil {
-				codeHash = codeHashes[i]
+			val, codeHash := u.Val, []byte(nil)
+			if codeHashes != nil && codeHashes[i] != nil {
+				val, codeHash = codeVals[i], codeHashes[i]
 			}
-			c.applyLocked(cache, u.Domain, u.Key, u.Val, u.TxNum, codeHash)
+			c.applyLocked(cache, u.Domain, u.Key, val, u.TxNum, codeHash)
 		}
 		c.admissionMu.Unlock()
 	}
