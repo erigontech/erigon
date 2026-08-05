@@ -221,6 +221,47 @@ func TestResetLogsTotalsMatchRetained(t *testing.T) {
 	}
 }
 
+// Both budget paths recount what they keep, so the totals must still match the
+// buffers after an eviction and after a trim.
+func TestLogTotalsMatchRetainedPastBudget(t *testing.T) {
+	t.Parallel()
+
+	const dataSize = maxReusableLogDataCap + 1
+	ibs := New(nil)
+	for txIndex := range maxReusableLogBytes/dataSize + 4 {
+		ibs.SetTxContext(1, txIndex)
+		ibs.AllocLog(common.HexToAddress("0x1"), 0, dataSize)
+		ibs.Reset()
+	}
+	_, slotCap, dataBytes := retainedLogs(ibs)
+	require.Equal(t, slotCap, ibs.logs.reusableEntries, "after evicting oversized")
+	require.Equal(t, dataBytes, ibs.logs.reusableBytes, "after evicting oversized")
+
+	for txIndex := range maxReusableLogEntries {
+		ibs.SetTxContext(2, txIndex)
+		ibs.AllocLog(common.HexToAddress("0x2"), 0, 8)
+		ibs.Reset()
+	}
+	_, slotCap, dataBytes = retainedLogs(ibs)
+	require.Equal(t, slotCap, ibs.logs.reusableEntries, "after trim")
+	require.Equal(t, dataBytes, ibs.logs.reusableBytes, "after trim")
+	require.LessOrEqual(t, slotCap, maxReusableLogEntries)
+}
+
+// A buffer is queued for eviction when it grows past the cap, not when it is
+// used: reuse must not queue it again, or the queue grows by one every block.
+func TestOversizedLogIsQueuedOnce(t *testing.T) {
+	t.Parallel()
+
+	ibs := New(nil)
+	for blockNum := range 4 {
+		ibs.SetTxContext(uint64(blockNum+1), 0)
+		ibs.AllocLog(common.HexToAddress("0x1"), 0, maxReusableLogDataCap+1)
+		ibs.Reset()
+		require.Len(t, ibs.logs.oversized, 1, "block %d", blockNum)
+	}
+}
+
 func retainedLogs(ibs *IntraBlockState) (entries, slotCap, dataBytes int) {
 	for _, slot := range ibs.logs.byTx[:cap(ibs.logs.byTx)] {
 		slotCap += cap(slot)

@@ -25,10 +25,9 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-// Log entries outlive the block that emitted them, so what one arena keeps for
-// reuse must be capped in total: a burst of logs at a fresh tx index every block
-// would otherwise add a high-water-mark buffer per block, forever. The budget
-// holds any realistic block in full.
+// Entries outlive the block that emitted them, so what the arena keeps must be
+// capped: a burst of logs at a fresh tx index every block would otherwise add a
+// high-water mark per block, forever. The budget holds any realistic block.
 const (
 	maxReusableLogEntries = 4096
 	maxReusableLogBytes   = 4 * 1024 * 1024
@@ -37,34 +36,32 @@ const (
 
 // logArena owns a block's log entries and keeps them for the next block to
 // reuse. The executor resets once per transaction, so the budget is tracked as
-// entries are allocated rather than recomputed by a full scan, and reset walks
-// only the transactions that wrote.
+// entries are allocated, not rescanned.
 type logArena struct {
 	byTx               []types.Logs // by txIndex+1; index 0 is the pre-transaction system calls
 	filledLo, filledHi int          // transactions written since the last reset, as [lo, hi); hi == 0 means none
-	// What the entries retain for reuse, against the maxReusableLog budget.
-	// Overcounting is safe: it only pulls in a trim, which recounts.
+	// Against the maxReusableLog budget. Overcounting is safe: it only pulls in
+	// a trim, which recounts.
 	reusableEntries, reusableBytes int
-	oversized                      []logPos // entries that outgrew maxReusableLogDataCap, for reset to drop
+	oversized                      []logPos // buffers past maxReusableLogDataCap, newest last
 	indexInBlock                   uint
 }
 
-// logPos addresses one entry: its transaction, then its place in that
-// transaction. Entries never move, so a position stays valid until reset.
+// logPos addresses one entry. Entries never move, so it stays valid.
 type logPos struct{ ti, idx int }
 
-// alloc journals the allocation for revertLast, then reserves the next entry of
-// txIndex and returns it sized for numTopics/dataSize. The caller must write
-// every topic and every data byte; whatever it leaves unwritten is the previous
-// block's. The entry is owned by the arena and reused by later blocks, so it
-// must never be handed out without copying.
+// alloc journals the allocation for revertLast, then returns txIndex's next
+// entry sized for numTopics/dataSize. The caller must write every topic and data
+// byte; what it leaves unwritten is the previous block's. The arena owns the
+// entry, so it must never be handed out without copying.
 func (a *logArena) alloc(j *journal, addr common.Address, txIndex, numTopics, dataSize int) *types.Log {
 	j.addLogChange(txIndex)
 	ti := txIndex + 1
-	if len(a.byTx) <= ti {
-		a.byTx = slices.Grow(a.byTx, ti+1-len(a.byTx))[:ti+1]
-	}
 	byTx := a.byTx
+	if len(byTx) <= ti {
+		byTx = slices.Grow(byTx, ti+1-len(byTx))[:ti+1]
+		a.byTx = byTx
+	}
 	entries := byTx[ti]
 	logIdx, entriesCap := len(entries), cap(entries)
 	entries = slices.Grow(entries, 1)[:logIdx+1]
@@ -124,11 +121,10 @@ func (a *logArena) reset() {
 	a.filledLo, a.filledHi = 0, 0
 }
 
-// drainOversized frees Data that outgrew the per-entry cap until the arena is
-// back inside its budget, newest first. These go before anything else: one of
-// them holds as many bytes as hundreds of ordinary entries. Newest first because
-// transactions take their positions in order — freeing the oldest frees exactly
-// what the next block asks for first, and then nothing is ever reused.
+// drainOversized frees Data past the per-entry cap until the arena is back
+// inside its budget. It goes first because one such buffer holds as much as
+// hundreds of ordinary entries. Newest first: transactions take their positions
+// in order, so freeing the oldest frees what the next block asks for first.
 func (a *logArena) drainOversized(all []types.Logs) {
 	i := len(a.oversized) - 1
 	for ; i >= 0 && a.reusableBytes > maxReusableLogBytes; i-- {
@@ -144,7 +140,7 @@ func (a *logArena) drainOversized(all []types.Logs) {
 	a.oversized = a.oversized[:i+1]
 }
 
-// forget removes a position from the eviction queue, newest match first.
+// forget removes a position from the eviction queue.
 func (a *logArena) forget(p logPos) {
 	for i := len(a.oversized) - 1; i >= 0; i-- {
 		if a.oversized[i] == p {
@@ -185,8 +181,8 @@ func (a *logArena) trim() {
 }
 
 // revertLast drops the entry txIndex allocated last. Oversized Data goes with
-// it: behind the length it is reachable again only if the transaction re-emits
-// that many logs, so keeping it is retention without reuse.
+// it: behind the length, only a transaction re-emitting that many logs could
+// reach it again.
 func (a *logArena) revertLast(txIndex int) {
 	if txIndex+1 >= len(a.byTx) {
 		panic(fmt.Sprintf("can't revert log index %v, max: %v", txIndex, len(a.byTx)-1))
@@ -213,5 +209,5 @@ func (a *logArena) forTx(txIndex int) types.Logs {
 	return a.byTx[txIndex+1]
 }
 
-// release drops the entries, so they are no longer reused.
+// release drops the entries.
 func (a *logArena) release() { *a = logArena{} }
