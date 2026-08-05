@@ -21,6 +21,7 @@ import (
 	"math"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/c2h5oh/datasize"
 
@@ -61,7 +62,15 @@ type StateCache struct {
 	// admissionMu makes Apply's frontier advance + cache mutation atomic
 	// against concurrent read-fills, which recheck freshness under RLock.
 	admissionMu sync.RWMutex
-	appliedEnd  [kv.DomainLen]uint64
+	// appliedEnd is per domain, necessarily: a domain's frontier advances only
+	// on its own writes, so a single global applied end would reject every
+	// quiet domain's fills.
+	appliedEnd [kv.DomainLen]uint64
+	// fillsAdmitted/fillsRejected count admission-gate outcomes, reported by
+	// PrintStatsAndReset — the lens on how much reader warming survives at a
+	// given commit cadence.
+	fillsAdmitted atomic.Uint64
+	fillsRejected atomic.Uint64
 	// disableFills (STATE_CACHE_FILLS=false) turns off every reader fill
 	// (including the content-addressed ones), leaving applies as the only
 	// writer ("apply-only" mode) — an A/B lever and an operational kill switch.
@@ -260,8 +269,10 @@ func (c *StateCache) fillIfFresh(domain kv.Domain, key []byte, value []byte, rea
 	c.admissionMu.RLock()
 	defer c.admissionMu.RUnlock()
 	if visibleEnd < c.appliedEnd[domain] {
+		c.fillsRejected.Add(1)
 		return
 	}
+	c.fillsAdmitted.Add(1)
 	cache.PutIfAbsent(key, cloned, readTxNum)
 }
 
@@ -280,8 +291,10 @@ func (c *StateCache) fillCodeIfFresh(key []byte, value []byte, readTxNum, visibl
 	c.admissionMu.RLock()
 	defer c.admissionMu.RUnlock()
 	if visibleEnd < c.appliedEnd[kv.CodeDomain] || accountsVisibleEnd < c.appliedEnd[kv.AccountsDomain] {
+		c.fillsRejected.Add(1)
 		return
 	}
+	c.fillsAdmitted.Add(1)
 	codeCache.PutWithCodeHashIfAbsent(key, cloned, codeHash, readTxNum)
 }
 
@@ -311,6 +324,45 @@ func (c *StateCache) apply(domain kv.Domain, key, value []byte, txNum uint64) {
 
 	c.admissionMu.Lock()
 	defer c.admissionMu.Unlock()
+	c.applyLocked(cache, domain, key, value, txNum, codeHash)
+}
+
+// applyChunkSize bounds one exclusive critical section of applyAll, so a huge
+// batch apply never starves concurrent fills for its whole duration.
+const applyChunkSize = 4096
+
+func (c *StateCache) applyAll(updates []Update) {
+	for start := 0; start < len(updates); start += applyChunkSize {
+		chunk := updates[start:min(start+applyChunkSize, len(updates))]
+		var codeHashes [][]byte
+		for i := range chunk {
+			u := &chunk[i]
+			if u.Domain == kv.CodeDomain && len(u.Val) > 0 {
+				if codeHashes == nil {
+					codeHashes = make([][]byte, len(chunk))
+				}
+				u.Val = bytes.Clone(u.Val)
+				codeHashes[i] = crypto.Keccak256(u.Val)
+			}
+		}
+		c.admissionMu.Lock()
+		for i := range chunk {
+			u := &chunk[i]
+			cache := c.caches[u.Domain]
+			if cache == nil {
+				continue
+			}
+			var codeHash []byte
+			if codeHashes != nil {
+				codeHash = codeHashes[i]
+			}
+			c.applyLocked(cache, u.Domain, u.Key, u.Val, u.TxNum, codeHash)
+		}
+		c.admissionMu.Unlock()
+	}
+}
+
+func (c *StateCache) applyLocked(cache Cache, domain kv.Domain, key, value []byte, txNum uint64, codeHash []byte) {
 	c.noteApplied(domain, txNum)
 
 	switch domain {
@@ -412,6 +464,10 @@ func (c *StateCache) getCache(domain kv.Domain) Cache {
 func (c *StateCache) PrintStatsAndReset() {
 	if c == nil {
 		return
+	}
+	admitted, rejected := c.fillsAdmitted.Swap(0), c.fillsRejected.Swap(0)
+	if admitted+rejected > 0 {
+		log.Info("[cache] fill admission", "admitted", admitted, "rejected", rejected)
 	}
 	if acc, ok := c.caches[kv.AccountsDomain].(*DomainCache); ok {
 		acc.PrintStatsAndReset("Account")

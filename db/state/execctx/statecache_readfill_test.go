@@ -147,15 +147,44 @@ func TestReadFill_MemoizesWritableVisibleEndUntilFlush(t *testing.T) {
 	written[0] = 4
 	domains.SetTxNum(20)
 	require.NoError(t, domains.DomainPut(kv.AccountsDomain, rwTx, written, encAccount(2), 20, nil))
-	require.NoError(t, domains.Flush(ctx, rwTx))
 
-	missing := make([]byte, 20)
-	missing[0] = 5
-	value, _, err := domains.GetLatest(kv.AccountsDomain, rwTx, missing)
-	require.NoError(t, err)
-	require.Empty(t, value)
+	// The memo must re-derive inside Commit's validate window (after the
+	// internal flush, before the tx commits): reads here already see the
+	// advanced frontier.
+	require.NoError(t, domains.Commit(ctx, rwTx, func(kv.RwTx) error {
+		missing := make([]byte, 20)
+		missing[0] = 5
+		value, _, err := domains.GetLatest(kv.AccountsDomain, rwTx, missing)
+		require.NoError(t, err)
+		require.Empty(t, value)
+		return nil
+	}))
 	require.Equal(t, uint64(2), debug.calls)
 	require.Greater(t, debug.last, initialEnd)
+}
+
+// An SD with a state cache must route every flush through Commit: a plain
+// Flush neither applies nor invalidates, so the cache would keep serving
+// pre-flush values for the flushed keys forever.
+func TestFlushRejectsCacheAttachedSD(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	db := newTestDb(t, 16)
+
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	require.NoError(t, domains.Flush(ctx, rwTx), "cache-less SDs may flush and commit themselves")
+
+	stateCache := newSmallStateCache()
+	t.Cleanup(stateCache.Close)
+	domains.SetStateCacheForTest(stateCache)
+	require.Error(t, domains.Flush(ctx, rwTx))
 }
 
 // During an in-flight unwind the mem overlay bounds reads of an affected key
@@ -349,31 +378,65 @@ type fakeForbidder struct{ called bool }
 
 func (f *fakeForbidder) ForbidVisibilityLowering() { f.called = true }
 
-type fakeHasAgg struct{ f *fakeForbidder }
+// fakeTemporalDB satisfies kv.TemporalRwDB by embedding (the interface now
+// carries Agg, so a DB shape without it no longer compiles); only Agg is
+// implemented — the guard must not touch anything else.
+type fakeTemporalDB struct {
+	kv.TemporalRwDB
+	agg any
+}
 
-func (h fakeHasAgg) Agg() any { return h.f }
-
-type fakeHasBadAgg struct{}
-
-func (fakeHasBadAgg) Agg() any { return struct{}{} }
+func (d fakeTemporalDB) Agg() any { return d.agg }
 
 // The guard is load-bearing: for a fill-enabled cache it must either bind the
-// invariant or fail loudly — never silently drop it on a DB shape mismatch.
-// A nil or apply-only cache needs no guard at all.
+// invariant or fail loudly — never silently drop it. A nil or apply-only
+// cache needs no guard at all.
 func TestGuardAggregatorForCache(t *testing.T) {
 	sc := newSmallStateCache()
 	t.Cleanup(sc.Close)
 
 	f := &fakeForbidder{}
-	execctx.GuardAggregatorForCache(fakeHasAgg{f}, sc)
+	execctx.GuardAggregatorForCache(fakeTemporalDB{agg: f}, sc)
 	require.True(t, f.called)
 
-	require.NotPanics(t, func() { execctx.GuardAggregatorForCache(struct{}{}, nil) },
-		"no cache, no invariant to bind — shape is irrelevant")
-	require.Panics(t, func() { execctx.GuardAggregatorForCache(struct{}{}, sc) },
-		"a db that cannot produce its aggregator must fail loudly, not drop the guard")
-	require.Panics(t, func() { execctx.GuardAggregatorForCache(fakeHasBadAgg{}, sc) },
+	require.NotPanics(t, func() { execctx.GuardAggregatorForCache(fakeTemporalDB{}, nil) },
+		"no cache, no invariant to bind — the aggregator is never consulted")
+	require.Panics(t, func() { execctx.GuardAggregatorForCache(fakeTemporalDB{agg: struct{}{}}, sc) },
 		"an aggregator without ForbidVisibilityLowering must fail loudly, not drop the guard")
+}
+
+type nilDebugRwTx struct {
+	kv.TemporalRwTx
+}
+
+func (nilDebugRwTx) Debug() kv.TemporalDebugTx { return nil }
+
+// A tx without a debug backend (MemoryMutation over a nil db) has no exact
+// frontier: reads must still work and simply never fill.
+func TestReadFill_NilDebugTxSkipsFills(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	db := newTestDb(t, 16)
+
+	baseTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer baseTx.Rollback()
+	domains, err := execctx.NewSharedDomains(ctx, baseTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+	stateCache := newSmallStateCache()
+	t.Cleanup(stateCache.Close)
+	domains.SetStateCacheForTest(stateCache)
+
+	missing := make([]byte, 20)
+	missing[0] = 7
+	value, _, err := domains.GetLatest(kv.AccountsDomain, nilDebugRwTx{TemporalRwTx: baseTx}, missing)
+	require.NoError(t, err)
+	require.Empty(t, value)
+
+	_, ok := stateCache.View(nil).Get(kv.AccountsDomain, missing)
+	require.False(t, ok, "no exact frontier means no fill")
 }
 
 // An apply-only cache (STATE_CACHE_FILLS=false) has no fills for a lowered
@@ -384,6 +447,6 @@ func TestGuardAggregatorForCache_ApplyOnlySkips(t *testing.T) {
 	t.Cleanup(sc.Close)
 
 	f := &fakeForbidder{}
-	execctx.GuardAggregatorForCache(fakeHasAgg{f}, sc)
+	execctx.GuardAggregatorForCache(fakeTemporalDB{agg: f}, sc)
 	require.False(t, f.called)
 }

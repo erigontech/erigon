@@ -44,11 +44,8 @@ func (f FrontierFunc) DomainVisibleEnd(domain kv.Domain) (uint64, bool) { return
 // inert: reads miss, fills no-op.
 //
 // A ReadView does not isolate reads: the cache holds latest-applied state, so
-// a hit can be newer than the view — the same direction the exec overlay
-// already serves. In the forward direction the cache's invariant is
-// monotonicity (content never regresses behind the applied frontier),
-// enforced on the fill side; unwinds invalidate by epoch and floor.
-// Snapshot-isolated caching is kvcache's job (node/shards).
+// a hit can be newer than the view. Snapshot-isolated caching is kvcache's
+// job (node/shards).
 type ReadView struct {
 	c        *StateCache
 	frontier Frontier
@@ -109,9 +106,7 @@ func (v ReadView) CanFill() bool { return v.c != nil && v.frontier != nil }
 // Fill offers a value read from this view without replacing an authoritative
 // entry. Admission is checked against the view's frontier for the domain;
 // views without an exact frontier skip the fill. A code fill also checks the
-// accounts frontier: an addr-keyed code entry derives from the account — an
-// account deletion drops it without advancing the code frontier — so a view
-// that predates the deletion must not refill it (mirrors SeedAddrCodeHash).
+// accounts frontier — see fillCodeIfFresh for why.
 func (v ReadView) Fill(domain kv.Domain, key []byte, value []byte, readTxNum uint64) {
 	if v.c == nil || v.c.disableFills || v.frontier == nil {
 		return
@@ -173,6 +168,24 @@ func (a Applier) Apply(domain kv.Domain, key, value []byte, txNum uint64) {
 		return
 	}
 	a.c.apply(domain, key, value, txNum)
+}
+
+// Update is one authoritative committed tuple for ApplyAll.
+type Update struct {
+	Domain kv.Domain
+	Key    []byte
+	Val    []byte
+	TxNum  uint64
+}
+
+// ApplyAll is Apply over a batch: the write lock is taken once per chunk
+// instead of once per key, bounding how long concurrent fills wait. Code
+// values are cloned (and hashed) outside the lock.
+func (a Applier) ApplyAll(updates []Update) {
+	if a.c == nil {
+		return
+	}
+	a.c.applyAll(updates)
 }
 
 // Unwind invalidates, across all caches, entries reflecting state above

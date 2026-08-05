@@ -1317,6 +1317,8 @@ func (td temporaldb) BeginTemporalRwNosync(ctx context.Context) (kv.TemporalRwTx
 	return td.memoryMutation, nil
 }
 
+func (td temporaldb) Agg() any { return nil }
+
 func (td temporaldb) Debug() kv.TemporalDebugDB {
 	panic("not implemented")
 }
