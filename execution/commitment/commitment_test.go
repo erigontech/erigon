@@ -528,7 +528,7 @@ func TestBranchData_ReplacePlainKeys(t *testing.T) {
 
 	_, _, enc := encodeCellRow(t, 16)
 
-	original := common.Copy(enc)
+	original := bytes.Clone(enc)
 
 	target := make([]byte, 0, len(enc))
 	oldKeys := make([][]byte, 0)
@@ -552,7 +552,7 @@ func TestBranchData_ReplacePlainKeys(t *testing.T) {
 	require.EqualValues(t, original, replacedBack)
 
 	t.Run("merge replaced and original back", func(t *testing.T) {
-		orig := common.Copy(original)
+		orig := bytes.Clone(original)
 
 		merged, err := replaced.MergeHexBranches(original, nil)
 		require.NoError(t, err)
@@ -569,7 +569,7 @@ func TestBranchData_ReplacePlainKeys_WithEmpty(t *testing.T) {
 
 	_, _, enc := encodeCellRow(t, 16)
 
-	original := common.Copy(enc)
+	original := bytes.Clone(enc)
 
 	target := make([]byte, 0, len(enc))
 	oldKeys := make([][]byte, 0)
@@ -593,7 +593,7 @@ func TestBranchData_ReplacePlainKeys_WithEmpty(t *testing.T) {
 	require.EqualValues(t, original, replacedBack)
 
 	t.Run("merge replaced and original back", func(t *testing.T) {
-		orig := common.Copy(original)
+		orig := bytes.Clone(original)
 
 		merged, err := replaced.MergeHexBranches(original, nil)
 		require.NoError(t, err)
@@ -612,7 +612,7 @@ func TestBranchData_ReplacePlainKeys_PartialChange(t *testing.T) {
 
 	_, _, enc := encodeCellRow(t, 16)
 
-	original := common.Copy(enc)
+	original := bytes.Clone(enc)
 
 	// Collect original keys and shorten only account keys.
 	type keyRecord struct {
@@ -620,10 +620,10 @@ func TestBranchData_ReplacePlainKeys_PartialChange(t *testing.T) {
 		isStorage bool
 	}
 	var origKeys []keyRecord
-	replaced, err := BranchData(common.Copy(enc)).ReplacePlainKeys(
+	replaced, err := BranchData(bytes.Clone(enc)).ReplacePlainKeys(
 		make([]byte, 0, len(enc)),
 		func(key []byte, isStorage bool) ([]byte, error) {
-			origKeys = append(origKeys, keyRecord{common.Copy(key), isStorage})
+			origKeys = append(origKeys, keyRecord{bytes.Clone(key), isStorage})
 			if isStorage {
 				return nil, nil // keep original
 			}
@@ -769,7 +769,7 @@ func (r *recordingCtx) Branch(_ []byte) ([]byte, kv.Step, error) {
 }
 func (r *recordingCtx) PutBranch(prefix, data, prev []byte) error {
 	r.puts = append(r.puts, struct{ prefix, data, prev []byte }{
-		common.Copy(prefix), common.Copy(data), common.Copy(prev),
+		bytes.Clone(prefix), bytes.Clone(data), bytes.Clone(prev),
 	})
 	return nil
 }

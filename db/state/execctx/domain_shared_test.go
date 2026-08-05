@@ -71,7 +71,7 @@ func newTestDb(tb testing.TB, stepSize uint64) kv.TemporalRwDB {
 }
 
 func composite(k, k2 []byte) []byte {
-	return append(common.Copy(k), k2...)
+	return append(bytes.Clone(k), k2...)
 }
 
 func TestSharedDomain_Unwind(t *testing.T) {
@@ -1509,7 +1509,7 @@ func TestDomainPut_HistoryCorrectness(t *testing.T) {
 	domainCases := []domainCase{
 		{
 			domain:  kv.AccountsDomain,
-			makeKey: func() []byte { return common.Copy(addr) },
+			makeKey: func() []byte { return bytes.Clone(addr) },
 			makeVal: func(i int) []byte {
 				acc := accounts3.Account{
 					Nonce:    uint64(i),
@@ -1522,13 +1522,13 @@ func TestDomainPut_HistoryCorrectness(t *testing.T) {
 		},
 		{
 			domain:          kv.StorageDomain,
-			makeKey:         func() []byte { return common.Copy(storageKey) },
+			makeKey:         func() []byte { return bytes.Clone(storageKey) },
 			makeVal:         func(i int) []byte { return binary.BigEndian.AppendUint64(nil, uint64(i)) },
 			historyKeyTable: kv.TblStorageHistoryKeys,
 		},
 		{
 			domain:          kv.CodeDomain,
-			makeKey:         func() []byte { return common.Copy(addr) },
+			makeKey:         func() []byte { return bytes.Clone(addr) },
 			makeVal:         func(i int) []byte { return binary.BigEndian.AppendUint64(nil, uint64(i)) },
 			historyKeyTable: kv.TblCodeHistoryKeys,
 		},

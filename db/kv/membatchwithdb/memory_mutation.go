@@ -26,7 +26,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -835,8 +834,8 @@ func (m *MemoryMutation) Diff() (*MemoryDiff, error) {
 					return nil, err
 				}
 				memDiff.diff[t] = append(memDiff.diff[t], entry{
-					k: common.Copy(k),
-					v: common.Copy(v),
+					k: bytes.Clone(k),
+					v: bytes.Clone(v),
 				})
 			}
 		} else {
@@ -854,8 +853,8 @@ func (m *MemoryMutation) Diff() (*MemoryDiff, error) {
 					return nil, err
 				}
 				memDiff.diff[t] = append(memDiff.diff[t], entry{
-					k: common.Copy(k),
-					v: common.Copy(v),
+					k: bytes.Clone(k),
+					v: bytes.Clone(v),
 				})
 			}
 		}

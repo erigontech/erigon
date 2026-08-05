@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
@@ -54,7 +53,7 @@ type pathKey struct {
 
 func toPathKey(path []byte) pathKey {
 	// HexToCompact result may alias a reused buffer, so copy it.
-	return pathKey{path: path, key: common.Copy(nibbles.HexToCompact(path))}
+	return pathKey{path: path, key: bytes.Clone(nibbles.HexToCompact(path))}
 }
 
 // ContractTrunkPreloadParallel is the wave-BFS analogue of ContractTrunkPreload.
@@ -97,7 +96,7 @@ func NewContractTrunkPreloadParallel(contractHash []byte) (*ContractTrunkPreload
 	if len(contractHash) != 32 {
 		return nil, fmt.Errorf("NewContractTrunkPreloadParallel: contractHash must be 32 bytes, got %d", len(contractHash))
 	}
-	contractHashCopy := common.Copy(contractHash)
+	contractHashCopy := bytes.Clone(contractHash)
 	return &ContractTrunkPreloadParallel{
 		contractHash:    contractHashCopy,
 		frontier:        []pathKey{toPathKey(ContractNibbles(contractHashCopy))},
@@ -185,7 +184,7 @@ func (p *ContractTrunkPreloadParallel) Run(
 		// floor drops a preloaded pin before the cStep<=maxStep gate is consulted,
 		// so leaving step unset only keeps that gate trivially true for live pins.
 		cache.PinEntry(pk.key, v, 0, p.pinTxNum)
-		p.pinnedPrefixes = append(p.pinnedPrefixes, common.Copy(pk.key))
+		p.pinnedPrefixes = append(p.pinnedPrefixes, bytes.Clone(pk.key))
 		p.usedBytes += cost
 		p.pinned++
 		chunkPinned++

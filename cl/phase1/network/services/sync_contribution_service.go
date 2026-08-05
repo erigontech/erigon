@@ -385,7 +385,7 @@ func verifySyncContributionProofAggregatedSignature(s *state.CachingBeaconState,
 	subCommitteePubsKeys := make([][]byte, 0, len(subCommitteeKeys))
 	for i, key := range subCommitteeKeys {
 		if utils.IsBitOn(contribution.AggregationBits, i) {
-			subCommitteePubsKeys = append(subCommitteePubsKeys, common.Copy(key[:]))
+			subCommitteePubsKeys = append(subCommitteePubsKeys, bytes.Clone(key[:]))
 		}
 	}
 

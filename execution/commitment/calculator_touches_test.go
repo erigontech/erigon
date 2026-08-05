@@ -1,6 +1,7 @@
 package commitment
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -125,7 +126,7 @@ func TestTouchKey_AccountAndCodeShareKey(t *testing.T) {
 
 	addr := common.FromHex("c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2")
 	slot := common.FromHex("0000000000000000000000000000000000000000000000000000000000000004")
-	stgKey := append(common.Copy(addr), slot...)
+	stgKey := append(bytes.Clone(addr), slot...)
 
 	updates := NewUpdates(ModeUpdate, t.TempDir(), keyHasherNoop)
 	acc := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(100)}

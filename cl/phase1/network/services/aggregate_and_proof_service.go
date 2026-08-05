@@ -17,6 +17,7 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -40,7 +41,7 @@ import (
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
-	"github.com/erigontech/erigon/common"
+
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
@@ -462,7 +463,7 @@ func AggregateMessageSignature(
 			return err
 		}
 		pk := val.PublicKeyBytes()
-		pks = append(pks, common.Copy(pk))
+		pks = append(pks, bytes.Clone(pk))
 		return nil
 	}); err != nil {
 		return nil, nil, nil, err

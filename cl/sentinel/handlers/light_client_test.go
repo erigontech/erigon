@@ -252,7 +252,7 @@ func TestLightClientBootstrap(t *testing.T) {
 	}
 	require.NoError(t, err)
 
-	reqData := common.Copy(reqBuf.Bytes())
+	reqData := bytes.Clone(reqBuf.Bytes())
 	_, err = stream.Write(reqData)
 	require.NoError(t, err)
 
@@ -327,7 +327,7 @@ func TestLightClientUpdates(t *testing.T) {
 	}
 	require.NoError(t, err)
 
-	reqData := common.Copy(reqBuf.Bytes())
+	reqData := bytes.Clone(reqBuf.Bytes())
 	_, err = stream.Write(reqData)
 	require.NoError(t, err)
 
