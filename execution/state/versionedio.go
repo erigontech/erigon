@@ -1079,9 +1079,9 @@ func (s *WriteSet) Storages() iter.Seq2[accounts.Address, map[accounts.StorageKe
 	return maps.All(s.storage)
 }
 
-func eachWriteHeaderOf[T any](m map[accounts.Address]*VersionedWrite[T], yield func(WriteHeader) bool) bool {
+func eachWriteHeaderOf[T any](m map[accounts.Address]*VersionedWrite[T], yield func(*WriteHeader) bool) bool {
 	for _, vw := range m {
-		if !yield(vw.WriteHeader) {
+		if !yield(&vw.WriteHeader) {
 			return false
 		}
 	}
@@ -1090,8 +1090,11 @@ func eachWriteHeaderOf[T any](m map[accounts.Address]*VersionedWrite[T], yield f
 
 // AllHeaders visits the type-agnostic header of every write; the value is read
 // typed-by-path from the per-path maps, so nothing is erased to an interface.
-func (s *WriteSet) AllHeaders() iter.Seq[WriteHeader] {
-	return func(yield func(WriteHeader) bool) {
+//
+// The header is yielded by pointer, aliasing the write that holds it: read-only
+// for consumers, and never retained past the visit.
+func (s *WriteSet) AllHeaders() iter.Seq[*WriteHeader] {
+	return func(yield func(*WriteHeader) bool) {
 		if s == nil {
 			return
 		}
@@ -1108,7 +1111,7 @@ func (s *WriteSet) AllHeaders() iter.Seq[WriteHeader] {
 		}
 		for _, inner := range s.storage {
 			for _, vw := range inner {
-				if !yield(vw.WriteHeader) {
+				if !yield(&vw.WriteHeader) {
 					return
 				}
 			}
@@ -1976,7 +1979,7 @@ func (writes *WriteSet) HasNewWrite(cmpSet *WriteSet) bool {
 		return true
 	}
 	for h := range writes.AllHeaders() {
-		if !cmpSet.hasHeader(h) {
+		if !cmpSet.hasHeader(*h) {
 			return true
 		}
 	}
