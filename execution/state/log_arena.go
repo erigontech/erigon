@@ -23,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -31,27 +32,26 @@ import (
 // unit of work — a transaction for the executor and the trace workers, a block
 // for the assembler and the tooling, which reset once it is built.
 const (
-	// Entries kept for reuse, 168B struct + 8B pointer + 128B topics = 304B each,
-	// so 1024 of them is ~300KB. One transaction emits at most
-	// MaxTxnGasLimit/LogGas = 16777216/375 = 44739, but the pool never shrinks:
-	// sizing for that would park 44739*304B = 13MB in every arena that ever ran
-	// such a transaction. Mainnet peaks near 90 logs in one transaction.
-	maxPooledLogEntries = 1024
+	// What one transaction's gas can buy, under the EIP-7825 cap.
+	maxLogsPerTxn     = int(params.MaxTxnGasLimit / params.LogGas)     // 44739
+	maxLogBytesPerTxn = int(params.MaxTxnGasLimit / params.LogDataGas) // 2MB
 
-	// Data kept with those entries. One transaction emits at most
-	// MaxTxnGasLimit/LogDataGas = 16777216/8 = 2MB; mainnet blocks run under
-	// 128KB in total.
-	maxPooledLogBytes = 1024 * 1024
+	// The pool keeps a tenth of that, rounded to a power of two. At 168B struct
+	// + 8B pointer + 128B topics, 4096 entries is ~1.2MB, and it covers the p99
+	// block of 1706 logs, which the assembler pools in one go. The pool never
+	// shrinks, so sizing for maxLogsPerTxn would park 13MB in every arena.
+	maxPooledLogEntries = 1 << 12
+	maxPooledLogBytes   = maxLogBytesPerTxn / 2
 
-	// 1MB/8 = 128KB, so no entry may take more than an eighth of the Data. One
-	// large log would otherwise take the whole budget and starve the small
-	// entries real traffic is made of, while a cap far below it would throw away
-	// the reuse that makes a block of large logs cheap.
+	// No entry may take more than an eighth of the Data. One large log would
+	// otherwise take the whole budget and starve the small entries real traffic
+	// is made of, while a cap far below it would throw away the reuse that makes
+	// a block of large logs cheap.
 	maxPooledLogDataCap = maxPooledLogBytes / 8
 
-	// Slots one transaction may leave behind, 8B each: 4096 is 32KB of pointers
-	// against the 44739 an outlier could reach.
-	maxLogSlotsPerTx = 4096
+	// A transaction may not leave more slots behind than the pool holds entries:
+	// the pointers alone are retention.
+	maxLogSlotsPerTx = maxPooledLogEntries
 )
 
 // logArena owns a block's log entries and recycles them through a pool, so what
