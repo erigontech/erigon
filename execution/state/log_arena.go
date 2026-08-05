@@ -36,21 +36,18 @@ const (
 	maxLogsPerTxn     = int(params.MaxTxnGasLimit / params.LogGas)     // 44739
 	maxLogBytesPerTxn = int(params.MaxTxnGasLimit / params.LogDataGas) // 2MB
 
-	// The pool keeps a tenth of that: 4473 entries at 168B struct + 8B pointer +
-	// 128B topics is ~1.3MB, and it covers the p99 block of 1706 logs, which the
-	// assembler pools in one go. The pool never shrinks, so sizing for the whole
-	// maxLogsPerTxn would park 13MB in every arena.
+	// Fractions of those, because the pool never shrinks: the whole ceiling would
+	// park 13MB of entries per arena, while a tenth still holds the p99 block of
+	// 1706 logs that a caller resetting per block pools in one go.
 	maxPooledLogEntries = maxLogsPerTxn / 10
 	maxPooledLogBytes   = maxLogBytesPerTxn / 2
 
-	// No entry may take more than an eighth of the Data. One large log would
-	// otherwise take the whole budget and starve the small entries real traffic
-	// is made of, while a cap far below it would throw away the reuse that makes
-	// a block of large logs cheap.
+	// One large log must not take the whole budget and starve the small entries
+	// real traffic is made of, and a cap much lower would throw away the reuse
+	// that makes a block of large logs cheap.
 	maxPooledLogDataCap = maxPooledLogBytes / 8
 
-	// A transaction may not leave more slots behind than the pool holds entries:
-	// the pointers alone are retention.
+	// The pointers alone are retention.
 	maxLogSlotsPerTx = maxPooledLogEntries
 )
 
@@ -106,8 +103,7 @@ func (a *logArena) alloc(j *journal, addr common.Address, txIndex, numTopics, da
 	return lp
 }
 
-// take returns a pooled entry, keeping its Topics and Data for alloc to grow
-// into, or a fresh one when the pool is empty.
+// take returns a pooled entry, Topics and Data included for alloc to grow into.
 func (a *logArena) take() *types.Log {
 	n := len(a.pool) - 1
 	if n < 0 {
@@ -217,5 +213,4 @@ func (a *logArena) assertLive(ti int) {
 	}
 }
 
-// release drops the entries.
 func (a *logArena) release() { *a = logArena{} }
