@@ -187,6 +187,57 @@ func TestFlushRejectsCacheAttachedSD(t *testing.T) {
 	require.Error(t, domains.Flush(ctx, rwTx))
 }
 
+// The incoherence the Flush rejection prevents, end to end: after v1 is
+// committed (the cache holds it), flushing v2 through another cache-attached
+// SD and committing the tx would leave the cache serving v1 while MDBX holds
+// v2. The rejection fires at exactly that step; routing through Commit keeps
+// the cache coherent.
+func TestFlushRejectionPreventsStaleCachedReads(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	db := newTestDb(t, 16)
+	stateCache := newSmallStateCache()
+	t.Cleanup(stateCache.Close)
+
+	slot := make([]byte, 52)
+	slot[0] = 1
+	v1, v2 := []byte{1}, []byte{2}
+
+	tx1, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer tx1.Rollback()
+	sd1, err := execctx.NewSharedDomains(ctx, tx1, log.New())
+	require.NoError(t, err)
+	defer sd1.Close()
+	sd1.SetStateCacheForTest(stateCache)
+	sd1.SetTxNum(10)
+	require.NoError(t, sd1.DomainPut(kv.StorageDomain, tx1, slot, v1, 10, nil))
+	require.NoError(t, sd1.Commit(ctx, tx1))
+	sd1.Close()
+
+	got, ok := stateCache.View(nil).Get(kv.StorageDomain, slot)
+	require.True(t, ok)
+	require.Equal(t, v1, got)
+
+	tx2, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer tx2.Rollback()
+	sd2, err := execctx.NewSharedDomains(ctx, tx2, log.New())
+	require.NoError(t, err)
+	defer sd2.Close()
+	sd2.SetStateCacheForTest(stateCache)
+	sd2.SetTxNum(20)
+	require.NoError(t, sd2.DomainPut(kv.StorageDomain, tx2, slot, v2, 20, nil))
+	require.Error(t, sd2.Flush(ctx, tx2),
+		"the step that would split the cache (v1) from MDBX (v2) must be rejected")
+
+	require.NoError(t, sd2.Commit(ctx, tx2))
+	got, ok = stateCache.View(nil).Get(kv.StorageDomain, slot)
+	require.True(t, ok)
+	require.Equal(t, v2, got, "Commit keeps the cache coherent with MDBX")
+}
+
 // During an in-flight unwind the mem overlay bounds reads of an affected key
 // by maxStep while MDBX still holds the not-yet-deleted dying row inside that
 // bound. A cache hit legitimately below the unwind floor then diverges from
