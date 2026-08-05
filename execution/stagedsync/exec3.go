@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/bal/tempbal"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -538,8 +539,15 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 	}
 }
 
-func blockAccessListBytes(blockTx kv.Getter, block *types.Block, blockNum uint64) ([]byte, error) {
+func blockAccessListBytes(blockTx kv.Getter, block *types.Block, blockNum uint64, tempBAL *tempbal.Reader) ([]byte, error) {
 	data := block.BlockAccessList()
+	if len(data) == 0 && tempBAL != nil {
+		// Synthetic BALs generated for blocks whose headers carry none
+		// (--use-temp-bal). Bypasses the HasNonEmptyBAL header gate below.
+		if b, ok := tempBAL.Get(blockNum, block.Hash()); ok {
+			return b, nil
+		}
+	}
 	if len(data) == 0 && block.HeaderNoCopy().HasNonEmptyBAL() {
 		return rawdb.ReadBlockAccessListBytes(blockTx, block.Hash(), blockNum)
 	}
@@ -637,7 +645,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			// db.View() as it can deadlock with the stageloop's RW transaction when
 			// BlockOverlay is active. ProcessBAL still computes+validates the BAL
 			// from the write-set as the ultimate fallback.
-			data, err := blockAccessListBytes(blockTx, b, blockNum)
+			data, err := blockAccessListBytes(blockTx, b, blockNum, te.cfg.tempBALReader)
 			if err != nil {
 				return err
 			}

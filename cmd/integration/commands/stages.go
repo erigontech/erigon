@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
@@ -57,6 +58,7 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/stats"
+	"github.com/erigontech/erigon/execution/bal/tempbal"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/cache"
 	chain2 "github.com/erigontech/erigon/execution/chain"
@@ -324,6 +326,7 @@ func init() {
 	withPruneTo(cmdStageExec)
 	withTraceFlags(cmdStageExec)
 	withChainTipMode(cmdStageExec)
+	withTempBAL(cmdStageExec)
 	withErigondbDomainStepsInFrozenFile(cmdStageExec)
 	rootCmd.AddCommand(cmdStageExec)
 
@@ -673,11 +676,34 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	genesis := readGenesis(chain)
 	br, _ := blocksIO(db, logger)
 
+	if generateTempBAL && useTempBAL {
+		return errors.New("--generate-temp-bal and --use-temp-bal are mutually exclusive")
+	}
+
 	notifications := shards.NewNotifications(nil)
+	// Generating temp BALs requires the experimental-BAL exec path (pre-Amsterdam
+	// blocks otherwise skip BAL computation entirely).
 	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, notifications,
 		/*stateStream=*/ false,
 		/*badBlockHalt=*/ true,
-		dirs, br, genesis, syncCfg, false /*experimentalBAL*/, exec.NewBlockReadAheader())
+		dirs, br, genesis, syncCfg, generateTempBAL /*experimentalBAL*/, exec.NewBlockReadAheader())
+
+	if generateTempBAL {
+		w, err := tempbal.NewWriter(filepath.Join(dirs.DataDir, "temp-bal"))
+		if err != nil {
+			return err
+		}
+		defer w.Close()
+		cfg = cfg.WithTempBAL(w, nil)
+	}
+	if useTempBAL {
+		r, err := tempbal.OpenReader(filepath.Join(dirs.DataDir, "temp-bal"))
+		if err != nil {
+			return err
+		}
+		defer r.Close()
+		cfg = cfg.WithTempBAL(nil, r)
+	}
 
 	if unwind > 0 {
 		if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {

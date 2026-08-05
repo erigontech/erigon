@@ -753,7 +753,11 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 
 					isAmsterdam := pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime)
 					if isAmsterdam || pe.cfg.experimentalBAL {
-						err = bal.Process(rwTx, lastHeader, applyResult.TxIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger)
+						var sink bal.BALSink
+						if pe.cfg.tempBALWriter != nil {
+							sink = pe.cfg.tempBALWriter
+						}
+						err = bal.Process(rwTx, lastHeader, applyResult.TxIO, isAmsterdam, pe.cfg.experimentalBAL, sink, pe.cfg.dirs.DataDir, pe.logger)
 						if err != nil {
 							failInfra(err)
 							continue

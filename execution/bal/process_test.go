@@ -114,6 +114,55 @@ func TestCreateBALOrdering(t *testing.T) {
 	}
 }
 
+type recordingSink struct {
+	num   uint64
+	hash  common.Hash
+	bal   []byte
+	calls int
+}
+
+func (s *recordingSink) Append(num uint64, hash common.Hash, bal []byte) error {
+	s.num, s.hash, s.bal, s.calls = num, hash, bal, s.calls+1
+	return nil
+}
+
+// TestProcessPersistsTempBAL covers --generate-temp-bal: for a pre-Amsterdam
+// block (isEIP7928=false) with experimental BAL on, Process computes the BAL
+// and hands the encoded bytes to the sink, keyed by block number and hash.
+func TestProcessPersistsTempBAL(t *testing.T) {
+	addrA := accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000000001"))
+	io := state.NewVersionedIO(1)
+	writeSets := map[int]*state.WriteSet{}
+	addBalanceWrite(writeSets, 0, addrA, 99)
+	recordAll(io, map[int]state.ReadSet{}, writeSets)
+
+	header := &types.Header{Number: *uint256.NewInt(100)}
+	sink := &recordingSink{}
+
+	if err := balpkg.Process(nil, header, io, false /*isEIP7928*/, true /*experimental*/, sink, "", log.New()); err != nil {
+		t.Fatal(err)
+	}
+	if sink.calls != 1 {
+		t.Fatalf("sink.Append calls = %d, want 1", sink.calls)
+	}
+	if sink.num != 100 || sink.hash != header.Hash() {
+		t.Fatalf("sink got (%d,%s), want (100,%s)", sink.num, sink.hash, header.Hash())
+	}
+	decoded, err := types.DecodeBlockAccessListBytes(sink.bal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := balpkg.Create(100, io, "", log.New())
+	if decoded.Hash() != want.Hash() {
+		t.Fatalf("persisted BAL hash %s != computed %s", decoded.Hash(), want.Hash())
+	}
+
+	// A nil sink disables persistence without error.
+	if err := balpkg.Process(nil, header, io, false, true, nil, "", log.New()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func addStorageRead(readSets map[int]state.ReadSet, txIdx int, addr accounts.Address, slot accounts.StorageKey) {
 	addStorageReadVal(readSets, txIdx, addr, slot, *uint256.NewInt(0))
 }
