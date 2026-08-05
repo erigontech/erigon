@@ -68,7 +68,7 @@ func TestCallTraceOneByOne(t *testing.T) {
 	m := execmoduletester.New(t)
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, gen *blockgen.BlockGen) {
 		gen.SetCoinbase(common.Address{1})
-	})
+	}, m.PublishedSD())
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestCallTraceUnwind(t *testing.T) {
 	var err error
 	chainA, err = blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, gen *blockgen.BlockGen) {
 		gen.SetCoinbase(common.Address{1})
-	})
+	}, m.PublishedSD())
 	if err != nil {
 		t.Fatalf("generate chainA: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestCallTraceUnwind(t *testing.T) {
 		} else {
 			gen.SetCoinbase(common.Address{2})
 		}
-	})
+	}, m.PublishedSD())
 	if err != nil {
 		t.Fatalf("generate chainB: %v", err)
 	}
@@ -178,7 +178,7 @@ func TestFilterNoAddresses(t *testing.T) {
 	m := execmoduletester.New(t)
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, gen *blockgen.BlockGen) {
 		gen.SetCoinbase(common.Address{1})
-	})
+	}, m.PublishedSD())
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
 	}
@@ -230,7 +230,7 @@ func TestFilterAddressIntersection(t *testing.T) {
 			t.Fatal(err)
 		}
 		block.AddTx(txn)
-	})
+	}, m.PublishedSD())
 	require.NoError(t, err, "generate chain")
 
 	err = m.InsertChain(chain)

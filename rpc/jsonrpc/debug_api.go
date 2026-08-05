@@ -130,7 +130,7 @@ func (api *DebugAPIImpl) SetHead(ctx context.Context, number hexutil.Uint64) err
 	}
 	defer tx.Rollback()
 
-	currentHead, err := rpchelper.GetLatestBlockNumber(tx)
+	currentHead, err := rpchelper.GetLatestBlockNumber(api.filters.WithOverlay(tx))
 	if err != nil {
 		return err
 	}
@@ -247,7 +247,7 @@ func (api *DebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.Blo
 		if number == rpc.LatestBlockNumber {
 			var err error
 
-			blockNumber, err = stages.GetStageProgress(tx, stages.Execution)
+			blockNumber, err = stages.GetStageProgress(api.filters.WithOverlay(tx), stages.Execution)
 			if err != nil {
 				return state.IteratorDump{}, fmt.Errorf("last block has not found: %w", err)
 			}
@@ -314,7 +314,7 @@ func (api *DebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context, startN
 	}
 	defer tx.Rollback()
 
-	latestBlock, err := stages.GetStageProgress(tx, stages.Execution)
+	latestBlock, err := stages.GetStageProgress(api.filters.WithOverlay(tx), stages.Execution)
 	if err != nil {
 		return nil, err
 	}
@@ -516,7 +516,7 @@ func (api *DebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, startHas
 	}
 	defer tx.Rollback()
 
-	latestBlock, err := stages.GetStageProgress(tx, stages.Execution)
+	latestBlock, err := stages.GetStageProgress(api.filters.WithOverlay(tx), stages.Execution)
 	if err != nil {
 		return nil, err
 	}

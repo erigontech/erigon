@@ -319,7 +319,7 @@ func TestReplayTransaction(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newTraceApiForTest(m)
 	var txnHash common.Hash
-	if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
+	if err := m.OverlayDB().View(context.Background(), func(tx kv.Tx) error {
 		b, err := m.BlockReader.BlockByNumber(m.Ctx, tx, 6)
 		if err != nil {
 			return err
@@ -470,7 +470,7 @@ func TestOeTracer(t *testing.T) {
 // returns its binary encoding together with the sender and recipient addresses.
 func rawTxFromBlock(t *testing.T, m *execmoduletester.ExecModuleTester, blockNum uint64) (encoded []byte, from, to accounts.Address) {
 	t.Helper()
-	if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
+	if err := m.OverlayDB().View(context.Background(), func(tx kv.Tx) error {
 		b, err := m.BlockReader.BlockByNumber(m.Ctx, tx, blockNum)
 		if err != nil {
 			return err
@@ -713,7 +713,7 @@ func (c *baseFeeTestChain) mineBlock(t *testing.T, gen func(*blockgen.BlockGen))
 
 	chainB, err := blockgen.GenerateChain(c.m.ChainConfig, c.head, c.m.Engine, c.m.DB, 1, func(_ int, block *blockgen.BlockGen) {
 		gen(block)
-	})
+	}, c.m.PublishedSD())
 	require.NoError(t, err)
 	require.NoError(t, c.m.InsertChain(chainB))
 	c.head = chainB.TopBlock

@@ -90,7 +90,7 @@ func (api *GraphQLAPIImpl) GetLatestBlockNumber(ctx context.Context) (uint64, er
 		return 0, err
 	}
 	defer tx.Rollback()
-	return rpchelper.GetLatestBlockNumber(tx)
+	return rpchelper.GetLatestBlockNumber(api.filters.WithOverlay(tx))
 }
 
 func (api *GraphQLAPIImpl) GetBlockNumberForTx(ctx context.Context, hash common.Hash) (uint64, bool, error) {
@@ -391,7 +391,7 @@ func (api *GraphQLAPIImpl) Call(ctx context.Context, blockNumber rpc.BlockNumber
 	var tx kv.TemporalTx = roTx
 	if api.filters != nil {
 		if sd := api.filters.LatestSD(); sd != nil {
-			if overlayTx := sd.BlockOverlayTemporalTx(roTx); overlayTx != nil {
+			if overlayTx := sd.OverlayTemporalTx(roTx); overlayTx != nil {
 				tx = overlayTx
 			}
 		}

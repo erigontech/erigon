@@ -42,6 +42,13 @@ type DomainReader interface {
 	HistorySeek(name kv.Domain, k []byte, ts uint64) ([]byte, bool, error)
 }
 
+// domainLatestReader is the subset of SharedDomains needed for GetLatest/HasPrefix
+// reads from an OverlayTemporalReadView. Implemented by SharedDomains.
+type domainLatestReader interface {
+	GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte) ([]byte, kv.Step, error)
+	HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) ([]byte, []byte, bool, error)
+}
+
 type MemoryMutation struct {
 	// mu protects concurrent access to the mutation's maps and backing tx.
 	// Read methods (GetOne, Has) acquire RLock; write methods (Put, Delete,
@@ -1141,13 +1148,25 @@ func (v *OverlayTemporalReadView) Apply(_ context.Context, f func(tx kv.Tx) erro
 	return f(v)
 }
 
-// Temporal methods — delegate to the independent temporal tx.
+// Temporal methods — check the installed SD chain before the committed tx.
 
 func (v *OverlayTemporalReadView) GetLatest(name kv.Domain, k []byte) ([]byte, kv.Step, error) {
+	// The installed reader walks the whole generation chain and falls through to
+	// v.temporalTx itself, so its value and error are authoritative — a nil here
+	// is a genuine tombstone, not a cue to re-read the committed tx.
+	if dr, ok := v.MemoryMutation.DomainReader.(domainLatestReader); ok {
+		return dr.GetLatest(name, v.temporalTx, k)
+	}
 	return v.temporalTx.GetLatest(name, k)
 }
 
 func (v *OverlayTemporalReadView) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
+	// Authoritative for the same reason as GetLatest: the reader already honours
+	// parent-generation tombstones and the committed tx, so a false result must
+	// not be overridden by re-checking committed storage the overlay cleared.
+	if dr, ok := v.MemoryMutation.DomainReader.(domainLatestReader); ok {
+		return dr.HasPrefix(name, prefix, v.temporalTx)
+	}
 	return v.temporalTx.HasPrefix(name, prefix)
 }
 

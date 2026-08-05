@@ -55,7 +55,7 @@ func TestCallBlockParallelMatchesSequential(t *testing.T) {
 	const blockNum = uint64(6) // block 6 has 32 txs (case i=5 in test chain generation)
 	traceTypes := []string{TraceTypeTrace}
 
-	tx, err := m.DB.BeginTemporalRo(ctx)
+	tx, err := m.OverlayDB().BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 
@@ -212,7 +212,7 @@ func chainWithWithdrawal(t *testing.T, withdrawalAddr common.Address, withdrawal
 			Address:   withdrawalAddr,
 			Amount:    withdrawalGwei,
 		})
-	})
+	}, m.PublishedSD())
 	require.NoError(t, err)
 	err = m.InsertChain(generated)
 	require.NoError(t, err)
@@ -343,7 +343,7 @@ func TestReplayBlockTransactionsMultiWithdrawalSameAddr(t *testing.T) {
 	generated, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(_ int, b *blockgen.BlockGen) {
 		b.AddWithdrawal(&types.Withdrawal{Index: 0, Validator: 42, Address: withdrawalAddr, Amount: wd1Gwei})
 		b.AddWithdrawal(&types.Withdrawal{Index: 1, Validator: 43, Address: withdrawalAddr, Amount: wd2Gwei})
-	})
+	}, m.PublishedSD())
 	require.NoError(t, err)
 	err = m.InsertChain(generated)
 	require.NoError(t, err)
@@ -389,7 +389,7 @@ func TestReplayBlockTransactionsWithdrawalNewAddress(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec))
 	generated, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(_ int, b *blockgen.BlockGen) {
 		b.AddWithdrawal(&types.Withdrawal{Index: 0, Validator: 42, Address: newAddr, Amount: withdrawalGwei})
-	})
+	}, m.PublishedSD())
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(generated))
 
@@ -434,7 +434,7 @@ func TestReplayBlockTransactionsMultiWithdrawalNewAddress(t *testing.T) {
 	generated, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(_ int, b *blockgen.BlockGen) {
 		b.AddWithdrawal(&types.Withdrawal{Index: 0, Validator: 1, Address: newAddr, Amount: wd1Gwei})
 		b.AddWithdrawal(&types.Withdrawal{Index: 1, Validator: 2, Address: newAddr, Amount: wd2Gwei})
-	})
+	}, m.PublishedSD())
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(generated))
 

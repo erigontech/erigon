@@ -76,7 +76,7 @@ func TestUpdateForkChoiceBadBlockMidBatchThenRecovery(t *testing.T) {
 		)
 		require.NoError(t, err)
 		b.AddTx(tx)
-	})
+	}, m.PublishedSD())
 	require.NoError(t, err)
 	require.Len(t, chainPack.Blocks, chainLen)
 
@@ -153,6 +153,7 @@ func TestUpdateForkChoiceBadBlockMidBatchThenRecovery(t *testing.T) {
 	_, err = updateForkChoice(ctx, m.ExecModule, block13.Header())
 	require.NoError(t, err)
 
+	m.ExecModule.WaitCommitsDrained()
 	var acc accounts.Account
 	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 		v, _, err := tx.GetLatest(kv.AccountsDomain, senderAddr[:])
@@ -196,7 +197,7 @@ func TestUpdateForkChoiceBadBlockAtLongBatchTailThenRecovery(t *testing.T) {
 	}
 	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainLen+1, func(i int, b *blockgen.BlockGen) {
 		b.AddTx(mkTx(i, 1_000))
-	})
+	}, m.PublishedSD())
 	require.NoError(t, err)
 	require.NoError(t, insertValidateAndUfc1By1(ctx, m.ExecModule, chainPack.Blocks[:committedTo]))
 
@@ -243,6 +244,7 @@ func TestUpdateForkChoiceBadBlockAtLongBatchTailThenRecovery(t *testing.T) {
 	_, err = updateForkChoice(ctx, m.ExecModule, forkTip.Header())
 	require.NoError(t, err)
 
+	m.ExecModule.WaitCommitsDrained()
 	var acc accounts.Account
 	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 		v, _, err := tx.GetLatest(kv.AccountsDomain, senderAddr[:])

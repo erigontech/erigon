@@ -17,7 +17,8 @@ import (
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
-	"github.com/erigontech/erigon/execution/cache"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -34,13 +35,12 @@ type BlockReadAheader struct {
 	warming atomic.Bool // only one warmBody can run at a time
 	warmWg  sync.WaitGroup
 
-	// stateCache is the process-global state cache that SharedDomains.GetLatest
-	// consults on the EVM hot path. When set, warmBody routes its prefetches
-	// through a cache-populating getter so the same hashmap the EVM probes is
-	// pre-warmed. Without it, prefetches only warm OS page cache + RoTx
-	// cursors — disconnected from the cache layer the EVM actually reads.
-	// Mirrors reth's CachedReads / ExecutionCache "same hashmap" property.
-	stateCache *cache.StateCache
+	// publishedSD returns the latest published SharedDomains (the stable tip leaf).
+	// When set, warmBody prefetches through it so reads see in-flight tip state and
+	// the SD's own read-fill warms the process-global cache the EVM probes — keeping
+	// cache population an SD concern. A nil provider (or nil return) falls back to a
+	// raw read that does not touch the cache.
+	publishedSD func() *execctx.SharedDomains
 }
 
 func NewBlockReadAheader() *BlockReadAheader {
@@ -63,43 +63,30 @@ func NewBlockReadAheader() *BlockReadAheader {
 	}
 }
 
-// SetStateCache wires the process-global state cache so warmBody's
-// prefetches land in the same hashmap that SharedDomains.GetLatest probes
-// on the EVM hot path. Without this, prefetches warm OS page cache only —
-// the EVM still pays the file accessor stack on its first per-address read.
-// Idempotent; safe to call before the first AddHeaderAndBody.
-func (bra *BlockReadAheader) SetStateCache(sc *cache.StateCache) {
-	bra.stateCache = sc
+// SetPublishedSD wires the published-SharedDomains provider so warmBody
+// prefetches read through the in-flight tip state and the SD's read-fill warms
+// the process-global cache the EVM probes. Idempotent; safe to call before the
+// first AddHeaderAndBody.
+func (bra *BlockReadAheader) SetPublishedSD(provider func() *execctx.SharedDomains) {
+	bra.publishedSD = provider
 }
 
-// cachePopulatingGetter wraps a kv.TemporalGetter and fills a StateCache
-// ReadView as a side effect. Used by warmBody to make read-ahead prefetches
-// populate the same in-process cache layer that SharedDomains.GetLatest
-// consults — eliminating the file-accessor stack cost on the EVM's first
-// touch of any prefetched address.
-//
-// Code reads also populate the content-addressed and size-cache layers.
-type cachePopulatingGetter struct {
-	kv.TemporalGetter
-	view     cache.ReadView
-	stepSize uint64 // for the read txNum upper bound (last txNum of the read's step)
-}
-
-func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache) kv.TemporalGetter {
-	if sc == nil {
-		return ttx
+// warmView opens a per-goroutine read view for prefetching. A prefetch is a
+// fire-and-forget warmer, so it takes a plain (uncoordinated) RO snapshot — no
+// foreground-mutex traffic on the tip path. With a published SD it reads through
+// it (in-flight tip state, and the SD's own read-fill warms the process-global
+// cache); without one it reads the raw tx and populates nothing. A throwaway
+// per-worker metrics accumulator keeps concurrent workers off the SD's shared
+// request metrics.
+func warmView(ctx context.Context, tdb kv.TemporalRoDB, sd *execctx.SharedDomains) (kv.TemporalTx, kv.TemporalGetter, error) {
+	ttx, err := tdb.BeginTemporalRo(ctx) //nolint:gocritic // tx is returned to the caller, which defers Rollback
+	if err != nil {
+		return nil, nil, err
 	}
-	debug := ttx.Debug()
-	return &cachePopulatingGetter{TemporalGetter: ttx, view: sc.View(debug), stepSize: debug.StepSize()}
-}
-
-func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte) ([]byte, kv.Step, error) {
-	v, step, err := cpg.TemporalGetter.GetLatest(name, k)
-	if err == nil {
-		readTxNum := (uint64(step)+1)*cpg.stepSize - 1
-		cpg.view.Fill(name, k, v, readTxNum)
+	if sd != nil {
+		return ttx, sd.AsGetterMetered(ttx, kvmetrics.NewDomainMetrics()), nil
 	}
-	return v, step, err
+	return ttx, ttx, nil
 }
 
 func (bra *BlockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, header *types.Header, body *types.Body) {
@@ -154,16 +141,36 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 		workers = 1
 	}
 
+	tdb, ok := db.(kv.TemporalRoDB)
+	if !ok {
+		return
+	}
+	// Capture the published tip leaf once; all workers share it (concurrent reads
+	// are safe on the stable published SD) and each opens its own read tx. SetHead
+	// drains in-flight warmup before closing generations, so the captured leaf
+	// can't be closed out from under a worker.
+	var sd *execctx.SharedDomains
+	if bra.publishedSD != nil {
+		sd = bra.publishedSD()
+	}
+
 	var wg errgroup.Group
 
-	// If BAL exists in DB, use BAL warming (more complete)
+	// If a BAL exists, use it (more complete). Read it through the SD's block
+	// overlay so an in-flight tip BAL is visible before its commit lands.
 	var bal types.BlockAccessList
-	if header != nil && db != nil {
-		tx, err := db.BeginRo(ctx)
+	if header != nil {
+		btx, err := tdb.BeginTemporalRo(ctx)
 		if err != nil {
 			log.Warn("[warmBody] failed to open tx for BAL", "blockNum", header.Number.Uint64(), "blockHash", header.Hash(), "err", err)
 		} else {
-			data, err := tx.GetOne(kv.BlockAccessList, dbutils.BlockBodyKey(header.Number.Uint64(), header.Hash()))
+			var balSrc kv.TemporalTx = btx
+			if sd != nil {
+				if ov := sd.OverlayTemporalTx(btx); ov != nil {
+					balSrc = ov
+				}
+			}
+			data, err := balSrc.GetOne(kv.BlockAccessList, dbutils.BlockBodyKey(header.Number.Uint64(), header.Hash()))
 			if err != nil {
 				log.Warn("[warmBody] failed to read BAL", "blockNum", header.Number.Uint64(), "blockHash", header.Hash(), "err", err)
 			} else if len(data) > 0 {
@@ -172,7 +179,7 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 					log.Warn("[warmBody] failed to decode BAL", "blockNum", header.Number.Uint64(), "blockHash", header.Hash(), "err", err)
 				}
 			}
-			tx.Rollback()
+			btx.Rollback()
 		}
 	}
 
@@ -194,17 +201,12 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 			workerStart, workerEnd, workerID := start, end, w
 			wg.Go(func() error {
 				startTime := time.Now()
-				tx, err := db.BeginRo(ctx)
+				ttx, getter, err := warmView(ctx, tdb, sd)
 				if err != nil {
 					return err
 				}
-				defer tx.Rollback()
-
-				ttx, ok := tx.(kv.TemporalTx)
-				if !ok {
-					return nil
-				}
-				stateReader := state.NewReaderV3(readAheadGetter(ttx, bra.stateCache))
+				defer ttx.Rollback()
+				stateReader := state.NewReaderV3(getter)
 
 				for idx := workerStart; idx < workerEnd; idx++ {
 					select {
@@ -260,17 +262,12 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 		workerStart, workerEnd, workerID := start, end, w
 		wg.Go(func() error {
 			startTime := time.Now()
-			tx, err := db.BeginRo(ctx)
+			ttx, getter, err := warmView(ctx, tdb, sd)
 			if err != nil {
 				return err
 			}
-			defer tx.Rollback()
-
-			ttx, ok := tx.(kv.TemporalTx)
-			if !ok {
-				return nil
-			}
-			stateReader := state.NewReaderV3(readAheadGetter(ttx, bra.stateCache))
+			defer ttx.Rollback()
+			stateReader := state.NewReaderV3(getter)
 
 			for txIdx := workerStart; txIdx < workerEnd; txIdx++ {
 				select {

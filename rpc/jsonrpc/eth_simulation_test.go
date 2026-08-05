@@ -525,7 +525,7 @@ func TestSimulationRequestTypes(t *testing.T) {
 
 func TestSimulateV1PopulatesMaxUsedGas(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	api := newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), nil, nil)
 
 	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	to := common.HexToAddress("0x0000000000000000000000000000000000000001")

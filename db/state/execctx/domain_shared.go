@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -34,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -227,6 +229,14 @@ type SharedDomains struct {
 	// mem batch before consulting the underlying tx. Used by the block builder
 	// to read from the FCU's published SD without writing to it.
 	parent *SharedDomains
+
+	// readCoordinator, when set, opens a base RO tx coordinated with the
+	// background-commit generation set: opened while holding the commit mutex so
+	// the tx's committed snapshot reflects every generation the parent chain has
+	// dropped as committed. Readers that need an underlying-DB base call
+	// BeginCoordinatedRo instead of opening an ad-hoc BeginTemporalRo, so a datum
+	// is always in the mem chain or this tx — never neither.
+	readCoordinator func(context.Context) (kv.TemporalTx, error)
 
 	// stateCache is an optional cache for state data (accounts, storage, code);
 	// cacheApplier is its authoritative writer handle (commit/unwind only).
@@ -793,7 +803,29 @@ func (sd *SharedDomains) InMemHistoryReads() bool          { return sd.mem.InMem
 // SetParent sets a parent SD for read-through domain chaining. Domain reads
 // that miss in the local mem batch will check the parent's mem batch before
 // falling through to the underlying tx/aggregator.
-func (sd *SharedDomains) SetParent(parent *SharedDomains) { sd.parent = parent }
+func (sd *SharedDomains) SetParent(parent *SharedDomains) {
+	sd.parent = parent
+	// Inherit the parent's read coordinator so a child SD built for a read pass
+	// opens coordinated base txns without the caller re-wiring it.
+	if parent != nil && sd.readCoordinator == nil {
+		sd.readCoordinator = parent.readCoordinator
+	}
+}
+
+// SetReadCoordinator wires the coordinated base-tx opener (see readCoordinator).
+func (sd *SharedDomains) SetReadCoordinator(fn func(context.Context) (kv.TemporalTx, error)) {
+	sd.readCoordinator = fn
+}
+
+// BeginCoordinatedRo opens a base RO tx coordinated with the generation set (see
+// readCoordinator). Falls back to a plain tx from db when no coordinator is set
+// (non-bg-commit setups), so callers can use it unconditionally.
+func (sd *SharedDomains) BeginCoordinatedRo(ctx context.Context, db kv.TemporalRoDB) (kv.TemporalTx, error) {
+	if sd.readCoordinator != nil {
+		return sd.readCoordinator(ctx)
+	}
+	return db.BeginTemporalRo(ctx)
+}
 
 // BlockOverlay returns the in-memory overlay for block-level metadata (headers, bodies,
 // canonical hashes, TD, stage progress, forkchoice markers). Callers can use this
@@ -807,15 +839,29 @@ func (sd *SharedDomains) CloseBlockOverlay() {
 	}
 }
 
-// BlockOverlayTemporalTx returns a read-only temporal view of the block overlay.
-// This allows consumers (RPC, shutter) to read uncommitted block data with
+// OverlayTemporalTx returns a read-only temporal view of the overlay. This
+// allows consumers (RPC, shutter) to read uncommitted overlay data with
 // temporal (state history) support. Returns nil if no overlay is active.
-func (sd *SharedDomains) BlockOverlayTemporalTx(roTx kv.TemporalTx) kv.TemporalTx {
+func (sd *SharedDomains) OverlayTemporalTx(roTx kv.TemporalTx) kv.TemporalTx {
+	// Chain the read view through the parent generations' block overlays, oldest
+	// ancestor first, bottoming out at roTx — NewTemporalReadView rebinds the
+	// fallthrough base, so the ancestor chain must be built explicitly here. This
+	// mirrors the domain-mem parent chain: block data written by an uncommitted
+	// ancestor generation stays visible until its commit lands.
+	base := roTx
+	if sd.parent != nil {
+		if pv := sd.parent.OverlayTemporalTx(roTx); pv != nil {
+			base = pv
+		}
+	}
 	overlay := sd.blockOverlay.Load()
 	if overlay == nil {
+		if base != kv.TemporalTx(roTx) {
+			return base
+		}
 		return nil
 	}
-	return overlay.NewTemporalReadView(roTx)
+	return overlay.NewTemporalReadView(base)
 }
 
 // InitBlockOverlay creates (or replaces) the block-level metadata overlay backed by
@@ -943,12 +989,84 @@ func (sd *SharedDomains) InlineTouchKeyDisabled() bool {
 	return sd.disableInlineTouchKey
 }
 
-func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) ([]byte, []byte, bool, error) {
-	return sd.mem.HasPrefix(domain, prefix, roTx)
+// collectPrefixCandidates unions the candidate keys under prefix from the leaf
+// batch (leaf RAM + committed DB) and every parent generation's RAM, returned in
+// key order. Collection runs inside each mem's read lock but only appends keys;
+// callers resolve values afterwards (getLatest re-locks), so no read lock is
+// ever held across a second acquisition — see the recursive-RLock hazard on
+// sync.RWMutex. The whole candidate set is materialized before resolution, so a
+// self-destruct enumerating a large contract's storage holds all its slot keys.
+func (sd *SharedDomains) collectPrefixCandidates(domain kv.Domain, prefix []byte, roTx kv.Tx) ([]string, error) {
+	seen := make(map[string]struct{})
+	var keys []string
+	collect := func(k, _ []byte) (bool, error) {
+		ks := string(k)
+		if _, dup := seen[ks]; !dup {
+			seen[ks] = struct{}{}
+			keys = append(keys, ks)
+		}
+		return true, nil
+	}
+	for p := sd; p != nil; p = p.parent {
+		if err := p.mem.IteratePrefix(domain, prefix, roTx, collect); err != nil {
+			return nil, err
+		}
+	}
+	slices.Sort(keys)
+	return keys, nil
 }
 
+// HasPrefix reports the first live key/value under prefix in key order, chain-
+// correctly across the generation chain: a candidate cleared by a nearer
+// generation is skipped and one written only in a parent is still found.
+func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) ([]byte, []byte, bool, error) {
+	tx, ok := roTx.(kv.TemporalTx)
+	if sd.parent == nil || !ok {
+		return sd.mem.HasPrefix(domain, prefix, roTx)
+	}
+	keys, err := sd.collectPrefixCandidates(domain, prefix, roTx)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	for _, ks := range keys {
+		k := []byte(ks)
+		v, _, err := sd.getLatestMetered(domain, tx, k, nil, sd.cacheReader())
+		if err != nil {
+			return nil, nil, false, err
+		}
+		if len(v) > 0 {
+			return k, bytes.Clone(v), true, nil
+		}
+	}
+	return nil, nil, false, nil
+}
+
+// IteratePrefix emits every live key under prefix across the whole generation
+// chain in key order, newest-generation-wins with tombstone shadowing.
 func (sd *SharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte) (cont bool, err error)) error {
-	return sd.mem.IteratePrefix(domain, prefix, roTx, it)
+	tx, ok := roTx.(kv.TemporalTx)
+	if sd.parent == nil || !ok {
+		return sd.mem.IteratePrefix(domain, prefix, roTx, it)
+	}
+	keys, err := sd.collectPrefixCandidates(domain, prefix, roTx)
+	if err != nil {
+		return err
+	}
+	for _, ks := range keys {
+		k := []byte(ks)
+		v, _, err := sd.getLatestMetered(domain, tx, k, nil, sd.cacheReader())
+		if err != nil {
+			return err
+		}
+		if len(v) == 0 {
+			continue
+		}
+		cont, err := it(k, v)
+		if err != nil || !cont {
+			return err
+		}
+	}
+	return nil
 }
 
 func (sd *SharedDomains) Close() {
@@ -1244,9 +1362,12 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 		maxStep = step
 	}
 
-	// Check parent's mem batch (read-through chaining for child SDs)
-	if sd.parent != nil {
-		if v, step, ok := sd.parent.mem.GetLatest(domain, k); ok {
+	// Check the parent chain's mem batches (read-through chaining for child
+	// SDs). Walk every ancestor generation, not just the immediate parent, so a
+	// value written by an uncommitted block several generations back is still
+	// visible — the parent link is a chain, not a single hop.
+	for p := sd.parent; p != nil; p = p.parent {
+		if v, step, ok := p.mem.GetLatest(domain, k); ok {
 			if dbg.KVReadLevelledMetrics {
 				wm.UpdateCacheReads(domain, start)
 			}
@@ -1503,8 +1624,8 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, view cache.ReadView, 
 	if v, _, ok := sd.mem.GetLatest(kv.AccountsDomain, addr); ok {
 		return accounts.DeserialiseV3CodeHash(v)
 	}
-	if sd.parent != nil {
-		if v, _, ok := sd.parent.mem.GetLatest(kv.AccountsDomain, addr); ok {
+	for p := sd.parent; p != nil; p = p.parent {
+		if v, _, ok := p.mem.GetLatest(kv.AccountsDomain, addr); ok {
 			return accounts.DeserialiseV3CodeHash(v)
 		}
 	}
@@ -1639,11 +1760,45 @@ func (sd *SharedDomains) DomainLogMetrics() map[kv.Domain][]any {
 }
 
 func (sd *SharedDomains) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
-	return sd.mem.GetAsOf(domain, key, ts)
+	if v, ok, err = sd.mem.GetAsOf(domain, key, ts); ok || err != nil {
+		return v, ok, err
+	}
+	for p := sd.parent; p != nil; p = p.parent {
+		if v, ok, err = p.mem.GetAsOf(domain, key, ts); ok || err != nil {
+			return v, ok, err
+		}
+	}
+	return nil, false, nil
 }
 
-func (sd *SharedDomains) HistorySeek(domain kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
-	return sd.mem.HistorySeek(domain, key, ts)
+// RangeAsOf returns domain values over [fromKey, toKey) as of ts, merging the
+// in-flight in-memory history with committed DB+files.
+func (sd *SharedDomains) RangeAsOf(ctx context.Context, domain kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int, roTx kv.Tx) (stream.KV, error) {
+	return sd.mem.RangeAsOf(ctx, domain, fromKey, toKey, ts, asc, limit, roTx)
+}
+
+// HistoryRange returns keys changed in [fromTs, toTs) with their pre-range
+// value, merging in-flight in-memory history with committed.
+func (sd *SharedDomains) HistoryRange(ctx context.Context, domain kv.Domain, fromTs, toTs int, asc order.By, limit int, roTx kv.Tx) (stream.KV, error) {
+	return sd.mem.HistoryRange(ctx, domain, fromTs, toTs, asc, limit, roTx)
+}
+
+// IndexRange returns the txNums at which key k changed in [fromTs, toTs),
+// merging in-flight in-memory history with the committed inverted index.
+func (sd *SharedDomains) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {
+	return sd.mem.IndexRange(name, k, fromTs, toTs, asc, limit, roTx)
+}
+
+// HistorySeek returns the in-flight in-memory historical value of key as of ts,
+// walking the whole generation chain; (nil, false) means no generation has it,
+// so the caller falls back to committed history.
+func (sd *SharedDomains) HistorySeek(domain kv.Domain, key []byte, ts uint64) ([]byte, bool, error) {
+	for p := sd; p != nil; p = p.parent {
+		if v, ok, err := p.mem.HistorySeek(domain, key, ts); err != nil || ok {
+			return v, ok, err
+		}
+	}
+	return nil, false, nil
 }
 
 // DomainPut

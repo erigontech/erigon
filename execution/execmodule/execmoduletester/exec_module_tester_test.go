@@ -40,7 +40,7 @@ func TestInsertChain(t *testing.T) {
 	m := execmoduletester.New(t)
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 100, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
-	})
+	}, m.PublishedSD())
 	require.NoError(t, err)
 	err = m.InsertChain(chain)
 	require.NoError(t, err)
@@ -51,7 +51,7 @@ func TestReorgsWithInsertChain(t *testing.T) {
 	m := execmoduletester.New(t)
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
-	})
+	}, m.PublishedSD())
 	require.NoError(t, err)
 	// insert initial chain
 	err = m.InsertChain(chain)
@@ -59,16 +59,16 @@ func TestReorgsWithInsertChain(t *testing.T) {
 	// Now generate three competing branches, one short and two longer ones
 	short, err := blockgen.GenerateChain(m.ChainConfig, chain.TopBlock, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
-	})
+	}, m.PublishedSD())
 	require.NoError(t, err)
 	long1, err := blockgen.GenerateChain(m.ChainConfig, chain.TopBlock, m.Engine, m.DB, 10, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{2}) // Need to make headers different from short branch
-	})
+	}, m.PublishedSD())
 	require.NoError(t, err)
 	// Second long chain needs to be slightly shorter than the first long chain
 	long2, err := blockgen.GenerateChain(m.ChainConfig, chain.TopBlock, m.Engine, m.DB, 9, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{3}) // Need to make headers different from short branch and another long branch
-	})
+	}, m.PublishedSD())
 	require.NoError(t, err)
 	// insert short chain
 	err = m.InsertChain(short)
@@ -79,7 +79,7 @@ func TestReorgsWithInsertChain(t *testing.T) {
 	// another short chain
 	short2, err := blockgen.GenerateChain(m.ChainConfig, long1.TopBlock, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
-	})
+	}, m.PublishedSD())
 	require.NoError(t, err)
 	// insert long2 chain
 	err = m.InsertChain(long2)

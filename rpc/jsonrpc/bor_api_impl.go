@@ -60,7 +60,7 @@ func (api *BorImpl) GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error) {
 	// Retrieve the requested block number (or current if none requested)
 	var header *types.Header
 	if number == nil || *number == rpc.LatestBlockNumber {
-		header = rawdb.ReadCurrentHeader(tx)
+		header = rawdb.ReadCurrentHeader(api.filters.WithOverlay(tx))
 	} else {
 		header, _ = api.headerByNumber(ctx, *number, tx)
 	}
@@ -102,7 +102,7 @@ func (api *BorImpl) GetAuthor(blockNrOrHash *rpc.BlockNumberOrHash) (accounts.Ad
 
 	//nolint:nestif
 	if blockNrOrHash == nil {
-		latestBlockNum, err2 := rpchelper.GetLatestBlockNumber(tx)
+		latestBlockNum, err2 := rpchelper.GetLatestBlockNumber(api.filters.WithOverlay(tx))
 		if err2 != nil {
 			return accounts.NilAddress, err2
 		}
@@ -174,7 +174,7 @@ func (api *BorImpl) GetSigners(number *rpc.BlockNumber) ([]common.Address, error
 	// Retrieve the requested block number (or current if none requested)
 	var header *types.Header
 	if number == nil || *number == rpc.LatestBlockNumber {
-		header = rawdb.ReadCurrentHeader(tx)
+		header = rawdb.ReadCurrentHeader(api.filters.WithOverlay(tx))
 	} else {
 		header, _ = api.headerByNumber(ctx, *number, tx)
 	}
@@ -298,7 +298,7 @@ func (api *BorImpl) getLatestBlockNum(ctx context.Context) (uint64, error) {
 	}
 	defer tx.Rollback()
 
-	return rpchelper.GetLatestBlockNumber(tx)
+	return rpchelper.GetLatestBlockNumber(api.filters.WithOverlay(tx))
 }
 
 // GetSnapshotProposer retrieves the in-turn signer at a given block.
@@ -314,11 +314,11 @@ func (api *BorImpl) GetSnapshotProposer(blockNrOrHash *rpc.BlockNumberOrHash) (c
 	var header *types.Header
 	//nolint:nestif
 	if blockNrOrHash == nil {
-		header = rawdb.ReadCurrentHeader(tx)
+		header = rawdb.ReadCurrentHeader(api.filters.WithOverlay(tx))
 	} else {
 		if blockNr, ok := blockNrOrHash.Number(); ok {
 			if blockNr == rpc.LatestBlockNumber {
-				header = rawdb.ReadCurrentHeader(tx)
+				header = rawdb.ReadCurrentHeader(api.filters.WithOverlay(tx))
 			} else {
 				header, err = api.headerByNumber(ctx, blockNr, tx)
 			}
@@ -352,11 +352,11 @@ func (api *BorImpl) GetSnapshotProposerSequence(blockNrOrHash *rpc.BlockNumberOr
 	// Retrieve the requested block number (or current if none requested)
 	var header *types.Header
 	if blockNrOrHash == nil {
-		header = rawdb.ReadCurrentHeader(tx)
+		header = rawdb.ReadCurrentHeader(api.filters.WithOverlay(tx))
 	} else {
 		if blockNr, ok := blockNrOrHash.Number(); ok {
 			if blockNr == rpc.LatestBlockNumber {
-				header = rawdb.ReadCurrentHeader(tx)
+				header = rawdb.ReadCurrentHeader(api.filters.WithOverlay(tx))
 			} else {
 				header, err = api.headerByNumber(ctx, blockNr, tx)
 			}

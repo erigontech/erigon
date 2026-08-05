@@ -73,7 +73,7 @@ func newLondonApiForTest(t *testing.T) *APIImpl {
 		Ethash:                new(chain.EthashConfig),
 	}
 	m := execmoduletester.New(t, execmoduletester.WithChainConfig(londonCfg))
-	return newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+	return newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), stubTxPoolClient{}, nil)
 }
 
 func testJsonAuthorization(addr common.Address) types.JsonAuthorization {
@@ -89,7 +89,7 @@ func testJsonAuthorization(addr common.Address) types.JsonAuthorization {
 
 func TestFillTransactionFillsDefaults(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+	api := newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), stubTxPoolClient{}, nil)
 
 	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
@@ -108,7 +108,7 @@ func TestFillTransactionFillsDefaults(t *testing.T) {
 
 func TestFillTransactionConflictingFees(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+	api := newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), stubTxPoolClient{}, nil)
 
 	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
@@ -127,7 +127,7 @@ func TestFillTransactionConflictingFees(t *testing.T) {
 
 func TestFillTransactionChainIDMismatch(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+	api := newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), stubTxPoolClient{}, nil)
 
 	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
@@ -144,7 +144,7 @@ func TestFillTransactionChainIDMismatch(t *testing.T) {
 
 func TestFillTransactionContractCreationNoData(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+	api := newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), stubTxPoolClient{}, nil)
 
 	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
@@ -157,7 +157,7 @@ func TestFillTransactionContractCreationNoData(t *testing.T) {
 
 func TestFillTransactionNoFrom(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+	api := newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), stubTxPoolClient{}, nil)
 
 	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 
@@ -171,7 +171,7 @@ func TestFillTransactionNoFrom(t *testing.T) {
 
 func TestFillTransactionExplicitNoncePreserved(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+	api := newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), stubTxPoolClient{}, nil)
 
 	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
@@ -188,7 +188,7 @@ func TestFillTransactionExplicitNoncePreserved(t *testing.T) {
 
 func TestFillTransactionExplicitGasPreserved(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+	api := newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), stubTxPoolClient{}, nil)
 
 	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
@@ -207,7 +207,7 @@ func TestFillTransactionBlobPreCancun(t *testing.T) {
 	// TestChainBerlinConfig has no Cancun (ExcessBlobGas == nil on head).
 	// A blob tx request must return a clear error, not panic.
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+	api := newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), stubTxPoolClient{}, nil)
 
 	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
@@ -225,7 +225,7 @@ func TestFillTransactionBlobPreCancun(t *testing.T) {
 func TestFillTransactionBlobPreCancunExplicitBlobFee(t *testing.T) {
 	// Even with an explicit maxFeePerBlobGas, blob txs on a pre-Cancun chain must error.
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+	api := newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), stubTxPoolClient{}, nil)
 
 	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
@@ -245,7 +245,7 @@ func TestFillTransactionBlobPreCancunExplicitBlobFee(t *testing.T) {
 
 func TestFillTransactionPoolErrorPropagates(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, errPoolClient{}, nil)
+	api := newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), errPoolClient{}, nil)
 
 	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
@@ -324,7 +324,7 @@ func TestFillTransactionEmptyAuthorizationList(t *testing.T) {
 
 func TestFillTransactionUserGasAboveCapPreserved(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+	api := newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), stubTxPoolClient{}, nil)
 
 	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
@@ -343,7 +343,7 @@ func TestFillTransactionUserGasAboveCapPreserved(t *testing.T) {
 func TestFillTransactionPoolNonce(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	const pendingNonce = uint64(5)
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, fixedNoncePoolClient{nonce: pendingNonce}, nil)
+	api := newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), fixedNoncePoolClient{nonce: pendingNonce}, nil)
 
 	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
@@ -448,7 +448,7 @@ func TestFillTransactionBlobFeeUsesHeadExcess(t *testing.T) {
 	}
 
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec))
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+	api := newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), stubTxPoolClient{}, nil)
 
 	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 	gas := hexutil.Uint64(21000)

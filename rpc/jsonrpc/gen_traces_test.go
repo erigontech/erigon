@@ -46,7 +46,7 @@ func TestGeneratedDebugApi(t *testing.T) {
 	m := rpcdaemontest.CreateTestExecModuleForTraces(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, m.Engine, nil, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
-	api := NewPrivateDebugAPI(baseApi, m.DB, nil, &rpccfg.DebugApiConfig{})
+	api := NewPrivateDebugAPI(baseApi, m.OverlayDB(), nil, &rpccfg.DebugApiConfig{})
 	var buf bytes.Buffer
 	stream := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
 	callTracer := "callTracer"

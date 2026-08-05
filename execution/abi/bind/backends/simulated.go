@@ -109,7 +109,7 @@ func NewSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, confi
 		m:            m,
 		prependBlock: m.Genesis,
 		getHeader: func(hash common.Hash, number uint64) (h *types.Header, err error) {
-			err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+			err = m.OverlayDB().View(context.Background(), func(tx kv.Tx) error {
 				h, err = m.BlockReader.Header(context.Background(), tx, hash, number)
 				return nil
 			})
@@ -161,6 +161,10 @@ func (b *SimulatedBackend) Commit() {
 	}); err != nil {
 		panic(err)
 	}
+	// Make the just-committed block durable before generating the next pending
+	// block on it: the generation below reads prependBlock's committed state
+	// with a fresh SharedDomains, so it must not race the background commit.
+	b.m.ExecModule.WaitCommitsDrained()
 	//nolint:prealloc
 	var allLogs []*types.Log
 	for _, r := range b.pendingReceipts {
@@ -192,7 +196,7 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 	if b.pendingState != nil {
 		b.pendingState.Close()
 	}
-	tx, err := b.m.DB.BeginTemporalRo(context.Background()) //nolint:gocritic
+	tx, err := b.m.OverlayDB().BeginTemporalRo(context.Background()) //nolint:gocritic
 	if err != nil {
 		panic(err)
 	}
@@ -213,7 +217,7 @@ func (b *SimulatedBackend) stateByBlockNumber(db kv.TemporalTx, blockNumber *uin
 func (b *SimulatedBackend) CodeAt(ctx context.Context, contract common.Address, blockNumber *uint256.Int) ([]byte, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	tx, err := b.m.DB.BeginTemporalRo(context.Background())
+	tx, err := b.m.OverlayDB().BeginTemporalRo(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -226,7 +230,7 @@ func (b *SimulatedBackend) CodeAt(ctx context.Context, contract common.Address, 
 func (b *SimulatedBackend) BalanceAt(ctx context.Context, contract common.Address, blockNumber *uint256.Int) (*uint256.Int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	tx, err := b.m.DB.BeginTemporalRo(context.Background())
+	tx, err := b.m.OverlayDB().BeginTemporalRo(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -240,7 +244,7 @@ func (b *SimulatedBackend) BalanceAt(ctx context.Context, contract common.Addres
 func (b *SimulatedBackend) NonceAt(ctx context.Context, contract common.Address, blockNumber *uint256.Int) (uint64, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	tx, err := b.m.DB.BeginTemporalRo(context.Background())
+	tx, err := b.m.OverlayDB().BeginTemporalRo(context.Background())
 	if err != nil {
 		return 0, err
 	}
@@ -254,7 +258,7 @@ func (b *SimulatedBackend) NonceAt(ctx context.Context, contract common.Address,
 func (b *SimulatedBackend) StorageAt(ctx context.Context, contract common.Address, key common.Hash, blockNumber *uint256.Int) ([]byte, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	tx, err := b.m.DB.BeginTemporalRo(context.Background())
+	tx, err := b.m.OverlayDB().BeginTemporalRo(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -273,7 +277,7 @@ func (b *SimulatedBackend) TransactionReceipt(ctx context.Context, txHash common
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	tx, err := b.m.DB.BeginTemporalRo(context.Background())
+	tx, err := b.m.OverlayDB().BeginTemporalRo(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -317,7 +321,7 @@ func (b *SimulatedBackend) TransactionByHash(ctx context.Context, txHash common.
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	tx, err := b.m.DB.BeginRo(ctx)
+	tx, err := b.m.OverlayDB().BeginRo(ctx)
 	if err != nil {
 		return nil, false, err
 	}
@@ -364,7 +368,7 @@ func (b *SimulatedBackend) BlockByHash(ctx context.Context, hash common.Hash) (*
 	if hash == b.pendingBlock.Hash() {
 		return b.pendingBlock, nil
 	}
-	tx, err := b.m.DB.BeginRo(ctx)
+	tx, err := b.m.OverlayDB().BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -398,7 +402,7 @@ func (b *SimulatedBackend) blockByNumberNoLock(ctx context.Context, number *uint
 		return b.prependBlock, nil
 	}
 
-	tx, err := b.m.DB.BeginRo(context.Background())
+	tx, err := b.m.OverlayDB().BeginRo(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -423,7 +427,7 @@ func (b *SimulatedBackend) HeaderByHash(ctx context.Context, hash common.Hash) (
 	if hash == b.pendingBlock.Hash() {
 		return b.pendingBlock.Header(), nil
 	}
-	tx, err := b.m.DB.BeginRo(context.Background())
+	tx, err := b.m.OverlayDB().BeginRo(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -449,7 +453,7 @@ func (b *SimulatedBackend) HeaderByHash(ctx context.Context, hash common.Hash) (
 func (b *SimulatedBackend) HeaderByNumber(ctx context.Context, number *uint256.Int) (*types.Header, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	tx, err := b.m.DB.BeginRo(context.Background())
+	tx, err := b.m.OverlayDB().BeginRo(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -474,7 +478,7 @@ func (b *SimulatedBackend) TransactionCount(ctx context.Context, blockHash commo
 	if blockHash == b.pendingBlock.Hash() {
 		return uint(b.pendingBlock.Transactions().Len()), nil
 	}
-	tx, err := b.m.DB.BeginRo(context.Background())
+	tx, err := b.m.OverlayDB().BeginRo(context.Background())
 	if err != nil {
 		return 0, err
 	}
@@ -508,7 +512,7 @@ func (b *SimulatedBackend) TransactionInBlock(ctx context.Context, blockHash com
 
 		return transactions[index], nil
 	}
-	tx, err := b.m.DB.BeginRo(context.Background())
+	tx, err := b.m.OverlayDB().BeginRo(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -582,7 +586,7 @@ func (b *SimulatedBackend) CallContract(ctx context.Context, call bind.CallMsg, 
 		return nil, errBlockNumberUnsupported
 	}
 	var res *evmtypes.ExecutionResult
-	if err := b.m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) (err error) {
+	if err := b.m.OverlayDB().ViewTemporal(context.Background(), func(tx kv.TemporalTx) (err error) {
 		s := state.New(b.m.NewStateReader(tx))
 		res, err = b.callContract(ctx, call, b.pendingBlock, s)
 		if err != nil {

@@ -27,7 +27,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sync/errgroup"
@@ -54,7 +53,9 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
@@ -125,6 +126,7 @@ type ExecModuleTester struct {
 	ForkValidator   *execmodule.ForkValidator
 	ExecModule      *execmodule.ExecModule
 	StateCache      *execmodule.Cache
+	domainCache     *cache.StateCache
 	retirementStart chan bool
 	retirementDone  chan struct{}
 	retirementWg    sync.WaitGroup
@@ -148,6 +150,13 @@ type ExecModuleTester struct {
 }
 
 func (emt *ExecModuleTester) Close() {
+	// Drain and stop the background-commit worker (and its in-flight commit tx)
+	// before closing the DB, mirroring production shutdown. Otherwise DB.Close
+	// can race a commit still writing, which deadlocks. Must run before cancel()
+	// so WaitIdle can still acquire the foreground semaphore.
+	if emt.ExecModule != nil {
+		emt.ExecModule.WaitIdle(emt.Ctx)
+	}
 	emt.cancel()
 	if err := emt.bgComponentsEg.Wait(); err != nil && emt.tb != nil {
 		require.Equal(emt.tb, context.Canceled, err) // upon waiting for clean exit we should get ctx cancelled
@@ -167,8 +176,8 @@ func (emt *ExecModuleTester) Close() {
 	if emt.DB != nil {
 		emt.DB.Close()
 	}
-	if emt.ExecModule != nil {
-		emt.ExecModule.Close()
+	if emt.domainCache != nil {
+		emt.domainCache.Close()
 	}
 	if emt.tb == nil && emt.Dirs.DataDir != "" {
 		dir.RemoveAll(emt.Dirs.DataDir)
@@ -353,6 +362,12 @@ func WithFcuBackgroundCommit() Option {
 	}
 }
 
+func WithFcuForegroundCommit() Option {
+	return func(opts *options) {
+		opts.fcuBackgroundCommit = false
+	}
+}
+
 // WithAlwaysGenerateChangesets pins --experimental.always-generate-changesets
 // regardless of the tester default: true for tests that reorg deeper than
 // MaxReorgDepth, false for tests that rely on the windowed-changesets
@@ -406,11 +421,12 @@ func applyOptions(opts []Option) options {
 	defaultKey, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	defaultPruneMode := prune.MockMode
 	opt := options{
-		key:             defaultKey,
-		pruneMode:       &defaultPruneMode,
-		chainConfig:     chain.TestChainBerlinConfig,
-		experimentalBAL: false,
-		sentryProtocol:  direct.ETH68,
+		key:                 defaultKey,
+		pruneMode:           &defaultPruneMode,
+		chainConfig:         chain.TestChainBerlinConfig,
+		experimentalBAL:     false,
+		sentryProtocol:      direct.ETH68,
+		fcuBackgroundCommit: false,
 	}
 	for _, o := range opts {
 		o(&opt)
@@ -705,7 +721,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		mock.TxPool,
 		sealCancel,
 		latestBlockBuiltStore,
-		nil, /*sdProvider*/
 		logger,
 	)
 
@@ -774,6 +789,10 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		Accumulator:    mock.Notifications.Accumulator,
 		RecentReceipts: mock.Notifications.RecentReceipts,
 	}
+	// Per-instance domain cache, held on the tester so Close releases its
+	// envelope reservation. Uses the production default — the caches jump-grow on
+	// demand, so a small-working-set fixture stays small.
+	mock.domainCache = cache.NewDefaultStateCache()
 	mock.ExecModule = execmodule.NewExecModule(
 		ctx,
 		mock.BlockReader,
@@ -785,7 +804,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		hook,
 		accum,
 		mock.StateCache,
-		0, // stateCacheBudget: production default; the caches jump-grow on demand
+		0, // stateCacheBudget: production default; caches jump-grow on demand
 		logger,
 		engine,
 		cfg.Sync,
@@ -796,6 +815,13 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		func() error { return nil },
 	)
 	mock.ForkValidator = mock.ExecModule.ForkValidator()
+
+	// Mirror production (node/eth/backend.go): readers fall back to the
+	// published in-flight SharedDomains when no foreground context is active,
+	// so consensus-table reads see not-yet-committed state under background
+	// commit instead of a stale raw DB.
+	mock.ExecModule.SetPublishedSD(mock.Notifications.Events.LatestSD)
+	mock.StateCache.SetPublishedSD(mock.Notifications.Events.LatestSD)
 
 	mock.StreamWg.Add(1)
 	mock.bgComponentsEg.Go(func() error {
@@ -846,7 +872,15 @@ func (emt *ExecModuleTester) EnableLogs() {
 
 func (emt *ExecModuleTester) Cfg() ethconfig.Config { return emt.cfg }
 
-func (emt *ExecModuleTester) insertChain(chain *blockgen.ChainPack) error {
+// PublishedSD returns the latest published SharedDomains (the tip after the
+// last FCU). Pass it to blockgen.GenerateChain when building on the tip so the
+// generator reads the tip's in-flight state under background commit instead of
+// a lagging raw DB.
+func (emt *ExecModuleTester) PublishedSD() *execctx.SharedDomains {
+	return emt.Notifications.Events.LatestSD()
+}
+
+func (emt *ExecModuleTester) insertPoSBlocks(chain *blockgen.ChainPack) error {
 	wr := chainreader.NewChainReaderEth1(emt.ChainConfig, emt.ExecModule, time.Hour)
 
 	streamCtx, cancel := context.WithCancel(emt.Ctx)
@@ -871,9 +905,23 @@ func (emt *ExecModuleTester) insertChain(chain *blockgen.ChainPack) error {
 
 	tipHash := chain.TopBlock.Hash()
 
-	status, verr, _, err := wr.UpdateForkChoice(emt.Ctx, tipHash, tipHash, tipHash)
-	if err != nil {
-		return err
+	// Busy means the background-commit backlog is full; the real CL retries the
+	// FCU, giving the commit worker a foreground-idle window to drain. Mirror
+	// that here instead of failing the insert.
+	var status execmodule.ExecutionStatus
+	var verr *string
+	for {
+		status, verr, _, err = wr.UpdateForkChoice(emt.Ctx, tipHash, tipHash, tipHash)
+		if err != nil {
+			return err
+		}
+		if status != execmodule.ExecutionStatusBusy {
+			break
+		}
+		if emt.Ctx.Err() != nil {
+			return emt.Ctx.Err()
+		}
+		time.Sleep(time.Millisecond)
 	}
 
 	if status != execmodule.ExecutionStatusSuccess {
@@ -892,7 +940,7 @@ func (emt *ExecModuleTester) insertChain(chain *blockgen.ChainPack) error {
 		req, err := stream.Recv()
 		if err != nil {
 			if emt.Ctx.Err() != nil {
-				break
+				return nil
 			}
 			if streamCtx.Err() != nil {
 				return fmt.Errorf("block insert recv timed out: %d remaining", len(insertedBlocks))
@@ -911,11 +959,27 @@ func (emt *ExecModuleTester) insertChain(chain *blockgen.ChainPack) error {
 		}
 	}
 
-	roTx, err := emt.DB.BeginRo(emt.Ctx)
+	return nil
+}
+
+func (emt *ExecModuleTester) InsertChain(chain *blockgen.ChainPack) error {
+	if err := emt.insertPoSBlocks(chain); err != nil {
+		return err
+	}
+	baseTx, err := emt.DB.BeginTemporalRo(emt.Ctx)
 	if err != nil {
 		return err
 	}
-	defer roTx.Rollback()
+	defer baseTx.Rollback()
+	// Under background commit the just-inserted block metadata (header, stage
+	// progress, head hash) lives in the published SharedDomains overlay before
+	// it lands in the raw DB, so read through the overlay when one is published.
+	var roTx kv.Tx = baseTx
+	if sd := emt.PublishedSD(); sd != nil {
+		if v := sd.OverlayTemporalTx(baseTx); v != nil {
+			roTx = v
+		}
+	}
 	// Check if the latest header was imported or rolled back
 	if rawdb.ReadHeader(roTx, chain.TopBlock.Hash(), chain.TopBlock.NumberU64()) == nil {
 		return fmt.Errorf("did not import block %d %x", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
@@ -930,66 +994,11 @@ func (emt *ExecModuleTester) insertChain(chain *blockgen.ChainPack) error {
 	if rawdb.ReadHeadBlockHash(roTx) != chain.TopBlock.Hash() {
 		return fmt.Errorf("did not import block %d %x", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
 	}
+	// Under background commit InsertChain returns before its commit lands. Drain
+	// it before returning so a following operation (a reorg's unwind, a raw-DB
+	// read) cannot race the still-in-flight commit of the chain just inserted.
+	emt.ExecModule.WaitCommitsDrained()
 	return nil
-}
-
-func (emt *ExecModuleTester) insertChainPoW(chain *blockgen.ChainPack) error {
-	tip := chain.TopBlock
-	currentHeader, err := emt.ExecModule.CurrentHeader(emt.Ctx)
-	if err != nil {
-		return err
-	}
-	currentHash := currentHeader.Hash()
-	currentNumber := currentHeader.Number.Uint64()
-	currentTd, err := emt.ExecModule.GetTD(emt.Ctx, &currentHash, &currentNumber)
-	if err != nil {
-		return err
-	}
-	if currentTd == nil {
-		return fmt.Errorf("total difficulty not found for current head %d %x", currentNumber, currentHash)
-	}
-	firstBlock := chain.Blocks[0]
-	firstNumber := firstBlock.NumberU64()
-	if firstNumber == 0 {
-		return emt.insertChain(chain)
-	}
-	parentHash := firstBlock.ParentHash()
-	parentNumber := firstNumber - 1
-	parentTd, err := emt.ExecModule.GetTD(emt.Ctx, &parentHash, &parentNumber)
-	if err != nil {
-		return err
-	}
-	if parentTd == nil {
-		return fmt.Errorf("total difficulty not found for parent %d %x", parentNumber, parentHash)
-	}
-	candidateTd := new(uint256.Int).Set(parentTd)
-	for _, block := range chain.Blocks {
-		difficulty := block.Difficulty()
-		if _, overflow := candidateTd.AddOverflow(candidateTd, &difficulty); overflow {
-			return fmt.Errorf("total difficulty overflows for block %d %x", block.NumberU64(), block.Hash())
-		}
-	}
-	if !ethash.ShouldReorg(currentTd, currentNumber, currentHash, candidateTd, tip.NumberU64(), tip.Hash()) {
-		wr := chainreader.NewChainReaderEth1(emt.ChainConfig, emt.ExecModule, time.Hour)
-		for _, block := range chain.Blocks {
-			if err := block.HashCheck(false); err != nil {
-				return err
-			}
-		}
-		return wr.InsertBlocks(emt.Ctx, chain.Blocks, chain.BlockAccessLists)
-	}
-	return emt.insertChain(chain)
-}
-
-func (emt *ExecModuleTester) InsertChain(chain *blockgen.ChainPack) error {
-	if chain.Length() == 0 {
-		return nil
-	}
-	tipDifficulty := chain.TopBlock.Difficulty()
-	if !tipDifficulty.IsZero() {
-		return emt.insertChainPoW(chain)
-	}
-	return emt.insertChain(chain)
 }
 
 func (emt *ExecModuleTester) NewHistoryStateReader(blockNum uint64, tx kv.TemporalTx) state.StateReader {

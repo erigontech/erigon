@@ -66,17 +66,32 @@ func (e *ExecModule) beginOverlayOrRo(ctx context.Context) (kv.TemporalTx, func(
 	}
 	if sd != nil {
 		if overlay := sd.BlockOverlay(); overlay != nil {
-			// Open a fresh RO tx while still holding the read lock so that
-			// the overlay cannot be closed between our check and the
-			// NewReadView call (TOCTOU avoidance).
+			// Open a fresh RO tx while still holding the read lock so the
+			// generation chain cannot change between the check and building the
+			// view (TOCTOU avoidance). Route through OverlayTemporalTx so
+			// the view chains every ancestor generation's block overlay, not just
+			// the leaf — otherwise reads miss uncommitted block data from earlier
+			// FCUs.
 			roTx, err := e.db.BeginTemporalRo(ctx) //nolint:gocritic
 			if err != nil {
 				e.lock.RUnlock()
 				return nil, nil, err
 			}
-			view := overlay.NewReadView(roTx)
+			view := sd.OverlayTemporalTx(roTx)
 			e.lock.RUnlock()
-			return view, func() { roTx.Rollback() }, nil
+			if view != nil {
+				return view, func() { roTx.Rollback() }, nil
+			}
+			// The overlay was flushed to the DB (CloseBlockOverlay, e.g. a bulk
+			// InsertBlocks) between the check and the re-load, leaving no overlay
+			// in the chain. The flushed blocks are now committed, so a fresh roTx
+			// sees them; the one we opened predates the flush, so drop it.
+			roTx.Rollback()
+			tx, err := e.db.BeginTemporalRo(ctx) //nolint:gocritic
+			if err != nil {
+				return nil, nil, err
+			}
+			return tx, func() { tx.Rollback() }, nil
 		}
 	}
 	e.lock.RUnlock()

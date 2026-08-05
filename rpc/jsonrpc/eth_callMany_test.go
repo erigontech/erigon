@@ -67,8 +67,8 @@ func TestSetupEVMTimeoutCancelsEVMStoredAfterExpiry(t *testing.T) {
 func TestCallManyEmptyBundles(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	baseApi := newBaseApiForTest(m)
-	api := newEthApiForTest(baseApi, m.DB, nil, nil)
-	debugApi := NewPrivateDebugAPI(baseApi, m.DB, nil, &rpccfg.DebugApiConfig{GasCap: 5000000})
+	api := newEthApiForTest(baseApi, m.OverlayDB(), nil, nil)
+	debugApi := NewPrivateDebugAPI(baseApi, m.OverlayDB(), nil, &rpccfg.DebugApiConfig{GasCap: 5000000})
 	ctx := context.Background()
 
 	txIndex := -1

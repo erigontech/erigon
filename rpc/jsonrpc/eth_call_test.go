@@ -217,7 +217,7 @@ func newTestEthAPIWithFilters(t *testing.T, m *execmoduletester.ExecModuleTester
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, execmoduletester.New(t))
 	mining := txpoolproto.NewMiningClient(conn)
 	filters := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, mining, func() {}, m.Log, nil)
-	return newEthApiForTest(newBaseApiWithFiltersForTest(filters, stateCache, m), m.DB, nil, nil)
+	return newEthApiForTest(newBaseApiWithFiltersForTest(filters, stateCache, m), m.OverlayDB(), nil, nil)
 }
 
 type stubTxPoolClient struct{ txpoolproto.TxpoolClient }
@@ -228,7 +228,7 @@ func (stubTxPoolClient) Nonce(context.Context, *txpoolproto.NonceRequest, ...grp
 
 func TestCreateAccessListContractCreationWithoutFromDoesNotPanic(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+	api := newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), stubTxPoolClient{}, nil)
 
 	var (
 		res *accessListResult
@@ -244,7 +244,7 @@ func TestCreateAccessListContractCreationWithoutFromDoesNotPanic(t *testing.T) {
 func TestEthCallNonCanonical(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := newEthApiForTest(newBaseApiWithFiltersForTest(nil, stateCache, m), m.DB, nil, nil)
+	api := newEthApiForTest(newBaseApiWithFiltersForTest(nil, stateCache, m), m.OverlayDB(), nil, nil)
 	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 	blockNumberOrHash := rpc.BlockNumberOrHashWithHash(common.HexToHash("0x3fcb7c0d4569fddc89cbea54b42f163e0c789351d98810a513895ab44b47020b"), true)
@@ -263,7 +263,7 @@ func TestEthCallToPrunedBlock(t *testing.T) {
 
 	m, bankAddress, contractAddress, _ := chainWithDeployedContract(t)
 	doPrune(t, m.DB, pruneTo)
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	api := newEthApiForTest(newBaseApiForTest(m), m.OverlayDB(), nil, nil)
 
 	callData := hexutil.MustDecode("0x2e64cec1")
 	callDataBytes := hexutil.Bytes(callData)
@@ -293,7 +293,7 @@ func TestGetProof(t *testing.T) {
 		RpcTxSyncDefaultTimeout:     20 * time.Second,
 		RpcTxSyncMaxTimeout:         1 * time.Minute,
 	}
-	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, cfg, log.New())
+	api := NewEthAPI(newBaseApiForTest(m), m.OverlayDB(), nil, nil, nil, cfg, log.New())
 
 	key := func(b byte) hexutil.Bytes {
 		result := common.Hash{}
@@ -410,7 +410,7 @@ func TestGetProof(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, proof)
 
-			tx, err := m.DB.BeginTemporalRo(context.Background())
+			tx, err := m.OverlayDB().BeginTemporalRo(context.Background())
 			require.NoError(t, err)
 			defer tx.Rollback()
 			header, err := api.headerByNumber(context.Background(), rpc.BlockNumber(tt.blockNum), tx)
@@ -474,10 +474,10 @@ func TestGetProofGenesisPrunedCommitmentHistory(t *testing.T) {
 func TestGetBlockByTimestampLatestTime(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	tx, err := m.DB.BeginTemporalRo(ctx)
+	tx, err := m.OverlayDB().BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
+	api := NewErigonAPI(newBaseApiForTest(m), m.OverlayDB(), nil)
 
 	latestBlock, err := m.BlockReader.CurrentBlock(tx)
 	require.NoError(t, err)
@@ -501,10 +501,10 @@ func TestGetBlockByTimestampLatestTime(t *testing.T) {
 func TestGetBlockByTimestampOldestTime(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	tx, err := m.DB.BeginTemporalRo(ctx)
+	tx, err := m.OverlayDB().BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
+	api := NewErigonAPI(newBaseApiForTest(m), m.OverlayDB(), nil)
 
 	oldestBlock, err := m.BlockReader.BlockByNumber(m.Ctx, tx, 0)
 	require.NoError(t, err)
@@ -529,10 +529,10 @@ func TestGetBlockByTimestampOldestTime(t *testing.T) {
 func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	tx, err := m.DB.BeginTemporalRo(ctx)
+	tx, err := m.OverlayDB().BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
+	api := NewErigonAPI(newBaseApiForTest(m), m.OverlayDB(), nil)
 
 	latestBlock, err := m.BlockReader.CurrentBlock(tx)
 	require.NoError(t, err)
@@ -557,10 +557,10 @@ func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
 func TestGetBlockByTimeMiddle(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	tx, err := m.DB.BeginTemporalRo(ctx)
+	tx, err := m.OverlayDB().BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
+	api := NewErigonAPI(newBaseApiForTest(m), m.OverlayDB(), nil)
 
 	currentHeader := rawdb.ReadCurrentHeader(tx)
 	oldestHeader, err := api._blockReader.HeaderByNumber(ctx, tx, 0)
@@ -590,10 +590,10 @@ func TestGetBlockByTimeMiddle(t *testing.T) {
 func TestGetBlockByTimestamp(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	tx, err := m.DB.BeginTemporalRo(ctx)
+	tx, err := m.OverlayDB().BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
+	api := NewErigonAPI(newBaseApiForTest(m), m.OverlayDB(), nil)
 
 	highestBlockNumber := rawdb.ReadCurrentHeader(tx).Number
 	pickedBlock, err := m.BlockReader.BlockByNumber(m.Ctx, tx, highestBlockNumber.Uint64()/3)
@@ -767,7 +767,7 @@ func chainWithDeployedContractAndConfig(t *testing.T, cfg *chain.Config) (*execm
 	_, fillerPublicKeys, err := generatePseudoRandomECDSAKeyPairs(rng, nFillerAccounts)
 	require.NoError(t, err)
 
-	db := m.DB
+	db := m.OverlayDB()
 
 	var contractAddr common.Address
 
@@ -869,7 +869,7 @@ func chainWithDeployedContractAndConfig(t *testing.T, cfg *chain.Config) (*execm
 		case 5:
 			// empty block
 		}
-	})
+	}, m.PublishedSD())
 	require.NoError(t, err)
 
 	err = m.InsertChain(chain)
