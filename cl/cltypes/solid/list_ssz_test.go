@@ -17,9 +17,11 @@
 package solid
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/ssz"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -88,6 +90,44 @@ func TestListSSZEncodeDecodeSSZ(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, list.Len(), decodedList.Len())
+}
+
+func TestProgressiveListSSZDecodeEnforcesLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		list *ListSSZ[Validator]
+	}{
+		{
+			name: "static",
+			list: NewStaticProgressiveListSSZ[Validator](1, validatorSize),
+		},
+		{
+			name: "dynamic",
+			list: NewDynamicProgressiveListSSZ[Validator](1),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var source *ListSSZ[Validator]
+			if tc.list.static {
+				source = NewStaticListSSZ[Validator](tc.list.limit+1, validatorSize)
+			} else {
+				source = NewDynamicListSSZ[Validator](tc.list.limit + 1)
+			}
+			for range tc.list.limit {
+				source.Append(NewValidator())
+			}
+			encoded, err := source.EncodeSSZ(nil)
+			require.NoError(t, err)
+			require.NoError(t, tc.list.DecodeSSZ(encoded, 0))
+
+			source.Append(NewValidator())
+			encoded, err = source.EncodeSSZ(nil)
+			require.NoError(t, err)
+			err = tc.list.DecodeSSZ(encoded, 0)
+			require.Error(t, err)
+			assert.True(t, errors.Is(err, ssz.ErrTooBigList), "expected ErrTooBigList, got %v", err)
+		})
+	}
 }
 
 func TestUint64VectorSSZ(t *testing.T) {
