@@ -255,3 +255,57 @@ func TestAssertSelfDestructNormalized(t *testing.T) {
 		ws.assertSelfDestructNormalized()
 	}, "balance and storage deletes are legal on a self-destructed address")
 }
+
+// A slot written before an in-block SELFDESTRUCT and re-written to the same value
+// by a tx after the revival: the destruct wiped the slot, so the re-write is a
+// real change, not a no-op. The pre-destruct write is not a valid baseline for
+// it, and the latest SelfDestruct entry is the revival, which says nothing about
+// the destruct that did the wiping.
+func TestNormalize_KeepsRewriteOfPreDestructValueAfterRevival(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0x7f"))
+	key := accounts.InternKey(common.HexToHash("0x32"))
+	val := *uint256.NewInt(0x593d)
+
+	vm := NewVersionMap(nil)
+	vm.WriteStorage(addr, key, Version{TxIndex: 16}, val, true)
+	vm.WriteSelfDestruct(addr, Version{TxIndex: 41}, true, true)
+	vm.WriteSelfDestruct(addr, Version{TxIndex: 42}, false, true)
+
+	ws := &WriteSet{}
+	ws.SetStorage(addr, key, &VersionedWrite[uint256.Int]{
+		WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key, Version: Version{TxIndex: 43}},
+		Val:         val,
+	})
+
+	out, err := ws.Normalize(vm, 43, 0, &minimalStateReader{}, nil, false, false, false)
+	require.NoError(t, err)
+	got, ok := out.GetStorage(addr, key)
+	require.True(t, ok, "the destruct wiped the slot, so re-writing the pre-destruct value is a real change")
+	require.True(t, got.Val.Eq(&val))
+}
+
+// The no-op filter must still drop a genuine no-op: same value, same slot, with
+// the destruct sitting below the baseline write rather than above it.
+func TestNormalize_DropsNoOpWhenDestructPrecedesBaselineWrite(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0x7e"))
+	key := accounts.InternKey(common.HexToHash("0x32"))
+	val := *uint256.NewInt(0x593d)
+
+	vm := NewVersionMap(nil)
+	vm.WriteSelfDestruct(addr, Version{TxIndex: 10}, true, true)
+	vm.WriteSelfDestruct(addr, Version{TxIndex: 11}, false, true)
+	vm.WriteStorage(addr, key, Version{TxIndex: 16}, val, true)
+
+	ws := &WriteSet{}
+	ws.SetStorage(addr, key, &VersionedWrite[uint256.Int]{
+		WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key, Version: Version{TxIndex: 43}},
+		Val:         val,
+	})
+
+	out, err := ws.Normalize(vm, 43, 0, &minimalStateReader{}, nil, false, false, false)
+	require.NoError(t, err)
+	_, ok := out.GetStorage(addr, key)
+	require.False(t, ok, "no destruct after the baseline write, so writing the same value is a no-op")
+}

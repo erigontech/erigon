@@ -159,16 +159,24 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 			// flushed back to the versionMap, so without this a resurrect TX
 			// that re-writes a slot to its pre-SD value is wrongly dropped as a
 			// no-op (TestDeleteRecreateSlotsAcrossManyBlocks).
-			sdTxIdx, sdOk := -1, false
+			sdOk := false
 			if v, sd, _ := vm.ReadSelfDestruct(h.Address, txIndex); sd.Status() == MVReadResultDone && v {
-				sdTxIdx, sdOk = sd.Version().TxIndex, true
+				sdOk = true
 			}
 			// No-op filter: compare against origin (what this TX would have read).
 			// First check versionMap floor (prior TX's write in this block).
 			// Then fall back to stateReader (pre-block value from domain).
 			originVal, origin, originOK := vm.ReadStorage(h.Address, h.Key, txIndex)
-			originValid := originOK && origin.Status() == MVReadResultDone &&
-				!(sdOk && sdTxIdx > origin.Version().TxIndex)
+			originValid := originOK && origin.Status() == MVReadResultDone
+			if originValid {
+				// A destruct above the baseline write wiped the slot, so the baseline
+				// is 0 rather than what that write left, and re-writing the old value
+				// is a real change. Only a range scan sees this: once the account is
+				// revived, the latest SelfDestruct entry is the revival.
+				if _, wiped := vm.FindDoneSelfDestructInRange(h.Address, origin.Version().TxIndex+1, txIndex, true); wiped {
+					originValid = false
+				}
+			}
 			switch {
 			case originValid:
 				if writeVal.Eq(&originVal) {
