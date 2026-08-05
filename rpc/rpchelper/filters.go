@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/common/concurrent"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
@@ -1186,6 +1187,21 @@ func (ff *Filters) WithOverlay(tx kv.Tx) kv.Tx {
 		return overlay.NewReadView(tx)
 	}
 	return tx
+}
+
+// LatestOverlay returns the block overlay behind the latest published SD, or nil.
+// Callers that must keep serving one consistent head across several txs (e.g. a
+// forked backend) pin this instance instead of re-resolving, which could observe
+// the overlay being unpublished mid-request.
+func (ff *Filters) LatestOverlay() *membatchwithdb.MemoryMutation {
+	if ff == nil {
+		return nil
+	}
+	sd := ff.LatestSD()
+	if sd == nil {
+		return nil
+	}
+	return sd.BlockOverlay()
 }
 
 // WithTemporalOverlay is like WithOverlay but returns kv.TemporalTx directly,
