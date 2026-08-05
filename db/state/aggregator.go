@@ -88,9 +88,15 @@ type Aggregator struct {
 	oldestVisible *aggregatorVisible
 	// unaligned entities are left out of the shared visible-file ceiling while tooling
 	// regenerates them. Guarded by dirtyFilesLock.
-	unalignedDomain   [kv.DomainLen]bool
-	unalignedIdx      [kv.StandaloneIdxLen]bool
-	snapshotBuildSema *semaphore.Weighted
+	unalignedDomain [kv.DomainLen]bool
+	unalignedIdx    [kv.StandaloneIdxLen]bool
+	// visibilityLoweringForbidden: a fill-enabled StateCache is wired over
+	// this aggregator, and its fill admission relies on view frontiers never
+	// decreasing. recalcVisibleFiles refuses to lower the cached state
+	// domains' visible ends while set; Close clears it (shutdown is not a
+	// fill window).
+	visibilityLoweringForbidden atomic.Bool
+	snapshotBuildSema           *semaphore.Weighted
 
 	disableHistory      bool
 	branchCacheDisabled bool
@@ -542,6 +548,17 @@ func (a *Aggregator) UnalignIdx(name kv.InvertedIdx) (realign func()) {
 	return func() {}
 }
 
+// ForbidVisibilityLowering marks this aggregator as backing a fill-enabled
+// StateCache: from then on recalcVisibleFiles panics instead of lowering a
+// cached state domain's visible end, whichever entry point caused it.
+// Serialized with recalcVisibleFiles via dirtyFilesLock so "from then on"
+// holds against a recalculation already in flight.
+func (a *Aggregator) ForbidVisibilityLowering() {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	a.visibilityLoweringForbidden.Store(true)
+}
+
 func (a *Aggregator) setUnalignedDomain(d kv.Domain, v bool) {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
@@ -683,6 +700,9 @@ func (a *Aggregator) WaitForFiles() {
 }
 
 func (a *Aggregator) Close() {
+	a.dirtyFilesLock.Lock()
+	a.visibilityLoweringForbidden.Store(false) // shutdown is not a fill window
+	a.dirtyFilesLock.Unlock()
 	a.WaitForFiles()
 	if !a.background.BeginClose() { // idempotent: safe to call Close multiple times
 		return
@@ -1852,6 +1872,28 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 	}
 	next.minimaxTxNum = next.stateMinimaxTxNum()
 
+	if a.visibilityLoweringForbidden.Load() {
+		prev := a.visible.Load()
+		for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+			if prev.d[d] == nil || next.d[d] == nil {
+				continue
+			}
+			prevEnd := visibleFiles(prev.d[d].files).EndTxNum()
+			nextEnd := visibleFiles(next.d[d].files).EndTxNum()
+			if nextEnd < prevEnd {
+				panic(fmt.Sprintf("assert: %s visible end lowered %d -> %d while a fill-enabled StateCache is wired — fill admission relies on view frontiers never decreasing", d, prevEnd, nextEnd))
+			}
+			if prev.dhii[d] == nil || next.dhii[d] == nil {
+				continue
+			}
+			prevII := prev.dhii[d].files.EndTxNum()
+			nextII := next.dhii[d].files.EndTxNum()
+			if nextII < prevII {
+				panic(fmt.Sprintf("assert: %s history-II visible end lowered %d -> %d while a fill-enabled StateCache is wired — DomainVisibleEnd derives view frontiers from it", d, prevII, nextII))
+			}
+		}
+	}
+
 	old := a.visible.Load()
 	old.retired = retired
 	old.next = next
@@ -2595,6 +2637,21 @@ func (at *AggregatorRoTx) DomainProgress(name kv.Domain, tx kv.Tx) uint64 {
 		return at.d[name].d.maxStepInDBNoHistory(tx).ToTxNum(at.a.stepSize.Load())
 	}
 	return at.d[name].ht.iit.Progress(tx)
+}
+func (at *AggregatorRoTx) DomainVisibleEnd(name kv.Domain, tx kv.Tx) (uint64, bool) {
+	d := at.d[name]
+	if d.d.HistoryDisabled {
+		return 0, false
+	}
+	// A dependency checker can clamp the values view below the history-II end.
+	// Such a view has no exact frontier: reads mix fresh DB-resident keys with
+	// older file values for the gap, and raising the dependent file's
+	// visibility later reveals state without any cache apply — a fill made
+	// during the clamp would never be invalidated.
+	if d.files.EndTxNum() < d.ht.iit.files.EndTxNum() {
+		return 0, false
+	}
+	return d.ht.iit.visibleEnd(tx), true
 }
 func (at *AggregatorRoTx) IIProgress(name kv.InvertedIdx, tx kv.Tx) uint64 {
 	return at.searchII(name).Progress(tx)
