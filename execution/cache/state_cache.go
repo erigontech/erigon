@@ -417,10 +417,37 @@ func (c *StateCache) noteApplied(domain kv.Domain, txNum uint64) {
 func (c *StateCache) clear() {
 	c.admissionMu.Lock()
 	defer c.admissionMu.Unlock()
+	c.clearLocked()
+}
+
+func (c *StateCache) clearLocked() {
 	for _, cache := range c.caches {
 		if cache != nil {
 			cache.Clear()
 		}
+	}
+}
+
+// absorbFilesExtension reconciles the cache with state published by files
+// rather than applies (snapshot download): entries invalidated that way are
+// never overwritten, so when visibility passes a domain's applied frontier,
+// drop every entry and advance the frontiers — pre-publication views cannot
+// refill what was dropped.
+func (c *StateCache) absorbFilesExtension(f Frontier) {
+	c.admissionMu.Lock()
+	defer c.admissionMu.Unlock()
+	extended := false
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+		if c.caches[domain] == nil {
+			continue
+		}
+		if end, ok := f.DomainVisibleEnd(domain); ok && end > c.appliedEnd[domain] {
+			c.appliedEnd[domain] = end
+			extended = true
+		}
+	}
+	if extended {
+		c.clearLocked()
 	}
 }
 

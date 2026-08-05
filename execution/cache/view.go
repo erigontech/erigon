@@ -190,6 +190,18 @@ func (a Applier) ApplyAll(updates []Update) {
 	a.c.applyAll(updates)
 }
 
+// AbsorbFilesExtension reconciles the cache with state published by files
+// rather than applies (snapshot download): when visibility passes a domain's
+// applied frontier, every entry is dropped and the frontiers advance, so
+// pre-publication views cannot refill them. A no-op when visibility stays
+// within what applies covered.
+func (a Applier) AbsorbFilesExtension(f Frontier) {
+	if a.c == nil || f == nil {
+		return
+	}
+	a.c.absorbFilesExtension(f)
+}
+
 // Unwind invalidates, across all caches, entries reflecting state above
 // unwindToTxNum on a now-dead fork, and lowers the applied frontiers.
 func (a Applier) Unwind(unwindToTxNum uint64) {
