@@ -39,12 +39,9 @@ type seenEnvelopeKey struct {
 	builderIndex    uint64
 }
 
-// pendingEnvelopeKey tracks envelopes waiting for their block to arrive.
-// We use (blockRoot, envelopeHash) as key instead of just blockRoot because:
-//   - Multiple envelopes (including forged ones) may arrive before the block
-//   - Using only blockRoot would cause later arrivals to overwrite earlier ones
-//   - If a forged envelope overwrites the valid one, we lose the valid envelope
-//   - With envelopeHash, all candidates are kept and validated when block arrives
+// pendingEnvelopeKey identifies one envelope candidate for a block. Including
+// envelopeHash keeps competing candidates separate until validation, so an
+// invalid candidate cannot prevent a valid candidate from being queued.
 type pendingEnvelopeKey struct {
 	blockRoot    common.Hash
 	envelopeHash common.Hash

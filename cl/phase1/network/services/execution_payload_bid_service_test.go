@@ -803,7 +803,7 @@ func TestExecutionPayloadBidServicePendingStaleSlotDropped(t *testing.T) {
 	})
 	service.pending.count.Store(1)
 
-	// Bid slot 100 is neither current (200) nor next slot → dropped
+	// A stale slot removes the job before any dependency retry.
 	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(200))
 
 	service.pending.processPending(context.Background())
@@ -813,9 +813,9 @@ func TestExecutionPayloadBidServicePendingStaleSlotDropped(t *testing.T) {
 	require.False(t, exists)
 }
 
-// TestExecutionPayloadBidServiceLoopProcessesQueuedBid exercises the background
-// loop end-to-end: a bid queued while proposer preferences are missing is
-// picked up and validated once the preferences arrive.
+// TestExecutionPayloadBidServiceLoopProcessesQueuedBid exercises the real
+// polling loop, including its condition-variable wakeup and retry after the
+// missing dependency becomes available.
 func TestExecutionPayloadBidServiceLoopProcessesQueuedBid(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -832,7 +832,6 @@ func TestExecutionPayloadBidServiceLoopProcessesQueuedBid(t *testing.T) {
 	defer cancel()
 	go service.pending.loop(ctx)
 
-	// No preferences yet → queued as pending
 	require.ErrorIs(t, service.ProcessMessage(context.Background(), nil, msg), ErrIgnore)
 	require.Equal(t, int32(1), service.pending.count.Load())
 
