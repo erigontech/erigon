@@ -1626,6 +1626,9 @@ func TestGetPayloadBodiesNonCanonicalBlockAccessList(t *testing.T) {
 	require.NoError(t, err)
 	// Insert the fork blocks without a fork choice update so they stay
 	// non-canonical, with no stored BAL sidecar.
+	for _, block := range fork.Blocks {
+		block.SetBlockAccessList(nil)
+	}
 	insertRes, err := m.InsertBlocks(ctx, fork.Blocks)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, insertRes)
