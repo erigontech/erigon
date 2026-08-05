@@ -2022,7 +2022,7 @@ func TestReceiptAsOf_InFlightBlockLogIndex(t *testing.T) {
 	committed, err := execctx.NewSharedDomains(ctx, tx, logger)
 	require.NoError(t, err)
 	defer committed.Close()
-	require.NoError(t, rawtemporaldb.AppendReceipt(committed.AsPutDel(tx), committedLogIdx, 0, 0, committedTxNum))
+	require.NoError(t, rawtemporaldb.AppendReceiptMetadata(committed.AsPutDel(tx), committedLogIdx, 0, 0, committedTxNum))
 	require.NoError(t, committed.Flush(ctx, tx))
 	committed.Close()
 
@@ -2034,7 +2034,7 @@ func TestReceiptAsOf_InFlightBlockLogIndex(t *testing.T) {
 	require.NoError(t, err)
 	defer sd.Close()
 	require.NoError(t, sd.InitBlockOverlay(tx, t.TempDir()))
-	require.NoError(t, rawtemporaldb.AppendReceipt(sd.AsPutDel(tx), inFlightLogIdx, 0, 0, inFlightTxNum))
+	require.NoError(t, rawtemporaldb.AppendReceiptMetadata(sd.AsPutDel(tx), inFlightLogIdx, 0, 0, inFlightTxNum))
 
 	_, _, got, err := rawtemporaldb.ReceiptAsOf(sd.BlockOverlay().NewReadView(tx), inFlightTxNum+1)
 	require.NoError(t, err)
