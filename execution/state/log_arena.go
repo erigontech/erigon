@@ -33,8 +33,9 @@ import (
 const (
 	// Entries kept for reuse, 168B struct + 8B pointer + 128B topics = 304B each,
 	// so 1024 of them is ~300KB. One transaction emits at most
-	// MaxTxnGasLimit/LogGas = 16777216/375 = 44739; mainnet blocks peak near 90
-	// in one transaction.
+	// MaxTxnGasLimit/LogGas = 16777216/375 = 44739, but the pool never shrinks:
+	// sizing for that would park 44739*304B = 13MB in every arena that ever ran
+	// such a transaction. Mainnet peaks near 90 logs in one transaction.
 	maxPooledLogEntries = 1024
 
 	// Data kept with those entries. One transaction emits at most
