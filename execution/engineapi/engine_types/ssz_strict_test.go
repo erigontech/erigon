@@ -77,6 +77,20 @@ func TestExecutionPayloadDecodeSSZStrictRejectsNonCanonicalOffset(t *testing.T) 
 	)
 }
 
+func TestExecutionPayloadDecodeSSZStrictRejectsOversizedExtraData(t *testing.T) {
+	const version = clparams.BellatrixVersion
+	payload := NewExecutionPayloadSSZ(version)
+	payload.ExtraData = make(hexutil.Bytes, 32)
+	encoded, err := payload.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	const txsOffsetPosition = 504
+	malformed := insertSSZGap(encoded, len(encoded), txsOffsetPosition)
+
+	require.NoError(t, NewExecutionPayloadSSZ(version).DecodeSSZ(malformed, int(version)))
+	require.ErrorIs(t, NewExecutionPayloadSSZ(version).DecodeSSZStrict(malformed, int(version)), commonssz.ErrTooBigList)
+}
+
 func TestPayloadAttributesDecodeSSZStrictRejectsTrailingBytes(t *testing.T) {
 	attributes := NewPayloadAttributesSSZ(clparams.BellatrixVersion)
 	encoded, err := attributes.EncodeSSZ(nil)
