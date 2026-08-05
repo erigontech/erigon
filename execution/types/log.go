@@ -439,24 +439,20 @@ func (l *Log) DecodeRLP(s *rlp.Stream) error {
 	return err
 }
 
-// RlpHashLogs hashes the per-transaction logs as one RLP list, without
-// flattening them into a single slice first.
-func RlpHashLogs(byTx []Logs) common.Hash {
+// RlpHashLogs hashes the logs as one RLP list, encoding them through a shared
+// buffer rather than one per entry.
+func RlpHashLogs(logs Logs) common.Hash {
 	return rlpPayloadHash(func(w io.Writer, b []byte) error {
 		payloadSize := 0
-		for _, logs := range byTx {
-			for _, l := range logs {
-				payloadSize += l.encodingSize()
-			}
+		for _, l := range logs {
+			payloadSize += l.encodingSize()
 		}
 		if err := rlp.EncodeListPrefix(payloadSize, w, b); err != nil {
 			return err
 		}
-		for _, logs := range byTx {
-			for _, l := range logs {
-				if err := l.encodeRLP(w, b); err != nil {
-					return err
-				}
+		for _, l := range logs {
+			if err := l.encodeRLP(w, b); err != nil {
+				return err
 			}
 		}
 		return nil

@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -83,8 +84,8 @@ func TestAllocLogClearsReusedEntry(t *testing.T) {
 	require.False(t, reused.Removed)
 }
 
-// Growing the outer buffer past its capacity must keep the groups already
-// filled: Logs and LogsRlpHash read every transaction of the block.
+// Growing the run past its capacity must keep what earlier transactions wrote:
+// Logs and LogsRlpHash read the whole block.
 func TestAllocLogKeepsEarlierTxsAcrossGrowth(t *testing.T) {
 	t.Parallel()
 
@@ -93,10 +94,11 @@ func TestAllocLogKeepsEarlierTxsAcrossGrowth(t *testing.T) {
 		ibs.SetTxContext(1, txIndex)
 		ibs.AddLog(&types.Log{Address: common.BytesToAddress([]byte{byte(txIndex)})})
 	}
+	logs := ibs.Logs()
+	require.Len(t, logs, 64)
 	for txIndex := range 64 {
-		logs := ibs.GetRawLogs(txIndex)
-		require.Len(t, logs, 1, "tx %d lost its logs", txIndex)
-		require.Equal(t, common.BytesToAddress([]byte{byte(txIndex)}), logs[0].Address)
+		require.Equal(t, common.BytesToAddress([]byte{byte(txIndex)}), logs[txIndex].Address, "tx %d", txIndex)
+		require.Equal(t, hexutil.Uint(txIndex), logs[txIndex].TxIndex)
 	}
 }
 
@@ -187,7 +189,7 @@ func TestResetKeepsLogsWithinBudget(t *testing.T) {
 		ibs.AddLog(&types.Log{Address: common.HexToAddress("0x1"), Data: make([]byte, 64)})
 	}
 	before := make(map[*types.Log]struct{}, burst)
-	for _, lp := range ibs.logs.byTx[1] {
+	for _, lp := range ibs.logs.entries {
 		before[lp] = struct{}{}
 	}
 
@@ -267,31 +269,30 @@ func TestLogPoolRejectsOversizedData(t *testing.T) {
 	require.Nil(t, ibs.logs.pool[0].Data)
 }
 
-// One outlier transaction must not leave its slots behind.
-func TestResetDropsOutsizedTxSlots(t *testing.T) {
+// An outlier must not leave the array that held it behind.
+func TestResetDropsOutsizedLogSlots(t *testing.T) {
 	t.Parallel()
 
 	ibs := New(nil)
 	ibs.SetTxContext(1, 0)
-	for range maxLogSlotsPerTx + 1 {
+	for range maxRetainedLogSlots + 1 {
 		ibs.AllocLog(common.HexToAddress("0x1"), 0, 8)
 	}
-	require.Greater(t, cap(ibs.logs.byTx[1]), maxLogSlotsPerTx)
+	require.Greater(t, cap(ibs.logs.entries), maxRetainedLogSlots)
 
 	ibs.Reset()
-	require.Nil(t, ibs.logs.byTx[:cap(ibs.logs.byTx)][1])
+	require.Zero(t, cap(ibs.logs.entries))
 }
 
 func retainedLogs(ibs *IntraBlockState) (entries, slotCap, dataBytes int) {
-	for _, slot := range ibs.logs.byTx[:cap(ibs.logs.byTx)] {
-		slotCap += cap(slot)
-		for _, lp := range slot[:cap(slot)] {
-			if lp == nil {
-				continue
-			}
-			entries++
-			dataBytes += cap(lp.Data)
+	run := ibs.logs.entries
+	slotCap = cap(run)
+	for _, lp := range run[:cap(run)] {
+		if lp == nil {
+			continue
 		}
+		entries++
+		dataBytes += cap(lp.Data)
 	}
 	return entries, slotCap, dataBytes
 }
@@ -307,7 +308,7 @@ func TestRevertKeepsNormalLogBufferForReuse(t *testing.T) {
 		Address: common.HexToAddress("0x1"),
 		Data:    []byte{1, 2, 3},
 	})
-	first := ibs.logs.byTx[1][0]
+	first := ibs.logs.entries[0]
 	ibs.RevertToSnapshot(snap, nil)
 
 	lp := ibs.AllocLog(common.HexToAddress("0x2"), 0, 2)
@@ -612,16 +613,15 @@ func TestAllocLogPreservesCapacityAcrossRevert(t *testing.T) {
 	for i := range 8 {
 		ibs.AddLog(&types.Log{Address: common.Address{byte(i)}})
 	}
-	require.Len(t, ibs.logs.byTx, 2)
-	capBefore := cap(ibs.logs.byTx[1])
+	capBefore := cap(ibs.logs.entries)
 	require.GreaterOrEqual(t, capBefore, 8)
 
 	ibs.RevertToSnapshot(snap, nil)
-	require.Len(t, ibs.logs.byTx, 1) // the tx's slot was truncated off the outer buffer
+	require.Empty(t, ibs.logs.entries, "the reverted logs are gone")
 
 	ibs.AddLog(&types.Log{Address: common.Address{0xff}})
-	require.Len(t, ibs.logs.byTx, 2)
-	require.Equal(t, capBefore, cap(ibs.logs.byTx[1]), "inner log buffer capacity must survive revert+relog")
+	require.Len(t, ibs.logs.entries, 1)
+	require.Equal(t, capBefore, cap(ibs.logs.entries), "the array survives revert+relog")
 }
 
 // TestLogIndexIsBlockWide pins that AddLog stamps a block-wide log index:
@@ -642,15 +642,33 @@ func TestLogIndexIsBlockWide(t *testing.T) {
 	ibs.RevertToSnapshot(snap, nil)
 	ibs.AddLog(&types.Log{Address: common.Address{0x04}})
 
-	tx0, tx1 := ibs.GetRawLogs(0), ibs.GetRawLogs(1)
-	require.Len(t, tx0, 2)
-	require.Len(t, tx1, 1)
-	require.Equal(t, hexutil.Uint(0), tx0[0].Index)
-	require.Equal(t, hexutil.Uint(1), tx0[1].Index)
-	require.Equal(t, hexutil.Uint(2), tx1[0].Index, "index continues across txs and reuses a reverted slot")
+	block := ibs.Logs()
+	require.Len(t, block, 3)
+	require.Equal(t, hexutil.Uint(0), block[0].Index)
+	require.Equal(t, hexutil.Uint(1), block[1].Index)
+	require.Equal(t, hexutil.Uint(2), block[2].Index, "index continues across txs and reuses a reverted slot")
+	require.Len(t, ibs.GetRawLogs(1), 1, "the transaction in context has one")
 
 	ibs.Reset()
 	ibs.SetTxContext(2, 0)
 	ibs.AddLog(&types.Log{Address: common.Address{0x05}})
 	require.Equal(t, hexutil.Uint(0), ibs.GetRawLogs(0)[0].Index, "next block restarts at zero")
+}
+
+// Reading a transaction the run has moved past answers empty, which a receipt
+// records as "emitted no logs". A transaction that simply emitted nothing is
+// newer than the tail, not older, so it stays legal.
+func TestGetLogsOfPastTxAsserts(t *testing.T) {
+	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
+	dbg.AssertEnabled = true
+
+	ibs := New(nil)
+	ibs.SetTxContext(1, 0)
+	ibs.AddLog(&types.Log{Address: common.HexToAddress("0x1")})
+	ibs.SetTxContext(1, 5)
+	ibs.AddLog(&types.Log{Address: common.HexToAddress("0x2")})
+
+	require.Len(t, ibs.GetRawLogs(5), 1, "the tail")
+	require.Empty(t, ibs.GetRawLogs(9), "a later transaction emitted nothing")
+	require.Panics(t, func() { ibs.GetRawLogs(0) }, "the run has moved past tx 0")
 }

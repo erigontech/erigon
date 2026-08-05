@@ -84,13 +84,10 @@ func TestLogsRlpHashMatchesReflectionHash(t *testing.T) {
 	samples := logEncodingSamples()
 
 	var flat Logs
-	var byTx []Logs
 	for _, l := range samples {
 		flat = append(flat, l)
-		byTx = append(byTx, Logs{l})
 	}
-	byTx = append(byTx, nil, Logs{})
 
-	require.Equal(t, RlpHash(flat), RlpHashLogs(byTx))
+	require.Equal(t, RlpHash(flat), RlpHashLogs(flat))
 	require.Equal(t, RlpHash(Logs(nil)), RlpHashLogs(nil))
 }
