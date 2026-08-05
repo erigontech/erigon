@@ -77,7 +77,7 @@ func NewStateCache(accountBytes, storageBytes, codeBytes, addrBytes datasize.Byt
 	sc := &StateCache{}
 	if !dbg.EnvBool("STATE_CACHE_FILLS", true) {
 		sc.disableFills = true
-		log.Info("[cache] STATE_CACHE_FILLS=false — read fills disabled, only flush applies populate the cache")
+		log.Info("[cache] STATE_CACHE_FILLS=false — read fills disabled, only post-commit applies populate the cache")
 	}
 	sc.caches[kv.AccountsDomain] = newDomainCacheBytes(accountBytes, avgAccountEntryBytes, mode)
 	sc.caches[kv.StorageDomain] = newDomainCacheBytes(storageBytes, avgStorageEntryBytes, mode)

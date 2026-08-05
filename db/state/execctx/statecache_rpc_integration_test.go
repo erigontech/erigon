@@ -269,7 +269,7 @@ func testEmbeddedRPCCacheViewDoesNotResurrectDeletedValue(t *testing.T, domain k
 
 // The account-deletion mirror of TestEmbeddedRPCCacheViewDoesNotResurrectDeletedCode.
 // DomainDel(AccountsDomain) cascades a code-domain delete at the SD layer, so the
-// flush applies it and the code frontier advances past every pre-deletion view —
+// commit applies it and the code frontier advances past every pre-deletion view —
 // and the cache-level code-fill admission also checks the accounts frontier. This
 // pins both layers: losing either must not let a pre-deletion RPC view refill the
 // deleted account's code.

@@ -106,7 +106,7 @@ func TestCodeHashForAddr_CacheSourcedRecordDoesNotSeedMapping(t *testing.T) {
 	_, ok := sc.View(nil).Get(kv.AccountsDomain, addr[:])
 	require.True(t, ok, "the committed record must be served by the accounts cache")
 	_, ok = sc.View(nil).GetAddrCodeHash(addr[:])
-	require.False(t, ok, "the flush apply must leave the derived mapping empty")
+	require.False(t, ok, "the post-commit apply must leave the derived mapping empty")
 
 	roTx, err := db.BeginTemporalRo(ctx)
 	require.NoError(t, err)

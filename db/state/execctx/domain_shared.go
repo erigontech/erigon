@@ -229,7 +229,7 @@ type SharedDomains struct {
 	parent *SharedDomains
 
 	// stateCache is an optional cache for state data (accounts, storage, code);
-	// cacheApplier is its authoritative writer handle (flush/unwind only).
+	// cacheApplier is its authoritative writer handle (commit/unwind only).
 	stateCache   *cache.StateCache
 	cacheApplier cache.Applier
 

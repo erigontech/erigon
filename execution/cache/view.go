@@ -155,9 +155,9 @@ func (v ReadView) FillCodeSize(codeHash []byte, size int, txNum uint64) {
 	v.c.putCodeSizeByHash(codeHash, size, txNum)
 }
 
-// Applier is the authoritative writer handle of a StateCache: committed
-// updates, unwinds and clears. It belongs to the authoritative mutation path
-// — the SharedDomains flush/unwind code. The zero value is a no-op.
+// Applier is the authoritative writer handle of a StateCache: post-commit
+// applies, unwinds and clears. It belongs to the authoritative mutation path
+// — the SharedDomains commit/unwind code. The zero value is a no-op.
 type Applier struct {
 	c *StateCache
 }

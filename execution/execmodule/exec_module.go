@@ -325,8 +325,7 @@ func newDomainStateCache(budget datasize.ByteSize) *cache.StateCache {
 }
 
 // Close releases the domain state cache's reservation in the shared memory
-// envelope. For harnesses that build many modules per process; production
-// modules live for the process.
+// envelope.
 func (e *ExecModule) Close() {
 	if e.stateCache != nil {
 		e.stateCache.Close()

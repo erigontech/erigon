@@ -256,7 +256,7 @@ func TestAssertStateCache_NoFalsePanicDuringInFlightUnwindStepZero(t *testing.T)
 }
 
 // The read-fill after a fall-through read must not replace a live cache
-// entry: it never carries newer information than a flush-apply, and during an
+// entry: it never carries newer information than a post-commit apply, and during an
 // in-flight unwind the bounded DB read can even return the not-yet-deleted
 // dying row.
 func TestReadFill_DoesNotClobberLiveEntry(t *testing.T) {

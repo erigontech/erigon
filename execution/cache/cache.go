@@ -30,8 +30,8 @@
 // frontier — the exclusive txNum end of what its tx can see, so a view with
 // frontier N sees txNums < N — against the applied end, under the same lock
 // applies take. The Applier handle, held by the SharedDomains
-// flush/unwind path, performs the authoritative writes: committed updates,
-// unwinds, clears.
+// commit/unwind path, performs the authoritative writes: post-commit
+// applies, unwinds, clears.
 package cache
 
 // Cache is the interface for domain caches.
