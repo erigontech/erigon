@@ -77,11 +77,13 @@ type StateCache struct {
 	// The pad keeps the counters — RMWed by every fill — off the cache line
 	// of the read-mostly fields above, which every fill reads.
 	_ [64]byte
-	// fillsAdmitted/fillsRejected count admission-gate outcomes, reported by
-	// PrintStatsAndReset — the lens on how much reader warming survives at a
-	// given commit cadence.
-	fillsAdmitted atomic.Uint64
-	fillsRejected atomic.Uint64
+	// Fill-attempt outcomes, reported by PrintStatsAndReset — the lens on how
+	// much reader warming survives at a given commit cadence. noFrontier
+	// counts attempts dying on an inexact frontier (ok=false) before the
+	// admission compare; without it admitted+rejected undercounts attempts.
+	fillsAdmitted   atomic.Uint64
+	fillsRejected   atomic.Uint64
+	fillsNoFrontier atomic.Uint64
 }
 
 // NewStateCache creates a new StateCache with the specified byte capacities.
@@ -528,9 +530,9 @@ func (c *StateCache) PrintStatsAndReset() {
 	if c == nil {
 		return
 	}
-	admitted, rejected := c.fillsAdmitted.Swap(0), c.fillsRejected.Swap(0)
-	if admitted+rejected > 0 {
-		log.Info("[cache] fill admission", "admitted", admitted, "rejected", rejected)
+	admitted, rejected, noFrontier := c.fillsAdmitted.Swap(0), c.fillsRejected.Swap(0), c.fillsNoFrontier.Swap(0)
+	if admitted+rejected+noFrontier > 0 {
+		log.Info("[cache] fill admission", "admitted", admitted, "rejected", rejected, "noFrontier", noFrontier)
 	}
 	if acc, ok := c.caches[kv.AccountsDomain].(*DomainCache); ok {
 		acc.PrintStatsAndReset("Account")

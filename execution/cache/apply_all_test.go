@@ -191,6 +191,14 @@ func TestFillAdmissionCounters(t *testing.T) {
 	fresh2 := c.View(FrontierFunc(func(kv.Domain) (uint64, bool) { return 300, true }))
 	fresh2.SeedAddrCodeHash(key, [32]byte{7}, 250)
 	require.EqualValues(t, 2, c.fillsAdmitted.Load(), "an admitted addr-codehash seed must count")
+
+	inexact := c.View(FrontierFunc(func(kv.Domain) (uint64, bool) { return 0, false }))
+	inexact.Fill(kv.AccountsDomain, key, []byte{1}, 50)
+	inexact.SeedAddrCodeHash(key, [32]byte{7}, 50)
+	require.EqualValues(t, 2, c.fillsNoFrontier.Load(),
+		"fills dying on an inexact frontier must count — admitted+rejected alone undercounts attempts")
+	require.EqualValues(t, 2, c.fillsAdmitted.Load())
+	require.EqualValues(t, 2, c.fillsRejected.Load())
 }
 
 func BenchmarkApplierApply(b *testing.B) {

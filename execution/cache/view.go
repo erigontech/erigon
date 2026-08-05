@@ -114,11 +114,13 @@ func (v ReadView) Fill(domain kv.Domain, key []byte, value []byte, readTxNum uin
 	}
 	visibleEnd, ok := v.frontier.DomainVisibleEnd(domain)
 	if !ok {
+		v.c.fillsNoFrontier.Add(1)
 		return
 	}
 	if domain == kv.CodeDomain {
 		accountsEnd, ok := v.frontier.DomainVisibleEnd(kv.AccountsDomain)
 		if !ok {
+			v.c.fillsNoFrontier.Add(1)
 			return
 		}
 		v.c.fillCodeIfFresh(key, value, readTxNum, visibleEnd, accountsEnd)
@@ -136,6 +138,7 @@ func (v ReadView) SeedAddrCodeHash(addr []byte, h [32]byte, txNum uint64) {
 	}
 	visibleEnd, ok := v.frontier.DomainVisibleEnd(kv.AccountsDomain)
 	if !ok {
+		v.c.fillsNoFrontier.Add(1)
 		return
 	}
 	v.c.seedAddrCodeHash(addr, h, txNum, visibleEnd)
