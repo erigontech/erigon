@@ -69,12 +69,13 @@ type logArena struct {
 func (a *logArena) alloc(j *journal, addr common.Address, txIndex, numTopics, dataSize int) *types.Log {
 	j.addLogChange(txIndex)
 	logIdx := len(a.entries)
-	a.entries = slices.Grow(a.entries, 1)[:logIdx+1]
+	entries := slices.Grow(a.entries, 1)[:logIdx+1]
+	a.entries = entries
 
 	// Always take: reset and revertLast empty a slot before shrinking past it, so
 	// a slot that still held an entry would be one two transactions share.
 	lp := a.take()
-	a.entries[logIdx] = lp
+	entries[logIdx] = lp
 	lp.Address = addr
 	lp.Topics = slices.Grow(lp.Topics[:0], numTopics)[:numTopics]
 	lp.Data = slices.Grow(lp.Data[:0], dataSize)[:dataSize]
@@ -118,31 +119,33 @@ func (a *logArena) put(lp *types.Log) {
 // block goes empty. It walks only what the caller wrote, not the block's width.
 func (a *logArena) reset() {
 	a.indexInBlock = 0
-	for i, lp := range a.entries {
+	entries := a.entries
+	for i, lp := range entries {
 		if lp == nil {
 			continue
 		}
 		a.put(lp)
-		a.entries[i] = nil
+		entries[i] = nil
 	}
-	if cap(a.entries) > maxRetainedLogSlots {
+	if cap(entries) > maxRetainedLogSlots {
 		a.entries = nil // an outlier keeps its entries, not the array that held them
 	} else {
-		a.entries = a.entries[:0]
+		a.entries = entries[:0]
 	}
 }
 
 // revertLast drops the entry allocated last, returning it to the pool.
 func (a *logArena) revertLast(txIndex int) {
-	last := len(a.entries) - 1
+	entries := a.entries
+	last := len(entries) - 1
 	if last < 0 {
 		panic(fmt.Sprintf("can't revert log of tx %d: none were emitted", txIndex))
 	}
-	if lp := a.entries[last]; lp != nil {
+	if lp := entries[last]; lp != nil {
 		a.put(lp)
-		a.entries[last] = nil
+		entries[last] = nil
 	}
-	a.entries = a.entries[:last]
+	a.entries = entries[:last]
 	a.indexInBlock--
 }
 
@@ -150,17 +153,18 @@ func (a *logArena) revertLast(txIndex int) {
 // in one run rather than grouped, and a transaction's own are the tail of it,
 // so any other transaction reads as empty.
 func (a *logArena) forTx(txIndex int) types.Logs {
-	i := len(a.entries)
-	if dbg.AssertEnabled && i > 0 && txIndex < int(a.entries[i-1].TxIndex) {
+	entries := a.entries
+	i := len(entries)
+	if dbg.AssertEnabled && i > 0 && txIndex < int(entries[i-1].TxIndex) {
 		// Newer than the tail is a transaction that emitted nothing, which is
 		// how most of them end. Older is a caller reading what it has left.
 		panic(fmt.Sprintf("logs of tx %d asked for, the run has reached tx %d",
-			txIndex, int(a.entries[i-1].TxIndex)))
+			txIndex, int(entries[i-1].TxIndex)))
 	}
-	for i > 0 && int(a.entries[i-1].TxIndex) == txIndex {
+	for i > 0 && int(entries[i-1].TxIndex) == txIndex {
 		i--
 	}
-	return a.entries[i:]
+	return entries[i:]
 }
 
 func (a *logArena) release() { *a = logArena{} }
