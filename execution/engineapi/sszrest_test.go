@@ -571,6 +571,34 @@ func TestSSZRESTBlobsResponseRoundTrip(t *testing.T) {
 	})
 }
 
+// An unavailable BlobEntry carries zero-valued contents. For v1 the spec
+// mandates the layout: a zero-filled blob and proof. For v2 the spec leaves
+// the unavailable contents unstated; the empty (not zero-filled) cell_proofs
+// list pinned here is the SSZ zero value and matches go-ethereum.
+func TestSSZRESTBlobsUnavailableEntryByteLayout(t *testing.T) {
+	t.Run("v1", func(t *testing.T) {
+		enc, err := encodeBlobsV1Response([]*engine_types.BlobAndProofV1{nil})
+		require.NoError(t, err)
+		want := make([]byte, 4+1+sszBlobBytes+sszKZGBytes)
+		binary.LittleEndian.PutUint32(want, 4) // offset of the entries list
+		// available=false and the zero-filled blob and proof stay zero
+		require.Len(t, enc, len(want))
+		require.Equal(t, want, enc)
+	})
+
+	t.Run("v2", func(t *testing.T) {
+		enc, err := encodeBlobsV2Response([]*engine_types.BlobAndProofV2{nil})
+		require.NoError(t, err)
+		want := make([]byte, 4+4+1+4+sszBlobBytes+4)
+		binary.LittleEndian.PutUint32(want, 4)                                // offset of the entries list
+		binary.LittleEndian.PutUint32(want[4:], 4)                            // offset of the single entry
+		binary.LittleEndian.PutUint32(want[9:], 5)                            // offset of contents within the entry
+		binary.LittleEndian.PutUint32(want[13+sszBlobBytes:], sszBlobBytes+4) // empty cell_proofs list offset
+		require.Len(t, enc, len(want))
+		require.Equal(t, want, enc)
+	})
+}
+
 func TestSSZRESTHashListRequestRoundTrip(t *testing.T) {
 	hashes := []common.Hash{common.HexToHash("0xaa"), common.HexToHash("0xbb")}
 	for _, limit := range []int{sszMaxBodiesRequest, sszMaxGetBlobHashes} {
