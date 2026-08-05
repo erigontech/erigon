@@ -181,7 +181,8 @@ type Update struct {
 
 // ApplyAll is Apply over a batch: the write lock is taken once per chunk
 // instead of once per key, bounding how long concurrent fills wait. Code
-// values are cloned (and hashed) outside the lock.
+// values are cloned (and hashed) outside the lock; the updates slice is
+// consumed and may be rewritten in place.
 func (a Applier) ApplyAll(updates []Update) {
 	if a.c == nil {
 		return

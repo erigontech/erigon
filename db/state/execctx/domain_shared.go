@@ -998,12 +998,11 @@ func (sd *SharedDomains) flushMem(ctx context.Context, tx kv.RwTx, opts ...kv.Fl
 	return sd.mem.Flush(ctx, tx, opts...)
 }
 
-type cacheUpdate struct {
-	domain kv.Domain
-	key    []byte
-	val    []byte
-	step   kv.Step
-	txN    uint64
+type branchUpdate struct {
+	key  []byte
+	val  []byte
+	step kv.Step
+	txN  uint64
 }
 
 // Commit flushes the in-memory batch into tx, commits tx, and only then applies
@@ -1048,7 +1047,7 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	// no cache apply ever runs ahead of durable MDBX state. (Reads through
 	// this SD between flush and a failed commit can still fill flushed
 	// values; a failed commit is fatal, so they die with the process.)
-	var pendingBranch []cacheUpdate
+	var pendingBranch []branchUpdate
 	var pendingState []cache.Update
 	stashState := func(domain kv.Domain) kv.FlushOption {
 		return kv.WithFlushCallback(domain, func(k []byte, v []byte, step kv.Step, txNum uint64) {
@@ -1063,12 +1062,11 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	var opts []kv.FlushOption
 	if sd.branchCache != nil {
 		opts = append(opts, kv.WithFlushCallback(kv.CommitmentDomain, func(k []byte, v []byte, step kv.Step, txNum uint64) {
-			pendingBranch = append(pendingBranch, cacheUpdate{
-				domain: kv.CommitmentDomain,
-				key:    append([]byte(nil), k...),
-				val:    append([]byte(nil), v...),
-				step:   step,
-				txN:    txNum,
+			pendingBranch = append(pendingBranch, branchUpdate{
+				key:  append([]byte(nil), k...),
+				val:  append([]byte(nil), v...),
+				step: step,
+				txN:  txNum,
 			})
 		}))
 	}
