@@ -169,3 +169,5 @@ func MustParseUints(strNum, separator string) []uint64 {
 	}
 	return ints
 }
+
+var UsePrefixIndex = EnvBool("USE_PREFIX_INDEX", false)
