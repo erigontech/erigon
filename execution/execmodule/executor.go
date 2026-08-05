@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
@@ -177,10 +178,25 @@ func (pe *PipelineExecutor) RunLoop(ctx context.Context, sd *execctx.SharedDomai
 	return tx, sd, nil
 }
 
+// newFrozenBlocksSD builds a SharedDomains for frozen-block processing wired
+// to the module's caches: its post-commit applies overwrite pre-catchup cache
+// entries and advance the admission frontier, so read views opened before
+// catchup cannot refill stale state.
+func (pe *PipelineExecutor) newFrozenBlocksSD(ctx context.Context, tx kv.TemporalRwTx, stateCache *cache.StateCache, codeStore *cache.CodeStore) (*execctx.SharedDomains, error) {
+	sd, err := execctx.NewSharedDomains(ctx, tx, pe.logger)
+	if err != nil {
+		return nil, err
+	}
+	sd.SetInMemHistoryReads(inMemHistoryReads)
+	sd.SetStateCache(stateCache)
+	sd.SetCodeStore(codeStore)
+	return sd, nil
+}
+
 // ProcessFrozenBlocks runs the pipeline over snapshot blocks at startup.
 // It downloads block files, then executes them in a hasMore loop until
 // all frozen blocks are processed.
-func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stageloop.Hook, onlySnapDownload bool) error {
+func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stageloop.Hook, onlySnapDownload bool, stateCache *cache.StateCache, codeStore *cache.CodeStore) error {
 	sawZeroBlocksTimes := 0
 	tx, err := pe.db.BeginTemporalRw(ctx)
 	if err != nil {
@@ -203,12 +219,11 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 		return tx.Commit()
 	}
 
-	doms, err := execctx.NewSharedDomains(ctx, tx, pe.logger)
+	doms, err := pe.newFrozenBlocksSD(ctx, tx, stateCache, codeStore)
 	if err != nil {
 		return err
 	}
 	defer func() { doms.Close() }() // RunLoop rotates doms; close whichever is current at exit
-	doms.SetInMemHistoryReads(inMemHistoryReads)
 
 	var finishStageBeforeSync uint64
 	if hook != nil {
@@ -247,11 +262,10 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 				return nil, nil, err
 			}
 			tx = newTx
-			newSD, err := execctx.NewSharedDomains(ctx, newTx, pe.logger)
+			newSD, err := pe.newFrozenBlocksSD(ctx, newTx, stateCache, codeStore)
 			if err != nil {
 				return nil, nil, err
 			}
-			newSD.SetInMemHistoryReads(inMemHistoryReads)
 			hook.NotifySyncState(newTx)
 			return newTx, newSD, nil
 		},
