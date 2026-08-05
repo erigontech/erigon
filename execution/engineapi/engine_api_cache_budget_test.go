@@ -47,6 +47,7 @@ func TestEngineApiNodeCloseReleasesCacheBudget(t *testing.T) {
 		CoinbaseKey: coinbaseKey,
 	})
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = eat.Close() })
 	require.Greater(t, cachebudget.Global.Used(), usedBefore,
 		"a running node must hold cache-budget reservations")
 
