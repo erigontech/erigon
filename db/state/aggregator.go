@@ -55,6 +55,7 @@ import (
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
@@ -96,7 +97,10 @@ type Aggregator struct {
 	// domains' visible ends while set; Close clears it (shutdown is not a
 	// fill window).
 	visibilityLoweringForbidden atomic.Bool
-	snapshotBuildSema           *semaphore.Weighted
+	// boundStateCache, when set, is reconciled with file publications at every
+	// visibility recalculation (guarded by dirtyFilesLock).
+	boundStateCache   *cache.StateCache
+	snapshotBuildSema *semaphore.Weighted
 
 	disableHistory      bool
 	branchCacheDisabled bool
@@ -558,6 +562,42 @@ func (a *Aggregator) ForbidVisibilityLowering() {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 	a.visibilityLoweringForbidden.Store(true)
+}
+
+// BindStateCache binds a fill-enabled StateCache to this aggregator: forbids
+// visibility lowering and reconciles the cache with every file publication —
+// at the visibility recalculation itself, so no caller or error path can
+// publish files without the caches absorbing the extension. Reconciles
+// immediately: files may already be visible when the cache is wired.
+func (a *Aggregator) BindStateCache(sc *cache.StateCache) {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	a.visibilityLoweringForbidden.Store(true)
+	a.boundStateCache = sc
+	if v := a.visible.Load(); v != nil {
+		a.reconcileCachesLocked(v)
+	}
+}
+
+// reconcileCachesLocked absorbs the bundle's file visibility into the bound
+// StateCache and the aggregator-owned BranchCache. Runs under dirtyFilesLock,
+// before a new bundle is published, so readers never see extended files while
+// stale cache entries live.
+func (a *Aggregator) reconcileCachesLocked(v *aggregatorVisible) {
+	if sc := a.boundStateCache; sc != nil {
+		sc.Applier().AbsorbFilesExtension(cache.FrontierFunc(func(domain kv.Domain) (uint64, bool) {
+			dv := v.d[domain]
+			if dv == nil {
+				return 0, false
+			}
+			return visibleFiles(dv.files).EndTxNum(), true
+		}))
+	}
+	if cd := a.d[kv.CommitmentDomain]; cd != nil && cd.branchCache != nil {
+		if cv := v.d[kv.CommitmentDomain]; cv != nil {
+			cd.branchCache.AbsorbFilesExtension(visibleFiles(cv.files).EndTxNum())
+		}
+	}
 }
 
 func (a *Aggregator) setUnalignedDomain(d kv.Domain, v bool) {
@@ -1920,6 +1960,8 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 			}
 		}
 	}
+
+	a.reconcileCachesLocked(next)
 
 	old := a.visible.Load()
 	old.retired = retired

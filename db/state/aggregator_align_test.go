@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/cache"
 )
 
 // generateStandaloneIIFile writes files with a hardcoded step size of 10.
@@ -259,4 +260,73 @@ func TestVisibilityLowering_GuardsHistoryIIEnd(t *testing.T) {
 
 	require.Panics(t, func() { agg.recalcVisibleFiles(nil) },
 		"lowering a history-II end while values ends stay put must trip the forbid assert")
+}
+
+// File publication brings state that never flows through cache applies. The
+// visibility recalculation is the one chokepoint every publication funnels
+// through, so it reconciles both caches there — no caller or error path can
+// skip it.
+func TestFilePublicationReconcilesCaches(t *testing.T) {
+	t.Parallel()
+	_, agg := testDbAndAggregatorv3(t, alignStepSize)
+
+	sc := cache.NewStateCache(1<<20, 1<<20, 1<<20, 1<<20)
+	t.Cleanup(sc.Close)
+	agg.BindStateCache(sc)
+
+	key := make([]byte, 20)
+	key[0] = 1
+	preView := sc.View(cache.FrontierFunc(func(kv.Domain) (uint64, bool) { return 10, true }))
+	preView.Fill(kv.AccountsDomain, key, []byte{1}, 5)
+	_, ok := sc.View(nil).Get(kv.AccountsDomain, key)
+	require.True(t, ok)
+
+	prefix := []byte{0x01}
+	bc := agg.d[kv.CommitmentDomain].branchCache
+	require.NotNil(t, bc)
+	bc.Put(prefix, []byte{0xbb}, 0, 5)
+	_, _, ok = bc.Get(prefix)
+	require.True(t, ok)
+
+	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	generateStandaloneIIFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	require.NoError(t, agg.OpenFolder())
+
+	_, ok = sc.View(nil).Get(kv.AccountsDomain, key)
+	require.False(t, ok, "publication must drop pre-publication state entries")
+	preView.Fill(kv.AccountsDomain, key, []byte{1}, 5)
+	_, ok = sc.View(nil).Get(kv.AccountsDomain, key)
+	require.False(t, ok, "a pre-publication view must not refill past the publication")
+
+	_, _, ok = bc.Get(prefix)
+	require.False(t, ok, "publication must drop pre-publication branch entries")
+}
+
+// A cache bound after files are already visible starts with its admission
+// frontier at the published ends, so views older than the files cannot fill.
+func TestBindStateCacheAbsorbsExistingVisibility(t *testing.T) {
+	t.Parallel()
+	_, agg := testDbAndAggregatorv3(t, alignStepSize)
+
+	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	generateStandaloneIIFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	require.NoError(t, agg.OpenFolder())
+
+	sc := cache.NewStateCache(1<<20, 1<<20, 1<<20, 1<<20)
+	t.Cleanup(sc.Close)
+	agg.BindStateCache(sc)
+
+	key := make([]byte, 20)
+	key[0] = 1
+	older := sc.View(cache.FrontierFunc(func(kv.Domain) (uint64, bool) { return 10, true }))
+	older.Fill(kv.AccountsDomain, key, []byte{1}, 5)
+	_, ok := sc.View(nil).Get(kv.AccountsDomain, key)
+	require.False(t, ok, "a view older than the already-published files must not fill")
+
+	current := sc.View(cache.FrontierFunc(func(kv.Domain) (uint64, bool) { return 2 * alignStepSize, true }))
+	current.Fill(kv.AccountsDomain, key, []byte{2}, 15)
+	_, ok = sc.View(nil).Get(kv.AccountsDomain, key)
+	require.True(t, ok, "a view at the published ends fills normally")
 }
