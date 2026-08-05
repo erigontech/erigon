@@ -1007,11 +1007,7 @@ func (e *EngineServer) HandleNewPayload(
 		}
 	}
 
-	var bals [][]byte
-	if len(blockAccessListBytes) > 0 || block.BlockAccessListHash() != nil {
-		bals = [][]byte{blockAccessListBytes}
-	}
-	if err := e.chainRW.InsertBlocks(ctx, []*types.Block{block}, bals); err != nil {
+	if err := e.chainRW.InsertBlocks(ctx, []*types.Block{block}); err != nil {
 		if errors.Is(err, types.ErrBlockExceedsMaxRlpSize) {
 			return &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,

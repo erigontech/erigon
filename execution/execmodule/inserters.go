@@ -53,7 +53,7 @@ func (e *ExecModule) flushBlockOverlayToDB(ctx context.Context, sd *execctx.Shar
 	return nil
 }
 
-func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock) (ExecutionStatus, error) {
+func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (ExecutionStatus, error) {
 	// Serialize behind any in-flight exec-module op, blocking rather than failing fast with Busy.
 	start := time.Now()
 	// Timed across the whole call so the metric includes semaphore wait.
@@ -99,8 +99,8 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 	blockOverlay := sd.BlockOverlay()
 
 	for _, block := range blocks {
-		header := block.Header
-		body := block.Body
+		header := block.HeaderNoCopy()
+		body := block.RawBody()
 
 		// Skip frozen blocks.
 		if header.Number.Uint64() < frozenBlocks {
@@ -141,11 +141,11 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 		if _, err := rawdb.WriteRawBodyIfNotExists(blockOverlay, header.Hash(), height, body); err != nil {
 			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBody: %s", err)
 		}
-		if len(block.BlockAccessList) > 0 {
+		if blockAccessList := block.BlockAccessList(); len(blockAccessList) > 0 {
 			if header.BlockAccessListHash == nil {
 				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: block access list provided without hash for block %d", height)
 			}
-			if err := rawdb.WriteBlockAccessListBytes(blockOverlay, header.Hash(), height, block.BlockAccessList); err != nil {
+			if err := rawdb.WriteBlockAccessListBytes(blockOverlay, header.Hash(), height, blockAccessList); err != nil {
 				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBlockAccessList, block %d: %s", height, err)
 			}
 		}

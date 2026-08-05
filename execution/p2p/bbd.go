@@ -641,23 +641,17 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 	}
 
 	blocks := make([]*types.Block, 0, len(headers))
-	var bals [][]byte
 	for batchIndex, blocksBatch := range blockBatches {
 		balMap := balBatches[batchIndex]
 		for _, block := range blocksBatch {
+			if bal, ok := balMap[block.Hash()]; ok {
+				block = types.NewBlockFromNetwork(block.HeaderNoCopy(), block.Body(), bal)
+			}
 			blocks = append(blocks, block)
-			bal, ok := balMap[block.Hash()]
-			if !ok {
-				continue
-			}
-			if bals == nil {
-				bals = make([][]byte, len(headers))
-			}
-			bals[len(blocks)-1] = bal
 		}
 	}
 
-	err = feed.consumeData(ctx, blocks, bals)
+	err = feed.consumeData(ctx, blocks)
 	if err != nil {
 		return fmt.Errorf("result feed could not consume blocks batch: %w", err)
 	}
