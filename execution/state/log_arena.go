@@ -62,7 +62,7 @@ type logArena struct {
 	poolBytes          int          // Data the pool holds
 	indexInBlock       uint
 	gen                uint32   // reset counter
-	writtenGen         []uint32 // by txIndex+1 like byTx: the gen it last wrote in; only under dbg.AssertEnabled
+	genByTx            []uint32 // like byTx: the gen each transaction last wrote in; only under dbg.AssertEnabled
 }
 
 // alloc journals the allocation for revertLast, then returns txIndex's next
@@ -201,18 +201,18 @@ func (a *logArena) forTx(txIndex int) types.Logs {
 // stampWrite records the reset cycle a transaction wrote in. The offset keeps
 // zero meaning never written.
 func (a *logArena) stampWrite(ti int) {
-	if len(a.writtenGen) <= ti {
-		a.writtenGen = slices.Grow(a.writtenGen, ti+1-len(a.writtenGen))[:ti+1]
+	if len(a.genByTx) <= ti {
+		a.genByTx = slices.Grow(a.genByTx, ti+1-len(a.genByTx))[:ti+1]
 	}
-	a.writtenGen[ti] = a.gen + 1
+	a.genByTx[ti] = a.gen + 1
 }
 
 // assertLive catches a read of logs the arena already took back. The answer
 // would be an empty set, which a receipt records as "emitted no logs".
 func (a *logArena) assertLive(ti int) {
-	if ti < len(a.writtenGen) && a.writtenGen[ti] != 0 && a.writtenGen[ti] != a.gen+1 {
+	if ti < len(a.genByTx) && a.genByTx[ti] != 0 && a.genByTx[ti] != a.gen+1 {
 		panic(fmt.Sprintf("logs of tx %d were reclaimed by Reset: written in cycle %d, now %d",
-			ti-1, a.writtenGen[ti]-1, a.gen))
+			ti-1, a.genByTx[ti]-1, a.gen))
 	}
 }
 
