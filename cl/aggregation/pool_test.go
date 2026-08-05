@@ -309,19 +309,19 @@ func (t *PoolTestSuite) TestAddAttestation() {
 	for _, tc := range testcases {
 		func() {
 			log.Printf("test case: %s", tc.name)
-      if tc.mockFunc != nil {
-        tc.mockFunc()
-      }
-      ctx, cancel := context.WithCancel(context.Background())
-      defer cancel()
-      pool := NewAggregationPool(ctx, t.mockBeaconConfig, nil, t.mockEthClock)
-      for i := range tc.atts {
-        pool.AddAttestation(tc.atts[i])
-      }
-      att := pool.GetAggregatationByRoot(tc.hashRoot)
-      expected := tc.expect.Copy()
-      expected.SetVersion(clparams.DenebVersion)
-      t.Equal(expected, att, tc.name)
+			if tc.mockFunc != nil {
+				tc.mockFunc()
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			pool := NewAggregationPool(ctx, t.mockBeaconConfig, nil, t.mockEthClock)
+			for i := range tc.atts {
+				pool.AddAttestation(tc.atts[i])
+			}
+			att := pool.GetAggregatationByRoot(tc.hashRoot)
+			expected := tc.expect.Copy()
+			expected.SetVersion(clparams.DenebVersion)
+			t.Equal(expected, att, tc.name)
 		}()
 	}
 }
