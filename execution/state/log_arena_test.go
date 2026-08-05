@@ -672,3 +672,39 @@ func TestGetLogsOfPastTxAsserts(t *testing.T) {
 	require.Empty(t, ibs.GetRawLogs(9), "a later transaction emitted nothing")
 	require.Panics(t, func() { ibs.GetRawLogs(0) }, "the run has moved past tx 0")
 }
+
+// Whatever the traffic looks like, one arena holds a bounded amount: the pool,
+// and the one array the run left behind. This is the invariant a shape-specific
+// leak breaks — logs parked per tx index, an array kept because one block was
+// wide, Data kept because one log was large.
+func TestArenaRetentionStaysBounded(t *testing.T) {
+	t.Parallel()
+
+	shapes := []struct{ txs, logsPerTx, dataSize int }{
+		{200, 3, 96},                        // ordinary
+		{1500, 1, 32},                       // wide: many tx indexes
+		{2, maxRetainedLogSlots + 1000, 8},  // deep: one transaction outgrows the run's array
+		{20, 2, maxPooledLogDataCap + 1000}, // Data past what the pool admits
+		{8, 40, maxPooledLogBytes / 32},     // Data that fits alone but not together
+		{800, 2, 256},
+	}
+	ibs := New(nil)
+	for blockNum := range 200 {
+		s := shapes[blockNum%len(shapes)]
+		for txIndex := range s.txs {
+			ibs.SetTxContext(uint64(blockNum+1), txIndex)
+			for range s.logsPerTx {
+				ibs.AllocLog(common.HexToAddress("0x1"), 2, s.dataSize)
+			}
+			ibs.Reset()
+		}
+	}
+
+	slotBytes := cap(ibs.logs.entries) * 8
+	require.LessOrEqual(t, slotBytes, maxRetainedLogSlots*8, "the run's array")
+	require.LessOrEqual(t, len(ibs.logs.pool), maxPooledLogEntries, "pooled entries")
+	require.LessOrEqual(t, ibs.logs.poolBytes, maxPooledLogBytes, "pooled Data")
+
+	held := slotBytes + len(ibs.logs.pool)*304 + ibs.logs.poolBytes
+	require.Less(t, held, 3<<20, "an arena holds %dKB after mixed traffic", held/1024)
+}
