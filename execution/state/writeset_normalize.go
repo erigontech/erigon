@@ -17,6 +17,8 @@
 package state
 
 import (
+	"time"
+
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -29,6 +31,10 @@ import (
 // the recovered bytes didn't hash to the emitted codeHash; surfaced so the skip
 // isn't silent.
 var codePathRecoveryHashMismatch = metrics.GetOrCreateCounter("exec3_codepath_recovery_hash_mismatch")
+
+// slowNormalizeThreshold is the debug-branch trigger for dumping write-set
+// geometry, so outlier shapes can be reproduced in the benchmark.
+const slowNormalizeThreshold = 100 * time.Millisecond
 
 // Normalize produces a clean write set from the versionMap's WriteSet
 // for a given TX. It matches the serial IBS MakeWriteSet behaviour:
@@ -126,6 +132,29 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 	// the fill loop below needs no second walk. Filtering must not narrow it:
 	// an address whose writes are all dropped still needs its account fields.
 	allAddresses := make(map[accounts.Address]bool)
+
+	normalizeStarted := time.Now()
+	defer func() {
+		took := time.Since(normalizeStarted)
+		if took < slowNormalizeThreshold {
+			return
+		}
+		storageAddrs, storageSlots, widestAddr := 0, 0, 0
+		for _, inner := range writes.storage {
+			storageAddrs++
+			storageSlots += len(inner)
+			widestAddr = max(widestAddr, len(inner))
+		}
+		log.Warn("[dbg] slow WriteSet.Normalize",
+			"took", took, "txIndex", txIndex, "incarnation", incarnation,
+			"dirtyAddrs", len(allAddresses), "selfDestructs", len(sdSet),
+			"storageAddrs", storageAddrs, "storageSlots", storageSlots, "widestAddr", widestAddr,
+			"balance", len(writes.balance), "nonce", len(writes.nonce),
+			"incarnations", len(writes.incarnation), "codeHash", len(writes.codeHash),
+			"code", len(writes.code), "codeSize", len(writes.codeSize),
+			"createContract", len(writes.createContract),
+			"in", writes.Count(), "out", filtered.Count())
+	}()
 
 	// Ranging the per-path maps directly, rather than through AllHeaders, keeps
 	// the 56-byte WriteHeader out of the hot loop and hands each branch the
