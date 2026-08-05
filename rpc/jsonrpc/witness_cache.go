@@ -94,17 +94,6 @@ func newWitnessResultCache(blocks uint, maxBytes int, headCapture, cacheOnly boo
 	return c
 }
 
-// store is the build paths' single insert: it caches the pre-marshaled witness and
-// publishes it to subscribers. Both build paths must go through it, or the feed
-// goes silent on that node type with nothing else to catch it.
-func (c *witnessResultCache) store(num uint64, hash common.Hash, enc []byte) {
-	c.Add(hash, &ExecutionWitnessResult{cachedJSON: enc})
-	c.feed.publish(witnessPush{num: num, hash: hash, json: enc})
-}
-
-func (c *witnessResultCache) subscribe() chan witnessPush     { return c.feed.subscribe() }
-func (c *witnessResultCache) unsubscribe(ch chan witnessPush) { c.feed.unsubscribe(ch) }
-
 // HeadCapture reports whether the cache runs in pinned-parent head-capture mode.
 func (c *witnessResultCache) HeadCapture() bool { return c.headCapture }
 
@@ -117,6 +106,15 @@ func (c *witnessResultCache) ResidentBytes() int {
 	defer c.mu.Unlock()
 	return c.residentBytes
 }
+
+// store is the build paths' insert: it caches the pre-marshaled witness and publishes it.
+func (c *witnessResultCache) store(num uint64, hash common.Hash, enc []byte) {
+	c.Add(hash, &ExecutionWitnessResult{cachedJSON: enc})
+	c.feed.publish(witnessPush{num: num, hash: hash, json: enc})
+}
+
+func (c *witnessResultCache) subscribe() chan witnessPush     { return c.feed.subscribe() }
+func (c *witnessResultCache) unsubscribe(ch chan witnessPush) { c.feed.unsubscribe(ch) }
 
 // Add stores a result keyed by hash and keeps resident-bytes accounting in sync,
 // evicting oldest entries when either the count cap or the byte cap would be exceeded.
