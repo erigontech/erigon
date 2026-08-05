@@ -581,6 +581,28 @@ func (vm *VersionMap) AnyDoneSelfDestructEquals(addr accounts.Address, txIdxLimi
 	return found
 }
 
+// HasDoneSelfDestructAt reports whether a Done SelfDestruct cell holding target
+// sits at exactly ver.
+func (vm *VersionMap) HasDoneSelfDestructAt(addr accounts.Address, ver Version, target bool) bool {
+	if vm == nil {
+		return false
+	}
+	e := vm.load(addr)
+	if e == nil {
+		return false
+	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if e.SelfDestruct == nil {
+		return false
+	}
+	cell, ok := e.SelfDestruct.Get(ver.TxIndex)
+	if !ok || cell == nil {
+		return false
+	}
+	return cell.flag == FlagDone && cell.Value == target && cell.incarnation == ver.Incarnation
+}
+
 // FindDoneSelfDestructInRange returns the version of the highest Done
 // SelfDestruct write with lo <= TxIdx < hi whose value == target, if any.
 // Read-side mirror of AnyDoneSelfDestructEquals: it finds an in-block
@@ -1138,6 +1160,14 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 	}
 	for a, tr := range rs.selfDestruct {
 		if !ok(noValueRead(a, SelfDestructPath, accounts.NilKey, tr.ReadHeader)) {
+			return
+		}
+	}
+	// Range deps assert that a specific destruct happened, not what the latest
+	// SelfDestruct entry says — a revival above it does not make them stale.
+	for a, ver := range rs.selfDestructInRange {
+		if !vm.HasDoneSelfDestructAt(a, ver, true) {
+			valid = VersionInvalid
 			return
 		}
 	}

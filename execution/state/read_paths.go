@@ -513,10 +513,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		if path == StoragePath {
 			if sdVer, ok := s.versionMap.FindDoneSelfDestructInRange(addr, hdr.Version.TxIndex, s.txIndex, true); ok {
 				if !commited {
-					s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
-						ReadHeader: ReadHeader{Source: MapRead, Version: sdVer},
-						Val:        true,
-					})
+					s.versionedReads.SetSelfDestructInRange(addr, sdVer)
 				}
 				r.outcome = outcomeReturnZero
 				r.source = MapRead

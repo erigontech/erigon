@@ -106,16 +106,21 @@ func NewAccountView(acc *accounts.Account) AccountView { return concreteAccountV
 // non-storage probes to a single map lookup.  All maps are lazily allocated
 // on first write.
 type ReadSet struct {
-	address        map[accounts.Address]VersionedRead[AccountView]
-	balance        map[accounts.Address]VersionedRead[uint256.Int]
-	nonce          map[accounts.Address]VersionedRead[uint64]
-	incarnation    map[accounts.Address]VersionedRead[uint64]
-	selfDestruct   map[accounts.Address]VersionedRead[bool]
-	createContract map[accounts.Address]VersionedRead[bool]
-	code           map[accounts.Address]VersionedRead[[]byte]
-	codeHash       map[accounts.Address]VersionedRead[accounts.CodeHash]
-	codeSize       map[accounts.Address]VersionedRead[int]
-	storage        map[accounts.Address]map[accounts.StorageKey]VersionedRead[uint256.Int]
+	address      map[accounts.Address]VersionedRead[AccountView]
+	balance      map[accounts.Address]VersionedRead[uint256.Int]
+	nonce        map[accounts.Address]VersionedRead[uint64]
+	incarnation  map[accounts.Address]VersionedRead[uint64]
+	selfDestruct map[accounts.Address]VersionedRead[bool]
+	// A storage read whose cell predates an in-block SELFDESTRUCT is justified by
+	// that destruct rather than by the latest SelfDestruct entry, which a later
+	// revival moves. Kept apart so the validator checks the destruct it actually
+	// depended on still exists, instead of comparing against the latest.
+	selfDestructInRange map[accounts.Address]Version
+	createContract      map[accounts.Address]VersionedRead[bool]
+	code                map[accounts.Address]VersionedRead[[]byte]
+	codeHash            map[accounts.Address]VersionedRead[accounts.CodeHash]
+	codeSize            map[accounts.Address]VersionedRead[int]
+	storage             map[accounts.Address]map[accounts.StorageKey]VersionedRead[uint256.Int]
 
 	// access carries EIP-7928 "address was accessed" marks (with the
 	// non-revertable "real EVM access" bit) on the read side, so the access set
@@ -142,6 +147,13 @@ func (s *ReadSet) SetNonce(addr accounts.Address, tr VersionedRead[uint64]) {
 func (s *ReadSet) SetIncarnation(addr accounts.Address, tr VersionedRead[uint64]) {
 	readSetPut(&s.incarnation, addr, tr)
 }
+func (s *ReadSet) SetSelfDestructInRange(addr accounts.Address, ver Version) {
+	if s.selfDestructInRange == nil {
+		s.selfDestructInRange = map[accounts.Address]Version{}
+	}
+	s.selfDestructInRange[addr] = ver
+}
+
 func (s *ReadSet) SetSelfDestruct(addr accounts.Address, tr VersionedRead[bool]) {
 	readSetPut(&s.selfDestruct, addr, tr)
 }
