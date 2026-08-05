@@ -31,15 +31,28 @@ services:
     command:
       # --- Basic Configuration ---
       - --chain=gnosis
+      # Must match the container side of the volume mount below.
+      - --datadir=/var/lib/erigon
       - --http.addr=0.0.0.0
       - --http.api=eth,web3,net,debug,trace,txpool
+      # --- Reachability (recommended) ---
+      # Lets other nodes dial you. Set EXTERNAL_IP to your public IP, or drop
+      # both lines to run outbound-only with fewer peers.
+      - --nat=extip:${EXTERNAL_IP}
+      - --caplin.nat=extip:${EXTERNAL_IP}
       # --- Pruning Mode (Optional) ---
       # To change Pruning Mode, uncomment the line below:
       # - --prune.mode=archive
       # or
       # - --prune.mode=minimal
     ports:
-      - "8545:8545" # Exposes the RPC port (needed for wallets/dApps)
+      - "127.0.0.1:8545:8545" # RPC, reachable from this machine only
+      - "30303:30303/tcp"     # execution-layer p2p
+      - "30303:30303/udp"     # execution-layer discovery
+      - "42069:42069/tcp"     # snapshot downloader (BitTorrent)
+      - "42069:42069/udp"
+      - "4000:4000/udp"       # Caplin consensus-layer discovery
+      - "4001:4001/tcp"       # Caplin consensus-layer p2p
     volumes:
       # *** IMPORTANT: CHANGE THIS PATH! ***
       # Replace the path below with an actual directory on your machine
@@ -47,8 +60,22 @@ services:
       - /path/to/erigon/data:/var/lib/erigon
 ```
 
+Set `EXTERNAL_IP` before starting, either in a `.env` file next to `docker-compose.yml`:
+
+```bash
+echo "EXTERNAL_IP=$(curl -s https://api.ipify.org)" > .env
+```
+
+or by exporting it in your shell. Forward the `30303`, `42069`, `4000` and `4001`
+ports on your router as well, otherwise peers still cannot reach you.
+
 :::warning
 ⚠️ **Action Required**: You must change the volume path! Replace `/path/to/erigon/data` with a valid, empty directory on your machine where you want Erigon to store its files.
+
+The container runs as UID/GID `1000`, so the directory must be writable by that
+user — `sudo chown -R 1000:1000 /path/to/erigon/data`. See
+[Permission denied inside Docker](/help-center/common-errors-and-solutions) if
+you hit a `permission denied` error on startup.
 :::
 
 ### **B. Launch the Node and Monitor Progress**
@@ -63,7 +90,9 @@ docker compose up
 
 * `--chain=gnosis` specifies to run on Gnosis Chain, use `--chain=chiado` for Chiado testnet
 * Add `--prune.mode=minimal` to run minimal [Pruning Mode](/fundamentals/pruning-modes) or `--prune.mode=archive` to run an archive node
-* `--http.addr=0.0.0.0 --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](/fundamentals/web3-wallet)
+* `--datadir=/var/lib/erigon` has to name the same path as the container side of the volume mount. Without it Erigon writes to its default location inside the container instead of your mounted directory, and the data ends up in an anonymous Docker volume rather than where you pointed it
+* `--http.addr=0.0.0.0 --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](/fundamentals/web3-wallet). `0.0.0.0` is the address *inside* the container, which is what lets Docker forward to it at all; the `127.0.0.1:8545:8545` port mapping is what keeps it off your LAN. Change that mapping to `8545:8545` only if you intend to expose RPC to other machines
+* `--nat=extip:<your public IP>` and `--caplin.nat=extip:<your public IP>` advertise a reachable address so other nodes can dial you — the first for the execution layer, the second for Caplin. Without them, and without the forwarded ports, the node still syncs but only through connections it opens itself
 * `--torrent.download.rate` is deliberately not set above, because its default of `512mb` (megabytes per second) is already the maximum this recipe would ask for. During initial sync Erigon uses the full allowance, which is what you want on a dedicated machine. Add the flag only to **lower** the cap if you share the machine with other work (e.g. `--torrent.download.rate=128mb`), or set `--torrent.download.rate=Inf` to remove the limit entirely.
 
 When you get familiar with running Erigon from CLI you may also consider [staking](/staking/caplin) and/or run a Gnosis node with an [external Consensus Layer](/get-started/easy-nodes/how-to-run-a-gnosis-chain-node/gnosis-with-an-external-cl).
