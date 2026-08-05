@@ -737,7 +737,15 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 					// Commitment is computed by the commitmentCalculator goroutine.
 					// Post-execution validation (receipts, BAL) runs here. The
 					// per-block blockValidator was spawned earlier (~30 LOC up)
-					// and runs concurrently with the work above; Wait() joins it.
+					// and runs concurrently with the work above.
+					isAmsterdam := pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime)
+					if isAmsterdam || pe.cfg.experimentalBAL {
+						if err := bal.Process(rwTx, lastHeader, applyResult.TxIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger); err != nil {
+							failInfra(err)
+							continue
+						}
+					}
+
 					if err := blockValidatorWaiter.Wait(); err != nil {
 						// Block-validity verdict from post-execution validation. Route it
 						// through failCandidate (earliest-block-wins, exec supersedes a
@@ -749,15 +757,6 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 						fail.consider(applyResult.BlockNum, applyResult.BlockHash, true, fmt.Errorf("%w, block=%d, %v", rules.ErrInvalidBlock, applyResult.BlockNum, err))
 						finalized = true
 						continue
-					}
-
-					isAmsterdam := pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime)
-					if isAmsterdam || pe.cfg.experimentalBAL {
-						err = bal.Process(rwTx, lastHeader, applyResult.TxIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger)
-						if err != nil {
-							failInfra(err)
-							continue
-						}
 					}
 
 					// Mark this block as fully applied. The exit-completeness

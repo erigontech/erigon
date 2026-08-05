@@ -75,7 +75,7 @@ entry) for engine + rpc-compat suites, `.github/workflows/test-hive-eest.yml`
 | eest (consume-enginex) | 0 |
 | eest-rlp | 0 |
 | pre-Amsterdam eest-devnet consume-enginex shards | 0 |
-| glamsterdam-devnet consume-enginex | 4 |
+| glamsterdam-devnet consume-enginex | 0 |
 
 Note: Failure counts are version-dependent and may change with newer fixtures.
 The CI devnet rows split every EngineX fork exactly once and run only with parallel
