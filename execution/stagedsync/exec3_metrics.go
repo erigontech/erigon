@@ -666,11 +666,15 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 		}
 
 		mxExecRepeats.SetInt(repeats)
-		// engine_newPayload drives fork validation; everything else is sync
-		// catch-up, where conflict behaviour is a different workload.
-		execMode := "sync"
-		if te.isForkValidation {
+		// Conflict behaviour differs by workload, so keep the modes apart:
+		// engine_newPayload validates one block at the tip, applying-blocks
+		// chews through a sync batch, and a from-scratch re-exec is neither.
+		execMode := "other"
+		switch {
+		case te.isForkValidation:
 			execMode = "newpayload"
+		case te.isApplyingBlocks:
+			execMode = "applyingblocks"
 		}
 		mxExecsTotal.WithLabelValues(execMode).AddUint64(execDiff)
 		mxRepeatsTotal.WithLabelValues(execMode).AddInt(repeats)
