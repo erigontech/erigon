@@ -1645,16 +1645,18 @@ func encodeRLPGeneric[T rlpEncodable](arr []T, _len int, w io.Writer, b []byte) 
 }
 
 func decodeTxns(appendList *[]Transaction, s *rlp.Stream) error {
-	var err error
-	if _, err = s.List(); err != nil {
+	if _, err := s.List(); err != nil {
 		return err
 	}
-	var txn Transaction
 	blobTxnsAreWrappedWithBlobs := false
-	for txn, err = DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs); err == nil; txn, err = DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs) {
+	for s.MoreDataInList() {
+		txn, err := DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs)
+		if err != nil {
+			return err
+		}
 		*appendList = append(*appendList, txn)
 	}
-	return checkErrListEnd(s, err)
+	return s.ListEnd()
 }
 
 func decodeUncles(appendList *[]*Header, s *rlp.Stream) error {

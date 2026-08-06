@@ -44,7 +44,7 @@ func CreateTestBlockAccessListExecModule(t *testing.T) (*execmoduletester.ExecMo
 	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
 	gasPrice := uint256.NewInt(m.Genesis.BaseFee().Uint64())
 	var nonce uint64
-	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 5, func(i int, b *blockgen.BlockGen) {
+	chainPack, err := m.GenerateChain(5, func(i int, b *blockgen.BlockGen) {
 		if i != 1 && i != 3 {
 			return
 		}
@@ -56,8 +56,8 @@ func CreateTestBlockAccessListExecModule(t *testing.T) (*execmoduletester.ExecMo
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(chainPack))
 	require.Nil(t, chainPack.Blocks[0].Header().BlockAccessListHash)
-	require.NotEqual(t, []byte{0xc0}, chainPack.BlockAccessLists[1])
-	require.NotEqual(t, []byte{0xc0}, chainPack.BlockAccessLists[3])
+	require.NotEqual(t, []byte{0xc0}, chainPack.Blocks[1].BlockAccessList())
+	require.NotEqual(t, []byte{0xc0}, chainPack.Blocks[3].BlockAccessList())
 	err = m.DB.Update(t.Context(), func(tx kv.RwTx) error {
 		for _, block := range []*types.Block{chainPack.Blocks[2], chainPack.Blocks[4]} {
 			if err := rawdb.WriteBlockAccessListBytes(tx, block.Hash(), block.NumberU64(), []byte{0xc0}); err != nil {
@@ -69,8 +69,8 @@ func CreateTestBlockAccessListExecModule(t *testing.T) (*execmoduletester.ExecMo
 		return nil
 	})
 	require.NoError(t, err)
-	chainPack.BlockAccessLists[2] = []byte{0xc0}
-	chainPack.BlockAccessLists[4] = []byte{0xc0}
+	chainPack.Blocks[2].SetBlockAccessList([]byte{0xc0})
+	chainPack.Blocks[4].SetBlockAccessList([]byte{0xc0})
 	pruneBlockAccessListHistory(t, m, chainPack.Blocks[3])
 	return m, chainPack
 }

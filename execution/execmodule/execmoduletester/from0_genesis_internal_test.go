@@ -91,7 +91,7 @@ func runFromZeroGenesisAllocPreservedAfterResetReExec(t *testing.T) {
 	emt := New(t, WithGenesisSpec(gspec), WithKey(key))
 
 	// Build a chain of empty blocks that NEVER touch the dormant address.
-	gen, err := blockgen.GenerateChain(emt.ChainConfig, emt.Genesis, emt.Engine, emt.DB, 5, func(i int, b *blockgen.BlockGen) {
+	gen, err := emt.GenerateChain(5, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	})
 	require.NoError(t, err)
@@ -297,7 +297,7 @@ func runBranchCacheCoherentAcrossBatches(t *testing.T) {
 	// fresh recipient, so new account leaves and the branch nodes above them
 	// change block to block — exactly what the BranchCache must track.
 	signer := types.LatestSignerForChainID(emt.ChainConfig.ChainID)
-	gen, err := blockgen.GenerateChain(emt.ChainConfig, emt.Genesis, emt.Engine, emt.DB, 12, func(i int, b *blockgen.BlockGen) {
+	gen, err := emt.GenerateChain(12, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		for j := range 3 {
 			to := common.BytesToAddress([]byte{byte(i + 1), byte(j + 1), 0xab})
@@ -342,7 +342,7 @@ func TestExec_RestoresCommitmentStateReader(t *testing.T) {
 	emt := New(t, WithGenesisSpec(gspec), WithKey(key))
 
 	signer := types.LatestSignerForChainID(emt.ChainConfig.ChainID)
-	gen, err := blockgen.GenerateChain(emt.ChainConfig, emt.Genesis, emt.Engine, emt.DB, 4, func(i int, b *blockgen.BlockGen) {
+	gen, err := emt.GenerateChain(4, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		to := common.BytesToAddress([]byte{byte(i + 1), 0xab})
 		tx, txErr := types.SignTx(

@@ -94,7 +94,7 @@ func TestSetCodeClearDelegationPurgesCodeDomain(t *testing.T) {
 				return signed
 			}
 
-			chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
+			chainPack, err := m.GenerateChain(2, func(i int, b *blockgen.BlockGen) {
 				b.SetCoinbase(common.Address{1})
 				switch i {
 				case 0:
