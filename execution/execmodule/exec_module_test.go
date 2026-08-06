@@ -643,6 +643,7 @@ func TestAssembleBlock(t *testing.T) {
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
 		ParentBeaconBlockRoot: &parentBeaconBlockRoot,
+		SlotNumber:            syntheticSlotNumber(chainPack.TopBlock),
 	})
 	require.NoError(t, err)
 	block, err := m.GetAssembledBlock(ctx, payloadId)
@@ -701,6 +702,7 @@ func TestAssembleBlockWithConcurrentSiblingCommit(t *testing.T) {
 		SuggestedFeeRecipient: common.Address{4},
 		Withdrawals:           make([]*types.Withdrawal, 0),
 		ParentBeaconBlockRoot: &parentBeaconBlockRoot,
+		SlotNumber:            syntheticSlotNumber(parent),
 		CustomTxnProvider:     provider,
 	})
 	require.NoError(t, err)
@@ -757,6 +759,7 @@ func TestGetAssembledBlockHonorsCanceledContextWhenTxPoolIsBehindParent(t *testi
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
 		ParentBeaconBlockRoot: &parentBeaconBlockRoot,
+		SlotNumber:            syntheticSlotNumber(parent),
 		CustomTxnProvider:     provider,
 	})
 	require.NoError(t, err)
@@ -829,6 +832,7 @@ func TestAssembleBlockWithFreshlyAddedTxns(t *testing.T) {
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
 		ParentBeaconBlockRoot: &parentBeaconBlockRoot,
+		SlotNumber:            syntheticSlotNumber(chainPack.TopBlock),
 		CustomTxnProvider:     provider,
 	})
 	require.NoError(t, err)
@@ -854,6 +858,12 @@ func randomHash() common.Hash {
 	return h
 }
 
+func syntheticSlotNumber(parent *types.Block) *uint64 {
+	// Consensus assigns slots independently; synthetic tests reuse block numbers.
+	slotNumber := parent.NumberU64() + 1
+	return &slotNumber
+}
+
 func TestAssembleEmptyBlock(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -877,6 +887,7 @@ func TestAssembleEmptyBlock(t *testing.T) {
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
 		ParentBeaconBlockRoot: func() *common.Hash { h := randomHash(); return &h }(),
+		SlotNumber:            syntheticSlotNumber(chainPack.TopBlock),
 	})
 	require.NoError(t, err)
 
@@ -916,6 +927,7 @@ func TestAssembleBlockWithStateVerification(t *testing.T) {
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
 		ParentBeaconBlockRoot: func() *common.Hash { h := randomHash(); return &h }(),
+		SlotNumber:            syntheticSlotNumber(chainPack.TopBlock),
 	})
 	require.NoError(t, err)
 
@@ -939,6 +951,7 @@ func TestAssembleBlockWithStateVerification(t *testing.T) {
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
 		ParentBeaconBlockRoot: func() *common.Hash { h := randomHash(); return &h }(),
+		SlotNumber:            syntheticSlotNumber(block),
 	})
 	require.NoError(t, err)
 
@@ -994,6 +1007,7 @@ func TestAssembleBlockWithContractCreation(t *testing.T) {
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
 		ParentBeaconBlockRoot: func() *common.Hash { h := randomHash(); return &h }(),
+		SlotNumber:            syntheticSlotNumber(chainPack.TopBlock),
 	})
 	require.NoError(t, err)
 
@@ -1064,6 +1078,7 @@ func TestAssembleBlockGasOverflow(t *testing.T) {
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
 		ParentBeaconBlockRoot: func() *common.Hash { h := randomHash(); return &h }(),
+		SlotNumber:            syntheticSlotNumber(chainPack.TopBlock),
 	})
 	require.NoError(t, err)
 	block, err := m.GetAssembledBlock(ctx, payloadId)
@@ -1083,6 +1098,7 @@ func TestAssembleBlockGasOverflow(t *testing.T) {
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
 		ParentBeaconBlockRoot: func() *common.Hash { h := randomHash(); return &h }(),
+		SlotNumber:            syntheticSlotNumber(block),
 	})
 	require.NoError(t, err)
 	block2, err := m.GetAssembledBlock(ctx, payloadId2)
@@ -1157,6 +1173,7 @@ func TestAssembleBlockMixedTxTypes(t *testing.T) {
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
 		ParentBeaconBlockRoot: func() *common.Hash { h := randomHash(); return &h }(),
+		SlotNumber:            syntheticSlotNumber(chainPack.TopBlock),
 	})
 	require.NoError(t, err)
 	block, err := m.GetAssembledBlock(ctx, payloadId)
@@ -1248,6 +1265,7 @@ func TestAssembleBlockWithWithdrawalRequest(t *testing.T) {
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
 		ParentBeaconBlockRoot: &beaconRoot,
+		SlotNumber:            syntheticSlotNumber(chainPack.TopBlock),
 	})
 	require.NoError(t, err)
 
