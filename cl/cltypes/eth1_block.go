@@ -151,7 +151,7 @@ func NewEth1BlockFromHeaderAndBody(header *types.Header, body *types.RawBody, be
 
 	if header.SlotNumber != nil {
 		// BlockAccessList is initialized empty here because types.RawBody does not
-		// carry the block access list bytes (only types.RawBlock does). In production,
+		// carry the block access list bytes. In production,
 		// GLOAS execution payloads arrive via the Engine API and are populated through
 		// SSZ decoding, not this constructor. This function is currently only called
 		// from test code.
