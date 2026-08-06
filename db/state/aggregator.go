@@ -25,6 +25,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strconv"
@@ -47,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -1013,6 +1015,92 @@ func (a *Aggregator) BuildMissedAccessors(ctx context.Context, workers int, opts
 		return err
 	}
 	return nil
+}
+
+// v4KVFileNameRegex parses a v4-shaped `.kv` basename like
+// `v4.0-storage.117968750-118177835.kv` — captures (version-major,
+// version-minor, domain-base-name, fromTxN, toTxN). Only v4 emits carry
+// raw-txN naming; the regex enforces the shape so BuildKVAccessors
+// refuses to guess for older step-aligned names.
+var v4KVFileNameRegex = regexp.MustCompile(`^v(\d+)\.(\d+)-([[:lower:]]+)\.(\d+)-(\d+)\.kv$`)
+
+// BuildKVAccessors builds the .bt/.kvei/.kvi sidecars a domain .kv
+// needs to be visible to state reads. Called by the mode-C v4 emit
+// functions (WriteStateBoundaryFileV4 / WriteCommitmentBoundaryFileV4)
+// so the emitted .kv lands on disk complete — WITH its accessors —
+// rather than waiting for a later BuildMissedAccessors pass that
+// (pre-fix) never fired for these files under FinalizeUnwind, leaving
+// the .kv on disk but excluded from every DomainRoTx visible set
+// (checkForVisibility requires bindex + existence). Root cause of the
+// 2026-08-06 leg-M v1 iter 1 mode_b gas mismatch −135,654: v4 emit
+// shipped .kv-only, forward-exec state reads bypassed the invisible
+// file, returned pre-window state, mis-priced SSTOREs.
+//
+// dataPath is the physical .kv location (typically `<final>.regen`);
+// finalPath is the eventual name used to derive accessor filenames
+// (so the sidecars land at the paired name FinalizeUnwind's rename
+// will use). Both may be the same when the writer targets the final
+// path directly.
+//
+// Dispatch mirrors Domain.BuildMissedAccessors — BT+existence for
+// accounts/storage/code/receipt/commitment-under-AGG_COMMITMENT_BT,
+// hash-map otherwise. Per-domain d.Accessors is authoritative.
+func (a *Aggregator) BuildKVAccessors(ctx context.Context, domain kv.Domain, dataPath, finalPath string) error {
+	if int(domain) >= len(a.d) || a.d[domain] == nil {
+		return fmt.Errorf("BuildKVAccessors: unknown domain %s", domain)
+	}
+	d := a.d[domain]
+
+	fromTxN, toTxN, err := parseV4KVBaseName(filepath.Base(finalPath))
+	if err != nil {
+		return fmt.Errorf("BuildKVAccessors(%s): %w", domain, err)
+	}
+
+	dec, err := seg.NewDecompressor(dataPath)
+	if err != nil {
+		return fmt.Errorf("BuildKVAccessors(%s): open %s: %w", domain, dataPath, err)
+	}
+	defer dec.Close()
+
+	ps := background.NewProgressSet()
+
+	if d.Accessors.Has(statecfg.AccessorBTree) {
+		btPath := d.kvBtAccessorNewFilePathV4(fromTxN, toTxN)
+		kveiPath := d.kvExistenceIdxNewFilePathV4(fromTxN, toTxN)
+		reader := seg.NewReader(dec.MakeGetter(), d.Compression)
+		if err := btindex.BuildBtreeIndexWithDecompressor(btPath, kveiPath, reader, ps, d.dirs.Tmp, *d.salt.Load(), d.logger, d.noFsync, d.Accessors); err != nil {
+			return fmt.Errorf("BuildKVAccessors(%s): build BT+existence: %w", domain, err)
+		}
+	}
+	if d.Accessors.Has(statecfg.AccessorHashMap) {
+		kviPath := d.kviAccessorNewFilePathV4(fromTxN, toTxN)
+		if err := d.buildHashMapAccessorAt(ctx, kviPath, dec, ps); err != nil {
+			return fmt.Errorf("BuildKVAccessors(%s): build hash-map: %w", domain, err)
+		}
+	}
+
+	return nil
+}
+
+// parseV4KVBaseName extracts (fromTxN, toTxN) from a v4 .kv basename.
+// Returns an error for any non-v4 shape (step-aligned legacy names are
+// deliberately rejected — BuildKVAccessors is only ever called for the
+// mode-C v4 emit and mistaking a legacy step-count for a raw txN would
+// silently write accessors that don't match the .kv's coords).
+func parseV4KVBaseName(base string) (fromTxN, toTxN uint64, err error) {
+	m := v4KVFileNameRegex.FindStringSubmatch(base)
+	if m == nil {
+		return 0, 0, fmt.Errorf("not a v4 .kv basename: %q", base)
+	}
+	fromTxN, err = strconv.ParseUint(m[4], 10, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("parse fromTxN from %q: %w", base, err)
+	}
+	toTxN, err = strconv.ParseUint(m[5], 10, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("parse toTxN from %q: %w", base, err)
+	}
+	return fromTxN, toTxN, nil
 }
 
 type AggV3StaticFiles struct {

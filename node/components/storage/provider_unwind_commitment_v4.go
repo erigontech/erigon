@@ -19,9 +19,11 @@ package storage
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
@@ -52,6 +54,9 @@ import (
 //     KeyCommitmentState.
 //   - newKVPath: destination for the .regen file. FinalizeUnwind
 //     atomically renames <path>.regen → <path>.
+//   - accessors: builds the .kvi (or .bt/.kvei under AGG_COMMITMENT_BT)
+//     sidecar post-Compress. Required — see AccessorBuilder doc for the
+//     invisibility failure mode this fixes.
 func WriteCommitmentBoundaryFileV4(
 	ctx context.Context,
 	branches *etl.Collector,
@@ -59,6 +64,7 @@ func WriteCommitmentBoundaryFileV4(
 	newKVPath string,
 	tmpDir string,
 	compression seg.FileCompression,
+	accessors AccessorBuilder,
 	logger log.Logger,
 ) error {
 	if branches == nil {
@@ -69,6 +75,9 @@ func WriteCommitmentBoundaryFileV4(
 	}
 	if newKVPath == "" {
 		return fmt.Errorf("WriteCommitmentBoundaryFileV4: newKVPath is required")
+	}
+	if accessors == nil {
+		return fmt.Errorf("WriteCommitmentBoundaryFileV4: accessors builder is required (v4 .kv without accessors is invisible to state reads)")
 	}
 
 	comp, err := seg.NewCompressor(ctx, "mode-C commitment v4 emit", newKVPath, tmpDir, seg.DefaultCfg, log.LvlInfo, logger)
@@ -102,6 +111,11 @@ func WriteCommitmentBoundaryFileV4(
 
 	if err := comp.Compress(); err != nil {
 		return fmt.Errorf("compress %s: %w", newKVPath, err)
+	}
+
+	finalKVPath := strings.TrimSuffix(newKVPath, ".regen")
+	if err := accessors.BuildKVAccessors(ctx, kv.CommitmentDomain, newKVPath, finalKVPath); err != nil {
+		return fmt.Errorf("build v4 commitment accessors for %s (final=%s): %w", newKVPath, finalKVPath, err)
 	}
 
 	if logger != nil {

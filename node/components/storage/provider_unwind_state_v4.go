@@ -20,12 +20,31 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/seg"
 )
+
+// AccessorBuilder builds the .bt / .kvei / .kvi sidecars that a domain
+// .kv needs to be visible to state reads. Every mode-C v4 emit MUST
+// supply one — without accessors the emitted .kv is on disk but
+// excluded from every DomainRoTx visible set (checkForVisibility in
+// db/state/dirty_files.go rejects items whose bindex or existence
+// filter is nil), and forward-exec reads bypass v4 → falls through to
+// older files → returns pre-window state → mis-priced SSTOREs by tens
+// to hundreds of kilo-gas → block invalidated.
+//
+// dataPath is where the .kv was actually written (typically a .regen
+// suffix during Provider.Unwind); finalPath is the eventual name the
+// accessor filenames get derived from (so accessors land at the paired
+// name FinalizeUnwind will rename the .kv to). The two are the same
+// when the writer targets the final path directly.
+type AccessorBuilder interface {
+	BuildKVAccessors(ctx context.Context, domain kv.Domain, dataPath, finalPath string) error
+}
 
 // StateKeyWalker enumerates every unique key that had at least one write
 // in a mode-C boundary regen's advertised window (fromTxN, lastTxN+1]. The
@@ -68,6 +87,10 @@ type StateKeyWalker func(yield func(key []byte) bool) error
 // lookup is called once per unique key with ts=lastTxN. A (nil, false,
 // nil) result is written as a value-domain tombstone (empty value) so
 // older baseline files at earlier steps don't leak pre-tombstone values.
+//
+// accessors builds the .bt/.kvei/.kvi sidecars post-Compress. Required —
+// without them the emitted .kv is invisible to state reads (see the
+// AccessorBuilder doc for the failure mode this fixes).
 func WriteStateBoundaryFileV4(
 	ctx context.Context,
 	domain kv.Domain,
@@ -77,6 +100,7 @@ func WriteStateBoundaryFileV4(
 	newKVPath string,
 	tmpDir string,
 	compression seg.FileCompression,
+	accessors AccessorBuilder,
 	logger log.Logger,
 ) error {
 	if domain == kv.CommitmentDomain {
@@ -90,6 +114,9 @@ func WriteStateBoundaryFileV4(
 	}
 	if newKVPath == "" {
 		return fmt.Errorf("WriteStateBoundaryFileV4: newKVPath is required")
+	}
+	if accessors == nil {
+		return fmt.Errorf("WriteStateBoundaryFileV4: accessors builder is required (v4 .kv without accessors is invisible to state reads)")
 	}
 
 	comp, err := seg.NewCompressor(ctx, "mode-C boundary-step regen", newKVPath, tmpDir, seg.DefaultCfg, log.LvlInfo, logger)
@@ -132,6 +159,14 @@ func WriteStateBoundaryFileV4(
 
 	if err := comp.Compress(); err != nil {
 		return fmt.Errorf("compress %s: %w", newKVPath, err)
+	}
+	// Compress renames its temp file to newKVPath and releases the fd
+	// internally; the accessor builder can seg.NewDecompressor(newKVPath)
+	// directly. The final-naming trim lets callers pass a .regen path
+	// while accessors land at the eventual final .bt/.kvei/.kvi names.
+	finalKVPath := strings.TrimSuffix(newKVPath, ".regen")
+	if err := accessors.BuildKVAccessors(ctx, domain, newKVPath, finalKVPath); err != nil {
+		return fmt.Errorf("build v4 accessors for %s (final=%s): %w", newKVPath, finalKVPath, err)
 	}
 
 	if logger != nil {

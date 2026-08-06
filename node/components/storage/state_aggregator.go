@@ -83,4 +83,22 @@ type StateAggregator interface {
 	// as-of-lastTxN content (rather than lying via the step-boundary
 	// convention).
 	DomainKVFilePathV4(domain kv.Domain, fromTxN, toTxN uint64) string
+
+	// BuildKVAccessors builds the .bt/.kvei/.kvi sidecars for a
+	// freshly-written domain .kv file. dataPath is the physical .kv
+	// location (may carry a .regen suffix during Provider.Unwind);
+	// finalPath is the eventual naming the accessor filenames get
+	// derived from. Concrete Aggregator opens the .kv at dataPath as a
+	// seg.Decompressor and calls the domain's existing accessor-build
+	// primitives (BuildBtreeIndexWithDecompressor for BT+existence,
+	// buildHashMapAccessorAt for hashmap) so the domain's own
+	// per-accessor mask dictates what gets built.
+	//
+	// Without this, mode-C v4 .kv emits ship with no accessors and are
+	// silently excluded from every DomainRoTx visible set — forward-exec
+	// reads bypass v4 and return pre-window state (leg-M v1 2026-08-06
+	// iter 1 mode_b gas mismatch −135,654 root cause). Satisfies the
+	// AccessorBuilder interface in the storage package so the emit
+	// functions can call it directly.
+	BuildKVAccessors(ctx context.Context, domain kv.Domain, dataPath, finalPath string) error
 }

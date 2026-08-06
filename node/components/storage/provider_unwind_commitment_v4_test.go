@@ -64,7 +64,7 @@ func TestWriteCommitmentBoundaryFileV4_EmitsBranchesThenAnchor(t *testing.T) {
 	outPath := filepath.Join(dir, "v4.0-commitment.0-100.kv")
 
 	require.NoError(t, WriteCommitmentBoundaryFileV4(
-		ctx, branches, anchor, outPath, dir, seg.CompressNone, log.New(),
+		ctx, branches, anchor, outPath, dir, seg.CompressNone, &fakeAccessorBuilder{}, log.New(),
 	))
 
 	got := readKV(t, outPath)
@@ -96,7 +96,7 @@ func TestWriteCommitmentBoundaryFileV4_EmptyBranches(t *testing.T) {
 	outPath := filepath.Join(dir, "v4.0-commitment.0-100.kv")
 
 	require.NoError(t, WriteCommitmentBoundaryFileV4(
-		ctx, branches, anchor, outPath, dir, seg.CompressNone, log.New(),
+		ctx, branches, anchor, outPath, dir, seg.CompressNone, &fakeAccessorBuilder{}, log.New(),
 	))
 
 	got := readKV(t, outPath)
@@ -134,15 +134,19 @@ func TestWriteCommitmentBoundaryFileV4_ArgumentValidation(t *testing.T) {
 	anchor := []byte("a")
 	outPath := filepath.Join(dir, "out.kv")
 
-	err := WriteCommitmentBoundaryFileV4(ctx, nil, anchor, outPath, dir, seg.CompressNone, log.New())
+	fab := &fakeAccessorBuilder{}
+	err := WriteCommitmentBoundaryFileV4(ctx, nil, anchor, outPath, dir, seg.CompressNone, fab, log.New())
 	require.ErrorContains(t, err, "branches collector is required")
 
-	err = WriteCommitmentBoundaryFileV4(ctx, branches, nil, outPath, dir, seg.CompressNone, log.New())
+	err = WriteCommitmentBoundaryFileV4(ctx, branches, nil, outPath, dir, seg.CompressNone, fab, log.New())
 	require.ErrorContains(t, err, "anchor blob is required")
 
-	err = WriteCommitmentBoundaryFileV4(ctx, branches, []byte{}, outPath, dir, seg.CompressNone, log.New())
+	err = WriteCommitmentBoundaryFileV4(ctx, branches, []byte{}, outPath, dir, seg.CompressNone, fab, log.New())
 	require.ErrorContains(t, err, "anchor blob is required")
 
-	err = WriteCommitmentBoundaryFileV4(ctx, branches, anchor, "", dir, seg.CompressNone, log.New())
+	err = WriteCommitmentBoundaryFileV4(ctx, branches, anchor, "", dir, seg.CompressNone, fab, log.New())
 	require.ErrorContains(t, err, "newKVPath is required")
+
+	err = WriteCommitmentBoundaryFileV4(ctx, branches, anchor, outPath, dir, seg.CompressNone, nil, log.New())
+	require.ErrorContains(t, err, "accessors builder is required")
 }

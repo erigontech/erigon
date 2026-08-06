@@ -69,6 +69,9 @@ func (a *pathSpyAggregator) DomainKVFilePathV4(domain kv.Domain, fromTxN, toTxN 
 	a.calls = append(a.calls, pathSpyCall{domain: domain, fromTxN: fromTxN, toTxN: toTxN, returnedPathTag: tag})
 	return tag
 }
+func (a *pathSpyAggregator) BuildKVAccessors(_ context.Context, _ kv.Domain, _, _ string) error {
+	return nil
+}
 
 // These tests pin boundaryStepFileForDomain's lookup predicate. The
 // soak v14 iter-3 mode-B wedge (depth 30k, target=3,006,443) surfaced

@@ -246,7 +246,7 @@ func (p *Provider) regenerateBoundaryStepFiles(
 				}
 				if err := WriteCommitmentBoundaryFileV4(
 					ctx, recompute.regenBranches, anchor, regenPath,
-					p.snapTmpDir, compression, p.logger,
+					p.snapTmpDir, compression, p.Aggregator, p.logger,
 				); err != nil {
 					return nil, fmt.Errorf("emit v4 commitment file %s: %w", regenPath, err)
 				}
@@ -255,7 +255,7 @@ func (p *Provider) regenerateBoundaryStepFiles(
 				walker := historyKeyWalker(tx, kvDomain, fromTxN, lastTxNum)
 				if err := WriteStateBoundaryFileV4(
 					ctx, kvDomain, walker, lookup, lastTxNum,
-					regenPath, p.snapTmpDir, compression, p.logger,
+					regenPath, p.snapTmpDir, compression, p.Aggregator, p.logger,
 				); err != nil {
 					return nil, fmt.Errorf("emit v4 %s file %s: %w", sd, regenPath, err)
 				}

@@ -43,6 +43,26 @@ func keyWalkerFromSlice(keys [][]byte) StateKeyWalker {
 	}
 }
 
+// fakeAccessorBuilder records BuildKVAccessors calls without doing any
+// real accessor build. Used by unit tests that verify the emit invokes
+// the builder correctly. Production wires *state.Aggregator, which
+// actually builds .bt/.kvei/.kvi from the .kv content.
+type fakeAccessorBuilder struct {
+	calls []fakeAccessorCall
+	err   error // returned by every call when non-nil
+}
+
+type fakeAccessorCall struct {
+	domain    kv.Domain
+	dataPath  string
+	finalPath string
+}
+
+func (f *fakeAccessorBuilder) BuildKVAccessors(_ context.Context, domain kv.Domain, dataPath, finalPath string) error {
+	f.calls = append(f.calls, fakeAccessorCall{domain: domain, dataPath: dataPath, finalPath: finalPath})
+	return f.err
+}
+
 // TestWriteStateBoundaryFileV4_IncludesKeysMissingFromOldFile pins the
 // load-bearing correctness property: keys first-written IN the boundary
 // window (which weren't in any pre-unwind boundary .kv) MUST appear in
@@ -95,6 +115,7 @@ func TestWriteStateBoundaryFileV4_IncludesKeysMissingFromOldFile(t *testing.T) {
 		newPath,
 		dir,
 		seg.CompressNone,
+		&fakeAccessorBuilder{},
 		log.New(),
 	)
 	require.NoError(t, err)
@@ -131,7 +152,7 @@ func TestWriteStateBoundaryFileV4_TombstoneOnNotFound(t *testing.T) {
 	newPath := filepath.Join(dir, "v4.0-storage.0-100.kv")
 
 	err := WriteStateBoundaryFileV4(
-		ctx, kv.StorageDomain, walker, lookup, 100, newPath, dir, seg.CompressNone, log.New(),
+		ctx, kv.StorageDomain, walker, lookup, 100, newPath, dir, seg.CompressNone, &fakeAccessorBuilder{}, log.New(),
 	)
 	require.NoError(t, err)
 
@@ -159,7 +180,7 @@ func TestWriteStateBoundaryFileV4_EmptyWindow(t *testing.T) {
 	newPath := filepath.Join(dir, "v4.0-code.0-100.kv")
 
 	err := WriteStateBoundaryFileV4(
-		ctx, kv.CodeDomain, walker, lookup, 100, newPath, dir, seg.CompressNone, log.New(),
+		ctx, kv.CodeDomain, walker, lookup, 100, newPath, dir, seg.CompressNone, &fakeAccessorBuilder{}, log.New(),
 	)
 	require.NoError(t, err)
 	require.Empty(t, readKV(t, newPath))
@@ -178,7 +199,7 @@ func TestWriteStateBoundaryFileV4_RejectsCommitmentDomain(t *testing.T) {
 	lookup := func(_ kv.Domain, _ []byte, _ uint64) ([]byte, bool, error) { return nil, false, nil }
 	err := WriteStateBoundaryFileV4(
 		t.Context(), kv.CommitmentDomain, walker, lookup, 100,
-		filepath.Join(dir, "should-not-write.kv"), dir, seg.CompressNone, log.New(),
+		filepath.Join(dir, "should-not-write.kv"), dir, seg.CompressNone, &fakeAccessorBuilder{}, log.New(),
 	)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "commitment domain")
@@ -198,8 +219,91 @@ func TestWriteStateBoundaryFileV4_LookupErrorAborts(t *testing.T) {
 	walker := keyWalkerFromSlice([][]byte{[]byte("k")})
 	err := WriteStateBoundaryFileV4(
 		t.Context(), kv.AccountsDomain, walker, lookup, 100,
-		filepath.Join(dir, "aborted.kv"), dir, seg.CompressNone, log.New(),
+		filepath.Join(dir, "aborted.kv"), dir, seg.CompressNone, &fakeAccessorBuilder{}, log.New(),
 	)
 	require.Error(t, err)
 	require.ErrorIs(t, err, sentinel)
 }
+
+// TestWriteStateBoundaryFileV4_InvokesAccessorBuilder pins the fix for
+// the 2026-08-06 leg-M v1 iter 1 mode_b gas mismatch: the v4 emit must
+// build its .bt/.kvei/.kvi sidecars inline. Prior to the fix the emit
+// shipped .kv-only, checkForVisibility rejected the file for missing
+// bindex/existence, forward-exec state reads bypassed the invisible v4
+// → fell through to older files → returned pre-window state → SSTOREs
+// mispriced as RESET-instead-of-SET → −135,654 gas / block invalidated.
+//
+// Verifies the emit invokes the AccessorBuilder with:
+//   - the correct domain,
+//   - the actual write path as dataPath,
+//   - the .regen-stripped final name as finalPath (so accessor filenames
+//     land at the paired name FinalizeUnwind's rename produces).
+func TestWriteStateBoundaryFileV4_InvokesAccessorBuilder(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	lookup := func(_ kv.Domain, _ []byte, _ uint64) ([]byte, bool, error) {
+		return []byte("v"), true, nil
+	}
+	walker := keyWalkerFromSlice([][]byte{[]byte("k")})
+	final := filepath.Join(dir, "v4.0-storage.0-1001.kv")
+	regen := final + ".regen"
+
+	fab := &fakeAccessorBuilder{}
+	err := WriteStateBoundaryFileV4(
+		t.Context(), kv.StorageDomain, walker, lookup, 1000,
+		regen, dir, seg.CompressNone, fab, log.New(),
+	)
+	require.NoError(t, err)
+	require.Len(t, fab.calls, 1, "accessor builder must be invoked exactly once per emit")
+	require.Equal(t, kv.StorageDomain, fab.calls[0].domain)
+	require.Equal(t, regen, fab.calls[0].dataPath, "dataPath must be the actual write location (.regen)")
+	require.Equal(t, final, fab.calls[0].finalPath, "finalPath must be the .regen-stripped eventual name")
+}
+
+// TestWriteStateBoundaryFileV4_AccessorBuilderErrorPropagates: any
+// error from the accessor build fails the emit — the caller MUST NOT
+// proceed with a rename that would put a .kv on disk without paired
+// accessors (same invisibility failure mode).
+func TestWriteStateBoundaryFileV4_AccessorBuilderErrorPropagates(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	sentinel := errAccessorBuild
+	lookup := func(_ kv.Domain, _ []byte, _ uint64) ([]byte, bool, error) {
+		return []byte("v"), true, nil
+	}
+	walker := keyWalkerFromSlice([][]byte{[]byte("k")})
+	err := WriteStateBoundaryFileV4(
+		t.Context(), kv.StorageDomain, walker, lookup, 1000,
+		filepath.Join(dir, "v4.0-storage.0-1001.kv.regen"), dir, seg.CompressNone,
+		&fakeAccessorBuilder{err: sentinel}, log.New(),
+	)
+	require.Error(t, err)
+	require.ErrorIs(t, err, sentinel)
+}
+
+// TestWriteStateBoundaryFileV4_NilAccessorBuilderRejected: the emit
+// refuses to run without a builder rather than silently shipping a
+// .kv without accessors. Defensive — the wire code always passes
+// p.Aggregator, but a future caller that forgets is a soundness bug.
+func TestWriteStateBoundaryFileV4_NilAccessorBuilderRejected(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	lookup := func(_ kv.Domain, _ []byte, _ uint64) ([]byte, bool, error) {
+		return nil, false, nil
+	}
+	walker := keyWalkerFromSlice([][]byte{[]byte("k")})
+	err := WriteStateBoundaryFileV4(
+		t.Context(), kv.StorageDomain, walker, lookup, 100,
+		filepath.Join(dir, "v4.0-storage.0-101.kv.regen"), dir, seg.CompressNone, nil, log.New(),
+	)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "accessors builder is required")
+}
+
+// errAccessorBuild is a sentinel used by the accessor-error test.
+var errAccessorBuild = errSentinel("accessor build failed")
+
+type errSentinel string
+
+func (e errSentinel) Error() string { return string(e) }
