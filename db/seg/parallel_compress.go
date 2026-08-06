@@ -356,8 +356,8 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	if lvl < log.LvlTrace {
 		logger.Log(lvl, fmt.Sprintf("[%s] dictionary file parsed", logPrefix), "entries", len(code2pattern))
 	}
-	// we pass consecutive words so that AC mather's prefix-resume functionality 
-	// can process words faster (the words are in sorted order); 
+	// we pass consecutive words so that AC mather's prefix-resume functionality
+	// can process words faster (the words are in sorted order);
 	// so we send a batch of coverBatchSize consecutive words to each worker
 	coverBatchSize := 512
 	if n := int(uncompressedFile.count); cfg.Workers > 1 && n < coverBatchSize*cfg.Workers {
@@ -448,12 +448,13 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 					break outer
 				}
 			}
-			// queue[0].order >= outCount always, so order > outCount means the next word to
-			// write is still in flight; block on results instead of allocating more work. That
-			// word may itself be an unflushed member of curBatch, so keep offering curBatch to
-			// ch while draining — a plain <-out would deadlock waiting for a batch only we can send.
+			// queue[0].order is never below outCount, so > means the next word to write is
+			// missing: nothing can be written, so wait for results instead of reading more input.
 			for compressionQueue.Len() >= queueLimit && compressionQueue[0].order > outCount {
 				if len(curBatch) > 0 {
+					// The missing word may sit in curBatch, and only we can send it — so offer it
+					// while waiting, else <-out waits forever. Rare: AddWord followed by a long run
+					// of AddUncompressedWord (see TestCompressParallelBatchingBackpressureNoDeadlock).
 					select {
 					case ch <- curBatch:
 						curBatch = make([]*CompressionWord, 0, coverBatchSize)
