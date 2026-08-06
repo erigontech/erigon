@@ -359,12 +359,14 @@ func TestTemporalTx_ForceReopenRefreshesDomainVisibleEnd(t *testing.T) {
 	// Write past the RO tx's MVCC view and move the data into files, which are
 	// visible regardless of the DB read view.
 	for txNum := uint64(2); txNum <= 3; txNum++ {
-		rwTtx, err := temporalDb.BeginTemporalRw(ctx)
-		require.NoError(t, err)
-		defer rwTtx.Rollback()
-		require.NoError(t, sd.DomainPut(kv.StorageDomain, rwTtx, storageK, []byte{byte(txNum)}, txNum, nil))
-		require.NoError(t, sd.Flush(ctx, rwTtx))
-		require.NoError(t, rwTtx.Commit())
+		func() {
+			rwTtx, err := temporalDb.BeginTemporalRw(ctx)
+			require.NoError(t, err)
+			defer rwTtx.Rollback()
+			require.NoError(t, sd.DomainPut(kv.StorageDomain, rwTtx, storageK, []byte{byte(txNum)}, txNum, nil))
+			require.NoError(t, sd.Flush(ctx, rwTtx))
+			require.NoError(t, rwTtx.Commit())
+		}()
 	}
 	require.NoError(t, agg.BuildFiles(3))
 

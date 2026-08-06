@@ -820,7 +820,7 @@ func TestCallManyBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
 	contractAddr := c.deployOpcodeContract(t, opGasprice)
 	api := c.traceAPI()
 
-	calls := fmt.Sprintf(`[[{"from":"%s","to":"%s","maxFeePerGas":"0x77359400","maxPriorityFeePerGas":"0x2"},["trace"]]]`,
+	calls := fmt.Sprintf(`[[{"from":%q,"to":%q,"maxFeePerGas":"0x77359400","maxPriorityFeePerGas":"0x2"},["trace"]]]`,
 		c.bankAddress.Hex(), contractAddr.Hex())
 
 	results, err := api.CallMany(context.Background(), json.RawMessage(calls), nil, traceConfigWithBaseFeeOverride(uint256.NewInt(10)))
@@ -898,7 +898,7 @@ func TestCallManyBlockOverridesOtherFieldsAffectOpcodes(t *testing.T) {
 			contractAddr := c.deployOpcodeContract(t, tc.opcode)
 			api := c.traceAPI()
 
-			calls := fmt.Sprintf(`[[{"from":"%s","to":"%s"},["trace"]]]`, c.bankAddress.Hex(), contractAddr.Hex())
+			calls := fmt.Sprintf(`[[{"from":%q,"to":%q},["trace"]]]`, c.bankAddress.Hex(), contractAddr.Hex())
 			results, err := api.CallMany(context.Background(), json.RawMessage(calls), nil, &config.TraceConfig{
 				BlockOverrides: tc.override,
 			})
