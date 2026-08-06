@@ -30,6 +30,25 @@ import (
 // isn't silent.
 var codePathRecoveryHashMismatch = metrics.GetOrCreateCounter("exec3_codepath_recovery_hash_mismatch")
 
+// dropForSelfDestruct reports whether a write on this path must be dropped when
+// its address self-destructed in this tx, so applyVersionedWrites reaches the
+// pure-delete branch instead of cleanup-before-recreate. Exhaustive by design:
+// a new path has to state its answer here.
+func dropForSelfDestruct(path AccountPath, eip8246 bool) bool {
+	switch path {
+	case NoncePath, IncarnationPath, CodeHashPath, CodePath, StoragePath:
+		return true
+	case BalancePath:
+		// EIP-8246 keeps the post-SD balance so the calculator can
+		// preserve a balance-only account (or delete it when zero);
+		// pre-8246 drops it so the account is purely deleted.
+		return !eip8246
+	case AddressPath, CreateContractPath, SelfDestructPath, CodeSizePath:
+		return false
+	}
+	return false
+}
+
 // Normalize produces a clean write set from the versionMap's WriteSet
 // for a given TX. It matches the serial IBS MakeWriteSet behaviour:
 //
@@ -133,10 +152,7 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 	// explicit StoragePath=0 delete for every slot via sdStorageSlots).
 	for _, vw := range writes.balance {
 		allAddresses[vw.Address] = true
-		// EIP-8246 keeps the post-SD balance so the calculator can
-		// preserve a balance-only account (or delete it when zero);
-		// pre-8246 drops it so the account is purely deleted.
-		if sdSet[vw.Address] && !eip8246 {
+		if sdSet[vw.Address] && dropForSelfDestruct(BalancePath, eip8246) {
 			continue
 		}
 		// Account fields: prefer the versionMap's accumulated value; fall
@@ -148,7 +164,7 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 
 	for _, vw := range writes.nonce {
 		allAddresses[vw.Address] = true
-		if sdSet[vw.Address] {
+		if sdSet[vw.Address] && dropForSelfDestruct(NoncePath, eip8246) {
 			continue
 		}
 		if !SetAccountFieldFromMap(filtered, vm, vw.Address, NoncePath, vw.Version, txIndex+1) {
@@ -158,7 +174,7 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 
 	for _, vw := range writes.incarnation {
 		allAddresses[vw.Address] = true
-		if sdSet[vw.Address] {
+		if sdSet[vw.Address] && dropForSelfDestruct(IncarnationPath, eip8246) {
 			continue
 		}
 		if !SetAccountFieldFromMap(filtered, vm, vw.Address, IncarnationPath, vw.Version, txIndex+1) {
@@ -168,7 +184,7 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 
 	for _, vw := range writes.codeHash {
 		allAddresses[vw.Address] = true
-		if sdSet[vw.Address] {
+		if sdSet[vw.Address] && dropForSelfDestruct(CodeHashPath, eip8246) {
 			continue
 		}
 		if !SetAccountFieldFromMap(filtered, vm, vw.Address, CodeHashPath, vw.Version, txIndex+1) {
@@ -180,7 +196,8 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 	// here down; stale entries from a prior incarnation are dropped.
 	for _, vw := range writes.code {
 		allAddresses[vw.Address] = true
-		if sdSet[vw.Address] || vw.Version.Incarnation != incarnation {
+		if vw.Version.Incarnation != incarnation ||
+			(sdSet[vw.Address] && dropForSelfDestruct(CodePath, eip8246)) {
 			continue
 		}
 		filtered.SetCode(vw.Address, vw)
@@ -188,7 +205,8 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 
 	for _, vw := range writes.createContract {
 		allAddresses[vw.Address] = true
-		if vw.Version.Incarnation != incarnation {
+		if vw.Version.Incarnation != incarnation ||
+			(sdSet[vw.Address] && dropForSelfDestruct(CreateContractPath, eip8246)) {
 			continue
 		}
 		filtered.SetCreateContract(vw.Address, vw)
@@ -198,7 +216,8 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 		allAddresses[vw.Address] = true
 		// Only emit storage DELETE entries when the account was actually
 		// self-destructed (val=true).
-		if vw.Version.Incarnation != incarnation || !vw.Val {
+		if vw.Version.Incarnation != incarnation || !vw.Val ||
+			(sdSet[vw.Address] && dropForSelfDestruct(SelfDestructPath, eip8246)) {
 			continue
 		}
 		filtered.SetSelfDestruct(vw.Address, vw)
@@ -233,7 +252,8 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 		for _, h := range inner {
 			allAddresses[h.Address] = true
 			// Only include writes from the current (validated) incarnation.
-			if sdSet[h.Address] || h.Version.Incarnation != incarnation {
+			if h.Version.Incarnation != incarnation ||
+				(sdSet[h.Address] && dropForSelfDestruct(StoragePath, eip8246)) {
 				continue
 			}
 			writeVal := h.Val
