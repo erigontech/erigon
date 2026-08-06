@@ -1393,6 +1393,7 @@ func (b *Block) BlockAccessListHash() *common.Hash   { return b.header.BlockAcce
 
 // BlockAccessList returns the RLP-encoded EIP-7928 BAL sidecar carried with the
 // payload (nil when absent). It is not part of the block's RLP encoding or hash.
+// Constructors retain the supplied slice, and this method returns it without copying.
 func (b *Block) BlockAccessList() []byte { return b.bal }
 
 // Header returns a deep-copy of the entire block header using CopyHeader()
