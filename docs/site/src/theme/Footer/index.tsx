@@ -25,173 +25,149 @@ const IconLinkedIn = () => (
   </svg>
 );
 
+/* Brand stack per docusaurus-design-spec.md §7: Nunito Sans for body/UI text,
+   Quantify 700 for the wordmark only. Colours live in custom.css as --footer-*
+   vars so the surface can invert between light and dark mode; see "Footer
+   palette" there. Every interactive element hovers Erigon Orange. */
+const BODY = 'var(--ifm-font-family-base)';
+const ACCENT = 'var(--footer-accent)';
+const SURFACE = 'var(--footer-bg)';
+const FOREGROUND = 'var(--footer-fg)';
+const TAGLINE = 'var(--footer-tagline)';
+const ICON_BASE = 'var(--footer-icon)';
+const FINE_BASE = 'var(--footer-fine)';
+const BOX_BORDER = 'var(--footer-box-border)';
+const DIVIDER = 'var(--footer-divider)';
+const TOP_EDGE = 'var(--footer-top-edge)';
+
+const socialBtnStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: '38px',
+  height: '38px',
+  border: `1px solid ${BOX_BORDER}`,
+  borderRadius: '8px',
+  color: ICON_BASE,
+  textDecoration: 'none',
+  background: 'transparent',
+  transition: 'color 0.15s, border-color 0.15s, background-color 0.15s',
+};
+
+const fineLinkStyle: React.CSSProperties = {
+  fontSize: '0.8rem',
+  color: FINE_BASE,
+  textDecoration: 'none',
+  transition: 'color 0.15s',
+};
+
+const SOCIALS = [
+  {label: 'X / Twitter', href: 'https://x.com/erigoneth', Icon: IconX},
+  {label: 'Discord', href: 'https://dsc.gg/erigon', Icon: IconDiscord},
+  {label: 'GitHub', href: 'https://github.com/erigontech', Icon: IconGitHub},
+  {label: 'LinkedIn', href: 'https://www.linkedin.com/company/erigon/', Icon: IconLinkedIn},
+];
+
+const LEGAL = [
+  {label: 'Privacy Policy', href: 'https://erigon.tech/privacy/'},
+  {label: 'Cookie Policy', href: 'https://erigon.tech/cookies/'},
+  {label: 'Contact', href: 'https://erigon.tech/contact/'},
+  {label: 'hello@erigon.tech', href: 'mailto:hello@erigon.tech'},
+];
+
 export default function Footer(): React.ReactElement {
   const logoUrl = useBaseUrl('/img/logo-icon-orange.png');
 
   return (
-    <footer style={{background: '#000000', color: '#ffffff', fontFamily: "'Nunito Sans', sans-serif"}}>
-      {/* Top section */}
+    <footer style={{
+      background: SURFACE,
+      color: FOREGROUND,
+      borderTop: `1px solid ${TOP_EDGE}`,
+      fontFamily: BODY,
+    }}>
+      {/* Top section — single horizontal row */}
       <div className="footer-top-grid" style={{
         maxWidth: '1280px',
         margin: '0 auto',
-        padding: '3.5rem 2rem 2.5rem',
-        display: 'grid',
-        gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr',
-        gap: '2rem',
+        padding: '1.25rem 2rem 0.75rem',
+        display: 'flex',
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: '1.25rem',
+        flexWrap: 'wrap',
       }}>
 
-        {/* Brand column */}
-        <div style={{display: 'flex', flexDirection: 'column', gap: '1rem'}}>
-          {/* Brand lockup links to the corporate home page. One anchor wraps
-              both logo and wordmark so it is a single hit target. */}
-          <a href="https://erigon.tech" target="_blank" rel="noopener noreferrer"
-            aria-label="Erigon home page"
-            style={{display: 'flex', alignItems: 'center', gap: '0.6rem', color: 'inherit', textDecoration: 'none', transition: 'color 0.15s'}}
-            onMouseEnter={e => (e.currentTarget.style.color = '#EF7716')}
-            onMouseLeave={e => (e.currentTarget.style.color = 'inherit')}>
-            <img src={logoUrl} alt="Erigon" style={{height: '32px', width: 'auto'}} />
-            <span style={{fontFamily: "'Quantify', sans-serif", fontWeight: 700, fontSize: '1rem', letterSpacing: '0.04em'}}>erigon.tech</span>
-          </a>
-          <p style={{
-            fontSize: '0.875rem',
-            color: 'rgba(255,255,255,0.55)',
-            lineHeight: 1.6,
-            margin: 0,
-            maxWidth: '240px',
-          }}>
-            Building the future on the efficient software frontier.
-          </p>
-          <p style={{
-            fontSize: '0.8rem',
-            color: 'rgba(255,255,255,0.35)',
-            lineHeight: 1.6,
-            margin: 0,
-          }}>
-            Erigon Technologies AG<br />
-            Dammstrasse 16<br />
-            6300 Zug, Switzerland
-          </p>
-        </div>
+        {/* Brand lockup — one anchor around logo + wordmark, so it is a single
+            hit target; aria-label because the visible content is a wordmark
+            plus an image. */}
+        <a href="https://erigon.tech" target="_blank" rel="noopener noreferrer"
+          aria-label="Erigon home page"
+          style={{display: 'flex', alignItems: 'center', gap: '0.6rem', color: 'inherit', textDecoration: 'none', transition: 'color 0.15s'}}
+          onMouseEnter={e => (e.currentTarget.style.color = ACCENT)}
+          onMouseLeave={e => (e.currentTarget.style.color = 'inherit')}>
+          <img src={logoUrl} alt="Erigon" style={{height: '32px', width: 'auto'}} />
+          <span style={{fontFamily: "'Quantify', sans-serif", fontWeight: 700, fontSize: '1rem', letterSpacing: '0.04em'}}>erigon.tech</span>
+        </a>
 
-        {/* Products column */}
-        <div>
-          <p style={{fontFamily: "'Montserrat', sans-serif", fontWeight: 800, fontSize: '0.8rem', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#f0f0f0', margin: '0 0 1rem'}}>Products</p>
-          <ul style={{listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.6rem'}}>
-            {[
-              {label: 'Erigon Client', href: 'https://erigon.tech/products/erigon-client/'},
-              {label: 'Zilkworm', href: 'https://erigon.tech/products/zilkworm/'},
-              {label: 'Cocoon', href: 'https://erigon.tech/products/cocoon/'},
-              {label: 'R&D', href: 'https://erigon.tech/products/rnd/'},
-            ].map(({label, href}) => (
-              <li key={label}>
-                <a href={href} target="_blank" rel="noopener noreferrer" style={{color: 'rgba(255,255,255,0.65)', textDecoration: 'none', fontSize: '0.9rem', transition: 'color 0.15s'}}
-                  onMouseEnter={e => (e.currentTarget.style.color = '#EF7716')}
-                  onMouseLeave={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.65)')}>
-                  {label}
-                </a>
-              </li>
-            ))}
-          </ul>
-        </div>
+        {/* Tagline */}
+        <p style={{
+          fontSize: '0.875rem',
+          color: TAGLINE,
+          lineHeight: 1.6,
+          margin: 0,
+          maxWidth: '360px',
+        }}>
+          Building the future on the efficient software frontier.
+        </p>
 
-        {/* Developers column */}
-        <div>
-          <p style={{fontFamily: "'Montserrat', sans-serif", fontWeight: 800, fontSize: '0.8rem', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#f0f0f0', margin: '0 0 1rem'}}>Developers</p>
-          <ul style={{listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.6rem'}}>
-            {[
-              {label: 'Zilkworm Docs ↗', href: 'https://zilkworm.erigon.tech'},
-              {label: 'Cocoon Docs ↗', href: 'https://cocoon.erigon.tech'},
-              {label: 'Erigon Docs ↗', href: 'https://docs.erigon.tech'},
-              {label: 'Blog', href: 'https://erigon.tech/blog/'},
-            ].map(({label, href}) => (
-              <li key={label}>
-                <a href={href} target="_blank" rel="noopener noreferrer" style={{color: 'rgba(255,255,255,0.65)', textDecoration: 'none', fontSize: '0.9rem', transition: 'color 0.15s'}}
-                  onMouseEnter={e => (e.currentTarget.style.color = '#EF7716')}
-                  onMouseLeave={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.65)')}>
-                  {label}
-                </a>
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        {/* Company column */}
-        <div>
-          <p style={{fontFamily: "'Montserrat', sans-serif", fontWeight: 800, fontSize: '0.8rem', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#f0f0f0', margin: '0 0 1rem'}}>Company</p>
-          <ul style={{listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.6rem'}}>
-            {[
-              {label: 'About Us', href: 'https://erigon.tech/about/'},
-              {label: 'Services', href: 'https://erigon.tech/services/'},
-              {label: 'Contact', href: 'https://erigon.tech/contact/'},
-              {label: 'Privacy Policy', href: 'https://erigon.tech/privacy/'},
-              {label: 'Cookie Policy', href: 'https://erigon.tech/cookies/'},
-            ].map(({label, href}) => (
-              <li key={label}>
-                <a href={href} target="_blank" rel="noopener noreferrer" style={{color: 'rgba(255,255,255,0.65)', textDecoration: 'none', fontSize: '0.9rem', transition: 'color 0.15s'}}
-                  onMouseEnter={e => (e.currentTarget.style.color = '#EF7716')}
-                  onMouseLeave={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.65)')}>
-                  {label}
-                </a>
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        {/* Community column */}
-        <div>
-          <p style={{fontFamily: "'Montserrat', sans-serif", fontWeight: 800, fontSize: '0.8rem', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#f0f0f0', margin: '0 0 1rem'}}>Community</p>
-          <div style={{display: 'flex', flexDirection: 'column', gap: '0.5rem'}}>
-            {[
-              {label: 'X / Twitter', href: 'https://x.com/erigoneth', Icon: IconX},
-              {label: 'Discord', href: 'https://dsc.gg/erigon', Icon: IconDiscord},
-              {label: 'GitHub', href: 'https://github.com/erigontech', Icon: IconGitHub},
-              {label: 'LinkedIn', href: 'https://www.linkedin.com/company/erigon/', Icon: IconLinkedIn},
-            ].map(({label, href, Icon}) => (
-              <a key={label} href={href} target="_blank" rel="noopener noreferrer" className="footer-social-btn">
-                <Icon />
-                {label}
-              </a>
-            ))}
-          </div>
+        {/* Social icons — right aligned */}
+        <div style={{display: 'flex', flexDirection: 'row', gap: '0.6rem', flexWrap: 'wrap', marginLeft: 'auto'}}>
+          {SOCIALS.map(({label, href, Icon}) => (
+            <a key={label} href={href} target="_blank" rel="noopener noreferrer" aria-label={label} title={label}
+              style={socialBtnStyle}
+              onMouseEnter={e => {
+                e.currentTarget.style.color = ACCENT;
+                e.currentTarget.style.borderColor = ACCENT;
+                e.currentTarget.style.backgroundColor = 'color-mix(in srgb, var(--footer-accent) 12%, transparent)';
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.color = ICON_BASE;
+                e.currentTarget.style.borderColor = BOX_BORDER;
+                e.currentTarget.style.backgroundColor = 'transparent';
+              }}>
+              <Icon />
+            </a>
+          ))}
         </div>
       </div>
 
       {/* Divider */}
-      <div style={{borderTop: '1px solid rgba(255,255,255,0.08)', margin: '0 2rem'}} />
+      <div style={{borderTop: `1px solid ${DIVIDER}`, margin: '0.25rem 2rem'}} />
 
       {/* Bottom bar */}
       <div className="footer-bottom-bar" style={{
         maxWidth: '1280px',
         margin: '0 auto',
-        padding: '1.25rem 2rem',
+        padding: '0.7rem 2rem',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
         flexWrap: 'wrap',
         gap: '0.75rem',
       }}>
-        <span style={{fontSize: '0.8rem', color: 'rgba(255,255,255,0.35)'}}>
+        <span style={{fontSize: '0.8rem', color: FINE_BASE}}>
           © {new Date().getFullYear()} Erigon Technologies AG. All rights reserved.
         </span>
         <div style={{display: 'flex', alignItems: 'center', gap: '1.5rem', flexWrap: 'wrap'}}>
-          {[
-            {label: 'Privacy Policy', href: 'https://erigon.tech/privacy/'},
-            {label: 'Cookie Policy', href: 'https://erigon.tech/cookies/'},
-            {label: 'Contact', href: 'https://erigon.tech/contact/'},
-          ].map(({label, href}) => (
-            <a key={label} href={href} target="_blank" rel="noopener noreferrer"
-              style={{fontSize: '0.8rem', color: 'rgba(255,255,255,0.35)', textDecoration: 'none', transition: 'color 0.15s'}}
-              onMouseEnter={e => (e.currentTarget.style.color = '#EF7716')}
-              onMouseLeave={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.35)')}>
+          {LEGAL.map(({label, href}) => (
+            <a key={label} href={href}
+              {...(href.startsWith('mailto:') ? {} : {target: '_blank', rel: 'noopener noreferrer'})}
+              style={fineLinkStyle}
+              onMouseEnter={e => (e.currentTarget.style.color = ACCENT)}
+              onMouseLeave={e => (e.currentTarget.style.color = FINE_BASE)}>
               {label}
             </a>
           ))}
-          <a href="mailto:hello@erigon.tech"
-            style={{fontSize: '0.8rem', color: 'rgba(255,255,255,0.35)', textDecoration: 'none', transition: 'color 0.15s'}}
-            onMouseEnter={e => (e.currentTarget.style.color = '#EF7716')}
-            onMouseLeave={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.35)')}>
-            hello@erigon.tech
-          </a>
         </div>
       </div>
     </footer>

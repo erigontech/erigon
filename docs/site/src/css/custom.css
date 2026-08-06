@@ -461,39 +461,53 @@ details.alert.alert--info summary {
 }
 
 /* Footer background matches dark brand */
-.footer {
-  background-color: #000000;
+/* ─── Footer palette ─────────────────────────────────────────────────────── */
+/* The footer surface follows the colour mode: white in light, black in dark.
+   Text is a fixed alpha ramp rather than Infima's emphasis vars, because those
+   invert with the theme and would render dark-on-black (or light-on-white)
+   depending on mode. Ramp values 0.55/0.65/0.35/0.15/0.08 come from the
+   original black corporate footer; light mode mirrors them to black-alpha.
+   --footer-accent is Erigon Orange, flat across modes, and drives EVERY
+   interactive hover in the footer.
+   --footer-top-edge only exists in light mode: a white footer on a white page
+   body has no edge of its own, whereas the black one separates unaided. */
+:root {
+  --footer-accent: #EF7716;
+  --footer-bg: #FFFFFF;
+  --footer-fg: #000000;
+  --footer-tagline: rgba(0, 0, 0, 0.55);
+  --footer-icon: rgba(0, 0, 0, 0.65);
+  --footer-fine: rgba(0, 0, 0, 0.35);
+  --footer-box-border: rgba(0, 0, 0, 0.15);
+  --footer-divider: rgba(0, 0, 0, 0.08);
+  --footer-top-edge: rgba(0, 0, 0, 0.08);
 }
-
-/* ─── Footer social pill buttons ─────────────────────────────────────────── */
-
-.footer-social-btn {
-  display: flex;
-  align-items: center;
-  gap: 0.65rem;
-  padding: 0.55rem 0.85rem;
-  border-radius: 8px;
-  border: 1px solid rgba(255,255,255,0.15);
-  color: rgba(255,255,255,0.65) !important;
-  text-decoration: none !important;
-  font-size: 0.875rem;
-  font-weight: 500;
-  transition: color 0.2s ease, border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
-}
-.footer-social-btn:hover {
-  color: #EF7716 !important;
-  border-color: #EF7716 !important;
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(239,119,22,0.15);
+[data-theme='dark'] {
+  --footer-bg: #000000;
+  --footer-fg: #FFFFFF;
+  --footer-tagline: rgba(255, 255, 255, 0.55);
+  --footer-icon: rgba(255, 255, 255, 0.65);
+  --footer-fine: rgba(255, 255, 255, 0.35);
+  --footer-box-border: rgba(255, 255, 255, 0.15);
+  --footer-divider: rgba(255, 255, 255, 0.08);
+  --footer-top-edge: transparent;
 }
 
 /* ─── Footer responsive (mobile) ────────────────────────────────────────── */
 
 @media (max-width: 768px) {
+  /* The footer top row is flex, not a grid — stack it, don't set columns. */
   .footer-top-grid {
-    grid-template-columns: 1fr !important;
-    padding: 2.5rem 1.5rem 2rem !important;
-    gap: 2.5rem !important;
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    padding: 1.5rem 1.5rem 1rem !important;
+    gap: 1rem !important;
+  }
+
+  /* Social row is pushed right by margin-left:auto on desktop; drop that so it
+     aligns with the brand and tagline once stacked. */
+  .footer-top-grid > div:last-child {
+    margin-left: 0 !important;
   }
 
   .footer-bottom-bar {
