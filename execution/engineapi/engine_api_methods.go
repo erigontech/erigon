@@ -281,6 +281,11 @@ func (e *EngineServer) ExchangeCapabilities(fromCl []string) []string {
 
 func (e *EngineServer) GetBlobsV1(ctx context.Context, blobHashes []common.Hash) (engine_types.BlobsBundleV1, error) {
 	e.logger.Debug("[GetBlobsV1] Received Request", "hashes", len(blobHashes))
+	if currentHeader := e.chainRW.CurrentHeader(ctx); currentHeader != nil {
+		if e.config.IsOsaka(currentHeader.Time) {
+			return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
+		}
+	}
 	resp, err := e.getBlobs(ctx, blobHashes, clparams.DenebVersion)
 	if err != nil {
 		return nil, err
