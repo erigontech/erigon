@@ -456,19 +456,34 @@ if [[ "$SOAK_RC" -eq 0 ]]; then
             continue
         fi
         # Check consecutive files: prev.toStep must equal cur.fromStep.
+        # OVERLAPs that involve a v4 file (either prev or cur) are
+        # legitimate transient state — mode-C emits a v4 whose endTxN
+        # rounds up to the same step boundary as the per-step successor
+        # that retire will later produce; both coexist until a wider
+        # merge supersedes v4 (see commit 906f8f3de1 filesCoverBackwardTo).
+        # Under ERIGON_MERGE_MIN_AGE_STEPS=6 that merge is intentionally
+        # delayed by several steps so we always see the transient here.
+        # Only count OVERLAPs between two legacy files as failures — that
+        # is a real invariant violation.
         prev_to=""
+        prev_kind=""
         while read -r from to name kind; do
             [[ "$kind" == "v4" ]] && V4_TRANSIENT_COUNT=$((V4_TRANSIENT_COUNT + 1))
             if [[ -n "$prev_to" && "$prev_to" != "$from" ]]; then
                 if [[ "$prev_to" -gt "$from" ]]; then
-                    echo "  OVERLAP: $DOMAIN — prev.toStep=$prev_to > cur.fromStep=$from ($name kind=$kind)"
-                    OVERLAP_COUNT=$((OVERLAP_COUNT + 1))
+                    if [[ "$prev_kind" == "v4" || "$kind" == "v4" ]]; then
+                        echo "  V4_OVERLAP: $DOMAIN — prev.toStep=$prev_to > cur.fromStep=$from ($name kind=$kind, prev_kind=$prev_kind) [expected transient, awaiting merge]"
+                    else
+                        echo "  OVERLAP: $DOMAIN — prev.toStep=$prev_to > cur.fromStep=$from ($name kind=$kind, prev_kind=$prev_kind)"
+                        OVERLAP_COUNT=$((OVERLAP_COUNT + 1))
+                    fi
                 else
-                    echo "  GAP: $DOMAIN — prev.toStep=$prev_to < cur.fromStep=$from ($name kind=$kind)"
+                    echo "  GAP: $DOMAIN — prev.toStep=$prev_to < cur.fromStep=$from ($name kind=$kind, prev_kind=$prev_kind)"
                     GAP_COUNT=$((GAP_COUNT + 1))
                 fi
             fi
             prev_to=$to
+            prev_kind=$kind
         done <<< "$LAYOUT"
     done
 
