@@ -45,6 +45,21 @@ var (
 	mxExecCodeReadRate    = metrics.NewGauge("exec_code_read_rate")
 	mxExecWriteRate       = metrics.NewGauge("exec_write_rate")
 
+	// Conflict signals for the parallel executor, as monotonic totals so the
+	// rate and the ratio are derived at query time rather than being fixed to
+	// this reporter's interval.
+	//
+	// exec_execs_total is the denominator rather than the existing
+	// exec_triggers: that one is a gauge holding the executor's own exec
+	// counter, which restarts with each executor, so it is not monotonic and
+	// rate() over it is meaningless.
+	mxExecsTotal = metrics.GetOrCreateCounterVec("exec_execs_total", []string{"mode"},
+		"parallel-exec task executions, by sync mode")
+	mxRepeatsTotal = metrics.GetOrCreateCounterVec("exec_repeats_total", []string{"mode"},
+		"parallel-exec re-executions, by sync mode")
+	mxDiscardsTotal = metrics.GetOrCreateCounterVec("exec_discards_total", []string{"mode", "reason"},
+		"parallel-exec tasks thrown away, by sync mode and reason")
+
 	mxExecDomainReads             = metrics.NewGauge(`exec_domain_read_rate{domain="all"}`)
 	mxExecDomainReadDuration      = metrics.NewGauge(`exec_domain_read_dur{domain="all"}`)
 	mxExecDomainCacheReads        = metrics.NewGauge(`exec_domain_cache_read_rate{domain="all"}`)
@@ -651,6 +666,20 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 		}
 
 		mxExecRepeats.SetInt(repeats)
+		// Conflict behaviour differs by workload, so keep the modes apart:
+		// engine_newPayload validates one block at the tip, applying-blocks
+		// chews through a sync batch, and a from-scratch re-exec is neither.
+		execMode := "other"
+		switch {
+		case te.isForkValidation:
+			execMode = "newpayload"
+		case te.isApplyingBlocks:
+			execMode = "applyingblocks"
+		}
+		mxExecsTotal.WithLabelValues(execMode).AddUint64(execDiff)
+		mxRepeatsTotal.WithLabelValues(execMode).AddInt(repeats)
+		mxDiscardsTotal.WithLabelValues(execMode, "abort").AddUint64(abortCount - p.prevAbortCount)
+		mxDiscardsTotal.WithLabelValues(execMode, "invalid").AddUint64(invalidCount - p.prevInvalidCount)
 		mxExecTriggers.SetInt(int(execCount))
 
 		p.prevExecCount = execCount

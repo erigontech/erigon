@@ -6567,11 +6567,11 @@
               },
               "editorMode": "code",
               "exemplar": true,
-              "expr": "rate(exec_repeats{instance=~\"$instance\"}[$__rate_interval])/rate(exec_txs_done{instance=~\"$instance\"}[$__rate_interval])",
+              "expr": "rate(exec_repeats_total{instance=~\"$instance\"}[$__rate_interval]) / rate(exec_execs_total{instance=~\"$instance\"}[$__rate_interval])",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 1,
-              "legendFormat": "repeats: {{instance}}",
+              "legendFormat": "conflict rate ({{mode}})",
               "range": true,
               "refId": "A"
             },
@@ -6582,12 +6582,12 @@
               },
               "editorMode": "code",
               "exemplar": true,
-              "expr": "rate(exec_triggers{instance=~\"$instance\"}[$__rate_interval])/rate(exec_txs_done{instance=~\"$instance\"}[$__rate_interval])",
+              "expr": "rate(exec_discards_total{instance=~\"$instance\"}[$__rate_interval])",
               "format": "time_series",
               "hide": false,
               "interval": "",
               "intervalFactor": 1,
-              "legendFormat": "triggers: {{instance}}",
+              "legendFormat": "discards/s {{reason}} ({{mode}})",
               "range": true,
               "refId": "B"
             }
