@@ -45,6 +45,15 @@ var (
 	mxExecCodeReadRate    = metrics.NewGauge("exec_code_read_rate")
 	mxExecWriteRate       = metrics.NewGauge("exec_write_rate")
 
+	// exec_execs_total, not the existing exec_triggers: that gauge holds the
+	// executor's own counter and restarts with it, so rate() sees a reset.
+	mxExecsTotal = metrics.GetOrCreateCounterVec("exec_execs_total", []string{"mode"},
+		"parallel-exec task executions, by sync mode")
+	mxRepeatsTotal = metrics.GetOrCreateCounterVec("exec_repeats_total", []string{"mode"},
+		"parallel-exec re-executions, by sync mode")
+	mxDiscardsTotal = metrics.GetOrCreateCounterVec("exec_discards_total", []string{"mode", "reason"},
+		"parallel-exec tasks thrown away, by sync mode and reason")
+
 	mxExecDomainReads             = metrics.NewGauge(`exec_domain_read_rate{domain="all"}`)
 	mxExecDomainReadDuration      = metrics.NewGauge(`exec_domain_read_dur{domain="all"}`)
 	mxExecDomainCacheReads        = metrics.NewGauge(`exec_domain_cache_read_rate{domain="all"}`)
@@ -651,6 +660,17 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 		}
 
 		mxExecRepeats.SetInt(repeats)
+		execMode := "other"
+		switch {
+		case te.isForkValidation:
+			execMode = "newpayload"
+		case te.isApplyingBlocks:
+			execMode = "applyingblocks"
+		}
+		mxExecsTotal.WithLabelValues(execMode).AddUint64(execDiff)
+		mxRepeatsTotal.WithLabelValues(execMode).AddInt(repeats)
+		mxDiscardsTotal.WithLabelValues(execMode, "abort").AddUint64(abortCount - p.prevAbortCount)
+		mxDiscardsTotal.WithLabelValues(execMode, "invalid").AddUint64(invalidCount - p.prevInvalidCount)
 		mxExecTriggers.SetInt(int(execCount))
 
 		p.prevExecCount = execCount
