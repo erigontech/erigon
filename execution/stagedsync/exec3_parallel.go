@@ -2857,9 +2857,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					// already recorded, and assert the domain agrees on every one.
 					normReader := stateReader
 					if stateReader != nil { // nil means "no reader"; Normalize guards on it
-						normReader = state.NewCheckedStateReader(
-							state.NewVersionedStateReader(txVersion.TxIndex, be.blockIO.ReadSet(txVersion.TxIndex), be.versionMap, stateReader),
-							stateReader)
+						normReader = state.NewVersionedStateReader(txVersion.TxIndex, be.blockIO.ReadSet(txVersion.TxIndex), be.versionMap, stateReader)
 					}
 					normWrites, normErr := rawWrites.Normalize(be.versionMap, txVersion.TxIndex, resultIncarnation, normReader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil, txTask.Rules().IsAmsterdam)
 					if domainKeysErr != nil {
@@ -3128,9 +3126,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				var normErr error
 				finalizeNormReader := reader
 				if reader != nil {
-					finalizeNormReader = state.NewCheckedStateReader(
-						state.NewVersionedStateReader(finalVersion.TxIndex, be.blockIO.ReadSet(finalVersion.TxIndex), be.versionMap, reader),
-						reader)
+					finalizeNormReader = state.NewVersionedStateReader(finalVersion.TxIndex, be.blockIO.ReadSet(finalVersion.TxIndex), be.versionMap, reader)
 				}
 				finalizeWrites, normErr = writes.Normalize(be.versionMap, finalVersion.TxIndex, finalVersion.Incarnation, finalizeNormReader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil, pe.cfg.chainConfig.IsAmsterdam(tt.Header.Time))
 				if domainKeysErr != nil {

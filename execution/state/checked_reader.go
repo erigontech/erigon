@@ -49,7 +49,7 @@ func mismatch(op string, addr accounts.Address, detail string) {
 func (r *CheckedStateReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	want, err := r.want.ReadAccountData(address)
 	if err != nil {
-		return nil, err
+		mismatch("ReadAccountData", address, fmt.Sprintf("read-set path errored: %v", err))
 	}
 	got, gotErr := r.got.ReadAccountData(address)
 	if gotErr != nil {
@@ -72,7 +72,7 @@ func (r *CheckedStateReader) ReadAccountData(address accounts.Address) (*account
 func (r *CheckedStateReader) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
 	want, wantOK, err := r.want.ReadAccountStorage(address, key)
 	if err != nil {
-		return want, wantOK, err
+		mismatch("ReadAccountStorage", address, fmt.Sprintf("read-set path errored: %v", err))
 	}
 	got, gotOK, gotErr := r.got.ReadAccountStorage(address, key)
 	if gotErr != nil {
@@ -100,7 +100,7 @@ func (r *CheckedStateReader) ReadAccountStorage(address accounts.Address, key ac
 func (r *CheckedStateReader) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	want, err := r.want.ReadAccountCode(address)
 	if err != nil {
-		return nil, err
+		mismatch("ReadAccountCode", address, fmt.Sprintf("read-set path errored: %v", err))
 	}
 	got, gotErr := r.got.ReadAccountCode(address)
 	if gotErr != nil {
