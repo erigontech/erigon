@@ -322,8 +322,12 @@ LOOP:
 			stopped = time.NewTicker(500 * time.Millisecond)
 		}
 		// If we don't have enough gas for any further transactions then we're done.
-		if gasPool.Gas() < params.TxGas {
-			logger.Debug(fmt.Sprintf("[%s] Not enough gas for further transactions", logPrefix), "have", gasPool, "want", params.TxGas)
+		minTxGas := params.TxGas
+		if ba.cfg.ChainConfig.IsAmsterdam(header.Time) {
+			minTxGas = params.TxBaseEIP2780
+		}
+		if gasPool.Gas() < minTxGas {
+			logger.Debug(fmt.Sprintf("[%s] Not enough gas for further transactions", logPrefix), "have", gasPool, "want", minTxGas)
 			done = true
 			break
 		}
