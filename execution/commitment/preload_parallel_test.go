@@ -15,6 +15,7 @@ import (
 	"errors"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
@@ -783,5 +784,166 @@ func TestContractTrunkPreloadParallel_BadHashLengthError(t *testing.T) {
 	}
 	if _, err := NewContractTrunkPreloadParallel(make([]byte, 33)); err == nil {
 		t.Fatal("expected error for 33-byte hash")
+	}
+}
+
+// TestContractTrunkPreloadParallel_ExactBudgetFillTerminates covers a wave whose
+// pins land usedBytes exactly on stepCap, followed by a frontier that misses
+// dbBranches entirely. That leaves no budget for a single file entry, so the
+// whole miss set is deferred and nothing is pinned — depth, frontier and
+// usedBytes all stay put and the wave must not be re-entered.
+func TestContractTrunkPreloadParallel_ExactBudgetFillTerminates(t *testing.T) {
+	hash, tree, _ := buildSyntheticTree(t)
+	root := ""
+	for p := range tree {
+		if root == "" || len(p) < len(root) {
+			root = p
+		}
+	}
+	const valSz = 100
+	resolve := fakeResolver(tree, nil, valSz, "")
+
+	rootKey := bytes.Clone(nibbles.HexToCompact([]byte(root)))
+	rootVal := branchVal(tree[root], valSz)
+	// Shadow only the root, so every wave below depth 64 is a pure file miss.
+	dbBranches := map[string][]byte{string(rootKey): rootVal}
+
+	c := NewBranchCache(64)
+	p, err := NewContractTrunkPreloadParallel(hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Budget the root pin consumes exactly, landing usedBytes on stepCap.
+	stepBudget := estimatedEntryCost(rootKey, rootVal)
+
+	type runResult struct {
+		pinned     int
+		queueEmpty bool
+		err        error
+	}
+	res := make(chan runResult, 1)
+	go func() {
+		n, done, err := p.Run(stepBudget, dbBranches, resolve, c, nil)
+		res <- runResult{n, done, err}
+	}()
+
+	var got runResult
+	select {
+	case got = <-res:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Run did not terminate: a wave with no file budget defers the whole frontier without pinning, so the loop re-enters on identical state")
+	}
+	if got.err != nil {
+		t.Fatal(got.err)
+	}
+	if got.queueEmpty {
+		t.Fatal("queue reported empty, but the root's children were never pinned")
+	}
+	if got.pinned != 1 {
+		t.Fatalf("pinned %d entries, want 1 (the root)", got.pinned)
+	}
+
+	// The deferred frontier must survive so a later, larger step finishes the tree.
+	if _, done, err := p.Run(1<<20, nil, resolve, c, nil); err != nil {
+		t.Fatal(err)
+	} else if !done {
+		t.Fatalf("expected done after a large budget; queue=%d", p.QueueRemaining())
+	}
+	if p.PinnedTotal() != len(tree) {
+		t.Fatalf("pinned %d entries, want the whole tree (%d)", p.PinnedTotal(), len(tree))
+	}
+}
+
+// TestContractTrunkPreloadParallel_StepBudgetSweepTerminates drives the wave-BFS
+// to completion across step budgets straddling the exact cost of one entry, the
+// values that leave a wave with zero file budget. No Run may spin, and any budget
+// that can afford the root must finish the tree.
+func TestContractTrunkPreloadParallel_StepBudgetSweepTerminates(t *testing.T) {
+	hash, tree, _ := buildSyntheticTree(t)
+	root := ""
+	for p := range tree {
+		if root == "" || len(p) < len(root) {
+			root = p
+		}
+	}
+	const valSz = 100
+	resolve := fakeResolver(tree, nil, valSz, "")
+	rootKey := bytes.Clone(nibbles.HexToCompact([]byte(root)))
+	rootVal := branchVal(tree[root], valSz)
+	dbBranches := map[string][]byte{string(rootKey): rootVal}
+	exact := estimatedEntryCost(rootKey, rootVal)
+
+	// Entry cost grows with path depth, so only a budget comfortably above one
+	// entry is guaranteed to keep making progress; smaller ones must still return.
+	const maxSteps = 200
+	affordable := 4 * exact
+	budgets := []int{1, minEntryBytes, exact - 1, exact, exact + 1, affordable, 1 << 20}
+
+	type sweepResult struct {
+		budget int
+		steps  int
+		done   bool
+		pinned int
+		err    error
+	}
+	results := make(chan []sweepResult, 1)
+	go func() {
+		out := make([]sweepResult, 0, len(budgets))
+		for _, budget := range budgets {
+			c := NewBranchCache(64)
+			p, err := NewContractTrunkPreloadParallel(hash)
+			if err != nil {
+				out = append(out, sweepResult{budget: budget, err: err})
+				continue
+			}
+			r := sweepResult{budget: budget}
+			for r.steps = 1; r.steps <= maxSteps; r.steps++ {
+				_, done, err := p.Run(budget, dbBranches, resolve, c, nil)
+				if err != nil {
+					r.err = err
+					break
+				}
+				if done {
+					r.done = true
+					break
+				}
+			}
+			r.pinned = p.PinnedTotal()
+			out = append(out, r)
+		}
+		results <- out
+	}()
+
+	var out []sweepResult
+	select {
+	case out = <-results:
+	case <-time.After(30 * time.Second):
+		t.Fatal("a Run did not terminate: a wave with no file budget must end the step, not re-enter on an unchanged frontier")
+	}
+
+	for _, r := range out {
+		if r.err != nil {
+			t.Errorf("budget %d: %v", r.budget, r.err)
+			continue
+		}
+		// A budget below one entry's cost can never pin the root; it must still
+		// return from every Run, but it cannot make progress.
+		if r.budget < exact {
+			if r.pinned != 0 {
+				t.Errorf("budget %d: pinned %d entries on a sub-entry budget", r.budget, r.pinned)
+			}
+			continue
+		}
+		if r.budget < affordable {
+			continue
+		}
+		if !r.done {
+			t.Errorf("budget %d: not complete after %d steps (pinned %d/%d)", r.budget, maxSteps, r.pinned, len(tree))
+			continue
+		}
+		if r.pinned != len(tree) {
+			t.Errorf("budget %d: pinned %d entries, want the whole tree (%d)", r.budget, r.pinned, len(tree))
+		}
 	}
 }

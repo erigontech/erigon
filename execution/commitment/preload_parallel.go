@@ -216,9 +216,11 @@ func (p *ContractTrunkPreloadParallel) Run(
 
 		// Cap the file fetch by what the budget can absorb after dbHits.
 		var fileMissDeferred []pathKey
+		noFileBudget := false
 		if fileBudget := stepCap - p.usedBytes - dbHitsBytes; fileBudget <= 0 {
 			fileMissDeferred = fileMiss
 			fileMiss = nil
+			noFileBudget = true
 		} else if maxFileFetch := fileBudget/minEntryBytes + 1; maxFileFetch < len(fileMiss) {
 			fileMissDeferred = fileMiss[maxFileFetch:]
 			fileMiss = fileMiss[:maxFileFetch]
@@ -259,6 +261,13 @@ func (p *ContractTrunkPreloadParallel) Run(
 					break
 				}
 			}
+		}
+
+		// Deferring the whole miss set is not progress: depth and frontier stay
+		// put, and pin() only trips budgetHit on a strict overflow, so a wave
+		// that fills usedBytes to exactly stepCap would re-enter here forever.
+		if noFileBudget && len(fileMissDeferred) > 0 {
+			budgetHit = true
 		}
 
 		if budgetHit {
