@@ -6567,7 +6567,7 @@
               },
               "editorMode": "code",
               "exemplar": true,
-              "expr": "rate(exec_repeats_total{instance=~\"$instance\"}[$__rate_interval]) / rate(exec_execs_total{instance=~\"$instance\"}[$__rate_interval])",
+              "expr": "rate(exec_repeats_total{instance=~\"$instance\"}[$__rate_interval]) / rate(exec_execs_total{instance=~\"$instance\"}[$__rate_interval]) * 100",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 1,
