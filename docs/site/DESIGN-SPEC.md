@@ -155,7 +155,7 @@ Completely swizzled (`src/theme/Footer/index.tsx`) — not using the Docusaurus 
 - No link columns and no postal address. Those belong to the **full** footer, which is erigon.tech's, not a docs site's. Do not "fix" this footer by porting them back.
 - Nunito Sans throughout, with the `erigon.tech` wordmark in Quantify 700.
 - Every interactive element hovers Erigon Orange `#EF7716`.
-- Theme-aware surface via `--footer-*` custom properties in `src/css/custom.css`: white in light mode, black in dark. It is **not** always black — that was the pre-2026-08 five-column footer.
+- Theme-aware surface via `--footer-*` custom properties in `src/css/custom.css`: white in light mode, black in dark. It is **not** always black — that was the previous five-column footer.
 - Both modes carry a 1px top edge. In light because a white footer on a white body has no edge of its own; in dark because `#000000` against the `#0A0A0A` page body is imperceptible.
 - Fine print is 0.55 alpha, deliberately not a mirrored 0.35: equal alpha is not equal perceived contrast across inverted surfaces, and 0.35 on white computes to 2.44:1, failing WCAG AA.
 
