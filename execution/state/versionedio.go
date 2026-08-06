@@ -1072,6 +1072,18 @@ func (s *WriteSet) CodeHashes() iter.Seq2[accounts.Address, *VersionedWrite[acco
 	}
 	return maps.All(s.codeHash)
 }
+func (s *WriteSet) CreateContracts() iter.Seq2[accounts.Address, *VersionedWrite[bool]] {
+	if s == nil {
+		return maps.All(map[accounts.Address]*VersionedWrite[bool](nil))
+	}
+	return maps.All(s.createContract)
+}
+func (s *WriteSet) CodeSizes() iter.Seq2[accounts.Address, *VersionedWrite[int]] {
+	if s == nil {
+		return maps.All(map[accounts.Address]*VersionedWrite[int](nil))
+	}
+	return maps.All(s.codeSize)
+}
 func (s *WriteSet) Storages() iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]] {
 	if s == nil {
 		return maps.All(map[accounts.Address]map[accounts.StorageKey]*VersionedWrite[uint256.Int](nil))

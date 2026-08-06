@@ -3379,32 +3379,120 @@ func normalizeWriteSet(writes *state.WriteSet, vm *state.VersionMap, txIndex int
 		}
 	}
 
-	for h := range writes.AllHeaders() {
-		// Drop account-field writes for SD'd addresses so applyVersionedWrites
-		// takes the pure-delete branch instead of cleanup-before-recreate; drop
-		// raw StoragePath writes too (the SelfDestructPath case re-emits an
-		// explicit StoragePath=0 delete for every slot via sdStorageSlots).
-		if sdSet[h.Address] {
-			switch h.Path {
-			case state.NoncePath, state.IncarnationPath, state.CodeHashPath, state.CodePath, state.StoragePath:
-				continue
-			case state.BalancePath:
-				// EIP-8246 keeps the post-SD balance so the calculator can
-				// preserve a balance-only account (or delete it when zero);
-				// pre-8246 drops it so the account is purely deleted.
-				if !eip8246 {
-					continue
-				}
-			}
+	// Addresses of every field-level write in the raw input, collected during
+	// the walk so the fill loop below needs no second pass. Filtering must not
+	// narrow it: an address whose writes are all dropped still needs its
+	// account fields.
+	allAddresses := make(map[accounts.Address]bool)
+
+	// Drop account-field writes for SD'd addresses so applyVersionedWrites
+	// takes the pure-delete branch instead of cleanup-before-recreate; drop
+	// raw StoragePath writes too (the self-destruct loop re-emits an
+	// explicit StoragePath=0 delete for every slot via sdStorageSlots).
+	for addr, vw := range writes.Balances() {
+		allAddresses[addr] = true
+		// EIP-8246 keeps the post-SD balance so the calculator can preserve a
+		// balance-only account (or delete it when zero); pre-8246 drops it so
+		// the account is purely deleted.
+		if sdSet[addr] && !eip8246 {
+			continue
 		}
-		switch h.Path {
-		case state.StoragePath:
+		// Account fields: prefer the versionMap's accumulated value; fall back
+		// to the raw write when the map has none.
+		if !state.SetAccountFieldFromMap(filtered, vm, addr, state.BalancePath, vw.Version, txIndex+1) {
+			filtered.SetBalance(addr, vw)
+		}
+	}
+
+	for addr, vw := range writes.Nonces() {
+		allAddresses[addr] = true
+		if sdSet[addr] {
+			continue
+		}
+		if !state.SetAccountFieldFromMap(filtered, vm, addr, state.NoncePath, vw.Version, txIndex+1) {
+			filtered.SetNonce(addr, vw)
+		}
+	}
+
+	for addr, vw := range writes.Incarnations() {
+		allAddresses[addr] = true
+		if sdSet[addr] {
+			continue
+		}
+		if !state.SetAccountFieldFromMap(filtered, vm, addr, state.IncarnationPath, vw.Version, txIndex+1) {
+			filtered.SetIncarnation(addr, vw)
+		}
+	}
+
+	for addr, vw := range writes.CodeHashes() {
+		allAddresses[addr] = true
+		if sdSet[addr] {
+			continue
+		}
+		if !state.SetAccountFieldFromMap(filtered, vm, addr, state.CodeHashPath, vw.Version, txIndex+1) {
+			filtered.SetCodeHash(addr, vw)
+		}
+	}
+
+	// Only writes from the current (validated) incarnation are included from
+	// here down; stale entries from a prior incarnation are dropped.
+	for addr, vw := range writes.Codes() {
+		allAddresses[addr] = true
+		if sdSet[addr] || vw.Version.Incarnation != incarnation {
+			continue
+		}
+		filtered.SetCode(addr, vw)
+	}
+
+	for addr, vw := range writes.CreateContracts() {
+		allAddresses[addr] = true
+		if vw.Version.Incarnation != incarnation {
+			continue
+		}
+		filtered.SetCreateContract(addr, vw)
+	}
+
+	for addr, vw := range writes.SelfDestructs() {
+		allAddresses[addr] = true
+		// Only emit storage DELETE entries when the account was actually
+		// self-destructed (val=true).
+		if vw.Version.Incarnation != incarnation || !vw.Val {
+			continue
+		}
+		filtered.SetSelfDestruct(addr, vw)
+		for _, slot := range sdStorageSlots(addr) {
+			filtered.SetStorage(addr, slot, &state.VersionedWrite[uint256.Int]{
+				WriteHeader: state.WriteHeader{
+					Address: addr,
+					Path:    state.StoragePath,
+					Key:     slot,
+					Version: vw.Version,
+				},
+			})
+		}
+	}
+
+	// Code size is derived from the code bytes and isn't a domain field, so it's
+	// intentionally not carried into the calc/apply write set (as on serial).
+	// Cross-tx ReadCodeSize is served from the versionMap, which the worker
+	// populates directly — independent of this pass.
+	for addr := range writes.CodeSizes() {
+		allAddresses[addr] = true
+	}
+
+	// writes.Addresses is not walked: AddressPath is record-level — skip for
+	// field-level consumers.
+
+	for addr, inner := range writes.Storages() {
+		// Both self-destruct probes below key on the address alone, so they are
+		// resolved once for the whole slot group — lazily, so a group whose
+		// slots are all filtered out pays for neither.
+		sdTxIdx, sdOk, sdLoaded := -1, false, false
+		revived, revivedLoaded := false, false
+		for key, sw := range inner {
+			allAddresses[addr] = true
 			// Only include writes from the current (validated) incarnation.
-			if h.Version.Incarnation != incarnation {
-				continue
-			}
-			sw, ok := writes.GetStorage(h.Address, h.Key)
-			if !ok {
+			if sdSet[addr] || sw.Version.Incarnation != incarnation {
 				continue
 			}
 			writeVal := sw.Val
@@ -3416,14 +3504,16 @@ func normalizeWriteSet(writes *state.WriteSet, vm *state.VersionMap, txIndex int
 			// flushed back to the versionMap, so without this a resurrect TX
 			// that re-writes a slot to its pre-SD value is wrongly dropped as a
 			// no-op (TestDeleteRecreateSlotsAcrossManyBlocks).
-			sdTxIdx, sdOk := -1, false
-			if v, sd, _ := vm.ReadSelfDestruct(h.Address, txIndex); sd.Status() == state.MVReadResultDone && v {
-				sdTxIdx, sdOk = sd.Version().TxIndex, true
+			if !sdLoaded {
+				sdLoaded = true
+				if v, sd, _ := vm.ReadSelfDestruct(addr, txIndex); sd.Status() == state.MVReadResultDone && v {
+					sdTxIdx, sdOk = sd.Version().TxIndex, true
+				}
 			}
 			// No-op filter: compare against origin (what this TX would have read).
 			// First check versionMap floor (prior TX's write in this block).
 			// Then fall back to stateReader (pre-block value from domain).
-			originVal, origin, originOK := vm.ReadStorage(h.Address, h.Key, txIndex)
+			originVal, origin, originOK := vm.ReadStorage(addr, key, txIndex)
 			originValid := originOK && origin.Status() == state.MVReadResultDone &&
 				!(sdOk && sdTxIdx > origin.Version().TxIndex)
 			if originValid {
@@ -3443,12 +3533,16 @@ func normalizeWriteSet(writes *state.WriteSet, vm *state.VersionMap, txIndex int
 				// misses it. Narrower than an IncarnationPath probe: pure
 				// CREATE (no prior SD=true) doesn't wipe pre-existing storage,
 				// so its same-value SSTOREs still no-op against pre-block.
-				if vm.AnyDoneSelfDestructEquals(h.Address, txIndex-1, true) {
+				if !revivedLoaded {
+					revivedLoaded = true
+					revived = vm.AnyDoneSelfDestructEquals(addr, txIndex-1, true)
+				}
+				if revived {
 					if writeVal.IsZero() {
 						continue
 					}
 				} else {
-					preVal, found, err := stateReader.ReadAccountStorage(h.Address, h.Key)
+					preVal, found, err := stateReader.ReadAccountStorage(addr, key)
 					if err == nil {
 						if !found && writeVal.IsZero() {
 							continue
@@ -3459,72 +3553,7 @@ func normalizeWriteSet(writes *state.WriteSet, vm *state.VersionMap, txIndex int
 					}
 				}
 			}
-			filtered.SetStorage(h.Address, h.Key, sw)
-		case state.BalancePath, state.NoncePath, state.IncarnationPath, state.CodeHashPath:
-			// Account fields: prefer the versionMap's accumulated value; fall
-			// back to the raw write when the map has none.
-			if !state.SetAccountFieldFromMap(filtered, vm, h.Address, h.Path, h.Version, txIndex+1) {
-				switch h.Path {
-				case state.BalancePath:
-					if vw, ok := writes.GetBalance(h.Address); ok {
-						filtered.SetBalance(h.Address, vw)
-					}
-				case state.NoncePath:
-					if vw, ok := writes.GetNonce(h.Address); ok {
-						filtered.SetNonce(h.Address, vw)
-					}
-				case state.IncarnationPath:
-					if vw, ok := writes.GetIncarnation(h.Address); ok {
-						filtered.SetIncarnation(h.Address, vw)
-					}
-				case state.CodeHashPath:
-					if vw, ok := writes.GetCodeHash(h.Address); ok {
-						filtered.SetCodeHash(h.Address, vw)
-					}
-				}
-			}
-		case state.CodePath:
-			if h.Version.Incarnation != incarnation {
-				continue
-			}
-			if vw, ok := writes.GetCode(h.Address); ok {
-				filtered.SetCode(h.Address, vw)
-			}
-		case state.CreateContractPath:
-			if h.Version.Incarnation != incarnation {
-				continue
-			}
-			if vw, ok := writes.GetCreateContract(h.Address); ok {
-				filtered.SetCreateContract(h.Address, vw)
-			}
-		case state.SelfDestructPath:
-			if h.Version.Incarnation != incarnation {
-				continue
-			}
-			// Only emit storage DELETE entries when the account was actually
-			// self-destructed (val=true).
-			sdw, ok := writes.GetSelfDestruct(h.Address)
-			if !ok || !sdw.Val {
-				continue
-			}
-			filtered.SetSelfDestruct(h.Address, sdw)
-			for _, slot := range sdStorageSlots(h.Address) {
-				filtered.SetStorage(h.Address, slot, &state.VersionedWrite[uint256.Int]{
-					WriteHeader: state.WriteHeader{
-						Address: h.Address,
-						Path:    state.StoragePath,
-						Key:     slot,
-						Version: h.Version,
-					},
-				})
-			}
-		case state.AddressPath:
-			// AddressPath is record-level — skip for field-level consumers.
-		case state.CodeSizePath:
-			// Code size is derived from the code bytes and isn't a domain field,
-			// so it's intentionally not carried into the calc/apply write set (as
-			// on serial). Cross-tx ReadCodeSize is served from the versionMap,
-			// which the worker populates directly — independent of this pass.
+			filtered.SetStorage(addr, key, sw)
 		}
 	}
 
@@ -3535,15 +3564,6 @@ func normalizeWriteSet(writes *state.WriteSet, vm *state.VersionMap, txIndex int
 	// - Addresses with only storage writes (no balance/nonce changes)
 	// - Addresses whose storage writes were all filtered as no-ops
 	//   (the object was still dirty in the IBS)
-	//
-	// Collect all addresses from the raw input (before filtering).
-	allAddresses := make(map[accounts.Address]bool)
-	for h := range writes.AllHeaders() {
-		if h.Path != state.AddressPath {
-			allAddresses[h.Address] = true
-		}
-	}
-
 	for addr := range allAddresses {
 		if sdSet[addr] {
 			// Don't fill account fields for SD'd addresses — same rationale as
