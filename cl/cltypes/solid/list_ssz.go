@@ -35,15 +35,12 @@ type ListSSZ[T EncodableHashableSSZ] struct {
 	list []T
 
 	limit int
-	// this needs to be set to true if the underlying schema of the object
-	// includes an offset in any of its sub elements.
-	static bool
-	// If the underlying object has static size, aka static=true
-	// then we can cache its size instead of calling EncodeSizeSSZ on
-	// an always newly created object
+	// static means elements have fixed-size encodings and bytesPerElement is
+	// valid. The list itself remains variable-size.
+	static          bool
 	bytesPerElement int
 	progressive     bool
-	// We can keep hash_tree_root result cached
+	// root caches the hash-tree root computed by HashSSZ.
 	root common.Hash
 }
 
@@ -139,11 +136,24 @@ func (l *ListSSZ[T]) EncodeSSZ(buf []byte) (dst []byte, err error) {
 	return
 }
 
-func (l *ListSSZ[T]) DecodeSSZ(buf []byte, version int) (err error) {
+func (l *ListSSZ[T]) DecodeSSZ(buf []byte, version int) error {
+	return l.decodeSSZ(buf, version, false)
+}
+
+func (l *ListSSZ[T]) DecodeSSZStrict(buf []byte, version int) error {
+	return l.decodeSSZ(buf, version, true)
+}
+
+func (l *ListSSZ[T]) decodeSSZ(buf []byte, version int, strict bool) (err error) {
 	limit := uint64(l.limit)
-	if l.static {
+	switch {
+	case l.static && strict:
+		l.list, err = ssz.DecodeStaticListStrict[T](buf, 0, uint32(len(buf)), uint32(l.bytesPerElement), limit, version)
+	case l.static:
 		l.list, err = ssz.DecodeStaticList[T](buf, 0, uint32(len(buf)), uint32(l.bytesPerElement), limit, version)
-	} else {
+	case strict:
+		l.list, err = ssz.DecodeDynamicListStrict[T](buf, 0, uint32(len(buf)), limit, version)
+	default:
 		l.list, err = ssz.DecodeDynamicList[T](buf, 0, uint32(len(buf)), limit, version)
 	}
 	l.root = common.Hash{}
