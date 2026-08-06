@@ -322,11 +322,14 @@ LOOP:
 			stopped = time.NewTicker(500 * time.Millisecond)
 		}
 		// If we don't have enough gas for any further transactions then we're done.
+		// Post-Amsterdam the state pool must also fit tx.gas_limit (EIP-8037
+		// check_transaction), so check both dimensions.
+		isAmsterdam := ba.cfg.ChainConfig.IsAmsterdam(header.Time)
 		minTxGas := params.TxGas
-		if ba.cfg.ChainConfig.IsAmsterdam(header.Time) {
+		if isAmsterdam {
 			minTxGas = params.TxBaseEIP2780
 		}
-		if gasPool.Gas() < minTxGas {
+		if gasPool.Gas() < minTxGas || (isAmsterdam && gasPool.StateGasAvailable() < minTxGas) {
 			logger.Debug(fmt.Sprintf("[%s] Not enough gas for further transactions", logPrefix), "have", gasPool, "want", minTxGas)
 			done = true
 			break
