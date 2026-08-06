@@ -159,6 +159,7 @@ func (bra *BlockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, t
 		bra.warmWg.Go(func() {
 			bra.warmBody(ctx, db, body, bal, dbg.ReadAheadWorkers)
 		})
+		bra.waitForWarmupIfConfigured(ctx)
 	}
 }
 
@@ -174,6 +175,12 @@ func (bra *BlockReadAheader) WaitForWarmup(ctx context.Context) {
 	select {
 	case <-done:
 	case <-ctx.Done():
+	}
+}
+
+func (bra *BlockReadAheader) waitForWarmupIfConfigured(ctx context.Context) {
+	if dbg.ReadAheadWait {
+		bra.WaitForWarmup(ctx)
 	}
 }
 

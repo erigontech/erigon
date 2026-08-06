@@ -18,6 +18,7 @@ package exec
 
 import (
 	"testing"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
@@ -58,6 +59,31 @@ func (s stubTemporalGetter) StepsInFiles(...kv.Domain) kv.Step { return 0 }
 func newTestStateCache() *cache.StateCache {
 	b := 1 * datasize.MB
 	return cache.NewStateCache(b, b, b, b)
+}
+
+func TestBlockReadAheaderWaitsForConfiguredWarmup(t *testing.T) {
+	oldReadAheadWait := dbg.ReadAheadWait
+	dbg.ReadAheadWait = true
+	t.Cleanup(func() { dbg.ReadAheadWait = oldReadAheadWait })
+	readAheader := NewBlockReadAheader()
+	release := make(chan struct{})
+	readAheader.warmWg.Go(func() { <-release })
+	done := make(chan struct{})
+	go func() {
+		readAheader.waitForWarmupIfConfigured(t.Context())
+		close(done)
+	}()
+	select {
+	case <-done:
+		t.Fatal("configured warmup wait returned before warmup completed")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("configured warmup wait did not return after warmup completed")
+	}
 }
 
 func TestMakeBALWarmupTasksSplitsStorageHeavyAccount(t *testing.T) {
