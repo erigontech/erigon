@@ -446,7 +446,25 @@ func (d *Domain) openList(ctx context.Context, scanResult ScanDirsResult) (retir
 //   - `kill -9` in the middle of `buildFiles()`, then `rm -f db` (restore from backup)
 //   - `kill -9` in the middle of `buildFiles()`, then `stage_exec --reset` (drop progress - as a hot-fix)
 func (d *Domain) protectFromHistoryFilesAheadOfDomainFiles() {
-	d.closeFilesAfterStep(kv.Step(d.dirtyFilesEndTxNumMinimax() / d.stepSize))
+	e := d.dirtyFilesEndTxNumMinimax()
+	if e == 0 {
+		return
+	}
+	// Mode-C v4 emit lands a domain file whose endTxN is mid-step (raw
+	// txnum, not step-aligned). Straight truncation would collapse
+	// lowerBound to the file's own StartStep (both = endTxN/stepSize),
+	// closeFilesAfterStep would then include the v4 file itself, and the
+	// bridge that just made it visible would be silently undone (the
+	// 2026-08-06 postfix soak run 5 iter 4 regime-3 clamp: emit at
+	// endTxN=118,146,408, StartStep=302; truncation gave lowerBound=302;
+	// v4 got closed; visible-set fell back to step-302 files → race).
+	// Round up when endTxN isn't step-aligned so lowerBound sits STRICTLY
+	// past the boundary file's step, keeping it in dirtyFiles.
+	lowerBound := kv.Step(e / d.stepSize)
+	if e%d.stepSize != 0 {
+		lowerBound++
+	}
+	d.closeFilesAfterStep(lowerBound)
 }
 
 func (d *Domain) openFolder(ctx context.Context, r *ScanDirsResult) (retiredFiles, error) {
