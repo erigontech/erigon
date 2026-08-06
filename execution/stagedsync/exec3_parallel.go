@@ -2857,6 +2857,13 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					// already recorded, and assert the domain agrees on every one.
 					normReader := state.NewNormalizeReader(txVersion.TxIndex, be.blockIO.ReadSet(txVersion.TxIndex), be.versionMap, stateReader)
 					normWrites, normErr := rawWrites.Normalize(be.versionMap, txVersion.TxIndex, resultIncarnation, normReader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil, txTask.Rules().IsAmsterdam)
+					if state.AssertNormalizeReadsEnabled() && normErr == nil && stateReader != nil {
+						domainWrites, domainErr := rawWrites.Normalize(be.versionMap, txVersion.TxIndex, resultIncarnation, stateReader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil, txTask.Rules().IsAmsterdam)
+						if domainErr != nil {
+							return nil, fmt.Errorf("[parallel] normalize cross-check: %w", domainErr)
+						}
+						state.AssertNormalizeMatches(domainWrites, normWrites)
+					}
 					if domainKeysErr != nil {
 						return nil, fmt.Errorf("[parallel] iterate storage prefix for block write normalization: %w", domainKeysErr)
 					}

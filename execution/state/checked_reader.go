@@ -26,25 +26,20 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// assertNormalizeReads turns on the cross-check in NewNormalizeReader.
+// assertNormalizeReads runs Normalize a second time against the domain reader
+// and asserts the two outputs match. Diagnostic only: it doubles Normalize.
 var assertNormalizeReads = dbg.EnvBool("NORMALIZE_ASSERT_READS", true)
+
+// AssertNormalizeReadsEnabled reports whether the output-level check is on.
+func AssertNormalizeReadsEnabled() bool { return assertNormalizeReads }
 
 // NewNormalizeReader returns the reader Normalize should use: the tx's own
 // recorded reads first, then the versionMap, then the domain.
-//
-// With NORMALIZE_ASSERT_READS=true it also reads the domain for every call and
-// panics on disagreement. That is diagnostic-only and changes behaviour: the
-// domain reader fills the block state cache, so reading through it twice
-// perturbs the cache and fails blocks that pass without it.
 func NewNormalizeReader(txIndex int, reads ReadSet, versionMap *VersionMap, domain StateReader) StateReader {
 	if domain == nil { // nil means "no reader"; Normalize guards on it
 		return nil
 	}
-	readSet := NewVersionedStateReader(txIndex, reads, versionMap, domain)
-	if !assertNormalizeReads {
-		return readSet
-	}
-	return NewCheckedStateReader(readSet, domain)
+	return NewVersionedStateReader(txIndex, reads, versionMap, domain)
 }
 
 // CheckedStateReader answers from want and asserts that got agrees, panicking
@@ -189,3 +184,26 @@ func (r *CheckedStateReader) SetTrace(trace bool, tracePrefix string) {
 func (r *CheckedStateReader) Trace() bool { return r.want.Trace() }
 
 func (r *CheckedStateReader) TracePrefix() string { return r.want.TracePrefix() }
+
+// AssertNormalizeMatches panics when two Normalize outputs differ. Compared at
+// the output rather than at each read: the apply-side reader fills the block
+// state cache on a miss, so reading it twice to cross-check is a mutation, not
+// an observation, and fails blocks that otherwise pass.
+func AssertNormalizeMatches(domain, readSet *WriteSet) {
+	if domain.Count() != readSet.Count() {
+		panic(fmt.Sprintf("normalize output differs: domain=%d readset=%d writes",
+			domain.Count(), readSet.Count()))
+	}
+	for h := range domain.AllHeaders() {
+		if !readSet.Has(h) {
+			panic(fmt.Sprintf("normalize output differs: read set lacks %x path=%v key=%x",
+				h.Address.Value(), h.Path, h.Key.Value()))
+		}
+	}
+	for h := range readSet.AllHeaders() {
+		if !domain.Has(h) {
+			panic(fmt.Sprintf("normalize output differs: domain lacks %x path=%v key=%x",
+				h.Address.Value(), h.Path, h.Key.Value()))
+		}
+	}
+}
