@@ -956,19 +956,6 @@ func (s *BaseRoSnapshots) reclaimRetired() {
 	reclaimSegments(toDelete)
 }
 
-// hasPinnedGenerationsLocked reports whether any superseded generation still has readers.
-// Generations share `*DirtySegment`s, so a segment is only safe to close once every one of
-// them has drained, not just the newest. Must be called with dirtyLock held.
-func (s *BaseRoSnapshots) hasPinnedGenerationsLocked() bool {
-	cur := s.visible.Load()
-	for h := s.oldestVisible; h != cur; h = h.next {
-		if h.refcnt.Load() != 0 {
-			return true
-		}
-	}
-	return false
-}
-
 // retiredSegments were removed from the dirty set and handed to the outgoing visible
 // generation; they are closed (and deleted from disk when canDelete) once the last
 // reader of that generation drains. See mvcc.RetireReason.
@@ -1330,22 +1317,11 @@ func (s *BaseRoSnapshots) Close() {
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
 
-	detached := s.detachNotInList(nil)
-
-	// Publish the empty generation before reading refcounts, so a concurrent lock-free
-	// View() re-check fails its pin and retries onto the empty generation.
-	s.recalcVisibleFiles(s.alignMin, nil)
-
-	// Close fds only once every superseded generation has drained; closing a segment a live
-	// View holds would nil its Decompressor out from under that reader. At shutdown leaking
-	// the fds is preferable to that use-after-close.
-	if s.hasPinnedGenerationsLocked() {
-		s.logger.Warn("[snapshots] Close called with live readers; leaving fds open")
-	} else {
-		for _, sn := range detached {
-			sn.close()
-		}
-	}
+	// Hand the segments to the outgoing generation instead of closing them here: generations
+	// share them, so a reader pinned to any older one would lose its Decompressor mid-read.
+	// The last reader to drain closes them; the files themselves stay on disk.
+	detached := s.retireSegmentsNotInList(mvcc.RetireReasonWasDeletedFromDisk, nil)
+	s.recalcVisibleFiles(s.alignMin, detached)
 }
 
 // retireSegmentsNotInList detaches segments whose file is not in `protect` and marks their

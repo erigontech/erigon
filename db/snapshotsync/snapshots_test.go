@@ -1458,11 +1458,10 @@ func TestOpenListOpensOnlyNamedFiles(t *testing.T) {
 	require.Equal(10_000-1, int(s.IndicesMax()))
 }
 
-// A duplicate name resolves to one DirtySegment twice, so without deduplication both
-// occurrences open its indexes concurrently. Meaningful under -race.
-// A reader pinned to generation G1 keeps every segment G1 references alive. If an
-// unpinned G2 is published after that pin, Close must still honour G1: gating the fd
-// close on the outgoing generation alone closes segments the G1 reader is reading.
+// A reader pinned to generation G1 keeps every segment G1 references alive, even once an
+// unpinned G2 has superseded it. Close must hand those segments to the generation chain
+// rather than close them inline, and the last reader to drain must then release the fds —
+// Windows cannot delete a file that stays mapped.
 func TestCloseKeepsSegmentPinnedByOlderGeneration(t *testing.T) {
 	logger := log.New()
 	tmpDir := t.TempDir()
@@ -1476,7 +1475,6 @@ func TestCloseKeepsSegmentPinnedByOlderGeneration(t *testing.T) {
 	require.NoError(s.OpenFolder())
 
 	v := s.View()
-	defer v.Close()
 	g1 := v.snapshotVisible
 
 	seg, ok := v.Segment(snaptype2.Headers, 500)
@@ -1497,6 +1495,9 @@ func TestCloseKeepsSegmentPinnedByOlderGeneration(t *testing.T) {
 	word, ok = readFirstWord(seg.Src())
 	require.True(ok, "a reader pinned to an older generation must still read its segment after Close")
 	require.Equal([]byte{1}, word)
+
+	v.Close()
+	require.Nil(seg.Src().Decompressor, "the last reader draining must release the fds Close deferred")
 }
 
 func readFirstWord(sn *DirtySegment) ([]byte, bool) {
