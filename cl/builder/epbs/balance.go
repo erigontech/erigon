@@ -27,7 +27,10 @@ func CheckBalance(sd synced_data.SyncedData, builderIndex uint64) (BalanceStatus
 		status.Active = state.IsActiveBuilder(s, builderIndex)
 		builders := s.GetBuilders()
 		if builders != nil && int(builderIndex) < builders.Len() {
-			status.Balance = builders.Get(int(builderIndex)).Balance
+			builder := builders.Get(int(builderIndex))
+			if builder != nil {
+				status.Balance = builder.Balance
+			}
 		}
 		return nil
 	})
@@ -43,43 +46,36 @@ func RunBalanceMonitor(ctx context.Context, sd synced_data.SyncedData, manager *
 	defer ticker.Stop()
 
 	for {
+		refreshBuilderBalance(sd, manager)
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			builderIndex, resolved := manager.BuilderIndex()
-
-			// Attempt re-resolve if index is still unresolved.
-			if !resolved {
-				idx, found, err := manager.ResolveIndex(sd)
-				if err != nil {
-					log.Debug("ePBS builder: re-resolve index failed", "err", err)
-					continue
-				}
-				if found {
-					manager.SetBuilderIndex(idx)
-					builderIndex = idx
-					log.Info("ePBS builder: index resolved on retry", "builderIndex", idx)
-				} else {
-					log.Debug("ePBS builder: pubkey still not in builders registry")
-					continue
-				}
-			}
-
-			status, err := CheckBalance(sd, builderIndex)
-			if err != nil {
-				log.Debug("ePBS builder: balance check failed", "err", err)
-				continue
-			}
-			log.Info("ePBS builder: balance status",
-				"builderIndex", builderIndex,
-				"active", status.Active,
-				"balance_gwei", status.Balance,
-			)
-			if !status.Active {
-				log.Warn("ePBS builder: builder is NOT active on-chain — bids will be rejected",
-					"builderIndex", builderIndex)
-			}
 		}
 	}
+}
+
+func refreshBuilderBalance(sd synced_data.SyncedData, manager *BuilderManager) {
+	builderIndex, resolved := manager.BuilderIndex()
+	if !resolved {
+		idx, found, err := manager.ResolveIndex(sd)
+		if err != nil {
+			log.Debug("ePBS builder: re-resolve index failed", "err", err)
+			return
+		}
+		if !found {
+			log.Debug("ePBS builder: pubkey still not in builders registry")
+			return
+		}
+		manager.SetBuilderIndex(idx)
+		builderIndex = idx
+		log.Info("ePBS builder: index resolved on retry", "builderIndex", idx)
+	}
+	status, err := CheckBalance(sd, builderIndex)
+	if err != nil {
+		log.Debug("ePBS builder: balance check failed", "err", err)
+		return
+	}
+	manager.SetBalanceStatus(status)
+	log.Info("ePBS builder: balance status", "builderIndex", builderIndex, "active", status.Active, "balance_gwei", status.Balance)
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	log "github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/types"
@@ -24,14 +25,6 @@ const (
 	weiPerGwei         = 1_000_000_000   // consensus layer uses Gwei; EL blockValue is in wei
 )
 
-// EIP-7685 request type prefixes. These are stable protocol constants duplicated
-// here to avoid importing execution/types (keeping the dependency boundary clean).
-const (
-	depositRequestType       byte = 0x00
-	withdrawalRequestType    byte = 0x01
-	consolidationRequestType byte = 0x02
-)
-
 // pendingPayload is a completed build result waiting for a bid-won reveal.
 type pendingPayload struct {
 	slot      uint64
@@ -39,16 +32,19 @@ type pendingPayload struct {
 	assembled *eladapter.AssembledPayload
 	execReqs  *cltypes.ExecutionRequests
 	parent    ParentInfo
+	revealing bool
+	bidValue  uint64
 }
 
 // SlotContext holds per-slot context that the caller provides to the builder loop.
 // This separates beacon state access (caller responsibility) from build logic.
 type SlotContext struct {
-	Slot        uint64
-	Parent      ParentInfo
-	Timestamp   uint64      // Unix timestamp for the slot (from ComputeTimestampAtSlot)
-	PrevRandao  common.Hash // RANDAO mix for the current epoch
-	Withdrawals []*types.Withdrawal
+	Slot          uint64
+	Parent        ParentInfo
+	DependentRoot common.Hash
+	Timestamp     uint64      // Unix timestamp for the slot (from ComputeTimestampAtSlot)
+	PrevRandao    common.Hash // RANDAO mix for the current epoch
+	Withdrawals   []*types.Withdrawal
 }
 
 // BuilderLoop is the slot-driven build-bid-reveal core loop for the ePBS builder.
@@ -112,6 +108,9 @@ func NewBuilderLoop(
 // OnNewHead starts a speculative EL build for the given parent.
 // Called when the builder observes a new head via fork choice.
 func (l *BuilderLoop) OnNewHead(ctx context.Context, sc SlotContext) error {
+	if sc.Slot > 1 {
+		l.pruneBeforeSlot(sc.Slot - 1)
+	}
 	params := l.buildParams(sc)
 
 	payloadId, err := l.specBuild.StartBuild(ctx, params)
@@ -119,9 +118,14 @@ func (l *BuilderLoop) OnNewHead(ctx context.Context, sc SlotContext) error {
 		return fmt.Errorf("epbs/loop: OnNewHead speculative build: %w", err)
 	}
 
+	key := speculativeKey{slot: sc.Slot, parentBlockHash: sc.Parent.ExecutionHash, parentBlockRoot: sc.Parent.BlockRoot}
 	l.mu.Lock()
-	l.speculativePayloads[speculativeKey{slot: sc.Slot, parentBlockHash: sc.Parent.ExecutionHash, parentBlockRoot: sc.Parent.BlockRoot}] = payloadId
+	previousPayloadID, replaced := l.speculativePayloads[key]
+	l.speculativePayloads[key] = payloadId
 	l.mu.Unlock()
+	if replaced {
+		l.specBuild.Discard(previousPayloadID)
+	}
 
 	log.Info("ePBS builder: speculative build started",
 		"slot", sc.Slot, "parentHash", sc.Parent.ExecutionHash, "payloadId", payloadId)
@@ -132,13 +136,41 @@ func (l *BuilderLoop) OnNewHead(ctx context.Context, sc SlotContext) error {
 // OnSlot is called at the start of each slot. It waits for proposer preferences,
 // determines whether the speculative build matches, and submits a bid.
 func (l *BuilderLoop) OnSlot(ctx context.Context, sc SlotContext) error {
-	prefs, err := l.prefsWatch.WaitForPreferences(sc.Slot, preferencesTimeout)
+	if sc.Slot > 1 {
+		l.pruneBeforeSlot(sc.Slot - 1)
+	}
+	prefs, err := l.prefsWatch.WaitForPreferences(sc.Slot, sc.DependentRoot, preferencesTimeout)
 	if err != nil {
 		log.Debug("ePBS builder: no preferences, skipping slot", "slot", sc.Slot, "err", err)
 		return nil // skip path
 	}
 
 	return l.buildAndBid(ctx, sc, prefs)
+}
+
+func (l *BuilderLoop) pruneBeforeSlot(slot uint64) {
+	var discarded []uint64
+	var released []uint64
+	l.mu.Lock()
+	for key, pending := range l.pendingPayloads {
+		if key.slot < slot {
+			delete(l.pendingPayloads, key)
+			released = append(released, pending.bidValue)
+		}
+	}
+	for key, payloadID := range l.speculativePayloads {
+		if key.slot < slot {
+			delete(l.speculativePayloads, key)
+			discarded = append(discarded, payloadID)
+		}
+	}
+	l.mu.Unlock()
+	for _, payloadID := range discarded {
+		l.specBuild.Discard(payloadID)
+	}
+	for _, bidValue := range released {
+		l.manager.ReleaseBid(bidValue)
+	}
 }
 
 // buildAndBid implements the speculative match -> calculate value -> bid -> submit flow.
@@ -164,6 +196,8 @@ func (l *BuilderLoop) buildAndBid(ctx context.Context, sc SlotContext, prefs *cl
 		} else if result == nil {
 			log.Debug("ePBS builder: speculative build not ready, rebuilding", "slot", slot)
 			hasSpec = false
+		} else if err := validatePayloadForSlot(result, sc); err != nil {
+			return fmt.Errorf("epbs/loop: invalid speculative payload: %w", err)
 		} else if !speculativeMatchesPrefs(result, prefs) {
 			// Speculative build was started before preferences arrived (OnNewHead
 			// uses FeeRecipient=0x0 and default GasLimit). If the proposer wants
@@ -174,7 +208,7 @@ func (l *BuilderLoop) buildAndBid(ctx context.Context, sc SlotContext, prefs *cl
 				"specFeeRecipient", result.Eth1Block.FeeRecipient,
 				"prefsFeeRecipient", prefs.Message.FeeRecipient,
 				"specGasLimit", result.Eth1Block.GasLimit,
-				"prefsGasLimit", prefs.Message.GasLimit)
+				"prefsGasLimit", prefs.Message.TargetGasLimit)
 			hasSpec = false
 		} else {
 			assembled = result
@@ -207,6 +241,9 @@ func (l *BuilderLoop) buildAndBid(ctx context.Context, sc SlotContext, prefs *cl
 					return fmt.Errorf("epbs/loop: rebuild GetResult: %w", err)
 				}
 				if result != nil {
+					if err := validatePayloadForSlot(result, sc); err != nil {
+						return fmt.Errorf("epbs/loop: invalid rebuilt payload: %w", err)
+					}
 					assembled = result
 					usedPayloadId = newPayloadId
 					goto buildDone
@@ -221,6 +258,12 @@ buildDone:
 	if assembled == nil {
 		return nil
 	}
+	if prefs == nil || prefs.Message == nil {
+		return fmt.Errorf("epbs/loop: missing proposer preferences")
+	}
+	if assembled.Eth1Block.FeeRecipient != prefs.Message.FeeRecipient {
+		return fmt.Errorf("epbs/loop: payload fee recipient does not match proposer preferences")
+	}
 
 	// Calculate block value
 	blockValue := assembled.BlockValue
@@ -234,22 +277,39 @@ buildDone:
 		log.Info("ePBS builder: strategy decided to skip slot", "slot", slot, "blockValue", blockValue)
 		return nil
 	}
+	bidGwei := new(big.Int).Div(new(big.Int).Set(bidAmount), big.NewInt(weiPerGwei))
+	if !bidGwei.IsUint64() {
+		return fmt.Errorf("epbs/loop: bid amount exceeds uint64 gwei")
+	}
+	bidValue := bidGwei.Uint64()
+	if !l.manager.ReserveBid(bidValue) {
+		log.Debug("ePBS builder: inactive or insufficient available balance, skipping bid", "slot", slot, "bidValue", bidValue)
+		return nil
+	}
+	reserved := true
+	defer func() {
+		if reserved {
+			l.manager.ReleaseBid(bidValue)
+		}
+	}()
 
 	// Decode execution requests and compute ExecutionRequestsRoot
 	execReqs, execReqsRoot, err := l.decodeAndHashRequests(assembled.RequestsBundle)
 	if err != nil {
 		return fmt.Errorf("epbs/loop: execution requests: %w", err)
 	}
+	maxBlobs := l.beaconCfg.GetBlobParameters(slot / l.beaconCfg.SlotsPerEpoch).MaxBlobsPerBlock
+	if err := validateBlobsBundle(assembled.BlobsBundle, maxBlobs); err != nil {
+		return fmt.Errorf("epbs/loop: blobs bundle: %w", err)
+	}
 
 	// Build KZG commitments from blobs bundle
 	blobCommitments := solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48)
 	if assembled.BlobsBundle != nil {
 		for _, commitment := range assembled.BlobsBundle.Commitments {
-			if len(commitment) == 48 {
-				var c cltypes.KZGCommitment
-				copy(c[:], commitment)
-				blobCommitments.Append(&c)
-			}
+			var c cltypes.KZGCommitment
+			copy(c[:], commitment)
+			blobCommitments.Append(&c)
 		}
 	}
 
@@ -271,8 +331,8 @@ buildDone:
 		FeeRecipient:          assembled.Eth1Block.FeeRecipient,
 		GasLimit:              assembled.Eth1Block.GasLimit,
 		BuilderIndex:          bidBuilderIndex,
-		Value:                 new(big.Int).Div(bidAmount, big.NewInt(weiPerGwei)).Uint64(), // consensus uses Gwei
-		ExecutionPayment:      0,                                                            // per spec: builder pays nothing in ePBS
+		Value:                 bidValue,
+		ExecutionPayment:      0,
 		BlobKzgCommitments:    *blobCommitments,
 		ExecutionRequestsRoot: execReqsRoot,
 	}
@@ -289,15 +349,22 @@ buildDone:
 	}
 
 	// Store for reveal
+	key := pendingPayloadKey{slot: slot, parentBlockHash: parent.ExecutionHash, parentBlockRoot: parent.BlockRoot}
 	l.mu.Lock()
-	l.pendingPayloads[pendingPayloadKey{slot: slot, parentBlockHash: parent.ExecutionHash, parentBlockRoot: parent.BlockRoot}] = &pendingPayload{
+	previous := l.pendingPayloads[key]
+	l.pendingPayloads[key] = &pendingPayload{
 		slot:      slot,
 		payloadId: usedPayloadId,
 		assembled: assembled,
 		execReqs:  execReqs,
 		parent:    parent,
+		bidValue:  bidValue,
 	}
 	l.mu.Unlock()
+	if previous != nil {
+		l.manager.ReleaseBid(previous.bidValue)
+	}
+	reserved = false
 
 	log.Info("ePBS builder: bid submitted",
 		"slot", slot,
@@ -317,7 +384,7 @@ buildDone:
 // of the beacon block that included the winning bid (set in the envelope per
 // spec). These are distinct values: parentBlockRoot identifies which build to
 // reveal, while beaconBlockRoot links the envelope to the including block.
-func (l *BuilderLoop) OnBidWon(ctx context.Context, slot uint64, builderIndex uint64, parentHash common.Hash, parentBlockRoot common.Hash, beaconBlockRoot common.Hash) error {
+func (l *BuilderLoop) OnBidWon(ctx context.Context, slot uint64, builderIndex uint64, parentHash common.Hash, parentBlockRoot common.Hash, blockHash common.Hash, beaconBlockRoot common.Hash) error {
 	// Only reveal if the winning bid belongs to us.
 	ourIndex, resolved := l.manager.BuilderIndex()
 	if !resolved || builderIndex != ourIndex {
@@ -329,14 +396,31 @@ func (l *BuilderLoop) OnBidWon(ctx context.Context, slot uint64, builderIndex ui
 	key := pendingPayloadKey{slot: slot, parentBlockHash: parentHash, parentBlockRoot: parentBlockRoot}
 	l.mu.Lock()
 	pending, ok := l.pendingPayloads[key]
-	if ok {
-		delete(l.pendingPayloads, key)
-	}
-	l.mu.Unlock()
-
 	if !ok {
+		l.mu.Unlock()
 		return fmt.Errorf("epbs/loop: no pending payload for slot %d parentHash %s parentBlockRoot %s", slot, parentHash, parentBlockRoot)
 	}
+	if pending.assembled == nil || pending.assembled.Eth1Block == nil || pending.assembled.Eth1Block.BlockHash != blockHash {
+		l.mu.Unlock()
+		return fmt.Errorf("epbs/loop: winning block hash %s does not match pending payload", blockHash)
+	}
+	if pending.revealing {
+		l.mu.Unlock()
+		return nil
+	}
+	pending.revealing = true
+	l.mu.Unlock()
+	revealed := false
+	defer func() {
+		if revealed {
+			return
+		}
+		l.mu.Lock()
+		if current := l.pendingPayloads[key]; current == pending {
+			current.revealing = false
+		}
+		l.mu.Unlock()
+	}()
 
 	// Construct the envelope using the NewExecutionPayloadEnvelope constructor
 	envelope := cltypes.NewExecutionPayloadEnvelope(l.beaconCfg)
@@ -344,6 +428,7 @@ func (l *BuilderLoop) OnBidWon(ctx context.Context, slot uint64, builderIndex ui
 	envelope.ExecutionRequests = pending.execReqs
 	envelope.BuilderIndex = ourIndex
 	envelope.BeaconBlockRoot = beaconBlockRoot
+	envelope.ParentBeaconBlockRoot = parentBlockRoot
 
 	// Sign the envelope
 	signedEnvelope, err := l.manager.SignEnvelope(ctx, envelope, slot)
@@ -361,12 +446,78 @@ func (l *BuilderLoop) OnBidWon(ctx context.Context, slot uint64, builderIndex ui
 		return fmt.Errorf("epbs/loop: broadcast payload: %w", err)
 	}
 
+	releaseReservation := false
+	l.mu.Lock()
+	if current := l.pendingPayloads[key]; current == pending {
+		delete(l.pendingPayloads, key)
+		releaseReservation = true
+	}
+	l.mu.Unlock()
+	revealed = true
+	if releaseReservation {
+		l.manager.ReleaseBid(pending.bidValue)
+	}
+
 	log.Info("ePBS builder: payload revealed",
 		"slot", slot,
 		"blockHash", pending.assembled.Eth1Block.BlockHash,
 		"beaconBlockRoot", beaconBlockRoot,
 	)
 
+	return nil
+}
+
+func validateBlobsBundle(bundle *eladapter.BlobsBundle, maxBlobs uint64) error {
+	if bundle == nil {
+		return nil
+	}
+	if uint64(len(bundle.Commitments)) > maxBlobs {
+		return fmt.Errorf("%d commitments exceed maximum %d", len(bundle.Commitments), maxBlobs)
+	}
+	if len(bundle.Commitments) != len(bundle.Blobs) {
+		return fmt.Errorf("%d commitments for %d blobs", len(bundle.Commitments), len(bundle.Blobs))
+	}
+	for i := range bundle.Commitments {
+		if len(bundle.Commitments[i]) != len(cltypes.KZGCommitment{}) {
+			return fmt.Errorf("commitment %d has length %d", i, len(bundle.Commitments[i]))
+		}
+		if len(bundle.Blobs[i]) != cltypes.BytesPerBlob {
+			return fmt.Errorf("blob %d has length %d", i, len(bundle.Blobs[i]))
+		}
+	}
+	return nil
+}
+
+func validateAssembledPayload(assembled *eladapter.AssembledPayload) error {
+	if assembled == nil {
+		return fmt.Errorf("missing assembled payload")
+	}
+	if assembled.Eth1Block == nil {
+		return fmt.Errorf("missing execution payload")
+	}
+	if assembled.Eth1Block.Extra == nil || assembled.Eth1Block.Transactions == nil || assembled.Eth1Block.Withdrawals == nil {
+		return fmt.Errorf("execution payload has uninitialized fields")
+	}
+	return nil
+}
+
+func validatePayloadForSlot(assembled *eladapter.AssembledPayload, slotContext SlotContext) error {
+	if err := validateAssembledPayload(assembled); err != nil {
+		return err
+	}
+	payload := assembled.Eth1Block
+	if payload.ParentHash != slotContext.Parent.ExecutionHash {
+		return fmt.Errorf("execution payload parent hash %s does not match %s", payload.ParentHash, slotContext.Parent.ExecutionHash)
+	}
+	if payload.Time != slotContext.Timestamp {
+		return fmt.Errorf("execution payload timestamp %d does not match %d", payload.Time, slotContext.Timestamp)
+	}
+	if payload.PrevRandao != slotContext.PrevRandao {
+		return fmt.Errorf("execution payload prev_randao does not match slot context")
+	}
+	if payload.SlotNumber != slotContext.Slot {
+		return fmt.Errorf("execution payload slot_number %d does not match %d", payload.SlotNumber, slotContext.Slot)
+	}
 	return nil
 }
 
@@ -412,8 +563,8 @@ func (l *BuilderLoop) buildParamsFromPrefs(sc SlotContext, prefs *cltypes.Signed
 	params := l.buildParams(sc)
 	if prefs != nil && prefs.Message != nil {
 		params.SuggestedFeeRecipient = prefs.Message.FeeRecipient
-		if prefs.Message.GasLimit > 0 {
-			gl := prefs.Message.GasLimit
+		if prefs.Message.TargetGasLimit > 0 {
+			gl := prefs.Message.TargetGasLimit
 			params.TargetGasLimit = &gl
 		}
 	}
@@ -432,14 +583,14 @@ func speculativeMatchesPrefs(result *eladapter.AssembledPayload, prefs *cltypes.
 	// SuggestedFeeRecipient passed in Parameters. If the speculative build
 	// used 0x0 and the proposer wants a real address, they won't match.
 	wantRecipient := prefs.Message.FeeRecipient
-	if wantRecipient != (common.Address{}) && result.Eth1Block.FeeRecipient != wantRecipient {
+	if result.Eth1Block.FeeRecipient != wantRecipient {
 		return false
 	}
 	// GasLimit: gossip validation requires bid.gas_limit == prefs.gas_limit
 	// (execution_payload_bid_service.go) and the state transition enforces the
 	// envelope payload's gas_limit matches (operations.go). If the speculative
 	// build used a different gas limit, the bid/reveal will be rejected.
-	if prefs.Message.GasLimit > 0 && result.Eth1Block.GasLimit != prefs.Message.GasLimit {
+	if prefs.Message.TargetGasLimit > 0 && result.Eth1Block.GasLimit != prefs.Message.TargetGasLimit {
 		return false
 	}
 	return true
@@ -448,37 +599,17 @@ func speculativeMatchesPrefs(result *eladapter.AssembledPayload, prefs *cltypes.
 // decodeAndHashRequests decodes a RequestsBundle into ExecutionRequests and computes
 // the hash_tree_root. Returns nil ExecutionRequests and zero hash if bundle is nil.
 func (l *BuilderLoop) decodeAndHashRequests(bundle *typesproto.RequestsBundle) (*cltypes.ExecutionRequests, common.Hash, error) {
-	execReqs := cltypes.NewExecutionRequests(l.beaconCfg)
-
-	if bundle == nil || len(bundle.GetRequests()) == 0 {
-		root, err := execReqs.HashSSZ()
-		if err != nil {
-			return nil, common.Hash{}, fmt.Errorf("hash empty requests: %w", err)
+	var requestList []hexutil.Bytes
+	if bundle != nil {
+		requests := bundle.GetRequests()
+		requestList = make([]hexutil.Bytes, len(requests))
+		for i := range requests {
+			requestList[i] = requests[i]
 		}
-		return execReqs, common.Hash(root), nil
 	}
-
-	stateVersion := int(clparams.GloasVersion)
-	for _, request := range bundle.GetRequests() {
-		if len(request) == 0 {
-			continue
-		}
-		rType := request[0]
-		requestData := request[1:]
-		switch rType {
-		case depositRequestType:
-			if err := execReqs.Deposits.DecodeSSZ(requestData, stateVersion); err != nil {
-				return nil, common.Hash{}, fmt.Errorf("decode deposit request: %w", err)
-			}
-		case withdrawalRequestType:
-			if err := execReqs.Withdrawals.DecodeSSZ(requestData, stateVersion); err != nil {
-				return nil, common.Hash{}, fmt.Errorf("decode withdrawal request: %w", err)
-			}
-		case consolidationRequestType:
-			if err := execReqs.Consolidations.DecodeSSZ(requestData, stateVersion); err != nil {
-				return nil, common.Hash{}, fmt.Errorf("decode consolidation request: %w", err)
-			}
-		}
+	execReqs, err := cltypes.DecodeExecutionRequestsList(l.beaconCfg, requestList, clparams.GloasVersion)
+	if err != nil {
+		return nil, common.Hash{}, fmt.Errorf("decode execution requests: %w", err)
 	}
 
 	root, err := execReqs.HashSSZ()

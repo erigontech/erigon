@@ -3,6 +3,7 @@ package epbs
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -15,7 +16,12 @@ import (
 // BuilderManager manages the builder identity and signing operations for ePBS.
 type BuilderManager struct {
 	signer                Signer
-	builderIndex          *uint64 // nil = not yet resolved; 0 is a valid index
+	indexMu               sync.RWMutex
+	builderIndex          uint64
+	builderIndexResolved  bool
+	balanceStatus         BalanceStatus
+	balanceKnown          bool
+	reservedBidValue      uint64
 	beaconCfg             *clparams.BeaconChainConfig
 	genesisValidatorsRoot common.Hash
 }
@@ -29,12 +35,16 @@ func NewBuilderManager(
 	beaconCfg *clparams.BeaconChainConfig,
 	genesisValidatorsRoot common.Hash,
 ) *BuilderManager {
-	return &BuilderManager{
+	manager := &BuilderManager{
 		signer:                signer,
-		builderIndex:          builderIndex,
 		beaconCfg:             beaconCfg,
 		genesisValidatorsRoot: genesisValidatorsRoot,
 	}
+	if builderIndex != nil {
+		manager.builderIndex = *builderIndex
+		manager.builderIndexResolved = true
+	}
+	return manager
 }
 
 // Pubkey returns the builder's public key.
@@ -45,17 +55,49 @@ func (m *BuilderManager) Pubkey() common.Bytes48 {
 // BuilderIndex returns the on-chain builder index.
 // Returns (index, true) if resolved, or (0, false) if not yet resolved.
 func (m *BuilderManager) BuilderIndex() (uint64, bool) {
-	if m.builderIndex == nil {
-		return 0, false
-	}
-	return *m.builderIndex, true
+	m.indexMu.RLock()
+	defer m.indexMu.RUnlock()
+	return m.builderIndex, m.builderIndexResolved
 }
 
 // SetBuilderIndex updates the on-chain builder index. Used by the balance
 // monitor to re-resolve the index after the initial resolve failed (e.g.
 // node was not synced or deposit was not yet finalized at startup).
 func (m *BuilderManager) SetBuilderIndex(idx uint64) {
-	m.builderIndex = &idx
+	m.indexMu.Lock()
+	m.builderIndex = idx
+	m.builderIndexResolved = true
+	m.indexMu.Unlock()
+}
+
+func (m *BuilderManager) SetBalanceStatus(status BalanceStatus) {
+	m.indexMu.Lock()
+	m.balanceStatus = status
+	m.balanceKnown = true
+	m.indexMu.Unlock()
+}
+
+func (m *BuilderManager) ReserveBid(value uint64) bool {
+	m.indexMu.Lock()
+	defer m.indexMu.Unlock()
+	if value == 0 || !m.balanceKnown || !m.balanceStatus.Active || m.reservedBidValue > m.balanceStatus.Balance {
+		return false
+	}
+	if value > m.balanceStatus.Balance-m.reservedBidValue {
+		return false
+	}
+	m.reservedBidValue += value
+	return true
+}
+
+func (m *BuilderManager) ReleaseBid(value uint64) {
+	m.indexMu.Lock()
+	if value >= m.reservedBidValue {
+		m.reservedBidValue = 0
+	} else {
+		m.reservedBidValue -= value
+	}
+	m.indexMu.Unlock()
 }
 
 // SignBid stamps the manager's BuilderIndex onto the bid, computes the signing
@@ -123,11 +165,12 @@ func (m *BuilderManager) SignEnvelope(ctx context.Context, envelope *cltypes.Exe
 	}, nil
 }
 
-// SignDeposit computes the signing root for a builder deposit (or any
-// HashableSSZ without a dedicated signed wrapper) at the given slot using
-// DomainBeaconBuilder, and returns the raw signature via Signer.SignDeposit.
-func (m *BuilderManager) SignDeposit(ctx context.Context, obj ssz.HashableSSZ, slot uint64) (common.Bytes96, error) {
-	domain, err := m.builderDomain(slot)
+func (m *BuilderManager) SignDeposit(ctx context.Context, obj ssz.HashableSSZ) (common.Bytes96, error) {
+	domain, err := fork.ComputeDomain(
+		m.beaconCfg.DomainBuilderDeposit[:],
+		utils.Uint32ToBytes4(uint32(m.beaconCfg.GenesisForkVersion)),
+		common.Hash{},
+	)
 	if err != nil {
 		return common.Bytes96{}, fmt.Errorf("epbs/manager: compute domain for deposit: %w", err)
 	}

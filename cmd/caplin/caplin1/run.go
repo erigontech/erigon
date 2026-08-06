@@ -549,14 +549,8 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		if initErr != nil {
 			logger.Error("ePBS builder: initialization failed", "err", initErr)
 		} else if builderSvc != nil {
-			type bidWonSetter interface {
-				SetOnBidWon(func(uint64, uint64, common.Hash, common.Hash, common.Hash))
-			}
-			if setter, ok := blockService.(bidWonSetter); ok {
-				setter.SetOnBidWon(epbs.OnBidWonFunc(ctx, builderSvc.Loop))
-			}
 			defer builderSvc.Shutdown()
-			logger.Info("ePBS builder: wired into block service")
+			logger.Info("ePBS builder: service initialized")
 		}
 	} else if config.EpbsBuilder.Enabled {
 		logger.Warn("ePBS builder: enabled but no execution module available (standalone mode) — builder disabled")

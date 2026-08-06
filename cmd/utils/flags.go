@@ -279,10 +279,6 @@ var (
 		Name:  "builder.key",
 		Usage: "Path to BLS secret key file for ePBS builder identity",
 	}
-	EpbsBuilderFeeRecipientFlag = cli.StringFlag{
-		Name:  "builder.fee-recipient",
-		Usage: "Default fee recipient address for ePBS builder payments",
-	}
 	EpbsBuilderBidMarginFlag = cli.Float64Flag{
 		Name:  "builder.bid-margin",
 		Usage: "Fraction of block value to bid (e.g. 0.85 = bid 85%, keep 15% profit)",
@@ -1889,9 +1885,6 @@ func setCaplin(ctx *cli.Command, cfg *ethconfig.Config) {
 	// ePBS builder
 	cfg.CaplinConfig.EpbsBuilder.Enabled = ctx.Bool(EpbsBuilderFlag.Name)
 	cfg.CaplinConfig.EpbsBuilder.KeyPath = ctx.String(EpbsBuilderKeyFlag.Name)
-	if ctx.IsSet(EpbsBuilderFeeRecipientFlag.Name) {
-		cfg.CaplinConfig.EpbsBuilder.FeeRecipient = common.HexToAddress(ctx.String(EpbsBuilderFeeRecipientFlag.Name))
-	}
 	cfg.CaplinConfig.EpbsBuilder.BidMargin = ctx.Float64(EpbsBuilderBidMarginFlag.Name)
 	if ctx.IsSet(EpbsBuilderMinProfitFlag.Name) {
 		profit, ok := new(big.Int).SetString(ctx.String(EpbsBuilderMinProfitFlag.Name), 10)

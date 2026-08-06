@@ -112,11 +112,23 @@ type EpbsPool struct {
 	// Short-lived cache (~1 slot), keyed by (slot, validatorIndex).
 	PayloadAttestations *lru.Cache[PayloadAttestationKey, *cltypes.PayloadAttestationMessage]
 
-	// OnPreferencesReceived is an optional callback invoked by the proposer
-	// preferences gossip service after a validated preference is stored.
-	// The ePBS builder wires this to PreferencesWatcher.OnPreferencesReceived
-	// so the builder loop wakes up without polling the LRU cache.
-	OnPreferencesReceived func(slot uint64, prefs *cltypes.SignedProposerPreferences)
+	preferencesHandlerMu sync.RWMutex
+	preferencesHandler   func(uint64, *cltypes.SignedProposerPreferences)
+}
+
+func (p *EpbsPool) SetPreferencesHandler(handler func(uint64, *cltypes.SignedProposerPreferences)) {
+	p.preferencesHandlerMu.Lock()
+	p.preferencesHandler = handler
+	p.preferencesHandlerMu.Unlock()
+}
+
+func (p *EpbsPool) NotifyPreferencesReceived(slot uint64, preferences *cltypes.SignedProposerPreferences) {
+	p.preferencesHandlerMu.RLock()
+	handler := p.preferencesHandler
+	p.preferencesHandlerMu.RUnlock()
+	if handler != nil {
+		handler(slot, preferences)
+	}
 }
 
 func NewEpbsPool() *EpbsPool {

@@ -251,7 +251,6 @@ var DefaultFlags = []cli.Flag{
 
 	&utils.EpbsBuilderFlag,
 	&utils.EpbsBuilderKeyFlag,
-	&utils.EpbsBuilderFeeRecipientFlag,
 	&utils.EpbsBuilderBidMarginFlag,
 	&utils.EpbsBuilderMinProfitFlag,
 	&utils.CaplinCustomConfigFlag,

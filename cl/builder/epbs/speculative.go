@@ -77,6 +77,12 @@ func (s *SpeculativeBuild) GetResult(ctx context.Context, payloadId uint64) (*el
 	return result, nil
 }
 
+func (s *SpeculativeBuild) Discard(payloadId uint64) {
+	s.mu.Lock()
+	delete(s.builds, payloadId)
+	s.mu.Unlock()
+}
+
 // PayloadIdToBytes converts a uint64 payload ID to its little-endian byte representation.
 // This matches the format used by ExecutionEngine.GetAssembledBlock.
 func PayloadIdToBytes(id uint64) []byte {

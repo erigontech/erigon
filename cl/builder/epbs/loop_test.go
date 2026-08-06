@@ -2,6 +2,7 @@ package epbs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"sync"
@@ -15,6 +16,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/stretchr/testify/require"
 )
 
@@ -34,7 +36,7 @@ func newMockPayloadAssembler() *mockPayloadAssembler {
 	}
 }
 
-func (m *mockPayloadAssembler) AssemblePayload(_ context.Context, _ *builder.Parameters) (uint64, error) {
+func (m *mockPayloadAssembler) AssemblePayload(_ context.Context, params *builder.Parameters) (uint64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.err != nil {
@@ -44,6 +46,18 @@ func (m *mockPayloadAssembler) AssemblePayload(_ context.Context, _ *builder.Par
 		return 0, fmt.Errorf("eladapter: execution module busy")
 	}
 	m.nextId++
+	if result := m.results[m.nextId]; result != nil && result.Eth1Block != nil {
+		result.Eth1Block.ParentHash = params.ParentHash
+		result.Eth1Block.Time = params.Timestamp
+		result.Eth1Block.PrevRandao = params.PrevRandao
+		result.Eth1Block.FeeRecipient = params.SuggestedFeeRecipient
+		if params.TargetGasLimit != nil {
+			result.Eth1Block.GasLimit = *params.TargetGasLimit
+		}
+		if params.SlotNumber != nil {
+			result.Eth1Block.SlotNumber = *params.SlotNumber
+		}
+	}
 	return m.nextId, nil
 }
 
@@ -73,6 +87,7 @@ type mockBidSubmitter struct {
 	sidecars      [][]*cltypes.DataColumnSidecar
 	submitBidErr  error
 	broadcastErr  error
+	broadcastHook func()
 }
 
 func (s *mockBidSubmitter) SubmitBid(_ context.Context, bid *cltypes.SignedExecutionPayloadBid) error {
@@ -93,6 +108,9 @@ func (s *mockBidSubmitter) BroadcastPayload(_ context.Context, envelope *cltypes
 	}
 	s.broadcasts = append(s.broadcasts, envelope)
 	s.sidecars = append(s.sidecars, columnSidecars)
+	if s.broadcastHook != nil {
+		s.broadcastHook()
+	}
 	return nil
 }
 
@@ -143,7 +161,10 @@ func makeTestPayload(t *testing.T, blockValue *big.Int) *eladapter.AssembledPayl
 	eth1Block.BlockNumber = 1000
 	eth1Block.GasLimit = 30_000_000
 	eth1Block.GasUsed = 15_000_000
-	eth1Block.BlockHash = common.HexToHash("0xblockhash")
+	eth1Block.Time = 1700000000
+	eth1Block.PrevRandao = common.HexToHash("0xcafe")
+	eth1Block.SlotNumber = 100
+	eth1Block.BlockHash = common.HexToHash("0xb10c")
 	eth1Block.Extra = solid.NewExtraData()
 	eth1Block.Transactions = &solid.TransactionsSSZ{}
 	eth1Block.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), 44)
@@ -161,6 +182,7 @@ func setupBuilderLoop(t *testing.T) (*BuilderLoop, *mockPayloadAssembler, *mockB
 	signer := testSigner(t)
 	idx := uint64(42)
 	manager := NewBuilderManager(signer, &idx, cfg, common.HexToHash("0x1234"))
+	manager.SetBalanceStatus(BalanceStatus{Active: true, Balance: ^uint64(0)})
 	strategy := &FixedMarginStrategy{Margin: 0.85}
 	exec := newMockPayloadAssembler()
 	prefsWatch := NewPreferencesWatcher()
@@ -192,7 +214,7 @@ func TestBuilderLoop_FastPath(t *testing.T) {
 			ProposalSlot:   sc.Slot,
 			ValidatorIndex: 7,
 			FeeRecipient:   common.Address{}, // no constraint -> fast path
-			GasLimit:       30_000_000,
+			TargetGasLimit: 30_000_000,
 		},
 	}
 
@@ -233,7 +255,7 @@ func TestBuilderLoop_RebuildPath(t *testing.T) {
 			ProposalSlot:   sc.Slot,
 			ValidatorIndex: 7,
 			FeeRecipient:   common.HexToAddress("0xfee"),
-			GasLimit:       30_000_000,
+			TargetGasLimit: 30_000_000,
 		},
 	}
 
@@ -291,7 +313,7 @@ func TestBuilderLoop_BidWonReveal(t *testing.T) {
 			ProposalSlot:   sc.Slot,
 			ValidatorIndex: 7,
 			FeeRecipient:   common.Address{}, // no constraint -> fast path
-			GasLimit:       30_000_000,
+			TargetGasLimit: 30_000_000,
 		},
 	}
 
@@ -311,7 +333,7 @@ func TestBuilderLoop_BidWonReveal(t *testing.T) {
 	// Step 2: Bid won -> reveal
 	// beaconBlockRoot is the hash_tree_root of the containing block (distinct from parent root).
 	beaconBlockRoot := common.HexToHash("0xbeefcafe")
-	err = loop.OnBidWon(ctx, sc.Slot, 42, sc.Parent.ExecutionHash, sc.Parent.BlockRoot, beaconBlockRoot)
+	err = loop.OnBidWon(ctx, sc.Slot, 42, sc.Parent.ExecutionHash, sc.Parent.BlockRoot, common.HexToHash("0xb10c"), beaconBlockRoot)
 	require.NoError(t, err)
 
 	// Verify envelope was broadcast
@@ -326,6 +348,7 @@ func TestBuilderLoop_BidWonReveal(t *testing.T) {
 	require.Equal(t, uint64(42), envelope.Message.BuilderIndex)
 	// BeaconBlockRoot must be the containing block root, NOT the parent root.
 	require.Equal(t, beaconBlockRoot, envelope.Message.BeaconBlockRoot)
+	require.Equal(t, sc.Parent.BlockRoot, envelope.Message.ParentBeaconBlockRoot)
 	require.NotEqual(t, sc.Parent.BlockRoot, envelope.Message.BeaconBlockRoot,
 		"BeaconBlockRoot must not equal parentBlockRoot -- they are different blocks")
 	require.NotNil(t, envelope.Message.ExecutionRequests)
@@ -338,9 +361,63 @@ func TestBuilderLoop_BidWonReveal_NoPending(t *testing.T) {
 	ctx := context.Background()
 
 	// OnBidWon without any pending payload -> error
-	err := loop.OnBidWon(ctx, 100, 42, common.HexToHash("0xdead"), common.HexToHash("0xbeef"), common.HexToHash("0xaabb"))
+	err := loop.OnBidWon(ctx, 100, 42, common.HexToHash("0xdead"), common.HexToHash("0xbeef"), common.HexToHash("0xblock"), common.HexToHash("0xaabb"))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no pending payload")
+}
+
+func TestBuilderLoop_BidWonReveal_RetainsPayloadUntilSuccessfulBroadcast(t *testing.T) {
+	loop, exec, submitter, prefsWatch := setupBuilderLoop(t)
+	ctx := context.Background()
+	sc := testSlotContext()
+	exec.setResultForNext(makeTestPayload(t, big.NewInt(1_000_000_000_000)))
+	require.NoError(t, loop.OnNewHead(ctx, sc))
+	prefsWatch.OnPreferencesReceived(sc.Slot, &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+		ProposalSlot: sc.Slot, TargetGasLimit: 30_000_000,
+	}})
+	require.NoError(t, loop.OnSlot(ctx, sc))
+
+	beaconBlockRoot := common.HexToHash("0xbeefcafe")
+	err := loop.OnBidWon(ctx, sc.Slot, 42, sc.Parent.ExecutionHash, sc.Parent.BlockRoot, common.HexToHash("0x9999"), beaconBlockRoot)
+	require.ErrorContains(t, err, "block hash")
+	require.Len(t, loop.pendingPayloads, 1)
+
+	submitter.broadcastErr = errors.New("temporary gossip failure")
+	err = loop.OnBidWon(ctx, sc.Slot, 42, sc.Parent.ExecutionHash, sc.Parent.BlockRoot, common.HexToHash("0xb10c"), beaconBlockRoot)
+	require.ErrorContains(t, err, "temporary gossip failure")
+	require.Len(t, loop.pendingPayloads, 1)
+
+	submitter.broadcastErr = nil
+	require.NoError(t, loop.OnBidWon(ctx, sc.Slot, 42, sc.Parent.ExecutionHash, sc.Parent.BlockRoot, common.HexToHash("0xb10c"), beaconBlockRoot))
+	require.Empty(t, loop.pendingPayloads)
+	require.Len(t, submitter.broadcasts, 1)
+}
+
+func TestBuilderLoop_BidWonReveal_DoesNotReleaseDeletedPendingTwice(t *testing.T) {
+	loop, exec, submitter, prefsWatch := setupBuilderLoop(t)
+	ctx := context.Background()
+	sc := testSlotContext()
+	exec.setResultForNext(makeTestPayload(t, big.NewInt(1_000_000_000_000)))
+	require.NoError(t, loop.OnNewHead(ctx, sc))
+	prefsWatch.OnPreferencesReceived(sc.Slot, &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+		ProposalSlot: sc.Slot, TargetGasLimit: 30_000_000,
+	}})
+	require.NoError(t, loop.OnSlot(ctx, sc))
+	require.True(t, loop.manager.ReserveBid(10))
+
+	key := pendingPayloadKey{slot: sc.Slot, parentBlockHash: sc.Parent.ExecutionHash, parentBlockRoot: sc.Parent.BlockRoot}
+	submitter.broadcastHook = func() {
+		loop.mu.Lock()
+		pending := loop.pendingPayloads[key]
+		delete(loop.pendingPayloads, key)
+		loop.mu.Unlock()
+		loop.manager.ReleaseBid(pending.bidValue)
+	}
+
+	require.NoError(t, loop.OnBidWon(ctx, sc.Slot, 42, sc.Parent.ExecutionHash, sc.Parent.BlockRoot, common.HexToHash("0xb10c"), common.HexToHash("0xbeef")))
+	loop.manager.indexMu.RLock()
+	require.Equal(t, uint64(10), loop.manager.reservedBidValue)
+	loop.manager.indexMu.RUnlock()
 }
 
 func TestBuildDataColumnSidecars_EmptyBundle(t *testing.T) {
@@ -377,7 +454,7 @@ func TestBuilderLoop_BidWonReveal_WrongBuilder(t *testing.T) {
 			ProposalSlot:   sc.Slot,
 			ValidatorIndex: 7,
 			FeeRecipient:   common.Address{},
-			GasLimit:       30_000_000,
+			TargetGasLimit: 30_000_000,
 		},
 	}
 	prefsWatch.OnPreferencesReceived(sc.Slot, prefs)
@@ -386,7 +463,7 @@ func TestBuilderLoop_BidWonReveal_WrongBuilder(t *testing.T) {
 	require.NoError(t, err)
 
 	// Different builder index (99 != 42) should be silently ignored.
-	err = loop.OnBidWon(ctx, sc.Slot, 99, sc.Parent.ExecutionHash, sc.Parent.BlockRoot, common.HexToHash("0xbeef"))
+	err = loop.OnBidWon(ctx, sc.Slot, 99, sc.Parent.ExecutionHash, sc.Parent.BlockRoot, common.HexToHash("0xb10c"), common.HexToHash("0xbeef"))
 	require.NoError(t, err)
 
 	submitter.mu.Lock()
@@ -414,7 +491,7 @@ func TestBuilderLoop_BidFields(t *testing.T) {
 			ProposalSlot:   sc.Slot,
 			ValidatorIndex: 7,
 			FeeRecipient:   common.Address{}, // no constraint -> fast path
-			GasLimit:       30_000_000,
+			TargetGasLimit: 30_000_000,
 		},
 	}
 
@@ -452,7 +529,7 @@ func TestBuildParams_CarriesWithdrawals(t *testing.T) {
 
 func TestPreferencesWatcher_Timeout(t *testing.T) {
 	w := NewPreferencesWatcher()
-	_, err := w.WaitForPreferences(42, 50*time.Millisecond)
+	_, err := w.WaitForPreferences(42, common.Hash{}, 50*time.Millisecond)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "timeout")
 }
@@ -471,7 +548,7 @@ func TestPreferencesWatcher_Receive(t *testing.T) {
 		w.OnPreferencesReceived(42, prefs)
 	}()
 
-	result, err := w.WaitForPreferences(42, time.Second)
+	result, err := w.WaitForPreferences(42, common.Hash{}, time.Second)
 	require.NoError(t, err)
 	require.Equal(t, prefs, result)
 }
@@ -490,9 +567,23 @@ func TestPreferencesWatcher_WrongSlot(t *testing.T) {
 		w.OnPreferencesReceived(43, prefs) // wrong slot -- ignored
 	}()
 
-	_, err := w.WaitForPreferences(42, 100*time.Millisecond)
+	_, err := w.WaitForPreferences(42, common.Hash{}, 100*time.Millisecond)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "timeout")
+}
+
+func TestPreferencesWatcher_DistinguishesDependentRoots(t *testing.T) {
+	w := NewPreferencesWatcher()
+	rootA := common.HexToHash("0xaaaa")
+	rootB := common.HexToHash("0xbbbb")
+	prefsA := &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{ProposalSlot: 42, DependentRoot: rootA}}
+	prefsB := &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{ProposalSlot: 42, DependentRoot: rootB}}
+	w.OnPreferencesReceived(42, prefsA)
+	w.OnPreferencesReceived(42, prefsB)
+
+	result, err := w.WaitForPreferences(42, rootA, time.Second)
+	require.NoError(t, err)
+	require.Same(t, prefsA, result)
 }
 
 func TestNewExecutionPayloadEnvelope_Used(t *testing.T) {
@@ -519,6 +610,59 @@ func TestDecodeAndHashRequests_Empty(t *testing.T) {
 	require.NotNil(t, execReqs)
 	// Empty requests should still produce a valid (non-zero) hash
 	require.NotEqual(t, common.Hash{}, root)
+}
+
+func TestDecodeAndHashRequests_GloasBuilderRequests(t *testing.T) {
+	cfg := testBeaconCfg()
+	loop := &BuilderLoop{beaconCfg: cfg}
+	requests := cltypes.NewExecutionRequestsWithVersion(cfg, clparams.GloasVersion)
+	requests.BuilderDeposits.Append(&solid.BuilderDepositRequest{Amount: 123})
+	requests.BuilderExits.Append(&solid.BuilderExitRequest{SourceAddress: common.HexToAddress("0x1234")})
+	depositBytes, err := requests.BuilderDeposits.EncodeSSZ(nil)
+	require.NoError(t, err)
+	exitBytes, err := requests.BuilderExits.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	decoded, _, err := loop.decodeAndHashRequests(&typesproto.RequestsBundle{Requests: [][]byte{
+		append([]byte{byte(cfg.BuilderDepositRequestType)}, depositBytes...),
+		append([]byte{byte(cfg.BuilderExitRequestType)}, exitBytes...),
+	}})
+	require.NoError(t, err)
+	require.Equal(t, 1, decoded.BuilderDeposits.Len())
+	require.Equal(t, uint64(123), decoded.BuilderDeposits.Get(0).Amount)
+	require.Equal(t, 1, decoded.BuilderExits.Len())
+}
+
+func TestDecodeAndHashRequests_RejectsUnknownType(t *testing.T) {
+	loop := &BuilderLoop{beaconCfg: testBeaconCfg()}
+	_, _, err := loop.decodeAndHashRequests(&typesproto.RequestsBundle{Requests: [][]byte{{0xff, 0x01}}})
+	require.ErrorContains(t, err, "unknown execution request type")
+}
+
+func TestValidateBlobsBundle_RejectsMalformedCommitment(t *testing.T) {
+	err := validateBlobsBundle(&eladapter.BlobsBundle{
+		Commitments: [][]byte{make([]byte, 47)},
+		Blobs:       [][]byte{make([]byte, cltypes.BytesPerBlob)},
+	}, 6)
+	require.ErrorContains(t, err, "commitment 0")
+}
+
+func TestValidateBlobsBundle_RejectsMismatchedBlobCount(t *testing.T) {
+	err := validateBlobsBundle(&eladapter.BlobsBundle{
+		Commitments: [][]byte{make([]byte, 48)},
+	}, 6)
+	require.ErrorContains(t, err, "commitments")
+}
+
+func TestValidateAssembledPayload_RejectsMissingExecutionPayload(t *testing.T) {
+	require.Error(t, validateAssembledPayload(nil))
+	require.ErrorContains(t, validateAssembledPayload(&eladapter.AssembledPayload{}), "execution payload")
+}
+
+func TestValidatePayloadForSlot_RejectsWrongParent(t *testing.T) {
+	payload := makeTestPayload(t, big.NewInt(1))
+	payload.Eth1Block.ParentHash = common.HexToHash("0x9999")
+	require.ErrorContains(t, validatePayloadForSlot(payload, testSlotContext()), "parent hash")
 }
 
 func TestDomainBeaconBuilder_Used(t *testing.T) {
@@ -566,6 +710,22 @@ func TestSpeculativeBuild_Busy(t *testing.T) {
 	require.Contains(t, err.Error(), "busy")
 }
 
+func TestBuilderLoop_PruneBeforeSlot(t *testing.T) {
+	loop, _, _, _ := setupBuilderLoop(t)
+	for slot := uint64(98); slot <= 100; slot++ {
+		parentHash := common.BigToHash(new(big.Int).SetUint64(slot))
+		parentRoot := common.BigToHash(new(big.Int).SetUint64(slot + 1_000))
+		loop.pendingPayloads[pendingPayloadKey{slot: slot, parentBlockHash: parentHash, parentBlockRoot: parentRoot}] = &pendingPayload{slot: slot}
+		loop.speculativePayloads[speculativeKey{slot: slot, parentBlockHash: parentHash, parentBlockRoot: parentRoot}] = slot
+		loop.specBuild.builds[slot] = struct{}{}
+	}
+
+	loop.pruneBeforeSlot(100)
+	require.Len(t, loop.pendingPayloads, 1)
+	require.Len(t, loop.speculativePayloads, 1)
+	require.Len(t, loop.specBuild.builds, 1)
+}
+
 func TestCaplinBidSubmitter_SubmitBid(t *testing.T) {
 	// This is a basic test that CaplinBidSubmitter compiles and works with nil pool/gossip
 	// In a real test, we'd wire up actual pool and gossip mocks.
@@ -598,7 +758,7 @@ func TestBuilderLoop_EnvelopeUsesConstructor(t *testing.T) {
 			ProposalSlot:   sc.Slot,
 			ValidatorIndex: 7,
 			FeeRecipient:   common.Address{}, // no constraint -> fast path
-			GasLimit:       30_000_000,
+			TargetGasLimit: 30_000_000,
 		},
 	}
 
@@ -612,7 +772,7 @@ func TestBuilderLoop_EnvelopeUsesConstructor(t *testing.T) {
 
 	// parentBlockRoot for key lookup, beaconBlockRoot for envelope
 	beaconBlockRoot := common.HexToHash("0xbeefcafe")
-	err = loop.OnBidWon(ctx, sc.Slot, 42, sc.Parent.ExecutionHash, sc.Parent.BlockRoot, beaconBlockRoot)
+	err = loop.OnBidWon(ctx, sc.Slot, 42, sc.Parent.ExecutionHash, sc.Parent.BlockRoot, common.HexToHash("0xb10c"), beaconBlockRoot)
 	require.NoError(t, err)
 
 	submitter.mu.Lock()
@@ -655,7 +815,7 @@ func TestBuilderLoop_FastPath_FeeRecipientMismatch(t *testing.T) {
 			ProposalSlot:   sc.Slot,
 			ValidatorIndex: 7,
 			FeeRecipient:   common.HexToAddress("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"),
-			GasLimit:       30_000_000,
+			TargetGasLimit: 30_000_000,
 		},
 	}
 
@@ -701,7 +861,7 @@ func TestBuilderLoop_FastPath_GasLimitMismatch(t *testing.T) {
 			ProposalSlot:   sc.Slot,
 			ValidatorIndex: 7,
 			FeeRecipient:   common.Address{}, // zero = no FeeRecipient constraint
-			GasLimit:       50_000_000,       // different from speculative build
+			TargetGasLimit: 50_000_000,       // different from speculative build
 		},
 	}
 
@@ -745,7 +905,7 @@ func TestPreferencesWatcher_EarlyArrival(t *testing.T) {
 	w.OnPreferencesReceived(42, prefs)
 
 	// Now wait -- should return immediately (fast path from prefsBySlot map)
-	result, err := w.WaitForPreferences(42, 100*time.Millisecond)
+	result, err := w.WaitForPreferences(42, common.Hash{}, 100*time.Millisecond)
 	require.NoError(t, err)
 	require.Equal(t, prefs, result)
 }
@@ -765,7 +925,7 @@ func TestPreferencesWatcher_EarlyArrival_WrongSlot(t *testing.T) {
 	w.OnPreferencesReceived(43, prefs)
 
 	// Wait for slot 42 -- should timeout (slot 43 prefs don't match)
-	_, err := w.WaitForPreferences(42, 100*time.Millisecond)
+	_, err := w.WaitForPreferences(42, common.Hash{}, 100*time.Millisecond)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "timeout")
 }
@@ -788,7 +948,7 @@ func TestBuilderLoop_OnBidWon_BeaconBlockRootDistinctFromParent(t *testing.T) {
 			ProposalSlot:   sc.Slot,
 			ValidatorIndex: 7,
 			FeeRecipient:   common.Address{}, // no constraint -> fast path
-			GasLimit:       30_000_000,
+			TargetGasLimit: 30_000_000,
 		},
 	}
 	go func() {
@@ -802,7 +962,7 @@ func TestBuilderLoop_OnBidWon_BeaconBlockRootDistinctFromParent(t *testing.T) {
 	parentBlockRoot := sc.Parent.BlockRoot                    // used for lookup
 	beaconBlockRoot := common.HexToHash("0x1111222233334444") // containing block root
 
-	err = loop.OnBidWon(ctx, sc.Slot, 42, sc.Parent.ExecutionHash, parentBlockRoot, beaconBlockRoot)
+	err = loop.OnBidWon(ctx, sc.Slot, 42, sc.Parent.ExecutionHash, parentBlockRoot, common.HexToHash("0xb10c"), beaconBlockRoot)
 	require.NoError(t, err)
 
 	submitter.mu.Lock()
@@ -869,7 +1029,7 @@ func TestBuilderLoop_MultiMarket(t *testing.T) {
 			ProposalSlot:   slot,
 			ValidatorIndex: 7,
 			FeeRecipient:   common.Address{},
-			GasLimit:       30_000_000,
+			TargetGasLimit: 30_000_000,
 		},
 	}
 
@@ -911,12 +1071,12 @@ func TestBuilderLoop_MultiMarket(t *testing.T) {
 
 	// Reveal parent A's payload
 	beaconRootA := common.HexToHash("0xdd01")
-	err = loop.OnBidWon(ctx, slot, 42, parentA.ExecutionHash, parentA.BlockRoot, beaconRootA)
+	err = loop.OnBidWon(ctx, slot, 42, parentA.ExecutionHash, parentA.BlockRoot, common.HexToHash("0xcc01"), beaconRootA)
 	require.NoError(t, err)
 
 	// Reveal parent B's payload
 	beaconRootB := common.HexToHash("0xdd02")
-	err = loop.OnBidWon(ctx, slot, 42, parentB.ExecutionHash, parentB.BlockRoot, beaconRootB)
+	err = loop.OnBidWon(ctx, slot, 42, parentB.ExecutionHash, parentB.BlockRoot, common.HexToHash("0xcc02"), beaconRootB)
 	require.NoError(t, err)
 
 	// Verify two separate envelopes were broadcast.

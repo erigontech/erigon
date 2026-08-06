@@ -7,7 +7,6 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/das"
 	"github.com/erigontech/erigon/cl/gossip"
-	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/pool"
 )
 
@@ -30,14 +29,18 @@ type BidSubmitter interface {
 type CaplinBidSubmitter struct {
 	epbsPool      *pool.EpbsPool
 	gossipManager GossipPublisher
-	forkchoice    forkchoice.ForkChoiceStorageWriter
+	forkchoice    executionPayloadProcessor
+}
+
+type executionPayloadProcessor interface {
+	OnExecutionPayload(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error
 }
 
 // NewCaplinBidSubmitter creates a CaplinBidSubmitter.
 func NewCaplinBidSubmitter(
 	epbsPool *pool.EpbsPool,
 	gossipManager GossipPublisher,
-	fc forkchoice.ForkChoiceStorageWriter,
+	fc executionPayloadProcessor,
 ) *CaplinBidSubmitter {
 	return &CaplinBidSubmitter{
 		epbsPool:      epbsPool,
@@ -53,13 +56,6 @@ func (s *CaplinBidSubmitter) SubmitBid(ctx context.Context, bid *cltypes.SignedE
 		return fmt.Errorf("epbs/submitter: nil bid")
 	}
 
-	key := pool.HighestBidKey{
-		Slot:            bid.Message.Slot,
-		ParentBlockHash: bid.Message.ParentBlockHash,
-		ParentBlockRoot: bid.Message.ParentBlockRoot,
-	}
-	s.epbsPool.HighestBids.Add(key, bid)
-
 	encodedSSZ, err := bid.EncodeSSZ(nil)
 	if err != nil {
 		return fmt.Errorf("epbs/submitter: encode bid: %w", err)
@@ -68,6 +64,12 @@ func (s *CaplinBidSubmitter) SubmitBid(ctx context.Context, bid *cltypes.SignedE
 	if err := s.gossipManager.Publish(ctx, gossip.TopicNameExecutionPayloadBid, encodedSSZ); err != nil {
 		return fmt.Errorf("epbs/submitter: publish bid: %w", err)
 	}
+	key := pool.HighestBidKey{
+		Slot:            bid.Message.Slot,
+		ParentBlockHash: bid.Message.ParentBlockHash,
+		ParentBlockRoot: bid.Message.ParentBlockRoot,
+	}
+	s.epbsPool.HighestBids.Add(key, bid)
 
 	return nil
 }
@@ -81,13 +83,8 @@ func (s *CaplinBidSubmitter) BroadcastPayload(ctx context.Context, envelope *clt
 		return fmt.Errorf("epbs/submitter: nil envelope")
 	}
 
-	// Process through forkchoice first (local state transition).
-	// checkBlobData=false, validatePayload=true (send to EL via NewPayload).
-	// This may return an error if OnBlock hasn't finished yet — the forkchoice
-	// store queues the envelope in pendingEnvelopes for later processing.
 	if err := s.forkchoice.OnExecutionPayload(ctx, envelope, false, true); err != nil {
-		// Non-fatal: envelope is queued for pending processing.
-		_ = err
+		return fmt.Errorf("epbs/submitter: process payload: %w", err)
 	}
 
 	// Broadcast on gossip

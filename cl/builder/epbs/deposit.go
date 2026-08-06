@@ -7,10 +7,12 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 )
 
 // BuildWithdrawalCredentials constructs withdrawal credentials for a builder deposit.
@@ -23,35 +25,33 @@ func BuildWithdrawalCredentials(feeRecipient common.Address, beaconCfg *clparams
 	return creds
 }
 
-// BuildDepositData constructs a signed DepositData for builder registration.
-//
-// The signature uses DomainDeposit with the genesis fork version and a zero
-// genesis validators root, matching the verification logic in
-// state.IsValidDepositSignature and statechange.IsValidDepositSignature.
-//
-// The resulting DepositData can be submitted as a deposit request on the
-// execution layer to register the builder in the beacon state.
-func BuildDepositData(
+func BuildBuilderDepositRequest(
 	ctx context.Context,
 	signer Signer,
 	feeRecipient common.Address,
 	amount uint64,
 	beaconCfg *clparams.BeaconChainConfig,
-) (*cltypes.DepositData, error) {
+) (*solid.BuilderDepositRequest, error) {
+	if signer == nil {
+		return nil, fmt.Errorf("epbs/deposit: nil signer")
+	}
+	if beaconCfg == nil {
+		return nil, fmt.Errorf("epbs/deposit: nil beacon config")
+	}
+	if amount < beaconCfg.MinDepositAmount {
+		return nil, fmt.Errorf("epbs/deposit: amount %d below minimum %d", amount, beaconCfg.MinDepositAmount)
+	}
 	pubkey := signer.Pubkey()
 	creds := BuildWithdrawalCredentials(feeRecipient, beaconCfg)
 
-	// Build unsigned deposit data to compute the message hash.
-	dd := &cltypes.DepositData{
+	depositData := &cltypes.DepositData{
 		PubKey:                pubkey,
 		WithdrawalCredentials: creds,
 		Amount:                amount,
 	}
 
-	// Compute deposit domain: DomainDeposit + genesis fork version + zero genesis validators root.
-	// Deposits are chain-agnostic (not tied to a specific genesis validators root).
 	domain, err := fork.ComputeDomain(
-		beaconCfg.DomainDeposit[:],
+		beaconCfg.DomainBuilderDeposit[:],
 		utils.Uint32ToBytes4(uint32(beaconCfg.GenesisForkVersion)),
 		[32]byte{},
 	)
@@ -59,21 +59,22 @@ func BuildDepositData(
 		return nil, fmt.Errorf("epbs/deposit: compute domain: %w", err)
 	}
 
-	// Compute signing root = SHA256(message_hash || domain).
-	// MessageHash returns HashTreeRoot(pubkey, withdrawal_credentials, amount).
-	messageRoot, err := dd.MessageHash()
+	messageRoot, err := depositData.MessageHash()
 	if err != nil {
 		return nil, fmt.Errorf("epbs/deposit: compute message hash: %w", err)
 	}
-	signingRoot := utils.Sha256(messageRoot[:], domain)
+	signingRoot := crypto.Sha256(messageRoot[:], domain)
 
 	sig, err := signer.SignDeposit(ctx, common.Hash(signingRoot))
 	if err != nil {
 		return nil, fmt.Errorf("epbs/deposit: sign: %w", err)
 	}
-	dd.Signature = sig
-
-	return dd, nil
+	return &solid.BuilderDepositRequest{
+		PubKey:                pubkey,
+		WithdrawalCredentials: creds,
+		Amount:                amount,
+		Signature:             sig,
+	}, nil
 }
 
 // ResolveIndex searches the current head state for a builder whose pubkey

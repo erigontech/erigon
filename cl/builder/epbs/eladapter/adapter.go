@@ -7,7 +7,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
@@ -73,9 +72,7 @@ func convertResult(version clparams.StateVersion, beaconCfg *clparams.BeaconChai
 	// BaseFeePerGas in cltypes.Eth1Block is stored as little-endian bytes in a common.Hash.
 	var baseFeeLE common.Hash
 	if header.BaseFee != nil {
-		be := header.BaseFee.Bytes32() // big-endian [32]byte
-		copy(baseFeeLE[:], be[:])
-		utils.ReverseBytes(&baseFeeLE) // convert to little-endian
+		_, _ = header.BaseFee.MarshalSSZAppend(baseFeeLE[:0])
 	}
 
 	extraData := solid.NewExtraData()

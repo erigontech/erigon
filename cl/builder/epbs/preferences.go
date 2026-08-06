@@ -6,7 +6,13 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/common"
 )
+
+type preferencesKey struct {
+	slot          uint64
+	dependentRoot common.Hash
+}
 
 // PreferencesWatcher watches for incoming proposer preferences via the
 // EpbsPool.OnPreferencesReceived callback and provides a blocking wait
@@ -18,16 +24,16 @@ import (
 type PreferencesWatcher struct {
 	mu          sync.Mutex
 	ch          chan struct{} // signalled when prefs for the watched slot arrive
-	waitingSlot uint64        // the slot WaitForPreferences is currently blocking on
-	waiting     bool          // true while WaitForPreferences is blocked
-	prefsBySlot map[uint64]*cltypes.SignedProposerPreferences
+	waitingKey  preferencesKey
+	waiting     bool // true while WaitForPreferences is blocked
+	preferences map[preferencesKey]*cltypes.SignedProposerPreferences
 }
 
 // NewPreferencesWatcher creates a PreferencesWatcher.
 func NewPreferencesWatcher() *PreferencesWatcher {
 	return &PreferencesWatcher{
 		ch:          make(chan struct{}, 1),
-		prefsBySlot: make(map[uint64]*cltypes.SignedProposerPreferences),
+		preferences: make(map[preferencesKey]*cltypes.SignedProposerPreferences),
 	}
 }
 
@@ -38,10 +44,15 @@ func (w *PreferencesWatcher) OnPreferencesReceived(slot uint64, prefs *cltypes.S
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	w.prefsBySlot[slot] = prefs
+	var dependentRoot common.Hash
+	if prefs != nil && prefs.Message != nil {
+		dependentRoot = prefs.Message.DependentRoot
+	}
+	key := preferencesKey{slot: slot, dependentRoot: dependentRoot}
+	w.preferences[key] = prefs
 
 	// Signal only if the builder loop is waiting for this exact slot.
-	if w.waiting && slot == w.waitingSlot {
+	if w.waiting && key == w.waitingKey {
 		select {
 		case w.ch <- struct{}{}:
 		default:
@@ -52,18 +63,19 @@ func (w *PreferencesWatcher) OnPreferencesReceived(slot uint64, prefs *cltypes.S
 // WaitForPreferences blocks until preferences arrive for the given slot
 // or the timeout expires. If preferences for the slot arrived before this
 // call, they are returned immediately.
-func (w *PreferencesWatcher) WaitForPreferences(slot uint64, timeout time.Duration) (*cltypes.SignedProposerPreferences, error) {
+func (w *PreferencesWatcher) WaitForPreferences(slot uint64, dependentRoot common.Hash, timeout time.Duration) (*cltypes.SignedProposerPreferences, error) {
 	w.mu.Lock()
+	key := preferencesKey{slot: slot, dependentRoot: dependentRoot}
 
 	// Fast path: preferences already arrived before we started waiting.
-	if prefs, ok := w.prefsBySlot[slot]; ok {
-		delete(w.prefsBySlot, slot)
+	if prefs, ok := w.preferences[key]; ok {
+		delete(w.preferences, key)
 		w.mu.Unlock()
 		return prefs, nil
 	}
 
 	// Register the slot we are waiting on and drain any stale signal.
-	w.waitingSlot = slot
+	w.waitingKey = key
 	w.waiting = true
 	select {
 	case <-w.ch:
@@ -75,9 +87,9 @@ func (w *PreferencesWatcher) WaitForPreferences(slot uint64, timeout time.Durati
 		w.mu.Lock()
 		w.waiting = false
 		// Prune old entries — keep only future slots.
-		for s := range w.prefsBySlot {
-			if s < slot {
-				delete(w.prefsBySlot, s)
+		for storedKey := range w.preferences {
+			if storedKey.slot < slot {
+				delete(w.preferences, storedKey)
 			}
 		}
 		w.mu.Unlock()
@@ -89,8 +101,8 @@ func (w *PreferencesWatcher) WaitForPreferences(slot uint64, timeout time.Durati
 	select {
 	case <-w.ch:
 		w.mu.Lock()
-		prefs := w.prefsBySlot[slot]
-		delete(w.prefsBySlot, slot)
+		prefs := w.preferences[key]
+		delete(w.preferences, key)
 		w.mu.Unlock()
 		if prefs == nil {
 			return nil, fmt.Errorf("epbs/preferences: signal received but no preferences for slot %d", slot)

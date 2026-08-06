@@ -9,9 +9,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
 	"github.com/stretchr/testify/require"
@@ -23,13 +21,11 @@ var testFeeRecipient = common.HexToAddress("0x1234567890abcdef1234567890abcdef12
 // BuildWithdrawalCredentials
 // ---------------------------------------------------------------------------
 
-func TestBuildWithdrawalCredentials_PrefixIs0x03(t *testing.T) {
+func TestBuildWithdrawalCredentials_UsesConfiguredBuilderPrefix(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	creds := BuildWithdrawalCredentials(testFeeRecipient, &cfg)
 
-	require.Equal(t, byte(cfg.BuilderWithdrawalPrefix), creds[0],
-		"first byte must be BuilderWithdrawalPrefix (0x03)")
-	require.Equal(t, byte(0x03), creds[0])
+	require.Equal(t, byte(cfg.BuilderWithdrawalPrefix), creds[0])
 }
 
 func TestBuildWithdrawalCredentials_ZeroPadding(t *testing.T) {
@@ -53,10 +49,10 @@ func TestBuildWithdrawalCredentials_AddressEmbedded(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// BuildDepositData
+// BuildBuilderDepositRequest
 // ---------------------------------------------------------------------------
 
-func TestBuildDepositData_Fields(t *testing.T) {
+func TestBuildBuilderDepositRequest_Fields(t *testing.T) {
 	privKey, err := bls.GenerateKey()
 	require.NoError(t, err)
 
@@ -66,26 +62,19 @@ func TestBuildDepositData_Fields(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	amount := cfg.MinDepositAmount // 1 ETH = 1e9 Gwei
 
-	dd, err := BuildDepositData(context.Background(), signer, testFeeRecipient, amount, &cfg)
+	request, err := BuildBuilderDepositRequest(context.Background(), signer, testFeeRecipient, amount, &cfg)
 	require.NoError(t, err)
 
-	// Pubkey matches signer.
-	require.Equal(t, signer.Pubkey(), dd.PubKey)
+	require.Equal(t, signer.Pubkey(), request.PubKey)
+	require.Equal(t, amount, request.Amount)
+	require.Equal(t, byte(cfg.BuilderWithdrawalPrefix), request.WithdrawalCredentials[0])
 
-	// Amount matches.
-	require.Equal(t, amount, dd.Amount)
-
-	// Withdrawal credentials have 0x03 prefix.
-	require.Equal(t, byte(0x03), dd.WithdrawalCredentials[0],
-		"withdrawal_credentials[0] must be 0x03 (BuilderWithdrawalPrefix)")
-
-	// Execution address embedded correctly.
 	var addr common.Address
-	copy(addr[:], dd.WithdrawalCredentials[12:32])
+	copy(addr[:], request.WithdrawalCredentials[12:32])
 	require.Equal(t, testFeeRecipient, addr)
 }
 
-func TestBuildDepositData_SignatureVerifiesWithDomainDeposit(t *testing.T) {
+func TestBuildBuilderDepositRequest_SignatureVerifiesWithBuilderDomain(t *testing.T) {
 	privKey, err := bls.GenerateKey()
 	require.NoError(t, err)
 
@@ -94,29 +83,15 @@ func TestBuildDepositData_SignatureVerifiesWithDomainDeposit(t *testing.T) {
 
 	cfg := clparams.MainnetBeaconConfig
 
-	dd, err := BuildDepositData(context.Background(), signer, testFeeRecipient, cfg.MinDepositAmount, &cfg)
+	request, err := BuildBuilderDepositRequest(context.Background(), signer, testFeeRecipient, cfg.MinDepositAmount, &cfg)
 	require.NoError(t, err)
 
-	// Verify using the same logic as state.IsValidDepositSignature:
-	// domain = ComputeDomain(DomainDeposit, genesisForkVersion, [32]byte{})
-	domain, err := fork.ComputeDomain(
-		cfg.DomainDeposit[:],
-		utils.Uint32ToBytes4(uint32(cfg.GenesisForkVersion)),
-		[32]byte{},
-	)
+	valid, err := state.IsValidBuilderDepositSignature(&cfg, request)
 	require.NoError(t, err)
-
-	messageRoot, err := dd.MessageHash()
-	require.NoError(t, err)
-
-	signingRoot := utils.Sha256(messageRoot[:], domain)
-
-	valid, err := bls.Verify(dd.Signature[:], signingRoot[:], dd.PubKey[:])
-	require.NoError(t, err)
-	require.True(t, valid, "deposit signature must verify with DomainDeposit")
+	require.True(t, valid)
 }
 
-func TestBuildDepositData_DoesNotVerifyWithDomainBeaconBuilder(t *testing.T) {
+func TestBuildBuilderDepositRequest_DoesNotVerifyAsValidatorDeposit(t *testing.T) {
 	privKey, err := bls.GenerateKey()
 	require.NoError(t, err)
 
@@ -125,45 +100,23 @@ func TestBuildDepositData_DoesNotVerifyWithDomainBeaconBuilder(t *testing.T) {
 
 	cfg := clparams.MainnetBeaconConfig
 
-	dd, err := BuildDepositData(context.Background(), signer, testFeeRecipient, cfg.MinDepositAmount, &cfg)
+	request, err := BuildBuilderDepositRequest(context.Background(), signer, testFeeRecipient, cfg.MinDepositAmount, &cfg)
 	require.NoError(t, err)
 
-	// If we verify using DomainBeaconBuilder instead, it must fail.
-	wrongDomain, err := fork.ComputeDomain(
-		cfg.DomainBeaconBuilder[:],
-		utils.Uint32ToBytes4(uint32(cfg.GenesisForkVersion)),
-		[32]byte{},
-	)
+	valid, err := state.IsValidDepositSignature(&cfg, request.PubKey, request.WithdrawalCredentials, request.Amount, request.Signature)
 	require.NoError(t, err)
-
-	messageRoot, err := dd.MessageHash()
-	require.NoError(t, err)
-
-	wrongSigningRoot := utils.Sha256(messageRoot[:], wrongDomain)
-
-	valid, err := bls.Verify(dd.Signature[:], wrongSigningRoot[:], dd.PubKey[:])
-	require.NoError(t, err)
-	require.False(t, valid,
-		"deposit signature must NOT verify with DomainBeaconBuilder — deposits use DomainDeposit")
+	require.False(t, valid)
 }
 
-func TestBuildDepositData_MatchesIsValidDepositSignature(t *testing.T) {
+func TestBuildBuilderDepositRequest_RejectsInsufficientAmount(t *testing.T) {
 	privKey, err := bls.GenerateKey()
 	require.NoError(t, err)
-
 	signer, err := NewLocalSignerFromBytes(privKey.Bytes())
 	require.NoError(t, err)
-
 	cfg := clparams.MainnetBeaconConfig
 
-	dd, err := BuildDepositData(context.Background(), signer, testFeeRecipient, cfg.MinDepositAmount, &cfg)
-	require.NoError(t, err)
-
-	// Use the exact same verifier used on-chain: state.IsValidDepositSignature.
-	// This is in cl/phase1/core/state/epbs.go.
-	valid, err := state.IsValidDepositSignature(&cfg, dd.PubKey, dd.WithdrawalCredentials, dd.Amount, dd.Signature)
-	require.NoError(t, err)
-	require.True(t, valid, "deposit must pass IsValidDepositSignature (the on-chain verifier)")
+	_, err = BuildBuilderDepositRequest(context.Background(), signer, testFeeRecipient, cfg.MinDepositAmount-1, &cfg)
+	require.ErrorContains(t, err, "minimum")
 }
 
 // ---------------------------------------------------------------------------

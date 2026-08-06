@@ -2,6 +2,7 @@ package epbs
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -197,6 +198,39 @@ func TestBuilderManager_BuilderIndex(t *testing.T) {
 	require.Equal(t, testBuilderIndex, idx)
 }
 
+func TestBuilderManager_BuilderIndexConcurrentAccess(t *testing.T) {
+	mgr, _ := newTestManager(t)
+	var wg sync.WaitGroup
+	for worker := range 8 {
+		wg.Add(2)
+		go func(offset uint64) {
+			defer wg.Done()
+			for i := range uint64(10_000) {
+				mgr.SetBuilderIndex(offset + i)
+			}
+		}(uint64(worker) << 32)
+		go func() {
+			defer wg.Done()
+			for range 10_000 {
+				_, _ = mgr.BuilderIndex()
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+func TestBuilderManager_ReserveBidRequiresKnownActiveBalance(t *testing.T) {
+	mgr, _ := newTestManager(t)
+	require.False(t, mgr.ReserveBid(1))
+	mgr.SetBalanceStatus(BalanceStatus{Active: false, Balance: 100})
+	require.False(t, mgr.ReserveBid(1))
+	mgr.SetBalanceStatus(BalanceStatus{Active: true, Balance: 100})
+	require.True(t, mgr.ReserveBid(60))
+	require.False(t, mgr.ReserveBid(41))
+	mgr.ReleaseBid(60)
+	require.True(t, mgr.ReserveBid(100))
+}
+
 func TestBuilderManager_SignBid_StampsBuilderIndex(t *testing.T) {
 	mgr, _ := newTestManager(t)
 	ctx := context.Background()
@@ -265,15 +299,16 @@ func TestBuilderManager_SignDeposit(t *testing.T) {
 	ctx := context.Background()
 
 	stub := &depositStub{root: common.HexToHash("0xdeposit")}
-	sig, err := mgr.SignDeposit(ctx, stub, 100)
+	sig, err := mgr.SignDeposit(ctx, stub)
 	require.NoError(t, err)
 
 	// Manually compute expected signing root.
 	cfg := clparams.MainnetBeaconConfig
-	epoch := uint64(100) / cfg.SlotsPerEpoch
-	stateVersion := cfg.GetCurrentStateVersion(epoch)
-	forkVersion := utils.Uint32ToBytes4(cfg.GetForkVersionByVersion(stateVersion))
-	domain, err := fork.ComputeDomain(cfg.DomainBeaconBuilder[:], forkVersion, testGenesisValidatorsRoot)
+	domain, err := fork.ComputeDomain(
+		cfg.DomainBuilderDeposit[:],
+		utils.Uint32ToBytes4(uint32(cfg.GenesisForkVersion)),
+		common.Hash{},
+	)
 	require.NoError(t, err)
 
 	signingRoot, err := fork.ComputeSigningRoot(stub, domain)
