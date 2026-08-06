@@ -78,7 +78,18 @@ func (r *CheckedStateReader) ReadAccountStorage(address accounts.Address, key ac
 	if gotErr != nil {
 		mismatch("ReadAccountStorage", address, fmt.Sprintf("domain errored (%v) while read set answered", gotErr))
 	}
-	if wantOK != gotOK || !want.Eq(&got) {
+	// Absent and present-with-zero are the same slot to the no-op filter: it
+	// drops a zero write either way and keeps a non-zero one either way, so
+	// only the effective value has to agree. The read set reports found=true
+	// for a slot the worker read as zero; the domain reports it absent.
+	wantEff, gotEff := want, got
+	if !wantOK {
+		wantEff = uint256.Int{}
+	}
+	if !gotOK {
+		gotEff = uint256.Int{}
+	}
+	if !wantEff.Eq(&gotEff) {
 		mismatch("ReadAccountStorage", address, fmt.Sprintf(
 			"slot %x: readset={%s,found:%v} domain={%s,found:%v}",
 			key.Value(), want.String(), wantOK, got.String(), gotOK))
