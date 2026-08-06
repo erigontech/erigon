@@ -500,6 +500,78 @@ details.alert.alert--info summary {
   --footer-top-edge: rgba(255, 255, 255, 0.08);
 }
 
+/* ─── Footer interactive states ──────────────────────────────────────────── */
+/* These live in CSS, not in React onMouseEnter/onMouseLeave handlers. Those
+   handlers only fire for a mouse: keyboard users tabbing through the footer got
+   no accent state at all, and mutating inline styles fights any later theming.
+   :hover and :focus-visible are declared together so mouse, keyboard and touch
+   all get the same affordance. */
+
+.footer-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: inherit;
+  text-decoration: none;
+  transition: color 0.15s;
+}
+.footer-brand:hover,
+.footer-brand:focus-visible {
+  color: var(--footer-accent);
+}
+
+.footer-socials {
+  display: flex;
+  flex-direction: row;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.footer-social {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--footer-box-border);
+  border-radius: 8px;
+  color: var(--footer-icon);
+  text-decoration: none;
+  background: transparent;
+  transition: color 0.15s, border-color 0.15s, background-color 0.15s;
+}
+.footer-social:hover,
+.footer-social:focus-visible {
+  color: var(--footer-accent);
+  border-color: var(--footer-accent);
+  /* Fallback first: color-mix() is Chrome/Edge 111+, Firefox 113+, Safari 16.2+,
+     and the default production browserslist still resolves down to Chrome 109.
+     Older engines keep the flat tint; newer ones take the color-mix line. Both
+     are the same colour, since --footer-accent is flat across modes here. */
+  background-color: rgba(239, 119, 22, 0.12);
+  background-color: color-mix(in srgb, var(--footer-accent) 12%, transparent);
+}
+
+.footer-legal {
+  font-size: 0.8rem;
+  color: var(--footer-fine);
+  text-decoration: none;
+  transition: color 0.15s;
+}
+.footer-legal:hover,
+.footer-legal:focus-visible {
+  color: var(--footer-accent);
+}
+
+/* The icon buttons had no visible keyboard focus indicator at all. */
+.footer-brand:focus-visible,
+.footer-social:focus-visible,
+.footer-legal:focus-visible {
+  outline: 2px solid var(--footer-accent);
+  outline-offset: 2px;
+}
+
 /* ─── Footer responsive (mobile) ────────────────────────────────────────── */
 
 @media (max-width: 768px) {
@@ -511,10 +583,11 @@ details.alert.alert--info summary {
     gap: 1rem !important;
   }
 
-  /* Social row is pushed right by margin-left:auto on desktop; drop that so it
-     aligns with the brand and tagline once stacked. */
-  .footer-top-grid > div:last-child {
-    margin-left: 0 !important;
+  /* Socials are pushed right by margin-left:auto on desktop; drop that so they
+     align with the brand and tagline once stacked. Targets the dedicated class,
+     not > div:last-child, which broke if another div were appended. */
+  .footer-socials {
+    margin-left: 0;
   }
 
   .footer-bottom-bar {
