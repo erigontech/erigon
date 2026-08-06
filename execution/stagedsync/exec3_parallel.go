@@ -1918,7 +1918,10 @@ func (result *execResult) finalizeSystemTx(
 	}
 	ibs.SetTrace(txTask.Trace)
 
-	writes := ibs.FinalizedWrites(txTask.Rules())
+	writes, err := ibs.FinalizedWrites(txTask.Rules())
+	if err != nil {
+		return nil, state.ReadSet{}, nil, err
+	}
 	return nil, ibs.VersionedReads(), writes, nil
 }
 
@@ -1947,15 +1950,21 @@ func (result *execResult) calcFees(
 	burntAddr := result.ExecutionResult.BurntContractAddress
 	hasBurnt := !burntAddr.IsNil()
 	var newBurntBalance uint256.Int
-	var burntAcc *accounts.Account
+	burntAfterExecution := accounts.NewAccount()
 	if hasBurnt {
-		burntAcc, err = vsReader.ReadAccountData(burntAddr)
+		burntAcc, err := vsReader.ReadAccountData(burntAddr)
 		if err != nil {
 			return nil, err
 		}
 		if burntAcc != nil {
-			newBurntBalance = burntAcc.Balance
+			burntAfterExecution = *burntAcc
 		}
+		if written, ok := result.TxOut.AccountAfterWrites(burntAddr, burntAfterExecution); ok {
+			burntAfterExecution = written
+		} else {
+			burntAfterExecution = accounts.NewAccount()
+		}
+		newBurntBalance = burntAfterExecution.Balance
 	}
 	// Worker writes coinbase/burnt to TxOut when sender matches (gas-debit
 	// applied to sender under shouldDelayFeeCalc=true). Track Nonce / CodeHash
@@ -1983,11 +1992,6 @@ func (result *execResult) calcFees(
 	}
 	if cw, ok := result.TxOut.GetCreateContract(result.Coinbase); ok {
 		coinbaseCreatedContract = cw.Val
-	}
-	if hasBurnt {
-		if bw, ok := result.TxOut.GetBalance(burntAddr); ok {
-			newBurntBalance = bw.Val
-		}
 	}
 	oldCoinbaseBalance := newCoinbaseBalance
 	// Before EIP-8246, burn the tip only for an actual SELFDESTRUCT of a contract coinbase.
@@ -2071,33 +2075,42 @@ func (result *execResult) calcFees(
 			})
 		}
 	}
-	if hasBurnt && newBurntBalance != oldBurntBalance {
-		addWrites.SetBalance(burntAddr, &state.VersionedWrite[uint256.Int]{
-			WriteHeader: state.WriteHeader{
-				Address: burntAddr,
-				Path:    state.BalancePath,
-				Version: taskVersion,
-				Reason:  tracing.BalanceDecreaseGasBuy,
-			},
-			Val: newBurntBalance,
-		})
-		// Mirror the AddressPath emission above for the burnt address.
-		burntAddrAcc := &accounts.Account{Balance: newBurntBalance}
-		if burntAcc != nil {
-			burntAddrAcc.Nonce = burntAcc.Nonce
-			burntAddrAcc.Incarnation = burntAcc.Incarnation
-			burntAddrAcc.CodeHash = burntAcc.CodeHash
+	burntAfterFees := burntAfterExecution
+	burntAfterFees.Balance = newBurntBalance
+	burntEmptyRemoval := hasBurnt && state.EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, burntAddr)
+	deleteBurnt := burntEmptyRemoval && burntAfterFees.Balance.IsZero() &&
+		burntAfterFees.Nonce == 0 && burntAfterFees.IsEmptyCodeHash()
+	emitBurnt := hasBurnt && (newBurntBalance != oldBurntBalance || deleteBurnt)
+	if emitBurnt {
+		if deleteBurnt {
+			addWrites.SetSelfDestruct(burntAddr, &state.VersionedWrite[bool]{
+				WriteHeader: state.WriteHeader{
+					Address: burntAddr,
+					Path:    state.SelfDestructPath,
+					Version: taskVersion,
+				},
+				Val: true,
+			})
 		} else {
-			burntAddrAcc.CodeHash = accounts.EmptyCodeHash
+			addWrites.SetBalance(burntAddr, &state.VersionedWrite[uint256.Int]{
+				WriteHeader: state.WriteHeader{
+					Address: burntAddr,
+					Path:    state.BalancePath,
+					Version: taskVersion,
+					Reason:  tracing.BalanceDecreaseGasBuy,
+				},
+				Val: newBurntBalance,
+			})
+			// Mirror the AddressPath emission above for the burnt address.
+			addWrites.SetAddress(burntAddr, &state.VersionedWrite[*accounts.Account]{
+				WriteHeader: state.WriteHeader{
+					Address: burntAddr,
+					Path:    state.AddressPath,
+					Version: taskVersion,
+				},
+				Val: &burntAfterFees,
+			})
 		}
-		addWrites.SetAddress(burntAddr, &state.VersionedWrite[*accounts.Account]{
-			WriteHeader: state.WriteHeader{
-				Address: burntAddr,
-				Path:    state.AddressPath,
-				Version: taskVersion,
-			},
-			Val: burntAddrAcc,
-		})
 	}
 
 	return addWrites, nil
@@ -3089,10 +3102,13 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				be.blockIO.RecordReads(finalVersion, ibs.VersionedReads())
 
-				writes := ibs.FinalizedWrites(lastResult.Rules())
-				if !writes.IsEmpty() {
-					be.blockIO.RecordWrites(finalVersion, writes)
-					be.versionMap.FlushVersionedWrites(writes, true, "")
+				ivw, err := ibs.FinalizedWrites(lastResult.Rules())
+				if err != nil {
+					return nil, fmt.Errorf("[parallel] finalize block writes: %w", err)
+				}
+				if !ivw.IsEmpty() {
+					be.blockIO.RecordWrites(finalVersion, ivw)
+					be.versionMap.FlushVersionedWrites(ivw, true, "")
 				}
 
 				// Commit finalize writes from the versionMap write-set, the
@@ -3118,7 +3134,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 				emptyRemoval := be.blockNum != 0 && pe.cfg.chainConfig.IsEIP161Enabled(be.blockNum)
 				var normErr error
-				finalizeWrites, normErr = writes.Normalize(be.versionMap, finalVersion.TxIndex, finalVersion.Incarnation, reader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil, pe.cfg.chainConfig.IsAmsterdam(tt.Header.Time))
+				finalizeWrites, normErr = ivw.Normalize(be.versionMap, finalVersion.TxIndex, finalVersion.Incarnation, reader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil, pe.cfg.chainConfig.IsAmsterdam(tt.Header.Time))
 				if domainKeysErr != nil {
 					return nil, fmt.Errorf("[parallel] finalize iterate storage prefix for block write normalization: %w", domainKeysErr)
 				}

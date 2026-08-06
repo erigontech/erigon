@@ -65,7 +65,10 @@ func RederiveBlockAccessList(
 	if err != nil {
 		return nil, fmt.Errorf("bal.RederiveBlockAccessList: initialize block %d: %w", blockNum, err)
 	}
-	initWrites := ibs.FinalizedWrites(blockRules)
+	initWrites, err := ibs.FinalizedWrites(blockRules)
+	if err != nil {
+		return nil, fmt.Errorf("bal.RederiveBlockAccessList: finalize init writes for block %d: %w", blockNum, err)
+	}
 	ibs.MergeTxIOInto(balIO, initWrites)
 	// Publish this phase's writes to the versionMap so the next phase observes
 	// them across the ResetVersionedIO below — the cross-tx carrier the parallel
@@ -96,7 +99,10 @@ func RederiveBlockAccessList(
 		if evm.Cancelled() {
 			return nil, fmt.Errorf("bal.RederiveBlockAccessList: execution aborted replaying tx %d of block %d: %w", i, blockNum, ctx.Err())
 		}
-		txWrites := ibs.FinalizedWrites(blockRules)
+		txWrites, err := ibs.FinalizedWrites(blockRules)
+		if err != nil {
+			return nil, fmt.Errorf("bal.RederiveBlockAccessList: finalize tx %d writes for block %d: %w", i, blockNum, err)
+		}
 		ibs.MergeTxIOInto(balIO, txWrites)
 		ibs.FlushWritesToVersionMap(txWrites)
 		ibs.ResetVersionedIO()
@@ -113,7 +119,10 @@ func RederiveBlockAccessList(
 	if err != nil {
 		return nil, fmt.Errorf("bal.RederiveBlockAccessList: finalize block %d: %w", blockNum, err)
 	}
-	finalWrites := ibs.FinalizedWrites(blockRules)
+	finalWrites, err := ibs.FinalizedWrites(blockRules)
+	if err != nil {
+		return nil, fmt.Errorf("bal.RederiveBlockAccessList: finalize block %d writes: %w", blockNum, err)
+	}
 	ibs.MergeTxIOInto(balIO, finalWrites)
 	return balIO.AsBlockAccessList(), nil
 }

@@ -256,6 +256,36 @@ type readPathResult struct {
 	err error
 }
 
+func recordSelfDestructRead(s *IntraBlockState, addr accounts.Address, read VersionedRead[bool]) {
+	if recorded, ok := s.versionedReads.GetSelfDestruct(addr); ok {
+		if recorded.internal && !read.internal {
+			recorded.internal = false
+			s.versionedReads.SetSelfDestruct(addr, recorded)
+		}
+		return
+	}
+	s.versionedReads.SetSelfDestruct(addr, read)
+}
+
+func recordSelfDestructProbe(s *IntraBlockState, addr accounts.Address, destructed bool, res ReadResult, ok bool) {
+	if ok && res.Status() == MVReadResultDependency {
+		if res.DepIdx() > s.dep {
+			s.dep = res.DepIdx()
+		}
+		recordSelfDestructRead(s, addr, VersionedRead[bool]{
+			ReadHeader: ReadHeader{Source: MapRead, Version: res.Version(), internal: true},
+			Val:        destructed,
+		})
+		panic(ErrDependency)
+	}
+	header := ReadHeader{Source: StorageRead, Version: UnknownVersion, internal: true}
+	if ok && res.Status() != MVReadResultNone {
+		header.Source = MapRead
+		header.Version = res.Version()
+	}
+	recordSelfDestructRead(s, addr, VersionedRead[bool]{ReadHeader: header, Val: destructed})
+}
+
 // versionedReadCore is the non-generic body that drives the read.
 // Typed wrappers (readBalance, readNonce, readState, …) consume the
 // result.  See readPathOutcome for the outcome enumeration.
@@ -293,10 +323,14 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		// When the in-memory deletion reflects a prior tx's selfdestruct, surface
 		// the SD version rather than UnknownVersion, so synthetic CreateAccount read
 		// records match later SD-zero-path reads and don't force a version conflict.
-		if destructed, sdRes, ok := s.readSelfDestructMemo(addr); ok && sdRes.Status() == MVReadResultDone && destructed {
+		destructed, sdRes, sdOK := s.readSelfDestructMemo(addr)
+		if !commited {
+			recordSelfDestructProbe(s, addr, destructed, sdRes, sdOK)
+		}
+		if sdOK && sdRes.Status() == MVReadResultDone && destructed {
 			sdVer := Version{TxIndex: sdRes.DepIdx(), Incarnation: sdRes.Incarnation()}
 			if !commited {
-				s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
+				recordSelfDestructRead(s, addr, VersionedRead[bool]{
 					ReadHeader: ReadHeader{Source: MapRead, Version: sdVer},
 					Val:        true,
 				})
@@ -333,7 +367,11 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	}
 
 	var destructedVersion Version
-	if destructed, sdRes, ok := s.readSelfDestructMemo(addr); ok && sdRes.Status() == MVReadResultDone && destructed {
+	destructed, sdRes, sdOK := s.readSelfDestructMemo(addr)
+	if !commited {
+		recordSelfDestructProbe(s, addr, destructed, sdRes, sdOK)
+	}
+	if sdOK && sdRes.Status() == MVReadResultDone && destructed {
 		destructTxIndex := sdRes.DepIdx()
 		// A tx's own same-tx write to this path is returned directly: it always
 		// observes its own write, even after a prior tx's self-destruct.
@@ -360,7 +398,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 				// its balance and stays alive, so a concurrent reader must see the
 				// live account, not a zeroed one. Record the SelfDestructPath
 				// dependency for validation, then fall through to the actual value.
-				s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
+				recordSelfDestructRead(s, addr, VersionedRead[bool]{
 					ReadHeader: ReadHeader{Source: MapRead, Version: sdVersion},
 					Val:        true,
 				})
@@ -384,7 +422,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 					sd, sdOK = s.versionedWriteSelfDestruct(addr)
 				}
 				if !sdOK || sd {
-					s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
+					recordSelfDestructRead(s, addr, VersionedRead[bool]{
 						ReadHeader: ReadHeader{Source: MapRead, Version: sdVersion},
 						Val:        true,
 					})
@@ -513,7 +551,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		if path == StoragePath {
 			if sdVer, ok := s.versionMap.FindDoneSelfDestructInRange(addr, hdr.Version.TxIndex, s.txIndex, true); ok {
 				if !commited {
-					s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
+					recordSelfDestructRead(s, addr, VersionedRead[bool]{
 						ReadHeader: ReadHeader{Source: MapRead, Version: sdVer},
 						Val:        true,
 					})
@@ -590,7 +628,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 			if destructed, sd, ok := s.versionMap.ReadSelfDestruct(addr, s.txIndex); ok && sd.Status() == MVReadResultDone && destructed {
 				sdVer := Version{TxIndex: sd.DepIdx(), Incarnation: sd.Incarnation()}
 				if !commited {
-					s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
+					recordSelfDestructRead(s, addr, VersionedRead[bool]{
 						ReadHeader: ReadHeader{Source: MapRead, Version: sdVer},
 						Val:        true,
 					})
@@ -1418,7 +1456,7 @@ func readSelfDestruct(s *IntraBlockState, addr accounts.Address) (bool, ReadSour
 	case outcomeMapDone:
 		v := r.mapSelfDestructVal
 		if r.recordVR {
-			s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{r.hdr, v})
+			recordSelfDestructRead(s, addr, VersionedRead[bool]{r.hdr, v})
 		}
 		return v, r.source, r.version, nil
 	case outcomeStorageRead:
@@ -1434,7 +1472,7 @@ func readSelfDestruct(s *IntraBlockState, addr accounts.Address) (bool, ReadSour
 			}
 		}
 		if r.recordVR {
-			s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{r.hdr, v})
+			recordSelfDestructRead(s, addr, VersionedRead[bool]{r.hdr, v})
 		}
 		return v, r.source, r.version, nil
 	case outcomeLegacyStorage:
@@ -1470,7 +1508,7 @@ func refreshSelfDestruct(s *IntraBlockState, addr accounts.Address) (bool, ReadS
 	case outcomeReturnZero, outcomeReturnDefault:
 		if r.recordVR {
 			// SelfDestructPath defaultV is false — the zero value.
-			s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{ReadHeader: r.hdr})
+			recordSelfDestructRead(s, addr, VersionedRead[bool]{ReadHeader: r.hdr})
 		}
 		return false, r.source, r.version, nil
 	default:

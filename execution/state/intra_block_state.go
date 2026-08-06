@@ -685,30 +685,47 @@ func (sdb *IntraBlockState) Empty(addr accounts.Address) (empty bool, err error)
 }
 
 // emptyFromVersionedFields computes the EIP-161 emptiness verdict for an
-// account that versionedAccountBase resolved as existing, reading the current
-// balance/nonce/codeHash per-field (short-circuiting on the first non-empty
-// field) instead of reconstructing the whole account. The per-field refresh
-// reads apply the same self-destruct gate as the whole-account path.
+// existing account without reconstructing it. It checks recorded writes before
+// refreshing untouched fields because FinalizeTx may already have cleared the
+// journal dirtiness used by the read path's own-write fast path.
 func (sdb *IntraBlockState) emptyFromVersionedFields(addr accounts.Address, account *accounts.Account) (bool, error) {
-	balance, _, _, err := refreshBalance(sdb, addr, account.Balance)
-	if err != nil {
-		return false, err
+	codeHash := account.CodeHash
+	if write, ok := sdb.versionedWrites.GetCodeHash(addr); ok {
+		codeHash = write.Val
+	} else {
+		var err error
+		codeHash, _, _, err = refreshCodeHash(sdb, addr, codeHash)
+		if err != nil {
+			return false, err
+		}
 	}
-	if !balance.IsZero() {
+	if codeHash != accounts.EmptyCodeHash {
 		return false, nil
 	}
-	nonce, _, _, err := refreshNonce(sdb, addr, account.Nonce)
-	if err != nil {
-		return false, err
+	nonce := account.Nonce
+	if write, ok := sdb.versionedWrites.GetNonce(addr); ok {
+		nonce = write.Val
+	} else {
+		var err error
+		nonce, _, _, err = refreshNonce(sdb, addr, nonce)
+		if err != nil {
+			return false, err
+		}
 	}
 	if nonce != 0 {
 		return false, nil
 	}
-	codeHash, _, _, err := refreshCodeHash(sdb, addr, account.CodeHash)
-	if err != nil {
-		return false, err
+	balance := account.Balance
+	if write, ok := sdb.versionedWrites.GetBalance(addr); ok {
+		balance = write.Val
+	} else {
+		var err error
+		balance, _, _, err = refreshBalance(sdb, addr, balance)
+		if err != nil {
+			return false, err
+		}
 	}
-	return codeHash == accounts.EmptyCodeHash, nil
+	return balance.IsZero(), nil
 }
 
 // GetBalance retrieves the balance from the given address or 0 if object not found
@@ -2670,33 +2687,101 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 	return nil
 }
 
-// FinalizedWrites applies EIP-6780 normalization and EIP-161 filtering, then
-// returns a detached committable snapshot.
-func (sdb *IntraBlockState) FinalizedWrites(chainRules *chain.Rules) *WriteSet {
+// FinalizedWrites returns a detached write set after end-of-phase filtering.
+// deferredFeeAddrs postpone deletion of pre-existing empty accounts until
+// later fee settlement.
+func (sdb *IntraBlockState) FinalizedWrites(chainRules *chain.Rules, deferredFeeAddrs ...accounts.Address) (*WriteSet, error) {
+	if chainRules == nil {
+		return nil, errors.New("chain rules are required to finalize versioned writes")
+	}
 	writes := sdb.versionedWrites.Finalize()
-	sdb.withholdCreatedEmptyAccounts(chainRules, writes)
-	return writes
+	if err := sdb.clearEmptyAccounts(chainRules, deferredFeeAddrs, writes); err != nil {
+		writes.ReleaseAndReset()
+		return nil, err
+	}
+	return writes, nil
 }
 
-// withholdCreatedEmptyAccounts drops writes for accounts the tx observed as
-// absent and left empty (EIP-161): such an account is absent both before and
-// after the tx, so omitting its writes is exact and no deletion marker is
-// needed. An account that existed before is kept even when it ends empty —
-// clearing it needs an explicit delete, which commit-time normalization emits.
-func (sdb *IntraBlockState) withholdCreatedEmptyAccounts(chainRules *chain.Rules, writes *WriteSet) {
-	if sdb.blockNum == 0 || chainRules == nil {
-		return
+// clearEmptyAccounts applies serial EIP-161 cleanup to a versioned phase.
+// It deletes pre-existing accounts that end empty and withholds newly created
+// empty accounts only when their recorded read proves prior absence. Deferred
+// fee addresses are settled later; genesis and Aura exceptions are preserved.
+func (sdb *IntraBlockState) clearEmptyAccounts(chainRules *chain.Rules, deferredFeeAddrs []accounts.Address, writes *WriteSet) error {
+	if sdb.blockNum == 0 {
+		return nil
 	}
-	for addr := range writes.address {
-		if !EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, addr) {
+	eip161 := chainRules.IsEIP161Enabled()
+	if !eip161 {
+		return nil
+	}
+	for addr := range sdb.versionedWrites.addrs() {
+		if !EIP161EmptyRemoval(eip161, chainRules.IsAura, addr) {
 			continue
 		}
-		read, ok := sdb.versionedReads.GetAddress(addr)
-		if !ok || (read.Val != nil && !read.Val.IsNil()) || !writes.createdEmpty(addr) {
+		publishDelete := false
+		if !slices.Contains(deferredFeeAddrs, addr) {
+			existingEmpty, err := sdb.existingAccountEndsEmpty(addr)
+			if err != nil {
+				return err
+			}
+			publishDelete = existingEmpty
+		}
+		withholdCreatedEmpty := sdb.versionedWrites.createdEmpty(addr)
+		if withholdCreatedEmpty {
+			read, ok := sdb.versionedReads.GetAddress(addr)
+			withholdCreatedEmpty = ok && (read.Val == nil || read.Val.IsNil())
+		}
+		if !publishDelete && !withholdCreatedEmpty {
 			continue
 		}
 		writes.deleteAddr(addr)
+		if publishDelete {
+			sdb.MarkAddressAccess(addr, true)
+			deleteWrite := &VersionedWrite[bool]{
+				WriteHeader: WriteHeader{
+					Address: addr,
+					Path:    SelfDestructPath,
+					Version: sdb.Version(),
+				},
+				Val: true,
+			}
+			writes.SetSelfDestruct(addr, deleteWrite)
+			traceWrite(sdb, deleteWrite)
+		}
 	}
+	return nil
+}
+
+// existingAccountEndsEmpty resolves fields not replaced by an AddressPath write
+// through the version map so prior transactions become validation dependencies.
+func (sdb *IntraBlockState) existingAccountEndsEmpty(addr accounts.Address) (bool, error) {
+	_, wroteRecord := sdb.versionedWrites.GetAddress(addr)
+	addressRead, ok := sdb.versionedReads.GetAddress(addr)
+	var account accounts.Account
+	if ok && addressRead.Val != nil && !addressRead.Val.IsNil() {
+		account = *addressRead.Val.Account()
+	} else {
+		// A record write means this tx (re)created the account, which createdEmpty
+		// settles instead — and it is also what keeps a prior tx's delete from
+		// being read back out of the stale committedBase record below.
+		if wroteRecord {
+			return false, nil
+		}
+		committed, ok := sdb.committedBase[addr]
+		if !ok || committed == nil {
+			return false, nil
+		}
+		account = *committed
+	}
+	if destroyed, ok := sdb.versionedWrites.GetSelfDestruct(addr); ok && destroyed.Val {
+		return false, nil
+	}
+
+	if !wroteRecord {
+		return sdb.emptyFromVersionedFields(addr, &account)
+	}
+	account, ok = sdb.versionedWrites.AccountAfterWrites(addr, account)
+	return ok && account.Empty(), nil
 }
 
 // MergeTxIOInto folds the current transaction's reads and supplied writes into io.
@@ -2799,7 +2884,7 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 
 	// EIP-7928 records the EIP-3651 coinbase access even without a priority fee.
 	if rules.IsShanghai {
-		sdb.MarkAddressAccess(coinbase, true)
+		sdb.MarkAddressAccess(coinbase, false)
 	}
 }
 

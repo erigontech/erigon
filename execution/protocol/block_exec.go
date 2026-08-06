@@ -342,6 +342,8 @@ func FinalizeBlockExecution(
 		return ret, err
 	}
 
+	// EIP-7928 lists withdrawal recipients even when nothing changes, so the
+	// finalize phase records its accesses like transaction execution does.
 	if ibs.IsVersioned() {
 		ibs.StartAccessRecording()
 	}
