@@ -25,6 +25,7 @@ import (
 	"encoding/hex"
 	"math/big"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -42,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/changeset"
+	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -1644,9 +1646,10 @@ func TestGetPayloadBodiesNonCanonicalBlockAccessList(t *testing.T) {
 	require.NoError(t, err)
 	// Insert the fork blocks without a fork choice update so they stay
 	// non-canonical, with no stored BAL sidecar.
-	for _, block := range fork.Blocks {
-		block.SetBlockAccessList(nil)
+	for i, block := range fork.Blocks {
+		fork.Blocks[i] = types.NewBlockFromNetwork(block.HeaderNoCopy(), block.Body(), nil)
 	}
+	fork.TopBlock = fork.Blocks[len(fork.Blocks)-1]
 	insertRes, err := m.InsertBlocks(ctx, fork.Blocks)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, insertRes)
@@ -2458,7 +2461,7 @@ func runBatchedFCUBadBlockRecovery(t *testing.T, bgCommit bool) {
 		Transactions: chainPack.Blocks[5].Transactions(),
 		Uncles:       chainPack.Blocks[5].Uncles(),
 		Withdrawals:  chainPack.Blocks[5].Withdrawals(),
-	})
+	}, chainPack.Blocks[5].BlockAccessList())
 
 	badRes, err := m.InsertBlocks(ctx, []*types.Block{badBlock6})
 	require.NoError(t, err)
@@ -2827,4 +2830,475 @@ func TestUpdateForkChoiceToNonGenesisBlockAtHeightZero(t *testing.T) {
 	fcu, err := m.UpdateForkChoice(ctx, fakeBlock.Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusBadBlock, fcu.Status)
+}
+
+// TestPreCancunMetamorphicSelfDestructSequence guards the pre-EIP-6780
+// account lifecycle through the real execution module under the default
+// parallel executor: within one block a Phoenix contract's counter is
+// incremented, the contract is destroyed by a later transaction (a
+// cross-transaction SELFDESTRUCT fully deletes it pre-Cancun), a plain
+// transfer revives the address as a fresh balance-only account, and an
+// observer contract deployed afterwards persists what it sees of the wiped
+// code and the revived balance. Stale pre-destruct reads must re-execute,
+// wiped reads must validate (no retry livelock), and gas and state root must
+// match the header.
+func TestPreCancunMetamorphicSelfDestructSequence(t *testing.T) {
+	ctx := t.Context()
+	privKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	preCancun := &chain.Config{}
+	require.NoError(t, copier.CopyWithOption(preCancun, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	preCancun.CancunTime = nil
+	preCancun.PragueTime = nil
+	preCancun.OsakaTime = nil
+	preCancun.AmsterdamTime = nil
+	preCancun.Bpo1Time = nil
+	preCancun.Bpo2Time = nil
+	preCancun.Bpo3Time = nil
+	preCancun.Bpo4Time = nil
+	preCancun.Bpo5Time = nil
+	preCancun.DepositContract = common.Address{}
+	genesis := &types.Genesis{
+		Config: preCancun,
+		Alloc: types.GenesisAlloc{
+			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+		},
+	}
+	m := execmoduletester.New(t,
+		execmoduletester.WithGenesisSpec(genesis),
+		execmoduletester.WithKey(privKey),
+	)
+	gasPrice := m.Genesis.BaseFee().Uint64() * 2
+	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	mustSign := func(tx types.Transaction) types.Transaction {
+		signed, err := types.SignTx(tx, *signer, privKey)
+		require.NoError(t, err)
+		return signed
+	}
+	phoenixABI, err := abi.JSON(strings.NewReader(contracts.PhoenixABI))
+	require.NoError(t, err)
+	incrementCall, err := phoenixABI.Pack("increment")
+	require.NoError(t, err)
+	dieCall, err := phoenixABI.Pack("die")
+	require.NoError(t, err)
+	// Observer (execution/state/contracts/observer.sol) persists its
+	// constructor-time view of the phoenix: slot 0 = code size, slot 1 = code
+	// hash, slot 2 = balance.
+	observerInit := func(victim common.Address) []byte {
+		return append(common.FromHex(contracts.ObserverBin), common.LeftPadBytes(victim[:], 32)...)
+	}
+	var phoenixAddr common.Address
+	var observerAddr common.Address
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, gen *blockgen.BlockGen) {
+		switch i {
+		case 0:
+			nonce := gen.TxNonce(senderAddr)
+			phoenixAddr = types.CreateAddress(senderAddr, nonce)
+			gen.AddTx(mustSign(types.NewContractCreation(nonce, uint256.NewInt(0), 600_000, uint256.NewInt(gasPrice), common.FromHex(contracts.PhoenixBin))))
+		case 1:
+			nonce := gen.TxNonce(senderAddr)
+			gen.AddTx(mustSign(types.NewTransaction(nonce, phoenixAddr, uint256.NewInt(0), 100_000, uint256.NewInt(gasPrice), incrementCall)))
+			gen.AddTx(mustSign(types.NewTransaction(nonce+1, phoenixAddr, uint256.NewInt(0), 100_000, uint256.NewInt(gasPrice), dieCall)))
+			gen.AddTx(mustSign(types.NewTransaction(nonce+2, phoenixAddr, uint256.NewInt(1), 100_000, uint256.NewInt(gasPrice), nil)))
+			observerAddr = types.CreateAddress(senderAddr, nonce+3)
+			gen.AddTx(mustSign(types.NewContractCreation(nonce+3, uint256.NewInt(0), 300_000, uint256.NewInt(gasPrice), observerInit(phoenixAddr))))
+		}
+	})
+	require.NoError(t, err)
+	for _, receipts := range chainPack.Receipts {
+		for _, receipt := range receipts {
+			require.Equal(t, types.ReceiptStatusSuccessful, receipt.Status)
+		}
+	}
+	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, chainPack.Blocks))
+	err = m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		enc, _, err := tx.GetLatest(kv.AccountsDomain, phoenixAddr[:])
+		require.NoError(t, err)
+		require.NotEmpty(t, enc)
+		var phoenix accounts.Account
+		require.NoError(t, accounts.DeserialiseV3(&phoenix, enc))
+		require.Equal(t, *uint256.NewInt(1), phoenix.Balance)
+		require.Equal(t, uint64(0), phoenix.Nonce)
+		require.True(t, phoenix.CodeHash.IsEmpty() || phoenix.CodeHash.IsZero())
+		readSlot := func(owner common.Address, slot int64) []byte {
+			h := common.BigToHash(big.NewInt(slot))
+			v, _, err := tx.GetLatest(kv.StorageDomain, append(owner[:], h[:]...))
+			require.NoError(t, err)
+			return v
+		}
+		require.Empty(t, readSlot(phoenixAddr, 0))
+		require.Empty(t, readSlot(observerAddr, 0))
+		require.Equal(t, crypto.Keccak256(nil), readSlot(observerAddr, 1))
+		require.Equal(t, []byte{0x01}, readSlot(observerAddr, 2))
+		return nil
+	})
+	require.NoError(t, err)
+}
+
+// TestPreCancunFeeRevivedCoinbaseAfterDestruct drives the cell-less revival
+// shape through the real execution module: the block's coinbase is a Phoenix
+// contract destroyed mid-block, so the per-transaction priority fees credited
+// to it afterwards are balance-only revivals that write no code or code-hash
+// entries. An observer deployed after the destruct must see the wiped code
+// (size 0, hash keccak(”)) of an account that is nonetheless alive with the
+// accumulated fees, and the recorded reads must validate without retry.
+func TestPreCancunFeeRevivedCoinbaseAfterDestruct(t *testing.T) {
+	ctx := t.Context()
+	privKey, err := crypto.HexToECDSA("c87f65ff3f271bf5dc8643484f66b200109caffe4bf98c4cb393dc35740b28c0")
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	preCancun := &chain.Config{}
+	require.NoError(t, copier.CopyWithOption(preCancun, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	preCancun.CancunTime = nil
+	preCancun.PragueTime = nil
+	preCancun.OsakaTime = nil
+	preCancun.AmsterdamTime = nil
+	preCancun.Bpo1Time = nil
+	preCancun.Bpo2Time = nil
+	preCancun.Bpo3Time = nil
+	preCancun.Bpo4Time = nil
+	preCancun.Bpo5Time = nil
+	preCancun.DepositContract = common.Address{}
+	genesis := &types.Genesis{
+		Config: preCancun,
+		Alloc: types.GenesisAlloc{
+			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+		},
+	}
+	m := execmoduletester.New(t,
+		execmoduletester.WithGenesisSpec(genesis),
+		execmoduletester.WithKey(privKey),
+	)
+	gasPrice := m.Genesis.BaseFee().Uint64() * 2
+	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	mustSign := func(tx types.Transaction) types.Transaction {
+		signed, err := types.SignTx(tx, *signer, privKey)
+		require.NoError(t, err)
+		return signed
+	}
+	phoenixABI, err := abi.JSON(strings.NewReader(contracts.PhoenixABI))
+	require.NoError(t, err)
+	dieCall, err := phoenixABI.Pack("die")
+	require.NoError(t, err)
+	observerInit := func(victim common.Address) []byte {
+		return append(common.FromHex(contracts.ObserverBin), common.LeftPadBytes(victim[:], 32)...)
+	}
+	var phoenixAddr common.Address
+	var observerAddr common.Address
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, gen *blockgen.BlockGen) {
+		switch i {
+		case 0:
+			nonce := gen.TxNonce(senderAddr)
+			phoenixAddr = types.CreateAddress(senderAddr, nonce)
+			gen.AddTx(mustSign(types.NewContractCreation(nonce, uint256.NewInt(0), 600_000, uint256.NewInt(gasPrice), common.FromHex(contracts.PhoenixBin))))
+		case 1:
+			gen.SetCoinbase(phoenixAddr)
+			nonce := gen.TxNonce(senderAddr)
+			gen.AddTx(mustSign(types.NewTransaction(nonce, phoenixAddr, uint256.NewInt(0), 100_000, uint256.NewInt(gasPrice), dieCall)))
+			gen.AddTx(mustSign(types.NewTransaction(nonce+1, senderAddr, uint256.NewInt(1), 100_000, uint256.NewInt(gasPrice), nil)))
+			observerAddr = types.CreateAddress(senderAddr, nonce+2)
+			gen.AddTx(mustSign(types.NewContractCreation(nonce+2, uint256.NewInt(0), 300_000, uint256.NewInt(gasPrice), observerInit(phoenixAddr))))
+		}
+	})
+	require.NoError(t, err)
+	for _, receipts := range chainPack.Receipts {
+		for _, receipt := range receipts {
+			require.Equal(t, types.ReceiptStatusSuccessful, receipt.Status)
+		}
+	}
+	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, chainPack.Blocks))
+	block2 := chainPack.Blocks[1]
+	tip := gasPrice - block2.BaseFee().Uint64()
+	// tx0's own fee is credited before its destruct wipes the account (the
+	// pre-EIP-8246 burn); tx1's fee is the balance-only revival the observer
+	// sees, and tx2's own fee lands after its execution.
+	fillerFee := chainPack.Receipts[1][1].GasUsed * tip
+	totalFees := (chainPack.Receipts[1][1].GasUsed + chainPack.Receipts[1][2].GasUsed) * tip
+	err = m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		enc, _, err := tx.GetLatest(kv.AccountsDomain, phoenixAddr[:])
+		require.NoError(t, err)
+		require.NotEmpty(t, enc)
+		var phoenix accounts.Account
+		require.NoError(t, accounts.DeserialiseV3(&phoenix, enc))
+		require.Equal(t, *uint256.NewInt(totalFees), phoenix.Balance)
+		require.Equal(t, uint64(0), phoenix.Nonce)
+		require.True(t, phoenix.CodeHash.IsEmpty() || phoenix.CodeHash.IsZero())
+		readSlot := func(owner common.Address, slot int64) []byte {
+			h := common.BigToHash(big.NewInt(slot))
+			v, _, err := tx.GetLatest(kv.StorageDomain, append(owner[:], h[:]...))
+			require.NoError(t, err)
+			return v
+		}
+		require.Empty(t, readSlot(observerAddr, 0))
+		require.Equal(t, crypto.Keccak256(nil), readSlot(observerAddr, 1))
+		require.Equal(t, new(uint256.Int).SetUint64(fillerFee).Bytes(), readSlot(observerAddr, 2))
+		return nil
+	})
+	require.NoError(t, err)
+}
+
+// TestAuraSystemAddressRetainedUnderParallelExec pins the AuRa carve-out end
+// to end: EIP-161 removal retains AuRa's SystemAddress, so a declared-empty
+// SystemAddress must survive being touched by a call, its reads must record
+// and validate under the default parallel executor without dead-equivalating
+// it to a nonexistent account, and the state root must agree.
+func TestAuraSystemAddressRetainedUnderParallelExec(t *testing.T) {
+	ctx := t.Context()
+	privKey, err := crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	auraCfg := &chain.Config{}
+	require.NoError(t, copier.CopyWithOption(auraCfg, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	auraCfg.CancunTime = nil
+	auraCfg.PragueTime = nil
+	auraCfg.OsakaTime = nil
+	auraCfg.AmsterdamTime = nil
+	auraCfg.Bpo1Time = nil
+	auraCfg.Bpo2Time = nil
+	auraCfg.Bpo3Time = nil
+	auraCfg.Bpo4Time = nil
+	auraCfg.Bpo5Time = nil
+	auraCfg.DepositContract = common.Address{}
+	auraCfg.Aura = &chain.AuRaConfig{}
+	sysAddr := params.SystemAddress.Value()
+	genesis := &types.Genesis{
+		Config: auraCfg,
+		Alloc: types.GenesisAlloc{
+			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+			sysAddr:    {Balance: big.NewInt(0)},
+		},
+	}
+	m := execmoduletester.New(t,
+		execmoduletester.WithGenesisSpec(genesis),
+		execmoduletester.WithKey(privKey),
+	)
+	gasPrice := m.Genesis.BaseFee().Uint64() * 2
+	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	mustSign := func(tx types.Transaction) types.Transaction {
+		signed, err := types.SignTx(tx, *signer, privKey)
+		require.NoError(t, err)
+		return signed
+	}
+	observerInit := func(victim common.Address) []byte {
+		return append(common.FromHex(contracts.ObserverBin), common.LeftPadBytes(victim[:], 32)...)
+	}
+	var observerAddr common.Address
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {
+		nonce := gen.TxNonce(senderAddr)
+		gen.AddTx(mustSign(types.NewTransaction(nonce, sysAddr, uint256.NewInt(0), 100_000, uint256.NewInt(gasPrice), nil)))
+		observerAddr = types.CreateAddress(senderAddr, nonce+1)
+		gen.AddTx(mustSign(types.NewContractCreation(nonce+1, uint256.NewInt(0), 300_000, uint256.NewInt(gasPrice), observerInit(sysAddr))))
+	})
+	require.NoError(t, err)
+	for _, receipts := range chainPack.Receipts {
+		for _, receipt := range receipts {
+			require.Equal(t, types.ReceiptStatusSuccessful, receipt.Status)
+		}
+	}
+	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, chainPack.Blocks))
+	err = m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		enc, _, err := tx.GetLatest(kv.AccountsDomain, sysAddr[:])
+		require.NoError(t, err)
+		require.NotEmpty(t, enc, "AuRa must retain the empty SystemAddress")
+		var sys accounts.Account
+		require.NoError(t, accounts.DeserialiseV3(&sys, enc))
+		require.True(t, sys.Balance.IsZero())
+		require.Equal(t, uint64(0), sys.Nonce)
+		obsEnc, _, err := tx.GetLatest(kv.AccountsDomain, observerAddr[:])
+		require.NoError(t, err)
+		require.NotEmpty(t, obsEnc)
+		var obs accounts.Account
+		require.NoError(t, accounts.DeserialiseV3(&obs, obsEnc))
+		require.Equal(t, uint64(1), obs.Nonce)
+		return nil
+	})
+	require.NoError(t, err)
+}
+
+// TestPreCancunSameTxStoreAndDie drives the same-transaction SSTORE +
+// SELFDESTRUCT shape through the real execution module: the write and the
+// destruct land at the same transaction index, so the wipe must erase the
+// value written by the destructing transaction itself, a plain transfer then
+// revives the address balance-only, and the observer sees the wiped code of
+// the alive account.
+func TestPreCancunSameTxStoreAndDie(t *testing.T) {
+	ctx := t.Context()
+	privKey, err := crypto.HexToECDSA("45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8")
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	preCancun := &chain.Config{}
+	require.NoError(t, copier.CopyWithOption(preCancun, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	preCancun.CancunTime = nil
+	preCancun.PragueTime = nil
+	preCancun.OsakaTime = nil
+	preCancun.AmsterdamTime = nil
+	preCancun.Bpo1Time = nil
+	preCancun.Bpo2Time = nil
+	preCancun.Bpo3Time = nil
+	preCancun.Bpo4Time = nil
+	preCancun.Bpo5Time = nil
+	preCancun.DepositContract = common.Address{}
+	genesis := &types.Genesis{
+		Config: preCancun,
+		Alloc: types.GenesisAlloc{
+			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+		},
+	}
+	m := execmoduletester.New(t,
+		execmoduletester.WithGenesisSpec(genesis),
+		execmoduletester.WithKey(privKey),
+	)
+	gasPrice := m.Genesis.BaseFee().Uint64() * 2
+	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	mustSign := func(tx types.Transaction) types.Transaction {
+		signed, err := types.SignTx(tx, *signer, privKey)
+		require.NoError(t, err)
+		return signed
+	}
+	sadABI, err := abi.JSON(strings.NewReader(contracts.StoreAndDieABI))
+	require.NoError(t, err)
+	storeAndDieCall, err := sadABI.Pack("storeAndDie", big.NewInt(7))
+	require.NoError(t, err)
+	observerInit := func(victim common.Address) []byte {
+		return append(common.FromHex(contracts.ObserverBin), common.LeftPadBytes(victim[:], 32)...)
+	}
+	var victimAddr common.Address
+	var observerAddr common.Address
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, gen *blockgen.BlockGen) {
+		switch i {
+		case 0:
+			nonce := gen.TxNonce(senderAddr)
+			victimAddr = types.CreateAddress(senderAddr, nonce)
+			gen.AddTx(mustSign(types.NewContractCreation(nonce, uint256.NewInt(0), 600_000, uint256.NewInt(gasPrice), common.FromHex(contracts.StoreAndDieBin))))
+		case 1:
+			nonce := gen.TxNonce(senderAddr)
+			gen.AddTx(mustSign(types.NewTransaction(nonce, victimAddr, uint256.NewInt(0), 100_000, uint256.NewInt(gasPrice), storeAndDieCall)))
+			gen.AddTx(mustSign(types.NewTransaction(nonce+1, victimAddr, uint256.NewInt(1), 100_000, uint256.NewInt(gasPrice), nil)))
+			observerAddr = types.CreateAddress(senderAddr, nonce+2)
+			gen.AddTx(mustSign(types.NewContractCreation(nonce+2, uint256.NewInt(0), 300_000, uint256.NewInt(gasPrice), observerInit(victimAddr))))
+		}
+	})
+	require.NoError(t, err)
+	for _, receipts := range chainPack.Receipts {
+		for _, receipt := range receipts {
+			require.Equal(t, types.ReceiptStatusSuccessful, receipt.Status)
+		}
+	}
+	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, chainPack.Blocks))
+	err = m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		enc, _, err := tx.GetLatest(kv.AccountsDomain, victimAddr[:])
+		require.NoError(t, err)
+		require.NotEmpty(t, enc)
+		var victim accounts.Account
+		require.NoError(t, accounts.DeserialiseV3(&victim, enc))
+		require.Equal(t, *uint256.NewInt(1), victim.Balance)
+		require.Equal(t, uint64(0), victim.Nonce)
+		require.True(t, victim.CodeHash.IsEmpty() || victim.CodeHash.IsZero())
+		readSlot := func(owner common.Address, slot int64) []byte {
+			h := common.BigToHash(big.NewInt(slot))
+			v, _, err := tx.GetLatest(kv.StorageDomain, append(owner[:], h[:]...))
+			require.NoError(t, err)
+			return v
+		}
+		require.Empty(t, readSlot(victimAddr, 0), "the same-tx write must be erased by the destruct")
+		require.Empty(t, readSlot(observerAddr, 0))
+		require.Equal(t, crypto.Keccak256(nil), readSlot(observerAddr, 1))
+		require.Equal(t, []byte{0x01}, readSlot(observerAddr, 2))
+		return nil
+	})
+	require.NoError(t, err)
+}
+
+// TestPreCancunCreate2RecreateThenUse drives the metamorphic re-deploy through
+// the real execution module with the recreated contract USED in the same
+// block: Phoenix is CREATE2-deployed, incremented (counter = 1), destroyed,
+// CREATE2-recreated at the same address, and incremented again — the second
+// increment reads the recreated contract's own storage, which must be the
+// wiped zero, so the counter ends at 1. A stale read of the first
+// incarnation's slot would end it at 2 and diverge the state root.
+func TestPreCancunCreate2RecreateThenUse(t *testing.T) {
+	ctx := t.Context()
+	privKey, err := crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	preCancun := &chain.Config{}
+	require.NoError(t, copier.CopyWithOption(preCancun, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	preCancun.CancunTime = nil
+	preCancun.PragueTime = nil
+	preCancun.OsakaTime = nil
+	preCancun.AmsterdamTime = nil
+	preCancun.Bpo1Time = nil
+	preCancun.Bpo2Time = nil
+	preCancun.Bpo3Time = nil
+	preCancun.Bpo4Time = nil
+	preCancun.Bpo5Time = nil
+	preCancun.DepositContract = common.Address{}
+	genesis := &types.Genesis{
+		Config: preCancun,
+		Alloc: types.GenesisAlloc{
+			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+		},
+	}
+	m := execmoduletester.New(t,
+		execmoduletester.WithGenesisSpec(genesis),
+		execmoduletester.WithKey(privKey),
+	)
+	gasPrice := m.Genesis.BaseFee().Uint64() * 2
+	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	mustSign := func(tx types.Transaction) types.Transaction {
+		signed, err := types.SignTx(tx, *signer, privKey)
+		require.NoError(t, err)
+		return signed
+	}
+	revive2ABI, err := abi.JSON(strings.NewReader(contracts.Revive2ABI))
+	require.NoError(t, err)
+	deployCall, err := revive2ABI.Pack("deploy", [32]byte{})
+	require.NoError(t, err)
+	phoenixABI, err := abi.JSON(strings.NewReader(contracts.PhoenixABI))
+	require.NoError(t, err)
+	incrementCall, err := phoenixABI.Pack("increment")
+	require.NoError(t, err)
+	dieCall, err := phoenixABI.Pack("die")
+	require.NoError(t, err)
+	var factoryAddr common.Address
+	var phoenixAddr common.Address
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, gen *blockgen.BlockGen) {
+		switch i {
+		case 0:
+			nonce := gen.TxNonce(senderAddr)
+			factoryAddr = types.CreateAddress(senderAddr, nonce)
+			codeHash := crypto.Keccak256Hash(common.FromHex(contracts.PhoenixBin))
+			phoenixAddr = types.CreateAddress2(factoryAddr, [32]byte{}, accounts.InternCodeHash(codeHash))
+			gen.AddTx(mustSign(types.NewContractCreation(nonce, uint256.NewInt(0), 1_000_000, uint256.NewInt(gasPrice), common.FromHex(contracts.Revive2Bin))))
+		case 1:
+			nonce := gen.TxNonce(senderAddr)
+			gen.AddTx(mustSign(types.NewTransaction(nonce, factoryAddr, uint256.NewInt(0), 300_000, uint256.NewInt(gasPrice), deployCall)))
+			gen.AddTx(mustSign(types.NewTransaction(nonce+1, phoenixAddr, uint256.NewInt(0), 100_000, uint256.NewInt(gasPrice), incrementCall)))
+			gen.AddTx(mustSign(types.NewTransaction(nonce+2, phoenixAddr, uint256.NewInt(0), 100_000, uint256.NewInt(gasPrice), dieCall)))
+			gen.AddTx(mustSign(types.NewTransaction(nonce+3, factoryAddr, uint256.NewInt(0), 300_000, uint256.NewInt(gasPrice), deployCall)))
+			gen.AddTx(mustSign(types.NewTransaction(nonce+4, phoenixAddr, uint256.NewInt(0), 100_000, uint256.NewInt(gasPrice), incrementCall)))
+		}
+	})
+	require.NoError(t, err)
+	for _, receipts := range chainPack.Receipts {
+		for _, receipt := range receipts {
+			require.Equal(t, types.ReceiptStatusSuccessful, receipt.Status)
+		}
+	}
+	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, chainPack.Blocks))
+	err = m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		enc, _, err := tx.GetLatest(kv.AccountsDomain, phoenixAddr[:])
+		require.NoError(t, err)
+		require.NotEmpty(t, enc)
+		var phoenix accounts.Account
+		require.NoError(t, accounts.DeserialiseV3(&phoenix, enc))
+		require.False(t, phoenix.CodeHash.IsEmpty() || phoenix.CodeHash.IsZero(), "the recreated phoenix must carry code")
+		h := common.BigToHash(big.NewInt(0))
+		v, _, err := tx.GetLatest(kv.StorageDomain, append(phoenixAddr[:], h[:]...))
+		require.NoError(t, err)
+		require.Equal(t, []byte{0x01}, v, "the recreated phoenix's counter must restart from the wiped zero")
+		return nil
+	})
+	require.NoError(t, err)
 }

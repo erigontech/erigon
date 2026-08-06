@@ -293,7 +293,7 @@ func (s *Merge) FinalizeAndAssemble(config *chain.Config, header *types.Header, 
 	if config.IsPrague(header.Time) {
 		header.RequestsHash = outRequests.Hash()
 	}
-	return types.NewBlockForAsembling(header, txs, uncles, receipts, withdrawals), outRequests, nil
+	return types.NewBlockForAsembling(header, txs, uncles, receipts, withdrawals, nil), outRequests, nil
 }
 
 func (s *Merge) SealHash(header *types.Header) (hash common.Hash) {

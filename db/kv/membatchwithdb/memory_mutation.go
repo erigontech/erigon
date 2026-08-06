@@ -818,45 +818,50 @@ func (m *MemoryMutation) Diff() (*MemoryDiff, error) {
 	}
 	// Iterate over each bucket and apply changes accordingly.
 	for _, bucket := range buckets {
-		if isTablePurelyDupsort(bucket) {
-			cbucket, err := m.memTx.CursorDupSort(bucket)
-			if err != nil {
-				return nil, err
-			}
-			defer cbucket.Close()
+		if err := func() error {
+			if isTablePurelyDupsort(bucket) {
+				cbucket, err := m.memTx.CursorDupSort(bucket)
+				if err != nil {
+					return err
+				}
+				defer cbucket.Close()
 
-			t := table{
-				name:    bucket,
-				dupsort: true,
-			}
-			for k, v, err := cbucket.First(); k != nil; k, v, err = cbucket.Next() {
-				if err != nil {
-					return nil, err
+				t := table{
+					name:    bucket,
+					dupsort: true,
 				}
-				memDiff.diff[t] = append(memDiff.diff[t], entry{
-					k: bytes.Clone(k),
-					v: bytes.Clone(v),
-				})
-			}
-		} else {
-			cbucket, err := m.memTx.Cursor(bucket)
-			if err != nil {
-				return nil, err
-			}
-			defer cbucket.Close()
-			t := table{
-				name:    bucket,
-				dupsort: false,
-			}
-			for k, v, err := cbucket.First(); k != nil; k, v, err = cbucket.Next() {
-				if err != nil {
-					return nil, err
+				for k, v, err := cbucket.First(); k != nil; k, v, err = cbucket.Next() {
+					if err != nil {
+						return err
+					}
+					memDiff.diff[t] = append(memDiff.diff[t], entry{
+						k: bytes.Clone(k),
+						v: bytes.Clone(v),
+					})
 				}
-				memDiff.diff[t] = append(memDiff.diff[t], entry{
-					k: bytes.Clone(k),
-					v: bytes.Clone(v),
-				})
+			} else {
+				cbucket, err := m.memTx.Cursor(bucket)
+				if err != nil {
+					return err
+				}
+				defer cbucket.Close()
+				t := table{
+					name:    bucket,
+					dupsort: false,
+				}
+				for k, v, err := cbucket.First(); k != nil; k, v, err = cbucket.Next() {
+					if err != nil {
+						return err
+					}
+					memDiff.diff[t] = append(memDiff.diff[t], entry{
+						k: bytes.Clone(k),
+						v: bytes.Clone(v),
+					})
+				}
 			}
+			return nil
+		}(); err != nil {
+			return nil, err
 		}
 	}
 	return memDiff, nil
