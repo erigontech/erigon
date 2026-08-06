@@ -509,6 +509,9 @@ details.alert.alert--info summary {
 .footer-brand:hover,
 .footer-brand:focus-visible {
   color: var(--footer-accent);
+  /* Infima's `a:hover` sets text-decoration: underline and outranks the base
+     class on specificity, so it has to be cleared on the state too. */
+  text-decoration: none;
 }
 
 .footer-socials {
@@ -553,6 +556,7 @@ details.alert.alert--info summary {
 .footer-legal:hover,
 .footer-legal:focus-visible {
   color: var(--footer-accent);
+  text-decoration: none;
 }
 
 /* The icon buttons had no visible keyboard focus indicator at all. */
