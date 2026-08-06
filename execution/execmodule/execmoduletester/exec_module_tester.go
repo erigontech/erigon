@@ -356,12 +356,6 @@ func WithoutAmsterdamBuilderContracts() Option {
 	}
 }
 
-func WithFcuBackgroundCommit() Option {
-	return func(opts *options) {
-		opts.fcuBackgroundCommit = true
-	}
-}
-
 // WithAlwaysGenerateChangesets pins --experimental.always-generate-changesets
 // regardless of the tester default: true for tests that reorg deeper than
 // MaxReorgDepth, false for tests that rely on the windowed-changesets
@@ -404,7 +398,6 @@ type options struct {
 	pruneMode                     *prune.Mode
 	withTxPool                    bool
 	enableDomains                 []kv.Domain
-	fcuBackgroundCommit           bool
 	fcuBackgroundPrune            bool
 	alwaysGenerateChangesets      *bool
 	maxReorgDepth                 *uint64
@@ -521,7 +514,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	cfg.Prune = pruneMode
 	cfg.ExperimentalBAL = opt.experimentalBAL
 	cfg.FcuBackgroundPrune = opt.fcuBackgroundPrune
-	cfg.FcuBackgroundCommit = opt.fcuBackgroundCommit
 
 	logLvl := log.LvlError
 	if lvl, ok := os.LookupEnv("EXEC_MODULE_TESTER_LOG_LEVEL"); ok {
@@ -803,7 +795,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		engine,
 		cfg.Sync,
 		cfg.FcuBackgroundPrune,
-		cfg.FcuBackgroundCommit,
 		onlySnapDownloadOnStart,
 		readAheader,
 		func() error { return nil },
