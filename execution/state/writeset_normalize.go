@@ -32,6 +32,8 @@ import (
 // isn't silent.
 var codePathRecoveryHashMismatch = metrics.GetOrCreateCounter("exec3_codepath_recovery_hash_mismatch")
 
+var mxNormalizeTook = metrics.GetOrCreateSummary("exec3_normalize_seconds")
+
 // slowNormalizeThreshold is the debug-branch trigger for dumping write-set
 // geometry, so outlier shapes can be reproduced in the benchmark.
 const slowNormalizeThreshold = 1 * time.Millisecond
@@ -100,7 +102,9 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 
 	normalizeStarted := time.Now()
 	defer func() {
-		if took := time.Since(normalizeStarted); took >= slowNormalizeThreshold {
+		took := time.Since(normalizeStarted)
+		mxNormalizeTook.Observe(took.Seconds())
+		if took >= slowNormalizeThreshold {
 			logSlowNormalize(writes, filtered, took, txIndex, incarnation)
 		}
 	}()
