@@ -697,7 +697,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 			createTestSegmentFile(t, from, to, name.Enum(), dir, version.V1_0, logger)
 		}
 		s := NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
-		defer s.Close()
+		defer s.Close() //nolint:gocritic
 		err := s.OpenFolder()
 		require.NoError(err)
 		require.NotNil(s.visible.Load().segments[snaptype2.Enums.Headers])
@@ -706,7 +706,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 
 		createFile(step, step*2, snaptype2.Bodies)
 		s = NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
-		defer s.Close()
+		defer s.Close() //nolint:gocritic
 		require.NotNil(s.visible.Load().segments[snaptype2.Enums.Bodies])
 		require.Empty(s.visible.Load().segments[snaptype2.Enums.Bodies])
 		s.Close()
@@ -725,7 +725,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 		createFile(0, step, snaptype2.Headers)
 		createFile(0, step, snaptype2.Transactions)
 		s = NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
-		defer s.Close()
+		defer s.Close() //nolint:gocritic
 
 		err = s.OpenFolder()
 		require.NoError(err)
@@ -733,7 +733,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 		require.Len(s.visible.Load().segments[snaptype2.Enums.Headers], 2)
 
 		view := s.View()
-		defer view.Close()
+		defer view.Close() //nolint:gocritic
 
 		seg, ok := view.Segment(snaptype2.Transactions, 10)
 		require.True(ok)
@@ -752,7 +752,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 		s = NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
 		err = s.OpenFolder()
 		require.NoError(err)
-		defer s.Close()
+		defer s.Close() //nolint:gocritic
 		require.NotNil(s.visible.Load().segments[snaptype2.Enums.Headers])
 		require.Len(s.visible.Load().segments[snaptype2.Enums.Headers], 2)
 
@@ -761,7 +761,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 		createFile(step, step*2-step/5, snaptype2.Transactions)
 		chainSnapshotCfg.ExpectBlocks = math.MaxUint64
 		s = NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
-		defer s.Close()
+		defer s.Close() //nolint:gocritic
 		err = s.OpenFolder()
 		require.NoError(err)
 	}
