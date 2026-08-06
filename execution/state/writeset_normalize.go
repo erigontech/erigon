@@ -129,18 +129,18 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 
 	// Drop account-field writes for SD'd addresses so applyVersionedWrites
 	// takes the pure-delete branch instead of cleanup-before-recreate; drop
-	// raw StoragePath writes too (the self-destruct loop re-emits an
+	// raw StoragePath writes too (the SelfDestructPath loop re-emits an
 	// explicit StoragePath=0 delete for every slot via sdStorageSlots).
 	for _, vw := range writes.balance {
 		allAddresses[vw.Address] = true
-		// EIP-8246 keeps the post-SD balance so the calculator can preserve a
-		// balance-only account (or delete it when zero); pre-8246 drops it so
-		// the account is purely deleted.
+		// EIP-8246 keeps the post-SD balance so the calculator can
+		// preserve a balance-only account (or delete it when zero);
+		// pre-8246 drops it so the account is purely deleted.
 		if sdSet[vw.Address] && !eip8246 {
 			continue
 		}
-		// Account fields: prefer the versionMap's accumulated value; fall back
-		// to the raw write when the map has none.
+		// Account fields: prefer the versionMap's accumulated value; fall
+		// back to the raw write when the map has none.
 		if !SetAccountFieldFromMap(filtered, vm, vw.Address, BalancePath, vw.Version, txIndex+1) {
 			filtered.SetBalance(vw.Address, vw)
 		}
@@ -214,16 +214,15 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 		}
 	}
 
-	// Code size is derived from the code bytes and isn't a domain field, so it's
-	// intentionally not carried into the calc/apply write set (as on serial).
-	// Cross-tx ReadCodeSize is served from the versionMap, which the worker
-	// populates directly — independent of this pass.
+	// Code size is derived from the code bytes and isn't a domain field,
+	// so it's intentionally not carried into the calc/apply write set (as
+	// on serial). Cross-tx ReadCodeSize is served from the versionMap,
+	// which the worker populates directly — independent of this pass.
 	for addr := range writes.codeSize {
 		allAddresses[addr] = true
 	}
 
-	// writes.address is not walked: AddressPath is record-level — skip for
-	// field-level consumers.
+	// AddressPath is record-level — skip for field-level consumers.
 
 	for _, inner := range writes.storage {
 		// Both self-destruct probes below key on the address alone, so they are
