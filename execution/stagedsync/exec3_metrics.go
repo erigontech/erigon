@@ -45,14 +45,8 @@ var (
 	mxExecCodeReadRate    = metrics.NewGauge("exec_code_read_rate")
 	mxExecWriteRate       = metrics.NewGauge("exec_write_rate")
 
-	// Conflict signals for the parallel executor, as monotonic totals so the
-	// rate and the ratio are derived at query time rather than being fixed to
-	// this reporter's interval.
-	//
-	// exec_execs_total is the denominator rather than the existing
-	// exec_triggers: that one is a gauge holding the executor's own exec
-	// counter, which restarts with each executor, so it is not monotonic and
-	// rate() over it is meaningless.
+	// exec_execs_total, not the existing exec_triggers: that gauge holds the
+	// executor's own counter and restarts with it, so rate() sees a reset.
 	mxExecsTotal = metrics.GetOrCreateCounterVec("exec_execs_total", []string{"mode"},
 		"parallel-exec task executions, by sync mode")
 	mxRepeatsTotal = metrics.GetOrCreateCounterVec("exec_repeats_total", []string{"mode"},
@@ -666,9 +660,6 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 		}
 
 		mxExecRepeats.SetInt(repeats)
-		// Conflict behaviour differs by workload, so keep the modes apart:
-		// engine_newPayload validates one block at the tip, applying-blocks
-		// chews through a sync batch, and a from-scratch re-exec is neither.
 		execMode := "other"
 		switch {
 		case te.isForkValidation:
