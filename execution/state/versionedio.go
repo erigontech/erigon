@@ -1439,44 +1439,12 @@ func versionedUpdateAddress(vm *VersionMap, addr accounts.Address, txIndex int) 
 	return nil, false
 }
 
-func versionedUpdateBalance(vm *VersionMap, addr accounts.Address, txIndex int) (uint256.Int, bool) {
-	val, res, ok := vm.ReadBalance(addr, txIndex)
-	if ok && res.Status() != MVReadResultNone {
-		return val, true
-	}
-	return uint256.Int{}, false
-}
-
-func versionedUpdateNonce(vm *VersionMap, addr accounts.Address, txIndex int) (uint64, bool) {
-	val, res, ok := vm.ReadNonce(addr, txIndex)
-	if ok && res.Status() != MVReadResultNone {
-		return val, true
-	}
-	return 0, false
-}
-
-func versionedUpdateIncarnation(vm *VersionMap, addr accounts.Address, txIndex int) (uint64, bool) {
-	val, res, ok := vm.ReadIncarnation(addr, txIndex)
-	if ok && res.Status() != MVReadResultNone {
-		return val, true
-	}
-	return 0, false
-}
-
 func versionedUpdateCode(vm *VersionMap, addr accounts.Address, txIndex int) ([]byte, bool) {
 	val, res, ok := vm.ReadCode(addr, txIndex)
 	if ok && res.Status() != MVReadResultNone {
 		return val.Bytes, true
 	}
 	return nil, false
-}
-
-func versionedUpdateCodeHash(vm *VersionMap, addr accounts.Address, txIndex int) (accounts.CodeHash, bool) {
-	val, res, ok := vm.ReadCodeHash(addr, txIndex)
-	if ok && res.Status() != MVReadResultNone {
-		return val, true
-	}
-	return accounts.CodeHash{}, false
 }
 
 func versionedUpdateStorage(vm *VersionMap, addr accounts.Address, key accounts.StorageKey, txIndex int) (uint256.Int, bool) {
@@ -1487,24 +1455,12 @@ func versionedUpdateStorage(vm *VersionMap, addr accounts.Address, key accounts.
 	return uint256.Int{}, false
 }
 
-// applyVersionedUpdates applies updated from the version map to the account before returning it, this is necessary
-// for the account obkect becuase the state reader/.writer api's treat the subfileds as a group and this
-// may lead to updated from pervious transactions being missed where we only update a subset of the fiels as these won't
-// be recored as reads and hence the varification process will miss them.  We don't want to creat a fail but
-// we do  want to capture the updates
+// applyVersionedUpdates overlays the version map's per-field writes onto account.
+// The reader/writer API treats an account's sub-fields as one group, so a prior
+// tx that wrote only a subset would otherwise be lost here — and those fields are
+// not recorded as reads, so validation would not catch the miss either.
 func (vr versionedStateReader) applyVersionedUpdates(address accounts.Address, account accounts.Account) accounts.Account {
-	if update, ok := versionedUpdateBalance(vr.versionMap, address, vr.txIndex); ok {
-		account.Balance = update
-	}
-	if update, ok := versionedUpdateNonce(vr.versionMap, address, vr.txIndex); ok {
-		account.Nonce = update
-	}
-	if update, ok := versionedUpdateIncarnation(vr.versionMap, address, vr.txIndex); ok {
-		account.Incarnation = update
-	}
-	if update, ok := versionedUpdateCodeHash(vr.versionMap, address, vr.txIndex); ok {
-		account.CodeHash = update
-	}
+	vr.versionMap.applySubFieldWrites(address, vr.txIndex, &account)
 	return account
 }
 

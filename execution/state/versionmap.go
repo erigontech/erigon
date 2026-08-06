@@ -327,17 +327,8 @@ func readFloor[T any](vm *VersionMap, addr accounts.Address, txIdx int, sel func
 	if !present {
 		return val, res, false
 	}
-	cells := sel(e)
-	if cells == nil {
-		return val, res, false
-	}
-	fk := UnknownDep
-	var fv *WriteCell[T]
-	cells.Descend(txIdx-1, func(k int, v *WriteCell[T]) bool {
-		fk, fv = k, v
-		return false
-	})
-	if fk == UnknownDep || fv == nil {
+	fk, fv := floorCell(sel(e), txIdx)
+	if fv == nil {
 		return val, res, false
 	}
 	res.depIdx = fk
@@ -349,6 +340,53 @@ func readFloor[T any](vm *VersionMap, addr accounts.Address, txIdx int, sel func
 		panic("unknown flag value")
 	}
 	return fv.Value, res, true
+}
+
+// floorCell returns the highest write strictly below txIdx, or (UnknownDep, nil)
+// when the path holds none. Caller must hold vm.mu.RLock().
+func floorCell[T any](cells *btree.Map[int, *WriteCell[T]], txIdx int) (int, *WriteCell[T]) {
+	if cells == nil {
+		return UnknownDep, nil
+	}
+	fk := UnknownDep
+	var fv *WriteCell[T]
+	cells.Descend(txIdx-1, func(k int, v *WriteCell[T]) bool {
+		fk, fv = k, v
+		return false
+	})
+	if fk == UnknownDep {
+		return UnknownDep, nil
+	}
+	return fk, fv
+}
+
+// applySubFieldWrites layers the Balance/Nonce/Incarnation/CodeHash writes for
+// addr onto account, taking one map lookup and one read lock where the per-path
+// ReadX primitives would take one of each. An Estimate cell counts the same as a
+// Done one — it holds the same latest in-block write, which finalize
+// reconstruction must consume rather than fall back to the pre-block DB value.
+func (vm *VersionMap) applySubFieldWrites(addr accounts.Address, txIdx int, account *accounts.Account) {
+	if vm == nil {
+		return
+	}
+	vm.mu.RLock()
+	defer vm.mu.RUnlock()
+	e, present := vm.s[addr]
+	if !present {
+		return
+	}
+	if _, cell := floorCell(e.Balance, txIdx); cell != nil {
+		account.Balance = cell.Value
+	}
+	if _, cell := floorCell(e.Nonce, txIdx); cell != nil {
+		account.Nonce = cell.Value
+	}
+	if _, cell := floorCell(e.Incarnation, txIdx); cell != nil {
+		account.Incarnation = cell.Value
+	}
+	if _, cell := floorCell(e.CodeHash, txIdx); cell != nil {
+		account.CodeHash = cell.Value
+	}
 }
 
 func (vm *VersionMap) ReadAddress(addr accounts.Address, txIdx int) (*accounts.Account, ReadResult, bool) {
