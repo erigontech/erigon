@@ -167,17 +167,21 @@ func TestBlockEncoding(t *testing.T) {
 func TestBlockAccessListNotInEncoding(t *testing.T) {
 	t.Parallel()
 	blockEnc := common.FromHex("f90260f901f9a083cafc574e1f51ba9dc0568fc617a08ea2429fb384059c972f13b19fa1c8dd55a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347948888f1f195afa192cfee860698584c030f4c9db1a0ef1552a40b7165c3cd773806b9e0c165b75356e0314bf0706f279c729f51e017a05fe50b260da6308036625b850b5d6ced6d0a9f814c0688bc91ffb7b7a3a54b67a0bc37d79753ad738a6dac4921e57392f145d8887476de3f783dfa7edae9283e52b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008302000001832fefd8825208845506eb0780a0bd4472abb6659ebe3ee06ee4d7b72a00a9f4d001caca51342001075469aff49888a13a5a8c8f2bb1c4f861f85f800a82c35094095e7baea6a6c7c4c2dfeb977efac326af552d870a801ba09bea4c4daac7c7c52e093e6a4c35dbbcf8856f1af7b059ba20253e70848d094fa08a8fae537ce25ed8cb5af9adac3f141af69bd515bd2ba031522df09b97dd72b1c0")
-	var block Block
-	if err := rlp.DecodeBytes(blockEnc, &block); err != nil {
+	var decoded Block
+	if err := rlp.DecodeBytes(blockEnc, &decoded); err != nil {
 		t.Fatal("decode error: ", err)
 	}
 
-	hashBefore := block.Hash()
-	block.SetBlockAccessList([]byte{0x01, 0x02, 0x03})
+	hashBefore := decoded.Hash()
+	bal := []byte{0x01, 0x02, 0x03}
+	block := NewBlockFromNetwork(decoded.HeaderNoCopy(), decoded.Body(), bal)
+	if got := block.BlockAccessList(); !bytes.Equal(got, bal) {
+		t.Errorf("BAL mismatch: got %x want %x", got, bal)
+	}
 	if got := block.Hash(); got != hashBefore {
 		t.Errorf("BAL changed block hash: got %x want %x", got, hashBefore)
 	}
-	enc, err := rlp.EncodeToBytes(&block)
+	enc, err := rlp.EncodeToBytes(block)
 	if err != nil {
 		t.Fatal("encode error: ", err)
 	}
@@ -185,12 +189,12 @@ func TestBlockAccessListNotInEncoding(t *testing.T) {
 		t.Errorf("BAL leaked into block RLP:\ngot:  %x\nwant: %x", enc, blockEnc)
 	}
 
-	var decoded Block
-	if err := rlp.DecodeBytes(enc, &decoded); err != nil {
+	var roundTrip Block
+	if err := rlp.DecodeBytes(enc, &roundTrip); err != nil {
 		t.Fatal("decode error: ", err)
 	}
-	if decoded.BlockAccessList() != nil {
-		t.Errorf("BAL survived RLP round-trip (must be a non-encoded sidecar): %x", decoded.BlockAccessList())
+	if roundTrip.BlockAccessList() != nil {
+		t.Errorf("BAL survived RLP round-trip (must be a non-encoded sidecar): %x", roundTrip.BlockAccessList())
 	}
 }
 
@@ -885,8 +889,8 @@ func TestBlockRawBodyFromBinaryTxsMatchesEncoded(t *testing.T) {
 		require.NotNilf(t, txns[i], "could not generate a decodable txType=%d", txType)
 	}
 
-	cached := NewBlockFromStorageWithBinaryTxs(common.Hash{}, &Header{}, txns, binaryTxs, nil, nil)
-	reference := NewBlockFromStorage(common.Hash{}, &Header{}, txns, nil, nil)
+	cached := NewBlockFromStorageWithBinaryTxs(common.Hash{}, &Header{}, txns, binaryTxs, nil, nil, nil)
+	reference := NewBlockFromStorage(common.Hash{}, &Header{}, txns, nil, nil, nil)
 
 	got, want := cached.RawBody(), reference.RawBody()
 	require.Len(t, got.Transactions, len(want.Transactions))
