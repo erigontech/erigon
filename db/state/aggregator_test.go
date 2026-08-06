@@ -1029,3 +1029,108 @@ func setupAggSnapRepo(t *testing.T, dirs datadir.Dirs, genRepo func(stepSize uin
 		Schema:                 schema,
 	}, log.New())
 }
+
+// TestAggregator_BuildKVAccessors_ProducesSidecarsForBTreeDomain pins the
+// end-to-end contract that the code-review pass on e272828445 flagged as
+// uncovered: given a freshly-written v4-shape .kv, BuildKVAccessors must
+// land .bt + .kvei sidecars at the paired final-name paths for a
+// BTree+Existence domain (storage/accounts/code/receipt). Previously
+// only the wire contract was tested via a fake AccessorBuilder — no
+// test actually invoked *Aggregator.BuildKVAccessors on a real
+// aggregator with real seg files. A regex mistake, wrong path helper,
+// or bad accessor-mask dispatch would only surface in integration.
+func TestAggregator_BuildKVAccessors_ProducesSidecarsForBTreeDomain(t *testing.T) {
+	t.Parallel()
+	_, agg := testDbAndAggregatorv3(t, 1)
+	ctx := t.Context()
+
+	// Write a tiny v4-shape .kv into the storage domain directory.
+	// Coords are raw-txN, non-step-aligned to match a mid-step
+	// mode-C emit's shape.
+	const fromTxN, toTxN = uint64(1000), uint64(1500)
+	finalPath := agg.DomainKVFilePathV4(kv.StorageDomain, fromTxN, toTxN)
+	dataPath := finalPath + ".regen"
+	tmpDir := t.TempDir()
+
+	comp, err := seg.NewCompressor(ctx, "test", dataPath, tmpDir, seg.DefaultCfg, log.LvlDebug, log.New())
+	require.NoError(t, err)
+	writer := seg.NewWriter(comp, agg.d[kv.StorageDomain].Compression)
+	// Two keys with distinct values — enough for a minimal .kv.
+	for _, kv := range []struct{ k, v []byte }{
+		{[]byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("value-1")},
+		{[]byte("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"), []byte("value-2")},
+	} {
+		_, err = writer.Write(kv.k)
+		require.NoError(t, err)
+		_, err = writer.Write(kv.v)
+		require.NoError(t, err)
+	}
+	require.NoError(t, comp.Compress())
+	comp.Close()
+
+	// Under the fix, BuildKVAccessors on the storage domain must
+	// build both .bt (btree index) and .kvei (existence filter) at
+	// the finalPath's naming — dataPath's .regen suffix is
+	// irrelevant to the accessor filenames.
+	require.NoError(t, agg.BuildKVAccessors(ctx, kv.StorageDomain, dataPath, finalPath))
+
+	// Both sidecars must exist on disk with the paired v4 naming.
+	btPath := agg.d[kv.StorageDomain].kvBtAccessorNewFilePathV4(fromTxN, toTxN)
+	kveiPath := agg.d[kv.StorageDomain].kvExistenceIdxNewFilePathV4(fromTxN, toTxN)
+	_, btErr := os.Stat(btPath)
+	require.NoError(t, btErr, "missing .bt at %s", btPath)
+	_, kveiErr := os.Stat(kveiPath)
+	require.NoError(t, kveiErr, "missing .kvei at %s", kveiPath)
+}
+
+// TestAggregator_BuildKVAccessors_ProducesSidecarForHashMapDomain: the
+// commitment default is AccessorHashMap only — so BuildKVAccessors
+// must land .kvi (not .bt/.kvei). Guards the dispatch-branch coverage
+// the review flagged.
+func TestAggregator_BuildKVAccessors_ProducesSidecarForHashMapDomain(t *testing.T) {
+	t.Parallel()
+	_, agg := testDbAndAggregatorv3(t, 1)
+	ctx := t.Context()
+
+	const fromTxN, toTxN = uint64(2000), uint64(2500)
+	finalPath := agg.DomainKVFilePathV4(kv.CommitmentDomain, fromTxN, toTxN)
+	dataPath := finalPath + ".regen"
+	tmpDir := t.TempDir()
+
+	comp, err := seg.NewCompressor(ctx, "test", dataPath, tmpDir, seg.DefaultCfg, log.LvlDebug, log.New())
+	require.NoError(t, err)
+	writer := seg.NewWriter(comp, agg.d[kv.CommitmentDomain].Compression)
+	_, err = writer.Write([]byte("k1"))
+	require.NoError(t, err)
+	_, err = writer.Write([]byte("v1"))
+	require.NoError(t, err)
+	require.NoError(t, comp.Compress())
+	comp.Close()
+
+	require.NoError(t, agg.BuildKVAccessors(ctx, kv.CommitmentDomain, dataPath, finalPath))
+
+	// Commitment default (no AGG_COMMITMENT_BT) uses hash-map accessor.
+	if agg.d[kv.CommitmentDomain].Accessors.Has(statecfg.AccessorHashMap) {
+		kviPath := agg.d[kv.CommitmentDomain].kviAccessorNewFilePathV4(fromTxN, toTxN)
+		_, err := os.Stat(kviPath)
+		require.NoError(t, err, "missing .kvi at %s", kviPath)
+	}
+}
+
+// TestAggregator_BuildKVAccessors_RejectsLegacyBaseName: the parser
+// tightening (v4KVFileNameRegex requires version-major >= 4) ensures a
+// legacy step-form basename passed in error fails LOUDLY rather than
+// being misinterpreted as raw-txN coords (a step-form "0-64" naively
+// treated as txN would produce accessors at a nonsense range).
+func TestAggregator_BuildKVAccessors_RejectsLegacyBaseName(t *testing.T) {
+	t.Parallel()
+	_, agg := testDbAndAggregatorv3(t, 1)
+	ctx := t.Context()
+
+	// Craft a legacy-versioned name; content doesn't matter, parser
+	// gates before opening the file.
+	finalPath := filepath.Join(agg.d[kv.StorageDomain].dirs.SnapDomain, "v2.0-storage.0-64.kv")
+	err := agg.BuildKVAccessors(ctx, kv.StorageDomain, finalPath, finalPath)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not a v4 .kv basename")
+}

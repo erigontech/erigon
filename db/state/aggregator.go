@@ -1020,9 +1020,12 @@ func (a *Aggregator) BuildMissedAccessors(ctx context.Context, workers int, opts
 // v4KVFileNameRegex parses a v4-shaped `.kv` basename like
 // `v4.0-storage.117968750-118177835.kv` — captures (version-major,
 // version-minor, domain-base-name, fromTxN, toTxN). Only v4 emits carry
-// raw-txN naming; the regex enforces the shape so BuildKVAccessors
-// refuses to guess for older step-aligned names.
-var v4KVFileNameRegex = regexp.MustCompile(`^v(\d+)\.(\d+)-([[:lower:]]+)\.(\d+)-(\d+)\.kv$`)
+// raw-txN naming; the regex requires the version-major to be >=
+// TxNumNamingPivot (currently 4) so a legacy v2/v3 step-aligned name
+// passed here in error surfaces as a parse failure instead of being
+// mistreated as raw-txN coords (a step-form "0-64" would become raw
+// txN 0-64, wrong by orders of magnitude).
+var v4KVFileNameRegex = regexp.MustCompile(`^v([4-9]|[1-9][0-9]+)\.(\d+)-([[:lower:]]+)\.(\d+)-(\d+)\.kv$`)
 
 // BuildKVAccessors builds the .bt/.kvei/.kvi sidecars a domain .kv
 // needs to be visible to state reads. Called by the mode-C v4 emit
