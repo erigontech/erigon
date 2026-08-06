@@ -3380,9 +3380,9 @@ func doUnmerge(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) erro
 			if err != nil {
 				return err
 			}
-			defer bodiesSegment.Close()
 
 			_, expectedCount, err := snaptype2.TxsAmountBasedOnBodiesSnapshots(bodiesSegment, um_fileinfo.Len()-1)
+			bodiesSegment.Close()
 			if err != nil {
 				return err
 			}
