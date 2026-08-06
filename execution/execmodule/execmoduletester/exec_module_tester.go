@@ -916,7 +916,8 @@ func (emt *ExecModuleTester) InsertValidateAndUfc1By1(ctx context.Context, block
 			return err
 		}
 		if validationResult.ValidationStatus != execmodule.ExecutionStatusSuccess {
-			return fmt.Errorf("unexpected validateChain status: %s", validationResult.ValidationStatus)
+			return fmt.Errorf("unexpected validateChain status: %s (block %d, validation error: %q)",
+				validationResult.ValidationStatus, header.Number.Uint64(), validationResult.ValidationError)
 		}
 		forkChoiceResult, err := emt.UpdateForkChoice(ctx, header)
 		if err != nil {

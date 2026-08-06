@@ -1338,21 +1338,26 @@ func (r *BlockReader) IterateFrozenBodies(tx kv.Getter, f func(blockNum, baseTxN
 	view, release := r.view(tx)
 	defer release()
 	for _, sn := range view.Bodies() {
-		defer sn.Src().MadvSequential().DisableReadAhead()
+		if err := func() error {
+			defer sn.Src().MadvSequential().DisableReadAhead()
 
-		var buf []byte
-		g := sn.Src().MakeGetter()
-		blockNum := sn.From()
-		var b types.BodyOnlyTxn
-		for g.HasNext() {
-			buf, _ = g.Next(buf[:0])
-			if err := b.DecodeRLPBytes(buf); err != nil {
-				return err
+			var buf []byte
+			g := sn.Src().MakeGetter()
+			blockNum := sn.From()
+			var b types.BodyOnlyTxn
+			for g.HasNext() {
+				buf, _ = g.Next(buf[:0])
+				if err := b.DecodeRLPBytes(buf); err != nil {
+					return err
+				}
+				if err := f(blockNum, b.BaseTxnID.U64(), uint64(b.TxCount)); err != nil {
+					return err
+				}
+				blockNum++
 			}
-			if err := f(blockNum, b.BaseTxnID.U64(), uint64(b.TxCount)); err != nil {
-				return err
-			}
-			blockNum++
+			return nil
+		}(); err != nil {
+			return err
 		}
 	}
 	return nil
