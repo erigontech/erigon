@@ -271,8 +271,31 @@ func (e *EngineBlockDownloader) downloadBlocks(ctx context.Context, req Backward
 	return nil
 }
 
+// retryBusy re-invokes call while it reports ExecutionStatusBusy (a background
+// FCU commit briefly holds the exec semaphore), polling every 50ms and logging
+// periodically so a stuck commit surfaces instead of hanging silently.
+func (e *EngineBlockDownloader) retryBusy(ctx context.Context, label string, call func() (execmodule.ExecutionStatus, *string, common.Hash, error)) (execmodule.ExecutionStatus, *string, common.Hash, error) {
+	status, validationErr, lastValidHash, err := call()
+	logEvery := time.NewTicker(5 * time.Second)
+	defer logEvery.Stop()
+	for err == nil && status == execmodule.ExecutionStatusBusy {
+		if err := common.Sleep(ctx, 50*time.Millisecond); err != nil {
+			return status, validationErr, lastValidHash, err
+		}
+		select {
+		case <-logEvery.C:
+			e.logger.Debug("[EngineBlockDownloader] execution busy - retrying", "label", label)
+		default:
+		}
+		status, validationErr, lastValidHash, err = call()
+	}
+	return status, validationErr, lastValidHash, err
+}
+
 func (e *EngineBlockDownloader) execDownloadedBatch(ctx context.Context, block *types.Block, requested common.Hash) error {
-	status, validationErr, lastValidHash, err := e.chainRW.ValidateChain(ctx, block.Hash(), block.NumberU64())
+	status, validationErr, lastValidHash, err := e.retryBusy(ctx, "ValidateChain", func() (execmodule.ExecutionStatus, *string, common.Hash, error) {
+		return e.chainRW.ValidateChain(ctx, block.Hash(), block.NumberU64())
+	})
 	if err != nil {
 		return err
 	}
@@ -297,7 +320,9 @@ func (e *EngineBlockDownloader) execDownloadedBatch(ctx context.Context, block *
 			lastValidHash,
 		)
 	}
-	fcuStatus, _, lastValidHash, err := e.chainRW.UpdateForkChoice(ctx, block.Hash(), common.Hash{}, common.Hash{}, 0)
+	fcuStatus, _, lastValidHash, err := e.retryBusy(ctx, "UpdateForkChoice", func() (execmodule.ExecutionStatus, *string, common.Hash, error) {
+		return e.chainRW.UpdateForkChoice(ctx, block.Hash(), common.Hash{}, common.Hash{}, 0)
+	})
 	if err != nil {
 		return err
 	}
