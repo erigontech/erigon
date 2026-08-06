@@ -356,9 +356,9 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	if lvl < log.LvlTrace {
 		logger.Log(lvl, fmt.Sprintf("[%s] dictionary file parsed", logPrefix), "entries", len(code2pattern))
 	}
-	// Consecutive words per batch: large enough to preserve the matcher's prefix-resume,
-	// but capped so a small input still spreads across every worker instead of piling the
-	// whole cover phase onto one.
+	// we pass consecutive words so that AC mather's prefix-resume functionality 
+	// can process words faster (the words are in sorted order); 
+	// so we send a batch of coverBatchSize consecutive words to each worker
 	coverBatchSize := 512
 	if n := int(uncompressedFile.count); cfg.Workers > 1 && n < coverBatchSize*cfg.Workers {
 		coverBatchSize = max(1, n/cfg.Workers)
