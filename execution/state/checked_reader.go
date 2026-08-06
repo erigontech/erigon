@@ -22,8 +22,30 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+// assertNormalizeReads turns on the cross-check in NewNormalizeReader.
+var assertNormalizeReads = dbg.EnvBool("NORMALIZE_ASSERT_READS", false)
+
+// NewNormalizeReader returns the reader Normalize should use: the tx's own
+// recorded reads first, then the versionMap, then the domain.
+//
+// With NORMALIZE_ASSERT_READS=true it also reads the domain for every call and
+// panics on disagreement. That is diagnostic-only and changes behaviour: the
+// domain reader fills the block state cache, so reading through it twice
+// perturbs the cache and fails blocks that pass without it.
+func NewNormalizeReader(txIndex int, reads ReadSet, versionMap *VersionMap, domain StateReader) StateReader {
+	if domain == nil { // nil means "no reader"; Normalize guards on it
+		return nil
+	}
+	readSet := NewVersionedStateReader(txIndex, reads, versionMap, domain)
+	if !assertNormalizeReads {
+		return readSet
+	}
+	return NewCheckedStateReader(readSet, domain)
+}
 
 // CheckedStateReader answers from want and asserts that got agrees, panicking
 // on any disagreement. It exists to settle one question empirically: can
@@ -31,8 +53,7 @@ import (
 // of re-reading the domain on the apply loop? Every divergence is a case where
 // it cannot, and the panic names it.
 //
-// Experiment only — the double read makes it strictly slower than either
-// reader alone.
+// Diagnostic only, and not side-effect free: see NewNormalizeReader.
 type CheckedStateReader struct {
 	want StateReader // read set -> versionMap -> domain
 	got  StateReader // domain
