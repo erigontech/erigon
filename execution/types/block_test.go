@@ -175,9 +175,8 @@ func TestBlockAccessListNotInEncoding(t *testing.T) {
 	hashBefore := decoded.Hash()
 	bal := []byte{0x01, 0x02, 0x03}
 	block := NewBlockFromNetwork(decoded.HeaderNoCopy(), decoded.Body(), bal)
-	bal[0] = 0xff
-	if got := block.BlockAccessList(); !bytes.Equal(got, []byte{0x01, 0x02, 0x03}) {
-		t.Errorf("BAL aliases constructor input: got %x", got)
+	if got := block.BlockAccessList(); !bytes.Equal(got, bal) {
+		t.Errorf("BAL mismatch: got %x want %x", got, bal)
 	}
 	if got := block.Hash(); got != hashBefore {
 		t.Errorf("BAL changed block hash: got %x want %x", got, hashBefore)

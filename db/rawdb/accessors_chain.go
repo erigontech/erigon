@@ -809,15 +809,15 @@ func ReadBlock(tx kv.Getter, hash common.Hash, number uint64) *types.Block {
 	if body == nil {
 		return nil
 	}
-	var blockAccessList []byte
+	var bal []byte
 	// Carry the BAL sidecar (secondary storage) so a block reconstructed from the
 	// DB carries its BAL like its header/body. Only Amsterdam+ blocks have one.
 	if header.HasBAL() {
-		if bal, err := ReadBlockAccessListBytes(tx, hash, number); err == nil && len(bal) > 0 {
-			blockAccessList = bal
+		if data, err := ReadBlockAccessListBytes(tx, hash, number); err == nil && len(data) > 0 {
+			bal = bytes.Clone(data)
 		}
 	}
-	return types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals, blockAccessList)
+	return types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals, bal)
 }
 
 // HasBlock - is more efficient than ReadBlock because doesn't read transactions.

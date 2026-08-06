@@ -821,11 +821,11 @@ type Block struct {
 	transactions Transactions
 	withdrawals  []*Withdrawal
 
-	// blockAccessList is the RLP-encoded EIP-7928 Block Access List sidecar
+	// bal is the RLP-encoded EIP-7928 Block Access List sidecar
 	// carried with the payload (nil pre-Amsterdam). It is NOT part of the block's
 	// RLP/consensus encoding or hash — never add it to EncodeRLP/DecodeRLP/
 	// payloadSize. The header's BlockAccessListHash is the consensus commitment.
-	blockAccessList []byte
+	bal []byte
 
 	// binaryTransactions optionally caches the transactions' encodings (e.g. from
 	// an engine_newPayload payload) so RawBody() can skip re-encoding them.
@@ -1153,26 +1153,26 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 }
 
 // NewBlockForAsembling - creating new block - which allow mutation of fileds. Use it for block-assembly
-func NewBlockForAsembling(header *Header, txs []Transaction, uncles []*Header, receipts []*Receipt, withdrawals []*Withdrawal, blockAccessList []byte) *Block {
+func NewBlockForAsembling(header *Header, txs []Transaction, uncles []*Header, receipts []*Receipt, withdrawals []*Withdrawal, bal []byte) *Block {
 	b := NewBlock(header, txs, uncles, receipts, withdrawals)
-	b.blockAccessList = bytes.Clone(blockAccessList)
+	b.bal = bal
 	b.header.mutable = true
 	return b
 }
 
 // NewBlockFromStorage like NewBlock but used to create Block object when read it from DB
 // in this case no reason to copy parts, or re-calculate headers fields - they are all stored in DB
-func NewBlockFromStorage(hash common.Hash, header *Header, txs []Transaction, uncles []*Header, withdrawals []*Withdrawal, blockAccessList []byte) *Block {
+func NewBlockFromStorage(hash common.Hash, header *Header, txs []Transaction, uncles []*Header, withdrawals []*Withdrawal, bal []byte) *Block {
 	header.hash.Store(&hash)
-	b := &Block{header: header, transactions: txs, uncles: uncles, withdrawals: withdrawals, blockAccessList: bytes.Clone(blockAccessList)}
+	b := &Block{header: header, transactions: txs, uncles: uncles, withdrawals: withdrawals, bal: bal}
 	return b
 }
 
 // NewBlockFromStorageWithBinaryTxs is NewBlockFromStorage with a binaryTxs cache
 // (its length must match txs) that lets RawBody() skip re-encoding the transactions.
-func NewBlockFromStorageWithBinaryTxs(hash common.Hash, header *Header, txs []Transaction, binaryTxs BinaryTransactions, uncles []*Header, withdrawals []*Withdrawal, blockAccessList []byte) *Block {
+func NewBlockFromStorageWithBinaryTxs(hash common.Hash, header *Header, txs []Transaction, binaryTxs BinaryTransactions, uncles []*Header, withdrawals []*Withdrawal, bal []byte) *Block {
 	header.hash.Store(&hash)
-	b := &Block{header: header, transactions: txs, binaryTransactions: binaryTxs, uncles: uncles, withdrawals: withdrawals, blockAccessList: bytes.Clone(blockAccessList)}
+	b := &Block{header: header, transactions: txs, binaryTransactions: binaryTxs, uncles: uncles, withdrawals: withdrawals, bal: bal}
 	return b
 }
 
@@ -1185,13 +1185,13 @@ func NewBlockWithHeader(header *Header) *Block {
 
 // NewBlockFromNetwork like NewBlock but used to create Block object when assembled from devp2p network messages
 // when there is no reason to copy parts, or re-calculate headers fields.
-func NewBlockFromNetwork(header *Header, body *Body, blockAccessList []byte) *Block {
+func NewBlockFromNetwork(header *Header, body *Body, bal []byte) *Block {
 	b := &Block{
-		header:          header,
-		transactions:    body.Transactions,
-		uncles:          body.Uncles,
-		withdrawals:     body.Withdrawals,
-		blockAccessList: bytes.Clone(blockAccessList),
+		header:       header,
+		transactions: body.Transactions,
+		uncles:       body.Uncles,
+		withdrawals:  body.Withdrawals,
+		bal:          bal,
 	}
 	return b
 }
@@ -1393,7 +1393,7 @@ func (b *Block) BlockAccessListHash() *common.Hash   { return b.header.BlockAcce
 
 // BlockAccessList returns the RLP-encoded EIP-7928 BAL sidecar carried with the
 // payload (nil when absent). It is not part of the block's RLP encoding or hash.
-func (b *Block) BlockAccessList() []byte { return b.blockAccessList }
+func (b *Block) BlockAccessList() []byte { return b.bal }
 
 // Header returns a deep-copy of the entire block header using CopyHeader()
 func (b *Block) Header() *Header       { return CopyHeader(b.header) }
@@ -1555,11 +1555,11 @@ func (b *Block) Copy() *Block {
 	}
 
 	newB := &Block{
-		header:          CopyHeader(b.header),
-		uncles:          uncles,
-		transactions:    CopyTxs(b.transactions),
-		withdrawals:     withdrawals,
-		blockAccessList: bytes.Clone(b.blockAccessList),
+		header:       CopyHeader(b.header),
+		uncles:       uncles,
+		transactions: CopyTxs(b.transactions),
+		withdrawals:  withdrawals,
+		bal:          bytes.Clone(b.bal),
 	}
 	szCopy := b.size.Load()
 	newB.size.Store(szCopy)
@@ -1573,11 +1573,11 @@ func (b *Block) WithSeal(header *Header) *Block {
 	headerCopy.mutable = false
 	headerCopy.hash.Store(nil) // invalidate cached hash
 	return &Block{
-		header:          headerCopy,
-		transactions:    b.transactions,
-		uncles:          b.uncles,
-		withdrawals:     b.withdrawals,
-		blockAccessList: b.blockAccessList,
+		header:       headerCopy,
+		transactions: b.transactions,
+		uncles:       b.uncles,
+		withdrawals:  b.withdrawals,
+		bal:          b.bal,
 	}
 }
 
