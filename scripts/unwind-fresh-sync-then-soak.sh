@@ -509,6 +509,42 @@ if [[ "$SOAK_RC" -eq 0 ]]; then
         fi
     done
 
+    # Block .seg triple completeness (recent-range only): every range
+    # that has a transactions.seg MUST also have matching bodies+headers.
+    # The reverse direction (bodies+headers without transactions) is
+    # NOT flagged: under --prune.mode=minimal older transactions.seg
+    # are legitimately absent (only kept for recent retention window).
+    # A missing bodies OR headers alongside a present transactions is a
+    # real invariant violation because retire always builds the triple
+    # together; if any member is present others must be too.
+    # The 2026-08-06 run-1 retire race produced bodies+headers WITHOUT
+    # transactions for 003230-003240 (index build refused, phantom-tail
+    # body); this check DOES NOT catch that specific case — see
+    # docs/plans/20260806-block-straddler-truncation.md for the block-
+    # side design that would prevent it at source.
+    declare -A BLOCK_KINDS
+    for f in "$SNAP_DIR"/v*-*-*-transactions.seg; do
+        [[ -e "$f" ]] || continue
+        name=$(basename "$f")
+        range=$(echo "$name" | sed -E 's/^v[0-9.]+-([0-9]+-[0-9]+)-transactions\.seg$/\1/')
+        [[ -z "$range" ]] && continue
+        BLOCK_KINDS[$range]="transactions"
+    done
+    for range in "${!BLOCK_KINDS[@]}"; do
+        bodies_pattern="$SNAP_DIR/v*-${range}-bodies.seg"
+        headers_pattern="$SNAP_DIR/v*-${range}-headers.seg"
+        # shellcheck disable=SC2086
+        if ! compgen -G "$bodies_pattern" >/dev/null; then
+            echo "  ORPHAN: block .seg triple for $range has transactions but missing bodies"
+            ORPHAN_COUNT=$((ORPHAN_COUNT + 1))
+        fi
+        # shellcheck disable=SC2086
+        if ! compgen -G "$headers_pattern" >/dev/null; then
+            echo "  ORPHAN: block .seg triple for $range has transactions but missing headers"
+            ORPHAN_COUNT=$((ORPHAN_COUNT + 1))
+        fi
+    done
+
     TOTAL=$((OVERLAP_COUNT + GAP_COUNT + ORPHAN_COUNT))
     if [[ $TOTAL -gt 0 ]]; then
         echo "FAIL: disk-clean assertion — overlaps=$OVERLAP_COUNT gaps=$GAP_COUNT orphans=$ORPHAN_COUNT v4_transient=$V4_TRANSIENT_COUNT"
