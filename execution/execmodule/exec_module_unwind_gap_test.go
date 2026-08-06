@@ -68,7 +68,7 @@ func TestUpdateForkChoiceBadBlockMidBatchThenRecovery(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
 	const chainLen = 13
 	const committedTo = 10
-	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainLen, func(i int, b *blockgen.BlockGen) {
+	chainPack, err := m.GenerateChain(chainLen, func(i int, b *blockgen.BlockGen) {
 		tx, err := types.SignTx(
 			types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(1_000), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
 			*types.LatestSignerForChainID(nil),
@@ -80,13 +80,13 @@ func TestUpdateForkChoiceBadBlockMidBatchThenRecovery(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, chainPack.Blocks, chainLen)
 
-	require.NoError(t, insertValidateAndUfc1By1(ctx, m.ExecModule, chainPack.Blocks[:committedTo]))
+	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, chainPack.Blocks[:committedTo]))
 
 	block11 := chainPack.Blocks[committedTo]
 	block12 := chainPack.Blocks[committedTo+1]
 	block12Bad := tamperBlockGasUsed(t, block12, 21_000)
 
-	insRes, err := insertBlocks(ctx, m.ExecModule, []*types.Block{block11, block12Bad})
+	insRes, err := m.InsertBlocks(ctx, []*types.Block{block11, block12Bad})
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
 
@@ -94,7 +94,7 @@ func TestUpdateForkChoiceBadBlockMidBatchThenRecovery(t *testing.T) {
 	// 12-bad must be rejected — and 11 must remain the latest valid block. If
 	// the retry loop re-executes 11 against its own stale overlay writes, 11 is
 	// wrongly reported bad and LatestValidHash degrades to block 10.
-	res, err := updateForkChoice(ctx, m.ExecModule, block12Bad.Header())
+	res, err := m.UpdateForkChoice(ctx, block12Bad.Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusBadBlock, res.Status, "tampered block must be rejected")
 	t.Logf("bad-tip FCU: latestValidHash=%s (block10=%s block11=%s)", res.LatestValidHash, chainPack.Blocks[committedTo-1].Hash(), block11.Hash())
@@ -107,21 +107,21 @@ func TestUpdateForkChoiceBadBlockMidBatchThenRecovery(t *testing.T) {
 	// The CL's recovery move: switch to the untampered block 12 at the same
 	// height. This only works if block 11 was not wrongly marked bad by the
 	// in-loop retry — a bad-mark on 11 poisons every chain built on it.
-	insRes, err = insertBlocks(ctx, m.ExecModule, []*types.Block{block12})
+	insRes, err = m.InsertBlocks(ctx, []*types.Block{block12})
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
-	vr, err := validateChain(ctx, m.ExecModule, block12.Header())
+	vr, err := m.ValidateChain(ctx, block12.Header())
 	require.NoError(t, err)
 	require.Equalf(t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus,
 		"newPayload-style validation of the untampered block 12 must succeed (status=%s validationErr=%q latestValid=%s)",
 		vr.ValidationStatus, vr.ValidationError, vr.LatestValidHash)
-	res, err = updateForkChoice(ctx, m.ExecModule, block12.Header())
+	res, err = m.UpdateForkChoice(ctx, block12.Header())
 	require.NoError(t, err)
 	require.Equalf(t, execmodule.ExecutionStatusSuccess, res.Status,
 		"recovery FCU to the untampered block 12 must succeed (status=%s validationErr=%q latestValid=%s)",
 		res.Status, res.ValidationError, res.LatestValidHash)
 	// Idempotent settle FCU: the previous FCU may commit in the background.
-	_, err = updateForkChoice(ctx, m.ExecModule, block12.Header())
+	_, err = m.UpdateForkChoice(ctx, block12.Header())
 	require.NoError(t, err)
 
 	// Second shape: the bad block is the first block above committed progress,
@@ -130,27 +130,27 @@ func TestUpdateForkChoiceBadBlockMidBatchThenRecovery(t *testing.T) {
 	// the same height re-reads the failed block's writes and is wrongly bad.
 	block13 := chainPack.Blocks[committedTo+2]
 	block13Bad := tamperBlockGasUsed(t, block13, 21_000)
-	insRes, err = insertBlocks(ctx, m.ExecModule, []*types.Block{block13Bad})
+	insRes, err = m.InsertBlocks(ctx, []*types.Block{block13Bad})
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
-	res, err = updateForkChoice(ctx, m.ExecModule, block13Bad.Header())
+	res, err = m.UpdateForkChoice(ctx, block13Bad.Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusBadBlock, res.Status, "tampered first-of-batch block must be rejected")
 	require.Equal(t, block12.Hash(), res.LatestValidHash, "latest valid hash must be the bad block's parent, the committed head")
 
-	insRes, err = insertBlocks(ctx, m.ExecModule, []*types.Block{block13})
+	insRes, err = m.InsertBlocks(ctx, []*types.Block{block13})
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
-	vr, err = validateChain(ctx, m.ExecModule, block13.Header())
+	vr, err = m.ValidateChain(ctx, block13.Header())
 	require.NoError(t, err)
 	require.Equalf(t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus,
 		"validation of the untampered block 13 must succeed (status=%s validationErr=%q)", vr.ValidationStatus, vr.ValidationError)
-	res, err = updateForkChoice(ctx, m.ExecModule, block13.Header())
+	res, err = m.UpdateForkChoice(ctx, block13.Header())
 	require.NoError(t, err)
 	require.Equalf(t, execmodule.ExecutionStatusSuccess, res.Status,
 		"recovery FCU to the untampered block 13 must succeed (status=%s validationErr=%q latestValid=%s)",
 		res.Status, res.ValidationError, res.LatestValidHash)
-	_, err = updateForkChoice(ctx, m.ExecModule, block13.Header())
+	_, err = m.UpdateForkChoice(ctx, block13.Header())
 	require.NoError(t, err)
 
 	var acc accounts.Account
@@ -194,21 +194,21 @@ func TestUpdateForkChoiceBadBlockAtLongBatchTailThenRecovery(t *testing.T) {
 		require.NoError(t, err)
 		return tx
 	}
-	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainLen+1, func(i int, b *blockgen.BlockGen) {
+	chainPack, err := m.GenerateChain(chainLen+1, func(i int, b *blockgen.BlockGen) {
 		b.AddTx(mkTx(i, 1_000))
 	})
 	require.NoError(t, err)
-	require.NoError(t, insertValidateAndUfc1By1(ctx, m.ExecModule, chainPack.Blocks[:committedTo]))
+	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, chainPack.Blocks[:committedTo]))
 
 	segment := make([]*types.Block, 0, badHeight-committedTo)
 	segment = append(segment, chainPack.Blocks[committedTo:badHeight-1]...)
 	badTip := tamperBlockGasUsed(t, chainPack.Blocks[badHeight-1], 21_000)
 	segment = append(segment, badTip)
-	insRes, err := insertBlocks(ctx, m.ExecModule, segment)
+	insRes, err := m.InsertBlocks(ctx, segment)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
 
-	res, err := updateForkChoice(ctx, m.ExecModule, badTip.Header())
+	res, err := m.UpdateForkChoice(ctx, badTip.Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusBadBlock, res.Status, "tampered segment tip must be rejected")
 	t.Logf("bad-tip FCU: latestValidHash=%s (committed=%s lastGood=%s)",
@@ -224,23 +224,23 @@ func TestUpdateForkChoiceBadBlockAtLongBatchTailThenRecovery(t *testing.T) {
 	// block on top: only possible if the valid segment blocks were not
 	// condemned during the failed FCU.
 	recovery := []*types.Block{chainPack.Blocks[badHeight-1], chainPack.Blocks[badHeight]}
-	insRes, err = insertBlocks(ctx, m.ExecModule, recovery)
+	insRes, err = m.InsertBlocks(ctx, recovery)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
 	for _, b := range recovery {
-		vr, err := validateChain(ctx, m.ExecModule, b.Header())
+		vr, err := m.ValidateChain(ctx, b.Header())
 		require.NoError(t, err)
 		require.Equalf(t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus,
 			"validation of recovery block %d must succeed (status=%s validationErr=%q)",
 			b.NumberU64(), vr.ValidationStatus, vr.ValidationError)
 	}
 	forkTip := recovery[len(recovery)-1]
-	res, err = updateForkChoice(ctx, m.ExecModule, forkTip.Header())
+	res, err = m.UpdateForkChoice(ctx, forkTip.Header())
 	require.NoError(t, err)
 	require.Equalf(t, execmodule.ExecutionStatusSuccess, res.Status,
 		"recovery FCU past the bad height must succeed (status=%s validationErr=%q latestValid=%s)",
 		res.Status, res.ValidationError, res.LatestValidHash)
-	_, err = updateForkChoice(ctx, m.ExecModule, forkTip.Header())
+	_, err = m.UpdateForkChoice(ctx, forkTip.Header())
 	require.NoError(t, err)
 
 	var acc accounts.Account

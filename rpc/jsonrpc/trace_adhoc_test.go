@@ -711,7 +711,7 @@ func newBaseFeeTestChain(t *testing.T, cfg *chain.Config) *baseFeeTestChain {
 func (c *baseFeeTestChain) mineBlock(t *testing.T, gen func(*blockgen.BlockGen)) *blockgen.ChainPack {
 	t.Helper()
 
-	chainB, err := blockgen.GenerateChain(c.m.ChainConfig, c.head, c.m.Engine, c.m.DB, 1, func(_ int, block *blockgen.BlockGen) {
+	chainB, err := c.m.GenerateChainFrom(c.head, 1, func(_ int, block *blockgen.BlockGen) {
 		gen(block)
 	})
 	require.NoError(t, err)
