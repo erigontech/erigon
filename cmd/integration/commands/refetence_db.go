@@ -375,10 +375,11 @@ MainLoop:
 		if err != nil {
 			return err
 		}
-		defer c.Close()
+		defer c.Close() //nolint:gocritic
 
 		for {
 			if !fileScanner.Scan() {
+				c.Close()
 				break MainLoop
 			}
 			k := bytes.Clone(fileScanner.Bytes())
@@ -387,6 +388,7 @@ MainLoop:
 			}
 			k = common.FromHex(string(k[1:]))
 			if !fileScanner.Scan() {
+				c.Close()
 				break MainLoop
 			}
 			v := bytes.Clone(fileScanner.Bytes())
@@ -394,16 +396,19 @@ MainLoop:
 
 			if casted, ok := c.(kv.RwCursorDupSort); ok {
 				if err = casted.AppendDup(k, v); err != nil {
+					c.Close()
 					panic(err)
 				}
 			} else {
 				if err = c.Append(k, v); err != nil {
+					c.Close()
 					panic(err)
 				}
 			}
 			select {
 			default:
 			case <-ctx.Done():
+				c.Close()
 				return ctx.Err()
 			case <-commitEvery.C:
 				logger.Info("Progress", "bucket", bucket, "key", hex.EncodeToString(k))
