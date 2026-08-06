@@ -3,6 +3,18 @@
 # the standard set of CLI flags. Used by both the manual restart path and
 # the kill-mid / fresh-sync test harnesses so a single source of truth
 # owns the flag set. Pass DATADIR / LOG via env to override.
+#
+# Two modes, gated by env:
+#   leg P (default): --snap.p2p-manifest with no publisher wired. On a
+#   machine with no chain-toml publishers reachable, the 2-min manifest
+#   discovery times out and stage_snapshots falls back to preverified.
+#   This is what most of the existing soak history was run under.
+#
+#   leg M (PUBLISHER_ENR + PUBLISHER_TRUST_ROOT set): staticpeer the
+#   local master publisher and pin its trust-root pubkey. The manifest
+#   discovery MUST succeed via the publisher — no preverified fallback
+#   should fire. The soak wrapper post-checks the log for the fallback
+#   line and fails the leg if it appears.
 
 set -u
 
@@ -23,6 +35,16 @@ export USE_STATE_CACHE=false
 # peer propagation.
 export ERIGON_MERGE_MIN_AGE_STEPS="${ERIGON_MERGE_MIN_AGE_STEPS:-6}"
 
+# leg-M extras: bind the consumer to the local publisher and pin its
+# trust root. Empty in leg P.
+EXTRA_ARGS=()
+if [[ -n "${PUBLISHER_ENR:-}" ]]; then
+  EXTRA_ARGS+=(--staticpeers="$PUBLISHER_ENR")
+fi
+if [[ -n "${PUBLISHER_TRUST_ROOT:-}" ]]; then
+  EXTRA_ARGS+=(--snapshot.trust-roots="$PUBLISHER_TRUST_ROOT")
+fi
+
 exec "$BIN" \
   --datadir="$DATADIR" \
   --chain=hoodi --prune.mode=minimal \
@@ -33,4 +55,5 @@ exec "$BIN" \
   --torrent.port=43369 --port=31503 \
   --caplin.discovery.port=4750 --caplin.discovery.tcpport=4751 \
   --sentinel.port=8490 --beacon.api.port=6260 --mcp.port=9260 \
+  "${EXTRA_ARGS[@]}" \
   --log.console.verbosity=3 >"$LOG" 2>&1
