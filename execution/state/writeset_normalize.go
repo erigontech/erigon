@@ -32,6 +32,25 @@ import (
 // isn't silent.
 var codePathRecoveryHashMismatch = metrics.GetOrCreateCounter("exec3_codepath_recovery_hash_mismatch")
 
+// dropForSelfDestruct reports whether a write on this path must be dropped when
+// its address self-destructed in this tx, so applyVersionedWrites reaches the
+// pure-delete branch instead of cleanup-before-recreate. Exhaustive by design:
+// a new path has to state its answer here.
+func dropForSelfDestruct(path AccountPath, eip8246 bool) bool {
+	switch path {
+	case NoncePath, IncarnationPath, CodeHashPath, CodePath, StoragePath:
+		return true
+	case BalancePath:
+		// EIP-8246 keeps the post-SD balance so the calculator can
+		// preserve a balance-only account (or delete it when zero);
+		// pre-8246 drops it so the account is purely deleted.
+		return !eip8246
+	case AddressPath, CreateContractPath, SelfDestructPath, CodeSizePath:
+		return false
+	}
+	return false
+}
+
 var mxNormalizeTook = metrics.GetOrCreateSummary("exec3_normalize_seconds")
 
 // slowNormalizeThreshold is the debug-branch trigger for dumping write-set
@@ -170,35 +189,122 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 		}
 	}
 
-	for h := range writes.AllHeaders() {
-		// Drop account-field writes for SD'd addresses so applyVersionedWrites
-		// takes the pure-delete branch instead of cleanup-before-recreate; drop
-		// raw StoragePath writes too (the SelfDestructPath case re-emits an
-		// explicit StoragePath=0 delete for every slot via sdStorageSlots).
-		if sdSet[h.Address] {
-			switch h.Path {
-			case NoncePath, IncarnationPath, CodeHashPath, CodePath, StoragePath:
-				continue
-			case BalancePath:
-				// EIP-8246 keeps the post-SD balance so the calculator can
-				// preserve a balance-only account (or delete it when zero);
-				// pre-8246 drops it so the account is purely deleted.
-				if !eip8246 {
-					continue
-				}
-			}
+	// Addresses of every field-level write in the raw input, collected here so
+	// the fill loop below needs no second walk. Filtering must not narrow it:
+	// an address whose writes are all dropped still needs its account fields.
+	allAddresses := make(map[accounts.Address]bool)
+
+	// Drop account-field writes for SD'd addresses so applyVersionedWrites
+	// takes the pure-delete branch instead of cleanup-before-recreate; drop
+	// raw StoragePath writes too (the SelfDestructPath loop re-emits an
+	// explicit StoragePath=0 delete for every slot via sdStorageSlots).
+	for _, vw := range writes.balance {
+		allAddresses[vw.Address] = true
+		if sdSet[vw.Address] && dropForSelfDestruct(BalancePath, eip8246) {
+			continue
 		}
-		switch h.Path {
-		case StoragePath:
+		// Account fields: prefer the versionMap's accumulated value; fall
+		// back to the raw write when the map has none.
+		if !SetAccountFieldFromMap(filtered, vm, vw.Address, BalancePath, vw.Version, txIndex+1) {
+			filtered.SetBalance(vw.Address, vw)
+		}
+	}
+
+	for _, vw := range writes.nonce {
+		allAddresses[vw.Address] = true
+		if sdSet[vw.Address] && dropForSelfDestruct(NoncePath, eip8246) {
+			continue
+		}
+		if !SetAccountFieldFromMap(filtered, vm, vw.Address, NoncePath, vw.Version, txIndex+1) {
+			filtered.SetNonce(vw.Address, vw)
+		}
+	}
+
+	for _, vw := range writes.incarnation {
+		allAddresses[vw.Address] = true
+		if sdSet[vw.Address] && dropForSelfDestruct(IncarnationPath, eip8246) {
+			continue
+		}
+		if !SetAccountFieldFromMap(filtered, vm, vw.Address, IncarnationPath, vw.Version, txIndex+1) {
+			filtered.SetIncarnation(vw.Address, vw)
+		}
+	}
+
+	for _, vw := range writes.codeHash {
+		allAddresses[vw.Address] = true
+		if sdSet[vw.Address] && dropForSelfDestruct(CodeHashPath, eip8246) {
+			continue
+		}
+		if !SetAccountFieldFromMap(filtered, vm, vw.Address, CodeHashPath, vw.Version, txIndex+1) {
+			filtered.SetCodeHash(vw.Address, vw)
+		}
+	}
+
+	// Only writes from the current (validated) incarnation are included from
+	// here down; stale entries from a prior incarnation are dropped.
+	for _, vw := range writes.code {
+		allAddresses[vw.Address] = true
+		if vw.Version.Incarnation != incarnation ||
+			(sdSet[vw.Address] && dropForSelfDestruct(CodePath, eip8246)) {
+			continue
+		}
+		filtered.SetCode(vw.Address, vw)
+	}
+
+	for _, vw := range writes.createContract {
+		allAddresses[vw.Address] = true
+		if vw.Version.Incarnation != incarnation ||
+			(sdSet[vw.Address] && dropForSelfDestruct(CreateContractPath, eip8246)) {
+			continue
+		}
+		filtered.SetCreateContract(vw.Address, vw)
+	}
+
+	for _, vw := range writes.selfDestruct {
+		allAddresses[vw.Address] = true
+		// Only emit storage DELETE entries when the account was actually
+		// self-destructed (val=true).
+		if vw.Version.Incarnation != incarnation || !vw.Val ||
+			(sdSet[vw.Address] && dropForSelfDestruct(SelfDestructPath, eip8246)) {
+			continue
+		}
+		filtered.SetSelfDestruct(vw.Address, vw)
+		for _, slot := range sdStorageSlots(vw.Address) {
+			filtered.SetStorage(vw.Address, slot, &VersionedWrite[uint256.Int]{
+				WriteHeader: WriteHeader{
+					Address: vw.Address,
+					Path:    StoragePath,
+					Key:     slot,
+					Version: vw.Version,
+				},
+			})
+		}
+	}
+
+	// Code size is derived from the code bytes and isn't a domain field,
+	// so it's intentionally not carried into the calc/apply write set (as
+	// on serial). Cross-tx ReadCodeSize is served from the versionMap,
+	// which the worker populates directly — independent of this pass.
+	for addr := range writes.codeSize {
+		allAddresses[addr] = true
+	}
+
+	// AddressPath is record-level — skip for field-level consumers.
+
+	for _, inner := range writes.storage {
+		// Both self-destruct probes below key on the address alone, so they are
+		// resolved once for the whole slot group — lazily, so a group whose
+		// slots are all filtered out pays for neither.
+		sdTxIdx, sdOk, sdLoaded := -1, false, false
+		revived, revivedLoaded := false, false
+		for _, h := range inner {
+			allAddresses[h.Address] = true
 			// Only include writes from the current (validated) incarnation.
-			if h.Version.Incarnation != incarnation {
+			if h.Version.Incarnation != incarnation ||
+				(sdSet[h.Address] && dropForSelfDestruct(StoragePath, eip8246)) {
 				continue
 			}
-			sw, ok := writes.GetStorage(h.Address, h.Key)
-			if !ok {
-				continue
-			}
-			writeVal := sw.Val
+			writeVal := h.Val
 			// If addr was self-destructed by an earlier TX in this block, its
 			// storage was wiped — the effective baseline for any slot not
 			// re-written since is 0, regardless of what the versionMap (prior
@@ -207,9 +313,11 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 			// flushed back to the versionMap, so without this a resurrect TX
 			// that re-writes a slot to its pre-SD value is wrongly dropped as a
 			// no-op (TestDeleteRecreateSlotsAcrossManyBlocks).
-			sdTxIdx, sdOk := -1, false
-			if v, sd, _ := vm.ReadSelfDestruct(h.Address, txIndex); sd.Status() == MVReadResultDone && v {
-				sdTxIdx, sdOk = sd.Version().TxIndex, true
+			if !sdLoaded {
+				sdLoaded = true
+				if v, sd, _ := vm.ReadSelfDestruct(h.Address, txIndex); sd.Status() == MVReadResultDone && v {
+					sdTxIdx, sdOk = sd.Version().TxIndex, true
+				}
 			}
 			// No-op filter: compare against origin (what this TX would have read).
 			// First check versionMap floor (prior TX's write in this block).
@@ -235,7 +343,11 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 				// misses it. Narrower than an IncarnationPath probe: pure
 				// CREATE (no prior SD=true) doesn't wipe pre-existing storage,
 				// so its same-value SSTOREs still no-op against pre-block.
-				if vm.AnyDoneSelfDestructEquals(h.Address, txIndex-1, true) {
+				if !revivedLoaded {
+					revivedLoaded = true
+					revived = vm.AnyDoneSelfDestructEquals(h.Address, txIndex-1, true)
+				}
+				if revived {
 					if writeVal.IsZero() {
 						continue
 					}
@@ -252,72 +364,7 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 					}
 				}
 			}
-			filtered.SetStorage(h.Address, h.Key, sw)
-		case BalancePath, NoncePath, IncarnationPath, CodeHashPath:
-			// Account fields: prefer the versionMap's accumulated value; fall
-			// back to the raw write when the map has none.
-			if !SetAccountFieldFromMap(filtered, vm, h.Address, h.Path, h.Version, txIndex+1) {
-				switch h.Path {
-				case BalancePath:
-					if vw, ok := writes.GetBalance(h.Address); ok {
-						filtered.SetBalance(h.Address, vw)
-					}
-				case NoncePath:
-					if vw, ok := writes.GetNonce(h.Address); ok {
-						filtered.SetNonce(h.Address, vw)
-					}
-				case IncarnationPath:
-					if vw, ok := writes.GetIncarnation(h.Address); ok {
-						filtered.SetIncarnation(h.Address, vw)
-					}
-				case CodeHashPath:
-					if vw, ok := writes.GetCodeHash(h.Address); ok {
-						filtered.SetCodeHash(h.Address, vw)
-					}
-				}
-			}
-		case CodePath:
-			if h.Version.Incarnation != incarnation {
-				continue
-			}
-			if vw, ok := writes.GetCode(h.Address); ok {
-				filtered.SetCode(h.Address, vw)
-			}
-		case CreateContractPath:
-			if h.Version.Incarnation != incarnation {
-				continue
-			}
-			if vw, ok := writes.GetCreateContract(h.Address); ok {
-				filtered.SetCreateContract(h.Address, vw)
-			}
-		case SelfDestructPath:
-			if h.Version.Incarnation != incarnation {
-				continue
-			}
-			// Only emit storage DELETE entries when the account was actually
-			// self-destructed (val=true).
-			sdw, ok := writes.GetSelfDestruct(h.Address)
-			if !ok || !sdw.Val {
-				continue
-			}
-			filtered.SetSelfDestruct(h.Address, sdw)
-			for _, slot := range sdStorageSlots(h.Address) {
-				filtered.SetStorage(h.Address, slot, &VersionedWrite[uint256.Int]{
-					WriteHeader: WriteHeader{
-						Address: h.Address,
-						Path:    StoragePath,
-						Key:     slot,
-						Version: h.Version,
-					},
-				})
-			}
-		case AddressPath:
-			// AddressPath is record-level — skip for field-level consumers.
-		case CodeSizePath:
-			// Code size is derived from the code bytes and isn't a domain field,
-			// so it's intentionally not carried into the calc/apply write set (as
-			// on serial). Cross-tx ReadCodeSize is served from the versionMap,
-			// which the worker populates directly — independent of this pass.
+			filtered.SetStorage(h.Address, h.Key, h)
 		}
 	}
 
@@ -328,9 +375,6 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 	// - Addresses with only storage writes (no balance/nonce changes)
 	// - Addresses whose storage writes were all filtered as no-ops
 	//   (the object was still dirty in the IBS)
-	allAddresses := make(map[accounts.Address]bool)
-	writes.forEachFieldAddr(func(addr accounts.Address) { allAddresses[addr] = true })
-
 	for addr := range allAddresses {
 		if sdSet[addr] {
 			// Don't fill account fields for SD'd addresses — same rationale as
