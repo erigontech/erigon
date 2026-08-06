@@ -1134,3 +1134,55 @@ func TestAggregator_BuildKVAccessors_RejectsLegacyBaseName(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not a v4 .kv basename")
 }
+
+// TestDomain_dirtyFilesEndTxNumMinimax_V4Bridge pins the fix for the
+// 2026-08-06 postfix soak run 3+4 iter 3 mode_b non-deterministic
+// failure. Domain.dirtyFilesEndTxNumMinimax used to return
+// min(domain_max, history_max); when a mode-C v4 emit lands a domain .kv
+// at endTxN past history's step-aligned max, the min clipped the v4 out
+// of the visible-set, forward-exec state reads fell through to
+// pre-window files, and SSTOREs mispriced by tens of kilogas. The fix
+// bypasses the min-clip when the past-history domain item is a v4
+// mid-step (raw-txN non-step-aligned endTxN).
+func TestDomain_dirtyFilesEndTxNumMinimax_V4Bridge(t *testing.T) {
+	t.Parallel()
+	_, agg := testDbAndAggregatorv3(t, 100) // stepSize=100
+	d := agg.d[kv.StorageDomain]
+
+	// Baseline: step-aligned domain + history at (0, 200) (endTxN = step 2 boundary).
+	d.dirtyFiles.Set(newFilesItem(0, 200))
+	d.History.dirtyFiles.Set(newFilesItem(0, 200))
+	d.History.InvertedIndex.dirtyFiles.Set(newFilesItem(0, 200))
+	require.Equal(t, uint64(200), d.dirtyFilesEndTxNumMinimax(),
+		"baseline: coherent step-aligned domain+history returns 200")
+
+	// Simulate a mode-C v4 emit: domain gets a raw-txN mid-step file at
+	// (200, 250). History stays at 200 (no matching .v/.ef produced by the
+	// v4 emit path). Pre-fix this returned 200 → v4 invisible. Post-fix
+	// this returns 250 → v4 visible to state reads.
+	d.dirtyFiles.Set(newFilesItem(200, 250))
+	require.Equal(t, uint64(250), d.dirtyFilesEndTxNumMinimax(),
+		"v4 mid-step domain file must not be clipped by history's older max — see commit 906f8f3de1 for the parallel merge-side bridge")
+}
+
+// TestDomain_dirtyFilesEndTxNumMinimax_MinClipStillActiveWithoutV4 guards
+// the defensive min-with-history behavior for non-v4 scenarios: a
+// step-aligned domain file past a step-aligned history max (a real
+// corruption or partial retire) must still clip to history to prevent
+// silently exposing data without history coverage.
+func TestDomain_dirtyFilesEndTxNumMinimax_MinClipStillActiveWithoutV4(t *testing.T) {
+	t.Parallel()
+	_, agg := testDbAndAggregatorv3(t, 100)
+	d := agg.d[kv.StorageDomain]
+
+	d.dirtyFiles.Set(newFilesItem(0, 200))
+	d.dirtyFiles.Set(newFilesItem(200, 300)) // STEP-ALIGNED (300 % 100 == 0)
+	d.History.dirtyFiles.Set(newFilesItem(0, 200))
+	d.History.InvertedIndex.dirtyFiles.Set(newFilesItem(0, 200))
+
+	// No v4-shape items present. min-clip must fire: returns 200 (history
+	// max), not 300 (domain max). Prevents a partial retire from
+	// exposing domain data without matching history.
+	require.Equal(t, uint64(200), d.dirtyFilesEndTxNumMinimax(),
+		"step-aligned domain past step-aligned history must still clip to history — the v4 bridge activates only for raw-txN mid-step items")
+}

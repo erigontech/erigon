@@ -47,7 +47,44 @@ func (d *Domain) dirtyFilesEndTxNumMinimax() uint64 {
 	if d == nil {
 		return 0
 	}
-	return d.dirtyFiles.endTxNumMinimax(d.History.dirtyFilesEndTxNumMinimax())
+	// Mode-C v4 bridge: the emit writes a domain .kv at a raw-txN endTxN
+	// (mid-step, past the step-aligned history max) without producing a
+	// matching history .v/.ef at the same coordinate. The classic
+	// min(domain, history) clamp would then clip the v4 back to history's
+	// older max and Aggregator.calcVisibleFiles(toTxNum) would drop it
+	// (item.endTxN > toTxNum → skip), leaving state reads in the walk
+	// window to fall through to pre-window files and mis-price SSTOREs
+	// (the 2026-08-06 postfix soak run 3+4 iter 3 mode_b failures).
+	//
+	// When the domain has a v4 mid-step item past history's max, keep the
+	// domain's endTxN. GetAsOf's history-side reads remain served by the
+	// older history files for keys touched before the walk window; keys
+	// touched IN the window survive in MDBX post-wipe (WipeWritableShadowPast
+	// only removes txN > lastTxN), so GetLatest returns them from MDBX;
+	// keys not in either fall through to the v4 file, which is now visible.
+	// Same-shape reasoning as commit 906f8f3de1's filesCoverBackwardTo
+	// bridge for the merge-walk side.
+	histMax := d.History.dirtyFilesEndTxNumMinimax()
+	if histMax > 0 && d.hasV4ItemPast(histMax) {
+		return d.dirtyFiles.EndTxNumMax()
+	}
+	return d.dirtyFiles.endTxNumMinimax(histMax)
+}
+
+// hasV4ItemPast returns true if any dirtyFiles item is v4-shape (raw-txN
+// non-step-aligned endTxN) with endTxN > threshold. Used by
+// dirtyFilesEndTxNumMinimax to detect the mode-C v4 emit case that
+// intentionally advances the domain past history's coverage.
+func (d *Domain) hasV4ItemPast(threshold uint64) bool {
+	found := false
+	d.dirtyFiles.Scan(func(item *FilesItem) bool {
+		if item.endTxNum > threshold && d.isRawTxNItem(item) {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
 }
 
 func (ii *InvertedIndex) dirtyFilesEndTxNumMinimax() uint64 {
