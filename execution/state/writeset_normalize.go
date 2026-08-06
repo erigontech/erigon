@@ -36,7 +36,7 @@ var mxNormalizeTook = metrics.GetOrCreateSummary("exec3_normalize_seconds")
 
 // slowNormalizeThreshold is the debug-branch trigger for dumping write-set
 // geometry, so outlier shapes can be reproduced in the benchmark.
-const slowNormalizeThreshold = 1 * time.Millisecond
+const slowNormalizeThreshold = 50 * time.Millisecond
 
 // logSlowNormalize dumps the geometry of a write set whose Normalize ran long.
 // Everything it counts is walked only on the slow path.
