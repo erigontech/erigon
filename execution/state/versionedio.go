@@ -35,6 +35,8 @@ func (s ReadSource) String() string {
 		return "tx-writes"
 	case ReadSetRead:
 		return "tx-reads"
+	case ProvisionalRead:
+		return "provisional"
 	default:
 		return "unknown"
 	}
@@ -50,6 +52,8 @@ func (s ReadSource) VersionedString(version Version) string {
 		return "tx-writes"
 	case ReadSetRead:
 		return "tx-reads"
+	case ProvisionalRead:
+		return "provisional"
 	default:
 		return "unknown"
 	}
@@ -61,6 +65,10 @@ const (
 	StorageRead
 	WriteSetRead
 	ReadSetRead
+	// ProvisionalRead marks a nil record probe made mid-account-load, before
+	// the load has exposed any value to the EVM: a re-probe in the same load
+	// that finds a freshly flushed cell adopts it instead of aborting.
+	ProvisionalRead
 )
 
 // ReadHeader is the type-agnostic part of a versioned read: the tx-version
@@ -106,16 +114,21 @@ func NewAccountView(acc *accounts.Account) AccountView { return concreteAccountV
 // non-storage probes to a single map lookup.  All maps are lazily allocated
 // on first write.
 type ReadSet struct {
-	address        map[accounts.Address]VersionedRead[AccountView]
-	balance        map[accounts.Address]VersionedRead[uint256.Int]
-	nonce          map[accounts.Address]VersionedRead[uint64]
-	incarnation    map[accounts.Address]VersionedRead[uint64]
-	selfDestruct   map[accounts.Address]VersionedRead[bool]
-	createContract map[accounts.Address]VersionedRead[bool]
-	code           map[accounts.Address]VersionedRead[[]byte]
-	codeHash       map[accounts.Address]VersionedRead[accounts.CodeHash]
-	codeSize       map[accounts.Address]VersionedRead[int]
-	storage        map[accounts.Address]map[accounts.StorageKey]VersionedRead[uint256.Int]
+	address      map[accounts.Address]VersionedRead[AccountView]
+	balance      map[accounts.Address]VersionedRead[uint256.Int]
+	nonce        map[accounts.Address]VersionedRead[uint64]
+	incarnation  map[accounts.Address]VersionedRead[uint64]
+	selfDestruct map[accounts.Address]VersionedRead[bool]
+	// selfDestructWitnesses holds the OTHER distinct destruct versions a tx
+	// consumed when it recorded more than one (a wipe from each of several
+	// destroy/recreate cycles of one address): validation must re-check every
+	// destruct a conclusion depended on, not only the last-recorded one.
+	selfDestructWitnesses map[accounts.Address][]VersionedRead[bool]
+	createContract        map[accounts.Address]VersionedRead[bool]
+	code                  map[accounts.Address]VersionedRead[[]byte]
+	codeHash              map[accounts.Address]VersionedRead[accounts.CodeHash]
+	codeSize              map[accounts.Address]VersionedRead[int]
+	storage               map[accounts.Address]map[accounts.StorageKey]VersionedRead[uint256.Int]
 
 	// access carries EIP-7928 "address was accessed" marks (with the
 	// non-revertable "real EVM access" bit) on the read side, so the access set
@@ -143,6 +156,18 @@ func (s *ReadSet) SetIncarnation(addr accounts.Address, tr VersionedRead[uint64]
 	readSetPut(&s.incarnation, addr, tr)
 }
 func (s *ReadSet) SetSelfDestruct(addr accounts.Address, tr VersionedRead[bool]) {
+	if prev, ok := s.selfDestruct[addr]; ok && prev.Version != tr.Version {
+		for _, w := range s.selfDestructWitnesses[addr] {
+			if w.Version == prev.Version {
+				readSetPut(&s.selfDestruct, addr, tr)
+				return
+			}
+		}
+		if s.selfDestructWitnesses == nil {
+			s.selfDestructWitnesses = map[accounts.Address][]VersionedRead[bool]{}
+		}
+		s.selfDestructWitnesses[addr] = append(s.selfDestructWitnesses[addr], prev)
+	}
 	readSetPut(&s.selfDestruct, addr, tr)
 }
 func (s *ReadSet) SetCreateContract(addr accounts.Address, tr VersionedRead[bool]) {
@@ -395,7 +420,12 @@ func (s *ReadSet) mergeFrom(src ReadSet) {
 		readSetPut(&s.incarnation, a, tr)
 	}
 	for a, tr := range src.selfDestruct {
-		readSetPut(&s.selfDestruct, a, tr)
+		s.SetSelfDestruct(a, tr)
+	}
+	for a, trs := range src.selfDestructWitnesses {
+		for _, tr := range trs {
+			s.SetSelfDestruct(a, tr)
+		}
 	}
 	for a, tr := range src.createContract {
 		readSetPut(&s.createContract, a, tr)
