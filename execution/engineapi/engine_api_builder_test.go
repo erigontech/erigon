@@ -17,7 +17,6 @@
 package engineapi_test
 
 import (
-	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"encoding/binary"
@@ -36,49 +35,16 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
-	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
 	"github.com/erigontech/erigon/execution/protocol/params"
-	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state/contracts"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/rpc"
 )
-
-func signAuthorization(t *testing.T, key *ecdsa.PrivateKey, chainID *uint256.Int, target common.Address, nonce uint64) types.Authorization {
-	t.Helper()
-	var buf [33]byte
-	data := bytes.NewBuffer(nil)
-
-	authLen := rlp.Uint256Len(*chainID)
-	authLen += 1 + length.Addr
-	authLen += rlp.U64Len(nonce)
-	require.NoError(t, rlp.EncodeListPrefix(authLen, data, buf[:]))
-	require.NoError(t, rlp.EncodeUint256(*chainID, data, buf[:]))
-	require.NoError(t, types.EncodeOptionalAddress(&target, data, buf[:]))
-	require.NoError(t, rlp.EncodeU64(nonce, data, buf[:]))
-
-	hash := crypto.Keccak256Hash(append([]byte{params.SetCodeMagicPrefix}, data.Bytes()...))
-	sig, err := crypto.Sign(hash[:], key)
-	require.NoError(t, err)
-
-	auth := types.Authorization{
-		ChainID: *chainID,
-		Address: target,
-		Nonce:   nonce,
-		YParity: sig[64],
-		R:       *uint256.NewInt(0).SetBytes(sig[:32]),
-		S:       *uint256.NewInt(0).SetBytes(sig[32:64]),
-	}
-	recovered, err := auth.RecoverSigner(bytes.NewBuffer(nil), buf[:])
-	require.NoError(t, err)
-	require.Equal(t, crypto.PubkeyToAddress(key.PublicKey), *recovered)
-	return auth
-}
 
 func TestEngineApiClearsFreshTouchedEmptyAccount(t *testing.T) {
 	tests := []struct {
@@ -154,14 +120,14 @@ func testEngineApiClearsFreshTouchedEmptyAccount(t *testing.T, experimentalBAL b
 			CommonTx: types.CommonTx{Nonce: 1, GasLimit: 200_000, To: &selfDestructor},
 			ChainID:  *chainID, TipCap: *feeCap, FeeCap: *feeCap,
 		})
+		auth, err := types.SignAuthorization(emptyKey, *chainID, common.Address{0xaa}, 0)
+		require.NoError(t, err)
 		send(&types.SetCodeTransaction{
 			DynamicFeeTransaction: types.DynamicFeeTransaction{
 				CommonTx: types.CommonTx{Nonce: 2, GasLimit: 500_000, To: &senderAddr},
 				ChainID:  *chainID, TipCap: *feeCap, FeeCap: *feeCap,
 			},
-			Authorizations: []types.Authorization{
-				signAuthorization(t, emptyKey, chainID, common.Address{0xaa}, 0),
-			},
+			Authorizations: []types.Authorization{auth},
 		})
 
 		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
