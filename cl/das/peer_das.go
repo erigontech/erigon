@@ -128,7 +128,11 @@ func NewPeerDas(
 		indiciesDB:     indiciesDB,
 		gloasDataCache: gloasDataCache,
 	}
-	p.resubscribeGossip()
+	if !p.resubscribeGossip() {
+		// Initial subscribe raced fork-digest topic registration; keep
+		// reconciling per slot until the custody-column subscriptions take.
+		go p.resubscribeGossipLoop(ctx)
+	}
 	for range numOfBlobRecoveryWorkers {
 		go p.blobsRecoverWorker(ctx)
 	}
@@ -286,35 +290,71 @@ func (d *peerdas) isMyColumnDataAvailable(slot uint64, blockRoot common.Hash) (b
 	return len(nowCustodies) == len(expectedCustodies), nil
 }
 
-func (d *peerdas) resubscribeGossip() {
+// resubscribeGossip subscribes to the node's custody data-column gossip subnets
+// and reports whether every subscription is now established. It is idempotent
+// (SubscribeWithExpiry no-ops on an already-subscribed topic), so it is safe to
+// re-run on a reconcile tick until it succeeds — see resubscribeGossipLoop.
+func (d *peerdas) resubscribeGossip() bool {
 	if d.IsArchivedMode() {
+		allSubscribed := true
 		// subscribe to all subnets
 		for subnet := range d.beaconConfig.DataColumnSidecarSubnetCount {
 			topicName := gossip.TopicNameDataColumnSidecar(subnet)
 			expiry := time.Unix(0, math.MaxInt64)
 			if err := d.gossipManager.SubscribeWithExpiry(topicName, expiry); err != nil {
+				allSubscribed = false
 				log.Warn("[peerdas] failed to subscribe to column sidecar subnet", "err", err, "subnet", subnet)
 			} else {
 				log.Debug("[peerdas] subscribed to column sidecar subnet", "subnet", subnet)
 			}
 		}
-		return
+		return allSubscribed
 	}
 
 	// subscribe to the columns in our custody group
 	custodyColumns, err := d.state.GetMyCustodyColumns()
 	if err != nil {
 		log.Warn("failed to get my custody columns", "err", err)
-		return
+		return false
 	}
+	allSubscribed := true
 	for column := range custodyColumns {
 		subnet := ComputeSubnetForDataColumnSidecar(column)
 		topicName := gossip.TopicNameDataColumnSidecar(subnet)
 		expiry := time.Unix(0, math.MaxInt64)
 		if err := d.gossipManager.SubscribeWithExpiry(topicName, expiry); err != nil {
+			allSubscribed = false
 			log.Warn("[peerdas] failed to subscribe to column sidecar", "err", err, "column", column, "subnet", subnet)
 		} else {
 			log.Debug("[peerdas] subscribed to column sidecar", "column", column, "subnet", subnet)
+		}
+	}
+	return allSubscribed
+}
+
+// resubscribeGossipLoop retries resubscribeGossip on a slot cadence until every
+// custody data-column subnet is subscribed, then stops. The initial subscribe
+// in NewPeerDas can fail with "topic not found" when the current fork digest's
+// gossip topics are not yet registered; those requests are parked but never
+// replayed, so without this reconcile the node never subscribes to its custody
+// columns, never receives them, and PeerDAS data availability never succeeds.
+// Re-running is idempotent, mirroring the per-slot subnet reconciliation other
+// consensus clients use to self-heal a missed subscription.
+func (d *peerdas) resubscribeGossipLoop(ctx context.Context) {
+	interval := time.Duration(d.beaconConfig.SecondsPerSlot) * time.Second
+	if interval <= 0 {
+		interval = 12 * time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if d.resubscribeGossip() {
+				return
+			}
 		}
 	}
 }
