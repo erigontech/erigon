@@ -437,7 +437,7 @@ func TestEIP8038AccessListIntrinsicGas(t *testing.T) {
 		"address and storage key": {
 			accessListLen:  1,
 			storageKeysLen: 1,
-			expectedGas:    5_800,
+			expectedGas:    4_900,
 		},
 	}
 	for name, tc := range cases {

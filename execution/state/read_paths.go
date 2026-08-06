@@ -1424,11 +1424,12 @@ func readSelfDestruct(s *IntraBlockState, addr accounts.Address) (bool, ReadSour
 	case outcomeStorageRead:
 		var v bool
 		if r.so != nil {
-			if r.so.deleted {
+			switch {
+			case r.so.deleted:
 				v = false
-			} else if r.so.createdContract {
+			case r.so.createdContract:
 				v = false
-			} else {
+			default:
 				v = r.so.selfdestructed
 			}
 		}

@@ -134,7 +134,7 @@ func ResetBlocks(db kv.RwDB, tx kv.RwTx, br dbservices.FullBlockReader, bw *bloc
 	if err != nil {
 		return err
 	}
-	if err = rawdb.WriteHeadHeaderHash(tx, hash); err != nil {
+	if err := rawdb.WriteHeadHeaderHash(tx, hash); err != nil {
 		return err
 	}
 
@@ -365,7 +365,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 			if !ok {
 				return fmt.Errorf("canonical marker not found: %d", blocksAvailable)
 			}
-			if err = rawdb.WriteHeadHeaderHash(tx, canonicalHash); err != nil {
+			if err := rawdb.WriteHeadHeaderHash(tx, canonicalHash); err != nil {
 				return err
 			}
 

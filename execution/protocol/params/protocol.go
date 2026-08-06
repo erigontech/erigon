@@ -237,18 +237,18 @@ const (
 	// costs and adds the execution-gas write components (ACCOUNT_WRITE, STORAGE_WRITE)
 	// that the EIP-8037 state-gas model is charged alongside.
 	ColdAccountAccessCostEIP8038      = uint64(3000)                                           // COLD_ACCOUNT_ACCESS (EIP-2929: 2600)
-	ColdStorageAccessCostEIP8038      = uint64(3000)                                           // COLD_STORAGE_ACCESS (EIP-2929 cold SLOAD: 2100)
-	AccountWriteCostEIP8038           = uint64(8000)                                           // ACCOUNT_WRITE: account balance-leaf write
+	ColdStorageAccessCostEIP8038      = uint64(2100)                                           // COLD_STORAGE_ACCESS (unchanged from EIP-2929)
+	AccountWriteCostEIP8038           = uint64(9000)                                           // ACCOUNT_WRITE: account balance-leaf write
 	StorageWriteCostEIP8038           = uint64(10000)                                          // STORAGE_WRITE: first write to a slot in the txn
-	CallValueTransferGasEIP8038       = AccountWriteCostEIP8038 + CallStipend                  // CALL_VALUE = 10300
-	CreateAccessEIP8038               = AccountWriteCostEIP8038 + ColdStorageAccessCostEIP8038 // CREATE_ACCESS = 11000
-	SstoreClearsScheduleRefundEIP8038 = uint64(12480)                                          // REFUND_STORAGE_CLEAR = (STORAGE_WRITE+COLD_STORAGE_ACCESS)*4800/5000
+	CallValueTransferGasEIP8038       = AccountWriteCostEIP8038 + CallStipend                  // CALL_VALUE = 11300
+	CreateAccessEIP8038               = AccountWriteCostEIP8038 + ColdAccountAccessCostEIP8038 // CREATE_ACCESS = 12000
+	SstoreClearsScheduleRefundEIP8038 = (StorageWriteCostEIP8038 + ColdStorageAccessCostEIP8038) * 4800 / 5000
 	TxAccessListAddressGasEIP8038     = ColdAccountAccessCostEIP8038 - WarmStorageReadCostEIP2929
 	TxAccessListStorageKeyGasEIP8038  = ColdStorageAccessCostEIP8038 - WarmStorageReadCostEIP2929
 	ExtCodeWarmAccessGasEIP8038       = 2 * WarmStorageReadCostEIP2929 // EXTCODESIZE/EXTCODECOPY: account access + second read for the code
 	// EXECUTION_PER_AUTH_BASE_COST = 101 auth-tuple bytes * 16 + ECRECOVER + COLD_ACCOUNT_ACCESS + 2*WARM_ACCESS = 7816
 	ExecutionPerAuthBaseCostEIP8038 = 101*TxDataNonZeroGasEIP2028 + EcrecoverGas + ColdAccountAccessCostEIP8038 + 2*WarmStorageReadCostEIP2929
-	// PER_AUTH execution intrinsic = ACCOUNT_WRITE + EXECUTION_PER_AUTH_BASE_COST = 15816
+	// PER_AUTH execution intrinsic = ACCOUNT_WRITE + EXECUTION_PER_AUTH_BASE_COST = 16816
 	PerAuthExecutionCostEIP8038 = AccountWriteCostEIP8038 + ExecutionPerAuthBaseCostEIP8038
 
 	// EIP-2780: Reduce intrinsic transaction gas (resource-based decomposition).
@@ -256,7 +256,7 @@ const (
 	TxBaseEIP2780            uint64 = 12_000 // TX_BASE: sender ECDSA recovery plus access and write
 	TxValueCostEIP2780       uint64 = 6_000  // TX_VALUE_COST: recipient balance write and EIP-7708 transfer log
 	ColdAccountAccessEIP2780 uint64 = 3_000  // COLD_ACCOUNT_ACCESS: recipient account touch
-	CreateAccessEIP2780      uint64 = 11_000 // CREATE_ACCESS: ACCOUNT_WRITE(8000) + COLD_STORAGE_ACCESS(3000)
+	CreateAccessEIP2780      uint64 = CreateAccessEIP8038
 )
 
 // EIP-7702: Set EOA account code

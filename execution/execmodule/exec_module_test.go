@@ -23,15 +23,12 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"encoding/hex"
-	"errors"
-	"fmt"
 	"math/big"
 	"sort"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/cenkalti/backoff/v4"
 	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
@@ -39,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/common/generics"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
@@ -170,7 +166,7 @@ func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
 		execmoduletester.WithKey(privKey),
 		execmoduletester.WithStepSize(stepSize),
 	)
-	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
+	chainPack, err := m.GenerateChain(1, func(i int, b *blockgen.BlockGen) {
 		tx, err := types.SignTx(
 			types.NewTransaction(0, senderAddr, uint256.NewInt(0), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
 			*types.LatestSignerForChainID(nil),
@@ -181,11 +177,10 @@ func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Len(t, chainPack.Blocks, 1)
-	exec := m.ExecModule
-	insertRes, err := insertBlocks(ctx, exec, chainPack.Blocks)
+	insertRes, err := m.InsertBlocks(ctx, chainPack.Blocks)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, insertRes)
-	validationReceipt, err := validateChain(ctx, exec, chainPack.Blocks[0].Header())
+	validationReceipt, err := m.ValidateChain(ctx, chainPack.Blocks[0].Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validationReceipt.ValidationStatus)
 	require.Equal(t, "", validationReceipt.ValidationError)
@@ -236,7 +231,7 @@ func TestValidateChainAndUpdateForkChoiceWithSideForksThatGoBackAndForwardInHeig
 		},
 	}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
-	longerFork, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
+	longerFork, err := m.GenerateChain(2, func(i int, b *blockgen.BlockGen) {
 		tx, err := types.SignTx(
 			types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(1_000), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
 			*types.LatestSignerForChainID(nil),
@@ -247,7 +242,7 @@ func TestValidateChainAndUpdateForkChoiceWithSideForksThatGoBackAndForwardInHeig
 	})
 	require.NoError(t, err)
 	//goland:noinspection DuplicatedCode
-	shorterFork, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
+	shorterFork, err := m.GenerateChain(1, func(i int, b *blockgen.BlockGen) {
 		tx, err := types.SignTx(
 			types.NewTransaction(uint64(i), senderAddr2, uint256.NewInt(2_000), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
 			*types.LatestSignerForChainID(nil),
@@ -258,7 +253,7 @@ func TestValidateChainAndUpdateForkChoiceWithSideForksThatGoBackAndForwardInHeig
 	})
 	require.NoError(t, err)
 	//goland:noinspection DuplicatedCode
-	longerFork2, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
+	longerFork2, err := m.GenerateChain(2, func(i int, b *blockgen.BlockGen) {
 		tx, err := types.SignTx(
 			types.NewTransaction(uint64(i), senderAddr3, uint256.NewInt(3_000), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
 			*types.LatestSignerForChainID(nil),
@@ -268,11 +263,11 @@ func TestValidateChainAndUpdateForkChoiceWithSideForksThatGoBackAndForwardInHeig
 		b.AddTx(tx)
 	})
 	require.NoError(t, err)
-	err = insertValidateAndUfc1By1(t.Context(), m.ExecModule, longerFork.Blocks)
+	err = m.InsertValidateAndUfc1By1(t.Context(), longerFork.Blocks)
 	require.NoError(t, err)
-	err = insertValidateAndUfc1By1(t.Context(), m.ExecModule, shorterFork.Blocks)
+	err = m.InsertValidateAndUfc1By1(t.Context(), shorterFork.Blocks)
 	require.NoError(t, err)
-	err = insertValidateAndUfc1By1(t.Context(), m.ExecModule, longerFork2.Blocks)
+	err = m.InsertValidateAndUfc1By1(t.Context(), longerFork2.Blocks)
 	require.NoError(t, err)
 }
 
@@ -315,38 +310,38 @@ func TestValidateForkPayloadOffNonTipCanonicalBlockWithCache(t *testing.T) {
 	// finalize the shared prefix genesis → 1 → 2 first (nonces 0,1), each block
 	// carrying a state-touching txn so the BranchCache + commitment hold real
 	// entries. After this the head is block 2.
-	prefix, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
+	prefix, err := m.GenerateChain(2, func(i int, b *blockgen.BlockGen) {
 		b.AddTx(mkTx(uint64(i), 1_000))
 	})
 	require.NoError(t, err)
-	require.NoError(t, insertValidateAndUfc1By1(t.Context(), m.ExecModule, prefix.Blocks))
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), prefix.Blocks))
 	block2 := prefix.Blocks[1]
 
 	// With the head at block 2 (signer nonce 2), generate both continuations off
 	// block 2 before inserting either: the canonical tip (block 3, nonce 2) and a
 	// longer fork (blocks 3',4' at nonces 2,3) that branches off the same non-tip
 	// block 2.
-	canonicalTip, err := blockgen.GenerateChain(m.ChainConfig, block2, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
+	canonicalTip, err := m.GenerateChainFrom(block2, 1, func(i int, b *blockgen.BlockGen) {
 		b.AddTx(mkTx(2, 1_000))
 	})
 	require.NoError(t, err)
-	fork, err := blockgen.GenerateChain(m.ChainConfig, block2, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
+	fork, err := m.GenerateChainFrom(block2, 2, func(i int, b *blockgen.BlockGen) {
 		b.AddTx(mkTx(uint64(2+i), 2_000))
 	})
 	require.NoError(t, err)
 
 	// Finalize the canonical tip (head → block 3).
-	require.NoError(t, insertValidateAndUfc1By1(t.Context(), m.ExecModule, canonicalTip.Blocks))
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), canonicalTip.Blocks))
 
 	// Validating fork.Blocks[0] (height 3, parent = block 2) must unwind canonical
 	// block 3 back to block 2; fork.Blocks[1] then head-extends and the FCU reorgs
 	// onto the longer fork.
-	require.NoError(t, insertValidateAndUfc1By1(t.Context(), m.ExecModule, fork.Blocks))
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), fork.Blocks))
 
 	// Reorg back onto the original canonical block 3 (same common ancestor,
 	// block 2) to exercise the BranchCache masking in the other direction:
 	// unwind the fork blocks and re-validate canonical block 3 off block 2.
-	require.NoError(t, insertValidateAndUfc1By1(t.Context(), m.ExecModule, canonicalTip.Blocks))
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), canonicalTip.Blocks))
 }
 
 // Regression for PR #21415: when state's commitBlock is ahead of TxNums.Last
@@ -367,7 +362,7 @@ func TestUpdateForkChoiceRecoversWhenStateAheadOfTxNums(t *testing.T) {
 		},
 	}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
-	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, b *blockgen.BlockGen) {
+	chainPack, err := m.GenerateChain(10, func(i int, b *blockgen.BlockGen) {
 		tx, err := types.SignTx(
 			types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(1_000), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
 			*types.LatestSignerForChainID(nil),
@@ -381,7 +376,7 @@ func TestUpdateForkChoiceRecoversWhenStateAheadOfTxNums(t *testing.T) {
 
 	// Drive the full chain in (insert + validate + UFC). State commitBlock and
 	// TxNums.Last are now both at block 10.
-	require.NoError(t, insertValidateAndUfc1By1(ctx, m.ExecModule, chainPack.Blocks))
+	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, chainPack.Blocks))
 
 	const truncateTo uint64 = 5
 	// Simulate the post-OtterSync state where chaindata's canonical+TxNums only
@@ -419,7 +414,7 @@ func TestUpdateForkChoiceRecoversWhenStateAheadOfTxNums(t *testing.T) {
 	// returns ExecutionStatusTooFarAway ("domain ahead of blocks") rather than
 	// ReorgTooDeep — a signal the CL (Caplin/Astrid/EngineServer) knows how to
 	// handle by inserting the missing canonical blocks and retrying.
-	res, err := updateForkChoice(ctx, m.ExecModule, chainPack.Blocks[len(chainPack.Blocks)-1].Header())
+	res, err := m.UpdateForkChoice(ctx, chainPack.Blocks[len(chainPack.Blocks)-1].Header())
 	require.NoError(t, err)
 	require.NotEqual(t, execmodule.ExecutionStatusReorgTooDeep, res.Status, "must not be rejected as ReorgTooDeep")
 	require.Equal(t, execmodule.ExecutionStatusTooFarAway, res.Status, "should signal domain-ahead-of-blocks so the CL retries")
@@ -452,7 +447,7 @@ func TestUpdateForkChoiceForwardExecutesAfterStateAheadRecovery(t *testing.T) {
 		},
 	}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
-	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 15, func(i int, b *blockgen.BlockGen) {
+	chainPack, err := m.GenerateChain(15, func(i int, b *blockgen.BlockGen) {
 		tx, err := types.SignTx(
 			types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(1_000), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
 			*types.LatestSignerForChainID(nil),
@@ -465,10 +460,10 @@ func TestUpdateForkChoiceForwardExecutesAfterStateAheadRecovery(t *testing.T) {
 	require.Len(t, chainPack.Blocks, 15)
 
 	// Execute only the first 10 blocks: state/commitBlock/execProgress at 10.
-	require.NoError(t, insertValidateAndUfc1By1(ctx, m.ExecModule, chainPack.Blocks[:10]))
+	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, chainPack.Blocks[:10]))
 	// Insert headers/bodies for 11..15 so the forkchoice walk-back can traverse
 	// them, but do not UFC — they are neither canonical nor executed yet.
-	insRes, err := insertBlocks(ctx, m.ExecModule, chainPack.Blocks[10:])
+	insRes, err := m.InsertBlocks(ctx, chainPack.Blocks[10:])
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
 
@@ -490,7 +485,7 @@ func TestUpdateForkChoiceForwardExecutesAfterStateAheadRecovery(t *testing.T) {
 
 	// First FCU to the tip (block 15). Index is repaired (canonical + TxNums
 	// extended to 15) and, since the domain was behind, we get TooFarAway.
-	res, err := updateForkChoice(ctx, m.ExecModule, tip)
+	res, err := m.UpdateForkChoice(ctx, tip)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusTooFarAway, res.Status, "first FCU should repair index and signal domain-ahead")
 	var execProgAfter1 uint64
@@ -506,7 +501,7 @@ func TestUpdateForkChoiceForwardExecutesAfterStateAheadRecovery(t *testing.T) {
 
 	// Second FCU to the same tip: domain is no longer ahead (TxNums caught up),
 	// so execution is driven forward from commitBlock to the tip.
-	res2, err := updateForkChoice(ctx, m.ExecModule, tip)
+	res2, err := m.UpdateForkChoice(ctx, tip)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, res2.Status, "second FCU should execute forward to the tip")
 	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
@@ -548,7 +543,7 @@ func TestReorgBackAndForwardIntoCanonicalChain(t *testing.T) {
 
 			const chainLen = 9
 			const reorgBackTo = 5
-			chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainLen, func(i int, b *blockgen.BlockGen) {})
+			chainPack, err := m.GenerateChain(chainLen, func(i int, b *blockgen.BlockGen) {})
 			require.NoError(t, err)
 			require.Len(t, chainPack.Blocks, chainLen)
 
@@ -557,15 +552,15 @@ func TestReorgBackAndForwardIntoCanonicalChain(t *testing.T) {
 			for n := uint64(1); n <= chainLen; n++ {
 				// Insert the block only when it is "produced" (as newPayload would):
 				// later blocks must not exist in the DB during the earlier re-orgs.
-				insRes, err := insertBlocks(ctx, m.ExecModule, chainPack.Blocks[n-1:n])
+				insRes, err := m.InsertBlocks(ctx, chainPack.Blocks[n-1:n])
 				require.NoError(t, err)
 				require.Equalf(t, execmodule.ExecutionStatusSuccess, insRes, "insert block %d", n)
 
 				h := headerAt(n)
-				vr, err := validateChain(ctx, m.ExecModule, h)
+				vr, err := m.ValidateChain(ctx, h)
 				require.NoError(t, err)
 				require.Equalf(t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus, "validate block %d", n)
-				ur, err := updateForkChoice(ctx, m.ExecModule, h)
+				ur, err := m.UpdateForkChoice(ctx, h)
 				require.NoError(t, err)
 				require.Equalf(t, execmodule.ExecutionStatusSuccess, ur.Status, "fcu to canonical block %d", n)
 
@@ -573,12 +568,12 @@ func TestReorgBackAndForwardIntoCanonicalChain(t *testing.T) {
 					continue
 				}
 				// Re-org the head back down to block 5.
-				back, err := updateForkChoice(ctx, m.ExecModule, headerAt(reorgBackTo))
+				back, err := m.UpdateForkChoice(ctx, headerAt(reorgBackTo))
 				require.NoError(t, err)
 				require.Equalf(t, execmodule.ExecutionStatusSuccess, back.Status, "re-org back to block %d (cycle at %d)", reorgBackTo, n)
 
 				// Re-org the head forward back into the canonical chain (block n).
-				fwd, err := updateForkChoice(ctx, m.ExecModule, h)
+				fwd, err := m.UpdateForkChoice(ctx, h)
 				require.NoError(t, err)
 				require.Equalf(t, execmodule.ExecutionStatusSuccess, fwd.Status, "re-org forward back to canonical block %d", n)
 				require.Equalf(t, h.Hash(), fwd.LatestValidHash, "forward re-org should make block %d the head", n)
@@ -625,9 +620,8 @@ func TestAssembleBlock(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	m := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
-	exec := m.ExecModule
 	txpool := m.TxPoolGrpcServer
-	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {
+	chainPack, err := m.GenerateChain(1, func(i int, gen *blockgen.BlockGen) {
 		// In block 1, addr1 sends addr2 some ether.
 		tx, err := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
 		require.NoError(t, err)
@@ -642,7 +636,7 @@ func TestAssembleBlock(t *testing.T) {
 	var parentBeaconBlockRoot common.Hash
 	_, err = rand.Read(parentBeaconBlockRoot[:])
 	require.NoError(t, err)
-	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
+	payloadId, err := m.AssembleBlock(ctx, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
 		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            chainPack.TopBlock.Header().MixDigest,
@@ -652,12 +646,12 @@ func TestAssembleBlock(t *testing.T) {
 		SlotNumber:            syntheticSlotNumber(chainPack.TopBlock),
 	})
 	require.NoError(t, err)
-	block, err := getAssembledBlock(ctx, exec, payloadId)
+	block, err := m.GetAssembledBlock(ctx, payloadId)
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), block.NumberU64())
 	require.Len(t, block.Transactions(), 2)
 
-	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
+	err = m.InsertValidateAndUfc1By1(ctx, []*types.Block{block})
 	require.NoError(t, err)
 }
 
@@ -665,7 +659,7 @@ func TestAssembleBlockWithConcurrentSiblingCommit(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
-	parentChain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(_ int, gen *blockgen.BlockGen) {
+	parentChain, err := m.GenerateChain(1, func(_ int, gen *blockgen.BlockGen) {
 		tx, txErr := types.SignTx(
 			types.NewTransaction(0, common.Address{1}, uint256.NewInt(10_000), 50_000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
 			*types.LatestSignerForChainID(m.ChainConfig.ChainID),
@@ -690,7 +684,7 @@ func TestAssembleBlockWithConcurrentSiblingCommit(t *testing.T) {
 		m.Key,
 	)
 	require.NoError(t, err)
-	siblingChain, err := blockgen.GenerateChain(m.ChainConfig, parent, m.Engine, m.DB, 1, func(_ int, gen *blockgen.BlockGen) {
+	siblingChain, err := m.GenerateChainFrom(parent, 1, func(_ int, gen *blockgen.BlockGen) {
 		gen.AddTx(siblingTx)
 	})
 	require.NoError(t, err)
@@ -701,7 +695,7 @@ func TestAssembleBlockWithConcurrentSiblingCommit(t *testing.T) {
 		txns:      []types.Transaction{builderTx},
 	}
 	parentBeaconBlockRoot := randomHash()
-	payloadID, err := assembleBlock(ctx, m.ExecModule, &builder.Parameters{
+	payloadID, err := m.AssembleBlock(ctx, &builder.Parameters{
 		ParentHash:            parent.Hash(),
 		Timestamp:             parent.Time() + 1,
 		PrevRandao:            parent.Header().MixDigest,
@@ -717,29 +711,29 @@ func TestAssembleBlockWithConcurrentSiblingCommit(t *testing.T) {
 		case provider.release <- struct{}{}:
 		default:
 		}
-		_, _ = getAssembledBlock(context.Background(), m.ExecModule, payloadID)
+		_, _ = m.GetAssembledBlock(context.Background(), payloadID)
 	}()
 	select {
 	case <-provider.ready:
 	case <-time.After(10 * time.Second):
 		t.Fatal("builder did not reach transaction selection")
 	}
-	require.NoError(t, insertValidateAndUfc1By1(ctx, m.ExecModule, siblingChain.Blocks))
+	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, siblingChain.Blocks))
 	provider.release <- struct{}{}
 	select {
 	case <-provider.exhausted:
 	case <-time.After(10 * time.Second):
 		t.Fatal("builder did not finish transaction selection")
 	}
-	built, err := getAssembledBlock(ctx, m.ExecModule, payloadID)
+	built, err := m.GetAssembledBlock(ctx, payloadID)
 	require.NoError(t, err)
 	require.Equal(t, parent.Hash(), built.ParentHash())
 	require.Len(t, built.Transactions(), 1)
 	require.Equal(t, builderTx.Hash(), built.Transactions()[0].Hash())
-	status, err := insertBlocks(ctx, m.ExecModule, []*types.Block{built})
+	status, err := m.InsertBlocks(ctx, []*types.Block{built})
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
-	validation, err := validateChain(ctx, m.ExecModule, built.Header())
+	validation, err := m.ValidateChain(ctx, built.Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
 }
@@ -747,7 +741,7 @@ func TestAssembleBlockWithConcurrentSiblingCommit(t *testing.T) {
 func TestGetAssembledBlockHonorsCanceledContextWhenTxPoolIsBehindParent(t *testing.T) {
 	ctx := t.Context()
 	m := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
-	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, nil)
+	chainPack, err := m.GenerateChain(2, nil)
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(chainPack))
 
@@ -758,7 +752,7 @@ func TestGetAssembledBlockHonorsCanceledContextWhenTxPoolIsBehindParent(t *testi
 		ready: make(chan struct{}),
 	}
 	parentBeaconBlockRoot := randomHash()
-	payloadID, err := assembleBlock(ctx, m.ExecModule, &builder.Parameters{
+	payloadID, err := m.AssembleBlock(ctx, &builder.Parameters{
 		ParentHash:            parent.Hash(),
 		Timestamp:             parent.Time() + 1,
 		PrevRandao:            parent.Header().MixDigest,
@@ -811,9 +805,8 @@ func TestAssembleBlockWithFreshlyAddedTxns(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	m := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
-	exec := m.ExecModule
 	txpool := m.TxPoolGrpcServer
-	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {
+	chainPack, err := m.GenerateChain(1, func(i int, gen *blockgen.BlockGen) {
 		// In block 1, addr1 sends addr2 some ether.
 		tx, err := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
 		require.NoError(t, err)
@@ -832,7 +825,7 @@ func TestAssembleBlockWithFreshlyAddedTxns(t *testing.T) {
 	var parentBeaconBlockRoot common.Hash
 	_, err = rand.Read(parentBeaconBlockRoot[:])
 	require.NoError(t, err)
-	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
+	payloadId, err := m.AssembleBlock(ctx, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
 		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            chainPack.TopBlock.Header().MixDigest,
@@ -850,139 +843,13 @@ func TestAssembleBlockWithFreshlyAddedTxns(t *testing.T) {
 	waitForProvidedTxnCount(t, provider.txnCounts, 2)
 	waitForProvidedTxnCount(t, provider.txnCounts, 0)
 
-	block, err := getAssembledBlock(ctx, exec, payloadId)
+	block, err := m.GetAssembledBlock(ctx, payloadId)
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), block.NumberU64())
 	require.Len(t, block.Transactions(), 4)
 
-	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
+	err = m.InsertValidateAndUfc1By1(ctx, []*types.Block{block})
 	require.NoError(t, err)
-}
-
-func insertBlocks(ctx context.Context, exec *execmodule.ExecModule, blocks []*types.Block) (execmodule.ExecutionStatus, error) {
-	return insertBlocksWithBAL(ctx, exec, blocks, nil)
-}
-
-// insertBlocksWithBAL inserts blocks, attaching the parallel per-block BAL bytes
-// (as blockgen's ChainPack.BlockAccessLists carries them) onto each RawBlock so
-// the BAL reaches the DB — GenerateChain sets the header's BlockAccessListHash
-// but not the block's BlockAccessList field. bals may be nil.
-func insertBlocksWithBAL(ctx context.Context, exec *execmodule.ExecModule, blocks []*types.Block, bals [][]byte) (execmodule.ExecutionStatus, error) {
-	rawBlocks := make([]*types.RawBlock, len(blocks))
-	for i, b := range blocks {
-		rawBlocks[i] = &types.RawBlock{Header: b.HeaderNoCopy(), Body: b.RawBody()}
-		if i < len(bals) {
-			rawBlocks[i].BlockAccessList = bals[i]
-		}
-	}
-	return retryBusy(ctx, func() (execmodule.ExecutionStatus, bool, error) {
-		status, err := exec.InsertBlocks(ctx, rawBlocks)
-		if err != nil {
-			return execmodule.ExecutionStatusBusy, false, err
-		}
-		return status, status == execmodule.ExecutionStatusBusy, nil
-	})
-}
-
-func validateChain(ctx context.Context, exec *execmodule.ExecModule, h *types.Header) (execmodule.ValidationResult, error) {
-	return retryBusy(ctx, func() (execmodule.ValidationResult, bool, error) {
-		r, err := exec.ValidateChain(ctx, h.Hash(), h.Number.Uint64())
-		if err != nil {
-			return execmodule.ValidationResult{}, false, err
-		}
-		return r, r.ValidationStatus == execmodule.ExecutionStatusBusy, nil
-	})
-}
-
-func updateForkChoice(ctx context.Context, exec *execmodule.ExecModule, h *types.Header) (execmodule.ForkChoiceResult, error) {
-	return retryBusy(ctx, func() (execmodule.ForkChoiceResult, bool, error) {
-		r, err := exec.UpdateForkChoice(ctx, h.Hash(), common.Hash{}, common.Hash{})
-		if err != nil {
-			return execmodule.ForkChoiceResult{}, false, err
-		}
-		return r, r.Status == execmodule.ExecutionStatusBusy, nil
-	})
-}
-
-func insertValidateAndUfc1By1(ctx context.Context, exec *execmodule.ExecModule, blocks []*types.Block) error {
-	ir, err := insertBlocks(ctx, exec, blocks)
-	if err != nil {
-		return err
-	}
-	if ir != execmodule.ExecutionStatusSuccess {
-		return fmt.Errorf("unexpected insertBlocks status: %s", ir)
-	}
-	for _, b := range blocks {
-		h := b.Header()
-		vr, err := validateChain(ctx, exec, h)
-		if err != nil {
-			return err
-		}
-		if vr.ValidationStatus != execmodule.ExecutionStatusSuccess {
-			return fmt.Errorf("unexpected validateChain status: %s", vr.ValidationStatus)
-		}
-		ur, err := updateForkChoice(ctx, exec, h)
-		if err != nil {
-			return err
-		}
-		if ur.Status != execmodule.ExecutionStatusSuccess {
-			return fmt.Errorf("unexpected updateForkChoice status: %s", ur.Status)
-		}
-	}
-	// UpdateForkChoice returns before the background flush+commit finishes
-	// (per #21444). The next semaphore-acquiring op blocks until the prior
-	// FCU's commit defers complete — so do one more idempotent FCU for the
-	// last block to ensure commitBlock has settled before the caller reads it.
-	if len(blocks) > 0 {
-		if _, err := updateForkChoice(ctx, exec, blocks[len(blocks)-1].Header()); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func assembleBlock(ctx context.Context, exec *execmodule.ExecModule, params *builder.Parameters) (uint64, error) {
-	return retryBusy(ctx, func() (uint64, bool, error) {
-		r, err := exec.AssembleBlock(ctx, params)
-		if err != nil {
-			return 0, false, err
-		}
-		return r.PayloadID, r.Busy, nil
-	})
-}
-
-func getAssembledBlock(ctx context.Context, exe *execmodule.ExecModule, payloadId uint64) (*types.Block, error) {
-	return retryBusy(ctx, func() (*types.Block, bool, error) {
-		r, err := exe.GetAssembledBlock(ctx, payloadId)
-		if err != nil {
-			return nil, false, err
-		}
-		if r.Block == nil {
-			return nil, r.Busy, nil
-		}
-		return r.Block.Block, r.Busy, nil
-	})
-}
-
-func retryBusy[T any](ctx context.Context, f func() (T, bool, error)) (T, error) {
-	ctx, cancel := context.WithTimeout(ctx, time.Minute)
-	defer cancel()
-	var b backoff.BackOff
-	b = backoff.NewConstantBackOff(time.Millisecond)
-	b = backoff.WithContext(b, ctx)
-	return backoff.RetryWithData(
-		func() (T, error) {
-			r, busy, err := f()
-			if err != nil {
-				return generics.Zero[T](), backoff.Permanent(err) // no retries
-			}
-			if busy {
-				return generics.Zero[T](), errors.New("retrying busy")
-			}
-			return r, nil
-		},
-		b,
-	)
 }
 
 func randomHash() common.Hash {
@@ -1001,10 +868,9 @@ func TestAssembleEmptyBlock(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	m := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
-	exec := m.ExecModule
 
 	// Build 1 block with 1 tx as genesis state.
-	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {
+	chainPack, err := m.GenerateChain(1, func(i int, gen *blockgen.BlockGen) {
 		tx, txErr := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
 		require.NoError(t, txErr)
 		gen.AddTx(tx)
@@ -1014,7 +880,7 @@ func TestAssembleEmptyBlock(t *testing.T) {
 	require.NoError(t, err)
 
 	// Don't add any txns to pool — assemble empty block.
-	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
+	payloadId, err := m.AssembleBlock(ctx, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
 		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            chainPack.TopBlock.Header().MixDigest,
@@ -1025,13 +891,13 @@ func TestAssembleEmptyBlock(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	block, err := getAssembledBlock(ctx, exec, payloadId)
+	block, err := m.GetAssembledBlock(ctx, payloadId)
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), block.NumberU64())
 	require.Empty(t, block.Transactions())
 
 	// Insert + validate + FCU — validates state root is correct.
-	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
+	err = m.InsertValidateAndUfc1By1(ctx, []*types.Block{block})
 	require.NoError(t, err)
 }
 
@@ -1039,11 +905,10 @@ func TestAssembleBlockWithStateVerification(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	m := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
-	exec := m.ExecModule
 	txpool := m.TxPoolGrpcServer
 
 	// Build 1 block with 1 tx as genesis state.
-	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {
+	chainPack, err := m.GenerateChain(1, func(i int, gen *blockgen.BlockGen) {
 		tx, txErr := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
 		require.NoError(t, txErr)
 		gen.AddTx(tx)
@@ -1055,7 +920,7 @@ func TestAssembleBlockWithStateVerification(t *testing.T) {
 	baseFee := chainPack.TopBlock.BaseFee().Uint64()
 	addTwoTxnsToPool(ctx, 1, t, m, txpool, baseFee)
 
-	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
+	payloadId, err := m.AssembleBlock(ctx, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
 		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            chainPack.TopBlock.Header().MixDigest,
@@ -1066,7 +931,7 @@ func TestAssembleBlockWithStateVerification(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	block, err := getAssembledBlock(ctx, exec, payloadId)
+	block, err := m.GetAssembledBlock(ctx, payloadId)
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), block.NumberU64())
 	require.Len(t, block.Transactions(), 2)
@@ -1074,12 +939,12 @@ func TestAssembleBlockWithStateVerification(t *testing.T) {
 	// Validate the block and update fork choice.
 	// insertValidateAndUfc1By1 verifies the state root is correct, which proves
 	// that the assembled block's execution produced the exact expected state.
-	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
+	err = m.InsertValidateAndUfc1By1(ctx, []*types.Block{block})
 	require.NoError(t, err)
 
 	// Build a second block (block 3) with 2 more txns to verify multi-block assembly.
 	addTwoTxnsToPool(ctx, 3, t, m, txpool, baseFee)
-	payloadId2, err := assembleBlock(ctx, exec, &builder.Parameters{
+	payloadId2, err := m.AssembleBlock(ctx, &builder.Parameters{
 		ParentHash:            block.Hash(),
 		Timestamp:             block.Time() + 1,
 		PrevRandao:            block.Header().MixDigest,
@@ -1090,12 +955,12 @@ func TestAssembleBlockWithStateVerification(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	block2, err := getAssembledBlock(ctx, exec, payloadId2)
+	block2, err := m.GetAssembledBlock(ctx, payloadId2)
 	require.NoError(t, err)
 	require.Equal(t, uint64(3), block2.NumberU64())
 	require.Len(t, block2.Transactions(), 2)
 
-	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block2})
+	err = m.InsertValidateAndUfc1By1(ctx, []*types.Block{block2})
 	require.NoError(t, err)
 }
 
@@ -1103,11 +968,10 @@ func TestAssembleBlockWithContractCreation(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	m := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
-	exec := m.ExecModule
 	txpool := m.TxPoolGrpcServer
 
 	// Build 1 block with 1 tx as genesis state.
-	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {
+	chainPack, err := m.GenerateChain(1, func(i int, gen *blockgen.BlockGen) {
 		tx, txErr := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
 		require.NoError(t, txErr)
 		gen.AddTx(tx)
@@ -1136,7 +1000,7 @@ func TestAssembleBlockWithContractCreation(t *testing.T) {
 	require.Equal(t, "success", r.Errors[0])
 
 	// Assemble block.
-	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
+	payloadId, err := m.AssembleBlock(ctx, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
 		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            chainPack.TopBlock.Header().MixDigest,
@@ -1147,14 +1011,14 @@ func TestAssembleBlockWithContractCreation(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	block, err := getAssembledBlock(ctx, exec, payloadId)
+	block, err := m.GetAssembledBlock(ctx, payloadId)
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), block.NumberU64())
 	require.Len(t, block.Transactions(), 1)
 
 	// Insert + validate + FCU — validates state root which proves
 	// contract deployment was executed correctly.
-	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
+	err = m.InsertValidateAndUfc1By1(ctx, []*types.Block{block})
 	require.NoError(t, err)
 }
 
@@ -1177,11 +1041,10 @@ func TestAssembleBlockGasOverflow(t *testing.T) {
 		execmoduletester.WithKey(privKey),
 		execmoduletester.WithTxPool(),
 	)
-	exec := m.ExecModule
 	txpool := m.TxPoolGrpcServer
 
 	// Generate 1 empty block as initial chain state.
-	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1,
+	chainPack, err := m.GenerateChain(1,
 		func(i int, gen *blockgen.BlockGen) {})
 	require.NoError(t, err)
 	err = m.InsertChain(chainPack)
@@ -1208,7 +1071,7 @@ func TestAssembleBlockGasOverflow(t *testing.T) {
 	}
 
 	// Assemble block 2 — should be gas-limited.
-	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
+	payloadId, err := m.AssembleBlock(ctx, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
 		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            chainPack.TopBlock.Header().MixDigest,
@@ -1218,17 +1081,17 @@ func TestAssembleBlockGasOverflow(t *testing.T) {
 		SlotNumber:            syntheticSlotNumber(chainPack.TopBlock),
 	})
 	require.NoError(t, err)
-	block, err := getAssembledBlock(ctx, exec, payloadId)
+	block, err := m.GetAssembledBlock(ctx, payloadId)
 	require.NoError(t, err)
 	b2TxCount := len(block.Transactions())
 	require.Greater(t, b2TxCount, 0)
 	require.Less(t, b2TxCount, 10) // not all fit
 
-	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
+	err = m.InsertValidateAndUfc1By1(ctx, []*types.Block{block})
 	require.NoError(t, err)
 
 	// Assemble block 3 — remaining txns spill over.
-	payloadId2, err := assembleBlock(ctx, exec, &builder.Parameters{
+	payloadId2, err := m.AssembleBlock(ctx, &builder.Parameters{
 		ParentHash:            block.Hash(),
 		Timestamp:             block.Header().Time + 1,
 		PrevRandao:            block.Header().MixDigest,
@@ -1238,7 +1101,7 @@ func TestAssembleBlockGasOverflow(t *testing.T) {
 		SlotNumber:            syntheticSlotNumber(block),
 	})
 	require.NoError(t, err)
-	block2, err := getAssembledBlock(ctx, exec, payloadId2)
+	block2, err := m.GetAssembledBlock(ctx, payloadId2)
 	require.NoError(t, err)
 	b3TxCount := len(block2.Transactions())
 	require.Greater(t, b3TxCount, 0)
@@ -1246,7 +1109,7 @@ func TestAssembleBlockGasOverflow(t *testing.T) {
 	// All 10 transactions should be included across the 2 blocks.
 	require.Equal(t, 10, b2TxCount+b3TxCount)
 
-	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block2})
+	err = m.InsertValidateAndUfc1By1(ctx, []*types.Block{block2})
 	require.NoError(t, err)
 }
 
@@ -1254,11 +1117,10 @@ func TestAssembleBlockMixedTxTypes(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	m := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
-	exec := m.ExecModule
 	txpool := m.TxPoolGrpcServer
 
 	// Build 1 block with 1 tx as genesis state.
-	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {
+	chainPack, err := m.GenerateChain(1, func(i int, gen *blockgen.BlockGen) {
 		tx, txErr := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
 		require.NoError(t, txErr)
 		gen.AddTx(tx)
@@ -1304,7 +1166,7 @@ func TestAssembleBlockMixedTxTypes(t *testing.T) {
 	}
 
 	// Assemble block.
-	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
+	payloadId, err := m.AssembleBlock(ctx, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
 		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            chainPack.TopBlock.Header().MixDigest,
@@ -1314,7 +1176,7 @@ func TestAssembleBlockMixedTxTypes(t *testing.T) {
 		SlotNumber:            syntheticSlotNumber(chainPack.TopBlock),
 	})
 	require.NoError(t, err)
-	block, err := getAssembledBlock(ctx, exec, payloadId)
+	block, err := m.GetAssembledBlock(ctx, payloadId)
 	require.NoError(t, err)
 	require.Len(t, block.Transactions(), 3)
 
@@ -1331,7 +1193,7 @@ func TestAssembleBlockMixedTxTypes(t *testing.T) {
 	require.True(t, hasTransfer, "block should contain transfer transactions")
 	require.True(t, hasContractCreation, "block should contain contract creation transaction")
 
-	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
+	err = m.InsertValidateAndUfc1By1(ctx, []*types.Block{block})
 	require.NoError(t, err)
 }
 
@@ -1345,11 +1207,10 @@ func TestAssembleBlockWithWithdrawalRequest(t *testing.T) {
 	ctx := t.Context()
 
 	m := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
-	exec := m.ExecModule
 	txpool := m.TxPoolGrpcServer
 
 	// Insert 1 initial block.
-	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {
+	chainPack, err := m.GenerateChain(1, func(i int, gen *blockgen.BlockGen) {
 		tx, err := types.SignTx(
 			types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
 			*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key,
@@ -1397,7 +1258,7 @@ func TestAssembleBlockWithWithdrawalRequest(t *testing.T) {
 
 	// Assemble block.
 	beaconRoot := randomHash()
-	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
+	payloadId, err := m.AssembleBlock(ctx, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
 		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            randomHash(),
@@ -1411,7 +1272,7 @@ func TestAssembleBlockWithWithdrawalRequest(t *testing.T) {
 	// Get the assembled block via ChainReaderWriterEth1 — Caplin's production interface.
 	chainRW := chainreader.NewChainReaderEth1(
 		m.ChainConfig,
-		exec,
+		m.ExecModule,
 		time.Hour,
 	)
 
@@ -1446,9 +1307,9 @@ func TestAssembleBlockWithWithdrawalRequest(t *testing.T) {
 		"should find a withdrawal request via ChainReaderWriterEth1.GetAssembledBlock")
 
 	// Verify the block also passes validation.
-	block, err := getAssembledBlock(ctx, exec, payloadId)
+	block, err := m.GetAssembledBlock(ctx, payloadId)
 	require.NoError(t, err)
-	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
+	err = m.InsertValidateAndUfc1By1(ctx, []*types.Block{block})
 	require.NoError(t, err)
 }
 
@@ -1494,7 +1355,6 @@ func TestAssembleBlockAmsterdamForkTransition(t *testing.T) {
 		execmoduletester.WithChainConfig(cfg),
 		execmoduletester.WithExperimentalBAL(),
 	)
-	exec := m.ExecModule
 	txpool := m.TxPoolGrpcServer
 
 	// Build 3 pre-Amsterdam blocks via the builder (timestamps 1, 2, 3).
@@ -1518,7 +1378,7 @@ func TestAssembleBlockAmsterdamForkTransition(t *testing.T) {
 		var prevRandao, beaconRoot common.Hash
 		_, _ = rand.Read(prevRandao[:])
 		_, _ = rand.Read(beaconRoot[:])
-		payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
+		payloadId, err := m.AssembleBlock(ctx, &builder.Parameters{
 			ParentHash:            topBlock.Hash(),
 			Timestamp:             ts,
 			PrevRandao:            prevRandao,
@@ -1528,11 +1388,11 @@ func TestAssembleBlockAmsterdamForkTransition(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		block, err := getAssembledBlock(ctx, exec, payloadId)
+		block, err := m.GetAssembledBlock(ctx, payloadId)
 		require.NoError(t, err)
 		require.Equal(t, uint64(i+1), block.NumberU64())
 
-		err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
+		err = m.InsertValidateAndUfc1By1(ctx, []*types.Block{block})
 		require.NoError(t, err)
 		topBlock = block
 		baseFee = block.BaseFee().Uint64()
@@ -1571,7 +1431,7 @@ func TestAssembleBlockAmsterdamForkTransition(t *testing.T) {
 	var amsPrevRandao, amsBeaconRoot common.Hash
 	_, _ = rand.Read(amsPrevRandao[:])
 	_, _ = rand.Read(amsBeaconRoot[:])
-	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
+	payloadId, err := m.AssembleBlock(ctx, &builder.Parameters{
 		ParentHash:            topBlock.Hash(),
 		Timestamp:             amsterdamTime,
 		PrevRandao:            amsPrevRandao,
@@ -1582,14 +1442,14 @@ func TestAssembleBlockAmsterdamForkTransition(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	block, err := getAssembledBlock(ctx, exec, payloadId)
+	block, err := m.GetAssembledBlock(ctx, payloadId)
 	require.NoError(t, err)
 	require.NotNil(t, block, "first Amsterdam block should be built successfully")
 	require.True(t, cfg.IsAmsterdam(block.Time()), "block should be an Amsterdam block")
 	require.GreaterOrEqual(t, len(block.Transactions()), 1, "block should contain txpool txns")
 
 	// Insert, validate, and update fork choice.
-	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
+	err = m.InsertValidateAndUfc1By1(ctx, []*types.Block{block})
 	require.NoError(t, err)
 }
 
@@ -1612,7 +1472,7 @@ func TestGetPayloadBodiesRegenerateBlockAccessLists(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
 	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
 	baseFee := uint256.NewInt(m.Genesis.BaseFee().Uint64())
-	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
+	chainPack, err := m.GenerateChain(2, func(i int, b *blockgen.BlockGen) {
 		txn, err := types.SignTx(types.NewTransaction(uint64(i), common.Address{1}, uint256.NewInt(10_000), 50_000, baseFee, nil), *signer, privKey)
 		require.NoError(t, err)
 		b.AddTx(txn)
@@ -1626,7 +1486,7 @@ func TestGetPayloadBodiesRegenerateBlockAccessLists(t *testing.T) {
 	require.Len(t, stored, 2)
 	for i, pb := range stored {
 		require.NotNil(t, pb)
-		require.Equal(t, chainPack.BlockAccessLists[i], pb.BlockAccessList, "stored block %d", i+1)
+		require.Equal(t, chainPack.Blocks[i].BlockAccessList(), pb.BlockAccessList, "stored block %d", i+1)
 	}
 	err = m.DB.Update(ctx, func(tx kv.RwTx) error {
 		return tx.ForEach(kv.BlockAccessList, nil, func(k, _ []byte) error {
@@ -1646,14 +1506,14 @@ func TestGetPayloadBodiesRegenerateBlockAccessLists(t *testing.T) {
 	require.Len(t, byHash, 2)
 	for i, pb := range byHash {
 		require.NotNil(t, pb)
-		require.Equal(t, chainPack.BlockAccessLists[i], pb.BlockAccessList, "byHash block %d", i+1)
+		require.Equal(t, chainPack.Blocks[i].BlockAccessList(), pb.BlockAccessList, "byHash block %d", i+1)
 	}
 	byRange, err := m.ExecModule.GetPayloadBodiesByRange(ctx, 1, 2)
 	require.NoError(t, err)
 	require.Len(t, byRange, 2)
 	for i, pb := range byRange {
 		require.NotNil(t, pb)
-		require.Equal(t, chainPack.BlockAccessLists[i], pb.BlockAccessList, "byRange block %d", i+1)
+		require.Equal(t, chainPack.Blocks[i].BlockAccessList(), pb.BlockAccessList, "byRange block %d", i+1)
 	}
 }
 
@@ -1692,7 +1552,7 @@ func TestGetPayloadBodiesPrunedHistoryBlockAccessList(t *testing.T) {
 func newPayloadBodiesBALTestChain(t *testing.T, config *chain.Config) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack) {
 	t.Helper()
 	m := execmoduletester.New(t, execmoduletester.WithChainConfig(config))
-	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, nil)
+	chainPack, err := m.GenerateChain(1, nil)
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(chainPack))
 	return m, chainPack
@@ -1767,13 +1627,13 @@ func TestGetPayloadBodiesNonCanonicalBlockAccessList(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKeyA))
 	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
 	baseFee := uint256.NewInt(m.Genesis.BaseFee().Uint64())
-	canonical, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
+	canonical, err := m.GenerateChain(2, func(i int, b *blockgen.BlockGen) {
 		txn, err := types.SignTx(types.NewTransaction(uint64(i), common.Address{1}, uint256.NewInt(10_000), 50_000, baseFee, nil), *signer, privKeyA)
 		require.NoError(t, err)
 		b.AddTx(txn)
 	})
 	require.NoError(t, err)
-	fork, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
+	fork, err := m.GenerateChain(2, func(i int, b *blockgen.BlockGen) {
 		txn, err := types.SignTx(types.NewTransaction(uint64(i), common.Address{2}, uint256.NewInt(20_000), 50_000, baseFee, nil), *signer, privKeyB)
 		require.NoError(t, err)
 		b.AddTx(txn)
@@ -1784,7 +1644,10 @@ func TestGetPayloadBodiesNonCanonicalBlockAccessList(t *testing.T) {
 	require.NoError(t, err)
 	// Insert the fork blocks without a fork choice update so they stay
 	// non-canonical, with no stored BAL sidecar.
-	insertRes, err := insertBlocks(ctx, m.ExecModule, fork.Blocks)
+	for _, block := range fork.Blocks {
+		block.SetBlockAccessList(nil)
+	}
+	insertRes, err := m.InsertBlocks(ctx, fork.Blocks)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, insertRes)
 	byHash, err := m.ExecModule.GetPayloadBodiesByHash(ctx, []common.Hash{fork.Blocks[0].Hash(), fork.Blocks[1].Hash()})
@@ -1803,16 +1666,15 @@ func TestGetPayloadBodiesNonCanonicalBlockAccessList(t *testing.T) {
 func TestNotificationDispatchForegroundCommit(t *testing.T) {
 	ctx := t.Context()
 	m := execmoduletester.New(t)
-	exec := m.ExecModule
 
 	// Subscribe to header notifications before any blocks.
 	headerCh, unsub := m.Notifications.Events.AddHeaderSubscription()
 	defer unsub()
 
-	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, nil)
+	chainPack, err := m.GenerateChain(3, nil)
 	require.NoError(t, err)
 
-	err = insertValidateAndUfc1By1(ctx, exec, chainPack.Blocks)
+	err = m.InsertValidateAndUfc1By1(ctx, chainPack.Blocks)
 	require.NoError(t, err)
 
 	// After FCU returns Success, header notifications must already be
@@ -1851,7 +1713,7 @@ func TestNotificationDispatchBackgroundCommit(t *testing.T) {
 	headerCh, unsub := m.Notifications.Events.AddHeaderSubscription()
 	defer unsub()
 
-	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, nil)
+	chainPack, err := m.GenerateChain(1, nil)
 	require.NoError(t, err)
 
 	err = m.InsertChain(chainPack)
@@ -1868,15 +1730,14 @@ func TestNotificationDispatchBackgroundCommit(t *testing.T) {
 func TestNotificationDispatchBackgroundPrune(t *testing.T) {
 	ctx := t.Context()
 	m := execmoduletester.New(t, execmoduletester.WithFcuBackgroundPrune())
-	exec := m.ExecModule
 
 	headerCh, unsub := m.Notifications.Events.AddHeaderSubscription()
 	defer unsub()
 
-	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, nil)
+	chainPack, err := m.GenerateChain(3, nil)
 	require.NoError(t, err)
 
-	err = insertValidateAndUfc1By1(ctx, exec, chainPack.Blocks)
+	err = m.InsertValidateAndUfc1By1(ctx, chainPack.Blocks)
 	require.NoError(t, err)
 
 	// Notifications dispatched.
@@ -1940,11 +1801,10 @@ func TestAssembleBlockStateGasLimit(t *testing.T) {
 		execmoduletester.WithKey(privKey),
 		execmoduletester.WithTxPool(),
 	)
-	exec := m.ExecModule
 	txpool := m.TxPoolGrpcServer
 
 	// Generate 1 empty block as initial chain state.
-	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1,
+	chainPack, err := m.GenerateChain(1,
 		func(i int, gen *blockgen.BlockGen) {})
 	require.NoError(t, err)
 	err = m.InsertChain(chainPack)
@@ -1974,7 +1834,7 @@ func TestAssembleBlockStateGasLimit(t *testing.T) {
 	// Assemble block — builder must stop before state gas exceeds gas limit.
 	slotNumber := uint64(1)
 	parentBeaconBlockRoot := randomHash()
-	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
+	payloadId, err := m.AssembleBlock(ctx, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
 		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            randomHash(),
@@ -1984,7 +1844,7 @@ func TestAssembleBlockStateGasLimit(t *testing.T) {
 		SlotNumber:            &slotNumber,
 	})
 	require.NoError(t, err)
-	block, err := getAssembledBlock(ctx, exec, payloadId)
+	block, err := m.GetAssembledBlock(ctx, payloadId)
 	require.NoError(t, err)
 
 	// The block must include some but not all 10 creates (state gas limited).
@@ -1997,7 +1857,7 @@ func TestAssembleBlockStateGasLimit(t *testing.T) {
 		"gas_used (max of execution, state) must not exceed gas_limit")
 
 	// Block must pass full validation (insert + validate + FCU).
-	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
+	err = m.InsertValidateAndUfc1By1(ctx, []*types.Block{block})
 	require.NoError(t, err)
 }
 
@@ -2029,7 +1889,6 @@ func TestAssembleBlockStateGasLimitSSTORE(t *testing.T) {
 		execmoduletester.WithKey(privKey),
 		execmoduletester.WithTxPool(),
 	)
-	exec := m.ExecModule
 	txpool := m.TxPoolGrpcServer
 
 	// Deploy a contract whose runtime writes to 4 storage slots per call.
@@ -2049,7 +1908,7 @@ func TestAssembleBlockStateGasLimitSSTORE(t *testing.T) {
 	contractAddr := types.CreateAddress(senderAddr, 0)
 
 	// Generate block 1 with the deployment.
-	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1,
+	chainPack, err := m.GenerateChain(1,
 		func(i int, gen *blockgen.BlockGen) { gen.AddTx(deployTx) })
 	require.NoError(t, err)
 	err = m.InsertChain(chainPack)
@@ -2082,7 +1941,7 @@ func TestAssembleBlockStateGasLimitSSTORE(t *testing.T) {
 	// Assemble block 2.
 	slotNumber := uint64(1)
 	parentBeaconBlockRoot := randomHash()
-	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
+	payloadId, err := m.AssembleBlock(ctx, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
 		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            randomHash(),
@@ -2092,7 +1951,7 @@ func TestAssembleBlockStateGasLimitSSTORE(t *testing.T) {
 		SlotNumber:            &slotNumber,
 	})
 	require.NoError(t, err)
-	block, err := getAssembledBlock(ctx, exec, payloadId)
+	block, err := m.GetAssembledBlock(ctx, payloadId)
 	require.NoError(t, err)
 
 	txCount := len(block.Transactions())
@@ -2103,7 +1962,7 @@ func TestAssembleBlockStateGasLimitSSTORE(t *testing.T) {
 	require.LessOrEqual(t, block.GasUsed(), block.GasLimit(),
 		"gas_used (max of execution, state) must not exceed gas_limit")
 
-	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
+	err = m.InsertValidateAndUfc1By1(ctx, []*types.Block{block})
 	require.NoError(t, err)
 }
 
@@ -2172,10 +2031,9 @@ func TestAssembleBlockGasPoolSnapshotRestoreBug(t *testing.T) {
 		execmoduletester.WithKey(keys[0]),
 		execmoduletester.WithTxPool(),
 	)
-	exec := m.ExecModule
 	txpool := m.TxPoolGrpcServer
 
-	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1,
+	chainPack, err := m.GenerateChain(1,
 		func(i int, gen *blockgen.BlockGen) {})
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(chainPack))
@@ -2202,7 +2060,7 @@ func TestAssembleBlockGasPoolSnapshotRestoreBug(t *testing.T) {
 
 	slotNumber := uint64(1)
 	parentBeaconBlockRoot := randomHash()
-	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
+	payloadId, err := m.AssembleBlock(ctx, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
 		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            randomHash(),
@@ -2212,14 +2070,14 @@ func TestAssembleBlockGasPoolSnapshotRestoreBug(t *testing.T) {
 		SlotNumber:            &slotNumber,
 	})
 	require.NoError(t, err)
-	block, err := getAssembledBlock(ctx, exec, payloadId)
+	block, err := m.GetAssembledBlock(ctx, payloadId)
 	require.NoError(t, err)
 
 	require.Greater(t, len(block.Transactions()), 0, "block should contain at least one tx")
 	require.LessOrEqual(t, block.GasUsed(), block.GasLimit(),
 		"gas_used (max of execution, state) must not exceed gas_limit")
 
-	require.NoError(t, insertValidateAndUfc1By1(ctx, exec, []*types.Block{block}))
+	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, []*types.Block{block}))
 }
 
 // TestAssembleBlockGasPoolMultiBatchInitBug exercises the block assembler's
@@ -2273,10 +2131,9 @@ func TestAssembleBlockGasPoolMultiBatchInitBug(t *testing.T) {
 		execmoduletester.WithKey(keys[0]),
 		execmoduletester.WithTxPool(),
 	)
-	exec := m.ExecModule
 	txpool := m.TxPoolGrpcServer
 
-	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1,
+	chainPack, err := m.GenerateChain(1,
 		func(i int, gen *blockgen.BlockGen) {})
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(chainPack))
@@ -2333,7 +2190,7 @@ func TestAssembleBlockGasPoolMultiBatchInitBug(t *testing.T) {
 
 	slotNumber := uint64(1)
 	parentBeaconBlockRoot := randomHash()
-	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
+	payloadId, err := m.AssembleBlock(ctx, &builder.Parameters{
 		ParentHash:            chainPack.TopBlock.Hash(),
 		Timestamp:             chainPack.TopBlock.Time() + 1,
 		PrevRandao:            randomHash(),
@@ -2343,14 +2200,14 @@ func TestAssembleBlockGasPoolMultiBatchInitBug(t *testing.T) {
 		SlotNumber:            &slotNumber,
 	})
 	require.NoError(t, err)
-	block, err := getAssembledBlock(ctx, exec, payloadId)
+	block, err := m.GetAssembledBlock(ctx, payloadId)
 	require.NoError(t, err)
 
 	require.Greater(t, len(block.Transactions()), 0, "block should contain at least one tx")
 	require.LessOrEqual(t, block.GasUsed(), block.GasLimit(),
 		"gas_used (max of execution, state) must not exceed gas_limit")
 
-	require.NoError(t, insertValidateAndUfc1By1(ctx, exec, []*types.Block{block}))
+	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, []*types.Block{block}))
 }
 
 func TestEIP8246NoBurnLogWhenCoinbaseSelfDestructs(t *testing.T) {
@@ -2390,7 +2247,7 @@ func TestEIP8246NoBurnLogWhenCoinbaseSelfDestructs(t *testing.T) {
 	initCode := []byte{0x33, 0xFF}
 
 	var coinbaseAddr common.Address
-	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {
+	chainPack, err := m.GenerateChain(1, func(i int, gen *blockgen.BlockGen) {
 		nonce := gen.TxNonce(senderAddr)
 		// Pre-compute the CREATE address — the contract will be deployed here.
 		coinbaseAddr = types.CreateAddress(senderAddr, nonce)
@@ -2412,7 +2269,7 @@ func TestEIP8246NoBurnLogWhenCoinbaseSelfDestructs(t *testing.T) {
 	require.Greater(t, receipt.GasUsed, uint64(0))
 
 	// Insert + validate + FCU proves the state root is computed correctly.
-	err = insertValidateAndUfc1By1(ctx, m.ExecModule, chainPack.Blocks)
+	err = m.InsertValidateAndUfc1By1(ctx, chainPack.Blocks)
 	require.NoError(t, err)
 
 	// EIP-8246 preserves the self-destructed coinbase: the priority fee
@@ -2458,7 +2315,7 @@ func TestInsertBlocksWithBatchedFCU(t *testing.T) {
 	const totalBlocks = 30
 	const batchSize = 10
 
-	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, totalBlocks, func(i int, b *blockgen.BlockGen) {
+	chainPack, err := m.GenerateChain(totalBlocks, func(i int, b *blockgen.BlockGen) {
 		tx, err := types.SignTx(
 			types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(1_000), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
 			*types.LatestSignerForChainID(nil),
@@ -2474,12 +2331,12 @@ func TestInsertBlocksWithBatchedFCU(t *testing.T) {
 		end := start + batchSize
 		batch := chainPack.Blocks[start:end]
 
-		insRes, err := insertBlocks(ctx, m.ExecModule, batch)
+		insRes, err := m.InsertBlocks(ctx, batch)
 		require.NoError(t, err, "batch [%d..%d] InsertBlocks", start+1, end)
 		require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
 
 		last := batch[len(batch)-1].Header()
-		fcuRes, err := updateForkChoice(ctx, m.ExecModule, last)
+		fcuRes, err := m.UpdateForkChoice(ctx, last)
 		require.NoError(t, err, "batch [%d..%d] FCU on block %d", start+1, end, last.Number.Uint64())
 		require.Equal(t, execmodule.ExecutionStatusSuccess, fcuRes.Status,
 			"FCU on block %d should succeed; validationError=%q", last.Number.Uint64(), fcuRes.ValidationError)
@@ -2569,7 +2426,7 @@ func runBatchedFCUBadBlockRecovery(t *testing.T, bgCommit bool) {
 
 	// Build a 6-block chain. First 5 are committed normally; block 6 is the
 	// recovery target.
-	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 6, func(i int, b *blockgen.BlockGen) {
+	chainPack, err := m.GenerateChain(6, func(i int, b *blockgen.BlockGen) {
 		tx, err := types.SignTx(
 			types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(1_000), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
 			*types.LatestSignerForChainID(nil),
@@ -2582,10 +2439,10 @@ func runBatchedFCUBadBlockRecovery(t *testing.T, bgCommit bool) {
 	require.Len(t, chainPack.Blocks, 6)
 
 	// Phase 1: insert + FCU blocks 1..5 normally so state is at 5.
-	insRes, err := insertBlocks(ctx, m.ExecModule, chainPack.Blocks[:5])
+	insRes, err := m.InsertBlocks(ctx, chainPack.Blocks[:5])
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
-	res, err := updateForkChoice(ctx, m.ExecModule, chainPack.Blocks[4].Header())
+	res, err := m.UpdateForkChoice(ctx, chainPack.Blocks[4].Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, res.Status)
 	waitForBlock(5)
@@ -2603,11 +2460,11 @@ func runBatchedFCUBadBlockRecovery(t *testing.T, bgCommit bool) {
 		Withdrawals:  chainPack.Blocks[5].Withdrawals(),
 	})
 
-	badRes, err := insertBlocks(ctx, m.ExecModule, []*types.Block{badBlock6})
+	badRes, err := m.InsertBlocks(ctx, []*types.Block{badBlock6})
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, badRes, "InsertBlocks writes the header without validating state root")
 
-	fcuBad, err := updateForkChoice(ctx, m.ExecModule, badBlock6.Header())
+	fcuBad, err := m.UpdateForkChoice(ctx, badBlock6.Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusBadBlock, fcuBad.Status,
 		"FCU on the bad block must return BadBlock (state-root mismatch); got %s validationError=%q", fcuBad.Status, fcuBad.ValidationError)
@@ -2618,11 +2475,11 @@ func runBatchedFCUBadBlockRecovery(t *testing.T, bgCommit bool) {
 	// pointing to the prior SD (foreground) or has been nil'd (background);
 	// both paths must let the next InsertBlocks re-initialize the overlay
 	// cleanly.
-	recoverIns, err := insertBlocks(ctx, m.ExecModule, []*types.Block{chainPack.Blocks[5]})
+	recoverIns, err := m.InsertBlocks(ctx, []*types.Block{chainPack.Blocks[5]})
 	require.NoError(t, err, "InsertBlocks of the good block after a bad-block FCU must not error")
 	require.Equal(t, execmodule.ExecutionStatusSuccess, recoverIns)
 
-	recoverFcu, err := updateForkChoice(ctx, m.ExecModule, chainPack.Blocks[5].Header())
+	recoverFcu, err := m.UpdateForkChoice(ctx, chainPack.Blocks[5].Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, recoverFcu.Status,
 		"FCU on the good block after recovery must succeed; validationError=%q", recoverFcu.ValidationError)
@@ -2694,14 +2551,14 @@ func TestLargeBatchExecGeneratesChangesetsForReorgWindow(t *testing.T) {
 	maxReorgDepth := m.Cfg().Sync.MaxReorgDepth
 	chainLen := int(maxReorgDepth) + 14
 
-	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainLen,
+	chainPack, err := m.GenerateChain(chainLen,
 		transferGen(t, privKey, senderAddr, 1_000))
 	require.NoError(t, err)
 
-	insRes, err := insertBlocks(ctx, m.ExecModule, chainPack.Blocks)
+	insRes, err := m.InsertBlocks(ctx, chainPack.Blocks)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
-	fcuRes, err := updateForkChoice(ctx, m.ExecModule, chainPack.TopBlock.Header())
+	fcuRes, err := m.UpdateForkChoice(ctx, chainPack.TopBlock.Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, fcuRes.Status)
 
@@ -2732,10 +2589,10 @@ func TestUpdateForkChoiceShallowReorgAfterLargeBatchExec(t *testing.T) {
 	const reorgDepth = 4
 	divergeFrom := chainLen - reorgDepth
 
-	canonical, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainLen,
+	canonical, err := m.GenerateChain(chainLen,
 		transferGen(t, privKey, senderAddr, 1_000))
 	require.NoError(t, err)
-	fork, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainLen,
+	fork, err := m.GenerateChain(chainLen,
 		func(i int, b *blockgen.BlockGen) {
 			amount := uint64(1_000)
 			if i >= divergeFrom {
@@ -2747,17 +2604,17 @@ func TestUpdateForkChoiceShallowReorgAfterLargeBatchExec(t *testing.T) {
 	require.Equal(t, canonical.Blocks[divergeFrom-1].Hash(), fork.Blocks[divergeFrom-1].Hash())
 	require.NotEqual(t, canonical.Blocks[divergeFrom].Hash(), fork.Blocks[divergeFrom].Hash())
 
-	insRes, err := insertBlocks(ctx, m.ExecModule, canonical.Blocks)
+	insRes, err := m.InsertBlocks(ctx, canonical.Blocks)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
-	fcuRes, err := updateForkChoice(ctx, m.ExecModule, canonical.TopBlock.Header())
+	fcuRes, err := m.UpdateForkChoice(ctx, canonical.TopBlock.Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, fcuRes.Status)
 
-	insRes, err = insertBlocks(ctx, m.ExecModule, fork.Blocks[divergeFrom:])
+	insRes, err = m.InsertBlocks(ctx, fork.Blocks[divergeFrom:])
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
-	fcuRes, err = updateForkChoice(ctx, m.ExecModule, fork.TopBlock.Header())
+	fcuRes, err = m.UpdateForkChoice(ctx, fork.TopBlock.Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, fcuRes.Status,
 		"shallow reorg of %d blocks after a %d-block batch must succeed; status=%s validationError=%q",
@@ -2868,7 +2725,7 @@ func runBALComputeAheadChangeset(t *testing.T, computeAhead, shadow bool) balCom
 
 	// AllProtocolChanges is post-London, so txs need a fee cap above the base fee
 	// (transferGen's 1-wei price is only valid on the pre-London default).
-	canonical, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainLen,
+	canonical, err := m.GenerateChain(chainLen,
 		func(i int, b *blockgen.BlockGen) {
 			tx, txErr := types.SignTx(
 				types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(1_000), 50000, uint256.NewInt(10_000_000_000), nil),
@@ -2879,10 +2736,10 @@ func runBALComputeAheadChangeset(t *testing.T, computeAhead, shadow bool) balCom
 		})
 	require.NoError(t, err)
 
-	insRes, err := insertBlocksWithBAL(ctx, m.ExecModule, canonical.Blocks, canonical.BlockAccessLists)
+	insRes, err := m.InsertBlocks(ctx, canonical.Blocks)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
-	fcuRes, err := updateForkChoice(ctx, m.ExecModule, canonical.TopBlock.Header())
+	fcuRes, err := m.UpdateForkChoice(ctx, canonical.TopBlock.Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, fcuRes.Status,
 		"batch with compute-ahead=%v must execute cleanly; validationError=%q", computeAhead, fcuRes.ValidationError)
@@ -2928,7 +2785,7 @@ func runBALComputeAheadChangeset(t *testing.T, computeAhead, shadow bool) balCom
 	// FCU forward re-executes. If the compute-ahead-built state were wrong, the
 	// unwind restores a bad root and the forward re-exec fails.
 	const reorgBackTo = chainLen - 2 // within the window (>= windowStart)
-	back, err := updateForkChoice(ctx, m.ExecModule, canonical.Blocks[reorgBackTo-1].Header())
+	back, err := m.UpdateForkChoice(ctx, canonical.Blocks[reorgBackTo-1].Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, back.Status, "reorg back must succeed")
 	m.ExecModule.WaitIdle(ctx)
@@ -2939,7 +2796,7 @@ func runBALComputeAheadChangeset(t *testing.T, computeAhead, shadow bool) balCom
 		return nil
 	}))
 
-	fwd, err := updateForkChoice(ctx, m.ExecModule, canonical.TopBlock.Header())
+	fwd, err := m.UpdateForkChoice(ctx, canonical.TopBlock.Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, fwd.Status,
 		"forward re-exec after unwind must reach the correct root (compute-ahead=%v); validationError=%q",
@@ -2964,10 +2821,10 @@ func TestUpdateForkChoiceToNonGenesisBlockAtHeightZero(t *testing.T) {
 	fakeHeader.Extra = []byte("not the genesis")
 	fakeBlock := types.NewBlockWithHeader(fakeHeader)
 	require.NotEqual(t, m.Genesis.Hash(), fakeBlock.Hash())
-	insRes, err := insertBlocks(ctx, m.ExecModule, []*types.Block{fakeBlock})
+	insRes, err := m.InsertBlocks(ctx, []*types.Block{fakeBlock})
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
-	fcu, err := updateForkChoice(ctx, m.ExecModule, fakeBlock.Header())
+	fcu, err := m.UpdateForkChoice(ctx, fakeBlock.Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusBadBlock, fcu.Status)
 }

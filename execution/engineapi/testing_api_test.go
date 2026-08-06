@@ -210,6 +210,25 @@ func preCancunChainConfig() *chain.Config {
 	return cfg
 }
 
+// prePragueChainConfig returns a chain config where Cancun is active but
+// Prague and later forks are NOT activated.
+func prePragueChainConfig() *chain.Config {
+	cfg := allForksChainConfig()
+	cfg.PragueTime = nil
+	cfg.OsakaTime = nil
+	cfg.AmsterdamTime = nil
+	return cfg
+}
+
+// preOsakaChainConfig returns a chain config where Prague is active but
+// Osaka and later forks are NOT activated.
+func preOsakaChainConfig() *chain.Config {
+	cfg := allForksChainConfig()
+	cfg.OsakaTime = nil
+	cfg.AmsterdamTime = nil
+	return cfg
+}
+
 // preAmsterdamChainConfig returns a chain config where Osaka is active but
 // Amsterdam (Glamsterdam) is NOT activated.
 func preAmsterdamChainConfig() *chain.Config {
