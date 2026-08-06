@@ -699,8 +699,21 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			}
 			go warmTxsHashes(b)
 
-			txs := b.Transactions()
+			// dbBAL is fed by the block source (src.next -> blockAndBAL), which
+			// prefers the payload-carried BAL and falls back to the DB sidecar.
 			header := b.HeaderNoCopy()
+			if dbBAL == nil && !dbg.IgnoreBAL && te.cfg.chainConfig.IsAmsterdam(header.Time) && header.HasBAL() {
+				te.logger.Debug("executing block without a BAL", "blockNum", blockNum)
+			}
+			if dbg.TraceBALFeed {
+				if dbBAL != nil {
+					fmt.Printf("BAL-FEED blk=%d accounts=%d\n", blockNum, len(dbBAL))
+				} else if te.cfg.chainConfig.IsAmsterdam(header.Time) {
+					fmt.Printf("BAL-MISSING blk=%d\n", blockNum)
+				}
+			}
+
+			txs := b.Transactions()
 
 			// BlockContext: workers override GetHash with their own per-worker
 			// function (installWorkerGetHash) using their own roTx. The
