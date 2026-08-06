@@ -47,11 +47,18 @@ var (
 
 	// Conflict signals for the parallel executor, as monotonic totals so the
 	// rate and the ratio are derived at query time rather than being fixed to
-	// this reporter's interval. The denominator for the ratio is the existing
-	// exec_triggers, which already carries the cumulative execution count.
-	mxRepeatsTotal  = metrics.GetOrCreateCounter("exec_repeats_total")
-	mxDiscardsTotal = metrics.GetOrCreateCounterVec("exec_discards_total", []string{"reason"},
-		"parallel-exec tasks thrown away, by reason")
+	// this reporter's interval.
+	//
+	// exec_execs_total is the denominator rather than the existing
+	// exec_triggers: that one is a gauge holding the executor's own exec
+	// counter, which restarts with each executor, so it is not monotonic and
+	// rate() over it is meaningless.
+	mxExecsTotal = metrics.GetOrCreateCounterVec("exec_execs_total", []string{"mode"},
+		"parallel-exec task executions, by sync mode")
+	mxRepeatsTotal = metrics.GetOrCreateCounterVec("exec_repeats_total", []string{"mode"},
+		"parallel-exec re-executions, by sync mode")
+	mxDiscardsTotal = metrics.GetOrCreateCounterVec("exec_discards_total", []string{"mode", "reason"},
+		"parallel-exec tasks thrown away, by sync mode and reason")
 
 	mxExecDomainReads             = metrics.NewGauge(`exec_domain_read_rate{domain="all"}`)
 	mxExecDomainReadDuration      = metrics.NewGauge(`exec_domain_read_dur{domain="all"}`)
@@ -659,9 +666,16 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 		}
 
 		mxExecRepeats.SetInt(repeats)
-		mxRepeatsTotal.AddInt(repeats)
-		mxDiscardsTotal.WithLabelValues("abort").AddUint64(abortCount - p.prevAbortCount)
-		mxDiscardsTotal.WithLabelValues("invalid").AddUint64(invalidCount - p.prevInvalidCount)
+		// engine_newPayload drives fork validation; everything else is sync
+		// catch-up, where conflict behaviour is a different workload.
+		execMode := "sync"
+		if te.isForkValidation {
+			execMode = "newpayload"
+		}
+		mxExecsTotal.WithLabelValues(execMode).AddUint64(execDiff)
+		mxRepeatsTotal.WithLabelValues(execMode).AddInt(repeats)
+		mxDiscardsTotal.WithLabelValues(execMode, "abort").AddUint64(abortCount - p.prevAbortCount)
+		mxDiscardsTotal.WithLabelValues(execMode, "invalid").AddUint64(invalidCount - p.prevInvalidCount)
 		mxExecTriggers.SetInt(int(execCount))
 
 		p.prevExecCount = execCount
