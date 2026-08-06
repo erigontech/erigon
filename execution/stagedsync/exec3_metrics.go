@@ -45,6 +45,14 @@ var (
 	mxExecCodeReadRate    = metrics.NewGauge("exec_code_read_rate")
 	mxExecWriteRate       = metrics.NewGauge("exec_write_rate")
 
+	// Conflict signals for the parallel executor, as monotonic totals so the
+	// rate and the ratio are derived at query time rather than being fixed to
+	// this reporter's interval. The denominator for the ratio is the existing
+	// exec_triggers, which already carries the cumulative execution count.
+	mxRepeatsTotal  = metrics.GetOrCreateCounter("exec_repeats_total")
+	mxDiscardsTotal = metrics.GetOrCreateCounterVec("exec_discards_total", []string{"reason"},
+		"parallel-exec tasks thrown away, by reason")
+
 	mxExecDomainReads             = metrics.NewGauge(`exec_domain_read_rate{domain="all"}`)
 	mxExecDomainReadDuration      = metrics.NewGauge(`exec_domain_read_dur{domain="all"}`)
 	mxExecDomainCacheReads        = metrics.NewGauge(`exec_domain_cache_read_rate{domain="all"}`)
@@ -651,6 +659,9 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 		}
 
 		mxExecRepeats.SetInt(repeats)
+		mxRepeatsTotal.AddInt(repeats)
+		mxDiscardsTotal.WithLabelValues("abort").AddUint64(abortCount - p.prevAbortCount)
+		mxDiscardsTotal.WithLabelValues("invalid").AddUint64(invalidCount - p.prevInvalidCount)
 		mxExecTriggers.SetInt(int(execCount))
 
 		p.prevExecCount = execCount
