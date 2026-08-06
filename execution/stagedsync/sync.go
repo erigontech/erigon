@@ -140,6 +140,7 @@ func (s *Sync) UnwindTo(unwindPoint uint64, reason UnwindReason, tx kv.Tx) error
 			// Ignore in the case that snapshots are ahead of commitment, it will be resolved later.
 			// This can be a problem if snapshots include a wrong chain so it is ok to ignore it.
 			if errors.Is(err, commitmentdb.ErrBehindCommitment) {
+				s.logger.Info("UnwindTo: unwind request dropped, target behind commitment", "requested", unwindPoint, "err", reason.Err())
 				return nil
 			}
 			if err != nil {
@@ -538,6 +539,11 @@ func (s *Sync) unwindStage(initialCycle bool, stage *Stage, sd *execctx.SharedDo
 	unwind.Reason = s.unwindReason
 
 	if stageState.BlockNumber <= unwind.UnwindPoint {
+		if stageState.BlockNumber == unwind.UnwindPoint {
+			s.logger.Info("unwind skipped, stage exactly at unwind point", "stage", stage.ID, "unwindPoint", unwind.UnwindPoint)
+		} else {
+			s.logger.Debug("unwind skipped, stage below unwind point", "stage", stage.ID, "progress", stageState.BlockNumber, "unwindPoint", unwind.UnwindPoint)
+		}
 		return nil
 	}
 

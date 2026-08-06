@@ -407,6 +407,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 		// Do not `ResetPendingUpdates()` here. Unlike the disk-unwind path below (which discards then
 		// rebuilds commitment state via unwindExec3 + SeekCommitment), this early return only rewinds the in-RAM overlay
 
+		logger.Info(fmt.Sprintf("[%s] Unwind Execution: RAM-only, disk state untouched", u.LogPrefix()), "unwindPoint", u.UnwindPoint, "progress", s.BlockNumber)
 		_, err = unwindDomsToBlock(ctx, rwTx, cfg.blockReader, doms, s.BlockNumber, nil)
 		return err
 	}
