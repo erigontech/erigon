@@ -971,16 +971,17 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 			isBALPrePopulatedPath := path == BalancePath || path == NoncePath ||
 				path == CodePath || path == StoragePath
 			if !vm.HasBAL || !isBALPrePopulatedPath {
-				if recursive && matchesLive == nil {
+				switch {
+				case recursive && matchesLive == nil:
 					// Synthetic cross-validate probe (no recorded value of its
 					// own) — the outer entry's validation covers it. Without this
 					// guard a recursive AddressPath/SelfDestructPath probe that
 					// lands on a Done cell would over-invalidate.
-				} else if matchesLive != nil && matchesLive() {
+				case matchesLive != nil && matchesLive():
 					// Value tiebreaker: a Done entry now exists where the read
 					// saw storage, but it holds the same value — read stays valid.
 					// Evaluated typed by the caller; no boxing.
-				} else {
+				default:
 					valid = VersionInvalid
 				}
 			}
@@ -1012,16 +1013,17 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 	case MVReadResultDependency:
 		valid = VersionInvalid
 	case MVReadResultNone:
-		if source == MapRead && !recursive &&
-			(path == BalancePath || path == NoncePath || path == IncarnationPath || path == CodeHashPath) {
+		switch {
+		case source == MapRead && !recursive &&
+			(path == BalancePath || path == NoncePath || path == IncarnationPath || path == CodeHashPath):
 			// A sub-field read with no dedicated cell is recorded folded onto
 			// AddressPath (its source/version), so validate it against AddressPath
 			// at that version.
 			valid = vm.validateReadImpl(txIndex, addr, AddressPath, accounts.StorageKey{}, source,
 				version, vm.ReadStatus(addr, AddressPath, accounts.StorageKey{}, txIndex), nil, checkVersion, traceInvalid, tracePrefix, true)
-		} else if source != StorageRead {
+		case source != StorageRead:
 			valid = VersionInvalid
-		} else {
+		default:
 			if valid = checkVersion(version, version); valid == VersionValid {
 				// Cross-validate any account property read against AddressPath
 				// and SelfDestructPath.  A prior tx may have created or

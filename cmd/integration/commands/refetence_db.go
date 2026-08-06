@@ -278,19 +278,20 @@ func compareBuckets(ctx context.Context, tx kv.Tx, b string, refTx kv.Tx, refB s
 			}
 			fmt.Printf("Compared %d records\n", count)
 		}
-		if k == nil {
+		switch {
+		case k == nil:
 			fmt.Printf("Missing in db: %x [%x]\n", refK, refV)
 			refK, refV, revErr = refC.Next()
 			if revErr != nil {
 				return revErr
 			}
-		} else if refK == nil {
+		case refK == nil:
 			fmt.Printf("Missing refDB: %x [%x]\n", k, v)
 			k, v, e = c.Next()
 			if e != nil {
 				return e
 			}
-		} else {
+		default:
 			switch bytes.Compare(k, refK) {
 			case -1:
 				fmt.Printf("Missing refDB: %x [%x]\n", k, v)
