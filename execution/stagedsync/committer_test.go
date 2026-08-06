@@ -37,8 +37,8 @@ import (
 //
 // In BatchCommitments mode the calculator only computes on
 // commitComputeRequest. The very first batch of an exec3 cycle that runs
-// only the genesis block produces lastBlockResult.BlockNum=0. The dedup
-// check used to be `lastBlockResult.BlockNum > lastComputedBlock`, which
+// only the genesis block produces lastTarget.blockNum=0. The dedup
+// check used to be `lastTarget.blockNum > lastComputedBlock`, which
 // for the (very common) initial state lastComputedBlock=0 evaluates to
 // `0 > 0 == false`. So the calculator silently skipped computing and
 // publishing — leaving the genesis commitment unwritten to sd. The next
@@ -50,7 +50,7 @@ import (
 // computed" from "computed block 0".
 func TestShouldComputeOnRequest_GenesisFirstBatch(t *testing.T) {
 	cc := &commitmentCalculator{
-		lastBlockResult:   &blockResult{BlockNum: 0},
+		lastTarget:        &commitTarget{blockNum: 0},
 		lastComputedBlock: 0,
 		hasComputed:       false,
 	}
@@ -66,7 +66,7 @@ func TestShouldComputeOnRequest_GenesisFirstBatch(t *testing.T) {
 // new block boundary should NOT recompute.
 func TestShouldComputeOnRequest_AlreadyComputedSameBlock(t *testing.T) {
 	cc := &commitmentCalculator{
-		lastBlockResult:   &blockResult{BlockNum: 0},
+		lastTarget:        &commitTarget{blockNum: 0},
 		lastComputedBlock: 0,
 		hasComputed:       true,
 	}
@@ -78,7 +78,7 @@ func TestShouldComputeOnRequest_AlreadyComputedSameBlock(t *testing.T) {
 // a new block arrived since the last compute, recompute.
 func TestShouldComputeOnRequest_AdvancedBlock(t *testing.T) {
 	cc := &commitmentCalculator{
-		lastBlockResult:   &blockResult{BlockNum: 5},
+		lastTarget:        &commitTarget{blockNum: 5},
 		lastComputedBlock: 3,
 		hasComputed:       true,
 	}
@@ -91,7 +91,7 @@ func TestShouldComputeOnRequest_AdvancedBlock(t *testing.T) {
 // we publish the empty result instead of computing against nothing.
 func TestShouldComputeOnRequest_NoBlockResult(t *testing.T) {
 	cc := &commitmentCalculator{
-		lastBlockResult:   nil,
+		lastTarget:        nil,
 		lastComputedBlock: 0,
 		hasComputed:       false,
 	}
@@ -104,7 +104,7 @@ func TestShouldComputeOnRequest_NoBlockResult(t *testing.T) {
 // fires because we already advanced past it.
 func TestShouldComputeOnRequest_BlockZeroAfterAdvance(t *testing.T) {
 	cc := &commitmentCalculator{
-		lastBlockResult:   &blockResult{BlockNum: 0},
+		lastTarget:        &commitTarget{blockNum: 0},
 		lastComputedBlock: 5,
 		hasComputed:       true,
 	}

@@ -711,8 +711,7 @@ func TestExecLoopShouldExitPriority(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			br := &blockResult{BlockNum: tc.blockNum, Exhausted: tc.exhausted}
-			got := execLoopShouldExit(br, tc.sizeEst, batchLimit, tc.maxBlockNum, tc.stopAfterBlock)
+			got := execLoopShouldExit(tc.blockNum, tc.exhausted, tc.sizeEst, batchLimit, tc.maxBlockNum, tc.stopAfterBlock)
 			if got != tc.want {
 				t.Fatalf("execLoopShouldExit got %v, want %v", got, tc.want)
 			}

@@ -94,6 +94,11 @@ func NewTestExecTask(txIdx int, ops []Op, sender accounts.Address, nonce int) *t
 	}
 }
 
+func newParallelTestBlock(blockNum uint64) *types.Block {
+	header := &types.Header{Number: *uint256.NewInt(blockNum)}
+	return types.NewBlockFromStorage(common.Hash{}, header, nil, nil, nil)
+}
+
 func sleepWithContext(ctx context.Context, d time.Duration) error {
 	select {
 	case <-ctx.Done():
@@ -571,8 +576,9 @@ func executeParallelWithCheck(tb testing.TB, pe *parallelExecutor, tasks []exec.
 	ctx, cancel := context.WithCancel(context.Background())
 
 	applyResults := make(chan applyResult, 1000)
+	block := types.NewBlockFromStorage(tasks[0].BlockHash(), tasks[0].BlockHeader(), nil, nil, nil)
 
-	pe.execRequests <- &execRequest{0, common.Hash{}, nil, nil, tasks, applyResults, nil, profile, nil}
+	pe.execRequests <- &execRequest{block: block, tasks: tasks, applyResults: applyResults, profile: profile}
 
 	// TODO get results back
 
@@ -1436,7 +1442,7 @@ func TestParallelResumeBoundaryOffsets(t *testing.T) {
 
 	gasPool := new(protocol.GasPool).AddGas(10_000_000)
 
-	be := newBlockExec(0, common.Hash{}, gasPool, nil, make(chan applyResult, 1), nil, false, nil)
+	be := newBlockExec(newParallelTestBlock(0), gasPool, nil, make(chan applyResult, 1), nil, false, nil)
 	eTask := &execTask{
 		Task:  txTask,
 		index: 0,
@@ -1519,7 +1525,7 @@ func TestParallelResumeReconstructsPriorReceipts(t *testing.T) {
 
 	gasPool := new(protocol.GasPool).AddGas(10_000_000)
 
-	be := newBlockExec(1, common.Hash{}, gasPool, nil, make(chan applyResult, 4), nil, false, nil)
+	be := newBlockExec(newParallelTestBlock(1), gasPool, nil, make(chan applyResult, 4), nil, false, nil)
 	eTask := &execTask{
 		Task:  txTask,
 		index: 0,
@@ -1592,7 +1598,7 @@ func TestParallelResumeReconstructionFailureIsNonFatal(t *testing.T) {
 
 	gasPool := new(protocol.GasPool).AddGas(10_000_000)
 
-	be := newBlockExec(1, common.Hash{}, gasPool, nil, make(chan applyResult, 4), nil, false, nil)
+	be := newBlockExec(newParallelTestBlock(1), gasPool, nil, make(chan applyResult, 4), nil, false, nil)
 	eTask := &execTask{
 		Task:  txTask,
 		index: 0,
@@ -1667,7 +1673,7 @@ func TestParallelFinalizeMissingPrevReceiptErrors(t *testing.T) {
 
 	gasPool := new(protocol.GasPool).AddGas(10_000_000)
 
-	be := newBlockExec(0, common.Hash{}, gasPool, nil, make(chan applyResult, 1), nil, false, nil)
+	be := newBlockExec(newParallelTestBlock(0), gasPool, nil, make(chan applyResult, 1), nil, false, nil)
 	be.tasks = []*execTask{eTask0, eTask1}
 	be.results = []*execResult{nil, nil}
 	// tx 0 was "finalized" without a receipt — the invariant nextResult
@@ -1726,7 +1732,7 @@ func TestNextResult_NilVsEmptyRecordForkAware(t *testing.T) {
 			pe.in = exec.NewQueueWithRetry(16)
 			t.Cleanup(pe.in.Close)
 			gasPool := new(protocol.GasPool).AddGas(10_000_000)
-			be := newBlockExec(tc.blockNum, common.Hash{}, gasPool, nil, make(chan applyResult, 8), make(chan applyResult, 8), false, nil)
+			be := newBlockExec(newParallelTestBlock(tc.blockNum), gasPool, nil, make(chan applyResult, 8), make(chan applyResult, 8), false, nil)
 			eTask := &execTask{Task: txTask, index: 0}
 			be.tasks = []*execTask{eTask}
 			be.results = []*execResult{nil}

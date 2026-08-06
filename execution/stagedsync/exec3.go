@@ -480,7 +480,7 @@ func (te *txExecutor) reconstructPriorReceipts(ctx context.Context, applyTx kv.T
 	return priorReceipts, nil
 }
 
-func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHash common.Hash) {
+func (te *txExecutor) onBlockStart(ctx context.Context, block *types.Block) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			te.logger.Warn("hook panicked", "panic", rec, "stack", dbg.Stack())
@@ -491,6 +491,13 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 		return
 	}
 
+	if block == nil {
+		te.logger.Warn("hooks ignored: nil block")
+		return
+	}
+
+	blockNum := block.NumberU64()
+	blockHash := block.Hash()
 	if blockHash == (common.Hash{}) {
 		te.logger.Warn("hooks ignored: zero block hash")
 		return
@@ -498,29 +505,17 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 
 	if blockNum == 0 {
 		if te.hooks.OnGenesisBlock != nil {
-			var b *types.Block
-			if err := te.applyTx.Apply(ctx, func(tx kv.Tx) (err error) {
-				b, _, err = te.cfg.blockReader.BlockWithSenders(ctx, tx, blockHash, blockNum)
-				return err
-			}); err != nil {
-				te.logger.Warn("hook: OnGenesisBlock: abandoned", "err", err)
-			}
-			te.hooks.OnGenesisBlock(b, te.cfg.genesis.Alloc)
+			te.hooks.OnGenesisBlock(block, te.cfg.genesis.Alloc)
 		}
 	} else {
 		if te.hooks.OnBlockStart != nil {
-			var b *types.Block
 			var td *uint256.Int
 			var finalized *types.Header
 			var safe *types.Header
 
 			if err := te.applyTx.Apply(ctx, func(tx kv.Tx) (err error) {
-				b, _, err = te.cfg.blockReader.BlockWithSenders(ctx, tx, blockHash, blockNum)
-				if err != nil {
-					return err
-				}
-				chainReader := exec.NewChainReader(te.cfg.chainConfig, te.applyTx, te.cfg.blockReader, te.logger)
-				td = chainReader.GetTd(b.ParentHash(), b.NumberU64()-1)
+				chainReader := exec.NewChainReader(te.cfg.chainConfig, tx, te.cfg.blockReader, te.logger)
+				td = chainReader.GetTd(block.ParentHash(), blockNum-1)
 				finalized = chainReader.CurrentFinalizedHeader()
 				safe = chainReader.CurrentSafeHeader()
 				return nil
@@ -529,7 +524,7 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 			}
 
 			te.hooks.OnBlockStart(tracing.BlockEvent{
-				Block:     b,
+				Block:     block,
 				TD:        td,
 				Finalized: finalized,
 				Safe:      safe,
@@ -619,7 +614,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			}
 			b, ok := te.cfg.readAheader.ReadBlockWithSenders(canonicalHash)
 			if b == nil || !ok {
-				b, err = exec.BlockWithSenders(ctx, te.cfg.db, blockTx, te.cfg.blockReader, blockNum)
+				b, _, err = te.cfg.blockReader.BlockWithSenders(ctx, blockTx, canonicalHash, blockNum)
 			}
 			if err != nil {
 				return err
@@ -737,9 +732,15 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 				}
 			}
 			select {
-			case te.execRequests <- &execRequest{b.NumberU64(), b.Hash(),
-				protocol.NewGasPool(b.GasLimit(), te.cfg.chainConfig.GetMaxBlobGasPerBlock(b.Time())),
-				dbBAL, txTasks, applyResults, commitResults, false, exhausted}:
+			case te.execRequests <- &execRequest{
+				block:         b,
+				gasPool:       protocol.NewGasPool(b.GasLimit(), te.cfg.chainConfig.GetMaxBlobGasPerBlock(b.Time())),
+				accessList:    dbBAL,
+				tasks:         txTasks,
+				applyResults:  applyResults,
+				commitResults: commitResults,
+				exhausted:     exhausted,
+			}:
 			case <-ctx.Done():
 				return ctx.Err()
 			}
