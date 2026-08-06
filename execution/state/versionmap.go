@@ -581,6 +581,22 @@ func (vm *VersionMap) AnyDoneSelfDestructEquals(addr accounts.Address, txIdxLimi
 	return found
 }
 
+// wipedByInRangeDestruct reports whether an in-block SELFDESTRUCT cleared the
+// value a reader would otherwise return. floor is the tx index of the version
+// map cell holding that value, or -1 when it comes from before the block. The
+// latest SelfDestruct entry cannot answer this on its own: once the account is
+// revived, that entry is the revival.
+func (vm *VersionMap) wipedByInRangeDestruct(addr accounts.Address, floor, txIndex int) bool {
+	if vm == nil {
+		return false
+	}
+	if floor < 0 {
+		return vm.AnyDoneSelfDestructEquals(addr, txIndex-1, true)
+	}
+	_, found := vm.FindDoneSelfDestructInRange(addr, floor, txIndex, true)
+	return found
+}
+
 // HasDoneSelfDestructAt reports whether a Done SelfDestruct cell holding target
 // sits at exactly ver.
 func (vm *VersionMap) HasDoneSelfDestructAt(addr accounts.Address, ver Version, target bool) bool {

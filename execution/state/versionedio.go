@@ -1681,28 +1681,12 @@ func versionedUpdateIncarnation(vm *VersionMap, addr accounts.Address, txIndex i
 	return 0, false
 }
 
-func versionedUpdateCode(vm *VersionMap, addr accounts.Address, txIndex int) ([]byte, bool) {
-	val, res, ok := vm.ReadCode(addr, txIndex)
-	if ok && res.Status() != MVReadResultNone {
-		return val.Bytes, true
-	}
-	return nil, false
-}
-
 func versionedUpdateCodeHash(vm *VersionMap, addr accounts.Address, txIndex int) (accounts.CodeHash, bool) {
 	val, res, ok := vm.ReadCodeHash(addr, txIndex)
 	if ok && res.Status() != MVReadResultNone {
 		return val, true
 	}
 	return accounts.CodeHash{}, false
-}
-
-func versionedUpdateStorage(vm *VersionMap, addr accounts.Address, key accounts.StorageKey, txIndex int) (uint256.Int, bool) {
-	val, res, ok := vm.ReadStorage(addr, key, txIndex)
-	if ok && res.Status() != MVReadResultNone {
-		return val, true
-	}
-	return uint256.Int{}, false
 }
 
 // applyVersionedUpdates applies updated from the version map to the account before returning it, this is necessary
@@ -1759,8 +1743,15 @@ func (vr versionedStateReader) ReadAccountStorage(address accounts.Address, key 
 				return uint256.Int{}, false, nil
 			}
 		}
-		if val, ok := versionedUpdateStorage(vr.versionMap, address, key, vr.txIndex); ok {
+		val, res, ok := vr.versionMap.ReadStorage(address, key, vr.txIndex)
+		if ok && res.Status() != MVReadResultNone {
+			if vr.versionMap.wipedByInRangeDestruct(address, res.Version().TxIndex, vr.txIndex) {
+				return uint256.Int{}, false, nil
+			}
 			return val, true, nil
+		}
+		if vr.versionMap.wipedByInRangeDestruct(address, -1, vr.txIndex) {
+			return uint256.Int{}, false, nil
 		}
 	}
 
@@ -1796,8 +1787,15 @@ func (vr versionedStateReader) ReadAccountCode(address accounts.Address) ([]byte
 				return nil, nil
 			}
 		}
-		if code, ok := versionedUpdateCode(vr.versionMap, address, vr.txIndex); ok {
-			return code, nil
+		code, res, ok := vr.versionMap.ReadCode(address, vr.txIndex)
+		if ok && res.Status() != MVReadResultNone {
+			if vr.versionMap.wipedByInRangeDestruct(address, res.Version().TxIndex, vr.txIndex) {
+				return nil, nil
+			}
+			return code.Bytes, nil
+		}
+		if vr.versionMap.wipedByInRangeDestruct(address, -1, vr.txIndex) {
+			return nil, nil
 		}
 	}
 
@@ -1819,8 +1817,15 @@ func (vr versionedStateReader) ReadAccountCodeSize(address accounts.Address) (in
 				return 0, nil
 			}
 		}
-		if code, ok := versionedUpdateCode(vr.versionMap, address, vr.txIndex); ok {
-			return len(code), nil
+		code, res, ok := vr.versionMap.ReadCode(address, vr.txIndex)
+		if ok && res.Status() != MVReadResultNone {
+			if vr.versionMap.wipedByInRangeDestruct(address, res.Version().TxIndex, vr.txIndex) {
+				return 0, nil
+			}
+			return len(code.Bytes), nil
+		}
+		if vr.versionMap.wipedByInRangeDestruct(address, -1, vr.txIndex) {
+			return 0, nil
 		}
 	}
 

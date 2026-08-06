@@ -495,12 +495,22 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 			s.versionedReads.SetHeader(addr, path, key, hdr)
 			panic(ErrDependency)
 		}
-		// CodePath trumped by SelfDestruct at >= DepIdx
-		if path == CodePath {
-			if destructed, sdres, ok := s.versionMap.ReadSelfDestruct(addr, s.txIndex); ok && sdres.Status() == MVReadResultDone && destructed && sdres.DepIdx() >= res.DepIdx() {
+		// Code and code size are trumped by a destruct at or above the cell. The
+		// revival that follows one clears the account's code without writing a
+		// CodePath cell, so a latest-only probe would hand back the pre-destruct
+		// code; scan the range instead, as the storage case below does.
+		if path == CodePath || path == CodeSizePath {
+			if sdVer, ok := s.versionMap.FindDoneSelfDestructInRange(addr, hdr.Version.TxIndex, s.txIndex, true); ok {
+				if !commited {
+					s.versionedReads.SetSelfDestructInRange(addr, VersionedRead[bool]{
+						ReadHeader: ReadHeader{Source: MapRead, Version: sdVer},
+						Val:        true,
+					})
+					s.versionedReads.SetHeader(addr, path, key, hdr)
+				}
 				r.outcome = outcomeReturnDefault
 				r.source = MapRead
-				r.version = Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}
+				r.version = sdVer
 				return
 			}
 		}
