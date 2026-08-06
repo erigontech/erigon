@@ -13,6 +13,7 @@ import (
 	"cmp"
 	"encoding/binary"
 	"errors"
+	"runtime/debug"
 	"slices"
 	"testing"
 	"time"
@@ -787,6 +788,16 @@ func TestContractTrunkPreloadParallel_BadHashLengthError(t *testing.T) {
 	}
 }
 
+// panicOnStuck aborts the test binary rather than just failing the test. Run has
+// no cancellation, so a livelock regression would leave a goroutine spinning on a
+// core for the rest of the package run and time out unrelated tests. The
+// traceback setting widens the dump to every goroutine so the spinning one, not
+// just this waiter, shows up in the failure output.
+func panicOnStuck(why string) {
+	debug.SetTraceback("all")
+	panic("ContractTrunkPreloadParallel.Run did not terminate: " + why)
+}
+
 // TestContractTrunkPreloadParallel_ExactBudgetFillTerminates covers a wave whose
 // pins land usedBytes exactly on stepCap, followed by a frontier that misses
 // dbBranches entirely. That leaves no budget for a single file entry, so the
@@ -832,7 +843,7 @@ func TestContractTrunkPreloadParallel_ExactBudgetFillTerminates(t *testing.T) {
 	select {
 	case got = <-res:
 	case <-time.After(10 * time.Second):
-		t.Fatal("Run did not terminate: a wave with no file budget defers the whole frontier without pinning, so the loop re-enters on identical state")
+		panicOnStuck("a wave with no file budget defers the whole frontier without pinning, so the loop re-enters on identical state")
 	}
 	if got.err != nil {
 		t.Fatal(got.err)
@@ -855,10 +866,11 @@ func TestContractTrunkPreloadParallel_ExactBudgetFillTerminates(t *testing.T) {
 	}
 }
 
-// TestContractTrunkPreloadParallel_StepBudgetSweepTerminates drives the wave-BFS
-// to completion across step budgets straddling the exact cost of one entry, the
-// values that leave a wave with zero file budget. No Run may spin, and any budget
-// that can afford the root must finish the tree.
+// TestContractTrunkPreloadParallel_StepBudgetSweepTerminates sweeps step budgets
+// straddling one entry's cost, including the values that leave a wave with zero
+// file budget. Every Run must return; a budget that can afford the costliest
+// entry must additionally finish the tree, since it can always pin at least one
+// entry per step.
 func TestContractTrunkPreloadParallel_StepBudgetSweepTerminates(t *testing.T) {
 	hash, tree, _ := buildSyntheticTree(t)
 	root := ""
@@ -874,10 +886,16 @@ func TestContractTrunkPreloadParallel_StepBudgetSweepTerminates(t *testing.T) {
 	dbBranches := map[string][]byte{string(rootKey): rootVal}
 	exact := estimatedEntryCost(rootKey, rootVal)
 
-	// Entry cost grows with path depth, so only a budget comfortably above one
-	// entry is guaranteed to keep making progress; smaller ones must still return.
+	// Entry cost grows with path depth, so derive the guaranteed-progress budget
+	// from the costliest entry in the tree rather than scaling the root's cost.
+	affordable := 0
+	for path, afterMap := range tree {
+		if cost := estimatedEntryCost(nibbles.HexToCompact([]byte(path)), branchVal(afterMap, valSz)); cost > affordable {
+			affordable = cost
+		}
+	}
+
 	const maxSteps = 200
-	affordable := 4 * exact
 	budgets := []int{1, minEntryBytes, exact - 1, exact, exact + 1, affordable, 1 << 20}
 
 	type sweepResult struct {
@@ -919,7 +937,7 @@ func TestContractTrunkPreloadParallel_StepBudgetSweepTerminates(t *testing.T) {
 	select {
 	case out = <-results:
 	case <-time.After(30 * time.Second):
-		t.Fatal("a Run did not terminate: a wave with no file budget must end the step, not re-enter on an unchanged frontier")
+		panicOnStuck("a wave with no file budget must end the step, not re-enter on an unchanged frontier")
 	}
 
 	for _, r := range out {
