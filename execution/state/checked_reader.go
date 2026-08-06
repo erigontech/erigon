@@ -27,7 +27,7 @@ import (
 )
 
 // assertNormalizeReads turns on the cross-check in NewNormalizeReader.
-var assertNormalizeReads = dbg.EnvBool("NORMALIZE_ASSERT_READS", false)
+var assertNormalizeReads = dbg.EnvBool("NORMALIZE_ASSERT_READS", true)
 
 // NewNormalizeReader returns the reader Normalize should use: the tx's own
 // recorded reads first, then the versionMap, then the domain.
