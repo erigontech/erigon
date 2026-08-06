@@ -3314,6 +3314,25 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 // isn't silent.
 var codePathRecoveryHashMismatch = metrics.GetOrCreateCounter("exec3_codepath_recovery_hash_mismatch")
 
+// dropForSelfDestruct reports whether a write on this path must be dropped when
+// its address self-destructed in this tx, so applyVersionedWrites reaches the
+// pure-delete branch instead of cleanup-before-recreate. Exhaustive by design:
+// a new path has to state its answer here.
+func dropForSelfDestruct(path state.AccountPath, eip8246 bool) bool {
+	switch path {
+	case state.NoncePath, state.IncarnationPath, state.CodeHashPath, state.CodePath, state.StoragePath:
+		return true
+	case state.BalancePath:
+		// EIP-8246 keeps the post-SD balance so the calculator can
+		// preserve a balance-only account (or delete it when zero);
+		// pre-8246 drops it so the account is purely deleted.
+		return !eip8246
+	case state.AddressPath, state.CreateContractPath, state.SelfDestructPath, state.CodeSizePath:
+		return false
+	}
+	return false
+}
+
 func normalizeWriteSet(writes *state.WriteSet, vm *state.VersionMap, txIndex int, incarnation int, stateReader state.StateReader, domainStorageKeys func(addr accounts.Address) []accounts.StorageKey, emptyRemoval bool, isAura bool, eip8246 bool) *state.WriteSet {
 	filtered := &state.WriteSet{}
 	if writes == nil {
@@ -3379,26 +3398,23 @@ func normalizeWriteSet(writes *state.WriteSet, vm *state.VersionMap, txIndex int
 		}
 	}
 
-	// Addresses of every field-level write in the raw input, collected during
-	// the walk so the fill loop below needs no second pass. Filtering must not
+	// Collect all addresses from the raw input (before filtering) — done
+	// during the walk below, so no second pass is needed. Filtering must not
 	// narrow it: an address whose writes are all dropped still needs its
 	// account fields.
 	allAddresses := make(map[accounts.Address]bool)
 
 	// Drop account-field writes for SD'd addresses so applyVersionedWrites
 	// takes the pure-delete branch instead of cleanup-before-recreate; drop
-	// raw StoragePath writes too (the self-destruct loop re-emits an
+	// raw StoragePath writes too (the SelfDestructPath loop re-emits an
 	// explicit StoragePath=0 delete for every slot via sdStorageSlots).
 	for addr, vw := range writes.Balances() {
 		allAddresses[addr] = true
-		// EIP-8246 keeps the post-SD balance so the calculator can preserve a
-		// balance-only account (or delete it when zero); pre-8246 drops it so
-		// the account is purely deleted.
-		if sdSet[addr] && !eip8246 {
+		if sdSet[addr] && dropForSelfDestruct(state.BalancePath, eip8246) {
 			continue
 		}
-		// Account fields: prefer the versionMap's accumulated value; fall back
-		// to the raw write when the map has none.
+		// Account fields: prefer the versionMap's accumulated value; fall
+		// back to the raw write when the map has none.
 		if !state.SetAccountFieldFromMap(filtered, vm, addr, state.BalancePath, vw.Version, txIndex+1) {
 			filtered.SetBalance(addr, vw)
 		}
@@ -3406,7 +3422,7 @@ func normalizeWriteSet(writes *state.WriteSet, vm *state.VersionMap, txIndex int
 
 	for addr, vw := range writes.Nonces() {
 		allAddresses[addr] = true
-		if sdSet[addr] {
+		if sdSet[addr] && dropForSelfDestruct(state.NoncePath, eip8246) {
 			continue
 		}
 		if !state.SetAccountFieldFromMap(filtered, vm, addr, state.NoncePath, vw.Version, txIndex+1) {
@@ -3416,7 +3432,7 @@ func normalizeWriteSet(writes *state.WriteSet, vm *state.VersionMap, txIndex int
 
 	for addr, vw := range writes.Incarnations() {
 		allAddresses[addr] = true
-		if sdSet[addr] {
+		if sdSet[addr] && dropForSelfDestruct(state.IncarnationPath, eip8246) {
 			continue
 		}
 		if !state.SetAccountFieldFromMap(filtered, vm, addr, state.IncarnationPath, vw.Version, txIndex+1) {
@@ -3426,7 +3442,7 @@ func normalizeWriteSet(writes *state.WriteSet, vm *state.VersionMap, txIndex int
 
 	for addr, vw := range writes.CodeHashes() {
 		allAddresses[addr] = true
-		if sdSet[addr] {
+		if sdSet[addr] && dropForSelfDestruct(state.CodeHashPath, eip8246) {
 			continue
 		}
 		if !state.SetAccountFieldFromMap(filtered, vm, addr, state.CodeHashPath, vw.Version, txIndex+1) {
@@ -3438,7 +3454,8 @@ func normalizeWriteSet(writes *state.WriteSet, vm *state.VersionMap, txIndex int
 	// here down; stale entries from a prior incarnation are dropped.
 	for addr, vw := range writes.Codes() {
 		allAddresses[addr] = true
-		if sdSet[addr] || vw.Version.Incarnation != incarnation {
+		if vw.Version.Incarnation != incarnation ||
+			(sdSet[addr] && dropForSelfDestruct(state.CodePath, eip8246)) {
 			continue
 		}
 		filtered.SetCode(addr, vw)
@@ -3446,7 +3463,8 @@ func normalizeWriteSet(writes *state.WriteSet, vm *state.VersionMap, txIndex int
 
 	for addr, vw := range writes.CreateContracts() {
 		allAddresses[addr] = true
-		if vw.Version.Incarnation != incarnation {
+		if vw.Version.Incarnation != incarnation ||
+			(sdSet[addr] && dropForSelfDestruct(state.CreateContractPath, eip8246)) {
 			continue
 		}
 		filtered.SetCreateContract(addr, vw)
@@ -3456,7 +3474,8 @@ func normalizeWriteSet(writes *state.WriteSet, vm *state.VersionMap, txIndex int
 		allAddresses[addr] = true
 		// Only emit storage DELETE entries when the account was actually
 		// self-destructed (val=true).
-		if vw.Version.Incarnation != incarnation || !vw.Val {
+		if vw.Version.Incarnation != incarnation || !vw.Val ||
+			(sdSet[addr] && dropForSelfDestruct(state.SelfDestructPath, eip8246)) {
 			continue
 		}
 		filtered.SetSelfDestruct(addr, vw)
@@ -3472,16 +3491,15 @@ func normalizeWriteSet(writes *state.WriteSet, vm *state.VersionMap, txIndex int
 		}
 	}
 
-	// Code size is derived from the code bytes and isn't a domain field, so it's
-	// intentionally not carried into the calc/apply write set (as on serial).
-	// Cross-tx ReadCodeSize is served from the versionMap, which the worker
-	// populates directly — independent of this pass.
+	// Code size is derived from the code bytes and isn't a domain field,
+	// so it's intentionally not carried into the calc/apply write set (as
+	// on serial). Cross-tx ReadCodeSize is served from the versionMap,
+	// which the worker populates directly — independent of this pass.
 	for addr := range writes.CodeSizes() {
 		allAddresses[addr] = true
 	}
 
-	// writes.Addresses is not walked: AddressPath is record-level — skip for
-	// field-level consumers.
+	// AddressPath is record-level — skip for field-level consumers.
 
 	for addr, inner := range writes.Storages() {
 		// Both self-destruct probes below key on the address alone, so they are
@@ -3492,7 +3510,8 @@ func normalizeWriteSet(writes *state.WriteSet, vm *state.VersionMap, txIndex int
 		for key, sw := range inner {
 			allAddresses[addr] = true
 			// Only include writes from the current (validated) incarnation.
-			if sdSet[addr] || sw.Version.Incarnation != incarnation {
+			if sw.Version.Incarnation != incarnation ||
+				(sdSet[addr] && dropForSelfDestruct(state.StoragePath, eip8246)) {
 				continue
 			}
 			writeVal := sw.Val
