@@ -198,13 +198,16 @@ func (br *BlockRetire) borSnapshots() *heimdall.RoSnapshots {
 	return br.blockReader.BorSnapshots().(*heimdall.RoSnapshots)
 }
 
-func CanRetire(curBlockNum uint64, blocksInSnapshots uint64, snapType snaptype.Enum, snCfg *snapcfg.Cfg) (blockFrom, blockTo uint64, can bool) {
-	var keep uint64 = dbg.MaxReorgDepth
+func (br *BlockRetire) canRetire(curBlockNum uint64, blocksInSnapshots uint64, snapType snaptype.Enum) (blockFrom, blockTo uint64, can bool) {
+	//
+	// TODO(milen): finalisedHash check
+	//
+	keep := br.config.MaxReorgDepth
 	if curBlockNum <= keep {
 		return
 	}
 	blockFrom = blocksInSnapshots + 1
-	return snapshotsync.CanRetire(blockFrom, curBlockNum-keep, snapType, snCfg)
+	return snapshotsync.CanRetire(blockFrom, curBlockNum-keep, snapType, br.snCfg, br.config.Snapshot.E2RetireStep)
 }
 
 func CanDeleteTo(curBlockNum uint64, blocksInSnapshots uint64) (blockTo uint64) {
@@ -270,8 +273,7 @@ func (br *BlockRetire) buildFiles(
 	notifier, logger, blockReader, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, br.workers.Load()
 	snapshots := br.snapshots()
 
-	blockFrom, blockTo, ok := CanRetire(maxBlockNum, minBlockNum, snaptype.Unknown, br.snCfg)
-
+	blockFrom, blockTo, ok := br.canRetire(maxBlockNum, minBlockNum, snaptype.Unknown)
 	if ok {
 		if has, err := br.dbHasEnoughDataForBlocksRetire(ctx); err != nil {
 			return false, err

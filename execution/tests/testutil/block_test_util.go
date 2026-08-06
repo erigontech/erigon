@@ -365,7 +365,8 @@ func (bt *BlockTest) insertBlocks(m *execmoduletester.ExecModuleTester) ([]btBlo
 			}
 		}
 		// RLP decoding worked, try to insert into chain:
-		chain := &blockgen.ChainPack{Blocks: []*types.Block{cb}, Headers: []*types.Header{cb.Header()}, TopBlock: cb, BlockAccessLists: [][]byte{balBytes}}
+		cb.SetBlockAccessList(balBytes)
+		chain := &blockgen.ChainPack{Blocks: []*types.Block{cb}, Headers: []*types.Header{cb.Header()}, TopBlock: cb}
 		var previousHead *types.Header
 		if b.BlockHeader == nil {
 			previousHead, err = m.ExecModule.CurrentHeader(m.Ctx)
