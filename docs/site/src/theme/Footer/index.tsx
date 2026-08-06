@@ -42,10 +42,16 @@ export default function Footer(): React.ReactElement {
 
         {/* Brand column */}
         <div style={{display: 'flex', flexDirection: 'column', gap: '1rem'}}>
-          <div style={{display: 'flex', alignItems: 'center', gap: '0.6rem'}}>
+          {/* Brand lockup links to the corporate home page. One anchor wraps
+              both logo and wordmark so it is a single hit target. */}
+          <a href="https://erigon.tech" target="_blank" rel="noopener noreferrer"
+            aria-label="Erigon home page"
+            style={{display: 'flex', alignItems: 'center', gap: '0.6rem', color: 'inherit', textDecoration: 'none', transition: 'color 0.15s'}}
+            onMouseEnter={e => (e.currentTarget.style.color = '#EF7716')}
+            onMouseLeave={e => (e.currentTarget.style.color = 'inherit')}>
             <img src={logoUrl} alt="Erigon" style={{height: '32px', width: 'auto'}} />
-            <span style={{fontFamily: "'Montserrat', sans-serif", fontWeight: 800, fontSize: '1rem', letterSpacing: '0.04em'}}>erigon.tech</span>
-          </div>
+            <span style={{fontFamily: "'Quantify', sans-serif", fontWeight: 700, fontSize: '1rem', letterSpacing: '0.04em'}}>erigon.tech</span>
+          </a>
           <p style={{
             fontSize: '0.875rem',
             color: 'rgba(255,255,255,0.55)',
