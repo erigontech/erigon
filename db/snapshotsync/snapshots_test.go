@@ -1458,6 +1458,75 @@ func TestOpenListOpensOnlyNamedFiles(t *testing.T) {
 	require.Equal(10_000-1, int(s.IndicesMax()))
 }
 
+// A duplicate name resolves to one DirtySegment twice, so without deduplication both
+// occurrences open its indexes concurrently. Meaningful under -race.
+// A reader pinned to generation G1 keeps every segment G1 references alive. If an
+// unpinned G2 is published after that pin, Close must still honour G1: gating the fd
+// close on the outgoing generation alone closes segments the G1 reader is reading.
+func TestCloseKeepsSegmentPinnedByOlderGeneration(t *testing.T) {
+	logger := log.New()
+	tmpDir := t.TempDir()
+	require := require.New(t)
+
+	for _, snT := range snaptype2.BlockSnapshotTypes {
+		createTestSegmentFile(t, 0, 1_000, snT.Enum(), tmpDir, version.V1_0, logger)
+	}
+
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, tmpDir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	require.NoError(s.OpenFolder())
+
+	v := s.View()
+	defer v.Close()
+	g1 := v.snapshotVisible
+
+	seg, ok := v.Segment(snaptype2.Headers, 500)
+	require.True(ok)
+	word, ok := readFirstWord(seg.Src())
+	require.True(ok)
+	require.Equal([]byte{1}, word, "sanity: the pinned segment reads before anything is closed")
+
+	// A no-op OpenFolder republishes the same segments as G2, which nobody pins.
+	require.NoError(s.OpenFolder())
+	g2 := s.visible.Load()
+	require.NotSame(g1, g2, "OpenFolder must have published a new generation")
+	require.Zero(g2.refcnt.Load(), "G2 must be unpinned")
+	require.Equal(int32(1), g1.refcnt.Load(), "G1 must still be pinned by the live View")
+
+	s.Close()
+
+	word, ok = readFirstWord(seg.Src())
+	require.True(ok, "a reader pinned to an older generation must still read its segment after Close")
+	require.Equal([]byte{1}, word)
+}
+
+func readFirstWord(sn *DirtySegment) ([]byte, bool) {
+	if sn.Decompressor == nil {
+		return nil, false
+	}
+	g := sn.MakeGetter()
+	g.Reset(0)
+	if !g.HasNext() {
+		return nil, false
+	}
+	word, _ := g.Next(nil)
+	return word, true
+}
+
+func TestOpenListToleratesDuplicateNames(t *testing.T) {
+	logger := log.New()
+	dir, require := t.TempDir(), require.New(t)
+	createTestSegmentFile(t, 0, 10_000, snaptype2.Enums.Headers, dir, version.V1_0, logger)
+	name := snaptype.SegmentFileName(version.V1_0, 0, 10_000, snaptype2.Enums.Headers)
+
+	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
+	s := NewBaseRoSnapshots(cfg, dir, []snaptype.Type{snaptype2.Headers}, snaptype2.Headers, false, logger)
+	defer s.Close()
+
+	require.NoError(s.OpenList([]string{name, name}, false))
+	require.Equal(1, s.dirty[snaptype2.Enums.Headers].Len())
+	require.True(visibleHas(s, snaptype2.Enums.Headers, 0, 10_000))
+}
+
 func TestViewSegmentsOfUnmanagedType(t *testing.T) {
 	logger := log.New()
 	dir, require := t.TempDir(), require.New(t)

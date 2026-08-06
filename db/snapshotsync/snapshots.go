@@ -956,6 +956,19 @@ func (s *BaseRoSnapshots) reclaimRetired() {
 	reclaimSegments(toDelete)
 }
 
+// hasPinnedGenerationsLocked reports whether any superseded generation still has readers.
+// Generations share `*DirtySegment`s, so a segment is only safe to close once every one of
+// them has drained, not just the newest. Must be called with dirtyLock held.
+func (s *BaseRoSnapshots) hasPinnedGenerationsLocked() bool {
+	cur := s.visible.Load()
+	for h := s.oldestVisible; h != cur; h = h.next {
+		if h.refcnt.Load() != 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // retiredSegments were removed from the dirty set and handed to the outgoing visible
 // generation; they are closed (and deleted from disk when canDelete) once the last
 // reader of that generation drains. See mvcc.RetireReason.
@@ -1144,7 +1157,16 @@ func (s *BaseRoSnapshots) openSegments(fileNames []string, open bool, optimistic
 		}
 	}
 
+	// A repeated name resolves to the same DirtySegment twice and would schedule two
+	// concurrent OpenIdxIfNeed on it, which race on its index slice.
+	seen := make(map[string]struct{}, len(fileNames))
+
 	for _, fName := range fileNames {
+		if _, dup := seen[fName]; dup {
+			continue
+		}
+		seen[fName] = struct{}{}
+
 		f, isState, ok := snaptype.ParseFileName(s.dir, fName)
 		if !ok || isState || snaptype.IsTorrentPartial(f.Ext) {
 			continue
@@ -1310,16 +1332,15 @@ func (s *BaseRoSnapshots) Close() {
 
 	detached := s.detachNotInList(nil)
 
-	// Publish the empty generation before reading the outgoing one's refcnt, so a concurrent
-	// lock-free View() re-check fails its pin on it and retries onto the empty generation.
-	prev := s.visible.Load()
+	// Publish the empty generation before reading refcounts, so a concurrent lock-free
+	// View() re-check fails its pin and retries onto the empty generation.
 	s.recalcVisibleFiles(s.alignMin, nil)
 
-	// Close fds only when no reader still pins the outgoing generation; closing a segment
-	// a live View holds would nil its Decompressor out from under that reader. At shutdown
-	// leaking the fds is preferable to that use-after-close.
-	if prev != nil && prev.refcnt.Load() != 0 {
-		s.logger.Warn("[snapshots] Close called with live readers; leaving fds open", "refcnt", prev.refcnt.Load())
+	// Close fds only once every superseded generation has drained; closing a segment a live
+	// View holds would nil its Decompressor out from under that reader. At shutdown leaking
+	// the fds is preferable to that use-after-close.
+	if s.hasPinnedGenerationsLocked() {
+		s.logger.Warn("[snapshots] Close called with live readers; leaving fds open")
 	} else {
 		for _, sn := range detached {
 			sn.close()
