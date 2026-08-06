@@ -180,18 +180,23 @@ func ExecV3(ctx context.Context,
 	startBlockNum := blockNum
 	blockLimit := uint64(cfg.syncCfg.LoopBlockLimit)
 
-	doms.EnableParaTrieDB(cfg.db)
-	doms.EnableTrieWarmup(true)
-	doms.SetDeferCommitmentUpdates(false)
-	// Enable deferred commitment updates for fork validation and parallel initial sync.
-	// Deferred updates batch commitment calculations to block boundaries rather than
-	// per-transaction, significantly reducing re-org validation overhead.
-	// For the parallel path during initial sync, Flush() now includes pending updates,
-	// so they are no longer silently discarded between StageLoopIteration cycles.
-	if isForkValidation || isApplyingBlocks {
-		doms.SetDeferCommitmentUpdates(true)
+	// Exec-only mode (discardCommitment) runs no trie work, so skip the trie
+	// setup entirely: EnableParaTrieDB after the witness seed's DomainPut touches
+	// would panic on the dropped sequential-buffer keys (ERIGON_COMMITMENT_PARALLEL).
+	if !cfg.discardCommitment {
+		doms.EnableParaTrieDB(cfg.db)
+		doms.EnableTrieWarmup(true)
+		doms.SetDeferCommitmentUpdates(false)
+		// Enable deferred commitment updates for fork validation and parallel initial sync.
+		// Deferred updates batch commitment calculations to block boundaries rather than
+		// per-transaction, significantly reducing re-org validation overhead.
+		// For the parallel path during initial sync, Flush() now includes pending updates,
+		// so they are no longer silently discarded between StageLoopIteration cycles.
+		if isForkValidation || isApplyingBlocks {
+			doms.SetDeferCommitmentUpdates(true)
+		}
+		defer doms.SetDeferCommitmentUpdates(false)
 	}
-	defer doms.SetDeferCommitmentUpdates(false)
 	// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
 	// can't use OS-level ReadAhead - because Data >> RAM
 	// it also warmsup state a bit - by touching senders/coninbase accounts and code
