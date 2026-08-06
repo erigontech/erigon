@@ -32,7 +32,7 @@ import (
 )
 
 type StateChangeSet struct {
-	Diffs [kv.DomainLen]kv.DomainDiff // there are 4 domains of state changes
+	Diffs [kv.DomainLen]kv.DomainDiff
 }
 
 func (s *StateChangeSet) Copy() *StateChangeSet {
