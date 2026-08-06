@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
@@ -368,6 +369,23 @@ func stageProgress(tx kv.Tx, db kv.RoDB, stage stages.SyncStage) (prevStageProgr
 
 // ================ Erigon3 End ================
 
+// resolveExecResumePoint picks where a resumed exec run restarts. The committed
+// commitment boundary (SeekCommitment) is normally authoritative. Exec-only mode
+// (discardCommitment) never advances KeyCommitmentState, so a resume would restart
+// at the stale pre-run boundary and re-execute blocks whose flat state a prior
+// size-limited batch already flushed. When Execution progress has moved past the
+// commitment boundary, resume from Execution progress instead.
+func resolveExecResumePoint(ctx context.Context, txNumReader rawdbv3.TxNumsReader, tx kv.Tx, discardCommitment bool, execProgress, seekTxNum, seekBlock uint64) (txNum, blockNum uint64, err error) {
+	if !discardCommitment || execProgress <= seekBlock {
+		return seekTxNum, seekBlock, nil
+	}
+	execTxNum, err := txNumReader.Max(ctx, tx, execProgress)
+	if err != nil {
+		return 0, 0, err
+	}
+	return execTxNum, execProgress, nil
+}
+
 func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) (err error) {
 	if dbg.StagesOnlyBlocks {
 		return nil
@@ -390,6 +408,10 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 	// and exec window from committed domains + the txNum index before handing a
 	// resolved execRange to ExecV3.
 	initialTxNum, blockNum, err := doms.SeekCommitment(ctx, rwTx)
+	if err != nil {
+		return err
+	}
+	initialTxNum, blockNum, err = resolveExecResumePoint(ctx, cfg.blockReader.TxnumReader(), rwTx, cfg.discardCommitment, s.BlockNumber, initialTxNum, blockNum)
 	if err != nil {
 		return err
 	}
