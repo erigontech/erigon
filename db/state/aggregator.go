@@ -605,6 +605,12 @@ func (a *Aggregator) Unwind(txN uint64) {
 }
 
 func (a *Aggregator) OpenFolder() error {
+	// TEMP-INSTR-2026-08-06 [dbg-openfolder]: caller trace paired with
+	// [dbg-recalcVisible] to spot ordering issues around v4 emits.
+	if _, cf, cl, ok := runtime.Caller(1); ok {
+		log.Warn("[dbg-openfolder] Aggregator.OpenFolder called",
+			"caller", fmt.Sprintf("%s:%d", filepath.Base(cf), cl))
+	}
 	a.dirtyFilesLock.Lock()
 	if err := a.reloadSalt(); err != nil {
 		a.dirtyFilesLock.Unlock()
@@ -1049,6 +1055,20 @@ var v4KVFileNameRegex = regexp.MustCompile(`^v([4-9]|[1-9][0-9]+)\.(\d+)-([[:low
 // accounts/storage/code/receipt/commitment-under-AGG_COMMITMENT_BT,
 // hash-map otherwise. Per-domain d.Accessors is authoritative.
 func (a *Aggregator) BuildKVAccessors(ctx context.Context, domain kv.Domain, dataPath, finalPath string) error {
+	// TEMP-INSTR-2026-08-06 [dbg-buildaccessors]: entry log paired with
+	// [dbg-recalcVisible] so we can correlate v4 emit completion with the
+	// visible-set update that would (or would not) include it before
+	// forward-exec opens its next tx snapshot.
+	log.Warn("[dbg-buildaccessors] BuildKVAccessors entry",
+		"domain", domain,
+		"dataPath", filepath.Base(dataPath),
+		"finalPath", filepath.Base(finalPath))
+	defer func() {
+		log.Warn("[dbg-buildaccessors] BuildKVAccessors exit",
+			"domain", domain,
+			"finalPath", filepath.Base(finalPath))
+	}()
+
 	if int(domain) >= len(a.d) || a.d[domain] == nil {
 		return fmt.Errorf("BuildKVAccessors: unknown domain %s", domain)
 	}
@@ -2075,6 +2095,25 @@ type aggregatorVisible struct {
 // Per-entity visibility is not mutated; readers atomically observe one
 // cross-entity-consistent generation.
 func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
+	// TEMP-INSTR-2026-08-06 [dbg-recalcVisible]: race-diagnosis for
+	// post-fix soak run 3's iter 3 mode_b gas mismatch — non-repro on
+	// restart proves in-flight-only. Correlating visible-set transitions
+	// with the "gas used mismatch" WARN in rules.go:207 will identify
+	// whether the failing forward-exec tx captured a stale visible-set.
+	// Revert this block once the mechanism is identified.
+	var (
+		callerFile string
+		callerLine int
+	)
+	if _, cf, cl, ok := runtime.Caller(1); ok {
+		callerFile = filepath.Base(cf)
+		callerLine = cl
+	}
+	prevMinimax := uint64(0)
+	if prev := a.visible.Load(); prev != nil {
+		prevMinimax = prev.minimaxTxNum
+	}
+
 	toTxNum := a.dirtyFilesEndTxNumMinimax()
 	next := &aggregatorVisible{}
 	for id, d := range a.d {
@@ -2095,6 +2134,23 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 	old.retired = retired
 	old.next = next
 	a.visible.Store(next)
+
+	// TEMP-INSTR: dump per-domain endTxN so we can spot mid-emit clamps
+	// where one domain has advanced but another hasn't → minimax pulls
+	// the whole visible-set back to the older value → v4 files clipped
+	// out of read-side visibility right when forward-exec needs them.
+	log.Warn("[dbg-recalcVisible] visible-set transition",
+		"caller", fmt.Sprintf("%s:%d", callerFile, callerLine),
+		"toTxNum", toTxNum,
+		"accEnd", a.d[kv.AccountsDomain].dirtyFilesEndTxNumMinimax(),
+		"stoEnd", a.d[kv.StorageDomain].dirtyFilesEndTxNumMinimax(),
+		"codEnd", a.d[kv.CodeDomain].dirtyFilesEndTxNumMinimax(),
+		"comEnd", a.d[kv.CommitmentDomain].dirtyFilesEndTxNumMinimax(),
+		"recEnd", a.d[kv.ReceiptDomain].dirtyFilesEndTxNumMinimax(),
+		"prevMinimax", prevMinimax,
+		"nextMinimax", next.minimaxTxNum,
+		"retiredCount", len(retired),
+	)
 
 	// `recalcVisibleFiles` is rare background operation under `dirtyFilesLock`
 	// it's good idea to delete files here, then hot reader-Close path will more likely be lock-free
