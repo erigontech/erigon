@@ -1628,9 +1628,10 @@ func TestGetPayloadBodiesNonCanonicalBlockAccessList(t *testing.T) {
 	require.NoError(t, err)
 	// Insert the fork blocks without a fork choice update so they stay
 	// non-canonical, with no stored BAL sidecar.
-	for _, block := range fork.Blocks {
-		block.SetBlockAccessList(nil)
+	for i, block := range fork.Blocks {
+		fork.Blocks[i] = types.NewBlockFromNetwork(block.HeaderNoCopy(), block.Body(), nil)
 	}
+	fork.TopBlock = fork.Blocks[len(fork.Blocks)-1]
 	insertRes, err := m.InsertBlocks(ctx, fork.Blocks)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, insertRes)
@@ -2442,7 +2443,7 @@ func runBatchedFCUBadBlockRecovery(t *testing.T, bgCommit bool) {
 		Transactions: chainPack.Blocks[5].Transactions(),
 		Uncles:       chainPack.Blocks[5].Uncles(),
 		Withdrawals:  chainPack.Blocks[5].Withdrawals(),
-	})
+	}, chainPack.Blocks[5].BlockAccessList())
 
 	badRes, err := m.InsertBlocks(ctx, []*types.Block{badBlock6})
 	require.NoError(t, err)
