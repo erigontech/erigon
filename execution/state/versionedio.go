@@ -3047,3 +3047,40 @@ func (s *WriteSet) createdEmpty(addr accounts.Address) bool {
 	_, hasCodeSize := s.codeSize[addr]
 	return !hasCode && !hasIncarnation && !destroyed && !createdContract && !hasCodeSize && len(s.storage[addr]) == 0
 }
+
+// accountFieldResolver lets Normalize fill one account field from a source
+// richer than the StateReader interface exposes. Optional: Normalize type
+// asserts for it and falls back to a whole-account domain read without it.
+type accountFieldResolver interface {
+	ResolveAccountField(out *WriteSet, addr accounts.Address, path AccountPath, ver Version) bool
+}
+
+// ResolveAccountField serves one field from what this tx already read, so the
+// fill loop doesn't fetch a whole account from the domain to recover it. Only
+// the requested path is answered: the read set records reads per path, and a
+// synthesised account with the unread fields zeroed would be wrong.
+func (vr *versionedStateReader) ResolveAccountField(out *WriteSet, addr accounts.Address, path AccountPath, ver Version) bool {
+	switch path {
+	case BalancePath:
+		if r, ok := vr.reads.GetBalance(addr); ok {
+			out.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: ver}, Val: r.Val})
+			return true
+		}
+	case NoncePath:
+		if r, ok := vr.reads.GetNonce(addr); ok {
+			out.SetNonce(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath, Version: ver}, Val: r.Val})
+			return true
+		}
+	case IncarnationPath:
+		if r, ok := vr.reads.GetIncarnation(addr); ok {
+			out.SetIncarnation(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: IncarnationPath, Version: ver}, Val: r.Val})
+			return true
+		}
+	case CodeHashPath:
+		if r, ok := vr.reads.GetCodeHash(addr); ok {
+			out.SetCodeHash(addr, &VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath, Version: ver}, Val: r.Val})
+			return true
+		}
+	}
+	return false
+}

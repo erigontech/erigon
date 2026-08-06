@@ -384,6 +384,10 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 			if SetAccountFieldFromMap(filtered, vm, addr, path, ver, txIndex+1) {
 				continue
 			}
+			// Then what this tx already read, before paying for a domain read.
+			if r, ok := stateReader.(accountFieldResolver); ok && r.ResolveAccountField(filtered, addr, path, ver) {
+				continue
+			}
 			// Fall back to stateReader for pre-block account
 			if stateReader != nil {
 				if !fallbackLoaded {
