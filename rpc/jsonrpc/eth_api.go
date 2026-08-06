@@ -33,13 +33,13 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/kvcfg"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
@@ -54,6 +54,7 @@ import (
 	"github.com/erigontech/erigon/rpc/filters"
 	"github.com/erigontech/erigon/rpc/gasprice"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -150,9 +151,9 @@ type BaseAPI struct {
 	_pruneMode                atomic.Pointer[prune.Mode]
 	_commitmentHistoryEnabled atomic.Pointer[bool]
 
-	_blockReader services.FullBlockReader
+	_blockReader dbservices.FullBlockReader
 	_txNumReader rawdbv3.TxNumsReader
-	_txnReader   services.TxnReader
+	_txnReader   dbservices.TxnReader
 	_engine      rules.EngineReader
 
 	bridgeReader bridgeReader
@@ -165,19 +166,31 @@ type BaseAPI struct {
 	receiptsGenerator   *receipts.Generator
 	borReceiptGenerator *receipts.BorGenerator
 	balRegenerator      *bal.Regenerator
+
+	// witnessCache serves recent legacy-mode debug_executionWitness results from
+	// memory, keyed by block hash; nil disables it (only the embedded node wires one).
+	// It is the single source of truth for head-capture/cache-only serving mode, read
+	// by both the debug and eth_getWitness serve paths.
+	witnessCache *witnessResultCache
 }
 
-func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, singleNodeMode bool, evmCallTimeout time.Duration, engine rules.Engine, dirs datadir.Dirs, bridgeReader bridgeReader, rangeLimit int, getLogsMaxResults int, logQueryLimit int) *BaseAPI {
-	var (
-		blocksLRUSize = 128 // ~32Mb
-	)
+func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbservices.FullBlockReader, engine rules.Engine, bridgeReader bridgeReader, conf *rpccfg.BaseApiConfig) *BaseAPI {
+	if conf == nil {
+		conf = &rpccfg.BaseApiConfig{}
+	}
+	blocksLRUSize := 128 // ~32Mb
 	// if RPCDaemon deployed as independent process: increase cache sizes
-	if !singleNodeMode {
+	if !conf.SingleNodeMode {
 		blocksLRUSize *= 5
 	}
 	blocksLRU, err := lru.New[common.Hash, *types.Block](blocksLRUSize)
 	if err != nil {
 		panic(err)
+	}
+
+	evmCallTimeout := conf.EvmCallTimeout
+	if evmCallTimeout == 0 {
+		evmCallTimeout = rpccfg.DefaultEvmCallTimeout
 	}
 
 	return &BaseAPI{
@@ -189,14 +202,14 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 		_txNumReader:        blockReader.TxnumReader(),
 		evmCallTimeout:      evmCallTimeout,
 		_engine:             engine,
-		receiptsGenerator:   receipts.NewGenerator(dirs, blockReader, engine, stateCache, evmCallTimeout, f),
+		receiptsGenerator:   receipts.NewGenerator(conf.Dirs, blockReader, engine, stateCache, evmCallTimeout, f),
 		borReceiptGenerator: receipts.NewBorGenerator(blockReader, engine, stateCache, f),
 		balRegenerator:      bal.NewRegenerator(blockReader, engine, log.Root()),
-		dirs:                dirs,
+		dirs:                conf.Dirs,
 		bridgeReader:        bridgeReader,
-		blockRangeLimit:     rangeLimit,
-		getLogsMaxResults:   getLogsMaxResults,
-		logQueryLimit:       logQueryLimit,
+		blockRangeLimit:     conf.BlockRangeLimit,
+		getLogsMaxResults:   conf.GetLogsMaxResults,
+		logQueryLimit:       conf.LogQueryLimit,
 	}
 }
 
@@ -523,20 +536,8 @@ type APIImpl struct {
 	logger                      log.Logger
 }
 
-// EthApiConfig defines the configurable parameters for EthAPI
-type EthApiConfig struct {
-	GasCap                      uint64
-	FeeCap                      float64
-	ReturnDataLimit             int
-	AllowUnprotectedTxs         bool
-	MaxGetProofRewindBlockCount int
-	SubscribeLogsChannelSize    int
-	RpcTxSyncDefaultTimeout     time.Duration
-	RpcTxSyncMaxTimeout         time.Duration
-}
-
 // NewEthAPI returns APIImpl instance
-func NewEthAPI(base *BaseAPI, db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.TxpoolClient, mining txpoolproto.MiningClient, cfg *EthApiConfig, logger log.Logger) *APIImpl {
+func NewEthAPI(base *BaseAPI, db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.TxpoolClient, mining txpoolproto.MiningClient, cfg *rpccfg.EthApiConfig, logger log.Logger) *APIImpl {
 	gascap := cfg.GasCap
 	if gascap == 0 {
 		gascap = uint64(math.MaxUint64 / 2)

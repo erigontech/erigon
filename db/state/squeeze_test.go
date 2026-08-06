@@ -17,7 +17,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
@@ -77,16 +76,16 @@ func generateInputData(tb testing.TB, keySize, valueSize, keyCount int) ([][]byt
 	keys := make([][]byte, keyCount)
 
 	bk, bv := make([]byte, keySize), make([]byte, valueSize)
-	for i := 0; i < keyCount; i++ {
+	for i := range keyCount {
 		n, err := rnd.Read(bk)
 		require.Equal(tb, keySize, n)
 		require.NoError(tb, err)
-		keys[i] = common.Copy(bk[:n])
+		keys[i] = bytes.Clone(bk[:n])
 
 		n, err = rnd.Read(bv[:rnd.IntN(valueSize)+1])
 		require.NoError(tb, err)
 
-		values[i] = common.Copy(bv[:n])
+		values[i] = bytes.Clone(bv[:n])
 	}
 	return keys, values
 }
@@ -174,10 +173,10 @@ func testDbAggregatorWithNoFiles(tb testing.TB, txCount int, cfg *testAggConfig)
 	tb.Logf("keys %d vals %d\n", len(keys), len(vals))
 
 	var txNum, blockNum uint64
-	for i := 0; i < len(vals); i++ {
+	for i := range vals {
 		txNum = uint64(i)
 
-		for j := 0; j < len(keys); j++ {
+		for j := range keys {
 			acc := accounts.Account{
 				Nonce:       uint64(i),
 				Balance:     *uint256.NewInt(uint64(i * 100_000)),
@@ -292,7 +291,7 @@ func TestExpandShortenedKeysInBranch_ReadPath(t *testing.T) {
 	for _, vf := range at.Files(kv.CommitmentDomain) {
 		decomp, err := seg.NewDecompressor(vf.Fullpath())
 		require.NoError(t, err)
-		defer decomp.Close()
+		defer decomp.Close() //nolint:gocritic
 		reader := seg.NewReader(decomp.MakeGetter(), agg.Cfg(kv.CommitmentDomain).Compression)
 		reader.Reset(0)
 
@@ -416,7 +415,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 }
 
 func composite(k, k2 []byte) []byte {
-	return append(common.Copy(k), k2...)
+	return append(bytes.Clone(k), k2...)
 }
 
 // makeAccountAddr generates a deterministic 20-byte account address with uniform
@@ -451,7 +450,7 @@ func makeCodeValue(idx uint64) []byte {
 	binary.BigEndian.PutUint64(buf[1:], idx)
 	h := sha256.Sum256(buf[:])
 	// Fill code with hash-derived bytes, repeating as needed
-	for i := 0; i < size; i++ {
+	for i := range size {
 		code[i] = h[i%len(h)]
 	}
 	return code
@@ -460,13 +459,13 @@ func makeCodeValue(idx uint64) []byte {
 func TestMakeAccountAddr_NibbleDistribution(t *testing.T) {
 	nibbles := make(map[byte]int, 16)
 	const count = 1000
-	for i := uint64(0); i < count; i++ {
+	for i := range uint64(count) {
 		addr := makeAccountAddr(i)
 		firstNibble := addr[0] >> 4
 		nibbles[firstNibble]++
 	}
 	// All 16 nibble values must be present
-	for n := byte(0); n < 16; n++ {
+	for n := range byte(16) {
 		require.Positive(t, nibbles[n], "missing first nibble %x in %d generated keys", n, count)
 	}
 	t.Logf("nibble distribution over %d keys: %v", count, nibbles)
@@ -559,7 +558,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 		err = domains.DomainPut(kv.StorageDomain, tx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, nil)
 		require.NoError(t, err)
 
-		err = domains.DomainPut(kv.CommitmentDomain, tx, someKey, common.Copy(aux[:]), txNum, nil)
+		err = domains.DomainPut(kv.CommitmentDomain, tx, someKey, bytes.Clone(aux[:]), txNum, nil)
 		require.NoError(t, err)
 		maxWrite = txNum
 	}
@@ -710,7 +709,7 @@ func TestGenerateCommitmentRebuildData(t *testing.T) {
 		lastRoot    []byte
 	)
 
-	for txNum := uint64(0); txNum < totalTxs; txNum++ {
+	for txNum := range totalTxs {
 		// Write accounts batch
 		for i := uint64(0); i < accPerTx && accIdx < numAccounts; i++ {
 			addr := makeAccountAddr(accIdx)
@@ -749,7 +748,7 @@ func TestGenerateCommitmentRebuildData(t *testing.T) {
 			require.NoError(t, err)
 
 			// Update account with real code hash
-			codeHash := accounts.InternCodeHash(common.BytesToHash(crypto.Keccak256(code)))
+			codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
 			acc := accounts.Account{
 				Nonce:       txNum,
 				Balance:     *uint256.NewInt(txNum * 1000),

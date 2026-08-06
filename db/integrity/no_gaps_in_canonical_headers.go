@@ -23,13 +23,13 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
 
-func NoGapsInCanonicalHeaders(ctx context.Context, db kv.RoDB, br services.FullBlockReader, failFast bool) error {
+func NoGapsInCanonicalHeaders(ctx context.Context, db kv.RoDB, br dbservices.FullBlockReader, failFast bool) error {
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return err
@@ -79,7 +79,7 @@ func NoGapsInCanonicalHeaders(ctx context.Context, db kv.RoDB, br services.FullB
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-logEvery.C:
-			log.Info("[integrity] HeaderNoGaps", "progress", fmt.Sprintf("%s/%s", common.PrettyCounter(i), common.PrettyCounter(lastBlockNum)))
+			log.Info("[integrity] HeaderNoGaps", "progress", fmt.Sprintf("%s/%s", common.PrettyExact(i), common.PrettyExact(lastBlockNum)))
 		default:
 		}
 	}

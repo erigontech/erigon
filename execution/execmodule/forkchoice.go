@@ -282,7 +282,7 @@ func (e *ExecModule) unwindIfNeeded(
 		if err := e.pipelineExecutor.UnwindTo(unwindTarget, stagedsync.ForkChoice, tx); err != nil {
 			return nil, err
 		}
-		if err = e.hook.BeforeRun(tx, isSynced); err != nil {
+		if err := e.hook.BeforeRun(tx, isSynced); err != nil {
 			return nil, err
 		}
 		// Run the unwind
@@ -360,10 +360,9 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	})
 	defer cleanupBeforeSemaRelease()
 
-	// Drain any warmup a preceding newPayload spawned: its Puts reflect a
-	// pre-FCU snapshot and must land before this FCU's unwind epoch-bump and
-	// flush cache-apply, not after them (no new warmup starts while we hold
-	// the semaphore).
+	// Drain any warmup a preceding newPayload spawned: a fill from a pre-unwind
+	// view would survive this FCU's possible unwind epoch-bump as a live entry
+	// (see drainReadAhead). No new warmup starts while we hold the semaphore.
 	e.drainReadAhead()
 
 	var validationError string
@@ -455,6 +454,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	}
 
 	e.hook.LastNewBlockSeen(fcuHeader.Number.Uint64()) // used by eth_syncing
+	e.hook.NotifySyncState(tx)
 
 	finishProgressBefore, err := stages.GetStageProgress(tx, stages.Finish)
 	if err != nil {
@@ -646,7 +646,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			if blockHashBlockNum != nil {
 				hashBlockNum = strconv.FormatUint(*blockHashBlockNum, 10)
 			}
-			e.logger.Warn("bad forkchoice", "head", headHash, "head block", headNum, "hash", blockHash, "hash block", hashBlockNum)
+			e.logger.Warn("bad forkchoice", "head", headHash, "headBlock", headNum, "hash", blockHash, "hashBlockNum", hashBlockNum)
 		}
 		currentContext.Close()
 		currentContext = nil

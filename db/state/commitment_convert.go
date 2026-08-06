@@ -186,7 +186,7 @@ func sampleViaBT(reader *seg.Reader, fi *FilesItem, samples int) ([]sampledPair,
 	}
 	n := min(uint64(samples), keyCount)
 	out := make([]sampledPair, 0, n)
-	for i := uint64(0); i < n; i++ {
+	for i := range n {
 		// distribute samples across the full key space; stride = keyCount/n
 		// puts the i-th sample at index i*keyCount/n, covering [0, keyCount).
 		ordinal := i * keyCount / n
@@ -968,11 +968,11 @@ func writeRestoreManifestAtomic(path string, entries []string) error {
 		return err
 	}
 	if _, err := f.Write([]byte(strings.Join(entries, "\n"))); err != nil {
-		f.Close()
+		_ = f.Close()
 		return err
 	}
 	if err := f.Sync(); err != nil {
-		f.Close()
+		_ = f.Close()
 		return err
 	}
 	if err := f.Close(); err != nil {
@@ -998,7 +998,7 @@ func fsyncDir(path string) error {
 		return err
 	}
 	if err := d.Sync(); err != nil {
-		d.Close()
+		_ = d.Close()
 		return err
 	}
 	return d.Close()

@@ -5,8 +5,12 @@ on:
     - cron: '0 20 * * 0'  # Run on Sunday at 08:00 PM UTC
   workflow_dispatch:     # Run manually
 
+permissions:
+  contents: read
+
 jobs:
   constrained-tip-tracking-test:
+    name: tip-tracking-test-${{ matrix.chain }}-${{ matrix.cgroup_name }}-${{ matrix.prune_mode }}
     strategy:
       fail-fast: false
       matrix:
@@ -34,6 +38,8 @@ jobs:
     steps:
     - name: Check out repository
       uses: actions/checkout@v7
+      with:
+        persist-credentials: false
 
     - name: Clean Erigon Build Directory
       run: |

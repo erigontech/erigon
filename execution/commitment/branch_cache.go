@@ -48,8 +48,8 @@ func isCommitmentStateKey(prefix []byte) bool {
 // BranchCache stores commitment-trie branch data: a bounded LRU tail plus a
 // never-evicted root slot, aggregator-scope and passive (the trie drives all
 // reads/writes). Concurrent Get/Put/Invalidate are mechanically safe, but the
-// cache does not coordinate writers — callers must ensure a single writer per
-// prefix, coordinated at the orchestrator, not by locking the cache.
+// writer stripes only make stamped publications atomic with Clear; callers must
+// still ensure one logical mutation per prefix at the orchestrator.
 type BranchCache struct {
 	// Root tier — single slot for the root branch (always hottest, always
 	// present). Atomic-pointer access so no lock is needed for the hot
@@ -117,9 +117,13 @@ type BranchCache struct {
 	lastPublishedPinnedHits   atomic.Uint64
 	lastPublishedPinnedMisses atomic.Uint64
 
+	// putStripes make epoch sampling and publication atomic with Clear while
+	// preserving parallel writes to unrelated prefixes.
+	putStripes [256]sync.Mutex
+
 	// coh is the (epoch, floor) unwind-coherence primitive shared with the state
 	// and code caches: an entry is valid iff written in the current epoch OR its
-	// txN is below the unwind floor. See execution/cache/coherence.
+	// txN is below the unwind floor.
 	coh coherence.Gen
 }
 
@@ -307,6 +311,29 @@ type AdaptivePinControllerProvider interface {
 // concurrent commitment mounts / warmup workers don't serialize on one mutex.
 const branchCacheTailShards = 256
 
+func (c *BranchCache) putStripe(prefix []byte) *sync.Mutex {
+	if len(prefix) == 0 {
+		return &c.putStripes[0]
+	}
+	stripe := prefix[len(prefix)-1]
+	if len(prefix) > 1 {
+		stripe ^= prefix[0]
+	}
+	return &c.putStripes[stripe]
+}
+
+func (c *BranchCache) lockAllPutStripes() {
+	for i := range c.putStripes {
+		c.putStripes[i].Lock()
+	}
+}
+
+func (c *BranchCache) unlockAllPutStripes() {
+	for i := len(c.putStripes) - 1; i >= 0; i-- {
+		c.putStripes[i].Unlock()
+	}
+}
+
 // NewBranchCache constructs a BranchCache with the given LRU tail capacity.
 // Capacity <= 0 panics — pass a positive value or DefaultBranchCacheTailCapacity.
 func NewBranchCache(tailCapacity int) *BranchCache {
@@ -320,9 +347,6 @@ func NewBranchCache(tailCapacity int) *BranchCache {
 		accountTrunk:  newAccountTrunk(maxDepth),
 		trunkDisabled: os.Getenv("BRANCH_CACHE_TRUNK_DISABLE") != "",
 	}
-	// Before any unwind every entry's txN is at/below the floor, so the epoch
-	// check never strands a valid entry.
-	bc.coh.Init()
 	log.Debug("[branch-cache] init", "trunkEnabled", !bc.trunkDisabled, "tailCap", tailCapacity, "trunkDepth", maxDepth)
 	return bc
 }
@@ -420,7 +444,7 @@ func (c *BranchCache) storageRoute(prefix []byte, create bool) (st *trunk, acct 
 		return nil, nil, nil, false
 	}
 	packed := make([]byte, 32)
-	for i := 0; i < 32; i++ {
+	for i := range 32 {
 		packed[i] = nib[2*i]<<4 | nib[2*i+1]
 	}
 	stor = nib[64:]
@@ -462,7 +486,7 @@ func ContractHashFromPrefix(prefix []byte) (hash [32]byte, ok bool) {
 		return hash, false
 	}
 	if prefix[0]&0x10 != 0 { // odd: first nibble is the low nibble of byte 0
-		for i := 0; i < 32; i++ {
+		for i := range 32 {
 			hash[i] = prefix[i]&0x0f<<4 | prefix[i+1]>>4
 		}
 		return hash, true
@@ -611,6 +635,11 @@ func (c *BranchCache) PinEntry(prefix []byte, data []byte, step, txN uint64) {
 	}
 	dataCopy := make([]byte, len(data))
 	copy(dataCopy, data)
+
+	stripe := c.putStripe(prefix)
+	stripe.Lock()
+	defer stripe.Unlock()
+
 	entry := &branchCacheEntry{data: dataCopy, step: step, txN: txN, epoch: c.coh.Epoch()}
 	st, _, stor, ok := c.storageRoute(prefix, true)
 	if !ok {
@@ -642,6 +671,9 @@ func (c *BranchCache) Get(prefix []byte) ([]byte, uint64, bool) {
 	if isCommitmentStateKey(prefix) {
 		return nil, 0, false
 	}
+	// Snapshot before lookup so an entry captured while Clear empties the tiers
+	// retains the pre-Clear unwind floor used to judge it.
+	coh := c.coh.Snapshot()
 	entry, ok := c.lookup(prefix)
 	if !ok {
 		return nil, 0, false
@@ -651,7 +683,7 @@ func (c *BranchCache) Get(prefix []byte) ([]byte, uint64, bool) {
 	// the read falls through to the reverted domain and repopulates. The floor
 	// is the first unwound txN (>= matches GenericCache: an entry stamped exactly
 	// at the floor belongs to a rolled-back block).
-	if c.coh.IsStale(entry.txN, entry.epoch) {
+	if coh.IsStale(entry.txN, entry.epoch) {
 		c.Invalidate(prefix)
 		c.staleEvicted.Add(1)
 		return nil, 0, false
@@ -669,6 +701,11 @@ func (c *BranchCache) Put(prefix []byte, data []byte, step, txN uint64) {
 	}
 	dataCopy := make([]byte, len(data))
 	copy(dataCopy, data)
+
+	stripe := c.putStripe(prefix)
+	stripe.Lock()
+	defer stripe.Unlock()
+
 	c.store(prefix, &branchCacheEntry{
 		data:  dataCopy,
 		step:  step,
@@ -709,18 +746,22 @@ func (c *BranchCache) Invalidate(prefix []byte) {
 // txN the chain is rewound to. O(1) and scan-free: bump the epoch (so entries
 // written in the new, live epoch stay valid) and lower the unwind floor to
 // unwindToTxN (so old-epoch entries at or above it are dropped lazily on their
-// next Get). The floor only ever decreases, so a shallow unwind cannot
-// resurrect entries a deeper one invalidated. Mirrors GenericCache.Unwind so
-// branch and state caches honor one (txN, epoch) model.
+// next Get). Within the current cache generation, the floor only decreases, so
+// a shallow unwind cannot resurrect entries a deeper one invalidated. Mirrors
+// GenericCache.Unwind so branch and state caches honor one (txN, epoch) model.
 func (c *BranchCache) Unwind(unwindToTxN uint64) {
 	c.coh.Unwind(unwindToTxN)
 }
 
-// Clear empties the cache and resets stats counters across ALL tiers
-// (root slot, LRU tail). Use on Reset / fork-validation paths to
-// ensure stale entries from one trie root are not served against a
-// different root.
+// Clear empties the root, trunk, pinned, and tail tiers, resets their stats, and
+// starts a new coherence generation. It holds every writer stripe until all
+// tiers are empty and coherence is reset, so a publication cannot cross
+// generations. Reset runs after every tier is cleared, so a reader cannot pair a
+// retired entry with the lifted unwind floor.
 func (c *BranchCache) Clear() {
+	c.lockAllPutStripes()
+	defer c.unlockAllPutStripes()
+
 	c.root.Store(nil)
 	c.clearTrunk()
 	c.pinned.Store(nil)
@@ -742,7 +783,7 @@ func (c *BranchCache) Clear() {
 	c.tailMisses.Store(0)
 	c.bytesServed.Store(0)
 	c.staleEvicted.Store(0)
-	c.coh.Init()
+	c.coh.Reset()
 }
 
 // Stats returns a one-line summary of the cache tiers' hit/miss counters plus

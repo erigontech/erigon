@@ -23,9 +23,9 @@ import (
 	"github.com/davecgh/go-spew/spew"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/aura"
@@ -83,7 +83,7 @@ func l2Engine(name string) (L2EngineFunc, bool) {
 }
 
 func CreateRulesEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainConfig *chain.Config, config any, noVerify bool,
-	withoutHeimdall bool, blockReader services.FullBlockReader, readonly bool,
+	withoutHeimdall bool, blockReader dbservices.FullBlockReader, readonly bool,
 	logger log.Logger, polygonBridge *bridge.Service, heimdallService *heimdall.Service,
 ) rules.Engine {
 	var eng rules.Engine
@@ -161,13 +161,14 @@ func CreateRulesEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainCon
 func CreateRulesEngineBareBones(ctx context.Context, chainConfig *chain.Config, logger log.Logger) rules.Engine {
 	var consensusConfig any
 
-	if chainConfig.Aura != nil {
+	switch {
+	case chainConfig.Aura != nil:
 		consensusConfig = chainConfig.Aura
-	} else if chainConfig.Bor != nil {
+	case chainConfig.Bor != nil:
 		consensusConfig = chainConfig.Bor
-	} else if chainConfig.L2 != nil {
+	case chainConfig.L2 != nil:
 		consensusConfig = chainConfig.L2
-	} else {
+	default:
 		var ethashCfg ethashcfg.Config
 		ethashCfg.PowMode = ethashcfg.ModeFake
 		consensusConfig = &ethashCfg

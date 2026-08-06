@@ -343,18 +343,18 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, txn Transaction) 
 
 // SignatureValues returns the raw R, S, V values corresponding to the
 // given signature.
-func (sg Signer) SignatureValues(txn Transaction, sig []byte) (R, S, V *uint256.Int, err error) {
+func (sg Signer) SignatureValues(txn Transaction, sig []byte) (r, s, v *uint256.Int, err error) {
 	switch t := txn.(type) {
 	case *LegacyTx:
-		R, S, V, err = decodeSignature(sig)
+		r, s, v, err = decodeSignature(sig)
 		if err != nil {
 			return nil, nil, nil, err
 		}
 		if sg.chainID.IsZero() {
-			V.Add(V, &u256.Num27)
+			v.Add(v, &u256.Num27)
 		} else {
-			V.Add(V, &u256.Num35)
-			V.Add(V, &sg.chainIDMul)
+			v.Add(v, &u256.Num35)
+			v.Add(v, &sg.chainIDMul)
 		}
 	case *DynamicFeeTransaction, *AccessListTx, *BlobTx, *SetCodeTransaction:
 		// Check that chain ID of tx matches the signer. We also accept ID zero here,
@@ -363,7 +363,7 @@ func (sg Signer) SignatureValues(txn Transaction, sig []byte) (R, S, V *uint256.
 		if !chainId.IsZero() && !chainId.Eq(&sg.chainID) {
 			return nil, nil, nil, ErrInvalidChainId
 		}
-		R, S, V, err = decodeSignature(sig)
+		r, s, v, err = decodeSignature(sig)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -373,15 +373,15 @@ func (sg Signer) SignatureValues(txn Transaction, sig []byte) (R, S, V *uint256.
 			if chainId != nil && !chainId.IsZero() && !chainId.Eq(&sg.chainID) {
 				return nil, nil, nil, ErrInvalidChainId
 			}
-			R, S, V, err = decodeSignature(sig)
+			r, s, v, err = decodeSignature(sig)
 			if err != nil {
 				return nil, nil, nil, err
 			}
-			return R, S, V, nil
+			return r, s, v, nil
 		}
 		return nil, nil, nil, ErrTxTypeNotSupported
 	}
-	return R, S, V, nil
+	return r, s, v, nil
 }
 
 func (sg Signer) ChainID() *uint256.Int {
@@ -414,20 +414,20 @@ func decodeSignature(sig []byte) (r, s, v *uint256.Int, err error) {
 	return r, s, v, nil
 }
 
-func recoverPlain(context *secp256k1.Context, sighash common.Hash, R, S, Vb *uint256.Int, homestead bool) (accounts.Address, error) {
-	if Vb.BitLen() > 8 {
+func recoverPlain(context *secp256k1.Context, sighash common.Hash, r, s, vb *uint256.Int, homestead bool) (accounts.Address, error) {
+	if vb.BitLen() > 8 {
 		return accounts.NilAddress, ErrInvalidSig
 	}
-	V := byte(Vb.Uint64() - 27)
-	if !crypto.TransactionSignatureIsValid(V, R, S, !homestead) {
+	vByte := byte(vb.Uint64() - 27)
+	if !crypto.TransactionSignatureIsValid(vByte, r, s, !homestead) {
 		return accounts.NilAddress, ErrInvalidSig
 	}
 	// encode the signature in uncompressed format
-	r, s := R.Bytes(), S.Bytes()
+	rBytes, sBytes := r.Bytes(), s.Bytes()
 	sig := make([]byte, crypto.SignatureLength)
-	copy(sig[32-len(r):32], r)
-	copy(sig[64-len(s):64], s)
-	sig[64] = V
+	copy(sig[32-len(rBytes):32], rBytes)
+	copy(sig[64-len(sBytes):64], sBytes)
+	sig[64] = vByte
 	// recover the public key from the signature
 	pub, err := crypto.EcrecoverWithContext(context, sighash[:], sig)
 	if err != nil {

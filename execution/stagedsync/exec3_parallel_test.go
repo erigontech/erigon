@@ -16,15 +16,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
-	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
@@ -267,7 +263,7 @@ func taskFactory(numTask int, sender Sender, readsPerT int, writesPerT int, nonI
 
 	senderNonces := make(map[accounts.Address]int)
 
-	for i := 0; i < numTask; i++ {
+	for i := range numTask {
 		s := sender(i)
 
 		// Set first two ops to always read and write nonce
@@ -283,7 +279,7 @@ func taskFactory(numTask int, sender Sender, readsPerT int, writesPerT int, nonI
 			ops = append(ops, Op{opType: readType})
 		}
 
-		for j := 0; j < nonIOPerT; j++ {
+		for range nonIOPerT {
 			ops = append(ops, Op{opType: otherType})
 		}
 
@@ -300,13 +296,14 @@ func taskFactory(numTask int, sender Sender, readsPerT int, writesPerT int, nonI
 
 		// Generate time and key path for each op except first two that are always read and write nonce
 		for j := 2; j < len(ops); j++ {
-			if ops[j].opType == readType {
+			switch ops[j].opType {
+			case readType:
 				ops[j].key = pathGenerator(i, j, len(ops))
 				ops[j].duration = readTime(i, j)
-			} else if ops[j].opType == writeType {
+			case writeType:
 				ops[j].key = pathGenerator(i, j, len(ops))
 				ops[j].duration = writeTime(i, j)
-			} else {
+			default:
 				ops[j].duration = nonIOTime(i, j)
 			}
 
@@ -444,11 +441,11 @@ func checkNoStatusOverlap(pe *parallelExecutor) error {
 	defer pe.RUnlock()
 
 	for blockNum, blockStatus := range pe.blockExecutors {
-		for _, tx := range blockStatus.execTasks.complete {
+		for _, tx := range blockStatus.execTasks.completeList() {
 			seen[tx] = "complete"
 		}
 
-		for _, tx := range blockStatus.execTasks.inProgress {
+		for _, tx := range blockStatus.execTasks.inProgressList() {
 			if v, ok := seen[tx]; ok {
 				return fmt.Errorf("blk %d, tx %v is in both %v and inProgress", blockNum, v, tx)
 			}
@@ -487,30 +484,16 @@ func checkNoDroppedTx(pe *parallelExecutor) error {
 
 func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, metadata bool, logger log.Logger) time.Duration {
 	tb.Helper()
+	ctx := tb.Context()
 
-	tmpDir, err := os.MkdirTemp("", "erigon-parallel-test-*")
-	if err != nil {
-		tb.Fatal(err)
-	}
-	defer dir.RemoveAll(tmpDir)
+	dirs := datadir.New(tb.TempDir())
+	db := temporaltest.NewTestDB(tb, dirs)
 
-	dirs := datadir.New(tmpDir)
-	rawDb := mdbx.New(dbcfg.ChainDB, logger).InMem(tb, dirs.Chaindata).MustOpen()
-
-	defer rawDb.Close()
-
-	agg, err := dbstate.NewTest(dirs).StepSize(16).Logger(logger).Open(context.Background(), rawDb)
-	assert.NoError(tb, err)
-	defer agg.Close()
-
-	db, err := temporal.New(rawDb, agg, nil)
-	assert.NoError(tb, err)
-
-	tx, err := db.BeginTemporalRo(context.Background()) //nolint:gocritic
+	tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
 	assert.NoError(tb, err)
 	defer tx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
 	assert.NoError(tb, err)
 	defer domains.Close()
 
@@ -531,7 +514,7 @@ func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, met
 		workerCount: runtime.NumCPU() - 1,
 	}
 
-	executorContext, executorCancel, err := pe.run(context.Background())
+	executorContext, executorCancel, err := pe.run(ctx)
 
 	assert.NoError(tb, err, "error occur during parallel init")
 	assert.NoError(tb, executorContext.Err(), "error occur during parallel init")
@@ -612,30 +595,18 @@ func executeParallelWithCheck(tb testing.TB, pe *parallelExecutor, tasks []exec.
 
 func runParallelGetMetadata(tb testing.TB, tasks []exec.Task, validation propertyCheck) map[int]map[int]bool {
 	tb.Helper()
+	ctx := tb.Context()
 
 	logger := log.Root()
 
-	tmpDir, err := os.MkdirTemp("", "erigon-parallel-meta-*")
-	if err != nil {
-		tb.Fatal(err)
-	}
-	defer dir.RemoveAll(tmpDir)
+	dirs := datadir.New(tb.TempDir())
+	db := temporaltest.NewTestDB(tb, dirs)
 
-	dirs := datadir.New(tmpDir)
-	rawDb := mdbx.New(dbcfg.ChainDB, logger).InMem(tb, dirs.Chaindata).MustOpen()
-	defer rawDb.Close()
-	agg, err := dbstate.NewTest(dirs).StepSize(16).Logger(logger).Open(context.Background(), rawDb)
-	assert.NoError(tb, err)
-	defer agg.Close()
-
-	db, err := temporal.New(rawDb, agg, nil)
-	assert.NoError(tb, err)
-
-	tx, err := db.BeginTemporalRo(context.Background()) //nolint:gocritic
+	tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
 	assert.NoError(tb, err)
 	defer tx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
 	assert.NoError(tb, err)
 	defer domains.Close()
 
@@ -654,7 +625,7 @@ func runParallelGetMetadata(tb testing.TB, tasks []exec.Task, validation propert
 		workerCount: runtime.NumCPU() - 1,
 	}
 
-	executorContext, executorCancel, err := pe.run(context.Background())
+	executorContext, executorCancel, err := pe.run(ctx)
 	defer executorCancel(nil)
 	assert.NoError(tb, err, "error occur during parallel init")
 
@@ -674,31 +645,18 @@ func runParallelGetMetadata(tb testing.TB, tasks []exec.Task, validation propert
 // Uses a single DB stack for both passes, halving the MDBX/aggregator/temporal setup cost.
 func runProfileAndExecute(tb testing.TB, tasks []exec.Task, validation propertyCheck, logger log.Logger) time.Duration {
 	tb.Helper()
+	ctx := tb.Context()
 
-	tmpDir, err := os.MkdirTemp("", "erigon-parallel-meta-test-*")
-	if err != nil {
-		tb.Fatal(err)
-	}
-	defer dir.RemoveAll(tmpDir)
-
-	dirs := datadir.New(tmpDir)
-	rawDb := mdbx.New(dbcfg.ChainDB, logger).InMem(tb, dirs.Chaindata).MustOpen()
-	defer rawDb.Close()
-
-	agg, err := dbstate.NewTest(dirs).StepSize(16).Logger(logger).Open(context.Background(), rawDb)
-	assert.NoError(tb, err)
-	defer agg.Close()
-
-	db, err := temporal.New(rawDb, agg, nil)
-	assert.NoError(tb, err)
+	dirs := datadir.New(tb.TempDir())
+	db := temporaltest.NewTestDB(tb, dirs)
 
 	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
 
 	// newExecutor creates a fresh domains/state/executor on the shared DB.
 	newExecutor := func() (*parallelExecutor, context.Context, context.CancelCauseFunc, func()) {
-		tx, err := db.BeginTemporalRo(context.Background()) //nolint:gocritic
+		tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
 		assert.NoError(tb, err)
-		domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+		domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
 		assert.NoError(tb, err)
 
 		pe := &parallelExecutor{
@@ -711,7 +669,7 @@ func runProfileAndExecute(tb testing.TB, tasks []exec.Task, validation propertyC
 			workerCount: runtime.NumCPU() - 1,
 		}
 
-		executorCtx, executorCancel, err := pe.run(context.Background())
+		executorCtx, executorCancel, err := pe.run(ctx)
 		assert.NoError(tb, err, "error during parallel init")
 
 		cleanup := func() {
@@ -754,7 +712,7 @@ func runProfileAndExecute(tb testing.TB, tasks []exec.Task, validation propertyC
 	}
 
 	start := time.Now()
-	_, err = executeParallelWithCheck(tb, pe, tasks, false, validation, true)
+	_, err := executeParallelWithCheck(tb, pe, tasks, false, validation, true)
 	assert.NoError(tb, err, "error during metadata execution pass")
 
 	finalWriteSet := map[accounts.Address]map[state.AccountKey]time.Duration{}
@@ -1399,17 +1357,8 @@ func newResumeTestDB(t *testing.T) kv.TemporalRwDB {
 	if runtime.GOOS == "windows" {
 		t.Skip("mdbx InMem test databases are not supported on windows")
 	}
-	logger := log.New()
 	dirs := datadir.New(t.TempDir())
-	rawDb := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
-	t.Cleanup(rawDb.Close)
-
-	agg, err := dbstate.NewTest(dirs).StepSize(16).Logger(logger).Open(context.Background(), rawDb)
-	require.NoError(t, err)
-	t.Cleanup(agg.Close)
-
-	db, err := temporal.New(rawDb, agg, nil)
-	require.NoError(t, err)
+	db := temporaltest.NewTestDBWithStepSize(t, dirs, 16)
 	return db
 }
 
@@ -1461,7 +1410,7 @@ func TestParallelResumeBoundaryOffsets(t *testing.T) {
 
 	// Write mock receipt for transaction 0 in the database at txNum = 1
 	seedResumeTestDB(t, db, func(putter kv.TemporalPutDel) error {
-		return rawtemporaldb.AppendReceipt(putter, 5, 21000, 12000, 1)
+		return rawtemporaldb.AppendReceiptMetadata(putter, 5, 21000, 12000, 1)
 	})
 
 	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
@@ -1494,7 +1443,7 @@ func TestParallelResumeBoundaryOffsets(t *testing.T) {
 	}
 	be.tasks = []*execTask{eTask}
 	be.results = []*execResult{nil}
-	be.execTasks.inProgress = []int{0}
+	be.execTasks.setInProgress(0)
 
 	tVersion := &taskVersion{
 		execTask: eTask,
@@ -1552,7 +1501,7 @@ func TestParallelResumeReconstructsPriorReceipts(t *testing.T) {
 		if err := putter.DomainPut(kv.AccountsDomain, senderIsCoinbaseKey.rawAddress[:], accounts.SerialiseV3(&acc), 0, nil); err != nil {
 			return err
 		}
-		return rawtemporaldb.AppendReceipt(putter, 0, 21000, 0, 1)
+		return rawtemporaldb.AppendReceiptMetadata(putter, 0, 21000, 0, 1)
 	})
 
 	txTask := &exec.TxTask{
@@ -1577,7 +1526,7 @@ func TestParallelResumeReconstructsPriorReceipts(t *testing.T) {
 	}
 	be.tasks = []*execTask{eTask}
 	be.results = []*execResult{nil}
-	be.execTasks.inProgress = []int{0}
+	be.execTasks.setInProgress(0)
 
 	tVersion := &taskVersion{
 		execTask: eTask,
@@ -1625,7 +1574,7 @@ func TestParallelResumeReconstructionFailureIsNonFatal(t *testing.T) {
 	// Store tx0's receipt values but leave the sender unfunded: the RCacheV2
 	// probe misses and the prefix replay fails on insufficient funds.
 	seedResumeTestDB(t, db, func(putter kv.TemporalPutDel) error {
-		return rawtemporaldb.AppendReceipt(putter, 0, 21000, 0, 1)
+		return rawtemporaldb.AppendReceiptMetadata(putter, 0, 21000, 0, 1)
 	})
 
 	txTask := &exec.TxTask{
@@ -1650,7 +1599,7 @@ func TestParallelResumeReconstructionFailureIsNonFatal(t *testing.T) {
 	}
 	be.tasks = []*execTask{eTask}
 	be.results = []*execResult{nil}
-	be.execTasks.inProgress = []int{0}
+	be.execTasks.setInProgress(0)
 
 	tVersion := &taskVersion{
 		execTask: eTask,
@@ -1724,8 +1673,8 @@ func TestParallelFinalizeMissingPrevReceiptErrors(t *testing.T) {
 	// tx 0 was "finalized" without a receipt — the invariant nextResult
 	// relies on for the in-memory prev-receipt lookup is broken.
 	be.finalizedResults[0] = &execResult{TxResult: &exec.TxResult{Task: tVersion0}}
-	be.execTasks.complete = []int{0}
-	be.execTasks.inProgress = []int{1}
+	be.execTasks.setComplete(0)
+	be.execTasks.setInProgress(1)
 
 	txResult1 := &exec.TxResult{
 		Task: tVersion1,
@@ -1739,4 +1688,76 @@ func TestParallelFinalizeMissingPrevReceiptErrors(t *testing.T) {
 	// not the batch-local task index (0).
 	assert.ErrorContains(err, "missing finalized receipt for tx 1")
 	assert.Nil(res)
+}
+
+// The nil≡empty account tiebreaker is gated on EIP-161 at the apply-loop
+// validation call site: pre-Spurious-Dragon an existing-empty account is
+// gas-observable (CALL charges new-account gas on non-existence), so a nil
+// storage read raced against a created-empty record must re-execute; after
+// EIP-161 the two are EVM-indistinguishable and the read stays valid.
+func TestNextResult_NilVsEmptyRecordForkAware(t *testing.T) {
+	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
+	raced := accounts.InternAddress([20]byte{0xfa, 0xde})
+	for _, tc := range []struct {
+		name        string
+		blockNum    uint64
+		wantInvalid int
+	}{
+		{"pre-spurious-dragon-invalidates", 1, 1},
+		{"post-spurious-dragon-validates", 3_000_000, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := newResumeTestDB(t)
+			signedTx := signSelfSendTx(t, 0, 0, 1, 21000, chainSpec.Config, 0)
+			txTask := &exec.TxTask{
+				Header: &types.Header{
+					Number:   *uint256.NewInt(tc.blockNum),
+					GasLimit: 10_000_000,
+				},
+				EvmBlockContext: evmtypes.BlockContext{
+					BlockNumber: tc.blockNum,
+				},
+				TxNum:   1,
+				TxIndex: 0,
+				Config:  chainSpec.Config,
+				Txs:     []types.Transaction{signedTx},
+			}
+			pe, roTx := newResumeTestExec(t, db, chainSpec.Config)
+			pe.in = exec.NewQueueWithRetry(16)
+			t.Cleanup(pe.in.Close)
+			gasPool := new(protocol.GasPool).AddGas(10_000_000)
+			be := newBlockExec(tc.blockNum, common.Hash{}, gasPool, nil, make(chan applyResult, 8), make(chan applyResult, 8), false, nil)
+			eTask := &execTask{Task: txTask, index: 0}
+			be.tasks = []*execTask{eTask}
+			be.results = []*execResult{nil}
+			be.txIncarnations = []int{0}
+			be.execFailed = []int{0}
+			be.execAborted = []int{0}
+			be.estimateDeps[0] = []int{}
+			be.execTasks.setInProgress(0)
+			// Block-init left an EIP-161-empty record; the task under test read
+			// the address from storage as absent before that flush landed.
+			be.versionMap.WriteAddress(raced, state.Version{TxIndex: -1}, &accounts.Account{CodeHash: accounts.EmptyCodeHash}, true)
+			reads := state.ReadSet{}
+			reads.SetAddress(raced, state.VersionedRead[state.AccountView]{
+				ReadHeader: state.ReadHeader{Source: state.StorageRead, Version: state.UnknownVersion},
+			})
+			txResult := &exec.TxResult{
+				Task: &taskVersion{
+					execTask: eTask,
+					version:  state.Version{BlockNum: tc.blockNum, TxIndex: 0, Incarnation: 0, TxNum: 1},
+				},
+				TxIn:            reads,
+				ExecutionResult: evmtypes.ExecutionResult{ReceiptGasUsed: 10000},
+			}
+			_, err := be.nextResult(context.Background(), pe, txResult, roTx)
+			require.NoError(t, err)
+			require.Equal(t, tc.wantInvalid, be.cntValidationFail)
+			if tc.wantInvalid == 0 {
+				require.NotNil(t, be.finalizedResults[0])
+			} else {
+				require.Nil(t, be.finalizedResults[0])
+			}
+		})
+	}
 }

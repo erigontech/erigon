@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 
 	"github.com/erigontech/erigon/cl/abstract"
@@ -32,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/threading"
 )
 
@@ -52,15 +52,13 @@ func Epoch(b abstract.BeaconStateBasic) uint64 {
 
 func IsAggregator(cfg *clparams.BeaconChainConfig, committeeLength, committeeIndex uint64, slotSignature common.Bytes96) bool {
 	modulo := max(1, committeeLength/cfg.TargetAggregatorsPerCommittee)
-	hashSlotSignatue := utils.Sha256(slotSignature[:])
+	hashSlotSignatue := crypto.Sha256(slotSignature[:])
 	return binary.LittleEndian.Uint64(hashSlotSignatue[:8])%modulo == 0
 }
 
 // GetTotalBalance return the sum of all balances within the given validator set.
 func GetTotalBalance(b abstract.BeaconStateBasic, validatorSet []uint64) (uint64, error) {
-	var (
-		total uint64
-	)
+	var total uint64
 	for _, validatorIndex := range validatorSet {
 		// Should be in bounds.
 		delta, err := b.ValidatorEffectiveBalance(int(validatorIndex))
@@ -130,7 +128,7 @@ func EligibleValidatorsIndicies(b abstract.BeaconState) (eligibleValidators []ui
 	}
 	previousEpoch := PreviousEpoch(b)
 	// Iterate over all validators and include the active ones that have flag_index enabled and are not slashed.
-	for i := 0; i < numThreads; i++ {
+	for i := range numThreads {
 		workerID := i
 		wp.AddWork(func() error {
 			from := workerID * shardSize
@@ -169,8 +167,8 @@ func EligibleValidatorsIndicies(b abstract.BeaconState) (eligibleValidators []ui
 
 func IsValidIndexedAttestation(b abstract.BeaconStateBasic, att *cltypes.IndexedAttestation) (bool, error) {
 	inds := att.AttestingIndices
-	if inds.Length() == 0 || !solid.IsUint64SortedSet(inds) {
-		return false, errors.New("isValidIndexedAttestation: attesting indices are not sorted or are null")
+	if err := ValidateIndexedAttestationIndices(b.BeaconConfig(), b.Version(), inds); err != nil {
+		return false, err
 	}
 
 	pks := make([][]byte, 0, inds.Length())
@@ -204,6 +202,30 @@ func IsValidIndexedAttestation(b abstract.BeaconStateBasic, att *cltypes.Indexed
 		return false, errors.New("invalid aggregate signature")
 	}
 	return true, nil
+}
+
+func ValidateIndexedAttestationIndices(cfg *clparams.BeaconChainConfig, version clparams.StateVersion, inds *solid.RawUint64List) error {
+	if inds == nil || inds.Length() == 0 {
+		return errors.New("isValidIndexedAttestation: attesting indices are not sorted or are null")
+	}
+	if cfg == nil {
+		return errors.New("isValidIndexedAttestation: beacon config is nil")
+	}
+	limit := cfg.MaxValidatorsPerCommittee
+	if version >= clparams.ElectraVersion {
+		if cfg.MaxCommitteesPerSlot != 0 && limit > ^uint64(0)/cfg.MaxCommitteesPerSlot {
+			limit = ^uint64(0)
+		} else {
+			limit *= cfg.MaxCommitteesPerSlot
+		}
+	}
+	if uint64(inds.Length()) > limit {
+		return fmt.Errorf("isValidIndexedAttestation: too many attesting indices: %d > %d", inds.Length(), limit)
+	}
+	if !solid.IsUint64SortedSet(inds) {
+		return errors.New("isValidIndexedAttestation: attesting indices are not sorted or are null")
+	}
+	return nil
 }
 
 // IsValidatorEligibleForActivationQueue returns whether the validator is eligible to be placed into the activation queue.

@@ -31,7 +31,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/length"
@@ -71,6 +70,8 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 	domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
 	require.NoError(b, err)
 	defer domains.Close()
+	domains.EnableParaTrieDB(db)
+	require.Equal(b, execctx.PickTrieVariant(), domains.GetCommitmentCtx().Trie().Variant())
 
 	b.ReportAllocs()
 
@@ -100,7 +101,7 @@ func queueKeys(ctx context.Context, seed, ofSize uint64) <-chan []byte {
 				break
 			}
 			bb := make([]byte, ofSize)
-			rnd.Read(bb)
+			_, _ = rnd.Read(bb)
 
 			keys <- bb
 		}
@@ -119,14 +120,13 @@ func Benchmark_BtreeIndex_Search(b *testing.B) {
 	logger := log.New()
 	rnd := newRnd(uint64(time.Now().UnixNano()))
 	tmp := b.TempDir()
-	defer dir.RemoveAll(tmp)
+	defer dir.RemoveAll(tmp) //nolint:errcheck
 
 	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
 	comp := seg.CompressKeys | seg.CompressVals
 	buildBtreeIndex(b, dataPath, indexPath, comp, 1, logger, true)
 
-	M := 1024
-	kv, bt, err := btindex.OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), comp, false)
+	kv, bt, err := btindex.OpenBtreeIndexAndDataFile(indexPath, dataPath, comp, false)
 	require.NoError(b, err)
 	defer bt.Close()
 	defer kv.Close()
@@ -146,7 +146,6 @@ func Benchmark_BtreeIndex_Search(b *testing.B) {
 }
 
 type bTreeParameters struct {
-	M         uint64
 	KeySize   int // bytes
 	ValueSize int // bytes
 	KeyCount  int
@@ -157,14 +156,14 @@ func benchInitBtreeIndex(b *testing.B, params bTreeParameters, compression seg.F
 
 	logger := log.New()
 	tmp := b.TempDir()
-	b.Cleanup(func() { dir.RemoveAll(tmp) })
+	b.Cleanup(func() { _ = dir.RemoveAll(tmp) })
 
 	dataPath := generateKV(b, tmp, params.KeySize, params.ValueSize, params.KeyCount, logger, compression)
 	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bt")
 
 	buildBtreeIndex(b, dataPath, indexPath, compression, 1, logger, true)
 
-	kv, bt, err := btindex.OpenBtreeIndexAndDataFile(indexPath, dataPath, params.M, compression, false)
+	kv, bt, err := btindex.OpenBtreeIndexAndDataFile(indexPath, dataPath, compression, false)
 	require.NoError(b, err)
 	b.Cleanup(func() { bt.Close() })
 	b.Cleanup(func() { kv.Close() })
@@ -181,7 +180,6 @@ func Benchmark_BTree_SeekVsGetCompressedV(b *testing.B) {
 		keyCount = 10_000
 	}
 	kv, bt, keys, _ := benchInitBtreeIndex(b, bTreeParameters{
-		M:         1024,
 		KeySize:   64,
 		ValueSize: 1024,
 		KeyCount:  keyCount,
@@ -227,7 +225,6 @@ func Benchmark_BTree_SeekVsGetCompressedK(b *testing.B) {
 		keyCount = 10_000
 	}
 	kv, bt, keys, _ := benchInitBtreeIndex(b, bTreeParameters{
-		M:         1024,
 		KeySize:   64,
 		ValueSize: 1024,
 		KeyCount:  keyCount,
@@ -273,7 +270,6 @@ func Benchmark_BTree_SeekVsGetCompressedKV(b *testing.B) {
 		keyCount = 10_000
 	}
 	kv, bt, keys, _ := benchInitBtreeIndex(b, bTreeParameters{
-		M:         1024,
 		KeySize:   64,
 		ValueSize: 1024,
 		KeyCount:  keyCount,
@@ -319,7 +315,6 @@ func Benchmark_BTree_SeekVsGetUncompressed(b *testing.B) {
 		keyCount = 10_000
 	}
 	kv, bt, keys, _ := benchInitBtreeIndex(b, bTreeParameters{
-		M:         1024,
 		KeySize:   64,
 		ValueSize: 1024,
 		KeyCount:  keyCount,
@@ -365,7 +360,6 @@ func Benchmark_BTree_SeekThenNext(b *testing.B) {
 		keyCount = 10_000
 	}
 	kv, bt, keys, _ := benchInitBtreeIndex(b, bTreeParameters{
-		M:         1024,
 		KeySize:   64,
 		ValueSize: 1024,
 		KeyCount:  keyCount,
@@ -386,10 +380,10 @@ func Benchmark_BTree_SeekThenNext(b *testing.B) {
 				panic("mistmatch")
 			}
 
-			prevKey := common.Copy(keys[p])
+			prevKey := bytes.Clone(keys[p])
 			ntimer := time.Duration(0)
 			nextKeys := 5000
-			for j := 0; j < nextKeys; j++ {
+			for range nextKeys {
 				ntime := time.Now()
 
 				if !cur.Next() {
@@ -422,7 +416,7 @@ func Benchmark_Recsplit_Find_ExternalFile(b *testing.B) {
 	rnd := newRnd(uint64(time.Now().UnixNano()))
 	tmp := b.TempDir()
 
-	defer dir.RemoveAll(tmp)
+	defer dir.RemoveAll(tmp) //nolint:errcheck
 
 	indexPath := dataPath + "i"
 	idx, err := recsplit.OpenIndex(indexPath)
@@ -612,7 +606,7 @@ func pivotKeysFromKV(dataPath string) ([][]byte, error) {
 			break
 		}
 		key, _ := getter.Next(key[:0])
-		listing = append(listing, common.Copy(key))
+		listing = append(listing, bytes.Clone(key))
 		getter.Skip()
 	}
 	decomp.Close()
@@ -637,7 +631,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	collector := etl.NewCollector(btindex.BtreeLogPrefix+" genCompress", tmp, etl.NewSortableBuffer(bufSize), logger)
 	defer collector.Close()
 
-	for i := 0; i < keyCount; i++ {
+	for i := range keyCount {
 		key := make([]byte, keySize)
 		n, err := rnd.Read(key)
 		require.Equal(tb, keySize, n)

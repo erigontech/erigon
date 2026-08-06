@@ -245,7 +245,7 @@ func TestBlockValidatorWaitMultipleTimes(t *testing.T) {
 	bv := &blockValidator{done: make(chan error, 1)}
 	bv.done <- nil // simulate goroutine completion
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		done := make(chan error, 1)
 		go func() {
 			done <- bv.Wait()
@@ -409,10 +409,7 @@ func TestExecLoopExitCheckConcurrentReads(t *testing.T) {
 	var stop atomic.Bool
 	var wg sync.WaitGroup
 
-	// Mutator: add and remove blocks under pe's lock.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for !stop.Load() {
 			pe.Lock()
 			pe.blockExecutors[42] = &blockExecutor{}
@@ -421,16 +418,13 @@ func TestExecLoopExitCheckConcurrentReads(t *testing.T) {
 			delete(pe.blockExecutors, 42)
 			pe.Unlock()
 		}
-	}()
+	})
 
-	// Reader: continually call execLoopExitCheck.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for !stop.Load() {
 			_ = pe.execLoopExitCheck(context.Background(), "concurrent")
 		}
-	}()
+	})
 
 	time.Sleep(50 * time.Millisecond)
 	stop.Store(true)
@@ -721,6 +715,38 @@ func TestExecLoopShouldExitPriority(t *testing.T) {
 			got := execLoopShouldExit(br, tc.sizeEst, batchLimit, tc.maxBlockNum, tc.stopAfterBlock)
 			if got != tc.want {
 				t.Fatalf("execLoopShouldExit got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestApplyLoopCloseIsClean pins the no-stop-cause apply-loop close
+// classification. The load-bearing case is the empty loop
+// (txResultCount==0, lastBlockNum==0): under background commit the async
+// commit can advance execution progress to the validation target before a
+// single-block fork-validation step runs, so the exec loop executes nothing
+// and produces no blockResult. Treating that as pending work returns a
+// spurious ErrLoopExhausted, which the stage loop reports as
+// "unexpected state step has more work".
+func TestApplyLoopCloseIsClean(t *testing.T) {
+	cases := []struct {
+		name         string
+		lastBlockNum uint64
+		maxBlockNum  uint64
+		txResults    int
+		want         bool
+	}{
+		{name: "fully applied", lastBlockNum: 5, maxBlockNum: 5, txResults: 3, want: true},
+		{name: "past target", lastBlockNum: 6, maxBlockNum: 5, txResults: 3, want: true},
+		{name: "partial batch is not clean", lastBlockNum: 3, maxBlockNum: 5, txResults: 2, want: false},
+		{name: "empty loop, nothing executed", lastBlockNum: 0, maxBlockNum: 21, txResults: 0, want: true},
+		{name: "tx-results without blockResult is not clean", lastBlockNum: 0, maxBlockNum: 21, txResults: 4, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := applyLoopCloseIsClean(tc.lastBlockNum, tc.maxBlockNum, tc.txResults)
+			if got != tc.want {
+				t.Fatalf("applyLoopCloseIsClean(%d,%d,%d) = %v, want %v", tc.lastBlockNum, tc.maxBlockNum, tc.txResults, got, tc.want)
 			}
 		})
 	}

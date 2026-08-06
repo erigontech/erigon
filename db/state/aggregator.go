@@ -85,11 +85,22 @@ type Aggregator struct {
 	// visible is CoW field updated only by `recalcVisibleFiles`.
 	visible atomic.Pointer[aggregatorVisible]
 	// oldestVisible head of linked-list of visibleFiles objects (oldest still-have-reader object). Mutated only under dirtyFilesLock.
-	oldestVisible     *aggregatorVisible
-	snapshotBuildSema *semaphore.Weighted
+	oldestVisible *aggregatorVisible
+	// unaligned entities are left out of the shared visible-file ceiling while tooling
+	// regenerates them. Guarded by dirtyFilesLock.
+	unalignedDomain [kv.DomainLen]bool
+	unalignedIdx    [kv.StandaloneIdxLen]bool
+	// visibilityLoweringForbidden: a fill-enabled StateCache is wired over
+	// this aggregator, and its fill admission relies on view frontiers never
+	// decreasing. recalcVisibleFiles refuses to lower the cached state
+	// domains' visible ends while set; Close clears it (shutdown is not a
+	// fill window).
+	visibilityLoweringForbidden atomic.Bool
+	snapshotBuildSema           *semaphore.Weighted
 
 	disableHistory      bool
 	branchCacheDisabled bool
+	skipFilesDBGapCheck bool
 	workers             workersCfg
 
 	// To keep DB small - need move data to small files ASAP.
@@ -308,16 +319,21 @@ func (a *Aggregator) applyReferencesInCommitmentBranches(refs bool) {
 	}
 }
 
-// SetDomainStepsInFrozenFile sets the domain merge cap from a flag spec: empty or
-// "Inf" means unbounded, otherwise a positive integer step count.
+// SetDomainStepsInFrozenFile sets the domain merge cap from a flag spec: empty means
+// no override (the domain uses the erigondb.toml cap), "Inf" means unbounded, otherwise
+// a positive integer step count.
 func (a *Aggregator) SetDomainStepsInFrozenFile(spec string) error {
-	v := config3.UnboundedDomainMerge
-	if spec != "" && !strings.EqualFold(spec, "inf") {
-		parsed, err := strconv.ParseUint(spec, 10, 64)
-		if err != nil || parsed == 0 {
-			return fmt.Errorf("invalid domain steps-in-frozen-file %q: must be a positive integer or \"Inf\"", spec)
+	var v uint64 // 0 = no override
+	if spec != "" {
+		if strings.EqualFold(spec, "inf") {
+			v = config3.UnboundedDomainMerge
+		} else {
+			parsed, err := strconv.ParseUint(spec, 10, 64)
+			if err != nil || parsed == 0 {
+				return fmt.Errorf("invalid domain steps-in-frozen-file %q: must be a positive integer or \"Inf\"", spec)
+			}
+			v = parsed
 		}
-		v = parsed
 	}
 	a.SetErigondbDomainStepsInFrozenFile(v)
 	return nil
@@ -492,9 +508,9 @@ func (a *Aggregator) EnableAllDependencies() {
 	if a.checker == nil {
 		return
 	}
-	a.checker.Enable()
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
+	a.checker.Enable()
 	a.recalcVisibleFiles(nil)
 }
 
@@ -502,9 +518,59 @@ func (a *Aggregator) DisableAllDependencies() {
 	if a.checker == nil {
 		return
 	}
-	a.checker.Disable()
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
+	a.checker.Disable()
+	a.recalcVisibleFiles(nil)
+}
+
+// Unalign leaves a domain out of the shared visible-file ceiling while tooling regenerates
+// it: it stops clamping the others and stays clamped by them, so it can lag them and never
+// lead. Not persisted - an interrupted rebuild reopens aligned.
+//
+// Accounts, storage and code hold the state a rebuild reads: unaligning one panics.
+func (a *Aggregator) Unalign(d kv.Domain) (realign func()) {
+	switch d {
+	case kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain:
+		panic(fmt.Sprintf("assert: %s holds the state a rebuild reads, it can not lag it", d))
+	}
+	a.setUnalignedDomain(d, true)
+	return func() { a.setUnalignedDomain(d, false) }
+}
+
+// UnalignIdx is Unalign for a standalone index.
+func (a *Aggregator) UnalignIdx(name kv.InvertedIdx) (realign func()) {
+	for id, ii := range a.standaloneIIs() {
+		if ii.Name == name {
+			a.setUnalignedIdx(id, true)
+			return func() { a.setUnalignedIdx(id, false) }
+		}
+	}
+	return func() {}
+}
+
+// ForbidVisibilityLowering marks this aggregator as backing a fill-enabled
+// StateCache: from then on recalcVisibleFiles panics instead of lowering a
+// cached state domain's visible end, whichever entry point caused it.
+// Serialized with recalcVisibleFiles via dirtyFilesLock so "from then on"
+// holds against a recalculation already in flight.
+func (a *Aggregator) ForbidVisibilityLowering() {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	a.visibilityLoweringForbidden.Store(true)
+}
+
+func (a *Aggregator) setUnalignedDomain(d kv.Domain, v bool) {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	a.unalignedDomain[d] = v
+	a.recalcVisibleFiles(nil)
+}
+
+func (a *Aggregator) setUnalignedIdx(id int, v bool) {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	a.unalignedIdx[id] = v
 	a.recalcVisibleFiles(nil)
 }
 
@@ -512,22 +578,48 @@ func (a *Aggregator) DisableInterDomainDependencies() {
 	if a.checker == nil {
 		return
 	}
-	a.checker.DisableInterDomain()
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
+	a.checker.DisableInterDomain()
 	a.recalcVisibleFiles(nil)
 }
 
 func (a *Aggregator) OpenFolder() error {
-	a.dirtyFilesLock.Lock()
-	defer a.dirtyFilesLock.Unlock()
-	if err := a.reloadSalt(); err != nil {
+	if err := func() error {
+		a.dirtyFilesLock.Lock()
+		defer a.dirtyFilesLock.Unlock()
+		if err := a.reloadSalt(); err != nil {
+			return err
+		}
+		if err := a.openFolder(); err != nil {
+			return fmt.Errorf("OpenFolder: %w", err)
+		}
+		return nil
+	}(); err != nil {
 		return err
 	}
-	if err := a.openFolder(); err != nil {
-		return fmt.Errorf("OpenFolder: %w", err)
+	return a.checkFilesDBGap()
+}
+
+// checkFilesDBGap refuses to open a datadir where the DB was pruned past where the
+// snapshot files end (the hole `rm-state --latest` leaves without a reset — reads
+// below it silently return stale data). Skipped when SkipFilesDBGapCheck is set so
+// `--reset` tooling can open and fix it.
+func (a *Aggregator) checkFilesDBGap() error {
+	if a.skipFilesDBGapCheck || a.db == nil {
+		return nil
 	}
-	return nil
+	return a.db.View(context.Background(), func(tx kv.Tx) error {
+		at := a.BeginFilesRo()
+		defer at.Close()
+		if err := at.CheckFilesDBGap(tx); err != nil {
+			// The datadir is corrupt and can't be executed on; exit hard rather than
+			// let the error be swallowed/retried up the stack.
+			a.logger.Error("[snapshots] " + err.Error())
+			os.Exit(1)
+		}
+		return nil
+	})
 }
 
 func scanDirs(dirs datadir.Dirs) (r *ScanDirsResult, err error) {
@@ -564,28 +656,46 @@ func (a *Aggregator) openFolder() error {
 		return err
 	}
 
+	standaloneIIs := a.standaloneIIs()
+	retiredByDomain := make([]retiredFiles, len(a.d))
+	retiredByII := make([]retiredFiles, len(standaloneIIs))
+
 	eg, ctx := errgroup.WithContext(a.ctx)
-	for _, d := range a.d {
+	for id, d := range a.d {
 		if d.Disable {
 			continue
 		}
 
-		d := d
-		eg.Go(func() error {
-			return d.openFolder(ctx, scanDirsRes)
+		eg.Go(func() (err error) {
+			retiredByDomain[id], err = d.openFolder(ctx, scanDirsRes)
+			return err
 		})
 	}
-	for _, ii := range a.standaloneIIs() {
+	for id, ii := range standaloneIIs {
 		if ii.Disable {
 			continue
 		}
-		ii := ii
-		eg.Go(func() error { return ii.openFolder(ctx, scanDirsRes) })
+		eg.Go(func() (err error) {
+			retiredByII[id], err = ii.openFolder(ctx, scanDirsRes)
+			return err
+		})
 	}
-	if err := eg.Wait(); err != nil {
-		return fmt.Errorf("openFolder: %w", err)
+	waitErr := eg.Wait()
+
+	var retired retiredFiles
+	for _, r := range retiredByDomain {
+		retired = append(retired, r...)
 	}
-	a.recalcVisibleFiles(nil)
+	for _, r := range retiredByII {
+		retired = append(retired, r...)
+	}
+	// Retire (not close in place); the last existing reader closes them. Attach even when
+	// a sibling open errored (only ctx cancellation): the files are already detached from
+	// dirtyFiles, so skipping recalc would strand them, never reclaimed.
+	a.recalcVisibleFiles(retired)
+	if waitErr != nil {
+		return fmt.Errorf("openFolder: %w", waitErr)
+	}
 	return nil
 }
 
@@ -617,6 +727,9 @@ func (a *Aggregator) WaitForFiles() {
 }
 
 func (a *Aggregator) Close() {
+	a.dirtyFilesLock.Lock()
+	a.visibilityLoweringForbidden.Store(false) // shutdown is not a fill window
+	a.dirtyFilesLock.Unlock()
 	a.WaitForFiles()
 	if !a.background.BeginClose() { // idempotent: safe to call Close multiple times
 		return
@@ -647,21 +760,17 @@ func (a *Aggregator) closeDirtyFiles() {
 		if d == nil {
 			continue
 		}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			d.Close()
-		}()
+		})
 	}
 	for _, ii := range a.standaloneIIs() {
 		if ii == nil {
 			continue
 		}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			ii.Close()
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -832,19 +941,22 @@ func (a *Aggregator) WaitForBuildAndMerge(ctx context.Context) chan struct{} {
 				return
 			case <-chkEvery.C:
 				a.logger.Trace("[agg] waiting for files",
-					"building files", a.buildingFiles.Load(),
-					"merging files", a.mergingFiles.Load())
+					"buildingFiles", a.buildingFiles.Load(),
+					"mergingFiles", a.mergingFiles.Load())
 			}
 		}
 	}()
 	return res
 }
 
-func (a *Aggregator) BuildMissedAccessors(ctx context.Context, workers int) error {
+func (a *Aggregator) BuildMissedAccessors(ctx context.Context, workers int, opts ...kv.BuildAccessorsOption) error {
 	rotx := a.DebugBeginDirtyFilesRo()
 	defer rotx.Close()
 
 	missedFilesItems := rotx.FilesWithMissedAccessors()
+	if slices.Contains(opts, kv.SkipCoveredAccessors) {
+		rotx.dropCovered(missedFilesItems)
+	}
 	if !missedFilesItems.IsEmpty() {
 		defer a.onFilesChange(nil)
 	}
@@ -1378,7 +1490,7 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 				fullStat.Accumulate(stat)
 				return true, nil
 			}
-			at.a.logger.Warn("[snapshots] PruneSmallBatches failed", "err", err, "is deadline?", errors.Is(err, context.DeadlineExceeded))
+			at.a.logger.Warn("[snapshots] PruneSmallBatches failed", "err", err, "isDeadline", errors.Is(err, context.DeadlineExceeded))
 			return false, err
 		}
 		if stat == nil || stat.PrunedNothing() {
@@ -1417,7 +1529,7 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 				)
 			} else {
 				at.a.logger.Info("[prune] state",
-					"until commit", time.Until(started.Add(timeout)).String(),
+					"untilCommit", time.Until(started.Add(timeout)).String(),
 					//"pruneLimit", pruneLimit,
 					//"aggregatedStep", at.StepsInFiles(kv.AccountsDomain),
 					"stepsRangeInDB", at.stepsRangeInDBAsStr(tx),
@@ -1714,26 +1826,35 @@ func (a *Aggregator) FirstTxNumOfStep(step kv.Step) uint64 { // could have some 
 	return firstTxNumOfStep(step, a.StepSize())
 }
 
+// dirtyFilesEndTxNumMinimax is the ceiling shared by all visible files: no entity is visible
+// past a range another one misses. Left out: entities with no files at all (a fresh node, or
+// optional indexes never downloaded, would otherwise see nothing) and unaligned ones.
 func (a *Aggregator) dirtyFilesEndTxNumMinimax() uint64 {
-	if a.d[kv.AccountsDomain] == nil || a.d[kv.StorageDomain] == nil || a.d[kv.CodeDomain] == nil {
+	// end == 0 means "entity has no files", it does not lower the ceiling
+	_min := func(ceiling, end uint64) uint64 {
+		if end == 0 {
+			return ceiling
+		}
+		return min(ceiling, end)
+	}
+
+	ceiling := uint64(math.MaxUint64)
+	for id, d := range a.d {
+		if d == nil || d.Disable || a.unalignedDomain[id] {
+			continue
+		}
+		ceiling = _min(ceiling, d.dirtyFilesEndTxNumMinimax())
+	}
+	for id, ii := range a.standaloneIIs() {
+		if ii == nil || ii.Disable || a.unalignedIdx[id] {
+			continue
+		}
+		ceiling = _min(ceiling, ii.dirtyFilesEndTxNumMinimax())
+	}
+	if ceiling == math.MaxUint64 {
 		return 0
 	}
-	m := min(
-		a.d[kv.AccountsDomain].dirtyFilesEndTxNumMinimax(),
-		a.d[kv.StorageDomain].dirtyFilesEndTxNumMinimax(),
-		a.d[kv.CodeDomain].dirtyFilesEndTxNumMinimax(),
-		// a.d[kv.CommitmentDomain].dirtyFilesEndTxNumMinimax(),
-	)
-	// TODO(awskii) have two different functions including commitment/without it
-	//  Usually its skipped because commitment either have MaxUint64 due to no history or equal to other domains
-
-	//log.Warn("dirtyFilesEndTxNumMinimax", "min", m,
-	//	"acc", a.d[kv.AccountsDomain].dirtyFilesEndTxNumMinimax(),
-	//	"sto", a.d[kv.StorageDomain].dirtyFilesEndTxNumMinimax(),
-	//	"cod", a.d[kv.CodeDomain].dirtyFilesEndTxNumMinimax(),
-	//	"com", a.d[kv.CommitmentDomain].dirtyFilesEndTxNumMinimax(),
-	//)
-	return m
+	return ceiling
 }
 
 // aggregatorVisible immutable visible-for-application files (no gaps, no overlaps, indexed)
@@ -1751,7 +1872,7 @@ type aggregatorVisible struct {
 	minimaxTxNum uint64                          // min of domain file EndTxNum across kv.StateDomains
 
 	refcnt  atomic.Int32       // live readers
-	retired []*FilesItem       // files marked as "ready for delete"
+	retired retiredFiles       // last reader of  `aggregatorVisible` object will close/remove this files
 	next    *aggregatorVisible // oldest→newest linked-list link (set under dirtyFilesLock)
 }
 
@@ -1761,7 +1882,7 @@ type aggregatorVisible struct {
 // helpers, then publishes the completed snapshot with a.visible.Store(next).
 // Per-entity visibility is not mutated; readers atomically observe one
 // cross-entity-consistent generation.
-func (a *Aggregator) recalcVisibleFiles(retired []*FilesItem) {
+func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 	toTxNum := a.dirtyFilesEndTxNumMinimax()
 	next := &aggregatorVisible{}
 	for id, d := range a.d {
@@ -1778,6 +1899,28 @@ func (a *Aggregator) recalcVisibleFiles(retired []*FilesItem) {
 	}
 	next.minimaxTxNum = next.stateMinimaxTxNum()
 
+	if a.visibilityLoweringForbidden.Load() {
+		prev := a.visible.Load()
+		for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+			if prev.d[d] == nil || next.d[d] == nil {
+				continue
+			}
+			prevEnd := visibleFiles(prev.d[d].files).EndTxNum()
+			nextEnd := visibleFiles(next.d[d].files).EndTxNum()
+			if nextEnd < prevEnd {
+				panic(fmt.Sprintf("assert: %s visible end lowered %d -> %d while a fill-enabled StateCache is wired — fill admission relies on view frontiers never decreasing", d, prevEnd, nextEnd))
+			}
+			if prev.dhii[d] == nil || next.dhii[d] == nil {
+				continue
+			}
+			prevII := prev.dhii[d].files.EndTxNum()
+			nextII := next.dhii[d].files.EndTxNum()
+			if nextII < prevII {
+				panic(fmt.Sprintf("assert: %s history-II visible end lowered %d -> %d while a fill-enabled StateCache is wired — DomainVisibleEnd derives view frontiers from it", d, prevII, nextII))
+			}
+		}
+	}
+
 	old := a.visible.Load()
 	old.retired = retired
 	old.next = next
@@ -1785,7 +1928,7 @@ func (a *Aggregator) recalcVisibleFiles(retired []*FilesItem) {
 
 	// `recalcVisibleFiles` is rare background operation under `dirtyFilesLock`
 	// it's good idea to delete files here, then hot reader-Close path will more likely be lock-free
-	closeAndRemoveFiles(a.reclaimRetiredLocked())
+	reclaimFiles(a.reclaimRetiredLocked())
 }
 
 // stateMinimaxTxNum returns min(EndTxNum) across kv.StateDomains. Mirrors
@@ -1848,7 +1991,8 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 		cr := r.domain[kv.CommitmentDomain]
 
 		restorePrevRange := false
-		for k, dr := range &r.domain {
+		for k := range r.domain {
+			dr := &r.domain[k]
 			kd := kv.Domain(k)
 			if kd == kv.CommitmentDomain || cr.values.Equal(&dr.values) {
 				continue
@@ -1871,7 +2015,8 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 			}
 		}
 		if restorePrevRange {
-			for k, dr := range &r.domain {
+			for k := range r.domain {
+				dr := &r.domain[k]
 				r.domain[k].values = MergeRange{}
 				at.a.logger.Debug("findMergeRange: commitment range is different than accounts or storage, cancel kv merge",
 					at.d[k].d.FilenameBase, dr.values.String("", at.StepSize()))
@@ -1919,8 +2064,8 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *visibleFilesFor
 	// re-shortening (flag off, or flag on below threshold) need neither and run in parallel.
 	comVals := r.domain[kv.CommitmentDomain].values
 	commitmentRefsEnabled := at.a.referencesInCommitmentBranches()
-	// With referenced commitment files present, concurrent dereference does random reads; keep the shared
-	// mmap at MADV_NORMAL during merge instead of a separate sequential view that would evict those pages.
+	// With referenced commitment files present, concurrent dereference does random reads; read through
+	// the shared mmap instead of a separate sequential view that would evict those pages.
 	seqReadahead := !at.commitmentVisibleFilesReferenced()
 	needCommitmentTransform := comVals.needMerge &&
 		commitmentMergeNeedsTransform(files.d[kv.CommitmentDomain], commitmentRefsEnabled, at.StepSize(), comVals.from, comVals.to)
@@ -2265,6 +2410,18 @@ func (at *AggregatorRoTx) HistoryStartFrom(name kv.Domain, tx kv.Tx) uint64 {
 	return at.d[name].HistoryStartFrom(tx)
 }
 
+// Returns the first known txNum available in a standalone inverted index (files, then DB)
+func (at *AggregatorRoTx) IIStartFrom(name kv.InvertedIdx, tx kv.Tx) uint64 {
+	iit := at.searchII(name)
+	if iit == nil {
+		return 0
+	}
+	if len(iit.files) == 0 {
+		return iit.ii.minTxNumInDB(tx)
+	}
+	return iit.files[0].startTxNum
+}
+
 func (at *AggregatorRoTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int, tx kv.Tx) (timestamps stream.U64, err error) {
 	// check domain iis
 	for _, d := range at.d {
@@ -2340,6 +2497,29 @@ type AggregatorRoTx struct {
 	_leakID uint64 // set only if TRACE_AGG=true
 }
 
+// CheckFilesDBGap detects a gap between the snapshot files and the DB. It can arise from
+// snapshot/DB management operations — e.g. `seg rm-state --latest` and then starting
+// erigon without `integration stage_exec --reset`. Meant to run once at startup.
+func (at *AggregatorRoTx) CheckFilesDBGap(tx kv.Tx) error {
+	for _, dt := range at.d {
+		if dt == nil || dt.d.Disable {
+			continue
+		}
+		if err := dt.checkFilesDBGap(tx); err != nil {
+			return err
+		}
+	}
+	for _, iit := range at.iis {
+		if iit == nil || iit.ii.Disable {
+			continue
+		}
+		if err := iit.checkFilesDBGap(tx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (a *Aggregator) acquireVisibleFiles() (v *aggregatorVisible) {
 	// Load+Increment: is not atomic operation. Means: between them "existing last reader may End" (and close files)
 	// Means: must check that latest view didn't change
@@ -2363,27 +2543,35 @@ func (a *Aggregator) releaseVisibleFiles(v *aggregatorVisible) {
 }
 
 // reclaimRetiredLocked oldest-first traverse linked-list of visibleFiles objects while `refcnt == 0`
-// collecting retired files for physical delete. Physical delete happen out of `dirtyFilesLock`
-func (a *Aggregator) reclaimRetiredLocked() (toDelete []*FilesItem) {
+// collecting retired files for physical reclaim. Physical reclaim happens out of `dirtyFilesLock`
+func (a *Aggregator) reclaimRetiredLocked() (toReclaim retiredFiles) {
 	cur := a.visible.Load()
 	for h := a.oldestVisible; h != cur && h.refcnt.Load() == 0; h = h.next {
-		toDelete = append(toDelete, h.retired...)
+		toReclaim = append(toReclaim, h.retired...)
 		h.retired = nil
 		a.oldestVisible = h.next
 	}
-	return toDelete
+	return toReclaim
 }
 
 func (a *Aggregator) reclaimRetired() {
 	a.dirtyFilesLock.Lock()
-	toDelete := a.reclaimRetiredLocked()
+	toReclaim := a.reclaimRetiredLocked()
 	a.dirtyFilesLock.Unlock()
-	closeAndRemoveFiles(toDelete)
+	reclaimFiles(toReclaim)
 }
 
-func closeAndRemoveFiles(files []*FilesItem) {
+// reclaimFiles closes each retired file, additionally deleting it from disk when it is
+// marked deletable (canDelete). Files an external actor already removed from disk (an
+// OpenFolder that found them gone) are close-only, so a same-name recreation before the
+// pinning readers drain is never clobbered.
+func reclaimFiles(files retiredFiles) {
 	for _, f := range files {
-		f.closeFilesAndRemove()
+		if f.canDelete.Load() {
+			f.closeFilesAndRemove()
+		} else {
+			f.closeFiles()
+		}
 	}
 }
 
@@ -2425,27 +2613,39 @@ func (p *AggregatorFilesPin) Close() {
 	}
 }
 
+// aggRoTxArena lets one AggregatorRoTx and its children come from a single allocation.
+type aggRoTxArena struct {
+	at  AggregatorRoTx
+	d   [kv.DomainLen]DomainRoTx
+	h   [kv.DomainLen]HistoryRoTx
+	hii [kv.DomainLen]InvertedIndexRoTx
+	ii  [kv.StandaloneIdxLen]InvertedIndexRoTx
+}
+
 // beginFilesRoOn builds an AggregatorRoTx with fresh per-domain/per-index cursors
 // over the already-pinned visible generation v (caller owns the refcnt on v,
 // released by AggregatorRoTx.Close).
 func (a *Aggregator) beginFilesRoOn(v *aggregatorVisible) *AggregatorRoTx {
-	ac := &AggregatorRoTx{
-		a:        a,
-		visible:  v,
-		iisCount: a.iisCount,
-		_leakID:  a.leakDetector.Add(),
-	}
+	arena := &aggRoTxArena{}
+	ac := &arena.at
+	ac.a = a
+	ac.visible = v
+	ac.iisCount = a.iisCount
+	ac._leakID = a.leakDetector.Add()
+
 	for id, iv := range v.iis {
 		if iv == nil {
 			continue
 		}
-		ac.iis[id] = a.iis[id].beginFilesRo(iv)
+		a.iis[id].initFilesRo(&arena.ii[id], iv)
+		ac.iis[id] = &arena.ii[id]
 	}
 	for id, dv := range v.d {
 		if dv == nil {
 			continue
 		}
-		ac.d[id] = a.d[id].beginFilesRo(dv, v.dh[id], v.dhii[id])
+		a.d[id].initFilesRo(&arena.d[id], &arena.h[id], &arena.hii[id], dv, v.dh[id], v.dhii[id])
+		ac.d[id] = &arena.d[id]
 	}
 	return ac
 }
@@ -2487,6 +2687,21 @@ func (at *AggregatorRoTx) DomainProgress(name kv.Domain, tx kv.Tx) uint64 {
 		return at.d[name].d.maxStepInDBNoHistory(tx).ToTxNum(at.a.stepSize.Load())
 	}
 	return at.d[name].ht.iit.Progress(tx)
+}
+func (at *AggregatorRoTx) DomainVisibleEnd(name kv.Domain, tx kv.Tx) (uint64, bool) {
+	d := at.d[name]
+	if d.d.HistoryDisabled {
+		return 0, false
+	}
+	// A dependency checker can clamp the values view below the history-II end.
+	// Such a view has no exact frontier: reads mix fresh DB-resident keys with
+	// older file values for the gap, and raising the dependent file's
+	// visibility later reveals state without any cache apply — a fill made
+	// during the clamp would never be invalidated.
+	if d.files.EndTxNum() < d.ht.iit.files.EndTxNum() {
+		return 0, false
+	}
+	return d.ht.iit.visibleEnd(tx), true
 }
 func (at *AggregatorRoTx) IIProgress(name kv.InvertedIdx, tx kv.Tx) uint64 {
 	return at.searchII(name).Progress(tx)

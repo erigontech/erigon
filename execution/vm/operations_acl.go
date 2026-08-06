@@ -40,7 +40,7 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 			return mdgas.MdGas{}, ErrWriteProtection
 		}
 		// If we fail the minimum gas availability invariant, fail (0)
-		if scopeGas.Regular <= params.SstoreSentryGasEIP2200 {
+		if scopeGas.Execution <= params.SstoreSentryGasEIP2200 {
 			return mdgas.MdGas{}, errors.New("not enough gas for reentrancy sentry")
 		}
 		var coldAccess, writeCreate, writeExisting, clearRefund, stateCreate uint64
@@ -58,34 +58,43 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 			stateCreate = 0
 		}
 
-		slot := callContext.peekStorageKey()
+		slot := callContext.peekStorageKey(evm)
 		access := params.WarmStorageReadCostEIP2929
-		if _, slotMod := evm.IntraBlockState().AddSlotToAccessList(callContext.Address(), slot); slotMod {
+		slotPresent := evm.IntraBlockState().SlotKnownWarm(callContext.Address(), slot)
+		if !slotPresent {
+			_, slotPresent = evm.IntraBlockState().SlotInAccessList(callContext.Address(), slot)
+		}
+		if !slotPresent {
 			access = coldAccess
-			if callContext.gas < access {
-				return mdgas.MdGas{}, ErrOutOfGas
-			}
+		}
+		if scopeGas.Execution < access {
+			return mdgas.MdGas{}, ErrOutOfGas
+		}
+		if !slotPresent {
+			evm.IntraBlockState().AddSlotToAccessList(callContext.Address(), slot)
 		}
 		var value uint256.Int
-		value.Set(callContext.Stack.Back(1))
+		value.Set(callContext.Stack.back(1))
 		current, _ := evm.IntraBlockState().GetState(callContext.Address(), slot)
 
 		if current.Eq(&value) { // noop (1)
-			return mdgas.MdGas{Regular: access}, nil
+			return mdgas.MdGas{Execution: access}, nil
 		}
 		original, _ := evm.IntraBlockState().GetCommittedState(callContext.Address(), slot)
 		if original.Eq(&current) {
 			if original.IsZero() { // create slot (2.1.1)
-				return mdgas.MdGas{Regular: access + writeCreate, State: stateCreate}, nil
+				return mdgas.MdGas{Execution: access + writeCreate, State: stateCreate}, nil
 			}
 			if value.IsZero() { // delete slot (2.1.2b)
 				evm.IntraBlockState().AddRefund(clearRefund)
 			}
-			return mdgas.MdGas{Regular: access + writeExisting}, nil // write existing slot (2.1.2)
+			return mdgas.MdGas{Execution: access + writeExisting}, nil // write existing slot (2.1.2)
 		}
 		if !original.IsZero() {
 			if current.IsZero() { // recreate slot (2.2.1.1)
-				evm.IntraBlockState().SubRefund(clearRefund)
+				if err := evm.IntraBlockState().SubRefund(clearRefund); err != nil {
+					return mdgas.MdGas{}, err
+				}
 			} else if value.IsZero() { // delete slot (2.2.1.2)
 				evm.IntraBlockState().AddRefund(clearRefund)
 			}
@@ -100,7 +109,7 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 				evm.IntraBlockState().AddRefund(writeExisting)
 			}
 		}
-		return mdgas.MdGas{Regular: access}, nil // dirty update (2.2)
+		return mdgas.MdGas{Execution: access}, nil // dirty update (2.2)
 	}
 }
 
@@ -112,10 +121,14 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 func gasSLoadEIP2929(evm *EVM, callContext *CallContext, scopeGas mdgas.MdGas, memorySize uint64) (mdgas.MdGas, error) {
 	// If the caller cannot afford the cost, this change will be rolled back
 	// If he does afford it, we can skip checking the same thing later on, during execution
-	if _, slotMod := evm.IntraBlockState().AddSlotToAccessList(callContext.Address(), callContext.peekStorageKey()); slotMod {
-		return mdgas.MdGas{Regular: coldStorageAccessCost(evm.chainRules)}, nil
+	addr, slot := callContext.Address(), callContext.peekStorageKey(evm)
+	if evm.IntraBlockState().SlotKnownWarm(addr, slot) {
+		return mdgas.MdGas{Execution: params.WarmStorageReadCostEIP2929}, nil
 	}
-	return mdgas.MdGas{Regular: params.WarmStorageReadCostEIP2929}, nil
+	if _, slotMod := evm.IntraBlockState().AddSlotToAccessList(addr, slot); slotMod {
+		return mdgas.MdGas{Execution: coldStorageAccessCost(evm.chainRules)}, nil
+	}
+	return mdgas.MdGas{Execution: params.WarmStorageReadCostEIP2929}, nil
 }
 
 // gasExtCodeCopyEIP2929 implements extcodecopy according to EIP-2929
@@ -134,7 +147,7 @@ func gasExtCodeCopyEIP2929(evm *EVM, callContext *CallContext, scopeGas mdgas.Md
 	if evm.IntraBlockState().AddAddressToAccessList(addr) {
 		var overflow bool
 		// We charge (cold-warm), since 'warm' is already charged as constantGas
-		if gas.Regular, overflow = math.SafeAdd(gas.Regular, coldAccountAccessCost(evm.chainRules)-params.WarmStorageReadCostEIP2929); overflow {
+		if gas.Execution, overflow = math.SafeAdd(gas.Execution, coldAccountAccessCost(evm.chainRules)-params.WarmStorageReadCostEIP2929); overflow {
 			return mdgas.MdGas{}, ErrGasUintOverflow
 		}
 		return gas, nil
@@ -154,14 +167,14 @@ func gasEip2929AccountCheck(evm *EVM, callContext *CallContext, scopeGas mdgas.M
 	// If the caller cannot afford the cost, this change will be rolled back
 	if evm.IntraBlockState().AddAddressToAccessList(addr) {
 		// The warm storage read cost is already charged as constantGas
-		return mdgas.MdGas{Regular: coldAccountAccessCost(evm.chainRules) - params.WarmStorageReadCostEIP2929}, nil
+		return mdgas.MdGas{Execution: coldAccountAccessCost(evm.chainRules) - params.WarmStorageReadCostEIP2929}, nil
 	}
 	return mdgas.MdGas{}, nil
 }
 
 func makeCallVariantGasCallEIP2929(oldCalculator gasFunc) gasFunc {
 	return func(evm *EVM, callContext *CallContext, scopeGas mdgas.MdGas, memorySize uint64) (mdgas.MdGas, error) {
-		addr := accounts.InternAddress(callContext.Stack.Back(1).Bytes20())
+		addr := accounts.InternAddress(callContext.Stack.back(1).Bytes20())
 		// The WarmStorageReadCostEIP2929 (100) is already deducted in the form of a constant cost, so
 		// the cost to charge for cold access, if any, is Cold - Warm
 		coldCost := params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929
@@ -169,11 +182,11 @@ func makeCallVariantGasCallEIP2929(oldCalculator gasFunc) gasFunc {
 		if !warmAccess {
 			// Charge the remaining difference here already, to correctly calculate available
 			// gas for call
-			if _, ok := useGas(scopeGas.Regular, coldCost, evm.Config().Tracer, tracing.GasChangeCallStorageColdAccess); !ok {
+			if _, ok := useGas(scopeGas.Execution, coldCost, evm.Config().Tracer, tracing.GasChangeCallStorageColdAccess); !ok {
 				return mdgas.MdGas{}, ErrOutOfGas
 			}
 			evm.IntraBlockState().AddAddressToAccessList(addr)
-			scopeGas.Regular -= coldCost
+			scopeGas.Execution -= coldCost
 		}
 
 		// Now call the old calculator, which takes into account
@@ -189,7 +202,7 @@ func makeCallVariantGasCallEIP2929(oldCalculator gasFunc) gasFunc {
 		// add it to the returned gas. By adding it to the return, it will be charged
 		// outside of this function, as part of the dynamic gas, and that will make it
 		// also become correctly reported to tracers.
-		gas.Regular += coldCost
+		gas.Execution += coldCost
 		return gas, nil
 	}
 }
@@ -234,8 +247,8 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 		}
 		// If the caller cannot afford the cost, this change will be rolled back
 		if !evm.IntraBlockState().AddressInAccessList(address) {
-			gas.Regular = coldAccountAccessCost(evm.chainRules)
-			if _, ok := useGas(scopeGas.Regular, gas.Regular, evm.Config().Tracer, tracing.GasChangeCallStorageColdAccess); !ok {
+			gas.Execution = coldAccountAccessCost(evm.chainRules)
+			if _, ok := useGas(scopeGas.Execution, gas.Execution, evm.Config().Tracer, tracing.GasChangeCallStorageColdAccess); !ok {
 				return mdgas.MdGas{}, ErrOutOfGas
 			}
 			evm.IntraBlockState().AddAddressToAccessList(address)
@@ -255,19 +268,24 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 		evm.IntraBlockState().MarkAddressAccess(address, false)
 		if empty && !balance.IsZero() {
 			if evm.chainRules.IsAmsterdam {
-				gas.Regular += params.AccountWriteCostEIP8038
+				gas.Execution += params.AccountWriteCostEIP8038
 				gas.State = params.StateGasNewAccount
 			} else {
-				gas.Regular += params.CreateBySelfdestructGas
+				gas.Execution += params.CreateBySelfdestructGas
 			}
 		}
 
-		hasSelfdestructed, err := evm.IntraBlockState().HasSelfdestructed(callContext.Address())
-		if err != nil {
-			return mdgas.MdGas{}, err
-		}
-		if refundsEnabled && !hasSelfdestructed {
-			evm.IntraBlockState().AddRefund(params.SelfdestructRefundGas)
+		// Probe the flag only when the refund can apply: the probe records a
+		// SelfDestructPath read, which under parallel execution races another
+		// tx's SELFDESTRUCT of the same contract for no observable effect.
+		if refundsEnabled {
+			hasSelfdestructed, err := evm.IntraBlockState().HasSelfdestructed(callContext.Address())
+			if err != nil {
+				return mdgas.MdGas{}, err
+			}
+			if !hasSelfdestructed {
+				evm.IntraBlockState().AddRefund(params.SelfdestructRefundGas)
+			}
 		}
 		return gas, nil
 	}
@@ -285,10 +303,10 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 	return func(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGas, error) {
 		// In static mode, CALL with value must fail before EIP-7702 can warm
 		// the target or delegated address.
-		if rejectStaticValueTransfer && evm.readOnly && !callContext.Stack.Back(2).IsZero() {
+		if rejectStaticValueTransfer && evm.readOnly && !callContext.Stack.back(2).IsZero() {
 			return mdgas.MdGas{}, ErrWriteProtection
 		}
-		addr := accounts.InternAddress(callContext.Stack.Back(1).Bytes20())
+		addr := accounts.InternAddress(callContext.Stack.back(1).Bytes20())
 		coldAccountAccess := coldAccountAccessCost(evm.ChainRules())
 		// Check slot presence in the access list
 		var gas mdgas.MdGas
@@ -299,7 +317,7 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 			accessGas = coldAccountAccess - params.WarmStorageReadCostEIP2929
 			// Charge the remaining difference here already, to correctly calculate available
 			// gas for call
-			if availableGas.Regular < accessGas {
+			if availableGas.Execution < accessGas {
 				return mdgas.MdGas{}, ErrOutOfGas
 			}
 
@@ -314,34 +332,34 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 		if err != nil {
 			return mdgas.MdGas{}, err
 		}
-		if statelessGas, overflow := math.SafeAdd(statelessBaseGas.Regular, accessGas); overflow {
+		if statelessGas, overflow := math.SafeAdd(statelessBaseGas.Execution, accessGas); overflow {
 			return mdgas.MdGas{}, ErrGasUintOverflow
-		} else if availableGas.Regular < statelessGas {
+		} else if availableGas.Execution < statelessGas {
 			return mdgas.MdGas{}, ErrOutOfGas
 		}
 
-		statefulBaseGas, err := statefulCalculator(evm, callContext, statelessBaseGas, mdgas.MdGas{Regular: availableGas.Regular - accessGas}, transfersValue)
+		statefulBaseGas, err := statefulCalculator(evm, callContext, statelessBaseGas, mdgas.MdGas{Execution: availableGas.Execution - accessGas}, transfersValue)
 		if err != nil {
 			return mdgas.MdGas{}, err
 		}
 
 		// EIP-8037: Match the reference execution spec charge order:
-		//   regular base gas → state gas → 63/64 rule.
+		//   execution base gas → state gas → 63/64 rule.
 		//
-		// Temporarily deduct the regular base from callContext so that the
+		// Temporarily deduct the execution base from callContext so that the
 		// state gas charge (which may spill into gas_left) sees the correct
 		// reduced balance.  After computing the 63/64 rule we restore the
 		// base so the interpreter can deduct (and trace) the full amount.
-		regularBase := accessGas + statefulBaseGas.Regular
-		if callContext.gas < regularBase {
+		executionBase := accessGas + statefulBaseGas.Execution
+		if callContext.gas < executionBase {
 			return mdgas.MdGas{}, ErrOutOfGas
 		}
-		callContext.gas -= regularBase // temporary
+		callContext.gas -= executionBase // temporary
 
 		if statefulBaseGas.State > 0 {
 			ok := callContext.useMdGas(statefulBaseGas.State, mdgas.StateGas, nil, tracing.GasChangeIgnored)
 			if !ok {
-				callContext.gas += regularBase // restore before error
+				callContext.gas += executionBase // restore before error
 				return mdgas.MdGas{}, ErrOutOfGas
 			}
 		}
@@ -364,7 +382,7 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 				return mdgas.MdGas{}, err
 			}
 			if callContext.gas < delegationGas {
-				callContext.gas += regularBase
+				callContext.gas += executionBase
 				return mdgas.MdGas{}, ErrOutOfGas
 			}
 			callContext.gas -= delegationGas // temporary
@@ -373,14 +391,14 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 
 		availableGas = callContext.Gas()
 		// 63/64ths rule with the reduced gas (after base + state + delegation).
-		callGas, err := calcCallGas(evm, callContext, availableGas.Regular, 0)
+		callGas, err := calcCallGas(evm, callContext, availableGas.Execution, 0)
 		if err != nil {
 			return mdgas.MdGas{}, err
 		}
 
 		// Restore the temporarily deducted base + delegation so the
 		// interpreter deducts (and traces) the full dynamic cost.
-		callContext.gas += regularBase + delegationGas
+		callContext.gas += executionBase + delegationGas
 
 		if dbg.TraceDynamicGas && evm.intraBlockState.Trace() {
 			fmt.Printf("%d (%d.%d) Variant Gas: base %d, access: %d, delegation: %d, call: %d\n",
@@ -388,13 +406,13 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 				statefulBaseGas, accessGas, delegationGas, callGas)
 		}
 		var overflow bool
-		if gas.Regular, overflow = math.SafeAdd(gas.Regular, accessGas+delegationGas); overflow {
+		if gas.Execution, overflow = math.SafeAdd(gas.Execution, accessGas+delegationGas); overflow {
 			return mdgas.MdGas{}, ErrGasUintOverflow
 		}
-		if gas.Regular, overflow = math.SafeAdd(gas.Regular, statefulBaseGas.Regular); overflow {
+		if gas.Execution, overflow = math.SafeAdd(gas.Execution, statefulBaseGas.Execution); overflow {
 			return mdgas.MdGas{}, ErrGasUintOverflow
 		}
-		if gas.Regular, overflow = math.SafeAdd(gas.Regular, callGas); overflow {
+		if gas.Execution, overflow = math.SafeAdd(gas.Execution, callGas); overflow {
 			return mdgas.MdGas{}, ErrGasUintOverflow
 		}
 		return gas, nil

@@ -85,7 +85,7 @@ var readDomains = &cobra.Command{
 
 		var readFromDomain string
 		var addrs [][]byte
-		for i := 0; i < len(args); i++ {
+		for i := range args {
 			if i == 0 {
 				switch s := strings.ToLower(args[i]); s {
 				case "account", "storage", "code", "commitment":
@@ -98,7 +98,7 @@ var readDomains = &cobra.Command{
 			}
 			addr, err := hex.DecodeString(strings.TrimPrefix(args[i], "0x"))
 			if err != nil {
-				logger.Warn("invalid address passed", "str", args[i], "at position", i, "err", err)
+				logger.Warn("invalid address passed", "str", args[i], "position", i, "err", err)
 				continue
 			}
 			addrs = append(addrs, addr)

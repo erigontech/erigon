@@ -17,6 +17,7 @@
 package stagedsync
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -31,13 +32,13 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -70,7 +71,7 @@ type ExecuteBlockCfg struct {
 	vmConfig      *vm.Config
 	badBlockHalt  bool
 	stateStream   bool
-	blockReader   services.FullBlockReader
+	blockReader   dbservices.FullBlockReader
 	author        accounts.Address
 	// last valid number of the stage
 
@@ -95,7 +96,7 @@ func StageExecuteBlocksCfg(
 	badBlockHalt bool,
 
 	dirs datadir.Dirs,
-	blockReader services.FullBlockReader,
+	blockReader dbservices.FullBlockReader,
 	genesis *types.Genesis,
 	syncCfg ethconfig.Sync,
 	experimentalBAL bool,
@@ -132,7 +133,7 @@ func (cfg ExecuteBlockCfg) ChainConfig() *chain.Config { return cfg.chainConfig 
 func (cfg ExecuteBlockCfg) IsExperimentalBAL() bool { return cfg.experimentalBAL }
 
 // BlockReader returns the block reader.
-func (cfg ExecuteBlockCfg) BlockReader() services.FullBlockReader { return cfg.blockReader }
+func (cfg ExecuteBlockCfg) BlockReader() dbservices.FullBlockReader { return cfg.blockReader }
 
 // DirsDataDir returns the data directory path.
 func (cfg ExecuteBlockCfg) DirsDataDir() string { return cfg.dirs.DataDir }
@@ -150,7 +151,7 @@ var ErrTooDeepUnwind = errors.New("too deep unwind")
 // findExecutedDiffsetAtHeight returns the diffset of the block executed at currentBlock.
 // When no canonical hash is recorded at that height (e.g. the block is no longer canonical
 // after a reorg) it falls back to the stored header.
-func findExecutedDiffsetAtHeight(ctx context.Context, rwTx kv.TemporalRwTx, br services.FullBlockReader, doms *execctx.SharedDomains, currentBlock uint64) (diffSet [kv.DomainLen][]kv.DomainEntryDiff, executedHash common.Hash, found bool, err error) {
+func findExecutedDiffsetAtHeight(ctx context.Context, rwTx kv.TemporalRwTx, br dbservices.FullBlockReader, doms *execctx.SharedDomains, currentBlock uint64) (diffSet [kv.DomainLen][]kv.DomainEntryDiff, executedHash common.Hash, found bool, err error) {
 	executedHash, ok, err := br.CanonicalHash(ctx, rwTx, currentBlock)
 	if err != nil {
 		return diffSet, common.Hash{}, false, err
@@ -178,18 +179,15 @@ func findExecutedDiffsetAtHeight(ctx context.Context, rwTx kv.TemporalRwTx, br s
 }
 
 func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, ctx context.Context, cfg ExecuteBlockCfg, accumulator *shards.Accumulator, logger log.Logger) (err error) {
+	dropStateFromBlockNum := u.UnwindPoint + 1
 	br := cfg.blockReader
-	txNumsReader := br.TxnumReader()
-
-	// unwind all txs of u.UnwindPoint block. 1 txn in begin/end of block - system txs
-	txNum, err := txNumsReader.Min(ctx, rwTx, u.UnwindPoint+1)
-	if err != nil {
-		return err
-	}
 
 	t := time.Now()
+	defer mxState3Unwind.ObserveDuration(t)
+
 	var changeSet *[kv.DomainLen][]kv.DomainEntryDiff
-	for currentBlock := u.CurrentBlockNumber; currentBlock > u.UnwindPoint; currentBlock-- {
+	// collect and merge diffsets of blocks [dropStateFromBlockNum, u.CurrentBlockNumber]
+	for currentBlock := u.CurrentBlockNumber; currentBlock >= dropStateFromBlockNum; currentBlock-- {
 		currentKeys, executedHash, found, err := findExecutedDiffsetAtHeight(ctx, rwTx, br, doms, currentBlock)
 		if err != nil {
 			return err
@@ -214,15 +212,15 @@ func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwT
 			}
 		}
 	}
-	// Get the hash of the last executed block (the tip we're unwinding from).
-	lastExecHash, _, err := br.CanonicalHash(ctx, rwTx, u.CurrentBlockNumber)
+
+	dropFromTxNum, err := unwindDomsToBlock(ctx, rwTx, br, doms, u.UnwindPoint, changeSet)
 	if err != nil {
-		lastExecHash = common.Hash{}
+		return err
 	}
-	if err := unwindExec3State(ctx, doms, rwTx, u.UnwindPoint, txNum, accumulator, changeSet, lastExecHash, logger); err != nil {
-		return fmt.Errorf("unwindExec3State(%d->%d): %w, took %s", s.BlockNumber, u.UnwindPoint, err, time.Since(t))
+	if err := stateChangesStreamAtUnwind(ctx, rwTx, u.UnwindPoint, dropFromTxNum, accumulator, changeSet, logger); err != nil {
+		return fmt.Errorf("stateChangesStreamAtUnwind(%d->%d): %w, took %s", s.BlockNumber, u.UnwindPoint, err, time.Since(t))
 	}
-	if err := rawdb.DeleteNewerEpochs(rwTx, u.UnwindPoint+1); err != nil {
+	if err := rawdb.DeleteNewerEpochs(rwTx, dropStateFromBlockNum); err != nil {
 		return fmt.Errorf("delete newer epochs: %w", err)
 	}
 	return nil
@@ -230,13 +228,12 @@ func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwT
 
 var mxState3Unwind = metrics.GetOrCreateSummary("state3_unwind")
 
-func unwindExec3State(ctx context.Context,
-	sd *execctx.SharedDomains, tx kv.TemporalRwTx,
+// stateChangesStreamAtUnwind sending state changes to `accumulator`
+func stateChangesStreamAtUnwind(ctx context.Context,
+	tx kv.TemporalRwTx,
 	blockUnwindTo, txUnwindTo uint64,
 	accumulator *shards.Accumulator,
-	changeset *[kv.DomainLen][]kv.DomainEntryDiff, lastExecutedBlockHash common.Hash, logger log.Logger) error {
-	st := time.Now()
-	defer mxState3Unwind.ObserveDuration(st)
+	changeset *[kv.DomainLen][]kv.DomainEntryDiff, logger log.Logger) error {
 	var currentInc uint64
 
 	//TODO: why we don't call accumulator.ChangeCode???
@@ -244,7 +241,7 @@ func unwindExec3State(ctx context.Context,
 		//TODO: This is broken - becuase it does not handle the way value changes
 		// for previous steps are represented - they will pass nil values here
 		// which will look like a delete (12/11/25 - I've not fixed this as it has
-		// been here for a while and I'm not sure what if anything recieves these
+		// been here for a while and I'm not sure what if anything receives these
 		// changes at what it does with them)
 		if len(k) == length.Addr {
 			if len(v) > 0 {
@@ -273,7 +270,7 @@ func unwindExec3State(ctx context.Context,
 		copy(address[:], k[:length.Addr])
 		copy(location[:], k[length.Addr:])
 		if accumulator != nil {
-			accumulator.ChangeStorage(address, currentInc, location, common.Copy(v))
+			accumulator.ChangeStorage(address, currentInc, location, bytes.Clone(v))
 		}
 		if dbg.TraceUnwinds && dbg.TraceDomain(uint16(kv.StorageDomain)) {
 			if v == nil {
@@ -295,14 +292,15 @@ func unwindExec3State(ctx context.Context,
 			if dbg.TraceUnwinds && dbg.TraceDomain(uint16(kv.AccountsDomain)) {
 				address := entry.Key[:len(entry.Key)-8]
 				keyStep := ^binary.BigEndian.Uint64([]byte(entry.Key[len(entry.Key)-8:]))
-				if entry.Value != nil && len(entry.Value) > 0 {
+				switch {
+				case entry.Value != nil && len(entry.Value) > 0:
 					var account accounts.Account
 					if err := accounts.DeserialiseV3(&account, entry.Value); err == nil {
 						fmt.Printf("unwind (Block:%d,Tx:%d): acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}, step: %d\n", blockUnwindTo, txUnwindTo, address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash, keyStep)
 					}
-				} else if entry.Value == nil {
+				case entry.Value == nil:
 					fmt.Printf("unwind (Block:%d,Tx:%d): acc %x: [different step], step: %d\n", blockUnwindTo, txUnwindTo, address, keyStep)
-				} else {
+				default:
 					fmt.Printf("unwind (Block:%d,Tx:%d): del acc: %x, step: %d\n", blockUnwindTo, txUnwindTo, address, keyStep)
 				}
 			}
@@ -339,8 +337,6 @@ func unwindExec3State(ctx context.Context,
 
 	}
 
-	sd.Unwind(txUnwindTo, changeset)
-	sd.SetTxNum(txUnwindTo)
 	return nil
 }
 
@@ -351,7 +347,7 @@ func stageProgress(tx kv.Tx, db kv.RoDB, stage stages.SyncStage) (prevStageProgr
 			return prevStageProgress, err
 		}
 	} else {
-		if err = db.View(context.Background(), func(tx kv.Tx) error {
+		if err := db.View(context.Background(), func(tx kv.Tx) error {
 			prevStageProgress, err = stages.GetStageProgress(tx, stage)
 			if err != nil {
 				return err
@@ -390,33 +386,29 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 	return nil
 }
 
+// unwindDomsToBlock drops in-mem state of blocks (unwindToBlock, ∞) and
+// returns the boundary txNum it pruned from.
+func unwindDomsToBlock(ctx context.Context, rwTx kv.TemporalRwTx, br dbservices.FullBlockReader, doms *execctx.SharedDomains, unwindToBlock uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) (uint64, error) {
+	dropStateFromBlockNum := unwindToBlock + 1
+	txNum, err := br.TxnumReader().Min(ctx, rwTx, dropStateFromBlockNum)
+	if err != nil {
+		return 0, err
+	}
+	doms.Unwind(txNum, changeset) // drops [txNum, ∞)
+	doms.SetTxNum(txNum)
+	return txNum, nil
+}
+
 func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) (err error) {
-	//fmt.Printf("unwind: %d -> %d\n", u.CurrentBlockNumber, u.UnwindPoint)
 	if u.UnwindPoint >= s.BlockNumber {
-		// MDBX has nothing above u.UnwindPoint to roll back here, but the in-RAM
-		// overlay (reused across the unwind→retry loop) can still hold uncommitted
-		// writes for blocks above it — e.g. a block that failed its post-execution
-		// gas check before its step was flushed. Prune them so re-execution doesn't
-		// read a stale value; the committed prune in unwindExec3 is skipped here.
-		//
-		// Prune from s.BlockNumber+1, not u.UnwindPoint+1: this early return skips
-		// u.Done, so committed progress stays at s.BlockNumber and re-execution
-		// resumes there — the whole (s.BlockNumber, u.UnwindPoint] range re-executes
-		// and its stale overlay writes must be pruned too, or an SSTORE_SET is
-		// mischarged as SSTORE_RESET (gas undercharge).
-		txNum, err := cfg.blockReader.TxnumReader().Min(ctx, rwTx, s.BlockNumber+1)
-		if err != nil {
-			return err
-		}
-		// NB: do NOT ResetPendingUpdates here. Unlike the disk-unwind path below
-		// (which discards then rebuilds commitment state via unwindExec3 +
-		// SeekCommitment), this early return only rewinds the in-RAM overlay and
-		// returns — the overlay and its deferred commitment updates are reused by
-		// the in-loop re-execution, so discarding them strands the commitment
-		// context and stalls the next block.
-		doms.Unwind(txNum, nil)
-		doms.SetTxNum(txNum)
-		return nil
+		// Disk holds nothing above s.BlockNumber, but the in-RAM overlay may.
+
+		// Do not `u.Done()` here — disk state doesn't reach u.UnwindPoint - so re-execution resumes at s.BlockNumber+1
+		// Do not `ResetPendingUpdates()` here. Unlike the disk-unwind path below (which discards then
+		// rebuilds commitment state via unwindExec3 + SeekCommitment), this early return only rewinds the in-RAM overlay
+
+		_, err = unwindDomsToBlock(ctx, rwTx, cfg.blockReader, doms, s.BlockNumber, nil)
+		return err
 	}
 
 	logger.Info(fmt.Sprintf("[%s] Unwind Execution", u.LogPrefix()), "from", s.BlockNumber, "to", u.UnwindPoint)
@@ -463,7 +455,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 		return err
 	}
 
-	if err = u.Done(rwTx); err != nil {
+	if err := u.Done(rwTx); err != nil {
 		return err
 	}
 
@@ -472,7 +464,6 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 	if _, _, err = doms.SeekCommitment(ctx, rwTx); err != nil {
 		return fmt.Errorf("unwind: SeekCommitment after disk unwind: %w", err)
 	}
-	//dumpPlainStateDebug(tx, nil)
 	return nil
 }
 
@@ -609,7 +600,7 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 			"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
 		)
 	}
-	if err = s.Done(tx); err != nil {
+	if err := s.Done(tx); err != nil {
 		return err
 	}
 	return nil
@@ -620,7 +611,7 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 // own --prune.commitment-history.distance window; RCacheDomain follows the
 // general history window by default, or its own --prune.receipts.distance
 // window when set (keep-all retires nothing).
-func historyRetireCutoffs(ctx context.Context, tx kv.Tx, blockReader services.FullBlockReader, pm prune.Mode, forwardProgress uint64) (cutoffs kv.RetireCutoffs, err error) {
+func historyRetireCutoffs(ctx context.Context, tx kv.Tx, blockReader dbservices.FullBlockReader, pm prune.Mode, forwardProgress uint64) (cutoffs kv.RetireCutoffs, err error) {
 	historyTxNum, err := blockAmountRetireCutoffTxNum(ctx, tx, blockReader, pm.History, forwardProgress)
 	if err != nil {
 		return kv.RetireCutoffs{}, err
@@ -650,7 +641,7 @@ func historyRetireCutoffs(ctx context.Context, tx kv.Tx, blockReader services.Fu
 
 // blockAmountRetireCutoffTxNum resolves a retention window to the txNum below
 // which frozen files may be retired; 0 means retire nothing.
-func blockAmountRetireCutoffTxNum(ctx context.Context, tx kv.Tx, blockReader services.FullBlockReader, ba prune.BlockAmount, forwardProgress uint64) (uint64, error) {
+func blockAmountRetireCutoffTxNum(ctx context.Context, tx kv.Tx, blockReader dbservices.FullBlockReader, ba prune.BlockAmount, forwardProgress uint64) (uint64, error) {
 	if ba == nil || !ba.Enabled() {
 		return 0, nil
 	}

@@ -39,6 +39,25 @@ func TestHashTreeRoot(t *testing.T) {
 	require.Equal(t, common.Hash(root), common.HexToHash("0x9f684cf34c4ac8eb9056051f93498c552b59de6b0977c453ee099be68e58d90c"))
 }
 
+func TestHashTreeRootEmptySchema(t *testing.T) {
+	_, err := merkle_tree.HashTreeRoot()
+	require.Error(t, err)
+}
+
+func TestProgressiveContainerRootUnsupportedTypeMessage(t *testing.T) {
+	require.PanicsWithValue(t, "Can't create TreeRoot: unsupported type string at index 0", func() {
+		_, _ = merkle_tree.ProgressiveContainerRootAll("bad")
+	})
+}
+
+func TestProgressiveContainerRootInactiveFieldVector(t *testing.T) {
+	first := common.Hash{1}
+	third := common.Hash{2}
+	root, err := merkle_tree.ProgressiveContainerRoot([]bool{true, false, true}, first[:], third[:])
+	require.NoError(t, err)
+	require.Equal(t, common.HexToHash("0x3a6584864e28437da67deac288c46c9b60cee55880b19b12cfe68a7d1d5bc491"), common.Hash(root))
+}
+
 func TestHashTreeRootTxs(t *testing.T) {
 	txs := [][]byte{
 		{1, 2, 3},
@@ -48,4 +67,14 @@ func TestHashTreeRootTxs(t *testing.T) {
 	root, err := merkle_tree.TransactionsListRoot(txs)
 	require.NoError(t, err)
 	require.Equal(t, common.Hash(root), common.HexToHash("0x987269bc1075122edff32bfc38479757103cee5c1ed6e990de7ffee85b5dd18a"))
+}
+
+func TestProgressiveContainerProofRejectsOversizedSchema(t *testing.T) {
+	schema := make([]any, 257)
+	for i := range schema {
+		schema[i] = uint64(i)
+	}
+
+	_, err := merkle_tree.ProgressiveContainerProofAll(0, schema...)
+	require.Error(t, err)
 }

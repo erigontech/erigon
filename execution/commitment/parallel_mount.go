@@ -1,12 +1,13 @@
 package commitment
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"io"
 	"math/bits"
 	"os"
-	"sort"
+	"slices"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -16,6 +17,22 @@ var cmtTiming = os.Getenv("ERIGON_CMT_TIMING") == "1"
 
 // deepStorageThreshold is the touched-slot count above which an account's storage subtree folds concurrently instead of streaming through its worker.
 const deepStorageThreshold = 1_000
+
+// unfoldRootWall unfolds base at the root until row 0 forms the top-nibble mount wall,
+// consuming at most one nibble per step: a restored root extension sharing the probe's
+// leading nibble would otherwise unfold several levels at once and misplace the wall.
+func unfoldRootWall(ctx context.Context, base *HexPatriciaHashed) error {
+	zero := []byte{0}
+	for u := base.needUnfolding(zero); u > 0; u = base.needUnfolding(zero) {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := base.unfold(zero, min(u, 1)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 // seedRootBase synthesizes a row-0 wall when the on-disk root has no branch, so foldMounted stops
 // at the mount boundary and returns cells excluding the mount nibble for empty and non-empty bases alike.
@@ -53,7 +70,7 @@ func (hph *HexPatriciaHashed) mountTo(root *HexPatriciaHashed, nibble int) {
 	hph.mounted = true
 	hph.mountWall = root.currentKeyLen + 1
 	for row := 0; row <= hph.activeRows; row++ {
-		for nib := 0; nib < len(hph.grid[row]); nib++ {
+		for nib := range len(hph.grid[row]) {
 			hph.grid[row][nib] = root.grid[row][nib]
 		}
 	}
@@ -67,7 +84,7 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 		return nil, fmt.Errorf("processMounted: nil template")
 	}
 	if base.ctx == nil && p.trieCtxFactory != nil {
-		bctx, cleanup := p.trieCtxFactory()
+		bctx, cleanup := p.trieCtxFactory(ctx)
 		if cleanup != nil {
 			defer cleanup()
 		}
@@ -88,14 +105,8 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 		tStart = time.Now()
 	}
 
-	zero := []byte{0}
-	for u := base.needUnfolding(zero); u > 0; u = base.needUnfolding(zero) {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		if err := base.unfold(zero, u); err != nil {
-			return nil, fmt.Errorf("processMounted: unfold root: %w", err)
-		}
+	if err := unfoldRootWall(ctx, base); err != nil {
+		return nil, fmt.Errorf("processMounted: unfold root: %w", err)
 	}
 	seedRootBase(base)
 	if cmtTiming {
@@ -116,14 +127,14 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 		child := root.children[childIdx]
 		ni, ch := nib, child
 		g.Go(func() error {
-			w := p.workerPool.Get().(*HexPatriciaHashed)
+			w := NewHexPatriciaHashed(p.accountKeyLen, nil, p.cfg)
 			w.mountTo(base, ni)
 			if p.template != nil && p.template.traceW != nil {
 				w.traceW = tracePrefix(p.template.traceW, fmt.Sprintf("[mnt %x] ", ni))
 			} else {
 				w.traceW = nil
 			}
-			wctx, cleanup := p.trieCtxFactory()
+			wctx, cleanup := p.trieCtxFactory(gctx)
 			if cleanup != nil {
 				defer cleanup()
 			}
@@ -143,8 +154,7 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 				return foldStorageRoot(gctx, foldSem, p.newStorageWorker, pu, n, pth, accountFresh)
 			})
 			if buildErr != nil {
-				w.resetForReuse()
-				p.workerPool.Put(w)
+				w.Release()
 				return fmt.Errorf("mount[%x] build: %w", ni, buildErr)
 			}
 			var tf time.Time
@@ -157,8 +167,7 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 				foldDur[ni] = time.Since(tf)
 			}
 			if err != nil {
-				w.resetForReuse()
-				p.workerPool.Put(w)
+				w.Release()
 				return fmt.Errorf("mount[%x] fold: %w", ni, err)
 			}
 			cells[ni] = c
@@ -166,8 +175,7 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 			if deferred := w.TakeDeferredUpdates(); len(deferred) > 0 {
 				pu.appendDeferred(deferred)
 			}
-			w.resetForReuse()
-			p.workerPool.Put(w)
+			w.Release()
 			return nil
 		})
 		childIdx++
@@ -193,8 +201,6 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 			return nil, fmt.Errorf("processMounted: root fold: %w", err)
 		}
 	}
-	// fold() only sets rootPresent on a multi-child root fold, so set it here for the EncodeCurrentState/SetState round-trip.
-	base.rootPresent = !base.root.IsEmpty()
 	if deferred := base.TakeDeferredUpdates(); len(deferred) > 0 {
 		pu.appendDeferred(deferred)
 	}
@@ -229,7 +235,7 @@ func printMountTiming(tStart, tUnfolded, tWorkers time.Time, buildDur, foldDur *
 			maxSum, maxSumNib = sum, nib
 		}
 	}
-	sort.Slice(stats, func(i, j int) bool { return stats[i].sum > stats[j].sum })
+	slices.SortFunc(stats, func(a, b wstat) int { return cmp.Compare(b.sum, a.sum) })
 	fmt.Printf("\n[CMT_TIMING] baseUnfold=%v workerWall=%v rootFold=%v | criticalWorker=nib %x sum=%v (build=%v fold=%v)\n",
 		tUnfolded.Sub(tStart), tWorkers.Sub(tUnfolded), time.Since(tWorkers), maxSumNib, maxSum, stats[0].build, stats[0].fold)
 	fmt.Printf("[CMT_TIMING] sum(maxBuild=%v maxFold=%v) = ideal critical path if build & fold each split perfectly across nibbles\n", maxBuild, maxFold)
@@ -238,12 +244,12 @@ func printMountTiming(tStart, tUnfolded, tWorkers time.Time, buildDur, foldDur *
 	}
 }
 
-func (p *ParallelPatriciaHashed) newStorageWorker() (*HexPatriciaHashed, func()) {
+func (p *ParallelPatriciaHashed) newStorageWorker(ctx context.Context) (*HexPatriciaHashed, func()) {
 	var traceW io.Writer
 	if p.template != nil {
 		traceW = p.template.traceW
 	}
-	return newDeferredStorageWorker(&p.workerPool, p.trieCtxFactory, traceW)
+	return newDeferredStorageWorker(ctx, p.accountKeyLen, p.cfg, p.trieCtxFactory, traceW)
 }
 
 // setAccountStorageRoot writes the folded storage-root cell sr onto the account leaf.

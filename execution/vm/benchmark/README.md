@@ -91,6 +91,13 @@ Targets opcode dispatch overhead in `interpreter.go:Run()`.
 - `BenchmarkKeccak256` — SHA3 at 32B/256B/4KB input sizes
 - `BenchmarkMixedCompute` — realistic opcode mix (60% stack, 20% arith, 10% mem, 10% control)
 
+### E: Compute-Heavy Contract (`bench_snailtracer_test.go`)
+
+The cross-client reference workload for interpreter throughput: one long frame of
+arithmetic, memory and jumps with almost no state access.
+
+- `BenchmarkSnailtracer` — renders one pixel with the Snailtracer ray tracer
+
 ## Running
 
 ```bash

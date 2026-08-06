@@ -17,6 +17,10 @@
 package cltypes
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
@@ -126,7 +130,7 @@ type PayloadAttestation struct {
 }
 
 func (p *PayloadAttestation) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(p.AggregationBits, p.Data, p.Signature[:])
+	return merkle_tree.ProgressiveContainerRootAll(p.AggregationBits, p.Data, p.Signature[:])
 }
 
 func (p *PayloadAttestation) EncodingSizeSSZ() int {
@@ -242,7 +246,7 @@ func (i *IndexedPayloadAttestation) EncodingSizeSSZ() int {
 }
 
 func (i *IndexedPayloadAttestation) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(i.AttestingIndices, i.Data, i.Signature[:])
+	return merkle_tree.ProgressiveContainerRootAll(i.AttestingIndices, i.Data, i.Signature[:])
 }
 
 func (i *IndexedPayloadAttestation) Clone() clonable.Clonable {
@@ -258,7 +262,7 @@ func (i *IndexedPayloadAttestation) Clone() clonable.Clonable {
 }
 
 // ExecutionPayloadBid represents a bid for an execution payload from a builder.
-// Field order matches the alpha7 spec: consensus-specs/specs/gloas/beacon-chain.md
+// Its SSZ methods must preserve the field order defined by the Gloas schema.
 type ExecutionPayloadBid struct {
 	ParentBlockHash       common.Hash                   `json:"parent_block_hash"`
 	ParentBlockRoot       common.Hash                   `json:"parent_block_root"`
@@ -275,7 +279,27 @@ type ExecutionPayloadBid struct {
 }
 
 func (e *ExecutionPayloadBid) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(
+	schema, err := e.hashSchema()
+	if err != nil {
+		return [32]byte{}, err
+	}
+	return merkle_tree.ProgressiveContainerRootAll(schema...)
+}
+
+func (e *ExecutionPayloadBid) ParentBlockHashMerkleProof() ([][32]byte, error) {
+	schema, err := e.hashSchema()
+	if err != nil {
+		return nil, err
+	}
+	return merkle_tree.ProgressiveContainerProofAll(0, schema...)
+}
+
+func (e *ExecutionPayloadBid) hashSchema() ([]any, error) {
+	blobRoot, err := e.BlobKzgCommitments.HashSSZProgressive(nil)
+	if err != nil {
+		return nil, err
+	}
+	return []any{
 		e.ParentBlockHash[:],
 		e.ParentBlockRoot[:],
 		e.BlockHash[:],
@@ -286,21 +310,19 @@ func (e *ExecutionPayloadBid) HashSSZ() ([32]byte, error) {
 		e.Slot,
 		e.Value,
 		e.ExecutionPayment,
-		&e.BlobKzgCommitments,
+		blobRoot[:],
 		e.ExecutionRequestsRoot[:],
-	)
+	}, nil
 }
 
 func (e *ExecutionPayloadBid) EncodingSizeSSZ() int {
-	// 4 Hash32 fields (ParentBlockHash, ParentBlockRoot, BlockHash, PrevRandao) = 32*4 = 128
-	// 1 ExecutionAddress (FeeRecipient) = 20
-	// 5 uint64 fields (GasLimit, BuilderIndex, Slot, Value, ExecutionPayment) = 8*5 = 40
-	// 1 offset for BlobKzgCommitments = 4
-	// 1 Hash32 field (ExecutionRequestsRoot) = 32
-	// Total fixed = 128 + 20 + 40 + 4 + 32 = 224
-	return length.Hash*4 + length.Addr + 8*5 +
-		4 + // offset for BlobKzgCommitments (variable-length field)
-		length.Hash + // ExecutionRequestsRoot
+	// The fixed section contains five hashes, one address, five uint64 values,
+	// and the offset for BlobKzgCommitments.
+	const dynamicOffsetSize = 4
+	return length.Hash*5 +
+		length.Addr +
+		length.BlockNum*5 +
+		dynamicOffsetSize +
 		e.BlobKzgCommitments.EncodingSizeSSZ()
 }
 
@@ -309,7 +331,8 @@ func (e *ExecutionPayloadBid) Static() bool {
 }
 
 func (e *ExecutionPayloadBid) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf,
+	return ssz2.MarshalSSZ(
+		buf,
 		e.ParentBlockHash[:],
 		e.ParentBlockRoot[:],
 		e.BlockHash[:],
@@ -326,8 +349,9 @@ func (e *ExecutionPayloadBid) EncodeSSZ(buf []byte) ([]byte, error) {
 }
 
 func (e *ExecutionPayloadBid) DecodeSSZ(buf []byte, version int) error {
-	e.BlobKzgCommitments = *solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsCommittmentsPerBlock, 48)
-	return ssz2.UnmarshalSSZ(buf, version,
+	e.BlobKzgCommitments.EnsureStaticProgressive(maxBlobCommitmentsForConfig(clparams.GetBeaconConfig()), 48)
+	return ssz2.UnmarshalSSZ(
+		buf, version,
 		e.ParentBlockHash[:],
 		e.ParentBlockRoot[:],
 		e.BlockHash[:],
@@ -344,9 +368,28 @@ func (e *ExecutionPayloadBid) DecodeSSZ(buf []byte, version int) error {
 }
 
 func (e *ExecutionPayloadBid) Clone() clonable.Clonable {
+	commitments := e.BlobKzgCommitments.Clone().(*solid.ListSSZ[*KZGCommitment])
+	commitments.EnsureStaticProgressive(maxBlobCommitmentsForConfig(clparams.GetBeaconConfig()), 48)
 	return &ExecutionPayloadBid{
-		BlobKzgCommitments: *solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsCommittmentsPerBlock, 48),
+		BlobKzgCommitments: *commitments,
 	}
+}
+
+func (e *ExecutionPayloadBid) UnmarshalJSON(data []byte) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	commitments, ok := fields["blob_kzg_commitments"]
+	if !ok || bytes.Equal(bytes.TrimSpace(commitments), []byte("null")) {
+		return errors.New("execution payload bid contains null blob KZG commitments")
+	}
+	type executionPayloadBid ExecutionPayloadBid
+	if err := json.Unmarshal(data, (*executionPayloadBid)(e)); err != nil {
+		return err
+	}
+	e.BlobKzgCommitments.EnsureStaticProgressive(maxBlobCommitmentsForConfig(clparams.GetBeaconConfig()), 48)
+	return nil
 }
 
 func (e *ExecutionPayloadBid) Copy() *ExecutionPayloadBid {
@@ -377,7 +420,7 @@ func (s *SignedExecutionPayloadBid) HashSSZ() ([32]byte, error) {
 }
 
 func (s *SignedExecutionPayloadBid) EncodingSizeSSZ() int {
-	return 4 + s.Message.EncodingSizeSSZ() + length.Bytes96 // 4 is the offset for Message (variable-length field)
+	return signedDynamicSize(s.Message.EncodingSizeSSZ())
 }
 
 func (s *SignedExecutionPayloadBid) Static() bool {
@@ -389,7 +432,11 @@ func (s *SignedExecutionPayloadBid) EncodeSSZ(buf []byte) ([]byte, error) {
 }
 
 func (s *SignedExecutionPayloadBid) DecodeSSZ(buf []byte, version int) error {
-	s.Message = new(ExecutionPayloadBid)
+	if s.Message == nil {
+		s.Message = &ExecutionPayloadBid{
+			BlobKzgCommitments: *solid.NewStaticProgressiveListSSZ[*KZGCommitment](maxBlobCommitmentsForConfig(clparams.GetBeaconConfig()), 48),
+		}
+	}
 	return ssz2.UnmarshalSSZ(buf, version, s.Message, s.Signature[:])
 }
 
@@ -423,7 +470,7 @@ func NewExecutionPayloadEnvelope(cfg *clparams.BeaconChainConfig) *ExecutionPayl
 }
 
 func (e *ExecutionPayloadEnvelope) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(
+	return merkle_tree.ProgressiveContainerRootAll(
 		e.Payload,
 		e.ExecutionRequests,
 		e.BuilderIndex,
@@ -437,7 +484,8 @@ func (e *ExecutionPayloadEnvelope) Static() bool {
 }
 
 func (e *ExecutionPayloadEnvelope) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf,
+	return ssz2.MarshalSSZ(
+		buf,
 		e.Payload,
 		e.ExecutionRequests,
 		e.BuilderIndex,
@@ -453,7 +501,8 @@ func (e *ExecutionPayloadEnvelope) DecodeSSZ(buf []byte, version int) error {
 	if e.ExecutionRequests == nil {
 		e.ExecutionRequests = NewExecutionRequestsWithVersion(e.beaconCfg, clparams.StateVersion(version))
 	}
-	return ssz2.UnmarshalSSZ(buf, version,
+	return ssz2.UnmarshalSSZ(
+		buf, version,
 		e.Payload,
 		e.ExecutionRequests,
 		&e.BuilderIndex,
@@ -463,9 +512,13 @@ func (e *ExecutionPayloadEnvelope) DecodeSSZ(buf []byte, version int) error {
 }
 
 func (e *ExecutionPayloadEnvelope) EncodingSizeSSZ() int {
-	return 4 + e.Payload.EncodingSizeSSZ() + // offset for Payload (variable-length)
-		4 + e.ExecutionRequests.EncodingSizeSSZ() + // offset for ExecutionRequests (variable-length)
-		8 + length.Hash + length.Hash // BuilderIndex + BeaconBlockRoot + ParentBeaconBlockRoot
+	// Payload and ExecutionRequests are dynamic, so each contributes a 4-byte offset.
+	const dynamicOffsetSize = 4
+	return 2*dynamicOffsetSize +
+		e.Payload.EncodingSizeSSZ() +
+		e.ExecutionRequests.EncodingSizeSSZ() +
+		length.BlockNum +
+		2*length.Hash
 }
 
 func (e *ExecutionPayloadEnvelope) Clone() clonable.Clonable {
@@ -513,7 +566,7 @@ func (s *SignedExecutionPayloadEnvelope) DecodeSSZ(buf []byte, version int) erro
 }
 
 func (s *SignedExecutionPayloadEnvelope) EncodingSizeSSZ() int {
-	return 4 + s.Message.EncodingSizeSSZ() + length.Bytes96 // 4 is the offset for Message (variable-length)
+	return signedDynamicSize(s.Message.EncodingSizeSSZ())
 }
 
 func (s *SignedExecutionPayloadEnvelope) Clone() clonable.Clonable {

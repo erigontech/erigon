@@ -145,8 +145,8 @@ func (opts MdbxOpts) WithMetrics() MdbxOpts                    { opts.metrics = 
 // Flags
 func (opts MdbxOpts) HasFlag(flag uint) bool           { return opts.flags&flag != 0 }
 func (opts MdbxOpts) Flags(f func(uint) uint) MdbxOpts { opts.flags = f(opts.flags); return opts }
-func (opts MdbxOpts) AddFlags(flags uint) MdbxOpts     { opts.flags = opts.flags | flags; return opts }
-func (opts MdbxOpts) RemoveFlags(flags uint) MdbxOpts  { opts.flags = opts.flags &^ flags; return opts }
+func (opts MdbxOpts) AddFlags(flags uint) MdbxOpts     { opts.flags |= flags; return opts }
+func (opts MdbxOpts) RemoveFlags(flags uint) MdbxOpts  { opts.flags &^= flags; return opts }
 func (opts MdbxOpts) boolToFlag(enabled bool, flag uint) MdbxOpts {
 	if enabled {
 		return opts.AddFlags(flag)
@@ -239,13 +239,13 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 			return nil, fmt.Errorf("db verbosity set: %w", err)
 		}
 	}
-	if err = env.SetOption(mdbx.OptMaxDB, 200); err != nil {
+	if err := env.SetOption(mdbx.OptMaxDB, 200); err != nil {
 		return nil, err
 	}
-	if err = env.SetOption(mdbx.OptMaxReaders, kv.ReadersLimit); err != nil {
+	if err := env.SetOption(mdbx.OptMaxReaders, kv.ReadersLimit); err != nil {
 		return nil, err
 	}
-	if err = env.SetOption(mdbx.OptRpAugmentLimit, 1_000_000_000); err != nil { //default: 262144
+	if err := env.SetOption(mdbx.OptRpAugmentLimit, 1_000_000_000); err != nil { //default: 262144
 		return nil, err
 	}
 
@@ -255,14 +255,14 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 	}
 
 	if !opts.HasFlag(mdbx.Accede) && !exists {
-		if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(opts.growthStep), opts.shrinkThreshold, int(opts.pageSize)); err != nil {
+		if err := env.SetGeometry(-1, -1, int(opts.mapSize), int(opts.growthStep), opts.shrinkThreshold, int(opts.pageSize)); err != nil {
 			return nil, err
 		}
 		if err = os.MkdirAll(opts.path, 0744); err != nil {
 			return nil, fmt.Errorf("could not create dir: %s, %w", opts.path, err)
 		}
 	} else if exists {
-		if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(opts.growthStep), opts.shrinkThreshold, -1); err != nil {
+		if err := env.SetGeometry(-1, -1, int(opts.mapSize), int(opts.growthStep), opts.shrinkThreshold, -1); err != nil {
 			return nil, err
 		}
 	}
@@ -282,14 +282,14 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 			return nil, err
 		}
 		if opts.label == dbcfg.ChainDB {
-			if err = env.SetOption(mdbx.OptTxnDpInitial, txnDpInitial*2); err != nil {
+			if err := env.SetOption(mdbx.OptTxnDpInitial, txnDpInitial*2); err != nil {
 				return nil, err
 			}
 			dpReserveLimit, err := env.GetOption(mdbx.OptDpReverseLimit)
 			if err != nil {
 				return nil, err
 			}
-			if err = env.SetOption(mdbx.OptDpReverseLimit, dpReserveLimit*2); err != nil {
+			if err := env.SetOption(mdbx.OptDpReverseLimit, dpReserveLimit*2); err != nil {
 				return nil, err
 			}
 		}
@@ -317,13 +317,13 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 			}
 		}
 		//can't use real pagesize here - it will be known only after env.Open()
-		if err = env.SetOption(mdbx.OptTxnDpLimit, dirtySpace/pageSize.Bytes()); err != nil {
+		if err := env.SetOption(mdbx.OptTxnDpLimit, dirtySpace/pageSize.Bytes()); err != nil {
 			return nil, err
 		}
 
 		// must be in the range from 12.5% (almost empty) to 50% (half empty)
 		// which corresponds to the range from 8192 and to 32768 in units respectively
-		if err = env.SetOption(mdbx.OptMergeThreshold16dot16Percent, opts.mergeThreshold); err != nil {
+		if err := env.SetOption(mdbx.OptMergeThreshold16dot16Percent, opts.mergeThreshold); err != nil {
 			return nil, err
 		}
 	}
@@ -353,13 +353,13 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 	}
 
 	if opts.HasFlag(mdbx.SafeNoSync) && opts.syncPeriod != 0 {
-		if err = env.SetSyncPeriod(opts.syncPeriod); err != nil {
+		if err := env.SetSyncPeriod(opts.syncPeriod); err != nil {
 			return nil, err
 		}
 	}
 
 	if opts.HasFlag(mdbx.SafeNoSync) && opts.syncBytes != nil {
-		if err = env.SetSyncBytes(uint(opts.syncBytes.Bytes())); err != nil {
+		if err := env.SetSyncBytes(uint(opts.syncBytes.Bytes())); err != nil {
 			return nil, err
 		}
 	}
@@ -935,7 +935,7 @@ func (tx *MdbxTx) DistributeCursors(table string, from []byte, n int) ([][]byte,
 		if err != nil {
 			return nil, err
 		}
-		defer cw.Close()
+		defer cw.Close() //nolint:gocritic
 		wrappers[i], cursors[i] = cw, rawCursor(cw)
 	}
 
@@ -2126,7 +2126,7 @@ func (s *cursor2iter) Next() (k, v []byte, err error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	if err = s.advance(); err != nil {
+	if err := s.advance(); err != nil {
 		return nil, nil, err
 	}
 	return k, v, nil
@@ -2298,7 +2298,7 @@ func (s *cursorDup2iter) Next() (k, v []byte, err error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	if err = s.advance(); err != nil {
+	if err := s.advance(); err != nil {
 		return nil, nil, err
 	}
 	return s.key, v, nil

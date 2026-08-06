@@ -17,8 +17,9 @@
 package state
 
 import (
+	"cmp"
 	"fmt"
-	"sort"
+	"slices"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -200,14 +201,12 @@ func (b *CachingBeaconState) UpgradeToElectra() error {
 		return true
 	})
 	// sort
-	sort.Slice(validators, func(i, j int) bool {
-		vi, vj := validators[i].validator, validators[j].validator
-		if vi.ActivationEligibilityEpoch() == vj.ActivationEligibilityEpoch() {
-			//  If eligibility epochs are equal, compare indices
-			return validators[i].index < validators[j].index
+	slices.SortFunc(validators, func(a, b tempValidator) int {
+		ae, be := a.validator.ActivationEligibilityEpoch(), b.validator.ActivationEligibilityEpoch()
+		if ae == be {
+			return cmp.Compare(a.index, b.index)
 		}
-		// Otherwise, sort by activationEligibilityEpoch
-		return vi.ActivationEligibilityEpoch() < vj.ActivationEligibilityEpoch()
+		return cmp.Compare(ae, be)
 	})
 
 	for _, v := range validators {
@@ -220,8 +219,8 @@ func (b *CachingBeaconState) UpgradeToElectra() error {
 		}
 		curValidator := v.validator
 		// Do NOT directly modify the validator in the validator set, because we need to mark validatorSet as dirty in BeaconState
-		//curValidator.SetEffectiveBalance(0)
-		//curValidator.SetActivationEligibilityEpoch(b.BeaconConfig().FarFutureEpoch)
+		// curValidator.SetEffectiveBalance(0)
+		// curValidator.SetActivationEligibilityEpoch(b.BeaconConfig().FarFutureEpoch)
 		b.SetEffectiveBalanceForValidatorAtIndex(int(v.index), 0)
 		b.SetActivationEligibilityEpochForValidatorAtIndex(int(v.index), b.BeaconConfig().FarFutureEpoch)
 		// Use bls.G2_POINT_AT_INFINITY as a signature field placeholder
@@ -269,7 +268,7 @@ func (b *CachingBeaconState) UpgradeToFulu() error {
 		if err != nil {
 			return err
 		}
-		for j := 0; j < len(proposerIndices); j++ {
+		for j := range proposerIndices {
 			lookahead.Set(i*int(b.BeaconConfig().SlotsPerEpoch)+j, proposerIndices[j])
 		}
 	}

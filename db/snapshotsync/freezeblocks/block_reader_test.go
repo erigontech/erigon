@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/recsplit"
@@ -457,7 +458,7 @@ func TestCanonicalHashCache_MultipleBlocks(t *testing.T) {
 	defer rwTx.Rollback()
 
 	hashes := make([]common.Hash, 5)
-	for i := uint64(0); i < 5; i++ {
+	for i := range uint64(5) {
 		header := &types.Header{Number: *uint256.NewInt(i)}
 		hashes[i] = header.Hash()
 		require.NoError(t, rawdb.WriteCanonicalHash(rwTx, hashes[i], i))
@@ -468,7 +469,7 @@ func TestCanonicalHashCache_MultipleBlocks(t *testing.T) {
 	defer tx.Rollback()
 
 	// Read all blocks — results come from DB, not snapshots, so the cache stays empty.
-	for i := uint64(0); i < 5; i++ {
+	for i := range uint64(5) {
 		hash, ok, err := blockReader.CanonicalHash(context.Background(), tx, i)
 		require.NoError(t, err)
 		assert.True(t, ok)
@@ -476,7 +477,7 @@ func TestCanonicalHashCache_MultipleBlocks(t *testing.T) {
 	}
 
 	// DB results should NOT be cached (only snapshot data is immutable and cacheable)
-	for i := uint64(0); i < 5; i++ {
+	for i := range uint64(5) {
 		_, found := blockReader.canonicalHashCache.Get(i)
 		assert.False(t, found, "block %d should not be cached (DB data)", i)
 	}
@@ -559,4 +560,46 @@ func TestCanonicalHashCache_SnapshotPath(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, ok2)
 	assert.Equal(t, header.Hash(), hash2)
+}
+
+// TestTxBlockView_StaleUntilReopen reproduces the minimal-mode history-download
+// regression: a temporal tx pins its block-files view at begin-time, so body
+// segments opened afterwards stay invisible to reads through that tx until the
+// tx reopens its underlying-files view. When they stayed invisible, the
+// snapshots stage's download filter walked an empty body view, couldn't compute
+// the history prune cutoff, and downloaded every history file.
+func TestTxBlockView_StaleUntilReopen(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	db := temporaltest.NewTestDB(t, dirs)
+	logger := log.New()
+
+	snapshots := db.(HasBlockFiles).DebugBlockFiles()
+	blockReader := NewBlockReader(snapshots, nil)
+
+	// Begin the tx BEFORE any block segments exist: it pins an empty view.
+	rwTx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	bodiesInTxView := func() int {
+		view, release := blockReader.view(rwTx)
+		defer release()
+		return len(view.Bodies())
+	}
+	require.Equal(t, 0, bodiesInTxView())
+
+	// Create and open header/body/tx segments after the tx began.
+	ver := version.V1_0
+	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Headers, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Bodies, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Transactions, dirs.Snap, ver, logger)
+	require.NoError(t, snapshots.OpenFolder())
+	require.Equal(t, uint64(999), snapshots.SegmentsMax())
+
+	// Regression: the tx still sees its stale, empty view.
+	require.Equal(t, 0, bodiesInTxView())
+
+	// Fix: reopening the tx's underlying-files view exposes the bodies.
+	rwTx.(kv.CanReopenUnderlyingFilesTx).ForceReopenUnderlyingFilesTx()
+	require.Positive(t, bodiesInTxView())
 }

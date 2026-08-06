@@ -103,7 +103,7 @@ func prepareDictMetadata(t testing.TB, multiplier int, hasMetadata bool, metadat
 	defer c.Close()
 	k := bytes.Repeat([]byte("long"), multiplier)
 	v := bytes.Repeat([]byte("word"), multiplier)
-	for i := 0; i < keys; i++ {
+	for i := range keys {
 		if err = c.AddWord(nil); err != nil {
 			panic(err)
 		}
@@ -406,7 +406,7 @@ func TestCompressSamplingCoversWholeFile(t *testing.T) {
 		defer c.Close()
 		c.superstringLimit = 1000
 
-		for i := 0; i < nWords; i++ {
+		for range nWords {
 			require.NoError(t, c.AddWord([]byte(word)))
 		}
 		count := c.superstringCount

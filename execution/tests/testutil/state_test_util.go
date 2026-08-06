@@ -38,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
-	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -95,7 +94,7 @@ type stTransaction struct {
 	GasPrice             *math.HexOrDecimal256 `json:"gasPrice"`
 	MaxFeePerGas         *math.HexOrDecimal256 `json:"maxFeePerGas"`
 	MaxPriorityFeePerGas *math.HexOrDecimal256 `json:"maxPriorityFeePerGas"`
-	Nonce                math.HexOrDecimal64   `json:"nonce"`
+	Nonce                math.HexOrDecimal256  `json:"nonce"`
 	GasLimit             []math.HexOrDecimal64 `json:"gasLimit"`
 	PrivateKey           hexutil.Bytes         `json:"secretKey"`
 	To                   string                `json:"to"`
@@ -250,29 +249,27 @@ func (t *StateTest) checkError(subtest StateSubtest, err error) error {
 // Run executes a specific subtest and verifies the post-state and logs.
 // sd is the caller-owned SharedDomains: discard (Close without Flush) to
 // prevent per-subtest state from polluting the long-lived branch cache.
-func (t *StateTest) Run(tb testing.TB, sd *execctx.SharedDomains, tx kv.TemporalRwTx, subtest StateSubtest, vmconfig vm.Config, dirs datadir.Dirs) (*state.IntraBlockState, common.Hash, error) {
-	st, root, _, err := t.RunNoVerify(tb, sd, tx, subtest, vmconfig, dirs)
+func (t *StateTest) Run(tb testing.TB, sd *execctx.SharedDomains, tx kv.TemporalRwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, common.Hash, error) {
+	st, root, _, err := t.RunNoVerify(tb, sd, tx, subtest, vmconfig)
+	return st, root, t.checkResult(subtest, st, root, err)
+}
 
+func (t *StateTest) checkResult(subtest StateSubtest, st *state.IntraBlockState, root common.Hash, err error) error {
 	checkedErr := t.checkError(subtest, err)
 	if checkedErr != nil {
-		return st, root, checkedErr
+		return checkedErr
 	}
 	if err != nil {
-		// Error was expected — check post-state root if specified
-		post := t.Json.Post[subtest.Fork][subtest.Index]
-		if post.Root != (common.UnprefixedHash{}) && root != common.Hash(post.Root) {
-			return st, root, fmt.Errorf("post state root mismatch: got %x, want %x", root, post.Root)
-		}
-		return st, root, nil
+		return nil
 	}
 	post := t.Json.Post[subtest.Fork][subtest.Index]
 	if root != common.Hash(post.Root) {
-		return st, root, fmt.Errorf("post state root mismatch: got %x, want %x", root, post.Root)
+		return fmt.Errorf("post state root mismatch: got %x, want %x", root, post.Root)
 	}
-	if logs := rlpHash(st.Logs()); logs != common.Hash(post.Logs) {
-		return st, root, fmt.Errorf("post state logs hash mismatch: got %x, want %x", logs, post.Logs)
+	if logs := st.LogsRlpHash(); logs != common.Hash(post.Logs) {
+		return fmt.Errorf("post state logs hash mismatch: got %x, want %x", logs, post.Logs)
 	}
-	return st, root, nil
+	return nil
 }
 
 // RunNoVerify runs a specific subtest and returns the statedb, post-state root
@@ -280,18 +277,18 @@ func (t *StateTest) Run(tb testing.TB, sd *execctx.SharedDomains, tx kv.Temporal
 // into it via MakePreStateInto so the per-subtest writes can be discarded by
 // closing sd without Flush — keeping ephemeral test state out of the long-lived
 // branch cache.
-func (t *StateTest) RunNoVerify(tb testing.TB, sd *execctx.SharedDomains, tx kv.TemporalRwTx, subtest StateSubtest, vmconfig vm.Config, dirs datadir.Dirs) (statedb *state.IntraBlockState, root common.Hash, gasUsed uint64, err error) {
+func (t *StateTest) RunNoVerify(tb testing.TB, sd *execctx.SharedDomains, tx kv.TemporalRwTx, subtest StateSubtest, vmconfig vm.Config) (statedb *state.IntraBlockState, root common.Hash, gasUsed uint64, err error) {
 	config, eips, err := GetChainConfig(subtest.Fork)
 	if err != nil {
 		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
 	}
 	vmconfig.ExtraEips = eips
-	block, _, err := genesiswrite.GenesisToBlock(nil, t.genesis(config), dirs, log.Root())
-	if err != nil {
-		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
-	}
+	// Only header fields feed the block context, and the genesis state root is not
+	// one of them: computing it would mean a throwaway DB plus a commitment over
+	// Pre, which MakePreStateInto redoes below anyway.
+	header, _ := genesiswrite.GenesisWithoutStateToBlock(t.genesis(config))
 
-	readBlockNr := block.NumberU64()
+	readBlockNr := header.Number.Uint64()
 	writeBlockNr := readBlockNr + 1
 
 	_, err = MakePreStateInto(&chain.Rules{}, sd, tx, t.Json.Pre, readBlockNr)
@@ -329,7 +326,6 @@ func (t *StateTest) RunNoVerify(tb testing.TB, sd *execctx.SharedDomains, tx kv.
 		}
 	}
 	post := t.Json.Post[subtest.Fork][subtest.Index]
-	header := block.HeaderNoCopy()
 
 	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), nil, accounts.InternAddress(t.Json.Env.Coinbase), config)
 	blockContext.GetHash = vmTestBlockHash
@@ -344,7 +340,7 @@ func (t *StateTest) RunNoVerify(tb testing.TB, sd *execctx.SharedDomains, tx kv.
 		blockContext.PrevRanDao = &rnd
 		blockContext.Difficulty.Clear()
 	}
-	if config.IsCancun(block.Time()) && t.Json.Env.ExcessBlobGas != nil {
+	if config.IsCancun(header.Time) && t.Json.Env.ExcessBlobGas != nil {
 		blockContext.BlobBaseFee, err = misc.GetBlobGasPrice(config, *t.Json.Env.ExcessBlobGas, header.Time)
 		if err != nil {
 			return nil, common.Hash{}, 0, err
@@ -390,7 +386,7 @@ func (t *StateTest) RunNoVerify(tb testing.TB, sd *execctx.SharedDomains, tx kv.
 	// Execute the message.
 	snapshot := statedb.PushSnapshot()
 	gaspool := new(protocol.GasPool)
-	gaspool.AddGas(block.GasLimit()).AddBlobGas(config.GetMaxBlobGasPerBlock(header.Time))
+	gaspool.AddGas(header.GasLimit).AddBlobGas(config.GetMaxBlobGasPerBlock(header.Time))
 	res, err := protocol.ApplyMessage(evm, msg, gaspool, true /* refunds */, false /* gasBailout */, nil /* engine */)
 	if res != nil {
 		gasUsed = res.ReceiptGasUsed
@@ -412,10 +408,10 @@ func (t *StateTest) RunNoVerify(tb testing.TB, sd *execctx.SharedDomains, tx kv.
 	// touched. Matches go-ethereum's state-test runner.
 	statedb.AddBalance(accounts.InternAddress(t.Json.Env.Coinbase), *uint256.NewInt(0), tracing.BalanceChangeUnspecified)
 
-	if err = statedb.FinalizeTx(evm.ChainRules(), w); err != nil {
+	if err := statedb.FinalizeTx(evm.ChainRules(), w); err != nil {
 		return nil, root, gasUsed, err
 	}
-	if err = statedb.CommitBlock(evm.ChainRules(), w); err != nil {
+	if err := statedb.CommitBlock(evm.ChainRules(), w); err != nil {
 		return nil, root, gasUsed, err
 	}
 
@@ -496,10 +492,8 @@ func (t *StateTest) genesis(config *chain.Config) *types.Genesis {
 	}
 }
 
-var rlpHash = types.RlpHash
-
 func vmTestBlockHash(n uint64) (common.Hash, error) {
-	return common.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String()))), nil
+	return crypto.Keccak256Hash([]byte(new(big.Int).SetUint64(n).String())), nil
 }
 
 // toMessage builds a protocol.Message directly from the JSON fixture's
@@ -590,7 +584,10 @@ func toMessage(tx stTransaction, ps stPostState, baseFee *uint256.Int) (protocol
 		feeCap = big.Int(*gasPrice)
 		tipCap = big.Int(*gasPrice)
 	}
-
+	nonce := (*big.Int)(&tx.Nonce)
+	if !nonce.IsUint64() {
+		return nil, fmt.Errorf("invalid txn nonce (overflowed) %q", nonce)
+	}
 	gpi := big.Int(*gasPrice)
 	gasPriceInt := uint256.NewInt(gpi.Uint64())
 
@@ -602,7 +599,7 @@ func toMessage(tx stTransaction, ps stPostState, baseFee *uint256.Int) (protocol
 	msg := types.NewMessage(
 		from,
 		to,
-		uint64(tx.Nonce),
+		nonce.Uint64(),
 		value,
 		uint64(gasLimit),
 		gasPriceInt,

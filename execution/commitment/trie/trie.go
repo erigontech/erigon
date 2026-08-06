@@ -39,7 +39,7 @@ var (
 	EmptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 
 	// emptyState is the known hash of an empty state trie entry.
-	emptyState = crypto.HashData(nil)
+	emptyState = crypto.Keccak256Hash(nil)
 )
 
 // Trie is a Merkle Patricia Trie.
@@ -365,7 +365,7 @@ func (t *Trie) UpdateAccountCode(key []byte, code CodeNode) error {
 		return fmt.Errorf("account not found with key: %x", key)
 	}
 
-	actualCodeHash := crypto.HashData(code)
+	actualCodeHash := crypto.Keccak256Hash(code)
 	if accNode.CodeHash.Value() != actualCodeHash {
 		return fmt.Errorf("inserted code mismatch account hash (acc.CodeHash=%x codeHash=%x)", accNode.CodeHash, actualCodeHash)
 	}
@@ -472,12 +472,15 @@ func findSubTriesToLoad(nd Node, nibblePath []byte, hook []byte, rl RetainDecide
 		newPrefixes = prefixes
 		newFixedBits = fixedbits
 		newHooks = hooks
-		newNibblePath := append(nibblePath, i1)
-		newHook := append(hook, i1)
+		newNibblePath := append([]byte(nil), nibblePath...)
+		newNibblePath = append(newNibblePath, i1)
+		newHook := append([]byte(nil), hook...)
+		newHook = append(newHook, i1)
 		if rl.Retain(newNibblePath) {
 			var newDbPrefix []byte
 			if bits%8 == 0 {
-				newDbPrefix = append(dbPrefix, i1<<4)
+				newDbPrefix = append([]byte(nil), dbPrefix...)
+				newDbPrefix = append(newDbPrefix, i1<<4)
 			} else {
 				newDbPrefix = dbPrefix
 				newDbPrefix[len(newDbPrefix)-1] &= 0xf0
@@ -485,12 +488,15 @@ func findSubTriesToLoad(nd Node, nibblePath []byte, hook []byte, rl RetainDecide
 			}
 			newPrefixes, newFixedBits, newHooks = findSubTriesToLoad(n.child1, newNibblePath, newHook, rl, newDbPrefix, bits+4, newPrefixes, newFixedBits, newHooks)
 		}
-		newNibblePath = append(nibblePath, i2)
-		newHook = append(hook, i2)
+		newNibblePath = append([]byte(nil), nibblePath...)
+		newNibblePath = append(newNibblePath, i2)
+		newHook = append([]byte(nil), hook...)
+		newHook = append(newHook, i2)
 		if rl.Retain(newNibblePath) {
 			var newDbPrefix []byte
 			if bits%8 == 0 {
-				newDbPrefix = append(dbPrefix, i2<<4)
+				newDbPrefix = append([]byte(nil), dbPrefix...)
+				newDbPrefix = append(newDbPrefix, i2<<4)
 			} else {
 				newDbPrefix = dbPrefix
 				newDbPrefix[len(newDbPrefix)-1] &= 0xf0
@@ -503,16 +509,17 @@ func findSubTriesToLoad(nd Node, nibblePath []byte, hook []byte, rl RetainDecide
 		newPrefixes = prefixes
 		newFixedBits = fixedbits
 		newHooks = hooks
-		var newNibblePath []byte
-		var newHook []byte
 		for i, child := range n.Children {
 			if child != nil {
-				newNibblePath = append(nibblePath, byte(i))
-				newHook = append(hook, byte(i))
+				newNibblePath := append([]byte(nil), nibblePath...)
+				newNibblePath = append(newNibblePath, byte(i))
+				newHook := append([]byte(nil), hook...)
+				newHook = append(newHook, byte(i))
 				if rl.Retain(newNibblePath) {
 					var newDbPrefix []byte
 					if bits%8 == 0 {
-						newDbPrefix = append(dbPrefix, byte(i)<<4)
+						newDbPrefix = append([]byte(nil), dbPrefix...)
+						newDbPrefix = append(newDbPrefix, byte(i)<<4)
 					} else {
 						newDbPrefix = dbPrefix
 						newDbPrefix[len(newDbPrefix)-1] &= 0xf0
@@ -543,9 +550,12 @@ func findSubTriesToLoad(nd Node, nibblePath []byte, hook []byte, rl RetainDecide
 		}
 		return newPrefixes, newFixedBits, newHooks
 	case *HashNode:
-		newPrefixes = append(prefixes, common.Copy(dbPrefix))
-		newFixedBits = append(fixedbits, bits)
-		newHooks = append(hooks, common.Copy(hook))
+		newPrefixes = prefixes
+		newPrefixes = append(newPrefixes, bytes.Clone(dbPrefix))
+		newFixedBits = fixedbits
+		newFixedBits = append(newFixedBits, bits)
+		newHooks = hooks
+		newHooks = append(newHooks, bytes.Clone(hook))
 		return newPrefixes, newFixedBits, newHooks
 	}
 	return prefixes, fixedbits, hooks
@@ -597,7 +607,7 @@ func (t *Trie) insertRecursive(origNode Node, key []byte, pos int, value Node) (
 	var nn Node
 	switch n := origNode.(type) {
 	case nil:
-		return true, NewShortNode(common.Copy(key[pos:]), value)
+		return true, NewShortNode(bytes.Clone(key[pos:]), value)
 	case *AccountNode:
 		updated, nn = t.insertRecursive(n.Storage, key, pos, value)
 		if updated {
@@ -622,13 +632,13 @@ func (t *Trie) insertRecursive(origNode Node, key []byte, pos int, value Node) (
 			if len(n.Key) == matchlen+1 {
 				c1 = n.Val
 			} else {
-				c1 = NewShortNode(common.Copy(n.Key[matchlen+1:]), n.Val)
+				c1 = NewShortNode(bytes.Clone(n.Key[matchlen+1:]), n.Val)
 			}
 			var c2 Node
 			if len(key) == pos+matchlen+1 {
 				c2 = value
 			} else {
-				c2 = NewShortNode(common.Copy(key[pos+matchlen+1:]), value)
+				c2 = NewShortNode(bytes.Clone(key[pos+matchlen+1:]), value)
 			}
 			branch := &DuoNode{}
 			if n.Key[matchlen] < key[pos+matchlen] {
@@ -645,7 +655,7 @@ func (t *Trie) insertRecursive(origNode Node, key []byte, pos int, value Node) (
 				newNode = branch // current node leaves the generation, but new node branch joins it
 			} else {
 				// Otherwise, replace it with a short node leading up to the branch.
-				n.Key = common.Copy(key[pos : pos+matchlen])
+				n.Key = bytes.Clone(key[pos : pos+matchlen])
 				n.Val = branch
 				n.ref.len = 0
 				newNode = n
@@ -676,7 +686,7 @@ func (t *Trie) insertRecursive(origNode Node, key []byte, pos int, value Node) (
 			if len(key) == pos+1 {
 				child = value
 			} else {
-				child = NewShortNode(common.Copy(key[pos+1:]), value)
+				child = NewShortNode(bytes.Clone(key[pos+1:]), value)
 			}
 			newnode := &FullNode{}
 			newnode.Children[i1] = n.child1
@@ -694,7 +704,7 @@ func (t *Trie) insertRecursive(origNode Node, key []byte, pos int, value Node) (
 			if len(key) == pos+1 {
 				n.Children[key[pos]] = value
 			} else {
-				n.Children[key[pos]] = NewShortNode(common.Copy(key[pos+1:]), value)
+				n.Children[key[pos]] = NewShortNode(bytes.Clone(key[pos+1:]), value)
 			}
 			updated = true
 			n.ref.len = 0
@@ -1020,9 +1030,10 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 					}
 				}
 			}
-			if count == 1 {
+			switch {
+			case count == 1:
 				newNode = t.convertToShortNode(n.Children[pos1], uint(pos1))
-			} else if count == 2 {
+			case count == 2:
 				duo := &DuoNode{}
 				if pos1 == int(key[keyStart]) {
 					duo.child1 = nn
@@ -1036,7 +1047,7 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 				}
 				duo.mask = (1 << uint(pos1)) | (uint32(1) << uint(pos2))
 				newNode = duo
-			} else if count > 2 {
+			case count > 2:
 				// n still contains at least three values and cannot be reduced.
 				n.ref.len = 0
 				newNode = n
@@ -1291,7 +1302,7 @@ func (t *Trie) RLPEncode() ([][]byte, error) {
 			hash := crypto.Keccak256Hash(nodeRLP)
 			if _, ok := seen[hash]; !ok {
 				seen[hash] = struct{}{}
-				nodes = append(nodes, common.Copy(nodeRLP))
+				nodes = append(nodes, bytes.Clone(nodeRLP))
 			}
 			return collect(n.Val)
 
@@ -1303,7 +1314,7 @@ func (t *Trie) RLPEncode() ([][]byte, error) {
 			hash := crypto.Keccak256Hash(nodeRLP)
 			if _, ok := seen[hash]; !ok {
 				seen[hash] = struct{}{}
-				nodes = append(nodes, common.Copy(nodeRLP))
+				nodes = append(nodes, bytes.Clone(nodeRLP))
 			}
 			if err := collect(n.child1); err != nil {
 				return err
@@ -1318,9 +1329,9 @@ func (t *Trie) RLPEncode() ([][]byte, error) {
 			hash := crypto.Keccak256Hash(nodeRLP)
 			if _, ok := seen[hash]; !ok {
 				seen[hash] = struct{}{}
-				nodes = append(nodes, common.Copy(nodeRLP))
+				nodes = append(nodes, bytes.Clone(nodeRLP))
 			}
-			for i := 0; i < 17; i++ {
+			for i := range 17 {
 				if n.Children[i] != nil {
 					if err := collect(n.Children[i]); err != nil {
 						return err
@@ -1457,7 +1468,7 @@ func decodeTrieShort(elems []byte) (*ShortNode, error) {
 // decodeTrieFull decodes a full node (branch) for trie reconstruction.
 func decodeTrieFull(elems []byte) (*FullNode, error) {
 	n := &FullNode{}
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		var err error
 		n.Children[i], elems, err = decodeTrieRef(elems)
 		if err != nil {
@@ -1589,7 +1600,7 @@ func resolveHashNodes(node Node, nodeMap map[common.Hash]Node, insideStorageTree
 
 	case *FullNode:
 		newNode := &FullNode{}
-		for i := 0; i < 17; i++ {
+		for i := range 17 {
 			if n.Children[i] != nil {
 				resolved, err := resolveHashNodes(n.Children[i], nodeMap, insideStorageTree)
 				if err != nil {

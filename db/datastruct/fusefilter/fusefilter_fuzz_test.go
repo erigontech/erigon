@@ -24,7 +24,7 @@ func FuzzReaderOnBytes(f *testing.F) {
 	f.Add(make([]byte, headerSize-1))
 	f.Add(make([]byte, headerSize))
 	// Truncate at every header byte boundary.
-	for i := 0; i < headerSize; i++ {
+	for i := range headerSize {
 		if i < len(good) {
 			f.Add(good[:i])
 		}
@@ -116,7 +116,7 @@ func FuzzWriterRoundTrip(f *testing.F) {
 			z := x
 			z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9
 			z = (z ^ (z >> 27)) * 0x94D049BB133111EB
-			z = z ^ (z >> 31)
+			z ^= (z >> 31)
 			keys = append(keys, z)
 			if err := w.AddHash(z); err != nil {
 				t.Fatal(err)
@@ -148,7 +148,7 @@ func buildValidBlob(f *testing.F, n int) []byte {
 		f.Fatal(err)
 	}
 	defer w.Close()
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if err := w.AddHash(uint64(i)); err != nil {
 			f.Fatal(err)
 		}
@@ -167,7 +167,7 @@ func buildValidShardedBlob(f *testing.F, n int) []byte {
 		f.Fatal(err)
 	}
 	defer w.Close()
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if err := w.AddHash(uint64(i)); err != nil {
 			f.Fatal(err)
 		}

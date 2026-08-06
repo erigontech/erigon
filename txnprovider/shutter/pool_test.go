@@ -314,10 +314,6 @@ func TestPoolProvideTxnsUsesGasTargetAndTxnsIdFilter(t *testing.T) {
 
 //goland:noinspection DuplicatedCode
 func TestPoolProvideTxnsFiltersByIntrinsicGasNotFullGasLimit(t *testing.T) {
-	// EIP-8037: gas filtering uses intrinsic regular/state gas per dimension,
-	// not the full txn gas limit. A txn whose gas limit exceeds availableGas
-	// in one dimension must still be included as long as its intrinsic gas
-	// fits. Execution-time state gas is enforced later by applyTransaction.
 	t.Parallel()
 	pt := PoolTest{t}
 	pt.Run(func(ctx context.Context, t *testing.T, pool *shutter.Pool, handle PoolTestHandle) {
@@ -328,8 +324,7 @@ func TestPoolProvideTxnsFiltersByIntrinsicGasNotFullGasLimit(t *testing.T) {
 		err = handle.SimulateNewBlockChange(ctx)
 		require.NoError(t, err)
 		synctest.Wait()
-		// A simple transfer has intrinsic regular gas of TxGas=21_000 and
-		// intrinsic state gas of 0 — but its declared gas limit is 100_000.
+		// A simple transfer has intrinsic gas of 21,000 but declares 100,000.
 		const txnGasLimit uint64 = 100_000
 		encTxn := MockEncryptedTxn(t, handle.config.ChainId, ekg.Eon(), MockWithGasLimit(txnGasLimit))
 		err = handle.SimulateLogEvents(ctx, []types.Log{
@@ -345,20 +340,50 @@ func TestPoolProvideTxnsFiltersByIntrinsicGasNotFullGasLimit(t *testing.T) {
 		handle.SimulateDecryptionKeys(ctx, t, ekg, 1, encTxn.IdentityPreimage)
 		synctest.Wait()
 		require.Len(t, pool.AllDecryptedTxns(), 1)
-		// Budget enough regular gas for the intrinsic (21_000) but strictly
-		// less than the txn's declared gas limit (100_000), and zero state
-		// gas. The pre-fix logic compared txn.GetGasLimit() against both
-		// dimensions and would have rejected this txn; the EIP-8037 logic
-		// accepts it because intrinsic gas fits.
+		// Budget enough gas for the intrinsic but less than the declared limit.
 		txns, err := pool.ProvideTxns(
 			ctx,
 			txnprovider.WithBlockTime(handle.nextBlockTime),
 			txnprovider.WithParentBlockNum(handle.nextBlockNum-1),
-			txnprovider.WithGasTarget(mdgas.NewFullMdGas(50_000, 0, 0)),
+			txnprovider.WithGasTarget(mdgas.NewFullMdGas(50_000, txnGasLimit, 0)),
 		)
 		require.NoError(t, err)
 		require.Len(t, txns, 1)
 		require.Equal(t, encTxn.OriginalTxn.Hash(), txns[0].Hash())
+	})
+}
+
+func TestPoolProvideTxnsRejectsGasLimitAboveStateGasTarget(t *testing.T) {
+	t.Parallel()
+	pt := PoolTest{t}
+	pt.Run(func(ctx context.Context, t *testing.T, pool *shutter.Pool, handle PoolTestHandle) {
+		ekg, err := testhelpers.MockEonKeyGeneration(shutter.EonIndex(0), 1, 2, 1)
+		require.NoError(t, err)
+		handle.SimulateInitialEonRead(t, ekg)
+		handle.SimulateFilterLogs(common.HexToAddress(handle.config.SequencerContractAddress), []types.Log{})
+		require.NoError(t, handle.SimulateNewBlockChange(ctx))
+		synctest.Wait()
+
+		const txnGasLimit uint64 = 100_000
+		encTxn := MockEncryptedTxn(t, handle.config.ChainId, ekg.Eon(), MockWithGasLimit(txnGasLimit))
+		require.NoError(t, handle.SimulateLogEvents(ctx, []types.Log{
+			MockTxnSubmittedEventLog(t, handle.config, ekg.Eon(), 1, encTxn),
+		}))
+		handle.SimulateCachedEonRead(t, ekg)
+		require.NoError(t, handle.SimulateNewBlockChange(ctx))
+		synctest.Wait()
+		handle.SimulateCurrentSlot()
+		handle.SimulateDecryptionKeys(ctx, t, ekg, 1, encTxn.IdentityPreimage)
+		synctest.Wait()
+
+		txns, err := pool.ProvideTxns(
+			ctx,
+			txnprovider.WithBlockTime(handle.nextBlockTime),
+			txnprovider.WithParentBlockNum(handle.nextBlockNum-1),
+			txnprovider.WithGasTarget(mdgas.NewFullMdGas(50_000, txnGasLimit-1, 0)),
+		)
+		require.NoError(t, err)
+		require.Empty(t, txns)
 	})
 }
 
@@ -665,14 +690,15 @@ func (cb *MockContractBackend) SimulateFilterLogs(addr common.Address, logs []ty
 func (cb *MockContractBackend) SimulateLogEvents(ctx context.Context, logs []types.Log) error {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
-	for _, l := range logs {
+	for i := range logs {
+		l := &logs[i]
 		cb.logger.Trace("--- DEBUG --- attempting to send log for", "addr", l.Address.String())
 		for _, sub := range cb.subs[l.Address] {
 			cb.logger.Trace("--- DEBUG --- sending log event", "addr", l.Address.String())
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case sub <- l: // no-op
+			case sub <- *l: // no-op
 				cb.logger.Trace("--- DEBUG --- sent log event", "addr", l.Address.String())
 			}
 		}

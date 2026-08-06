@@ -57,7 +57,7 @@ func buildAccountStorageTrie() *Trie {
 	tr := newEmpty()
 	var preimage [4]byte
 	var keys []string
-	for b := uint32(0); b < 10; b++ {
+	for b := range uint32(10) {
 		binary.BigEndian.PutUint32(preimage[:], b)
 		keys = append(keys, string(crypto.Keccak256(preimage[:])))
 	}
@@ -112,7 +112,7 @@ func TestHashWithModificationsChanges(t *testing.T) {
 	// Generate account change
 	var preimage [4]byte
 	binary.BigEndian.PutUint32(preimage[:], 5000000)
-	insertKey := crypto.HashData(preimage[:])
+	insertKey := crypto.Keccak256Hash(preimage[:])
 	var insertA accounts.Account
 	insertA.Balance.SetUint64(300000)
 	insertA.Root = EmptyRoot

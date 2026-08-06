@@ -141,6 +141,10 @@ var (
 		Value: ".*",
 		Usage: "Run only those tests matching the regular expression.",
 	}
+	ExcludeFlag = cli.StringSliceFlag{
+		Name:  "exclude",
+		Usage: "Exclude tests whose fixture path or path::test identifier matches a regular expression.",
+	}
 	WorkersFlag = cli.Uint64Flag{
 		Name:  "workers",
 		Value: 1,
@@ -209,6 +213,9 @@ func init() {
 		&engineXTestCommand,
 		&zkevmTestCommand,
 		&stateTestCommand,
+		&rlpTestCommand,
+		&transactionTestCommand,
+		&difficultyTestCommand,
 		&stateTransitionCommand,
 	}
 }

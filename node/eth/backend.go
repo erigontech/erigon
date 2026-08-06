@@ -53,6 +53,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -63,7 +64,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
@@ -73,7 +73,6 @@ import (
 	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/diagnostics/mem"
 	"github.com/erigontech/erigon/execution/builder"
-	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/engineapi"
@@ -166,7 +165,7 @@ type Ethereum struct {
 	rpcDaemonStateCache kvcache.Cache
 	mcpRPC              *mcp.ErigonMCPServer
 
-	miningSealingQuit   chan struct{}
+	sealCancel          chan struct{}
 	pendingBlocks       chan *types.Block
 	minedBlocks         chan *types.Block
 	minedBlockObservers *event.Observers[*types.Block]
@@ -185,11 +184,12 @@ type Ethereum struct {
 	syncUnwindOrder    stagedsync.UnwindOrder
 	syncPruneOrder     stagedsync.PruneOrder
 
-	downloaderClient services.DownloaderClient
+	downloaderClient dbservices.DownloaderClient
 
 	notifications *shards.Notifications
 
-	unsubscribeEthstat func()
+	unsubscribeEthstat      func()
+	unsubscribeWitnessCache func()
 
 	txPool                    *txpool.TxPool
 	txPoolGrpcServer          txpoolproto.TxpoolServer
@@ -199,7 +199,7 @@ type Ethereum struct {
 	components                *nodebuilder.Builder
 
 	blockSnapshots *blocksnapshots.RoSnapshots
-	blockReader    services.FullBlockReader
+	blockReader    dbservices.FullBlockReader
 	blockWriter    *blockio.BlockWriter
 	kvRPC          *remotedbserver.KvServer
 	logger         log.Logger
@@ -275,6 +275,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	// Assemble the Ethereum object
+	stack.Config().ExecWorkerCount = config.Sync.ExecWorkerCount
 	rawChainDB, err := node.OpenDatabase(ctx, stack.Config(), dbcfg.ChainDB, "", false, logger)
 	if err != nil {
 		return nil, err
@@ -312,7 +313,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			statecfg.ExperimentalStreamingCommitment = true
 		}
 
-		if err = stages.UpdateMetrics(tx); err != nil {
+		if err := stages.UpdateMetrics(tx); err != nil {
 			return err
 		}
 
@@ -336,7 +337,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		networkID:                 config.NetworkID,
 		etherbase:                 config.Builder.Etherbase,
 		blockBuilderNotifyNewTxns: make(chan struct{}, 1),
-		miningSealingQuit:         make(chan struct{}),
+		sealCancel:                make(chan struct{}),
 		minedBlocks:               make(chan *types.Block, 1),
 		minedBlockObservers:       event.NewObservers[*types.Block](),
 		logger:                    logger,
@@ -596,11 +597,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	logger.Info("Initialising Ethereum protocol", "network", config.NetworkID)
 	var rulesConfig any
 
-	if chainConfig.Aura != nil {
+	switch {
+	case chainConfig.Aura != nil:
 		rulesConfig = &config.Aura
-	} else if chainConfig.Bor != nil {
+	case chainConfig.Bor != nil:
 		rulesConfig = chainConfig.Bor
-	} else {
+	default:
 		rulesConfig = &config.Ethash
 	}
 
@@ -673,6 +675,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		backend.sentryProvider.ExecutionP2PMessageListener,
 		backend.sentryProvider.ExecutionP2PMessageSender,
 		backend.sentryProvider.ExecutionP2PPeerPenalizer,
+		backend.sentryProvider.ExecutionP2PPeerTracker,
 	)
 	bbd := execp2p.NewBackwardBlockDownloader(logger, executionFetcher, backend.sentryProvider.ExecutionP2PPeerPenalizer, backend.sentryProvider.ExecutionP2PPeerTracker, tmpdir, execp2p.WithBALFetcher(balFetcher))
 
@@ -723,7 +726,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			ctx,
 			config.TxPool,
 			backend.chainDB,
-			kvcache.NewSimple(),
+			kvcache.NewLatestBatchCache(),
 			sentries,
 			backend.stateDiffClient,
 			blockBuilderNotifyNewTxns,
@@ -761,60 +764,27 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.rpcDaemonStateCache = rpcDaemonStateCache
 	backend.rpcFilters = rpcFilters
 
-	baseApi := jsonrpc.NewBaseApi(
-		backend.rpcFilters,
-		backend.rpcDaemonStateCache,
-		blockReader,
-		httpRpcCfg.WithDatadir,
-		httpRpcCfg.EvmCallTimeout,
-		backend.engine,
-		httpRpcCfg.Dirs,
-		backend.polygonBridge,
-		httpRpcCfg.BlockRangeLimit,
-		httpRpcCfg.GetLogsMaxResults,
-		httpRpcCfg.LogQueryLimit,
-	)
-	ethApiConfig := &jsonrpc.EthApiConfig{
-		GasCap:                      httpRpcCfg.Gascap,
-		FeeCap:                      httpRpcCfg.Feecap,
-		ReturnDataLimit:             httpRpcCfg.ReturnDataLimit,
-		AllowUnprotectedTxs:         httpRpcCfg.AllowUnprotectedTxs,
-		MaxGetProofRewindBlockCount: httpRpcCfg.MaxGetProofRewindBlockCount,
-		SubscribeLogsChannelSize:    httpRpcCfg.WebsocketSubscribeLogsChannelSize,
-		RpcTxSyncDefaultTimeout:     httpRpcCfg.RpcTxSyncDefaultTimeout,
-		RpcTxSyncMaxTimeout:         httpRpcCfg.RpcTxSyncMaxTimeout,
-	}
-	ethApi := jsonrpc.NewEthAPI(
-		baseApi,
-		backend.chainDB,
-		backend.ethRpcClient,
-		backend.txPoolRpcClient,
-		backend.miningRpcClient,
-		ethApiConfig,
-		logger,
-	)
-
-	erigonApi := jsonrpc.NewErigonAPI(baseApi, backend.chainDB, backend.ethRpcClient)
-
-	otsApi := jsonrpc.NewOtterscanAPI(baseApi, backend.chainDB, stack.Config().Http.OtsMaxPageSize)
-
-	mcpServer := mcp.NewErigonMCPServer(ethApi, erigonApi, otsApi, config.Dirs.Log)
-
-	if config.MCPAddress != "" {
-		go func() {
-			logger.Info("serve MCP on", "addr", config.MCPAddress)
-			mcpErr := mcpServer.ServeSSE(ctx, config.MCPAddress)
-			if mcpErr != nil {
-				logger.Error("mcpServer.ServeSSE", "err", mcpErr)
-				return
-			}
-		}()
-	}
-
 	if config.Shutter.Enabled {
 		if config.TxPool.Disable {
 			panic("can't enable shutter pool when devp2p txpool is disabled")
 		}
+		baseApi := jsonrpc.NewBaseApi(
+			backend.rpcFilters,
+			backend.rpcDaemonStateCache,
+			blockReader,
+			backend.engine,
+			backend.polygonBridge,
+			jsonrpc.NewBaseApiConfig(&httpRpcCfg),
+		)
+		ethApi := jsonrpc.NewEthAPI(
+			baseApi,
+			backend.chainDB,
+			backend.ethRpcClient,
+			backend.txPoolRpcClient,
+			backend.miningRpcClient,
+			jsonrpc.NewEthApiConfig(&httpRpcCfg),
+			logger,
+		)
 		contractBackend := contracts.NewDirectBackend(ethApi)
 		baseTxnProvider := backend.txPool
 		currentBlockNumReader := func(ctx context.Context) (*uint64, error) {
@@ -866,7 +836,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		&vm.Config{},
 		tmpdir,
 		txnProvider,
-		backend.miningSealingQuit,
+		backend.sealCancel,
 		latestBlockBuiltStore,
 		backend.notifications.Events.LatestSD,
 		logger,
@@ -965,21 +935,13 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	dispatcher := execmodule.NewDispatcher(chainConfig, backend.notifications.Events, backend.notifications.StateChangesConsumer, logger)
 	pipelineExecutor := execmodule.NewPipelineExecutor(backend.pipelineStagedSync, backend.chainDB, blockReader, chainConfig, backend.engine, validationSync, validationNotifications, dispatcher, logger)
 
-	hook := stageloop.NewHook(backend.sentryCtx, backend.notifications, backend.stagedSync, backend.chainConfig, backend.logger, dispatcher, backend.sentryProvider.Client.SetStatus, statusDataProvider, backend.sentryProvider.ExecutionP2PPublisher)
+	hook := stageloop.NewHook(backend.sentryCtx, backend.notifications, backend.stagedSync, backend.chainConfig, backend.logger, dispatcher, backend.sentryProvider.Client.SetStatus, statusDataProvider, backend.sentryProvider.ExecutionP2PPublisher, blockReader)
 
 	// for polygon, we only need to download snapshots on start so that all driver components are correctly initialised before any block execution begins
 	onlySnapDownloadOnStart := chainConfig.Bor != nil
 	accum := &execmodule.Accumulation{
 		Accumulator:    backend.notifications.Accumulator,
 		RecentReceipts: backend.notifications.RecentReceipts,
-	}
-	// Test harnesses (e.g. EngineApiTester) set StateCacheBudget small so each
-	// per-fixture ExecModule doesn't allocate the full production cache; 0 keeps
-	// the production default.
-	var domainStateCache *cache.StateCache
-	if config.StateCacheBudget > 0 {
-		b := config.StateCacheBudget
-		domainStateCache = cache.NewStateCache(b, b, b, b)
 	}
 	backend.execModule = execmodule.NewExecModule(
 		ctx,
@@ -992,7 +954,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		hook,
 		accum,
 		execmoduleCache,
-		domainStateCache,
+		config.StateCacheBudget,
 		logger,
 		backend.engine,
 		config.Sync,
@@ -1151,10 +1113,9 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 	blockReader := s.blockReader
 	ctx := s.sentryCtx
 	chainKv := s.chainDB
-	var err error
 	emptyBadHash := config.BadBlockHash == common.Hash{}
 	if !emptyBadHash {
-		if err = chainKv.View(ctx, func(tx kv.Tx) error {
+		if err := chainKv.View(ctx, func(tx kv.Tx) error {
 			badBlockHeader, hErr := rawdb.ReadHeaderByHash(tx, config.BadBlockHash)
 			if badBlockHeader != nil {
 				unwindPoint := badBlockHeader.Number.Uint64() - 1
@@ -1183,7 +1144,78 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 		entry := engineapi.NewTestingRPCEntry(s.engineBackendRPC, s.logger, s.chainDB)
 		testingEntry = &entry
 	}
-	s.apiList = jsonrpc.APIList(chainKv, s.ethRpcClient, s.txPoolRpcClient, s.miningRpcClient, s.rpcFilters, s.rpcDaemonStateCache, blockReader, &httpRpcCfg, s.engine, s.logger, s.polygonBridge, s.heimdallService, testingEntry)
+	// Eager witness cache (embedded RPC only). A datadir built with commitment history
+	// recomputes on miss (durable path); a minimal node without it can still serve recent
+	// witnesses cache-only when --witness.cache.head-capture is set, building each head from
+	// a pinned parent snapshot. Without either, no witness can be built, so the cache stays off.
+	enableWitnessCache := httpRpcCfg.WitnessCacheBlocks > 0
+	headCaptureMode := false
+	if enableWitnessCache {
+		var commitmentHistory bool
+		if err := chainKv.View(ctx, func(tx kv.Tx) error {
+			var rerr error
+			commitmentHistory, _, rerr = rawdb.ReadDBCommitmentHistoryEnabled(tx)
+			return rerr
+		}); err != nil {
+			s.logger.Warn("[witness-cache] could not read commitment-history flag; cache disabled", "err", err)
+			enableWitnessCache = false
+		} else {
+			enableWitnessCache, headCaptureMode = jsonrpc.WitnessCacheMode(httpRpcCfg.WitnessCacheBlocks, commitmentHistory, httpRpcCfg.WitnessCacheHeadCapture)
+			if !enableWitnessCache {
+				s.logger.Warn("[witness-cache] --witness.cache.blocks set but commitment history is disabled and --witness.cache.head-capture is off; cache disabled (restart with --prune.experimental.include-commitment-history or --witness.cache.head-capture)")
+			}
+		}
+	}
+	witnessCache, witnessBuilder := jsonrpc.NewWitnessCacheBuilderAPI(enableWitnessCache, headCaptureMode, chainKv, s.ethRpcClient, s.rpcFilters, s.rpcDaemonStateCache, blockReader, &httpRpcCfg, s.engine, s.polygonBridge)
+	if witnessBuilder != nil {
+		var headCh chan [][]byte
+		headCh, s.unsubscribeWitnessCache = s.notifications.Events.AddHeaderSubscription()
+		s.bgComponentsEg.Go(func() error {
+			jsonrpc.RunWitnessCacheBuilder(ctx, witnessBuilder, headCh)
+			return nil
+		})
+		s.logger.Info("[witness-cache] eager witness cache enabled", "blocks", jsonrpc.WitnessCacheCapacity(httpRpcCfg.WitnessCacheBlocks), "headCapture", headCaptureMode)
+	}
+
+	mcpNamespaces := []string{"eth", "erigon", "ots", "txpool", "net", "admin", "debug", "trace"}
+	apiCfg := httpRpcCfg
+	if config.MCPAddress != "" {
+		apiCfg.API = slices.Clone(httpRpcCfg.API)
+		for _, ns := range mcpNamespaces {
+			if !slices.Contains(apiCfg.API, ns) {
+				apiCfg.API = append(apiCfg.API, ns)
+			}
+		}
+	}
+	// One APIList call even when MCP widens the namespace set, so the HTTP
+	// RPC server and MCP share the BaseApi block/receipt caches instead of
+	// each holding their own.
+	allAPIs := jsonrpc.APIList(chainKv, s.ethRpcClient, s.txPoolRpcClient, s.miningRpcClient, s.rpcFilters, s.rpcDaemonStateCache, blockReader, &apiCfg, s.engine, s.logger, s.polygonBridge, s.heimdallService, testingEntry, witnessCache)
+	s.apiList = apisForNamespaces(allAPIs, append(slices.Clone(httpRpcCfg.API), "graphql"))
+
+	if config.MCPAddress != "" {
+		mcpSrv := rpc.NewServer(httpRpcCfg.RpcBatchConcurrency, httpRpcCfg.TraceRequests, httpRpcCfg.DebugSingleRequest, httpRpcCfg.RpcStreamingDisable, s.logger, httpRpcCfg.RPCSlowLogThreshold)
+		for _, api := range apisForNamespaces(allAPIs, mcpNamespaces) {
+			if err := mcpSrv.RegisterName(api.Namespace, api.Service); err != nil {
+				return err
+			}
+		}
+		// NonBlockingAcquire on the in-process connection so BeginRo fails
+		// fast (ErrServerOverloaded) instead of blocking MCP handlers when
+		// all DB read slots are held; node/rpcstack.go does the same for HTTP.
+		mcpClient := rpc.DialInProcWithContext(kv.WithNonBlockingAcquire(ctx), mcpSrv, s.logger)
+		s.mcpRPC = mcp.NewErigonMCPServer(mcpClient, config.Dirs.Log, true)
+		s.bgComponentsEg.Go(func() error {
+			s.logger.Info("serve MCP on", "addr", config.MCPAddress, "endpoints", "/mcp (streamable HTTP), /sse + /message (SSE)")
+			mcpErr := s.mcpRPC.ListenAndServe(ctx, config.MCPAddress)
+			mcpClient.Close()
+			mcpSrv.Stop()
+			if mcpErr != nil && !errors.Is(mcpErr, context.Canceled) {
+				s.logger.Error("mcpServer.ListenAndServe", "err", mcpErr)
+			}
+			return mcpErr
+		})
+	}
 
 	s.bgComponentsEg.Go(func() error {
 		err := rpcdaemoncli.StartRpcServer(ctx, &httpRpcCfg, s.apiList, s.logger)
@@ -1239,7 +1271,7 @@ func (s *Ethereum) NetVersion() (uint64, error) { return s.networkID, nil }
 func (s *Ethereum) NetPeerCount() (uint64, error) {
 	var sentryPc uint64 = 0
 
-	s.logger.Trace("sentry", "peer count", sentryPc)
+	s.logger.Trace("sentry", "peerCount", sentryPc)
 	for _, sc := range s.sentryProvider.Client.Sentries() {
 		ctx := context.Background()
 		reply, err := sc.PeerCount(ctx, &sentryproto.PeerCountRequest{})
@@ -1439,7 +1471,7 @@ func (s *Ethereum) Start() error {
 	}
 
 	stageLoopDispatcher := execmodule.NewDispatcher(s.chainConfig, s.notifications.Events, s.notifications.StateChangesConsumer, s.logger)
-	hook := stageloop.NewHook(s.sentryCtx, s.notifications, s.stagedSync, s.chainConfig, s.logger, stageLoopDispatcher, s.sentryProvider.Client.SetStatus, s.sentryProvider.StatusDataProvider, s.sentryProvider.ExecutionP2PPublisher)
+	hook := stageloop.NewHook(s.sentryCtx, s.notifications, s.stagedSync, s.chainConfig, s.logger, stageLoopDispatcher, s.sentryProvider.Client.SetStatus, s.sentryProvider.StatusDataProvider, s.sentryProvider.ExecutionP2PPublisher, s.blockReader)
 
 	currentTDProvider := func() *uint256.Int {
 		currentTD, err := readCurrentTotalDifficulty(s.sentryCtx, s.chainDB, s.blockReader)
@@ -1514,6 +1546,9 @@ func (s *Ethereum) Stop() error {
 	if s.unsubscribeEthstat != nil {
 		s.unsubscribeEthstat()
 	}
+	if s.unsubscribeWitnessCache != nil {
+		s.unsubscribeWitnessCache()
+	}
 	if s.components != nil && s.components.Downloader != nil {
 		s.components.Downloader.Close()
 	}
@@ -1579,6 +1614,10 @@ func (s *Ethereum) Stop() error {
 
 	s.chainDB.Close()
 
+	if s.execModule != nil {
+		s.execModule.Close()
+	}
+
 	if s.config.Downloader != nil {
 		_ = s.config.Downloader.CloseTorrentLogFile()
 	}
@@ -1614,7 +1653,7 @@ func (s *Ethereum) SentryControlServer() *sentry_multi_client.MultiClient {
 	return s.sentryProvider.Client
 }
 
-func (s *Ethereum) BlockIO() (services.FullBlockReader, *blockio.BlockWriter) {
+func (s *Ethereum) BlockIO() (dbservices.FullBlockReader, *blockio.BlockWriter) {
 	return s.blockReader, s.blockWriter
 }
 
@@ -1651,7 +1690,7 @@ func RemoveContents(dirname string) error {
 	return nil
 }
 
-func readCurrentTotalDifficulty(ctx context.Context, db kv.RwDB, blockReader services.FullBlockReader) (*uint256.Int, error) {
+func readCurrentTotalDifficulty(ctx context.Context, db kv.RwDB, blockReader dbservices.FullBlockReader) (*uint256.Int, error) {
 	var currentTD *uint256.Int
 	err := db.View(ctx, func(tx kv.Tx) error {
 		h, err := blockReader.CurrentBlock(tx)
@@ -1691,4 +1730,14 @@ func setBorDefaultTxPoolPriceLimit(config *txpoolcfg.Config, chainConfig *chain.
 		config.MinFeeCap = txpoolcfg.BorDefaultTxPoolPriceLimit
 	}
 	_ = config.MinFeeCap
+}
+
+func apisForNamespaces(apis []rpc.API, namespaces []string) []rpc.API {
+	out := make([]rpc.API, 0, len(apis))
+	for _, api := range apis {
+		if slices.Contains(namespaces, api.Namespace) {
+			out = append(out, api)
+		}
+	}
+	return out
 }

@@ -20,6 +20,7 @@
 package blockgen
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"errors"
@@ -147,10 +148,9 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64
 	}
 
 	if b.ibs.IsVersioned() {
-		writes := b.ibs.VersionedWrites(false)
+		writes := b.ibs.FinalizedWrites(b.blockRules())
 		if b.blockIO != nil {
 			b.blockIO.RecordReads(txVersion, b.ibs.VersionedReads())
-			b.blockIO.RecordAccesses(txVersion, b.ibs.AccessedAddresses())
 			b.blockIO.RecordWrites(txVersion, writes)
 		}
 		b.versionMap.FlushVersionedWrites(writes, true, "")
@@ -159,6 +159,13 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64
 
 	b.txs = append(b.txs, txn)
 	b.receipts = append(b.receipts, receipt)
+}
+
+func (b *BlockGen) blockRules() *chain.Rules {
+	blockContext := protocol.NewEVMBlockContext(
+		b.header, protocol.GetHashFn(b.header, nil), b.engine, accounts.NilAddress, b.config,
+	)
+	return blockContext.Rules(b.config)
 }
 
 func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash common.Hash, number uint64) (*types.Header, error), engine rules.Engine, txn types.Transaction) {
@@ -289,11 +296,10 @@ func (b *BlockGen) GetReceipts() []*types.Receipt {
 var GenerateTrace bool
 
 type ChainPack struct {
-	Headers          []*types.Header
-	Blocks           []*types.Block
-	Receipts         []types.Receipts
-	TopBlock         *types.Block // Convenience field to access the last block
-	BlockAccessLists [][]byte     // RLP-encoded block access list bytes, indexed parallel to Blocks (nil entry = no BAL)
+	Headers  []*types.Header
+	Blocks   []*types.Block
+	Receipts []types.Receipts
+	TopBlock *types.Block // Convenience field to access the last block
 }
 
 func (cp *ChainPack) Length() int {
@@ -303,16 +309,12 @@ func (cp *ChainPack) Length() int {
 // OneBlock returns a ChainPack which contains just one
 // block with given index
 func (cp *ChainPack) Slice(i, j int) *ChainPack {
-	result := &ChainPack{
+	return &ChainPack{
 		Headers:  cp.Headers[i:j],
 		Blocks:   cp.Blocks[i:j],
 		Receipts: cp.Receipts[i:j],
 		TopBlock: cp.Blocks[j-1],
 	}
-	if len(cp.BlockAccessLists) > 0 {
-		result.BlockAccessLists = cp.BlockAccessLists[i:j]
-	}
-	return result
 }
 
 // Copy creates a deep copy of the ChainPack.
@@ -338,38 +340,18 @@ func (cp *ChainPack) Copy() *ChainPack {
 
 	topBlock := cp.TopBlock.Copy()
 
-	var blockAccessLists [][]byte
-	if len(cp.BlockAccessLists) > 0 {
-		blockAccessLists = make([][]byte, len(cp.BlockAccessLists))
-		for i, bal := range cp.BlockAccessLists {
-			if bal != nil {
-				blockAccessLists[i] = make([]byte, len(bal))
-				copy(blockAccessLists[i], bal)
-			}
-		}
-	}
-
 	return &ChainPack{
-		Headers:          headers,
-		Blocks:           blocks,
-		Receipts:         receipts,
-		TopBlock:         topBlock,
-		BlockAccessLists: blockAccessLists,
+		Headers:  headers,
+		Blocks:   blocks,
+		Receipts: receipts,
+		TopBlock: topBlock,
 	}
 }
 
 var withdrawalRequestCode = common.Hex2Bytes("3373fffffffffffffffffffffffffffffffffffffffe1460cb5760115f54807fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff146101f457600182026001905f5b5f82111560685781019083028483029004916001019190604d565b909390049250505036603814608857366101f457346101f4575f5260205ff35b34106101f457600154600101600155600354806003026004013381556001015f35815560010160203590553360601b5f5260385f601437604c5fa0600101600355005b6003546002548082038060101160df575060105b5f5b8181146101835782810160030260040181604c02815460601b8152601401816001015481526020019060020154807fffffffffffffffffffffffffffffffff00000000000000000000000000000000168252906010019060401c908160381c81600701538160301c81600601538160281c81600501538160201c81600401538160181c81600301538160101c81600201538160081c81600101535360010160e1565b910180921461019557906002556101a0565b90505f6002555f6003555b5f54807fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff14156101cd57505f5b6001546002828201116101e25750505f6101e8565b01600290035b5f555f600155604c025ff35b5f5ffd")
-var withdrawalRequestCodeHash = accounts.InternCodeHash(common.BytesToHash(crypto.Keccak256(withdrawalRequestCode)))
+var withdrawalRequestCodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(withdrawalRequestCode))
 var consolidationRequestCode = common.Hex2Bytes("3373fffffffffffffffffffffffffffffffffffffffe1460d35760115f54807fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff1461019a57600182026001905f5b5f82111560685781019083028483029004916001019190604d565b9093900492505050366060146088573661019a573461019a575f5260205ff35b341061019a57600154600101600155600354806004026004013381556001015f358155600101602035815560010160403590553360601b5f5260605f60143760745fa0600101600355005b6003546002548082038060021160e7575060025b5f5b8181146101295782810160040260040181607402815460601b815260140181600101548152602001816002015481526020019060030154905260010160e9565b910180921461013b5790600255610146565b90505f6002555f6003555b5f54807fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff141561017357505f5b6001546001828201116101885750505f61018e565b01600190035b5f555f6001556074025ff35b5f5ffd")
-var consolidationRequestCodeHash = accounts.InternCodeHash(common.BytesToHash(crypto.Keccak256(consolidationRequestCode)))
-
-// EIP-8282 builder deposit contract runtime bytecode
-var builderDepositRequestCode = misc.BuilderDepositRequestCode
-var builderDepositRequestCodeHash = accounts.InternCodeHash(common.BytesToHash(crypto.Keccak256(builderDepositRequestCode)))
-
-// EIP-8282 builder exit contract runtime bytecode
-var builderExitRequestCode = misc.BuilderExitRequestCode
-var builderExitRequestCodeHash = accounts.InternCodeHash(common.BytesToHash(crypto.Keccak256(builderExitRequestCode)))
+var consolidationRequestCodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(consolidationRequestCode))
 
 func InitPraguePreDeploys(db kv.TemporalRwDB, config *chain.Config, logger log.Logger) error {
 	ctx := context.Background()
@@ -411,55 +393,6 @@ func InitPraguePreDeploys(db kv.TemporalRwDB, config *chain.Config, logger log.L
 		return err
 	}
 	err = stateWriter.UpdateAccountCode(consolidationAddr, 0, consolidationRequestCodeHash, consolidationRequestCode)
-	if err != nil {
-		return err
-	}
-
-	return domains.Commit(ctx, tx)
-}
-
-// InitAmsterdamPreDeploys deploys the EIP-8282 builder deposit and exit
-// system contracts into the state database for test chains with Amsterdam active.
-func InitAmsterdamPreDeploys(db kv.TemporalRwDB, config *chain.Config, logger log.Logger) error {
-	ctx := context.Background()
-	builderDepositAddr := config.GetBuilderDepositContract()
-	builderExitAddr := config.GetBuilderExitContract()
-	tx, err := db.BeginTemporalRw(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	domains, err := execctx.NewSharedDomains(ctx, tx, logger)
-	if err != nil {
-		return err
-	}
-	defer domains.Close()
-	latestTxNum, _, err := domains.SeekCommitment(ctx, tx)
-	if err != nil {
-		return err
-	}
-	stateWriter := state.NewWriter(domains.AsPutDel(tx), nil, latestTxNum)
-
-	err = stateWriter.UpdateAccountData(builderDepositAddr, &accounts.Account{}, &accounts.Account{
-		CodeHash: builderDepositRequestCodeHash,
-		Nonce:    1,
-	})
-	if err != nil {
-		return err
-	}
-	err = stateWriter.UpdateAccountCode(builderDepositAddr, 0, builderDepositRequestCodeHash, builderDepositRequestCode)
-	if err != nil {
-		return err
-	}
-	err = stateWriter.UpdateAccountData(builderExitAddr, &accounts.Account{}, &accounts.Account{
-		CodeHash: builderExitRequestCodeHash,
-		Nonce:    1,
-	})
-	if err != nil {
-		return err
-	}
-	err = stateWriter.UpdateAccountCode(builderExitAddr, 0, builderExitRequestCodeHash, builderExitRequestCode)
 	if err != nil {
 		return err
 	}
@@ -515,7 +448,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		stateWriter.SetTxNum(txNum)
 	}
 	genblock := func(i int, parent *types.Block, ibs *state.IntraBlockState, stateReader state.StateReader,
-		stateWriter state.StateWriter) (*types.Block, types.Receipts, []byte, error) {
+		stateWriter state.StateWriter) (*types.Block, types.Receipts, error) {
 		txNumIncrement()
 
 		var versionMap *state.VersionMap
@@ -546,13 +479,16 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			b.withdrawals = []*types.Withdrawal{}
 		}
 		b.header = makeHeader(chainreader, parent, ibs, b.engine)
-		if chainreader.Config().IsAmsterdam(b.header.Time) && !chainreader.Config().IsEIPDisabled(7928) {
+		// blockIO carries the per-phase write-sets: it feeds both the Amsterdam
+		// BAL and the versioned write-set commit, so create it for any versioned
+		// block, not only Amsterdam.
+		if versionMap != nil || (chainreader.Config().IsEIPEnabled(7928, b.header.Time)) {
 			b.blockIO = &state.VersionedIO{}
 		}
 		// Mutate the state and block according to any hard-fork specs
 		if daoBlock := config.DAOForkBlock; daoBlock != nil {
 			if b.header.Number.Uint64() >= *daoBlock && b.header.Number.Uint64() < *daoBlock+misc.DAOForkExtraRange {
-				b.header.Extra = common.Copy(misc.DAOForkBlockExtra)
+				b.header.Extra = bytes.Clone(misc.DAOForkBlockExtra)
 			}
 		}
 		// Set ParentBeaconBlockRoot for Cancun+ blocks before InitializeBlockExecution
@@ -560,7 +496,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		if config.IsCancun(b.header.Time) {
 			var beaconBlockRoot common.Hash
 			if _, err := rand.Read(beaconBlockRoot[:]); err != nil {
-				return nil, nil, nil, fmt.Errorf("can't create beacon block root: %w", err)
+				return nil, nil, fmt.Errorf("can't create beacon block root: %w", err)
 			}
 			b.header.ParentBeaconBlockRoot = &beaconBlockRoot
 		}
@@ -572,14 +508,13 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			}
 			err := protocol.InitializeBlockExecution(b.engine, chainreader, b.header, config, ibs, nil, logger, nil)
 			if err != nil {
-				return nil, nil, nil, fmt.Errorf("call to InitializeBlockExecution: %w", err)
+				return nil, nil, fmt.Errorf("call to InitializeBlockExecution: %w", err)
 			}
 			// Record system call I/O into blockIO for BAL computation
 			if ibs.IsVersioned() && b.blockIO != nil {
 				initVersion := state.Version{BlockNum: b.header.Number.Uint64(), TxIndex: -1}
-				writes := ibs.VersionedWrites(false)
+				writes := ibs.FinalizedWrites(b.blockRules())
 				b.blockIO.RecordReads(initVersion, ibs.VersionedReads())
-				b.blockIO.RecordAccesses(initVersion, ibs.AccessedAddresses())
 				b.blockIO.RecordWrites(initVersion, writes)
 				if b.versionMap != nil {
 					b.versionMap.FlushVersionedWrites(writes, true, "")
@@ -604,6 +539,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			// Reset versioned I/O before finalize to capture system call I/O cleanly
 			if ibs.IsVersioned() {
 				ibs.ResetVersionedIO()
+				ibs.StartAccessRecording()
 			}
 			// Finalize and seal the block
 			syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
@@ -612,14 +548,13 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			_, requests, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, b.withdrawals, chainreader, syscall, nil, logger)
 
 			if err != nil {
-				return nil, nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)
+				return nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)
 			}
 			// Record finalize system call I/O into blockIO for BAL computation
 			if ibs.IsVersioned() && b.blockIO != nil {
 				finalizeVersion := state.Version{BlockNum: b.header.Number.Uint64(), TxIndex: len(b.txs)}
-				writes := ibs.VersionedWrites(false)
+				writes := ibs.FinalizedWrites(b.blockRules())
 				b.blockIO.RecordReads(finalizeVersion, ibs.VersionedReads())
-				b.blockIO.RecordAccesses(finalizeVersion, ibs.AccessedAddresses())
 				b.blockIO.RecordWrites(finalizeVersion, writes)
 				if b.versionMap != nil {
 					b.versionMap.FlushVersionedWrites(writes, true, "")
@@ -629,8 +564,50 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 
 			// Write state changes to db
 			blockContext := protocol.NewEVMBlockContext(b.header, protocol.GetHashFn(b.header, nil), b.engine, accounts.NilAddress, config)
-			if err := ibs.CommitBlock(blockContext.Rules(config), stateWriter); err != nil {
-				return nil, nil, nil, fmt.Errorf("call to CommitBlock to stateWriter: %w", err)
+			blockRules := blockContext.Rules(config)
+			if b.versionMap != nil && b.blockIO != nil {
+				// Commit from the versionMap write-set via WriteSet.Normalize/Apply
+				// — the same path the parallel executor uses — instead of so.data
+				// via CommitBlock, so generation matches import once the write path
+				// bypasses so.data. Each recorded phase (init txIdx=-1, txs,
+				// finalize) is applied in order; applying a phase before normalizing
+				// the next lets the next phase's stateReader fallback see it.
+				blockNum := b.header.Number.Uint64()
+				var domainKeysErr error
+				domainStorageKeys := func(addr accounts.Address) []accounts.StorageKey {
+					av := addr.Value()
+					const addrLen, hashLen = 20, 32
+					var keys []accounts.StorageKey
+					if iterErr := domains.IteratePrefix(kv.StorageDomain, av[:], tx, func(k, _ []byte) (bool, error) {
+						if len(k) >= addrLen+hashLen {
+							keys = append(keys, accounts.InternKey(common.BytesToHash(k[addrLen:addrLen+hashLen])))
+						}
+						return true, nil
+					}); iterErr != nil {
+						domainKeysErr = iterErr
+						return nil
+					}
+					return keys
+				}
+				emptyRemoval := blockNum != 0 && config.IsEIP161Enabled(blockNum)
+				isAura := config.Aura != nil
+				for i, ws := range b.blockIO.Outputs() {
+					if ws == nil || ws.IsEmpty() {
+						continue
+					}
+					normalized, normErr := ws.Normalize(b.versionMap, i-1, 0, stateReader, domainStorageKeys, emptyRemoval, isAura, config.IsAmsterdam(b.header.Time))
+					if domainKeysErr != nil {
+						return nil, nil, fmt.Errorf("iterate storage prefix for block write normalization: %w", domainKeysErr)
+					}
+					if normErr != nil {
+						return nil, nil, fmt.Errorf("normalize block writes: %w", normErr)
+					}
+					if err := normalized.Apply(domains, tx, blockNum, txNum, nil, blockRules, nil, false); err != nil {
+						return nil, nil, fmt.Errorf("apply versioned block writes: %w", err)
+					}
+				}
+			} else if err := ibs.CommitBlock(blockRules, stateWriter); err != nil {
+				return nil, nil, fmt.Errorf("call to CommitBlock to stateWriter: %w", err)
 			}
 
 			if config.IsPrague(b.header.Time) {
@@ -639,36 +616,36 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 
 			var bal types.BlockAccessList
 			var balBytes []byte
-			if config.IsAmsterdam(b.header.Time) && !config.IsEIPDisabled(7928) {
+			if config.IsEIPEnabled(7928, b.header.Time) {
 				bal = b.blockIO.AsBlockAccessList()
 				balHash := bal.Hash()
 				b.header.BlockAccessListHash = &balHash
 				var encErr error
 				balBytes, encErr = types.EncodeBlockAccessListBytes(bal)
 				if encErr != nil {
-					return nil, nil, nil, fmt.Errorf("encode block access list: %w", encErr)
+					return nil, nil, fmt.Errorf("encode block access list: %w", encErr)
 				}
 			}
 
 			stateRoot, err := domains.ComputeCommitment(ctx, tx, true, b.header.Number.Uint64(), uint64(txNum), "", nil)
 			if err != nil {
-				return nil, nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)
+				return nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)
 			}
 			b.header.Root = common.BytesToHash(stateRoot)
 			// Recreating block to make sure Root makes it into the header
 			block := types.NewBlockForAsembling(b.header, b.txs, b.uncles, b.receipts, b.withdrawals)
-			return block, b.receipts, balBytes, nil
+			block.SetBlockAccessList(balBytes)
+			return block, b.receipts, nil
 		}
-		return nil, nil, nil, errors.New("no engine to generate blocks")
+		return nil, nil, errors.New("no engine to generate blocks")
 	}
 
-	blockAccessLists := make([][]byte, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		ibs := state.New(stateReader)
 		if dbg.TraceBlock(uint64(i)) {
 			ibs.SetTrace(true)
 		}
-		block, receipt, balBytes, err := genblock(i, parent, ibs, stateReader, stateWriter)
+		block, receipt, err := genblock(i, parent, ibs, stateReader, stateWriter)
 		ibs.SetTrace(false)
 		if err != nil {
 			return nil, fmt.Errorf("generating block %d: %w", i, err)
@@ -676,11 +653,10 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		headers[i] = block.Header()
 		blocks[i] = block
 		receipts[i] = receipt
-		blockAccessLists[i] = balBytes
 		parent = block
 	}
 
-	return &ChainPack{Headers: headers, Blocks: blocks, Receipts: receipts, BlockAccessLists: blockAccessLists, TopBlock: blocks[n-1]}, nil
+	return &ChainPack{Headers: headers, Blocks: blocks, Receipts: receipts, TopBlock: blocks[n-1]}, nil
 }
 
 func makeHeader(chain rules.ChainReader, parent *types.Block, state *state.IntraBlockState, engine rules.Engine) *types.Header {
