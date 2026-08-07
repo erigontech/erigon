@@ -180,6 +180,10 @@ func ExecV3(ctx context.Context,
 	startBlockNum := blockNum
 	blockLimit := uint64(cfg.syncCfg.LoopBlockLimit)
 
+	// Thread the cfg's exec-only flag into the domains so IsUnfrozenStepEdge uses
+	// it rather than reading dbg.DiscardCommitment() independently (single source).
+	doms.SetDiscardCommitment(cfg.discardCommitment)
+
 	// Exec-only mode (discardCommitment) runs no trie work, so skip the trie
 	// setup entirely: EnableParaTrieDB after the witness seed's DomainPut touches
 	// would panic on the dropped sequential-buffer keys (ERIGON_COMMITMENT_PARALLEL).
