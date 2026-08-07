@@ -22,6 +22,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 )
 
@@ -34,6 +35,10 @@ type directGrpcServerClient struct {
 func DirectGrpcServerClient(server downloaderproto.DownloaderServer) downloaderproto.DownloaderClient {
 	return directGrpcServerClient{server: server}
 }
+
+// RpcClient reaches the progress capability through a type assertion on its
+// inner client, so losing it here would compile and silently report no progress.
+var _ dbservices.DownloadProgressReport = directGrpcServerClient{}
 
 func (c directGrpcServerClient) Download(ctx context.Context, in *downloaderproto.DownloadRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	return c.server.Download(ctx, in)
@@ -54,8 +59,8 @@ func (c directGrpcServerClient) Completed() (done, total uint64) {
 	return 0, 0
 }
 
-func (c directGrpcServerClient) ResetStats() {
+func (c directGrpcServerClient) ResetProgress() {
 	if s, ok := c.server.(*GrpcServer); ok {
-		s.d.ResetStats()
+		s.d.ResetProgress()
 	}
 }

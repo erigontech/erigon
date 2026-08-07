@@ -134,32 +134,44 @@ type Downloader struct {
 	// Latest aggregated stats snapshot, published by the download logging loop
 	// so eth_syncing can report download progress.
 	lastStats atomic.Pointer[AggStats]
-}
 
-// progressReporter is the in-process side of dbservices.DownloadProgressReport,
-// reached through the client wrappers by type assertion.
-type progressReporter interface {
-	Completed() (done, total uint64)
-	ResetStats()
+	// Highest BytesCompleted published in this download session.
+	completedHighWater atomic.Uint64
 }
 
 // Completed reports the latest snapshot-download progress in bytes; total is 0
-// until the first stats sample is available.
+// when it is unknown.
 func (d *Downloader) Completed() (done, total uint64) {
 	s := d.lastStats.Load()
-	if s == nil {
+	// Torrents still missing their metainfo are excluded from both counters, so
+	// until every one has arrived the already-complete files are measured against
+	// a partial total and progress reads far too high.
+	if s == nil || s.MetadataReady != s.NumTorrents {
 		return 0, 0
 	}
 	return s.BytesCompleted, s.BytesTotal
 }
 
-func (d *Downloader) ResetStats() {
+func (d *Downloader) ResetProgress() {
 	d.lastStats.Store(nil)
+	d.completedHighWater.Store(0)
 }
 
 // storeStats publishes an immutable snapshot of the current stats: s is a fresh
 // copy, so the stored pointer never aliases the loop buffer being overwritten.
+// BytesCompleted is raised to the session high-water mark, since it counts dirty
+// bytes and can go back down.
 func (d *Downloader) storeStats(s AggStats) {
+	for {
+		high := d.completedHighWater.Load()
+		if s.BytesCompleted <= high {
+			s.BytesCompleted = high
+			break
+		}
+		if d.completedHighWater.CompareAndSwap(high, s.BytesCompleted) {
+			break
+		}
+	}
 	d.lastStats.Store(&s)
 }
 

@@ -121,6 +121,23 @@ func TestBuildSyncingReplySnapshotDownloadCompletePinsFullProgress(t *testing.T)
 	require.Equal(t, uint64(20_000_000), reply.LastNewBlockSeen)
 }
 
+// The snapshots being downloaded only cover targetBlock, so an FCU arriving
+// mid-download must raise the reported highest block without scaling the byte
+// ratio onto it: doing so claims blocks no snapshot holds and makes
+// currentBlock step backwards once execution starts.
+func TestBuildSyncingReplySnapshotDownloadDoesNotScaleToLiveHead(t *testing.T) {
+	const targetBlock, liveHead = 20_000_000, 21_000_000
+	n, tx := newSyncStateFixture(t, 0)
+	n.NewLastBlockSeen(liveHead)
+	n.SetSnapshotDownloadProgress(500, 1000, targetBlock)
+
+	reply, err := n.BuildSyncingReply(tx, 0)
+	require.NoError(t, err)
+	require.True(t, reply.Syncing)
+	require.Equal(t, uint64(targetBlock/2), reply.CurrentBlock)
+	require.Equal(t, uint64(liveHead), reply.LastNewBlockSeen)
+}
+
 // The downloader recomputes its byte total every cycle and it grows as torrent
 // metadata arrives, so consecutive samples differ in both fields. A reader must
 // never combine the total of one sample with the completed bytes of the next:

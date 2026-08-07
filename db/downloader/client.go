@@ -86,15 +86,15 @@ func (me *RpcClient) Delete(ctx context.Context, paths []string) (err error) {
 }
 
 func (me *RpcClient) Completed() (done, total uint64) {
-	if c, ok := me.inner.(progressReporter); ok {
+	if c, ok := me.inner.(dbservices.DownloadProgressReport); ok {
 		return c.Completed()
 	}
 	return 0, 0
 }
 
 func (me *RpcClient) ResetProgress() {
-	if c, ok := me.inner.(progressReporter); ok {
-		c.ResetStats()
+	if c, ok := me.inner.(dbservices.DownloadProgressReport); ok {
+		c.ResetProgress()
 	}
 }
 
