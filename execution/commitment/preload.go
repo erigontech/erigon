@@ -28,6 +28,10 @@ import (
 // tx/aggregator types to keep this package free of db/state imports.
 type CommitmentReader func(prefix []byte) (v []byte, step uint64, found bool, err error)
 
+type branchPinWriter interface {
+	PinEntry(prefix, data []byte, step uint64)
+}
+
 // estimatedEntryOverheadBytes is the per-entry RAM cost beyond the encoded
 // value itself: branchCacheEntry (~80 B), maphash slot + hash (~40 B),
 // prefix slice (~24 B header + content), value slice header (~24 B).
@@ -47,10 +51,6 @@ type ContractTrunkPreload struct {
 	pinned          int
 	usedBytes       int
 	maxDepthReached int
-	// pinTxNum stamps pinned entries with the head txNum they were read at, so a
-	// later unwind below that point evicts them via the BranchCache floor (a
-	// txN=0 pin would escape it and be served stale after a deep unwind).
-	pinTxNum uint64
 }
 
 // NewContractTrunkPreload seeds a preload state at depth 64 (storage
@@ -78,7 +78,7 @@ func NewContractTrunkPreload(contractHash []byte) (*ContractTrunkPreload, error)
 func (p *ContractTrunkPreload) Run(
 	additionalBudgetBytes int,
 	reader CommitmentReader,
-	cache *BranchCache,
+	cache branchPinWriter,
 	logger log.Logger,
 ) (newlyPinned int, queueEmpty bool, err error) {
 	if cache == nil {
@@ -110,7 +110,7 @@ func (p *ContractTrunkPreload) Run(
 			break
 		}
 
-		cache.PinEntry(prefix, v, step, p.pinTxNum)
+		cache.PinEntry(prefix, v, step)
 		// HexToCompact may alias a reused buffer; copy for a stable Invalidate handle.
 		prefixCopy := make([]byte, len(prefix))
 		copy(prefixCopy, prefix)

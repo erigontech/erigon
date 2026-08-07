@@ -181,7 +181,7 @@ func TestAggregatorCloseReleasesBranchCache(t *testing.T) {
 	require.NotNil(t, cd.branchCache, "precondition: BranchCache is set when USE_STATE_CACHE is on")
 
 	prefix := []byte{0x01, 0x02}
-	cd.branchCache.Put(prefix, []byte{0xaa, 0xbb}, 1, 1)
+	cd.branchCache.Put(prefix, []byte{0xaa, 0xbb}, 1)
 	_, _, ok := cd.branchCache.Get(prefix)
 	require.True(t, ok, "precondition: entry is cached before Close")
 

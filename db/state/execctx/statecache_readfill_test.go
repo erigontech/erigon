@@ -83,8 +83,9 @@ func currentStateCacheView(t *testing.T, stateCache *cache.StateCache) cache.Rea
 	return stateCache.View(stateVersion)
 }
 
-// During an in-flight unwind the cache is inactive, so the assertion compares
-// the bounded database read without observing the old cache generation.
+// During an in-flight unwind this SharedDomains is detached from StateCache,
+// so the assertion compares the bounded database read without observing the
+// cache generation that still serves readers of the durable state.
 func TestAssertStateCache_NoFalsePanicDuringInFlightUnwind(t *testing.T) {
 	// Mutates dbg.AssertStateCache — must not run in parallel with tests that
 	// read it on the SD read path.
@@ -174,7 +175,7 @@ func TestAssertStateCache_NoFalsePanicDuringInFlightUnwindStepZero(t *testing.T)
 	require.Equal(t, v1, v, "the inactive cache must fall through to the bounded database read")
 }
 
-func TestReadFill_SkipsInFlightUnwindRow(t *testing.T) {
+func TestReadFill_UnwindDetachesWithoutRevokingStateCache(t *testing.T) {
 	t.Parallel()
 
 	const stepSize = uint64(16)
@@ -182,6 +183,9 @@ func TestReadFill_SkipsInFlightUnwindRow(t *testing.T) {
 	db := newTestDb(t, stepSize)
 	sc := newSmallStateCache()
 	key, _, v2, diffs := twoStepRows(t, db, sc)
+	stateVersion, ok := sc.CurrentStateVersion()
+	require.True(t, ok)
+	sc.Publisher().Begin().Publish(stateVersion, nil, true)
 
 	roTx, err := db.BeginTemporalRo(ctx)
 	require.NoError(t, err)
@@ -197,11 +201,14 @@ func TestReadFill_SkipsInFlightUnwindRow(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, v2, got)
 
-	_, ok := sc.CurrentStateVersion()
-	require.False(t, ok, "the cache must stay inactive until the unwind commits")
+	currentVersion, ok := sc.CurrentStateVersion()
+	require.True(t, ok, "an uncommitted unwind must not revoke the durable cache")
+	require.Equal(t, stateVersion, currentVersion)
+	_, ok = sc.View(currentVersion).Get(kv.AccountsDomain, key)
+	require.False(t, ok, "the detached SharedDomains must not fill from its rewound database view")
 }
 
-func TestCodeHashFill_SkipsInFlightUnwindRow(t *testing.T) {
+func TestCodeHashFill_UnwindDetachesWithoutRevokingStateCache(t *testing.T) {
 	t.Parallel()
 
 	const stepSize = uint64(16)
@@ -228,6 +235,9 @@ func TestCodeHashFill_SkipsInFlightUnwindRow(t *testing.T) {
 	sd.SetTxNum(20)
 	require.NoError(t, sd.DomainPut(kv.AccountsDomain, rwTx, key, value, 20, nil))
 	require.NoError(t, sd.Commit(ctx, rwTx))
+	stateVersion, ok := sc.CurrentStateVersion()
+	require.True(t, ok)
+	sc.Publisher().Begin().Publish(stateVersion, nil, true)
 
 	stepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(stepBytes, ^uint64(1))
@@ -246,8 +256,11 @@ func TestCodeHashFill_SkipsInFlightUnwindRow(t *testing.T) {
 	got := sd2.CodeHashForAddr(roTx, key, 20)
 	require.Equal(t, codeHash[:], got)
 
-	_, ok := sc.CurrentStateVersion()
-	require.False(t, ok, "the cache must stay inactive until the unwind commits")
+	currentVersion, ok := sc.CurrentStateVersion()
+	require.True(t, ok, "an uncommitted unwind must not revoke the durable cache")
+	require.Equal(t, stateVersion, currentVersion)
+	_, ok = sc.View(currentVersion).Get(kv.AccountsDomain, key)
+	require.False(t, ok, "code-hash lookup through the rewound view must not fill the durable cache")
 }
 
 func TestSpeculativeUnwindDoesNotPublishStateCache(t *testing.T) {

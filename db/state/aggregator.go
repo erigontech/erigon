@@ -90,11 +90,9 @@ type Aggregator struct {
 	// regenerates them. Guarded by dirtyFilesLock.
 	unalignedDomain [kv.DomainLen]bool
 	unalignedIdx    [kv.StandaloneIdxLen]bool
-	// visibilityLoweringForbidden: a fill-enabled StateCache is wired over
-	// this aggregator, and its fill admission relies on view frontiers never
-	// decreasing. recalcVisibleFiles refuses to lower the cached state
-	// domains' visible ends while set; Close clears it (shutdown is not a
-	// fill window).
+	// visibilityLoweringForbidden: a single-version cache is wired over this
+	// aggregator, and its fill admission relies on view frontiers never
+	// decreasing. Close clears it because shutdown is not a fill window.
 	visibilityLoweringForbidden atomic.Bool
 	snapshotBuildSema           *semaphore.Weighted
 
@@ -549,12 +547,15 @@ func (a *Aggregator) UnalignIdx(name kv.InvertedIdx) (realign func()) {
 	return func() {}
 }
 
-// ForbidVisibilityLowering marks this aggregator as backing a fill-enabled
-// StateCache: from then on recalcVisibleFiles panics instead of lowering a
-// cached state domain's visible end, whichever entry point caused it.
+// ForbidVisibilityLowering marks this aggregator as backing a single-version
+// cache. From then on recalcVisibleFiles rejects lowering a cached domain's
+// visible end, whichever entry point caused it.
 // Serialized with recalcVisibleFiles via dirtyFilesLock so "from then on"
 // holds against a recalculation already in flight.
 func (a *Aggregator) ForbidVisibilityLowering() {
+	if a.visibilityLoweringForbidden.Load() {
+		return
+	}
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 	a.visibilityLoweringForbidden.Store(true)
@@ -709,9 +710,17 @@ func (a *Aggregator) ReloadFiles() error {
 // closeDirtyFilesNoReopen drops all dirty-file mmaps without re-scanning the
 // snapshots dir, so a caller can rename the underlying files (Windows forbids
 // renaming a mapped file); a later ReloadFiles re-opens them.
+// closeDirtyFilesNoReopen is an exclusive tooling operation: it temporarily
+// removes all visible files and invalidates cache guarantees tied to them.
 func (a *Aggregator) closeDirtyFilesNoReopen() {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
+	// This path removes every visible file before replacing them, so no cache
+	// view may remain live across the reset.
+	a.visibilityLoweringForbidden.Store(false)
+	if cd := a.d[kv.CommitmentDomain]; cd != nil && cd.branchCache != nil {
+		cd.branchCache.Reset()
+	}
 	a.closeDirtyFiles()
 	a.recalcVisibleFiles(nil)
 }
@@ -1901,14 +1910,14 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 
 	if a.visibilityLoweringForbidden.Load() {
 		prev := a.visible.Load()
-		for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+		for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain} {
 			if prev.d[d] == nil || next.d[d] == nil {
 				continue
 			}
 			prevEnd := visibleFiles(prev.d[d].files).EndTxNum()
 			nextEnd := visibleFiles(next.d[d].files).EndTxNum()
 			if nextEnd < prevEnd {
-				panic(fmt.Sprintf("assert: %s visible end lowered %d -> %d while a fill-enabled StateCache is wired — fill admission relies on view frontiers never decreasing", d, prevEnd, nextEnd))
+				panic(fmt.Sprintf("assert: %s visible end lowered %d -> %d while a single-version cache is wired — fill admission relies on view frontiers never decreasing", d, prevEnd, nextEnd))
 			}
 			if prev.dhii[d] == nil || next.dhii[d] == nil {
 				continue
@@ -1916,7 +1925,7 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 			prevII := prev.dhii[d].files.EndTxNum()
 			nextII := next.dhii[d].files.EndTxNum()
 			if nextII < prevII {
-				panic(fmt.Sprintf("assert: %s history-II visible end lowered %d -> %d while a fill-enabled StateCache is wired — DomainVisibleEnd derives view frontiers from it", d, prevII, nextII))
+				panic(fmt.Sprintf("assert: %s history-II visible end lowered %d -> %d while a single-version cache is wired — DomainVisibleEnd derives view frontiers from it", d, prevII, nextII))
 			}
 		}
 	}
@@ -2673,6 +2682,10 @@ func (at *AggregatorRoTx) AdaptivePinController() *commitment.AdaptivePinControl
 // aggregate.
 func (at *AggregatorRoTx) MetricsCollector() *kvmetrics.Collector {
 	return at.a.metricsCollector
+}
+
+func (at *AggregatorRoTx) ForbidVisibilityLowering() {
+	at.a.ForbidVisibilityLowering()
 }
 
 func (at *AggregatorRoTx) Dirs() datadir.Dirs                  { return at.a.dirs }

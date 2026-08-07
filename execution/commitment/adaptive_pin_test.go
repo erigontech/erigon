@@ -17,9 +17,13 @@
 package commitment
 
 import (
+	"bytes"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
 // A zero-value field means "unset", so the constructor's fallbacks must resolve
@@ -46,4 +50,41 @@ func TestNewAdaptivePinController_ExplicitConfigWins(t *testing.T) {
 	if c.cfg != cfg {
 		t.Fatalf("explicit config was overwritten: got %+v, want %+v", c.cfg, cfg)
 	}
+}
+
+func TestAdaptivePinPlanDoesNotMutateCacheBeforePublication(t *testing.T) {
+	branchCache := NewBranchCache(64)
+	t.Cleanup(branchCache.Close)
+	publisher := branchCache.Publisher()
+	publisher.Initialize(1)
+
+	cfg := DefaultAdaptivePinControllerConfig()
+	cfg.PromoteThresholdMisses = 1
+	cfg.MaxPromotedContracts = 1
+	controller := NewAdaptivePinController(branchCache, cfg, log.Root())
+
+	var contractHash [32]byte
+	contractHash[0] = 1
+	prefix := nibbles.HexToCompact(ContractNibbles(contractHash[:]))
+	controller.onCacheMiss(prefix)
+	reader := func(key []byte) ([]byte, uint64, bool, error) {
+		if !bytes.Equal(key, prefix) {
+			return nil, 0, false, nil
+		}
+		return []byte{0, 0, 0, 0}, 1, true, nil
+	}
+
+	plan := controller.PlanBlock(1, reader, nil, nil)
+	_, _, ok := branchCache.Get(prefix)
+	require.False(t, ok, "planning from an uncommitted transaction must not change BranchCache")
+	plan.Abort()
+	require.Empty(t, controller.states, "aborting the database transaction must restore controller state")
+
+	plan = controller.PlanBlock(2, reader, nil, nil)
+	publication := publisher.Begin()
+	publication.Publish(2, nil, false, plan)
+	plan.Commit()
+
+	_, _, ok = branchCache.View(2).Get(prefix)
+	require.True(t, ok, "publication must apply the staged pin")
 }

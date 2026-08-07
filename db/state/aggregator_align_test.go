@@ -260,3 +260,31 @@ func TestVisibilityLowering_GuardsHistoryIIEnd(t *testing.T) {
 	require.Panics(t, func() { agg.recalcVisibleFiles(nil) },
 		"lowering a history-II end while values ends stay put must trip the forbid assert")
 }
+
+func TestVisibilityLowering_GuardsCommitmentDomain(t *testing.T) {
+	t.Parallel()
+	_, agg := testDbAndAggregatorv3(t, alignStepSize)
+
+	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	generateStandaloneIIFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	require.NoError(t, agg.OpenFolder())
+
+	agg.Unalign(kv.CommitmentDomain)
+	agg.ForbidVisibilityLowering()
+
+	agg.dirtyFilesLock.Lock()
+	defer agg.dirtyFilesLock.Unlock()
+	dropped := 0
+	agg.d[kv.CommitmentDomain].dirtyFiles.CloseIf(func(item *FilesItem) bool {
+		if item.endTxNum == 2*alignStepSize {
+			dropped++
+			return true
+		}
+		return false
+	})
+	require.Equal(t, 1, dropped)
+
+	require.Panics(t, func() { agg.recalcVisibleFiles(nil) },
+		"BranchCache fill admission requires the commitment frontier to remain monotonic")
+}

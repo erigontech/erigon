@@ -19,8 +19,6 @@ package cache
 import (
 	"bytes"
 	"strings"
-	"sync"
-	"sync/atomic"
 
 	"github.com/c2h5oh/datasize"
 
@@ -38,25 +36,12 @@ const (
 	avgStorageEntryBytes = 80
 )
 
-// cacheGeneration is immutable after it is stored. ReadView uses pointer
-// identity, rather than stateVersion alone, as its validity token: revoking
-// and later republishing the same state version must not make an old view
-// valid again.
-type cacheGeneration struct {
-	stateVersion uint64
-	active       bool
-}
-
 // StateCache holds account, storage, and code values for exactly one durable
-// PlainStateVersion. Each reader carries the generation pointer that was
-// current for its database snapshot. Publication replaces that pointer before
-// changing entries, so old readers turn cache accesses into misses instead of
-// observing a mixture of the old and new states.
+// PlainStateVersion. Each reader carries a version token for its database
+// snapshot. Publication revokes that view before changing entries, so old
+// readers miss instead of observing a mixture of the old and new states.
 type StateCache struct {
-	// Reads remain lock-free. admissionMu only serializes generation changes
-	// against fills, whose source read may have started before publication.
-	generation  atomic.Pointer[cacheGeneration]
-	admissionMu sync.RWMutex
+	version PlainStateVersionGate
 
 	caches       [kv.DomainLen]Cache
 	disableFills bool
@@ -104,23 +89,11 @@ func NewDefaultStateCache() *StateCache {
 	)
 }
 
-func (c *StateCache) generationFor(stateVersion uint64) *cacheGeneration {
-	generation := c.generation.Load()
-	if generation == nil || !generation.active || generation.stateVersion != stateVersion {
-		return nil
-	}
-	return generation
-}
-
 // CurrentStateVersion reports the durable PlainStateVersion represented by
 // all cache layers. It returns false while publication is in progress because
 // the old version has been revoked and the new version is not visible yet.
 func (c *StateCache) CurrentStateVersion() (uint64, bool) {
-	generation := c.generation.Load()
-	if generation == nil || !generation.active {
-		return 0, false
-	}
-	return generation.stateVersion, true
+	return c.version.CurrentStateVersion()
 }
 
 func (c *StateCache) getWithStep(domain kv.Domain, key []byte) ([]byte, kv.Step, bool) {
@@ -156,7 +129,7 @@ func (c *StateCache) getAddrCodeHash(addr []byte) ([32]byte, bool) {
 }
 
 func (c *StateCache) fill(
-	generation *cacheGeneration,
+	version PlainStateVersionView,
 	domain kv.Domain,
 	key, value []byte,
 	step kv.Step,
@@ -167,16 +140,13 @@ func (c *StateCache) fill(
 	}
 	value = bytes.Clone(value)
 
-	c.admissionMu.RLock()
-	defer c.admissionMu.RUnlock()
-	if c.generation.Load() != generation {
-		return
-	}
-	cache.PutIfAbsent(key, value, step)
+	version.Admit(func() {
+		cache.PutIfAbsent(key, value, step)
+	})
 }
 
 func (c *StateCache) fillCode(
-	generation *cacheGeneration,
+	version PlainStateVersionView,
 	key, value []byte,
 	step kv.Step,
 ) {
@@ -187,38 +157,29 @@ func (c *StateCache) fillCode(
 	value = bytes.Clone(value)
 	codeHash := crypto.Keccak256(value)
 
-	c.admissionMu.RLock()
-	defer c.admissionMu.RUnlock()
-	if c.generation.Load() != generation {
-		return
-	}
-	codeCache.PutWithCodeHashIfAbsent(key, value, codeHash, step)
+	version.Admit(func() {
+		codeCache.PutWithCodeHashIfAbsent(key, value, codeHash, step)
+	})
 }
 
-func (c *StateCache) seedAddrCodeHash(generation *cacheGeneration, addr []byte, hash [32]byte) {
+func (c *StateCache) seedAddrCodeHash(version PlainStateVersionView, addr []byte, hash [32]byte) {
 	codeCache, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok {
 		return
 	}
-	c.admissionMu.RLock()
-	defer c.admissionMu.RUnlock()
-	if c.generation.Load() != generation {
-		return
-	}
-	codeCache.PutAddrCodeHash(addr, hash)
+	version.Admit(func() {
+		codeCache.PutAddrCodeHash(addr, hash)
+	})
 }
 
-func (c *StateCache) fillCodeSize(generation *cacheGeneration, codeHash []byte, size int) {
+func (c *StateCache) fillCodeSize(version PlainStateVersionView, codeHash []byte, size int) {
 	codeCache, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok {
 		return
 	}
-	c.admissionMu.RLock()
-	defer c.admissionMu.RUnlock()
-	if c.generation.Load() != generation {
-		return
-	}
-	codeCache.PutCodeSizeByCodeHash(codeHash, size)
+	version.Admit(func() {
+		codeCache.PutCodeSizeByCodeHash(codeHash, size)
+	})
 }
 
 func (c *StateCache) deleteAddrCodeHash(addr []byte) {
@@ -274,9 +235,7 @@ func (c *StateCache) clearLocked() {
 }
 
 func (c *StateCache) Close() {
-	c.admissionMu.Lock()
-	c.generation.Store(&cacheGeneration{})
-	c.admissionMu.Unlock()
+	c.version.Close()
 	for _, cache := range c.caches {
 		if cache != nil {
 			cache.Close()
@@ -312,7 +271,7 @@ func (c *StateCache) PrintStatsAndReset() {
 
 // Update is one value written by the database transaction being published.
 // Step is retained because GetLatest must return the value's source step; cache
-// coherence depends only on the published PlainStateVersion.
+// validity depends only on the published PlainStateVersion.
 type Update struct {
 	Domain kv.Domain
 	Key    []byte
@@ -324,14 +283,20 @@ type Update struct {
 // receive only ReadView, while code that makes a database state durable uses a
 // Publisher to move every cache layer to the same PlainStateVersion.
 type Publisher struct {
-	c *StateCache
+	c       *StateCache
+	version PlainStateVersionPublisher
 }
 
 // Publisher returns a handle that can change the cache's canonical generation.
 // It must not be given to speculative execution whose writes may be discarded.
-func (c *StateCache) Publisher() Publisher { return Publisher{c: c} }
+func (c *StateCache) Publisher() Publisher {
+	if c == nil {
+		return Publisher{}
+	}
+	return Publisher{c: c, version: c.version.Publisher()}
+}
 
-func (p Publisher) Enabled() bool { return p.c != nil }
+func (p Publisher) Enabled() bool { return p.c != nil && p.version.Enabled() }
 
 // Initialize binds the cache to the durable version seen by its canonical
 // owner. Existing entries are preserved when the version already matches. A
@@ -341,22 +306,7 @@ func (p Publisher) Initialize(stateVersion uint64) {
 	if p.c == nil {
 		return
 	}
-	c := p.c
-	c.admissionMu.Lock()
-	defer c.admissionMu.Unlock()
-
-	current := c.generation.Load()
-	if current != nil && current.active {
-		if current.stateVersion == stateVersion {
-			return
-		}
-	} else if current != nil {
-		panic("state cache publication already in progress")
-	}
-
-	c.generation.Store(&cacheGeneration{})
-	c.clearLocked()
-	c.generation.Store(&cacheGeneration{stateVersion: stateVersion, active: true})
+	p.version.Initialize(stateVersion, p.c.clearLocked)
 }
 
 // Publication represents one pending transition of the durable database
@@ -364,9 +314,8 @@ func (p Publisher) Initialize(stateVersion uint64) {
 // Abort can restore the previous generation if the transaction rolls back.
 // Publish consumes the transition after the database commit succeeds.
 type Publication struct {
-	c          *StateCache
-	previous   *cacheGeneration
-	transition *cacheGeneration
+	c       *StateCache
+	version *PlainStateVersionPublication
 }
 
 // Begin revokes every existing ReadView and prevents creation of a new live
@@ -376,17 +325,7 @@ func (p Publisher) Begin() *Publication {
 	if p.c == nil {
 		return nil
 	}
-	c := p.c
-	c.admissionMu.Lock()
-	defer c.admissionMu.Unlock()
-
-	previous := c.generation.Load()
-	if previous != nil && !previous.active {
-		panic("state cache publication already in progress")
-	}
-	transition := &cacheGeneration{}
-	c.generation.Store(transition)
-	return &Publication{c: c, previous: previous, transition: transition}
+	return &Publication{c: p.c, version: p.version.Begin()}
 }
 
 // Abort restores the previous generation after a failed or abandoned database
@@ -396,12 +335,7 @@ func (p *Publication) Abort() {
 	if p == nil || p.c == nil {
 		return
 	}
-	p.c.admissionMu.Lock()
-	defer p.c.admissionMu.Unlock()
-	if p.c.generation.Load() != p.transition {
-		panic("state cache publication changed before abort")
-	}
-	p.c.generation.Store(p.previous)
+	p.version.Abort()
 	p.c = nil
 }
 
@@ -418,18 +352,14 @@ func (p *Publication) Publish(stateVersion uint64, updates []Update, clear bool)
 	if p == nil || p.c == nil {
 		return
 	}
-	p.c.admissionMu.Lock()
-	defer p.c.admissionMu.Unlock()
-	if p.c.generation.Load() != p.transition {
-		panic("state cache publication changed before publish")
-	}
-	if clear {
-		p.c.clearLocked()
-	}
-	for i := range updates {
-		p.c.applyLocked(updates[i])
-	}
-	p.c.generation.Store(&cacheGeneration{stateVersion: stateVersion, active: true})
+	p.version.Publish(stateVersion, func() {
+		if clear {
+			p.c.clearLocked()
+		}
+		for i := range updates {
+			p.c.applyLocked(updates[i])
+		}
+	})
 	p.c = nil
 }
 

@@ -25,7 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
-	"github.com/erigontech/erigon/execution/cache/coherence"
+	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
@@ -45,12 +45,13 @@ func isCommitmentStateKey(prefix []byte) bool {
 	return bytes.Equal(prefix, KeyCommitmentState)
 }
 
-// BranchCache stores commitment-trie branch data: a bounded LRU tail plus a
-// never-evicted root slot, aggregator-scope and passive (the trie drives all
-// reads/writes). Concurrent Get/Put/Invalidate are mechanically safe, but the
-// writer stripes only make stamped publications atomic with Clear; callers must
-// still ensure one logical mutation per prefix at the orchestrator.
+// BranchCache stores commitment-trie branches in an aggregator-scope resident
+// trunk and bounded LRU tail. Concurrent storage operations are safe; shared
+// readers use View, and durable writers use Publisher, to keep all entries
+// bound to one PlainStateVersion.
 type BranchCache struct {
+	version cache.PlainStateVersionGate
+
 	// Root tier — single slot for the root branch (always hottest, always
 	// present). Atomic-pointer access so no lock is needed for the hot
 	// read path.
@@ -66,10 +67,9 @@ type BranchCache struct {
 	accountTrunk *trunk
 
 	// Pinned tier — one storageTrunk per hot contract, keyed by the 32-byte
-	// account hash. Entries never LRU-evict (sized by the residency policy)
-	// but still honor the (txN, epoch) unwind model. Lookup checks this tier
-	// between the account trunk and the tail. pinnedEntries counts filled
-	// storage slots across all storageTrunks.
+	// account hash. Entries never LRU-evict (sized by the residency policy).
+	// Lookup checks this tier between the account trunk and the tail.
+	// pinnedEntries counts filled storage slots across all storageTrunks.
 	// Allocated on the first pin (via pinnedForWrite): a cache that never pins a
 	// contract — the common case for short-lived caches over shallow tries —
 	// never pays for the (min 32-bucket) concurrent map.
@@ -104,7 +104,6 @@ type BranchCache struct {
 	pinnedHits, pinnedMisses atomic.Uint64
 	tailHits, tailMisses     atomic.Uint64
 	bytesServed              atomic.Uint64
-	staleEvicted             atomic.Uint64 // entries dropped lazily on read after an unwind
 
 	// onMiss fires when lookup misses all tiers. The residency/adaptive layer
 	// (added separately) registers here to attribute miss pressure per
@@ -117,14 +116,9 @@ type BranchCache struct {
 	lastPublishedPinnedHits   atomic.Uint64
 	lastPublishedPinnedMisses atomic.Uint64
 
-	// putStripes make epoch sampling and publication atomic with Clear while
+	// putStripes serialize writes to one prefix and fence Clear while
 	// preserving parallel writes to unrelated prefixes.
 	putStripes [256]sync.Mutex
-
-	// coh is the (epoch, floor) unwind-coherence primitive shared with the state
-	// and code caches: an entry is valid iff written in the current epoch OR its
-	// txN is below the unwind floor.
-	coh coherence.Gen
 }
 
 type branchCacheEntry struct {
@@ -138,16 +132,6 @@ type branchCacheEntry struct {
 	// in-memory tests but real callers should always pass the step
 	// returned by aggTx.MeteredGetLatest / tx.GetLatest.
 	step uint64
-
-	// txN is the txN the cached bytes are valid as of (an upper bound: the
-	// value's write txN). With epoch it gates reads after an unwind. 0 means
-	// "frozen/untracked" — predates any unwind, always served.
-	txN uint64
-
-	// epoch is the unwind generation the entry was written in. Disambiguates a
-	// txN reused across forks: an entry from a superseded epoch whose txN is at
-	// or above the unwind floor is dropped lazily on its next Get.
-	epoch uint32
 }
 
 // MissCallback is invoked when lookup misses ALL tiers (root, account trunk,
@@ -354,12 +338,20 @@ func NewBranchCache(tailCapacity int) *BranchCache {
 // Close drops this cache from the active-instance count so later BranchCaches
 // size their trunk depth against real concurrency. Idempotent.
 func (c *BranchCache) Close() {
+	c.version.Close()
 	if c.closed.CompareAndSwap(false, true) {
 		if t := c.tail.Load(); t != nil {
 			t.Close()
 		}
 		activeBranchCaches.Add(-1)
 	}
+}
+
+// Reset clears cached branches and revokes all views until the next durable
+// publication. It is required when the backing commitment view changes
+// without advancing PlainStateVersion.
+func (c *BranchCache) Reset() {
+	c.version.Reset(c.Clear)
 }
 
 // tailForWrite returns the LRU tail, allocating it on first use so a cache whose
@@ -626,10 +618,10 @@ func (c *BranchCache) store(prefix []byte, entry *branchCacheEntry) {
 }
 
 // PinEntry inserts or replaces a pinned cache entry for prefix in its contract's
-// storage trunk (allocated on demand). Pinned entries never LRU-evict but still
-// honor the (txN, epoch) unwind model. Data is copied; safe to mutate the input
-// after the call. Non-storage prefixes (< 64 nibbles) fall through to the tail.
-func (c *BranchCache) PinEntry(prefix []byte, data []byte, step, txN uint64) {
+// storage trunk (allocated on demand). Data is copied; safe to mutate the input
+// after the call. The adaptive controller calls it only inside a publication.
+// Non-storage prefixes (< 64 nibbles) fall through to the tail.
+func (c *BranchCache) PinEntry(prefix []byte, data []byte, step uint64) {
 	if isCommitmentStateKey(prefix) {
 		return
 	}
@@ -640,7 +632,7 @@ func (c *BranchCache) PinEntry(prefix []byte, data []byte, step, txN uint64) {
 	stripe.Lock()
 	defer stripe.Unlock()
 
-	entry := &branchCacheEntry{data: dataCopy, step: step, txN: txN, epoch: c.coh.Epoch()}
+	entry := &branchCacheEntry{data: dataCopy, step: step}
 	st, _, stor, ok := c.storageRoute(prefix, true)
 	if !ok {
 		c.tailForWrite().Add(maphash.Hash(prefix), entry)
@@ -666,26 +658,14 @@ func (c *BranchCache) PinnedCount() int {
 
 // Get retrieves branch data from the cache. Returns the canonical encoded
 // bytes (with the leading 2-byte touch-map prefix) plus the on-disk file
-// step the bytes came from (0 if not tracked).
+// step the bytes came from (0 if not tracked). Shared database readers use
+// BranchReadView.Get so the result is checked against PlainStateVersion.
 func (c *BranchCache) Get(prefix []byte) ([]byte, uint64, bool) {
 	if isCommitmentStateKey(prefix) {
 		return nil, 0, false
 	}
-	// Snapshot before lookup so an entry captured while Clear empties the tiers
-	// retains the pre-Clear unwind floor used to judge it.
-	coh := c.coh.Snapshot()
 	entry, ok := c.lookup(prefix)
 	if !ok {
-		return nil, 0, false
-	}
-	// Lazy unwind invalidation: an entry from a superseded epoch whose txN is at
-	// or above the unwind floor reflects dead-fork state — drop it and miss so
-	// the read falls through to the reverted domain and repopulates. The floor
-	// is the first unwound txN (>= matches GenericCache: an entry stamped exactly
-	// at the floor belongs to a rolled-back block).
-	if coh.IsStale(entry.txN, entry.epoch) {
-		c.Invalidate(prefix)
-		c.staleEvicted.Add(1)
 		return nil, 0, false
 	}
 	c.bytesServed.Add(uint64(len(entry.data)))
@@ -694,8 +674,8 @@ func (c *BranchCache) Get(prefix []byte) ([]byte, uint64, bool) {
 
 // Put stores branch data in the cache, replacing any existing entry.
 // Always copies the input data so the cache owns it independently of
-// caller buffer lifetime. See entry.txN for the txN tagging semantics.
-func (c *BranchCache) Put(prefix []byte, data []byte, step, txN uint64) {
+// caller buffer lifetime. Durable state changes use BranchPublisher.
+func (c *BranchCache) Put(prefix []byte, data []byte, step uint64) {
 	if isCommitmentStateKey(prefix) {
 		return
 	}
@@ -707,17 +687,12 @@ func (c *BranchCache) Put(prefix []byte, data []byte, step, txN uint64) {
 	defer stripe.Unlock()
 
 	c.store(prefix, &branchCacheEntry{
-		data:  dataCopy,
-		step:  step,
-		txN:   txN,
-		epoch: c.coh.Epoch(),
+		data: dataCopy,
+		step: step,
 	})
 }
 
-// Invalidate removes the entry at prefix entirely from whichever tier
-// holds it. Use when the caller knows the canonical store has changed
-// and the cached entry should not be served at all (vs MarkDirty which
-// keeps the entry but blocks PutIfClean overwrites).
+// Invalidate removes the entry at prefix from whichever tier holds it.
 func (c *BranchCache) Invalidate(prefix []byte) {
 	if isRootPrefix(prefix) {
 		c.root.Store(nil)
@@ -742,22 +717,8 @@ func (c *BranchCache) Invalidate(prefix []byte) {
 	}
 }
 
-// Unwind invalidates entries that reflect dead-fork state. unwindToTxN is the
-// txN the chain is rewound to. O(1) and scan-free: bump the epoch (so entries
-// written in the new, live epoch stay valid) and lower the unwind floor to
-// unwindToTxN (so old-epoch entries at or above it are dropped lazily on their
-// next Get). Within the current cache generation, the floor only decreases, so
-// a shallow unwind cannot resurrect entries a deeper one invalidated. Mirrors
-// GenericCache.Unwind so branch and state caches honor one (txN, epoch) model.
-func (c *BranchCache) Unwind(unwindToTxN uint64) {
-	c.coh.Unwind(unwindToTxN)
-}
-
-// Clear empties the root, trunk, pinned, and tail tiers, resets their stats, and
-// starts a new coherence generation. It holds every writer stripe until all
-// tiers are empty and coherence is reset, so a publication cannot cross
-// generations. Reset runs after every tier is cleared, so a reader cannot pair a
-// retired entry with the lifted unwind floor.
+// Clear empties the root, trunk, pinned, and tail tiers and resets their stats.
+// It holds every writer stripe so a write cannot cross the clear.
 func (c *BranchCache) Clear() {
 	c.lockAllPutStripes()
 	defer c.unlockAllPutStripes()
@@ -782,8 +743,6 @@ func (c *BranchCache) Clear() {
 	c.tailHits.Store(0)
 	c.tailMisses.Store(0)
 	c.bytesServed.Store(0)
-	c.staleEvicted.Store(0)
-	c.coh.Reset()
 }
 
 // Stats returns a one-line summary of the cache tiers' hit/miss counters plus
@@ -803,11 +762,11 @@ func (c *BranchCache) Stats() string {
 		return 100.0 * float64(hit) / float64(total)
 	}
 	return fmt.Sprintf(
-		"branch-cache root hit=%d miss=%d (%.1f%%) | trunk hit=%d miss=%d (%.1f%%) | pin hit=%d miss=%d (%.1f%%) entries=%d | tail hit=%d miss=%d (%.1f%%) entries=%d | served %.1f MiB | staleEvicted=%d",
+		"branch-cache root hit=%d miss=%d (%.1f%%) | trunk hit=%d miss=%d (%.1f%%) | pin hit=%d miss=%d (%.1f%%) entries=%d | tail hit=%d miss=%d (%.1f%%) entries=%d | served %.1f MiB",
 		rh, rm, pct(rh, rm),
 		kh, km, pct(kh, km),
 		ph, pm, pct(ph, pm), int(c.pinnedEntries.Load()),
 		th, tm, pct(th, tm), c.tailLen(),
-		float64(bb)/1024/1024, c.staleEvicted.Load(),
+		float64(bb)/1024/1024,
 	)
 }

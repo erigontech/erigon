@@ -27,8 +27,8 @@ import "github.com/erigontech/erigon/db/kv"
 // read from an old database snapshot therefore cannot enter a newer cache
 // generation. The zero value is inert and safely falls back to the database.
 type ReadView struct {
-	c          *StateCache
-	generation *cacheGeneration
+	c       *StateCache
+	version PlainStateVersionView
 }
 
 // View returns a live handle only when the cache currently represents
@@ -40,15 +40,15 @@ func (c *StateCache) View(stateVersion uint64) ReadView {
 	if c == nil {
 		return ReadView{}
 	}
-	generation := c.generationFor(stateVersion)
-	if generation == nil {
+	version := c.version.View(stateVersion)
+	if !version.Current() {
 		return ReadView{}
 	}
-	return ReadView{c: c, generation: generation}
+	return ReadView{c: c, version: version}
 }
 
 func (v ReadView) current() bool {
-	return v.c != nil && v.generation != nil && v.c.generation.Load() == v.generation
+	return v.c != nil && v.version.Current()
 }
 
 func (v ReadView) Get(domain kv.Domain, key []byte) ([]byte, bool) {
@@ -109,22 +109,22 @@ func (v ReadView) Fill(domain kv.Domain, key, value []byte, step kv.Step) {
 		return
 	}
 	if domain == kv.CodeDomain {
-		v.c.fillCode(v.generation, key, value, step)
+		v.c.fillCode(v.version, key, value, step)
 		return
 	}
-	v.c.fill(v.generation, domain, key, value, step)
+	v.c.fill(v.version, domain, key, value, step)
 }
 
 func (v ReadView) SeedAddrCodeHash(addr []byte, hash [32]byte) {
 	if !v.canFill() {
 		return
 	}
-	v.c.seedAddrCodeHash(v.generation, addr, hash)
+	v.c.seedAddrCodeHash(v.version, addr, hash)
 }
 
 func (v ReadView) FillCodeSize(codeHash []byte, size int) {
 	if !v.canFill() {
 		return
 	}
-	v.c.fillCodeSize(v.generation, codeHash, size)
+	v.c.fillCodeSize(v.version, codeHash, size)
 }

@@ -474,7 +474,7 @@ func computeCommitmentRoot(t *testing.T, db kv.TemporalRwDB) []byte {
 	tx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
-	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithoutSharedBranchCache())
 	require.NoError(t, err)
 	defer domains.Close()
 	rh, err := domains.ComputeCommitment(t.Context(), tx, false, 0, 0, "", nil)

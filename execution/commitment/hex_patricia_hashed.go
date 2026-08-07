@@ -2707,8 +2707,8 @@ func (hph *HexPatriciaHashed) SetLeaveDeferredForCaller(leave bool) {
 }
 
 // Reset allows HexPatriciaHashed instance to be reused for the new commitment calculation.
-// The aggregator-scope BranchCache is intentionally not cleared here;
-// SharedDomains.Unwind handles correctness via txN-tagged eviction.
+// The aggregator-scope BranchCache is not trie-instance state. SharedDomains
+// detaches it during unwind and clears it only if the rewound state commits.
 func (hph *HexPatriciaHashed) Reset() {
 	hph.root.reset()
 	hph.rootTouched = false
