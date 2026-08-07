@@ -176,12 +176,11 @@ func pbinLeafValue(key []byte, u *Update) ([pbinValueLength]byte, error) {
 		return pbinEncodeBasicData(u.Nonce, &u.Balance, u.CodeSize)
 	case subIndex == pbinCodeHashLeafKey:
 		return pbinCodeHashValue(u.CodeHash), nil
-	case subIndex >= pbinHeaderStorageOffset && subIndex < pbinCodeOffset:
+	case subIndex >= pbinHeaderStorageOffset && subIndex < pbinHeaderStorageOffset+pbinHeaderStorageSlots:
 		return pbinEncodeStorageValue(u.Storage[:u.StorageLen]), nil
 	default:
-		// Code chunks from CODE_OFFSET on, plus the sub-indices the embedding
-		// reserves below HEADER_STORAGE_OFFSET (eip:255-257): neither is packed from
-		// state, so the value must already be 32 whole bytes.
+		// Sub-indices the embedding reserves (eip:255-257): not packed from state,
+		// so the value must already be 32 whole bytes.
 		return pbinRecordLeafValue(u)
 	}
 }

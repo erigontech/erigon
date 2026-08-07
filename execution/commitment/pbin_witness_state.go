@@ -164,13 +164,7 @@ func (c *pbinWitnessContext) codeFromLeaves(addr []byte) ([]byte, error) {
 
 	code := make([]byte, 0, size)
 	for chunk := 0; chunk < pbinCodeChunkCount(size); chunk++ {
-		var key []byte
-		if chunk < pbinHeaderCodeChunks {
-			key = c.keys.codeChunkKey(addr, chunk)
-		} else {
-			key = c.keys.codeOverflowKey(codeHash, chunk)
-		}
-		value, ok, err := c.tree.leaf(key)
+		value, ok, err := c.tree.leaf(c.keys.codeChunkKey(codeHash, chunk))
 		if err != nil {
 			return nil, err
 		}

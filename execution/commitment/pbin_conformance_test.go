@@ -138,13 +138,7 @@ func TestPBinConformanceEmbedding(t *testing.T) {
 	for chunk, want := range e.CodeChunkKeys {
 		id, err := strconv.Atoi(chunk)
 		require.NoError(t, err)
-		var got []byte
-		if id < pbinCodeOffset {
-			got = keys.codeChunkKey(addr, id)
-		} else {
-			got = keys.codeOverflowKey(codeHash, id)
-		}
-		require.Equal(t, want, hexKey(got), "chunk %s", chunk)
+		require.Equal(t, want, hexKey(keys.codeChunkKey(codeHash, id)), "chunk %s", chunk)
 	}
 }
 
@@ -204,11 +198,7 @@ func TestPBinConformancePBTState(t *testing.T) {
 				put(keys.accountKey(addr, pbinCodeHashLeafKey), pbinCodeHashValue(codeHash))
 
 				for i, chunk := range pbinChunkifyCode(code) {
-					if i < pbinCodeOffset {
-						put(keys.codeChunkKey(addr, i), chunk)
-						continue
-					}
-					put(keys.codeOverflowKey(codeHash, i), chunk)
+					put(keys.codeChunkKey(codeHash, i), chunk)
 				}
 
 				for slot, value := range acc.Storage {

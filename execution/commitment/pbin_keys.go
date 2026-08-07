@@ -33,7 +33,7 @@ const (
 	pbinCodeHashLeafKey     = 1
 	pbinDelegationLeafKey   = 2
 	pbinHeaderStorageOffset = 64
-	pbinCodeOffset          = 128
+	pbinHeaderStorageSlots  = 64
 	pbinStemSubtreeWidth    = 256
 
 	pbinAccountZone = 0x00
@@ -103,21 +103,12 @@ func pbinTreeKeyStorage(addr, slot []byte) []byte {
 	return c.storageKey(addr, slot)
 }
 
-// pbinTreeKeyCodeChunk returns the key for a code chunk the account header holds,
-// sharing the account's own stem (eip:355-367). Higher chunks go through
-// pbinTreeKeyCodeOverflow.
-func pbinTreeKeyCodeChunk(addr []byte, chunkID int) []byte {
+// pbinTreeKeyCodeChunk returns the code-zone key of a chunk (eip:355-367).
+// Chunks are content-addressed by code hash, so accounts running the same
+// bytecode share the leaves and no address takes part in the derivation.
+func pbinTreeKeyCodeChunk(codeHash common.Hash, chunkID int) []byte {
 	var c pbinDigestCache
-	return c.codeChunkKey(addr, chunkID)
-}
-
-// pbinTreeKeyCodeOverflow returns the code-zone key for a chunk past the account
-// header (eip:355-367). These chunks are content-addressed by code hash, so
-// accounts running the same bytecode share the leaves and no address can derive
-// the key.
-func pbinTreeKeyCodeOverflow(codeHash common.Hash, chunkID int) []byte {
-	var c pbinDigestCache
-	return c.codeOverflowKey(codeHash, chunkID)
+	return c.codeChunkKey(codeHash, chunkID)
 }
 
 // pbinKeyHasher returns a keyHasher deriving the primary leaf's tree key:
@@ -216,26 +207,18 @@ func (c *pbinDigestCache) accountStoragePrefix(addr []byte) []byte {
 	return append([]byte{pbinStorageZone}, c.stemDigest(&addr32)[:]...)
 }
 
-func (c *pbinDigestCache) codeChunkKey(addr []byte, chunkID int) []byte {
-	if chunkID < 0 || chunkID >= pbinHeaderCodeChunks {
-		panic(fmt.Sprintf("pbin: code chunk %d lives outside the account header", chunkID))
-	}
-	return c.accountKey(addr, byte(pbinCodeOffset+chunkID))
-}
-
-// codeOverflowKey derives the code-zone key of an overflow chunk. The digest is
-// not memoized: one contract spans at most a handful of tree indexes, and the
+// codeChunkKey derives the code-zone key of a chunk. The digest is not
+// memoized: one contract spans at most a handful of tree indexes, and the
 // cache's entries are bound to an address these keys do not have.
-func (c *pbinDigestCache) codeOverflowKey(codeHash common.Hash, chunkID int) []byte {
-	if chunkID < pbinHeaderCodeChunks {
-		panic(fmt.Sprintf("pbin: code chunk %d is a header chunk, not a code-zone one", chunkID))
+func (c *pbinDigestCache) codeChunkKey(codeHash common.Hash, chunkID int) []byte {
+	if chunkID < 0 {
+		panic(fmt.Sprintf("pbin: code chunk %d is negative", chunkID))
 	}
-	overflow := chunkID - pbinHeaderCodeChunks
 	var preimage [2 * length.Hash]byte
 	copy(preimage[:], codeHash[:])
-	binary.BigEndian.PutUint64(preimage[2*length.Hash-8:], uint64(overflow/pbinStemSubtreeWidth))
+	binary.BigEndian.PutUint64(preimage[2*length.Hash-8:], uint64(chunkID/pbinStemSubtreeWidth))
 	position := c.hash(preimage[:])
-	return pbinTreeKey(pbinCodeZone, position[:], byte(overflow%pbinStemSubtreeWidth))
+	return pbinTreeKey(pbinCodeZone, position[:], byte(chunkID%pbinStemSubtreeWidth))
 }
 
 func (c *pbinDigestCache) storageKey(addr, slot []byte) []byte {
@@ -276,5 +259,5 @@ func pbinSlotInHeader(slot *[32]byte) bool {
 			return false
 		}
 	}
-	return slot[31] < pbinCodeOffset-pbinHeaderStorageOffset
+	return slot[31] < pbinHeaderStorageSlots
 }

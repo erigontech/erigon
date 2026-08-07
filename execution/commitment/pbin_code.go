@@ -24,10 +24,6 @@ const (
 	// value carries the PUSHDATA count instead.
 	pbinChunkDataLen = pbinValueLength - 1
 
-	// pbinHeaderCodeChunks are the chunks the account header holds, at sub-indices
-	// CODE_OFFSET..255. Higher chunks live in the code zone.
-	pbinHeaderCodeChunks = pbinStemSubtreeWidth - pbinCodeOffset
-
 	pbinPushOffset = 95
 	pbinPush1      = pbinPushOffset + 1
 	pbinPush32     = pbinPushOffset + 32

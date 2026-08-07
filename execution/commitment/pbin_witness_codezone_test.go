@@ -25,9 +25,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Deploying a spilling contract writes leaves into the content-addressed code
-// zone. When another contract's chunks are already there, the new leaves split
-// an existing subtree, and the witness has to carry the node they split.
+// Deploying a contract writes leaves into the content-addressed code zone.
+// When another contract's chunks are already there, the new leaves split an
+// existing subtree, and the witness has to carry the node they split.
 
 // pbinSpillingCode returns code of chunkCount chunks, distinct per seed so two
 // accounts land on different code-zone stems.
@@ -93,7 +93,7 @@ func TestPBinWitnessCodeOverrideMatchesFoldKeys(t *testing.T) {
 func TestPBinWitnessDeployIntoPopulatedCodeZone(t *testing.T) {
 	t.Parallel()
 
-	const chunks = 136 // 128 header chunks, 8 in the code zone
+	const chunks = 136
 
 	for _, tc := range []struct {
 		name  string

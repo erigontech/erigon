@@ -410,37 +410,62 @@ commitment` unbuildable, which would block every later gate.
 - Modify: `execution/commitment/pbin_code_test.go`
 - Modify: `execution/commitment/pbin_hash_test.go`
 
-- [ ] delete `pbinCodeOffset` and `pbinHeaderCodeChunks`; add
+- [x] delete `pbinCodeOffset` and `pbinHeaderCodeChunks`; add
       `pbinHeaderStorageSlots = 64` and rewrite `pbinSlotInHeader`
       (`pbin_keys.go:278`), `pbin_hash.go:179` and `pbin_specengine_test.go:72`
       against it — all three are renames, not behaviour changes
-- [ ] merge `codeChunkKey`/`codeOverflowKey` (`pbin_keys.go:218-238`) and their
+- [x] merge `codeChunkKey`/`codeOverflowKey` (`pbin_keys.go:218-238`) and their
       wrappers `pbinTreeKeyCodeChunk`/`pbinTreeKeyCodeOverflow` (`:108`, `:117`)
       into one `chunkID / pbinStemSubtreeWidth` deriver taking a code hash
-- [ ] delete `pbinPendingCode`, `flushPendingCode` and `flushPendingCodeBefore`
+- [x] delete `pbinPendingCode`, `flushPendingCode` and `flushPendingCodeBefore`
       from `pbin_update_stream.go`; `queueCode` routes every chunk through the
       surviving code-zone path, and `pbinOverflowChunk` loses the "overflow"
-      name that no longer denotes anything
-- [ ] rewrite the witness chunk loop (`pbin_witness_state.go:164-172`), the
+      name that no longer denotes anything (now `pbinCodeChunk`)
+- [x] rewrite the witness chunk loop (`pbin_witness_state.go:164-172`), the
       verify position check (`pbin_verify_test.go:296`), the conformance
       embedding assertion (`:142`) and the conformance `pbt_state` oracle
       (`:206-212`), and re-express `pbinFuzzCodeSizes` (`pbin_fuzz_test.go:39`)
-      and `pbinTestChunkKey` (`pbin_process_test.go:108`)
-- [ ] write `TestPBinChunkKeyMatchesVectorIndices` pinning chunk ids 0, 1, 255,
+      and `pbinTestChunkKey` (`pbin_process_test.go:108` — deleted outright;
+      callers use `pbinTreeKeyCodeChunk` directly)
+- [x] write `TestPBinChunkKeyMatchesVectorIndices` pinning chunk ids 0, 1, 255,
       256, 257, 511, 512 and 2114 against `embedding.code_chunk_keys` — that is
       the id set the fresh corpus carries — and
       `TestPBinChunkKeyIgnoresAddress`
-- [ ] write `TestPBinSharedBytecodeEmitsOneChunkSet` and
-      `TestPBinChunksCrossGroupBoundary` (129 chunks reaching `tree_index` 1)
-- [ ] write `TestPBinZeroChunkEmitsNoLeaf`, covering that a chunk is absent only
+- [x] write `TestPBinSharedBytecodeEmitsOneChunkSet` and
+      `TestPBinChunksCrossGroupBoundary` (256 and 257 chunks, not the planned
+      129 — stale arithmetic from the old split: the group boundary sits at
+      `STEM_SUBTREE_WIDTH` = 256, matching the 257-chunk vector case)
+- [x] write `TestPBinZeroChunkEmitsNoLeaf`, covering that a chunk is absent only
       when byte 0's PUSHDATA count is zero too, and that `code_size` still
       delimits the code
-- [ ] gate: `go test ./execution/commitment/ -count=1 -v -run 'TestPBinChunkKey|TestPBinSharedBytecode|TestPBinChunksCross|TestPBinZeroChunk|TestPBinTreeKeyEIPVectors|TestPBinChunkifyCode|TestPBinCellHash|TestPBinLeafValueRoutesByZone|TestPBinProcess|TestPBinConformanceEmbedding'`
+- [x] gate: `go test ./execution/commitment/ -count=1 -v -run 'TestPBinChunkKey|TestPBinSharedBytecode|TestPBinChunksCross|TestPBinZeroChunk|TestPBinTreeKeyEIPVectors|TestPBinChunkifyCode|TestPBinCellHash|TestPBinLeafValueRoutesByZone|TestPBinProcess|TestPBinConformanceEmbedding'`
       — confirm from `-v` that the new tests ran, and that
       `TestPBinConformanceEmbedding` and the seven code-shaped `pbt_state`
-      cases are green
-- [ ] `make lint` until clean; commit as
+      cases are green (28 pass, 0 fail; eight `pbt_state` cases went green —
+      `code_hash_starting_with_the_delegation_marker` is code-shaped, not a
+      delegation case, so Task 7's remaining red set is three: `delegation_designator`,
+      `two_authorities_one_target`, `delegation_with_storage`)
+- [x] `make lint` until clean; commit as
       `execution/commitment: address every code chunk by code hash`
+
+➕ Fixed a latent subtree-drop bug the move exposed (`pbin_patricia_hashed.go`,
+`needUnfolding`): a removal prefix ending strictly inside a stored node's
+prefix was misclassified as a Split and errored at `updateCell`. The old
+header chunks at sub-indices ≥ 0x80 forced a branch exactly at bit 264 in
+every tested removal, masking it. Red was `TestPBinAccountRemovalDropsBothSubtrees`.
+➕ Re-baselined `TestPBinAccountRemovalDropsBothSubtrees`
+(`pbin_zerovalue_test.go`): a removed account's chunks are content-addressed
+and stay, so the expected root now includes them.
+➕ Also touched beyond the planned file list: `pbin_witness_test.go` and
+`pbin_witness_prune_test.go` (chunk-key call sites), `pbin_witness_codezone_test.go`
+and `pbin_zerovalue_test.go` (stale header-split comments/expectations).
+Renames: `TestPBinEngineEmitsHeaderCodeChunks` → `TestPBinEngineEmitsCodeChunks`;
+`TestPBinShorteningRedeployKeepsStaleChunks` + `TestPBinGrowingRedeployReplacesChunks`
+→ `TestPBinRedeployKeepsOldCodeChunks` (under content addressing every redeploy
+keeps the old chunk set); `TestPBinCodeOverflowKeyMatchesSpec` →
+`TestPBinChunkKeyMatchesSpec`; `TestPBinOverflowChunksAreSharedByIdenticalCode`
+→ `TestPBinSharedBytecodeEmitsOneChunkSet`; `TestPBinOverflowChunksFollowEveryAccountZoneKey`
+→ `TestPBinCodeChunksFollowEveryAccountZoneKey`.
 
 ### Task 5: Re-baseline the witness measurement suite
 

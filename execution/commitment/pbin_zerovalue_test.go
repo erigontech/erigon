@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"testing"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -142,14 +143,16 @@ func TestPBinLoadCellStateAbsentRead(t *testing.T) {
 
 // TestPBinAccountRemovalDropsBothSubtrees: an account owns its header stem and
 // its storage prefix, and removing it removes those two subtrees whole — header
-// storage slots and header code chunks included, and storage the fold was handed
-// no list of. A bystander account must survive untouched.
+// storage slots included, and storage the fold was handed no list of. Its code
+// chunks are content-addressed and shared, so they stay, and a bystander
+// account must survive untouched.
 func TestPBinAccountRemovalDropsBothSubtrees(t *testing.T) {
 	t.Parallel()
 
 	addr, bystander := pbinOracleAddr(45), pbinOracleAddr(48)
+	code := bytes.Repeat([]byte{0x01}, 31*4)
 	stored := new(pbinTestCorpus).
-		accountWithCodeBytes(addr, 3, 7, bytes.Repeat([]byte{0x01}, 31*4)).
+		accountWithCodeBytes(addr, 3, 7, code).
 		storage(addr, pbinOracleSlot(5), 0x01).   // header window
 		storage(addr, pbinOracleSlot(256), 0x02). // storage zone
 		storage(addr, pbinOracleSlot(1<<20), 0x03).
@@ -166,8 +169,14 @@ func TestPBinAccountRemovalDropsBothSubtrees(t *testing.T) {
 	root := pbinTestProcess(t, pph, removal.plainKeys, removal.updates)
 
 	survivor := new(pbinTestCorpus).account(bystander, 1, 2, common.Hash{0x48})
-	require.Equal(t, survivor.oracleRoot(t), root,
-		"nothing of the removed account may survive, and nothing of the other may go")
+	want := survivor.entries(t)
+	codeHash := keccak.Sum256(code)
+	for i, chunk := range pbinChunkifyCode(code) {
+		want = append(want, pbinOracleEntry{key: pbinTreeKeyCodeChunk(codeHash, i), value: chunk[:]})
+	}
+	wantRoot := pbinOracleRoot(want)
+	require.Equal(t, wantRoot[:], root,
+		"nothing of the removed account's own subtrees may survive, and nothing of the other may go")
 }
 
 // TestPBinFoldDeleteRunsOnProcess: removing the last leaf of a subtree collapses

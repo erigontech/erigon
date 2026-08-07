@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"testing"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/empty"
@@ -85,9 +86,9 @@ func TestPBinChunkifyCodeEmpty(t *testing.T) {
 	require.Empty(t, pbinChunkifyCode([]byte{}))
 }
 
-// TestPBinChunkifyCodeChunkCount pins the sizing the header/overflow split rests
-// on: chunks are ceil(len/31), and MaxCodeSize needs more of them than the 128
-// the account header holds.
+// TestPBinChunkifyCodeChunkCount pins the sizing the code grouping rests on:
+// chunks are ceil(len/31), and MaxCodeSize needs more of them than the 256 one
+// code group holds.
 func TestPBinChunkifyCodeChunkCount(t *testing.T) {
 	t.Parallel()
 
@@ -95,8 +96,8 @@ func TestPBinChunkifyCodeChunkCount(t *testing.T) {
 		{size: 1, chunks: 1},
 		{size: 31, chunks: 1},
 		{size: 32, chunks: 2},
-		{size: pbinHeaderCodeChunks * pbinChunkDataLen, chunks: pbinHeaderCodeChunks},
-		{size: pbinHeaderCodeChunks*pbinChunkDataLen + 1, chunks: pbinHeaderCodeChunks + 1},
+		{size: pbinStemSubtreeWidth * pbinChunkDataLen, chunks: pbinStemSubtreeWidth},
+		{size: pbinStemSubtreeWidth*pbinChunkDataLen + 1, chunks: pbinStemSubtreeWidth + 1},
 		{size: 24576, chunks: 793},
 	} {
 		require.Len(t, pbinChunkifyCode(make([]byte, tc.size)), tc.chunks, "code of %d bytes", tc.size)
@@ -114,9 +115,9 @@ func pbinTestCode(n int) []byte {
 	return code
 }
 
-// TestPBinEngineEmitsHeaderCodeChunks covers the first half of code in the tree:
-// chunks reaching the reference leaf set at header sub-indices CODE_OFFSET and up.
-func TestPBinEngineEmitsHeaderCodeChunks(t *testing.T) {
+// TestPBinEngineEmitsCodeChunks covers code in the tree: chunks reaching the
+// reference leaf set in the content-addressed code zone.
+func TestPBinEngineEmitsCodeChunks(t *testing.T) {
 	t.Parallel()
 
 	addr := pbinOracleAddr(11)
@@ -130,10 +131,9 @@ func TestPBinEngineEmitsHeaderCodeChunks(t *testing.T) {
 	require.Equal(t, corpus.oracleRoot(t), root)
 }
 
-// TestPBinCodeChunksFollowHeaderSlots pins the emit order inside a stem: chunks
-// sit at the top sub-indices, so emitting them at the account's own visit
-// descends past header storage slots the stream has not delivered yet, and the
-// fold that comes back for them rewrites a record it already wrote.
+// TestPBinCodeChunksFollowHeaderSlots composes one account's code, header slots
+// and overflow storage: its leaves span all three zones, and the chunks must
+// wait for the walk to leave the account zone.
 func TestPBinCodeChunksFollowHeaderSlots(t *testing.T) {
 	t.Parallel()
 
@@ -164,57 +164,50 @@ func TestPBinVisitOrderIsMonotonic(t *testing.T) {
 }
 
 // TestPBinCodeChunksSurviveAsRecordSiblings pins that a chunk leaf carries its
-// own value: no state domain holds a chunk, so an untouched chunk sibling of a
-// touched one has to hash from the branch record.
+// own value: no state domain holds a chunk, so when a later batch writes into
+// the code zone next to an earlier contract's chunks, those chunks have to hash
+// from the branch records alone.
 func TestPBinCodeChunksSurviveAsRecordSiblings(t *testing.T) {
 	t.Parallel()
 
-	addr := pbinOracleAddr(14)
-	// 62 bytes is two chunks; the redeploy to 31 touches only chunk 0.
-	deploy := new(pbinTestCorpus).accountWithCodeBytes(addr, 1, 10, pbinTestCode(62))
-	stale := pbinChunkifyCode(pbinTestCode(62))[1]
-	redeploy := new(pbinTestCorpus).accountWithCodeBytes(addr, 2, 10, pbinTestCode(31))
+	first := new(pbinTestCorpus).accountWithCodeBytes(pbinOracleAddr(14), 1, 10, pbinTestCode(62))
+	second := new(pbinTestCorpus).accountWithCodeBytes(pbinOracleAddr(24), 1, 20, pbinTestCode(93))
 
-	_, _, root := pbinTestBatches(t, deploy, redeploy)
-
-	want := append(redeploy.entries(t), pbinOracleEntry{
-		key:   pbinTreeKeyCodeChunk(addr, 1),
-		value: stale[:],
-	})
-	wantRoot := pbinOracleRoot(want)
-	require.Equal(t, wantRoot[:], root, "the untouched chunk keeps the value the record holds")
+	_, _, root := pbinTestBatches(t, first, second)
+	require.Equal(t, pbinTestUnion(first, second).oracleRoot(t), root)
 }
 
-// TestPBinShorteningRedeployKeepsStaleChunks pins the residue a shorter redeploy
-// leaves: EIP-8297 has no removal, so a forward run commits the chunks above the
-// new length while a recompute from the state domains cannot know they exist.
-// Both roots are internally consistent, which is what makes recompute-from-domains
-// invalid as an oracle for a code-bearing account.
-func TestPBinShorteningRedeployKeepsStaleChunks(t *testing.T) {
+// TestPBinRedeployKeepsOldCodeChunks pins the residue a redeploy leaves: chunk
+// keys derive from the code hash, so new code names a disjoint leaf set and
+// EIP-8297 removes nothing here. A recompute from the state domains cannot know
+// the old chunks exist, which is what makes it invalid as an oracle for a
+// code-bearing account.
+func TestPBinRedeployKeepsOldCodeChunks(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct{ before, after int }{
-		{before: 62, after: 31},  // 2 chunks down to 1: the residue is a leaf sibling
-		{before: 200, after: 62}, // 7 down to 2: the residue is a whole subtree
+		{before: 62, after: 31},
+		{before: 200, after: 62},
+		{before: 31, after: 62}, // growth keeps the residue too: the old hash names other leaves
 	} {
-		t.Run(fmt.Sprintf("%d bytes down to %d", tc.before, tc.after), func(t *testing.T) {
+		t.Run(fmt.Sprintf("%d bytes to %d", tc.before, tc.after), func(t *testing.T) {
 			t.Parallel()
 
 			addr := pbinOracleAddr(15)
-			long, short := pbinTestCode(tc.before), pbinTestCode(tc.after)
-			deploy := new(pbinTestCorpus).accountWithCodeBytes(addr, 1, 10, long)
-			redeploy := new(pbinTestCorpus).accountWithCodeBytes(addr, 2, 10, short)
+			old, next := pbinTestCode(tc.before), pbinTestCode(tc.after)
+			deploy := new(pbinTestCorpus).accountWithCodeBytes(addr, 1, 10, old)
+			redeploy := new(pbinTestCorpus).accountWithCodeBytes(addr, 2, 10, next)
 
 			_, _, forward := pbinTestBatches(t, deploy, redeploy)
 
-			_, rebuilt := new(pbinTestCorpus).accountWithCodeBytes(addr, 2, 10, short).process(t)
+			_, rebuilt := new(pbinTestCorpus).accountWithCodeBytes(addr, 2, 10, next).process(t)
 			require.NotEqual(t, rebuilt, forward,
 				"a rebuild from state cannot reproduce the stale chunks the forward run kept")
 
 			want := redeploy.entries(t)
-			oldChunks := pbinChunkifyCode(long)
-			for i := len(pbinChunkifyCode(short)); i < len(oldChunks); i++ {
-				want = append(want, pbinOracleEntry{key: pbinTreeKeyCodeChunk(addr, i), value: oldChunks[i][:]})
+			oldHash := keccak.Sum256(old)
+			for i, chunk := range pbinChunkifyCode(old) {
+				want = append(want, pbinOracleEntry{key: pbinTreeKeyCodeChunk(oldHash, i), value: chunk[:]})
 			}
 			wantRoot := pbinOracleRoot(want)
 			require.Equal(t, wantRoot[:], forward)
@@ -236,8 +229,9 @@ func TestPBinClearedCodeKeepsChunks(t *testing.T) {
 	_, _, forward := pbinTestBatches(t, deploy, cleared)
 
 	want := cleared.entries(t)
+	desigHash := keccak.Sum256(designator)
 	for i, chunk := range pbinChunkifyCode(designator) {
-		want = append(want, pbinOracleEntry{key: pbinTreeKeyCodeChunk(addr, i), value: chunk[:]})
+		want = append(want, pbinOracleEntry{key: pbinTreeKeyCodeChunk(desigHash, i), value: chunk[:]})
 	}
 	wantRoot := pbinOracleRoot(want)
 	require.Equal(t, wantRoot[:], forward, "clearing code leaves its chunks in the tree")
@@ -246,31 +240,45 @@ func TestPBinClearedCodeKeepsChunks(t *testing.T) {
 	require.NotEqual(t, rebuilt, forward, "the state a rebuild reads no longer names the chunks")
 }
 
-// TestPBinGrowingRedeployReplacesChunks is the case a rebuild does reproduce:
-// growing code overwrites every chunk it had and adds the rest, leaving no
-// residue for the forward tree and a rebuild from state to disagree over.
-func TestPBinGrowingRedeployReplacesChunks(t *testing.T) {
+// TestPBinZeroChunkEmitsNoLeaf pins the absence rule for chunks: a chunk is
+// absent only when its whole 32-byte value is zero — 31 zero code bytes and a
+// zero PUSHDATA count. The same zero bytes continuing an earlier chunk's PUSH
+// keep their leaf, and code_size delimits the code either way.
+func TestPBinZeroChunkEmitsNoLeaf(t *testing.T) {
 	t.Parallel()
 
-	for _, tc := range []struct{ before, after int }{
-		{before: 31, after: 62}, // 1 chunk to 2, both in the header
-		{before: 62, after: pbinHeaderCodeChunks*pbinChunkDataLen + 62}, // header-only to header plus code zone
-	} {
-		t.Run(fmt.Sprintf("%d bytes up to %d", tc.before, tc.after), func(t *testing.T) {
-			t.Parallel()
+	opcodes := pbinTestCode(31) // every byte below PUSH1, none zero
 
-			addr := pbinOracleAddr(20)
-			short, long := pbinTestCode(tc.before), pbinTestCode(tc.after)
-			deploy := new(pbinTestCorpus).accountWithCodeBytes(addr, 1, 10, short)
-			redeploy := new(pbinTestCorpus).accountWithCodeBytes(addr, 2, 10, long)
+	t.Run("zero tail chunk is absent", func(t *testing.T) {
+		t.Parallel()
 
-			_, _, forward := pbinTestBatches(t, deploy, redeploy)
+		code := append(bytes.Clone(opcodes), make([]byte, 31)...)
+		chunks := pbinChunkifyCode(code)
+		require.Len(t, chunks, 2)
+		require.Equal(t, [pbinValueLength]byte{}, chunks[1])
 
-			_, rebuilt := new(pbinTestCorpus).accountWithCodeBytes(addr, 2, 10, long).process(t)
-			require.Equal(t, rebuilt, forward, "growth leaves no chunk of the old code behind")
-			require.Equal(t, redeploy.oracleRoot(t), forward)
-		})
-	}
+		corpus := new(pbinTestCorpus).accountWithCodeBytes(pbinOracleAddr(25), 1, 10, code)
+		require.Equal(t, 2+1, corpus.leafCount(t), "the zero chunk contributes no leaf")
+
+		_, root := corpus.process(t)
+		require.Equal(t, corpus.oracleRoot(t), root)
+	})
+
+	t.Run("pushdata continuation keeps the leaf", func(t *testing.T) {
+		t.Parallel()
+
+		code := append(bytes.Clone(opcodes[:30]), byte(pbinPushOffset+31))
+		code = append(code, make([]byte, 31)...)
+		chunks := pbinChunkifyCode(code)
+		require.Len(t, chunks, 2)
+		require.EqualValues(t, 31, chunks[1][0], "byte 0 counts the PUSH31 data")
+
+		corpus := new(pbinTestCorpus).accountWithCodeBytes(pbinOracleAddr(26), 1, 10, code)
+		require.Equal(t, 2+2, corpus.leafCount(t), "the continuation chunk keeps its leaf")
+
+		_, root := corpus.process(t)
+		require.Equal(t, corpus.oracleRoot(t), root)
+	})
 }
 
 func TestPBinCodelessContextRefusesCodeBearingAccount(t *testing.T) {
@@ -351,17 +359,16 @@ func TestPBinLeafValueRoutesByZone(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, chunk[:], got[:])
 
-	// Inside the account zone, sub-indices at CODE_OFFSET and above are chunks,
-	// not storage.
-	addr := pbinOracleAddr(19)
-	got, err = pbinLeafValue(pbinTreeKeyCodeChunk(addr, 0), &u)
+	// Inside the account zone, sub-indices past the header storage span are
+	// reserved and carry their value verbatim, not as storage.
+	got, err = pbinLeafValue(pbinTreeKey(pbinAccountZone, make([]byte, 32), pbinHeaderStorageOffset+pbinHeaderStorageSlots), &u)
 	require.NoError(t, err)
 	require.Equal(t, chunk[:], got[:])
 
 	// A chunk leaf holding fewer than 32 value bytes cannot be left-padded into
 	// place the way a storage value can: byte 0 is the PUSHDATA count.
 	short := Update{Flags: StorageUpdate, StorageLen: 4}
-	_, err = pbinLeafValue(pbinTreeKeyCodeChunk(addr, 1), &short)
+	_, err = pbinLeafValue(pbinTreeKeyCodeChunk(keccak.Sum256(pbinTestCode(62)), 1), &short)
 	require.ErrorIs(t, err, errPBinCellHash)
 }
 

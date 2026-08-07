@@ -185,7 +185,7 @@ func TestPBinWitnessPruneKeepsCodeLeaves(t *testing.T) {
 		}
 	}
 	for i := range chunks {
-		require.Contains(t, leaves, string(pbinTestChunkKey(addr, keccak.Sum256(code), i)), "code chunk %d was pruned away", i)
+		require.Contains(t, leaves, string(pbinTreeKeyCodeChunk(keccak.Sum256(code), i)), "code chunk %d was pruned away", i)
 	}
 	require.Contains(t, leaves, string(pbinTreeKeyAccount(addr, pbinCodeHashLeafKey)))
 }

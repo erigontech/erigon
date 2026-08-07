@@ -325,7 +325,7 @@ func TestPBinWitnessesProvesCodeLeaves(t *testing.T) {
 	chunks := pbinChunkifyCode(code)
 	require.Greater(t, len(chunks), 1)
 	for i := range chunks {
-		require.Contains(t, proved, string(pbinTestChunkKey(addr, keccak.Sum256(code), i)), "code chunk %d is not proved", i)
+		require.Contains(t, proved, string(pbinTreeKeyCodeChunk(keccak.Sum256(code), i)), "code chunk %d is not proved", i)
 	}
 	require.Len(t, provedKeys, 2+len(chunks))
 }

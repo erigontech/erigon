@@ -307,7 +307,7 @@ func TestPBinCellHashRejectsMalformedLeaf(t *testing.T) {
 		require.ErrorIs(t, err, errPBinCellHash)
 	})
 	t.Run("account-zone sub-index naming no leaf", func(t *testing.T) {
-		bad := pbinPathFromBytes(pbinTreeKey(pbinAccountZone, make([]byte, 32), pbinCodeOffset))
+		bad := pbinPathFromBytes(pbinTreeKey(pbinAccountZone, make([]byte, 32), pbinHeaderStorageOffset+pbinHeaderStorageSlots))
 		path := bad.slice(0, 100)
 		c := pbinCell{kind: pbinNodeLeaf, prefix: bad.slice(100, bad.bitLen)}
 		_, err := h.cellHash(&c, &path)

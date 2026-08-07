@@ -34,9 +34,9 @@ var pbinFuzzSlots = []uint64{0, 1, 2, 63, 64, 65, 66, 127, 128, 255, 256, 257, 2
 // pbinFuzzAccountBit is the selector bit choosing an account write over a slot.
 const pbinFuzzAccountBit = 0x04
 
-// pbinFuzzCodeSizes: the last entry is the only size that spills past the
-// account header into the code zone.
-var pbinFuzzCodeSizes = []int{0, 23, 31, 62, pbinHeaderCodeChunks*pbinChunkDataLen + 62}
+// pbinFuzzCodeSizes: the last entry is the only size whose chunks cross a
+// code-group boundary into a second tree index.
+var pbinFuzzCodeSizes = []int{0, 23, 31, 62, pbinStemSubtreeWidth*pbinChunkDataLen + 62}
 
 // pbinFuzzCode keys the code on the address so it stays fixed for a whole run,
 // which is what keeps the oracle valid: a redeploy to shorter code leaves its

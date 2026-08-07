@@ -34,10 +34,9 @@ type pbinUpdateStream struct {
 	state PatriciaContext
 	emit  pbinUpdateSink
 
-	siblingKey   [pbinAccountKeyLength]byte
-	pendingCode  pbinPendingCode
-	overflowCode []pbinOverflowChunk
-	keyDigest    pbinDigestCache
+	siblingKey [pbinAccountKeyLength]byte
+	codeChunks []pbinCodeChunk
+	keyDigest  pbinDigestCache
 
 	// witness is what the parent state cannot tell a witness pass about the block.
 	// See chunkSource and removesAccount.
@@ -53,13 +52,7 @@ type pbinAccountRemoval struct {
 	plainKey [length.Addr]byte
 }
 
-type pbinPendingCode struct {
-	stem     [pbinAccountKeyLength - 1]byte
-	plainKey [length.Addr]byte
-	chunks   [][pbinValueLength]byte
-}
-
-type pbinOverflowChunk struct {
+type pbinCodeChunk struct {
 	key   [pbinCodeKeyLength]byte
 	value [pbinValueLength]byte
 }
@@ -84,10 +77,7 @@ func (s *pbinUpdateStream) process(ctx context.Context, updates *Updates, state 
 	if err != nil {
 		return processed, err
 	}
-	if err = s.flushPendingCode(); err != nil {
-		return processed, err
-	}
-	if err = s.flushOverflowCode(); err != nil {
+	if err = s.flushCodeChunks(); err != nil {
 		return processed, err
 	}
 	if err = s.flushRemovals(nil); err != nil {
@@ -98,8 +88,7 @@ func (s *pbinUpdateStream) process(ctx context.Context, updates *Updates, state 
 
 func (s *pbinUpdateStream) reset() {
 	s.state, s.emit = nil, nil
-	s.pendingCode = pbinPendingCode{}
-	s.overflowCode = s.overflowCode[:0]
+	s.codeChunks = s.codeChunks[:0]
 	s.pendingRemoval = s.pendingRemoval[:0]
 }
 
@@ -112,10 +101,7 @@ func (s *pbinUpdateStream) release() {
 // processKey expands an account into its basic-data and code-hash leaves. Code
 // chunks are delayed until emitting them cannot move the ordered trie walk back.
 func (s *pbinUpdateStream) processKey(treeKey, plainKey []byte, stateUpdate *Update) error {
-	if err := s.flushPendingCodeBefore(treeKey); err != nil {
-		return err
-	}
-	if err := s.flushOverflowCodeBefore(treeKey); err != nil {
+	if err := s.flushCodeChunksBefore(treeKey); err != nil {
 		return err
 	}
 	if err := s.flushRemovalsBefore(treeKey); err != nil {
@@ -146,7 +132,7 @@ func (s *pbinUpdateStream) processKey(treeKey, plainKey []byte, stateUpdate *Upd
 	if err = s.emit(codeKey, plainKey, update); err != nil {
 		return err
 	}
-	return s.queueCode(treeKey, plainKey, update)
+	return s.queueCode(plainKey, update)
 }
 
 // removesAccount reports whether the block removes this account. A witness pass
@@ -162,8 +148,8 @@ func (s *pbinUpdateStream) removesAccount(plainKey []byte, update *Update) bool 
 
 // removeAccount drops the two subtrees an account owns — its header stem, and
 // its storage prefix once the walk reaches that zone — rather than the leaves it
-// holds, which for storage nothing enumerates. Overflow code chunks stay: they
-// are shared with every account running the same bytecode (eip:608-641).
+// holds, which for storage nothing enumerates. Code chunks stay: they are
+// shared with every account running the same bytecode (eip:608-641).
 func (s *pbinUpdateStream) removeAccount(plainKey []byte, update *Update) error {
 	if err := s.emit(s.keyDigest.accountHeaderStem(plainKey), plainKey, update); err != nil {
 		return err
@@ -205,7 +191,7 @@ func (s *pbinUpdateStream) flushRemovals(upTo []byte) error {
 }
 
 // chunkSource is the code an account's chunk keys derive from, with the hash
-// addressing its overflow chunks. A witness pass walks the parent state, where a
+// addressing its chunks. A witness pass walks the parent state, where a
 // contract the block creates has no code, so it needs the override to reach the
 // same keys the fold did. Only key derivation moves; values stay pre-state.
 func (s *pbinUpdateStream) chunkSource(plainKey []byte, update *Update) ([]byte, common.Hash, error) {
@@ -226,7 +212,7 @@ func (s *pbinUpdateStream) chunkSource(plainKey []byte, update *Update) ([]byte,
 	return code, update.CodeHash, nil
 }
 
-func (s *pbinUpdateStream) queueCode(basicDataKey, plainKey []byte, update *Update) error {
+func (s *pbinUpdateStream) queueCode(plainKey []byte, update *Update) error {
 	code, codeHash, err := s.chunkSource(plainKey, update)
 	if err != nil {
 		return err
@@ -234,55 +220,44 @@ func (s *pbinUpdateStream) queueCode(basicDataKey, plainKey []byte, update *Upda
 	if len(code) == 0 {
 		return nil
 	}
-	if len(s.pendingCode.chunks) != 0 {
-		return fmt.Errorf("pbin: code for %x queued while %x is still pending: the stem exit was missed",
-			plainKey, s.pendingCode.plainKey[:])
+	for i, chunk := range pbinChunkifyCode(code) {
+		var cc pbinCodeChunk
+		copy(cc.key[:], s.keyDigest.codeChunkKey(codeHash, i))
+		cc.value = chunk
+		s.codeChunks = append(s.codeChunks, cc)
 	}
-	chunks := pbinChunkifyCode(code)
-	if len(chunks) > pbinHeaderCodeChunks {
-		for i := pbinHeaderCodeChunks; i < len(chunks); i++ {
-			var oc pbinOverflowChunk
-			copy(oc.key[:], s.keyDigest.codeOverflowKey(codeHash, i))
-			oc.value = chunks[i]
-			s.overflowCode = append(s.overflowCode, oc)
-		}
-		chunks = chunks[:pbinHeaderCodeChunks]
-	}
-	s.pendingCode.chunks = chunks
-	copy(s.pendingCode.stem[:], basicDataKey)
-	copy(s.pendingCode.plainKey[:], plainKey)
 	return nil
 }
 
-func (s *pbinUpdateStream) flushOverflowCodeBefore(treeKey []byte) error {
-	if len(s.overflowCode) == 0 || treeKey[0] <= pbinCodeZone {
+func (s *pbinUpdateStream) flushCodeChunksBefore(treeKey []byte) error {
+	if len(s.codeChunks) == 0 || treeKey[0] <= pbinCodeZone {
 		return nil
 	}
-	return s.flushOverflowCode()
+	return s.flushCodeChunks()
 }
 
-func (s *pbinUpdateStream) flushOverflowCode() error {
-	if len(s.overflowCode) == 0 {
+func (s *pbinUpdateStream) flushCodeChunks() error {
+	if len(s.codeChunks) == 0 {
 		return nil
 	}
-	slices.SortFunc(s.overflowCode, func(a, b pbinOverflowChunk) int { return bytes.Compare(a.key[:], b.key[:]) })
+	slices.SortFunc(s.codeChunks, func(a, b pbinCodeChunk) int { return bytes.Compare(a.key[:], b.key[:]) })
 
-	var prev *pbinOverflowChunk
-	for i := range s.overflowCode {
-		oc := &s.overflowCode[i]
-		if prev != nil && oc.key == prev.key {
-			if oc.value != prev.value {
-				return fmt.Errorf("pbin: code chunk %x carries two values", oc.key[:])
+	var prev *pbinCodeChunk
+	for i := range s.codeChunks {
+		cc := &s.codeChunks[i]
+		if prev != nil && cc.key == prev.key {
+			if cc.value != prev.value {
+				return fmt.Errorf("pbin: code chunk %x carries two values", cc.key[:])
 			}
 			continue
 		}
-		update := Update{Flags: StorageUpdate, StorageLen: pbinValueLength, Storage: oc.value}
-		if err := s.emit(oc.key[:], nil, &update); err != nil {
+		update := Update{Flags: StorageUpdate, StorageLen: pbinValueLength, Storage: cc.value}
+		if err := s.emit(cc.key[:], nil, &update); err != nil {
 			return err
 		}
-		prev = oc
+		prev = cc
 	}
-	s.overflowCode = s.overflowCode[:0]
+	s.codeChunks = s.codeChunks[:0]
 	return nil
 }
 
@@ -297,28 +272,6 @@ func (s *pbinUpdateStream) codeOf(plainKey []byte) ([]byte, error) {
 		return nil, fmt.Errorf("pbin: read code %x: %w", plainKey, err)
 	}
 	return code, nil
-}
-
-func (s *pbinUpdateStream) flushPendingCodeBefore(treeKey []byte) error {
-	if len(s.pendingCode.chunks) == 0 || bytes.HasPrefix(treeKey, s.pendingCode.stem[:]) {
-		return nil
-	}
-	return s.flushPendingCode()
-}
-
-func (s *pbinUpdateStream) flushPendingCode() error {
-	p := &s.pendingCode
-	var key [pbinAccountKeyLength]byte
-	copy(key[:], p.stem[:])
-	for i := range p.chunks {
-		key[pbinAccountKeyLength-1] = byte(pbinCodeOffset + i)
-		update := Update{Flags: StorageUpdate, StorageLen: pbinValueLength, Storage: p.chunks[i]}
-		if err := s.emit(key[:], nil, &update); err != nil {
-			return err
-		}
-	}
-	p.chunks = nil
-	return nil
 }
 
 func (s *pbinUpdateStream) stateOf(plainKey []byte) (*Update, error) {

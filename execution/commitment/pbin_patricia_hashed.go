@@ -446,6 +446,12 @@ func (pph *PBinPatriciaHashed) needUnfolding(probe *pbinBitpath) pbinUnfolding {
 
 	matched := pbinCommonPrefixBitsAt(probe, depth, &cell.prefix)
 	if matched < cell.prefix.bitLen {
+		if depth+matched == probe.bitLen {
+			// The probe ended inside the cell's prefix without diverging: it names
+			// a subtree wholly containing this node, so the cell itself is the
+			// probe's slot. Only a subtree drop probes short of a whole key.
+			return pbinUnfolding{}
+		}
 		return pbinUnfolding{action: pbinUnfoldSplit, matched: matched}
 	}
 	if cell.kind == pbinNodeLeaf {

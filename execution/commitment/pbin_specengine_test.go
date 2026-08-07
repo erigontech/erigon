@@ -69,7 +69,7 @@ func pbinLeafFromVector(key, value []byte, seq int) pbinEngineLeaf {
 		l.update.Flags = CodeUpdate
 		l.update.CodeHash = common.BytesToHash(value)
 		return l
-	case sub >= pbinHeaderStorageOffset && sub < pbinCodeOffset:
+	case sub >= pbinHeaderStorageOffset && sub < pbinHeaderStorageOffset+pbinHeaderStorageSlots:
 		storageLeaf()
 		return l
 	default:
