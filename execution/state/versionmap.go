@@ -597,6 +597,22 @@ func (vm *VersionMap) AccountLifecycle(addr accounts.Address, txIdx int) (destro
 	return true, destroyedAt, false
 }
 
+// wipedByInRangeDestruct reports whether an in-block SELFDESTRUCT cleared the
+// value a reader would otherwise return. floor is the tx index of the version
+// map cell holding that value, or -1 when it comes from before the block. The
+// latest SelfDestruct entry cannot answer this on its own: once the account is
+// revived, that entry is the revival.
+func (vm *VersionMap) wipedByInRangeDestruct(addr accounts.Address, floor, txIndex int) bool {
+	if vm == nil {
+		return false
+	}
+	if floor < 0 {
+		return vm.AnyDoneSelfDestructEquals(addr, txIndex-1, true)
+	}
+	_, found := vm.FindDoneSelfDestructInRange(addr, floor, txIndex, true)
+	return found
+}
+
 // AnyDoneSelfDestructEquals reports whether any Done SelfDestruct write at
 // TxIdx ≤ txIdxLimit has value == target. Detects a prior in-block
 // SelfDestructPath=true write that a later revival flipped back to false
