@@ -2478,11 +2478,15 @@ func (be *blockExecutor) invalidBlockResult(err error) *blockResult {
 // MergeInto shares VersionedWrite pointers rather than the maps holding them,
 // so pooling prev's maps leaves the writes merged now holds intact.
 func (be *blockExecutor) recordFeeMerge(tx int, prev, merged *state.WriteSet) {
-	if temp := be.feeMergeTemp[tx]; temp != nil && temp == prev && merged != temp {
+	if temp := be.feeMergeTemp[tx]; temp != nil && temp == prev && merged != temp && releaseFeeMergeMaps {
 		temp.ReleaseMaps()
 	}
 	be.feeMergeTemp[tx] = merged
 }
+
+// releaseFeeMergeMaps trades apply-loop time against allocator pressure: off,
+// the superseded fee-merge maps are collected rather than pooled.
+var releaseFeeMergeMaps = dbg.EnvBool("RELEASE_FEE_MERGE_MAPS", true)
 
 // tooManyRetries returns an invalid-block result when tx has exceeded its
 // retry budget, otherwise nil. origin may be nil (validator-invalid path)
