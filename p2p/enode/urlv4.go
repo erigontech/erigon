@@ -167,14 +167,15 @@ func (n *Node) URLv4() string {
 		nodeid = fmt.Sprintf("%s.%x", scheme, n.id[:])
 	}
 	u := url.URL{Scheme: "enode"}
-	if n.Hostname() != "" {
+	switch {
+	case n.Hostname() != "":
 		// For nodes with a DNS name: include DNS name, TCP port, and optional UDP port
 		u.User = url.User(nodeid)
 		u.Host = fmt.Sprintf("%s:%d", n.Hostname(), n.TCP())
 		if n.UDP() != n.TCP() {
 			u.RawQuery = "discport=" + strconv.Itoa(n.UDP())
 		}
-	} else if n.ip.IsValid() {
+	case n.ip.IsValid():
 		// For IP-based nodes: include IP address, TCP port, and optional UDP port
 		addr := net.TCPAddr{IP: n.IP(), Port: n.TCP()}
 		u.User = url.User(nodeid)
@@ -182,7 +183,7 @@ func (n *Node) URLv4() string {
 		if n.UDP() != n.TCP() {
 			u.RawQuery = "discport=" + strconv.Itoa(n.UDP())
 		}
-	} else {
+	default:
 		u.Host = nodeid
 	}
 	return u.String()

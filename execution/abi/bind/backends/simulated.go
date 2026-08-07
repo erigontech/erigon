@@ -180,7 +180,7 @@ func (b *SimulatedBackend) Rollback() {
 }
 
 func (b *SimulatedBackend) emptyPendingBlock() {
-	blockChain, _ := blockgen.GenerateChain(b.m.ChainConfig, b.prependBlock, b.m.Engine, b.m.DB, 1, func(int, *blockgen.BlockGen) {})
+	blockChain, _ := b.m.GenerateChainFrom(b.prependBlock, 1, func(int, *blockgen.BlockGen) {})
 	b.pendingBlock = blockChain.Blocks[0]
 	b.pendingReceipts = blockChain.Receipts[0]
 	b.pendingHeader = blockChain.Headers[0]
@@ -819,7 +819,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, txn types.Transa
 	}
 	protocol.SetGasUsed(b.pendingHeader, b.pendingGasUsed)
 	//fmt.Printf("==== Start producing block %d\n", (b.prependBlock.NumberU64() + 1))
-	chain, err := blockgen.GenerateChain(b.m.ChainConfig, b.prependBlock, b.m.Engine, b.m.DB, 1, func(number int, block *blockgen.BlockGen) {
+	chain, err := b.m.GenerateChainFrom(b.prependBlock, 1, func(number int, block *blockgen.BlockGen) {
 		for _, txn := range b.pendingBlock.Transactions() {
 			block.AddTxWithChain(b.getHeader, b.m.Engine, txn)
 		}
@@ -864,7 +864,7 @@ func (b *SimulatedBackend) AdjustTime(adjustment time.Duration) error {
 		return errors.New("could not adjust time on non-empty block")
 	}
 
-	chain, err := blockgen.GenerateChain(b.m.ChainConfig, b.prependBlock, b.m.Engine, b.m.DB, 1, func(number int, block *blockgen.BlockGen) {
+	chain, err := b.m.GenerateChainFrom(b.prependBlock, 1, func(number int, block *blockgen.BlockGen) {
 		for _, txn := range b.pendingBlock.Transactions() {
 			block.AddTxWithChain(b.getHeader, b.m.Engine, txn)
 		}

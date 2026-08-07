@@ -188,14 +188,15 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpoolproto.AddRequest) (*txpo
 			}
 			return nil
 		}); err != nil {
-			slots.Resize(uint(j))                // remove erroneous transaction
-			if errors.Is(err, ErrAlreadyKnown) { // Noop, but need to handle to not count these
+			slots.Resize(uint(j)) // remove erroneous transaction
+			switch {
+			case errors.Is(err, ErrAlreadyKnown): // Noop, but need to handle to not count these
 				reply.Errors[i] = txpoolcfg.AlreadyKnown.String()
 				reply.Imported[i] = txpoolproto.ImportResult_ALREADY_EXISTS
-			} else if errors.Is(err, ErrRlpTooBig) { // Noop, but need to handle to not count these
+			case errors.Is(err, ErrRlpTooBig): // Noop, but need to handle to not count these
 				reply.Errors[i] = txpoolcfg.RLPTooLong.String()
 				reply.Imported[i] = txpoolproto.ImportResult_INVALID
-			} else {
+			default:
 				reply.Errors[i] = err.Error()
 				reply.Imported[i] = txpoolproto.ImportResult_INTERNAL_ERROR
 			}

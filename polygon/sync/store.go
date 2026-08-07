@@ -208,7 +208,7 @@ func (s *ExecutionClientStore) bridgeReplayInitialBlockIfNeeded(ctx context.Cont
 			"blockNum", initialHeader.Number.Uint64(),
 		)
 
-		if err = s.bridgeStore.ReplayInitialBlock(ctx, types.NewBlockWithHeader(initialHeader)); err != nil {
+		if err := s.bridgeStore.ReplayInitialBlock(ctx, types.NewBlockWithHeader(initialHeader)); err != nil {
 			return err
 		}
 	}
