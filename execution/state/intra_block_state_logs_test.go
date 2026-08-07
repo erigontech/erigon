@@ -311,3 +311,28 @@ func BenchmarkLogsRlpHash(b *testing.B) {
 		}
 	})
 }
+
+// TestGetLogsStampsTxAndBlock pins that GetLogs stamps the tx hash, block hash
+// and block number onto the logs it returns. Receipts are built straight from
+// this result, so a stamp that lands on a per-iteration copy leaves every
+// receipt log carrying zero identity.
+func TestGetLogsStampsTxAndBlock(t *testing.T) {
+	t.Parallel()
+
+	ibs := New(NewNoopReader())
+	ibs.SetTxContext(0, 0)
+	ibs.AddLog(&types.Log{Address: common.Address{0x11}, Topics: []common.Hash{{0x01}}, Data: []byte{0xaa}})
+	ibs.AddLog(&types.Log{Address: common.Address{0x22}, Data: []byte{0xbb}})
+
+	txnHash := common.Hash{0xde, 0xad}
+	blockHash := common.Hash{0xbe, 0xef}
+	const blockNumber = 4242
+
+	logs := ibs.GetLogs(0, txnHash, blockNumber, blockHash)
+	require.Len(t, logs, 2)
+	for i, l := range logs {
+		require.Equal(t, txnHash, l.TxHash, "log %d: TxHash", i)
+		require.Equal(t, blockHash, l.BlockHash, "log %d: BlockHash", i)
+		require.Equal(t, hexutil.Uint64(blockNumber), l.BlockNumber, "log %d: BlockNumber", i)
+	}
+}

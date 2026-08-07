@@ -560,7 +560,8 @@ func (sdb *IntraBlockState) GetLogs(txIndex int, txnHash common.Hash, blockNumbe
 		return nil
 	}
 	logs := sdb.logs[txIndex+1].Copy()
-	for _, l := range logs {
+	for i := range logs {
+		l := &logs[i]
 		l.TxHash = txnHash
 		l.BlockHash = blockHash
 		l.BlockNumber = hexutil.Uint64(blockNumber)

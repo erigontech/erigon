@@ -257,9 +257,9 @@ func CopyLogGroups(groups []Logs) Logs {
 	var total, totalTopics, totalData int
 	for _, g := range groups {
 		total += len(g)
-		for _, l := range g {
-			totalTopics += len(l.Topics)
-			totalData += len(l.Data)
+		for i := range g {
+			totalTopics += len(g[i].Topics)
+			totalData += len(g[i].Data)
 		}
 	}
 	if total == 0 {
@@ -270,7 +270,8 @@ func CopyLogGroups(groups []Logs) Logs {
 	out := make(Logs, total)
 	i := 0
 	for _, g := range groups {
-		for _, l := range g {
+		for j := range g {
+			l := &g[j]
 			dst := &out[i]
 			nt, nd := len(l.Topics), len(l.Data)
 			// Capped so a later append to one copied log cannot bleed into the next.
