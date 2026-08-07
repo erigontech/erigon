@@ -722,19 +722,29 @@ the group-boundary shape.
 **Files:**
 - Create: `execution/commitment/pbin_adversarial_test.go`
 
-- [ ] `TestPBinDelegationSetAndClearedInOneBatch` — the account ends with a
+- [x] `TestPBinDelegationSetAndClearedInOneBatch` — the account ends with a
       code-hash leaf of `keccak("")` and no delegation leaf
-- [ ] `TestPBinDelegationRepointedInOneBatch` — the delegation leaf is rewritten
-      and no code-hash leaf ever appears
-- [ ] `TestPBinZeroChunkAloneInItsGroup` — a zero chunk that is the only chunk
+- [x] `TestPBinDelegationRepointedInOneBatch` — the delegation leaf is rewritten
+      and no code-hash leaf ever appears (seeded with a prior-batch delegation,
+      so the sub-index-2 leaf is literally rewritten, then repointed twice
+      inside one batch)
+- [x] `TestPBinZeroChunkAloneInItsGroup` — a zero chunk that is the only chunk
       in its `tree_index`, so the group has no leaf at all
-- [ ] `TestPBinSharedCodeOutlivesOneHolder` — two accounts sharing code, one
-      deleted, the other keeps it, root matches the oracle
-- [ ] assert engine root == `pbinOracleRoot` in every case, and == the vector
-      root wherever the corpus pins one
-- [ ] gate: `go test ./execution/commitment/ -count=1 -v -run TestPBin` and
-      confirm all four new tests ran
-- [ ] `make lint` until clean; commit as
+- [x] `TestPBinSharedCodeOutlivesOneHolder` — two accounts sharing code, one
+      deleted, the other keeps it, root matches the oracle (differs from Task
+      9's cases: the deleted holder pre-existed with its chunks, not a merged
+      create-and-destroy)
+- [x] assert engine root == `pbinOracleRoot` in every case, and == the vector
+      root wherever the corpus pins one (no vendored vector pins these shapes —
+      the nearest, `shared_bytecode_two_accounts` and `code_chunks_of_zero_bytes`,
+      are single-state cases — so oracle equality is the whole assertion; each
+      test adds a NotEqual against the plausible wrong-shape root for
+      non-vacuity)
+- [x] gate: `go test ./execution/commitment/ -count=1 -v -run TestPBin` and
+      confirm all four new tests ran (all four ran; 208 pass, 0 fail. Green on
+      first run by design — these pin behaviour Tasks 6-9 built, per this
+      task's intro; the intra-batch merge path was already correct)
+- [x] `make lint` until clean; commit as
       `execution/commitment: pin adversarial pbin embedding cases`
 
 ### Task 11: Extend the differential fuzz corpus over the new shapes
