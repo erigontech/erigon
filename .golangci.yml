@@ -51,7 +51,7 @@ linters:
         - ruleguard
       disabled-checks:
         - commentFormatting # disabled to avoid unnecessary friction on local lints and CI for minor whitespace changes without functional benefit
-        - commentedOutCode
+        - commentedOutCode # disabled to avoid false positives on doc examples, EIP spec comments, and JSON templates
       enabled-tags:
         - performance
         - diagnostic
