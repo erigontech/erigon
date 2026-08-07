@@ -655,21 +655,35 @@ func modexpU256Applicable(base, mod []byte) bool {
 }
 
 // modexpU256 computes base^exp mod modulus and writes the big-endian result into
-// dst, which must be len(modulus) bytes. Operands must satisfy
+// dst, which must be len(modulus) zero bytes. Operands must satisfy
 // modexpU256Applicable; the exponent may be any length.
 //
 // It is a fixed-width uint256 left-to-right square-and-multiply using a
 // precomputed reciprocal, so each modular multiply is a multiply+reduce with no
 // division and no heap allocation.
 func modexpU256(dst, base, exp, mod []byte) {
+	// Operands are padded to their declared field widths, which EIP-7823 caps at
+	// 1024 bytes. Both loops below cost the field width, not the value, so the
+	// two degenerate results are taken before entering them.
+	for len(exp) > 0 && exp[0] == 0 {
+		exp = exp[1:]
+	}
+	if len(exp) == 0 {
+		dst[len(dst)-1] = 1 // exponent 0 and m > 1, so the result is 1 — including 0^0
+		return
+	}
+
 	var m, b uint256.Int
 	m.SetBytes(mod)
-	mu := uint256.Reciprocal(&m)
 	b.SetBytes(base)
 	b.Mod(&b, &m)
+	if b.IsZero() {
+		return // 0^exp with exp > 0; dst is already zero
+	}
+	mu := uint256.Reciprocal(&m)
 
-	// started stays false until the first set exponent bit, so leading zero
-	// bits/bytes of the exponent cost no squarings.
+	// started stays false until the first set exponent bit, so leading zero bits
+	// of the top byte cost no squarings. It is always set by the end: exp[0] != 0.
 	var result uint256.Int
 	started := false
 	for _, by := range exp {
@@ -686,9 +700,6 @@ func modexpU256(dst, base, exp, mod []byte) {
 				}
 			}
 		}
-	}
-	if !started {
-		result.SetOne() // exponent == 0, and m > 1, so the result is 1
 	}
 	b32 := result.Bytes32()
 	copy(dst, b32[32-len(dst):])

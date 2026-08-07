@@ -92,6 +92,42 @@ func TestModexpU256(t *testing.T) {
 	}
 }
 
+// TestModexpU256PaddedAndZero covers the operand shapes whose cost is driven by
+// the declared field width rather than the value: an exponent field padded with
+// leading zeros, and a base that reduces to zero. 0^0 mod m stays 1.
+func TestModexpU256PaddedAndZero(t *testing.T) {
+	pad := func(n int, tail ...byte) []byte {
+		b := make([]byte, n)
+		copy(b[n-len(tail):], tail)
+		return b
+	}
+	mod := pad(32, 0xff)
+	mod[0] = 0xff // full-width odd modulus
+	modBig := new(big.Int).SetBytes(mod)
+
+	cases := []struct {
+		name      string
+		base, exp []byte
+	}{
+		{"1024-byte exponent field holding 0", pad(32, 7), pad(1024)},
+		{"1024-byte exponent field holding 1", pad(32, 7), pad(1024, 1)},
+		{"zero base, exponent 0", pad(32), pad(1024)},
+		{"zero base, all-ones exponent", pad(32), bytes.Repeat([]byte{0xff}, 1024)},
+		{"base equal to the modulus", mod, bytes.Repeat([]byte{0xff}, 1024)},
+		{"empty base and empty exponent", nil, nil},
+	}
+	for _, c := range cases {
+		dst := make([]byte, len(mod))
+		modexpU256(dst, c.base, c.exp, mod)
+
+		want := make([]byte, len(mod))
+		new(big.Int).Exp(new(big.Int).SetBytes(c.base), new(big.Int).SetBytes(c.exp), modBig).FillBytes(want)
+		if !bytes.Equal(dst, want) {
+			t.Errorf("%s: got %x want %x", c.name, dst, want)
+		}
+	}
+}
+
 // TestModexpU256Random fuzzes the uint256 path against math/big over random
 // operands drawn from the routed domain, including modulus fields padded with
 // leading zero bytes.
