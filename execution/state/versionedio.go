@@ -1589,7 +1589,8 @@ func (vr *versionedStateReader) TracePrefix() string {
 }
 
 func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
-	if r, ok := vr.reads.GetAddress(address); ok && r.Val != nil && !r.Val.IsNil() {
+	r, recorded := vr.reads.GetAddress(address)
+	if recorded && r.Val != nil && !r.Val.IsNil() {
 		account := r.Val.Account()
 		updated := vr.applyVersionedUpdates(address, *account)
 		return &updated, nil
@@ -1614,7 +1615,9 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 		}
 	}
 
-	if vr.stateReader != nil {
+	// A recorded AddressPath read with no account is the tx's own conclusion that
+	// the address holds nothing; the domain cannot say otherwise.
+	if vr.stateReader != nil && !recorded {
 		account, err := vr.stateReader.ReadAccountData(address)
 
 		if err != nil {
