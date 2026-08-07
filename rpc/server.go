@@ -21,7 +21,9 @@ package rpc
 
 import (
 	"context"
+	"fmt"
 	"io"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -96,6 +98,19 @@ func (s *Server) SetBatchLimit(limit int) {
 // service collection this server provides to clients.
 func (s *Server) RegisterName(name string, receiver any) error {
 	return s.services.registerName(name, receiver)
+}
+
+// RegisterMethod registers a strongly-typed RPC method, bypassing reflection on every call.
+// The name must use "namespace_method" form (e.g. "eth_blockNumber").
+// Typed methods take priority over reflection-based methods registered via [Server.RegisterName].
+// Returns an error if name is not in "namespace_method" form.
+func RegisterMethod[Params any, Result any](s *Server, name string, fn func(ctx context.Context, params Params) (Result, error)) error {
+	ns, method, ok := strings.Cut(name, serviceMethodSeparator)
+	if !ok || ns == "" || method == "" {
+		return fmt.Errorf("rpc: RegisterMethod: name %q must be \"namespace_method\" form", name)
+	}
+	s.services.registerTyped(name, Method[Params, Result]{fn: fn})
+	return nil
 }
 
 // ServeCodec reads incoming requests from codec, calls the appropriate callback and writes
