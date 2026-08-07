@@ -74,7 +74,7 @@ func TestGetBlockReceiptsFrozenBlocks(t *testing.T) {
 		execmoduletester.WithSentryProtocol(direct.ETH70),
 	)
 	signer := types.LatestSignerForChainID(nil)
-	generated, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, frozenChainLength, func(i int, block *blockgen.BlockGen) {
+	generated, err := m.GenerateChain(frozenChainLength, func(i int, block *blockgen.BlockGen) {
 		if i+1 == frozenEmptyBlockNum {
 			return // one empty block surrounded by non-empty ones
 		}
@@ -268,7 +268,7 @@ func TestGetBlockAccessListsResponseMatrix(t *testing.T) {
 	)
 	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
 	baseFee := uint256.NewInt(m.Genesis.BaseFee().Uint64())
-	canonical, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainLength, func(i int, b *blockgen.BlockGen) {
+	canonical, err := m.GenerateChain(chainLength, func(i int, b *blockgen.BlockGen) {
 		if i+1 == emptyBlockNum {
 			return
 		}
@@ -277,7 +277,7 @@ func TestGetBlockAccessListsResponseMatrix(t *testing.T) {
 		b.AddTx(txn)
 	})
 	require.NoError(t, err)
-	fork, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
+	fork, err := m.GenerateChain(2, func(i int, b *blockgen.BlockGen) {
 		txn, err := types.SignTx(types.NewTransaction(b.TxNonce(addrB), common.Address{2}, uint256.NewInt(2), params.TxGas, baseFee, nil), *signer, keyB)
 		require.NoError(t, err)
 		b.AddTx(txn)
@@ -288,7 +288,7 @@ func TestGetBlockAccessListsResponseMatrix(t *testing.T) {
 	require.NoError(t, m.InsertChain(canonical))
 	// The fork blocks are inserted without a fork choice update so they stay
 	// non-canonical, with no stored BAL sidecar.
-	insertRes, err := insertBlocks(m.Ctx, m.ExecModule, fork.Blocks)
+	insertRes, err := m.InsertBlocks(m.Ctx, fork.Blocks)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, insertRes)
 	// Prune every stored BAL row except storedBlockNum's, simulating the
@@ -309,7 +309,7 @@ func TestGetBlockAccessListsResponseMatrix(t *testing.T) {
 	require.Equal(t, uint64(1), count)
 	require.NoError(t, rwTx.Commit())
 	balBytes := func(num uint64) rlp.RawValue {
-		return canonical.BlockAccessLists[num-1]
+		return canonical.Blocks[num-1].BlockAccessList()
 	}
 	blockHash := func(num uint64) common.Hash {
 		return canonical.Blocks[num-1].Hash()

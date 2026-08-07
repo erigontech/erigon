@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"math/big"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -59,7 +60,7 @@ type stubExecutionModule struct {
 	getAssembledBlockFunc func(ctx context.Context, payloadID uint64) (execmodule.AssembledBlockResult, error)
 	getForkChoiceFunc     func(ctx context.Context) (execmodule.ForkChoiceState, error)
 	currentHeaderFunc     func(ctx context.Context) (*types.Header, error)
-	insertBlocksFunc      func(ctx context.Context, blocks []*types.RawBlock) (execmodule.ExecutionStatus, error)
+	insertBlocksFunc      func(ctx context.Context, blocks []*types.Block) (execmodule.ExecutionStatus, error)
 	validateChainFunc     func(ctx context.Context, blockHash common.Hash, blockNumber uint64) (execmodule.ValidationResult, error)
 	updateForkChoiceFunc  func(ctx context.Context, headHash, safeHash, finalizedHash common.Hash) (execmodule.ForkChoiceResult, error)
 }
@@ -89,7 +90,7 @@ func (s *stubExecutionModule) GetAssembledBlock(ctx context.Context, payloadID u
 
 // --- No-op implementations for the rest of the interface ---
 
-func (s *stubExecutionModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock) (execmodule.ExecutionStatus, error) {
+func (s *stubExecutionModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (execmodule.ExecutionStatus, error) {
 	if s.insertBlocksFunc != nil {
 		return s.insertBlocksFunc(ctx, blocks)
 	}
@@ -327,7 +328,7 @@ func makeAssembledBlock(blockHash, parentHash, stateRoot common.Hash, blockNumbe
 	h.BlobGasUsed = &blobGasUsed
 	h.ExcessBlobGas = &excessBlobGas
 
-	blk := types.NewBlockFromStorage(blockHash, h, nil, nil, []*types.Withdrawal{})
+	blk := types.NewBlockFromStorage(blockHash, h, nil, nil, []*types.Withdrawal{}, nil)
 	return &types.BlockWithReceipts{
 		Block:    blk,
 		Requests: make(types.FlatRequests, 0), // empty but non-nil: valid for Prague+
@@ -1435,6 +1436,52 @@ func TestValidatePayloadAttributesPostFCU_AmsterdamGate(t *testing.T) {
 		err := srv.validatePayloadAttributesPostFCU(clparams.FuluVersion, attrs)
 		require.NoError(t, err)
 	})
+}
+
+func TestNewPayloadV4RejectsSlotNumber(t *testing.T) {
+	t.Parallel()
+
+	srv := NewEngineServer(log.New(), preAmsterdamChainConfig(), &stubExecutionModule{}, nil, false, false, false, true, nil, nil, 0, 0)
+	zero := hexutil.Uint64(0)
+	payload := &engine_types.ExecutionPayload{
+		LogsBloom:     make(hexutil.Bytes, types.BloomByteLength),
+		BaseFeePerGas: (*hexutil.Big)(big.NewInt(1)),
+		Transactions:  []hexutil.Bytes{},
+		Withdrawals:   []*types.Withdrawal{},
+		BlobGasUsed:   &zero,
+		ExcessBlobGas: &zero,
+		SlotNumber:    &zero,
+	}
+
+	status, err := srv.NewPayloadV4(t.Context(), payload, []common.Hash{}, &common.Hash{}, []hexutil.Bytes{})
+	require.Nil(t, status)
+	require.Error(t, err)
+	var rpcErr rpc.Error
+	require.ErrorAs(t, err, &rpcErr)
+	require.Equal(t, -32602, rpcErr.ErrorCode())
+}
+
+func TestNewPayloadV5RequiresBlockAccessListBeforeAmsterdam(t *testing.T) {
+	t.Parallel()
+
+	srv := NewEngineServer(log.New(), preAmsterdamChainConfig(), &stubExecutionModule{}, nil, false, false, false, true, nil, nil, 0, 0)
+	zero := hexutil.Uint64(0)
+	payload := &engine_types.ExecutionPayload{
+		LogsBloom:     make(hexutil.Bytes, types.BloomByteLength),
+		BaseFeePerGas: (*hexutil.Big)(big.NewInt(1)),
+		Transactions:  []hexutil.Bytes{},
+		Withdrawals:   []*types.Withdrawal{},
+		BlobGasUsed:   &zero,
+		ExcessBlobGas: &zero,
+		SlotNumber:    &zero,
+	}
+
+	status, err := srv.NewPayloadV5(t.Context(), payload, []common.Hash{}, &common.Hash{}, []hexutil.Bytes{})
+	require.Nil(t, status)
+	require.Error(t, err)
+	var invalidParams *rpc.InvalidParamsError
+	require.ErrorAs(t, err, &invalidParams)
+	require.Equal(t, "blockAccessList missing", invalidParams.Message)
 }
 
 func TestForkchoiceUpdatedReturnsSyncingForIncompleteExecution(t *testing.T) {

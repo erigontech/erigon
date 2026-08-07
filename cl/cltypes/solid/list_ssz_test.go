@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/clonable"
 	"github.com/erigontech/erigon/common/ssz"
 )
 
@@ -91,6 +92,45 @@ func TestListSSZEncodeDecodeSSZ(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, list.Len(), decodedList.Len())
+}
+
+var errStrictStaticListDecode = errors.New("strict static list decode")
+
+type strictRejectingStaticListElement struct{}
+
+func (*strictRejectingStaticListElement) EncodeSSZ(dst []byte) ([]byte, error) {
+	return append(dst, 0), nil
+}
+
+func (*strictRejectingStaticListElement) EncodingSizeSSZ() int {
+	return 1
+}
+
+func (*strictRejectingStaticListElement) DecodeSSZ([]byte, int) error {
+	return nil
+}
+
+func (*strictRejectingStaticListElement) DecodeSSZStrict([]byte, int) error {
+	return errStrictStaticListDecode
+}
+
+func (*strictRejectingStaticListElement) HashSSZ() ([32]byte, error) {
+	return [32]byte{}, nil
+}
+
+func (*strictRejectingStaticListElement) Clone() clonable.Clonable {
+	return &strictRejectingStaticListElement{}
+}
+
+func TestListSSZDecodeSSZStrictPropagatesToStaticElements(t *testing.T) {
+	buf := []byte{0}
+
+	require.NoError(t, NewStaticListSSZ[*strictRejectingStaticListElement](1, 1).DecodeSSZ(buf, 0))
+	require.ErrorIs(
+		t,
+		NewStaticListSSZ[*strictRejectingStaticListElement](1, 1).DecodeSSZStrict(buf, 0),
+		errStrictStaticListDecode,
+	)
 }
 
 func TestProgressiveListSSZDecodeEnforcesLimit(t *testing.T) {

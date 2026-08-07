@@ -935,7 +935,7 @@ func (tx *MdbxTx) DistributeCursors(table string, from []byte, n int) ([][]byte,
 		if err != nil {
 			return nil, err
 		}
-		defer cw.Close()
+		defer cw.Close() //nolint:gocritic
 		wrappers[i], cursors[i] = cw, rawCursor(cw)
 	}
 

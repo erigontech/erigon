@@ -252,7 +252,7 @@ func syncBySmallSteps(db kv.TemporalRwDB, builderConfig buildercfg.BuilderConfig
 		if err != nil {
 			return err
 		}
-		defer tx.Rollback()
+		defer tx.Rollback() //nolint:gocritic
 
 		// All stages forward to `execStage + unwindEvery` block
 		execAtBlock = progress(tx, stages.Execution)
@@ -290,7 +290,7 @@ func syncBySmallSteps(db kv.TemporalRwDB, builderConfig buildercfg.BuilderConfig
 			if tx, err = db.BeginTemporalRw(ctx); err != nil {
 				return err
 			}
-			defer tx.Rollback()
+			defer tx.Rollback() //nolint:gocritic
 			// Fresh SD: a committed SD is never reused.
 			if sd, err = execctx.NewSharedDomains(ctx, tx, logger1); err != nil {
 				return err
@@ -326,7 +326,7 @@ func syncBySmallSteps(db kv.TemporalRwDB, builderConfig buildercfg.BuilderConfig
 		if err != nil {
 			return err
 		}
-		defer tx.Rollback()
+		defer tx.Rollback() //nolint:gocritic
 
 		// allow backward loop
 		if unwind > 0 && unwindEvery > 0 {
@@ -393,7 +393,7 @@ func loopExec(db kv.TemporalRwDB, ctx context.Context, unwind uint64, logger log
 		if err != nil {
 			return err
 		}
-		defer sd.Close()
+		defer sd.Close() //nolint:gocritic
 		sd.SetInMemHistoryReads(false)
 		_ = sync.SetCurrentStage(stages.Execution)
 		t := time.Now()
@@ -407,6 +407,6 @@ func loopExec(db kv.TemporalRwDB, ctx context.Context, unwind uint64, logger log
 		if err != nil {
 			return err
 		}
-		defer tx.Rollback()
+		defer tx.Rollback() //nolint:gocritic
 	}
 }
