@@ -1402,6 +1402,26 @@ func TestDirtySegmentsMaxCountsUnindexedTail(t *testing.T) {
 	require.Equal(uint64(30_000-1), s.DirtySegmentsMax(snaptype2.Enums.Headers))
 }
 
+// DirtySegmentsMax is served from a cache, so every path that mutates the dirty set has to
+// refresh it — a stale max would let the archive backfill stop short of history it still needs.
+func TestDirtySegmentsMaxFollowsRetire(t *testing.T) {
+	logger := testlog.Logger(t, log.LvlCrit)
+	dir, require := t.TempDir(), require.New(t)
+	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
+
+	for i := range uint64(3) {
+		createTestSegmentFile(t, i*10_000, (i+1)*10_000, snaptype2.Enums.Headers, dir, version.V1_0, logger)
+	}
+	s := NewBaseRoSnapshots(cfg, dir, []snaptype.Type{snaptype2.Headers}, snaptype2.Headers, false, logger)
+	defer s.Close()
+	require.NoError(s.OpenFolder())
+	require.Equal(uint64(30_000-1), s.DirtySegmentsMax(snaptype2.Enums.Headers))
+
+	tail := snaptype.SegmentFileName(version.V1_0, 20_000, 30_000, snaptype2.Enums.Headers)
+	require.NoError(s.retireFiles(mvcc.RetireReasonMerged, tail))
+	require.Equal(uint64(20_000-1), s.DirtySegmentsMax(snaptype2.Enums.Headers))
+}
+
 // An index builder needs the dumped-but-unindexed segments, which the visible set hides
 // and DirtySegmentsMax only summarizes into one number.
 func TestWalkDirtySegments(t *testing.T) {
