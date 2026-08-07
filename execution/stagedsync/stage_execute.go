@@ -472,14 +472,16 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 	return unwindOnExecError(execErr, out, cfg, s, u, logger)
 }
 
-// unwindOnExecError performs the bad-block unwind at the stage boundary after
-// parallel exec reports an invalid block. A non-initial-cycle wrong trie root
-// binary-searches from the implicated block (out.failedBlock/Hash); an
-// initial-cycle wrong root is fatal (no fork to recover from) and returns
-// execErr unchanged. Any other invalid block unwinds to the recorded failed
-// block minus one and marks that block bad. Under badBlockHalt (in-memory fork
-// validation) or a non-invalid error it unwinds nothing and returns execErr
-// unchanged for the caller to propagate.
+// unwindOnExecError decides the unwind after parallel exec reports an invalid
+// block. A non-initial-cycle wrong trie root routes to handleIncorrectRootHashError,
+// which schedules the unwind on u (binary-search from out.failedBlock/Hash). An
+// initial-cycle wrong root is fatal (no fork to recover from) and returns execErr.
+// Any other invalid block also returns execErr WITHOUT setting a stage unwind
+// point — the staged-sync loop that detects ErrInvalidBlock owns that unwind;
+// setting one here would leave a stale bad-block verdict that blocks a fresh
+// canonical block at the same height on the next fork-choice. Under badBlockHalt
+// (in-memory fork validation) or a non-invalid error it unwinds nothing and
+// returns execErr for the caller to propagate.
 func unwindOnExecError(execErr error, out execV3Outcome, cfg ExecuteBlockCfg, s *StageState, u Unwinder, logger log.Logger) error {
 	if !errors.Is(execErr, rules.ErrInvalidBlock) || cfg.badBlockHalt || u == nil {
 		return execErr

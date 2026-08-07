@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -9,7 +10,10 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbutils"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -140,5 +144,27 @@ func TestUnwindOnExecError(t *testing.T) {
 		got := unwindOnExecError(wrongRoot, out, ExecuteBlockCfg{}, s, u, logger)
 		require.ErrorIs(t, got, ErrWrongTrieRoot, "initial-cycle wrong root must stay fatal")
 		require.Empty(t, u.calls, "must not schedule any unwind")
+	})
+
+	t.Run("wrong root on non-initial cycle schedules the binary-search unwind", func(t *testing.T) {
+		// failedBlock (15) > s.BlockNumber (5) takes handleIncorrectRootHashError's
+		// scheduled-unwind branch: jump = (15-5)/2 = 5 -> UnwindTo(10). Needs a real
+		// temporal tx: one 40-byte ChangeSets3 key pins the lowest unwindable block
+		// to 4, so CanUnwindToBlockNum = 3 <= 10 and the target is not clamped.
+		dirs := datadir.New(t.TempDir())
+		db := temporaltest.NewTestDBWithStepSize(t, dirs, 10_000)
+		tx, err := db.BeginTemporalRw(context.Background())
+		require.NoError(t, err)
+		defer tx.Rollback()
+		require.NoError(t, tx.Put(kv.ChangeSets3, dbutils.BlockBodyKey(4, common.Hash{0x01}), []byte{0x01}))
+
+		u := &recordingUnwinder{}
+		s := &StageState{BlockNumber: 5}
+		s.CurrentSyncCycle.IsInitialCycle = false
+		out := execV3Outcome{lastHeader: headerAt(20), failedBlock: 15, failedHash: common.HexToHash("0xf00d"), applyTx: tx}
+		got := unwindOnExecError(wrongRoot, out, ExecuteBlockCfg{}, s, u, logger)
+		require.NoError(t, got)
+		require.Len(t, u.calls, 1)
+		require.Equal(t, uint64(10), u.calls[0].point, "unwind target = failedBlock - (failedBlock-s.BlockNumber)/2")
 	})
 }
