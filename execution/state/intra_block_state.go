@@ -389,7 +389,7 @@ func (sdb *IntraBlockState) Reset() {
 	for _, so := range sdb.stateObjects {
 		so.release()
 	}
-	sdb.stateObjectArena.rewind()
+	sdb.stateObjectArena.reset()
 	clear(sdb.stateObjects)
 	clear(sdb.stateObjectsDirty)
 	sdb.resetLogs()
@@ -443,7 +443,7 @@ func (sdb *IntraBlockState) Close() {
 	stateObjects, journal := sdb.stateObjects, sdb.journal
 	sdb.stateObjects, sdb.journal = nil, nil
 	sdb.logs = nil
-	sdb.stateObjectArena.free()
+	sdb.stateObjectArena.release()
 	sdb.revisions.reset()
 	// Safe to pool: VersionedWrites/FinalizedWrites hand out deep clones, and the
 	// set is unexported, so nothing outside holds a raw VersionedWrite.
