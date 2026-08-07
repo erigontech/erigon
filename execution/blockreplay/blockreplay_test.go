@@ -16,7 +16,7 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
-	"github.com/erigontech/erigon/execution/tests/blockreplay"
+	"github.com/erigontech/erigon/execution/blockreplay"
 	"github.com/erigontech/erigon/execution/types"
 )
 

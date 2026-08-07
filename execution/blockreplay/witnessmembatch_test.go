@@ -11,7 +11,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
-	"github.com/erigontech/erigon/execution/tests/blockreplay"
+	"github.com/erigontech/erigon/execution/blockreplay"
 )
 
 // TestWitnessPrefixOps pins that a prefix scan over the witness-backed mem batch

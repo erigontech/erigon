@@ -24,7 +24,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
-	"github.com/erigontech/erigon/execution/tests/blockreplay"
+	"github.com/erigontech/erigon/execution/blockreplay"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -154,7 +154,7 @@ func (r *ephemeralReplay) newDomains(tb testing.TB, fx *blockreplay.Fixture) (kv
 // benchmark should time. Receipts/gas/bloom are validated inside the apply loop.
 func (r *ephemeralReplay) exec(tx kv.TemporalRwTx, doms *execctx.SharedDomains) error {
 	src := &singleBlockSource{block: r.block, num: r.num, parent: r.parent, bal: r.bal}
-	_, err := ExecV3(r.ctx, r.cfg, doms, tx, stages.ModeApplyingBlocks, false, "replay", r.rng, src, r.logger)
+	_, err := execV3(r.ctx, r.cfg, doms, tx, stages.ModeApplyingBlocks, false, "replay", r.rng, src, r.logger)
 	return err
 }
 

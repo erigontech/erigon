@@ -130,12 +130,13 @@ type execV3Outcome struct {
 	failedHash            common.Hash
 }
 
-// ExecV3 runs the parallel executor over the resolved window rng. It is
+// execV3 runs the parallel executor over the resolved window rng. It is
 // stage-agnostic: the caller owns SeekCommitment/restoreTxNum (upstream) and
 // stage-progress update / bad-block unwind (downstream, via the returned
 // outcome). This lets both SpawnExecuteBlocksStage and an ephemeral single-block
-// replay drive the same execution path.
-func ExecV3(ctx context.Context,
+// replay drive the same execution path. Unexported: it takes package-internal
+// types (execRange, blockSource) and has no external callers.
+func execV3(ctx context.Context,
 	cfg ExecuteBlockCfg,
 	doms *execctx.SharedDomains, rwTx kv.TemporalRwTx,
 	syncMode stages.Mode, initialCycle bool, logPrefix string,
