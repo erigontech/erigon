@@ -53,6 +53,15 @@ func nonceBalanceWrites(addr accounts.Address, nonce uint64, bal uint256.Int) *s
 	return ws
 }
 
+func newTestBlockResult(blockNum uint64, blockHash common.Hash, lastTxNum uint64, partial bool) *blockResult {
+	header := &types.Header{Number: *uint256.NewInt(blockNum)}
+	return &blockResult{
+		Block:     types.NewBlockFromStorage(blockHash, header, nil, nil, nil, nil),
+		lastTxNum: lastTxNum,
+		isPartial: partial,
+	}
+}
+
 // TestHandleMessage_StepBoundaryCheckpointMidBlock pins the parallel-exec
 // step-boundary commitment bug: a block whose txNum range straddles a step
 // edge must leave a commitment checkpoint at that edge, otherwise the step's
@@ -108,12 +117,12 @@ func TestHandleMessage_StepBoundaryCheckpointMidBlock(t *testing.T) {
 	for txNum := uint64(1); txNum <= block1End; txNum++ {
 		writeAccount(txNum)
 	}
-	cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: common.Hash{0x01}, lastTxNum: block1End})
+	cc.handleMessage(ctx, newTestBlockResult(1, common.Hash{0x01}, block1End, false))
 
 	for txNum := block1End + 1; txNum <= block2End; txNum++ {
 		writeAccount(txNum)
 	}
-	cc.handleMessage(ctx, &blockResult{BlockNum: 2, BlockHash: common.Hash{0x02}, lastTxNum: block2End})
+	cc.handleMessage(ctx, newTestBlockResult(2, common.Hash{0x02}, block2End, false))
 
 	cc.Stop()
 
@@ -173,7 +182,7 @@ func TestHandleMessage_StepCheckpointInPerBlockMode(t *testing.T) {
 	for txNum := uint64(1); txNum <= block1End; txNum++ {
 		writeAccount(txNum, 1)
 	}
-	cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: common.Hash{0x01}, lastTxNum: block1End})
+	cc.handleMessage(ctx, newTestBlockResult(1, common.Hash{0x01}, block1End, false))
 
 	// Block 2 runs only up to the step edge — no block-2 boundary is sent.
 	for txNum := block1End + 1; txNum <= stepEdgeTxNum; txNum++ {
@@ -232,7 +241,7 @@ func TestHandleMessage_PartialBlockComputeFailureNotSwallowed(t *testing.T) {
 	// deterministically (the per-key ctx check in the trie fold, with >=1 update).
 	failCtx, cancel := context.WithCancel(ctx)
 	cancel()
-	cc.handleMessage(failCtx, &blockResult{BlockNum: 1, BlockHash: common.Hash{0x01}, lastTxNum: 5, isPartial: true})
+	cc.handleMessage(failCtx, newTestBlockResult(1, common.Hash{0x01}, 5, true))
 
 	require.False(t, cc.hasComputed,
 		"a failed partial-block commitment must not be marked computed — the error must halt exec, not be swallowed")
@@ -316,7 +325,7 @@ func runBlockEndingOnStepEdge(t *testing.T, edgeTxHasWrites bool) stepEdgeOutcom
 	// The block-end system task is always published at the block-end txNum, with
 	// empty writes when the block has no finalize writes.
 	writeAccount(edgeTxNum, edgeTxHasWrites)
-	cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: common.Hash{0x01}, lastTxNum: edgeTxNum})
+	cc.handleMessage(ctx, newTestBlockResult(1, common.Hash{0x01}, edgeTxNum, false))
 	cc.Stop()
 
 	stateBlob, _, err := doms.GetLatest(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState)
@@ -514,7 +523,7 @@ func TestHandleMessage_PreWindowPerBlockComputeDoesNotPolluteLiveChangeset(t *te
 	}
 	// First partial block => computeWithoutCheck, a per-block compute with no
 	// root check; pre-window, so it must isolate its commitment writes.
-	cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: common.Hash{0x01}, lastTxNum: 5, isPartial: true})
+	cc.handleMessage(ctx, newTestBlockResult(1, common.Hash{0x01}, 5, true))
 
 	require.Zero(t, liveCS.Diffs[kv.CommitmentDomain].Len(),
 		"pre-window per-block compute leaked CommitmentDomain diffs into the live changeset accumulator")
@@ -672,7 +681,7 @@ func feedBlock1Shadow(t *testing.T, n uint64, balRoot []byte) commitmentResult {
 	cc.computedAhead[1] = true
 	cc.balRoots[1] = balRoot
 
-	cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: common.Hash{0x01}, lastTxNum: n})
+	cc.handleMessage(ctx, newTestBlockResult(1, common.Hash{0x01}, n, false))
 	cc.Stop()
 	select {
 	case res := <-out:
