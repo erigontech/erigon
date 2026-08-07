@@ -491,11 +491,6 @@ func (te *txExecutor) onBlockStart(ctx context.Context, block *types.Block) {
 		return
 	}
 
-	if block == nil {
-		te.logger.Warn("hooks ignored: nil block")
-		return
-	}
-
 	blockNum := block.NumberU64()
 	blockHash := block.Hash()
 	if blockHash == (common.Hash{}) {

@@ -102,7 +102,7 @@ type commitmentCalculator struct {
 
 	// lastTarget tracks the most recent block boundary so that
 	// computeAndPublish knows which block to compute for.
-	lastTarget *commitTarget
+	lastTarget commitTarget
 
 	// lastComputedBlock tracks the block number of the last computed
 	// commitment to avoid duplicate computation when commitComputeRequest
@@ -378,7 +378,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 
 		// Track the latest block boundary. lastBlockResultSeen opens the
 		// compute-ahead gate for the next block (its baseline is now in sd.mem).
-		cc.lastTarget = &target
+		cc.lastTarget = target
 		cc.lastBlockResultSeen = blockNum
 		cc.hasSeenBlockResult = true
 
@@ -440,7 +440,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 	case *commitComputeRequest:
 		// Explicit compute signal from the apply loop at batch boundary.
 		if cc.shouldComputeOnRequest() {
-			cc.computeAndPublish(ctx, *cc.lastTarget)
+			cc.computeAndPublish(ctx, cc.lastTarget)
 		} else {
 			// Publish empty result so drainBeforeExit doesn't block forever
 			cc.publish(ctx, commitmentResult{blockNum: cc.lastComputedBlock})
@@ -699,7 +699,7 @@ func (cc *commitmentCalculator) fail(ctx context.Context, target commitTarget, e
 //
 //	(b) a new block boundary advanced past the last computed one.
 func (cc *commitmentCalculator) shouldComputeOnRequest() bool {
-	if cc.lastTarget == nil {
+	if !cc.hasSeenBlockResult {
 		return false
 	}
 	if !cc.hasComputed {

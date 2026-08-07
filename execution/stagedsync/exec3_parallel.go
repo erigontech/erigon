@@ -356,8 +356,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	}
 
 	var lastExecutedLog time.Time
-	var lastBlockNum, lastBlockTxNum uint64
-	var hasLastBlockResult bool
+	var lastBlock appliedBlockProgress
 	var lastHeader *types.Header
 	var uncommittedBlocks int64
 	var uncommittedTransactions uint64
@@ -530,9 +529,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 							}
 						}
 					}
-					if hasLastBlockResult && lastBlockNum > 0 {
-						pe.txExecutor.lastCommittedBlockNum.Store(lastBlockNum)
-						pe.txExecutor.lastCommittedTxNum.Store(lastBlockTxNum)
+					if lastBlock.blockNum > 0 {
+						pe.txExecutor.lastCommittedBlockNum.Store(lastBlock.blockNum)
+						pe.txExecutor.lastCommittedTxNum.Store(lastBlock.lastTxNum)
 					}
 					// Two reasons the exec loop closes the channel:
 					//   (1) sizeEst > batchLimit — flush and tell the stage loop
@@ -581,7 +580,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 					}
 					if missing := applyLoopMissingBlocks(txResultBlocks, appliedBlocks); len(missing) > 0 {
 						return fmt.Errorf("%w: apply loop exited (lastBlockResult=%d maxBlockNum=%d) but %d block(s) had tx-results without a blockResult: %v",
-							rules.ErrInvalidBlock, lastBlockNum, pe.maxBlockNum, len(missing), missing)
+							rules.ErrInvalidBlock, lastBlock.blockNum, pe.maxBlockNum, len(missing), missing)
 					}
 					// The stop kind rides in the shared context's cause: stopReachedMax
 					// is a clean batch end (nil); stopMoreWork is a partial batch to
@@ -592,7 +591,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 						case stopReachedMax:
 							return nil
 						case stopMoreWork:
-							return &ErrLoopExhausted{From: startBlockNum, To: lastBlockNum, Reason: "block batch is full"}
+							return &ErrLoopExhausted{From: startBlockNum, To: lastBlock.blockNum, Reason: "block batch is full"}
 						}
 					}
 					// Fallback for exit paths that publish no cause: a single-block
@@ -601,10 +600,10 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 					// — or an empty loop that executed nothing because the range was
 					// already applied (async background commit advanced progress) — is a
 					// clean end; otherwise there is more work.
-					if applyLoopCloseIsClean(lastBlockNum, pe.maxBlockNum, len(txResultBlocks)) {
+					if applyLoopCloseIsClean(lastBlock.blockNum, pe.maxBlockNum, len(txResultBlocks)) {
 						return nil
 					}
-					return &ErrLoopExhausted{From: startBlockNum, To: lastBlockNum, Reason: "block batch is full"}
+					return &ErrLoopExhausted{From: startBlockNum, To: lastBlock.blockNum, Reason: "block batch is full"}
 				}
 				switch applyResult := applyResult.(type) {
 				case *txResult:
@@ -627,12 +626,6 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 					pe.rs.SetTrace(false)
 				case *blockResult:
 					block := applyResult.Block
-					if block == nil {
-						fail.consider(0, common.Hash{}, true, errors.New("block result has no block"))
-						finalized = true
-						deliberateCancel()
-						continue
-					}
 					blockNum := block.NumberU64()
 					blockHash := block.Hash()
 					if finalized {
@@ -693,7 +686,8 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 					// sd.mem already has all TX writes when we reach here.
 
 					var blockValidatorWaiter *blockValidator
-					if blockNum > 0 && !applyResult.isPartial { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
+					validateFullBlock := blockNum > 0 && !applyResult.isPartial
+					if validateFullBlock { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
 						checkBloom := !pe.cfg.vmConfig.StatelessExec && !pe.cfg.vmConfig.NoReceipts
 						checkReceipts := checkBloom && pe.cfg.chainConfig.IsByzantium(blockNum)
 
@@ -708,7 +702,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 						// joined via Wait() below, after the other per-result work
 						// has had a chance to run in parallel with validation.
 						blockValidatorWaiter = newBlockValidator(pe.cfg.engine, applyResult.BlockGasUsed, applyResult.BlobGasUsed, checkReceipts, checkBloom, applyResult.Receipts,
-							lastHeader, txs, pe.cfg.chainConfig, pe.logger)
+							header, txs, pe.cfg.chainConfig, pe.logger)
 
 					}
 
@@ -716,12 +710,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 						pe.cfg.notifications.RecentReceipts.Add(applyResult.Receipts, txs, header)
 					}
 
-					if !hasLastBlockResult || blockNum > lastBlockNum {
+					if lastBlock.advance(blockNum, applyResult.lastTxNum) {
 						uncommittedBlocks++
-						pe.doms.SetTxNum(applyResult.lastTxNum)
-						lastBlockNum = blockNum
-						lastBlockTxNum = applyResult.lastTxNum
-						hasLastBlockResult = true
+						pe.doms.SetTxNum(lastBlock.lastTxNum)
 					}
 
 					blockUpdateCount = 0
@@ -737,8 +728,10 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 					// per-block blockValidator was spawned earlier (~30 LOC up)
 					// and runs concurrently with the work above.
 					isAmsterdam := pe.cfg.chainConfig.IsAmsterdam(block.Time())
-					if isAmsterdam || pe.cfg.experimentalBAL {
-						if err := bal.Process(rwTx, lastHeader, applyResult.TxIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger); err != nil {
+					// A partial block records only suffix I/O, so it cannot be checked
+					// against a full-block BAL.
+					if validateFullBlock && (isAmsterdam || pe.cfg.experimentalBAL) {
+						if err := bal.Process(rwTx, header, applyResult.TxIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger); err != nil {
 							failInfra(err)
 							continue
 						}
@@ -1276,7 +1269,14 @@ func (pe *parallelExecutor) decideStop(blockResult *blockResult, sizeCutPending 
 		sizeEst = pe.rs.SizeEstimateAfterCommitment() // 1x
 	}
 	blockNum := blockResult.Block.NumberU64()
-	switch execLoopShouldExit(blockNum, blockResult.Exhausted, sizeEst, pe.cfg.batchSize.Bytes(), pe.maxBlockNum, dbg.StopAfterBlock) {
+	switch execLoopShouldExit(execLoopExitInput{
+		blockNum:       blockNum,
+		exhausted:      blockResult.Exhausted,
+		sizeEst:        sizeEst,
+		batchLimit:     pe.cfg.batchSize.Bytes(),
+		maxBlockNum:    pe.maxBlockNum,
+		stopAfterBlock: dbg.StopAfterBlock,
+	}) {
 	case execLoopExitMaxReached, execLoopExitExhausted, execLoopExitStopAfter:
 		terminal = true
 	case execLoopExitSizeLimit:
@@ -1305,25 +1305,30 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 	// unwind (txNum/epoch — see StateCache.Unwind). The executor does not touch
 	// it during forward execution.
 
+	if execRequest.block == nil {
+		return errors.New("parallel exec request has no block")
+	}
+
 	prevSenderTx := map[accounts.Address]int{}
 	var scheduleable *blockExecutor
-	var executor *blockExecutor
 	blockNum := execRequest.block.NumberU64()
+	if len(execRequest.tasks) > 0 {
+		firstBlockNum := execRequest.tasks[0].BlockNumber()
+		lastBlockNum := execRequest.tasks[len(execRequest.tasks)-1].BlockNumber()
+		if firstBlockNum != blockNum || lastBlockNum != blockNum {
+			return fmt.Errorf("parallel exec request for block %d contains tasks for blocks %d..%d", blockNum, firstBlockNum, lastBlockNum)
+		}
+	}
+	executor, ok := pe.blockExecutors[blockNum]
+	if !ok {
+		executor = newBlockExec(execRequest.block, execRequest.gasPool, execRequest.accessList, execRequest.applyResults, execRequest.commitResults, execRequest.profile, execRequest.exhausted)
+	}
 
 	for i, txTask := range execRequest.tasks {
 		t := &execTask{
 			Task:               txTask,
 			index:              i,
 			shouldDelayFeeCalc: true,
-		}
-
-		if executor == nil {
-			var ok bool
-			executor, ok = pe.blockExecutors[blockNum]
-
-			if !ok {
-				executor = newBlockExec(execRequest.block, execRequest.gasPool, execRequest.accessList, execRequest.applyResults, execRequest.commitResults, execRequest.profile, execRequest.exhausted)
-			}
 		}
 
 		executor.tasks = append(executor.tasks, t)
@@ -1377,8 +1382,6 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 				pe.blockExecutors[blockNum] = executor
 			}
 			pe.Unlock()
-
-			executor = nil
 		}
 	}
 
@@ -1480,6 +1483,15 @@ const (
 	execLoopExitStopAfter
 )
 
+type execLoopExitInput struct {
+	blockNum       uint64
+	exhausted      *ErrLoopExhausted
+	sizeEst        uint64
+	batchLimit     uint64
+	maxBlockNum    uint64
+	stopAfterBlock uint64
+}
+
 // execLoopShouldExit evaluates the exec-loop's per-blockResult exit
 // decision in priority order. Pure function so the precedence is
 // unit-testable; the exec loop calls this and dispatches on the result.
@@ -1487,7 +1499,7 @@ const (
 // Priority order (matches production):
 //  1. sizeEst > batchLimit         (size-limit batch flush — most urgent)
 //  2. blockNum >= max              (clean end — stopReachedMax cause)
-//  3. blockResult.Exhausted != nil (per-cycle dispatch limit hit)
+//  3. exhausted != nil             (per-cycle dispatch limit hit)
 //  4. dbg.StopAfterBlock crossed   (debug-only halt)
 //  5. otherwise execLoopContinue   (schedule next block)
 //
@@ -1495,20 +1507,34 @@ const (
 // two conditions overlap (e.g. final block of a cycle that also crosses
 // the size limit), which is why the test pins the exact precedence.
 // See TestExecLoopShouldExitPriority.
-func execLoopShouldExit(blockNum uint64, exhausted *ErrLoopExhausted, sizeEst, batchLimit, maxBlockNum, stopAfterBlock uint64) execLoopExitDecision {
-	if sizeEst > batchLimit {
+func execLoopShouldExit(input execLoopExitInput) execLoopExitDecision {
+	if input.sizeEst > input.batchLimit {
 		return execLoopExitSizeLimit
 	}
-	if blockNum >= maxBlockNum {
+	if input.blockNum >= input.maxBlockNum {
 		return execLoopExitMaxReached
 	}
-	if exhausted != nil {
+	if input.exhausted != nil {
 		return execLoopExitExhausted
 	}
-	if stopAfterBlock > 0 && blockNum >= stopAfterBlock {
+	if input.stopAfterBlock > 0 && input.blockNum >= input.stopAfterBlock {
 		return execLoopExitStopAfter
 	}
 	return execLoopContinue
+}
+
+type appliedBlockProgress struct {
+	blockNum  uint64
+	lastTxNum uint64
+}
+
+func (progress *appliedBlockProgress) advance(blockNum, lastTxNum uint64) bool {
+	if blockNum <= progress.blockNum {
+		return false
+	}
+	progress.blockNum = blockNum
+	progress.lastTxNum = lastTxNum
+	return true
 }
 
 // applyLoopCloseIsClean reports whether an apply-loop close with no published

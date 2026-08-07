@@ -99,6 +99,16 @@ func newParallelTestBlock(blockNum uint64) *types.Block {
 	return types.NewBlockFromStorage(common.Hash{}, header, nil, nil, nil, nil)
 }
 
+func newParallelTestBlockFromTasks(tasks []exec.Task) *types.Block {
+	txs := make(types.Transactions, 0, len(tasks))
+	for _, task := range tasks {
+		if tx := task.Tx(); tx != nil {
+			txs = append(txs, tx)
+		}
+	}
+	return types.NewBlockFromStorage(tasks[0].BlockHash(), tasks[0].BlockHeader(), txs, nil, nil, nil)
+}
+
 func sleepWithContext(ctx context.Context, d time.Duration) error {
 	select {
 	case <-ctx.Done():
@@ -576,7 +586,7 @@ func executeParallelWithCheck(tb testing.TB, pe *parallelExecutor, tasks []exec.
 	ctx, cancel := context.WithCancel(context.Background())
 
 	applyResults := make(chan applyResult, 1000)
-	block := types.NewBlockFromStorage(tasks[0].BlockHash(), tasks[0].BlockHeader(), nil, nil, nil, nil)
+	block := newParallelTestBlockFromTasks(tasks)
 
 	pe.execRequests <- &execRequest{block: block, tasks: tasks, applyResults: applyResults, profile: profile}
 
