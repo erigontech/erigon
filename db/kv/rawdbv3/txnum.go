@@ -66,7 +66,7 @@ type DefaultTxBlockIndex struct{}
 
 func (d *DefaultTxBlockIndex) MaxTxNum(_ context.Context, tx kv.Tx, c kv.Cursor, blockNum uint64) (maxTxNum uint64, ok bool, err error) {
 	if c == nil {
-		c, err := tx.Cursor(kv.MaxTxNum)
+		c, err = tx.Cursor(kv.MaxTxNum)
 		if err != nil {
 			return 0, false, err
 		}
