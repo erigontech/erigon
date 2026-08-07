@@ -16,9 +16,15 @@
 
 // Package cache provides the process-global cache of latest committed state.
 //
-// StateCache represents one durable PlainStateVersion at a time. Read views
-// are bound to that version, and a publication revokes them before changing
-// cache contents. Snapshot-isolated caching is handled separately by kvcache.
+// StateCache represents exactly one durable PlainStateVersion at a time. It
+// does not keep old generations: a transaction whose snapshot has another
+// version receives an inert ReadView and reads from the database instead.
+//
+// Publishing canonical state revokes the current generation before changing
+// entries and exposes the next generation only after the database commit.
+// This keeps concurrent readers on one complete version even though the cache
+// itself is process-global. Multi-version snapshot caching remains the
+// responsibility of kvcache.
 package cache
 
 import "github.com/erigontech/erigon/db/kv"

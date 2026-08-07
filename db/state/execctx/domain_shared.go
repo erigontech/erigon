@@ -82,6 +82,10 @@ type accHolder interface {
 	SetChangesetAccumulator(acc *changeset.StateChangeSet)
 }
 
+// cacheViewFor binds a cache handle to the state version of tx. Most reads use
+// the base transaction and reuse the construction-time metadata stored on
+// SharedDomains. Reads through another transaction re-evaluate both its
+// version and whether its domain view has an exact frontier.
 func (sd *SharedDomains) cacheViewFor(tx kv.TemporalTx) cache.ReadView {
 	if sd.stateCache == nil || tx == nil {
 		return cache.ReadView{}
@@ -105,6 +109,10 @@ func (sd *SharedDomains) cacheViewFor(tx kv.TemporalTx) cache.ReadView {
 	return sd.stateCache.View(stateVersion)
 }
 
+// stateCacheViewEligible rejects a dependency-clamped domain view. Such a view
+// mixes database values with older file values and may later expose newer
+// files without changing PlainStateVersion; a fill from it could therefore
+// outlive the snapshot that produced the value.
 func stateCacheViewEligible(tx kv.TemporalTx) bool {
 	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
 		if _, ok := tx.Debug().DomainVisibleEnd(domain); !ok {
@@ -133,6 +141,9 @@ type SharedDomains struct {
 
 	logger log.Logger
 
+	// These fields describe the database snapshot used to construct this
+	// SharedDomains. The common read path reuses them instead of reading cache
+	// eligibility metadata for every GetLatest call.
 	baseViewID            uint64
 	baseStateVersion      uint64
 	baseStateVersionKnown bool
@@ -161,8 +172,10 @@ type SharedDomains struct {
 	// to read from the FCU's published SD without writing to it.
 	parent *SharedDomains
 
-	// Only canonical SharedDomains receive a publisher; speculative readers
-	// never change its generation or authoritative entries.
+	// stateCache provides version-bound reads and fills. cachePublisher is set
+	// only when this SharedDomains owns publication of durable canonical state;
+	// a speculative SharedDomains may read the cache but cannot move its
+	// generation or change its authoritative entries.
 	stateCache       *cache.StateCache
 	cachePublisher   cache.Publisher
 	cachePublication *cache.Publication
@@ -714,11 +727,19 @@ func (sd *SharedDomains) Unwind(txNumUnwindTo uint64, changeset *[kv.DomainLen][
 		}
 	}
 	if sd.cachePublisher.Enabled() {
+		// A canonical unwind changes the durable state represented by the
+		// process-global cache. Revoke current views now, then clear all entries
+		// when Commit publishes the post-unwind PlainStateVersion. Clearing is
+		// required because the unwind changeset is not a complete list of cache
+		// entries that may have come from the discarded fork.
 		if sd.cachePublication == nil {
 			sd.cachePublication = sd.cachePublisher.Begin()
 		}
 		sd.clearStateCache = true
 	} else {
+		// A speculative unwind changes only this SharedDomains and may later be
+		// discarded. Detach its reader so the rewound local view cannot read
+		// from or fill the cache's durable canonical generation.
 		sd.stateCache = nil
 	}
 }
@@ -777,8 +798,13 @@ func (sd *SharedDomains) GetCommitmentCtx() *commitmentdb.SharedDomainsCommitmen
 
 func (sd *SharedDomains) Logger() log.Logger { return sd.logger }
 
-// SetStateCacheReader attaches the process-global cache without granting
-// publication authority. A speculative unwind only detaches this reader.
+// SetStateCacheReader attaches the process-global cache for version-checked
+// reads and read-through fills. It does not grant authority to publish, clear,
+// or otherwise move the cache's durable generation.
+//
+// This restricted capability is safe for speculative execution: its writes
+// may be discarded, and its local unwind only detaches the reader. It cannot
+// change the canonical cache observed by other transactions.
 func (sd *SharedDomains) SetStateCacheReader(stateCache *cache.StateCache) {
 	if !dbg.UseStateCache || stateCache == nil {
 		return
@@ -786,8 +812,16 @@ func (sd *SharedDomains) SetStateCacheReader(stateCache *cache.StateCache) {
 	sd.stateCache = stateCache
 }
 
-// SetCanonicalStateCache also grants publication authority to Commit and
-// canonical unwind.
+// SetCanonicalStateCache attaches the same reader and also grants publication
+// authority. Use it only for a SharedDomains whose Commit makes state durable:
+// Commit may revoke existing views, apply the committed cache updates, and
+// publish the resulting PlainStateVersion. A canonical unwind may additionally
+// clear all entries before publishing its rewound version.
+//
+// Initialize binds the process-global cache to this SharedDomains' base
+// database version. Keeping this authority separate from SetStateCacheReader
+// prevents speculative rollback or unwind from changing globally visible
+// cache state.
 func (sd *SharedDomains) SetCanonicalStateCache(stateCache *cache.StateCache) {
 	sd.SetStateCacheReader(stateCache)
 	if sd.stateCache == nil || !sd.baseStateVersionKnown {
@@ -797,9 +831,16 @@ func (sd *SharedDomains) SetCanonicalStateCache(stateCache *cache.StateCache) {
 	sd.cachePublisher.Initialize(sd.baseStateVersion)
 }
 
-// GuardAggregatorForCache keeps one PlainStateVersion from exposing older
-// domain data after a cache view is bound to it. Call it whenever a StateCache
-// is wired over a DB, including when reader fills are disabled.
+// GuardAggregatorForCache prevents domain-file visibility from moving
+// backwards while StateCache is active. PlainStateVersion tracks durable
+// database state, but it does not change when the aggregator exposes an older
+// set of files. If visibility could be lowered independently, a transaction
+// and the cache could report the same version while representing different
+// effective states.
+//
+// The guard is required even when reader fills are disabled because cache hits
+// also rely on stable visibility. A database that cannot enforce the invariant
+// is rejected instead of silently permitting unsafe cache reads.
 func GuardAggregatorForCache(db any, sc *cache.StateCache) {
 	if sc == nil {
 		return
@@ -946,8 +987,14 @@ type cacheUpdate struct {
 	txN    uint64
 }
 
-// Commit flushes and commits tx before publishing the resulting cache
-// generation. tx must be a flush-specific transaction.
+// Commit makes the database transition durable before exposing its cache
+// generation. It first flushes state while collecting cache updates, revokes
+// the old ReadViews, and commits tx. Only after a successful commit does it
+// apply the collected updates and publish the resulting PlainStateVersion.
+//
+// Any error before the database commit leaves the entries unchanged and Abort
+// restores the previous generation. tx must be dedicated to this flush because
+// Commit consumes it.
 func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...func(tx kv.RwTx) error) error {
 	defer mxFlushTook.ObserveDuration(time.Now())
 	defer func() {

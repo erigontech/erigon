@@ -38,17 +38,26 @@ const (
 	avgStorageEntryBytes = 80
 )
 
+// cacheGeneration is immutable after it is stored. ReadView uses pointer
+// identity, rather than stateVersion alone, as its validity token: revoking
+// and later republishing the same state version must not make an old view
+// valid again.
 type cacheGeneration struct {
 	stateVersion uint64
 	active       bool
 }
 
-// StateCache holds account, storage, and code data for one durable state
-// version. A generation is made inactive before any publication changes the
-// underlying caches, so readers never observe a partially published version.
+// StateCache holds account, storage, and code values for exactly one durable
+// PlainStateVersion. Each reader carries the generation pointer that was
+// current for its database snapshot. Publication replaces that pointer before
+// changing entries, so old readers turn cache accesses into misses instead of
+// observing a mixture of the old and new states.
 type StateCache struct {
-	generation   atomic.Pointer[cacheGeneration]
-	admissionMu  sync.RWMutex
+	// Reads remain lock-free. admissionMu only serializes generation changes
+	// against fills, whose source read may have started before publication.
+	generation  atomic.Pointer[cacheGeneration]
+	admissionMu sync.RWMutex
+
 	caches       [kv.DomainLen]Cache
 	disableFills bool
 }
@@ -103,8 +112,9 @@ func (c *StateCache) generationFor(stateVersion uint64) *cacheGeneration {
 	return generation
 }
 
-// CurrentStateVersion reports the durable version represented by the cache.
-// It is unavailable while a publication is in progress.
+// CurrentStateVersion reports the durable PlainStateVersion represented by
+// all cache layers. It returns false while publication is in progress because
+// the old version has been revoked and the new version is not visible yet.
 func (c *StateCache) CurrentStateVersion() (uint64, bool) {
 	generation := c.generation.Load()
 	if generation == nil || !generation.active {
@@ -300,8 +310,9 @@ func (c *StateCache) PrintStatsAndReset() {
 	}
 }
 
-// Update is one committed cache value. Step is returned on a later GetLatest
-// hit; it is not used for cache coherence.
+// Update is one value written by the database transaction being published.
+// Step is retained because GetLatest must return the value's source step; cache
+// coherence depends only on the published PlainStateVersion.
 type Update struct {
 	Domain kv.Domain
 	Key    []byte
@@ -309,17 +320,23 @@ type Update struct {
 	Step   kv.Step
 }
 
-// Publisher is the canonical mutation handle for StateCache.
+// Publisher is the mutation capability for canonical state. Normal readers
+// receive only ReadView, while code that makes a database state durable uses a
+// Publisher to move every cache layer to the same PlainStateVersion.
 type Publisher struct {
 	c *StateCache
 }
 
+// Publisher returns a handle that can change the cache's canonical generation.
+// It must not be given to speculative execution whose writes may be discarded.
 func (c *StateCache) Publisher() Publisher { return Publisher{c: c} }
 
 func (p Publisher) Enabled() bool { return p.c != nil }
 
-// Initialize makes the cache represent stateVersion. A version mismatch drops
-// all entries because their source version is unknown.
+// Initialize binds the cache to the durable version seen by its canonical
+// owner. Existing entries are preserved when the version already matches. A
+// mismatch clears them because this single-version cache cannot prove that any
+// entry belongs to the owner's database snapshot.
 func (p Publisher) Initialize(stateVersion uint64) {
 	if p.c == nil {
 		return
@@ -342,15 +359,19 @@ func (p Publisher) Initialize(stateVersion uint64) {
 	c.generation.Store(&cacheGeneration{stateVersion: stateVersion, active: true})
 }
 
-// Publication keeps the previous generation available for rollback until the
-// database commit succeeds.
+// Publication represents one pending transition of the durable database
+// state. Begin makes the cache unavailable without changing its entries, so
+// Abort can restore the previous generation if the transaction rolls back.
+// Publish consumes the transition after the database commit succeeds.
 type Publication struct {
 	c          *StateCache
 	previous   *cacheGeneration
 	transition *cacheGeneration
 }
 
-// Begin revokes every existing ReadView before the database commit starts.
+// Begin revokes every existing ReadView and prevents creation of a new live
+// view. It does not alter cache entries; they remain available for Abort until
+// the canonical database transaction either commits or rolls back.
 func (p Publisher) Begin() *Publication {
 	if p.c == nil {
 		return nil
@@ -368,7 +389,9 @@ func (p Publisher) Begin() *Publication {
 	return &Publication{c: c, previous: previous, transition: transition}
 }
 
-// Abort restores the unchanged cache when the database transaction rolls back.
+// Abort restores the previous generation after a failed or abandoned database
+// transaction. The entries were not changed during the transition, so the old
+// ReadViews become valid again together with their database version.
 func (p *Publication) Abort() {
 	if p == nil || p.c == nil {
 		return
@@ -382,9 +405,15 @@ func (p *Publication) Abort() {
 	p.c = nil
 }
 
-// Publish applies the committed batch and makes its state version visible.
-// clear is used for canonical unwind because entries absent from the unwind
-// callbacks may still belong to the discarded fork.
+// Publish applies updates from a successful database transaction and exposes
+// stateVersion as one complete cache generation. The caller must invoke it
+// only after the database commit, so a visible cache generation is never ahead
+// of durable state.
+//
+// A forward commit can retain entries that were not updated because they still
+// have the same value in the new state. Canonical unwind sets clear because its
+// callbacks do not enumerate every value that may belong to the discarded
+// fork.
 func (p *Publication) Publish(stateVersion uint64, updates []Update, clear bool) {
 	if p == nil || p.c == nil {
 		return
@@ -404,6 +433,8 @@ func (p *Publication) Publish(stateVersion uint64, updates []Update, clear bool)
 	p.c = nil
 }
 
+// Clear revokes current views, removes every cached value, and publishes an
+// empty generation for stateVersion.
 func (p Publisher) Clear(stateVersion uint64) {
 	publication := p.Begin()
 	publication.Publish(stateVersion, nil, true)

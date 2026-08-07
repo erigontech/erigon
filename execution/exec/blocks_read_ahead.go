@@ -85,6 +85,11 @@ type cachePopulatingGetter struct {
 	view cache.ReadView
 }
 
+// readAheadGetter enables fills only when the transaction has an exact domain
+// frontier. StateCache.View performs the second check: its PlainStateVersion
+// must match the currently published generation. Failure of either check keeps
+// read-ahead useful for the OS page cache without admitting unsafe values into
+// StateCache.
 func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache) kv.TemporalGetter {
 	if sc == nil {
 		return ttx

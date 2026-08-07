@@ -18,15 +18,24 @@ package cache
 
 import "github.com/erigontech/erigon/db/kv"
 
-// ReadView is a cache handle bound to one durable state version. Its zero value
-// is inert. A publication invalidates the view before changing cache contents.
+// ReadView is a cache handle bound to one durable PlainStateVersion. It does
+// not pin the cache or delay publication. Instead, each read checks the
+// immutable generation token before and after accessing an underlying cache,
+// so publication concurrent with the access turns the result into a miss.
+//
+// Fills check the same token while holding the cache admission lock. A value
+// read from an old database snapshot therefore cannot enter a newer cache
+// generation. The zero value is inert and safely falls back to the database.
 type ReadView struct {
 	c          *StateCache
 	generation *cacheGeneration
 }
 
-// View returns an inert handle unless stateVersion is the current durable
-// version represented by the cache.
+// View returns a live handle only when the cache currently represents
+// stateVersion and no publication is in progress. Callers must pass the
+// version of their own database snapshot, not a separately sampled latest
+// version. A mismatch returns an inert view rather than serving newer or older
+// cached state.
 func (c *StateCache) View(stateVersion uint64) ReadView {
 	if c == nil {
 		return ReadView{}
