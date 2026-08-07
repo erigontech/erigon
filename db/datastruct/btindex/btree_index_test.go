@@ -825,3 +825,150 @@ func TestNodeEncode_NoAlloc(t *testing.T) {
 	})
 	require.Zero(t, allocs)
 }
+
+func Test_BtreeIndex_GetValSize(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	logger := log.New()
+	keyCount := 1200
+	compressFlags := seg.CompressVals
+
+	dataPath := generateKV(t, tmp, 20, 3000, keyCount, logger, compressFlags)
+	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
+	buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
+
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, compressFlags, false)
+	require.NoError(t, err)
+	defer bt.Close()
+	defer kv.Close()
+
+	keys, err := pivotKeysFromKV(dataPath)
+	require.NoError(t, err)
+	require.NotEmpty(t, keys)
+
+	getter := seg.NewReader(kv.MakeGetter(), compressFlags)
+
+	for i, key := range keys {
+		_, v, _, found, err := bt.Get(key, getter)
+		require.NoErrorf(t, err, "i=%d", i)
+		require.Truef(t, found, "i=%d", i)
+
+		size, sizeFound, err := bt.GetValSize(key, getter)
+		require.NoErrorf(t, err, "i=%d", i)
+		require.Truef(t, sizeFound, "i=%d", i)
+		require.Equalf(t, len(v), size, "i=%d", i)
+	}
+
+	for i := range keys {
+		miss := bytes.Clone(keys[i])
+		miss[0] ^= 0xff
+		_, v, _, found, err := bt.Get(miss, getter)
+		require.NoErrorf(t, err, "i=%d", i)
+		size, sizeFound, err := bt.GetValSize(miss, getter)
+		require.NoErrorf(t, err, "i=%d", i)
+		require.Equalf(t, found, sizeFound, "i=%d", i)
+		require.Equalf(t, len(v), size, "i=%d", i)
+	}
+}
+
+// A nil lookup key must resolve the same way in GetValSize as in Get - including
+// over a file whose first key is empty - and must not materialize a value.
+func Test_BtreeIndex_GetValSize_EmptyKey(t *testing.T) {
+	logger := log.New()
+	compressFlags := seg.CompressVals
+
+	check := func(t *testing.T, dataPath string) {
+		t.Helper()
+		indexPath := filepath.Join(filepath.Dir(dataPath), filepath.Base(dataPath)+".bti")
+		buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
+
+		kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, compressFlags, false)
+		require.NoError(t, err)
+		defer bt.Close()
+		defer kv.Close()
+
+		getter := seg.NewReader(kv.MakeGetter(), compressFlags)
+
+		_, v, _, found, err := bt.Get(nil, getter)
+		require.NoError(t, err)
+
+		size, sizeFound, err := bt.GetValSize(nil, getter)
+		require.NoError(t, err)
+		require.Equal(t, found, sizeFound)
+		require.Equal(t, len(v), size)
+
+		allocs := testing.AllocsPerRun(100, func() {
+			if _, _, err := bt.GetValSize(nil, getter); err != nil {
+				t.Fatal(err)
+			}
+		})
+		require.Zero(t, allocs)
+	}
+
+	t.Run("first key not empty", func(t *testing.T) {
+		tmp := t.TempDir()
+		check(t, generateKV(t, tmp, 20, 3000, 100, logger, compressFlags))
+	})
+	t.Run("first key empty", func(t *testing.T) {
+		tmp := t.TempDir()
+		dataPath := filepath.Join(tmp, "emptyfirstkey.kv")
+		comp, err := seg.NewCompressor(t.Context(), "cmp", dataPath, tmp, seg.DefaultCfg, log.LvlDebug, logger)
+		require.NoError(t, err)
+		w := seg.NewWriter(comp, compressFlags)
+		for _, pair := range [][2]string{{"", strings.Repeat("first-value", 100)}, {"a", "second"}, {"b", "third"}} {
+			_, err = w.Write([]byte(pair[0]))
+			require.NoError(t, err)
+			_, err = w.Write([]byte(pair[1]))
+			require.NoError(t, err)
+		}
+		require.NoError(t, comp.Compress())
+		comp.Close()
+
+		keys, err := pivotKeysFromKV(dataPath)
+		require.NoError(t, err)
+		require.Empty(t, keys[0])
+
+		check(t, dataPath)
+	})
+}
+
+func Benchmark_BtreeIndex_GetVsGetValSize(b *testing.B) {
+	tmp := b.TempDir()
+	logger := log.New()
+	keyCount := 10000
+	compressFlags := seg.CompressVals
+
+	dataPath := generateKV(b, tmp, 20, 3000, keyCount, logger, compressFlags)
+	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
+	buildBtreeIndex(b, dataPath, indexPath, compressFlags, 1, logger, true)
+
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, compressFlags, false)
+	require.NoError(b, err)
+	defer bt.Close()
+	defer kv.Close()
+
+	keys, err := pivotKeysFromKV(dataPath)
+	require.NoError(b, err)
+
+	getter := seg.NewReader(kv.MakeGetter(), compressFlags)
+
+	b.Run("Get", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; b.Loop(); i++ {
+			_, _, _, _, err := bt.Get(keys[i%len(keys)], getter)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+	b.Run("GetValSize", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; b.Loop(); i++ {
+			_, _, err := bt.GetValSize(keys[i%len(keys)], getter)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}
