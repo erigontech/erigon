@@ -149,6 +149,7 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (E
 			if err := rawdb.WriteBlockAccessListBytes(blockOverlay, hash, height, blockAccessList); err != nil {
 				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBlockAccessList, block %d: %s", height, err)
 			}
+			e.readAheader.AddBlockAccessList(blockAccessList, hash)
 		}
 		e.logger.Trace("Inserted block", "hash", hash, "number", header.Number)
 	}
