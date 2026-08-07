@@ -426,8 +426,6 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		stateFinalized              = lastProcessedState.FinalizedCheckpoint()
 		justificationBits           = lastProcessedState.JustificationBits().Copy()
 	)
-	f.operationsPool.NotifyBlock(block.Block)
-
 	// Eagerly compute unrealized justification and finality (spec: compute_pulled_up_tip)
 	if err := statechange.ProcessJustificationBitsAndFinality(lastProcessedState, nil); err != nil {
 		return err

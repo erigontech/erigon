@@ -10,6 +10,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -621,7 +622,7 @@ func TestVersionedRead_E2_StaleMapReadCaughtAtCommit(t *testing.T) {
 			return VersionValid
 		}
 		return VersionInvalid
-	}, false, "")
+	}, true, false, false, "")
 	assert.Equal(t, VersionInvalid, valid, "commit-time validation catches the stale read")
 }
 
@@ -669,16 +670,18 @@ func TestVersionedRead_D1_WriteSetHitWithStaleReadSetPanics(t *testing.T) {
 	// versionMap Done at tx 3 — higher than the readSet's stale tx-1 entry.
 	mvhm.WriteBalance(addr, Version{TxIndex: 3, Incarnation: 0}, *uint256.NewInt(30), true)
 
-	// Seed a stale readSet entry at a lower version.
-	ibs.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{
-		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 0}},
-		Val:        *uint256.NewInt(99),
-	})
 	// Seed a current-tx writeSet entry (intra-tx write) so the writeSet
 	// branch fires.
 	err := ibs.SetBalance(addr, *uint256.NewInt(77), 0)
 	require.NoError(t, err)
 
+	// Seed a stale readSet entry at a lower version AFTER the write:
+	// seeding it first would already panic inside SetBalance's account
+	// refresh, before the writeSet-hit branch under test is reached.
+	ibs.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{
+		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 0}},
+		Val:        *uint256.NewInt(99),
+	})
 	defer func() {
 		r := recover()
 		require.NotNil(t, r, "must panic when writeSet hit conflicts with stale readSet at versionMap Done")
@@ -687,4 +690,29 @@ func TestVersionedRead_D1_WriteSetHitWithStaleReadSetPanics(t *testing.T) {
 		assert.ErrorIs(t, err, ErrDependency)
 	}()
 	_, _ = ibs.GetBalance(addr)
+}
+
+// The nil≡empty arm of readValueUnchanged carries the same gates as
+// validation's dead-equivalence: no equivalence pre-EIP-161, and none for
+// AuRa's retained SystemAddress.
+func TestReadValueUnchanged_NilEmptyArmGated(t *testing.T) {
+	newIBS := func(addr accounts.Address, eip161 bool, isAura bool) *IntraBlockState {
+		ibs := NewWithVersionMap(&emptyReader{}, NewVersionMap(nil))
+		t.Cleanup(func() { ibs.Release(false) })
+		ibs.SetTxContext(0, 2)
+		ibs.eip161 = eip161
+		ibs.isAura = isAura
+		ibs.versionedReads.SetAddress(addr, VersionedRead[AccountView]{
+			ReadHeader: ReadHeader{Source: StorageRead, Version: UnknownVersion},
+		})
+		return ibs
+	}
+	r := &readPathResult{mapAddressVal: &accounts.Account{CodeHash: accounts.EmptyCodeHash}}
+	sys := params.SystemAddress
+	other := accounts.InternAddress([20]byte{0x18, 0x01})
+	require.True(t, newIBS(other, true, false).readValueUnchanged(other, AddressPath, accounts.NilKey, r))
+	require.False(t, newIBS(other, false, false).readValueUnchanged(other, AddressPath, accounts.NilKey, r))
+	require.False(t, newIBS(sys, true, true).readValueUnchanged(sys, AddressPath, accounts.NilKey, r))
+	require.True(t, newIBS(sys, true, false).readValueUnchanged(sys, AddressPath, accounts.NilKey, r))
+	require.True(t, newIBS(other, true, true).readValueUnchanged(other, AddressPath, accounts.NilKey, r))
 }

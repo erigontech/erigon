@@ -885,7 +885,7 @@ func (c *AuRa) FinalizeAndAssemble(config *chain.Config, header *types.Header, s
 	}
 
 	// Assemble and return the final block for sealing
-	return types.NewBlockForAsembling(header, txs, uncles, receipts, withdrawals), nil, nil
+	return types.NewBlockForAsembling(header, txs, uncles, receipts, withdrawals, nil), nil, nil
 }
 
 // SignerFn hashes and signs the data to be signed by a backing account.
