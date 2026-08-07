@@ -212,46 +212,50 @@ func (v *pbinVerifier) recordAt(nodePath *pbinBitpath) ([2]pbinCell, error) {
 	return cells, nil
 }
 
-// checkPlainKeys asserts every stored leaf sits where its own key derivation puts
-// it: the record's path, the child bit and the cell's prefix must spell exactly
-// treeKey(plainKey). A slot routed into the wrong zone still builds a tree that
-// hashes consistently, so position against derivation is what catches it.
+// checkPlainKeys asserts every reachable stored leaf sits where its own key
+// derivation puts it: the record's path, the child bit and the cell's prefix
+// must spell exactly treeKey(plainKey). A slot routed into the wrong zone still
+// builds a tree that hashes consistently, so position against derivation is
+// what catches it. The walk starts at the stored root cell: a dropped subtree's
+// records stay behind unreferenced — nothing enumerates them to delete them —
+// so the reachable set is the tree.
 func (v *pbinVerifier) checkPlainKeys() (int, error) {
 	root, err := v.rootCell()
 	if err != nil {
 		return 0, err
 	}
-	leaves := 0
-	if root.kind == pbinNodeLeaf {
-		var start pbinBitpath
-		if err = v.checkLeafPosition(&start, &root); err != nil {
+	var start pbinBitpath
+	return v.checkCellLeaves(&start, &root)
+}
+
+func (v *pbinVerifier) checkCellLeaves(start *pbinBitpath, c *pbinCell) (int, error) {
+	switch c.kind {
+	case pbinNodeLeaf:
+		if err := v.checkLeafPosition(start, c); err != nil {
 			return 0, err
 		}
-		leaves++
-	}
-	paths, err := v.recordPaths()
-	if err != nil {
-		return 0, err
-	}
-	for _, path := range paths {
-		cells, err := v.recordAt(&path)
+		return 1, nil
+	case pbinNodeBranch:
+		nodePath := *start
+		nodePath.append(&c.prefix)
+		cells, err := v.recordAt(&nodePath)
 		if err != nil {
 			return 0, err
 		}
+		leaves := 0
 		for bit := range cells {
-			c := &cells[bit]
-			if c.kind != pbinNodeLeaf {
-				continue
-			}
-			start := path
-			start.appendBit(uint64(bit))
-			if err = v.checkLeafPosition(&start, c); err != nil {
+			childStart := nodePath
+			childStart.appendBit(uint64(bit))
+			n, err := v.checkCellLeaves(&childStart, &cells[bit])
+			if err != nil {
 				return 0, err
 			}
-			leaves++
+			leaves += n
 		}
+		return leaves, nil
+	default:
+		return 0, fmt.Errorf("pbin verify: cell at %d bits has no node kind", start.bitLen)
 	}
-	return leaves, nil
 }
 
 func (v *pbinVerifier) checkLeafPosition(start *pbinBitpath, c *pbinCell) error {

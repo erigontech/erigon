@@ -753,19 +753,54 @@ the group-boundary shape.
 - Modify: `execution/commitment/pbin_fuzz_test.go`
 - Modify: `execution/commitment/pbin_process_test.go`
 
-- [ ] extend `pbinFuzzCorpus` (`pbin_fuzz_test.go:54`) to generate delegated
+- [x] extend `pbinFuzzCorpus` (`pbin_fuzz_test.go:54`) to generate delegated
       accounts, accounts sharing bytecode, all-zero chunks, and chunk counts
-      straddling the 255/256 and 511/512 group boundaries
-- [ ] extend `pbinFuzzBatches` to delete accounts inside a batch, so reclamation
-      is exercised against the oracle and not only by hand-written cases
-- [ ] confirm `pbinTestCorpus.entries` (`pbin_process_test.go:74`) already
+      straddling the 255/256 and 511/512 group boundaries (the size list became
+      `pbinFuzzCodeShapes`: a fixed indicator, zero-tailed codes, and chunk
+      counts 255/256/257 and 511/512/513; eight address seeds fold onto shapes
+      modulo four, so seeds four apart always share bytecode — one shared
+      indicator is also two authorities on one target; a zero value byte became
+      a storage zeroization write)
+- [x] extend `pbinFuzzBatches` to delete accounts inside a batch, so reclamation
+      is exercised against the oracle and not only by hand-written cases (a new
+      delete selector bit; the existing cut decides which side of a batch
+      boundary a removal lands on, which is what distinguishes a materialized
+      account's removal from a merged create-and-destroy)
+- [x] confirm `pbinTestCorpus.entries` (`pbin_process_test.go:74`) already
       describes the delegation leaf after Task 7; extend it only if the oracle
-      and the engine disagree
-- [ ] add seed corpus entries for each Task 10 case
-- [ ] gate: `go test ./execution/commitment/ -count=1 -run FuzzPBinProcessMatchesOracle`
+      and the engine disagree (the delegation rule carried over unchanged, but
+      the oracle and engine did disagree on removals and on zeroing overwrites —
+      see the ➕ notes)
+- [x] add seed corpus entries for each Task 10 case
+- [x] gate: `go test ./execution/commitment/ -count=1 -run FuzzPBinProcessMatchesOracle`
       then `go test ./execution/commitment/ -fuzz FuzzPBinProcessMatchesOracle -fuzztime=5m`
-- [ ] `make lint` until clean; commit as
+      (seeds green; 5-minute fuzz clean)
+- [x] `make lint` until clean; commit as
       `execution/commitment: fuzz pbin over delegation, sharing and group boundaries`
+
+➕ The removal seeds were Red two ways, so the flat-union oracle was replaced by
+a batch-aware fold, `pbinTestFinalEntries` (`entries` now delegates to it with
+one batch). First, the union is cut-blind: an account created and destroyed
+inside one batch inserts no chunks, while the same writes split by the cut
+insert and keep them — only a per-batch fold (last update per plain key, then
+removals dropping the address's header and storage leaves, chunk leaves
+unowned) can state both. Second, a latent gap the removals exposed for values
+too: a leaf zeroed by a later batch stayed non-zero in the union, though the
+engine removes it — the fold treats a zero value as absent, and two seeds pin
+that (a live slot zeroed, basic data zeroed while the code-hash leaf stays).
+➕ `TestPBinFuzzCorpusCoversNewShapes` pins the generator's reach — delegation,
+sharing, zero tails, all six straddling chunk counts, removal — so the seeds
+cannot go vacuous if the shape table drifts.
+⚠️ The fuzz surfaced a record-hygiene property of subtree drops: `updateCell`
+resets the dropped cell without visiting the records beneath it (nothing
+enumerates them through the context), so a removed account's branch records
+stay behind unreferenced. The root recompute was already anchored at the stored
+root cell; `checkPlainKeys` walked every record and counted the orphans'
+leaves, and now walks reachably from the root cell instead
+(`checkCellLeaves`). The stale records are unreachable — no live cell
+references a dropped prefix — so this is domain garbage, not a correctness
+bug; cleaning it up would mean unfolding the dropped subtree, defeating the
+O(1) drop, and would bloat a witness pass with the removed subtree's reads.
 
 ### Task 12: Cite the spec by section instead of by line number
 
