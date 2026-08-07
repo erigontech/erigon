@@ -663,8 +663,11 @@ func modexpU256Applicable(base, mod []byte) bool {
 // division and no heap allocation.
 func modexpU256(dst, base, exp, mod []byte) {
 	// Operands are padded to their declared field widths, which EIP-7823 caps at
-	// 1024 bytes. Both loops below cost the field width, not the value, so the
+	// 1024 bytes. The loops below cost the field width, not the value, so the
 	// two degenerate results are taken before entering them.
+	for len(exp) >= 8 && binary.BigEndian.Uint64(exp) == 0 {
+		exp = exp[8:]
+	}
 	for len(exp) > 0 && exp[0] == 0 {
 		exp = exp[1:]
 	}
