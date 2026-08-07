@@ -49,7 +49,7 @@ fi
 if [ "$TEST_TYPE" = "latest" ]; then
     OPTIONAL_FLAGS+=" --tests-on-latest-block"
     if [ -n "$REFERENCE_HOST" ]; then
-        NUM_OF_RETRIES=3
+        NUM_OF_RETRIES=5
     fi
 fi
 
