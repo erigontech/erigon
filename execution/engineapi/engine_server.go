@@ -361,7 +361,17 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 
 	var blockAccessListBytes []byte
 	var err error
-	if version >= clparams.GloasVersion && s.config.IsEIPEnabled(7928, header.Time) {
+	if version < clparams.GloasVersion && req.SlotNumber != nil {
+		return nil, &rpc.InvalidParamsError{Message: "unexpected slotNumber before engine_newPayloadV5"}
+	}
+	if version < clparams.GloasVersion && req.BlockAccessList != nil && len(*req.BlockAccessList) > 0 {
+		// Reject only a NON-EMPTY block access list pre-Amsterdam. An empty ("0x")
+		// param must fall through rather than error here: a pre-fork block that
+		// carries a bal-hash header is rejected by the ensuing block-hash mismatch,
+		// and erroring on the empty param would pre-empt that expected path.
+		return nil, &rpc.InvalidParamsError{Message: "unexpected blockAccessList in pre-Amsterdam payload"}
+	}
+	if version >= clparams.GloasVersion {
 		if req.BlockAccessList == nil {
 			return nil, &rpc.InvalidParamsError{Message: "blockAccessList missing"}
 		}
@@ -389,12 +399,6 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		} else {
 			return nil, &rpc.InvalidParamsError{Message: "slotNumber missing"}
 		}
-	} else if req.BlockAccessList != nil && len(*req.BlockAccessList) > 0 {
-		// Reject only a NON-EMPTY block access list pre-Amsterdam. An empty ("0x")
-		// param must fall through rather than error here: a pre-fork block that
-		// carries a bal-hash header is rejected by the ensuing block-hash mismatch,
-		// and erroring on the empty param would pre-empt that expected path.
-		return nil, &rpc.InvalidParamsError{Message: "unexpected blockAccessList in pre-Amsterdam payload"}
 	}
 
 	if (!s.config.IsCancun(header.Time) && version >= clparams.DenebVersion) ||
