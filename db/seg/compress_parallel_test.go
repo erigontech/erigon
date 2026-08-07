@@ -134,7 +134,7 @@ func TestCompressParallelBatchingBackpressureNoDeadlock(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		assertSameOutputEveryWorkerCount(t, corpus, 2163753720, 4)
+		assertSameOutputEveryWorkerCount(t, corpus, 2163753720, 1, 4)
 	}()
 	select {
 	case <-done:
