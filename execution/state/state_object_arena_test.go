@@ -204,6 +204,28 @@ func TestStateObjectArenaFallsBackToHeap(t *testing.T) {
 	require.NotNil(t, a.alloc(), "rewind must make the arena usable again")
 }
 
+// TestStateObjectArenaDropsSlabsPastResident pins that a transaction may draw
+// past the resident threshold and that rewind gives those slabs back, so an
+// outlier does not park them for the life of the worker.
+func TestStateObjectArenaDropsSlabsPastResident(t *testing.T) {
+	var a stateObjectArena
+
+	for i := range arenaSlabSize * (arenaResidentSlabs + 2) {
+		require.NotNil(t, a.alloc(), "slot %d must come from the arena", i)
+	}
+	require.Len(t, a.slabs, arenaResidentSlabs+2)
+
+	a.rewind()
+	require.Len(t, a.slabs, arenaResidentSlabs, "rewind must drop the slabs past the resident threshold")
+	for i, slab := range a.slabs[:cap(a.slabs)][arenaResidentSlabs:] {
+		require.Nil(t, slab, "dropped slab %d is still reachable from the backing array", i)
+	}
+
+	so := a.alloc()
+	require.NotNil(t, so)
+	require.Same(t, so, &a.slabs[0][0], "rewind must restart at the first slab")
+}
+
 // TestStateObjectArenaPointersSurviveGrowth pins that a pointer handed out
 // before the arena grows still refers to the same object afterwards.
 func TestStateObjectArenaPointersSurviveGrowth(t *testing.T) {

@@ -16,10 +16,15 @@
 
 package state
 
+// The two bounds are separate: maxSlabs is what one transaction may draw,
+// residentSlabs what the arena keeps between them. An outlier is therefore
+// served from the arena rather than the heap, without parking its slabs for the
+// life of the worker.
 const (
-	arenaSlabSize   = 64
-	arenaMaxSlabs   = 128
-	arenaMaxObjects = arenaSlabSize * arenaMaxSlabs
+	arenaSlabSize      = 64
+	arenaResidentSlabs = 128
+	arenaMaxSlabs      = 512
+	arenaMaxObjects    = arenaSlabSize * arenaMaxSlabs
 )
 
 // stateObjectArena is a slab allocator for stateObjects that are never cached
@@ -59,9 +64,10 @@ func (a *stateObjectArena) grow() bool {
 
 // rewind makes every slot handed out since the last rewind available again.
 // Slots are reset here rather than on hand-out so a slot that is not reused
-// stops retaining the account and code it last held.
+// stops retaining the account and code it last held. Slabs past the resident
+// threshold are dropped instead, which also skips resetting them.
 func (a *stateObjectArena) rewind() {
-	for s := 0; s <= a.slab && s < len(a.slabs); s++ {
+	for s := 0; s <= a.slab && s < len(a.slabs) && s < arenaResidentSlabs; s++ {
 		used := a.slabs[s][:]
 		if s == a.slab {
 			used = used[:a.idx]
@@ -69,6 +75,12 @@ func (a *stateObjectArena) rewind() {
 		for i := range used {
 			used[i].reset()
 		}
+	}
+	for s := arenaResidentSlabs; s < len(a.slabs); s++ {
+		a.slabs[s] = nil
+	}
+	if len(a.slabs) > arenaResidentSlabs {
+		a.slabs = a.slabs[:arenaResidentSlabs]
 	}
 	a.slab, a.idx = 0, 0
 }
