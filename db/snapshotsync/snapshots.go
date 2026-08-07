@@ -1558,6 +1558,7 @@ func (s *BaseRoSnapshots) RetireFilesBelow(typ snaptype.Type, blockTo uint64, on
 			return false, fmt.Errorf("onDelete: %w", err)
 		}
 	}
+	s.logger.Info("[snapshots] retired old block files", "type", typ.Name(), "removed", len(names), "blockTo", blockTo)
 	return true, s.retireFiles(mvcc.RetireReasonAged, names...)
 }
 

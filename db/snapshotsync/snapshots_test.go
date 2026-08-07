@@ -17,6 +17,7 @@
 package snapshotsync
 
 import (
+	"bytes"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -492,6 +493,37 @@ func TestRetireFilesBelowSkipsWindowTooSmall(t *testing.T) {
 	require.NoError(err)
 	require.False(retired)
 	require.Equal(2, s.dirty[txEnum].Len())
+}
+
+// Block-segment retirement must be visible in the log: it is the only signal an operator
+// (or the QA retirement check) has that the prune window actually dropped files, since
+// unlink happens later, off the retire call.
+func TestRetireFilesBelowLogsWhatItRetired(t *testing.T) {
+	dir := t.TempDir()
+	require := require.New(t)
+
+	logger := log.New()
+	const mergeLimit = snaptype.Erigon2MergeLimit
+	for _, snT := range snaptype2.BlockSnapshotTypes {
+		createTestSegmentFile(t, 0, mergeLimit, snT.Enum(), dir, version.V1_0, logger)
+		createTestSegmentFile(t, mergeLimit, 2*mergeLimit, snT.Enum(), dir, version.V1_0, logger)
+		createTestSegmentFile(t, 2*mergeLimit, 3*mergeLimit, snT.Enum(), dir, version.V1_0, logger)
+	}
+
+	output := new(bytes.Buffer)
+	logger.SetHandler(log.StreamHandler(output, log.LogfmtFormat()))
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(s.OpenFolder())
+
+	retired, err := s.RetireFilesBelow(snaptype2.Transactions, 2*mergeLimit, func([]string) error { return nil })
+	require.NoError(err)
+	require.True(retired)
+
+	require.Contains(output.String(), "retired old block files")
+	require.Contains(output.String(), "type=transactions")
+	require.Contains(output.String(), "removed=1")
+	require.Contains(output.String(), "blockTo=200000")
 }
 
 // The SnapshotDownloadToBlock cleanup: after downloading past the target block, the extra
