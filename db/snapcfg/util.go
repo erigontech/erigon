@@ -130,6 +130,27 @@ func keepNewest(best *btree.Map[string, PreverifiedItem], kept *btree.Map[string
 	kept.Set(key, v)
 }
 
+const maxLoggedDroppedNames = 16
+
+// droppedNames returns the names in all that kept no longer contains, capped at
+// limit, along with the total dropped count.
+func droppedNames(all, kept []PreverifiedItem, limit int) (names []string, dropped int) {
+	keptNames := make(map[string]struct{}, len(kept))
+	for _, item := range kept {
+		keptNames[item.Name] = struct{}{}
+	}
+	for _, item := range all {
+		if _, ok := keptNames[item.Name]; ok {
+			continue
+		}
+		dropped++
+		if len(names) < limit {
+			names = append(names, item.Name)
+		}
+	}
+	return names, dropped
+}
+
 func (p Preverified) Typed(types []snaptype.Type) Preverified {
 	var bestVersions btree.Map[string, PreverifiedItem]
 	var keptVersions btree.Map[string, snaptype.Version]
@@ -246,14 +267,9 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 		return strings.Compare(i.Name, j.Name)
 	})
 	if len(p.Items) != len(versioned) {
-		log.Root().Warn("Preverified list reduced after applying type filter", "from", len(p.Items), "to", len(versioned))
-		// for _, v := range p.Items {
-		// 	if !slices.ContainsFunc(versioned, func(item PreverifiedItem) bool {
-		// 		return item.Name == v.Name
-		// 	}) {
-		// 		log.Root().Warn("Preverified item removed by type filter", "name", v.Name)
-		// 	}
-		// }
+		names, dropped := droppedNames(p.Items, versioned, maxLoggedDroppedNames)
+		log.Root().Warn("Preverified list reduced after applying type filter",
+			"from", len(p.Items), "to", len(versioned), "dropped", dropped, "names", strings.Join(names, ","))
 	} else {
 		log.Root().Debug("Preverified list has same len after applying type filter", "len", len(p.Items))
 	}

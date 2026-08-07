@@ -19,6 +19,7 @@ package integrity
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -170,9 +171,9 @@ func TestVerifyTorrentFilesUnresolvableSubdirFailFast(t *testing.T) {
 	require.ErrorContains(t, err, "hash mismatch")
 }
 
-// A data file that exists but cannot be stat'ed must be accounted for like an
-// unreadable path — skipped and reported — instead of aborting the run before a
-// single piece hash is checked.
+// A data file that exists but cannot be stat'ed must be skipped and reported
+// instead of aborting the run before a single piece hash is checked. It hides no
+// torrents, so it counts once, as a data file — never also as an unreadable path.
 func TestVerifyTorrentFilesUnreadableDataFile(t *testing.T) {
 	dir := t.TempDir()
 	writeTorrentPair(t, dir, "corrupt.seg", true)
@@ -186,7 +187,8 @@ func TestVerifyTorrentFilesUnreadableDataFile(t *testing.T) {
 
 	err := VerifyTorrentFiles(context.Background(), dir, false, log.New())
 	require.Error(t, err)
-	require.ErrorContains(t, err, "unreadable data file(s)")
+	require.ErrorContains(t, err, "1 unreadable data file(s)")
+	require.NotContains(t, err.Error(), "unreadable path(s)")
 	// The reachable file was still verified rather than skipped by the abort.
 	require.ErrorContains(t, err, "1 file(s) failed verification")
 }
@@ -204,6 +206,24 @@ func TestVerifyTorrentFilesCancelledKeepsScanError(t *testing.T) {
 	err := VerifyTorrentFiles(ctx, dir, false, log.New())
 	require.ErrorIs(t, err, context.Canceled)
 	require.ErrorContains(t, err, "1 unreadable path(s)")
+}
+
+// Cancellation must be observed while iterating a directory's own entries, not
+// only when descending into a subdirectory: the flat dirs are the largest ones.
+func TestCollectTorrentFilesCancelledFlatDir(t *testing.T) {
+	dir := t.TempDir()
+	const total = 64
+	for i := range total {
+		name := filepath.Join(dir, fmt.Sprintf("f%02d.seg.torrent", i))
+		require.NoError(t, os.WriteFile(name, nil, 0o644))
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	files, err := collectTorrentFiles(ctx, dir, log.New())
+	require.ErrorIs(t, err, context.Canceled)
+	require.Less(t, len(files), total)
 }
 
 // A symlink pointing back at an ancestor must not send the scan into unbounded
