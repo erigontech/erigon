@@ -287,6 +287,12 @@ func WithStepSize(stepSize uint64) Option {
 	}
 }
 
+func WithE2RetireStep(e2RetireStep uint64) Option {
+	return func(opts *options) {
+		opts.e2RetireStep = &e2RetireStep
+	}
+}
+
 func WithExperimentalBAL() Option {
 	return func(opts *options) {
 		opts.experimentalBAL = true
@@ -389,6 +395,7 @@ func WithSentryProtocol(protocol uint) Option {
 
 type options struct {
 	stepSize                      *uint64
+	e2RetireStep                  *uint64
 	experimentalBAL               bool
 	genesis                       *types.Genesis
 	chainConfig                   *chain.Config
@@ -507,6 +514,9 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	cfg.PersistReceiptsCacheV2 = true
 	cfg.ChaosMonkey = false
 	cfg.Snapshot.ChainName = gspec.Config.ChainName
+	if opt.e2RetireStep != nil {
+		cfg.Snapshot.E2RetireStep = *opt.e2RetireStep
+	}
 	cfg.Genesis = gspec
 	cfg.Prune = pruneMode
 	cfg.ExperimentalBAL = opt.experimentalBAL
@@ -514,7 +524,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	cfg.FcuBackgroundCommit = opt.fcuBackgroundCommit
 
 	logLvl := log.LvlError
-	if lvl, ok := os.LookupEnv("MOCK_SENTRY_LOG_LEVEL"); ok {
+	if lvl, ok := os.LookupEnv("EXEC_MODULE_TESTER_LOG_LEVEL"); ok {
 		logLvl, err = log.LvlFromString(lvl)
 		if err != nil {
 			panic(err)

@@ -95,12 +95,13 @@ func (bs *BlobStore) WriteBlobSidecars(ctx context.Context, blockRoot common.Has
 		if err != nil {
 			return err
 		}
-		defer file.Close()
-
-		if err := ssz_snappy.EncodeAndWrite(file, blobSidecar); err != nil {
-			return err
-		}
-		if err := file.Sync(); err != nil {
+		if err := func() error {
+			defer file.Close()
+			if err := ssz_snappy.EncodeAndWrite(file, blobSidecar); err != nil {
+				return err
+			}
+			return file.Sync()
+		}(); err != nil {
 			return err
 		}
 	}
@@ -145,10 +146,15 @@ func (bs *BlobStore) ReadBlobSidecars(ctx context.Context, slot uint64, blockRoo
 			}
 			return nil, false, err
 		}
-		defer file.Close()
-
-		blobSidecar := &cltypes.BlobSidecar{}
-		if err := ssz_snappy.DecodeAndReadNoForkDigest(file, blobSidecar, clparams.DenebVersion); err != nil {
+		blobSidecar, err := func() (*cltypes.BlobSidecar, error) {
+			defer file.Close()
+			blobSidecar := &cltypes.BlobSidecar{}
+			if err := ssz_snappy.DecodeAndReadNoForkDigest(file, blobSidecar, clparams.DenebVersion); err != nil {
+				return nil, err
+			}
+			return blobSidecar, nil
+		}()
+		if err != nil {
 			return nil, false, err
 		}
 		blobSidecars = append(blobSidecars, blobSidecar)
