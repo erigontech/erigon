@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"os"
 	"runtime"
 	"runtime/pprof"
@@ -2920,8 +2919,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			applyResult := txResult{
 				blockNum:              be.blockNum,
 				blockHash:             be.blockHash,
-				traceFroms:            map[accounts.Address]struct{}{},
-				traceTos:              map[accounts.Address]struct{}{},
+				traceFroms:            result.TraceFroms,
+				traceTos:              result.TraceTos,
 				txNum:                 task.Version().TxNum,
 				rules:                 task.Rules(),
 				cumulativeBlobGasUsed: result.cumulativeBlobGasUsed,
@@ -2948,8 +2947,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				pe.executedGas.Add(int64(applyResult.blockGasUsed))
 			}
 
-			maps.Copy(applyResult.traceFroms, result.TraceFroms)
-			maps.Copy(applyResult.traceTos, result.TraceTos)
 			be.cntFinalized++
 			be.publishTasks.markComplete(tx)
 
