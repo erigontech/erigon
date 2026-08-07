@@ -1622,6 +1622,7 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 	if vr.stateReader != nil && !(recorded && skipAbsentDomainRead) {
 		if normalizeProbe {
 			normProbe.domainReads.Add(1)
+			normProbeCaller(address)
 		}
 		account, err := vr.stateReader.ReadAccountData(address)
 
@@ -1782,7 +1783,14 @@ func (vr versionedStateReader) ReadAccountStorage(address accounts.Address, key 
 	}
 
 	if vr.stateReader != nil {
-		return vr.stateReader.ReadAccountStorage(address, key)
+		if normalizeProbe {
+			normProbe.stgDomainReads.Add(1)
+		}
+		v, found, err := vr.stateReader.ReadAccountStorage(address, key)
+		if normalizeProbe && found {
+			normProbe.stgDomainFound.Add(1)
+		}
+		return v, found, err
 	}
 
 	return uint256.Int{}, false, nil

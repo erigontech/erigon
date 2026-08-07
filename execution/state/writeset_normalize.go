@@ -305,15 +305,27 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 						continue
 					}
 				} else {
+					if normalizeProbe {
+						normProbeStorageFallback(stateReader, h.Address, h.Key, writeVal.IsZero())
+					}
 					preVal, found, err := stateReader.ReadAccountStorage(h.Address, h.Key)
 					if err != nil {
 						return nil, err
 					}
 					if !found && writeVal.IsZero() {
+						if normalizeProbe {
+							normProbeStorageResult(true)
+						}
 						continue
 					}
 					if found && writeVal.Eq(&preVal) {
+						if normalizeProbe {
+							normProbeStorageResult(true)
+						}
 						continue
+					}
+					if normalizeProbe {
+						normProbeStorageResult(false)
 					}
 				}
 			}

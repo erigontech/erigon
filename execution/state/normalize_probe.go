@@ -18,6 +18,10 @@ package state
 
 import (
 	"fmt"
+	"runtime"
+	"sort"
+	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/erigontech/erigon/common/dbg"
@@ -54,6 +58,51 @@ var normProbe struct {
 	gotNil      [normProbeClassCount]atomic.Uint64 // the read returned nil
 	fromMap     [normProbeClassCount]atomic.Uint64 // versionMap AddressPath answered
 	domainReads atomic.Uint64                      // versioned reader reached the domain
+
+	stgFallbacks    atomic.Uint64 // no-op filter reached ReadAccountStorage
+	stgSlotInReads  atomic.Uint64 // the tx recorded a read of this exact slot
+	stgAddrInReads  atomic.Uint64 // other slots of this address recorded, not this one
+	stgAddrCold     atomic.Uint64 // no storage read recorded for this address
+	stgDomainReads  atomic.Uint64 // versioned reader reached the domain for a slot
+	stgDomainFound  atomic.Uint64 // ... and the slot existed
+	stgWriteIsZero  atomic.Uint64 // the write being filtered is zero
+	stgFilteredOut  atomic.Uint64 // the fallback concluded "no-op", write dropped
+	stgFilteredKeep atomic.Uint64 // the fallback kept the write
+}
+
+var normProbeCallers struct {
+	sync.Mutex
+	m     map[string]uint64
+	addrs map[string]map[accounts.Address]uint64
+}
+
+// normProbeCaller attributes one domain read to its call site.
+func normProbeCaller(probeAddr accounts.Address) {
+	var pcs [8]uintptr
+	n := runtime.Callers(3, pcs[:])
+	frames := runtime.CallersFrames(pcs[:n])
+	var site string
+	for {
+		f, more := frames.Next()
+		if !strings.Contains(f.Function, "erigon/execution/state.") {
+			site = fmt.Sprintf("%s:%d", f.Function, f.Line)
+			break
+		}
+		if !more {
+			break
+		}
+	}
+	normProbeCallers.Lock()
+	if normProbeCallers.m == nil {
+		normProbeCallers.m = map[string]uint64{}
+		normProbeCallers.addrs = map[string]map[accounts.Address]uint64{}
+	}
+	normProbeCallers.m[site]++
+	if normProbeCallers.addrs[site] == nil {
+		normProbeCallers.addrs[site] = map[accounts.Address]uint64{}
+	}
+	normProbeCallers.addrs[site][probeAddr]++
+	normProbeCallers.Unlock()
 }
 
 func normProbeFallback(reader StateReader, addr accounts.Address) normProbeClass {
@@ -93,6 +142,38 @@ func normProbeResult(class normProbeClass, acc *accounts.Account) {
 		return
 	}
 	normProbe.gotNil[class].Add(1)
+}
+
+func normProbeStorageFallback(reader StateReader, addr accounts.Address, key accounts.StorageKey, writeIsZero bool) {
+	normProbe.stgFallbacks.Add(1)
+	if writeIsZero {
+		normProbe.stgWriteIsZero.Add(1)
+	}
+	vr, ok := reader.(*versionedStateReader)
+	if !ok {
+		return
+	}
+	switch {
+	case hasSlotRead(vr, addr, key):
+		normProbe.stgSlotInReads.Add(1)
+	case len(vr.reads.storage[addr]) > 0:
+		normProbe.stgAddrInReads.Add(1)
+	default:
+		normProbe.stgAddrCold.Add(1)
+	}
+}
+
+func hasSlotRead(vr *versionedStateReader, addr accounts.Address, key accounts.StorageKey) bool {
+	_, ok := vr.reads.GetStorage(addr, key)
+	return ok
+}
+
+func normProbeStorageResult(dropped bool) {
+	if dropped {
+		normProbe.stgFilteredOut.Add(1)
+		return
+	}
+	normProbe.stgFilteredKeep.Add(1)
 }
 
 func (s *ReadSet) touched(addr accounts.Address) bool {
@@ -142,4 +223,33 @@ func NormalizeProbeDump(label string) {
 			label, normProbeClassName[c], seen, 100*float64(seen)/float64(applyLoop),
 			normProbe.gotAcc[c].Load(), normProbe.gotNil[c].Load(), normProbe.fromMap[c].Load())
 	}
+	normProbeCallers.Lock()
+	type kv struct {
+		k string
+		v uint64
+	}
+	var sites []kv
+	for k, v := range normProbeCallers.m {
+		sites = append(sites, kv{k, v})
+	}
+	normProbeCallers.Unlock()
+	sort.Slice(sites, func(i, j int) bool { return sites[i].v > sites[j].v })
+	for i, s := range sites {
+		if i == 8 {
+			break
+		}
+		fmt.Printf("NORMALIZE_PROBE %s:   domainRead site %6d reads / %d distinct addrs  %s\n",
+			label, s.v, len(normProbeCallers.addrs[s.k]), s.k)
+	}
+	stg := normProbe.stgFallbacks.Load()
+	if stg == 0 {
+		return
+	}
+	spct := func(v uint64) string { return fmt.Sprintf("%d (%.1f%%)", v, 100*float64(v)/float64(stg)) }
+	fmt.Printf("NORMALIZE_PROBE %s: storageFallbacks=%d slotInReads=%s addrInReads=%s addrCold=%s writeIsZero=%s\n",
+		label, stg, spct(normProbe.stgSlotInReads.Load()), spct(normProbe.stgAddrInReads.Load()),
+		spct(normProbe.stgAddrCold.Load()), spct(normProbe.stgWriteIsZero.Load()))
+	fmt.Printf("NORMALIZE_PROBE %s: storageDomainReads=%d found=%d dropped=%d kept=%d\n",
+		label, normProbe.stgDomainReads.Load(), normProbe.stgDomainFound.Load(),
+		normProbe.stgFilteredOut.Load(), normProbe.stgFilteredKeep.Load())
 }
