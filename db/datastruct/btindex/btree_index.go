@@ -71,6 +71,12 @@ type Cursor struct {
 	key        []byte
 	value      []byte
 	d          uint64
+
+	// knownOffset is the offset of pair knownD, learned while reading the pair before
+	// it: pairs sit back to back in the .kv file, so reading one reveals where the next
+	// starts. Forward iteration then needs no EliasFano lookup. The zero value is valid
+	// - pair 0 always starts at offset 0.
+	knownD, knownOffset uint64
 }
 
 func (c *Cursor) Close() {
@@ -164,7 +170,10 @@ func (c *Cursor) readKV() error {
 		return errors.New("getter is nil")
 	}
 
-	offset := c.ef.Get(c.d)
+	offset := c.knownOffset
+	if c.knownD != c.d {
+		offset = c.ef.Get(c.d)
+	}
 	c.getter.Reset(offset)
 	if !c.getter.HasNext() {
 		return fmt.Errorf("pair %d/%d key not found, file: %s/%s", c.d, c.ef.Count(), c.getter.FileName(), c.getter.FileName())
@@ -173,7 +182,8 @@ func (c *Cursor) readKV() error {
 	if !c.getter.HasNext() {
 		return fmt.Errorf("pair %d/%d val not found, file: %s/%s", c.d, c.ef.Count(), c.getter.FileName(), c.getter.FileName())
 	}
-	c.value, _ = c.getter.Next(nil) // if value is not compressed, we getting ptr to slice from mmap, may need to copy
+	c.value, c.knownOffset = c.getter.Next(nil) // if value is not compressed, we getting ptr to slice from mmap, may need to copy
+	c.knownD = c.d + 1
 	return nil
 }
 
