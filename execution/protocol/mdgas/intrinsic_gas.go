@@ -79,13 +79,10 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 		result.ExecutionGas = params.TxBaseEIP2780
 		if args.IsContractCreation {
 			result.ExecutionGas += params.CreateAccessEIP2780
-			if args.HasValue {
-				result.ExecutionGas += params.TransferLogCostEIP2780
-			}
 		} else if !args.IsSelfTransfer {
 			result.ExecutionGas += params.ColdAccountAccessEIP2780
 			if args.HasValue {
-				result.ExecutionGas += params.TransferLogCostEIP2780 + params.TxValueCostEIP2780
+				result.ExecutionGas += params.TxValueCostEIP2780
 			}
 		}
 	case args.IsContractCreation && args.IsEIP2:
