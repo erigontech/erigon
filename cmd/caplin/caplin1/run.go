@@ -623,6 +623,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			payloadAttestationService,
 			proposerPreferencesService,
 		)
+		apiHandler.StartPayloadPreparation(ctx)
 		go beacon.ListenAndServe(&beacon.LayeredBeaconHandler{
 			ArchiveApi: apiHandler,
 		}, config.BeaconAPIRouter)
