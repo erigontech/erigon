@@ -755,7 +755,7 @@ func post2(client *http.Client, url, request string) ([]byte, *fastjson.Value, e
 	return response, v, nil
 }
 
-func print(client *http.Client, url, request string) {
+func printRPCRequest(client *http.Client, url, request string) {
 	r, err := client.Post(url, "application/json", strings.NewReader(request))
 	if err != nil {
 		fmt.Printf("Could not print: %v\n", err)
