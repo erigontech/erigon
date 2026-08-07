@@ -236,8 +236,9 @@ func startSnapshotDownloadProgressReporter(ctx context.Context, cfg SnapshotsCfg
 		// Pin at 100% instead of clearing: the download branch only applies while
 		// Execution progress is 0, so it self-clears the moment execution advances.
 		// Clearing here would report currentBlock=0 until then, i.e. a 100%→0% dip.
-		_, total := reporter.Completed()
-		setAndPublish(total, total, cfg.blockReader.FrozenBlocks())
+		// Don't read the downloader here: completion can land inside the last
+		// sampling window, where it still reports (0, 0) and would clear instead.
+		setAndPublish(1, 1, cfg.blockReader.FrozenBlocks())
 	}
 }
 
