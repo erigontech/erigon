@@ -60,7 +60,7 @@ func fixturePath(tb testing.TB) string {
 	if p := os.Getenv("BLOCKREPLAY_FIXTURE"); p != "" {
 		return p
 	}
-	return filepath.Join("..", "tests", "blockreplay", "testdata", "block-25604144.gob")
+	return filepath.Join("..", "blockreplay", "testdata", "block-25604144.gob")
 }
 
 const ephemeralSeedTxNum = uint64(1) << 20
@@ -209,4 +209,23 @@ func BenchmarkEphemeralParallelReplay(b *testing.B) {
 			require.NoError(b, r.verify(tx, doms, writeSet, expected))
 		}()
 	}
+}
+
+// TestEphemeralParallelReplay runs one exec-only parallel replay so a normal
+// `go test` covers the nil-commitResults topology (exec-only: no commitment
+// consumer) that otherwise only BenchmarkEphemeralParallelReplay exercises.
+func TestEphemeralParallelReplay(t *testing.T) {
+	fx, err := blockreplay.Load(fixturePath(t))
+	require.NoError(t, err)
+	require.NotNil(t, fx.Outputs, "fixture missing captured outputs; recapture with `integration capture_block`")
+
+	r, closeFn := setupEphemeralReplay(t, fx)
+	defer closeFn()
+
+	tx, doms, writeSet := r.newDomains(t, fx)
+	defer tx.Rollback()
+	defer doms.Close()
+
+	require.NoError(t, r.exec(tx, doms))
+	require.NoError(t, r.verify(tx, doms, writeSet, fx.Outputs))
 }
