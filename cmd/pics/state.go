@@ -135,7 +135,7 @@ func stateDatabaseComparison(first kv.RwDB, second kv.RwDB, number int) error {
 	noValues := make(map[int]struct{})
 	perBucketFiles := make(map[string]*os.File)
 
-	if err = second.View(context.Background(), func(readTx kv.Tx) error {
+	if err := second.View(context.Background(), func(readTx kv.Tx) error {
 		return first.View(context.Background(), func(firstTx kv.Tx) error {
 			for bucketName := range bucketLabels {
 				if err := readTx.ForEach(bucketName, nil, func(k, v []byte) error {
@@ -305,8 +305,8 @@ func initialState1() error {
 	}
 
 	var tokenContract *contracts.Token
-	// We generate the blocks without plainstant because it's not supported in blockgen.GenerateChain
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 8, func(i int, block *blockgen.BlockGen) {
+	// We generate the blocks without plain state because GenerateChain does not support it.
+	chain, err := m.GenerateChain(8, func(i int, block *blockgen.BlockGen) {
 		var (
 			txn types.Transaction
 			txs []types.Transaction
@@ -418,12 +418,12 @@ func initialState1() error {
 	m2 := execmoduletester.New(nil, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 	defer m2.DB.Close()
 
-	if err = hexPalette(); err != nil {
+	if err := hexPalette(); err != nil {
 		return err
 	}
 
 	emptyKv := memdb.New(nil, "", dbcfg.ChainDB)
-	if err = stateDatabaseComparison(emptyKv, m.DB, 0); err != nil {
+	if err := stateDatabaseComparison(emptyKv, m.DB, 0); err != nil {
 		return err
 	}
 	defer emptyKv.Close()
@@ -431,18 +431,18 @@ func initialState1() error {
 	// BLOCKS
 
 	for i := 0; i < chain.Length(); i++ {
-		if err = m2.InsertChain(chain.Slice(i, i+1)); err != nil {
+		if err := m2.InsertChain(chain.Slice(i, i+1)); err != nil {
 			return err
 		}
-		if err = stateDatabaseComparison(m.DB, m2.DB, i+1); err != nil {
+		if err := stateDatabaseComparison(m.DB, m2.DB, i+1); err != nil {
 			return err
 		}
-		if err = m.InsertChain(chain.Slice(i, i+1)); err != nil {
+		if err := m.InsertChain(chain.Slice(i, i+1)); err != nil {
 			return err
 		}
 	}
 
-	if err = stateDatabaseComparison(emptyKv, m.DB, 9); err != nil {
+	if err := stateDatabaseComparison(emptyKv, m.DB, 9); err != nil {
 		return err
 	}
 	return nil

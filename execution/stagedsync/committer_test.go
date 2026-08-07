@@ -37,7 +37,7 @@ import (
 //
 // In BatchCommitments mode the calculator only computes on
 // commitComputeRequest. The very first batch of an exec3 cycle that runs
-// only the genesis block produces lastBlockResult.BlockNum=0. The dedup
+// only the genesis block produces lastTarget.blockNum=0. The dedup
 // check used to be `lastBlockResult.BlockNum > lastComputedBlock`, which
 // for the (very common) initial state lastComputedBlock=0 evaluates to
 // `0 > 0 == false`. So the calculator silently skipped computing and
@@ -50,9 +50,10 @@ import (
 // computed" from "computed block 0".
 func TestShouldComputeOnRequest_GenesisFirstBatch(t *testing.T) {
 	cc := &commitmentCalculator{
-		lastBlockResult:   &blockResult{BlockNum: 0},
-		lastComputedBlock: 0,
-		hasComputed:       false,
+		lastTarget:         commitTarget{blockNum: 0},
+		lastComputedBlock:  0,
+		hasComputed:        false,
+		hasSeenBlockResult: true,
 	}
 	assert.True(t, cc.shouldComputeOnRequest(),
 		"first batch covering only genesis (block 0) MUST compute, "+
@@ -66,9 +67,10 @@ func TestShouldComputeOnRequest_GenesisFirstBatch(t *testing.T) {
 // new block boundary should NOT recompute.
 func TestShouldComputeOnRequest_AlreadyComputedSameBlock(t *testing.T) {
 	cc := &commitmentCalculator{
-		lastBlockResult:   &blockResult{BlockNum: 0},
-		lastComputedBlock: 0,
-		hasComputed:       true,
+		lastTarget:         commitTarget{blockNum: 0},
+		lastComputedBlock:  0,
+		hasComputed:        true,
+		hasSeenBlockResult: true,
 	}
 	assert.False(t, cc.shouldComputeOnRequest(),
 		"no new block boundary since last compute — skip and publish empty")
@@ -78,9 +80,10 @@ func TestShouldComputeOnRequest_AlreadyComputedSameBlock(t *testing.T) {
 // a new block arrived since the last compute, recompute.
 func TestShouldComputeOnRequest_AdvancedBlock(t *testing.T) {
 	cc := &commitmentCalculator{
-		lastBlockResult:   &blockResult{BlockNum: 5},
-		lastComputedBlock: 3,
-		hasComputed:       true,
+		lastTarget:         commitTarget{blockNum: 5},
+		lastComputedBlock:  3,
+		hasComputed:        true,
+		hasSeenBlockResult: true,
 	}
 	assert.True(t, cc.shouldComputeOnRequest(),
 		"new block boundary advanced past the last compute — recompute")
@@ -91,9 +94,10 @@ func TestShouldComputeOnRequest_AdvancedBlock(t *testing.T) {
 // we publish the empty result instead of computing against nothing.
 func TestShouldComputeOnRequest_NoBlockResult(t *testing.T) {
 	cc := &commitmentCalculator{
-		lastBlockResult:   nil,
-		lastComputedBlock: 0,
-		hasComputed:       false,
+		lastTarget:         commitTarget{},
+		lastComputedBlock:  0,
+		hasComputed:        false,
+		hasSeenBlockResult: false,
 	}
 	assert.False(t, cc.shouldComputeOnRequest(),
 		"no blockResult to compute against — publish empty so drainBeforeExit unblocks")
@@ -104,9 +108,10 @@ func TestShouldComputeOnRequest_NoBlockResult(t *testing.T) {
 // fires because we already advanced past it.
 func TestShouldComputeOnRequest_BlockZeroAfterAdvance(t *testing.T) {
 	cc := &commitmentCalculator{
-		lastBlockResult:   &blockResult{BlockNum: 0},
-		lastComputedBlock: 5,
-		hasComputed:       true,
+		lastTarget:         commitTarget{blockNum: 0},
+		lastComputedBlock:  5,
+		hasComputed:        true,
+		hasSeenBlockResult: true,
 	}
 	assert.False(t, cc.shouldComputeOnRequest(),
 		"stale block 0 result while we've already computed block 5 — skip")

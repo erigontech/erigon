@@ -1,3 +1,11 @@
+# Erigon v3.7.0 — TBD
+
+### Changed
+
+- node: RPC HTTP gzip compression moved from the cgo-based `go-libdeflate` to the pure-Go `klauspost/compress`, and fully buffered (one-shot) responses now compress at `BestSpeed` (level 1) instead of level 6; streaming responses were already at `BestSpeed`. Large one-shot responses gain ~10-14% latency and roughly half the compression CPU, in exchange for slightly larger compressed bodies (+2-8% wire size — relevant for operators who pay for egress). Also removes the libdeflate compressor pool and its `libdeflate_pool_*` metrics, eliminating the cgo leak class fixed in #22700 (#22882) — by @lupin012
+
+---
+
 # Erigon v3.6.0 — Upstream Underbelly — TBD
 
 ### Breaking Changes
