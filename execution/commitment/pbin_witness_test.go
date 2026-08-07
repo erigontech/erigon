@@ -321,13 +321,15 @@ func TestPBinWitnessesProvesCodeLeaves(t *testing.T) {
 	}
 	require.Contains(t, proved, string(pbinTreeKeyAccount(addr, pbinBasicDataLeafKey)))
 	require.Contains(t, proved, string(pbinTreeKeyAccount(addr, pbinCodeHashLeafKey)))
+	require.Contains(t, proved, string(pbinTreeKeyAccount(addr, pbinDelegationLeafKey)),
+		"the unconditional delegation-leaf removal walks its key, so the witness must prove it")
 
 	chunks := pbinChunkifyCode(code)
 	require.Greater(t, len(chunks), 1)
 	for i := range chunks {
 		require.Contains(t, proved, string(pbinTreeKeyCodeChunk(keccak.Sum256(code), i)), "code chunk %d is not proved", i)
 	}
-	require.Len(t, provedKeys, 2+len(chunks))
+	require.Len(t, provedKeys, 3+len(chunks))
 }
 
 // TestPBinWitnessesExclusionProofsIgnored: the flag materializes the branch an

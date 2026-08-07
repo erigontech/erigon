@@ -574,29 +574,51 @@ discipline in the witness path.
 - Modify: `execution/commitment/pbin_conformance_test.go`
 - Modify: `execution/commitment/pbin_delegation_test.go`
 
-- [ ] at the code-hash sibling emission (`pbin_update_stream.go:142-149`),
+- [x] at the code-hash sibling emission (`pbin_update_stream.go:142-149`),
       branch on `pbinIsDelegation`: emit sub-index 2 and delete sub-index 1, or
       emit sub-index 1 and delete sub-index 2 — both deletions unconditional
-      within their branch
-- [ ] skip `queueCode` entirely for a delegated account; it has no `CODE_ZONE`
-      leaves
-- [ ] treat the delegation leaf as record-resident in `pbinLeafValue`
+      within their branch (new `emitCodeLeaves`; `codeHashKey` generalized to
+      `emitSibling`)
+- [x] skip `queueCode` entirely for a delegated account; it has no `CODE_ZONE`
+      leaves (the code read moved into `emitCodeLeaves`; `queueCode` became
+      `queueChunks` and only the non-delegation branch reaches it)
+- [x] treat the delegation leaf as record-resident in `pbinLeafValue`
       (`pbin_hash.go`) and `pbinWitnessLeafState` (`pbin_witness_context.go:232-257`),
       which today produce flags only for sub-indices 0 and 1; the value carries
-      no field an `Update` holds
-- [ ] admit sub-index 2 in the verify position check (`pbin_verify_test.go:282`)
-- [ ] teach the conformance `pbt_state` oracle (`pbin_conformance_test.go:204-212`)
+      no field an `Update` holds (`pbinLeafValue` got an explicit sub-index-2
+      case; `pbin_witness_context.go` needed no edit — `fillLeafCell`'s
+      verbatim re-encode already routes sub-index 2 through `pbinLeafValue`
+      into the record-resident cell shape, so the two cannot drift)
+- [x] admit sub-index 2 in the verify position check (landed in the
+      record-resident arm of `pbinVerifyDerivedKey`, not the account-addressed
+      arm at `:282` — the delegation leaf carries no plain key, so it decodes
+      as a value-carrying cell)
+- [x] teach the conformance `pbt_state` oracle (`pbin_conformance_test.go:204-212`)
       to write a delegation leaf and no code-hash or chunk leaves for a
       delegated account — the four delegation vector cases cannot go green
       otherwise
-- [ ] write `TestPBinDelegationLeafIsExclusive`: delegation set on a fresh EOA;
+- [x] write `TestPBinDelegationLeafIsExclusive`: delegation set on a fresh EOA;
       delegation replacing contract-shaped code; delegation cleared to
       `keccak("")` with `code_size` zeroed; two authorities delegating to one
       target producing two distinct header leaves and no shared leaf
-- [ ] gate: `go test ./execution/commitment/ -count=1 -v -run 'TestPBinDelegationLeafIsExclusive|TestPBinConformancePBTState'`
-      — `TestPBinConformancePBTState` must now be 18/18
-- [ ] `make lint` until clean; commit as
+- [x] gate: `go test ./execution/commitment/ -count=1 -v -run 'TestPBinDelegationLeafIsExclusive|TestPBinConformancePBTState'`
+      — `TestPBinConformancePBTState` must now be 18/18 (it is; Red confirmed
+      first: all four subtests and the three delegation vector cases failed at
+      the engine root with the oracles already taught)
+- [x] `make lint` until clean; commit as
       `execution/commitment: hold delegation indicators in the account header`
+
+➕ `pbinTestCorpus.entries` (`pbin_process_test.go`) learned the same rule in
+the Red step: with only the engine wrong, engine and corpus-oracle would have
+agreed and two subtests would have passed vacuously. Task 11's confirm item is
+thereby already satisfied.
+➕ The unconditional delegation-sibling removal walks one more key per account,
+so a witness pass proves it: `TestPBinWitnessesProvesCodeLeaves`
+(`pbin_witness_test.go`) and `TestPBinWitnessCodeOverrideMatchesFoldKeys`
+(`pbin_witness_codezone_test.go`) count 3 header keys now, not 2. Node sets are
+unchanged for non-delegated accounts — the sub-index-2 path diverges below the
+deepest existing header branch — and the full `rpc/jsonrpc` TestPBinWitness
+suite stays green unmodified.
 
 ### Task 8: Serve delegated accounts from the witness
 

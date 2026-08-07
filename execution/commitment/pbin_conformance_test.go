@@ -195,10 +195,13 @@ func TestPBinConformancePBTState(t *testing.T) {
 				basic, err := pbinEncodeBasicData(acc.Nonce, balance, uint64(len(code)))
 				require.NoError(t, err)
 				put(keys.accountKey(addr, pbinBasicDataLeafKey), basic)
-				put(keys.accountKey(addr, pbinCodeHashLeafKey), pbinCodeHashValue(codeHash))
-
-				for i, chunk := range pbinChunkifyCode(code) {
-					put(keys.codeChunkKey(codeHash, i), chunk)
+				if pbinIsDelegation(code) {
+					put(keys.accountKey(addr, pbinDelegationLeafKey), pbinEncodeDelegation(code))
+				} else {
+					put(keys.accountKey(addr, pbinCodeHashLeafKey), pbinCodeHashValue(codeHash))
+					for i, chunk := range pbinChunkifyCode(code) {
+						put(keys.codeChunkKey(codeHash, i), chunk)
+					}
 				}
 
 				for slot, value := range acc.Storage {

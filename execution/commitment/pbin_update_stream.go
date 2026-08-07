@@ -98,8 +98,8 @@ func (s *pbinUpdateStream) release() {
 	s.witness = PBinWitnessBlock{}
 }
 
-// processKey expands an account into its basic-data and code-hash leaves. Code
-// chunks are delayed until emitting them cannot move the ordered trie walk back.
+// processKey expands an account into its header leaves. Code chunks are delayed
+// until emitting them cannot move the ordered trie walk back.
 func (s *pbinUpdateStream) processKey(treeKey, plainKey []byte, stateUpdate *Update) error {
 	if err := s.flushCodeChunksBefore(treeKey); err != nil {
 		return err
@@ -125,14 +125,34 @@ func (s *pbinUpdateStream) processKey(treeKey, plainKey []byte, stateUpdate *Upd
 	if len(plainKey) != length.Addr {
 		return nil
 	}
-	codeKey, err := s.codeHashKey(treeKey)
+	return s.emitCodeLeaves(treeKey, plainKey, update)
+}
+
+// emitCodeLeaves writes the header sibling the account's code selects —
+// CODE_HASH, or DELEGATION for an EIP-7702 indicator — and removes the other.
+// The stream is told nothing about what the account held before, so both
+// removals are unconditional. The indicator is no account field, so its leaf
+// carries the value itself and no plain key.
+func (s *pbinUpdateStream) emitCodeLeaves(basicDataKey, plainKey []byte, update *Update) error {
+	code, codeHash, err := s.chunkSource(plainKey, update)
 	if err != nil {
 		return err
 	}
-	if err = s.emit(codeKey, plainKey, update); err != nil {
+	if pbinIsDelegation(code) {
+		if err := s.emitSibling(basicDataKey, pbinCodeHashLeafKey, plainKey, &Update{Flags: DeleteUpdate}); err != nil {
+			return err
+		}
+		indicator := Update{Flags: StorageUpdate, StorageLen: pbinValueLength, Storage: pbinEncodeDelegation(code)}
+		return s.emitSibling(basicDataKey, pbinDelegationLeafKey, nil, &indicator)
+	}
+	if err := s.emitSibling(basicDataKey, pbinCodeHashLeafKey, plainKey, update); err != nil {
 		return err
 	}
-	return s.queueCode(plainKey, update)
+	if err := s.emitSibling(basicDataKey, pbinDelegationLeafKey, plainKey, &Update{Flags: DeleteUpdate}); err != nil {
+		return err
+	}
+	s.queueChunks(code, codeHash)
+	return nil
 }
 
 // removesAccount reports whether the block removes this account. A witness pass
@@ -212,21 +232,13 @@ func (s *pbinUpdateStream) chunkSource(plainKey []byte, update *Update) ([]byte,
 	return code, update.CodeHash, nil
 }
 
-func (s *pbinUpdateStream) queueCode(plainKey []byte, update *Update) error {
-	code, codeHash, err := s.chunkSource(plainKey, update)
-	if err != nil {
-		return err
-	}
-	if len(code) == 0 {
-		return nil
-	}
+func (s *pbinUpdateStream) queueChunks(code []byte, codeHash common.Hash) {
 	for i, chunk := range pbinChunkifyCode(code) {
 		var cc pbinCodeChunk
 		copy(cc.key[:], s.keyDigest.codeChunkKey(codeHash, i))
 		cc.value = chunk
 		s.codeChunks = append(s.codeChunks, cc)
 	}
-	return nil
 }
 
 func (s *pbinUpdateStream) flushCodeChunksBefore(treeKey []byte) error {
@@ -289,11 +301,11 @@ func (s *pbinUpdateStream) stateOf(plainKey []byte) (*Update, error) {
 	return update, nil
 }
 
-func (s *pbinUpdateStream) codeHashKey(basicDataKey []byte) ([]byte, error) {
+func (s *pbinUpdateStream) emitSibling(basicDataKey []byte, subIndex byte, plainKey []byte, update *Update) error {
 	if len(basicDataKey) != pbinAccountKeyLength || basicDataKey[pbinAccountKeyLength-1] != pbinBasicDataLeafKey {
-		return nil, fmt.Errorf("pbin: %x is not a BASIC_DATA key", basicDataKey)
+		return fmt.Errorf("pbin: %x is not a BASIC_DATA key", basicDataKey)
 	}
 	copy(s.siblingKey[:], basicDataKey)
-	s.siblingKey[pbinAccountKeyLength-1] = pbinCodeHashLeafKey
-	return s.siblingKey[:], nil
+	s.siblingKey[pbinAccountKeyLength-1] = subIndex
+	return s.emit(s.siblingKey[:], plainKey, update)
 }

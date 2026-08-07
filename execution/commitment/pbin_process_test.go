@@ -68,9 +68,10 @@ func (c *pbinTestCorpus) storage(addr, slot []byte, value ...byte) *pbinTestCorp
 	return c
 }
 
-// entries is the leaf set the corpus stands for. An account is two leaves —
-// stated here independently of the engine. A value of 32 zero bytes is the same
-// state as an absent key, so it contributes no leaf.
+// entries is the leaf set the corpus stands for, stated here independently of
+// the engine. An account holds exactly one of the CODE_HASH and DELEGATION
+// leaves, decided by its code bytes. A value of 32 zero bytes is the same state
+// as an absent key, so it contributes no leaf.
 func (c *pbinTestCorpus) entries(t *testing.T) []pbinOracleEntry {
 	t.Helper()
 	var zero [pbinValueLength]byte
@@ -88,9 +89,13 @@ func (c *pbinTestCorpus) entries(t *testing.T) []pbinOracleEntry {
 			basic, err := pbinEncodeBasicData(u.Nonce, &u.Balance, u.CodeSize)
 			require.NoError(t, err)
 			add(pbinTreeKeyAccount(plainKey, pbinBasicDataLeafKey), basic)
-			add(pbinTreeKeyAccount(plainKey, pbinCodeHashLeafKey), pbinCodeHashValue(u.CodeHash))
-			for j, chunk := range pbinChunkifyCode(c.codes[string(plainKey)]) {
-				add(pbinTreeKeyCodeChunk(u.CodeHash, j), chunk)
+			if code := c.codes[string(plainKey)]; pbinIsDelegation(code) {
+				add(pbinTreeKeyAccount(plainKey, pbinDelegationLeafKey), pbinEncodeDelegation(code))
+			} else {
+				add(pbinTreeKeyAccount(plainKey, pbinCodeHashLeafKey), pbinCodeHashValue(u.CodeHash))
+				for j, chunk := range pbinChunkifyCode(code) {
+					add(pbinTreeKeyCodeChunk(u.CodeHash, j), chunk)
+				}
 			}
 		case length.Addr + length.Hash:
 			add(pbinTreeKeyStorage(plainKey[:length.Addr], plainKey[length.Addr:]),

@@ -80,10 +80,10 @@ func TestPBinWitnessCodeOverrideMatchesFoldKeys(t *testing.T) {
 	witness := pbinStreamKeys(t, parent, deploy, PBinWitnessBlock{Code: map[string][]byte{string(addr): code}}, true)
 
 	require.Equal(t, fold, witness)
-	require.Len(t, fold, 2+136, "two header leaves and one key per chunk")
+	require.Len(t, fold, 3+136, "three header keys and one key per chunk")
 
-	// Without it the parent state yields the account's two header leaves only.
-	require.Len(t, pbinStreamKeys(t, parent, deploy, PBinWitnessBlock{}, true), 2)
+	// Without it the parent state yields the account's header keys only.
+	require.Len(t, pbinStreamKeys(t, parent, deploy, PBinWitnessBlock{}, true), 3)
 }
 
 // TestPBinWitnessDeployIntoPopulatedCodeZone: a witness for a deploy has to let

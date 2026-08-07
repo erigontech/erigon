@@ -176,6 +176,9 @@ func pbinLeafValue(key []byte, u *Update) ([pbinValueLength]byte, error) {
 		return pbinEncodeBasicData(u.Nonce, &u.Balance, u.CodeSize)
 	case subIndex == pbinCodeHashLeafKey:
 		return pbinCodeHashValue(u.CodeHash), nil
+	case subIndex == pbinDelegationLeafKey:
+		// An EIP-7702 indicator is no account field, so the leaf carries its own bytes.
+		return pbinRecordLeafValue(u)
 	case subIndex >= pbinHeaderStorageOffset && subIndex < pbinHeaderStorageOffset+pbinHeaderStorageSlots:
 		return pbinEncodeStorageValue(u.Storage[:u.StorageLen]), nil
 	default:

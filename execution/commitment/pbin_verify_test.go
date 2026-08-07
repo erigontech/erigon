@@ -288,10 +288,13 @@ func pbinVerifyDerivedKey(c *pbinCell, key []byte) ([]byte, error) {
 		return pbinTreeKeyStorage(addr, slot), nil
 	default:
 		// A record-resident leaf holds no plain key to re-derive from, so what is
-		// checked is where it may sit: only a code chunk carries its own value, and
-		// chunks live in the code zone — never in the account or storage zone.
+		// checked is where it may sit: a code chunk in the code zone, or a
+		// delegation indicator at its header sub-index — never anywhere else.
+		if len(key) == pbinAccountKeyLength && key[0] == pbinAccountZone && key[pbinAccountKeyLength-1] == pbinDelegationLeafKey {
+			return key, nil
+		}
 		if len(key) != pbinCodeKeyLength || key[0] != pbinCodeZone {
-			return nil, fmt.Errorf("%w: value-carrying leaf at %x is no code chunk", errPBinVerifyPosition, key)
+			return nil, fmt.Errorf("%w: value-carrying leaf at %x is neither code chunk nor delegation leaf", errPBinVerifyPosition, key)
 		}
 		return key, nil
 	}
