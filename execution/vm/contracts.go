@@ -632,10 +632,9 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 		expBig := new(big.Int).SetBytes(exp)
 		modBig := new(big.Int).SetBytes(mod)
 		baseBig.Exp(baseBig, expBig, modBig).FillBytes(result)
-	case modLen <= 32:
-		// When the modulus fits in 256 bits, a fixed-width uint256 square-and-
-		// multiply avoids arbitrary-precision overhead and the cgo boundary. Base
-		// and exponent lengths are unrestricted (the base is reduced mod m first).
+	case modexpU256Applicable(base, mod):
+		// A fixed-width uint256 square-and-multiply avoids arbitrary-precision
+		// overhead and the cgo boundary.
 		modexpU256(result, base, exp, mod)
 	default:
 		evmone.ModExp(result, base, exp, mod)
@@ -643,44 +642,51 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 	return result, nil
 }
 
-// modexpU256 computes base^exp mod modulus for the case where the modulus fits
-// in 256 bits, writing the big-endian result into dst (which must be len(modulus)
-// bytes and zero-filled). The base and exponent may be any length.
+// modexpU256Applicable reports whether modexpU256 may be used for these operands,
+// and whether it is worth using. The base must fit in 256 bits — uint256.SetBytes
+// silently truncates above that — and the modulus must lie in [2^192, 2^256):
+// below 2^192 uint256.Reciprocal yields no reciprocal, every modular multiply
+// degrades into a full division, and evmone wins by around 3x.
+func modexpU256Applicable(base, mod []byte) bool {
+	if len(base) > 32 || len(mod) > 32 || len(mod) <= 24 {
+		return false
+	}
+	return bitutil.TestBytes(mod[:len(mod)-24])
+}
+
+// modexpU256 computes base^exp mod modulus and writes the big-endian result into
+// dst, which must be len(modulus) zero bytes. Operands must satisfy
+// modexpU256Applicable; the exponent may be any length.
 //
 // It is a fixed-width uint256 left-to-right square-and-multiply using a
 // precomputed reciprocal, so each modular multiply is a multiply+reduce with no
 // division and no heap allocation.
 func modexpU256(dst, base, exp, mod []byte) {
-	var m uint256.Int
+	// Operands are padded to their declared field widths, which EIP-7823 caps at
+	// 1024 bytes. The loops below cost the field width, not the value, so the
+	// two degenerate results are taken before entering them.
+	for len(exp) >= 8 && binary.BigEndian.Uint64(exp) == 0 {
+		exp = exp[8:]
+	}
+	for len(exp) > 0 && exp[0] == 0 {
+		exp = exp[1:]
+	}
+	if len(exp) == 0 {
+		dst[len(dst)-1] = 1 // exponent 0 and m > 1, so the result is 1 — including 0^0
+		return
+	}
+
+	var m, b uint256.Int
 	m.SetBytes(mod)
-	if m.IsZero() {
-		return // result stays zero
+	b.SetBytes(base)
+	b.Mod(&b, &m)
+	if b.IsZero() {
+		return // 0^exp with exp > 0; dst is already zero
 	}
 	mu := uint256.Reciprocal(&m)
 
-	// b = base mod m. base may exceed 256 bits, so fold it in byte by byte
-	// (b = b*256 + digit, reduced mod m each step).
-	var b uint256.Int
-	if len(base) <= 32 {
-		b.SetBytes(base)
-		b.Mod(&b, &m)
-	} else {
-		var c256, digit uint256.Int
-		c256.SetUint64(256)
-		for _, by := range base {
-			b.MulModWithReciprocal(&b, &c256, &m, &mu)
-			digit.SetUint64(uint64(by))
-			digit.Mod(&digit, &m) // digit < m even for a tiny modulus
-			// b, digit < m, so b+digit < 2m: one conditional subtract suffices
-			// (Sub wraps mod 2^256, giving the right value when Add overflowed).
-			if _, carry := b.AddOverflow(&b, &digit); carry || b.Cmp(&m) >= 0 {
-				b.Sub(&b, &m)
-			}
-		}
-	}
-
-	// started stays false until the first set exponent bit, so leading zero
-	// bits/bytes of the exponent cost no squarings.
+	// started stays false until the first set exponent bit, so leading zero bits
+	// of the top byte cost no squarings. It is always set by the end: exp[0] != 0.
 	var result uint256.Int
 	started := false
 	for _, by := range exp {
@@ -697,11 +703,6 @@ func modexpU256(dst, base, exp, mod []byte) {
 				}
 			}
 		}
-	}
-	if !started {
-		// exponent == 0: result is 1 mod m
-		result.SetUint64(1)
-		result.Mod(&result, &m)
 	}
 	b32 := result.Bytes32()
 	copy(dst, b32[32-len(dst):])

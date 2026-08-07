@@ -386,7 +386,7 @@ func (sdb *IntraBlockState) Reset() {
 	for _, so := range sdb.stateObjects {
 		so.release()
 	}
-	sdb.stateObjectArena.rewind()
+	sdb.stateObjectArena.reset()
 	clear(sdb.stateObjects)
 	clear(sdb.stateObjectsDirty)
 	sdb.logs.reset()
@@ -438,7 +438,7 @@ func (sdb *IntraBlockState) Close() {
 
 	stateObjects, journal := sdb.stateObjects, sdb.journal
 	sdb.stateObjects, sdb.journal = nil, nil
-	sdb.stateObjectArena.free()
+	sdb.stateObjectArena.release()
 	sdb.logs.release()
 	sdb.revisions.reset()
 	// Safe to pool: VersionedWrites/FinalizedWrites hand out deep clones, and the
@@ -472,9 +472,8 @@ func releaseResources(stateObjects map[accounts.Address]*stateObject, journal *j
 // AllocLog reserves the next log slot of the current tx and returns it sized for
 // numTopics/dataSize. The caller must write every topic and every data byte, then
 // call NotifyLog; whatever it leaves unwritten belongs to whichever transaction
-// held the entry before. The entry
-// is owned by the arena and reused by later blocks, so it must never be handed
-// out without copying.
+// held the entry before. The entry is owned by the arena and handed to a later
+// transaction, so it must never be passed on without copying.
 func (sdb *IntraBlockState) AllocLog(addr common.Address, numTopics, dataSize int) *types.Log {
 	return sdb.logs.alloc(sdb.journal, addr, sdb.txIndex, numTopics, dataSize)
 }

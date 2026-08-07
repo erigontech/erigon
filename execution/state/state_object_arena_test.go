@@ -158,7 +158,7 @@ func TestNoMaterializeAccountReadAllocs(t *testing.T) {
 	}
 }
 
-// TestStateObjectArenaRecyclesSlots pins that rewind hands the same backing
+// TestStateObjectArenaRecyclesSlots pins that reset hands the same backing
 // slots out again, carrying no state from their previous use.
 func TestStateObjectArenaRecyclesSlots(t *testing.T) {
 	var a stateObjectArena
@@ -176,10 +176,10 @@ func TestStateObjectArenaRecyclesSlots(t *testing.T) {
 	require.NotNil(t, second)
 	require.NotSame(t, first, second, "live slots must not alias")
 
-	a.rewind()
+	a.reset()
 
 	reused := a.alloc()
-	require.Same(t, first, reused, "rewind must hand the same slot back")
+	require.Same(t, first, reused, "reset must hand the same slot back")
 	assert.False(t, reused.selfdestructed)
 	assert.False(t, reused.deleted)
 	assert.False(t, reused.dirtyCode)
@@ -200,8 +200,8 @@ func TestStateObjectArenaFallsBackToHeap(t *testing.T) {
 	}
 	require.Nil(t, a.alloc(), "arena must refuse to grow past its cap")
 
-	a.rewind()
-	require.NotNil(t, a.alloc(), "rewind must make the arena usable again")
+	a.reset()
+	require.NotNil(t, a.alloc(), "reset must make the arena usable again")
 }
 
 // TestStateObjectArenaPointersSurviveGrowth pins that a pointer handed out
@@ -259,10 +259,10 @@ func BenchmarkNoMaterializeTx(b *testing.B) {
 	}
 }
 
-// TestStateObjectArenaRewindCoversVaryingHighWater pins that a slot is clean on
+// TestStateObjectArenaResetCoversVaryingHighWater pins that a slot is clean on
 // hand-out even when transactions consume different numbers of slots: a slot is
-// reset by the rewind of every generation that handed it out.
-func TestStateObjectArenaRewindCoversVaryingHighWater(t *testing.T) {
+// reset by every generation that handed it out.
+func TestStateObjectArenaResetCoversVaryingHighWater(t *testing.T) {
 	var a stateObjectArena
 
 	dirty := func(n int) {
@@ -273,7 +273,7 @@ func TestStateObjectArenaRewindCoversVaryingHighWater(t *testing.T) {
 			so.selfdestructed = true
 			so.setState(accounts.InternKey([32]byte{0x01}), *uint256.NewInt(1))
 		}
-		a.rewind()
+		a.reset()
 	}
 
 	for _, n := range []int{200, 50, 200, 1, 130} {

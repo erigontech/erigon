@@ -28,7 +28,7 @@ const (
 
 // stateObjectArena is a slab allocator for stateObjects that are never cached
 // and so die with the transaction that created them. Slabs are append-only, so
-// a pointer stays valid until rewind.
+// a pointer stays valid until reset.
 type stateObjectArena struct {
 	slabs []*[arenaSlabSize]stateObject
 	slab  int
@@ -60,10 +60,10 @@ func (a *stateObjectArena) grow() bool {
 	return true
 }
 
-// rewind makes every slot handed out since the last rewind available again.
-// Slots are reset here rather than on hand-out so a slot that is not reused
+// reset makes every slot handed out since the last reset available again.
+// Slots are cleared here rather than on hand-out so a slot that is not reused
 // stops retaining the account and code it last held.
-func (a *stateObjectArena) rewind() {
+func (a *stateObjectArena) reset() {
 	for s := 0; s <= a.slab && s < len(a.slabs); s++ {
 		used := a.slabs[s][:]
 		if s == a.slab {
@@ -76,6 +76,6 @@ func (a *stateObjectArena) rewind() {
 	a.slab, a.idx = 0, 0
 }
 
-func (a *stateObjectArena) free() {
+func (a *stateObjectArena) release() {
 	a.slabs, a.slab, a.idx = nil, 0, 0
 }

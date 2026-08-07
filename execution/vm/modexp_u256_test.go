@@ -10,39 +10,80 @@ import (
 	"testing"
 )
 
+func bigLsh(n uint) *big.Int { return new(big.Int).Lsh(big.NewInt(1), n) }
+
+// TestModexpU256Applicable pins the routing boundaries: a base wider than 256
+// bits (which uint256.SetBytes would silently truncate) and a modulus below
+// 2^192 (where the reciprocal is unavailable) must not reach modexpU256.
+func TestModexpU256Applicable(t *testing.T) {
+	be := func(n int, v *big.Int) []byte {
+		b := make([]byte, n)
+		v.FillBytes(b)
+		return b
+	}
+	mod256 := new(big.Int).Sub(bigLsh(256), big.NewInt(1))
+	mod192 := bigLsh(192)
+	mod192m1 := new(big.Int).Sub(mod192, big.NewInt(1))
+
+	cases := []struct {
+		name string
+		base []byte
+		mod  []byte
+		want bool
+	}{
+		{"32-byte base, full 256-bit modulus", be(32, mod256), be(32, mod256), true},
+		{"empty base", nil, be(32, mod256), true},
+		{"modulus exactly 2^192", be(32, mod256), be(25, mod192), true},
+		{"2^192 in a padded 32-byte field", be(32, mod256), be(32, mod192), true},
+		{"modulus 2^192-1", be(32, mod256), be(24, mod192m1), false},
+		{"2^192-1 in a padded 32-byte field", be(32, mod256), be(32, mod192m1), false},
+		{"128-bit modulus in a 32-byte field", be(32, mod256), be(32, bigLsh(128)), false},
+		{"33-byte base", be(33, mod256), be(32, mod256), false},
+		{"1024-byte base", be(1024, mod256), be(32, mod256), false},
+		{"33-byte modulus", be(32, mod256), be(33, mod256), false},
+	}
+	for _, c := range cases {
+		if got := modexpU256Applicable(c.base, c.mod); got != c.want {
+			t.Errorf("%s: modexpU256Applicable = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
 // TestModexpU256 cross-checks the fixed-width uint256 MODEXP fast path against
 // math/big across odd/even moduli, base 0/1/>mod, and exponent 0/small/large.
 func TestModexpU256(t *testing.T) {
 	be := func(x *big.Int) []byte { return x.Bytes() }
 	i := big.NewInt
-	twoTo256m1 := new(big.Int).Sub(new(big.Int).Lsh(i(1), 256), i(1)) // odd
-	twoTo255 := new(big.Int).Lsh(i(1), 255)                           // even, needs 32 bytes
-	twoTo300 := new(big.Int).Add(new(big.Int).Lsh(i(1), 300), i(7))   // base > 256 bits (38 bytes)
-	twoTo500 := new(big.Int).Add(new(big.Int).Lsh(i(1), 500), i(3))   // base >> 256 bits (63 bytes)
+	twoTo256m1 := new(big.Int).Sub(bigLsh(256), i(1))      // odd, 256-bit
+	twoTo255 := bigLsh(255)                                // even, 32 bytes
+	twoTo192 := bigLsh(192)                                // smallest accepted modulus, 25 bytes
+	twoTo192p1 := new(big.Int).Add(twoTo192, i(1))         // odd, 25 bytes
+	bigExp := new(big.Int).Sub(twoTo256m1, i(1))           // ~256-bit exponent
+	bigBase := new(big.Int).Sub(bigLsh(256), i(1234567))   // 32-byte base > modulus 2^192
+	oddMod := new(big.Int).Sub(twoTo256m1, i(58))          // odd, 256-bit
+	evenMod := new(big.Int).Sub(bigLsh(250), i(1024*1024)) // even, 32 bytes
 
 	cases := []struct{ base, exp, mod *big.Int }{
-		{i(2), i(65537), twoTo256m1},                           // odd modulus, small exp
-		{i(2), new(big.Int).Sub(twoTo256m1, i(1)), twoTo256m1}, // odd modulus, ~256-bit exp
-		{i(0), i(5), i(7)},                                     // base 0 -> 0
-		{i(3), i(0), i(7)},                                     // exp 0 -> 1
-		{i(1), i(12345), i(7)},                                 // base 1 -> 1
-		{i(10), i(3), i(6)},                                    // even modulus
-		{i(100), i(2), i(7)},                                   // base > modulus
-		{i(3), i(100), twoTo255},                               // even 256-bit modulus
-		{i(3), i(5), i(2)},                                     // tiny modulus
-		{twoTo300, i(65537), twoTo256m1},                       // base > 256 bits, odd modulus
-		{twoTo500, i(100), i(7)},                               // base >> 256 bits, tiny modulus
-		{twoTo300, i(9), twoTo255},                             // base > 256 bits, even modulus
+		{i(2), i(65537), twoTo256m1},    // odd modulus, small exp
+		{i(2), bigExp, twoTo256m1},      // odd modulus, ~256-bit exp
+		{i(0), i(5), oddMod},            // base 0 -> 0
+		{i(3), i(0), oddMod},            // exp 0 -> 1
+		{i(1), i(12345), oddMod},        // base 1 -> 1
+		{i(10), i(3), evenMod},          // even modulus
+		{bigBase, i(2), twoTo192},       // base > modulus, power-of-two modulus
+		{bigBase, i(65537), twoTo192p1}, // base > modulus, odd 25-byte modulus
+		{i(3), i(100), twoTo255},        // even 256-bit modulus
+		{bigBase, bigExp, oddMod},       // full-width base and exponent
 	}
 	for idx, c := range cases {
-		modLen := len(be(c.mod))
-		if modLen == 0 {
-			modLen = 1
+		modBytes := be(c.mod)
+		if !modexpU256Applicable(be(c.base), modBytes) {
+			t.Fatalf("case %d: test vector is outside the routed domain", idx)
 		}
-		dst := make([]byte, modLen)
-		modexpU256(dst, be(c.base), be(c.exp), be(c.mod))
+		dst := make([]byte, len(modBytes))
+		modexpU256(dst, be(c.base), be(c.exp), modBytes)
 
-		want := make([]byte, modLen)
+		want := make([]byte, len(modBytes))
 		new(big.Int).Exp(c.base, c.exp, c.mod).FillBytes(want)
 		if !bytes.Equal(dst, want) {
 			t.Errorf("case %d (base=%s exp=%s mod=%s): got %x want %x",
@@ -51,29 +92,70 @@ func TestModexpU256(t *testing.T) {
 	}
 }
 
+// TestModexpU256PaddedAndZero covers the operand shapes whose cost is driven by
+// the declared field width rather than the value: an exponent field padded with
+// leading zeros, and a base that reduces to zero. 0^0 mod m stays 1.
+func TestModexpU256PaddedAndZero(t *testing.T) {
+	pad := func(n int, tail ...byte) []byte {
+		b := make([]byte, n)
+		copy(b[n-len(tail):], tail)
+		return b
+	}
+	mod := pad(32, 0xff)
+	mod[0] = 0xff // full-width odd modulus
+	modBig := new(big.Int).SetBytes(mod)
+
+	cases := []struct {
+		name      string
+		base, exp []byte
+	}{
+		{"1024-byte exponent field holding 0", pad(32, 7), pad(1024)},
+		{"1024-byte exponent field holding 1", pad(32, 7), pad(1024, 1)},
+		{"zero base, exponent 0", pad(32), pad(1024)},
+		{"zero base, all-ones exponent", pad(32), bytes.Repeat([]byte{0xff}, 1024)},
+		{"base equal to the modulus", mod, bytes.Repeat([]byte{0xff}, 1024)},
+		{"empty base and empty exponent", nil, nil},
+	}
+	for _, c := range cases {
+		dst := make([]byte, len(mod))
+		modexpU256(dst, c.base, c.exp, mod)
+
+		want := make([]byte, len(mod))
+		new(big.Int).Exp(new(big.Int).SetBytes(c.base), new(big.Int).SetBytes(c.exp), modBig).FillBytes(want)
+		if !bytes.Equal(dst, want) {
+			t.Errorf("%s: got %x want %x", c.name, dst, want)
+		}
+	}
+}
+
 // TestModexpU256Random fuzzes the uint256 path against math/big over random
-// inputs, including bases longer than the 256-bit modulus and small moduli.
+// operands drawn from the routed domain, including modulus fields padded with
+// leading zero bytes.
 func TestModexpU256Random(t *testing.T) {
 	rng := rand.New(rand.NewSource(1))
-	randBytes := func(maxLen int) []byte {
-		b := make([]byte, rng.Intn(maxLen+1))
+	randBytes := func(minLen, maxLen int) []byte {
+		b := make([]byte, minLen+rng.Intn(maxLen-minLen+1))
 		rng.Read(b)
 		return b
 	}
-	one := big.NewInt(1)
 	for iter := range 20000 {
-		base := randBytes(48) // up to 48 bytes exercises the base-reduction path
-		exp := randBytes(20)
-		modB := randBytes(32) // modulus fits in 256 bits
-		m := new(big.Int).SetBytes(modB)
-		if m.Cmp(one) <= 0 {
-			continue // mod 0/1 are handled by earlier switch cases
+		base := randBytes(0, 32)
+		exp := randBytes(0, 20)
+		modB := randBytes(25, 32)
+		// Force the modulus to at least 2^192, then zero a random prefix so that
+		// padded fields (and their boundary) get exercised too.
+		modB[0] |= 1
+		for j := range rng.Intn(len(modB) - 24) {
+			modB[j] = 0
 		}
-		modLen := len(modB)
-		dst := make([]byte, modLen)
+		if !modexpU256Applicable(base, modB) {
+			continue
+		}
+		m := new(big.Int).SetBytes(modB)
+		dst := make([]byte, len(modB))
 		modexpU256(dst, base, exp, modB)
 
-		want := make([]byte, modLen)
+		want := make([]byte, len(modB))
 		new(big.Int).Exp(new(big.Int).SetBytes(base), new(big.Int).SetBytes(exp), m).FillBytes(want)
 		if !bytes.Equal(dst, want) {
 			t.Fatalf("iter %d: base=%x exp=%x mod=%x\n got %x\nwant %x", iter, base, exp, modB, dst, want)

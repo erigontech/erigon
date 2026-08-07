@@ -171,7 +171,7 @@ func TestResetBoundsRetainedLogMemory(t *testing.T) {
 	require.LessOrEqual(t, len(ibs.logs.pool), maxPooledLogEntries)
 	require.LessOrEqual(t, ibs.logs.poolBytes, maxPooledLogBytes)
 
-	// The tx groups keep their slots, but every entry is in the pool.
+	// The run keeps its array, but every entry is in the pool.
 	entries, _, dataBytes := retainedLogs(ibs)
 	require.Zero(t, entries, "entries live outside the pool")
 	require.Zero(t, dataBytes)
