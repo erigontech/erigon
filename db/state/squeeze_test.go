@@ -291,7 +291,7 @@ func TestExpandShortenedKeysInBranch_ReadPath(t *testing.T) {
 	for _, vf := range at.Files(kv.CommitmentDomain) {
 		decomp, err := seg.NewDecompressor(vf.Fullpath())
 		require.NoError(t, err)
-		defer decomp.Close()
+		defer decomp.Close() //nolint:gocritic
 		reader := seg.NewReader(decomp.MakeGetter(), agg.Cfg(kv.CommitmentDomain).Compression)
 		reader.Reset(0)
 
