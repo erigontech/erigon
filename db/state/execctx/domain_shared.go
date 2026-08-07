@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -172,6 +173,27 @@ func (f sdFrontier) DomainVisibleEnd(domain kv.Domain) (uint64, bool) {
 	return f.sd.domainVisibleEnd(f.tx, domain)
 }
 
+type rejectedFrontier struct{}
+
+func (rejectedFrontier) DomainVisibleEnd(kv.Domain) (uint64, bool) { return 0, false }
+
+// readViewEpoch rejects cache views created before an unwind. Requiring the same
+// state generation also rejects an old database transaction first bound after it.
+func (sd *SharedDomains) cacheFrontierFor(tx kv.TemporalTx) cache.Frontier {
+	if !sd.baseStateVersionKnown {
+		return rejectedFrontier{}
+	}
+	sameStateGeneration := tx.ViewID() == sd.baseViewID
+	if !sameStateGeneration {
+		stateVersion, err := rawdb.GetStateVersion(tx)
+		sameStateGeneration = err == nil && stateVersion == sd.baseStateVersion
+	}
+	if !sameStateGeneration {
+		return rejectedFrontier{}
+	}
+	return sdFrontier{sd: sd, tx: tx}
+}
+
 // cacheViewFor binds the shared state cache to tx's read view. Boxing the
 // frontier allocates, so per-read paths hold the view in their getter instead
 // of rebuilding it per call.
@@ -179,7 +201,7 @@ func (sd *SharedDomains) cacheViewFor(tx kv.TemporalTx) cache.ReadView {
 	if sd.stateCache == nil {
 		return cache.ReadView{}
 	}
-	return sd.stateCache.View(sdFrontier{sd: sd, tx: tx})
+	return sd.stateCache.View(sd.cacheFrontierFor(tx))
 }
 
 // cacheReader is a frontier-less view: admission-gated fills are disabled,
@@ -204,6 +226,10 @@ type SharedDomains struct {
 	stepSize uint64
 
 	logger log.Logger
+
+	baseViewID            uint64
+	baseStateVersion      uint64
+	baseStateVersionKnown bool
 
 	txNum       uint64
 	currentStep kv.Step
@@ -308,10 +334,14 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	}
 	trieCfg := o.trieCfg
 
+	stateVersion, stateVersionErr := rawdb.GetStateVersion(tx)
 	sd := &SharedDomains{
-		logger:   logger,
-		metrics:  kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
-		stepSize: tx.Debug().StepSize(),
+		logger:                logger,
+		metrics:               kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
+		stepSize:              tx.Debug().StepSize(),
+		baseViewID:            tx.ViewID(),
+		baseStateVersion:      stateVersion,
+		baseStateVersionKnown: stateVersionErr == nil,
 	}
 
 	sd.mem = tx.Debug().NewMemBatch(&sd.metrics)
@@ -1352,7 +1382,7 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 			// Frontier-less view from the plain GetLatest wrappers: bind a
 			// frontier here, on the miss path, where the boxing amortizes
 			// against the backing read it follows.
-			fillView = fillView.WithFrontier(sdFrontier{sd: sd, tx: tx})
+			fillView = fillView.WithFrontier(sd.cacheFrontierFor(tx))
 		}
 		fillView.Fill(domain, k, v, readTxNum)
 	}
@@ -1560,7 +1590,7 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, view cache.ReadView, 
 		if !seedView.CanFill() {
 			// Frontier-less view from the plain wrappers: bind one on this cold
 			// seed path, where the boxing amortizes against the account read.
-			seedView = seedView.WithFrontier(sdFrontier{sd: sd, tx: tx})
+			seedView = seedView.WithFrontier(sd.cacheFrontierFor(tx))
 		}
 		seedView.SeedAddrCodeHash(addr, fixed, txNum)
 	}
