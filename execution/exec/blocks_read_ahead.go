@@ -17,6 +17,7 @@ import (
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
@@ -81,23 +82,29 @@ func (bra *BlockReadAheader) SetStateCache(sc *cache.StateCache) {
 // Code reads also populate the content-addressed and size-cache layers.
 type cachePopulatingGetter struct {
 	kv.TemporalGetter
-	view     cache.ReadView
-	stepSize uint64 // for the read txNum upper bound (last txNum of the read's step)
+	view cache.ReadView
 }
 
 func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache) kv.TemporalGetter {
 	if sc == nil {
 		return ttx
 	}
-	debug := ttx.Debug()
-	return &cachePopulatingGetter{TemporalGetter: ttx, view: sc.View(debug), stepSize: debug.StepSize()}
+	stateVersion, err := rawdb.GetStateVersion(ttx)
+	if err != nil {
+		return ttx
+	}
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+		if _, ok := ttx.Debug().DomainVisibleEnd(domain); !ok {
+			return ttx
+		}
+	}
+	return &cachePopulatingGetter{TemporalGetter: ttx, view: sc.View(stateVersion)}
 }
 
 func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte) ([]byte, kv.Step, error) {
 	v, step, err := cpg.TemporalGetter.GetLatest(name, k)
 	if err == nil {
-		readTxNum := (uint64(step)+1)*cpg.stepSize - 1
-		cpg.view.Fill(name, k, v, readTxNum)
+		cpg.view.Fill(name, k, v, step)
 	}
 	return v, step, err
 }

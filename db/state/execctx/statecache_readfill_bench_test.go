@@ -49,23 +49,8 @@ func benchSeedDb(b *testing.B) kv.TemporalRwDB {
 	return db
 }
 
-// BenchmarkDomainVisibleEnd isolates the transaction-local cached frontier
-// lookup used by repeated cache fills.
-func BenchmarkDomainVisibleEnd(b *testing.B) {
-	db := benchSeedDb(b)
-	roTx, err := db.BeginTemporalRo(b.Context())
-	require.NoError(b, err)
-	defer roTx.Rollback()
-	_, _ = roTx.Debug().DomainVisibleEnd(kv.AccountsDomain)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, _ = roTx.Debug().DomainVisibleEnd(kv.AccountsDomain)
-	}
-}
-
 // benchColdNegativeReads drives the full cold-negative SD read: the whole
-// miss stack, plus — when a cache is wired — the exact-frontier lookup and
-// freshness-checked fill.
+// miss stack plus the generation-checked fill when a cache is wired.
 func benchColdNegativeReads(b *testing.B, withCache, writable bool) {
 	db := benchSeedDb(b)
 	ctx := b.Context()
@@ -104,7 +89,7 @@ func benchColdNegativeReads(b *testing.B, withCache, writable bool) {
 
 func BenchmarkGetLatestColdNegative(b *testing.B) { benchColdNegativeReads(b, true, false) }
 
-// The baseline the stamp+fill cost adds to.
+// The baseline for the generation check and fill.
 func BenchmarkGetLatestColdNegativeNoCache(b *testing.B) {
 	benchColdNegativeReads(b, false, false)
 }

@@ -77,14 +77,14 @@ func TestCommit_UpdatesStorageStateCache(t *testing.T) {
 
 	// First commit: the storage callback must fire and populate the cache.
 	commit(1, val1, nil)
-	got, ok := sc.View(nil).Get(kv.StorageDomain, key)
+	got, ok := currentStateCacheView(t, sc).Get(kv.StorageDomain, key)
 	require.True(t, ok, "storage cache must be populated by the commit callback")
 	require.Equal(t, val1, got)
 
 	// Overwrite in a second tx: the callback must fire again and refresh the
 	// entry — not leave the stale val1 behind.
 	commit(stepSize+1, val2, val1)
-	got, ok = sc.View(nil).Get(kv.StorageDomain, key)
+	got, ok = currentStateCacheView(t, sc).Get(kv.StorageDomain, key)
 	require.True(t, ok)
 	require.Equal(t, val2, got, "commit must refresh the storage cache; stale value served on hit was the bug")
 }

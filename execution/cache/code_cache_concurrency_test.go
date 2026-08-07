@@ -25,7 +25,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/maphash"
 )
@@ -80,7 +79,7 @@ func TestCodeCache_ByteCheckRejectsForeignKeyHash(t *testing.T) {
 	foreign := make([]byte, 32)
 	copy(foreign, realHash)
 	foreign[0] ^= 0xff // different 32-byte key
-	cc.codeHashToCode.Add(maphash.Hash(foreign), codeEntry{code: code, keyHash: hash32(realHash), txNum: 1, epoch: cc.coh.Epoch()})
+	cc.codeHashToCode.Add(maphash.Hash(foreign), codeEntry{code: code, keyHash: hash32(realHash)})
 
 	// The stored entry's keyHash is realHash, not foreign — Get must reject it.
 	_, ok = cc.GetByCodeHash(foreign)
@@ -136,27 +135,6 @@ func TestCodeCache_PutIfAbsentAtomicWithPut(t *testing.T) {
 	}
 }
 
-func TestCodeCache_ClearRacingPut_EpochAlias(t *testing.T) {
-	cc := closeOnCleanup(t, NewCodeCache(64*datasize.MB, 16*datasize.MB))
-	cc.Unwind(300)
-
-	addr := make([]byte, 20)
-	addr[0] = 0xef
-	code := []byte("dead-fork-code")
-	codeID := maphash.Hash(code)
-	preClearEpoch := cc.coh.Epoch()
-
-	cc.Clear()
-	// Model a writer that sampled the epoch before Clear and published after
-	// the relevant layers were purged.
-	cc.addrToHash.Add(common.BytesToAddress(addr), versionedAddressID{addrID: codeID, txNum: 200, epoch: preClearEpoch})
-	cc.hashToCode.Add(codeID, codeEntry{code: code, txNum: 200, epoch: preClearEpoch})
-	cc.Unwind(150)
-
-	_, ok := cc.Get(addr)
-	require.False(t, ok, "pre-Clear epoch must not alias the live epoch after a later unwind")
-}
-
 func TestCodeCache_ClearFencesStartedPut(t *testing.T) {
 	// Limit Go execution to one logical processor. Each runtime.Gosched call
 	// yields to the queued goroutine, which runs until it reaches the blocked lock.
@@ -164,10 +142,9 @@ func TestCodeCache_ClearFencesStartedPut(t *testing.T) {
 	defer runtime.GOMAXPROCS(previousProcs)
 
 	cc := closeOnCleanup(t, NewCodeCache(64*datasize.MB, 16*datasize.MB))
-	cc.Unwind(300)
 
 	addr := []byte{0xef}
-	code := []byte("dead-fork-code")
+	code := []byte("contract-code")
 	cc.addrBindMu.Lock()
 
 	var wg sync.WaitGroup

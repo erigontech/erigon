@@ -30,7 +30,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
 	"github.com/erigontech/erigon/common/math"
-	"github.com/erigontech/erigon/execution/cache/coherence"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 // putStripeCount sizes the same-key write-serialization stripes; power of two
@@ -51,11 +51,9 @@ const avgBytesPerEntry = 256
 // the OnEvict callback can update currentSize without re-running
 // sizeFunc.
 type entry[T any] struct {
-	key   []byte
-	val   T
-	size  int
-	txNum uint64 // commit/read txNum the cached value reflects (upper bound)
-	epoch uint32 // unwind generation the entry was written in
+	key  []byte
+	val  T
+	size int
 }
 
 // GenericCache is a sharded, LRU-evicting bounded cache for key-value
@@ -100,23 +98,16 @@ type GenericCache[T any] struct {
 	enveloped bool
 	closed    atomic.Bool
 
-	// coh is the shared (epoch, floor) unwind-coherence primitive: an entry is
-	// valid iff written in the current epoch OR its txNum is below the unwind
-	// floor. See execution/cache/coherence.
-	coh coherence.Gen
-
 	// putStripes serialize same-key writers so PutIfAbsent's check+insert is
 	// atomic w.r.t. a concurrent Put (freelru offers no conditional insert).
 	putStripes [putStripeCount]sync.Mutex
 
-	hits         atomic.Uint64
-	misses       atomic.Uint64
-	inserts      atomic.Uint64
-	evictions    atomic.Uint64 // capacity evictions only, counted from Add's evicted return (see newShards)
-	dropped      atomic.Uint64
-	staleEvicted atomic.Uint64 // stale entries detected on read after an unwind; dropped unless a racing put revived them
-
-	sizeFunc func(T) int
+	hits      atomic.Uint64
+	misses    atomic.Uint64
+	inserts   atomic.Uint64
+	evictions atomic.Uint64 // capacity evictions only, counted from Add's evicted return (see newShards)
+	dropped   atomic.Uint64
+	sizeFunc  func(T) int
 }
 
 func u64identity(k uint64) uint32 { return uint32(k) }
@@ -271,30 +262,42 @@ func (c *GenericCache[T]) maybeGrow() {
 		"alloc", fenceStart.Sub(start), "fenced", time.Since(fenceStart))
 }
 
-// DomainCache wraps GenericCache[[]byte] to implement the Cache interface.
+type domainEntry struct {
+	value []byte
+	step  kv.Step
+}
+
+// DomainCache stores the value and source step required by GetLatest.
 type DomainCache struct {
-	*GenericCache[[]byte]
+	*GenericCache[domainEntry]
 }
 
 // NewDomainCacheMode creates a new domain cache with the given mode.
 func NewDomainCacheMode(capacityBytes datasize.ByteSize, mode Mode) *DomainCache {
 	return &DomainCache{
-		GenericCache: NewGenericCache(capacityBytes, func(v []byte) int { return len(v) }, mode),
+		GenericCache: NewGenericCache(capacityBytes, func(v domainEntry) int { return len(v.value) }, mode),
 	}
 }
 
-// Get retrieves data for the given key, implementing the Cache interface.
 func (c *DomainCache) Get(key []byte) ([]byte, bool) {
+	value, _, ok := c.GetWithStep(key)
+	return value, ok
+}
+
+func (c *DomainCache) GetWithStep(key []byte) ([]byte, kv.Step, bool) {
 	entry, ok := c.GenericCache.Get(key)
 	if !ok {
-		return nil, false
+		return nil, 0, false
 	}
-	return entry, true
+	return entry.value, entry.step, true
 }
 
-// Put stores data for the given key, implementing the Cache interface.
-func (c *DomainCache) Put(key []byte, value []byte, txNum uint64) {
-	c.GenericCache.Put(key, value, txNum)
+func (c *DomainCache) Put(key, value []byte, step kv.Step) {
+	c.GenericCache.Put(key, domainEntry{value: value, step: step})
+}
+
+func (c *DomainCache) PutIfAbsent(key, value []byte, step kv.Step) {
+	c.GenericCache.PutIfAbsent(key, domainEntry{value: value, step: step})
 }
 
 // Delete removes the data for the given key, delegating to GenericCache.
@@ -304,64 +307,33 @@ func (c *DomainCache) Delete(key []byte) {
 
 // Get retrieves data for the given key.
 func (c *GenericCache[T]) Get(key []byte) (T, bool) {
-	v, _, ok := c.GetWithTxNum(key)
-	return v, ok
-}
-
-// GetWithTxNum is Get plus the txNum the cached value reflects, so callers can
-// apply a step bound (cStep = txNum/stepSize) against an in-flight unwind's
-// maxStep — the same coherence the BranchCache read applies for commitment.
-func (c *GenericCache[T]) GetWithTxNum(key []byte) (T, uint64, bool) {
 	h := maphash.Hash(key)
-	// Snapshot coherence before loading the generation. Clear publishes the
-	// replacement generation before lifting the unwind floor, so an entry
-	// captured from the retiring generation is always judged by coherence that
-	// still carries its unwind. A replacement-generation entry judged by an old
-	// snapshot can only cause a safe miss because dropStale rechecks the current
-	// generation before removing it.
-	coh := c.coh.Snapshot()
 	lru := c.data.Load()
 	e, ok := lru.Get(h)
 	if !ok || !bytes.Equal(e.key, key) {
 		c.misses.Add(1)
 		var zero T
-		return zero, 0, false
-	}
-	// Lazy unwind invalidation: an entry from a superseded epoch whose txNum is
-	// at or above the unwind floor reflects dead-fork state — drop it and miss so
-	// the read falls through to the reverted domain and repopulates. The floor is
-	// the first unwound txNum (Min(UnwindPoint+1), the first txNum of the first
-	// rolled-back block), so an entry stamped exactly at the floor belongs to a
-	// dead block — e.g. an EIP-4788 beacon-root write in the block-begin system
-	// tx — and must be dropped; >= not > (the surviving block's last txNum is
-	// floor-1, so this never drops a live entry).
-	if coh.IsStale(e.txNum, e.epoch) {
-		c.dropStale(h, key)
-		c.staleEvicted.Add(1)
-		c.misses.Add(1)
-		var zero T
-		return zero, 0, false
+		return zero, false
 	}
 	c.hits.Add(1)
-	return e.val, e.txNum, true
+	return e.val, true
 }
 
 // Put stores data for the given key. In ModeEvictLRU the underlying
 // sharded LRU evicts cold entries when its entry-count cap is reached.
 // In ModeNoOp inserts that would overflow the byte budget are dropped
 // (and counted via the dropped metric).
-func (c *GenericCache[T]) Put(key []byte, value T, txNum uint64) {
-	c.put(key, value, txNum, true)
+func (c *GenericCache[T]) Put(key []byte, value T) {
+	c.put(key, value, true)
 }
 
-// PutIfAbsent implements Cache.PutIfAbsent (live entry kept, stale one
-// replaced).
-func (c *GenericCache[T]) PutIfAbsent(key []byte, value T, txNum uint64) {
-	c.put(key, value, txNum, false)
+// PutIfAbsent leaves an existing entry untouched.
+func (c *GenericCache[T]) PutIfAbsent(key []byte, value T) {
+	c.put(key, value, false)
 }
 
-func (c *GenericCache[T]) put(key []byte, value T, txNum uint64, overwrite bool) {
-	if c.putStriped(key, value, txNum, overwrite) {
+func (c *GenericCache[T]) put(key []byte, value T, overwrite bool) {
+	if c.putStriped(key, value, overwrite) {
 		// Grow outside the stripe — maybeGrow takes every stripe.
 		c.maybeGrow()
 	}
@@ -371,7 +343,7 @@ func (c *GenericCache[T]) put(key []byte, value T, txNum uint64, overwrite bool)
 // insert landed in a full LRU with ceiling headroom, i.e. the caller should
 // grow. Detection stays on the insert path — Len locks every shard, too costly
 // per warm update.
-func (c *GenericCache[T]) putStriped(key []byte, value T, txNum uint64, overwrite bool) bool {
+func (c *GenericCache[T]) putStriped(key []byte, value T, overwrite bool) bool {
 	h := maphash.Hash(key)
 	valBytes := c.sizeFunc(value)
 	newSize := len(key) + valBytes + 24
@@ -380,10 +352,6 @@ func (c *GenericCache[T]) putStriped(key []byte, value T, txNum uint64, overwrit
 	mu.Lock()
 	defer mu.Unlock()
 
-	// Sample the epoch under the stripe. Clear holds every stripe across the
-	// generation swap and coherence reset, so the stamp cannot belong to a
-	// different generation from the one where the entry lands.
-	ep := c.coh.Epoch()
 	lru := c.data.Load()
 	existing, hasExisting := lru.Get(h)
 
@@ -391,7 +359,7 @@ func (c *GenericCache[T]) putStriped(key []byte, value T, txNum uint64, overwrit
 	// delta would be wrong). Reuse the stored key buffer to avoid an extra
 	// allocation; the freshly-decoded value replaces the old one.
 	if hasExisting && bytes.Equal(existing.key, key) {
-		if !overwrite && !c.coh.IsStale(existing.txNum, existing.epoch) {
+		if !overwrite {
 			return false
 		}
 		// Reserve the new size before the removal: the byte counter must never
@@ -400,7 +368,7 @@ func (c *GenericCache[T]) putStriped(key []byte, value T, txNum uint64, overwrit
 		// worst a new key is dropped, which is within "drop new keys when full".
 		c.currentSize.Add(int64(newSize))
 		lru.Remove(h)
-		if lru.Add(h, entry[T]{key: existing.key, val: value, size: newSize, txNum: txNum, epoch: ep}) {
+		if lru.Add(h, entry[T]{key: existing.key, val: value, size: newSize}) {
 			c.evictions.Add(1)
 		}
 		return false
@@ -442,7 +410,7 @@ func (c *GenericCache[T]) putStriped(key []byte, value T, txNum uint64, overwrit
 		lru.Remove(h)
 	}
 	keyCopy := bytes.Clone(key)
-	if lru.Add(h, entry[T]{key: keyCopy, val: value, size: newSize, txNum: txNum, epoch: ep}) {
+	if lru.Add(h, entry[T]{key: keyCopy, val: value, size: newSize}) {
 		c.evictions.Add(1)
 	}
 	c.inserts.Add(1)
@@ -463,25 +431,7 @@ func (c *GenericCache[T]) Delete(key []byte) {
 	}
 }
 
-// dropStale removes key's entry under its put stripe: the re-check keeps an
-// entry a concurrent put revived, and the stripe keeps the removal out of
-// generation swaps.
-func (c *GenericCache[T]) dropStale(h uint64, key []byte) {
-	mu := &c.putStripes[h&(putStripeCount-1)]
-	mu.Lock()
-	defer mu.Unlock()
-	lru := c.data.Load()
-	if e, ok := lru.Get(h); ok && bytes.Equal(e.key, key) && c.coh.IsStale(e.txNum, e.epoch) {
-		lru.Remove(h)
-	}
-}
-
-// Clear removes all entries and restores the starting capacity. It starts an
-// empty coherence generation by advancing the epoch and lifting the unwind
-// floor, so subsequent puts are not constrained by an unwind that belongs to
-// the retired data. The accounting reset, data swap, and coherence reset run
-// with every put stripe held, so a racing writer cannot split those
-// publications.
+// Clear removes all entries and restores the starting capacity.
 func (c *GenericCache[T]) Clear() {
 	// Shrink back to the start size and return the grown budget to the envelope,
 	// keeping the cache adaptive across fork-validation/reset (it regrows on
@@ -501,11 +451,6 @@ func (c *GenericCache[T]) Clear() {
 	c.shardCount = shards
 	c.curCap.Store(c.startCap)
 	c.data.Store(next)
-	// Reset coherence only after publishing the empty generation. Paired with
-	// GetWithTxNum's snapshot-before-load ordering, this ensures an entry from
-	// the retiring generation is judged by pre-Reset coherence that still
-	// carries the unwind.
-	c.coh.Reset()
 	for i := range c.putStripes {
 		c.putStripes[i].Unlock()
 	}
@@ -521,14 +466,6 @@ func (c *GenericCache[T]) Close() {
 		c.resizeMu.Unlock()
 		cachebudget.Global.Release(reserved)
 	}
-}
-
-// Unwind invalidates entries that reflect dead-fork state. unwindToTxNum is the
-// first rolled-back txNum (Min(UnwindPoint+1)); every entry at or above it is on
-// the dead fork. O(1) and scan-free; stale entries drop lazily on their next
-// read. See coherence.Gen.Unwind.
-func (c *GenericCache[T]) Unwind(unwindToTxNum uint64) {
-	c.coh.Unwind(unwindToTxNum)
 }
 
 // Len returns the number of entries in the cache.
@@ -553,7 +490,6 @@ func (c *GenericCache[T]) PrintStatsAndReset(name string) {
 	inserts := c.inserts.Swap(0)
 	evictions := c.evictions.Swap(0)
 	dropped := c.dropped.Swap(0)
-	staleEvicted := c.staleEvicted.Swap(0)
 	total := hits + misses
 	var hitRate float64
 	if total > 0 {
@@ -565,7 +501,6 @@ func (c *GenericCache[T]) PrintStatsAndReset(name string) {
 		"mode", c.mode.String(),
 		"hits", hits, "misses", misses, "hit_rate", hitRate,
 		"inserts", inserts, "evictions", evictions, "dropped", dropped,
-		"stale_evicted", staleEvicted, "epoch", c.coh.Epoch(),
 		"entries", c.data.Load().Len(), "size_mb", sizeBytes/(1024*1024),
 		"capacity_mb", int64(c.capacityB/datasize.MB), "usage_pct", usagePct,
 	)

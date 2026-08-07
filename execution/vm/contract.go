@@ -114,7 +114,7 @@ func (c *Contract) isCode(udest uint64) bool {
 
 	if !isCodeHashZero {
 		// content-addressed by codeHash and never unwound, so txNum is irrelevant
-		jumpDestCache.Put(codeHash[:], c.analysis, 0)
+		jumpDestCache.Put(codeHash[:], c.analysis)
 	}
 
 	return c.analysis.codeSegment(udest)

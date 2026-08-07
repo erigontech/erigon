@@ -58,6 +58,16 @@ func makeValue(i int) []byte {
 	return []byte{byte(i), byte(i + 1), byte(i + 2)}
 }
 
+func readyStateCache(t *testing.T, stateVersion uint64) (*StateCache, Publisher) {
+	t.Helper()
+	b := 1 * datasize.MB
+	stateCache := NewStateCache(b, b, b, b)
+	t.Cleanup(stateCache.Close)
+	publisher := stateCache.Publisher()
+	publisher.Initialize(stateVersion)
+	return stateCache, publisher
+}
+
 // =============================================================================
 // DomainCache Tests
 // =============================================================================
@@ -140,7 +150,7 @@ func TestDomainCache_PutEvictsWhenFull_EvictMode(t *testing.T) {
 	// eviction event. Capacity-bytes is unused for the eviction
 	// decision and is only carried for telemetry.
 	c := &DomainCache{
-		GenericCache: newGenericCacheEntries[[]byte](1<<20, 2, func(v []byte) int { return len(v) }, ModeEvictLRU),
+		GenericCache: newGenericCacheEntries[domainEntry](1<<20, 2, func(v domainEntry) int { return len(v.value) }, ModeEvictLRU),
 	}
 
 	for i := 1; i <= 64; i++ {
@@ -443,67 +453,72 @@ func TestStateCache_NewDefaultStateCache(t *testing.T) {
 }
 
 func TestStateCache_GetPut_Account(t *testing.T) {
-	c := closeOnCleanup(t, NewStateCache(100, 100, 100, 100))
+	c, _ := readyStateCache(t, 1)
+	view := c.View(1)
 
 	addr := makeAddr(1)
 	value := makeValue(1)
 
 	// Get non-existent
-	v, ok := c.get(kv.AccountsDomain, addr)
+	v, ok := view.Get(kv.AccountsDomain, addr)
 	assert.False(t, ok)
 	assert.Nil(t, v)
 
 	// Put and Get
-	c.put(kv.AccountsDomain, addr, value, 0)
-	v, ok = c.get(kv.AccountsDomain, addr)
+	view.Fill(kv.AccountsDomain, addr, value, 0)
+	v, ok = view.Get(kv.AccountsDomain, addr)
 	assert.True(t, ok)
 	assert.Equal(t, value, v)
 }
 
 func TestStateCache_GetPut_Storage(t *testing.T) {
-	c := closeOnCleanup(t, NewStateCache(100, 100, 100, 100))
+	c, _ := readyStateCache(t, 1)
+	view := c.View(1)
 
 	key := make([]byte, 52) // addr(20) + slot(32)
 	copy(key, makeAddr(1))
 	key[51] = 1
 	value := makeValue(1)
 
-	c.put(kv.StorageDomain, key, value, 0)
-	v, ok := c.get(kv.StorageDomain, key)
+	view.Fill(kv.StorageDomain, key, value, 0)
+	v, ok := view.Get(kv.StorageDomain, key)
 	assert.True(t, ok)
 	assert.Equal(t, value, v)
 }
 
 func TestStateCache_GetPut_Code(t *testing.T) {
-	c := closeOnCleanup(t, NewStateCache(1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB))
+	c, _ := readyStateCache(t, 1)
+	view := c.View(1)
 
 	addr := makeAddr(1)
 	code := makeCode(1)
 
-	c.put(kv.CodeDomain, addr, code, 0)
-	v, ok := c.get(kv.CodeDomain, addr)
+	view.Fill(kv.CodeDomain, addr, code, 0)
+	v, ok := view.Get(kv.CodeDomain, addr)
 	assert.True(t, ok)
 	assert.Equal(t, code, v)
 }
 
 func TestStateCache_GetPut_UnsupportedDomain(t *testing.T) {
-	c := closeOnCleanup(t, NewStateCache(100, 100, 100, 100))
+	c, _ := readyStateCache(t, 1)
+	view := c.View(1)
 
 	// ReceiptDomain is not supported
-	c.put(kv.ReceiptDomain, makeAddr(1), makeValue(1), 0)
-	v, ok := c.get(kv.ReceiptDomain, makeAddr(1))
+	view.Fill(kv.ReceiptDomain, makeAddr(1), makeValue(1), 0)
+	v, ok := view.Get(kv.ReceiptDomain, makeAddr(1))
 	assert.False(t, ok)
 	assert.Nil(t, v)
 }
 
 func TestStateCache_Delete(t *testing.T) {
-	c := closeOnCleanup(t, NewStateCache(100, 100, 100, 100))
+	c, publisher := readyStateCache(t, 1)
 
 	addr := makeAddr(1)
-	c.put(kv.AccountsDomain, addr, makeValue(1), 0)
-	c.deleteKey(kv.AccountsDomain, addr)
+	c.View(1).Fill(kv.AccountsDomain, addr, makeValue(1), 0)
+	publication := publisher.Begin()
+	publication.Publish(2, []Update{{Domain: kv.AccountsDomain, Key: addr}}, false)
 
-	_, ok := c.get(kv.AccountsDomain, addr)
+	_, ok := c.View(2).Get(kv.AccountsDomain, addr)
 	assert.False(t, ok)
 }
 
@@ -511,53 +526,59 @@ func TestStateCache_Delete(t *testing.T) {
 // caches deleted keys via Put(key, nil); if Get treats that as "not found",
 // the caller unnecessarily falls through to the DB on every read.
 func TestStateCache_PutEmpty_ThenGet_IsCacheHit(t *testing.T) {
-	c := closeOnCleanup(t, NewStateCache(100, 100, 100, 100))
+	c, _ := readyStateCache(t, 1)
+	view := c.View(1)
 
 	key := make([]byte, 52) // addr(20) + slot(32)
 	key[0] = 0x1d
 	key[51] = 0xa2
 
-	c.put(kv.StorageDomain, key, nil, 0)
+	view.Fill(kv.StorageDomain, key, nil, 0)
 
-	v, ok := c.get(kv.StorageDomain, key)
+	v, ok := view.Get(kv.StorageDomain, key)
 	assert.True(t, ok, "Get after Put(nil) must be a cache hit, not a miss")
 	assert.Empty(t, v, "cached value for a deleted key must be empty")
 }
 
 // Same test for []byte{} (zero-length but non-nil).
 func TestStateCache_PutEmptySlice_ThenGet_IsCacheHit(t *testing.T) {
-	c := closeOnCleanup(t, NewStateCache(100, 100, 100, 100))
+	c, _ := readyStateCache(t, 1)
+	view := c.View(1)
 
 	key := make([]byte, 52)
 	key[0] = 0x1d
 	key[51] = 0xa2
 
-	c.put(kv.StorageDomain, key, []byte{}, 0)
+	view.Fill(kv.StorageDomain, key, []byte{}, 0)
 
-	v, ok := c.get(kv.StorageDomain, key)
+	v, ok := view.Get(kv.StorageDomain, key)
 	assert.True(t, ok, "Get after Put([]byte{}) must be a cache hit")
 	assert.Empty(t, v)
 }
 
 func TestStateCache_Delete_UnsupportedDomain(t *testing.T) {
-	c := closeOnCleanup(t, NewStateCache(100, 100, 100, 100))
+	_, publisher := readyStateCache(t, 1)
 
-	// Should not panic
-	c.deleteKey(kv.ReceiptDomain, makeAddr(1))
+	require.NotPanics(t, func() {
+		publication := publisher.Begin()
+		publication.Publish(2, []Update{{Domain: kv.ReceiptDomain, Key: makeAddr(1)}}, false)
+	})
 }
 
 func TestStateCache_Clear(t *testing.T) {
-	c := closeOnCleanup(t, NewStateCache(100, 100, 100, 100))
+	c, publisher := readyStateCache(t, 1)
+	view := c.View(1)
 
-	c.put(kv.AccountsDomain, makeAddr(1), makeValue(1), 0)
-	c.put(kv.StorageDomain, makeAddr(2), makeValue(2), 0)
-	c.put(kv.CodeDomain, makeAddr(3), makeCode(3), 0)
+	view.Fill(kv.AccountsDomain, makeAddr(1), makeValue(1), 0)
+	view.Fill(kv.StorageDomain, makeAddr(2), makeValue(2), 0)
+	view.Fill(kv.CodeDomain, makeAddr(3), makeCode(3), 0)
 
-	c.clear()
+	publisher.Clear(2)
+	view = c.View(2)
 
-	_, ok1 := c.get(kv.AccountsDomain, makeAddr(1))
-	_, ok2 := c.get(kv.StorageDomain, makeAddr(2))
-	_, ok3 := c.get(kv.CodeDomain, makeAddr(3))
+	_, ok1 := view.Get(kv.AccountsDomain, makeAddr(1))
+	_, ok2 := view.Get(kv.StorageDomain, makeAddr(2))
+	_, ok3 := view.Get(kv.CodeDomain, makeAddr(3))
 
 	assert.False(t, ok1)
 	assert.False(t, ok2)
@@ -634,20 +655,21 @@ func TestCodeCache_ConcurrentAccess(t *testing.T) {
 // =============================================================================
 
 func TestStateCache_DomainIsolation(t *testing.T) {
-	c := closeOnCleanup(t, NewStateCache(1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB))
+	c, _ := readyStateCache(t, 1)
+	view := c.View(1)
 
 	addr := makeAddr(1)
 	accountData := []byte("account")
 	storageData := []byte("storage")
 	codeData := []byte{0x60, 0x00, 0x60, 0x00} // valid code
 
-	c.put(kv.AccountsDomain, addr, accountData, 0)
-	c.put(kv.StorageDomain, addr, storageData, 0)
-	c.put(kv.CodeDomain, addr, codeData, 0)
+	view.Fill(kv.AccountsDomain, addr, accountData, 0)
+	view.Fill(kv.StorageDomain, addr, storageData, 0)
+	view.Fill(kv.CodeDomain, addr, codeData, 0)
 
-	v1, ok1 := c.get(kv.AccountsDomain, addr)
-	v2, ok2 := c.get(kv.StorageDomain, addr)
-	v3, ok3 := c.get(kv.CodeDomain, addr)
+	v1, ok1 := view.Get(kv.AccountsDomain, addr)
+	v2, ok2 := view.Get(kv.StorageDomain, addr)
+	v3, ok3 := view.Get(kv.CodeDomain, addr)
 
 	assert.True(t, ok1)
 	assert.True(t, ok2)
@@ -656,131 +678,6 @@ func TestStateCache_DomainIsolation(t *testing.T) {
 	assert.True(t, bytes.Equal(v1, accountData))
 	assert.True(t, bytes.Equal(v2, storageData))
 	assert.True(t, bytes.Equal(v3, codeData))
-}
-
-// =============================================================================
-// Block Continuity Tests
-// =============================================================================
-
-// Fork-validation (engine_newPayload) of a block building on the canonical tip
-// must NOT purge the hot cache when that block is subsequently applied
-// canonically. Regression for the tip purge_rate bug: fork-validation advancing
-// blockHash to the speculative block made the canonical apply mismatch & purge.
-// Fork-validation of a block on a DIFFERENT parent (reorg proposal) must still
-// purge, since cache-as-of-canonical-tip would serve incoherent reads, but it
-// must not advance blockHash (canonical continues cleanly afterward).
-// =============================================================================
-// RevertWithDiffset Tests
-// =============================================================================
-
-// makeDiffKey creates a domain entry key with an 8-byte step suffix, matching
-// the format used by DomainEntryDiff (full key = base key + inverted step).
-func makeDiffKey(baseKey []byte, step uint64) string {
-	k := make([]byte, len(baseKey)+8)
-	copy(k, baseKey)
-	// Store inverted step in the suffix (same encoding as domain tables).
-	k[len(k)-8] = byte(^step >> 56)
-	k[len(k)-7] = byte(^step >> 48)
-	k[len(k)-6] = byte(^step >> 40)
-	k[len(k)-5] = byte(^step >> 32)
-	k[len(k)-4] = byte(^step >> 24)
-	k[len(k)-3] = byte(^step >> 16)
-	k[len(k)-2] = byte(^step >> 8)
-	k[len(k)-1] = byte(^step)
-	return string(k)
-}
-
-// --- txNum/epoch unwind invalidation (replaces the blockHash/diffset model) ---
-
-// Entries stamped at/below the unwind point survive (warm hot set kept); entries
-// above it from the now-dead epoch are dropped lazily on read.
-func TestUnwind_KeepsBelowFloor_EvictsAbove(t *testing.T) {
-	c := closeOnCleanup(t, NewDomainCacheMode(1*datasize.MB, ModeEvictLRU))
-	below := makeAddr(1)
-	above := makeAddr(2)
-	c.Put(below, makeValue(1), 50)  // predates the unwind
-	c.Put(above, makeValue(2), 150) // written in the unwound range
-
-	c.Unwind(100) // floor=100 (first unwound txNum): keep <100, drop >=100
-
-	v, ok := c.Get(below)
-	assert.True(t, ok, "entry below the unwind point must stay warm")
-	assert.Equal(t, makeValue(1), v)
-
-	_, ok = c.Get(above)
-	assert.False(t, ok, "entry above the unwind point must be invalidated")
-	assert.Equal(t, 1, c.Len(), "the stale entry is evicted lazily on its read")
-}
-
-// Pins the unwind floor boundary: unwindToTxNum is the FIRST rolled-back txNum,
-// so an entry stamped at exactly that txNum is dead-fork state and must be
-// evicted — the drop rule is txNum >= floor, not txNum > floor.
-func TestUnwind_EvictsEntryAtFloor(t *testing.T) {
-	c := closeOnCleanup(t, NewDomainCacheMode(1*datasize.MB, ModeEvictLRU))
-	atFloor := makeAddr(1)
-	belowFloor := makeAddr(2)
-	c.Put(atFloor, makeValue(1), 100)   // first txNum of the first unwound block
-	c.Put(belowFloor, makeValue(2), 99) // last txNum of the surviving block
-
-	c.Unwind(100) // floor=100, epoch->1
-
-	_, ok := c.Get(atFloor)
-	assert.False(t, ok, "entry at txNum==floor is on the dead fork and must be evicted")
-
-	v, ok := c.Get(belowFloor)
-	assert.True(t, ok, "entry at txNum==floor-1 predates the unwind and must stay warm")
-	assert.Equal(t, makeValue(2), v)
-}
-
-// The reused-txNum case: after an unwind, the live fork re-writes a key at the
-// SAME txNum as the dead fork's write. The epoch — not the txNum — distinguishes
-// them, so the dead entry reads stale and the re-written one reads valid.
-func TestUnwind_ReusedTxNumDisambiguatedByEpoch(t *testing.T) {
-	c := closeOnCleanup(t, NewDomainCacheMode(1*datasize.MB, ModeEvictLRU))
-	k := makeAddr(1)
-	c.Put(k, makeValue(1), 150) // dead fork, epoch 0
-
-	c.Unwind(100) // epoch -> 1, floor -> 100
-
-	_, ok := c.Get(k)
-	assert.False(t, ok, "dead-fork entry (old epoch, above floor) reads stale")
-
-	c.Put(k, makeValue(2), 150) // live fork re-writes at the same txNum, epoch 1
-	v, ok := c.Get(k)
-	assert.True(t, ok, "live-fork entry at the same txNum is valid (current epoch)")
-	assert.Equal(t, makeValue(2), v)
-}
-
-// A straggler the live fork never re-writes must not resurrect: it stays in a
-// dead epoch above the floor and reads stale no matter how far execution
-// advances afterwards (there is no rising high-water mark to re-validate it).
-func TestUnwind_StragglerNeverResurrects(t *testing.T) {
-	c := closeOnCleanup(t, NewDomainCacheMode(1*datasize.MB, ModeEvictLRU))
-	straggler := makeAddr(1)
-	c.Put(straggler, makeValue(1), 150) // epoch 0
-
-	c.Unwind(100) // epoch 1
-
-	// Advance the live fork far past the straggler's txNum (no re-write of it).
-	for i := 2; i < 50; i++ {
-		c.Put(makeAddr(i), makeValue(i), uint64(200+i))
-	}
-	_, ok := c.Get(straggler)
-	assert.False(t, ok, "straggler in a dead epoch must stay stale, never resurrect")
-}
-
-// A second, shallower unwind must not resurrect entries a deeper earlier unwind
-// invalidated (floor only moves down).
-func TestUnwind_FloorOnlyMovesDown(t *testing.T) {
-	c := closeOnCleanup(t, NewDomainCacheMode(1*datasize.MB, ModeEvictLRU))
-	k := makeAddr(1)
-	c.Put(k, makeValue(1), 70) // epoch 0
-
-	c.Unwind(50)  // floor 50, epoch 1 — k(70>50, epoch0) now stale
-	c.Unwind(100) // shallower; floor must stay 50, not rise to 100
-
-	_, ok := c.Get(k)
-	assert.False(t, ok, "deeper unwind's floor must not be raised by a later shallower one")
 }
 
 func TestDomainCache_PutIfAbsent(t *testing.T) {
@@ -802,20 +699,6 @@ func TestDomainCache_PutIfAbsent(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, fresh, v, "PutIfAbsent must not replace a live entry")
 
-	// Entry below the unwind floor survives the unwind and still blocks PutIfAbsent.
-	low := makeAddr(2)
-	c.Put(low, fresh, 3)
-	c.Unwind(5)
-	c.PutIfAbsent(low, stale, 4)
-	v, ok = c.Get(low)
-	require.True(t, ok)
-	assert.Equal(t, fresh, v)
-
-	// Stale entry (at/above the floor, superseded epoch) → replaced.
-	c.PutIfAbsent(addr, stale, 10) // addr's entry was stamped txNum 20 >= floor 5
-	v, ok = c.Get(addr)
-	require.True(t, ok)
-	assert.Equal(t, stale, v, "PutIfAbsent must replace a stale entry")
 }
 
 func TestCodeCache_PutIfAbsentKeepsLiveAddrBinding(t *testing.T) {
@@ -835,12 +718,6 @@ func TestCodeCache_PutIfAbsentKeepsLiveAddrBinding(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, fresh, v, "PutIfAbsent must not rebind a live addr entry")
 
-	// After an unwind marks the binding stale, PutIfAbsent may rebind.
-	cc.Unwind(5)
-	cc.PutIfAbsent(addr, stale, 4)
-	v, ok = cc.Get(addr)
-	require.True(t, ok)
-	assert.Equal(t, stale, v)
 }
 
 func TestCodeCache_PutWithCodeHashIfAbsent(t *testing.T) {
@@ -890,162 +767,132 @@ func TestDomainCache_PutIfAbsentAtomicWithPut(t *testing.T) {
 	}
 }
 
-func TestStateCache_AppliedEndLifecycle(t *testing.T) {
-	b := 1 * datasize.MB
-	sc := NewStateCache(b, b, b, b)
-	t.Cleanup(sc.Close)
-	require.Zero(t, sc.appliedEnd[kv.AccountsDomain])
-
-	sc.apply(kv.AccountsDomain, makeAddr(1), makeValue(1), 20)
-	sc.apply(kv.AccountsDomain, makeAddr(2), makeValue(2), 10)
-	require.Equal(t, uint64(21), sc.appliedEnd[kv.AccountsDomain])
-	require.Zero(t, sc.appliedEnd[kv.StorageDomain])
-
-	sc.unwind(15)
-	require.Equal(t, uint64(15), sc.appliedEnd[kv.AccountsDomain])
-
-	sc.clear()
-	require.Equal(t, uint64(15), sc.appliedEnd[kv.AccountsDomain],
-		"clear drops entries, not admission history")
-}
-
-func TestStateCache_StaleViewCannotFillAfterDelete(t *testing.T) {
-	b := 1 * datasize.MB
-	sc := NewStateCache(b, b, b, b)
-	t.Cleanup(sc.Close)
-
-	key := makeAddr(1)
-	stale := makeValue(1)
-	sc.apply(kv.AccountsDomain, key, stale, 10)
-	sc.apply(kv.AccountsDomain, key, nil, 20)
-	_, ok := sc.get(kv.AccountsDomain, key)
-	require.False(t, ok, "an authoritative deletion must physically remove the entry")
-
-	sc.fillIfFresh(kv.AccountsDomain, key, stale, 10, 11)
-	_, ok = sc.get(kv.AccountsDomain, key)
-	require.False(t, ok, "a view older than the deletion must not fill afterward")
-}
-
-// SharedDomains commits the tx and only then walks `pending` into the cache, so
-// between those steps a reader opening a new tx legitimately sees txNums the
-// cache has not applied yet: its frontier is ahead of appliedEnd. Rejecting
-// "ahead" would drop fills on every flush for the length of the apply loop.
-func TestStateCache_ReaderAheadOfApplyWindowCanFill(t *testing.T) {
-	b := 1 * datasize.MB
-	sc := NewStateCache(b, b, b, b)
-	t.Cleanup(sc.Close)
-
-	sc.apply(kv.AccountsDomain, makeAddr(1), makeValue(1), 100)
-
-	key := makeAddr(2)
-	sc.fillIfFresh(kv.AccountsDomain, key, makeValue(2), 200, 201)
-
-	_, ok := sc.get(kv.AccountsDomain, key)
-	require.True(t, ok,
-		"a reader ahead of appliedEnd is the normal commit-then-apply window, not a dead fork")
-}
-
 func TestStateCache_UnwindReadmitsPreReorgFill(t *testing.T) {
-	b := 1 * datasize.MB
-	sc := NewStateCache(b, b, b, b)
-	t.Cleanup(sc.Close)
-
+	sc, publisher := readyStateCache(t, 1)
 	key := makeAddr(1)
-	canonical, fork := makeValue(1), makeValue(2)
-	sc.apply(kv.AccountsDomain, key, canonical, 40)
-	sc.apply(kv.AccountsDomain, key, fork, 100)
+	fork := makeValue(2)
+	preReorg := sc.View(1)
+	preReorg.Fill(kv.AccountsDomain, key, fork, 10)
 
-	sc.fillIfFresh(kv.AccountsDomain, key, fork, 100, 101)
-	sc.unwind(50)
-	_, ok := sc.get(kv.AccountsDomain, key)
-	require.False(t, ok, "the unwind must evict the fork's value")
+	publication := publisher.Begin()
+	publication.Publish(2, nil, true)
 
-	sc.fillIfFresh(kv.AccountsDomain, key, fork, 100, 101)
-	_, ok = sc.get(kv.AccountsDomain, key)
+	preReorg.Fill(kv.AccountsDomain, key, fork, 10)
+	_, ok := sc.View(2).Get(kv.AccountsDomain, key)
 	require.False(t, ok, "a pre-reorg view must not reinstate the discarded fork's value")
 }
 
-func TestStateCache_FileEndViewCannotFillAtAppliedTx(t *testing.T) {
-	b := 1 * datasize.MB
-	sc := NewStateCache(b, b, b, b)
-	t.Cleanup(sc.Close)
+func TestStateCache_PublicationIsOneGeneration(t *testing.T) {
+	sc, publisher := readyStateCache(t, 10)
+	oldKey, changedKey := makeAddr(1), makeAddr(2)
+	oldView := sc.View(10)
+	oldView.Fill(kv.AccountsDomain, oldKey, makeValue(1), 1)
+	oldView.Fill(kv.AccountsDomain, changedKey, makeValue(2), 2)
 
-	key := makeAddr(1)
-	stale := makeValue(1)
-	sc.apply(kv.AccountsDomain, key, nil, 100)
+	publication := publisher.Begin()
+	_, ok := oldView.Get(kv.AccountsDomain, oldKey)
+	require.False(t, ok, "the old generation must be unavailable during publication")
 
-	sc.fillIfFresh(kv.AccountsDomain, key, stale, 99, 100)
-	_, ok := sc.get(kv.AccountsDomain, key)
-	require.False(t, ok, "a [0,100) view does not contain the applied tx 100")
+	publication.Publish(11, []Update{{
+		Domain: kv.AccountsDomain,
+		Key:    changedKey,
+		Value:  makeValue(3),
+		Step:   3,
+	}}, false)
 
-	fresh := makeValue(2)
-	sc.fillIfFresh(kv.AccountsDomain, key, fresh, 100, 101)
-	got, ok := sc.get(kv.AccountsDomain, key)
+	_, ok = oldView.Get(kv.AccountsDomain, oldKey)
+	require.False(t, ok, "publication must revoke old read views")
+	freshView := sc.View(11)
+	got, ok := freshView.Get(kv.AccountsDomain, oldKey)
 	require.True(t, ok)
-	require.Equal(t, fresh, got)
+	require.Equal(t, makeValue(1), got, "forward publication keeps unchanged entries")
+	got, step, ok := freshView.GetWithStep(kv.AccountsDomain, changedKey)
+	require.True(t, ok)
+	require.Equal(t, makeValue(3), got)
+	require.Equal(t, kv.Step(3), step)
 }
 
-func TestStateCache_ApplyDeleteAtomicWithFill(t *testing.T) {
-	b := 1 * datasize.MB
-	sc := NewStateCache(b, b, b, b)
-	t.Cleanup(sc.Close)
+func TestStateCache_AbortRestoresGeneration(t *testing.T) {
+	sc, publisher := readyStateCache(t, 10)
+	key := makeAddr(1)
+	view := sc.View(10)
+	view.Fill(kv.AccountsDomain, key, makeValue(1), 1)
 
-	progressKey := makeAddr(1)
-	key := makeAddr(2)
+	publication := publisher.Begin()
+	_, ok := view.Get(kv.AccountsDomain, key)
+	require.False(t, ok)
+	publication.Abort()
+
+	got, ok := view.Get(kv.AccountsDomain, key)
+	require.True(t, ok)
+	require.Equal(t, makeValue(1), got)
+}
+
+func TestStateCache_UnpublishedVersionCannotReadOrFill(t *testing.T) {
+	sc, _ := readyStateCache(t, 10)
+	key := makeAddr(1)
+	unpublished := sc.View(11)
+	unpublished.Fill(kv.AccountsDomain, key, makeValue(1), 1)
+	_, ok := sc.View(10).Get(kv.AccountsDomain, key)
+	require.False(t, ok)
+}
+
+func TestStateCache_PublishDeleteAtomicWithOldFill(t *testing.T) {
+	sc, publisher := readyStateCache(t, 1)
+	key := makeAddr(1)
 	value := makeValue(1)
-	for round := range 20000 {
-		appliedTxNum := uint64(round*2 + 1)
-		visibleEnd := appliedTxNum + 1
-		sc.apply(kv.AccountsDomain, progressKey, value, appliedTxNum)
-
+	for stateVersion := uint64(1); stateVersion < 2000; stateVersion++ {
+		oldView := sc.View(stateVersion)
 		var wg sync.WaitGroup
-		wg.Add(2)
-		go func() {
-			defer wg.Done()
-			sc.apply(kv.AccountsDomain, key, nil, visibleEnd)
-		}()
-		go func() {
-			defer wg.Done()
-			sc.fillIfFresh(kv.AccountsDomain, key, value, appliedTxNum, visibleEnd)
-		}()
+		wg.Go(func() {
+			oldView.Fill(kv.AccountsDomain, key, value, 1)
+		})
+		wg.Go(func() {
+			publication := publisher.Begin()
+			publication.Publish(stateVersion+1, []Update{{
+				Domain: kv.AccountsDomain,
+				Key:    key,
+				Step:   2,
+			}}, false)
+		})
 		wg.Wait()
 
-		_, ok := sc.get(kv.AccountsDomain, key)
-		require.False(t, ok, "round %d: stale fill survived the authoritative delete", round)
+		_, ok := sc.View(stateVersion+1).Get(kv.AccountsDomain, key)
+		require.False(t, ok, "state version %d: stale fill survived publication", stateVersion)
 	}
 }
 
 func TestStateCache_ApplyCodeDeleteDropsAddrCodeHash(t *testing.T) {
-	b := 1 * datasize.MB
-	sc := NewStateCache(b, b, b, b)
-	t.Cleanup(sc.Close)
-
+	sc, publisher := readyStateCache(t, 1)
 	addr := makeAddr(1)
 	var h [32]byte
 	h[0] = 0xaa
-	sc.seedAddrCodeHash(addr, h, 10, 0)
-	_, ok := sc.getAddrCodeHash(addr)
+	sc.View(1).SeedAddrCodeHash(addr, h)
+	_, ok := sc.View(1).GetAddrCodeHash(addr)
 	require.True(t, ok)
 
-	sc.apply(kv.CodeDomain, addr, nil, 20)
-	_, ok = sc.getAddrCodeHash(addr)
+	publication := publisher.Begin()
+	publication.Publish(2, []Update{{Domain: kv.CodeDomain, Key: addr}}, false)
+	_, ok = sc.View(2).GetAddrCodeHash(addr)
 	require.False(t, ok, "a code deletion must drop the derived addr→codeHash mapping")
 }
 
 func TestStateCache_AccountDeleteDropsCodeBinding(t *testing.T) {
-	b := 1 * datasize.MB
-	sc := NewStateCache(b, b, b, b)
-	t.Cleanup(sc.Close)
-
+	sc, publisher := readyStateCache(t, 1)
 	addr := makeAddr(1)
 	code := makeCode(1)
-
-	sc.apply(kv.CodeDomain, addr, code, 10)
-	_, ok := sc.get(kv.CodeDomain, addr)
+	publication := publisher.Begin()
+	publication.Publish(2, []Update{{
+		Domain: kv.CodeDomain,
+		Key:    addr,
+		Value:  code,
+	}}, false)
+	_, ok := sc.View(2).Get(kv.CodeDomain, addr)
 	require.True(t, ok)
 
-	sc.apply(kv.AccountsDomain, addr, nil, 20)
-	_, ok = sc.get(kv.CodeDomain, addr)
+	publication = publisher.Begin()
+	publication.Publish(3, []Update{{Domain: kv.AccountsDomain, Key: addr}}, false)
+	_, ok = sc.View(3).Get(kv.CodeDomain, addr)
 	require.False(t, ok, "an account deletion must drop the addr→code binding")
 }
 
@@ -1066,27 +913,6 @@ func TestDomainCache_DeleteAtomicWithPut_NoSizeDrift(t *testing.T) {
 		wg.Wait()
 		c.Delete(addr)
 		require.Zero(t, c.SizeBytes(), "round %d: size accounting drifted", round)
-	}
-}
-
-// The lazy stale-drop inside GetWithTxNum removes entries; an unstriped
-// Remove racing put's read-modify-write double-subtracts the displaced
-// entry's size. Exactly one live entry remains after every round, so drift
-// shows as a size mismatch.
-func TestDomainCache_StaleDropAtomicWithPut_NoSizeDrift(t *testing.T) {
-	c := closeOnCleanup(t, NewDomainCacheMode(1*datasize.MB, ModeEvictLRU))
-	addr := makeAddr(1)
-	v1 := []byte("value-one")
-	v2 := []byte("value-two")
-	wantSize := int64(len(addr) + len(v1) + 24)
-	for round := range 20000 {
-		c.Put(addr, v1, 10)
-		c.Unwind(5)
-		var wg sync.WaitGroup
-		wg.Go(func() { c.Put(addr, v2, 20) })
-		wg.Go(func() { c.Get(addr) })
-		wg.Wait()
-		require.Equal(t, wantSize, c.SizeBytes(), "round %d: size accounting drifted", round)
 	}
 }
 
@@ -1112,103 +938,73 @@ func TestDomainCache_ClearAtomicWithPut_NoSizeDrift(t *testing.T) {
 	}
 }
 
-// STATE_CACHE_FILLS=false turns off the admission-gated read fills (apply-only
-// mode): the A/B lever for measuring what fills contribute, and the ops kill
-// switch. Applies keep working.
+// STATE_CACHE_FILLS=false turns off reader fills. Publications keep working.
 func TestStateCacheFillsSwitchDisablesReadFills(t *testing.T) {
 	t.Setenv("STATE_CACHE_FILLS", "false")
-	b := 1 * datasize.MB
-	c := NewStateCache(b, b, b, b)
-	defer c.Close()
+	c, publisher := readyStateCache(t, 1)
 
 	key := make([]byte, 20)
 	key[0] = 0xaa
-	view := c.View(FrontierFunc(func(kv.Domain) (uint64, bool) { return 100, true }))
+	view := c.View(1)
 
 	view.Fill(kv.AccountsDomain, key, []byte("value"), 10)
-	_, ok := c.View(nil).Get(kv.AccountsDomain, key)
+	_, ok := view.Get(kv.AccountsDomain, key)
 	require.False(t, ok, "fills must be disabled")
 
-	view.SeedAddrCodeHash(key, [32]byte{1}, 10)
-	_, ok = c.View(nil).GetAddrCodeHash(key)
+	view.SeedAddrCodeHash(key, [32]byte{1})
+	_, ok = view.GetAddrCodeHash(key)
 	require.False(t, ok, "mapping seeds must be disabled")
 
 	codeHash := crypto.Keccak256([]byte{0xaa, 1, 2, 3})
-	view.FillCodeSize(codeHash, 4, 10)
-	_, ok = c.View(nil).GetCodeSizeByHash(codeHash)
+	view.FillCodeSize(codeHash, 4)
+	_, ok = view.GetCodeSizeByHash(codeHash)
 	require.False(t, ok, "content-addressed fills must be disabled too: the switch means no reader writes at all")
 
-	c.Applier().Apply(kv.AccountsDomain, key, []byte("applied"), 20)
-	got, ok := c.View(nil).Get(kv.AccountsDomain, key)
-	require.True(t, ok, "applies must keep working")
+	publication := publisher.Begin()
+	publication.Publish(2, []Update{{
+		Domain: kv.AccountsDomain,
+		Key:    key,
+		Value:  []byte("applied"),
+	}}, false)
+	got, ok := c.View(2).Get(kv.AccountsDomain, key)
+	require.True(t, ok, "publications must keep working")
 	require.Equal(t, []byte("applied"), got)
 }
 
-// Clearing entries does not rewind canonical state, so the admission frontier
-// must survive Clear: a still-live older ReadView must not refill pre-apply
-// data into the emptied cache.
 func TestStateCache_StaleViewCannotFillAfterClear(t *testing.T) {
-	b := 1 * datasize.MB
-	sc := NewStateCache(b, b, b, b)
-	t.Cleanup(sc.Close)
-
+	sc, publisher := readyStateCache(t, 1)
 	key := makeAddr(1)
-	oldView := sc.View(FrontierFunc(func(kv.Domain) (uint64, bool) { return 11, true }))
-
-	sc.Applier().Apply(kv.AccountsDomain, key, nil, 20) // canonical delete
-	sc.Applier().Clear()
+	oldView := sc.View(1)
+	publisher.Clear(1)
 
 	oldView.Fill(kv.AccountsDomain, key, []byte("pre-delete"), 10)
-	_, ok := sc.View(nil).Get(kv.AccountsDomain, key)
-	require.False(t, ok, "a pre-apply view must not resurrect the deleted value through Clear")
+	freshView := sc.View(1)
+	_, ok := freshView.Get(kv.AccountsDomain, key)
+	require.False(t, ok, "a retired view must not refill after Clear")
 
-	freshView := sc.View(FrontierFunc(func(kv.Domain) (uint64, bool) { return 21, true }))
 	freshView.Fill(kv.AccountsDomain, key, []byte("current"), 20)
-	got, ok := sc.View(nil).Get(kv.AccountsDomain, key)
-	require.True(t, ok, "a view at the applied frontier must still fill after Clear")
+	got, ok := freshView.Get(kv.AccountsDomain, key)
+	require.True(t, ok, "the new generation must fill after Clear")
 	require.Equal(t, []byte("current"), got)
 }
 
-// An addr-keyed code entry derives from the account: an account deletion drops
-// it without advancing the code frontier, so code-fill admission must check the
-// accounts frontier too — otherwise a pre-deletion view refills the dead code.
 func TestStateCache_AccountDeletionGatesStaleCodeFill(t *testing.T) {
-	b := 1 * datasize.MB
-	c := NewStateCache(b, b, b, b)
-	t.Cleanup(c.Close)
+	c, publisher := readyStateCache(t, 1)
 	addr, code := makeAddr(1), makeCode(1)
 	other, otherCode := makeAddr(2), makeCode(2)
 
-	c.Applier().Apply(kv.CodeDomain, addr, code, 100)
-	c.Applier().Apply(kv.AccountsDomain, addr, nil, 200)
+	publication := publisher.Begin()
+	publication.Publish(2, []Update{{Domain: kv.CodeDomain, Key: addr, Value: code}}, false)
+	stale := c.View(2)
 
-	stale := c.View(FrontierFunc(func(kv.Domain) (uint64, bool) { return 101, true }))
-	stale.Fill(kv.CodeDomain, addr, code, 100)
-	_, ok := c.View(nil).Get(kv.CodeDomain, addr)
+	publication = publisher.Begin()
+	publication.Publish(3, []Update{{Domain: kv.AccountsDomain, Key: addr}}, false)
+	stale.Fill(kv.CodeDomain, addr, code, 1)
+	fresh := c.View(3)
+	_, ok := fresh.Get(kv.CodeDomain, addr)
 	require.False(t, ok, "code of a deleted account must not be refillable from a pre-deletion view")
 
-	fresh := c.View(FrontierFunc(func(d kv.Domain) (uint64, bool) {
-		if d == kv.AccountsDomain {
-			return 201, true
-		}
-		return 101, true
-	}))
-	fresh.Fill(kv.CodeDomain, other, otherCode, 100)
-	_, ok = c.View(nil).Get(kv.CodeDomain, other)
+	fresh.Fill(kv.CodeDomain, other, otherCode, 1)
+	_, ok = fresh.Get(kv.CodeDomain, other)
 	require.True(t, ok, "unrelated code fills from a current view must stay admitted")
-}
-
-// An apply-only cache (STATE_CACHE_FILLS=false) has no fill for a lowered
-// frontier to poison; wire-up code keys the aggregator forbid on this.
-func TestApplyOnlyCacheReportsFillsDisabled(t *testing.T) {
-	t.Setenv("STATE_CACHE_FILLS", "false")
-	b := 1 * datasize.MB
-	c := NewStateCache(b, b, b, b)
-	t.Cleanup(c.Close)
-	require.False(t, c.FillsEnabled())
-
-	t.Setenv("STATE_CACHE_FILLS", "true")
-	c2 := NewStateCache(b, b, b, b)
-	t.Cleanup(c2.Close)
-	require.True(t, c2.FillsEnabled())
 }

@@ -39,23 +39,23 @@ func TestCodeCache_PutAddrCodeHashKeepsLiveEntry(t *testing.T) {
 	freshHash := [32]byte{1}
 	staleHash := [32]byte{2}
 
-	c.PutAddrCodeHash(addr, freshHash, 20)
-	c.PutAddrCodeHash(addr, staleHash, 10)
+	c.PutAddrCodeHash(addr, freshHash)
+	c.PutAddrCodeHash(addr, staleHash)
 
 	got, ok := c.GetAddrCodeHash(addr)
 	require.True(t, ok)
 	require.Equal(t, freshHash, got)
 }
 
-func TestCodeCache_PutAddrCodeHashReplacesStaleEntry(t *testing.T) {
+func TestCodeCache_PutAddrCodeHashReplacesEntryAfterClear(t *testing.T) {
 	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
 	addr := makeAddr(1)
 	oldHash := [32]byte{1}
 	newHash := [32]byte{2}
 
-	c.PutAddrCodeHash(addr, oldHash, 100)
-	c.Unwind(50)
-	c.PutAddrCodeHash(addr, newHash, 100)
+	c.PutAddrCodeHash(addr, oldHash)
+	c.Clear()
+	c.PutAddrCodeHash(addr, newHash)
 
 	got, ok := c.GetAddrCodeHash(addr)
 	require.True(t, ok)
@@ -162,7 +162,7 @@ func TestCodeCache_CodeSize_DirectPutAndGet(t *testing.T) {
 	codeHash := makeCodeHash(0xff)
 
 	// Direct Put without going through the bytes layer.
-	c.PutCodeSizeByCodeHash(codeHash, 4096, 0)
+	c.PutCodeSizeByCodeHash(codeHash, 4096)
 
 	size, ok := c.GetCodeSizeByCodeHash(codeHash)
 	require.True(t, ok)
@@ -171,8 +171,8 @@ func TestCodeCache_CodeSize_DirectPutAndGet(t *testing.T) {
 
 func TestCodeCache_CodeSize_EmptyHashOrNegativeIsNoOp(t *testing.T) {
 	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
-	c.PutCodeSizeByCodeHash(nil, 100, 0)
-	c.PutCodeSizeByCodeHash(makeCodeHash(1), -1, 0)
+	c.PutCodeSizeByCodeHash(nil, 100)
+	c.PutCodeSizeByCodeHash(makeCodeHash(1), -1)
 	_, ok := c.GetCodeSizeByCodeHash(makeCodeHash(1))
 	assert.False(t, ok)
 }
@@ -244,79 +244,50 @@ func BenchmarkCodeCache_GetByCodeHash_ManyAddrs_OneCode(b *testing.B) {
 	}
 }
 
-// TestCodeCache_Unwind_DropsUnwoundCodeEverywhere verifies the (txNum, epoch)
-// model: code deployed on a fork that is later
-// unwound must stop being discoverable on EVERY layer — addr→code, the
-// content-addressed codeHash→code, and the size layer — not just the addr
-// layer. The code's value is invariant for a hash, but its existence is not.
-func TestCodeCache_Unwind_DropsUnwoundCodeEverywhere(t *testing.T) {
+func TestCodeCache_ClearDropsCodeEverywhere(t *testing.T) {
 	c := closeOnCleanup(t, NewCodeCache(64*datasize.MB, 16*datasize.MB))
 
 	addr := makeAddr(1)
 	code := bytes.Repeat([]byte{0x60}, 64)
 	codeHash := makeCodeHash(0x11)
 
-	// Deploy at txNum=100.
 	c.PutWithCodeHash(addr, code, codeHash, 100)
 
-	// All layers hit before unwind.
+	// All layers hit before the clear.
 	got, ok := c.Get(addr)
 	require.True(t, ok)
 	require.Equal(t, code, got)
 	_, ok = c.GetByCodeHash(codeHash)
-	require.True(t, ok, "codeHash lookup must hit before unwind")
+	require.True(t, ok, "codeHash lookup must hit before the clear")
 	sz, ok := c.GetCodeSizeByCodeHash(codeHash)
 	require.True(t, ok)
 	require.Equal(t, len(code), sz)
 
-	// Unwind to txNum=50 — the deploy at 100 is rolled back.
-	c.Unwind(50)
+	c.Clear()
 
 	_, ok = c.Get(addr)
 	require.False(t, ok, "addr→code must drop")
 	_, ok = c.GetByCodeHash(codeHash)
-	require.False(t, ok, "unwound code must NOT be discoverable by codeHash")
+	require.False(t, ok, "cleared code must not be discoverable by codeHash")
 	_, ok = c.GetCodeSizeByCodeHash(codeHash)
-	require.False(t, ok, "size of unwound code must drop too")
+	require.False(t, ok, "cleared code size must drop too")
 }
 
-// TestCodeCache_Unwind_BelowFloorSurvives verifies code deployed below the
-// unwind floor (still live after the unwind) stays warm on all layers.
-func TestCodeCache_Unwind_BelowFloorSurvives(t *testing.T) {
-	c := closeOnCleanup(t, NewCodeCache(64*datasize.MB, 16*datasize.MB))
-
-	addr := makeAddr(2)
-	code := bytes.Repeat([]byte{0x61}, 32)
-	codeHash := makeCodeHash(0x22)
-	c.PutWithCodeHash(addr, code, codeHash, 40)
-
-	c.Unwind(50) // floor=50; the deploy at 40 predates it
-
-	got, ok := c.Get(addr)
-	require.True(t, ok, "below-floor addr→code must survive")
-	require.Equal(t, code, got)
-	_, ok = c.GetByCodeHash(codeHash)
-	require.True(t, ok, "below-floor codeHash→code must survive")
-}
-
-// TestCodeCache_Unwind_RedeployRevives verifies that re-deploying the same code
-// on the live fork (current epoch) after an unwind makes it discoverable again,
-// even though a stale entry at the same txNum was left behind.
-func TestCodeCache_Unwind_RedeployRevives(t *testing.T) {
+func TestCodeCache_ClearThenRedeploy(t *testing.T) {
 	c := closeOnCleanup(t, NewCodeCache(64*datasize.MB, 16*datasize.MB))
 
 	addr := makeAddr(3)
 	code := bytes.Repeat([]byte{0x62}, 48)
 	codeHash := makeCodeHash(0x33)
 
-	c.PutWithCodeHash(addr, code, codeHash, 100) // old fork
-	c.Unwind(50)
-	c.PutWithCodeHash(addr, code, codeHash, 100) // re-executed on live fork, new epoch
+	c.PutWithCodeHash(addr, code, codeHash, 100)
+	c.Clear()
+	c.PutWithCodeHash(addr, code, codeHash, 100)
 
 	got, ok := c.Get(addr)
-	require.True(t, ok, "re-deployed addr→code must be live")
+	require.True(t, ok, "reinserted addr→code must be live")
 	require.Equal(t, code, got)
 	gotH, ok := c.GetByCodeHash(codeHash)
-	require.True(t, ok, "re-deployed codeHash→code must be live")
+	require.True(t, ok, "reinserted codeHash→code must be live")
 	require.Equal(t, code, gotH)
 }

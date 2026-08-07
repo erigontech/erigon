@@ -44,15 +44,25 @@ func (s stubTemporalGetter) HasPrefix(kv.Domain, []byte) ([]byte, []byte, bool, 
 
 func (s stubTemporalGetter) StepsInFiles(...kv.Domain) kv.Step { return 0 }
 
-func newTestStateCache() *cache.StateCache {
+func newTestStateCache(t *testing.T) *cache.StateCache {
+	t.Helper()
 	b := 1 * datasize.MB
-	return cache.NewStateCache(b, b, b, b)
+	sc := cache.NewStateCache(b, b, b, b)
+	t.Cleanup(sc.Close)
+	sc.Publisher().Initialize(1)
+	return sc
 }
 
-// seedFill places an entry with an exact txNum stamp through the public fill
-// API without moving the applied frontier.
-func seedFill(sc *cache.StateCache, domain kv.Domain, k, v []byte, txNum uint64) {
-	sc.View(cache.FrontierFunc(func(kv.Domain) (uint64, bool) { return txNum + 1, true })).Fill(domain, k, v, txNum)
+func currentCacheView(t *testing.T, sc *cache.StateCache) cache.ReadView {
+	t.Helper()
+	stateVersion, ok := sc.CurrentStateVersion()
+	require.True(t, ok)
+	return sc.View(stateVersion)
+}
+
+func seedFill(t *testing.T, sc *cache.StateCache, domain kv.Domain, k, v []byte, step kv.Step) {
+	t.Helper()
+	currentCacheView(t, sc).Fill(domain, k, v, step)
 }
 
 // A warmup read-through must never replace a fresher entry an authoritative
@@ -64,15 +74,15 @@ func TestCachePopulatingGetterKeepsFresherEntry(t *testing.T) {
 	fresh := []byte("account-record-nonce-5")
 	stale := []byte("account-record-nonce-4")
 	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
-		sc := newTestStateCache()
-		seedFill(sc, domain, key, fresh, 54)
-		cpg := &cachePopulatingGetter{TemporalGetter: stubTemporalGetter{v: stale}, view: sc.View(cache.FrontierFunc(emptyVisibleEnd)), stepSize: 1_562_500}
+		sc := newTestStateCache(t)
+		seedFill(t, sc, domain, key, fresh, 54)
+		cpg := &cachePopulatingGetter{TemporalGetter: stubTemporalGetter{v: stale}, view: currentCacheView(t, sc)}
 
 		v, _, err := cpg.GetLatest(domain, key)
 		require.NoError(t, err)
 		require.Equal(t, stale, v, "read-through must still return the view's value")
 
-		got, ok := sc.View(nil).Get(domain, key)
+		got, ok := currentCacheView(t, sc).Get(domain, key)
 		require.True(t, ok, "domain %s", domain)
 		require.Equal(t, fresh, got, "domain %s: warmup must not clobber the fresher entry", domain)
 	}
@@ -84,14 +94,14 @@ func TestCachePopulatingGetterKeepsFresherCodeBinding(t *testing.T) {
 	addr := []byte("\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff\x00\x11\x22\x33\x44")
 	freshCode := []byte{0xaa, 0x01, 0x02, 0x03}
 	staleCode := []byte{0xbb, 0x04, 0x05, 0x06}
-	sc := newTestStateCache()
-	seedFill(sc, kv.CodeDomain, addr, freshCode, 54)
-	cpg := &cachePopulatingGetter{TemporalGetter: stubTemporalGetter{v: staleCode}, view: sc.View(cache.FrontierFunc(emptyVisibleEnd)), stepSize: 1_562_500}
+	sc := newTestStateCache(t)
+	seedFill(t, sc, kv.CodeDomain, addr, freshCode, 54)
+	cpg := &cachePopulatingGetter{TemporalGetter: stubTemporalGetter{v: staleCode}, view: currentCacheView(t, sc)}
 
 	_, _, err := cpg.GetLatest(kv.CodeDomain, addr)
 	require.NoError(t, err)
 
-	got, ok := sc.View(nil).Get(kv.CodeDomain, addr)
+	got, ok := currentCacheView(t, sc).Get(kv.CodeDomain, addr)
 	require.True(t, ok)
 	require.Equal(t, freshCode, got, "warmup must not rebind addr to older code")
 }
@@ -103,85 +113,78 @@ func TestCachePopulatingGetterWarmsColdKeys(t *testing.T) {
 	code := []byte{0xaa, 0x01, 0x02, 0x03}
 
 	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
-		sc := newTestStateCache()
-		cpg := &cachePopulatingGetter{TemporalGetter: stubTemporalGetter{v: val}, view: sc.View(cache.FrontierFunc(emptyVisibleEnd)), stepSize: 1_562_500}
+		sc := newTestStateCache(t)
+		cpg := &cachePopulatingGetter{TemporalGetter: stubTemporalGetter{v: val}, view: currentCacheView(t, sc)}
 		_, _, err := cpg.GetLatest(domain, key)
 		require.NoError(t, err)
-		got, ok := sc.View(nil).Get(domain, key)
+		got, ok := currentCacheView(t, sc).Get(domain, key)
 		require.True(t, ok, "domain %s", domain)
 		require.Equal(t, val, got, "domain %s", domain)
 	}
 
-	sc := newTestStateCache()
-	cpg := &cachePopulatingGetter{TemporalGetter: stubTemporalGetter{v: code}, view: sc.View(cache.FrontierFunc(emptyVisibleEnd)), stepSize: 1_562_500}
+	sc := newTestStateCache(t)
+	cpg := &cachePopulatingGetter{TemporalGetter: stubTemporalGetter{v: code}, view: currentCacheView(t, sc)}
 	_, _, err := cpg.GetLatest(kv.CodeDomain, key)
 	require.NoError(t, err)
-	got, ok := sc.View(nil).Get(kv.CodeDomain, key)
+	got, ok := currentCacheView(t, sc).Get(kv.CodeDomain, key)
 	require.True(t, ok)
 	require.Equal(t, code, got)
-	got, ok = sc.View(nil).GetCodeByHash(crypto.Keccak256(code))
+	got, ok = currentCacheView(t, sc).GetCodeByHash(crypto.Keccak256(code))
 	require.True(t, ok)
 	require.Equal(t, code, got)
 
 	// Negative results (missing account, empty slot) are cached as nil hits.
-	sc = newTestStateCache()
-	cpg = &cachePopulatingGetter{TemporalGetter: stubTemporalGetter{v: nil}, view: sc.View(cache.FrontierFunc(emptyVisibleEnd)), stepSize: 1_562_500}
+	sc = newTestStateCache(t)
+	cpg = &cachePopulatingGetter{TemporalGetter: stubTemporalGetter{v: nil}, view: currentCacheView(t, sc)}
 	_, _, err = cpg.GetLatest(kv.AccountsDomain, key)
 	require.NoError(t, err)
-	got, ok = sc.View(nil).Get(kv.AccountsDomain, key)
+	got, ok = currentCacheView(t, sc).Get(kv.AccountsDomain, key)
 	require.True(t, ok)
 	require.Empty(t, got)
 }
 
-func TestCachePopulatingGetterNegativeUsesLastVisibleTxNum(t *testing.T) {
-	const visibleEnd = uint64(10_000_001)
+func TestCachePopulatingGetterNegativeClearedByPublication(t *testing.T) {
 	key := []byte("\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff\x00\x11\x22\x33\x44")
-	sc := newTestStateCache()
+	sc := newTestStateCache(t)
 	cpg := &cachePopulatingGetter{
-		TemporalGetter: stubTemporalGetter{v: nil}, stepSize: 1_562_500,
-		view: sc.View(cache.FrontierFunc(func(kv.Domain) (uint64, bool) { return visibleEnd, true })),
+		TemporalGetter: stubTemporalGetter{v: nil},
+		view:           currentCacheView(t, sc),
 	}
 	_, _, err := cpg.GetLatest(kv.AccountsDomain, key)
 	require.NoError(t, err)
-	_, ok := sc.View(nil).Get(kv.AccountsDomain, key)
+	_, ok := currentCacheView(t, sc).Get(kv.AccountsDomain, key)
 	require.True(t, ok)
 
-	sc.Applier().Unwind(visibleEnd)
-	_, ok = sc.View(nil).Get(kv.AccountsDomain, key)
-	require.True(t, ok, "a negative observed before the unwind floor must remain cached")
-
-	sc.Applier().Unwind(visibleEnd - 1)
-	_, ok = sc.View(nil).Get(kv.AccountsDomain, key)
-	require.False(t, ok, "a negative observed at the unwind floor must be invalidated")
+	sc.Publisher().Clear(2)
+	_, ok = currentCacheView(t, sc).Get(kv.AccountsDomain, key)
+	require.False(t, ok)
 }
 
-func TestCachePopulatingGetterUnavailableVisibleEndNeverFills(t *testing.T) {
+func TestCachePopulatingGetterInertViewNeverFills(t *testing.T) {
 	key := []byte("\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff\x00\x11\x22\x33\x44")
-	sc := newTestStateCache()
+	sc := newTestStateCache(t)
 	cpg := &cachePopulatingGetter{
-		TemporalGetter: stubTemporalGetter{v: nil}, stepSize: 1_562_500,
-		view: sc.View(cache.FrontierFunc(func(kv.Domain) (uint64, bool) { return 0, false })),
+		TemporalGetter: stubTemporalGetter{v: nil},
+		view:           cache.ReadView{},
 	}
 	_, _, err := cpg.GetLatest(kv.AccountsDomain, key)
 	require.NoError(t, err)
-	_, ok := sc.View(nil).Get(kv.AccountsDomain, key)
-	require.False(t, ok, "no exact frontier — nothing may be cached")
+	_, ok := currentCacheView(t, sc).Get(kv.AccountsDomain, key)
+	require.False(t, ok)
 }
 
 func TestCachePopulatingGetterStaleViewDoesNotFill(t *testing.T) {
 	key := []byte("\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff\x00\x11\x22\x33\x44")
-	sc := newTestStateCache()
-	sc.Applier().Apply(kv.AccountsDomain, key, nil, 20)
+	sc := newTestStateCache(t)
 	cpg := &cachePopulatingGetter{
 		TemporalGetter: stubTemporalGetter{v: []byte("pre-delete-record")},
-		stepSize:       1_562_500,
-		view:           sc.View(cache.FrontierFunc(func(kv.Domain) (uint64, bool) { return 11, true })),
+		view:           currentCacheView(t, sc),
 	}
+	publication := sc.Publisher().Begin()
+	publication.Publish(2, nil, false)
 
 	_, _, err := cpg.GetLatest(kv.AccountsDomain, key)
 	require.NoError(t, err)
-	_, ok := sc.View(nil).Get(kv.AccountsDomain, key)
+	_, ok := currentCacheView(t, sc).Get(kv.AccountsDomain, key)
 	require.False(t, ok)
 }
-
-func emptyVisibleEnd(kv.Domain) (uint64, bool) { return 0, true }
