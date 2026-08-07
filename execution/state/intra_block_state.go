@@ -211,6 +211,8 @@ type IntraBlockState struct {
 	// via FinalizeTx→so.data.
 	noMaterialize bool
 
+	stateObjectArena stateObjectArena
+
 	// eip8246 pins whether SELFDESTRUCT preserves the account (EIP-8246 removes
 	// the balance burn). Set per-tx from the block rules in Prepare; under it a
 	// SelfDestructPath=true account must read as a live, balance-preserving,
@@ -384,6 +386,7 @@ func (sdb *IntraBlockState) Reset() {
 	for _, so := range sdb.stateObjects {
 		so.release()
 	}
+	sdb.stateObjectArena.rewind()
 	clear(sdb.stateObjects)
 	clear(sdb.stateObjectsDirty)
 	sdb.logs.reset()
@@ -435,6 +438,7 @@ func (sdb *IntraBlockState) Close() {
 
 	stateObjects, journal := sdb.stateObjects, sdb.journal
 	sdb.stateObjects, sdb.journal = nil, nil
+	sdb.stateObjectArena.free()
 	sdb.logs.release()
 	sdb.revisions.reset()
 	// Safe to pool: VersionedWrites/FinalizedWrites hand out deep clones, and the
@@ -442,6 +446,18 @@ func (sdb *IntraBlockState) Close() {
 	sdb.versionedWrites.ReleaseAndReset()
 
 	releaseResources(stateObjects, journal)
+}
+
+// The noMaterialize path never releases what it takes, so a pool draw there
+// would be a one-way drain on the materializing paths.
+func (sdb *IntraBlockState) allocStateObject() *stateObject {
+	if sdb.noMaterialize {
+		if so := sdb.stateObjectArena.alloc(); so != nil {
+			return so
+		}
+		return newHeapObject()
+	}
+	return stateObjectPool.Get().(*stateObject)
 }
 
 func releaseResources(stateObjects map[accounts.Address]*stateObject, journal *journal) {
