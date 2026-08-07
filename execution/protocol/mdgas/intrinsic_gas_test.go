@@ -356,7 +356,7 @@ func TestEIP2780IntrinsicGas(t *testing.T) {
 		},
 		"eoa non-zero value": {
 			hasValue:          true,
-			expectedExecution: params.TxBaseEIP2780 + params.ColdAccountAccessEIP2780 + params.TransferLogCostEIP2780 + params.TxValueCostEIP2780,
+			expectedExecution: params.TxBaseEIP2780 + params.ColdAccountAccessEIP2780 + params.TxValueCostEIP2780,
 		},
 		"creation zero value": {
 			creation:          true,
@@ -365,7 +365,7 @@ func TestEIP2780IntrinsicGas(t *testing.T) {
 		"creation non-zero value": {
 			creation:          true,
 			hasValue:          true,
-			expectedExecution: params.TxBaseEIP2780 + params.CreateAccessEIP2780 + params.TransferLogCostEIP2780,
+			expectedExecution: params.TxBaseEIP2780 + params.CreateAccessEIP2780,
 		},
 	}
 	for name, c := range cases {

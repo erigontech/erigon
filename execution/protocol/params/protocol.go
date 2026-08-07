@@ -254,8 +254,7 @@ const (
 	// EIP-2780: Reduce intrinsic transaction gas (resource-based decomposition).
 	// COLD_ACCOUNT_ACCESS and CREATE_ACCESS take their values from EIP-8038.
 	TxBaseEIP2780            uint64 = 12_000 // TX_BASE: sender ECDSA recovery plus access and write
-	TxValueCostEIP2780       uint64 = 4_244  // TX_VALUE_COST: recipient balance write for value transfers
-	TransferLogCostEIP2780   uint64 = 1_756  // TRANSFER_LOG_COST: EIP-7708 transfer log
+	TxValueCostEIP2780       uint64 = 6_000  // TX_VALUE_COST: recipient balance write and EIP-7708 transfer log
 	ColdAccountAccessEIP2780 uint64 = 3_000  // COLD_ACCOUNT_ACCESS: recipient account touch
 	CreateAccessEIP2780      uint64 = 11_000 // CREATE_ACCESS: ACCOUNT_WRITE(8000) + COLD_STORAGE_ACCESS(3000)
 )
