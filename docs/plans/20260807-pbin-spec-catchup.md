@@ -346,15 +346,19 @@ unique lives there.
 **Files:**
 - Create: `~/org/wrk/espr` (clone, outside this repository)
 
-- [ ] clone `https://github.com/ethereum/execution-specs.git` to `~/org/wrk/espr`
-- [ ] add remote `fork` → `https://github.com/awskii/execution-specs.git`, fetch
+- [x] clone `https://github.com/ethereum/execution-specs.git` to `~/org/wrk/espr`
+- [x] add remote `fork` → `https://github.com/awskii/execution-specs.git`, fetch
       both remotes
-- [ ] check out `projects/binary-trie` and confirm HEAD is at or past `8d258bc`
-- [ ] confirm `~/org/wrk/espr/tests/binary_trie/vectors/binary_trie_vectors.json`
+- [x] check out `projects/binary-trie` and confirm HEAD is at or past `8d258bc`
+      (HEAD is exactly `8d258bc`)
+- [x] confirm `~/org/wrk/espr/tests/binary_trie/vectors/binary_trie_vectors.json`
       reports `source_commit` `58faeb0`
-- [ ] verify the toolchain: `uv run python tests/binary_trie/vectors/dump_vectors.py`
-      regenerates the file with no diff
-- [ ] run `uv run pytest tests/binary_trie/ -q` to confirm a green base
+- [x] verify the toolchain: `uv run python tests/binary_trie/vectors/dump_vectors.py`
+      regenerates the file with no diff — vector content byte-identical; the
+      only changed line is the `source_commit` stamp, which the generator sets
+      to the current HEAD (`8d258bc`), restored after the check
+- [x] run `uv run pytest tests/binary_trie/ -q` to confirm a green base —
+      204 passed
 
 ### Task 3: Vendor the fresh vectors and make the harness build against them
 
