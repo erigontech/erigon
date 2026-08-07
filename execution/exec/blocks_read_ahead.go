@@ -227,20 +227,41 @@ const (
 	balWarmAccount balWarmupTaskKind = iota
 	balWarmStorageChanges
 	balWarmStorageReads
+	balWarmBALCode
+	balWarmTxnDestination
+)
+
+type balCodeWarmupMode uint8
+
+const (
+	balCodeWarmupNone balCodeWarmupMode = iota
+	balCodeWarmupTxnDestinations
+	balCodeWarmupAll
 )
 
 type balWarmupTask struct {
 	accountIndex int
 	kind         balWarmupTaskKind
 	slotIndex    int
+	address      accounts.Address
 }
 
-func makeBALWarmupPlan(bal types.BlockAccessList, workers int) ([]balWarmupTask, int) {
+func balCodeWarmupModeForFlags(warmBALCode, warmTxCode bool) balCodeWarmupMode {
+	if warmBALCode {
+		return balCodeWarmupAll
+	}
+	if warmTxCode {
+		return balCodeWarmupTxnDestinations
+	}
+	return balCodeWarmupNone
+}
+
+func makeBALWarmupPlan(bal types.BlockAccessList, txns types.Transactions, codeMode balCodeWarmupMode, workers int) ([]balWarmupTask, int) {
 	taskCount := len(bal)
 	for _, account := range bal {
 		taskCount += len(account.StorageChanges) + len(account.StorageReads)
 	}
-	tasks := make([]balWarmupTask, 0, taskCount)
+	tasks := make([]balWarmupTask, 0, taskCount+len(bal)+len(txns))
 	for accountIndex, account := range bal {
 		tasks = append(tasks, balWarmupTask{accountIndex: accountIndex, kind: balWarmAccount})
 		for slotIndex := range account.StorageChanges {
@@ -248,6 +269,26 @@ func makeBALWarmupPlan(bal types.BlockAccessList, workers int) ([]balWarmupTask,
 		}
 		for slotIndex := range account.StorageReads {
 			tasks = append(tasks, balWarmupTask{accountIndex: accountIndex, kind: balWarmStorageReads, slotIndex: slotIndex})
+		}
+	}
+	switch codeMode {
+	case balCodeWarmupAll:
+		for accountIndex := range bal {
+			tasks = append(tasks, balWarmupTask{accountIndex: accountIndex, kind: balWarmBALCode})
+		}
+	case balCodeWarmupTxnDestinations:
+		txnDestinations := make(map[accounts.Address]struct{}, len(txns))
+		for _, txn := range txns {
+			to := txn.GetTo()
+			if to == nil {
+				continue
+			}
+			address := accounts.InternAddress(*to)
+			if _, ok := txnDestinations[address]; ok {
+				continue
+			}
+			txnDestinations[address] = struct{}{}
+			tasks = append(tasks, balWarmupTask{kind: balWarmTxnDestination, address: address})
 		}
 	}
 	return tasks, min(workers, len(tasks))
@@ -262,14 +303,15 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, body *typ
 		workers = 1
 	}
 	if len(bal) > 0 {
-		bra.warmBAL(ctx, db, bal, workers)
+		codeMode := balCodeWarmupModeForFlags(dbg.ReadAheadBALCode, dbg.ReadAheadTxCode)
+		bra.warmBAL(ctx, db, bal, body.Transactions, codeMode, workers)
 		return
 	}
 	bra.warmTxns(ctx, db, body.Transactions, workers)
 }
 
-func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.BlockAccessList, workers int) {
-	tasks, balWorkers := makeBALWarmupPlan(bal, workers)
+func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.BlockAccessList, txns types.Transactions, codeMode balCodeWarmupMode, workers int) {
+	tasks, balWorkers := makeBALWarmupPlan(bal, txns, codeMode, workers)
 	var nextTask atomic.Uint64
 	var wg errgroup.Group
 	for w := range balWorkers {
@@ -302,17 +344,27 @@ func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.
 					break
 				}
 				task := tasks[taskIndex]
-				acctChanges := bal[task.accountIndex]
 				switch task.kind {
 				case balWarmAccount:
+					acctChanges := bal[task.accountIndex]
+					stateReader.ReadAccountData(acctChanges.Address)
+				case balWarmBALCode:
+					acctChanges := bal[task.accountIndex]
 					acct, _ := stateReader.ReadAccountData(acctChanges.Address)
 					if (acct != nil && !acct.CodeHash.IsEmpty()) || len(acctChanges.CodeChanges) > 0 {
 						stateReader.ReadAccountCode(acctChanges.Address)
 					}
+				case balWarmTxnDestination:
+					acct, _ := stateReader.ReadAccountData(task.address)
+					if acct != nil && !acct.CodeHash.IsEmpty() {
+						stateReader.ReadAccountCode(task.address)
+					}
 				case balWarmStorageChanges:
+					acctChanges := bal[task.accountIndex]
 					slot := acctChanges.StorageChanges[task.slotIndex].Slot
 					stateReader.ReadAccountStorage(acctChanges.Address, slot)
 				case balWarmStorageReads:
+					acctChanges := bal[task.accountIndex]
 					slot := acctChanges.StorageReads[task.slotIndex]
 					stateReader.ReadAccountStorage(acctChanges.Address, slot)
 				}

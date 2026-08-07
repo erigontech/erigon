@@ -115,7 +115,7 @@ func TestMakeBALWarmupTasksSplitsStorageHeavyAccount(t *testing.T) {
 		StorageChanges: make([]*types.SlotChanges, 5),
 		StorageReads:   make([]accounts.StorageKey, 3),
 	}}
-	tasks, workers := makeBALWarmupPlan(bal, 4)
+	tasks, workers := makeBALWarmupPlan(bal, nil, balCodeWarmupModeForFlags(false, false), 4)
 	require.Equal(t, 4, workers)
 	require.Equal(t, []balWarmupTask{
 		{accountIndex: 0, kind: balWarmAccount},
@@ -127,6 +127,67 @@ func TestMakeBALWarmupTasksSplitsStorageHeavyAccount(t *testing.T) {
 		{accountIndex: 0, kind: balWarmStorageReads, slotIndex: 0},
 		{accountIndex: 0, kind: balWarmStorageReads, slotIndex: 1},
 		{accountIndex: 0, kind: balWarmStorageReads, slotIndex: 2},
+	}, tasks)
+}
+
+func TestBALCodeWarmupModeForFlags(t *testing.T) {
+	tests := []struct {
+		name        string
+		warmBALCode bool
+		warmTxCode  bool
+		want        balCodeWarmupMode
+	}{
+		{name: "all BAL code", warmBALCode: true, want: balCodeWarmupAll},
+		{name: "BAL code takes precedence", warmBALCode: true, warmTxCode: true, want: balCodeWarmupAll},
+		{name: "transaction destinations", warmTxCode: true, want: balCodeWarmupTxnDestinations},
+		{name: "no code", want: balCodeWarmupNone},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.want, balCodeWarmupModeForFlags(test.warmBALCode, test.warmTxCode))
+		})
+	}
+}
+
+func TestMakeBALWarmupTasksQueuesUniqueTransactionDestinationsAfterStateData(t *testing.T) {
+	destinationA := common.Address{19: 0xa1}
+	destinationB := common.Address{19: 0xb2}
+	balOnly := common.Address{19: 0xc3}
+	txns := types.Transactions{
+		types.NewTransaction(0, destinationA, nil, 0, nil, nil),
+		types.NewTransaction(1, destinationA, nil, 0, nil, []byte{0x01}),
+		types.NewContractCreation(2, nil, 0, nil, []byte{0x02}),
+		types.NewTransaction(3, destinationB, nil, 0, nil, nil),
+	}
+	bal := types.BlockAccessList{
+		{Address: accounts.InternAddress(destinationA), StorageReads: []accounts.StorageKey{accounts.InternKey(common.Hash{31: 0x01})}},
+		{Address: accounts.InternAddress(balOnly)},
+	}
+	tasks, workers := makeBALWarmupPlan(bal, txns, balCodeWarmupModeForFlags(false, true), 4)
+	require.Equal(t, 4, workers)
+	require.Equal(t, []balWarmupTask{
+		{accountIndex: 0, kind: balWarmAccount},
+		{accountIndex: 0, kind: balWarmStorageReads, slotIndex: 0},
+		{accountIndex: 1, kind: balWarmAccount},
+		{kind: balWarmTxnDestination, address: accounts.InternAddress(destinationA)},
+		{kind: balWarmTxnDestination, address: accounts.InternAddress(destinationB)},
+	}, tasks)
+}
+
+func TestMakeBALWarmupTasksQueuesAllCodeAfterStateData(t *testing.T) {
+	bal := types.BlockAccessList{
+		{StorageChanges: make([]*types.SlotChanges, 1)},
+		{StorageReads: make([]accounts.StorageKey, 1)},
+	}
+	tasks, workers := makeBALWarmupPlan(bal, nil, balCodeWarmupModeForFlags(true, false), 4)
+	require.Equal(t, 4, workers)
+	require.Equal(t, []balWarmupTask{
+		{accountIndex: 0, kind: balWarmAccount},
+		{accountIndex: 0, kind: balWarmStorageChanges, slotIndex: 0},
+		{accountIndex: 1, kind: balWarmAccount},
+		{accountIndex: 1, kind: balWarmStorageReads, slotIndex: 0},
+		{accountIndex: 0, kind: balWarmBALCode},
+		{accountIndex: 1, kind: balWarmBALCode},
 	}, tasks)
 }
 
