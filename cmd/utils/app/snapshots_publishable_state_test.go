@@ -877,6 +877,15 @@ func Test_CheckStateSnapshotFiles_TmpFileIsNotDuplicate(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func Test_CheckStateSnapshotFiles_NonSnapshotVersionedFileIsNotDuplicate(t *testing.T) {
+	t.Parallel()
+	dirs := setupWorkingStateMockDatadir(t)
+	createMockFile(t, dirs.SnapDomain, "v1.0-storage.0-128.log")
+	createMockFile(t, dirs.SnapDomain, "v1.1-storage.0-128.log")
+	err := checkStateSnapshotFiles(dirs, false, false)
+	require.NoError(t, err)
+}
+
 // --- Block snapshot checks ---
 
 func Test_CheckIfBlockSnapshotsPublishable_SuccessCase(t *testing.T) {

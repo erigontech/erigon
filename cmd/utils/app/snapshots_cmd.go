@@ -2310,9 +2310,13 @@ func checkNoDuplicateFileVersions(dirPaths ...string) error {
 			return err
 		}
 		for _, g := range groups {
-			if len(g) > 1 {
-				return fmt.Errorf("%w: %s and %s in %s", ErrSnapDuplicateVersions, g[0].Name, g[1].Name, dirPath)
+			if len(g) < 2 {
+				continue
 			}
+			if !snaptype.IsSeedableExtension(g[0].Name) && !strings.HasSuffix(g[0].Name, ".torrent") {
+				continue // not an erigon snapshot file
+			}
+			return fmt.Errorf("%w: %s and %s in %s", ErrSnapDuplicateVersions, g[0].Name, g[1].Name, dirPath)
 		}
 	}
 	return nil
