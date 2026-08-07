@@ -1709,3 +1709,47 @@ func TestVersionedIO_MidBlockEmptyCodeHashReadMustNotDropRealClear(t *testing.T)
 	}
 	require.True(t, found, "authority account must appear in BAL")
 }
+
+// Absorb must land the same set as MergeInto, with src winning on conflicts —
+// that equivalence is what lets the fee merge take the cheap direction.
+func TestWriteSetAbsorbMatchesMergeInto(t *testing.T) {
+	t.Parallel()
+
+	mk := func(addr accounts.Address, bal uint64, key accounts.StorageKey, slot uint64) *WriteSet {
+		ws := &WriteSet{}
+		ws.SetBalance(addr, &VersionedWrite[uint256.Int]{
+			WriteHeader: WriteHeader{Address: addr, Path: BalancePath},
+			Val:         *uint256.NewInt(bal),
+		})
+		ws.SetStorage(addr, key, &VersionedWrite[uint256.Int]{
+			WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key},
+			Val:         *uint256.NewInt(slot),
+		})
+		return ws
+	}
+	shared := accounts.InternAddress(common.HexToAddress("0xaa"))
+	other := accounts.InternAddress(common.HexToAddress("0xbb"))
+	key := accounts.InternKey(common.HexToHash("0x01"))
+
+	// MergeInto: next wins, prev fills the gaps.
+	prev, next := mk(shared, 1, key, 11), mk(other, 2, key, 22)
+	next.SetBalance(shared, &VersionedWrite[uint256.Int]{
+		WriteHeader: WriteHeader{Address: shared, Path: BalancePath}, Val: *uint256.NewInt(9),
+	})
+	want := prev.MergeInto(next)
+
+	// Absorb: same inputs, folded the other way.
+	base, src := mk(shared, 1, key, 11), mk(other, 2, key, 22)
+	src.SetBalance(shared, &VersionedWrite[uint256.Int]{
+		WriteHeader: WriteHeader{Address: shared, Path: BalancePath}, Val: *uint256.NewInt(9),
+	})
+	base.Absorb(src)
+
+	require.Equal(t, want.Count(), base.Count())
+	for h := range want.AllHeaders() {
+		require.True(t, base.Has(h), "absorbed set lacks %v", h.Path)
+	}
+	bal, ok := base.GetBalance(shared)
+	require.True(t, ok)
+	require.Equal(t, uint64(9), bal.Val.Uint64(), "src must win on a conflicting entry")
+}
