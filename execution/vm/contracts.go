@@ -989,6 +989,10 @@ func (c *bls12381G1MultiExp) Run(input []byte) ([]byte, error) {
 
 	// Compute r = e_0 * p_0 + e_1 * p_1 + ... + e_(k-1) * p_(k-1)
 	var r bls12381.G1Affine
+	if k == 1 {
+		scalarMulG1(&r, &points[0], &scalars[0])
+		return encodePointG1(&r), nil
+	}
 	_, err := r.MultiExp(points, scalars, ecc.MultiExpConfig{})
 	if err != nil {
 		return nil, err
@@ -1093,6 +1097,10 @@ func (c *bls12381G2MultiExp) Run(input []byte) ([]byte, error) {
 
 	// Compute r = e_0 * p_0 + e_1 * p_1 + ... + e_(k-1) * p_(k-1)
 	var r bls12381.G2Affine
+	if k == 1 {
+		scalarMulG2(&r, &points[0], &scalars[0])
+		return encodePointG2(&r), nil
+	}
 	_, err := r.MultiExp(points, scalars, ecc.MultiExpConfig{})
 	if err != nil {
 		return nil, err
@@ -1169,6 +1177,20 @@ func (c *bls12381Pairing) Run(input []byte) ([]byte, error) {
 
 func (c *bls12381Pairing) Name() string {
 	return "BLS12_PAIRING_CHECK"
+}
+
+// scalarMulG1 sets r to s*p. EIP-2537 has no dedicated MUL precompile, so a plain
+// scalar multiplication reaches G1MSM as k == 1, and the spec asks implementations
+// to recognise it: gnark's MultiExp pays full Pippenger setup even for one point.
+func scalarMulG1(r, p *bls12381.G1Affine, s *fr.Element) {
+	var b big.Int
+	r.ScalarMultiplication(p, s.BigInt(&b))
+}
+
+// scalarMulG2 sets r to s*p, see scalarMulG1.
+func scalarMulG2(r, p *bls12381.G2Affine, s *fr.Element) {
+	var b big.Int
+	r.ScalarMultiplication(p, s.BigInt(&b))
 }
 
 func decodePointG1(in []byte) (bls12381.G1Affine, error) {

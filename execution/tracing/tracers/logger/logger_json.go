@@ -22,7 +22,8 @@ package logger
 import (
 	"encoding/json"
 	"io"
-	"math/big"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/math"
@@ -90,11 +91,8 @@ func (l *JSONLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope traci
 		log.Memory = memory
 	}
 	if !l.cfg.DisableStack {
-		//TODO(@holiman) improve this
-		logstack := make([]*big.Int, len(stack))
-		for i, item := range stack {
-			logstack[i] = item.ToBig()
-		}
+		logstack := make([]uint256.Int, len(stack))
+		copy(logstack, stack)
 		log.Stack = logstack
 	}
 	if l.cfg.EnableReturnData {
