@@ -306,7 +306,7 @@ func StateStep(ctx context.Context, chainReader rules.ChainReader, engine rules.
 		if err := stateSync.UnwindTo(unwindPoint, stagedsync.StagedUnwind, nil); err != nil {
 			return err
 		}
-		if err = stateSync.RunUnwind(sd, tx); err != nil {
+		if err := stateSync.RunUnwind(sd, tx); err != nil {
 			return err
 		}
 	}

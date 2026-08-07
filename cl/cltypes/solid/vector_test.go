@@ -41,6 +41,7 @@ func newTestAttestation(slot, committeeIndex uint64, numBytes int) *Attestation 
 	for i := 0; i < numBytes && i < 10; i++ {
 		att.AggregationBits.Set(i, byte(i))
 	}
+	att.AggregationBits.Set(numBytes-1, 1)
 	return att
 }
 
