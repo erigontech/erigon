@@ -73,8 +73,10 @@ func (r *memBlockReader) headerAt(number uint64) *types.Header {
 		return r.parent
 	case number < r.parentN:
 		h := &types.Header{Number: *uint256.NewInt(number)}
-		if prev, ok := r.ancestors[number-1]; ok {
-			h.ParentHash = prev
+		if number > 0 { // block 0 has no parent; number-1 would underflow
+			if prev, ok := r.ancestors[number-1]; ok {
+				h.ParentHash = prev
+			}
 		}
 		return h
 	default:

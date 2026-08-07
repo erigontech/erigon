@@ -706,8 +706,8 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			txs := b.Transactions()
 
 			// BlockContext: workers override GetHash with their own per-worker
-			// function (installWorkerGetHash) using their own roTx. The
-			// placeholder here uses execRoTx for the serial path fallback.
+			// function (installWorkerGetHash) using their own roTx; this
+			// placeholder resolves ancestor headers via the block source.
 			blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
 				return src.header(ctx, hash, number)
 			}), te.cfg.engine, te.cfg.author, te.cfg.chainConfig)

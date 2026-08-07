@@ -204,14 +204,25 @@ func newFixtureChainReader(config *chain.Config, fx *Fixture) (*fixtureChainRead
 	return &fixtureChainReader{config: config, parent: parent}, nil
 }
 
-func (c *fixtureChainReader) Config() *chain.Config                     { return c.config }
-func (c *fixtureChainReader) CurrentHeader() *types.Header              { return c.parent }
-func (c *fixtureChainReader) CurrentFinalizedHeader() *types.Header     { return c.parent }
-func (c *fixtureChainReader) CurrentSafeHeader() *types.Header          { return c.parent }
-func (c *fixtureChainReader) GetHeaderByNumber(uint64) *types.Header    { return c.parent }
-func (c *fixtureChainReader) GetHeaderByHash(common.Hash) *types.Header { return c.parent }
-func (c *fixtureChainReader) FrozenBlocks() uint64                      { return 0 }
-func (c *fixtureChainReader) FrozenBorBlocks(bool) uint64               { return 0 }
+func (c *fixtureChainReader) Config() *chain.Config                 { return c.config }
+func (c *fixtureChainReader) CurrentHeader() *types.Header          { return c.parent }
+func (c *fixtureChainReader) CurrentFinalizedHeader() *types.Header { return c.parent }
+func (c *fixtureChainReader) CurrentSafeHeader() *types.Header      { return c.parent }
+func (c *fixtureChainReader) GetHeaderByNumber(number uint64) *types.Header {
+	if c.parent != nil && c.parent.Number.Uint64() == number {
+		return c.parent
+	}
+	return nil
+}
+
+func (c *fixtureChainReader) GetHeaderByHash(hash common.Hash) *types.Header {
+	if c.parent != nil && c.parent.Hash() == hash {
+		return c.parent
+	}
+	return nil
+}
+func (c *fixtureChainReader) FrozenBlocks() uint64        { return 0 }
+func (c *fixtureChainReader) FrozenBorBlocks(bool) uint64 { return 0 }
 
 func (c *fixtureChainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
 	if c.parent != nil && c.parent.Number.Uint64() == number {
