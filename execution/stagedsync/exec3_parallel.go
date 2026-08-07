@@ -8,6 +8,7 @@ import (
 	"os"
 	"runtime"
 	"runtime/pprof"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -1139,8 +1140,13 @@ func (pe *parallelExecutor) drainOnCancel(ctx context.Context, applyTx kv.Tempor
 				return nil
 			}
 			pe.Lock()
+			done, wasPending := pe.blockExecutors[blockResult.BlockNum]
 			delete(pe.blockExecutors, blockResult.BlockNum)
 			pe.Unlock()
+			// Off-lock: walking a block's cells can be long.
+			if wasPending {
+				done.versionMap.Release()
+			}
 			pe.scheduleNextPending(ctx)
 		default:
 			return pe.execLoopExitCheck(ctx, "ctx-done-drain: no more pending results")
@@ -1206,8 +1212,13 @@ func (pe *parallelExecutor) completeBlock(ctx context.Context, blockResult *bloc
 		}
 
 		pe.Lock()
+		done, wasPending := pe.blockExecutors[blockResult.BlockNum]
 		delete(pe.blockExecutors, blockResult.BlockNum)
 		pe.Unlock()
+		// Off-lock: walking a block's cells can be long.
+		if wasPending {
+			done.versionMap.Release()
+		}
 
 		if terminal {
 			// commitResults is drained by the calculator on its own
@@ -1672,6 +1683,20 @@ func (pe *parallelExecutor) processResults(ctx context.Context, applyTx kv.Tempo
 	return blockResult, nil
 }
 
+// releaseResidualVersionMaps returns the cells of every executor still in the
+// map to their pools. Callable only once the previous batch's workers have
+// stopped — it covers whatever that batch left behind, pending or failed.
+func (pe *parallelExecutor) releaseResidualVersionMaps() {
+	pe.Lock()
+	residual := slices.Collect(maps.Values(pe.blockExecutors))
+	clear(pe.blockExecutors)
+	pe.Unlock()
+	// Off-lock: walking a block's cells can be long.
+	for _, be := range residual {
+		be.versionMap.Release()
+	}
+}
+
 func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.CancelCauseFunc, error) {
 	// execRequests holds one entry per decoded block (each containing all its TxTasks).
 	// A large buffer causes the block-loader goroutine to race far ahead of the apply
@@ -1681,6 +1706,10 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	// Clear stale blockExecutors from previous batch — unprocessed blocks left
 	// in the map after a "batch full" exit would prevent the first block of the
 	// new batch from being scheduled (processRequest only schedules when map is empty).
+	// Queued executors already hold pooled cells (processRequest builds their
+	// version map up front), so dropping the map without releasing would bypass
+	// the pools on every rollover.
+	pe.releaseResidualVersionMaps()
 	pe.blockExecutors = nil
 	// in is the per-transaction work queue consumed by OCC workers.
 	// 2048 entries keeps all workers saturated without unbounded accumulation.

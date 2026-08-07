@@ -9,6 +9,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -802,6 +803,75 @@ func TestNoBAL_SameSenderTxs_DetectsConflicts(t *testing.T) {
 		require.Equal(t, VersionInvalid, valid,
 			"tx %d: recorded StorageRead of sender.BalancePath conflicts with tx 0's flushed Done; got %s", txIdx, valid)
 	}
+}
+
+// TestVersionMapRelease_EmptiesEveryPath pins Release's contract: every cell the
+// map holds is dropped, across all account paths and storage, so a released map
+// reads as if nothing was ever written to it and the per-path cell containers
+// it hands back to the pools are left empty.
+func TestVersionMapRelease_EmptiesEveryPath(t *testing.T) {
+	t.Parallel()
+
+	paths := []AccountPath{
+		AddressPath, SelfDestructPath, BalancePath, NoncePath, IncarnationPath,
+		CodePath, CodeHashPath, CodeSizePath, CreateContractPath, StoragePath,
+	}
+	key := accounts.InternKey(common.Hash{0x11})
+
+	vm := NewVersionMap(nil)
+	for i, path := range paths {
+		addr := getAddress(i)
+		for txIdx := range 3 {
+			writeFor(vm, addr, path, key, Version{TxIndex: txIdx}, valueFor(path, txIdx, 0), true)
+		}
+	}
+
+	for i, path := range paths {
+		_, rr, ok := readFor(vm, getAddress(i), path, key, 3)
+		require.True(t, ok, "%s: setup must land a readable write", path)
+		require.Equal(t, MVReadResultDone, rr.Status(), "%s: setup write must read back Done", path)
+	}
+
+	var entries []*AddressEntry
+	vm.s.Range(func(_, value any) bool {
+		entries = append(entries, value.(*AddressEntry))
+		return true
+	})
+	require.NotEmpty(t, entries, "setup must build address entries")
+	require.NotZero(t, countCells(entries), "setup must leave cells in the entries")
+
+	vm.Release()
+
+	remaining := 0
+	vm.s.Range(func(_, _ any) bool { remaining++; return true })
+	require.Zero(t, remaining, "Release must leave no address entries behind")
+	require.Zero(t, countCells(entries), "Release must empty every cell container it returns to the pools")
+	for i, path := range paths {
+		_, rr, ok := readFor(vm, getAddress(i), path, key, 3)
+		require.False(t, ok, "%s: released map must not report a write", path)
+		require.Equal(t, MVReadResultNone, rr.Status(), "%s: released map must read as None", path)
+	}
+}
+
+func countCells(entries []*AddressEntry) int {
+	n := 0
+	for _, e := range entries {
+		for _, cells := range e.Storage {
+			n += cellLen(cells)
+		}
+		n += cellLen(e.SelfDestruct) + cellLen(e.CreateContract)
+		n += cellLen(e.Nonce) + cellLen(e.Incarnation)
+		n += cellLen(e.Balance) + cellLen(e.CodeSize)
+		n += cellLen(e.Address) + cellLen(e.Code) + cellLen(e.CodeHash)
+	}
+	return n
+}
+
+func cellLen[T any](cells *btree.Map[int, *WriteCell[T]]) int {
+	if cells == nil {
+		return 0
+	}
+	return cells.Len()
 }
 
 // fixedAccountReader returns a fixed account from the DB/state reader.

@@ -1604,3 +1604,42 @@ func (mvr ReadResult) Status() int {
 
 	return MVReadResultNone
 }
+
+// Release returns every cell held by the map to its pool. Cells are otherwise
+// only recycled by Delete/DeleteAll, so a version map that reaches the end of
+// its block normally strands all of them.
+//
+// The map is left empty and must not be written to again; a fresh one is
+// built per block.
+func (vm *VersionMap) Release() {
+	vm.s.Range(func(key, value any) bool {
+		e := value.(*AddressEntry)
+		e.mu.Lock()
+		releaseCells(e.Address, releaseCellAccount)
+		releaseCells(e.SelfDestruct, releaseCellSelfDestruct)
+		releaseCells(e.Balance, releaseCellBalance)
+		releaseCells(e.Nonce, releaseCellNonce)
+		releaseCells(e.Incarnation, releaseCellIncarnation)
+		releaseCells(e.Code, releaseCellCode)
+		releaseCells(e.CodeHash, releaseCellCodeHash)
+		releaseCells(e.CodeSize, releaseCellCodeSize)
+		releaseCells(e.CreateContract, releaseCellCreateContract)
+		for _, cells := range e.Storage {
+			releaseCells(cells, releaseCellStorage)
+		}
+		e.mu.Unlock()
+		vm.s.Delete(key)
+		return true
+	})
+}
+
+func releaseCells[T any](cells *btree.Map[int, *WriteCell[T]], release func(*WriteCell[T])) {
+	if cells == nil {
+		return
+	}
+	cells.Scan(func(_ int, c *WriteCell[T]) bool {
+		release(c)
+		return true
+	})
+	cells.Clear()
+}
