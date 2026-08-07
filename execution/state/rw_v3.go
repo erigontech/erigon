@@ -1156,15 +1156,21 @@ func (c *BlockStateCache) DeleteAccount(addr accounts.Address, txNum uint64) {
 	c.mu.Unlock()
 }
 
+// writtenAccount returns the blob written this block, without the committed
+// fallback — callers that hold a decoded committed account skip the re-encode.
+func (c *BlockStateCache) writtenAccount(addr accounts.Address) ([]byte, bool) {
+	c.mu.RLock()
+	enc, ok := c.currentAccounts[addr]
+	c.mu.RUnlock()
+	return enc, ok
+}
+
 // GetCurrentAccount returns the latest account blob (including intra-block writes).
 // Falls back to committed state if no write exists. Returns (nil, false) if not cached.
 func (c *BlockStateCache) GetCurrentAccount(addr accounts.Address) ([]byte, bool) {
-	c.mu.RLock()
-	if enc, ok := c.currentAccounts[addr]; ok {
-		c.mu.RUnlock()
+	if enc, ok := c.writtenAccount(addr); ok {
 		return enc, true
 	}
-	c.mu.RUnlock()
 	// The committed fallback runs after releasing mu, so the two reads are not one
 	// point-in-time snapshot. That is safe because committedAccounts is a
 	// write-once immutable pre-block view (a sync.Map for lock-free reads): a
@@ -1310,7 +1316,10 @@ func (r *CachedReaderV3) ReadAccountData(address accounts.Address) (*accounts.Ac
 	if r.blockCache != nil {
 		if r.readCurrent {
 			// Read from write buffer — sees accumulated per-TX writes.
-			if enc, ok := r.blockCache.GetCurrentAccount(address); ok {
+			if enc, ok := r.blockCache.writtenAccount(address); ok {
+				if normalizeProbe {
+					normProbe.cacheWritten.Add(1)
+				}
 				if enc == nil {
 					return nil, nil
 				}
@@ -1319,6 +1328,18 @@ func (r *CachedReaderV3) ReadAccountData(address accounts.Address) (*accounts.Ac
 					return nil, err
 				}
 				return &acc, nil
+			}
+			// Unwritten this block, so the committed view is the current one;
+			// take it decoded rather than through a re-encode.
+			if acc, ok := r.blockCache.GetCommittedAccount(address); ok {
+				if normalizeProbe {
+					normProbe.cacheCommitted.Add(1)
+				}
+				if acc == nil {
+					return nil, nil
+				}
+				result := *acc
+				return &result, nil
 			}
 		} else {
 			// Read from committed cache — stable pre-block view.
@@ -1330,6 +1351,9 @@ func (r *CachedReaderV3) ReadAccountData(address accounts.Address) (*accounts.Ac
 				return &result, nil
 			}
 		}
+	}
+	if normalizeProbe {
+		normProbe.cacheMiss.Add(1)
 	}
 	acc, err := r.ReaderV3.ReadAccountData(address)
 	if err != nil {

@@ -305,15 +305,27 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 						continue
 					}
 				} else {
+					if normalizeProbe {
+						normProbeStorageFallback(stateReader, h.Address, h.Key, writeVal.IsZero())
+					}
 					preVal, found, err := stateReader.ReadAccountStorage(h.Address, h.Key)
 					if err != nil {
 						return nil, err
 					}
 					if !found && writeVal.IsZero() {
+						if normalizeProbe {
+							normProbeStorageResult(true)
+						}
 						continue
 					}
 					if found && writeVal.Eq(&preVal) {
+						if normalizeProbe {
+							normProbeStorageResult(true)
+						}
 						continue
+					}
+					if normalizeProbe {
+						normProbeStorageResult(false)
 					}
 				}
 			}
@@ -385,12 +397,23 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 			if SetAccountFieldFromMap(filtered, vm, addr, path, ver, txIndex+1) {
 				continue
 			}
+			// Then what this tx already read, before paying for a domain read.
+			if r, ok := stateReader.(accountFieldResolver); ok && r.ResolveAccountField(filtered, addr, path, ver) {
+				continue
+			}
 			// Fall back to stateReader for pre-block account
 			if stateReader != nil {
 				if !fallbackLoaded {
+					var probeClass normProbeClass
+					if normalizeProbe {
+						probeClass = normProbeFallback(stateReader, addr)
+					}
 					acc, err := stateReader.ReadAccountData(addr)
 					if err != nil {
 						return nil, err
+					}
+					if normalizeProbe {
+						normProbeResult(probeClass, acc)
 					}
 					fallbackAcc = acc
 					fallbackLoaded = true
