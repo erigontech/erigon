@@ -598,19 +598,6 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 		}
 	}
-	// The main rules this message must satisfy, in the order preCheck runs
-	// them. The fork-gated checks (EIP-3607, 1559 and 4844 fee caps, EIP-7702
-	// prerequisites, EIP-3860 initcode size) interleave with these:
-	//
-	// 1. the nonce of the message caller is correct
-	// 2. the amount of gas required is available in the block
-	// 3. the transaction carries at most MaxBlobsPerTxn blob hashes (Osaka+)
-	// 4. there is no overflow when calculating intrinsic gas
-	// 5. the transaction gas limit does not exceed the EIP-7825 cap (Osaka+)
-	// 6. caller has enough balance to cover transaction fee(gaslimit * gasprice)
-	//    plus the asset transfer for the **topmost** call
-	// 7. the purchased gas is enough to cover intrinsic usage
-
 	msg := st.msg
 	sender := msg.From()
 	contractCreation := msg.To().IsNil()

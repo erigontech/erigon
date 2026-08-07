@@ -1382,7 +1382,7 @@ func TestPreCheckIntrinsicGasMatchesMessage(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ibs := state.New(state.NewNoopReader())
 			defer ibs.Close()
-			ibs.SetBalance(sender, *uint256.NewInt(1_000_000), tracing.BalanceChangeUnspecified)
+			require.NoError(t, ibs.SetBalance(sender, *uint256.NewInt(1_000_000), tracing.BalanceChangeUnspecified))
 			evm := newTestEVM(ibs, chain.TestChainOsakaConfig, 30_000_000)
 			msg := types.NewMessage(
 				sender, tc.to, 0, tc.amount, 10_000_000,
