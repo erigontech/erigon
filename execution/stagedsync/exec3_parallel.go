@@ -2269,6 +2269,8 @@ type blockExecutor struct {
 	// recorded set is some execResult's TxOut, which stays live.
 	feeMergeTemp map[int]*state.WriteSet
 
+	mapReleasing sync.WaitGroup
+
 	// settledInput[tx]==true marks a task that was dispatched when every
 	// preceding task had already validated — so it executed against fully
 	// settled MVCC state, with no lower-indexed worker still in flight.
@@ -2452,10 +2454,44 @@ func (be *blockExecutor) invalidBlockResult(err error) *blockResult {
 // so pooling prev's maps leaves the writes merged now holds intact.
 func (be *blockExecutor) recordFeeMerge(tx int, prev, merged *state.WriteSet) {
 	if temp := be.feeMergeTemp[tx]; temp != nil && temp == prev && merged != temp {
-		temp.ReleaseMaps()
+		be.queueMapRelease(temp)
 	}
 	be.feeMergeTemp[tx] = merged
 }
+
+// ReleaseMaps clears every map before pooling it, which is O(entries), and a
+// superseded fee-merge set holds the whole tx's writes. Keep it off the apply
+// loop, which is the serial stage the workers wait behind.
+type mapRelease struct {
+	ws      *state.WriteSet
+	pending *sync.WaitGroup
+}
+
+var (
+	mapReleases     = make(chan mapRelease, 4096)
+	mapReleaseStart sync.Once
+)
+
+func (be *blockExecutor) queueMapRelease(ws *state.WriteSet) {
+	mapReleaseStart.Do(func() {
+		go func() {
+			for r := range mapReleases {
+				r.ws.ReleaseMaps()
+				r.pending.Done()
+			}
+		}()
+	})
+	be.mapReleasing.Add(1)
+	select {
+	case mapReleases <- mapRelease{ws, &be.mapReleasing}:
+	default:
+		// Releaser is behind; inline costs less than blocking the apply loop.
+		ws.ReleaseMaps()
+		be.mapReleasing.Done()
+	}
+}
+
+func (be *blockExecutor) awaitMapReleases() { be.mapReleasing.Wait() }
 
 // tooManyRetries returns an invalid-block result when tx has exceeded its
 // retry budget, otherwise nil. origin may be nil (validator-invalid path)
