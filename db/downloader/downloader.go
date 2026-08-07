@@ -2035,7 +2035,59 @@ func (d *Downloader) Close() {
 	d.log(log.LvlInfo, "Stopping", "files", len(d.torrentClient.Torrents()))
 	d.lockingClose()
 	d.wg.Wait()
+	// Post-close disk sweep: any .torrent metainfo sidecar without a
+	// primary payload on disk is an orphan the running downloader
+	// couldn't complete (peer stall, filter change, aborted mid-add).
+	// Distributable-datadir invariant requires the stopped state to be
+	// orphan-free, so remove them here rather than leaving them for a
+	// next-boot sweep that would inflate the disk image handed off to
+	// consumers of a stopped-erigon datadir.
+	removed, err := sweepOrphanTorrentSidecars(d.snapDir())
+	if err != nil {
+		d.log(log.LvlWarn, "close: orphan torrent sidecar sweep encountered errors", "err", err)
+	}
+	if removed > 0 {
+		d.log(log.LvlInfo, "close: removed orphan torrent sidecars", "count", removed)
+	}
 	d.log(log.LvlInfo, "Stopped")
+}
+
+// sweepOrphanTorrentSidecars walks snapDir and removes every .torrent
+// file whose stripped-suffix primary payload does not exist on disk.
+// Returns the count of removed sidecars and joins any per-file walk
+// errors (walking continues past individual errors). Never removes
+// files that don't end in .torrent; never traverses symlinks outside
+// snapDir.
+func sweepOrphanTorrentSidecars(snapDir string) (removed int, err error) {
+	walkErr := filepath.WalkDir(snapDir, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			err = errors.Join(err, walkErr)
+			return nil
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		if !strings.HasSuffix(entry.Name(), ".torrent") {
+			return nil
+		}
+		primary := strings.TrimSuffix(path, ".torrent")
+		if _, statErr := os.Stat(primary); statErr == nil {
+			return nil
+		} else if !errors.Is(statErr, fs.ErrNotExist) {
+			err = errors.Join(err, statErr)
+			return nil
+		}
+		if rmErr := os.Remove(path); rmErr != nil && !errors.Is(rmErr, fs.ErrNotExist) {
+			err = errors.Join(err, rmErr)
+			return nil
+		}
+		removed++
+		return nil
+	})
+	if walkErr != nil {
+		err = errors.Join(err, walkErr)
+	}
+	return removed, err
 }
 
 func (d *Downloader) lockingClose() {

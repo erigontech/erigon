@@ -18,6 +18,7 @@ package downloader
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -356,6 +357,54 @@ func newDownloaderTest(t *testing.T) *downloaderTest {
 		cfg:        cfg,
 		downloader: d,
 	}
+}
+
+// TestSweepOrphanTorrentSidecars pins the close-time cleanup that
+// removes .torrent sidecars whose primary payload is missing. Every
+// paired .torrent+primary must survive; every orphan .torrent must
+// be gone; nested dirs must be walked. Distributable-datadir
+// invariant: on shutdown the datadir handed to a downstream consumer
+// carries no orphan sidecars.
+func TestSweepOrphanTorrentSidecars(t *testing.T) {
+	snapDir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(snapDir, "domain"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(snapDir, "history"), 0o755))
+
+	paired := filepath.Join(snapDir, "v1.1-000000-000500-bodies.seg")
+	pairedTorrent := paired + ".torrent"
+	require.NoError(t, os.WriteFile(paired, []byte("primary"), 0o644))
+	require.NoError(t, os.WriteFile(pairedTorrent, []byte("metainfo"), 0o644))
+
+	orphanTop := filepath.Join(snapDir, "v1.1-000500-001000-bodies.seg.torrent")
+	orphanNested := filepath.Join(snapDir, "domain", "v3.0-receipt.288-296.kv.torrent")
+	orphanAccessor := filepath.Join(snapDir, "domain", "v2.0-receipt.288-296.bt.torrent")
+	require.NoError(t, os.WriteFile(orphanTop, []byte("metainfo"), 0o644))
+	require.NoError(t, os.WriteFile(orphanNested, []byte("metainfo"), 0o644))
+	require.NoError(t, os.WriteFile(orphanAccessor, []byte("metainfo"), 0o644))
+
+	// A non-.torrent file with no matching anything — never touched.
+	stray := filepath.Join(snapDir, "history", "stray-note.txt")
+	require.NoError(t, os.WriteFile(stray, []byte("noise"), 0o644))
+
+	removed, err := sweepOrphanTorrentSidecars(snapDir)
+	require.NoError(t, err)
+	require.Equal(t, 3, removed)
+
+	// Paired kept.
+	_, err = os.Stat(paired)
+	require.NoError(t, err)
+	_, err = os.Stat(pairedTorrent)
+	require.NoError(t, err)
+
+	// Orphans gone.
+	for _, p := range []string{orphanTop, orphanNested, orphanAccessor} {
+		_, err := os.Stat(p)
+		require.True(t, errors.Is(err, fs.ErrNotExist), "expected %s to be removed, got err=%v", p, err)
+	}
+
+	// Non-.torrent untouched.
+	_, err = os.Stat(stray)
+	require.NoError(t, err)
 }
 
 func TestShouldEmitV2Generation(t *testing.T) {
