@@ -419,9 +419,9 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 	headers, blocks, receipts := make([]*types.Header, n), make(types.Blocks, n), make([]types.Receipts, n)
 	chainreader := &FakeChainReader{Cfg: config, current: parent}
 	ctx := context.Background()
-	tx, errBegin := db.BeginTemporalRo(context.Background())
-	if errBegin != nil {
-		return nil, errBegin
+	tx, err := db.BeginTemporalRo(context.Background())
+	if err != nil {
+		return nil, err
 	}
 	defer tx.Rollback()
 	logger := log.New("generate-chain", config.ChainName)
@@ -546,7 +546,6 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 				return protocol.SysCallContract(contract, data, config, ibs, b.header, b.engine, false /* constCall */, vm.Config{})
 			}
 			_, requests, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, b.withdrawals, chainreader, syscall, nil, logger)
-
 			if err != nil {
 				return nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)
 			}
@@ -633,8 +632,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			}
 			b.header.Root = common.BytesToHash(stateRoot)
 			// Recreating block to make sure Root makes it into the header
-			block := types.NewBlockForAsembling(b.header, b.txs, b.uncles, b.receipts, b.withdrawals)
-			block.SetBlockAccessList(balBytes)
+			block := types.NewBlockForAsembling(b.header, b.txs, b.uncles, b.receipts, b.withdrawals, balBytes)
 			return block, b.receipts, nil
 		}
 		return nil, nil, errors.New("no engine to generate blocks")
@@ -668,6 +666,12 @@ func makeHeader(chain rules.ChainReader, parent *types.Block, state *state.Intra
 	}
 
 	header := builder.MakeEmptyHeader(parent.Header(), chain.Config(), time, nil)
+	if chain.Config().IsAmsterdam(time) {
+		// Real slot numbers come from the consensus layer. Synthetic chains use
+		// the block number as a deterministic stand-in.
+		slotNumber := header.Number.Uint64()
+		header.SlotNumber = &slotNumber
+	}
 	header.Coinbase = parent.Coinbase()
 	header.Difficulty = engine.CalcDifficulty(chain, time,
 		time-10,

@@ -483,7 +483,7 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
 		sCopy := NewWithVersionMap(reader, mvhm)
-		defer sCopy.Close()
+		defer sCopy.Close() //nolint:gocritic
 		sCopy.txIndex = i
 		states = append(states, sCopy)
 	}
@@ -564,7 +564,7 @@ func TestVersionMapRevert(t *testing.T) {
 	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
 		sCopy := NewWithVersionMap(reader, mvhm)
-		defer sCopy.Close()
+		defer sCopy.Close() //nolint:gocritic
 		sCopy.txIndex = i
 		states = append(states, sCopy)
 	}
@@ -627,7 +627,7 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
 		sCopy := NewWithVersionMap(reader, mvhm)
-		defer sCopy.Close()
+		defer sCopy.Close() //nolint:gocritic
 		sCopy.txIndex = i
 		states = append(states, sCopy)
 	}
@@ -686,7 +686,7 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 			return VersionValid
 		}
 		return VersionInvalid
-	}, false, "")
+	}, true, false, false, "")
 	assert.Equal(t, VersionInvalid, valid, "commit-time validation catches the ESTIMATE dependency")
 
 	// Tx1 read again should get Tx0 vals
@@ -709,7 +709,7 @@ func TestVersionMapOverwrite(t *testing.T) {
 	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
 		sCopy := NewWithVersionMap(reader, mvhm)
-		defer sCopy.Close()
+		defer sCopy.Close() //nolint:gocritic
 		sCopy.txIndex = i
 		states = append(states, sCopy)
 	}
@@ -800,7 +800,7 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
 		sCopy := NewWithVersionMap(reader, mvhm)
-		defer sCopy.Close()
+		defer sCopy.Close() //nolint:gocritic
 		sCopy.txIndex = i
 		states = append(states, sCopy)
 	}
@@ -947,7 +947,7 @@ func TestApplyVersionedWrites(t *testing.T) {
 	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
 		sCopy := NewWithVersionMap(reader, mvhm)
-		defer sCopy.Close()
+		defer sCopy.Close() //nolint:gocritic
 		sCopy.txIndex = i
 		states = append(states, sCopy)
 	}

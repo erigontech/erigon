@@ -737,7 +737,15 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 					// Commitment is computed by the commitmentCalculator goroutine.
 					// Post-execution validation (receipts, BAL) runs here. The
 					// per-block blockValidator was spawned earlier (~30 LOC up)
-					// and runs concurrently with the work above; Wait() joins it.
+					// and runs concurrently with the work above.
+					isAmsterdam := pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime)
+					if isAmsterdam || pe.cfg.experimentalBAL {
+						if err := bal.Process(rwTx, lastHeader, applyResult.TxIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger); err != nil {
+							failInfra(err)
+							continue
+						}
+					}
+
 					if err := blockValidatorWaiter.Wait(); err != nil {
 						// Block-validity verdict from post-execution validation. Route it
 						// through failCandidate (earliest-block-wins, exec supersedes a
@@ -749,15 +757,6 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 						fail.consider(applyResult.BlockNum, applyResult.BlockHash, true, fmt.Errorf("%w, block=%d, %v", rules.ErrInvalidBlock, applyResult.BlockNum, err))
 						finalized = true
 						continue
-					}
-
-					isAmsterdam := pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime)
-					if isAmsterdam || pe.cfg.experimentalBAL {
-						err = bal.Process(rwTx, lastHeader, applyResult.TxIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger)
-						if err != nil {
-							failInfra(err)
-							continue
-						}
 					}
 
 					// The BAL was the last reader of the recorded write sets;
@@ -2528,13 +2527,14 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				// speculative errors only the genuinely-first one is returned.
 				if be.settledInput[tx] {
 					txVersion := res.Version()
+					taskRules := be.tasks[tx].Task.Rules()
 					validity := be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
 						func(readVersion, writtenVersion state.Version) state.VersionValidity {
 							if readVersion != writtenVersion {
 								return state.VersionInvalid
 							}
 							return state.VersionValid
-						}, false, "")
+						}, taskRules.IsEIP161Enabled(), taskRules.IsAura, false, "")
 					if validity == state.VersionValid {
 						return be.invalidBlockResult(fmt.Errorf("%w: could not apply tx %d:%d [%d:%v]: %w", rules.ErrInvalidBlock, be.blockNum, txVersion.TxIndex, txVersion.TxNum, task.TxHash(), execErr.OriginError)), nil
 					}
@@ -2545,6 +2545,15 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				// validated, so the re-run is itself settledInput and a still-
 				// failing error is then returned by the branch above. (Some
 				// re-execution is wasted here — bounded and marginal.)
+				if dbg.TraceReexec {
+					fmt.Printf(
+						"ABORT-ERR blk=%d tx=%d inc=%d origin=%v\n",
+						be.blockNum,
+						res.Version().TxIndex,
+						res.Version().Incarnation,
+						execErr.OriginError,
+					)
+				}
 				be.execTasks.clearInProgress(tx)
 				be.execTasks.pushDeferred(tx)
 				be.execAborted[tx]++
@@ -2553,6 +2562,15 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			} else {
 				// Dependency abort: re-execute against the named blocker.
 				dependency := execErr.DependencyTxIndex + 1
+				if dbg.TraceReexec {
+					fmt.Printf(
+						"ABORT-DEP blk=%d tx=%d inc=%d dep=%d\n",
+						be.blockNum,
+						res.Version().TxIndex,
+						res.Version().Incarnation,
+						execErr.DependencyTxIndex,
+					)
+				}
 
 				l := len(be.estimateDeps[tx])
 				for l > 0 && be.estimateDeps[tx][l-1] > dependency {
@@ -2608,11 +2626,23 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 			// Remove entries that were previously written but are no longer
 			// written — res.TxOut.Has answers membership directly, no cmp map.
+			deletedWrites := 0
 			for h := range prevWrites.AllHeaders() {
 				if !res.TxOut.Has(h) {
 					hasWriteChange = true
+					deletedWrites++
 					be.versionMap.Delete(h.Address, h.Path, h.Key, txVersion.TxIndex, true)
 				}
+			}
+			if dbg.TraceReexec {
+				fmt.Printf(
+					"REEXEC-RESULT blk=%d tx=%d inc=%d writeChange=%v deleted=%d\n",
+					be.blockNum,
+					txVersion.TxIndex,
+					txVersion.Incarnation,
+					hasWriteChange,
+					deletedWrites,
+				)
 			}
 
 			be.blockIO.RecordWrites(txVersion, res.TxOut)
@@ -2713,10 +2743,13 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 
 				return vv
-			}, trace, tracePrefix)
+			}, txTask.Rules().IsEIP161Enabled(), txTask.Rules().IsAura, trace, tracePrefix)
 		be.versionMap.SetTrace(false)
 
 		if validity == state.VersionTooEarly {
+			if dbg.TraceReexec {
+				fmt.Printf("TOOEARLY blk=%d tx=%d inc=%d\n", be.blockNum, txVersion.TxIndex, txVersion.Incarnation)
+			}
 			cntInvalid++
 			continue
 		}
@@ -2725,6 +2758,15 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		// a result is committed only if validation explicitly passed it.
 		valid := validity == state.VersionValid
 
+		if dbg.TraceReexec && valid && cntInvalid > 0 {
+			fmt.Printf(
+				"FLUSH-EST blk=%d tx=%d inc=%d batchInvalid=%d\n",
+				be.blockNum,
+				txVersion.TxIndex,
+				txVersion.Incarnation,
+				cntInvalid,
+			)
+		}
 		be.versionMap.SetTrace(trace)
 		writeSet := be.blockIO.WriteSet(txVersion.TxIndex)
 		be.versionMap.FlushVersionedWrites(writeSet, applyLoopFlushAsComplete(valid, cntInvalid), tracePrefix)
@@ -2885,6 +2927,16 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			be.cntValidationFail++
 			be.execFailed[tx]++
 
+			if dbg.TraceReexec {
+				fmt.Printf(
+					"INVALID blk=%d tx=%d inc=%d failed=%d aborted=%d\n",
+					be.blockNum,
+					txVersion.TxIndex,
+					txVersion.Incarnation,
+					be.execFailed[tx],
+					be.execAborted[tx],
+				)
+			}
 			if dbg.TraceTransactionIO && be.txIncarnations[tx] > 1 {
 				fmt.Println(be.blockNum, "FAILED", tx, be.txIncarnations[tx], "failed", be.execFailed[tx], "aborted", be.execAborted[tx])
 			}
@@ -3254,7 +3306,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 								return state.VersionValid
 							}
 							return state.VersionInvalid
-						}, false, "") != state.VersionValid {
+						}, execTask.Rules().IsEIP161Enabled(), execTask.Rules().IsAura, false, "") != state.VersionValid {
 					holdBack = append(holdBack, nextTx)
 					continue
 				}
