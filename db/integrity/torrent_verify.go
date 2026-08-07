@@ -89,8 +89,7 @@ func VerifyTorrentFiles(ctx context.Context, dir string, failFast bool, logger l
 	var completedBytes atomic.Uint64
 	var completedFiles atomic.Uint64
 
-	parent := ctx
-	g, ctx := errgroup.WithContext(ctx)
+	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(runtime.GOMAXPROCS(-1) * 4)
 
 	// Progress logging
@@ -99,7 +98,7 @@ func VerifyTorrentFiles(ctx context.Context, dir string, failFast bool, logger l
 	go func() {
 		for {
 			select {
-			case <-ctx.Done():
+			case <-gctx.Done():
 				return
 			case <-logEvery.C:
 				logger.Info("[verify] progress",
@@ -117,14 +116,14 @@ func VerifyTorrentFiles(ctx context.Context, dir string, failFast bool, logger l
 	for _, torrentFile := range toVerify {
 		g.Go(func() error {
 			defer completedFiles.Add(1)
-			err := verifyFileFromTorrent(ctx, torrentFile, &completedBytes)
+			err := verifyFileFromTorrent(gctx, torrentFile, &completedBytes)
 			if err != nil {
 				if failFast {
 					return err
 				}
 				// A cancelled run is a shutdown, not corruption: counting it would
 				// report every in-flight file as a verification failure.
-				if ctx.Err() != nil {
+				if gctx.Err() != nil {
 					return nil
 				}
 				logger.Warn("[verify] file failed", "file", torrentFile, "err", err)
@@ -147,9 +146,9 @@ func VerifyTorrentFiles(ctx context.Context, dir string, failFast bool, logger l
 		verifyErr = fmt.Errorf("%d file(s) failed verification, first: %w", failed, firstFailure)
 	}
 	// Without failFast the workers only warn, so an interrupted run would
-	// otherwise be indistinguishable from a complete one. The errgroup's own
-	// ctx is always cancelled by now, hence the parent.
-	if err := parent.Err(); err != nil {
+	// otherwise be indistinguishable from a complete one. gctx is always
+	// cancelled by now, hence ctx.
+	if err := ctx.Err(); err != nil {
 		return errors.Join(scanErr, verifyErr, err)
 	}
 	if err := errors.Join(scanErr, verifyErr); err != nil {
@@ -165,7 +164,8 @@ func VerifyTorrentFiles(ctx context.Context, dir string, failFast bool, logger l
 // another disk is a supported layout — and the resolved path doubles as the
 // cycle guard. Paths that could not be read are reported through the error
 // together with the files that were reached: they may hide any number of
-// torrents, so the caller verifies what it got and still fails the run.
+// torrents, so the caller verifies what it got and still fails the run. A data
+// file hides nothing, so an unreadable one is left to the caller to report.
 func collectTorrentFiles(ctx context.Context, dir string, logger log.Logger) (files []string, err error) {
 	visited := map[string]struct{}{}
 	var skipped int
@@ -177,8 +177,41 @@ func collectTorrentFiles(ctx context.Context, dir string, logger log.Logger) (fi
 			firstSkipped = fmt.Errorf("%s: %w", path, err)
 		}
 	}
+	isDataFile := func(path string) bool {
+		_, err := os.Lstat(path + ".torrent")
+		return err == nil
+	}
 
 	var walk func(string) error
+
+	visitEntry := func(parentDir string, e fs.DirEntry) error {
+		child := filepath.Join(parentDir, e.Name())
+		isDir := e.IsDir()
+		if e.Type()&fs.ModeSymlink != 0 {
+			info, err := os.Stat(child)
+			if err != nil {
+				if !isDataFile(child) {
+					skip(child, err)
+				}
+				return nil
+			}
+			isDir = info.IsDir()
+		}
+		if isDir {
+			if err := walk(child); err != nil {
+				if ctx.Err() != nil {
+					return err
+				}
+				skip(child, err)
+			}
+			return nil
+		}
+		if strings.HasSuffix(e.Name(), ".torrent") {
+			files = append(files, child)
+		}
+		return nil
+	}
+
 	walk = func(path string) error {
 		resolved, err := filepath.EvalSymlinks(path)
 		if err != nil {
@@ -194,33 +227,13 @@ func collectTorrentFiles(ctx context.Context, dir string, logger log.Logger) (fi
 			return err
 		}
 		for _, e := range entries {
-			child := filepath.Join(resolved, e.Name())
-			isDir := e.IsDir()
-			if e.Type()&fs.ModeSymlink != 0 {
-				info, err := os.Stat(child)
-				if err != nil {
-					skip(child, err)
-					continue
-				}
-				isDir = info.IsDir()
+			if err := visitEntry(resolved, e); err != nil {
+				return err
 			}
-			if isDir {
-				// Cancellation stops the descent, which is where the cost is; entries
-				// already reached stay in the report so the caller still learns what
-				// was wrong with them.
-				if err := ctx.Err(); err != nil {
-					return err
-				}
-				if err := walk(child); err != nil {
-					if ctx.Err() != nil {
-						return err
-					}
-					skip(child, err)
-				}
-				continue
-			}
-			if strings.HasSuffix(e.Name(), ".torrent") {
-				files = append(files, child)
+			// Checked after the entry is accounted for, so a cancelled scan still
+			// reports what was wrong with the entries it reached.
+			if err := ctx.Err(); err != nil {
+				return err
 			}
 		}
 		return nil

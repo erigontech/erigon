@@ -60,6 +60,35 @@ func TestTypedCaplinDropsUnparseableVersion(t *testing.T) {
 	require.Equal(t, []string{"caplin/v1.1-000000-000100-BlockRoot.seg"}, names)
 }
 
+func TestDroppedNamesReportsUnparseableCaplinEntry(t *testing.T) {
+	items := PreverifiedItems{
+		{Name: "caplin/salt-blocks.txt", Hash: "no-version"},
+		{Name: "caplin/v1.1-000000-000100-BlockRoot.seg", Hash: "in-window"},
+	}
+	typed := Preverified{Items: items}.Typed(snaptype.CaplinSnapshotTypes)
+
+	names, total := droppedNames(items, typed.Items, maxLoggedDroppedNames)
+	require.Equal(t, 1, total)
+	require.Equal(t, []string{"caplin/salt-blocks.txt"}, names)
+}
+
+func TestDroppedNamesCapsEnumeration(t *testing.T) {
+	items := PreverifiedItems{
+		{Name: "caplin/bad1-000000-000100-BlockRoot.seg"},
+		{Name: "caplin/bad2-000000-000100-BlockRoot.seg"},
+		{Name: "caplin/bad3-000000-000100-BlockRoot.seg"},
+		{Name: "caplin/v1.1-000000-000100-BlockRoot.seg"},
+	}
+	typed := Preverified{Items: items}.Typed(snaptype.CaplinSnapshotTypes)
+
+	names, total := droppedNames(items, typed.Items, 2)
+	require.Equal(t, 3, total)
+	require.Equal(t, []string{
+		"caplin/bad1-000000-000100-BlockRoot.seg",
+		"caplin/bad2-000000-000100-BlockRoot.seg",
+	}, names)
+}
+
 // keepNewest is shared by the caplin and the generic branch, and it compares the
 // versions it was given rather than re-deriving them from the stored item's name.
 func TestKeepNewestPrefersHigherVersion(t *testing.T) {

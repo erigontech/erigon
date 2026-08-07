@@ -511,6 +511,7 @@ type BaseRoSnapshots struct {
 
 	dir               string
 	segmentsMinByType map[snaptype.Enum]*atomic.Uint64 // min block number per segment type
+	dirtyMaxByType    map[snaptype.Enum]*atomic.Uint64 // max height per segment type, indexed or not
 	idxMax            atomic.Uint64                    // all types of .idx files are available - up to this number
 	cfg               ethconfig.BlocksFreezing
 	snCfg             *snapcfg.Cfg
@@ -592,6 +593,7 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 		alignMin:          alignMin,
 		operators:         map[snaptype.Enum]*retireOperators{},
 		segmentsMinByType: make(map[snaptype.Enum]*atomic.Uint64),
+		dirtyMaxByType:    make(map[snaptype.Enum]*atomic.Uint64),
 	}
 	for _, snapType := range types {
 		s.dirty[snapType.Enum()] = btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false})
@@ -604,6 +606,7 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 		u := &atomic.Uint64{}
 		u.Store(math.MaxUint64)
 		s.segmentsMinByType[t] = u
+		s.dirtyMaxByType[t] = &atomic.Uint64{}
 	}
 
 	s.dirtyLock.Lock()
@@ -654,15 +657,38 @@ func (s *BaseRoSnapshots) VisibleBlocksAvailable(t snaptype.Enum) uint64 {
 // DirtySegmentsMax is the tip of the data on disk, index or no index: unlike
 // DirtyBlocksAvailable it does not stop at the first unindexed segment, so a producer
 // can see a range it has dumped but not yet indexed.
+// DirtySegmentsMax is read per downloaded block, so it serves a value cached by
+// storeDirtyMax rather than walking the dirty set under a lock.
 func (s *BaseRoSnapshots) DirtySegmentsMax(t snaptype.Enum) uint64 {
+	u, ok := s.dirtyMaxByType[t]
+	if !ok {
+		return 0
+	}
+	return u.Load()
+}
+
+// storeDirtyMax refreshes the cache for t. Must be called with dirtyLock held, from the
+// single publish point every dirty mutation funnels through.
+func (s *BaseRoSnapshots) storeDirtyMax(t snaptype.Enum) {
+	u, ok := s.dirtyMaxByType[t]
+	if !ok {
+		return
+	}
+	dirty := s.dirty[t]
+	if dirty == nil {
+		u.Store(0)
+		return
+	}
 	var _max uint64
-	s.WalkDirtySegments(t, func(sn *DirtySegment) bool {
-		if sn.to > 0 && sn.to-1 > _max {
-			_max = sn.to - 1
+	dirty.Walk(func(segments []*DirtySegment) bool {
+		for _, sn := range segments {
+			if sn.to > 0 && sn.to-1 > _max {
+				_max = sn.to - 1
+			}
 		}
 		return true
 	})
-	return _max
+	u.Store(_max)
 }
 
 func (s *BaseRoSnapshots) DownloadComplete() {
@@ -860,6 +886,7 @@ func (s *BaseRoSnapshots) recalcVisibleFiles(alignMin bool, retired retiredSegme
 	maxVisibleBlocks := make([]uint64, 0, len(s.types))
 
 	for _, t := range s.enums {
+		s.storeDirtyMax(t)
 		newVisibleSegments := RecalcVisibleSegments(s.dirty[t])
 		visible[t] = newVisibleSegments
 		var to uint64
@@ -1072,6 +1099,17 @@ func (s *BaseRoSnapshots) visibleIdxAvailability(segtype snaptype.Enum) (maxVisi
 	}
 
 	return
+}
+
+// VisibleSegmentsMaxTo is the exclusive upper bound of the last visible segment of segtype.
+// A generation's segment ranges never change after publish, so this needs no reader pin —
+// which matters for callers on a per-request path, where releasing a pin can take dirtyLock.
+func (s *BaseRoSnapshots) VisibleSegmentsMaxTo(segtype snaptype.Enum) uint64 {
+	visibleFiles := s.visible.Load().segments[segtype]
+	if len(visibleFiles) == 0 {
+		return 0
+	}
+	return visibleFiles[len(visibleFiles)-1].to
 }
 
 func (s *BaseRoSnapshots) Ls() {
@@ -1364,12 +1402,6 @@ func (s *BaseRoSnapshots) detachNotInList(protect []string) retiredSegments {
 		detached = append(detached, toDelete...)
 	}
 	return detached
-}
-
-// CloseSegmentsNotInList closes and drops tree segments whose file name is not
-// in protectFiles.
-func CloseSegmentsNotInList(tree *btree.BTreeG[*DirtySegment], protectFiles map[string]struct{}) {
-	closeAndDropNotProtected(tree, protectFiles, (*DirtySegment).FileName)
 }
 
 func closeAndDropNotProtected(tree *btree.BTreeG[*DirtySegment], protectFiles map[string]struct{}, nameOf func(*DirtySegment) string) {
