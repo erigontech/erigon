@@ -61,6 +61,40 @@ func TestCursor_ScanMatchesOrdinalLookup(t *testing.T) {
 	}
 }
 
+// TestCursor_ScanWithSharedGetter pins why the cursor re-anchors the getter on every
+// read instead of assuming it is still where the previous read left it: one getter is
+// shared per file (DomainRoTx.reusableReader), so a point lookup - or anything an
+// IteratePrefix callback does - can reposition it between two Next calls.
+func TestCursor_ScanWithSharedGetter(t *testing.T) {
+	t.Parallel()
+
+	const keyCount = 1000
+	compressed := seg.CompressKeys
+	kv, bt := openScanFixture(t, keyCount, compressed)
+	getter := seg.NewReader(kv.MakeGetter(), compressed)
+	refGetter := seg.NewReader(kv.MakeGetter(), compressed)
+
+	keys := make([][]byte, keyCount)
+	for di := range uint64(keyCount) {
+		k, _, _, err := bt.dataLookup(di, refGetter)
+		require.NoError(t, err)
+		keys[di] = append([]byte(nil), k...)
+	}
+
+	cur, err := bt.Seek(getter, nil)
+	require.NoError(t, err)
+	defer cur.Close()
+	for di := range keyCount {
+		require.Equalf(t, keys[di], cur.Key(), "key at %d", di)
+
+		_, _, _, found, err := bt.Get(keys[(di*7+3)%keyCount], getter) // moves the shared getter
+		require.NoError(t, err)
+		require.True(t, found)
+
+		require.Equal(t, di+1 < keyCount, cur.Next(), "Next at %d", di)
+	}
+}
+
 func BenchmarkCursorScan(b *testing.B) {
 	const keyCount = 100_000
 	kv, bt := openScanFixture(b, keyCount, seg.CompressKeys)
