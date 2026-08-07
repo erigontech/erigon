@@ -852,7 +852,12 @@ func (r *RollingV2Publisher) evictInvalidLocked(enrFP string, canonical map[stri
 
 	if r.downloader != nil {
 		for name := range orphanNames {
-			r.downloader.DropTorrentByName(name)
+			// DropTorrentByName deliberately preserves the .torrent
+			// sidecar for republish-in-place callers; an orphaned name
+			// is going away for good, so Delete instead — drops the
+			// registration AND removes the sidecar. Data-file removal
+			// stays with the merger (per this method's docstring).
+			_ = r.downloader.Delete(name)
 		}
 	}
 }
