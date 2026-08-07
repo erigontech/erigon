@@ -45,6 +45,57 @@ func TestEmbeddedRPCCacheViewDoesNotResurrectDeletedCode(t *testing.T) {
 	testEmbeddedRPCCacheViewDoesNotResurrectDeletedValue(t, kv.CodeDomain)
 }
 
+func TestEmbeddedRPCCacheViewDoesNotRefillUnwoundAccount(t *testing.T) {
+	const stepSize = uint64(16)
+	ctx := t.Context()
+	db := newTestDb(t, stepSize)
+	stateCache := newSmallStateCache()
+	t.Cleanup(stateCache.Close)
+	key, v1, v2, diffs := twoStepRows(t, db, stateCache)
+
+	rpcTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer rpcTx.Rollback()
+
+	unwindTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer unwindTx.Rollback()
+	unwindDomains, err := execctx.NewSharedDomains(ctx, unwindTx, log.New())
+	require.NoError(t, err)
+	defer unwindDomains.Close()
+	unwindDomains.SetStateCacheForTest(stateCache)
+
+	events := shards.NewEvents()
+	events.PublishOverlay(unwindDomains)
+	rpcCache := &execmodule.Cache{}
+	rpcCache.SetPublishedSD(events.LatestSD)
+	rpcView, err := rpcCache.View(ctx, rpcTx)
+	require.NoError(t, err)
+
+	unwindDomains.Unwind(10, &diffs)
+	require.NoError(t, unwindDomains.Commit(ctx, unwindTx))
+	events.PublishOverlay(nil)
+
+	got, err := rpcView.Get(key)
+	require.NoError(t, err)
+	require.Equal(t, v2, got, "the pre-reorg RPC view still sees the discarded fork")
+
+	_, ok := stateCache.View(nil).Get(kv.AccountsDomain, key)
+	require.False(t, ok, "the pre-reorg RPC view must not refill the discarded fork")
+
+	freshTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer freshTx.Rollback()
+	freshDomains, err := execctx.NewSharedDomains(ctx, freshTx, log.New())
+	require.NoError(t, err)
+	defer freshDomains.Close()
+	freshDomains.SetStateCacheForTest(stateCache)
+
+	got, _, err = freshDomains.GetLatest(kv.AccountsDomain, freshTx, key)
+	require.NoError(t, err)
+	require.Equal(t, v1, got)
+}
+
 func TestAccountOnlyDeleteDoesNotBlockUnrelatedCodeFill(t *testing.T) {
 	const stepSize = uint64(16)
 	ctx := t.Context()

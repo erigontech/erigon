@@ -51,14 +51,28 @@ func (f FrontierFunc) DomainVisibleEnd(domain kv.Domain) (uint64, bool) { return
 // already serves. In the forward direction the cache's invariant is
 // monotonicity (content never regresses behind the applied frontier),
 // enforced on the fill side; unwinds invalidate by epoch and floor.
+// Each view also keeps the unwind generation sampled at construction, so a
+// later unwind prevents it from filling from the discarded fork.
 // Snapshot-isolated caching is kvcache's job (node/shards).
 type ReadView struct {
-	c        *StateCache
-	frontier Frontier
+	c         *StateCache
+	frontier  Frontier
+	unwindGen uint64
 }
 
 // View creates a ReadView vouched for by f. A nil f disables admission-gated fills.
-func (c *StateCache) View(f Frontier) ReadView { return ReadView{c: c, frontier: f} }
+func (c *StateCache) View(f Frontier) ReadView {
+	if c == nil {
+		return ReadView{}
+	}
+	return ReadView{c: c, frontier: f, unwindGen: c.unwindGen.Load()}
+}
+
+// WithFrontier binds f without changing the unwind generation sampled by View.
+func (v ReadView) WithFrontier(f Frontier) ReadView {
+	v.frontier = f
+	return v
+}
 
 // Get retrieves data for the given domain and key.
 // Returns (value, true) on cache hit — including (nil, true) for cached negatives —
@@ -128,10 +142,10 @@ func (v ReadView) Fill(domain kv.Domain, key []byte, value []byte, readTxNum uin
 		if !ok {
 			return
 		}
-		v.c.fillCodeIfFresh(key, value, readTxNum, visibleEnd, accountsEnd)
+		v.c.fillCodeIfFresh(key, value, readTxNum, visibleEnd, accountsEnd, v.unwindGen)
 		return
 	}
-	v.c.fillIfFresh(domain, key, value, readTxNum, visibleEnd)
+	v.c.fillIfFresh(domain, key, value, readTxNum, visibleEnd, v.unwindGen)
 }
 
 // SeedAddrCodeHash offers an addr → codeHash mapping derived from an account
@@ -145,7 +159,7 @@ func (v ReadView) SeedAddrCodeHash(addr []byte, h [32]byte, txNum uint64) {
 	if !ok {
 		return
 	}
-	v.c.seedAddrCodeHash(addr, h, txNum, visibleEnd)
+	v.c.seedAddrCodeHash(addr, h, txNum, visibleEnd, v.unwindGen)
 }
 
 // FillCodeSize records the code length for codeHash. Content-addressed and

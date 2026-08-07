@@ -1344,16 +1344,15 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
 
-	// View freshness is rechecked while the fill is serialized against
-	// committed cache updates.
-	if sd.stateCache != nil && sd.stateCache.Caches(domain) {
+	// A bounded read observes a staged unwind, not stable committed state.
+	if maxStep == kv.NoStepBound && sd.stateCache != nil && sd.stateCache.Caches(domain) {
 		readTxNum := (uint64(step)+1)*sd.StepSize() - 1
 		fillView := view
 		if !fillView.CanFill() {
 			// Frontier-less view from the plain GetLatest wrappers: bind a
 			// frontier here, on the miss path, where the boxing amortizes
 			// against the backing read it follows.
-			fillView = sd.cacheViewFor(tx)
+			fillView = fillView.WithFrontier(sdFrontier{sd: sd, tx: tx})
 		}
 		fillView.Fill(domain, k, v, readTxNum)
 	}
@@ -1496,17 +1495,22 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, view cache.ReadView, 
 	if len(addr) == 0 {
 		return nil
 	}
+	bounded := false
 	// In-batch state is authoritative: sd.mem / parent.mem hold this batch's
 	// uncommitted account writes, while the addr→codeHash LRU is invalidated only
 	// on flush. Route mem-first; the LRU is a committed-state layer that may only
 	// answer once mem has missed.
-	if v, _, ok := sd.mem.GetLatest(kv.AccountsDomain, addr); ok {
+	v, step, ok := sd.mem.GetLatest(kv.AccountsDomain, addr)
+	if ok {
 		return accounts.DeserialiseV3CodeHash(v)
 	}
+	bounded = step != kv.NoStepBound
 	if sd.parent != nil {
-		if v, _, ok := sd.parent.mem.GetLatest(kv.AccountsDomain, addr); ok {
+		v, step, ok = sd.parent.mem.GetLatest(kv.AccountsDomain, addr)
+		if ok {
 			return accounts.DeserialiseV3CodeHash(v)
 		}
+		bounded = bounded || step != kv.NoStepBound
 	}
 
 	// Below mem: the addr → codeHash LRU caches committed state
@@ -1541,7 +1545,7 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, view cache.ReadView, 
 	}
 
 	h, fromReadView := resolve()
-	if fromReadView && sd.stateCache != nil {
+	if fromReadView && !bounded && sd.stateCache != nil {
 		var fixed [32]byte
 		if len(h) == 32 {
 			copy(fixed[:], h)
@@ -1556,7 +1560,7 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, view cache.ReadView, 
 		if !seedView.CanFill() {
 			// Frontier-less view from the plain wrappers: bind one on this cold
 			// seed path, where the boxing amortizes against the account read.
-			seedView = sd.cacheViewFor(tx)
+			seedView = seedView.WithFrontier(sdFrontier{sd: sd, tx: tx})
 		}
 		seedView.SeedAddrCodeHash(addr, fixed, txNum)
 	}

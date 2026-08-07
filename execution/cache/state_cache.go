@@ -21,6 +21,7 @@ import (
 	"math"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/c2h5oh/datasize"
 
@@ -62,6 +63,7 @@ type StateCache struct {
 	// against concurrent read-fills, which recheck freshness under RLock.
 	admissionMu sync.RWMutex
 	appliedEnd  [kv.DomainLen]uint64
+	unwindGen   atomic.Uint64
 	// disableFills (STATE_CACHE_FILLS=false) turns off every reader fill
 	// (including the content-addressed ones), leaving applies as the only
 	// writer ("apply-only" mode) — an A/B lever and an operational kill switch.
@@ -207,14 +209,14 @@ func (c *StateCache) getAddrCodeHash(addr []byte) ([32]byte, bool) {
 // seedAddrCodeHash conditionally records an addr → codeHash mapping.
 // The mapping derives from an account record, so admission checks the accounts
 // frontier even though the mapping lives in the code cache.
-func (c *StateCache) seedAddrCodeHash(addr []byte, h [32]byte, txNum, visibleEnd uint64) {
+func (c *StateCache) seedAddrCodeHash(addr []byte, h [32]byte, txNum, visibleEnd, viewGen uint64) {
 	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok {
 		return
 	}
 	c.admissionMu.RLock()
 	defer c.admissionMu.RUnlock()
-	if visibleEnd < c.appliedEnd[kv.AccountsDomain] {
+	if viewGen != c.unwindGen.Load() || visibleEnd < c.appliedEnd[kv.AccountsDomain] {
 		return
 	}
 	cc.PutAddrCodeHash(addr, h, txNum)
@@ -243,7 +245,7 @@ func (c *StateCache) put(domain kv.Domain, key []byte, value []byte, txNum uint6
 // fillIfFresh conditionally inserts an accounts or storage value read from a
 // read view without replacing an authoritative entry. Negatives use the view's
 // last included txNum. Code goes through fillCodeIfFresh.
-func (c *StateCache) fillIfFresh(domain kv.Domain, key []byte, value []byte, readTxNum, visibleEnd uint64) {
+func (c *StateCache) fillIfFresh(domain kv.Domain, key []byte, value []byte, readTxNum, visibleEnd, viewGen uint64) {
 	cache := c.caches[domain]
 	if cache == nil {
 		return
@@ -259,7 +261,7 @@ func (c *StateCache) fillIfFresh(domain kv.Domain, key []byte, value []byte, rea
 	}
 	c.admissionMu.RLock()
 	defer c.admissionMu.RUnlock()
-	if visibleEnd < c.appliedEnd[domain] {
+	if viewGen != c.unwindGen.Load() || visibleEnd < c.appliedEnd[domain] {
 		return
 	}
 	cache.PutIfAbsent(key, cloned, readTxNum)
@@ -270,7 +272,7 @@ func (c *StateCache) fillIfFresh(domain kv.Domain, key []byte, value []byte, rea
 // code frontier — so admission also checks the accounts frontier. Code
 // negatives are not cached here: "no code" is cached at the addr→codeHash
 // mapping instead (the zero-hash sentinel seeded by SeedAddrCodeHash).
-func (c *StateCache) fillCodeIfFresh(key []byte, value []byte, readTxNum, visibleEnd, accountsVisibleEnd uint64) {
+func (c *StateCache) fillCodeIfFresh(key []byte, value []byte, readTxNum, visibleEnd, accountsVisibleEnd, viewGen uint64) {
 	codeCache, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok || len(value) == 0 {
 		return
@@ -279,7 +281,9 @@ func (c *StateCache) fillCodeIfFresh(key []byte, value []byte, readTxNum, visibl
 	cloned := bytes.Clone(value)
 	c.admissionMu.RLock()
 	defer c.admissionMu.RUnlock()
-	if visibleEnd < c.appliedEnd[kv.CodeDomain] || accountsVisibleEnd < c.appliedEnd[kv.AccountsDomain] {
+	if viewGen != c.unwindGen.Load() ||
+		visibleEnd < c.appliedEnd[kv.CodeDomain] ||
+		accountsVisibleEnd < c.appliedEnd[kv.AccountsDomain] {
 		return
 	}
 	codeCache.PutWithCodeHashIfAbsent(key, cloned, codeHash, readTxNum)
@@ -386,6 +390,7 @@ func (c *StateCache) Close() {
 func (c *StateCache) unwind(unwindToTxNum uint64) {
 	c.admissionMu.Lock()
 	defer c.admissionMu.Unlock()
+	c.unwindGen.Add(1)
 	for _, cache := range c.caches {
 		if cache != nil {
 			cache.Unwind(unwindToTxNum)
