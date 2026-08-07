@@ -65,11 +65,13 @@ func (v BranchReadView) Fill(prefix, value []byte, step uint64) {
 	})
 }
 
-// BranchUpdate is one committed commitment-domain value.
+// BranchUpdate is one committed commitment-domain value. TxNum records process
+// write coverage for detecting files downloaded outside this publication path.
 type BranchUpdate struct {
 	Key   []byte
 	Value []byte
 	Step  uint64
+	TxNum uint64
 }
 
 // BranchPublisher is the canonical mutation handle for BranchCache.
@@ -135,6 +137,9 @@ func (p *BranchPublication) Publish(stateVersion uint64, updates []BranchUpdate,
 		adaptive.apply()
 		for i := range updates {
 			update := &updates[i]
+			if committedEnd := update.TxNum + 1; committedEnd > p.c.committedTxNumEnd {
+				p.c.committedTxNumEnd = committedEnd
+			}
 			if len(update.Value) == 0 {
 				p.c.Invalidate(update.Key)
 				continue

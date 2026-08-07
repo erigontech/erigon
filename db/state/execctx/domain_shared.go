@@ -839,26 +839,28 @@ func (sd *SharedDomains) SetCanonicalStateCache(stateCache *cache.StateCache) {
 	sd.cachePublisher.Initialize(sd.baseStateVersion)
 }
 
-// GuardAggregatorForCache prevents domain-file visibility from moving
-// backwards while StateCache is active. PlainStateVersion tracks durable
-// database state, but it does not change when the aggregator exposes an older
-// set of files. If visibility could be lowered independently, a transaction
-// and the cache could report the same version while representing different
-// effective states.
+// BindStateCacheToAggregator binds StateCache to the aggregator's file
+// publications and prevents domain-file visibility from moving backwards.
+// PlainStateVersion tracks durable database state, but it does not change when
+// the aggregator changes which files are visible.
 //
-// The guard is required even when reader fills are disabled because cache hits
-// also rely on stable visibility. A database that cannot enforce the invariant
-// is rejected instead of silently permitting unsafe cache reads.
-func GuardAggregatorForCache(db any, sc *cache.StateCache) {
+// The binding is required even when reader fills are disabled because cache
+// hits also rely on the same backing view. A database that cannot enforce the
+// invariant is rejected instead of silently permitting unsafe cache reads.
+func BindStateCacheToAggregator(db any, sc *cache.StateCache) {
 	if sc == nil {
 		return
 	}
 	h, ok := db.(interface{ Agg() any })
 	if !ok {
-		panic(fmt.Sprintf("assert: StateCache wired over %T, which cannot produce its aggregator — the visibility-lowering guard would be silently dropped", db))
+		panic(fmt.Sprintf("assert: StateCache wired over %T, which cannot produce its aggregator — file-publication cache binding would be silently dropped", db))
 	}
 	agg := h.Agg()
-	forbidVisibilityLowering(agg)
+	b, ok := agg.(interface{ BindStateCache(*cache.StateCache) })
+	if !ok {
+		panic(fmt.Sprintf("assert: aggregator %T lacks BindStateCache — file-publication cache invalidation would be silently dropped", agg))
+	}
+	b.BindStateCache(sc)
 }
 
 func forbidVisibilityLowering(agg any) {
@@ -1022,21 +1024,23 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 
 	var stateUpdates []cache.Update
 	stashState := func(domain kv.Domain) kv.FlushOption {
-		return kv.WithFlushCallback(domain, func(key, value []byte, step kv.Step, _ uint64) {
+		return kv.WithFlushCallback(domain, func(key, value []byte, step kv.Step, txNum uint64) {
 			stateUpdates = append(stateUpdates, cache.Update{
 				Domain: domain,
 				Key:    bytes.Clone(key),
 				Value:  bytes.Clone(value),
 				Step:   step,
+				TxNum:  txNum,
 			})
 		})
 	}
 	var branchUpdates []commitment.BranchUpdate
-	stashBranch := kv.WithFlushCallback(kv.CommitmentDomain, func(key, value []byte, step kv.Step, _ uint64) {
+	stashBranch := kv.WithFlushCallback(kv.CommitmentDomain, func(key, value []byte, step kv.Step, txNum uint64) {
 		branchUpdates = append(branchUpdates, commitment.BranchUpdate{
 			Key:   bytes.Clone(key),
 			Value: bytes.Clone(value),
 			Step:  uint64(step),
+			TxNum: txNum,
 		})
 	})
 
@@ -1053,7 +1057,7 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	// corrupts it (reorg/unwind wrong root).
 	var codeStoreWrites [][2][]byte
 	if stateCacheEnabled || sd.codeStore != nil {
-		opts = append(opts, kv.WithFlushCallback(kv.CodeDomain, func(key, value []byte, step kv.Step, _ uint64) {
+		opts = append(opts, kv.WithFlushCallback(kv.CodeDomain, func(key, value []byte, step kv.Step, txNum uint64) {
 			if sd.codeStore != nil && len(value) > 0 {
 				codeStoreWrites = append(codeStoreWrites, [2][]byte{crypto.Keccak256(value), bytes.Clone(value)})
 			}
@@ -1063,6 +1067,7 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 					Key:    bytes.Clone(key),
 					Value:  bytes.Clone(value),
 					Step:   step,
+					TxNum:  txNum,
 				})
 			}
 		}))
@@ -1097,6 +1102,8 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 		adaptivePlan.Abort()
 	}()
 
+	// Canonical commits and file-view changes both acquire BranchCache before
+	// StateCache. Keeping one order prevents their publications from deadlocking.
 	if branchCacheEnabled {
 		if !sd.clearBranchCache {
 			adaptivePlan = sd.planAdaptivePins(tx)

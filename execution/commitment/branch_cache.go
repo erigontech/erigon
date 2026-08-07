@@ -52,6 +52,11 @@ func isCommitmentStateKey(prefix []byte) bool {
 type BranchCache struct {
 	version cache.PlainStateVersionGate
 
+	// committedTxNumEnd is only a file-provenance watermark. Cache validity is
+	// still decided by PlainStateVersion; this end distinguishes locally built
+	// commitment files from files downloaded outside the publication stream.
+	committedTxNumEnd uint64
+
 	// Root tier — single slot for the root branch (always hottest, always
 	// present). Atomic-pointer access so no lock is needed for the hot
 	// read path.
@@ -351,7 +356,26 @@ func (c *BranchCache) Close() {
 // publication. It is required when the backing commitment view changes
 // without advancing PlainStateVersion.
 func (c *BranchCache) Reset() {
-	c.version.Reset(c.Clear)
+	c.version.Reset(func() {
+		c.committedTxNumEnd = 0
+		c.Clear()
+	})
+}
+
+// BeginFilesPublication revokes and clears the cache when commitment files
+// expose state beyond this process's committed branch updates. Finish must be
+// called after the new files view becomes visible.
+func (c *BranchCache) BeginFilesPublication(filesEnd uint64) *cache.PlainStateVersionBackingChange {
+	if c == nil {
+		return nil
+	}
+	return c.version.Publisher().BeginBackingChange(func() bool {
+		if filesEnd <= c.committedTxNumEnd {
+			return false
+		}
+		c.committedTxNumEnd = filesEnd
+		return true
+	}, c.Clear)
 }
 
 // tailForWrite returns the LRU tail, allocating it on first use so a cache whose

@@ -55,6 +55,7 @@ import (
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
@@ -91,10 +92,13 @@ type Aggregator struct {
 	unalignedDomain [kv.DomainLen]bool
 	unalignedIdx    [kv.StandaloneIdxLen]bool
 	// visibilityLoweringForbidden: a single-version cache is wired over this
-	// aggregator, and its fill admission relies on view frontiers never
-	// decreasing. Close clears it because shutdown is not a fill window.
+	// aggregator, and PlainStateVersion does not encode changes to file
+	// visibility. Close clears it because shutdown is not a cache-read window.
 	visibilityLoweringForbidden atomic.Bool
-	snapshotBuildSema           *semaphore.Weighted
+	// boundStateCache is reconciled before a new files view becomes visible.
+	// Guarded by dirtyFilesLock.
+	boundStateCache   *cache.StateCache
+	snapshotBuildSema *semaphore.Weighted
 
 	disableHistory      bool
 	branchCacheDisabled bool
@@ -549,7 +553,7 @@ func (a *Aggregator) UnalignIdx(name kv.InvertedIdx) (realign func()) {
 
 // ForbidVisibilityLowering marks this aggregator as backing a single-version
 // cache. From then on recalcVisibleFiles rejects lowering a cached domain's
-// visible end, whichever entry point caused it.
+// visible end because PlainStateVersion does not identify that change.
 // Serialized with recalcVisibleFiles via dirtyFilesLock so "from then on"
 // holds against a recalculation already in flight.
 func (a *Aggregator) ForbidVisibilityLowering() {
@@ -559,6 +563,21 @@ func (a *Aggregator) ForbidVisibilityLowering() {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 	a.visibilityLoweringForbidden.Store(true)
+}
+
+// BindStateCache prevents visibility lowering and reconciles the cache with
+// files that are already visible. Future file publications are reconciled by
+// recalcVisibleFiles before readers can observe their new backing view.
+func (a *Aggregator) BindStateCache(stateCache *cache.StateCache) {
+	if stateCache == nil {
+		return
+	}
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	a.visibilityLoweringForbidden.Store(true)
+	a.boundStateCache = stateCache
+	change := stateCache.BeginFilesPublication(visibleStateFilesEnd(a.visible.Load()))
+	change.Finish()
 }
 
 func (a *Aggregator) setUnalignedDomain(d kv.Domain, v bool) {
@@ -1885,6 +1904,47 @@ type aggregatorVisible struct {
 	next    *aggregatorVisible // oldest→newest linked-list link (set under dirtyFilesLock)
 }
 
+func visibleStateFilesEnd(visible *aggregatorVisible) (ends [kv.DomainLen]uint64) {
+	if visible == nil {
+		return ends
+	}
+	for domain, domainVisible := range visible.d {
+		if domainVisible != nil {
+			ends[domain] = visibleFiles(domainVisible.files).EndTxNum()
+		}
+	}
+	return ends
+}
+
+type cacheFilesPublication struct {
+	state  *cache.PlainStateVersionBackingChange
+	branch *cache.PlainStateVersionBackingChange
+}
+
+func (a *Aggregator) beginCacheFilesPublication(visible *aggregatorVisible) cacheFilesPublication {
+	var publication cacheFilesPublication
+	// SharedDomains.Commit acquires cache publication in the same order.
+	if domain := a.d[kv.CommitmentDomain]; domain != nil && domain.branchCache != nil {
+		if commitmentVisible := visible.d[kv.CommitmentDomain]; commitmentVisible != nil {
+			publication.branch = domain.branchCache.BeginFilesPublication(visibleFiles(commitmentVisible.files).EndTxNum())
+		}
+	}
+	if a.boundStateCache != nil {
+		publication.state = a.boundStateCache.BeginFilesPublication(visibleStateFilesEnd(visible))
+	}
+	return publication
+}
+
+func (p *cacheFilesPublication) Finish() {
+	if p == nil {
+		return
+	}
+	p.state.Finish()
+	p.state = nil
+	p.branch.Finish()
+	p.branch = nil
+}
+
 // recalcVisibleFiles must be called with dirtyFilesLock held (writers are
 // serialized by it; readers take no lock and instead load a.visible). It builds
 // a fresh immutable aggregatorVisible bundle via the per-entity calcVisibleFiles
@@ -1917,7 +1977,7 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 			prevEnd := visibleFiles(prev.d[d].files).EndTxNum()
 			nextEnd := visibleFiles(next.d[d].files).EndTxNum()
 			if nextEnd < prevEnd {
-				panic(fmt.Sprintf("assert: %s visible end lowered %d -> %d while a single-version cache is wired — fill admission relies on view frontiers never decreasing", d, prevEnd, nextEnd))
+				panic(fmt.Sprintf("assert: %s visible end lowered %d -> %d while a single-version cache is wired — PlainStateVersion does not identify file-visibility changes", d, prevEnd, nextEnd))
 			}
 			if prev.dhii[d] == nil || next.dhii[d] == nil {
 				continue
@@ -1925,15 +1985,19 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 			prevII := prev.dhii[d].files.EndTxNum()
 			nextII := next.dhii[d].files.EndTxNum()
 			if nextII < prevII {
-				panic(fmt.Sprintf("assert: %s history-II visible end lowered %d -> %d while a single-version cache is wired — DomainVisibleEnd derives view frontiers from it", d, prevII, nextII))
+				panic(fmt.Sprintf("assert: %s history-II visible end lowered %d -> %d while a single-version cache is wired — exact cache-view eligibility derives its frontier from history-II", d, prevII, nextII))
 			}
 		}
 	}
+
+	cachePublication := a.beginCacheFilesPublication(next)
+	defer cachePublication.Finish()
 
 	old := a.visible.Load()
 	old.retired = retired
 	old.next = next
 	a.visible.Store(next)
+	cachePublication.Finish()
 
 	// `recalcVisibleFiles` is rare background operation under `dirtyFilesLock`
 	// it's good idea to delete files here, then hot reader-Close path will more likely be lock-free
@@ -2686,6 +2750,10 @@ func (at *AggregatorRoTx) MetricsCollector() *kvmetrics.Collector {
 
 func (at *AggregatorRoTx) ForbidVisibilityLowering() {
 	at.a.ForbidVisibilityLowering()
+}
+
+func (at *AggregatorRoTx) BindStateCache(stateCache *cache.StateCache) {
+	at.a.BindStateCache(stateCache)
 }
 
 func (at *AggregatorRoTx) Dirs() datadir.Dirs                  { return at.a.dirs }

@@ -30,11 +30,14 @@ type versionGeneration struct {
 }
 
 // PlainStateVersionGate binds lock-free cache reads and serialized fills to one
-// durable PlainStateVersion. It controls visibility only; each cache remains
-// responsible for storing and applying its own entries.
+// durable PlainStateVersion. It also revokes views when the backing data
+// changes without advancing that version.
 type PlainStateVersionGate struct {
 	current     atomic.Pointer[versionGeneration]
 	admissionMu sync.RWMutex
+	// publicationMu orders durable cache publication with independent changes
+	// to the backing-file view. Begin holds it until Publish or Abort.
+	publicationMu sync.Mutex
 }
 
 // PlainStateVersionView is the immutable validity token held by one cache view.
@@ -111,22 +114,17 @@ func (p PlainStateVersionPublisher) Initialize(stateVersion uint64, clear func()
 		return
 	}
 	gate := p.gate
+	gate.publicationMu.Lock()
+	defer gate.publicationMu.Unlock()
 	gate.admissionMu.Lock()
 	defer gate.admissionMu.Unlock()
 
 	current := gate.current.Load()
-	if current != nil && current.active {
-		if current.stateVersion == stateVersion {
-			return
-		}
-	} else if current != nil {
-		// The owner already revoked the old version and will publish the
-		// transaction's version after its database commit. A concurrent owner
-		// cannot initialize from this in-between state, so it stays inert.
+	if current != nil && current.active && current.stateVersion == stateVersion {
 		return
 	}
 
-	gate.current.Store(&versionGeneration{})
+	gate.current.Store(nil)
 	if clear != nil {
 		clear()
 	}
@@ -140,17 +138,21 @@ type PlainStateVersionPublication struct {
 	transition *versionGeneration
 }
 
-// Begin revokes all existing views without changing cache entries.
+// Begin revokes all existing views without changing cache entries. It also
+// blocks backing-file changes until Publish or Abort completes the durable
+// transition.
 func (p PlainStateVersionPublisher) Begin() *PlainStateVersionPublication {
 	if p.gate == nil {
 		return nil
 	}
 	gate := p.gate
+	gate.publicationMu.Lock()
 	gate.admissionMu.Lock()
 	defer gate.admissionMu.Unlock()
 
 	previous := gate.current.Load()
 	if previous != nil && !previous.active {
+		gate.publicationMu.Unlock()
 		panic("cache version publication already in progress")
 	}
 	transition := &versionGeneration{}
@@ -163,12 +165,14 @@ func (p *PlainStateVersionPublication) Abort() {
 	if p == nil || p.gate == nil {
 		return
 	}
-	p.gate.admissionMu.Lock()
-	defer p.gate.admissionMu.Unlock()
-	if p.gate.current.Load() != p.transition {
+	gate := p.gate
+	gate.admissionMu.Lock()
+	defer gate.publicationMu.Unlock()
+	defer gate.admissionMu.Unlock()
+	if gate.current.Load() != p.transition {
 		panic("cache version publication changed before abort")
 	}
-	p.gate.current.Store(p.previous)
+	gate.current.Store(p.previous)
 	p.gate = nil
 }
 
@@ -177,15 +181,17 @@ func (p *PlainStateVersionPublication) Publish(stateVersion uint64, apply func()
 	if p == nil || p.gate == nil {
 		return
 	}
-	p.gate.admissionMu.Lock()
-	defer p.gate.admissionMu.Unlock()
-	if p.gate.current.Load() != p.transition {
+	gate := p.gate
+	gate.admissionMu.Lock()
+	defer gate.publicationMu.Unlock()
+	defer gate.admissionMu.Unlock()
+	if gate.current.Load() != p.transition {
 		panic("cache version publication changed before publish")
 	}
 	if apply != nil {
 		apply()
 	}
-	p.gate.current.Store(&versionGeneration{stateVersion: stateVersion, active: true})
+	gate.current.Store(&versionGeneration{stateVersion: stateVersion, active: true})
 	p.gate = nil
 }
 
@@ -195,17 +201,59 @@ func (g *PlainStateVersionGate) Reset(clear func()) {
 	if g == nil {
 		return
 	}
+	g.publicationMu.Lock()
+	defer g.publicationMu.Unlock()
 	g.admissionMu.Lock()
 	defer g.admissionMu.Unlock()
-	current := g.current.Load()
-	if current != nil && !current.active {
-		panic("cannot reset cache during version publication")
-	}
-	g.current.Store(&versionGeneration{})
+	g.current.Store(nil)
 	if clear != nil {
 		clear()
 	}
-	g.current.Store(nil)
+}
+
+// PlainStateVersionBackingChange keeps cache publication blocked while a new
+// backing-file view becomes visible.
+type PlainStateVersionBackingChange struct {
+	gate *PlainStateVersionGate
+}
+
+// BeginBackingChange runs reconcile while publications and fills are blocked.
+// If reconcile reports that cached entries no longer match the backing data,
+// the current generation is revoked and cleared. The returned handle keeps
+// publication blocked until Finish makes the new backing view observable.
+func (p PlainStateVersionPublisher) BeginBackingChange(reconcile func() bool, clear func()) *PlainStateVersionBackingChange {
+	if p.gate == nil {
+		return nil
+	}
+	gate := p.gate
+	gate.publicationMu.Lock()
+	gate.admissionMu.Lock()
+	keepPublicationLocked := false
+	defer func() {
+		gate.admissionMu.Unlock()
+		if !keepPublicationLocked {
+			gate.publicationMu.Unlock()
+		}
+	}()
+
+	if reconcile == nil || !reconcile() {
+		return nil
+	}
+	gate.current.Store(nil)
+	if clear != nil {
+		clear()
+	}
+	keepPublicationLocked = true
+	return &PlainStateVersionBackingChange{gate: gate}
+}
+
+// Finish allows cache publication after the backing-file view is visible.
+func (c *PlainStateVersionBackingChange) Finish() {
+	if c == nil || c.gate == nil {
+		return
+	}
+	c.gate.publicationMu.Unlock()
+	c.gate = nil
 }
 
 // Close permanently revokes current views. The owner may then close its cache
@@ -214,7 +262,9 @@ func (g *PlainStateVersionGate) Close() {
 	if g == nil {
 		return
 	}
+	g.publicationMu.Lock()
+	defer g.publicationMu.Unlock()
 	g.admissionMu.Lock()
-	g.current.Store(&versionGeneration{})
+	g.current.Store(nil)
 	g.admissionMu.Unlock()
 }

@@ -43,8 +43,12 @@ const (
 type StateCache struct {
 	version PlainStateVersionGate
 
-	caches       [kv.DomainLen]Cache
-	disableFills bool
+	// committedTxNumEnd is only a file-provenance watermark. Cache validity is
+	// still decided exclusively by version; these ends distinguish files built
+	// from published updates from files downloaded outside that stream.
+	committedTxNumEnd [kv.DomainLen]uint64
+	caches            [kv.DomainLen]Cache
+	disableFills      bool
 }
 
 func NewStateCache(accountBytes, storageBytes, codeBytes, addrBytes datasize.ByteSize) *StateCache {
@@ -94,6 +98,26 @@ func NewDefaultStateCache() *StateCache {
 // the old version has been revoked and the new version is not visible yet.
 func (c *StateCache) CurrentStateVersion() (uint64, bool) {
 	return c.version.CurrentStateVersion()
+}
+
+// BeginFilesPublication revokes and clears the cache when files expose state
+// beyond this process's committed updates. Finish must be called after the new
+// files view becomes visible.
+func (c *StateCache) BeginFilesPublication(filesEnd [kv.DomainLen]uint64) *PlainStateVersionBackingChange {
+	if c == nil {
+		return nil
+	}
+	return c.version.Publisher().BeginBackingChange(func() bool {
+		extended := false
+		for domain, cache := range c.caches {
+			if cache == nil || filesEnd[domain] <= c.committedTxNumEnd[domain] {
+				continue
+			}
+			c.committedTxNumEnd[domain] = filesEnd[domain]
+			extended = true
+		}
+		return extended
+	}, c.clearLocked)
 }
 
 func (c *StateCache) getWithStep(domain kv.Domain, key []byte) ([]byte, kv.Step, bool) {
@@ -193,6 +217,9 @@ func (c *StateCache) applyLocked(update Update) {
 	if cache == nil {
 		return
 	}
+	if committedEnd := update.TxNum + 1; committedEnd > c.committedTxNumEnd[update.Domain] {
+		c.committedTxNumEnd[update.Domain] = committedEnd
+	}
 
 	switch update.Domain {
 	case kv.AccountsDomain:
@@ -270,13 +297,15 @@ func (c *StateCache) PrintStatsAndReset() {
 }
 
 // Update is one value written by the database transaction being published.
-// Step is retained because GetLatest must return the value's source step; cache
-// validity depends only on the published PlainStateVersion.
+// Step is returned by GetLatest. TxNum records how far this process's committed
+// writes cover the domain, allowing file publication to detect downloaded
+// state that never passed through this publisher.
 type Update struct {
 	Domain kv.Domain
 	Key    []byte
 	Value  []byte
 	Step   kv.Step
+	TxNum  uint64
 }
 
 // Publisher is the mutation capability for canonical state. Normal readers

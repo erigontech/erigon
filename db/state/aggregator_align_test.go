@@ -24,6 +24,8 @@ import (
 
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/cache"
 )
 
 // generateStandaloneIIFile writes files with a hardcoded step size of 10.
@@ -54,6 +56,10 @@ func requireVisibleEnd(t *testing.T, agg *Aggregator, end uint64) {
 		require.EqualValues(t, end, ii.files.EndTxNum(), "index %s", ii.name)
 	}
 }
+
+type cacheAggregatorHolder struct{ agg *Aggregator }
+
+func (h cacheAggregatorHolder) Agg() any { return h.agg }
 
 // state visible past commitment's files = state no commitment covers
 func TestVisibleFilesAligned_LaggingCommitmentClampsEveryone(t *testing.T) {
@@ -286,5 +292,81 @@ func TestVisibilityLowering_GuardsCommitmentDomain(t *testing.T) {
 	require.Equal(t, 1, dropped)
 
 	require.Panics(t, func() { agg.recalcVisibleFiles(nil) },
-		"BranchCache fill admission requires the commitment frontier to remain monotonic")
+		"BranchCache validity requires the commitment frontier to remain monotonic")
+}
+
+func TestFilePublicationRevokesCacheGenerations(t *testing.T) {
+	t.Parallel()
+	_, agg := testDbAndAggregatorv3(t, alignStepSize)
+
+	stateCache := cache.NewStateCache(1<<20, 1<<20, 1<<20, 1<<20)
+	t.Cleanup(stateCache.Close)
+	statePublisher := stateCache.Publisher()
+	statePublisher.Initialize(1)
+	execctx.BindStateCacheToAggregator(cacheAggregatorHolder{agg}, stateCache)
+
+	accountKey := make([]byte, 20)
+	accountKey[0] = 1
+	stateView := stateCache.View(1)
+	stateView.Fill(kv.AccountsDomain, accountKey, []byte{1}, 1)
+	_, ok := stateView.Get(kv.AccountsDomain, accountKey)
+	require.True(t, ok)
+
+	branchCache := agg.d[kv.CommitmentDomain].branchCache
+	require.NotNil(t, branchCache)
+	branchPublisher := branchCache.Publisher()
+	branchPublisher.Initialize(1)
+	branchKey := []byte{0x01}
+	branchView := branchCache.View(1)
+	branchView.Fill(branchKey, []byte{0xbb}, 1)
+	_, _, ok = branchView.Get(branchKey)
+	require.True(t, ok)
+
+	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	generateStandaloneIIFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	require.NoError(t, agg.OpenFolder())
+
+	_, ok = stateView.Get(kv.AccountsDomain, accountKey)
+	require.False(t, ok, "file publication must revoke pre-publication state views")
+	stateView.Fill(kv.AccountsDomain, accountKey, []byte{1}, 1)
+	statePublisher.Initialize(1)
+	_, ok = stateCache.View(1).Get(kv.AccountsDomain, accountKey)
+	require.False(t, ok, "a revoked state view must not refill after file publication")
+
+	_, _, ok = branchView.Get(branchKey)
+	require.False(t, ok, "file publication must revoke pre-publication branch views")
+	branchView.Fill(branchKey, []byte{0xbb}, 1)
+	branchPublisher.Initialize(1)
+	_, _, ok = branchCache.View(1).Get(branchKey)
+	require.False(t, ok, "a revoked branch view must not refill after file publication")
+}
+
+func TestCacheBindingAbsorbsExistingFileVisibility(t *testing.T) {
+	t.Parallel()
+	_, agg := testDbAndAggregatorv3(t, alignStepSize)
+
+	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	generateStandaloneIIFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	require.NoError(t, agg.OpenFolder())
+
+	stateCache := cache.NewStateCache(1<<20, 1<<20, 1<<20, 1<<20)
+	t.Cleanup(stateCache.Close)
+	statePublisher := stateCache.Publisher()
+	statePublisher.Initialize(1)
+	accountKey := make([]byte, 20)
+	accountKey[0] = 1
+	oldView := stateCache.View(1)
+	oldView.Fill(kv.AccountsDomain, accountKey, []byte{1}, 1)
+	_, ok := oldView.Get(kv.AccountsDomain, accountKey)
+	require.True(t, ok)
+
+	execctx.BindStateCacheToAggregator(cacheAggregatorHolder{agg}, stateCache)
+
+	_, ok = oldView.Get(kv.AccountsDomain, accountKey)
+	require.False(t, ok, "binding must revoke entries created before the visible files were absorbed")
+	statePublisher.Initialize(1)
+	_, ok = stateCache.View(1).Get(kv.AccountsDomain, accountKey)
+	require.False(t, ok)
 }

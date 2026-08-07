@@ -296,11 +296,11 @@ func TestSpeculativeUnwindDoesNotPublishStateCache(t *testing.T) {
 	require.Equal(t, v2, got)
 }
 
-type fakeForbidder struct{ called bool }
+type fakeCacheBinder struct{ called bool }
 
-func (f *fakeForbidder) ForbidVisibilityLowering() { f.called = true }
+func (f *fakeCacheBinder) BindStateCache(*cache.StateCache) { f.called = true }
 
-type fakeHasAgg struct{ f *fakeForbidder }
+type fakeHasAgg struct{ f *fakeCacheBinder }
 
 func (h fakeHasAgg) Agg() any { return h.f }
 
@@ -310,28 +310,28 @@ func (fakeHasBadAgg) Agg() any { return struct{}{} }
 
 // The guard is load-bearing for every StateCache and must fail loudly when the
 // DB cannot enforce the visibility invariant. A nil cache needs no guard.
-func TestGuardAggregatorForCache(t *testing.T) {
+func TestBindStateCacheToAggregator(t *testing.T) {
 	sc := newSmallStateCache()
 	t.Cleanup(sc.Close)
 
-	f := &fakeForbidder{}
-	execctx.GuardAggregatorForCache(fakeHasAgg{f}, sc)
+	f := &fakeCacheBinder{}
+	execctx.BindStateCacheToAggregator(fakeHasAgg{f}, sc)
 	require.True(t, f.called)
 
-	require.NotPanics(t, func() { execctx.GuardAggregatorForCache(struct{}{}, nil) },
+	require.NotPanics(t, func() { execctx.BindStateCacheToAggregator(struct{}{}, nil) },
 		"no cache, no invariant to bind — shape is irrelevant")
-	require.Panics(t, func() { execctx.GuardAggregatorForCache(struct{}{}, sc) },
+	require.Panics(t, func() { execctx.BindStateCacheToAggregator(struct{}{}, sc) },
 		"a db that cannot produce its aggregator must fail loudly, not drop the guard")
-	require.Panics(t, func() { execctx.GuardAggregatorForCache(fakeHasBadAgg{}, sc) },
-		"an aggregator without ForbidVisibilityLowering must fail loudly, not drop the guard")
+	require.Panics(t, func() { execctx.BindStateCacheToAggregator(fakeHasBadAgg{}, sc) },
+		"an aggregator without BindStateCache must fail loudly, not drop the binding")
 }
 
-func TestGuardAggregatorForCache_FillsDisabledStillGuards(t *testing.T) {
+func TestBindStateCacheToAggregator_FillsDisabledStillBinds(t *testing.T) {
 	t.Setenv("STATE_CACHE_FILLS", "false")
 	sc := newSmallStateCache()
 	t.Cleanup(sc.Close)
 
-	f := &fakeForbidder{}
-	execctx.GuardAggregatorForCache(fakeHasAgg{f}, sc)
+	f := &fakeCacheBinder{}
+	execctx.BindStateCacheToAggregator(fakeHasAgg{f}, sc)
 	require.True(t, f.called)
 }
