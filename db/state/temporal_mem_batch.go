@@ -515,12 +515,11 @@ func (sd *TemporalMemBatch) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockN
 	cs, ok := sd.pastChangesAccumulator[common.ToStringZeroCopy(key[:])]
 	sd.pastChangesLock.RUnlock()
 	if ok {
-		return [kv.DomainLen][]kv.DomainEntryDiff{
-			cs.Diffs[kv.AccountsDomain].GetDiffSet(),
-			cs.Diffs[kv.StorageDomain].GetDiffSet(),
-			cs.Diffs[kv.CodeDomain].GetDiffSet(),
-			cs.Diffs[kv.CommitmentDomain].GetDiffSet(),
-		}, true, nil
+		var diffs [kv.DomainLen][]kv.DomainEntryDiff
+		for i := range cs.Diffs {
+			diffs[i] = cs.Diffs[i].GetDiffSet()
+		}
+		return diffs, true, nil
 	}
 	return changeset.ReadDiffSet(tx, blockNumber, blockHash)
 }
