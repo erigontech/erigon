@@ -117,9 +117,37 @@ func (b *BitVector) EncodingSizeSSZ() int {
 }
 
 func (b *BitVector) DecodeSSZ(buf []byte, _ int) error {
+	if err := b.validateBytes(buf, b.bitCap); err != nil {
+		return err
+	}
 	b.bitLen = b.bitCap // bitCap must be set before decoding by NewBitVector
 	b.container = make([]byte, b.EncodingSizeSSZ())
 	copy(b.container, buf)
+	return nil
+}
+
+func (b *BitVector) ValidateSize(bitCap int) error {
+	if b == nil {
+		return errors.New("nil bitvector")
+	}
+	if err := b.validateBytes(b.container, bitCap); err != nil {
+		return err
+	}
+	b.bitCap = bitCap
+	b.bitLen = bitCap
+	return nil
+}
+
+func (b *BitVector) validateBytes(buf []byte, bitCap int) error {
+	expectedBytes := (bitCap + 7) / 8
+	if len(buf) != expectedBytes {
+		return fmt.Errorf("invalid bitvector byte length: %d != %d", len(buf), expectedBytes)
+	}
+	if remainder := bitCap % 8; remainder != 0 && len(buf) > 0 {
+		if buf[len(buf)-1]&byte(0xff<<remainder) != 0 {
+			return errors.New("invalid bitvector unused bits")
+		}
+	}
 	return nil
 }
 

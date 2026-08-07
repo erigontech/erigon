@@ -252,7 +252,7 @@ func (l *RPCLog) UnmarshalJSON(input []byte) error {
 type RPCLogs []*RPCLog
 
 // CopyLogGroups flattens the groups into one slice of deep copies backed by
-// shared arrays. Nil entries stay nil; an empty result is nil.
+// shared arrays. An empty result is nil.
 func CopyLogGroups(groups []Logs) Logs {
 	var total, totalTopics, totalData int
 	for _, g := range groups {
@@ -284,7 +284,6 @@ func CopyLogGroups(groups []Logs) Logs {
 }
 
 // Copy deep-copies the logs into freshly allocated shared backing arrays.
-// Nil entries stay nil.
 func (logs Logs) Copy() Logs {
 	if logs == nil {
 		return nil

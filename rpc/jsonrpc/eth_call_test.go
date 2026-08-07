@@ -771,7 +771,7 @@ func chainWithDeployedContractAndConfig(t *testing.T, cfg *chain.Config) (*execm
 
 	var contractAddr common.Address
 
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 6, func(i int, block *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(6, func(i int, block *blockgen.BlockGen) {
 		nonce := block.TxNonce(bankAddress)
 		switch i {
 		case 0:

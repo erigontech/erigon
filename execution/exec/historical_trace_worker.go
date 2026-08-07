@@ -489,24 +489,26 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 
 		if result.IsBlockEnd() {
 			if result.BlockNumber() > 0 {
-				chainReader := consensuschain.NewReader(cfg.ChainConfig, tx, cfg.BlockReader, logger)
-				// End of block transaction in a block
-				reader := state.NewHistoryReaderV3(tx, outputTxNum)
-				ibs := state.New(reader)
-				defer ibs.Close()
-				ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
-				syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-					ret, err := protocol.SysCallContract(contract, data, cfg.ChainConfig, ibs, txTask.Header, txTask.Engine, false /* constCall */, vm.Config{
-						Tracer: result.TracingHooks(),
-					})
-					result.Logs = append(result.Logs, ibs.GetRawLogs(txTask.TxIndex)...)
-					return ret, err
-				}
+				func() {
+					chainReader := consensuschain.NewReader(cfg.ChainConfig, tx, cfg.BlockReader, logger)
+					// End of block transaction in a block
+					reader := state.NewHistoryReaderV3(tx, outputTxNum)
+					ibs := state.New(reader)
+					defer ibs.Close()
+					ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
+					syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
+						ret, err := protocol.SysCallContract(contract, data, cfg.ChainConfig, ibs, txTask.Header, txTask.Engine, false /* constCall */, vm.Config{
+							Tracer: result.TracingHooks(),
+						})
+						result.Logs = append(result.Logs, ibs.GetRawLogs(txTask.TxIndex)...)
+						return ret, err
+					}
 
-				_, err := cfg.Engine.Finalize(cfg.ChainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles, p.blockResult.Receipts, txTask.Withdrawals, chainReader, syscall, true /* skipReceiptsEval */, logger)
-				if err != nil {
-					result.Err = err
-				}
+					_, err := cfg.Engine.Finalize(cfg.ChainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles, p.blockResult.Receipts, txTask.Withdrawals, chainReader, syscall, true /* skipReceiptsEval */, logger)
+					if err != nil {
+						result.Err = err
+					}
+				}()
 			}
 
 			p.blockResult.Complete = true

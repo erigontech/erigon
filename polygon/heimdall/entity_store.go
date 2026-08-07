@@ -185,7 +185,7 @@ func (s *mdbxEntityStore[TEntity]) PutEntity(ctx context.Context, id uint64, ent
 	}
 	defer tx.Rollback()
 
-	if err = (txEntityStore[TEntity]{s, tx}).PutEntity(ctx, id, entity); err != nil {
+	if err := (txEntityStore[TEntity]{s, tx}).PutEntity(ctx, id, entity); err != nil {
 		return err
 	}
 
@@ -323,7 +323,7 @@ func (s txEntityStore[TEntity]) PutEntity(ctx context.Context, id uint64, entity
 	}
 
 	key := entityStoreKey(id)
-	if err = tx.Put(s.table, key[:], jsonBytes); err != nil {
+	if err := tx.Put(s.table, key[:], jsonBytes); err != nil {
 		return err
 	}
 
@@ -413,7 +413,7 @@ func (s txEntityStore[TEntity]) DeleteToBlockNum(ctx context.Context, unwindPoin
 			break
 		}
 
-		if err = cursor.DeleteCurrent(); err != nil {
+		if err := cursor.DeleteCurrent(); err != nil {
 			return deleted, err
 		}
 		deleted++
@@ -450,7 +450,7 @@ func (s txEntityStore[TEntity]) DeleteFromBlockNum(ctx context.Context, unwindPo
 	var k []byte
 	var deleted int
 	for k, _, err = cursor.Seek(entityKey[:]); err == nil && k != nil; k, _, err = cursor.Next() {
-		if err = cursor.DeleteCurrent(); err != nil {
+		if err := cursor.DeleteCurrent(); err != nil {
 			return deleted, err
 		}
 		deleted++
