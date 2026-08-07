@@ -168,8 +168,11 @@ func (s *pbinUpdateStream) removesAccount(plainKey []byte, update *Update) bool 
 
 // removeAccount drops the two subtrees an account owns — its header stem, and
 // its storage prefix once the walk reaches that zone — rather than the leaves it
-// holds, which for storage nothing enumerates. Code chunks stay: they are
-// shared with every account running the same bytecode (eip:608-641).
+// holds, which for storage nothing enumerates. Code chunks stay: pre-existing
+// ones are shared with holders the batch cannot have deleted, and a
+// batch-inserted set always has a surviving in-batch holder, because an account
+// created and destroyed inside the batch merges to a bare deletion and inserts
+// none (eip:608-641).
 func (s *pbinUpdateStream) removeAccount(plainKey []byte, update *Update) error {
 	if err := s.emit(s.keyDigest.accountHeaderStem(plainKey), plainKey, update); err != nil {
 		return err
@@ -214,11 +217,13 @@ func (s *pbinUpdateStream) flushRemovals(upTo []byte) error {
 // addressing its chunks. A witness pass walks the parent state, where a
 // contract the block creates has no code, so it needs the override to reach the
 // same keys the fold did. Only key derivation moves; values stay pre-state.
+// A deletion's code fields are whatever the batch merge left behind, not
+// state, so a removed account is codeless here.
 func (s *pbinUpdateStream) chunkSource(plainKey []byte, update *Update) ([]byte, common.Hash, error) {
 	if code, ok := s.witness.Code[string(plainKey)]; ok {
 		return code, common.Hash(keccak.Sum256(code)), nil
 	}
-	if update.CodeSize == 0 {
+	if update.Deleted() || update.CodeSize == 0 {
 		return nil, common.Hash{}, nil
 	}
 	code, err := s.codeOf(plainKey)

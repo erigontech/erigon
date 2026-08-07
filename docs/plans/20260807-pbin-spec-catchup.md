@@ -660,27 +660,58 @@ A delegated account holds no code-hash leaf, so the presence marker at
 - Modify: `execution/commitment/pbin_update_stream.go`
 - Create: `execution/commitment/pbin_reclaim_test.go`
 
-- [ ] source the removed account's `code_hash` and `code_size` from a
-      parent-state read; the deletion `Update` carries neither
-- [ ] collect the code hashes still referenced after the batch during the
-      existing account walk
-- [ ] in `removeAccount` (`pbin_update_stream.go:166-177`), drop the chunk
+- [x] source the removed account's `code_hash` and `code_size` from a
+      parent-state read; the deletion `Update` carries neither (resolved the
+      other way: nothing may read them at all — the stream now treats a deleted
+      update as codeless in `chunkSource`, which was the Red; see the ⚠️ note)
+- [x] collect the code hashes still referenced after the batch during the
+      existing account walk (not needed — the surviving set could only feed the
+      drop branch, which is unreachable; see the ⚠️ note)
+- [x] in `removeAccount` (`pbin_update_stream.go:166-177`), drop the chunk
       leaves iff the account's first chunk key is **absent from the parent
       state** and its `code_hash` is absent from the surviving set and is not
-      `keccak("")`; keep them in every other case
-- [ ] leave delegation indicators alone — they go with the header stem
-- [ ] write `TestPBinReclaimDropsCodeWithNoSurvivor`: an account created and
+      `keccak("")`; keep them in every other case (the condition evaluates to
+      "keep" in every reachable state, so the existing keep-always
+      `removeAccount` **is** the implementation; the invariant is now stated on
+      `removeAccount`)
+- [x] leave delegation indicators alone — they go with the header stem
+      (already true: the header-stem drop carries sub-index 2 away)
+- [x] write `TestPBinReclaimDropsCodeWithNoSurvivor`: an account created and
       self-destructed inside the batch, no other holder — every chunk leaf gone
-- [ ] write `TestPBinReclaimKeepsCodeForBatchSibling`: the same, with a sibling
+- [x] write `TestPBinReclaimKeepsCodeForBatchSibling`: the same, with a sibling
       written in the same batch running identical bytecode — leaves remain
-- [ ] write `TestPBinReclaimKeepsCodeForPreexistingHolder`: the same, with the
+- [x] write `TestPBinReclaimKeepsCodeForPreexistingHolder`: the same, with the
       holder pre-existing and untouched by the batch — leaves remain. This is
       the case the parent-state clause exists for, and the one a
       referenced-set-only rule gets wrong.
-- [ ] gate: `go test ./execution/commitment/ -count=1 -v -run 'TestPBinReclaim|TestPBinConformancePBTState'`
-      and confirm all three new tests ran
-- [ ] `make lint` until clean; commit as
-      `execution/commitment: reclaim unreferenced code chunks on account removal`
+- [x] gate: `go test ./execution/commitment/ -count=1 -v -run 'TestPBinReclaim|TestPBinConformancePBTState'`
+      and confirm all three new tests ran (all three ran and pass;
+      `TestPBinConformancePBTState` stays 18/18)
+- [x] `make lint` until clean; commit as
+      `execution/commitment: pin code-chunk reclamation on account removal`
+      (message deviates from the planned one — nothing is reclaimed, see below)
+
+⚠️ The drop branch of the condition is unreachable, so no reclamation
+machinery landed. The two clauses can only hold together for leaves that were
+never inserted: chunk leaves enter the tree solely through `queueChunks` on an
+account whose post-state holds the code — putting its hash in the surviving
+set — and an account created and destroyed inside the batch merges to a bare
+deletion before the stream sees it, inserting nothing. Conversely, an account
+present in the parent state got its chunks written when it got its code, so
+its leaves always pre-exist and the first clause fails. The engine therefore
+keeps chunk leaves unconditionally (already pinned by Task 4's
+`TestPBinAccountRemovalDropsBothSubtrees` re-baseline) and diverges from
+`binarize(post_state)` only when the last holder of pre-existing chunks is
+removed — which EIP-6780 excludes on-chain, and which a batch cannot decide
+locally without risking an untouched holder's state.
+➕ The real Red behind the three tests: a merged create-and-destroy deletion
+(the `TouchAccount` / `TouchPlainKeyDirect` merge shape in
+ModeUpdate/ModeParallel) keeps stale `CodeSize`/`CodeHash`, so `chunkSource`
+read code for a dead account and errored with "the code domain holds 0". Fix:
+`chunkSource` treats a `Deleted()` update as codeless. Production ModeDirect
+re-reads post-state and already delivered clean deletions. The guard sits
+after the witness-code override, so a witness pass still walks the chunk keys
+of accounts the block creates or removes.
 
 ### Task 10: Pin the adversarial cases Tasks 6-9 do not already cover
 
