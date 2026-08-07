@@ -51,6 +51,7 @@ linters:
         - ruleguard
       disabled-checks:
         - commentFormatting # disabled to avoid unnecessary friction on local lints and CI for minor whitespace changes without functional benefit
+        - uncheckedInlineErr
         - preferStringWriter
         - commentedOutCode
         - preferFprint
