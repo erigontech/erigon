@@ -293,7 +293,7 @@ func (e *ExecModule) unwindIfNeeded(
 	} else {
 		execProgress, err := stages.GetStageProgress(tx, stages.Execution)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("updateForkChoice: %w", err)
 		}
 		if execProgress > unwindTarget {
 			e.logger.Info("updateForkChoice: unwind skipped with executed state above reorg point", "unwindTarget", unwindTarget, "lastCanonicalBlock", lastCanonicalBlock, "execProgress", execProgress)
