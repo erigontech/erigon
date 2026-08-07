@@ -34,14 +34,14 @@ type pbinConformance struct {
 	TrieRoots []pbinSpecTrieVector `json:"trie_roots"`
 
 	Embedding struct {
-		Address20            string            `json:"address20"`
-		Address32            string            `json:"address32"`
-		BasicDataKey         string            `json:"basic_data_key"`
-		CodeHashKey          string            `json:"code_hash_key"`
-		HeaderSubIndex255Key string            `json:"header_sub_index_255_key"`
-		StorageSlotKeys      map[string]string `json:"storage_slot_keys"`
-		CodeChunkKeys        map[string]string `json:"code_chunk_keys"`
-		CodeHash             string            `json:"code_hash"`
+		Address20       string            `json:"address20"`
+		Address32       string            `json:"address32"`
+		BasicDataKey    string            `json:"basic_data_key"`
+		CodeHashKey     string            `json:"code_hash_key"`
+		DelegationKey   string            `json:"delegation_key"`
+		StorageSlotKeys map[string]string `json:"storage_slot_keys"`
+		CodeChunkKeys   map[string]string `json:"code_chunk_keys"`
+		CodeHash        string            `json:"code_hash"`
 	} `json:"embedding"`
 
 	ChunkifyCode []struct {
@@ -129,7 +129,7 @@ func TestPBinConformanceEmbedding(t *testing.T) {
 	hexKey := func(k []byte) string { return "0x" + hex.EncodeToString(k) }
 	require.Equal(t, e.BasicDataKey, hexKey(keys.accountKey(addr, pbinBasicDataLeafKey)))
 	require.Equal(t, e.CodeHashKey, hexKey(keys.accountKey(addr, pbinCodeHashLeafKey)))
-	require.Equal(t, e.HeaderSubIndex255Key, hexKey(keys.accountKey(addr, 255)))
+	require.Equal(t, e.DelegationKey, hexKey(keys.accountKey(addr, pbinDelegationLeafKey)))
 
 	for slot, want := range e.StorageSlotKeys {
 		require.Equal(t, want, hexKey(keys.storageKey(addr, pbinSlotBytes(t, slot))), "slot %s", slot)

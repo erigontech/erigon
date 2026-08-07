@@ -371,20 +371,22 @@ identifier is a build break, not a Red test.
 - Modify: `execution/commitment/pbin_conformance_test.go`
 - Modify: `execution/commitment/pbin_keys.go`
 
-- [ ] copy `~/org/wrk/espr/tests/binary_trie/vectors/binary_trie_vectors.json`
+- [x] copy `~/org/wrk/espr/tests/binary_trie/vectors/binary_trie_vectors.json`
       over `execution/commitment/testdata/binary_trie_vectors.json`
-- [ ] add `pbinDelegationLeafKey = 2` to the embedding constants
-- [ ] replace the `HeaderSubIndex255Key` field (`pbin_conformance_test.go:41`)
+- [x] add `pbinDelegationLeafKey = 2` to the embedding constants
+- [x] replace the `HeaderSubIndex255Key` field (`pbin_conformance_test.go:41`)
       and its assertion (`:132`) with `DelegationKey`, asserted against
       `keys.accountKey(addr, pbinDelegationLeafKey)`
-- [ ] leave the two chunk-placement sites (`:142` in the embedding assertion and
+- [x] leave the two chunk-placement sites (`:142` in the embedding assertion and
       `:207` in the `pbt_state` oracle) untouched for now — Task 4 rewrites both
       in the same atomic edit that deletes the constants they use
-- [ ] run `go test ./execution/commitment/ -run TestPBinConformance -count=1`;
+- [x] run `go test ./execution/commitment/ -run TestPBinConformance -count=1`;
       the package must **build**, and the failing set must be
       `TestPBinConformanceEmbedding` plus the eleven `pbt_state` cases in
       Context. Record any deviation in this plan before continuing.
-- [ ] run `make lint` until clean; commit as
+      (Verified: failing set is exactly `TestPBinConformanceEmbedding` plus the
+      eleven Context cases; `pbt_state` 7/18 pass. No deviation.)
+- [x] run `make lint` until clean; commit as
       `execution/commitment: vendor EIP-8297 conformance vectors from 58faeb0`
 
 ### Task 4: Move every code chunk into the code zone

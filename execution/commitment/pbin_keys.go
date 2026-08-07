@@ -31,6 +31,7 @@ import (
 const (
 	pbinBasicDataLeafKey    = 0
 	pbinCodeHashLeafKey     = 1
+	pbinDelegationLeafKey   = 2
 	pbinHeaderStorageOffset = 64
 	pbinCodeOffset          = 128
 	pbinStemSubtreeWidth    = 256
