@@ -38,9 +38,21 @@ var mxNormalizeTook = metrics.GetOrCreateSummary("exec3_normalize_seconds")
 // geometry, so outlier shapes can be reproduced in the benchmark.
 const slowNormalizeThreshold = 50 * time.Millisecond
 
+// sdCascadeStats accumulates the cost of the self-destruct storage cascade.
+// domainTook is split from vmTook because only the former walks the domain
+// files, whose per-call cost is set by the file count rather than by the number
+// of slots the address owns; took-vmTook-domainTook is the dedup.
+type sdCascadeStats struct {
+	calls      int
+	slots      int
+	took       time.Duration
+	vmTook     time.Duration
+	domainTook time.Duration
+}
+
 // logSlowNormalize dumps the geometry of a write set whose Normalize ran long.
 // Everything it counts is walked only on the slow path.
-func logSlowNormalize(writes, filtered *WriteSet, took time.Duration, txIndex, incarnation int) {
+func logSlowNormalize(writes, filtered *WriteSet, took time.Duration, txIndex, incarnation int, sd sdCascadeStats) {
 	dirty := make(map[accounts.Address]struct{})
 	writes.forEachFieldAddr(func(addr accounts.Address) { dirty[addr] = struct{}{} })
 
@@ -64,6 +76,8 @@ func logSlowNormalize(writes, filtered *WriteSet, took time.Duration, txIndex, i
 		"incarnations", len(writes.incarnation), "codeHash", len(writes.codeHash),
 		"code", len(writes.code), "codeSize", len(writes.codeSize),
 		"createContract", len(writes.createContract),
+		"sdCalls", sd.calls, "sdSlots", sd.slots, "sdTook", sd.took,
+		"sdDomainTook", sd.domainTook, "sdVMTook", sd.vmTook,
 		"in", writes.Count(), "out", filtered.Count())
 }
 
@@ -100,6 +114,7 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 		return filtered, nil
 	}
 
+	var sdStats sdCascadeStats
 	normalizeStarted := time.Now()
 	defer func() {
 		took := time.Since(normalizeStarted)
@@ -107,7 +122,7 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 			mxNormalizeTook.Observe(took.Seconds())
 		}
 		if took >= slowNormalizeThreshold {
-			logSlowNormalize(writes, filtered, took, txIndex, incarnation)
+			logSlowNormalize(writes, filtered, took, txIndex, incarnation, sdStats)
 		}
 	}()
 
@@ -115,22 +130,32 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 	// domainStorageKeys (committed before this batch), deduped — the complete
 	// set of storage slots that must be DELETE'd when addr self-destructs.
 	sdStorageSlots := func(addr accounts.Address) []accounts.StorageKey {
+		cascadeStarted := time.Now()
+		sdStats.calls++
 		seen := make(map[accounts.StorageKey]struct{})
 		var out []accounts.StorageKey
-		for _, k := range vm.StorageKeys(addr) {
+		vmStarted := time.Now()
+		vmKeys := vm.StorageKeys(addr)
+		sdStats.vmTook += time.Since(vmStarted)
+		for _, k := range vmKeys {
 			if _, ok := seen[k]; !ok {
 				seen[k] = struct{}{}
 				out = append(out, k)
 			}
 		}
 		if domainStorageKeys != nil {
-			for _, k := range domainStorageKeys(addr) {
+			domainStarted := time.Now()
+			domainKeys := domainStorageKeys(addr)
+			sdStats.domainTook += time.Since(domainStarted)
+			for _, k := range domainKeys {
 				if _, ok := seen[k]; !ok {
 					seen[k] = struct{}{}
 					out = append(out, k)
 				}
 			}
 		}
+		sdStats.slots += len(out)
+		sdStats.took += time.Since(cascadeStarted)
 		return out
 	}
 
