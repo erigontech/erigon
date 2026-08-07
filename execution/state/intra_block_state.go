@@ -213,10 +213,7 @@ type IntraBlockState struct {
 	// via FinalizeTx→so.data.
 	noMaterialize bool
 
-	// arena backs the stateObjects the noMaterialize path hands out. Those are
-	// never cached, so they die with the transaction and Reset can recycle the
-	// whole arena at once.
-	arena stateObjectArena
+	stateObjectArena stateObjectArena
 
 	// eip8246 pins whether SELFDESTRUCT preserves the account (EIP-8246 removes
 	// the balance burn). Set per-tx from the block rules in Prepare; under it a
@@ -392,7 +389,7 @@ func (sdb *IntraBlockState) Reset() {
 	for _, so := range sdb.stateObjects {
 		so.release()
 	}
-	sdb.arena.rewind()
+	sdb.stateObjectArena.rewind()
 	clear(sdb.stateObjects)
 	clear(sdb.stateObjectsDirty)
 	sdb.resetLogs()
@@ -446,7 +443,7 @@ func (sdb *IntraBlockState) Close() {
 	stateObjects, journal := sdb.stateObjects, sdb.journal
 	sdb.stateObjects, sdb.journal = nil, nil
 	sdb.logs = nil
-	sdb.arena.free()
+	sdb.stateObjectArena.free()
 	sdb.revisions.reset()
 	// Safe to pool: VersionedWrites/FinalizedWrites hand out deep clones, and the
 	// set is unexported, so nothing outside holds a raw VersionedWrite.
@@ -455,12 +452,11 @@ func (sdb *IntraBlockState) Close() {
 	releaseResources(stateObjects, journal)
 }
 
-// allocStateObject keeps the noMaterialize path off the shared pool entirely:
-// objects it hands out are never released, so taking one would be a one-way
-// drain that costs the materializing paths their pooled objects.
+// The noMaterialize path never releases what it takes, so a pool draw there
+// would be a one-way drain on the materializing paths.
 func (sdb *IntraBlockState) allocStateObject() *stateObject {
 	if sdb.noMaterialize {
-		if so := sdb.arena.alloc(); so != nil {
+		if so := sdb.stateObjectArena.alloc(); so != nil {
 			return so
 		}
 		return newHeapObject()

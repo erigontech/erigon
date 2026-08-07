@@ -86,7 +86,7 @@ func TestNoMaterializeReadReusesArena(t *testing.T) {
 		require.Empty(t, ibs.stateObjects, "parallel read must not cache a stateObject")
 	}
 
-	require.Len(t, ibs.arena.slabs, 1, "200 transactions must reuse one slab")
+	require.Len(t, ibs.stateObjectArena.slabs, 1, "200 transactions must reuse one slab")
 }
 
 // TestNoMaterializeAllocStateObjectUsesArena pins the routing: the parallel path

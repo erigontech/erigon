@@ -49,8 +49,8 @@ func newHeapObject() *stateObject {
 
 type Storage map[accounts.StorageKey]uint256.Int
 
-// set allocates the map on first write. The arena hands out objects with a nil
-// Storage because reads of one are safe and most objects never write.
+// set allocates the map on first write, so an object that never writes keeps a
+// nil Storage.
 func (s *Storage) set(key accounts.StorageKey, value uint256.Int) {
 	if *s == nil {
 		*s = make(Storage)
@@ -103,8 +103,7 @@ type stateObject struct {
 	newlyCreated    bool // true if this object was created in the current transaction
 	createdContract bool // true if this object represents a newly created contract
 
-	// arena marks a slot owned by stateObjectArena. It is slot identity, not
-	// per-use state, so reset leaves it alone.
+	// Slot identity, not per-use state, so reset leaves it alone.
 	arena bool
 }
 
@@ -143,8 +142,7 @@ func (so *stateObject) reset() {
 	so.createdContract = false
 }
 
-// release returns the stateObject to the pool after resetting it. Arena slots
-// are owned by their arena and are recycled by rewind instead.
+// release resets the object and pools it, unless the arena owns the slot.
 func (so *stateObject) release() {
 	so.reset()
 	if so.arena {
