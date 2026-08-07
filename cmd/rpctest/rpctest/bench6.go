@@ -66,7 +66,7 @@ func Bench6(erigon_url string) error {
 `
 			var receipt EthReceipt
 			if err := post(client, erigon_url, fmt.Sprintf(template, txn.Hash, req_id), &receipt); err != nil {
-				print(client, erigon_url, fmt.Sprintf(template, txn.Hash, req_id))
+				printRPCRequest(client, erigon_url, fmt.Sprintf(template, txn.Hash, req_id))
 				return fmt.Errorf("Count not get receipt: %s: %v\n", txn.Hash, err)
 			}
 			if receipt.Error != nil {
