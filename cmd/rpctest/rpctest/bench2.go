@@ -71,11 +71,12 @@ func Bench2(erigon_url string) error {
 						nextKey = sr.Result.NextKey
 						for k, v := range sr.Result.Storage {
 							sm[k] = v
-							if v.Key == nil {
+							switch {
+							case v.Key == nil:
 								fmt.Printf("No key for sec key: %x\n", k)
-							} else if k != crypto.Keccak256Hash(v.Key[:]) {
+							case k != crypto.Keccak256Hash(v.Key[:]):
 								fmt.Printf("Different sec key: %x %x (%x), value %x\n", k, crypto.Keccak256Hash(v.Key[:]), *(v.Key), v.Value)
-							} else {
+							default:
 								fmt.Printf("Keys: %x %x, value %x\n", *(v.Key), k, v.Value)
 							}
 						}

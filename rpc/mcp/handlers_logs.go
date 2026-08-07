@@ -286,11 +286,12 @@ func getLogStats(filename string) (map[string]any, error) {
 		totalLines++
 		line := strings.ToLower(scanner.Text())
 
-		if strings.Contains(line, "error") || strings.Contains(line, "err=") {
+		switch {
+		case strings.Contains(line, "error") || strings.Contains(line, "err="):
 			errorLines++
-		} else if strings.Contains(line, "warn") {
+		case strings.Contains(line, "warn"):
 			warnLines++
-		} else if strings.Contains(line, "info") {
+		case strings.Contains(line, "info"):
 			infoLines++
 		}
 	}

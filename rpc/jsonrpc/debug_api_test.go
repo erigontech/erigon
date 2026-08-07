@@ -92,8 +92,8 @@ var debugTraceTransactionNoRefundTests = []struct {
 
 func TestGetRawBlockAccessListRPCSpec(t *testing.T) {
 	chainPack, client := newBlockAccessListRPCFixture(t)
-	availableRaw := marshalHexBytesJSON(t, chainPack.BlockAccessLists[1])
-	emptyRaw := marshalHexBytesJSON(t, chainPack.BlockAccessLists[2])
+	availableRaw := marshalHexBytesJSON(t, chainPack.Blocks[1].BlockAccessList())
+	emptyRaw := marshalHexBytesJSON(t, chainPack.Blocks[2].BlockAccessList())
 	cases := []blockAccessListRPCCase{
 		{name: "available by number", selector: "0x2", want: availableRaw},
 		{name: "available by tag", selector: "safe", want: availableRaw},
@@ -239,7 +239,7 @@ func TestTraceBlockByHashPrestateTracerCreate2MemoryOverflow(t *testing.T) {
 		},
 	}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec))
-	generated, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(_ int, gen *blockgen.BlockGen) {
+	generated, err := m.GenerateChain(1, func(_ int, gen *blockgen.BlockGen) {
 		gen.SetCoinbase(coinbase)
 		gen.AddTx(tx)
 	})
@@ -249,7 +249,7 @@ func TestTraceBlockByHashPrestateTracerCreate2MemoryOverflow(t *testing.T) {
 	require.NoError(t, err)
 	defer dbtx.Rollback()
 	st := state.New(m.NewStateReader(dbtx))
-	defer st.Release(false)
+	defer st.Close()
 	senderBalance, err := st.GetBalance(accounts.InternAddress(sender))
 	require.NoError(t, err)
 	require.Equal(t, uint256.MustFromHex("0x2869323611617c47"), &senderBalance)
@@ -1150,7 +1150,7 @@ func TestGetRawTransaction(t *testing.T) {
 	for i := range number {
 		tx, err := m.DB.BeginRo(ctx)
 		require.NoError(err)
-		defer tx.Rollback()
+		defer tx.Rollback() //nolint:gocritic
 		block, err := api._blockReader.BlockByNumber(ctx, tx, i)
 		require.NoError(err)
 		txns := block.Transactions()
@@ -1358,7 +1358,7 @@ func TestExecutionWitnessCacheServe(t *testing.T) {
 	sentinel := &ExecutionWitnessResult{State: []hexutil.Bytes{{0xde, 0xad, 0xbe, 0xef}}}
 
 	t.Run("legacy hit returns cached pointer", func(t *testing.T) {
-		cache := newWitnessResultCache(96)
+		cache := newWitnessResultCache(96, 0, false, false)
 		cache.Add(block1Hash, sentinel)
 		api.witnessCache = cache
 		t.Cleanup(func() { api.witnessCache = nil })
@@ -1371,7 +1371,7 @@ func TestExecutionWitnessCacheServe(t *testing.T) {
 	})
 
 	t.Run("canonical request bypasses the cache", func(t *testing.T) {
-		cache := newWitnessResultCache(96)
+		cache := newWitnessResultCache(96, 0, false, false)
 		cache.Add(block1Hash, sentinel)
 		api.witnessCache = cache
 		t.Cleanup(func() { api.witnessCache = nil })
@@ -1384,7 +1384,7 @@ func TestExecutionWitnessCacheServe(t *testing.T) {
 	})
 
 	t.Run("empty-cache miss falls through to on-demand", func(t *testing.T) {
-		api.witnessCache = newWitnessResultCache(96)
+		api.witnessCache = newWitnessResultCache(96, 0, false, false)
 		t.Cleanup(func() { api.witnessCache = nil })
 
 		missBefore := witnessCacheMissCounter.GetValueUint64()

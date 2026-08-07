@@ -50,12 +50,7 @@ linters:
       enabled-checks:
         - ruleguard
       disabled-checks:
-        - captLocal
-        - commentFormatting
-        - ifElseChain
-        - sloppyReassign
-        - sprintfQuotedString
-        - deferInLoop
+        - commentFormatting # disabled to avoid unnecessary friction on local lints and CI for minor whitespace changes without functional benefit
         - nilValReturn
         - evalOrder
         - returnAfterHttpError

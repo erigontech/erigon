@@ -124,6 +124,19 @@ func TestValidateAnchorEnvelope(t *testing.T) {
 	}
 }
 
+func TestAnchorEnvelopeMatches(t *testing.T) {
+	_, _, _, env, anchorRoot := validAnchorEnvelopeFixture(t, 1)
+
+	require.True(t, anchorEnvelopeMatches(env, anchorRoot))
+
+	// Server finalized ahead of the local anchor: the HTTP endpoint returns a valid
+	// envelope for a newer block, which must be rejected so we fall back to a
+	// root-specific P2P request instead of failing anchor validation.
+	require.False(t, anchorEnvelopeMatches(env, common.HexToHash("0x99")))
+	require.False(t, anchorEnvelopeMatches(nil, anchorRoot))
+	require.False(t, anchorEnvelopeMatches(&cltypes.SignedExecutionPayloadEnvelope{}, anchorRoot))
+}
+
 func TestVerifyAnchorEnvelopeSignature(t *testing.T) {
 	_, st, bid, env, _ := validAnchorEnvelopeFixture(t, 2)
 	require.NoError(t, verifyAnchorEnvelopeSignature(st.BeaconConfig(), st, env, bid.Slot))
@@ -392,11 +405,11 @@ func (t *testExecutionEngine) ForkChoiceUpdate(context.Context, common.Hash, com
 
 func (t *testExecutionEngine) SupportInsertion() bool { return t.supportInsertion }
 
-func (t *testExecutionEngine) InsertBlocks(context.Context, []*types.Block, [][]byte) error {
+func (t *testExecutionEngine) InsertBlocks(context.Context, []*types.Block) error {
 	return nil
 }
 
-func (t *testExecutionEngine) InsertBlock(context.Context, *types.Block, []byte) error { return nil }
+func (t *testExecutionEngine) InsertBlock(context.Context, *types.Block) error { return nil }
 
 func (t *testExecutionEngine) CurrentHeader(context.Context) (*types.Header, error) { return nil, nil }
 

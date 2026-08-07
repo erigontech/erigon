@@ -660,25 +660,31 @@ func TestRemoveOverlaps_CrossingTypeString(t *testing.T) {
 }
 
 func TestCanRetire(t *testing.T) {
-	require := require.New(t)
 	cases := []struct {
-		inFrom, inTo, outFrom, outTo uint64
-		can                          bool
+		inFrom, inTo, outFrom, outTo, retireStep uint64
+		can                                      bool
 	}{
-		{0, 1234, 0, 1000, true},
-		{1_000_000, 1_120_000, 1_000_000, 1_100_000, true},
-		{2_500_000, 4_100_000, 2_500_000, 2_600_000, true},
-		{2_500_000, 2_500_100, 2_500_000, 2_500_000, false},
-		{1_001_000, 2_000_000, 1_001_000, 1_002_000, true},
+		{0, 1234, 0, 1000, 0, true},
+		{1_000_000, 1_120_000, 1_000_000, 1_100_000, 0, true},
+		{2_500_000, 4_100_000, 2_500_000, 2_600_000, 0, true},
+		{2_500_000, 2_500_100, 2_500_000, 2_500_000, 0, false},
+		{1_001_000, 2_000_000, 1_001_000, 1_002_000, 0, true},
+		{0, 10, 0, 10, 10, true},
+		{0, 12, 0, 10, 10, true},
+		{0, 9, 0, 0, 10, false},
+		{10, 20, 10, 20, 10, true},
+		{10, 22, 10, 20, 10, true},
+		{10, 18, 10, 10, 10, false},
 	}
 	snCfg := snapcfg.KnownCfgOrDevnet(networkname.Mainnet)
 	for i, tc := range cases {
-		from, to, can := CanRetire(tc.inFrom, tc.inTo, snaptype.Unknown, snCfg)
-		require.Equal(int(tc.outFrom), int(from), i)
-		require.Equal(int(tc.outTo), int(to), i)
-		require.Equal(tc.can, can, tc.inFrom, tc.inTo, i)
+		from, to, can := CanRetire(tc.inFrom, tc.inTo, snaptype.Unknown, snCfg, tc.retireStep)
+		require.Equal(t, tc.outFrom, from, i)
+		require.Equal(t, tc.outTo, to, i)
+		require.Equal(t, tc.can, can, "CanRetire(%d, %d) case %d", tc.inFrom, tc.inTo, i)
 	}
 }
+
 func TestOpenAllSnapshot(t *testing.T) {
 	logger := log.New()
 	baseDir, require := t.TempDir(), require.New(t)
@@ -695,7 +701,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 			createTestSegmentFile(t, from, to, name.Enum(), dir, version.V1_0, logger)
 		}
 		s := NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
-		defer s.Close()
+		defer s.Close() //nolint:gocritic
 		err := s.OpenFolder()
 		require.NoError(err)
 		require.NotNil(s.visible.Load().segments[snaptype2.Enums.Headers])
@@ -704,7 +710,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 
 		createFile(step, step*2, snaptype2.Bodies)
 		s = NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
-		defer s.Close()
+		defer s.Close() //nolint:gocritic
 		require.NotNil(s.visible.Load().segments[snaptype2.Enums.Bodies])
 		require.Empty(s.visible.Load().segments[snaptype2.Enums.Bodies])
 		s.Close()
@@ -723,7 +729,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 		createFile(0, step, snaptype2.Headers)
 		createFile(0, step, snaptype2.Transactions)
 		s = NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
-		defer s.Close()
+		defer s.Close() //nolint:gocritic
 
 		err = s.OpenFolder()
 		require.NoError(err)
@@ -731,7 +737,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 		require.Len(s.visible.Load().segments[snaptype2.Enums.Headers], 2)
 
 		view := s.View()
-		defer view.Close()
+		defer view.Close() //nolint:gocritic
 
 		seg, ok := view.Segment(snaptype2.Transactions, 10)
 		require.True(ok)
@@ -750,7 +756,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 		s = NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
 		err = s.OpenFolder()
 		require.NoError(err)
-		defer s.Close()
+		defer s.Close() //nolint:gocritic
 		require.NotNil(s.visible.Load().segments[snaptype2.Enums.Headers])
 		require.Len(s.visible.Load().segments[snaptype2.Enums.Headers], 2)
 
@@ -759,7 +765,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 		createFile(step, step*2-step/5, snaptype2.Transactions)
 		chainSnapshotCfg.ExpectBlocks = math.MaxUint64
 		s = NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
-		defer s.Close()
+		defer s.Close() //nolint:gocritic
 		err = s.OpenFolder()
 		require.NoError(err)
 	}
@@ -768,18 +774,19 @@ func TestOpenAllSnapshot(t *testing.T) {
 func TestParseCompressedFileName(t *testing.T) {
 	require := require.New(t)
 	fs := fstest.MapFS{
-		"a":                      &fstest.MapFile{},
-		"1-a":                    &fstest.MapFile{},
-		"1-2-a":                  &fstest.MapFile{},
-		"1-2-bodies.info":        &fstest.MapFile{},
-		"1-2-bodies.seg":         &fstest.MapFile{},
-		"v2-1-2-bodies.seg":      &fstest.MapFile{},
-		"v0-1-2-bodies.seg":      &fstest.MapFile{},
-		"v1-1-2-bodies.seg":      &fstest.MapFile{},
-		"v1.0-1-2-bodies.seg":    &fstest.MapFile{},
-		"v1-accounts.24-28.ef":   &fstest.MapFile{},
-		"v1.0-accounts.24-28.ef": &fstest.MapFile{},
-		"salt-blocks.txt":        &fstest.MapFile{},
+		"a":                                   &fstest.MapFile{},
+		"1-a":                                 &fstest.MapFile{},
+		"1-2-a":                               &fstest.MapFile{},
+		"1-2-bodies.info":                     &fstest.MapFile{},
+		"1-2-bodies.seg":                      &fstest.MapFile{},
+		"v2-000001-000002-bodies.seg":         &fstest.MapFile{},
+		"v0-000001-000002-bodies.seg":         &fstest.MapFile{},
+		"v1-000001-000002-bodies.seg":         &fstest.MapFile{},
+		"v1.0-000001-000002-bodies.seg":       &fstest.MapFile{},
+		"v1.0-000000001-000000002-bodies.seg": &fstest.MapFile{},
+		"v1-accounts.24-28.ef":                &fstest.MapFile{},
+		"v1.0-accounts.24-28.ef":              &fstest.MapFile{},
+		"salt-blocks.txt":                     &fstest.MapFile{},
 		"v1.0-022695-022696-transactions-to-block.idx":                     &fstest.MapFile{},
 		"v1-022695-022696-transactions-to-block.idx":                       &fstest.MapFile{},
 		"preverified.toml":                                                 &fstest.MapFile{},
@@ -809,11 +816,11 @@ func TestParseCompressedFileName(t *testing.T) {
 	require.False(ok)
 	_, _, ok = snaptype.ParseFileName("", stat("1-2-bodies.seg"))
 	require.False(ok)
-	_, _, ok = snaptype.ParseFileName("", stat("v2-1-2-bodies.seg"))
+	_, _, ok = snaptype.ParseFileName("", stat("v2-000001-000002-bodies.seg"))
 	require.True(ok)
-	_, _, ok = snaptype.ParseFileName("", stat("v0-1-2-bodies.seg"))
+	_, _, ok = snaptype.ParseFileName("", stat("v0-000001-000002-bodies.seg"))
 	require.True(ok)
-	f, _, ok := snaptype.ParseFileName("", stat("v1-1-2-bodies.seg"))
+	f, _, ok := snaptype.ParseFileName("", stat("v1-000001-000002-bodies.seg"))
 	require.True(ok)
 	require.Equal(f.Type.Enum(), snaptype2.Bodies.Enum())
 	require.Equal(1_000, int(f.From))
@@ -876,12 +883,18 @@ func TestParseCompressedFileName(t *testing.T) {
 	require.Equal(22695000, int(f.From))
 	require.Equal(22696000, int(f.To))
 
-	f, e3, ok = snaptype.ParseFileName("", stat("v1.0-1-2-bodies.seg"))
+	f, e3, ok = snaptype.ParseFileName("", stat("v1.0-000001-000002-bodies.seg"))
+	require.True(ok)
+	require.False(e3)
+	require.Equal(1_000, int(f.From))
+	require.Equal(2_000, int(f.To))
+	require.Equal("bodies", f.TypeString)
+	f, e3, ok = snaptype.ParseFileName("", stat("v1.0-000000001-000000002-bodies.seg"))
 	require.True(ok)
 	require.False(e3)
 	require.Equal(f.Type.Enum(), snaptype2.Bodies.Enum())
-	require.Equal(1_000, int(f.From))
-	require.Equal(2_000, int(f.To))
+	require.Equal(1, int(f.From))
+	require.Equal(2, int(f.To))
 	require.Equal("bodies", f.TypeString)
 
 	f, e3, ok = snaptype.ParseFileName("", stat("v1.0-070200-070300-bodies.seg.torrent4014494284"))

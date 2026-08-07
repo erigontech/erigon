@@ -229,11 +229,11 @@ func (s *testFinalizeScenario) buildExecResult() *execResult {
 	txResult := &exec.TxResult{
 		Task: task,
 		ExecutionResult: evmtypes.ExecutionResult{
-			FeeTipped:            s.feeTipped,
-			FeeBurnt:             s.feeBurnt,
-			BurntContractAddress: s.burntAddr,
-			ReceiptGasUsed:       21000,
-			BlockRegularGasUsed:  21000,
+			FeeTipped:             s.feeTipped,
+			FeeBurnt:              s.feeBurnt,
+			BurntContractAddress:  s.burntAddr,
+			ReceiptGasUsed:        21000,
+			BlockExecutionGasUsed: 21000,
 		},
 		Coinbase: s.coinbase,
 	}
@@ -897,7 +897,7 @@ func TestFinalizeTxSimple_FeeWriteInvalidatesStaleCoinbaseRead(t *testing.T) {
 			Val: readVal,
 		})
 		io.RecordReads(state.Version{TxIndex: 1}, rs)
-		return vm.ValidateVersion(1, io, checkVersion, false, "")
+		return vm.ValidateVersion(1, io, checkVersion, true, false, false, "")
 	}
 
 	// Stale timing — the dependent worker read the coinbase via stateReader

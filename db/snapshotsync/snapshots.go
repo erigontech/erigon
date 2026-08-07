@@ -147,25 +147,26 @@ func findOverlaps[T SortedRange](in []T) (res []T, overlapped []T) {
 	return res, overlapped
 }
 
-func CanRetire(from, to uint64, snapType snaptype.Enum, snCfg *snapcfg.Cfg) (blockFrom, blockTo uint64, can bool) {
+func CanRetire(from, to uint64, snapType snaptype.Enum, snCfg *snapcfg.Cfg, retireStep uint64) (blockFrom, blockTo uint64, can bool) {
 	if to <= from {
 		return
 	}
-	blockFrom = (from / 1_000) * 1_000
-	roundedTo1K := (to / 1_000) * 1_000
-	var maxJump uint64 = 1_000
-
+	if retireStep == 0 {
+		retireStep = 1_000
+	}
+	blockFrom = (from / retireStep) * retireStep
+	roundedToRetireStep := (to / retireStep) * retireStep
+	maxJump := retireStep
 	mergeLimit := snapcfg.MergeLimitFromCfg(snCfg, snapType, blockFrom)
-
-	if blockFrom%mergeLimit == 0 {
+	switch {
+	case blockFrom%mergeLimit == 0:
 		maxJump = mergeLimit
-	} else if blockFrom%100_000 == 0 {
+	case blockFrom%100_000 == 0:
 		maxJump = 100_000
-	} else if blockFrom%10_000 == 0 {
+	case blockFrom%10_000 == 0:
 		maxJump = 10_000
 	}
-	//roundedTo1K := (to / 1_000) * 1_000
-	jump := min(maxJump, roundedTo1K-blockFrom)
+	jump := min(maxJump, roundedToRetireStep-blockFrom)
 	switch { // only next segment sizes are allowed
 	case jump >= mergeLimit:
 		blockTo = blockFrom + mergeLimit
@@ -173,12 +174,12 @@ func CanRetire(from, to uint64, snapType snaptype.Enum, snCfg *snapcfg.Cfg) (blo
 		blockTo = blockFrom + 100_000
 	case jump >= 10_000:
 		blockTo = blockFrom + 10_000
-	case jump >= 1_000:
-		blockTo = blockFrom + 1_000
+	case jump >= retireStep:
+		blockTo = blockFrom + retireStep
 	default:
 		blockTo = blockFrom
 	}
-	return blockFrom, blockTo, blockTo-blockFrom >= 1_000
+	return blockFrom, blockTo, blockTo-blockFrom >= retireStep
 }
 
 type Range struct {

@@ -73,7 +73,6 @@ import (
 	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/diagnostics/mem"
 	"github.com/erigontech/erigon/execution/builder"
-	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/engineapi"
@@ -314,7 +313,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			statecfg.ExperimentalStreamingCommitment = true
 		}
 
-		if err = stages.UpdateMetrics(tx); err != nil {
+		if err := stages.UpdateMetrics(tx); err != nil {
 			return err
 		}
 
@@ -598,11 +597,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	logger.Info("Initialising Ethereum protocol", "network", config.NetworkID)
 	var rulesConfig any
 
-	if chainConfig.Aura != nil {
+	switch {
+	case chainConfig.Aura != nil:
 		rulesConfig = &config.Aura
-	} else if chainConfig.Bor != nil {
+	case chainConfig.Bor != nil:
 		rulesConfig = chainConfig.Bor
-	} else {
+	default:
 		rulesConfig = &config.Ethash
 	}
 
@@ -943,14 +943,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		Accumulator:    backend.notifications.Accumulator,
 		RecentReceipts: backend.notifications.RecentReceipts,
 	}
-	// Test harnesses (e.g. EngineApiTester) set StateCacheBudget small so each
-	// per-fixture ExecModule doesn't allocate the full production cache; 0 keeps
-	// the production default.
-	var domainStateCache *cache.StateCache
-	if config.StateCacheBudget > 0 {
-		b := config.StateCacheBudget
-		domainStateCache = cache.NewStateCache(b, b, b, b)
-	}
 	backend.execModule = execmodule.NewExecModule(
 		ctx,
 		blockReader,
@@ -962,7 +954,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		hook,
 		accum,
 		execmoduleCache,
-		domainStateCache,
+		config.StateCacheBudget,
 		logger,
 		backend.engine,
 		config.Sync,
@@ -1121,10 +1113,9 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 	blockReader := s.blockReader
 	ctx := s.sentryCtx
 	chainKv := s.chainDB
-	var err error
 	emptyBadHash := config.BadBlockHash == common.Hash{}
 	if !emptyBadHash {
-		if err = chainKv.View(ctx, func(tx kv.Tx) error {
+		if err := chainKv.View(ctx, func(tx kv.Tx) error {
 			badBlockHeader, hErr := rawdb.ReadHeaderByHash(tx, config.BadBlockHash)
 			if badBlockHeader != nil {
 				unwindPoint := badBlockHeader.Number.Uint64() - 1
@@ -1153,10 +1144,12 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 		entry := engineapi.NewTestingRPCEntry(s.engineBackendRPC, s.logger, s.chainDB)
 		testingEntry = &entry
 	}
-	// Eager witness cache (embedded RPC only). Gate on the DB-persisted
-	// commitment-history flag, not the CLI flag: a datadir built without it can never
-	// build a witness, so the cache would only accumulate failures.
+	// Eager witness cache (embedded RPC only). A datadir built with commitment history
+	// recomputes on miss (durable path); a minimal node without it can still serve recent
+	// witnesses cache-only when --witness.cache.head-capture is set, building each head from
+	// a pinned parent snapshot. Without either, no witness can be built, so the cache stays off.
 	enableWitnessCache := httpRpcCfg.WitnessCacheBlocks > 0
+	headCaptureMode := false
 	if enableWitnessCache {
 		var commitmentHistory bool
 		if err := chainKv.View(ctx, func(tx kv.Tx) error {
@@ -1166,12 +1159,14 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 		}); err != nil {
 			s.logger.Warn("[witness-cache] could not read commitment-history flag; cache disabled", "err", err)
 			enableWitnessCache = false
-		} else if !jsonrpc.WitnessCacheShouldEnable(httpRpcCfg.WitnessCacheBlocks, commitmentHistory) {
-			s.logger.Warn("[witness-cache] --witness.cache.blocks set but commitment history is disabled; cache disabled (restart with --prune.experimental.include-commitment-history)")
-			enableWitnessCache = false
+		} else {
+			enableWitnessCache, headCaptureMode = jsonrpc.WitnessCacheMode(httpRpcCfg.WitnessCacheBlocks, commitmentHistory, httpRpcCfg.WitnessCacheHeadCapture)
+			if !enableWitnessCache {
+				s.logger.Warn("[witness-cache] --witness.cache.blocks set but commitment history is disabled and --witness.cache.head-capture is off; cache disabled (restart with --prune.experimental.include-commitment-history or --witness.cache.head-capture)")
+			}
 		}
 	}
-	witnessCache, witnessBuilder := jsonrpc.NewWitnessCacheBuilderAPI(enableWitnessCache, chainKv, s.ethRpcClient, s.rpcFilters, s.rpcDaemonStateCache, blockReader, &httpRpcCfg, s.engine, s.polygonBridge)
+	witnessCache, witnessBuilder := jsonrpc.NewWitnessCacheBuilderAPI(enableWitnessCache, headCaptureMode, chainKv, s.ethRpcClient, s.rpcFilters, s.rpcDaemonStateCache, blockReader, &httpRpcCfg, s.engine, s.polygonBridge)
 	if witnessBuilder != nil {
 		var headCh chan [][]byte
 		headCh, s.unsubscribeWitnessCache = s.notifications.Events.AddHeaderSubscription()
@@ -1179,7 +1174,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 			jsonrpc.RunWitnessCacheBuilder(ctx, witnessBuilder, headCh)
 			return nil
 		})
-		s.logger.Info("[witness-cache] eager witness cache enabled", "blocks", jsonrpc.WitnessCacheCapacity(httpRpcCfg.WitnessCacheBlocks))
+		s.logger.Info("[witness-cache] eager witness cache enabled", "blocks", jsonrpc.WitnessCacheCapacity(httpRpcCfg.WitnessCacheBlocks), "headCapture", headCaptureMode)
 	}
 
 	mcpNamespaces := []string{"eth", "erigon", "ots", "txpool", "net", "admin", "debug", "trace"}
@@ -1618,6 +1613,10 @@ func (s *Ethereum) Stop() error {
 	}
 
 	s.chainDB.Close()
+
+	if s.execModule != nil {
+		s.execModule.Close()
+	}
 
 	if s.config.Downloader != nil {
 		_ = s.config.Downloader.CloseTorrentLogFile()
