@@ -746,10 +746,6 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 						}
 					}
 
-					// The BAL was the last reader of the recorded write sets;
-					// return their map containers to the pools.
-					applyResult.TxIO.ReleaseOutputMaps()
-
 					if err := blockValidatorWaiter.Wait(); err != nil {
 						// Block-validity verdict from post-execution validation. Route it
 						// through failCandidate (earliest-block-wins, exec supersedes a
@@ -762,6 +758,10 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 						finalized = true
 						continue
 					}
+
+					// The BAL was the last reader of the recorded write sets;
+					// return their map containers to the pools.
+					applyResult.TxIO.ReleaseOutputMaps()
 
 					// Mark this block as fully applied. The exit-completeness
 					// check at channel-close compares this set against the
@@ -1944,7 +1944,9 @@ func (result *execResult) calcFees(
 		newCoinbaseBalance = coinbaseAcc.Balance
 	}
 	burntAddr := result.ExecutionResult.BurntContractAddress
-	hasBurnt := !burntAddr.IsNil()
+	// A burnt write can only differ from the pre-state when London adds a
+	// non-zero FeeBurnt, so skip the whole read otherwise.
+	hasBurnt := !burntAddr.IsNil() && chainRules.IsLondon && !result.ExecutionResult.FeeBurnt.IsZero()
 	var newBurntBalance uint256.Int
 	var burntAcc *accounts.Account
 	if hasBurnt {
@@ -1999,9 +2001,10 @@ func (result *execResult) calcFees(
 		newCoinbaseBalance.Add(&newCoinbaseBalance, &result.ExecutionResult.FeeTipped)
 	}
 	oldBurntBalance := newBurntBalance
-	if hasBurnt && chainRules.IsLondon {
+	if hasBurnt {
 		newBurntBalance.Add(&newBurntBalance, &result.ExecutionResult.FeeBurnt)
 	}
+	emitBurnt := hasBurnt && newBurntBalance != oldBurntBalance
 
 	// EIP-161 empty-removal: even when the tip is zero (newBal == oldBal)
 	// the coinbase must be "touched" so the commitment calculator sees the
@@ -2020,6 +2023,10 @@ func (result *execResult) calcFees(
 		coinbaseNonce == 0 && coinbaseEmptyCodeHash && !coinbaseHasCodeHashWrite
 	emitCoinbase := newCoinbaseBalance != oldCoinbaseBalance ||
 		(coinbaseEmptyRemoval && coinbaseEmptyPre && newCoinbaseBalance.IsZero())
+
+	if !emitCoinbase && !emitBurnt {
+		return nil, nil
+	}
 
 	addWrites := &state.WriteSet{}
 	if emitCoinbase {
@@ -2051,15 +2058,7 @@ func (result *execResult) calcFees(
 			// stale CallNewAccountGas (+25000) for a CALL-with-value to the
 			// coinbase mid-tx. Mainnet block 25151825 tx 31's SD+CREATE2-on-
 			// coinbase MEV pattern surfaced this divergence.
-			addrAcc := &accounts.Account{Balance: newCoinbaseBalance}
-			if coinbaseAcc != nil {
-				addrAcc.Nonce = coinbaseAcc.Nonce
-				addrAcc.Incarnation = coinbaseAcc.Incarnation
-				addrAcc.CodeHash = coinbaseAcc.CodeHash
-			} else {
-				addrAcc.Nonce = coinbaseNonce
-				addrAcc.CodeHash = accounts.EmptyCodeHash
-			}
+			addrAcc := feeAddressAccount(coinbaseAcc, newCoinbaseBalance, coinbaseNonce)
 			addWrites.SetAddress(result.Coinbase, &state.VersionedWrite[*accounts.Account]{
 				WriteHeader: state.WriteHeader{
 					Address: result.Coinbase,
@@ -2070,7 +2069,7 @@ func (result *execResult) calcFees(
 			})
 		}
 	}
-	if hasBurnt && newBurntBalance != oldBurntBalance {
+	if emitBurnt {
 		addWrites.SetBalance(burntAddr, &state.VersionedWrite[uint256.Int]{
 			WriteHeader: state.WriteHeader{
 				Address: burntAddr,
@@ -2081,14 +2080,7 @@ func (result *execResult) calcFees(
 			Val: newBurntBalance,
 		})
 		// Mirror the AddressPath emission above for the burnt address.
-		burntAddrAcc := &accounts.Account{Balance: newBurntBalance}
-		if burntAcc != nil {
-			burntAddrAcc.Nonce = burntAcc.Nonce
-			burntAddrAcc.Incarnation = burntAcc.Incarnation
-			burntAddrAcc.CodeHash = burntAcc.CodeHash
-		} else {
-			burntAddrAcc.CodeHash = accounts.EmptyCodeHash
-		}
+		burntAddrAcc := feeAddressAccount(burntAcc, newBurntBalance, 0)
 		addWrites.SetAddress(burntAddr, &state.VersionedWrite[*accounts.Account]{
 			WriteHeader: state.WriteHeader{
 				Address: burntAddr,
@@ -2100,6 +2092,15 @@ func (result *execResult) calcFees(
 	}
 
 	return addWrites, nil
+}
+
+// feeAddressAccount builds the AddressPath value for a fee credit from read, the
+// address's pre-credit account. nonce applies only when there is no pre-state.
+func feeAddressAccount(read *accounts.Account, balance uint256.Int, nonce uint64) *accounts.Account {
+	if read == nil {
+		return &accounts.Account{Balance: balance, Nonce: nonce, CodeHash: accounts.EmptyCodeHash}
+	}
+	return &accounts.Account{Balance: balance, Nonce: read.Nonce, Incarnation: read.Incarnation, CodeHash: read.CodeHash}
 }
 
 func (result *execResult) finalizeTx(
