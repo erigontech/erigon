@@ -27,7 +27,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 
 	btree2 "github.com/tidwall/btree"
 
@@ -67,11 +66,6 @@ type TemporalMemBatch struct {
 	latestStateLock sync.RWMutex
 	domains         [kv.DomainLen]map[string][]dataWithTxNum
 	storage         *btree2.Map[string, []dataWithTxNum] // TODO: replace hardcoded domain name to per-config configuration of available Guarantees/AccessMethods (range vs get)
-
-	// published is set once readers may hold this batch's in-memory maps (an SD
-	// published to RPC readers). ClearRam then becomes a no-op: the maps go to
-	// GC with the last reader instead of being emptied under it.
-	published atomic.Bool
 
 	domainWriters [kv.DomainLen]*DomainBufferedWriter
 	iiWriters     []*InvertedIndexBufferedWriter
@@ -369,9 +363,6 @@ func (sd *TemporalMemBatch) SizeEstimate() uint64 {
 }
 
 func (sd *TemporalMemBatch) ClearRam() {
-	if sd.published.Load() {
-		return
-	}
 	sd.latestStateLock.Lock()
 	defer sd.latestStateLock.Unlock()
 	for i := range sd.domains {
@@ -643,8 +634,10 @@ func (sd *TemporalMemBatch) IndexAdd(table kv.InvertedIdx, key []byte, txNum uin
 	panic(fmt.Errorf("unknown index %s", table))
 }
 
-func (sd *TemporalMemBatch) MarkPublished() { sd.published.Store(true) }
-
+// Close releases writer resources but never clears the in-memory maps:
+// readers of a published SD may still hold them, and an unpublished batch is
+// dropped right after Close anyway, so the GC reclaims the maps either way.
+// Owners that clear-and-reuse a batch call ClearRam explicitly instead.
 func (sd *TemporalMemBatch) Close() {
 	for _, d := range sd.domainWriters {
 		if d != nil {
@@ -662,7 +655,6 @@ func (sd *TemporalMemBatch) Close() {
 	for _, iiWriter := range sd.pastIIWriters {
 		iiWriter.close()
 	}
-	sd.ClearRam()
 }
 
 func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {

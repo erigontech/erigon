@@ -27,13 +27,12 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 )
 
-// TestClose_PublishedSDKeepsDomainRam pins the lifetime guarantee readers rely
-// on: a read view over a published SD keeps its DomainReader pointing at the
-// SD's in-memory domain maps, so Close on a published SD must release writer
-// resources without clearing those maps — otherwise in-flight domain reads
-// (e.g. the head block's receipts) silently miss and fall back to a tx that
-// does not have the data yet.
-func TestClose_PublishedSDKeepsDomainRam(t *testing.T) {
+// TestClose_KeepsDomainRamForReaders pins the lifetime guarantee readers rely
+// on: a read view keeps its DomainReader pointing at the SD's in-memory domain
+// maps, so Close must release writer resources without clearing those maps —
+// otherwise in-flight domain reads (e.g. the head block's receipts) silently
+// miss and fall back to a tx that does not have the data yet.
+func TestClose_KeepsDomainRamForReaders(t *testing.T) {
 	t.Parallel()
 	db := newTestDb(t, 16)
 	ctx := context.Background()
@@ -60,8 +59,7 @@ func TestClose_PublishedSDKeepsDomainRam(t *testing.T) {
 	}
 	assertReceiptVisible("the in-flight receipt must be visible through the view before Close")
 
-	sd.MarkPublished()
 	sd.Close()
 
-	assertReceiptVisible("Close on a published SD must not clear the domain RAM readers still hold")
+	assertReceiptVisible("Close must not clear the domain RAM readers still hold")
 }

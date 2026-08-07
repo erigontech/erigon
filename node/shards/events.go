@@ -266,9 +266,6 @@ func (e *Events) AddOverlaySubscription() (chan *execctx.SharedDomains, func()) 
 // PublishOverlay sends the SharedDomains to all in-process subscribers.
 // The SD is shared read-only; the background commit goroutine owns its lifecycle.
 func (e *Events) PublishOverlay(sd *execctx.SharedDomains) {
-	if sd != nil {
-		sd.MarkPublished()
-	}
 	e.latestSD.Store(sd)
 	e.lock.Lock()
 	defer e.lock.Unlock()
