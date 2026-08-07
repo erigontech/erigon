@@ -90,7 +90,11 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 	// A quarter-slot tick lands well inside every slot without assuming when in the slot the head
 	// arrives; preparation is skipped unless the next slot is ours, so the cost is a proposer
 	// lookup on a state we already hold.
-	ticker := time.NewTicker(time.Duration(a.beaconChainCfg.SecondsPerSlot) * time.Second / 4)
+	tick := time.Duration(a.beaconChainCfg.SecondsPerSlot) * time.Second / 4
+	// Preparation is silent on a node that rarely proposes, so say once that it is running:
+	// otherwise a loop that never started looks exactly like one with nothing to do.
+	log.Info("PayloadPreparation: watching for proposals", "every", tick)
+	ticker := time.NewTicker(tick)
 	defer ticker.Stop()
 
 	var lastPrepared uint64
