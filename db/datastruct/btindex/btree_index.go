@@ -17,6 +17,7 @@
 package btindex
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
@@ -41,6 +42,81 @@ import (
 )
 
 const BtreeLogPrefix = "btree"
+
+// ReadKvDataSizeFromBt returns the .kv data size the btree accessor
+// at indexPath was built against — the `u` parameter of its
+// EliasFano offset section, set to `uint64(kv.Size())` at build
+// time. Reads bounded byte ranges: never opens the .kv, never mmaps
+// the .bt in a way that would fault on out-of-bounds offsets.
+//
+// Used by pre-open probes to detect an accessor addressing bytes
+// past the current .kv's end (the pre-fix mode-C regen corruption
+// class), where opening the decompressor and iterating would
+// SIGSEGV inside runtime.memmove — an unrecoverable fault.
+func ReadKvDataSizeFromBt(indexPath string) (uint64, error) {
+	f, err := os.Open(indexPath)
+	if err != nil {
+		return 0, err
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return 0, err
+	}
+	if st.Size() < 1 {
+		return 0, fmt.Errorf("btindex: %s: empty file", indexPath)
+	}
+	var lead [1]byte
+	if _, err := f.ReadAt(lead[:], 0); err != nil {
+		return 0, fmt.Errorf("btindex: %s: read lead byte: %w", indexPath, err)
+	}
+	switch lead[0] {
+	case btFirstByteLegacy:
+		// Legacy layout: EF starts at offset 0. u lives at bytes 8:16
+		// (per eliasfano32.Max: BigEndian.Uint64(r[8:16]) - 1).
+		if st.Size() < 16 {
+			return 0, fmt.Errorf("btindex: %s: legacy file shorter than EF header", indexPath)
+		}
+		var efHdr [16]byte
+		if _, err := f.ReadAt(efHdr[:], 0); err != nil {
+			return 0, fmt.Errorf("btindex: %s: read legacy EF header: %w", indexPath, err)
+		}
+		u := binary.BigEndian.Uint64(efHdr[8:16])
+		if u == 0 {
+			return 0, fmt.Errorf("btindex: %s: EF u==0 in legacy header", indexPath)
+		}
+		return u, nil
+	case btFirstByteUseFooter:
+		// Footer-based layout: read metadata+anchor, extract EfOffset,
+		// then read 16 bytes at EfOffset for the EF header.
+		if st.Size() < int64(btMetadataLen+btAnchorLen) {
+			return 0, fmt.Errorf("btindex: %s: footer file shorter than metadata+anchor", indexPath)
+		}
+		tailLen := int64(btMetadataLen + btAnchorLen)
+		tail := make([]byte, tailLen)
+		if _, err := f.ReadAt(tail, st.Size()-tailLen); err != nil {
+			return 0, fmt.Errorf("btindex: %s: read footer: %w", indexPath, err)
+		}
+		footer, _, err := ReadFooter(tail)
+		if err != nil {
+			return 0, fmt.Errorf("btindex: %s: parse footer: %w", indexPath, err)
+		}
+		if int64(footer.Meta.EfOffset)+16 > st.Size() {
+			return 0, fmt.Errorf("btindex: %s: EfOffset=%d + 16 > file size %d", indexPath, footer.Meta.EfOffset, st.Size())
+		}
+		var efHdr [16]byte
+		if _, err := f.ReadAt(efHdr[:], int64(footer.Meta.EfOffset)); err != nil {
+			return 0, fmt.Errorf("btindex: %s: read EF header at %d: %w", indexPath, footer.Meta.EfOffset, err)
+		}
+		u := binary.BigEndian.Uint64(efHdr[8:16])
+		if u == 0 {
+			return 0, fmt.Errorf("btindex: %s: EF u==0 in footer-format header", indexPath)
+		}
+		return u, nil
+	default:
+		return 0, fmt.Errorf("btindex: %s: unknown lead byte 0x%02x", indexPath, lead[0])
+	}
+}
 
 // DefaultBtreeM - amount of keys on leaf of BTree
 // It will do log2(M) co-located-reads from data file - for binary-search inside leaf

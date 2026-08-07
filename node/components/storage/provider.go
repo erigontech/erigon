@@ -916,6 +916,7 @@ func (p *Provider) Initialize(deps Deps) error {
 			// commitment file independently — they don't contend.
 			extractBootstrapCommitmentAnchors(ctx, deps.Inventory,
 				p.ChainDB, p.BlockReader, p.snapDir, logger)
+			probeBootstrapDomainFiles(deps.Inventory, p.snapDir, logger)
 		}
 	}
 

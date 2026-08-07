@@ -815,6 +815,58 @@ func TestDecodeListNodesV0_Validation(t *testing.T) {
 	}
 }
 
+// TestReadKvDataSizeFromBt validates the bounded-byte-range reader
+// against a real .bt built via BuildBtreeIndexWithDecompressor
+// (footer format). u is the EF-encoded upper bound on offsets the
+// accessor addresses; in a healthy pair it stays below the .kv file
+// size (data-area sits after decompressor header). The pre-open
+// probe's positive signal is u >= current .kv Stat().Size() — the
+// case that would SIGSEGV on runtime.memmove past the mmap end.
+func TestReadKvDataSizeFromBt(t *testing.T) {
+	tmp := t.TempDir()
+	logger := log.New()
+	dataPath := generateKV(t, tmp, 52, 300, 100, logger, 0)
+	decomp, err := seg.NewDecompressor(dataPath)
+	require.NoError(t, err)
+	kvSize := uint64(decomp.Size())
+	r := seg.NewReader(decomp.MakeGetter(), seg.CompressNone)
+	btPath := filepath.Join(tmp, "a.bt")
+	require.NoError(t, BuildBtreeIndexWithDecompressor(btPath, filepath.Join(tmp, "a.kvei"), r, background.NewProgressSet(), tmp, 1, logger, true, statecfg.AccessorBTree|statecfg.AccessorExistence))
+	decomp.Close()
+
+	u, err := ReadKvDataSizeFromBt(btPath)
+	require.NoError(t, err)
+	require.Less(t, u, kvSize, "u sits below .kv size on a healthy pair (data-area is post-header)")
+}
+
+// TestReadKvDataSizeFromBt_ShrinkDetection pins the corruption-detect
+// case: build .bt against a valid .kv, then truncate the .kv below u.
+// u >= current .kv size is the pre-open signal the runtime read path
+// would SIGSEGV on (accessor addresses bytes past the mmap end).
+func TestReadKvDataSizeFromBt_ShrinkDetection(t *testing.T) {
+	tmp := t.TempDir()
+	logger := log.New()
+	dataPath := generateKV(t, tmp, 52, 300, 100, logger, 0)
+	decomp, err := seg.NewDecompressor(dataPath)
+	require.NoError(t, err)
+	kvSize := uint64(decomp.Size())
+	r := seg.NewReader(decomp.MakeGetter(), seg.CompressNone)
+	btPath := filepath.Join(tmp, "a.bt")
+	require.NoError(t, BuildBtreeIndexWithDecompressor(btPath, filepath.Join(tmp, "a.kvei"), r, background.NewProgressSet(), tmp, 1, logger, true, statecfg.AccessorBTree|statecfg.AccessorExistence))
+	decomp.Close()
+
+	u, err := ReadKvDataSizeFromBt(btPath)
+	require.NoError(t, err)
+
+	// Truncate to well below u so the mismatch is unambiguous.
+	require.NoError(t, os.Truncate(dataPath, int64(u)/2))
+	newSt, err := os.Stat(dataPath)
+	require.NoError(t, err)
+
+	require.GreaterOrEqual(t, u, uint64(newSt.Size()), "u must fall at or past truncated size — the pre-open corruption signal")
+	require.Less(t, uint64(newSt.Size()), kvSize)
+}
+
 func TestNodeEncode_NoAlloc(t *testing.T) {
 	node := Node{key: []byte("some-key")}
 	var headerBuf [10]byte

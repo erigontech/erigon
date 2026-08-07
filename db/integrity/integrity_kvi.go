@@ -142,6 +142,13 @@ var (
 	// whether to treat as informational (minimal mode) or as a hard
 	// failure (archive mode where history is expected to be present).
 	ErrCommitmentReplayNoHistory = fmt.Errorf("%w: replay history unavailable for in-block tail", ErrIntegrity)
+
+	// ErrDomainFileSegInvalid: a state-domain .kv's accessor advertises
+	// offsets past the .kv's on-disk end. A runtime Getter would
+	// SIGSEGV inside runtime.memmove following those offsets — a fault
+	// Go's defer/recover cannot catch. Caught pre-open by cross-checking
+	// the accessor's max-offset against os.Stat on the .kv.
+	ErrDomainFileSegInvalid = fmt.Errorf("%w: domain file seg invalid", ErrIntegrity)
 )
 
 // CheckKvis checks all kvi index files for a domain sequentially (one file at a time),
