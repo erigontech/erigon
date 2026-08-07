@@ -49,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	libkzg "github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/iouring"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -452,7 +453,16 @@ var (
 	}
 	WitnessCacheBlocksFlag = cli.UintFlag{
 		Name:  "witness.cache.blocks",
-		Usage: "Number of recent blocks whose legacy debug_executionWitness result is eagerly cached in memory, keyed by block hash in an LRU (embedded RPC only; requires --prune.experimental.include-commitment-history). 0 disables the cache; capped at 96. Each witness is stored as serialized JSON so a hit is served verbatim; memory use is roughly this count times the per-block witness size.",
+		Usage: "Number of recent blocks whose legacy debug_executionWitness result is eagerly cached in memory, keyed by block hash in an LRU (embedded RPC only; requires either --prune.experimental.include-commitment-history for recompute-on-miss or --witness.cache.head-capture for cache-only serving on a minimal node). 0 disables the cache; capped at 96. Each witness is stored as serialized JSON so a hit is served verbatim; memory use is roughly this count times the per-block witness size.",
+		Value: 0,
+	}
+	WitnessCacheHeadCaptureFlag = cli.BoolFlag{
+		Name:  "witness.cache.head-capture",
+		Usage: "Serve recent-block debug_executionWitness on a minimal node without commitment-domain history: each head block's witness is built from a pinned parent commitment snapshot and the account/storage/code history the node keeps. Witnesses are served cache-only (out-of-window on miss, never a history recompute). Embedded RPC only.",
+	}
+	WitnessCacheMaxMBFlag = cli.UintFlag{
+		Name:  "witness.cache.maxmb",
+		Usage: "Resident-memory cap (in MB) for the witness cache; eviction triggers on whichever of the block count (--witness.cache.blocks, capped at 96) or this byte budget binds first. 0 = count-only (no byte cap).",
 		Value: 0,
 	}
 	RpcTxSyncDefaultTimeoutFlag = cli.DurationFlag{
@@ -1037,6 +1047,11 @@ var (
 		Name:  "caplin.checkpoint-sync.disable",
 		Usage: "disable checkpoint sync in caplin",
 		Value: false,
+	}
+	CaplinResumeMaxStalenessEpochsFlag = cli.Uint64Flag{
+		Name:  "caplin.resume-max-staleness-epochs",
+		Usage: "max epochs a locally-finalized state may be stale to resume from it on restart instead of remote checkpoint syncing (0 = default: the anchor fork's sidecar-retention window). Data-availability bound; larger values are clamped to the retention window",
+		Value: 0,
 	}
 
 	CaplinEnableSnapshotGeneration = cli.BoolFlag{
@@ -1756,11 +1771,12 @@ func setBorConfig(ctx *cli.Command, cfg *ethconfig.Config, nodeConfig *nodecfg.C
 func setBuilder(ctx *cli.Command, cfg *buildercfg.BuilderConfig) {
 	cfg.EnabledPOS = !ctx.IsSet(ProposingDisableFlag.Name)
 
-	if ctx.IsSet(MinerExtraDataFlag.Name) {
+	switch {
+	case ctx.IsSet(MinerExtraDataFlag.Name):
 		cfg.ExtraData = []byte(ctx.String(MinerExtraDataFlag.Name))
-	} else if len(version.GitCommit) > 0 {
+	case len(version.GitCommit) > 0:
 		cfg.ExtraData = []byte(ctx.Root().Name + "-" + version.VersionWithCommit(version.GitCommit))
-	} else {
+	default:
 		cfg.ExtraData = []byte(ctx.Root().Name + "-" + ctx.Root().Version)
 	}
 	maxExtra := min(int(params.MaximumExtraDataSize), types.ExtraVanityLength)
@@ -1854,6 +1870,7 @@ func setCaplin(ctx *cli.Command, cfg *ethconfig.Config) {
 	cfg.CaplinConfig.ImmediateBlobsBackfilling = ctx.Bool(CaplinImmediateBlobBackfillFlag.Name)
 	cfg.CaplinConfig.SnapshotGenerationEnabled = ctx.Bool(CaplinEnableSnapshotGeneration.Name)
 	cfg.CaplinConfig.DisabledCheckpointSync = ctx.Bool(CaplinDisableCheckpointSyncFlag.Name)
+	cfg.CaplinConfig.ResumeMaxStalenessEpochs = ctx.Uint64(CaplinResumeMaxStalenessEpochsFlag.Name)
 	cfg.CaplinConfig.ColumnKeepSlots = ctx.Uint64(CaplinColumnKeepSlotsFlag.Name)
 	// bunch of extra stuff
 	cfg.CaplinConfig.MevRelayUrl = ctx.String(CaplinMevRelayUrl.Name)
@@ -2036,6 +2053,14 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 	if ctx.IsSet(ExecSerialFlag.Name) && ctx.Bool(ExecSerialFlag.Name) {
 		dbg.SetExec3Workers(1)
 		cfg.ExecWorkerCount = 1
+	}
+	// If FILES_ASYNC_IO is set but io_uring is unavailable (old kernel, or blocked
+	// by a seccomp sandbox such as Docker's default profile), disable the gate at
+	// startup so it doesn't pay the per-read residency-probe cost for warms that
+	// would never run. Warming is an optimization; reads just use ordinary faults.
+	if dbg.FilesAsyncIO && runtime.GOOS == "linux" && !iouring.Available() {
+		log.Warn("FILES_ASYNC_IO is set but io_uring is unavailable (unsupported kernel, or blocked by a seccomp sandbox such as Docker's default profile); disabling it — reads will use ordinary blocking faults")
+		dbg.FilesAsyncIO = false
 	}
 	if c := ctx.Int(DBReadConcurrencyFlag.Name); c > 0 {
 		if limit := httpcfg.RoTxsLimit(c, cfg.ExecWorkerCount); int64(c) < limit {
@@ -2242,10 +2267,12 @@ func setDevnetEthConfig(ctx *cli.Command, cfg *ethconfig.Config, logger log.Logg
 	genesisTime := uint64(time.Now().Unix())
 	// Compute the EL genesis block hash so the beacon state's Eth1Data
 	// matches the actual chain genesis.
-	elGenesisBlock, _, err := genesiswrite.GenesisToBlock(nil, cfg.Genesis, cfg.Dirs, logger)
+	elGenesisBlock, ibs, err := genesiswrite.GenesisToBlock(nil, cfg.Genesis, cfg.Dirs, logger)
 	if err != nil {
 		Fatalf("Failed to compute dev EL genesis hash: %v", err)
 	}
+	defer ibs.Close()
+
 	elGenesisHash := elGenesisBlock.Hash()
 	beaconState, _, err := devgenesis.BuildGenesisState(seed, validatorCount, &beaconCfg, genesisTime, elGenesisHash)
 	if err != nil {

@@ -24,9 +24,15 @@ var (
 	witnessCacheBuildOKCounter         = metrics.GetOrCreateCounter("witness_cache_build_ok_total")
 	witnessCacheBuildFailVerifyCounter = metrics.GetOrCreateCounter("witness_cache_build_fail_verify_total")
 	witnessCacheBuildFailOtherCounter  = metrics.GetOrCreateCounter("witness_cache_build_fail_other_total")
+	witnessCacheStalePinSkipCounter    = metrics.GetOrCreateCounter("witness_cache_stale_pin_skip_total")
 	witnessCacheCoalesceDropCounter    = metrics.GetOrCreateCounter("witness_cache_coalesce_drop_total")
 
+	// Counts overflow events, not discarded witnesses: one overflow drops up to
+	// cap(ch)/2 queued pushes.
+	witnessFeedOverflowCounter = metrics.GetOrCreateCounter("witness_feed_overflow_total")
+
 	witnessCacheEntriesResidentGauge = metrics.GetOrCreateGauge("witness_cache_entries_resident")
+	witnessFeedSubscribersGauge      = metrics.GetOrCreateGauge("witness_feed_subscribers")
 
 	witnessCacheBuildDuration = metrics.GetOrCreateHistogram("witness_cache_build_duration_seconds")
 )

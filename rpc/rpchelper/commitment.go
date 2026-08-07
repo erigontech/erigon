@@ -106,10 +106,12 @@ func (r *CommitmentReplay) ComputeCustomCommitmentFromStateHistory(
 		return nil, err
 	}
 	genesisHeader, _ := genesiswrite.GenesisWithoutStateToBlock(genesis)
-	_, _, err = genesiswrite.ComputeGenesisCommitment(ctx, genesis, ttx, tsd, genesisHeader)
+	_, ibs, err := genesiswrite.ComputeGenesisCommitment(ctx, genesis, ttx, tsd, genesisHeader)
 	if err != nil {
 		return nil, err
 	}
+	ibs.Close()
+
 	genesisRoot, err := tsd.GetCommitmentCtx().Trie().RootHash()
 	if err != nil {
 		return nil, err

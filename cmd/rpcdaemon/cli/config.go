@@ -136,6 +136,8 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().BoolVar(&cfg.TraceCompatibility, "trace.compat", false, "Bug for bug compatibility with OE for trace_ routines")
 	rootCmd.PersistentFlags().BoolVar(&cfg.GethCompatibility, "rpc.gethcompat", false, "Enables Geth-compatible storage iteration order for debug_storageRangeAt (sorted by keccak256 hash). Disabled by default for performance.")
 	rootCmd.PersistentFlags().UintVar(&cfg.WitnessCacheBlocks, utils.WitnessCacheBlocksFlag.Name, utils.WitnessCacheBlocksFlag.Value, utils.WitnessCacheBlocksFlag.Usage)
+	rootCmd.PersistentFlags().BoolVar(&cfg.WitnessCacheHeadCapture, utils.WitnessCacheHeadCaptureFlag.Name, false, utils.WitnessCacheHeadCaptureFlag.Usage+" (standalone daemon parses this flag but does not act on it; head-capture runs embedded only)")
+	rootCmd.PersistentFlags().UintVar(&cfg.WitnessCacheMaxMB, utils.WitnessCacheMaxMBFlag.Name, utils.WitnessCacheMaxMBFlag.Value, utils.WitnessCacheMaxMBFlag.Usage)
 	rootCmd.PersistentFlags().StringVar(&cfg.TxPoolApiAddr, "txpool.api.addr", "", "txpool api network address, for example: 127.0.0.1:9090 (default: use value of --private.api.addr)")
 
 	rootCmd.PersistentFlags().StringVar(&stateCacheStr, "state.cache", "0MB", "Amount of data to store in StateCache (enabled if no --datadir set). Set 0 to disable StateCache. Defaults to 0MB RAM")
@@ -297,11 +299,12 @@ func checkDbCompatibility(ctx context.Context, db kv.RoDB) error {
 	if ok {
 		var compatible bool
 		dbSchemaVersion := &kv.DBSchemaVersion
-		if major != dbSchemaVersion.Major {
+		switch {
+		case major != dbSchemaVersion.Major:
 			compatible = false
-		} else if minor != dbSchemaVersion.Minor {
+		case minor != dbSchemaVersion.Minor:
 			compatible = false
-		} else {
+		default:
 			compatible = true
 		}
 		if !compatible {
@@ -323,16 +326,17 @@ func EmbeddedServices(ctx context.Context,
 	miningServer txpoolproto.MiningServer, stateDiffClient StateChangesClient,
 	logger log.Logger, events *shards.Events,
 ) (eth rpchelper.ApiBackend, txPool txpoolproto.TxpoolClient, mining txpoolproto.MiningClient, stateCache kvcache.Cache, ff *rpchelper.Filters) {
-	if stateCacheCfg.LocalCache != nil {
+	switch {
+	case stateCacheCfg.LocalCache != nil:
 		// In-process: read state directly from SharedDomains overlay.
 		// This replaces the coherent cache (kvcache) for embedded mode —
 		// the overlay is always current, has zero memory overhead, and
 		// doesn't need the StateChanges gRPC stream to stay coherent.
 		stateCache = stateCacheCfg.LocalCache
-	} else if stateCacheCfg.CacheSize > 0 {
+	case stateCacheCfg.CacheSize > 0:
 		// Remote RPCDaemon: use coherent cache fed by StateChanges stream.
 		stateCache = kvcache.New(stateCacheCfg)
-	} else {
+	default:
 		stateCache = kvcache.NewLatestBatchCache()
 	}
 
@@ -569,7 +573,8 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 	var remoteHeimdallReader *heimdall.RemoteReader
 
 	if cfg.WithDatadir {
-		if cc != nil && cc.Bor != nil {
+		switch {
+		case cc != nil && cc.Bor != nil:
 			stateReceiverContractAddress := cc.Bor.StateReceiverContractAddress()
 
 			bridgeConfig := bridge.ReaderConfig{
@@ -594,7 +599,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			}
 
 			engine = bor.NewRo(cc, blockReader, logger)
-		} else if cc != nil && cc.Aura != nil {
+		case cc != nil && cc.Aura != nil:
 			consensusDB, err := kv2.New(dbcfg.ConsensusDB, logger).Path(filepath.Join(cfg.DataDir, "aura")).Accede(true).Open(ctx)
 			if err != nil {
 				return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
@@ -606,7 +611,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			if cc.TerminalTotalDifficulty != nil {
 				engine = merge.New(engine) // the Merge
 			}
-		} else {
+		default:
 			engine = ethash.NewFaker()
 			if cc.TerminalTotalDifficulty != nil {
 				engine = merge.New(engine) // the Merge
@@ -1061,7 +1066,8 @@ func (e *remoteRulesEngine) init(db kv.RoDB, blockReader dbservices.FullBlockRea
 
 	// TODO(yperbasis): try to unify with CreateRulesEngine
 	var eng rules.Engine
-	if cc.Aura != nil {
+	switch {
+	case cc.Aura != nil:
 		auraKv, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), logger, remoteKV).
 			WithBucketsConfig(kv.AuRaTablesCfg).
 			Open()
@@ -1074,9 +1080,9 @@ func (e *remoteRulesEngine) init(db kv.RoDB, blockReader dbservices.FullBlockRea
 		if err != nil {
 			return err
 		}
-	} else if cc.Bor != nil {
+	case cc.Bor != nil:
 		eng = bor.NewRo(cc, blockReader, logger)
-	} else {
+	default:
 		eng = ethash.NewFaker()
 	}
 
