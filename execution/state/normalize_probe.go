@@ -59,10 +59,14 @@ var normProbe struct {
 	fromMap     [normProbeClassCount]atomic.Uint64 // versionMap AddressPath answered
 	domainReads atomic.Uint64                      // versioned reader reached the domain
 
-	stgFallbacks    atomic.Uint64 // no-op filter reached ReadAccountStorage
-	stgSlotInReads  atomic.Uint64 // the tx recorded a read of this exact slot
-	stgAddrInReads  atomic.Uint64 // other slots of this address recorded, not this one
-	stgAddrCold     atomic.Uint64 // no storage read recorded for this address
+	stgFallbacks   atomic.Uint64 // no-op filter reached ReadAccountStorage
+	stgSlotInReads atomic.Uint64 // the tx recorded a read of this exact slot
+	stgAddrInReads atomic.Uint64 // other slots of this address recorded, not this one
+	stgAddrCold    atomic.Uint64 // no storage read recorded for this address
+	cacheWritten   atomic.Uint64 // CachedReaderV3 hit an account written this block
+	cacheCommitted atomic.Uint64 // ... the decoded committed view
+	cacheMiss      atomic.Uint64 // ... nothing cached, went to the domain
+
 	stgDomainReads  atomic.Uint64 // versioned reader reached the domain for a slot
 	stgDomainFound  atomic.Uint64 // ... and the slot existed
 	stgWriteIsZero  atomic.Uint64 // the write being filtered is zero
@@ -241,6 +245,8 @@ func NormalizeProbeDump(label string) {
 		fmt.Printf("NORMALIZE_PROBE %s:   domainRead site %6d reads / %d distinct addrs  %s\n",
 			label, s.v, len(normProbeCallers.addrs[s.k]), s.k)
 	}
+	fmt.Printf("NORMALIZE_PROBE %s: cachedReader written=%d committed=%d miss=%d\n",
+		label, normProbe.cacheWritten.Load(), normProbe.cacheCommitted.Load(), normProbe.cacheMiss.Load())
 	stg := normProbe.stgFallbacks.Load()
 	if stg == 0 {
 		return
