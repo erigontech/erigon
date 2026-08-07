@@ -462,7 +462,46 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger) (*Downl
 
 	d.ctx, d.stop = context.WithCancel(context.Background())
 
+	// Recover from an ungraceful previous shutdown. The clean-shutdown
+	// marker is written by Close() after all cleanup completes and is
+	// removed here at boot. If it's absent at boot the previous exit
+	// didn't run cleanup (crash, kill -9, hardware) — sweep orphan
+	// sidecars so the running process starts on the same clean footing
+	// a graceful restart would leave.
+	if wasClean := consumeCleanShutdownMarker(cfg.Dirs.Snap); !wasClean {
+		removed, err := sweepOrphanTorrentSidecars(cfg.Dirs.Snap)
+		if err != nil {
+			logger.Warn("[downloader] boot: orphan torrent sidecar sweep encountered errors", "err", err)
+		}
+		if removed > 0 {
+			logger.Info("[downloader] boot: recovered from ungraceful shutdown, removed orphan torrent sidecars", "count", removed)
+		}
+	}
+
 	return d, nil
+}
+
+const cleanShutdownMarkerName = ".downloader-clean-shutdown"
+
+// consumeCleanShutdownMarker returns true iff a marker written by a
+// prior graceful Close() is present, and removes it. Absence at boot
+// means the prior process exited without running Close cleanup.
+func consumeCleanShutdownMarker(snapDir string) bool {
+	path := filepath.Join(snapDir, cleanShutdownMarkerName)
+	_, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	_ = os.Remove(path)
+	return true
+}
+
+// writeCleanShutdownMarker records that Close() completed all cleanup
+// steps. Best-effort — a failure here downgrades the next boot to the
+// dirty-shutdown recovery path, which is idempotent.
+func writeCleanShutdownMarker(snapDir string) {
+	path := filepath.Join(snapDir, cleanShutdownMarkerName)
+	_ = os.WriteFile(path, nil, 0o644)
 }
 
 // Add completed torrents from disk. It's assumed that torrents should be completed, and if they're
@@ -2049,6 +2088,7 @@ func (d *Downloader) Close() {
 	if removed > 0 {
 		d.log(log.LvlInfo, "close: removed orphan torrent sidecars", "count", removed)
 	}
+	writeCleanShutdownMarker(d.snapDir())
 	d.log(log.LvlInfo, "Stopped")
 }
 

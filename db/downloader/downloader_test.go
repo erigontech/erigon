@@ -407,6 +407,31 @@ func TestSweepOrphanTorrentSidecars(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// TestCleanShutdownMarkerLifecycle pins the graceful-vs-crash boot
+// detection: consume returns true and clears the marker iff Close()
+// wrote it; a subsequent boot sees no marker (dirty) until the next
+// Close() writes one again.
+func TestCleanShutdownMarkerLifecycle(t *testing.T) {
+	snapDir := t.TempDir()
+
+	// First boot on a fresh datadir — no marker → dirty (or first-run).
+	require.False(t, consumeCleanShutdownMarker(snapDir))
+
+	// Graceful close writes marker.
+	writeCleanShutdownMarker(snapDir)
+	_, err := os.Stat(filepath.Join(snapDir, cleanShutdownMarkerName))
+	require.NoError(t, err)
+
+	// Next boot sees the marker → clean, and consumes it.
+	require.True(t, consumeCleanShutdownMarker(snapDir))
+	_, err = os.Stat(filepath.Join(snapDir, cleanShutdownMarkerName))
+	require.True(t, errors.Is(err, fs.ErrNotExist))
+
+	// Immediately-following boot without an intervening Close → dirty
+	// again. Same signal a crash produces.
+	require.False(t, consumeCleanShutdownMarker(snapDir))
+}
+
 func TestShouldEmitV2Generation(t *testing.T) {
 	var zero [20]byte
 	set := [20]byte{1}
