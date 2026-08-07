@@ -305,8 +305,8 @@ func initialState1() error {
 	}
 
 	var tokenContract *contracts.Token
-	// We generate the blocks without plainstant because it's not supported in blockgen.GenerateChain
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 8, func(i int, block *blockgen.BlockGen) {
+	// We generate the blocks without plain state because GenerateChain does not support it.
+	chain, err := m.GenerateChain(8, func(i int, block *blockgen.BlockGen) {
 		var (
 			txn types.Transaction
 			txs []types.Transaction
