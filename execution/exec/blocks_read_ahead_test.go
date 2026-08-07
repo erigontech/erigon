@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/cache"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -46,6 +47,12 @@ type stubTemporalGetter struct {
 	step kv.Step
 }
 
+type sharedCodeTemporalGetter struct {
+	account   []byte
+	code      []byte
+	codeReads int
+}
+
 func (s stubTemporalGetter) GetLatest(kv.Domain, []byte) ([]byte, kv.Step, error) {
 	return s.v, s.step, nil
 }
@@ -55,6 +62,23 @@ func (s stubTemporalGetter) HasPrefix(kv.Domain, []byte) ([]byte, []byte, bool, 
 }
 
 func (s stubTemporalGetter) StepsInFiles(...kv.Domain) kv.Step { return 0 }
+
+func (s *sharedCodeTemporalGetter) GetLatest(domain kv.Domain, _ []byte) ([]byte, kv.Step, error) {
+	if domain == kv.AccountsDomain {
+		return s.account, 0, nil
+	}
+	if domain == kv.CodeDomain {
+		s.codeReads++
+		return s.code, 0, nil
+	}
+	return nil, 0, nil
+}
+
+func (s *sharedCodeTemporalGetter) HasPrefix(kv.Domain, []byte) ([]byte, []byte, bool, error) {
+	return nil, nil, false, nil
+}
+
+func (s *sharedCodeTemporalGetter) StepsInFiles(...kv.Domain) kv.Step { return 0 }
 
 func newTestStateCache() *cache.StateCache {
 	b := 1 * datasize.MB
@@ -204,6 +228,26 @@ func TestCachePopulatingGetterKeepsFresherCodeBinding(t *testing.T) {
 	got, ok := sc.Get(kv.CodeDomain, addr)
 	require.True(t, ok)
 	require.Equal(t, freshCode, got, "warmup must not rebind addr to older code")
+}
+
+func TestCachePopulatingGetterReusesCodeByHashAcrossGetters(t *testing.T) {
+	code := []byte{0xaa, 0x01, 0x02, 0x03}
+	account := accounts.Account{Nonce: 1, CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(code))}
+	source := &sharedCodeTemporalGetter{account: accounts.SerialiseV3(&account), code: code}
+	stateCache := newTestStateCache()
+	for _, address := range []accounts.Address{
+		accounts.InternAddress(common.Address{19: 1}),
+		accounts.InternAddress(common.Address{19: 2}),
+	} {
+		reader := state.NewReaderV3(&cachePopulatingGetter{g: source, sc: stateCache, stepSize: 16})
+		gotAccount, err := reader.ReadAccountData(address)
+		require.NoError(t, err)
+		require.Equal(t, account.CodeHash, gotAccount.CodeHash)
+		gotCode, err := reader.ReadAccountCode(address)
+		require.NoError(t, err)
+		require.Equal(t, code, gotCode)
+	}
+	require.Equal(t, 1, source.codeReads, "identical code must be loaded from the address-keyed domain only once")
 }
 
 // Cold keys must still be warmed — that is the prefetcher's purpose.

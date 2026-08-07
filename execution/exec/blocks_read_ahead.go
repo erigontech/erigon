@@ -83,10 +83,13 @@ func (bra *BlockReadAheader) SetStateCache(sc *cache.StateCache) {
 // (codeHash→bytes) + size-cache layers via PutCodeWithHashIfAbsent, keyed by
 // the code's own keccak hash so every cached pair is self-consistent.
 type cachePopulatingGetter struct {
-	g        kv.TemporalGetter
-	sc       *cache.StateCache
-	progress func(kv.Domain) uint64 // domain progress source for stamping negative fills
-	stepSize uint64                 // for the read txNum upper bound (last txNum of the read's step)
+	g                 kv.TemporalGetter
+	sc                *cache.StateCache
+	progress          func(kv.Domain) uint64 // domain progress source for stamping negative fills
+	stepSize          uint64                 // for the read txNum upper bound (last txNum of the read's step)
+	lastCodeAddr      common.Address
+	lastCodeHash      common.Hash
+	lastCodeHashKnown bool
 }
 
 func newCachePopulatingGetter(tx kv.TemporalTx, sc *cache.StateCache) *cachePopulatingGetter {
@@ -96,6 +99,16 @@ func newCachePopulatingGetter(tx kv.TemporalTx, sc *cache.StateCache) *cachePopu
 
 func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte) ([]byte, kv.Step, error) {
 	v, step, err := cpg.g.GetLatest(name, k)
+	if name == kv.AccountsDomain {
+		cpg.lastCodeHashKnown = false
+		if err == nil && len(k) == len(cpg.lastCodeAddr) {
+			if codeHash := accounts.DeserialiseV3CodeHash(v); len(codeHash) == len(cpg.lastCodeHash) {
+				cpg.lastCodeAddr = common.BytesToAddress(k)
+				copy(cpg.lastCodeHash[:], codeHash)
+				cpg.lastCodeHashKnown = true
+			}
+		}
+	}
 	if err == nil && cpg.sc != nil {
 		// If-absent writes only: this runs in a fire-and-forget goroutine over a
 		// committed snapshot, so an unconditional Put racing an FCU flush's
@@ -127,6 +140,22 @@ func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte) ([]byte, k
 		}
 	}
 	return v, step, err
+}
+
+func (cpg *cachePopulatingGetter) GetCode(addr []byte, _ uint64) ([]byte, bool, error) {
+	// The hash was captured by a preceding read of this account on this
+	// getter's committed snapshot. It is safe for an immutable content-cache
+	// probe; a miss still uses the authoritative address-keyed CodeDomain path.
+	if cpg.sc != nil && cpg.lastCodeHashKnown && bytes.Equal(addr, cpg.lastCodeAddr[:]) {
+		if code, ok := cpg.sc.GetCodeByHash(cpg.lastCodeHash[:]); ok {
+			return code, true, nil
+		}
+	}
+	code, _, err := cpg.GetLatest(kv.CodeDomain, addr)
+	if err != nil {
+		return nil, false, err
+	}
+	return code, len(code) > 0, nil
 }
 
 func (cpg *cachePopulatingGetter) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
