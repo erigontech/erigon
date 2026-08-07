@@ -41,6 +41,12 @@ var valueAwareMapRead = dbg.EnvBool("VALUE_AWARE_MAPREAD", false)
 // idempotent and allowed; a higher incarnation is a new version and allowed.
 var oneValPerVer = dbg.EnvBool("ONE_VAL_PER_VER", false)
 
+// frozenLockFree lets reads of a published (frozen) prev-block versionMap skip
+// the per-account RLock. After PushHead the block's exec is complete, so its
+// cells are immutable and readers need no lock — only the current (unfrozen)
+// block's map is still being written and keeps locking. Gated off by default.
+var frozenLockFree = dbg.EnvBool("FROZEN_LOCKFREE", false)
+
 // originTxIndex is the versionMap index of the pre-block committed base ("origin"
 // = all account fields read at once, the old stateObject.original). It is the
 // highest slot below every real task index: the lowest task is the block-begin

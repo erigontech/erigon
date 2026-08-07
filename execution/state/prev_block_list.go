@@ -35,6 +35,9 @@ func NewPrevBlockList() *PrevBlockList { return &PrevBlockList{} }
 // block's last txNum, so a reader can select the window by txNum (matching the
 // per-tx apply) rather than blockNum.
 func (l *PrevBlockList) PushHead(blockNum, endTxNum uint64, vm *VersionMap) {
+	// Publishing to the prev-block window makes vm immutable: the block's exec has
+	// finished, so its cells never change again and layered readers may go lock-free.
+	vm.Freeze()
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	node := &prevBlockNode{blockNum: blockNum, endTxNum: endTxNum, vm: vm, older: l.head}

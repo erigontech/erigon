@@ -184,7 +184,21 @@ type VersionMap struct {
 	// has many (workers), coordinated by the atomics.
 	sealed      atomic.Int64
 	sealedArmed atomic.Bool
+
+	// frozen marks a published prev-block map immutable. Set at PushHead, once the
+	// block's exec is complete and its cells never change again — so reads may skip
+	// the per-account RLock (gated by frozenLockFree). The current block's own map
+	// is never frozen while it is being written, so it keeps locking.
+	frozen atomic.Bool
 }
+
+// Freeze publishes this map as immutable. Called once, at PushHead, after the
+// block's exec has finished; there are no concurrent writers past this point.
+func (vm *VersionMap) Freeze() { vm.frozen.Store(true) }
+
+// readLockFree reports whether reads of this map may skip the per-account RLock:
+// the frozenLockFree gate is on and the map has been frozen (immutable).
+func (vm *VersionMap) readLockFree() bool { return frozenLockFree && vm.frozen.Load() }
 
 // SealUpTo marks every tx at TxIndex <= txIndex as finalized/immutable. Monotonic:
 // the frontier never regresses. Called from the single-threaded finalize sweep.
@@ -238,8 +252,10 @@ func (vm *VersionMap) StorageKeys(addr accounts.Address) []accounts.StorageKey {
 	if e == nil {
 		return nil
 	}
-	e.mu.RLock()
-	defer e.mu.RUnlock()
+	if !vm.readLockFree() {
+		e.mu.RLock()
+		defer e.mu.RUnlock()
+	}
 	if len(e.Storage) == 0 {
 		return nil
 	}
@@ -395,8 +411,10 @@ func readFloor[T any](vm *VersionMap, addr accounts.Address, txIdx int, sel func
 	if e == nil {
 		return val, res, false
 	}
-	e.mu.RLock()
-	defer e.mu.RUnlock()
+	if !vm.readLockFree() {
+		e.mu.RLock()
+		defer e.mu.RUnlock()
+	}
 	cells := sel(e)
 	if cells == nil {
 		return val, res, false
@@ -511,8 +529,10 @@ func (vm *VersionMap) LatestTxIndex(addr accounts.Address, path AccountPath, key
 	if e == nil {
 		return 0, false
 	}
-	e.mu.RLock()
-	defer e.mu.RUnlock()
+	if !vm.readLockFree() {
+		e.mu.RLock()
+		defer e.mu.RUnlock()
+	}
 
 	fk := UnknownDep
 	switch path {
@@ -607,8 +627,10 @@ func (vm *VersionMap) AnyDoneSelfDestructEquals(addr accounts.Address, txIdxLimi
 	if e == nil {
 		return false
 	}
-	e.mu.RLock()
-	defer e.mu.RUnlock()
+	if !vm.readLockFree() {
+		e.mu.RLock()
+		defer e.mu.RUnlock()
+	}
 	if e.SelfDestruct == nil {
 		return false
 	}
@@ -639,8 +661,10 @@ func (vm *VersionMap) FindDoneSelfDestructInRange(addr accounts.Address, lo, hi 
 	if e == nil {
 		return Version{}, false
 	}
-	e.mu.RLock()
-	defer e.mu.RUnlock()
+	if !vm.readLockFree() {
+		e.mu.RLock()
+		defer e.mu.RUnlock()
+	}
 	if e.SelfDestruct == nil {
 		return Version{}, false
 	}
