@@ -16,7 +16,44 @@
 
 package errors
 
-import "errors"
+import (
+	"context"
+	"errors"
+)
+
+// NilIfCanceled returns nil when err is nil or contains only context
+// cancellation. Mixed errors are preserved.
+func NilIfCanceled(err error) error {
+	if err == nil || IsOnlyCanceled(err) {
+		return nil
+	}
+	return err
+}
+
+// IsOnlyCanceled reports whether err is non-nil and every leaf in its unwrap
+// tree is context.Canceled.
+func IsOnlyCanceled(err error) bool {
+	if err == nil {
+		return false
+	}
+	switch x := err.(type) {
+	case interface{ Unwrap() []error }:
+		errs := x.Unwrap()
+		if len(errs) == 0 {
+			return false
+		}
+		for _, e := range errs {
+			if !IsOnlyCanceled(e) {
+				return false
+			}
+		}
+		return true
+	case interface{ Unwrap() error }:
+		return IsOnlyCanceled(x.Unwrap())
+	default:
+		return errors.Is(err, context.Canceled)
+	}
+}
 
 func IsOneOf(err error, targets []error) bool {
 	if err == nil {

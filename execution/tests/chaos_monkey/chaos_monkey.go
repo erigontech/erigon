@@ -18,6 +18,7 @@ package chaos_monkey
 
 import (
 	"fmt"
+	"sync"
 
 	"math/rand/v2"
 
@@ -33,4 +34,78 @@ func ThrowRandomConsensusError(isInitialCycle bool, txIndex int, badBlockHalt bo
 		return fmt.Errorf("monkey in the datacenter: %w: %v", rules.ErrInvalidBlock, txTaskErr)
 	}
 	return nil
+}
+
+// armedError stores a process-local fault until its disarm function runs.
+type armedError struct {
+	mu  sync.Mutex
+	err error
+}
+
+func (a *armedError) arm(err error) (disarm func()) {
+	a.mu.Lock()
+	a.err = err
+	a.mu.Unlock()
+	return func() {
+		a.mu.Lock()
+		a.err = nil
+		a.mu.Unlock()
+	}
+}
+
+func (a *armedError) throw() error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.err
+}
+
+var (
+	preExecErr     armedError
+	workerErr      armedError
+	execLoopFault  armedError
+	applyLoopFault armedError
+)
+
+// ArmPreExecutionError makes ThrowPreExecutionError return err until disarm runs.
+func ArmPreExecutionError(err error) (disarm func()) {
+	return preExecErr.arm(err)
+}
+
+// ThrowPreExecutionError returns the armed pre-dispatch failure, if any.
+func ThrowPreExecutionError() error {
+	return preExecErr.throw()
+}
+
+// ArmWorkerError makes ThrowWorkerError return err until disarm runs.
+func ArmWorkerError(err error) (disarm func()) {
+	return workerErr.arm(err)
+}
+
+// ThrowWorkerError returns the armed worker failure, if any.
+func ThrowWorkerError() error {
+	return workerErr.throw()
+}
+
+// ArmExecLoopPanic makes ExecLoopPanic panic with err until disarm runs.
+func ArmExecLoopPanic(err error) (disarm func()) {
+	return execLoopFault.arm(err)
+}
+
+// ExecLoopPanic panics with the armed fault, if any.
+func ExecLoopPanic() {
+	if err := execLoopFault.throw(); err != nil {
+		panic(err)
+	}
+}
+
+// ArmApplyLoopPanic makes ApplyLoopPanic panic with err until disarm runs.
+func ArmApplyLoopPanic(err error) (disarm func()) {
+	return applyLoopFault.arm(err)
+}
+
+// ApplyLoopPanic panics with the armed fault, if any.
+func ApplyLoopPanic() {
+	if err := applyLoopFault.throw(); err != nil {
+		panic(err)
+	}
 }

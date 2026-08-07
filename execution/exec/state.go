@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
@@ -39,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
 	"github.com/erigontech/erigon/execution/tracing/calltracer"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
@@ -372,7 +374,7 @@ func (rw *Worker) Run() (err error) {
 	pprof.SetGoroutineLabels(pprof.WithLabels(rw.ctx, pprof.Labels("sub", "exec-worker")))
 	defer func() {
 		if rec := recover(); rec != nil {
-			err = fmt.Errorf("exec.Worker panic: %s, %s", rec, dbg.Stack())
+			err = fmt.Errorf("exec.Worker panic: %v, %s", rec, dbg.Stack())
 			rw.logger.Warn("Worker failed", "err", err)
 		}
 	}()
@@ -386,13 +388,18 @@ func (rw *Worker) Run() (err error) {
 		}
 	}()
 
+	// Test-only fault injection; it returns nil unless explicitly armed.
+	if chaosErr := chaos_monkey.ThrowWorkerError(); chaosErr != nil {
+		return chaosErr
+	}
+
 	for txTask, ok := rw.in.Next(rw.ctx); ok; txTask, ok = rw.in.Next(rw.ctx) {
 		result := func() (result *TxResult) {
 			defer func() {
 				if rec := recover(); rec != nil {
 					result = &TxResult{
 						Task: txTask,
-						Err:  fmt.Errorf("exec task panic: %s, %s", rec, dbg.Stack()),
+						Err:  fmt.Errorf("exec task panic: %v, %s", rec, dbg.Stack()),
 					}
 				}
 			}()
@@ -579,7 +586,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 
 func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, background bool, chainDb kv.TemporalRoDB,
 	rs *state.StateV3Buffered, stateReader state.StateReader, stateWriter state.StateWriter, in *QueueWithRetry, blockReader dbservices.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis,
-	engine rules.Engine, workerCount int, metrics *WorkerMetrics, dirs datadir.Dirs, logger log.Logger) (reconWorkers []*Worker, applyWorker *Worker, rws *ResultsQueue, clear func(), wait func(), err error) {
+	engine rules.Engine, workerCount int, metrics *WorkerMetrics, dirs datadir.Dirs, logger log.Logger) (reconWorkers []*Worker, applyWorker *Worker, rws *ResultsQueue, clear func(), wait func() error, err error) {
 	// Appended, so a part-way failure leaves clear only the workers actually built.
 	reconWorkers = make([]*Worker, 0, workerCount)
 
@@ -622,10 +629,10 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 	if background {
 		for i := range workerCount {
 			g.Go(func() error {
-				return reconWorkers[i].Run()
+				return commonerrors.NilIfCanceled(reconWorkers[i].Run())
 			})
 		}
-		wait = func() { g.Wait() }
+		wait = func() error { return g.Wait() }
 	}
 
 	return reconWorkers, applyWorker, rws, clear, wait, err
