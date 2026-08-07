@@ -147,8 +147,7 @@
     - '/\.meta/'
 - shard: blocktests-legacy-constantinople-race-constantinople-sequential
   workers: 12
-  # PoW fork-choice and total-difficulty support: https://github.com/erigontech/erigon/issues/22061
-  max-allowed-failures: 5
+  max-allowed-failures: 0
   commitment-parallel: false
   expected-tests: 10807
   run: '_Constantinople$'
@@ -164,8 +163,7 @@
     - '/\.meta/'
 - shard: blocktests-legacy-constantinople-race-constantinople-fix-sequential
   workers: 12
-  # PoW fork-choice and total-difficulty support: https://github.com/erigontech/erigon/issues/22061
-  max-allowed-failures: 5
+  max-allowed-failures: 0
   commitment-parallel: false
   expected-tests: 10802
   run: '_ConstantinopleFix$'
@@ -197,8 +195,7 @@
     - '/\.meta/'
 - shard: blocktests-legacy-constantinople-race-other-forks-sequential
   workers: 12
-  # PoW fork-choice and total-difficulty support: https://github.com/erigontech/erigon/issues/22061
-  max-allowed-failures: 14
+  max-allowed-failures: 0
   commitment-parallel: false
   expected-tests: 6006
   exclude:
@@ -230,8 +227,7 @@
     - '/\.meta/'
 - shard: blocktests-legacy-cancun-race-berlin-sequential
   workers: 12
-  # PoW fork-choice and total-difficulty support: https://github.com/erigontech/erigon/issues/22061
-  max-allowed-failures: 7
+  max-allowed-failures: 0
   commitment-parallel: false
   expected-tests: 14026
   run: '(_Berlin$|fork_Berlin-)'
@@ -279,8 +275,7 @@
     - '/\.meta/'
 - shard: blocktests-legacy-cancun-race-london-sequential
   workers: 12
-  # PoW fork-choice and total-difficulty support: https://github.com/erigontech/erigon/issues/22061
-  max-allowed-failures: 7
+  max-allowed-failures: 0
   commitment-parallel: false
   expected-tests: 20337
   run: '(_London$|fork_London-)'
@@ -312,8 +307,7 @@
     - '/\.meta/'
 - shard: blocktests-legacy-cancun-race-other-forks-sequential
   workers: 12
-  # PoW fork-choice and total-difficulty support: https://github.com/erigontech/erigon/issues/22061
-  max-allowed-failures: 12
+  max-allowed-failures: 0
   commitment-parallel: false
   expected-tests: 14713
   exclude:

@@ -17,6 +17,7 @@
 package state
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"testing"
@@ -212,6 +213,22 @@ func TestAsBlockAccessList_SystemAddressIncludedWithNonRevertableAccess(t *testi
 	}
 	require.True(t, found,
 		"system address should be included in BAL when a user tx has non-revertable access")
+}
+
+func TestPrepareRecordsSystemCoinbaseInBlockAccessList(t *testing.T) {
+	t.Parallel()
+
+	ibs := New(nil)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 0)
+	ibs.Prepare(&chain.Rules{IsShanghai: true}, accounts.ZeroAddress, params.SystemAddress, accounts.NilAddress, nil, nil)
+
+	io := NewVersionedIO(1)
+	io.RecordReads(Version{TxIndex: 0}, ibs.VersionedReads())
+	bal := io.AsBlockAccessList()
+
+	require.Len(t, bal, 1)
+	require.Equal(t, params.SystemAddress, bal[0].Address)
 }
 
 // TestAsBlockAccessList_SystemAddressIncludedWithStateChanges verifies that the
@@ -1314,6 +1331,58 @@ func TestVersionedUpdates_EstimateCellConsumed(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok, "Estimate-cell storage must be found")
 	require.Equal(t, newStorage, storageGot, "Estimate-cell storage must be consumed, not stale")
+}
+
+// countingStateReader records how many account reads reached the domain.
+type countingStateReader struct {
+	minimalStateReader
+	acc            *accounts.Account
+	accountReads   int
+	failOnAccounts bool
+}
+
+func (r *countingStateReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
+	r.accountReads++
+	if r.failOnAccounts {
+		return nil, errors.New("domain must not be consulted")
+	}
+	return r.acc, nil
+}
+
+// A tx that read an address and found no account records the AddressPath entry
+// header-only; that entry is the answer, not a gap to fill from the domain.
+func TestVersionedStateReader_RecordedAbsentSkipsDomain(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0xab5e17"))
+	reads := ReadSet{}
+	reads.SetAddress(addr, VersionedRead[AccountView]{
+		ReadHeader: ReadHeader{Source: StorageRead, Version: UnknownVersion},
+	})
+
+	reader := &countingStateReader{failOnAccounts: true}
+	vr := NewVersionedStateReader(3, reads, NewVersionMap(nil), reader)
+
+	got, err := vr.ReadAccountData(addr)
+	require.NoError(t, err)
+	require.Nil(t, got)
+	require.Zero(t, reader.accountReads, "recorded-absent read must not reach the domain")
+}
+
+func TestVersionedStateReader_UnrecordedAddressReadsDomain(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0xc01d"))
+	domainAcc := accounts.NewAccount()
+	domainAcc.Nonce = 9
+	reader := &countingStateReader{acc: &domainAcc}
+	vr := NewVersionedStateReader(3, ReadSet{}, NewVersionMap(nil), reader)
+
+	got, err := vr.ReadAccountData(addr)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, uint64(9), got.Nonce)
+	require.Equal(t, 1, reader.accountReads)
 }
 
 // writeSetFixture builds a WriteSet covering every path, multiple addresses and
