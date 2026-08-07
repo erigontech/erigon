@@ -960,8 +960,8 @@ services:
       # --- Reachability (recommended) ---
       # Lets other nodes dial you. Set EXTERNAL_IP to your public IP, or drop
       # both lines to run outbound-only with fewer peers.
-      - --nat=extip:${EXTERNAL_IP}
-      - --caplin.nat=extip:${EXTERNAL_IP}
+      - --nat=extip:${EXTERNAL_IP:?set EXTERNAL_IP to this host's public IP, or delete these two lines to run outbound-only}
+      - --caplin.nat=extip:${EXTERNAL_IP:?set EXTERNAL_IP to this host's public IP, or delete these two lines to run outbound-only}
       # --- Pruning Mode (Optional) ---
       # To change Pruning Mode, uncomment the line below:
       # - --prune.mode=archive
@@ -1192,8 +1192,8 @@ services:
       # --- Reachability (recommended) ---
       # Lets other nodes dial you. Set EXTERNAL_IP to your public IP, or drop
       # both lines to run outbound-only with fewer peers.
-      - --nat=extip:${EXTERNAL_IP}
-      - --caplin.nat=extip:${EXTERNAL_IP}
+      - --nat=extip:${EXTERNAL_IP:?set EXTERNAL_IP to this host's public IP, or delete these two lines to run outbound-only}
+      - --caplin.nat=extip:${EXTERNAL_IP:?set EXTERNAL_IP to this host's public IP, or delete these two lines to run outbound-only}
       # --- Pruning Mode (Optional) ---
       # To change Pruning Mode, uncomment the line below:
       # - --prune.mode=archive
