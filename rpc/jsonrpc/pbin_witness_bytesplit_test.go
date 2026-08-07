@@ -31,21 +31,10 @@ func pbinLeafKeyOf(node []byte) []byte {
 	return node[1 : len(node)-32]
 }
 
-// isCodeChunkKey reports whether a tree key names a code chunk: the code zone
-// holds overflow chunks, and account-zone sub-indices from CODE_OFFSET on hold
-// the chunks the account header carries.
+// isCodeChunkKey reports whether a tree key names a code chunk: every chunk
+// lives in the code zone, content-addressed by code hash.
 func isCodeChunkKey(key []byte) bool {
-	if len(key) == 0 {
-		return false
-	}
-	switch key[0] {
-	case 0x01: // code zone — overflow chunks, content-addressed by code hash
-		return true
-	case 0x00: // account zone — CODE_OFFSET is 128
-		return key[len(key)-1] >= 128
-	default:
-		return false
-	}
+	return len(key) > 0 && key[0] == 0x01
 }
 
 func TestPBinWitnessCodeWeight(t *testing.T) {

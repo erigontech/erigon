@@ -482,25 +482,59 @@ its own assertion proves nothing.
 - Modify: `rpc/jsonrpc/pbin_witness_deploy_test.go`
 - Modify: `rpc/jsonrpc/pbin_witness_whale_test.go`
 
-- [ ] re-express the local `pbinHeaderCodeCapacity` (`pbin_witness_e2e_test.go:41`,
+- [x] re-express the local `pbinHeaderCodeCapacity` (`pbin_witness_e2e_test.go:41`,
       currently `31 * (256 - 128)`) as a chunk count; `pbinStemSubtreeWidth` is
       unexported in `package commitment` and not reachable from here, so the
-      constant stays local
-- [ ] drop the `gated()` column in `pbin_witness_altspec_test.go` — the
+      constant stays local (now `pbinCodeGroupChunks = 256`)
+- [x] drop the `gated()` column in `pbin_witness_altspec_test.go` — the
       "keep code in the header when it fits" alternative it priced is gone from
       the spec
-- [ ] state the expected direction before measuring, then assert relations:
+- [x] state the expected direction before measuring, then assert relations:
       binary witness exceeds hex at every size, and the ratio grows with chunk
-      count
-- [ ] add `TestPBinWitnessClonesProveOneChunkSet`, asserting that two accounts
+      count (asserted over the 1 → 128 → 256 → 793 subsequence: adjacent close
+      sizes may wobble — measured 128 gives 3.74x against 129's 3.69x, because a
+      different code hash scatters the stem elsewhere in the zone — while the
+      decade steps grow strictly; the zero-padded case must undercut hex)
+- [x] add `TestPBinWitnessClonesProveOneChunkSet`, asserting that two accounts
       sharing bytecode prove one chunk set rather than two — the behaviour
-      content addressing was adopted for, and previously false
-- [ ] record the re-measured hex-versus-binary table in this plan, not in the
-      assertions
-- [ ] gate: `go test ./rpc/jsonrpc/ -count=1 -v -run TestPBinWitness` and
+      content addressing was adopted for, and previously false (clone block
+      proves exactly 257 chunk leaves, distinct block 8×257)
+- [x] record the re-measured hex-versus-binary table in this plan, not in the
+      assertions (below)
+- [x] gate: `go test ./rpc/jsonrpc/ -count=1 -v -run TestPBinWitness` and
       confirm `TestPBinWitnessClonesProveOneChunkSet` appears in the output
-- [ ] `make lint` until clean; commit as
+      (all pass; the new test ran)
+- [x] `make lint` until clean; commit as
       `rpc/jsonrpc: re-baseline pbin witness measurements on the code zone`
+
+Re-measured on the code zone (call executing 8 bytes; chunk counts 1, 128, 129,
+256, 793 reproduce execution-specs#3286's sizes, `group_spill` 257 replaces the
+header-split `spill_4216`):
+
+| case | code B | chunks | hex tot | bin tot | bin/hex | blob-variant | /hex |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| single_chunk | 31 | 1 | 1184 | 2016 | 1.70x | 1711 | 1.45x |
+| chunks_128 | 3968 | 128 | 5120 | 19132 | 3.74x | 5714 | 1.12x |
+| chunks_129 | 3999 | 129 | 5151 | 18997 | 3.69x | 5543 | 1.08x |
+| group_full | 7936 | 256 | 9089 | 35947 | 3.96x | 9480 | 1.04x |
+| group_spill | 7967 | 257 | 9120 | 36418 | 3.99x | 9646 | 1.06x |
+| max_code_size | 24576 | 793 | 25729 | 108339 | 4.21x | 26255 | 1.02x |
+| max_zero_padded | 24576 | 793 | 25730 | 2114 | 0.08x | 26323 | 1.02x |
+
+Clone dedup, 8 contracts of 257 chunks each called in one block: clones
+hex 10280 / bin 38591 (3.75x), distinct hex 66132 / bin 279752 (4.23x) —
+shared bytecode proves 17219 chunk bytes against distinct's 137752.
+
+➕ Also touched beyond the planned file list: `pbin_witness_bytesplit_test.go`
+(`isCodeChunkKey` loses its dead account-zone arm), `pbin_witness_size_test.go`
+(`pbinWitnessCorpus` shape names follow the e2e chain rename),
+`pbin_witness_stateless_test.go` (stale header-chunk corpus comment).
+Renames: `TestPBinWitnessConsecutiveSpillingDeploys` →
+`TestPBinWitnessConsecutiveDeploys`; granularity cases `header_full` /
+`first_overflow` / `deep_overflow` → `chunks_128` / `chunks_129` /
+`group_full`. The granularity bin arm now asserts account-zone leaves stay
+inside the allocated sub-indices (0, 1, 64–127), pinning Gap D's reserved-range
+discipline in the witness path.
 
 ### Task 6: Add the delegation classifier and encoder
 

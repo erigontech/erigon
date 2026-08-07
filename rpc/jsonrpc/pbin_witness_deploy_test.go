@@ -25,7 +25,7 @@ import (
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
-func TestPBinWitnessConsecutiveSpillingDeploys(t *testing.T) {
+func TestPBinWitnessConsecutiveDeploys(t *testing.T) {
 	withCommitmentHistory(t)
 	withBinCommitmentDatadir(t)
 
@@ -48,10 +48,9 @@ func TestPBinWitnessConsecutiveSpillingDeploys(t *testing.T) {
 	signer := types.LatestSignerForChainID(nil)
 	const deploys = 3
 	pack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, deploys, func(i int, b *blockgen.BlockGen) {
-		// Each contract spills past the account header by a few chunks, and each
-		// is distinct, so every deploy opens its own code-zone stem beside the
-		// ones already there.
-		runtime := make([]byte, pbinHeaderCodeCapacity+31*(i+2))
+		// Each contract is distinct, so every deploy opens its own code-zone
+		// stem beside the ones already there.
+		runtime := make([]byte, 31*(8+i))
 		for j := range runtime {
 			runtime[j] = 0xfe
 		}

@@ -2,11 +2,10 @@ package jsonrpc
 
 // What duplicated bytecode costs a binary witness.
 //
-// A contract's first 128 chunks live in its own account header, keyed by
-// address; everything past that lives in the code zone, keyed by code hash. So
-// a block calling several clones of one contract proves the shared tail once
-// and the per-account head once per clone. This measures that split against
-// hex, which stores code by hash and so ships it once either way.
+// Every chunk lives in the code zone, keyed by code hash alone, so a block
+// calling several clones of one contract proves one shared chunk set; distinct
+// contracts of the same size prove one set each. This measures that sharing
+// against hex, which stores code by hash and so ships it once either way.
 
 import (
 	"fmt"
@@ -20,7 +19,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
@@ -29,8 +27,9 @@ import (
 
 const (
 	pbinCloneCount = 8
-	// 256 chunks: 128 in the account header, 128 in the code zone.
-	pbinCloneSize = pbinHeaderCodeCapacity * 2
+	// One chunk past a full group, so sharing is pinned across a group boundary.
+	pbinCloneChunks = pbinCodeGroupChunks + 1
+	pbinCloneSize   = 31 * pbinCloneChunks
 )
 
 // pbinCloneChain deploys pbinCloneCount identical contracts and as many
@@ -117,9 +116,8 @@ func TestPBinWitnessCloneDedup(t *testing.T) {
 	type row struct {
 		name                       string
 		hexState, hexCodes, hexTot int
-		binTot, hdrChunk, ovfChunk int
-		binBranch, binNodes        int
-		zonedTot                   int // header chunks re-pruned away: what the code zone alone carries
+		binTot, chunkB, branchB    int
+		binNodes                   int
 	}
 	rows := []row{{name: "8 clones"}, {name: "8 distinct"}}
 
@@ -145,44 +143,60 @@ func TestPBinWitnessCloneDedup(t *testing.T) {
 			r := &rows[i]
 			r.binNodes = len(w.State)
 			r.binTot = sumBytes(w.State) + sumBytes(w.Headers)
-			nodes := make([][]byte, 0, len(w.State))
-			keep := make([][]byte, 0, len(w.State))
 			for _, node := range w.State {
-				nodes = append(nodes, node)
 				key := pbinLeafKeyOf(node)
 				switch {
 				case key == nil:
-					r.binBranch += len(node)
-					continue
-				case key[0] == 0x01:
-					r.ovfChunk += len(node)
-				case key[len(key)-1] >= 128:
-					r.hdrChunk += len(node)
-					continue // the chunks the proposal would move out of the header
+					r.branchB += len(node)
+				case isCodeChunkKey(key):
+					r.chunkB += len(node)
 				}
-				keep = append(keep, key)
-			}
-			root := c.block(t, num-1).Root()
-			lean, err := commitment.PBinWitnessNodesForKeys(nodes, root[:], keep)
-			require.NoError(t, err)
-			r.zonedTot = sumBytes(w.Headers)
-			for _, node := range lean {
-				r.zonedTot += len(node)
 			}
 		}
 	})
 
-	out := fmt.Sprintf("%d contracts of %d B (%d chunks: 128 header, 128 code zone), all called in one block\n",
-		pbinCloneCount, pbinCloneSize, pbinCloneSize/31)
-	out += fmt.Sprintf("%-12s %9s %9s %8s | %8s %7s %9s %9s %9s | %9s\n",
-		"block", "hexState", "hexCodes", "hex tot", "bin tot", "/hex", "hdrChunkB", "ovfChunkB", "branchB", "zoneOnly")
+	// Direction stated up front: hex ships duplicated code once by hash, so
+	// only bin's chunk sharing can keep the clone block anywhere near the
+	// distinct block — clones must prove fewer bytes than distinct code.
+	require.Less(t, rows[0].chunkB, rows[1].chunkB, "clones must prove fewer chunk bytes than distinct contracts")
+	require.Less(t, rows[0].binTot, rows[1].binTot, "clones must prove a smaller witness than distinct contracts")
+	require.Less(t, rows[0].hexCodes, rows[1].hexCodes, "hex ships duplicated code once")
+
+	out := fmt.Sprintf("%d contracts of %d B (%d chunks, one spilling past a full group), all called in one block\n",
+		pbinCloneCount, pbinCloneSize, pbinCloneChunks)
+	out += fmt.Sprintf("%-12s %9s %9s %8s | %8s %7s %8s %9s %9s\n",
+		"block", "hexState", "hexCodes", "hex tot", "bin tot", "/hex", "binNod", "chunkB", "branchB")
 	for _, r := range rows {
-		out += fmt.Sprintf("%-12s %9d %9d %8d | %8d %6.2fx %9d %9d %9d | %9d\n",
+		out += fmt.Sprintf("%-12s %9d %9d %8d | %8d %6.2fx %8d %9d %9d\n",
 			r.name, r.hexState, r.hexCodes, r.hexTot,
-			r.binTot, float64(r.binTot)/float64(r.hexTot), r.hdrChunk, r.ovfChunk, r.binBranch, r.zonedTot)
+			r.binTot, float64(r.binTot)/float64(r.hexTot), r.binNodes, r.chunkB, r.branchB)
 	}
-	out += "\nzoneOnly = header chunks pruned away: the account proofs plus whatever the\n" +
-		"code zone already carries. The proposal's witness is that plus one more\n" +
-		"128-chunk code-zone group for the chunks it moves out of the header.\n"
 	t.Log("witness cost of duplicated bytecode\n" + out)
+}
+
+// TestPBinWitnessClonesProveOneChunkSet pins what content addressing was
+// adopted for: accounts sharing bytecode share its chunk leaves, so the clone
+// block proves exactly one chunk set and the distinct block one per contract.
+func TestPBinWitnessClonesProveOneChunkSet(t *testing.T) {
+	withCommitmentHistory(t)
+	withBinCommitmentDatadir(t)
+
+	c, cloneBlock, distinctBlock := pbinCloneChain(t)
+	enableCommitmentHistoryFlag(t, c.m.DB)
+	api := NewPrivateDebugAPI(newBaseApiForTest(c.m), c.m.DB, nil, &rpccfg.DebugApiConfig{})
+
+	countChunks := func(num uint64) int {
+		chunks := 0
+		for _, node := range pbinWitnessOf(t, api, num).State {
+			if key := pbinLeafKeyOf(node); key != nil && isCodeChunkKey(key) {
+				chunks++
+			}
+		}
+		return chunks
+	}
+
+	require.Equal(t, pbinCloneChunks, countChunks(cloneBlock),
+		"%d clones share one content-addressed chunk set", pbinCloneCount)
+	require.Equal(t, pbinCloneCount*pbinCloneChunks, countChunks(distinctBlock),
+		"distinct bytecode proves one chunk set per contract")
 }

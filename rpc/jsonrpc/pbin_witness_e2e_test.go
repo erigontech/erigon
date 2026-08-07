@@ -35,10 +35,9 @@ import (
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
-// pbinHeaderCodeCapacity is the code an account header holds: EIP-8297 gives it
-// the sub-indexes from 128 to 255, one 31-byte chunk each, and everything past
-// that spills into the code zone under a stem of its own.
-const pbinHeaderCodeCapacity = 31 * (256 - 128)
+// pbinCodeGroupChunks is how many 31-byte chunks one code-zone stem holds: the
+// spec's STEM_SUBTREE_WIDTH, unexported by package commitment.
+const pbinCodeGroupChunks = 256
 
 // pbinStoreRuntime stores calldata[32:64] at slot calldata[0:32], so one deploy
 // serves both a non-zero SSTORE and an SSTORE-to-zero.
@@ -75,8 +74,8 @@ type pbinWitnessChain struct {
 	m         *execmoduletester.ExecModuleTester
 	pack      *blockgen.ChainPack
 	receiver  common.Address
-	small     common.Address // code fits the account header's chunks
-	large     common.Address // code overflows into the code zone
+	small     common.Address // code fits one code-zone group
+	large     common.Address // code crosses a code-zone group boundary
 	slot      common.Hash
 	otherSlot common.Hash
 }
@@ -92,10 +91,10 @@ func (c *pbinWitnessChain) block(t *testing.T, num uint64) *types.Block {
 }
 
 // buildPBinWitnessChain generates and imports a chain whose blocks each exercise
-// one shape the binary witness has to carry: a plain transfer, a deploy the
-// account header holds, a deploy that overflows into the code zone, a non-zero
-// SSTORE, an SSTORE-to-zero, a call reading code back across the header/code-zone
-// boundary, and a block with no transactions.
+// one shape the binary witness has to carry: a plain transfer, a deploy fitting
+// one code-zone group, a deploy crossing a group boundary, a non-zero SSTORE,
+// an SSTORE-to-zero, a call reading code back across a group boundary, and a
+// block with no transactions.
 func buildPBinWitnessChain(t *testing.T) *pbinWitnessChain {
 	t.Helper()
 
@@ -110,7 +109,7 @@ func buildPBinWitnessChain(t *testing.T) *pbinWitnessChain {
 		otherSlot: common.HexToHash("0x02"),
 	}
 
-	overflowing := make([]byte, pbinHeaderCodeCapacity+31*8)
+	overflowing := make([]byte, 31*(pbinCodeGroupChunks+8))
 	copy(overflowing, pbinStoreRuntime)
 
 	sign := func(txn *types.LegacyTx) types.Transaction {
@@ -128,12 +127,12 @@ func buildPBinWitnessChain(t *testing.T) *pbinWitnessChain {
 			b.AddTx(sign(&types.LegacyTx{CommonTx: types.CommonTx{
 				Nonce: nonce, To: &c.receiver, GasLimit: 21_000, Value: *uint256.NewInt(1e9),
 			}}))
-		case 1: // deploy whose code the account header holds
+		case 1: // deploy whose code fits one code-zone group
 			c.small = types.CreateAddress(bankAddress, nonce)
 			b.AddTx(sign(&types.LegacyTx{CommonTx: types.CommonTx{
 				Nonce: nonce, GasLimit: 200_000, Data: pbinDeployCode(pbinStoreRuntime),
 			}}))
-		case 2: // deploy whose code overflows into the code zone
+		case 2: // deploy whose code crosses a code-zone group boundary
 			c.large = types.CreateAddress(bankAddress, nonce)
 			b.AddTx(sign(&types.LegacyTx{CommonTx: types.CommonTx{
 				Nonce: nonce, GasLimit: 4_000_000, Data: pbinDeployCode(overflowing),
@@ -146,7 +145,7 @@ func buildPBinWitnessChain(t *testing.T) *pbinWitnessChain {
 			b.AddTx(sign(&types.LegacyTx{CommonTx: types.CommonTx{
 				Nonce: nonce, To: &c.small, GasLimit: 100_000, Data: pbinStoreCalldata(c.slot, 0),
 			}}))
-		case 5: // call the large contract, so its code is read back from the witness
+		case 5: // call the large contract, so its code is read back across groups
 			b.AddTx(sign(&types.LegacyTx{CommonTx: types.CommonTx{
 				Nonce: nonce, To: &c.large, GasLimit: 200_000, Data: pbinStoreCalldata(c.otherSlot, 7),
 			}}))
@@ -198,11 +197,11 @@ func requirePBinChainShape(t *testing.T, c *pbinWitnessChain) {
 	smallCode, err := stateAt(3).GetCode(accounts.InternAddress(c.small))
 	require.NoError(t, err)
 	require.Equal(t, pbinStoreRuntime, smallCode)
-	require.LessOrEqual(t, len(smallCode), pbinHeaderCodeCapacity, "block 2's code fits the account header")
+	require.LessOrEqual(t, len(smallCode), 31*pbinCodeGroupChunks, "block 2's code fits one code-zone group")
 
 	largeCode, err := stateAt(4).GetCode(accounts.InternAddress(c.large))
 	require.NoError(t, err)
-	require.Greater(t, len(largeCode), pbinHeaderCodeCapacity, "block 3's code must reach the code zone")
+	require.Greater(t, len(largeCode), 31*pbinCodeGroupChunks, "block 3's code must cross a group boundary")
 
 	written, err := stateAt(5).GetState(accounts.InternAddress(c.small), accounts.InternKey(c.slot))
 	require.NoError(t, err)
@@ -263,11 +262,11 @@ func TestPBinExecutionWitnessEndToEnd(t *testing.T) {
 		name string
 	}{
 		{1, "plain transfer"},
-		{2, "deploy held by the account header"},
-		{3, "deploy overflowing into the code zone"},
+		{2, "deploy within one code-zone group"},
+		{3, "deploy crossing a group boundary"},
 		{4, "storage write"},
 		{5, "SSTORE to zero"},
-		{6, "code read across the code-zone boundary"},
+		{6, "code read across a group boundary"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			result := pbinWitnessOf(t, api, tc.num)

@@ -76,11 +76,11 @@ var pbinWitnessCorpus = []struct {
 	shape string
 }{
 	{1, "plain transfer"},
-	{2, "deploy held by the account header"},
-	{3, "deploy overflowing into the code zone"},
+	{2, "deploy within one code-zone group"},
+	{3, "deploy crossing a group boundary"},
 	{4, "storage write"},
 	{5, "SSTORE to zero"},
-	{6, "code read across the code-zone boundary"},
+	{6, "code read across a group boundary"},
 	{7, "no transactions"},
 }
 

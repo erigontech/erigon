@@ -5,7 +5,7 @@ package jsonrpc
 // Every measured block calls a contract that executes the same 8 bytes; only the
 // dead padding behind the STOP differs. Under hex the code ships as one blob
 // beside a short account proof; under bin it is committed as 31-byte chunk leaves
-// inside the trie, so the same call proves every chunk the contract occupies.
+// in the code zone, so the same call proves every chunk the contract occupies.
 //
 // Bin bytes are attributed by reading each leaf's own key: the zone byte and the
 // sub-index say what the leaf is, so nothing here is inferred from position.
@@ -28,7 +28,8 @@ import (
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
-// The five code sizes of tests/binary_tree/.../test_witness_growth.py.
+// The chunk counts of tests/binary_tree/.../test_witness_growth.py, plus the
+// code-zone group boundary at STEM_SUBTREE_WIDTH and a zero-padded tail.
 var pbinGranCases = []struct {
 	name    string
 	size    int
@@ -36,10 +37,10 @@ var pbinGranCases = []struct {
 	zeroPad bool
 }{
 	{"single_chunk", 31, 1, false},
-	{"header_full", pbinHeaderCodeCapacity, 128, false},
-	{"first_overflow", pbinHeaderCodeCapacity + 31, 129, false},
-	{"spill_4216", 4216, 136, false},
-	{"deep_overflow", pbinHeaderCodeCapacity * 2, 256, false},
+	{"chunks_128", 31 * 128, 128, false},
+	{"chunks_129", 31 * 129, 129, false},
+	{"group_full", 31 * pbinCodeGroupChunks, 256, false},
+	{"group_spill", 31 * (pbinCodeGroupChunks + 1), 257, false},
 	{"max_code_size", 24576, 793, false},
 	{"max_zero_padded", 24576, 793, true},
 }
@@ -47,8 +48,8 @@ var pbinGranCases = []struct {
 type pbinGranRow struct {
 	name string
 	// bin, by what the leaf's own key says it is
-	basicData, codeHash, headerChunk, overflowChunk, storageLeaf int
-	branches, binNodes, binTotal                                 int
+	basicData, codeHash, codeChunk, storageLeaf int
+	branches, binNodes, binTotal                int
 	// hex
 	hexState, hexCodes, hexNodes, hexTotal int
 	headers                                int
@@ -97,7 +98,7 @@ func pbinGranChain(t *testing.T) (*pbinWitnessChain, []common.Address) {
 		if i < n { // deploy
 			// Padding is INVALID, not zero: a chunk of 31 zero bytes is stored as no
 			// leaf at all, so zero padding would measure the collapse rather than the
-			// cost of code. pbinGranZeroPad covers that case deliberately.
+			// cost of code. The zeroPad case covers that collapse deliberately.
 			runtime := make([]byte, pbinGranCases[i].size)
 			for j := range runtime {
 				runtime[j] = 0xfe
@@ -169,16 +170,16 @@ func TestPBinWitnessGranularity(t *testing.T) {
 				}
 				switch sub := key[len(key)-1]; {
 				case key[0] == 0x01:
-					r.overflowChunk += len(node)
+					r.codeChunk += len(node)
 				case key[0] == 0xFF:
 					r.storageLeaf += len(node)
 				case sub == 0:
 					r.basicData += len(node)
 				case sub == 1:
 					r.codeHash += len(node)
-				case sub >= 128:
-					r.headerChunk += len(node)
 				default:
+					require.True(t, sub >= 64 && sub < 128,
+						"%s: account-zone leaf at reserved sub-index %d", r.name, sub)
 					r.storageLeaf += len(node)
 				}
 			}
@@ -190,6 +191,25 @@ func TestPBinWitnessGranularity(t *testing.T) {
 		}
 	})
 
+	// Direction stated up front: chunk leaves and the branches binding them
+	// outweigh hex's flat code blob at every size, the gap widens with chunk
+	// count, and a zero-padded tail collapses to elided leaves that undercut
+	// the blob.
+	ratio := map[int]float64{}
+	for i, gc := range pbinGranCases {
+		r := &rows[i]
+		if gc.zeroPad {
+			require.Less(t, r.binTotal, r.hexTotal, "%s: elided zero chunks must undercut hex", gc.name)
+			continue
+		}
+		require.Greater(t, r.binTotal, r.hexTotal, "%s: chunked code must outweigh hex", gc.name)
+		ratio[gc.chunks] = float64(r.binTotal) / float64(r.hexTotal)
+	}
+	for _, step := range [][2]int{{1, 128}, {128, 256}, {256, 793}} {
+		require.Greater(t, ratio[step[1]], ratio[step[0]],
+			"bin/hex must grow from %d to %d chunks", step[0], step[1])
+	}
+
 	t.Log("witness bytes for a call executing 8 bytes, by contract size\n" + pbinGranTable(rows))
 }
 
@@ -198,12 +218,11 @@ func pbinGranTable(rows []pbinGranRow) string {
 		"case", "code B", "chunks", "hex tot", "bin tot", "bin/hex", "hexNod", "hexCode", "binNod", "chunkB", "noChunk")
 	for i := range rows {
 		r := &rows[i]
-		chunkBytes := r.headerChunk + r.overflowChunk
-		noChunk := r.binTotal - chunkBytes
+		noChunk := r.binTotal - r.codeChunk
 		s += fmt.Sprintf("%-16s %7d %5d %8d %9d %7.2fx | %6d %7d %8d %8d | %7d\n",
 			r.name, pbinGranCases[i].size, pbinGranCases[i].chunks,
 			r.hexTotal, r.binTotal, float64(r.binTotal)/float64(r.hexTotal),
-			r.hexNodes, r.hexCodes, r.binNodes, chunkBytes, noChunk)
+			r.hexNodes, r.hexCodes, r.binNodes, r.codeChunk, noChunk)
 	}
 	s += "\ndeploying the contract against reading it back:\n"
 	s += fmt.Sprintf("%-16s %8s %8s | %8s %8s | %8s %8s\n",
@@ -215,12 +234,12 @@ func pbinGranTable(rows []pbinGranRow) string {
 			r.deployHexTotal, r.hexTotal)
 	}
 	s += "\nbin state bytes by what the leaf's key says it is:\n"
-	s += fmt.Sprintf("%-16s %10s %9s %12s %14s %8s %10s\n",
-		"case", "BASIC_DATA", "CODE_HASH", "hdr chunks", "ovf chunks", "storage", "branches")
+	s += fmt.Sprintf("%-16s %10s %9s %12s %8s %10s\n",
+		"case", "BASIC_DATA", "CODE_HASH", "code chunks", "storage", "branches")
 	for i := range rows {
 		r := &rows[i]
-		s += fmt.Sprintf("%-16s %10d %9d %12d %14d %8d %10d\n",
-			r.name, r.basicData, r.codeHash, r.headerChunk, r.overflowChunk, r.storageLeaf, r.branches)
+		s += fmt.Sprintf("%-16s %10d %9d %12d %8d %10d\n",
+			r.name, r.basicData, r.codeHash, r.codeChunk, r.storageLeaf, r.branches)
 	}
 	return s
 }

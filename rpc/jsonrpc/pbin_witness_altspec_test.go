@@ -1,20 +1,14 @@
 package jsonrpc
 
-// What a binary witness would weigh if code were not committed as chunk leaves.
+// What a binary witness would weigh if code were not committed as chunk leaves:
+// never chunk; every contract ships as a blob, as hex does.
 //
-// Two variants are sized against the spec as written and against hex:
+// The variant is measured, not modelled: the chunk keys are dropped from the
+// proved set and the real pruner re-runs, so the branches that existed only to
+// bind those chunks go too. The blob term is the contract's own bytecode, the
+// same bytes hex carries in Codes.
 //
-//	gated   chunk the code only when it fits the 128 header slots; a contract
-//	        that would spill ships as a blob instead, so the 0x01 code zone
-//	        never appears in a witness
-//	blob    never chunk; every contract ships as a blob, as hex does
-//
-// Both are measured, not modelled: the chunk keys are dropped from the proved
-// set and the real pruner re-runs, so the branches that existed only to bind
-// those chunks go too. The blob term is the contract's own bytecode, the same
-// bytes hex carries in Codes.
-//
-// The variants are not proposals and their roots differ from the spec's — this
+// The variant is not a proposal and its root differs from the spec's — this
 // prices the choice, it does not implement it.
 
 import (
@@ -43,14 +37,6 @@ type pbinAltRow struct {
 
 // blob is what the contract's bytecode weighs when a witness ships it whole.
 func (r pbinAltRow) blob() int { return r.size }
-
-// gated is the size-gated variant: chunked below the header limit, blob above.
-func (r pbinAltRow) gated() int {
-	if r.size <= pbinHeaderCodeCapacity {
-		return r.binTotal
-	}
-	return r.leanProof + r.blob()
-}
 
 // noChunk drops chunking outright.
 func (r pbinAltRow) noChunk() int { return r.leanProof + r.blob() }
@@ -197,15 +183,14 @@ func TestPBinWitnessPartialChunks(t *testing.T) {
 }
 
 func pbinAltTable(rows []pbinAltRow) string {
-	s := fmt.Sprintf("%-16s %7s %6s | %8s | %9s %7s | %9s %7s | %9s %7s\n",
+	s := fmt.Sprintf("%-16s %7s %6s | %8s | %9s %7s | %9s %7s\n",
 		"case", "code B", "chunks", "hex tot",
-		"spec", "/hex", "gated", "/hex", "blob", "/hex")
+		"spec", "/hex", "blob", "/hex")
 	for _, r := range rows {
 		ratio := func(v int) float64 { return float64(v) / float64(r.hexTotal) }
-		s += fmt.Sprintf("%-16s %7d %6d | %8d | %9d %6.2fx | %9d %6.2fx | %9d %6.2fx\n",
+		s += fmt.Sprintf("%-16s %7d %6d | %8d | %9d %6.2fx | %9d %6.2fx\n",
 			r.name, r.size, r.chunks, r.hexTotal,
 			r.binTotal, ratio(r.binTotal),
-			r.gated(), ratio(r.gated()),
 			r.noChunk(), ratio(r.noChunk()))
 	}
 	s += "\nproof bytes alone, code blob excluded from both sides:\n"

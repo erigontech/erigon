@@ -184,9 +184,8 @@ func pbinStatelessSlotBytes(n uint64) []byte {
 }
 
 // pbinStatelessCorpus is the pre-state every test in this file reads: an EOA, a
-// contract whose code spans several header chunks, a contract whose code spills
-// into the code zone, and storage in both the account header and the storage
-// zone.
+// contract whose code spans a few chunks, a larger contract spanning many, and
+// storage in both the account header and the storage zone.
 type pbinStatelessCorpus struct {
 	state    *pbinStatelessState
 	eoa      common.Address
