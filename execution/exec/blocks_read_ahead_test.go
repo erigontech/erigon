@@ -49,9 +49,10 @@ type stubTemporalGetter struct {
 }
 
 type sharedCodeTemporalGetter struct {
-	account   []byte
-	code      []byte
-	codeReads int
+	account      []byte
+	code         []byte
+	accountReads int
+	codeReads    int
 }
 
 type countingGetter struct {
@@ -76,6 +77,7 @@ func (s stubTemporalGetter) StepsInFiles(...kv.Domain) kv.Step { return 0 }
 
 func (s *sharedCodeTemporalGetter) GetLatest(domain kv.Domain, _ []byte) ([]byte, kv.Step, error) {
 	if domain == kv.AccountsDomain {
+		s.accountReads++
 		return s.account, 0, nil
 	}
 	if domain == kv.CodeDomain {
@@ -96,48 +98,48 @@ func newTestStateCache() *cache.StateCache {
 	return cache.NewStateCache(b, b, b, b)
 }
 
-func TestBlockReadAheaderWaitsForConfiguredWarmup(t *testing.T) {
-	oldReadAheadWait := dbg.ReadAheadWait
-	dbg.ReadAheadWait = true
-	t.Cleanup(func() { dbg.ReadAheadWait = oldReadAheadWait })
+func TestBlockReadAheaderWaitForWarmup(t *testing.T) {
 	readAheader := NewBlockReadAheader()
-	release := make(chan struct{})
-	readAheader.warmWg.Go(func() { <-release })
-	done := make(chan struct{})
-	go func() {
-		readAheader.waitForWarmupIfConfigured(t.Context())
-		close(done)
-	}()
-	select {
-	case <-done:
-		t.Fatal("configured warmup wait returned before warmup completed")
-	case <-time.After(50 * time.Millisecond):
+	for range 2 {
+		<-readAheader.warmDone
+		done := make(chan struct{})
+		go func() {
+			readAheader.WaitForWarmup(t.Context())
+			close(done)
+		}()
+		select {
+		case <-done:
+			t.Fatal("warmup wait returned before warmup completed")
+		case <-time.After(50 * time.Millisecond):
+		}
+		readAheader.warmDone <- struct{}{}
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Fatal("warmup wait did not return after warmup completed")
+		}
 	}
-	close(release)
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("configured warmup wait did not return after warmup completed")
-	}
+}
+
+func TestBlockReadAheaderIgnoresMissingHeaderOrBody(t *testing.T) {
+	readAheader := NewBlockReadAheader()
+	header := &types.Header{Number: *uint256.NewInt(1)}
+	require.NotPanics(t, func() { readAheader.AddHeaderAndBody(t.Context(), nil, nil, nil, new(types.Body)) })
+	require.NotPanics(t, func() { readAheader.AddHeaderAndBody(t.Context(), nil, nil, header, nil) })
+	require.Zero(t, readAheader.headers.Len())
+	require.Zero(t, readAheader.bodies.Len())
 }
 
 func TestMakeBALWarmupTasksSplitsStorageHeavyAccount(t *testing.T) {
 	bal := types.BlockAccessList{{
-		StorageChanges: make([]*types.SlotChanges, 5),
+		StorageChanges: make([]*types.SlotChanges, 65),
 		StorageReads:   make([]accounts.StorageKey, 3),
 	}}
-	tasks, workers := makeBALWarmupPlan(bal, nil, balCodeWarmupModeForFlags(false, false), 4)
-	require.Equal(t, 4, workers)
+	tasks, workers := makeBALWarmupPlan(bal, 4)
+	require.Equal(t, 2, workers)
 	require.Equal(t, []balWarmupTask{
-		{accountIndex: 0, kind: balWarmAccount},
-		{accountIndex: 0, kind: balWarmStorageChanges, slotIndex: 0},
-		{accountIndex: 0, kind: balWarmStorageChanges, slotIndex: 1},
-		{accountIndex: 0, kind: balWarmStorageChanges, slotIndex: 2},
-		{accountIndex: 0, kind: balWarmStorageChanges, slotIndex: 3},
-		{accountIndex: 0, kind: balWarmStorageChanges, slotIndex: 4},
-		{accountIndex: 0, kind: balWarmStorageReads, slotIndex: 0},
-		{accountIndex: 0, kind: balWarmStorageReads, slotIndex: 1},
-		{accountIndex: 0, kind: balWarmStorageReads, slotIndex: 2},
+		{accountIndex: 0, slotFrom: 0, slotTo: 64},
+		{accountIndex: 0, slotFrom: 64, slotTo: 68},
 	}, tasks)
 }
 
@@ -160,46 +162,96 @@ func TestBALCodeWarmupModeForFlags(t *testing.T) {
 	}
 }
 
-func TestMakeBALWarmupTasksQueuesUniqueTransactionDestinationsAfterStateData(t *testing.T) {
+func TestUniqueTransactionDestinations(t *testing.T) {
 	destinationA := common.Address{19: 0xa1}
 	destinationB := common.Address{19: 0xb2}
-	balOnly := common.Address{19: 0xc3}
 	txns := types.Transactions{
 		types.NewTransaction(0, destinationA, nil, 0, nil, nil),
 		types.NewTransaction(1, destinationA, nil, 0, nil, []byte{0x01}),
 		types.NewContractCreation(2, nil, 0, nil, []byte{0x02}),
 		types.NewTransaction(3, destinationB, nil, 0, nil, nil),
 	}
-	bal := types.BlockAccessList{
-		{Address: accounts.InternAddress(destinationA), StorageReads: []accounts.StorageKey{accounts.InternKey(common.Hash{31: 0x01})}},
-		{Address: accounts.InternAddress(balOnly)},
-	}
-	tasks, workers := makeBALWarmupPlan(bal, txns, balCodeWarmupModeForFlags(false, true), 4)
-	require.Equal(t, 4, workers)
-	require.Equal(t, []balWarmupTask{
-		{accountIndex: 0, kind: balWarmAccount},
-		{accountIndex: 0, kind: balWarmStorageReads, slotIndex: 0},
-		{accountIndex: 1, kind: balWarmAccount},
-		{kind: balWarmTxnDestination, address: accounts.InternAddress(destinationA)},
-		{kind: balWarmTxnDestination, address: accounts.InternAddress(destinationB)},
-	}, tasks)
+	require.Equal(t, map[accounts.Address]struct{}{accounts.InternAddress(destinationA): {}, accounts.InternAddress(destinationB): {}}, uniqueTransactionDestinations(txns))
 }
 
-func TestMakeBALWarmupTasksQueuesAllCodeAfterStateData(t *testing.T) {
+func TestWarmBALStateTaskLoadsSelectedCode(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		mode          balCodeWarmupMode
+		destination   bool
+		contract      bool
+		codeChanges   bool
+		wantCodeReads int
+	}{
+		{name: "transaction destination contract", mode: balCodeWarmupTxnDestinations, destination: true, contract: true, wantCodeReads: 1},
+		{name: "transaction non-destination contract", mode: balCodeWarmupTxnDestinations, contract: true},
+		{name: "transaction destination EOA", mode: balCodeWarmupTxnDestinations, destination: true},
+		{name: "all contract", mode: balCodeWarmupAll, contract: true, wantCodeReads: 1},
+		{name: "all EOA", mode: balCodeWarmupAll},
+		{name: "all forced code change", mode: balCodeWarmupAll, codeChanges: true, wantCodeReads: 1},
+		{name: "none", destination: true, contract: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			code := []byte{0xaa, 0x01, 0x02, 0x03}
+			account := accounts.NewAccount()
+			if test.contract {
+				account.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
+			}
+			source := &sharedCodeTemporalGetter{account: accounts.SerialiseV3(&account), code: code}
+			stateCache := newTestStateCache()
+			t.Cleanup(stateCache.Close)
+			frontier := cache.FrontierFunc(func(kv.Domain) (uint64, bool) { return 16, true })
+			address := accounts.InternAddress(common.Address{19: 1})
+			destinations := make(map[accounts.Address]struct{})
+			if test.destination {
+				destinations[address] = struct{}{}
+			}
+			accountChanges := &types.AccountChanges{Address: address}
+			if test.codeChanges {
+				accountChanges.CodeChanges = []*types.CodeChange{{Bytecode: code}}
+			}
+			getter := &cachePopulatingGetter{TemporalGetter: source, view: stateCache.View(frontier), stepSize: 16}
+			reader := state.NewReaderV3(getter)
+			require.NoError(t, warmBALStateTask(reader, accountChanges, balWarmupTask{}, test.mode, destinations))
+			require.Equal(t, 1, source.accountReads)
+			require.Equal(t, test.wantCodeReads, source.codeReads)
+		})
+	}
+}
+
+func TestWarmBALStateTaskDoesNotRepeatCodeForLaterChunks(t *testing.T) {
+	code := []byte{0xaa, 0x01, 0x02, 0x03}
+	account := accounts.NewAccount()
+	account.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
+	source := &sharedCodeTemporalGetter{account: accounts.SerialiseV3(&account), code: code}
+	address := accounts.InternAddress(common.Address{19: 1})
+	accountChanges := &types.AccountChanges{Address: address, StorageReads: make([]accounts.StorageKey, 65)}
+	reader := state.NewReaderV3(source)
+	require.NoError(t, warmBALStateTask(reader, accountChanges, balWarmupTask{slotFrom: 64, slotTo: 65}, balCodeWarmupAll, nil))
+	require.Zero(t, source.accountReads)
+	require.Zero(t, source.codeReads)
+}
+
+func TestMakeBALWarmupTasksKeepsSmallAccountsTogether(t *testing.T) {
 	bal := types.BlockAccessList{
 		{StorageChanges: make([]*types.SlotChanges, 1)},
 		{StorageReads: make([]accounts.StorageKey, 1)},
 	}
-	tasks, workers := makeBALWarmupPlan(bal, nil, balCodeWarmupModeForFlags(true, false), 4)
-	require.Equal(t, 4, workers)
+	tasks, workers := makeBALWarmupPlan(bal, 4)
+	require.Equal(t, 2, workers)
 	require.Equal(t, []balWarmupTask{
-		{accountIndex: 0, kind: balWarmAccount},
-		{accountIndex: 0, kind: balWarmStorageChanges, slotIndex: 0},
-		{accountIndex: 1, kind: balWarmAccount},
-		{accountIndex: 1, kind: balWarmStorageReads, slotIndex: 0},
-		{accountIndex: 0, kind: balWarmBALCode},
-		{accountIndex: 1, kind: balWarmBALCode},
+		{accountIndex: 0, slotFrom: 0, slotTo: 1},
+		{accountIndex: 1, slotFrom: 0, slotTo: 1},
 	}, tasks)
+}
+
+func TestWarmBALPropagatesWorkerCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	bal := types.BlockAccessList{{Address: accounts.InternAddress(common.Address{19: 1})}}
+	err := NewBlockReadAheader().warmBAL(ctx, db, bal, nil, balCodeWarmupNone, 1)
+	require.ErrorIs(t, err, context.Canceled)
 }
 
 func TestBlockReadAheaderWarmsOverlayBlockAccessList(t *testing.T) {
@@ -294,6 +346,25 @@ func TestBlockReadAheaderPrefersCachedBlockAccessList(t *testing.T) {
 	require.Zero(t, getter.getOneCalls)
 }
 
+func TestBlockReadAheaderSkipsBlockAccessListReadWhenDisabledOrAbsent(t *testing.T) {
+	oldReadAhead := dbg.ReadAhead
+	dbg.SetReadAhead(false)
+	t.Cleanup(func() { dbg.SetReadAhead(oldReadAhead) })
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	getter := new(countingGetter)
+	bal := make(types.BlockAccessList, 0)
+	balHash := bal.Hash()
+	headerWithBAL := &types.Header{Number: *uint256.NewInt(1), BlockAccessListHash: &balHash}
+	bra := NewBlockReadAheader()
+	bra.AddHeaderAndBody(t.Context(), db, getter, headerWithBAL, new(types.Body))
+	require.Zero(t, getter.getOneCalls, "READ_AHEAD=false must skip the BAL lookup")
+	dbg.SetReadAhead(true)
+	headerWithoutBAL := &types.Header{Number: *uint256.NewInt(2)}
+	bra.AddHeaderAndBody(t.Context(), db, getter, headerWithoutBAL, new(types.Body))
+	bra.WaitForWarmup(t.Context())
+	require.Zero(t, getter.getOneCalls, "pre-Amsterdam blocks must skip the BAL lookup")
+}
+
 // seedFill places an entry with an exact txNum stamp through the public fill
 // API without moving the applied frontier.
 func seedFill(sc *cache.StateCache, domain kv.Domain, k, v []byte, txNum uint64) {
@@ -346,19 +417,31 @@ func TestCachePopulatingGetterReusesCodeByHashAcrossGetters(t *testing.T) {
 	account := accounts.Account{Nonce: 1, CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(code))}
 	source := &sharedCodeTemporalGetter{account: accounts.SerialiseV3(&account), code: code}
 	stateCache := newTestStateCache()
-	for _, address := range []accounts.Address{
-		accounts.InternAddress(common.Address{19: 1}),
-		accounts.InternAddress(common.Address{19: 2}),
-	} {
-		reader := state.NewReaderV3(&cachePopulatingGetter{TemporalGetter: source, view: stateCache.View(cache.FrontierFunc(emptyVisibleEnd)), stepSize: 16})
-		gotAccount, err := reader.ReadAccountData(address)
-		require.NoError(t, err)
-		require.Equal(t, account.CodeHash, gotAccount.CodeHash)
-		gotCode, err := reader.ReadAccountCode(address)
-		require.NoError(t, err)
-		require.Equal(t, code, gotCode)
-	}
+	frontier := cache.FrontierFunc(func(kv.Domain) (uint64, bool) { return 16, true })
+	firstAddress := accounts.InternAddress(common.Address{19: 1})
+	secondAddress := accounts.InternAddress(common.Address{19: 2})
+	firstReader := state.NewReaderV3(&cachePopulatingGetter{TemporalGetter: source, view: stateCache.View(frontier), stepSize: 16})
+	gotAccount, err := firstReader.ReadAccountData(firstAddress)
+	require.NoError(t, err)
+	require.Equal(t, account.CodeHash, gotAccount.CodeHash)
+	gotCode, err := firstReader.ReadAccountCode(firstAddress)
+	require.NoError(t, err)
+	require.Equal(t, code, gotCode)
+	accountReader := state.NewReaderV3(&cachePopulatingGetter{TemporalGetter: source, view: stateCache.View(frontier), stepSize: 16})
+	gotAccount, err = accountReader.ReadAccountData(secondAddress)
+	require.NoError(t, err)
+	require.Equal(t, account.CodeHash, gotAccount.CodeHash)
+	codeGetter := &cachePopulatingGetter{TemporalGetter: source, view: stateCache.View(frontier), stepSize: 16}
+	codeReader := state.NewReaderV3(codeGetter)
+	gotCode, err = codeReader.ReadAccountCode(secondAddress)
+	require.NoError(t, err)
+	require.Equal(t, code, gotCode)
+	require.Equal(t, 2, source.accountReads, "the code phase must reuse the account read from the state phase")
 	require.Equal(t, 1, source.codeReads, "identical code must be loaded from the address-keyed domain only once")
+	secondAddressValue := secondAddress.Value()
+	boundCode, ok := stateCache.View(nil).Get(kv.CodeDomain, secondAddressValue[:])
+	require.True(t, ok, "the code-hash fast path must bind code to the second address")
+	require.Equal(t, code, boundCode)
 }
 
 // Cold keys must still be warmed — that is the prefetcher's purpose.
