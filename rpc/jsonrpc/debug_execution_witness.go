@@ -1020,6 +1020,9 @@ type accessedState struct {
 	SortedCodes []hexutil.Bytes
 	CodeReads   map[common.Hash]witnesstypes.CodeWithHash
 	Deleted     map[common.Address]struct{}
+	// ModifiedCode is the code the block writes, per address. The binary trie
+	// commits code, so a witness for it has to cover the chunk keys these imply.
+	ModifiedCode map[common.Address][]byte
 }
 
 // isEmpty reports whether no accounts, storage slots, or code addresses were touched.
@@ -1086,13 +1089,14 @@ func (a *accessedState) touchAll(sdCtx *commitmentdb.SharedDomainsCommitmentCont
 // verifier re-derives in-block-created code by replaying the transactions.
 func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 	out := &accessedState{
-		Addresses:   make(map[common.Address]struct{}),
-		Storage:     make(map[common.Address]map[common.Hash]struct{}),
-		CodeAddrs:   make(map[common.Address]struct{}),
-		SortedCodes: []hexutil.Bytes{},
-		WitnessKeys: []hexutil.Bytes{},
-		CodeReads:   make(map[common.Hash]witnesstypes.CodeWithHash),
-		Deleted:     make(map[common.Address]struct{}),
+		Addresses:    make(map[common.Address]struct{}),
+		Storage:      make(map[common.Address]map[common.Hash]struct{}),
+		CodeAddrs:    make(map[common.Address]struct{}),
+		SortedCodes:  []hexutil.Bytes{},
+		WitnessKeys:  []hexutil.Bytes{},
+		CodeReads:    make(map[common.Hash]witnesstypes.CodeWithHash),
+		ModifiedCode: make(map[common.Address][]byte),
+		Deleted:      make(map[common.Address]struct{}),
 	}
 	for addr := range rs.DeletedAccounts {
 		out.Deleted[addr] = struct{}{}
@@ -1234,8 +1238,9 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 	for addr := range preCode {
 		out.CodeAddrs[addr] = struct{}{}
 	}
-	for addr := range modCode {
+	for addr, code := range modCode {
 		out.CodeAddrs[addr] = struct{}{}
+		out.ModifiedCode[addr] = code
 	}
 
 	return out
@@ -1362,6 +1367,23 @@ func buildWitnessTrie(
 	}
 
 	accessed.touchAll(sdCtx)
+
+	// The pass walks the parent state, which holds neither the code the block
+	// deploys nor any sign of which accounts it removed — and under bin both
+	// decide which keys the block touches.
+	if binTrie {
+		block := commitment.PBinWitnessBlock{
+			Code:    make(map[string][]byte, len(accessed.ModifiedCode)),
+			Removed: make(map[string]struct{}, len(accessed.Deleted)),
+		}
+		for addr, code := range accessed.ModifiedCode {
+			block.Code[string(addr[:])] = code
+		}
+		for addr := range accessed.Deleted {
+			block.Removed[string(addr[:])] = struct{}{}
+		}
+		sdCtx.SetWitnessBlock(block)
+	}
 
 	if len(siblingPaths) > 0 {
 		log.Debug("[debug_executionWitness] detected sibling paths", "count", len(siblingPaths))

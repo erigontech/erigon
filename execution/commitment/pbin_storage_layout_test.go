@@ -57,7 +57,7 @@ func TestPBinStorageLayoutCost(t *testing.T) {
 
 	for _, p := range patterns {
 		c := new(pbinTestCorpus).account(addr, 1, 100, pbinTestCodeHash(0))
-		for i := 0; i < slots; i++ {
+		for i := range slots {
 			c = c.storage(addr, pbinSlotAt(p.slot(i)), byte(i+1))
 		}
 
@@ -128,11 +128,11 @@ func TestPBinStorageGroupSharing(t *testing.T) {
 		// co-location property is about. Other accounts' keys diverge above this
 		// account's stem and cancel between the two arms.
 		full := new(pbinTestCorpus).account(addr, 1, 100, pbinTestCodeHash(0))
-		for i := 0; i < filler; i++ {
+		for i := range filler {
 			full = full.storage(addr, pbinSlotAt(1<<20+256*uint64(i)), 0x7f)
 		}
 		touched := new(pbinTestCorpus)
-		for i := 0; i < slots; i++ {
+		for i := range slots {
 			full = full.storage(addr, pbinSlotAt(64+step*uint64(i)), byte(i+1))
 			touched = touched.storage(addr, pbinSlotAt(64+step*uint64(i)), byte(i+1))
 		}

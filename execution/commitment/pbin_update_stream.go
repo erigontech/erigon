@@ -22,6 +22,9 @@ import (
 	"fmt"
 	"slices"
 
+	keccak "github.com/erigontech/fastkeccak"
+
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 )
 
@@ -35,6 +38,19 @@ type pbinUpdateStream struct {
 	pendingCode  pbinPendingCode
 	overflowCode []pbinOverflowChunk
 	keyDigest    pbinDigestCache
+
+	// witness is what the parent state cannot tell a witness pass about the block.
+	// See chunkSource and removesAccount.
+	witness     PBinWitnessBlock
+	witnessPass bool
+
+	pendingRemoval []pbinAccountRemoval
+}
+
+// pbinAccountRemoval is a storage subtree waiting for the walk to reach its zone.
+type pbinAccountRemoval struct {
+	prefix   []byte
+	plainKey [length.Addr]byte
 }
 
 type pbinPendingCode struct {
@@ -74,6 +90,9 @@ func (s *pbinUpdateStream) process(ctx context.Context, updates *Updates, state 
 	if err = s.flushOverflowCode(); err != nil {
 		return processed, err
 	}
+	if err = s.flushRemovals(nil); err != nil {
+		return processed, err
+	}
 	return processed, nil
 }
 
@@ -81,29 +100,36 @@ func (s *pbinUpdateStream) reset() {
 	s.state, s.emit = nil, nil
 	s.pendingCode = pbinPendingCode{}
 	s.overflowCode = s.overflowCode[:0]
+	s.pendingRemoval = s.pendingRemoval[:0]
 }
 
 func (s *pbinUpdateStream) release() {
 	s.reset()
 	s.keyDigest = pbinDigestCache{}
+	s.witness = PBinWitnessBlock{}
 }
 
 // processKey expands an account into its basic-data and code-hash leaves. Code
 // chunks are delayed until emitting them cannot move the ordered trie walk back.
 func (s *pbinUpdateStream) processKey(treeKey, plainKey []byte, stateUpdate *Update) error {
-	if stateUpdate != nil && stateUpdate.Deleted() {
-		return fmt.Errorf("%w: update for %x", errPBinDeleteUnsupported, plainKey)
-	}
 	if err := s.flushPendingCodeBefore(treeKey); err != nil {
 		return err
 	}
 	if err := s.flushOverflowCodeBefore(treeKey); err != nil {
 		return err
 	}
+	if err := s.flushRemovalsBefore(treeKey); err != nil {
+		return err
+	}
 	update := stateUpdate
 	if update == nil {
 		var err error
 		if update, err = s.stateOf(plainKey); err != nil {
+			return err
+		}
+	}
+	if len(plainKey) == length.Addr && s.removesAccount(plainKey, update) {
+		if err := s.removeAccount(plainKey, update); err != nil {
 			return err
 		}
 	}
@@ -123,27 +149,100 @@ func (s *pbinUpdateStream) processKey(treeKey, plainKey []byte, stateUpdate *Upd
 	return s.queueCode(treeKey, plainKey, update)
 }
 
-func (s *pbinUpdateStream) queueCode(basicDataKey, plainKey []byte, update *Update) error {
+// removesAccount reports whether the block removes this account. A witness pass
+// reads the parent state, where an account the block creates is absent too, so
+// there it has to be told rather than infer it.
+func (s *pbinUpdateStream) removesAccount(plainKey []byte, update *Update) bool {
+	if s.witnessPass {
+		_, removed := s.witness.Removed[string(plainKey)]
+		return removed
+	}
+	return update.Deleted()
+}
+
+// removeAccount drops the two subtrees an account owns — its header stem, and
+// its storage prefix once the walk reaches that zone — rather than the leaves it
+// holds, which for storage nothing enumerates. Overflow code chunks stay: they
+// are shared with every account running the same bytecode (eip:608-641).
+func (s *pbinUpdateStream) removeAccount(plainKey []byte, update *Update) error {
+	if err := s.emit(s.keyDigest.accountHeaderStem(plainKey), plainKey, update); err != nil {
+		return err
+	}
+	s.pendingRemoval = append(s.pendingRemoval, pbinAccountRemoval{
+		prefix: s.keyDigest.accountStoragePrefix(plainKey),
+	})
+	copy(s.pendingRemoval[len(s.pendingRemoval)-1].plainKey[:], plainKey)
+	return nil
+}
+
+func (s *pbinUpdateStream) flushRemovalsBefore(treeKey []byte) error {
+	if len(s.pendingRemoval) == 0 || treeKey[0] < pbinStorageZone {
+		return nil
+	}
+	return s.flushRemovals(treeKey)
+}
+
+// flushRemovals emits the storage-prefix drops sorting before upTo, or all of
+// them when upTo is nil. A drop has to land before any storage key it covers.
+func (s *pbinUpdateStream) flushRemovals(upTo []byte) error {
+	slices.SortFunc(s.pendingRemoval, func(a, b pbinAccountRemoval) int {
+		return bytes.Compare(a.prefix, b.prefix)
+	})
+	kept := s.pendingRemoval[:0]
+	for i := range s.pendingRemoval {
+		r := &s.pendingRemoval[i]
+		if upTo != nil && bytes.Compare(r.prefix, upTo) >= 0 {
+			kept = append(kept, *r)
+			continue
+		}
+		update := Update{Flags: DeleteUpdate}
+		if err := s.emit(r.prefix, r.plainKey[:], &update); err != nil {
+			return err
+		}
+	}
+	s.pendingRemoval = kept
+	return nil
+}
+
+// chunkSource is the code an account's chunk keys derive from, with the hash
+// addressing its overflow chunks. A witness pass walks the parent state, where a
+// contract the block creates has no code, so it needs the override to reach the
+// same keys the fold did. Only key derivation moves; values stay pre-state.
+func (s *pbinUpdateStream) chunkSource(plainKey []byte, update *Update) ([]byte, common.Hash, error) {
+	if code, ok := s.witness.Code[string(plainKey)]; ok {
+		return code, common.Hash(keccak.Sum256(code)), nil
+	}
 	if update.CodeSize == 0 {
+		return nil, common.Hash{}, nil
+	}
+	code, err := s.codeOf(plainKey)
+	if err != nil {
+		return nil, common.Hash{}, err
+	}
+	if uint64(len(code)) != update.CodeSize {
+		return nil, common.Hash{}, fmt.Errorf("pbin: account %x says %d code bytes, the code domain holds %d",
+			plainKey, update.CodeSize, len(code))
+	}
+	return code, update.CodeHash, nil
+}
+
+func (s *pbinUpdateStream) queueCode(basicDataKey, plainKey []byte, update *Update) error {
+	code, codeHash, err := s.chunkSource(plainKey, update)
+	if err != nil {
+		return err
+	}
+	if len(code) == 0 {
 		return nil
 	}
 	if len(s.pendingCode.chunks) != 0 {
 		return fmt.Errorf("pbin: code for %x queued while %x is still pending: the stem exit was missed",
 			plainKey, s.pendingCode.plainKey[:])
 	}
-	code, err := s.codeOf(plainKey)
-	if err != nil {
-		return err
-	}
-	if uint64(len(code)) != update.CodeSize {
-		return fmt.Errorf("pbin: account %x says %d code bytes, the code domain holds %d",
-			plainKey, update.CodeSize, len(code))
-	}
 	chunks := pbinChunkifyCode(code)
 	if len(chunks) > pbinHeaderCodeChunks {
 		for i := pbinHeaderCodeChunks; i < len(chunks); i++ {
 			var oc pbinOverflowChunk
-			copy(oc.key[:], s.keyDigest.codeOverflowKey(update.CodeHash, i))
+			copy(oc.key[:], s.keyDigest.codeOverflowKey(codeHash, i))
 			oc.value = chunks[i]
 			s.overflowCode = append(s.overflowCode, oc)
 		}

@@ -30,15 +30,18 @@ import (
 
 // The five code sizes of tests/binary_tree/.../test_witness_growth.py.
 var pbinGranCases = []struct {
-	name   string
-	size   int
-	chunks int
+	name    string
+	size    int
+	chunks  int
+	zeroPad bool
 }{
-	{"single_chunk", 31, 1},
-	{"header_full", pbinHeaderCodeCapacity, 128},
-	{"first_overflow", pbinHeaderCodeCapacity + 31, 129},
-	{"deep_overflow", pbinHeaderCodeCapacity * 2, 256},
-	{"max_code_size", 24576, 793},
+	{"single_chunk", 31, 1, false},
+	{"header_full", pbinHeaderCodeCapacity, 128, false},
+	{"first_overflow", pbinHeaderCodeCapacity + 31, 129, false},
+	{"spill_4216", 4216, 136, false},
+	{"deep_overflow", pbinHeaderCodeCapacity * 2, 256, false},
+	{"max_code_size", 24576, 793, false},
+	{"max_zero_padded", 24576, 793, true},
 }
 
 type pbinGranRow struct {
@@ -49,6 +52,9 @@ type pbinGranRow struct {
 	// hex
 	hexState, hexCodes, hexNodes, hexTotal int
 	headers                                int
+	// the block that deploys the contract, against the block that reads it
+	deployBinNodes, deployBinTotal int
+	deployHexNodes, deployHexTotal int
 }
 
 // pbinGranChain deploys one contract per case, then calls each in its own block.
@@ -89,8 +95,17 @@ func pbinGranChain(t *testing.T) (*pbinWitnessChain, []common.Address) {
 	pack, err2 := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2*n, func(i int, b *blockgen.BlockGen) {
 		nonce := b.TxNonce(bankAddress)
 		if i < n { // deploy
+			// Padding is INVALID, not zero: a chunk of 31 zero bytes is stored as no
+			// leaf at all, so zero padding would measure the collapse rather than the
+			// cost of code. pbinGranZeroPad covers that case deliberately.
 			runtime := make([]byte, pbinGranCases[i].size)
+			for j := range runtime {
+				runtime[j] = 0xfe
+			}
 			copy(runtime, pbinStoreRuntime)
+			if pbinGranCases[i].zeroPad {
+				clear(runtime[len(pbinStoreRuntime):])
+			}
 			addrs[i] = types.CreateAddress(bankAddress, nonce)
 			b.AddTx(sign(&types.LegacyTx{CommonTx: types.CommonTx{
 				Nonce: nonce, GasLimit: 12_000_000, Data: pbinDeployCode(runtime),
@@ -128,6 +143,10 @@ func TestPBinWitnessGranularity(t *testing.T) {
 			rows[i].hexCodes = sumBytes(w.Codes)
 			rows[i].headers = sumBytes(w.Headers)
 			rows[i].hexTotal = rows[i].hexState + rows[i].hexCodes + rows[i].headers
+
+			d := pbinWitnessOf(t, api, uint64(i+1))
+			rows[i].deployHexNodes = len(d.State)
+			rows[i].deployHexTotal = sumBytes(d.State) + sumBytes(d.Codes) + sumBytes(d.Headers)
 		}
 	})
 
@@ -164,6 +183,10 @@ func TestPBinWitnessGranularity(t *testing.T) {
 				}
 			}
 			r.binTotal += r.headers
+
+			d := pbinWitnessOf(t, api, uint64(i+1))
+			r.deployBinNodes = len(d.State)
+			r.deployBinTotal = sumBytes(d.State) + sumBytes(d.Headers)
 		}
 	})
 
@@ -173,7 +196,8 @@ func TestPBinWitnessGranularity(t *testing.T) {
 func pbinGranTable(rows []pbinGranRow) string {
 	s := fmt.Sprintf("%-16s %7s %5s %8s %9s %8s | %6s %7s %8s %8s | %7s\n",
 		"case", "code B", "chunks", "hex tot", "bin tot", "bin/hex", "hexNod", "hexCode", "binNod", "chunkB", "noChunk")
-	for i, r := range rows {
+	for i := range rows {
+		r := &rows[i]
 		chunkBytes := r.headerChunk + r.overflowChunk
 		noChunk := r.binTotal - chunkBytes
 		s += fmt.Sprintf("%-16s %7d %5d %8d %9d %7.2fx | %6d %7d %8d %8d | %7d\n",
@@ -181,10 +205,20 @@ func pbinGranTable(rows []pbinGranRow) string {
 			r.hexTotal, r.binTotal, float64(r.binTotal)/float64(r.hexTotal),
 			r.hexNodes, r.hexCodes, r.binNodes, chunkBytes, noChunk)
 	}
+	s += "\ndeploying the contract against reading it back:\n"
+	s += fmt.Sprintf("%-16s %8s %8s | %8s %8s | %8s %8s\n",
+		"case", "depBinN", "depBinB", "readBinN", "readBinB", "depHexB", "readHexB")
+	for i := range rows {
+		r := &rows[i]
+		s += fmt.Sprintf("%-16s %8d %8d | %8d %8d | %8d %8d\n",
+			r.name, r.deployBinNodes, r.deployBinTotal, r.binNodes, r.binTotal,
+			r.deployHexTotal, r.hexTotal)
+	}
 	s += "\nbin state bytes by what the leaf's key says it is:\n"
 	s += fmt.Sprintf("%-16s %10s %9s %12s %14s %8s %10s\n",
 		"case", "BASIC_DATA", "CODE_HASH", "hdr chunks", "ovf chunks", "storage", "branches")
-	for _, r := range rows {
+	for i := range rows {
+		r := &rows[i]
 		s += fmt.Sprintf("%-16s %10d %9d %12d %14d %8d %10d\n",
 			r.name, r.basicData, r.codeHash, r.headerChunk, r.overflowChunk, r.storageLeaf, r.branches)
 	}

@@ -61,6 +61,21 @@ func (c pbinWitnessReadOnly) Code(plainKey []byte) ([]byte, error) {
 	return inner.Code(plainKey)
 }
 
+// PBinWitnessBlock is what a witness pass cannot read out of the parent state:
+// the code the block writes, whose chunk keys would otherwise go unwalked, and
+// the accounts it removes, which are indistinguishable there from accounts it
+// creates. Both are keyed by account plain key.
+type PBinWitnessBlock struct {
+	Code    map[string][]byte
+	Removed map[string]struct{}
+}
+
+// SetWitnessBlock supplies the next witness pass with what the parent state
+// cannot say. Cleared when Witnesses returns.
+func (pph *PBinPatriciaHashed) SetWitnessBlock(b PBinWitnessBlock) {
+	pph.updateStream.witness = b
+}
+
 // Witnesses walks the tree along every key the update stream expands to, taps
 // each node as it is hashed, and returns the captured superset (root first), the
 // keys walked, and the root hash. Callers prune to the lean set.
@@ -70,10 +85,13 @@ func (c pbinWitnessReadOnly) Code(plainKey []byte) ([]byte, error) {
 //
 // produceExclusionProofs is accepted and ignored. It materializes the branch an
 // extension node hides, and EIP-8297 has no extension node.
+
 func (pph *PBinPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, produceExclusionProofs bool, logPrefix string) (nodes [][]byte, provedKeys [][]byte, rootHash []byte, err error) {
 	set := newWitnessNodeSet()
 	pph.setWitnessTracer(set)
 	defer pph.setWitnessTracer(nil)
+	pph.updateStream.witnessPass = true
+	defer func() { pph.updateStream.witness, pph.updateStream.witnessPass = PBinWitnessBlock{}, false }()
 
 	stateCtx := pph.ctx
 	pph.ctx = pbinWitnessReadOnly{PatriciaContext: stateCtx}

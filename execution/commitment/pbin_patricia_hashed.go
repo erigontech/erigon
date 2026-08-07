@@ -228,17 +228,32 @@ func (pph *PBinPatriciaHashed) updateCell(plainKey []byte, probe *pbinBitpath, u
 		c = &g.rows[row][bit]
 	}
 
-	// A key with no state reads back as a delete. With no leaf here there is
-	// nothing to remove; over a live one see pbinZeroedLeafUpdate.
-	if update.Deleted() {
-		if c.kind != pbinNodeLeaf {
-			return nil
-		}
-		zeroed, err := pbinZeroedLeafUpdate(plainKey)
+	// An absent key and a zero-valued one are the same state, so both a delete and
+	// a value of 32 zero bytes remove the leaf rather than store it. Code length
+	// therefore comes from code_size, never from which chunks are present.
+	drop := update.Deleted()
+	if !drop {
+		zero, err := pbinLeafValueIsZero(probe, update)
 		if err != nil {
 			return err
 		}
-		update = &zeroed
+		drop = zero
+	}
+	if drop {
+		// A probe shorter than a whole key names a subtree, and dropping it drops
+		// everything under it. Unfolding stops at the probe, so nothing below the
+		// cell is open and resetting it is the whole removal.
+		if c.kind == pbinNodeEmpty {
+			return nil
+		}
+		c.reset()
+		if g.activeRows == 0 {
+			pph.rootTouched, pph.rootPresent = true, false
+			return nil
+		}
+		g.touchMap[row] |= uint16(1) << bit
+		g.afterMap[row] &^= uint16(1) << bit
+		return nil
 	}
 
 	if g.activeRows == 0 {
@@ -279,16 +294,20 @@ func (pph *PBinPatriciaHashed) updateCell(plainKey []byte, probe *pbinBitpath, u
 	return nil
 }
 
-// pbinZeroedLeafUpdate reinterprets an absent read over a live leaf. The domain
-// encodes zero and absent the same way, while EIP-8297 has no removal and holds
-// a zero value as a present leaf, so a zeroed storage slot keeps its leaf at 32
-// zero bytes. An absent account would be a removal the EIP does not define, so
-// it stays refused rather than guessed at.
-func pbinZeroedLeafUpdate(plainKey []byte) (Update, error) {
-	if len(plainKey) != length.Addr+length.Hash {
-		return Update{}, fmt.Errorf("%w: %x", errPBinDeleteUnsupported, plainKey)
+// pbinLeafValueIsZero reports whether the leaf at path would hold 32 zero bytes.
+// The path is the whole key, so the value is formed the same way the hasher forms
+// it and the two cannot drift.
+func pbinLeafValueIsZero(path *pbinBitpath, u *Update) (bool, error) {
+	if path.bitLen%8 != 0 {
+		return false, fmt.Errorf("pbin: leaf key of %d bits is not whole bytes", path.bitLen)
 	}
-	return Update{Flags: StorageUpdate}, nil
+	var buf [pbinStorageKeyLength]byte
+	key := path.appendPackedBits(buf[:0])
+	value, err := pbinLeafValue(key, u)
+	if err != nil {
+		return false, err
+	}
+	return value == [pbinValueLength]byte{}, nil
 }
 
 // RootHash hashes whatever the root cell holds: a one-key tree's root is the
@@ -796,11 +815,9 @@ func (pph *PBinPatriciaHashed) loadCellState(c *pbinCell) error {
 			return fmt.Errorf("pbin: read storage %x: %w", plainKey, err)
 		}
 		if update.Deleted() {
-			zeroed, err := pbinZeroedLeafUpdate(plainKey)
-			if err != nil {
-				return err
-			}
-			update = &zeroed
+			// A stored leaf whose state reads absent: the record outlived the value.
+			// Carry the zero it stands for; the update path is what removes leaves.
+			update = &Update{Flags: StorageUpdate}
 		}
 		c.setFromUpdate(update)
 		c.loaded = c.loaded.addFlag(cellLoadStorage)

@@ -92,12 +92,14 @@ func (p *pbinWitnessPruner) walk(key []byte) error {
 }
 
 // pbinWitnessProvedPath rejects a key no zone admits rather than letting
-// pbinPathFromBytes panic on it.
+// pbinPathFromBytes panic on it. A key shorter than its zone's length is a
+// subtree prefix, which an account removal proves in place of the leaves it
+// drops, so the walk stops where that subtree begins.
 func pbinWitnessProvedPath(key []byte) (pbinBitpath, error) {
 	if len(key) == 0 {
 		return pbinBitpath{}, fmt.Errorf("%w: empty proved key", errPBinWitnessNode)
 	}
-	if want, known := pbinZoneKeyLength(key[0]); !known || len(key) != want {
+	if want, known := pbinZoneKeyLength(key[0]); !known || len(key) > want {
 		return pbinBitpath{}, fmt.Errorf("%w: proved key %x is no key of zone %#x", errPBinWitnessNode, key, key[0])
 	}
 	return pbinPathFromBytes(key), nil

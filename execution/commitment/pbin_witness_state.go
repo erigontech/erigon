@@ -74,24 +74,24 @@ func (s *PBinWitnessState) SetCode(addr, code []byte) { s.ctx.setCode(addr, code
 // Account resolves an address to the state its two account leaves hold. ok is
 // false when the witness proves the account absent.
 func (s *PBinWitnessState) Account(addr []byte) (PBinAccount, bool, error) {
-	basic, ok, err := s.tree.leaf(s.keys.accountKey(addr, pbinBasicDataLeafKey))
+	// CODE_HASH marks the account present: it is never zero, so it is never
+	// collapsed away, while BASIC_DATA is absent for an account whose nonce,
+	// balance and code_size are all zero.
+	codeHash, ok, err := s.tree.leaf(s.keys.accountKey(addr, pbinCodeHashLeafKey))
 	if err != nil || !ok {
 		return PBinAccount{}, false, err
 	}
-	codeHash, ok, err := s.tree.leaf(s.keys.accountKey(addr, pbinCodeHashLeafKey))
+	acc := PBinAccount{CodeHash: common.BytesToHash(codeHash)}
+
+	basic, ok, err := s.tree.leaf(s.keys.accountKey(addr, pbinBasicDataLeafKey))
 	if err != nil {
 		return PBinAccount{}, false, err
 	}
-	if !ok {
-		return PBinAccount{}, false, fmt.Errorf("%w: account %x has a BASIC_DATA leaf but no CODE_HASH leaf",
-			errPBinWitnessNode, addr)
+	if ok {
+		acc.CodeSize = uint64(binary.BigEndian.Uint32(basic[pbinBasicDataCodeSizeOffset:]))
+		acc.Nonce = binary.BigEndian.Uint64(basic[pbinBasicDataNonceOffset:])
+		acc.Balance.SetBytes(basic[pbinBasicDataBalanceOffset:])
 	}
-	acc := PBinAccount{
-		CodeSize: uint64(binary.BigEndian.Uint32(basic[pbinBasicDataCodeSizeOffset:])),
-		Nonce:    binary.BigEndian.Uint64(basic[pbinBasicDataNonceOffset:]),
-		CodeHash: common.BytesToHash(codeHash),
-	}
-	acc.Balance.SetBytes(basic[pbinBasicDataBalanceOffset:])
 	return acc, true, nil
 }
 
@@ -143,23 +143,24 @@ func (s *PBinWitnessState) Root(ctx context.Context, plainKeys [][]byte, updates
 // The reassembly is checked against the CODE_HASH leaf, so it cannot drift from
 // the chunker. A nil result means the witness proves the account absent.
 func (c *pbinWitnessContext) codeFromLeaves(addr []byte) ([]byte, error) {
-	basic, ok, err := c.tree.leaf(c.keys.accountKey(addr, pbinBasicDataLeafKey))
+	// An account whose nonce, balance and code_size are all zero stores no
+	// BASIC_DATA leaf, so its absence is zeros rather than an absent account —
+	// the CODE_HASH leaf is what marks the account present.
+	hashValue, ok, err := c.tree.leaf(c.keys.accountKey(addr, pbinCodeHashLeafKey))
 	if err != nil || !ok {
 		return nil, err
 	}
-	size := uint64(binary.BigEndian.Uint32(basic[pbinBasicDataCodeSizeOffset:]))
+	codeHash := common.BytesToHash(hashValue)
+
+	var size uint64
+	if basic, ok, err := c.tree.leaf(c.keys.accountKey(addr, pbinBasicDataLeafKey)); err != nil {
+		return nil, err
+	} else if ok {
+		size = uint64(binary.BigEndian.Uint32(basic[pbinBasicDataCodeSizeOffset:]))
+	}
 	if size == 0 {
 		return []byte{}, nil
 	}
-	hashValue, ok, err := c.tree.leaf(c.keys.accountKey(addr, pbinCodeHashLeafKey))
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		return nil, fmt.Errorf("%w: account %x runs %d code bytes but has no CODE_HASH leaf",
-			errPBinWitnessNode, addr, size)
-	}
-	codeHash := common.BytesToHash(hashValue)
 
 	code := make([]byte, 0, size)
 	for chunk := 0; chunk < pbinCodeChunkCount(size); chunk++ {
@@ -174,7 +175,11 @@ func (c *pbinWitnessContext) codeFromLeaves(addr []byte) ([]byte, error) {
 			return nil, err
 		}
 		if !ok {
-			return nil, fmt.Errorf("%w: code chunk %d of account %x is absent", errPBinWitnessNode, chunk, addr)
+			// A chunk of 31 zero bytes is stored as no leaf at all, so an absent
+			// chunk is the zeros it stands for. code_size delimits the code, not
+			// which chunks are present.
+			var zero [pbinValueLength]byte
+			value = zero[:]
 		}
 		code = append(code, value[1:]...)
 	}

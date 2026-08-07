@@ -202,6 +202,19 @@ func (c *pbinDigestCache) accountKey(addr []byte, subIndex byte) []byte {
 	return pbinTreeKey(pbinAccountZone, c.stemDigest(&addr32)[:], subIndex)
 }
 
+// accountHeaderStem and accountStoragePrefix are the two key-space regions an
+// account owns, both fixed by its address. Removing an account is removing these
+// two subtrees (eip:608-641).
+func (c *pbinDigestCache) accountHeaderStem(addr []byte) []byte {
+	addr32 := pbinAddr32(addr)
+	return append([]byte{pbinAccountZone}, c.stemDigest(&addr32)[:]...)
+}
+
+func (c *pbinDigestCache) accountStoragePrefix(addr []byte) []byte {
+	addr32 := pbinAddr32(addr)
+	return append([]byte{pbinStorageZone}, c.stemDigest(&addr32)[:]...)
+}
+
 func (c *pbinDigestCache) codeChunkKey(addr []byte, chunkID int) []byte {
 	if chunkID < 0 || chunkID >= pbinHeaderCodeChunks {
 		panic(fmt.Sprintf("pbin: code chunk %d lives outside the account header", chunkID))

@@ -359,9 +359,25 @@ var (
 	_ witnessTrie = (*commitment.PBinPatriciaHashed)(nil)
 )
 
+// witnessBlockTrie is the seam for a trie whose key set depends on what the
+// block did. Only the binary trie commits code, so only it implements this.
+type witnessBlockTrie interface {
+	SetWitnessBlock(b commitment.PBinWitnessBlock)
+}
+
+// SetWitnessBlock hands the next capture what the parent state it walks cannot
+// say about the block. See commitment.PBinWitnessBlock.
+func (sdc *SharedDomainsCommitmentContext) SetWitnessBlock(b commitment.PBinWitnessBlock) {
+	if trie, ok := sdc.Trie().(witnessBlockTrie); ok {
+		trie.SetWitnessBlock(b)
+	}
+}
+
 // witnessCapture runs the on-the-fly fold and returns the captured superset node
 // set (root first), the fold's hashed keys, and the root hash.
 func (sdc *SharedDomainsCommitmentContext) witnessCapture(ctx context.Context, produceExclusionProofs bool, logPrefix string) (nodes [][]byte, provedKeys [][]byte, rootHash []byte, err error) {
+	defer sdc.SetWitnessBlock(commitment.PBinWitnessBlock{}) // Witnesses clears it too, but only once it runs
+
 	capturer, ok := sdc.Trie().(witnessTrie)
 	if !ok {
 		return nil, nil, nil, fmt.Errorf("commitment trie %T captures no witness", sdc.Trie())
