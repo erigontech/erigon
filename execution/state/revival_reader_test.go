@@ -45,9 +45,10 @@ func TestVersionedStateReader_StorageWipedByInRangeDestruct(t *testing.T) {
 	destructThenRevive(vm, addr)
 
 	vr := NewVersionedStateReader(3, ReadSet{}, vm, nil)
-	val, _, err := vr.ReadAccountStorage(addr, key)
+	val, found, err := vr.ReadAccountStorage(addr, key)
 	require.NoError(t, err)
 	require.True(t, val.IsZero(), "the destruct wiped the slot; the revival did not restore it")
+	require.False(t, found, "a wiped slot is absent, not a slot that happens to hold zero")
 }
 
 func TestVersionedStateReader_StorageSurvivesWhenRevivalRewrote(t *testing.T) {
@@ -61,9 +62,10 @@ func TestVersionedStateReader_StorageSurvivesWhenRevivalRewrote(t *testing.T) {
 	writeFor(vm, addr, StoragePath, key, Version{TxIndex: 2}, *uint256.NewInt(9), true)
 
 	vr := NewVersionedStateReader(3, ReadSet{}, vm, nil)
-	val, _, err := vr.ReadAccountStorage(addr, key)
+	val, found, err := vr.ReadAccountStorage(addr, key)
 	require.NoError(t, err)
 	require.Equal(t, uint64(9), val.Uint64(), "a write above the destruct is the live value")
+	require.True(t, found, "and it is present, not absent")
 }
 
 func TestVersionedStateReader_CodeWipedByInRangeDestruct(t *testing.T) {
