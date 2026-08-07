@@ -445,26 +445,21 @@ func (d *Domain) openList(ctx context.Context, scanResult ScanDirsResult) (retir
 // protectFromHistoryFilesAheadOfDomainFiles - in some corner-cases app may see more .ef/.v files than .kv:
 //   - `kill -9` in the middle of `buildFiles()`, then `rm -f db` (restore from backup)
 //   - `kill -9` in the middle of `buildFiles()`, then `stage_exec --reset` (drop progress - as a hot-fix)
+//
+// Mode-C v4 emit exception: v4 items (raw-txN, non-step-aligned endTxN)
+// are pinned across this cleanup regardless of the step-truncation
+// threshold. Their endTxN legitimately extends past the step boundary
+// (they ARE the boundary-extender the visible-set uses); classifying
+// them as "ahead of history" and closing them would silently undo the
+// dirtyFilesEndTxNumMinimax bridge that made them visible in the first
+// place. Non-v4 files at the same step still get closed — the crash-
+// recovery invariant is preserved for legitimately-ahead partial files.
 func (d *Domain) protectFromHistoryFilesAheadOfDomainFiles() {
 	e := d.dirtyFilesEndTxNumMinimax()
 	if e == 0 {
 		return
 	}
-	// Mode-C v4 emit lands a domain file whose endTxN is mid-step (raw
-	// txnum, not step-aligned). Straight truncation would collapse
-	// lowerBound to the file's own StartStep (both = endTxN/stepSize),
-	// closeFilesAfterStep would then include the v4 file itself, and the
-	// bridge that just made it visible would be silently undone (the
-	// 2026-08-06 postfix soak run 5 iter 4 regime-3 clamp: emit at
-	// endTxN=118,146,408, StartStep=302; truncation gave lowerBound=302;
-	// v4 got closed; visible-set fell back to step-302 files → race).
-	// Round up when endTxN isn't step-aligned so lowerBound sits STRICTLY
-	// past the boundary file's step, keeping it in dirtyFiles.
-	lowerBound := kv.Step(e / d.stepSize)
-	if e%d.stepSize != 0 {
-		lowerBound++
-	}
-	d.closeFilesAfterStep(lowerBound)
+	d.closeFilesAfterStep(kv.Step(e / d.stepSize))
 }
 
 func (d *Domain) openFolder(ctx context.Context, r *ScanDirsResult) (retiredFiles, error) {
@@ -475,7 +470,28 @@ func (d *Domain) openFolder(ctx context.Context, r *ScanDirsResult) (retiredFile
 }
 
 func (d *Domain) closeFilesAfterStep(lowerBound kv.Step) {
-	pred := func(item *FilesItem) bool {
+	// Domain predicate excludes v4 items: their raw-txN mid-step endTxN
+	// makes StartStep = endTxN/stepSize = lowerBound; the aggregate
+	// bridge in dirtyFilesEndTxNumMinimax specifically returns their
+	// endTxN so they're visible. Closing them here would silently undo
+	// that bridge (surfaced by 2026-08-06 postfix soak run 5 iter 4).
+	// Non-v4 items at StartStep >= lowerBound still close — the crash-
+	// recovery invariant for legitimately-ahead partial files stands.
+	// History + InvertedIndex don't emit v4 shapes, so their predicate
+	// stays untouched.
+	domainPred := func(item *FilesItem) bool {
+		if item.StartStep(d.stepSize) < lowerBound {
+			return false
+		}
+		if d.isRawTxNItem(item) {
+			return false
+		}
+		if item.decompressor != nil {
+			log.Debug("[snapshots] closing", "file", item.decompressor.FileName(), "reason", fmt.Sprintf("step %d not complete", lowerBound))
+		}
+		return true
+	}
+	historyPred := func(item *FilesItem) bool {
 		if item.StartStep(d.stepSize) < lowerBound {
 			return false
 		}
@@ -484,9 +500,9 @@ func (d *Domain) closeFilesAfterStep(lowerBound kv.Step) {
 		}
 		return true
 	}
-	d.dirtyFiles.CloseIf(pred)
-	d.History.dirtyFiles.CloseIf(pred)
-	d.History.InvertedIndex.dirtyFiles.CloseIf(pred)
+	d.dirtyFiles.CloseIf(domainPred)
+	d.History.dirtyFiles.CloseIf(historyPred)
+	d.History.InvertedIndex.dirtyFiles.CloseIf(historyPred)
 }
 
 func (d *Domain) scanDirtyFiles(fileNames []string) (garbageFiles []*FilesItem) {
