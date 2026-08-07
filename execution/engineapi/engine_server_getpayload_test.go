@@ -340,7 +340,7 @@ func (s *getPayloadStubModule) GetAssembledBlock(ctx context.Context, payloadID 
 	return s.getAssembledBlockFunc(ctx, payloadID)
 }
 func (s *getPayloadStubModule) Ready(_ context.Context) (bool, error) { return true, nil }
-func (s *getPayloadStubModule) InsertBlocks(_ context.Context, _ []*types.RawBlock) (execmodule.ExecutionStatus, error) {
+func (s *getPayloadStubModule) InsertBlocks(_ context.Context, _ []*types.Block) (execmodule.ExecutionStatus, error) {
 	panic("not implemented")
 }
 func (s *getPayloadStubModule) ValidateChain(_ context.Context, _ common.Hash, _ uint64) (execmodule.ValidationResult, error) {

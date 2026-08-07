@@ -156,6 +156,7 @@ type BlocksFreezing struct {
 	DisableDownloadE3 bool // disable download state snapshots
 	DownloaderAddr    string
 	ChainName         string
+	E2RetireStep      uint64 // optional, 0 means we use hardcoded default of 1_000
 	// ChainTomlURL, when non-empty, overrides the default R2/GitHub fetch of
 	// the preverified chain.toml with a direct HTTP GET to this URL. Local
 	// preverified.toml in the datadir still takes precedence.

@@ -510,7 +510,7 @@ func TestCaplinBlockProductionWithWithdrawalRequest(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
 
 	// Insert 1 initial block so we have a chain head.
-	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {
+	chainPack, err := m.GenerateChain(1, func(i int, gen *blockgen.BlockGen) {
 		tx, err := types.SignTx(
 			types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
 			*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key,
@@ -642,7 +642,7 @@ func TestCaplinBlockProductionGlamsterdamSlotNumber(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
 
 	// Insert 1 initial block so we have a chain head.
-	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {
+	chainPack, err := m.GenerateChain(1, func(i int, gen *blockgen.BlockGen) {
 		tx, err := types.SignTx(
 			types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
 			*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key,
