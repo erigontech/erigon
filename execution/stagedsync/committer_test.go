@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
@@ -260,4 +261,65 @@ func TestComputeAheadCap_StopsComputeAhead(t *testing.T) {
 	cc.maybeComputeAhead(context.Background(), 5) // must return before computeBlockFromBAL
 
 	assert.False(t, cc.computedAhead[5], "a compute-ahead past the coalesce block M must not run")
+}
+
+func mismatchedRoot() []byte { h := common.Hash{0x22}; return h[:] }
+
+// rootCheckTarget is the block identity shared by the rootCheckResult cases.
+func rootCheckTarget() commitTarget {
+	return commitTarget{blockNum: 7, blockHash: common.Hash{0xbb}, lastTxNum: 42, stateRoot: common.Hash{0x11}}
+}
+
+func TestRootCheckResult_MismatchWhileRunningIsAWrongRoot(t *testing.T) {
+	r, ok := rootCheckResult(t.Context(), rootCheckTarget(), computeMode{checkRoot: true}, mismatchedRoot())
+
+	require.True(t, ok, "a mismatch on a live run must be published")
+	require.ErrorIs(t, r.err, ErrWrongTrieRoot)
+	assert.Equal(t, uint64(7), r.blockNum)
+}
+
+// TestRootCheckResult_MismatchAfterCancelIsNotABadBlock pins the shutdown
+// contract: the calculator runs on the outer context, so a cancelled context
+// means the run is being torn down and the result stream feeding this compute
+// can be truncated. Classifying that root as a wrong root logs a consensus
+// error and drives handleIncorrectRootHashError (bad-block marking + unwind)
+// for a block that is simply re-executed on the next start.
+func TestRootCheckResult_MismatchAfterCancelIsNotABadBlock(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	_, ok := rootCheckResult(ctx, rootCheckTarget(), computeMode{checkRoot: true}, mismatchedRoot())
+
+	assert.False(t, ok, "a mismatch computed while shutting down must not be reported as a bad block")
+}
+
+func TestRootCheckResult_MatchPublishesOnlyOnRequest(t *testing.T) {
+	target := rootCheckTarget()
+
+	_, ok := rootCheckResult(t.Context(), target, computeMode{checkRoot: true}, target.stateRoot[:])
+	assert.False(t, ok, "a matching root is silent unless the batch boundary asked for it")
+
+	r, ok := rootCheckResult(t.Context(), target, computeMode{checkRoot: true, publishRoot: true}, target.stateRoot[:])
+	require.True(t, ok)
+	require.NoError(t, r.err)
+	assert.Equal(t, target.stateRoot[:], r.rootHash)
+}
+
+// A cancelled run still publishes a matching root: only the mismatch verdict
+// is untrustworthy, and the batch-boundary request may be waiting for it.
+func TestRootCheckResult_MatchAfterCancelStillPublishes(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	target := rootCheckTarget()
+
+	r, ok := rootCheckResult(ctx, target, computeMode{checkRoot: true, publishRoot: true}, target.stateRoot[:])
+
+	require.True(t, ok)
+	assert.NoError(t, r.err)
+}
+
+func TestRootCheckResult_NoRootCheckPublishesNothing(t *testing.T) {
+	_, ok := rootCheckResult(t.Context(), rootCheckTarget(), computeMode{}, mismatchedRoot())
+
+	assert.False(t, ok, "a mid-block checkpoint has no root to check")
 }
