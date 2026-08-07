@@ -50,14 +50,16 @@ func (f FrontierFunc) DomainVisibleEnd(domain kv.Domain) (uint64, bool) { return
 // a hit can be newer than the view — the same direction the exec overlay
 // already serves. In the forward direction the cache's invariant is
 // monotonicity (content never regresses behind the applied frontier),
-// enforced on the fill side; unwinds invalidate by epoch and floor.
-// Each view also keeps the unwind generation sampled at construction, so a
-// later unwind prevents it from filling from the discarded fork.
+// enforced on the fill side; unwinds invalidate stored entries by their
+// per-cache entry epoch and floor.
+// Each view also snapshots the StateCache read-view epoch. An unwind advances
+// that epoch, so older views can still read but cannot fill from the discarded
+// fork.
 // Snapshot-isolated caching is kvcache's job (node/shards).
 type ReadView struct {
-	c         *StateCache
-	frontier  Frontier
-	unwindGen uint64
+	c             *StateCache
+	frontier      Frontier
+	readViewEpoch uint64
 }
 
 // View creates a ReadView vouched for by f. A nil f disables admission-gated fills.
@@ -65,10 +67,10 @@ func (c *StateCache) View(f Frontier) ReadView {
 	if c == nil {
 		return ReadView{}
 	}
-	return ReadView{c: c, frontier: f, unwindGen: c.unwindGen.Load()}
+	return ReadView{c: c, frontier: f, readViewEpoch: c.readViewEpoch.Load()}
 }
 
-// WithFrontier binds f without changing the unwind generation sampled by View.
+// WithFrontier binds f while preserving the original view's read-view epoch.
 func (v ReadView) WithFrontier(f Frontier) ReadView {
 	v.frontier = f
 	return v
@@ -142,10 +144,10 @@ func (v ReadView) Fill(domain kv.Domain, key []byte, value []byte, readTxNum uin
 		if !ok {
 			return
 		}
-		v.c.fillCodeIfFresh(key, value, readTxNum, visibleEnd, accountsEnd, v.unwindGen)
+		v.c.fillCodeIfFresh(key, value, readTxNum, visibleEnd, accountsEnd, v.readViewEpoch)
 		return
 	}
-	v.c.fillIfFresh(domain, key, value, readTxNum, visibleEnd, v.unwindGen)
+	v.c.fillIfFresh(domain, key, value, readTxNum, visibleEnd, v.readViewEpoch)
 }
 
 // SeedAddrCodeHash offers an addr → codeHash mapping derived from an account
@@ -159,7 +161,7 @@ func (v ReadView) SeedAddrCodeHash(addr []byte, h [32]byte, txNum uint64) {
 	if !ok {
 		return
 	}
-	v.c.seedAddrCodeHash(addr, h, txNum, visibleEnd, v.unwindGen)
+	v.c.seedAddrCodeHash(addr, h, txNum, visibleEnd, v.readViewEpoch)
 }
 
 // FillCodeSize records the code length for codeHash. Content-addressed and
