@@ -520,6 +520,48 @@ func ReadBodyWithTransactions(db kv.Getter, hash common.Hash, number uint64) (*t
 	return body, nil
 }
 
+// ReadBodyTxnHashes returns the block's txn hashes without decoding the
+// transactions. A nil slice means the body was not found.
+func ReadBodyTxnHashes(db kv.Getter, hash common.Hash, number uint64) ([]common.Hash, error) {
+	body, firstTxId, txCount := ReadBody(db, hash, number)
+	if body == nil {
+		return nil, nil
+	}
+	return CanonicalTransactionHashes(db, firstTxId, txCount)
+}
+
+// CanonicalTransactionHashes hashes each stored txn RLP in place of decoding it.
+// Unlike CanonicalTransactions a missing txn is an error, not a truncated result: a
+// body is never pruned apart from its txns, so anything missing is corruption, and
+// tolerating it writes an index with holes. ForAmount walks past a gap into the next
+// block's txns, so every record's id is checked, not just their count.
+func CanonicalTransactionHashes(db kv.Getter, txnID uint64, amount uint32) ([]common.Hash, error) {
+	if amount == 0 {
+		return []common.Hash{}, nil
+	}
+	hashes := make([]common.Hash, amount)
+	i := uint32(0)
+	if err := db.ForAmount(kv.EthTx, hexutil.EncodeTs(txnID), amount, func(k, v []byte) error {
+		want := txnID + uint64(i)
+		if got := binary.BigEndian.Uint64(k); got != want {
+			return fmt.Errorf("EthTx is missing txnID %d of [%d,%d), next is %d", want, txnID, txnID+uint64(amount), got)
+		}
+		h, err := types.TxnHashFromRLP(v)
+		if err != nil {
+			return fmt.Errorf("txn %d of %d, txnID %d: %w", i, amount, want, err)
+		}
+		hashes[i] = h
+		i++
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	if i != amount {
+		return nil, fmt.Errorf("EthTx holds %d of %d txns, txnID %d", i, amount, txnID)
+	}
+	return hashes, nil
+}
+
 func RawTransactionsRange(db kv.Getter, from, to uint64) (res [][]byte, err error) {
 	blockKey := make([]byte, dbutils.NumberLength+length.Hash)
 	encNum := make([]byte, 8)

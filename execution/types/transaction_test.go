@@ -857,6 +857,347 @@ func TestTrailingBytes(t *testing.T) {
 	}
 }
 
+// storedTxnRLP returns the encoding rawdb.WriteTransactions persists, i.e. what
+// the EthTx table and the transactions snapshot hold for one txn.
+func storedTxnRLP(t testing.TB, txn Transaction) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := txn.EncodeRLP(&buf); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+// txnFramings are the encodings DecodeTransaction accepts: the RLP form the EthTx
+// table and the transactions snapshot hold, and the canonical EIP-2718 form the
+// engine API and SSZ payloads carry. TxnHashFromRLP must accept both.
+var txnFramings = []struct {
+	name   string
+	encode func(Transaction, *bytes.Buffer) error
+}{
+	{"rlp", func(txn Transaction, buf *bytes.Buffer) error { return txn.EncodeRLP(buf) }},
+	{"canonical", func(txn Transaction, buf *bytes.Buffer) error { return txn.MarshalBinary(buf) }},
+}
+
+// TestTxnHashFromRLP pins TxnHashFromRLP against the decode-then-Hash path it
+// replaces, across every transaction type and every framing the decode accepts.
+func TestTxnHashFromRLP(t *testing.T) {
+	t.Parallel()
+	for _, framing := range txnFramings {
+		t.Run(framing.name, func(t *testing.T) {
+			tr := NewTRand()
+			var buf bytes.Buffer
+			for range RUNS {
+				txn := tr.RandTransaction(-1)
+				buf.Reset()
+				if err := framing.encode(txn, &buf); err != nil {
+					if txn.Type() >= BlobTxType && errors.Is(err, ErrNilToFieldTx) {
+						continue
+					}
+					t.Fatalf("encode: %v", err)
+				}
+				stored := buf.Bytes()
+
+				decoded, err := DecodeTransaction(stored)
+				if err != nil {
+					t.Fatalf("DecodeTransaction: %v", err)
+				}
+				want := decoded.Hash()
+
+				got, err := TxnHashFromRLP(stored)
+				if err != nil {
+					t.Fatalf("TxnHashFromRLP (type %d): %v", txn.Type(), err)
+				}
+				if got != want {
+					t.Fatalf("type %d: hash mismatch: got %x, want %x", txn.Type(), got, want)
+				}
+			}
+		})
+	}
+}
+
+// TestTxnHashFromRLPRejectsWrappedBlobTxn pins the one input that frames and types
+// correctly yet does not hash to itself: a blob transaction carrying its sidecar
+// hashes as the transaction it wraps, so hashing these bytes would index it under a
+// hash nothing looks it up by.
+func TestTxnHashFromRLPRejectsWrappedBlobTxn(t *testing.T) {
+	t.Parallel()
+	wrapper := newRandBlobWrapper()
+
+	var buf bytes.Buffer
+	if err := wrapper.MarshalBinaryWrapped(&buf); err != nil {
+		t.Fatalf("MarshalBinaryWrapped: %v", err)
+	}
+	wrapped := buf.Bytes()
+
+	if _, err := DecodeTransaction(wrapped); err == nil {
+		t.Fatal("DecodeTransaction accepted a wrapped blob txn; guard premise is wrong")
+	}
+	if _, err := TxnHashFromRLP(wrapped); !errors.Is(err, errWrappedBlobTxn) {
+		t.Fatalf("got %v, want %v", err, errWrappedBlobTxn)
+	}
+
+	// The transaction it wraps still hashes, and to the same value the wrapper reports.
+	buf.Reset()
+	if err := wrapper.MarshalBinary(&buf); err != nil {
+		t.Fatalf("MarshalBinary: %v", err)
+	}
+	got, err := TxnHashFromRLP(buf.Bytes())
+	if err != nil {
+		t.Fatalf("TxnHashFromRLP: %v", err)
+	}
+	if got != wrapper.Hash() {
+		t.Fatalf("hash mismatch: got %x, want %x", got, wrapper.Hash())
+	}
+}
+
+func TestTxnHashFromRLPErrors(t *testing.T) {
+	t.Parallel()
+	tr := &TRand{rnd: rand.New(rand.NewSource(1))}
+	legacy := storedTxnRLP(t, tr.RandTransaction(LegacyTxType))
+
+	tests := []struct {
+		name    string
+		input   []byte
+		wantErr error // nil means any error will do
+	}{
+		{"empty", nil, errShortTxnRLP},
+		{"bare byte", []byte{0x01}, errShortTxnRLP},
+		{"truncated string", []byte{0x84, 0x01}, nil},
+		{"empty string", []byte{0x80}, errShortTxnRLP},
+		{"trailing bytes", append(bytes.Clone(legacy), 0xFF), errTrailingBytes},
+		// A 1-byte string holding a byte < 0x80 is non-canonical RLP, so rlp.Split
+		// turns it down before the envelope guards below are reached.
+		{"non-canonical envelope", []byte{0x81, 0x02}, rlp.ErrCanonSize},
+		// Inputs that are well-formed RLP but cannot be a transaction. The decode
+		// this replaces rejected them, so hashing them would index corrupt data.
+		{"empty list", []byte{0xC0}, errShortTxnRLP},
+		{"type byte only", []byte{0x81, 0x80}, errShortTxnRLP},
+		{"envelope holding a legacy list", []byte{0x82, 0xF8, 0x00}, ErrInvalidTxType},
+		{"envelope type byte >= 0x80", []byte{0x82, 0x80, 0x00}, ErrInvalidTxType},
+		{"unregistered envelope type", []byte{0x82, 0x7F, 0x00}, ErrTxTypeNotSupported},
+		// The same shapes in the canonical framing, which carries the type byte bare.
+		{"canonical type byte only", []byte{0x02}, errShortTxnRLP},
+		{"canonical unregistered type", []byte{0x7F, 0x00}, ErrTxTypeNotSupported},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := TxnHashFromRLP(tt.input)
+			if err == nil {
+				t.Fatal("expected an error, got nil")
+			}
+			if tt.wantErr != nil && !errors.Is(err, tt.wantErr) {
+				t.Fatalf("got %v, want %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestTxnHashFromRLPRejectsWhatDecodeRejects pins the guards above to the decode
+// path they stand in for: TxnHashFromRLP must not accept an input DecodeTransaction
+// turns down.
+func TestTxnHashFromRLPRejectsWhatDecodeRejects(t *testing.T) {
+	t.Parallel()
+	for _, input := range [][]byte{
+		{0xC0}, {0x81, 0x80}, {0x81, 0x02}, {0x80}, {0x01},
+		{0x82, 0xF8, 0x00}, {0x82, 0x80, 0x00}, {0x82, 0x7F, 0x00},
+		{0x02}, {0x7F, 0x00},
+	} {
+		if _, err := DecodeTransaction(input); err == nil {
+			t.Fatalf("DecodeTransaction(%x) unexpectedly succeeded; guard premise is wrong", input)
+		}
+		if _, err := TxnHashFromRLP(input); err == nil {
+			t.Fatalf("TxnHashFromRLP(%x) accepted an input DecodeTransaction rejects", input)
+		}
+	}
+}
+
+// TestTxnHashFromRLPRejectsTrailingBytes pins that bytes past the transaction are
+// turned down in both framings. The outer split only sees the ones past the whole
+// item, so the ones past the payload inside a typed envelope need their own check.
+func TestTxnHashFromRLPRejectsTrailingBytes(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	decoded, err := DecodeTransaction(benchStoredTxn(t, DynamicFeeTxType))
+	if err != nil {
+		t.Fatalf("DecodeTransaction: %v", err)
+	}
+	if err := decoded.MarshalBinary(&buf); err != nil {
+		t.Fatalf("MarshalBinary: %v", err)
+	}
+	canonicalWithJunk := append(bytes.Clone(buf.Bytes()), 0xFF, 0xFF)
+
+	var wrapped bytes.Buffer
+	if err := rlp.EncodeString(canonicalWithJunk, &wrapped, make([]byte, 9)); err != nil {
+		t.Fatalf("EncodeString: %v", err)
+	}
+
+	for _, tt := range []struct {
+		name  string
+		input []byte
+	}{
+		{"canonical", canonicalWithJunk},
+		{"rlp envelope", wrapped.Bytes()},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := DecodeTransaction(tt.input); !errors.Is(err, errTrailingBytes) {
+				t.Fatalf("DecodeTransaction: got %v, want %v; guard premise is wrong", err, errTrailingBytes)
+			}
+			if _, err := TxnHashFromRLP(tt.input); !errors.Is(err, errTrailingBytes) {
+				t.Fatalf("got %v, want %v", err, errTrailingBytes)
+			}
+		})
+	}
+}
+
+// TestTxnHashFromRLPRejectsRegisteredTxType pins that a type this package did not
+// define is turned down rather than hashed. A registered type's Hash is its own
+// business and need not be keccak of its encoding, so hashing the bytes would index
+// the transaction under a hash nothing looks it up by.
+func TestTxnHashFromRLPRejectsRegisteredTxType(t *testing.T) {
+	registerFakeTxType(t)
+
+	txn := &fakeRegisteredTx{Nonce: 7, Data: []byte{0xde, 0xad, 0xbe, 0xef}}
+	var buf bytes.Buffer
+	if err := txn.MarshalBinary(&buf); err != nil {
+		t.Fatalf("MarshalBinary: %v", err)
+	}
+	if txn.Hash() == crypto.Keccak256Hash(buf.Bytes()) {
+		t.Fatal("fixture no longer witnesses the gap: this type now hashes its own encoding")
+	}
+
+	if _, err := DecodeTransaction(buf.Bytes()); err != nil {
+		t.Fatalf("DecodeTransaction: %v; guard premise is wrong", err)
+	}
+	if _, err := TxnHashFromRLP(buf.Bytes()); !errors.Is(err, ErrTxTypeNotSupported) {
+		t.Fatalf("got %v, want %v", err, ErrTxTypeNotSupported)
+	}
+}
+
+// TestTxnHashFromRLPMirrorsTypeByteCheck pins the envelope type byte to the decode's
+// across every value one can hold and both framings that carry one, so a type the
+// decode turns down is never hashed and indexed under it. The payload is deliberately
+// junk: a type the decode accepts fails on the payload instead, which this skips.
+func TestTxnHashFromRLPMirrorsTypeByteCheck(t *testing.T) {
+	t.Parallel()
+	for b := 0; b <= 0xFF; b++ {
+		for _, envelope := range [][]byte{
+			{0x82, byte(b), 0x00}, // rlp string holding [type, payload]
+			{byte(b), 0x00},       // the same envelope, bare
+		} {
+			_, decErr := DecodeTransaction(envelope)
+			if !errors.Is(decErr, ErrInvalidTxType) && !errors.Is(decErr, ErrTxTypeNotSupported) {
+				continue
+			}
+			if _, err := TxnHashFromRLP(envelope); err == nil {
+				t.Errorf("type byte %#02x (%x): DecodeTransaction reports %q, TxnHashFromRLP accepts it", b, envelope, decErr)
+			}
+		}
+	}
+}
+
+// FuzzTxnHashFromRLP pins the whole contract at once: whatever DecodeTransaction
+// accepts, TxnHashFromRLP must accept and hash to the same value. The tests above feed
+// encodings this package produced, so they cannot reach the bytes that arrive over p2p
+// and are stored by WriteRawTransactions without a re-encode.
+func FuzzTxnHashFromRLP(f *testing.F) {
+	tr := &TRand{rnd: rand.New(rand.NewSource(1))}
+	var buf bytes.Buffer
+	for range 40 {
+		txn := tr.RandTransaction(-1)
+		for _, encode := range txnFramings {
+			buf.Reset()
+			if err := encode.encode(txn, &buf); err == nil {
+				f.Add(bytes.Clone(buf.Bytes()))
+			}
+		}
+	}
+	f.Fuzz(func(t *testing.T, data []byte) {
+		decoded, decErr := DecodeTransaction(data)
+		if decErr != nil {
+			return
+		}
+		got, err := TxnHashFromRLP(data)
+		if err != nil {
+			t.Fatalf("input %x (type %d): DecodeTransaction accepts it, TxnHashFromRLP does not: %v", data, decoded.Type(), err)
+		}
+		if want := decoded.Hash(); got != want {
+			t.Fatalf("input %x (type %d): got %x, want %x", data, decoded.Type(), got, want)
+		}
+	})
+}
+
+// TestTxnHashFromRLPNeverReportsStreamEnd pins that malformed input is turned down
+// with a real error rather than an end-of-input sentinel. checkErrListEnd reads a bare
+// rlp.EOL as a clean end of list, and io.EOF reads as a clean end of input, so
+// reporting either would let a caller drop the element instead of rejecting it.
+func TestTxnHashFromRLPNeverReportsStreamEnd(t *testing.T) {
+	t.Parallel()
+	for _, input := range [][]byte{nil, {0x01}, {0x80}, {0xC0}, {0x81, 0x80}, {0x84, 0x01}} {
+		_, err := TxnHashFromRLP(input)
+		if err == rlp.EOL { //nolint:errorlint // a bare EOL is what checkErrListEnd matches
+			t.Errorf("TxnHashFromRLP(%x) reported a bare rlp.EOL", input)
+		}
+		if errors.Is(err, io.EOF) {
+			t.Errorf("TxnHashFromRLP(%x) reported io.EOF", input)
+		}
+	}
+}
+
+func benchStoredTxn(b testing.TB, txType int) []byte {
+	b.Helper()
+	tr := &TRand{rnd: rand.New(rand.NewSource(1))}
+	for range 100 {
+		if txn := tr.RandTransaction(txType); txn.GetTo() != nil {
+			return storedTxnRLP(b, txn)
+		}
+	}
+	b.Fatalf("no transaction of type %d with a non-nil To", txType)
+	return nil
+}
+
+var hashBenchTxTypes = []struct {
+	name   string
+	txType int
+}{
+	{"Legacy", LegacyTxType},
+	{"AccessList", AccessListTxType},
+	{"DynamicFee", DynamicFeeTxType},
+	{"Blob", BlobTxType},
+	{"SetCode", SetCodeTxType},
+}
+
+func BenchmarkTxnHashFromRLP(b *testing.B) {
+	for _, tt := range hashBenchTxTypes {
+		b.Run(tt.name, func(b *testing.B) {
+			enc := benchStoredTxn(b, tt.txType)
+			b.ReportAllocs()
+			for b.Loop() {
+				if _, err := TxnHashFromRLP(enc); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkDecodeTransactionThenHash is the path TxnHashFromRLP replaces.
+func BenchmarkDecodeTransactionThenHash(b *testing.B) {
+	for _, tt := range hashBenchTxTypes {
+		b.Run(tt.name, func(b *testing.B) {
+			enc := benchStoredTxn(b, tt.txType)
+			b.ReportAllocs()
+			for b.Loop() {
+				txn, err := DecodeTransaction(enc)
+				if err != nil {
+					b.Fatal(err)
+				}
+				_ = txn.Hash()
+			}
+		})
+	}
+}
+
 // Error text is matched verbatim by eest's ErigonExceptionMapper (TYPE_3/TYPE_4_TX_CONTRACT_CREATION).
 func TestTypedTxEmptyToErrorMessage(t *testing.T) {
 	t.Parallel()

@@ -327,6 +327,9 @@ func (back *RemoteBackend) IterateFrozenBodies(_ kv.Getter, _ func(blockNum uint
 func (back *RemoteBackend) BodyWithTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (body *types.Body, err error) {
 	return back.blockReader.BodyWithTransactions(ctx, tx, hash, blockNum)
 }
+func (back *RemoteBackend) TxnHashes(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) ([]common.Hash, error) {
+	return back.blockReader.TxnHashes(ctx, tx, hash, blockNum)
+}
 func (back *RemoteBackend) BodyRlp(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (bodyRlp rlp.RawValue, err error) {
 	return back.blockReader.BodyRlp(ctx, tx, hash, blockNum)
 }
