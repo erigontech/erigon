@@ -1589,7 +1589,8 @@ func (vr *versionedStateReader) TracePrefix() string {
 }
 
 func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
-	if r, ok := vr.reads.GetAddress(address); ok && r.Val != nil && !r.Val.IsNil() {
+	r, recorded := vr.reads.GetAddress(address)
+	if recorded && r.Val != nil && !r.Val.IsNil() {
 		account := r.Val.Account()
 		updated := vr.applyVersionedUpdates(address, *account)
 		return &updated, nil
@@ -1614,7 +1615,14 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 		}
 	}
 
-	if vr.stateReader != nil {
+	// A recorded AddressPath read with no account is the tx's own conclusion that
+	// the address holds nothing: the header goes in first and is overwritten with
+	// the value as soon as a load finds one, so a header-only entry means the load
+	// came back empty. No point asking the domain again.
+	if vr.stateReader != nil && !(recorded && skipAbsentDomainRead) {
+		if normalizeProbe {
+			normProbe.domainReads.Add(1)
+		}
 		account, err := vr.stateReader.ReadAccountData(address)
 
 		if err != nil {

@@ -392,9 +392,16 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 			// Fall back to stateReader for pre-block account
 			if stateReader != nil {
 				if !fallbackLoaded {
+					var probeClass normProbeClass
+					if normalizeProbe {
+						probeClass = normProbeFallback(stateReader, addr)
+					}
 					acc, err := stateReader.ReadAccountData(addr)
 					if err != nil {
 						return nil, err
+					}
+					if normalizeProbe {
+						normProbeResult(probeClass, acc)
 					}
 					fallbackAcc = acc
 					fallbackLoaded = true
