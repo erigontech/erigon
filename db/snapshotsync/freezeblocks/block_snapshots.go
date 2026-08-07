@@ -998,7 +998,8 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 // triple atomicity when a later member fails after earlier members
 // have already been written.
 func removeBlockTripleArtifacts(committed []snaptype.FileInfo) {
-	for _, fi := range committed {
+	for i := range committed {
+		fi := &committed[i]
 		_ = dir2.RemoveFile(fi.Path)
 		for _, idxName := range fi.Type.IdxFileNames(fi.From, fi.To) {
 			_ = dir2.RemoveFile(filepath.Join(fi.Dir(), idxName))

@@ -58,6 +58,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
@@ -492,7 +493,7 @@ func consumeCleanShutdownMarker(snapDir string) bool {
 	if err != nil {
 		return false
 	}
-	_ = os.Remove(path)
+	_ = dir2.RemoveFile(path)
 	return true
 }
 
@@ -2117,7 +2118,7 @@ func sweepOrphanTorrentSidecars(snapDir string) (removed int, err error) {
 			err = errors.Join(err, statErr)
 			return nil
 		}
-		if rmErr := os.Remove(path); rmErr != nil && !errors.Is(rmErr, fs.ErrNotExist) {
+		if rmErr := dir2.RemoveFile(path); rmErr != nil && !errors.Is(rmErr, fs.ErrNotExist) {
 			err = errors.Join(err, rmErr)
 			return nil
 		}

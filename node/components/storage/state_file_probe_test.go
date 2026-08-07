@@ -44,7 +44,7 @@ func buildDomainPair(t *testing.T, dir, kvBase string) (kvName, btName string) {
 	dataPath := filepath.Join(dir, "domain", kvBase+".kv")
 	compressor, err := seg.NewCompressor(t.Context(), "test", dataPath, t.TempDir(), seg.DefaultCfg, log.LvlDebug, log.New())
 	require.NoError(t, err)
-	for i := 0; i < 64; i++ {
+	for i := range 64 {
 		key := []byte{byte(i)}
 		val := []byte{byte(i), byte(i)}
 		require.NoError(t, compressor.AddWord(key))
