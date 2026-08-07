@@ -56,7 +56,7 @@ func nonceBalanceWrites(addr accounts.Address, nonce uint64, bal uint256.Int) *s
 func newTestBlockResult(blockNum uint64, blockHash common.Hash, lastTxNum uint64, partial bool) *blockResult {
 	header := &types.Header{Number: *uint256.NewInt(blockNum)}
 	return &blockResult{
-		Block:     types.NewBlockFromStorage(blockHash, header, nil, nil, nil),
+		Block:     types.NewBlockFromStorage(blockHash, header, nil, nil, nil, nil),
 		lastTxNum: lastTxNum,
 		isPartial: partial,
 	}

@@ -96,7 +96,7 @@ func NewTestExecTask(txIdx int, ops []Op, sender accounts.Address, nonce int) *t
 
 func newParallelTestBlock(blockNum uint64) *types.Block {
 	header := &types.Header{Number: *uint256.NewInt(blockNum)}
-	return types.NewBlockFromStorage(common.Hash{}, header, nil, nil, nil)
+	return types.NewBlockFromStorage(common.Hash{}, header, nil, nil, nil, nil)
 }
 
 func sleepWithContext(ctx context.Context, d time.Duration) error {
@@ -576,7 +576,7 @@ func executeParallelWithCheck(tb testing.TB, pe *parallelExecutor, tasks []exec.
 	ctx, cancel := context.WithCancel(context.Background())
 
 	applyResults := make(chan applyResult, 1000)
-	block := types.NewBlockFromStorage(tasks[0].BlockHash(), tasks[0].BlockHeader(), nil, nil, nil)
+	block := types.NewBlockFromStorage(tasks[0].BlockHash(), tasks[0].BlockHeader(), nil, nil, nil, nil)
 
 	pe.execRequests <- &execRequest{block: block, tasks: tasks, applyResults: applyResults, profile: profile}
 

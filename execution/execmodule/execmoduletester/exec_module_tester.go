@@ -872,16 +872,8 @@ func (emt *ExecModuleTester) GenerateChainWithConfig(config *chain.Config, paren
 }
 
 func (emt *ExecModuleTester) InsertBlocks(ctx context.Context, blocks []*types.Block) (execmodule.ExecutionStatus, error) {
-	rawBlocks := make([]*types.RawBlock, len(blocks))
-	for i, block := range blocks {
-		rawBlocks[i] = &types.RawBlock{
-			Header:          block.HeaderNoCopy(),
-			Body:            block.RawBody(),
-			BlockAccessList: block.BlockAccessList(),
-		}
-	}
 	return retryBusy(ctx, func() (execmodule.ExecutionStatus, bool, error) {
-		status, err := emt.ExecModule.InsertBlocks(ctx, rawBlocks)
+		status, err := emt.ExecModule.InsertBlocks(ctx, blocks)
 		if err != nil {
 			return execmodule.ExecutionStatusBusy, false, err
 		}
@@ -985,14 +977,6 @@ func retryBusy[T any](ctx context.Context, f func() (T, bool, error)) (T, error)
 	)
 }
 
-func blockAccessLists(blocks []*types.Block) [][]byte {
-	bals := make([][]byte, len(blocks))
-	for i, block := range blocks {
-		bals[i] = block.BlockAccessList()
-	}
-	return bals
-}
-
 func (emt *ExecModuleTester) insertChain(chain *blockgen.ChainPack) error {
 	wr := chainreader.NewChainReaderEth1(emt.ChainConfig, emt.ExecModule, time.Hour)
 
@@ -1012,7 +996,7 @@ func (emt *ExecModuleTester) insertChain(chain *blockgen.ChainPack) error {
 		insertedBlocks[chain.Blocks[i].NumberU64()] = struct{}{}
 	}
 
-	if err := wr.InsertBlocks(emt.Ctx, chain.Blocks, blockAccessLists(chain.Blocks)); err != nil {
+	if err := wr.InsertBlocks(emt.Ctx, chain.Blocks); err != nil {
 		return err
 	}
 
@@ -1123,7 +1107,7 @@ func (emt *ExecModuleTester) insertChainPoW(chain *blockgen.ChainPack) error {
 				return err
 			}
 		}
-		return wr.InsertBlocks(emt.Ctx, chain.Blocks, blockAccessLists(chain.Blocks))
+		return wr.InsertBlocks(emt.Ctx, chain.Blocks)
 	}
 	return emt.insertChain(chain)
 }
