@@ -543,21 +543,25 @@ discipline in the witness path.
 - Modify: `execution/commitment/pbin_values.go`
 - Create: `execution/commitment/pbin_delegation_test.go`
 
-- [ ] add `pbinDelegationMarker = {0xef,0x01,0x00}` and
-      `pbinDelegationCodeLength = 23` (`pbinDelegationLeafKey` landed in Task 3)
-- [ ] add `pbinIsDelegation(code []byte) bool`, matching on length 23 and the
+- [x] add `pbinDelegationMarker = {0xef,0x01,0x00}` and
+      `pbinDelegationCodeLength = 23` (`pbinDelegationLeafKey` landed in Task 3;
+      everything new sits in `pbin_values.go` — `pbin_keys.go` needed no edit)
+- [x] add `pbinIsDelegation(code []byte) bool`, matching on length 23 and the
       three-byte prefix, and nothing else
-- [ ] add `pbinEncodeDelegation(code []byte) [pbinValueLength]byte`,
+- [x] add `pbinEncodeDelegation(code []byte) [pbinValueLength]byte`,
       right-padding with nine zero bytes
-- [ ] write `TestPBinIsDelegationClassifiesByBytes`: a valid indicator; 23 bytes
+- [x] write `TestPBinIsDelegationClassifiesByBytes`: a valid indicator; 23 bytes
       without the marker; the marker at a length other than 23; and code whose
-      *keccak hash* begins `0xef0100`, which must classify as code
-- [ ] write `TestPBinEncodeDelegationPadsToThirtyTwo`, round-tripping the
+      *keccak hash* begins `0xef0100`, which must classify as code (the vendored
+      `code_hash_starting_with_the_delegation_marker` value covers the last two
+      at once: 23 bytes, no marker prefix, keccak opens `0xef0100`)
+- [x] write `TestPBinEncodeDelegationPadsToThirtyTwo`, round-tripping the
       leading 23 bytes and asserting the encoding differs from the chunk
       encoding of the same bytes
-- [ ] gate: `go test ./execution/commitment/ -count=1 -v -run 'TestPBinIsDelegation|TestPBinEncodeDelegation'`
-      and confirm both ran
-- [ ] `make lint` until clean; commit as
+- [x] gate: `go test ./execution/commitment/ -count=1 -v -run 'TestPBinIsDelegation|TestPBinEncodeDelegation'`
+      and confirm both ran (both ran, both pass; Red confirmed first as
+      undefined-identifier build failure)
+- [x] `make lint` until clean; commit as
       `execution/commitment: classify and encode EIP-7702 delegation indicators`
 
 ### Task 7: Write exactly one of the code-hash and delegation leaves
@@ -763,9 +767,21 @@ the other. There is no second zone holding chunks now, so that framing is dead
 
 - [ ] rebase `tests/binary-tree-consecutive-spilling-deploys` onto current
       `projects/binary-trie`
-- [ ] confirm the case is still sized by chunk count `(129, 137, STEM_SUBTREE_WIDTH)`
-      with no `CODE_OFFSET` dependency
+- [ ] **re-size the three contracts.** They are `(129, 137, STEM_SUBTREE_WIDTH)`
+      chunks, sized when 128 was the header/code-zone edge. That edge is gone,
+      so 129 and 137 are ordinary interior sizes and nothing in the test crosses
+      a boundary. The only boundary left is the group edge at
+      `STEM_SUBTREE_WIDTH`, so use `(255, 256, 257)`: last chunk of group 0,
+      exactly-full group 0, and first chunk of group 1. The 257-chunk contract
+      is the only one holding two stems, which is what makes a later deploy
+      disturbing an earlier one visible.
+- [ ] keep every size under 308 chunks — the filler fails deterministically at
+      309 and above, unexplained and unrelated to this test
+- [ ] update the test's docstring: the point is now sharing one code zone across
+      the group boundary, not spilling out of a header
 - [ ] fill the test on the rebased base and confirm all cases pass
+- [ ] rewrite the PR body for the new sizes; keep it dead short, problem
+      paragraph first, no "Summary" heading, no Testing section, no AI mentions
 - [ ] push and reply to the rebase request
 - [ ] confirm CI is green apart from any known unrelated `fork.py` drift
 
