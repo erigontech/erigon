@@ -214,6 +214,22 @@ func TestAsBlockAccessList_SystemAddressIncludedWithNonRevertableAccess(t *testi
 		"system address should be included in BAL when a user tx has non-revertable access")
 }
 
+func TestPrepareRecordsSystemCoinbaseInBlockAccessList(t *testing.T) {
+	t.Parallel()
+
+	ibs := New(nil)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 0)
+	ibs.Prepare(&chain.Rules{IsShanghai: true}, accounts.ZeroAddress, params.SystemAddress, accounts.NilAddress, nil, nil)
+
+	io := NewVersionedIO(1)
+	io.RecordReads(Version{TxIndex: 0}, ibs.VersionedReads())
+	bal := io.AsBlockAccessList()
+
+	require.Len(t, bal, 1)
+	require.Equal(t, params.SystemAddress, bal[0].Address)
+}
+
 // TestAsBlockAccessList_SystemAddressIncludedWithStateChanges verifies that the
 // system address is kept in the BAL when it has actual state changes (e.g. a
 // value transfer to the system address), regardless of access type.

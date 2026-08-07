@@ -898,7 +898,7 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 		return nil, nil, err
 	}
 
-	return types.NewBlockForAsembling(header, txs, nil, receipts, withdrawals), nil, nil
+	return types.NewBlockForAsembling(header, txs, nil, receipts, withdrawals, nil), nil, nil
 }
 
 func (c *Bor) Initialize(config *chain.Config, chain rules.ChainHeaderReader, header *types.Header,
