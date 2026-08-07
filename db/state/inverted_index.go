@@ -729,6 +729,18 @@ func (iit *InvertedIndexRoTx) CanHashPrune(tx kv.Tx) bool {
 	return false
 }
 
+func (iit *InvertedIndexRoTx) checkFilesDBGap(tx kv.Tx) error {
+	prg, err := GetPruneValProgress(tx, []byte(iit.ii.ValuesTable))
+	if err != nil {
+		return err
+	}
+	if filesEnd := iit.files.EndTxNum(); prg.TxTo > filesEnd {
+		return fmt.Errorf("gap between snapshot files and DB for index %s: files end at txNum %d but the DB was pruned up to %d — [%d, %d) is in neither. Maybe you removed snapshot files (e.g. `snapshots rm-state --latest`) but forgot to run `integration stage_exec --reset`?",
+			iit.ii.FilenameBase, filesEnd, prg.TxTo, filesEnd, prg.TxTo)
+	}
+	return nil
+}
+
 func (iit *InvertedIndexRoTx) CanPrune(tx kv.Tx, untilTx uint64) bool {
 	stat, err := GetPruneValProgress(tx, []byte(iit.ii.ValuesTable))
 	if err != nil {
@@ -1055,7 +1067,7 @@ func (ii *InvertedIndex) collate(ctx context.Context, step kv.Step, roTx kv.Tx) 
 		return InvertedIndexCollation{}, err
 	}
 	if len(offsets) > 0 {
-		if err = loadBitmapsFunc(nil, make([]byte, 8), nil, nil); err != nil {
+		if err := loadBitmapsFunc(nil, make([]byte, 8), nil, nil); err != nil {
 			return InvertedIndexCollation{}, err
 		}
 	}
@@ -1238,15 +1250,31 @@ func (ii *InvertedIndex) minTxNumInDB(tx kv.Tx) uint64 {
 	return 0
 }
 
-func (ii *InvertedIndex) maxTxNumInDB(tx kv.Tx) uint64 {
+func (ii *InvertedIndex) lastTxNumInDB(tx kv.Tx) (uint64, bool) {
 	lst, _ := kv.LastKey(tx, ii.KeysTable)
-	if len(lst) > 0 {
-		lstInDb := binary.BigEndian.Uint64(lst)
-		return lstInDb
+	if len(lst) == 0 {
+		return 0, false
 	}
-	return 0
+	return binary.BigEndian.Uint64(lst), true
+}
+
+func (ii *InvertedIndex) maxTxNumInDB(tx kv.Tx) uint64 {
+	txNum, _ := ii.lastTxNumInDB(tx)
+	return txNum
 }
 
 func (iit *InvertedIndexRoTx) Progress(tx kv.Tx) uint64 {
 	return max(iit.files.EndTxNum(), iit.ii.maxTxNumInDB(tx))
+}
+
+// visibleEnd is the exclusive txNum bound of what this view can see: the max
+// of its two components, because GetLatest reads their union. Both sides are
+// required — on a snapshot-synced or fully-pruned datadir the DB side is empty
+// and the files carry the whole bound.
+func (iit *InvertedIndexRoTx) visibleEnd(tx kv.Tx) uint64 {
+	dbEnd, ok := iit.ii.lastTxNumInDB(tx)
+	if ok && dbEnd < math.MaxUint64 {
+		dbEnd++
+	}
+	return max(iit.files.EndTxNum(), dbEnd)
 }

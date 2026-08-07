@@ -154,7 +154,7 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 	}
 
 	var buf bytes.Buffer
-	if err = txn.MarshalBinary(&buf); err != nil {
+	if err := txn.MarshalBinary(&buf); err != nil {
 		return nil, err
 	}
 

@@ -439,13 +439,14 @@ func mergeViaHeap(logPrefix string, providers []dataProvider, process func(key, 
 
 func makeCurrentKeyStr(k []byte) string {
 	var currentKeyStr string
-	if k == nil {
+	switch {
+	case k == nil:
 		currentKeyStr = "final"
-	} else if len(k) < 4 {
+	case len(k) < 4:
 		currentKeyStr = hex.EncodeToString(k)
-	} else if k[0] == 0 && k[1] == 0 && k[2] == 0 && k[3] == 0 && len(k) >= 8 { // if key has leading zeroes, show a bit more info
+	case k[0] == 0 && k[1] == 0 && k[2] == 0 && k[3] == 0 && len(k) >= 8: // if key has leading zeroes, show a bit more info
 		currentKeyStr = hex.EncodeToString(k)
-	} else {
+	default:
 		currentKeyStr = hex.EncodeToString(k[:4])
 	}
 	return currentKeyStr

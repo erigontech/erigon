@@ -17,6 +17,7 @@
 package pool
 
 import (
+	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -24,22 +25,18 @@ import (
 	"github.com/erigontech/erigon/common/crypto/blake2b"
 )
 
-// Pool capacities are gossip retention windows, not per-block bounds: the pools are drained
-// only by eviction, and a proposer packs from operations gathered over many slots.
+// Pool capacities are gossip retention windows bounded by finalized-state pruning and eviction.
 const (
 	// Aggregates are retained for this many slots. A deeper window offers the proposer more
 	// partial aggregates to merge, but block production is linear in pool occupancy and
 	// quadratic within one data root, with a BLS aggregation per merge, so widening it is a
 	// latency trade and needs measuring first.
 	attestationRetentionSlots = 10
-	// Has() on these pools is the only cheap gate in front of full BLS verification of a
-	// re-gossiped slashing, so keep them deep: eviction is not recoverable for lifeSpan.
 	attesterSlashingsCapacity = 10240
 	proposerSlashingsCapacity = 10240
-	// Keyed by validator index, so the pool self-dedupes. Sized for a mass-exit queue
-	// arriving faster than it drains at MaxVoluntaryExits per block.
+	// Voluntary exits are keyed by validator index and sized for a mass-exit queue.
 	voluntaryExitsCapacity = 16384
-	// Purged on every imported block, so this only ever holds one slot of arrivals.
+	// BLS changes remain available through reorgs until their credential changes are finalized.
 	blsToExecutionChangesCapacity = 10240
 )
 
@@ -81,22 +78,90 @@ func NewOperationsPool(beaconCfg *clparams.BeaconChainConfig) OperationsPool {
 	}
 }
 
-func (o *OperationsPool) NotifyBlock(blk *cltypes.BeaconBlock) {
-	blk.Body.VoluntaryExits.Range(func(_ int, exit *cltypes.SignedVoluntaryExit, _ int) bool {
-		o.VoluntaryExitsPool.DeleteIfExist(exit.VoluntaryExit.ValidatorIndex)
-		return true
-	})
-	blk.Body.AttesterSlashings.Range(func(_ int, att *cltypes.AttesterSlashing, _ int) bool {
-		o.AttesterSlashingsPool.DeleteIfExist(ComputeKeyForAttesterSlashing(att))
-		return true
-	})
-	blk.Body.ProposerSlashings.Range(func(_ int, ps *cltypes.ProposerSlashing, _ int) bool {
-		o.ProposerSlashingsPool.DeleteIfExist(ComputeKeyForProposerSlashing(ps))
-		return true
-	})
-	blk.Body.ExecutionChanges.Range(func(_ int, c *cltypes.SignedBLSToExecutionChange, _ int) bool {
-		o.BLSToExecutionChangesPool.DeleteIfExist(c.Signature)
-		return true
-	})
-	o.BLSToExecutionChangesPool.pool.Purge()
+func (o *OperationsPool) HasPrunableOperations() bool {
+	return o.AttesterSlashingsPool.Len() > 0 ||
+		o.ProposerSlashingsPool.Len() > 0 ||
+		o.BLSToExecutionChangesPool.Len() > 0 ||
+		o.VoluntaryExitsPool.Len() > 0
+}
+
+func (o *OperationsPool) PruneFinalized(finalizedState abstract.BeaconState, finalizedEpoch uint64) {
+	if finalizedState == nil {
+		return
+	}
+
+	for _, slashing := range o.ProposerSlashingsPool.Raw() {
+		if slashing == nil || slashing.Header1 == nil || slashing.Header1.Header == nil || slashing.Header2 == nil {
+			continue
+		}
+		validator, ok := validatorFromState(finalizedState, slashing.Header1.Header.ProposerIndex)
+		if ok && slashingTerminal(validator, finalizedEpoch) {
+			o.ProposerSlashingsPool.DeleteIfExist(ComputeKeyForProposerSlashing(slashing))
+		}
+	}
+
+	for _, slashing := range o.AttesterSlashingsPool.Raw() {
+		if !attesterSlashingTerminal(finalizedState, slashing, finalizedEpoch) {
+			continue
+		}
+		o.AttesterSlashingsPool.DeleteIfExist(ComputeKeyForAttesterSlashing(slashing))
+	}
+
+	for _, exit := range o.VoluntaryExitsPool.Raw() {
+		if exit == nil || exit.VoluntaryExit == nil {
+			continue
+		}
+		validatorIndex := exit.VoluntaryExit.ValidatorIndex
+		// Builder indices are reusable, so finalized validator state cannot prove a builder exit terminal.
+		if validatorIndex&clparams.BuilderIndexFlag != 0 {
+			continue
+		}
+		validator, ok := validatorFromState(finalizedState, validatorIndex)
+		if ok && validator.ExitEpoch() != finalizedState.BeaconConfig().FarFutureEpoch {
+			o.VoluntaryExitsPool.DeleteIfExist(validatorIndex)
+		}
+	}
+
+	for _, change := range o.BLSToExecutionChangesPool.Raw() {
+		if change == nil || change.Message == nil {
+			continue
+		}
+		validator, ok := validatorFromState(finalizedState, change.Message.ValidatorIndex)
+		if ok && validator.WithdrawalCredentials()[0] != byte(finalizedState.BeaconConfig().BLSWithdrawalPrefixByte) {
+			o.BLSToExecutionChangesPool.DeleteIfExist(change.Signature)
+		}
+	}
+}
+
+func validatorFromState(finalizedState abstract.BeaconState, validatorIndex uint64) (solid.Validator, bool) {
+	if validatorIndex >= uint64(finalizedState.ValidatorLength()) {
+		return nil, false
+	}
+	validator, err := finalizedState.ValidatorForValidatorIndex(int(validatorIndex))
+	return validator, err == nil && validator != nil
+}
+
+func slashingTerminal(validator solid.Validator, finalizedEpoch uint64) bool {
+	return validator.Slashed() || validator.WithdrawableEpoch() <= finalizedEpoch
+}
+
+func attesterSlashingTerminal(finalizedState abstract.BeaconState, slashing *cltypes.AttesterSlashing, finalizedEpoch uint64) bool {
+	if slashing == nil || slashing.Attestation_1 == nil || slashing.Attestation_2 == nil ||
+		slashing.Attestation_1.AttestingIndices == nil || slashing.Attestation_2.AttestingIndices == nil {
+		return false
+	}
+	intersection := solid.IntersectionOfSortedSets(
+		slashing.Attestation_1.AttestingIndices,
+		slashing.Attestation_2.AttestingIndices,
+	)
+	if len(intersection) == 0 {
+		return false
+	}
+	for _, validatorIndex := range intersection {
+		validator, ok := validatorFromState(finalizedState, validatorIndex)
+		if !ok || !slashingTerminal(validator, finalizedEpoch) {
+			return false
+		}
+	}
+	return true
 }
