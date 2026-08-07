@@ -79,7 +79,7 @@ var (
 
 	SnapshotMadvRnd = EnvBool("SNAPSHOT_MADV_RND", true)
 	// kill-switch: set SNAPSHOT_MADV_SEQUENTIAL=false to skip MADV_SEQUENTIAL in seg.OpenSequentialView
-	SnapshotMadvSequential = EnvBool("SNAPSHOT_MADV_SEQUENTIAL", true)
+	SnapshotMadvSequential = EnvBool("SNAPSHOT_MADV_SEQUENTIAL", false)
 	// LogNonRandomMmap logs snapshot files left without MADV_RANDOM after each merge.
 	// Off by default: reading /proc/self/smaps walks page tables of every mapped file.
 	LogNonRandomMmap = EnvBool("LOG_NON_RANDOM_MMAP", false)
@@ -115,6 +115,8 @@ var (
 	TraceApply            = EnvBool("TRACE_APPLY", false)
 	TraceTouchKey         = EnvBool("TRACE_TOUCH_KEY", false)
 	TraceBlockAccessLists = EnvBool("TRACE_BLOCK_ACCESS_LISTS", false)
+	TraceReexec           = EnvBool("TRACE_REEXEC", false)
+	TraceBALFeed          = EnvBool("TRACE_BAL_FEED", false)
 	TraceBlocks           = EnvUints("TRACE_BLOCKS", ",", nil)
 	TraceTxIndexes        = EnvInts("TRACE_TXINDEXES", ",", nil)
 	TraceUnwinds          = EnvBool("TRACE_UNWINDS", false)
@@ -139,6 +141,14 @@ var (
 	DisableAdaptivePin   = EnvBool("DISABLE_ADAPTIVE_PIN", false)
 	AssertStateCache     = EnvBool("ASSERT_STATE_CACHE", false)
 	ReadAhead            = EnvBool("READ_AHEAD", true)
+	// FilesAsyncIO warms cold state .kv pages via io_uring before the mmap read, so
+	// a would-be blocking page fault becomes a non-blocking read that releases the
+	// goroutine's P. Linux + io_uring only; self-disables (reads use ordinary faults)
+	// if io_uring is unavailable. Not free when on: each gated .kv file runs a
+	// background goroutine that mincore-rescans it every RESIDENCY_REFRESH_SEC
+	// (default 120s) — a real page-table-walk cost across a full datadir. Experimental,
+	// off by default.
+	FilesAsyncIO = EnvBool("FILES_ASYNC_IO", false)
 
 	BorValidateHeaderTime = EnvBool("BOR_VALIDATE_HEADER_TIME", true)
 	TraceDeletion         = EnvBool("TRACE_DELETION", false)

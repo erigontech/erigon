@@ -49,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	libkzg "github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/iouring"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -1770,11 +1771,12 @@ func setBorConfig(ctx *cli.Command, cfg *ethconfig.Config, nodeConfig *nodecfg.C
 func setBuilder(ctx *cli.Command, cfg *buildercfg.BuilderConfig) {
 	cfg.EnabledPOS = !ctx.IsSet(ProposingDisableFlag.Name)
 
-	if ctx.IsSet(MinerExtraDataFlag.Name) {
+	switch {
+	case ctx.IsSet(MinerExtraDataFlag.Name):
 		cfg.ExtraData = []byte(ctx.String(MinerExtraDataFlag.Name))
-	} else if len(version.GitCommit) > 0 {
+	case len(version.GitCommit) > 0:
 		cfg.ExtraData = []byte(ctx.Root().Name + "-" + version.VersionWithCommit(version.GitCommit))
-	} else {
+	default:
 		cfg.ExtraData = []byte(ctx.Root().Name + "-" + ctx.Root().Version)
 	}
 	maxExtra := min(int(params.MaximumExtraDataSize), types.ExtraVanityLength)
@@ -2051,6 +2053,14 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 	if ctx.IsSet(ExecSerialFlag.Name) && ctx.Bool(ExecSerialFlag.Name) {
 		dbg.SetExec3Workers(1)
 		cfg.ExecWorkerCount = 1
+	}
+	// If FILES_ASYNC_IO is set but io_uring is unavailable (old kernel, or blocked
+	// by a seccomp sandbox such as Docker's default profile), disable the gate at
+	// startup so it doesn't pay the per-read residency-probe cost for warms that
+	// would never run. Warming is an optimization; reads just use ordinary faults.
+	if dbg.FilesAsyncIO && runtime.GOOS == "linux" && !iouring.Available() {
+		log.Warn("FILES_ASYNC_IO is set but io_uring is unavailable (unsupported kernel, or blocked by a seccomp sandbox such as Docker's default profile); disabling it — reads will use ordinary blocking faults")
+		dbg.FilesAsyncIO = false
 	}
 	if c := ctx.Int(DBReadConcurrencyFlag.Name); c > 0 {
 		if limit := httpcfg.RoTxsLimit(c, cfg.ExecWorkerCount); int64(c) < limit {

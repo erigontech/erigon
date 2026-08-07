@@ -453,7 +453,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		defer view.Close()
+		defer view.Close() //nolint:gocritic
 		g := seg.NewReader(view.MakeGetter(), dt.d.Compression)
 		g.Reset(0)
 		if g.HasNext() {
@@ -539,7 +539,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		}
 	}
 
-	if err = kvWriter.Compress(); err != nil {
+	if err := kvWriter.Compress(); err != nil {
 		return nil, nil, nil, err
 	}
 	kvWriter.Close()
@@ -641,7 +641,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 		if err != nil {
 			return nil, err
 		}
-		defer view.Close()
+		defer view.Close() //nolint:gocritic
 		g := seg.NewReader(view.MakeGetter(), iit.ii.Compression)
 		g.Reset(0)
 		if g.HasNext() {
@@ -718,7 +718,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 			p.Processed.Store(i)
 		}
 	}
-	if err = write.Compress(); err != nil {
+	if err := write.Compress(); err != nil {
 		return nil, err
 	}
 	comp.Close()
@@ -810,7 +810,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 			if err != nil {
 				return nil, nil, err
 			}
-			defer idxView.Close()
+			defer idxView.Close() //nolint:gocritic
 			g := seg.NewReader(idxView.MakeGetter(), ht.h.InvertedIndex.Compression)
 			g.Reset(0)
 			if g.HasNext() {
@@ -827,7 +827,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 						if err != nil {
 							return nil, nil, err
 						}
-						defer histView.Close()
+						defer histView.Close() //nolint:gocritic
 						g2 = seg.NewPagedReader(seg.NewReader(histView.MakeGetter(), ht.h.Compression), compressedPageValuesCount, true)
 						break
 					}
@@ -881,7 +881,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 
 					histKeyBuf = historyKey(txNum, ci1.key, histKeyBuf)
 
-					if err = pagedWr.Add(histKeyBuf, v); err != nil {
+					if err := pagedWr.Add(histKeyBuf, v); err != nil {
 						return nil, nil, err
 					}
 				}
@@ -905,7 +905,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		}
 		ps.Delete(p)
 
-		if err = ht.h.buildVI(ctx, idxPath, decomp, indexIn.decompressor, indexIn.startTxNum, ps); err != nil {
+		if err := ht.h.buildVI(ctx, idxPath, decomp, indexIn.decompressor, indexIn.startTxNum, ps); err != nil {
 			return nil, nil, err
 		}
 
