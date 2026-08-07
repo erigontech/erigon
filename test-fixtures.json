@@ -5,9 +5,9 @@
     "size": 1025048557
   },
   "eest_devnet": {
-    "url": "https://github.com/ethereum/execution-specs/releases/download/tests-glamsterdam-devnet%40v7.2.0/fixtures_glamsterdam-devnet.tar.gz",
-    "sha256": "29ba214eaf37c880c845179994cb62e82a0fb63e58f83e6c640d85f3e7d7a796",
-    "size": 677943112,
+    "url": "https://github.com/ethereum/execution-specs/releases/download/tests-glamsterdam-devnet%40v7.2.1/fixtures_glamsterdam-devnet.tar.gz",
+    "sha256": "02e3eca2ede5b424f4dbf2461caf592e6b43b56d55bbd64213dd01f63af9a583",
+    "size": 883926577,
     "branch": "devnets/glamsterdam/7"
   },
   "eest_stable": {
@@ -21,9 +21,9 @@
     "size": 497764775
   },
   "cl_mainnet": {
-    "url": "https://github.com/ethereum/consensus-specs/releases/download/v1.7.0-alpha.11/mainnet.tar.gz",
-    "sha256": "956cc05f9bb2e745ecd04b60fb2bb91679c80ede82e81b489b5d47a9d65eb66b",
-    "size": 851476438
+    "url": "https://github.com/ethereum/consensus-specs/releases/download/v1.7.0-alpha.12/mainnet.tar.gz",
+    "sha256": "f0057d2acdea2730ec68cac2c796aad89174e10e9b38ac68ad7d8aa1c0cbd85c",
+    "size": 858531022
   },
   "legacy_cancun": {
     "url": "https://github.com/ethereum/legacytests/archive/1f581b8ccdc4c63acf5f2c5c1b155c690c32a8eb.tar.gz",

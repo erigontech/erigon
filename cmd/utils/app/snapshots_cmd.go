@@ -721,7 +721,7 @@ func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, label s
 		log.Warn("[dbg] no accessor found, assuming file may have state", "file", filePath)
 		return true, false, "", nil
 	}
-	rd, bti, err := btindex.OpenBtreeIndexAndDataFile(bt, filePath, btindex.DefaultBtreeM, statecfg.Schema.CommitmentDomain.Compression, false)
+	rd, bti, err := btindex.OpenBtreeIndexAndDataFile(bt, filePath, statecfg.Schema.CommitmentDomain.Compression, false)
 	if err != nil {
 		return false, false, "", err
 	}
@@ -1442,7 +1442,7 @@ func doBtSearch(ctx context.Context, cliCtx *cli.Command) error {
 	dbg.ReadMemStats(&m)
 	logger.Info("before open", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 	compress := seg.CompressKeys | seg.CompressVals
-	kv, idx, err := btindex.OpenBtreeIndexAndDataFile(srcF, dataFilePath, btindex.DefaultBtreeM, compress, false)
+	kv, idx, err := btindex.OpenBtreeIndexAndDataFile(srcF, dataFilePath, compress, false)
 	if err != nil {
 		return err
 	}
@@ -2810,7 +2810,7 @@ func doMeta(ctx context.Context, cliCtx *cli.Command) error {
 			panic(err)
 		}
 		defer src.Close()
-		bt, err := btindex.OpenBtreeIndexWithDecompressor(fname, btindex.DefaultBtreeM, seg.NewReader(src.MakeGetter(), seg.CompressNone))
+		bt, err := btindex.OpenBtreeIndexWithDecompressor(fname, seg.NewReader(src.MakeGetter(), seg.CompressNone))
 		if err != nil {
 			return err
 		}
@@ -3099,7 +3099,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		snTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(indexDB)
 		blkFreezeCfg := ethconfig.BlocksFreezing{ChainName: beaconConfig.ConfigName}
 		res.CaplinStateSnaps = snapshotsync.NewCaplinStateSnapshots(blkFreezeCfg, beaconConfig, dirs, snTypes, logger)
-		if err = res.CaplinStateSnaps.OpenFolder(); err != nil {
+		if err := res.CaplinStateSnaps.OpenFolder(); err != nil {
 			return res, nil, err
 		}
 		res.CaplinStateSnaps.LogStat("caplin-state")
@@ -3339,11 +3339,12 @@ func doUnmerge(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) erro
 	compresCfg.Workers = workers
 	var word = make([]byte, 0, 4096)
 
-	if info.Type.Enum() == snaptype2.Enums.Headers || info.Type.Enum() == snaptype2.Enums.Bodies {
+	switch {
+	case info.Type.Enum() == snaptype2.Enums.Headers || info.Type.Enum() == snaptype2.Enums.Bodies:
 		for g.HasNext() {
 			if blockFrom%1000 == 0 {
 				if compressor != nil {
-					if err = compressor.Compress(); err != nil {
+					if err := compressor.Compress(); err != nil {
 						return err
 					}
 					compressor.Close()
@@ -3369,9 +3370,9 @@ func doUnmerge(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) erro
 			}
 			compressor.Close()
 		}
-	} else if info.Type.Enum() != snaptype2.Enums.Transactions {
+	case info.Type.Enum() != snaptype2.Enums.Transactions:
 		return fmt.Errorf("unsupported type %s", info.Type.Enum().String())
-	} else {
+	default:
 		// tx unmerge
 		for ; blockFrom < blockTo; blockFrom += 1000 {
 			um_fileinfo := snaptype2.Enums.Bodies.Type().FileInfo(dirs.Snap, blockFrom, blockFrom+1000)
@@ -3379,9 +3380,9 @@ func doUnmerge(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) erro
 			if err != nil {
 				return err
 			}
-			defer bodiesSegment.Close()
 
 			_, expectedCount, err := snaptype2.TxsAmountBasedOnBodiesSnapshots(bodiesSegment, um_fileinfo.Len()-1)
+			bodiesSegment.Close()
 			if err != nil {
 				return err
 			}
@@ -3404,7 +3405,7 @@ func doUnmerge(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) erro
 				return fmt.Errorf("unexpected count %d", expectedCount)
 			}
 
-			if err = compressor.Compress(); err != nil {
+			if err := compressor.Compress(); err != nil {
 				return err
 			}
 			compressor.Close()
@@ -3528,7 +3529,7 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 
 	logger.Info("Work on state history snapshots")
 	indexWorkers := estimate.IndexSnapshot.Workers()
-	if err = temporalDb.BuildMissedAccessors(ctx, indexWorkers); err != nil {
+	if err := temporalDb.BuildMissedAccessors(ctx, indexWorkers); err != nil {
 		return err
 	}
 
@@ -3543,7 +3544,7 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 	}
 
 	logger.Info("Build state history snapshots")
-	if err = agg.BuildFiles(lastTxNum); err != nil {
+	if err := agg.BuildFiles(lastTxNum); err != nil {
 		return err
 	}
 
@@ -3560,10 +3561,10 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 	logger.Info("waiting for background build/merge to drain")
 	agg.WaitForFiles()
 
-	if err = agg.MergeLoop(ctx); err != nil {
+	if err := agg.MergeLoop(ctx); err != nil {
 		return err
 	}
-	if err = agg.RemoveOverlapsAfterMerge(ctx); err != nil {
+	if err := agg.RemoveOverlapsAfterMerge(ctx); err != nil {
 		return err
 	}
 

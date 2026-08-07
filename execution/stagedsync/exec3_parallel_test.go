@@ -296,13 +296,14 @@ func taskFactory(numTask int, sender Sender, readsPerT int, writesPerT int, nonI
 
 		// Generate time and key path for each op except first two that are always read and write nonce
 		for j := 2; j < len(ops); j++ {
-			if ops[j].opType == readType {
+			switch ops[j].opType {
+			case readType:
 				ops[j].key = pathGenerator(i, j, len(ops))
 				ops[j].duration = readTime(i, j)
-			} else if ops[j].opType == writeType {
+			case writeType:
 				ops[j].key = pathGenerator(i, j, len(ops))
 				ops[j].duration = writeTime(i, j)
-			} else {
+			default:
 				ops[j].duration = nonIOTime(i, j)
 			}
 
@@ -1409,7 +1410,7 @@ func TestParallelResumeBoundaryOffsets(t *testing.T) {
 
 	// Write mock receipt for transaction 0 in the database at txNum = 1
 	seedResumeTestDB(t, db, func(putter kv.TemporalPutDel) error {
-		return rawtemporaldb.AppendReceipt(putter, 5, 21000, 12000, 1)
+		return rawtemporaldb.AppendReceiptMetadata(putter, 5, 21000, 12000, 1)
 	})
 
 	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
@@ -1500,7 +1501,7 @@ func TestParallelResumeReconstructsPriorReceipts(t *testing.T) {
 		if err := putter.DomainPut(kv.AccountsDomain, senderIsCoinbaseKey.rawAddress[:], accounts.SerialiseV3(&acc), 0, nil); err != nil {
 			return err
 		}
-		return rawtemporaldb.AppendReceipt(putter, 0, 21000, 0, 1)
+		return rawtemporaldb.AppendReceiptMetadata(putter, 0, 21000, 0, 1)
 	})
 
 	txTask := &exec.TxTask{
@@ -1573,7 +1574,7 @@ func TestParallelResumeReconstructionFailureIsNonFatal(t *testing.T) {
 	// Store tx0's receipt values but leave the sender unfunded: the RCacheV2
 	// probe misses and the prefix replay fails on insufficient funds.
 	seedResumeTestDB(t, db, func(putter kv.TemporalPutDel) error {
-		return rawtemporaldb.AppendReceipt(putter, 0, 21000, 0, 1)
+		return rawtemporaldb.AppendReceiptMetadata(putter, 0, 21000, 0, 1)
 	})
 
 	txTask := &exec.TxTask{
@@ -1687,4 +1688,76 @@ func TestParallelFinalizeMissingPrevReceiptErrors(t *testing.T) {
 	// not the batch-local task index (0).
 	assert.ErrorContains(err, "missing finalized receipt for tx 1")
 	assert.Nil(res)
+}
+
+// The nil≡empty account tiebreaker is gated on EIP-161 at the apply-loop
+// validation call site: pre-Spurious-Dragon an existing-empty account is
+// gas-observable (CALL charges new-account gas on non-existence), so a nil
+// storage read raced against a created-empty record must re-execute; after
+// EIP-161 the two are EVM-indistinguishable and the read stays valid.
+func TestNextResult_NilVsEmptyRecordForkAware(t *testing.T) {
+	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
+	raced := accounts.InternAddress([20]byte{0xfa, 0xde})
+	for _, tc := range []struct {
+		name        string
+		blockNum    uint64
+		wantInvalid int
+	}{
+		{"pre-spurious-dragon-invalidates", 1, 1},
+		{"post-spurious-dragon-validates", 3_000_000, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := newResumeTestDB(t)
+			signedTx := signSelfSendTx(t, 0, 0, 1, 21000, chainSpec.Config, 0)
+			txTask := &exec.TxTask{
+				Header: &types.Header{
+					Number:   *uint256.NewInt(tc.blockNum),
+					GasLimit: 10_000_000,
+				},
+				EvmBlockContext: evmtypes.BlockContext{
+					BlockNumber: tc.blockNum,
+				},
+				TxNum:   1,
+				TxIndex: 0,
+				Config:  chainSpec.Config,
+				Txs:     []types.Transaction{signedTx},
+			}
+			pe, roTx := newResumeTestExec(t, db, chainSpec.Config)
+			pe.in = exec.NewQueueWithRetry(16)
+			t.Cleanup(pe.in.Close)
+			gasPool := new(protocol.GasPool).AddGas(10_000_000)
+			be := newBlockExec(tc.blockNum, common.Hash{}, gasPool, nil, make(chan applyResult, 8), make(chan applyResult, 8), false, nil)
+			eTask := &execTask{Task: txTask, index: 0}
+			be.tasks = []*execTask{eTask}
+			be.results = []*execResult{nil}
+			be.txIncarnations = []int{0}
+			be.execFailed = []int{0}
+			be.execAborted = []int{0}
+			be.estimateDeps[0] = []int{}
+			be.execTasks.setInProgress(0)
+			// Block-init left an EIP-161-empty record; the task under test read
+			// the address from storage as absent before that flush landed.
+			be.versionMap.WriteAddress(raced, state.Version{TxIndex: -1}, &accounts.Account{CodeHash: accounts.EmptyCodeHash}, true)
+			reads := state.ReadSet{}
+			reads.SetAddress(raced, state.VersionedRead[state.AccountView]{
+				ReadHeader: state.ReadHeader{Source: state.StorageRead, Version: state.UnknownVersion},
+			})
+			txResult := &exec.TxResult{
+				Task: &taskVersion{
+					execTask: eTask,
+					version:  state.Version{BlockNum: tc.blockNum, TxIndex: 0, Incarnation: 0, TxNum: 1},
+				},
+				TxIn:            reads,
+				ExecutionResult: evmtypes.ExecutionResult{ReceiptGasUsed: 10000},
+			}
+			_, err := be.nextResult(context.Background(), pe, txResult, roTx)
+			require.NoError(t, err)
+			require.Equal(t, tc.wantInvalid, be.cntValidationFail)
+			if tc.wantInvalid == 0 {
+				require.NotNil(t, be.finalizedResults[0])
+			} else {
+				require.Nil(t, be.finalizedResults[0])
+			}
+		})
+	}
 }

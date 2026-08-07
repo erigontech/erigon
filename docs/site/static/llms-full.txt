@@ -83,15 +83,23 @@ _Current Disk Usage measured as of 2026-07-19; usage grows over time as the chai
 
 _Current Disk Usage measured as of 2026-07-21; usage grows over time as the chain grows._
 
-:::warning
-The final release series of Erigon that officially supports Polygon is 3.1.\*. For the software supported by Polygon, please refer to the link: [https://github.com/0xPolygon/erigon/releases](https://github.com/0xPolygon/erigon/releases). Disk usage figures below are from September 2025 and are no longer automatically updated.
-:::
+| **Pruning Mode** | **Current Disk Usage** |
+| -------------- | ---------------------- |
+| Archive        | 1.10 TB |
 
-| **Pruning Mode**  | **Current Disk Usage** | **Disk Size (Recommended)** | **RAM (Required)** | **RAM (Recommended)** |
-| -------------- | ---------------------- | --------------------------- | ------------------ | --------------------- |
-| Archive        | 4.85 TB                | 8 TB                        | 64 GB              | 128 GB                |
-| Full (Default) | 3.3 TB                 | 4 TB                        | 32 GB              | 64 GB                 |
-| Minimal        | 1.2 TB                 | 2 TB                        | 32 GB              | 64 GB                 |
+_Current Disk Usage measured as of 2026-07-29; usage grows over time as the chain grows. Execution layer only — full and minimal modes are not measured for this network._
+
+| **Pruning Mode** | **Current Disk Usage** |
+| -------------- | ---------------------- |
+| Archive        | 133.73 GB |
+
+_Current Disk Usage measured as of 2026-07-29; usage grows over time as the chain grows. Execution layer only — full and minimal modes are not measured for this network._
+
+| **Pruning Mode** | **Current Disk Usage** |
+| -------------- | ---------------------- |
+| Archive        | 29.64 GB |
+
+_Current Disk Usage measured as of 2026-07-29; usage grows over time as the chain grows. Execution layer only — full and minimal modes are not measured for this network._
 
 :::tip
 See also how you can [optimize storage](../fundamentals/optimizing-storage).
@@ -840,88 +848,6 @@ Guided setup for running a complete node with sensible defaults — pick your ne
 
 - [Ethereum Node](https://docs.erigon.tech/get-started/easy-nodes/how-to-run-an-ethereum-node): Run a full Ethereum mainnet node using Caplin (built-in consensus layer) or connect an external CL client.
 - [Gnosis Chain Node](https://docs.erigon.tech/get-started/easy-nodes/how-to-run-a-gnosis-chain-node): Run a full Gnosis Chain node with Erigon's embedded consensus layer or an external CL client.
-- [Polygon Node](https://docs.erigon.tech/get-started/easy-nodes/how-to-run-a-polygon-node): Step-by-step guide to running an Erigon node on the Polygon PoS network.
-
----
-
-# How to run a Polygon node
-URL: https://docs.erigon.tech/get-started/easy-nodes/how-to-run-a-polygon-node
-
-
-:::warning
-**Information**: The final release series of Erigon that officially supports Polygon is 3.1.\*. For the software supported by Polygon, please refer to the link: [https://github.com/0xPolygon/erigon/releases](https://github.com/0xPolygon/erigon/releases).
-:::
-
-## 1. Prerequisites Check
-
-1. Confirm your machine meets the necessary [Hardware Requirements](../hardware-requirements) based on your desired pruning mode.
-2. **Install Docker**:
-   * For Linux, install [Docker Engine](https://docs.docker.com/engine/install).
-   * For macOS or Windows, install [Docker Desktop](https://docs.docker.com/desktop/).
-
-## 2. Configure and Launch Erigon
-
-Follow these steps to configure and launch the All-in-One Client with the Heimdall endpoint.
-
-### **A. Create the Configuration File**
-
-Create a new file named `docker-compose.yml` in a directory where you want to manage your Erigon setup, and paste the following content into it:
-
-```sh
-services:
-  erigon:
-    image: erigontech/erigon:v{ERIGON_VERSION}
-    container_name: erigon-node
-    restart: always
-    command:
-      # --- Basic Configuration ---
-      - --chain=bor-mainnet
-      - --bor.heimdall=https://heimdall-api.polygon.technology
-      - --http.addr="0.0.0.0"
-      - --http.api=eth,web3,net,debug,trace,txpool
-      # --- Performance Tweaks ---
-      - --torrent.download.rate=512mb
-      # --- Pruning Mode (Optional) ---
-      # To change Pruning Mode, uncomment the line below:
-      # - --prune.mode=archive
-      # or
-      # - --prune.mode=minimal
-    ports:
-      - "8545:8545" # Exposes the RPC port (needed for wallets/dApps)
-    volumes:
-      # *** IMPORTANT: CHANGE THIS PATH! ***
-      # Replace the path below with an actual directory on your machine 
-      # where you want the blockchain data stored (e.g., /mnt/ssd/erigon-data)
-      - /path/to/erigon/data:/var/lib/erigon
-```
-
-:::warning
-⚠️ **Action Required**: You must change the volume path! Replace `/path/to/erigon/data` with a valid, empty directory on your machine where you want Erigon to store its files.
-:::
-
-### **B. Launch the Node and Monitor Progress**
-
-Open your terminal in the directory where you saved `docker-compose.yml`. To start the node and immediately see the sync process type:
-
-```text
-docker compose up
-```
-
-Now you can relax and watch your Erigon Polygon node sync!
-
-## Flag explanation
-
-* `--chain=bor-mainnet` and `--bor.heimdall=https://heimdall-api.polygon.technology` specify respectively the Polygon mainnet and the API endpoint for the Heimdall network
-  * to use Amoy testnet, replace with flags `--chain=amoy --bor.heimdall=https://heimdall-api-amoy.polygon.technology`
-* Add `--prune.mode=minimal` to run minimal [Pruning Mode](../../fundamentals/pruning-modes) or `--prune.mode=archive` to run an archive node
-* `--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](../../fundamentals/web3-wallet);
-* `--torrent.download.rate=512mb` to increase download speed. While the default downloading speed is 128mb, with this flag Erigon will use as much download speed as it can, up to a maximum of 512 megabytes per second. This means it will try to download data as quickly as possible, but it won't exceed the 512 MB/s limit you've set.
-
-:::tip
-Press `Ctrl+C` in your terminal to stop Erigon.
-:::
-
-Additional flags can be added to [configure](../../fundamentals/configuring-erigon/) Erigon with several options.
 
 ---
 
@@ -1355,7 +1281,7 @@ This command will display a list of convenience commands available in the Makefi
 ```text
  go-version:                        print and verify go version
  validate_docker_build_args:        ensure docker build args are valid
- docker:                            validate, update submodules and build with docker
+ docker:                            validate and build with docker
  setup_xdg_data_home:               TODO
  docker-compose:                    validate build args, setup xdg data home, and run docker-compose up
  dbg                                debug build allows see C stack traces, run it with GOTRACEBACK=crash. You don't need debug build for C pit for profiling. To profile C code use SETCGOTRCKEBACK=1
@@ -1379,7 +1305,6 @@ This command will display a list of convenience commands available in the Makefi
  bindings:                          generate test contracts and core contracts
  prometheus:                        run prometheus and grafana with docker-compose
  escape:                            run escape path={path} to check for memory leaks e.g. run escape path=cmd/erigon
- git-submodules:                    update git submodules
  install:                           copies binaries and libraries to DIST
  user_linux:                        create "erigon" user (Linux)
  user_macos:                        create "erigon" user (MacOS)
@@ -1489,7 +1414,7 @@ Erigon stores everything under a single **datadir**. Two kinds of files live the
 
 This split is what enables Erigon's small disk footprint relative to other archive nodes:
 
-- **`chaindata/` is small (~15 GB on Ethereum mainnet)** because it only holds latest state and recently-updated values.
+- **`chaindata/` is small (~22 GB on Ethereum mainnet, rarely more than 25 GB)** because it only holds latest state and recently-updated values.
 - **`snapshots/` is large but content-addressed.** Once a `.seg` file is finalised it is the *same file* on every Erigon node in the world — meaning it can be distributed via BitTorrent and verified by hash. There is no rewrite-amplification penalty for keeping history.
 
 For the exact directory layout, file sizes on mainnet, and how to split storage across fast/slow disks, see [Database](database) and [Optimizing Storage](optimizing-storage).
@@ -1597,21 +1522,23 @@ Snapshots are organised into several subdirectories. The main ones are:
 
 ## What does it cost on disk?
 
-Real numbers from a Nov 2024 mainnet archive node:
+Real numbers from Erigon 3.6 archive nodes (`--prune.mode=archive`, default pruning options), July 2026:
 
-```sh
-# eth-mainnet — archive — prune.mode=archive
-chaindata           15 GB
-snapshots/accessor 120 GB
-snapshots/domain   300 GB
-snapshots/history  280 GB
-snapshots/idx      430 GB
-snapshots TOTAL    2.3 TB
-```
+| | eth-mainnet | gnosis | sepolia | hoodi | chiado |
+| --- | --- | --- | --- | --- | --- |
+| `chaindata` | 22.75 GB | 9.63 GB | 12.87 GB | 6.78 GB | 2.40 GB |
+| `snapshots` (block segments) | 996.40 GB | 284.82 GB | 614.90 GB | 33.38 GB | 12.91 GB |
+| `snapshots/domain` | 417.66 GB | 227.03 GB | 237.26 GB | 52.39 GB | 7.17 GB |
+| `snapshots/idx` | 332.72 GB | 136.67 GB | 115.95 GB | 25.47 GB | 3.44 GB |
+| `snapshots/history` | 255.60 GB | 39.28 GB | 68.93 GB | 8.00 GB | 2.33 GB |
+| `snapshots/accessor` | 141.61 GB | 33.73 GB | 45.85 GB | 7.70 GB | 1.39 GB |
+| **total** | **2.17 TB** | **731.16 GB** | **1.10 TB** | **133.73 GB** | **29.64 GB** |
 
-The breakdown above lists the state/history snapshot subdirectories. The remaining ~1.2 TB is mostly block/transaction `.seg` data, which is not broken out separately here.
+Block segments — headers, bodies and transactions — sit directly in `snapshots/` rather than in a sub-folder, and on mainnet they are the single largest item.
 
-For up-to-date totals across all networks and pruning modes, see [Hardware Requirements](../get-started/hardware-requirements).
+Data that is off by default is excluded above. On the same mainnet node it would add 441 GB for the receipts cache (`--prune.include-receipts`), 4.4 TB for commitment history (`--prune.include-commitment-history`), and 2.5 TB for the Caplin block, blob and state archive.
+
+Each column is one node, so totals differ slightly from the headline figures on [Hardware Requirements](../get-started/hardware-requirements), which are measured on freshly synced nodes.
 
 ## Why `chaindata/` stays so small
 
@@ -1621,7 +1548,7 @@ In Erigon 3, `chaindata/` only holds:
 - Recent blocks not yet folded into snapshots
 - Live txpool, peer state, sync stage progress
 
-Most of the bulk that other clients keep in the active database — historical state, ancient blocks, receipt logs — is in immutable snapshot files instead. This is why `chaindata/` rarely exceeds 20 GB even on archive nodes.
+Most of the bulk that other clients keep in the active database — historical state, ancient blocks, receipt logs — is in immutable snapshot files instead. This is why `chaindata/` rarely exceeds ~25 GB even on archive nodes.
 
 Deleting `chaindata/` is **recoverable but not free**: it discards the latest mutable state and any recent blocks not yet folded into snapshots. On restart Erigon re-derives state from the immutable snapshots (re-downloading them if needed) and resyncs the post-snapshot tip forward from the consensus layer over the Engine API — blocks are no longer pulled from peers over devp2p. Treat it as a resync of the chain tip, not a quick rebuild, and keep a backup if fast recovery matters.
 
@@ -1968,6 +1895,29 @@ These flags cover the general behavior and configuration of the Erigon client.
 * `--keep.stored.chain.config`: Avoids overriding the chain configuration already stored in the database.
   * Default: `false`
 
+### Development, testing, and block-production helpers
+
+These flags are mainly for dev networks, testing, or specialized block-production setups.
+
+* `--allow-insecure-unlock`: Allows insecure account unlocking when account-related RPCs are exposed by HTTP. Use only on trusted networks.
+  * Default: `false`
+* `--dev-validator-seed value`: Deterministic BLS key seed for the embedded dev validator; enables PoS dev mode.
+  * Default: `devnet`
+* `--dev-validator-count value`: Number of validators for PoS dev mode.
+  * Default: `64`
+* `--dev.slot-time value`: Slot duration in seconds for PoS dev mode.
+  * Default: `6`
+* `--miner.gaslimit value`: Target gas limit for mined blocks.
+  * Default: `0`
+* `--miner.extradata value`: Block extra data set by the miner; defaults to the client version string.
+  * Default: client version string
+* `--experimental.bal`: Generates block access lists.
+  * Default: `false`
+* `--experimental.always-generate-changesets`: Overrides changeset generation logic.
+  * Default: `false`
+* `--chaos.monkey`: Testing-only flag that enables spontaneous network, consensus, and other failures.
+  * Default: `false`
+
 ### Database and Caching
 
 These flags control database performance and memory usage. See [Database](/fundamentals/database) for the on-disk layout.
@@ -1984,6 +1934,8 @@ These flags control database performance and memory usage. See [Database](/funda
   * Default: `2`
 * `--batchSize value`: Sets the batch size for the execution stage.
   * Default: `512M`
+* `--etl.bufferSize value`: Buffer size for ETL operations.
+  * Default: `256MB`
 * `--bodies.cache value`: Sets the size limit for the block bodies cache.
   * Default: `268435456`
 * `--state.cache value`: Sets the amount of data to store in the StateCache.
@@ -2200,8 +2152,12 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
   * Default: `2m0s`
 * `--healthcheck`: Enables gRPC health checks.
   * Default: `false`
-* `--witness.cache.blocks value` *(New in v3.6)*: Number of recent blocks whose legacy `debug_executionWitness` result is eagerly cached in memory, keyed by block hash in an LRU. Each witness is held as serialized JSON and served verbatim on a hit, so memory use is roughly this count multiplied by the per-block witness size. Embedded RPC only, and requires `--prune.include-commitment-history` (runtime errors from `debug_executionWitness` and `eth_getWitness` name its `--prune.experimental.include-commitment-history` alias instead).
+* `--witness.cache.blocks value` *(New in v3.6)*: Number of recent blocks whose legacy `debug_executionWitness` result is eagerly cached in memory, keyed by block hash in an LRU. Each witness is held as serialized JSON and served verbatim on a hit, so memory use is roughly this count multiplied by the per-block witness size. Embedded RPC only, and requires `--prune.include-commitment-history` (runtime errors from `debug_executionWitness` and `eth_getWitness` name its `--prune.experimental.include-commitment-history` alias instead). This flag also gates `debug_subscribe("executionWitnesses")`, which pushes each witness over WebSocket as the cache builds it. That stream is best-effort rather than contiguous — catch-up bursts, skipped or failed builds, and slow subscribers all leave gaps — so a client that needs every height re-requests the missing ones with `debug_executionWitness`.
   * Default: `0` (cache disabled); values above the cap of `96` are clamped
+* `--witness.cache.head-capture`: Serves recent-block `debug_executionWitness` on a minimal node without commitment-history by building each head block from a pinned parent commitment snapshot and the account/storage/code history the node keeps. Cache-only serving: out-of-window requests miss, and no history recompute is attempted. Embedded RPC only.
+  * Default: `false`
+* `--witness.cache.maxmb value`: Resident-memory cap, in MB, for the witness cache; whichever limit binds first wins between the byte budget and `--witness.cache.blocks` (still capped at `96`). `0` means count-only (no byte cap).
+  * Default: `0`
 
 ### MCP Server
 
@@ -2415,6 +2371,8 @@ Flags for configuring the [Caplin](/fundamentals/caplin) consensus layer.
   * Default: `131072` (~18 days)
 * `--caplin.checkpoint-sync.disable`: Disables checkpoint sync.
   * Default: `false`
+* `--caplin.resume-max-staleness-epochs value`: Max epochs a locally-finalized state may be stale for Caplin to resume from it on restart instead of remote checkpoint syncing. Data-availability bound; larger values are clamped to the anchor fork's sidecar-retention window.
+  * Default: `0` (resolves to the anchor fork's sidecar-retention window)
 * `--caplin.snapgen`: Enables snapshot generation.
   * Default: `false`
 * `--caplin.mev-relay-url value`: The MEV relay endpoint.
@@ -8164,12 +8122,6 @@ This section details common error messages and provides clear, actionable steps 
 * **Solution:** Confirm that the required services are running and that the command-line flags (e.g., `--bor.heimdall.url`) are correctly set. See [Configuring Erigon](/fundamentals/configuring-erigon) for all available flags.
 
 ## Chain-Specific Issues
-
-### Bad block / Invalid Merkle on Polygon network
-
-* **Error Description:** The node stops importing new blocks, and the logs show errors related to bad blocks.
-* **Cause:** This is a Polygon-specific issue that occurs when the Heimdall and Bor layers are out of sync.
-* **Solution:** Verify that your Heimdall and REST servers are running. Restarting the Bor and Heimdall services on both the sentry and validator nodes should resolve the issue by bringing the layers back into sync. See the [Polygon Node](/get-started/easy-nodes/how-to-run-a-polygon-node) guide.
 
 ## Build and Installation
 

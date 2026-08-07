@@ -763,7 +763,7 @@ func opMstore8(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 
 func opSload(pc uint64, evm *EVM, scope *CallContext) (_ uint64, _ []byte, err error) {
 	loc := scope.Stack.peek()
-	*loc, err = evm.IntraBlockState().GetState(scope.Contract.Address(), scope.peekStorageKey())
+	*loc, err = evm.IntraBlockState().GetState(scope.Contract.Address(), scope.peekStorageKey(evm))
 	return pc, nil, err
 }
 
@@ -776,7 +776,7 @@ func opSstore(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	if evm.readOnly {
 		return pc, nil, ErrWriteProtection
 	}
-	key := scope.peekStorageKey()
+	key := scope.peekStorageKey(evm)
 	scope.Stack.drop()
 	val := scope.Stack.popCopy()
 	return pc, nil, evm.IntraBlockState().SetState(scope.Contract.Address(), key, val)
@@ -1021,13 +1021,13 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 		}
 		gas = scope.Gas()
 		if evm.chainRules.IsTangerineWhistle {
-			gas.Regular -= gas.Regular / 64
+			gas.Execution -= gas.Execution / 64
 		}
 		gasChangeReason := tracing.GasChangeCallContractCreation
 		if typ == CREATE2 {
 			gasChangeReason = tracing.GasChangeCallContractCreation2
 		}
-		scope.useGas(gas.Regular, evm.Config().Tracer, gasChangeReason)
+		scope.useGas(gas.Execution, evm.Config().Tracer, gasChangeReason)
 		scope.stateGas = 0
 		returnGas = gas
 		forwarded = true
@@ -1114,7 +1114,7 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 			evm.intraBlockState.MarkReadsInternal(toAddr)
 			return pc, nil, ErrWriteProtection
 		}
-		gas.Regular += params.CallStipend
+		gas.Execution += params.CallStipend
 	}
 
 	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
@@ -1167,7 +1167,7 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	args := scope.Memory.GetPtr(inOffset, inSize)
 
 	if !value.IsZero() {
-		gas.Regular += params.CallStipend
+		gas.Execution += params.CallStipend
 	}
 
 	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
@@ -1361,7 +1361,8 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 	}
 	rules := evm.ChainRules()
 	eip8246 := rules.IsAmsterdam
-	if eip8246 {
+	switch {
+	case eip8246:
 		// EIP-8246: SELFDESTRUCT no longer burns. The balance moves to the
 		// beneficiary (a no-op when it is self); a same-tx-created contract is
 		// still cleared at finalization but keeps any residual balance.
@@ -1379,7 +1380,7 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 				return pc, nil, err
 			}
 		}
-	} else if newContract { // Contract is new and will actually be deleted.
+	case newContract: // Contract is new and will actually be deleted.
 		if err := ibs.SubBalance(self, balance, tracing.BalanceDecreaseSelfdestruct); err != nil {
 			return pc, nil, err
 		}
@@ -1392,7 +1393,7 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 		if err != nil {
 			return pc, nil, err
 		}
-	} else if self != beneficiaryAddr { // Contract already exists, only do transfer if beneficiary is not self.
+	case self != beneficiaryAddr: // Contract already exists, only do transfer if beneficiary is not self.
 		if err := ibs.SubBalance(self, balance, tracing.BalanceDecreaseSelfdestruct); err != nil {
 			return pc, nil, err
 		}
@@ -1514,23 +1515,18 @@ func makeLog(size int) executionFunc {
 		if evm.readOnly {
 			return pc, nil, ErrWriteProtection
 		}
-		topics := make([]common.Hash, size)
-		stack := &scope.Stack
+		stack, ibs := &scope.Stack, evm.IntraBlockState()
 		mStart, mSize := stack.pop2Uint64()
+		mem := scope.Memory.GetPtr(mStart, mSize)
+		log := ibs.AllocLog(scope.Contract.Address().Value(), size, len(mem))
+		// This is a non-consensus field, but assigned here because
+		// execution/state doesn't know the current block number.
+		log.BlockNumber = hexutil.Uint64(evm.Context.BlockNumber)
 		for i := range size {
-			topics[i] = stack.pop().Bytes32()
+			log.Topics[i] = stack.pop().Bytes32()
 		}
-
-		d := scope.Memory.GetCopy(mStart, mSize)
-		evm.IntraBlockState().AddLog(&types.Log{
-			Address: scope.Contract.Address().Value(),
-			Topics:  topics,
-			Data:    d,
-			// This is a non-consensus field, but assigned here because
-			// execution/state doesn't know the current block number.
-			BlockNumber: hexutil.Uint64(evm.Context.BlockNumber),
-		})
-
+		copy(log.Data, mem)
+		ibs.NotifyLog(log)
 		return pc, nil, nil
 	}
 }
@@ -1564,11 +1560,12 @@ func stPush1(pc uint64, scope *CallContext) string {
 func opPush2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	codeLen := uint64(len(scope.Contract.Code))
 	integer := scope.Stack.pushRef()
-	if pc+2 < codeLen {
+	switch {
+	case pc+2 < codeLen:
 		integer.SetBytes2(scope.Contract.Code[pc+1 : pc+3])
-	} else if pc+1 < codeLen {
+	case pc+1 < codeLen:
 		integer.SetUint64(uint64(scope.Contract.Code[pc+1]) << 8)
-	} else {
+	default:
 		integer.Clear()
 	}
 	pc += 2
