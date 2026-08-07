@@ -302,12 +302,12 @@ func TestFilePublicationRevokesCacheGenerations(t *testing.T) {
 	stateCache := cache.NewStateCache(1<<20, 1<<20, 1<<20, 1<<20)
 	t.Cleanup(stateCache.Close)
 	statePublisher := stateCache.Publisher()
-	statePublisher.Initialize(1)
+	statePublisher.Initialize(cache.StateGeneration(1, 0, 0, 0))
 	execctx.BindStateCacheToAggregator(cacheAggregatorHolder{agg}, stateCache)
 
 	accountKey := make([]byte, 20)
 	accountKey[0] = 1
-	stateView := stateCache.View(1)
+	stateView := stateCache.View(cache.StateGeneration(1, 0, 0, 0))
 	stateView.Fill(kv.AccountsDomain, accountKey, []byte{1}, 1)
 	_, ok := stateView.Get(kv.AccountsDomain, accountKey)
 	require.True(t, ok)
@@ -315,9 +315,9 @@ func TestFilePublicationRevokesCacheGenerations(t *testing.T) {
 	branchCache := agg.d[kv.CommitmentDomain].branchCache
 	require.NotNil(t, branchCache)
 	branchPublisher := branchCache.Publisher()
-	branchPublisher.Initialize(1)
+	branchPublisher.Initialize(cache.BranchGeneration(1, 0))
 	branchKey := []byte{0x01}
-	branchView := branchCache.View(1)
+	branchView := branchCache.View(cache.BranchGeneration(1, 0))
 	branchView.Fill(branchKey, []byte{0xbb}, 1)
 	_, _, ok = branchView.Get(branchKey)
 	require.True(t, ok)
@@ -330,15 +330,15 @@ func TestFilePublicationRevokesCacheGenerations(t *testing.T) {
 	_, ok = stateView.Get(kv.AccountsDomain, accountKey)
 	require.False(t, ok, "file publication must revoke pre-publication state views")
 	stateView.Fill(kv.AccountsDomain, accountKey, []byte{1}, 1)
-	statePublisher.Initialize(1)
-	_, ok = stateCache.View(1).Get(kv.AccountsDomain, accountKey)
+	statePublisher.Initialize(cache.StateGeneration(1, 2*alignStepSize, 2*alignStepSize, 2*alignStepSize))
+	_, ok = stateCache.View(cache.StateGeneration(1, 2*alignStepSize, 2*alignStepSize, 2*alignStepSize)).Get(kv.AccountsDomain, accountKey)
 	require.False(t, ok, "a revoked state view must not refill after file publication")
 
 	_, _, ok = branchView.Get(branchKey)
 	require.False(t, ok, "file publication must revoke pre-publication branch views")
 	branchView.Fill(branchKey, []byte{0xbb}, 1)
-	branchPublisher.Initialize(1)
-	_, _, ok = branchCache.View(1).Get(branchKey)
+	branchPublisher.Initialize(cache.BranchGeneration(1, 2*alignStepSize))
+	_, _, ok = branchCache.View(cache.BranchGeneration(1, 2*alignStepSize)).Get(branchKey)
 	require.False(t, ok, "a revoked branch view must not refill after file publication")
 }
 
@@ -354,10 +354,10 @@ func TestCacheBindingAbsorbsExistingFileVisibility(t *testing.T) {
 	stateCache := cache.NewStateCache(1<<20, 1<<20, 1<<20, 1<<20)
 	t.Cleanup(stateCache.Close)
 	statePublisher := stateCache.Publisher()
-	statePublisher.Initialize(1)
+	statePublisher.Initialize(cache.StateGeneration(1, 0, 0, 0))
 	accountKey := make([]byte, 20)
 	accountKey[0] = 1
-	oldView := stateCache.View(1)
+	oldView := stateCache.View(cache.StateGeneration(1, 0, 0, 0))
 	oldView.Fill(kv.AccountsDomain, accountKey, []byte{1}, 1)
 	_, ok := oldView.Get(kv.AccountsDomain, accountKey)
 	require.True(t, ok)
@@ -366,7 +366,7 @@ func TestCacheBindingAbsorbsExistingFileVisibility(t *testing.T) {
 
 	_, ok = oldView.Get(kv.AccountsDomain, accountKey)
 	require.False(t, ok, "binding must revoke entries created before the visible files were absorbed")
-	statePublisher.Initialize(1)
-	_, ok = stateCache.View(1).Get(kv.AccountsDomain, accountKey)
+	statePublisher.Initialize(cache.StateGeneration(1, 2*alignStepSize, 2*alignStepSize, 2*alignStepSize))
+	_, ok = stateCache.View(cache.StateGeneration(1, 2*alignStepSize, 2*alignStepSize, 2*alignStepSize)).Get(kv.AccountsDomain, accountKey)
 	require.False(t, ok)
 }

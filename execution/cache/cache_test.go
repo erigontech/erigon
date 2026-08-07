@@ -58,13 +58,17 @@ func makeValue(i int) []byte {
 	return []byte{byte(i), byte(i + 1), byte(i + 2)}
 }
 
+func testStateGeneration(stateVersion uint64) Generation {
+	return StateGeneration(stateVersion, 0, 0, 0)
+}
+
 func readyStateCache(t *testing.T, stateVersion uint64) (*StateCache, Publisher) {
 	t.Helper()
 	b := 1 * datasize.MB
 	stateCache := NewStateCache(b, b, b, b)
 	t.Cleanup(stateCache.Close)
 	publisher := stateCache.Publisher()
-	publisher.Initialize(stateVersion)
+	publisher.Initialize(testStateGeneration(stateVersion))
 	return stateCache, publisher
 }
 
@@ -454,7 +458,7 @@ func TestStateCache_NewDefaultStateCache(t *testing.T) {
 
 func TestStateCache_GetPut_Account(t *testing.T) {
 	c, _ := readyStateCache(t, 1)
-	view := c.View(1)
+	view := c.View(testStateGeneration(1))
 
 	addr := makeAddr(1)
 	value := makeValue(1)
@@ -473,7 +477,7 @@ func TestStateCache_GetPut_Account(t *testing.T) {
 
 func TestStateCache_GetPut_Storage(t *testing.T) {
 	c, _ := readyStateCache(t, 1)
-	view := c.View(1)
+	view := c.View(testStateGeneration(1))
 
 	key := make([]byte, 52) // addr(20) + slot(32)
 	copy(key, makeAddr(1))
@@ -488,7 +492,7 @@ func TestStateCache_GetPut_Storage(t *testing.T) {
 
 func TestStateCache_GetPut_Code(t *testing.T) {
 	c, _ := readyStateCache(t, 1)
-	view := c.View(1)
+	view := c.View(testStateGeneration(1))
 
 	addr := makeAddr(1)
 	code := makeCode(1)
@@ -501,7 +505,7 @@ func TestStateCache_GetPut_Code(t *testing.T) {
 
 func TestStateCache_GetPut_UnsupportedDomain(t *testing.T) {
 	c, _ := readyStateCache(t, 1)
-	view := c.View(1)
+	view := c.View(testStateGeneration(1))
 
 	// ReceiptDomain is not supported
 	view.Fill(kv.ReceiptDomain, makeAddr(1), makeValue(1), 0)
@@ -514,11 +518,11 @@ func TestStateCache_Delete(t *testing.T) {
 	c, publisher := readyStateCache(t, 1)
 
 	addr := makeAddr(1)
-	c.View(1).Fill(kv.AccountsDomain, addr, makeValue(1), 0)
+	c.View(testStateGeneration(1)).Fill(kv.AccountsDomain, addr, makeValue(1), 0)
 	publication := publisher.Begin()
-	publication.Publish(2, []Update{{Domain: kv.AccountsDomain, Key: addr}}, false)
+	publication.Publish(testStateGeneration(2), []Update{{Domain: kv.AccountsDomain, Key: addr}}, false)
 
-	_, ok := c.View(2).Get(kv.AccountsDomain, addr)
+	_, ok := c.View(testStateGeneration(2)).Get(kv.AccountsDomain, addr)
 	assert.False(t, ok)
 }
 
@@ -527,7 +531,7 @@ func TestStateCache_Delete(t *testing.T) {
 // the caller unnecessarily falls through to the DB on every read.
 func TestStateCache_PutEmpty_ThenGet_IsCacheHit(t *testing.T) {
 	c, _ := readyStateCache(t, 1)
-	view := c.View(1)
+	view := c.View(testStateGeneration(1))
 
 	key := make([]byte, 52) // addr(20) + slot(32)
 	key[0] = 0x1d
@@ -543,7 +547,7 @@ func TestStateCache_PutEmpty_ThenGet_IsCacheHit(t *testing.T) {
 // Same test for []byte{} (zero-length but non-nil).
 func TestStateCache_PutEmptySlice_ThenGet_IsCacheHit(t *testing.T) {
 	c, _ := readyStateCache(t, 1)
-	view := c.View(1)
+	view := c.View(testStateGeneration(1))
 
 	key := make([]byte, 52)
 	key[0] = 0x1d
@@ -561,20 +565,20 @@ func TestStateCache_Delete_UnsupportedDomain(t *testing.T) {
 
 	require.NotPanics(t, func() {
 		publication := publisher.Begin()
-		publication.Publish(2, []Update{{Domain: kv.ReceiptDomain, Key: makeAddr(1)}}, false)
+		publication.Publish(testStateGeneration(2), []Update{{Domain: kv.ReceiptDomain, Key: makeAddr(1)}}, false)
 	})
 }
 
 func TestStateCache_Clear(t *testing.T) {
 	c, publisher := readyStateCache(t, 1)
-	view := c.View(1)
+	view := c.View(testStateGeneration(1))
 
 	view.Fill(kv.AccountsDomain, makeAddr(1), makeValue(1), 0)
 	view.Fill(kv.StorageDomain, makeAddr(2), makeValue(2), 0)
 	view.Fill(kv.CodeDomain, makeAddr(3), makeCode(3), 0)
 
-	publisher.Clear(2)
-	view = c.View(2)
+	publisher.Clear(testStateGeneration(2))
+	view = c.View(testStateGeneration(2))
 
 	_, ok1 := view.Get(kv.AccountsDomain, makeAddr(1))
 	_, ok2 := view.Get(kv.StorageDomain, makeAddr(2))
@@ -656,7 +660,7 @@ func TestCodeCache_ConcurrentAccess(t *testing.T) {
 
 func TestStateCache_DomainIsolation(t *testing.T) {
 	c, _ := readyStateCache(t, 1)
-	view := c.View(1)
+	view := c.View(testStateGeneration(1))
 
 	addr := makeAddr(1)
 	accountData := []byte("account")
@@ -771,21 +775,21 @@ func TestStateCache_UnwindReadmitsPreReorgFill(t *testing.T) {
 	sc, publisher := readyStateCache(t, 1)
 	key := makeAddr(1)
 	fork := makeValue(2)
-	preReorg := sc.View(1)
+	preReorg := sc.View(testStateGeneration(1))
 	preReorg.Fill(kv.AccountsDomain, key, fork, 10)
 
 	publication := publisher.Begin()
-	publication.Publish(2, nil, true)
+	publication.Publish(testStateGeneration(2), nil, true)
 
 	preReorg.Fill(kv.AccountsDomain, key, fork, 10)
-	_, ok := sc.View(2).Get(kv.AccountsDomain, key)
+	_, ok := sc.View(testStateGeneration(2)).Get(kv.AccountsDomain, key)
 	require.False(t, ok, "a pre-reorg view must not reinstate the discarded fork's value")
 }
 
 func TestStateCache_PublicationIsOneGeneration(t *testing.T) {
 	sc, publisher := readyStateCache(t, 10)
 	oldKey, changedKey := makeAddr(1), makeAddr(2)
-	oldView := sc.View(10)
+	oldView := sc.View(testStateGeneration(10))
 	oldView.Fill(kv.AccountsDomain, oldKey, makeValue(1), 1)
 	oldView.Fill(kv.AccountsDomain, changedKey, makeValue(2), 2)
 
@@ -793,7 +797,7 @@ func TestStateCache_PublicationIsOneGeneration(t *testing.T) {
 	_, ok := oldView.Get(kv.AccountsDomain, oldKey)
 	require.False(t, ok, "the old generation must be unavailable during publication")
 
-	publication.Publish(11, []Update{{
+	publication.Publish(testStateGeneration(11), []Update{{
 		Domain: kv.AccountsDomain,
 		Key:    changedKey,
 		Value:  makeValue(3),
@@ -802,7 +806,7 @@ func TestStateCache_PublicationIsOneGeneration(t *testing.T) {
 
 	_, ok = oldView.Get(kv.AccountsDomain, oldKey)
 	require.False(t, ok, "publication must revoke old read views")
-	freshView := sc.View(11)
+	freshView := sc.View(testStateGeneration(11))
 	got, ok := freshView.Get(kv.AccountsDomain, oldKey)
 	require.True(t, ok)
 	require.Equal(t, makeValue(1), got, "forward publication keeps unchanged entries")
@@ -815,7 +819,7 @@ func TestStateCache_PublicationIsOneGeneration(t *testing.T) {
 func TestStateCache_AbortRestoresGeneration(t *testing.T) {
 	sc, publisher := readyStateCache(t, 10)
 	key := makeAddr(1)
-	view := sc.View(10)
+	view := sc.View(testStateGeneration(10))
 	view.Fill(kv.AccountsDomain, key, makeValue(1), 1)
 
 	publication := publisher.Begin()
@@ -831,9 +835,9 @@ func TestStateCache_AbortRestoresGeneration(t *testing.T) {
 func TestStateCache_UnpublishedVersionCannotReadOrFill(t *testing.T) {
 	sc, _ := readyStateCache(t, 10)
 	key := makeAddr(1)
-	unpublished := sc.View(11)
+	unpublished := sc.View(testStateGeneration(11))
 	unpublished.Fill(kv.AccountsDomain, key, makeValue(1), 1)
-	_, ok := sc.View(10).Get(kv.AccountsDomain, key)
+	_, ok := sc.View(testStateGeneration(10)).Get(kv.AccountsDomain, key)
 	require.False(t, ok)
 }
 
@@ -842,14 +846,14 @@ func TestStateCache_PublishDeleteAtomicWithOldFill(t *testing.T) {
 	key := makeAddr(1)
 	value := makeValue(1)
 	for stateVersion := uint64(1); stateVersion < 2000; stateVersion++ {
-		oldView := sc.View(stateVersion)
+		oldView := sc.View(testStateGeneration(stateVersion))
 		var wg sync.WaitGroup
 		wg.Go(func() {
 			oldView.Fill(kv.AccountsDomain, key, value, 1)
 		})
 		wg.Go(func() {
 			publication := publisher.Begin()
-			publication.Publish(stateVersion+1, []Update{{
+			publication.Publish(testStateGeneration(stateVersion+1), []Update{{
 				Domain: kv.AccountsDomain,
 				Key:    key,
 				Step:   2,
@@ -857,7 +861,7 @@ func TestStateCache_PublishDeleteAtomicWithOldFill(t *testing.T) {
 		})
 		wg.Wait()
 
-		_, ok := sc.View(stateVersion+1).Get(kv.AccountsDomain, key)
+		_, ok := sc.View(testStateGeneration(stateVersion+1)).Get(kv.AccountsDomain, key)
 		require.False(t, ok, "state version %d: stale fill survived publication", stateVersion)
 	}
 }
@@ -867,13 +871,13 @@ func TestStateCache_ApplyCodeDeleteDropsAddrCodeHash(t *testing.T) {
 	addr := makeAddr(1)
 	var h [32]byte
 	h[0] = 0xaa
-	sc.View(1).SeedAddrCodeHash(addr, h)
-	_, ok := sc.View(1).GetAddrCodeHash(addr)
+	sc.View(testStateGeneration(1)).SeedAddrCodeHash(addr, h)
+	_, ok := sc.View(testStateGeneration(1)).GetAddrCodeHash(addr)
 	require.True(t, ok)
 
 	publication := publisher.Begin()
-	publication.Publish(2, []Update{{Domain: kv.CodeDomain, Key: addr}}, false)
-	_, ok = sc.View(2).GetAddrCodeHash(addr)
+	publication.Publish(testStateGeneration(2), []Update{{Domain: kv.CodeDomain, Key: addr}}, false)
+	_, ok = sc.View(testStateGeneration(2)).GetAddrCodeHash(addr)
 	require.False(t, ok, "a code deletion must drop the derived addr→codeHash mapping")
 }
 
@@ -882,17 +886,17 @@ func TestStateCache_AccountDeleteDropsCodeBinding(t *testing.T) {
 	addr := makeAddr(1)
 	code := makeCode(1)
 	publication := publisher.Begin()
-	publication.Publish(2, []Update{{
+	publication.Publish(testStateGeneration(2), []Update{{
 		Domain: kv.CodeDomain,
 		Key:    addr,
 		Value:  code,
 	}}, false)
-	_, ok := sc.View(2).Get(kv.CodeDomain, addr)
+	_, ok := sc.View(testStateGeneration(2)).Get(kv.CodeDomain, addr)
 	require.True(t, ok)
 
 	publication = publisher.Begin()
-	publication.Publish(3, []Update{{Domain: kv.AccountsDomain, Key: addr}}, false)
-	_, ok = sc.View(3).Get(kv.CodeDomain, addr)
+	publication.Publish(testStateGeneration(3), []Update{{Domain: kv.AccountsDomain, Key: addr}}, false)
+	_, ok = sc.View(testStateGeneration(3)).Get(kv.CodeDomain, addr)
 	require.False(t, ok, "an account deletion must drop the addr→code binding")
 }
 
@@ -945,7 +949,7 @@ func TestStateCacheFillsSwitchDisablesReadFills(t *testing.T) {
 
 	key := make([]byte, 20)
 	key[0] = 0xaa
-	view := c.View(1)
+	view := c.View(testStateGeneration(1))
 
 	view.Fill(kv.AccountsDomain, key, []byte("value"), 10)
 	_, ok := view.Get(kv.AccountsDomain, key)
@@ -961,12 +965,12 @@ func TestStateCacheFillsSwitchDisablesReadFills(t *testing.T) {
 	require.False(t, ok, "content-addressed fills must be disabled too: the switch means no reader writes at all")
 
 	publication := publisher.Begin()
-	publication.Publish(2, []Update{{
+	publication.Publish(testStateGeneration(2), []Update{{
 		Domain: kv.AccountsDomain,
 		Key:    key,
 		Value:  []byte("applied"),
 	}}, false)
-	got, ok := c.View(2).Get(kv.AccountsDomain, key)
+	got, ok := c.View(testStateGeneration(2)).Get(kv.AccountsDomain, key)
 	require.True(t, ok, "publications must keep working")
 	require.Equal(t, []byte("applied"), got)
 }
@@ -974,11 +978,11 @@ func TestStateCacheFillsSwitchDisablesReadFills(t *testing.T) {
 func TestStateCache_StaleViewCannotFillAfterClear(t *testing.T) {
 	sc, publisher := readyStateCache(t, 1)
 	key := makeAddr(1)
-	oldView := sc.View(1)
-	publisher.Clear(1)
+	oldView := sc.View(testStateGeneration(1))
+	publisher.Clear(testStateGeneration(1))
 
 	oldView.Fill(kv.AccountsDomain, key, []byte("pre-delete"), 10)
-	freshView := sc.View(1)
+	freshView := sc.View(testStateGeneration(1))
 	_, ok := freshView.Get(kv.AccountsDomain, key)
 	require.False(t, ok, "a retired view must not refill after Clear")
 
@@ -994,13 +998,13 @@ func TestStateCache_AccountDeletionGatesStaleCodeFill(t *testing.T) {
 	other, otherCode := makeAddr(2), makeCode(2)
 
 	publication := publisher.Begin()
-	publication.Publish(2, []Update{{Domain: kv.CodeDomain, Key: addr, Value: code}}, false)
-	stale := c.View(2)
+	publication.Publish(testStateGeneration(2), []Update{{Domain: kv.CodeDomain, Key: addr, Value: code}}, false)
+	stale := c.View(testStateGeneration(2))
 
 	publication = publisher.Begin()
-	publication.Publish(3, []Update{{Domain: kv.AccountsDomain, Key: addr}}, false)
+	publication.Publish(testStateGeneration(3), []Update{{Domain: kv.AccountsDomain, Key: addr}}, false)
 	stale.Fill(kv.CodeDomain, addr, code, 1)
-	fresh := c.View(3)
+	fresh := c.View(testStateGeneration(3))
 	_, ok := fresh.Get(kv.CodeDomain, addr)
 	require.False(t, ok, "code of a deleted account must not be refillable from a pre-deletion view")
 

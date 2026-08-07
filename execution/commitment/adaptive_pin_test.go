@@ -56,7 +56,7 @@ func TestAdaptivePinPlanDoesNotMutateCacheBeforePublication(t *testing.T) {
 	branchCache := NewBranchCache(64)
 	t.Cleanup(branchCache.Close)
 	publisher := branchCache.Publisher()
-	publisher.Initialize(1)
+	publisher.Initialize(testBranchGeneration(1))
 
 	cfg := DefaultAdaptivePinControllerConfig()
 	cfg.PromoteThresholdMisses = 1
@@ -82,9 +82,9 @@ func TestAdaptivePinPlanDoesNotMutateCacheBeforePublication(t *testing.T) {
 
 	plan = controller.PlanBlock(2, reader, nil, nil)
 	publication := publisher.Begin()
-	publication.Publish(2, nil, false, plan)
+	publication.Publish(testBranchGeneration(2), nil, false, plan)
 	plan.Commit()
 
-	_, _, ok = branchCache.View(2).Get(prefix)
+	_, _, ok = branchCache.View(testBranchGeneration(2)).Get(prefix)
 	require.True(t, ok, "publication must apply the staged pin")
 }

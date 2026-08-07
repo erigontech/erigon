@@ -16,14 +16,15 @@
 
 // Package cache provides the process-global cache of latest committed state.
 //
-// StateCache represents exactly one durable PlainStateVersion at a time. It
-// does not keep old generations: a transaction whose snapshot has another
-// version receives an inert ReadView and reads from the database instead.
+// StateCache represents exactly one Generation at a time: one durable
+// PlainStateVersion over one compatible immutable-files view. It does not keep
+// old generations; a transaction with another identity receives an inert
+// ReadView and reads from its own database snapshot instead.
 //
 // Publishing canonical state revokes the current generation before changing
 // entries and exposes the next generation only after the database commit.
-// This keeps concurrent readers on one complete version even though the cache
-// itself is process-global. Multi-version snapshot caching remains the
+// This keeps concurrent readers on one complete generation even though the
+// cache is process-global. Multi-version snapshot caching remains the
 // responsibility of kvcache.
 package cache
 

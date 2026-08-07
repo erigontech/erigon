@@ -36,16 +36,15 @@ const (
 	avgStorageEntryBytes = 80
 )
 
-// StateCache holds account, storage, and code values for exactly one durable
-// PlainStateVersion. Each reader carries a version token for its database
-// snapshot. Publication revokes that view before changing entries, so old
-// readers miss instead of observing a mixture of the old and new states.
+// StateCache holds account, storage, and code values for one durable database
+// state over one compatible files view. Publication revokes a reader's
+// generation before changing entries, so it cannot observe mixed state.
 type StateCache struct {
-	version PlainStateVersionGate
+	generation GenerationGate
 
 	// committedTxNumEnd is only a file-provenance watermark. Cache validity is
-	// still decided exclusively by version; these ends distinguish files built
-	// from published updates from files downloaded outside that stream.
+	// decided by Generation; these ends distinguish files built from published
+	// updates from files downloaded outside that stream.
 	committedTxNumEnd [kv.DomainLen]uint64
 	caches            [kv.DomainLen]Cache
 	disableFills      bool
@@ -97,17 +96,23 @@ func NewDefaultStateCache() *StateCache {
 // all cache layers. It returns false while publication is in progress because
 // the old version has been revoked and the new version is not visible yet.
 func (c *StateCache) CurrentStateVersion() (uint64, bool) {
-	return c.version.CurrentStateVersion()
+	return c.generation.CurrentStateVersion()
 }
 
-// BeginFilesPublication revokes and clears the cache when files expose state
-// beyond this process's committed updates. Finish must be called after the new
-// files view becomes visible.
-func (c *StateCache) BeginFilesPublication(filesEnd [kv.DomainLen]uint64) *PlainStateVersionBackingChange {
+// BeginFilesPublication revokes the old files generation. It retains entries
+// backed by this process's committed updates and clears them when the new files
+// contain foreign state. Finish publishes the new identity after the files
+// become visible.
+func (c *StateCache) BeginFilesPublication(filesEnd [kv.DomainLen]uint64) *BackingChange {
 	if c == nil {
 		return nil
 	}
-	return c.version.Publisher().BeginBackingChange(func() bool {
+	files := stateFilesView(
+		filesEnd[kv.AccountsDomain],
+		filesEnd[kv.StorageDomain],
+		filesEnd[kv.CodeDomain],
+	)
+	return c.generation.Publisher().BeginBackingChange(files, func() bool {
 		extended := false
 		for domain, cache := range c.caches {
 			if cache == nil || filesEnd[domain] <= c.committedTxNumEnd[domain] {
@@ -153,7 +158,7 @@ func (c *StateCache) getAddrCodeHash(addr []byte) ([32]byte, bool) {
 }
 
 func (c *StateCache) fill(
-	version PlainStateVersionView,
+	generation GenerationView,
 	domain kv.Domain,
 	key, value []byte,
 	step kv.Step,
@@ -164,13 +169,13 @@ func (c *StateCache) fill(
 	}
 	value = bytes.Clone(value)
 
-	version.Admit(func() {
+	generation.Admit(func() {
 		cache.PutIfAbsent(key, value, step)
 	})
 }
 
 func (c *StateCache) fillCode(
-	version PlainStateVersionView,
+	generation GenerationView,
 	key, value []byte,
 	step kv.Step,
 ) {
@@ -181,27 +186,27 @@ func (c *StateCache) fillCode(
 	value = bytes.Clone(value)
 	codeHash := crypto.Keccak256(value)
 
-	version.Admit(func() {
+	generation.Admit(func() {
 		codeCache.PutWithCodeHashIfAbsent(key, value, codeHash, step)
 	})
 }
 
-func (c *StateCache) seedAddrCodeHash(version PlainStateVersionView, addr []byte, hash [32]byte) {
+func (c *StateCache) seedAddrCodeHash(generation GenerationView, addr []byte, hash [32]byte) {
 	codeCache, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok {
 		return
 	}
-	version.Admit(func() {
+	generation.Admit(func() {
 		codeCache.PutAddrCodeHash(addr, hash)
 	})
 }
 
-func (c *StateCache) fillCodeSize(version PlainStateVersionView, codeHash []byte, size int) {
+func (c *StateCache) fillCodeSize(generation GenerationView, codeHash []byte, size int) {
 	codeCache, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok {
 		return
 	}
-	version.Admit(func() {
+	generation.Admit(func() {
 		codeCache.PutCodeSizeByCodeHash(codeHash, size)
 	})
 }
@@ -262,7 +267,7 @@ func (c *StateCache) clearLocked() {
 }
 
 func (c *StateCache) Close() {
-	c.version.Close()
+	c.generation.Close()
 	for _, cache := range c.caches {
 		if cache != nil {
 			cache.Close()
@@ -309,11 +314,11 @@ type Update struct {
 }
 
 // Publisher is the mutation capability for canonical state. Normal readers
-// receive only ReadView, while code that makes a database state durable uses a
-// Publisher to move every cache layer to the same PlainStateVersion.
+// receive only ReadView, while code that makes database state durable uses a
+// Publisher to move every cache layer to the same Generation.
 type Publisher struct {
-	c       *StateCache
-	version PlainStateVersionPublisher
+	c          *StateCache
+	generation GenerationPublisher
 }
 
 // Publisher returns a handle that can change the cache's canonical generation.
@@ -322,20 +327,19 @@ func (c *StateCache) Publisher() Publisher {
 	if c == nil {
 		return Publisher{}
 	}
-	return Publisher{c: c, version: c.version.Publisher()}
+	return Publisher{c: c, generation: c.generation.Publisher()}
 }
 
-func (p Publisher) Enabled() bool { return p.c != nil && p.version.Enabled() }
+func (p Publisher) Enabled() bool { return p.c != nil && p.generation.Enabled() }
 
-// Initialize binds the cache to the durable version seen by its canonical
-// owner. Existing entries are preserved when the version already matches. A
-// mismatch clears them because this single-version cache cannot prove that any
-// entry belongs to the owner's database snapshot.
-func (p Publisher) Initialize(stateVersion uint64) {
+// Initialize binds the cache to the database and files generation seen by its
+// canonical owner. A mismatch clears entries because their origin cannot be
+// proven compatible with that snapshot.
+func (p Publisher) Initialize(generation Generation) {
 	if p.c == nil {
 		return
 	}
-	p.version.Initialize(stateVersion, p.c.clearLocked)
+	p.generation.Initialize(generation, p.c.clearLocked)
 }
 
 // Publication represents one pending transition of the durable database
@@ -343,8 +347,8 @@ func (p Publisher) Initialize(stateVersion uint64) {
 // Abort can restore the previous generation if the transaction rolls back.
 // Publish consumes the transition after the database commit succeeds.
 type Publication struct {
-	c       *StateCache
-	version *PlainStateVersionPublication
+	c          *StateCache
+	generation *GenerationPublication
 }
 
 // Begin revokes every existing ReadView and prevents creation of a new live
@@ -354,7 +358,7 @@ func (p Publisher) Begin() *Publication {
 	if p.c == nil {
 		return nil
 	}
-	return &Publication{c: p.c, version: p.version.Begin()}
+	return &Publication{c: p.c, generation: p.generation.Begin()}
 }
 
 // Abort restores the previous generation after a failed or abandoned database
@@ -364,12 +368,12 @@ func (p *Publication) Abort() {
 	if p == nil || p.c == nil {
 		return
 	}
-	p.version.Abort()
+	p.generation.Abort()
 	p.c = nil
 }
 
 // Publish applies updates from a successful database transaction and exposes
-// stateVersion as one complete cache generation. The caller must invoke it
+// generation as one complete cache snapshot. The caller must invoke it
 // only after the database commit, so a visible cache generation is never ahead
 // of durable state.
 //
@@ -377,11 +381,11 @@ func (p *Publication) Abort() {
 // have the same value in the new state. Canonical unwind sets clear because its
 // callbacks do not enumerate every value that may belong to the discarded
 // fork.
-func (p *Publication) Publish(stateVersion uint64, updates []Update, clear bool) {
+func (p *Publication) Publish(generation Generation, updates []Update, clear bool) {
 	if p == nil || p.c == nil {
 		return
 	}
-	p.version.Publish(stateVersion, func() {
+	p.generation.Publish(generation, func() {
 		if clear {
 			p.c.clearLocked()
 		}
@@ -393,8 +397,8 @@ func (p *Publication) Publish(stateVersion uint64, updates []Update, clear bool)
 }
 
 // Clear revokes current views, removes every cached value, and publishes an
-// empty generation for stateVersion.
-func (p Publisher) Clear(stateVersion uint64) {
+// empty generation.
+func (p Publisher) Clear(generation Generation) {
 	publication := p.Begin()
-	publication.Publish(stateVersion, nil, true)
+	publication.Publish(generation, nil, true)
 }

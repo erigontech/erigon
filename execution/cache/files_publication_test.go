@@ -30,34 +30,41 @@ func TestStateCacheFilesPublication(t *testing.T) {
 	value := makeValue(1)
 
 	publication := publisher.Begin()
-	publication.Publish(2, []Update{{
+	publication.Publish(testStateGeneration(2), []Update{{
 		Domain: kv.AccountsDomain,
 		Key:    key,
 		Value:  value,
 		Step:   1,
 		TxNum:  100,
 	}}, false)
-	view := stateCache.View(2)
+	view := stateCache.View(testStateGeneration(2))
 	got, ok := view.Get(kv.AccountsDomain, key)
 	require.True(t, ok)
 	require.Equal(t, value, got)
 
 	var filesEnd [kv.DomainLen]uint64
 	filesEnd[kv.AccountsDomain] = 101
-	require.Nil(t, stateCache.BeginFilesPublication(filesEnd))
-	_, ok = view.Get(kv.AccountsDomain, key)
-	require.True(t, ok, "files covered by committed updates must not clear the cache")
-
-	filesEnd[kv.AccountsDomain] = 150
 	change := stateCache.BeginFilesPublication(filesEnd)
 	require.NotNil(t, change)
 	_, ok = view.Get(kv.AccountsDomain, key)
+	require.False(t, ok, "a files change must revoke views pinned to the old files")
+	change.Finish()
+	_, ok = stateCache.View(testStateGeneration(2)).Get(kv.AccountsDomain, key)
+	require.False(t, ok, "a transaction first bound after publication must present the new files identity")
+	covered := stateCache.View(StateGeneration(2, 101, 0, 0))
+	_, ok = covered.Get(kv.AccountsDomain, key)
+	require.True(t, ok, "files covered by committed updates must retain cache entries")
+
+	filesEnd[kv.AccountsDomain] = 150
+	change = stateCache.BeginFilesPublication(filesEnd)
+	require.NotNil(t, change)
+	_, ok = covered.Get(kv.AccountsDomain, key)
 	require.False(t, ok, "foreign files must revoke the published generation")
 	change.Finish()
 
 	publication = publisher.Begin()
-	publication.Publish(3, nil, false)
-	current := stateCache.View(3)
+	publication.Publish(StateGeneration(3, 150, 0, 0), nil, false)
+	current := stateCache.View(StateGeneration(3, 150, 0, 0))
 	_, ok = current.Get(kv.AccountsDomain, key)
 	require.False(t, ok, "the next commit must not reactivate entries from the old backing view")
 
@@ -74,14 +81,14 @@ func TestFilesPublicationBlocksCachePublicationUntilVisible(t *testing.T) {
 
 	change := stateCache.BeginFilesPublication(filesEnd)
 	require.NotNil(t, change)
-	require.False(t, stateCache.version.publicationMu.TryLock(),
+	require.False(t, stateCache.generation.publicationMu.TryLock(),
 		"cache publication must stay blocked while the backing-file view changes")
 
 	change.Finish()
-	locked := stateCache.version.publicationMu.TryLock()
+	locked := stateCache.generation.publicationMu.TryLock()
 	require.True(t, locked)
 	if locked {
-		stateCache.version.publicationMu.Unlock()
+		stateCache.generation.publicationMu.Unlock()
 	}
 
 	publication := publisher.Begin()

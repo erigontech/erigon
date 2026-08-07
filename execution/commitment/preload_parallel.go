@@ -176,7 +176,7 @@ func (p *ContractTrunkPreloadParallel) Run(
 			return false
 		}
 		// A branch resolved across merged files has no single source step. The
-		// enclosing publication binds the completed preload to PlainStateVersion.
+		// enclosing publication binds the completed preload to one generation.
 		cache.PinEntry(pk.key, v, 0)
 		p.pinnedPrefixes = append(p.pinnedPrefixes, bytes.Clone(pk.key))
 		p.usedBytes += cost

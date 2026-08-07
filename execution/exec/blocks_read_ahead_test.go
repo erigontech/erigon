@@ -49,7 +49,7 @@ func newTestStateCache(t *testing.T) *cache.StateCache {
 	b := 1 * datasize.MB
 	sc := cache.NewStateCache(b, b, b, b)
 	t.Cleanup(sc.Close)
-	sc.Publisher().Initialize(1)
+	sc.Publisher().Initialize(cache.StateGeneration(1, 0, 0, 0))
 	return sc
 }
 
@@ -57,7 +57,7 @@ func currentCacheView(t *testing.T, sc *cache.StateCache) cache.ReadView {
 	t.Helper()
 	stateVersion, ok := sc.CurrentStateVersion()
 	require.True(t, ok)
-	return sc.View(stateVersion)
+	return sc.View(cache.StateGeneration(stateVersion, 0, 0, 0))
 }
 
 func seedFill(t *testing.T, sc *cache.StateCache, domain kv.Domain, k, v []byte, step kv.Step) {
@@ -155,7 +155,7 @@ func TestCachePopulatingGetterNegativeClearedByPublication(t *testing.T) {
 	_, ok := currentCacheView(t, sc).Get(kv.AccountsDomain, key)
 	require.True(t, ok)
 
-	sc.Publisher().Clear(2)
+	sc.Publisher().Clear(cache.StateGeneration(2, 0, 0, 0))
 	_, ok = currentCacheView(t, sc).Get(kv.AccountsDomain, key)
 	require.False(t, ok)
 }
@@ -181,7 +181,7 @@ func TestCachePopulatingGetterStaleViewDoesNotFill(t *testing.T) {
 		view:           currentCacheView(t, sc),
 	}
 	publication := sc.Publisher().Begin()
-	publication.Publish(2, nil, false)
+	publication.Publish(cache.StateGeneration(2, 0, 0, 0), nil, false)
 
 	_, _, err := cpg.GetLatest(kv.AccountsDomain, key)
 	require.NoError(t, err)

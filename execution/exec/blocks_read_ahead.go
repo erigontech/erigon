@@ -86,10 +86,10 @@ type cachePopulatingGetter struct {
 }
 
 // readAheadGetter enables fills only when the transaction has an exact domain
-// frontier. StateCache.View performs the second check: its PlainStateVersion
-// must match the currently published generation. Failure of either check keeps
-// read-ahead useful for the OS page cache without admitting unsafe values into
-// StateCache.
+// frontier. StateCache.View also requires the transaction's state version and
+// pinned files ends to match the published generation. Failure of either check
+// keeps read-ahead useful for the OS page cache without admitting unsafe values
+// into StateCache.
 func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache) kv.TemporalGetter {
 	if sc == nil {
 		return ttx
@@ -98,12 +98,19 @@ func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache) kv.TemporalGetter 
 	if err != nil {
 		return ttx
 	}
+	debug := ttx.Debug()
 	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
-		if _, ok := ttx.Debug().DomainVisibleEnd(domain); !ok {
+		if _, ok := debug.DomainVisibleEnd(domain); !ok {
 			return ttx
 		}
 	}
-	return &cachePopulatingGetter{TemporalGetter: ttx, view: sc.View(stateVersion)}
+	generation := cache.StateGeneration(
+		stateVersion,
+		debug.TxNumsInFiles(kv.AccountsDomain),
+		debug.TxNumsInFiles(kv.StorageDomain),
+		debug.TxNumsInFiles(kv.CodeDomain),
+	)
+	return &cachePopulatingGetter{TemporalGetter: ttx, view: sc.View(generation)}
 }
 
 func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte) ([]byte, kv.Step, error) {

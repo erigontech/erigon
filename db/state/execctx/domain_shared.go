@@ -87,49 +87,60 @@ type cacheViews struct {
 	branch commitment.BranchReadView
 }
 
-// cacheViewsFor binds both process-global caches to the state version of tx.
-// Most reads use the base transaction and reuse the construction-time
-// metadata stored on SharedDomains. Reads through another transaction
-// re-evaluate its version and exact domain frontiers.
+// cacheViewsFor binds both process-global caches to the database and files
+// generation pinned by tx. The common path reuses construction-time metadata;
+// reads through another transaction derive its generation again.
 func (sd *SharedDomains) cacheViewsFor(tx kv.TemporalTx) cacheViews {
 	if tx == nil {
 		return cacheViews{}
 	}
-	var stateVersion uint64
+	var stateGeneration, branchGeneration cache.Generation
 	var stateEligible, branchEligible bool
 	if tx.ViewID() == sd.baseViewID {
 		if !sd.baseStateVersionKnown {
 			return cacheViews{}
 		}
-		stateVersion = sd.baseStateVersion
+		stateGeneration = sd.baseStateCacheGeneration
+		branchGeneration = sd.baseBranchCacheGeneration
 		stateEligible = sd.baseStateCacheEligible
 		branchEligible = sd.baseBranchCacheEligible
 	} else {
-		var err error
-		stateVersion, err = rawdb.GetStateVersion(tx)
+		stateVersion, err := rawdb.GetStateVersion(tx)
 		if err != nil {
 			return cacheViews{}
 		}
-		stateEligible = cacheViewEligible(tx, kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain)
-		branchEligible = cacheViewEligible(tx, kv.CommitmentDomain)
+		debug := tx.Debug()
+		stateGeneration, branchGeneration = cacheGenerationsFor(debug, stateVersion)
+		stateEligible = cacheViewEligible(debug, kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain)
+		branchEligible = cacheViewEligible(debug, kv.CommitmentDomain)
 	}
 	var views cacheViews
 	if sd.stateCache != nil && stateEligible {
-		views.state = sd.stateCache.View(stateVersion)
+		views.state = sd.stateCache.View(stateGeneration)
 	}
 	if sd.branchCache != nil && branchEligible {
-		views.branch = sd.branchCache.View(stateVersion)
+		views.branch = sd.branchCache.View(branchGeneration)
 	}
 	return views
 }
 
-// cacheViewEligible rejects a dependency-clamped domain view. Such a view
-// mixes database values with older file values and may later expose newer
-// files without changing PlainStateVersion; a fill from it could therefore
-// outlive the snapshot that produced the value.
-func cacheViewEligible(tx kv.TemporalTx, domains ...kv.Domain) bool {
+func cacheGenerationsFor(debug kv.TemporalDebugTx, stateVersion uint64) (cache.Generation, cache.Generation) {
+	stateGeneration := cache.StateGeneration(
+		stateVersion,
+		debug.TxNumsInFiles(kv.AccountsDomain),
+		debug.TxNumsInFiles(kv.StorageDomain),
+		debug.TxNumsInFiles(kv.CodeDomain),
+	)
+	branchGeneration := cache.BranchGeneration(stateVersion, debug.TxNumsInFiles(kv.CommitmentDomain))
+	return stateGeneration, branchGeneration
+}
+
+// cacheViewEligible rejects a dependency-clamped domain view. Its reads mix
+// database state with an older values frontier, so it has no exact cache
+// identity.
+func cacheViewEligible(debug kv.TemporalDebugTx, domains ...kv.Domain) bool {
 	for _, domain := range domains {
-		if _, ok := tx.Debug().DomainVisibleEnd(domain); !ok {
+		if _, ok := debug.DomainVisibleEnd(domain); !ok {
 			return false
 		}
 	}
@@ -158,11 +169,12 @@ type SharedDomains struct {
 	// These fields describe the database snapshot used to construct this
 	// SharedDomains. The common read path reuses them instead of reading cache
 	// eligibility metadata for every GetLatest call.
-	baseViewID              uint64
-	baseStateVersion        uint64
-	baseStateVersionKnown   bool
-	baseStateCacheEligible  bool
-	baseBranchCacheEligible bool
+	baseViewID                uint64
+	baseStateCacheGeneration  cache.Generation
+	baseBranchCacheGeneration cache.Generation
+	baseStateVersionKnown     bool
+	baseStateCacheEligible    bool
+	baseBranchCacheEligible   bool
 
 	txNum       uint64
 	currentStep kv.Step
@@ -187,7 +199,7 @@ type SharedDomains struct {
 	// to read from the FCU's published SD without writing to it.
 	parent *SharedDomains
 
-	// stateCache provides version-bound reads and fills. cachePublisher is set
+	// stateCache provides generation-bound reads and fills. cachePublisher is set
 	// only when this SharedDomains owns publication of durable canonical state;
 	// a speculative SharedDomains may read the cache but cannot move its
 	// generation or change its authoritative entries.
@@ -209,8 +221,8 @@ type SharedDomains struct {
 	changesetMu sync.Mutex
 
 	// branchCache is the aggregator-scope commitment cache. Local and parent
-	// memory overlays take precedence; the PlainStateVersion view then prevents
-	// one SharedDomains from observing another transaction's branch generation.
+	// memory overlays take precedence; its generation view then prevents one
+	// SharedDomains from observing another transaction's cached branches.
 	branchCache     *commitment.BranchCache
 	branchPublisher commitment.BranchPublisher
 	// Like clearStateCache, this survives reader detachment and Merge.
@@ -269,15 +281,18 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	trieCfg := o.trieCfg
 
 	stateVersion, stateVersionErr := rawdb.GetStateVersion(tx)
+	debug := tx.Debug()
+	stateGeneration, branchGeneration := cacheGenerationsFor(debug, stateVersion)
 	sd := &SharedDomains{
-		logger:                  logger,
-		metrics:                 kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
-		stepSize:                tx.Debug().StepSize(),
-		baseViewID:              tx.ViewID(),
-		baseStateVersion:        stateVersion,
-		baseStateVersionKnown:   stateVersionErr == nil,
-		baseStateCacheEligible:  cacheViewEligible(tx, kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain),
-		baseBranchCacheEligible: cacheViewEligible(tx, kv.CommitmentDomain),
+		logger:                    logger,
+		metrics:                   kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
+		stepSize:                  debug.StepSize(),
+		baseViewID:                tx.ViewID(),
+		baseStateCacheGeneration:  stateGeneration,
+		baseBranchCacheGeneration: branchGeneration,
+		baseStateVersionKnown:     stateVersionErr == nil,
+		baseStateCacheEligible:    cacheViewEligible(debug, kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain),
+		baseBranchCacheEligible:   cacheViewEligible(debug, kv.CommitmentDomain),
 	}
 
 	sd.mem = tx.Debug().NewMemBatch(&sd.metrics)
@@ -802,7 +817,7 @@ func (sd *SharedDomains) GetCommitmentCtx() *commitmentdb.SharedDomainsCommitmen
 
 func (sd *SharedDomains) Logger() log.Logger { return sd.logger }
 
-// SetStateCacheReader attaches the process-global cache for version-checked
+// SetStateCacheReader attaches the process-global cache for generation-checked
 // reads and read-through fills. It does not grant authority to publish, clear,
 // or otherwise move the cache's durable generation.
 //
@@ -821,13 +836,13 @@ func (sd *SharedDomains) SetStateCacheReader(stateCache *cache.StateCache) {
 // SetCanonicalStateCache attaches the same reader and also grants publication
 // authority. Use it only for a SharedDomains whose Commit makes state durable:
 // Commit may revoke existing views, apply the committed cache updates, and
-// publish the resulting PlainStateVersion. A canonical unwind may additionally
-// clear all entries before publishing its rewound version.
+// publish the resulting database and files generation. A canonical unwind may
+// additionally clear all entries before publishing its rewound state.
 //
 // Initialize binds the process-global cache to this SharedDomains' base
-// database version. Keeping this authority separate from SetStateCacheReader
-// prevents speculative rollback or unwind from changing globally visible
-// cache state.
+// database and files snapshot. Keeping this authority separate from
+// SetStateCacheReader prevents speculative rollback or unwind from changing
+// globally visible cache state.
 func (sd *SharedDomains) SetCanonicalStateCache(stateCache *cache.StateCache) {
 	if !dbg.UseStateCache || stateCache == nil || !sd.baseStateVersionKnown {
 		return
@@ -836,7 +851,7 @@ func (sd *SharedDomains) SetCanonicalStateCache(stateCache *cache.StateCache) {
 		sd.stateCache = stateCache
 	}
 	sd.cachePublisher = stateCache.Publisher()
-	sd.cachePublisher.Initialize(sd.baseStateVersion)
+	sd.cachePublisher.Initialize(sd.baseStateCacheGeneration)
 }
 
 // BindStateCacheToAggregator binds StateCache to the aggregator's file
@@ -1084,13 +1099,14 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 		return err
 	}
 
-	var stateVersion uint64
+	var stateGeneration, branchGeneration cache.Generation
 	if stateCacheEnabled || branchCacheEnabled {
-		var err error
-		stateVersion, err = rawdb.GetStateVersion(tx)
+		stateVersion, err := rawdb.GetStateVersion(tx)
 		if err != nil {
 			return fmt.Errorf("read plain state version: %w", err)
 		}
+		stateGeneration = sd.baseStateCacheGeneration.WithStateVersion(stateVersion)
+		branchGeneration = sd.baseBranchCacheGeneration.WithStateVersion(stateVersion)
 	}
 
 	var statePublication *cache.Publication
@@ -1117,9 +1133,9 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 		return err
 	}
 
-	statePublication.Publish(stateVersion, stateUpdates, sd.clearStateCache)
+	statePublication.Publish(stateGeneration, stateUpdates, sd.clearStateCache)
 	statePublication = nil
-	branchPublication.Publish(stateVersion, branchUpdates, sd.clearBranchCache, adaptivePlan)
+	branchPublication.Publish(branchGeneration, branchUpdates, sd.clearBranchCache, adaptivePlan)
 	branchPublication = nil
 	adaptivePlan.Commit()
 	adaptivePlan = nil

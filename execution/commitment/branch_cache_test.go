@@ -23,7 +23,13 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/execution/cache"
 )
+
+func testBranchGeneration(stateVersion uint64) cache.Generation {
+	return cache.BranchGeneration(stateVersion, 0)
+}
 
 // TestBranchCache_AccountTrunkRouting verifies account-trie branches at nibble
 // depths 1-4 land in the resident fixed-array trunk (counted as trunk hits),
@@ -287,14 +293,14 @@ func TestBranchCache_ConcurrentTailGrow(t *testing.T) {
 	wg.Wait()
 }
 
-func TestBranchCache_ViewRequiresExactStateVersion(t *testing.T) {
+func TestBranchCache_ViewRequiresExactGeneration(t *testing.T) {
 	c := NewBranchCache(100)
 	t.Cleanup(c.Close)
 	publisher := c.Publisher()
-	publisher.Initialize(7)
+	publisher.Initialize(testBranchGeneration(7))
 
 	key := []byte{0xa0, 0xb0}
-	view := c.View(7)
+	view := c.View(testBranchGeneration(7))
 	view.Fill(key, []byte("version-7"), 3)
 
 	value, step, ok := view.Get(key)
@@ -302,20 +308,22 @@ func TestBranchCache_ViewRequiresExactStateVersion(t *testing.T) {
 	require.Equal(t, []byte("version-7"), value)
 	require.Equal(t, uint64(3), step)
 
-	_, _, ok = c.View(6).Get(key)
+	_, _, ok = c.View(testBranchGeneration(6)).Get(key)
 	require.False(t, ok, "an older database snapshot must not read the current branch generation")
-	_, _, ok = c.View(8).Get(key)
+	_, _, ok = c.View(testBranchGeneration(8)).Get(key)
 	require.False(t, ok, "a newer database snapshot must wait for its branch generation to be published")
+	_, _, ok = c.View(cache.BranchGeneration(7, 1)).Get(key)
+	require.False(t, ok, "a different files view must not read the current branch generation")
 }
 
 func TestBranchCache_PublicationRejectsLateFill(t *testing.T) {
 	c := NewBranchCache(100)
 	t.Cleanup(c.Close)
 	publisher := c.Publisher()
-	publisher.Initialize(1)
+	publisher.Initialize(testBranchGeneration(1))
 
 	key := []byte{0xa0, 0xb0}
-	oldView := c.View(1)
+	oldView := c.View(testBranchGeneration(1))
 	oldView.Fill(key, []byte("old"), 1)
 
 	publication := publisher.Begin()
@@ -323,7 +331,7 @@ func TestBranchCache_PublicationRejectsLateFill(t *testing.T) {
 	require.False(t, ok, "Begin must revoke existing branch views")
 	oldView.Fill(key, []byte("late-old-fill"), 1)
 
-	publication.Publish(2, []BranchUpdate{{
+	publication.Publish(testBranchGeneration(2), []BranchUpdate{{
 		Key:   key,
 		Value: []byte("new"),
 		Step:  2,
@@ -331,7 +339,7 @@ func TestBranchCache_PublicationRejectsLateFill(t *testing.T) {
 
 	_, _, ok = oldView.Get(key)
 	require.False(t, ok, "a published generation must not revalidate an old view")
-	value, step, ok := c.View(2).Get(key)
+	value, step, ok := c.View(testBranchGeneration(2)).Get(key)
 	require.True(t, ok)
 	require.Equal(t, []byte("new"), value)
 	require.Equal(t, uint64(2), step)
@@ -341,10 +349,10 @@ func TestBranchCache_PublicationAbortRestoresPreviousView(t *testing.T) {
 	c := NewBranchCache(100)
 	t.Cleanup(c.Close)
 	publisher := c.Publisher()
-	publisher.Initialize(1)
+	publisher.Initialize(testBranchGeneration(1))
 
 	key := []byte{0xa0, 0xb0}
-	view := c.View(1)
+	view := c.View(testBranchGeneration(1))
 	view.Fill(key, []byte("unchanged"), 1)
 
 	publication := publisher.Begin()
@@ -361,25 +369,25 @@ func TestBranchCache_ResetRevokesViewsUntilNextPublication(t *testing.T) {
 	c := NewBranchCache(100)
 	t.Cleanup(c.Close)
 	publisher := c.Publisher()
-	publisher.Initialize(1)
+	publisher.Initialize(testBranchGeneration(1))
 
 	key := []byte{0xa0, 0xb0}
-	oldView := c.View(1)
+	oldView := c.View(testBranchGeneration(1))
 	oldView.Fill(key, []byte("old-layout"), 1)
 
 	c.Reset()
 	_, _, ok := oldView.Get(key)
 	require.False(t, ok)
-	_, _, ok = c.View(1).Get(key)
+	_, _, ok = c.View(testBranchGeneration(1)).Get(key)
 	require.False(t, ok, "Reset must leave the cache unpublished")
 
 	publication := publisher.Begin()
-	publication.Publish(2, []BranchUpdate{{
+	publication.Publish(testBranchGeneration(2), []BranchUpdate{{
 		Key:   key,
 		Value: []byte("new-layout"),
 		Step:  2,
 	}}, false, nil)
-	value, _, ok := c.View(2).Get(key)
+	value, _, ok := c.View(testBranchGeneration(2)).Get(key)
 	require.True(t, ok)
 	require.Equal(t, []byte("new-layout"), value)
 }

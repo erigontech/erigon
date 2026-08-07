@@ -48,13 +48,13 @@ func isCommitmentStateKey(prefix []byte) bool {
 // BranchCache stores commitment-trie branches in an aggregator-scope resident
 // trunk and bounded LRU tail. Concurrent storage operations are safe; shared
 // readers use View, and durable writers use Publisher, to keep all entries
-// bound to one PlainStateVersion.
+// bound to one database and files generation.
 type BranchCache struct {
-	version cache.PlainStateVersionGate
+	generation cache.GenerationGate
 
 	// committedTxNumEnd is only a file-provenance watermark. Cache validity is
-	// still decided by PlainStateVersion; this end distinguishes locally built
-	// commitment files from files downloaded outside the publication stream.
+	// decided by Generation; this end distinguishes locally built commitment
+	// files from files downloaded outside the publication stream.
 	committedTxNumEnd uint64
 
 	// Root tier — single slot for the root branch (always hottest, always
@@ -343,7 +343,7 @@ func NewBranchCache(tailCapacity int) *BranchCache {
 // Close drops this cache from the active-instance count so later BranchCaches
 // size their trunk depth against real concurrency. Idempotent.
 func (c *BranchCache) Close() {
-	c.version.Close()
+	c.generation.Close()
 	if c.closed.CompareAndSwap(false, true) {
 		if t := c.tail.Load(); t != nil {
 			t.Close()
@@ -353,23 +353,23 @@ func (c *BranchCache) Close() {
 }
 
 // Reset clears cached branches and revokes all views until the next durable
-// publication. It is required when the backing commitment view changes
-// without advancing PlainStateVersion.
+// publication.
 func (c *BranchCache) Reset() {
-	c.version.Reset(func() {
+	c.generation.Reset(func() {
 		c.committedTxNumEnd = 0
 		c.Clear()
 	})
 }
 
-// BeginFilesPublication revokes and clears the cache when commitment files
-// expose state beyond this process's committed branch updates. Finish must be
-// called after the new files view becomes visible.
-func (c *BranchCache) BeginFilesPublication(filesEnd uint64) *cache.PlainStateVersionBackingChange {
+// BeginFilesPublication revokes the old files generation. It retains entries
+// backed by this process's committed updates and clears them when the new files
+// contain foreign state. Finish publishes the new identity after the files
+// become visible.
+func (c *BranchCache) BeginFilesPublication(filesEnd uint64) *cache.BackingChange {
 	if c == nil {
 		return nil
 	}
-	return c.version.Publisher().BeginBackingChange(func() bool {
+	return c.generation.Publisher().BeginBackingChange(cache.BranchFilesView(filesEnd), func() bool {
 		if filesEnd <= c.committedTxNumEnd {
 			return false
 		}
@@ -683,7 +683,7 @@ func (c *BranchCache) PinnedCount() int {
 // Get retrieves branch data from the cache. Returns the canonical encoded
 // bytes (with the leading 2-byte touch-map prefix) plus the on-disk file
 // step the bytes came from (0 if not tracked). Shared database readers use
-// BranchReadView.Get so the result is checked against PlainStateVersion.
+// BranchReadView.Get so the result is checked against their full generation.
 func (c *BranchCache) Get(prefix []byte) ([]byte, uint64, bool) {
 	if isCommitmentStateKey(prefix) {
 		return nil, 0, false

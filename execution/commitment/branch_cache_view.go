@@ -18,29 +18,24 @@ package commitment
 
 import "github.com/erigontech/erigon/execution/cache"
 
-// BranchReadView binds BranchCache access to one durable PlainStateVersion.
-// Publication concurrent with a read turns the result into a miss, while fills
-// are serialized so a value from an old database snapshot cannot enter a new
-// generation.
+// BranchReadView binds BranchCache access to one durable database state and
+// files view. Concurrent publication turns a read into a miss, while fill
+// admission prevents an old snapshot from entering a new generation.
 type BranchReadView struct {
-	c       *BranchCache
-	version cache.PlainStateVersionView
+	c          *BranchCache
+	generation cache.GenerationView
 }
 
-// View returns an inert handle unless stateVersion is currently published.
-func (c *BranchCache) View(stateVersion uint64) BranchReadView {
+// View returns an inert handle unless generation is currently published.
+func (c *BranchCache) View(generation cache.Generation) BranchReadView {
 	if c == nil {
 		return BranchReadView{}
 	}
-	version := c.version.View(stateVersion)
-	if !version.Current() {
-		return BranchReadView{}
-	}
-	return BranchReadView{c: c, version: version}
+	return BranchReadView{c: c, generation: c.generation.View(generation)}
 }
 
 func (v BranchReadView) current() bool {
-	return v.c != nil && v.version.Current()
+	return v.c != nil && v.generation.Current()
 }
 
 // Get returns a branch only while the view remains current.
@@ -60,7 +55,7 @@ func (v BranchReadView) Fill(prefix, value []byte, step uint64) {
 	if !v.current() || len(value) == 0 {
 		return
 	}
-	v.version.Admit(func() {
+	v.generation.Admit(func() {
 		v.c.Put(prefix, value, step)
 	})
 }
@@ -76,8 +71,8 @@ type BranchUpdate struct {
 
 // BranchPublisher is the canonical mutation handle for BranchCache.
 type BranchPublisher struct {
-	c       *BranchCache
-	version cache.PlainStateVersionPublisher
+	c          *BranchCache
+	generation cache.GenerationPublisher
 }
 
 // Publisher returns a handle that can publish durable branch generations.
@@ -85,25 +80,25 @@ func (c *BranchCache) Publisher() BranchPublisher {
 	if c == nil {
 		return BranchPublisher{}
 	}
-	return BranchPublisher{c: c, version: c.version.Publisher()}
+	return BranchPublisher{c: c, generation: c.generation.Publisher()}
 }
 
 func (p BranchPublisher) Enabled() bool {
-	return p.c != nil && p.version.Enabled()
+	return p.c != nil && p.generation.Enabled()
 }
 
-// Initialize binds an empty or previously published cache to stateVersion.
-func (p BranchPublisher) Initialize(stateVersion uint64) {
+// Initialize binds an empty or previously published cache to generation.
+func (p BranchPublisher) Initialize(generation cache.Generation) {
 	if p.c == nil {
 		return
 	}
-	p.version.Initialize(stateVersion, p.c.Clear)
+	p.generation.Initialize(generation, p.c.Clear)
 }
 
 // BranchPublication represents one pending durable branch transition.
 type BranchPublication struct {
-	c       *BranchCache
-	version *cache.PlainStateVersionPublication
+	c          *BranchCache
+	generation *cache.GenerationPublication
 }
 
 // Begin revokes current BranchReadViews without changing branch entries.
@@ -111,7 +106,7 @@ func (p BranchPublisher) Begin() *BranchPublication {
 	if p.c == nil {
 		return nil
 	}
-	return &BranchPublication{c: p.c, version: p.version.Begin()}
+	return &BranchPublication{c: p.c, generation: p.generation.Begin()}
 }
 
 // Abort restores the previous branch generation after database rollback.
@@ -119,18 +114,18 @@ func (p *BranchPublication) Abort() {
 	if p == nil || p.c == nil {
 		return
 	}
-	p.version.Abort()
+	p.generation.Abort()
 	p.c = nil
 }
 
 // Publish applies staged pin changes and committed branch updates before it
-// exposes stateVersion. clear is required after canonical unwind because its
+// exposes generation. clear is required after canonical unwind because its
 // diffset is not a complete list of branches from the discarded fork.
-func (p *BranchPublication) Publish(stateVersion uint64, updates []BranchUpdate, clear bool, adaptive *AdaptivePinPlan) {
+func (p *BranchPublication) Publish(generation cache.Generation, updates []BranchUpdate, clear bool, adaptive *AdaptivePinPlan) {
 	if p == nil || p.c == nil {
 		return
 	}
-	p.version.Publish(stateVersion, func() {
+	p.generation.Publish(generation, func() {
 		if clear {
 			p.c.Clear()
 		}

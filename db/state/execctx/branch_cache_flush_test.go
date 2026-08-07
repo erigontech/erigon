@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
@@ -35,6 +36,13 @@ type commitErrorTx struct {
 }
 
 func (tx *commitErrorTx) Commit() error { return tx.err }
+
+func branchGenerationForTx(t *testing.T, tx kv.TemporalTx) cache.Generation {
+	t.Helper()
+	stateVersion, err := rawdb.GetStateVersion(tx)
+	require.NoError(t, err)
+	return cache.BranchGeneration(stateVersion, tx.Debug().TxNumsInFiles(kv.CommitmentDomain))
+}
 
 // Use Commit (not Flush) so the rebuilt branch refreshes the BranchCache entry.
 func TestBranchCacheCommitRefreshesAfterReadThrough(t *testing.T) {
@@ -95,12 +103,11 @@ func TestSpeculativeUnwindDetachesWithoutChangingBranchCache(t *testing.T) {
 	branchCache := provider.BranchCache()
 	require.NotNil(t, branchCache)
 
-	stateVersion, err := rawdb.GetStateVersion(roTx)
-	require.NoError(t, err)
-	branchCache.Publisher().Initialize(stateVersion)
+	generation := branchGenerationForTx(t, roTx)
+	branchCache.Publisher().Initialize(generation)
 
 	key := []byte{0xa0, 0xb0}
-	published := branchCache.View(stateVersion)
+	published := branchCache.View(generation)
 	published.Fill(key, []byte("canonical-cache-only"), 1)
 
 	sd.Unwind(50, nil)
@@ -139,9 +146,7 @@ func TestCanonicalUnwindClearsBranchCacheOnlyAfterCommit(t *testing.T) {
 	provider, ok := unwindTx.AggTx().(commitment.BranchCacheProvider)
 	require.True(t, ok)
 	branchCache := provider.BranchCache()
-	stateVersion, err := rawdb.GetStateVersion(unwindTx)
-	require.NoError(t, err)
-	oldView := branchCache.View(stateVersion)
+	oldView := branchCache.View(branchGenerationForTx(t, unwindTx))
 	cacheOnlyKey := []byte{0xa0, 0xc0}
 	oldView.Fill(cacheOnlyKey, []byte("discarded-fork"), 2)
 
@@ -158,9 +163,7 @@ func TestCanonicalUnwindClearsBranchCacheOnlyAfterCommit(t *testing.T) {
 	readTx, err := db.BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer readTx.Rollback()
-	newStateVersion, err := rawdb.GetStateVersion(readTx)
-	require.NoError(t, err)
-	_, _, ok = branchCache.View(newStateVersion).Get(cacheOnlyKey)
+	_, _, ok = branchCache.View(branchGenerationForTx(t, readTx)).Get(cacheOnlyKey)
 	require.False(t, ok, "the unwound generation must not retain a cache-only discarded branch")
 }
 
@@ -187,9 +190,7 @@ func TestFailedCommitRestoresBranchCacheGeneration(t *testing.T) {
 	provider, ok := rwTx.AggTx().(commitment.BranchCacheProvider)
 	require.True(t, ok)
 	branchCache := provider.BranchCache()
-	stateVersion, err := rawdb.GetStateVersion(rwTx)
-	require.NoError(t, err)
-	view := branchCache.View(stateVersion)
+	view := branchCache.View(branchGenerationForTx(t, rwTx))
 	key := []byte{0xa0, 0xb0}
 	view.Fill(key, []byte("durable"), 1)
 

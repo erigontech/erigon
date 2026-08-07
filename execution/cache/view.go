@@ -18,37 +18,31 @@ package cache
 
 import "github.com/erigontech/erigon/db/kv"
 
-// ReadView is a cache handle bound to one durable PlainStateVersion. It does
-// not pin the cache or delay publication. Instead, each read checks the
+// ReadView is a cache handle bound to one durable database state and files
+// view. It does not pin the cache or delay publication. Each read checks its
 // immutable generation token before and after accessing an underlying cache,
-// so publication concurrent with the access turns the result into a miss.
+// so concurrent publication turns the result into a miss.
 //
 // Fills check the same token while holding the cache admission lock. A value
 // read from an old database snapshot therefore cannot enter a newer cache
 // generation. The zero value is inert and safely falls back to the database.
 type ReadView struct {
-	c       *StateCache
-	version PlainStateVersionView
+	c          *StateCache
+	generation GenerationView
 }
 
 // View returns a live handle only when the cache currently represents
-// stateVersion and no publication is in progress. Callers must pass the
-// version of their own database snapshot, not a separately sampled latest
-// version. A mismatch returns an inert view rather than serving newer or older
-// cached state.
-func (c *StateCache) View(stateVersion uint64) ReadView {
+// generation and no publication is in progress. Callers must derive it from
+// their own pinned transaction. A mismatch returns an inert view.
+func (c *StateCache) View(generation Generation) ReadView {
 	if c == nil {
 		return ReadView{}
 	}
-	version := c.version.View(stateVersion)
-	if !version.Current() {
-		return ReadView{}
-	}
-	return ReadView{c: c, version: version}
+	return ReadView{c: c, generation: c.generation.View(generation)}
 }
 
 func (v ReadView) current() bool {
-	return v.c != nil && v.version.Current()
+	return v.c != nil && v.generation.Current()
 }
 
 func (v ReadView) Get(domain kv.Domain, key []byte) ([]byte, bool) {
@@ -109,22 +103,22 @@ func (v ReadView) Fill(domain kv.Domain, key, value []byte, step kv.Step) {
 		return
 	}
 	if domain == kv.CodeDomain {
-		v.c.fillCode(v.version, key, value, step)
+		v.c.fillCode(v.generation, key, value, step)
 		return
 	}
-	v.c.fill(v.version, domain, key, value, step)
+	v.c.fill(v.generation, domain, key, value, step)
 }
 
 func (v ReadView) SeedAddrCodeHash(addr []byte, hash [32]byte) {
 	if !v.canFill() {
 		return
 	}
-	v.c.seedAddrCodeHash(v.version, addr, hash)
+	v.c.seedAddrCodeHash(v.generation, addr, hash)
 }
 
 func (v ReadView) FillCodeSize(codeHash []byte, size int) {
 	if !v.canFill() {
 		return
 	}
-	v.c.fillCodeSize(v.version, codeHash, size)
+	v.c.fillCodeSize(v.generation, codeHash, size)
 }

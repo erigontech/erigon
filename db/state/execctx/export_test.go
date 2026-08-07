@@ -22,7 +22,7 @@ func (sd *SharedDomains) SetStateCacheForTest(sc *cache.StateCache) {
 	}
 	if sd.baseStateVersionKnown {
 		sd.cachePublisher = sc.Publisher()
-		sd.cachePublisher.Initialize(sd.baseStateVersion)
+		sd.cachePublisher.Initialize(sd.baseStateCacheGeneration)
 	}
 }
 

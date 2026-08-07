@@ -91,9 +91,9 @@ type Aggregator struct {
 	// regenerates them. Guarded by dirtyFilesLock.
 	unalignedDomain [kv.DomainLen]bool
 	unalignedIdx    [kv.StandaloneIdxLen]bool
-	// visibilityLoweringForbidden: a single-version cache is wired over this
-	// aggregator, and PlainStateVersion does not encode changes to file
-	// visibility. Close clears it because shutdown is not a cache-read window.
+	// Cache reconciliation assumes that visible ends only advance. Lowering one
+	// could retain an entry that existed only in the newer files view. Close
+	// clears this guard because shutdown is not a cache-read window.
 	visibilityLoweringForbidden atomic.Bool
 	// boundStateCache is reconciled before a new files view becomes visible.
 	// Guarded by dirtyFilesLock.
@@ -551,9 +551,9 @@ func (a *Aggregator) UnalignIdx(name kv.InvertedIdx) (realign func()) {
 	return func() {}
 }
 
-// ForbidVisibilityLowering marks this aggregator as backing a single-version
-// cache. From then on recalcVisibleFiles rejects lowering a cached domain's
-// visible end because PlainStateVersion does not identify that change.
+// ForbidVisibilityLowering marks this aggregator as backing a shared latest
+// state cache. From then on recalcVisibleFiles rejects lowering a cached
+// domain's visible end because cache file-provenance watermarks only advance.
 // Serialized with recalcVisibleFiles via dirtyFilesLock so "from then on"
 // holds against a recalculation already in flight.
 func (a *Aggregator) ForbidVisibilityLowering() {
@@ -1917,8 +1917,8 @@ func visibleStateFilesEnd(visible *aggregatorVisible) (ends [kv.DomainLen]uint64
 }
 
 type cacheFilesPublication struct {
-	state  *cache.PlainStateVersionBackingChange
-	branch *cache.PlainStateVersionBackingChange
+	state  *cache.BackingChange
+	branch *cache.BackingChange
 }
 
 func (a *Aggregator) beginCacheFilesPublication(visible *aggregatorVisible) cacheFilesPublication {
@@ -1977,7 +1977,7 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 			prevEnd := visibleFiles(prev.d[d].files).EndTxNum()
 			nextEnd := visibleFiles(next.d[d].files).EndTxNum()
 			if nextEnd < prevEnd {
-				panic(fmt.Sprintf("assert: %s visible end lowered %d -> %d while a single-version cache is wired — PlainStateVersion does not identify file-visibility changes", d, prevEnd, nextEnd))
+				panic(fmt.Sprintf("assert: %s visible end lowered %d -> %d while a shared cache is wired — file-provenance watermarks only advance", d, prevEnd, nextEnd))
 			}
 			if prev.dhii[d] == nil || next.dhii[d] == nil {
 				continue
@@ -1985,7 +1985,7 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 			prevII := prev.dhii[d].files.EndTxNum()
 			nextII := next.dhii[d].files.EndTxNum()
 			if nextII < prevII {
-				panic(fmt.Sprintf("assert: %s history-II visible end lowered %d -> %d while a single-version cache is wired — exact cache-view eligibility derives its frontier from history-II", d, prevII, nextII))
+				panic(fmt.Sprintf("assert: %s history-II visible end lowered %d -> %d while a shared cache is wired — exact cache-view eligibility derives its frontier from history-II", d, prevII, nextII))
 			}
 		}
 	}
