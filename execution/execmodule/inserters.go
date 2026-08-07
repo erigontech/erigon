@@ -128,30 +128,30 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (E
 		metrics.UpdateBlockConsumerBodyDownloadDelay(header.Time, height, e.logger)
 
 		// Sum TDs.
-		hash := header.Hash()
+		blockHash := header.Hash()
 		var td uint256.Int
 		if _, overflow := td.AddOverflow(parentTd, &header.Difficulty); overflow {
-			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: TD overflows uint256 at height %d hash %x", height, hash)
+			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: TD overflows uint256 at height %d hash %x", height, blockHash)
 		}
 		if err := rawdb.WriteHeader(blockOverlay, header); err != nil {
 			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeHeader: %s", err)
 		}
-		if err := rawdb.WriteTd(blockOverlay, hash, height, td); err != nil {
+		if err := rawdb.WriteTd(blockOverlay, blockHash, height, td); err != nil {
 			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeTd: %s", err)
 		}
-		if _, err := rawdb.WriteRawBodyIfNotExists(blockOverlay, hash, height, body); err != nil {
+		if _, err := rawdb.WriteRawBodyIfNotExists(blockOverlay, blockHash, height, body); err != nil {
 			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBody: %s", err)
 		}
 		if blockAccessList := block.BlockAccessList(); len(blockAccessList) > 0 {
 			if header.BlockAccessListHash == nil {
 				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: block access list provided without hash for block %d", height)
 			}
-			if err := rawdb.WriteBlockAccessListBytes(blockOverlay, hash, height, blockAccessList); err != nil {
+			if err := rawdb.WriteBlockAccessListBytes(blockOverlay, blockHash, height, blockAccessList); err != nil {
 				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBlockAccessList, block %d: %s", height, err)
 			}
-			e.readAheader.AddBlockAccessList(blockAccessList, hash)
+			e.readAheader.AddBlockAccessList(blockHash, blockAccessList)
 		}
-		e.logger.Trace("Inserted block", "hash", hash, "number", header.Number)
+		e.logger.Trace("Inserted block", "hash", blockHash, "number", header.Number)
 	}
 
 	// On ChainTip - store blocks in Overlay

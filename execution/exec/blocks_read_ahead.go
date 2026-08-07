@@ -145,7 +145,7 @@ func (bra *BlockReadAheader) AddSenders(senders []byte, blockHash common.Hash) {
 	bra.senders.Add(blockHash, bytes.Clone(senders))
 }
 
-func (bra *BlockReadAheader) AddBlockAccessList(bal []byte, blockHash common.Hash) {
+func (bra *BlockReadAheader) AddBlockAccessList(blockHash common.Hash, bal []byte) {
 	if len(bal) == 0 {
 		return
 	}

@@ -17,6 +17,7 @@
 package exec
 
 import (
+	"context"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -59,8 +60,8 @@ func TestBlockReadAheaderCarriesBlockAccessList(t *testing.T) {
 	blockHash := header.Hash()
 	bal := []byte{0xc0}
 	sender := common.Address{1}
-	bra.AddHeaderAndBody(nil, nil, header, body)
-	bra.AddBlockAccessList(bal, blockHash)
+	bra.AddHeaderAndBody(context.Background(), nil, header, body)
+	bra.AddBlockAccessList(blockHash, bal)
 	bra.AddSenders(sender[:], blockHash)
 	block, ok := bra.ReadBlockWithSenders(blockHash)
 	require.True(t, ok)
