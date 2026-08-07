@@ -552,3 +552,21 @@ func TestPreparedPayloadCopiesTheID(t *testing.T) {
 	require.True(t, p.matches(10, []byte{1, 2, 3, 4, 5, 6, 7, 8}))
 	require.False(t, p.matches(10, id))
 }
+
+func TestShouldPrepareAgainWhenTheHeadMoves(t *testing.T) {
+	headA := common.Hash{0xaa}
+	headB := common.Hash{0xbb}
+
+	// Nothing primed yet.
+	require.True(t, shouldPrepare(10, 0, headA, common.Hash{}))
+
+	// Already primed this slot on this head: nothing to do.
+	require.False(t, shouldPrepare(10, 10, headA, headA))
+
+	// The previous slot's block arrived late and moved the head, so the warm builder is on a parent
+	// that is no longer the head — prime again rather than wait for the next slot.
+	require.True(t, shouldPrepare(10, 10, headB, headA))
+
+	// A new target slot always needs priming.
+	require.True(t, shouldPrepare(11, 10, headA, headA))
+}

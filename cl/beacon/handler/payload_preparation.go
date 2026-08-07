@@ -97,7 +97,10 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 	ticker := time.NewTicker(tick)
 	defer ticker.Stop()
 
-	var lastPrepared uint64
+	var (
+		primedSlot uint64
+		primedHead common.Hash
+	)
 	for {
 		select {
 		case <-ctx.Done():
@@ -106,14 +109,15 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 		}
 
 		targetSlot := a.ethClock.GetCurrentSlot() + 1
-		if targetSlot <= lastPrepared {
+		if !shouldPrepare(targetSlot, primedSlot, a.syncedData.HeadRoot(), primedHead) {
 			continue
 		}
 		if a.beaconChainCfg.GetCurrentStateVersion(targetSlot / a.beaconChainCfg.SlotsPerEpoch).AfterOrEqual(clparams.GloasVersion) {
 			// [Gloas:EIP7732] builders gossip bids instead; the engine is not primed this way.
 			continue
 		}
-		if err := a.preparePayloadFor(ctx, targetSlot); err != nil {
+		head, err := a.preparePayloadFor(ctx, targetSlot)
+		if err != nil {
 			// Most ticks land on a slot somebody else proposes; logging those would drown out the
 			// failures worth seeing.
 			if !isExpectedPreparationSkip(err) {
@@ -121,8 +125,16 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 			}
 			continue
 		}
-		lastPrepared = targetSlot
+		primedSlot, primedHead = targetSlot, head
 	}
+}
+
+// shouldPrepare reports whether the target slot still needs priming. Priming once per slot is not
+// enough: when the previous slot's block arrives late the head moves after we have already primed,
+// and the execution layer is left warming a builder on a parent that is no longer the head. That is
+// exactly the case where the proposal is most at risk, so prime again whenever the head changes.
+func shouldPrepare(targetSlot, primedSlot uint64, head, primedHead common.Hash) bool {
+	return targetSlot != primedSlot || head != primedHead
 }
 
 // isExpectedPreparationSkip reports whether there was simply nothing to prepare, as opposed to a
@@ -139,7 +151,7 @@ func isExpectedPreparationSkip(err error) bool {
 // syncing, the slot belongs to someone else, or the validator client has not registered a fee
 // recipient yet — because block production falls back to building inside the slot in every one of
 // those cases.
-func (a *ApiHandler) preparePayloadFor(ctx context.Context, targetSlot uint64) error {
+func (a *ApiHandler) preparePayloadFor(ctx context.Context, targetSlot uint64) (common.Hash, error) {
 	var (
 		baseBlockRoot common.Hash
 		proposerIndex uint64
@@ -175,29 +187,29 @@ func (a *ApiHandler) preparePayloadFor(ctx context.Context, targetSlot uint64) e
 		baseState, err = headState.Copy()
 		return err
 	}); err != nil {
-		return err
+		return common.Hash{}, err
 	}
 
 	if err := transition.DefaultMachine.ProcessSlots(baseState, targetSlot); err != nil {
-		return err
+		return common.Hash{}, err
 	}
 
 	head, safeHash, finalizedHash, attrs, err := a.preparedForkChoiceInputs(baseState, baseBlockRoot, targetSlot, feeRecipient)
 	if err != nil {
-		return err
+		return common.Hash{}, err
 	}
 	stateVersion := a.beaconChainCfg.GetCurrentStateVersion(targetSlot / a.beaconChainCfg.SlotsPerEpoch)
 	payloadID, err := a.engine.ForkChoiceUpdate(ctx, finalizedHash, safeHash, head, attrs, stateVersion)
 	if err != nil {
-		return err
+		return common.Hash{}, err
 	}
 	if len(payloadID) == 0 {
-		return errNoPayloadID
+		return common.Hash{}, errNoPayloadID
 	}
 
 	a.preparedPayload.set(targetSlot, payloadID)
-	log.Info("PayloadPreparation: primed execution layer", "slot", targetSlot, "proposer", proposerIndex)
-	return nil
+	log.Info("PayloadPreparation: primed execution layer", "slot", targetSlot, "proposer", proposerIndex, "head", baseBlockRoot)
+	return baseBlockRoot, nil
 }
 
 // preparedForkChoiceInputs assembles the forkchoice-update arguments for building targetSlot on top
