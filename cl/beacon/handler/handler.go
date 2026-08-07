@@ -104,6 +104,9 @@ type ApiHandler struct {
 	routerCfg *beacon_router_configuration.RouterConfiguration
 	logger    log.Logger
 
+	// preparedPayload tracks the payload primed ahead of a slot this node proposes.
+	preparedPayload preparedPayload
+
 	// Validator data structures
 	validatorParams                    *validator_params.ValidatorParams
 	blobBundles                        *lru.Cache[common.Bytes48, BlobBundle] // Keep recent bundled blobs from the execution layer.
