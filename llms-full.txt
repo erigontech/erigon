@@ -1119,7 +1119,7 @@ scheduled forks, not after.
 
     If your Consensus Layer (CL) client is on a different device, add the following flags:
 
-    * `--authrpc.addr 0.0.0.0`, since the Engine API listens on localhost by default;
+    * `--authrpc.addr <this-host-LAN-IP>` — the Engine API listens on localhost by default, so it has to be widened for a remote CL. Read the warning below before reaching for `0.0.0.0`;
     * `--authrpc.vhosts <CL_host>` where \ is the source host or the appropriate hostname that your CL client is using.
 2.  Install and run **Prysm** by following the official guide: [https://docs.prylabs.network/docs/install/install-with-script](https://docs.prylabs.network/docs/install/install-with-script).
 
@@ -1323,7 +1323,7 @@ erigon --chain=gnosis --externalcl
 
 If your CL client is on a different device, add the following flags:
 
-* `--authrpc.addr 0.0.0.0`, since the Engine API listens on localhost by default;
+* `--authrpc.addr <this-host-LAN-IP>` — the Engine API listens on localhost by default, so it has to be widened for a remote CL. Read the warning below before reaching for `0.0.0.0`;
 * `--authrpc.vhosts <CL_host>` where `<CL_host>` is the source host or the appropriate hostname that your CL client is using.
 
 :::warning
