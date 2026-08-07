@@ -55,6 +55,8 @@ var sidecarSSZSize = (&cltypes.BlobSidecar{}).EncodingSizeSSZ()
 type CaplinSnapshots struct {
 	snapshotsync.BaseRoSnapshots
 
+	// salt-blocks.txt is the EL blocks salt; caplin has no salt file of its own, so its
+	// indexes stay on 0 as they always have been.
 	Salt uint32
 
 	tmpdir string
@@ -84,13 +86,6 @@ func NewCaplinSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.Beacon
 	})
 	c.SetIndexBuilder(snaptype.BeaconBlocks, beaconIdx)
 	c.SetIndexBuilder(snaptype.BlobSidecars, beaconIdx)
-	// Each .idx stores the salt it was built with, so a datadir without salt-blocks.txt
-	// stays readable on the zero value - no reason to fail construction over it. LoadSalt
-	// rather than GetIndexSalt: caplin is constructed before the snapshot stage downloads
-	// the salt file, and GetIndexSalt logs that absence at ERROR with a stack.
-	if salt, err := snaptype.LoadSalt(dirs.Snap, false, logger); err == nil && salt != nil {
-		c.Salt = *salt
-	}
 	return c
 }
 
