@@ -140,7 +140,7 @@ func (s *Sync) UnwindTo(unwindPoint uint64, reason UnwindReason, tx kv.Tx) error
 			// Ignore in the case that snapshots are ahead of commitment, it will be resolved later.
 			// This can be a problem if snapshots include a wrong chain so it is ok to ignore it.
 			if errors.Is(err, commitmentdb.ErrBehindCommitment) {
-				s.logger.Info("UnwindTo: unwind request dropped, target behind commitment", "requested", unwindPoint, "err", reason.Err())
+				s.logger.Info("UnwindTo: unwind request dropped, target behind commitment", "requested", unwindPoint, "err", err)
 				return nil
 			}
 			if err != nil {
