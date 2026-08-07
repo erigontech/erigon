@@ -153,7 +153,7 @@ var DeprecatedChecks = []Check{
 	CommitmentKvDeref, //StateVerify - will overcome
 	StateProgress,
 }
-var AllChecks = append(append(append([]Check{}, FastChecks...), SlowChecks...), DeprecatedChecks...)
+var AllChecks = append(append(append([]Check{TorrentPieces}, FastChecks...), SlowChecks...), DeprecatedChecks...)
 
 // SortChecksByCost returns a copy of checks ordered by their position in FastChecks
 // (cheapest → heaviest). Checks not in FastChecks keep their original relative order at the end.
