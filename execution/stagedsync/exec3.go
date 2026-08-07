@@ -650,9 +650,19 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 					return fmt.Errorf("invalid block access list: %w", err)
 				}
 			}
+			header := b.HeaderNoCopy()
+			if dbBAL == nil && !dbg.IgnoreBAL && te.cfg.chainConfig.IsAmsterdam(header.Time) && header.HasBAL() {
+				te.logger.Debug("executing block without a BAL", "blockNum", blockNum)
+			}
+			if dbg.TraceBALFeed {
+				if dbBAL != nil {
+					fmt.Printf("BAL-FEED blk=%d bytes=%d accounts=%d\n", blockNum, len(data), len(dbBAL))
+				} else if te.cfg.chainConfig.IsAmsterdam(header.Time) {
+					fmt.Printf("BAL-MISSING blk=%d bytes=%d\n", blockNum, len(data))
+				}
+			}
 
 			txs := b.Transactions()
-			header := b.HeaderNoCopy()
 
 			// BlockContext: workers override GetHash with their own per-worker
 			// function (installWorkerGetHash) using their own roTx. The

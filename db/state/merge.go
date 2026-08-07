@@ -453,7 +453,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		defer view.Close()
+		defer view.Close() //nolint:gocritic
 		g := seg.NewReader(view.MakeGetter(), dt.d.Compression)
 		g.Reset(0)
 		if g.HasNext() {
@@ -641,7 +641,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 		if err != nil {
 			return nil, err
 		}
-		defer view.Close()
+		defer view.Close() //nolint:gocritic
 		g := seg.NewReader(view.MakeGetter(), iit.ii.Compression)
 		g.Reset(0)
 		if g.HasNext() {
@@ -810,7 +810,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 			if err != nil {
 				return nil, nil, err
 			}
-			defer idxView.Close()
+			defer idxView.Close() //nolint:gocritic
 			g := seg.NewReader(idxView.MakeGetter(), ht.h.InvertedIndex.Compression)
 			g.Reset(0)
 			if g.HasNext() {
@@ -827,7 +827,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 						if err != nil {
 							return nil, nil, err
 						}
-						defer histView.Close()
+						defer histView.Close() //nolint:gocritic
 						g2 = seg.NewPagedReader(seg.NewReader(histView.MakeGetter(), ht.h.Compression), compressedPageValuesCount, true)
 						break
 					}

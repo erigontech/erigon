@@ -1,7 +1,7 @@
 package types
 
 import (
-	"bytes"
+	"crypto/ecdsa"
 	"errors"
 	"fmt"
 	"io"
@@ -14,6 +14,11 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
+)
+
+var (
+	errAuthNonceOverflow = errors.New("authorization nonce has max value")
+	errAuthNilPrivateKey = errors.New("private key is nil")
 )
 
 type Authorization struct {
@@ -36,67 +41,96 @@ func (ath *Authorization) copy() *Authorization {
 	}
 }
 
-func (ath *Authorization) RecoverSigner(data *bytes.Buffer, buf []byte) (*common.Address, error) {
-	if ath.Nonce == math.MaxUint64 {
-		return nil, errors.New("failed assertion: auth.nonce < 2**64 - 1")
-	}
-
-	authLen := rlp.Uint256Len(ath.ChainID)
+// encodeSigningPayload writes rlp([chain_id, address, nonce]), the RLP portion
+// of an EIP-7702 authorization signing preimage. Hashing adds the magic prefix;
+// buf is scratch space for the RLP encoders.
+func encodeSigningPayload(chainID uint256.Int, address common.Address, nonce uint64, w io.Writer, buf []byte) error {
+	authLen := rlp.Uint256Len(chainID)
 	authLen += 1 + length.Addr
-	authLen += rlp.U64Len(ath.Nonce)
+	authLen += rlp.U64Len(nonce)
 
-	if err := rlp.EncodeListPrefix(authLen, data, buf); err != nil {
-		return nil, err
+	if err := rlp.EncodeListPrefix(authLen, w, buf); err != nil {
+		return err
 	}
-
-	// chainId, address, nonce
-	if err := rlp.EncodeUint256(ath.ChainID, data, buf); err != nil {
-		return nil, err
+	if err := rlp.EncodeUint256(chainID, w, buf); err != nil {
+		return err
 	}
-
-	if err := EncodeOptionalAddress(&ath.Address, data, buf); err != nil {
-		return nil, err
+	if err := EncodeOptionalAddress(&address, w, buf); err != nil {
+		return err
 	}
-
-	if err := rlp.EncodeU64(ath.Nonce, data, buf); err != nil {
-		return nil, err
-	}
-
-	return RecoverSignerFromRLP(data.Bytes(), ath.YParity, ath.R, ath.S)
+	return rlp.EncodeU64(nonce, w, buf)
 }
 
-func RecoverSignerFromRLP(rlp []byte, yParity uint8, r uint256.Int, s uint256.Int) (*common.Address, error) {
-	hashData := make([]byte, 0, 1+len(rlp))
-	hashData = append(hashData, params.SetCodeMagicPrefix)
-	hashData = append(hashData, rlp...)
-	hash := crypto.Keccak256Hash(hashData)
+func authorizationSigningHash(chainID uint256.Int, address common.Address, nonce uint64) common.Hash {
+	return prefixedPayloadHash(params.SetCodeMagicPrefix, func(w io.Writer, buf []byte) error {
+		return encodeSigningPayload(chainID, address, nonce, w, buf)
+	})
+}
 
+func (ath *Authorization) RecoverSigner() (common.Address, error) {
+	if ath.Nonce == math.MaxUint64 {
+		return common.Address{}, errAuthNonceOverflow
+	}
+
+	hash := authorizationSigningHash(ath.ChainID, ath.Address, ath.Nonce)
+	return recoverSignerFromHash(hash, ath.YParity, ath.R, ath.S)
+}
+
+// SignAuthorization returns an EIP-7702 authorization signed by key. The
+// address is the delegation target; the zero address requests that an existing
+// delegation be cleared when the authorization is applied. It rejects a nil
+// key or the maximum uint64 nonce, which cannot be incremented during
+// authorization processing.
+func SignAuthorization(key *ecdsa.PrivateKey, chainID uint256.Int, address common.Address, nonce uint64) (Authorization, error) {
+	if key == nil {
+		return Authorization{}, errAuthNilPrivateKey
+	}
+	if nonce == math.MaxUint64 {
+		return Authorization{}, errAuthNonceOverflow
+	}
+
+	hash := authorizationSigningHash(chainID, address, nonce)
+	sig, err := crypto.Sign(hash[:], key)
+	if err != nil {
+		return Authorization{}, err
+	}
+
+	auth := Authorization{
+		ChainID: chainID,
+		Address: address,
+		Nonce:   nonce,
+		YParity: sig[64],
+	}
+	auth.R.SetBytes(sig[:32])
+	auth.S.SetBytes(sig[32:64])
+	return auth, nil
+}
+
+func recoverSignerFromHash(hash common.Hash, yParity uint8, r uint256.Int, s uint256.Int) (common.Address, error) {
 	var sig [65]byte
-	rBytes := r.Bytes()
-	sBytes := s.Bytes()
-	copy(sig[32-len(rBytes):32], rBytes)
-	copy(sig[64-len(sBytes):64], sBytes)
+	r.PutUint256(sig[:32])
+	s.PutUint256(sig[32:64])
 
 	if yParity > 1 {
-		return nil, fmt.Errorf("invalid y parity value: %d", yParity)
+		return common.Address{}, fmt.Errorf("invalid y parity value: %d", yParity)
 	}
 	sig[64] = yParity
 
 	if !crypto.TransactionSignatureIsValid(sig[64], &r, &s, false /* allowPreEip2s */) {
-		return nil, errors.New("invalid signature")
+		return common.Address{}, errors.New("invalid signature")
 	}
 
 	pubKey, err := crypto.Ecrecover(hash[:], sig[:])
 	if err != nil {
-		return nil, err
+		return common.Address{}, err
 	}
 	if len(pubKey) == 0 || pubKey[0] != 4 {
-		return nil, errors.New("invalid public key")
+		return common.Address{}, errors.New("invalid public key")
 	}
 
 	var authority common.Address
 	copy(authority[:], crypto.Keccak256(pubKey[1:])[12:])
-	return &authority, nil
+	return authority, nil
 }
 
 func authorizationSize(auth Authorization) (authLen int) {

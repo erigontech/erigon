@@ -17,9 +17,11 @@
 package cltypes
 
 import (
+	"bytes"
 	"encoding/hex"
 	"encoding/json"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
@@ -35,6 +37,47 @@ type AggregateAndProof struct {
 	AggregatorIndex uint64             `json:"aggregator_index,string"`
 	Aggregate       *solid.Attestation `json:"aggregate"`
 	SelectionProof  common.Bytes96     `json:"selection_proof"`
+	version         clparams.StateVersion
+}
+
+func (a *AggregateAndProof) SetVersion(version clparams.StateVersion) {
+	a.version = version
+	if a.Aggregate != nil {
+		a.Aggregate.SetVersion(version)
+	}
+}
+
+func (a *AggregateAndProof) UnmarshalJSON(data []byte) error {
+	decoded := struct {
+		AggregatorIndex uint64         `json:"aggregator_index,string"`
+		SelectionProof  common.Bytes96 `json:"selection_proof"`
+	}{AggregatorIndex: a.AggregatorIndex, SelectionProof: a.SelectionProof}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	fields := make(map[string]json.RawMessage)
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	aggregate := a.Aggregate
+	if raw, ok := fields["aggregate"]; ok {
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			aggregate = nil
+		} else {
+			aggregate = &solid.Attestation{}
+			aggregate.SetVersion(a.version)
+			if err := json.Unmarshal(raw, aggregate); err != nil {
+				return err
+			}
+		}
+	}
+	a.AggregatorIndex = decoded.AggregatorIndex
+	a.Aggregate = aggregate
+	a.SelectionProof = decoded.SelectionProof
+	if a.Aggregate != nil {
+		a.Aggregate.SetVersion(a.version)
+	}
+	return nil
 }
 
 func (a *AggregateAndProof) EncodeSSZ(dst []byte) ([]byte, error) {
@@ -46,6 +89,7 @@ func (a *AggregateAndProof) Static() bool {
 }
 
 func (a *AggregateAndProof) DecodeSSZ(buf []byte, version int) error {
+	a.version = clparams.StateVersion(version)
 	a.Aggregate = new(solid.Attestation)
 	return ssz2.UnmarshalSSZ(buf, version, &a.AggregatorIndex, a.Aggregate, a.SelectionProof[:])
 }
@@ -61,6 +105,45 @@ func (a *AggregateAndProof) HashSSZ() ([32]byte, error) {
 type SignedAggregateAndProof struct {
 	Message   *AggregateAndProof `json:"message"`
 	Signature common.Bytes96     `json:"signature"`
+	version   clparams.StateVersion
+}
+
+func (a *SignedAggregateAndProof) SetVersion(version clparams.StateVersion) {
+	a.version = version
+	if a.Message != nil {
+		a.Message.SetVersion(version)
+	}
+}
+
+func (a *SignedAggregateAndProof) UnmarshalJSON(data []byte) error {
+	decoded := struct {
+		Signature common.Bytes96 `json:"signature"`
+	}{Signature: a.Signature}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	fields := make(map[string]json.RawMessage)
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	message := a.Message
+	if raw, ok := fields["message"]; ok {
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			message = nil
+		} else {
+			message = &AggregateAndProof{}
+			message.SetVersion(a.version)
+			if err := json.Unmarshal(raw, message); err != nil {
+				return err
+			}
+		}
+	}
+	a.Message = message
+	a.Signature = decoded.Signature
+	if a.Message != nil {
+		a.Message.SetVersion(a.version)
+	}
+	return nil
 }
 
 func (a *SignedAggregateAndProof) EncodeSSZ(dst []byte) ([]byte, error) {
@@ -68,6 +151,7 @@ func (a *SignedAggregateAndProof) EncodeSSZ(dst []byte) ([]byte, error) {
 }
 
 func (a *SignedAggregateAndProof) DecodeSSZ(buf []byte, version int) error {
+	a.version = clparams.StateVersion(version)
 	a.Message = new(AggregateAndProof)
 	return ssz2.UnmarshalSSZ(buf, version, a.Message, a.Signature[:])
 }
