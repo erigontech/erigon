@@ -405,16 +405,17 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 			}
 
 			if produce.LogAddr {
-				for _, lg := range result.Logs {
-					if err := doms.IndexAdd(kv.LogAddrIdx, lg.Address[:], txTask.TxNum); err != nil {
+				for i := range result.Logs {
+					if err := doms.IndexAdd(kv.LogAddrIdx, result.Logs[i].Address[:], txTask.TxNum); err != nil {
 						return err
 					}
 				}
 			}
 			if produce.LogTopic {
-				for _, lg := range result.Logs {
-					for i := range lg.Topics {
-						if err := doms.IndexAdd(kv.LogTopicIdx, lg.Topics[i][:], txTask.TxNum); err != nil {
+				for i := range result.Logs {
+					topics := result.Logs[i].Topics
+					for j := range topics {
+						if err := doms.IndexAdd(kv.LogTopicIdx, topics[j][:], txTask.TxNum); err != nil {
 							return err
 						}
 					}

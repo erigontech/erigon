@@ -84,7 +84,7 @@ func TestReceiptWriterAppendMetadataValuesAreDistinct(t *testing.T) {
 func receiptFixture() *types.Receipt {
 	logs := make(types.Logs, 3)
 	for i := range logs {
-		logs[i] = &types.Log{
+		logs[i] = types.Log{
 			Address: common.HexToAddress(fmt.Sprintf("0x%02x", 0xa0+i)),
 			Topics:  []common.Hash{common.HexToHash("0x11"), common.HexToHash("0x22")},
 			Data:    []byte{0x01, 0x02, 0x03, byte(i)},

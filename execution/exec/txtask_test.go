@@ -138,7 +138,7 @@ func TestCreateReceiptTxIndex(t *testing.T) {
 		ExecutionResult: evmtypes.ExecutionResult{
 			ReceiptGasUsed: receiptGasUsed,
 		},
-		Logs: []*types.Log{{}},
+		Logs: types.Logs{{}},
 	}
 
 	receipt, err := result.CreateReceipt(txTask.TxIndex, priorCumGasUsed+result.ExecutionResult.ReceiptGasUsed, firstLogIndex)

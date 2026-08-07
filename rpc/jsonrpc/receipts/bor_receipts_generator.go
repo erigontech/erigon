@@ -136,9 +136,9 @@ func getBorLogs(msgs []*types.Message, evm *vm.EVM, gp *protocol.GasPool, ibs *s
 		// can be removed when receipt files fixed and all users are sure to have it (v2.2)
 		logIndex = logIdxAfterTx - uint(len(receiptLogs))
 	}
-	for i, l := range receiptLogs {
-		l.TxIndex = hexutil.Uint(txIndex)
-		l.Index = hexutil.Uint(logIndex + uint(i))
+	for i := range receiptLogs {
+		receiptLogs[i].TxIndex = hexutil.Uint(txIndex)
+		receiptLogs[i].Index = hexutil.Uint(logIndex + uint(i))
 	}
 	return receiptLogs, nil
 }

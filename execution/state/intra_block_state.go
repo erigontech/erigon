@@ -480,13 +480,10 @@ func (sdb *IntraBlockState) resetLogs() {
 			continue
 		}
 		entries += cap(buf)
-		for j, lp := range buf {
-			if lp == nil {
-				continue
-			}
-			data := cap(lp.Data)
+		for j := range buf {
+			data := cap(buf[j].Data)
 			if data > maxReusableLogDataCap || dataBytes+data > maxReusableLogBytes {
-				buf[j] = nil
+				buf[j] = types.Log{}
 				continue
 			}
 			dataBytes += data
@@ -508,13 +505,10 @@ func (sdb *IntraBlockState) AllocLog(addr common.Address, numTopics, dataSize in
 	}
 	logIdx := len(sdb.logs[ti])
 	sdb.logs[ti] = slices.Grow(sdb.logs[ti], 1)[:logIdx+1]
-	logs := sdb.logs[ti]
 
-	lp := logs[logIdx] // a prior block's entry to reuse, or nil for a fresh slot
-	if lp == nil {
-		lp = &types.Log{}
-		logs[logIdx] = lp
-	}
+	// Points into the tx's buffer, so it is only valid until the next AllocLog
+	// may regrow it — the caller fills and notifies before allocating again.
+	lp := &sdb.logs[ti][logIdx]
 	lp.Address = addr
 	lp.Topics = slices.Grow(lp.Topics[:0], numTopics)[:numTopics]
 	lp.Data = slices.Grow(lp.Data[:0], dataSize)[:dataSize]
@@ -566,7 +560,8 @@ func (sdb *IntraBlockState) GetLogs(txIndex int, txnHash common.Hash, blockNumbe
 		return nil
 	}
 	logs := sdb.logs[txIndex+1].Copy()
-	for _, l := range logs {
+	for i := range logs {
+		l := &logs[i]
 		l.TxHash = txnHash
 		l.BlockHash = blockHash
 		l.BlockNumber = hexutil.Uint64(blockNumber)

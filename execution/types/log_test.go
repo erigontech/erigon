@@ -32,21 +32,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestLogsCopyPreservesNilEntries(t *testing.T) {
+func TestLogsCopyIsDeep(t *testing.T) {
 	logs := Logs{
-		nil,
+		{},
 		{
 			Address: common.HexToAddress("0x1"),
 			Topics:  []common.Hash{common.HexToHash("0xaa")},
 			Data:    []byte{1, 2},
 		},
-		nil,
+		{},
 	}
 	cp := logs.Copy()
 	require.Len(t, cp, 3)
-	require.Nil(t, cp[0])
-	require.Nil(t, cp[2])
-	require.NotSame(t, logs[1], cp[1])
 	require.Equal(t, logs[1], cp[1])
 
 	logs[1].Topics[0] = common.HexToHash("0xbb")
@@ -61,7 +58,8 @@ func TestLogCopyNormalizesNilTopics(t *testing.T) {
 	src := &Log{Address: common.HexToAddress("0x1"), Data: []byte{1}}
 	require.Nil(t, src.Topics)
 
-	for name, cp := range map[string]*Log{"Log.Copy": src.Copy(), "Logs.Copy": Logs{src}.Copy()[0]} {
+	logsCopy := Logs{*src}.Copy()
+	for name, cp := range map[string]*Log{"Log.Copy": src.Copy(), "Logs.Copy": &logsCopy[0]} {
 		t.Run(name, func(t *testing.T) {
 			require.NotNil(t, cp.Topics)
 			require.Empty(t, cp.Topics)
@@ -289,8 +287,8 @@ func TestFilterLogsTopics(t *testing.T) {
 }
 
 func testFLExtractAddress(xs Logs) (o []common.Address) {
-	for _, v := range xs {
-		o = append(o, v.Address)
+	for i := range xs {
+		o = append(o, xs[i].Address)
 	}
 	return
 }

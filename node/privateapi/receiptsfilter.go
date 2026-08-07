@@ -180,9 +180,9 @@ func receiptNotificationToProto(rn *notifications.ReceiptNotification) *remotepr
 
 	// Convert logs
 	protoLogs := make([]*remoteproto.SubscribeLogsReply, 0, len(receipt.Logs))
-	for _, l := range receipt.Logs {
+	for i := range receipt.Logs {
 		protoLogs = append(protoLogs, logNotificationToProto(&notifications.LogNotification{
-			Log:     l,
+			Log:     &receipt.Logs[i],
 			Removed: rn.Removed,
 		}))
 	}

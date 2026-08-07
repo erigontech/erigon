@@ -424,14 +424,14 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 
 				borLogs = borLogs.FilterWithTopicMap(addrMap, topicMap, 0)
 
-				for _, filteredLog := range borLogs {
+				for i := range borLogs {
 					if maxResults != 0 && len(logs) >= maxResults {
 						return nil, &rpc.InvalidParamsError{
 							Message: fmt.Sprintf("%s: %d", errExceedLogResults, maxResults),
 						}
 					}
 					logs = append(logs, &types.ErigonLog{
-						Log:       *filteredLog,
+						Log:       borLogs[i],
 						Timestamp: hexutil.Uint64(header.Time),
 					})
 				}
@@ -443,11 +443,12 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, maxTxNumInBlock=%d,mixTxNumInBlock=%d\n", txNum, blockNum, txIndex, maxTxNumInBlock, minTxNumInBlock)
 
 		if r, ok := api.receiptsGenerator.TryGetCachedReceipt(header.Hash(), txNum, txIndex); ok {
-			for _, filteredLog := range r.Logs.FilterWithTopicMap(addrMap, topicMap, 0) {
+			cached := r.Logs.FilterWithTopicMap(addrMap, topicMap, 0)
+			for i := range cached {
 				if maxResults != 0 && len(logs) >= maxResults {
 					return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("%s: %d", errExceedLogResults, maxResults)}
 				}
-				logs = append(logs, &types.ErigonLog{Log: *filteredLog, Timestamp: hexutil.Uint64(header.Time)})
+				logs = append(logs, &types.ErigonLog{Log: cached[i], Timestamp: hexutil.Uint64(header.Time)})
 			}
 			continue
 		}
@@ -469,14 +470,14 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		}
 		filtered := r.Logs.FilterWithTopicMap(addrMap, topicMap, 0)
 
-		for _, filteredLog := range filtered {
+		for i := range filtered {
 			if maxResults != 0 && len(logs) >= maxResults {
 				return nil, &rpc.InvalidParamsError{
 					Message: fmt.Sprintf("%s: %d", errExceedLogResults, maxResults),
 				}
 			}
 			logs = append(logs, &types.ErigonLog{
-				Log:       *filteredLog,
+				Log:       filtered[i],
 				Timestamp: hexutil.Uint64(header.Time),
 			})
 		}

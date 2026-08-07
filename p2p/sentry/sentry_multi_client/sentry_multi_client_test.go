@@ -27,7 +27,7 @@ type receiptRLP69 struct {
 	Type              uint8
 	PostStateOrStatus []byte
 	CumulativeGasUsed uint64
-	Logs              []*types.Log
+	Logs              types.Logs
 }
 
 func TestMultiClient_GetReceipts69(t *testing.T) {
@@ -39,7 +39,7 @@ func TestMultiClient_GetReceipts69(t *testing.T) {
 			Type:              types.LegacyTxType,
 			Status:            types.ReceiptStatusSuccessful,
 			CumulativeGasUsed: 21000,
-			Logs:              []*types.Log{},
+			Logs:              types.Logs{},
 			TxHash:            testHash,
 			GasUsed:           21000,
 		},
@@ -47,7 +47,7 @@ func TestMultiClient_GetReceipts69(t *testing.T) {
 			Type:              types.DynamicFeeTxType,
 			Status:            types.ReceiptStatusSuccessful,
 			CumulativeGasUsed: 42000,
-			Logs:              []*types.Log{},
+			Logs:              types.Logs{},
 			TxHash:            testHash,
 			GasUsed:           21000,
 		},

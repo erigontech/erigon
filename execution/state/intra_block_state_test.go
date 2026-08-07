@@ -1163,14 +1163,15 @@ func TestResetDropsOversizedLogDataBuffers(t *testing.T) {
 
 	ibs := New(NewNoopReader())
 	ibs.SetTxContext(1, 0)
-	small := ibs.AllocLog(common.Address{0x01}, 1, 8)
-	big := ibs.AllocLog(common.Address{0x02}, 1, maxReusableLogDataCap+1)
+	smallData := &ibs.AllocLog(common.Address{0x01}, 1, 8).Data[0]
+	bigData := &ibs.AllocLog(common.Address{0x02}, 1, maxReusableLogDataCap+1).Data[0]
 
 	ibs.Reset()
 	ibs.SetTxContext(2, 0)
-	require.Same(t, small, ibs.AllocLog(common.Address{0x03}, 1, 8), "normal-size entry is reused")
+	reused := ibs.AllocLog(common.Address{0x03}, 1, 8)
+	require.Same(t, smallData, &reused.Data[0], "normal-size entry is reused")
 	relog := ibs.AllocLog(common.Address{0x04}, 1, 8)
-	require.NotSame(t, big, relog, "oversized entry must not survive Reset")
+	require.NotSame(t, bigData, &relog.Data[0], "oversized entry must not survive Reset")
 	require.LessOrEqual(t, cap(relog.Data), maxReusableLogDataCap)
 }
 

@@ -49,7 +49,7 @@ import (
 )
 
 type OverlayAPI interface {
-	GetLogs(ctx context.Context, crit filters.FilterCriteria, stateOverride *ethapi.StateOverrides, rules *chain.Rules) ([]*types.Log, error)
+	GetLogs(ctx context.Context, crit filters.FilterCriteria, stateOverride *ethapi.StateOverrides, rules *chain.Rules) (types.Logs, error)
 	CallConstructor(ctx context.Context, address common.Address, code *hexutil.Bytes) (*CreationCode, error)
 }
 
@@ -73,9 +73,9 @@ type blockReplayTask struct {
 }
 
 type blockReplayResult struct {
-	BlockNumber int64        `json:"block_number"`
-	Logs        []*types.Log `json:"logs,omitempty"`
-	Error       string       `json:"error,omitempty"`
+	BlockNumber int64      `json:"block_number"`
+	Logs        types.Logs `json:"logs,omitempty"`
+	Error       string     `json:"error,omitempty"`
 }
 
 // NewOverlayAPI returns OverlayAPIImpl instance
@@ -256,7 +256,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	return nil, nil
 }
 
-func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria, stateOverride *ethapi.StateOverrides, rules *chain.Rules) ([]*types.Log, error) {
+func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria, stateOverride *ethapi.StateOverrides, rules *chain.Rules) (types.Logs, error) {
 	timeout := api.OverlayGetLogsTimeout
 	// Setup context so it may be cancelled the call has completed
 	// or, in case of unmetered gas, setup a context with a timeout.
@@ -398,23 +398,23 @@ blockLoop:
 		return nil, failed
 	}
 
-	logs := []*types.Log{}
+	logs := types.Logs{}
 	for idx := range results {
 		res := results[idx]
 		if res == nil {
 			continue
 		}
-		for _, l := range res.Logs {
+		for i := range res.Logs {
 			if api.getLogsMaxResults != 0 && len(logs) >= api.getLogsMaxResults {
 				return nil, fmt.Errorf("%s: %d", errExceedLogResults, api.getLogsMaxResults)
 			}
-			logs = append(logs, l)
+			logs = append(logs, res.Logs[i])
 		}
 	}
 	return logs, nil
 }
 
-func filterLogs(logs types.Logs, addresses []common.Address, topics [][]common.Hash) []*types.Log {
+func filterLogs(logs types.Logs, addresses []common.Address, topics [][]common.Hash) types.Logs {
 	addrMap := make(map[common.Address]struct{}, len(addresses))
 	for _, v := range addresses {
 		addrMap[v] = struct{}{}
@@ -422,7 +422,7 @@ func filterLogs(logs types.Logs, addresses []common.Address, topics [][]common.H
 	return logs.Filter(addrMap, topics, 0)
 }
 
-func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, statedb *state.IntraBlockState, chainConfig *chain.Config, tx kv.TemporalTx) ([]*types.Log, error) {
+func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, statedb *state.IntraBlockState, chainConfig *chain.Config, tx kv.TemporalTx) (types.Logs, error) {
 	log.Debug("[replayBlock] begin", "block", blockNum)
 	var (
 		hash               common.Hash
@@ -433,7 +433,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 		overrideBlockHash  map[uint64]common.Hash
 	)
 
-	blockLogs := []*types.Log{}
+	blockLogs := types.Logs{}
 	overrideBlockHash = make(map[uint64]common.Hash)
 
 	blockNumber := rpc.BlockNumber(blockNum)

@@ -167,7 +167,7 @@ func (l *ErigonLog) UnmarshalJSON(input []byte) error {
 	return nil
 }
 
-type Logs []*Log
+type Logs []Log
 
 type ErigonLog struct {
 	Log
@@ -179,9 +179,9 @@ type ErigonLogs []*ErigonLog
 // ToErigonLogs converts Logs to ErigonLogs, adding a timestamp to each entry.
 func (logs Logs) ToErigonLogs(timestamp uint64) ErigonLogs {
 	result := make(ErigonLogs, len(logs))
-	for i, l := range logs {
+	for i := range logs {
 		result[i] = &ErigonLog{
-			Log:       *l,
+			Log:       logs[i],
 			Timestamp: hexutil.Uint64(timestamp),
 		}
 	}
@@ -252,17 +252,14 @@ func (l *RPCLog) UnmarshalJSON(input []byte) error {
 type RPCLogs []*RPCLog
 
 // CopyLogGroups flattens the groups into one slice of deep copies backed by
-// shared arrays. Nil entries stay nil; an empty result is nil.
+// shared arrays. An empty result is nil.
 func CopyLogGroups(groups []Logs) Logs {
 	var total, totalTopics, totalData int
 	for _, g := range groups {
 		total += len(g)
-		for _, l := range g {
-			if l == nil {
-				continue
-			}
-			totalTopics += len(l.Topics)
-			totalData += len(l.Data)
+		for i := range g {
+			totalTopics += len(g[i].Topics)
+			totalData += len(g[i].Data)
 		}
 	}
 	if total == 0 {
@@ -270,20 +267,17 @@ func CopyLogGroups(groups []Logs) Logs {
 	}
 	topics := make([]common.Hash, totalTopics)
 	data := make([]byte, totalData)
-	backing := make([]Log, total)
 	out := make(Logs, total)
 	i := 0
 	for _, g := range groups {
-		for _, l := range g {
-			if l != nil {
-				dst := &backing[i]
-				nt, nd := len(l.Topics), len(l.Data)
-				// Capped so a later append to one copied log cannot bleed into the next.
-				dst.Topics, dst.Data = topics[:nt:nt], data[:nd:nd]
-				topics, data = topics[nt:], data[nd:]
-				l.copyTo(dst)
-				out[i] = dst
-			}
+		for j := range g {
+			l := &g[j]
+			dst := &out[i]
+			nt, nd := len(l.Topics), len(l.Data)
+			// Capped so a later append to one copied log cannot bleed into the next.
+			dst.Topics, dst.Data = topics[:nt:nt], data[:nd:nd]
+			topics, data = topics[nt:], data[nd:]
+			l.copyTo(dst)
 			i++
 		}
 	}
@@ -291,7 +285,6 @@ func CopyLogGroups(groups []Logs) Logs {
 }
 
 // Copy deep-copies the logs into freshly allocated shared backing arrays.
-// Nil entries stay nil.
 func (logs Logs) Copy() Logs {
 	if logs == nil {
 		return nil
@@ -330,9 +323,10 @@ func BuildTopicMap(topics [][]common.Hash) []map[common.Hash]struct{} {
 // FilterWithTopicMap filters logs using a pre-built topic map. Use this when filtering
 // in a loop with the same topics to avoid rebuilding the map on every call.
 func (logs Logs) FilterWithTopicMap(addrMap map[common.Address]struct{}, topicMap []map[common.Hash]struct{}, maxLogs uint64) Logs {
-	o := make(Logs, 0, len(logs))
+	o := Logs{}
 	var logCount uint64
-	for _, v := range logs {
+	for i := range logs {
+		v := &logs[i]
 		if len(addrMap) != 0 {
 			if _, ok := addrMap[v.Address]; !ok {
 				continue
@@ -352,7 +346,10 @@ func (logs Logs) FilterWithTopicMap(addrMap map[common.Address]struct{}, topicMa
 			}
 		}
 		if found {
-			o = append(o, v)
+			if cap(o) == 0 {
+				o = make(Logs, 0, len(logs)-i)
+			}
+			o = append(o, *v)
 		}
 		logCount++
 		if maxLogs != 0 && logCount >= maxLogs {
@@ -367,29 +364,27 @@ func (logs Logs) Filter(addrMap map[common.Address]struct{}, topics [][]common.H
 }
 
 func (logs Logs) ContainingTopics(addrMap map[common.Address]struct{}, topicsMap map[common.Hash]struct{}, maxLogs uint64) Logs {
-	o := make(Logs, 0, len(logs))
+	o := Logs{}
 	var logCount uint64
 
-	for _, v := range logs {
-		found := false
+	for i := range logs {
+		v := &logs[i]
 
 		// check address if addrMap is not empty
 		if _, requested := addrMap[v.Address]; !requested && len(addrMap) > 0 {
 			continue // not there? skip this log
 		}
 		//topicsMap len zero match any topics
-		if len(topicsMap) == 0 {
-			o = append(o, v)
-		} else {
-			for i := range v.Topics {
-				//Contain any topics that matched
-				if _, ok := topicsMap[v.Topics[i]]; ok {
-					found = true
-				}
+		found := len(topicsMap) == 0
+		for j := 0; !found && j < len(v.Topics); j++ {
+			//Contain any topics that matched
+			_, found = topicsMap[v.Topics[j]]
+		}
+		if found {
+			if cap(o) == 0 {
+				o = make(Logs, 0, len(logs)-i)
 			}
-			if found {
-				o = append(o, v)
-			}
+			o = append(o, *v)
 		}
 		logCount += 1
 		if maxLogs != 0 && logCount >= maxLogs {
@@ -464,16 +459,16 @@ func RlpHashLogs(groups []Logs) common.Hash {
 	return rlpPayloadHash(func(w io.Writer, b []byte) error {
 		payloadSize := 0
 		for _, logs := range groups {
-			for _, l := range logs {
-				payloadSize += l.encodingSize()
+			for i := range logs {
+				payloadSize += logs[i].encodingSize()
 			}
 		}
 		if err := rlp.EncodeListPrefix(payloadSize, w, b); err != nil {
 			return err
 		}
 		for _, logs := range groups {
-			for _, l := range logs {
-				if err := l.encodeRLP(w, b); err != nil {
+			for i := range logs {
+				if err := logs[i].encodeRLP(w, b); err != nil {
 					return err
 				}
 			}
