@@ -59,7 +59,7 @@ func newTestBackend(t *testing.T) *execmoduletester.ExecModuleTester {
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 
 	// Generate testing blocks
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 32, func(i int, b *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(32, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		tx, txErr := types.SignTx(types.NewTransaction(b.TxNonce(addr), common.HexToAddress("deadbeef"), uint256.NewInt(100), 21000, uint256.NewInt(uint64(int64(i+1)*common.GWei)), nil), *signer, key)
 		if txErr != nil {
@@ -179,11 +179,12 @@ func findKthUint256(values []*uint256.Int, k int) *uint256.Int {
 		pivot := left + rand.Intn(right-left+1)
 		values[pivot], values[right] = values[right], values[pivot]
 		pos := partitionUint256(values, left, right)
-		if pos == k {
+		switch {
+		case pos == k:
 			return values[k]
-		} else if pos < k {
+		case pos < k:
 			left = pos + 1
-		} else {
+		default:
 			right = pos - 1
 		}
 	}
@@ -371,7 +372,7 @@ func TestSuggestTipCap_SparseBlocks(t *testing.T) {
 
 	// 10 blocks: only the last one (index 9) has a transaction; all others are empty.
 	const totalBlocks = 10
-	ch, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, totalBlocks, func(i int, b *blockgen.BlockGen) {
+	ch, err := m.GenerateChain(totalBlocks, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		if i == totalBlocks-1 {
 			tx, txErr := types.SignTx(
@@ -418,7 +419,7 @@ func TestSuggestTipCap_AllEmptyBlocks(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec))
 
 	const totalBlocks = 5
-	ch, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, totalBlocks, func(_ int, b *blockgen.BlockGen) {
+	ch, err := m.GenerateChain(totalBlocks, func(_ int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// no transactions — all blocks are empty
 	})

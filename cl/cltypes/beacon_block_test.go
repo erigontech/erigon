@@ -19,6 +19,7 @@ package cltypes
 import (
 	_ "embed"
 	"encoding/json"
+	"math"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -647,4 +648,33 @@ func TestBeaconBody_GetPayloadAttestations_VersionAware(t *testing.T) {
 	// GLOAS should have PayloadAttestations
 	gloasBody := NewBeaconBody(bc, clparams.GloasVersion)
 	assert.NotNil(t, gloasBody.GetPayloadAttestations(), "GLOAS should have PayloadAttestations")
+}
+
+func TestBeaconBodyGloasJSONRejectsNullRequiredFields(t *testing.T) {
+	for _, input := range []string{
+		`{"signed_execution_payload_bid":null}`,
+		`{"signed_execution_payload_bid":{"message":null}}`,
+		`{"signed_execution_payload_bid":{"message":{"blob_kzg_commitments":null}}}`,
+		`{"signed_execution_payload_bid":{"message":{"blob_kzg_commitments":[null]}}}`,
+		`{"payload_attestations":null}`,
+		`{"payload_attestations":[null]}`,
+		`{"payload_attestations":[{"aggregation_bits":null,"data":null}]}`,
+		`{"parent_execution_requests":null}`,
+		`{"parent_execution_requests":{"deposits":[null]}}`,
+	} {
+		t.Run(input, func(t *testing.T) {
+			body := NewBeaconBody(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+			require.Error(t, json.Unmarshal([]byte(input), body))
+		})
+	}
+}
+
+func TestBeaconBodyGloasProgressiveLimitsUseConfig(t *testing.T) {
+	for _, limit := range []uint64{32, math.MaxUint64} {
+		cfg := clparams.MainnetBeaconConfig
+		cfg.MaxProposerSlashings = limit
+		body := NewBeaconBody(&cfg, clparams.GloasVersion)
+
+		require.NoError(t, body.ProposerSlashings.DecodeSSZ(make([]byte, 33*416), int(clparams.GloasVersion)))
+	}
 }

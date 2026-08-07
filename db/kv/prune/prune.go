@@ -135,7 +135,7 @@ func HashSeekingPrune(
 			if vtx := binary.BigEndian.Uint64(vv); vtx != binary.BigEndian.Uint64(txnm) {
 				return fmt.Errorf("prune history %s got invalid txNum: found %d != %d wanted", filenameBase, vtx, binary.BigEndian.Uint64(txnm))
 			}
-			if err = valDelCursor.DeleteCurrent(); err != nil {
+			if err := valDelCursor.DeleteCurrent(); err != nil {
 				return err
 			}
 		case DefaultStorageMode:
@@ -168,7 +168,7 @@ func HashSeekingPrune(
 				break
 			}
 			stat.PruneCountTx++
-			if err = keysCursor.Delete(txnb); err != nil {
+			if err := keysCursor.Delete(txnb); err != nil {
 				return nil, err
 			}
 		}
@@ -252,7 +252,7 @@ func TableScanningPrune(
 				time.Sleep(*throttling)
 			}
 			//println("key", hex.EncodeToString(txnb), "value", hex.EncodeToString(val))
-			if err = keysCursor.DeleteCurrentDuplicates(); err != nil {
+			if err := keysCursor.DeleteCurrentDuplicates(); err != nil {
 				return nil, err
 			}
 		}
@@ -414,7 +414,7 @@ func tableScanningPrune(
 				}
 				stat.MinTxNum = min(stat.MinTxNum, txNumDup)
 				stat.MaxTxNum = max(stat.MaxTxNum, txNumDup)
-				if err = valDelCursor.DeleteCurrent(); err != nil {
+				if err := valDelCursor.DeleteCurrent(); err != nil {
 					return nil, err
 				}
 				stat.PruneCountValues++

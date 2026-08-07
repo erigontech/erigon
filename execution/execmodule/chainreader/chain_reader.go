@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -217,9 +216,8 @@ func (c ChainReaderWriterEth1) FrozenBlocks(ctx context.Context) (uint64, bool) 
 	return frozen, hasGap
 }
 
-func (c ChainReaderWriterEth1) InsertBlocks(ctx context.Context, blocks []*types.Block, bals [][]byte) error {
-	rawBlocks := blocksToRaw(blocks, bals)
-	status, err := c.executionModule.InsertBlocks(ctx, rawBlocks)
+func (c ChainReaderWriterEth1) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
+	status, err := c.executionModule.InsertBlocks(ctx, blocks)
 	if err != nil {
 		return err
 	}
@@ -229,20 +227,8 @@ func (c ChainReaderWriterEth1) InsertBlocks(ctx context.Context, blocks []*types
 	return nil
 }
 
-func (c ChainReaderWriterEth1) InsertBlock(ctx context.Context, block *types.Block, bal []byte) error {
-	return c.InsertBlocks(ctx, []*types.Block{block}, [][]byte{bal})
-}
-
-func blocksToRaw(blocks []*types.Block, bals [][]byte) []*types.RawBlock {
-	raw := make([]*types.RawBlock, len(blocks))
-	for i, b := range blocks {
-		rb := &types.RawBlock{Header: b.Header(), Body: b.RawBody()}
-		if i < len(bals) {
-			rb.BlockAccessList = bals[i]
-		}
-		raw[i] = rb
-	}
-	return raw
+func (c ChainReaderWriterEth1) InsertBlock(ctx context.Context, block *types.Block) error {
+	return c.InsertBlocks(ctx, []*types.Block{block})
 }
 
 func (c ChainReaderWriterEth1) ValidateChain(ctx context.Context, hash common.Hash, number uint64) (execmodule.ExecutionStatus, *string, common.Hash, error) {
@@ -341,12 +327,9 @@ func (c ChainReaderWriterEth1) GetAssembledBlock(id uint64) (*cltypes.Eth1Block,
 	extraData.SetBytes(header.Extra)
 	blockHash := block.Hash()
 
-	// BaseFeePerGas in cltypes.Eth1Block is stored as little-endian bytes in a common.Hash.
 	var baseFeeLE common.Hash
 	if header.BaseFee != nil {
-		be := header.BaseFee.Bytes32() // big-endian [32]byte
-		copy(baseFeeLE[:], be[:])
-		utils.ReverseBytes(&baseFeeLE) // convert to little-endian
+		_, _ = header.BaseFee.MarshalSSZAppend(baseFeeLE[:0])
 	}
 
 	eth1Block := &cltypes.Eth1Block{
