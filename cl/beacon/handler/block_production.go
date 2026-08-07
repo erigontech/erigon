@@ -203,11 +203,18 @@ func attestationDue(cfg *clparams.BeaconChainConfig, stateVersion clparams.State
 	return time.Duration(cfg.AttestationDueMs(stateVersion.AfterOrEqual(clparams.GloasVersion))) * time.Millisecond
 }
 
-// computeBlockBuilderWindow returns when to first poll for the assembled payload and when to stop,
-// reserving a publication margin before the attestation deadline (see payloadPublicationDivisor).
-func computeBlockBuilderWindow(now, slotStart time.Time, cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion) blockBuilderWindow {
+// computeBlockBuilderWindow returns when to first poll for the assembled payload and when to stop.
+//
+// Without a primed builder the execution layer only starts packing when the block is requested, so
+// polling stops a publication margin before the attestation deadline to give it most of the slot
+// (see payloadPublicationDivisor). A primed builder has been packing since before the slot, so the
+// payload can be taken early instead, leaving the rest of the margin for signing and gossip.
+func computeBlockBuilderWindow(now, slotStart time.Time, cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion, prepared bool) blockBuilderWindow {
 	due := attestationDue(cfg, stateVersion)
 	grabBy := slotStart.Add(due - due/payloadPublicationDivisor)
+	if prepared {
+		grabBy = slotStart.Add(due / payloadPublicationDivisor)
+	}
 	firstGetAt := grabBy.Add(-minPayloadPollingWindow)
 	if firstGetAt.Before(now) {
 		firstGetAt = now
@@ -1057,7 +1064,11 @@ func (a *ApiHandler) produceBeaconBody(
 			return
 		}
 		slotStart := a.ethClock.GetSlotTime(targetSlot)
-		buildWindow := computeBlockBuilderWindow(builderStartedAt, slotStart, a.beaconChainCfg, stateVersion)
+		// An identical payload id means the execution layer kept the builder primed before the slot,
+		// so the payload is already packed and does not need the rest of the slot to fill.
+		prepared := a.preparedPayload.matches(targetSlot, idBytes)
+		log.Info("BlockProduction: payload preparation", "slot", targetSlot, "prepared", prepared)
+		buildWindow := computeBlockBuilderWindow(builderStartedAt, slotStart, a.beaconChainCfg, stateVersion, prepared)
 		payload, bundles, requestsBundle, blockValue, ok := pollAssembledPayload(ctx, buildWindow, retryTime, func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			return a.engine.GetAssembledBlock(ctx, idBytes, stateVersion)
 		})

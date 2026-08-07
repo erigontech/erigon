@@ -59,7 +59,7 @@ func TestBlockBuilderWindowPreGloas(t *testing.T) {
 	slotStart := time.Unix(100, 0)
 	now := slotStart
 
-	window := computeBlockBuilderWindow(now, slotStart, cfg, clparams.ElectraVersion)
+	window := computeBlockBuilderWindow(now, slotStart, cfg, clparams.ElectraVersion, false)
 
 	// Attestation deadline is 4s; polling stops a quarter of it (1s) earlier, at 3s.
 	require.Equal(t, slotStart.Add(3*time.Second).Add(-minPayloadPollingWindow), window.firstGetAt)
@@ -74,7 +74,7 @@ func TestBlockBuilderWindowGloas(t *testing.T) {
 	slotStart := time.Unix(100, 0)
 	now := slotStart
 
-	window := computeBlockBuilderWindow(now, slotStart, cfg, clparams.GloasVersion)
+	window := computeBlockBuilderWindow(now, slotStart, cfg, clparams.GloasVersion, false)
 
 	// Attestation deadline is 3s; polling stops a quarter of it (750ms) earlier, at 2.25s.
 	require.Equal(t, slotStart.Add(2250*time.Millisecond).Add(-minPayloadPollingWindow), window.firstGetAt)
@@ -327,7 +327,7 @@ func TestBlockBuilderWindowLateStartKeepsPublicationMargin(t *testing.T) {
 	slotStart := time.Unix(100, 0)
 	now := slotStart.Add(2950 * time.Millisecond)
 
-	window := computeBlockBuilderWindow(now, slotStart, cfg, clparams.ElectraVersion)
+	window := computeBlockBuilderWindow(now, slotStart, cfg, clparams.ElectraVersion, false)
 
 	// A late request clamps the first poll up to now but still stops at 3s, preserving the margin.
 	require.Equal(t, now, window.firstGetAt)
@@ -342,7 +342,7 @@ func TestBlockBuilderWindowLateRequestGrabsImmediately(t *testing.T) {
 	slotStart := time.Unix(100, 0)
 	now := slotStart.Add(5 * time.Second)
 
-	window := computeBlockBuilderWindow(now, slotStart, cfg, clparams.GloasVersion)
+	window := computeBlockBuilderWindow(now, slotStart, cfg, clparams.GloasVersion, false)
 
 	require.Equal(t, now, window.firstGetAt)
 	require.Equal(t, now, window.pollUntil)
@@ -365,7 +365,7 @@ func TestBlockBuilderWindowReservesPublicationMargin(t *testing.T) {
 		{"gloas", clparams.GloasVersion, 3 * time.Second, 2250 * time.Millisecond},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			window := computeBlockBuilderWindow(slotStart, slotStart, cfg, tc.version)
+			window := computeBlockBuilderWindow(slotStart, slotStart, cfg, tc.version, false)
 			require.Equal(t, slotStart.Add(tc.wantPollUntil), window.pollUntil)
 			require.True(t, window.pollUntil.Before(slotStart.Add(tc.deadline)),
 				"polling must stop before the attestation deadline to leave publication margin")
@@ -731,4 +731,51 @@ func TestCaplinBlockProductionGlamsterdamSlotNumber(t *testing.T) {
 		"PayloadAttributes.SlotNumber must be set for Glamsterdam (EIP-7843)")
 	require.Equal(t, hexutil.Uint64(targetSlot), *spy.lastAttributes.SlotNumber,
 		"SlotNumber should equal the target slot")
+}
+
+func TestBlockBuilderWindowTakesPreparedPayloadEarly(t *testing.T) {
+	cfg := &clparams.BeaconChainConfig{
+		SecondsPerSlot:   12,
+		IntervalsPerSlot: 3,
+	}
+	slotStart := time.Unix(100, 0)
+
+	// A builder primed before the slot has already packed the payload, so it is taken a quarter of
+	// the way into the slot rather than at the publication margin, leaving the rest for gossip.
+	prepared := computeBlockBuilderWindow(slotStart, slotStart, cfg, clparams.ElectraVersion, true)
+	require.Equal(t, slotStart.Add(time.Second), prepared.pollUntil)
+
+	// Without a primed builder nothing changes: the execution layer still needs most of the slot.
+	unprepared := computeBlockBuilderWindow(slotStart, slotStart, cfg, clparams.ElectraVersion, false)
+	require.Equal(t, slotStart.Add(3*time.Second), unprepared.pollUntil)
+
+	require.True(t, prepared.pollUntil.Before(unprepared.pollUntil))
+}
+
+func TestPreparedPayloadMatchesOnlyTheSamePrime(t *testing.T) {
+	var p preparedPayload
+	id := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+
+	require.False(t, p.matches(10, id), "nothing primed yet")
+
+	p.set(10, id)
+	require.True(t, p.matches(10, id))
+
+	// A different payload id means the execution layer started a fresh build — a reorg, a late
+	// block, or a changed fee recipient — so the warm builder is gone.
+	require.False(t, p.matches(10, []byte{9, 9, 9, 9, 9, 9, 9, 9}))
+	require.False(t, p.matches(11, id), "primed for another slot")
+	require.False(t, p.matches(10, nil), "no id from the execution layer")
+}
+
+func TestPreparedPayloadCopiesTheID(t *testing.T) {
+	var p preparedPayload
+	id := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+
+	p.set(10, id)
+	id[0] = 0xff
+
+	// The caller's buffer must not be able to invalidate, or forge, a later match.
+	require.True(t, p.matches(10, []byte{1, 2, 3, 4, 5, 6, 7, 8}))
+	require.False(t, p.matches(10, id))
 }
