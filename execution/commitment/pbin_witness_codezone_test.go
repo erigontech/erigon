@@ -22,7 +22,10 @@ import (
 	"encoding/hex"
 	"testing"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common"
 )
 
 // Deploying a contract writes leaves into the content-addressed code zone.
@@ -84,6 +87,87 @@ func TestPBinWitnessCodeOverrideMatchesFoldKeys(t *testing.T) {
 
 	// Without it the parent state yields the account's header keys only.
 	require.Len(t, pbinStreamKeys(t, parent, deploy, PBinWitnessBlock{}, true), 3)
+}
+
+// pbinWitnessStateFor commits the corpus, proves a touch of addr and decodes the
+// pruned witness back into a readable state.
+func pbinWitnessStateFor(t *testing.T, corpus *pbinTestCorpus, addr []byte) (*PBinWitnessState, [][]byte, []byte) {
+	t.Helper()
+	ms, parentRoot := pbinWitnessCommitted(t, corpus)
+
+	upd := WrapKeyUpdates(t, ModeDirect, pbinKeyHasher(), [][]byte{addr}, []Update{{}})
+	nodes, provedKeys, root := pbinWitnessesOf(t, ms, upd, false)
+	require.Equal(t, parentRoot, root)
+
+	lean, err := PBinWitnessNodesForKeys(nodes, root, provedKeys)
+	require.NoError(t, err)
+	state, err := PBinNewWitnessState(lean, root)
+	require.NoError(t, err)
+	return state, lean, root
+}
+
+// TestPBinWitnessDelegatedAccountIsPresent: a delegated account holds no
+// CODE_HASH leaf, so the delegation leaf has to mark it present, with the code
+// hash EXTCODEHASH defines — the keccak of the indicator bytes.
+func TestPBinWitnessDelegatedAccountIsPresent(t *testing.T) {
+	t.Parallel()
+
+	addr := pbinOracleAddr(75)
+	indicator := append([]byte{0xEF, 0x01, 0x00}, bytes.Repeat([]byte{0x22}, 20)...)
+	corpus := new(pbinTestCorpus).accountWithCodeBytes(addr, 3, 700, indicator)
+
+	state, _, _ := pbinWitnessStateFor(t, corpus, addr)
+
+	acc, ok, err := state.Account(addr)
+	require.NoError(t, err)
+	require.True(t, ok, "the delegation leaf marks the account present")
+	require.Equal(t, uint64(3), acc.Nonce)
+	require.Equal(t, uint64(700), acc.Balance.Uint64())
+	require.Equal(t, uint64(pbinDelegationCodeLength), acc.CodeSize)
+	require.Equal(t, common.Hash(keccak.Sum256(indicator)), acc.CodeHash)
+}
+
+// TestPBinWitnessDelegatedAccountCarriesNoChunks: the indicator is the code, read
+// straight from the header leaf — the witness holds no code-zone leaf for it.
+func TestPBinWitnessDelegatedAccountCarriesNoChunks(t *testing.T) {
+	t.Parallel()
+
+	addr := pbinOracleAddr(76)
+	indicator := append([]byte{0xEF, 0x01, 0x00}, bytes.Repeat([]byte{0x33}, 20)...)
+	corpus := new(pbinTestCorpus).accountWithCodeBytes(addr, 1, 5, indicator)
+
+	state, lean, root := pbinWitnessStateFor(t, corpus, addr)
+
+	code, ok, err := state.Code(addr)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, indicator, code, "the code is the leading code_size bytes of the delegation leaf")
+
+	tree, err := pbinDecodeWitness(lean, root)
+	require.NoError(t, err)
+	for _, node := range tree.nodes {
+		if node.isLeaf() {
+			require.NotEqual(t, byte(pbinCodeZone), node.key[0], "a delegated account owns no code-zone leaf")
+		}
+	}
+}
+
+// TestPBinWitnessReassemblesCodeAcrossGroups: chunk 256 lives under tree_index 1,
+// a different code-zone stem than chunks 0-255. The read has to cross that group
+// boundary and come back byte-for-byte.
+func TestPBinWitnessReassemblesCodeAcrossGroups(t *testing.T) {
+	t.Parallel()
+
+	addr := pbinOracleAddr(77)
+	code := pbinSpillingCode(0xD0, pbinStemSubtreeWidth+1)
+	corpus := new(pbinTestCorpus).accountWithCodeBytes(addr, 1, 1, code)
+
+	state, _, _ := pbinWitnessStateFor(t, corpus, addr)
+
+	got, ok, err := state.Code(addr)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, code, got)
 }
 
 // TestPBinWitnessDeployIntoPopulatedCodeZone: a witness for a deploy has to let

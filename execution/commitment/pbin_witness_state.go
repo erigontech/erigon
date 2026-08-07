@@ -71,18 +71,14 @@ func PBinNewWitnessState(nodes [][]byte, root []byte) (*PBinWitnessState, error)
 // pre-state chunk leaves. Everything else is read from the leaves.
 func (s *PBinWitnessState) SetCode(addr, code []byte) { s.ctx.setCode(addr, code) }
 
-// Account resolves an address to the state its two account leaves hold. ok is
+// Account resolves an address to the state its account leaves hold. ok is
 // false when the witness proves the account absent.
 func (s *PBinWitnessState) Account(addr []byte) (PBinAccount, bool, error) {
-	// CODE_HASH marks the account present: it is never zero, so it is never
-	// collapsed away, while BASIC_DATA is absent for an account whose nonce,
-	// balance and code_size are all zero.
-	codeHash, ok, err := s.tree.leaf(s.keys.accountKey(addr, pbinCodeHashLeafKey))
-	if err != nil || !ok {
-		return PBinAccount{}, false, err
-	}
-	acc := PBinAccount{CodeHash: common.BytesToHash(codeHash)}
-
+	// An account holds exactly one of the CODE_HASH and DELEGATION leaves, and
+	// neither is ever zero, so whichever exists marks the account present —
+	// while BASIC_DATA is absent for an account whose nonce, balance and
+	// code_size are all zero.
+	var acc PBinAccount
 	basic, ok, err := s.tree.leaf(s.keys.accountKey(addr, pbinBasicDataLeafKey))
 	if err != nil {
 		return PBinAccount{}, false, err
@@ -92,6 +88,23 @@ func (s *PBinWitnessState) Account(addr []byte) (PBinAccount, bool, error) {
 		acc.Nonce = binary.BigEndian.Uint64(basic[pbinBasicDataNonceOffset:])
 		acc.Balance.SetBytes(basic[pbinBasicDataBalanceOffset:])
 	}
+
+	codeHash, ok, err := s.tree.leaf(s.keys.accountKey(addr, pbinCodeHashLeafKey))
+	if err != nil {
+		return PBinAccount{}, false, err
+	}
+	if ok {
+		acc.CodeHash = common.BytesToHash(codeHash)
+		return acc, true, nil
+	}
+
+	indicator, err := s.ctx.delegationCode(addr, acc.CodeSize)
+	if err != nil || indicator == nil {
+		return PBinAccount{}, false, err
+	}
+	// A delegated account commits no code hash; EXTCODEHASH defines its hash as
+	// the keccak of the indicator bytes.
+	acc.CodeHash = common.Hash(keccak.Sum256(indicator))
 	return acc, true, nil
 }
 
@@ -105,8 +118,9 @@ func (s *PBinWitnessState) Storage(addr, slot []byte) (common.Hash, bool, error)
 	return common.BytesToHash(value), true, nil
 }
 
-// Code returns the account's bytecode, reassembled from the chunk leaves. ok is
-// false when the witness proves the account absent.
+// Code returns the account's bytecode: reassembled from the chunk leaves, or
+// read from the DELEGATION leaf for a delegated account. ok is false when the
+// witness proves the account absent.
 func (s *PBinWitnessState) Code(addr []byte) ([]byte, bool, error) {
 	code, err := s.ctx.codeFromLeaves(addr)
 	if err != nil {
@@ -137,20 +151,19 @@ func (s *PBinWitnessState) Root(ctx context.Context, plainKeys [][]byte, updates
 }
 
 // codeFromLeaves is the witness's own answer to "what code does this account
-// run". The chunk leaves are the single code source under bin: they are
-// committed by the root, and the fold re-chunks every account it touches, so the
-// pruned witness carries a chunk leaf wherever the post-state pass needs one.
-// The reassembly is checked against the CODE_HASH leaf, so it cannot drift from
-// the chunker. A nil result means the witness proves the account absent.
+// run". The leaves are the single code source under bin: they are committed by
+// the root, and the fold re-chunks every account it touches, so the pruned
+// witness carries a chunk leaf wherever the post-state pass needs one. The
+// reassembly is checked against the CODE_HASH leaf, so it cannot drift from the
+// chunker. A nil result means the witness proves the account absent.
 func (c *pbinWitnessContext) codeFromLeaves(addr []byte) ([]byte, error) {
 	// An account whose nonce, balance and code_size are all zero stores no
 	// BASIC_DATA leaf, so its absence is zeros rather than an absent account —
-	// the CODE_HASH leaf is what marks the account present.
-	hashValue, ok, err := c.tree.leaf(c.keys.accountKey(addr, pbinCodeHashLeafKey))
-	if err != nil || !ok {
+	// the CODE_HASH or DELEGATION leaf is what marks the account present.
+	hashValue, hasCodeHash, err := c.tree.leaf(c.keys.accountKey(addr, pbinCodeHashLeafKey))
+	if err != nil {
 		return nil, err
 	}
-	codeHash := common.BytesToHash(hashValue)
 
 	var size uint64
 	if basic, ok, err := c.tree.leaf(c.keys.accountKey(addr, pbinBasicDataLeafKey)); err != nil {
@@ -158,6 +171,11 @@ func (c *pbinWitnessContext) codeFromLeaves(addr []byte) ([]byte, error) {
 	} else if ok {
 		size = uint64(binary.BigEndian.Uint32(basic[pbinBasicDataCodeSizeOffset:]))
 	}
+
+	if !hasCodeHash {
+		return c.delegationCode(addr, size)
+	}
+	codeHash := common.BytesToHash(hashValue)
 	if size == 0 {
 		return []byte{}, nil
 	}
@@ -183,6 +201,22 @@ func (c *pbinWitnessContext) codeFromLeaves(addr []byte) ([]byte, error) {
 			errPBinWitnessNode, addr, got, codeHash)
 	}
 	return code, nil
+}
+
+// delegationCode reads a delegated account's code: the leading code_size bytes
+// of its DELEGATION leaf. There is nothing to reassemble and no hash to check
+// against — the root commits the leaf itself. A nil result means the witness
+// proves the account absent.
+func (c *pbinWitnessContext) delegationCode(addr []byte, size uint64) ([]byte, error) {
+	value, ok, err := c.tree.leaf(c.keys.accountKey(addr, pbinDelegationLeafKey))
+	if err != nil || !ok {
+		return nil, err
+	}
+	if size > uint64(len(value)) {
+		return nil, fmt.Errorf("%w: delegation leaf of account %x holds %d bytes, code_size says %d",
+			errPBinWitnessNode, addr, len(value), size)
+	}
+	return bytes.Clone(value[:size]), nil
 }
 
 func pbinCodeChunkCount(size uint64) int {

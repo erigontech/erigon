@@ -43,9 +43,9 @@ import (
 // unresolved hash is unambiguous, so a missing node is always an error and never
 // an empty read.
 //
-// Code has one owner: the witness's own chunk leaves, reassembled and checked
-// against the CODE_HASH leaf (commitment.PBinWitnessState.Code). result.Codes is
-// not read. The leaves are committed by the root and the fold re-chunks every
+// Code has one owner: the witness's own leaves — chunks reassembled and checked
+// against the CODE_HASH leaf, or the delegation indicator read from its header
+// leaf (commitment.PBinWitnessState.Code). result.Codes is not read. The leaves are committed by the root and the fold re-chunks every
 // account it touches, so the pruned witness carries them wherever the post-state
 // pass needs code; a blob list is keyed by code reads, a strictly narrower set.
 // Code a block deploys has no pre-state leaves and arrives through

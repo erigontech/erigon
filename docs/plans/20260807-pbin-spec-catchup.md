@@ -630,20 +630,28 @@ A delegated account holds no code-hash leaf, so the presence marker at
 - Modify: `rpc/jsonrpc/pbin_witness_stateless.go`
 - Modify: `execution/commitment/pbin_witness_codezone_test.go`
 
-- [ ] make `PBinWitnessState.Account` treat "code-hash leaf **or** delegation
+- [x] make `PBinWitnessState.Account` treat "code-hash leaf **or** delegation
       leaf" as the presence marker, and synthesize `CodeHash` for a delegated
       account by hashing the leading `code_size` bytes of the leaf
-- [ ] make the code reader (`pbin_witness_state.go:145`) return those leading
-      `code_size` bytes before it reaches the chunk loop
-- [ ] confirm `preStateAccount` (`rpc/jsonrpc/pbin_witness_stateless.go:151-168`)
-      no longer returns nil for a delegated account
-- [ ] write `TestPBinWitnessDelegatedAccountIsPresent` and
-      `TestPBinWitnessDelegatedAccountCarriesNoChunks`
-- [ ] write `TestPBinWitnessReassemblesCodeAcrossGroups`, reassembling a
-      257-chunk contract byte-for-byte across two `tree_index` groups
-- [ ] gate: `go test ./execution/commitment/ ./rpc/jsonrpc/ -count=1 -v -run 'TestPBinWitnessDelegated|TestPBinWitnessReassembles'`
-      and confirm all three ran
-- [ ] `make lint` until clean; commit as
+- [x] make the code reader (`pbin_witness_state.go:145`) return those leading
+      `code_size` bytes before it reaches the chunk loop (new
+      `delegationCode`, shared by `Account` and `codeFromLeaves`)
+- [x] confirm `preStateAccount` (`rpc/jsonrpc/pbin_witness_stateless.go:151-168`)
+      no longer returns nil for a delegated account — it returns nil only when
+      `PBinWitnessState.Account` reports absent, which
+      `TestPBinWitnessDelegatedAccountIsPresent` now pins as present; no code
+      change needed there
+- [x] write `TestPBinWitnessDelegatedAccountIsPresent` and
+      `TestPBinWitnessDelegatedAccountCarriesNoChunks` (Red confirmed first:
+      both failed with the account read back absent)
+- [x] write `TestPBinWitnessReassemblesCodeAcrossGroups`, reassembling a
+      257-chunk contract byte-for-byte across two `tree_index` groups (green on
+      first run — it pins the read side of Task 4's unified chunk-key deriver,
+      which already crossed groups; kept as the coverage the plan wants)
+- [x] gate: `go test ./execution/commitment/ ./rpc/jsonrpc/ -count=1 -v -run 'TestPBinWitnessDelegated|TestPBinWitnessReassembles'`
+      and confirm all three ran (all three ran and pass; full TestPBin suites in
+      both packages stay green)
+- [x] `make lint` until clean; commit as
       `execution/commitment, rpc/jsonrpc: read delegated accounts from a witness`
 
 ### Task 9: Reclaim code-zone leaves the batch inserted and nothing still holds
