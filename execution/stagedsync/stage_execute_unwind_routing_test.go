@@ -129,16 +129,16 @@ func TestUnwindOnExecError(t *testing.T) {
 		require.Empty(t, u.calls, "must not take the plain lastHeader-1 unwind branch")
 	})
 
-	t.Run("wrong root on initial cycle takes the same binary-search path as non-initial", func(t *testing.T) {
+	t.Run("wrong root on initial cycle is fatal (no fork to recover from)", func(t *testing.T) {
 		u := &recordingUnwinder{}
 		s := &StageState{BlockNumber: 10}
 		s.CurrentSyncCycle.IsInitialCycle = true
-		// Wrong-root routes to handleIncorrectRootHashError regardless of cycle;
-		// failedBlock (5) <= s.BlockNumber (10) trips its guard, so no unwind is
-		// scheduled here.
+		// Initial sync has no competing fork: the wrong root must propagate as a
+		// fatal error, not route to handleIncorrectRootHashError (which would return
+		// nil here — failedBlock (5) <= s.BlockNumber (10) — and swallow it).
 		out := execV3Outcome{lastHeader: headerAt(20), failedBlock: 5, failedHash: common.HexToHash("0xbad5")}
 		got := unwindOnExecError(wrongRoot, out, ExecuteBlockCfg{}, s, u, logger)
-		require.NoError(t, got)
-		require.Empty(t, u.calls, "must not take a plain unwind branch")
+		require.ErrorIs(t, got, ErrWrongTrieRoot, "initial-cycle wrong root must stay fatal")
+		require.Empty(t, u.calls, "must not schedule any unwind")
 	})
 }

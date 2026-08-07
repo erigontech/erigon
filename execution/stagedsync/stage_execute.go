@@ -474,17 +474,25 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 
 // unwindOnExecError performs the bad-block unwind at the stage boundary after
 // parallel exec reports an invalid block. A non-initial-cycle wrong trie root
-// binary-searches from the implicated block (out.failedBlock/Hash); any other
-// invalid block unwinds to the recorded failed block minus one and marks that
-// block bad. Under badBlockHalt (in-memory fork validation) or a non-invalid
-// error it unwinds nothing and returns execErr unchanged for the caller to
-// propagate.
+// binary-searches from the implicated block (out.failedBlock/Hash); an
+// initial-cycle wrong root is fatal (no fork to recover from) and returns
+// execErr unchanged. Any other invalid block unwinds to the recorded failed
+// block minus one and marks that block bad. Under badBlockHalt (in-memory fork
+// validation) or a non-invalid error it unwinds nothing and returns execErr
+// unchanged for the caller to propagate.
 func unwindOnExecError(execErr error, out execV3Outcome, cfg ExecuteBlockCfg, s *StageState, u Unwinder, logger log.Logger) error {
 	if !errors.Is(execErr, rules.ErrInvalidBlock) || cfg.badBlockHalt || u == nil {
 		return execErr
 	}
 
 	if errors.Is(execErr, ErrWrongTrieRoot) {
+		// Initial sync has no competing fork to recover from, so a wrong trie root
+		// is fatal — the recovery handler would schedule an unwind (or none, when
+		// failedBlock <= s.BlockNumber) and return nil, silently swallowing the
+		// state-root mismatch. Only a non-initial-cycle reorg routes to recovery.
+		if s.CurrentSyncCycle.IsInitialCycle {
+			return execErr
+		}
 		return handleIncorrectRootHashError(out.failedBlock, out.failedHash, out.applyTx, cfg, s, logger, u)
 	}
 
