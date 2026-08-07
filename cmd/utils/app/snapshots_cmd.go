@@ -2305,34 +2305,14 @@ var (
 // Subdirectories are skipped, so callers pass each snapshot directory they own.
 func checkNoDuplicateFileVersions(dirPaths ...string) error {
 	for _, dirPath := range dirPaths {
-		seen := map[string]string{}
-		if err := filepath.WalkDir(dirPath, func(path string, info fs.DirEntry, err error) error {
-			if err != nil {
-				if os.IsNotExist(err) { //it's ok if some file get removed during walk
-					return nil
-				}
-				return err
-			}
-			if info.IsDir() {
-				if path == dirPath {
-					return nil
-				}
-				return fs.SkipDir
-			}
-			if filepath.Ext(info.Name()) == ".tmp" {
-				return nil
-			}
-			masked, err := version.ReplaceVersionWithMask(info.Name())
-			if err != nil {
-				return nil // unversioned file, e.g. salt-blocks.txt
-			}
-			if prev, ok := seen[masked]; ok {
-				return fmt.Errorf("%w: %s and %s in %s", ErrSnapDuplicateVersions, prev, info.Name(), dirPath)
-			}
-			seen[masked] = info.Name()
-			return nil
-		}); err != nil {
+		groups, err := version.GroupByMaskedName(filepath.Join(dirPath, "*"))
+		if err != nil {
 			return err
+		}
+		for _, g := range groups {
+			if len(g) > 1 {
+				return fmt.Errorf("%w: %s and %s in %s", ErrSnapDuplicateVersions, g[0].Name, g[1].Name, dirPath)
+			}
 		}
 	}
 	return nil
