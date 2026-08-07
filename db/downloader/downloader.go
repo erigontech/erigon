@@ -1811,19 +1811,12 @@ func (d *Downloader) addedFirstDownloader(
 	infoHash metainfo.Hash,
 ) (afterAdd func()) {
 	// Try again, we would have invalidated data for changed infohashes now.
+	fetchedFromWebseed := false
 	if !miOpt.Ok {
-		// Yes I mean for this error to be scoped here.
-		err := d.fetchMetainfoFromWebseeds(ctx, name, infoHash)
+		mi, err := d.fetchMetainfoFromWebseeds(ctx, name, infoHash)
 		if err == nil {
-			// Always reuse code paths to ensure no surprises later. I.e. load the metainfo again
-			// through the same path that is used on a good run. No data invalidation here, at this
-			// point we've added the torrent, and already invalidated if the metainfo was missing
-			// the first time.
-			miOpt, err = d.maybeLoadMetainfoFromDisk(name)
-			if err != nil {
-				// Should this error be returned instead?
-				d.log(log.LvlError, "error loading metainfo from disk", "err", err, "name", name)
-			}
+			miOpt.Set(mi)
+			fetchedFromWebseed = true
 		} else if !errors.Is(err, context.Canceled) {
 			d.log(log.LvlWarn, "error fetching metainfo from webseeds", "err", err, "name", name, "infohash", infoHash)
 		}
@@ -1842,7 +1835,17 @@ func (d *Downloader) addedFirstDownloader(
 	if t.Info() == nil {
 		return func() { d.afterAddForDownloadMissingMetainfo(t, name) }
 	} else {
-		return func() { d.afterAddForDownloadHadMetainfo(t) }
+		afterAdd := func() { d.afterAddForDownloadHadMetainfo(t) }
+		if fetchedFromWebseed {
+			// Persist the .torrent sidecar only once the payload
+			// arrives. Metainfo cached on disk from a prior run
+			// already has its sidecar and needs no further save.
+			return func() {
+				afterAdd()
+				d.spawn(func() { d.waitAndSaveMetainfoOnComplete(t) })
+			}
+		}
+		return afterAdd
 	}
 
 }
@@ -1890,32 +1893,62 @@ func (d *Downloader) webseedMetainfoUrls(snapshotName string) iter.Seq[string] {
 	}
 }
 
-func (d *Downloader) fetchMetainfoFromWebseeds(ctx context.Context, name string, ih metainfo.Hash) (err error) {
+// fetchMetainfoFromWebseeds returns the fetched metainfo without
+// persisting it to disk. Persisting happens only after the payload
+// download completes (see waitAndSaveMetainfoOnComplete), so a
+// mid-flight abort leaves no orphan .torrent sidecar behind.
+func (d *Downloader) fetchMetainfoFromWebseeds(ctx context.Context, name string, ih metainfo.Hash) (mi *metainfo.MetaInfo, err error) {
 	err = errors.New("no webseed urls")
 	var buf bytes.Buffer
 	for base := range d.webSeedUrlStrs() {
 		buf.Reset()
-		var mi metainfo.MetaInfo
+		var got metainfo.MetaInfo
 		var w io.Writer = &buf
-		mi, err = GetMetainfoFromWebseed(ctx, base, name, d.metainfoHttpClient, w)
+		got, err = GetMetainfoFromWebseed(ctx, base, name, d.metainfoHttpClient, w)
 		if err != nil {
 			d.log(log.LvlDebug, "error fetching metainfo from webseed", "err", err, "name", name, "webseed", base)
 			// Whither error?
 			continue
 		}
-		actualIh := mi.HashInfoBytes()
+		actualIh := got.HashInfoBytes()
 		if actualIh != ih {
 			d.log(log.LvlWarn, "webseed infohash mismatch",
 				"expected", ih,
-				"actual", mi.HashInfoBytes(),
+				"actual", got.HashInfoBytes(),
 				"name", name,
 				"webseed", base)
 			continue
 		}
-		return os.WriteFile(d.metainfoFilePathForName(name), buf.Bytes(), 0o666)
+		return &got, nil
 	}
 	err = fmt.Errorf("all webseed urls failed. last error: %w", err)
-	return
+	return nil, err
+}
+
+// waitAndSaveMetainfoOnComplete blocks until t completes downloading
+// its payload, then persists its metainfo to disk. Exits without
+// writing if t closes first (Delete, shutdown, filter change). The
+// invariant "sidecar exists iff payload complete" holds regardless
+// of which write path (webseed fetch, delayed-got-info) queued it.
+func (d *Downloader) waitAndSaveMetainfoOnComplete(t *torrent.Torrent) {
+	select {
+	case <-t.Closed():
+		return
+	case <-t.Complete().On():
+	}
+	d.lock.RLock()
+	defer d.lock.RUnlock()
+	select {
+	case <-t.Closed():
+		return
+	default:
+	}
+	if err := d.saveMetainfoFromTorrent(t); err != nil {
+		d.log(log.LvlWarn, "error saving metainfo post-complete",
+			"name", t.Name(),
+			"infohash", t.InfoHash(),
+			"err", err)
+	}
 }
 
 func webseedMetainfoUrl(webseedUrlBase, snapshotName string) string {
@@ -2570,6 +2603,13 @@ func (d *Downloader) afterAddForDownloadMissingMetainfo(t *torrent.Torrent, name
 
 // This is a workaround for a minor edge case: We have no existing way to wait for infos for
 // multiple Torrents, but we rarely add Torrents when the metainfo isn't available.
+//
+// Ordering: start payload download first, persist metainfo only after
+// the payload lands. Writing the sidecar eagerly (pre-fix ordering)
+// left an orphan .torrent whenever the payload never completed —
+// peer stall, filter change, Delete during download.
+// Sidecar-exists-iff-payload-complete keeps the datadir orphan-free
+// without a background sweep.
 func (d *Downloader) delayedGotInfoHandler(t *torrent.Torrent) {
 	select {
 	// Make sure this handler stops if Downloader.Delete is called on it.
@@ -2578,23 +2618,8 @@ func (d *Downloader) delayedGotInfoHandler(t *torrent.Torrent) {
 	case <-t.GotInfo():
 	}
 	d.log(log.LvlDebug, "got metainfo from network", "name", t.Name(), "infohash", t.InfoHash())
-	// Make sure the Torrent isn't closed while we're saving the metainfo.
-	d.lock.RLock()
-	defer d.lock.RUnlock()
-	// Don't save the metainfo in case Downloader.Delete was called. TODO: Why doesn't
-	// chansync.SetOnce have a read-only form, or events.Done have a helper?
-	select {
-	case <-t.Closed():
-		return
-	default:
-	}
-	if err := d.saveMetainfoFromTorrent(t); err != nil {
-		d.log(log.LvlWarn, "error saving delayed metainfo",
-			"name", t.Name(),
-			"infohash", t.InfoHash(),
-			"err", err)
-	}
 	t.DownloadAll()
+	d.waitAndSaveMetainfoOnComplete(t)
 }
 
 // After adding a new torrent that should already be completed. This is safe to call without
