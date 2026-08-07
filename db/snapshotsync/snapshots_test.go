@@ -520,9 +520,16 @@ func TestRetireFilesBelowLogsWhatItRetired(t *testing.T) {
 	defer s.Close()
 	require.NoError(s.OpenFolder())
 
+	txEnum := snaptype2.Transactions.Enum()
+	require.Equal(3, s.dirty[txEnum].Len())
+
 	retired, err := s.RetireFilesBelow(snaptype2.Transactions, 2*mergeLimit, func([]string) error { return nil })
 	require.NoError(err)
 	require.True(retired)
+
+	// The count in the log has to be the count actually detached, so assert both.
+	require.Equal(2, s.dirty[txEnum].Len())
+	require.False(visibleHas(s, txEnum, 0, mergeLimit))
 
 	require.Contains(output.String(), "retired old block files")
 	require.Contains(output.String(), "type=transactions")
