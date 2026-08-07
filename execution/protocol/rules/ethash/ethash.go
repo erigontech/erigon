@@ -170,7 +170,7 @@ func memoryMapAndGenerate(path string, size uint64, lock bool, generator func(bu
 		}
 		_ = dir2.RemoveFile(temp)
 	}()
-	if err = dump.Truncate(int64(len(dumpMagic))*4 + int64(size)); err != nil {
+	if err := dump.Truncate(int64(len(dumpMagic))*4 + int64(size)); err != nil {
 		return nil, nil, nil, err
 	}
 	// Memory map the file for writing and fill it with the generator

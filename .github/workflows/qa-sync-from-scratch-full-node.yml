@@ -37,6 +37,8 @@ jobs:
       CHAIN: ${{ matrix.chain }}
       NODE_TYPE: full_node
       MODE: full
+      RETIREMENT_TIMEOUT_SECONDS: 1800 # 30 minutes to observe the first retirement
+      RETIREMENT_SETTLE_SECONDS: 300 # a full -> minimal backlog is tens of GB to unlink
 
     steps:
       - name: Check out repository
@@ -149,6 +151,85 @@ jobs:
         with:
           name: disk-usage-${{ env.CHAIN }}-${{ env.MODE }}
           path: ${{ github.workspace }}/disk-usage-${{ env.CHAIN }}-${{ env.MODE }}.txt
+
+      # Restart the datadir just synced as a *minimal* node. The full-node windows
+      # are wider than the minimal ones (262144 vs 100000 blocks for both state
+      # history and blocks), so the datadir already holds more than the minimal mode
+      # allows and the retire pass has a backlog without any window narrowing:
+      # --prune.distance is left off entirely. EnsureNotChanged accepts the switch
+      # because full and minimal differ only in the size of finite retention windows.
+      # No --distance is passed: leaving it off is the check script's default and
+      # means "run the mode as configured".
+      #
+      # This is the closest reproduction of what #21306 reported — a node carrying
+      # files its prune mode should have deleted — and the only variant that gives
+      # the block-file retirement path something to do, since the Blocks window
+      # narrows too.
+      - name: Test old file retirement after switching to minimal (full node)
+        id: retirement_step
+        run: |
+          set +e # Disable exit on error
+
+          python3 $ERIGON_QA_PATH/test_system/qa-tests/file-retirement/run_and_check_file_retirement.py \
+            "$GITHUB_WORKSPACE/build/bin" $ERIGON_DATA_DIR \
+            --chain $CHAIN \
+            --timeout $RETIREMENT_TIMEOUT_SECONDS \
+            --settle $RETIREMENT_SETTLE_SECONDS \
+            --result-file "$GITHUB_WORKSPACE/result-retirement-$CHAIN-full-to-minimal.json"
+
+          # Capture the check script exit status
+          test_exit_status=$?
+
+          # Save the subsection reached status
+          echo "test_executed=true" >> "$GITHUB_OUTPUT"
+
+          # Dump the measures into the log. They are also uploaded as an artifact,
+          # but whoever reads the workflow output should not need to know that.
+          # Before the verdict below, so a failing run prints them too.
+          RESULT_FILE="$GITHUB_WORKSPACE/result-retirement-$CHAIN-full-to-minimal.json"
+          echo "::group::File retirement measures (result-retirement-$CHAIN-full-to-minimal.json)"
+          if [ -f "$RESULT_FILE" ]; then
+            cat "$RESULT_FILE"
+          else
+            echo "no result file at $RESULT_FILE: the check script did not reach the point where it writes one"
+          fi
+          echo "::endgroup::"
+
+          # Check the check script exit status
+          if [ $test_exit_status -eq 0 ]; then
+            echo "File retirement test completed successfully"
+            echo "::notice::File retirement test completed successfully"
+            echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
+          else
+            echo "Error detected during file retirement test"
+            echo "::error::Error detected during file retirement test"
+            echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+      - name: Save file retirement test results
+        if: ${{ always() && steps.retirement_step.outputs.test_executed == 'true' }}
+        env:
+          TEST_RESULT: ${{ steps.retirement_step.outputs.TEST_RESULT }}
+        run: |
+          python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
+            --repo erigon \
+            --commit $(git rev-parse HEAD) \
+            --branch "$GITHUB_REF_NAME" \
+            --test_name full-to-minimal-file-retirement \
+            --chain $CHAIN \
+            --runner "$RUNNER_NAME" \
+            --outcome $TEST_RESULT \
+            --result_file "$GITHUB_WORKSPACE/result-retirement-$CHAIN-full-to-minimal.json"
+
+      - name: Upload file retirement test results
+        if: ${{ always() && steps.retirement_step.outputs.test_executed == 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: file-retirement-results-${{ env.CHAIN }}-full-to-minimal
+          path: |
+            ${{ github.workspace }}/result-retirement-${{ env.CHAIN }}-full-to-minimal.json
+            ${{ github.workspace }}/erigon_data/logs/
 
       - name: Clean up Erigon data directory
         if: always()

@@ -483,7 +483,7 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
 		sCopy := NewWithVersionMap(reader, mvhm)
-		defer sCopy.Close()
+		defer sCopy.Close() //nolint:gocritic
 		sCopy.txIndex = i
 		states = append(states, sCopy)
 	}
@@ -564,7 +564,7 @@ func TestVersionMapRevert(t *testing.T) {
 	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
 		sCopy := NewWithVersionMap(reader, mvhm)
-		defer sCopy.Close()
+		defer sCopy.Close() //nolint:gocritic
 		sCopy.txIndex = i
 		states = append(states, sCopy)
 	}
@@ -627,7 +627,7 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
 		sCopy := NewWithVersionMap(reader, mvhm)
-		defer sCopy.Close()
+		defer sCopy.Close() //nolint:gocritic
 		sCopy.txIndex = i
 		states = append(states, sCopy)
 	}
@@ -686,7 +686,7 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 			return VersionValid
 		}
 		return VersionInvalid
-	}, false, "")
+	}, true, false, false, "")
 	assert.Equal(t, VersionInvalid, valid, "commit-time validation catches the ESTIMATE dependency")
 
 	// Tx1 read again should get Tx0 vals
@@ -709,7 +709,7 @@ func TestVersionMapOverwrite(t *testing.T) {
 	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
 		sCopy := NewWithVersionMap(reader, mvhm)
-		defer sCopy.Close()
+		defer sCopy.Close() //nolint:gocritic
 		sCopy.txIndex = i
 		states = append(states, sCopy)
 	}
@@ -800,7 +800,7 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
 		sCopy := NewWithVersionMap(reader, mvhm)
-		defer sCopy.Close()
+		defer sCopy.Close() //nolint:gocritic
 		sCopy.txIndex = i
 		states = append(states, sCopy)
 	}
@@ -947,7 +947,7 @@ func TestApplyVersionedWrites(t *testing.T) {
 	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
 		sCopy := NewWithVersionMap(reader, mvhm)
-		defer sCopy.Close()
+		defer sCopy.Close() //nolint:gocritic
 		sCopy.txIndex = i
 		states = append(states, sCopy)
 	}
@@ -1163,14 +1163,15 @@ func TestResetDropsOversizedLogDataBuffers(t *testing.T) {
 
 	ibs := New(NewNoopReader())
 	ibs.SetTxContext(1, 0)
-	small := ibs.AllocLog(common.Address{0x01}, 1, 8)
-	big := ibs.AllocLog(common.Address{0x02}, 1, maxReusableLogDataCap+1)
+	smallData := &ibs.AllocLog(common.Address{0x01}, 1, 8).Data[0]
+	bigData := &ibs.AllocLog(common.Address{0x02}, 1, maxReusableLogDataCap+1).Data[0]
 
 	ibs.Reset()
 	ibs.SetTxContext(2, 0)
-	require.Same(t, small, ibs.AllocLog(common.Address{0x03}, 1, 8), "normal-size entry is reused")
+	reused := ibs.AllocLog(common.Address{0x03}, 1, 8)
+	require.Same(t, smallData, &reused.Data[0], "normal-size entry is reused")
 	relog := ibs.AllocLog(common.Address{0x04}, 1, 8)
-	require.NotSame(t, big, relog, "oversized entry must not survive Reset")
+	require.NotSame(t, bigData, &relog.Data[0], "oversized entry must not survive Reset")
 	require.LessOrEqual(t, cap(relog.Data), maxReusableLogDataCap)
 }
 

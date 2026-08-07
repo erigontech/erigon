@@ -218,6 +218,11 @@ type IntraBlockState struct {
 	// SelfDestructPath=true account must read as a live, balance-preserving,
 	// empty-code account rather than a destroyed one.
 	eip8246 bool
+	// eip161 and isAura gate nil≡empty dead-equivalence on the read paths (AuRa
+	// retains its empty SystemAddress; pre-161 existing-empty is gas-observable).
+	// Set per-tx from the block rules in Prepare.
+	eip161 bool
+	isAura bool
 
 	revisions revisions
 }
@@ -475,13 +480,10 @@ func (sdb *IntraBlockState) resetLogs() {
 			continue
 		}
 		entries += cap(buf)
-		for j, lp := range buf {
-			if lp == nil {
-				continue
-			}
-			data := cap(lp.Data)
+		for j := range buf {
+			data := cap(buf[j].Data)
 			if data > maxReusableLogDataCap || dataBytes+data > maxReusableLogBytes {
-				buf[j] = nil
+				buf[j] = types.Log{}
 				continue
 			}
 			dataBytes += data
@@ -503,13 +505,10 @@ func (sdb *IntraBlockState) AllocLog(addr common.Address, numTopics, dataSize in
 	}
 	logIdx := len(sdb.logs[ti])
 	sdb.logs[ti] = slices.Grow(sdb.logs[ti], 1)[:logIdx+1]
-	logs := sdb.logs[ti]
 
-	lp := logs[logIdx] // a prior block's entry to reuse, or nil for a fresh slot
-	if lp == nil {
-		lp = &types.Log{}
-		logs[logIdx] = lp
-	}
+	// Points into the tx's buffer, so it is only valid until the next AllocLog
+	// may regrow it — the caller fills and notifies before allocating again.
+	lp := &sdb.logs[ti][logIdx]
 	lp.Address = addr
 	lp.Topics = slices.Grow(lp.Topics[:0], numTopics)[:numTopics]
 	lp.Data = slices.Grow(lp.Data[:0], dataSize)[:dataSize]
@@ -1216,6 +1215,91 @@ func (sdb *IntraBlockState) TouchAccount(addr accounts.Address) error {
 	return nil
 }
 
+// synthesizeCreatedAccountBase reconstructs the record of an account that is
+// absent from both the versionMap AddressPath and the DB, from its sub-field
+// cells: an EIP-7928 BAL pre-populates balance/nonce/code but not the record
+// itself, and a worker flush strips the record for destroyed accounts. With a
+// BAL the cells are deterministic (written before execution starts), so
+// resolving existence from them removes the read-after-create race with the
+// creator's flush. Only a non-EIP-161-empty result synthesizes: an
+// existing-empty account is not gas-equivalent to a non-existent one. Non-Done
+// cells (racing worker estimates) and destroyed accounts return ok=false.
+func (sdb *IntraBlockState) synthesizeCreatedAccountBase(addr accounts.Address) (*accounts.Account, bool) {
+	if sdb.versionMap == nil {
+		return nil, false
+	}
+	// A definitive nil record read means this tx already consumed the account's
+	// absence; synthesizing from cells flushed since would fork the tx's view of
+	// the address mid-execution and reconcile the fork out of validation's
+	// sight. Only a provisional (mid-load) probe may adopt fresh cells — the
+	// stale conclusion re-executes via commit-time validation instead.
+	if tr, ok := sdb.versionedReads.GetAddress(addr); ok && tr.Source != ProvisionalRead && (tr.Val == nil || tr.Val.Account() == nil) {
+		return nil, false
+	}
+	if destructed, sdRes, ok := sdb.versionMap.ReadSelfDestruct(addr, sdb.txIndex); ok && sdRes.Status() == MVReadResultDone && destructed {
+		if dbg.TraceReexec {
+			fmt.Printf("SYNTH-DECLINE reason=sd blk=%d tx=%d %x sdIdx=%d\n", sdb.blockNum, sdb.txIndex, addr, sdRes.DepIdx())
+		}
+		return nil, false
+	}
+	acc := &accounts.Account{CodeHash: accounts.EmptyCodeHash}
+	found := false
+	if bal, res, ok := sdb.versionMap.ReadBalance(addr, sdb.txIndex); ok {
+		if res.Status() != MVReadResultDone {
+			if dbg.TraceReexec {
+				fmt.Printf("SYNTH-DECLINE reason=est-bal blk=%d tx=%d %x cellIdx=%d\n", sdb.blockNum, sdb.txIndex, addr, res.DepIdx())
+			}
+			return nil, false
+		}
+		acc.Balance = bal
+		found = true
+	}
+	if nonce, res, ok := sdb.versionMap.ReadNonce(addr, sdb.txIndex); ok {
+		if res.Status() != MVReadResultDone {
+			if dbg.TraceReexec {
+				fmt.Printf("SYNTH-DECLINE reason=est-nonce blk=%d tx=%d %x cellIdx=%d\n", sdb.blockNum, sdb.txIndex, addr, res.DepIdx())
+			}
+			return nil, false
+		}
+		acc.Nonce = nonce
+		found = true
+	}
+	if code, res, ok := sdb.versionMap.ReadCode(addr, sdb.txIndex); ok {
+		if res.Status() != MVReadResultDone {
+			if dbg.TraceReexec {
+				fmt.Printf("SYNTH-DECLINE reason=est-code blk=%d tx=%d %x cellIdx=%d\n", sdb.blockNum, sdb.txIndex, addr, res.DepIdx())
+			}
+			return nil, false
+		}
+		if len(code.Bytes) > 0 {
+			acc.CodeHash = code.Hash
+			if _, delegated := types.ParseDelegation(code.Bytes); !delegated {
+				acc.Incarnation = 1
+			}
+		}
+		found = true
+	}
+	if !found || acc.Empty() {
+		if dbg.TraceReexec && found {
+			fmt.Printf("SYNTH-DECLINE reason=empty blk=%d tx=%d %x\n", sdb.blockNum, sdb.txIndex, addr)
+		}
+		return nil, false
+	}
+	acc.Root.SetBytes(trie.EmptyRoot[:])
+	return acc, true
+}
+
+// finalizeProvisionalAddressRead demotes a load's in-flight nil record probe
+// to a definitive storage read once the load concludes the account is absent:
+// the EVM is about to consume that answer, so a later flush must conflict with
+// it instead of being silently adopted.
+func (sdb *IntraBlockState) finalizeProvisionalAddressRead(addr accounts.Address) {
+	if tr, ok := sdb.versionedReads.GetAddress(addr); ok && tr.Source == ProvisionalRead {
+		tr.Source = StorageRead
+		sdb.versionedReads.SetAddress(addr, tr)
+	}
+}
+
 // readSelfDestructMemo returns the shared-versionMap SelfDestruct probe for the
 // current execution attempt, caching it so a warm multi-field read does not
 // re-acquire the versionMap RWMutex per field. The probe reads only prior-tx SD
@@ -1311,6 +1395,14 @@ func (sdb *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 				if err != nil {
 					return nil, StorageRead, UnknownVersion, err
 				}
+				if preserved == nil {
+					sdb.finalizeProvisionalAddressRead(addr)
+					return nil, StorageRead, UnknownVersion, nil
+				}
+				// The EVM consumes this conclusion: reconcile the provisional
+				// nil probe with the preserved account so a later flush
+				// conflicts with it instead of being silently adopted.
+				sdb.accountRead(addr, preserved, MapRead, Version{TxIndex: destructTxIndex})
 				return preserved, MapRead, Version{TxIndex: destructTxIndex}, nil
 			}
 		}
@@ -1345,6 +1437,18 @@ func (sdb *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 		}
 
 		if readAccount == nil || err != nil {
+			if err == nil && readStorage {
+				// A created account absent from the DB resolves its existence
+				// from the BAL-prepopulated sub-field cells; the fields
+				// themselves flow through the per-field cell reads downstream.
+				if synth, ok := sdb.synthesizeCreatedAccountBase(addr); ok {
+					sdb.accountRead(addr, synth, MapRead, UnknownVersion)
+					return synth, StorageRead, UnknownVersion, nil
+				}
+			}
+			if readStorage {
+				sdb.finalizeProvisionalAddressRead(addr)
+			}
 			return nil, StorageRead, UnknownVersion, err
 		}
 
@@ -1354,8 +1458,14 @@ func (sdb *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 		// only overwrites fields a versionMap cell exists for), so Empty()
 		// returns false and the EVM misses CallNewAccountGas.
 		if destroyed, _, revived := sdb.versionMap.AccountLifecycle(addr, sdb.txIndex); destroyed && !revived {
+			sdb.finalizeProvisionalAddressRead(addr)
 			return nil, StorageRead, UnknownVersion, nil
 		}
+		// readAccount above recorded a nil map-read marker; the DB resolved
+		// the account, so reconcile the recorded read — a later record cell
+		// would otherwise spuriously invalidate the nil against a live
+		// account.
+		sdb.accountRead(addr, readAccount, source, version)
 	}
 
 	return readAccount, source, version, nil
@@ -1961,7 +2071,10 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 	sdb.stateReader.SetTrace(false, "")
 
 	accountSource := StorageRead
-	accountVersion := sdb.Version()
+	// A DB-loaded record is pre-block state — older than any in-block cell.
+	// Stamping it with the reader's own version would rank it above those
+	// cells; UnknownVersion keeps every cell overlay ahead of it.
+	accountVersion := UnknownVersion
 
 	if err != nil {
 		return nil, err
@@ -1972,21 +2085,35 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 			readAccount, accountSource, accountVersion, err = refreshAccount(sdb, addr)
 
 			if readAccount == nil || err != nil {
-				return nil, err
-			}
-
-			destructed, _, _, err := refreshSelfDestruct(sdb, addr)
-
-			if destructed || err != nil {
-				if !sdb.noMaterialize {
-					so := stateObjectPool.Get().(*stateObject)
-					so.db = sdb
-					so.address = addr
-					so.selfdestructed = destructed
-					so.deleted = destructed
-					sdb.setStateObject(addr, so)
+				if err == nil {
+					if synth, ok := sdb.synthesizeCreatedAccountBase(addr); ok {
+						sdb.accountRead(addr, synth, MapRead, UnknownVersion)
+						readAccount = synth
+						accountSource = StorageRead
+						accountVersion = UnknownVersion
+					}
 				}
-				return nil, err
+				if readAccount == nil {
+					sdb.finalizeProvisionalAddressRead(addr)
+					return nil, err
+				}
+			} else {
+				// The synthesized path skips this: synthesizeCreatedAccountBase
+				// already bails on a destructed floor, and refreshSelfDestruct
+				// would record a racing SD read the BAL cannot resolve.
+				destructed, _, _, err := refreshSelfDestruct(sdb, addr)
+				if destructed || err != nil {
+					sdb.finalizeProvisionalAddressRead(addr)
+					if !sdb.noMaterialize {
+						so := stateObjectPool.Get().(*stateObject)
+						so.db = sdb
+						so.address = addr
+						so.selfdestructed = destructed
+						so.deleted = destructed
+						sdb.setStateObject(addr, so)
+					}
+					return nil, err
+				}
 			}
 		} else {
 			sdb.nilAccounts[addr] = struct{}{}
@@ -1997,7 +2124,8 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 		}
 	}
 
-	var code []byte
+	var code refreshedCode
+	var codeSource ReadSource
 
 	if sdb.versionMap != nil {
 		account = readAccount
@@ -2008,7 +2136,11 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 		// SelfDestructPath directly from the versionMap (not via versionedReadCore
 		// which itself short-circuits on the same flag). Use the same pattern
 		// as CreateAccount (line 1628).
-		if destructed, res, ok := sdb.versionMap.ReadSelfDestruct(addr, sdb.txIndex); ok && res.Status() == MVReadResultDone && destructed {
+		if sdVer, ok := sdb.versionMap.FindDoneSelfDestructInRange(addr, 0, sdb.txIndex, true); ok && !sdb.versionMap.selfDestructRevived(addr, sdVer.TxIndex, sdb.txIndex) {
+			// Revival must be evidenced by cells written after the destruct
+			// index (e.g. a BAL-funded balance): the DB record's own fields are
+			// pre-block state, so their non-emptiness says nothing about life
+			// after an in-block self-destruct.
 			// Only honour if the current tx hasn't already resurrected.
 			localResurrected := false
 			if sdVal, ok := sdb.versionedWriteSelfDestruct(addr); ok {
@@ -2029,7 +2161,7 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 			}
 		}
 
-		code, _, _, err = refreshCode(sdb, addr)
+		code, codeSource, _, err = refreshCode(sdb, addr)
 		if err != nil {
 			return nil, err
 		}
@@ -2037,19 +2169,18 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 		account = readAccount
 	}
 
-	if recordRead {
+	// recordRead=false must still reconcile on the versioned path: the map-miss above
+	// already recorded a nil marker (refreshAccount/getVersionedAccount), and a
+	// wrong nil read would spuriously invalidate against a later record cell.
+	if recordRead || sdb.versionMap != nil {
 		sdb.accountRead(addr, account, accountSource, accountVersion)
 	}
 	obj := newObject(sdb, addr, account, account)
-	if code != nil {
-		// When code is loaded from the version map (written by a prior tx),
-		// synchronise the stateObject's CodeHash with the actual code.
-		// Without this fix, the stale CodeHash causes the "revert to original"
-		// optimisation in SetCode to incorrectly delete code writes when
-		// clearing a delegation that was set by a prior transaction in the
-		// same block.
-		codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
-		obj.code = accounts.Code{Hash: codeHash, Bytes: code}
+	if code.Bytes != nil {
+		// The account record can lag a prior tx's code write, so the resolved
+		// hash wins: SetCode's revert-to-original check would drop the write.
+		codeHash := code.codeHash(codeSource, obj.data.CodeHash)
+		obj.code = accounts.Code{Hash: codeHash, Bytes: code.Bytes}
 		if codeHash != obj.data.CodeHash {
 			obj.data.CodeHash = codeHash
 			obj.original.CodeHash = codeHash
@@ -2168,31 +2299,26 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 		if readAccount != nil {
 			account := readAccount
 
-			destructed, _, _, err := refreshSelfDestruct(sdb, addr)
-
-			if err != nil {
-				return err
+			// Derive destructed without recording a SelfDestructPath read: the
+			// flag is a worker signal the BAL cannot pre-populate, so a recorded
+			// probe races the destroyer's flush on a CREATE2 re-creation. The
+			// value-carrying synthetic incarnation/balance reads below pin every
+			// consequence of the flag, so a stale conclusion still invalidates.
+			destructed := false
+			if sd, ok := sdb.versionedWriteSelfDestruct(addr); ok {
+				destructed = sd
+			} else if d, res, ok := sdb.versionMap.ReadSelfDestruct(addr, sdb.txIndex); ok && res.Status() == MVReadResultDone && d {
+				destructed = true
 			}
 
 			// Reuse the cached stateObject directly `previous` so that (a) selfdestructed=true is captured,
 			// (b) the accumulated incarnation is used for the new object's PrevIncarnation (important when the
 			// account was created and destroyed multiple times within the same block), and
-			// (c) after a REVERT CommitBlock can still emit DeleteAccount for it.
+			// (c) after a REVERT CommitBlock can still emit DeleteAccount for it (accumulated-IBS
+			// path, e.g. GenerateChain, where the map carries no SelfDestructPath cell).
 			if !destructed {
 				if so, ok := sdb.stateObjects[addr]; ok && so.selfdestructed {
-					// Accumulated-IBS path (e.g. GenerateChain): stateObjects cache marks the
-					// account as selfdestructed but versionedReadCore returned false due to the
-					// so.deleted early exit.  Reuse the cached stateObject to preserve the
-					// correct selfdestructed flag and accumulated incarnation.
 					previous = so
-				} else if sdb.versionMap != nil {
-					// Fresh-IBS worker path (e.g. InsertChain parallel executor): no stateObjects
-					// cache, but the versionMap may have SelfDestructPath=true from a prior tx.
-					// versionedReadCore returns false for SelfDestructPath via the early-exit at
-					// lines 459-462 — bypass it here so we correctly set selfdestructed=true.
-					if d, res, ok := sdb.versionMap.ReadSelfDestruct(addr, sdb.txIndex); ok && res.Status() == MVReadResultDone && d {
-						destructed = true
-					}
 				}
 			}
 
@@ -2771,6 +2897,8 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 		fmt.Printf("%d (%d.%d) ibs.Prepare: sender: %x, coinbase: %x, dest: %x, %x, %v, %v\n", sdb.blockNum, sdb.txIndex, sdb.version, sender, coinbase, dst, precompiles, list, rules)
 	}
 	sdb.eip8246 = rules.IsAmsterdam
+	sdb.eip161 = rules.IsEIP161Enabled()
+	sdb.isAura = rules.IsAura
 	if rules.IsBerlin {
 		// Clear out any leftover from previous executions
 		sdb.accessList.Reset()
@@ -2802,7 +2930,7 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 
 	// EIP-7928 records the EIP-3651 coinbase access even without a priority fee.
 	if rules.IsShanghai {
-		sdb.MarkAddressAccess(coinbase, true)
+		sdb.MarkAddressAccess(coinbase, false)
 	}
 }
 
@@ -2897,6 +3025,12 @@ func (sdb *IntraBlockState) accountRead(addr accounts.Address, account *accounts
 			// cross-tx dependency; recording it would make the validator
 			// (floored below the tx's own writes) return None and wrongly
 			// invalidate the tx.
+			return
+		}
+		if source == ReadSetRead {
+			// Served from the read set: the entry being reconciled is already
+			// recorded with its real source; re-recording would launder the
+			// synthetic tx-reads source into validation, which rejects it.
 			return
 		}
 		data := *account
@@ -3203,12 +3337,12 @@ func (sdb *IntraBlockState) reconstructCellFlags(obj *stateObject, addr accounts
 	if obj.code.Bytes != nil {
 		return
 	}
-	code, _, _, err := refreshCode(sdb, addr)
-	if err != nil || code == nil {
+	code, codeSource, _, err := refreshCode(sdb, addr)
+	if err != nil || code.Bytes == nil {
 		return
 	}
-	codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
-	obj.code = accounts.Code{Hash: codeHash, Bytes: code}
+	codeHash := code.codeHash(codeSource, obj.data.CodeHash)
+	obj.code = accounts.Code{Hash: codeHash, Bytes: code.Bytes}
 	obj.data.CodeHash = codeHash
 	obj.original.CodeHash = codeHash
 }

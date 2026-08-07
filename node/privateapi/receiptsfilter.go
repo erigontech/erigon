@@ -88,11 +88,12 @@ func (a *ReceiptsFilterAggregator) updateReceiptsFilter(filter *ReceiptsFilter, 
 
 	// Empty TransactionHashes slice (not nil) means subscribe to all
 	txHashes := filterReq.GetTransactionHashes()
-	if txHashes != nil && len(txHashes) == 0 {
+	switch {
+	case txHashes != nil && len(txHashes) == 0:
 		filter.allTxHashes = 1
-	} else if filterReq.GetAllTransactions() {
+	case filterReq.GetAllTransactions():
 		filter.allTxHashes = 1
-	} else {
+	default:
 		filter.allTxHashes = 0
 	}
 

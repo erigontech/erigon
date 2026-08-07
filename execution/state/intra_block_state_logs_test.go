@@ -18,7 +18,6 @@ package state
 
 import (
 	"bytes"
-	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -182,24 +181,28 @@ func TestResetKeepsLogsWithinBudget(t *testing.T) {
 	for range burst {
 		ibs.AddLog(&types.Log{Address: common.HexToAddress("0x1"), Data: make([]byte, 64)})
 	}
-	before := slices.Clone(ibs.logs[1])
+	before := ibs.logs[1]
+	beforeData := make([]*byte, burst)
+	for i := range before {
+		beforeData[i] = &before[i].Data[0]
+	}
 
 	ibs.Reset()
 	ibs.SetTxContext(2, 0)
 	for i := range burst {
-		require.Same(t, before[i], ibs.AllocLog(common.HexToAddress("0x2"), 0, 64), "entry %d", i)
+		lp := ibs.AllocLog(common.HexToAddress("0x2"), 0, 64)
+		require.Same(t, &before[i], lp, "entry %d", i)
+		require.Same(t, beforeData[i], &lp.Data[0], "entry %d data", i)
 	}
 }
 
 func retainedLogs(ibs *IntraBlockState) (entries, slotCap, dataBytes int) {
 	for _, slot := range ibs.logs[:cap(ibs.logs)] {
 		slotCap += cap(slot)
-		for _, lp := range slot[:cap(slot)] {
-			if lp == nil {
-				continue
-			}
-			entries++
-			dataBytes += cap(lp.Data)
+		buf := slot[:cap(slot)]
+		entries += len(buf)
+		for i := range buf {
+			dataBytes += cap(buf[i].Data)
 		}
 	}
 	return entries, slotCap, dataBytes
@@ -216,7 +219,7 @@ func TestRevertKeepsNormalLogBufferForReuse(t *testing.T) {
 		Address: common.HexToAddress("0x1"),
 		Data:    []byte{1, 2, 3},
 	})
-	first := ibs.logs[1][0]
+	first := &ibs.logs[1][0]
 	ibs.RevertToSnapshot(snap, nil)
 
 	lp := ibs.AllocLog(common.HexToAddress("0x2"), 0, 2)

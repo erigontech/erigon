@@ -71,7 +71,7 @@ func HeadersUnwind(ctx context.Context, u *UnwindState, s *StageState, tx kv.RwT
 				return fmt.Errorf("key in TD table has to be 40 bytes long: %x", k)
 			}
 			var td big.Int
-			if err = rlp.DecodeBytes(v, &td); err != nil {
+			if err := rlp.DecodeBytes(v, &td); err != nil {
 				return err
 			}
 			if td.Cmp(&maxTd) > 0 {
@@ -93,13 +93,13 @@ func HeadersUnwind(ctx context.Context, u *UnwindState, s *StageState, tx kv.RwT
 				return fmt.Errorf("not found canonical marker: %d", maxNum)
 			}
 		}
-		if err = rawdb.WriteHeadHeaderHash(tx, maxHash); err != nil {
+		if err := rawdb.WriteHeadHeaderHash(tx, maxHash); err != nil {
 			return err
 		}
-		if err = u.Done(tx); err != nil {
+		if err := u.Done(tx); err != nil {
 			return err
 		}
-		if err = s.Update(tx, maxNum); err != nil {
+		if err := s.Update(tx, maxNum); err != nil {
 			return err
 		}
 	}

@@ -1361,7 +1361,8 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 	}
 	rules := evm.ChainRules()
 	eip8246 := rules.IsAmsterdam
-	if eip8246 {
+	switch {
+	case eip8246:
 		// EIP-8246: SELFDESTRUCT no longer burns. The balance moves to the
 		// beneficiary (a no-op when it is self); a same-tx-created contract is
 		// still cleared at finalization but keeps any residual balance.
@@ -1379,7 +1380,7 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 				return pc, nil, err
 			}
 		}
-	} else if newContract { // Contract is new and will actually be deleted.
+	case newContract: // Contract is new and will actually be deleted.
 		if err := ibs.SubBalance(self, balance, tracing.BalanceDecreaseSelfdestruct); err != nil {
 			return pc, nil, err
 		}
@@ -1392,7 +1393,7 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 		if err != nil {
 			return pc, nil, err
 		}
-	} else if self != beneficiaryAddr { // Contract already exists, only do transfer if beneficiary is not self.
+	case self != beneficiaryAddr: // Contract already exists, only do transfer if beneficiary is not self.
 		if err := ibs.SubBalance(self, balance, tracing.BalanceDecreaseSelfdestruct); err != nil {
 			return pc, nil, err
 		}
@@ -1559,11 +1560,12 @@ func stPush1(pc uint64, scope *CallContext) string {
 func opPush2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	codeLen := uint64(len(scope.Contract.Code))
 	integer := scope.Stack.pushRef()
-	if pc+2 < codeLen {
+	switch {
+	case pc+2 < codeLen:
 		integer.SetBytes2(scope.Contract.Code[pc+1 : pc+3])
-	} else if pc+1 < codeLen {
+	case pc+1 < codeLen:
 		integer.SetUint64(uint64(scope.Contract.Code[pc+1]) << 8)
-	} else {
+	default:
 		integer.Clear()
 	}
 	pc += 2
