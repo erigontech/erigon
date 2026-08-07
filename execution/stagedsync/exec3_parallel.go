@@ -2452,10 +2452,43 @@ func (be *blockExecutor) invalidBlockResult(err error) *blockResult {
 // so pooling prev's maps leaves the writes merged now holds intact.
 func (be *blockExecutor) recordFeeMerge(tx int, prev, merged *state.WriteSet) {
 	if temp := be.feeMergeTemp[tx]; temp != nil && temp == prev && merged != temp {
-		temp.ReleaseMaps()
+		queueMapRelease(temp)
 	}
 	be.feeMergeTemp[tx] = merged
 }
+
+// Reclaiming a superseded write set is not free: ReleaseMaps clears every map
+// before pooling it, which is O(entries), and a superseded fee-merge set holds
+// the transaction's whole write set. Keep that off the apply loop, which is the
+// serial stage the workers wait behind.
+var (
+	mapReleases     = make(chan *state.WriteSet, 4096)
+	mapReleaseStart sync.Once
+	mapReleasing    sync.WaitGroup
+)
+
+func queueMapRelease(ws *state.WriteSet) {
+	mapReleaseStart.Do(func() {
+		go func() {
+			for w := range mapReleases {
+				w.ReleaseMaps()
+				mapReleasing.Done()
+			}
+		}()
+	})
+	mapReleasing.Add(1)
+	select {
+	case mapReleases <- ws:
+	default:
+		// A full queue means the releaser is behind; reclaiming inline costs
+		// less than letting the apply loop block on it.
+		ws.ReleaseMaps()
+		mapReleasing.Done()
+	}
+}
+
+// awaitMapReleases waits for queued reclamation to finish. Tests only.
+func awaitMapReleases() { mapReleasing.Wait() }
 
 // tooManyRetries returns an invalid-block result when tx has exceeded its
 // retry budget, otherwise nil. origin may be nil (validator-invalid path)
