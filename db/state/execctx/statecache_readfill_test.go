@@ -369,6 +369,27 @@ func TestCodeHashFill_SkipsInFlightUnwindRow(t *testing.T) {
 	require.False(t, ok, "a bounded in-flight unwind read must not seed a code-hash mapping")
 }
 
+// Background exec workers are constructed with a nil chainTx placeholder and
+// open their real tx on the first task; binding a getter for the placeholder
+// must not touch the tx.
+func TestAsGetterMeteredNilTx(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	db := newTestDb(t, 16)
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+	stateCache := newSmallStateCache()
+	t.Cleanup(stateCache.Close)
+	domains.SetStateCacheForTest(stateCache)
+
+	require.NotPanics(t, func() { domains.AsGetterMetered(nil, nil) })
+}
+
 // A negative reflects transactions below the read view's exclusive frontier,
 // so its unwind stamp is the last included txNum.
 func TestReadFill_NegativeUsesLastVisibleTxNum(t *testing.T) {

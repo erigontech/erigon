@@ -180,7 +180,9 @@ func (rejectedFrontier) DomainVisibleEnd(kv.Domain) (uint64, bool) { return 0, f
 // readViewEpoch rejects cache views created before an unwind. Requiring the same
 // state generation also rejects an old database transaction first bound after it.
 func (sd *SharedDomains) cacheFrontierFor(tx kv.TemporalTx) cache.Frontier {
-	if !sd.baseStateVersionKnown {
+	// Background exec workers bind getters with a nil placeholder tx and open
+	// the real one on their first task; the placeholder can never fill.
+	if tx == nil || !sd.baseStateVersionKnown {
 		return rejectedFrontier{}
 	}
 	sameStateGeneration := tx.ViewID() == sd.baseViewID
