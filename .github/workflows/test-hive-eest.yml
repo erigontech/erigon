@@ -188,8 +188,7 @@ jobs:
             fixtures-tarball: eest_devnet
             extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
             erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
-            # TODO v8.1.0 spec conformance
-            max-failures: 5
+            max-failures: 0
             commitment_mode: serial
           - sim: consume-enginex
             runner: ubuntu-latest
@@ -198,8 +197,7 @@ jobs:
             fixtures-tarball: eest_devnet
             extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
             erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
-            # TODO v8.1.0 spec conformance
-            max-failures: 5
+            max-failures: 0
             commitment_mode: parallel
     steps:
       - name: Clean docker system

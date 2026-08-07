@@ -49,12 +49,10 @@
   commitment-parallel: true
 - shard: statetests-devnet-sequential
   workers: 12
-  # TODO v8.1.0 spec conformance
   max-allowed-failures: 0
   commitment-parallel: false
 - shard: statetests-devnet-parallel
   workers: 12
-  # TODO v8.1.0 spec conformance
   max-allowed-failures: 0
   commitment-parallel: true
 - shard: statetests-legacy-sequential
@@ -95,13 +93,11 @@
   commitment-parallel: true
 - shard: blocktests-devnet-sequential
   workers: 12
-  # TODO v8.1.0 spec conformance
-  max-allowed-failures: 2
+  max-allowed-failures: 0
   commitment-parallel: false
 - shard: blocktests-devnet-parallel
   workers: 12
-  # TODO v8.1.0 spec conformance
-  max-allowed-failures: 2
+  max-allowed-failures: 0
   commitment-parallel: true
 - shard: blocktests-legacy-consensus-sequential
   workers: 12
@@ -331,13 +327,11 @@
   commitment-parallel: true
 - shard: enginextests-devnet-sequential
   workers: 8
-  # TODO v8.1.0 spec conformance
-  max-allowed-failures: 2
+  max-allowed-failures: 0
   commitment-parallel: false
 - shard: enginextests-devnet-parallel
   workers: 8
-  # TODO v8.1.0 spec conformance
-  max-allowed-failures: 2
+  max-allowed-failures: 0
   commitment-parallel: true
 - shard: enginextests-benchmark-1m-sequential
   workers: 1
@@ -455,14 +449,12 @@
   run: 'fork_(Osaka|BPO)'
 - shard: blocktests-devnet-race-amsterdam-sequential
   workers: 12
-  # TODO v8.1.0 spec conformance
-  max-allowed-failures: 2
+  max-allowed-failures: 0
   commitment-parallel: false
   run: 'fork_Amsterdam'
 - shard: blocktests-devnet-race-amsterdam-parallel
   workers: 12
-  # TODO v8.1.0 spec conformance
-  max-allowed-failures: 2
+  max-allowed-failures: 0
   commitment-parallel: true
   run: 'fork_Amsterdam'
 - shard: zkevm-witness-race
