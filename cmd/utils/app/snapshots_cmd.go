@@ -424,11 +424,10 @@ var snapshotCommand = cli.Command{
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&cli.StringFlag{Name: "check", Usage: fmt.Sprintf("comma separated list from: %s", integrity.FastChecks)},
-				&cli.StringFlag{Name: "skip-check", Usage: fmt.Sprintf("comma separated list from: %s", integrity.FastChecks)},
-				&cli.BoolFlag{Name: "failFast", Value: true, Usage: "to stop after 1st problem or print WARN log and continue check"},
+				&cli.StringFlag{Name: "skip-check", Usage: fmt.Sprintf("comma separated list from: %s, plus %s", integrity.FastChecks, integrity.TorrentPieces)},
+				&cli.BoolFlag{Name: "failFast", Value: true, Usage: "stop after the 1st problem, or WARN and keep checking (a torrent piece-hash mismatch still fails the run)"},
 				&cli.Uint64Flag{Name: "fromStep", Value: 0, Usage: "skip files before given step"},
 				&cli.StringFlag{Name: "file-integrity-cache", Usage: "path to integrity check cache file (speeds up repeated runs)"},
-				&cli.BoolFlag{Name: "skip-torrent-verify", Usage: "skip torrent piece verification when using file-integrity-cache"},
 				&cli.Int64Flag{Name: "seed", Usage: "random seed for sampling (auto-generated if not set)"},
 				&cli.Float64Flag{Name: "sample", Usage: "fraction of items to check via pseudo-random sampling (0.0-1.0)", Value: 0.01},
 				&cli.DurationFlag{Name: "integrity.budget", Value: 0, Usage: "total wall-clock budget for the run; each check gets (remaining / remaining_checks). 0 (default) means no limit"},
@@ -1522,7 +1521,7 @@ func doDebugKey(ctx context.Context, cliCtx *cli.Command) error {
 	return nil
 }
 
-func doIntegrity(ctx context.Context, cliCtx *cli.Command) error {
+func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 	logger := log.Root()
 
 	checkStr := cliCtx.String("check")
@@ -1543,9 +1542,8 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) error {
 		requestedChecks = integrity.FastChecks
 	}
 
-	skipChecks := cliCtx.String("skip-check")
-	if len(skipChecks) > 0 {
-		skipSet := map[integrity.Check]struct{}{}
+	skipSet := map[integrity.Check]struct{}{}
+	if skipChecks := cliCtx.String("skip-check"); len(skipChecks) > 0 {
 		for skipCheck := range strings.SplitSeq(skipChecks, ",") {
 			skipSet[integrity.Check(skipCheck)] = struct{}{}
 		}
@@ -1570,6 +1568,14 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) error {
 	fromStep := cliCtx.Uint64("fromStep")
 
 	var cache *integrity.IntegrityCache
+	// A torrent-verification failure must survive whatever the checks below return,
+	// including an early error or a cancellation on their way out.
+	var torrentVerifyErr error
+	defer func() {
+		if torrentVerifyErr != nil {
+			retErr = errors.Join(torrentVerifyErr, retErr)
+		}
+	}()
 	if cachePath := cliCtx.String("file-integrity-cache"); cachePath != "" {
 		var err error
 		cache, err = integrity.LoadIntegrityCache(cachePath)
@@ -1583,11 +1589,18 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) error {
 		}()
 
 		// When using cache, verify torrent piece hashes first (unless skipped)
-		if !cliCtx.Bool("skip-torrent-verify") {
+		if _, skip := skipSet[integrity.TorrentPieces]; !skip {
 			dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 			logger.Info("[integrity] verifying torrent piece hashes before integrity checks")
 			if err := integrity.VerifyTorrentFiles(ctx, dirs.Snap, failFast, logger); err != nil {
-				return fmt.Errorf("torrent verification failed: %w", err)
+				err = fmt.Errorf("torrent verification failed: %w", err)
+				if failFast {
+					return err
+				}
+				// failFast=false means "warn and keep checking", so the run still has to
+				// produce its check results; the error is reported at the end instead.
+				logger.Warn("[integrity] continuing after torrent verification failure", "err", err)
+				torrentVerifyErr = err
 			}
 		}
 	}
@@ -1716,6 +1729,12 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) error {
 			return integrity.CheckCommitmentHistAtBlkRange(ctx, scCopy, db, blockReader, 1, to+1, logger)
 		case integrity.StateVerify:
 			return integrity.CheckStateVerify(ctx, db, failFast, fromStep, logger)
+		case integrity.TorrentPieces:
+			// Already run as a pre-pass when --file-integrity-cache enabled it.
+			if cache == nil {
+				return integrity.VerifyTorrentFiles(ctx, dirs.Snap, failFast, logger)
+			}
+			return nil
 		default:
 			return fmt.Errorf("unknown check: %s", chk)
 		}
