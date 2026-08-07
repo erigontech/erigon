@@ -33,6 +33,7 @@ func (ws *WitnessWriteSet) Diff(want *Outputs) []string { return ws.mem.writeSet
 func NewWitnessDomains(ctx context.Context, tx kv.TemporalRwTx, fx *Fixture, seedTxNum uint64, logger log.Logger) (*execctx.SharedDomains, *WitnessWriteSet, error) {
 	metrics := &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}}
 	wmem := newWitnessMemBatch(tx.Debug().NewMemBatch(metrics))
+	wmem.hasStorage = fx.HasStorageResult
 
 	doms, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithMemBatch(wmem))
 	if err != nil {

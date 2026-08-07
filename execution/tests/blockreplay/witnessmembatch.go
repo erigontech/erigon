@@ -25,7 +25,12 @@ type witnessMemBatch struct {
 	// extra or missing write is a correctness bug that commitment-off replay,
 	// which validates neither receipts nor trie root, otherwise cannot see).
 	writes map[kv.Domain]map[string]struct{}
-	sealed bool
+	// hasStorage is the fixture's captured per-address HasStorage answer. The
+	// witness seeds only the storage slots that were read, so a prefix scan cannot
+	// reproduce HasStorage (storage may live in unseeded slots); the recorded
+	// answer is authoritative for the ReaderV3.HasStorage prefix check.
+	hasStorage map[[20]byte]bool
+	sealed     bool
 }
 
 func newWitnessMemBatch(delegate kv.TemporalMemBatch) *witnessMemBatch {
@@ -135,6 +140,13 @@ func (w *witnessMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv
 }
 
 func (w *witnessMemBatch) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) ([]byte, []byte, bool, error) {
+	// ReaderV3.HasStorage queries HasPrefix(StorageDomain, addr) and uses only the
+	// bool. Serve the captured answer — the seeded slots alone underreport it.
+	if domain == kv.StorageDomain && len(prefix) == 20 {
+		if has, ok := w.hasStorage[[20]byte(prefix)]; ok {
+			return nil, nil, has, nil
+		}
+	}
 	keys, err := w.prefixKeys(domain, prefix, roTx)
 	if err != nil {
 		return nil, nil, false, err

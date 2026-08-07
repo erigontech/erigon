@@ -70,8 +70,14 @@ type Fixture struct {
 	Accounts        map[[20]byte]acctData
 	Storage         map[[20]byte]map[[32]byte][32]byte
 	Code            map[[20]byte][]byte
-	Outputs         *Outputs // post-state the block wrote; nil until captured/backfilled
-	BALBytes        []byte   // encoded block access list sidecar; empty pre-Amsterdam
+	// HasStorageResult is the per-address HasStorage answer captured at query time.
+	// It cannot be derived from Storage (which holds only slots that were read):
+	// storage may exist only in unread slots, and reading an absent/zero slot does
+	// not imply storage exists. The EVM uses HasStorage for CREATE collision, so
+	// replay must reproduce the captured answer, not infer it.
+	HasStorageResult map[[20]byte]bool
+	Outputs          *Outputs // post-state the block wrote; nil until captured/backfilled
+	BALBytes         []byte   // encoded block access list sidecar; empty pre-Amsterdam
 }
 
 // BAL decodes the fixture's block access list sidecar, or nil when the block
@@ -104,10 +110,11 @@ func newOutputs() *Outputs {
 
 func newFixture() *Fixture {
 	return &Fixture{
-		Ancestors: map[uint64][32]byte{},
-		Accounts:  map[[20]byte]acctData{},
-		Storage:   map[[20]byte]map[[32]byte][32]byte{},
-		Code:      map[[20]byte][]byte{},
+		Ancestors:        map[uint64][32]byte{},
+		Accounts:         map[[20]byte]acctData{},
+		Storage:          map[[20]byte]map[[32]byte][32]byte{},
+		Code:             map[[20]byte][]byte{},
+		HasStorageResult: map[[20]byte]bool{},
 	}
 }
 
@@ -186,7 +193,14 @@ func (r *recordingReader) ReadAccountStorage(address accounts.Address, key accou
 }
 
 func (r *recordingReader) HasStorage(address accounts.Address) (bool, error) {
-	return r.inner.HasStorage(address)
+	has, err := r.inner.HasStorage(address)
+	if err != nil {
+		return has, err
+	}
+	if _, seen := r.fx.HasStorageResult[address.Value()]; !seen {
+		r.fx.HasStorageResult[address.Value()] = has
+	}
+	return has, nil
 }
 
 func (r *recordingReader) ReadAccountCode(address accounts.Address) ([]byte, error) {
@@ -261,6 +275,10 @@ func (r *inMemReader) ReadAccountStorage(address accounts.Address, key accounts.
 }
 
 func (r *inMemReader) HasStorage(address accounts.Address) (bool, error) {
+	// Use the captured answer; do NOT infer from read slots (see HasStorageResult).
+	if has, ok := r.fx.HasStorageResult[address.Value()]; ok {
+		return has, nil
+	}
 	return len(r.fx.Storage[address.Value()]) > 0, nil
 }
 
