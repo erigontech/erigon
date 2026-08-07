@@ -559,7 +559,9 @@ func (c *CodeCache) putCodeSizeByCodeHashLocked(codeHash []byte, size int, hcs, 
 
 // Delete removes the address → code mapping for addr.
 func (c *CodeCache) Delete(addr []byte) {
+	c.addrBindMu.Lock()
 	c.addrToHash.Remove(common.BytesToAddress(addr))
+	c.addrBindMu.Unlock()
 }
 
 // Clear removes every layer, resets accounting, and starts a new coherence
