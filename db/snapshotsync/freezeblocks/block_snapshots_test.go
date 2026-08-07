@@ -19,6 +19,8 @@ package freezeblocks
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -132,6 +134,48 @@ func TestRetireMergedTransactionFilesBelow(t *testing.T) {
 	_, ok, rel = snapshots.BaseRoSnapshots.ViewSingleFile(snaptype2.Headers, testMergeLimit/2)
 	rel()
 	require.True(t, ok, "only transaction segments are retired")
+}
+
+// TestRemoveBlockTripleArtifacts_RemovesSegAndAccessors pins the
+// atomic-cleanup helper called from dumpBlocksRange when a later
+// triple member fails after earlier members have already been
+// written. Every file the helper is told to sweep must be gone
+// afterwards; files outside the committed slice must survive.
+func TestRemoveBlockTripleArtifacts_RemovesSegAndAccessors(t *testing.T) {
+	dir := t.TempDir()
+
+	touched := func(fi snaptype.FileInfo) []string {
+		files := []string{fi.Path}
+		for _, idx := range fi.Type.IdxFileNames(fi.From, fi.To) {
+			files = append(files, filepath.Join(fi.Dir(), idx))
+		}
+		for _, p := range files {
+			require.NoError(t, os.WriteFile(p, []byte("fake"), 0644))
+		}
+		return files
+	}
+
+	hdrFI := snaptype2.Headers.FileInfo(dir, 0, 1000)
+	bodyFI := snaptype2.Bodies.FileInfo(dir, 0, 1000)
+	txFI := snaptype2.Transactions.FileInfo(dir, 0, 1000)
+
+	hdrFiles := touched(hdrFI)
+	bodyFiles := touched(bodyFI)
+	txFiles := touched(txFI)
+
+	// Simulate a transactions-side failure: headers + bodies were
+	// committed; transactions never made it past dumpRange's own
+	// cleanup so nothing of txFI is in `committed`.
+	removeBlockTripleArtifacts([]snaptype.FileInfo{hdrFI, bodyFI})
+
+	for _, p := range append(hdrFiles, bodyFiles...) {
+		_, err := os.Stat(p)
+		require.True(t, os.IsNotExist(err), "expected %s to be removed, got err=%v", p, err)
+	}
+	for _, p := range txFiles {
+		_, err := os.Stat(p)
+		require.NoError(t, err, "%s must not be touched — not in committed slice", p)
+	}
 }
 
 func TestDumpRangeErrorsWhenRangeAlreadyClaimed(t *testing.T) {

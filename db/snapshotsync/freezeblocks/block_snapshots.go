@@ -949,6 +949,20 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 		return lastTxNum, nil, err
 	}
 
+	// A block .seg triple (headers/bodies/transactions) is committed
+	// atomically: if any member fails, the earlier members must be
+	// retracted so the caller never sees a partial triple. dumpRange
+	// cleans up its own artifacts on failure; this defer covers the
+	// sibling members already on disk when a later dumpRange fails.
+	var committed []snaptype.FileInfo
+	defer func() {
+		if err == nil {
+			return
+		}
+		removeBlockTripleArtifacts(committed)
+		producedFiles = nil
+	}()
+
 	hdrFI := snaptype2.Headers.FileInfo(snapDir, blockFrom, blockTo)
 	headersDump := func(ctx context.Context, db kv.RoDB, cc *chain.Config, from, to uint64, fk firstKeyGetter, collect func([]byte) error, w int, l log.Lvl, lg log.Logger) (uint64, error) {
 		return DumpHeadersRaw(ctx, db, cc, from, to, fk, collect, w, l, lg, false, blockReader)
@@ -958,6 +972,7 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 		return 0, nil, err
 	}
 	producedFiles = append(producedFiles, hdrFI.Name())
+	committed = append(committed, hdrFI)
 
 	bodyFI := snaptype2.Bodies.FileInfo(snapDir, blockFrom, blockTo)
 	if lastTxNum, err = dumpRange(ctx, bodyFI,
@@ -965,6 +980,7 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 		return lastTxNum, producedFiles, err
 	}
 	producedFiles = append(producedFiles, bodyFI.Name())
+	committed = append(committed, bodyFI)
 
 	txFI := snaptype2.Transactions.FileInfo(snapDir, blockFrom, blockTo)
 	if _, err = dumpRange(ctx, txFI,
@@ -974,6 +990,20 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 	producedFiles = append(producedFiles, txFI.Name())
 
 	return lastTxNum, producedFiles, nil
+}
+
+// removeBlockTripleArtifacts removes the .seg and every accessor file
+// for each committed block-file. Best-effort — individual RemoveFile
+// failures don't stop the sweep. Used by dumpBlocksRange to preserve
+// triple atomicity when a later member fails after earlier members
+// have already been written.
+func removeBlockTripleArtifacts(committed []snaptype.FileInfo) {
+	for _, fi := range committed {
+		_ = dir2.RemoveFile(fi.Path)
+		for _, idxName := range fi.Type.IdxFileNames(fi.From, fi.To) {
+			_ = dir2.RemoveFile(filepath.Join(fi.Dir(), idxName))
+		}
+	}
 }
 
 type firstKeyGetter func(ctx context.Context) uint64
@@ -1398,6 +1428,7 @@ func DumpBodies(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blo
 	from := hexutil.EncodeTs(blockFrom)
 
 	lastTxNum := firstTxNum(ctx)
+	var emitted uint64
 	if err := kv.BigChunks(db, kv.HeaderCanonical, from, func(tx kv.Tx, k, v []byte) (bool, error) {
 		blockNum := binary.BigEndian.Uint64(k)
 		if blockNum >= blockTo {
@@ -1430,6 +1461,7 @@ func DumpBodies(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blo
 		if err := collect(dataRLP); err != nil {
 			return false, err
 		}
+		emitted++
 
 		select {
 		case <-ctx.Done():
@@ -1447,6 +1479,14 @@ func DumpBodies(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blo
 		return true, nil
 	}); err != nil {
 		return lastTxNum, err
+	}
+
+	// A short bodies.seg pairs with a full-length transactions.seg that
+	// reads back the last body at index N-1, decodes a zero-valued
+	// BodyForStorage, and produces the "negative txs count" indexer
+	// error. Fail loudly here so retire retries the range cleanly.
+	if emitted != (blockTo - blockFrom) {
+		return lastTxNum, fmt.Errorf("bodies sparse in requested range: got %d entries for [%d, %d) (expected %d)", emitted, blockFrom, blockTo, blockTo-blockFrom)
 	}
 
 	return lastTxNum, nil
