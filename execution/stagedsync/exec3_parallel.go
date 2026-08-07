@@ -2988,10 +2988,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				// progress / uncommittedGas tracking; receipt gas is fine here.
 				applyResult.blockGasUsed = int64(result.Receipt.GasUsed)
 
-				receipt := *result.Receipt
-				applyResult.receipt = &receipt
-				applyResult.receipt.Logs = append([]*types.Log{}, result.Receipt.Logs...)
-				applyResult.logs = applyResult.receipt.Logs
+				applyResult.receipt = result.Receipt
+				applyResult.logs = result.Receipt.Logs
 				pe.executedGas.Add(int64(applyResult.blockGasUsed))
 			}
 
