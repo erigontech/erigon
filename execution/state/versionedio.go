@@ -2142,6 +2142,50 @@ func (prev *WriteSet) Merge(next *WriteSet) *WriteSet {
 // exclusively owned by the caller and neither side may mutate a shared
 // VersionedWrite in place afterwards; prev's maps are never touched, so
 // map-level deletes on prev stay safe.
+// Absorb writes src's entries into s, src winning on conflicts. It is the
+// same result as s.MergeInto(src) but costs O(src) rather than O(s): the fee
+// merge adds two entries to a set holding the whole tx's writes.
+//
+// s is mutated, so the caller must own it — unlike MergeInto, which leaves
+// both inputs alone and returns one of them.
+func (s *WriteSet) Absorb(src *WriteSet) {
+	if src == nil {
+		return
+	}
+	for a, vw := range src.address {
+		s.SetAddress(a, vw)
+	}
+	for a, vw := range src.balance {
+		s.SetBalance(a, vw)
+	}
+	for a, vw := range src.nonce {
+		s.SetNonce(a, vw)
+	}
+	for a, vw := range src.incarnation {
+		s.SetIncarnation(a, vw)
+	}
+	for a, vw := range src.selfDestruct {
+		s.SetSelfDestruct(a, vw)
+	}
+	for a, vw := range src.createContract {
+		s.SetCreateContract(a, vw)
+	}
+	for a, vw := range src.code {
+		s.SetCode(a, vw)
+	}
+	for a, vw := range src.codeHash {
+		s.SetCodeHash(a, vw)
+	}
+	for a, vw := range src.codeSize {
+		s.SetCodeSize(a, vw)
+	}
+	for a, inner := range src.storage {
+		for key, vw := range inner {
+			s.SetStorage(a, key, vw)
+		}
+	}
+}
+
 func (prev *WriteSet) MergeInto(next *WriteSet) *WriteSet {
 	if prev.IsEmpty() {
 		return next

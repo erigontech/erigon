@@ -2495,6 +2495,10 @@ var releaseFeeMergeMaps = dbg.EnvBool("RELEASE_FEE_MERGE_MAPS", true)
 // long on. Zero disables it.
 var slowBlockMs = dbg.EnvInt("SLOW_BLOCK_MS", 0)
 
+// feeMergeInPlace folds the fee writes into the tx's own write set rather than
+// building a set that absorbs it. O(fee writes) instead of O(tx writes).
+var feeMergeInPlace = dbg.EnvBool("FEE_MERGE_IN_PLACE", false)
+
 // blockGeometry counts the work processResults did for one block, so a slow
 // block can be described rather than guessed at.
 type blockGeometry struct {
@@ -2787,12 +2791,22 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
 				if slowBlockMs > 0 {
 					be.geo.feeMerges++
-					be.geo.feeMergePrev += existingWrites.Count()
 					be.geo.feeMergeTip += tipWrites.Count()
 				}
-				merged := existingWrites.MergeInto(tipWrites)
-				be.blockIO.RecordWrites(txVersion, merged)
-				be.recordFeeMerge(tx, existingWrites, merged)
+				if feeMergeInPlace && !existingWrites.IsEmpty() {
+					// The fee writes are the small side: fold them into the set
+					// the tx already recorded instead of pouring that set into
+					// them. Nothing is superseded, so nothing needs reclaiming.
+					existingWrites.Absorb(tipWrites)
+					be.blockIO.RecordWrites(txVersion, existingWrites)
+				} else {
+					if slowBlockMs > 0 {
+						be.geo.feeMergePrev += existingWrites.Count()
+					}
+					merged := existingWrites.MergeInto(tipWrites)
+					be.blockIO.RecordWrites(txVersion, merged)
+					be.recordFeeMerge(tx, existingWrites, merged)
+				}
 			}
 		}
 
