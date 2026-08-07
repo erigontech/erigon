@@ -143,9 +143,10 @@ func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte) ([]byte, k
 }
 
 func (cpg *cachePopulatingGetter) GetCode(addr []byte, _ uint64) ([]byte, bool, error) {
-	// The hash was captured by a preceding read of this account on this
-	// getter's committed snapshot. It is safe for an immutable content-cache
-	// probe; a miss still uses the authoritative address-keyed CodeDomain path.
+	// A warmup worker calls ReadAccountData immediately before ReadAccountCode.
+	// The account read provides the code hash, which lets the code read probe the
+	// code cache before falling back to the database. This avoids repeated database
+	// reads for accounts sharing identical code.
 	if cpg.sc != nil && cpg.lastCodeHashKnown && bytes.Equal(addr, cpg.lastCodeAddr[:]) {
 		if code, ok := cpg.sc.GetCodeByHash(cpg.lastCodeHash[:]); ok {
 			return code, true, nil
