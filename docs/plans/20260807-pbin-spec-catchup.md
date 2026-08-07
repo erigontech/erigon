@@ -321,8 +321,8 @@ and cannot depend on transient working-tree state.
 **Files:**
 - Modify: (commit only, no edits) `execution/commitment/`, `rpc/jsonrpc/`, `docs/`
 
-- [ ] review `git status` and `git diff` on branch `binary-trie-witness`
-- [ ] stage every modified file plus all nine untracked ones:
+- [x] review `git status` and `git diff` on branch `binary-trie-witness`
+- [x] stage every modified file plus all nine untracked ones:
       `docs/pbin-encoding.md`, `docs/plans/20260807-pbin-spec-catchup.md`,
       `execution/commitment/pbin_conformance_test.go`,
       `execution/commitment/pbin_witness_codezone_test.go`,
@@ -331,10 +331,10 @@ and cannot depend on transient working-tree state.
       `rpc/jsonrpc/pbin_witness_clone_test.go`,
       `rpc/jsonrpc/pbin_witness_deploy_test.go`,
       `rpc/jsonrpc/pbin_witness_whale_test.go`
-- [ ] run `make lint` until clean
-- [ ] commit as `execution/commitment, rpc/jsonrpc: pbin witness fixes and conformance harness`
-- [ ] verify `git status --porcelain` is empty
-- [ ] run `go test ./execution/commitment/... -run TestPBin -count=1` — must be
+- [x] run `make lint` until clean
+- [x] commit as `execution/commitment, rpc/jsonrpc: pbin witness fixes and conformance harness`
+- [x] verify `git status --porcelain` is empty
+- [x] run `go test ./execution/commitment/... -run TestPBin -count=1` — must be
       green on the old vectors
 
 ### Task 2: Establish a durable execution-specs checkout
