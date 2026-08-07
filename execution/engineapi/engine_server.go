@@ -361,7 +361,17 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 
 	var blockAccessListBytes []byte
 	var err error
-	if version >= clparams.GloasVersion && s.config.IsEIPEnabled(7928, header.Time) {
+	if version < clparams.GloasVersion && req.SlotNumber != nil {
+		return nil, &rpc.InvalidParamsError{Message: "unexpected slotNumber before engine_newPayloadV5"}
+	}
+	if version < clparams.GloasVersion && req.BlockAccessList != nil && len(*req.BlockAccessList) > 0 {
+		// Reject only a NON-EMPTY block access list pre-Amsterdam. An empty ("0x")
+		// param must fall through rather than error here: a pre-fork block that
+		// carries a bal-hash header is rejected by the ensuing block-hash mismatch,
+		// and erroring on the empty param would pre-empt that expected path.
+		return nil, &rpc.InvalidParamsError{Message: "unexpected blockAccessList in pre-Amsterdam payload"}
+	}
+	if version >= clparams.GloasVersion {
 		if req.BlockAccessList == nil {
 			return nil, &rpc.InvalidParamsError{Message: "blockAccessList missing"}
 		}
@@ -389,12 +399,6 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		} else {
 			return nil, &rpc.InvalidParamsError{Message: "slotNumber missing"}
 		}
-	} else if req.BlockAccessList != nil && len(*req.BlockAccessList) > 0 {
-		// Reject only a NON-EMPTY block access list pre-Amsterdam. An empty ("0x")
-		// param must fall through rather than error here: a pre-fork block that
-		// carries a bal-hash header is rejected by the ensuing block-hash mismatch,
-		// and erroring on the empty param would pre-empt that expected path.
-		return nil, &rpc.InvalidParamsError{Message: "unexpected blockAccessList in pre-Amsterdam payload"}
 	}
 
 	if (!s.config.IsCancun(header.Time) && version >= clparams.DenebVersion) ||
@@ -482,11 +486,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	// inside InsertBlocks doesn't re-encode every tx
 	// via rlp.EncodeToBytes. Both slices reference the same underlying
 	// byte buffers from req.Transactions.
-	block := types.NewBlockFromStorageWithBinaryTxs(blockHash, &header, transactions, txs, nil /* uncles */, withdrawals)
-	// Carry the payload's BAL on the block so execution consumes it from the
-	// in-memory payload; InsertBlocks still stores it in the overlay (flushed at
-	// commit) as secondary storage.
-	block.SetBlockAccessList(blockAccessListBytes)
+	block := types.NewBlockFromStorageWithBinaryTxs(blockHash, &header, transactions, txs, nil /* uncles */, withdrawals, blockAccessListBytes)
 	payloadStatus, err := s.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes, blockAccessListBytes)
 	if err != nil {
 		if errors.Is(err, rules.ErrInvalidBlock) {
@@ -1011,11 +1011,7 @@ func (e *EngineServer) HandleNewPayload(
 		}
 	}
 
-	var bals [][]byte
-	if len(blockAccessListBytes) > 0 || block.BlockAccessListHash() != nil {
-		bals = [][]byte{blockAccessListBytes}
-	}
-	if err := e.chainRW.InsertBlocks(ctx, []*types.Block{block}, bals); err != nil {
+	if err := e.chainRW.InsertBlocks(ctx, []*types.Block{block}); err != nil {
 		if errors.Is(err, types.ErrBlockExceedsMaxRlpSize) {
 			return &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,
