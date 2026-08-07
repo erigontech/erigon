@@ -28,7 +28,7 @@ Replace `<path>` with the actual path to your Erigon data directory.
 - `--skip-check` — Comma-separated list of checks to exclude from the run
 - `--failFast` — Stop after the first problem is found (default: `true`). Set to `false` to continue and collect all warnings
 - `--file-integrity-cache` — Path to a cache file that speeds up repeated runs. Setting it also enables a torrent piece-hash verification pass before the checks
-- `--skip-torrent-verify` — Skip that torrent verification pass
+- `--skip-check TorrentPieces` — Skip that torrent verification pass; it is a named check like any other
 
 ## Discovering Available Checks
 
@@ -80,6 +80,6 @@ First discover available checks via `--help`, then:
 
 - **File Lock**: If Erigon is running, the command will fail due to file lock
 - **Long running**: Integrity checks can take significant time on large datadirs, especially mainnet
-- **Torrent verification scope**: With `--file-integrity-cache` set, the pre-pass scans `<datadir>/snapshots` recursively — top-level block segments plus `caplin/`, `domain/`, `history/`, `idx/`, `accessor/`. On a mainnet archive datadir that is roughly 2.6x the files of the top-level set; use `--skip-torrent-verify` to skip it
+- **Torrent verification scope**: With `--file-integrity-cache` set, the pre-pass scans `<datadir>/snapshots` recursively — top-level block segments plus `caplin/`, `domain/`, `history/`, `idx/`, `accessor/`. On a mainnet archive datadir that is roughly 2.6x the files of the top-level set; use `--skip-check TorrentPieces` to skip it
 - **Torrent verification exit code**: `--failFast=false` only means "verify every file before giving up" — a piece-hash mismatch, a path under `snapshots/` the scan could not read, or an interrupted run all still exit non-zero. A partial or failed scan is never reported as a pass
 - **Discover checks dynamically**: Always use `--help` to find the current list of available checks rather than assuming fixed names
