@@ -2353,6 +2353,8 @@ type blockExecutor struct {
 	// Stats for debugging purposes
 	cntExec, cntSpecExec, cntSuccess, cntAbort, cntTotalValidations, cntValidationFail, cntFinalized int
 
+	geo blockGeometry
+
 	// finalizedResults stores the finalized execResult snapshot per TX.
 	// Prevents the publish loop from seeing a different incarnation's
 	// result if be.results[tx] is overwritten between finalize and publish.
@@ -2480,6 +2482,7 @@ func (be *blockExecutor) invalidBlockResult(err error) *blockResult {
 func (be *blockExecutor) recordFeeMerge(tx int, prev, merged *state.WriteSet) {
 	if temp := be.feeMergeTemp[tx]; temp != nil && temp == prev && merged != temp && releaseFeeMergeMaps {
 		temp.ReleaseMaps()
+		be.geo.feeReleases++
 	}
 	be.feeMergeTemp[tx] = merged
 }
@@ -2487,6 +2490,36 @@ func (be *blockExecutor) recordFeeMerge(tx int, prev, merged *state.WriteSet) {
 // releaseFeeMergeMaps trades apply-loop time against allocator pressure: off,
 // the superseded fee-merge maps are collected rather than pooled.
 var releaseFeeMergeMaps = dbg.EnvBool("RELEASE_FEE_MERGE_MAPS", true)
+
+// slowBlockMs logs the shape of every block the apply loop takes at least this
+// long on. Zero disables it.
+var slowBlockMs = dbg.EnvInt("SLOW_BLOCK_MS", 0)
+
+// blockGeometry counts the work processResults did for one block, so a slow
+// block can be described rather than guessed at.
+type blockGeometry struct {
+	feeMerges      int // fee merges performed
+	feeMergePrev   int // writes already recorded on the txs those merges touched
+	feeMergeTip    int // writes the fee calc contributed
+	feeReleases    int // superseded fee-merge write sets reclaimed
+	finalizeMerges int
+	finalizePrev   int
+	normalizes     int
+	normalizeIn    int
+	normalizeOut   int
+	sdPrefixScans  int // domainStorageKeys calls
+	sdPrefixKeys   int // slots they enumerated
+}
+
+func (g *blockGeometry) logArgs() []any {
+	return []any{
+		"feeMerges", g.feeMerges, "feeMergePrevW", g.feeMergePrev, "feeMergeTipW", g.feeMergeTip,
+		"feeReleases", g.feeReleases,
+		"finalizeMerges", g.finalizeMerges, "finalizePrevW", g.finalizePrev,
+		"normalizes", g.normalizes, "normIn", g.normalizeIn, "normOut", g.normalizeOut,
+		"sdScans", g.sdPrefixScans, "sdKeys", g.sdPrefixKeys,
+	}
+}
 
 // tooManyRetries returns an invalid-block result when tx has exceeded its
 // retry budget, otherwise nil. origin may be nil (validator-invalid path)
@@ -2752,6 +2785,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 			if !tipWrites.IsEmpty() {
 				existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
+				if slowBlockMs > 0 {
+					be.geo.feeMerges++
+					be.geo.feeMergePrev += existingWrites.Count()
+					be.geo.feeMergeTip += tipWrites.Count()
+				}
 				merged := existingWrites.MergeInto(tipWrites)
 				be.blockIO.RecordWrites(txVersion, merged)
 				be.recordFeeMerge(tx, existingWrites, merged)
@@ -2882,6 +2920,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				if !addWrites.IsEmpty() {
 					// Merge finalization writes with existing execution writes.
 					existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
+					if slowBlockMs > 0 {
+						be.geo.finalizeMerges++
+						be.geo.finalizePrev += existingWrites.Count()
+					}
 					merged := existingWrites.MergeInto(addWrites)
 					be.blockIO.RecordWrites(txVersion, merged)
 
@@ -2917,11 +2959,20 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 							domainKeysErr = iterErr
 							return nil
 						}
+						if slowBlockMs > 0 {
+							be.geo.sdPrefixScans++
+							be.geo.sdPrefixKeys += len(keys)
+						}
 						return keys
 					}
 					// Mirror txtask.go's genesis rules-clobber so empty allocs (AuRa ZeroAddress) survive.
 					emptyRemoval := be.number() != 0 && pe.cfg.chainConfig.IsEIP161Enabled(be.number())
 					normWrites, normErr := rawWrites.Normalize(be.versionMap, txVersion.TxIndex, resultIncarnation, stateReader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil, txTask.Rules().IsAmsterdam)
+					if slowBlockMs > 0 {
+						be.geo.normalizes++
+						be.geo.normalizeIn += rawWrites.Count()
+						be.geo.normalizeOut += normWrites.Count()
+					}
 					if domainKeysErr != nil {
 						return nil, fmt.Errorf("[parallel] iterate storage prefix for block write normalization: %w", domainKeysErr)
 					}
@@ -3060,6 +3111,19 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		if be.profile {
 			allDeps = state.GetDep(be.blockIO)
 			deps = state.BuildDAG(be.blockIO, pe.logger)
+		}
+
+		if dur := time.Since(be.begin); slowBlockMs > 0 && dur >= time.Duration(slowBlockMs)*time.Millisecond {
+			reExecs := 0
+			for _, inc := range be.txIncarnations {
+				reExecs += inc
+			}
+			args := append([]any{
+				"blk", be.number(), "dur", common.Round(dur, 0), "txs", len(be.tasks),
+				"reExecs", reExecs, "aborts", be.cntAbort, "invalid", be.cntValidationFail,
+				"appliedW", be.applyCount,
+			}, be.geo.logArgs()...)
+			pe.logger.Info("["+pe.logPrefix+"] slow block", args...)
 		}
 
 		isPartial := len(be.tasks) > 0 && be.tasks[0].Version().TxIndex != -1
