@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/transition"
@@ -37,7 +38,12 @@ var (
 	errNodeSyncing    = errors.New("node is syncing")
 	errNotOurProposal = errors.New("next slot is not proposed by a registered validator")
 	errNoPayloadID    = errors.New("execution layer returned no payload id")
+	errHeadTooFarBack = errors.New("head state is too far behind the slot to prepare")
 )
+
+// preparedPayloadRetainSlots keeps a primed record alive past the slot it was primed for, so
+// priming the next slot cannot evict the record for a proposal that is still being produced.
+const preparedPayloadRetainSlots = 2
 
 // preparedPayload records the payload id the execution layer returned for a slot this node primed
 // ahead of time. Block production compares the id its own forkchoice update returns against this
@@ -45,22 +51,32 @@ var (
 // packing transactions since the prime, so the payload is worth taking early. Anything else — a
 // reorg, a late block, a changed fee recipient, an execution layer that was busy — yields a
 // different id and leaves production on its usual later schedule.
+// Records are kept per slot: consecutive proposals would otherwise let the prime for the later slot
+// evict the one production is about to look up.
 type preparedPayload struct {
-	mu        sync.Mutex
-	slot      uint64
-	payloadID []byte
+	mu       sync.Mutex
+	payloads map[uint64][]byte
 }
 
 func (p *preparedPayload) set(slot uint64, payloadID []byte) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.slot, p.payloadID = slot, bytes.Clone(payloadID)
+	if p.payloads == nil {
+		p.payloads = map[uint64][]byte{}
+	}
+	// Slots this far back can no longer be produced, so dropping them bounds the map.
+	for recorded := range p.payloads {
+		if recorded+preparedPayloadRetainSlots < slot {
+			delete(p.payloads, recorded)
+		}
+	}
+	p.payloads[slot] = bytes.Clone(payloadID)
 }
 
 func (p *preparedPayload) matches(slot uint64, payloadID []byte) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return len(payloadID) > 0 && p.slot == slot && bytes.Equal(p.payloadID, payloadID)
+	return len(payloadID) > 0 && bytes.Equal(p.payloads[slot], payloadID)
 }
 
 // StartPayloadPreparation primes the execution layer for slots this node is due to propose, so the
@@ -94,11 +110,24 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 			continue
 		}
 		if err := a.preparePayloadFor(ctx, targetSlot); err != nil {
-			log.Debug("PayloadPreparation: skipped", "slot", targetSlot, "err", err)
+			// Most ticks land on a slot somebody else proposes; logging those would drown out the
+			// failures worth seeing.
+			if !isExpectedPreparationSkip(err) {
+				log.Debug("PayloadPreparation: skipped", "slot", targetSlot, "err", err)
+			}
 			continue
 		}
 		lastPrepared = targetSlot
 	}
+}
+
+// isExpectedPreparationSkip reports whether there was simply nothing to prepare, as opposed to a
+// failure worth reporting.
+func isExpectedPreparationSkip(err error) bool {
+	return errors.Is(err, errNotOurProposal) ||
+		errors.Is(err, errNodeSyncing) ||
+		errors.Is(err, errHeadTooFarBack) ||
+		errors.Is(err, synced_data.ErrNotSynced)
 }
 
 // preparePayloadFor sends the forkchoice update for targetSlot ahead of the slot itself. It returns
@@ -107,34 +136,44 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 // recipient yet — because block production falls back to building inside the slot in every one of
 // those cases.
 func (a *ApiHandler) preparePayloadFor(ctx context.Context, targetSlot uint64) error {
-	baseBlockRoot := a.syncedData.HeadRoot()
-	if baseBlockRoot == (common.Hash{}) {
-		return errNodeSyncing
-	}
-
-	var proposerIndex uint64
+	var (
+		baseBlockRoot common.Hash
+		proposerIndex uint64
+		feeRecipient  common.Address
+		baseState     *state.CachingBeaconState
+	)
+	// Root, proposer and state all come from one view of the head. Reading them separately would
+	// let a head update in between pair a parent beacon block root with a different state, priming
+	// a builder that production can never match.
 	if err := a.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
-		var err error
-		proposerIndex, err = headState.GetBeaconProposerIndexForSlot(targetSlot)
-		return err
-	}); err != nil {
-		return err
-	}
-	// Only our own proposals are worth priming, and a fee recipient we do not yet know would build
-	// a payload that block production could not reuse anyway.
-	feeRecipient, ok := a.validatorParams.GetFeeRecipient(proposerIndex)
-	if !ok {
-		return errNotOurProposal
-	}
+		baseBlockRoot = a.syncedData.HeadRoot()
+		if baseBlockRoot == (common.Hash{}) {
+			return errNodeSyncing
+		}
+		// Beyond the proposer lookahead the index has to be reshuffled from the seed, which is far
+		// too costly to repeat every tick on a large validator set.
+		slotsPerEpoch := a.beaconChainCfg.SlotsPerEpoch
+		if targetSlot/slotsPerEpoch > headState.Slot()/slotsPerEpoch+a.beaconChainCfg.MinSeedLookahead {
+			return errHeadTooFarBack
+		}
 
-	var baseState *state.CachingBeaconState
-	if err := a.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
 		var err error
+		if proposerIndex, err = headState.GetBeaconProposerIndexForSlot(targetSlot); err != nil {
+			return err
+		}
+		// Only our own proposals are worth priming, and a fee recipient we do not yet know would
+		// build a payload that block production could not reuse anyway. Checked before the state
+		// copy, which is the expensive part.
+		var ok bool
+		if feeRecipient, ok = a.validatorParams.GetFeeRecipient(proposerIndex); !ok {
+			return errNotOurProposal
+		}
 		baseState, err = headState.Copy()
 		return err
 	}); err != nil {
 		return err
 	}
+
 	if err := transition.DefaultMachine.ProcessSlots(baseState, targetSlot); err != nil {
 		return err
 	}

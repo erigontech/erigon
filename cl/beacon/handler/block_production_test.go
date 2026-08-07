@@ -524,6 +524,23 @@ func TestPreparedPayloadMatchesOnlyTheSamePrime(t *testing.T) {
 	require.False(t, p.matches(10, nil), "no id from the execution layer")
 }
 
+func TestPreparedPayloadKeepsConsecutiveSlots(t *testing.T) {
+	var p preparedPayload
+	first := []byte{1, 1, 1, 1, 1, 1, 1, 1}
+	second := []byte{2, 2, 2, 2, 2, 2, 2, 2}
+
+	// Consecutive proposals: priming slot 11 must not evict slot 10, whose block may still be
+	// in production.
+	p.set(10, first)
+	p.set(11, second)
+	require.True(t, p.matches(10, first))
+	require.True(t, p.matches(11, second))
+
+	// Records old enough that they can no longer be produced are dropped, so the map is bounded.
+	p.set(10+preparedPayloadRetainSlots+1, []byte{3, 3, 3, 3, 3, 3, 3, 3})
+	require.False(t, p.matches(10, first))
+}
+
 func TestPreparedPayloadCopiesTheID(t *testing.T) {
 	var p preparedPayload
 	id := []byte{1, 2, 3, 4, 5, 6, 7, 8}
