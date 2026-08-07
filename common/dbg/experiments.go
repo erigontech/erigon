@@ -80,7 +80,10 @@ var (
 	SnapshotMadvRnd = EnvBool("SNAPSHOT_MADV_RND", true)
 	// kill-switch: set SNAPSHOT_MADV_SEQUENTIAL=false to skip MADV_SEQUENTIAL in seg.OpenSequentialView
 	SnapshotMadvSequential = EnvBool("SNAPSHOT_MADV_SEQUENTIAL", false)
-	OnlyCreateDB           = EnvBool("ONLY_CREATE_DB", false)
+	// LogNonRandomMmap logs snapshot files left without MADV_RANDOM after each merge.
+	// Off by default: reading /proc/self/smaps walks page tables of every mapped file.
+	LogNonRandomMmap = EnvBool("LOG_NON_RANDOM_MMAP", false)
+	OnlyCreateDB     = EnvBool("ONLY_CREATE_DB", false)
 
 	CaplinSyncedDataMangerDeadlockDetection = EnvBool("CAPLIN_SYNCED_DATA_MANAGER_DEADLOCK_DETECTION", false)
 
