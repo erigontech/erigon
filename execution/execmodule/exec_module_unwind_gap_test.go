@@ -41,7 +41,7 @@ import (
 func tamperBlockGasUsed(t *testing.T, b *types.Block, delta uint64) *types.Block {
 	header := b.Header()
 	header.GasUsed += delta
-	bad := types.NewBlockFromStorage(header.Hash(), header, b.Transactions(), b.Uncles(), b.Withdrawals())
+	bad := types.NewBlockFromStorage(header.Hash(), header, b.Transactions(), b.Uncles(), b.Withdrawals(), nil)
 	require.NotEqual(t, b.Hash(), bad.Hash(), "tampering must change the block hash")
 	return bad
 }
