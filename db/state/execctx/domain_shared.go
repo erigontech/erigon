@@ -293,6 +293,8 @@ func PickTrieVariant() commitment.TrieVariant {
 		return commitment.VariantStreamingHexPatricia
 	case statecfg.ExperimentalParallelCommitment:
 		return commitment.VariantParallelHexPatricia
+	case statecfg.ExperimentalDeembeddedCommitment:
+		return commitment.VariantDeembeddedHexPatricia
 	}
 	return commitment.VariantHexPatriciaTrie
 }
