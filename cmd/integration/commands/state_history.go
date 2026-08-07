@@ -260,7 +260,7 @@ func (s *histDupScan) observe(key, val []byte) {
 			if !s.curDup {
 				s.curDup = true
 				if len(s.SampleKeys) < s.sampleLimit {
-					s.SampleKeys = append(s.SampleKeys, common.Copy(key))
+					s.SampleKeys = append(s.SampleKeys, bytes.Clone(key))
 				}
 			}
 		}
@@ -284,7 +284,7 @@ func (s *histDupScan) finish() { s.closeKey() }
 
 func historyDomainNames() []string {
 	names := make([]string, 0, kv.DomainLen)
-	for d := kv.Domain(0); d < kv.DomainLen; d++ {
+	for d := range kv.DomainLen {
 		names = append(names, d.String())
 	}
 	return names
