@@ -265,6 +265,39 @@ func TestDump(t *testing.T) {
 	}
 }
 
+// TestDumpBlocks_RangeAheadOfHead pins the head-bound guard: dumping
+// a range whose blockTo exceeds bodies stage progress returns
+// ErrRangeAheadOfHead instead of building a partial .seg triple.
+// Retire treats this error as retriable — the range is picked up on
+// the next cycle once forward exec catches up. Post-deep-unwind,
+// forward re-exec may still be catching up when retire fires for a
+// range straddling the unwind target.
+func TestDumpBlocks_RangeAheadOfHead(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	m := createDumpTestKV(t, chain.AllProtocolChanges, 1000)
+	snConfig, _ := snapcfg.KnownCfg(networkname.Mainnet)
+	snConfig.ExpectBlocks = math.MaxUint64
+
+	// Request past the actual chain size — bodies stage sits at 1000.
+	_, err := freezeblocks.DumpBlocks(
+		m.Ctx, 0, uint64(2000),
+		m.ChainConfig, m.Dirs.Tmp, m.Dirs.Snap, m.DB,
+		1, log.LvlInfo, log.New(), m.BlockReader, snConfig, nil,
+	)
+	require.Error(t, err)
+	require.ErrorIs(t, err, freezeblocks.ErrRangeAheadOfHead)
+
+	// In-range still works — same chain, blockTo == chainSize.
+	_, err = freezeblocks.DumpBlocks(
+		m.Ctx, 0, uint64(1000),
+		m.ChainConfig, m.Dirs.Tmp, m.Dirs.Snap, m.DB,
+		1, log.LvlInfo, log.New(), m.BlockReader, snConfig, nil,
+	)
+	require.NoError(t, err)
+}
+
 func createDumpTestKV(t *testing.T, chainConfig *chain.Config, chainSize int) *execmoduletester.ExecModuleTester {
 	var (
 		key, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")

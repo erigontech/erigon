@@ -917,6 +917,7 @@ func (p *Provider) Initialize(deps Deps) error {
 			extractBootstrapCommitmentAnchors(ctx, deps.Inventory,
 				p.ChainDB, p.BlockReader, p.snapDir, logger)
 			probeBootstrapDomainFiles(deps.Inventory, p.snapDir, logger)
+			sweepIncompleteBlockTriples(p.snapDir, logger)
 		}
 	}
 

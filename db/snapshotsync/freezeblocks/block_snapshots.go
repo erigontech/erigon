@@ -761,6 +761,14 @@ func (br *BlockRetire) BuildFilesInBackground(
 			br.logger.Debug("[snapshots] retire blocks: deferred to in-flight build", "err", err)
 			return
 		}
+		if errors.Is(err, ErrRangeAheadOfHead) {
+			// Range extends past what forward exec has flushed to DB. Retire
+			// re-tries the range on the next scheduling tick once head
+			// catches up. Common after deep unwind while forward re-exec
+			// is still catching up to a straddler .seg's original range.
+			br.logger.Debug("[snapshots] retire blocks: range ahead of bodies stage; will retry", "err", err)
+			return
+		}
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
 				br.logger.Debug("[snapshots] retire blocks canceled", "err", err)
@@ -917,13 +925,34 @@ func (br *BlockRetire) DisableReadAhead() {
 // for [blockFrom, blockTo) and returns the basenames of every file
 // produced. Caller fires NotifyOnFilesChange with these names so the
 // inventory + chain.toml stay in sync without a disk scan.
+// ErrRangeAheadOfHead is returned by DumpBlocks when the caller
+// requests blocks that haven't been written to the chain DB yet
+// (blockTo > bodies stage progress + 1). Retire treats this as
+// retriable — the range gets picked up on the next cycle once
+// forward exec catches up.
+var ErrRangeAheadOfHead = errors.New("dumpblocks: requested range extends past bodies stage progress")
+
 func DumpBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *chain.Config, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader dbservices.FullBlockReader, snCfg *snapcfg.Cfg, inProgress *snapshotsync.BaseRoSnapshots) ([]string, error) {
 	var firstTxNum uint64
+	var bodiesProgress uint64
 	if err := chainDB.View(ctx, func(tx kv.Tx) error {
 		firstTxNum = blockReader.FirstTxnNumNotInSnapshots(tx)
-		return nil
+		var innerErr error
+		bodiesProgress, innerErr = stages.GetStageProgress(tx, stages.Bodies)
+		return innerErr
 	}); err != nil {
 		return nil, err
+	}
+	// Head-bound guard: refuse to dump a range whose end exceeds
+	// bodies stage progress. Building past the head produces phantom
+	// tail bodies (BaseTxnID=0) that TxsAmountBasedOnBodiesSnapshots
+	// then rejects with `negative txs count`, leaving orphan
+	// bodies+headers.seg with no matching transactions.seg. Post-
+	// deep-unwind, forward re-exec may still be catching up when
+	// retire fires for a range straddling the unwind target.
+	if blockTo > 0 && blockTo-1 > bodiesProgress {
+		return nil, fmt.Errorf("%w: blockTo=%d bodiesProgress=%d",
+			ErrRangeAheadOfHead, blockTo, bodiesProgress)
 	}
 
 	var produced []string
