@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/common"
 )
@@ -289,6 +290,77 @@ func TestExecutionPayloadServicePendingEnvelopeProcessing(t *testing.T) {
 
 	// Envelope should be marked as seen
 	require.True(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 1}))
+}
+
+func TestExecutionPayloadServiceQueuesEnvelopeUntilDataAvailable(t *testing.T) {
+	service, fcu := setupExecutionPayloadService(t)
+	impl := service.(*executionPayloadService)
+	blockRoot := common.HexToHash("0x1234")
+	envelope := newTestSignedEnvelope(100, blockRoot, 1)
+	fcu.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{
+		Block: &cltypes.BeaconBlock{Slot: 100},
+	}
+	fcu.OnExecutionPayloadErr = forkchoice.ErrEIP7594ColumnDataNotAvailable
+
+	err := service.ProcessMessage(t.Context(), nil, envelope)
+	require.ErrorIs(t, err, forkchoice.ErrEIP7594ColumnDataNotAvailable)
+	require.Equal(t, int32(1), impl.pendingCount.Load())
+
+	fcu.OnExecutionPayloadErr = nil
+	impl.processPendingEnvelopes(t.Context())
+
+	require.Equal(t, int32(0), impl.pendingCount.Load())
+	require.True(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 1}))
+}
+
+func TestExecutionPayloadServiceRetainsPendingEnvelopeUntilDataAvailable(t *testing.T) {
+	service, fcu := setupExecutionPayloadService(t)
+	impl := service.(*executionPayloadService)
+	blockRoot := common.HexToHash("0x1234")
+	envelope := newTestSignedEnvelope(100, blockRoot, 1)
+
+	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, envelope), ErrIgnore)
+	envelopeHash, err := envelope.HashSSZ()
+	require.NoError(t, err)
+	key := pendingEnvelopeKey{blockRoot: blockRoot, envelopeHash: envelopeHash}
+	value, ok := impl.pendingEnvelopes.Load(key)
+	require.True(t, ok)
+	creationTime := value.(*envelopeJob).creationTime
+
+	fcu.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{
+		Block: &cltypes.BeaconBlock{Slot: 100},
+	}
+	fcu.OnExecutionPayloadErr = forkchoice.ErrEIP7594ColumnDataNotAvailable
+
+	impl.processPendingEnvelopes(t.Context())
+	require.Equal(t, int32(1), impl.pendingCount.Load())
+	value, ok = impl.pendingEnvelopes.Load(key)
+	require.True(t, ok)
+	require.Equal(t, creationTime, value.(*envelopeJob).creationTime)
+
+	fcu.OnExecutionPayloadErr = nil
+	impl.processPendingEnvelopes(t.Context())
+
+	require.Equal(t, int32(0), impl.pendingCount.Load())
+	require.True(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 1}))
+}
+
+func TestExecutionPayloadServiceDropsPendingEnvelopeAfterValidationFailure(t *testing.T) {
+	service, fcu := setupExecutionPayloadService(t)
+	impl := service.(*executionPayloadService)
+	blockRoot := common.HexToHash("0x1234")
+	envelope := newTestSignedEnvelope(100, blockRoot, 1)
+
+	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, envelope), ErrIgnore)
+	fcu.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{
+		Block: &cltypes.BeaconBlock{Slot: 100},
+	}
+	fcu.OnExecutionPayloadErr = errors.New("invalid envelope")
+
+	impl.processPendingEnvelopes(t.Context())
+
+	require.Equal(t, int32(0), impl.pendingCount.Load())
+	require.False(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 1}))
 }
 
 func TestExecutionPayloadServiceMultiplePendingForSameBlock(t *testing.T) {

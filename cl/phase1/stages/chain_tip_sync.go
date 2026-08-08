@@ -60,8 +60,8 @@ func gloasEnvelopePayloadHash(envelope *cltypes.SignedExecutionPayloadEnvelope) 
 	return envelope.Message.Payload.BlockHash, true
 }
 
-func canRetryGloasPayloads(cfg *Cfg) bool {
-	return cfg.executionClient != nil && cfg.executionClient.SupportInsertion()
+func canValidateGloasPayloads(cfg *Cfg) bool {
+	return cfg.executionClient != nil
 }
 
 // waitForExecutionEngineToBeFinished checks if the execution engine is ready within a specified timeout.
@@ -259,7 +259,7 @@ MainLoop:
 				if block.Version() >= clparams.GloasVersion && len(envelopes) > 0 {
 					parentRoot := block.Block.ParentRoot
 					if env, ok := envelopes[common.Hash(parentRoot)]; ok {
-						if envErr := cfg.forkChoice.OnExecutionPayload(ctx, env, false, canRetryGloasPayloads(cfg)); envErr != nil {
+						if envErr := cfg.forkChoice.OnExecutionPayload(ctx, env, false, canValidateGloasPayloads(cfg)); envErr != nil {
 							log.Debug("[chainTipSync] failed to apply parent envelope", "slot", block.Block.Slot, "err", envErr)
 						}
 					}
@@ -296,7 +296,7 @@ func fetchAndApplyEnvelopes(ctx context.Context, cfg *Cfg, roots [][32]byte) {
 		return
 	}
 	for _, env := range envelopes {
-		if err := cfg.forkChoice.OnExecutionPayload(ctx, env, true, canRetryGloasPayloads(cfg)); err != nil {
+		if err := cfg.forkChoice.OnExecutionPayload(ctx, env, true, canValidateGloasPayloads(cfg)); err != nil {
 			log.Debug("[chainTipSync] failed to apply recovered GLOAS envelope", "beaconBlockRoot", env.Message.BeaconBlockRoot, "err", err)
 		}
 	}
@@ -511,7 +511,23 @@ func retryGloasPayloadWithEL(ctx context.Context, cfg *Cfg, block *cltypes.Signe
 		return execution_client.PayloadStatusNone, err
 	}
 	parentRoot := block.Block.ParentRoot
-	return cfg.executionClient.NewPayload(ctx, envelope.Message.Payload, &parentRoot, versionedHashes, executionRequestsList)
+	validationKey, err := envelope.Message.HashSSZ()
+	if err != nil {
+		return execution_client.PayloadStatusNone, err
+	}
+	return cfg.newPayloadCoordinator().NewPayload(ctx, common.Hash(validationKey), envelope.Message.Payload, &parentRoot, versionedHashes, executionRequestsList)
+}
+
+func (c *Cfg) newPayloadCoordinator() *execution_client.PayloadValidationCoordinator {
+	if c.payloadValidator != nil {
+		return c.payloadValidator
+	}
+	if c.forkChoice != nil && c.forkChoice.PayloadValidationCoordinator() != nil {
+		c.payloadValidator = c.forkChoice.PayloadValidationCoordinator()
+	} else {
+		c.payloadValidator = execution_client.NewPayloadValidationCoordinator(c.executionClient)
+	}
+	return c.payloadValidator
 }
 
 func isGloasPayloadKnownInvalid(cfg *Cfg, envelope *cltypes.SignedExecutionPayloadEnvelope) bool {
@@ -676,13 +692,15 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 	// insertion — so it must run regardless of SupportInsertion().
 	recoverMissingEnvelopes(ctx, cfg)
 
-	if canRetryGloasPayloads(cfg) {
+	if canValidateGloasPayloads(cfg) {
 		// [New in Gloas:EIP7732] Drain execution blocks whose CL transition succeeded
 		// but whose EL newPayload previously returned SYNCING/ACCEPTED.
 		drainPendingGloasPayloads(ctx, cfg)
 		retryUnverifiedAnchorPayload(ctx, cfg)
-		if err := cfg.blockCollector.Flush(context.Background()); err != nil {
-			log.Warn("[chainTipSync] blockCollector.Flush failed (EL may still be catching up)", "err", err)
+		if cfg.executionClient.SupportInsertion() {
+			if err := cfg.blockCollector.Flush(context.Background()); err != nil {
+				log.Warn("[chainTipSync] blockCollector.Flush failed (EL may still be catching up)", "err", err)
+			}
 		}
 	}
 
@@ -696,7 +714,7 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 			if headRoot != (common.Hash{}) && !cfg.forkChoice.HasEnvelope(headRoot) {
 				pollForEnvelope(ctx, cfg, headRoot, 2*time.Second)
 			}
-			if canRetryGloasPayloads(cfg) {
+			if canValidateGloasPayloads(cfg) {
 				verifyUnverifiedGloasPayloads(ctx, cfg)
 			}
 			// NOTE: recoverMissingEnvelopes runs unconditionally above (before

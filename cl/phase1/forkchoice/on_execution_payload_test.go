@@ -18,6 +18,8 @@ package forkchoice
 
 import (
 	"context"
+	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -30,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 )
 
 // TestValidateEnvelopeAgainstBlock_NoBid tests that validation fails when block has no bid
@@ -323,9 +326,8 @@ func TestValidatePayloadWithELDoesNotRelockForkChoiceMu(t *testing.T) {
 				payloadStatusByRoot:      payloadStatusByRoot,
 				executionPayloadGasLimit: executionPayloadGasLimit,
 			}
-			envelope := &cltypes.ExecutionPayloadEnvelope{
-				Payload: &cltypes.Eth1Block{BlockHash: executionBlockHash},
-			}
+			envelope := cltypes.NewExecutionPayloadEnvelope(cfg)
+			envelope.Payload.BlockHash = executionBlockHash
 			body := cltypes.NewBeaconBody(cfg, clparams.GloasVersion)
 			body.SignedExecutionPayloadBid = &cltypes.SignedExecutionPayloadBid{
 				Message: &cltypes.ExecutionPayloadBid{
@@ -361,4 +363,315 @@ func TestValidatePayloadWithELDoesNotRelockForkChoiceMu(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestValidatePayloadWithELReleasesForkChoiceMuDuringNewPayload(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	ctrl := gomock.NewController(t)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engineStarted := make(chan struct{})
+	releaseEngine := make(chan struct{})
+	engine.EXPECT().
+		NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (execution_client.PayloadStatus, error) {
+			close(engineStarted)
+			<-releaseEngine
+			return execution_client.PayloadStatusValidated, nil
+		})
+
+	verifiedExecutionPayload, err := lru.New[common.Hash, struct{}](16)
+	require.NoError(t, err)
+	executionPayloadStatus, err := lru.New[common.Hash, execution_client.PayloadStatus](16)
+	require.NoError(t, err)
+	payloadStatusByRoot, err := lru.New[common.Hash, execution_client.PayloadStatus](16)
+	require.NoError(t, err)
+	executionPayloadGasLimit, err := lru.New[common.Hash, uint64](16)
+	require.NoError(t, err)
+
+	f := &ForkChoiceStore{
+		beaconCfg:                cfg,
+		engine:                   engine,
+		forkGraph:                payloadVoteForkGraph{},
+		verifiedExecutionPayload: verifiedExecutionPayload,
+		executionPayloadStatus:   executionPayloadStatus,
+		payloadStatusByRoot:      payloadStatusByRoot,
+		executionPayloadGasLimit: executionPayloadGasLimit,
+	}
+	body := cltypes.NewBeaconBody(cfg, clparams.GloasVersion)
+	body.SignedExecutionPayloadBid = &cltypes.SignedExecutionPayloadBid{
+		Message: &cltypes.ExecutionPayloadBid{
+			BlobKzgCommitments: *solid.NewStaticListSSZ[*cltypes.KZGCommitment](0, 48),
+		},
+	}
+	block := &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Body: body}}
+	envelope := cltypes.NewExecutionPayloadEnvelope(cfg)
+	envelope.Payload.BlockHash = common.HexToHash("0xabcd")
+
+	validationDone := make(chan error, 1)
+	go func() {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		validationDone <- f.validatePayloadWithEL(context.Background(), envelope, block, common.HexToHash("0x1234"))
+	}()
+	<-engineStarted
+
+	lockAcquired := make(chan struct{})
+	go func() {
+		f.mu.Lock()
+		close(lockAcquired)
+		f.mu.Unlock()
+	}()
+	acquiredBeforeRelease := false
+	select {
+	case <-lockAcquired:
+		acquiredBeforeRelease = true
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(releaseEngine)
+	require.NoError(t, <-validationDone)
+	require.True(t, acquiredBeforeRelease, "forkchoice mutex stayed locked during NewPayload")
+}
+
+func TestValidatePayloadWithELDoesNotCoalesceDifferentPayloads(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	ctrl := gomock.NewController(t)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	firstStarted := make(chan struct{})
+	secondStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	var calls atomic.Int32
+	engine.EXPECT().
+		NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Times(2).
+		DoAndReturn(func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (execution_client.PayloadStatus, error) {
+			if calls.Add(1) == 1 {
+				close(firstStarted)
+				<-releaseFirst
+			} else {
+				close(secondStarted)
+			}
+			return execution_client.PayloadStatusValidated, nil
+		})
+
+	verifiedExecutionPayload, err := lru.New[common.Hash, struct{}](16)
+	require.NoError(t, err)
+	executionPayloadStatus, err := lru.New[common.Hash, execution_client.PayloadStatus](16)
+	require.NoError(t, err)
+	payloadStatusByRoot, err := lru.New[common.Hash, execution_client.PayloadStatus](16)
+	require.NoError(t, err)
+	executionPayloadGasLimit, err := lru.New[common.Hash, uint64](16)
+	require.NoError(t, err)
+	f := &ForkChoiceStore{
+		beaconCfg:                cfg,
+		engine:                   engine,
+		forkGraph:                payloadVoteForkGraph{},
+		verifiedExecutionPayload: verifiedExecutionPayload,
+		executionPayloadStatus:   executionPayloadStatus,
+		payloadStatusByRoot:      payloadStatusByRoot,
+		executionPayloadGasLimit: executionPayloadGasLimit,
+	}
+	body := cltypes.NewBeaconBody(cfg, clparams.GloasVersion)
+	body.SignedExecutionPayloadBid = &cltypes.SignedExecutionPayloadBid{
+		Message: &cltypes.ExecutionPayloadBid{BlobKzgCommitments: *solid.NewStaticListSSZ[*cltypes.KZGCommitment](0, 48)},
+	}
+	block := &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Body: body}}
+	blockRoot := common.HexToHash("0x1234")
+	first := cltypes.NewExecutionPayloadEnvelope(cfg)
+	first.BeaconBlockRoot = blockRoot
+	first.Payload.BlockHash = common.HexToHash("0xabcd")
+	second := cltypes.NewExecutionPayloadEnvelope(cfg)
+	second.BeaconBlockRoot = blockRoot
+	second.Payload.BlockHash = first.Payload.BlockHash
+	second.Payload.GasUsed = 1
+
+	results := make(chan error, 2)
+	validate := func(envelope *cltypes.ExecutionPayloadEnvelope) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		results <- f.validatePayloadWithEL(context.Background(), envelope, block, blockRoot)
+	}
+	go validate(first)
+	<-firstStarted
+	go validate(second)
+	select {
+	case <-secondStarted:
+	case <-time.After(time.Second):
+		close(releaseFirst)
+		t.Fatal("different payload was coalesced with in-flight validation")
+	}
+	close(releaseFirst)
+	require.NoError(t, <-results)
+	require.NoError(t, <-results)
+}
+
+func TestNewPayloadCoalescesSameKey(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	expectedErr := errors.New("payload rejected")
+	engine.EXPECT().
+		NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Times(1).
+		DoAndReturn(func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (execution_client.PayloadStatus, error) {
+			close(started)
+			<-release
+			return execution_client.PayloadStatusInvalidated, expectedErr
+		})
+	f := &ForkChoiceStore{engine: engine}
+	key := hashWithFirstByte(1)
+	type result struct {
+		status execution_client.PayloadStatus
+		err    error
+	}
+	results := make(chan result, 2)
+	validate := func(acquired chan<- struct{}) {
+		f.mu.Lock()
+		if acquired != nil {
+			close(acquired)
+		}
+		status, err := f.newPayloadWithoutForkChoiceLock(context.Background(), key, nil, nil, nil, nil)
+		f.mu.Unlock()
+		results <- result{status: status, err: err}
+	}
+
+	go validate(nil)
+	<-started
+	followerAcquired := make(chan struct{})
+	go validate(followerAcquired)
+	<-followerAcquired
+	f.mu.Lock()
+	close(release)
+	f.mu.Unlock()
+	for range 2 {
+		got := <-results
+		require.EqualValues(t, execution_client.PayloadStatusInvalidated, got.status)
+		require.ErrorIs(t, got.err, expectedErr)
+	}
+}
+
+func TestNewPayloadCanceledWaiterDoesNotCancelLeader(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	engine.EXPECT().
+		NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Times(1).
+		DoAndReturn(func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (execution_client.PayloadStatus, error) {
+			close(started)
+			<-release
+			return execution_client.PayloadStatusValidated, nil
+		})
+	f := &ForkChoiceStore{engine: engine}
+	key := hashWithFirstByte(1)
+	leaderDone := make(chan error, 1)
+	go func() {
+		f.mu.Lock()
+		_, err := f.newPayloadWithoutForkChoiceLock(context.Background(), key, nil, nil, nil, nil)
+		f.mu.Unlock()
+		leaderDone <- err
+	}()
+	<-started
+
+	waiterCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	f.mu.Lock()
+	_, err := f.newPayloadWithoutForkChoiceLock(waiterCtx, key, nil, nil, nil, nil)
+	f.mu.Unlock()
+	require.ErrorIs(t, err, context.Canceled)
+
+	close(release)
+	require.NoError(t, <-leaderDone)
+}
+
+func TestNewPayloadConcurrencyIsBounded(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	started := make(chan struct{}, 3)
+	release := make(chan struct{})
+	var active atomic.Int32
+	var maximum atomic.Int32
+	engine.EXPECT().
+		NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Times(3).
+		DoAndReturn(func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (execution_client.PayloadStatus, error) {
+			current := active.Add(1)
+			for current > maximum.Load() && !maximum.CompareAndSwap(maximum.Load(), current) {
+			}
+			started <- struct{}{}
+			<-release
+			active.Add(-1)
+			return execution_client.PayloadStatusValidated, nil
+		})
+	f := &ForkChoiceStore{engine: engine}
+	done := make(chan struct{}, 3)
+	for i := range 3 {
+		go func(key byte) {
+			f.mu.Lock()
+			_, _ = f.newPayloadWithoutForkChoiceLock(context.Background(), hashWithFirstByte(key), nil, nil, nil, nil)
+			f.mu.Unlock()
+			done <- struct{}{}
+		}(byte(i + 1))
+	}
+	<-started
+	<-started
+	select {
+	case <-started:
+		t.Fatal("more than two NewPayload calls ran concurrently")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	<-started
+	for range 3 {
+		<-done
+	}
+	require.Equal(t, int32(2), maximum.Load())
+}
+
+func TestNewPayloadPanicRestoresForkChoiceState(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	var calls atomic.Int32
+	engine.EXPECT().
+		NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Times(3).
+		DoAndReturn(func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (execution_client.PayloadStatus, error) {
+			if calls.Add(1) == 1 {
+				panic("engine panic")
+			}
+			return execution_client.PayloadStatusValidated, nil
+		})
+	f := &ForkChoiceStore{engine: engine}
+	key := hashWithFirstByte(1)
+	func() {
+		defer func() { require.Equal(t, "engine panic", recover()) }()
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		_, _ = f.newPayloadWithoutForkChoiceLock(context.Background(), key, nil, nil, nil, nil)
+	}()
+
+	done := make(chan error, 2)
+	for _, retryKey := range []common.Hash{key, hashWithFirstByte(2)} {
+		go func() {
+			f.mu.Lock()
+			_, err := f.newPayloadWithoutForkChoiceLock(context.Background(), retryKey, nil, nil, nil, nil)
+			f.mu.Unlock()
+			done <- err
+		}()
+	}
+	for range 2 {
+		select {
+		case err := <-done:
+			require.NoError(t, err)
+		case <-time.After(time.Second):
+			t.Fatal("payload validation remained blocked after engine panic")
+		}
+	}
+}
+
+func hashWithFirstByte(value byte) common.Hash {
+	var hash common.Hash
+	hash[0] = value
+	return hash
 }

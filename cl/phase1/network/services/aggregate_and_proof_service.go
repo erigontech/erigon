@@ -340,7 +340,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 			localValidatorIsProposer = a.isLocalValidatorProposer(headState, currentEpoch, localValidators)
 		}
 
-		if localValidatorIsProposer || aggregateAndProof.ImmediateProcess {
+		if shouldVerifyAggregate(localValidators, localValidatorIsProposer, aggregateAndProof.ImmediateProcess) {
 			// Set beacon config on the aggregate's attestation so HashSSZ uses the correct
 			// AggregationBits limit for the active preset (e.g. minimal: 8192, mainnet: 131072).
 			aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.SetBeaconConfig(a.beaconCfg)
@@ -382,6 +382,10 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 
 	a.batchSignatureVerifier.AsyncVerifyAggregateProof(aggregateVerificationData)
 	return nil
+}
+
+func shouldVerifyAggregate(localValidators []uint64, localValidatorIsProposer, immediateProcess bool) bool {
+	return len(localValidators) == 0 || localValidatorIsProposer || immediateProcess
 }
 
 func GetSignaturesOnAggregate(

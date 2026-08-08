@@ -176,6 +176,7 @@ type ForkChoiceStore struct {
 	ptcVoteMu                   sync.Mutex // protects read-modify-write on payloadTimelinessVote and payloadDataAvailabilityVote
 	payloadTimelinessVote       sync.Map   // map[common.Hash][clparams.PtcSize]int8 (0=unvoted, 1=true, -1=false)
 	payloadDataAvailabilityVote sync.Map   // map[common.Hash][clparams.PtcSize]int8 (0=unvoted, 1=true, -1=false)
+	payloadAttestationContexts  *payloadAttestationValidationContexts
 	// [New in Gloas:EIP7732] Block timeliness tracking.
 	// Pre-GLOAS: stores [block_timely, false] (only index 0 is meaningful).
 	// Post-GLOAS: stores [block_timely, payload_timely] — two independent booleans.
@@ -201,6 +202,7 @@ type ForkChoiceStore struct {
 	// eventually receives the blocks.
 	pendingELPayloadsMu sync.Mutex
 	pendingELPayloads   []PendingELPayload
+	payloadValidator    *execution_client.PayloadValidationCoordinator
 
 	// db is used to persist execution payload indices (block number/hash) when an envelope
 	// is accepted in OnExecutionPayload. May be nil (e.g. in tests), in which case the
@@ -335,6 +337,10 @@ func NewForkChoiceStore(
 	if err != nil {
 		return nil, err
 	}
+	payloadAttestationContexts, err := newPayloadAttestationValidationContexts()
+	if err != nil {
+		return nil, err
+	}
 
 	publicKeysRegistry.ResetAnchor(anchorState)
 	participation.Add(state.Epoch(anchorState.BeaconState), anchorState.CurrentEpochParticipation().Copy())
@@ -392,6 +398,8 @@ func NewForkChoiceStore(
 		executionPayloadStatus:         executionPayloadStatus,
 		payloadStatusByRoot:            payloadStatusByRoot,
 		executionPayloadGasLimit:       executionPayloadGasLimit,
+		payloadAttestationContexts:     payloadAttestationContexts,
+		payloadValidator:               execution_client.NewPayloadValidationCoordinator(engine),
 		db:                             db,
 	}
 	f.justifiedCheckpoint.Store(anchorCheckpoint)
@@ -422,6 +430,10 @@ func NewForkChoiceStore(
 	f.gloasWeightTree = newGloasWeightTree(f)
 
 	return f, nil
+}
+
+func (f *ForkChoiceStore) PayloadValidationCoordinator() *execution_client.PayloadValidationCoordinator {
+	return f.payloadValidator
 }
 
 func (f *ForkChoiceStore) InitPeerDas(peerDas das.PeerDas) {

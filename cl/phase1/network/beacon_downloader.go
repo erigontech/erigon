@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"math"
 	"net/http"
 	"slices"
@@ -258,8 +257,14 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 
 Process:
 	resp := atomicResp.Load().(peerAndBlocks)
-	processBlocks := resp.blocks
+	processBlocks := completeBeaconBlocks(resp.blocks)
 	pid := resp.peerId
+	if len(processBlocks) == 0 {
+		if shouldBanIncompleteBlockResponse(pid, len(resp.blocks), len(processBlocks)) && f.rpc != nil {
+			f.rpc.BanPeer(pid)
+		}
+		return
+	}
 
 	slices.SortFunc(processBlocks, func(a, b *cltypes.SignedBeaconBlock) int {
 		return cmp.Compare(a.Block.Slot, b.Block.Slot)
@@ -290,27 +295,14 @@ Process:
 			// When blocks came from HTTP fallback, P2P is known-broken for this
 			// batch — skip the 30s P2P envelope timeout and fetch directly via HTTP.
 			if pid == "http-fallback" && f.httpFallbackURL != "" {
-				envelopes = make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)
-				httpEnvs := fetchEnvelopesFromBeaconAPI(ctx, f.httpFallbackURL, processBlocks, fullRoots, envelopes, f.beaconCfg)
-				if httpEnvs > 0 {
-					log.Debug("[ForwardBeaconDownloader] fetched envelopes from beacon API", "count", httpEnvs)
-				}
+				envelopes = validateAndFetchMissingEnvelopes(ctx, f.httpFallbackURL, processBlocks, fullRoots, nil, f.beaconCfg)
 			} else {
 				var envErr error
 				envelopes, envErr = RequestEnvelopesFrantically(ctx, f.rpc, fullRoots, processBlocks...)
 				if envErr != nil {
 					log.Debug("[ForwardBeaconDownloader] failed to get envelopes via P2P", "err", envErr)
 				}
-				// HTTP fallback for envelopes when P2P returned incomplete results
-				if f.httpFallbackURL != "" && len(envelopes) < len(fullRoots) {
-					if envelopes == nil {
-						envelopes = make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)
-					}
-					httpEnvs := fetchEnvelopesFromBeaconAPI(ctx, f.httpFallbackURL, processBlocks, fullRoots, envelopes, f.beaconCfg)
-					if httpEnvs > 0 {
-						log.Debug("[ForwardBeaconDownloader] fetched envelopes from beacon API", "count", httpEnvs)
-					}
-				}
+				envelopes = validateAndFetchMissingEnvelopes(ctx, f.httpFallbackURL, processBlocks, fullRoots, envelopes, f.beaconCfg)
 			}
 			log.Debug("[ForwardBeaconDownloader] envelope fetch result",
 				"fullRoots", len(fullRoots), "received", len(envelopes),
@@ -340,10 +332,32 @@ Process:
 	}
 }
 
+func validateAndFetchMissingEnvelopes(ctx context.Context, httpFallbackURL string, blocks []*cltypes.SignedBeaconBlock, fullRoots [][32]byte, envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, beaconCfg *clparams.BeaconChainConfig) map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope {
+	envelopes = validateFetchedEnvelopes(beaconCfg, blocks, envelopes)
+	if httpFallbackURL != "" && len(envelopes) < len(fullRoots) {
+		fetchEnvelopesFromBeaconAPI(ctx, httpFallbackURL, blocks, fullRoots, envelopes, beaconCfg)
+	}
+	return validateFetchedEnvelopes(beaconCfg, blocks, envelopes)
+}
+
+func shouldBanIncompleteBlockResponse(peerID string, received, complete int) bool {
+	return peerID != "" && peerID != "http-fallback" && received > 0 && complete == 0
+}
+
+func completeBeaconBlocks(blocks []*cltypes.SignedBeaconBlock) []*cltypes.SignedBeaconBlock {
+	complete := make([]*cltypes.SignedBeaconBlock, 0, len(blocks))
+	for _, block := range blocks {
+		if block != nil && block.Block != nil && block.Block.Body != nil {
+			complete = append(complete, block)
+		}
+	}
+	return complete
+}
+
 // anyGloasBlock returns true if any block in the list is GLOAS version or later.
 func anyGloasBlock(blocks []*cltypes.SignedBeaconBlock) bool {
 	for _, block := range blocks {
-		if block.Version() >= clparams.GloasVersion {
+		if block != nil && block.Block != nil && block.Block.Body != nil && block.Version() >= clparams.GloasVersion {
 			return true
 		}
 	}
@@ -362,6 +376,9 @@ func determineFullGloasRoots(blocks []*cltypes.SignedBeaconBlock, processCount i
 	var roots [][32]byte
 	for i := 0; i < processCount && i < len(blocks); i++ {
 		block := blocks[i]
+		if block == nil || block.Block == nil || block.Block.Body == nil {
+			continue
+		}
 		if block.Version() < clparams.GloasVersion {
 			continue
 		}
@@ -373,7 +390,8 @@ func determineFullGloasRoots(blocks []*cltypes.SignedBeaconBlock, processCount i
 		isFull := false
 		if i+1 < len(blocks) {
 			nextBlock := blocks[i+1]
-			if nextBlock.Version() >= clparams.GloasVersion {
+			blockRoot, err := block.Block.HashSSZ()
+			if err == nil && nextBlock != nil && nextBlock.Block != nil && nextBlock.Block.Body != nil && nextBlock.Block.Slot > block.Block.Slot && nextBlock.Block.ParentRoot == blockRoot && nextBlock.Version() >= clparams.GloasVersion {
 				nextBid := nextBlock.Block.Body.GetSignedExecutionPayloadBid()
 				if nextBid != nil && nextBid.Message != nil {
 					isFull = nextBid.Message.ParentBlockHash == bid.Message.BlockHash
@@ -479,17 +497,17 @@ func fetchBlocksFromBeaconAPI(ctx context.Context, baseURL string, startSlot, co
 				results[idx].err = fmt.Errorf("HTTP block fetch slot %d: %w", slot, err)
 				return
 			}
-			body, readErr := io.ReadAll(resp.Body)
-			resp.Body.Close()
-			if readErr != nil {
-				results[idx].err = fmt.Errorf("HTTP block read slot %d: %w", slot, readErr)
-				return
-			}
+			defer resp.Body.Close()
 			if resp.StatusCode == http.StatusNotFound {
-				return // Skipped slot — block stays nil
+				return
 			}
 			if resp.StatusCode != http.StatusOK {
 				results[idx].err = fmt.Errorf("HTTP block fetch slot %d: status %d", slot, resp.StatusCode)
+				return
+			}
+			body, readErr := readBoundedBeaconAPIResponse(resp.Body, maxBeaconAPIResponseBytes)
+			if readErr != nil {
+				results[idx].err = fmt.Errorf("HTTP block read slot %d: %w", slot, readErr)
 				return
 			}
 
@@ -553,6 +571,9 @@ func fetchEnvelopesFromBeaconAPI(
 	// Build root-to-slot mapping from blocks
 	rootToSlot := make(map[common.Hash]uint64, len(blocks))
 	for _, blk := range blocks {
+		if blk == nil || blk.Block == nil || blk.Block.Body == nil {
+			continue
+		}
 		root, err := blk.Block.HashSSZ()
 		if err == nil {
 			rootToSlot[root] = blk.Block.Slot
@@ -612,7 +633,7 @@ func fetchEnvelopesFromBeaconAPI(
 			if err != nil {
 				return
 			}
-			body, err := io.ReadAll(resp.Body)
+			body, err := readBoundedBeaconAPIResponse(resp.Body, maxBeaconAPIResponseBytes)
 			resp.Body.Close()
 			if err != nil || resp.StatusCode != http.StatusOK {
 				return
@@ -623,6 +644,11 @@ func fetchEnvelopesFromBeaconAPI(
 			}
 			if err := envelope.DecodeSSZ(body, int(clparams.GloasVersion)); err != nil {
 				log.Debug("[ForwardBeaconDownloader] HTTP envelope decode failed", "slot", slot, "err", err)
+				return
+			}
+			block := blockByRoot(blocks, common.Hash(root))
+			if err := ValidateFetchedEnvelope(beaconCfg, block, common.Hash(root), envelope); err != nil {
+				log.Debug("[ForwardBeaconDownloader] HTTP envelope mismatch", "slot", slot, "err", err)
 				return
 			}
 			results[idx] = envResult{hash: common.Hash(root), envelope: envelope}

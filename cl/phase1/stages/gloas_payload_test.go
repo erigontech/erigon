@@ -3,7 +3,10 @@ package stages
 import (
 	"context"
 	"math/big"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -181,36 +184,82 @@ func TestGloasPayloadHelpers(t *testing.T) {
 	require.Equal(t, want, hash)
 }
 
-func TestStandaloneExecutionClientDoesNotRunLocalGloasRetry(t *testing.T) {
-	require.False(t, canRetryGloasPayloads(&Cfg{}))
-	require.False(t, canRetryGloasPayloads(&Cfg{executionClient: &testExecutionEngine{supportInsertion: false}}))
-	require.True(t, canRetryGloasPayloads(&Cfg{executionClient: &testExecutionEngine{supportInsertion: true}}))
+func TestGloasPayloadValidationRequiresExecutionClient(t *testing.T) {
+	require.False(t, canValidateGloasPayloads(&Cfg{}))
+	require.True(t, canValidateGloasPayloads(&Cfg{executionClient: &testExecutionEngine{supportInsertion: false}}))
+	require.True(t, canValidateGloasPayloads(&Cfg{executionClient: &testExecutionEngine{supportInsertion: true}}))
 }
 
-func TestValidateAnchorPayloadIfLocalELFollowsSupportInsertion(t *testing.T) {
+func TestValidateAnchorPayloadWithAnyExecutionClient(t *testing.T) {
 	cfg, _, bid, env, anchorRoot := validAnchorEnvelopeFixture(t, 1)
 	remoteEL := &testExecutionEngine{
 		supportInsertion: false,
-		payloadStatus:    execution_client.PayloadStatusInvalidated,
+		payloadStatus:    execution_client.PayloadStatusValidated,
 	}
 
-	require.NoError(t, validateAnchorPayloadIfLocalEL(context.Background(), &Cfg{
+	require.NoError(t, validateAnchorPayloadWithExecutionClient(context.Background(), &Cfg{
 		beaconCfg:       cfg,
 		executionClient: remoteEL,
 		forkChoice:      &forkchoice.ForkChoiceStore{},
 	}, anchorRoot, bid, env))
-	require.Equal(t, 0, remoteEL.newPayloadCalls)
+	require.Equal(t, 1, remoteEL.newPayloadCalls)
 
 	localEL := &testExecutionEngine{
 		supportInsertion: true,
 		payloadStatus:    execution_client.PayloadStatusValidated,
 	}
-	require.NoError(t, validateAnchorPayloadIfLocalEL(context.Background(), &Cfg{
+	require.NoError(t, validateAnchorPayloadWithExecutionClient(context.Background(), &Cfg{
 		beaconCfg:       cfg,
 		executionClient: localEL,
 		forkChoice:      &forkchoice.ForkChoiceStore{},
 	}, anchorRoot, bid, env))
 	require.Equal(t, 1, localEL.newPayloadCalls)
+}
+
+func TestStageNewPayloadUsesSharedCoordinator(t *testing.T) {
+	beaconCfg, _, bid, env, _ := validAnchorEnvelopeFixture(t, 1)
+	started := make(chan struct{}, 3)
+	release := make(chan struct{})
+	var active atomic.Int32
+	var maximum atomic.Int32
+	engine := &testExecutionEngine{
+		payloadStatus: execution_client.PayloadStatusValidated,
+		newPayloadFn: func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (execution_client.PayloadStatus, error) {
+			current := active.Add(1)
+			for current > maximum.Load() && !maximum.CompareAndSwap(maximum.Load(), current) {
+			}
+			started <- struct{}{}
+			<-release
+			active.Add(-1)
+			return execution_client.PayloadStatusValidated, nil
+		},
+	}
+	coordinator := execution_client.NewPayloadValidationCoordinator(engine)
+	cfg := &Cfg{beaconCfg: beaconCfg, executionClient: engine, payloadValidator: coordinator}
+	done := make(chan struct{}, 3)
+	for _, key := range []common.Hash{{1}, {2}} {
+		go func() {
+			_, _ = coordinator.NewPayload(context.Background(), key, nil, nil, nil, nil)
+			done <- struct{}{}
+		}()
+	}
+	<-started
+	<-started
+	go func() {
+		_, _ = validateAnchorPayloadWithEL(context.Background(), cfg, bid, env)
+		done <- struct{}{}
+	}()
+	select {
+	case <-started:
+		t.Fatal("stage bypassed the shared NewPayload bound")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	<-started
+	for range 3 {
+		<-done
+	}
+	require.Equal(t, int32(2), maximum.Load())
 }
 
 func TestDrainPendingGloasPayloadsRequeuesNotValidatedPayload(t *testing.T) {
@@ -243,8 +292,9 @@ func TestDrainPendingGloasPayloadsRequeuesNotValidatedPayload(t *testing.T) {
 		},
 		Envelope: &cltypes.SignedExecutionPayloadEnvelope{
 			Message: &cltypes.ExecutionPayloadEnvelope{
-				BeaconBlockRoot: blockRoot,
-				Payload:         payload,
+				BeaconBlockRoot:   blockRoot,
+				Payload:           payload,
+				ExecutionRequests: cltypes.NewExecutionRequestsWithVersion(&cfg, clparams.GloasVersion),
 			},
 		},
 	}
@@ -392,10 +442,17 @@ type testExecutionEngine struct {
 	supportInsertion bool
 	payloadStatus    execution_client.PayloadStatus
 	newPayloadCalls  int
+	newPayloadMu     sync.Mutex
+	newPayloadFn     func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (execution_client.PayloadStatus, error)
 }
 
-func (t *testExecutionEngine) NewPayload(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (execution_client.PayloadStatus, error) {
+func (t *testExecutionEngine) NewPayload(ctx context.Context, payload *cltypes.Eth1Block, parentRoot *common.Hash, versionedHashes []common.Hash, requests []hexutil.Bytes) (execution_client.PayloadStatus, error) {
+	t.newPayloadMu.Lock()
 	t.newPayloadCalls++
+	t.newPayloadMu.Unlock()
+	if t.newPayloadFn != nil {
+		return t.newPayloadFn(ctx, payload, parentRoot, versionedHashes, requests)
+	}
 	return t.payloadStatus, nil
 }
 
