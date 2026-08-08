@@ -263,7 +263,7 @@ func TestPBinUnfoldEmptyRoot(t *testing.T) {
 
 // The divergence bit walks both word boundaries of the [9]uint64 path. A split
 // moves the node below one level down and re-cuts its prefix, dropping the bit
-// the new row branches on (eip:174-176).
+// the new row branches on (eip:"Insertion and deletion").
 func TestPBinUnfoldSplitsInsidePrefix(t *testing.T) {
 	t.Parallel()
 

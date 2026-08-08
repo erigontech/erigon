@@ -305,7 +305,7 @@ func TestPBinWitnessDecodeSingleNodeRemoval(t *testing.T) {
 }
 
 // TestPBinWitnessDecodeEmptyTree: an empty tree is 32 zero bytes with no node
-// behind it (eip:208), and a witness claiming any other root with no nodes is
+// behind it (eip:"Node merkelization"), and a witness claiming any other root with no nodes is
 // unusable rather than empty.
 func TestPBinWitnessDecodeEmptyTree(t *testing.T) {
 	t.Parallel()

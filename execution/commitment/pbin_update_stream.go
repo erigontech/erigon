@@ -172,7 +172,7 @@ func (s *pbinUpdateStream) removesAccount(plainKey []byte, update *Update) bool 
 // ones are shared with holders the batch cannot have deleted, and a
 // batch-inserted set always has a surviving in-batch holder, because an account
 // created and destroyed inside the batch merges to a bare deletion and inserts
-// none (eip:608-641).
+// none (eip:"Zero values and deletion").
 func (s *pbinUpdateStream) removeAccount(plainKey []byte, update *Update) error {
 	if err := s.emit(s.keyDigest.accountHeaderStem(plainKey), plainKey, update); err != nil {
 		return err

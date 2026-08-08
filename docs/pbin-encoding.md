@@ -27,12 +27,13 @@ A tree key is `zone(1) || treePosition || subIndex(1)`, assembled by `pbinTreeKe
 The two indexes are unrelated quantities, and neither preimage is a bare concatenation of
 naturally-sized values — both are exactly 64 bytes, with the index widened to fill the tail:
 
-- `codeIndex = (chunkID - 128) / 256`, the chunk's tree index in the code zone, written as 8
-  big-endian bytes after 24 zero bytes (§10, `pbin_keys.go:215-225`).
+- `codeIndex = chunkID / 256`, the chunk's code group, written as 8 big-endian bytes after 24 zero
+  bytes (§10, `codeChunkKey`, `pbin_keys.go:213-222`). No address takes part: the code zone is
+  content-addressed, so two accounts running the same bytecode share one set of leaves.
 - `slotIndex = slot >> 8`, written as a 32-byte big-endian value, which is `0x00 || slot[0:31]`
-  (§9, `pbin_keys.go:186-198`).
+  (§9, `groupDigest`, `pbin_keys.go:178-190`).
 
-The trailing `subIndex` byte is `(chunkID - 128) % 256` for code and `slot & 0xFF` for storage.
+The trailing `subIndex` byte is `chunkID % 256` for code and `slot & 0xFF` for storage.
 
 Zones `0x02..0xFE` have no length and `pbinTreeKey` panics on them. The fixed length per zone *is*
 the prefix-free invariant, and it is re-asserted at hash time from the key's own first byte
@@ -192,13 +193,16 @@ Real branch preimage, 5-bit prefix, both children being the leaves above:
 
 One account (address `0102…14`, nonce 3, balance 1000, code `60aabb000102`), storage slot 5 holding
 5, storage slot 300 holding 0x2c. Four branch records plus the root record.
-`stem = 12b9c2d7…61d53e7a`.
+`stem = 12b9c2d7…61d53e7a`, `codeHash = 1d6423ed…7696574d`.
 
 Those values are the corpus, not something the records carry: a record names a leaf's identity only
 (§6), so every hash below and in §12 needs them supplied from outside. The tree's five leaves in
 full: BASIC_DATA packing nonce 3 / balance 1000 / code_size 6; CODE_HASH =
-`keccak256(60aabb000102) = 1d6423ed…7696574d`; code chunk 0, that code padded to 31 bytes; slot 5 =
-`0000…0005`; slot 300 = `0000…002c` (44 — the value, not the slot number).
+`keccak256(60aabb000102) = 1d6423ed…7696574d`; code chunk 0 in the code zone, that code padded to
+31 bytes; slot 5 = `0000…0005`; slot 300 = `0000…002c` (44 — the value, not the slot number).
+
+The account holds no DELEGATION leaf: its code is contract code, so it takes the CODE_HASH branch
+of the exclusive pair (§8).
 
 Each record below is named by its domain key, with the parent cell it hangs off:
 
@@ -206,21 +210,23 @@ Each record below is named by its domain key, with the parent cell it hangs off:
   key 08                              root cell: branch, 0-bit prefix, hash = state root
                                       its node is the record at key 00
 
-  key 00                  [  0 bits]  splits on bit 0
-    |-- bit0  branch, 263-bit prefix ---------------------> node at 264 bits = key 0012b9…7a00
-    `-- bit1  leaf,   527-bit prefix, storageAddr --------> slot 300  (528-bit key)
+  key 00                  [  0 bits]  splits on bit 0 (the zone byte's top bit)
+    |-- bit0  branch,   6-bit prefix ---------------------> node at 7 bits = key 0007
+    `-- bit1  leaf,   527-bit prefix, storageAddr --------> slot 300  (528-bit key, zone 0xFF)
 
-  key 0012b9…7a00         [264 bits]  = 0x00 || stem; splits on sub-index bit 7
+  key 0007                [  7 bits]  splits on bit 7, the zone byte's last:
+                                      account zone 0x00 against code zone 0x01
                                       child of key 00, cell bit 0
-    |-- bit0  branch, 0-bit prefix -----------------------> node at 265 bits = key 0012b9…7a0001
-    `-- bit1  leaf,   7-bit prefix, leafValue ------------> code chunk 0 (sub 0x80)
+    |-- bit0  branch, 257-bit prefix ---------------------> node at 265 bits = key 0012b9…7a0001
+    `-- bit1  leaf,   264-bit prefix, leafValue ----------> code chunk 0 (zone 0x01, 272-bit key)
 
-  key 0012b9…7a0001       [265 bits]  splits on sub-index bit 6
-                                      child of key 0012b9…7a00, cell bit 0
+  key 0012b9…7a0001       [265 bits]  = 0x00 || stem || sub-index bit 264, which is 0 for every
+                                      allocated sub-index; splits on sub-index bit 265
+                                      child of key 0007, cell bit 0
     |-- bit0  branch, 5-bit prefix -----------------------> node at 271 bits = key 0012b9…7a0007
     `-- bit1  leaf,   6-bit prefix 000101, storageAddr ---> slot 5 (sub 0x45 = 64+5)
 
-  key 0012b9…7a0007       [271 bits]  splits on sub-index bit 0
+  key 0012b9…7a0007       [271 bits]  splits on the sub-index's last bit
                                       child of key 0012b9…7a0001, cell bit 0
     |-- bit0  leaf, 0-bit prefix, accountAddr ------------> BASIC_DATA (sub 0x00)
     `-- bit1  leaf, 0-bit prefix, accountAddr ------------> CODE_HASH  (sub 0x01)
@@ -228,9 +234,13 @@ Each record below is named by its domain key, with the parent cell it hangs off:
 
 Every chain descends through cell bit 0; the bit-1 cells are all leaves.
 
+The chunk leaf hanging off the zone byte rather than off the account's stem is what content
+addressing looks like in the tree: the account's three header keys and its code share nothing below
+bit 7.
+
 Depth arithmetic closes at every step: `record bits + 1 branch bit + cell prefix bits = child's
-absolute depth`. `0+1+263 = 264`, `264+1+0 = 265`, `265+1+5 = 271`, `271+1+0 = 272` (the 34-byte
-account key), `0+1+527 = 528` (the 66-byte storage key).
+absolute depth`. `0+1+6 = 7`, `7+1+257 = 265`, `265+1+5 = 271`, `271+1+0 = 272` (the 34-byte account
+key), `7+1+264 = 272` (the 34-byte code key), `0+1+527 = 528` (the 66-byte storage key).
 
 ### 5.2 Layout
 
@@ -301,26 +311,28 @@ cell bit 1
                               0000…0005                (addr || slot, 52 bytes)
 ```
 
-Sub-index reconstruction for cell 1: the record sits at 265 bits, so the two branch bits already
-consumed are sub-index bits 7 and 6 (`0` then `1`), and the cell prefix supplies `000101`. Full
-sub-index `0b01000101 = 0x45 = 64 + 5` — storage slot 5 in the account header (§9).
+Sub-index reconstruction for cell 1: the record sits at 265 bits, so the sub-index's top bit is
+already fixed to `0` by the prefix above it and this record's branch bit supplies the next, `1`.
+The cell prefix then supplies `000101`. Full sub-index `0b01000101 = 0x45 = 64 + 5` — storage slot 5
+in the account header (§9).
 
 The other three records of the same tree:
 
 ```
-key 00  [0 bits]  195 bytes
+key 00  [0 bits]  162 bytes
   0003 0003
-  12 8702 00257385ae7310057bbe7ae1c1d19f20e9e90322037c2e971072eb4f20c3aa7cf4
-     20 d7bf1503f945c9fc30faa4b97e3b26e99b412973cd9d16357d7bc91833ef81e0
+  12 06 00 20 c9aca54ec7a6c2fe06fc1cee22bd609b559f1c16217ce2ea48793349b8d61be5
   09 8f04 fe257385ae7310057bbe7ae1c1d19f20e9e90322037c2e971072eb4f20c3aa7cf4
           3211d8496e2c633f71a67a015a0551623e46676cc65d3acc04301137a5fc5a8458
      34 0102030405060708090a0b0c0d0e0f1011121314
         000000000000000000000000000000000000000000000000000000000000012c
 
-key 0012b9…7a00  [264 bits]  75 bytes
+key 0007  [7 bits]  142 bytes
   0003 0003
-  12 00 20 17ebf484e85b5d75d233bf34a447e1b3ec9fc7bc22ab3ee1f051087643a9bac2
-  21 07 00 20 0060aabb00010200000000000000000000000000000000000000000000000000
+  12 8102 12b9c2d7398802bddf3d70e0e8cf9074f4819101be174b883975a79061d53e7a00
+     20 ac8c75fc4b6f6e25d0831229dd10d3ad353c56dc573141f6f7e62707a5076b5d
+  21 8802 073be86901ad75392dc6c8cd03071cf8e0c17da59c33a1911c7b85c09f969b5a00
+     20 0060aabb00010200000000000000000000000000000000000000000000000000
 
 key 0012b9…7a0007  [271 bits]  50 bytes
   0003 0003
@@ -328,14 +340,16 @@ key 0012b9…7a0007  [271 bits]  50 bytes
   05 00 14 0102030405060708090a0b0c0d0e0f1011121314
 ```
 
-Note the one-bit shift in the top record's prefixes: the account key starts `00 12 b9…` and its cell
-prefix (bits 1..263) starts `00 25 73…`; the storage key starts `ff 12 b9…` and its cell prefix
-(bits 1..527) starts `fe 25 73…`. Shifting left by one is what turns `00 12 b9` into `00 25 73`
-(`0x12<<1 | 0xb9>>7 = 0x25`) and `ff 12 b9` into `fe 25 73` (`0xff<<1 | 0x12>>7 = 0xfe`).
+The 7-bit record shows the two zones side by side and needs no shift to read: seven bits are
+consumed above it and one more by its own branch, so both cell prefixes start on a byte boundary —
+cell 0 carries `stem || 0x00` (the account key from byte 1 on), cell 1 the chunk key's own 33 bytes.
+The top record is where the shift shows: the storage key starts `ff 12 b9…` and its cell prefix
+(bits 1..527) starts `fe 25 73…`, since shifting left by one turns `ff 12 b9` into `fe 25 73`
+(`0xff<<1 | 0x12>>7 = 0xfe`).
 
 The 271-bit record is the account pair: two leaf cells, zero-bit prefixes, both naming the *same*
 20-byte plain key. Which leaf each is is decided by the last bit of the reconstructed tree key and
-resolved at hash time by `pbinLeafValue` (`pbin_hash.go:164-187`), not by anything in the record.
+resolved at hash time by `pbinLeafValue` (`pbin_hash.go:166-191`), not by anything in the record.
 
 ### 5.4 touchMap and afterMap
 
@@ -357,16 +371,15 @@ no record at all — the node moves up and the consumed bits are prepended to th
 encoding (`foldDelete`, `:712`). `touchMap` does vary: bits are set at update time (`:243-249`) and
 carried upward by `propagateTouch` (`:736-747`).
 
-The two non-branch outcomes are not equally reachable under append-only semantics:
+Both non-branch outcomes are reachable:
 
 - **One survivor** is routine, and has nothing to do with removal. An unfold that descends into a
   cell seeds the new row with that one cell (`:481-488`), so a row that no later update splits folds
   straight back through `foldPropagate` — the exact inverse of the unfold that opened it.
 - **No survivor** needs a parent cell that was touched and is now absent, which `unfoldBranchNode`
-  loads as `after = 0` through its `deleted` flag (`:533-546`). The only site that ever clears an
-  `afterMap` bit is `foldDelete` itself (`:719`) — an update only ever sets one (`:248`), since
-  EIP-8297 defines no deletion (§11) — so the state it needs never arises on the `Process` path;
-  pinned at `pbin_zerovalue_test.go:162-204`.
+  loads as `after = 0` through its `deleted` flag (`:533-546`). A write of 32 zero bytes is a
+  deletion (§11), so zeroing a subtree's last leaf reaches it; pinned at
+  `TestPBinFoldDeleteRunsOnProcess`, `pbin_zerovalue_test.go:186-225`.
 
 A reader still needs an answer for a zero-length value, and it differs by key: at a bit-path key
 `unfoldBranchNode` rejects it as a missing branch (`:529-531`), so it is not a shape a decoder
@@ -391,8 +404,8 @@ blocks are 21 (account), 53 (storage), 33 (verbatim value), 33 (hash).
 | **writer ceiling** — two 527-bit-prefix storage leaves | **248** | only at a depth-0 record |
 | **format ceiling** — the same plus a HASH block on each | **314** | decodes; writer never emits it |
 
-All seven rows encode-and-decode round-trip. Measured record sizes for the §5.1 corpus: 195, 96, 75,
-50, plus a 35-byte root record. The root record is framed differently and sized in §7.
+All seven rows encode-and-decode round-trip. Measured record sizes for the §5.1 corpus: 162, 142,
+96, 50, plus a 35-byte root record. The root record is framed differently and sized in §7.
 
 Size is driven, in order of weight, by: the two prefix bit lengths (up to 66 bytes each — all the
 variance lives here, and it is inverse to depth); which value each child names (53 > 33 > 21); and
@@ -445,9 +458,9 @@ context spells the same three fields differently, below.
   (`pbin_patricia_hashed.go:267-270`).
 - **STORAGE_ADDR** — `addr||slot`, `len(plainKey)==52` (`:271-274`).
 - **LEAF_VALUE** — 32 raw bytes, and only when the leaf has no plain key at all: the encoder sets it
-  iff no address field is present (`pbin_branch.go:100-102`). That is the code-chunk and
-  reserved-sub-index case, where no state domain holds the value
-  (`pbin_branch.go:39-42`, `pbin_code.go:75-85`).
+  iff no address field is present (`pbin_branch.go:100-102`). That is the code chunk, the
+  EIP-7702 delegation indicator and any reserved sub-index — every leaf whose value no state domain
+  holds as a field (`pbin_branch.go:39-42`, `pbinRecordLeafValue`, `pbin_code.go:75-81`).
 
 A leaf's own hash is **not** in the record. `hashRowCell` writes a computed hash back only for
 branch cells (`pbin_patricia_hashed.go:749-757`), and no other site sets `hashLen` on a leaf, so the
@@ -539,16 +552,23 @@ byte:  0        1 ............................ 32       33
       | 00 |          stem = H(addr32)          | sub  |
       +----+------------------------------------+------+
 
-sub    0        BASIC_DATA    packed from account state        pbin_hash.go:175-176
-       1        CODE_HASH     32 raw bytes                     pbin_hash.go:177-178
-       2 ..  63 reserved      not packed; leaf carries 32 verbatim bytes
-                                                pbin_hash.go:181-186 -> pbin_code.go:79-85
-      64 .. 127 storage slots 0..63, value left-padded          pbin_hash.go:179-180
-     128 .. 255 code chunks 0..127                              pbin_keys.go:205-210
+sub    0        BASIC_DATA    packed from account state        pbin_hash.go:177-178
+       1        CODE_HASH     32 raw bytes                     pbin_hash.go:179-180
+       2        DELEGATION    the 23-byte indicator, right-padded with nine zeros
+                                                                pbin_hash.go:181-183
+       3 ..  63 reserved      not packed; leaf carries 32 verbatim bytes
+                                                pbin_hash.go:186-189 -> pbin_code.go:75-81
+      64 .. 127 storage slots 0..63, value left-padded          pbin_hash.go:184-185
+     128 .. 255 unallocated   no key this embedding derives lands here
 ```
 
-Constants at `pbin_keys.go:31-36`; the dispatch that turns a sub-index into a leaf value is
-`pbinLeafValue` (`pbin_hash.go:164-187`).
+Constants at `pbin_keys.go:31-46`; the dispatch that turns a sub-index into a leaf value is
+`pbinLeafValue` (`pbin_hash.go:166-191`).
+
+Sub-indices 128..255 held the first 128 code chunks before every chunk moved into the code zone
+(§10). They are now reserved like 3..63, and the dispatch treats both ranges the same: a leaf there
+carries its 32 bytes verbatim rather than being packed from state, which is the right answer for a
+sub-index whose meaning is not yet defined.
 
 BASIC_DATA packing (`pbin_values.go:36-40`, `:50-63`), big-endian throughout:
 
@@ -565,11 +585,26 @@ a code size over 2^32-1 is an error, not a truncation — a silent truncation wo
 root (`pbin_values.go:52-57`).
 
 The CODE_HASH leaf is the raw 32-byte hash, with the zero hash mapped to `keccak256("")` for a
-codeless account (`pbin_values.go:68-73`). It has no key derivation of its own: `treeKey`
-(`pbin_keys.go:239-248`) only ever derives BASIC_DATA for an address, and the update stream produces
-the sibling by flipping the last key byte `0x00 -> 0x01` inside the same visit (`codeHashKey`,
-`pbin_update_stream.go:240-247`, called at `:116-122`). **An account is always exactly two leaves,
-emitted adjacently.**
+codeless account (`pbin_values.go:68-73`). The DELEGATION leaf holds an EIP-7702 indicator — the 23
+bytes `0xef0100 || target` — right-padded with nine zeros (`pbinEncodeDelegation`,
+`pbin_values.go:85-95`). That is *not* the chunk encoding of §10: an indicator never executes, so
+byte 0 carries code rather than a PUSHDATA count.
+
+**An existing account holds exactly one of the two**, decided by its code bytes alone
+(`pbinIsDelegation`, `pbin_values.go:81-83`) and never by its hash — a contract whose *hash* opens
+`0xef0100` is still contract code. So a write emits one of the pair and deletes the other
+unconditionally, since the stream is told nothing about what the account held a moment ago
+(`emitCodeLeaves`, `pbin_update_stream.go:136-156`). A delegated account holds no code-zone chunks
+at all: its leaf *is* its code, a read takes the leading `code_size` bytes and `EXTCODEHASH` hashes
+them. Clearing a delegation restores a CODE_HASH leaf of `keccak256("")` with `code_size` zeroed.
+
+Neither sibling has a key derivation of its own: `treeKey` (`pbin_keys.go:236-245`) only ever
+derives BASIC_DATA for an address, and the stream produces the sibling by overwriting the last key
+byte inside the same visit (`emitSibling`, `pbin_update_stream.go:309-316`).
+
+Because the delegation leaf also marks an account present, a reader asking whether an account
+exists must accept **either** sibling. BASIC_DATA is not that marker: an account with zero nonce,
+zero balance and no code stores none (`PBinWitnessState.Account`, `pbin_witness_state.go:76-109`).
 
 ```
 addr    = 0102030405060708090a0b0c0d0e0f1011121314
@@ -578,6 +613,7 @@ stem    = 12b9c2d7398802bddf3d70e0e8cf9074f4819101be174b883975a79061d53e7a
 
 BASIC_DATA key   00 12b9…3e7a 00
 CODE_HASH  key   00 12b9…3e7a 01
+DELEGATION key   00 12b9…3e7a 02
 
 BASIC_DATA value, nonce=3 balance=1e18 code_size=100:
   00000000 00000064 0000000000000003 00000000000000000de0b6b3a7640000
@@ -585,22 +621,27 @@ BASIC_DATA value, nonce=3 balance=1e18 code_size=100:
 CODE_HASH value — a *separate* example, for a codeless account (code_size 0), where the zero
 hash maps to keccak256(""):
   c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470
+DELEGATION value — a third account, delegating to 00…aa, so code_size is 23:
+  ef0100 00000000000000000000000000000000000000aa 000000000000000000
+  ^marker ^target (20 B)                          ^nine zero bytes
 ```
 
-The two lines above are two different accounts. Pairing them would describe an account running 100
-code bytes whose code hashes empty, which no state can produce and the witness rejects outright —
-`codeFromLeaves` demands a chunk leaf per chunk and re-checks the reassembly against CODE_HASH
-(`pbin_witness_state.go:145-187`). For one consistent account, see §5.1: code_size 6, CODE_HASH
+The three value lines are three different accounts. Pairing the first two would describe an account
+running 100 code bytes whose code hashes empty, which no state can produce and the witness rejects
+outright — `codeFromLeaves` re-checks the reassembled code against CODE_HASH
+(`pbin_witness_state.go:159-204`). For one consistent account, see §5.1: code_size 6, CODE_HASH
 `1d6423ed…7696574d`.
 
 ## 9. The storage sub-trie
 
-`pbinSlotInHeader` (`pbin_keys.go:259-266`) decides: slot bytes `[0:31]` all zero **and**
-`slot[31] < CODE_OFFSET - HEADER_STORAGE_OFFSET = 64`. So slots 0..63 only.
+`pbinSlotInHeader` (`pbin_keys.go:256-263`) decides: slot bytes `[0:31]` all zero **and**
+`slot[31] < HEADER_STORAGE_SLOTS = 64`. So slots 0..63 only. The spec's invariant is
+`HEADER_STORAGE_OFFSET + HEADER_STORAGE_SLOTS <= STEM_SUBTREE_WIDTH`, which pins the header slots
+to sub-indices 64..127.
 
-Header slots take an account-zone key at sub-index `64 + slot` (`pbin_keys.go:230-232`) — same
+Header slots take an account-zone key at sub-index `64 + slot` (`pbin_keys.go:228`) — same
 34-byte shape, same stem, no extra hash. Everything else goes to zone `0xFF`, 66 bytes
-(`pbin_keys.go:233-236`):
+(`pbin_keys.go:230-233`):
 
 ```
 byte:  0        1 .................. 32   33 ....................... 64    65
@@ -619,7 +660,7 @@ a group = the 256 consecutive slots sharing one treeIdx:
   slot 319  ff | 12b9…3e7a | 1908ec24…d2fe2d42 | 3f   /
 ```
 
-The group preimage is built by `groupDigest` (`pbin_keys.go:186-198`) as
+The group preimage is built by `groupDigest` (`pbin_keys.go:178-190`) as
 `addr32 || 0x00 || slot[0:31]`, 64 bytes. Co-location of a group in one subtree is the point of the
 layout, and the digest is memoized per group.
 
@@ -676,43 +717,54 @@ short code 000102 -> one chunk:  00 000102 0000…00
 empty code       -> zero chunks (pbin_code.go:41-43)
 ```
 
-The account header holds `256 - CODE_OFFSET = 128` chunks (`pbin_code.go:29`) at sub-indices
-128..255 on the account's own stem (`pbin_keys.go:205-210`) — the first `128 * 31 = 3968` code
-bytes. Chunk `i >= 128` goes to the code zone (`codeOverflowKey`, `pbin_keys.go:215-225`), with
-`overflow = i - 128`:
+**Every** chunk lives in the code zone; the account header holds none. One deriver takes a code hash
+and a chunk id (`codeChunkKey`, `pbin_keys.go:213-222`):
 
 ```
-preimage (64 B) = codeHash(32) || 24 zero bytes || u64BE(overflow / 256)
-key      (34 B) = 0x01 || H(preimage) || byte(overflow % 256)
+treeIndex       = chunkID / 256          the chunk's code group
+preimage (64 B) = codeHash(32) || 24 zero bytes || u64BE(treeIndex)
+key      (34 B) = 0x01 || H(preimage) || byte(chunkID % 256)
 ```
+
+An aligned run of 256 chunks sharing one `treeIndex` is a code group: its chunks share a stem and
+differ only in the sub-index byte, so a contract of at most 256 chunks (7936 bytes) occupies one
+dense subtree and the group edge is the only boundary in the layout.
 
 The derivation names no address — only the code hash. Two accounts running the same bytecode derive
-identical overflow keys and share one set of leaves (`pbin_keys.go:113-116`). The dedup is realised
-at emit time: overflow chunks are buffered, sorted by key, and duplicate keys collapse to one
-emission, with an error if two carry different values (`pbin_update_stream.go:165-188`). Header
-chunks are **not** shared — they hang off the account stem, so identical code still duplicates its
-first 3968 bytes per account. The overflow digest is deliberately not memoized: the digest cache's
-entries are bound to an address these keys do not have (`pbin_keys.go:212-214`).
+identical keys and share one set of leaves, whatever the code's size
+(`pbinTreeKeyCodeChunk`, `pbin_keys.go:106-112`). The dedup is realised at emit time: chunks are
+buffered, sorted by key, and duplicate keys collapse to one emission, with an error if two carry
+different values (`flushCodeChunks`, `pbin_update_stream.go:256-279`). The chunk digest is
+deliberately not memoized: the digest cache's entries are bound to an address these keys do not
+have (`pbin_keys.go:210-212`).
 
 ```
 codeHash = 7b1e263ffcf71ebd01a2edd752b53eb24ed6abf042e8678a4a1db8d05d5d31b0
-  chunk   0 (header)  00 12b9c2d7…61d53e7a 80
-  chunk 127 (header)  00 12b9c2d7…61d53e7a ff
-  chunk 128 (ovf   0) 01 1b05bf4b082e83c2b306efdbfdd460ba5193adeebcec3ca8453a5cff437d3f4d 00
-  chunk 383 (ovf 255) 01 1b05bf4b082e83c2b306efdbfdd460ba5193adeebcec3ca8453a5cff437d3f4d ff
-  chunk 384 (ovf 256) 01 2aeb430d323776088db507c7efbad5c4797d0f748b8b8a0112153cb665a413f5 00
-                         ^ tree index rolls 0 -> 1, new stem; no address in the derivation
+  chunk   0 (group 0) 01 1b05bf4b082e83c2b306efdbfdd460ba5193adeebcec3ca8453a5cff437d3f4d 00
+  chunk 255 (group 0) 01 1b05bf4b082e83c2b306efdbfdd460ba5193adeebcec3ca8453a5cff437d3f4d ff
+  chunk 256 (group 1) 01 2aeb430d323776088db507c7efbad5c4797d0f748b8b8a0112153cb665a413f5 00
+  chunk 512 (group 2) 01 aa179620390ea03ed4cd924bbb94938f8162bf6741205ed18fbd5a34e449b9c0 00
+                         ^ each group is a fresh stem; no address in any of them
 ```
+
+A chunk of 32 zero bytes is stored as no leaf at all, like any other zero value (§11). That takes
+31 zero code bytes **and** a zero PUSHDATA count in byte 0 — zero bytes continuing PUSHDATA from an
+earlier chunk do not qualify, since byte 0 then records the continuation. Chunk presence therefore
+does not delimit the code: `code_size` does, and an absent chunk reads back as the zeros it stands
+for (`codeFromLeaves`, `pbin_witness_state.go:159-204`).
 
 Chunk leaves carry no plain key: no state domain holds a code chunk, since chunking is a property of
 the tree rather than of the account. They are emitted with a nil plain key
-(`pbin_update_stream.go:210-223`), validated at `pbin_patricia_hashed.go:261-265`, and stored under
-`pbinFieldLeafValue` (§6). Emission ordering keeps the trie walk monotone: header chunks flush when
-the walk leaves the account's stem (`pbin_update_stream.go:203-208`), overflow chunks flush when a
-key past the code zone appears (`:158-163`).
+(`flushCodeChunks`), validated at `pbin_patricia_hashed.go:261-265`, and stored under
+`pbinFieldLeafValue` (§6). Emission ordering keeps the trie walk monotone: chunks are queued as
+accounts are visited (`queueChunks`, `pbin_update_stream.go:240-247`) and flushed once a key past
+the code zone appears (`flushCodeChunksBefore`, `:249-254`).
+
+A delegated account queues nothing: its indicator lives in the header and it owns no chunk leaves
+at all (§8).
 
 Read-back, for a stateless verifier: concatenate `value[1:]` of chunks `0..ceil(size/31)-1`,
-truncate to `code_size`, verify against the CODE_HASH leaf (`pbin_witness_state.go:139-186`).
+truncate to `code_size`, verify against the CODE_HASH leaf (`pbin_witness_state.go:159-204`).
 
 ## 11. There is no storage root
 
@@ -726,13 +778,14 @@ consumer. `PBinAccount` is exactly Nonce, Balance, CodeSize, CodeHash
 
 What replaces it is a single flat global trie. Account fields, storage slots and code chunks are all
 ordinary leaves of *one* binary trie, each addressed by its own 34- or 66-byte tree key. There is no
-nesting, so there is no second trie to have a root. `pbinLeafValue` (`pbin_hash.go:164-187`)
+nesting, so there is no second trie to have a root. `pbinLeafValue` (`pbin_hash.go:166-191`)
 enumerates every value a leaf may hold — BASIC_DATA, CODE_HASH, a padded storage word, a verbatim
 32-byte record value — and none of them is a subtree hash.
 
 An account and its storage are related only by sharing a key **prefix**: bytes 1..32 of the
 account-zone key and bytes 1..32 of the storage-zone key are the same `H(addr32)`
-(`pbin_keys.go:200-203` vs `:233-236`). Prefix, not containment.
+(`pbin_keys.go:200-203` vs `:230-233`). Prefix, not containment. The account's code shares not even
+that: it is keyed by code hash and sits in a third zone.
 
 ```
 account BASIC_DATA : 00 |12b9c2d7…61d53e7a| 00
@@ -740,6 +793,8 @@ account CODE_HASH  : 00 |12b9c2d7…61d53e7a| 01
 storage slot 5     : 00 |12b9c2d7…61d53e7a| 45
 storage slot 300   : ff |12b9c2d7…61d53e7a| 1908ec24…d2fe2d42 2c
                         ^^^^^^^^^^^^^^^^^^ same stem, different zone
+code chunk 0       : 01 |073be869…9f969b5a| 00
+                        ^^^^^^^^^^^^^^^^^^ H(codeHash || 0), no stem at all
 ```
 
 Compare the hex engine in the same package, where the MPT structure is explicit:
@@ -758,11 +813,14 @@ Behavioural consequences:
 - Proving a slot is a root-to-leaf walk of the global trie, per slot:
   `Storage` is `tree.leaf(storageKey(addr, slot))` (`pbin_witness_state.go:100-106`). There is no
   per-account root to prove first and descend from.
-- No node update can collapse an account's storage. EIP-8297 defines no deletion, so pbin refuses
-  one outright (`errPBinDeleteUnsupported`, `pbin_patricia_hashed.go:132`, raised at
-  `pbin_update_stream.go:94-96`), and a zeroed slot stays a present leaf of 32 zero bytes
-  (`pbinZeroedLeafUpdate`, `:287-292`). Under the MPT, self-destruct drops one storage root; here
-  there is nothing to drop.
+- Deleting an account is deleting two key-space regions, not dropping one node. `removeAccount`
+  (`pbin_update_stream.go:176-185`) emits a drop at the account's header stem and another at its
+  storage prefix once the walk reaches that zone, because nothing enumerates the slots an account
+  holds. Its code-zone leaves are content-addressed and stay: another account may run the same
+  bytecode. Under the MPT, self-destruct drops one storage root; here there is no such node.
+- Zero and absent are the same state, so a write of 32 zero bytes removes the leaf rather than
+  storing zeros (`state_write`, eip:"Zero values and deletion"), and the fold collapses whatever
+  subtree that empties (§5.4).
 - The one persisted root record, under key `0x08`, is the root cell of the whole trie — one per
   trie, never per account.
 
@@ -784,18 +842,23 @@ L_code   = H(0x00 || 0012b9…7a01 || 1d6423ed…7696574d)
 N271     = H(0x01 || 0005 || 00 || L_basic || L_code)
          = de50844a66c2a773d715492d679fee88416467c0c5a7802a6b033199b357b0a4   [265-bit rec, cell 0]
 L_slot5  = H(0x00 || 0012b9…7a45 || 0000…0005)
-N265     = H(0x01 || 0000 || N271 || L_slot5)
-         = 17ebf484e85b5d75d233bf34a447e1b3ec9fc7bc22ab3ee1f051087643a9bac2   [264-bit rec, cell 0]
-L_chunk0 = H(0x00 || 0012b9…7a80 || 0060aabb000102 0000…00)
-         = 766052da49a0c98d2b25c5946b5ddc90c7bc33164a62bb5a429790bb7db4f477
-N264     = H(0x01 || 0107 || 00257385…c3aa7cf4 || N265 || L_chunk0)
-         = d7bf1503f945c9fc30faa4b97e3b26e99b412973cd9d16357d7bc91833ef81e0   [0-bit rec, cell 0]
+         = a3fe2808a326a445d72d6488cf48f5a73fa6e9eb552e7e4b224785b8a0208305
+N265     = H(0x01 || 0101 || 12b9c2d7…61d53e7a 00 || N271 || L_slot5)
+         = ac8c75fc4b6f6e25d0831229dd10d3ad353c56dc573141f6f7e62707a5076b5d   [7-bit rec, cell 0]
+L_chunk0 = H(0x00 || 01073be8…9f969b5a 00 || 0060aabb000102 0000…00)
+         = c2b8ca4b597abfe8f13fa11cebfcf945d417addef7841108b1064abe064c50e0
+N7       = H(0x01 || 0006 || 00 || N265 || L_chunk0)
+         = c9aca54ec7a6c2fe06fc1cee22bd609b559f1c16217ce2ea48793349b8d61be5   [0-bit rec, cell 0]
 L_slot300= H(0x00 || ff12b9…d2fe2d42 2c || 0000…002c)
          = 8cfca105b43b269e0b12a1fcd0649a8b193381be942582566dc573ab8749fa49
-root     = H(0x01 || 0000 || N264 || L_slot300)
-         = 5bce7ac6db0e7b5510ff10062add86faaadbeaf6a9ca726e63b4836bd6d65fd3   [key 08]
+root     = H(0x01 || 0000 || N7 || L_slot300)
+         = 658b62aba5ac2933e86f1100cce5084bdb35b32d797b05d247abf27a2018c064   [key 08]
 ```
 
-`0x0107` is `u16(263)` — the branch preimage's fixed-width count, where the same 263-bit prefix is
-spelled `8702` as a uvarint inside the record. Every intermediate hash equals the bytes stored in
+`0x0101` is `u16(257)` — the branch preimage's fixed-width count, where the same 257-bit prefix is
+spelled `8102` as a uvarint inside the record. Every intermediate hash equals the bytes stored in
 the corresponding record.
+
+`L_chunk0` is where content addressing shows in the arithmetic: the chunk's key names the code hash,
+not the account, so an identical contract at any other address produces this same leaf and the same
+`N7` input.

@@ -129,7 +129,7 @@ func (pph *PBinPatriciaHashed) Release() {
 
 var (
 	errPBinMissingBranch     = errors.New("pbin: branch record missing")
-	errPBinDeleteUnsupported = errors.New("pbin: EIP-8297 defines no deletion")
+	errPBinDeleteUnsupported = errors.New("pbin: account record outlived its state")
 	errPBinVisitOrder        = errors.New("pbin: visit order is not ascending")
 )
 
@@ -311,7 +311,8 @@ func pbinLeafValueIsZero(path *pbinBitpath, u *Update) (bool, error) {
 }
 
 // RootHash hashes whatever the root cell holds: a one-key tree's root is the
-// leaf itself (eip:133-135) and an empty tree is 32 zero bytes (eip:208), so
+// leaf itself (eip:"Tree structure") and an empty tree is 32 zero bytes
+// (eip:"Node merkelization"), so
 // neither shape needs a special case.
 func (pph *PBinPatriciaHashed) RootHash() ([]byte, error) {
 	if pph.grid.activeRows != 0 {
@@ -799,8 +800,9 @@ func (pph *PBinPatriciaHashed) cellHash(c *pbinCell, path *pbinBitpath) (common.
 }
 
 // loadCellState fills a leaf cell whose plain key arrived from a record and
-// whose value therefore did not. The leaf is already in the tree, so an absent
-// read is pbinZeroedLeafUpdate's case.
+// whose value therefore did not. A storage leaf whose state reads absent carries
+// the zero it stands for; an account leaf cannot, since removal drops its whole
+// header stem before any record can name it.
 func (pph *PBinPatriciaHashed) loadCellState(c *pbinCell) error {
 	if c.accountAddrLen > 0 && !c.loaded.account() {
 		plainKey := c.accountAddr[:c.accountAddrLen]

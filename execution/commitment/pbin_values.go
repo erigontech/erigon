@@ -28,10 +28,10 @@ import (
 	"github.com/erigontech/erigon/common/length"
 )
 
-// pbinValueLength is the one leaf value size EIP-8297 admits (eip:132).
+// pbinValueLength is the one leaf value size EIP-8297 admits (eip:"Tree structure").
 const pbinValueLength = 32
 
-// BASIC_DATA field offsets within the leaf value (eip:332-339). Byte 0 (version)
+// BASIC_DATA field offsets within the leaf value (eip:"Header values"). Byte 0 (version)
 // and the reserved bytes 1..3 stay zero.
 const (
 	pbinBasicDataCodeSizeOffset = 4
@@ -64,7 +64,7 @@ func pbinEncodeBasicData(nonce uint64, balance *uint256.Int, codeSize uint64) ([
 
 // pbinCodeHashValue returns the CODE_HASH leaf value, mapping an unset hash to
 // the empty-bytecode hash as the spec requires for a codeless account
-// (eip:345-347).
+// (eip:"Header values").
 func pbinCodeHashValue(codeHash common.Hash) [pbinValueLength]byte {
 	if codeHash == (common.Hash{}) {
 		return empty.CodeHash

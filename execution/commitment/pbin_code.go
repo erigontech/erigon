@@ -18,7 +18,7 @@ package commitment
 
 import "fmt"
 
-// EIP-8297's code embedding (eip:349-397).
+// EIP-8297's code embedding (eip:"Code").
 const (
 	// pbinChunkDataLen is how much code one chunk holds; byte 0 of the 32-byte
 	// value carries the PUSHDATA count instead.
@@ -29,7 +29,7 @@ const (
 	pbinPush32     = pbinPushOffset + 32
 )
 
-// pbinChunkifyCode splits code into the tree's chunk values (eip:374-397). The
+// pbinChunkifyCode splits code into the tree's chunk values (eip:"Code"). The
 // PUSHDATA scan runs over the whole code, so residual PUSHDATA carries across
 // chunk boundaries. Padding to a multiple of 31 happens before the scan, which
 // is what makes a PUSH whose data runs off the end count against the padded tail.

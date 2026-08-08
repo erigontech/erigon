@@ -28,7 +28,7 @@ import (
 	"github.com/erigontech/erigon/common/length"
 )
 
-// Node tags separating the two preimage shapes EIP-8297 defines (eip:191-206).
+// Node tags separating the two preimage shapes EIP-8297 defines (eip:"Node merkelization").
 const (
 	pbinLeafTag   = 0x00
 	pbinBranchTag = 0x01
@@ -38,13 +38,15 @@ const (
 	pbinHashBufLen = 1 + 2 + (pbinMaxPathBits+7)/8 + 2*length.Hash
 )
 
-// pbinEmptyTreeHash is the hash of an absent subtree: 32 zero bytes (eip:208).
+// pbinEmptyTreeHash is the hash of an absent subtree: 32 zero bytes
+// (eip:"Node merkelization").
 // Not empty.RootHash — the RLP empty-string MPT root would build a different tree.
 var pbinEmptyTreeHash common.Hash
 
 var errPBinCellHash = errors.New("pbin: cell cannot be hashed")
 
-// pbinHashFn is H, which EIP-8297 leaves open (eip:511-513). Tree-key derivation
+// pbinHashFn is H, which EIP-8297 leaves open
+// (eip:"SNARK friendliness and post-quantum security"). Tree-key derivation
 // hashes with H too, so a suite is only fully swapped when pbinDigestCache is
 // swapped with it.
 type pbinHashFn func([]byte) common.Hash
@@ -95,7 +97,7 @@ func (h *pbinHasher) hash(preimage []byte) common.Hash {
 	return keccak.Sum256(preimage)
 }
 
-// pbinAppendBitPrefix is the spec's encode_bit_prefix (eip:196-201). The leading
+// pbinAppendBitPrefix is the spec's encode_bit_prefix (eip:"Node merkelization"). The leading
 // bit count is what keeps a 7-bit prefix distinct from an 8-bit one that agrees
 // with it on the pad bit.
 func pbinAppendBitPrefix(dst []byte, p *pbinBitpath) []byte {
@@ -147,7 +149,7 @@ func (h *pbinHasher) leafCellHash(c *pbinCell, path *pbinBitpath) (common.Hash, 
 	buf := full.appendPackedBits(append(h.buf[:0], pbinLeafTag))
 	key := buf[1:]
 	// Key length is fixed per zone, which is what keeps the key space prefix-free
-	// (eip:284-288).
+	// (eip:"Tree embedding").
 	if want, known := pbinZoneKeyLength(key[0]); !known || len(key) != want {
 		return common.Hash{}, fmt.Errorf("%w: leaf key %x is no key of zone %#x", errPBinCellHash, key, key[0])
 	}
@@ -182,7 +184,7 @@ func pbinLeafValue(key []byte, u *Update) ([pbinValueLength]byte, error) {
 	case subIndex >= pbinHeaderStorageOffset && subIndex < pbinHeaderStorageOffset+pbinHeaderStorageSlots:
 		return pbinEncodeStorageValue(u.Storage[:u.StorageLen]), nil
 	default:
-		// Sub-indices the embedding reserves (eip:255-257): not packed from state,
+		// Sub-indices the embedding reserves (eip:"Header values"): not packed from state,
 		// so the value must already be 32 whole bytes.
 		return pbinRecordLeafValue(u)
 	}

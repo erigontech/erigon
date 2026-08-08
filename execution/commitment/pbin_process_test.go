@@ -200,7 +200,7 @@ func pbinTestProcess(t *testing.T, pph *PBinPatriciaHashed, plainKeys [][]byte, 
 }
 
 // TestPBinRootHashEmptyEngine: an empty EIP-8297 tree is 32 zero bytes
-// (eip:208), not the empty-MPT root the rest of erigon reaches for.
+// (eip:"Node merkelization"), not the empty-MPT root the rest of erigon reaches for.
 func TestPBinRootHashEmptyEngine(t *testing.T) {
 	t.Parallel()
 
@@ -211,7 +211,7 @@ func TestPBinRootHashEmptyEngine(t *testing.T) {
 	require.NotEqual(t, empty.RootHash[:], root)
 }
 
-// TestPBinProcessSingleKeyRootIsLeaf pins eip:133-135: with one entry the root
+// TestPBinProcessSingleKeyRootIsLeaf pins eip:"Tree structure": with one entry the root
 // is the leaf itself, not a branch wrapping it.
 func TestPBinProcessSingleKeyRootIsLeaf(t *testing.T) {
 	t.Parallel()

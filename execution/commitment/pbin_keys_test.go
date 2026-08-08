@@ -48,7 +48,7 @@ func pbinTestAddr(t *testing.T, s string) []byte {
 	return b
 }
 
-// pbinTestAddress32 is the spec's address20_to_address32 (eip:291-296).
+// pbinTestAddress32 is the spec's address20_to_address32 (eip:"Tree embedding").
 func pbinTestAddress32(addr []byte) []byte {
 	a := make([]byte, 32)
 	copy(a[32-len(addr):], addr)
@@ -71,7 +71,7 @@ func pbinTestConcat(parts ...[]byte) []byte {
 	return out
 }
 
-// Pins the derivation against the spec's test cases (eip:583-630).
+// Pins the derivation against the spec's test cases (eip:"Test Cases").
 func TestPBinTreeKeyEIPVectors(t *testing.T) {
 	t.Parallel()
 

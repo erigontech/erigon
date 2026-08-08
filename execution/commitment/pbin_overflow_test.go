@@ -29,7 +29,7 @@ import (
 )
 
 // pbinTestSpecCodeChunkKey transcribes get_tree_key_for_code_chunk
-// (eip:355-367) from the spec's Python, hashing with the independent Keccak the
+// (eip:"Code") from the spec's Python, hashing with the independent Keccak the
 // tests use. It is the ground truth for the cache-backed derivation.
 func pbinTestSpecCodeChunkKey(t *testing.T, codeHash common.Hash, chunkID int) []byte {
 	t.Helper()
@@ -164,7 +164,7 @@ func TestPBinChunksCrossGroupBoundary(t *testing.T) {
 }
 
 // TestPBinSharedBytecodeEmitsOneChunkSet pins the point of content addressing
-// (eip:352-354): two accounts running the same bytecode name the same code-zone
+// (eip:"Code"): two accounts running the same bytecode name the same code-zone
 // leaves, so the zone holds one copy of them.
 func TestPBinSharedBytecodeEmitsOneChunkSet(t *testing.T) {
 	t.Parallel()

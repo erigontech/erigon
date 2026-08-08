@@ -29,7 +29,7 @@ import (
 )
 
 // TestPBinChunkifyCodeVectors checks chunking against the reference's own
-// chunkings of chunk_code (eip:374-397).
+// chunkings of chunk_code (eip:"Code").
 func TestPBinChunkifyCodeVectors(t *testing.T) {
 	t.Parallel()
 	v := pbinLoadSpecVectors(t)

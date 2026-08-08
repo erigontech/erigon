@@ -73,7 +73,7 @@ func pbinDecodeWitnessLeaf(preimage []byte) (pbinWitnessNode, error) {
 	}
 	key := body[:len(body)-pbinValueLength]
 	// Key length is fixed per zone, which is what keeps the key space prefix-free
-	// (eip:284-288).
+	// (eip:"Tree embedding").
 	if want, known := pbinZoneKeyLength(key[0]); !known || len(key) != want {
 		return pbinWitnessNode{}, fmt.Errorf("%w: leaf key %x is no key of zone %#x", errPBinWitnessNode, key, key[0])
 	}

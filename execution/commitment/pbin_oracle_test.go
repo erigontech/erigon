@@ -33,7 +33,8 @@ import (
 	"github.com/erigontech/erigon/common/length"
 )
 
-// The reference implementation of EIP-8297's binary tree (eip:112-222),
+// The reference implementation of EIP-8297's binary tree
+// (eip:"Tree structure", "Node merkelization", "Insertion and deletion"),
 // transcribed from the spec's Python with no optimisation — no memoised hashes,
 // no shared buffers, one bit per byte — because it is the ground truth the
 // engine is diffed against and has to stay recognisably the same algorithm. Its
@@ -133,7 +134,7 @@ func pbinOracleInsert(node pbinOracleNode, bits, key, value []byte, depth int) p
 		return branch
 	}
 
-	// The key diverges inside the prefix (eip:171-182). The survivor keeps the
+	// The key diverges inside the prefix (eip:"Insertion and deletion"). The survivor keeps the
 	// bits after the divergence, dropping the bit the new branch consumes.
 	survivor := &pbinOracleBranch{
 		prefix: slices.Clone(branch.prefix[matched+1:]),
@@ -150,7 +151,7 @@ func pbinOracleInsert(node pbinOracleNode, bits, key, value []byte, depth int) p
 	return newBranch
 }
 
-// pbinOracleEncodeBitPrefix is the spec's encode_bit_prefix (eip:196-201).
+// pbinOracleEncodeBitPrefix is the spec's encode_bit_prefix (eip:"Node merkelization").
 func pbinOracleEncodeBitPrefix(prefix []byte) []byte {
 	if len(prefix) >= 1<<16 {
 		panic(fmt.Sprintf("pbin oracle: prefix of %d bits exceeds the encodable count", len(prefix)))
@@ -421,7 +422,7 @@ func TestPBinOracleEncodeBitPrefixLongRun(t *testing.T) {
 	require.Equal(t, bytes.Repeat([]byte{0xFF}, 66), got[2:])
 }
 
-// The empty tree is 32 zero bytes (eip:208), not the empty-MPT root the rest of
+// The empty tree is 32 zero bytes (eip:"Node merkelization"), not the empty-MPT root the rest of
 // erigon uses.
 func TestPBinOracleEmptyTreeHash(t *testing.T) {
 	t.Parallel()
@@ -442,7 +443,7 @@ func TestPBinOracleSingleKeyRootIsLeafHash(t *testing.T) {
 	var tree pbinOracleTree
 	tree.insert(e.key, e.value)
 
-	require.IsType(t, &pbinOracleLeaf{}, tree.root, "a one-key tree's root is the leaf itself (eip:133-135)")
+	require.IsType(t, &pbinOracleLeaf{}, tree.root, "a one-key tree's root is the leaf itself (eip:\"Tree structure\")")
 
 	want := pbinTestKeccak(t, []byte{0x00}, e.key, e.value)
 	got := tree.rootHash()
@@ -496,7 +497,7 @@ func TestPBinOracleSplitAtLastBit(t *testing.T) {
 	require.Equal(t, want, got[:])
 }
 
-// Pins the shape of the split-inside-prefix branch (eip:171-182): the bit the
+// Pins the shape of the split-inside-prefix branch (eip:"Insertion and deletion"): the bit the
 // new branch consumes must not reappear in the survivor below it.
 func TestPBinOracleSplitInsidePrefix(t *testing.T) {
 	t.Parallel()

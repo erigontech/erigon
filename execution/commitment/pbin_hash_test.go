@@ -88,7 +88,7 @@ func pbinTestOracleLeaf(addr, slot uint64) *pbinOracleLeaf {
 	}
 }
 
-// EIP-8297's empty subtree is 32 zero bytes (eip:208), not the empty-MPT root
+// EIP-8297's empty subtree is 32 zero bytes (eip:"Node merkelization"), not the empty-MPT root
 // the rest of erigon reaches for.
 func TestPBinEmptyTreeHash(t *testing.T) {
 	t.Parallel()

@@ -122,6 +122,15 @@ single-child branch merge the spec formalized under "Insertion and deletion"
   *why*-focused, with no PR numbers, dates, or incident narration
 - commit messages prefix the package: `execution/commitment: ...`. No signing.
   Commit on the existing branch `binary-trie-witness`, never on main.
+- **never write to GitHub.** Do not post, edit or reply to any comment, review,
+  PR body or issue, and do not open or close a PR. Rebasing and pushing the
+  spec-repo branches is allowed; every message a human would read is theirs to
+  send. This overrides any task step that says otherwise.
+- **never push a ralphex plan anywhere.** `docs/plans/**` is working material:
+  it must not reach origin, a fork, or the spec repo, on any branch. Before the
+  erigon work is ever released, the plans come out of the history first — as
+  they did for the engine branch. This overrides any task step that says
+  otherwise.
 - **do not push the erigon branch.** Spec-catchup and witness work stays local
   until explicitly released. The spec-repo branches in Part B may be pushed;
   they are already public.
@@ -814,15 +823,43 @@ O(1) drop, and would bloat a witness pass with the removed subtree's reads.
   `pbin_witness_decode_test.go` (1)
 - Modify: `docs/pbin-encoding.md`
 
-- [ ] replace every `eip:` citation with a section name, e.g. `eip:"Code"`,
+- [x] replace every `eip:` citation with a section name, e.g. `eip:"Code"`,
       `eip:"Zero values and deletion"`, `eip:"Delegation"` — including the
-      single-line form `eip:132` at `pbin_values.go:31`
-- [ ] refresh `docs/pbin-encoding.md` for the code zone, the delegation leaf and
+      single-line form `eip:132` at `pbin_values.go:31` (40 citations across 16
+      files; every name checked to resolve against a `###` header of spec HEAD
+      `2c6da5e`)
+- [x] refresh `docs/pbin-encoding.md` for the code zone, the delegation leaf and
       the reserved sub-index ranges (3–63 and 128–255)
-- [ ] confirm `grep -rn 'eip:[0-9]' execution/commitment/` returns nothing
-- [ ] gate: `go test ./execution/commitment/... -run TestPBin -count=1`
-- [ ] `make lint` until clean; commit as
+- [x] confirm `grep -rn 'eip:[0-9]' execution/commitment/` returns nothing
+- [x] gate: `go test ./execution/commitment/... -run TestPBin -count=1`
+      (green; `./rpc/jsonrpc/ -run TestPBin` green too)
+- [x] `make lint` until clean; commit as
       `execution/commitment: cite EIP-8297 by section, not by line`
+
+➕ Line citations pointed at three different spec revisions, not one: the
+account-removal sites cited `eip:608-641`, which even in the pre-catch-up file
+lands inside Test Cases. Mapping them by *meaning* rather than by the old line
+range is what the section form makes checkable.
+➕ Two stale spec claims found outside the citation form and corrected with
+them: `errPBinDeleteUnsupported`'s message read "EIP-8297 defines no deletion",
+which the spec now does under "Zero values and deletion" and the engine
+implements; and `loadCellState`'s docstring named `pbinZeroedLeafUpdate`, a
+function zeroization removed. Neither is a behaviour change — the error's
+identity is asserted with `ErrorIs`.
+➕ `docs/pbin-encoding.md` needed more than the three named topics, because the
+code-zone move changed the tree the worked example builds. Re-measured against
+the engine and re-derived by hand: §5.1's record set (the chunk now hangs off
+the zone byte, so the 264-bit account record is gone and a 7-bit record splits
+the zones), §5.3's sibling records and sub-index reconstruction, §5.5's sizes
+(162, 142, 96, 50 + 35 root), and §12, whose hand reconstruction reproduces the
+engine root `658b62ab…`. §5.4 and §11 also asserted "EIP-8297 defines no
+deletion" and that a zeroed slot keeps a zero leaf; both are now the opposite.
+⚠️ The doc cites erigon source by line number ~90 times and those anchors have
+drifted the same way the `eip:` ones did. Anchors inside every passage rewritten
+here were re-checked against the current files; the rest were not. Task 19's
+"confirm `docs/pbin-encoding.md` matches the shipped layout" is where that
+decision belongs — the fix is either a sweep or a move to identifier citations,
+which is what this task did for the spec.
 
 ### Task 13: Close execution-specs#3286 as superseded by the code-zone move
 
@@ -864,7 +901,9 @@ the other. There is no second zone holding chunks now, so that framing is dead
 - [ ] verify both roots against erigon's engine and the canonical-rebuild oracle
 - [ ] rewrite the PR body: problem paragraph first with no "Summary" heading,
       then `## Changes`; no Testing section, no AI mentions
-- [ ] push and reply to the rebase request
+- [ ] push the rebased branch. **Do NOT post, edit or reply to any GitHub
+      comment, review or PR body.** Pushing the branch is the whole of the
+      outward action; the human replies to the rebase request themselves
 
 ### Task 15: Rebase execution-specs#3316
 
@@ -888,7 +927,9 @@ the other. There is no second zone holding chunks now, so that framing is dead
 - [ ] fill the test on the rebased base and confirm all cases pass
 - [ ] rewrite the PR body for the new sizes; keep it dead short, problem
       paragraph first, no "Summary" heading, no Testing section, no AI mentions
-- [ ] push and reply to the rebase request
+- [ ] push the rebased branch. **Do NOT post, edit or reply to any GitHub
+      comment, review or PR body.** Pushing the branch is the whole of the
+      outward action; the human replies to the rebase request themselves
 - [ ] confirm CI is green apart from any known unrelated `fork.py` drift
 
 ### Task 16: Diff the adversarial case list against the existing corpus
@@ -926,7 +967,8 @@ is 18 `pbt_state` vector cases and 49 fixture test functions.
 - [ ] cross-check every proposed root against erigon's engine before pushing
 - [ ] write each body dead short: problem paragraph first, no "Summary" heading,
       no Testing section, no AI mentions
-- [ ] push to `fork` and open against `projects/binary-trie`
+- [ ] push to `fork` only. **Do NOT open the PR and do NOT post any comment.**
+      Leave the branch pushed and report it for the human to open
 
 ### Task 18: Verify acceptance criteria
 
