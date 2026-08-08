@@ -26,7 +26,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -102,9 +101,9 @@ type Domain struct {
 }
 
 type domainVisible struct {
-	files  visibleFiles
-	name   kv.Domain
-	caches *sync.Pool
+	files visibleFiles
+	name  kv.Domain
+	cache *DomainGetFromFileCache
 }
 
 func NewDomain(cfg statecfg.DomainCfg, stepSize, stepsInFrozenFile uint64, dirs datadir.Dirs, logger log.Logger) (*Domain, error) {
@@ -391,7 +390,7 @@ func (d *Domain) retireFilesNotInList(fNames []string) retiredFiles {
 // calcVisibleFiles is pure — it does not mutate d, d.History, or d.History.InvertedIndex.
 // Aggregator.recalcVisibleFiles uses it to assemble a cross-entity consistent
 // snapshot that is published via a single atomic store.
-func (d *Domain) calcVisibleFiles(toTxNum uint64) (*domainVisible, visibleFiles, *iiVisible) {
+func (d *Domain) calcVisibleFiles(toTxNum uint64, prev *domainVisible) (*domainVisible, visibleFiles, *iiVisible) {
 	var checker func(startTxNum, endTxNum uint64) bool
 	if d.checker != nil {
 		ue := FromDomain(d.Name)
@@ -399,7 +398,7 @@ func (d *Domain) calcVisibleFiles(toTxNum uint64) (*domainVisible, visibleFiles,
 			return d.checker.CheckDependentPresent(ue, All, startTxNum, endTxNum)
 		}
 	}
-	dv := newDomainVisible(d.Name, calcVisibleFiles(d.dirtyFiles, d.Accessors, checker, false, toTxNum))
+	dv := newDomainVisible(d.Name, calcVisibleFiles(d.dirtyFiles, d.Accessors, checker, false, toTxNum), prev)
 	hv, hiv := d.History.calcVisibleFiles(toTxNum)
 	return dv, hv, hiv
 }
@@ -641,7 +640,7 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte, hi, lo uint64) (v
 // because it can observe an unsynchronized/torn view of dirtyFiles across
 // entities. Production code goes through Aggregator.BeginFilesRo.
 func (d *Domain) beginForTests() *DomainRoTx {
-	dv, hv, iv := d.calcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
+	dv, hv, iv := d.calcVisibleFiles(d.dirtyFilesEndTxNumMinimax(), nil)
 	return d.beginFilesRo(dv, hv, iv)
 }
 
@@ -657,13 +656,14 @@ func (d *Domain) beginFilesRo(dv *domainVisible, hf visibleFiles, hiv *iiVisible
 func (d *Domain) initFilesRo(dt *DomainRoTx, ht *HistoryRoTx, iit *InvertedIndexRoTx, dv *domainVisible, hf visibleFiles, hiv *iiVisible) {
 	d.History.initFilesRo(ht, iit, hf, hiv)
 	*dt = DomainRoTx{
-		name:     d.Name,
-		stepSize: d.stepSize,
-		d:        d,
-		ht:       ht,
-		visible:  dv,
-		files:    dv.files,
-		salt:     d.salt.Load(),
+		name:             d.Name,
+		stepSize:         d.stepSize,
+		d:                d,
+		ht:               ht,
+		visible:          dv,
+		files:            dv.files,
+		salt:             d.salt.Load(),
+		getFromFileCache: dv.cache,
 	}
 }
 
@@ -1427,16 +1427,12 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 	hi, lo := dt.ht.iit.hashKey(k)
 
 	getFromFileCache := dt.getFromFileCache
-
-	if useCache && getFromFileCache == nil {
-		if dt.getFromFileCache == nil {
-			dt.getFromFileCache = dt.visible.newGetFromFileCache()
-		}
-		getFromFileCache = dt.getFromFileCache
+	if !useCache {
+		getFromFileCache = nil
 	}
-	if getFromFileCache != nil && useCache {
+	if getFromFileCache != nil {
 		if cv, ok := getFromFileCache.Get(hi); ok {
-			return cv.v, true, dt.files[cv.lvl].startTxNum, dt.files[cv.lvl].endTxNum, nil
+			return cv.v, true, cv.startTxNum, cv.endTxNum, nil
 		}
 	}
 
@@ -1478,8 +1474,8 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 			fmt.Printf("GetLatest(%s, %x) -> found in file %s\n", dt.name.String(), k, f.src.decompressor.FileName())
 		}
 
-		if dt.getFromFileCache != nil && useCache {
-			dt.getFromFileCache.Add(hi, domainGetFromFileCacheItem{lvl: uint8(i), v: v})
+		if getFromFileCache != nil {
+			getFromFileCache.Add(hi, domainGetFromFileCacheItem{startTxNum: f.startTxNum, endTxNum: f.endTxNum, v: bytes.Clone(v)})
 		}
 		return v, true, f.startTxNum, f.endTxNum, nil
 	}
@@ -1487,8 +1483,8 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 		fmt.Printf("GetLatest(%s, %x) -> not found in %d files\n", dt.name.String(), k, len(dt.files))
 	}
 
-	if dt.getFromFileCache != nil && useCache {
-		dt.getFromFileCache.Add(hi, domainGetFromFileCacheItem{lvl: 0, v: nil})
+	if getFromFileCache != nil {
+		getFromFileCache.Add(hi, domainGetFromFileCacheItem{})
 	}
 	return nil, false, 0, 0, nil
 }
@@ -1557,7 +1553,8 @@ func (dt *DomainRoTx) Close() {
 	dt.mapReaders = nil
 	dt.ht.Close()
 
-	dt.visible.returnGetFromFileCache(dt.getFromFileCache)
+	dt.getFromFileCache.LogStats(dt.name)
+	dt.getFromFileCache = nil
 }
 
 // reusableReader - for short read-and-forget operations. Must Reset this reader before use
