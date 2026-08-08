@@ -18,9 +18,11 @@ package cache
 
 import (
 	"bytes"
+	"fmt"
 	"math"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/c2h5oh/datasize"
 
@@ -61,11 +63,27 @@ type StateCache struct {
 	// admissionMu makes Apply's frontier advance + cache mutation atomic
 	// against concurrent read-fills, which recheck freshness under RLock.
 	admissionMu sync.RWMutex
-	appliedEnd  [kv.DomainLen]uint64
+	// appliedEnd is per domain, necessarily: a domain's frontier advances only
+	// on its own writes, so a single global applied end would reject every
+	// quiet domain's fills.
+	appliedEnd [kv.DomainLen]uint64
+	// aggBound records that BindAggregator ran; SetStateCache asserts it
+	// before wiring a fill-enabled cache.
+	aggBound atomic.Bool
 	// disableFills (STATE_CACHE_FILLS=false) turns off every reader fill
 	// (including the content-addressed ones), leaving applies as the only
 	// writer ("apply-only" mode) — an A/B lever and an operational kill switch.
 	disableFills bool
+	// The pad keeps the counters — RMWed by every fill — off the cache line
+	// of the read-mostly fields above, which every fill reads.
+	_ [64]byte
+	// Fill-attempt outcomes, reported by PrintStatsAndReset — the lens on how
+	// much reader warming survives at a given commit cadence. noFrontier
+	// counts attempts dying on an inexact frontier (ok=false) before the
+	// admission compare; without it admitted+rejected undercounts attempts.
+	fillsAdmitted   atomic.Uint64
+	fillsRejected   atomic.Uint64
+	fillsNoFrontier atomic.Uint64
 }
 
 // NewStateCache creates a new StateCache with the specified byte capacities.
@@ -215,8 +233,10 @@ func (c *StateCache) seedAddrCodeHash(addr []byte, h [32]byte, txNum, visibleEnd
 	c.admissionMu.RLock()
 	defer c.admissionMu.RUnlock()
 	if visibleEnd < c.appliedEnd[kv.AccountsDomain] {
+		c.fillsRejected.Add(1)
 		return
 	}
+	c.fillsAdmitted.Add(1)
 	cc.PutAddrCodeHash(addr, h, txNum)
 }
 
@@ -260,8 +280,10 @@ func (c *StateCache) fillIfFresh(domain kv.Domain, key []byte, value []byte, rea
 	c.admissionMu.RLock()
 	defer c.admissionMu.RUnlock()
 	if visibleEnd < c.appliedEnd[domain] {
+		c.fillsRejected.Add(1)
 		return
 	}
+	c.fillsAdmitted.Add(1)
 	cache.PutIfAbsent(key, cloned, readTxNum)
 }
 
@@ -275,13 +297,17 @@ func (c *StateCache) fillCodeIfFresh(key []byte, value []byte, readTxNum, visibl
 	if !ok || len(value) == 0 {
 		return
 	}
-	codeHash := crypto.Keccak256(value)
+	// Clone before hashing, like the apply paths: the stored bytes and their
+	// codeHash cannot diverge even if the caller's buffer is reused mid-call.
 	cloned := bytes.Clone(value)
+	codeHash := crypto.Keccak256(cloned)
 	c.admissionMu.RLock()
 	defer c.admissionMu.RUnlock()
 	if visibleEnd < c.appliedEnd[kv.CodeDomain] || accountsVisibleEnd < c.appliedEnd[kv.AccountsDomain] {
+		c.fillsRejected.Add(1)
 		return
 	}
+	c.fillsAdmitted.Add(1)
 	codeCache.PutWithCodeHashIfAbsent(key, cloned, codeHash, readTxNum)
 }
 
@@ -311,6 +337,46 @@ func (c *StateCache) apply(domain kv.Domain, key, value []byte, txNum uint64) {
 
 	c.admissionMu.Lock()
 	defer c.admissionMu.Unlock()
+	c.applyLocked(cache, domain, key, value, txNum, codeHash)
+}
+
+// applyChunkSize bounds one exclusive critical section of applyAll, so a huge
+// batch apply never starves concurrent fills for its whole duration.
+const applyChunkSize = 4096
+
+func (c *StateCache) applyAll(updates []Update) {
+	for start := 0; start < len(updates); start += applyChunkSize {
+		chunk := updates[start:min(start+applyChunkSize, len(updates))]
+		var codeVals, codeHashes [][]byte
+		for i := range chunk {
+			u := &chunk[i]
+			if u.Domain == kv.CodeDomain && len(u.Val) > 0 {
+				if codeHashes == nil {
+					codeVals = make([][]byte, len(chunk))
+					codeHashes = make([][]byte, len(chunk))
+				}
+				codeVals[i] = bytes.Clone(u.Val)
+				codeHashes[i] = crypto.Keccak256(codeVals[i])
+			}
+		}
+		c.admissionMu.Lock()
+		for i := range chunk {
+			u := &chunk[i]
+			cache := c.caches[u.Domain]
+			if cache == nil {
+				continue
+			}
+			val, codeHash := u.Val, []byte(nil)
+			if codeHashes != nil && codeHashes[i] != nil {
+				val, codeHash = codeVals[i], codeHashes[i]
+			}
+			c.applyLocked(cache, u.Domain, u.Key, val, u.TxNum, codeHash)
+		}
+		c.admissionMu.Unlock()
+	}
+}
+
+func (c *StateCache) applyLocked(cache Cache, domain kv.Domain, key, value []byte, txNum uint64, codeHash []byte) {
 	c.noteApplied(domain, txNum)
 
 	switch domain {
@@ -361,12 +427,66 @@ func (c *StateCache) noteApplied(domain kv.Domain, txNum uint64) {
 func (c *StateCache) clear() {
 	c.admissionMu.Lock()
 	defer c.admissionMu.Unlock()
+	c.clearLocked()
+}
+
+func (c *StateCache) clearLocked() {
 	for _, cache := range c.caches {
 		if cache != nil {
 			cache.Clear()
 		}
 	}
 }
+
+// absorbFilesExtension reconciles the cache with state published by files
+// rather than applies (snapshot download): entries invalidated that way are
+// never overwritten, so when visibility passes a domain's applied frontier,
+// drop every entry and advance the frontiers — pre-publication views cannot
+// refill what was dropped.
+func (c *StateCache) absorbFilesExtension(f Frontier) {
+	c.admissionMu.Lock()
+	defer c.admissionMu.Unlock()
+	extended := false
+	for d := range kv.DomainLen {
+		domain := kv.Domain(d)
+		if c.caches[domain] == nil {
+			continue
+		}
+		if end, ok := f.DomainVisibleEnd(domain); ok && end > c.appliedEnd[domain] {
+			c.appliedEnd[domain] = end
+			extended = true
+		}
+	}
+	if extended {
+		c.clearLocked()
+	}
+}
+
+// BindAggregator forbids visibility lowering on db's aggregator for a
+// fill-enabled cache: fill admission relies on view frontiers never
+// decreasing. SharedDomains.SetStateCache asserts this binding, so wiring
+// cannot forget it. The aggregator side is duck-typed (the concrete type
+// lives in db/state, above this package) but load-bearing: an aggregator
+// without the forbid fails loudly. A nil or apply-only cache needs no
+// binding.
+func (c *StateCache) BindAggregator(db kv.TemporalRwDB) {
+	if c == nil || !c.FillsEnabled() {
+		return
+	}
+	agg := db.Agg()
+	if agg == nil {
+		panic("assert: fill-enabled StateCache bound to a DB without an aggregator — the visibility-lowering guard would be silently dropped")
+	}
+	f, ok := agg.(interface{ ForbidVisibilityLowering() })
+	if !ok {
+		panic(fmt.Sprintf("assert: fill-enabled StateCache bound to a DB whose aggregator %T lacks ForbidVisibilityLowering — the visibility-lowering guard would be silently dropped", agg))
+	}
+	f.ForbidVisibilityLowering()
+	c.aggBound.Store(true)
+}
+
+// AggregatorBound reports whether BindAggregator ran.
+func (c *StateCache) AggregatorBound() bool { return c != nil && c.aggBound.Load() }
 
 // Close releases every sub-cache's slot in the shared memory envelope so later
 // caches size against real concurrency. Idempotent.
@@ -412,6 +532,10 @@ func (c *StateCache) getCache(domain kv.Domain) Cache {
 func (c *StateCache) PrintStatsAndReset() {
 	if c == nil {
 		return
+	}
+	admitted, rejected, noFrontier := c.fillsAdmitted.Swap(0), c.fillsRejected.Swap(0), c.fillsNoFrontier.Swap(0)
+	if admitted+rejected+noFrontier > 0 {
+		log.Debug("[cache] fill admission", "admitted", admitted, "rejected", rejected, "noFrontier", noFrontier)
 	}
 	if acc, ok := c.caches[kv.AccountsDomain].(*DomainCache); ok {
 		acc.PrintStatsAndReset("Account")
