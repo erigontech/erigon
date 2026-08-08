@@ -876,10 +876,22 @@ Done ahead of the run. Nothing here for the executor.
 - [x] close the PR
 - [x] confirm branch `tests/binary-tree-witness-growth` stays on `fork` at
       `b2382c5`
-- [ ] record in this plan which of its measurements Task 5 reproduces
+- [x] record in this plan which of its measurements Task 5 reproduces
 
 The five sizes to reproduce in Task 5, re-expressed as chunk counts now that
 the header holds none: 1, 128, 129, 256, and 793 (`MAX_CODE_SIZE`).
+
+What Task 5 reproduces, re-measured by `TestPBinWitnessGranularity`
+(`rpc/jsonrpc/pbin_witness_granularity_test.go`) on the code zone:
+
+| #3286 measurement | Task 5 |
+| --- | --- |
+| growth over chunk counts 1, 128, 129, 256, 793 | reproduced as `single_chunk`, `chunks_128`, `chunks_129`, `group_full`, `max_code_size`; `group_spill` (257) and `max_zero_padded` added |
+| a chunk leaf costs 67 bytes (1 tag + 34 key + 32 value) | exact: 53131 chunk bytes / 793 = 67.0 |
+| ~4.35x bytecode — the leaf plus the branch binding it | 4.33x: (108339 − 2016) / (793 − 1) = 134.2 bytes per marginal chunk, over 31 |
+| 3.75x total bin/hex reading a 4,216-byte contract | the ratio survives the move — 3.74x at 128 chunks (19132 / 5120). The 4,216-byte size itself went with the header split |
+| deploy-versus-read asymmetry, 8 nodes against 284 | reproduced per case in the deploy columns: at 128 chunks, 11 nodes / 1343 B deploying against 276 / 19132 reading. A deploy proves the nodes its insertions split, never the chunks |
+| `EXTCODESIZE`/`EXTCODEHASH` answer from the header (the control) | **not reproduced.** Both are opcode-level claims about what execution touches; the granularity harness measures the witness of one fixed call and has no arm that probes either opcode. It stays a spec-suite case |
 
 ### Task 14: Rebase and reframe execution-specs#3305
 
