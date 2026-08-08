@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcfg"
+	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
@@ -495,10 +496,22 @@ type GasPriceOracleBackend struct {
 	db      kv.TemporalRoDB // nil if Fork is not supported
 	tx      kv.TemporalTx
 	baseApi *BaseAPI
+	overlay *membatchwithdb.MemoryMutation // pinned at construction; nil when no overlay was published
 }
 
+// NewGasPriceOracleBackend pins the block overlay once so the head the oracle
+// resolves stays readable for the whole request, including on the txs Fork opens.
 func NewGasPriceOracleBackend(db kv.TemporalRoDB, tx kv.TemporalTx, baseApi *BaseAPI) *GasPriceOracleBackend {
-	return &GasPriceOracleBackend{db: db, tx: tx, baseApi: baseApi}
+	b := &GasPriceOracleBackend{db: db, baseApi: baseApi, overlay: baseApi.filters.LatestOverlay()}
+	b.tx = b.withOverlay(tx)
+	return b
+}
+
+func (b *GasPriceOracleBackend) withOverlay(tx kv.TemporalTx) kv.TemporalTx {
+	if b.overlay == nil {
+		return tx
+	}
+	return b.overlay.NewReadView(tx)
 }
 
 func (b *GasPriceOracleBackend) Fork(ctx context.Context) (gasprice.OracleBackend, func(), error) {
@@ -509,7 +522,9 @@ func (b *GasPriceOracleBackend) Fork(ctx context.Context) (gasprice.OracleBacken
 	if err != nil {
 		return nil, nil, err
 	}
-	return &GasPriceOracleBackend{db: b.db, tx: tx, baseApi: b.baseApi},
+	// Reuse the pinned overlay instead of re-resolving: it may have been
+	// unpublished since the request started.
+	return &GasPriceOracleBackend{db: b.db, tx: b.withOverlay(tx), baseApi: b.baseApi, overlay: b.overlay},
 		func() { tx.Rollback() },
 		nil
 }

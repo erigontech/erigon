@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/common/concurrent"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
@@ -1175,30 +1176,31 @@ func (ff *Filters) LatestSD() *execctx.SharedDomains {
 // for data not in the overlay.
 // Safe to call on a nil receiver.
 func (ff *Filters) WithOverlay(tx kv.Tx) kv.Tx {
-	if ff == nil {
-		return tx
-	}
-	sd := ff.LatestSD()
-	if sd == nil {
-		return tx
-	}
-	if overlay := sd.BlockOverlay(); overlay != nil {
+	if overlay := ff.LatestOverlay(); overlay != nil {
 		return overlay.NewReadView(tx)
 	}
 	return tx
 }
 
-// WithTemporalOverlay is like WithOverlay but returns kv.TemporalTx directly,
-// avoiding repeated type assertions at callsites that need temporal access.
-func (ff *Filters) WithTemporalOverlay(tx kv.TemporalTx) kv.TemporalTx {
+// LatestOverlay returns the block overlay behind the latest published SD, or nil.
+// Callers that must keep serving one consistent head across several txs (e.g. a
+// forked backend) pin this instance instead of re-resolving, which could observe
+// the overlay being unpublished mid-request.
+func (ff *Filters) LatestOverlay() *membatchwithdb.MemoryMutation {
 	if ff == nil {
-		return tx
+		return nil
 	}
 	sd := ff.LatestSD()
 	if sd == nil {
-		return tx
+		return nil
 	}
-	if overlay := sd.BlockOverlay(); overlay != nil {
+	return sd.BlockOverlay()
+}
+
+// WithTemporalOverlay is like WithOverlay but returns kv.TemporalTx directly,
+// avoiding repeated type assertions at callsites that need temporal access.
+func (ff *Filters) WithTemporalOverlay(tx kv.TemporalTx) kv.TemporalTx {
+	if overlay := ff.LatestOverlay(); overlay != nil {
 		return overlay.NewReadView(tx)
 	}
 	return tx
