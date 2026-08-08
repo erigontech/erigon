@@ -2419,14 +2419,7 @@ func (a *Aggregator) IntegrateMergedDirtyFiles(in *MergeResult) {
 		ii.integrateMergedDirtyFiles(in.iis[id])
 	}
 
-	// Merge widening may subsume v4 boundary files that span multiple
-	// steps — the single-step retire integration can't see them.
-	// Histories/IIs are handled by their own merge cleanup.
-	subsumed := a.subsumedV4ItemsFromMergeLocked(in)
 	a.cleanAfterMergeLocked(at, in)
-	if len(subsumed) > 0 {
-		a.recalcVisibleFiles(subsumed)
-	}
 }
 
 // subsumedV4ItemsFromMergeLocked collects retired v4 items across
@@ -2502,6 +2495,13 @@ func (a *Aggregator) cleanAfterMergeLocked(at *AggregatorRoTx, in *MergeResult) 
 		deleted = append(deleted, names...)
 		retired = append(retired, r...)
 	}
+	// Merge widening may subsume v4 boundary files that span multiple
+	// steps — the single-step retire integration in IntegrateDirtyFiles
+	// can't see them. Fold them into this pass so they ride the same
+	// visible-set transition as the merge garbage (one refcnt drop
+	// unlocks physical reclaim of both). Histories/IIs are handled by
+	// their own merge cleanup above.
+	retired = append(retired, a.subsumedV4ItemsFromMergeLocked(in)...)
 
 	a.NotifyOnFilesDelete(deleted)
 	a.recalcVisibleFiles(retired)
