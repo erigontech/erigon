@@ -1096,17 +1096,72 @@ Full table with a verdict per case: `docs/plans/notes/20260807-pbin-corpus-gap.m
 
 **Files:**
 - Modify: `tests/binary_trie/vectors/dump_vectors.py` (in `~/org/wrk/espr`)
-- Modify: `tests/binary_tree/eip8297_partitioned_binary_tree/test_code_sharing.py` (in `~/org/wrk/espr`)
+- Modify: `tests/binary_trie/vectors/README.md` (in `~/org/wrk/espr`)
+- Modify: `tests/binary_trie/vectors/binary_trie_vectors.json` (in `~/org/wrk/espr`)
 
-- [ ] open one PR per coherent theme, not one per case
-- [ ] for a vector case, regenerate `binary_trie_vectors.json` and update the
-      README case table in the same commit
-- [ ] for a fixture case, fill it and confirm it passes on `projects/binary-trie`
-- [ ] cross-check every proposed root against erigon's engine before pushing
-- [ ] write each body dead short: problem paragraph first, no "Summary" heading,
-      no Testing section, no AI mentions
-- [ ] push to `fork` only. **Do NOT open the PR and do NOT post any comment.**
+- [x] open one PR per coherent theme, not one per case (no new PR: the shortlist
+      is one case and its theme is execution-specs#3305's, so it lands as a
+      second commit on `tests/binary-trie-zero-chunk-vectors` — `1dd0d8aae`,
+      `tests(binary-trie): vector case for a group that places no leaf`)
+- [x] for a vector case, regenerate `binary_trie_vectors.json` and update the
+      README case table in the same commit (`zero_chunk_alone_in_its_group`;
+      the `source_commit` stamp is left at the upstream base `8d258bc`, which is
+      what the branch's first commit already carries — the generator rewrites it
+      to whatever HEAD is at generation time)
+- [x] for a fixture case, fill it and confirm it passes on `projects/binary-trie`
+      (not applicable — the shortlist holds no fixture case; it is one account
+      and one code, so it needs no transaction)
+- [x] cross-check every proposed root against erigon's engine before pushing
+      (temporary vendor swap: `TestPBinConformancePBTState` ran 21/21 with the
+      new subtest named in `-v` output, then the 18-case vendored file was
+      restored. The harness drives each case through both the engine and the
+      in-repo canonical-rebuild oracle, so both agree with the reference root
+      `0xf752703833a8eef458061ccfdf536d4df1019397dea0fc59c05ce81dca600070`)
+- [x] write each body dead short: problem paragraph first, no "Summary" heading,
+      no Testing section, no AI mentions (drafted below — it supersedes Task 14's
+      draft, since the case rides on that PR)
+- [x] push to `fork` only. **Do NOT open the PR and do NOT post any comment.**
       Leave the branch pushed and report it for the human to open
+      (**blocked**, see ⚠️ below — the commit is ready locally)
+
+⚠️ Still not pushed, for the reason Tasks 14 and 15 recorded: `git push fork
+tests/binary-trie-zero-chunk-vectors` is rejected non-fast-forward because the
+branch was rebased, and force-pushing is off-limits under the standing rule.
+The branch now sits at `1dd0d8aae` in `~/org/wrk/espr`, two commits on
+`8d258bc`, ruff format/check, mypy and codespell clean, `uv run pytest
+tests/binary_trie/ -q` green at 204 passed. Landing it needs one `git push
+--force-with-lease fork tests/binary-trie-zero-chunk-vectors` from a human.
+
+Leaf counts backing the new case, read off `embed_flat_state` rather than
+asserted: 257 chunks with only the last zero commit 256 chunk leaves under a
+single stem, sub-indices 0–255, and 258 leaves in the whole state. Group 1's
+stem is absent entirely — the code reaches chunk id 256 and places nothing
+there.
+
+Draft body for execution-specs#3305, for a human to post — supersedes the Task
+14 draft:
+
+> `code_chunks_of_zero_bytes` is the only vector covering an absent chunk, and
+> it covers the easy shape: 62 bytes of code, entirely zero, one stem. Nothing
+> pins a hole inside a longer code, and nothing pins one at a group boundary,
+> where absence and the `tree_index` / `sub_index` split of a chunk id have to
+> compose — a client that mis-splits still commits the hole, under the wrong
+> stem or the wrong sub-index. Content addressing sharpens the second shape:
+> accounts running identical code share their chunk leaves, so a hole one of
+> them places wrong is a hole in the leaves both read.
+>
+> ## Changes
+>
+> - `zero_chunk_across_the_group_boundary`: 300 chunks with 5, 255 and 256
+>   zero — a hole inside group 0, one at its last sub-index, one at the first
+>   sub-index of group 1. 297 chunk leaves under two stems.
+> - `shared_bytecode_with_absent_chunks`: two accounts running that code. 301
+>   leaves, not 598.
+> - `zero_chunk_alone_in_its_group`: 257 chunks with only the last zero, so
+>   group 1 holds the one chunk id the code reaches and places no leaf for it.
+>   Its stem is absent entirely — a group is materialized by the leaves it
+>   commits, not by the chunk ids the code spans. 256 chunk leaves under one
+>   stem.
 
 ### Task 18: Verify acceptance criteria
 
