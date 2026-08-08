@@ -253,6 +253,32 @@ func TestPBinWitnessPruneRejectsMalformedKey(t *testing.T) {
 	}
 }
 
+// TestPBinWitnessPruneKeepsSubtreePrefix: an account removal proves the subtree
+// it drops, not the leaves inside it, so a key shorter than its zone's length is
+// a proved key and the walk stops where that subtree begins.
+func TestPBinWitnessPruneKeepsSubtreePrefix(t *testing.T) {
+	t.Parallel()
+
+	f := pbinWitnessPruneSetup(t)
+	var leafKey []byte
+	for _, key := range f.provedKeys {
+		if len(key) == pbinAccountKeyLength && key[0] == pbinAccountZone {
+			leafKey = key
+			break
+		}
+	}
+	require.NotEmpty(t, leafKey, "the capture proved no account-zone leaf")
+	stem := leafKey[:pbinAccountKeyLength-1]
+
+	kept := pbinWitnessHashSet(t, f.prune(t, [][]byte{stem}))
+	require.NotEmpty(t, kept)
+	for hash := range kept {
+		require.Contains(t, pbinWitnessHashSet(t, f.prune(t, [][]byte{leafKey})), hash,
+			"the stem walk descended past the subtree the leaf key reaches")
+	}
+	require.Equal(t, f.root, pbinWitnessMerkelized(t, f.prune(t, [][]byte{stem}), f.root))
+}
+
 // TestPBinWitnessPruneEmptyCapture: no capture, nothing to prune. The empty
 // result is what an update set touching nothing produces.
 func TestPBinWitnessPruneEmptyCapture(t *testing.T) {

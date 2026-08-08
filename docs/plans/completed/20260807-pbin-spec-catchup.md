@@ -931,7 +931,7 @@ the other. There is no second zone holding chunks now, so that framing is dead
 - [x] rewrite the PR body: problem paragraph first with no "Summary" heading,
       then `## Changes`; no Testing section, no AI mentions (drafted below, not
       posted — the Development Approach forbids writing to GitHub)
-- [x] push the rebased branch. **Do NOT post, edit or reply to any GitHub
+- [ ] push the rebased branch. **Do NOT post, edit or reply to any GitHub
       comment, review or PR body.** Pushing the branch is the whole of the
       outward action; the human replies to the rebase request themselves
       (**blocked**, see ⚠️ below — the commit is ready locally)
@@ -1004,11 +1004,11 @@ Draft body for execution-specs#3305, for a human to post:
       paragraph first, no "Summary" heading, no Testing section, no AI mentions
       (drafted below, not posted — the Development Approach forbids writing to
       GitHub)
-- [x] push the rebased branch. **Do NOT post, edit or reply to any GitHub
+- [ ] push the rebased branch. **Do NOT post, edit or reply to any GitHub
       comment, review or PR body.** Pushing the branch is the whole of the
       outward action; the human replies to the rebase request themselves
       (**blocked**, see ⚠️ below — the commit is ready locally)
-- [x] confirm CI is green apart from any known unrelated `fork.py` drift
+- [ ] confirm CI is green apart from any known unrelated `fork.py` drift
       (**not reachable** — CI runs on the pushed branch, and the push is blocked)
 
 ⚠️ Same blocker as Task 14: `git push fork
@@ -1128,7 +1128,7 @@ Full table with a verdict per case: `docs/plans/notes/20260807-pbin-corpus-gap.m
 - [x] write each body dead short: problem paragraph first, no "Summary" heading,
       no Testing section, no AI mentions (drafted below — it supersedes Task 14's
       draft, since the case rides on that PR)
-- [x] push to `fork` only. **Do NOT open the PR and do NOT post any comment.**
+- [ ] push to `fork` only. **Do NOT open the PR and do NOT post any comment.**
       Leave the branch pushed and report it for the human to open
       (**blocked**, see ⚠️ below — the commit is ready locally)
 
@@ -1243,6 +1243,16 @@ they now use the doc's own §5.1 tree, so they are checkable like the rest.
 ## Post-Completion
 
 *Items requiring manual intervention or external systems — informational only.*
+
+**Pending human action (Tasks 14, 15 and 17 left these unchecked):**
+
+- Force-push `tests/binary-trie-zero-chunk-vectors` (at `1dd0d8aae` in
+  `~/org/wrk/espr`) and `tests/binary-tree-consecutive-spilling-deploys` (at
+  `439a4e102`) to `fork`. Both are rebases of published branches, so a plain
+  push is rejected non-fast-forward and the standing no-force-push rule stops
+  the executor from resolving it.
+- The PR bodies for execution-specs#3305 and #3316 are drafted in Tasks 17 and
+  15 and unposted. #3316's CI has not run — it runs on the pushed branch.
 
 **Out of scope here, tracked for later:**
 

@@ -18,6 +18,8 @@ package commitment
 
 import (
 	"bytes"
+	"fmt"
+	"sort"
 	"testing"
 
 	keccak "github.com/erigontech/fastkeccak"
@@ -222,4 +224,52 @@ func TestPBinFoldDeleteRunsOnProcess(t *testing.T) {
 		}
 	}
 	require.NotZero(t, collapsed, "every stored leaf was zeroed, so subtrees must collapse")
+}
+
+// TestPBinCollapsedRowLeavesNoRecord: removing one of a branch's two children
+// collapses the row into its survivor, and the record the row was unfolded from
+// has to go with it — an incremental removal must store exactly the records a
+// rebuild of the same state stores.
+func TestPBinCollapsedRowLeavesNoRecord(t *testing.T) {
+	t.Parallel()
+
+	addr, bystander := pbinOracleAddr(51), pbinOracleAddr(52)
+	stored := new(pbinTestCorpus).
+		account(bystander, 1, 2, common.Hash{0x52}).
+		storage(addr, pbinOracleSlot(256), 0x01).
+		storage(addr, pbinOracleSlot(257), 0x02)
+
+	pph, ms := pbinTestEngine(t)
+	stored.applyTo(t, ms)
+	pbinTestProcess(t, pph, stored.plainKeys, stored.updates)
+
+	zeroed := new(pbinTestCorpus).storage(addr, pbinOracleSlot(257))
+	require.NoError(t, ms.applyPlainUpdates(zeroed.plainKeys, []Update{{Flags: DeleteUpdate}}))
+	pph.Reset()
+	root := pbinTestProcess(t, pph, zeroed.plainKeys, zeroed.updates)
+
+	survivors := new(pbinTestCorpus).
+		account(bystander, 1, 2, common.Hash{0x52}).
+		storage(addr, pbinOracleSlot(256), 0x01)
+	require.Equal(t, survivors.oracleRoot(t), root)
+
+	_, fresh := pbinTestEngine(t)
+	survivors.applyTo(t, fresh)
+	freshEngine := NewPBinPatriciaHashed(fresh)
+	defer freshEngine.Release()
+	pbinTestProcess(t, freshEngine, survivors.plainKeys, survivors.updates)
+
+	require.Equal(t, pbinLiveRecordKeys(fresh), pbinLiveRecordKeys(ms),
+		"the collapsed row's record outlived the node it described")
+}
+
+func pbinLiveRecordKeys(ms *MockState) []string {
+	keys := make([]string, 0, len(ms.cm))
+	for prefix, data := range ms.cm {
+		if len(data) > 0 {
+			keys = append(keys, fmt.Sprintf("%x", prefix))
+		}
+	}
+	sort.Strings(keys)
+	return keys
 }

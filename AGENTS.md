@@ -122,6 +122,8 @@ Don't sign commits, pr's, issues, comments.
 
 Selecting the binary trie is process-global, not a per-tester option: set `statecfg.ExperimentalBinCommitment` and `statecfg.BinCommitmentHash`, then `commitment.SetPBinHashSuite`. Calling `SetPBinHashSuite` alone is undone by the settings resolver's keccak default. A test that flips these must restore them in `t.Cleanup` and must not call `t.Parallel` — a concurrent hex test reads the same globals.
 
+The EIP-8297 embedding is not versioned on disk. `erigondb.toml` records `trie_variant` and `trie_hash` and guards a change of either, but nothing records which embedding wrote the state — so a change to key derivation or leaf layout silently recomputes different roots over an existing bin datadir. Rebuild bin datadirs from genesis whenever the embedding changes.
+
 Cite by name, never by line number. An EIP reference is `eip:"<section name>"`, not `eip:NNN-NNN`; a reference to erigon source from `docs/` names the identifier and its file, not `file.go:NNN`. Line anchors rot on the next edit in either repo, and a stale one is worse than none — it points a reader at unrelated code with full confidence.
 
 Run `make lint` before every push. The linter is non-deterministic — run it repeatedly until clean.

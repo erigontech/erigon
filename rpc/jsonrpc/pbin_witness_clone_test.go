@@ -131,6 +131,7 @@ func TestPBinWitnessCloneDedup(t *testing.T) {
 			rows[i].hexCodes = sumBytes(w.Codes)
 			rows[i].hexTot = rows[i].hexState + rows[i].hexCodes
 		}
+		require.Less(t, rows[0].hexCodes, rows[1].hexCodes, "hex ships duplicated code once")
 	})
 
 	t.Run("bin", func(t *testing.T) {
@@ -153,14 +154,12 @@ func TestPBinWitnessCloneDedup(t *testing.T) {
 				}
 			}
 		}
+		// Direction stated up front: hex ships duplicated code once by hash, so
+		// only bin's chunk sharing can keep the clone block anywhere near the
+		// distinct block — clones must prove fewer bytes than distinct code.
+		require.Less(t, rows[0].chunkB, rows[1].chunkB, "clones must prove fewer chunk bytes than distinct contracts")
+		require.Less(t, rows[0].binTot, rows[1].binTot, "clones must prove a smaller witness than distinct contracts")
 	})
-
-	// Direction stated up front: hex ships duplicated code once by hash, so
-	// only bin's chunk sharing can keep the clone block anywhere near the
-	// distinct block — clones must prove fewer bytes than distinct code.
-	require.Less(t, rows[0].chunkB, rows[1].chunkB, "clones must prove fewer chunk bytes than distinct contracts")
-	require.Less(t, rows[0].binTot, rows[1].binTot, "clones must prove a smaller witness than distinct contracts")
-	require.Less(t, rows[0].hexCodes, rows[1].hexCodes, "hex ships duplicated code once")
 
 	out := fmt.Sprintf("%d contracts of %d B (%d chunks, one spilling past a full group), all called in one block\n",
 		pbinCloneCount, pbinCloneSize, pbinCloneChunks)
@@ -169,7 +168,7 @@ func TestPBinWitnessCloneDedup(t *testing.T) {
 	for _, r := range rows {
 		out += fmt.Sprintf("%-12s %9d %9d %8d | %8d %6.2fx %8d %9d %9d\n",
 			r.name, r.hexState, r.hexCodes, r.hexTot,
-			r.binTot, float64(r.binTot)/float64(r.hexTot), r.binNodes, r.chunkB, r.branchB)
+			r.binTot, float64(r.binTot)/float64(max(r.hexTot, 1)), r.binNodes, r.chunkB, r.branchB)
 	}
 	t.Log("witness cost of duplicated bytecode\n" + out)
 }

@@ -37,6 +37,10 @@ func isCodeChunkKey(key []byte) bool {
 	return len(key) > 0 && key[0] == 0x01
 }
 
+// pbinDelegationSubIndex is the EIP's DELEGATION_LEAF_KEY, unexported by package
+// commitment. It stands where CODE_HASH does for a 7702-delegated account.
+const pbinDelegationSubIndex = 2
+
 func TestPBinWitnessCodeWeight(t *testing.T) {
 	withCommitmentHistory(t)
 	withBinCommitmentDatadir(t)

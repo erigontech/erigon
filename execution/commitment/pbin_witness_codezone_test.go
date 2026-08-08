@@ -225,3 +225,50 @@ func TestPBinWitnessDeployIntoPopulatedCodeZone(t *testing.T) {
 		})
 	}
 }
+
+// TestPBinWitnessAccountMissingCodeHashIsMalformed: a present account holds
+// exactly one of the CODE_HASH and DELEGATION leaves, so a witness that proves
+// both absent under a live BASIC_DATA leaf describes a state the tree cannot
+// hold. Reading it as an absent account would recompute a wrong root instead.
+func TestPBinWitnessAccountMissingCodeHashIsMalformed(t *testing.T) {
+	t.Parallel()
+
+	addr := pbinOracleAddr(77)
+	keys := pbinDigestCache{sum: pbinSelectedSum}
+	var value [pbinValueLength]byte
+	value[pbinBasicDataNonceOffset+7] = 1
+
+	preimage := append([]byte{pbinLeafTag}, keys.accountKey(addr, pbinBasicDataLeafKey)...)
+	preimage = append(preimage, value[:]...)
+	hasher := pbinHasher{sum: pbinSelectedSum}
+	root := hasher.hash(preimage)
+
+	state, err := PBinNewWitnessState([][]byte{preimage}, root[:])
+	require.NoError(t, err)
+
+	_, _, err = state.Account(addr)
+	require.ErrorIs(t, err, errPBinWitnessNode)
+}
+
+// TestPBinFoldIgnoresWitnessBlock: the block override is a witness-pass input.
+// A fold that finds one left behind has to derive its chunk keys from state
+// anyway — honouring it would commit a wrong root on the execution path.
+func TestPBinFoldIgnoresWitnessBlock(t *testing.T) {
+	t.Parallel()
+
+	addr := pbinOracleAddr(73)
+	code := pbinSpillingCode(0xC1, 4)
+	deploy := pbinDeployCorpus(73, code)
+
+	post := NewMockState(t)
+	require.NoError(t, post.applyPlainUpdates(deploy.plainKeys, deploy.updates))
+	post.setCode(addr, code)
+
+	stale := PBinWitnessBlock{
+		Code:    map[string][]byte{string(addr): pbinSpillingCode(0xC2, 9)},
+		Removed: map[string]struct{}{string(addr): {}},
+	}
+	require.Equal(t,
+		pbinStreamKeys(t, post, deploy, PBinWitnessBlock{}, false),
+		pbinStreamKeys(t, post, deploy, stale, false))
+}

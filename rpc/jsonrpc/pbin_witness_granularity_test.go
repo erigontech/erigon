@@ -177,7 +177,11 @@ func TestPBinWitnessGranularity(t *testing.T) {
 					r.basicData += len(node)
 				case sub == 1:
 					r.codeHash += len(node)
+				case sub == pbinDelegationSubIndex:
+					r.codeHash += len(node)
 				default:
+					// The header window is the only other allocated part of the
+					// account zone; everything between is reserved.
 					require.True(t, sub >= 64 && sub < 128,
 						"%s: account-zone leaf at reserved sub-index %d", r.name, sub)
 					r.storageLeaf += len(node)

@@ -483,6 +483,17 @@ bytes of the node hash, which the context resolves back to the account state. So
 witness record ACCOUNT_ADDR is not an address and LEAF_VALUE is not evidence of a code chunk.
 Consumers must know which producer wrote the record.
 
+**A witness pass is told what the parent state cannot say.** It walks the parent state, where a
+contract the block deploys has no code and an account the block removed is indistinguishable from
+one it created. Both decide which keys the pass has to walk, so the caller supplies them in a
+`PBinWitnessBlock` (`pbin_witness.go`) keyed by account plain key: `chunkSource`
+(`pbin_update_stream.go`) derives chunk keys from the supplied code — key derivation only, values
+stay pre-state — and `removesAccount` reads the supplied removal set instead of the update's delete
+flag. Both overrides apply on a witness pass only; a fold ignores a block left set. `SetWitnessBlock`
+must be called before the capture, `Witnesses` clears it on return, and
+`SharedDomainsCommitmentContext.SetWitnessBlock` (`commitment_context.go`) is a silent no-op on a
+hex trie. A bin capture that skips it walks too few keys and prunes away nodes the verifier needs.
+
 ## 7. The root record
 
 `pbinRootKey = {0x08}` (`pbin_patricia_hashed.go`) holds a **bare cell body with no 4-byte
@@ -826,6 +837,11 @@ Behavioural consequences:
 - Zero and absent are the same state, so a write of 32 zero bytes removes the leaf rather than
   storing zeros (`state_write`, eip:"Zero values and deletion"), and the fold collapses whatever
   subtree that empties (§5.4).
+- A subtree drop resets one cell, so the branch records stored *beneath* that cell are not
+  reclaimed. Nothing unfolds them afterwards — the survivor's own record lives at its own path —
+  so the root is unaffected, but the commitment domain keeps rows for nodes the trie no longer
+  holds. Reclaiming them needs a prefix-range delete at the drop point; the rows a *collapsing*
+  fold leaves behind are deleted (`deleteRowRecord`, `pbin_patricia_hashed.go`).
 - The one persisted root record, under key `0x08`, is the root cell of the whole trie — one per
   trie, never per account.
 

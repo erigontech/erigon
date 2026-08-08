@@ -85,7 +85,6 @@ func (pph *PBinPatriciaHashed) SetWitnessBlock(b PBinWitnessBlock) {
 //
 // produceExclusionProofs is accepted and ignored. It materializes the branch an
 // extension node hides, and EIP-8297 has no extension node.
-
 func (pph *PBinPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, produceExclusionProofs bool, logPrefix string) (nodes [][]byte, provedKeys [][]byte, rootHash []byte, err error) {
 	set := newWitnessNodeSet()
 	pph.setWitnessTracer(set)

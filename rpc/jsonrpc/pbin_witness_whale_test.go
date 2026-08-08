@@ -182,6 +182,24 @@ func TestPBinWhaleWitness(t *testing.T) {
 			}
 			r.binTotal += sumBytes(w.Headers)
 		}
+		// The property the table exists to show: a slot's number, not its count,
+		// decides the zone. Slots under 64 sit in the account's header window;
+		// everything else, and every keccak-mapped slot, gets its own storage-zone
+		// group.
+		for i, c := range pbinWhaleCases {
+			r := &rows[i]
+			if c.mapping {
+				require.Zero(t, r.binHdr, "%s/%d: a mapped slot cannot reach the header window", c.layout, c.touch)
+				require.NotZero(t, r.binZone, "%s/%d: mapped slots must land in the storage zone", c.layout, c.touch)
+				continue
+			}
+			require.NotZero(t, r.binHdr, "%s/%d: slots under 64 must land in the header window", c.layout, c.touch)
+			if c.touch < 64 {
+				require.Zero(t, r.binZone, "%s/%d: no slot reaches the storage zone", c.layout, c.touch)
+			} else {
+				require.NotZero(t, r.binZone, "%s/%d: slots from 64 up must land in the storage zone", c.layout, c.touch)
+			}
+		}
 	})
 
 	out := fmt.Sprintf("%d slots stored; one block per read depth\n", pbinWhaleSlots)

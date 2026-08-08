@@ -38,9 +38,10 @@ import (
 // incomplete; under bin an unresolved hash is unambiguous, so there is no mode
 // where guessing is right.
 
-// PBinAccount is the account state the BASIC_DATA and CODE_HASH leaves hold.
-// The binary tree commits no per-account storage root, so there is no field for
-// one.
+// PBinAccount is the account state the header leaves hold. A delegated account
+// has no CODE_HASH leaf, and its CodeHash is the keccak of the indicator bytes
+// its DELEGATION leaf carries. The binary tree commits no per-account storage
+// root, so there is no field for one.
 type PBinAccount struct {
 	Nonce    uint64
 	Balance  uint256.Int
@@ -79,11 +80,11 @@ func (s *PBinWitnessState) Account(addr []byte) (PBinAccount, bool, error) {
 	// while BASIC_DATA is absent for an account whose nonce, balance and
 	// code_size are all zero.
 	var acc PBinAccount
-	basic, ok, err := s.tree.leaf(s.keys.accountKey(addr, pbinBasicDataLeafKey))
+	basic, hasBasic, err := s.tree.leaf(s.keys.accountKey(addr, pbinBasicDataLeafKey))
 	if err != nil {
 		return PBinAccount{}, false, err
 	}
-	if ok {
+	if hasBasic {
 		acc.CodeSize = uint64(binary.BigEndian.Uint32(basic[pbinBasicDataCodeSizeOffset:]))
 		acc.Nonce = binary.BigEndian.Uint64(basic[pbinBasicDataNonceOffset:])
 		acc.Balance.SetBytes(basic[pbinBasicDataBalanceOffset:])
@@ -99,8 +100,15 @@ func (s *PBinWitnessState) Account(addr []byte) (PBinAccount, bool, error) {
 	}
 
 	indicator, err := s.ctx.delegationCode(addr, acc.CodeSize)
-	if err != nil || indicator == nil {
+	if err != nil {
 		return PBinAccount{}, false, err
+	}
+	if indicator == nil {
+		if hasBasic {
+			return PBinAccount{}, false, fmt.Errorf("%w: account %x has a BASIC_DATA leaf but neither a CODE_HASH nor a DELEGATION leaf",
+				errPBinWitnessNode, addr)
+		}
+		return PBinAccount{}, false, nil
 	}
 	// A delegated account commits no code hash; EXTCODEHASH defines its hash as
 	// the keccak of the indicator bytes.

@@ -113,6 +113,16 @@ func (s *pbinStatelessState) setAccount(addr common.Address, nonce, balance uint
 	}
 }
 
+func (s *pbinStatelessState) dropAccount(addr common.Address) {
+	delete(s.accounts, addr)
+	delete(s.code, addr)
+	for key := range s.storage {
+		if bytes.HasPrefix([]byte(key), addr[:]) {
+			delete(s.storage, key)
+		}
+	}
+}
+
 func (s *pbinStatelessState) setStorage(addr common.Address, slot common.Hash, value uint64) {
 	key := string(append(bytes.Clone(addr[:]), slot[:]...))
 	if value == 0 {
@@ -147,6 +157,14 @@ func pbinStatelessProcess(t *testing.T, state *pbinStatelessState, plainKeys [][
 // their proof paths, which is the node set debug_executionWitness returns.
 func pbinStatelessWitness(t *testing.T, state *pbinStatelessState, accessed [][]byte) ([][]byte, []byte) {
 	t.Helper()
+	return pbinStatelessWitnessRemoving(t, state, accessed, nil)
+}
+
+// pbinStatelessWitnessRemoving is the same capture for a block that removes
+// accounts. The pass reads the parent state, where a removed account still
+// looks live, so buildWitnessTrie has to name them — see commitment.PBinWitnessBlock.
+func pbinStatelessWitnessRemoving(t *testing.T, state *pbinStatelessState, accessed [][]byte, removed []common.Address) ([][]byte, []byte) {
+	t.Helper()
 	trie, updates := commitment.InitializeTrieAndUpdates(commitment.ModeDirect, t.TempDir(),
 		commitment.TrieConfig{Variant: commitment.VariantBinPatriciaTrie})
 	defer trie.Release()
@@ -158,6 +176,17 @@ func pbinStatelessWitness(t *testing.T, state *pbinStatelessState, accessed [][]
 		Witnesses(ctx context.Context, updates *commitment.Updates, produceExclusionProofs bool, logPrefix string) ([][]byte, [][]byte, []byte, error)
 	})
 	require.True(t, ok, "the binary trie captures no witness")
+	if len(removed) > 0 {
+		setter, ok := trie.(interface {
+			SetWitnessBlock(commitment.PBinWitnessBlock)
+		})
+		require.True(t, ok, "the binary trie takes no witness block")
+		block := commitment.PBinWitnessBlock{Removed: make(map[string]struct{}, len(removed))}
+		for _, addr := range removed {
+			block.Removed[string(addr[:])] = struct{}{}
+		}
+		setter.SetWitnessBlock(block)
+	}
 
 	full, provedKeys, root, err := capturer.Witnesses(context.Background(), updates, false, "")
 	require.NoError(t, err)
@@ -230,7 +259,11 @@ func (c *pbinStatelessCorpus) verifier(t *testing.T) (*pbinWitnessStateless, [][
 	t.Helper()
 	pbinStatelessProcess(t, c.state, c.accessed())
 	nodes, root := pbinStatelessWitness(t, c.state, c.accessed())
+	return pbinStatelessVerifierOver(t, nodes, root), nodes, common.BytesToHash(root)
+}
 
+func pbinStatelessVerifierOver(t *testing.T, nodes [][]byte, root []byte) *pbinWitnessStateless {
+	t.Helper()
 	// Codes stays empty on purpose: under bin the chunk leaves are the code
 	// source, so every code read here has to come out of State alone.
 	result := &ExecutionWitnessResult{State: make([]hexutil.Bytes, len(nodes))}
@@ -239,7 +272,7 @@ func (c *pbinStatelessCorpus) verifier(t *testing.T) (*pbinWitnessStateless, [][
 	}
 	stateless, err := newPBinWitnessStateless(result, common.BytesToHash(root))
 	require.NoError(t, err)
-	return stateless, nodes, common.BytesToHash(root)
+	return stateless
 }
 
 // TestPBinWitnessStatelessResolvesAccessedState: the witness alone answers every
@@ -387,8 +420,8 @@ func TestPBinWitnessStatelessPostStateRoot(t *testing.T) {
 		require.NoError(t, s.UpdateAccountData(contract, nil, contractAcc))
 		require.NoError(t, s.WriteAccountStorage(contract, 0, accounts.InternKey(pbinStatelessSlot(1)),
 			uint256.Int{}, *uint256.NewInt(0xAB)))
-		// A slot the witness holds keeps its leaf as a present zero; one it proves
-		// absent must not gain a leaf.
+		// Zeroing a slot the witness holds removes its leaf; one the witness
+		// proves absent must not gain a leaf.
 		require.NoError(t, s.WriteAccountStorage(contract, 0, accounts.InternKey(pbinStatelessSlot(64)),
 			uint256.Int{}, uint256.Int{}))
 		require.NoError(t, s.WriteAccountStorage(contract, 0, accounts.InternKey(pbinStatelessSlot(999)),
@@ -423,19 +456,44 @@ func TestPBinWitnessStatelessPostStateRoot(t *testing.T) {
 	require.NotEqual(t, parentRoot, got, "the writes do not move the root, so the test proves nothing")
 }
 
-// TestPBinWitnessStatelessRefusesRemoval: the binary trie has no removal, so a
-// block that drops an on-tree account cannot be verified — and must say so
-// rather than produce a root.
-func TestPBinWitnessStatelessRefusesRemoval(t *testing.T) {
+// TestPBinWitnessStatelessRemovesOnTreeAccount: a block that clears an account
+// the parent state holds reaches, over the witness alone, the root the domain
+// fold reaches over full state.
+func TestPBinWitnessStatelessRemovesOnTreeAccount(t *testing.T) {
 	t.Parallel()
 
 	c := pbinStatelessNewCorpus()
-	stateless, _, _ := c.verifier(t)
+	pbinStatelessProcess(t, c.state, c.accessed())
+	nodes, root := pbinStatelessWitnessRemoving(t, c.state, c.accessed(), []common.Address{c.contract})
+	stateless := pbinStatelessVerifierOver(t, nodes, root)
 
-	require.ErrorIs(t, stateless.DeleteAccount(accounts.InternAddress(c.eoa), nil), errPBinWitnessNoRemoval)
-	// An account the witness proves absent was created and dropped inside the
-	// block, so it leaves no leaf to remove.
+	require.NoError(t, stateless.DeleteAccount(accounts.InternAddress(c.contract), nil))
+
+	got, err := stateless.Finalize(context.Background())
+	require.NoError(t, err)
+
+	full := c.state.clone()
+	full.dropAccount(c.contract)
+	want := pbinStatelessProcess(t, full, [][]byte{c.contract[:]})
+
+	require.Equal(t, common.BytesToHash(want), got)
+	require.NotEqual(t, common.BytesToHash(root), got, "the removal does not move the root, so the test proves nothing")
+}
+
+// TestPBinWitnessStatelessRemovesAccountCreatedInBlock: an account the witness
+// proves absent was created and dropped inside the block, so it leaves no leaf
+// behind and the root must not move.
+func TestPBinWitnessStatelessRemovesAccountCreatedInBlock(t *testing.T) {
+	t.Parallel()
+
+	c := pbinStatelessNewCorpus()
+	stateless, _, parentRoot := c.verifier(t)
+
 	require.NoError(t, stateless.DeleteAccount(accounts.InternAddress(c.fresh), nil))
+
+	got, err := stateless.Finalize(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, parentRoot, got)
 }
 
 // pbinVerifyWithdrawalGwei is the only state the gate's test block moves. A

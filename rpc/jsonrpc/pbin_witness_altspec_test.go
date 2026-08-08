@@ -97,6 +97,11 @@ func TestPBinWitnessNoCodeZone(t *testing.T) {
 			for _, node := range lean {
 				r.leanProof += len(node)
 			}
+			// What the "blob" column costs is only meaningful if dropping the
+			// chunk keys really drops nodes: the code zone has to be a separable
+			// part of the witness, not entangled with the account's proof.
+			require.Less(t, r.leanNodes, r.binNodes, "%s: re-pruning kept every node", r.name)
+			require.NotZero(t, r.leanNodes, "%s: re-pruning kept nothing", r.name)
 		}
 	})
 

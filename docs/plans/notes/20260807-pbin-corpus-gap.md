@@ -24,19 +24,19 @@ they decide most verdicts below.
 
 | erigon case | nearest existing | verdict |
 | --- | --- | --- |
-| `TestPBinIsDelegationClassifiesByBytes` (`pbin_delegation_test.go:32`) | `test_embedding.py::test_delegation_is_classified_by_code_never_by_hash` (7 params) | covered — spec is a superset; it also pins a wrong marker byte (`0xef0101`), which erigon does not. Also `test_code_sharing.py::test_contract_hashing_to_the_delegation_marker_executes_as_code` and vector `code_hash_starting_with_the_delegation_marker` |
-| `TestPBinEncodeDelegationPadsToThirtyTwo` (`:51`) | `test_embedding.py::test_delegation_leaf_value_layout` + `test_chunkify_designator_shaped_code_still_chunks` | covered — spec is a superset: it pins each target byte's position, not just the nine-zero tail |
-| `TestPBinDelegationLeafIsExclusive/fresh EOA delegates` (`:72`) | `test_state_pbt.py::test_every_account_holds_exactly_one_of_the_two_leaves[delegated_eoa]`; vector `delegation_designator` | covered |
-| `…/delegation replaces contract code` (`:89`) | `test_state_pbt.py::test_delegating_replaces_the_code_hash_leaf` + `test_delegating_an_account_reclaims_nothing` | covered — the second pins that the replaced code's chunks stay |
-| `…/delegation cleared to empty code` (`:108`) | `test_state_pbt.py::test_undelegating_restores_the_empty_code_hash_leaf`; the `b""` arm of `test_delegation_change_replaces_the_header_leaf` | covered |
-| `…/two authorities one target` (`:120`) | `test_state_pbt.py::test_authorities_to_one_target_hold_separate_delegation_leaves`; vector `two_authorities_one_target`; `test_code_sharing.py::test_shared_designator_survives_peer_redelegation` | covered |
-| `TestPBinReclaimDropsCodeWithNoSurvivor` (`pbin_reclaim_test.go:61`) | `test_state_pbt.py::test_deleting_the_last_holder_removes_its_code`, `test_deleting_a_sole_holder_removes_its_short_code`, `test_deleting_the_last_holder_drops_every_group` | covered — see the divergence below |
-| `TestPBinReclaimKeepsCodeForBatchSibling` (`:82`) | `test_state_pbt.py::test_deleting_a_holder_keeps_chunks_a_survivor_still_holds[diff_first,diff_last]` | covered — that test's diff arm is exactly the batch sibling, and it orders the survivor both ways |
-| `TestPBinReclaimKeepsCodeForPreexistingHolder` (`:106`) | `test_state_pbt.py::test_deleting_one_holder_keeps_shared_code`, the pre-state arm of `…keeps_chunks_a_survivor_still_holds`; `test_code_sharing.py::test_shared_code_survives_sibling_same_tx_selfdestruct` | covered |
-| `TestPBinDelegationSetAndClearedInOneBatch` (`pbin_adversarial_test.go:38`) | `test_state_pbt.py::test_undelegating_restores_the_empty_code_hash_leaf` | not applicable upstream — see below |
-| `TestPBinDelegationRepointedInOneBatch` (`:60`) | `test_state_pbt.py::test_delegation_change_replaces_the_header_leaf`; step 1 of `…authorities_to_one_target…` | not applicable upstream — see below |
-| `TestPBinZeroChunkAloneInItsGroup` (`:82`) | `test_state_pbt.py::test_absent_chunk_in_a_later_group_does_not_stall_removal`, `test_group_exact_code_fills_group_zero_and_nothing_more` | **absent** |
-| `TestPBinSharedCodeOutlivesOneHolder` (`:105`) | `test_state_pbt.py::test_shared_code_survives_until_the_last_holder_is_gone`, `test_deleting_one_holder_keeps_shared_code`; vector `shared_bytecode_two_accounts` | covered |
+| `TestPBinIsDelegationClassifiesByBytes` (`pbin_delegation_test.go`) | `test_embedding.py::test_delegation_is_classified_by_code_never_by_hash` (7 params) | covered — spec is a superset; it also pins a wrong marker byte (`0xef0101`), which erigon does not. Also `test_code_sharing.py::test_contract_hashing_to_the_delegation_marker_executes_as_code` and vector `code_hash_starting_with_the_delegation_marker` |
+| `TestPBinEncodeDelegationPadsToThirtyTwo` | `test_embedding.py::test_delegation_leaf_value_layout` + `test_chunkify_designator_shaped_code_still_chunks` | covered — spec is a superset: it pins each target byte's position, not just the nine-zero tail |
+| `TestPBinDelegationLeafIsExclusive/fresh EOA delegates` | `test_state_pbt.py::test_every_account_holds_exactly_one_of_the_two_leaves[delegated_eoa]`; vector `delegation_designator` | covered |
+| `…/delegation replaces contract code` | `test_state_pbt.py::test_delegating_replaces_the_code_hash_leaf` + `test_delegating_an_account_reclaims_nothing` | covered — the second pins that the replaced code's chunks stay |
+| `…/delegation cleared to empty code` | `test_state_pbt.py::test_undelegating_restores_the_empty_code_hash_leaf`; the `b""` arm of `test_delegation_change_replaces_the_header_leaf` | covered |
+| `…/two authorities one target` | `test_state_pbt.py::test_authorities_to_one_target_hold_separate_delegation_leaves`; vector `two_authorities_one_target`; `test_code_sharing.py::test_shared_designator_survives_peer_redelegation` | covered |
+| `TestPBinReclaimDropsCodeWithNoSurvivor` (`pbin_reclaim_test.go`) | `test_state_pbt.py::test_deleting_the_last_holder_removes_its_code`, `test_deleting_a_sole_holder_removes_its_short_code`, `test_deleting_the_last_holder_drops_every_group` | covered — see the divergence below |
+| `TestPBinReclaimKeepsCodeForBatchSibling` | `test_state_pbt.py::test_deleting_a_holder_keeps_chunks_a_survivor_still_holds[diff_first,diff_last]` | covered — that test's diff arm is exactly the batch sibling, and it orders the survivor both ways |
+| `TestPBinReclaimKeepsCodeForPreexistingHolder` | `test_state_pbt.py::test_deleting_one_holder_keeps_shared_code`, the pre-state arm of `…keeps_chunks_a_survivor_still_holds`; `test_code_sharing.py::test_shared_code_survives_sibling_same_tx_selfdestruct` | covered |
+| `TestPBinDelegationSetAndClearedInOneBatch` (`pbin_adversarial_test.go`) | `test_state_pbt.py::test_undelegating_restores_the_empty_code_hash_leaf` | not applicable upstream — see below |
+| `TestPBinDelegationRepointedInOneBatch` | `test_state_pbt.py::test_delegation_change_replaces_the_header_leaf`; step 1 of `…authorities_to_one_target…` | not applicable upstream — see below |
+| `TestPBinZeroChunkAloneInItsGroup` | `test_state_pbt.py::test_absent_chunk_in_a_later_group_does_not_stall_removal`, `test_group_exact_code_fills_group_zero_and_nothing_more` | **absent** |
+| `TestPBinSharedCodeOutlivesOneHolder` | `test_state_pbt.py::test_shared_code_survives_until_the_last_holder_is_gone`, `test_deleting_one_holder_keeps_shared_code`; vector `shared_bytecode_two_accounts` | covered |
 
 ## Shortlist
 

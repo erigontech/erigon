@@ -45,13 +45,12 @@ import (
 //
 // Code has one owner: the witness's own leaves — chunks reassembled and checked
 // against the CODE_HASH leaf, or the delegation indicator read from its header
-// leaf (commitment.PBinWitnessState.Code). result.Codes is not read. The leaves are committed by the root and the fold re-chunks every
-// account it touches, so the pruned witness carries them wherever the post-state
-// pass needs code; a blob list is keyed by code reads, a strictly narrower set.
-// Code a block deploys has no pre-state leaves and arrives through
-// UpdateAccountCode, as it does under hex.
-
-var errPBinWitnessNoRemoval = errors.New("binary trie defines no removal")
+// leaf (commitment.PBinWitnessState.Code). result.Codes is not read. The leaves
+// are committed by the root and the fold re-chunks every account it touches, so
+// the pruned witness carries them wherever the post-state pass needs code; a
+// blob list is keyed by code reads, a strictly narrower set. Code a block
+// deploys has no pre-state leaves and arrives through UpdateAccountCode, as it
+// does under hex.
 
 // pbinExecBlockStatelessly re-executes the block against the binary witness alone
 // and returns the post-state root it reaches. It is the bin arm of the gate
@@ -241,17 +240,13 @@ func (s *pbinWitnessStateless) UpdateAccountData(address accounts.Address, origi
 	return nil
 }
 
-// DeleteAccount is where a block that cannot be committed under bin surfaces.
-// An account the witness proves absent was created and dropped inside the block,
-// leaving no leaf behind; anything else would have to remove one.
+// DeleteAccount records the removal. The pre-state read is what makes it strict:
+// an account whose leaves the witness cannot resolve errors here rather than
+// being dropped on a guess.
 func (s *pbinWitnessStateless) DeleteAccount(address accounts.Address, original *accounts.Account) error {
 	addr := address.Value()
-	acc, err := s.preStateAccount(addr)
-	if err != nil {
+	if _, err := s.preStateAccount(addr); err != nil {
 		return err
-	}
-	if acc != nil {
-		return fmt.Errorf("%w: account %x", errPBinWitnessNoRemoval, addr)
 	}
 	delete(s.accountUpdates, addr)
 	delete(s.storageWrites, addr)
@@ -302,6 +297,12 @@ func (s *pbinWitnessStateless) Finalize(ctx context.Context) (common.Hash, error
 }
 
 func (s *pbinWitnessStateless) pendingUpdates() (plainKeys [][]byte, updates []commitment.Update, err error) {
+	// A removal is one update on the address: the engine drops the account's
+	// header stem and its storage subtree, neither of which the writes enumerate.
+	for addr := range s.deleted {
+		plainKeys = append(plainKeys, addr[:])
+		updates = append(updates, commitment.Update{Flags: commitment.DeleteUpdate})
+	}
 	for addr, acc := range s.accountUpdates {
 		if acc == nil {
 			continue
@@ -366,10 +367,10 @@ func (s *pbinWitnessStateless) accountUpdate(addr common.Address, acc *accounts.
 	return update, nil
 }
 
-// storageUpdate keeps a zeroed slot as a present zero when the witness holds its
-// leaf: EIP-8297 has no removal, so the leaf stays and commits 32 zero bytes. A
-// slot with no leaf to begin with is dropped — writing zero to it would commit a
-// leaf the chain never had.
+// storageUpdate writes a zeroed slot the witness holds, which the fold reads as
+// a removal of its leaf. A slot with no leaf to begin with is dropped instead:
+// there is nothing to remove, and the walk would prove a key the block never
+// reached.
 func (s *pbinWitnessStateless) storageUpdate(addr common.Address, slot common.Hash, value uint256.Int) (commitment.Update, bool, error) {
 	update := commitment.Update{Flags: commitment.StorageUpdate}
 	if value.IsZero() {

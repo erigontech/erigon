@@ -43,13 +43,9 @@ type pbinUpdateStream struct {
 	witness     PBinWitnessBlock
 	witnessPass bool
 
-	pendingRemoval []pbinAccountRemoval
-}
-
-// pbinAccountRemoval is a storage subtree waiting for the walk to reach its zone.
-type pbinAccountRemoval struct {
-	prefix   []byte
-	plainKey [length.Addr]byte
+	// pendingRemoval holds storage-subtree prefixes waiting for the walk to reach
+	// their zone. Removals are queued in account order, which is prefix order.
+	pendingRemoval [][]byte
 }
 
 type pbinCodeChunk struct {
@@ -115,7 +111,7 @@ func (s *pbinUpdateStream) processKey(treeKey, plainKey []byte, stateUpdate *Upd
 		}
 	}
 	if len(plainKey) == length.Addr && s.removesAccount(plainKey, update) {
-		if err := s.removeAccount(plainKey, update); err != nil {
+		if err := s.removeAccount(plainKey); err != nil {
 			return err
 		}
 	}
@@ -173,14 +169,12 @@ func (s *pbinUpdateStream) removesAccount(plainKey []byte, update *Update) bool 
 // batch-inserted set always has a surviving in-batch holder, because an account
 // created and destroyed inside the batch merges to a bare deletion and inserts
 // none (eip:"Zero values and deletion").
-func (s *pbinUpdateStream) removeAccount(plainKey []byte, update *Update) error {
-	if err := s.emit(s.keyDigest.accountHeaderStem(plainKey), plainKey, update); err != nil {
+func (s *pbinUpdateStream) removeAccount(plainKey []byte) error {
+	drop := Update{Flags: DeleteUpdate}
+	if err := s.emit(s.keyDigest.accountHeaderStem(plainKey), plainKey, &drop); err != nil {
 		return err
 	}
-	s.pendingRemoval = append(s.pendingRemoval, pbinAccountRemoval{
-		prefix: s.keyDigest.accountStoragePrefix(plainKey),
-	})
-	copy(s.pendingRemoval[len(s.pendingRemoval)-1].plainKey[:], plainKey)
+	s.pendingRemoval = append(s.pendingRemoval, s.keyDigest.accountStoragePrefix(plainKey))
 	return nil
 }
 
@@ -191,25 +185,23 @@ func (s *pbinUpdateStream) flushRemovalsBefore(treeKey []byte) error {
 	return s.flushRemovals(treeKey)
 }
 
-// flushRemovals emits the storage-prefix drops sorting before upTo, or all of
-// them when upTo is nil. A drop has to land before any storage key it covers.
+// flushRemovals emits the queued storage-prefix drops that sort before upTo, or
+// all of them when upTo is nil. A drop has to land before any storage key it
+// covers; a queue out of order would fail the engine's ascending-visit check
+// rather than pass silently.
 func (s *pbinUpdateStream) flushRemovals(upTo []byte) error {
-	slices.SortFunc(s.pendingRemoval, func(a, b pbinAccountRemoval) int {
-		return bytes.Compare(a.prefix, b.prefix)
-	})
-	kept := s.pendingRemoval[:0]
-	for i := range s.pendingRemoval {
-		r := &s.pendingRemoval[i]
-		if upTo != nil && bytes.Compare(r.prefix, upTo) >= 0 {
-			kept = append(kept, *r)
-			continue
+	drop := Update{Flags: DeleteUpdate}
+	sent := 0
+	for _, prefix := range s.pendingRemoval {
+		if upTo != nil && bytes.Compare(prefix, upTo) >= 0 {
+			break
 		}
-		update := Update{Flags: DeleteUpdate}
-		if err := s.emit(r.prefix, r.plainKey[:], &update); err != nil {
+		if err := s.emit(prefix, nil, &drop); err != nil {
 			return err
 		}
+		sent++
 	}
-	s.pendingRemoval = kept
+	s.pendingRemoval = append(s.pendingRemoval[:0], s.pendingRemoval[sent:]...)
 	return nil
 }
 
@@ -220,7 +212,7 @@ func (s *pbinUpdateStream) flushRemovals(upTo []byte) error {
 // A deletion's code fields are whatever the batch merge left behind, not
 // state, so a removed account is codeless here.
 func (s *pbinUpdateStream) chunkSource(plainKey []byte, update *Update) ([]byte, common.Hash, error) {
-	if code, ok := s.witness.Code[string(plainKey)]; ok {
+	if code, ok := s.witness.Code[string(plainKey)]; ok && s.witnessPass {
 		return code, common.Hash(keccak.Sum256(code)), nil
 	}
 	if update.Deleted() || update.CodeSize == 0 {

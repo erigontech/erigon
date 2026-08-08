@@ -713,8 +713,8 @@ func (pph *PBinPatriciaHashed) foldBranch(row int, bit uint64, upDepth, depth in
 }
 
 // foldPropagate collapses a row down to its sole survivor. The node moves up
-// rather than being rewritten: no record is written, and the bits the row
-// consumed are prepended to the survivor's own prefix.
+// rather than being rewritten, so the row's own record describes nothing once
+// the bits it consumed are prepended to the survivor's prefix.
 func (pph *PBinPatriciaHashed) foldPropagate(row int, bit uint64, upDepth, depth int16, upCell *pbinCell) error {
 	g := &pph.grid
 	pph.propagateTouch(row, bit)
@@ -730,7 +730,7 @@ func (pph *PBinPatriciaHashed) foldPropagate(row int, bit uint64, upDepth, depth
 		return fmt.Errorf("pbin: propagate at row %d formed a %d-bit prefix, want %d", row, upCell.prefix.bitLen, want)
 	}
 	pph.rehashAfterPrefixChange(upCell)
-	return nil
+	return pph.deleteRowRecord(row)
 }
 
 // foldDelete drops a row that kept nothing, taking the record it came from with
@@ -746,11 +746,17 @@ func (pph *PBinPatriciaHashed) foldDelete(row int, bit uint64, upCell *pbinCell)
 		}
 	}
 	upCell.reset()
-	if !g.branchBefore[row] {
+	return pph.deleteRowRecord(row)
+}
+
+// deleteRowRecord removes the stored record a vanished row was unfolded from.
+// A row that never had one leaves nothing to remove.
+func (pph *PBinPatriciaHashed) deleteRowRecord(row int) error {
+	if !pph.grid.branchBefore[row] {
 		return nil
 	}
 	key := pbinEncodeBitPath(&pph.currentKey)
-	if err := pph.ctx.PutBranch(key, []byte{}, g.prevRecordFor(row)); err != nil {
+	if err := pph.ctx.PutBranch(key, []byte{}, pph.grid.prevRecordFor(row)); err != nil {
 		return fmt.Errorf("pbin: delete branch at %x: %w", key, err)
 	}
 	return nil
