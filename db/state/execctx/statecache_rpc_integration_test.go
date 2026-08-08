@@ -335,7 +335,7 @@ func TestEmbeddedRPCCacheViewDoesNotRefillCodeOfDeletedAccount(t *testing.T) {
 
 	got, err := rpcView.GetCode(addr)
 	require.NoError(t, err)
-	require.Equal(t, code, got, "the pre-deletion view still reads the code from its own tx")
+	require.Empty(t, got, "the view keeps serving the published SD's state after teardown, so the deletion stays visible")
 
 	_, ok = stateCache.View(nil).Get(kv.CodeDomain, addr)
 	require.False(t, ok, "a pre-deletion RPC view must not refill the deleted account's code")

@@ -362,32 +362,6 @@ func (sd *TemporalMemBatch) SizeEstimate() uint64 {
 	return uint64(sd.metrics.CachePutSize)
 }
 
-func (sd *TemporalMemBatch) ClearRam() {
-	sd.latestStateLock.Lock()
-	defer sd.latestStateLock.Unlock()
-	for i := range sd.domains {
-		sd.domains[i] = map[string][]dataWithTxNum{}
-	}
-
-	sd.storage = btree2.NewMap[string, []dataWithTxNum](128)
-	sd.unwindToTxNum = 0
-	sd.unwindChangeset = nil
-	sd.unwindChangesetRaw = nil
-
-	sd.metrics.Lock()
-	defer sd.metrics.Unlock()
-	sd.metrics.CachePutCount = 0
-	sd.metrics.CachePutSize = 0
-	sd.metrics.CachePutKeySize = 0
-	sd.metrics.CachePutValueSize = 0
-	for _, dm := range sd.metrics.Domains {
-		dm.CachePutCount = 0
-		dm.CachePutSize = 0
-		dm.CachePutKeySize = 0
-		dm.CachePutValueSize = 0
-	}
-}
-
 func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte) (cont bool, err error)) error {
 	sd.latestStateLock.RLock()
 	defer sd.latestStateLock.RUnlock()
@@ -541,12 +515,11 @@ func (sd *TemporalMemBatch) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockN
 	cs, ok := sd.pastChangesAccumulator[common.ToStringZeroCopy(key[:])]
 	sd.pastChangesLock.RUnlock()
 	if ok {
-		return [kv.DomainLen][]kv.DomainEntryDiff{
-			cs.Diffs[kv.AccountsDomain].GetDiffSet(),
-			cs.Diffs[kv.StorageDomain].GetDiffSet(),
-			cs.Diffs[kv.CodeDomain].GetDiffSet(),
-			cs.Diffs[kv.CommitmentDomain].GetDiffSet(),
-		}, true, nil
+		var diffs [kv.DomainLen][]kv.DomainEntryDiff
+		for i := range cs.Diffs {
+			diffs[i] = cs.Diffs[i].GetDiffSet()
+		}
+		return diffs, true, nil
 	}
 	return changeset.ReadDiffSet(tx, blockNumber, blockHash)
 }
@@ -634,6 +607,8 @@ func (sd *TemporalMemBatch) IndexAdd(table kv.InvertedIdx, key []byte, txNum uin
 	panic(fmt.Errorf("unknown index %s", table))
 }
 
+// Close releases writer resources but must not clear the in-memory maps:
+// readers of a published SD may still hold them.
 func (sd *TemporalMemBatch) Close() {
 	for _, d := range sd.domainWriters {
 		if d != nil {
@@ -651,7 +626,6 @@ func (sd *TemporalMemBatch) Close() {
 	for _, iiWriter := range sd.pastIIWriters {
 		iiWriter.close()
 	}
-	sd.ClearRam()
 }
 
 func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
