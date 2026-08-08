@@ -1040,19 +1040,57 @@ is 18 `pbt_state` vector cases and 49 fixture test functions.
 **Files:**
 - Create: `docs/plans/notes/20260807-pbin-corpus-gap.md`
 
-- [ ] create `docs/plans/notes/` — it does not exist
-- [ ] list every case from Tasks 6, 7, 9 and 10 beside its nearest existing
+- [x] create `docs/plans/notes/` — it does not exist
+- [x] list every case from Tasks 6, 7, 9 and 10 beside its nearest existing
       equivalent, checking at minimum `test_code_sharing.py`
       (`test_shared_code_survives_sibling_same_tx_selfdestruct`,
       `test_shared_designator_survives_peer_redelegation`,
       `test_contract_hashing_to_the_delegation_marker_executes_as_code`) and
       `test_code_chunking.py` (`test_delegated_eoa_executes_chunked_delegate`)
-- [ ] mark each covered, partially covered, or absent, with the file and test
+      (13 cases; the two Python suites `tests/binary_trie/test_embedding.py` and
+      `test_state_pbt.py` carry the closest equivalents and decide most verdicts,
+      so the diff is against all four corpus sources, not the fixtures alone)
+- [x] mark each covered, partially covered, or absent, with the file and test
       name backing the verdict
-- [ ] confirm the expected shortlist: reclamation with no surviving holder, and
-      a zero chunk alone in its group
-- [ ] drop anything already covered — do not repackage an existing case
-- [ ] record the shortlist in this plan before opening anything
+- [x] confirm the expected shortlist: reclamation with no surviving holder, and
+      a zero chunk alone in its group (**half confirmed** — only the zero chunk
+      is absent; see below)
+- [x] drop anything already covered — do not repackage an existing case
+- [x] record the shortlist in this plan before opening anything
+
+**Shortlist: one case, not two.**
+
+*A zero chunk alone in its `tree_index` group* — 257 chunks with the last
+all-zero, so group 1 exists in the code and places no leaf, leaving its stem
+absent. It pins whether a group's stem follows the chunk *ids* the code reaches
+or the leaves it actually places. Expressible as a flat `pbt_state` vector case
+(one account, one code), so it needs no transaction. Its theme is absent chunks
+at a group boundary — execution-specs#3305's theme — so Task 17 folds it into
+that branch rather than opening a second PR. Nothing existing has the shape:
+every group-1 case either keeps a leaf there (`test_absent_chunk_in_a_later_group_does_not_stall_removal`
+at 258 chunks, `test_deleting_the_last_holder_drops_every_group` whose only hole
+falls at chunk 223, vector `code_across_the_group_boundary`, and #3305's own
+reframed case at 300 chunks) or has no chunk in group 1 at all
+(`test_group_exact_code_fills_group_zero_and_nothing_more`).
+
+*Reclamation with no surviving holder* is **dropped** — already covered, three
+times over, by `test_state_pbt.py`'s `test_deleting_a_sole_holder_removes_its_short_code`,
+`test_deleting_the_last_holder_removes_its_code` and
+`test_deleting_the_last_holder_drops_every_group`.
+
+⚠️ Those same three tests pin the reference *dropping* a pre-existing sole
+holder's chunks, which erigon does not do — Task 9 established the drop branch
+is unreachable for a commitment batch. On-chain the two agree (EIP-6780 deletes
+only same-transaction creations, whose chunks were never inserted); they part on
+a handcrafted diff. Recorded as a known deviation, not reopened.
+
+⚠️ `TestPBinDelegationSetAndClearedInOneBatch` and
+`TestPBinDelegationRepointedInOneBatch` have **no upstream form**: a reference
+`BlockDiff` carries one already-merged post-state account per address, so an
+intra-batch intermediate write has nowhere to live. They pin erigon's
+update-merge path, not the embedding, and stay erigon-internal.
+
+Full table with a verdict per case: `docs/plans/notes/20260807-pbin-corpus-gap.md`.
 
 ### Task 17: Contribute the absent cases back to the corpus
 
