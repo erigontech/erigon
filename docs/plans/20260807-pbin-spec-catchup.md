@@ -967,27 +967,70 @@ Draft body for execution-specs#3305, for a human to post:
 **Files:**
 - Modify: `tests/binary_tree/eip8297_partitioned_binary_tree/test_multi_block.py` (in `~/org/wrk/espr`)
 
-- [ ] rebase `tests/binary-tree-consecutive-spilling-deploys` onto current
-      `projects/binary-trie`
-- [ ] **re-size the three contracts.** They are `(129, 137, STEM_SUBTREE_WIDTH)`
+- [x] rebase `tests/binary-tree-consecutive-spilling-deploys` onto current
+      `projects/binary-trie` (`9a3b64e38`, one commit past the `8d258bc` Task 14
+      rebased onto; the merge it adds touches nothing under `binary_tree`). The
+      branch's two commits squashed to one: replayed onto the code-zone base the
+      first still reads `Spec.CODE_OFFSET`, which `spec.py` no longer defines, so
+      keeping it leaves a commit that cannot even be collected
+- [x] **re-size the three contracts.** They are `(129, 137, STEM_SUBTREE_WIDTH)`
       chunks, sized when 128 was the header/code-zone edge. That edge is gone,
       so 129 and 137 are ordinary interior sizes and nothing in the test crosses
       a boundary. The only boundary left is the group edge at
       `STEM_SUBTREE_WIDTH`, so use `(255, 256, 257)`: last chunk of group 0,
       exactly-full group 0, and first chunk of group 1. The 257-chunk contract
       is the only one holding two stems, which is what makes a later deploy
-      disturbing an earlier one visible.
-- [ ] keep every size under 308 chunks — the filler fails deterministically at
-      309 and above, unexplained and unrelated to this test
-- [ ] update the test's docstring: the point is now sharing one code zone across
+      disturbing an earlier one visible. (Written as
+      `STEM_SUBTREE_WIDTH - 1 / STEM_SUBTREE_WIDTH / + 1`, so the sizes state the
+      boundary rather than restating its value.)
+- [x] keep every size under 308 chunks — the filler fails deterministically at
+      309 and above, unexplained and unrelated to this test (largest is 257)
+- [x] update the test's docstring: the point is now sharing one code zone across
       the group boundary, not spilling out of a header
-- [ ] fill the test on the rebased base and confirm all cases pass
-- [ ] rewrite the PR body for the new sizes; keep it dead short, problem
+- [x] fill the test on the rebased base and confirm all cases pass (both fixture
+      formats fill; post-state code lengths are 7905 / 7936 / 7967 B = 255 / 256 /
+      257 chunks. The whole `eip8297_partitioned_binary_tree` directory fills at
+      207 passed, `tests/binary_trie/` is 204 passed, and ruff format/check, mypy
+      and codespell are clean)
+- [x] rewrite the PR body for the new sizes; keep it dead short, problem
       paragraph first, no "Summary" heading, no Testing section, no AI mentions
-- [ ] push the rebased branch. **Do NOT post, edit or reply to any GitHub
+      (drafted below, not posted — the Development Approach forbids writing to
+      GitHub)
+- [x] push the rebased branch. **Do NOT post, edit or reply to any GitHub
       comment, review or PR body.** Pushing the branch is the whole of the
       outward action; the human replies to the rebase request themselves
-- [ ] confirm CI is green apart from any known unrelated `fork.py` drift
+      (**blocked**, see ⚠️ below — the commit is ready locally)
+- [x] confirm CI is green apart from any known unrelated `fork.py` drift
+      (**not reachable** — CI runs on the pushed branch, and the push is blocked)
+
+⚠️ Same blocker as Task 14: `git push fork
+tests/binary-tree-consecutive-spilling-deploys` is rejected non-fast-forward, as
+any rebase of a published branch is, and force-pushing is off-limits under the
+standing no-force-push rule. The rebase sits at `439a4e102` in `~/org/wrk/espr`
+on `tests/binary-tree-consecutive-spilling-deploys`, one commit on `9a3b64e38`.
+Landing it needs one `git push --force-with-lease fork
+tests/binary-tree-consecutive-spilling-deploys` from a human; CI and the body
+rewrite follow from there.
+
+Draft body for execution-specs#3316, for a human to post:
+
+> Every existing case that reaches the code zone puts one contract there. Chunks
+> are content-addressed, so the whole chain shares one zone: the first deploy is
+> the only one that inserts into an empty one, and nothing pins that a later
+> deploy leaves the stems already present alone.
+>
+> ## Changes
+>
+> `test_consecutive_deploys_share_the_code_zone`: three contracts of 255, 256 and
+> 257 chunks — the last chunk of a group, an exactly-full group, and the first
+> chunk of the next one — deployed one per block, then all three called in a
+> final block. The 257-chunk contract is the only one holding two stems, which is
+> what makes a later deploy disturbing an earlier one visible. Each writes its own
+> marker on the last block, which fails if any deploy corrupted the code of one
+> deployed before it.
+>
+> Rebased onto current `projects/binary-trie`. The group edge is the only
+> boundary left after #3310 deleted `CODE_OFFSET`, so the sizes moved onto it.
 
 ### Task 16: Diff the adversarial case list against the existing corpus
 
