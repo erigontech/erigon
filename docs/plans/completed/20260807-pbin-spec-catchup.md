@@ -2,6 +2,14 @@
 
 ## Overview
 
+**Targets this catch-up lands on**, so the next drift is measurable:
+
+| what | revision |
+| --- | --- |
+| EIP-8297 text | `2c6da5e` on `ethereum/EIPs@master` |
+| reference implementation | `8d258bc` on `ethereum/execution-specs@projects/binary-trie` |
+| vendored conformance vectors | `source_commit` `58faeb0` |
+
 Erigon's `PBinPatriciaHashed` implements EIP-8297 as it stood several spec
 commits ago. The tree it builds no longer agrees with the reference
 implementation on any state containing code.
@@ -1202,13 +1210,35 @@ state numbers.
 
 ### Task 19: [Final] Update documentation
 
-- [ ] confirm `docs/pbin-encoding.md` matches the shipped layout
-- [ ] update `CLAUDE.md` only if a new convention emerged that future work needs
-- [ ] record the spec HEAD this catch-up targets (`2c6da5e` / `8d258bc` /
+- [x] confirm `docs/pbin-encoding.md` matches the shipped layout — re-measured
+      against the engine, and the ~90 source line anchors Task 12 deferred are
+      now identifier citations (see below)
+- [x] update `CLAUDE.md` only if a new convention emerged that future work needs
+      (one did: cite by name, never by line — the rule Task 12 applied to the
+      spec and this task applied to erigon source)
+- [x] record the spec HEAD this catch-up targets (`2c6da5e` / `8d258bc` /
       vectors `58faeb0`) in this plan's Overview so the next drift is measurable
-- [ ] append the settled facts to `~/org/mode/e/research-8297-witness.org` per
-      the research-log skill
-- [ ] move this plan to `docs/plans/completed/`
+- [x] append the settled facts to `~/org/mode/e/research-8297-witness.org` per
+      the research-log skill (F29–F34 added; F1/F2/F3/F4/F10 updated in place,
+      R14/R15 retired, I1/I6 closed as shipped, N2 done, N11/N12 restated)
+- [x] move this plan to `docs/plans/completed/`
+
+➕ Task 12's ⚠️ deferred the doc's ~90 erigon line anchors to here, as either a
+sweep or a move to identifier citations. They had drifted the same way the
+`eip:` ones did — `pbin_patricia_hashed.go:42` landed on a blank line, the
+point-lookup set at `:523`/`:670`/`:726`/`:817` on four unrelated statements,
+and `hashRowCell` / `loadCellState` / `PBinWitnessState.Storage` each on a
+neighbouring function. A sweep re-rots on the next commit, so all 162 anchors
+became identifier citations, checked mechanically: every one of the 106 cited
+identifiers resolves in the package, and all 49 identifier/file pairings resolve
+in the file named.
+➕ The doc's measured claims were re-run against the shipped engine rather than
+taken on trust: §5.1's five records reproduce byte-for-byte at 162/142/96/50 + 35,
+§12's hand reconstruction still lands on root `658b62ab…`, and every standalone
+example in §8, §9 and §10 (BASIC_DATA, the codeless CODE_HASH, the delegation
+value, slot keys 5/63/64/300, chunk keys 0/255/256/512, the PUSHDATA-crossing
+chunk pair) reproduces exactly. Two hashes in §7 belonged to no stated corpus —
+they now use the doc's own §5.1 tree, so they are checkable like the rest.
 
 ## Post-Completion
 
