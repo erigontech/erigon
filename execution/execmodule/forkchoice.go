@@ -290,6 +290,14 @@ func (e *ExecModule) unwindIfNeeded(
 			err = fmt.Errorf("updateForkChoice: %w", err)
 			return nil, err
 		}
+	} else {
+		execProgress, err := stages.GetStageProgress(tx, stages.Execution)
+		if err != nil {
+			return nil, fmt.Errorf("updateForkChoice: %w", err)
+		}
+		if execProgress > unwindTarget {
+			e.logger.Info("updateForkChoice: unwind skipped with executed state above reorg point", "unwindTarget", unwindTarget, "lastCanonicalBlock", lastCanonicalBlock, "execProgress", execProgress)
+		}
 	}
 	// SD.Unwind (inside RunUnwind) tx-aware-invalidates the BranchCache by
 	// the unwound txNum, so no whole-cache clear is needed here.
