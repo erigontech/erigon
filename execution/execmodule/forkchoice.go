@@ -575,7 +575,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			}
 			defer commitRwTx.Rollback() // idempotent after a successful Commit
 			// The committed sd is spent; RunLoop closes it and continues on the
-			// fresh SD built below (no ClearRam reuse).
+			// fresh SD built below (no reuse).
 			if err := sd.Commit(ctx, commitRwTx); err != nil {
 				return nil, nil, fmt.Errorf("updateForkChoice: flush+commit sd after hasMore: %w", err)
 			}
