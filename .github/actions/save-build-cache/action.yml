@@ -15,7 +15,9 @@ runs:
     - name: Show build cache size
       if: ${{ always() }}
       shell: bash
-      run: time du -hs "${{ inputs.gocache }}" || true
+      env:
+        GOCACHE_PATH: ${{ inputs.gocache }}
+      run: time du -hs "$GOCACHE_PATH" || true
 
     - name: Display free disk space before saving build cache
       if: ${{ always() }}
