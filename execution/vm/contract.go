@@ -113,8 +113,8 @@ func (c *Contract) isCode(udest uint64) bool {
 	c.analysis = codeBitmap(c.Code)
 
 	if !isCodeHashZero {
-		// content-addressed by codeHash and never unwound, so txNum is irrelevant
-		jumpDestCache.Put(codeHash[:], c.analysis, 0)
+		// Code analysis is content-addressed and remains valid across state changes.
+		jumpDestCache.Put(codeHash[:], c.analysis)
 	}
 
 	return c.analysis.codeSegment(udest)

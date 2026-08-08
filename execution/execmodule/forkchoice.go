@@ -360,11 +360,6 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	})
 	defer cleanupBeforeSemaRelease()
 
-	// Drain any warmup a preceding newPayload spawned: a fill from a pre-unwind
-	// view would survive this FCU's possible unwind epoch-bump as a live entry
-	// (see drainReadAhead). No new warmup starts while we hold the semaphore.
-	e.drainReadAhead()
-
 	var validationError string
 
 	// Open a RO tx as the base for all reads. Writes accumulate in the block
@@ -405,7 +400,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		// the per-execution Account/Storage/Code cache. Previously only
 		// ValidateChain (fork validation, exec_module.go) set this, leaving
 		// the canonical execution path running uncached against the aggTx.
-		currentContext.SetStateCache(e.stateCache)
+		currentContext.SetCanonicalStateCache(e.stateCache)
 		currentContext.SetCodeStore(e.codeStore)
 	}
 
@@ -591,7 +586,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				return nil, nil, fmt.Errorf("updateForkChoice: new sd after hasMore: %w", err)
 			}
 			freshSD.SetInMemHistoryReads(inMemHistoryReads)
-			freshSD.SetStateCache(e.stateCache)
+			freshSD.SetCanonicalStateCache(e.stateCache)
 			freshSD.SetCodeStore(e.codeStore)
 			if err := freshSD.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
 				roTx.Rollback()

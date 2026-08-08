@@ -55,6 +55,7 @@ import (
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
@@ -90,13 +91,14 @@ type Aggregator struct {
 	// regenerates them. Guarded by dirtyFilesLock.
 	unalignedDomain [kv.DomainLen]bool
 	unalignedIdx    [kv.StandaloneIdxLen]bool
-	// visibilityLoweringForbidden: a fill-enabled StateCache is wired over
-	// this aggregator, and its fill admission relies on view frontiers never
-	// decreasing. recalcVisibleFiles refuses to lower the cached state
-	// domains' visible ends while set; Close clears it (shutdown is not a
-	// fill window).
+	// Cache reconciliation assumes that visible ends only advance. Lowering one
+	// could retain an entry that existed only in the newer files view. Close
+	// clears this guard because shutdown is not a cache-read window.
 	visibilityLoweringForbidden atomic.Bool
-	snapshotBuildSema           *semaphore.Weighted
+	// boundStateCache is reconciled before a new files view becomes visible.
+	// Guarded by dirtyFilesLock.
+	boundStateCache   *cache.StateCache
+	snapshotBuildSema *semaphore.Weighted
 
 	disableHistory      bool
 	branchCacheDisabled bool
@@ -549,15 +551,33 @@ func (a *Aggregator) UnalignIdx(name kv.InvertedIdx) (realign func()) {
 	return func() {}
 }
 
-// ForbidVisibilityLowering marks this aggregator as backing a fill-enabled
-// StateCache: from then on recalcVisibleFiles panics instead of lowering a
-// cached state domain's visible end, whichever entry point caused it.
+// ForbidVisibilityLowering marks this aggregator as backing a shared latest
+// state cache. From then on recalcVisibleFiles rejects lowering a cached
+// domain's visible end because cache file-provenance watermarks only advance.
 // Serialized with recalcVisibleFiles via dirtyFilesLock so "from then on"
 // holds against a recalculation already in flight.
 func (a *Aggregator) ForbidVisibilityLowering() {
+	if a.visibilityLoweringForbidden.Load() {
+		return
+	}
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 	a.visibilityLoweringForbidden.Store(true)
+}
+
+// BindStateCache prevents visibility lowering and reconciles the cache with
+// files that are already visible. Future file publications are reconciled by
+// recalcVisibleFiles before readers can observe their new backing view.
+func (a *Aggregator) BindStateCache(stateCache *cache.StateCache) {
+	if stateCache == nil {
+		return
+	}
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	a.visibilityLoweringForbidden.Store(true)
+	a.boundStateCache = stateCache
+	change := stateCache.BeginFilesPublication(visibleStateFilesEnd(a.visible.Load()))
+	change.Finish()
 }
 
 func (a *Aggregator) setUnalignedDomain(d kv.Domain, v bool) {
@@ -709,9 +729,17 @@ func (a *Aggregator) ReloadFiles() error {
 // closeDirtyFilesNoReopen drops all dirty-file mmaps without re-scanning the
 // snapshots dir, so a caller can rename the underlying files (Windows forbids
 // renaming a mapped file); a later ReloadFiles re-opens them.
+// closeDirtyFilesNoReopen is an exclusive tooling operation: it temporarily
+// removes all visible files and invalidates cache guarantees tied to them.
 func (a *Aggregator) closeDirtyFilesNoReopen() {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
+	// This path removes every visible file before replacing them, so no cache
+	// view may remain live across the reset.
+	a.visibilityLoweringForbidden.Store(false)
+	if cd := a.d[kv.CommitmentDomain]; cd != nil && cd.branchCache != nil {
+		cd.branchCache.Reset()
+	}
 	a.closeDirtyFiles()
 	a.recalcVisibleFiles(nil)
 }
@@ -1876,6 +1904,47 @@ type aggregatorVisible struct {
 	next    *aggregatorVisible // oldest→newest linked-list link (set under dirtyFilesLock)
 }
 
+func visibleStateFilesEnd(visible *aggregatorVisible) (ends [kv.DomainLen]uint64) {
+	if visible == nil {
+		return ends
+	}
+	for domain, domainVisible := range visible.d {
+		if domainVisible != nil {
+			ends[domain] = visibleFiles(domainVisible.files).EndTxNum()
+		}
+	}
+	return ends
+}
+
+type cacheFilesPublication struct {
+	state  *cache.BackingChange
+	branch *cache.BackingChange
+}
+
+func (a *Aggregator) beginCacheFilesPublication(visible *aggregatorVisible) cacheFilesPublication {
+	var publication cacheFilesPublication
+	// SharedDomains.Commit acquires cache publication in the same order.
+	if domain := a.d[kv.CommitmentDomain]; domain != nil && domain.branchCache != nil {
+		if commitmentVisible := visible.d[kv.CommitmentDomain]; commitmentVisible != nil {
+			publication.branch = domain.branchCache.BeginFilesPublication(visibleFiles(commitmentVisible.files).EndTxNum())
+		}
+	}
+	if a.boundStateCache != nil {
+		publication.state = a.boundStateCache.BeginFilesPublication(visibleStateFilesEnd(visible))
+	}
+	return publication
+}
+
+func (p *cacheFilesPublication) Finish() {
+	if p == nil {
+		return
+	}
+	p.state.Finish()
+	p.state = nil
+	p.branch.Finish()
+	p.branch = nil
+}
+
 // recalcVisibleFiles must be called with dirtyFilesLock held (writers are
 // serialized by it; readers take no lock and instead load a.visible). It builds
 // a fresh immutable aggregatorVisible bundle via the per-entity calcVisibleFiles
@@ -1901,14 +1970,14 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 
 	if a.visibilityLoweringForbidden.Load() {
 		prev := a.visible.Load()
-		for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+		for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain} {
 			if prev.d[d] == nil || next.d[d] == nil {
 				continue
 			}
 			prevEnd := visibleFiles(prev.d[d].files).EndTxNum()
 			nextEnd := visibleFiles(next.d[d].files).EndTxNum()
 			if nextEnd < prevEnd {
-				panic(fmt.Sprintf("assert: %s visible end lowered %d -> %d while a fill-enabled StateCache is wired — fill admission relies on view frontiers never decreasing", d, prevEnd, nextEnd))
+				panic(fmt.Sprintf("assert: %s visible end lowered %d -> %d while a shared cache is wired — file-provenance watermarks only advance", d, prevEnd, nextEnd))
 			}
 			if prev.dhii[d] == nil || next.dhii[d] == nil {
 				continue
@@ -1916,15 +1985,19 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 			prevII := prev.dhii[d].files.EndTxNum()
 			nextII := next.dhii[d].files.EndTxNum()
 			if nextII < prevII {
-				panic(fmt.Sprintf("assert: %s history-II visible end lowered %d -> %d while a fill-enabled StateCache is wired — DomainVisibleEnd derives view frontiers from it", d, prevII, nextII))
+				panic(fmt.Sprintf("assert: %s history-II visible end lowered %d -> %d while a shared cache is wired — exact cache-view eligibility derives its frontier from history-II", d, prevII, nextII))
 			}
 		}
 	}
+
+	cachePublication := a.beginCacheFilesPublication(next)
+	defer cachePublication.Finish()
 
 	old := a.visible.Load()
 	old.retired = retired
 	old.next = next
 	a.visible.Store(next)
+	cachePublication.Finish()
 
 	// `recalcVisibleFiles` is rare background operation under `dirtyFilesLock`
 	// it's good idea to delete files here, then hot reader-Close path will more likely be lock-free
@@ -2673,6 +2746,14 @@ func (at *AggregatorRoTx) AdaptivePinController() *commitment.AdaptivePinControl
 // aggregate.
 func (at *AggregatorRoTx) MetricsCollector() *kvmetrics.Collector {
 	return at.a.metricsCollector
+}
+
+func (at *AggregatorRoTx) ForbidVisibilityLowering() {
+	at.a.ForbidVisibilityLowering()
+}
+
+func (at *AggregatorRoTx) BindStateCache(stateCache *cache.StateCache) {
+	at.a.BindStateCache(stateCache)
 }
 
 func (at *AggregatorRoTx) Dirs() datadir.Dirs                  { return at.a.dirs }

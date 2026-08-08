@@ -283,7 +283,7 @@ type domainVisibleEnds struct {
 	// over-rejects fills: a view's frontier never decreases in a process that
 	// fills a cache — the DB component is frozen at tx begin, and a files
 	// reopen only extends it, an invariant the aggregator enforces once a
-	// fill-enabled cache is wired over it (ForbidVisibilityLowering).
+	// shared latest-state cache is bound (BindStateCache).
 	ends  [kv.DomainLen]atomic.Uint64
 	mu    sync.Mutex
 	state atomic.Uint32

@@ -24,6 +24,8 @@ import (
 
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/cache"
 )
 
 // generateStandaloneIIFile writes files with a hardcoded step size of 10.
@@ -54,6 +56,10 @@ func requireVisibleEnd(t *testing.T, agg *Aggregator, end uint64) {
 		require.EqualValues(t, end, ii.files.EndTxNum(), "index %s", ii.name)
 	}
 }
+
+type cacheAggregatorHolder struct{ agg *Aggregator }
+
+func (h cacheAggregatorHolder) Agg() any { return h.agg }
 
 // state visible past commitment's files = state no commitment covers
 func TestVisibleFilesAligned_LaggingCommitmentClampsEveryone(t *testing.T) {
@@ -259,4 +265,108 @@ func TestVisibilityLowering_GuardsHistoryIIEnd(t *testing.T) {
 
 	require.Panics(t, func() { agg.recalcVisibleFiles(nil) },
 		"lowering a history-II end while values ends stay put must trip the forbid assert")
+}
+
+func TestVisibilityLowering_GuardsCommitmentDomain(t *testing.T) {
+	t.Parallel()
+	_, agg := testDbAndAggregatorv3(t, alignStepSize)
+
+	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	generateStandaloneIIFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	require.NoError(t, agg.OpenFolder())
+
+	agg.Unalign(kv.CommitmentDomain)
+	agg.ForbidVisibilityLowering()
+
+	agg.dirtyFilesLock.Lock()
+	defer agg.dirtyFilesLock.Unlock()
+	dropped := 0
+	agg.d[kv.CommitmentDomain].dirtyFiles.CloseIf(func(item *FilesItem) bool {
+		if item.endTxNum == 2*alignStepSize {
+			dropped++
+			return true
+		}
+		return false
+	})
+	require.Equal(t, 1, dropped)
+
+	require.Panics(t, func() { agg.recalcVisibleFiles(nil) },
+		"BranchCache validity requires the commitment frontier to remain monotonic")
+}
+
+func TestFilePublicationRevokesCacheGenerations(t *testing.T) {
+	t.Parallel()
+	_, agg := testDbAndAggregatorv3(t, alignStepSize)
+
+	stateCache := cache.NewStateCache(1<<20, 1<<20, 1<<20, 1<<20)
+	t.Cleanup(stateCache.Close)
+	statePublisher := stateCache.Publisher()
+	statePublisher.Initialize(cache.StateGeneration(1, 0, 0, 0))
+	execctx.BindStateCacheToAggregator(cacheAggregatorHolder{agg}, stateCache)
+
+	accountKey := make([]byte, 20)
+	accountKey[0] = 1
+	stateView := stateCache.View(cache.StateGeneration(1, 0, 0, 0))
+	stateView.Fill(kv.AccountsDomain, accountKey, []byte{1}, 1)
+	_, ok := stateView.Get(kv.AccountsDomain, accountKey)
+	require.True(t, ok)
+
+	branchCache := agg.d[kv.CommitmentDomain].branchCache
+	require.NotNil(t, branchCache)
+	branchPublisher := branchCache.Publisher()
+	branchPublisher.Initialize(cache.BranchGeneration(1, 0))
+	branchKey := []byte{0x01}
+	branchView := branchCache.View(cache.BranchGeneration(1, 0))
+	branchView.Fill(branchKey, []byte{0xbb}, 1)
+	_, _, ok = branchView.Get(branchKey)
+	require.True(t, ok)
+
+	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	generateStandaloneIIFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	require.NoError(t, agg.OpenFolder())
+
+	_, ok = stateView.Get(kv.AccountsDomain, accountKey)
+	require.False(t, ok, "file publication must revoke pre-publication state views")
+	stateView.Fill(kv.AccountsDomain, accountKey, []byte{1}, 1)
+	statePublisher.Initialize(cache.StateGeneration(1, 2*alignStepSize, 2*alignStepSize, 2*alignStepSize))
+	_, ok = stateCache.View(cache.StateGeneration(1, 2*alignStepSize, 2*alignStepSize, 2*alignStepSize)).Get(kv.AccountsDomain, accountKey)
+	require.False(t, ok, "a revoked state view must not refill after file publication")
+
+	_, _, ok = branchView.Get(branchKey)
+	require.False(t, ok, "file publication must revoke pre-publication branch views")
+	branchView.Fill(branchKey, []byte{0xbb}, 1)
+	branchPublisher.Initialize(cache.BranchGeneration(1, 2*alignStepSize))
+	_, _, ok = branchCache.View(cache.BranchGeneration(1, 2*alignStepSize)).Get(branchKey)
+	require.False(t, ok, "a revoked branch view must not refill after file publication")
+}
+
+func TestCacheBindingAbsorbsExistingFileVisibility(t *testing.T) {
+	t.Parallel()
+	_, agg := testDbAndAggregatorv3(t, alignStepSize)
+
+	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	generateStandaloneIIFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	require.NoError(t, agg.OpenFolder())
+
+	stateCache := cache.NewStateCache(1<<20, 1<<20, 1<<20, 1<<20)
+	t.Cleanup(stateCache.Close)
+	statePublisher := stateCache.Publisher()
+	statePublisher.Initialize(cache.StateGeneration(1, 0, 0, 0))
+	accountKey := make([]byte, 20)
+	accountKey[0] = 1
+	oldView := stateCache.View(cache.StateGeneration(1, 0, 0, 0))
+	oldView.Fill(kv.AccountsDomain, accountKey, []byte{1}, 1)
+	_, ok := oldView.Get(kv.AccountsDomain, accountKey)
+	require.True(t, ok)
+
+	execctx.BindStateCacheToAggregator(cacheAggregatorHolder{agg}, stateCache)
+
+	_, ok = oldView.Get(kv.AccountsDomain, accountKey)
+	require.False(t, ok, "binding must revoke entries created before the visible files were absorbed")
+	statePublisher.Initialize(cache.StateGeneration(1, 2*alignStepSize, 2*alignStepSize, 2*alignStepSize))
+	_, ok = stateCache.View(cache.StateGeneration(1, 2*alignStepSize, 2*alignStepSize, 2*alignStepSize)).Get(kv.AccountsDomain, accountKey)
+	require.False(t, ok)
 }

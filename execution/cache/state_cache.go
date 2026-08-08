@@ -18,9 +18,7 @@ package cache
 
 import (
 	"bytes"
-	"math"
 	"strings"
-	"sync"
 
 	"github.com/c2h5oh/datasize"
 
@@ -31,66 +29,40 @@ import (
 )
 
 const (
-	// DefaultAccountCacheBytes is the byte limit for the account cache.
 	DefaultAccountCacheBytes = 1 * datasize.GB
-	// DefaultStorageCacheBytes is the byte limit for storage cache. 150 MB
-	// holds the hot storage working set with headroom so eviction pressure
-	// doesn't push the hot set out.
 	DefaultStorageCacheBytes = 150 * datasize.MB
 
-	// Per-domain avg entry size used to translate the byte budget into the
-	// entry-count cap the underlying sharded LRU is sized against. Account
-	// and storage are near-fixed: addr + record or addr+slot + value plus
-	// entry overhead.
-	avgAccountEntryBytes = 96 // 20 addr + ~50 account record + 24 overhead
-	avgStorageEntryBytes = 88 // 52 addr+slot + ~12 value + 24 overhead
+	avgAccountEntryBytes = 88
+	avgStorageEntryBytes = 80
 )
 
-// StateCache is a unified cache for domain data (Account, Storage, Code).
-// Uses an array indexed by kv.Domain. Only Account, Storage, and Code domains
-// are supported; other indices are nil.
-//
-// StateCache itself exposes no data methods: reads and admission-gated fills
-// go through a ReadView bound to one tx's read view, committed updates through
-// the Applier handle (see view.go).
-//
-// Account and Storage use GenericCache.
-// Code uses CodeCache (two-level for deduplication).
+// StateCache holds account, storage, and code values for one durable database
+// state over one compatible files view. Publication revokes a reader's
+// generation before changing entries, so it cannot observe mixed state.
 type StateCache struct {
-	caches [kv.DomainLen]Cache
-	// admissionMu makes Apply's frontier advance + cache mutation atomic
-	// against concurrent read-fills, which recheck freshness under RLock.
-	admissionMu sync.RWMutex
-	appliedEnd  [kv.DomainLen]uint64
-	// disableFills (STATE_CACHE_FILLS=false) turns off every reader fill
-	// (including the content-addressed ones), leaving applies as the only
-	// writer ("apply-only" mode) — an A/B lever and an operational kill switch.
-	disableFills bool
+	generation GenerationGate
+
+	// committedTxNumEnd is only a file-provenance watermark. Cache validity is
+	// decided by Generation; these ends distinguish files built from published
+	// updates from files downloaded outside that stream.
+	committedTxNumEnd [kv.DomainLen]uint64
+	caches            [kv.DomainLen]Cache
+	disableFills      bool
 }
 
-// NewStateCache creates a new StateCache with the specified byte capacities.
-// Mode for the byte-budget DomainCaches (Account/Storage) is read once from
-// STATE_CACHE_MODE (evict|noop, default evict). CodeCache has its own LRU and
-// is not gated by this knob.
 func NewStateCache(accountBytes, storageBytes, codeBytes, addrBytes datasize.ByteSize) *StateCache {
 	mode := stateCacheModeFromEnv()
 	sc := &StateCache{}
 	if !dbg.EnvBool("STATE_CACHE_FILLS", true) {
 		sc.disableFills = true
-		log.Info("[cache] STATE_CACHE_FILLS=false — read fills disabled, only post-commit applies populate the cache")
+		log.Info("[cache] STATE_CACHE_FILLS=false — read fills disabled, only committed publications populate the cache")
 	}
 	sc.caches[kv.AccountsDomain] = newDomainCacheBytes(accountBytes, avgAccountEntryBytes, mode)
 	sc.caches[kv.StorageDomain] = newDomainCacheBytes(storageBytes, avgStorageEntryBytes, mode)
 	sc.caches[kv.CodeDomain] = NewCodeCache(codeBytes, addrBytes)
-	// CommitmentDomain deliberately gets no cache: commitment data lives in the
-	// BranchCache, and the nil slot short-circuits every StateCache path for it
-	// (including writes of commitmentdb.KeyCommitmentState).
 	return sc
 }
 
-// stateCacheModeFromEnv reads STATE_CACHE_MODE (once per NewStateCache). Unset
-// or unrecognised returns ModeEvictLRU. Recognised values: "evict", "noop". The
-// noop and unrecognised cases log; the default evict path is silent.
 func stateCacheModeFromEnv() Mode {
 	v := strings.ToLower(strings.TrimSpace(dbg.EnvString("STATE_CACHE_MODE", "")))
 	switch v {
@@ -105,20 +77,12 @@ func stateCacheModeFromEnv() Mode {
 	}
 }
 
-// newDomainCacheBytes constructs a DomainCache whose growth ceiling is derived
-// from the byte budget using the supplied per-domain avg. It jump-grows from a
-// small start into the shared envelope on demand, so a domain with a small
-// working set (a test fixture) never pre-commits the full budget.
 func newDomainCacheBytes(capacityBytes datasize.ByteSize, avgBytes uint32, mode Mode) *DomainCache {
 	return &DomainCache{
-		GenericCache: NewGenericCacheWithAvg(capacityBytes, avgBytes, func(v []byte) int { return len(v) }, mode),
+		GenericCache: NewGenericCacheWithAvg(capacityBytes, avgBytes, func(v domainEntry) int { return len(v.value) }, mode),
 	}
 }
 
-// NewDefaultStateCache creates a new StateCache with the production byte budgets
-// (Account 1GB, Storage 150MB, Code 512MB, Addr 16MB). Harnesses that build
-// many short-lived ExecModules set a small ethconfig.Config.StateCacheBudget
-// instead.
 func NewDefaultStateCache() *StateCache {
 	return NewStateCache(
 		DefaultAccountCacheBytes,
@@ -128,35 +92,47 @@ func NewDefaultStateCache() *StateCache {
 	)
 }
 
-// get retrieves data for the given domain and key.
-// Returns (value, true) on cache hit — including (nil, true) for cached negatives —
-// and (nil, false) on cache miss.
-func (c *StateCache) get(domain kv.Domain, key []byte) ([]byte, bool) {
-	cache := c.caches[domain]
-	if cache == nil {
-		return nil, false
-	}
-	return cache.Get(key)
+// CurrentStateVersion reports the durable PlainStateVersion represented by
+// all cache layers. It returns false while publication is in progress because
+// the old version has been revoked and the new version is not visible yet.
+func (c *StateCache) CurrentStateVersion() (uint64, bool) {
+	return c.generation.CurrentStateVersion()
 }
 
-// getWithTxNum is get plus the txNum the cached value reflects, so the read
-// path can bound a hit by step against an in-flight unwind's maxStep.
-func (c *StateCache) getWithTxNum(domain kv.Domain, key []byte) ([]byte, uint64, bool) {
-	cache := c.caches[domain]
+// BeginFilesPublication revokes the old files generation. It retains entries
+// backed by this process's committed updates and clears them when the new files
+// contain foreign state. Finish publishes the new identity after the files
+// become visible.
+func (c *StateCache) BeginFilesPublication(filesEnd [kv.DomainLen]uint64) *BackingChange {
+	if c == nil {
+		return nil
+	}
+	files := stateFilesView(
+		filesEnd[kv.AccountsDomain],
+		filesEnd[kv.StorageDomain],
+		filesEnd[kv.CodeDomain],
+	)
+	return c.generation.Publisher().BeginBackingChange(files, func() bool {
+		extended := false
+		for domain, cache := range c.caches {
+			if cache == nil || filesEnd[domain] <= c.committedTxNumEnd[domain] {
+				continue
+			}
+			c.committedTxNumEnd[domain] = filesEnd[domain]
+			extended = true
+		}
+		return extended
+	}, c.clearLocked)
+}
+
+func (c *StateCache) getWithStep(domain kv.Domain, key []byte) ([]byte, kv.Step, bool) {
+	cache := c.getCache(domain)
 	if cache == nil {
 		return nil, 0, false
 	}
-	return cache.GetWithTxNum(key)
+	return cache.GetWithStep(key)
 }
 
-// getCodeByHash retrieves code bytes by their Ethereum codeHash (keccak256),
-// bypassing the addr-keyed CodeDomain lookup. Returns (nil, false) on miss or
-// when the code domain cache is not a CodeCache (defensive fallback).
-//
-// Use when the caller has the codeHash in hand (post-account-load) — typical
-// for EXTCODESIZE / EXTCODEHASH / CALL targets. Lets many-addrs-one-code
-// patterns (proxies, factory clones, ERC-20 holders) share a single codeHashToCode
-// entry.
 func (c *StateCache) getCodeByHash(codeHash []byte) ([]byte, bool) {
 	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok {
@@ -165,9 +141,6 @@ func (c *StateCache) getCodeByHash(codeHash []byte) ([]byte, bool) {
 	return cc.GetByCodeHash(codeHash)
 }
 
-// getCodeSizeByHash returns the size of code by its Ethereum codeHash
-// without loading the bytes. Returns (0, false) when the size-only layer
-// is not populated for this hash.
 func (c *StateCache) getCodeSizeByHash(codeHash []byte) (int, bool) {
 	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok {
@@ -176,26 +149,6 @@ func (c *StateCache) getCodeSizeByHash(codeHash []byte) (int, bool) {
 	return cc.GetCodeSizeByCodeHash(codeHash)
 }
 
-// putCodeSizeByHash records the code size for a given codeHash. Useful when
-// the caller has the size in hand (e.g. from an account-domain probe that
-// resolved a sibling addr to the same code) but doesn't have the bytes.
-func (c *StateCache) putCodeSizeByHash(codeHash []byte, size int, txNum uint64) {
-	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
-	if !ok {
-		return
-	}
-	cc.PutCodeSizeByCodeHash(codeHash, size, txNum)
-}
-
-// FillsEnabled reports whether reader fills are active (STATE_CACHE_FILLS).
-// Wire-up code uses it to decide whether the backing aggregator must forbid
-// visibility lowering: fill admission relies on view frontiers never
-// decreasing, and apply-only caches have nothing for a lowered frontier to
-// poison.
-func (c *StateCache) FillsEnabled() bool { return !c.disableFills }
-
-// getAddrCodeHash returns the Ethereum codeHash for addr without an
-// account-domain round-trip. The hash is zero when ok is false.
 func (c *StateCache) getAddrCodeHash(addr []byte) ([32]byte, bool) {
 	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok {
@@ -204,163 +157,108 @@ func (c *StateCache) getAddrCodeHash(addr []byte) ([32]byte, bool) {
 	return cc.GetAddrCodeHash(addr)
 }
 
-// seedAddrCodeHash conditionally records an addr → codeHash mapping.
-// The mapping derives from an account record, so admission checks the accounts
-// frontier even though the mapping lives in the code cache.
-func (c *StateCache) seedAddrCodeHash(addr []byte, h [32]byte, txNum, visibleEnd uint64) {
-	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
-	if !ok {
-		return
-	}
-	c.admissionMu.RLock()
-	defer c.admissionMu.RUnlock()
-	if visibleEnd < c.appliedEnd[kv.AccountsDomain] {
-		return
-	}
-	cc.PutAddrCodeHash(addr, h, txNum)
-}
-
-func (c *StateCache) deleteAddrCodeHash(addr []byte) {
-	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
-	if !ok {
-		return
-	}
-	cc.DeleteAddrCodeHash(addr)
-}
-
-// put stores data for the given domain and key, stamped with the txNum the
-// value reflects (for txNum/epoch unwind invalidation). It bypasses fill
-// admission: committed updates go through Applier.Apply, read fills through
-// ReadView.Fill.
-func (c *StateCache) put(domain kv.Domain, key []byte, value []byte, txNum uint64) {
-	cache := c.caches[domain]
+func (c *StateCache) fill(
+	generation GenerationView,
+	domain kv.Domain,
+	key, value []byte,
+	step kv.Step,
+) {
+	cache := c.getCache(domain)
 	if cache == nil {
 		return
 	}
-	cache.Put(key, bytes.Clone(value), txNum)
+	value = bytes.Clone(value)
+
+	generation.Admit(func() {
+		cache.PutIfAbsent(key, value, step)
+	})
 }
 
-// fillIfFresh conditionally inserts an accounts or storage value read from a
-// read view without replacing an authoritative entry. Negatives use the view's
-// last included txNum. Code goes through fillCodeIfFresh.
-func (c *StateCache) fillIfFresh(domain kv.Domain, key []byte, value []byte, readTxNum, visibleEnd uint64) {
-	cache := c.caches[domain]
-	if cache == nil {
-		return
-	}
-	// Clone outside the lock: a rejected fill wastes one copy (rare), but
-	// Apply's write lock never waits on a fill's memcpy.
-	cloned := bytes.Clone(value)
-	if len(value) == 0 {
-		readTxNum = 0
-		if visibleEnd > 0 {
-			readTxNum = visibleEnd - 1
-		}
-	}
-	c.admissionMu.RLock()
-	defer c.admissionMu.RUnlock()
-	if visibleEnd < c.appliedEnd[domain] {
-		return
-	}
-	cache.PutIfAbsent(key, cloned, readTxNum)
-}
-
-// fillCodeIfFresh is fillIfFresh for the code domain. An addr-keyed code entry
-// derives from the account — an account deletion drops it without advancing the
-// code frontier — so admission also checks the accounts frontier. Code
-// negatives are not cached here: "no code" is cached at the addr→codeHash
-// mapping instead (the zero-hash sentinel seeded by SeedAddrCodeHash).
-func (c *StateCache) fillCodeIfFresh(key []byte, value []byte, readTxNum, visibleEnd, accountsVisibleEnd uint64) {
+func (c *StateCache) fillCode(
+	generation GenerationView,
+	key, value []byte,
+	step kv.Step,
+) {
 	codeCache, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok || len(value) == 0 {
 		return
 	}
+	value = bytes.Clone(value)
 	codeHash := crypto.Keccak256(value)
-	cloned := bytes.Clone(value)
-	c.admissionMu.RLock()
-	defer c.admissionMu.RUnlock()
-	if visibleEnd < c.appliedEnd[kv.CodeDomain] || accountsVisibleEnd < c.appliedEnd[kv.AccountsDomain] {
-		return
-	}
-	codeCache.PutWithCodeHashIfAbsent(key, cloned, codeHash, readTxNum)
+
+	generation.Admit(func() {
+		codeCache.PutWithCodeHashIfAbsent(key, value, codeHash, step)
+	})
 }
 
-// deleteKey removes the data for the given domain and key. Authoritative
-// deletions go through apply, which also advances the fill-admission frontier.
-func (c *StateCache) deleteKey(domain kv.Domain, key []byte) {
-	cache := c.caches[domain]
+func (c *StateCache) seedAddrCodeHash(generation GenerationView, addr []byte, hash [32]byte) {
+	codeCache, ok := c.caches[kv.CodeDomain].(*CodeCache)
+	if !ok {
+		return
+	}
+	generation.Admit(func() {
+		codeCache.PutAddrCodeHash(addr, hash)
+	})
+}
+
+func (c *StateCache) fillCodeSize(generation GenerationView, codeHash []byte, size int) {
+	codeCache, ok := c.caches[kv.CodeDomain].(*CodeCache)
+	if !ok {
+		return
+	}
+	generation.Admit(func() {
+		codeCache.PutCodeSizeByCodeHash(codeHash, size)
+	})
+}
+
+func (c *StateCache) deleteAddrCodeHash(addr []byte) {
+	if codeCache, ok := c.caches[kv.CodeDomain].(*CodeCache); ok {
+		codeCache.DeleteAddrCodeHash(addr)
+	}
+}
+
+func (c *StateCache) applyLocked(update Update) {
+	cache := c.getCache(update.Domain)
 	if cache == nil {
 		return
 	}
-	cache.Delete(key)
-}
-
-// apply makes a committed domain update authoritative for subsequent fills.
-func (c *StateCache) apply(domain kv.Domain, key, value []byte, txNum uint64) {
-	cache := c.caches[domain]
-	if cache == nil {
-		return
-	}
-	var codeHash []byte
-	if domain == kv.CodeDomain && len(value) > 0 {
-		// Clone before hashing so the stored bytes and their codeHash cannot
-		// diverge if the caller reuses its buffer.
-		value = bytes.Clone(value)
-		codeHash = crypto.Keccak256(value)
+	if committedEnd := update.TxNum + 1; committedEnd > c.committedTxNumEnd[update.Domain] {
+		c.committedTxNumEnd[update.Domain] = committedEnd
 	}
 
-	c.admissionMu.Lock()
-	defer c.admissionMu.Unlock()
-	c.noteApplied(domain, txNum)
-
-	switch domain {
+	switch update.Domain {
 	case kv.AccountsDomain:
-		putOrDelete(cache, key, value, txNum)
-		c.deleteAddrCodeHash(key)
-		if len(value) == 0 {
-			// SharedDomains pairs an account deletion with a code-domain apply;
-			// that paired apply is what advances the code frontier — this cascade
-			// only drops the entry. Code-fill admission also checks the accounts
-			// frontier (fillCodeIfFresh), so the cache holds even for a caller
-			// that does not pair the deletes.
-			c.deleteKey(kv.CodeDomain, key)
+		putOrDelete(cache, update.Key, update.Value, update.Step)
+		c.deleteAddrCodeHash(update.Key)
+		if len(update.Value) == 0 {
+			if code := c.getCache(kv.CodeDomain); code != nil {
+				code.Delete(update.Key)
+			}
 		}
 	case kv.CodeDomain:
-		if len(value) == 0 {
-			cache.Delete(key)
-			c.deleteAddrCodeHash(key)
-		} else if codeCache, ok := cache.(*CodeCache); ok {
-			codeCache.PutWithCodeHash(key, value, codeHash, txNum)
+		if len(update.Value) == 0 {
+			cache.Delete(update.Key)
+			c.deleteAddrCodeHash(update.Key)
+			return
+		}
+		value := bytes.Clone(update.Value)
+		if codeCache, ok := cache.(*CodeCache); ok {
+			codeCache.PutWithCodeHash(update.Key, value, crypto.Keccak256(value), update.Step)
 		}
 	default:
-		putOrDelete(cache, key, value, txNum)
+		putOrDelete(cache, update.Key, update.Value, update.Step)
 	}
 }
 
-func putOrDelete(cache Cache, key, value []byte, txNum uint64) {
+func putOrDelete(cache Cache, key, value []byte, step kv.Step) {
 	if len(value) == 0 {
 		cache.Delete(key)
 		return
 	}
-	cache.Put(key, bytes.Clone(value), txNum)
+	cache.Put(key, bytes.Clone(value), step)
 }
 
-func (c *StateCache) noteApplied(domain kv.Domain, txNum uint64) {
-	end := txNum
-	if end < math.MaxUint64 {
-		end++
-	}
-	if end > c.appliedEnd[domain] {
-		c.appliedEnd[domain] = end
-	}
-}
-
-// clear removes all mutable entries from all caches. The admission frontier
-// survives: clearing drops entries, it does not rewind canonical state, and a
-// zeroed frontier would let a still-live older ReadView refill pre-apply data.
-func (c *StateCache) clear() {
-	c.admissionMu.Lock()
-	defer c.admissionMu.Unlock()
+func (c *StateCache) clearLocked() {
 	for _, cache := range c.caches {
 		if cache != nil {
 			cache.Clear()
@@ -368,9 +266,8 @@ func (c *StateCache) clear() {
 	}
 }
 
-// Close releases every sub-cache's slot in the shared memory envelope so later
-// caches size against real concurrency. Idempotent.
 func (c *StateCache) Close() {
+	c.generation.Close()
 	for _, cache := range c.caches {
 		if cache != nil {
 			cache.Close()
@@ -378,27 +275,8 @@ func (c *StateCache) Close() {
 	}
 }
 
-// unwind invalidates, across all caches, entries reflecting state above
-// unwindToTxNum on a now-dead fork. Diffset-free and O(1): every cache (the
-// GenericCaches and the CodeCache, all layers) bumps an epoch + lowers a floor
-// and drops stale entries lazily on read. This is the sole cache-invalidation
-// path on unwind — the executor never touches the cache during forward execution.
-func (c *StateCache) unwind(unwindToTxNum uint64) {
-	c.admissionMu.Lock()
-	defer c.admissionMu.Unlock()
-	for _, cache := range c.caches {
-		if cache != nil {
-			cache.Unwind(unwindToTxNum)
-		}
-	}
-	for i := range c.appliedEnd {
-		c.appliedEnd[i] = min(c.appliedEnd[i], unwindToTxNum)
-	}
-}
-
-// Caches reports whether the given domain has a cache attached.
 func (c *StateCache) Caches(domain kv.Domain) bool {
-	return domain < kv.DomainLen && c.caches[domain] != nil
+	return c.getCache(domain) != nil
 }
 
 func (c *StateCache) getCache(domain kv.Domain) Cache {
@@ -408,7 +286,6 @@ func (c *StateCache) getCache(domain kv.Domain) Cache {
 	return c.caches[domain]
 }
 
-// PrintStatsAndReset prints cache statistics for all domains and resets counters.
 func (c *StateCache) PrintStatsAndReset() {
 	if c == nil {
 		return
@@ -422,4 +299,106 @@ func (c *StateCache) PrintStatsAndReset() {
 	if code, ok := c.caches[kv.CodeDomain].(*CodeCache); ok {
 		code.PrintStatsAndReset()
 	}
+}
+
+// Update is one value written by the database transaction being published.
+// Step is returned by GetLatest. TxNum records how far this process's committed
+// writes cover the domain, allowing file publication to detect downloaded
+// state that never passed through this publisher.
+type Update struct {
+	Domain kv.Domain
+	Key    []byte
+	Value  []byte
+	Step   kv.Step
+	TxNum  uint64
+}
+
+// Publisher is the mutation capability for canonical state. Normal readers
+// receive only ReadView, while code that makes database state durable uses a
+// Publisher to move every cache layer to the same Generation.
+type Publisher struct {
+	c          *StateCache
+	generation GenerationPublisher
+}
+
+// Publisher returns a handle that can change the cache's canonical generation.
+// It must not be given to speculative execution whose writes may be discarded.
+func (c *StateCache) Publisher() Publisher {
+	if c == nil {
+		return Publisher{}
+	}
+	return Publisher{c: c, generation: c.generation.Publisher()}
+}
+
+func (p Publisher) Enabled() bool { return p.c != nil && p.generation.Enabled() }
+
+// Initialize binds the cache to the database and files generation seen by its
+// canonical owner. A mismatch clears entries because their origin cannot be
+// proven compatible with that snapshot.
+func (p Publisher) Initialize(generation Generation) {
+	if p.c == nil {
+		return
+	}
+	p.generation.Initialize(generation, p.c.clearLocked)
+}
+
+// Publication represents one pending transition of the durable database
+// state. Begin makes the cache unavailable without changing its entries, so
+// Abort can restore the previous generation if the transaction rolls back.
+// Publish consumes the transition after the database commit succeeds.
+type Publication struct {
+	c          *StateCache
+	generation *GenerationPublication
+}
+
+// Begin revokes every existing ReadView and prevents creation of a new live
+// view. It does not alter cache entries; they remain available for Abort until
+// the canonical database transaction either commits or rolls back.
+func (p Publisher) Begin() *Publication {
+	if p.c == nil {
+		return nil
+	}
+	return &Publication{c: p.c, generation: p.generation.Begin()}
+}
+
+// Abort restores the previous generation after a failed or abandoned database
+// transaction. The entries were not changed during the transition, so the old
+// ReadViews become valid again together with their database version.
+func (p *Publication) Abort() {
+	if p == nil || p.c == nil {
+		return
+	}
+	p.generation.Abort()
+	p.c = nil
+}
+
+// Publish applies updates from a successful database transaction and exposes
+// generation as one complete cache snapshot. The caller must invoke it
+// only after the database commit, so a visible cache generation is never ahead
+// of durable state.
+//
+// A forward commit can retain entries that were not updated because they still
+// have the same value in the new state. Canonical unwind sets clear because its
+// callbacks do not enumerate every value that may belong to the discarded
+// fork.
+func (p *Publication) Publish(generation Generation, updates []Update, clear bool) {
+	if p == nil || p.c == nil {
+		return
+	}
+	p.generation.Publish(generation, func() {
+		if clear {
+			p.c.clearLocked()
+		}
+		for i := range updates {
+			p.c.applyLocked(updates[i])
+		}
+	})
+	p.c = nil
+}
+
+// Clear revokes current views, removes every cached value, and publishes an
+// empty generation.
+func (p Publisher) Clear(generation Generation) {
+	publication := p.Begin()
+	publication.Publish(generation, nil, true)
 }

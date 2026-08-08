@@ -78,10 +78,6 @@ type ContractTrunkPreloadParallel struct {
 	usedBytes       int
 	maxDepthReached int
 	dbHitsPinned    int
-	// pinTxNum stamps pinned entries with the head txNum they were read at, so a
-	// later unwind below that point evicts them via the BranchCache floor (a
-	// txN=0 pin would escape it and be served stale after a deep unwind).
-	pinTxNum uint64
 
 	// Reusable per-wave partition scratch. Contents are copied into the next
 	// frontier before the buffers are reused, so retaining the grown backing
@@ -154,7 +150,7 @@ func (p *ContractTrunkPreloadParallel) Run(
 	stepBudgetBytes int,
 	dbBranches map[string][]byte,
 	resolve BatchBranchResolver,
-	cache *BranchCache,
+	cache branchPinWriter,
 	logger log.Logger,
 ) (newlyPinned int, queueEmpty bool, err error) {
 	if cache == nil {
@@ -179,11 +175,9 @@ func (p *ContractTrunkPreloadParallel) Run(
 			budgetHit = true
 			return false
 		}
-		// step=0: a storage-trunk branch resolved across merged files has no single
-		// source step, and the pinTxNum stamp already gives unwind coherence — the
-		// floor drops a preloaded pin before the cStep<=maxStep gate is consulted,
-		// so leaving step unset only keeps that gate trivially true for live pins.
-		cache.PinEntry(pk.key, v, 0, p.pinTxNum)
+		// A branch resolved across merged files has no single source step. The
+		// enclosing publication binds the completed preload to one generation.
+		cache.PinEntry(pk.key, v, 0)
 		p.pinnedPrefixes = append(p.pinnedPrefixes, bytes.Clone(pk.key))
 		p.usedBytes += cost
 		p.pinned++

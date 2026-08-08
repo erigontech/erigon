@@ -383,7 +383,7 @@ func CheckCommitmentForPrint(ctx context.Context, rwDb kv.TemporalRwDB) (string,
 	}
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), execctx.WithoutSharedBranchCache())
 	if err != nil {
 		return "", err
 	}
@@ -540,7 +540,8 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 
 	rebuildCfg := commitment.DefaultTrieConfig()
 	rebuildCfg.Variant = execctx.PickTrieVariant()
-	domains, err := execctx.NewSharedDomains(ctx, rwTx, logger, execctx.WithTrieConfig(rebuildCfg))
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, logger,
+		execctx.WithTrieConfig(rebuildCfg), execctx.WithoutSharedBranchCache())
 	if err != nil {
 		return nil, err
 	}
@@ -641,7 +642,8 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		}
 		flushCfg := commitment.DefaultTrieConfig()
 		flushCfg.Variant = execctx.PickTrieVariant()
-		domains, err = execctx.NewSharedDomains(ctx, rwTx, logger, execctx.WithTrieConfig(flushCfg))
+		domains, err = execctx.NewSharedDomains(ctx, rwTx, logger,
+			execctx.WithTrieConfig(flushCfg), execctx.WithoutSharedBranchCache())
 		if err != nil {
 			return err
 		}
@@ -1055,7 +1057,8 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 			iterTrieCfg := rebuildTrieCfg
 			iterTrieCfg.Variant = trieVariant
-			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), execctx.WithTrieConfig(iterTrieCfg))
+			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New(),
+				execctx.WithTrieConfig(iterTrieCfg), execctx.WithoutSharedBranchCache())
 			if err != nil {
 				return nil, err
 			}

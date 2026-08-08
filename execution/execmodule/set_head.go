@@ -103,18 +103,9 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	}
 	defer sd.Close()
 
-	// Wire the shared state cache so unwindExec3 invalidates it (epoch bump +
-	// floor lower). Without this, the SD has no cache attached during the unwind,
-	// so sd.Unwind's invalidation is a no-op, the cache keeps pre-unwind values,
-	// and the next FCU re-execution reads them and computes a stale state root
-	// (BadBlock). Mirrors ValidateChain/forkchoice.
-	sd.SetStateCache(e.stateCache)
+	// This path owns the canonical cache publication performed by Commit.
+	sd.SetCanonicalStateCache(e.stateCache)
 	sd.SetCodeStore(e.codeStore)
-
-	// Drain in-flight warmup before the unwind bumps the cache epoch, so a
-	// fire-and-forget warmup can't Put a dead-fork value stamped with the new
-	// epoch (cross-fork contamination).
-	e.drainReadAhead()
 
 	// Set the unwind point and run the unwind
 	if err := e.pipelineExecutor.UnwindTo(targetBlock, stagedsync.StagedUnwind, tx); err != nil {

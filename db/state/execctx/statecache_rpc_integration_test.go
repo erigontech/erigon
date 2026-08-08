@@ -26,6 +26,8 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/execmodule"
@@ -43,6 +45,226 @@ func TestEmbeddedRPCCacheViewDoesNotResurrectDeletedStorage(t *testing.T) {
 
 func TestEmbeddedRPCCacheViewDoesNotResurrectDeletedCode(t *testing.T) {
 	testEmbeddedRPCCacheViewDoesNotResurrectDeletedValue(t, kv.CodeDomain)
+}
+
+func TestEmbeddedRPCCacheViewDoesNotRefillUnwoundAccount(t *testing.T) {
+	const stepSize = uint64(16)
+	ctx := t.Context()
+	db := newTestDb(t, stepSize)
+	stateCache := newSmallStateCache()
+	t.Cleanup(stateCache.Close)
+	key, v1, v2, diffs := twoStepRows(t, db, stateCache)
+
+	rpcTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer rpcTx.Rollback()
+
+	unwindTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer unwindTx.Rollback()
+	unwindDomains, err := execctx.NewSharedDomains(ctx, unwindTx, log.New())
+	require.NoError(t, err)
+	defer unwindDomains.Close()
+	unwindDomains.SetStateCacheForTest(stateCache)
+
+	events := shards.NewEvents()
+	events.PublishOverlay(unwindDomains)
+	rpcCache := &execmodule.Cache{}
+	rpcCache.SetPublishedSD(events.LatestSD)
+	rpcView, err := rpcCache.View(ctx, rpcTx)
+	require.NoError(t, err)
+
+	unwindDomains.Unwind(10, &diffs)
+	require.NoError(t, unwindDomains.Commit(ctx, unwindTx))
+	events.PublishOverlay(nil)
+
+	got, err := rpcView.Get(key)
+	require.NoError(t, err)
+	require.Equal(t, v2, got, "the pre-reorg RPC view still sees the discarded fork")
+
+	_, ok := currentStateCacheView(t, stateCache).Get(kv.AccountsDomain, key)
+	require.False(t, ok, "the pre-reorg RPC view must not refill the discarded fork")
+
+	freshTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer freshTx.Rollback()
+	freshDomains, err := execctx.NewSharedDomains(ctx, freshTx, log.New())
+	require.NoError(t, err)
+	defer freshDomains.Close()
+	freshDomains.SetStateCacheForTest(stateCache)
+
+	got, _, err = freshDomains.GetLatest(kv.AccountsDomain, freshTx, key)
+	require.NoError(t, err)
+	require.Equal(t, v1, got)
+}
+
+func TestEmbeddedRPCTxBoundAfterUnwindDoesNotRefillUnwoundAccount(t *testing.T) {
+	const stepSize = uint64(16)
+	ctx := t.Context()
+	db := newTestDb(t, stepSize)
+	stateCache := newSmallStateCache()
+	t.Cleanup(stateCache.Close)
+	key, v1, v2, diffs := twoStepRows(t, db, stateCache)
+
+	rpcTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer rpcTx.Rollback()
+
+	unwindTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer unwindTx.Rollback()
+	unwindDomains, err := execctx.NewSharedDomains(ctx, unwindTx, log.New())
+	require.NoError(t, err)
+	unwindDomains.SetStateCacheForTest(stateCache)
+	unwindDomains.Unwind(10, &diffs)
+	require.NoError(t, unwindDomains.Commit(ctx, unwindTx))
+	unwindDomains.Close()
+
+	freshTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer freshTx.Rollback()
+	freshDomains, err := execctx.NewSharedDomains(ctx, freshTx, log.New())
+	require.NoError(t, err)
+	defer freshDomains.Close()
+	freshDomains.SetStateCacheForTest(stateCache)
+
+	events := shards.NewEvents()
+	events.PublishOverlay(freshDomains)
+	rpcCache := &execmodule.Cache{}
+	rpcCache.SetPublishedSD(events.LatestSD)
+	rpcView, err := rpcCache.View(ctx, rpcTx)
+	require.NoError(t, err)
+
+	got, err := rpcView.Get(key)
+	require.NoError(t, err)
+	require.Equal(t, v2, got, "the old RPC transaction still sees the discarded fork")
+
+	_, ok := currentStateCacheView(t, stateCache).Get(kv.AccountsDomain, key)
+	require.False(t, ok, "binding an old RPC transaction after unwind must not refill the discarded fork")
+
+	got, _, err = freshDomains.GetLatest(kv.AccountsDomain, freshTx, key)
+	require.NoError(t, err)
+	require.Equal(t, v1, got)
+}
+
+func TestSharedDomainsOldTxBoundAfterUnwindDoesNotRefillUnwoundAccount(t *testing.T) {
+	const stepSize = uint64(16)
+	ctx := t.Context()
+	db := newTestDb(t, stepSize)
+	stateCache := newSmallStateCache()
+	t.Cleanup(stateCache.Close)
+	key, v1, v2, diffs := twoStepRows(t, db, stateCache)
+
+	oldTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer oldTx.Rollback()
+
+	unwindTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer unwindTx.Rollback()
+	unwindDomains, err := execctx.NewSharedDomains(ctx, unwindTx, log.New())
+	require.NoError(t, err)
+	unwindDomains.SetStateCacheForTest(stateCache)
+	unwindDomains.Unwind(10, &diffs)
+	require.NoError(t, unwindDomains.Commit(ctx, unwindTx))
+	unwindDomains.Close()
+
+	freshTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer freshTx.Rollback()
+	freshDomains, err := execctx.NewSharedDomains(ctx, freshTx, log.New())
+	require.NoError(t, err)
+	defer freshDomains.Close()
+	freshDomains.SetStateCacheForTest(stateCache)
+
+	got, _, err := freshDomains.GetLatest(kv.AccountsDomain, oldTx, key)
+	require.NoError(t, err)
+	require.Equal(t, v2, got, "the old transaction still sees the discarded fork")
+
+	_, ok := currentStateCacheView(t, stateCache).Get(kv.AccountsDomain, key)
+	require.False(t, ok, "binding an old transaction on a cache miss must not refill the discarded fork")
+
+	got, _, err = freshDomains.GetLatest(kv.AccountsDomain, freshTx, key)
+	require.NoError(t, err)
+	require.Equal(t, v1, got)
+}
+
+func TestSharedDomainsOldFilesTxBoundAfterPublicationDoesNotUseNewCacheGeneration(t *testing.T) {
+	const stepSize = uint64(1)
+	ctx := t.Context()
+	db := newTestDb(t, stepSize)
+	stateCache := newSmallStateCache()
+	t.Cleanup(stateCache.Close)
+	execctx.BindStateCacheToAggregator(db, stateCache)
+
+	key := make([]byte, 52)
+	key[0] = 0xaa
+	v1, v2, v3 := []byte{1}, []byte{2}, []byte{3}
+
+	seedTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer seedTx.Rollback()
+	seedDomains, err := execctx.NewSharedDomains(ctx, seedTx, log.New())
+	require.NoError(t, err)
+	seedDomains.SetStateCacheForTest(stateCache)
+	seedDomains.SetTxNum(1)
+	require.NoError(t, seedDomains.DomainPut(kv.StorageDomain, seedTx, key, v1, 1, nil))
+	require.NoError(t, seedDomains.Commit(ctx, seedTx))
+	seedDomains.Close()
+
+	readerTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer readerTx.Rollback()
+	readerDomains, err := execctx.NewSharedDomains(ctx, readerTx, log.New())
+	require.NoError(t, err)
+	defer readerDomains.Close()
+	readerDomains.SetStateCacheReaderForTest(stateCache)
+
+	writeStorage := func(txNum uint64, value, prevValue []byte) {
+		rwTx, err := db.BeginTemporalRw(ctx)
+		require.NoError(t, err)
+		defer rwTx.Rollback()
+		domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+		require.NoError(t, err)
+		defer domains.Close()
+		domains.SetTxNum(txNum)
+		require.NoError(t, domains.DomainPut(kv.StorageDomain, rwTx, key, value, txNum, prevValue))
+		require.NoError(t, domains.Flush(ctx, rwTx))
+		require.NoError(t, rwTx.Commit())
+	}
+
+	oldTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer oldTx.Rollback()
+	oldStateVersion, err := rawdb.GetStateVersion(oldTx)
+	require.NoError(t, err)
+	oldFilesEnd := oldTx.Debug().TxNumsInFiles(kv.StorageDomain)
+
+	writeStorage(2, v2, v1)
+	writeStorage(3, v3, v2)
+	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
+	require.NoError(t, agg.BuildFiles(3))
+
+	// The extra writes only create the extended files. Restoring the version
+	// models a downloaded files publication without a database-state commit.
+	resetTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer resetTx.Rollback()
+	require.NoError(t, resetTx.ResetSequence(string(kv.PlainStateVersion), oldStateVersion))
+	require.NoError(t, resetTx.Commit())
+
+	freshTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer freshTx.Rollback()
+	require.Greater(t, freshTx.Debug().TxNumsInFiles(kv.StorageDomain), oldFilesEnd)
+
+	got, _, err := readerDomains.GetLatest(kv.StorageDomain, freshTx, key)
+	require.NoError(t, err)
+	require.Equal(t, v3, got)
+
+	got, _, err = readerDomains.GetLatest(kv.StorageDomain, oldTx, key)
+	require.NoError(t, err)
+	require.Equal(t, v1, got, "a transaction pinned to the old files must not use the new files cache generation")
 }
 
 func TestAccountOnlyDeleteDoesNotBlockUnrelatedCodeFill(t *testing.T) {
@@ -111,66 +333,48 @@ func TestAccountOnlyDeleteDoesNotBlockUnrelatedCodeFill(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, code, got)
 
-	cached, ok := stateCache.View(nil).Get(kv.CodeDomain, contractAddr)
+	cached, ok := currentStateCacheView(t, stateCache).Get(kv.CodeDomain, contractAddr)
 	require.True(t, ok, "an account-only deletion must not block unrelated code fills")
 	require.Equal(t, code, cached)
 }
 
-func TestSharedDomainsNegativeCacheEntryUsesLastVisibleTxNum(t *testing.T) {
+func TestCanonicalUnwindClearsNegativeCacheEntry(t *testing.T) {
 	const stepSize = uint64(16)
 	ctx := t.Context()
 	db := newTestDb(t, stepSize)
+	stateCache := newSmallStateCache()
+	t.Cleanup(stateCache.Close)
+	_, _, _, diffs := twoStepRows(t, db, stateCache)
 
-	presentKey := make([]byte, 20)
-	presentKey[0] = 0xaa
 	missingKey := make([]byte, 20)
 	missingKey[0] = 0xbb
-	account := accounts.SerialiseV3(&accounts.Account{
-		Nonce:   1,
-		Balance: *uint256.NewInt(1),
-	})
-
-	seedTx, err := db.BeginTemporalRw(ctx)
-	require.NoError(t, err)
-	defer seedTx.Rollback()
-	seedDomains, err := execctx.NewSharedDomains(ctx, seedTx, log.New())
-	require.NoError(t, err)
-	defer seedDomains.Close()
-	seedDomains.SetTxNum(10)
-	require.NoError(t, seedDomains.DomainPut(kv.AccountsDomain, seedTx, presentKey, account, 10, nil))
-	require.NoError(t, seedDomains.Commit(ctx, seedTx))
-	seedDomains.Close()
-
-	budget := 1 * datasize.MB
-	stateCache := cache.NewStateCache(budget, budget, budget, budget)
-	t.Cleanup(stateCache.Close)
 
 	readTx, err := db.BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer readTx.Rollback()
-	visibleEnd, ok := readTx.Debug().DomainVisibleEnd(kv.AccountsDomain)
-	require.True(t, ok)
-	require.NotZero(t, visibleEnd)
-
 	readDomains, err := execctx.NewSharedDomains(ctx, readTx, log.New())
 	require.NoError(t, err)
-	defer readDomains.Close()
 	readDomains.SetStateCacheForTest(stateCache)
 	got, _, err := readDomains.GetLatest(kv.AccountsDomain, readTx, missingKey)
 	require.NoError(t, err)
 	require.Empty(t, got)
+	readDomains.Close()
 
-	cached, ok := stateCache.View(nil).Get(kv.AccountsDomain, missingKey)
+	_, ok := currentStateCacheView(t, stateCache).Get(kv.AccountsDomain, missingKey)
 	require.True(t, ok)
-	require.Empty(t, cached)
 
-	stateCache.Applier().Unwind(visibleEnd)
-	_, ok = stateCache.View(nil).Get(kv.AccountsDomain, missingKey)
-	require.True(t, ok, "a negative observed before the unwind floor must remain cached")
+	unwindTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer unwindTx.Rollback()
+	unwindDomains, err := execctx.NewSharedDomains(ctx, unwindTx, log.New())
+	require.NoError(t, err)
+	defer unwindDomains.Close()
+	unwindDomains.SetStateCacheForTest(stateCache)
+	unwindDomains.Unwind(10, &diffs)
+	require.NoError(t, unwindDomains.Commit(ctx, unwindTx))
 
-	stateCache.Applier().Unwind(visibleEnd - 1)
-	_, ok = stateCache.View(nil).Get(kv.AccountsDomain, missingKey)
-	require.False(t, ok, "a negative observed at the unwind floor must be invalidated")
+	_, ok = currentStateCacheView(t, stateCache).Get(kv.AccountsDomain, missingKey)
+	require.False(t, ok, "canonical unwind must clear entries without an unwind callback")
 }
 
 func testEmbeddedRPCCacheViewDoesNotResurrectDeletedValue(t *testing.T, domain kv.Domain) {
@@ -268,11 +472,8 @@ func testEmbeddedRPCCacheViewDoesNotResurrectDeletedValue(t *testing.T, domain k
 }
 
 // The account-deletion mirror of TestEmbeddedRPCCacheViewDoesNotResurrectDeletedCode.
-// DomainDel(AccountsDomain) cascades a code-domain delete at the SD layer, so the
-// commit applies it and the code frontier advances past every pre-deletion view —
-// and the cache-level code-fill admission also checks the accounts frontier. This
-// pins both layers: losing either must not let a pre-deletion RPC view refill the
-// deleted account's code.
+// DomainDel(AccountsDomain) cascades a code-domain delete. One publication must
+// revoke the old RPC view before applying both deletions.
 func TestEmbeddedRPCCacheViewDoesNotRefillCodeOfDeletedAccount(t *testing.T) {
 	const stepSize = uint64(16)
 	ctx := t.Context()
@@ -330,13 +531,13 @@ func TestEmbeddedRPCCacheViewDoesNotRefillCodeOfDeletedAccount(t *testing.T) {
 	// The view outlives the overlay teardown on purpose, as above.
 	deleteDomains.Close()
 
-	_, ok := stateCache.View(nil).Get(kv.CodeDomain, addr)
+	_, ok := currentStateCacheView(t, stateCache).Get(kv.CodeDomain, addr)
 	require.False(t, ok, "the account deletion must drop the cached code entry")
 
 	got, err := rpcView.GetCode(addr)
 	require.NoError(t, err)
 	require.Empty(t, got, "the view keeps serving the published SD's state after teardown, so the deletion stays visible")
 
-	_, ok = stateCache.View(nil).Get(kv.CodeDomain, addr)
+	_, ok = currentStateCacheView(t, stateCache).Get(kv.CodeDomain, addr)
 	require.False(t, ok, "a pre-deletion RPC view must not refill the deleted account's code")
 }

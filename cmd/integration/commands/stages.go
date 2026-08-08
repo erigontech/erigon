@@ -844,9 +844,9 @@ func execBlocksBatch(ctx context.Context, db kv.TemporalRwDB, st *stagedsync.Syn
 	}
 	defer doms.Close()
 	doms.SetInMemHistoryReads(false)
-	doms.SetStateCache(stateCache)
+	doms.SetCanonicalStateCache(stateCache)
 	doms.SetCodeStore(codeStore)
-	execctx.GuardAggregatorForCache(db, stateCache)
+	execctx.BindStateCacheToAggregator(db, stateCache)
 
 	s, err := st.StageState(stages.Execution, tx, initialCycle, false)
 	if err != nil {
