@@ -56,6 +56,9 @@ type BranchCache struct {
 	// decided by Generation; this end distinguishes locally built commitment
 	// files from files downloaded outside the publication stream.
 	committedTxNumEnd uint64
+	// clearEpoch lets optimistic adaptive plans detect that their pinned
+	// entries were removed without extending the cache publication lock.
+	clearEpoch atomic.Uint64
 
 	// Root tier — single slot for the root branch (always hottest, always
 	// present). Atomic-pointer access so no lock is needed for the hot
@@ -767,6 +770,7 @@ func (c *BranchCache) Clear() {
 	c.tailHits.Store(0)
 	c.tailMisses.Store(0)
 	c.bytesServed.Store(0)
+	c.clearEpoch.Add(1)
 }
 
 // Stats returns a one-line summary of the cache tiers' hit/miss counters plus

@@ -129,7 +129,7 @@ func (p *BranchPublication) Publish(generation cache.Generation, updates []Branc
 		if clear {
 			p.c.Clear()
 		}
-		adaptive.apply()
+		adaptive.apply(p.generation)
 		for i := range updates {
 			update := &updates[i]
 			if committedEnd := update.TxNum + 1; committedEnd > p.c.committedTxNumEnd {

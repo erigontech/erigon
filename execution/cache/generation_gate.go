@@ -79,6 +79,10 @@ type GenerationGate struct {
 	// publicationMu orders durable cache publication with independent changes
 	// to the backing-file view. Begin holds it until Publish or Abort.
 	publicationMu sync.Mutex
+	// files remembers the latest publication even while no durable generation
+	// is active, so a later commit cannot restore an older transaction's view.
+	files      FilesView
+	filesKnown bool
 }
 
 // GenerationView is the immutable validity token held by one cache view.
@@ -147,9 +151,9 @@ func (g *GenerationGate) Publisher() GenerationPublisher {
 
 func (p GenerationPublisher) Enabled() bool { return p.gate != nil }
 
-// Initialize binds the gate to identity. A mismatch runs clear while fills are
-// blocked because existing entries have an unknown origin relative to the
-// requested database and files snapshot.
+// Initialize binds the gate to identity's state version and the newest files
+// view already reported by the backing store. A mismatch clears entries while
+// fills are blocked because their origin cannot be proven compatible.
 func (p GenerationPublisher) Initialize(identity Generation, clear func()) {
 	if p.gate == nil {
 		return
@@ -160,6 +164,12 @@ func (p GenerationPublisher) Initialize(identity Generation, clear func()) {
 	gate.admissionMu.Lock()
 	defer gate.admissionMu.Unlock()
 
+	if gate.filesKnown {
+		identity.files = gate.files
+	} else {
+		gate.files = identity.files
+		gate.filesKnown = true
+	}
 	current := gate.current.Load()
 	if current != nil && current.active && current.identity == identity {
 		return
@@ -177,6 +187,8 @@ type GenerationPublication struct {
 	gate       *GenerationGate
 	previous   *publishedGeneration
 	transition *publishedGeneration
+	files      FilesView
+	filesKnown bool
 }
 
 // Begin revokes all existing views without changing cache entries. It also
@@ -198,7 +210,22 @@ func (p GenerationPublisher) Begin() *GenerationPublication {
 	}
 	transition := &publishedGeneration{}
 	gate.current.Store(transition)
-	return &GenerationPublication{gate: gate, previous: previous, transition: transition}
+	return &GenerationPublication{
+		gate:       gate,
+		previous:   previous,
+		transition: transition,
+		files:      gate.files,
+		filesKnown: gate.filesKnown,
+	}
+}
+
+// StartedFrom reports whether view was the live token revoked by Begin.
+func (p *GenerationPublication) StartedFrom(view GenerationView) bool {
+	return p != nil &&
+		p.gate != nil &&
+		p.previous != nil &&
+		view.gate == p.gate &&
+		view.generation == p.previous
 }
 
 // Abort restores the previous generation when no cache entries were changed.
@@ -232,6 +259,12 @@ func (p *GenerationPublication) Publish(identity Generation, apply func()) {
 	if apply != nil {
 		apply()
 	}
+	if p.filesKnown {
+		identity.files = p.files
+	} else {
+		gate.files = identity.files
+		gate.filesKnown = true
+	}
 	gate.current.Store(&publishedGeneration{identity: identity, active: true})
 	p.gate = nil
 }
@@ -247,6 +280,8 @@ func (g *GenerationGate) Reset(clear func()) {
 	g.admissionMu.Lock()
 	defer g.admissionMu.Unlock()
 	g.current.Store(nil)
+	g.files = FilesView{}
+	g.filesKnown = false
 	if clear != nil {
 		clear()
 	}
@@ -285,6 +320,8 @@ func (p GenerationPublisher) BeginBackingChange(files FilesView, reconcile func(
 	if current != nil && !current.active {
 		panic("cache generation publication already in progress")
 	}
+	gate.files = files
+	gate.filesKnown = true
 	if current != nil && current.identity.files == files && !incompatible {
 		return nil
 	}

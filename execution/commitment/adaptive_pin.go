@@ -24,6 +24,7 @@ import (
 	"sync/atomic"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/cache"
 )
 
 // AdaptivePinControllerConfig sets the policy knobs for the adaptive
@@ -60,8 +61,9 @@ type AdaptivePinController struct {
 
 	misses sync.Map // [32]byte → *atomic.Uint64
 
-	mu     sync.Mutex
-	states map[[32]byte]*adaptiveContractState
+	mu              sync.Mutex
+	states          map[[32]byte]*adaptiveContractState
+	cacheClearEpoch uint64
 }
 
 // ParallelResolverFactory builds a fresh BatchBranchResolver for one
@@ -119,10 +121,15 @@ type AdaptivePinPlan struct {
 	mutations      adaptiveCacheMutations
 	previousStates map[[32]byte]*adaptiveContractState
 	observedMisses map[[32]byte]uint64
-	txNum          uint64
-	promoted       int
-	extended       int
-	demoted        int
+	// The source token and clear epoch must still match when publication
+	// applies the plan. Otherwise its branches came from obsolete backing state.
+	source          cache.GenerationView
+	cacheClearEpoch uint64
+	applied         bool
+	txNum           uint64
+	promoted        int
+	extended        int
+	demoted         int
 }
 
 type adaptiveContractState struct {
@@ -228,10 +235,11 @@ func NewAdaptivePinController(cache *BranchCache, cfg AdaptivePinControllerConfi
 		cfg.PromoteThresholdMisses = def.PromoteThresholdMisses
 	}
 	return &AdaptivePinController{
-		cache:  cache,
-		cfg:    cfg,
-		logger: logger,
-		states: make(map[[32]byte]*adaptiveContractState),
+		cache:           cache,
+		cfg:             cfg,
+		logger:          logger,
+		states:          make(map[[32]byte]*adaptiveContractState),
+		cacheClearEpoch: cache.clearEpoch.Load(),
 	}
 }
 
@@ -256,11 +264,26 @@ func (c *AdaptivePinController) Reset() {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.resetLocked()
+}
+
+func (c *AdaptivePinController) resetLocked() {
 	c.states = make(map[[32]byte]*adaptiveContractState)
 	c.misses.Range(func(key, _ any) bool {
 		c.misses.Delete(key)
 		return true
 	})
+	c.cacheClearEpoch = c.cache.clearEpoch.Load()
+	mxAdaptiveActive.SetUint64(0)
+}
+
+func (c *AdaptivePinController) syncCacheClearLocked() {
+	epoch := c.cache.clearEpoch.Load()
+	if epoch == c.cacheClearEpoch {
+		return
+	}
+	c.states = make(map[[32]byte]*adaptiveContractState)
+	c.cacheClearEpoch = epoch
 	mxAdaptiveActive.SetUint64(0)
 }
 
@@ -279,19 +302,29 @@ func (c *AdaptivePinController) onCacheMiss(prefix []byte) {
 
 // PlanBlock computes promotions, extensions, and demotions from the
 // uncommitted transaction without changing BranchCache. The returned plan
-// keeps controller updates serialized until Commit or Abort.
-func (c *AdaptivePinController) PlanBlock(txNum uint64, reader CommitmentReader, factory ParallelResolverFactory, provider DbBranchesProvider) *AdaptivePinPlan {
+// keeps controller updates serialized until Commit or Abort. Publication
+// discards it if sourceGeneration or the cache clear epoch changed meanwhile.
+func (c *AdaptivePinController) PlanBlock(
+	txNum uint64,
+	sourceGeneration cache.Generation,
+	reader CommitmentReader,
+	factory ParallelResolverFactory,
+	provider DbBranchesProvider,
+) *AdaptivePinPlan {
 	c.mu.Lock()
+	c.syncCacheClearLocked()
 	previousStates := c.states
 	c.states = cloneAdaptiveStateHeaders(previousStates)
 	misses := c.snapshotMisses()
 	observedMisses := make(map[[32]byte]uint64, len(misses))
 	maps.Copy(observedMisses, misses)
 	plan := &AdaptivePinPlan{
-		controller:     c,
-		previousStates: previousStates,
-		observedMisses: observedMisses,
-		txNum:          txNum,
+		controller:      c,
+		previousStates:  previousStates,
+		observedMisses:  observedMisses,
+		source:          c.cache.generation.View(sourceGeneration),
+		cacheClearEpoch: c.cacheClearEpoch,
+		txNum:           txNum,
 	}
 
 	// One factory call per block, shared across all contracts. nil falls back to serial.
@@ -350,10 +383,15 @@ func (c *AdaptivePinController) PlanBlock(txNum uint64, reader CommitmentReader,
 	return plan
 }
 
-func (p *AdaptivePinPlan) apply() {
-	if p != nil && p.controller != nil {
-		p.mutations.apply(p.controller.cache)
+func (p *AdaptivePinPlan) apply(publication *cache.GenerationPublication) {
+	if p == nil || p.controller == nil {
+		return
 	}
+	if p.cacheClearEpoch != p.controller.cache.clearEpoch.Load() || !publication.StartedFrom(p.source) {
+		return
+	}
+	p.mutations.apply(p.controller.cache)
+	p.applied = true
 }
 
 // Commit accepts the planned controller state after its cache mutations have
@@ -363,6 +401,10 @@ func (p *AdaptivePinPlan) Commit() {
 		return
 	}
 	c := p.controller
+	if !p.applied || p.cacheClearEpoch != c.cache.clearEpoch.Load() {
+		p.discard()
+		return
+	}
 	if p.promoted > 0 {
 		mxAdaptivePromoted.AddUint64(uint64(p.promoted))
 	}
@@ -394,12 +436,23 @@ func (p *AdaptivePinPlan) Abort() {
 	if p == nil || p.controller == nil {
 		return
 	}
+	p.discard()
+}
+
+func (p *AdaptivePinPlan) discard() {
 	c := p.controller
-	c.states = p.previousStates
+	epoch := c.cache.clearEpoch.Load()
+	if epoch == p.cacheClearEpoch {
+		c.states = p.previousStates
+	} else {
+		c.states = make(map[[32]byte]*adaptiveContractState)
+		c.cacheClearEpoch = epoch
+	}
 	for hash, count := range p.observedMisses {
 		value, _ := c.misses.LoadOrStore(hash, new(atomic.Uint64))
 		value.(*atomic.Uint64).Add(count)
 	}
+	mxAdaptiveActive.SetUint64(uint64(len(c.states)))
 	p.controller = nil
 	c.mu.Unlock()
 }

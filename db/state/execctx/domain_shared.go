@@ -1200,7 +1200,13 @@ func (sd *SharedDomains) planAdaptivePins(tx kv.RwTx) *commitment.AdaptivePinPla
 		scan(oddFrom, oddTo)
 		return branches
 	}
-	return sd.adaptivePinController.PlanBlock(sd.txNum, reader, factory, provider)
+	return sd.adaptivePinController.PlanBlock(
+		sd.txNum,
+		sd.baseBranchCacheGeneration,
+		reader,
+		factory,
+		provider,
+	)
 }
 
 // TemporalDomain satisfaction. Collects no read metrics — see
