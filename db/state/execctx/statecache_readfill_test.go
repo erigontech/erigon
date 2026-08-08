@@ -25,6 +25,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -290,6 +291,103 @@ func TestReadFill_DoesNotClobberLiveEntry(t *testing.T) {
 	got, ok := sc.View(nil).Get(kv.AccountsDomain, key)
 	require.True(t, ok)
 	require.Equal(t, v3, got, "read-fill must not clobber the live entry")
+}
+
+func TestReadFill_SkipsInFlightUnwindRow(t *testing.T) {
+	t.Parallel()
+
+	const stepSize = uint64(16)
+	ctx := t.Context()
+	db := newTestDb(t, stepSize)
+	sc := newSmallStateCache()
+	key, _, v2, diffs := twoStepRows(t, db, sc)
+
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	sd, err := execctx.NewSharedDomains(ctx, roTx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	sd.SetStateCacheForTest(sc)
+	sd.Unwind(10, &diffs)
+
+	got, _, err := sd.GetLatest(kv.AccountsDomain, roTx, key)
+	require.NoError(t, err)
+	require.Equal(t, v2, got)
+
+	_, ok := sc.View(nil).Get(kv.AccountsDomain, key)
+	require.False(t, ok, "a bounded in-flight unwind read must not populate the shared cache")
+}
+
+func TestCodeHashFill_SkipsInFlightUnwindRow(t *testing.T) {
+	t.Parallel()
+
+	const stepSize = uint64(16)
+	ctx := t.Context()
+	db := newTestDb(t, stepSize)
+	sc := newSmallStateCache()
+
+	key := make([]byte, 20)
+	key[0] = 0xcc
+	var codeHash common.Hash
+	codeHash[0] = 0xdd
+	value := accounts.SerialiseV3(&accounts.Account{
+		Nonce:    1,
+		CodeHash: accounts.InternCodeHash(codeHash),
+	})
+
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	sd, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	sd.SetStateCacheForTest(sc)
+	sd.SetTxNum(20)
+	require.NoError(t, sd.DomainPut(kv.AccountsDomain, rwTx, key, value, 20, nil))
+	require.NoError(t, sd.Commit(ctx, rwTx))
+
+	stepBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(stepBytes, ^uint64(1))
+	var diffs [kv.DomainLen][]kv.DomainEntryDiff
+	diffs[kv.AccountsDomain] = []kv.DomainEntryDiff{{Key: string(key) + string(stepBytes)}}
+
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	sd2, err := execctx.NewSharedDomains(ctx, roTx, log.New())
+	require.NoError(t, err)
+	defer sd2.Close()
+	sd2.SetStateCacheForTest(sc)
+	sd2.Unwind(10, &diffs)
+
+	got := sd2.CodeHashForAddr(roTx, key, 20)
+	require.Equal(t, codeHash[:], got)
+
+	_, ok := sc.View(nil).GetAddrCodeHash(key)
+	require.False(t, ok, "a bounded in-flight unwind read must not seed a code-hash mapping")
+}
+
+// Background exec workers are constructed with a nil chainTx placeholder and
+// open their real tx on the first task; binding a getter for the placeholder
+// must not touch the tx.
+func TestAsGetterMeteredNilTx(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	db := newTestDb(t, 16)
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+	stateCache := newSmallStateCache()
+	t.Cleanup(stateCache.Close)
+	domains.SetStateCacheForTest(stateCache)
+
+	require.NotPanics(t, func() { domains.AsGetterMetered(nil, nil) })
 }
 
 // A negative reflects transactions below the read view's exclusive frontier,

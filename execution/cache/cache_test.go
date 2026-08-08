@@ -58,6 +58,10 @@ func makeValue(i int) []byte {
 	return []byte{byte(i), byte(i + 1), byte(i + 2)}
 }
 
+func frontierAt(end uint64) Frontier {
+	return FrontierFunc(func(kv.Domain) (uint64, bool) { return end, true })
+}
+
 // =============================================================================
 // DomainCache Tests
 // =============================================================================
@@ -921,9 +925,49 @@ func TestStateCache_StaleViewCannotFillAfterDelete(t *testing.T) {
 	_, ok := sc.get(kv.AccountsDomain, key)
 	require.False(t, ok, "an authoritative deletion must physically remove the entry")
 
-	sc.fillIfFresh(kv.AccountsDomain, key, stale, 10, 11)
+	sc.View(frontierAt(11)).Fill(kv.AccountsDomain, key, stale, 10)
 	_, ok = sc.get(kv.AccountsDomain, key)
 	require.False(t, ok, "a view older than the deletion must not fill afterward")
+}
+
+// SharedDomains commits the tx and only then walks `pending` into the cache, so
+// between those steps a reader opening a new tx legitimately sees txNums the
+// cache has not applied yet: its frontier is ahead of appliedEnd. Rejecting
+// "ahead" would drop fills on every flush for the length of the apply loop.
+func TestStateCache_ReaderAheadOfApplyWindowCanFill(t *testing.T) {
+	b := 1 * datasize.MB
+	sc := NewStateCache(b, b, b, b)
+	t.Cleanup(sc.Close)
+
+	sc.apply(kv.AccountsDomain, makeAddr(1), makeValue(1), 100)
+
+	key := makeAddr(2)
+	sc.View(frontierAt(201)).Fill(kv.AccountsDomain, key, makeValue(2), 200)
+
+	_, ok := sc.get(kv.AccountsDomain, key)
+	require.True(t, ok,
+		"a reader ahead of appliedEnd is the normal commit-then-apply window, not a dead fork")
+}
+
+func TestStateCache_PreReorgViewCannotFillAfterUnwind(t *testing.T) {
+	b := 1 * datasize.MB
+	sc := NewStateCache(b, b, b, b)
+	t.Cleanup(sc.Close)
+
+	key := makeAddr(1)
+	canonical, fork := makeValue(1), makeValue(2)
+	sc.apply(kv.AccountsDomain, key, canonical, 40)
+	sc.apply(kv.AccountsDomain, key, fork, 100)
+
+	preReorg := sc.View(frontierAt(101))
+	preReorg.Fill(kv.AccountsDomain, key, fork, 100)
+	sc.unwind(50)
+	_, ok := sc.get(kv.AccountsDomain, key)
+	require.False(t, ok, "the unwind must evict the fork's value")
+
+	preReorg.Fill(kv.AccountsDomain, key, fork, 100)
+	_, ok = sc.get(kv.AccountsDomain, key)
+	require.False(t, ok, "a pre-reorg view must not reinstate the discarded fork's value")
 }
 
 func TestStateCache_FileEndViewCannotFillAtAppliedTx(t *testing.T) {
@@ -935,12 +979,12 @@ func TestStateCache_FileEndViewCannotFillAtAppliedTx(t *testing.T) {
 	stale := makeValue(1)
 	sc.apply(kv.AccountsDomain, key, nil, 100)
 
-	sc.fillIfFresh(kv.AccountsDomain, key, stale, 99, 100)
+	sc.View(frontierAt(100)).Fill(kv.AccountsDomain, key, stale, 99)
 	_, ok := sc.get(kv.AccountsDomain, key)
 	require.False(t, ok, "a [0,100) view does not contain the applied tx 100")
 
 	fresh := makeValue(2)
-	sc.fillIfFresh(kv.AccountsDomain, key, fresh, 100, 101)
+	sc.View(frontierAt(101)).Fill(kv.AccountsDomain, key, fresh, 100)
 	got, ok := sc.get(kv.AccountsDomain, key)
 	require.True(t, ok)
 	require.Equal(t, fresh, got)
@@ -967,7 +1011,7 @@ func TestStateCache_ApplyDeleteAtomicWithFill(t *testing.T) {
 		}()
 		go func() {
 			defer wg.Done()
-			sc.fillIfFresh(kv.AccountsDomain, key, value, appliedTxNum, visibleEnd)
+			sc.View(frontierAt(visibleEnd)).Fill(kv.AccountsDomain, key, value, appliedTxNum)
 		}()
 		wg.Wait()
 
@@ -984,7 +1028,7 @@ func TestStateCache_ApplyCodeDeleteDropsAddrCodeHash(t *testing.T) {
 	addr := makeAddr(1)
 	var h [32]byte
 	h[0] = 0xaa
-	sc.seedAddrCodeHash(addr, h, 10, 0)
+	sc.View(frontierAt(0)).SeedAddrCodeHash(addr, h, 10)
 	_, ok := sc.getAddrCodeHash(addr)
 	require.True(t, ok)
 

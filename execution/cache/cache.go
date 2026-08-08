@@ -22,16 +22,17 @@
 // newer than the reader's tx (snapshot-isolated caching is kvcache's job,
 // node/shards). In the forward direction its invariant is monotonicity:
 // content never regresses behind what has been applied. Unwinds invalidate
-// by epoch and floor instead.
+// stored entries by a per-cache entry epoch and floor instead.
 //
 // StateCache itself has no data methods. A ReadView — bound to one tx's read
 // view and not outliving it — serves reads and fills (cache writes made on
 // behalf of a database reader after a miss); admission compares the view's
 // frontier — the exclusive txNum end of what its tx can see, so a view with
 // frontier N sees txNums < N — against the applied end, under the same lock
-// applies take. The Applier handle, held by the SharedDomains
-// commit/unwind path, performs the authoritative writes: post-commit
-// applies, unwinds, clears.
+// applies take. A ReadView also snapshots a separate, StateCache-wide
+// read-view epoch, which an unwind advances to revoke fills from older views.
+// The Applier handle, held by the SharedDomains commit/unwind path, performs
+// the authoritative writes: post-commit applies, unwinds, clears.
 package cache
 
 // Cache is the interface for domain caches.
