@@ -176,8 +176,8 @@ func assertSameWrites(t *testing.T, want, got *WriteSet) {
 	t.Helper()
 	require.Equal(t, want.Count(), got.Count())
 	for h := range want.AllHeaders() {
-		require.True(t, got.Has(h), "missing header %v", h)
-		assert.Equal(t, writeSetVal(want, h), writeSetVal(got, h), "value mismatch at %v", h)
+		require.True(t, got.Has(*h), "missing header %v", h)
+		assert.Equal(t, writeSetVal(want, *h), writeSetVal(got, *h), "value mismatch at %v", h)
 	}
 }
 
@@ -204,8 +204,8 @@ func TestWriteSetMergeInto_MatchedKeyKeepsNext(t *testing.T) {
 	nextVals := map[writeKey]any{}
 	for h := range next.AllHeaders() {
 		k := writeKey{addr: h.Address, key: h.Key, path: h.Path}
-		nextHeaders[k] = h
-		nextVals[k] = writeSetVal(next, h)
+		nextHeaders[k] = *h
+		nextVals[k] = writeSetVal(next, *h)
 	}
 	require.NotZero(t, matchedKeys(prevKeys, nextKeys), "fixture must have matched keys")
 

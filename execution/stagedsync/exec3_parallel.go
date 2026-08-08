@@ -2641,7 +2641,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			// Remove entries that were previously written but are no longer
 			// written — res.TxOut.Has answers membership directly, no cmp map.
 			for h := range prevWrites.AllHeaders() {
-				if !res.TxOut.Has(h) {
+				if !res.TxOut.Has(*h) {
 					hasWriteChange = true
 					be.versionMap.Delete(h.Address, h.Path, h.Key, txVersion.TxIndex, true)
 				}
