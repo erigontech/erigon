@@ -366,28 +366,35 @@ func (d *Domain) v4FilesForStep(step kv.Step) []string {
 
 // retireSubsumedV4Items marks every dirtyFiles v4 item whose range
 // is entirely covered by a step-aligned file for `step` for
-// retirement (removes them from dirtyFiles, sets canDelete=true) and
-// returns the removed items so the caller can attach them to the
-// outgoing visible generation. Physical reclaim happens once the
-// last reader of that generation releases — so readers still
-// holding a v4 item's decompressor aren't surprised mid-read.
-//
-// Called by Aggregator.IntegrateDirtyFiles after retire has produced
-// a fresh step-aligned .kv whose content includes what the v4 held
-// (via Domain.stepSourcesForCollate's merge). Caller holds
-// d.dirtyFilesLock.
+// retirement. Thin wrapper over retireSubsumedV4ItemsInRange for the
+// single-step integration case.
 func (d *Domain) retireSubsumedV4Items(step kv.Step) []*FilesItem {
-	var items []*FilesItem
 	stepStart := uint64(step) * d.stepSize
 	stepEnd := uint64(step+1) * d.stepSize
+	return d.retireSubsumedV4ItemsInRange(stepStart, stepEnd)
+}
+
+// retireSubsumedV4ItemsInRange marks every dirtyFiles v4 item whose
+// range is wholly contained within [rangeStart, rangeEnd) for
+// retirement (removes from dirtyFiles, sets canDelete=true) and
+// returns the removed items so the caller can attach them to the
+// outgoing visible generation. Physical reclaim happens once the last
+// reader of that generation releases — v4 decompressors held by
+// live RO views aren't surprised mid-read. Caller holds
+// d.dirtyFilesLock.
+func (d *Domain) retireSubsumedV4ItemsInRange(rangeStart, rangeEnd uint64) []*FilesItem {
+	if rangeEnd <= rangeStart {
+		return nil
+	}
+	var items []*FilesItem
 	d.dirtyFiles.Scan(func(item *FilesItem) bool {
 		if !d.isRawTxNItem(item) {
 			return true
 		}
-		if item.startTxNum != stepStart {
+		if item.startTxNum < rangeStart || item.startTxNum >= rangeEnd {
 			return true
 		}
-		if item.endTxNum > stepEnd {
+		if item.endTxNum > rangeEnd {
 			return true
 		}
 		items = append(items, item)

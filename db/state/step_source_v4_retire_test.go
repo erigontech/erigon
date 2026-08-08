@@ -115,3 +115,60 @@ func TestDomain_RetireSubsumedV4Items_Empty(t *testing.T) {
 	require.Empty(t, retired)
 	require.False(t, itemA.canDelete.Load())
 }
+
+// TestDomain_RetireSubsumedV4ItemsInRange — a wider step-aligned range
+// (from merge integration) must retire every v4 item wholly contained
+// within it. Pins the multi-step v4 retirement class that
+// subsumedV4ItemsForStepLocked's single-step filter missed
+// (Phase 5 v4_transient class: v4 [step 288, mid-301] left dangling
+// once a merged [288-304] .kv covered its range).
+func TestDomain_RetireSubsumedV4ItemsInRange(t *testing.T) {
+	t.Parallel()
+
+	const stepSize = uint64(1000)
+	d := &Domain{
+		History: &History{
+			InvertedIndex: &InvertedIndex{stepSize: stepSize},
+		},
+		dirtyFiles: newDirtyFiles(),
+	}
+
+	// Range [3000, 7000) = steps 3..6 (four steps wide, aligned).
+	// Case matrix:
+	//   A: step-aligned .3-4 (startTxNum=3000, endTxNum=4000)   — NOT v4, MUST survive
+	//   B: v4 starting at step 3, mid-3      (3000-3500)         — v4 in range, MUST be retired
+	//   C: v4 starting at step 3, mid-6      (3000-6800)         — v4 in range (spans 4 steps), MUST be retired
+	//   D: v4 starting at step 5, mid-6      (5000-6900)         — v4 in range, MUST be retired
+	//   E: v4 starting at step 3, spills past (3000-7500)        — v4 extends beyond range, MUST survive
+	//   F: v4 starting at step 2 (before range) (2000-2500)      — v4 before range, MUST survive
+	//   G: v4 starting at step 7 (after range) (7000-7500)       — v4 at range end (not < rangeEnd), MUST survive
+	itemA := &FilesItem{startTxNum: 3000, endTxNum: 4000}
+	itemB := &FilesItem{startTxNum: 3000, endTxNum: 3500}
+	itemC := &FilesItem{startTxNum: 3000, endTxNum: 6800}
+	itemD := &FilesItem{startTxNum: 5000, endTxNum: 6900}
+	itemE := &FilesItem{startTxNum: 3000, endTxNum: 7500}
+	itemF := &FilesItem{startTxNum: 2000, endTxNum: 2500}
+	itemG := &FilesItem{startTxNum: 7000, endTxNum: 7500}
+	for _, it := range []*FilesItem{itemA, itemB, itemC, itemD, itemE, itemF, itemG} {
+		d.dirtyFiles.Set(it)
+	}
+
+	retired := d.retireSubsumedV4ItemsInRange(3000, 7000)
+
+	require.Len(t, retired, 3)
+	retiredSet := map[*FilesItem]struct{}{}
+	for _, r := range retired {
+		retiredSet[r] = struct{}{}
+	}
+	require.Contains(t, retiredSet, itemB)
+	require.Contains(t, retiredSet, itemC)
+	require.Contains(t, retiredSet, itemD)
+
+	require.False(t, itemA.canDelete.Load())
+	require.True(t, itemB.canDelete.Load())
+	require.True(t, itemC.canDelete.Load())
+	require.True(t, itemD.canDelete.Load())
+	require.False(t, itemE.canDelete.Load())
+	require.False(t, itemF.canDelete.Load())
+	require.False(t, itemG.canDelete.Load())
+}

@@ -1559,13 +1559,11 @@ func (a *Aggregator) IntegrateDirtyFiles(sf *AggV3StaticFiles, txNumFrom, txNumT
 	a.recalcVisibleFiles(retired)
 }
 
-// subsumedV4ItemsForStepLocked retires (removes from dirtyFiles +
-// marks canDelete) every mode-C v4 boundary file whose range is
-// entirely covered by the just-integrated step-aligned range
-// [txNumFrom, txNumTo). Returns the retired items so the caller
-// attaches them to the outgoing visible generation. No-op when the
-// range doesn't map cleanly to a single step (e.g. multi-step build)
-// or when no v4 items overlap. Caller holds dirtyFilesLock.
+// subsumedV4ItemsForStepLocked retires every mode-C v4 boundary file
+// whose range is wholly contained in the just-integrated step-aligned
+// range [txNumFrom, txNumTo) and returns them so the caller attaches
+// them to the outgoing visible generation. Caller holds
+// dirtyFilesLock.
 func (a *Aggregator) subsumedV4ItemsForStepLocked(txNumFrom, txNumTo uint64) []*FilesItem {
 	stepSize := a.stepSize.Load()
 	if stepSize == 0 {
@@ -1577,16 +1575,12 @@ func (a *Aggregator) subsumedV4ItemsForStepLocked(txNumFrom, txNumTo uint64) []*
 	if txNumTo <= txNumFrom {
 		return nil
 	}
-	if txNumTo-txNumFrom != stepSize {
-		return nil
-	}
-	step := kv.Step(txNumFrom / stepSize)
 	var out []*FilesItem
 	for _, d := range a.d {
 		if d.Disable {
 			continue
 		}
-		out = append(out, d.retireSubsumedV4Items(step)...)
+		out = append(out, d.retireSubsumedV4ItemsInRange(txNumFrom, txNumTo)...)
 	}
 	return out
 }
@@ -2425,7 +2419,43 @@ func (a *Aggregator) IntegrateMergedDirtyFiles(in *MergeResult) {
 		ii.integrateMergedDirtyFiles(in.iis[id])
 	}
 
+	// Merge widening may subsume v4 boundary files that span multiple
+	// steps — the single-step retire integration can't see them.
+	// Histories/IIs are handled by their own merge cleanup.
+	subsumed := a.subsumedV4ItemsFromMergeLocked(in)
 	a.cleanAfterMergeLocked(at, in)
+	if len(subsumed) > 0 {
+		a.recalcVisibleFiles(subsumed)
+	}
+}
+
+// subsumedV4ItemsFromMergeLocked collects retired v4 items across
+// every domain covered by the merge result. Merge widths differ
+// per-domain, so the check runs per merged item using its actual
+// [startTxNum, endTxNum) window. Caller holds dirtyFilesLock.
+func (a *Aggregator) subsumedV4ItemsFromMergeLocked(in *MergeResult) []*FilesItem {
+	if in == nil {
+		return nil
+	}
+	stepSize := a.stepSize.Load()
+	if stepSize == 0 {
+		return nil
+	}
+	var out []*FilesItem
+	for id, d := range a.d {
+		if d.Disable {
+			continue
+		}
+		merged := in.d[id]
+		if merged == nil {
+			continue
+		}
+		if merged.startTxNum%stepSize != 0 || merged.endTxNum%stepSize != 0 {
+			continue
+		}
+		out = append(out, d.retireSubsumedV4ItemsInRange(merged.startTxNum, merged.endTxNum)...)
+	}
+	return out
 }
 
 func (a *Aggregator) cleanAfterMerge(in *MergeResult) {
