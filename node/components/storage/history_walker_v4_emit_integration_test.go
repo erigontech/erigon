@@ -18,7 +18,9 @@ package storage
 
 import (
 	"bytes"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -65,13 +67,14 @@ func setupV4EmitFixture(t *testing.T, stepSize uint64) *v4EmitFixture {
 	return &v4EmitFixture{t: t, dirs: dirs, db: tdb, agg: agg, stepSize: stepSize}
 }
 
-// write applies (key, value) at the given txN via SharedDomains.
-// values with length zero are recorded as tombstones (empty value —
-// the accounts domain's "deleted" marker).
+// v4Write applies (key, value) at the given txN via SharedDomains.
+// del=true issues DomainDel instead of DomainPut (accounts-domain
+// tombstone semantics — SELFDESTRUCT / zero-out).
 type v4Write struct {
 	txN uint64
 	key []byte
 	val []byte
+	del bool
 }
 
 // applyWrites executes the plan and commits the tx.
@@ -87,7 +90,11 @@ func (f *v4EmitFixture) applyWrites(writes []v4Write) {
 	for _, w := range writes {
 		prev, _, err := domains.GetLatest(kv.AccountsDomain, rwTx, w.key)
 		require.NoError(f.t, err)
-		require.NoError(f.t, domains.DomainPut(kv.AccountsDomain, rwTx, w.key, w.val, w.txN, prev))
+		if w.del {
+			require.NoError(f.t, domains.DomainDel(kv.AccountsDomain, rwTx, w.key, w.txN, prev))
+		} else {
+			require.NoError(f.t, domains.DomainPut(kv.AccountsDomain, rwTx, w.key, w.val, w.txN, prev))
+		}
 	}
 	require.NoError(f.t, domains.Flush(f.t.Context(), rwTx))
 	require.NoError(f.t, rwTx.Commit())
@@ -278,4 +285,225 @@ func TestV4EmitPreWindowKeyFallsThroughToBaseline(t *testing.T) {
 	require.True(t, filesFound, "GetLatestFromFiles capped at target MUST find addrEarly in baseline file")
 	require.Equal(t, valEarly, filesVal,
 		"GetLatestFromFiles capped at target MUST return addrEarly's pre-window value (file range [%d, %d))", fileStart, fileEnd)
+}
+
+// deletePrunedHistoryFiles removes every .v/.ef/.efi/.vi file
+// under the datadir's snapshot subdirs, simulating the effect of
+// FilterPreverifiedByPruneMode at bootstrap under
+// --prune.mode=minimal (history + idx + accessor dirs' history-side
+// entries are filtered out; only domain .kv survives).
+// Returns the list of removed basenames for the assertion.
+func deletePrunedHistoryFiles(t *testing.T, dirs datadir.Dirs) []string {
+	t.Helper()
+	var removed []string
+	for _, d := range []string{dirs.SnapHistory, dirs.SnapIdx, dirs.SnapAccessors} {
+		entries, err := os.ReadDir(d)
+		if err != nil && !os.IsNotExist(err) {
+			t.Fatalf("read %s: %v", d, err)
+		}
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			name := e.Name()
+			if !(strings.HasSuffix(name, ".v") ||
+				strings.HasSuffix(name, ".ef") ||
+				strings.HasSuffix(name, ".efi") ||
+				strings.HasSuffix(name, ".vi")) {
+				continue
+			}
+			require.NoError(t, os.Remove(filepath.Join(d, name)))
+			removed = append(removed, name)
+		}
+	}
+	return removed
+}
+
+// TestV4EmitAfterPruneSimulation reproduces the postfix-run1 iter 3
+// scenario more faithfully: after retiring, DELETE the .v/.ef/.efi/.vi
+// files (simulating what FilterPreverifiedByPruneMode does at a
+// --prune.mode=minimal fresh sync). Only .kv files survive. Then
+// walk history for the mid-step window and emit v4.
+//
+// If the walker returns EMPTY when the .v files are absent (instead
+// of erroring or reading MDBX), then EVERY key touched in-window
+// is missed by v4 emit. State reads at target fall through to
+// baseline .kv, but any key that was UPDATED in-window shows the
+// stale pre-window value — the exact class of stale-state failure
+// the memo describes.
+//
+// Expected outcomes:
+//   - Walker for in-window range → yields addrUpdated (pass) OR empty (repro).
+//   - Reads at target for addrUpdated → return valInWindow (pass) OR
+//     stale valPreWindow (repro).
+func TestV4EmitAfterPruneSimulation(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	const stepSize uint64 = 16
+	f := setupV4EmitFixture(t, stepSize)
+
+	// addrUpdated: touched pre-window (txN=5) AND in-window (txN=20).
+	// If walker returns empty after prune, in-window write is lost →
+	// v4 emit doesn't include it → reads at target return pre-window value.
+	addrUpdated := bytes.Repeat([]byte{0xEE}, 20)
+	valPreWindow := []byte("balance-at-5-should-be-stale")
+	valInWindow := []byte("balance-at-20-should-win-at-target")
+
+	f.applyWrites([]v4Write{
+		{txN: 5, key: addrUpdated, val: valPreWindow},
+		{txN: 20, key: addrUpdated, val: valInWindow},
+	})
+	f.buildFilesUpTo(stepSize * 2)
+	f.agg.MergeLoop(ctx)
+
+	// Delete .v/.ef/.efi/.vi files (prune simulation). Then reload.
+	pruned := deletePrunedHistoryFiles(t, f.dirs)
+	t.Logf("prune-simulation removed %d history/idx/accessor files: %v", len(pruned), pruned)
+	require.NoError(t, f.agg.OpenFolder())
+
+	targetTxN := uint64(24)
+	fromTxN := stepSize * 1
+
+	roTx, err := f.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	// Walker output after prune. If it's empty, we've reproduced.
+	var yielded [][]byte
+	walker := historyKeyWalker(roTx, kv.AccountsDomain, fromTxN, targetTxN)
+	require.NoError(t, walker(func(k []byte) bool {
+		yielded = append(yielded, append([]byte(nil), k...))
+		return true
+	}))
+	t.Logf("post-prune walker yielded %d keys for range (%d, %d]", len(yielded), fromTxN, targetTxN+1)
+
+	// GetAsOf at target. If this returns valPreWindow (stale) instead of
+	// valInWindow, we've reproduced the state-restoration failure.
+	got, _, err := roTx.GetAsOf(kv.AccountsDomain, addrUpdated, targetTxN+1)
+	require.NoError(t, err)
+	t.Logf("post-prune GetAsOf(addrUpdated, %d) = %q (expected in-window: %q, stale would be: %q)",
+		targetTxN+1, got, valInWindow, valPreWindow)
+
+	// Behavioural assertion — walker must yield addrUpdated for a
+	// correct emit, and GetAsOf must return the in-window value.
+	// If the assertion fails, the failure mechanism is reproduced.
+	require.ElementsMatch(t, [][]byte{addrUpdated}, yielded,
+		"walker must yield addrUpdated even under prune-simulation "+
+			"(history absent). If empty, .kv-only reads can't reconstruct in-window touches → v4 emit will be blind")
+	require.Equal(t, valInWindow, got,
+		"GetAsOf must return the in-window value even under prune-simulation. "+
+			"If it returns %q (pre-window), state at target is stale — exact repro of the failure signature", valPreWindow)
+}
+
+// TestV4EmitTombstoneRecreateAcrossSteps reproduces the exact data
+// shape state-lookup-at showed on the frozen datadir for the failing
+// address 0x86c38852...: an address tombstoned in an early step,
+// then RECREATED in a later step's history. If retire/merge or the
+// walker loses the re-create event, the address appears tombstoned
+// at target — matching the observed failure.
+func TestV4EmitTombstoneRecreateAcrossSteps(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	const stepSize uint64 = 16
+	f := setupV4EmitFixture(t, stepSize)
+
+	addr := bytes.Repeat([]byte{0x86}, 20)
+	valFund := []byte("initial-funding")
+	valRecreate := []byte("recreated-with-balance")
+
+	// txN 5 (step 0): funded
+	// txN 10 (step 0): deleted (tombstone)
+	// txN 22 (step 1): recreated with new balance
+	// target: txN 24 (mid-step 1)
+	// Expected at target: valRecreate
+	f.applyWrites([]v4Write{
+		{txN: 5, key: addr, val: valFund},
+		{txN: 10, key: addr, del: true}, // tombstone
+		{txN: 22, key: addr, val: valRecreate},
+	})
+	f.buildFilesUpTo(stepSize * 2)
+	f.agg.MergeLoop(ctx)
+	require.NoError(t, f.agg.OpenFolder())
+
+	targetTxN := uint64(24)
+	fromTxN := stepSize * 1
+
+	roTx, err := f.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	// Walker must yield addr (touched in-window at txN=22).
+	var yielded [][]byte
+	walker := historyKeyWalker(roTx, kv.AccountsDomain, fromTxN, targetTxN)
+	require.NoError(t, walker(func(k []byte) bool {
+		yielded = append(yielded, append([]byte(nil), k...))
+		return true
+	}))
+	require.ElementsMatch(t, [][]byte{addr}, yielded,
+		"walker must yield the recreated address — in-window touch at txN=22")
+
+	// GetAsOf must return the recreated value, not tombstone.
+	got, ok, err := roTx.GetAsOf(kv.AccountsDomain, addr, targetTxN+1)
+	require.NoError(t, err)
+	require.True(t, ok, "GetAsOf must find the recreated address at target — "+
+		"if this returns not-found, we've reproduced the failing address's post-emit state")
+	require.Equal(t, valRecreate, got, "GetAsOf must return the recreated value, not tombstone")
+}
+
+// TestV4EmitTombstoneRecreateAfterPrune combines both: address is
+// tombstoned then recreated in-window, THEN the .v/.ef files are
+// pruned (minimal-mode simulation). This is the closest match to
+// the postfix-run1 datadir's shape: address absent from state,
+// history .v/.ef files present but potentially not covering the
+// recreation event.
+func TestV4EmitTombstoneRecreateAfterPrune(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	const stepSize uint64 = 16
+	f := setupV4EmitFixture(t, stepSize)
+
+	addr := bytes.Repeat([]byte{0x86}, 20)
+	valFund := []byte("initial-funding")
+	valRecreate := []byte("recreated-with-balance")
+
+	f.applyWrites([]v4Write{
+		{txN: 5, key: addr, val: valFund},
+		{txN: 10, key: addr, del: true}, // tombstone in step 0
+		{txN: 22, key: addr, val: valRecreate}, // recreate in step 1 (in-window at target=24)
+	})
+	f.buildFilesUpTo(stepSize * 2)
+	f.agg.MergeLoop(ctx)
+
+	pruned := deletePrunedHistoryFiles(t, f.dirs)
+	t.Logf("prune-simulation removed %d files: %v", len(pruned), pruned)
+	require.NoError(t, f.agg.OpenFolder())
+
+	targetTxN := uint64(24)
+	fromTxN := stepSize * 1
+
+	roTx, err := f.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	var yielded [][]byte
+	walker := historyKeyWalker(roTx, kv.AccountsDomain, fromTxN, targetTxN)
+	require.NoError(t, walker(func(k []byte) bool {
+		yielded = append(yielded, append([]byte(nil), k...))
+		return true
+	}))
+	t.Logf("post-prune+recreate walker yielded %d keys: %v", len(yielded), yielded)
+
+	got, ok, err := roTx.GetAsOf(kv.AccountsDomain, addr, targetTxN+1)
+	require.NoError(t, err)
+	t.Logf("post-prune+recreate GetAsOf(addr, %d) = found=%v value=%q",
+		targetTxN+1, ok, got)
+
+	// After prune of .v/.ef, the recreation event is gone → walker
+	// can't yield the recreated key → v4 emit misses it → state at
+	// target reads baseline .kv, which has the TOMBSTONE from step 0.
+	// If this assertion fails, we've reproduced the mechanism.
+	require.ElementsMatch(t, [][]byte{addr}, yielded,
+		"walker must yield addr even under prune — the recreation event MUST be visible")
+	require.True(t, ok, "GetAsOf must find addr at target with the recreated value")
+	require.Equal(t, valRecreate, got, "GetAsOf must return recreated value, not tombstone")
 }
