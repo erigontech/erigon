@@ -11,7 +11,7 @@
   },
   {
     "block": 2,
-    "shape": "deploy held by the account header",
+    "shape": "deploy within one code-zone group",
     "nodes": 4,
     "stateBytes": 347,
     "codes": 2,
@@ -21,11 +21,11 @@
   },
   {
     "block": 3,
-    "shape": "deploy overflowing into the code zone",
+    "shape": "deploy crossing a group boundary",
     "nodes": 4,
     "stateBytes": 379,
     "codes": 2,
-    "codeBytes": 4216,
+    "codeBytes": 8184,
     "headers": 1,
     "headerBytes": 504
   },
@@ -51,11 +51,11 @@
   },
   {
     "block": 6,
-    "shape": "code read across the code-zone boundary",
+    "shape": "code read across a group boundary",
     "nodes": 5,
     "stateBytes": 518,
     "codes": 2,
-    "codeBytes": 4216,
+    "codeBytes": 8184,
     "headers": 1,
     "headerBytes": 504
   },

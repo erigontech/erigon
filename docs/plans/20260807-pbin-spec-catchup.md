@@ -1165,17 +1165,40 @@ Draft body for execution-specs#3305, for a human to post — supersedes the Task
 
 ### Task 18: Verify acceptance criteria
 
-- [ ] `TestPBinConformancePBTState` is 18/18 and `TestPBinConformanceEmbedding`
-      passes against vectors `58faeb0`
-- [ ] `grep -rn 'pbinCodeOffset\|pbinHeaderCodeChunks\|pbinHeaderCodeCapacity' .`
-      returns nothing outside this plan
-- [ ] `grep -rn 'eip:[0-9]' execution/commitment/` returns nothing
-- [ ] every test function named in Tasks 4-11 exists and runs — confirm by name
-      in `go test -v` output, not by an exit code
-- [ ] the fuzz target runs 5 minutes clean
-- [ ] run the full suite: `go test ./execution/commitment/... ./rpc/jsonrpc/... -count=1`
-- [ ] run `make lint` repeatedly until clean, then `make erigon integration`
-- [ ] confirm the erigon branch is committed and **not** pushed
+- [x] `TestPBinConformancePBTState` is 18/18 and `TestPBinConformanceEmbedding`
+      passes against vectors `58faeb0` (all 18 subtests named in `-v`, 0 fail;
+      the vendored file's `source_commit` reads `58faeb09b95fd0222…`)
+- [x] `grep -rn 'pbinCodeOffset\|pbinHeaderCodeChunks\|pbinHeaderCodeCapacity' .`
+      returns nothing outside this plan (the plan file is the only match)
+- [x] `grep -rn 'eip:[0-9]' execution/commitment/` returns nothing
+- [x] every test function named in Tasks 4-11 exists and runs — confirm by name
+      in `go test -v` output, not by an exit code (30 names cross-checked
+      against the `=== RUN` set of both packages, each also matched to its
+      `--- PASS`. Two further entries — `TestPBinChunkifyCode` and
+      `TestPBinCellHash` — are `-run` regex prefixes in Task 4's gate rather
+      than function names; their nine matched functions all ran)
+- [x] the fuzz target runs 5 minutes clean (5m01s, 270,321 execs, 89 new
+      interesting, no crash)
+- [x] run the full suite: `go test ./execution/commitment/... ./rpc/jsonrpc/... -count=1`
+      (green across all seven packages, after the baseline fix below)
+- [x] run `make lint` repeatedly until clean, then `make erigon integration`
+      (lint 0 issues on two consecutive runs; both binaries build)
+- [x] confirm the erigon branch is committed and **not** pushed
+      (`binary-trie-witness`, 87 commits ahead of main, no upstream configured
+      and no matching ref on `origin`)
+
+➕ The suite was **not** green on first run: `TestWitnessSizeBinVsHex` failed
+against `rpc/jsonrpc/testdata/hex_witness_baseline.json`, a Task 5 leftover.
+Task 5 re-sized the e2e chain's large contract onto the group boundary
+(`31*(pbinCodeGroupChunks+8)` = 8184 B, from the header-split 4216 B) and
+renamed three corpus shapes, but never regenerated the golden file. Regenerated
+with `ERIGON_UPDATE_HEX_WITNESS_BASELINE=true`; the diff is exactly those five
+lines. Every hex trie-shaped number — nodes, `stateBytes`, `headerBytes` — is
+unchanged at every block, which is the invariant the baseline exists to guard
+("the bin witness path must leave the hex one byte-identical"). Only `codeBytes`
+moved, and only because the input contract itself grew: the hex MPT holds a
+fixed-size code hash in the account leaf, so a larger contract cannot move its
+state numbers.
 
 ### Task 19: [Final] Update documentation
 
