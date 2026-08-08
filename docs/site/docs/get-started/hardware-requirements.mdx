@@ -15,16 +15,57 @@ A locally mounted **SSD** (Solid-State Drive) or **NVMe** (Non-Volatile Memory E
 
 | Component | Recommendation | Notes |
 | --- | --- | --- |
-| Disk Type | Use high-end NVMe SSDs. | Avoid HDDs.SSD performance may degrade when nearing full capacity. |
-| Disk Configuration | RAID 0 for multiple disks (Speed) | High-Speed Option: RAID 0 provides maximum speed but no redundancy (data loss risk).ZFS filesystems may be considered for Archive nodes for their data integrity features, but complex RAID-Z setups are generally not recommended. |
+| Disk Type | Use high-end NVMe SSDs. | Avoid HDDs. SSD performance may degrade when nearing full capacity. |
+| Disk Configuration | A single NVMe device is enough for any pruning mode. | An archive node fits on one 4 TB drive, so RAID 0 striping is not needed. For failure protection, use a mirrored array, not RAID 0. See [Filesystem](#filesystem). |
+| Filesystem | ext4 or XFS | See [Filesystem](#filesystem) below. |
 | RAM | Adequate memory is crucial | Reduces bottlenecks during sync and improves performance under load. |
-| CPU | 4–8 cores for Full nodes8–16 cores for Archive nodes | More cores are generally better for intense sync and query operations. |
+| CPU | 4–8 cores for Full nodes, 8–16 cores for Archive nodes | More cores are generally better for intense sync and query operations. |
 | Linux | Kernel version > v4 | A modern Linux distribution is required. |
 
 
+## Filesystem
+
+Use **ext4** or **XFS** on a single NVMe device. The disk figures below are measured on ext4, and that is the configuration Erigon's own measurements come from. XFS is a reasonable choice on the same reasoning, but we have not measured it.
+
+Mount with `noatime` so reads do not generate metadata writes:
+
+```
+UUID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx  /data  ext4  defaults,noatime  0 2
+```
+
+Use the filesystem UUID (`blkid` prints it) rather than a `/dev/nvme…` name, which can move between boots. The final `2` is the `fsck` pass for a non-root filesystem.
+
+### Why the filesystem matters
+
+Erigon's bottleneck is disk **latency**, not throughput or IOPS — see [Improving Performance](/help-center/known-issues#improving-performance). Erigon does pre-warm what it can, but two properties of the workload mean its reads cannot be fully predicted, so part of every block's reads lands cold:
+
+* **EVM execution reads arbitrary state.** Nothing tells you in advance which accounts or storage slots a block will touch. Once the working set no longer fits in RAM, some of those reads land on cold data no cache had reason to hold.
+* **Merkle trie updates pull in neighbours.** Updating one key requires reading the nodes next to it in the trie. Those may be accounts the EVM never touches — they are involved only because of where they sit in the trie.
+
+Every layer the filesystem adds is added on top of each of those reads. That is what favours a thin filesystem here: ext4 and XFS store a file and leave caching to the OS page cache, which is what Erigon's memory-mapped database is built to use.
+
+### Filesystems to avoid
+
+Prefer a plain journaling filesystem over a copy-on-write or database-like one:
+
+* **ZFS** behaves more like a database than a filesystem. It keeps its own write-ahead log and its own cache (**ARC**), and that cache competes with the OS page cache for the same RAM. Optional features such as encryption and dedup add work to the read path this workload is bound by, and tuning ZFS for it is not a solved problem.
+* **Btrfs** is a copy-on-write B-tree of pages, and Erigon's MDBX database is itself a B-tree of pages, so you end up running a database inside a database. Its `autodefrag` feature is the sharpest edge: it can multiply write I/O by as much as 100x. See [Background File System Features Can Hurt Performance](/help-center/known-issues#background-file-system-features-can-hurt-performance).
+
+Filesystems other than ext4 and XFS are not part of what we measure, so treat their performance as unverified rather than assumed.
+
+A few more points that follow from Erigon's storage model — see [Database](../fundamentals/database) for the layout:
+
+* **One device is enough.** An archive node fits on a single 4 TB drive, so RAID 0 gains you no capacity you need while doubling the chance of losing the datadir. Stripe only if no single drive you have is large enough.
+* **For failure protection, use redundancy — not RAID 0.** A mirrored array and ECC memory guard against a failing disk or bad RAM, which is what [Best Practices](/help-center/best-practices) recommends. RAID 0 does the opposite.
+* **Most of the datadir is re-downloadable.** Snapshot files are content-addressed and refetched from peers, so `chaindata/` is the part worth backing up.
+* **Erigon memory-maps its database.** Leave RAM free for the page cache rather than handing it to a filesystem or volume manager to cache on its own.
+* **Network and cloud block storage are slow for block execution.** See [known issues](/help-center/known-issues#cloud-network-drives).
+
+If you must split the datadir across a fast and a slow device, see [Optimizing Storage](../fundamentals/optimizing-storage).
+
 ## Disk Size and RAM Requirements
 
-The amount of disk space recommended and RAM you need depends on the [pruning mode](../fundamentals/pruning-modes) you want to run. **Current Disk Usage** values listed below are obtained using the standard Erigon + [Caplin](../fundamentals/caplin) configuration, with the sole exception of the `--prune.mode` flag.
+The amount of disk space recommended and RAM you need depends on the [pruning mode](../fundamentals/pruning-modes) you want to run. **Current Disk Usage** values listed below are obtained using the standard Erigon + [Caplin](../fundamentals/caplin) configuration, varying only the `--prune.mode` flag unless a tab notes otherwise.
 
 <Tabs>
 <TabItem value="ethereum-mainnet" label="Ethereum mainnet">
@@ -46,16 +87,32 @@ _Current Disk Usage measured as of {/* ds-date:mainnet */}2026-07-19{/* ds:end *
 
 _Current Disk Usage measured as of {/* ds-date:gnosis */}2026-07-21{/* ds:end */}; usage grows over time as the chain grows._
 </TabItem>
-<TabItem value="polygon" label="Polygon">
-:::warning
-The final release series of Erigon that officially supports Polygon is 3.1.\*. For the software supported by Polygon, please refer to the link: [https://github.com/0xPolygon/erigon/releases](https://github.com/0xPolygon/erigon/releases). Disk usage figures below are from September 2025 and are no longer automatically updated.
-:::
+<TabItem value="sepolia" label="Sepolia">
+| **Pruning Mode**  | **Current Disk Usage** |
+| -------------- | ---------------------- |
+| Archive        | {/* ds:sepolia:archive */}1.04 TB{/* ds:end */} |
+| Full (Default) | {/* ds:sepolia:full */}238.71 GB{/* ds:end */} |
+| Minimal        | {/* ds:sepolia:minimal */}218.06 GB{/* ds:end */} |
 
-| **Pruning Mode**  | **Current Disk Usage** | **Disk Size (Recommended)** | **RAM (Required)** | **RAM (Recommended)** |
-| -------------- | ---------------------- | --------------------------- | ------------------ | --------------------- |
-| Archive        | 4.85 TB                | 8 TB                        | 64 GB              | 128 GB                |
-| Full (Default) | 3.3 TB                 | 4 TB                        | 32 GB              | 64 GB                 |
-| Minimal        | 1.2 TB                 | 2 TB                        | 32 GB              | 64 GB                 |
+_Current Disk Usage measured as of {/* ds-date:sepolia */}2026-08-05{/* ds:end */}; usage grows over time as the chain grows. Measured on v3.5.4; the Archive figure was taken a day later, on 2026-08-06._
+</TabItem>
+<TabItem value="hoodi" label="Hoodi">
+| **Pruning Mode**  | **Current Disk Usage** |
+| -------------- | ---------------------- |
+| Archive        | {/* ds:hoodi:archive */}115.85 GB{/* ds:end */} |
+| Full (Default) | {/* ds:hoodi:full */}48.36 GB{/* ds:end */} |
+| Minimal        | {/* ds:hoodi:minimal */}45.61 GB{/* ds:end */} |
+
+_Current Disk Usage measured as of {/* ds-date:hoodi */}2026-08-04{/* ds:end */}; usage grows over time as the chain grows. Measured on v3.5.4._
+</TabItem>
+<TabItem value="chiado" label="Chiado">
+| **Pruning Mode**  | **Current Disk Usage** |
+| -------------- | ---------------------- |
+| Archive        | {/* ds:chiado:archive */}26.95 GB{/* ds:end */} |
+| Full (Default) | {/* ds:chiado:full */}13.32 GB{/* ds:end */} |
+| Minimal        | {/* ds:chiado:minimal */}13.16 GB{/* ds:end */} |
+
+_Current Disk Usage measured as of {/* ds-date:chiado */}2026-08-07{/* ds:end */}; usage grows over time as the chain grows. Measured on v3.5.4. Minimal and Full are near-identical on Chiado: the chain is young enough that pruning has little history to remove._
 </TabItem>
 </Tabs>
 
@@ -71,3 +128,16 @@ Your internet bandwidth is also an important factor, particularly for sync speed
 | -------------- | -------------------- | ----------------------- |
 | Staking/Mining | 10 Mbps              | 50 Mbps                 |
 | Non-Staking    | 5 Mbps               | 25 Mbps                 |
+
+## Sync Times
+
+Approximate times to sync from scratch to the tip of the chain.
+
+| Chain    | Archive | Full (Default) | Minimal |
+| -------- | ------- | -------------- | ------- |
+| Ethereum | ~8 h    | ~4–6 h         | ~2 h    |
+| Gnosis   | ~2 h    | ~1–2 h         | ~30 m   |
+
+:::info
+These figures are indicative and are **not measured by CI** — read them as an order of magnitude, not a target. Most of the elapsed time is snapshot download rather than block execution, so your available [bandwidth](#bandwidth-requirements) influences the result more than CPU does: expect proportionally faster syncs on a well-connected host and slower ones on a constrained link.
+:::

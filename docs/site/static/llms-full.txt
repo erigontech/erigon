@@ -6,7 +6,7 @@ An efficient, modular Ethereum execution layer client built for performance, low
 ## Sections
 
 - [Get Started](https://docs.erigon.tech/get-started): Hardware requirements, installation options, and first-run guides to get your node online fast.
-- [Easy Nodes](https://docs.erigon.tech/get-started/easy-nodes): One-command guided setup for Ethereum mainnet, Gnosis Chain, and Polygon nodes with sensible defaults.
+- [Easy Nodes](https://docs.erigon.tech/get-started/easy-nodes): One-command guided setup for Ethereum mainnet and Gnosis Chain nodes with sensible defaults.
 - [Fundamentals](https://docs.erigon.tech/fundamentals): Pruning modes, configuration, Docker, JWT, logging, storage optimization, and day-to-day operations.
 - [Modules](https://docs.erigon.tech/fundamentals/modules): Run RPC Daemon, TxPool, Sentry, and Downloader as independent processes for scalable cluster setups.
 - [Staking](https://docs.erigon.tech/staking): Solo staking with Caplin (built-in consensus layer) or pair Erigon with any external consensus client.
@@ -25,7 +25,7 @@ Everything you need to go from zero to a running Erigon node — requirements, i
 - [Why Erigon?](https://docs.erigon.tech/get-started/why-using-erigon): Performance benchmarks, disk savings, and architecture advantages over other Ethereum clients.
 - [Hardware Requirements](https://docs.erigon.tech/get-started/hardware-requirements): Minimum and recommended specs for mainnet, testnets, and archive mode.
 - [Installation](https://docs.erigon.tech/get-started/installation): Binary releases, building from source, Docker images, and upgrade instructions.
-- [Easy Nodes](https://docs.erigon.tech/get-started/easy-nodes): One-command guided setup for Ethereum, Gnosis Chain, and Polygon nodes with sensible defaults.
+- [Easy Nodes](https://docs.erigon.tech/get-started/easy-nodes): One-command guided setup for Ethereum and Gnosis Chain nodes with sensible defaults.
 - [Migrating from Geth](https://docs.erigon.tech/get-started/migrating-from-geth): Switch from go-ethereum to Erigon — what changes, what stays the same, and how to preserve your data.
 - [Interacting with Erigon](https://docs.erigon.tech/interacting-with-erigon): JSON-RPC and gRPC API reference — eth, debug, trace, engine, TxPool, and other namespaces.
 
@@ -57,15 +57,58 @@ A locally mounted **SSD** (Solid-State Drive) or **NVMe** (Non-Volatile Memory E
 
 | Component | Recommendation | Notes |
 | --- | --- | --- |
-| Disk Type | Use high-end NVMe SSDs. | Avoid HDDs.SSD performance may degrade when nearing full capacity. |
-| Disk Configuration | RAID 0 for multiple disks (Speed) | High-Speed Option: RAID 0 provides maximum speed but no redundancy (data loss risk).ZFS filesystems may be considered for Archive nodes for their data integrity features, but complex RAID-Z setups are generally not recommended. |
+| Disk Type | Use high-end NVMe SSDs. | Avoid HDDs. SSD performance may degrade when nearing full capacity. |
+| Disk Configuration | A single NVMe device is enough for any pruning mode. | An archive node fits on one 4 TB drive, so RAID 0 striping is not needed. For failure protection, use a mirrored array, not RAID 0. See [Filesystem](#filesystem). |
+| Filesystem | ext4 or XFS | See [Filesystem](#filesystem) below. |
 | RAM | Adequate memory is crucial | Reduces bottlenecks during sync and improves performance under load. |
-| CPU | 4–8 cores for Full nodes8–16 cores for Archive nodes | More cores are generally better for intense sync and query operations. |
+| CPU | 4–8 cores for Full nodes, 8–16 cores for Archive nodes | More cores are generally better for intense sync and query operations. |
 | Linux | Kernel version > v4 | A modern Linux distribution is required. |
+
+## Filesystem
+
+Use **ext4** or **XFS** on a single NVMe device. The disk figures below are measured on ext4, and that is the configuration Erigon's own measurements come from. XFS is a reasonable choice on the same reasoning, but we have not measured it.
+
+Mount with `noatime` so reads do not generate metadata writes:
+
+```
+UUID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx  /data  ext4  defaults,noatime  0 2
+```
+
+Use the filesystem UUID (`blkid` prints it) rather than a `/dev/nvme…` name, which can move between boots. The final `2` is the `fsck` pass for a non-root filesystem.
+
+### Why the filesystem matters
+
+Erigon's bottleneck is disk **latency**, not throughput or IOPS — see [Improving Performance](/help-center/known-issues#improving-performance). Erigon does pre-warm what it can, but two properties of the workload mean its reads cannot be fully predicted, so part of every block's reads lands cold:
+
+* **EVM execution reads arbitrary state.** Nothing tells you in advance which accounts or storage slots a block will touch. Once the working set no longer fits in RAM, some of those reads land on cold data no cache had reason to hold.
+* **Merkle trie updates pull in neighbours.** Updating one key requires reading the nodes next to it in the trie. Those may be accounts the EVM never touches — they are involved only because of where they sit in the trie.
+
+Every layer the filesystem adds is added on top of each of those reads. That is what favours a thin filesystem here: ext4 and XFS store a file and leave caching to the OS page cache, which is what Erigon's memory-mapped database is built to use.
+
+### Filesystems to avoid
+
+Prefer a plain journaling filesystem over a copy-on-write or database-like one:
+
+* **ZFS** behaves more like a database than a filesystem. It keeps its own write-ahead log and its own cache (**ARC**), and that cache competes with the OS page cache for the same RAM. Optional features such as encryption and dedup add work to the read path this workload is bound by, and tuning ZFS for it is not a solved problem.
+* **Btrfs** is a copy-on-write B-tree of pages, and Erigon's MDBX database is itself a B-tree of pages, so you end up running a database inside a database. Its `autodefrag` feature is the sharpest edge: it can multiply write I/O by as much as 100x. See [Background File System Features Can Hurt Performance](/help-center/known-issues#background-file-system-features-can-hurt-performance).
+
+Filesystems other than ext4 and XFS are not part of what we measure, so treat their performance as unverified rather than assumed.
+
+A few more points that follow from Erigon's storage model — see [Database](../fundamentals/database) for the layout:
+
+* **One device is enough.** An archive node fits on a single 4 TB drive, so RAID 0 gains you no capacity you need while doubling the chance of losing the datadir. Stripe only if no single drive you have is large enough.
+* **For failure protection, use redundancy — not RAID 0.** A mirrored array and ECC memory guard against a failing disk or bad RAM, which is what [Best Practices](/help-center/best-practices) recommends. RAID 0 does the opposite.
+* **Most of the datadir is re-downloadable.** Snapshot files are content-addressed and refetched from peers, so `chaindata/` is the part worth backing up.
+* **Erigon memory-maps its database.** Leave RAM free for the page cache rather than handing it to a filesystem or volume manager to cache on its own.
+* **Network and cloud block storage are slow for block execution.** See [known issues](/help-center/known-issues#cloud-network-drives).
+
+If you must split the datadir across a fast and a slow device, see [Optimizing Storage](../fundamentals/optimizing-storage).
 
 ## Disk Size and RAM Requirements
 
-The amount of disk space recommended and RAM you need depends on the [pruning mode](../fundamentals/pruning-modes) you want to run. **Current Disk Usage** values listed below are obtained using the standard Erigon + [Caplin](../fundamentals/caplin) configuration, with the sole exception of the `--prune.mode` flag.
+The amount of disk space recommended and RAM you need depends on the [pruning mode](../fundamentals/pruning-modes) you want to run. **Current Disk Usage** values listed below are obtained using the standard Erigon + [Caplin](../fundamentals/caplin) configuration, varying only the `--prune.mode` flag unless a tab notes otherwise.
+
+### Ethereum mainnet
 
 | Pruning Mode | Current Disk Usage | Disk Size (Recommended) | RAM (Required) | RAM (Recommended) |
 | --- | --- | --- | --- | --- |
@@ -75,6 +118,8 @@ The amount of disk space recommended and RAM you need depends on the [pruning mo
 
 _Current Disk Usage measured as of 2026-07-19; usage grows over time as the chain grows._
 
+### Gnosis Chain
+
 | **Pruning Mode**  | **Current Disk Usage** | **Disk Size (Recommended)** | **RAM (Required)** | **RAM (Recommended)** |
 | -------------- | ---------------------- | --------------------------- | ------------------ | --------------------- |
 | Archive        | 673.59 GB | 1 TB                        | 16 GB              | 32 GB                 |
@@ -83,15 +128,35 @@ _Current Disk Usage measured as of 2026-07-19; usage grows over time as the chai
 
 _Current Disk Usage measured as of 2026-07-21; usage grows over time as the chain grows._
 
-:::warning
-The final release series of Erigon that officially supports Polygon is 3.1.\*. For the software supported by Polygon, please refer to the link: [https://github.com/0xPolygon/erigon/releases](https://github.com/0xPolygon/erigon/releases). Disk usage figures below are from September 2025 and are no longer automatically updated.
-:::
+### Sepolia
 
-| **Pruning Mode**  | **Current Disk Usage** | **Disk Size (Recommended)** | **RAM (Required)** | **RAM (Recommended)** |
-| -------------- | ---------------------- | --------------------------- | ------------------ | --------------------- |
-| Archive        | 4.85 TB                | 8 TB                        | 64 GB              | 128 GB                |
-| Full (Default) | 3.3 TB                 | 4 TB                        | 32 GB              | 64 GB                 |
-| Minimal        | 1.2 TB                 | 2 TB                        | 32 GB              | 64 GB                 |
+| **Pruning Mode**  | **Current Disk Usage** |
+| -------------- | ---------------------- |
+| Archive        | 1.04 TB |
+| Full (Default) | 238.71 GB |
+| Minimal        | 218.06 GB |
+
+_Current Disk Usage measured as of 2026-08-05; usage grows over time as the chain grows. Measured on v3.5.4; the Archive figure was taken a day later, on 2026-08-06._
+
+### Hoodi
+
+| **Pruning Mode**  | **Current Disk Usage** |
+| -------------- | ---------------------- |
+| Archive        | 115.85 GB |
+| Full (Default) | 48.36 GB |
+| Minimal        | 45.61 GB |
+
+_Current Disk Usage measured as of 2026-08-04; usage grows over time as the chain grows. Measured on v3.5.4._
+
+### Chiado
+
+| **Pruning Mode**  | **Current Disk Usage** |
+| -------------- | ---------------------- |
+| Archive        | 26.95 GB |
+| Full (Default) | 13.32 GB |
+| Minimal        | 13.16 GB |
+
+_Current Disk Usage measured as of 2026-08-07; usage grows over time as the chain grows. Measured on v3.5.4. Minimal and Full are near-identical on Chiado: the chain is young enough that pruning has little history to remove._
 
 :::tip
 See also how you can [optimize storage](../fundamentals/optimizing-storage).
@@ -105,6 +170,19 @@ Your internet bandwidth is also an important factor, particularly for sync speed
 | -------------- | -------------------- | ----------------------- |
 | Staking/Mining | 10 Mbps              | 50 Mbps                 |
 | Non-Staking    | 5 Mbps               | 25 Mbps                 |
+
+## Sync Times
+
+Approximate times to sync from scratch to the tip of the chain.
+
+| Chain    | Archive | Full (Default) | Minimal |
+| -------- | ------- | -------------- | ------- |
+| Ethereum | ~8 h    | ~4–6 h         | ~2 h    |
+| Gnosis   | ~2 h    | ~1–2 h         | ~30 m   |
+
+:::info
+These figures are indicative and are **not measured by CI** — read them as an order of magnitude, not a target. Most of the elapsed time is snapshot download rather than block execution, so your available [bandwidth](#bandwidth-requirements) influences the result more than CPU does: expect proportionally faster syncs on a well-connected host and slower ones on a constrained link.
+:::
 
 ---
 
@@ -137,6 +215,8 @@ The recommended approach involves running and syncing an **Erigon node alongside
 
 You can choose whether to migrate to Erigon + Caplin (the simplest setup) or continue using your existing CL.
 
+#### Migrate to Erigon + Caplin (Internal CL)
+
 This path offers the simplest validator configuration by using Erigon's embedded consensus client, Caplin. You will no longer need your external Consensus Layer (CL) client or a JWT secret for CL-EL communication.
 
 **Steps for Minimal Downtime**
@@ -156,6 +236,8 @@ This path offers the simplest validator configuration by using Erigon's embedded
    * To restart Erigon, there's no need to specify `--port`. Refer to this [guide](../fundamentals/caplin) for additional Erigon + Caplin configuration recommendations.
    * Crucially, reconfigure your **validator keys manager** to point directly to the Erigon Beacon API, as Erigon/Caplin now handles both layers internally.
 6. **Decommission Old Setup**: Verify Erigon/Caplin is proposing and attesting blocks correctly. If confirmed, safely remove Geth, the external CL client, and all their data, including the old JWT secret.
+
+#### Migrate to Erigon + External CL
 
 Switch to an Erigon Execution Layer (EL) while keeping your current external Consensus Layer (CL) client (e.g., Prysm, Lighthouse) and your existing JWT secret. Start by syncing Erigon with Caplin as the CL, then configure it to use the external CL.
 
@@ -180,6 +262,8 @@ Switch to an Erigon Execution Layer (EL) while keeping your current external Con
 
 This is the simplest option as it requires no configuration adjustments. However, the node will be down until Erigon finishes syncing.
 
+#### Erigon + Caplin (Fastest Sync)
+
 This path is the fastest way to get Erigon running. It utilizes **Erigon's embedded consensus client, Caplin**, requiring no external CL client or JWT secret. This is ideal for home users with limited disk space and no critical uptime requirements.
 
 **Steps for Quickest Start**
@@ -190,6 +274,8 @@ This path is the fastest way to get Erigon running. It utilizes **Erigon's embed
 4. **Synchronization**: Start syncing Erigon with the default Caplin configuration (Caplin does not use the Engine API).
 5. **Final Setup**: Once Erigon is fully synced, your node is online.
 6. **Monitoring**: Monitor the sync progress using `eth_syncing` or the health check, and ensure no errors appear in Erigon's logs.
+
+#### Erigon + External CL (Reuse Existing CL)
 
 This path retains your existing **external Consensus Layer (CL)** client (e.g., Prysm, Lighthouse) but swaps the old EL client for Erigon. Since downtime is accepted, this process requires simpler port management.
 
@@ -292,13 +378,19 @@ URL: https://docs.erigon.tech/get-started/installation
 
 To install Erigon, begin by choosing an installation method suited to your operating system and technical preference. Options range from the simplest to the most complex, including pre-built images, containers, or source compilation.
 
+### Linux
+
 Pre-built Binaries — Fastest way to get started. Download and run a pre-compiled binary for your architecture.
 Docker — Run Erigon in an isolated container. Recommended for most users.
 Build from Source — Full control over the build. Requires Go, C++ compiler, and CLI experience.
 Ethereum on ARM — Community image and APT repository for ARM single-board computers (Raspberry Pi, Rock 5B, Orange Pi 5).
 
+### macOS
+
 Docker — Run Erigon in an isolated container. The recommended method on macOS.
 Build from Source — Compile directly on your Mac. Requires Go, Clang/GCC, and CLI experience.
+
+### Windows
 
 Native Compilation — Compile and run Erigon directly on Windows using Chocolatey, MinGW, and Go.
 WSL (Windows Subsystem for Linux) — Run a full Linux environment on Windows. Recommended for best performance.
@@ -548,13 +640,27 @@ make -j<n> erigon
 
 The resulting executable binary will be created in the `./build/bin/erigon` path.
 
+**2.4 Installing Outside the Build Tree (Optional)**
+
+Running Erigon as a [dedicated system user](/fundamentals/security) — for example under `systemd` — is easiest when the binaries live outside your source checkout, where that user can reach them. Pass a destination to `make install`:
+
+```sh
+make DIST=/opt/erigon install
+```
+
+`make install` creates the destination directory, so a path under `/opt` needs either `sudo make DIST=/opt/erigon install` or a directory you already own (`sudo install -d -o $USER /opt/erigon`). A path under `$HOME/erigon` avoids that entirely. `make install` copies whatever is currently in `build/bin`, so build every component you intend to deploy before running it.
+
+Once installed this way, run the installed copy — `/opt/erigon/erigon` — rather than the one in the build tree.
+
 **3. Running Erigon**
 
-After installation, you can run Erigon from your terminal:
+From the build tree, run Erigon from your terminal:
 
 ```sh
 ./build/bin/erigon [options]
 ```
+
+If you completed step 2.4, run the binary at your chosen `DIST` path instead.
 
 ### Windows
 
@@ -840,88 +946,6 @@ Guided setup for running a complete node with sensible defaults — pick your ne
 
 - [Ethereum Node](https://docs.erigon.tech/get-started/easy-nodes/how-to-run-an-ethereum-node): Run a full Ethereum mainnet node using Caplin (built-in consensus layer) or connect an external CL client.
 - [Gnosis Chain Node](https://docs.erigon.tech/get-started/easy-nodes/how-to-run-a-gnosis-chain-node): Run a full Gnosis Chain node with Erigon's embedded consensus layer or an external CL client.
-- [Polygon Node](https://docs.erigon.tech/get-started/easy-nodes/how-to-run-a-polygon-node): Step-by-step guide to running an Erigon node on the Polygon PoS network.
-
----
-
-# How to run a Polygon node
-URL: https://docs.erigon.tech/get-started/easy-nodes/how-to-run-a-polygon-node
-
-
-:::warning
-**Information**: The final release series of Erigon that officially supports Polygon is 3.1.\*. For the software supported by Polygon, please refer to the link: [https://github.com/0xPolygon/erigon/releases](https://github.com/0xPolygon/erigon/releases).
-:::
-
-## 1. Prerequisites Check
-
-1. Confirm your machine meets the necessary [Hardware Requirements](../hardware-requirements) based on your desired pruning mode.
-2. **Install Docker**:
-   * For Linux, install [Docker Engine](https://docs.docker.com/engine/install).
-   * For macOS or Windows, install [Docker Desktop](https://docs.docker.com/desktop/).
-
-## 2. Configure and Launch Erigon
-
-Follow these steps to configure and launch the All-in-One Client with the Heimdall endpoint.
-
-### **A. Create the Configuration File**
-
-Create a new file named `docker-compose.yml` in a directory where you want to manage your Erigon setup, and paste the following content into it:
-
-```sh
-services:
-  erigon:
-    image: erigontech/erigon:v{ERIGON_VERSION}
-    container_name: erigon-node
-    restart: always
-    command:
-      # --- Basic Configuration ---
-      - --chain=bor-mainnet
-      - --bor.heimdall=https://heimdall-api.polygon.technology
-      - --http.addr="0.0.0.0"
-      - --http.api=eth,web3,net,debug,trace,txpool
-      # --- Performance Tweaks ---
-      - --torrent.download.rate=512mb
-      # --- Pruning Mode (Optional) ---
-      # To change Pruning Mode, uncomment the line below:
-      # - --prune.mode=archive
-      # or
-      # - --prune.mode=minimal
-    ports:
-      - "8545:8545" # Exposes the RPC port (needed for wallets/dApps)
-    volumes:
-      # *** IMPORTANT: CHANGE THIS PATH! ***
-      # Replace the path below with an actual directory on your machine 
-      # where you want the blockchain data stored (e.g., /mnt/ssd/erigon-data)
-      - /path/to/erigon/data:/var/lib/erigon
-```
-
-:::warning
-⚠️ **Action Required**: You must change the volume path! Replace `/path/to/erigon/data` with a valid, empty directory on your machine where you want Erigon to store its files.
-:::
-
-### **B. Launch the Node and Monitor Progress**
-
-Open your terminal in the directory where you saved `docker-compose.yml`. To start the node and immediately see the sync process type:
-
-```text
-docker compose up
-```
-
-Now you can relax and watch your Erigon Polygon node sync!
-
-## Flag explanation
-
-* `--chain=bor-mainnet` and `--bor.heimdall=https://heimdall-api.polygon.technology` specify respectively the Polygon mainnet and the API endpoint for the Heimdall network
-  * to use Amoy testnet replace with flags `--chain=amoy --bor.heimdall=https://heimdall-api-amoy.polygon.technology`
-* Add `--prune.mode=minimal` to run minimal [Pruning Mode](../../fundamentals/pruning-modes) or `--prune.mode=archive` to run an archive node
-* `--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](../../fundamentals/web3-wallet);
-* `--torrent.download.rate=512mb` to increase download speed. While the default downloading speed is 128mb, with this flag Erigon will use as much download speed as it can, up to a maximum of 512 megabytes per second. This means it will try to download data as quickly as possible, but it won't exceed the 512 MB/s limit you've set.
-
-:::tip
-Press `Ctrl+C` in your terminal to stop Erigon.
-:::
-
-Additional flags can be added to [configure](../../fundamentals/configuring-erigon/) Erigon with several options.
 
 ---
 
@@ -1111,6 +1135,8 @@ scheduled forks, not after.
 
 ## Erigon with Prysm as the external CL
 
+### Prysm
+
 1.  Start Erigon adding the `--externalcl` flag:
 
     ```bash
@@ -1134,6 +1160,8 @@ scheduled forks, not after.
     --checkpoint-sync-url=https://beaconstate.info \
     --genesis-beacon-api-url=https://beaconstate.info
     ```
+
+### Lighthouse
 
 1.  Start Erigon adding the `--externalcl` flag:
 
@@ -1427,16 +1455,22 @@ URL: https://docs.erigon.tech/fundamentals/basic-usage
 
 Erigon is mainly operated through the command line. The commands may vary based on your installation method.
 
+## Pre-Built Binaries
+
 Open your terminal and simply start Erigon with the command:
 
 ```text
 erigon [options]
 ```
 
+## Docker
+
 * You can use Docker Compose like in this [example](/get-started/easy-nodes/how-to-run-an-ethereum-node#a-create-the-configuration-file)
 *   Alternatively you can use the Docker syntax, for example:
 
     `docker run -it erigontech/erigon:v{ERIGON_VERSION} [options]`
+
+## Built from Source
 
 Open your terminal and move to the directory where you installed Erigon
 
@@ -1449,6 +1483,8 @@ You can then start Erigon with the below command:
 ```shell
 ./build/bin/erigon [options]
 ```
+
+## Windows
 
 To run Erigon after a native compilation, enter the following command in your Command Prompt or PowerShell:
 
@@ -1796,19 +1832,20 @@ Snapshots are organised into several subdirectories. The main ones are:
 
 ## What does it cost on disk?
 
-Real numbers from a Nov 2024 mainnet archive node:
+Measured on a mainnet archive node on 2026-08-04:
 
 ```sh
-# eth-mainnet — archive — prune.mode=archive
-chaindata           15 GB
-snapshots/accessor 120 GB
-snapshots/domain   300 GB
-snapshots/history  280 GB
-snapshots/idx      430 GB
-snapshots TOTAL    2.3 TB
+# eth-mainnet — prune.mode=archive
+chaindata             9.82 GB
+snapshots/idx       330.89 GB
+snapshots/domain    321.58 GB
+snapshots/history   254.43 GB
+snapshots/accessor  140.92 GB
+snapshots/*.seg     993.33 GB   # block and transaction segments
+snapshots TOTAL    2041.15 GB   # 2.04 TB
 ```
 
-The breakdown above lists the state/history snapshot subdirectories. The remaining ~1.2 TB is mostly block/transaction `.seg` data, which is not broken out separately here.
+Block and transaction segments are about half the datadir on their own; the state and history subdirectories account for the rest. Note how small `chaindata` stays even on an archive node — under 10 GB, because the bulk lives in the immutable snapshot files.
 
 For up-to-date totals across all networks and pruning modes, see [Hardware Requirements](../get-started/hardware-requirements).
 
@@ -1826,7 +1863,7 @@ Deleting `chaindata/` is **recoverable but not free**: it discards the latest mu
 
 ## Tuning knobs
 
-- **`--batchSize`** — size of the Execution stage's in-memory buffer before it is flushed to MDBX. Default: `512M`. Raising it (for example `--batchSize 1G` or higher) can speed up execution-heavy sync at the cost of more RAM.
+- **`--batchSize`** — size of the Execution stage's in-memory buffer before it is flushed to MDBX. Default: `512M`. Raising it (for example `--batchSize 1G` or higher) can speed up execution-heavy sync at the cost of more RAM. It is the Execution stage's commit threshold, so a larger value means larger single MDBX write transactions, which raise the file's high-water mark in bigger steps. Keeping it at or below `1G` is a useful heuristic if you want MDBX to grow more gradually.
 - **`--db.size.limit`** — caps the MDBX file size. Useful when running multiple Erigon instances on one disk to prevent one from starving the others.
 - **`--db.read.concurrency`** — number of concurrent MDBX read transactions. Increase when you run a high-throughput RPC Daemon against the same datadir.
 - **Symlinks for tiered storage.** Place `chaindata/` and `snapshots/domain/` on fast NVMe, leave `snapshots/idx/` and `snapshots/history/` on cheaper SATA. See [Optimizing Storage](optimizing-storage) for the recipe.
@@ -2090,6 +2127,12 @@ When Caplin is running, it exposes a Beacon API that external tools can query. T
 | `--beacon.api.read.timeout` | `5` | HTTP server read timeout, in seconds |
 | `--beacon.api.write.timeout` | `31536000` | HTTP server write timeout, in seconds (~1 year) |
 | `--beacon.api.idle.timeout` | `25` | HTTP server idle timeout, in seconds |
+
+The API is not served until you enable it with `--beacon.api=<namespaces>`; see [Caplin for staking](../staking/caplin) for the full namespace list.
+
+:::note
+Enabling the Beacon API increases RAM usage by roughly **6 GB**. Account for it when sizing your host — see [Hardware Requirements](../get-started/hardware-requirements).
+:::
 
 ---
 
@@ -2659,6 +2702,10 @@ http = true
 
 Erigon supports configuration through environment variables, primarily for experimental features and advanced settings.
 
+:::tip
+Erigon's own variables — everything below except the [Docker](#docker-environment-variables) ones, which do not take the `ERIGON_` prefix — can be set with or without it. `ERIGON_SNAPSHOT_MADV_RND` and `SNAPSHOT_MADV_RND` both work. Prefer the prefixed form: Erigon logs a warning when it reads the bare name, and the prefix keeps these from colliding with unrelated variables in your environment. The examples below use it.
+:::
+
 ### Core Environment Variables
 
 **Database and Performance:**
@@ -2707,16 +2754,16 @@ When running Erigon in [Docker](/fundamentals/docker-compose), you can configure
 **Basic Performance Tuning:**
 
 ```bash
-export MDBX_LOCK_IN_RAM=true
-export SNAPSHOT_MADV_RND=false
+export ERIGON_MDBX_LOCK_IN_RAM=true
+export ERIGON_SNAPSHOT_MADV_RND=false
 ./build/bin/erigon --datadir=/path/to/data
 ```
 
 **Memory Debugging:**
 
 ```bash
-export SAVE_HEAP_PROFILE=true
-export HEAP_PROFILE_THRESHOLD=45
+export ERIGON_SAVE_HEAP_PROFILE=true
+export ERIGON_HEAP_PROFILE_THRESHOLD=45
 ./build/bin/erigon --datadir=/path/to/data
 ```
 
@@ -3016,7 +3063,7 @@ Set **both** `--nat` and `--caplin.nat` to the same external IP, otherwise your 
 URL: https://docs.erigon.tech/fundamentals/optimizing-storage
 
 
-For optimal performance, it's recommended to store the datadir on a fast NVMe-RAID disk. However, if this is not feasible, you can store the history on a cheaper disk and still achieve good performance.
+For optimal performance, store the datadir on a single fast NVMe device formatted with ext4 or XFS — see [Filesystem](../get-started/hardware-requirements#filesystem). If that is not feasible, you can keep the history on a cheaper disk and still achieve good performance.
 
 ### Step 1
 
@@ -3075,10 +3122,10 @@ These instructions are designed to improve the performance of Erigon 3, particul
 
 ## Optimize for Cloud Drives
 
-* Set `SNAPSHOT_MADV_RND=false` to enable the operating system's cache prefetching for better performance on cloud drives with good throughput but bad latency.
+* Set `ERIGON_SNAPSHOT_MADV_RND=false` to enable the operating system's cache prefetching for better performance on cloud drives with good throughput but bad latency.
 
 ```bash
-SNAPSHOT_MADV_RND=false
+export ERIGON_SNAPSHOT_MADV_RND=false
 ```
 
 ## Lock Latest State in RAM
@@ -3235,13 +3282,17 @@ For Prometheus monitoring, each instance should expose metrics on different port
 
 If using network-attached storage, apply these optimizations:
 
-```bash
-# Reduce disk latency impact
-export SNAPSHOT_MADV_RND=false
---db.pagesize=64kb
+Set the environment variable before starting Erigon:
 
-# For Polygon networks
---sync.loop.block.limit=10000
+```bash
+export ERIGON_SNAPSHOT_MADV_RND=false   # let the OS prefetch; needs spare RAM
+```
+
+And pass these flags:
+
+```bash
+--db.pagesize=64kb              # less fragmentation; must be set before the first sync
+--sync.loop.block.limit=10000   # blocks per loop iteration (default 5000)
 ```
 
 ### Memory Locking for Performance
@@ -3271,7 +3322,7 @@ What can be done:
   * use latency-critical cloud-drives
   * or attached-NVMe (at least for initial sync)
 * increase RAM
-* if you throw enough RAM, then can set env variable `SNAPSHOT_MADV_RND=false`
+* if you throw enough RAM, then can set env variable `ERIGON_SNAPSHOT_MADV_RND=false`
 * Use `--db.pagesize=64kb` (less fragmentation, more IO)
 * Or use Erigon 3 (it also sensitive for disk-latency - but it will download 99% of history)
 
@@ -3362,6 +3413,10 @@ Erigon provides extensive logging configuration through command-line flags. Key 
 * `--log.dir.verbosity`: Set file log level (default: `dbug`)
 * `--log.delays`: Enable block delay logging
 
+**Downloader (torrent) logs**
+
+The torrent client inside the Downloader keeps its own JSON-formatted file, `logs/torrent.log`. It is written at whichever is **more verbose** of `--torrent.verbosity` and `WARN`, so warnings and errors always reach it even at the default verbosity. Messages at `--torrent.verbosity` or above are additionally forwarded to Erigon's own file and console loggers, which emit them only if `--log.dir.verbosity` and `--verbosity` are themselves set to a verbose enough level.
+
 **Log Levels**
 
 The logging system defines six distinct log levels in hierarchical order:
@@ -3442,6 +3497,10 @@ Based on best practices for execution clients, your local machine's firewall set
 | 30303    | TCP & UDP    | Peer-to-Peer (P2P) Networking | Allow inbound and outbound traffic to enable peer discovery and connections.                                                             |
 | 8545     | TCP          | JSON-RPC (Public API)         | Block all traffic _except_ from explicitly defined trusted machines. This port should never be publicly exposed without strict controls. |
 | 9090     | TCP          | Private API Communication     | Block all traffic except for communication between your internal components (e.g., RPC Daemon and core node).                            |
+
+:::note
+Some hosting providers add firewall requirements and operational pitfalls on top of these. If you run on Hetzner Cloud or a Hetzner dedicated server, see the [Hetzner firewall note](/help-center/troubleshooting#hetzner-cloud--dedicated-server-firewall-note) for the ports their edge firewall must allow, and for the reserved IPv4 ranges worth blocking yourself so outbound dials do not trip their abuse detection.
+:::
 
 #### CORS Protection
 
@@ -3779,6 +3838,8 @@ When something looks wrong with your node, ask the assistant to sift through log
 
 Add the following to your Claude Desktop configuration file (`~/.config/claude-desktop/config.json` on Linux/macOS, `%APPDATA%\claude-desktop\config.json` on Windows):
 
+### JSON-RPC mode
+
 ```json
 {
   "mcpServers": {
@@ -3790,6 +3851,8 @@ Add the following to your Claude Desktop configuration file (`~/.config/claude-d
 }
 ```
 
+### Datadir mode
+
 ```json
 {
   "mcpServers": {
@@ -3800,6 +3863,8 @@ Add the following to your Claude Desktop configuration file (`~/.config/claude-d
   }
 }
 ```
+
+### Embedded (SSE)
 
 ```json
 {
@@ -3851,12 +3916,16 @@ claude mcp remove erigon
 
 [OpenAI Codex CLI](https://github.com/openai/codex) supports MCP servers via `~/.codex/config.yaml`. Add the `mcp_servers` key to your existing config file:
 
+### Embedded SSE
+
 ```yaml
 mcp_servers:
   erigon:
     type: sse
     url: http://127.0.0.1:8553/sse
 ```
+
+### Standalone stdio
 
 ```yaml
 mcp_servers:
@@ -6827,6 +6896,10 @@ curl -s --data '{"jsonrpc":"2.0","method":"admin_removeTrustedPeer","params":["e
 URL: https://docs.erigon.tech/interacting-with-erigon/bor
 
 
+:::note
+The final Erigon release series that officially supports Polygon is 3.1.\*. The `bor` namespace is still wired and `--chain=bor-mainnet` remains selectable, so this reference is kept for those releases — but see [Supported Networks](/fundamentals/supported-networks) before planning a new Polygon deployment.
+:::
+
 The `bor` namespace provides Polygon-specific RPC methods that are only available when running Erigon on Polygon networks (Mainnet, Amoy testnet, etc.). These methods expose functionality specific to the Bor consensus engine, including validator information, snapshots, and proposer sequences.
 
 The bor namespace must be explicitly enabled using the `--http.api` flag when starting the RPC Daemon and is only functional when running on Polygon networks with the Bor consensus engine.
@@ -7924,7 +7997,7 @@ This list addresses the most common inquiries from the Erigon community, offerin
 2. **Is Erigon a good choice for client diversity?** Yes. The codebases have diverged so significantly from Geth that they are now considered separate clients, making Erigon an excellent choice to support Ethereum's client diversity goals.
 3. **What are the minimum hardware requirements?** The most critical component is a high-end NVMe or SSD with very low latency. While the exact requirements vary by network, 16GB of RAM and a fast SSD are generally the minimum for a full node. See [Hardware Requirements](/get-started/hardware-requirements) for detailed specs per network and pruning mode.
 4. **How long does it take to sync a node?** Initial synchronization time is highly dependent on hardware and bandwidth. A fast system with a high-end NVMe can sync a full node in as little as few hours, while on slower hardware, it can take several days.
-5. **How much disk space is required?** Disk space needs are constantly changing as the blockchain grows. As of September 2025, an Ethereum Mainnet full node requires about 920GB, while an archive node is significantly larger at around 1.77TB. See [Hardware Requirements](/get-started/hardware-requirements) for up-to-date figures.
+5. **How much disk space is required?** It depends on the network and the pruning mode, and it grows as the chain grows. See [Hardware Requirements](/get-started/hardware-requirements) for a measured figure and measurement date, for the networks and pruning modes it measures.
 6. **Can I run Erigon on an HDD?** It is not recommended to run Erigon on an HDD. The client's performance is critically dependent on high-speed disk I/O, and an HDD will almost certainly cause the node to fall behind the blockchain tip.
 7. **What is the `--prune.mode` flag, and which mode should I use?** This flag determines which historical data is discarded. The `full` mode (the default for Erigon 3) is suitable for most users. The `minimal` mode is for validators with limited disk space. The `archive` mode is for those who need a full historical record for all past states. See [Pruning Modes](/fundamentals/pruning-modes) for a full comparison.
 8. **Can I change my pruning mode after starting the node?** No. The pruning mode is a permanent choice made at the first sync. Changing it requires deleting the `datadir` directory and a full re-sync from scratch.
@@ -8002,6 +8075,8 @@ kill -SIGUSR1 $(pidof erigon)
 # Stack traces are printed to the erigon log / stdout
 ```
 
+If the node is wedged and you are ready to lose it, `kill -SIGABRT <pid>` dumps the stacks and terminates that process in one step. Pass an explicit PID rather than `$(pidof erigon)`: `SIGABRT` is destructive, and on a host running more than one instance `pidof` would abort all of them.
+
 **Capture a CPU or heap profile via pprof** (requires `--pprof` flag at startup — default address `localhost:6060`; override with `--pprof.addr` and `--pprof.port`):
 
 ```bash
@@ -8019,14 +8094,48 @@ Attach the `.pprof` files and the goroutine dump to your GitHub issue.
 
 ## Hetzner Cloud / Dedicated Server Firewall Note
 
-Hetzner applies a stateless firewall at the network edge. Ensure the following ports are open for **both TCP and UDP, inbound and outbound**:
+Hetzner filters traffic at the network edge, and the two product lines need different rules:
 
-| Purpose        | Port  | Protocol |
-| -------------- | ----- | -------- |
-| P2P (Ethereum) | 30303 | TCP+UDP  |
-| P2P (Caplin)   | 9000  | TCP+UDP  |
+* **Cloud** — the firewall is stateful, so return traffic is handled for you. Outbound is allow-all, but only for as long as no outbound rule exists: per Hetzner's FAQ, *"If you define one or more outbound rules, the outbound direction also changes to implicit 'deny'"*. Adding outbound rules for the ports below would therefore cut off DNS, NTP and HTTPS — including the snapshot webseeds — and break the initial download. Define **inbound rules only** and leave the outbound list empty.
+* **Dedicated servers (Robot)** — the firewall is stateless, so return traffic needs an explicit rule of its own. Here you do need rules in both directions.
 
-Without these, the node may appear to have peers (via the cloud dashboard) but will suffer poor block propagation. Configure the firewall in the Hetzner Cloud Console under **Firewalls** or via `hcloud firewall`.
+The ports to allow inbound:
+
+| Purpose                          | Port  | Protocol |
+| -------------------------------- | ----- | -------- |
+| P2P (execution layer)            | 30303 | TCP+UDP  |
+| Snapshot downloader (BitTorrent) | 42069 | TCP+UDP  |
+| Caplin DISCV5 discovery          | 4000  | UDP      |
+| Caplin DISCV5                    | 4001  | TCP      |
+
+This table is not exhaustive — it lists what a default node needs. See [Default ports](/fundamentals/default-ports) for every port Erigon can open, including the opt-in Shutter port.
+
+The Caplin ports are its defaults (`--caplin.discovery.port` and `--caplin.discovery.tcpport`); change the rules to match if you override them. If you run an **external** consensus client instead of Caplin, open the ports that client uses rather than the Caplin ones. Lighthouse, Teku and Nimbus default to `9000` TCP+UDP, and Lighthouse additionally uses `9001` UDP for QUIC; Prysm defaults to `13000` TCP and `12000` UDP. Check your client's own documentation rather than assuming `9000`.
+
+Without these, the node may appear to have peers (via the cloud dashboard) but will suffer poor block propagation. Configure Cloud firewalls in the Hetzner Cloud Console under **Firewalls** or via `hcloud firewall`; for dedicated servers the equivalent lives in the Robot panel under **Server → Firewall**.
+
+A public-facing Erigon node should also not attempt to peer with IPv4 ranges that are reserved for special use. Blocking them is worth doing explicitly on Hetzner, whose abuse and netscan detection flags outbound dials to reserved ranges — that is what prompted this note, rather than their firewall filtering the traffic. Do not apply this to a node using `--caplin.local-discovery`, which deliberately peers over private IPs. The authoritative list is the [IANA IPv4 Special-Purpose Address Registry](https://www.iana.org/assignments/iana-ipv4-special-registry/iana-ipv4-special-registry.xhtml) ([RFC 6890](https://datatracker.ietf.org/doc/html/rfc6890)); the ranges below are the ones commonly blocked for an Ethereum node (`100.64.0.0/10` comes from [RFC 6598](https://datatracker.ietf.org/doc/html/rfc6598), and `192.88.99.0/24` has since been deprecated by [RFC 7526](https://datatracker.ietf.org/doc/html/rfc7526) — blocking it remains correct):
+
+```text
+0.0.0.0/8             "This" Network                                RFC 1122, Section 3.2.1.3
+10.0.0.0/8            Private-Use Networks                          RFC 1918
+100.64.0.0/10         Carrier-Grade NAT (CGN)                       RFC 6598, Section 7
+127.0.0.0/8           Loopback                                      RFC 1122, Section 3.2.1.3
+169.254.0.0/16        Link Local                                    RFC 3927
+172.16.0.0/12         Private-Use Networks                          RFC 1918
+192.0.0.0/24          IETF Protocol Assignments                     RFC 5736
+192.0.2.0/24          TEST-NET-1                                    RFC 5737
+192.88.99.0/24        6to4 Relay Anycast                            RFC 3068
+192.168.0.0/16        Private-Use Networks                          RFC 1918
+198.18.0.0/15         Network Interconnect Device Benchmark Testing RFC 2544
+198.51.100.0/24       TEST-NET-2                                    RFC 5737
+203.0.113.0/24        TEST-NET-3                                    RFC 5737
+224.0.0.0/4           Multicast                                     RFC 3171
+240.0.0.0/4           Reserved for Future Use                       RFC 1112, Section 4
+255.255.255.255/32    Limited Broadcast                             RFC 919 and RFC 922, Section 7
+```
+
+A near-identical list expressed in [iptables syntax](https://ethereum.stackexchange.com/questions/6386/how-to-prevent-being-blacklisted-for-running-an-ethereum-client/13068#13068) is available on Stack Exchange. It covers 14 of the 16 ranges above, deliberately leaving out `127.0.0.0/8` and `255.255.255.255/32`: an `OUTPUT` drop on loopback would break Erigon's own inter-component traffic, such as the RPC Daemon reaching the core node on `127.0.0.1:9090`.
 
 ---
 
@@ -8238,17 +8347,9 @@ This section details common error messages and provides clear, actionable steps 
 
 ### Connect: connection refused or dial tcp... failures
 
-* **Error Description:** The node cannot connect to an external service, such as a local or remote Heimdall instance.
+* **Error Description:** The node cannot reach a service it depends on — for example an external consensus client, or an RPC Daemon talking to the core node.
 * **Cause:** This is a configuration error. The dependent service is either not running, or the command-line flag is pointing to an incorrect address.
-* **Solution:** Confirm that the required services are running and that the command-line flags (e.g., `--bor.heimdall.url`) are correctly set. See [Configuring Erigon](/fundamentals/configuring-erigon) for all available flags.
-
-## Chain-Specific Issues
-
-### Bad block / Invalid Merkle on Polygon network
-
-* **Error Description:** The node stops importing new blocks, and the logs show errors related to bad blocks.
-* **Cause:** This is a Polygon-specific issue that occurs when the Heimdall and Bor layers are out of sync.
-* **Solution:** Verify that your Heimdall and REST servers are running. Restarting the Bor and Heimdall services on both the sentry and validator nodes should resolve the issue by bringing the layers back into sync. See the [Polygon Node](/get-started/easy-nodes/how-to-run-a-polygon-node) guide.
+* **Solution:** Confirm that the required services are running and that the address flags (for example `--authrpc.addr` and `--authrpc.port` for the Engine API, or `--private.api.addr` between components) match on both sides. See [Configuring Erigon](/fundamentals/configuring-erigon) for all available flags.
 
 ## Build and Installation
 

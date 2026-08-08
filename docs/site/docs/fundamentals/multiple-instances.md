@@ -129,13 +129,17 @@ For Prometheus monitoring, each instance should expose metrics on different port
 
 If using network-attached storage, apply these optimizations:
 
-```bash
-# Reduce disk latency impact
-export SNAPSHOT_MADV_RND=false
---db.pagesize=64kb
+Set the environment variable before starting Erigon:
 
-# For Polygon networks
---sync.loop.block.limit=10000
+```bash
+export ERIGON_SNAPSHOT_MADV_RND=false   # let the OS prefetch; needs spare RAM
+```
+
+And pass these flags:
+
+```bash
+--db.pagesize=64kb              # less fragmentation; must be set before the first sync
+--sync.loop.block.limit=10000   # blocks per loop iteration (default 5000)
 ```
 
 ### Memory Locking for Performance
@@ -165,7 +169,7 @@ What can be done:
   * use latency-critical cloud-drives
   * or attached-NVMe (at least for initial sync)
 * increase RAM
-* if you throw enough RAM, then can set env variable `SNAPSHOT_MADV_RND=false`
+* if you throw enough RAM, then can set env variable `ERIGON_SNAPSHOT_MADV_RND=false`
 * Use `--db.pagesize=64kb` (less fragmentation, more IO)
 * Or use Erigon 3 (it also sensitive for disk-latency - but it will download 99% of history)
 
