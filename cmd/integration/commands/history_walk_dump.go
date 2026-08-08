@@ -100,12 +100,12 @@ var cmdHistoryWalkDump = &cobra.Command{
 		defer it.Close()
 
 		var (
-			prevKey       []byte
-			raw           uint64
-			yielded       uint64
-			focusYielded  uint64
-			focusHits     uint64
-			focusLastTxN  uint64
+			prevKey      []byte
+			raw          uint64
+			yielded      uint64
+			focusYielded uint64
+			focusHits    uint64
+			focusLastTxN uint64
 		)
 		for it.HasNext() {
 			k, txN, ierr := it.Next()

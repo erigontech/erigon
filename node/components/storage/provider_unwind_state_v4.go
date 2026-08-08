@@ -219,10 +219,10 @@ func historyKeyWalker(tx kv.TemporalTx, domain kv.Domain, fromTxN, lastTxN uint6
 		defer it.Close()
 		trace := v4EmitTrace
 		var (
-			prevKey       []byte
-			raw, yielded  uint64
-			firstTxN      uint64 = ^uint64(0)
-			lastSeenTxN   uint64
+			prevKey      []byte
+			raw, yielded uint64
+			firstTxN     uint64 = ^uint64(0)
+			lastSeenTxN  uint64
 		)
 		for it.HasNext() {
 			k, txN, ierr := it.Next()

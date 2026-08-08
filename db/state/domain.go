@@ -338,6 +338,32 @@ func (d *Domain) isRawTxNItem(item *FilesItem) bool {
 	return item.endTxNum%d.stepSize != 0
 }
 
+// v4FilesForStep returns the on-disk paths of every dirtyFiles v4
+// item whose range starts at step*stepSize — i.e. mode-C boundary
+// files anchored at THIS step's start. Retire's collate must merge
+// their content into the step-aligned .kv output so pre-target
+// state emitted by mode-C v4 emit isn't clobbered by the retire's
+// MDBX-only build. See the mode-C v4 non-determinism track for the
+// failure this fix targets.
+func (d *Domain) v4FilesForStep(step kv.Step) []string {
+	var paths []string
+	targetStart := uint64(step) * d.stepSize
+	d.dirtyFiles.Scan(func(item *FilesItem) bool {
+		if !d.isRawTxNItem(item) {
+			return true
+		}
+		if item.startTxNum != targetStart {
+			return true
+		}
+		if item.decompressor == nil {
+			return true
+		}
+		paths = append(paths, item.decompressor.FilePath())
+		return true
+	})
+	return paths
+}
+
 // kvFileNameMaskForItem returns the mask that MatchVersionedFile
 // applies against on-disk names for THIS item's actual coordinates.
 // Dispatches between the legacy step-indexed form and the v4 raw-
@@ -986,50 +1012,26 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 	// Compress files only in `merge` which ok to be slow.
 	comp := seg.NewWriter(coll.valuesComp, seg.CompressNone)
 
-	stepVal := ^uint64(step)
+	sources, err := d.stepSourcesForCollate(roTx, step)
+	if err != nil {
+		return coll, fmt.Errorf("build %s step sources: %w", d.FilenameBase, err)
+	}
+	defer stepSources(sources).Close()
 
-	if d.LargeValues {
-		valsCursor, err := roTx.Cursor(d.ValuesTable)
-		if err != nil {
-			return Collation{}, fmt.Errorf("create %s values cursor: %w", d.FilenameBase, err)
+	merged := newMergedStepSources(sources)
+	for {
+		k, v, ok, mergErr := merged.Next()
+		if mergErr != nil {
+			return coll, fmt.Errorf("merge %s step sources: %w", d.FilenameBase, mergErr)
 		}
-		defer valsCursor.Close()
-		for k, v, err := valsCursor.First(); k != nil; k, v, err = valsCursor.Next() {
-			if err != nil {
-				return coll, err
-			}
-			if binary.BigEndian.Uint64(k[len(k)-8:]) != stepVal {
-				continue
-			}
-			bareKey := k[:len(k)-8]
-			if _, err = comp.Write(bareKey); err != nil {
-				return coll, fmt.Errorf("add %s values key [%x]: %w", d.FilenameBase, bareKey, err)
-			}
-			if _, err = comp.Write(v); err != nil {
-				return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.FilenameBase, bareKey, v, err)
-			}
+		if !ok {
+			break
 		}
-	} else {
-		valsCursor, err := roTx.CursorDupSort(d.ValuesTable)
-		if err != nil {
-			return Collation{}, fmt.Errorf("create %s values cursorDupsort: %w", d.FilenameBase, err)
+		if _, err = comp.Write(k); err != nil {
+			return coll, fmt.Errorf("add %s values key [%x]: %w", d.FilenameBase, k, err)
 		}
-		defer valsCursor.Close()
-		for k, v, err := valsCursor.First(); k != nil; {
-			if err != nil {
-				return coll, err
-			}
-			if binary.BigEndian.Uint64(v[:8]) != stepVal {
-				k, v, err = valsCursor.Next()
-				continue
-			}
-			if _, err = comp.Write(k); err != nil {
-				return coll, fmt.Errorf("add %s values key [%x]: %w", d.FilenameBase, k, err)
-			}
-			if _, err = comp.Write(v[8:]); err != nil {
-				return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.FilenameBase, k, v[8:], err)
-			}
-			k, v, err = valsCursor.NextNoDup()
+		if _, err = comp.Write(v); err != nil {
+			return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.FilenameBase, k, v, err)
 		}
 	}
 
@@ -1037,6 +1039,58 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 	coll.valuesCount = coll.valuesComp.Count() / 2
 	mxCollationSize.SetUint64(uint64(coll.valuesCount))
 	return coll, nil
+}
+
+// stepSourcesForCollate returns the ordered set of stepSource
+// iterators Domain.collate merges into the step-aligned .kv output
+// for this step. Source[0] is MDBX (writable-shadow rows tagged
+// with the target step) — it takes priority on duplicate keys.
+// Source[1..] are mode-C v4 boundary files anchored at step*stepSize
+// (retire consumes them here so their pre-target snapshot lands in
+// the new step-aligned .kv instead of being clobbered).
+//
+// Every returned source must be Closed by the caller; stepSources
+// (slice type) provides Close-all.
+func (d *Domain) stepSourcesForCollate(roTx kv.Tx, step kv.Step) ([]stepSource, error) {
+	var sources []stepSource
+
+	if d.LargeValues {
+		// nolint:gocritic // cursor ownership transfers to the returned
+		// stepSource — sources.Close() closes it via mdbxLargeValuesStepSource.Close().
+		cursor, err := roTx.Cursor(d.ValuesTable)
+		if err != nil {
+			return nil, fmt.Errorf("create %s values cursor: %w", d.FilenameBase, err)
+		}
+		src, err := newMdbxLargeValuesStepSource(cursor, step)
+		if err != nil {
+			cursor.Close()
+			return nil, err
+		}
+		sources = append(sources, src)
+	} else {
+		// nolint:gocritic // cursor ownership transfers to the returned
+		// stepSource — sources.Close() closes it via mdbxDupSortStepSource.Close().
+		cursor, err := roTx.CursorDupSort(d.ValuesTable)
+		if err != nil {
+			return nil, fmt.Errorf("create %s values cursorDupsort: %w", d.FilenameBase, err)
+		}
+		src, err := newMdbxDupSortStepSource(cursor, step)
+		if err != nil {
+			cursor.Close()
+			return nil, err
+		}
+		sources = append(sources, src)
+	}
+
+	for _, v4Path := range d.v4FilesForStep(step) {
+		v4Src, err := newV4StepSource(v4Path, d.Compression)
+		if err != nil {
+			stepSources(sources).Close()
+			return nil, err
+		}
+		sources = append(sources, v4Src)
+	}
+	return sources, nil
 }
 
 type StaticFiles struct {

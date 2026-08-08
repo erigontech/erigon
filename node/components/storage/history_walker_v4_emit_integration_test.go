@@ -25,6 +25,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	dirutil "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -312,7 +313,7 @@ func deletePrunedHistoryFiles(t *testing.T, dirs datadir.Dirs) []string {
 				strings.HasSuffix(name, ".vi")) {
 				continue
 			}
-			require.NoError(t, os.Remove(filepath.Join(d, name)))
+			require.NoError(t, dirutil.RemoveFile(filepath.Join(d, name)))
 			removed = append(removed, name)
 		}
 	}
@@ -468,7 +469,7 @@ func TestV4EmitTombstoneRecreateAfterPrune(t *testing.T) {
 
 	f.applyWrites([]v4Write{
 		{txN: 5, key: addr, val: valFund},
-		{txN: 10, key: addr, del: true}, // tombstone in step 0
+		{txN: 10, key: addr, del: true},        // tombstone in step 0
 		{txN: 22, key: addr, val: valRecreate}, // recreate in step 1 (in-window at target=24)
 	})
 	f.buildFilesUpTo(stepSize * 2)
