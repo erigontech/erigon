@@ -1475,7 +1475,7 @@ func TestWriteSet_AllHeaders_RoundTrip(t *testing.T) {
 	s, want := writeSetFixture()
 	var got []string
 	for h := range s.AllHeaders() {
-		got = append(got, headerValStr(s, h))
+		got = append(got, headerValStr(s, *h))
 	}
 	sort.Strings(got)
 	require.Equal(t, want, got)
