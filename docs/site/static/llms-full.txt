@@ -132,31 +132,31 @@ _Current Disk Usage measured as of 2026-07-21; usage grows over time as the chai
 
 | **Pruning Mode**  | **Current Disk Usage** |
 | -------------- | ---------------------- |
-| Archive        | 1.10 TB |
-| Full (Default) | -                      |
-| Minimal        | -                      |
+| Archive        | 1.04 TB |
+| Full (Default) | 238.71 GB |
+| Minimal        | 218.06 GB |
 
-_Current Disk Usage measured as of 2026-07-29; usage grows over time as the chain grows. Execution layer only. Archive is the only mode measured for Sepolia. Measured on a v3.6 archive node, so treat it as indicative here._
+_Current Disk Usage measured as of 2026-08-05; usage grows over time as the chain grows. Measured on v3.5.4; the Archive figure was taken a day later, on 2026-08-06._
 
 ### Hoodi
 
 | **Pruning Mode**  | **Current Disk Usage** |
 | -------------- | ---------------------- |
-| Archive        | 133.73 GB |
-| Full (Default) | -                      |
-| Minimal        | -                      |
+| Archive        | 115.85 GB |
+| Full (Default) | 48.36 GB |
+| Minimal        | 45.61 GB |
 
-_Current Disk Usage measured as of 2026-07-29; usage grows over time as the chain grows. Execution layer only. Archive is the only mode measured for Hoodi. Measured on a v3.6 archive node, so treat it as indicative here._
+_Current Disk Usage measured as of 2026-08-04; usage grows over time as the chain grows. Measured on v3.5.4._
 
 ### Chiado
 
 | **Pruning Mode**  | **Current Disk Usage** |
 | -------------- | ---------------------- |
-| Archive        | 29.64 GB |
-| Full (Default) | -                      |
-| Minimal        | -                      |
+| Archive        | 26.95 GB |
+| Full (Default) | 13.32 GB |
+| Minimal        | 13.16 GB |
 
-_Current Disk Usage measured as of 2026-07-29; usage grows over time as the chain grows. Execution layer only. Archive is the only mode measured for Chiado. Measured on a v3.6 archive node, so treat it as indicative here._
+_Current Disk Usage measured as of 2026-08-07; usage grows over time as the chain grows. Measured on v3.5.4. Minimal and Full are near-identical on Chiado: the chain is young enough that pruning has little history to remove._
 
 :::tip
 See also how you can [optimize storage](../fundamentals/optimizing-storage).
