@@ -1549,7 +1549,46 @@ func (a *Aggregator) IntegrateDirtyFiles(sf *AggV3StaticFiles, txNumFrom, txNumT
 		ii.integrateDirtyFiles(sf.ivfs[id], txNumFrom, txNumTo)
 	}
 
-	a.recalcVisibleFiles(nil)
+	// A retire that just landed a step-aligned .kv covering [txNumFrom,
+	// txNumTo) makes any mode-C v4 boundary file at the same step
+	// redundant — collate merged the v4 content into the new file
+	// (Domain.stepSourcesForCollate). Retire those subsumed v4 items
+	// so reclaimRetired eventually unlinks them; keeping them would
+	// leave dead disk + confuse subsequent unwinds.
+	retired := a.subsumedV4ItemsForStepLocked(txNumFrom, txNumTo)
+	a.recalcVisibleFiles(retired)
+}
+
+// subsumedV4ItemsForStepLocked retires (removes from dirtyFiles +
+// marks canDelete) every mode-C v4 boundary file whose range is
+// entirely covered by the just-integrated step-aligned range
+// [txNumFrom, txNumTo). Returns the retired items so the caller
+// attaches them to the outgoing visible generation. No-op when the
+// range doesn't map cleanly to a single step (e.g. multi-step build)
+// or when no v4 items overlap. Caller holds dirtyFilesLock.
+func (a *Aggregator) subsumedV4ItemsForStepLocked(txNumFrom, txNumTo uint64) []*FilesItem {
+	stepSize := a.stepSize.Load()
+	if stepSize == 0 {
+		return nil
+	}
+	if txNumFrom%stepSize != 0 || txNumTo%stepSize != 0 {
+		return nil
+	}
+	if txNumTo <= txNumFrom {
+		return nil
+	}
+	if txNumTo-txNumFrom != stepSize {
+		return nil
+	}
+	step := kv.Step(txNumFrom / stepSize)
+	var out []*FilesItem
+	for _, d := range a.d {
+		if d.Disable {
+			continue
+		}
+		out = append(out, d.retireSubsumedV4Items(step)...)
+	}
+	return out
 }
 
 func (a *Aggregator) DomainTables(names ...kv.Domain) (tables []string) {
