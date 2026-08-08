@@ -22,11 +22,20 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/seg"
 )
+
+// v4EmitTrace toggles per-key trace logging for the v4-emit walker
+// and downstream lookups. Off by default (production overhead is
+// nil). Enable via ERIGON_V4EMIT_TRACE=true on a soak binary to
+// capture the yielded key set + resolved values for the failing
+// unwind profile — used to diagnose the state-v4 non-determinism
+// class (mode-c-v4-emit-nondeterministic-2026-08-06).
+var v4EmitTrace = dbg.EnvBool("ERIGON_V4EMIT_TRACE", false)
 
 // AccessorBuilder builds the .bt / .kvei / .kvi sidecars that a domain
 // .kv needs to be visible to state reads. Every mode-C v4 emit MUST
@@ -127,8 +136,10 @@ func WriteStateBoundaryFileV4(
 	writer := seg.NewWriter(comp, compression)
 
 	var (
-		kept    uint64
-		emitErr error
+		kept       uint64
+		emitErr    error
+		trace      = v4EmitTrace
+		tombstones uint64
 	)
 	walkErr := keys(func(key []byte) bool {
 		v, found, lerr := lookup(domain, key, lastTxN)
@@ -138,6 +149,15 @@ func WriteStateBoundaryFileV4(
 		}
 		if !found {
 			v = nil // value-domain tombstone
+			tombstones++
+		}
+		if trace {
+			log.Warn("[v4emit-trace] emit.entry",
+				"domain", domain,
+				"key", fmt.Sprintf("%x", key),
+				"vlen", len(v),
+				"found", found,
+				"lastTxN", lastTxN)
 		}
 		if _, werr := writer.Write(key); werr != nil {
 			emitErr = fmt.Errorf("write key: %w", werr)
@@ -150,6 +170,12 @@ func WriteStateBoundaryFileV4(
 		kept++
 		return true
 	})
+	if trace {
+		log.Warn("[v4emit-trace] emit.done",
+			"domain", domain,
+			"kept", kept, "tombstones", tombstones,
+			"path", newKVPath)
+	}
 	if emitErr != nil {
 		return emitErr
 	}
@@ -191,19 +217,46 @@ func historyKeyWalker(tx kv.TemporalTx, domain kv.Domain, fromTxN, lastTxN uint6
 			return fmt.Errorf("HistoryKeyTxNumRange(%s, [%d, %d)): %w", domain, fromTxN, lastTxN+1, err)
 		}
 		defer it.Close()
-		var prevKey []byte
+		trace := v4EmitTrace
+		var (
+			prevKey       []byte
+			raw, yielded  uint64
+			firstTxN      uint64 = ^uint64(0)
+			lastSeenTxN   uint64
+		)
 		for it.HasNext() {
-			k, _, ierr := it.Next()
+			k, txN, ierr := it.Next()
 			if ierr != nil {
 				return fmt.Errorf("HistoryKeyTxNumRange next(%s): %w", domain, ierr)
 			}
+			raw++
+			if txN < firstTxN {
+				firstTxN = txN
+			}
+			if txN > lastSeenTxN {
+				lastSeenTxN = txN
+			}
 			if prevKey != nil && bytes.Equal(k, prevKey) {
+				if trace {
+					log.Warn("[v4emit-trace] walker.dup", "domain", domain, "key", fmt.Sprintf("%x", k), "txN", txN)
+				}
 				continue
 			}
 			prevKey = append(prevKey[:0], k...)
+			yielded++
+			if trace {
+				log.Warn("[v4emit-trace] walker.yield", "domain", domain, "key", fmt.Sprintf("%x", k), "txN", txN)
+			}
 			if !yield(k) {
 				return nil
 			}
+		}
+		if trace {
+			log.Warn("[v4emit-trace] walker.done",
+				"domain", domain,
+				"range", fmt.Sprintf("(%d,%d]", fromTxN, lastTxN),
+				"raw", raw, "yielded", yielded,
+				"firstTxN", firstTxN, "lastSeenTxN", lastSeenTxN)
 		}
 		return nil
 	}
