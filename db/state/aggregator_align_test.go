@@ -195,7 +195,7 @@ func craftedClampedVisible(t *testing.T, agg *Aggregator) {
 	for _, dom := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
 		files := v.d[dom].files
 		require.GreaterOrEqual(t, len(files), 2)
-		crafted.d[dom] = newDomainVisible(dom, files[:len(files)-1])
+		crafted.d[dom] = newDomainVisible(dom, files[:len(files)-1], v.d[dom])
 	}
 	v.next = crafted
 	agg.visible.Store(crafted)
