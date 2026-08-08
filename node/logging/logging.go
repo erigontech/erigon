@@ -65,7 +65,7 @@ func SetupLoggerCtx(
 	var consoleJson = ctx.Bool(LogJsonFlag.Name) || ctx.Bool(LogConsoleJsonFlag.Name)
 	var dirJson = ctx.Bool(LogDirJsonFlag.Name)
 
-	metrics.DelayLoggingEnabled = ctx.Bool(LogBlockDelayFlag.Name)
+	metrics.DelayLoggingEnabled.Store(ctx.Bool(LogBlockDelayFlag.Name))
 
 	consoleLevel := consoleDefaultLevel
 
