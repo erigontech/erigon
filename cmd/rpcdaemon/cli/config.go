@@ -90,6 +90,7 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
+	"github.com/erigontech/erigon/rpc/sszql"
 
 	// Force-load native and js packages, to trigger registration
 	_ "github.com/erigontech/erigon/execution/tracing/tracers/js"
@@ -781,7 +782,16 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 	} else {
 		logger.Info("RPC admission control enabled", "max_concurrent_requests", rpcConcurrencyLimit, "db.read.concurrency", cfg.DBReadConcurrency)
 	}
-	httpHandler := node.NewHTTPHandlerStack(srv, cfg.HttpCORSDomain, cfg.HttpVirtualHost, cfg.HttpCompression, rpcConcurrencyLimit, true)
+	sszqlHandler := sszql.SSZQueryHandler()
+	rpcAndSSZQL := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := strings.TrimSuffix(r.URL.Path, "/")
+		if strings.HasPrefix(p, "/eth/") && strings.HasSuffix(p, "/query") {
+			sszqlHandler.ServeHTTP(w, r)
+			return
+		}
+		srv.ServeHTTP(w, r)
+	})
+	httpHandler := node.NewHTTPHandlerStack(rpcAndSSZQL, cfg.HttpCORSDomain, cfg.HttpVirtualHost, cfg.HttpCompression, rpcConcurrencyLimit, true)
 	var wsHandler http.Handler
 	if cfg.WebsocketEnabled {
 		wsHandler = node.NewWSConnectionLimiter(int64(cfg.WsMaxConnections),
