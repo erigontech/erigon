@@ -181,6 +181,17 @@ func findMergeRangeInFiles(files visibleFiles, stepSize, maxEndTxNum, maxSpan ui
 		if !filesCoverBackwardTo(files, i, start, stepSize) {
 			continue
 		}
+		if rangeContainsV4Item(files, start, item.endTxNum, stepSize) {
+			// v4 boundary file (mid-step endTxN) inside the proposed
+			// range. Merger would write a wider file whose advertised
+			// range spans the full step but whose content is a
+			// mix of v4's pre-target snapshot + earlier files —
+			// misrepresenting the file's true horizon. Skip until
+			// retire consumes v4 into a step-aligned .kv (see
+			// Aggregator.subsumedV4ItemsForStepLocked); merge is free
+			// to fire on the resulting step-aligned files afterwards.
+			continue
+		}
 		if r.needMerge && start > r.from {
 			continue
 		}
@@ -189,6 +200,23 @@ func findMergeRangeInFiles(files visibleFiles, stepSize, maxEndTxNum, maxSpan ui
 		r.to = item.endTxNum
 	}
 	return r
+}
+
+// rangeContainsV4Item reports whether any file in `files` with an
+// endTxNum inside [start, end] is a v4 boundary regen (endTxN not
+// step-aligned). Used by findMergeRangeInFiles's merge guard: v4
+// items must be consumed by retire (via Domain.stepSourcesForCollate
+// + subsumedV4ItemsForStepLocked) before merge is safe to widen.
+func rangeContainsV4Item(files visibleFiles, start, end, stepSize uint64) bool {
+	for _, f := range files {
+		if f.endTxNum <= start || f.endTxNum > end {
+			continue
+		}
+		if f.endTxNum%stepSize != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // filesCoverBackwardTo reports whether files[i] plus contiguous earlier

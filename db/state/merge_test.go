@@ -1062,20 +1062,24 @@ func TestFindMergeRangeInFiles(t *testing.T) {
 	// --- Mode-C v4 bridge: a file with non-step-aligned endTxN
 	// (emitted by mode-C boundary regen at a mid-step target) overlaps
 	// with the per-step successor that lands during forward-exec.
-	// filesCoverBackwardTo must bridge over the v4 file so a wider
-	// merge can consume both v4 and its per-step successors, producing
-	// a step-aligned superset that StaleNonMaximal culls v4 against.
-	// Without the bridge, retire never supersedes v4 → v4 accumulates
-	// on disk forever.
-
-	t.Run("v4_bridge_allows_wider_merge_over_mode_c_overlap", func(t *testing.T) {
+	// Under the merge-on-retire model, a v4 file inside a proposed
+	// merge range MUST block that merge. Retire's collate merges v4
+	// content into a step-aligned .kv (Domain.stepSourcesForCollate)
+	// and IntegrateDirtyFiles retires the v4 item
+	// (subsumedV4ItemsForStepLocked); merge is free to fire on the
+	// resulting step-aligned files afterwards. Bridging over v4 at
+	// merge time would produce a wider file whose advertised range
+	// spans the full step but whose content is a mix of v4's
+	// pre-target snapshot + earlier files — misrepresenting the
+	// merged file's true horizon.
+	t.Run("v4_in_range_blocks_merge_until_retire_consumes_it", func(t *testing.T) {
 		// stepSize=4. v4 at (8, 14): step-aligned start (step 2), mid-step end.
-		// Per-step successors start INSIDE v4's raw-txnum range (12 ∈ [8, 14)).
-		// Walk from f(24,32) with endStep=8 (span=8*4=32) needs to reach 0.
-		// Without bridge: walk breaks at v4 (14 ≠ 12) → no merge.
-		// With bridge: v4's start=8 <= 12 and end=14 >= 12 → coverStart drops to 8,
-		//              then legacy f(0,8) closes the walk to 0. Merge (0, 32) fires.
-		files := visibleFiles{
+		// Walk from f(24,32) with span=32 tries to cover 0..32.
+		// Any proposed merge whose range spans v4 MUST be skipped by the
+		// guard — merger would otherwise write a wider file whose
+		// advertised range spans the full step but whose content is a
+		// mix of v4's pre-target snapshot + earlier files.
+		filesWithV4 := visibleFiles{
 			f(0, 8),   // legacy
 			f(8, 14),  // v4: mid-step end (14 % 4 == 2)
 			f(12, 16), // per-step overlapping v4
@@ -1083,8 +1087,30 @@ func TestFindMergeRangeInFiles(t *testing.T) {
 			f(20, 24),
 			f(24, 32),
 		}
-		mr := findMergeRangeInFiles(files, uint64(4), 32, uint64(32), false)
-		assert.True(t, mr.needMerge, "mid-step v4 file must not block merges that span across it")
+		mr := findMergeRangeInFiles(filesWithV4, uint64(4), 32, uint64(32), false)
+		if mr.needMerge {
+			// A merge proposal that doesn't cross v4 (post-v4 range only)
+			// is still allowed — merger operating strictly right of v4
+			// doesn't misrepresent coverage.
+			assert.GreaterOrEqual(t, mr.from, uint64(14),
+				"any proposed merge with v4 present must start after v4's endTxNum (%d) — got mr=(%d, %d)",
+				uint64(14), mr.from, mr.to)
+		}
+
+		// After retire consumes v4 (simulated by removing v4 from files
+		// AND replacing the overlapping f(12,16) with a fresh
+		// step-aligned f(8,16) that contains the merged content),
+		// merge fires normally on the resulting step-aligned partition,
+		// spanning the full 0..32.
+		filesPostRetire := visibleFiles{
+			f(0, 8),
+			f(8, 16),
+			f(16, 20),
+			f(20, 24),
+			f(24, 32),
+		}
+		mr = findMergeRangeInFiles(filesPostRetire, uint64(4), 32, uint64(32), false)
+		assert.True(t, mr.needMerge, "post-retire step-aligned partition must merge normally")
 		assert.Equal(t, uint64(0), mr.from)
 		assert.Equal(t, uint64(32), mr.to)
 	})
