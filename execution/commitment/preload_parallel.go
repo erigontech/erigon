@@ -40,7 +40,10 @@ func estimatedEntryCost(key, value []byte) int {
 
 // minEntryBytes: true lower bound on estimatedEntryCost for a storage-trunk
 // branch (33 = shortest HexToCompact key at depth >= 64; value may be empty).
-// Bounds a wave's file fetch so the budget is guaranteed exhausted inside it.
+// Caps a wave's file fetch to what the remaining budget could still pin. Keys
+// absent from the file layer cost nothing, so a capped fetch may leave the
+// budget unspent — the wave's no-progress check, not this bound, is what ends
+// the step.
 const minEntryBytes = estimatedEntryOverheadBytes + 33
 
 // maxStorageTrunkDepth: 64 (account path) + 64 (keccak256(slot)) = 128.
@@ -164,7 +167,7 @@ func (p *ContractTrunkPreloadParallel) Run(
 		return 0, false, fmt.Errorf("ContractTrunkPreloadParallel.Run: resolver is nil")
 	}
 	if stepBudgetBytes <= 0 {
-		return 0, len(p.frontier) == 0, nil
+		return 0, len(p.frontier) == 0 && len(p.pendingChildren) == 0, nil
 	}
 	defer p.releaseScratch()
 
@@ -212,15 +215,15 @@ func (p *ContractTrunkPreloadParallel) Run(
 
 	for !budgetHit && p.nextDepth <= maxStorageTrunkDepth && len(p.frontier) > 0 {
 		depth := p.nextDepth
+		wavePinnedBefore := chunkPinned
 		dbHits, dbVals, fileMiss, dbHitsBytes := p.sortAndPartitionFrontier(dbBranches)
 
-		// Cap the file fetch by what the budget can absorb after dbHits.
+		// Cap the file fetch by what the budget can absorb after dbHits. Below
+		// minEntryBytes no file entry can be pinned, so fetching any is waste.
 		var fileMissDeferred []pathKey
-		noFileBudget := false
-		if fileBudget := stepCap - p.usedBytes - dbHitsBytes; fileBudget <= 0 {
+		if fileBudget := stepCap - p.usedBytes - dbHitsBytes; fileBudget < minEntryBytes {
 			fileMissDeferred = fileMiss
 			fileMiss = nil
-			noFileBudget = true
 		} else if maxFileFetch := fileBudget/minEntryBytes + 1; maxFileFetch < len(fileMiss) {
 			fileMissDeferred = fileMiss[maxFileFetch:]
 			fileMiss = fileMiss[:maxFileFetch]
@@ -249,8 +252,9 @@ func (p *ContractTrunkPreloadParallel) Run(
 			}
 			p.dbHitsPinned++
 		}
-		fileMissStop := len(fileMiss)
+		fileMissStop := 0
 		if !budgetHit {
+			fileMissStop = len(fileMiss)
 			for i, pk := range fileMiss {
 				v := fileVals[i]
 				if v == nil {
@@ -263,10 +267,12 @@ func (p *ContractTrunkPreloadParallel) Run(
 			}
 		}
 
-		// Deferring the whole miss set is not progress: depth and frontier stay
-		// put, and pin() only trips budgetHit on a strict overflow, so a wave
-		// that fills usedBytes to exactly stepCap would re-enter here forever.
-		if noFileBudget && len(fileMissDeferred) > 0 {
+		// Re-entering only helps if the next iteration sees a different budget.
+		// It does not when the whole miss set was deferred (dbHits consume
+		// exactly the bytes the deferral already accounted for), nor when a
+		// capped fetch pinned nothing because its keys were absent from the file
+		// layer. Either way, end the step; the tail resumes on the next Run.
+		if len(fileMissDeferred) > 0 && (len(fileMiss) == 0 || chunkPinned == wavePinnedBefore) {
 			budgetHit = true
 		}
 
@@ -282,8 +288,9 @@ func (p *ContractTrunkPreloadParallel) Run(
 		}
 
 		if len(fileMissDeferred) > 0 {
-			// Defensive: !budgetHit should mean no truncation. Clone out of the
-			// scratch-aliased slice so the next wave's partition can't overwrite it.
+			// Capped fetch that still pinned something: stay at this depth and
+			// resume with the tail. Clone out of the scratch-aliased slice so the
+			// next wave's partition can't overwrite it.
 			p.frontier = slices.Clone(fileMissDeferred)
 		} else {
 			p.frontier = p.pendingChildren
@@ -334,6 +341,9 @@ func PreloadContractTrunkParallel(
 ) (pinned int, err error) {
 	if ramBudgetBytes <= 0 {
 		return 0, fmt.Errorf("PreloadContractTrunkParallel: ramBudgetBytes must be positive, got %d", ramBudgetBytes)
+	}
+	if cache == nil {
+		return 0, fmt.Errorf("PreloadContractTrunkParallel: cache is nil")
 	}
 	p, err := NewContractTrunkPreloadParallel(contractHash)
 	if err != nil {
