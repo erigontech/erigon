@@ -21,21 +21,26 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
 
-func buildReplyForTest(t *testing.T, lastNewBlockSeen, frozenBlocks, executionProgress uint64) *remoteproto.SyncingReply {
+func newSyncStateFixture(t *testing.T, executionProgress uint64) (*Notifications, kv.RwTx) {
 	t.Helper()
 	db := memdb.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
-	defer tx.Rollback()
+	t.Cleanup(tx.Rollback)
 	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, executionProgress))
+	return NewNotifications(nil), tx
+}
 
-	n := NewNotifications(nil)
+func buildReplyForTest(t *testing.T, lastNewBlockSeen, frozenBlocks, executionProgress uint64) *remoteproto.SyncingReply {
+	t.Helper()
+	n, tx := newSyncStateFixture(t, executionProgress)
 	n.NewLastBlockSeen(lastNewBlockSeen)
 	reply, err := n.BuildSyncingReply(tx, frozenBlocks)
 	require.NoError(t, err)
@@ -75,6 +80,95 @@ func TestBuildSyncingReplyFrozenBlocksRaiseHighestBlock(t *testing.T) {
 	require.True(t, reply.Syncing)
 	require.Equal(t, uint64(500), reply.LastNewBlockSeen)
 	require.Equal(t, uint64(500), reply.FrozenBlocks)
+}
+
+func buildReplyWithDownloadForTest(t *testing.T, done, total, targetBlock, executionProgress uint64) *remoteproto.SyncingReply {
+	t.Helper()
+	n, tx := newSyncStateFixture(t, executionProgress)
+	n.SetSnapshotDownloadProgress(done, total, targetBlock)
+	reply, err := n.BuildSyncingReply(tx, 0)
+	require.NoError(t, err)
+	return reply
+}
+
+// During snapshot download the byte-completion ratio is mapped onto the
+// block-based currentBlock/highestBlock so dashboards show smooth 0→100%
+// progress: currentBlock = ratio * blocks_to_be_downloaded.
+func TestBuildSyncingReplySnapshotDownloadMapsRatioToBlocks(t *testing.T) {
+	reply := buildReplyWithDownloadForTest(t, 250, 1000, 20_000_000, 0)
+	require.True(t, reply.Syncing)
+	require.Empty(t, reply.Stages)
+	require.Equal(t, uint64(5_000_000), reply.CurrentBlock)
+	require.Equal(t, uint64(20_000_000), reply.LastNewBlockSeen)
+}
+
+// Once execution has started the download mapping must not apply, even if stale
+// download progress lingers.
+func TestBuildSyncingReplySnapshotDownloadIgnoredAfterExecutionStarts(t *testing.T) {
+	reply := buildReplyWithDownloadForTest(t, 250, 1000, 20_000_000, 100)
+	require.True(t, reply.Syncing)
+	require.Equal(t, uint64(100), reply.CurrentBlock)
+}
+
+// After the download completes progress is pinned at 100% (done==total) to bridge
+// the handoff to execution: currentBlock must report the full target, not drop to
+// 0 while the Execution stage counter has not yet been updated.
+func TestBuildSyncingReplySnapshotDownloadCompletePinsFullProgress(t *testing.T) {
+	reply := buildReplyWithDownloadForTest(t, 1000, 1000, 20_000_000, 0)
+	require.True(t, reply.Syncing)
+	require.Empty(t, reply.Stages)
+	require.Equal(t, uint64(20_000_000), reply.CurrentBlock)
+	require.Equal(t, uint64(20_000_000), reply.LastNewBlockSeen)
+}
+
+// The snapshots being downloaded only cover targetBlock, so an FCU arriving
+// mid-download must raise the reported highest block without scaling the byte
+// ratio onto it: doing so claims blocks no snapshot holds and makes
+// currentBlock step backwards once execution starts.
+func TestBuildSyncingReplySnapshotDownloadDoesNotScaleToLiveHead(t *testing.T) {
+	const targetBlock, liveHead = 20_000_000, 21_000_000
+	n, tx := newSyncStateFixture(t, 0)
+	n.NewLastBlockSeen(liveHead)
+	n.SetSnapshotDownloadProgress(500, 1000, targetBlock)
+
+	reply, err := n.BuildSyncingReply(tx, 0)
+	require.NoError(t, err)
+	require.True(t, reply.Syncing)
+	require.Equal(t, uint64(targetBlock/2), reply.CurrentBlock)
+	require.Equal(t, uint64(liveHead), reply.LastNewBlockSeen)
+}
+
+// The downloader recomputes its byte total every cycle and it grows as torrent
+// metadata arrives, so consecutive samples differ in both fields. A reader must
+// never combine the total of one sample with the completed bytes of the next:
+// that overshoots the target, i.e. currentBlock > highestBlock.
+func TestBuildSyncingReplySnapshotDownloadProgressIsPublishedAtomically(t *testing.T) {
+	n, tx := newSyncStateFixture(t, 0)
+	const target = 20_000_000
+
+	stop, writerDone := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(writerDone)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			n.SetSnapshotDownloadProgress(99, 100, target)
+			n.SetSnapshotDownloadProgress(150, 200, target)
+		}
+	}()
+	defer func() {
+		close(stop)
+		<-writerDone
+	}()
+
+	for range 20_000 {
+		reply, err := n.BuildSyncingReply(tx, 0)
+		require.NoError(t, err)
+		require.LessOrEqual(t, reply.CurrentBlock, reply.LastNewBlockSeen)
+	}
 }
 
 func drainSyncStateEvents(ch chan *remoteproto.SyncingReply) []*remoteproto.SyncingReply {

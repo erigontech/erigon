@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
@@ -157,7 +158,91 @@ func SpawnStageSnapshots(s *StageState, ctx context.Context, tx kv.RwTx, cfg Sna
 	return nil
 }
 
-func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.RwTx, cfg SnapshotsCfg, logger log.Logger) error {
+// Overridden by tests to avoid waiting whole intervals for a publish.
+var snapshotDownloadProgressInterval = 2 * time.Second
+
+// startSnapshotDownloadProgressReporter periodically republishes sync state so
+// eth_syncing reports progress during the (long) snapshot download. Returns a
+// stop func that, on a successful download, pins progress at 100% to bridge the
+// handoff to execution.
+// No-op when the downloader can't report progress or the target is unknown.
+func startSnapshotDownloadProgressReporter(ctx context.Context, cfg SnapshotsCfg) func(downloadErr error) {
+	noop := func(error) {}
+	if cfg.notifier == nil {
+		return noop
+	}
+	reporter, ok := cfg.snapshotDownloader.(dbservices.DownloadProgressReport)
+	if !ok {
+		return noop
+	}
+	var target uint64
+	if c, known := snapcfg.KnownCfg(cfg.chainConfig.ChainName); known {
+		target = c.ExpectBlocks
+	}
+	// A capped download requests only the files below toBlock, so the byte total
+	// covers the capped set and the target has to match it. Approximate: the cap
+	// gets rounded to step boundaries anyway.
+	if toBlock := cfg.syncConfig.SnapshotDownloadToBlock; toBlock > 0 {
+		target = min(target, toBlock-1)
+	}
+	if target == 0 {
+		return noop
+	}
+
+	reporter.ResetProgress()
+
+	setAndPublish := func(done, total, targetBlock uint64) {
+		cfg.notifier.SetSnapshotDownloadProgress(done, total, targetBlock)
+		if err := cfg.db.View(ctx, func(tx kv.Tx) error {
+			return cfg.notifier.PublishSyncState(tx, cfg.blockReader.FrozenBlocks())
+		}); err != nil {
+			log.Warn("[OtterSync] sync-state publish failed", "err", err)
+		}
+	}
+
+	publish := func() {
+		// A 100% sample is either the previous phase's terminal one or this phase's
+		// own completion, which the stop func pins.
+		if done, total := reporter.Completed(); total > 0 && done < total {
+			setAndPublish(done, total, target)
+		}
+	}
+
+	stopCtx, cancel := context.WithCancel(ctx)
+	stopped := make(chan struct{})
+	go func() {
+		defer dbg.LogPanic()
+		defer close(stopped)
+		t := time.NewTicker(snapshotDownloadProgressInterval)
+		defer t.Stop()
+		for {
+			select {
+			case <-stopCtx.Done():
+				return
+			case <-t.C:
+				publish()
+			}
+		}
+	}()
+
+	return func(downloadErr error) {
+		cancel()
+		<-stopped
+		// A failed download must not claim 100%. Keeping the last sample rather
+		// than clearing avoids a dip to 0 across a stage retry.
+		if downloadErr != nil {
+			return
+		}
+		// Pin at 100% instead of clearing: the download branch only applies while
+		// Execution progress is 0, so it self-clears the moment execution advances.
+		// Clearing here would report currentBlock=0 until then, i.e. a 100%→0% dip.
+		// Don't read the downloader here: completion can land inside the last
+		// sampling window, where it still reports (0, 0) and would clear instead.
+		setAndPublish(1, 1, cfg.blockReader.FrozenBlocks())
+	}
+}
+
+func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.RwTx, cfg SnapshotsCfg, logger log.Logger) (err error) {
 	if !s.CurrentSyncCycle.IsFirstCycle {
 		return nil
 	}
@@ -230,6 +315,11 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 
 	mustReopenUnderlyingFilesTx(tx)
 
+	// Only this phase reports progress: the header-chain phase above downloads a
+	// small subset, so its ratio would jump backwards once the full set is known.
+	stopReporter := startSnapshotDownloadProgressReporter(ctx, cfg)
+	defer func() { stopReporter(err) }()
+
 	if err := snapshotsync.SyncSnapshots(
 		ctx,
 		s.LogPrefix(),
@@ -276,7 +366,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 
 	// All snapshots are downloaded. Now commit the preverified.toml file so we load the same set of
 	// hashes next time.
-	err := downloadercfg.SaveSnapshotHashes(cfg.dirs, cfg.chainConfig.ChainName)
+	err = downloadercfg.SaveSnapshotHashes(cfg.dirs, cfg.chainConfig.ChainName)
 	if err != nil {
 		err = fmt.Errorf("saving snapshot hashes: %w", err)
 		return err

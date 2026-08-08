@@ -170,6 +170,18 @@ type DownloaderClient interface {
 	Download(context.Context, *downloaderproto.DownloadRequest) error
 }
 
+// DownloadProgressReport is an optional capability of a DownloaderClient: it
+// reports snapshot-download progress in bytes so eth_syncing can surface it.
+// Only the in-process downloader implements it; an external one over gRPC does
+// not, and callers degrade to no progress.
+type DownloadProgressReport interface {
+	// Completed reports downloaded and total bytes; total == 0 means unknown.
+	Completed() (done, total uint64)
+	// ResetProgress drops any stale sample, so that a phase downloading a small
+	// subset of the files cannot be mistaken for progress on the full set.
+	ResetProgress()
+}
+
 // A Seeder client that does nothing when delete or seed is requested, a common configuration pattern.
 type NoopSeederClient struct{}
 

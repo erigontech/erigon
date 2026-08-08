@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 )
 
 func TestConcurrentDownload(t *testing.T) {
@@ -345,4 +346,115 @@ func newDownloaderTest(t *testing.T) *downloaderTest {
 		cfg:        cfg,
 		downloader: d,
 	}
+}
+
+func TestDownloaderCompletedAndResetProgress(t *testing.T) {
+	var d Downloader
+
+	_, total := d.Completed()
+	require.Zero(t, total, "no sample yet")
+
+	d.lastStats.Store(&AggStats{BytesCompleted: 30, BytesTotal: 100, MetadataReady: 2, NumTorrents: 2})
+	done, total := d.Completed()
+	require.Equal(t, uint64(30), done)
+	require.Equal(t, uint64(100), total)
+
+	d.ResetProgress()
+	_, total = d.Completed()
+	require.Zero(t, total, "reset drops the sample")
+}
+
+// Torrents whose metainfo has not arrived are excluded from both byte counters,
+// so an early sample counts the already-complete header files against a partial
+// total and reports near-completion.
+func TestDownloaderCompletedIgnoresIncompleteMetadata(t *testing.T) {
+	var d Downloader
+
+	d.storeStats(AggStats{BytesCompleted: 25_000, BytesTotal: 26_000, MetadataReady: 3, NumTorrents: 10})
+
+	done, total := d.Completed()
+	require.Zero(t, total)
+	require.Zero(t, done)
+}
+
+func TestDownloaderCompletedReportsOnceMetadataArrives(t *testing.T) {
+	var d Downloader
+
+	d.storeStats(AggStats{BytesCompleted: 25_000, BytesTotal: 26_000, MetadataReady: 3, NumTorrents: 10})
+	d.storeStats(AggStats{BytesCompleted: 26_000, BytesTotal: 900_000, MetadataReady: 10, NumTorrents: 10})
+
+	done, total := d.Completed()
+	require.Equal(t, uint64(26_000), done)
+	require.Equal(t, uint64(900_000), total)
+}
+
+// BytesCompleted counts dirty bytes, which can go back down.
+func TestDownloaderCompletedNeverRegressesWithinSession(t *testing.T) {
+	var d Downloader
+
+	d.storeStats(AggStats{BytesCompleted: 500, BytesTotal: 1000, MetadataReady: 2, NumTorrents: 2})
+	d.storeStats(AggStats{BytesCompleted: 400, BytesTotal: 1000, MetadataReady: 2, NumTorrents: 2})
+
+	done, _ := d.Completed()
+	require.Equal(t, uint64(500), done)
+}
+
+// The high-water mark is per download session, or a retry after a failure would
+// stick at the previous session's high.
+func TestDownloaderResetProgressClearsHighWaterMark(t *testing.T) {
+	var d Downloader
+
+	d.storeStats(AggStats{BytesCompleted: 900, BytesTotal: 1000, MetadataReady: 2, NumTorrents: 2})
+	d.ResetProgress()
+	d.storeStats(AggStats{BytesCompleted: 100, BytesTotal: 1000, MetadataReady: 2, NumTorrents: 2})
+
+	done, _ := d.Completed()
+	require.Equal(t, uint64(100), done)
+}
+
+// noProgressDownloaderClient stands in for an external downloader reached over
+// gRPC, which cannot report progress.
+type noProgressDownloaderClient struct {
+	downloaderproto.DownloaderClient
+}
+
+// The capability travels through RpcClient by type assertion, so a broken bridge
+// compiles fine and silently reports no progress.
+func TestRpcClientForwardsProgressToInProcessDownloader(t *testing.T) {
+	test := newDownloaderTest(t)
+	grpcServer, err := NewGrpcServer(test.downloader)
+	require.NoError(t, err)
+	client := NewRpcClient(DirectGrpcServerClient(grpcServer), test.dirs.Snap)
+
+	test.downloader.storeStats(AggStats{BytesCompleted: 30, BytesTotal: 100, MetadataReady: 2, NumTorrents: 2})
+	done, total := client.Completed()
+	require.Equal(t, uint64(30), done)
+	require.Equal(t, uint64(100), total)
+
+	client.ResetProgress()
+	_, total = client.Completed()
+	require.Zero(t, total)
+}
+
+func TestRpcClientProgressDegradesWithoutCapability(t *testing.T) {
+	client := NewRpcClient(noProgressDownloaderClient{}, t.TempDir())
+
+	done, total := client.Completed()
+	require.Zero(t, done)
+	require.Zero(t, total)
+	client.ResetProgress()
+}
+
+// The stored snapshot must not alias the caller's value, which the stats loop
+// overwrites on every iteration.
+func TestDownloaderStoreStatsSnapshotIsImmutable(t *testing.T) {
+	var d Downloader
+
+	s := AggStats{BytesCompleted: 10, BytesTotal: 100, MetadataReady: 2, NumTorrents: 2}
+	d.storeStats(s)
+	s.BytesCompleted = 999
+
+	done, total := d.Completed()
+	require.Equal(t, uint64(10), done)
+	require.Equal(t, uint64(100), total)
 }

@@ -92,6 +92,18 @@ func (n *Notifications) BuildSyncingReply(tx kv.Getter, frozenBlocks uint64) (*r
 		Syncing:          true,
 	}
 
+	// While snapshots are still downloading (before execution has advanced) map
+	// the byte-completion ratio onto the block-based fields so dashboards show
+	// smooth progress: currentBlock = ratio * blocks_to_be_downloaded. The ratio
+	// scales the snapshots' target, not the live head, which an FCU can push past
+	// what the snapshots actually cover.
+	if snap := n.snapDownload.Load(); snap != nil && currentBlock == 0 {
+		ratio := float64(snap.done) / float64(snap.total)
+		reply.CurrentBlock = uint64(ratio * float64(snap.targetBlock))
+		reply.LastNewBlockSeen = max(snap.targetBlock, highestBlock)
+		return reply, nil
+	}
+
 	if highestBlock == 0 {
 		return reply, nil
 	}

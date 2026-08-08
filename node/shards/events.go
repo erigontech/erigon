@@ -328,12 +328,35 @@ type Notifications struct {
 	RecentReceipts       *RecentReceipts
 	LastNewBlockSeen     atomic.Uint64 // This is used by eth_syncing as an heuristic to determine if the node is syncing or not.
 
+	// Snapshot download progress. Nil means no download is in progress;
+	// eth_syncing then reports block-based progress.
+	snapDownload atomic.Pointer[snapDownloadProgress]
+
 	syncStateLock sync.Mutex
 	lastSyncState *remoteproto.SyncingReply
 }
 
 func (n *Notifications) NewLastBlockSeen(blockNum uint64) {
 	n.LastNewBlockSeen.Store(blockNum)
+}
+
+// snapDownloadProgress is published as a whole: the byte total is recomputed by
+// the downloader every cycle and grows as torrent metadata arrives, so mixing
+// fields from two samples can report more progress than was downloaded.
+type snapDownloadProgress struct {
+	done, total uint64
+	targetBlock uint64 // highest block covered by the snapshots being downloaded
+}
+
+// SetSnapshotDownloadProgress records snapshot-download progress in bytes so
+// eth_syncing can report it as block-based progress. total==0 clears it
+// (download done or not started).
+func (n *Notifications) SetSnapshotDownloadProgress(done, total, targetBlock uint64) {
+	if total == 0 {
+		n.snapDownload.Store(nil)
+		return
+	}
+	n.snapDownload.Store(&snapDownloadProgress{done: done, total: total, targetBlock: targetBlock})
 }
 
 func NewNotifications(stateChangesConsumer StateChangeConsumer) *Notifications {

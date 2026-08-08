@@ -85,8 +85,24 @@ func (me *RpcClient) Delete(ctx context.Context, paths []string) (err error) {
 	return
 }
 
+func (me *RpcClient) Completed() (done, total uint64) {
+	if c, ok := me.inner.(dbservices.DownloadProgressReport); ok {
+		return c.Completed()
+	}
+	return 0, 0
+}
+
+func (me *RpcClient) ResetProgress() {
+	if c, ok := me.inner.(dbservices.DownloadProgressReport); ok {
+		c.ResetProgress()
+	}
+}
+
 func NewRpcClient(inner downloaderproto.DownloaderClient, rootDir string) *RpcClient {
 	return &RpcClient{inner: inner, rootDir: rootDir}
 }
 
-var _ dbservices.DownloaderClient = (*RpcClient)(nil)
+var (
+	_ dbservices.DownloaderClient       = (*RpcClient)(nil)
+	_ dbservices.DownloadProgressReport = (*RpcClient)(nil)
+)
