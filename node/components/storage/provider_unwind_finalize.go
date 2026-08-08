@@ -465,11 +465,11 @@ func (p *Provider) removeAccessorSiblings(kvPath string) []string {
 
 // renameAccessorsToOld renames every accessor file (.bt / .kvi /
 // .kvei) sharing the regenerated .kv's domain + step-range to a .old
-// sidecar. fileItemsWithMissedAccessors rebuilds only when the
-// accessor file is absent under its canonical name; without renaming
-// the stale accessor out of the way the rebuild predicate skips it
-// and the new (truncated) .kv is served via the OLD accessor's
-// offsets.
+// sidecar, and unlinks each accessor's .torrent sidecar. Without the
+// rename fileItemsWithMissedAccessors sees the stale accessor and
+// skips the rebuild, serving the new .kv via the OLD accessor's
+// offsets. Without the .torrent unlink the sidecar orphans against
+// the rebuilt accessor (whose InfoHash differs).
 func (p *Provider) renameAccessorsToOld(finalPath string) []string {
 	finalBase := filepath.Base(finalPath)
 	_, after, ok := strings.Cut(finalBase, "-")
@@ -496,6 +496,9 @@ func (p *Provider) renameAccessorsToOld(finalPath string) []string {
 				continue
 			}
 			olds = append(olds, oldPath)
+			if err := dir.RemoveFile(m + ".torrent"); err != nil && !os.IsNotExist(err) && p.logger != nil {
+				p.logger.Warn("[storage] Provider.FinalizeUnwind: remove accessor .torrent sidecar failed (continuing — Downloader close-time sweep will pick it up)", "err", err, "path", m+".torrent")
+			}
 		}
 	}
 	return olds

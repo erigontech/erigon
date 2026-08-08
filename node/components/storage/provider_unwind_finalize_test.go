@@ -266,11 +266,22 @@ func TestProvider_FinalizeUnwind_RemovesEntirelyPastFiles(t *testing.T) {
 	t.Parallel()
 	tmpDir := t.TempDir()
 
+	// Every past-boundary .kv comes with the full accessor family that
+	// a real state-domain file has on disk (.bt / .kvi / .kvei) plus a
+	// .torrent sidecar for each. All of them must be removed together —
+	// leaving any accessor .torrent behind produces the orphan class the
+	// datadir-consistency check catches at Phase 5 (an accessor .torrent
+	// whose primary payload no longer exists).
 	type pastFile struct {
 		name        string
 		path        string
 		torrentPath string
 		btPath      string
+		btTorrent   string
+		kviPath     string
+		kviTorrent  string
+		kveiPath    string
+		kveiTorrent string
 	}
 	pastFiles := []pastFile{
 		{name: "v1.1-accounts.278-279.kv"},
@@ -280,10 +291,22 @@ func TestProvider_FinalizeUnwind_RemovesEntirelyPastFiles(t *testing.T) {
 	for i := range pastFiles {
 		pastFiles[i].path = filepath.Join(tmpDir, pastFiles[i].name)
 		pastFiles[i].torrentPath = pastFiles[i].path + ".torrent"
-		pastFiles[i].btPath = strings.TrimSuffix(pastFiles[i].path, ".kv") + ".bt"
+		stem := strings.TrimSuffix(pastFiles[i].path, ".kv")
+		pastFiles[i].btPath = stem + ".bt"
+		pastFiles[i].btTorrent = stem + ".bt.torrent"
+		pastFiles[i].kviPath = stem + ".kvi"
+		pastFiles[i].kviTorrent = stem + ".kvi.torrent"
+		pastFiles[i].kveiPath = stem + ".kvei"
+		pastFiles[i].kveiTorrent = stem + ".kvei.torrent"
 		require.NoError(t, os.WriteFile(pastFiles[i].path, []byte("stale past-boundary content"), 0o600))
 		require.NoError(t, os.WriteFile(pastFiles[i].torrentPath, []byte("stale torrent"), 0o600))
-		require.NoError(t, os.WriteFile(pastFiles[i].btPath, []byte("stale accessor"), 0o600))
+		for _, p := range []string{
+			pastFiles[i].btPath, pastFiles[i].btTorrent,
+			pastFiles[i].kviPath, pastFiles[i].kviTorrent,
+			pastFiles[i].kveiPath, pastFiles[i].kveiTorrent,
+		} {
+			require.NoError(t, os.WriteFile(p, []byte("stale accessor"), 0o600))
+		}
 	}
 
 	stub := &recordingDownloaderClient{}
@@ -303,12 +326,23 @@ func TestProvider_FinalizeUnwind_RemovesEntirelyPastFiles(t *testing.T) {
 	require.NoError(t, p.FinalizeUnwind())
 
 	for _, f := range pastFiles {
-		_, err := os.Stat(f.path)
-		require.True(t, os.IsNotExist(err), "past-boundary .kv must be removed: %s", f.path)
-		_, err = os.Stat(f.torrentPath)
-		require.True(t, os.IsNotExist(err), "past-boundary .torrent must be removed: %s", f.torrentPath)
-		_, err = os.Stat(f.btPath)
-		require.True(t, os.IsNotExist(err), "past-boundary .bt accessor must be removed: %s", f.btPath)
+		checks := []struct {
+			path string
+			what string
+		}{
+			{f.path, ".kv"},
+			{f.torrentPath, ".kv.torrent"},
+			{f.btPath, ".bt"},
+			{f.btTorrent, ".bt.torrent"},
+			{f.kviPath, ".kvi"},
+			{f.kviTorrent, ".kvi.torrent"},
+			{f.kveiPath, ".kvei"},
+			{f.kveiTorrent, ".kvei.torrent"},
+		}
+		for _, c := range checks {
+			_, err := os.Stat(c.path)
+			require.True(t, os.IsNotExist(err), "past-boundary %s must be removed: %s", c.what, c.path)
+		}
 	}
 
 	deletes := stub.snapshotDeletes()
