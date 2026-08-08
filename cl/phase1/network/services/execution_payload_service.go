@@ -20,8 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
@@ -41,21 +39,12 @@ type seenEnvelopeKey struct {
 	builderIndex    uint64
 }
 
-// pendingEnvelopeKey tracks envelopes waiting for their block to arrive.
-// We use (blockRoot, envelopeHash) as key instead of just blockRoot because:
-//   - Multiple envelopes (including forged ones) may arrive before the block
-//   - Using only blockRoot would cause later arrivals to overwrite earlier ones
-//   - If a forged envelope overwrites the valid one, we lose the valid envelope
-//   - With envelopeHash, all candidates are kept and validated when block arrives
+// pendingEnvelopeKey identifies one envelope candidate for a block. Including
+// envelopeHash keeps competing candidates separate until validation, so an
+// invalid candidate cannot prevent a valid candidate from being queued.
 type pendingEnvelopeKey struct {
 	blockRoot    common.Hash
 	envelopeHash common.Hash
-}
-
-// envelopeJob represents a pending envelope waiting for its block to arrive
-type envelopeJob struct {
-	envelope     *cltypes.SignedExecutionPayloadEnvelope
-	creationTime time.Time
 }
 
 const (
@@ -74,9 +63,7 @@ type executionPayloadService struct {
 	seenEnvelopesCache *lru.Cache[seenEnvelopeKey, struct{}]
 
 	// Pending envelopes waiting for block to arrive
-	pendingEnvelopes sync.Map // pendingEnvelopeKey -> *envelopeJob
-	pendingCount     atomic.Int32
-	pendingCond      *sync.Cond
+	pending *pendingJobQueue[pendingEnvelopeKey, *cltypes.SignedExecutionPayloadEnvelope]
 }
 
 // NewExecutionPayloadService creates a new execution payload service
@@ -95,10 +82,22 @@ func NewExecutionPayloadService(
 		beaconCfg:          beaconCfg,
 		emitters:           emitters,
 		seenEnvelopesCache: seenEnvelopesCache,
-		pendingCond:        sync.NewCond(&sync.Mutex{}),
 	}
-	go s.loop(ctx)
+	s.pending = s.newPendingQueue()
+	go s.pending.loop(ctx)
 	return s
+}
+
+func (s *executionPayloadService) newPendingQueue() *pendingJobQueue[pendingEnvelopeKey, *cltypes.SignedExecutionPayloadEnvelope] {
+	return newPendingJobQueue(pendingJobQueueOptions{
+		capacity:      maxPendingEnvelopes,
+		expiry:        pendingEnvelopeExpiry,
+		checkInterval: pendingEnvelopeCheckInterval,
+	},
+		s.tryProcessPendingEnvelope,
+		func(key pendingEnvelopeKey) {
+			log.Trace("Pending envelope expired", "blockRoot", key.blockRoot)
+		})
 }
 
 func (s *executionPayloadService) Names() []string {
@@ -198,106 +197,33 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 	return nil
 }
 
-// queuePendingEnvelope adds an envelope to the pending queue for later processing
+// queuePendingEnvelope defers an envelope until its referenced block is available.
 func (s *executionPayloadService) queuePendingEnvelope(blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) {
-	if s.pendingCount.Add(1) > maxPendingEnvelopes {
-		s.pendingCount.Add(-1)
-		return
-	}
-
-	// Compute envelope hash to allow multiple candidates per block
-	envelopeHash, err := envelope.HashSSZ()
-	if err != nil {
-		s.pendingCount.Add(-1)
-		log.Warn("Failed to hash envelope for pending queue", "blockRoot", blockRoot, "err", err)
-		return
-	}
-
-	key := pendingEnvelopeKey{
-		blockRoot:    blockRoot,
-		envelopeHash: envelopeHash,
-	}
-
-	if _, loaded := s.pendingEnvelopes.LoadOrStore(key, &envelopeJob{
-		envelope:     envelope,
-		creationTime: time.Now(),
-	}); loaded {
-		s.pendingCount.Add(-1)
-	} else {
-		s.pendingCond.L.Lock()
-		s.pendingCond.Signal()
-		s.pendingCond.L.Unlock()
-	}
-}
-
-// loop is the background goroutine that processes pending envelopes
-func (s *executionPayloadService) loop(ctx context.Context) {
-	// Wake any blocked Wait() on context cancellation to prevent deadlock.
-	go func() {
-		<-ctx.Done()
-		s.pendingCond.L.Lock()
-		s.pendingCond.Broadcast()
-		s.pendingCond.L.Unlock()
-	}()
-
-	for {
-		// Wait until there are pending envelopes
-		s.pendingCond.L.Lock()
-		for s.pendingCount.Load() == 0 {
-			// Check if context is cancelled
-			select {
-			case <-ctx.Done():
-				s.pendingCond.L.Unlock()
-				return
-			default:
-			}
-			s.pendingCond.Wait()
+	err := s.pending.enqueue(envelope, func() (pendingEnvelopeKey, error) {
+		envelopeHash, err := envelope.HashSSZ()
+		if err != nil {
+			return pendingEnvelopeKey{}, err
 		}
-		s.pendingCond.L.Unlock()
-
-		// Poll until all pending envelopes are processed
-		ticker := time.NewTicker(pendingEnvelopeCheckInterval)
-		for s.pendingCount.Load() > 0 {
-			select {
-			case <-ctx.Done():
-				ticker.Stop()
-				return
-			case <-ticker.C:
-				s.processPendingEnvelopes(ctx)
-			}
-		}
-		ticker.Stop()
-	}
-}
-
-// processPendingEnvelopes checks and processes any pending envelopes whose blocks have arrived
-func (s *executionPayloadService) processPendingEnvelopes(ctx context.Context) {
-	s.pendingEnvelopes.Range(func(key, value any) bool {
-		pendingKey := key.(pendingEnvelopeKey)
-		job := value.(*envelopeJob)
-
-		// Check expiry
-		if time.Since(job.creationTime) > pendingEnvelopeExpiry {
-			s.pendingEnvelopes.Delete(pendingKey)
-			s.pendingCount.Add(-1)
-			log.Trace("Pending envelope expired", "blockRoot", pendingKey.blockRoot)
-			return true
-		}
-
-		// Check if block has arrived
-		block, ok := s.forkchoiceStore.GetBlock(pendingKey.blockRoot)
-		if !ok || block == nil {
-			return true // Block still not here, keep waiting
-		}
-
-		// Block arrived, remove from pending and process
-		s.pendingEnvelopes.Delete(pendingKey)
-		s.pendingCount.Add(-1)
-
-		// Re-run full validation via ProcessMessage
-		if err := s.ProcessMessage(ctx, nil, job.envelope); err != nil {
-			log.Trace("Failed to process pending envelope", "blockRoot", pendingKey.blockRoot, "err", err)
-		}
-		return true
+		return pendingEnvelopeKey{
+			blockRoot:    blockRoot,
+			envelopeHash: envelopeHash,
+		}, nil
 	})
+	if err != nil {
+		log.Warn("Failed to hash envelope for pending queue", "blockRoot", blockRoot, "err", err)
+	}
+}
+
+// tryProcessPendingEnvelope removes and revalidates an envelope once its block arrives.
+func (s *executionPayloadService) tryProcessPendingEnvelope(ctx context.Context, key pendingEnvelopeKey, envelope *cltypes.SignedExecutionPayloadEnvelope) (func(), bool) {
+	block, ok := s.forkchoiceStore.GetBlock(key.blockRoot)
+	if !ok || block == nil {
+		return nil, false
+	}
+
+	return func() {
+		if err := s.ProcessMessage(ctx, nil, envelope); err != nil {
+			log.Trace("Failed to process pending envelope", "blockRoot", key.blockRoot, "err", err)
+		}
+	}, true
 }
