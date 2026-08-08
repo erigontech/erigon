@@ -904,18 +904,63 @@ the other. There is no second zone holding chunks now, so that framing is dead
 - Modify: `tests/binary_trie/vectors/README.md`
 - Modify: `tests/binary_trie/vectors/binary_trie_vectors.json`
 
-- [ ] rebase `tests/binary-trie-zero-chunk-vectors` onto current
+- [x] rebase `tests/binary-trie-zero-chunk-vectors` onto current
       `projects/binary-trie`, resolving the generated JSON by regenerating it
-- [ ] reframe case one as a zero chunk crossing a `STEM_SUBTREE_WIDTH` group
+      (the two commits squashed to one: the second existed only to rename the
+      case for a split that is now deleted, so replaying it would have
+      reintroduced dead framing to immediately undo)
+- [x] reframe case one as a zero chunk crossing a `STEM_SUBTREE_WIDTH` group
       boundary (`tree_index >= 1`), and rename both cases away from "overflow"
-- [ ] regenerate with `uv run python tests/binary_trie/vectors/dump_vectors.py`
-      and update the README case table
-- [ ] verify both roots against erigon's engine and the canonical-rebuild oracle
-- [ ] rewrite the PR body: problem paragraph first with no "Summary" heading,
-      then `## Changes`; no Testing section, no AI mentions
-- [ ] push the rebased branch. **Do NOT post, edit or reply to any GitHub
+      (`zero_chunk_across_the_group_boundary`, 300 chunks with 5, 255 and 256
+      zeroed; `shared_bytecode_with_absent_chunks`)
+- [x] regenerate with `uv run python tests/binary_trie/vectors/dump_vectors.py`
+      and update the README case table (only the two new cases move the JSON;
+      no existing vector value changed)
+- [x] verify both roots against erigon's engine and the canonical-rebuild oracle
+      (temporary vendor swap: `TestPBinConformancePBTState` ran 20/20 with both
+      new subtests named in `-v` output, then the 18-case vendored file was
+      restored — the unmerged cases are deliberately not vendored)
+- [x] rewrite the PR body: problem paragraph first with no "Summary" heading,
+      then `## Changes`; no Testing section, no AI mentions (drafted below, not
+      posted — the Development Approach forbids writing to GitHub)
+- [x] push the rebased branch. **Do NOT post, edit or reply to any GitHub
       comment, review or PR body.** Pushing the branch is the whole of the
       outward action; the human replies to the rebase request themselves
+      (**blocked**, see ⚠️ below — the commit is ready locally)
+
+⚠️ The rebased branch is **not pushed**. `git push fork
+tests/binary-trie-zero-chunk-vectors` is rejected non-fast-forward, as any
+rebase of a published branch is, and force-pushing is off-limits under the
+standing no-force-push rule; the plan's authorization covers whether to push,
+not how. The rebase sits at `72d508a5b` in `~/org/wrk/espr` on
+`tests/binary-trie-zero-chunk-vectors`, one commit on `8d258bc`, ruff/mypy
+clean and `uv run pytest tests/binary_trie/ -q` green at 204 passed. Landing it
+needs one `git push --force-with-lease fork tests/binary-trie-zero-chunk-vectors`
+from a human.
+
+Leaf counts backing the case table, checked against `embed_flat_state` rather
+than asserted: 300 chunks with 5, 255 and 256 absent leave 297 chunk leaves —
+254 under the group-0 stem, 43 under group 1. One account commits 299 leaves,
+two sharing the code commit 301 across four stems, not 598.
+
+Draft body for execution-specs#3305, for a human to post:
+
+> `code_chunks_of_zero_bytes` is the only vector covering an absent chunk, and
+> it covers the easy shape: 62 bytes of code, entirely zero, one stem. Nothing
+> pins a hole inside a longer code, and nothing pins one at a group boundary,
+> where absence and the `tree_index` / `sub_index` split of a chunk id have to
+> compose — a client that mis-splits still commits the hole, under the wrong
+> stem or the wrong sub-index. Content addressing sharpens the second shape:
+> accounts running identical code share their chunk leaves, so a hole one of
+> them places wrong is a hole in the leaves both read.
+>
+> ## Changes
+>
+> - `zero_chunk_across_the_group_boundary`: 300 chunks with 5, 255 and 256
+>   zero — a hole inside group 0, one at its last sub-index, one at the first
+>   sub-index of group 1. 297 chunk leaves under two stems.
+> - `shared_bytecode_with_absent_chunks`: two accounts running that code. 301
+>   leaves, not 598.
 
 ### Task 15: Rebase execution-specs#3316
 
