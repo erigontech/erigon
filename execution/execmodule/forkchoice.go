@@ -451,7 +451,21 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 	}
 	if fcuHeader == nil {
-		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("forkchoice: block %x not found or was marked invalid", blockHash), false)
+		// External CL asked us to head to a block we don't have. Common
+		// after mode-B setHead deleted the pre-unwind head from the
+		// external CL's cache. Return the correct engine-API shape
+		// (INVALID + LatestValidHash = our canonical head) so the CL
+		// walks back to our LVH rather than getting a raw Go error
+		// (which the JSON-RPC layer surfaces as an error object without
+		// LatestValidHash — no reorg happens).
+		currentHead := rawdb.ReadHeadHeaderHash(tx)
+		e.logger.Info("[execmodule] forkchoice head not found in our chain — returning INVALID + LatestValidHash",
+			"requested", blockHash, "latestValidHash", currentHead)
+		return sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
+			Status:          ExecutionStatusBadBlock,
+			LatestValidHash: currentHead,
+			ValidationError: fmt.Sprintf("head %x not found in canonical chain (possibly deleted by an earlier admin setHead)", blockHash),
+		}, false)
 	}
 
 	e.hook.LastNewBlockSeen(fcuHeader.Number.Uint64()) // used by eth_syncing

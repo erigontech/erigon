@@ -1254,7 +1254,23 @@ func (e *EngineServer) HandleForkChoice(
 		return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 	}
 	if status == execmodule.ExecutionStatusBadBlock {
-		return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, ValidationError: engine_types.NewStringifiedErrorFromString("Invalid chain after execution")}, nil
+		errMsg := "Invalid chain after execution"
+		if validationErr != nil && *validationErr != "" {
+			errMsg = *validationErr
+		}
+		ps := &engine_types.PayloadStatus{
+			Status:          engine_types.InvalidStatus,
+			ValidationError: engine_types.NewStringifiedErrorFromString(errMsg),
+		}
+		// External CLs need LatestValidHash to know where to re-anchor
+		// after a rejection. Post-admin-SetHead the EL surfaces the
+		// deleted-head case via ExecutionStatusBadBlock + LatestValidHash
+		// = current canonical head; passing it through here so the CL
+		// walks back rather than seeing INVALID without an anchor.
+		if latestValidHash != (common.Hash{}) {
+			ps.LatestValidHash = &latestValidHash
+		}
+		return ps, nil
 	}
 	payloadStatus := &engine_types.PayloadStatus{
 		Status:          convertGrpcStatusToEngineStatus(status),
