@@ -260,9 +260,15 @@ func TestForkAuthorityCascade_ForkedFromCapMissingRejects(t *testing.T) {
 
 // TestForkAuthorityCascade_MalformedForkedFromRejects covers layer-6
 // (E.5): a UCAN carries a `fork:from:` prefix but the payload is
-// malformed (non-hex or wrong-length pubkey). ExtractForkedFromCapability
-// silently skips such entries; if no other well-formed forked-from is
-// present the cascade rejects at the extraction step.
+// malformed (non-hex or wrong-length pubkey). Two-layer defense:
+//   - New() rejects at mint time via validateCapability — the primary
+//     defense against local typos.
+//   - ExtractForkedFromCapability silently skips such entries at
+//     extraction time — belt-and-suspenders for a bad UCAN arriving
+//     via wire that bypassed a local New() call.
+//
+// This test constructs the Delegation directly to bypass New() and
+// exercise the extraction-time defense.
 func TestForkAuthorityCascade_MalformedForkedFromRejects(t *testing.T) {
 	f := mintForkFixture(t)
 
@@ -271,11 +277,31 @@ func TestForkAuthorityCascade_MalformedForkedFromRejects(t *testing.T) {
 		CapForkedFromPrefix + "0102030405060708090a0b0c0d0e0f10", // 16 bytes, wrong length
 		CapForkedFromPrefix,
 	}
+
+	// Confirm New() rejects each at mint time.
 	for _, cap := range malformed {
-		d, err := New(&f.trustRoot.PublicKey, &f.operator.PublicKey,
+		_, err := New(&f.trustRoot.PublicKey, &f.operator.PublicKey,
 			[]string{string(CapAdvertise), string(CapServe), string(CapDelegate), cap},
 			f.notBefore, f.expires, 16, nil)
-		require.NoError(t, err)
+		require.Error(t, err, "New() must reject malformed fork:from cap %q at mint", cap)
+	}
+
+	// Extraction-time defense: bypass New() by direct construction and
+	// verify the cascade still rejects.
+	issuerCompressed, err := compressedPubKey(&f.trustRoot.PublicKey)
+	require.NoError(t, err)
+	audienceCompressed, err := compressedPubKey(&f.operator.PublicKey)
+	require.NoError(t, err)
+	for _, cap := range malformed {
+		d := &Delegation{
+			Version:      CurrentVersion,
+			Issuer:       issuerCompressed,
+			Audience:     audienceCompressed,
+			Capabilities: canonicalCapabilities([]string{string(CapAdvertise), string(CapServe), string(CapDelegate), cap}),
+			NotBefore:    unixOrZero(f.notBefore),
+			Expires:      unixOrZero(f.expires),
+			DepthCap:     16,
+		}
 		require.NoError(t, d.Sign(f.trustRoot))
 		encoded, err := d.Encode()
 		require.NoError(t, err)
