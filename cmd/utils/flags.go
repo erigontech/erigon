@@ -328,6 +328,51 @@ var (
 		Usage: "HTTP-RPC server listening port",
 		Value: nodecfg.DefaultHTTPPort,
 	}
+	HTTPURLFlag = cli.StringFlag{
+		Name:  "http.url",
+		Usage: "HTTP server listening url. will OVERRIDE http.addr and http.port. will NOT respect http paths. prefix supported are tcp, unix",
+		Value: "",
+	}
+	HTTPSEnabledFlag = cli.BoolFlag{
+		Name:  "https.enabled",
+		Usage: "Enable HTTPS server",
+		Value: false,
+	}
+	HTTPSListenAddrFlag = cli.StringFlag{
+		Name:  "https.addr",
+		Usage: "rpc HTTPS server listening interface",
+		Value: nodecfg.DefaultHTTPHost,
+	}
+	HTTPSPortFlag = cli.IntFlag{
+		Name:  "https.port",
+		Usage: "rpc HTTPS server listening port. default to http.port + 363 if not set",
+		Value: 0,
+	}
+	HTTPSURLFlag = cli.StringFlag{
+		Name:  "https.url",
+		Usage: "rpc HTTPS server listening url. will OVERRIDE https.addr and https.port. will NOT respect paths. prefix supported are tcp, unix",
+		Value: "",
+	}
+	HTTPSCertFlag = cli.StringFlag{
+		Name:  "https.cert",
+		Usage: "certificate for rpc HTTPS server",
+		Value: "",
+	}
+	HTTPSKeyFlag = cli.StringFlag{
+		Name:  "https.key",
+		Usage: "key file for rpc HTTPS server",
+		Value: "",
+	}
+	SocketEnabledFlag = cli.BoolFlag{
+		Name:  "socket.enabled",
+		Usage: "Enable IPC server",
+		Value: false,
+	}
+	SocketURLFlag = cli.StringFlag{
+		Name:  "socket.url",
+		Usage: "IPC server listening url. prefix supported are tcp, unix",
+		Value: "unix:///var/run/erigon.sock",
+	}
 	AuthRpcAddr = cli.StringFlag{
 		Name:  "authrpc.addr",
 		Usage: "HTTP-RPC server listening interface for the Engine API",
