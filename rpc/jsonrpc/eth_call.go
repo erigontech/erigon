@@ -797,7 +797,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		return nil, fmt.Errorf("failed to reset commitment for witness: %w", err)
 	}
 
-	accessed.touchAll(sdCtx)
+	accessed.touchAll(sdCtx, false /* binTrie: WithHexCommitmentOnly refuses bin above */)
 	for _, siblingPath := range siblingPaths {
 		sdCtx.TouchHashedKey(siblingPath)
 	}

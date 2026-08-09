@@ -372,9 +372,15 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		return nil, err
 	}
 
-	// After the resolve: a flagless restart of a bin datadir adopts the variant there.
+	// After the resolve: a flagless restart of a bin datadir adopts the variant
+	// and the hash recorded there, so both are read back rather than assumed.
 	if statecfg.ExperimentalBinCommitment {
-		logger.Warn("EXPERIMENTAL BINARY COMMITMENT TRIE IS ENABLED: roots follow EIP-8297 over Keccak-256 and agree with no other client; eth_getProof, eth_getWitness, eth_simulateV1, receipt regeneration, deferred commitment updates, collapse tracing and trie traces are unsupported and refuse rather than degrade; debug_executionWitness is supported and verifies each witness by stateless re-execution before returning it")
+		peers := "matches the execution-specs reference"
+		if commitment.PBinHashSuiteName() == commitment.PBinHashKeccak {
+			peers = "agrees with no other client"
+		}
+		logger.Warn("EXPERIMENTAL BINARY COMMITMENT TRIE IS ENABLED: roots follow EIP-8297 and "+peers+"; eth_getProof, eth_getWitness, eth_simulateV1, receipt regeneration, deferred commitment updates, collapse tracing and trie traces are unsupported and refuse rather than degrade; debug_executionWitness is supported and verifies each witness by stateless re-execution before returning it",
+			"hash", commitment.PBinHashSuiteName())
 	}
 
 	var chainConfig *chain.Config

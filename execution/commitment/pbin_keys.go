@@ -103,6 +103,17 @@ func pbinTreeKeyStorage(addr, slot []byte) []byte {
 	return c.storageKey(addr, slot)
 }
 
+// PBinStorageZoneProbeSlot is the lowest slot that lives outside the account
+// header (eip:"Storage"), so a proof of its key walks the account's whole
+// storage-zone prefix. That is what lets a witness answer EIP-7610's
+// non-empty-storage predicate for the zone, which no leaf of the account's own
+// header stem can report.
+func PBinStorageZoneProbeSlot() common.Hash {
+	var slot common.Hash
+	slot[length.Hash-1] = pbinHeaderStorageSlots
+	return slot
+}
+
 // pbinTreeKeyCodeChunk returns the code-zone key of a chunk (eip:"Code").
 // Chunks are content-addressed by code hash, so accounts running the same
 // bytecode share the leaves and no address takes part in the derivation.

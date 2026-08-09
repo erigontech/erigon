@@ -126,6 +126,24 @@ func (s *PBinWitnessState) Storage(addr, slot []byte) (common.Hash, bool, error)
 	return common.BytesToHash(value), true, nil
 }
 
+// HasStorage reports whether the witness holds a non-zero storage slot of the
+// account — EIP-7610's CREATE-collision predicate. The tree commits no
+// per-account storage root, so the answer is read from the two key regions an
+// account owns. The header slots resolve off the same proof path the account's
+// own leaves sit on; the storage zone needs a key of its own walked into it, so
+// a witness whose keys never enter the zone reads it as empty.
+func (s *PBinWitnessState) HasStorage(addr []byte) bool {
+	// Sub-indices 64..127 are the header's storage slots, which is exactly the
+	// header stem extended by the two bits pbinHeaderStorageOffset leads with.
+	stem := s.keys.accountHeaderStem(addr)
+	header := pbinPathFromBits(append(stem, pbinHeaderStorageOffset), int16(8*len(stem)+2))
+	if s.tree.hasSubtree(&header) {
+		return true
+	}
+	zone := pbinPathFromBytes(s.keys.accountStoragePrefix(addr))
+	return s.tree.hasSubtree(&zone)
+}
+
 // Code returns the account's bytecode: reassembled from the chunk leaves, or
 // read from the DELEGATION leaf for a delegated account. ok is false when the
 // witness proves the account absent.
@@ -229,6 +247,39 @@ func (c *pbinWitnessContext) delegationCode(addr []byte, size uint64) ([]byte, e
 
 func pbinCodeChunkCount(size uint64) int {
 	return int((size + pbinChunkDataLen - 1) / pbinChunkDataLen)
+}
+
+// hasSubtree reports whether the witness proves a leaf exists under prefix.
+// Unlike leaf, an unresolved hash is not an error here: a pruned witness proves
+// only the regions its keys walked, so this answers what the node set can see
+// and leaves the rest to read as empty.
+func (w *pbinWitnessTree) hasSubtree(prefix *pbinBitpath) bool {
+	hash, pos := w.root, int16(0)
+	for {
+		if hash == pbinEmptyTreeHash {
+			return false
+		}
+		if pos >= prefix.bitLen {
+			return true
+		}
+		node, ok := w.nodes[hash]
+		if !ok {
+			return false
+		}
+		if node.isLeaf() {
+			key := pbinPathFromBytes(node.key)
+			return key.hasPrefix(prefix)
+		}
+		limit := min(prefix.bitLen-pos, node.prefix.bitLen)
+		if pbinCommonPrefixBitsAt(prefix, pos, &node.prefix) != limit {
+			return false
+		}
+		if prefix.bitLen-pos <= node.prefix.bitLen {
+			return true
+		}
+		end := pos + node.prefix.bitLen
+		hash, pos = node.children[prefix.bit(end)], end+1
+	}
 }
 
 // leaf resolves the value at a tree key. found is false when the walk reaches a

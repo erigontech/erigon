@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
@@ -44,6 +45,7 @@ import (
 // map, used to exercise RecordingState predicates without a database.
 type fakeStateReader struct {
 	accounts map[common.Address]*accounts.Account
+	storage  map[common.Address]bool
 }
 
 func (r *fakeStateReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
@@ -55,7 +57,9 @@ func (r *fakeStateReader) ReadAccountDataForDebug(address accounts.Address) (*ac
 func (r *fakeStateReader) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
 	return uint256.Int{}, false, nil
 }
-func (r *fakeStateReader) HasStorage(address accounts.Address) (bool, error)         { return false, nil }
+func (r *fakeStateReader) HasStorage(address accounts.Address) (bool, error) {
+	return r.storage[address.Value()], nil
+}
 func (r *fakeStateReader) ReadAccountCode(address accounts.Address) ([]byte, error)  { return nil, nil }
 func (r *fakeStateReader) ReadAccountCodeSize(address accounts.Address) (int, error) { return 0, nil }
 func (r *fakeStateReader) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
@@ -650,4 +654,33 @@ func TestGetWitnessHeadCaptureOutOfWindowWhenPruned(t *testing.T) {
 	bn := rpc.BlockNumber(1)
 	_, err := api.GetWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn})
 	require.ErrorIs(t, err, errWitnessOutOfWindow)
+}
+
+// TestCollectAccessedState_PBinStorageZoneProbes asserts the CREATE-collision
+// check leaves a storage-zone probe behind for an account whose pre-state
+// storage it found. The binary trie commits no per-account storage root, so
+// without the probe the witness carries nothing that can answer EIP-7610 for a
+// slot outside the account header and the replay re-runs the CREATE.
+func TestCollectAccessedState_PBinStorageZoneProbes(t *testing.T) {
+	withStorage := common.HexToAddress("0x1111111111111111111111111111111111111111")
+	without := common.HexToAddress("0x2222222222222222222222222222222222222222")
+
+	inner := &fakeStateReader{
+		accounts: map[common.Address]*accounts.Account{withStorage: {Nonce: 1}, without: {Nonce: 1}},
+		storage:  map[common.Address]bool{withStorage: true},
+	}
+	rs := NewRecordingState(inner)
+	for _, addr := range []common.Address{withStorage, without} {
+		if _, err := rs.HasStorage(accounts.InternAddress(addr)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	accessed := collectAccessedState(rs, witnessModeCanonical)
+	probes := accessed.pbinStorageProbes()
+
+	probe := commitment.PBinStorageZoneProbeSlot()
+	want := append(bytes.Clone(withStorage[:]), probe[:]...)
+	require.Equal(t, [][]byte{want}, probes,
+		"the probe belongs to the account whose pre-state storage the collision check found, and to no other")
 }

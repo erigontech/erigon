@@ -156,8 +156,7 @@ func (s *pbinWitnessStateless) preStateAccount(addr common.Address) (*accounts.A
 		return nil, nil
 	}
 	s.usedTrieAddrs[addr] = struct{}{}
-	// The binary tree commits no per-account storage root, so Root stays empty; it
-	// is read only by HasStorage, which reports what the witness can see.
+	// The binary tree commits no per-account storage root, so Root stays empty.
 	acc := &accounts.Account{
 		Nonce:    witnessAcc.Nonce,
 		Balance:  witnessAcc.Balance,
@@ -211,10 +210,11 @@ func (s *pbinWitnessStateless) ReadAccountIncarnation(address accounts.Address) 
 	return 0, nil
 }
 
-// HasStorage reports the storage this verifier can see. The binary tree commits
-// no per-account storage root, so a pre-state slot outside the witness is
-// invisible here; CREATE-collision detection then rests on the nonce and code
-// the witness does carry.
+// HasStorage answers EIP-7610's CREATE-collision predicate. The binary tree
+// commits no per-account storage root, so the witness's own leaves are the
+// source: the header slots resolve off the proof path the account's leaves sit
+// on, and the storage zone off the probe the builder touches for it (see
+// accessedState.pbinStorageProbes).
 func (s *pbinWitnessStateless) HasStorage(address accounts.Address) (bool, error) {
 	addr := address.Value()
 	if _, ok := s.deleted[addr]; ok {
@@ -225,7 +225,7 @@ func (s *pbinWitnessStateless) HasStorage(address accounts.Address) (bool, error
 			return true, nil
 		}
 	}
-	return false, nil
+	return s.state.HasStorage(addr[:]), nil
 }
 
 func (s *pbinWitnessStateless) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {

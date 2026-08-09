@@ -17,12 +17,15 @@
 package jsonrpc
 
 import (
+	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -308,4 +311,52 @@ func TestPBinExecutionWitnessConsecutiveBlocks(t *testing.T) {
 	requirePBinWitnessVerifies(t, c, second, 5)
 	require.NotEqual(t, first.State, second.State,
 		"consecutive blocks over different pre-states cannot prove with the same node set")
+}
+
+// A CREATE over a nonce-0, code-empty account with storage outside the account
+// header. EIP-7610 makes that create fail, and the binary tree commits no
+// per-account storage root, so a verifier can only reach the same verdict from a
+// proof of the account's storage zone — which no leaf of the account's own
+// header stem carries.
+func TestPBinExecutionWitnessCreateCollisionOnZoneStorage(t *testing.T) {
+	// No t.Parallel: mutates process-global commitment flags.
+	withCommitmentHistory(t)
+	withBinCommitmentDatadir(t)
+
+	bankKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	bankAddress := crypto.PubkeyToAddress(bankKey.PublicKey)
+	victim := types.CreateAddress(bankAddress, 0)
+
+	chainConfig := new(chain.Config)
+	require.NoError(t, copier.CopyWithOption(chainConfig, chain.TestChainBerlinConfig, copier.Option{DeepCopy: true}))
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+		Config: chainConfig,
+		Alloc: types.GenesisAlloc{
+			bankAddress: {Balance: big.NewInt(1e18)},
+			victim: {
+				Balance: big.NewInt(1),
+				Storage: map[common.Hash]common.Hash{pbinStatelessSlot(1 << 20): common.BigToHash(big.NewInt(9))},
+			},
+		},
+	}), execmoduletester.WithKey(bankKey))
+
+	signer := types.LatestSignerForChainID(nil)
+	pack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
+		require.Zero(t, b.TxNonce(bankAddress), "the victim address is derived from nonce 0")
+		txn, err := types.SignTx(&types.LegacyTx{
+			CommonTx: types.CommonTx{GasLimit: 200_000, Data: pbinDeployCode(pbinStoreRuntime)},
+			GasPrice: *uint256.NewInt(1_000_000_000),
+		}, *signer, bankKey)
+		require.NoError(t, err)
+		b.AddTx(txn)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(pack))
+	require.EqualValues(t, types.ReceiptStatusFailed, pack.Receipts[0][0].Status,
+		"the create must collide; a successful deploy proves nothing about the predicate")
+
+	c := &pbinWitnessChain{m: m, pack: pack}
+	result := pbinWitnessOf(t, pbinWitnessAPI(t, m), 1)
+	requirePBinWitnessVerifies(t, c, result, 1)
 }
