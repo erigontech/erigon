@@ -1293,8 +1293,10 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 // paths the trie collapses through. The witness build must touch them, else collapsed-
 // sibling data is missing and stateless re-execution diverges from the root.
 //
-// The whole phase is hex-only: the binary trie never deletes a leaf, so no branch ever
-// collapses, and both tools this phase uses refuse bin — SetCollapseTracer panics and
+// The whole phase is hex-only. The binary trie does collapse branches, but it needs no
+// second pass to find them: its pruner keeps the sibling hanging off every branch a
+// proved key descends, so the survivor of any collapse is already in the witness. Both
+// tools this phase uses refuse bin anyway — SetCollapseTracer panics and
 // BranchChildCount is keyed by a hex nibble prefix.
 func detectCollapseSiblings(
 	ctx context.Context,
@@ -1395,10 +1397,11 @@ func buildWitnessTrie(
 	binTrie bool,
 ) (encodedNodes []hexutil.Bytes, err error) {
 	// TouchHashedKey records a hashed path with an empty plain key, which the bin update
-	// stream cannot resolve. Bin produces no collapse siblings at all, so one arriving here
-	// is a bug to surface, not a case to serve.
+	// stream cannot resolve. Bin carries its collapse survivors through the pruner instead,
+	// so detectCollapseSiblings returns none for it and one arriving here is a bug to
+	// surface, not a case to serve.
 	if binTrie && len(siblingPaths) > 0 {
-		return nil, fmt.Errorf("binary trie witness got %d collapse sibling paths; the binary trie never collapses a branch", len(siblingPaths))
+		return nil, fmt.Errorf("binary trie witness got %d collapse sibling paths; the binary trie names none", len(siblingPaths))
 	}
 
 	encodedNodes = []hexutil.Bytes{}

@@ -23,14 +23,13 @@ import (
 )
 
 // Pruning the captured superset down to the proof paths of the keys the fold
-// walked — the binary analogue of trie.WitnessNodesForKeysFromNodes. A binary
-// branch commits to both of its children, so a path carries its own siblings and
-// there is nothing to materialize alongside it.
+// walked — the binary analogue of trie.WitnessNodesForKeysFromNodes.
 
-// PBinWitnessNodesForKeys keeps the nodes on the proof path of every proved key
-// and drops the rest, returning them in walk order so the root leads. A
-// path that runs into a leaf, a diverging branch prefix or a blinded child stops
-// there — what it walked through is the proof that the key is absent.
+// PBinWitnessNodesForKeys keeps the nodes on the proof path of every proved key,
+// plus the sibling hanging off each branch along it, and drops the rest,
+// returning them in walk order so the root leads. A path that runs into a leaf,
+// a diverging branch prefix or a blinded child stops there — what it walked
+// through is the proof that the key is absent.
 func PBinWitnessNodesForKeys(nodes [][]byte, root []byte, provedKeys [][]byte) ([][]byte, error) {
 	if len(nodes) == 0 {
 		return nil, nil
@@ -68,6 +67,17 @@ func (p *pbinWitnessPruner) keep(hash common.Hash) {
 	p.order = append(p.order, hash)
 }
 
+// keepSibling keeps the child the walk turns away from. Its hash is committed by
+// the branch above it either way; what the preimage adds is the ability to
+// re-hash it under a longer prefix, which is what a removal on the other side of
+// the branch makes the consumer do. A sibling the capture blinded is skipped —
+// then the consumer can still read the branch, just not delete under it.
+func (p *pbinWitnessPruner) keepSibling(hash common.Hash) {
+	if _, ok := p.tree.nodes[hash]; ok {
+		p.keep(hash)
+	}
+}
+
 func (p *pbinWitnessPruner) walk(key []byte) error {
 	path, err := pbinWitnessProvedPath(key)
 	if err != nil {
@@ -87,7 +97,9 @@ func (p *pbinWitnessPruner) walk(key []byte) error {
 		if end >= path.bitLen || pbinCommonPrefixBitsAt(&path, pos, &node.prefix) != node.prefix.bitLen {
 			return nil
 		}
-		hash, pos = node.children[path.bit(end)], end+1
+		bit := path.bit(end)
+		p.keepSibling(node.children[1-bit])
+		hash, pos = node.children[bit], end+1
 	}
 }
 

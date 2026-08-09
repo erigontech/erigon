@@ -494,6 +494,15 @@ must be called before the capture, `Witnesses` clears it on return, and
 `SharedDomainsCommitmentContext.SetWitnessBlock` (`commitment_context.go`) is a silent no-op on a
 hex trie. A bin capture that skips it walks too few keys and prunes away nodes the verifier needs.
 
+**A witness carries the sibling of every branch its keys descend, not just the proof paths.** A
+branch commits to both children, so a hash is enough to *verify* a path — but not to *change* one.
+Removing a key collapses the branch above it and moves the surviving sibling up under a longer
+prefix, and `H(0x01 || encode_bit_prefix(prefix) || left || right)` binds the prefix the sibling had,
+so re-hashing it needs its own children. The capture therefore reads back any branch cell that
+arrived as a bare hash (`captureBranchPreimage`, `pbin_patricia_hashed.go`) and the pruner keeps it
+(`keepSibling`, `pbin_witness_prune.go`). This is what replaces hex's collapse-sibling detection
+phase; the cost is roughly one extra node per level of each proved path.
+
 ## 7. The root record
 
 `pbinRootKey = {0x08}` (`pbin_patricia_hashed.go`) holds a **bare cell body with no 4-byte

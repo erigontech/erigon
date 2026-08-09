@@ -1727,6 +1727,7 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 				}
 				if update.Flags&CodeUpdate != 0 {
 					existing.update.CodeHash = update.CodeHash
+					existing.update.CodeSize = update.CodeSize
 					existing.update.Flags |= CodeUpdate
 				}
 				if update.Flags&StorageUpdate != 0 {

@@ -14,6 +14,7 @@ package jsonrpc
 import (
 	"bytes"
 	"fmt"
+	"maps"
 	"slices"
 	"testing"
 
@@ -142,8 +143,7 @@ func TestPBinWitnessPartialChunks(t *testing.T) {
 			}
 			base = append(base, key)
 		}
-		require.Equal(t, gc.chunks, len(chunkKeys), "%s chunk leaves", gc.name)
-		slices.SortFunc(chunkKeys, bytes.Compare)
+		chunkKeys = pbinContractChunkKeys(t, chunkKeys, gc.chunks)
 
 		root := c.block(t, uint64(n+i)).Root()
 		size := func(keep [][]byte) int {
@@ -185,6 +185,36 @@ func TestPBinWitnessPartialChunks(t *testing.T) {
 		}
 	}
 	t.Log("witness bytes when only part of a contract's chunks are proved\n" + out)
+}
+
+// pbinContractChunkKeys picks the chunk leaves of the contract under test out of
+// every chunk leaf the witness carries. The pruner also keeps the sibling
+// hanging off each branch it descends, so a chunk leaf of an unrelated contract
+// can ride along; the contract's own stems are the ones holding a whole group,
+// plus one holding the remainder.
+func pbinContractChunkKeys(t *testing.T, keys [][]byte, chunks int) [][]byte {
+	t.Helper()
+	stems := map[string][][]byte{}
+	for _, key := range keys {
+		stems[string(key[:len(key)-1])] = append(stems[string(key[:len(key)-1])], key)
+	}
+	out := make([][]byte, 0, chunks)
+	for left := chunks; left > 0; left -= pbinCodeGroupChunks {
+		size := min(left, pbinCodeGroupChunks)
+		group := ""
+		for _, stem := range slices.Sorted(maps.Keys(stems)) {
+			if len(stems[stem]) == size {
+				group = stem
+				break
+			}
+		}
+		require.NotEmpty(t, group, "no stem holds a group of %d chunks", size)
+		out = append(out, stems[group]...)
+		delete(stems, group)
+	}
+	require.Len(t, out, chunks)
+	slices.SortFunc(out, bytes.Compare)
+	return out
 }
 
 func pbinAltTable(rows []pbinAltRow) string {

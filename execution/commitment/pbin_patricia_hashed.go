@@ -779,6 +779,9 @@ func (pph *PBinPatriciaHashed) propagateTouch(row int, bit uint64) {
 // hashRowCell hashes one cell of a folding row and writes the result back, so
 // the row's record carries every child hash a later read needs.
 func (pph *PBinPatriciaHashed) hashRowCell(c *pbinCell, path *pbinBitpath) (common.Hash, error) {
+	if err := pph.captureBranchPreimage(c, path); err != nil {
+		return common.Hash{}, err
+	}
 	h, err := pph.cellHash(c, path)
 	if err != nil {
 		return common.Hash{}, err
@@ -787,6 +790,23 @@ func (pph *PBinPatriciaHashed) hashRowCell(c *pbinCell, path *pbinBitpath) (comm
 		c.hash, c.hashLen = h, length.Hash
 	}
 	return h, nil
+}
+
+// captureBranchPreimage forces a branch cell that arrived as a bare hash to be
+// read back from its record, so the witness carries its preimage and not just
+// the hash its parent commits to. A consumer that removes a key collapses the
+// parent branch and re-hashes the surviving sibling under a longer prefix, which
+// needs the sibling's own children — a hash alone cannot be re-prefixed.
+//
+// Only while a tracer is attached: on the commitment path the stored hash is
+// already the answer and the extra record read would buy nothing.
+func (pph *PBinPatriciaHashed) captureBranchPreimage(c *pbinCell, path *pbinBitpath) error {
+	if pph.hasher.tracer == nil || c.kind != pbinNodeBranch || c.childrenSet || c.hashLen != length.Hash {
+		return nil
+	}
+	// materializeBranch reads one record and hashes the two cells in it; a branch
+	// among them keeps its stored hash, so this does not walk into the subtree.
+	return pph.materializeBranch(c, path)
 }
 
 func (pph *PBinPatriciaHashed) cellHash(c *pbinCell, path *pbinBitpath) (common.Hash, error) {
@@ -844,6 +864,12 @@ func (pph *PBinPatriciaHashed) loadCellState(c *pbinCell) error {
 // its record, so the record key is the cell's path followed by that prefix.
 func (pph *PBinPatriciaHashed) materializeBranch(c *pbinCell, path *pbinBitpath) error {
 	nodeKey := *path
+	// A prefix decoded from a witness is bounded on its own, not against the depth
+	// it was reached at, so the sum can overflow where append would panic.
+	if int(nodeKey.bitLen)+int(c.prefix.bitLen) > pbinMaxPathBits {
+		return fmt.Errorf("%w: branch at %d bits with a %d-bit prefix overflows the path",
+			errPBinCellHash, nodeKey.bitLen, c.prefix.bitLen)
+	}
 	nodeKey.append(&c.prefix)
 	key := pbinEncodeBitPath(&nodeKey)
 

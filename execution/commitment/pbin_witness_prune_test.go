@@ -88,8 +88,9 @@ func pbinWitnessHashSet(t *testing.T, nodes [][]byte) map[common.Hash]struct{} {
 	return out
 }
 
-// pbinWitnessOnPathNodes names the nodes the proved keys walk through, stated as
-// "the path taken to reach the node is a prefix of some proved key" over a walk
+// pbinWitnessOnPathNodes names the nodes the proved keys walk through and the
+// sibling hanging off each branch they descend, stated as "the path taken to
+// reach the node is a prefix of some proved key, or its parent's is" over a walk
 // of the whole tree — not as the per-key descent the pruner runs.
 func pbinWitnessOnPathNodes(w *pbinWitnessTree, provedKeys [][]byte) map[common.Hash]struct{} {
 	paths := make([]pbinBitpath, 0, len(provedKeys))
@@ -105,6 +106,11 @@ func pbinWitnessOnPathNodes(w *pbinWitnessTree, provedKeys [][]byte) map[common.
 		return false
 	}
 	out := make(map[common.Hash]struct{})
+	keep := func(hash common.Hash) {
+		if _, ok := w.nodes[hash]; ok {
+			out[hash] = struct{}{}
+		}
+	}
 	var walk func(hash common.Hash, arrival pbinBitpath)
 	walk = func(hash common.Hash, arrival pbinBitpath) {
 		node, ok := w.nodes[hash]
@@ -115,11 +121,17 @@ func pbinWitnessOnPathNodes(w *pbinWitnessTree, provedKeys [][]byte) map[common.
 		if node.isLeaf() {
 			return
 		}
+		child := [2]pbinBitpath{}
 		for bit := range node.children {
-			child := arrival
-			child.append(&node.prefix)
-			child.appendBit(uint64(bit))
-			walk(node.children[bit], child)
+			child[bit] = arrival
+			child[bit].append(&node.prefix)
+			child[bit].appendBit(uint64(bit))
+		}
+		for bit := range node.children {
+			if onPath(&child[bit]) {
+				keep(node.children[1-bit])
+			}
+			walk(node.children[bit], child[bit])
 		}
 	}
 	walk(w.root, pbinBitpath{})
@@ -143,10 +155,10 @@ func TestPBinWitnessPruneKeepsProofPaths(t *testing.T) {
 	require.Equal(t, f.applyOver(t, f.state), f.postStateRoot(t, lean))
 }
 
-// TestPBinWitnessPruneDropsOffPathNodes: the capture holds nodes no proved key
-// walks through — sibling leaves a binary branch already commits to, and branches
-// re-hashed under a shorter prefix earlier in the fold. Keeping them is the whole
-// cost the pruner exists to remove.
+// TestPBinWitnessPruneDropsOffPathNodes: the capture holds nodes neither a proved
+// key nor a collapse reaches — whole subtrees hanging two or more levels off a
+// path, and branches re-hashed under a shorter prefix earlier in the fold.
+// Keeping them is the whole cost the pruner exists to remove.
 func TestPBinWitnessPruneDropsOffPathNodes(t *testing.T) {
 	t.Parallel()
 
@@ -277,6 +289,75 @@ func TestPBinWitnessPruneKeepsSubtreePrefix(t *testing.T) {
 			"the stem walk descended past the subtree the leaf key reaches")
 	}
 	require.Equal(t, f.root, pbinWitnessMerkelized(t, f.prune(t, [][]byte{stem}), f.root))
+}
+
+// TestPBinWitnessServesRemoval: a removal collapses the branch above the key and
+// re-hashes the surviving sibling under a longer prefix. That needs the
+// sibling's own preimage — a branch hash commits to the node under the prefix it
+// had, so it cannot be re-prefixed — which the capture has to hash and the
+// pruner has to keep. Both sibling shapes are covered: a leaf, which the fold
+// hashes on its way past, and a branch, which arrives as a bare hash out of its
+// parent's record.
+func TestPBinWitnessServesRemoval(t *testing.T) {
+	t.Parallel()
+
+	addr, bystander := pbinOracleAddr(41), pbinOracleAddr(42)
+	// Storage-zone sub-indices split on the low bits of the slot: 0 and 1 sit
+	// under one branch, 2 under the other.
+	stored := func(slots ...uint64) *pbinTestCorpus {
+		c := new(pbinTestCorpus).account(bystander, 1, 2, common.Hash{0x42})
+		for _, slot := range slots {
+			c.storage(addr, pbinOracleSlot(slot), 0x01)
+		}
+		return c
+	}
+	for _, tc := range []struct {
+		name              string
+		stored, survivors *pbinTestCorpus
+		gone              uint64
+	}{
+		{
+			name:      "collapse onto a leaf sibling",
+			stored:    stored(256, 257, 258, 259),
+			survivors: stored(257, 258, 259),
+			gone:      256,
+		},
+		{
+			name:      "collapse onto a branch sibling",
+			stored:    stored(256, 257, 258),
+			survivors: stored(256, 257),
+			gone:      258,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			ms, root := pbinWitnessCommitted(t, tc.stored)
+			zeroed := new(pbinTestCorpus).storage(addr, pbinOracleSlot(tc.gone))
+
+			upd := WrapKeyUpdates(t, ModeUpdate, pbinKeyHasher(), zeroed.plainKeys, zeroed.updates)
+			nodes, provedKeys, captured := pbinWitnessesOf(t, ms, upd, false)
+			require.Equal(t, root, captured)
+
+			lean, err := PBinWitnessNodesForKeys(nodes, root, provedKeys)
+			require.NoError(t, err)
+			require.Less(t, len(lean), len(nodes), "nothing was pruned, so the test proves nothing")
+
+			want := tc.survivors.oracleRoot(t)
+			require.NotEqual(t, root, want, "the removal did not move the root")
+			for _, set := range []struct {
+				name  string
+				nodes [][]byte
+			}{{"superset", nodes}, {"lean", lean}} {
+				witness := pbinNewWitnessContext(pbinWitnessDecoded(t, set.nodes, root))
+				got, err := NewPBinPatriciaHashed(witness).Process(context.Background(),
+					WrapKeyUpdates(t, ModeUpdate, pbinKeyHasher(), zeroed.plainKeys, zeroed.updates),
+					"", nil, WarmupConfig{})
+				require.NoError(t, err, "%s cannot serve the removal", set.name)
+				require.Equal(t, want, got, "%s reached the wrong post-state root", set.name)
+			}
+		})
+	}
 }
 
 // TestPBinWitnessPruneEmptyCapture: no capture, nothing to prune. The empty

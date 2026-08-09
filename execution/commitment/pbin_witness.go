@@ -84,7 +84,9 @@ func (pph *PBinPatriciaHashed) SetWitnessBlock(b PBinWitnessBlock) {
 // block's, so it must be the pre-state one.
 //
 // produceExclusionProofs is accepted and ignored. It materializes the branch an
-// extension node hides, and EIP-8297 has no extension node.
+// extension node hides, and EIP-8297 has no extension node. The collapse
+// survivors a removal re-hashes are captured unconditionally instead — see
+// captureBranchPreimage.
 func (pph *PBinPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, produceExclusionProofs bool, logPrefix string) (nodes [][]byte, provedKeys [][]byte, rootHash []byte, err error) {
 	set := newWitnessNodeSet()
 	pph.setWitnessTracer(set)
