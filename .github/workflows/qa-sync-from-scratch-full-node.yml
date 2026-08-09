@@ -152,20 +152,24 @@ jobs:
           name: disk-usage-${{ env.CHAIN }}-${{ env.MODE }}
           path: ${{ github.workspace }}/disk-usage-${{ env.CHAIN }}-${{ env.MODE }}.txt
 
-      # Restart the datadir just synced as a *minimal* node. The full-node windows
-      # are wider than the minimal ones (262144 vs 100000 blocks for both state
-      # history and blocks), so the datadir already holds more than the minimal mode
-      # allows and the retire pass has a backlog without any window narrowing:
-      # --prune.distance is left off entirely. EnsureNotChanged accepts the switch
-      # because full and minimal differ only in the size of finite retention windows.
-      # No --distance is passed: leaving it off is the check script's default and
-      # means "run the mode as configured".
+      # Restart the datadir just synced as a *minimal* node. EnsureNotChanged accepts
+      # the switch because full and minimal differ only in the size of finite
+      # retention windows.
       #
-      # This is the closest reproduction of what #21306 reported — a node carrying
-      # files its prune mode should have deleted — and the only variant that gives
-      # the block-file retirement path something to do, since the Blocks window
-      # narrows too.
-      - name: Test old file retirement after switching to minimal (full node)
+      # The two retirement paths need different treatment here:
+      #
+      #   blocks  the window narrows from 262144 to 100000, a 162144-block move that
+      #           is wider than the 100000-block segment size, so at least one
+      #           transactions segment always falls in it. Deterministic, hence
+      #           --require-block-retirement.
+      #
+      #   state   history files span 256 steps (~310000 blocks at mainnet tip
+      #           density), nearly twice the same 162144-block move, so both cutoffs
+      #           usually land inside one file and the mode switch alone retires
+      #           nothing. --distance auto derives a window that puts the cutoff
+      #           between the two newest boundaries instead; a fixed value cannot,
+      #           since the gap is 1, 2, 4 ... steps depending on the merge ladder.
+      - name: Test old file retirement after switching to minimal node
         id: retirement_step
         run: |
           set +e # Disable exit on error
@@ -173,6 +177,8 @@ jobs:
           python3 $ERIGON_QA_PATH/test_system/qa-tests/file-retirement/run_and_check_file_retirement.py \
             "$GITHUB_WORKSPACE/build/bin" $ERIGON_DATA_DIR \
             --chain $CHAIN \
+            --distance auto \
+            --require-block-retirement \
             --timeout $RETIREMENT_TIMEOUT_SECONDS \
             --settle $RETIREMENT_SETTLE_SECONDS \
             --result-file "$GITHUB_WORKSPACE/result-retirement-$CHAIN-full-to-minimal.json"
