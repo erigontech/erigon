@@ -241,10 +241,16 @@ func (pph *PBinPatriciaHashed) updateCell(plainKey []byte, probe *pbinBitpath, u
 	}
 	if drop {
 		// A probe shorter than a whole key names a subtree, and dropping it drops
-		// everything under it. Unfolding stops at the probe, so nothing below the
-		// cell is open and resetting it is the whole removal.
+		// everything under it.
 		if c.kind == pbinNodeEmpty {
 			return nil
+		}
+		slot := pph.currentKey
+		if g.activeRows != 0 {
+			slot.appendBit(bit)
+		}
+		if err := pph.dropSubtreeRecords(c, &slot); err != nil {
+			return err
 		}
 		c.reset()
 		if g.activeRows == 0 {
@@ -747,6 +753,60 @@ func (pph *PBinPatriciaHashed) foldDelete(row int, bit uint64, upCell *pbinCell)
 	}
 	upCell.reset()
 	return pph.deleteRowRecord(row)
+}
+
+// pbinDerivedContext marks a context that derives its branch records from a node
+// set instead of storing them. A decoded witness is the only one, and it carries
+// no node the proof paths did not need.
+type pbinDerivedContext interface{ pbinRecordsAreDerived() }
+
+// dropSubtreeRecords deletes the stored records under a cell a subtree drop
+// discards. Unfolding stops at the drop probe, so no fold ever reaches them and
+// nothing else reclaims them — commitment pruning goes by step, not by
+// reachability. A derived context stores nothing to reclaim and would refuse the
+// preimages the sweep asks it for.
+func (pph *PBinPatriciaHashed) dropSubtreeRecords(c *pbinCell, slot *pbinBitpath) error {
+	if c.kind != pbinNodeBranch {
+		return nil
+	}
+	if _, derived := pph.ctx.(pbinDerivedContext); derived {
+		return nil
+	}
+
+	head := *slot
+	head.append(&c.prefix)
+	pending := []pbinBitpath{head}
+	var cells [2]pbinCell
+	for len(pending) > 0 {
+		path := pending[len(pending)-1]
+		pending = pending[:len(pending)-1]
+
+		key := pbinEncodeBitPath(&path)
+		data, _, err := pph.ctx.Branch(key)
+		if err != nil {
+			return fmt.Errorf("pbin: read branch at %x: %w", key, err)
+		}
+		if len(data) == 0 {
+			return fmt.Errorf("%w at %x (%d bits)", errPBinMissingBranch, key, path.bitLen)
+		}
+		_, afterMap, err := pbinDecodeBranch(data, &cells)
+		if err != nil {
+			return fmt.Errorf("pbin: decode branch at %x: %w", key, err)
+		}
+		for bit := range cells {
+			if afterMap&(uint16(1)<<uint(bit)) == 0 || cells[bit].kind != pbinNodeBranch {
+				continue
+			}
+			child := path
+			child.appendBit(uint64(bit))
+			child.append(&cells[bit].prefix)
+			pending = append(pending, child)
+		}
+		if err = pph.ctx.PutBranch(key, []byte{}, data); err != nil {
+			return fmt.Errorf("pbin: delete branch at %x: %w", key, err)
+		}
+	}
+	return nil
 }
 
 // deleteRowRecord removes the stored record a vanished row was unfolded from.

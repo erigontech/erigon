@@ -49,9 +49,12 @@ type pbinWitnessContext struct {
 }
 
 var (
-	_ PatriciaContext = (*pbinWitnessContext)(nil)
-	_ pbinCodeContext = (*pbinWitnessContext)(nil)
+	_ PatriciaContext    = (*pbinWitnessContext)(nil)
+	_ pbinCodeContext    = (*pbinWitnessContext)(nil)
+	_ pbinDerivedContext = (*pbinWitnessContext)(nil)
 )
+
+func (c *pbinWitnessContext) pbinRecordsAreDerived() {}
 
 func pbinNewWitnessContext(tree *pbinWitnessTree) *pbinWitnessContext {
 	return &pbinWitnessContext{

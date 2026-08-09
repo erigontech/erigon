@@ -23,6 +23,7 @@ import (
 	"testing"
 
 	keccak "github.com/erigontech/fastkeccak"
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -244,6 +245,45 @@ func TestPBinWitnessAccountMissingCodeHashIsMalformed(t *testing.T) {
 	root := hasher.hash(preimage)
 
 	state, err := PBinNewWitnessState([][]byte{preimage}, root[:])
+	require.NoError(t, err)
+
+	_, _, err = state.Account(addr)
+	require.ErrorIs(t, err, errPBinWitnessNode)
+}
+
+// TestPBinWitnessDelegationLeafPinsCodeSize: a DELEGATION leaf is a fixed shape,
+// so its account's code_size is always the indicator length. A BASIC_DATA leaf
+// claiming anything else describes a state the tree cannot hold, and reading it
+// would report an account running code no one wrote.
+func TestPBinWitnessDelegationLeafPinsCodeSize(t *testing.T) {
+	t.Parallel()
+
+	addr := pbinOracleAddr(78)
+	indicator := append([]byte{0xEF, 0x01, 0x00}, bytes.Repeat([]byte{0x44}, 20)...)
+	keys := pbinDigestCache{sum: pbinSelectedSum}
+	hasher := pbinHasher{sum: pbinSelectedSum}
+
+	leaf := func(key []byte, value [pbinValueLength]byte) ([]byte, common.Hash) {
+		preimage := append(append([]byte{pbinLeafTag}, key...), value[:]...)
+		return preimage, hasher.hash(preimage)
+	}
+
+	basicKey := keys.accountKey(addr, pbinBasicDataLeafKey)
+	var balance uint256.Int
+	balance.SetUint64(2)
+	basic, err := pbinEncodeBasicData(1, &balance, pbinDelegationCodeLength-1)
+	require.NoError(t, err)
+	basicNode, basicHash := leaf(basicKey, basic)
+	delegNode, delegHash := leaf(keys.accountKey(addr, pbinDelegationLeafKey), pbinEncodeDelegation(indicator))
+
+	// Sub-indices 0 and 2 diverge two bits before the end of the key.
+	prefix := pbinPathFromBits(basicKey, int16(8*len(basicKey)-2))
+	branch := pbinAppendBitPrefix([]byte{pbinBranchTag}, &prefix)
+	branch = append(branch, basicHash[:]...)
+	branch = append(branch, delegHash[:]...)
+	root := hasher.hash(branch)
+
+	state, err := PBinNewWitnessState([][]byte{branch, basicNode, delegNode}, root[:])
 	require.NoError(t, err)
 
 	_, _, err = state.Account(addr)

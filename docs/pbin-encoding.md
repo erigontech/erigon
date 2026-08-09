@@ -842,15 +842,22 @@ Behavioural consequences:
   (`pbin_update_stream.go`) emits a drop at the account's header stem and another at its
   storage prefix once the walk reaches that zone, because nothing enumerates the slots an account
   holds. Its code-zone leaves are content-addressed and stay: another account may run the same
-  bytecode. Under the MPT, self-destruct drops one storage root; here there is no such node.
+  bytecode. This is where the engine parts from `binarize(post_state)` — the reference suite drops
+  the chunks when the removed account was the sole holder, and the engine keeps them. EIP-6780
+  bounds the gap to states the chain cannot reach: on-chain, an account is only deleted with its
+  code in the transaction that created it, and such an account's chunks were never inserted (a
+  create-and-destroy merges to a bare deletion). Under the MPT, self-destruct drops one storage
+  root; here there is no such node.
 - Zero and absent are the same state, so a write of 32 zero bytes removes the leaf rather than
   storing zeros (`state_write`, eip:"Zero values and deletion"), and the fold collapses whatever
   subtree that empties (§5.4).
-- A subtree drop resets one cell, so the branch records stored *beneath* that cell are not
-  reclaimed. Nothing unfolds them afterwards — the survivor's own record lives at its own path —
-  so the root is unaffected, but the commitment domain keeps rows for nodes the trie no longer
-  holds. Reclaiming them needs a prefix-range delete at the drop point; the rows a *collapsing*
-  fold leaves behind are deleted (`deleteRowRecord`, `pbin_patricia_hashed.go`).
+- A subtree drop resets one cell, and nothing unfolds what was beneath it, so no fold reaches the
+  branch records stored there. `dropSubtreeRecords` (`pbin_patricia_hashed.go`) walks them from the
+  dropped cell's record down and deletes each one; without it the commitment domain would keep a
+  row per internal node of every removed account, which pruning does not collect because it goes by
+  step rather than by reachability. The rows a *collapsing* fold leaves behind are deleted
+  separately (`deleteRowRecord`). A decoded witness carries no node the proof paths did not need,
+  so a drop against one sweeps nothing (`pbinDerivedContext`).
 - The one persisted root record, under key `0x08`, is the root cell of the whole trie — one per
   trie, never per account.
 

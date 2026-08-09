@@ -152,6 +152,48 @@ func pbinRequirePutsMatchStore(t *testing.T, puts []pbinRecordedPut, store map[s
 	return overwrites
 }
 
+// A removed account takes every record it owned with it. The drop stops the
+// unfold at the account's subtree, so no fold reaches what is below and only an
+// explicit sweep reclaims it — left behind, those records are unreachable bytes
+// no prune collects, and a later rebuild of the same path would report a
+// previous value that is not there.
+func TestPBinAccountRemovalLeavesNoRecordBehind(t *testing.T) {
+	t.Parallel()
+
+	keep, gone := pbinOracleAddr(11), pbinOracleAddr(22)
+	stored := new(pbinTestCorpus).
+		account(keep, 1, 2, common.Hash{0x11}).
+		account(gone, 3, 4, common.Hash{0x22})
+	for i := range 16 {
+		stored.storage(gone, pbinOracleSlot(uint64(256+i)), byte(i+1))
+	}
+
+	pph, ctx, ms := pbinTestStrictEngine(t)
+	stored.applyTo(t, ms)
+	pbinTestProcess(t, pph, stored.plainKeys, stored.updates)
+
+	snapshot := make(map[string][]byte, len(ms.cm))
+	for k, v := range ms.cm {
+		snapshot[k] = bytes.Clone(v)
+	}
+	ctx.puts = nil
+
+	removal := new(pbinTestCorpus).remove(gone)
+	require.NoError(t, ms.applyPlainUpdates(removal.plainKeys, removal.updates))
+	pph.Reset()
+	root := pbinTestProcess(t, pph, removal.plainKeys, removal.updates)
+
+	survivor := new(pbinTestCorpus).account(keep, 1, 2, common.Hash{0x11})
+	require.Equal(t, survivor.oracleRoot(t), root)
+	pbinRequirePutsMatchStore(t, ctx.puts, snapshot)
+
+	_, rebuilt := pbinTestEngine(t)
+	survivor.applyTo(t, rebuilt)
+	pbinTestProcess(t, NewPBinPatriciaHashed(rebuilt), survivor.plainKeys, survivor.updates)
+	require.Equal(t, pbinLiveRecordKeys(rebuilt), pbinLiveRecordKeys(ms),
+		"the forward run must hold exactly the records a rebuild does")
+}
+
 // Every branch write carries the record it replaces: empty on a fresh store, the
 // stored bytes on a rewrite.
 func TestPBinProcessPutBranchCarriesRealPrev(t *testing.T) {

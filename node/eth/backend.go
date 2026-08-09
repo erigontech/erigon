@@ -338,9 +338,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		return nil, err
 	}
 
-	if !dbg.CheckHeaderStateRoot {
-		logger.Warn("HEADER STATE-ROOT CHECK IS DISABLED (CHECK_HEADER_STATE_ROOT=false): nothing cross-checks execution results against headers; a wrong chain will look healthy")
-	}
+	dbg.WarnHeaderStateRootCheckDisabled()
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
 

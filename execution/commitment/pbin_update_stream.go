@@ -164,11 +164,12 @@ func (s *pbinUpdateStream) removesAccount(plainKey []byte, update *Update) bool 
 
 // removeAccount drops the two subtrees an account owns — its header stem, and
 // its storage prefix once the walk reaches that zone — rather than the leaves it
-// holds, which for storage nothing enumerates. Code chunks stay: pre-existing
-// ones are shared with holders the batch cannot have deleted, and a
-// batch-inserted set always has a surviving in-batch holder, because an account
-// created and destroyed inside the batch merges to a bare deletion and inserts
-// none (eip:"Zero values and deletion").
+// holds, which for storage nothing enumerates. Code chunks always stay, which
+// parts from the reference suite when the removed account was the sole holder;
+// EIP-6780 bounds that to states the chain cannot reach, since an account
+// deleted with its code was created in the same transaction and a
+// create-and-destroy merges to a bare deletion that inserts no chunk
+// (eip:"Zero values and deletion").
 func (s *pbinUpdateStream) removeAccount(plainKey []byte) error {
 	drop := Update{Flags: DeleteUpdate}
 	if err := s.emit(s.keyDigest.accountHeaderStem(plainKey), plainKey, &drop); err != nil {

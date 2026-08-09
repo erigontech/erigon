@@ -759,7 +759,13 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 // dbg.CheckHeaderStateRoot switches the check off for a chain whose headers
 // this node cannot reproduce.
 func headerRootMismatch(computed, expected []byte) bool {
-	return dbg.CheckHeaderStateRoot && !bytes.Equal(computed, expected)
+	if !dbg.CheckHeaderStateRoot {
+		// Every execution entry point runs through here, so this is what reaches the
+		// integration and test runners too, not just node startup.
+		dbg.WarnHeaderStateRootCheckDisabled()
+		return false
+	}
+	return !bytes.Equal(computed, expected)
 }
 
 func handleIncorrectRootHashError(blockNumber uint64, blockHash common.Hash, applyTx kv.TemporalRwTx, cfg ExecuteBlockCfg, s *StageState, logger log.Logger, u Unwinder) error {

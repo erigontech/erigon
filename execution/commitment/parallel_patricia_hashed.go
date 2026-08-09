@@ -104,7 +104,10 @@ func (p *ParallelPatriciaHashed) EncodeCurrentState(buf []byte) ([]byte, error) 
 	return p.template.EncodeCurrentState(buf)
 }
 
+// A restore moves the root, so a root published by an earlier Process no longer
+// describes the trie and RootHash has to fall back to the template.
 func (p *ParallelPatriciaHashed) SetState(buf []byte) error {
+	p.rootHash.Store(nil)
 	return p.template.SetState(buf)
 }
 

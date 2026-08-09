@@ -229,20 +229,21 @@ func (c *pbinWitnessContext) codeFromLeaves(addr []byte) ([]byte, error) {
 	return code, nil
 }
 
-// delegationCode reads a delegated account's code: the leading code_size bytes
-// of its DELEGATION leaf. There is nothing to reassemble and no hash to check
-// against — the root commits the leaf itself. A nil result means the witness
-// proves the account absent.
+// delegationCode reads a delegated account's code: the indicator its DELEGATION
+// leaf carries. There is nothing to reassemble and no hash to check against —
+// the root commits the leaf itself — so the leaf's fixed shape is the only thing
+// that can be checked, and code_size has to agree with it. A nil result means the
+// witness proves the account absent.
 func (c *pbinWitnessContext) delegationCode(addr []byte, size uint64) ([]byte, error) {
 	value, ok, err := c.tree.leaf(c.keys.accountKey(addr, pbinDelegationLeafKey))
 	if err != nil || !ok {
 		return nil, err
 	}
-	if size > uint64(len(value)) {
-		return nil, fmt.Errorf("%w: delegation leaf of account %x holds %d bytes, code_size says %d",
-			errPBinWitnessNode, addr, len(value), size)
+	if size != pbinDelegationCodeLength || len(value) < pbinDelegationCodeLength {
+		return nil, fmt.Errorf("%w: delegation leaf of account %x holds %d bytes under code_size %d, want %d bytes of indicator",
+			errPBinWitnessNode, addr, len(value), size, pbinDelegationCodeLength)
 	}
-	return bytes.Clone(value[:size]), nil
+	return bytes.Clone(value[:pbinDelegationCodeLength]), nil
 }
 
 func pbinCodeChunkCount(size uint64) int {
