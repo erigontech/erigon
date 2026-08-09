@@ -955,12 +955,14 @@ func TestContractTrunkPreloadParallel_StepBudgetSweepTerminates(t *testing.T) {
 	}
 }
 
-// TestContractTrunkPreloadParallel_NoPinWaveEndsStep covers the capped-fetch
-// twin of the exact-fill case: a residual budget truncates the wave to a handful
-// of keys, all of them absent from the file layer (the normal shape at the BFS
-// fringe, where a set afterMap bit points at a leaf with no branch record). No
-// pin means no budgetHit, so the wave used to be re-entered once per remaining
-// entry, each time re-sorting and re-cloning the whole frontier.
+// TestContractTrunkPreloadParallel_NoPinWaveEndsStep covers the two ways a wave
+// ends a step having pinned nothing. Either the residual budget is below one
+// entry, so the miss set is deferred without being fetched, or it affords a
+// capped fetch whose keys are all absent from the file layer — the normal shape
+// at the BFS fringe, where a set afterMap bit names a leaf with no branch
+// record. Neither raises budgetHit from pin(), so the wave used to be re-entered
+// at the same depth on the deferred tail, once per chunk. The resolver call
+// count is the assertion that separates the two: it is what re-entry inflates.
 func TestContractTrunkPreloadParallel_NoPinWaveEndsStep(t *testing.T) {
 	hash := make([]byte, 32)
 	for i := range hash {
@@ -971,59 +973,71 @@ func TestContractTrunkPreloadParallel_NoPinWaveEndsStep(t *testing.T) {
 	// file layer, so every depth-65 key resolves to nil.
 	tree := syntheticTree{root: 0xffff}
 	const valSz = 100
-
-	calls := 0
-	base := fakeResolver(tree, nil, valSz, "")
-	resolve := func(keys [][]byte) ([][]byte, error) {
-		calls++
-		return base(keys)
-	}
-
-	c := NewBranchCache(64)
-	defer c.Close()
-	p, err := NewContractTrunkPreloadParallel(hash)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Enough for the root, with a residual too small to pin any depth-65 entry.
 	rootKey := nibbles.HexToCompact([]byte(root))
-	stepBudget := estimatedEntryCost(rootKey, branchVal(0xffff, valSz)) + minEntryBytes - 1
+	rootCost := estimatedEntryCost(rootKey, branchVal(0xffff, valSz))
 
-	done := make(chan struct{})
-	var pinned int
-	var queueEmpty bool
-	go func() {
-		pinned, queueEmpty, err = p.Run(stepBudget, nil, resolve, c, nil)
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-time.After(10 * time.Second):
-		panicOnStuck("a wave that pins nothing must end the step, not re-enter on the deferred tail")
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	if pinned != 1 || queueEmpty {
-		t.Fatalf("pinned %d queueEmpty=%v, want 1 and false (root only, children deferred)", pinned, queueEmpty)
-	}
-	// One batch for the root wave, at most one for the truncated depth-65 wave.
-	// Re-entering the wave per entry would cost one call each for 16 children.
-	if calls > 2 {
-		t.Fatalf("resolver called %d times for a 16-wide wave; the wave was re-entered per entry", calls)
-	}
-	if p.QueueRemaining() == 0 {
-		t.Fatal("deferred children were dropped instead of resumed")
-	}
+	for _, tc := range []struct {
+		name       string
+		stepBudget int
+		wantCalls  int
+	}{
+		// No depth-65 entry fits, so fetching any of them is waste: only the
+		// root wave reaches the resolver.
+		{"residual below one entry defers unfetched", rootCost + minEntryBytes - 1, 1},
+		// One byte more affords a capped fetch. It resolves, pins nothing, and
+		// must still end the step: one batch for the root, one for the cap.
+		{"capped fetch pins nothing", rootCost + minEntryBytes, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			base := fakeResolver(tree, nil, valSz, "")
+			resolve := func(keys [][]byte) ([][]byte, error) {
+				calls++
+				return base(keys)
+			}
 
-	// A full budget drains the absent children and completes the preload.
-	if _, done, err := p.Run(1<<20, nil, resolve, c, nil); err != nil {
-		t.Fatal(err)
-	} else if !done {
-		t.Fatalf("expected done after a large budget; queue=%d", p.QueueRemaining())
-	}
-	if p.PinnedTotal() != 1 {
-		t.Fatalf("pinned %d, want 1 (only the root exists in the file layer)", p.PinnedTotal())
+			c := NewBranchCache(64)
+			defer c.Close()
+			p, err := NewContractTrunkPreloadParallel(hash)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			done := make(chan struct{})
+			var pinned int
+			var queueEmpty bool
+			go func() {
+				pinned, queueEmpty, err = p.Run(tc.stepBudget, nil, resolve, c, nil)
+				close(done)
+			}()
+			select {
+			case <-done:
+			case <-time.After(10 * time.Second):
+				panicOnStuck("a wave that pins nothing must end the step, not re-enter on the deferred tail")
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if pinned != 1 || queueEmpty {
+				t.Fatalf("pinned %d queueEmpty=%v, want 1 and false (root only, children deferred)", pinned, queueEmpty)
+			}
+			if calls != tc.wantCalls {
+				t.Fatalf("resolver called %d times for a 16-wide wave, want %d; the wave was re-entered per chunk", calls, tc.wantCalls)
+			}
+			if p.QueueRemaining() == 0 {
+				t.Fatal("deferred children were dropped instead of resumed")
+			}
+
+			// A full budget drains the absent children and completes the preload.
+			if _, done, err := p.Run(1<<20, nil, resolve, c, nil); err != nil {
+				t.Fatal(err)
+			} else if !done {
+				t.Fatalf("expected done after a large budget; queue=%d", p.QueueRemaining())
+			}
+			if p.PinnedTotal() != 1 {
+				t.Fatalf("pinned %d, want 1 (only the root exists in the file layer)", p.PinnedTotal())
+			}
+		})
 	}
 }
 

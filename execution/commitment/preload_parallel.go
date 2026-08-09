@@ -167,7 +167,7 @@ func (p *ContractTrunkPreloadParallel) Run(
 		return 0, false, fmt.Errorf("ContractTrunkPreloadParallel.Run: resolver is nil")
 	}
 	if stepBudgetBytes <= 0 {
-		return 0, len(p.frontier) == 0 && len(p.pendingChildren) == 0, nil
+		return 0, p.queueEmpty(), nil
 	}
 	defer p.releaseScratch()
 
@@ -299,7 +299,7 @@ func (p *ContractTrunkPreloadParallel) Run(
 		}
 	}
 
-	queueEmpty = (len(p.frontier) == 0 && len(p.pendingChildren) == 0) || p.nextDepth > maxStorageTrunkDepth
+	queueEmpty = p.queueEmpty()
 	if logger != nil && (chunkPinned > 0 || queueEmpty) {
 		logger.Info("[trunk-preload-parallel] step",
 			"step_budget_mb", stepBudgetBytes/(1<<20),
@@ -326,6 +326,12 @@ func (p *ContractTrunkPreloadParallel) QueueRemaining() int {
 	return len(p.frontier) + len(p.pendingChildren)
 }
 
+// queueEmpty reports that no further Run can pin anything: the walk drained, or
+// it reached the depth ceiling with entries still queued below it.
+func (p *ContractTrunkPreloadParallel) queueEmpty() bool {
+	return p.QueueRemaining() == 0 || p.nextDepth > maxStorageTrunkDepth
+}
+
 // PinnedPrefixes returns slices aliasing internal storage — do not mutate.
 func (p *ContractTrunkPreloadParallel) PinnedPrefixes() [][]byte { return p.pinnedPrefixes }
 
@@ -345,12 +351,12 @@ func PreloadContractTrunkParallel(
 	if cache == nil {
 		return 0, fmt.Errorf("PreloadContractTrunkParallel: cache is nil")
 	}
+	if resolve == nil {
+		return 0, fmt.Errorf("PreloadContractTrunkParallel: resolver is nil")
+	}
 	p, err := NewContractTrunkPreloadParallel(contractHash)
 	if err != nil {
 		return 0, err
-	}
-	if resolve == nil {
-		return 0, fmt.Errorf("PreloadContractTrunkParallel: resolver is nil")
 	}
 	pinned, queueEmpty, err := p.Run(ramBudgetBytes, dbBranches, resolve, cache, logger)
 	if logger != nil {
