@@ -2,7 +2,6 @@ package stagedsync
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -17,27 +16,45 @@ type applyPhase int
 
 const (
 	phaseProcessResults applyPhase = iota
+	phaseNextResult
+	phaseRwsIter
+	phaseRecordIO
 	phaseCalcFees
 	phaseValidate
 	phaseFlushWrites
 	phaseFinalize
 	phaseNormalize
+	phaseFeeMerge
+	phaseFinalizeMerge
+	phaseBookkeeping
+	phaseValidateCollect
+	phasePublish
 	phaseApplyWrites
 	phaseApplyIndexes
+	phaseSendResult
 	phaseSchedule
 	phaseCount
 )
 
 var applyPhaseNames = [phaseCount]string{
 	"processResults(total)",
-	"calcFees",
-	"ValidateVersion",
-	"FlushVersionedWrites",
-	"finalize",
-	"Normalize",
-	"ApplyStateWrites",
-	"ApplyTxIndexes",
-	"scheduleExecution",
+	"  nextResult(total)",
+	"  rws.Iter/PopNext",
+	"    RecordReads/Writes",
+	"    calcFees",
+	"    ValidateVersion",
+	"    FlushVersionedWrites",
+	"    finalize",
+	"    Normalize",
+	"    feeMerge(MergeInto)",
+	"    finalizeMerge+flush",
+	"    task bookkeeping",
+	"    validate-collect",
+	"    publish(total)",
+	"      ApplyStateWrites",
+	"      ApplyTxIndexes",
+	"      sendResult",
+	"    scheduleExecution",
 }
 
 var (
@@ -81,15 +98,21 @@ func ApplyLoopTimingReport(txs int) string {
 	}
 	rows := make([]row, 0, phaseCount)
 	for i := range applyPhaseNs {
-		if ns := applyPhaseNs[i].Load(); ns > 0 {
-			rows = append(rows, row{applyPhaseNames[i], ns, applyPhaseCnt[i].Load()})
-		}
+		rows = append(rows, row{applyPhaseNames[i], applyPhaseNs[i].Load(), applyPhaseCnt[i].Load()})
 	}
-	sort.Slice(rows, func(i, j int) bool { return rows[i].ns > rows[j].ns })
-
 	var b strings.Builder
 	fmt.Fprintf(&b, "\n%-24s %10s %8s %10s %9s\n", "phase", "total", "share", "calls", "ns/tx")
+	var attributed int64
+	for i, r := range rows {
+		if applyPhase(i) != phaseProcessResults && applyPhase(i) != phaseNextResult && applyPhase(i) != phasePublish {
+			attributed += r.ns
+		}
+	}
+	rows = append(rows, row{"  UNATTRIBUTED", total - attributed, 0})
 	for _, r := range rows {
+		if r.ns <= 0 {
+			continue
+		}
 		share := 0.0
 		if total > 0 {
 			share = 100 * float64(r.ns) / float64(total)

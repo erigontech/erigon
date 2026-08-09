@@ -54,6 +54,10 @@ func smallTxSlot(i int) accounts.StorageKey {
 // its own sender, so any serialization the executor shows is its own, not the
 // workload's.
 func smallTxTaskFactory(numTx int, shape smallTxShape) []exec.Task {
+	return smallTxBlockFactory(numTx, shape, 1)
+}
+
+func smallTxBlockFactory(numTx int, shape smallTxShape, blockNum uint64) []exec.Task {
 	tasks := make([]exec.Task, 0, numTx)
 	// Senders, recipients and the token contract occupy disjoint address ranges.
 	const recipientBase = 1_000_000
@@ -93,7 +97,7 @@ func smallTxTaskFactory(numTx int, shape smallTxShape) []exec.Task {
 		t := NewTestExecTask(i, ops, sender, 0)
 		t.setupDelay = smallTxSetup
 		t.spin = true
-		t.Header = &types.Header{Number: *uint256.NewInt(1)}
+		t.Header = &types.Header{Number: *uint256.NewInt(blockNum)}
 		tasks = append(tasks, t)
 	}
 

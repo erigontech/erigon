@@ -1664,9 +1664,11 @@ func (pe *parallelExecutor) scheduleNextPending(ctx context.Context) {
 
 func (pe *parallelExecutor) processResults(ctx context.Context, applyTx kv.TemporalTx) (blockResult *blockResult, err error) {
 	defer phaseEnd(phaseProcessResults, phaseStart())
+	iterStart := phaseStart()
 	rwsIt := pe.rws.Iter()
 	for rwsIt.HasNext() && blockResult == nil {
 		txResult := rwsIt.PopNext()
+		phaseEnd(phaseRwsIter, iterStart)
 
 		if pe.cfg.syncCfg.ChaosMonkey && pe.enableChaosMonkey {
 			chaosErr := chaos_monkey.ThrowRandomConsensusError(false, txResult.Version().TxIndex, pe.cfg.badBlockHalt, txResult.Err)
@@ -1689,11 +1691,14 @@ func (pe *parallelExecutor) processResults(ctx context.Context, applyTx kv.Tempo
 		// preceding blockResult to trigger the fast-path install above).
 		pe.ensureChangesetAccumulator(txResult.Version().BlockNum)
 
+		nextStart := phaseStart()
 		blockResult, err = blockExecutor.nextResult(ctx, pe, txResult, applyTx)
+		phaseEnd(phaseNextResult, nextStart)
 
 		if err != nil {
 			return blockResult, err
 		}
+		iterStart = phaseStart()
 	}
 
 	return blockResult, nil
@@ -2638,10 +2643,14 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	} else {
 		txVersion := res.Version()
 
+		recStart := phaseStart()
 		be.blockIO.RecordReads(txVersion, res.TxIn)
+		phaseEnd(phaseRecordIO, recStart)
 
 		if res.Version().Incarnation == 0 {
+			recStart = phaseStart()
 			be.blockIO.RecordWrites(txVersion, res.TxOut)
+			phaseEnd(phaseRecordIO, recStart)
 		} else {
 			prevWrites := be.blockIO.WriteSet(txVersion.TxIndex)
 			hasWriteChange := res.TxOut.HasNewWrite(prevWrites)
@@ -2683,20 +2692,24 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 		}
 
+		bookStart := phaseStart()
 		be.validateTasks.pushPending(tx)
 		be.execTasks.markComplete(tx)
 		be.cntSuccess++
 
 		be.execTasks.removeDependency(tx)
+		phaseEnd(phaseBookkeeping, bookStart)
 	}
 
 	// do validations ...
+	collectStart := phaseStart()
 	maxComplete := be.execTasks.maxComplete()
 	toValidate := make(sort.IntSlice, 0, 2)
 
 	for be.validateTasks.minPending() <= maxComplete && be.validateTasks.minPending() >= 0 {
 		toValidate = append(toValidate, be.validateTasks.takeNextPending())
 	}
+	phaseEnd(phaseValidateCollect, collectStart)
 
 	cntInvalid := 0
 	var stateReader state.StateReader
@@ -2749,10 +2762,12 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				return nil, err
 			}
 			if !tipWrites.IsEmpty() {
+				mergeStart := phaseStart()
 				existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
 				merged := existingWrites.MergeInto(tipWrites)
 				be.blockIO.RecordWrites(txVersion, merged)
 				be.recordFeeMerge(tx, existingWrites, merged)
+				phaseEnd(phaseFeeMerge, mergeStart)
 			}
 		}
 
@@ -2876,6 +2891,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					return nil, err
 				}
 				addWrites := finalizeWrites
+				finMergeStart := phaseStart()
 
 				// Merge any additional reads/writes produced during finalize (fee calc, post apply, etc)
 				if addReads.Len() > 0 {
@@ -2896,6 +2912,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					// chain.
 					be.versionMap.FlushVersionedWrites(merged, true, "")
 				}
+				phaseEnd(phaseFinalizeMerge, finMergeStart)
 
 				{
 					// Build a clean write set from the validated incarnation's
@@ -2984,6 +3001,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	phaseEnd(phaseSchedule, schedStart)
 
 	if be.publishTasks.minPending() != -1 {
+		defer phaseEnd(phasePublish, phaseStart())
 		toPublish := make(sort.IntSlice, 0, 2)
 
 		for be.publishTasks.minPending() <= maxValidated && be.publishTasks.minPending() >= 0 {
@@ -3056,8 +3074,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				return nil, fmt.Errorf("ApplyTxIndexes block=%d txNum=%d: %w", applyResult.blockNum, applyResult.txNum, idxErr)
 			}
 
-			if err := be.sendResult(ctx, &applyResult, false); err != nil {
-				return nil, err
+			sendStart := phaseStart()
+			sendErr := be.sendResult(ctx, &applyResult, false)
+			phaseEnd(phaseSendResult, sendStart)
+			if sendErr != nil {
+				return nil, sendErr
 			}
 		}
 	}
