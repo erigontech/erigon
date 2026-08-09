@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/erigontech/erigon/common/dbg"
@@ -401,8 +402,30 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 				return err
 			}
 		}
-		if err := agg.OpenFolder(); err != nil {
-			return err
+		// agg.OpenFolder → reloadSalt reads salt-state.txt from snapDir.
+		// On the fallback-to-preverified path after a manifest-discovery
+		// timeout, SyncSnapshots can return before the salt file torrent
+		// completes (files=0/0 → instantly), leaving the file absent when
+		// this fires. Retry until it lands or the deadline expires.
+		const aggOpenFolderTimeout = 3 * time.Minute
+		aggDeadline := time.Now().Add(aggOpenFolderTimeout)
+		for {
+			err := agg.OpenFolder()
+			if err == nil {
+				break
+			}
+			if !strings.Contains(err.Error(), "salt not found") {
+				return err
+			}
+			if time.Now().After(aggDeadline) {
+				return fmt.Errorf("agg.OpenFolder: salt file did not arrive within %s (fallback preverified salt download failed): %w", aggOpenFolderTimeout, err)
+			}
+			log.Debug(fmt.Sprintf("[%s] agg.OpenFolder retry (waiting for salt file)", s.LogPrefix()), "err", err)
+			select {
+			case <-time.After(openFolderBackoff):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 		}
 
 		if err := firstNonGenesisCheck(tx, cfg.blockReader.Snapshots(), s.LogPrefix(), cfg.dirs); err != nil {
