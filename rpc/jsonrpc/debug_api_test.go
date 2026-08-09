@@ -938,6 +938,38 @@ func TestGetModifiedAccountsByNumber(t *testing.T) {
 		_, err = api.GetModifiedAccountsByNumber(m.Ctx, rpc.BlockNumber(11), &n2)
 		require.Error(t, err)
 	})
+	t.Run("block tags", func(t *testing.T) {
+		latest := rpc.LatestBlockNumber
+		earliest := rpc.EarliestBlockNumber
+
+		result, err := api.GetModifiedAccountsByNumber(m.Ctx, latest, nil)
+		require.NoError(t, err)
+		require.NotEmpty(t, result)
+
+		result, err = api.GetModifiedAccountsByNumber(m.Ctx, earliest, &latest)
+		require.NoError(t, err)
+		require.NotEmpty(t, result)
+
+		n := rpc.BlockNumber(11)
+		result, err = api.GetModifiedAccountsByNumber(m.Ctx, n, &latest)
+		require.NoError(t, err)
+		require.NotEmpty(t, result)
+
+		result, err = api.GetModifiedAccountsByNumber(m.Ctx, rpc.PendingBlockNumber, nil)
+		require.NoError(t, err)
+		require.NotEmpty(t, result)
+
+		_, err = api.GetModifiedAccountsByNumber(m.Ctx, latest, &earliest)
+		require.Error(t, err)
+
+		result, err = api.GetModifiedAccountsByNumber(m.Ctx, rpc.SafeBlockNumber, nil)
+		require.NoError(t, err)
+		require.NotEmpty(t, result)
+
+		result, err = api.GetModifiedAccountsByNumber(m.Ctx, rpc.FinalizedBlockNumber, nil)
+		require.NoError(t, err)
+		require.NotEmpty(t, result)
+	})
 }
 
 func TestMapTxNum2BlockNum(t *testing.T) {
