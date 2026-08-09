@@ -87,11 +87,13 @@ func (api *ErigonImpl) BlockNumber(ctx context.Context, rpcBlockNumPtr *rpc.Bloc
 		if err != nil {
 			return 0, err
 		}
-	default:
+	case rpc.LatestExecutedBlockNumber, rpc.PendingBlockNumber:
 		blockNum, err = rpchelper.GetLatestExecutedBlockNumber(tx)
 		if err != nil {
 			return 0, err
 		}
+	default:
+		blockNum = uint64(rpcBlockNum)
 	}
 
 	return hexutil.Uint64(blockNum), nil
