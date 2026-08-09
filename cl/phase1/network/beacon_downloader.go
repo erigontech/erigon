@@ -568,15 +568,14 @@ func fetchEnvelopesFromBeaconAPI(
 	received map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope,
 	beaconCfg *clparams.BeaconChainConfig,
 ) int {
-	// Build root-to-slot mapping from blocks
-	rootToSlot := make(map[common.Hash]uint64, len(blocks))
+	availableRoots := make(map[common.Hash]struct{}, len(blocks))
 	for _, blk := range blocks {
 		if blk == nil || blk.Block == nil || blk.Block.Body == nil {
 			continue
 		}
 		root, err := blk.Block.HashSSZ()
 		if err == nil {
-			rootToSlot[root] = blk.Block.Slot
+			availableRoots[root] = struct{}{}
 		}
 	}
 
@@ -585,24 +584,17 @@ func fetchEnvelopesFromBeaconAPI(
 		envelope *cltypes.SignedExecutionPayloadEnvelope
 	}
 
-	// Filter roots that need fetching
-	var toFetch []struct {
-		root [32]byte
-		slot uint64
-	}
+	toFetch := make([][32]byte, 0, len(fullRoots))
 	for _, root := range fullRoots {
 		h := common.Hash(root)
 		if _, ok := received[h]; ok {
 			continue
 		}
-		slot, ok := rootToSlot[h]
+		_, ok := availableRoots[h]
 		if !ok {
 			continue
 		}
-		toFetch = append(toFetch, struct {
-			root [32]byte
-			slot uint64
-		}{root, slot})
+		toFetch = append(toFetch, root)
 	}
 
 	if len(toFetch) == 0 {
@@ -614,15 +606,17 @@ func fetchEnvelopesFromBeaconAPI(
 	sem := make(chan struct{}, 8)
 	var wg sync.WaitGroup
 
-	for i, item := range toFetch {
+	for i, root := range toFetch {
 		idx := i
-		slot := item.slot
-		root := item.root
 		wg.Go(func() {
-			sem <- struct{}{}
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
 			defer func() { <-sem }()
 
-			reqURL := fmt.Sprintf("%s/eth/v1/beacon/execution_payload_envelope/%d", baseURL, slot)
+			reqURL := fmt.Sprintf("%s/eth/v1/beacon/execution_payload_envelope/%s", baseURL, common.Hash(root).Hex())
 			req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 			if err != nil {
 				return
@@ -643,12 +637,12 @@ func fetchEnvelopesFromBeaconAPI(
 				Message: cltypes.NewExecutionPayloadEnvelope(beaconCfg),
 			}
 			if err := envelope.DecodeSSZ(body, int(clparams.GloasVersion)); err != nil {
-				log.Debug("[ForwardBeaconDownloader] HTTP envelope decode failed", "slot", slot, "err", err)
+				log.Debug("[ForwardBeaconDownloader] HTTP envelope decode failed", "root", common.Hash(root), "err", err)
 				return
 			}
 			block := blockByRoot(blocks, common.Hash(root))
 			if err := ValidateFetchedEnvelope(beaconCfg, block, common.Hash(root), envelope); err != nil {
-				log.Debug("[ForwardBeaconDownloader] HTTP envelope mismatch", "slot", slot, "err", err)
+				log.Debug("[ForwardBeaconDownloader] HTTP envelope mismatch", "root", common.Hash(root), "err", err)
 				return
 			}
 			results[idx] = envResult{hash: common.Hash(root), envelope: envelope}

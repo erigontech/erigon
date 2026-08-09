@@ -352,7 +352,7 @@ func TestFetchGloasEnvelopesProbesLookaheadInferredEmptyBlock(t *testing.T) {
 	require.NoError(t, err)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/eth/v1/beacon/execution_payload_envelope/100" {
+		if r.URL.Path != "/eth/v1/beacon/execution_payload_envelope/"+common.Hash(blockRoot).Hex() {
 			http.NotFound(w, r)
 			return
 		}
@@ -377,6 +377,89 @@ func TestFetchGloasEnvelopesProbesLookaheadInferredEmptyBlock(t *testing.T) {
 	require.NoError(t, ValidateFetchedEnvelope(&clparams.MainnetBeaconConfig, block, common.Hash(blockRoot), envelopes[common.Hash(blockRoot)]))
 	assert.Contains(t, fullRoots, common.Hash(blockRoot))
 	assert.Contains(t, knownRoots, common.Hash(blockRoot))
+}
+
+func TestP2POnlyDownloadTracksLookaheadInferredEmptyBlock(t *testing.T) {
+	block := makeGloasBlock(100, hash(0xAA), hash(0x10))
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	lookahead := makeGloasBlock(101, hash(0xBB), hash(0xCC))
+	lookahead.Block.ParentRoot = blockRoot
+
+	processed := false
+	downloader := &BackwardBeaconDownloader{
+		expectedRoot:      blockRoot,
+		prevBatchTopBlock: lookahead,
+		beaconCfg:         &clparams.MainnetBeaconConfig,
+		onNewBlock: func(_ *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) (bool, error) {
+			processed = true
+			require.Nil(t, envelope)
+			return true, nil
+		},
+	}
+
+	require.NoError(t, downloader.processResponses(context.Background(), []*cltypes.SignedBeaconBlock{block}))
+	require.True(t, processed)
+	assert.Empty(t, downloader.skippedFullBlocks)
+}
+
+func TestProbeGloasEmptyCandidatesDeduplicatesRoots(t *testing.T) {
+	block := makeGloasBlock(100, hash(0xAA), hash(0x10))
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	downloader := &BackwardBeaconDownloader{
+		httpFallbackURL: server.URL,
+		beaconCfg:       &clparams.MainnetBeaconConfig,
+	}
+	done := make(chan struct{})
+	go func() {
+		downloader.probeGloasEmptyCandidates(
+			context.Background(),
+			[]*cltypes.SignedBeaconBlock{block, block},
+			map[common.Hash]struct{}{common.Hash(blockRoot): {}},
+		)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("duplicate root deadlocked envelope probing")
+	}
+	assert.Equal(t, int32(1), requests.Load())
+}
+
+func TestFetchEnvelopesFromBeaconAPIUsesBlockRoot(t *testing.T) {
+	block := makeGloasBlock(100, hash(0xAA), hash(0x10))
+	blockRoot, envelope := makeValidGloasEnvelope(t, block)
+	encoded, err := envelope.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	var requestedPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestedPath = r.URL.Path
+		_, _ = w.Write(encoded)
+	}))
+	defer server.Close()
+
+	received := make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)
+	require.Equal(t, 1, fetchEnvelopesFromBeaconAPI(
+		context.Background(),
+		server.URL,
+		[]*cltypes.SignedBeaconBlock{block},
+		[][32]byte{blockRoot},
+		received,
+		&clparams.MainnetBeaconConfig,
+	))
+	assert.Equal(t, "/eth/v1/beacon/execution_payload_envelope/"+common.Hash(blockRoot).Hex(), requestedPath)
 }
 
 func TestFetchGloasEnvelopesSkipsNetworkAfterFailureThreshold(t *testing.T) {
@@ -642,7 +725,7 @@ func TestRootFallbackProbesLookaheadInferredEmptyBlock(t *testing.T) {
 		case "/eth/v2/beacon/blocks/" + common.Hash(blockRoot).Hex():
 			w.Header().Set("Eth-Consensus-Version", "gloas")
 			_, _ = w.Write(encodedBlock)
-		case "/eth/v1/beacon/execution_payload_envelope/100":
+		case "/eth/v1/beacon/execution_payload_envelope/" + common.Hash(blockRoot).Hex():
 			_, _ = w.Write(encodedEnvelope)
 		default:
 			http.NotFound(w, r)
@@ -695,7 +778,7 @@ func TestMalformedP2PEnvelopeFallsBackToValidHTTPEnvelope(t *testing.T) {
 	encoded, err := valid.EncodeSSZ(nil)
 	require.NoError(t, err)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/eth/v1/beacon/execution_payload_envelope/100" {
+		if r.URL.Path != "/eth/v1/beacon/execution_payload_envelope/"+common.Hash(blockRoot).Hex() {
 			http.NotFound(w, r)
 			return
 		}
@@ -734,6 +817,33 @@ func TestMalformedHTTPRecoveryEnvelopeRemainsMissing(t *testing.T) {
 		map[common.Hash]*cltypes.SignedBeaconBlock{common.Hash(blockRoot): block},
 	)
 	require.Empty(t, got)
+}
+
+func TestHTTPRecoveryUsesBlockRoot(t *testing.T) {
+	block := makeGloasBlock(100, hash(0xAA), hash(0x10))
+	blockRoot, envelope := makeValidGloasEnvelope(t, block)
+	encoded, err := envelope.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	var requestedPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestedPath = r.URL.Path
+		_, _ = w.Write(encoded)
+	}))
+	defer server.Close()
+
+	downloader := &BackwardBeaconDownloader{
+		httpFallbackURL: server.URL,
+		beaconCfg:       &clparams.MainnetBeaconConfig,
+	}
+	got := downloader.RecoverSkippedEnvelopes(
+		context.Background(),
+		[]SkippedFullBlock{{Slot: block.Block.Slot, Root: blockRoot}},
+		map[common.Hash]*cltypes.SignedBeaconBlock{common.Hash(blockRoot): block},
+	)
+
+	require.NoError(t, ValidateFetchedEnvelope(&clparams.MainnetBeaconConfig, block, common.Hash(blockRoot), got[common.Hash(blockRoot)]))
+	assert.Equal(t, "/eth/v1/beacon/execution_payload_envelope/"+common.Hash(blockRoot).Hex(), requestedPath)
 }
 
 func TestFetchEnvelopeRecoverySourcesStartsAllSourcesBeforeDeadline(t *testing.T) {
