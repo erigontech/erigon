@@ -173,13 +173,13 @@ func (p *ContractTrunkPreloadParallel) Run(
 
 	stepCap := p.usedBytes + stepBudgetBytes
 	chunkPinned := 0
-	budgetHit := false
+	endStep := false
 
 	// pin records the entry and queues its children. Returns false on budget hit.
 	pin := func(pk pathKey, v []byte, depth int, next *[]pathKey) bool {
 		cost := estimatedEntryCost(pk.key, v)
 		if p.usedBytes+cost > stepCap {
-			budgetHit = true
+			endStep = true
 			return false
 		}
 		// step=0: a storage-trunk branch resolved across merged files has no single
@@ -213,7 +213,7 @@ func (p *ContractTrunkPreloadParallel) Run(
 		return true
 	}
 
-	for !budgetHit && p.nextDepth <= maxStorageTrunkDepth && len(p.frontier) > 0 {
+	for !endStep && p.nextDepth <= maxStorageTrunkDepth && len(p.frontier) > 0 {
 		depth := p.nextDepth
 		wavePinnedBefore := chunkPinned
 		dbHits, dbVals, fileMiss, dbHitsBytes := p.sortAndPartitionFrontier(dbBranches)
@@ -253,7 +253,7 @@ func (p *ContractTrunkPreloadParallel) Run(
 			p.dbHitsPinned++
 		}
 		fileMissStop := 0
-		if !budgetHit {
+		if !endStep {
 			fileMissStop = len(fileMiss)
 			for i, pk := range fileMiss {
 				v := fileVals[i]
@@ -273,10 +273,10 @@ func (p *ContractTrunkPreloadParallel) Run(
 		// capped fetch pinned nothing because its keys were absent from the file
 		// layer. Either way, end the step; the tail resumes on the next Run.
 		if len(fileMissDeferred) > 0 && (len(fileMiss) == 0 || chunkPinned == wavePinnedBefore) {
-			budgetHit = true
+			endStep = true
 		}
 
-		if budgetHit {
+		if endStep {
 			// Preserve un-pinned items at current depth; pendingChildren stays
 			// at depth+1 for when this depth is drained on a future Run.
 			rest := make([]pathKey, 0, len(dbHits)-dbHitStop+len(fileMiss)-fileMissStop+len(fileMissDeferred))

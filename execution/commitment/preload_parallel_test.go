@@ -960,7 +960,7 @@ func TestContractTrunkPreloadParallel_StepBudgetSweepTerminates(t *testing.T) {
 // entry, so the miss set is deferred without being fetched, or it affords a
 // capped fetch whose keys are all absent from the file layer — the normal shape
 // at the BFS fringe, where a set afterMap bit names a leaf with no branch
-// record. Neither raises budgetHit from pin(), so the wave used to be re-entered
+// record. Neither raises endStep from pin(), so the wave used to be re-entered
 // at the same depth on the deferred tail, once per chunk. The resolver call
 // count is the assertion that separates the two: it is what re-entry inflates.
 func TestContractTrunkPreloadParallel_NoPinWaveEndsStep(t *testing.T) {
