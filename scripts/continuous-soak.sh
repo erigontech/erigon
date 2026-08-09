@@ -44,28 +44,51 @@ next_leg() {
 }
 
 wait_publisher_tip() {
-  # Poll caplin/execution progress on the publisher until head advance
-  # stalls (already at tip). Cheap heuristic: two consecutive polls with
-  # the same head block number, 60s apart.
-  local prev="" cur=""
-  echo "[continuous-soak] waiting for publisher to reach hoodi tip..."
-  for i in $(seq 1 60); do  # up to 60 minutes
+  # Wait until the publisher genuinely reaches hoodi tip: head must be
+  # (a) > MIN_TIP_BLOCK — past bootstrap, far past 0, and (b) advancing
+  # by less than TIP_DELTA blocks between polls (chain-cadence, live).
+  # A head that has never moved past 0 is publisher-still-bootstrapping,
+  # NOT at-tip — leg-M consumers hitting that publisher get an empty
+  # manifest + zero seeded files.
+  local prev="" cur="" prev_dec=0 cur_dec=0
+  local MIN_TIP_BLOCK="${MIN_TIP_BLOCK:-3000000}"
+  local TIP_DELTA="${TIP_DELTA:-10}"
+  local MAX_WAIT_MIN="${MAX_WAIT_MIN:-120}"
+  local POLL_INTERVAL="${POLL_INTERVAL:-60}"
+  echo "[continuous-soak] waiting for publisher to reach hoodi tip (min>${MIN_TIP_BLOCK}, delta<${TIP_DELTA}, ${MAX_WAIT_MIN}m cap)..."
+  for i in $(seq 1 "$MAX_WAIT_MIN"); do
     cur=$(curl -sS -m 5 -X POST -H "Content-Type: application/json" \
       --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
       "http://127.0.0.1:${PUB_HTTP_PORT}" 2>/dev/null | jq -r '.result // empty' || true)
-    if [[ -z "$cur" ]]; then
-      echo "[continuous-soak] publisher RPC still not answering (attempt $i)..."
-      sleep 30
+    if [[ -z "$cur" || "$cur" == "0x0" || "$cur" == "0x" ]]; then
+      echo "[continuous-soak] publisher head=0 still bootstrapping (attempt $i / $MAX_WAIT_MIN)"
+      prev=""
+      sleep "$POLL_INTERVAL"
       continue
     fi
-    if [[ -n "$prev" && "$prev" == "$cur" ]]; then
-      echo "[continuous-soak] publisher head stable at $cur — treating as at-tip"
-      return 0
+    cur_dec=$(printf '%d' "$cur")
+    if (( cur_dec < MIN_TIP_BLOCK )); then
+      echo "[continuous-soak] publisher head=$cur_dec < $MIN_TIP_BLOCK, still catching up (attempt $i)"
+      prev="$cur"
+      prev_dec="$cur_dec"
+      sleep "$POLL_INTERVAL"
+      continue
+    fi
+    if [[ -n "$prev" ]]; then
+      local delta=$(( cur_dec - prev_dec ))
+      if (( delta >= 0 && delta < TIP_DELTA )); then
+        echo "[continuous-soak] publisher at hoodi tip: head=$cur_dec delta=$delta (< $TIP_DELTA)"
+        return 0
+      fi
+      echo "[continuous-soak] publisher head=$cur_dec (delta=$delta), still advancing"
+    else
+      echo "[continuous-soak] publisher head=$cur_dec, baseline for next poll"
     fi
     prev="$cur"
-    sleep 60
+    prev_dec="$cur_dec"
+    sleep "$POLL_INTERVAL"
   done
-  echo "[continuous-soak] FAIL: publisher didn't reach a stable tip within 60m" >&2
+  echo "[continuous-soak] FAIL: publisher didn't reach a stable tip within ${MAX_WAIT_MIN}m" >&2
   return 1
 }
 
