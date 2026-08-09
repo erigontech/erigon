@@ -181,6 +181,123 @@ func TestMixInActiveFieldsDoesNotModifyActiveFields(t *testing.T) {
 	require.Equal(t, original, activeFields)
 }
 
+func TestProgressiveContainerRootReferenceVectors(t *testing.T) {
+	executionPayloadFields := make([]bool, 18)
+	for i := range executionPayloadFields {
+		executionPayloadFields[i] = true
+	}
+
+	sparseFields := make([]bool, 18)
+	for _, i := range []int{0, 7, 8, 17} {
+		sparseFields[i] = true
+	}
+
+	boundaryFields := make([]bool, 256)
+	boundaryFields[0] = true
+	boundaryFields[255] = true
+
+	tests := []struct {
+		name         string
+		fieldRoots   [][32]byte
+		activeFields []bool
+		expected     string
+	}{
+		{
+			name:         "single field",
+			fieldRoots:   progressiveTestChunks(1),
+			activeFields: []bool{true},
+			expected:     "0xa21da97c8a597221c87c9ea5ecdfbd860fcd52fd6fb5b001723f6437856c8df1",
+		},
+		{
+			name:         "EIP-7807 ExecutionPayload fields",
+			fieldRoots:   progressiveTestChunks(18),
+			activeFields: executionPayloadFields,
+			expected:     "0x94bfadcf125b79acea740a8068a9aca0a64bb8bcb8bd12b524e7b3fd50ceadae",
+		},
+		{
+			name:         "sparse fields preserve stable indices",
+			fieldRoots:   progressiveTestChunks(4),
+			activeFields: sparseFields,
+			expected:     "0x5a4ff3bad5628183710200b4648ef601c3e2b735a260604f70e04d9ef19862bb",
+		},
+		{
+			name:         "256-bit boundary",
+			fieldRoots:   progressiveTestChunks(2),
+			activeFields: boundaryFields,
+			expected:     "0x90640bd1cdf470b6f9d15c77d1b529badab7cca638ee01217edc2b2956f60319",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root, err := merkle_tree.ProgressiveContainerRoot(test.fieldRoots, test.activeFields)
+			require.NoError(t, err)
+			require.Equal(t, [32]byte(common.HexToHash(test.expected)), root)
+		})
+	}
+}
+
+func TestProgressiveContainerRootRejectsInvalidConfigurations(t *testing.T) {
+	tooManyFields := make([]bool, 257)
+	tooManyFields[256] = true
+
+	tests := []struct {
+		name         string
+		fieldRoots   [][32]byte
+		activeFields []bool
+		expected     string
+	}{
+		{
+			name:         "no fields",
+			activeFields: []bool{true},
+			expected:     "progressive container has no fields",
+		},
+		{
+			name:       "empty active fields",
+			fieldRoots: progressiveTestChunks(1),
+			expected:   "active fields cannot be empty",
+		},
+		{
+			name:         "more than 256 active fields",
+			fieldRoots:   progressiveTestChunks(1),
+			activeFields: tooManyFields,
+			expected:     "active fields exceed 256 bits",
+		},
+		{
+			name:         "trailing inactive field",
+			fieldRoots:   progressiveTestChunks(1),
+			activeFields: []bool{true, false},
+			expected:     "active fields must end with an active field",
+		},
+		{
+			name:         "active field count mismatch",
+			fieldRoots:   progressiveTestChunks(2),
+			activeFields: []bool{true},
+			expected:     "active field count does not match field roots",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root, err := merkle_tree.ProgressiveContainerRoot(test.fieldRoots, test.activeFields)
+			require.EqualError(t, err, test.expected)
+			require.Zero(t, root)
+		})
+	}
+}
+
+func TestProgressiveContainerRootDoesNotModifyInputs(t *testing.T) {
+	fieldRoots := progressiveTestChunks(4)
+	activeFields := []bool{true, false, true, false, false, true, true}
+	fieldRootsBefore := append([][32]byte(nil), fieldRoots...)
+	activeFieldsBefore := append([]bool(nil), activeFields...)
+
+	_, err := merkle_tree.ProgressiveContainerRoot(fieldRoots, activeFields)
+	require.NoError(t, err)
+	require.Equal(t, fieldRootsBefore, fieldRoots)
+	require.Equal(t, activeFieldsBefore, activeFields)
+}
+
 func progressiveTestChunks(count int) [][32]byte {
 	chunks := make([][32]byte, count)
 	for i := range chunks {

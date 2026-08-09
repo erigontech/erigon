@@ -58,6 +58,48 @@ func MixInActiveFields(root [32]byte, activeFields []bool) ([32]byte, error) {
 	return crypto.Sha256(root[:], packed[:]), nil
 }
 
+// ProgressiveContainerRoot computes the EIP-7495 root from field roots ordered
+// by the active entries in activeFields.
+func ProgressiveContainerRoot(fieldRoots [][32]byte, activeFields []bool) ([32]byte, error) {
+	if len(fieldRoots) == 0 {
+		return [32]byte{}, errors.New("progressive container has no fields")
+	}
+	if len(activeFields) == 0 {
+		return [32]byte{}, errors.New("active fields cannot be empty")
+	}
+	if len(activeFields) > 256 {
+		return [32]byte{}, errors.New("active fields exceed 256 bits")
+	}
+	if !activeFields[len(activeFields)-1] {
+		return [32]byte{}, errors.New("active fields must end with an active field")
+	}
+
+	activeFieldCount := 0
+	for _, active := range activeFields {
+		if active {
+			activeFieldCount++
+		}
+	}
+	if activeFieldCount != len(fieldRoots) {
+		return [32]byte{}, errors.New("active field count does not match field roots")
+	}
+
+	expandedRoots := make([][32]byte, len(activeFields))
+	fieldIndex := 0
+	for i, active := range activeFields {
+		if active {
+			expandedRoots[i] = fieldRoots[fieldIndex]
+			fieldIndex++
+		}
+	}
+
+	progressiveRoot, err := MerkleizeProgressive(expandedRoots)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	return MixInActiveFields(progressiveRoot, activeFields)
+}
+
 func merkleizeProgressive(chunks [][32]byte, numLeaves uint64) ([32]byte, error) {
 	if len(chunks) == 0 {
 		return [32]byte{}, nil
