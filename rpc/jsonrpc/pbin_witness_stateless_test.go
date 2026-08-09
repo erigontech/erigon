@@ -619,6 +619,36 @@ func TestPBinWitnessStatelessRemovesAccountCreatedInBlock(t *testing.T) {
 	require.Equal(t, parentRoot, got)
 }
 
+// TestPBinWitnessStatelessRefundsRemovedAccount: FinalizeTx runs per transaction,
+// so an account emptied under EIP-161 in one transaction and funded again in a
+// later one reaches the writer as DeleteAccount then UpdateAccountData, with no
+// CreateContract between them. The later write wins, as it does when the domain
+// layer merges the same pair.
+func TestPBinWitnessStatelessRefundsRemovedAccount(t *testing.T) {
+	t.Parallel()
+
+	c := pbinStatelessNewCorpus()
+	stateless, _, parentRoot := c.verifier(t)
+
+	eoa := accounts.InternAddress(c.eoa)
+	acc, err := stateless.ReadAccountData(eoa)
+	require.NoError(t, err)
+	require.NoError(t, stateless.DeleteAccount(eoa, nil))
+
+	acc.Nonce, acc.Balance = 0, *uint256.NewInt(555)
+	require.NoError(t, stateless.UpdateAccountData(eoa, nil, acc))
+
+	got, err := stateless.Finalize(context.Background())
+	require.NoError(t, err)
+
+	full := c.state.clone()
+	full.setAccount(c.eoa, 0, 555, nil)
+	want := pbinStatelessProcess(t, full, [][]byte{c.eoa[:]})
+
+	require.Equal(t, common.BytesToHash(want), got)
+	require.NotEqual(t, parentRoot, got, "the writes do not move the root, so the test proves nothing")
+}
+
 // pbinVerifyWithdrawalGwei is the only state the gate's test block moves. A
 // withdrawal keeps the expected post-state root arithmetic instead of gas
 // accounting, while still running the full replay.

@@ -2352,6 +2352,9 @@ func (u *Update) Decode(buf []byte, pos int) (int, error) {
 			return 0, errors.New("decode Update: storage pos overflow")
 		}
 		pos += n
+		if l > uint64(len(u.Storage)) {
+			return 0, errors.New("decode Update: storage len out of range")
+		}
 		if len(buf) < pos+int(l) {
 			return 0, errors.New("decode Update: buffer too small for storage")
 		}

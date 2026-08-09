@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 )
 
@@ -282,6 +283,23 @@ func TestHashSort_WaitBufferFreeErrorKeepsArenaInvariant(t *testing.T) {
 
 		require.Equal(t, int(ut.gen%arenaRingSize), ut.curArena)
 	})
+}
+
+// TestUpdateDecodeRefusesOversizedStorage: the storage length is a varint on the
+// wire but an int8 in the struct, so a value past the field's own width has to
+// be refused at the bound check rather than wrap negative.
+func TestUpdateDecodeRefusesOversizedStorage(t *testing.T) {
+	t.Parallel()
+
+	for _, storageLen := range []uint64{uint64(length.Hash) + 1, 200} {
+		buf := []byte{byte(StorageUpdate)}
+		buf = binary.AppendUvarint(buf, storageLen)
+		buf = append(buf, bytes.Repeat([]byte{0xAA}, int(storageLen))...)
+
+		var u Update
+		_, err := u.Decode(buf, 0)
+		require.Error(t, err, "storage len %d", storageLen)
+	}
 }
 
 // TestUpdates_ArenaAlloc verifies that sequential allocations within a ring buffer return

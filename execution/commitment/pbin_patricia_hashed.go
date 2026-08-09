@@ -365,11 +365,11 @@ func (pph *PBinPatriciaHashed) storeRoot() error {
 // loadRoot reads the stored root cell into the grid; an absent record is the
 // empty tree.
 func (pph *PBinPatriciaHashed) loadRoot() error {
-	pph.rootChecked = true
 	data, _, err := pph.ctx.Branch(pbinRootKey)
 	if err != nil {
 		return fmt.Errorf("pbin: read root cell: %w", err)
 	}
+	pph.rootChecked = true
 	if len(data) == 0 {
 		pph.rootPrev = []byte{}
 		return nil

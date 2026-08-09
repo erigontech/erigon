@@ -250,6 +250,7 @@ func (s *pbinWitnessStateless) DeleteAccount(address accounts.Address, original 
 	}
 	delete(s.accountUpdates, addr)
 	delete(s.storageWrites, addr)
+	delete(s.codeUpdates, addr)
 	s.deleted[addr] = struct{}{}
 	return nil
 }
@@ -306,15 +307,15 @@ func (s *pbinWitnessStateless) Finalize(ctx context.Context) (common.Hash, error
 func (s *pbinWitnessStateless) pendingUpdates() (plainKeys [][]byte, updates []commitment.Update, err error) {
 	// A removal is one update on the address: the engine drops the account's
 	// header stem and its storage subtree, neither of which the writes enumerate.
+	// Removals go first so that a write the block made after one merges over it,
+	// as the same pair merges when the domain layer collects a block's updates:
+	// DeleteAccount clears the maps below, so anything left in them is later.
 	for addr := range s.deleted {
 		plainKeys = append(plainKeys, addr[:])
 		updates = append(updates, commitment.Update{Flags: commitment.DeleteUpdate})
 	}
 	for addr, acc := range s.accountUpdates {
 		if acc == nil {
-			continue
-		}
-		if _, gone := s.deleted[addr]; gone {
 			continue
 		}
 		update, err := s.accountUpdate(addr, acc)
@@ -325,9 +326,6 @@ func (s *pbinWitnessStateless) pendingUpdates() (plainKeys [][]byte, updates []c
 		updates = append(updates, update)
 	}
 	for addr, written := range s.storageWrites {
-		if _, gone := s.deleted[addr]; gone {
-			continue
-		}
 		for slot, value := range written {
 			update, keep, err := s.storageUpdate(addr, slot, value)
 			if err != nil {
