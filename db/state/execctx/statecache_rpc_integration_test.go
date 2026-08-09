@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -265,6 +266,84 @@ func TestSharedDomainsOldFilesTxBoundAfterPublicationDoesNotUseNewCacheGeneratio
 	got, _, err = readerDomains.GetLatest(kv.StorageDomain, oldTx, key)
 	require.NoError(t, err)
 	require.Equal(t, v1, got, "a transaction pinned to the old files must not use the new files cache generation")
+}
+
+func TestSharedDomainsSameDatabaseViewUsesReadTxFilesGeneration(t *testing.T) {
+	const stepSize = uint64(1)
+	ctx := t.Context()
+	db := newTestDb(t, stepSize)
+	stateCache := newSmallStateCache()
+	t.Cleanup(stateCache.Close)
+	execctx.BindStateCacheToAggregator(db, stateCache)
+
+	key := make([]byte, 20)
+	key[0] = 0xaa
+	values := [][]byte{encAccount(1), encAccount(2), encAccount(3)}
+
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+	for txNum := range uint64(len(values)) {
+		var prevValue []byte
+		if txNum > 0 {
+			prevValue = values[txNum-1]
+		}
+		domains.SetTxNum(txNum)
+		require.NoError(t, domains.DomainPut(kv.AccountsDomain, rwTx, key, values[txNum], txNum, prevValue))
+		_, err = domains.ComputeCommitment(ctx, rwTx, true, txNum, txNum, "", nil)
+		require.NoError(t, err)
+		require.NoError(t, domains.Flush(ctx, rwTx))
+		require.NoError(t, rawdbv3.TxNums.Append(rwTx, txNum, txNum))
+	}
+	domains.Close()
+	require.NoError(t, rwTx.Commit())
+
+	oldTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer oldTx.Rollback()
+	oldDomains, err := execctx.NewSharedDomains(ctx, oldTx, log.New())
+	require.NoError(t, err)
+	oldDomains.SetStateCacheForTest(stateCache)
+	oldDomains.Close()
+	oldFilesEnd := oldTx.Debug().TxNumsInFiles(kv.AccountsDomain)
+
+	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
+	require.NoError(t, agg.BuildFiles(3))
+
+	freshTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer freshTx.Rollback()
+	require.Equal(t, oldTx.ViewID(), freshTx.ViewID(), "publishing files must not advance the database snapshot")
+	require.Greater(t, freshTx.Debug().TxNumsInFiles(kv.AccountsDomain), oldFilesEnd)
+
+	stateVersion, err := rawdb.GetStateVersion(freshTx)
+	require.NoError(t, err)
+	freshDebug := freshTx.Debug()
+	freshGeneration := cache.StateGeneration(
+		stateVersion,
+		freshDebug.TxNumsInFiles(kv.AccountsDomain),
+		freshDebug.TxNumsInFiles(kv.StorageDomain),
+		freshDebug.TxNumsInFiles(kv.CodeDomain),
+	)
+	stateCache.Publisher().Clear(freshGeneration)
+	cacheOnlyValue := []byte{0xff}
+	freshCacheView := stateCache.View(freshGeneration)
+	freshCacheView.Fill(kv.AccountsDomain, key, cacheOnlyValue, 0)
+	cached, ok := freshCacheView.Get(kv.AccountsDomain, key)
+	require.True(t, ok)
+	require.Equal(t, cacheOnlyValue, cached)
+
+	freshDomains, err := execctx.NewSharedDomains(ctx, freshTx, log.New())
+	require.NoError(t, err)
+	defer freshDomains.Close()
+	freshDomains.SetStateCacheReaderForTest(stateCache)
+
+	got, _, err := freshDomains.GetLatest(kv.AccountsDomain, oldTx, key)
+	require.NoError(t, err)
+	require.Equal(t, values[2], got, "the old files transaction must not use the fresh files cache generation")
 }
 
 func TestAccountOnlyDeleteDoesNotBlockUnrelatedCodeFill(t *testing.T) {

@@ -88,32 +88,29 @@ type cacheViews struct {
 }
 
 // cacheViewsFor binds both process-global caches to the database and files
-// generation pinned by tx. The common path reuses construction-time metadata;
-// reads through another transaction derive its generation again.
+// generation pinned by tx. ViewID identifies only the database snapshot:
+// files can change without a database commit, so their identity and cache
+// eligibility must always come from the transaction being read.
 func (sd *SharedDomains) cacheViewsFor(tx kv.TemporalTx) cacheViews {
 	if tx == nil {
 		return cacheViews{}
 	}
-	var stateGeneration, branchGeneration cache.Generation
-	var stateEligible, branchEligible bool
+	stateVersion := sd.baseStateVersion
 	if tx.ViewID() == sd.baseViewID {
 		if !sd.baseStateVersionKnown {
 			return cacheViews{}
 		}
-		stateGeneration = sd.baseStateCacheGeneration
-		branchGeneration = sd.baseBranchCacheGeneration
-		stateEligible = sd.baseStateCacheEligible
-		branchEligible = sd.baseBranchCacheEligible
 	} else {
-		stateVersion, err := rawdb.GetStateVersion(tx)
+		var err error
+		stateVersion, err = rawdb.GetStateVersion(tx)
 		if err != nil {
 			return cacheViews{}
 		}
-		debug := tx.Debug()
-		stateGeneration, branchGeneration = cacheGenerationsFor(debug, stateVersion)
-		stateEligible = cacheViewEligible(debug, kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain)
-		branchEligible = cacheViewEligible(debug, kv.CommitmentDomain)
 	}
+	debug := tx.Debug()
+	stateGeneration, branchGeneration := cacheGenerationsFor(debug, stateVersion)
+	stateEligible := cacheViewEligible(debug, kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain)
+	branchEligible := cacheViewEligible(debug, kv.CommitmentDomain)
 	var views cacheViews
 	if sd.stateCache != nil && stateEligible {
 		views.state = sd.stateCache.View(stateGeneration)
@@ -167,14 +164,13 @@ type SharedDomains struct {
 	logger log.Logger
 
 	// These fields describe the database snapshot used to construct this
-	// SharedDomains. The common read path reuses them instead of reading cache
-	// eligibility metadata for every GetLatest call.
+	// SharedDomains. A read with the same ViewID can reuse the state version,
+	// but its independently pinned files metadata must still be derived again.
 	baseViewID                uint64
+	baseStateVersion          uint64
 	baseStateCacheGeneration  cache.Generation
 	baseBranchCacheGeneration cache.Generation
 	baseStateVersionKnown     bool
-	baseStateCacheEligible    bool
-	baseBranchCacheEligible   bool
 
 	txNum       uint64
 	currentStep kv.Step
@@ -288,11 +284,10 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 		metrics:                   kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
 		stepSize:                  debug.StepSize(),
 		baseViewID:                tx.ViewID(),
+		baseStateVersion:          stateVersion,
 		baseStateCacheGeneration:  stateGeneration,
 		baseBranchCacheGeneration: branchGeneration,
 		baseStateVersionKnown:     stateVersionErr == nil,
-		baseStateCacheEligible:    cacheViewEligible(debug, kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain),
-		baseBranchCacheEligible:   cacheViewEligible(debug, kv.CommitmentDomain),
 	}
 
 	sd.mem = tx.Debug().NewMemBatch(&sd.metrics)
