@@ -1259,8 +1259,11 @@ they now use the doc's own §5.1 tree, so they are checkable like the rest.
 - **EIP-7610 non-empty-storage predicate.** Newly specified: an address has
   non-empty storage exactly when a leaf exists at one of its header sub-indices
   64–127, or anywhere in its storage bucket. The MPT's `storage_root` check has
-  no analogue in this tree. This lives in the EL state layer, not `package
-  commitment`, so it belongs to the M1 EL-integration work.
+  no analogue in this tree. The witness arm did land here, against this
+  deferral: the stateless gate re-executes the block, so it needs an answer, and
+  `PBinWitnessState.HasStorage` plus the builder's storage-zone probe are it.
+  The EL state layer's own answer, read from the domains rather than a node set,
+  still belongs to the M1 EL-integration work.
 - **Gas schedule.** The EIP deleted its Access-events section outright. Erigon
   never carried EIP-4762 keying or branch-cost comments, so there is nothing to
   remove — but nothing should be added until a schedule is specified.

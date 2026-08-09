@@ -573,6 +573,36 @@ func TestPBinWitnessStatelessHasStorage(t *testing.T) {
 	require.False(t, has, "a neighbour's zone leaf is not this account's storage")
 }
 
+// TestPBinWitnessStatelessCreateOverStoredAccountRefused: the chain drops an
+// address's whole storage prefix on CREATE, which no plain-key update here can
+// express. A create over storage the witness proves is refused rather than
+// answered with a root that keeps the leaves the chain removed.
+func TestPBinWitnessStatelessCreateOverStoredAccountRefused(t *testing.T) {
+	t.Parallel()
+
+	state := newPBinStatelessState()
+	stored := pbinStatelessAddr(0x61)
+	bare := pbinStatelessAddr(0x62)
+	for _, addr := range []common.Address{stored, bare} {
+		state.setAccount(addr, 0, 1, nil)
+	}
+	state.setStorage(stored, pbinStatelessSlot(3), 9)
+
+	both := [][]byte{stored[:], bare[:]}
+	pbinStatelessProcess(t, state, append(slices.Clone(both),
+		append(bytes.Clone(stored[:]), pbinStatelessSlotBytes(3)...)))
+
+	nodes, root := pbinStatelessWitness(t, state, both)
+	stateless := pbinStatelessVerifierOver(t, nodes, root)
+
+	require.NoError(t, stateless.CreateContract(accounts.InternAddress(bare)),
+		"a create over an account with no storage is the ordinary case")
+
+	require.NoError(t, stateless.DeleteAccount(accounts.InternAddress(stored), nil))
+	require.Error(t, stateless.CreateContract(accounts.InternAddress(stored)),
+		"an in-block removal does not make the pre-state leaves go away")
+}
+
 // TestPBinWitnessStatelessRemovesAccountCreatedInBlock: an account the witness
 // proves absent was created and dropped inside the block, so it leaves no leaf
 // behind and the root must not move.

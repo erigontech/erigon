@@ -275,10 +275,17 @@ func (s *pbinWitnessStateless) WriteAccountStorage(address accounts.Address, inc
 }
 
 // CreateContract un-deletes the address: a create over an account dropped
-// earlier in the block puts its leaves back. There is no subtree to clear —
-// EIP-7610 forbids creating over an account that already has storage.
+// earlier in the block puts its leaves back. Pre-state storage under it is the
+// one case this cannot express — the chain drops the whole storage prefix here,
+// and no plain-key update reaches that subtree without also dropping the header
+// the create rewrites. EIP-7610 keeps a create off such an account, so the case
+// is refused rather than answered with a root that keeps the leaves.
 func (s *pbinWitnessStateless) CreateContract(address accounts.Address) error {
-	delete(s.deleted, address.Value())
+	addr := address.Value()
+	if s.state.HasStorage(addr[:]) {
+		return fmt.Errorf("create over account %x whose pre-state storage the witness proves", addr)
+	}
+	delete(s.deleted, addr)
 	return nil
 }
 
