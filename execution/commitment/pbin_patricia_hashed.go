@@ -865,8 +865,9 @@ func (pph *PBinPatriciaHashed) loadCellState(c *pbinCell) error {
 func (pph *PBinPatriciaHashed) materializeBranch(c *pbinCell, path *pbinBitpath) error {
 	nodeKey := *path
 	// A prefix decoded from a witness is bounded on its own, not against the depth
-	// it was reached at, so the sum can overflow where append would panic.
-	if int(nodeKey.bitLen)+int(c.prefix.bitLen) > pbinMaxPathBits {
+	// it was reached at, so the sum can overflow where append would panic. A branch
+	// landing exactly on the limit is out too: its children need one bit more.
+	if int(nodeKey.bitLen)+int(c.prefix.bitLen) >= pbinMaxPathBits {
 		return fmt.Errorf("%w: branch at %d bits with a %d-bit prefix overflows the path",
 			errPBinCellHash, nodeKey.bitLen, c.prefix.bitLen)
 	}

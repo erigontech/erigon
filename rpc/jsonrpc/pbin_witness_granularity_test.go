@@ -52,7 +52,8 @@ type pbinGranRow struct {
 	branches, binNodes, binTotal                int
 	// hex
 	hexState, hexCodes, hexNodes, hexTotal int
-	headers                                int
+	// block headers, measured in the arm they belong to
+	hexHeaders, binHeaders int
 	// the block that deploys the contract, against the block that reads it
 	deployBinNodes, deployBinTotal int
 	deployHexNodes, deployHexTotal int
@@ -132,6 +133,10 @@ func TestPBinWitnessGranularity(t *testing.T) {
 		rows[i].name = pbinGranCases[i].name
 	}
 
+	// The relations below are bin against hex, so they hold only once both arms
+	// have measured; a run filtered to one subtest compares against zeroes.
+	var hexRan, binRan bool
+
 	// hex arm
 	t.Run("hex", func(t *testing.T) {
 		c, _ := pbinGranChain(t)
@@ -142,13 +147,14 @@ func TestPBinWitnessGranularity(t *testing.T) {
 			rows[i].hexState = sumBytes(w.State)
 			rows[i].hexNodes = len(w.State)
 			rows[i].hexCodes = sumBytes(w.Codes)
-			rows[i].headers = sumBytes(w.Headers)
-			rows[i].hexTotal = rows[i].hexState + rows[i].hexCodes + rows[i].headers
+			rows[i].hexHeaders = sumBytes(w.Headers)
+			rows[i].hexTotal = rows[i].hexState + rows[i].hexCodes + rows[i].hexHeaders
 
 			d := pbinWitnessOf(t, api, uint64(i+1))
 			rows[i].deployHexNodes = len(d.State)
 			rows[i].deployHexTotal = sumBytes(d.State) + sumBytes(d.Codes) + sumBytes(d.Headers)
 		}
+		hexRan = true
 	})
 
 	// bin arm
@@ -187,13 +193,20 @@ func TestPBinWitnessGranularity(t *testing.T) {
 					r.storageLeaf += len(node)
 				}
 			}
-			r.binTotal += r.headers
+			r.binHeaders = sumBytes(w.Headers)
+			r.binTotal += r.binHeaders
 
 			d := pbinWitnessOf(t, api, uint64(i+1))
 			r.deployBinNodes = len(d.State)
 			r.deployBinTotal = sumBytes(d.State) + sumBytes(d.Headers)
 		}
+		binRan = true
 	})
+
+	if !hexRan || !binRan {
+		t.Log("bin-vs-hex relations need both arms; run the test without a subtest filter")
+		return
+	}
 
 	// Direction stated up front: chunk leaves and the branches binding them
 	// outweigh hex's flat code blob at every size, the gap widens with chunk

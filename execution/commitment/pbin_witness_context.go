@@ -150,6 +150,10 @@ func (c *pbinWitnessContext) rootRecord() ([]byte, error) {
 }
 
 func (c *pbinWitnessContext) branchRecord(node *pbinWitnessNode, path *pbinBitpath) ([]byte, error) {
+	if path.bitLen >= pbinMaxPathBits {
+		return nil, fmt.Errorf("%w: a branch at %d bits leaves no room for a child",
+			errPBinWitnessNode, path.bitLen)
+	}
 	var cells [2]pbinCell
 	for bit := range cells {
 		childPath := *path

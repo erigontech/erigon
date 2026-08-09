@@ -91,11 +91,11 @@ func reconcileTrieVariant(s *ErigonDBSettings, logger log.Logger) error {
 		if s.TrieHash != nil {
 			return errors.New("erigondb.toml: trie_hash is meaningless under trie_variant \"hex\"")
 		}
-		if statecfg.BinCommitmentHash != "" {
-			return errors.New("--experimental.bin-commitment.hash needs --experimental.bin-commitment")
-		}
 		if statecfg.ExperimentalBinCommitment {
 			return errors.New("--experimental.bin-commitment: datadir was created with the hex commitment trie; the bin trie needs a fresh datadir")
+		}
+		if statecfg.BinCommitmentHash != "" {
+			return errors.New("--experimental.bin-commitment.hash needs --experimental.bin-commitment")
 		}
 	default:
 		return fmt.Errorf("erigondb.toml: unknown trie_variant %q", s.TrieVariantName())

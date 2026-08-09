@@ -178,12 +178,21 @@ func TestWitnessSizeBinVsHex(t *testing.T) {
 	// hash suite are process-global, and each arm restores what it set.
 	withCommitmentHistory(t)
 
+	// Each arm checks itself, so either runs alone; only the joint table needs both.
 	var hexArm, binArm []witnessSizes
-	t.Run("hex", func(t *testing.T) { hexArm = measureWitnessSizes(t, false) })
-	t.Run("bin", func(t *testing.T) { binArm = measureWitnessSizes(t, true) })
-	require.Len(t, hexArm, len(pbinWitnessCorpus))
-	require.Len(t, binArm, len(pbinWitnessCorpus))
+	t.Run("hex", func(t *testing.T) {
+		hexArm = measureWitnessSizes(t, false)
+		require.Len(t, hexArm, len(pbinWitnessCorpus))
+		requireHexBaseline(t, hexArm)
+	})
+	t.Run("bin", func(t *testing.T) {
+		binArm = measureWitnessSizes(t, true)
+		require.Len(t, binArm, len(pbinWitnessCorpus))
+	})
 
-	requireHexBaseline(t, hexArm)
+	if len(hexArm) != len(pbinWitnessCorpus) || len(binArm) != len(pbinWitnessCorpus) {
+		t.Log("the bin-vs-hex table needs both arms; run the test without a subtest filter")
+		return
+	}
 	t.Log("witness sizes, bin vs hex:\n" + witnessSizeTable(hexArm, binArm))
 }
