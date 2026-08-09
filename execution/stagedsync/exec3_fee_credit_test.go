@@ -8,7 +8,6 @@ import (
 
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
-	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // feeCreditRound mirrors one apply-loop validation round for a single tx:
@@ -79,8 +78,10 @@ func TestCalcFees_ReCreditsWhenPriorBalanceChanged(t *testing.T) {
 	require.NotNil(t, r.run(t), "the first round must credit the tip")
 
 	// A prior tx moved the coinbase balance, so the tip lands on a new base.
+	// Only the balance changes — the rest of the account must stay put, or the
+	// test would pass even if recordedIn stopped comparing balances.
 	priorBalance := uint256.NewInt(7_000_000)
-	r.reader.accounts[s.coinbase] = &accounts.Account{Balance: *priorBalance, CodeHash: accounts.EmptyCodeHash}
+	r.reader.accounts[s.coinbase].Balance = *priorBalance
 
 	tip := r.run(t)
 	require.NotNil(t, tip, "a changed base balance must produce a fresh credit")
@@ -113,12 +114,7 @@ func TestCalcFees_ReCreditsWhenAddressPathMissing(t *testing.T) {
 
 func TestCalcFees_SkipsRedundantReCreditWithBurntContract(t *testing.T) {
 	t.Parallel()
-	s := simpleTransferScenario()
-	s.rules = &chain.Rules{IsSpuriousDragon: true, IsLondon: true}
-	s.burntAddr = fAddr("burntcontract")
-	s.feeBurnt = *uint256.NewInt(1000)
-	s.accts[s.burntAddr] = fMakeAccount(500_000, 0)
-
+	s := londonTransferScenario()
 	r := newFeeCreditRound(t, s)
 
 	first := r.run(t)
@@ -155,6 +151,10 @@ func BenchmarkCalcFees(b *testing.B) {
 					b.Fatal(err)
 				}
 				feeCreditSink = tip
+				// The apply loop recycles the emitted set's maps through
+				// recordFeeMerge; without this the pools stay empty and the
+				// emit arm is measured against a permanently cold pool.
+				tip.ReleaseMaps()
 			}
 		})
 	}
@@ -176,4 +176,30 @@ func TestCreditedWrites(t *testing.T) {
 		"another tx's fee-merge product says nothing about this tx")
 	require.Nil(t, be.creditedWrites(2, nil),
 		"a tx with no writes at all must not read as credited")
+}
+
+// TestCreditedWritesAfterReExecution drives the property the skip rests on
+// through the real VersionedIO: a new worker result re-records its own TxOut,
+// which stops the fee-merge product from being the recorded set. Without that,
+// a re-executed tx would inherit the previous incarnation's credit.
+func TestCreditedWritesAfterReExecution(t *testing.T) {
+	t.Parallel()
+	be := &blockExecutor{feeMergeTemp: map[int]*state.WriteSet{}, blockIO: state.NewVersionedIO(1)}
+	version := state.Version{TxIndex: 0}
+	recorded := func() *state.WriteSet { return be.blockIO.WriteSet(version.TxIndex) }
+
+	txOut := &state.WriteSet{}
+	be.blockIO.RecordWrites(version, txOut)
+	require.Nil(t, be.creditedWrites(0, recorded()),
+		"the worker's own output carries no credit")
+
+	merged := &state.WriteSet{}
+	be.blockIO.RecordWrites(version, merged)
+	be.recordFeeMerge(0, txOut, merged)
+	require.Same(t, merged, be.creditedWrites(0, recorded()))
+
+	reTxOut := &state.WriteSet{}
+	be.blockIO.RecordWrites(version, reTxOut)
+	require.Nil(t, be.creditedWrites(0, recorded()),
+		"a re-executed tx must be credited again, not handed the stale credit")
 }
