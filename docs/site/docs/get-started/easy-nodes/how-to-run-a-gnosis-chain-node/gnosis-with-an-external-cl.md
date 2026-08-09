@@ -18,7 +18,7 @@ erigon --chain=gnosis --externalcl
 
 If your CL client is on a different device, add the following flags:
 
-* `--authrpc.addr 0.0.0.0`, since the Engine API listens on localhost by default;
+* `--authrpc.addr <this-host-LAN-IP>` — the Engine API listens on localhost by default, so it has to be widened for a remote CL. Read the warning below before reaching for `0.0.0.0`;
 * `--authrpc.vhosts <CL_host>` where `<CL_host>` is the source host or the appropriate hostname that your CL client is using.
 
 :::warning
