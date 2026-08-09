@@ -3,10 +3,12 @@ package stagedsync
 import (
 	"fmt"
 	"math/big"
+	"os"
 	"runtime"
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/erigontech/erigon/common"
@@ -18,6 +20,7 @@ import (
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -90,6 +93,7 @@ func smallTxTaskFactory(numTx int, shape smallTxShape) []exec.Task {
 		t := NewTestExecTask(i, ops, sender, 0)
 		t.setupDelay = smallTxSetup
 		t.spin = true
+		t.Header = &types.Header{Number: *uint256.NewInt(1)}
 		tasks = append(tasks, t)
 	}
 
@@ -152,11 +156,13 @@ func runSmallTxBlock(tb testing.TB, tasks []exec.Task, logger log.Logger) time.D
 // BenchmarkSmallTxBlock sweeps block size for blocks made of many cheap txs,
 // where per-tx exec-loop cost dominates rather than EVM time.
 // Run with: go test -run='^$' -bench=BenchmarkSmallTxBlock -benchtime=1x -count=10
+// SMALLTX_TIMING=1 additionally prints the serial exec-loop phase breakdown.
 func BenchmarkSmallTxBlock(b *testing.B) {
 	if runtime.GOOS == "windows" {
 		b.Skip()
 	}
 	logger := logger(discardLogging)
+	timing := os.Getenv("SMALLTX_TIMING") != ""
 
 	shapes := []smallTxShape{
 		{name: "transfer", hotPct: 0},
@@ -174,9 +180,20 @@ func BenchmarkSmallTxBlock(b *testing.B) {
 		for _, numTx := range txCounts {
 			b.Run(fmt.Sprintf("%s/txs=%d", shape.name, numTx), func(b *testing.B) {
 				tasks := smallTxTaskFactory(numTx, shape)
+				if timing {
+					ResetApplyLoopTiming()
+					SetApplyLoopTiming(true)
+				}
 				b.ResetTimer()
 				d := runSmallTxBlock(b, tasks, logger)
+				b.StopTimer()
 				b.ReportMetric(float64(d.Nanoseconds())/float64(numTx), "ns/tx")
+				if timing {
+					SetApplyLoopTiming(false)
+					serial := applyPhaseNs[phaseProcessResults].Load()
+					b.ReportMetric(100*float64(serial)/float64(d.Nanoseconds()), "%serial")
+					b.Log(ApplyLoopTimingReport(numTx))
+				}
 			})
 		}
 	}

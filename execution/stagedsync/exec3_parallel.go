@@ -1663,6 +1663,7 @@ func (pe *parallelExecutor) scheduleNextPending(ctx context.Context) {
 }
 
 func (pe *parallelExecutor) processResults(ctx context.Context, applyTx kv.TemporalTx) (blockResult *blockResult, err error) {
+	defer phaseEnd(phaseProcessResults, phaseStart())
 	rwsIt := pe.rws.Iter()
 	for rwsIt.HasNext() && blockResult == nil {
 		txResult := rwsIt.PopNext()
@@ -2741,7 +2742,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					stateReader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsGetter(applyTx), be.blockStateCache)
 				}
 			}
+			feeStart := phaseStart()
 			tipWrites, err := txResult.calcFees(taskVer, be.versionMap, stateReader, txTask.Rules())
+			phaseEnd(phaseCalcFees, feeStart)
 			if err != nil {
 				return nil, err
 			}
@@ -2753,6 +2756,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 		}
 
+		validateStart := phaseStart()
 		validity := be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
 			func(readVersion, writtenVersion state.Version) state.VersionValidity {
 				vv := state.VersionValid
@@ -2765,6 +2769,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				return vv
 			}, txTask.Rules().IsEIP161Enabled(), txTask.Rules().IsAura, trace, tracePrefix)
+		phaseEnd(phaseValidate, validateStart)
 		be.versionMap.SetTrace(false)
 
 		if validity == state.VersionTooEarly {
@@ -2790,7 +2795,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		}
 		be.versionMap.SetTrace(trace)
 		writeSet := be.blockIO.WriteSet(txVersion.TxIndex)
+		flushStart := phaseStart()
 		be.versionMap.FlushVersionedWrites(writeSet, applyLoopFlushAsComplete(valid, cntInvalid), tracePrefix)
+		phaseEnd(phaseFlushWrites, flushStart)
 		be.versionMap.SetTrace(false)
 
 		if valid {
@@ -2862,7 +2869,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					}
 				}
 
+				finalizeStart := phaseStart()
 				_, addReads, finalizeWrites, err := txResult.finalize(cumulativeGasUsed, firstLogIndex, pe.cfg.engine, be.versionMap, stateReader)
+				phaseEnd(phaseFinalize, finalizeStart)
 				if err != nil {
 					return nil, err
 				}
@@ -2916,7 +2925,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					}
 					// Mirror txtask.go's genesis rules-clobber so empty allocs (AuRa ZeroAddress) survive.
 					emptyRemoval := be.number() != 0 && pe.cfg.chainConfig.IsEIP161Enabled(be.number())
+					normStart := phaseStart()
 					normWrites, normErr := rawWrites.Normalize(be.versionMap, txVersion.TxIndex, resultIncarnation, stateReader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil, txTask.Rules().IsAmsterdam)
+					phaseEnd(phaseNormalize, normStart)
 					if domainKeysErr != nil {
 						return nil, fmt.Errorf("[parallel] iterate storage prefix for block write normalization: %w", domainKeysErr)
 					}
@@ -2968,7 +2979,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	}
 
 	maxValidated := be.validateTasks.maxComplete()
+	schedStart := phaseStart()
 	be.scheduleExecution(ctx, pe)
+	phaseEnd(phaseSchedule, schedStart)
 
 	if be.publishTasks.minPending() != -1 {
 		toPublish := make(sort.IntSlice, 0, 2)
@@ -3023,8 +3036,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 
 			// Apply state writes to sd.mem and block cache.
-			if err := pe.rs.ApplyStateWrites(ctx, applyTx, applyResult.blockNum, applyResult.txNum, applyResult.writes,
-				nil, applyResult.rules, be.blockStateCache); err != nil {
+			applyStart := phaseStart()
+			err := pe.rs.ApplyStateWrites(ctx, applyTx, applyResult.blockNum, applyResult.txNum, applyResult.writes,
+				nil, applyResult.rules, be.blockStateCache)
+			phaseEnd(phaseApplyWrites, applyStart)
+			if err != nil {
 				return nil, err
 			}
 
@@ -3032,9 +3048,12 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			// exec loop, on the SAME goroutine that owns sd.mem mutations.
 			// Doing this in the apply loop instead used to race with the next
 			// tx / block-end ApplyStateWrites on SharedDomains.mem.
-			if err := pe.rs.ApplyTxIndexes(applyTx, applyResult.txNum, applyResult.receipt, applyResult.cumulativeBlobGasUsed,
-				applyResult.logs, applyResult.traceFroms, applyResult.traceTos); err != nil {
-				return nil, fmt.Errorf("ApplyTxIndexes block=%d txNum=%d: %w", applyResult.blockNum, applyResult.txNum, err)
+			idxStart := phaseStart()
+			idxErr := pe.rs.ApplyTxIndexes(applyTx, applyResult.txNum, applyResult.receipt, applyResult.cumulativeBlobGasUsed,
+				applyResult.logs, applyResult.traceFroms, applyResult.traceTos)
+			phaseEnd(phaseApplyIndexes, idxStart)
+			if idxErr != nil {
+				return nil, fmt.Errorf("ApplyTxIndexes block=%d txNum=%d: %w", applyResult.blockNum, applyResult.txNum, idxErr)
 			}
 
 			if err := be.sendResult(ctx, &applyResult, false); err != nil {
