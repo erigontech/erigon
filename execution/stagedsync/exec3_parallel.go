@@ -2003,18 +2003,31 @@ func (result *execResult) calcFees(
 	// and normalizeWriteSet's sdSet filter drops them.
 	coinbaseEmptyPre := (coinbaseAcc == nil || coinbaseAcc.Balance.IsZero()) &&
 		coinbaseNonce == 0 && coinbaseEmptyCodeHash && !coinbaseHasCodeHashWrite
-	emitCoinbase := newCoinbaseBalance != oldCoinbaseBalance ||
-		(coinbaseEmptyRemoval && coinbaseEmptyPre && newCoinbaseBalance.IsZero())
+	coinbaseEmptied := coinbaseEmptyRemoval && coinbaseEmptyPre && newCoinbaseBalance.IsZero()
+	emitCoinbase := newCoinbaseBalance != oldCoinbaseBalance || coinbaseEmptied
 
 	if !emitCoinbase && !emitBurnt {
 		return nil, nil
+	}
+
+	// CollectorWrites is maintained before the skip below so that both paths
+	// leave the same state behind for the round.
+	if emitCoinbase {
+		result.CollectorWrites = result.CollectorWrites.SetAccountBalanceOrDelete(
+			result.Coinbase, coinbaseAcc, newCoinbaseBalance,
+			tracing.BalanceIncreaseRewardTransactionFee, coinbaseEmptyRemoval)
+	}
+	if emitBurnt {
+		result.CollectorWrites = result.CollectorWrites.SetAccountBalanceOrDelete(
+			burntAddr, burntAcc, newBurntBalance,
+			tracing.BalanceDecreaseGasBuy, state.EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, burntAddr))
 	}
 
 	coinbaseEntry := feeEntry{
 		addr:    result.Coinbase,
 		acc:     feeAddressAccount(coinbaseAcc, newCoinbaseBalance, coinbaseNonce),
 		reason:  tracing.BalanceIncreaseRewardTransactionFee,
-		deleted: coinbaseEmptyRemoval && coinbaseEmptyPre && newCoinbaseBalance.IsZero(),
+		deleted: coinbaseEmptied,
 		emit:    emitCoinbase,
 	}
 	burntEntry := feeEntry{
@@ -2031,18 +2044,8 @@ func (result *execResult) calcFees(
 	}
 
 	addWrites := &state.WriteSet{}
-	if emitCoinbase {
-		result.CollectorWrites = result.CollectorWrites.SetAccountBalanceOrDelete(
-			result.Coinbase, coinbaseAcc, newCoinbaseBalance,
-			tracing.BalanceIncreaseRewardTransactionFee, coinbaseEmptyRemoval)
-		coinbaseEntry.writeTo(addWrites, taskVersion)
-	}
-	if emitBurnt {
-		result.CollectorWrites = result.CollectorWrites.SetAccountBalanceOrDelete(
-			burntAddr, burntAcc, newBurntBalance,
-			tracing.BalanceDecreaseGasBuy, state.EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, burntAddr))
-		burntEntry.writeTo(addWrites, taskVersion)
-	}
+	coinbaseEntry.writeTo(addWrites, taskVersion)
+	burntEntry.writeTo(addWrites, taskVersion)
 
 	return addWrites, nil
 }
@@ -2059,7 +2062,7 @@ type feeEntry struct {
 }
 
 // recordedIn reports whether ws already carries this entry verbatim.
-func (e feeEntry) recordedIn(ws *state.WriteSet, version state.Version) bool {
+func (e *feeEntry) recordedIn(ws *state.WriteSet, version state.Version) bool {
 	if !e.emit {
 		return true
 	}
@@ -2075,7 +2078,10 @@ func (e feeEntry) recordedIn(ws *state.WriteSet, version state.Version) bool {
 	return ok && aw.Val != nil && *aw.Val == e.acc && aw.Version == version
 }
 
-func (e feeEntry) writeTo(ws *state.WriteSet, version state.Version) {
+func (e *feeEntry) writeTo(ws *state.WriteSet, version state.Version) {
+	if !e.emit {
+		return
+	}
 	if e.deleted {
 		ws.SetSelfDestruct(e.addr, &state.VersionedWrite[bool]{
 			WriteHeader: state.WriteHeader{Address: e.addr, Path: state.SelfDestructPath, Version: version},
