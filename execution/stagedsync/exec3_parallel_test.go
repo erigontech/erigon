@@ -62,6 +62,12 @@ type testExecTask struct {
 	sender       accounts.Address
 	nonce        int
 	dependencies []int
+	// setupDelay models per-tx EVM work before the op stream.
+	setupDelay time.Duration
+	// spin busy-waits instead of sleeping. time.Sleep bottoms out near the
+	// scheduler tick, so microsecond-scale op costs only reproduce by spinning
+	// — and spinning also keeps workers on-CPU, which is what real EVM work does.
+	spin bool
 }
 
 type PathGenerator func(i int, j int, total int) opkey
@@ -91,7 +97,25 @@ func NewTestExecTask(txIdx int, ops []Op, sender accounts.Address, nonce int) *t
 		sender:       sender,
 		nonce:        nonce,
 		dependencies: []int{},
+		setupDelay:   50 * time.Microsecond,
 	}
+}
+
+func spinFor(d time.Duration) {
+	if d <= 0 {
+		return
+	}
+	deadline := time.Now().Add(d)
+	for time.Now().Before(deadline) {
+	}
+}
+
+func (t *testExecTask) delay(d time.Duration) {
+	if t.spin {
+		spinFor(d)
+		return
+	}
+	sleepWithContext(t.ctx, d) //nolint:errcheck
 }
 
 func newParallelTestBlock(blockNum uint64) *types.Block {
@@ -128,8 +152,7 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 	chainReader rules.ChainReader,
 	dirs datadir.Dirs,
 	calcFees bool) *exec.TxResult {
-	// Sleep for 50 microsecond to simulate setup time
-	sleepWithContext(t.ctx, time.Microsecond*50) //nolint:errcheck
+	t.delay(t.setupDelay)
 
 	version := t.Version()
 
@@ -144,7 +167,7 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 		switch op.opType {
 		case readType:
 			if t.writeMap.Has(state.WriteHeader{Address: k.addr, Path: k.path, Key: k.key}) {
-				sleepWithContext(t.ctx, op.duration) //nolint:errcheck
+				t.delay(op.duration)
 				continue
 			}
 
@@ -176,13 +199,13 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 				readKind = state.StorageRead
 			}
 
-			sleepWithContext(t.ctx, op.duration) //nolint:errcheck
+			t.delay(op.duration)
 
 			t.readMap.SetHeader(k.addr, k.path, k.key, state.ReadHeader{Source: readKind, Version: state.Version{TxIndex: result.DepIdx(), Incarnation: result.Incarnation()}})
 		case writeType:
 			testWriteSetInt(t.writeMap, k.addr, k.path, k.key, version, op.val)
 		case otherType:
-			sleepWithContext(t.ctx, op.duration) //nolint:errcheck
+			t.delay(op.duration)
 		default:
 			panic(fmt.Sprintf("Unknown op type: %d", op.opType))
 		}
