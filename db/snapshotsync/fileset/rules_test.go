@@ -111,6 +111,30 @@ func TestStaleNonMaximal_BroadAndNarrowsCoexist(t *testing.T) {
 	require.Equal(t, []int{1, 2, 3}, sortInts(StaleNonMaximal(items)))
 }
 
+// TestStaleNonMaximal_CrossVersionSubsumed pins that the rule ignores
+// tag/version and culls narrower items regardless of provenance.
+// Regression guard for the observed iter-3 mode_b layout:
+//
+//	.272-280 v2.1 (wide, kept)
+//	.272-276 v2.0 (narrow, stale)
+//	.276-278 v2.0 (narrow, stale)
+//	.278-279 v2.0 (narrow, stale)
+//
+// The rule already ignores tags — Tagged has no version field today —
+// so cross-version subsumption is culled correctly by construction.
+// This test documents the invariant so future tag additions don't
+// break it.
+func TestStaleNonMaximal_CrossVersionSubsumed(t *testing.T) {
+	t.Parallel()
+	items := []Tagged{
+		{Range: Range{From: 272, To: 280}}, // v2.1 wide
+		{Range: Range{From: 272, To: 276}}, // v2.0 narrow
+		{Range: Range{From: 276, To: 278}}, // v2.0 narrow
+		{Range: Range{From: 278, To: 279}}, // v2.0 narrow
+	}
+	require.Equal(t, []int{1, 2, 3}, sortInts(StaleNonMaximal(items)))
+}
+
 // TestStaleNonMaximal_NoOverlap: independent ranges, all maximal.
 func TestStaleNonMaximal_NoOverlap(t *testing.T) {
 	t.Parallel()
