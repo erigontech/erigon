@@ -1156,6 +1156,32 @@ func (c *BlockStateCache) DeleteAccount(addr accounts.Address, txNum uint64) {
 	c.mu.Unlock()
 }
 
+// GetCurrentAccountDecoded returns the latest account (including intra-block
+// writes), avoiding GetCurrentAccount's re-encode of the committed entry.
+func (c *BlockStateCache) GetCurrentAccountDecoded(addr accounts.Address) (*accounts.Account, bool, error) {
+	c.mu.RLock()
+	enc, written := c.currentAccounts[addr]
+	c.mu.RUnlock()
+	if written {
+		if enc == nil {
+			return nil, true, nil
+		}
+		acc := new(accounts.Account)
+		if err := accounts.DeserialiseV3(acc, enc); err != nil {
+			return nil, true, err
+		}
+		return acc, true, nil
+	}
+	if acc, ok := c.GetCommittedAccount(addr); ok {
+		if acc == nil {
+			return nil, true, nil
+		}
+		result := *acc
+		return &result, true, nil
+	}
+	return nil, false, nil
+}
+
 // GetCurrentAccount returns the latest account blob (including intra-block writes).
 // Falls back to committed state if no write exists. Returns (nil, false) if not cached.
 func (c *BlockStateCache) GetCurrentAccount(addr accounts.Address) ([]byte, bool) {
@@ -1309,16 +1335,13 @@ func (r *CachedReaderV3) SetBlockStateCache(cache *BlockStateCache) {
 func (r *CachedReaderV3) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	if r.blockCache != nil {
 		if r.readCurrent {
-			// Read from write buffer — sees accumulated per-TX writes.
-			if enc, ok := r.blockCache.GetCurrentAccount(address); ok {
-				if enc == nil {
-					return nil, nil
-				}
-				var acc accounts.Account
-				if err := accounts.DeserialiseV3(&acc, enc); err != nil {
-					return nil, err
-				}
-				return &acc, nil
+			// Sees accumulated per-TX writes.
+			acc, ok, err := r.blockCache.GetCurrentAccountDecoded(address)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				return acc, nil
 			}
 		} else {
 			// Read from committed cache — stable pre-block view.
