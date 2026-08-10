@@ -1406,13 +1406,17 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
 
-	// View freshness is rechecked while the fill is serialized against cache
-	// publication.
-	if sd.stateCache != nil && sd.stateCache.Caches(domain) {
-		views.state.Fill(domain, k, v, step)
-	}
-	if domain == kv.CommitmentDomain && sd.branchCache != nil {
-		views.branch.Fill(k, v, uint64(step))
+	// A bounded fall-through may intentionally return historical state. Even
+	// when its step satisfies the bound, it must not enter a latest-state cache.
+	if maxStep == kv.NoStepBound {
+		// View freshness is rechecked while the fill is serialized against cache
+		// publication.
+		if sd.stateCache != nil && sd.stateCache.Caches(domain) {
+			views.state.Fill(domain, k, v, step)
+		}
+		if domain == kv.CommitmentDomain && sd.branchCache != nil {
+			views.branch.Fill(k, v, uint64(step))
+		}
 	}
 
 	return v, step, nil

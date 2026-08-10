@@ -226,6 +226,49 @@ func TestReadFill_UnwindDetachesWithoutRevokingStateCache(t *testing.T) {
 	require.False(t, ok, "the detached SharedDomains must not fill from its rewound database view")
 }
 
+func TestBoundedReadDoesNotFillStateCache(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	db := newTestDb(t, 16)
+	stateCache := newSmallStateCache()
+	t.Cleanup(stateCache.Close)
+	key := make([]byte, 20)
+	key[0] = 0xaa
+	value := encAccount(1)
+	generation := currentStateCacheGeneration(t, db)
+	stateCache.Publisher().Initialize(generation)
+	view := stateCache.View(generation)
+
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	agg := &boundedLatestAgg{domain: kv.AccountsDomain, key: key, value: value, step: 1}
+	tx := &temporalTxWithAgg{TemporalTx: roTx, agg: agg}
+	parent, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	require.NoError(t, err)
+	defer parent.Close()
+	child, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	require.NoError(t, err)
+	defer child.Close()
+	child.SetStateCacheReaderForTest(stateCache)
+	child.SetParent(parent)
+
+	stepBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(stepBytes, ^uint64(1))
+	var diffs [kv.DomainLen][]kv.DomainEntryDiff
+	diffs[kv.AccountsDomain] = []kv.DomainEntryDiff{{Key: string(key) + string(stepBytes)}}
+	parent.Unwind(0, &diffs)
+
+	got, step, err := child.GetLatest(kv.AccountsDomain, tx, key)
+	require.NoError(t, err)
+	require.Equal(t, value, got)
+	require.Equal(t, kv.Step(1), step)
+	require.Equal(t, kv.Step(1), agg.maxStep)
+	_, ok := view.Get(kv.AccountsDomain, key)
+	require.False(t, ok, "a bounded historical value must not enter the latest-state cache")
+}
+
 func TestCodeHashFill_UnwindDetachesWithoutRevokingStateCache(t *testing.T) {
 	t.Parallel()
 

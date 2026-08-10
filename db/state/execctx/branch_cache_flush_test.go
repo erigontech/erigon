@@ -17,6 +17,8 @@
 package execctx_test
 
 import (
+	"bytes"
+	"encoding/binary"
 	"errors"
 	"testing"
 	"time"
@@ -27,9 +29,48 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/commitment"
 )
+
+type temporalTxWithAgg struct {
+	kv.TemporalTx
+	agg   any
+	debug kv.TemporalDebugTx
+}
+
+func (tx *temporalTxWithAgg) AggTx() any { return tx.agg }
+func (tx *temporalTxWithAgg) Debug() kv.TemporalDebugTx {
+	if tx.debug != nil {
+		return tx.debug
+	}
+	return tx.TemporalTx.Debug()
+}
+
+type exactVisibleDebug struct{ kv.TemporalDebugTx }
+
+func (*exactVisibleDebug) HasExactDomainVisibleEnd(kv.Domain) bool { return true }
+
+type boundedLatestAgg struct {
+	branchCache *commitment.BranchCache
+	domain      kv.Domain
+	key         []byte
+	value       []byte
+	step        kv.Step
+	maxStep     kv.Step
+}
+
+func (a *boundedLatestAgg) BranchCache() *commitment.BranchCache { return a.branchCache }
+func (a *boundedLatestAgg) ForbidVisibilityLowering()            {}
+
+func (a *boundedLatestAgg) MeteredGetLatest(domain kv.Domain, key []byte, _ kv.Tx, maxStep kv.Step, _ *kvmetrics.DomainMetrics, _ time.Time) ([]byte, kv.Step, bool, error) {
+	if domain != a.domain || !bytes.Equal(key, a.key) {
+		return nil, 0, false, nil
+	}
+	a.maxStep = maxStep
+	return a.value, a.step, true, nil
+}
 
 type commitErrorTx struct {
 	kv.TemporalRwTx
@@ -310,6 +351,64 @@ func TestBareFlushRetainsMemoryAsAuthorityOverCacheViews(t *testing.T) {
 			require.Equal(t, tc.new, got, "retained memory must shadow the old durable cache view")
 		})
 	}
+}
+
+func TestBoundedReadDoesNotFillBranchCache(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	db := newTestDb(t, 16)
+	branchCache := commitment.NewBranchCache(64)
+	t.Cleanup(branchCache.Close)
+	key := []byte{0x0a, 0x0b}
+	value := []byte("bounded-branch")
+
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	generation := branchGenerationForTx(t, roTx)
+	branchCache.Publisher().Initialize(generation)
+	view := branchCache.View(generation)
+	agg := &boundedLatestAgg{
+		branchCache: branchCache,
+		domain:      kv.CommitmentDomain,
+		key:         key,
+		value:       value,
+		step:        1,
+	}
+	tx := &temporalTxWithAgg{
+		TemporalTx: roTx,
+		agg:        agg,
+		debug:      &exactVisibleDebug{TemporalDebugTx: roTx.Debug()},
+	}
+	parent, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	require.NoError(t, err)
+	defer parent.Close()
+	child, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	require.NoError(t, err)
+	defer child.Close()
+	got, step, err := child.GetLatest(kv.CommitmentDomain, tx, key)
+	require.NoError(t, err)
+	require.Equal(t, value, got)
+	require.Equal(t, kv.Step(1), step)
+	_, _, ok := view.Get(key)
+	require.True(t, ok, "the setup must admit an unbounded read-through fill")
+	branchCache.Invalidate(key)
+	child.SetParent(parent)
+
+	stepBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(stepBytes, ^uint64(1))
+	var diffs [kv.DomainLen][]kv.DomainEntryDiff
+	diffs[kv.CommitmentDomain] = []kv.DomainEntryDiff{{Key: string(key) + string(stepBytes)}}
+	parent.Unwind(0, &diffs)
+
+	got, step, err = child.GetLatest(kv.CommitmentDomain, tx, key)
+	require.NoError(t, err)
+	require.Equal(t, value, got)
+	require.Equal(t, kv.Step(1), step)
+	require.Equal(t, kv.Step(1), agg.maxStep)
+	_, _, ok = view.Get(key)
+	require.False(t, ok, "a bounded historical branch must not enter the latest-branch cache")
 }
 
 // Commit, unlike Flush, publishes the rebuilt branch after the database commit.
