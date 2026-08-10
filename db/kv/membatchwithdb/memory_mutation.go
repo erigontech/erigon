@@ -58,6 +58,7 @@ type MemoryMutation struct {
 	db               kv.TemporalTx
 	statelessCursors map[string]kv.RwCursor
 	DomainReader     DomainReader
+	readView         bool
 }
 
 // NewMemoryBatch creates a pure Go in-memory batch with no OS-thread affinity.
@@ -1083,6 +1084,20 @@ func (m *MemoryMutation) NewReadView(tx kv.Tx) kv.TemporalTx {
 	return m.newReadViewMut(tx)
 }
 
+// CarriesOverlayView reports whether tx is already a read view over a block
+// overlay. Overlay wrap points skip such txs so the first wrap pins the
+// overlay a request reads from: re-wrapping would layer a possibly newer
+// overlay on top, mixing two heads within one request.
+func CarriesOverlayView(tx kv.Tx) bool {
+	switch v := tx.(type) {
+	case *OverlayTemporalReadView:
+		return true
+	case *MemoryMutation:
+		return v.readView
+	}
+	return false
+}
+
 // newReadViewMut is the internal constructor that returns the full
 // *MemoryMutation. Used by NewTemporalReadView which needs to embed it.
 func (m *MemoryMutation) newReadViewMut(tx kv.Tx) *MemoryMutation {
@@ -1099,6 +1114,7 @@ func (m *MemoryMutation) newReadViewMut(tx kv.Tx) *MemoryMutation {
 		clearedTables:  m.clearedTables,
 		db:             dbTx,
 		DomainReader:   m.DomainReader,
+		readView:       true,
 	}
 }
 
