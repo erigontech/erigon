@@ -40,10 +40,8 @@ func estimatedEntryCost(key, value []byte) int {
 
 // minEntryBytes: true lower bound on estimatedEntryCost for a storage-trunk
 // branch (33 = shortest HexToCompact key at depth >= 64; value may be empty).
-// Caps a wave's file fetch to what the remaining budget could still pin. Keys
-// absent from the file layer cost nothing, so a capped fetch may leave the
-// budget unspent — the wave's no-progress check, not this bound, is what ends
-// the step.
+// Bounds a wave's file fetch to what the remaining budget could still pin; a
+// wave that pins nothing anyway is ended by the no-progress check in Run.
 const minEntryBytes = estimatedEntryOverheadBytes + 33
 
 // maxStorageTrunkDepth: 64 (account path) + 64 (keccak256(slot)) = 128.

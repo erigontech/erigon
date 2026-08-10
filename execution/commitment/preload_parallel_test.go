@@ -13,11 +13,14 @@ import (
 	"cmp"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"runtime/debug"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
@@ -716,6 +719,22 @@ func TestContractTrunkPreloadParallel_NilCacheError(t *testing.T) {
 	}
 }
 
+// The wrapper logs unconditionally after Run and dereferences the cache there,
+// so a nil cache reached that block and panicked before the caller ever saw
+// Run's error. Only a non-nil logger reaches it.
+func TestPreloadContractTrunkParallel_NilCacheWithLoggerReturnsError(t *testing.T) {
+	hash := make([]byte, 32)
+	resolve := func(keys [][]byte) ([][]byte, error) { return make([][]byte, len(keys)), nil }
+
+	_, err := PreloadContractTrunkParallel(hash, 1<<20, nil, resolve, nil, log.Root())
+	if err == nil {
+		t.Fatal("expected error when cache is nil")
+	}
+	if !strings.Contains(err.Error(), "cache is nil") {
+		t.Fatalf("error %q, want it to name the nil cache", err)
+	}
+}
+
 func TestContractTrunkPreloadParallel_NilResolverError(t *testing.T) {
 	hash := make([]byte, 32)
 	c := NewBranchCache(64)
@@ -885,73 +904,75 @@ func TestContractTrunkPreloadParallel_StepBudgetSweepTerminates(t *testing.T) {
 	}
 
 	const maxSteps = 200
+	// Deduped: the derived budgets can coincide, and a repeated value would give
+	// two subtests the same name.
 	budgets := []int{1, minEntryBytes, exact - 1, exact, exact + 1, affordable, 1 << 20}
+	slices.Sort(budgets)
+	budgets = slices.Compact(budgets)
 
 	type sweepResult struct {
-		budget int
 		done   bool
 		pinned int
 		err    error
 	}
-	results := make(chan []sweepResult, 1)
-	go func() {
-		out := make([]sweepResult, 0, len(budgets))
-		for _, budget := range budgets {
+
+	// One subtest per budget: a livelock regression that only bites one of them
+	// names that budget instead of hanging the sweep behind a shared guard.
+	for _, budget := range budgets {
+		t.Run(fmt.Sprintf("budget=%d", budget), func(t *testing.T) {
 			p, err := NewContractTrunkPreloadParallel(hash)
 			if err != nil {
-				out = append(out, sweepResult{budget: budget, err: err})
-				continue
+				t.Fatal(err)
 			}
 			c := NewBranchCache(64)
-			r := sweepResult{budget: budget}
-			for range maxSteps {
-				_, done, err := p.Run(budget, dbBranches, resolve, c, nil)
-				if err != nil {
-					r.err = err
-					break
-				}
-				if done {
-					r.done = true
-					break
-				}
-			}
-			r.pinned = p.PinnedTotal()
-			c.Close()
-			out = append(out, r)
-		}
-		results <- out
-	}()
+			defer c.Close()
 
-	var out []sweepResult
-	select {
-	case out = <-results:
-	case <-time.After(30 * time.Second):
-		panicOnStuck("a wave with no file budget must end the step, not re-enter on an unchanged frontier")
-	}
+			results := make(chan sweepResult, 1)
+			go func() {
+				var r sweepResult
+				for range maxSteps {
+					_, done, err := p.Run(budget, dbBranches, resolve, c, nil)
+					if err != nil {
+						r.err = err
+						break
+					}
+					if done {
+						r.done = true
+						break
+					}
+				}
+				r.pinned = p.PinnedTotal()
+				results <- r
+			}()
 
-	for _, r := range out {
-		if r.err != nil {
-			t.Errorf("budget %d: %v", r.budget, r.err)
-			continue
-		}
-		// A budget below one entry's cost can never pin the root; it must still
-		// return from every Run, but it cannot make progress.
-		if r.budget < exact {
-			if r.pinned != 0 {
-				t.Errorf("budget %d: pinned %d entries on a sub-entry budget", r.budget, r.pinned)
+			var r sweepResult
+			select {
+			case r = <-results:
+			case <-time.After(30 * time.Second):
+				panicOnStuck(fmt.Sprintf("step budget %d: a wave that pins nothing must end the step, not re-enter on an unchanged frontier", budget))
 			}
-			continue
-		}
-		if r.budget < affordable {
-			continue
-		}
-		if !r.done {
-			t.Errorf("budget %d: not complete after %d steps (pinned %d/%d)", r.budget, maxSteps, r.pinned, len(tree))
-			continue
-		}
-		if r.pinned != len(tree) {
-			t.Errorf("budget %d: pinned %d entries, want the whole tree (%d)", r.budget, r.pinned, len(tree))
-		}
+			if r.err != nil {
+				t.Fatal(r.err)
+			}
+
+			// A budget below one entry's cost can never pin the root; it must still
+			// return from every Run, but it cannot make progress.
+			if budget < exact {
+				if r.pinned != 0 {
+					t.Fatalf("pinned %d entries on a sub-entry budget", r.pinned)
+				}
+				return
+			}
+			if budget < affordable {
+				return
+			}
+			if !r.done {
+				t.Fatalf("not complete after %d steps (pinned %d/%d)", maxSteps, r.pinned, len(tree))
+			}
+			if r.pinned != len(tree) {
+				t.Fatalf("pinned %d entries, want the whole tree (%d)", r.pinned, len(tree))
+			}
+		})
 	}
 }
 
@@ -960,9 +981,9 @@ func TestContractTrunkPreloadParallel_StepBudgetSweepTerminates(t *testing.T) {
 // entry, so the miss set is deferred without being fetched, or it affords a
 // capped fetch whose keys are all absent from the file layer — the normal shape
 // at the BFS fringe, where a set afterMap bit names a leaf with no branch
-// record. Neither raises endStep from pin(), so the wave used to be re-entered
-// at the same depth on the deferred tail, once per chunk. The resolver call
-// count is the assertion that separates the two: it is what re-entry inflates.
+// record. Neither raises endStep from pin(), so the wave used to grind through
+// the rest of the depth inside one Run, reporting the queue drained and issuing
+// a resolver batch per chunk. The call count is what pins that down.
 func TestContractTrunkPreloadParallel_NoPinWaveEndsStep(t *testing.T) {
 	hash := make([]byte, 32)
 	for i := range hash {
@@ -1045,12 +1066,19 @@ func TestContractTrunkPreloadParallel_NoPinWaveEndsStep(t *testing.T) {
 // the other termination tests miss: the wave that ends the step also pinned
 // db-hits, so the resumed frontier is a concatenation (unpinned db-hits, then
 // the deferred misses) at the current depth while pendingChildren already holds
-// the pinned hits' children one level down.
+// the pinned hits' children one level down. Deferring the miss unfetched and
+// fetching it only to fail the pin leave an identical frontier, so the resolver
+// call count is what tells them apart.
 func TestContractTrunkPreloadParallel_DeferWithDbHitsInSameWave(t *testing.T) {
 	hash, tree, _ := buildSyntheticTree(t)
 	root := string(hexNibbles(hash))
 	const valSz = 100
-	resolve := fakeResolver(tree, nil, valSz, "")
+	calls := 0
+	base := fakeResolver(tree, nil, valSz, "")
+	resolve := func(keys [][]byte) ([][]byte, error) {
+		calls++
+		return base(keys)
+	}
 
 	// Shadow R1 only: the depth-65 wave partitions into one db-hit and one file
 	// miss, and the budget left after pinning R1 cannot afford the miss.
@@ -1071,7 +1099,18 @@ func TestContractTrunkPreloadParallel_DeferWithDbHitsInSameWave(t *testing.T) {
 	// Room for the root and R1, with a remainder below any entry's cost.
 	stepBudget := rootCost + r1Cost + minEntryBytes - 1
 
-	pinned, queueEmpty, err := p.Run(stepBudget, dbBranches, resolve, c, nil)
+	done := make(chan struct{})
+	var pinned int
+	var queueEmpty bool
+	go func() {
+		pinned, queueEmpty, err = p.Run(stepBudget, dbBranches, resolve, c, nil)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		panicOnStuck("a wave that defers its misses while pinning db-hits must end the step")
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1080,6 +1119,11 @@ func TestContractTrunkPreloadParallel_DeferWithDbHitsInSameWave(t *testing.T) {
 	}
 	if p.DbHitsPinned() != 1 {
 		t.Fatalf("db-hits pinned %d, want 1 (R1 came from dbBranches)", p.DbHitsPinned())
+	}
+	// The remainder is below one entry's cost, so the miss must be deferred
+	// without being fetched: only the root wave reaches the resolver.
+	if calls != 1 {
+		t.Fatalf("resolver called %d times, want 1; the deferred miss was fetched anyway", calls)
 	}
 	// R2 stays at depth 65 in the frontier; R1's child is queued at depth 66.
 	if len(p.frontier) != 1 || len(p.pendingChildren) != 1 {
@@ -1107,5 +1151,37 @@ func TestContractTrunkPreloadParallel_DeferWithDbHitsInSameWave(t *testing.T) {
 			t.Fatalf("prefix %x pinned twice across the deferral boundary", pf)
 		}
 		seen[string(pf)] = true
+	}
+}
+
+// A walk stopped at the depth ceiling can pin nothing more even with entries
+// still queued, and must report that identically whether or not the step budget
+// is spendable — the zero-budget path returns before the loop that would
+// otherwise notice the ceiling.
+func TestContractTrunkPreloadParallel_DepthCeilingReportsDoneOnAnyBudget(t *testing.T) {
+	hash := make([]byte, 32)
+	resolve := func(keys [][]byte) ([][]byte, error) { return make([][]byte, len(keys)), nil }
+	c := NewBranchCache(64)
+	defer c.Close()
+	p, err := NewContractTrunkPreloadParallel(hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Place the walk at the ceiling rather than building a 64-level storage trie.
+	p.nextDepth = maxStorageTrunkDepth + 1
+	if p.QueueRemaining() == 0 {
+		t.Fatal("queue drained, so the queued-but-finished state is not exercised")
+	}
+
+	if _, queueEmpty, err := p.Run(1<<20, nil, resolve, c, nil); err != nil {
+		t.Fatal(err)
+	} else if !queueEmpty {
+		t.Error("a spendable budget past the depth ceiling reported work remaining")
+	}
+	if _, queueEmpty, err := p.Run(0, nil, resolve, c, nil); err != nil {
+		t.Fatal(err)
+	} else if !queueEmpty {
+		t.Error("a zero budget past the depth ceiling disagreed with the spendable one")
 	}
 }
