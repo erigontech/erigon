@@ -290,8 +290,6 @@ func (s *pbinWitnessStateless) CreateContract(address accounts.Address) error {
 	return nil
 }
 
-// Finalize turns the block's writes into the plain-key updates the commitment
-// layer takes and recomputes the root over the witness.
 func (s *pbinWitnessStateless) Finalize(ctx context.Context) (common.Hash, error) {
 	plainKeys, updates, err := s.pendingUpdates()
 	if err != nil {

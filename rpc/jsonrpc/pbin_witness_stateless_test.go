@@ -798,9 +798,8 @@ func TestPBinWitnessVerifyGateChecksKeys(t *testing.T) {
 	require.ErrorContains(t, g.verify(result, g.block), g.corpus.eoa.Hex())
 }
 
-// TestWitnessVerifySkippedOnlyUnderHex: ERIGON_WITNESS_NO_VERIFY buys back hex's
-// doubled execution cost. Under bin the gate is the only correctness evidence
-// there is, so the same variable must not turn it off.
+// TestWitnessVerifySkippedOnlyUnderHex: the same env var may skip the gate
+// under hex but never under bin — see witnessVerifySkipped for why.
 func TestWitnessVerifySkippedOnlyUnderHex(t *testing.T) {
 	require.False(t, witnessVerifySkipped(false /* binTrie */), "hex verification is off by default")
 	require.False(t, witnessVerifySkipped(true /* binTrie */), "bin verification is off by default")

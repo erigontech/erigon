@@ -49,7 +49,6 @@ type PBinAccount struct {
 	CodeHash common.Hash
 }
 
-// PBinWitnessState is a decoded binary witness served as pre-state.
 type PBinWitnessState struct {
 	tree *pbinWitnessTree
 	ctx  *pbinWitnessContext
@@ -72,8 +71,6 @@ func PBinNewWitnessState(nodes [][]byte, root []byte) (*PBinWitnessState, error)
 // pre-state chunk leaves. Everything else is read from the leaves.
 func (s *PBinWitnessState) SetCode(addr, code []byte) { s.ctx.setCode(addr, code) }
 
-// Account resolves an address to the state its account leaves hold. ok is
-// false when the witness proves the account absent.
 func (s *PBinWitnessState) Account(addr []byte) (PBinAccount, bool, error) {
 	// An account holds exactly one of the CODE_HASH and DELEGATION leaves, and
 	// neither is ever zero, so whichever exists marks the account present —
@@ -116,8 +113,7 @@ func (s *PBinWitnessState) Account(addr []byte) (PBinAccount, bool, error) {
 	return acc, true, nil
 }
 
-// Storage resolves one slot. ok is false when the witness proves the slot
-// absent, which the tree reads as zero.
+// An absent slot resolves to the zero hash, matching SLOAD's default value.
 func (s *PBinWitnessState) Storage(addr, slot []byte) (common.Hash, bool, error) {
 	value, ok, err := s.tree.leaf(s.keys.storageKey(addr, slot))
 	if err != nil || !ok {
@@ -145,8 +141,7 @@ func (s *PBinWitnessState) HasStorage(addr []byte) bool {
 }
 
 // Code returns the account's bytecode: reassembled from the chunk leaves, or
-// read from the DELEGATION leaf for a delegated account. ok is false when the
-// witness proves the account absent.
+// read from the DELEGATION leaf for a delegated account.
 func (s *PBinWitnessState) Code(addr []byte) ([]byte, bool, error) {
 	code, err := s.ctx.codeFromLeaves(addr)
 	if err != nil {
@@ -156,8 +151,7 @@ func (s *PBinWitnessState) Code(addr []byte) ([]byte, bool, error) {
 }
 
 // Root applies the block's writes over the witness and returns the post-state
-// root. The engine runs against the witness alone, so leaf splitting, branch
-// creation, BASIC_DATA packing and code chunking are the ones the chain uses.
+// root.
 func (s *PBinWitnessState) Root(ctx context.Context, plainKeys [][]byte, updates []Update) ([]byte, error) {
 	if len(plainKeys) != len(updates) {
 		return nil, fmt.Errorf("pbin: %d plain keys for %d updates", len(plainKeys), len(updates))
@@ -232,8 +226,7 @@ func (c *pbinWitnessContext) codeFromLeaves(addr []byte) ([]byte, error) {
 // delegationCode reads a delegated account's code: the indicator its DELEGATION
 // leaf carries. There is nothing to reassemble and no hash to check against —
 // the root commits the leaf itself — so the leaf's fixed shape is the only thing
-// that can be checked, and code_size has to agree with it. A nil result means the
-// witness proves the account absent.
+// that can be checked, and code_size has to agree with it.
 func (c *pbinWitnessContext) delegationCode(addr []byte, size uint64) ([]byte, error) {
 	value, ok, err := c.tree.leaf(c.keys.accountKey(addr, pbinDelegationLeafKey))
 	if err != nil || !ok {

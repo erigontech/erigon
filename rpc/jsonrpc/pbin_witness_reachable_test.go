@@ -76,10 +76,9 @@ func enableCommitmentHistoryFlag(t *testing.T, db kv.TemporalRwDB) {
 	}))
 }
 
-// TestPBinExecutionWitnessReachable is what Task 10 unblocks: debug_executionWitness
-// no longer declares itself hex-only, so a bin datadir reaches the pipeline instead of
-// ErrBinCommitmentUnsupported. Under bin the stateless gate is not skippable, so a
-// returned witness is one that re-executed the block to its post-state root.
+// TestPBinExecutionWitnessReachable confirms a bin datadir reaches the witness pipeline
+// instead of ErrBinCommitmentUnsupported. Under bin the stateless gate is not skippable, so
+// a returned witness is one that re-executed the block to its post-state root.
 func TestPBinExecutionWitnessReachable(t *testing.T) {
 	// No t.Parallel: mutates process-global commitment flags.
 	withCommitmentHistory(t)

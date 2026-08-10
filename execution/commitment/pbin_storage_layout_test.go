@@ -112,7 +112,7 @@ func TestPBinStorageLayoutCost(t *testing.T) {
 // into one group and once spread one-per-group. Both are storage-zone keys of the
 // same width, so any difference is the shared group stem alone.
 //
-// Two things this has to get right, both of which were got wrong first:
+// Two things to get right:
 //
 //   - Measure the PRUNED witness. Witnesses returns a superset that callers prune
 //     with PBinWitnessNodesForKeys; the superset carries off-path siblings re-hashed

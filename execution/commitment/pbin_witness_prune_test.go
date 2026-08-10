@@ -157,8 +157,7 @@ func TestPBinWitnessPruneKeepsProofPaths(t *testing.T) {
 
 // TestPBinWitnessPruneDropsOffPathNodes: the capture holds nodes neither a proved
 // key nor a collapse reaches — whole subtrees hanging two or more levels off a
-// path, and branches re-hashed under a shorter prefix earlier in the fold.
-// Keeping them is the whole cost the pruner exists to remove.
+// path.
 func TestPBinWitnessPruneDropsOffPathNodes(t *testing.T) {
 	t.Parallel()
 
@@ -203,8 +202,7 @@ func TestPBinWitnessPruneKeepsCodeLeaves(t *testing.T) {
 }
 
 // TestPBinWitnessPruneStopsAtBlindedChild: a key whose path leaves the witness
-// keeps what it walked and stops. The key is built from a path the witness is
-// known to blind, so the case cannot silently stop being one.
+// keeps what it walked and stops.
 func TestPBinWitnessPruneStopsAtBlindedChild(t *testing.T) {
 	t.Parallel()
 
@@ -291,13 +289,11 @@ func TestPBinWitnessPruneKeepsSubtreePrefix(t *testing.T) {
 	require.Equal(t, f.root, pbinWitnessMerkelized(t, f.prune(t, [][]byte{stem}), f.root))
 }
 
-// TestPBinWitnessServesRemoval: a removal collapses the branch above the key and
-// re-hashes the surviving sibling under a longer prefix. That needs the
-// sibling's own preimage — a branch hash commits to the node under the prefix it
-// had, so it cannot be re-prefixed — which the capture has to hash and the
-// pruner has to keep. Both sibling shapes are covered: a leaf, which the fold
-// hashes on its way past, and a branch, which arrives as a bare hash out of its
-// parent's record.
+// TestPBinWitnessServesRemoval: collapsing a branch re-hashes the surviving
+// sibling under a longer prefix, which needs its own preimage — a branch hash
+// commits to the prefix it had and can't be reused as-is. Both sibling shapes
+// are covered: a leaf the fold already hashes, and a branch that arrives as a
+// bare hash from its parent's record.
 func TestPBinWitnessServesRemoval(t *testing.T) {
 	t.Parallel()
 
@@ -360,8 +356,8 @@ func TestPBinWitnessServesRemoval(t *testing.T) {
 	}
 }
 
-// TestPBinWitnessPruneEmptyCapture: no capture, nothing to prune. The empty
-// result is what an update set touching nothing produces.
+// TestPBinWitnessPruneEmptyCapture: an update set that touches nothing produces
+// no nodes to prune.
 func TestPBinWitnessPruneEmptyCapture(t *testing.T) {
 	t.Parallel()
 

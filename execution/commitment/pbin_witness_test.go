@@ -174,7 +174,7 @@ func TestPBinWitnessTracerEmitsEveryNode(t *testing.T) {
 }
 
 // TestPBinWitnessTracerCoversRootLeaf: a one-key tree folds no row, so its only
-// node is hashed by RootHash. A tap in foldBranch would emit nothing here.
+// node is hashed by RootHash rather than during a fold.
 func TestPBinWitnessTracerCoversRootLeaf(t *testing.T) {
 	t.Parallel()
 
@@ -210,8 +210,8 @@ func TestPBinWitnessTracerCoversSiblingCells(t *testing.T) {
 	require.Equal(t, pbinWitnessOracleNodes(t, corpus.entries(t)), emitted)
 }
 
-// TestPBinWitnessTracerDetachedOnReset keeps the tracer off the normal
-// commitment path a reset engine goes back to serving.
+// TestPBinWitnessTracerDetachedOnReset: Reset detaches the tracer, so the
+// process that follows would trip a still-attached rejecting one.
 func TestPBinWitnessTracerDetachedOnReset(t *testing.T) {
 	t.Parallel()
 
@@ -254,9 +254,8 @@ func pbinWitnessPending() *pbinTestCorpus {
 	return c
 }
 
-// TestPBinWitnessesReturnsParentRoot: the pass proves the tree as it stands.
-// buildWitnessTrie checks the returned root against the parent block's, so an
-// applied update would fail there.
+// TestPBinWitnessesReturnsParentRoot: the pass proves the tree as it stands,
+// not any pending modifications to it.
 func TestPBinWitnessesReturnsParentRoot(t *testing.T) {
 	t.Parallel()
 
@@ -286,8 +285,8 @@ func pbinWitnessNodeFor(t *testing.T, nodes [][]byte, hash []byte) []byte {
 	return nil
 }
 
-// TestPBinWitnessesLeavesStateUntouched: the fold writes each branch row back as
-// it goes, and this pass folds rows it never modified.
+// TestPBinWitnessesLeavesStateUntouched: the witness pass must not write any
+// branch row back to state.
 func TestPBinWitnessesLeavesStateUntouched(t *testing.T) {
 	t.Parallel()
 
