@@ -282,7 +282,7 @@ func (e *ExecModule) unwindIfNeeded(
 		if err := e.pipelineExecutor.UnwindTo(unwindTarget, stagedsync.ForkChoice, tx); err != nil {
 			return nil, err
 		}
-		if err = e.hook.BeforeRun(tx, isSynced); err != nil {
+		if err := e.hook.BeforeRun(tx, isSynced); err != nil {
 			return nil, err
 		}
 		// Run the unwind
@@ -360,10 +360,9 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	})
 	defer cleanupBeforeSemaRelease()
 
-	// Drain any warmup a preceding newPayload spawned: its Puts reflect a
-	// pre-FCU snapshot and must land before this FCU's unwind epoch-bump and
-	// flush cache-apply, not after them (no new warmup starts while we hold
-	// the semaphore).
+	// Drain any warmup a preceding newPayload spawned: a fill from a pre-unwind
+	// view would survive this FCU's possible unwind epoch-bump as a live entry
+	// (see drainReadAhead). No new warmup starts while we hold the semaphore.
 	e.drainReadAhead()
 
 	var validationError string
@@ -577,7 +576,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			}
 			defer commitRwTx.Rollback() // idempotent after a successful Commit
 			// The committed sd is spent; RunLoop closes it and continues on the
-			// fresh SD built below (no ClearRam reuse).
+			// fresh SD built below (no reuse).
 			if err := sd.Commit(ctx, commitRwTx); err != nil {
 				return nil, nil, fmt.Errorf("updateForkChoice: flush+commit sd after hasMore: %w", err)
 			}

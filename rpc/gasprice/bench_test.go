@@ -59,7 +59,7 @@ func newTestBackendN(tb testing.TB, n int) *execmoduletester.ExecModuleTester {
 	}
 	signer := types.LatestSigner(gspec.Config)
 	m := execmoduletester.New(tb, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
-	ch, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, n, func(i int, b *blockgen.BlockGen) {
+	ch, err := m.GenerateChain(n, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		for j := range txsPerBlock {
 			gasPrice := uint256.NewInt(uint64(j+1) * uint64(common.GWei))

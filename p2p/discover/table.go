@@ -796,7 +796,7 @@ func (tab *Table) waitForNodes(ctx context.Context, n int) error {
 			// Lazily init the subscription. Do this while holding the
 			// lock so we don't miss any events that change the node count.
 			sub := initsub()
-			defer sub.Unsubscribe()
+			defer sub.Unsubscribe() //nolint:gocritic
 		}
 		tab.mutex.Unlock()
 

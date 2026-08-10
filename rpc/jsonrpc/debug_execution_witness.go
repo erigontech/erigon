@@ -1114,11 +1114,12 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 		_, deleted := rs.DeletedAccounts[sysAddr]
 		postOverlay, hasOverlay := rs.accountOverlay[sysAddr]
 		var postExists bool
-		if deleted {
+		switch {
+		case deleted:
 			postExists = false
-		} else if hasOverlay {
+		case hasOverlay:
 			postExists = postOverlay != nil
-		} else {
+		default:
 			postExists = preExists
 		}
 		existenceChanged := preExists != postExists

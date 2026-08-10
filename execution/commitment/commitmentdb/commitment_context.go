@@ -302,12 +302,6 @@ func (sdc *SharedDomainsCommitmentContext) Reset() {
 	}
 }
 
-func (sdc *SharedDomainsCommitmentContext) ClearRam() {
-	sdc.updates.Reset()
-	sdc.Reset()
-	sdc.stateReader = nil
-}
-
 func (sdc *SharedDomainsCommitmentContext) KeysCount() uint64 {
 	return sdc.updates.Size()
 }
@@ -685,7 +679,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	sdc.justRestored.Store(false)
 
 	if saveState {
-		if err = sdc.encodeAndStoreCommitmentState(trieContext, blockNum, txNum); err != nil {
+		if err := sdc.encodeAndStoreCommitmentState(trieContext, blockNum, txNum); err != nil {
 			return nil, err
 		}
 	}
@@ -853,7 +847,7 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(trieContext *Tr
 		return 0, 0, nil, err
 	}
 
-	if err = trieContext.stateReader.CheckDataAvailable(kv.CommitmentDomain, step); err != nil {
+	if err := trieContext.stateReader.CheckDataAvailable(kv.CommitmentDomain, step); err != nil {
 		return 0, 0, nil, err
 	}
 
@@ -1054,7 +1048,7 @@ func (sdc *TrieContext) Account(plainKey []byte) (u *commitment.Update, err erro
 	}
 
 	acc := new(accounts.Account)
-	if err = accounts.DeserialiseV3(acc, encAccount); err != nil {
+	if err := accounts.DeserialiseV3(acc, encAccount); err != nil {
 		return nil, err
 	}
 

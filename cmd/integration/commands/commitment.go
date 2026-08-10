@@ -1117,66 +1117,71 @@ func sampleCommitmentKeysFromFiles(ctx context.Context, acRo *dbstate.Aggregator
 	logger.Info("Found commitment .kv files", "kvFiles", len(commitmentKVFiles), "totalFiles", len(commitmentFiles))
 
 	for fileIdx, f := range commitmentKVFiles {
-		fpath := f.Fullpath()
-		logger.Info("Scanning file...", "file", filepath.Base(fpath), "fileIdx", fileIdx+1, "totalFiles", len(commitmentKVFiles))
+		if err := func() error {
+			fpath := f.Fullpath()
+			logger.Info("Scanning file...", "file", filepath.Base(fpath), "fileIdx", fileIdx+1, "totalFiles", len(commitmentKVFiles))
 
-		dec, err := seg.NewDecompressor(fpath)
-		if err != nil {
-			return nil, 0, fmt.Errorf("failed to create decompressor for %s: %w", fpath, err)
-		}
-		defer dec.Close()
-
-		fc := statecfg.Schema.GetDomainCfg(kv.CommitmentDomain).Compression
-		getter := seg.NewReader(dec.MakeGetter(), fc)
-
-		fileKeyCount := 0
-		for getter.HasNext() {
-			key, _ := getter.Next(nil)
-			if !getter.HasNext() {
-				return nil, 0, fmt.Errorf("invalid key/value pair in %s", fpath)
+			dec, err := seg.NewDecompressor(fpath)
+			if err != nil {
+				return fmt.Errorf("failed to create decompressor for %s: %w", fpath, err)
 			}
-			getter.Skip() // skip value
+			defer dec.Close()
 
-			// Skip the "state" key
-			if bytes.Equal(key, []byte("state")) {
-				continue
-			}
+			fc := statecfg.Schema.GetDomainCfg(kv.CommitmentDomain).Compression
+			getter := seg.NewReader(dec.MakeGetter(), fc)
 
-			globalCount++
-			fileKeyCount++
+			fileKeyCount := 0
+			for getter.HasNext() {
+				key, _ := getter.Next(nil)
+				if !getter.HasNext() {
+					return fmt.Errorf("invalid key/value pair in %s", fpath)
+				}
+				getter.Skip() // skip value
 
-			if len(keys) < sampleSize {
-				// Reservoir not full yet - always add
-				keyCopy := make([]byte, len(key))
-				copy(keyCopy, key)
-				keys = append(keys, keyCopy)
-			} else {
-				// Reservoir full - replace with probability sampleSize/globalCount
-				j := rng.Intn(globalCount)
-				if j < sampleSize {
-					if len(keys[j]) != len(key) {
-						keys[j] = make([]byte, len(key))
+				// Skip the "state" key
+				if bytes.Equal(key, []byte("state")) {
+					continue
+				}
+
+				globalCount++
+				fileKeyCount++
+
+				if len(keys) < sampleSize {
+					// Reservoir not full yet - always add
+					keyCopy := make([]byte, len(key))
+					copy(keyCopy, key)
+					keys = append(keys, keyCopy)
+				} else {
+					// Reservoir full - replace with probability sampleSize/globalCount
+					j := rng.Intn(globalCount)
+					if j < sampleSize {
+						if len(keys[j]) != len(key) {
+							keys[j] = make([]byte, len(key))
+						}
+						copy(keys[j], key)
 					}
-					copy(keys[j], key)
+				}
+
+				if time.Since(lastLog) > 10*time.Second {
+					logger.Info("Sampling...",
+						"file", filepath.Base(fpath),
+						"fileKeys", fileKeyCount,
+						"globalScanned", globalCount,
+						"reservoir", len(keys))
+					lastLog = time.Now()
+				}
+
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				default:
 				}
 			}
-
-			if time.Since(lastLog) > 10*time.Second {
-				logger.Info("Sampling...",
-					"file", filepath.Base(fpath),
-					"fileKeys", fileKeyCount,
-					"globalScanned", globalCount,
-					"reservoir", len(keys))
-				lastLog = time.Now()
-			}
-
-			select {
-			case <-ctx.Done():
-				return nil, 0, ctx.Err()
-			default:
-			}
+			logger.Info("File complete", "file", filepath.Base(fpath), "keysInFile", fileKeyCount)
+			return nil
+		}(); err != nil {
+			return nil, 0, err
 		}
-		logger.Info("File complete", "file", filepath.Base(fpath), "keysInFile", fileKeyCount)
 	}
 
 	return keys, globalCount, nil
