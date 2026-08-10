@@ -37,6 +37,7 @@ type payloadVoteForkGraph struct {
 	hasEnvelope       bool
 	blocks            map[common.Hash]*cltypes.SignedBeaconBlock
 	envelope          *cltypes.SignedExecutionPayloadEnvelope
+	readEnvelopeCalls *int
 	dumpedEnvelope    *common.Hash
 	invalidatedHeader *common.Hash
 }
@@ -51,6 +52,9 @@ func (g payloadVoteForkGraph) GetBlock(root common.Hash) (*cltypes.SignedBeaconB
 }
 
 func (g payloadVoteForkGraph) ReadEnvelopeFromDisk(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+	if g.readEnvelopeCalls != nil {
+		(*g.readEnvelopeCalls)++
+	}
 	return g.envelope, nil
 }
 
@@ -369,16 +373,19 @@ func TestValidateParentPayloadPathRequiresVerifiedFullParent(t *testing.T) {
 	}{
 		{name: "persisted but unverified", withEL: true, wantErr: true},
 		{name: "persisted and verified", withEL: true, verified: true},
-		{name: "standalone without EL"},
+		{name: "standalone without EL", wantErr: true},
+		{name: "standalone with prior verification", verified: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
+			readEnvelopeCalls := 0
 			f := newPayloadVoteTestStore(t, parentRoot, true, tt.verified)
 			if tt.withEL {
 				f.engine = execution_client.NewMockExecutionEngine(gomock.NewController(t))
 			}
 			f.forkGraph = payloadVoteForkGraph{
-				hasEnvelope: true,
-				blocks:      map[common.Hash]*cltypes.SignedBeaconBlock{parentRoot: parent},
+				hasEnvelope:       true,
+				blocks:            map[common.Hash]*cltypes.SignedBeaconBlock{parentRoot: parent},
+				readEnvelopeCalls: &readEnvelopeCalls,
 				envelope: &cltypes.SignedExecutionPayloadEnvelope{
 					Message: &cltypes.ExecutionPayloadEnvelope{
 						BeaconBlockRoot: parentRoot,
@@ -390,7 +397,14 @@ func TestValidateParentPayloadPathRequiresVerifiedFullParent(t *testing.T) {
 			err := f.validateParentPayloadPath(child)
 			if tt.wantErr {
 				require.ErrorIs(t, err, ErrParentEnvelopePending)
-				require.Len(t, f.DrainPendingELPayloads(), 1)
+				require.ErrorIs(t, f.validateParentPayloadPath(child), ErrParentEnvelopePending)
+				if tt.withEL {
+					require.Equal(t, 1, readEnvelopeCalls)
+					require.Len(t, f.DrainPendingELPayloads(), 1)
+				} else {
+					require.Zero(t, readEnvelopeCalls)
+					require.Empty(t, f.DrainPendingELPayloads())
+				}
 			} else {
 				require.NoError(t, err)
 			}

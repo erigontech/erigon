@@ -26,6 +26,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/stretchr/testify/require"
@@ -86,4 +87,34 @@ func TestPruneKeepsLowestAvailableBlockMonotonic(t *testing.T) {
 
 	require.NoError(t, f.Prune(120))
 	require.Equal(t, uint64(151), f.LowestAvailableSlot())
+}
+
+func TestReadEnvelopeRemovesCorruptPersistenceMarker(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
+	root := common.HexToHash("0x1234")
+	require.NoError(t, afero.WriteFile(fs, getEnvelopeFilename(root), []byte("truncated"), 0o644))
+	require.True(t, f.HasEnvelope(root))
+
+	_, err := f.ReadEnvelopeFromDisk(root)
+	require.Error(t, err)
+	require.False(t, f.HasEnvelope(root))
+}
+
+func TestDumpEnvelopeAtomicallyPersistsReadableFile(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
+	root := common.HexToHash("0x1234")
+	envelope := cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)
+	envelope.BeaconBlockRoot = root
+	envelope.Payload.Extra = solid.NewExtraData()
+	envelope.Payload.Transactions = &solid.TransactionsSSZ{}
+
+	require.NoError(t, f.DumpEnvelopeOnDisk(root, &cltypes.SignedExecutionPayloadEnvelope{Message: envelope}))
+	tempExists, err := afero.Exists(f.fs, getEnvelopeFilename(root)+".tmp")
+	require.NoError(t, err)
+	require.False(t, tempExists)
+	persisted, err := f.ReadEnvelopeFromDisk(root)
+	require.NoError(t, err)
+	require.Equal(t, root, persisted.Message.BeaconBlockRoot)
 }

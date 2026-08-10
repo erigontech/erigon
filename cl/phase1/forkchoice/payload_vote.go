@@ -429,11 +429,13 @@ func (f *ForkChoiceStore) validateParentPayloadPath(block *cltypes.BeaconBlock) 
 		if !f.forkGraph.HasEnvelope(block.ParentRoot) {
 			return ErrParentEnvelopePending
 		}
-		if f.engine != nil && !f.IsPayloadVerified(block.ParentRoot) {
-			parentBlock, ok := f.forkGraph.GetBlock(block.ParentRoot)
-			envelope, err := f.forkGraph.ReadEnvelopeFromDisk(block.ParentRoot)
-			if ok && parentBlock != nil && err == nil && envelope != nil && envelope.Message != nil {
-				f.addPendingELPayload(parentBlock, envelope)
+		if !f.IsPayloadVerified(block.ParentRoot) {
+			if f.engine != nil && !f.hasPendingELPayload(block.ParentRoot) {
+				parentBlock, ok := f.forkGraph.GetBlock(block.ParentRoot)
+				envelope, err := f.forkGraph.ReadEnvelopeFromDisk(block.ParentRoot)
+				if ok && parentBlock != nil && err == nil && envelope != nil && envelope.Message != nil {
+					f.addPendingELPayload(parentBlock, envelope)
+				}
 			}
 			return ErrParentEnvelopePending
 		}

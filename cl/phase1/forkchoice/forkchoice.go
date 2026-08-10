@@ -199,8 +199,9 @@ type ForkChoiceStore struct {
 	// whose EL newPayload failed (e.g. because EL hasn't caught up after forward sync).
 	// The stages layer drains these into blockCollector before each Flush() so EL
 	// eventually receives the blocks.
-	pendingELPayloadsMu sync.Mutex
-	pendingELPayloads   []PendingELPayload
+	pendingELPayloadsMu   sync.Mutex
+	pendingELPayloads     []PendingELPayload
+	pendingELPayloadRoots map[common.Hash]struct{}
 
 	// db is used to persist execution payload indices (block number/hash) when an envelope
 	// is accepted in OnExecutionPayload. May be nil (e.g. in tests), in which case the
@@ -1057,14 +1058,18 @@ func (f *ForkChoiceStore) addPendingELPayload(block *cltypes.SignedBeaconBlock, 
 	defer f.pendingELPayloadsMu.Unlock()
 	root, ok := pendingELPayloadRoot(PendingELPayload{Block: block, Envelope: envelope})
 	if ok {
-		for _, p := range f.pendingELPayloads {
-			if existingRoot, existingOk := pendingELPayloadRoot(p); existingOk && existingRoot == root {
-				return
-			}
+		if _, exists := f.pendingELPayloadRoots[root]; exists {
+			return
+		}
+		if f.pendingELPayloadRoots == nil {
+			f.pendingELPayloadRoots = make(map[common.Hash]struct{})
 		}
 	}
 	if len(f.pendingELPayloads) >= maxPendingELPayloads {
 		log.Warn("addPendingELPayload: dropping oldest pending EL payload", "queueLen", len(f.pendingELPayloads))
+		if evictedRoot, exists := pendingELPayloadRoot(f.pendingELPayloads[0]); exists {
+			delete(f.pendingELPayloadRoots, evictedRoot)
+		}
 		copy(f.pendingELPayloads, f.pendingELPayloads[1:])
 		f.pendingELPayloads[len(f.pendingELPayloads)-1] = PendingELPayload{}
 		f.pendingELPayloads = f.pendingELPayloads[:len(f.pendingELPayloads)-1]
@@ -1073,6 +1078,16 @@ func (f *ForkChoiceStore) addPendingELPayload(block *cltypes.SignedBeaconBlock, 
 		Block:    block,
 		Envelope: envelope,
 	})
+	if ok {
+		f.pendingELPayloadRoots[root] = struct{}{}
+	}
+}
+
+func (f *ForkChoiceStore) hasPendingELPayload(root common.Hash) bool {
+	f.pendingELPayloadsMu.Lock()
+	defer f.pendingELPayloadsMu.Unlock()
+	_, ok := f.pendingELPayloadRoots[root]
+	return ok
 }
 
 func pendingELPayloadRoot(p PendingELPayload) (common.Hash, bool) {
@@ -1094,16 +1109,19 @@ func (f *ForkChoiceStore) DrainPendingELPayloads() []PendingELPayload {
 	f.pendingELPayloadsMu.Lock()
 	defer f.pendingELPayloadsMu.Unlock()
 	if len(f.pendingELPayloads) == 0 {
+		clear(f.pendingELPayloadRoots)
 		return nil
 	}
 	if cap(f.pendingELPayloads) > pendingELPayloadsShrinkCap {
 		result := f.pendingELPayloads
 		f.pendingELPayloads = nil
+		f.pendingELPayloadRoots = nil
 		return result
 	}
 	result := make([]PendingELPayload, len(f.pendingELPayloads))
 	copy(result, f.pendingELPayloads)
 	clear(f.pendingELPayloads)
 	f.pendingELPayloads = f.pendingELPayloads[:0]
+	clear(f.pendingELPayloadRoots)
 	return result
 }

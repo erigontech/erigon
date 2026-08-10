@@ -209,11 +209,24 @@ func (f *forkGraphDisk) ReadEnvelopeFromDisk(blockRoot common.Hash) (envelope *c
 	f.stateDumpLock.Lock()
 	defer f.stateDumpLock.Unlock()
 
-	file, err = f.fs.Open(getEnvelopeFilename(blockRoot))
+	filename := getEnvelopeFilename(blockRoot)
+	file, err = f.fs.Open(filename)
 	if err != nil {
+		f.envelopeExists.Delete(blockRoot)
 		return
 	}
-	defer file.Close()
+	defer func() {
+		if closeErr := file.Close(); err == nil && closeErr != nil {
+			envelope = nil
+			err = closeErr
+		}
+		if err != nil {
+			f.envelopeExists.Delete(blockRoot)
+			if removeErr := f.fs.Remove(filename); removeErr != nil && !os.IsNotExist(removeErr) {
+				log.Warn("failed to remove corrupt envelope", "root", blockRoot, "err", removeErr)
+			}
+		}
+	}()
 
 	if f.sszSnappyReader == nil {
 		f.sszSnappyReader = snappy.NewReader(file)
@@ -276,11 +289,21 @@ func (f *forkGraphDisk) DumpEnvelopeOnDisk(blockRoot common.Hash, envelope *clty
 		return
 	}
 
-	dumpedFile, err := f.fs.OpenFile(getEnvelopeFilename(blockRoot), os.O_TRUNC|os.O_CREATE|os.O_RDWR, 0o755)
+	filename := getEnvelopeFilename(blockRoot)
+	tempFilename := filename + ".tmp"
+	dumpedFile, err := f.fs.OpenFile(tempFilename, os.O_TRUNC|os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return err
 	}
-	defer dumpedFile.Close()
+	closed := false
+	defer func() {
+		if !closed {
+			_ = dumpedFile.Close()
+		}
+		if err != nil {
+			_ = f.fs.Remove(tempFilename)
+		}
+	}()
 
 	if f.sszSnappyWriter == nil {
 		f.sszSnappyWriter = snappy.NewBufferedWriter(dumpedFile)
@@ -307,6 +330,13 @@ func (f *forkGraphDisk) DumpEnvelopeOnDisk(blockRoot common.Hash, envelope *clty
 
 	if err = dumpedFile.Sync(); err != nil {
 		log.Error("failed to sync dumped file", "err", err)
+		return
+	}
+	if err = dumpedFile.Close(); err != nil {
+		return
+	}
+	closed = true
+	if err = f.fs.Rename(tempFilename, filename); err != nil {
 		return
 	}
 
