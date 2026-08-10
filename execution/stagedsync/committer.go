@@ -305,13 +305,10 @@ func (cc *commitmentCalculator) loop(ctx context.Context) {
 	}
 }
 
-// drainBlockRequests handles every request already buffered, returning nil once
-// the channel is closed. The exec loop sends blockRequest(N) before dispatching
-// the exec that produces blockResult(N), so a result in hand means its own
-// request is already buffered — draining before handling the result restores the
-// send order that select's unordered pick between two ready channels loses.
-// Otherwise handleBlockRequest's drop-guard discards that request as stale and
-// maybeComputeAhead's contiguity chain never recovers for the rest of the batch.
+// drainBlockRequests handles every buffered request, returning nil once the
+// channel is closed. A block's request is always sent before the exec that
+// produces its result, so draining before handling a result keeps that order
+// past select, which would otherwise let the result drop the request as stale.
 func (cc *commitmentCalculator) drainBlockRequests(ctx context.Context, reqs chan *blockRequest) chan *blockRequest {
 	for {
 		select {

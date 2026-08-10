@@ -653,15 +653,10 @@ func TestComputeAhead_StepBoundaryCheckpointMidBlock(t *testing.T) {
 	requireBranchesConsistentWithAccounts(t, doms, tx, accountValues)
 }
 
-// TestLoop_BlockRequestBeatsSameNumberedResult pins the ordering loop() must
-// keep: blockRequest(N) is sent before the exec dispatch that produces
-// blockResult(N), so the request must always be handled first. select does not
-// preserve that across two channels, and handling the result first makes
-// handleBlockRequest drop the request as stale — after which maybeComputeAhead's
-// contiguity chain never recovers and the batch silently loses compute-ahead.
-// Both delivery orders are exercised: pre-buffered forces the two-ready-cases
-// pick every iteration, delivered-after-start forces the narrower window between
-// select's readiness poll and its park.
+// TestLoop_BlockRequestBeatsSameNumberedResult pins that loop() handles a block's
+// request before its own result, which select alone does not guarantee. The two
+// delivery orders hit different windows: pre-buffered makes both cases ready at
+// once, after-start races the send against select's readiness poll.
 func TestLoop_BlockRequestBeatsSameNumberedResult(t *testing.T) {
 	defer func(p bool) { dbg.BALDrivenCommitment = p }(dbg.BALDrivenCommitment)
 	defer func(p bool) { dbg.IgnoreBAL = p }(dbg.IgnoreBAL)
@@ -698,11 +693,8 @@ func TestLoop_BlockRequestBeatsSameNumberedResult(t *testing.T) {
 					NonceChanges: []*types.NonceChange{{Index: 0, Value: 1}},
 				}}
 
-				// stateRoot is deliberately wrong: computeBlockFromBAL's root check
-				// fails either way. Reaching that check at all — vs. the request
-				// being dropped before maybeComputeAhead ever calls
-				// computeBlockFromBAL — is exactly the property under test, and
-				// require.ErrorIs below tells the two outcomes apart.
+				// stateRoot is deliberately wrong, so a processed request publishes
+				// ErrWrongTrieRoot and a dropped one publishes nothing at all.
 				send := func() {
 					reqs <- &blockRequest{
 						blockNum:   i,
@@ -723,10 +715,8 @@ func TestLoop_BlockRequestBeatsSameNumberedResult(t *testing.T) {
 					cc.Start(ctx)
 				}
 
-				// Ranging over out blocks until loop() closes it, which only happens
-				// once in is fully drained and loop() returns — the same condition
-				// Stop() waits on, but without racing Stop()'s close(cc.done) against
-				// publish()'s own cc.out/cc.done select for a goroutine still in flight.
+				// Range rather than Stop() first: out closes only after loop() returns,
+				// and Stop()'s close(cc.done) would race an in-flight publish().
 				var results []commitmentResult
 				for res := range out {
 					results = append(results, res)
