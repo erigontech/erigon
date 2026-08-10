@@ -21,6 +21,7 @@ import (
 	"context"
 	"math/big"
 	"strconv"
+	"sync"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -30,6 +31,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
@@ -43,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/gasprice"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -54,11 +57,28 @@ const (
 	overlayRaceHighTip   = 2_000_000
 )
 
+// writeHeadBlockMarkers writes the minimal subset of what InsertBlocks and
+// updateForkChoice persist for a new head — header, canonical marker, body,
+// head-header and forkchoice markers. The forkchoice marker is what
+// rpchelper.GetLatestBlockNumber resolves the head from, so reader paths under
+// test (the gas oracle, "latest" tag resolution) see this block as current.
+func writeHeadBlockMarkers(t *testing.T, tx kv.RwTx, header *types.Header, body *types.Body) {
+	t.Helper()
+	hash := header.Hash()
+	num := header.Number.Uint64()
+	require.NoError(t, rawdb.WriteHeader(tx, header))
+	require.NoError(t, rawdb.WriteHeadHeaderHash(tx, hash))
+	require.NoError(t, rawdb.WriteCanonicalHash(tx, hash, num))
+	require.NoError(t, rawdb.WriteBody(tx, hash, num, body))
+	rawdb.WriteForkchoiceHead(tx, hash)
+}
+
 type overlayAheadHarness struct {
 	base          *BaseAPI
 	m             *execmoduletester.ExecModuleTester
 	overlayHeader *types.Header
 	events        *shards.Events
+	doms          *execctx.SharedDomains
 }
 
 func newOverlayAheadTestAPI(t *testing.T) (base *BaseAPI, m *execmoduletester.ExecModuleTester, overlayHeader *types.Header) {
@@ -126,16 +146,7 @@ func newOverlayAheadHarness(t *testing.T, withOverlayTxs bool) *overlayAheadHarn
 	}
 	hash := overlayHeader.Hash()
 	overlay := doms.BlockOverlay()
-	// Minimal subset of what InsertBlocks/updateForkChoice write in production,
-	// enough for the reader paths under test to resolve this header as current.
-	require.NoError(t, rawdb.WriteHeader(overlay, overlayHeader))
-	require.NoError(t, rawdb.WriteHeadHeaderHash(overlay, hash))
-	rawdb.WriteForkchoiceHead(overlay, hash)
-	require.NoError(t, rawdb.WriteCanonicalHash(overlay, hash, overlayNumber))
-	require.NoError(t, rawdb.WriteBody(overlay, hash, overlayNumber, &types.Body{Transactions: overlayTxs}))
-	// The forkchoice marker is what rpchelper.GetLatestBlockNumber resolves the head from,
-	// so readers that go through it (the gas oracle, "latest" tag resolution) see this block.
-	rawdb.WriteForkchoiceHead(overlay, hash)
+	writeHeadBlockMarkers(t, overlay, overlayHeader, &types.Body{Transactions: overlayTxs})
 
 	if withOverlayTxs {
 		senders := make([]common.Address, len(overlayTxs))
@@ -161,7 +172,7 @@ func newOverlayAheadHarness(t *testing.T, withOverlayTxs bool) *overlayAheadHarn
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	base := newBaseApiWithFiltersForTest(filters, stateCache, m)
 
-	return &overlayAheadHarness{base: base, m: m, overlayHeader: overlayHeader, events: events}
+	return &overlayAheadHarness{base: base, m: m, overlayHeader: overlayHeader, events: events, doms: doms}
 }
 
 // overlayRaceTxPoolClient extends stubTxPoolClient with canned replies for
@@ -354,6 +365,8 @@ func TestFeeHistory_OverlayHeadWithRewards(t *testing.T) {
 // resolved when the backend was built: when the overlay is unpublished between the
 // request start and the fork (the commit window closing), the forked backend must
 // still serve the head the parent resolved instead of failing with block-not-found.
+// The SharedDomains is also closed, as production teardown does right after the
+// unpublish, so the test covers reads on a closed-but-pinned overlay.
 func TestGasPriceOracle_ForkKeepsOverlayAfterUnpublish(t *testing.T) {
 	t.Parallel()
 	h := newOverlayAheadHarness(t, false)
@@ -363,6 +376,7 @@ func TestGasPriceOracle_ForkKeepsOverlayAfterUnpublish(t *testing.T) {
 	backend := NewGasPriceOracleBackend(h.m.DB, tx, h.base)
 
 	h.events.PublishOverlay(nil)
+	h.doms.Close()
 
 	forked, cleanup, err := backend.Fork(h.m.Ctx)
 	require.NoError(t, err)
@@ -378,4 +392,169 @@ func TestGasPriceOracle_ForkKeepsOverlayAfterUnpublish(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	require.Equal(t, h.overlayHeader.Hash(), got.Hash())
+}
+
+// publishSiblingOverlay publishes a second overlay holding a same-height
+// sibling of the harness's overlay head, with a different base fee so its
+// hash and header are distinguishable from the original.
+func publishSiblingOverlay(t *testing.T, h *overlayAheadHarness) *types.Header {
+	t.Helper()
+	ctx := h.m.Ctx
+	roTx, err := h.m.DB.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	t.Cleanup(roTx.Rollback)
+	doms, err := execctx.NewSharedDomains(ctx, roTx, h.m.Log)
+	require.NoError(t, err)
+	t.Cleanup(doms.Close)
+	require.NoError(t, doms.InitBlockOverlay(roTx, h.m.Dirs.Tmp))
+
+	sibling := types.CopyHeader(h.overlayHeader)
+	sibling.BaseFee = uint256.NewInt(overlayRaceBaseFee + 1111)
+	require.NotEqual(t, h.overlayHeader.Hash(), sibling.Hash())
+
+	writeHeadBlockMarkers(t, doms.BlockOverlay(), sibling, &types.Body{})
+
+	h.events.PublishOverlay(doms)
+	return sibling
+}
+
+// TestGasPriceOracle_PinnedViewIgnoresLaterOverlayPublish pins that a backend
+// which resolved overlay A at construction keeps serving A's head even after a
+// different overlay B (a same-height sibling, as after an in-RAM reorg) is
+// published mid-request: downstream helpers must not layer the live overlay
+// over the already-pinned view.
+func TestGasPriceOracle_PinnedViewIgnoresLaterOverlayPublish(t *testing.T) {
+	t.Parallel()
+	h := newOverlayAheadHarness(t, false)
+	tx, err := h.m.DB.BeginTemporalRo(h.m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	backend := NewGasPriceOracleBackend(h.m.DB, tx, h.base)
+
+	sibling := publishSiblingOverlay(t, h)
+
+	got, err := backend.HeaderByNumber(h.m.Ctx, rpc.LatestBlockNumber)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.NotEqual(t, sibling.Hash(), got.Hash(),
+		"the pinned request must not pick up the sibling head published after it started")
+	require.Equal(t, h.overlayHeader.Hash(), got.Hash(),
+		"the pinned request must keep serving the head it resolved at construction")
+}
+
+// TestFeeHistory_DeadOverlayBlockNotServedFromCache pins that fee data computed
+// for a not-yet-committed overlay block does not outlive that block: when a
+// same-height sibling replaces it (in-RAM reorg, or the commit failing), a new
+// request must serve the sibling's fees, not a memoized result keyed only by
+// block number.
+func TestFeeHistory_DeadOverlayBlockNotServedFromCache(t *testing.T) {
+	t.Parallel()
+	h := newOverlayAheadHarness(t, false)
+	api := newEthApiForTest(h.base, h.m.DB, nil, nil)
+
+	first, err := api.FeeHistory(h.m.Ctx, 1, rpc.LatestBlockNumber, nil)
+	require.NoError(t, err)
+	require.Equal(t, h.overlayHeader.BaseFee.ToBig(), first.BaseFee[0].ToInt())
+
+	sibling := publishSiblingOverlay(t, h)
+
+	second, err := api.FeeHistory(h.m.Ctx, 1, rpc.LatestBlockNumber, nil)
+	require.NoError(t, err)
+	require.Equal(t, sibling.Number.ToBig(), second.OldestBlock.ToInt())
+	require.Equal(t, sibling.BaseFee.ToBig(), second.BaseFee[0].ToInt(),
+		"fees cached for the dead overlay block must not be served for its same-height sibling")
+}
+
+// commitOverlayBlock writes the harness's overlay head into MDBX the way the
+// background commit would (header, canonical marker, forkchoice head), so txs
+// opened afterwards resolve it as the committed head.
+func commitOverlayBlock(t *testing.T, h *overlayAheadHarness) {
+	t.Helper()
+	rwTx, err := h.m.DB.BeginRw(h.m.Ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	writeHeadBlockMarkers(t, rwTx, h.overlayHeader, &types.Body{})
+	require.NoError(t, rwTx.Commit())
+}
+
+// unpublishOnBeginDB simulates the commit window closing while a request
+// acquires its tx: the first BeginTemporalRo returns a tx whose snapshot
+// predates the commit, with the commit landing and the overlay being
+// unpublished right after the open. Later opens behave normally.
+type unpublishOnBeginDB struct {
+	kv.TemporalRoDB
+	t    *testing.T
+	h    *overlayAheadHarness
+	once sync.Once
+}
+
+func (db *unpublishOnBeginDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
+	tx, err := db.TemporalRoDB.BeginTemporalRo(ctx) //nolint:gocritic
+	if err != nil {
+		return nil, err
+	}
+	db.once.Do(func() {
+		commitOverlayBlock(db.t, db.h)
+		db.h.events.PublishOverlay(nil)
+	})
+	return tx, nil
+}
+
+// publishSiblingOnGetCache publishes the sibling overlay the first time the
+// gas price oracle consults its cache — after the request has pinned its
+// overlay, before the baseFee addend is read.
+type publishSiblingOnGetCache struct {
+	inner gasprice.Cache
+	t     *testing.T
+	h     *overlayAheadHarness
+	once  sync.Once
+}
+
+func (c *publishSiblingOnGetCache) GetLatest() (common.Hash, *uint256.Int) {
+	c.once.Do(func() { publishSiblingOverlay(c.t, c.h) })
+	return c.inner.GetLatest()
+}
+
+func (c *publishSiblingOnGetCache) SetLatest(hash common.Hash, price *uint256.Int) {
+	c.inner.SetLatest(hash, price)
+}
+
+// TestGasPrice_BaseFeeFromPinnedOverlay pins that eth_gasPrice derives its
+// baseFee addend from the same overlay the tip was sampled on: an overlay
+// published mid-request (a same-height sibling with a different base fee)
+// must not leak into the sum.
+func TestGasPrice_BaseFeeFromPinnedOverlay(t *testing.T) {
+	t.Parallel()
+	h := newOverlayAheadHarness(t, false)
+	api := newEthApiForTest(h.base, h.m.DB, nil, nil)
+
+	tip, err := api.MaxPriorityFeePerGas(h.m.Ctx)
+	require.NoError(t, err)
+
+	api.gasCache = &publishSiblingOnGetCache{inner: api.gasCache, t: t, h: h}
+
+	got, err := api.GasPrice(h.m.Ctx)
+	require.NoError(t, err)
+	want := new(big.Int).Add(tip.ToInt(), h.overlayHeader.BaseFee.ToBig())
+	require.Equal(t, want, got.ToInt(),
+		"the baseFee addend must come from the pinned overlay head, not one published mid-request")
+}
+
+// TestFeeHistory_HeadCommittedDuringTxAcquisition pins that the overlay must
+// be captured atomically with the tx: when the commit lands and the overlay is
+// unpublished between the tx open and the overlay capture, the request would
+// otherwise see neither layer and serve a head one block behind the one the
+// node already published via eth_blockNumber.
+func TestFeeHistory_HeadCommittedDuringTxAcquisition(t *testing.T) {
+	t.Parallel()
+	h := newOverlayAheadHarness(t, false)
+	db := &unpublishOnBeginDB{TemporalRoDB: h.m.DB, t: t, h: h}
+	api := newEthApiForTest(h.base, db, nil, nil)
+
+	got, err := api.FeeHistory(h.m.Ctx, 1, rpc.LatestBlockNumber, nil)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, h.overlayHeader.Number.ToBig(), got.OldestBlock.ToInt(),
+		"a commit and unpublish landing during tx acquisition must not hide the head block")
+	require.Equal(t, h.overlayHeader.BaseFee.ToBig(), got.BaseFee[0].ToInt())
 }

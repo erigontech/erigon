@@ -522,7 +522,7 @@ type APIImpl struct {
 	ethBackend                  rpchelper.ApiBackend
 	txPool                      txpoolproto.TxpoolClient
 	mining                      txpoolproto.MiningClient
-	gasCache                    *GasPriceCache
+	gasCache                    gasprice.Cache
 	feeHistoryCache             *gasprice.FeeHistoryCache
 	db                          kv.TemporalRoDB
 	GasCap                      uint64

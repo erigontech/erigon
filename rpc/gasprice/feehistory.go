@@ -345,6 +345,10 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 
 	// Pre-fetch chain config once using the main backend (safe: single goroutine).
 	chainconfig := oracle.backend.ChainConfig()
+	var cacheableUpTo uint64
+	if oracle.historyCache != nil {
+		cacheableUpTo = oracle.backend.CacheableBlockLimit()
+	}
 
 	// Launch up to maxBlockFetchers goroutines. Each goroutine opens its own
 	// TemporalTx via Fork so MDBX transactions are never shared across goroutines.
@@ -380,9 +384,13 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 				}
 				idx := int(blockNumber - oldestBlock)
 
-				// Try the LRU cache first (skip for pending blocks — they are ephemeral).
+				// Try the LRU cache first. Pending and not-yet-committed blocks are
+				// excluded from both lookup and store: their number can be re-used by
+				// a same-height sibling, so an entry keyed by number alone would keep
+				// serving the dead block's fees.
 				isPending := pendingBlock != nil && blockNumber >= pendingBlock.NumberU64()
-				if !isPending && oracle.historyCache != nil {
+				cacheable := !isPending && oracle.historyCache != nil && blockNumber <= cacheableUpTo
+				if cacheable {
 					if cached, ok := oracle.historyCache.get(cacheKey{blockNumber, percentileKey}); ok {
 						blockResults[idx] = blockResult{processed: cached, hasResult: true}
 						continue
@@ -420,7 +428,7 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 				}
 
 				blockResults[idx] = blockResult{processed: fees.results, hasResult: true}
-				if !isPending && oracle.historyCache != nil {
+				if cacheable {
 					oracle.historyCache.add(cacheKey{blockNumber, percentileKey}, fees.results)
 				}
 			}
