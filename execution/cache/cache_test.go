@@ -771,7 +771,7 @@ func TestDomainCache_PutIfAbsentAtomicWithPut(t *testing.T) {
 	}
 }
 
-func TestStateCache_UnwindReadmitsPreReorgFill(t *testing.T) {
+func TestStateCache_UnwindRejectsPreReorgFill(t *testing.T) {
 	sc, publisher := readyStateCache(t, 1)
 	key := makeAddr(1)
 	fork := makeValue(2)
