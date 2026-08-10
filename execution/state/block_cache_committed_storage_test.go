@@ -127,11 +127,11 @@ func TestBlockStateCache_CommittedStorage_ConcurrentAccess(t *testing.T) {
 
 	cache := NewBlockStateCache()
 	var wg sync.WaitGroup
-	for g := 0; g < 16; g++ {
+	for g := range 16 {
 		wg.Add(1)
 		go func(g int) {
 			defer wg.Done()
-			for i := 0; i < 2000; i++ {
+			for i := range 2000 {
 				ai := (g + i) % nAddrs
 				ki := (g*7 + i) % nKeys
 				a, k := addrList[ai], keyList[ki]
