@@ -293,6 +293,7 @@ func (cc *commitmentCalculator) loop(ctx context.Context) {
 				in = nil
 				continue
 			}
+			reqs = cc.drainBlockRequests(ctx, reqs)
 			cc.handleMessage(ctx, result)
 		case req, ok := <-reqs:
 			if !ok {
@@ -300,6 +301,27 @@ func (cc *commitmentCalculator) loop(ctx context.Context) {
 				continue
 			}
 			cc.handleBlockRequest(ctx, req)
+		}
+	}
+}
+
+// drainBlockRequests handles every request already buffered, returning nil once
+// the channel is closed. The exec loop sends blockRequest(N) before dispatching
+// the exec that produces blockResult(N), so a result in hand means its own
+// request is already buffered — draining before handling the result restores the
+// send order that select's unordered pick between two ready channels loses.
+// Otherwise handleBlockRequest's drop-guard discards that request as stale and
+// maybeComputeAhead's contiguity chain never recovers for the rest of the batch.
+func (cc *commitmentCalculator) drainBlockRequests(ctx context.Context, reqs chan *blockRequest) chan *blockRequest {
+	for {
+		select {
+		case req, ok := <-reqs:
+			if !ok {
+				return nil
+			}
+			cc.handleBlockRequest(ctx, req)
+		default:
+			return reqs
 		}
 	}
 }
@@ -453,11 +475,10 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 // BALDrivenCommitment is set, else incremental — then tries to compute the
 // block ahead of its result stream (maybeComputeAhead).
 func (cc *commitmentCalculator) handleBlockRequest(ctx context.Context, req *blockRequest) {
-	// Record the batch's first block before the drop-guard: if blockResult(n) is
-	// consumed before blockRequest(n) (the in/reqs select has no cross-channel
-	// ordering), a dropped first request must still set firstBlockNum to n rather
-	// than leave n+1 to claim it — else computeAheadGateOpen and the contiguity guard
-	// are both bypassed via n == firstBlockNum and n+1 computes ahead on a baseline missing n.
+	// Record the batch's first block before the drop-guard below: were the first
+	// request ever dropped, leaving n+1 to claim firstBlockNum would bypass
+	// computeAheadGateOpen's and the contiguity guard's n == firstBlockNum
+	// exception, letting n+1 compute ahead on a baseline missing n.
 	if !cc.hasFirstBlock {
 		cc.firstBlockNum = req.blockNum
 		cc.hasFirstBlock = true

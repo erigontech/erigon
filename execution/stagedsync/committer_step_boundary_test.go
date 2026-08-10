@@ -653,6 +653,95 @@ func TestComputeAhead_StepBoundaryCheckpointMidBlock(t *testing.T) {
 	requireBranchesConsistentWithAccounts(t, doms, tx, accountValues)
 }
 
+// TestLoop_BlockRequestBeatsSameNumberedResult pins the ordering loop() must
+// keep: blockRequest(N) is sent before the exec dispatch that produces
+// blockResult(N), so the request must always be handled first. select does not
+// preserve that across two channels, and handling the result first makes
+// handleBlockRequest drop the request as stale — after which maybeComputeAhead's
+// contiguity chain never recovers and the batch silently loses compute-ahead.
+// Both delivery orders are exercised: pre-buffered forces the two-ready-cases
+// pick every iteration, delivered-after-start forces the narrower window between
+// select's readiness poll and its park.
+func TestLoop_BlockRequestBeatsSameNumberedResult(t *testing.T) {
+	defer func(p bool) { dbg.BALDrivenCommitment = p }(dbg.BALDrivenCommitment)
+	defer func(p bool) { dbg.IgnoreBAL = p }(dbg.IgnoreBAL)
+	dbg.BALDrivenCommitment = true
+	dbg.IgnoreBAL = false
+
+	ctx := context.Background()
+	logger := log.New()
+	db, _, doms := setupStepTest(t)
+	rnd := rand.New(rand.NewSource(7))
+
+	for _, tc := range []struct {
+		name       string
+		afterStart bool
+		iterations uint64
+	}{
+		{name: "buffered before start", iterations: 200},
+		{name: "delivered after start", afterStart: true, iterations: 2_000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for i := uint64(1); i <= tc.iterations; i++ {
+				in := make(chan applyResult, 4)
+				reqs := make(chan *blockRequest, 4)
+				out := make(chan commitmentResult, 4)
+				cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1<<62, in, reqs, out)
+				require.NoError(t, err)
+				cc.hasFirstBlock = true
+				cc.firstBlockNum = i
+
+				addrBytes := make([]byte, length.Addr)
+				rnd.Read(addrBytes)
+				bal := types.BlockAccessList{{
+					Address:      accounts.InternAddress([20]byte(addrBytes)),
+					NonceChanges: []*types.NonceChange{{Index: 0, Value: 1}},
+				}}
+
+				// stateRoot is deliberately wrong: computeBlockFromBAL's root check
+				// fails either way. Reaching that check at all — vs. the request
+				// being dropped before maybeComputeAhead ever calls
+				// computeBlockFromBAL — is exactly the property under test, and
+				// require.ErrorIs below tells the two outcomes apart.
+				send := func() {
+					reqs <- &blockRequest{
+						blockNum:   i,
+						firstTxNum: i,
+						lastTxNum:  i,
+						stateRoot:  common.Hash{0xba, 0xd5, 0x00, 0x71},
+						bal:        bal,
+					}
+					in <- newTestBlockResult(i, common.Hash{0x01}, i, false)
+					close(reqs)
+					close(in)
+				}
+				if tc.afterStart {
+					cc.Start(ctx)
+					go send()
+				} else {
+					send()
+					cc.Start(ctx)
+				}
+
+				// Ranging over out blocks until loop() closes it, which only happens
+				// once in is fully drained and loop() returns — the same condition
+				// Stop() waits on, but without racing Stop()'s close(cc.done) against
+				// publish()'s own cc.out/cc.done select for a goroutine still in flight.
+				var results []commitmentResult
+				for res := range out {
+					results = append(results, res)
+				}
+				cc.Stop()
+
+				require.Len(t, results, 1,
+					"iteration %d: block %d's request was dropped by its own same-numbered result before compute-ahead could run", i, i)
+				require.ErrorIs(t, results[0].err, ErrWrongTrieRoot,
+					"iteration %d: block %d's request must be processed before its own result", i, i)
+			}
+		})
+	}
+}
+
 // feedBlock1Shadow builds a calculator, feeds block 1's n writes (seed 42) into
 // cc.state, marks the block computed-ahead with balRoots[1]=balRoot, then delivers
 // blockResult(1) with BAL_SHADOW_COMPUTE on so shadowCrossCheck recomputes the
