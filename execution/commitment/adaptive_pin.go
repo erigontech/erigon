@@ -22,6 +22,7 @@ import (
 	"maps"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/cache"
@@ -494,10 +495,13 @@ func (c *AdaptivePinController) promoteLocked(
 		if provider != nil {
 			dbBranches = provider(hash[:])
 		}
+		started := time.Now()
 		if _, _, err := p.Run(c.cfg.InitialViewBudgetBytes, dbBranches, parallelResolve, mutations, c.logger); err != nil {
+			recordPreload(started, 0)
 			mutations.entries = mutations.entries[:checkpoint]
 			return nil, err
 		}
+		recordPreload(started, p.usedBytes)
 		return &adaptiveContractState{
 			contractHash: hash,
 			parallel:     p,
@@ -507,10 +511,13 @@ func (c *AdaptivePinController) promoteLocked(
 	if err != nil {
 		return nil, err
 	}
+	started := time.Now()
 	if _, _, err := p.Run(c.cfg.InitialViewBudgetBytes, reader, mutations, c.logger); err != nil {
+		recordPreload(started, 0)
 		mutations.entries = mutations.entries[:checkpoint]
 		return nil, err
 	}
+	recordPreload(started, p.usedBytes)
 	return &adaptiveContractState{
 		contractHash: hash,
 		preload:      p,
@@ -537,11 +544,15 @@ func (c *AdaptivePinController) runExtensionLocked(
 		if provider != nil {
 			dbBranches = provider(state.contractHash[:])
 		}
+		before, started := state.parallel.usedBytes, time.Now()
 		_, _, err := state.parallel.Run(stepBudget, dbBranches, parallelResolve, mutations, c.logger)
+		recordPreload(started, state.parallel.usedBytes-before)
 		return err
 	}
 	state.preload = cloneSerialPreload(state.preload)
+	before, started := state.preload.usedBytes, time.Now()
 	_, _, err := state.preload.Run(stepBudget, reader, mutations, c.logger)
+	recordPreload(started, state.preload.usedBytes-before)
 	return err
 }
 
