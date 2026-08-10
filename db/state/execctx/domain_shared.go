@@ -242,6 +242,10 @@ type SharedDomains struct {
 	// generation or change its authoritative entries.
 	stateCache     *cache.StateCache
 	statePublisher cache.Publisher
+
+	// hasStateCache survives reader detachment so Commit still requires
+	// publication authority.
+	hasStateCache bool
 	// Unwind and Merge preserve this flag after detaching both cache readers so
 	// a later canonical Commit clears entries from the discarded state.
 	clearExecutionCaches bool
@@ -423,7 +427,7 @@ func (sd *SharedDomains) Merge(ctx context.Context, sdTxNum uint64, other *Share
 		sd.branchCache = nil
 		sd.clearExecutionCaches = true
 	}
-
+	sd.hasStateCache = sd.hasStateCache || other.hasStateCache
 	// Merge block-level metadata from other's overlay into ours by flushing
 	// other's overlay writes directly into our overlay (which implements kv.RwTx).
 	if otherOverlay, sdOverlay := other.blockOverlay.Load(), sd.blockOverlay.Load(); otherOverlay != nil && sdOverlay != nil {
@@ -850,11 +854,20 @@ func (sd *SharedDomains) Logger() log.Logger { return sd.logger }
 //
 // This restricted capability is safe for speculative execution: its writes
 // may be discarded, and its local unwind only detaches the reader. It cannot
-// change the canonical cache observed by other transactions.
+// change the canonical cache observed by other transactions. Commit rejects
+// this capability until SetCanonicalCaches grants publication authority.
 func (sd *SharedDomains) SetStateCacheReader(stateCache *cache.StateCache) {
 	if !dbg.UseStateCache || stateCache == nil {
 		return
 	}
+	sd.setStateCacheReader(stateCache)
+}
+
+func (sd *SharedDomains) setStateCacheReader(stateCache *cache.StateCache) {
+	if stateCache == nil {
+		return
+	}
+	sd.hasStateCache = true
 	if !sd.clearExecutionCaches {
 		sd.stateCache = stateCache
 	}
@@ -878,6 +891,9 @@ func (sd *SharedDomains) SetCanonicalCaches(stateCache *cache.StateCache) {
 }
 
 func (sd *SharedDomains) setCanonicalCaches(stateCache *cache.StateCache) {
+	if stateCache != nil {
+		sd.hasStateCache = true
+	}
 	if !sd.baseStateVersionKnown {
 		return
 	}
@@ -888,9 +904,7 @@ func (sd *SharedDomains) setCanonicalCaches(stateCache *cache.StateCache) {
 	if stateCache == nil {
 		return
 	}
-	if !sd.clearExecutionCaches {
-		sd.stateCache = stateCache
-	}
+	sd.setStateCacheReader(stateCache)
 	sd.statePublisher = stateCache.Publisher()
 	sd.statePublisher.Initialize(sd.baseCacheGenerations.state)
 }
@@ -1041,11 +1055,17 @@ func (sd *SharedDomains) flushMem(ctx context.Context, tx kv.RwTx, opts ...kv.Fl
 // Commit flushes and commits tx before publishing either process-global cache.
 // Cache views are revoked only around the database commit, so they continue to
 // serve the old durable version while the in-memory batch is being flushed.
-// A SharedDomains with a shared BranchCache must call SetCanonicalCaches before Commit.
+// A SharedDomains attached to either process-global cache must call
+// SetCanonicalCaches before Commit.
 // tx must be dedicated to this operation because Commit consumes it.
 func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...func(tx kv.RwTx) error) error {
 	defer mxFlushTook.ObserveDuration(time.Now())
-	if sd.hasSharedBranchCache && !sd.branchPublisher.Enabled() {
+	stateCacheEnabled := sd.statePublisher.Enabled()
+	branchCacheEnabled := sd.branchPublisher.Enabled()
+	if sd.hasStateCache && !stateCacheEnabled {
+		return errors.New("SharedDomains.Commit requires SetCanonicalCaches when a StateCache has been attached")
+	}
+	if sd.hasSharedBranchCache && !branchCacheEnabled {
 		return errors.New("SharedDomains.Commit requires SetCanonicalCaches when a shared BranchCache is attached")
 	}
 
@@ -1061,8 +1081,6 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 		return nil
 	}
 
-	stateCacheEnabled := sd.statePublisher.Enabled()
-	branchCacheEnabled := sd.branchPublisher.Enabled()
 	if !stateCacheEnabled && !branchCacheEnabled && sd.codeStore == nil {
 		if err := sd.flushMem(ctx, tx); err != nil {
 			return err

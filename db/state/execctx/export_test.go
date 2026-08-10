@@ -20,9 +20,7 @@ func (sd *SharedDomains) SetCanonicalCachesForTest(sc *cache.StateCache) {
 }
 
 func (sd *SharedDomains) SetStateCacheReaderForTest(sc *cache.StateCache) {
-	if !sd.clearExecutionCaches {
-		sd.stateCache = sc
-	}
+	sd.setStateCacheReader(sc)
 }
 
 func (sd *SharedDomains) CachePublishersEnabledForTest() (state, branch bool) {

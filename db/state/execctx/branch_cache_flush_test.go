@@ -101,6 +101,69 @@ func TestCommitRequiresCanonicalCacheBinding(t *testing.T) {
 	require.ErrorContains(t, err, "SetCanonicalCaches")
 }
 
+func TestCommitRequiresCanonicalStateCacheBinding(t *testing.T) {
+	ctx := t.Context()
+	db := newTestDb(t, 100)
+	tx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	sd, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutSharedBranchCache())
+	require.NoError(t, err)
+	defer sd.Close()
+
+	stateCache := newSmallStateCache()
+	t.Cleanup(stateCache.Close)
+	sd.SetStateCacheReaderForTest(stateCache)
+
+	err = sd.Commit(ctx, tx)
+	require.ErrorContains(t, err, "SetCanonicalCaches")
+}
+
+func TestCommitRequiresCanonicalStateCacheBindingAfterUnwind(t *testing.T) {
+	ctx := t.Context()
+	db := newTestDb(t, 100)
+	tx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	sd, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutSharedBranchCache())
+	require.NoError(t, err)
+	defer sd.Close()
+
+	stateCache := newSmallStateCache()
+	t.Cleanup(stateCache.Close)
+	sd.SetStateCacheReaderForTest(stateCache)
+	sd.Unwind(0, nil)
+
+	err = sd.Commit(ctx, tx)
+	require.ErrorContains(t, err, "SetCanonicalCaches")
+}
+
+func TestCommitRequiresCanonicalStateCacheBindingAfterMerge(t *testing.T) {
+	ctx := t.Context()
+	db := newTestDb(t, 100)
+	tx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	parent, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutSharedBranchCache())
+	require.NoError(t, err)
+	defer parent.Close()
+	child, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutSharedBranchCache())
+	require.NoError(t, err)
+	defer child.Close()
+
+	stateCache := newSmallStateCache()
+	t.Cleanup(stateCache.Close)
+	child.SetStateCacheReaderForTest(stateCache)
+	child.Unwind(0, nil)
+	require.NoError(t, parent.Merge(ctx, 0, child, 0))
+
+	err = parent.Commit(ctx, tx)
+	require.ErrorContains(t, err, "SetCanonicalCaches")
+}
+
 func TestCommitDoesNotHoldCachePublicationDuringDatabaseCommit(t *testing.T) {
 	ctx := t.Context()
 	db := newTestDb(t, 100)
