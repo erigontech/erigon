@@ -44,6 +44,49 @@ func branchGenerationForTx(t *testing.T, tx kv.TemporalTx) cache.Generation {
 	return cache.BranchGeneration(stateVersion, tx.Debug().TxNumsInFiles(kv.CommitmentDomain))
 }
 
+func TestCanonicalCachePublicationRequiresExplicitBinding(t *testing.T) {
+	ctx := t.Context()
+	db := newTestDb(t, 100)
+	tx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	sd, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+
+	statePublisher, branchPublisher := sd.CachePublishersEnabledForTest()
+	require.False(t, statePublisher)
+	require.False(t, branchPublisher, "construction must not grant authority to publish the process-global branch cache")
+
+	sd.SetCanonicalCaches(nil)
+	statePublisher, branchPublisher = sd.CachePublishersEnabledForTest()
+	require.False(t, statePublisher)
+	require.True(t, branchPublisher, "canonical binding must grant branch publication authority without requiring StateCache")
+
+	stateCache := newSmallStateCache()
+	t.Cleanup(stateCache.Close)
+	sd.SetCanonicalCachesForTest(stateCache)
+	statePublisher, branchPublisher = sd.CachePublishersEnabledForTest()
+	require.True(t, statePublisher)
+	require.True(t, branchPublisher)
+}
+
+func TestCommitRequiresCanonicalCacheBinding(t *testing.T) {
+	ctx := t.Context()
+	db := newTestDb(t, 100)
+	tx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	sd, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+
+	err = sd.Commit(ctx, tx)
+	require.ErrorContains(t, err, "SetCanonicalCaches")
+}
+
 // Flush changes only the write transaction. The retained memory batch must
 // continue to shadow the still-published durable cache for existing getters.
 func TestBareFlushRetainsMemoryAsAuthorityOverCacheViews(t *testing.T) {
@@ -69,7 +112,7 @@ func TestBareFlushRetainsMemoryAsAuthorityOverCacheViews(t *testing.T) {
 			defer seedTx.Rollback()
 			seedDomains, err := execctx.NewSharedDomains(ctx, seedTx, log.New())
 			require.NoError(t, err)
-			seedDomains.SetStateCacheForTest(stateCache)
+			seedDomains.SetCanonicalCachesForTest(stateCache)
 			seedDomains.SetTxNum(1)
 			require.NoError(t, seedDomains.DomainPut(tc.domain, seedTx, tc.key, tc.old, 1, nil))
 			require.NoError(t, seedDomains.Commit(ctx, seedTx))
@@ -81,7 +124,7 @@ func TestBareFlushRetainsMemoryAsAuthorityOverCacheViews(t *testing.T) {
 			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 			require.NoError(t, err)
 			defer domains.Close()
-			domains.SetStateCacheForTest(stateCache)
+			domains.SetCanonicalCachesForTest(stateCache)
 
 			getter := domains.AsGetter(rwTx)
 			got, _, err := getter.GetLatest(tc.domain, tc.key)
@@ -146,6 +189,7 @@ func TestBranchCacheCommitRefreshesAfterReadThrough(t *testing.T) {
 		sd, err := execctx.NewSharedDomains(ctx, rwTx, logger)
 		require.NoError(t, err)
 		defer sd.Close()
+		sd.SetCanonicalCaches(nil)
 
 		if readFirst {
 			got, _, err := sd.GetLatest(kv.CommitmentDomain, rwTx, key)
@@ -218,6 +262,7 @@ func TestCanonicalUnwindClearsBranchCacheOnlyAfterCommit(t *testing.T) {
 	defer seedTx.Rollback()
 	seedSD, err := execctx.NewSharedDomains(ctx, seedTx, logger)
 	require.NoError(t, err)
+	seedSD.SetCanonicalCaches(nil)
 	require.NoError(t, seedSD.DomainPut(kv.CommitmentDomain, seedTx, key, []byte("durable"), 1, nil))
 	require.NoError(t, seedSD.Commit(ctx, seedTx))
 	seedSD.Close()
@@ -228,6 +273,7 @@ func TestCanonicalUnwindClearsBranchCacheOnlyAfterCommit(t *testing.T) {
 	unwindSD, err := execctx.NewSharedDomains(ctx, unwindTx, logger)
 	require.NoError(t, err)
 	defer unwindSD.Close()
+	unwindSD.SetCanonicalCaches(nil)
 
 	provider, ok := unwindTx.AggTx().(commitment.BranchCacheProvider)
 	require.True(t, ok)
@@ -263,6 +309,7 @@ func TestFailedCommitRestoresBranchCacheGeneration(t *testing.T) {
 	defer seedTx.Rollback()
 	seedSD, err := execctx.NewSharedDomains(ctx, seedTx, logger)
 	require.NoError(t, err)
+	seedSD.SetCanonicalCaches(nil)
 	require.NoError(t, seedSD.Commit(ctx, seedTx))
 	seedSD.Close()
 
@@ -272,6 +319,7 @@ func TestFailedCommitRestoresBranchCacheGeneration(t *testing.T) {
 	sd, err := execctx.NewSharedDomains(ctx, rwTx, logger)
 	require.NoError(t, err)
 	defer sd.Close()
+	sd.SetCanonicalCaches(nil)
 
 	provider, ok := rwTx.AggTx().(commitment.BranchCacheProvider)
 	require.True(t, ok)

@@ -262,6 +262,7 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec.Exe
 			return err
 		}
 		defer doms.Close()
+		doms.SetCanonicalCaches(nil)
 
 		if err := customTraceBatch(ctx, produce, cfg, tx, doms, fromBlock, toBlock, logPrefix, logger); err != nil {
 			return err

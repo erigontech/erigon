@@ -214,6 +214,7 @@ func execOneBatch(ctx context.Context, emt *ExecModuleTester, cfg stagedsync.Exe
 	}
 	defer doms.Close()
 	doms.SetInMemHistoryReads(false)
+	doms.SetCanonicalCaches(nil)
 
 	s, err := emt.Sync.StageState(stages.Execution, tx, true, false)
 	if err != nil {
@@ -350,6 +351,7 @@ func TestExec_RestoresCommitmentStateReader(t *testing.T) {
 	require.NoError(t, err)
 	defer doms.Close()
 	doms.SetInMemHistoryReads(false)
+	doms.SetCanonicalCaches(nil)
 
 	readerBefore := doms.GetCommitmentContext().StateReader()
 

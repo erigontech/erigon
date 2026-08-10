@@ -33,7 +33,7 @@ func TestCodeHashForAddr_InBatchAccountWinsOverStaleLRU(t *testing.T) {
 	defer sd.Close()
 
 	sc := cache.NewDefaultStateCache()
-	sd.SetStateCacheForTest(sc) // force-enable regardless of USE_STATE_CACHE
+	sd.SetCanonicalCachesForTest(sc) // force-enable regardless of USE_STATE_CACHE
 
 	var addr common.Address
 	addr[0] = 0xab
@@ -94,7 +94,7 @@ func TestCodeHashForAddr_CacheSourcedRecordSeedsMapping(t *testing.T) {
 	seedSD, err := execctx.NewSharedDomains(ctx, seedTx, log.New())
 	require.NoError(t, err)
 	defer seedSD.Close()
-	seedSD.SetStateCacheForTest(sc)
+	seedSD.SetCanonicalCachesForTest(sc)
 	seedSD.SetTxNum(10)
 	require.NoError(t, seedSD.DomainPut(kv.AccountsDomain, seedTx, addr[:], accounts.SerialiseV3(&acc), 10, nil))
 	require.NoError(t, seedSD.Commit(ctx, seedTx))
@@ -111,7 +111,7 @@ func TestCodeHashForAddr_CacheSourcedRecordSeedsMapping(t *testing.T) {
 	sd, err := execctx.NewSharedDomains(ctx, roTx, log.New())
 	require.NoError(t, err)
 	defer sd.Close()
-	sd.SetStateCacheForTest(sc)
+	sd.SetCanonicalCachesForTest(sc)
 
 	got := sd.CodeHashForAddr(roTx, addr[:], 20)
 	require.Equal(t, codeHash[:], got)
@@ -143,6 +143,7 @@ func TestCodeHashForAddr_ViewSourcedRecordSeedsMapping(t *testing.T) {
 	seedSD, err := execctx.NewSharedDomains(ctx, seedTx, log.New())
 	require.NoError(t, err)
 	defer seedSD.Close()
+	seedSD.SetCanonicalCaches(nil)
 	seedSD.SetTxNum(10)
 	require.NoError(t, seedSD.DomainPut(kv.AccountsDomain, seedTx, addr[:], accounts.SerialiseV3(&acc), 10, nil))
 	require.NoError(t, seedSD.Commit(ctx, seedTx))
@@ -157,7 +158,7 @@ func TestCodeHashForAddr_ViewSourcedRecordSeedsMapping(t *testing.T) {
 	sd, err := execctx.NewSharedDomains(ctx, roTx, log.New())
 	require.NoError(t, err)
 	defer sd.Close()
-	sd.SetStateCacheForTest(sc)
+	sd.SetCanonicalCachesForTest(sc)
 
 	got := sd.CodeHashForAddr(roTx, addr[:], 20)
 	require.Equal(t, codeHash[:], got)

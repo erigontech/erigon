@@ -58,7 +58,7 @@ func twoStepRows(t *testing.T, db kv.TemporalRwDB, sc *cache.StateCache) (key, v
 	sd, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 	require.NoError(t, err)
 	defer sd.Close()
-	sd.SetStateCacheForTest(sc)
+	sd.SetCanonicalCachesForTest(sc)
 
 	sd.SetTxNum(5)
 	require.NoError(t, sd.DomainPut(kv.AccountsDomain, rwTx, key, v1, 5, nil))
@@ -119,7 +119,7 @@ func TestAssertStateCache_NoFalsePanicDuringInFlightUnwind(t *testing.T) {
 	sd, err := execctx.NewSharedDomains(ctx, roTx, log.New())
 	require.NoError(t, err)
 	defer sd.Close()
-	sd.SetStateCacheForTest(sc)
+	sd.SetCanonicalCachesForTest(sc)
 
 	sd.Unwind(10, &diffs)
 
@@ -159,6 +159,7 @@ func TestAssertStateCache_NoFalsePanicDuringInFlightUnwindStepZero(t *testing.T)
 	sd, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 	require.NoError(t, err)
 	defer sd.Close()
+	sd.SetCanonicalCachesForTest(sc)
 	sd.SetTxNum(5)
 	require.NoError(t, sd.DomainPut(kv.AccountsDomain, rwTx, key, v1, 5, nil))
 	require.NoError(t, sd.Commit(ctx, rwTx))
@@ -174,7 +175,7 @@ func TestAssertStateCache_NoFalsePanicDuringInFlightUnwindStepZero(t *testing.T)
 	sd2, err := execctx.NewSharedDomains(ctx, roTx, log.New())
 	require.NoError(t, err)
 	defer sd2.Close()
-	sd2.SetStateCacheForTest(sc)
+	sd2.SetCanonicalCachesForTest(sc)
 
 	sd2.Unwind(3, &diffs)
 
@@ -212,7 +213,7 @@ func TestReadFill_UnwindDetachesWithoutRevokingStateCache(t *testing.T) {
 	sd, err := execctx.NewSharedDomains(ctx, roTx, log.New())
 	require.NoError(t, err)
 	defer sd.Close()
-	sd.SetStateCacheForTest(sc)
+	sd.SetCanonicalCachesForTest(sc)
 	sd.Unwind(10, &diffs)
 
 	got, _, err := sd.GetLatest(kv.AccountsDomain, roTx, key)
@@ -248,7 +249,7 @@ func TestCodeHashFill_UnwindDetachesWithoutRevokingStateCache(t *testing.T) {
 	sd, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 	require.NoError(t, err)
 	defer sd.Close()
-	sd.SetStateCacheForTest(sc)
+	sd.SetCanonicalCachesForTest(sc)
 	sd.SetTxNum(20)
 	require.NoError(t, sd.DomainPut(kv.AccountsDomain, rwTx, key, value, 20, nil))
 	require.NoError(t, sd.Commit(ctx, rwTx))
@@ -270,7 +271,7 @@ func TestCodeHashFill_UnwindDetachesWithoutRevokingStateCache(t *testing.T) {
 	sd2, err := execctx.NewSharedDomains(ctx, roTx, log.New())
 	require.NoError(t, err)
 	defer sd2.Close()
-	sd2.SetStateCacheForTest(sc)
+	sd2.SetCanonicalCachesForTest(sc)
 	sd2.Unwind(10, &diffs)
 
 	got := sd2.CodeHashForAddr(roTx, key, 20)

@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
@@ -180,7 +181,7 @@ func (pe *PipelineExecutor) RunLoop(ctx context.Context, sd *execctx.SharedDomai
 // ProcessFrozenBlocks runs the pipeline over snapshot blocks at startup.
 // It downloads block files, then executes them in a hasMore loop until
 // all frozen blocks are processed.
-func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stageloop.Hook, onlySnapDownload bool) error {
+func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stageloop.Hook, onlySnapDownload bool, stateCache *cache.StateCache) error {
 	sawZeroBlocksTimes := 0
 	tx, err := pe.db.BeginTemporalRw(ctx)
 	if err != nil {
@@ -209,6 +210,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 	}
 	defer func() { doms.Close() }() // RunLoop rotates doms; close whichever is current at exit
 	doms.SetInMemHistoryReads(inMemHistoryReads)
+	doms.SetCanonicalCaches(stateCache)
 
 	var finishStageBeforeSync uint64
 	if hook != nil {
@@ -252,6 +254,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 				return nil, nil, err
 			}
 			newSD.SetInMemHistoryReads(inMemHistoryReads)
+			newSD.SetCanonicalCaches(stateCache)
 			hook.NotifySyncState(newTx)
 			return newTx, newSD, nil
 		},

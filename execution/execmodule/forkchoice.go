@@ -399,7 +399,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		currentContext.SetInMemHistoryReads(inMemHistoryReads)
 		// Canonical execution both reads the process-global state cache and owns
 		// publication when Commit makes the overlay durable.
-		currentContext.SetCanonicalStateCache(e.stateCache)
+		currentContext.SetCanonicalCaches(e.stateCache)
 		currentContext.SetCodeStore(e.codeStore)
 	}
 
@@ -585,7 +585,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				return nil, nil, fmt.Errorf("updateForkChoice: new sd after hasMore: %w", err)
 			}
 			freshSD.SetInMemHistoryReads(inMemHistoryReads)
-			freshSD.SetCanonicalStateCache(e.stateCache)
+			freshSD.SetCanonicalCaches(e.stateCache)
 			freshSD.SetCodeStore(e.codeStore)
 			if err := freshSD.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
 				roTx.Rollback()

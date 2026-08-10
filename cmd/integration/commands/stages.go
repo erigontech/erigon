@@ -714,6 +714,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			return err
 		}
 		defer doms.Close()
+		doms.SetCanonicalCaches(nil)
 		if err := stagedsync.UnwindExecutionStage(u, s, doms, tx, ctx, cfg, logger); err != nil {
 			return err
 		}
@@ -844,7 +845,7 @@ func execBlocksBatch(ctx context.Context, db kv.TemporalRwDB, st *stagedsync.Syn
 	}
 	defer doms.Close()
 	doms.SetInMemHistoryReads(false)
-	doms.SetCanonicalStateCache(stateCache)
+	doms.SetCanonicalCaches(stateCache)
 	doms.SetCodeStore(codeStore)
 	execctx.BindStateCacheToAggregator(db, stateCache)
 

@@ -663,7 +663,7 @@ func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 	}
 	defer e.semaphore.Release(1)
 
-	if err := e.pipelineExecutor.ProcessFrozenBlocks(ctx, hook, e.onlySnapDownloadOnStart); err != nil {
+	if err := e.pipelineExecutor.ProcessFrozenBlocks(ctx, hook, e.onlySnapDownloadOnStart, e.stateCache); err != nil {
 		if !errors.Is(err, context.Canceled) {
 			e.logger.Error("Could not start execution service", "err", err)
 		}

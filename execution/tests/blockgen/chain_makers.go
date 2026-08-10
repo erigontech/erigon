@@ -368,6 +368,7 @@ func InitPraguePreDeploys(db kv.TemporalRwDB, config *chain.Config, logger log.L
 		return err
 	}
 	defer domains.Close()
+	domains.SetCanonicalCaches(nil)
 	latestTxNum, _, err := domains.SeekCommitment(ctx, tx)
 	if err != nil {
 		return err

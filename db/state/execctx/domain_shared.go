@@ -216,6 +216,7 @@ type SharedDomains struct {
 	baseStateVersion      uint64
 	baseCacheGenerations  cacheGenerations
 	baseStateVersionKnown bool
+	hasSharedBranchCache  bool
 
 	txNum       uint64
 	currentStep kv.Step
@@ -338,9 +339,9 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 		branchCache = p.BranchCache()
 	}
 	sd.branchCache = branchCache
+	sd.hasSharedBranchCache = branchCache != nil
 	if branchCache != nil {
 		forbidVisibilityLowering(tx.AggTx())
-		sd.branchPublisher = branchCache.Publisher()
 	}
 	if p, ok := tx.AggTx().(kvmetrics.MetricsCollectorProvider); ok {
 		sd.collector = p.MetricsCollector()
@@ -859,18 +860,32 @@ func (sd *SharedDomains) SetStateCacheReader(stateCache *cache.StateCache) {
 	}
 }
 
-// SetCanonicalStateCache attaches the same reader and also grants publication
-// authority. Use it only for a SharedDomains whose Commit makes state durable:
-// Commit may revoke existing views, apply the committed cache updates, and
-// publish the resulting database and files generation. A canonical unwind may
-// additionally clear all entries before publishing its rewound state.
+// SetCanonicalCaches grants publication authority for the aggregator-owned
+// BranchCache and the optional StateCache. Call it after construction only for
+// a SharedDomains whose Commit makes state durable. Commit may revoke existing
+// views, apply committed updates, and publish the resulting database and files
+// generation. A canonical unwind may additionally clear both caches.
 //
-// Initialize binds the process-global cache to this SharedDomains' base
-// database and files snapshot. Keeping this authority separate from
+// Initialization binds each available process-global cache to this SharedDomains' base
+// database and files snapshot. Keeping publication authority separate from
 // SetStateCacheReader prevents speculative rollback or unwind from changing
 // globally visible cache state.
-func (sd *SharedDomains) SetCanonicalStateCache(stateCache *cache.StateCache) {
-	if !dbg.UseStateCache || stateCache == nil || !sd.baseStateVersionKnown {
+func (sd *SharedDomains) SetCanonicalCaches(stateCache *cache.StateCache) {
+	if !dbg.UseStateCache {
+		stateCache = nil
+	}
+	sd.setCanonicalCaches(stateCache)
+}
+
+func (sd *SharedDomains) setCanonicalCaches(stateCache *cache.StateCache) {
+	if !sd.baseStateVersionKnown {
+		return
+	}
+	if sd.branchCache != nil {
+		sd.branchPublisher = sd.branchCache.Publisher()
+		sd.branchPublisher.Initialize(sd.baseCacheGenerations.branch)
+	}
+	if stateCache == nil {
 		return
 	}
 	if !sd.clearExecutionCaches {
@@ -1026,9 +1041,13 @@ func (sd *SharedDomains) flushMem(ctx context.Context, tx kv.RwTx, opts ...kv.Fl
 // Commit flushes and commits tx before publishing either process-global cache.
 // Cache views are revoked only around the database commit, so they continue to
 // serve the old durable version while the in-memory batch is being flushed.
+// A SharedDomains with a shared BranchCache must call SetCanonicalCaches before Commit.
 // tx must be dedicated to this operation because Commit consumes it.
 func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...func(tx kv.RwTx) error) error {
 	defer mxFlushTook.ObserveDuration(time.Now())
+	if sd.hasSharedBranchCache && !sd.branchPublisher.Enabled() {
+		return errors.New("SharedDomains.Commit requires SetCanonicalCaches when a shared BranchCache is attached")
+	}
 
 	runValidate := func() error {
 		for _, v := range validate {

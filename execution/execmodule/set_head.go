@@ -104,7 +104,7 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	defer sd.Close()
 
 	// This path owns the canonical cache publication performed by Commit.
-	sd.SetCanonicalStateCache(e.stateCache)
+	sd.SetCanonicalCaches(e.stateCache)
 	sd.SetCodeStore(e.codeStore)
 
 	// Set the unwind point and run the unwind

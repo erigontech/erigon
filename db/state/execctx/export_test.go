@@ -12,21 +12,19 @@ func (sd *SharedDomains) CodeHashForAddr(tx kv.TemporalTx, addr []byte, txNum ui
 	return sd.codeHashForAddr(tx, sd.cacheViewsFor(tx).state, addr)
 }
 
-// SetStateCacheForTest attaches canonical cache capability without the
-// USE_STATE_CACHE gate used by SetCanonicalStateCache and SetStateCacheReader.
+// SetCanonicalCachesForTest attaches canonical cache capability without the
+// USE_STATE_CACHE gate used by SetCanonicalCaches and SetStateCacheReader.
 // It avoids changing the process-wide flag in parallel tests.
-func (sd *SharedDomains) SetStateCacheForTest(sc *cache.StateCache) {
-	if !sd.clearExecutionCaches {
-		sd.stateCache = sc
-	}
-	if sd.baseStateVersionKnown {
-		sd.statePublisher = sc.Publisher()
-		sd.statePublisher.Initialize(sd.baseCacheGenerations.state)
-	}
+func (sd *SharedDomains) SetCanonicalCachesForTest(sc *cache.StateCache) {
+	sd.setCanonicalCaches(sc)
 }
 
 func (sd *SharedDomains) SetStateCacheReaderForTest(sc *cache.StateCache) {
 	if !sd.clearExecutionCaches {
 		sd.stateCache = sc
 	}
+}
+
+func (sd *SharedDomains) CachePublishersEnabledForTest() (state, branch bool) {
+	return sd.statePublisher.Enabled(), sd.branchPublisher.Enabled()
 }

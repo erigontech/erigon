@@ -53,6 +53,7 @@ func TestCommitExecUnwindDoesNotRepublishDiscardedBranches(t *testing.T) {
 	defer seedTx.Rollback()
 	seedDomains, err := execctx.NewSharedDomains(ctx, seedTx, logger)
 	require.NoError(t, err)
+	seedDomains.SetCanonicalCaches(nil)
 	require.NoError(t, seedDomains.Commit(ctx, seedTx))
 	seedDomains.Close()
 
@@ -61,6 +62,7 @@ func TestCommitExecUnwindDoesNotRepublishDiscardedBranches(t *testing.T) {
 	defer unwindTx.Rollback()
 	unwindDomains, err := execctx.NewSharedDomains(ctx, unwindTx, logger)
 	require.NoError(t, err)
+	unwindDomains.SetCanonicalCaches(nil)
 
 	provider, ok := unwindTx.AggTx().(commitment.BranchCacheProvider)
 	require.True(t, ok)
@@ -82,6 +84,7 @@ func TestCommitExecUnwindDoesNotRepublishDiscardedBranches(t *testing.T) {
 	defer nextTx.Rollback()
 	nextDomains, err := execctx.NewSharedDomains(ctx, nextTx, logger)
 	require.NoError(t, err)
+	nextDomains.SetCanonicalCaches(nil)
 	require.NoError(t, nextDomains.Commit(ctx, nextTx))
 	nextDomains.Close()
 

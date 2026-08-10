@@ -41,6 +41,7 @@ func benchSeedDb(b *testing.B) kv.TemporalRwDB {
 	sd, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 	require.NoError(b, err)
 	defer sd.Close()
+	sd.SetCanonicalCaches(nil)
 	written := make([]byte, 20)
 	written[0] = 0x01
 	sd.SetTxNum(100)
@@ -69,7 +70,7 @@ func benchColdNegativeReads(b *testing.B, withCache, writable bool) {
 	if withCache {
 		stateCache := newSmallStateCache()
 		defer stateCache.Close()
-		sd.SetStateCacheForTest(stateCache)
+		sd.SetCanonicalCachesForTest(stateCache)
 	}
 
 	key := make([]byte, 20)
@@ -113,7 +114,7 @@ func benchmarkCacheGetterConstruction(b *testing.B, resolveVisibleEnds bool) {
 	defer sd.Close()
 	stateCache := newSmallStateCache()
 	defer stateCache.Close()
-	sd.SetStateCacheForTest(stateCache)
+	sd.SetCanonicalCachesForTest(stateCache)
 
 	domains := [...]kv.Domain{
 		kv.AccountsDomain,
