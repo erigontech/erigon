@@ -12,10 +12,9 @@ func (sd *SharedDomains) CodeHashForAddr(tx kv.TemporalTx, addr []byte, txNum ui
 	return sd.codeHashForAddr(tx, sd.cacheViewsFor(tx).state, addr)
 }
 
-// SetStateCacheForTest attaches a cache unconditionally, bypassing the
-// USE_STATE_CACHE env gate that SetStateCache honors. Cache-behavior tests use
-// it so they always exercise the cache instead of skipping when the env is off
-// — without mutating the process-global flag (which would race t.Parallel tests).
+// SetStateCacheForTest attaches canonical cache capability without the
+// USE_STATE_CACHE gate used by SetCanonicalStateCache and SetStateCacheReader.
+// It avoids changing the process-wide flag in parallel tests.
 func (sd *SharedDomains) SetStateCacheForTest(sc *cache.StateCache) {
 	if !sd.clearExecutionCaches {
 		sd.stateCache = sc

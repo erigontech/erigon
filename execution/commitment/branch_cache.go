@@ -119,26 +119,24 @@ type BranchCache struct {
 	onMiss atomic.Pointer[MissCallback]
 
 	// last-published pinned counter snapshots — PublishMetrics emits the delta
-	// since the previous publish so the Prometheus counters track per-Flush
+	// since the previous publish so the Prometheus counters track per-publication
 	// activity, not snapshot absolutes.
 	lastPublishedPinnedHits   atomic.Uint64
 	lastPublishedPinnedMisses atomic.Uint64
 
-	// putStripes serialize writes to one prefix and fence Clear while
-	// preserving parallel writes to unrelated prefixes.
+	// putStripes serialize Put and PinEntry for one prefix and fence a full clear
+	// while preserving parallel inserts for unrelated prefixes.
 	putStripes [256]sync.Mutex
 }
 
 type branchCacheEntry struct {
-	// data is the canonical encoded form (with the leading 2-byte touch-map
-	// prefix). Always populated by Put.
+	// data owns the canonical encoded form, including the leading two-byte
+	// touch-map prefix.
 	data []byte
 
-	// step is the on-disk file step the cached bytes came from. Returned
-	// by Get so callers (e.g. CheckDataAvailable) can validate against
-	// the latest visible step. 0 means "step not tracked" — fine for
-	// in-memory tests but real callers should always pass the step
-	// returned by aggTx.MeteredGetLatest / tx.GetLatest.
+	// step is the source step returned with a cache hit. It may come from MDBX,
+	// a committed update, or a file read. Zero can mean either step zero or that
+	// no single source step was available.
 	step uint64
 }
 
@@ -649,8 +647,7 @@ func (c *BranchCache) store(prefix []byte, entry *branchCacheEntry) {
 
 // PinEntry inserts or replaces a pinned cache entry for prefix in its contract's
 // storage trunk (allocated on demand). Data is copied; safe to mutate the input
-// after the call. The adaptive controller calls it only inside a publication.
-// Non-storage prefixes (< 64 nibbles) fall through to the tail.
+// after the call. Non-storage prefixes (< 64 nibbles) fall through to the tail.
 func (c *BranchCache) PinEntry(prefix []byte, data []byte, step uint64) {
 	if isCommitmentStateKey(prefix) {
 		return
@@ -686,10 +683,9 @@ func (c *BranchCache) PinnedCount() int {
 	return int(c.pinnedEntries.Load())
 }
 
-// Get retrieves branch data from the cache. Returns the canonical encoded
-// bytes (with the leading 2-byte touch-map prefix) plus the on-disk file
-// step the bytes came from (0 if not tracked). Shared database readers use
-// BranchReadView.Get so the result is checked against their full generation.
+// Get retrieves canonical encoded branch data, including its two-byte touch-map
+// prefix, and its source step. Shared database readers use BranchReadView.Get so
+// the result is checked against their full generation.
 func (c *BranchCache) Get(prefix []byte) ([]byte, uint64, bool) {
 	if isCommitmentStateKey(prefix) {
 		return nil, 0, false
@@ -748,7 +744,7 @@ func (c *BranchCache) Invalidate(prefix []byte) {
 }
 
 // clear empties the root, trunk, pinned, and tail tiers and resets their stats.
-// It holds every writer stripe so a write cannot cross the clear.
+// It holds every put stripe so no Put or PinEntry can cross the clear.
 func (c *BranchCache) clear() {
 	c.lockAllPutStripes()
 	defer c.unlockAllPutStripes()

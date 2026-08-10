@@ -26,7 +26,8 @@ type BranchReadView struct {
 	generation cache.GenerationView
 }
 
-// View returns an inert handle unless generation is currently published.
+// View returns an inert handle unless the requested generation is currently
+// published.
 func (c *BranchCache) View(generation cache.Generation) BranchReadView {
 	if c == nil {
 		return BranchReadView{}
@@ -60,8 +61,9 @@ func (v BranchReadView) Fill(prefix, value []byte, step uint64) {
 	})
 }
 
-// BranchUpdate is one committed commitment-domain value. TxNum records process
-// write coverage for detecting files downloaded outside this publication path.
+// BranchUpdate is one committed commitment-domain value. Step is returned with
+// cache hits for bounded reads. TxNum records process write coverage for
+// detecting files downloaded outside this publication path.
 type BranchUpdate struct {
 	Key   []byte
 	Value []byte

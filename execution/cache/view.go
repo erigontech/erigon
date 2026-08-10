@@ -25,15 +25,16 @@ import "github.com/erigontech/erigon/db/kv"
 //
 // Fills check the same token while holding the cache admission lock. A value
 // read from an old database snapshot therefore cannot enter a newer cache
-// generation. The zero value is inert and safely falls back to the database.
+// generation. The zero value is inert and makes callers fall back to the
+// database.
 type ReadView struct {
 	c          *StateCache
 	generation GenerationView
 }
 
-// View returns a live handle only when the cache currently represents
-// generation and no publication is in progress. Callers must derive it from
-// their own pinned transaction. A mismatch returns an inert view.
+// View returns a live handle only when the cache currently represents the
+// requested generation and no publication is in progress. Callers must derive
+// it from their own pinned transaction. A mismatch returns an inert view.
 func (c *StateCache) View(generation Generation) ReadView {
 	if c == nil {
 		return ReadView{}

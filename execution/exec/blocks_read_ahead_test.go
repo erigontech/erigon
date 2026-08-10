@@ -81,10 +81,9 @@ func TestBlockReadAheaderCarriesBlockAccessList(t *testing.T) {
 	require.Equal(t, bal, block.BlockAccessList())
 }
 
-// A warmup read-through must never replace a fresher entry an authoritative
-// writer (the FCU flush cache-apply) has already put: the warmup reads a
-// pre-flush read view, so a laggard Put landing after the flush would pin
-// stale state in the cache and corrupt the next block's execution.
+// A read-through fill must not replace an entry already present in the same
+// generation. Publication excludes old views; this test pins the lower-level
+// PutIfAbsent contract used by read-ahead.
 func TestCachePopulatingGetterKeepsFresherEntry(t *testing.T) {
 	key := []byte("\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff\x00\x11\x22\x33\x44")
 	fresh := []byte("account-record-nonce-5")

@@ -129,7 +129,7 @@ func (sd *SharedDomains) cacheViewsFor(tx kv.TemporalTx) cacheViews {
 	return views
 }
 
-// StateCacheReadView binds stateCache to the state version and files ends pinned
+// StateCacheReadView binds stateCache to the state version and file ends pinned
 // by tx. It returns false if the cache is nil or that exact identity cannot be
 // derived. Even when true, the view is inert if the identity is not published.
 func StateCacheReadView(tx kv.TemporalTx, stateCache *cache.StateCache) (view cache.ReadView, identityKnown bool) {
@@ -226,18 +226,13 @@ type SharedDomains struct {
 	mem                   kv.TemporalMemBatch
 	metrics               kvmetrics.DomainMetrics
 
-	// blockOverlay is an in-memory overlay for block-level metadata writes (headers, bodies,
-	// canonical hashes, TD, stage progress, forkchoice markers). It allows execution to
-	// operate without holding an RwTx — writes accumulate here and are flushed atomically
-	// alongside domain state via Flush().
-	// Atomic because concurrent readers (RPC via LatestSD) may call BlockOverlay()
-	// while Close() nils the pointer.
+	// blockOverlay accumulates block metadata while execution holds only a read
+	// transaction. It is flushed atomically with domain state. The pointer is
+	// atomic because concurrent readers may load it while Close clears it.
 	blockOverlay atomic.Pointer[membatchwithdb.MemoryMutation]
 
-	// parent is an optional parent SD for read-through chaining. When set,
-	// domain reads that miss in the local mem batch fall through to the parent's
-	// mem batch before consulting the underlying tx. Used by the block builder
-	// to read from the FCU's published SD without writing to it.
+	// parent is an optional read-through chain for uncommitted domain state and
+	// accumulated diffsets. A child reads but never writes its parent.
 	parent *SharedDomains
 
 	// stateCache provides generation-bound reads and fills. statePublisher is set
@@ -773,11 +768,9 @@ func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumb
 	if ok || err != nil {
 		return d, ok, err
 	}
-	// Resolve through the parent chain: a fork-validation SD is freshly
-	// constructed with an empty mem batch, so the diffsets of the canonical
-	// blocks it must unwind live in the canonical generation's
-	// pastChangesAccumulator, reachable only via the parent link. Without
-	// this an unwind silently runs with no unwind set.
+	// A child can have no local history while its parent's overlay holds the
+	// canonical diffset needed for unwind. Continue through the chain before
+	// reporting a miss.
 	if sd.parent != nil {
 		return sd.parent.GetDiffset(tx, blockHash, blockNumber)
 	}
@@ -787,10 +780,10 @@ func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumb
 // Unwind drops [txNumUnwindTo, ∞)
 func (sd *SharedDomains) Unwind(txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) {
 	sd.mem.Unwind(txNumUnwindTo, changeset)
-	// The global caches still describe the durable database until Commit.
+	// The process-global caches still describe the durable database until Commit.
 	// Detaching keeps this rewound overlay from reading or filling that version.
-	// If the overlay is committed, both caches are cleared because the unwind
-	// diff is not a complete inventory of entries from the discarded fork.
+	// If a canonical owner commits the overlay, both caches are cleared because
+	// the unwind diff is not a complete inventory of discarded-fork entries.
 	sd.stateCache = nil
 	sd.branchCache = nil
 	sd.clearExecutionCaches = true
@@ -1007,8 +1000,8 @@ func (sd *SharedDomains) Close() {
 }
 
 // Flush writes the in-memory batch without committing or publishing cache
-// updates. A canonical SharedDomains must use Commit so the database and cache
-// become visible in that order.
+// updates. A SharedDomains with canonical publication authority must use Commit
+// so the database and cache become visible in that order.
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	defer mxFlushTook.ObserveDuration(time.Now())
 	return sd.flushMem(ctx, tx)
@@ -1345,9 +1338,9 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 		}
 	}
 
-	// branchCache sits between sd.mem/parent.mem and the aggTx files for
-	// CommitmentDomain only. Snapshot-isolated readers must disable it because
-	// concurrent commits can advance the cache beyond their transaction view.
+	// branchCache sits between the memory overlays and aggregator storage for
+	// CommitmentDomain. Its generation-bound view turns a publication outside
+	// this transaction's snapshot into a miss.
 	if domain == kv.CommitmentDomain && sd.branchCache != nil {
 		if cv, cStepU64, ok := views.branch.Get(k); ok {
 			// Get returns the on-disk step index directly — do NOT divide by
@@ -1503,10 +1496,10 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, view cache.ReadView, 
 	if len(addr) == 0 {
 		return nil
 	}
-	// In-batch state is authoritative: sd.mem / parent.mem hold this batch's
-	// uncommitted account writes, while the addr→codeHash LRU is invalidated only
-	// on flush. Route mem-first; the LRU is a committed-state layer that may only
-	// answer once mem has missed.
+	// In-batch state is authoritative: the memory overlays hold uncommitted
+	// account writes. The LRU contains committed state and is invalidated when
+	// the corresponding account update is published, so it may answer only after
+	// the overlays miss.
 	if v, _, ok := sd.mem.GetLatest(kv.AccountsDomain, addr); ok {
 		return accounts.DeserialiseV3CodeHash(v)
 	}
@@ -1516,9 +1509,8 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, view cache.ReadView, 
 		}
 	}
 
-	// Below mem: the addr → codeHash LRU caches committed state
-	// (flush-invalidated). The zero-hash sentinel means "no code / missing
-	// account" (negative cache).
+	// The zero-hash sentinel is the negative-cache entry for an account with no
+	// code or no account.
 	if sd.stateCache != nil {
 		if h, ok := view.GetAddrCodeHash(addr); ok {
 			if h == ([32]byte{}) {
@@ -1552,6 +1544,8 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, view cache.ReadView, 
 		if len(h) == 32 {
 			copy(fixed[:], h)
 		}
+		// A generation-bound account result can safely seed this derived mapping:
+		// publication revokes the view before changing either cache layer.
 		view.SeedAddrCodeHash(addr, fixed)
 	}
 	return h
@@ -1681,12 +1675,9 @@ func (sd *SharedDomains) domainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 		}
 	}
 
-	// The state cache is NOT updated here. This write goes into sd.mem and
-	// is served from there (checked first on every read, fork-isolated via
-	// the parent chain); the shared cache is refreshed only on flush
-	// (SharedDomains.Flush → FlushWithCallback), so it mirrors committed,
-	// fork-agnostic state. A per-write update would leak non-flushed,
-	// fork-specific bytes into a sibling fork's reads.
+	// This write remains in sd.mem, which every read checks before the shared
+	// caches. Only a successful canonical Commit publishes it, so speculative
+	// or fork-local writes cannot enter a sibling transaction's cache.
 
 	// Serialize against the calculator's accumulator-swap window — see
 	// changesetMu doc on the SharedDomains struct. Skipped when the caller
@@ -1743,9 +1734,9 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte,
 		return nil
 	}
 
-	// State cache is refreshed on flush only — see DomainPut. Serialize against
-	// the calculator's swap window for non-commitment domains; CommitmentDomain
-	// skipped — see DomainPut comment.
+	// Like DomainPut, this deletion remains in sd.mem until a successful
+	// canonical Commit publishes it. Serialize against the calculator's swap
+	// window for non-commitment domains; see DomainPut for the locking invariant.
 	if domain != kv.CommitmentDomain {
 		sd.changesetMu.Lock()
 		defer sd.changesetMu.Unlock()

@@ -44,7 +44,7 @@ func branchGenerationForTx(t *testing.T, tx kv.TemporalTx) cache.Generation {
 	return cache.BranchGeneration(stateVersion, tx.Debug().TxNumsInFiles(kv.CommitmentDomain))
 }
 
-// Use Commit (not Flush) so the rebuilt branch refreshes the BranchCache entry.
+// Commit, unlike Flush, publishes the rebuilt branch after the database commit.
 func TestBranchCacheCommitRefreshesAfterReadThrough(t *testing.T) {
 	stepSize := uint64(100)
 	db := newTestDb(t, stepSize)

@@ -148,8 +148,8 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 		return fmt.Errorf("failed to save block hashes stage progress: %w", err)
 	}
 
-	// sd.Commit flushes + commits as one unit and applies the BranchCache only
-	// after the commit succeeds, so a failed commit can't leave it poisoned.
+	// Commit makes the rewind durable before publishing the matching StateCache
+	// and BranchCache generations, so a failed commit cannot expose rewound data.
 	if err := sd.Commit(ctx, tx); err != nil {
 		return fmt.Errorf("failed to commit shared domains: %w", err)
 	}

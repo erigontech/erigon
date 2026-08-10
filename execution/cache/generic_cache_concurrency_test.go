@@ -125,15 +125,12 @@ func TestGenericCache_PutNotLostAcrossGrow(t *testing.T) {
 	}
 }
 
-// A conditional put must keep deferring to a live entry across a grow. The
-// vulnerable writer class: a put of a brand-new key that lands in the
-// retiring generation after the copy snapshotted Keys() is lost on the swap,
-// and a follow-up PutIfAbsent finds the key absent and installs its stale
-// value as live. With the fence the put either lands pre-fence (and is
-// migrated — Keys() is taken with every stripe held) or lands in the new
-// generation; either way the conditional put defers.
+// A conditional put must keep deferring to an existing entry across a grow.
+// Without the fence, a new key written to the old LRU after the copy is lost
+// during the swap, allowing a later PutIfAbsent to install its stale value.
+// With the fence, the write is either copied or lands in the new LRU.
 //
-// A writer hammers fresh keys while the grow swaps generations; every key
+// A writer hammers fresh keys while the grow swaps LRUs; every key
 // that straddled the swap is then probed with a stale conditional put. The
 // grow is forced by lowering curCap over a lightly-populated cache, so
 // capacity eviction cannot explain a missing key.
@@ -183,7 +180,7 @@ func TestGenericCache_PutIfAbsentDefersAcrossGrow(t *testing.T) {
 			v, ok := c.Get(k)
 			require.True(t, ok, "round %d: candidate %d missing", round, i)
 			require.Equal(t, fresh, v,
-				"round %d: candidate %d: PutIfAbsent installed a stale value over a put lost in the retiring generation", round, i)
+				"round %d: candidate %d: PutIfAbsent installed a stale value over a put lost in the retired LRU", round, i)
 		}
 		c.Close()
 	}

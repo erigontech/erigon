@@ -168,5 +168,5 @@ func TestCodeCache_ClearFencesStartedPut(t *testing.T) {
 	wg.Wait()
 
 	_, ok := cc.Get(addr)
-	require.False(t, ok, "Clear must remove a write that started in the retiring generation")
+	require.False(t, ok, "Clear must remove a write that started against the old LRU")
 }

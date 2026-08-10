@@ -13,8 +13,9 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// Pins that an in-batch account write overrides a stale addr→codeHash LRU entry
-// (the LRU caches committed state and is invalidated only at flush).
+// Pins that an in-batch account write overrides a stale addr→codeHash LRU entry.
+// The LRU caches committed state and is invalidated when the account update is
+// published.
 func TestCodeHashForAddr_InBatchAccountWinsOverStaleLRU(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -119,8 +120,8 @@ func TestCodeHashForAddr_CacheSourcedRecordSeedsMapping(t *testing.T) {
 	require.Equal(t, [32]byte(codeHash), h)
 }
 
-// A record read from the tx's read view (accounts-cache miss) is exactly what
-// the admission gate vouches for, so it still seeds the mapping.
+// A record read from the transaction's exact generation can safely seed the
+// derived addr→codeHash mapping.
 func TestCodeHashForAddr_ViewSourcedRecordSeedsMapping(t *testing.T) {
 	t.Parallel()
 

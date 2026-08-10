@@ -1452,8 +1452,9 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted boo
 		return err
 	}
 
-	// depthsToTxNum is used for per-file metrics; step is no longer available
-	// from the cache-or-DB helper (cache never had a meaningful step anyway).
+	// depthsToTxNum is used for per-file metrics. This path intentionally drops
+	// the source step because a branch may come from memory or cache, not one
+	// identifiable file.
 	hph.depthsToTxNum[depth] = 0
 
 	if len(branchData) >= 2 {

@@ -284,9 +284,7 @@ func NewExecModule(
 		stopNode:                stopNode,
 	}
 
-	// Wire the process-global state cache into the read-ahead so its
-	// prefetches populate the same hashmap that SharedDomains.GetLatest
-	// probes on the EVM hot path. Reth's "same hashmap" pattern.
+	// Share the execution state cache with read-ahead.
 	if readAheader != nil {
 		readAheader.SetStateCache(domainCache)
 	}
@@ -515,14 +513,8 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		}, nil
 	}
 
-	// Use the overlay-as-rwTx pattern: the validation pipeline writes through
-	// a fresh BlockOverlay on a new SharedDomains. This mirrors updateForkChoice
-	// (forkchoice.go:239-251) and is required by the parallel exec path —
-	// executeBlocks opens its own roTx in a separate goroutine and reads
-	// recently-inserted block data via te.doms.BlockOverlay().NewReadView,
-	// which shares the overlay's mem layer. A plain BeginTemporalRwNosync
-	// would leave doms with no overlay and the parallel goroutine could not
-	// see uncommitted block headers/bodies.
+	// Validation writes through a BlockOverlay because parallel execution opens
+	// independent read transactions that must still see uncommitted block data.
 	roTx, err := e.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return ValidationResult{}, err
@@ -533,9 +525,8 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	if err != nil {
 		return ValidationResult{}, err
 	}
-	// Do not defer doms.Close(): on the success path ownership transfers to
-	// forkValidator.sharedDom inside ValidatePayload and later phases close it,
-	// so we Close explicitly only on the early-return error paths below.
+	// ValidatePayload may retain doms after success, so early-return errors close
+	// it explicitly instead of using defer.
 	doms.SetInMemHistoryReads(inMemHistoryReads)
 
 	if err := doms.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
@@ -544,23 +535,16 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	}
 	var tx kv.TemporalRwTx = doms.BlockOverlay()
 
-	// Chain the validation SD to the canonical generation (e.currentContext) for
-	// any payload with a parent, not just head-extending ones: head-extending
-	// payloads read its not-yet-committed domain state instead of stale MDBX, and
-	// fork payloads reach the canonical generation's pastChangesAccumulator (via
-	// GetDiffset's parent chain) to build the unwind set — without the link the
-	// unwind runs empty, leaving the BranchCache unmasked and corrupting the root.
+	// Link validation to the canonical overlay. Head extensions need its
+	// uncommitted state, while fork validation needs its accumulated changes to
+	// construct the unwind.
 	if e.currentContext != nil {
 		doms.SetParent(e.currentContext)
 	}
 
-	// Flush block overlay data (headers, bodies, TDs from InsertBlocks) into
-	// the validation overlay so unwindToCommonCanonical and ValidatePayload —
-	// and the parallel exec goroutine via NewReadView — see this block data.
-	// The InsertBlocks overlay on e.currentContext retains its data unchanged.
-	// Do NOT UpdateTxn on e.currentContext.BlockOverlay() here — that would
-	// reassign its backing db to our soon-to-be-rolled-back roTx and leave
-	// e.currentContext in an inconsistent state for UpdateForkChoice.
+	// Copy pending block data into the validation overlay so all validation
+	// readers see it. Do not retarget the canonical overlay: this read transaction
+	// is rolled back after validation.
 	if e.currentContext != nil && e.currentContext.BlockOverlay() != nil {
 		if err := e.currentContext.BlockOverlay().Flush(ctx, tx); err != nil {
 			doms.Close()
@@ -568,7 +552,8 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		}
 	}
 
-	// Set state cache in SharedDomains for use during state reading
+	// Attach reader-only StateCache access; validation receives no StateCache
+	// publication authority.
 	doms.SetStateCacheReader(e.stateCache)
 	doms.SetCodeStore(e.codeStore)
 	if err = e.unwindToCommonCanonical(doms, tx, header); err != nil {
@@ -581,15 +566,13 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		return ValidationResult{}, criticalError
 	}
 
-	// No cache invalidation needed on an invalid payload: the state cache is
-	// populated only at flush (committed, fork-agnostic state) and this
-	// validation path never flushes, so a rejected payload leaves nothing
-	// fork-specific in the cache. Reads during validation only add canonical
-	// committed bytes. (Cache invalidation happens solely on unwind.)
+	// An invalid payload needs no cache rollback. Its uncommitted writes remain
+	// in the memory overlay, and a speculative unwind detaches both shared cache
+	// readers. Read-through fills can therefore contain only state from the
+	// transaction's published generation, never fork-local writes.
 
-	// Validation tx is the SD's BlockOverlay; defer doms.Close() above handles
-	// its rollback. By design we do not persist validation-run writes — there
-	// is no Flush/Commit on this path.
+	// Validation writes remain in the BlockOverlay. This path does not commit
+	// them; closing the owning SharedDomains rolls the overlay back.
 
 	validationStatus := ExecutionStatusSuccess
 	if status == engine_types.AcceptedStatus {

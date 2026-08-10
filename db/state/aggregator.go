@@ -91,9 +91,9 @@ type Aggregator struct {
 	// regenerates them. Guarded by dirtyFilesLock.
 	unalignedDomain [kv.DomainLen]bool
 	unalignedIdx    [kv.StandaloneIdxLen]bool
-	// Cache reconciliation assumes that visible ends only advance. Lowering one
-	// could retain an entry that existed only in the newer files view. Close
-	// clears this guard because shutdown is not a cache-read window.
+	// Cache provenance and exact-view eligibility assume that visible values and
+	// history-II ends only advance. Close clears this guard because shutdown is
+	// not a cache-read window.
 	visibilityLoweringForbidden atomic.Bool
 	// boundStateCache is reconciled before a new files view becomes visible.
 	// Guarded by dirtyFilesLock.
@@ -551,11 +551,11 @@ func (a *Aggregator) UnalignIdx(name kv.InvertedIdx) (realign func()) {
 	return func() {}
 }
 
-// ForbidVisibilityLowering marks this aggregator as backing a shared latest
-// state cache. From then on recalcVisibleFiles rejects lowering a cached
-// domain's visible end because cache file-provenance watermarks only advance.
-// Serialized with recalcVisibleFiles via dirtyFilesLock so "from then on"
-// holds against a recalculation already in flight.
+// ForbidVisibilityLowering marks this aggregator as backing shared latest-state
+// caches. It rejects lowering values-file ends because cache provenance only
+// advances, and history-II ends because they determine exact cache-view
+// eligibility. dirtyFilesLock orders the guard with a recalculation already in
+// progress.
 func (a *Aggregator) ForbidVisibilityLowering() {
 	if a.visibilityLoweringForbidden.Load() {
 		return
@@ -743,18 +743,18 @@ func (a *Aggregator) ReloadFiles() error {
 	return a.openFolder()
 }
 
-// closeDirtyFilesNoReopen drops all dirty-file mmaps without re-scanning the
-// snapshots dir, so a caller can rename the underlying files (Windows forbids
-// renaming a mapped file); a later ReloadFiles re-opens them.
-// closeDirtyFilesNoReopen is an exclusive tooling operation: it temporarily
-// removes all visible files and invalidates cache guarantees tied to them.
+// closeDirtyFilesNoReopen drops all dirty-file mappings without rescanning the
+// snapshots directory, allowing tooling to rename files on platforms that
+// forbid renaming mapped files. It temporarily publishes an empty files view
+// and revokes cache views tied to the old one; ReloadFiles opens the
+// replacements.
 func (a *Aggregator) closeDirtyFilesNoReopen() {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 	loweringWasForbidden := a.visibilityLoweringForbidden.Swap(false)
 	defer a.visibilityLoweringForbidden.Store(loweringWasForbidden)
-	// This path removes every visible file before replacing them, so no cache
-	// view may remain live across the reset.
+	// A lower file end normally retains committed entries. This tooling path
+	// removes every file, so discard BranchCache entries and provenance first.
 	if cd := a.d[kv.CommitmentDomain]; cd != nil && cd.branchCache != nil {
 		cd.branchCache.Reset()
 	}
@@ -1967,7 +1967,10 @@ func (p *cacheFilesPublication) Finish() {
 // a fresh immutable aggregatorVisible bundle via the per-entity calcVisibleFiles
 // helpers, then publishes the completed snapshot with a.visible.Store(next).
 // Per-entity visibility is not mutated; readers atomically observe one
-// cross-entity-consistent generation.
+// cross-entity-consistent generation. When the files identity changes, cache
+// views tied to the old files are revoked before the store, and the matching
+// identities are published after it. A cache generation is therefore never
+// backed by files that are not yet visible.
 func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 	toTxNum := a.dirtyFilesEndTxNumMinimax()
 	next := &aggregatorVisible{}
@@ -2002,7 +2005,7 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 			prevII := prev.dhii[d].files.EndTxNum()
 			nextII := next.dhii[d].files.EndTxNum()
 			if nextII < prevII {
-				panic(fmt.Sprintf("assert: %s history-II visible end lowered %d -> %d while a shared cache is wired — exact cache-view eligibility derives its frontier from history-II", d, prevII, nextII))
+				panic(fmt.Sprintf("assert: %s history-II visible end lowered %d -> %d while a shared cache is wired — exact cache-view eligibility depends on history-II coverage", d, prevII, nextII))
 			}
 		}
 	}
@@ -2016,8 +2019,8 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 	a.visible.Store(next)
 	cachePublication.Finish()
 
-	// `recalcVisibleFiles` is rare background operation under `dirtyFilesLock`
-	// it's good idea to delete files here, then hot reader-Close path will more likely be lock-free
+	// Reclamation is cheap here under dirtyFilesLock and keeps the hot reader
+	// Close path likely to remain lock-free.
 	reclaimFiles(a.reclaimRetiredLocked())
 }
 
@@ -2779,29 +2782,31 @@ func (at *AggregatorRoTx) standaloneIIs() []*InvertedIndexRoTx { return at.iis[:
 func (at *AggregatorRoTx) DomainProgress(name kv.Domain, tx kv.Tx) uint64 {
 	d := at.d[name]
 	if d.d.HistoryDisabled {
-		// this is not accurate, okay for reporting...
-		// if historyDisabled, there's no way to get progress in
-		// terms of exact txNum
+		// Without history there is no exact txNum progress, so reporting uses
+		// the latest database step as an approximation.
 		return at.d[name].d.maxStepInDBNoHistory(tx).ToTxNum(at.a.stepSize.Load())
 	}
 	return at.d[name].ht.iit.Progress(tx)
 }
+
+// HasExactDomainVisibleEnd reports whether an exact combined frontier exists.
+// History must be enabled and values files must cover the history-II frontier;
+// otherwise reads mix newer database keys with older file values.
 func (at *AggregatorRoTx) HasExactDomainVisibleEnd(name kv.Domain) bool {
 	d := at.d[name]
 	return !d.d.HistoryDisabled && d.files.EndTxNum() >= d.ht.iit.files.EndTxNum()
 }
+
+// DomainVisibleEnd returns the exact combined frontier after verifying that
+// the values files cover history-II.
 func (at *AggregatorRoTx) DomainVisibleEnd(name kv.Domain, tx kv.Tx) (uint64, bool) {
-	// A dependency checker can clamp the values view below the history-II end.
-	// Such a view has no exact frontier: reads mix fresh DB-resident keys with
-	// older file values for the gap, and raising the dependent file's
-	// visibility later reveals state without any cache apply — a fill made
-	// during the clamp would never be invalidated.
 	if !at.HasExactDomainVisibleEnd(name) {
 		return 0, false
 	}
 	d := at.d[name]
 	return d.ht.iit.visibleEnd(tx), true
 }
+
 func (at *AggregatorRoTx) IIProgress(name kv.InvertedIdx, tx kv.Tx) uint64 {
 	return at.searchII(name).Progress(tx)
 }

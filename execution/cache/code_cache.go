@@ -146,8 +146,8 @@ type CodeCache struct {
 	// insertion per key hash: freelru has no LoadOrStore, so without this two
 	// concurrent Puts of the same cold code both miss the check and both add to
 	// the byte counter while only one entry survives, drifting the stat upward.
-	// Clear uses every stripe to fence publications while distinct keys still
-	// write in parallel.
+	// A full clear takes every stripe so no put crosses it; puts to distinct keys
+	// remain parallel otherwise.
 	putStripes [256]sync.Mutex
 
 	// Stats counters (atomic for concurrent access)
@@ -269,7 +269,7 @@ func (c *CodeCache) Put(addr []byte, code []byte, step kv.Step) {
 }
 
 // PutIfAbsent implements Cache.PutIfAbsent for the addr→code binding; the
-// content-addressed layers skip live entries regardless.
+// content-addressed layers skip existing entries regardless.
 func (c *CodeCache) PutIfAbsent(addr []byte, code []byte, step kv.Step) {
 	c.putCode(addr, code, [32]byte{}, step, false)
 }
@@ -489,7 +489,8 @@ func (c *CodeCache) Delete(addr []byte) {
 	c.addrBindMu.Unlock()
 }
 
-// Clear removes every layer and resets accounting.
+// Clear removes every layer and resets accounting. It holds every put stripe
+// so no put can cross the multi-layer clear.
 func (c *CodeCache) Clear() {
 	c.lockAllPutStripes()
 	defer c.unlockAllPutStripes()

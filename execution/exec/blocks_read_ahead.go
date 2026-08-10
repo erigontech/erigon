@@ -36,12 +36,8 @@ type BlockReadAheader struct {
 	warming atomic.Bool // only one warmBody can run at a time
 	warmWg  sync.WaitGroup
 
-	// stateCache is the process-global state cache that SharedDomains.GetLatest
-	// consults on the EVM hot path. When set, warmBody routes its prefetches
-	// through a cache-populating getter so the same hashmap the EVM probes is
-	// pre-warmed. Without it, prefetches only warm OS page cache + RoTx
-	// cursors — disconnected from the cache layer the EVM actually reads.
-	// Mirrors reth's CachedReads / ExecutionCache "same hashmap" property.
+	// stateCache lets warmBody fill the same process-global cache used by
+	// execution instead of warming only the backing files and cursors.
 	stateCache *cache.StateCache
 }
 
@@ -70,22 +66,14 @@ func NewBlockReadAheader() *BlockReadAheader {
 	}
 }
 
-// SetStateCache wires the process-global state cache so warmBody's
-// prefetches land in the same hashmap that SharedDomains.GetLatest probes
-// on the EVM hot path. Without this, prefetches warm OS page cache only —
-// the EVM still pays the file accessor stack on its first per-address read.
-// Idempotent; safe to call before the first AddHeaderAndBody.
+// SetStateCache enables read-ahead fills into the process-global state cache.
+// Call it before the first warmBody can start.
 func (bra *BlockReadAheader) SetStateCache(sc *cache.StateCache) {
 	bra.stateCache = sc
 }
 
-// cachePopulatingGetter wraps a kv.TemporalGetter and fills a StateCache
-// ReadView as a side effect. Used by warmBody to make read-ahead prefetches
-// populate the same in-process cache layer that SharedDomains.GetLatest
-// consults — eliminating the file-accessor stack cost on the EVM's first
-// touch of any prefetched address.
-//
-// Code reads also populate the content-addressed and size-cache layers.
+// cachePopulatingGetter admits read-ahead results through a generation-bound
+// StateCache view. Code reads also fill the content-addressed and size layers.
 type cachePopulatingGetter struct {
 	kv.TemporalGetter
 	view cache.ReadView

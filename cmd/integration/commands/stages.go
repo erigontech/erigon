@@ -825,11 +825,12 @@ func commitExecUnwind(ctx context.Context, doms *execctx.SharedDomains, tx kv.Te
 
 // execBlocksBatch runs one stage_exec batch in its own rwtx and SharedDomains:
 // exec up to toBlock (or the batch limit), then doms.Commit. Commit (not Flush)
-// refreshes the aggregator BranchCache to match committed state — a stale cache
-// makes the next batch compute a wrong trie root — and commits the tx. A fresh
-// SharedDomains per call avoids reusing a committed (spent) one. Pruning and
-// file-building are the caller's job (agg.CollateAndPrune). Returns the Execution
-// stage progress after the batch.
+// publishes StateCache and BranchCache only after the database commit and
+// consumes the transaction. BranchCache must match durable state because the
+// next batch uses its branches to compute the trie root. A fresh SharedDomains
+// per call avoids reusing the spent transaction. Pruning and file building are
+// the caller's job. The function returns Execution stage progress after the
+// batch.
 func execBlocksBatch(ctx context.Context, db kv.TemporalRwDB, st *stagedsync.Sync, cfg stagedsync.ExecuteBlockCfg, toBlock uint64, initialCycle bool, stateCache *cache.StateCache, codeStore *cache.CodeStore, logger log.Logger) (uint64, error) {
 	tx, err := db.BeginTemporalRw(ctx)
 	if err != nil {

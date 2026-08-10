@@ -27,14 +27,14 @@ import (
 	"github.com/erigontech/erigon/execution/cache"
 )
 
-// Pins that Commit fires the StorageDomain flush-callback so the storage cache
-// is refreshed. Storage lives in a separate btree (sd.storage), not sd.domains,
-// so the callback loop must cover it — else a cached slot serves a stale value.
+// Pins that Commit fires the StorageDomain flush callback so the storage cache
+// is refreshed. Storage lives in a separate btree, so the callback loop must
+// cover it or a cached slot can retain a stale value.
 //
-// The caches are commit-gated: they are populated only after tx.Commit succeeds
-// (Commit stashes the flush-callback tuples and applies them post-commit), never
-// by a bare Flush. The test commits a slot, then commits an overwrite in a second
-// tx, and asserts the module-scope cache reflects the second write, not the first.
+// Authoritative cache updates are commit-gated: Commit stashes callback tuples
+// and publishes them only after tx.Commit succeeds. A bare Flush cannot expose
+// uncommitted values. The test commits a slot, then commits an overwrite and
+// checks that the shared cache reflects the second write.
 func TestCommit_UpdatesStorageStateCache(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -70,7 +70,7 @@ func TestCommit_UpdatesStorageStateCache(t *testing.T) {
 
 		sd.SetTxNum(txNum)
 		require.NoError(t, sd.DomainPut(kv.StorageDomain, rwTx, key, val, txNum, prevVal))
-		// Commit commits rwTx and only then applies the flush-callback tuples to
+		// Commit commits rwTx and only then publishes the flush-callback tuples to
 		// the cache. The StorageDomain callback must fire (iterate sd.storage).
 		require.NoError(t, sd.Commit(ctx, rwTx))
 	}

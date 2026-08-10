@@ -38,7 +38,7 @@ const (
 
 // StateCache holds account, storage, and code values for one durable database
 // state over one compatible files view. Publication revokes a reader's
-// generation before changing entries, so it cannot observe mixed state.
+// generation before changing entries, so the reader cannot observe mixed state.
 type StateCache struct {
 	generation GenerationGate
 
@@ -273,6 +273,8 @@ func (c *StateCache) Reset() {
 	c.generation.Reset(c.resetProvenanceAndClearLocked)
 }
 
+// Close revokes current views and releases the sub-caches' shared-envelope
+// reservations. It is idempotent.
 func (c *StateCache) Close() {
 	c.generation.Close()
 	for _, cache := range c.caches {
@@ -309,9 +311,10 @@ func (c *StateCache) PrintStatsAndReset() {
 }
 
 // Update is one value written by the database transaction being published.
-// Step is returned by GetLatest. TxNum records how far this process's committed
-// writes cover the domain, allowing file publication to detect downloaded
-// state that never passed through this publisher.
+// Step is the source step returned on cache hits, preserving bounded-read
+// semantics. TxNum records how far this process's committed writes cover the
+// domain, allowing file publication to detect downloaded state that never
+// passed through this publisher.
 type Update struct {
 	Domain kv.Domain
 	Key    []byte

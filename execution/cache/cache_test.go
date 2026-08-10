@@ -752,7 +752,7 @@ func TestCodeCache_PutWithCodeHashIfAbsent(t *testing.T) {
 // A conditional put must be atomic w.r.t. a concurrent unconditional Put of
 // the same key: without a shared critical section the conditional writer can
 // check (absent), lose the CPU to the authoritative writer's insert, then
-// clobber it — the prefetch-vs-flush staleness this cache guards against.
+// clobber it. The shared stripe makes the conditional update atomic.
 func TestDomainCache_PutIfAbsentAtomicWithPut(t *testing.T) {
 	c := closeOnCleanup(t, NewDomainCacheMode(1*datasize.MB, ModeEvictLRU))
 	fresh := []byte("fresh")
@@ -922,7 +922,7 @@ func TestDomainCache_DeleteAtomicWithPut_NoSizeDrift(t *testing.T) {
 }
 
 // A Clear racing a put must not leave phantom bytes: unless Clear excludes
-// writers via the put stripes, a put that loaded the retiring generation
+// writers via the put stripes, a put that loaded the retiring LRU
 // lands its entry where no reader sees it and adds the entry's size after
 // Clear zeroed the counter — inflating SizeBytes for an invisible entry.
 func TestDomainCache_ClearAtomicWithPut_NoSizeDrift(t *testing.T) {

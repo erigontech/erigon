@@ -60,9 +60,8 @@ type entry[T any] struct {
 // data. Eviction mode is fixed at construction (see policy.go).
 type GenericCache[T any] struct {
 	// data is the sharded LRU, replaced wholesale only with every put stripe
-	// held — on a jump-grow (fully copied generation) and on Clear (fresh
-	// empty one) — so no write lands in a retired generation and no reader
-	// sees a partial copy (see maybeGrow, Clear).
+	// held: on a jump-grow with a complete copy, and on Clear with a fresh empty
+	// LRU. No write can land in a retired LRU, and no reader sees a partial copy.
 	data      atomic.Pointer[freelru.ShardedLRU[uint64, entry[T]]]
 	capacityB datasize.ByteSize
 	mode      Mode
@@ -81,9 +80,9 @@ type GenericCache[T any] struct {
 	resizeMu      sync.Mutex
 	reservedBytes int64
 
-	// shardCount is the live generation's freelru shard count, bounded by
+	// shardCount is the current LRU's freelru shard count, bounded by
 	// shardCeil (freelru's own GOMAXPROCS-derived choice). Left to freelru, a
-	// grown generation could pick more, smaller shards and evict entries during
+	// grown LRU could pick more, smaller shards and evict entries during
 	// the migration copy; instead shards double across grows only while
 	// per-shard capacity does not shrink (see maybeGrow). Mutated under resizeMu.
 	shardCount uint32
@@ -205,12 +204,11 @@ func (c *GenericCache[T]) newShards(capacity, shards uint32) *freelru.ShardedLRU
 // LRU keeps its size and freelru evicts within it. Must not be called with a
 // stripe held (it takes them all).
 //
-// The copy runs with every put stripe held: writers (and the striped
-// stale-drop) are excluded, so no write can land in the generation being
-// retired and a conditional put never sees a mid-resize gap it could fill
-// with a stale value; readers stay on the retiring generation until the swap
-// and never miss. Grows are a handful of steps per cache lifetime, so the
-// writer stall is a bounded one-off.
+// The copy runs with every put stripe held, excluding writers and deletes.
+// No write can land in the retired LRU, a conditional put cannot observe a
+// mid-resize gap, and readers stay on the old LRU until the atomic swap.
+// Grows are a handful of steps per cache lifetime, so the writer stall is a
+// bounded one-off.
 func (c *GenericCache[T]) maybeGrow() {
 	c.resizeMu.Lock()
 	defer c.resizeMu.Unlock()
@@ -419,7 +417,7 @@ func (c *GenericCache[T]) putStriped(key []byte, value T, overwrite bool) bool {
 
 // Delete removes the data for the given key. Runs under the key's put stripe
 // so the check-then-remove is atomic against same-key puts and excluded from
-// generation swaps (maybeGrow, Clear), which fence via the stripes.
+// LRU swaps (maybeGrow and Clear), which fence via the stripes.
 func (c *GenericCache[T]) Delete(key []byte) {
 	h := maphash.Hash(key)
 	mu := &c.putStripes[h&(putStripeCount-1)]

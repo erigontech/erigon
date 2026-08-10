@@ -215,7 +215,10 @@ func (p *GenerationPublication) Abort() {
 	p.gate = nil
 }
 
-// Publish applies the committed cache transition before exposing identity.
+// Publish applies the committed cache transition before exposing identity. The
+// state version comes from identity, while the files view is replaced by the
+// newest backing view known to the gate. This prevents a transaction opened
+// before a files publication from restoring its older files identity.
 func (p *GenerationPublication) Publish(identity Generation, apply func()) {
 	if p == nil || p.gate == nil {
 		return
@@ -322,8 +325,8 @@ func (c *BackingChange) Finish() {
 	c.gate = nil
 }
 
-// Close permanently revokes current views. The owner may then close its cache
-// storage without admitting new fills.
+// Close waits for in-flight fills and revokes current views before the owner
+// closes cache storage.
 func (g *GenerationGate) Close() {
 	if g == nil {
 		return

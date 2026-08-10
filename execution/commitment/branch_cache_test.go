@@ -213,7 +213,7 @@ func TestBranchCache_ResetFencesStartedPut(t *testing.T) {
 	})
 
 	_, _, ok := c.Get(key)
-	require.False(t, ok, "Reset must remove a Put that started in the retiring generation")
+	require.False(t, ok, "Reset must remove a Put that started before the reset")
 }
 
 func TestBranchCache_ResetFencesStartedPinEntry(t *testing.T) {
@@ -227,7 +227,7 @@ func TestBranchCache_ResetFencesStartedPinEntry(t *testing.T) {
 	})
 
 	_, _, ok := c.Get(key)
-	require.False(t, ok, "Reset must remove a PinEntry that started in the retiring generation")
+	require.False(t, ok, "Reset must remove a PinEntry that started before the reset")
 }
 
 // TestBranchCache_Stats verifies the format of the stats string is

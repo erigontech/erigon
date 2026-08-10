@@ -277,13 +277,9 @@ type RwTx struct {
 }
 
 type domainVisibleEnds struct {
-	// ends is atomic so a lock-free read can overlap a reset-and-reload of
-	// the same slot without a data race. A torn read (state bit from one
-	// generation, end from another) can only be stale-low, which merely
-	// over-rejects fills: a view's frontier never decreases in a process that
-	// fills a cache — the DB component is frozen at tx begin, and a files
-	// reopen only extends it. The aggregator rejects visibility lowering while
-	// a shared latest-state cache is in use.
+	// ends is atomic because a lock-free read may overlap reset after the files
+	// transaction reopens. state publishes a slot only after its end is stored;
+	// reset takes mu so an in-flight load cannot republish old data.
 	ends  [kv.DomainLen]atomic.Uint64
 	mu    sync.Mutex
 	state atomic.Uint32

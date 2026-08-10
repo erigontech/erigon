@@ -89,7 +89,7 @@ func benchColdNegativeReads(b *testing.B, withCache, writable bool) {
 
 func BenchmarkGetLatestColdNegative(b *testing.B) { benchColdNegativeReads(b, true, false) }
 
-// The baseline for the generation check and fill.
+// Baseline without StateCache generation checks or fills.
 func BenchmarkGetLatestColdNegativeNoCache(b *testing.B) {
 	benchColdNegativeReads(b, false, false)
 }
