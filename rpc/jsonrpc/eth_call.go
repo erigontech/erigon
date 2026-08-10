@@ -437,6 +437,13 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 		return nil, err
 	}
 
+	// A canonical hash exists for blocks the header stage has downloaded but
+	// execution has not reached; the commitment history getProof needs is only
+	// written by execution.
+	if err := rpchelper.CheckBlockExecuted(roTx, uint64(requestedBlockNr)); err != nil {
+		return nil, err
+	}
+
 	err = api.BaseAPI.checkPruneHistory(ctx, roTx, uint64(requestedBlockNr))
 	if err != nil {
 		return nil, err
