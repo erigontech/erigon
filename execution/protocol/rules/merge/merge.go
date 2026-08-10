@@ -393,8 +393,7 @@ func (s *Merge) verifyHeader(chain rules.ChainHeaderReader, header, parent *type
 	amsterdam := chain.Config().IsAmsterdam(header.Time)
 	if amsterdam {
 		if header.SlotNumber == nil {
-			// TODO: No Slot Error Yet - Treat it as optional for hive testing
-			//return rules.ErrMissingSlotNumber
+			return rules.ErrMissingSlotNumber
 		}
 		if chain.Config().IsEIPEnabled(7928, header.Time) {
 			if header.BlockAccessListHash == nil {
