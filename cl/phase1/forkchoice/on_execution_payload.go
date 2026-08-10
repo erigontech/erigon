@@ -297,6 +297,7 @@ func (f *ForkChoiceStore) validatePayloadWithEL(
 		if err := f.optimisticStore.AddOptimisticCandidate(beaconBlockRoot, block.Block); err != nil {
 			return fmt.Errorf("failed to add block to optimistic store: %v", err)
 		}
+		return errELBehind
 	case execution_client.PayloadStatusInvalidated:
 		log.Warn("validatePayloadWithEL: payload is invalid", "beaconBlockRoot", beaconBlockRoot, "err", err)
 		f.markPayloadInvalidLocked(beaconBlockRoot, executionBlockHash)

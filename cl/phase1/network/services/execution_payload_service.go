@@ -264,6 +264,9 @@ func (s *executionPayloadService) queuePendingEnvelopeWithOptions(blockRoot comm
 
 	var envelopeHash common.Hash
 	if !dataAvailability {
+		if !recovered && s.pendingCount.Load() >= maxPendingEnvelopes {
+			return
+		}
 		var err error
 		envelopeHash, err = envelope.HashSSZ()
 		if err != nil {

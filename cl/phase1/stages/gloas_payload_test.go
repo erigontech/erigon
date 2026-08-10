@@ -219,6 +219,42 @@ func TestValidateAnchorPayloadUsesRemoteExecutionClient(t *testing.T) {
 	require.Equal(t, 1, localEL.newPayloadCalls)
 }
 
+func TestValidateAnchorPayloadHandlesRemoteExecutionStatuses(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		status execution_client.PayloadStatus
+	}{
+		{name: "validated", status: execution_client.PayloadStatusValidated},
+		{name: "syncing", status: execution_client.PayloadStatusNotValidated},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, _, bid, env, anchorRoot := validAnchorEnvelopeFixture(t, 1)
+			engine := &testExecutionEngine{payloadStatus: tt.status}
+			err := validateAnchorPayloadWithExecutionClient(context.Background(), &Cfg{
+				beaconCfg:       cfg,
+				executionClient: engine,
+				forkChoice:      &forkchoice.ForkChoiceStore{},
+			}, anchorRoot, bid, env)
+			require.NoError(t, err)
+			require.Equal(t, 1, engine.newPayloadCalls)
+		})
+	}
+}
+
+func TestValidateAnchorPayloadWithELReturnsRemoteInvalidation(t *testing.T) {
+	cfg, _, bid, env, _ := validAnchorEnvelopeFixture(t, 1)
+	engine := &testExecutionEngine{payloadStatus: execution_client.PayloadStatusInvalidated}
+
+	status, err := validateAnchorPayloadWithEL(context.Background(), &Cfg{
+		beaconCfg:       cfg,
+		executionClient: engine,
+	}, bid, env)
+
+	require.NoError(t, err)
+	require.EqualValues(t, execution_client.PayloadStatusInvalidated, status)
+	require.Equal(t, 1, engine.newPayloadCalls)
+}
+
 func TestDrainPendingGloasPayloadsRequeuesNotValidatedPayload(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	clparams.ApplyMinimalPreset(&cfg)

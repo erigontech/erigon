@@ -5,6 +5,7 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -35,6 +36,7 @@ type payloadVoteForkGraph struct {
 	fork_graph.ForkGraph
 	hasEnvelope       bool
 	blocks            map[common.Hash]*cltypes.SignedBeaconBlock
+	envelope          *cltypes.SignedExecutionPayloadEnvelope
 	dumpedEnvelope    *common.Hash
 	invalidatedHeader *common.Hash
 }
@@ -46,6 +48,10 @@ func (g payloadVoteForkGraph) HasEnvelope(common.Hash) bool {
 func (g payloadVoteForkGraph) GetBlock(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
 	block, ok := g.blocks[root]
 	return block, ok
+}
+
+func (g payloadVoteForkGraph) ReadEnvelopeFromDisk(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+	return g.envelope, nil
 }
 
 func (g payloadVoteForkGraph) DumpEnvelopeOnDisk(blockRoot common.Hash, _ *cltypes.SignedExecutionPayloadEnvelope) error {
@@ -357,22 +363,34 @@ func TestValidateParentPayloadPathRequiresVerifiedFullParent(t *testing.T) {
 
 	for _, tt := range []struct {
 		name     string
+		withEL   bool
 		verified bool
 		wantErr  bool
 	}{
-		{name: "persisted but unverified", wantErr: true},
-		{name: "persisted and verified", verified: true},
+		{name: "persisted but unverified", withEL: true, wantErr: true},
+		{name: "persisted and verified", withEL: true, verified: true},
+		{name: "standalone without EL"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newPayloadVoteTestStore(t, parentRoot, true, tt.verified)
+			if tt.withEL {
+				f.engine = execution_client.NewMockExecutionEngine(gomock.NewController(t))
+			}
 			f.forkGraph = payloadVoteForkGraph{
 				hasEnvelope: true,
 				blocks:      map[common.Hash]*cltypes.SignedBeaconBlock{parentRoot: parent},
+				envelope: &cltypes.SignedExecutionPayloadEnvelope{
+					Message: &cltypes.ExecutionPayloadEnvelope{
+						BeaconBlockRoot: parentRoot,
+						Payload:         &cltypes.Eth1Block{},
+					},
+				},
 			}
 
 			err := f.validateParentPayloadPath(child)
 			if tt.wantErr {
 				require.ErrorIs(t, err, ErrParentEnvelopePending)
+				require.Len(t, f.DrainPendingELPayloads(), 1)
 			} else {
 				require.NoError(t, err)
 			}

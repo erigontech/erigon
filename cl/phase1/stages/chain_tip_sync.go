@@ -22,7 +22,10 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-const maxGloasVerificationSweepPerCycle = 32
+const (
+	maxGloasVerificationSweepPerCycle = 32
+	maxGloasVerificationScanPerCycle  = 256
+)
 
 func gloasVersionedHashes(blobCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) ([]common.Hash, error) {
 	if blobCommitments == nil || blobCommitments.Len() == 0 {
@@ -576,7 +579,8 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 		block *cltypes.SignedBeaconBlock
 	}
 
-	for root := headRoot; root != (common.Hash{}); {
+	scanned := 0
+	for root := headRoot; root != (common.Hash{}) && scanned < maxGloasVerificationScanPerCycle; scanned++ {
 		block, ok := cfg.forkChoice.GetBlock(root)
 		if !ok || block == nil {
 			break
@@ -694,11 +698,13 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 	// insertion — so it must run regardless of SupportInsertion().
 	recoverMissingEnvelopes(ctx, cfg)
 
-	if canRetryGloasPayloads(cfg) {
+	if canValidateGloasPayloads(cfg) {
 		// [New in Gloas:EIP7732] Drain execution blocks whose CL transition succeeded
 		// but whose EL newPayload previously returned SYNCING/ACCEPTED.
 		drainPendingGloasPayloads(ctx, cfg)
 		retryUnverifiedAnchorPayload(ctx, cfg)
+	}
+	if canRetryGloasPayloads(cfg) {
 		if err := cfg.blockCollector.Flush(context.Background()); err != nil {
 			log.Warn("[chainTipSync] blockCollector.Flush failed (EL may still be catching up)", "err", err)
 		}

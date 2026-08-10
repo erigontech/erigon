@@ -425,8 +425,16 @@ func (f *ForkChoiceStore) validateParentPayloadPath(block *cltypes.BeaconBlock) 
 	}
 
 	if f.isParentNodeFull(block) {
-		// A FULL parent remains pending until its payload is persisted and EL-verified.
-		if !f.forkGraph.HasEnvelope(block.ParentRoot) || !f.IsPayloadVerified(block.ParentRoot) {
+		// A FULL parent remains pending until its payload is persisted and verified by any configured EL.
+		if !f.forkGraph.HasEnvelope(block.ParentRoot) {
+			return ErrParentEnvelopePending
+		}
+		if f.engine != nil && !f.IsPayloadVerified(block.ParentRoot) {
+			parentBlock, ok := f.forkGraph.GetBlock(block.ParentRoot)
+			envelope, err := f.forkGraph.ReadEnvelopeFromDisk(block.ParentRoot)
+			if ok && parentBlock != nil && err == nil && envelope != nil && envelope.Message != nil {
+				f.addPendingELPayload(parentBlock, envelope)
+			}
 			return ErrParentEnvelopePending
 		}
 	} else {

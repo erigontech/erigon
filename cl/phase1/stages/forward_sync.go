@@ -365,6 +365,7 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 	// Run the log loop until the highest processed slot reaches the chain tip slot
 	for downloader.GetHighestProcessedSlot() < chainTipSlot {
 		if canValidateGloasPayloads(cfg) && time.Since(lastGloasVerification) >= time.Second {
+			drainPendingGloasPayloads(ctx, cfg)
 			retryUnverifiedAnchorPayload(ctx, cfg)
 			verifyUnverifiedGloasPayloads(ctx, cfg)
 			lastGloasVerification = time.Now()

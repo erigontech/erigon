@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/optimistic"
 	"github.com/erigontech/erigon/common"
 )
 
@@ -301,6 +302,11 @@ func TestValidatePayloadWithELDoesNotRelockForkChoiceMu(t *testing.T) {
 			wantVerify: true,
 		},
 		{
+			name:    "not validated",
+			status:  execution_client.PayloadStatusNotValidated,
+			wantErr: true,
+		},
+		{
 			name:    "invalidated",
 			status:  execution_client.PayloadStatusInvalidated,
 			wantErr: true,
@@ -333,6 +339,7 @@ func TestValidatePayloadWithELDoesNotRelockForkChoiceMu(t *testing.T) {
 				executionPayloadStatus:   executionPayloadStatus,
 				payloadStatusByRoot:      payloadStatusByRoot,
 				executionPayloadGasLimit: executionPayloadGasLimit,
+				optimisticStore:          optimistic.NewOptimisticStore(),
 			}
 			envelope := &cltypes.ExecutionPayloadEnvelope{
 				Payload: &cltypes.Eth1Block{BlockHash: executionBlockHash},

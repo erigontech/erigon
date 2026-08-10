@@ -628,6 +628,16 @@ func TestExecutionPayloadServicePendingQueueCap(t *testing.T) {
 	require.False(t, exists)
 }
 
+func TestExecutionPayloadServicePendingQueueCapRejectsUntrustedBeforeHashing(t *testing.T) {
+	impl, _ := setupExecutionPayloadServiceWithoutLoop(t)
+	impl.pendingCount.Store(maxPendingEnvelopes)
+
+	require.NotPanics(t, func() {
+		impl.queuePendingEnvelope(common.HexToHash("0x1234"), &cltypes.SignedExecutionPayloadEnvelope{})
+	})
+	require.Equal(t, int32(maxPendingEnvelopes), impl.pendingCount.Load())
+}
+
 func TestExecutionPayloadServicePendingQueueUpgradesDataAvailabilityDuplicateAtCap(t *testing.T) {
 	impl, _ := setupExecutionPayloadServiceWithoutLoop(t)
 	blockRoot := common.HexToHash("0x1234")
