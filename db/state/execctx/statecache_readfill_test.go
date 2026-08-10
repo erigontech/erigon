@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -76,11 +77,25 @@ func newSmallStateCache() *cache.StateCache {
 	return cache.NewStateCache(b, b, b, b)
 }
 
-func currentStateCacheView(t *testing.T, stateCache *cache.StateCache) cache.ReadView {
+func currentStateCacheGeneration(t *testing.T, db kv.TemporalRoDB) cache.Generation {
 	t.Helper()
-	stateVersion, ok := stateCache.CurrentStateVersion()
-	require.True(t, ok)
-	return stateCache.View(cache.StateGeneration(stateVersion, 0, 0, 0))
+	tx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	stateVersion, err := rawdb.GetStateVersion(tx)
+	require.NoError(t, err)
+	debug := tx.Debug()
+	return cache.StateGeneration(
+		stateVersion,
+		debug.TxNumsInFiles(kv.AccountsDomain),
+		debug.TxNumsInFiles(kv.StorageDomain),
+		debug.TxNumsInFiles(kv.CodeDomain),
+	)
+}
+
+func currentStateCacheView(t *testing.T, db kv.TemporalRoDB, stateCache *cache.StateCache) cache.ReadView {
+	t.Helper()
+	return stateCache.View(currentStateCacheGeneration(t, db))
 }
 
 // During an in-flight unwind this SharedDomains is detached from StateCache,
@@ -183,9 +198,12 @@ func TestReadFill_UnwindDetachesWithoutRevokingStateCache(t *testing.T) {
 	db := newTestDb(t, stepSize)
 	sc := newSmallStateCache()
 	key, _, v2, diffs := twoStepRows(t, db, sc)
-	stateVersion, ok := sc.CurrentStateVersion()
-	require.True(t, ok)
-	sc.Publisher().Begin().Publish(cache.StateGeneration(stateVersion, 0, 0, 0), nil, true)
+	generation := currentStateCacheGeneration(t, db)
+	sc.Publisher().Begin().Publish(generation, nil, true)
+	durableView := sc.View(generation)
+	sentinelKey := make([]byte, 20)
+	sentinelKey[0] = 0xdd
+	durableView.Fill(kv.AccountsDomain, sentinelKey, []byte("durable"), 0)
 
 	roTx, err := db.BeginTemporalRo(ctx)
 	require.NoError(t, err)
@@ -201,10 +219,9 @@ func TestReadFill_UnwindDetachesWithoutRevokingStateCache(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, v2, got)
 
-	currentVersion, ok := sc.CurrentStateVersion()
+	_, ok := durableView.Get(kv.AccountsDomain, sentinelKey)
 	require.True(t, ok, "an uncommitted unwind must not revoke the durable cache")
-	require.Equal(t, stateVersion, currentVersion)
-	_, ok = sc.View(cache.StateGeneration(currentVersion, 0, 0, 0)).Get(kv.AccountsDomain, key)
+	_, ok = durableView.Get(kv.AccountsDomain, key)
 	require.False(t, ok, "the detached SharedDomains must not fill from its rewound database view")
 }
 
@@ -235,9 +252,12 @@ func TestCodeHashFill_UnwindDetachesWithoutRevokingStateCache(t *testing.T) {
 	sd.SetTxNum(20)
 	require.NoError(t, sd.DomainPut(kv.AccountsDomain, rwTx, key, value, 20, nil))
 	require.NoError(t, sd.Commit(ctx, rwTx))
-	stateVersion, ok := sc.CurrentStateVersion()
-	require.True(t, ok)
-	sc.Publisher().Begin().Publish(cache.StateGeneration(stateVersion, 0, 0, 0), nil, true)
+	generation := currentStateCacheGeneration(t, db)
+	sc.Publisher().Begin().Publish(generation, nil, true)
+	durableView := sc.View(generation)
+	sentinelKey := make([]byte, 20)
+	sentinelKey[0] = 0xee
+	durableView.Fill(kv.AccountsDomain, sentinelKey, []byte("durable"), 0)
 
 	stepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(stepBytes, ^uint64(1))
@@ -256,10 +276,9 @@ func TestCodeHashFill_UnwindDetachesWithoutRevokingStateCache(t *testing.T) {
 	got := sd2.CodeHashForAddr(roTx, key, 20)
 	require.Equal(t, codeHash[:], got)
 
-	currentVersion, ok := sc.CurrentStateVersion()
+	_, ok := durableView.Get(kv.AccountsDomain, sentinelKey)
 	require.True(t, ok, "an uncommitted unwind must not revoke the durable cache")
-	require.Equal(t, stateVersion, currentVersion)
-	_, ok = sc.View(cache.StateGeneration(currentVersion, 0, 0, 0)).Get(kv.AccountsDomain, key)
+	_, ok = durableView.Get(kv.AccountsDomain, key)
 	require.False(t, ok, "code-hash lookup through the rewound view must not fill the durable cache")
 }
 
@@ -273,9 +292,8 @@ func TestSpeculativeUnwindDoesNotPublishStateCache(t *testing.T) {
 	t.Cleanup(sc.Close)
 	key, _, v2, diffs := twoStepRows(t, db, sc)
 
-	stateVersion, ok := sc.CurrentStateVersion()
-	require.True(t, ok)
-	got, ok := sc.View(cache.StateGeneration(stateVersion, 0, 0, 0)).Get(kv.AccountsDomain, key)
+	view := currentStateCacheView(t, db, sc)
+	got, ok := view.Get(kv.AccountsDomain, key)
 	require.True(t, ok)
 	require.Equal(t, v2, got)
 
@@ -288,10 +306,7 @@ func TestSpeculativeUnwindDoesNotPublishStateCache(t *testing.T) {
 	sd.SetStateCacheReaderForTest(sc)
 	sd.Unwind(10, &diffs)
 
-	currentVersion, ok := sc.CurrentStateVersion()
-	require.True(t, ok)
-	require.Equal(t, stateVersion, currentVersion)
-	got, ok = sc.View(cache.StateGeneration(currentVersion, 0, 0, 0)).Get(kv.AccountsDomain, key)
+	got, ok = view.Get(kv.AccountsDomain, key)
 	require.True(t, ok)
 	require.Equal(t, v2, got)
 }

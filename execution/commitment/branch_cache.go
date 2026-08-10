@@ -343,11 +343,12 @@ func NewBranchCache(tailCapacity int) *BranchCache {
 	return bc
 }
 
-// Close drops this cache from the active-instance count so later BranchCaches
-// size their trunk depth against real concurrency. Idempotent.
+// Close revokes all views, releases cached entries, and drops this cache from
+// the active-instance count. Idempotent.
 func (c *BranchCache) Close() {
 	c.generation.Close()
 	if c.closed.CompareAndSwap(false, true) {
+		c.resetProvenanceAndClear()
 		if t := c.tail.Load(); t != nil {
 			t.Close()
 		}
@@ -363,7 +364,7 @@ func (c *BranchCache) Reset() {
 
 func (c *BranchCache) resetProvenanceAndClear() {
 	c.committedTxNumEnd = 0
-	c.Clear()
+	c.clear()
 }
 
 // BeginFilesPublication revokes the old files generation. It retains entries
@@ -380,7 +381,7 @@ func (c *BranchCache) BeginFilesPublication(filesEnd uint64) *cache.BackingChang
 		}
 		c.committedTxNumEnd = filesEnd
 		return true
-	}, c.Clear)
+	}, c.clear)
 }
 
 // tailForWrite returns the LRU tail, allocating it on first use so a cache whose
@@ -746,9 +747,9 @@ func (c *BranchCache) Invalidate(prefix []byte) {
 	}
 }
 
-// Clear empties the root, trunk, pinned, and tail tiers and resets their stats.
+// clear empties the root, trunk, pinned, and tail tiers and resets their stats.
 // It holds every writer stripe so a write cannot cross the clear.
-func (c *BranchCache) Clear() {
+func (c *BranchCache) clear() {
 	c.lockAllPutStripes()
 	defer c.unlockAllPutStripes()
 
@@ -766,7 +767,7 @@ func (c *BranchCache) Clear() {
 	c.pinnedHits.Store(0)
 	c.pinnedMisses.Store(0)
 	// Reset the publish watermarks too, else the next PublishMetrics computes a
-	// wrapped (huge) delta against the pre-Clear counter.
+	// wrapped (huge) delta against the pre-clear counter.
 	c.lastPublishedPinnedHits.Store(0)
 	c.lastPublishedPinnedMisses.Store(0)
 	c.tailHits.Store(0)

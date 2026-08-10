@@ -123,19 +123,6 @@ func (v GenerationView) Admit(fill func()) bool {
 	return true
 }
 
-// CurrentStateVersion reports the durable database version of the active
-// generation. It returns false before initialization and during publication.
-func (g *GenerationGate) CurrentStateVersion() (uint64, bool) {
-	if g == nil {
-		return 0, false
-	}
-	generation := g.current.Load()
-	if generation == nil {
-		return 0, false
-	}
-	return generation.identity.stateVersion, true
-}
-
 // GenerationPublisher is the mutation capability for one generation gate.
 type GenerationPublisher struct {
 	gate *GenerationGate
@@ -143,13 +130,8 @@ type GenerationPublisher struct {
 
 // Publisher returns a handle that can initialize and publish the gate.
 func (g *GenerationGate) Publisher() GenerationPublisher {
-	if g == nil {
-		return GenerationPublisher{}
-	}
 	return GenerationPublisher{gate: g}
 }
-
-func (p GenerationPublisher) Enabled() bool { return p.gate != nil }
 
 // Initialize binds the gate to identity's state version and the newest files
 // view already reported by the backing store. A mismatch clears entries while

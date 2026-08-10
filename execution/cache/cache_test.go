@@ -577,7 +577,8 @@ func TestStateCache_Clear(t *testing.T) {
 	view.Fill(kv.StorageDomain, makeAddr(2), makeValue(2), 0)
 	view.Fill(kv.CodeDomain, makeAddr(3), makeCode(3), 0)
 
-	publisher.Clear(testStateGeneration(2))
+	publication := publisher.Begin()
+	publication.Publish(testStateGeneration(2), nil, true)
 	view = c.View(testStateGeneration(2))
 
 	_, ok1 := view.Get(kv.AccountsDomain, makeAddr(1))
@@ -979,7 +980,8 @@ func TestStateCache_StaleViewCannotFillAfterClear(t *testing.T) {
 	sc, publisher := readyStateCache(t, 1)
 	key := makeAddr(1)
 	oldView := sc.View(testStateGeneration(1))
-	publisher.Clear(testStateGeneration(1))
+	publication := publisher.Begin()
+	publication.Publish(testStateGeneration(1), nil, true)
 
 	oldView.Fill(kv.AccountsDomain, key, []byte("pre-delete"), 10)
 	freshView := sc.View(testStateGeneration(1))

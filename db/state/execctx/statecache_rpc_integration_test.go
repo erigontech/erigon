@@ -83,7 +83,7 @@ func TestEmbeddedRPCCacheViewDoesNotRefillUnwoundAccount(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, v2, got, "the pre-reorg RPC view still sees the discarded fork")
 
-	_, ok := currentStateCacheView(t, stateCache).Get(kv.AccountsDomain, key)
+	_, ok := currentStateCacheView(t, db, stateCache).Get(kv.AccountsDomain, key)
 	require.False(t, ok, "the pre-reorg RPC view must not refill the discarded fork")
 
 	freshTx, err := db.BeginTemporalRo(ctx)
@@ -140,7 +140,7 @@ func TestEmbeddedRPCTxBoundAfterUnwindDoesNotRefillUnwoundAccount(t *testing.T) 
 	require.NoError(t, err)
 	require.Equal(t, v2, got, "the old RPC transaction still sees the discarded fork")
 
-	_, ok := currentStateCacheView(t, stateCache).Get(kv.AccountsDomain, key)
+	_, ok := currentStateCacheView(t, db, stateCache).Get(kv.AccountsDomain, key)
 	require.False(t, ok, "binding an old RPC transaction after unwind must not refill the discarded fork")
 
 	got, _, err = freshDomains.GetLatest(kv.AccountsDomain, freshTx, key)
@@ -182,7 +182,7 @@ func TestSharedDomainsOldTxBoundAfterUnwindDoesNotRefillUnwoundAccount(t *testin
 	require.NoError(t, err)
 	require.Equal(t, v2, got, "the old transaction still sees the discarded fork")
 
-	_, ok := currentStateCacheView(t, stateCache).Get(kv.AccountsDomain, key)
+	_, ok := currentStateCacheView(t, db, stateCache).Get(kv.AccountsDomain, key)
 	require.False(t, ok, "binding an old transaction on a cache miss must not refill the discarded fork")
 
 	got, _, err = freshDomains.GetLatest(kv.AccountsDomain, freshTx, key)
@@ -328,7 +328,7 @@ func TestSharedDomainsSameDatabaseViewUsesReadTxFilesGeneration(t *testing.T) {
 		freshDebug.TxNumsInFiles(kv.StorageDomain),
 		freshDebug.TxNumsInFiles(kv.CodeDomain),
 	)
-	stateCache.Publisher().Clear(freshGeneration)
+	stateCache.Publisher().Begin().Publish(freshGeneration, nil, true)
 	cacheOnlyValue := []byte{0xff}
 	freshCacheView := stateCache.View(freshGeneration)
 	freshCacheView.Fill(kv.AccountsDomain, key, cacheOnlyValue, 0)
@@ -412,7 +412,7 @@ func TestAccountOnlyDeleteDoesNotBlockUnrelatedCodeFill(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, code, got)
 
-	cached, ok := currentStateCacheView(t, stateCache).Get(kv.CodeDomain, contractAddr)
+	cached, ok := currentStateCacheView(t, db, stateCache).Get(kv.CodeDomain, contractAddr)
 	require.True(t, ok, "an account-only deletion must not block unrelated code fills")
 	require.Equal(t, code, cached)
 }
@@ -439,7 +439,7 @@ func TestCanonicalUnwindClearsNegativeCacheEntry(t *testing.T) {
 	require.Empty(t, got)
 	readDomains.Close()
 
-	_, ok := currentStateCacheView(t, stateCache).Get(kv.AccountsDomain, missingKey)
+	_, ok := currentStateCacheView(t, db, stateCache).Get(kv.AccountsDomain, missingKey)
 	require.True(t, ok)
 
 	unwindTx, err := db.BeginTemporalRw(ctx)
@@ -452,7 +452,7 @@ func TestCanonicalUnwindClearsNegativeCacheEntry(t *testing.T) {
 	unwindDomains.Unwind(10, &diffs)
 	require.NoError(t, unwindDomains.Commit(ctx, unwindTx))
 
-	_, ok = currentStateCacheView(t, stateCache).Get(kv.AccountsDomain, missingKey)
+	_, ok = currentStateCacheView(t, db, stateCache).Get(kv.AccountsDomain, missingKey)
 	require.False(t, ok, "canonical unwind must clear entries without an unwind callback")
 }
 
@@ -610,13 +610,13 @@ func TestEmbeddedRPCCacheViewDoesNotRefillCodeOfDeletedAccount(t *testing.T) {
 	// The view outlives the overlay teardown on purpose, as above.
 	deleteDomains.Close()
 
-	_, ok := currentStateCacheView(t, stateCache).Get(kv.CodeDomain, addr)
+	_, ok := currentStateCacheView(t, db, stateCache).Get(kv.CodeDomain, addr)
 	require.False(t, ok, "the account deletion must drop the cached code entry")
 
 	got, err := rpcView.GetCode(addr)
 	require.NoError(t, err)
 	require.Empty(t, got, "the view keeps serving the published SD's state after teardown, so the deletion stays visible")
 
-	_, ok = currentStateCacheView(t, stateCache).Get(kv.CodeDomain, addr)
+	_, ok = currentStateCacheView(t, db, stateCache).Get(kv.CodeDomain, addr)
 	require.False(t, ok, "a pre-deletion RPC view must not refill the deleted account's code")
 }

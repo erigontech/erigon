@@ -790,7 +790,6 @@ func (a *Aggregator) Close() {
 	// eagerly and drop this cache from the active-instance count so later
 	// BranchCaches size their trunk depth against real concurrency.
 	if cd := a.d[kv.CommitmentDomain]; cd != nil && cd.branchCache != nil {
-		cd.branchCache.Clear()
 		cd.branchCache.Close()
 	}
 

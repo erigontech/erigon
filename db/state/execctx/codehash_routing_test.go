@@ -45,7 +45,7 @@ func TestCodeHashForAddr_InBatchAccountWinsOverStaleLRU(t *testing.T) {
 	}
 	var staleArr [32]byte
 	copy(staleArr[:], stale[:])
-	currentStateCacheView(t, sc).SeedAddrCodeHash(addr[:], staleArr)
+	currentStateCacheView(t, db, sc).SeedAddrCodeHash(addr[:], staleArr)
 
 	t.Run("empty in-batch account wins (codeHash-no-code repro)", func(t *testing.T) {
 		acc := accounts.Account{Nonce: 7, CodeHash: accounts.EmptyCodeHash}
@@ -99,9 +99,9 @@ func TestCodeHashForAddr_CacheSourcedRecordSeedsMapping(t *testing.T) {
 	require.NoError(t, seedSD.Commit(ctx, seedTx))
 	seedSD.Close()
 
-	_, ok := currentStateCacheView(t, sc).Get(kv.AccountsDomain, addr[:])
+	_, ok := currentStateCacheView(t, db, sc).Get(kv.AccountsDomain, addr[:])
 	require.True(t, ok, "the committed record must be served by the accounts cache")
-	_, ok = currentStateCacheView(t, sc).GetAddrCodeHash(addr[:])
+	_, ok = currentStateCacheView(t, db, sc).GetAddrCodeHash(addr[:])
 	require.False(t, ok, "the post-commit apply must leave the derived mapping empty")
 
 	roTx, err := db.BeginTemporalRo(ctx)
@@ -114,7 +114,7 @@ func TestCodeHashForAddr_CacheSourcedRecordSeedsMapping(t *testing.T) {
 
 	got := sd.CodeHashForAddr(roTx, addr[:], 20)
 	require.Equal(t, codeHash[:], got)
-	h, ok := currentStateCacheView(t, sc).GetAddrCodeHash(addr[:])
+	h, ok := currentStateCacheView(t, db, sc).GetAddrCodeHash(addr[:])
 	require.True(t, ok)
 	require.Equal(t, [32]byte(codeHash), h)
 }
@@ -160,7 +160,7 @@ func TestCodeHashForAddr_ViewSourcedRecordSeedsMapping(t *testing.T) {
 
 	got := sd.CodeHashForAddr(roTx, addr[:], 20)
 	require.Equal(t, codeHash[:], got)
-	h, ok := currentStateCacheView(t, sc).GetAddrCodeHash(addr[:])
+	h, ok := currentStateCacheView(t, db, sc).GetAddrCodeHash(addr[:])
 	require.True(t, ok, "a view-sourced record must seed the mapping")
 	require.Equal(t, [32]byte(codeHash), h)
 }

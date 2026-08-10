@@ -71,20 +71,16 @@ type BranchUpdate struct {
 
 // BranchPublisher is the canonical mutation handle for BranchCache.
 type BranchPublisher struct {
-	c          *BranchCache
-	generation cache.GenerationPublisher
+	c *BranchCache
 }
 
 // Publisher returns a handle that can publish durable branch generations.
 func (c *BranchCache) Publisher() BranchPublisher {
-	if c == nil {
-		return BranchPublisher{}
-	}
-	return BranchPublisher{c: c, generation: c.generation.Publisher()}
+	return BranchPublisher{c: c}
 }
 
 func (p BranchPublisher) Enabled() bool {
-	return p.c != nil && p.generation.Enabled()
+	return p.c != nil
 }
 
 // Initialize binds the cache to generation. A mismatch clears branches and
@@ -93,7 +89,7 @@ func (p BranchPublisher) Initialize(generation cache.Generation) {
 	if p.c == nil {
 		return
 	}
-	p.generation.Initialize(generation, p.c.resetProvenanceAndClear)
+	p.c.generation.Publisher().Initialize(generation, p.c.resetProvenanceAndClear)
 }
 
 // BranchPublication represents one pending durable branch transition.
@@ -107,7 +103,7 @@ func (p BranchPublisher) Begin() *BranchPublication {
 	if p.c == nil {
 		return nil
 	}
-	return &BranchPublication{c: p.c, generation: p.generation.Begin()}
+	return &BranchPublication{c: p.c, generation: p.c.generation.Publisher().Begin()}
 }
 
 // Abort restores the previous branch generation after database rollback.

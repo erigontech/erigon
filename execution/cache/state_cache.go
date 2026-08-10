@@ -92,13 +92,6 @@ func NewDefaultStateCache() *StateCache {
 	)
 }
 
-// CurrentStateVersion reports the durable PlainStateVersion represented by
-// all cache layers. It returns false while publication is in progress because
-// the old version has been revoked and the new version is not visible yet.
-func (c *StateCache) CurrentStateVersion() (uint64, bool) {
-	return c.generation.CurrentStateVersion()
-}
-
 // BeginFilesPublication revokes the old files generation. It retains entries
 // backed by this process's committed updates and clears them when the new files
 // contain foreign state. Finish publishes the new identity after the files
@@ -331,20 +324,16 @@ type Update struct {
 // receive only ReadView, while code that makes database state durable uses a
 // Publisher to move every cache layer to the same Generation.
 type Publisher struct {
-	c          *StateCache
-	generation GenerationPublisher
+	c *StateCache
 }
 
 // Publisher returns a handle that can change the cache's canonical generation.
 // It must not be given to speculative execution whose writes may be discarded.
 func (c *StateCache) Publisher() Publisher {
-	if c == nil {
-		return Publisher{}
-	}
-	return Publisher{c: c, generation: c.generation.Publisher()}
+	return Publisher{c: c}
 }
 
-func (p Publisher) Enabled() bool { return p.c != nil && p.generation.Enabled() }
+func (p Publisher) Enabled() bool { return p.c != nil }
 
 // Initialize binds the cache to the database and files generation seen by its
 // canonical owner. A mismatch clears entries and their file provenance because
@@ -353,7 +342,7 @@ func (p Publisher) Initialize(generation Generation) {
 	if p.c == nil {
 		return
 	}
-	p.generation.Initialize(generation, p.c.resetProvenanceAndClearLocked)
+	p.c.generation.Publisher().Initialize(generation, p.c.resetProvenanceAndClearLocked)
 }
 
 // Publication represents one pending transition of the durable database
@@ -372,7 +361,7 @@ func (p Publisher) Begin() *Publication {
 	if p.c == nil {
 		return nil
 	}
-	return &Publication{c: p.c, generation: p.generation.Begin()}
+	return &Publication{c: p.c, generation: p.c.generation.Publisher().Begin()}
 }
 
 // Abort restores the previous generation after a failed or abandoned database
@@ -408,11 +397,4 @@ func (p *Publication) Publish(generation Generation, updates []Update, clear boo
 		}
 	})
 	p.c = nil
-}
-
-// Clear revokes current views, removes every cached value, and publishes an
-// empty generation.
-func (p Publisher) Clear(generation Generation) {
-	publication := p.Begin()
-	publication.Publish(generation, nil, true)
 }

@@ -142,8 +142,8 @@ func TestBranchCache_Invalidate(t *testing.T) {
 	require.False(t, ok, "deep invalidated")
 }
 
-// TestBranchCache_Clear empties everything and resets stats.
-func TestBranchCache_Clear(t *testing.T) {
+// TestBranchCache_Reset empties everything and resets stats.
+func TestBranchCache_Reset(t *testing.T) {
 	c := NewBranchCache(100)
 	deepKey := []byte{0x12, 0x34, 0x56} // 5 nibbles → LRU tail
 	c.Put([]byte{0x00}, []byte("r"), 0)
@@ -154,7 +154,7 @@ func TestBranchCache_Clear(t *testing.T) {
 	require.Equal(t, uint64(1), c.rootHits.Load())
 	require.Equal(t, uint64(1), c.tailHits.Load())
 
-	c.Clear()
+	c.Reset()
 	require.Equal(t, uint64(0), c.rootHits.Load())
 	require.Equal(t, uint64(0), c.tailHits.Load())
 	_, _, ok := c.Get([]byte{0x00})
@@ -163,7 +163,18 @@ func TestBranchCache_Clear(t *testing.T) {
 	require.False(t, ok)
 }
 
-func clearDuringBlockedBranchCacheWrite(c *BranchCache, block *sync.Mutex, write func()) {
+func TestBranchCache_CloseClearsEntries(t *testing.T) {
+	c := NewBranchCache(100)
+	key := []byte{0x00}
+	c.Put(key, []byte("root"), 0)
+
+	c.Close()
+
+	_, _, ok := c.Get(key)
+	require.False(t, ok)
+}
+
+func resetDuringBlockedBranchCacheWrite(c *BranchCache, block *sync.Mutex, write func()) {
 	// Limit Go execution to one logical processor. Each runtime.Gosched call
 	// yields to the queued goroutine, which runs until it reaches the blocked lock.
 	previousProcs := runtime.GOMAXPROCS(1)
@@ -182,7 +193,7 @@ func clearDuringBlockedBranchCacheWrite(c *BranchCache, block *sync.Mutex, write
 
 	clearDone := make(chan struct{})
 	go func() {
-		c.Clear()
+		c.Reset()
 		close(clearDone)
 	}()
 	runtime.Gosched()
@@ -192,31 +203,31 @@ func clearDuringBlockedBranchCacheWrite(c *BranchCache, block *sync.Mutex, write
 	<-clearDone
 }
 
-func TestBranchCache_ClearFencesStartedPut(t *testing.T) {
+func TestBranchCache_ResetFencesStartedPut(t *testing.T) {
 	c := NewBranchCache(100)
 	defer c.Close()
 
 	key := []byte{0x12, 0x34, 0x56}
-	clearDuringBlockedBranchCacheWrite(c, &c.tailMu, func() {
+	resetDuringBlockedBranchCacheWrite(c, &c.tailMu, func() {
 		c.Put(key, []byte("dead-fork-branch"), 0)
 	})
 
 	_, _, ok := c.Get(key)
-	require.False(t, ok, "Clear must remove a Put that started in the retiring generation")
+	require.False(t, ok, "Reset must remove a Put that started in the retiring generation")
 }
 
-func TestBranchCache_ClearFencesStartedPinEntry(t *testing.T) {
+func TestBranchCache_ResetFencesStartedPinEntry(t *testing.T) {
 	c := NewBranchCache(100)
 	defer c.Close()
 
 	key := make([]byte, 33)
 	key[32] = 1
-	clearDuringBlockedBranchCacheWrite(c, &c.pinnedMu, func() {
+	resetDuringBlockedBranchCacheWrite(c, &c.pinnedMu, func() {
 		c.PinEntry(key, []byte("dead-fork-branch"), 0)
 	})
 
 	_, _, ok := c.Get(key)
-	require.False(t, ok, "Clear must remove a PinEntry that started in the retiring generation")
+	require.False(t, ok, "Reset must remove a PinEntry that started in the retiring generation")
 }
 
 // TestBranchCache_Stats verifies the format of the stats string is

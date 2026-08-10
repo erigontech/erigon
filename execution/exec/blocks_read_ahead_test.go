@@ -57,16 +57,13 @@ func newTestStateCache(t *testing.T) *cache.StateCache {
 	return sc
 }
 
-func currentCacheView(t *testing.T, sc *cache.StateCache) cache.ReadView {
-	t.Helper()
-	stateVersion, ok := sc.CurrentStateVersion()
-	require.True(t, ok)
+func cacheView(sc *cache.StateCache, stateVersion uint64) cache.ReadView {
 	return sc.View(cache.StateGeneration(stateVersion, 0, 0, 0))
 }
 
 func seedFill(t *testing.T, sc *cache.StateCache, domain kv.Domain, k, v []byte, step kv.Step) {
 	t.Helper()
-	currentCacheView(t, sc).Fill(domain, k, v, step)
+	cacheView(sc, 1).Fill(domain, k, v, step)
 }
 
 func TestBlockReadAheaderCarriesBlockAccessList(t *testing.T) {
@@ -95,13 +92,13 @@ func TestCachePopulatingGetterKeepsFresherEntry(t *testing.T) {
 	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
 		sc := newTestStateCache(t)
 		seedFill(t, sc, domain, key, fresh, 54)
-		cpg := &cachePopulatingGetter{TemporalGetter: stubTemporalGetter{v: stale}, view: currentCacheView(t, sc)}
+		cpg := &cachePopulatingGetter{TemporalGetter: stubTemporalGetter{v: stale}, view: cacheView(sc, 1)}
 
 		v, _, err := cpg.GetLatest(domain, key)
 		require.NoError(t, err)
 		require.Equal(t, stale, v, "read-through must still return the view's value")
 
-		got, ok := currentCacheView(t, sc).Get(domain, key)
+		got, ok := cacheView(sc, 1).Get(domain, key)
 		require.True(t, ok, "domain %s", domain)
 		require.Equal(t, fresh, got, "domain %s: warmup must not clobber the fresher entry", domain)
 	}
@@ -115,12 +112,12 @@ func TestCachePopulatingGetterKeepsFresherCodeBinding(t *testing.T) {
 	staleCode := []byte{0xbb, 0x04, 0x05, 0x06}
 	sc := newTestStateCache(t)
 	seedFill(t, sc, kv.CodeDomain, addr, freshCode, 54)
-	cpg := &cachePopulatingGetter{TemporalGetter: stubTemporalGetter{v: staleCode}, view: currentCacheView(t, sc)}
+	cpg := &cachePopulatingGetter{TemporalGetter: stubTemporalGetter{v: staleCode}, view: cacheView(sc, 1)}
 
 	_, _, err := cpg.GetLatest(kv.CodeDomain, addr)
 	require.NoError(t, err)
 
-	got, ok := currentCacheView(t, sc).Get(kv.CodeDomain, addr)
+	got, ok := cacheView(sc, 1).Get(kv.CodeDomain, addr)
 	require.True(t, ok)
 	require.Equal(t, freshCode, got, "warmup must not rebind addr to older code")
 }
@@ -133,31 +130,31 @@ func TestCachePopulatingGetterWarmsColdKeys(t *testing.T) {
 
 	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
 		sc := newTestStateCache(t)
-		cpg := &cachePopulatingGetter{TemporalGetter: stubTemporalGetter{v: val}, view: currentCacheView(t, sc)}
+		cpg := &cachePopulatingGetter{TemporalGetter: stubTemporalGetter{v: val}, view: cacheView(sc, 1)}
 		_, _, err := cpg.GetLatest(domain, key)
 		require.NoError(t, err)
-		got, ok := currentCacheView(t, sc).Get(domain, key)
+		got, ok := cacheView(sc, 1).Get(domain, key)
 		require.True(t, ok, "domain %s", domain)
 		require.Equal(t, val, got, "domain %s", domain)
 	}
 
 	sc := newTestStateCache(t)
-	cpg := &cachePopulatingGetter{TemporalGetter: stubTemporalGetter{v: code}, view: currentCacheView(t, sc)}
+	cpg := &cachePopulatingGetter{TemporalGetter: stubTemporalGetter{v: code}, view: cacheView(sc, 1)}
 	_, _, err := cpg.GetLatest(kv.CodeDomain, key)
 	require.NoError(t, err)
-	got, ok := currentCacheView(t, sc).Get(kv.CodeDomain, key)
+	got, ok := cacheView(sc, 1).Get(kv.CodeDomain, key)
 	require.True(t, ok)
 	require.Equal(t, code, got)
-	got, ok = currentCacheView(t, sc).GetCodeByHash(crypto.Keccak256(code))
+	got, ok = cacheView(sc, 1).GetCodeByHash(crypto.Keccak256(code))
 	require.True(t, ok)
 	require.Equal(t, code, got)
 
 	// Negative results (missing account, empty slot) are cached as nil hits.
 	sc = newTestStateCache(t)
-	cpg = &cachePopulatingGetter{TemporalGetter: stubTemporalGetter{v: nil}, view: currentCacheView(t, sc)}
+	cpg = &cachePopulatingGetter{TemporalGetter: stubTemporalGetter{v: nil}, view: cacheView(sc, 1)}
 	_, _, err = cpg.GetLatest(kv.AccountsDomain, key)
 	require.NoError(t, err)
-	got, ok = currentCacheView(t, sc).Get(kv.AccountsDomain, key)
+	got, ok = cacheView(sc, 1).Get(kv.AccountsDomain, key)
 	require.True(t, ok)
 	require.Empty(t, got)
 }
@@ -167,15 +164,15 @@ func TestCachePopulatingGetterNegativeClearedByPublication(t *testing.T) {
 	sc := newTestStateCache(t)
 	cpg := &cachePopulatingGetter{
 		TemporalGetter: stubTemporalGetter{v: nil},
-		view:           currentCacheView(t, sc),
+		view:           cacheView(sc, 1),
 	}
 	_, _, err := cpg.GetLatest(kv.AccountsDomain, key)
 	require.NoError(t, err)
-	_, ok := currentCacheView(t, sc).Get(kv.AccountsDomain, key)
+	_, ok := cacheView(sc, 1).Get(kv.AccountsDomain, key)
 	require.True(t, ok)
 
-	sc.Publisher().Clear(cache.StateGeneration(2, 0, 0, 0))
-	_, ok = currentCacheView(t, sc).Get(kv.AccountsDomain, key)
+	sc.Publisher().Begin().Publish(cache.StateGeneration(2, 0, 0, 0), nil, true)
+	_, ok = cacheView(sc, 2).Get(kv.AccountsDomain, key)
 	require.False(t, ok)
 }
 
@@ -188,7 +185,7 @@ func TestCachePopulatingGetterInertViewNeverFills(t *testing.T) {
 	}
 	_, _, err := cpg.GetLatest(kv.AccountsDomain, key)
 	require.NoError(t, err)
-	_, ok := currentCacheView(t, sc).Get(kv.AccountsDomain, key)
+	_, ok := cacheView(sc, 1).Get(kv.AccountsDomain, key)
 	require.False(t, ok)
 }
 
@@ -197,13 +194,13 @@ func TestCachePopulatingGetterStaleViewDoesNotFill(t *testing.T) {
 	sc := newTestStateCache(t)
 	cpg := &cachePopulatingGetter{
 		TemporalGetter: stubTemporalGetter{v: []byte("pre-delete-record")},
-		view:           currentCacheView(t, sc),
+		view:           cacheView(sc, 1),
 	}
 	publication := sc.Publisher().Begin()
 	publication.Publish(cache.StateGeneration(2, 0, 0, 0), nil, false)
 
 	_, _, err := cpg.GetLatest(kv.AccountsDomain, key)
 	require.NoError(t, err)
-	_, ok := currentCacheView(t, sc).Get(kv.AccountsDomain, key)
+	_, ok := cacheView(sc, 2).Get(kv.AccountsDomain, key)
 	require.False(t, ok)
 }
