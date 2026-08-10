@@ -751,9 +751,10 @@ func (a *Aggregator) ReloadFiles() error {
 func (a *Aggregator) closeDirtyFilesNoReopen() {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
+	loweringWasForbidden := a.visibilityLoweringForbidden.Swap(false)
+	defer a.visibilityLoweringForbidden.Store(loweringWasForbidden)
 	// This path removes every visible file before replacing them, so no cache
 	// view may remain live across the reset.
-	a.visibilityLoweringForbidden.Store(false)
 	if cd := a.d[kv.CommitmentDomain]; cd != nil && cd.branchCache != nil {
 		cd.branchCache.Reset()
 	}

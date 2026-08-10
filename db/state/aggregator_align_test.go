@@ -18,6 +18,7 @@ package state
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -185,6 +186,23 @@ func TestVisibilityLowering_ForbiddenAggregatorPanicsOnLoweringOnly(t *testing.T
 	agg.ForbidVisibilityLowering()
 	realign := agg.Unalign(kv.ReceiptDomain) // raises the ceiling: allowed
 	require.Panics(t, func() { realign() }, "realigning a still-lagging receipt lowers the state domains' ends")
+}
+
+func TestCloseDirtyFilesNoReopenRestoresVisibilityLoweringGuard(t *testing.T) {
+	t.Parallel()
+
+	for _, initiallyForbidden := range []bool{false, true} {
+		t.Run(fmt.Sprintf("initially_forbidden_%t", initiallyForbidden), func(t *testing.T) {
+			_, agg := testDbAndAggregatorv3(t, alignStepSize)
+			if initiallyForbidden {
+				agg.ForbidVisibilityLowering()
+			}
+
+			agg.closeDirtyFilesNoReopen()
+
+			require.Equal(t, initiallyForbidden, agg.visibilityLoweringForbidden.Load())
+		})
+	}
 }
 
 // craftedClampedVisible replaces the current visible bundle with one where
