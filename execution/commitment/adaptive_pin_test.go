@@ -19,6 +19,7 @@ package commitment
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
 )
@@ -50,13 +51,13 @@ func TestNewAdaptivePinController_ExplicitConfigWins(t *testing.T) {
 }
 
 // The trunk-preload counters are the only signal for how much work the adaptive
-// pin controller is doing; a preload that pins bytes must move both of them.
+// pin controller is doing, so promotion must feed them. Asserting the byte
+// counter is enough to prove recordPreload ran: nothing else writes it.
 func TestAdaptivePin_PromoteRecordsPreloadMetrics(t *testing.T) {
 	hash, tree, _ := buildSyntheticTree(t)
 	resolve := fakeResolver(tree, nil, 100, "")
 
 	bytesBefore := mxPreloadBytesTotal.GetValue()
-	secondsBefore := mxPreloadDurationSecondsTotal.GetValue()
 
 	c := NewAdaptivePinController(NewBranchCache(64), AdaptivePinControllerConfig{}, log.Root())
 	var h [32]byte
@@ -74,9 +75,6 @@ func TestAdaptivePin_PromoteRecordsPreloadMetrics(t *testing.T) {
 
 	if got := mxPreloadBytesTotal.GetValue() - bytesBefore; got <= 0 {
 		t.Errorf("commitment_trunk_preload_bytes_total advanced by %v after promoting a contract, want > 0", got)
-	}
-	if got := mxPreloadDurationSecondsTotal.GetValue() - secondsBefore; got <= 0 {
-		t.Errorf("commitment_trunk_preload_duration_seconds_total advanced by %v after promoting a contract, want > 0", got)
 	}
 }
 
@@ -104,7 +102,6 @@ func TestAdaptivePin_ExtendRecordsPreloadMetrics(t *testing.T) {
 	}
 
 	bytesBefore := mxPreloadBytesTotal.GetValue()
-	secondsBefore := mxPreloadDurationSecondsTotal.GetValue()
 
 	if err := c.runExtensionLocked(context.Background(), state, 2, 1<<20, resolve, nil, nil); err != nil {
 		t.Fatal(err)
@@ -113,7 +110,35 @@ func TestAdaptivePin_ExtendRecordsPreloadMetrics(t *testing.T) {
 	if got := mxPreloadBytesTotal.GetValue() - bytesBefore; got <= 0 {
 		t.Errorf("commitment_trunk_preload_bytes_total advanced by %v after an extension, want > 0", got)
 	}
-	if got := mxPreloadDurationSecondsTotal.GetValue() - secondsBefore; got <= 0 {
-		t.Errorf("commitment_trunk_preload_duration_seconds_total advanced by %v after an extension, want > 0", got)
+}
+
+// The elapsed time cannot be asserted through a real preload: the work takes
+// microseconds, and a coarse platform timer rounds that to zero. Drive
+// recordPreload with a known elapsed time instead.
+func TestRecordPreload_RecordsElapsedAndBytes(t *testing.T) {
+	const elapsed = 50 * time.Millisecond
+
+	for _, tc := range []struct {
+		name        string
+		bytesPinned int
+		wantBytes   float64
+	}{
+		{"pinned bytes are counted", 4096, 4096},
+		// A rolled-back step reports the time it cost without the pins it lost.
+		{"a step that pinned nothing still counts its time", 0, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bytesBefore := mxPreloadBytesTotal.GetValue()
+			secondsBefore := mxPreloadDurationSecondsTotal.GetValue()
+
+			recordPreload(time.Now().Add(-elapsed), tc.bytesPinned)
+
+			if got := mxPreloadBytesTotal.GetValue() - bytesBefore; got != tc.wantBytes {
+				t.Errorf("commitment_trunk_preload_bytes_total advanced by %v, want %v", got, tc.wantBytes)
+			}
+			if got := mxPreloadDurationSecondsTotal.GetValue() - secondsBefore; got < elapsed.Seconds() {
+				t.Errorf("commitment_trunk_preload_duration_seconds_total advanced by %v, want >= %v", got, elapsed.Seconds())
+			}
+		})
 	}
 }
