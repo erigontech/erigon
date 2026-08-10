@@ -470,12 +470,12 @@ func (a *ApiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	a.mux.ServeHTTP(w, r)
 }
 
+// getHead resolves the head from fork choice, not from the memoized head state: the latter
+// only advances once the head state has been copied, so reading it hands out the parent root
+// for the whole duration of that copy.
 func (a *ApiHandler) getHead() (common.Hash, uint64, int, error) {
-	if a.enableMemoizedHeadState {
-		if a.syncedData.Syncing() {
-			return common.Hash{}, 0, http.StatusServiceUnavailable, errors.New("beacon node is syncing")
-		}
-		return a.syncedData.HeadRoot(), a.syncedData.HeadSlot(), 0, nil
+	if a.enableMemoizedHeadState && a.syncedData.Syncing() {
+		return common.Hash{}, 0, http.StatusServiceUnavailable, errors.New("beacon node is syncing")
 	}
 	blockRoot, blockSlot, err := a.forkchoiceStore.GetHead(nil)
 	if err != nil {
