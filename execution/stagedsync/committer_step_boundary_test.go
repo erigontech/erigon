@@ -660,24 +660,33 @@ func TestComputeAhead_StepBoundaryCheckpointMidBlock(t *testing.T) {
 func TestLoop_BlockRequestBeatsSameNumberedResult(t *testing.T) {
 	defer func(p bool) { dbg.BALDrivenCommitment = p }(dbg.BALDrivenCommitment)
 	defer func(p bool) { dbg.IgnoreBAL = p }(dbg.IgnoreBAL)
+	defer func(p bool) { dbg.BatchCommitments = p }(dbg.BatchCommitments)
 	dbg.BALDrivenCommitment = true
 	dbg.IgnoreBAL = false
+	// Per-block mode would publish a second, incremental result per block and
+	// break the single-result assertion below.
+	dbg.BatchCommitments = true
 
+	// Each iteration logs its own expected wrong-root failure.
 	ctx := context.Background()
 	logger := log.New()
-	db, _, doms := setupStepTest(t)
-	rnd := rand.New(rand.NewSource(7))
+	logger.SetHandler(log.DiscardHandler())
+
+	// Each iteration is an independent coin flip on select's two-ready pick.
+	const iterations = uint64(200)
 
 	for _, tc := range []struct {
 		name       string
 		afterStart bool
-		iterations uint64
 	}{
-		{name: "buffered before start", iterations: 200},
-		{name: "delivered after start", afterStart: true, iterations: 2_000},
+		{name: "buffered before start"},
+		{name: "delivered after start", afterStart: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			for i := uint64(1); i <= tc.iterations; i++ {
+			// Own domains per subtest: block and txNum restart at 1.
+			db, _, doms := setupStepTest(t)
+			rnd := rand.New(rand.NewSource(7))
+			for i := uint64(1); i <= iterations; i++ {
 				in := make(chan applyResult, 4)
 				reqs := make(chan *blockRequest, 4)
 				out := make(chan commitmentResult, 4)

@@ -366,11 +366,9 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		// the BAL (checkpointStepsFromBAL), computed while the domain sat exactly at
 		// each edge. Re-checkpointing here from the partially-accumulated cc.state
 		// on an already-advanced domain would let the last writer win and leave the
-		// step's commitment .kv inconsistent — so the incremental path is normally
-		// the sole checkpointer for a block. The in/reqs select has no cross-channel
-		// priority, so a late-consumed blockRequest can leave computedAhead[n] unset
-		// when this hook fires and let both paths checkpoint the same edge; that is
-		// benign — both emit identical values at the same txNum (idempotent).
+		// step's commitment .kv inconsistent — so exactly one of the two paths
+		// checkpoints a block. loop() drains a block's request before its results,
+		// so computedAhead[n] is already settled when this hook fires.
 		if !cc.computedAhead[r.blockNum] && cc.doms.IsUnfrozenStepEdge(cc.roTx, r.txNum) {
 			cc.computeStepBoundary(ctx, commitTarget{blockNum: r.blockNum, blockHash: r.blockHash, lastTxNum: r.txNum})
 		}
