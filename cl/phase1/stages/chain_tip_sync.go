@@ -28,7 +28,7 @@ const (
 	maxGloasVerificationStartRootsPerCycle = 8
 	maxGloasVerificationLeafRootsPerCycle  = maxGloasVerificationStartRootsPerCycle - 2
 	maxGloasVerificationStalledCycles      = 8
-	maxGloasVerificationCheckpoints        = 8
+	maxGloasVerificationCheckpoints        = 256
 )
 
 func gloasVersionedHashes(blobCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) ([]common.Hash, error) {
@@ -788,6 +788,24 @@ func collectUnverifiedGloasPayloadPages(
 	getBlock func(common.Hash) (*cltypes.SignedBeaconBlock, bool),
 	shouldVerify func(common.Hash) bool,
 ) ([]gloasVerificationBlock, []gloasVerificationLineage) {
+	return collectUnverifiedGloasPayloadPagesWithCheckpointLimit(
+		states,
+		finalizedSlot,
+		beaconCfg,
+		getBlock,
+		shouldVerify,
+		maxGloasVerificationCheckpoints,
+	)
+}
+
+func collectUnverifiedGloasPayloadPagesWithCheckpointLimit(
+	states []gloasVerificationLineage,
+	finalizedSlot uint64,
+	beaconCfg *clparams.BeaconChainConfig,
+	getBlock func(common.Hash) (*cltypes.SignedBeaconBlock, bool),
+	shouldVerify func(common.Hash) bool,
+	checkpointLimit int,
+) ([]gloasVerificationBlock, []gloasVerificationLineage) {
 	seen := make(map[common.Hash]struct{}, maxGloasVerificationScanPerLineage)
 	pages := make([][]gloasVerificationBlock, 0, len(states))
 	next := make([]gloasVerificationLineage, 0, len(states))
@@ -857,8 +875,8 @@ func collectUnverifiedGloasPayloadPages(
 			state.cursor = root
 			if state.checkpoints[len(state.checkpoints)-1] != root {
 				state.checkpoints = append(state.checkpoints, root)
-				if len(state.checkpoints) > maxGloasVerificationCheckpoints {
-					state.checkpoints = append([]common.Hash(nil), state.checkpoints[len(state.checkpoints)-maxGloasVerificationCheckpoints:]...)
+				if len(state.checkpoints) > checkpointLimit {
+					state.checkpoints = append([]common.Hash(nil), state.checkpoints[len(state.checkpoints)-checkpointLimit:]...)
 					state.truncated = true
 				}
 			}

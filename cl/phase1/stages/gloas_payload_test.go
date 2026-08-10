@@ -353,7 +353,8 @@ func TestCollectUnverifiedGloasPayloadsDefersSharedForkUntilAncestor(t *testing.
 
 func TestCollectUnverifiedGloasPayloadPagesAdvancesBeyondContinuationCapacity(t *testing.T) {
 	cfg := testGloasVerificationConfig()
-	depth := maxGloasVerificationScanPerLineage*(maxGloasVerificationStartRootsPerCycle+1) + 1
+	checkpointLimit := maxGloasVerificationStartRootsPerCycle
+	depth := maxGloasVerificationScanPerLineage*(checkpointLimit*3) + 1
 	blocks := make(map[common.Hash]*cltypes.SignedBeaconBlock, depth)
 	parentRoot := common.Hash{}
 	for i := 1; i <= depth; i++ {
@@ -368,7 +369,7 @@ func TestCollectUnverifiedGloasPayloadPagesAdvancesBeyondContinuationCapacity(t 
 		if len(states) == 0 {
 			states = []gloasVerificationLineage{{origin: parentRoot, cursor: parentRoot}}
 		}
-		items, next := collectUnverifiedGloasPayloadPages(
+		items, next := collectUnverifiedGloasPayloadPagesWithCheckpointLimit(
 			states,
 			0,
 			&cfg,
@@ -378,13 +379,14 @@ func TestCollectUnverifiedGloasPayloadPagesAdvancesBeyondContinuationCapacity(t 
 				return block, ok
 			},
 			func(root common.Hash) bool { return !verified[root] },
+			checkpointLimit,
 		)
 		for _, item := range items {
 			verified[item.root] = true
 		}
 		states = next
 		for _, state := range states {
-			require.LessOrEqual(t, len(state.checkpoints), maxGloasVerificationCheckpoints)
+			require.LessOrEqual(t, len(state.checkpoints), checkpointLimit)
 		}
 	}
 
