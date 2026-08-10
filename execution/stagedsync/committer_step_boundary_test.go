@@ -672,21 +672,24 @@ func TestLoop_BlockRequestBeatsSameNumberedResult(t *testing.T) {
 	logger := log.New()
 	logger.SetHandler(log.DiscardHandler())
 
-	// Each iteration is an independent coin flip on select's two-ready pick.
-	const iterations = uint64(200)
-
+	// Each iteration is an independent chance at select's two-ready pick, but the
+	// two orders are not equally likely to hit it: with the drain removed, the
+	// pre-buffered order catches within a handful of iterations while after-start
+	// averages ~40 and tails past 100, so it needs the larger count to keep a
+	// regression from slipping through.
 	for _, tc := range []struct {
 		name       string
 		afterStart bool
+		iterations uint64
 	}{
-		{name: "buffered before start"},
-		{name: "delivered after start", afterStart: true},
+		{name: "buffered before start", iterations: 200},
+		{name: "delivered after start", afterStart: true, iterations: 2_000},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			// Own domains per subtest: block and txNum restart at 1.
 			db, _, doms := setupStepTest(t)
 			rnd := rand.New(rand.NewSource(7))
-			for i := uint64(1); i <= iterations; i++ {
+			for i := uint64(1); i <= tc.iterations; i++ {
 				in := make(chan applyResult, 4)
 				reqs := make(chan *blockRequest, 4)
 				out := make(chan commitmentResult, 4)
