@@ -160,7 +160,7 @@ func (pph *PBinPatriciaHashed) Process(ctx context.Context, updates *Updates, lo
 			return nil, fmt.Errorf("pbin: final fold: %w", err)
 		}
 	}
-	if err = pph.storeRoot(); err != nil {
+	if err := pph.storeRoot(); err != nil {
 		return nil, err
 	}
 	if onProgress != nil {

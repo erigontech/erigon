@@ -317,7 +317,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			statecfg.ExperimentalBinCommitment = true
 		}
 		if config.BinCommitmentHash != "" {
-			if err = commitment.SetPBinHashSuite(config.BinCommitmentHash); err != nil {
+			if err := commitment.SetPBinHashSuite(config.BinCommitmentHash); err != nil {
 				return err
 			}
 			statecfg.BinCommitmentHash = config.BinCommitmentHash

@@ -77,7 +77,7 @@ func pbinExecBlockStatelessly(
 	if err != nil {
 		return common.Hash{}, nil, err
 	}
-	if err = replayBlockOverWitness(result, block, chainConfig, engine, stateless); err != nil {
+	if err := replayBlockOverWitness(result, block, chainConfig, engine, stateless); err != nil {
 		return common.Hash{}, stateless, err
 	}
 

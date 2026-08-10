@@ -2209,7 +2209,7 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 		// common.HexToAddress("0x8863786beBE8eB9659DF00b49f8f1eeEc7e2C8c1"),
 	})
 
-	if err = replayBlockOverWitness(result, block, chainConfig, engine, stateless); err != nil {
+	if err := replayBlockOverWitness(result, block, chainConfig, engine, stateless); err != nil {
 		return common.Hash{}, stateless, err
 	}
 

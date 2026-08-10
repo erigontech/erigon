@@ -55,7 +55,10 @@ func TestPBinStorageLayoutCost(t *testing.T) {
 	}
 	rows := make([]row, 0, len(patterns))
 
-	for _, p := range patterns {
+	buildRow := func(p struct {
+		name string
+		slot func(i int) uint64
+	}) row {
 		c := new(pbinTestCorpus).account(addr, 1, 100, pbinTestCodeHash(0))
 		for i := range slots {
 			c = c.storage(addr, pbinSlotAt(p.slot(i)), byte(i+1))
@@ -80,7 +83,10 @@ func TestPBinStorageLayoutCost(t *testing.T) {
 				t.Fatalf("unknown tag %#x", n[0])
 			}
 		}
-		rows = append(rows, r)
+		return r
+	}
+	for _, p := range patterns {
+		rows = append(rows, buildRow(p))
 	}
 
 	t.Logf("%d storage slots on one account, by where the embedding puts them:", slots)

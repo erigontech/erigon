@@ -141,7 +141,7 @@ func pbinDecodeBranch(data []byte, cells *[2]pbinCell) (touchMap, afterMap uint1
 		return 0, 0, fmt.Errorf("%w: %d bytes is shorter than the header", errPBinMalformedBranch, len(data))
 	}
 	touchMap, afterMap = binary.BigEndian.Uint16(data), binary.BigEndian.Uint16(data[2:])
-	if err = pbinCheckCellMaps(touchMap, afterMap); err != nil {
+	if err := pbinCheckCellMaps(touchMap, afterMap); err != nil {
 		return 0, 0, err
 	}
 

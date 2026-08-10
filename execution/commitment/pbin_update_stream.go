@@ -73,10 +73,10 @@ func (s *pbinUpdateStream) process(ctx context.Context, updates *Updates, state 
 	if err != nil {
 		return processed, err
 	}
-	if err = s.flushCodeChunks(); err != nil {
+	if err := s.flushCodeChunks(); err != nil {
 		return processed, err
 	}
-	if err = s.flushRemovals(nil); err != nil {
+	if err := s.flushRemovals(nil); err != nil {
 		return processed, err
 	}
 	return processed, nil
