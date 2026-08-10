@@ -391,6 +391,44 @@ func TestEIP2780IntrinsicGas(t *testing.T) {
 	}
 }
 
+// A contract-creating transaction and the CREATE opcode must price the new
+// account identically. They read separate constants, so a schedule that moves
+// one without the other diverges silently: the opcode charges the revised cost
+// while the transaction keeps the base one.
+func TestEIP8038RevisedCreateAccess(t *testing.T) {
+	cases := map[string]struct {
+		revised     bool
+		createAcces uint64
+	}{
+		"base schedule":    {createAcces: params.CreateAccessEIP8038},
+		"revised schedule": {revised: true, createAcces: params.CreateAccessEIP8038Revised},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			args := IntrinsicGasCalcArgs{
+				IsContractCreation: true,
+				IsEIP2:             true,
+				IsEIP2028:          true,
+				IsEIP3860:          true,
+				IsEIP7623:          true,
+				IsEIP7976:          true,
+				IsEIP7981:          true,
+				IsEIP2780:          true,
+				IsEIP8038Revised:   c.revised,
+			}
+			result, overflow := CalcIntrinsicGas(args)
+			assert.False(t, overflow)
+			assert.Equal(t, params.TxBaseEIP2780+c.createAcces, result.ExecutionGas)
+
+			// The flag prices creation only; an ordinary recipient is untouched.
+			args.IsContractCreation = false
+			eoa, overflow := CalcIntrinsicGas(args)
+			assert.False(t, overflow)
+			assert.Equal(t, params.TxBaseEIP2780+params.ColdAccountAccessEIP2780, eoa.ExecutionGas)
+		})
+	}
+}
+
 func TestEIP2780ContractCreationStateGasIsRuntime(t *testing.T) {
 	result, overflow := CalcIntrinsicGas(IntrinsicGasCalcArgs{
 		IsContractCreation: true,
