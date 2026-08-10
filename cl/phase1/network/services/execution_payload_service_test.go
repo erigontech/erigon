@@ -293,7 +293,6 @@ func TestExecutionPayloadServicePendingEnvelopeProcessing(t *testing.T) {
 		envelope:     envelope,
 		creationTime: time.Now(),
 	}
-	job.gossip.Store(true)
 	job.validate.Store(true)
 	impl.pendingEnvelopes.Store(key, job)
 	impl.pendingCount.Store(1)
@@ -332,10 +331,24 @@ func TestExecutionPayloadServiceRetriesEnvelopeUntilColumnDataAvailable(t *testi
 	require.ErrorIs(t, err, ErrIgnore)
 	require.Equal(t, int32(1), impl.pendingCount.Load())
 
+	impl.pendingEnvelopes.Range(func(_, value any) bool {
+		value.(*envelopeJob).nextAttempt = time.Time{}
+		return true
+	})
 	impl.processPendingEnvelopes(t.Context())
 	require.Equal(t, int32(1), impl.pendingCount.Load())
+	impl.pendingEnvelopes.Range(func(_, value any) bool {
+		job := value.(*envelopeJob)
+		require.Equal(t, 2*time.Second, job.retryDelay)
+		require.True(t, job.nextAttempt.After(time.Now()))
+		return true
+	})
 
 	fcu.OnExecutionPayloadErr = nil
+	impl.pendingEnvelopes.Range(func(_, value any) bool {
+		value.(*envelopeJob).nextAttempt = time.Time{}
+		return true
+	})
 	impl.processPendingEnvelopes(t.Context())
 	require.Equal(t, int32(0), impl.pendingCount.Load())
 	require.True(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 1}))
@@ -350,15 +363,52 @@ func TestExecutionPayloadServiceRetriesRecoveredEnvelope(t *testing.T) {
 	}
 	fcu.OnExecutionPayloadErr = forkchoice.ErrEIP7594ColumnDataNotAvailable
 
-	err := impl.ProcessRecoveredEnvelope(t.Context(), envelope, false)
+	err := impl.ProcessRecoveredEnvelope(t.Context(), envelope, true)
 	require.ErrorIs(t, err, ErrIgnore)
 	require.ErrorIs(t, err, forkchoice.ErrEIP7594ColumnDataNotAvailable)
 	require.Equal(t, int32(1), impl.pendingCount.Load())
 
 	fcu.OnExecutionPayloadErr = nil
+	impl.pendingEnvelopes.Range(func(_, value any) bool {
+		value.(*envelopeJob).nextAttempt = time.Time{}
+		return true
+	})
 	impl.processPendingEnvelopes(t.Context())
 	require.Equal(t, int32(0), impl.pendingCount.Load())
 	require.False(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 1}))
+}
+
+func TestExecutionPayloadServiceDataAvailabilityRetriesDeduplicateByRoot(t *testing.T) {
+	impl, fcu := setupExecutionPayloadServiceWithoutLoop(t)
+	blockRoot := common.HexToHash("0x1234")
+	fcu.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{
+		Block: &cltypes.BeaconBlock{Slot: 100},
+	}
+	fcu.OnExecutionPayloadErr = forkchoice.ErrEIP7594ColumnDataNotAvailable
+
+	require.Error(t, impl.ProcessRecoveredEnvelope(t.Context(), newTestSignedEnvelope(100, blockRoot, 1), true))
+	require.Error(t, impl.ProcessRecoveredEnvelope(t.Context(), newTestSignedEnvelope(100, blockRoot, 2), true))
+	require.Equal(t, int32(1), impl.pendingCount.Load())
+}
+
+func TestExecutionPayloadServicePendingExpiryCoversDeferredColumnSync(t *testing.T) {
+	require.Greater(t, pendingEnvelopeExpiry, time.Minute)
+}
+
+func TestExecutionPayloadServiceRejectsGossipAfterRecoveredEnvelope(t *testing.T) {
+	impl, fcu := setupExecutionPayloadServiceWithoutLoop(t)
+	blockRoot := common.HexToHash("0x1234")
+	valid := newTestSignedEnvelope(100, blockRoot, 1)
+	fcu.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{
+		Block: &cltypes.BeaconBlock{Slot: 100},
+	}
+	require.NoError(t, impl.ProcessRecoveredEnvelope(t.Context(), valid, true))
+	fcu.Envelopes[blockRoot] = valid
+
+	forged := newTestSignedEnvelope(100, blockRoot, 2)
+	err := impl.ProcessMessage(t.Context(), nil, forged)
+	require.ErrorIs(t, err, ErrIgnore)
+	require.False(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 2}))
 }
 
 func TestExecutionPayloadServiceMultiplePendingForSameBlock(t *testing.T) {
@@ -390,16 +440,14 @@ func TestExecutionPayloadServiceMultiplePendingForSameBlock(t *testing.T) {
 		envelope:     envelope1,
 		creationTime: time.Now(),
 	}
-	job1.gossip.Store(true)
 	job1.validate.Store(true)
-	impl.pendingEnvelopes.Store(pendingEnvelopeKey{blockRoot, hash1}, job1)
+	impl.pendingEnvelopes.Store(pendingEnvelopeKey{blockRoot, hash1, false}, job1)
 	job2 := &envelopeJob{
 		envelope:     envelope2,
 		creationTime: time.Now(),
 	}
-	job2.gossip.Store(true)
 	job2.validate.Store(true)
-	impl.pendingEnvelopes.Store(pendingEnvelopeKey{blockRoot, hash2}, job2)
+	impl.pendingEnvelopes.Store(pendingEnvelopeKey{blockRoot, hash2, false}, job2)
 	impl.pendingCount.Store(2)
 
 	// Add block
@@ -441,24 +489,39 @@ func TestExecutionPayloadServicePendingQueueCap(t *testing.T) {
 	require.Equal(t, int32(maxPendingEnvelopes), impl.pendingCount.Load())
 	envelopeHash, err := envelope.HashSSZ()
 	require.NoError(t, err)
-	_, exists := impl.pendingEnvelopes.Load(pendingEnvelopeKey{blockRoot, envelopeHash})
+	_, exists := impl.pendingEnvelopes.Load(pendingEnvelopeKey{blockRoot, envelopeHash, false})
 	require.False(t, exists)
 }
 
-func TestExecutionPayloadServicePendingQueueUpgradesRecoveredEnvelope(t *testing.T) {
+func TestExecutionPayloadServicePendingQueueUpgradesDataAvailabilityDuplicateAtCap(t *testing.T) {
+	impl, _ := setupExecutionPayloadServiceWithoutLoop(t)
+	blockRoot := common.HexToHash("0x1234")
+	envelope := newTestSignedEnvelope(100, blockRoot, 1)
+	impl.queuePendingEnvelopeWithOptions(blockRoot, envelope, false, true, true)
+	impl.pendingCount.Store(maxPendingEnvelopes)
+
+	impl.queuePendingEnvelopeWithOptions(blockRoot, envelope, true, true, true)
+
+	value, ok := impl.pendingEnvelopes.Load(pendingEnvelopeKey{blockRoot: blockRoot, dataAvailability: true})
+	require.True(t, ok)
+	require.True(t, value.(*envelopeJob).recovered.Load())
+	require.Equal(t, int32(maxPendingEnvelopes), impl.pendingCount.Load())
+}
+
+func TestExecutionPayloadServicePendingQueuePreservesRecoveredEnvelope(t *testing.T) {
 	impl, _ := setupExecutionPayloadServiceWithoutLoop(t)
 	blockRoot := common.HexToHash("0x1234")
 	envelope := newTestSignedEnvelope(100, blockRoot, 1)
 	envelopeHash, err := envelope.HashSSZ()
 	require.NoError(t, err)
 
-	impl.queuePendingEnvelopeWithOptions(blockRoot, envelope, true, false)
+	impl.queuePendingEnvelopeWithOptions(blockRoot, envelope, true, false, false)
 	impl.queuePendingEnvelope(blockRoot, envelope)
 
-	value, ok := impl.pendingEnvelopes.Load(pendingEnvelopeKey{blockRoot, envelopeHash})
+	value, ok := impl.pendingEnvelopes.Load(pendingEnvelopeKey{blockRoot, envelopeHash, false})
 	require.True(t, ok)
 	job := value.(*envelopeJob)
-	require.True(t, job.gossip.Load())
+	require.True(t, job.recovered.Load())
 	require.True(t, job.validate.Load())
 	require.Equal(t, int32(1), impl.pendingCount.Load())
 }

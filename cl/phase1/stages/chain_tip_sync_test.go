@@ -50,7 +50,7 @@ func TestApplyRecoveredEnvelopesUsesRetryingProcessor(t *testing.T) {
 	})
 
 	require.Equal(t, []*cltypes.SignedExecutionPayloadEnvelope{envelope}, processor.envelopes)
-	require.Equal(t, []bool{false}, processor.validate)
+	require.Equal(t, []bool{true}, processor.validate)
 }
 
 func TestApplyRecoveredEnvelopesIgnoresNilEnvelope(t *testing.T) {

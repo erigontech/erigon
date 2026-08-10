@@ -306,9 +306,9 @@ func applyRecoveredEnvelopes(ctx context.Context, cfg *Cfg, envelopes map[common
 		}
 		var err error
 		if cfg.recoveredEnvelopeProcessor != nil {
-			err = cfg.recoveredEnvelopeProcessor.ProcessRecoveredEnvelope(ctx, env, canRetryGloasPayloads(cfg))
+			err = cfg.recoveredEnvelopeProcessor.ProcessRecoveredEnvelope(ctx, env, true)
 		} else {
-			err = cfg.forkChoice.OnExecutionPayload(ctx, env, true, canRetryGloasPayloads(cfg))
+			err = cfg.forkChoice.OnExecutionPayload(ctx, env, true, true)
 		}
 		if err != nil {
 			log.Debug("[chainTipSync] failed to apply recovered GLOAS envelope", "beaconBlockRoot", root, "err", err)
