@@ -68,12 +68,12 @@ func (g Generation) WithStateVersion(stateVersion uint64) Generation {
 // published again.
 type publishedGeneration struct {
 	identity Generation
-	active   bool
 }
 
 // GenerationGate binds lock-free cache reads and serialized fills to one
 // durable database state over one compatible files view.
 type GenerationGate struct {
+	// current is nil until initialization and while publication is in progress.
 	current     atomic.Pointer[publishedGeneration]
 	admissionMu sync.RWMutex
 	// publicationMu orders durable cache publication with independent changes
@@ -97,7 +97,7 @@ func (g *GenerationGate) View(identity Generation) GenerationView {
 		return GenerationView{}
 	}
 	generation := g.current.Load()
-	if generation == nil || !generation.active || generation.identity != identity {
+	if generation == nil || generation.identity != identity {
 		return GenerationView{}
 	}
 	return GenerationView{gate: g, generation: generation}
@@ -130,7 +130,7 @@ func (g *GenerationGate) CurrentStateVersion() (uint64, bool) {
 		return 0, false
 	}
 	generation := g.current.Load()
-	if generation == nil || !generation.active {
+	if generation == nil {
 		return 0, false
 	}
 	return generation.identity.stateVersion, true
@@ -171,7 +171,7 @@ func (p GenerationPublisher) Initialize(identity Generation, clear func()) {
 		gate.filesKnown = true
 	}
 	current := gate.current.Load()
-	if current != nil && current.active && current.identity == identity {
+	if current != nil && current.identity == identity {
 		return
 	}
 
@@ -179,16 +179,13 @@ func (p GenerationPublisher) Initialize(identity Generation, clear func()) {
 	if clear != nil {
 		clear()
 	}
-	gate.current.Store(&publishedGeneration{identity: identity, active: true})
+	gate.current.Store(&publishedGeneration{identity: identity})
 }
 
 // GenerationPublication represents one pending durable transition.
 type GenerationPublication struct {
-	gate       *GenerationGate
-	previous   *publishedGeneration
-	transition *publishedGeneration
-	files      FilesView
-	filesKnown bool
+	gate     *GenerationGate
+	previous *publishedGeneration
 }
 
 // Begin revokes all existing views without changing cache entries. It also
@@ -204,18 +201,10 @@ func (p GenerationPublisher) Begin() *GenerationPublication {
 	defer gate.admissionMu.Unlock()
 
 	previous := gate.current.Load()
-	if previous != nil && !previous.active {
-		gate.publicationMu.Unlock()
-		panic("cache generation publication already in progress")
-	}
-	transition := &publishedGeneration{}
-	gate.current.Store(transition)
+	gate.current.Store(nil)
 	return &GenerationPublication{
-		gate:       gate,
-		previous:   previous,
-		transition: transition,
-		files:      gate.files,
-		filesKnown: gate.filesKnown,
+		gate:     gate,
+		previous: previous,
 	}
 }
 
@@ -237,7 +226,7 @@ func (p *GenerationPublication) Abort() {
 	gate.admissionMu.Lock()
 	defer gate.publicationMu.Unlock()
 	defer gate.admissionMu.Unlock()
-	if gate.current.Load() != p.transition {
+	if gate.current.Load() != nil {
 		panic("cache generation publication changed before abort")
 	}
 	gate.current.Store(p.previous)
@@ -253,19 +242,19 @@ func (p *GenerationPublication) Publish(identity Generation, apply func()) {
 	gate.admissionMu.Lock()
 	defer gate.publicationMu.Unlock()
 	defer gate.admissionMu.Unlock()
-	if gate.current.Load() != p.transition {
+	if gate.current.Load() != nil {
 		panic("cache generation publication changed before publish")
 	}
 	if apply != nil {
 		apply()
 	}
-	if p.filesKnown {
-		identity.files = p.files
+	if gate.filesKnown {
+		identity.files = gate.files
 	} else {
 		gate.files = identity.files
 		gate.filesKnown = true
 	}
-	gate.current.Store(&publishedGeneration{identity: identity, active: true})
+	gate.current.Store(&publishedGeneration{identity: identity})
 	p.gate = nil
 }
 
@@ -290,9 +279,8 @@ func (g *GenerationGate) Reset(clear func()) {
 // BackingChange keeps cache publication blocked while a new files view becomes
 // visible.
 type BackingChange struct {
-	gate       *GenerationGate
-	transition *publishedGeneration
-	next       *publishedGeneration
+	gate *GenerationGate
+	next *publishedGeneration
 }
 
 // BeginBackingChange runs reconcile while publications and fills are blocked.
@@ -317,28 +305,23 @@ func (p GenerationPublisher) BeginBackingChange(files FilesView, reconcile func(
 
 	incompatible := reconcile != nil && reconcile()
 	current := gate.current.Load()
-	if current != nil && !current.active {
-		panic("cache generation publication already in progress")
-	}
 	gate.files = files
 	gate.filesKnown = true
 	if current != nil && current.identity.files == files && !incompatible {
 		return nil
 	}
-	var transition, next *publishedGeneration
+	var next *publishedGeneration
 	if current != nil {
-		transition = &publishedGeneration{}
 		next = &publishedGeneration{
 			identity: Generation{stateVersion: current.identity.stateVersion, files: files},
-			active:   true,
 		}
-		gate.current.Store(transition)
+		gate.current.Store(nil)
 	}
 	if incompatible && clear != nil {
 		clear()
 	}
 	keepPublicationLocked = true
-	return &BackingChange{gate: gate, transition: transition, next: next}
+	return &BackingChange{gate: gate, next: next}
 }
 
 // Finish publishes the matching cache identity after the files view is visible.
@@ -350,7 +333,7 @@ func (c *BackingChange) Finish() {
 	gate.admissionMu.Lock()
 	defer gate.publicationMu.Unlock()
 	defer gate.admissionMu.Unlock()
-	if c.transition != nil && gate.current.Load() != c.transition {
+	if gate.current.Load() != nil {
 		panic("cache generation changed during files publication")
 	}
 	gate.current.Store(c.next)
