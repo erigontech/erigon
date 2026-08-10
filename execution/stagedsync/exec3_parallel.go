@@ -1299,11 +1299,6 @@ func (pe *parallelExecutor) decideStop(blockResult *blockResult, sizeCutPending 
 }
 
 func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *execRequest) (err error) {
-	// The state cache is a SharedDomain implementation detail: it is populated
-	// only at flush (committed, fork-agnostic state) and invalidated only on
-	// unwind (txNum/epoch — see StateCache.Unwind). The executor does not touch
-	// it during forward execution.
-
 	if execRequest.block == nil {
 		return errors.New("parallel exec request has no block")
 	}
