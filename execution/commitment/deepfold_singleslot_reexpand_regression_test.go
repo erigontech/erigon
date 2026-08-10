@@ -37,7 +37,7 @@ import (
 func TestDeepFold_SingleSlotCollapseThenDeepReexpand(t *testing.T) {
 	t.Parallel()
 
-	const seed = 900 // < deepStorageThreshold: batch 1 and the batch-2 collapse both stream
+	const seed = 100 // < deepStorageThreshold: batch 1 and the batch-2 collapse both stream
 	addr, _, _, _, wk1, wu1, groups := whaleByNibble(seed)
 	a := hex.EncodeToString(addr)
 
