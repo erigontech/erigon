@@ -5874,7 +5874,7 @@ All `trace_*` methods return objects built from the same set of fields. Each met
 | `trace_callMany` | `Array` — one per input call |
 | `trace_replayBlockTransactions` | `Array` — one per transaction; each entry adds `transactionHash` |
 | `trace_block`, `trace_filter`, `trace_transaction` | `Array` (flat list across all call frames) |
-| `trace_get` | `TraceEntry` (single call frame at the requested position) |
+| `trace_get` | `TraceEntry` (single call frame at the requested `traceAddress` path) |
 
 ### Top-level (ad-hoc tracing) fields
 
@@ -6422,12 +6422,12 @@ Response
 
 ### trace\_get
 
-Returns trace at given position.
+Returns the call frame at the given `traceAddress` path.
 
 #### Parameters
 
 1. `Hash` - Transaction hash.
-2. `Array` - Index positions of the traces.
+2. `Array` - `traceAddress` path of the call frame: `[]` for the root call, `["0x1", "0x0"]` for the first child of the second child of the root.
 
 ```js
 params: [
@@ -6438,7 +6438,7 @@ params: [
 
 #### Returns
 
-A single `TraceEntry` corresponding to the call frame at the requested position, with block-level fields (`blockHash`, `blockNumber`, `transactionHash`, `transactionPosition`). See [Response Fields Reference](#response-fields-reference).
+A single `TraceEntry` corresponding to the call frame at the requested `traceAddress` path, with block-level fields (`blockHash`, `blockNumber`, `transactionHash`, `transactionPosition`). See [Response Fields Reference](#response-fields-reference).
 
 #### Example
 
