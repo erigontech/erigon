@@ -19,6 +19,7 @@ package execctx_test
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -36,6 +37,19 @@ type commitErrorTx struct {
 }
 
 func (tx *commitErrorTx) Commit() error { return tx.err }
+
+type pausedCommitTx struct {
+	kv.TemporalRwTx
+	entered chan struct{}
+	resume  chan struct{}
+	err     error
+}
+
+func (tx *pausedCommitTx) Commit() error {
+	close(tx.entered)
+	<-tx.resume
+	return tx.err
+}
 
 func branchGenerationForTx(t *testing.T, tx kv.TemporalTx) cache.Generation {
 	t.Helper()
@@ -85,6 +99,68 @@ func TestCommitRequiresCanonicalCacheBinding(t *testing.T) {
 
 	err = sd.Commit(ctx, tx)
 	require.ErrorContains(t, err, "SetCanonicalCaches")
+}
+
+func TestCommitDoesNotHoldCachePublicationDuringDatabaseCommit(t *testing.T) {
+	ctx := t.Context()
+	db := newTestDb(t, 100)
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	sd, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	sd.SetCanonicalCaches(nil)
+
+	provider, ok := rwTx.AggTx().(commitment.BranchCacheProvider)
+	require.True(t, ok)
+	branchCache := provider.BranchCache()
+	require.NotNil(t, branchCache)
+	filesEnd := rwTx.Debug().TxNumsInFiles(kv.CommitmentDomain) + 1
+
+	pausedTx := &pausedCommitTx{
+		TemporalRwTx: rwTx,
+		entered:      make(chan struct{}),
+		resume:       make(chan struct{}),
+		err:          errors.New("injected commit failure"),
+	}
+	commitDone := make(chan error, 1)
+	go func() { commitDone <- sd.Commit(ctx, pausedTx) }()
+
+	select {
+	case <-pausedTx.entered:
+	case <-time.After(time.Second):
+		close(pausedTx.resume)
+		t.Fatal("database commit was not reached")
+	}
+
+	filesPublished := make(chan struct{})
+	go func() {
+		branchCache.BeginFilesPublication(filesEnd).Finish()
+		close(filesPublished)
+	}()
+
+	publicationBlocked := false
+	select {
+	case <-filesPublished:
+	case <-time.After(time.Second):
+		publicationBlocked = true
+	}
+	close(pausedTx.resume)
+
+	select {
+	case err := <-commitDone:
+		require.ErrorIs(t, err, pausedTx.err)
+	case <-time.After(time.Second):
+		t.Fatal("database commit did not finish")
+	}
+	select {
+	case <-filesPublished:
+	case <-time.After(time.Second):
+		t.Fatal("files publication did not finish")
+	}
+	require.False(t, publicationBlocked, "database commit must not hold cache publication while transaction close may acquire aggregator locks")
 }
 
 // Flush changes only the write transaction. The retained memory batch must
@@ -299,7 +375,7 @@ func TestCanonicalUnwindClearsBranchCacheOnlyAfterCommit(t *testing.T) {
 	require.False(t, ok, "the unwound generation must not retain a cache-only discarded branch")
 }
 
-func TestFailedCommitRestoresBranchCacheGeneration(t *testing.T) {
+func TestFailedCommitKeepsBranchCacheGeneration(t *testing.T) {
 	db := newTestDb(t, 100)
 	ctx := t.Context()
 	logger := log.New()
@@ -333,6 +409,6 @@ func TestFailedCommitRestoresBranchCacheGeneration(t *testing.T) {
 	require.ErrorIs(t, err, sentinel)
 
 	value, _, ok := view.Get(key)
-	require.True(t, ok, "a failed database commit must restore the previous branch generation")
+	require.True(t, ok, "a failed database commit must keep the previous branch generation")
 	require.Equal(t, []byte("durable"), value)
 }

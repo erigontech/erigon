@@ -1144,28 +1144,35 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 		nextCacheGenerations = sd.baseCacheGenerations.withStateVersion(stateVersion)
 	}
 
-	var statePublication *cache.Publication
-	var branchPublication *commitment.BranchPublication
 	var adaptivePlan *commitment.AdaptivePinPlan
-	defer func() {
-		statePublication.Abort()
-		branchPublication.Abort()
-		adaptivePlan.Abort()
-	}()
-
-	// Canonical commits and file-view changes both acquire BranchCache before
-	// StateCache. Keeping one order prevents their publications from deadlocking.
 	if branchCacheEnabled {
 		if !sd.clearExecutionCaches {
 			adaptivePlan = sd.planAdaptivePins(tx)
 		}
+	}
+	defer func() { adaptivePlan.Abort() }()
+
+	// Do not hold cache publication locks across tx.Commit: transaction cleanup
+	// may acquire aggregator file locks in the opposite order. The old generation
+	// remains safe because new transactions have the new state version, while old
+	// transactions still read the old durable state.
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	var statePublication *cache.Publication
+	var branchPublication *commitment.BranchPublication
+	defer func() {
+		statePublication.Abort()
+		branchPublication.Abort()
+	}()
+	// Canonical commits and file-view changes both acquire BranchCache before
+	// StateCache. Keeping one order prevents their publications from deadlocking.
+	if branchCacheEnabled {
 		branchPublication = sd.branchPublisher.Begin()
 	}
 	if stateCacheEnabled {
 		statePublication = sd.statePublisher.Begin()
-	}
-	if err := tx.Commit(); err != nil {
-		return err
 	}
 
 	statePublication.Publish(nextCacheGenerations.state, stateUpdates, sd.clearExecutionCaches)
