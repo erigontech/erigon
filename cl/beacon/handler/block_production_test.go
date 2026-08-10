@@ -814,6 +814,27 @@ func TestStartPayloadPreparationSkipsRemoteEngine(t *testing.T) {
 	handler.StartPayloadPreparation(ctx)
 }
 
+func TestStartPayloadPreparationSkipsNilEngine(t *testing.T) {
+	handler := &ApiHandler{}
+	require.NotPanics(t, func() {
+		handler.StartPayloadPreparation(t.Context())
+	})
+}
+
+func TestStartPayloadPreparationStartsLocalEngine(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().SupportInsertion().Return(true)
+	handler := &ApiHandler{
+		engine:         engine,
+		beaconChainCfg: &clparams.BeaconChainConfig{SecondsPerSlot: 12},
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	handler.StartPayloadPreparation(ctx)
+}
+
 func TestShouldPreparePayloadVersion(t *testing.T) {
 	for _, tc := range []struct {
 		version clparams.StateVersion
