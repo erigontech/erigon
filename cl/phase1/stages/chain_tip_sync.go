@@ -27,6 +27,7 @@ const (
 	maxGloasVerificationScanPerLineage     = 256
 	maxGloasVerificationStartRootsPerCycle = 8
 	maxGloasVerificationLeafRootsPerCycle  = maxGloasVerificationStartRootsPerCycle - 2
+	maxGloasVerificationStalledCycles      = 8
 )
 
 func gloasVersionedHashes(blobCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) ([]common.Hash, error) {
@@ -583,30 +584,26 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 		cfg.gloasVerificationMu.Unlock()
 	}()
 
-	startRoots := make([]common.Hash, 0, maxGloasVerificationStartRootsPerCycle)
+	startRoots := make([]common.Hash, 0, 2)
 	addStartRoot := func(root common.Hash) {
 		if root == (common.Hash{}) || slices.Contains(startRoots, root) || len(startRoots) >= maxGloasVerificationStartRootsPerCycle {
 			return
 		}
 		startRoots = append(startRoots, root)
 	}
-	if len(cfg.gloasVerificationLineages) == 0 {
-		canonicalRoot, _, err := cfg.forkChoice.GetHead(nil)
-		if err != nil {
-			log.Warn("[chainTipSync] failed to resolve canonical head for GLOAS verification", "err", err)
-		}
-		addStartRoot(canonicalRoot)
-		addStartRoot(cfg.forkChoice.HighestSeenRoot())
-		leafLimit := min(maxGloasVerificationLeafRootsPerCycle, maxGloasVerificationStartRootsPerCycle-len(startRoots))
-		if leafLimit > 0 {
-			for _, root := range cfg.forkChoice.GloasVerificationLeaves(leafLimit) {
-				addStartRoot(root)
-			}
-		}
-		cfg.gloasVerificationLineages = make([]gloasVerificationLineage, 0, len(startRoots))
-		for _, root := range startRoots {
-			cfg.gloasVerificationLineages = append(cfg.gloasVerificationLineages, gloasVerificationLineage{origin: root, cursor: root})
-		}
+	canonicalRoot, _, err := cfg.forkChoice.GetHead(nil)
+	if err != nil {
+		log.Warn("[chainTipSync] failed to resolve canonical head for GLOAS verification", "err", err)
+	}
+	addStartRoot(canonicalRoot)
+	addStartRoot(cfg.forkChoice.HighestSeenRoot())
+	cfg.gloasVerificationLineages = mergeGloasVerificationLineages(cfg.gloasVerificationLineages, startRoots)
+	leafLimit := min(maxGloasVerificationLeafRootsPerCycle, maxGloasVerificationStartRootsPerCycle-len(cfg.gloasVerificationLineages))
+	if leafLimit > 0 {
+		cfg.gloasVerificationLineages = mergeGloasVerificationLineages(
+			cfg.gloasVerificationLineages,
+			cfg.forkChoice.GloasVerificationLeaves(leafLimit),
+		)
 	}
 	if len(cfg.gloasVerificationLineages) == 0 {
 		return
@@ -618,7 +615,8 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 		cfg.beaconCfg,
 		cfg.forkChoice.GetBlock,
 		func(root common.Hash) bool {
-			return cfg.forkChoice.HasEnvelope(root) && !cfg.forkChoice.IsPayloadVerified(root)
+			status, hasStatus := cfg.forkChoice.GetRecentExecutionPayloadStatusByRoot(root)
+			return shouldVerifyGloasPayload(cfg.forkChoice.HasEnvelope(root), cfg.forkChoice.IsPayloadVerified(root), status, hasStatus)
 		},
 	)
 	cfg.gloasVerificationLineages = lineages
@@ -671,6 +669,77 @@ type gloasVerificationLineage struct {
 	origin        common.Hash
 	cursor        common.Hash
 	readyBoundary common.Hash
+	checkpoints   []common.Hash
+	pending       int
+	stalled       int
+}
+
+func mergeGloasVerificationLineages(states []gloasVerificationLineage, roots []common.Hash) []gloasVerificationLineage {
+	for _, root := range roots {
+		if root == (common.Hash{}) || len(states) >= maxGloasVerificationStartRootsPerCycle {
+			continue
+		}
+		known := false
+		for i := range states {
+			if states[i].origin == root || states[i].cursor == root || slices.Contains(states[i].checkpoints, root) {
+				known = true
+				break
+			}
+		}
+		if !known {
+			states = append(states, gloasVerificationLineage{origin: root, cursor: root, checkpoints: []common.Hash{root}})
+		}
+	}
+	return states
+}
+
+func shouldVerifyGloasPayload(hasEnvelope, verified bool, status execution_client.PayloadStatus, hasStatus bool) bool {
+	if !hasEnvelope || verified {
+		return false
+	}
+	if !hasStatus {
+		return true
+	}
+	return status != execution_client.PayloadStatusValidated && status != execution_client.PayloadStatusInvalidated
+}
+
+func gloasPageDependsOnBoundary(page []gloasVerificationBlock, boundary *cltypes.SignedBeaconBlock) bool {
+	if boundary == nil || boundary.Block == nil {
+		return true
+	}
+	boundaryBid := boundary.Block.Body.GetSignedExecutionPayloadBid()
+	if boundaryBid == nil || boundaryBid.Message == nil {
+		return true
+	}
+	for _, item := range page {
+		if item.block == nil || item.block.Block == nil {
+			return true
+		}
+		bid := item.block.Block.Body.GetSignedExecutionPayloadBid()
+		if bid == nil || bid.Message == nil || bid.Message.ParentBlockHash == boundaryBid.Message.BlockHash {
+			return true
+		}
+	}
+	return false
+}
+
+func gloasPageDependsOnSharedAncestry(
+	page []gloasVerificationBlock,
+	root common.Hash,
+	getBlock func(common.Hash) (*cltypes.SignedBeaconBlock, bool),
+	shouldVerify func(common.Hash) bool,
+) bool {
+	for scanned := 0; root != (common.Hash{}) && scanned < maxGloasVerificationScanPerLineage; scanned++ {
+		block, ok := getBlock(root)
+		if !ok || block == nil || block.Block == nil {
+			return true
+		}
+		if shouldVerify(root) && gloasPageDependsOnBoundary(page, block) {
+			return true
+		}
+		root = common.Hash(block.Block.ParentRoot)
+	}
+	return root != (common.Hash{})
 }
 
 func collectUnverifiedGloasPayloadPages(
@@ -683,7 +752,11 @@ func collectUnverifiedGloasPayloadPages(
 	seen := make(map[common.Hash]struct{}, maxGloasVerificationScanPerLineage)
 	pages := make([][]gloasVerificationBlock, 0, len(states))
 	next := make([]gloasVerificationLineage, 0, len(states))
-	for _, state := range states {
+	for i := range states {
+		state := states[i]
+		if len(state.checkpoints) == 0 {
+			state.checkpoints = []common.Hash{state.origin}
+		}
 		page := make([]gloasVerificationBlock, 0)
 		pageRoots := make([]common.Hash, 0, maxGloasVerificationScanPerLineage)
 		root := state.cursor
@@ -691,7 +764,7 @@ func collectUnverifiedGloasPayloadPages(
 		blocked := false
 		for ; root != (common.Hash{}) && scanned < maxGloasVerificationScanPerLineage; scanned++ {
 			if _, ok := seen[root]; ok {
-				if shouldVerify(root) {
+				if gloasPageDependsOnSharedAncestry(page, root, getBlock, shouldVerify) {
 					blocked = true
 				}
 				root = common.Hash{}
@@ -722,22 +795,46 @@ func collectUnverifiedGloasPayloadPages(
 			continue
 		}
 		if scanned == maxGloasVerificationScanPerLineage && root != (common.Hash{}) && root != state.readyBoundary {
-			for _, pageRoot := range pageRoots {
-				delete(seen, pageRoot)
+			boundary, _ := getBlock(root)
+			if gloasPageDependsOnBoundary(page, boundary) {
+				for _, pageRoot := range pageRoots {
+					delete(seen, pageRoot)
+				}
+				page = page[:0]
 			}
 			state.cursor = root
+			if state.checkpoints[len(state.checkpoints)-1] != root {
+				state.checkpoints = append(state.checkpoints, root)
+			}
+			state.pending = 0
+			state.stalled = 0
 			next = append(next, state)
+			slices.Reverse(page)
+			if len(page) > 0 {
+				pages = append(pages, page)
+			}
 			continue
 		}
 		slices.Reverse(page)
 		if len(page) > 0 {
 			pages = append(pages, page)
-			next = append(next, state)
+			if state.pending == len(page) {
+				state.stalled++
+			} else {
+				state.pending = len(page)
+				state.stalled = 0
+			}
+			if state.stalled < maxGloasVerificationStalledCycles {
+				next = append(next, state)
+			}
 			continue
 		}
-		if state.cursor != state.origin {
+		if len(state.checkpoints) > 1 {
 			state.readyBoundary = state.cursor
-			state.cursor = state.origin
+			state.checkpoints = state.checkpoints[:len(state.checkpoints)-1]
+			state.cursor = state.checkpoints[len(state.checkpoints)-1]
+			state.pending = 0
+			state.stalled = 0
 			next = append(next, state)
 		}
 	}
