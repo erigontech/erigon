@@ -2735,10 +2735,13 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				return nil, fmt.Errorf("apply loop: unexpected task type for tx %d: result.Task=%T", tx, txResult.Task)
 			}
 			if stateReader == nil {
+				// calcFees reads through NewVersionedStateReader(be.versionMap, ...),
+				// so the version map supplies all in-block state. This reader is only
+				// the pre-block base, so it does not need the block write buffer.
 				if txTask.IsHistoric() {
-					stateReader = state.NewHistoryReaderV3WithBlockCache(applyTx, pe.rs.Domains(), be.blockStateCache, txTask.Version().TxNum)
+					stateReader = state.NewHistoryReaderV3WithBlockCache(applyTx, pe.rs.Domains(), nil, txTask.Version().TxNum)
 				} else {
-					stateReader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsGetter(applyTx), be.blockStateCache)
+					stateReader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsGetter(applyTx), nil)
 				}
 			}
 			tipWrites, err := txResult.calcFees(taskVer, be.versionMap, stateReader, txTask.Rules())
@@ -2850,15 +2853,15 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 
 				if stateReader == nil {
+					// finalize (finalizeTx and the block-end finalizeSystemTx) reads
+					// through NewVersionedStateReader(be.versionMap, ...), so all
+					// accumulated in-block state comes from the version map. This
+					// reader is only the pre-block base and does not need the block
+					// write buffer.
 					if txTask.IsHistoric() {
-						stateReader = state.NewHistoryReaderV3WithBlockCache(applyTx, pe.rs.Domains(), be.blockStateCache, txTask.Version().TxNum)
+						stateReader = state.NewHistoryReaderV3WithBlockCache(applyTx, pe.rs.Domains(), nil, txTask.Version().TxNum)
 					} else {
-						// Use CachedReaderV3 with readCurrent=true so the
-						// finalize (including system TXs) reads from the
-						// BlockStateCache write buffer. This ensures the
-						// system TX sees all accumulated state from prior
-						// TXs in the block, not stale sd.mem values.
-						stateReader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsGetterNoMetrics(applyTx), be.blockStateCache)
+						stateReader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsGetterNoMetrics(applyTx), nil)
 					}
 				}
 
