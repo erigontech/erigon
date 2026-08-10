@@ -18,6 +18,7 @@ package fork_graph
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -46,6 +47,10 @@ func getBeaconStateFilename(blockRoot common.Hash) string {
 // [New in Gloas:EIP7732]
 func getEnvelopeFilename(blockRoot common.Hash) string {
 	return fmt.Sprintf("%x.envelope.snappy_ssz", blockRoot)
+}
+
+func getEnvelopeTempFilename(blockRoot common.Hash) string {
+	return getEnvelopeFilename(blockRoot) + ".tmp"
 }
 
 func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot common.Hash) (bs *state.CachingBeaconState, err error) {
@@ -189,11 +194,14 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot common.Hash, bs *state.C
 // Uses an in-memory cache populated by DumpEnvelopeOnDisk to avoid repeated disk stats.
 // [New in Gloas:EIP7732]
 func (f *forkGraphDisk) HasEnvelope(blockRoot common.Hash) bool {
-	// Fast path: check in-memory cache
 	if _, ok := f.envelopeExists.Load(blockRoot); ok {
 		return true
 	}
-	// Slow path: fall back to disk and populate cache on hit
+	f.stateDumpLock.Lock()
+	defer f.stateDumpLock.Unlock()
+	if _, ok := f.envelopeExists.Load(blockRoot); ok {
+		return true
+	}
 	exists, err := afero.Exists(f.fs, getEnvelopeFilename(blockRoot))
 	if err == nil && exists {
 		f.envelopeExists.Store(blockRoot, struct{}{})
@@ -206,19 +214,35 @@ func (f *forkGraphDisk) HasEnvelope(blockRoot common.Hash) bool {
 // [New in Gloas:EIP7732]
 func (f *forkGraphDisk) ReadEnvelopeFromDisk(blockRoot common.Hash) (envelope *cltypes.SignedExecutionPayloadEnvelope, err error) {
 	var file afero.File
+	var corrupt bool
 	f.stateDumpLock.Lock()
 	defer f.stateDumpLock.Unlock()
 
-	file, err = f.fs.Open(getEnvelopeFilename(blockRoot))
+	filename := getEnvelopeFilename(blockRoot)
+	file, err = f.fs.Open(filename)
 	if err != nil {
+		f.envelopeExists.Delete(blockRoot)
 		return
 	}
-	defer file.Close()
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			log.Warn("failed to close envelope after read", "root", blockRoot, "err", closeErr)
+		}
+		if corrupt {
+			if removeErr := f.fs.Remove(filename); removeErr != nil && !os.IsNotExist(removeErr) {
+				log.Warn("failed to remove corrupt envelope", "root", blockRoot, "err", removeErr)
+			}
+		}
+		if err != nil {
+			f.envelopeExists.Delete(blockRoot)
+		}
+	}()
 
+	readTracker := &envelopeReadTracker{Reader: file}
 	if f.sszSnappyReader == nil {
-		f.sszSnappyReader = snappy.NewReader(file)
+		f.sszSnappyReader = snappy.NewReader(readTracker)
 	} else {
-		f.sszSnappyReader.Reset(file)
+		f.sszSnappyReader.Reset(readTracker)
 	}
 
 	// Read the length
@@ -226,42 +250,77 @@ func (f *forkGraphDisk) ReadEnvelopeFromDisk(blockRoot common.Hash) (envelope *c
 	var n int
 	n, err = io.ReadFull(f.sszSnappyReader, lengthBytes)
 	if err != nil {
+		corrupt = isCorruptEnvelopeReadError(err, readTracker.err)
 		return nil, fmt.Errorf("failed to read length: %w, root: %x", err, blockRoot)
 	}
 	if n != 8 {
+		corrupt = true
 		return nil, fmt.Errorf("failed to read length: %d, want 8, root: %x", n, blockRoot)
 	}
 
 	envelopeLength := binary.BigEndian.Uint64(lengthBytes)
 	if envelopeLength > maxSSZObjectSize {
+		corrupt = true
 		return nil, fmt.Errorf("corrupt envelope file: length %d exceeds max %d, root: %x", envelopeLength, maxSSZObjectSize, blockRoot)
 	}
-	if envelopeLength > uint64(cap(f.sszBuffer)) {
-		f.sszBuffer = make([]byte, envelopeLength)
-	} else {
-		f.sszBuffer = f.sszBuffer[:envelopeLength]
-	}
-	n, err = io.ReadFull(f.sszSnappyReader, f.sszBuffer)
+	ownedBuffer := make([]byte, envelopeLength)
+	n, err = io.ReadFull(f.sszSnappyReader, ownedBuffer)
 	if err != nil {
+		corrupt = isCorruptEnvelopeReadError(err, readTracker.err)
 		return nil, fmt.Errorf("failed to read snappy buffer: %w, root: %x", err, blockRoot)
 	}
-	f.sszBuffer = f.sszBuffer[:n]
+	ownedBuffer = ownedBuffer[:n]
 
 	envelope = &cltypes.SignedExecutionPayloadEnvelope{
 		Message: cltypes.NewExecutionPayloadEnvelope(f.beaconCfg),
 	}
-	if err = envelope.DecodeSSZ(f.sszBuffer, int(clparams.GloasVersion)); err != nil {
+	if err = envelope.DecodeSSZ(ownedBuffer, int(clparams.GloasVersion)); err != nil {
+		corrupt = true
 		return nil, fmt.Errorf("failed to decode envelope: %w, root: %x, len: %d", err, blockRoot, n)
 	}
 
 	return
 }
 
+type envelopeReadTracker struct {
+	io.Reader
+	err error
+}
+
+func (r *envelopeReadTracker) Read(p []byte) (int, error) {
+	n, err := r.Reader.Read(p)
+	if err != nil && !errors.Is(err, io.EOF) {
+		r.err = err
+	}
+	return n, err
+}
+
+func isCorruptEnvelopeReadError(err, sourceErr error) bool {
+	return sourceErr == nil || !errors.Is(err, sourceErr)
+}
+
 // DumpEnvelopeOnDisk dumps an execution payload envelope to disk.
 // [New in Gloas:EIP7732]
 func (f *forkGraphDisk) DumpEnvelopeOnDisk(blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) (err error) {
+	if envelope == nil {
+		return errors.New("cannot persist nil envelope")
+	}
+	if envelope.Message == nil {
+		return errors.New("cannot persist envelope with nil message")
+	}
+	if envelope.Message.Payload == nil {
+		return errors.New("cannot persist envelope with nil payload")
+	}
+	if envelope.Message.ExecutionRequests == nil {
+		return errors.New("cannot persist envelope with nil execution requests")
+	}
 	f.stateDumpLock.Lock()
 	defer f.stateDumpLock.Unlock()
+	if blockRoot != f.anchorRoot {
+		if _, ok := f.blocks.Load(blockRoot); !ok {
+			return fmt.Errorf("cannot persist envelope for unknown block root %x", blockRoot)
+		}
+	}
 
 	// Populate in-memory cache on successful write
 	defer func() {
@@ -276,11 +335,21 @@ func (f *forkGraphDisk) DumpEnvelopeOnDisk(blockRoot common.Hash, envelope *clty
 		return
 	}
 
-	dumpedFile, err := f.fs.OpenFile(getEnvelopeFilename(blockRoot), os.O_TRUNC|os.O_CREATE|os.O_RDWR, 0o755)
+	filename := getEnvelopeFilename(blockRoot)
+	tempFilename := getEnvelopeTempFilename(blockRoot)
+	dumpedFile, err := f.fs.OpenFile(tempFilename, os.O_TRUNC|os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return err
 	}
-	defer dumpedFile.Close()
+	closed := false
+	defer func() {
+		if !closed {
+			_ = dumpedFile.Close()
+		}
+		if err != nil {
+			_ = f.fs.Remove(tempFilename)
+		}
+	}()
 
 	if f.sszSnappyWriter == nil {
 		f.sszSnappyWriter = snappy.NewBufferedWriter(dumpedFile)
@@ -307,6 +376,13 @@ func (f *forkGraphDisk) DumpEnvelopeOnDisk(blockRoot common.Hash, envelope *clty
 
 	if err = dumpedFile.Sync(); err != nil {
 		log.Error("failed to sync dumped file", "err", err)
+		return
+	}
+	if err = dumpedFile.Close(); err != nil {
+		return
+	}
+	closed = true
+	if err = f.fs.Rename(tempFilename, filename); err != nil {
 		return
 	}
 
