@@ -740,8 +740,7 @@ func TestBlockBuilderWindowTakesPreparedPayloadEarly(t *testing.T) {
 	}
 	slotStart := time.Unix(100, 0)
 
-	// A builder primed before the slot has already packed the payload, so it is taken a quarter of
-	// the way into the slot rather than at the publication margin, leaving the rest for gossip.
+	// A primed payload is taken one quarter of the attestation deadline into the slot.
 	prepared := computeBlockBuilderWindow(slotStart, slotStart, cfg, clparams.ElectraVersion, true)
 	require.Equal(t, slotStart.Add(time.Second), prepared.pollUntil)
 
@@ -789,6 +788,70 @@ func TestPreparedPayloadMinimumWarmupPreservesBuildTime(t *testing.T) {
 	}
 
 	require.Equal(t, 2*time.Second, preparedPayloadMinimumAge(cfg, clparams.ElectraVersion))
+}
+
+func TestPreparedPayloadRequiresBuilderContinuity(t *testing.T) {
+	var p preparedPayload
+	id := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+	now := time.Unix(100, 0)
+	p.set(10, id, now.Add(-3*time.Second))
+
+	require.True(t, canUsePreparedPayload(&p, true, 10, id, now, 2*time.Second))
+	require.False(t, canUsePreparedPayload(&p, false, 10, id, now, 2*time.Second))
+}
+
+func TestShouldPreparePayloadVersion(t *testing.T) {
+	for _, tc := range []struct {
+		version clparams.StateVersion
+		want    bool
+	}{
+		{clparams.Phase0Version, false},
+		{clparams.AltairVersion, false},
+		{clparams.BellatrixVersion, true},
+		{clparams.CapellaVersion, true},
+		{clparams.DenebVersion, true},
+		{clparams.FuluVersion, true},
+		{clparams.GloasVersion, false},
+	} {
+		require.Equal(t, tc.want, shouldPreparePayloadVersion(tc.version), tc.version.String())
+	}
+}
+
+func TestPayloadAttributesForkFields(t *testing.T) {
+	root := common.Hash{0xaa}
+	slot := hexutil.Uint64(10)
+	gasLimit := hexutil.Uint64(30_000_000)
+	withdrawals := []*types.Withdrawal{{Index: 1}}
+
+	for _, tc := range []struct {
+		version         clparams.StateVersion
+		wantWithdrawals bool
+		wantParentRoot  bool
+		wantGloasFields bool
+	}{
+		{clparams.BellatrixVersion, false, false, false},
+		{clparams.CapellaVersion, true, false, false},
+		{clparams.DenebVersion, true, true, false},
+		{clparams.FuluVersion, true, true, false},
+		{clparams.GloasVersion, true, true, true},
+	} {
+		t.Run(tc.version.String(), func(t *testing.T) {
+			attrs := payloadAttributesForVersion(
+				tc.version,
+				1,
+				common.Hash{0xbb},
+				common.Address{0xcc},
+				withdrawals,
+				&root,
+				&slot,
+				&gasLimit,
+			)
+			require.Equal(t, tc.wantWithdrawals, attrs.Withdrawals != nil)
+			require.Equal(t, tc.wantParentRoot, attrs.ParentBeaconBlockRoot != nil)
+			require.Equal(t, tc.wantGloasFields, attrs.SlotNumber != nil)
+			require.Equal(t, tc.wantGloasFields, attrs.TargetGasLimit != nil)
+		})
+	}
 }
 
 func TestPreparedPayloadKeepsConsecutiveSlots(t *testing.T) {

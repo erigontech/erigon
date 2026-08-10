@@ -40,14 +40,7 @@ func (e *ExecModule) checkWithdrawalsPresence(time uint64, withdrawals []*types.
 	return nil
 }
 
-// buildDuration returns how long a payload builder may run before it stops itself.
-//
-// A consensus layer may send payload attributes well ahead of the slot the payload is for and then
-// call getPayload against the cached payload id, without sending fresh attributes. A builder that
-// stops before that slot hands back a payload missing every transaction that arrived in between, so
-// build until shortly into the target slot, derived from the payload's own timestamp. The floor
-// leaves a late request no worse off than a fixed budget; the cap stops an implausible timestamp
-// from pinning a builder and its resources.
+// buildDuration spans the target slot for early requests while bounding late and implausibly future requests.
 func buildDuration(payloadTimestamp uint64, now time.Time, secondsPerSlot uint64) time.Duration {
 	slot := time.Duration(secondsPerSlot) * time.Second
 	// Reject beyond the cap horizon before converting: a large enough timestamp overflows

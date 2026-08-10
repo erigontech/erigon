@@ -208,12 +208,7 @@ func attestationDue(cfg *clparams.BeaconChainConfig, stateVersion clparams.State
 	return time.Duration(cfg.AttestationDueMs(stateVersion.AfterOrEqual(clparams.GloasVersion))) * time.Millisecond
 }
 
-// computeBlockBuilderWindow returns when to first poll for the assembled payload and when to stop.
-//
-// Without a primed builder the execution layer only starts packing when the block is requested, so
-// polling stops a publication margin before the attestation deadline to give it most of the slot
-// (see payloadPublicationDivisor). A primed builder has been packing since before the slot, so the
-// payload can be taken early instead, leaving the rest of the margin for signing and gossip.
+// computeBlockBuilderWindow uses the earlier collection window only for a sufficiently warmed builder.
 func computeBlockBuilderWindow(now, slotStart time.Time, cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion, prepared bool) blockBuilderWindow {
 	due := attestationDue(cfg, stateVersion)
 	grabBy := slotStart.Add(due - due/payloadPublicationDivisor)
@@ -237,6 +232,33 @@ func computeBlockBuilderWindow(now, slotStart time.Time, cfg *clparams.BeaconCha
 func preparedPayloadMinimumAge(cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion) time.Duration {
 	due := attestationDue(cfg, stateVersion)
 	return max(due-2*due/payloadPublicationDivisor, 0)
+}
+
+func payloadAttributesForVersion(
+	version clparams.StateVersion,
+	timestamp hexutil.Uint64,
+	prevRandao common.Hash,
+	feeRecipient common.Address,
+	withdrawals []*types.Withdrawal,
+	parentRoot *common.Hash,
+	slotNumber, targetGasLimit *hexutil.Uint64,
+) *engine_types.PayloadAttributes {
+	attrs := &engine_types.PayloadAttributes{
+		Timestamp:             timestamp,
+		PrevRandao:            prevRandao,
+		SuggestedFeeRecipient: feeRecipient,
+	}
+	if version.AfterOrEqual(clparams.CapellaVersion) {
+		attrs.Withdrawals = withdrawals
+	}
+	if version.AfterOrEqual(clparams.DenebVersion) {
+		attrs.ParentBeaconBlockRoot = parentRoot
+	}
+	if version.AfterOrEqual(clparams.GloasVersion) {
+		attrs.SlotNumber = slotNumber
+		attrs.TargetGasLimit = targetGasLimit
+	}
+	return attrs
 }
 
 func shouldRetryGetPayload(now, deadline time.Time) bool {
@@ -1045,18 +1067,21 @@ func (a *ApiHandler) produceBeaconBody(
 			}
 		}
 
-		attrs := &engine_types.PayloadAttributes{
-			Timestamp:             hexutil.Uint64(state.ComputeTimestampAtSlot(baseState, targetSlot)),
-			PrevRandao:            random,
-			SuggestedFeeRecipient: feeRecipient,
-			Withdrawals:           withdrawals,
-			ParentBeaconBlockRoot: (*common.Hash)(&blockRoot),
-		}
+		var slotNumber *hexutil.Uint64
 		if stateVersion.AfterOrEqual(clparams.GloasVersion) {
 			sn := hexutil.Uint64(targetSlot)
-			attrs.SlotNumber = &sn
-			attrs.TargetGasLimit = targetGasLimit
+			slotNumber = &sn
 		}
+		attrs := payloadAttributesForVersion(
+			stateVersion,
+			hexutil.Uint64(state.ComputeTimestampAtSlot(baseState, targetSlot)),
+			random,
+			feeRecipient,
+			withdrawals,
+			(*common.Hash)(&blockRoot),
+			slotNumber,
+			targetGasLimit,
+		)
 		builderStartedAt := time.Now()
 		idBytes, err := a.engine.ForkChoiceUpdate(
 			ctx,
@@ -1075,8 +1100,9 @@ func (a *ApiHandler) produceBeaconBody(
 			return
 		}
 		slotStart := a.ethClock.GetSlotTime(targetSlot)
-		// Early collection requires both the same builder and enough pre-slot packing time.
-		prepared := a.preparedPayload.matches(
+		prepared := canUsePreparedPayload(
+			&a.preparedPayload,
+			a.engine.SupportInsertion(),
 			targetSlot,
 			idBytes,
 			time.Now(),

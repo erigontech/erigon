@@ -77,6 +77,10 @@ func (p *preparedPayload) matches(slot uint64, payloadID []byte, now time.Time, 
 	return ok && len(payloadID) > 0 && bytes.Equal(record.id, payloadID) && now.Sub(record.primedAt) >= minAge
 }
 
+func canUsePreparedPayload(p *preparedPayload, builderContinuity bool, slot uint64, payloadID []byte, now time.Time, minAge time.Duration) bool {
+	return builderContinuity && p.matches(slot, payloadID, now, minAge)
+}
+
 // StartPayloadPreparation primes the execution layer for slots this node is due to propose, so the
 // payload is already packed when the validator client asks for a block instead of being built from
 // scratch inside the proposal slot.
@@ -110,8 +114,8 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 		if !shouldPrepare(targetSlot, primedSlot, a.syncedData.HeadRoot(), primedHead) {
 			continue
 		}
-		if a.beaconChainCfg.GetCurrentStateVersion(targetSlot / a.beaconChainCfg.SlotsPerEpoch).AfterOrEqual(clparams.GloasVersion) {
-			// [Gloas:EIP7732] builders gossip bids instead; the engine is not primed this way.
+		stateVersion := a.beaconChainCfg.GetCurrentStateVersion(targetSlot / a.beaconChainCfg.SlotsPerEpoch)
+		if !shouldPreparePayloadVersion(stateVersion) {
 			continue
 		}
 		head, err := a.preparePayloadFor(ctx, targetSlot)
@@ -130,6 +134,10 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 // shouldPrepare requires a fresh builder after the target slot or its parent head changes.
 func shouldPrepare(targetSlot, primedSlot uint64, head, primedHead common.Hash) bool {
 	return targetSlot != primedSlot || head != primedHead
+}
+
+func shouldPreparePayloadVersion(version clparams.StateVersion) bool {
+	return version.AfterOrEqual(clparams.BellatrixVersion) && version.Before(clparams.GloasVersion)
 }
 
 // isExpectedPreparationSkip reports whether there was simply nothing to prepare, as opposed to a
@@ -185,11 +193,11 @@ func (a *ApiHandler) preparePayloadFor(ctx context.Context, targetSlot uint64) (
 		return common.Hash{}, err
 	}
 
-	head, safeHash, finalizedHash, attrs, err := a.preparedForkChoiceInputs(baseState, baseBlockRoot, targetSlot, feeRecipient)
+	stateVersion := a.beaconChainCfg.GetCurrentStateVersion(targetSlot / a.beaconChainCfg.SlotsPerEpoch)
+	head, safeHash, finalizedHash, attrs, err := a.preparedForkChoiceInputs(baseState, baseBlockRoot, targetSlot, feeRecipient, stateVersion)
 	if err != nil {
 		return common.Hash{}, err
 	}
-	stateVersion := a.beaconChainCfg.GetCurrentStateVersion(targetSlot / a.beaconChainCfg.SlotsPerEpoch)
 	payloadID, err := a.engine.ForkChoiceUpdate(ctx, finalizedHash, safeHash, head, attrs, stateVersion)
 	if err != nil {
 		return common.Hash{}, err
@@ -209,6 +217,7 @@ func (a *ApiHandler) preparedForkChoiceInputs(
 	baseBlockRoot common.Hash,
 	targetSlot uint64,
 	feeRecipient common.Address,
+	stateVersion clparams.StateVersion,
 ) (head, safeHash, finalizedHash common.Hash, attrs *engine_types.PayloadAttributes, err error) {
 	head = baseState.LatestExecutionPayloadHeader().BlockHash
 
@@ -222,26 +231,32 @@ func (a *ApiHandler) preparedForkChoiceInputs(
 	}
 
 	epoch := targetSlot / a.beaconChainCfg.SlotsPerEpoch
-	clWithdrawals, err := state.GetExpectedWithdrawals(baseState, epoch)
-	if err != nil {
-		return head, safeHash, finalizedHash, nil, err
-	}
-	withdrawals := make([]*types.Withdrawal, 0, len(clWithdrawals.Withdrawals))
-	for _, w := range clWithdrawals.Withdrawals {
-		withdrawals = append(withdrawals, &types.Withdrawal{
-			Index:     w.Index,
-			Amount:    w.Amount,
-			Validator: w.Validator,
-			Address:   w.Address,
-		})
+	var withdrawals []*types.Withdrawal
+	if stateVersion.AfterOrEqual(clparams.CapellaVersion) {
+		clWithdrawals, err := state.GetExpectedWithdrawals(baseState, epoch)
+		if err != nil {
+			return head, safeHash, finalizedHash, nil, err
+		}
+		withdrawals = make([]*types.Withdrawal, 0, len(clWithdrawals.Withdrawals))
+		for _, w := range clWithdrawals.Withdrawals {
+			withdrawals = append(withdrawals, &types.Withdrawal{
+				Index:     w.Index,
+				Amount:    w.Amount,
+				Validator: w.Validator,
+				Address:   w.Address,
+			})
+		}
 	}
 
-	attrs = &engine_types.PayloadAttributes{
-		Timestamp:             hexutil.Uint64(state.ComputeTimestampAtSlot(baseState, targetSlot)),
-		PrevRandao:            baseState.GetRandaoMixes(epoch),
-		SuggestedFeeRecipient: feeRecipient,
-		Withdrawals:           withdrawals,
-		ParentBeaconBlockRoot: &baseBlockRoot,
-	}
+	attrs = payloadAttributesForVersion(
+		stateVersion,
+		hexutil.Uint64(state.ComputeTimestampAtSlot(baseState, targetSlot)),
+		baseState.GetRandaoMixes(epoch),
+		feeRecipient,
+		withdrawals,
+		&baseBlockRoot,
+		nil,
+		nil,
+	)
 	return head, safeHash, finalizedHash, attrs, nil
 }
