@@ -151,6 +151,16 @@ func (api *BaseAPI) resolveLogsRange(ctx context.Context, tx kv.Tx, crit filters
 		if number == nil {
 			return 0, 0, fmt.Errorf("block not found: %x", *crit.BlockHash)
 		}
+		// The header-number index also covers non-canonical headers, and the log
+		// scan below is by block number: without this the caller would get the
+		// canonical block's logs for a side-chain hash.
+		canonicalHash, ok, err := api._blockReader.CanonicalHash(ctx, tx, *number)
+		if err != nil {
+			return 0, 0, err
+		}
+		if !ok || canonicalHash != *crit.BlockHash {
+			return 0, 0, fmt.Errorf("block not found: %x", *crit.BlockHash)
+		}
 		return *number, *number, nil
 	}
 
