@@ -35,10 +35,11 @@ import (
 )
 
 var (
-	errNodeSyncing    = errors.New("node is syncing")
-	errNotOurProposal = errors.New("next slot is not proposed by a registered validator")
-	errNoPayloadID    = errors.New("execution layer returned no payload id")
-	errHeadTooFarBack = errors.New("head state is too far behind the slot to prepare")
+	errNodeSyncing            = errors.New("node is syncing")
+	errNotOurProposal         = errors.New("next slot is not proposed by a registered validator")
+	errNoPayloadID            = errors.New("execution layer returned no payload id")
+	errHeadTooFarBack         = errors.New("head state is too far behind the slot to prepare")
+	errPreparationHeadChanged = errors.New("head changed while preparing payload")
 )
 
 // preparedPayloadRetainSlots keeps a primed record alive past the slot it was primed for, so
@@ -85,7 +86,7 @@ func canUsePreparedPayload(p *preparedPayload, builderContinuity bool, slot uint
 // payload is already packed when the validator client asks for a block instead of being built from
 // scratch inside the proposal slot.
 func (a *ApiHandler) StartPayloadPreparation(ctx context.Context) {
-	if a.engine == nil || !a.engine.SupportInsertion() {
+	if a.routerCfg == nil || !a.routerCfg.Validator || a.engine == nil || !a.engine.SupportInsertion() {
 		return
 	}
 	go a.preparePayloadLoop(ctx)
@@ -103,30 +104,43 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 	defer ticker.Stop()
 
 	var (
-		primedSlot uint64
-		primedHead common.Hash
+		primedSlot     uint64
+		primedHead     common.Hash
+		lastFailureLog time.Time
 	)
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
+	for immediate := true; ; immediate = false {
+		if immediate {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+		} else {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
 		}
 
 		targetSlot := a.ethClock.GetCurrentSlot() + 1
+		stateVersion := a.beaconChainCfg.GetCurrentStateVersion(targetSlot / a.beaconChainCfg.SlotsPerEpoch)
+		if stateVersion.AfterOrEqual(clparams.GloasVersion) {
+			return
+		}
 		if !shouldPrepare(targetSlot, primedSlot, a.syncedData.HeadRoot(), primedHead) {
 			continue
 		}
-		stateVersion := a.beaconChainCfg.GetCurrentStateVersion(targetSlot / a.beaconChainCfg.SlotsPerEpoch)
 		if !shouldPreparePayloadVersion(stateVersion) {
 			continue
 		}
-		head, err := a.preparePayloadFor(ctx, targetSlot)
+		prepareCtx, cancel := context.WithDeadline(ctx, a.ethClock.GetSlotTime(targetSlot))
+		head, err := a.preparePayloadFor(prepareCtx, targetSlot)
+		cancel()
 		if err != nil {
-			// Most ticks land on a slot somebody else proposes; logging those would drown out the
-			// failures worth seeing.
-			if !isExpectedPreparationSkip(err) {
-				log.Debug("PayloadPreparation: skipped", "slot", targetSlot, "err", err)
+			if !isExpectedPreparationSkip(err) && time.Since(lastFailureLog) >= time.Minute {
+				log.Warn("PayloadPreparation: failed", "slot", targetSlot, "err", err)
+				lastFailureLog = time.Now()
 			}
 			continue
 		}
@@ -148,26 +162,26 @@ func shouldPreparePayloadVersion(version clparams.StateVersion) bool {
 func isExpectedPreparationSkip(err error) bool {
 	return errors.Is(err, errNotOurProposal) ||
 		errors.Is(err, errNodeSyncing) ||
+		errors.Is(err, errNoPayloadID) ||
 		errors.Is(err, errHeadTooFarBack) ||
+		errors.Is(err, errPreparationHeadChanged) ||
 		errors.Is(err, synced_data.ErrNotSynced)
 }
 
 // preparePayloadFor sends the forkchoice update for targetSlot ahead of the slot itself.
 func (a *ApiHandler) preparePayloadFor(ctx context.Context, targetSlot uint64) (common.Hash, error) {
 	var (
-		baseBlockRoot common.Hash
-		proposerIndex uint64
-		feeRecipient  common.Address
-		baseState     *state.CachingBeaconState
+		baseBlockRoot      common.Hash
+		proposerIndex      uint64
+		feeRecipient       common.Address
+		baseState          *state.CachingBeaconState
+		lookupAfterAdvance bool
 	)
 	// Root, proposer and state all come from one view of the head. Reading them separately would
 	// let a head update in between pair a parent beacon block root with a different state, priming
 	// a builder that production can never match.
-	if err := a.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
-		baseBlockRoot = a.syncedData.HeadRoot()
-		if baseBlockRoot == (common.Hash{}) {
-			return errNodeSyncing
-		}
+	if err := a.syncedData.ViewHeadStateWithIdentity(func(headState *state.CachingBeaconState, root common.Hash, _ uint64) error {
+		baseBlockRoot = root
 		// Beyond the proposer lookahead the index has to be reshuffled from the seed, which is far
 		// too costly to repeat every tick on a large validator set.
 		slotsPerEpoch := a.beaconChainCfg.SlotsPerEpoch
@@ -175,16 +189,16 @@ func (a *ApiHandler) preparePayloadFor(ctx context.Context, targetSlot uint64) (
 			return errHeadTooFarBack
 		}
 
+		lookupAfterAdvance = targetSlot/slotsPerEpoch > headState.Slot()/slotsPerEpoch
 		var err error
-		if proposerIndex, err = headState.GetBeaconProposerIndexForSlot(targetSlot); err != nil {
-			return err
-		}
-		// Only our own proposals are worth priming, and a fee recipient we do not yet know would
-		// build a payload that block production could not reuse anyway. Checked before the state
-		// copy, which is the expensive part.
-		var ok bool
-		if feeRecipient, ok = a.validatorParams.GetFeeRecipient(proposerIndex); !ok {
-			return errNotOurProposal
+		if !lookupAfterAdvance {
+			if proposerIndex, err = headState.GetBeaconProposerIndexForSlot(targetSlot); err != nil {
+				return err
+			}
+			var ok bool
+			if feeRecipient, ok = a.validatorParams.GetFeeRecipient(proposerIndex); !ok {
+				return errNotOurProposal
+			}
 		}
 		baseState, err = headState.Copy()
 		return err
@@ -195,11 +209,24 @@ func (a *ApiHandler) preparePayloadFor(ctx context.Context, targetSlot uint64) (
 	if err := transition.DefaultMachine.ProcessSlots(baseState, targetSlot); err != nil {
 		return common.Hash{}, err
 	}
+	if lookupAfterAdvance {
+		var err error
+		if proposerIndex, err = baseState.GetBeaconProposerIndexForSlot(targetSlot); err != nil {
+			return common.Hash{}, err
+		}
+		var ok bool
+		if feeRecipient, ok = a.validatorParams.GetFeeRecipient(proposerIndex); !ok {
+			return common.Hash{}, errNotOurProposal
+		}
+	}
 
 	stateVersion := a.beaconChainCfg.GetCurrentStateVersion(targetSlot / a.beaconChainCfg.SlotsPerEpoch)
-	head, safeHash, finalizedHash, attrs, err := a.preparedForkChoiceInputs(baseState, baseBlockRoot, targetSlot, feeRecipient, stateVersion)
+	head, safeHash, finalizedHash, attrs, err := a.preGloasForkChoiceInputs(baseState, baseBlockRoot, targetSlot, feeRecipient, stateVersion)
 	if err != nil {
 		return common.Hash{}, err
+	}
+	if a.syncedData.HeadRoot() != baseBlockRoot {
+		return common.Hash{}, errPreparationHeadChanged
 	}
 	payloadID, err := a.engine.ForkChoiceUpdate(ctx, finalizedHash, safeHash, head, attrs, stateVersion)
 	if err != nil {
@@ -214,8 +241,8 @@ func (a *ApiHandler) preparePayloadFor(ctx context.Context, targetSlot uint64) (
 	return baseBlockRoot, nil
 }
 
-// preparedForkChoiceInputs mirrors the pre-Gloas production inputs so the execution layer can reuse the builder.
-func (a *ApiHandler) preparedForkChoiceInputs(
+// preGloasForkChoiceInputs builds the shared preparation and production inputs.
+func (a *ApiHandler) preGloasForkChoiceInputs(
 	baseState *state.CachingBeaconState,
 	baseBlockRoot common.Hash,
 	targetSlot uint64,

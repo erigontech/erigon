@@ -144,19 +144,48 @@ func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized
 	// fork choice commits). This is common in single-process dev mode
 	// where the CL and EL share the same process.
 	idBytes := make([]byte, 8)
-	var id uint64
-	for range 30 {
-		id, err = cc.chainRW.AssembleBlock(head, attr)
-		if err == nil {
-			break
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
+	id, err := retryAssembleBlock(ctx, 30, 200*time.Millisecond, func(ctx context.Context) (uint64, error) {
+		return cc.chainRW.AssembleBlock(ctx, head, attr)
+	})
 	if err != nil {
 		return nil, err
 	}
 	binary.LittleEndian.PutUint64(idBytes, id)
 	return idBytes, nil
+}
+
+func retryAssembleBlock(ctx context.Context, attempts int, delay time.Duration, assemble func(context.Context) (uint64, error)) (uint64, error) {
+	if attempts <= 0 {
+		return 0, errors.New("assemble block requires at least one attempt")
+	}
+	var (
+		id  uint64
+		err error
+	)
+	for attempt := range attempts {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return 0, ctxErr
+		}
+		if id, err = assemble(ctx); err == nil {
+			return id, nil
+		}
+		if attempt+1 == attempts {
+			break
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return 0, ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return 0, err
 }
 
 func (cc *ExecutionClientDirect) SupportInsertion() bool {

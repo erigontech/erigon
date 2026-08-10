@@ -31,15 +31,18 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
+	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	builder_mock "github.com/erigontech/erigon/cl/beacon/builder/mock_services"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
+	sync_mock_services "github.com/erigontech/erigon/cl/beacon/synced_data/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/transition"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -745,13 +748,19 @@ func TestBlockBuilderWindowTakesPreparedPayloadEarly(t *testing.T) {
 
 	// A primed payload is taken one quarter of the attestation deadline into the slot.
 	prepared := computeBlockBuilderWindow(slotStart, slotStart, cfg, clparams.ElectraVersion, true)
-	require.Equal(t, slotStart.Add(time.Second), prepared.pollUntil)
+	require.Equal(t, slotStart.Add(time.Second).Add(-minPayloadPollingWindow), prepared.firstGetAt)
+	require.Equal(t, slotStart.Add(3*time.Second), prepared.pollUntil)
 
 	// Without a primed builder nothing changes: the execution layer still needs most of the slot.
 	unprepared := computeBlockBuilderWindow(slotStart, slotStart, cfg, clparams.ElectraVersion, false)
+	require.Equal(t, slotStart.Add(3*time.Second).Add(-minPayloadPollingWindow), unprepared.firstGetAt)
 	require.Equal(t, slotStart.Add(3*time.Second), unprepared.pollUntil)
 
-	require.True(t, prepared.pollUntil.Before(unprepared.pollUntil))
+	require.True(t, prepared.firstGetAt.Before(unprepared.firstGetAt))
+
+	late := computeBlockBuilderWindow(slotStart.Add(2*time.Second), slotStart, cfg, clparams.ElectraVersion, true)
+	require.Equal(t, slotStart.Add(2*time.Second), late.firstGetAt)
+	require.Equal(t, slotStart.Add(3*time.Second), late.pollUntil)
 }
 
 func TestPreparedPayloadMatchesOnlyTheSamePrime(t *testing.T) {
@@ -809,12 +818,26 @@ func TestStartPayloadPreparationSkipsRemoteEngine(t *testing.T) {
 	engine.EXPECT().SupportInsertion().Return(false)
 	handler := &ApiHandler{
 		engine:         engine,
+		routerCfg:      &beacon_router_configuration.RouterConfiguration{Validator: true},
 		beaconChainCfg: &clparams.BeaconChainConfig{SecondsPerSlot: 12},
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	handler.StartPayloadPreparation(ctx)
+}
+
+func TestStartPayloadPreparationSkipsWithoutValidatorAPI(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().SupportInsertion().Times(0)
+	handler := &ApiHandler{
+		engine:         engine,
+		routerCfg:      &beacon_router_configuration.RouterConfiguration{Validator: false},
+		beaconChainCfg: &clparams.BeaconChainConfig{SecondsPerSlot: 12},
+	}
+
+	handler.StartPayloadPreparation(t.Context())
 }
 
 func TestStartPayloadPreparationSkipsNilEngine(t *testing.T) {
@@ -830,12 +853,42 @@ func TestStartPayloadPreparationStartsLocalEngine(t *testing.T) {
 	engine.EXPECT().SupportInsertion().Return(true)
 	handler := &ApiHandler{
 		engine:         engine,
+		routerCfg:      &beacon_router_configuration.RouterConfiguration{Validator: true},
 		beaconChainCfg: &clparams.BeaconChainConfig{SecondsPerSlot: 12},
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
 	handler.StartPayloadPreparation(ctx)
+}
+
+func TestPreparePayloadLoopRunsImmediatelyWithSlotDeadline(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, _, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	targetSlot := postState.Slot() + 1
+	proposerIndex, err := postState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
+
+	slotStart := time.Now().Add(time.Minute)
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetCurrentSlot().Return(targetSlot - 1)
+	clock.EXPECT().GetSlotTime(targetSlot).Return(slotStart)
+	handler.ethClock = clock
+
+	ctx, cancel := context.WithCancel(t.Context())
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(callCtx context.Context, _, _, _ common.Hash, _ *engine_types.PayloadAttributes, _ clparams.StateVersion) ([]byte, error) {
+			deadline, ok := callCtx.Deadline()
+			require.True(t, ok)
+			require.Equal(t, slotStart, deadline)
+			cancel()
+			return []byte{1, 2, 3, 4, 5, 6, 7, 8}, nil
+		})
+	handler.engine = engine
+
+	handler.preparePayloadLoop(ctx)
 }
 
 func TestPreparePayloadForSendsCompleteForkChoiceUpdate(t *testing.T) {
@@ -916,6 +969,121 @@ func TestPreparePayloadForSendsCompleteForkChoiceUpdate(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, baseBlockRoot, primedHead)
 	require.True(t, handler.preparedPayload.matches(targetSlot, payloadID, time.Now(), 0))
+}
+
+func TestPreparePayloadForRejectsChangedHeadBeforeForkChoiceUpdate(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	targetSlot := postState.Slot() + 1
+	proposerIndex, err := postState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
+
+	baseBlockRoot := common.Hash{0x41}
+	changedBlockRoot := common.Hash{0x42}
+	syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
+	gomock.InOrder(
+		syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).
+			DoAndReturn(func(view synced_data.ViewHeadStateWithIdentityFn) error {
+				return view(postState, baseBlockRoot, postState.Slot())
+			}),
+		syncedDataMock.EXPECT().HeadRoot().Return(changedBlockRoot),
+	)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+	handler.engine = engine
+
+	_, err = handler.preparePayloadFor(t.Context(), targetSlot)
+	require.ErrorIs(t, err, errPreparationHeadChanged)
+	require.False(t, handler.preparedPayload.matches(targetSlot, []byte{1}, time.Now(), 0))
+}
+
+func TestPreparePayloadForUsesPostEpochProposer(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	config := *handler.beaconChainCfg
+	targetEpoch := postState.Slot()/config.SlotsPerEpoch + 1
+	targetSlot := targetEpoch * config.SlotsPerEpoch
+	config.FuluForkEpoch = targetEpoch + 10
+	config.GloasForkEpoch = targetEpoch + 11
+	config.InitializeForkSchedule()
+	handler.beaconChainCfg = &config
+
+	headState := state.New(&config)
+	require.NoError(t, postState.CopyInto(headState))
+	headState.SetSlot(targetSlot - 1)
+	for i := 0; i < headState.ValidatorLength(); i += 2 {
+		headState.SetEffectiveBalanceForValidatorAtIndex(i, 0)
+		require.NoError(t, headState.SetValidatorBalance(i, config.MaxEffectiveBalanceElectra))
+	}
+
+	mixPosition := (targetEpoch + config.EpochsPerHistoricalVector - config.MinSeedLookahead - 1) % config.EpochsPerHistoricalVector
+	var oldProposer, newProposer uint64
+	found := false
+	for nonce := byte(0); ; nonce++ {
+		headState.SetRandaoMixAt(int(mixPosition), common.Hash{nonce})
+		var err error
+		oldProposer, err = headState.GetBeaconProposerIndexForSlot(targetSlot)
+		require.NoError(t, err)
+
+		advanced, err := headState.Copy()
+		require.NoError(t, err)
+		require.NoError(t, transition.DefaultMachine.ProcessSlots(advanced, targetSlot))
+		newProposer, err = advanced.GetBeaconProposerIndexForSlot(targetSlot)
+		require.NoError(t, err)
+		if oldProposer != newProposer {
+			found = true
+			break
+		}
+		if nonce == 255 {
+			break
+		}
+	}
+	require.True(t, found, "fixture must expose a proposer change across epoch processing")
+	validatorParams.SetFeeRecipient(newProposer, common.Address{0x11})
+
+	baseBlockRoot := common.Hash{0x41}
+	syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
+	syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).
+		DoAndReturn(func(view synced_data.ViewHeadStateWithIdentityFn) error {
+			return view(headState, baseBlockRoot, headState.Slot())
+		})
+	syncedDataMock.EXPECT().HeadRoot().Return(baseBlockRoot)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, _, _, _ common.Hash, attrs *engine_types.PayloadAttributes, _ clparams.StateVersion) ([]byte, error) {
+			require.Equal(t, common.Address{0x11}, attrs.SuggestedFeeRecipient)
+			return []byte{1, 2, 3, 4, 5, 6, 7, 8}, nil
+		})
+	handler.engine = engine
+
+	_, err := handler.preparePayloadFor(t.Context(), targetSlot)
+	require.NoError(t, err)
+}
+
+func TestProduceBeaconBodyTakesRootAndStateFromOneView(t *testing.T) {
+	_, _, _, _, postState, _, _, syncedData, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	expectedRoot := common.Hash{0x41}
+	syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
+	syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).
+		DoAndReturn(func(view synced_data.ViewHeadStateWithIdentityFn) error {
+			return view(postState, expectedRoot, postState.Slot())
+		})
+
+	var (
+		gotRoot common.Hash
+		copied  *state.CachingBeaconState
+	)
+	require.NoError(t, syncedData.ViewHeadStateWithIdentity(
+		func(headState *state.CachingBeaconState, root common.Hash, _ uint64) error {
+			var err error
+			gotRoot = root
+			copied, err = headState.Copy()
+			return err
+		}))
+	require.Equal(t, expectedRoot, gotRoot)
+	require.NotSame(t, postState, copied)
+	require.Equal(t, postState.Slot(), copied.Slot())
 }
 
 func TestShouldPreparePayloadVersion(t *testing.T) {

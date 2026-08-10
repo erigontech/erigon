@@ -279,7 +279,7 @@ func (c ChainReaderWriterEth1) HasBlock(ctx context.Context, hash common.Hash) (
 	return c.executionModule.HasBlock(ctx, &hash, nil)
 }
 
-func (c ChainReaderWriterEth1) AssembleBlock(baseHash common.Hash, attributes *engine_types.PayloadAttributes) (id uint64, err error) {
+func (c ChainReaderWriterEth1) AssembleBlock(ctx context.Context, baseHash common.Hash, attributes *engine_types.PayloadAttributes) (id uint64, err error) {
 	params := &builder.Parameters{
 		ParentHash:            baseHash,
 		Timestamp:             uint64(attributes.Timestamp),
@@ -290,7 +290,7 @@ func (c ChainReaderWriterEth1) AssembleBlock(baseHash common.Hash, attributes *e
 		TargetGasLimit:        (*uint64)(attributes.TargetGasLimit),
 		ParentBeaconBlockRoot: attributes.ParentBeaconBlockRoot,
 	}
-	result, err := c.executionModule.AssembleBlock(context.Background(), params)
+	result, err := c.executionModule.AssembleBlock(ctx, params)
 	if err != nil {
 		return 0, err
 	}

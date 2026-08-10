@@ -211,15 +211,14 @@ func attestationDue(cfg *clparams.BeaconChainConfig, stateVersion clparams.State
 // computeBlockBuilderWindow uses the earlier collection window only for a sufficiently warmed builder.
 func computeBlockBuilderWindow(now, slotStart time.Time, cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion, prepared bool) blockBuilderWindow {
 	due := attestationDue(cfg, stateVersion)
-	grabBy := slotStart.Add(due - due/payloadPublicationDivisor)
+	pollUntil := slotStart.Add(due - due/payloadPublicationDivisor)
+	firstGetAt := pollUntil.Add(-minPayloadPollingWindow)
 	if prepared {
-		grabBy = slotStart.Add(due / payloadPublicationDivisor)
+		firstGetAt = slotStart.Add(due / payloadPublicationDivisor).Add(-minPayloadPollingWindow)
 	}
-	firstGetAt := grabBy.Add(-minPayloadPollingWindow)
 	if firstGetAt.Before(now) {
 		firstGetAt = now
 	}
-	pollUntil := grabBy
 	if pollUntil.Before(firstGetAt) {
 		pollUntil = firstGetAt
 	}
@@ -505,10 +504,6 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		}
 		return nil
 	}); err != nil {
-		return nil, err
-	}
-
-	if err != nil {
 		return nil, err
 	}
 	if baseState == nil {
@@ -987,8 +982,8 @@ func (a *ApiHandler) produceBeaconBody(
 			}
 		}
 	}
-	currEpoch := a.ethClock.GetCurrentEpoch()
-	random := baseState.GetRandaoMixes(currEpoch)
+	targetEpoch := targetSlot / a.beaconChainCfg.SlotsPerEpoch
+	random := baseState.GetRandaoMixes(targetEpoch)
 
 	var executionPayload *cltypes.Eth1Block
 	var executionValue uint64
@@ -1010,6 +1005,16 @@ func (a *ApiHandler) produceBeaconBody(
 		}()
 		retryTime := 10 * time.Millisecond
 		feeRecipient, _ := a.validatorParams.GetFeeRecipient(proposerIndex)
+		fcuHead, fcuSafeHash, fcuFinalizedHash := head, safeHash, finalizedHash
+		var attrs *engine_types.PayloadAttributes
+		if stateVersion.Before(clparams.GloasVersion) {
+			var err error
+			fcuHead, fcuSafeHash, fcuFinalizedHash, attrs, err = a.preGloasForkChoiceInputs(baseState, baseBlockRoot, targetSlot, feeRecipient, stateVersion)
+			if err != nil {
+				log.Error("BlockProduction: build forkchoice inputs failed", "err", err)
+				return
+			}
+		}
 		var withdrawals []*types.Withdrawal
 		switch {
 		case gloasWithdrawalsState != nil:
@@ -1046,48 +1051,29 @@ func (a *ApiHandler) produceBeaconBody(
 					})
 				}
 			}
-		default:
-			// Pre-GLOAS: compute withdrawals normally
-			clWithdrawals, err := state.GetExpectedWithdrawals(
-				baseState,
-				targetSlot/a.beaconChainCfg.SlotsPerEpoch,
-			)
-			if err != nil {
-				log.Error("BlockProduction: GetExpectedWithdrawals failed", "err", err)
-				return
-			}
-			withdrawals = make([]*types.Withdrawal, 0, len(clWithdrawals.Withdrawals))
-			for _, w := range clWithdrawals.Withdrawals {
-				withdrawals = append(withdrawals, &types.Withdrawal{
-					Index:     w.Index,
-					Amount:    w.Amount,
-					Validator: w.Validator,
-					Address:   w.Address,
-				})
-			}
 		}
 
-		var slotNumber *hexutil.Uint64
 		if stateVersion.AfterOrEqual(clparams.GloasVersion) {
+			var slotNumber *hexutil.Uint64
 			sn := hexutil.Uint64(targetSlot)
 			slotNumber = &sn
+			attrs = payloadAttributesForVersion(
+				stateVersion,
+				hexutil.Uint64(state.ComputeTimestampAtSlot(baseState, targetSlot)),
+				random,
+				feeRecipient,
+				withdrawals,
+				(*common.Hash)(&blockRoot),
+				slotNumber,
+				targetGasLimit,
+			)
 		}
-		attrs := payloadAttributesForVersion(
-			stateVersion,
-			hexutil.Uint64(state.ComputeTimestampAtSlot(baseState, targetSlot)),
-			random,
-			feeRecipient,
-			withdrawals,
-			(*common.Hash)(&blockRoot),
-			slotNumber,
-			targetGasLimit,
-		)
 		builderStartedAt := time.Now()
 		idBytes, err := a.engine.ForkChoiceUpdate(
 			ctx,
-			finalizedHash,
-			safeHash,
-			head,
+			fcuFinalizedHash,
+			fcuSafeHash,
+			fcuHead,
 			attrs,
 			stateVersion,
 		)
