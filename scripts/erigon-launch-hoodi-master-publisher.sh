@@ -61,6 +61,15 @@ export ERIGON_MERGE_MIN_AGE_STEPS="${ERIGON_MERGE_MIN_AGE_STEPS:-6}"
 # + consumer share the host.
 PUB_ADVERTISE_IP="${PUB_ADVERTISE_IP:-127.0.0.1}"
 
+# Pin publisher's discv5 node identity to the trust root key. Consumers
+# validate the peer chain.toml against the configured trust roots by
+# walking the UCAN chain to its root Issuer. When publisher auto-generates
+# a self-signed snapshot.ucan on first run, root Issuer = publisher's
+# operator key. If that operator key isn't the trust root key, the
+# consumer's UCAN gate rejects with "chain root issuer does not match
+# any configured trust root". Aligning nodekey = TRUST_ROOT_KEY makes
+# the auto-generated snapshot.ucan self-signed by the trust root pubkey,
+# which is exactly what the consumer's --snapshot.trust-roots pins.
 exec "$BIN" \
   --datadir="$DATADIR" \
   --chain=hoodi --prune.mode=minimal \
@@ -68,6 +77,7 @@ exec "$BIN" \
   --snap.bootstrap-from-preverified \
   --snap.p2p-manifest \
   --snapshot.trust-roots="$TRUST_ROOT_PUB" \
+  --nodekey="$TRUST_ROOT_KEY" \
   --nat="extip:$PUB_ADVERTISE_IP" \
   --http.api=eth,erigon,engine,debug,net,web3,trace,txpool,admin \
   --http.port=19845 --authrpc.port=19851 --private.api.addr=127.0.0.1:11890 \
