@@ -2,7 +2,9 @@ package stages
 
 import (
 	"context"
+	"encoding/binary"
 	"math/big"
+	"slices"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -155,20 +157,131 @@ func TestCollectUnverifiedGloasPayloadsIncludesCanonicalAndHighestSeenForks(t *t
 	for _, tt := range []struct {
 		name   string
 		starts []common.Hash
-		want   []common.Hash
 	}{
-		{name: "canonical B and highest-seen A", starts: []common.Hash{rootB, rootA}, want: []common.Hash{parentRoot, rootB, rootA}},
-		{name: "canonical A and highest-seen B", starts: []common.Hash{rootA, rootB}, want: []common.Hash{parentRoot, rootA, rootB}},
+		{name: "canonical B and highest-seen A", starts: []common.Hash{rootB, rootA}},
+		{name: "canonical A and highest-seen B", starts: []common.Hash{rootA, rootB}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			items := collectUnverifiedGloasPayloads(tt.starts, 0, &cfg, getBlock, shouldVerify)
-			roots := make([]common.Hash, 0, len(items))
-			for _, item := range items {
-				roots = append(roots, item.root)
-			}
-			require.Equal(t, tt.want, roots)
+			roots := verificationRoots(items)
+			require.Len(t, roots, 3)
+			require.Equal(t, parentRoot, roots[0])
+			require.ElementsMatch(t, []common.Hash{parentRoot, rootA, rootB}, roots)
 		})
 	}
+}
+
+func TestCollectUnverifiedGloasPayloadsDoesNotStarveLineageAtScanLimit(t *testing.T) {
+	cfg := testGloasVerificationConfig()
+	blocks := make(map[common.Hash]*cltypes.SignedBeaconBlock, maxGloasVerificationScanPerLineage+2)
+	canonicalRoot := common.Hash{}
+	for i := 1; i <= maxGloasVerificationScanPerLineage+1; i++ {
+		root := testGloasVerificationRoot(uint64(i))
+		blocks[root] = testGloasVerificationBlock(&cfg, uint64(i), canonicalRoot)
+		canonicalRoot = root
+	}
+	sideRoot := testGloasVerificationRoot(10_000)
+	blocks[sideRoot] = testGloasVerificationBlock(&cfg, 1, common.Hash{})
+	getBlock := func(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+		block, ok := blocks[root]
+		return block, ok
+	}
+
+	for _, length := range []int{maxGloasVerificationScanPerLineage, maxGloasVerificationScanPerLineage + 1} {
+		canonicalRoot = testGloasVerificationRoot(uint64(length))
+		for _, starts := range [][]common.Hash{{canonicalRoot, sideRoot}, {sideRoot, canonicalRoot}} {
+			items := collectUnverifiedGloasPayloads(starts, 0, &cfg, getBlock, func(root common.Hash) bool {
+				return root == sideRoot
+			})
+			require.Contains(t, verificationRoots(items), sideRoot)
+		}
+	}
+}
+
+func TestCollectUnverifiedGloasPayloadsSharesOutputAcrossLineages(t *testing.T) {
+	cfg := testGloasVerificationConfig()
+	blocks := make(map[common.Hash]*cltypes.SignedBeaconBlock, maxGloasVerificationSweepPerCycle+1)
+	canonicalRoot := common.Hash{}
+	for i := 1; i <= maxGloasVerificationSweepPerCycle; i++ {
+		root := testGloasVerificationRoot(uint64(i))
+		blocks[root] = testGloasVerificationBlock(&cfg, uint64(i), canonicalRoot)
+		canonicalRoot = root
+	}
+	sideRoot := testGloasVerificationRoot(10_000)
+	blocks[sideRoot] = testGloasVerificationBlock(&cfg, 1, common.Hash{})
+	getBlock := func(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+		block, ok := blocks[root]
+		return block, ok
+	}
+
+	for _, starts := range [][]common.Hash{{canonicalRoot, sideRoot}, {sideRoot, canonicalRoot}} {
+		items := collectUnverifiedGloasPayloads(starts, 0, &cfg, getBlock, func(common.Hash) bool { return true })
+		require.LessOrEqual(t, len(items), maxGloasVerificationSweepPerCycle)
+		require.Contains(t, verificationRoots(items), sideRoot)
+		lastSlot := uint64(0)
+		for _, item := range items {
+			require.GreaterOrEqual(t, item.block.Block.Slot, lastSlot)
+			lastSlot = item.block.Block.Slot
+		}
+	}
+}
+
+func TestCollectUnverifiedGloasPayloadsWalksHiddenLeafLineage(t *testing.T) {
+	cfg := testGloasVerificationConfig()
+	canonicalRoot := testGloasVerificationRoot(100)
+	highestSeenRoot := testGloasVerificationRoot(200)
+	hiddenRoots := []common.Hash{
+		testGloasVerificationRoot(301),
+		testGloasVerificationRoot(302),
+		testGloasVerificationRoot(303),
+	}
+	blocks := map[common.Hash]*cltypes.SignedBeaconBlock{
+		canonicalRoot:   testGloasVerificationBlock(&cfg, 4, common.Hash{}),
+		highestSeenRoot: testGloasVerificationBlock(&cfg, 5, common.Hash{}),
+		hiddenRoots[0]:  testGloasVerificationBlock(&cfg, 1, common.Hash{}),
+		hiddenRoots[1]:  testGloasVerificationBlock(&cfg, 2, hiddenRoots[0]),
+		hiddenRoots[2]:  testGloasVerificationBlock(&cfg, 3, hiddenRoots[1]),
+	}
+	items := collectUnverifiedGloasPayloads(
+		[]common.Hash{canonicalRoot, highestSeenRoot, hiddenRoots[2]},
+		0,
+		&cfg,
+		func(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+			block, ok := blocks[root]
+			return block, ok
+		},
+		func(root common.Hash) bool { return slices.Contains(hiddenRoots, root) },
+	)
+
+	require.Equal(t, hiddenRoots, verificationRoots(items))
+}
+
+func testGloasVerificationConfig() clparams.BeaconChainConfig {
+	cfg := clparams.MainnetBeaconConfig
+	clparams.ApplyMinimalPreset(&cfg)
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.GloasForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	return cfg
+}
+
+func testGloasVerificationRoot(i uint64) common.Hash {
+	var root common.Hash
+	binary.BigEndian.PutUint64(root[len(root)-8:], i)
+	return root
+}
+
+func verificationRoots(items []gloasVerificationBlock) []common.Hash {
+	roots := make([]common.Hash, len(items))
+	for i, item := range items {
+		roots[i] = item.root
+	}
+	return roots
 }
 
 func testGloasVerificationBlock(cfg *clparams.BeaconChainConfig, slot uint64, parentRoot common.Hash) *cltypes.SignedBeaconBlock {

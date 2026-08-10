@@ -37,6 +37,27 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
+func TestGloasVerificationLeavesPagesAndWraps(t *testing.T) {
+	root1 := common.HexToHash("0x01")
+	root3 := common.HexToHash("0x03")
+	root5 := common.HexToHash("0x05")
+	root7 := common.HexToHash("0x07")
+	store := &ForkChoiceStore{headSet: map[common.Hash]struct{}{
+		common.Hash{}: {},
+		root1:         {},
+		root3:         {},
+		root5:         {},
+		root7:         {},
+	}}
+
+	require.Nil(t, store.GloasVerificationLeaves(root3, 0))
+	require.Equal(t, []common.Hash{root5, root7}, store.GloasVerificationLeaves(root3, 2))
+	require.Equal(t, []common.Hash{root1, root3}, store.GloasVerificationLeaves(root7, 2))
+	require.Equal(t, []common.Hash{root7, root1, root3}, store.GloasVerificationLeaves(root5, 3))
+	require.Equal(t, []common.Hash{root5, root7, root1}, store.GloasVerificationLeaves(common.HexToHash("0x04"), 3))
+	require.ElementsMatch(t, []common.Hash{root1, root3, root5, root7}, store.GloasVerificationLeaves(common.Hash{}, 10))
+}
+
 func TestGetFinalizedExecutionHash(t *testing.T) {
 	cache, err := lru.New[common.Hash, common.Hash](16)
 	require.NoError(t, err)

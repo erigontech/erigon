@@ -23,8 +23,10 @@ import (
 )
 
 const (
-	maxGloasVerificationSweepPerCycle = 32
-	maxGloasVerificationScanPerCycle  = 256
+	maxGloasVerificationSweepPerCycle      = 32
+	maxGloasVerificationScanPerLineage     = 256
+	maxGloasVerificationStartRootsPerCycle = 8
+	maxGloasVerificationLeafRootsPerCycle  = maxGloasVerificationStartRootsPerCycle - 2
 )
 
 func gloasVersionedHashes(blobCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) ([]common.Hash, error) {
@@ -573,13 +575,26 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 		log.Warn("[chainTipSync] failed to resolve canonical head for GLOAS verification", "err", err)
 	}
 	highestSeenRoot := cfg.forkChoice.HighestSeenRoot()
-	startRoots := make([]common.Hash, 0, 2)
-	if canonicalRoot != (common.Hash{}) {
-		startRoots = append(startRoots, canonicalRoot)
+	startRoots := make([]common.Hash, 0, maxGloasVerificationStartRootsPerCycle)
+	addStartRoot := func(root common.Hash) {
+		if root == (common.Hash{}) || slices.Contains(startRoots, root) || len(startRoots) >= maxGloasVerificationStartRootsPerCycle {
+			return
+		}
+		startRoots = append(startRoots, root)
 	}
-	if highestSeenRoot != (common.Hash{}) && highestSeenRoot != canonicalRoot {
-		startRoots = append(startRoots, highestSeenRoot)
+	addStartRoot(canonicalRoot)
+	addStartRoot(highestSeenRoot)
+
+	cfg.gloasVerificationMu.Lock()
+	leaves := cfg.forkChoice.GloasVerificationLeaves(cfg.gloasVerificationLeafCursor, maxGloasVerificationLeafRootsPerCycle)
+	if len(leaves) > 0 {
+		cfg.gloasVerificationLeafCursor = leaves[len(leaves)-1]
 	}
+	cfg.gloasVerificationMu.Unlock()
+	for _, root := range leaves {
+		addStartRoot(root)
+	}
+
 	if len(startRoots) == 0 {
 		return
 	}
@@ -646,11 +661,14 @@ func collectUnverifiedGloasPayloads(
 	shouldVerify func(common.Hash) bool,
 ) []gloasVerificationBlock {
 	blocks := make([]gloasVerificationBlock, 0, maxGloasVerificationSweepPerCycle)
-	seen := make(map[common.Hash]struct{}, maxGloasVerificationScanPerCycle)
-	scanned := 0
+	seen := make(map[common.Hash]struct{}, maxGloasVerificationScanPerLineage)
+	lineages := make([][]gloasVerificationBlock, 0, min(len(startRoots), maxGloasVerificationStartRootsPerCycle))
 	for _, startRoot := range startRoots {
+		if len(lineages) >= maxGloasVerificationStartRootsPerCycle {
+			break
+		}
 		lineage := make([]gloasVerificationBlock, 0)
-		for root := startRoot; root != (common.Hash{}) && scanned < maxGloasVerificationScanPerCycle; scanned++ {
+		for root, scanned := startRoot, 0; root != (common.Hash{}) && scanned < maxGloasVerificationScanPerLineage; scanned++ {
 			if _, ok := seen[root]; ok {
 				break
 			}
@@ -668,13 +686,28 @@ func collectUnverifiedGloasPayloads(
 			}
 			root = common.Hash(block.Block.ParentRoot)
 		}
-		for i := len(lineage) - 1; i >= 0 && len(blocks) < maxGloasVerificationSweepPerCycle; i-- {
-			blocks = append(blocks, lineage[i])
+		slices.Reverse(lineage)
+		lineages = append(lineages, lineage)
+	}
+	for index := 0; len(blocks) < maxGloasVerificationSweepPerCycle; index++ {
+		added := false
+		for _, lineage := range lineages {
+			if index >= len(lineage) {
+				continue
+			}
+			blocks = append(blocks, lineage[index])
+			added = true
+			if len(blocks) >= maxGloasVerificationSweepPerCycle {
+				break
+			}
 		}
-		if len(blocks) >= maxGloasVerificationSweepPerCycle || scanned >= maxGloasVerificationScanPerCycle {
+		if !added {
 			break
 		}
 	}
+	slices.SortStableFunc(blocks, func(a, b gloasVerificationBlock) int {
+		return cmp.Compare(a.block.Block.Slot, b.block.Block.Slot)
+	})
 	return blocks
 }
 

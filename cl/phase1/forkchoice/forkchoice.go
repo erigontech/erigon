@@ -17,6 +17,7 @@
 package forkchoice
 
 import (
+	"bytes"
 	"cmp"
 	"slices"
 	"sync"
@@ -744,6 +745,43 @@ func (f *ForkChoiceStore) ForkNodes() []ForkNode {
 		return cmp.Compare(a.Slot, b.Slot)
 	})
 	return forkNodes
+}
+
+// GloasVerificationLeaves returns a bounded cyclic page of fork-tree leaves.
+func (f *ForkChoiceStore) GloasVerificationLeaves(after common.Hash, limit int) []common.Hash {
+	if limit <= 0 {
+		return nil
+	}
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	selectRoots := func(wrapped bool, pageLimit int) []common.Hash {
+		selected := make([]common.Hash, 0, pageLimit)
+		for root := range f.headSet {
+			if root == (common.Hash{}) || (bytes.Compare(root[:], after[:]) <= 0) != wrapped {
+				continue
+			}
+			index, _ := slices.BinarySearchFunc(selected, root, func(a, b common.Hash) int {
+				return bytes.Compare(a[:], b[:])
+			})
+			if len(selected) < pageLimit {
+				selected = append(selected, common.Hash{})
+				copy(selected[index+1:], selected[index:])
+				selected[index] = root
+				continue
+			}
+			if index < pageLimit {
+				copy(selected[index+1:], selected[index:len(selected)-1])
+				selected[index] = root
+			}
+		}
+		return selected
+	}
+	selected := selectRoots(false, limit)
+	if len(selected) < limit {
+		selected = append(selected, selectRoots(true, limit-len(selected))...)
+	}
+	return selected
 }
 
 func (f *ForkChoiceStore) Synced() bool {

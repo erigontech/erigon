@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/erigontech/erigon/cl/antiquary"
@@ -48,27 +49,29 @@ import (
 )
 
 type Cfg struct {
-	rpc                        *rpc.BeaconRpcP2P
-	ethClock                   eth_clock.EthereumClock
-	beaconCfg                  *clparams.BeaconChainConfig
-	executionClient            execution_client.ExecutionEngine
-	state                      *state.CachingBeaconState
-	forkChoice                 *forkchoice.ForkChoiceStore
-	recoveredEnvelopeProcessor recoveredEnvelopeProcessor
-	indiciesDB                 kv.RwDB
-	dirs                       datadir.Dirs
-	blockReader                freezeblocks.BeaconSnapshotReader
-	antiquary                  *antiquary.Antiquary
-	syncedData                 *synced_data.SyncedDataManager
-	emitter                    *beaconevents.EventEmitter
-	blockCollector             block_collector.BlockCollector
-	sn                         *freezeblocks.CaplinSnapshots
-	blobStore                  blob_storage.BlobStorage
-	peerDas                    das.PeerDas
-	blobDownloader             *network2.BlobHistoryDownloader
-	attestationDataProducer    attestation_producer.AttestationDataProducer
-	caplinConfig               clparams.CaplinConfig
-	hasDownloaded              bool
+	rpc                         *rpc.BeaconRpcP2P
+	ethClock                    eth_clock.EthereumClock
+	beaconCfg                   *clparams.BeaconChainConfig
+	executionClient             execution_client.ExecutionEngine
+	state                       *state.CachingBeaconState
+	forkChoice                  *forkchoice.ForkChoiceStore
+	recoveredEnvelopeProcessor  recoveredEnvelopeProcessor
+	indiciesDB                  kv.RwDB
+	dirs                        datadir.Dirs
+	blockReader                 freezeblocks.BeaconSnapshotReader
+	antiquary                   *antiquary.Antiquary
+	syncedData                  *synced_data.SyncedDataManager
+	emitter                     *beaconevents.EventEmitter
+	blockCollector              block_collector.BlockCollector
+	sn                          *freezeblocks.CaplinSnapshots
+	blobStore                   blob_storage.BlobStorage
+	peerDas                     das.PeerDas
+	blobDownloader              *network2.BlobHistoryDownloader
+	attestationDataProducer     attestation_producer.AttestationDataProducer
+	caplinConfig                clparams.CaplinConfig
+	hasDownloaded               bool
+	gloasVerificationMu         sync.Mutex
+	gloasVerificationLeafCursor common.Hash
 }
 
 type recoveredEnvelopeProcessor interface {
