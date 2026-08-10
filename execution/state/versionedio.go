@@ -1706,19 +1706,14 @@ func (vr versionedStateReader) ReadAccountStorage(address accounts.Address, key 
 
 	// Check version map for storage written by prior transactions.
 	if vr.versionMap != nil {
-		if destructed, res, ok := vr.versionMap.ReadSelfDestruct(address, vr.txIndex); ok && res.Status() == MVReadResultDone {
-			if destructed {
-				return uint256.Int{}, false, nil
-			}
-		}
 		val, res, ok := vr.versionMap.ReadStorage(address, key, vr.txIndex)
 		if ok && res.Status() != MVReadResultNone {
-			if vr.versionMap.wipedByInRangeDestruct(address, res.Version().TxIndex, vr.txIndex) {
+			if vr.wipedByDestruct(address, StoragePath, res.Version().TxIndex) {
 				return uint256.Int{}, false, nil
 			}
 			return val, true, nil
 		}
-		if vr.versionMap.wipedByInRangeDestruct(address, -1, vr.txIndex) {
+		if vr.wipedByDestruct(address, StoragePath, -1) {
 			return uint256.Int{}, false, nil
 		}
 	}
@@ -1730,9 +1725,26 @@ func (vr versionedStateReader) ReadAccountStorage(address accounts.Address, key 
 	return uint256.Int{}, false, nil
 }
 
+// wipedByDestruct reports whether an in-block SELFDESTRUCT cleared the value
+// this reader would otherwise return for path, floored at the version map cell
+// holding it (-1 when that value comes from before the block). The SelfDestruct
+// probe is what makes the common no-destruct case one lookup instead of two.
+func (vr versionedStateReader) wipedByDestruct(address accounts.Address, path AccountPath, floor int) bool {
+	if _, _, ok := vr.versionMap.ReadSelfDestruct(address, vr.txIndex); !ok {
+		return false
+	}
+	return vr.versionMap.wipedByInRangeDestruct(address, path, floor, vr.txIndex)
+}
+
 func (vr versionedStateReader) HasStorage(address accounts.Address) (bool, error) {
 	if _, ok := vr.reads.storage[address]; ok {
 		return true, nil
+	}
+
+	// An in-block destruct erased whatever the pre-block domain holds, so the
+	// fall-through below must not answer from it.
+	if vr.versionMap != nil && vr.wipedByDestruct(address, StoragePath, -1) {
+		return false, nil
 	}
 
 	if vr.stateReader != nil {
@@ -1750,19 +1762,14 @@ func (vr versionedStateReader) ReadAccountCode(address accounts.Address) ([]byte
 	// Check version map for CodePath entries written by prior transactions
 	// (e.g. EIP-7702 delegation set by an earlier tx in the same block).
 	if vr.versionMap != nil {
-		if destructed, res, ok := vr.versionMap.ReadSelfDestruct(address, vr.txIndex); ok && res.Status() == MVReadResultDone {
-			if destructed {
-				return nil, nil
-			}
-		}
 		code, res, ok := vr.versionMap.ReadCode(address, vr.txIndex)
 		if ok && res.Status() != MVReadResultNone {
-			if vr.versionMap.wipedByInRangeDestruct(address, res.Version().TxIndex, vr.txIndex) {
+			if vr.wipedByDestruct(address, CodePath, res.Version().TxIndex) {
 				return nil, nil
 			}
 			return code.Bytes, nil
 		}
-		if vr.versionMap.wipedByInRangeDestruct(address, -1, vr.txIndex) {
+		if vr.wipedByDestruct(address, CodePath, -1) {
 			return nil, nil
 		}
 	}
@@ -1780,19 +1787,14 @@ func (vr versionedStateReader) ReadAccountCodeSize(address accounts.Address) (in
 	}
 
 	if vr.versionMap != nil {
-		if destructed, res, ok := vr.versionMap.ReadSelfDestruct(address, vr.txIndex); ok && res.Status() == MVReadResultDone {
-			if destructed {
-				return 0, nil
-			}
-		}
 		code, res, ok := vr.versionMap.ReadCode(address, vr.txIndex)
 		if ok && res.Status() != MVReadResultNone {
-			if vr.versionMap.wipedByInRangeDestruct(address, res.Version().TxIndex, vr.txIndex) {
+			if vr.wipedByDestruct(address, CodeSizePath, res.Version().TxIndex) {
 				return 0, nil
 			}
 			return len(code.Bytes), nil
 		}
-		if vr.versionMap.wipedByInRangeDestruct(address, -1, vr.txIndex) {
+		if vr.wipedByDestruct(address, CodeSizePath, -1) {
 			return 0, nil
 		}
 	}

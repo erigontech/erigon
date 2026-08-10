@@ -451,7 +451,7 @@ func (vm *VersionMap) applySubFieldWrites(addr accounts.Address, txIdx int, acco
 		account.Balance = cell.Value
 	}
 	if idx, cell := floorCell(e.Nonce, txIdx); cell != nil {
-		if wipedByDestructLocked(e, idx, txIdx) {
+		if wipedByDestructLocked(e, NoncePath, idx, txIdx) {
 			account.Nonce = 0
 		} else {
 			account.Nonce = cell.Value
@@ -461,7 +461,7 @@ func (vm *VersionMap) applySubFieldWrites(addr accounts.Address, txIdx int, acco
 		account.Incarnation = cell.Value
 	}
 	if idx, cell := floorCell(e.CodeHash, txIdx); cell != nil {
-		if wipedByDestructLocked(e, idx, txIdx) {
+		if wipedByDestructLocked(e, CodeHashPath, idx, txIdx) {
 			account.CodeHash = accounts.EmptyCodeHash
 		} else {
 			account.CodeHash = cell.Value
@@ -470,15 +470,15 @@ func (vm *VersionMap) applySubFieldWrites(addr accounts.Address, txIdx int, acco
 }
 
 // wipedByDestructLocked is wipedByInRangeDestruct for a caller already holding
-// e.mu: a Done SelfDestruct=true write at or above floor and below txIdx. Taking
-// the shared helper here would re-enter the read lock.
-func wipedByDestructLocked(e *AddressEntry, floor, txIdx int) bool {
+// e.mu, which the shared helper would re-enter.
+func wipedByDestructLocked(e *AddressEntry, path AccountPath, floor, txIdx int) bool {
 	if e.SelfDestruct == nil {
 		return false
 	}
+	lo := destructScanFloor(path, floor)
 	found := false
 	e.SelfDestruct.Descend(txIdx-1, func(k int, v *WriteCell[bool]) bool {
-		if k < floor {
+		if k < lo {
 			return false
 		}
 		if v.flag == FlagDone && v.Value {
@@ -664,19 +664,26 @@ func (vm *VersionMap) AccountLifecycle(addr accounts.Address, txIdx int) (destro
 	return true, destroyedAt, false
 }
 
-// wipedByInRangeDestruct reports whether an in-block SELFDESTRUCT cleared the
-// value a reader would otherwise return. floor is the tx index of the version
-// map cell holding that value, or -1 when it comes from before the block. The
-// latest SelfDestruct entry cannot answer this on its own: once the account is
-// revived, that entry is the revival.
-func (vm *VersionMap) wipedByInRangeDestruct(addr accounts.Address, floor, txIndex int) bool {
-	if vm == nil {
-		return false
-	}
+// destructScanFloor is the lowest TxIndex a wipe scan covers for a value floored
+// at floor, or -1 when the value predates the block. Balance and CodeHash keep
+// the destroying tx's own entry, which already holds the post-destruct value —
+// EIP-8246 retains the balance and the code hash is reset there.
+func destructScanFloor(path AccountPath, floor int) int {
 	if floor < 0 {
-		return vm.AnyDoneSelfDestructEquals(addr, txIndex-1, true)
+		return -1
 	}
-	_, found := vm.FindDoneSelfDestructInRange(addr, floor, txIndex, true)
+	if path == BalancePath || path == CodeHashPath {
+		return floor + 1
+	}
+	return floor
+}
+
+// wipedByInRangeDestruct reports whether an in-block SELFDESTRUCT cleared the
+// value a reader would otherwise return for path. The latest SelfDestruct entry
+// cannot answer this alone: once the account is revived, that entry is the
+// revival.
+func (vm *VersionMap) wipedByInRangeDestruct(addr accounts.Address, path AccountPath, floor, txIndex int) bool {
+	_, found := vm.FindDoneSelfDestructInRange(addr, destructScanFloor(path, floor), txIndex, true)
 	return found
 }
 
