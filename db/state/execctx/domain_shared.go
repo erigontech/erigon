@@ -119,29 +119,59 @@ func (sd *SharedDomains) cacheViewsFor(tx kv.TemporalTx) cacheViews {
 		}
 	}
 	debug := tx.Debug()
-	generations := cacheGenerationsFor(debug, stateVersion)
-	stateEligible := cacheViewEligible(debug, kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain)
-	branchEligible := cacheViewEligible(debug, kv.CommitmentDomain)
 	var views cacheViews
-	if sd.stateCache != nil && stateEligible {
-		views.state = sd.stateCache.View(generations.state)
+	if stateView, identityKnown := stateCacheReadViewFor(debug, stateVersion, sd.stateCache); identityKnown {
+		views.state = stateView
 	}
-	if sd.branchCache != nil && branchEligible {
-		views.branch = sd.branchCache.View(generations.branch)
+	if sd.branchCache != nil && cacheViewEligible(debug, kv.CommitmentDomain) {
+		views.branch = sd.branchCache.View(branchCacheGenerationFor(debug, stateVersion))
 	}
 	return views
 }
 
+// StateCacheReadView binds stateCache to the state version and files ends pinned
+// by tx. It returns false if the cache is nil or that exact identity cannot be
+// derived. Even when true, the view is inert if the identity is not published.
+func StateCacheReadView(tx kv.TemporalTx, stateCache *cache.StateCache) (view cache.ReadView, identityKnown bool) {
+	if tx == nil || stateCache == nil {
+		return cache.ReadView{}, false
+	}
+	stateVersion, err := rawdb.GetStateVersion(tx)
+	if err != nil {
+		return cache.ReadView{}, false
+	}
+	return stateCacheReadViewFor(tx.Debug(), stateVersion, stateCache)
+}
+
+func stateCacheReadViewFor(
+	debug kv.TemporalDebugTx,
+	stateVersion uint64,
+	stateCache *cache.StateCache,
+) (cache.ReadView, bool) {
+	if stateCache == nil || !cacheViewEligible(debug, kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain) {
+		return cache.ReadView{}, false
+	}
+	return stateCache.View(stateCacheGenerationFor(debug, stateVersion)), true
+}
+
 func cacheGenerationsFor(debug kv.TemporalDebugTx, stateVersion uint64) cacheGenerations {
 	return cacheGenerations{
-		state: cache.StateGeneration(
-			stateVersion,
-			debug.TxNumsInFiles(kv.AccountsDomain),
-			debug.TxNumsInFiles(kv.StorageDomain),
-			debug.TxNumsInFiles(kv.CodeDomain),
-		),
-		branch: cache.BranchGeneration(stateVersion, debug.TxNumsInFiles(kv.CommitmentDomain)),
+		state:  stateCacheGenerationFor(debug, stateVersion),
+		branch: branchCacheGenerationFor(debug, stateVersion),
 	}
+}
+
+func stateCacheGenerationFor(debug kv.TemporalDebugTx, stateVersion uint64) cache.Generation {
+	return cache.StateGeneration(
+		stateVersion,
+		debug.TxNumsInFiles(kv.AccountsDomain),
+		debug.TxNumsInFiles(kv.StorageDomain),
+		debug.TxNumsInFiles(kv.CodeDomain),
+	)
+}
+
+func branchCacheGenerationFor(debug kv.TemporalDebugTx, stateVersion uint64) cache.Generation {
+	return cache.BranchGeneration(stateVersion, debug.TxNumsInFiles(kv.CommitmentDomain))
 }
 
 type exactDomainVisibleEnd interface {

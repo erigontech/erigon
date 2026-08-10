@@ -17,7 +17,7 @@ import (
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
-	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
@@ -91,32 +91,15 @@ type cachePopulatingGetter struct {
 	view cache.ReadView
 }
 
-// readAheadGetter enables fills only when the transaction has an exact domain
-// frontier. StateCache.View also requires the transaction's state version and
-// pinned files ends to match the published generation. Failure of either check
-// keeps read-ahead useful for the OS page cache without admitting unsafe values
-// into StateCache.
+// readAheadGetter uses StateCache only when the transaction's durable state and
+// pinned files form an exact identity. Returning the transaction unchanged on
+// uncertainty still lets read-ahead warm the database and OS page cache.
 func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache) kv.TemporalGetter {
-	if sc == nil {
+	view, identityKnown := execctx.StateCacheReadView(ttx, sc)
+	if !identityKnown {
 		return ttx
 	}
-	stateVersion, err := rawdb.GetStateVersion(ttx)
-	if err != nil {
-		return ttx
-	}
-	debug := ttx.Debug()
-	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
-		if !debug.HasExactDomainVisibleEnd(domain) {
-			return ttx
-		}
-	}
-	generation := cache.StateGeneration(
-		stateVersion,
-		debug.TxNumsInFiles(kv.AccountsDomain),
-		debug.TxNumsInFiles(kv.StorageDomain),
-		debug.TxNumsInFiles(kv.CodeDomain),
-	)
-	return &cachePopulatingGetter{TemporalGetter: ttx, view: sc.View(generation)}
+	return &cachePopulatingGetter{TemporalGetter: ttx, view: view}
 }
 
 func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte) ([]byte, kv.Step, error) {
