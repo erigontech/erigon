@@ -32,11 +32,11 @@ import (
 
 const (
 	// DefaultAccountCacheBytes is the byte limit for the account cache.
-	DefaultAccountCacheBytes = 1 * datasize.GB
+	DefaultAccountCacheBytes = 150 * datasize.MB
 	// DefaultStorageCacheBytes is the byte limit for storage cache. 150 MB
 	// holds the hot storage working set with headroom so eviction pressure
 	// doesn't push the hot set out.
-	DefaultStorageCacheBytes = 150 * datasize.MB
+	DefaultStorageCacheBytes = 1 * datasize.GB
 
 	// Per-domain avg entry size used to translate the byte budget into the
 	// entry-count cap the underlying sharded LRU is sized against. Account
