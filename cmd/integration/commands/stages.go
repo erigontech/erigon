@@ -717,12 +717,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		if err := stagedsync.UnwindExecutionStage(u, s, doms, tx, ctx, cfg, logger); err != nil {
 			return err
 		}
-		if err := doms.Flush(ctx, tx); err != nil {
-			return err
-		}
-		err = tx.Commit()
-		tx = nil
-		return err
+		return commitExecUnwind(ctx, doms, tx)
 	}
 
 	if pruneTo > 0 {
@@ -822,6 +817,10 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		}
 	}
 	return nil
+}
+
+func commitExecUnwind(ctx context.Context, doms *execctx.SharedDomains, tx kv.TemporalRwTx) error {
+	return doms.Commit(ctx, tx)
 }
 
 // execBlocksBatch runs one stage_exec batch in its own rwtx and SharedDomains:
