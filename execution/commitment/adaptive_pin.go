@@ -305,6 +305,8 @@ func (c *AdaptivePinController) onCacheMiss(prefix []byte) {
 // uncommitted transaction without changing BranchCache. The returned plan
 // keeps controller updates serialized until Commit or Abort. Publication
 // discards it if sourceGeneration or the cache clear epoch changed meanwhile.
+// An already-stale source returns no plan and leaves its misses for a fresh
+// transaction instead of doing work that cannot be published.
 func (c *AdaptivePinController) PlanBlock(
 	txNum uint64,
 	sourceGeneration cache.Generation,
@@ -314,6 +316,11 @@ func (c *AdaptivePinController) PlanBlock(
 ) *AdaptivePinPlan {
 	c.mu.Lock()
 	c.syncCacheClearLocked()
+	source := c.cache.generation.View(sourceGeneration)
+	if !source.Current() {
+		c.mu.Unlock()
+		return nil
+	}
 	previousStates := c.states
 	c.states = cloneAdaptiveStateHeaders(previousStates)
 	misses := c.snapshotMisses()
@@ -323,7 +330,7 @@ func (c *AdaptivePinController) PlanBlock(
 		controller:      c,
 		previousStates:  previousStates,
 		observedMisses:  observedMisses,
-		source:          c.cache.generation.View(sourceGeneration),
+		source:          source,
 		cacheClearEpoch: c.cacheClearEpoch,
 		txNum:           txNum,
 	}

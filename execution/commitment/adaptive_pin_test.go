@@ -138,6 +138,39 @@ func TestAdaptivePinPlanIsDiscardedAfterFilesPublication(t *testing.T) {
 	require.Empty(t, controller.states, "discarding the stale plan must also discard its residency state")
 }
 
+func TestAdaptivePinPlanSkipsStaleSourceAfterFilesPublication(t *testing.T) {
+	branchCache := NewBranchCache(64)
+	t.Cleanup(branchCache.Close)
+	publisher := branchCache.Publisher()
+	publisher.Initialize(testBranchGeneration(1))
+
+	cfg := DefaultAdaptivePinControllerConfig()
+	cfg.PromoteThresholdMisses = 1
+	cfg.MaxPromotedContracts = 1
+	controller := NewAdaptivePinController(branchCache, cfg, log.Root())
+
+	change := branchCache.BeginFilesPublication(100)
+	require.NotNil(t, change)
+	change.Finish()
+
+	var contractHash [32]byte
+	contractHash[0] = 1
+	prefix := nibbles.HexToCompact(ContractNibbles(contractHash[:]))
+	controller.onCacheMiss(prefix)
+	readerCalls := 0
+	reader := func(key []byte) ([]byte, uint64, bool, error) {
+		readerCalls++
+		if !bytes.Equal(key, prefix) {
+			return nil, 0, false, nil
+		}
+		return []byte{0, 0, 0, 0}, 1, true, nil
+	}
+
+	plan := controller.PlanBlock(1, testBranchGeneration(1), reader, nil, nil)
+	require.Nil(t, plan, "a transaction pinned to the old files cannot prepare a plan for the new cache generation")
+	require.Zero(t, readerCalls, "a plan that cannot be published must not scan branches")
+}
+
 func TestAdaptivePinControllerForgetsPinsClearedByFilesPublication(t *testing.T) {
 	branchCache := NewBranchCache(64)
 	t.Cleanup(branchCache.Close)
