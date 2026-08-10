@@ -1212,11 +1212,6 @@ func (c *BlockStateCache) GetCurrentStorage(addr accounts.Address, key accounts.
 		}
 	}
 	c.mu.RUnlock()
-	// Committed fallback runs after releasing mu, matching GetCurrentAccount:
-	// committedStorage is a write-once immutable pre-block view (a sync.Map for
-	// lock-free reads), so a concurrent WriteStorage can only add a currentStorage
-	// entry we'd miss — which the RLock-then-fallback ordering can't prevent
-	// regardless — never tear a committed value.
 	if v, ok := c.committedStorage.Load(committedStorageKey{addr: addr, key: key}); ok {
 		return v.([]byte), true
 	}
