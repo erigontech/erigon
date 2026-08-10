@@ -451,7 +451,7 @@ func (vm *VersionMap) applySubFieldWrites(addr accounts.Address, txIdx int, acco
 		account.Balance = cell.Value
 	}
 	if idx, cell := floorCell(e.Nonce, txIdx); cell != nil {
-		if wipedByDestructLocked(e, NoncePath, idx, txIdx) {
+		if selfDestructWipesLocked(e, NoncePath, idx, txIdx) {
 			account.Nonce = 0
 		} else {
 			account.Nonce = cell.Value
@@ -461,33 +461,12 @@ func (vm *VersionMap) applySubFieldWrites(addr accounts.Address, txIdx int, acco
 		account.Incarnation = cell.Value
 	}
 	if idx, cell := floorCell(e.CodeHash, txIdx); cell != nil {
-		if wipedByDestructLocked(e, CodeHashPath, idx, txIdx) {
+		if selfDestructWipesLocked(e, CodeHashPath, idx, txIdx) {
 			account.CodeHash = accounts.EmptyCodeHash
 		} else {
 			account.CodeHash = cell.Value
 		}
 	}
-}
-
-// wipedByDestructLocked is wipedByInRangeDestruct for a caller already holding
-// e.mu, which the shared helper would re-enter.
-func wipedByDestructLocked(e *AddressEntry, path AccountPath, floor, txIdx int) bool {
-	if e.SelfDestruct == nil {
-		return false
-	}
-	lo := destructScanFloor(path, floor)
-	found := false
-	e.SelfDestruct.Descend(txIdx-1, func(k int, v *WriteCell[bool]) bool {
-		if k < lo {
-			return false
-		}
-		if v.flag == FlagDone && v.Value {
-			found = true
-			return false
-		}
-		return true
-	})
-	return found
 }
 
 func (vm *VersionMap) ReadAddress(addr accounts.Address, txIdx int) (*accounts.Account, ReadResult, bool) {
@@ -683,7 +662,37 @@ func destructScanFloor(path AccountPath, floor int) int {
 // cannot answer this alone: once the account is revived, that entry is the
 // revival.
 func (vm *VersionMap) wipedByInRangeDestruct(addr accounts.Address, path AccountPath, floor, txIndex int) bool {
-	_, found := vm.FindDoneSelfDestructInRange(addr, destructScanFloor(path, floor), txIndex, true)
+	e := vm.load(addr)
+	if e == nil {
+		return false
+	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return selfDestructWipesLocked(e, path, floor, txIndex)
+}
+
+// selfDestructWipesLocked is the wipe rule itself, for callers already holding
+// e.mu. An Estimate cell counts as a destruct whatever its value: MarkEstimate
+// only flips the flag, so the value left there belongs to the incarnation being
+// re-executed. These readers serve Estimate values and record no read, so
+// skipping an Estimate destruct would hand back pre-destruct data with nothing
+// to catch it later.
+func selfDestructWipesLocked(e *AddressEntry, path AccountPath, floor, txIdx int) bool {
+	if e.SelfDestruct == nil {
+		return false
+	}
+	lo := destructScanFloor(path, floor)
+	found := false
+	e.SelfDestruct.Descend(txIdx-1, func(k int, v *WriteCell[bool]) bool {
+		if k < lo {
+			return false
+		}
+		if v.flag == FlagEstimate || v.Value {
+			found = true
+			return false
+		}
+		return true
+	})
 	return found
 }
 

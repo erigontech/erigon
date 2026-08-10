@@ -204,6 +204,26 @@ func TestVersionedStateReader_PreBlockValueWipedByInRangeDestruct(t *testing.T) 
 	require.False(t, has, "HasStorage must agree with ReadAccountStorage")
 }
 
+// An in-flight destruct still counts: MarkEstimate leaves the aborted
+// incarnation's value behind, so a scan that only accepts Done cells would read
+// the destruct as absent and serve the pre-destruct slot.
+func TestVersionedStateReader_EstimateDestructStillWipes(t *testing.T) {
+	t.Parallel()
+	addr := getAddress(110)
+	key := accounts.InternKey(common.HexToHash("0x01"))
+
+	vm := NewVersionMap(nil)
+	writeFor(vm, addr, StoragePath, key, Version{TxIndex: 0}, *uint256.NewInt(5), true)
+	writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 1}, true, true)
+	vm.MarkEstimate(addr, SelfDestructPath, accounts.NilKey, 1)
+
+	vr := NewVersionedStateReader(3, ReadSet{}, vm, nil)
+	val, found, err := vr.ReadAccountStorage(addr, key)
+	require.NoError(t, err)
+	require.True(t, val.IsZero(), "a destruct being re-executed is not a destruct that did not happen")
+	require.False(t, found)
+}
+
 // A same-tx destroy-and-recreate writes the new contract's code hash at the same
 // TxIndex as the destruct, so that entry is already the post-destruct value and
 // the scan must start above it — the convention read_paths.go applies to
