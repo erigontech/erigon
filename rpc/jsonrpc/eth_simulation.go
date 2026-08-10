@@ -125,8 +125,7 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 		return nil, err
 	}
 
-	// nil filters: resolve on the committed view — the gate and the simulator
-	// below read the same plain tx (see rpchelper.GetBlockNumber).
+	// nil filters: committed view — the gate and the simulator below read this same tx.
 	blockNumber, blockHash, _, err := rpchelper.GetBlockNumber(ctx, blockParameter, tx, api._blockReader, nil)
 	if err != nil {
 		return nil, err

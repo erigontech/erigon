@@ -140,8 +140,8 @@ func exceedsLogQueryLimit(crit filters.FilterCriteria, limit int) bool {
 // resolveLogsRange resolves a filter's block range. A BlockHash pins the range to that
 // block; otherwise negative tags are resolved against the chain, defaulting to the
 // latest executed block. With checkFuture, ranges past the latest executed block are
-// rejected as they are resolved. Tags resolve on the committed view of tx (nil
-// filters — see rpchelper.GetBlockNumber): callers scan logs through the same tx.
+// rejected as they are resolved. Tags resolve on the view tx exposes, since
+// callers scan logs through that same tx.
 func (api *BaseAPI) resolveLogsRange(ctx context.Context, tx kv.Tx, crit filters.FilterCriteria, checkFuture bool) (begin, end uint64, err error) {
 	if crit.BlockHash != nil {
 		number, err := api._blockReader.HeaderNumber(ctx, tx, *crit.BlockHash)

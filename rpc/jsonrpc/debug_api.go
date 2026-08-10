@@ -163,8 +163,7 @@ func (api *DebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Ha
 	}
 
 	blockNrOrHash := rpc.BlockNumberOrHashWithHash(blockHash, true)
-	// nil filters: resolve on the committed view — the storage-range scan reads
-	// temporal data through the same plain tx (see rpchelper.GetBlockNumber).
+	// nil filters: committed view — the scan below reads temporal data through this tx.
 	blockNumber, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
@@ -260,8 +259,7 @@ func (api *DebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.Blo
 		}
 
 	} else if _, ok := blockNrOrHash.Hash(); ok {
-		// nil filters: resolve on the committed view — the dumper reads temporal
-		// data through the same plain tx (see rpchelper.GetBlockNumber).
+		// nil filters: committed view — the dumper reads temporal data through this tx.
 		bn, _, _, err2 := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
 		if err2 != nil {
 			return state.IteratorDump{}, err2
@@ -586,8 +584,8 @@ func (api *DebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, t
 	}
 	defer tx.Rollback()
 
-	// Committed view: the canonical-hash check and GetAsOf reads below use the
-	// same plain tx (an overlay-resolved head would have no committed history).
+	// Committed view: the canonical-hash check and the GetAsOf reads below all
+	// go through this plain tx.
 	blockNumber, err := api._blockReader.HeaderNumber(ctx, tx, blockHash)
 	if err != nil {
 		return nil, err
