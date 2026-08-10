@@ -28,7 +28,7 @@ const (
 	maxGloasVerificationStartRootsPerCycle = 8
 	maxGloasVerificationLeafRootsPerCycle  = maxGloasVerificationStartRootsPerCycle - 2
 	maxGloasVerificationStalledCycles      = 8
-	maxGloasVerificationCheckpoints        = 256
+	maxGloasVerificationCheckpoints        = 8
 )
 
 func gloasVersionedHashes(blobCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) ([]common.Hash, error) {
@@ -673,6 +673,7 @@ type gloasVerificationLineage struct {
 	checkpoints   []common.Hash
 	pending       int
 	stalled       int
+	truncated     bool
 }
 
 func mergeGloasVerificationLineages(states []gloasVerificationLineage, roots []common.Hash) []gloasVerificationLineage {
@@ -858,6 +859,7 @@ func collectUnverifiedGloasPayloadPages(
 				state.checkpoints = append(state.checkpoints, root)
 				if len(state.checkpoints) > maxGloasVerificationCheckpoints {
 					state.checkpoints = append([]common.Hash(nil), state.checkpoints[len(state.checkpoints)-maxGloasVerificationCheckpoints:]...)
+					state.truncated = true
 				}
 			}
 			state.pending = 0
@@ -889,6 +891,14 @@ func collectUnverifiedGloasPayloadPages(
 			state.cursor = state.checkpoints[len(state.checkpoints)-1]
 			state.pending = 0
 			state.stalled = 0
+			next = append(next, state)
+		} else if state.truncated {
+			state.readyBoundary = state.cursor
+			state.cursor = state.origin
+			state.checkpoints = []common.Hash{state.origin}
+			state.pending = 0
+			state.stalled = 0
+			state.truncated = false
 			next = append(next, state)
 		}
 	}
