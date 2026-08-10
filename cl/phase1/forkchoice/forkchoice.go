@@ -17,8 +17,8 @@
 package forkchoice
 
 import (
-	"bytes"
 	"cmp"
+	"container/list"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -95,16 +95,19 @@ type ForkChoiceStore struct {
 	unrealizedJustifiedCheckpoint atomic.Value
 	unrealizedFinalizedCheckpoint atomic.Value
 
-	proposerBoostRoot        atomic.Value
-	headHash                 common.Hash
-	headSlot                 uint64
-	headPayloadStatus        cltypes.PayloadStatus
-	genesisTime              uint64
-	genesisValidatorsRoot    common.Hash
-	weights                  map[common.Hash]uint64
-	headSet                  map[common.Hash]struct{}
-	hotSidecars              map[common.Hash][]*cltypes.BlobSidecar // Set of sidecars that are not yet processed.
-	verifiedExecutionPayload *lru.Cache[common.Hash, struct{}]
+	proposerBoostRoot           atomic.Value
+	headHash                    common.Hash
+	headSlot                    uint64
+	headPayloadStatus           cltypes.PayloadStatus
+	genesisTime                 uint64
+	genesisValidatorsRoot       common.Hash
+	weights                     map[common.Hash]uint64
+	headSet                     map[common.Hash]struct{}
+	gloasVerificationLeaves     *list.List
+	gloasVerificationLeafByRoot map[common.Hash]*list.Element
+	gloasVerificationLeafCursor *list.Element
+	hotSidecars                 map[common.Hash][]*cltypes.BlobSidecar // Set of sidecars that are not yet processed.
+	verifiedExecutionPayload    *lru.Cache[common.Hash, struct{}]
 	// [New in Gloas:EIP7732] Track execution payload validation status by execution block hash.
 	// Used to check if parent execution payload has been validated/invalidated for gossip validation.
 	executionPayloadStatus *lru.Cache[common.Hash, execution_client.PayloadStatus]
@@ -422,6 +425,7 @@ func NewForkChoiceStore(
 	f.payloadDataAvailabilityVote.Store(common.Hash(anchorRoot), anchorDataAvailabilityVotes)
 
 	f.gloasWeightTree = newGloasWeightTree(f)
+	f.initializeGloasVerificationLeaves()
 
 	return f, nil
 }
@@ -747,41 +751,69 @@ func (f *ForkChoiceStore) ForkNodes() []ForkNode {
 	return forkNodes
 }
 
-// GloasVerificationLeaves returns a bounded cyclic page of fork-tree leaves.
-func (f *ForkChoiceStore) GloasVerificationLeaves(after common.Hash, limit int) []common.Hash {
+func (f *ForkChoiceStore) initializeGloasVerificationLeaves() {
+	f.gloasVerificationLeaves = list.New()
+	f.gloasVerificationLeafByRoot = make(map[common.Hash]*list.Element, len(f.headSet))
+	for root := range f.headSet {
+		f.addGloasVerificationLeaf(root)
+	}
+}
+
+func (f *ForkChoiceStore) addGloasVerificationLeaf(root common.Hash) {
+	if f.gloasVerificationLeaves == nil {
+		return
+	}
+	if _, ok := f.gloasVerificationLeafByRoot[root]; ok {
+		return
+	}
+	f.gloasVerificationLeafByRoot[root] = f.gloasVerificationLeaves.PushBack(root)
+}
+
+func (f *ForkChoiceStore) removeGloasVerificationLeaf(root common.Hash) {
+	if f.gloasVerificationLeaves == nil {
+		return
+	}
+	element, ok := f.gloasVerificationLeafByRoot[root]
+	if !ok {
+		return
+	}
+	if f.gloasVerificationLeafCursor == element {
+		if f.gloasVerificationLeaves.Len() == 1 {
+			f.gloasVerificationLeafCursor = nil
+		} else if previous := element.Prev(); previous != nil {
+			f.gloasVerificationLeafCursor = previous
+		} else {
+			f.gloasVerificationLeafCursor = f.gloasVerificationLeaves.Back()
+		}
+	}
+	f.gloasVerificationLeaves.Remove(element)
+	delete(f.gloasVerificationLeafByRoot, root)
+}
+
+// GloasVerificationLeaves returns the next bounded page of fork-tree leaves.
+func (f *ForkChoiceStore) GloasVerificationLeaves(limit int) []common.Hash {
 	if limit <= 0 {
 		return nil
 	}
-	f.mu.RLock()
-	defer f.mu.RUnlock()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.gloasVerificationLeaves == nil || f.gloasVerificationLeaves.Len() == 0 {
+		return nil
+	}
 
-	selectRoots := func(wrapped bool, pageLimit int) []common.Hash {
-		selected := make([]common.Hash, 0, pageLimit)
-		for root := range f.headSet {
-			if root == (common.Hash{}) || (bytes.Compare(root[:], after[:]) <= 0) != wrapped {
-				continue
-			}
-			index, _ := slices.BinarySearchFunc(selected, root, func(a, b common.Hash) int {
-				return bytes.Compare(a[:], b[:])
-			})
-			if len(selected) < pageLimit {
-				selected = append(selected, common.Hash{})
-				copy(selected[index+1:], selected[index:])
-				selected[index] = root
-				continue
-			}
-			if index < pageLimit {
-				copy(selected[index+1:], selected[index:len(selected)-1])
-				selected[index] = root
-			}
+	leaves := make([]common.Hash, 0, min(limit, f.gloasVerificationLeaves.Len()))
+	for visited := 0; visited < f.gloasVerificationLeaves.Len() && len(leaves) < limit; visited++ {
+		if f.gloasVerificationLeafCursor == nil || f.gloasVerificationLeafCursor.Next() == nil {
+			f.gloasVerificationLeafCursor = f.gloasVerificationLeaves.Front()
+		} else {
+			f.gloasVerificationLeafCursor = f.gloasVerificationLeafCursor.Next()
 		}
-		return selected
+		root := f.gloasVerificationLeafCursor.Value.(common.Hash)
+		if root != (common.Hash{}) {
+			leaves = append(leaves, root)
+		}
 	}
-	selected := selectRoots(false, limit)
-	if len(selected) < limit {
-		selected = append(selected, selectRoots(true, limit-len(selected))...)
-	}
-	return selected
+	return leaves
 }
 
 func (f *ForkChoiceStore) Synced() bool {

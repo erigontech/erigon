@@ -27,6 +27,7 @@ const (
 	maxGloasVerificationScanPerLineage     = 256
 	maxGloasVerificationStartRootsPerCycle = 8
 	maxGloasVerificationLeafRootsPerCycle  = maxGloasVerificationStartRootsPerCycle - 2
+	maxGloasVerificationContinuations      = 4
 )
 
 func gloasVersionedHashes(blobCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) ([]common.Hash, error) {
@@ -570,6 +571,19 @@ func drainPendingGloasPayloads(ctx context.Context, cfg *Cfg) {
 }
 
 func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
+	cfg.gloasVerificationMu.Lock()
+	if cfg.gloasVerificationRunning {
+		cfg.gloasVerificationMu.Unlock()
+		return
+	}
+	cfg.gloasVerificationRunning = true
+	cfg.gloasVerificationMu.Unlock()
+	defer func() {
+		cfg.gloasVerificationMu.Lock()
+		cfg.gloasVerificationRunning = false
+		cfg.gloasVerificationMu.Unlock()
+	}()
+
 	canonicalRoot, _, err := cfg.forkChoice.GetHead(nil)
 	if err != nil {
 		log.Warn("[chainTipSync] failed to resolve canonical head for GLOAS verification", "err", err)
@@ -582,24 +596,24 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 		}
 		startRoots = append(startRoots, root)
 	}
+	for _, root := range cfg.gloasVerificationContinuations {
+		addStartRoot(root)
+	}
 	addStartRoot(canonicalRoot)
 	addStartRoot(highestSeenRoot)
 
-	cfg.gloasVerificationMu.Lock()
-	leaves := cfg.forkChoice.GloasVerificationLeaves(cfg.gloasVerificationLeafCursor, maxGloasVerificationLeafRootsPerCycle)
-	if len(leaves) > 0 {
-		cfg.gloasVerificationLeafCursor = leaves[len(leaves)-1]
+	leafLimit := min(maxGloasVerificationLeafRootsPerCycle, maxGloasVerificationStartRootsPerCycle-len(startRoots))
+	if leafLimit > 0 {
+		for _, root := range cfg.forkChoice.GloasVerificationLeaves(leafLimit) {
+			addStartRoot(root)
+		}
 	}
-	cfg.gloasVerificationMu.Unlock()
-	for _, root := range leaves {
-		addStartRoot(root)
-	}
-
 	if len(startRoots) == 0 {
+		cfg.gloasVerificationContinuations = nil
 		return
 	}
 
-	blocks := collectUnverifiedGloasPayloads(
+	blocks, continuations := collectUnverifiedGloasPayloads(
 		startRoots,
 		cfg.forkChoice.FinalizedSlot(),
 		cfg.beaconCfg,
@@ -608,6 +622,10 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 			return cfg.forkChoice.HasEnvelope(root) && !cfg.forkChoice.IsPayloadVerified(root)
 		},
 	)
+	if len(continuations) > maxGloasVerificationContinuations {
+		continuations = continuations[:maxGloasVerificationContinuations]
+	}
+	cfg.gloasVerificationContinuations = continuations
 
 	swept := 0
 	for _, item := range blocks {
@@ -659,17 +677,21 @@ func collectUnverifiedGloasPayloads(
 	beaconCfg *clparams.BeaconChainConfig,
 	getBlock func(common.Hash) (*cltypes.SignedBeaconBlock, bool),
 	shouldVerify func(common.Hash) bool,
-) []gloasVerificationBlock {
+) ([]gloasVerificationBlock, []common.Hash) {
 	blocks := make([]gloasVerificationBlock, 0, maxGloasVerificationSweepPerCycle)
 	seen := make(map[common.Hash]struct{}, maxGloasVerificationScanPerLineage)
 	lineages := make([][]gloasVerificationBlock, 0, min(len(startRoots), maxGloasVerificationStartRootsPerCycle))
+	continuations := make([]common.Hash, 0, len(lineages))
 	for _, startRoot := range startRoots {
 		if len(lineages) >= maxGloasVerificationStartRootsPerCycle {
 			break
 		}
 		lineage := make([]gloasVerificationBlock, 0)
-		for root, scanned := startRoot, 0; root != (common.Hash{}) && scanned < maxGloasVerificationScanPerLineage; scanned++ {
+		root := startRoot
+		scanned := 0
+		for ; root != (common.Hash{}) && scanned < maxGloasVerificationScanPerLineage; scanned++ {
 			if _, ok := seen[root]; ok {
+				root = common.Hash{}
 				break
 			}
 			seen[root] = struct{}{}
@@ -685,6 +707,9 @@ func collectUnverifiedGloasPayloads(
 				lineage = append(lineage, gloasVerificationBlock{root: root, block: block})
 			}
 			root = common.Hash(block.Block.ParentRoot)
+		}
+		if scanned == maxGloasVerificationScanPerLineage && root != (common.Hash{}) && !slices.Contains(continuations, root) {
+			continuations = append(continuations, root)
 		}
 		slices.Reverse(lineage)
 		lineages = append(lineages, lineage)
@@ -708,7 +733,7 @@ func collectUnverifiedGloasPayloads(
 	slices.SortStableFunc(blocks, func(a, b gloasVerificationBlock) int {
 		return cmp.Compare(a.block.Block.Slot, b.block.Block.Slot)
 	})
-	return blocks
+	return blocks, continuations
 }
 
 func retryUnverifiedAnchorPayload(ctx context.Context, cfg *Cfg) {

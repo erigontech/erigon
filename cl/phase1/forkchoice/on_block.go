@@ -325,7 +325,9 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 
 	// Remove the parent from the head set
 	delete(f.headSet, block.Block.ParentRoot)
+	f.removeGloasVerificationLeaf(block.Block.ParentRoot)
 	f.headSet[blockRoot] = struct{}{}
+	f.addGloasVerificationLeaf(blockRoot)
 	// record_block_timeliness: store [block_timely, ptc_timely] vector.
 	// [Modified in Gloas:EIP7732] Post-GLOAS stores a two-element timeliness vector;
 	// pre-GLOAS stores [block_timely, false]. See recordBlockTimeliness for details.

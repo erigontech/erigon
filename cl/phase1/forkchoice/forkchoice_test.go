@@ -42,20 +42,34 @@ func TestGloasVerificationLeavesPagesAndWraps(t *testing.T) {
 	root3 := common.HexToHash("0x03")
 	root5 := common.HexToHash("0x05")
 	root7 := common.HexToHash("0x07")
-	store := &ForkChoiceStore{headSet: map[common.Hash]struct{}{
-		common.Hash{}: {},
-		root1:         {},
-		root3:         {},
-		root5:         {},
-		root7:         {},
-	}}
+	store := &ForkChoiceStore{headSet: make(map[common.Hash]struct{})}
+	store.initializeGloasVerificationLeaves()
+	for _, root := range []common.Hash{{}, root1, root3, root5, root7} {
+		store.headSet[root] = struct{}{}
+		store.addGloasVerificationLeaf(root)
+	}
 
-	require.Nil(t, store.GloasVerificationLeaves(root3, 0))
-	require.Equal(t, []common.Hash{root5, root7}, store.GloasVerificationLeaves(root3, 2))
-	require.Equal(t, []common.Hash{root1, root3}, store.GloasVerificationLeaves(root7, 2))
-	require.Equal(t, []common.Hash{root7, root1, root3}, store.GloasVerificationLeaves(root5, 3))
-	require.Equal(t, []common.Hash{root5, root7, root1}, store.GloasVerificationLeaves(common.HexToHash("0x04"), 3))
-	require.ElementsMatch(t, []common.Hash{root1, root3, root5, root7}, store.GloasVerificationLeaves(common.Hash{}, 10))
+	require.Nil(t, store.GloasVerificationLeaves(0))
+	require.Equal(t, []common.Hash{root1, root3}, store.GloasVerificationLeaves(2))
+	require.Equal(t, []common.Hash{root5, root7}, store.GloasVerificationLeaves(2))
+	require.Equal(t, []common.Hash{root1, root3}, store.GloasVerificationLeaves(2))
+
+	store.removeGloasVerificationLeaf(root3)
+	require.Equal(t, []common.Hash{root5, root7}, store.GloasVerificationLeaves(2))
+}
+
+func TestGloasVerificationLeavesLargeSetAdvancesFromCursor(t *testing.T) {
+	store := &ForkChoiceStore{headSet: make(map[common.Hash]struct{})}
+	store.initializeGloasVerificationLeaves()
+	for i := uint64(1); i <= 10_000; i++ {
+		root := testRoot(i)
+		store.headSet[root] = struct{}{}
+		store.addGloasVerificationLeaf(root)
+	}
+
+	require.Equal(t, []common.Hash{testRoot(1), testRoot(2), testRoot(3), testRoot(4), testRoot(5), testRoot(6)}, store.GloasVerificationLeaves(6))
+	store.removeGloasVerificationLeaf(testRoot(6))
+	require.Equal(t, []common.Hash{testRoot(7), testRoot(8), testRoot(9), testRoot(10), testRoot(11), testRoot(12)}, store.GloasVerificationLeaves(6))
 }
 
 func TestGetFinalizedExecutionHash(t *testing.T) {
