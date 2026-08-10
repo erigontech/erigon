@@ -87,6 +87,17 @@ type cacheViews struct {
 	branch commitment.BranchReadView
 }
 
+type cacheGenerations struct {
+	state  cache.Generation
+	branch cache.Generation
+}
+
+func (g cacheGenerations) withStateVersion(stateVersion uint64) cacheGenerations {
+	g.state = g.state.WithStateVersion(stateVersion)
+	g.branch = g.branch.WithStateVersion(stateVersion)
+	return g
+}
+
 // cacheViewsFor binds both process-global caches to the database and files
 // generation pinned by tx. ViewID identifies only the database snapshot:
 // files can change without a database commit, so their identity and cache
@@ -108,28 +119,29 @@ func (sd *SharedDomains) cacheViewsFor(tx kv.TemporalTx) cacheViews {
 		}
 	}
 	debug := tx.Debug()
-	stateGeneration, branchGeneration := cacheGenerationsFor(debug, stateVersion)
+	generations := cacheGenerationsFor(debug, stateVersion)
 	stateEligible := cacheViewEligible(debug, kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain)
 	branchEligible := cacheViewEligible(debug, kv.CommitmentDomain)
 	var views cacheViews
 	if sd.stateCache != nil && stateEligible {
-		views.state = sd.stateCache.View(stateGeneration)
+		views.state = sd.stateCache.View(generations.state)
 	}
 	if sd.branchCache != nil && branchEligible {
-		views.branch = sd.branchCache.View(branchGeneration)
+		views.branch = sd.branchCache.View(generations.branch)
 	}
 	return views
 }
 
-func cacheGenerationsFor(debug kv.TemporalDebugTx, stateVersion uint64) (cache.Generation, cache.Generation) {
-	stateGeneration := cache.StateGeneration(
-		stateVersion,
-		debug.TxNumsInFiles(kv.AccountsDomain),
-		debug.TxNumsInFiles(kv.StorageDomain),
-		debug.TxNumsInFiles(kv.CodeDomain),
-	)
-	branchGeneration := cache.BranchGeneration(stateVersion, debug.TxNumsInFiles(kv.CommitmentDomain))
-	return stateGeneration, branchGeneration
+func cacheGenerationsFor(debug kv.TemporalDebugTx, stateVersion uint64) cacheGenerations {
+	return cacheGenerations{
+		state: cache.StateGeneration(
+			stateVersion,
+			debug.TxNumsInFiles(kv.AccountsDomain),
+			debug.TxNumsInFiles(kv.StorageDomain),
+			debug.TxNumsInFiles(kv.CodeDomain),
+		),
+		branch: cache.BranchGeneration(stateVersion, debug.TxNumsInFiles(kv.CommitmentDomain)),
+	}
 }
 
 type exactDomainVisibleEnd interface {
@@ -170,11 +182,10 @@ type SharedDomains struct {
 	// These fields describe the database snapshot used to construct this
 	// SharedDomains. A read with the same ViewID can reuse the state version,
 	// but its independently pinned files metadata must still be derived again.
-	baseViewID                uint64
-	baseStateVersion          uint64
-	baseStateCacheGeneration  cache.Generation
-	baseBranchCacheGeneration cache.Generation
-	baseStateVersionKnown     bool
+	baseViewID            uint64
+	baseStateVersion      uint64
+	baseCacheGenerations  cacheGenerations
+	baseStateVersionKnown bool
 
 	txNum       uint64
 	currentStep kv.Step
@@ -199,15 +210,15 @@ type SharedDomains struct {
 	// to read from the FCU's published SD without writing to it.
 	parent *SharedDomains
 
-	// stateCache provides generation-bound reads and fills. cachePublisher is set
+	// stateCache provides generation-bound reads and fills. statePublisher is set
 	// only when this SharedDomains owns publication of durable canonical state;
 	// a speculative SharedDomains may read the cache but cannot move its
 	// generation or change its authoritative entries.
 	stateCache     *cache.StateCache
-	cachePublisher cache.Publisher
-	// Unwind and Merge preserve this flag after detaching the reader so a later
-	// canonical Commit clears entries from the discarded state.
-	clearStateCache bool
+	statePublisher cache.Publisher
+	// Unwind and Merge preserve this flag after detaching both cache readers so
+	// a later canonical Commit clears entries from the discarded state.
+	clearExecutionCaches bool
 
 	// codeStore is the optional two-tier (in-mem + MDBX) codehash-keyed code
 	// cache, reached via temporalGetter so an addr-keyed reader can serve a
@@ -225,8 +236,6 @@ type SharedDomains struct {
 	// SharedDomains from observing another transaction's cached branches.
 	branchCache     *commitment.BranchCache
 	branchPublisher commitment.BranchPublisher
-	// Like clearStateCache, this survives reader detachment and Merge.
-	clearBranchCache bool
 
 	// collector is the process-level KV-read metrics collector (aggregator
 	// scope). Finished per-worker metrics are sent here (ownership transfer)
@@ -282,16 +291,15 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 
 	stateVersion, stateVersionErr := rawdb.GetStateVersion(tx)
 	debug := tx.Debug()
-	stateGeneration, branchGeneration := cacheGenerationsFor(debug, stateVersion)
+	baseCacheGenerations := cacheGenerationsFor(debug, stateVersion)
 	sd := &SharedDomains{
-		logger:                    logger,
-		metrics:                   kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
-		stepSize:                  debug.StepSize(),
-		baseViewID:                tx.ViewID(),
-		baseStateVersion:          stateVersion,
-		baseStateCacheGeneration:  stateGeneration,
-		baseBranchCacheGeneration: branchGeneration,
-		baseStateVersionKnown:     stateVersionErr == nil,
+		logger:                logger,
+		metrics:               kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
+		stepSize:              debug.StepSize(),
+		baseViewID:            tx.ViewID(),
+		baseStateVersion:      stateVersion,
+		baseCacheGenerations:  baseCacheGenerations,
+		baseStateVersionKnown: stateVersionErr == nil,
 	}
 
 	sd.mem = tx.Debug().NewMemBatch(&sd.metrics)
@@ -384,13 +392,10 @@ func (sd *SharedDomains) Merge(ctx context.Context, sdTxNum uint64, other *Share
 	if err := sd.mem.Merge(other.mem); err != nil {
 		return err
 	}
-	if other.clearStateCache {
+	if other.clearExecutionCaches {
 		sd.stateCache = nil
-		sd.clearStateCache = true
-	}
-	if other.clearBranchCache {
 		sd.branchCache = nil
-		sd.clearBranchCache = true
+		sd.clearExecutionCaches = true
 	}
 
 	// Merge block-level metadata from other's overlay into ours by flushing
@@ -758,8 +763,7 @@ func (sd *SharedDomains) Unwind(txNumUnwindTo uint64, changeset *[kv.DomainLen][
 	// diff is not a complete inventory of entries from the discarded fork.
 	sd.stateCache = nil
 	sd.branchCache = nil
-	sd.clearStateCache = true
-	sd.clearBranchCache = true
+	sd.clearExecutionCaches = true
 }
 
 func (sd *SharedDomains) GetMemBatch() kv.TemporalMemBatch { return sd.mem }
@@ -827,7 +831,7 @@ func (sd *SharedDomains) SetStateCacheReader(stateCache *cache.StateCache) {
 	if !dbg.UseStateCache || stateCache == nil {
 		return
 	}
-	if !sd.clearStateCache {
+	if !sd.clearExecutionCaches {
 		sd.stateCache = stateCache
 	}
 }
@@ -846,11 +850,11 @@ func (sd *SharedDomains) SetCanonicalStateCache(stateCache *cache.StateCache) {
 	if !dbg.UseStateCache || stateCache == nil || !sd.baseStateVersionKnown {
 		return
 	}
-	if !sd.clearStateCache {
+	if !sd.clearExecutionCaches {
 		sd.stateCache = stateCache
 	}
-	sd.cachePublisher = stateCache.Publisher()
-	sd.cachePublisher.Initialize(sd.baseStateCacheGeneration)
+	sd.statePublisher = stateCache.Publisher()
+	sd.statePublisher.Initialize(sd.baseCacheGenerations.state)
 }
 
 // BindStateCacheToAggregator binds StateCache to the aggregator's file
@@ -1015,7 +1019,7 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 		return nil
 	}
 
-	stateCacheEnabled := sd.cachePublisher.Enabled()
+	stateCacheEnabled := sd.statePublisher.Enabled()
 	branchCacheEnabled := sd.branchPublisher.Enabled()
 	if !stateCacheEnabled && !branchCacheEnabled && sd.codeStore == nil {
 		if err := sd.flushMem(ctx, tx); err != nil {
@@ -1089,14 +1093,13 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 		return err
 	}
 
-	var stateGeneration, branchGeneration cache.Generation
+	var nextCacheGenerations cacheGenerations
 	if stateCacheEnabled || branchCacheEnabled {
 		stateVersion, err := rawdb.GetStateVersion(tx)
 		if err != nil {
 			return fmt.Errorf("read plain state version: %w", err)
 		}
-		stateGeneration = sd.baseStateCacheGeneration.WithStateVersion(stateVersion)
-		branchGeneration = sd.baseBranchCacheGeneration.WithStateVersion(stateVersion)
+		nextCacheGenerations = sd.baseCacheGenerations.withStateVersion(stateVersion)
 	}
 
 	var statePublication *cache.Publication
@@ -1111,29 +1114,28 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	// Canonical commits and file-view changes both acquire BranchCache before
 	// StateCache. Keeping one order prevents their publications from deadlocking.
 	if branchCacheEnabled {
-		if !sd.clearBranchCache {
+		if !sd.clearExecutionCaches {
 			adaptivePlan = sd.planAdaptivePins(tx)
 		}
 		branchPublication = sd.branchPublisher.Begin()
 	}
 	if stateCacheEnabled {
-		statePublication = sd.cachePublisher.Begin()
+		statePublication = sd.statePublisher.Begin()
 	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
 
-	statePublication.Publish(stateGeneration, stateUpdates, sd.clearStateCache)
+	statePublication.Publish(nextCacheGenerations.state, stateUpdates, sd.clearExecutionCaches)
 	statePublication = nil
-	branchPublication.Publish(branchGeneration, branchUpdates, sd.clearBranchCache, adaptivePlan)
+	branchPublication.Publish(nextCacheGenerations.branch, branchUpdates, sd.clearExecutionCaches, adaptivePlan)
 	branchPublication = nil
 	adaptivePlan.Commit()
 	adaptivePlan = nil
-	if sd.clearBranchCache && sd.adaptivePinController != nil {
+	if sd.clearExecutionCaches && sd.adaptivePinController != nil {
 		sd.adaptivePinController.Reset()
 	}
-	sd.clearStateCache = false
-	sd.clearBranchCache = false
+	sd.clearExecutionCaches = false
 	return nil
 }
 
@@ -1192,7 +1194,7 @@ func (sd *SharedDomains) planAdaptivePins(tx kv.RwTx) *commitment.AdaptivePinPla
 	}
 	return sd.adaptivePinController.PlanBlock(
 		sd.txNum,
-		sd.baseBranchCacheGeneration,
+		sd.baseCacheGenerations.branch,
 		reader,
 		factory,
 		provider,
