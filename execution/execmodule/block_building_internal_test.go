@@ -168,6 +168,36 @@ func TestAssembleBlockOwnsParameters(t *testing.T) {
 	_, _ = module.builders[result.PayloadID].Stop(context.Background())
 }
 
+func TestAssembleBlockCanceledContextDoesNotSupersedeBuilder(t *testing.T) {
+	started := make(chan *atomic.Bool, 1)
+	module := &ExecModule{
+		semaphore: semaphore.NewWeighted(1),
+		config:    &chain.Config{},
+		logger:    log.Root(),
+		builders:  map[uint64]*builder.BlockBuilder{},
+		builderFunc: func(_ *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
+			started <- interrupt
+			for !interrupt.Load() {
+				time.Sleep(time.Millisecond)
+			}
+			return nil, errors.New("builder stopped")
+		},
+	}
+	result, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: 100, ParentHash: common.Hash{0x01}})
+	require.NoError(t, err)
+	interrupt := <-started
+	t.Cleanup(func() {
+		_, _ = module.builders[result.PayloadID].Stop(context.Background())
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err = module.AssembleBlock(ctx, &builder.Parameters{Timestamp: 100, ParentHash: common.Hash{0x02}})
+	require.ErrorIs(t, err, context.Canceled)
+	require.False(t, interrupt.Load())
+	require.Equal(t, result.PayloadID, module.buildersByTimestamp[100])
+}
+
 func TestCloneBuilderParametersPreservesRepresentations(t *testing.T) {
 	require.Nil(t, cloneBuilderParameters(nil))
 

@@ -27,6 +27,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -1084,6 +1085,22 @@ func TestProduceBeaconBodyTakesRootAndStateFromOneView(t *testing.T) {
 	require.Equal(t, expectedRoot, gotRoot)
 	require.NotSame(t, postState, copied)
 	require.Equal(t, postState.Slot(), copied.Slot())
+}
+
+func TestGetEthV3ValidatorBlockMapsNotSyncedToServiceUnavailable(t *testing.T) {
+	_, _, _, _, _, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
+	syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).Return(synced_data.ErrNotSynced)
+
+	req := httptest.NewRequest(http.MethodGet, "/?randao_reveal="+hexutil.Encode(make([]byte, 96)), nil)
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("slot", "1")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+
+	_, err := handler.GetEthV3ValidatorBlock(httptest.NewRecorder(), req)
+	var endpointErr *beaconhttp.EndpointError
+	require.ErrorAs(t, err, &endpointErr)
+	require.Equal(t, http.StatusServiceUnavailable, endpointErr.Code)
 }
 
 func TestShouldPreparePayloadVersion(t *testing.T) {

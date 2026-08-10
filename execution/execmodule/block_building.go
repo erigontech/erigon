@@ -108,6 +108,9 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 		return AssembleBlockResult{Busy: true}, nil
 	}
 	defer e.semaphore.Release(1)
+	if err := ctx.Err(); err != nil {
+		return AssembleBlockResult{}, err
+	}
 
 	if err := e.checkWithdrawalsPresence(params.Timestamp, params.Withdrawals); err != nil {
 		return AssembleBlockResult{}, err
