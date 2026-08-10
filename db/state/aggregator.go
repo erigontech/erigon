@@ -580,6 +580,23 @@ func (a *Aggregator) BindStateCache(stateCache *cache.StateCache) {
 	change.Finish()
 }
 
+// ResetExecutionCaches revokes state backed by execution tables that are about
+// to be replaced outside SharedDomains.Commit. Both caches remain unpublished
+// until a later canonical owner initializes or publishes their new generation.
+func (a *Aggregator) ResetExecutionCaches() {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+
+	// Match the publication lock order used by SharedDomains.Commit and file
+	// publication so concurrent transitions cannot deadlock.
+	if domain := a.d[kv.CommitmentDomain]; domain != nil && domain.branchCache != nil {
+		domain.branchCache.Reset()
+	}
+	if a.boundStateCache != nil {
+		a.boundStateCache.Reset()
+	}
+}
+
 func (a *Aggregator) setUnalignedDomain(d kv.Domain, v bool) {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()

@@ -175,6 +175,20 @@ func ResetExec(ctx context.Context, db kv.TemporalRwDB) error {
 	cleanupList = append(cleanupList, db.Debug().DomainTables(kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain, kv.ReceiptDomain, kv.RCacheDomain)...)
 	cleanupList = append(cleanupList, db.Debug().InvertedIdxTables(kv.LogAddrIdx, kv.LogTopicIdx, kv.TracesFromIdx, kv.TracesToIdx)...)
 
+	// ResetExec replaces durable state without SharedDomains.Commit, so revoke
+	// both shared caches before the replacement can become visible. On failure,
+	// leaving them empty is safe; their canonical owner can initialize them again.
+	executionCachesReset := false
+	if hasAgg, ok := db.(dbstate.HasAgg); ok {
+		if agg, ok := hasAgg.Agg().(*dbstate.Aggregator); ok {
+			agg.ResetExecutionCaches()
+			executionCachesReset = true
+		}
+	}
+	if !executionCachesReset {
+		log.Warn("[reset] execution caches not reset before wiping state tables (no *state.Aggregator); continued use of an external cache may serve stale state")
+	}
+
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		if err := clearStageProgress(tx, stages.Execution); err != nil {
 			return fmt.Errorf("clearing Execution stage progress: %w", err)
@@ -183,27 +197,12 @@ func ResetExec(ctx context.Context, db kv.TemporalRwDB) error {
 		if err := backup.ClearTables(ctx, db, tx, cleanupList...); err != nil {
 			return fmt.Errorf("reset exec state tables: %w", err)
 		}
+		if _, err := rawdb.IncrementStateVersion(tx); err != nil {
+			return fmt.Errorf("advancing state version after exec reset: %w", err)
+		}
 		return nil
 	}); err != nil {
 		return err
-	}
-
-	// Wiping the commitment table leaves the aggregator's in-memory branchCache
-	// pointing at now-deleted trie nodes; drop it so a from-0 re-exec repopulates
-	// from the wiped table instead of computing a wrong root off stale nodes.
-	branchCacheCleared := false
-	if hasAgg, ok := db.(dbstate.HasAgg); ok {
-		if agg, ok := hasAgg.Agg().(*dbstate.Aggregator); ok {
-			aggTx := agg.BeginFilesRo()
-			defer aggTx.Close()
-			if bc := aggTx.BranchCache(); bc != nil {
-				bc.Clear()
-			}
-			branchCacheCleared = true
-		}
-	}
-	if !branchCacheCleared {
-		log.Warn("[reset] commitment branch cache not cleared after wiping the table (no *state.Aggregator); a from-0 re-exec may read stale commitment nodes and produce a wrong trie root")
 	}
 	return nil
 }

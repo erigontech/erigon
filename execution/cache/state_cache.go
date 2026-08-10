@@ -271,6 +271,15 @@ func (c *StateCache) resetProvenanceAndClearLocked() {
 	c.clearLocked()
 }
 
+// Reset revokes all views, clears entries and file provenance, and leaves the
+// cache unpublished until its canonical owner initializes or publishes it.
+func (c *StateCache) Reset() {
+	if c == nil {
+		return
+	}
+	c.generation.Reset(c.resetProvenanceAndClearLocked)
+}
+
 func (c *StateCache) Close() {
 	c.generation.Close()
 	for _, cache := range c.caches {

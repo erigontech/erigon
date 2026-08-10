@@ -23,15 +23,131 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/execution/cache"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
+
+func resetCacheTestDB(t *testing.T) (kv.TemporalRwDB, *dbstate.Aggregator) {
+	t.Helper()
+	previous := dbg.UseStateCache
+	dbg.SetUseStateCache(true)
+	t.Cleanup(func() { dbg.SetUseStateCache(previous) })
+
+	db := temporaltest.NewTestDBWithStepSize(t, datadir.New(t.TempDir()), 16)
+	hasAgg, ok := db.(dbstate.HasAgg)
+	require.True(t, ok)
+	agg, ok := hasAgg.Agg().(*dbstate.Aggregator)
+	require.True(t, ok)
+	return db, agg
+}
+
+func cacheGenerations(t *testing.T, db kv.TemporalRwDB) (cache.Generation, cache.Generation, *commitment.BranchCache) {
+	t.Helper()
+	tx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	stateVersion, err := rawdb.GetStateVersion(tx)
+	require.NoError(t, err)
+	debug := tx.Debug()
+	stateGeneration := cache.StateGeneration(
+		stateVersion,
+		debug.TxNumsInFiles(kv.AccountsDomain),
+		debug.TxNumsInFiles(kv.StorageDomain),
+		debug.TxNumsInFiles(kv.CodeDomain),
+	)
+	branchGeneration := cache.BranchGeneration(stateVersion, debug.TxNumsInFiles(kv.CommitmentDomain))
+	provider, ok := tx.AggTx().(commitment.BranchCacheProvider)
+	require.True(t, ok)
+	return stateGeneration, branchGeneration, provider.BranchCache()
+}
+
+func stateVersion(t *testing.T, db kv.TemporalRwDB) uint64 {
+	t.Helper()
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	version, err := rawdb.GetStateVersion(tx)
+	require.NoError(t, err)
+	return version
+}
+
+func TestResetExecAdvancesStateVersion(t *testing.T) {
+	db, _ := resetCacheTestDB(t)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		_, err := rawdb.IncrementStateVersion(tx)
+		return err
+	}))
+	before := stateVersion(t, db)
+
+	require.NoError(t, rawdbreset.ResetExec(t.Context(), db))
+
+	require.Equal(t, before+1, stateVersion(t, db))
+}
+
+func TestResetExecResetsBoundStateCache(t *testing.T) {
+	db, agg := resetCacheTestDB(t)
+	stateGeneration, _, _ := cacheGenerations(t, db)
+
+	stateCache := cache.NewStateCache(1<<20, 1<<20, 1<<20, 1<<20)
+	t.Cleanup(stateCache.Close)
+	agg.BindStateCache(stateCache)
+	publisher := stateCache.Publisher()
+	publisher.Initialize(stateGeneration)
+	publication := publisher.Begin()
+	key := []byte{0x01}
+	publication.Publish(stateGeneration, []cache.Update{{
+		Domain: kv.AccountsDomain,
+		Key:    key,
+		Value:  []byte{0xaa},
+	}}, false)
+	oldView := stateCache.View(stateGeneration)
+	_, ok := oldView.Get(kv.AccountsDomain, key)
+	require.True(t, ok, "precondition: state entry is cached")
+
+	require.NoError(t, rawdbreset.ResetExec(t.Context(), db))
+
+	_, ok = oldView.Get(kv.AccountsDomain, key)
+	require.False(t, ok, "reset must revoke views of the pre-reset state")
+	oldView.Fill(kv.AccountsDomain, key, []byte{0xbb}, 0)
+	publication = publisher.Begin()
+	publication.Publish(stateGeneration, nil, false)
+	_, ok = stateCache.View(stateGeneration).Get(kv.AccountsDomain, key)
+	require.False(t, ok, "the same numeric generation must not expose or accept pre-reset state")
+}
+
+func TestResetExecResetsBranchCacheGeneration(t *testing.T) {
+	db, _ := resetCacheTestDB(t)
+	_, branchGeneration, branchCache := cacheGenerations(t, db)
+	require.NotNil(t, branchCache)
+
+	publisher := branchCache.Publisher()
+	publisher.Initialize(branchGeneration)
+	key := []byte{0x01}
+	oldView := branchCache.View(branchGeneration)
+	oldView.Fill(key, []byte{0xaa}, 0)
+	_, _, ok := oldView.Get(key)
+	require.True(t, ok, "precondition: branch entry is cached")
+
+	require.NoError(t, rawdbreset.ResetExec(t.Context(), db))
+
+	oldView.Fill(key, []byte{0xbb}, 0)
+	publication := publisher.Begin()
+	publication.Publish(branchGeneration, nil, false, nil)
+	_, _, ok = branchCache.View(branchGeneration).Get(key)
+	require.False(t, ok, "a pre-reset view must not refill the reset branch generation")
+}
 
 // TestResetCanonicalAndRefillFromSnapshots_ClearsStaleSidechainPointers
 // verifies the fix for a stale-canonical-pointer leak observed on hoodi
