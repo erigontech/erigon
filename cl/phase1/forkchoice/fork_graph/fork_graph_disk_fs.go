@@ -194,6 +194,11 @@ func (f *forkGraphDisk) HasEnvelope(blockRoot common.Hash) bool {
 	if _, ok := f.envelopeExists.Load(blockRoot); ok {
 		return true
 	}
+	f.stateDumpLock.Lock()
+	defer f.stateDumpLock.Unlock()
+	if _, ok := f.envelopeExists.Load(blockRoot); ok {
+		return true
+	}
 	// Slow path: fall back to disk and populate cache on hit
 	exists, err := afero.Exists(f.fs, getEnvelopeFilename(blockRoot))
 	if err == nil && exists {
@@ -231,10 +236,11 @@ func (f *forkGraphDisk) ReadEnvelopeFromDisk(blockRoot common.Hash) (envelope *c
 		}
 	}()
 
+	readTracker := &envelopeReadTracker{Reader: file}
 	if f.sszSnappyReader == nil {
-		f.sszSnappyReader = snappy.NewReader(file)
+		f.sszSnappyReader = snappy.NewReader(readTracker)
 	} else {
-		f.sszSnappyReader.Reset(file)
+		f.sszSnappyReader.Reset(readTracker)
 	}
 
 	// Read the length
@@ -242,7 +248,7 @@ func (f *forkGraphDisk) ReadEnvelopeFromDisk(blockRoot common.Hash) (envelope *c
 	var n int
 	n, err = io.ReadFull(f.sszSnappyReader, lengthBytes)
 	if err != nil {
-		corrupt = isCorruptEnvelopeReadError(err)
+		corrupt = isCorruptEnvelopeReadError(err, readTracker.err)
 		return nil, fmt.Errorf("failed to read length: %w, root: %x", err, blockRoot)
 	}
 	if n != 8 {
@@ -258,7 +264,7 @@ func (f *forkGraphDisk) ReadEnvelopeFromDisk(blockRoot common.Hash) (envelope *c
 	ownedBuffer := make([]byte, envelopeLength)
 	n, err = io.ReadFull(f.sszSnappyReader, ownedBuffer)
 	if err != nil {
-		corrupt = isCorruptEnvelopeReadError(err)
+		corrupt = isCorruptEnvelopeReadError(err, readTracker.err)
 		return nil, fmt.Errorf("failed to read snappy buffer: %w, root: %x", err, blockRoot)
 	}
 	ownedBuffer = ownedBuffer[:n]
@@ -274,8 +280,21 @@ func (f *forkGraphDisk) ReadEnvelopeFromDisk(blockRoot common.Hash) (envelope *c
 	return
 }
 
-func isCorruptEnvelopeReadError(err error) bool {
-	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, snappy.ErrCorrupt)
+type envelopeReadTracker struct {
+	io.Reader
+	err error
+}
+
+func (r *envelopeReadTracker) Read(p []byte) (int, error) {
+	n, err := r.Reader.Read(p)
+	if err != nil && !errors.Is(err, io.EOF) {
+		r.err = err
+	}
+	return n, err
+}
+
+func isCorruptEnvelopeReadError(err, sourceErr error) bool {
+	return sourceErr == nil || !errors.Is(err, sourceErr)
 }
 
 // DumpEnvelopeOnDisk dumps an execution payload envelope to disk.

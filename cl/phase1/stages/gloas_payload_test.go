@@ -124,6 +124,60 @@ func TestValidateAnchorEnvelope(t *testing.T) {
 	}
 }
 
+func TestCollectUnverifiedGloasPayloadsIncludesCanonicalAndHighestSeenForks(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	clparams.ApplyMinimalPreset(&cfg)
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.GloasForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	parentRoot := common.HexToHash("0x10")
+	rootA := common.HexToHash("0xa")
+	rootB := common.HexToHash("0xb")
+	blocks := map[common.Hash]*cltypes.SignedBeaconBlock{
+		parentRoot: testGloasVerificationBlock(&cfg, 1, common.HexToHash("0x01")),
+		rootA:      testGloasVerificationBlock(&cfg, 2, parentRoot),
+		rootB:      testGloasVerificationBlock(&cfg, 2, parentRoot),
+	}
+	getBlock := func(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+		block, ok := blocks[root]
+		return block, ok
+	}
+	shouldVerify := func(root common.Hash) bool {
+		_, ok := blocks[root]
+		return ok
+	}
+
+	for _, tt := range []struct {
+		name   string
+		starts []common.Hash
+		want   []common.Hash
+	}{
+		{name: "canonical B and highest-seen A", starts: []common.Hash{rootB, rootA}, want: []common.Hash{parentRoot, rootB, rootA}},
+		{name: "canonical A and highest-seen B", starts: []common.Hash{rootA, rootB}, want: []common.Hash{parentRoot, rootA, rootB}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			items := collectUnverifiedGloasPayloads(tt.starts, 0, &cfg, getBlock, shouldVerify)
+			roots := make([]common.Hash, 0, len(items))
+			for _, item := range items {
+				roots = append(roots, item.root)
+			}
+			require.Equal(t, tt.want, roots)
+		})
+	}
+}
+
+func testGloasVerificationBlock(cfg *clparams.BeaconChainConfig, slot uint64, parentRoot common.Hash) *cltypes.SignedBeaconBlock {
+	block := cltypes.NewSignedBeaconBlock(cfg, clparams.GloasVersion)
+	block.Block.Slot = slot
+	block.Block.ParentRoot = parentRoot
+	return block
+}
+
 func TestAnchorEnvelopeMatches(t *testing.T) {
 	_, _, _, env, anchorRoot := validAnchorEnvelopeFixture(t, 1)
 

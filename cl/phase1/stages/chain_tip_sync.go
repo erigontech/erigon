@@ -568,44 +568,34 @@ func drainPendingGloasPayloads(ctx context.Context, cfg *Cfg) {
 }
 
 func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
-	headRoot := cfg.forkChoice.HighestSeenRoot()
-	if headRoot == (common.Hash{}) {
+	canonicalRoot, _, err := cfg.forkChoice.GetHead(nil)
+	if err != nil {
+		log.Warn("[chainTipSync] failed to resolve canonical head for GLOAS verification", "err", err)
+	}
+	highestSeenRoot := cfg.forkChoice.HighestSeenRoot()
+	startRoots := make([]common.Hash, 0, 2)
+	if canonicalRoot != (common.Hash{}) {
+		startRoots = append(startRoots, canonicalRoot)
+	}
+	if highestSeenRoot != (common.Hash{}) && highestSeenRoot != canonicalRoot {
+		startRoots = append(startRoots, highestSeenRoot)
+	}
+	if len(startRoots) == 0 {
 		return
 	}
 
-	finalizedSlot := cfg.forkChoice.FinalizedSlot()
-	var blocks []struct {
-		root  common.Hash
-		block *cltypes.SignedBeaconBlock
-	}
-
-	scanned := 0
-	for root := headRoot; root != (common.Hash{}) && scanned < maxGloasVerificationScanPerCycle; scanned++ {
-		block, ok := cfg.forkChoice.GetBlock(root)
-		if !ok || block == nil {
-			break
-		}
-		if block.Block.Slot <= finalizedSlot {
-			break
-		}
-		epoch := block.Block.Slot / cfg.beaconCfg.SlotsPerEpoch
-		if cfg.beaconCfg.GetCurrentStateVersion(epoch) < clparams.GloasVersion {
-			break
-		}
-		if cfg.forkChoice.HasEnvelope(root) && !cfg.forkChoice.IsPayloadVerified(root) {
-			blocks = append(blocks, struct {
-				root  common.Hash
-				block *cltypes.SignedBeaconBlock
-			}{root: root, block: block})
-			if len(blocks) >= maxGloasVerificationSweepPerCycle {
-				break
-			}
-		}
-		root = common.Hash(block.Block.ParentRoot)
-	}
+	blocks := collectUnverifiedGloasPayloads(
+		startRoots,
+		cfg.forkChoice.FinalizedSlot(),
+		cfg.beaconCfg,
+		cfg.forkChoice.GetBlock,
+		func(root common.Hash) bool {
+			return cfg.forkChoice.HasEnvelope(root) && !cfg.forkChoice.IsPayloadVerified(root)
+		},
+	)
 
 	swept := 0
-	for _, item := range slices.Backward(blocks) {
+	for _, item := range blocks {
 		if cfg.forkChoice.IsPayloadVerified(item.root) {
 			continue
 		}
@@ -641,6 +631,51 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 	if swept > 0 || len(blocks) >= maxGloasVerificationSweepPerCycle {
 		log.Info("[chainTipSync] GLOAS verification sweep", "swept", swept, "queued", len(blocks), "limit", maxGloasVerificationSweepPerCycle)
 	}
+}
+
+type gloasVerificationBlock struct {
+	root  common.Hash
+	block *cltypes.SignedBeaconBlock
+}
+
+func collectUnverifiedGloasPayloads(
+	startRoots []common.Hash,
+	finalizedSlot uint64,
+	beaconCfg *clparams.BeaconChainConfig,
+	getBlock func(common.Hash) (*cltypes.SignedBeaconBlock, bool),
+	shouldVerify func(common.Hash) bool,
+) []gloasVerificationBlock {
+	blocks := make([]gloasVerificationBlock, 0, maxGloasVerificationSweepPerCycle)
+	seen := make(map[common.Hash]struct{}, maxGloasVerificationScanPerCycle)
+	scanned := 0
+	for _, startRoot := range startRoots {
+		lineage := make([]gloasVerificationBlock, 0)
+		for root := startRoot; root != (common.Hash{}) && scanned < maxGloasVerificationScanPerCycle; scanned++ {
+			if _, ok := seen[root]; ok {
+				break
+			}
+			seen[root] = struct{}{}
+			block, ok := getBlock(root)
+			if !ok || block == nil || block.Block == nil || block.Block.Slot <= finalizedSlot {
+				break
+			}
+			epoch := block.Block.Slot / beaconCfg.SlotsPerEpoch
+			if beaconCfg.GetCurrentStateVersion(epoch) < clparams.GloasVersion {
+				break
+			}
+			if shouldVerify(root) {
+				lineage = append(lineage, gloasVerificationBlock{root: root, block: block})
+			}
+			root = common.Hash(block.Block.ParentRoot)
+		}
+		for i := len(lineage) - 1; i >= 0 && len(blocks) < maxGloasVerificationSweepPerCycle; i-- {
+			blocks = append(blocks, lineage[i])
+		}
+		if len(blocks) >= maxGloasVerificationSweepPerCycle || scanned >= maxGloasVerificationScanPerCycle {
+			break
+		}
+	}
+	return blocks
 }
 
 func retryUnverifiedAnchorPayload(ctx context.Context, cfg *Cfg) {
