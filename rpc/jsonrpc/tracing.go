@@ -374,7 +374,8 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 	}
 	engine := api.engine()
 
-	blockNumber, hash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, dbtx, api._blockReader, api.filters)
+	// nil filters: committed view — the replay below reads temporal data through this tx.
+	blockNumber, hash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, dbtx, api._blockReader, nil)
 	if err != nil {
 		return fmt.Errorf("get block number: %v", err)
 	}
@@ -482,7 +483,8 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 
 	defer func(start time.Time) { log.Trace("Tracing CallMany finished", "runtime", time.Since(start)) }(time.Now())
 
-	blockNum, hash, isLatest, err := rpchelper.GetBlockNumber(ctx, simulateContext.BlockNumber, tx, api._blockReader, api.filters)
+	// nil filters: committed view — the replay below reads temporal data through this tx.
+	blockNum, hash, isLatest, err := rpchelper.GetBlockNumber(ctx, simulateContext.BlockNumber, tx, api._blockReader, nil)
 	if err != nil {
 		return err
 	}
