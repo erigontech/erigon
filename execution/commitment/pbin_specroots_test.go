@@ -20,9 +20,9 @@ func pbinBlake3Sum(b []byte) [32]byte { return blake3.Sum256(b) }
 
 var pbinBlake3Hash pbinHashFn = func(b []byte) common.Hash { return common.Hash(blake3.Sum256(b)) }
 
-// pbinOracleRootOf rebuilds the oracle trie from the whole key set. A delete is
-// applied the same way — the EIP's insert has no removal — so nothing here
-// depends on a delete algorithm.
+// pbinOracleRootOf rebuilds the oracle trie from the whole key set, so a removed
+// key is simply one the set no longer holds and nothing here depends on an
+// incremental delete algorithm.
 func pbinOracleRootOf(t *testing.T, entries map[string][]byte) [32]byte {
 	t.Helper()
 	keys := make([]string, 0, len(entries))

@@ -84,18 +84,23 @@ func reconcileTrieVariant(s *ErigonDBSettings, logger log.Logger) error {
 			return fmt.Errorf("--experimental.bin-commitment.hash=%s: datadir was built with %q; the bin trie needs a fresh datadir to change hash",
 				statecfg.BinCommitmentHash, stored)
 		}
-		if err := commitment.SetPBinHashSuite(stored); err != nil {
-			return fmt.Errorf("erigondb.toml: %w", err)
+		// Resolution runs per RPC request and per aggregator open, while the
+		// selected suite is read unsynchronized by every engine; only write it
+		// when it actually has to change.
+		if commitment.PBinHashSuiteName() != stored {
+			if err := commitment.SetPBinHashSuite(stored); err != nil {
+				return fmt.Errorf("erigondb.toml: %w", err)
+			}
 		}
 	case TrieVariantHex:
 		if s.TrieHash != nil {
 			return errors.New("erigondb.toml: trie_hash is meaningless under trie_variant \"hex\"")
 		}
-		if statecfg.BinCommitmentHash != "" {
-			return errors.New("--experimental.bin-commitment.hash needs --experimental.bin-commitment")
-		}
 		if statecfg.ExperimentalBinCommitment {
 			return errors.New("--experimental.bin-commitment: datadir was created with the hex commitment trie; the bin trie needs a fresh datadir")
+		}
+		if statecfg.BinCommitmentHash != "" {
+			return errors.New("--experimental.bin-commitment.hash needs --experimental.bin-commitment")
 		}
 	default:
 		return fmt.Errorf("erigondb.toml: unknown trie_variant %q", s.TrieVariantName())

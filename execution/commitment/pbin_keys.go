@@ -27,12 +27,13 @@ import (
 	"github.com/erigontech/erigon/common/length"
 )
 
-// EIP-8297 embedding constants (eip:261-278).
+// EIP-8297 embedding constants (eip:"Tree embedding").
 const (
 	pbinBasicDataLeafKey    = 0
 	pbinCodeHashLeafKey     = 1
+	pbinDelegationLeafKey   = 2
 	pbinHeaderStorageOffset = 64
-	pbinCodeOffset          = 128
+	pbinHeaderStorageSlots  = 64
 	pbinStemSubtreeWidth    = 256
 
 	pbinAccountZone = 0x00
@@ -45,7 +46,7 @@ const (
 )
 
 // pbinZoneKeyLength gives the single key length a zone admits, which is what
-// keeps that zone's keys prefix-free (eip:284-288). Zones 0x02..0xFE are
+// keeps that zone's keys prefix-free (eip:"Tree embedding"). Zones 0x02..0xFE are
 // unallocated and have no length.
 func pbinZoneKeyLength(zone byte) (int, bool) {
 	switch zone {
@@ -60,7 +61,7 @@ func pbinZoneKeyLength(zone byte) (int, bool) {
 	}
 }
 
-// pbinAddr32 widens a legacy address to the spec's Address32 (eip:291-296).
+// pbinAddr32 widens a legacy address to the spec's Address32 (eip:"Tree embedding").
 func pbinAddr32(addr []byte) [32]byte {
 	if len(addr) > 32 {
 		panic(fmt.Sprintf("pbin: address of %d bytes exceeds 32", len(addr)))
@@ -88,35 +89,37 @@ func pbinTreeKey(zone byte, treePosition []byte, subIndex byte) []byte {
 	return key
 }
 
-// pbinTreeKeyAccount returns the account-header key at subIndex (eip:311-320).
+// pbinTreeKeyAccount returns the account-header key at subIndex (eip:"Header values").
 func pbinTreeKeyAccount(addr []byte, subIndex byte) []byte {
 	var c pbinDigestCache
 	return c.accountKey(addr, subIndex)
 }
 
 // pbinTreeKeyStorage returns the key for a storage slot: slots below 64 live in
-// the account header, the rest in the storage zone (eip:415-437). slot is
+// the account header, the rest in the storage zone (eip:"Storage"). slot is
 // big-endian and at most 32 bytes.
 func pbinTreeKeyStorage(addr, slot []byte) []byte {
 	var c pbinDigestCache
 	return c.storageKey(addr, slot)
 }
 
-// pbinTreeKeyCodeChunk returns the key for a code chunk the account header holds,
-// sharing the account's own stem (eip:355-367). Higher chunks go through
-// pbinTreeKeyCodeOverflow.
-func pbinTreeKeyCodeChunk(addr []byte, chunkID int) []byte {
-	var c pbinDigestCache
-	return c.codeChunkKey(addr, chunkID)
+// PBinStorageZoneProbeSlot is the lowest slot that lives outside the account
+// header (eip:"Storage"), so a proof of its key walks the account's whole
+// storage-zone prefix. That is what lets a witness answer EIP-7610's
+// non-empty-storage predicate for the zone, which no leaf of the account's own
+// header stem can report.
+func PBinStorageZoneProbeSlot() common.Hash {
+	var slot common.Hash
+	slot[length.Hash-1] = pbinHeaderStorageSlots
+	return slot
 }
 
-// pbinTreeKeyCodeOverflow returns the code-zone key for a chunk past the account
-// header (eip:355-367). These chunks are content-addressed by code hash, so
-// accounts running the same bytecode share the leaves and no address can derive
-// the key.
-func pbinTreeKeyCodeOverflow(codeHash common.Hash, chunkID int) []byte {
+// pbinTreeKeyCodeChunk returns the code-zone key of a chunk (eip:"Code").
+// Chunks are content-addressed by code hash, so accounts running the same
+// bytecode share the leaves and no address takes part in the derivation.
+func pbinTreeKeyCodeChunk(codeHash common.Hash, chunkID int) []byte {
 	var c pbinDigestCache
-	return c.codeOverflowKey(codeHash, chunkID)
+	return c.codeChunkKey(codeHash, chunkID)
 }
 
 // pbinKeyHasher returns a keyHasher deriving the primary leaf's tree key:
@@ -147,7 +150,7 @@ func pbinKeyHasherWith(sum pbinHashFn) keyHasher {
 
 // pbinDigestCache memoizes the two hash-derived key components: key_hash(addr32)
 // per address and key_hash(addr32||tree_index) per 256-slot storage group
-// (eip:411-414). The group entry is bound to the address as well as the index, so
+// (eip:"Storage"). The group entry is bound to the address as well as the index, so
 // a changed address cannot yield a stale hit.
 type pbinDigestCache struct {
 	sum pbinHashFn
@@ -202,26 +205,31 @@ func (c *pbinDigestCache) accountKey(addr []byte, subIndex byte) []byte {
 	return pbinTreeKey(pbinAccountZone, c.stemDigest(&addr32)[:], subIndex)
 }
 
-func (c *pbinDigestCache) codeChunkKey(addr []byte, chunkID int) []byte {
-	if chunkID < 0 || chunkID >= pbinHeaderCodeChunks {
-		panic(fmt.Sprintf("pbin: code chunk %d lives outside the account header", chunkID))
-	}
-	return c.accountKey(addr, byte(pbinCodeOffset+chunkID))
+// accountHeaderStem and accountStoragePrefix are the two key-space regions an
+// account owns, both fixed by its address. Removing an account is removing these
+// two subtrees (eip:"Zero values and deletion").
+func (c *pbinDigestCache) accountHeaderStem(addr []byte) []byte {
+	addr32 := pbinAddr32(addr)
+	return append([]byte{pbinAccountZone}, c.stemDigest(&addr32)[:]...)
 }
 
-// codeOverflowKey derives the code-zone key of an overflow chunk. The digest is
-// not memoized: one contract spans at most a handful of tree indexes, and the
+func (c *pbinDigestCache) accountStoragePrefix(addr []byte) []byte {
+	addr32 := pbinAddr32(addr)
+	return append([]byte{pbinStorageZone}, c.stemDigest(&addr32)[:]...)
+}
+
+// codeChunkKey derives the code-zone key of a chunk. The digest is not
+// memoized: one contract spans at most a handful of tree indexes, and the
 // cache's entries are bound to an address these keys do not have.
-func (c *pbinDigestCache) codeOverflowKey(codeHash common.Hash, chunkID int) []byte {
-	if chunkID < pbinHeaderCodeChunks {
-		panic(fmt.Sprintf("pbin: code chunk %d is a header chunk, not a code-zone one", chunkID))
+func (c *pbinDigestCache) codeChunkKey(codeHash common.Hash, chunkID int) []byte {
+	if chunkID < 0 {
+		panic(fmt.Sprintf("pbin: code chunk %d is negative", chunkID))
 	}
-	overflow := chunkID - pbinHeaderCodeChunks
 	var preimage [2 * length.Hash]byte
 	copy(preimage[:], codeHash[:])
-	binary.BigEndian.PutUint64(preimage[2*length.Hash-8:], uint64(overflow/pbinStemSubtreeWidth))
+	binary.BigEndian.PutUint64(preimage[2*length.Hash-8:], uint64(chunkID/pbinStemSubtreeWidth))
 	position := c.hash(preimage[:])
-	return pbinTreeKey(pbinCodeZone, position[:], byte(overflow%pbinStemSubtreeWidth))
+	return pbinTreeKey(pbinCodeZone, position[:], byte(chunkID%pbinStemSubtreeWidth))
 }
 
 func (c *pbinDigestCache) storageKey(addr, slot []byte) []byte {
@@ -262,5 +270,5 @@ func pbinSlotInHeader(slot *[32]byte) bool {
 			return false
 		}
 	}
-	return slot[31] < pbinCodeOffset-pbinHeaderStorageOffset
+	return slot[31] < pbinHeaderStorageSlots
 }

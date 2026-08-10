@@ -18,24 +18,25 @@ package commitment
 
 import (
 	"bytes"
-	"context"
+	"fmt"
+	"sort"
 	"testing"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 )
 
-// Zero-vs-absent. The domain encodes both as an absent read, while EIP-8297 has
-// no removal and commits a zero value as a present leaf. The engine supplies the
-// presence bit the domain lacks: a zeroed slot under a live leaf keeps the leaf
-// and commits 32 zero bytes, an absent key with no leaf of its own contributes
-// nothing, and an absent account over a live leaf stays refused.
+// Zero-vs-absent. EIP-8297 makes them the same state: a leaf whose value is 32
+// zero bytes is not stored, and reads back as the zero it stood for. So the
+// domain's shared encoding of the two needs no presence bit, and both a delete
+// and a zero write remove the leaf.
 
-// TestPBinStorageDeleteKeepsLeafAsPresentZero covers the update-stream side: the
-// zeroed slot is touched, so its leaf is in the grid when the absent read lands.
-func TestPBinStorageDeleteKeepsLeafAsPresentZero(t *testing.T) {
+// TestPBinStorageZeroWriteRemovesLeaf covers the update-stream side: the zeroed
+// slot is touched, so its leaf is in the grid when the absent read lands.
+func TestPBinStorageZeroWriteRemovesLeaf(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {
@@ -63,23 +64,21 @@ func TestPBinStorageDeleteKeepsLeafAsPresentZero(t *testing.T) {
 			pph.Reset()
 			root := pbinTestProcess(t, pph, zeroed.plainKeys, zeroed.updates)
 
-			want := new(pbinTestCorpus).
-				storage(addr, pbinOracleSlot(tc.gone)).
-				storage(addr, pbinOracleSlot(tc.kept), 0x02)
-			require.Equal(t, want.oracleRoot(t), root)
-			require.NotEqual(t, before, root)
-
 			survivorOnly := new(pbinTestCorpus).storage(addr, pbinOracleSlot(tc.kept), 0x02)
-			require.NotEqual(t, survivorOnly.oracleRoot(t), root,
-				"a zeroed slot keeps its leaf: dropping it is a different tree")
+			require.Equal(t, survivorOnly.oracleRoot(t), root,
+				"a zeroed slot leaves the tree it would have had without the slot")
+			require.NotEqual(t, before, root)
 		})
 	}
 }
 
-// TestPBinStorageDeleteOnUntouchedSiblingIsPresentZero is the same rule reached
-// through the fold: the zeroed slot is never touched, so its leaf is rehydrated
-// from the branch record and hashed with whatever the state read returns.
-func TestPBinStorageDeleteOnUntouchedSiblingIsPresentZero(t *testing.T) {
+// TestPBinStorageZeroOnUntouchedSiblingKeepsLeaf pins the fold path, where the
+// rule does not yet hold: a slot zeroed without being in the update set is
+// rehydrated from its branch record and committed as 32 zero bytes, which under
+// the current spec is a state the tree cannot hold. Removal lives on the update
+// path only. The domain always carries a zeroed slot in the same block's update
+// set, so this is out of reach through ordinary execution.
+func TestPBinStorageZeroOnUntouchedSiblingKeepsLeaf(t *testing.T) {
 	t.Parallel()
 
 	addr := pbinOracleAddr(42)
@@ -100,10 +99,16 @@ func TestPBinStorageDeleteOnUntouchedSiblingIsPresentZero(t *testing.T) {
 	pph.Reset()
 	root := pbinTestProcess(t, pph, touched.plainKeys, touched.updates)
 
-	want := new(pbinTestCorpus).
-		storage(addr, pbinOracleSlot(256)).
-		storage(addr, pbinOracleSlot(257), 0x0B)
-	require.Equal(t, want.oracleRoot(t), root)
+	// The zero leaf is not a state entries() can express, since it filters zeros.
+	survivor := new(pbinTestCorpus).storage(addr, pbinOracleSlot(257), 0x0B)
+	withZeroLeaf := append(survivor.entries(t), pbinOracleEntry{
+		key:   pbinTreeKeyStorage(addr, pbinOracleSlot(256)),
+		value: make([]byte, pbinValueLength),
+	})
+	want := pbinOracleRoot(withZeroLeaf)
+	require.Equal(t, want[:], root)
+
+	require.NotEqual(t, survivor.oracleRoot(t), root, "the leaf survives as a zero")
 }
 
 func TestPBinLoadCellStateAbsentRead(t *testing.T) {
@@ -138,33 +143,49 @@ func TestPBinLoadCellStateAbsentRead(t *testing.T) {
 	})
 }
 
-// TestPBinAccountRemovalStillRefused keeps the refusal in place: turning an
-// absent account into a zero-valued BASIC_DATA leaf would be consistent with
-// eip:345-347, but it is not verified against the reference and would silently
-// change the root.
-func TestPBinAccountRemovalStillRefused(t *testing.T) {
+// TestPBinAccountRemovalDropsBothSubtrees: an account owns its header stem and
+// its storage prefix, and removing it removes those two subtrees whole — header
+// storage slots included, and storage the fold was handed no list of. Its code
+// chunks are content-addressed and shared, so they stay, and a bystander
+// account must survive untouched.
+func TestPBinAccountRemovalDropsBothSubtrees(t *testing.T) {
 	t.Parallel()
 
-	addr := pbinOracleAddr(45)
-	stored := new(pbinTestCorpus).account(addr, 3, 7, common.Hash{0x45})
+	addr, bystander := pbinOracleAddr(45), pbinOracleAddr(48)
+	code := bytes.Repeat([]byte{0x01}, 31*4)
+	stored := new(pbinTestCorpus).
+		accountWithCodeBytes(addr, 3, 7, code).
+		storage(addr, pbinOracleSlot(5), 0x01).   // header window
+		storage(addr, pbinOracleSlot(256), 0x02). // storage zone
+		storage(addr, pbinOracleSlot(1<<20), 0x03).
+		account(bystander, 1, 2, common.Hash{0x48})
 
 	pph, ms := pbinTestEngine(t)
-	require.NoError(t, ms.applyPlainUpdates(stored.plainKeys, stored.updates))
+	stored.applyTo(t, ms)
 	pbinTestProcess(t, pph, stored.plainKeys, stored.updates)
 
-	require.NoError(t, ms.applyPlainUpdates(stored.plainKeys, []Update{{Flags: DeleteUpdate}}))
+	removal := new(pbinTestCorpus).account(addr, 0, 0, common.Hash{})
+	require.NoError(t, ms.applyPlainUpdates(removal.plainKeys, []Update{{Flags: DeleteUpdate}}))
+
 	pph.Reset()
-	upd := WrapKeyUpdates(t, ModeDirect, pbinKeyHasher(), stored.plainKeys, stored.updates)
-	_, err := pph.Process(context.Background(), upd, "", nil, WarmupConfig{})
-	require.ErrorIs(t, err, errPBinDeleteUnsupported)
+	root := pbinTestProcess(t, pph, removal.plainKeys, removal.updates)
+
+	survivor := new(pbinTestCorpus).account(bystander, 1, 2, common.Hash{0x48})
+	want := survivor.entries(t)
+	codeHash := keccak.Sum256(code)
+	for i, chunk := range pbinChunkifyCode(code) {
+		want = append(want, pbinOracleEntry{key: pbinTreeKeyCodeChunk(codeHash, i), value: chunk[:]})
+	}
+	wantRoot := pbinOracleRoot(want)
+	require.Equal(t, wantRoot[:], root,
+		"nothing of the removed account's own subtrees may survive, and nothing of the other may go")
 }
 
-// TestPBinFoldDeleteUnreachableFromProcess pins that foldDelete stays off the
-// Process path, since it collapses nodes the reference leaves in place. Its only
-// observable is the zero-length record it writes at a bit-path key — storeRoot
-// makes the sole other zero-length write, and only at the root key — so a run
-// that zeroes every leaf it stored must produce none.
-func TestPBinFoldDeleteUnreachableFromProcess(t *testing.T) {
+// TestPBinFoldDeleteRunsOnProcess: removing the last leaf of a subtree collapses
+// it, and the collapse is observable as the zero-length record foldDelete writes
+// at a bit-path key. storeRoot makes the sole other zero-length write, and only
+// at the root key.
+func TestPBinFoldDeleteRunsOnProcess(t *testing.T) {
 	t.Parallel()
 
 	addr := pbinOracleAddr(46)
@@ -182,10 +203,9 @@ func TestPBinFoldDeleteUnreachableFromProcess(t *testing.T) {
 	zeroed, want := new(pbinTestCorpus), new(pbinTestCorpus)
 	for _, slot := range slots {
 		zeroed.storage(addr, pbinOracleSlot(slot))
-		want.storage(addr, pbinOracleSlot(slot))
 	}
-	// An absent key with no leaf of its own contributes nothing and leaves no
-	// empty row behind — the case a zero write must not be confused with.
+	// An absent key with no leaf of its own contributes nothing — the case a zero
+	// write over a live leaf must not be confused with.
 	zeroed.storage(addr, pbinOracleSlot(1<<20))
 	want.account(pbinOracleAddr(47), 1, 2, common.Hash{0x47})
 
@@ -197,8 +217,59 @@ func TestPBinFoldDeleteUnreachableFromProcess(t *testing.T) {
 	root := pbinTestProcess(t, pph, zeroed.plainKeys, zeroed.updates)
 	require.Equal(t, want.oracleRoot(t), root)
 
-	require.NotEmpty(t, ctx.puts)
+	var collapsed int
 	for _, put := range ctx.puts {
-		require.NotEmpty(t, put.data, "zero-length record at %x: foldDelete ran", put.prefix)
+		if len(put.data) == 0 {
+			collapsed++
+		}
 	}
+	require.NotZero(t, collapsed, "every stored leaf was zeroed, so subtrees must collapse")
+}
+
+// TestPBinCollapsedRowLeavesNoRecord: removing one of a branch's two children
+// collapses the row into its survivor, and the record the row was unfolded from
+// has to go with it — an incremental removal must store exactly the records a
+// rebuild of the same state stores.
+func TestPBinCollapsedRowLeavesNoRecord(t *testing.T) {
+	t.Parallel()
+
+	addr, bystander := pbinOracleAddr(51), pbinOracleAddr(52)
+	stored := new(pbinTestCorpus).
+		account(bystander, 1, 2, common.Hash{0x52}).
+		storage(addr, pbinOracleSlot(256), 0x01).
+		storage(addr, pbinOracleSlot(257), 0x02)
+
+	pph, ms := pbinTestEngine(t)
+	stored.applyTo(t, ms)
+	pbinTestProcess(t, pph, stored.plainKeys, stored.updates)
+
+	zeroed := new(pbinTestCorpus).storage(addr, pbinOracleSlot(257))
+	require.NoError(t, ms.applyPlainUpdates(zeroed.plainKeys, []Update{{Flags: DeleteUpdate}}))
+	pph.Reset()
+	root := pbinTestProcess(t, pph, zeroed.plainKeys, zeroed.updates)
+
+	survivors := new(pbinTestCorpus).
+		account(bystander, 1, 2, common.Hash{0x52}).
+		storage(addr, pbinOracleSlot(256), 0x01)
+	require.Equal(t, survivors.oracleRoot(t), root)
+
+	_, fresh := pbinTestEngine(t)
+	survivors.applyTo(t, fresh)
+	freshEngine := NewPBinPatriciaHashed(fresh)
+	defer freshEngine.Release()
+	pbinTestProcess(t, freshEngine, survivors.plainKeys, survivors.updates)
+
+	require.Equal(t, pbinLiveRecordKeys(fresh), pbinLiveRecordKeys(ms),
+		"the collapsed row's record outlived the node it described")
+}
+
+func pbinLiveRecordKeys(ms *MockState) []string {
+	keys := make([]string, 0, len(ms.cm))
+	for prefix, data := range ms.cm {
+		if len(data) > 0 {
+			keys = append(keys, fmt.Sprintf("%x", prefix))
+		}
+	}
+	sort.Strings(keys)
+	return keys
 }

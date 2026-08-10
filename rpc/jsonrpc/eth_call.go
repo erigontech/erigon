@@ -789,7 +789,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 
 	siblingPaths, err := detectCollapseSiblings(ctx, tx, nil, domains, sdCtx,
 		firstTxNumInBlock, endTxNum, blockNr, parentNum,
-		block.Root(), accessed, witnessModeLegacy)
+		block.Root(), accessed, witnessModeLegacy, false /* binTrie: WithHexCommitmentOnly refuses bin above */)
 	if err != nil {
 		return nil, err
 	}
@@ -799,7 +799,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		return nil, fmt.Errorf("failed to reset commitment for witness: %w", err)
 	}
 
-	accessed.touchAll(sdCtx)
+	accessed.touchAll(sdCtx, false /* binTrie: WithHexCommitmentOnly refuses bin above */)
 	for _, siblingPath := range siblingPaths {
 		sdCtx.TouchHashedKey(siblingPath)
 	}

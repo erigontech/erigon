@@ -68,47 +68,101 @@ func (c *pbinTestCorpus) storage(addr, slot []byte, value ...byte) *pbinTestCorp
 	return c
 }
 
-// entries is the leaf set the corpus stands for. An account is two leaves —
-// stated here independently of the engine.
+func (c *pbinTestCorpus) remove(addr []byte) *pbinTestCorpus {
+	c.plainKeys = append(c.plainKeys, bytes.Clone(addr))
+	c.updates = append(c.updates, Update{Flags: DeleteUpdate})
+	return c
+}
+
+// entries is the leaf set the corpus stands for as a single batch.
 func (c *pbinTestCorpus) entries(t *testing.T) []pbinOracleEntry {
 	t.Helper()
-	entries := make([]pbinOracleEntry, 0, len(c.plainKeys))
-	for i, plainKey := range c.plainKeys {
-		u := &c.updates[i]
-		switch len(plainKey) {
-		case length.Addr:
-			basic, err := pbinEncodeBasicData(u.Nonce, &u.Balance, u.CodeSize)
-			require.NoError(t, err)
-			code := pbinCodeHashValue(u.CodeHash)
-			entries = append(entries,
-				pbinOracleEntry{key: pbinTreeKeyAccount(plainKey, pbinBasicDataLeafKey), value: basic[:]},
-				pbinOracleEntry{key: pbinTreeKeyAccount(plainKey, pbinCodeHashLeafKey), value: code[:]})
-			for j, chunk := range pbinChunkifyCode(c.codes[string(plainKey)]) {
-				entries = append(entries, pbinOracleEntry{
-					key:   pbinTestChunkKey(plainKey, u.CodeHash, j),
-					value: chunk[:],
-				})
+	return pbinTestFinalEntries(t, c)
+}
+
+// pbinTestFinalEntries is the leaf set the batches leave behind, stated
+// independently of the engine. Within a batch only a plain key's last update
+// counts, because the engine re-reads post-state; an account removal drops the
+// header and storage leaves derived from the address, while content-addressed
+// chunk leaves stay once a materialized account inserted them. A value of 32
+// zero bytes is the same state as an absent key, so it removes the leaf. An
+// account holds exactly one of the CODE_HASH and DELEGATION leaves, decided by
+// its code bytes.
+func pbinTestFinalEntries(t *testing.T, batches ...*pbinTestCorpus) []pbinOracleEntry {
+	t.Helper()
+	var zero [pbinValueLength]byte
+	var order []string
+	values := make(map[string][]byte)
+	owners := make(map[string]string)
+	set := func(key []byte, value [pbinValueLength]byte, owner []byte) {
+		k := string(key)
+		if _, seen := values[k]; !seen {
+			order = append(order, k)
+		}
+		if value == zero {
+			values[k] = nil
+		} else {
+			values[k] = bytes.Clone(value[:])
+		}
+		if owner != nil {
+			owners[k] = string(owner)
+		}
+	}
+	for _, b := range batches {
+		last := make(map[string]int, len(b.plainKeys))
+		for i, plainKey := range b.plainKeys {
+			last[string(plainKey)] = i
+		}
+		// Removals first: an account's header stem sorts before every other key
+		// it owns, so its drop always lands before the batch's re-inserts.
+		for i, plainKey := range b.plainKeys {
+			if last[string(plainKey)] != i || len(plainKey) != length.Addr || !b.updates[i].Deleted() {
+				continue
 			}
-		case length.Addr + length.Hash:
-			value := pbinEncodeStorageValue(u.Storage[:u.StorageLen])
-			entries = append(entries, pbinOracleEntry{
-				key:   pbinTreeKeyStorage(plainKey[:length.Addr], plainKey[length.Addr:]),
-				value: value[:],
-			})
-		default:
-			t.Fatalf("plain key of %d bytes is neither an account nor a storage key", len(plainKey))
+			for k, owner := range owners {
+				if owner == string(plainKey) {
+					values[k] = nil
+				}
+			}
+		}
+		for i, plainKey := range b.plainKeys {
+			if last[string(plainKey)] != i {
+				continue
+			}
+			u := &b.updates[i]
+			switch len(plainKey) {
+			case length.Addr:
+				if u.Deleted() {
+					continue
+				}
+				basic, err := pbinEncodeBasicData(u.Nonce, &u.Balance, u.CodeSize)
+				require.NoError(t, err)
+				set(pbinTreeKeyAccount(plainKey, pbinBasicDataLeafKey), basic, plainKey)
+				if code := b.codes[string(plainKey)]; pbinIsDelegation(code) {
+					set(pbinTreeKeyAccount(plainKey, pbinDelegationLeafKey), pbinEncodeDelegation(code), plainKey)
+					set(pbinTreeKeyAccount(plainKey, pbinCodeHashLeafKey), zero, plainKey)
+				} else {
+					set(pbinTreeKeyAccount(plainKey, pbinCodeHashLeafKey), pbinCodeHashValue(u.CodeHash), plainKey)
+					set(pbinTreeKeyAccount(plainKey, pbinDelegationLeafKey), zero, plainKey)
+					for j, chunk := range pbinChunkifyCode(code) {
+						set(pbinTreeKeyCodeChunk(u.CodeHash, j), chunk, nil)
+					}
+				}
+			case length.Addr + length.Hash:
+				set(pbinTreeKeyStorage(plainKey[:length.Addr], plainKey[length.Addr:]),
+					pbinEncodeStorageValue(u.Storage[:u.StorageLen]), plainKey[:length.Addr])
+			default:
+				t.Fatalf("plain key of %d bytes is neither an account nor a storage key", len(plainKey))
+			}
+		}
+	}
+	entries := make([]pbinOracleEntry, 0, len(order))
+	for _, k := range order {
+		if values[k] != nil {
+			entries = append(entries, pbinOracleEntry{key: []byte(k), value: values[k]})
 		}
 	}
 	return entries
-}
-
-// pbinTestChunkKey: header chunks live in the account's own stem, the rest in
-// the content-addressed code zone.
-func pbinTestChunkKey(addr []byte, codeHash common.Hash, chunkID int) []byte {
-	if chunkID < pbinHeaderCodeChunks {
-		return pbinTreeKeyCodeChunk(addr, chunkID)
-	}
-	return pbinTreeKeyCodeOverflow(codeHash, chunkID)
 }
 
 func (c *pbinTestCorpus) oracleRoot(t *testing.T) []byte {
@@ -146,7 +200,7 @@ func pbinTestProcess(t *testing.T, pph *PBinPatriciaHashed, plainKeys [][]byte, 
 }
 
 // TestPBinRootHashEmptyEngine: an empty EIP-8297 tree is 32 zero bytes
-// (eip:208), not the empty-MPT root the rest of erigon reaches for.
+// (eip:"Node merkelization"), not the empty-MPT root the rest of erigon reaches for.
 func TestPBinRootHashEmptyEngine(t *testing.T) {
 	t.Parallel()
 
@@ -157,7 +211,7 @@ func TestPBinRootHashEmptyEngine(t *testing.T) {
 	require.NotEqual(t, empty.RootHash[:], root)
 }
 
-// TestPBinProcessSingleKeyRootIsLeaf pins eip:133-135: with one entry the root
+// TestPBinProcessSingleKeyRootIsLeaf pins eip:"Tree structure": with one entry the root
 // is the leaf itself, not a branch wrapping it.
 func TestPBinProcessSingleKeyRootIsLeaf(t *testing.T) {
 	t.Parallel()
@@ -304,10 +358,9 @@ func TestPBinProcessAccountFansOutToCodeHash(t *testing.T) {
 	require.Equal(t, codeHash[:], code[:])
 }
 
-// TestPBinProcessRejectsStreamDelete: EIP-8297 never removes an entry, so a
-// delete arriving on the update stream is an error rather than a silently
-// applied removal.
-func TestPBinProcessRejectsStreamDelete(t *testing.T) {
+// TestPBinProcessStreamDeleteOnAbsentKeyIsNoop: a delete for a key that has no
+// leaf removes nothing, so the tree it leaves is the empty one.
+func TestPBinProcessStreamDeleteOnAbsentKeyIsNoop(t *testing.T) {
 	t.Parallel()
 
 	pph, ms := pbinTestEngine(t)
@@ -316,8 +369,9 @@ func TestPBinProcessRejectsStreamDelete(t *testing.T) {
 	require.NoError(t, ms.applyPlainUpdates(plainKeys, updates))
 
 	upd := WrapKeyUpdates(t, ModeUpdate, pbinKeyHasher(), plainKeys, updates)
-	_, err := pph.Process(context.Background(), upd, "", nil, WarmupConfig{})
-	require.ErrorIs(t, err, errPBinDeleteUnsupported)
+	root, err := pph.Process(context.Background(), upd, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	require.Equal(t, make([]byte, length.Hash), root)
 }
 
 // TestPBinProcessMissingStateIsAbsent: a context read for a key with no state

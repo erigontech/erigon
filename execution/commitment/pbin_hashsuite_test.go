@@ -101,7 +101,7 @@ func TestPBinBlake3SuiteMatchesSpecRoots(t *testing.T) {
 			require.Equal(t, tc.Root[2:], rootOf(t, tc))
 
 			if len(tc.Entries) == 0 {
-				return // the empty tree is 32 zero bytes under any hash (eip:208)
+				return // the empty tree is 32 zero bytes under any hash (eip:"Node merkelization")
 			}
 			require.NoError(t, SetPBinHashSuite(PBinHashKeccak))
 			require.NotEqual(t, tc.Root[2:], rootOf(t, tc), "keccak must not reproduce a blake3 reference root")

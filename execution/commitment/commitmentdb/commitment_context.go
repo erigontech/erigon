@@ -342,25 +342,60 @@ func (sdc *SharedDomainsCommitmentContext) TouchHashedKey(hashedKey []byte) {
 	sdc.updates.TouchHashedKey(hashedKey)
 }
 
+// witnessTrie is the capture seam: each engine walks its own tree and returns the
+// nodes it hashed. Both variants implement it, so the capture names no concrete trie.
+type witnessTrie interface {
+	Witnesses(ctx context.Context, updates *commitment.Updates, produceExclusionProofs bool, logPrefix string) (nodes [][]byte, provedKeys [][]byte, rootHash []byte, err error)
+}
+
+var (
+	_ witnessTrie = (*commitment.HexPatriciaHashed)(nil)
+	_ witnessTrie = (*commitment.PBinPatriciaHashed)(nil)
+)
+
+// witnessBlockTrie is the seam for a trie whose key set depends on what the
+// block did. Only the binary trie commits code, so only it implements this.
+type witnessBlockTrie interface {
+	SetWitnessBlock(b commitment.PBinWitnessBlock)
+}
+
+// SetWitnessBlock hands the next capture what the parent state it walks cannot
+// say about the block. See commitment.PBinWitnessBlock.
+func (sdc *SharedDomainsCommitmentContext) SetWitnessBlock(b commitment.PBinWitnessBlock) {
+	if trie, ok := sdc.Trie().(witnessBlockTrie); ok {
+		trie.SetWitnessBlock(b)
+	}
+}
+
 // witnessCapture runs the on-the-fly fold and returns the captured superset node
 // set (root first), the fold's hashed keys, and the root hash.
 func (sdc *SharedDomainsCommitmentContext) witnessCapture(ctx context.Context, produceExclusionProofs bool, logPrefix string) (nodes [][]byte, provedKeys [][]byte, rootHash []byte, err error) {
-	hexPatriciaHashed, ok := sdc.Trie().(*commitment.HexPatriciaHashed)
+	defer sdc.SetWitnessBlock(commitment.PBinWitnessBlock{}) // Witnesses clears it too, but only once it runs
+
+	capturer, ok := sdc.Trie().(witnessTrie)
 	if !ok {
-		return nil, nil, nil, errors.New("shared domains commitment context doesn't have HexPatriciaHashed")
+		return nil, nil, nil, fmt.Errorf("commitment trie %T captures no witness", sdc.Trie())
 	}
-	return hexPatriciaHashed.Witnesses(ctx, sdc.updates, produceExclusionProofs, logPrefix)
+	return capturer.Witnesses(ctx, sdc.updates, produceExclusionProofs, logPrefix)
 }
 
 // WitnessNodes builds the lean execution-witness node set: it prunes the captured
-// superset to the proof paths of the fold's keys, returning the RLP node bytes
-// (root first) and the root hash. This is the strict-verifier (reth) form.
+// superset to the proof paths of the fold's keys, returning the node bytes (root
+// first) and the root hash. This is the strict-verifier (reth) form.
+//
+// Each variant prunes with its own walker: the hex one is MPT-shaped and cannot
+// read a bin preimage.
 func (sdc *SharedDomainsCommitmentContext) WitnessNodes(ctx context.Context, produceExclusionProofs bool, logPrefix string) (nodes [][]byte, rootHash []byte, err error) {
 	full, provedKeys, rootHash, err := sdc.witnessCapture(ctx, produceExclusionProofs, logPrefix)
 	if err != nil {
 		return nil, nil, err
 	}
-	lean, err := trie.WitnessNodesForKeysFromNodes(full, provedKeys)
+	var lean [][]byte
+	if sdc.variant == commitment.VariantBinPatriciaTrie {
+		lean, err = commitment.PBinWitnessNodesForKeys(full, rootHash, provedKeys)
+	} else {
+		lean, err = trie.WitnessNodesForKeysFromNodes(full, provedKeys)
+	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("prune witness nodes: %w", err)
 	}

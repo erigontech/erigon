@@ -17,7 +17,9 @@
 package commitment
 
 import (
+	"encoding/hex"
 	"fmt"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -27,60 +29,89 @@ import (
 )
 
 // pbinTestSpecCodeChunkKey transcribes get_tree_key_for_code_chunk
-// (eip:355-367) from the spec's Python, hashing with the independent Keccak the
+// (eip:"Code") from the spec's Python, hashing with the independent Keccak the
 // tests use. It is the ground truth for the cache-backed derivation.
-func pbinTestSpecCodeChunkKey(t *testing.T, addr []byte, codeHash common.Hash, chunkID int) []byte {
+func pbinTestSpecCodeChunkKey(t *testing.T, codeHash common.Hash, chunkID int) []byte {
 	t.Helper()
-	if chunkID < pbinStemSubtreeWidth-pbinCodeOffset {
-		stem := pbinTestKeccak(t, pbinTestAddress32(addr))
-		return append(append([]byte{pbinAccountZone}, stem...), byte(pbinCodeOffset+chunkID))
-	}
-	overflow := chunkID - (pbinStemSubtreeWidth - pbinCodeOffset)
-	position := pbinTestKeccak(t, codeHash[:], pbinTestBE32(uint64(overflow/pbinStemSubtreeWidth)))
-	key := append(append([]byte{pbinCodeZone}, position...), byte(overflow%pbinStemSubtreeWidth))
+	position := pbinTestKeccak(t, codeHash[:], pbinTestBE32(uint64(chunkID/pbinStemSubtreeWidth)))
+	key := append(append([]byte{pbinCodeZone}, position...), byte(chunkID%pbinStemSubtreeWidth))
 	require.Len(t, key, pbinCodeKeyLength)
 	return key
 }
 
-// TestPBinCodeOverflowKeyMatchesSpec pins the second half of the code embedding:
-// past the account header a chunk is content-addressed by code hash, with the
-// overflow index split into a 32-byte tree index and a sub-index.
-func TestPBinCodeOverflowKeyMatchesSpec(t *testing.T) {
+// TestPBinChunkKeyMatchesSpec pins the code embedding: every chunk is
+// content-addressed by code hash, with the chunk id split into a 32-byte tree
+// index and a sub-index.
+func TestPBinChunkKeyMatchesSpec(t *testing.T) {
 	t.Parallel()
 
-	addr := pbinOracleAddr(60)
 	codeHash := common.Hash{0x82, 0x97}
 
 	for _, chunkID := range []int{
-		pbinHeaderCodeChunks,                            // the first overflow chunk
-		pbinHeaderCodeChunks + 1,                        // its neighbour on the same code stem
-		pbinHeaderCodeChunks + pbinStemSubtreeWidth - 1, // the last of the first code stem
-		pbinHeaderCodeChunks + pbinStemSubtreeWidth,     // the first of the second
-		792, // the last chunk MaxCodeSize produces
+		0,
+		1,
+		pbinStemSubtreeWidth - 1, // the last of the first code group
+		pbinStemSubtreeWidth,     // the first of the second
+		792,                      // the last chunk MaxCodeSize produces
 	} {
 		t.Run(fmt.Sprintf("chunk %d", chunkID), func(t *testing.T) {
 			t.Parallel()
-			got := pbinTreeKeyCodeOverflow(codeHash, chunkID)
-			require.Equal(t, pbinTestSpecCodeChunkKey(t, addr, codeHash, chunkID), got)
+			got := pbinTreeKeyCodeChunk(codeHash, chunkID)
+			require.Equal(t, pbinTestSpecCodeChunkKey(t, codeHash, chunkID), got)
 			require.Len(t, got, pbinCodeKeyLength)
 			require.EqualValues(t, pbinCodeZone, got[0])
 		})
 	}
 
-	require.Panics(t, func() { pbinTreeKeyCodeOverflow(codeHash, pbinHeaderCodeChunks-1) },
-		"a header chunk has no code-zone key")
+	require.Panics(t, func() { pbinTreeKeyCodeChunk(codeHash, -1) },
+		"a negative chunk id names no key")
+}
+
+// TestPBinChunkKeyMatchesVectorIndices pins the derivation against the
+// reference corpus at every chunk id the corpus carries — both sides of the
+// 255/256 and 511/512 group boundaries, and the last chunk of MAX_CODE_SIZE.
+func TestPBinChunkKeyMatchesVectorIndices(t *testing.T) {
+	e := pbinLoadConformance(t).Embedding
+	codeHash := common.BytesToHash(pbinUnhex(t, e.CodeHash))
+	keys := pbinDigestCache{sum: pbinBlake3Hash}
+
+	wantIDs := []int{0, 1, 255, 256, 257, 511, 512, 2114}
+	require.Len(t, e.CodeChunkKeys, len(wantIDs))
+	for _, id := range wantIDs {
+		want, ok := e.CodeChunkKeys[strconv.Itoa(id)]
+		require.True(t, ok, "the corpus carries no chunk %d", id)
+		require.Equal(t, want, "0x"+hex.EncodeToString(keys.codeChunkKey(codeHash, id)), "chunk %d", id)
+	}
+}
+
+// TestPBinChunkKeyIgnoresAddress: the derivation takes no address, so a digest
+// cache warmed on an account stem must not leak its memoized digests into a
+// chunk key.
+func TestPBinChunkKeyIgnoresAddress(t *testing.T) {
+	t.Parallel()
+
+	codeHash := common.Hash{0x82, 0x97}
+	var a, b pbinDigestCache
+	a.accountKey(pbinOracleAddr(60), pbinBasicDataLeafKey)
+	b.accountKey(pbinOracleAddr(61), pbinBasicDataLeafKey)
+
+	for _, chunkID := range []int{0, pbinStemSubtreeWidth - 1, pbinStemSubtreeWidth, 2114} {
+		fresh := pbinTreeKeyCodeChunk(codeHash, chunkID)
+		require.Equal(t, fresh, a.codeChunkKey(codeHash, chunkID), "chunk %d", chunkID)
+		require.Equal(t, fresh, b.codeChunkKey(codeHash, chunkID), "chunk %d", chunkID)
+	}
 }
 
 // TestPBinCodeKeyNeverRoutesToTheStorageZone pins that a code key cannot reach
-// the storage zone. An overflow key derives from code_hash ‖ tree_index, a
-// 64-byte preimage that is not a plain key at all, and the stream's key hasher
-// accepts only the two plain-key shapes.
+// the storage zone. A chunk key derives from code_hash ‖ tree_index, a 64-byte
+// preimage that is not a plain key at all, and the stream's key hasher accepts
+// only the two plain-key shapes.
 func TestPBinCodeKeyNeverRoutesToTheStorageZone(t *testing.T) {
 	t.Parallel()
 
 	codeHash := common.Hash{0x11}
-	for chunkID := pbinHeaderCodeChunks; chunkID < pbinHeaderCodeChunks+600; chunkID += 37 {
-		key := pbinTreeKeyCodeOverflow(codeHash, chunkID)
+	for chunkID := 0; chunkID < 600; chunkID += 37 {
+		key := pbinTreeKeyCodeChunk(codeHash, chunkID)
 		require.EqualValues(t, pbinCodeZone, key[0], "chunk %d", chunkID)
 		require.Len(t, key, pbinCodeKeyLength, "chunk %d", chunkID)
 	}
@@ -89,25 +120,24 @@ func TestPBinCodeKeyNeverRoutesToTheStorageZone(t *testing.T) {
 	for _, plainKey := range [][]byte{
 		make([]byte, pbinCodeKeyLength),   // a code key handed back as a plain key
 		make([]byte, pbinCodeKeyLength-1), // its stem
-		make([]byte, 2*length.Hash),       // the overflow preimage itself
+		make([]byte, 2*length.Hash),       // the chunk-position preimage itself
 	} {
 		require.Panics(t, func() { hasher(plainKey) },
 			"a %d-byte plain key is neither an account nor a storage key", len(plainKey))
 	}
 }
 
-// TestPBinEngineCommitsOverflowCodeChunks is the code zone end to end: code
-// outgrowing the account header keeps its first 128 chunks on the account stem
-// and puts the rest in the code zone.
-func TestPBinEngineCommitsOverflowCodeChunks(t *testing.T) {
+// TestPBinChunksCrossGroupBoundary is the code zone end to end: chunk 256 opens
+// a second code group on its own stem, and the engine commits both groups.
+func TestPBinChunksCrossGroupBoundary(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {
 		name   string
 		chunks int
 	}{
-		{name: "one chunk past the header", chunks: pbinHeaderCodeChunks + 1},
-		{name: "crosses a code stem", chunks: pbinHeaderCodeChunks + pbinStemSubtreeWidth + 1},
+		{name: "fills group 0", chunks: pbinStemSubtreeWidth},
+		{name: "one chunk into group 1", chunks: pbinStemSubtreeWidth + 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -125,26 +155,31 @@ func TestPBinEngineCommitsOverflowCodeChunks(t *testing.T) {
 			pbinTestVerifyRecords(t, ms, root, corpus.leafCount(t))
 		})
 	}
+
+	h := common.Hash{0xAB}
+	last, first := pbinTreeKeyCodeChunk(h, pbinStemSubtreeWidth-1), pbinTreeKeyCodeChunk(h, pbinStemSubtreeWidth)
+	require.NotEqual(t, last[1:33], first[1:33], "group 1 sits on its own stem")
+	require.EqualValues(t, pbinStemSubtreeWidth-1, last[33])
+	require.EqualValues(t, 0, first[33], "the sub-index wraps at the group boundary")
 }
 
-// TestPBinOverflowChunksAreSharedByIdenticalCode pins the point of
-// content-addressing (eip:352-354): two accounts running the same bytecode name
-// the same code-zone leaves, so the zone holds one copy of them.
-func TestPBinOverflowChunksAreSharedByIdenticalCode(t *testing.T) {
+// TestPBinSharedBytecodeEmitsOneChunkSet pins the point of content addressing
+// (eip:"Code"): two accounts running the same bytecode name the same code-zone
+// leaves, so the zone holds one copy of them.
+func TestPBinSharedBytecodeEmitsOneChunkSet(t *testing.T) {
 	t.Parallel()
 
-	code := pbinTestCode((pbinHeaderCodeChunks+2)*pbinChunkDataLen - 3)
+	code := pbinTestCode((pbinStemSubtreeWidth+2)*pbinChunkDataLen - 3)
 	a, b := pbinOracleAddr(62), pbinOracleAddr(63)
 	corpus := new(pbinTestCorpus).
 		accountWithCodeBytes(a, 1, 10, code).
 		accountWithCodeBytes(b, 2, 20, code)
 
 	chunks := len(pbinChunkifyCode(code))
-	overflow := chunks - pbinHeaderCodeChunks
-	require.Equal(t, 2, overflow)
-	// Two accounts: four header leaves, two full sets of header chunks, one
-	// shared set in the code zone.
-	require.Equal(t, 2*(2+pbinHeaderCodeChunks)+overflow, corpus.leafCount(t))
+	require.Equal(t, pbinStemSubtreeWidth+2, chunks)
+	// Two accounts: four header leaves and one shared chunk set spanning two
+	// code groups.
+	require.Equal(t, 2*2+chunks, corpus.leafCount(t))
 
 	pph, ms := pbinTestEngine(t)
 	corpus.applyTo(t, ms)
@@ -154,14 +189,14 @@ func TestPBinOverflowChunksAreSharedByIdenticalCode(t *testing.T) {
 	pbinTestVerifyRecords(t, ms, root, corpus.leafCount(t))
 }
 
-// TestPBinOverflowChunksFollowEveryAccountZoneKey pins where the code-zone block
+// TestPBinCodeChunksFollowEveryAccountZoneKey pins where the code-zone block
 // sits in the visit order: the zone byte puts it after every account-header key
 // and before every storage-zone one, so the chunks of an account visited early
 // have to wait for the last account of the run.
-func TestPBinOverflowChunksFollowEveryAccountZoneKey(t *testing.T) {
+func TestPBinCodeChunksFollowEveryAccountZoneKey(t *testing.T) {
 	t.Parallel()
 
-	code := pbinTestCode((pbinHeaderCodeChunks + 1) * pbinChunkDataLen)
+	code := pbinTestCode(5 * pbinChunkDataLen)
 	early := pbinOracleAddr(64)
 	corpus := new(pbinTestCorpus).accountWithCodeBytes(early, 1, 10, code)
 	for i := uint64(65); i < 70; i++ {

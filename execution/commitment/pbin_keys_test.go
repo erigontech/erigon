@@ -25,6 +25,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/sha3"
+
+	"github.com/erigontech/erigon/common/length"
 )
 
 // pbinTestKeccak is an independent Keccak-256 (x/crypto, not the fastkeccak the
@@ -48,7 +50,7 @@ func pbinTestAddr(t *testing.T, s string) []byte {
 	return b
 }
 
-// pbinTestAddress32 is the spec's address20_to_address32 (eip:291-296).
+// pbinTestAddress32 is the spec's address20_to_address32 (eip:"Tree embedding").
 func pbinTestAddress32(addr []byte) []byte {
 	a := make([]byte, 32)
 	copy(a[32-len(addr):], addr)
@@ -71,7 +73,7 @@ func pbinTestConcat(parts ...[]byte) []byte {
 	return out
 }
 
-// Pins the derivation against the spec's test cases (eip:583-630).
+// Pins the derivation against the spec's test cases (eip:"Test Cases").
 func TestPBinTreeKeyEIPVectors(t *testing.T) {
 	t.Parallel()
 
@@ -268,5 +270,23 @@ func TestPBinDigestCacheMatchesFreshDerivation(t *testing.T) {
 					"addr %x slot %d", addr, slot)
 			}
 		}
+	}
+}
+
+// The witness builder proves an account's storage zone occupied or empty by
+// touching one slot in it, so the probe slot has to derive a key under the
+// account's storage prefix and never a header one.
+func TestPBinStorageZoneProbeSlotLandsInTheZone(t *testing.T) {
+	t.Parallel()
+
+	probe := PBinStorageZoneProbeSlot()
+	var c pbinDigestCache
+	for _, s := range []string{
+		"0102030405060708090a0b0c0d0e0f1011121314",
+		"cafebabe000000000000000000000000deadbeef",
+	} {
+		addr := pbinTestAddr(t, s)
+		require.Equal(t, c.accountStoragePrefix(addr), c.storageKey(addr, probe[:])[:1+length.Hash],
+			"the probe key has to sit under the account's storage prefix")
 	}
 }

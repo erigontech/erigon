@@ -28,10 +28,10 @@ import (
 	"github.com/erigontech/erigon/common/length"
 )
 
-// pbinValueLength is the one leaf value size EIP-8297 admits (eip:132).
+// pbinValueLength is the one leaf value size EIP-8297 admits (eip:"Tree structure").
 const pbinValueLength = 32
 
-// BASIC_DATA field offsets within the leaf value (eip:332-339). Byte 0 (version)
+// BASIC_DATA field offsets within the leaf value (eip:"Header values"). Byte 0 (version)
 // and the reserved bytes 1..3 stay zero.
 const (
 	pbinBasicDataCodeSizeOffset = 4
@@ -64,12 +64,34 @@ func pbinEncodeBasicData(nonce uint64, balance *uint256.Int, codeSize uint64) ([
 
 // pbinCodeHashValue returns the CODE_HASH leaf value, mapping an unset hash to
 // the empty-bytecode hash as the spec requires for a codeless account
-// (eip:345-347).
+// (eip:"Header values").
 func pbinCodeHashValue(codeHash common.Hash) [pbinValueLength]byte {
 	if codeHash == (common.Hash{}) {
 		return empty.CodeHash
 	}
 	return codeHash
+}
+
+// EIP-7702 delegation indicators (eip:"Delegation"). Classification reads the
+// code bytes, never the hash — a code hash may begin with the marker too.
+var pbinDelegationMarker = [3]byte{0xEF, 0x01, 0x00}
+
+const pbinDelegationCodeLength = 23
+
+func pbinIsDelegation(code []byte) bool {
+	return len(code) == pbinDelegationCodeLength && [3]byte(code) == pbinDelegationMarker
+}
+
+// pbinEncodeDelegation right-pads the indicator into the DELEGATION leaf value.
+// This is not the chunk encoding: an indicator never executes, so byte 0 holds
+// code rather than a PUSHDATA count.
+func pbinEncodeDelegation(code []byte) [pbinValueLength]byte {
+	if len(code) != pbinDelegationCodeLength {
+		panic(fmt.Sprintf("pbin: delegation indicator of %d bytes, want %d", len(code), pbinDelegationCodeLength))
+	}
+	var v [pbinValueLength]byte
+	copy(v[:], code)
+	return v
 }
 
 func pbinEncodeStorageValue(value []byte) [pbinValueLength]byte {

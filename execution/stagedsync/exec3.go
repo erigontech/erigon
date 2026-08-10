@@ -108,11 +108,6 @@ func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, curr
 	return inputTxNum, maxTxNum, offsetFromBlockBeginning, blockNum, nil
 }
 
-// deferCommitmentUpdates reports whether Process() may leave branch updates as a
-// pending update flushed at the block boundary instead of applying them inline.
-// Deferring cuts re-org validation overhead; the parallel apply path also needs
-// Flush() to carry the pending update across sync cycles. The bin trie has no
-// deferred-update path and refuses the request, so it stays on the inline path.
 // executeInParallel picks the executor. The parallel executor's normalized write
 // set produces a different bin-trie root than the serial one for the same block,
 // so the bin variant stays on the serial executor until that is resolved.
@@ -123,6 +118,11 @@ func executeInParallel(variant commitment.TrieVariant, exec3Parallel, experiment
 	return exec3Parallel || experimentalBAL
 }
 
+// deferCommitmentUpdates reports whether Process() may leave branch updates as a
+// pending update flushed at the block boundary instead of applying them inline.
+// Deferring cuts re-org validation overhead; the parallel apply path also needs
+// Flush() to carry the pending update across sync cycles. The bin trie has no
+// deferred-update path and refuses the request, so it stays on the inline path.
 func deferCommitmentUpdates(variant commitment.TrieVariant, isForkValidation, parallel, isApplyingBlocks bool) bool {
 	if variant == commitment.VariantBinPatriciaTrie {
 		return false
@@ -775,7 +775,13 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 // dbg.CheckHeaderStateRoot switches the check off for a chain whose headers
 // this node cannot reproduce.
 func headerRootMismatch(computed, expected []byte) bool {
-	return dbg.CheckHeaderStateRoot && !bytes.Equal(computed, expected)
+	if !dbg.CheckHeaderStateRoot {
+		// Every execution entry point runs through here, so this is what reaches the
+		// integration and test runners too, not just node startup.
+		dbg.WarnHeaderStateRootCheckDisabled()
+		return false
+	}
+	return !bytes.Equal(computed, expected)
 }
 
 func handleIncorrectRootHashError(blockNumber uint64, blockHash common.Hash, applyTx kv.TemporalRwTx, cfg ExecuteBlockCfg, s *StageState, logger log.Logger, u Unwinder) error {

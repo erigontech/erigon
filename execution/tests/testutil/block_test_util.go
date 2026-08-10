@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"sync"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -221,6 +222,89 @@ func (bt *BlockTest) Run(t *testing.T) error {
 	return err
 }
 
+// The commitment variant and its hash are datadir properties resolved
+// process-wide, not per-tester options, so one run covers BinaryTree fixtures
+// or Merkle-Patricia ones and never both. The latch is what keeps the block
+// runner's concurrent workers off a racing write to the globals, and what turns
+// a mixed corpus into an error instead of fixtures silently re-rooted under the
+// wrong engine.
+var commitmentVariant struct {
+	sync.Mutex
+	holders   int
+	bin       bool
+	prevBin   bool
+	prevHash  string
+	prevSuite string
+}
+
+func commitmentVariantName(bin bool) string {
+	if bin {
+		return "binary"
+	}
+	return "Merkle-Patricia"
+}
+
+// selectCommitmentVariant commits the process to one commitment trie. Under go
+// test the choice is handed back once the last holder is done, so a later test
+// reads the process it expects; the CLI passes a nil tb and keeps it for the run.
+func selectCommitmentVariant(tb testing.TB, bin bool) error {
+	release, err := acquireCommitmentVariant(bin)
+	if err != nil {
+		return err
+	}
+	if tb != nil {
+		tb.Cleanup(release)
+	}
+	return nil
+}
+
+// acquireCommitmentVariant latches the variant and returns the release its
+// caller owes. Fixture files run as parallel subtests, so holders overlap: the
+// first applies the selection and only the last hands it back.
+func acquireCommitmentVariant(bin bool) (func(), error) {
+	commitmentVariant.Lock()
+	defer commitmentVariant.Unlock()
+
+	if commitmentVariant.holders > 0 {
+		if commitmentVariant.bin != bin {
+			return nil, fmt.Errorf("the commitment trie is selected process-wide: this run started under the %s trie and cannot also cover %s fixtures",
+				commitmentVariantName(commitmentVariant.bin), commitmentVariantName(bin))
+		}
+		commitmentVariant.holders++
+		return releaseCommitmentVariant, nil
+	}
+
+	prevBin, prevHash, prevSuite := statecfg.ExperimentalBinCommitment, statecfg.BinCommitmentHash, commitment.PBinHashSuiteName()
+	if bin {
+		if err := commitment.SetPBinHashSuite(commitment.PBinHashBlake3); err != nil {
+			return nil, err
+		}
+		// Setting the statecfg field is what makes the settings resolver persist
+		// blake3 and re-apply it; calling SetPBinHashSuite alone would be undone by
+		// the resolver's keccak default.
+		statecfg.ExperimentalBinCommitment = true
+		statecfg.BinCommitmentHash = commitment.PBinHashBlake3
+	}
+	commitmentVariant.bin = bin
+	commitmentVariant.prevBin, commitmentVariant.prevHash, commitmentVariant.prevSuite = prevBin, prevHash, prevSuite
+	commitmentVariant.holders = 1
+	return releaseCommitmentVariant, nil
+}
+
+func releaseCommitmentVariant() {
+	commitmentVariant.Lock()
+	defer commitmentVariant.Unlock()
+
+	commitmentVariant.holders--
+	if commitmentVariant.holders > 0 {
+		return
+	}
+	statecfg.ExperimentalBinCommitment, statecfg.BinCommitmentHash = commitmentVariant.prevBin, commitmentVariant.prevHash
+	if err := commitment.SetPBinHashSuite(commitmentVariant.prevSuite); err != nil {
+		panic(err)
+	}
+}
+
 // newTester builds the ExecModuleTester for this block test. tb may be nil for
 // CLI usage, in which case the caller owns the tester's lifecycle and MUST Close it.
 func (bt *BlockTest) newTester(tb testing.TB) (*execmoduletester.ExecModuleTester, error) {
@@ -228,17 +312,8 @@ func (bt *BlockTest) newTester(tb testing.TB) (*execmoduletester.ExecModuleTeste
 	if !ok {
 		return nil, testforks.UnsupportedForkError{Name: bt.json.Network}
 	}
-	if bt.json.Network == testforks.BinaryTree {
-		// The commitment variant and its hash are datadir properties resolved
-		// process-wide, not per-tester options, so they are set here rather than
-		// passed through mOpts. Setting the statecfg field is what makes the
-		// settings resolver persist blake3 and re-apply it; calling
-		// SetPBinHashSuite alone would be undone by the resolver's keccak default.
-		statecfg.ExperimentalBinCommitment = true
-		statecfg.BinCommitmentHash = commitment.PBinHashBlake3
-		if err := commitment.SetPBinHashSuite(commitment.PBinHashBlake3); err != nil {
-			return nil, err
-		}
+	if err := selectCommitmentVariant(tb, bt.json.Network == testforks.BinaryTree); err != nil {
+		return nil, err
 	}
 	engine := rulesconfig.CreateRulesEngineBareBones(context.Background(), config, log.New())
 	mOpts := []execmoduletester.Option{

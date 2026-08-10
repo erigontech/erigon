@@ -18,6 +18,7 @@ package commitment
 
 import (
 	"bytes"
+	"maps"
 	"math/rand"
 	"slices"
 	"testing"
@@ -73,6 +74,7 @@ func (c *pbinTestCorpus) permute(order []int) *pbinTestCorpus {
 		out.plainKeys = append(out.plainKeys, c.plainKeys[i])
 		out.updates = append(out.updates, c.updates[i])
 	}
+	out.codes = maps.Clone(c.codes)
 	return out
 }
 
