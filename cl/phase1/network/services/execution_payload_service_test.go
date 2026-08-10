@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/common"
 )
@@ -39,6 +40,20 @@ func setupExecutionPayloadService(t *testing.T) (ExecutionPayloadService, *mock_
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
 	service := NewExecutionPayloadService(t.Context(), forkchoiceMock, cfg, beaconevents.NewEventEmitter())
 	return service, forkchoiceMock
+}
+
+func setupExecutionPayloadServiceWithoutLoop(t *testing.T) (*executionPayloadService, *mock_services.ForkChoiceStorageMock) {
+	cfg := &clparams.MainnetBeaconConfig
+	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
+	seenCache, err := lru.New[seenEnvelopeKey, struct{}]("seen_envelopes", seenEnvelopeCacheSize)
+	require.NoError(t, err)
+	return &executionPayloadService{
+		forkchoiceStore:    forkchoiceMock,
+		beaconCfg:          cfg,
+		emitters:           beaconevents.NewEventEmitter(),
+		seenEnvelopesCache: seenCache,
+		pendingCond:        sync.NewCond(&sync.Mutex{}),
+	}, forkchoiceMock
 }
 
 func newTestSignedEnvelope(slot uint64, blockRoot common.Hash, builderIndex uint64) *cltypes.SignedExecutionPayloadEnvelope {
@@ -95,6 +110,16 @@ func TestExecutionPayloadServiceBlockNotFound(t *testing.T) {
 	// Note: OnExecutionPayload mock returns nil by default
 	err = service.ProcessMessage(context.Background(), nil, envelope)
 	require.NoError(t, err)
+}
+
+func TestExecutionPayloadServiceNilBeaconBlock(t *testing.T) {
+	impl, fcu := setupExecutionPayloadServiceWithoutLoop(t)
+	blockRoot := common.HexToHash("0x1234")
+	fcu.Blocks[blockRoot] = new(cltypes.SignedBeaconBlock)
+
+	err := impl.ProcessMessage(t.Context(), nil, newTestSignedEnvelope(100, blockRoot, 1))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "nil beacon block")
 }
 
 func TestExecutionPayloadServiceAlreadySeen(t *testing.T) {
@@ -264,10 +289,13 @@ func TestExecutionPayloadServicePendingEnvelopeProcessing(t *testing.T) {
 		blockRoot:    blockRoot,
 		envelopeHash: envelopeHash,
 	}
-	impl.pendingEnvelopes.Store(key, &envelopeJob{
+	job := &envelopeJob{
 		envelope:     envelope,
 		creationTime: time.Now(),
-	})
+	}
+	job.gossip.Store(true)
+	job.validate.Store(true)
+	impl.pendingEnvelopes.Store(key, job)
 	impl.pendingCount.Store(1)
 
 	// Block not yet available - should keep pending
@@ -289,6 +317,48 @@ func TestExecutionPayloadServicePendingEnvelopeProcessing(t *testing.T) {
 
 	// Envelope should be marked as seen
 	require.True(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 1}))
+}
+
+func TestExecutionPayloadServiceRetriesEnvelopeUntilColumnDataAvailable(t *testing.T) {
+	impl, fcu := setupExecutionPayloadServiceWithoutLoop(t)
+	blockRoot := common.HexToHash("0x1234")
+	envelope := newTestSignedEnvelope(100, blockRoot, 1)
+	fcu.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{
+		Block: &cltypes.BeaconBlock{Slot: 100},
+	}
+	fcu.OnExecutionPayloadErr = forkchoice.ErrEIP7594ColumnDataNotAvailable
+
+	err := impl.ProcessMessage(t.Context(), nil, envelope)
+	require.ErrorIs(t, err, ErrIgnore)
+	require.Equal(t, int32(1), impl.pendingCount.Load())
+
+	impl.processPendingEnvelopes(t.Context())
+	require.Equal(t, int32(1), impl.pendingCount.Load())
+
+	fcu.OnExecutionPayloadErr = nil
+	impl.processPendingEnvelopes(t.Context())
+	require.Equal(t, int32(0), impl.pendingCount.Load())
+	require.True(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 1}))
+}
+
+func TestExecutionPayloadServiceRetriesRecoveredEnvelope(t *testing.T) {
+	impl, fcu := setupExecutionPayloadServiceWithoutLoop(t)
+	blockRoot := common.HexToHash("0x1234")
+	envelope := newTestSignedEnvelope(100, blockRoot, 1)
+	fcu.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{
+		Block: &cltypes.BeaconBlock{Slot: 100},
+	}
+	fcu.OnExecutionPayloadErr = forkchoice.ErrEIP7594ColumnDataNotAvailable
+
+	err := impl.ProcessRecoveredEnvelope(t.Context(), envelope, false)
+	require.ErrorIs(t, err, ErrIgnore)
+	require.ErrorIs(t, err, forkchoice.ErrEIP7594ColumnDataNotAvailable)
+	require.Equal(t, int32(1), impl.pendingCount.Load())
+
+	fcu.OnExecutionPayloadErr = nil
+	impl.processPendingEnvelopes(t.Context())
+	require.Equal(t, int32(0), impl.pendingCount.Load())
+	require.False(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 1}))
 }
 
 func TestExecutionPayloadServiceMultiplePendingForSameBlock(t *testing.T) {
@@ -316,14 +386,20 @@ func TestExecutionPayloadServiceMultiplePendingForSameBlock(t *testing.T) {
 	hash2, _ := envelope2.HashSSZ()
 
 	// Add both as pending
-	impl.pendingEnvelopes.Store(pendingEnvelopeKey{blockRoot, hash1}, &envelopeJob{
+	job1 := &envelopeJob{
 		envelope:     envelope1,
 		creationTime: time.Now(),
-	})
-	impl.pendingEnvelopes.Store(pendingEnvelopeKey{blockRoot, hash2}, &envelopeJob{
+	}
+	job1.gossip.Store(true)
+	job1.validate.Store(true)
+	impl.pendingEnvelopes.Store(pendingEnvelopeKey{blockRoot, hash1}, job1)
+	job2 := &envelopeJob{
 		envelope:     envelope2,
 		creationTime: time.Now(),
-	})
+	}
+	job2.gossip.Store(true)
+	job2.validate.Store(true)
+	impl.pendingEnvelopes.Store(pendingEnvelopeKey{blockRoot, hash2}, job2)
 	impl.pendingCount.Store(2)
 
 	// Add block
@@ -367,6 +443,24 @@ func TestExecutionPayloadServicePendingQueueCap(t *testing.T) {
 	require.NoError(t, err)
 	_, exists := impl.pendingEnvelopes.Load(pendingEnvelopeKey{blockRoot, envelopeHash})
 	require.False(t, exists)
+}
+
+func TestExecutionPayloadServicePendingQueueUpgradesRecoveredEnvelope(t *testing.T) {
+	impl, _ := setupExecutionPayloadServiceWithoutLoop(t)
+	blockRoot := common.HexToHash("0x1234")
+	envelope := newTestSignedEnvelope(100, blockRoot, 1)
+	envelopeHash, err := envelope.HashSSZ()
+	require.NoError(t, err)
+
+	impl.queuePendingEnvelopeWithOptions(blockRoot, envelope, true, false)
+	impl.queuePendingEnvelope(blockRoot, envelope)
+
+	value, ok := impl.pendingEnvelopes.Load(pendingEnvelopeKey{blockRoot, envelopeHash})
+	require.True(t, ok)
+	job := value.(*envelopeJob)
+	require.True(t, job.gossip.Load())
+	require.True(t, job.validate.Load())
+	require.Equal(t, int32(1), impl.pendingCount.Load())
 }
 
 func TestExecutionPayloadServicePendingQueueCapConcurrent(t *testing.T) {

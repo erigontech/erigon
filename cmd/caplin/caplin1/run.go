@@ -639,6 +639,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		engine,
 		//gossipManager,
 		forkChoice,
+		executionPayloadService,
 		indexDB,
 		csn,
 		rcsn,

@@ -56,6 +56,8 @@ type pendingEnvelopeKey struct {
 type envelopeJob struct {
 	envelope     *cltypes.SignedExecutionPayloadEnvelope
 	creationTime time.Time
+	gossip       atomic.Bool
+	validate     atomic.Bool
 }
 
 const (
@@ -123,6 +125,14 @@ func (s *executionPayloadService) DecodeGossipMessage(_ peer.ID, data []byte, ve
 // Reference: https://github.com/ethereum/consensus-specs/blob/dev/specs/_features/epbs/p2p-interface.md#execution_payload
 // [New in Gloas:EIP7732]
 func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
+	return s.processEnvelope(ctx, signedEnvelope, false, true, true)
+}
+
+func (s *executionPayloadService) ProcessRecoveredEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, validatePayload bool) error {
+	return s.processEnvelope(ctx, signedEnvelope, true, validatePayload, true)
+}
+
+func (s *executionPayloadService) processEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, recovered, validatePayload, queueOnRetry bool) error {
 	if signedEnvelope == nil || signedEnvelope.Message == nil {
 		return errors.New("nil execution payload envelope")
 	}
@@ -139,20 +149,19 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 	// A client MAY queue payload for processing once the block is retrieved.
 	block, ok := s.forkchoiceStore.GetBlock(beaconBlockRoot)
 	if !ok || block == nil {
-		// Block hasn't arrived yet, queue envelope for later processing
-		s.queuePendingEnvelope(beaconBlockRoot, signedEnvelope)
-		// Also store in forkchoice's pendingEnvelopes so OnBlock can process it immediately
-		// when the block arrives, instead of waiting for the 100ms polling loop.
-		// validatePayload must be true: if the block arrives (via OnBlock) before this call
-		// acquires f.mu, the envelope will be applied with validatePayload — ensuring
-		// NewPayload is sent to the EL. With false, a mutex-contention race silently
-		// marks the envelope as processed without ever notifying the EL, permanently
-		// breaking the chain.
-		s.forkchoiceStore.OnExecutionPayload(ctx, signedEnvelope, false, true)
+		if queueOnRetry {
+			s.queuePendingEnvelopeWithOptions(beaconBlockRoot, signedEnvelope, recovered, validatePayload)
+		}
+		if !recovered {
+			s.forkchoiceStore.OnExecutionPayload(ctx, signedEnvelope, false, true)
+		}
 		log.Trace("Queued execution payload envelope for later processing",
 			"beaconBlockRoot", beaconBlockRoot,
 			"builderIndex", builderIndex)
 		return ErrIgnore
+	}
+	if block.Block == nil {
+		return errors.New("nil beacon block")
 	}
 
 	// [IGNORE] The node has not seen another valid SignedExecutionPayloadEnvelope
@@ -161,27 +170,35 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 		beaconBlockRoot: beaconBlockRoot,
 		builderIndex:    builderIndex,
 	}
-	if s.seenEnvelopesCache.Contains(seenKey) {
+	if !recovered && s.seenEnvelopesCache.Contains(seenKey) {
 		return fmt.Errorf("%w: already seen envelope for block %v from builder %d", ErrIgnore, beaconBlockRoot, builderIndex)
 	}
 
 	// [IGNORE] The envelope is from a slot greater than or equal to the latest finalized slot
-	finalizedSlot := s.forkchoiceStore.FinalizedSlot()
-	if block.Block.Slot < finalizedSlot {
-		return fmt.Errorf("%w: envelope slot %d < finalized slot %d", ErrIgnore, block.Block.Slot, finalizedSlot)
+	if !recovered {
+		finalizedSlot := s.forkchoiceStore.FinalizedSlot()
+		if block.Block.Slot < finalizedSlot {
+			return fmt.Errorf("%w: envelope slot %d < finalized slot %d", ErrIgnore, block.Block.Slot, finalizedSlot)
+		}
 	}
 
 	// Process the execution payload through forkchoice
 	// Note: bid matching and signature verification are done in OnExecutionPayload.validateEnvelopeAgainstBlock
-	if err := s.forkchoiceStore.OnExecutionPayload(ctx, signedEnvelope, true, true); err != nil {
+	if err := s.forkchoiceStore.OnExecutionPayload(ctx, signedEnvelope, true, validatePayload); err != nil {
 		if errors.Is(err, forkchoice.ErrIgnore) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
-			return fmt.Errorf("%w: %v", ErrIgnore, err)
+			if queueOnRetry {
+				s.queuePendingEnvelopeWithOptions(beaconBlockRoot, signedEnvelope, recovered, validatePayload)
+			}
+			return fmt.Errorf("%w: %w", ErrIgnore, err)
 		}
 		return fmt.Errorf("failed to process execution payload: %w", err)
 	}
 
 	// Mark as seen AFTER successful validation
 	// This ensures invalid envelopes (e.g., with forged signatures) don't block valid ones
+	if recovered {
+		return nil
+	}
 	s.seenEnvelopesCache.Add(seenKey, struct{}{})
 
 	// Emit SSE event for execution_payload_available [New in Gloas:EIP7732]
@@ -200,6 +217,10 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 
 // queuePendingEnvelope adds an envelope to the pending queue for later processing
 func (s *executionPayloadService) queuePendingEnvelope(blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) {
+	s.queuePendingEnvelopeWithOptions(blockRoot, envelope, false, true)
+}
+
+func (s *executionPayloadService) queuePendingEnvelopeWithOptions(blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope, recovered, validatePayload bool) {
 	if s.pendingCount.Add(1) > maxPendingEnvelopes {
 		s.pendingCount.Add(-1)
 		return
@@ -218,10 +239,21 @@ func (s *executionPayloadService) queuePendingEnvelope(blockRoot common.Hash, en
 		envelopeHash: envelopeHash,
 	}
 
-	if _, loaded := s.pendingEnvelopes.LoadOrStore(key, &envelopeJob{
+	job := &envelopeJob{
 		envelope:     envelope,
 		creationTime: time.Now(),
-	}); loaded {
+	}
+	job.gossip.Store(!recovered)
+	job.validate.Store(validatePayload)
+	actual, loaded := s.pendingEnvelopes.LoadOrStore(key, job)
+	if loaded {
+		stored := actual.(*envelopeJob)
+		if validatePayload {
+			stored.validate.Store(true)
+		}
+		if !recovered {
+			stored.gossip.Store(true)
+		}
 		s.pendingCount.Add(-1)
 	} else {
 		s.pendingCond.L.Lock()
@@ -290,12 +322,13 @@ func (s *executionPayloadService) processPendingEnvelopes(ctx context.Context) {
 			return true // Block still not here, keep waiting
 		}
 
-		// Block arrived, remove from pending and process
+		err := s.processEnvelope(ctx, job.envelope, !job.gossip.Load(), job.validate.Load(), false)
+		if errors.Is(err, forkchoice.ErrIgnore) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
+			return true
+		}
 		s.pendingEnvelopes.Delete(pendingKey)
 		s.pendingCount.Add(-1)
-
-		// Re-run full validation via ProcessMessage
-		if err := s.ProcessMessage(ctx, nil, job.envelope); err != nil {
+		if err != nil {
 			log.Trace("Failed to process pending envelope", "blockRoot", pendingKey.blockRoot, "err", err)
 		}
 		return true

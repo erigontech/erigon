@@ -157,3 +157,41 @@ func (c *MockExecutionPayloadServiceProcessMessageCall) DoAndReturn(f func(conte
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
+
+// ProcessRecoveredEnvelope mocks base method.
+func (m *MockExecutionPayloadService) ProcessRecoveredEnvelope(arg0 context.Context, arg1 *cltypes.SignedExecutionPayloadEnvelope, arg2 bool) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ProcessRecoveredEnvelope", arg0, arg1, arg2)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// ProcessRecoveredEnvelope indicates an expected call of ProcessRecoveredEnvelope.
+func (mr *MockExecutionPayloadServiceMockRecorder) ProcessRecoveredEnvelope(arg0, arg1, arg2 any) *MockExecutionPayloadServiceProcessRecoveredEnvelopeCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ProcessRecoveredEnvelope", reflect.TypeOf((*MockExecutionPayloadService)(nil).ProcessRecoveredEnvelope), arg0, arg1, arg2)
+	return &MockExecutionPayloadServiceProcessRecoveredEnvelopeCall{Call: call}
+}
+
+// MockExecutionPayloadServiceProcessRecoveredEnvelopeCall wrap *gomock.Call
+type MockExecutionPayloadServiceProcessRecoveredEnvelopeCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockExecutionPayloadServiceProcessRecoveredEnvelopeCall) Return(arg0 error) *MockExecutionPayloadServiceProcessRecoveredEnvelopeCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockExecutionPayloadServiceProcessRecoveredEnvelopeCall) Do(f func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool) error) *MockExecutionPayloadServiceProcessRecoveredEnvelopeCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockExecutionPayloadServiceProcessRecoveredEnvelopeCall) DoAndReturn(f func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool) error) *MockExecutionPayloadServiceProcessRecoveredEnvelopeCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}

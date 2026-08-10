@@ -1,6 +1,8 @@
 package services
 
 import (
+	"context"
+
 	"github.com/erigontech/erigon/cl/cltypes"
 	serviceinterface "github.com/erigontech/erigon/cl/phase1/network/services/service_interface"
 )
@@ -39,7 +41,10 @@ type DataColumnSidecarService serviceinterface.Service[*cltypes.DataColumnSideca
 type AttesterSlashingService serviceinterface.Service[*cltypes.AttesterSlashing]
 
 //go:generate mockgen -typed=true -destination=./mock_services/execution_payload_service_mock.go -package=mock_services . ExecutionPayloadService
-type ExecutionPayloadService serviceinterface.Service[*cltypes.SignedExecutionPayloadEnvelope]
+type ExecutionPayloadService interface {
+	serviceinterface.Service[*cltypes.SignedExecutionPayloadEnvelope]
+	ProcessRecoveredEnvelope(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool) error
+}
 
 //go:generate mockgen -typed=true -destination=./mock_services/execution_payload_bid_service_mock.go -package=mock_services . ExecutionPayloadBidService
 type ExecutionPayloadBidService serviceinterface.Service[*cltypes.SignedExecutionPayloadBid]

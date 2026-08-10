@@ -295,9 +295,23 @@ func fetchAndApplyEnvelopes(ctx context.Context, cfg *Cfg, roots [][32]byte) {
 		log.Debug("[chainTipSync] failed to request GLOAS envelopes", "err", err)
 		return
 	}
-	for _, env := range envelopes {
-		if err := cfg.forkChoice.OnExecutionPayload(ctx, env, true, canRetryGloasPayloads(cfg)); err != nil {
-			log.Debug("[chainTipSync] failed to apply recovered GLOAS envelope", "beaconBlockRoot", env.Message.BeaconBlockRoot, "err", err)
+	applyRecoveredEnvelopes(ctx, cfg, envelopes)
+}
+
+func applyRecoveredEnvelopes(ctx context.Context, cfg *Cfg, envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) {
+	for root, env := range envelopes {
+		if env == nil || env.Message == nil {
+			log.Debug("[chainTipSync] ignoring invalid recovered GLOAS envelope", "beaconBlockRoot", root)
+			continue
+		}
+		var err error
+		if cfg.recoveredEnvelopeProcessor != nil {
+			err = cfg.recoveredEnvelopeProcessor.ProcessRecoveredEnvelope(ctx, env, canRetryGloasPayloads(cfg))
+		} else {
+			err = cfg.forkChoice.OnExecutionPayload(ctx, env, true, canRetryGloasPayloads(cfg))
+		}
+		if err != nil {
+			log.Debug("[chainTipSync] failed to apply recovered GLOAS envelope", "beaconBlockRoot", root, "err", err)
 		}
 	}
 }
