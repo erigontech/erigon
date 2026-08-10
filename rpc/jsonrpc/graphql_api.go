@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	ethapi "github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/filters"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/rpc/transactions"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -72,14 +73,14 @@ type GraphQLAPIImpl struct {
 	returnDataLimit int
 }
 
-func NewGraphQLAPI(base *BaseAPI, db kv.TemporalRoDB, eth EthAPI, txPool txpoolproto.TxpoolClient, gasCap uint64, returnDataLimit int) *GraphQLAPIImpl {
+func NewGraphQLAPI(base *BaseAPI, db kv.TemporalRoDB, eth EthAPI, txPool txpoolproto.TxpoolClient, cfg *rpccfg.GraphQLApiConfig) *GraphQLAPIImpl {
 	return &GraphQLAPIImpl{
 		BaseAPI:         base,
 		db:              db,
 		eth:             eth,
 		txPool:          txPool,
-		gasCap:          gasCap,
-		returnDataLimit: returnDataLimit,
+		gasCap:          cfg.GasCap,
+		returnDataLimit: cfg.ReturnDataLimit,
 	}
 }
 
@@ -272,12 +273,12 @@ func (api *GraphQLAPIImpl) GetAccountInfo(ctx context.Context, address common.Ad
 		return "", 0, "", err
 	}
 
-	if err = api.checkPruneHistory(ctx, tx, blockNum); err != nil {
+	if err := api.checkPruneHistory(ctx, tx, blockNum); err != nil {
 		return "", 0, "", err
 	}
 
 	stateTx := api.filters.WithTemporalOverlay(tx)
-	if err = rpchelper.CheckBlockExecuted(stateTx, blockNum); err != nil {
+	if err := rpchelper.CheckBlockExecuted(stateTx, blockNum); err != nil {
 		return "", 0, "", err
 	}
 
@@ -328,12 +329,12 @@ func (api *GraphQLAPIImpl) GetAccountStorage(ctx context.Context, address common
 		return zeroStorageHash, err
 	}
 
-	if err = api.checkPruneHistory(ctx, tx, blockNum); err != nil {
+	if err := api.checkPruneHistory(ctx, tx, blockNum); err != nil {
 		return zeroStorageHash, err
 	}
 
 	stateTx := api.filters.WithTemporalOverlay(tx)
-	if err = rpchelper.CheckBlockExecuted(stateTx, blockNum); err != nil {
+	if err := rpchelper.CheckBlockExecuted(stateTx, blockNum); err != nil {
 		return zeroStorageHash, err
 	}
 
@@ -413,11 +414,11 @@ func (api *GraphQLAPIImpl) Call(ctx context.Context, blockNumber rpc.BlockNumber
 		return nil, fmt.Errorf("header not found")
 	}
 
-	if err = api.checkPruneHistory(ctx, tx, header.Number.Uint64()); err != nil {
+	if err := api.checkPruneHistory(ctx, tx, header.Number.Uint64()); err != nil {
 		return nil, err
 	}
 
-	if err = rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), header.Number.Uint64()); err != nil {
+	if err := rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), header.Number.Uint64()); err != nil {
 		return nil, err
 	}
 

@@ -25,7 +25,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/golang/snappy"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/ssz"
 )
 
@@ -132,17 +131,6 @@ func GetBitlistLength(b []byte) int {
 	return 8*(len(b)-1) + msb - 1
 }
 
-func ReverseBytes(h *common.Hash) {
-	a := binary.LittleEndian.Uint64(h[0:8])
-	b := binary.LittleEndian.Uint64(h[24:32])
-	binary.LittleEndian.PutUint64(h[0:8], bits.ReverseBytes64(b))
-	binary.LittleEndian.PutUint64(h[24:32], bits.ReverseBytes64(a))
-	a = binary.LittleEndian.Uint64(h[8:16])
-	b = binary.LittleEndian.Uint64(h[16:24])
-	binary.LittleEndian.PutUint64(h[8:16], bits.ReverseBytes64(b))
-	binary.LittleEndian.PutUint64(h[16:24], bits.ReverseBytes64(a))
-}
-
 func FlipBitOn(b []byte, i int) {
 	b[i/8] |= 1 << (i % 8)
 }
@@ -175,7 +163,6 @@ func IsNonStrictSupersetBitlist(a, b []byte) bool {
 func IsOverlappingSSZBitlist(a, b []byte) bool {
 	length := min(len(a), len(b))
 	for i := range length {
-
 		if a[i]&b[i] != 0 {
 			if i != length-1 {
 				return true
@@ -193,7 +180,6 @@ func IsOverlappingSSZBitlist(a, b []byte) bool {
 		}
 	}
 	return false
-
 }
 
 // func IsOverlappingBitlist(a, b []byte) bool {

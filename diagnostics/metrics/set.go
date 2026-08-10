@@ -17,10 +17,10 @@
 package metrics
 
 import (
+	"cmp"
 	"fmt"
 	"reflect"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -63,15 +63,18 @@ func NewSet() *Set {
 }
 
 func (s *Set) Describe(ch chan<- *prometheus.Desc) {
-	lessFunc := func(i, j int) bool {
-		return s.a[i].name < s.a[j].name
+	cmpA := func(a, b *namedMetric) int {
+		return cmp.Compare(a.name, b.name)
+	}
+	cmpAV := func(a, b *namedMetricVec) int {
+		return cmp.Compare(a.name, b.name)
 	}
 	s.mu.Lock()
-	if !sort.SliceIsSorted(s.a, lessFunc) {
-		sort.Slice(s.a, lessFunc)
+	if !slices.IsSortedFunc(s.a, cmpA) {
+		slices.SortFunc(s.a, cmpA)
 	}
-	if !sort.SliceIsSorted(s.av, lessFunc) {
-		sort.Slice(s.av, lessFunc)
+	if !slices.IsSortedFunc(s.av, cmpAV) {
+		slices.SortFunc(s.av, cmpAV)
 	}
 	sa := append([]*namedMetric(nil), s.a...)
 	sav := append([]*namedMetricVec(nil), s.av...)
@@ -85,15 +88,18 @@ func (s *Set) Describe(ch chan<- *prometheus.Desc) {
 }
 
 func (s *Set) Collect(ch chan<- prometheus.Metric) {
-	lessFunc := func(i, j int) bool {
-		return s.a[i].name < s.a[j].name
+	cmpA := func(a, b *namedMetric) int {
+		return cmp.Compare(a.name, b.name)
+	}
+	cmpAV := func(a, b *namedMetricVec) int {
+		return cmp.Compare(a.name, b.name)
 	}
 	s.mu.Lock()
-	if !sort.SliceIsSorted(s.a, lessFunc) {
-		sort.Slice(s.a, lessFunc)
+	if !slices.IsSortedFunc(s.a, cmpA) {
+		slices.SortFunc(s.a, cmpA)
 	}
-	if !sort.SliceIsSorted(s.av, lessFunc) {
-		sort.Slice(s.av, lessFunc)
+	if !slices.IsSortedFunc(s.av, cmpAV) {
+		slices.SortFunc(s.av, cmpAV)
 	}
 	sa := append([]*namedMetric(nil), s.a...)
 	sav := append([]*namedMetricVec(nil), s.av...)

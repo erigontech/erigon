@@ -17,6 +17,7 @@
 package builder
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -182,7 +183,7 @@ func createBlock(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalT
 
 	logger.Info(fmt.Sprintf("[%s] Start building", logPrefix), "block", executionAt+1, "baseFee", header.BaseFee, "gasLimit", header.GasLimit)
 	ibs := state.New(state.NewReaderV3(sd.AsGetter(tx)))
-	defer ibs.Release(false)
+	defer ibs.Close()
 
 	if err = cfg.engine.Prepare(chain, header, ibs); err != nil {
 		logger.Error("Failed to prepare header for building",
@@ -213,7 +214,7 @@ func createBlock(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalT
 	if daoBlock := cfg.chainConfig.DAOForkBlock; daoBlock != nil {
 		// Check whether the block is among the fork extra-override range
 		if header.Number.Uint64() >= *daoBlock && header.Number.Uint64() < *daoBlock+misc.DAOForkExtraRange {
-			header.Extra = common.Copy(misc.DAOForkBlockExtra)
+			header.Extra = bytes.Clone(misc.DAOForkBlockExtra)
 		}
 	}
 

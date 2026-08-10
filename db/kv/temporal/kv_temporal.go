@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/db/datadir"
@@ -186,7 +187,7 @@ func (db *DB) Update(ctx context.Context, f func(tx kv.RwTx) error) error {
 		return err
 	}
 	defer tx.Rollback()
-	if err = f(tx); err != nil {
+	if err := f(tx); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -198,7 +199,7 @@ func (db *DB) UpdateTemporal(ctx context.Context, f func(tx kv.TemporalRwTx) err
 		return err
 	}
 	defer tx.Rollback()
-	if err = f(tx); err != nil {
+	if err := f(tx); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -239,7 +240,7 @@ func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error 
 		return err
 	}
 	defer tx.Rollback()
-	if err = f(tx); err != nil {
+	if err := f(tx); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -257,22 +258,79 @@ func (db *DB) OnFilesChange(onChange, onDel kv.OnFilesChange) {
 }
 
 type tx struct {
-	db               *DB
-	aggtx            *state.AggregatorRoTx
-	blocktx          *blocksnapshots.View
-	resourcesToClose []kv.Closer
-	ctx              context.Context
-	mu               sync.RWMutex
+	db      *DB
+	aggtx   *state.AggregatorRoTx
+	blocktx *blocksnapshots.View
+	ctx     context.Context
+	mu      sync.RWMutex
 }
 
 type Tx struct {
 	kv.Tx
 	tx
+	visibleEnds domainVisibleEnds
 }
 
 type RwTx struct {
 	kv.RwTx
 	tx
+}
+
+type domainVisibleEnds struct {
+	// ends is atomic so a lock-free read can overlap a reset-and-reload of
+	// the same slot without a data race. A torn read (state bit from one
+	// generation, end from another) can only be stale-low, which merely
+	// over-rejects fills: a view's frontier never decreases in a process that
+	// fills a cache — the DB component is frozen at tx begin, and a files
+	// reopen only extends it, an invariant the aggregator enforces once a
+	// fill-enabled cache is wired over it (ForbidVisibilityLowering).
+	ends  [kv.DomainLen]atomic.Uint64
+	mu    sync.Mutex
+	state atomic.Uint32
+}
+
+// state packs two bits per domain into one word so a single atomic load
+// returns a consistent (loaded, ok) pair: loadedBit says ends[domain] is
+// memoized, okBit is the memoized ok answer of DomainVisibleEnd. The array
+// size asserts at compile time that both halves fit in uint32.
+var _ [32 - 2*int(kv.DomainLen)]struct{}
+
+func visibleEndBits(domain kv.Domain) (loadedBit, okBit uint32) {
+	loadedBit = uint32(1) << uint32(domain)
+	return loadedBit, loadedBit << uint32(kv.DomainLen)
+}
+
+func (v *domainVisibleEnds) get(tx *Tx, domain kv.Domain) (uint64, bool) {
+	loadedBit, okBit := visibleEndBits(domain)
+	state := v.state.Load()
+	if state&loadedBit != 0 {
+		return v.ends[domain].Load(), state&okBit != 0
+	}
+	return v.load(tx, domain, loadedBit, okBit)
+}
+
+func (v *domainVisibleEnds) load(tx *Tx, domain kv.Domain, loadedBit, okBit uint32) (uint64, bool) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	state := v.state.Load()
+	if state&loadedBit == 0 {
+		end, ok := tx.aggtx.DomainVisibleEnd(domain, tx.Tx)
+		v.ends[domain].Store(end)
+		state |= loadedBit
+		if ok {
+			state |= okBit
+		}
+		v.state.Store(state)
+	}
+	return v.ends[domain].Load(), state&okBit != 0
+}
+
+// reset takes mu so an in-flight load can't re-store pre-reset bits.
+func (v *domainVisibleEnds) reset() {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.state.Store(0)
 }
 
 func (tx *tx) ForceReopenUnderlyingFilesTx() {
@@ -284,6 +342,13 @@ func (tx *tx) ForceReopenUnderlyingFilesTx() {
 		tx.aggtx.Close()
 	}
 	tx.aggtx = tx.Agg().BeginFilesRo()
+}
+
+// ForceReopenUnderlyingFilesTx swaps in a fresh files view, which can extend
+// the visible frontier — drop the memoized ends so they are re-derived.
+func (tx *Tx) ForceReopenUnderlyingFilesTx() {
+	tx.tx.ForceReopenUnderlyingFilesTx()
+	tx.visibleEnds.reset()
 }
 func (tx *tx) FreezeInfo() kv.FreezeInfo { return tx.aggtx }
 
@@ -300,13 +365,13 @@ func (tx *tx) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) (int, error)
 }
 
 func (tx *tx) Rollback() {
-	tx.autoClose()
+	tx.closeFilesView()
 }
 func (tx *Tx) Rollback() {
 	if tx == nil {
 		return
 	}
-	tx.autoClose()
+	tx.closeFilesView()
 	if tx.Tx == nil { // invariant: it's safe to call Commit/Rollback multiple times
 		return
 	}
@@ -414,7 +479,7 @@ func (tx *RwTx) Rollback() {
 	if tx == nil {
 		return
 	}
-	tx.autoClose()
+	tx.closeFilesView()
 	if tx.RwTx == nil { // invariant: it's safe to call Commit/Rollback multiple times
 		return
 	}
@@ -435,11 +500,10 @@ func (rwtx *RwTx) AsyncClone(asyncTx kv.RwTx) *asyncClone {
 		RwTx{
 			RwTx: asyncTx,
 			tx: tx{
-				db:               rwtx.db,
-				aggtx:            rwtx.aggtx,
-				blocktx:          rwtx.blocktx,
-				resourcesToClose: nil,
-				ctx:              rwtx.ctx,
+				db:      rwtx.db,
+				aggtx:   rwtx.aggtx,
+				blocktx: rwtx.blocktx,
+				ctx:     rwtx.ctx,
 			}}}
 }
 
@@ -453,21 +517,18 @@ func (tx *asyncClone) Commit() error {
 func (tx *asyncClone) Rollback() {
 }
 
-func (tx *tx) autoClose() {
-	for _, closer := range tx.resourcesToClose {
-		closer.Close()
-	}
+func (tx *tx) closeFilesView() {
 	tx.aggtx.Close()
-	if tx.blocktx != nil {
-		tx.blocktx.Close()
-	}
+	tx.aggtx = nil
+	tx.blocktx.Close()
+	tx.blocktx = nil
 }
 
 func (tx *RwTx) Commit() error {
 	if tx == nil {
 		return nil
 	}
-	tx.autoClose()
+	tx.closeFilesView()
 	if tx.RwTx == nil { // invariant: it's safe to call Commit/Rollback multiple times
 		return nil
 	}
@@ -481,7 +542,6 @@ func (tx *tx) rangeAsOf(name kv.Domain, rtx kv.Tx, fromKey, toKey []byte, asOfTs
 	if err != nil {
 		return nil, err
 	}
-	tx.resourcesToClose = append(tx.resourcesToClose, it)
 	return it, nil
 }
 
@@ -573,7 +633,6 @@ func (tx *tx) indexRange(name kv.InvertedIdx, dbTx kv.Tx, k []byte, fromTs, toTs
 	if err != nil {
 		return nil, err
 	}
-	tx.resourcesToClose = append(tx.resourcesToClose, timestamps)
 	return timestamps, nil
 }
 
@@ -590,7 +649,6 @@ func (tx *tx) historyRange(name kv.Domain, dbTx kv.Tx, fromTs, toTs int, asc ord
 	if err != nil {
 		return nil, err
 	}
-	tx.resourcesToClose = append(tx.resourcesToClose, it)
 	return it, nil
 }
 
@@ -607,7 +665,6 @@ func (tx *tx) historyKeyTxNumRange(name kv.Domain, dbTx kv.Tx, fromTs, toTs int,
 	if err != nil {
 		return nil, err
 	}
-	tx.resourcesToClose = append(tx.resourcesToClose, it)
 	return it, nil
 }
 
@@ -675,8 +732,8 @@ func (db *DB) DomainTables(domain ...kv.Domain) []string {
 func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string {
 	return db.stateFiles.InvertedIdxTables(domain...)
 }
-func (db *DB) BuildMissedAccessors(ctx context.Context, workers int) (err error) {
-	return db.stateFiles.BuildMissedAccessors(ctx, workers)
+func (db *DB) BuildMissedAccessors(ctx context.Context, workers int, opts ...kv.BuildAccessorsOption) (err error) {
+	return db.stateFiles.BuildMissedAccessors(ctx, workers, opts...)
 }
 func (db *DB) EnableReadAhead() kv.TemporalDebugDB {
 	db.stateFiles.MadvNormal()
@@ -732,6 +789,12 @@ func (tx *Tx) DomainProgress(domain kv.Domain) uint64 {
 }
 func (tx *RwTx) DomainProgress(domain kv.Domain) uint64 {
 	return tx.aggtx.DomainProgress(domain, tx.RwTx)
+}
+func (tx *Tx) DomainVisibleEnd(domain kv.Domain) (uint64, bool) {
+	return tx.visibleEnds.get(tx, domain)
+}
+func (tx *RwTx) DomainVisibleEnd(domain kv.Domain) (uint64, bool) {
+	return tx.aggtx.DomainVisibleEnd(domain, tx.RwTx)
 }
 func (tx *Tx) IIProgress(domain kv.InvertedIdx) uint64 {
 	return tx.aggtx.IIProgress(domain, tx.Tx)

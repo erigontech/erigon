@@ -393,7 +393,7 @@ func (d *Dirs) RenameNewVersions() error {
 		}
 
 		// removing the rest of vx.y- files (i.e. v1.1- v2.0- etc, unsupported in 3.0)
-		if err = filepath.WalkDir(dirPath, func(path string, dirEntry fs.DirEntry, err error) error {
+		if err := filepath.WalkDir(dirPath, func(path string, dirEntry fs.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}

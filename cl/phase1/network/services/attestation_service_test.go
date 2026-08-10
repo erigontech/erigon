@@ -71,6 +71,7 @@ type attestationTestSuite struct {
 }
 
 func (t *attestationTestSuite) SetupTest() {
+	saveSignatureGlobals(t.T())
 	t.gomockCtrl = gomock.NewController(t.T())
 	t.mockForkChoice = &mock_services.ForkChoiceStorageMock{}
 	_, st, _ := tests.GetBellatrixRandom()

@@ -628,21 +628,21 @@ func randWord() []byte {
 	return word
 }
 
-func generateRandWords() (WORDS [N][]byte, WORD_FLAGS [N]bool, INPUT_FLAGS []int) {
-	WORDS = [N][]byte{}
-	WORD_FLAGS = [N]bool{} // false - uncompressed word, true - compressed word
-	INPUT_FLAGS = []int{}  // []byte or nil input
+func generateRandWords() (words [N][]byte, wordFlags [N]bool, inputFlags []int) {
+	words = [N][]byte{}
+	wordFlags = [N]bool{} // false - uncompressed word, true - compressed word
+	inputFlags = []int{}  // []byte or nil input
 
 	for i := range N - 2 {
-		WORDS[i] = randWord()
+		words[i] = randWord()
 	}
 	// make sure we have at least 2 emtpy []byte
-	WORDS[N-2] = []byte{}
-	WORDS[N-1] = []byte{}
+	words[N-2] = []byte{}
+	words[N-1] = []byte{}
 	return
 }
 
-func prepareRandomDict(t *testing.T) (d *Decompressor, WORDS [N][]byte, WORD_FLAGS [N]bool, INPUT_FLAGS []int) {
+func prepareRandomDict(t *testing.T) (d *Decompressor, words [N][]byte, wordFlags [N]bool, inputFlags []int) {
 	t.Helper()
 	logger := log.New()
 	tmpDir := t.TempDir()
@@ -657,32 +657,32 @@ func prepareRandomDict(t *testing.T) (d *Decompressor, WORDS [N][]byte, WORD_FLA
 	// c.DisableFsync()
 	defer c.Close()
 	rand.Seed(time.Now().UnixNano())
-	WORDS, WORD_FLAGS, INPUT_FLAGS = generateRandWords()
+	words, wordFlags, inputFlags = generateRandWords()
 
 	idx := 0
 	for idx < N {
 		n := rand.Intn(2)
 		switch n {
 		case 0: // input case
-			word := WORDS[idx]
+			word := words[idx]
 			m := rand.Intn(2)
 			if m == 1 {
 				if err = c.AddWord(word); err != nil {
 					t.Fatal(err)
 				}
-				WORD_FLAGS[idx] = true
+				wordFlags[idx] = true
 			} else {
 				if err = c.AddUncompressedWord(word); err != nil {
 					t.Fatal(err)
 				}
 			}
 			idx++
-			INPUT_FLAGS = append(INPUT_FLAGS, n)
+			inputFlags = append(inputFlags, n)
 		case 1: // nil word
 			if err = c.AddWord(nil); err != nil {
 				t.Fatal(err)
 			}
-			INPUT_FLAGS = append(INPUT_FLAGS, n)
+			inputFlags = append(inputFlags, n)
 		default:
 			t.Fatal(fmt.Errorf("case %d\n", n))
 		}
@@ -694,7 +694,7 @@ func prepareRandomDict(t *testing.T) (d *Decompressor, WORDS [N][]byte, WORD_FLA
 	if d, err = NewDecompressor(file); err != nil {
 		t.Fatal(err)
 	}
-	return d, WORDS, WORD_FLAGS, INPUT_FLAGS
+	return d, words, wordFlags, inputFlags
 }
 
 // TestMatchCmpCompressedBinaryKeys tests MatchCmp with binary keys similar to real storage keys.
@@ -772,7 +772,9 @@ func TestMatchCmpCompressedBinaryKeys(t *testing.T) {
 		copy(bigger, k)
 		bigger[len(bigger)-1] = 0xff
 		if bytes.Compare(bigger, k) <= 0 {
-			bigger = append(k, 0xff)
+			bigger = make([]byte, len(k)+1)
+			copy(bigger, k)
+			bigger[len(k)] = 0xff
 		}
 		cmp = g.MatchCmp(bigger)
 		require.Equal(t, 1, cmp, "expected buf > word for key %x vs %x", bigger, k)

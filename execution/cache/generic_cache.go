@@ -18,7 +18,6 @@ package cache
 
 import (
 	"bytes"
-	"math/bits"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -27,10 +26,10 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/elastic/go-freelru"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/cachebudget"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/cache/coherence"
 )
 
@@ -122,17 +121,10 @@ type GenericCache[T any] struct {
 
 func u64identity(k uint64) uint32 { return uint32(k) }
 
-func nextPow2(v uint32) uint32 {
-	if v <= 1 {
-		return 1
-	}
-	return 1 << bits.Len32(v-1)
-}
-
 // initialShardCount starts a lineage at ~64 entries per shard (freelru's own
 // small-cache geometry), bounded by ceil.
 func initialShardCount(capacity, ceil uint32) uint32 {
-	return min(nextPow2(capacity/64), ceil)
+	return min(uint32(math.NextPowerOfTwo(uint64(capacity/64))), ceil)
 }
 
 const (
@@ -189,11 +181,8 @@ func newGenericCacheEntries[T any](capacityBytes datasize.ByteSize, capacityEntr
 		sizeFunc:      sizeFunc,
 	}
 	c.curCap.Store(capacityEntries)
-	c.shardCeil = nextPow2(uint32(runtime.GOMAXPROCS(0) * 16))
+	c.shardCeil = uint32(math.NextPowerOfTwo(uint64(runtime.GOMAXPROCS(0) * 16)))
 	c.shardCount = initialShardCount(capacityEntries, c.shardCeil)
-	// Before any unwind every entry predates the (nonexistent) floor, so all
-	// reads are valid; the floor only drops once an unwind happens.
-	c.coh.Init()
 	c.data.Store(c.newShards(capacityEntries, c.shardCount))
 	return c
 }
@@ -324,14 +313,12 @@ func (c *GenericCache[T]) Get(key []byte) (T, bool) {
 // maxStep — the same coherence the BranchCache read applies for commitment.
 func (c *GenericCache[T]) GetWithTxNum(key []byte) (T, uint64, bool) {
 	h := maphash.Hash(key)
-	// Snapshot coherence before loading the generation: judged against the live
-	// state instead, a Clear landing between the load and the staleness check
-	// re-inits coherence (fresh epoch, lifted floor) and revalidates a dead
-	// entry captured from the retiring generation. Paired with Clear re-initing
-	// only after its swap, an old-generation entry is always judged by a
-	// pre-init snapshot that still carries the unwind. A live entry judged by a
-	// pre-Clear snapshot only degrades to a miss (dropStale re-checks and keeps
-	// it).
+	// Snapshot coherence before loading the generation. Clear publishes the
+	// replacement generation before lifting the unwind floor, so an entry
+	// captured from the retiring generation is always judged by coherence that
+	// still carries its unwind. A replacement-generation entry judged by an old
+	// snapshot can only cause a safe miss because dropStale rechecks the current
+	// generation before removing it.
 	coh := c.coh.Snapshot()
 	lru := c.data.Load()
 	e, ok := lru.Get(h)
@@ -393,9 +380,9 @@ func (c *GenericCache[T]) putStriped(key []byte, value T, txNum uint64, overwrit
 	mu.Lock()
 	defer mu.Unlock()
 
-	// Sample the epoch under the stripe: Clear resets the epoch counter inside
-	// the fence, so a stamp read outside could alias a future epoch and let a
-	// dead-fork entry survive a later unwind.
+	// Sample the epoch under the stripe. Clear holds every stripe across the
+	// generation swap and coherence reset, so the stamp cannot belong to a
+	// different generation from the one where the entry lands.
 	ep := c.coh.Epoch()
 	lru := c.data.Load()
 	existing, hasExisting := lru.Get(h)
@@ -454,7 +441,7 @@ func (c *GenericCache[T]) putStriped(key []byte, value T, txNum uint64, overwrit
 	if hasExisting {
 		lru.Remove(h)
 	}
-	keyCopy := common.Copy(key)
+	keyCopy := bytes.Clone(key)
 	if lru.Add(h, entry[T]{key: keyCopy, val: value, size: newSize, txNum: txNum, epoch: ep}) {
 		c.evictions.Add(1)
 	}
@@ -489,13 +476,12 @@ func (c *GenericCache[T]) dropStale(h uint64, key []byte) {
 	}
 }
 
-// Clear removes all entries from the cache. It also resets the (epoch,
-// unwindFloor) coherence pair: with no entries left, no stale (txNum, epoch)
-// can survive, so a fresh floor keeps subsequent Puts at the live epoch
-// serviceable. Mirrors CodeCache.Clear (which already did this — the two had
-// drifted). The counter reset and the generation swap run with every put
-// stripe held — like maybeGrow's — so a racing put can neither land in the
-// retired generation nor add its size after the reset.
+// Clear removes all entries and restores the starting capacity. It starts an
+// empty coherence generation by advancing the epoch and lifting the unwind
+// floor, so subsequent puts are not constrained by an unwind that belongs to
+// the retired data. The accounting reset, data swap, and coherence reset run
+// with every put stripe held, so a racing writer cannot split those
+// publications.
 func (c *GenericCache[T]) Clear() {
 	// Shrink back to the start size and return the grown budget to the envelope,
 	// keeping the cache adaptive across fork-validation/reset (it regrows on
@@ -515,11 +501,11 @@ func (c *GenericCache[T]) Clear() {
 	c.shardCount = shards
 	c.curCap.Store(c.startCap)
 	c.data.Store(next)
-	// Re-init coherence only after the swap: paired with GetWithTxNum's
-	// snapshot-before-load ordering, an entry captured from the retiring
-	// generation is then always judged by pre-init coherence that still
+	// Reset coherence only after publishing the empty generation. Paired with
+	// GetWithTxNum's snapshot-before-load ordering, this ensures an entry from
+	// the retiring generation is judged by pre-Reset coherence that still
 	// carries the unwind.
-	c.coh.Init()
+	c.coh.Reset()
 	for i := range c.putStripes {
 		c.putStripes[i].Unlock()
 	}

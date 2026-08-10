@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/filters"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/rpc/transactions"
 )
@@ -78,13 +79,13 @@ type blockReplayResult struct {
 }
 
 // NewOverlayAPI returns OverlayAPIImpl instance
-func NewOverlayAPI(base *BaseAPI, db kv.TemporalRoDB, gascap uint64, overlayGetLogsTimeout time.Duration, overlayReplayBlockTimeout time.Duration, otsApi OtterscanAPI) *OverlayAPIImpl {
+func NewOverlayAPI(base *BaseAPI, db kv.TemporalRoDB, cfg *rpccfg.OverlayApiConfig, otsApi OtterscanAPI) *OverlayAPIImpl {
 	return &OverlayAPIImpl{
 		BaseAPI:                   base,
 		db:                        db,
-		GasCap:                    gascap,
-		OverlayGetLogsTimeout:     overlayGetLogsTimeout,
-		OverlayReplayBlockTimeout: overlayReplayBlockTimeout,
+		GasCap:                    cfg.GasCap,
+		OverlayGetLogsTimeout:     cfg.OverlayGetLogsTimeout,
+		OverlayReplayBlockTimeout: cfg.OverlayReplayBlockTimeout,
 		OtsAPI:                    otsApi,
 	}
 }
@@ -165,6 +166,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	}
 
 	statedb := state.New(stateReader)
+	defer statedb.Close()
 
 	header := block.HeaderNoCopy()
 
@@ -220,11 +222,12 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	txCtx = protocol.NewEVMTxContext(msg)
 	ct := OverlayCreateTracer{contractAddress: accounts.InternAddress(address), code: *code, gasCap: api.GasCap}
 	evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{Tracer: ct.Tracer().Hooks})
+	ct.evm = evm
 
 	// Execute the transaction message
 	_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, api.engine())
 	if ct.err != nil {
-		return nil, err
+		return nil, ct.err
 	}
 
 	resultCode := &CreationCode{}
@@ -302,9 +305,7 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 	threads := min(runtime.NumCPU(), int(numBlocks))
 	jobs := make(chan *blockReplayTask, threads)
 	for range threads {
-		pend.Add(1)
-		go func() {
-			defer pend.Done()
+		pend.Go(func() {
 			tx, err := api.db.BeginTemporalRo(ctx)
 			if err != nil {
 				log.Error("Error", "error", err)
@@ -325,26 +326,27 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 					continue
 				}
 				statedb := state.New(stateReader)
-
-				if stateOverride != nil {
-					err = stateOverride.Override(statedb, nil, rules)
+				func() {
+					defer statedb.Close()
+					if stateOverride != nil {
+						if err := stateOverride.Override(statedb, nil, rules); err != nil {
+							results[task.idx] = &blockReplayResult{BlockNumber: task.BlockNumber, Error: err.Error()}
+							return
+						}
+					}
+					blockLogs, err := api.replayBlock(ctx, uint64(blockNumber), statedb, chainConfig, tx)
 					if err != nil {
 						results[task.idx] = &blockReplayResult{BlockNumber: task.BlockNumber, Error: err.Error()}
-						continue
+						return
 					}
-				}
-				blockLogs, err := api.replayBlock(ctx, uint64(blockNumber), statedb, chainConfig, tx)
-				if err != nil {
-					results[task.idx] = &blockReplayResult{BlockNumber: task.BlockNumber, Error: err.Error()}
-					continue
-				}
-				log.Debug("[GetLogs]", "len(blockLogs)", len(blockLogs))
-				logs := filterLogs(blockLogs, crit.Addresses, crit.Topics)
-				log.Debug("[GetLogs]", "len(logs)", len(logs))
+					log.Debug("[GetLogs]", "len(blockLogs)", len(blockLogs))
+					logs := filterLogs(blockLogs, crit.Addresses, crit.Topics)
+					log.Debug("[GetLogs]", "len(logs)", len(logs))
 
-				results[task.idx] = &blockReplayResult{BlockNumber: task.BlockNumber, Logs: logs}
+					results[task.idx] = &blockReplayResult{BlockNumber: task.BlockNumber, Logs: logs}
+				}()
 			}
-		}()
+		})
 	}
 
 	hasOverrides := false

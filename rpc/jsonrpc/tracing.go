@@ -112,6 +112,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 	if err != nil {
 		return err
 	}
+	defer ibs.Close()
 
 	var precompiles vm.PrecompiledContracts
 	if config.BlockOverrides != nil {
@@ -307,6 +308,7 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 	if err != nil {
 		return err
 	}
+	defer ibs.Close()
 
 	var precompiles vm.PrecompiledContracts
 	if config != nil {
@@ -404,6 +406,7 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 		return fmt.Errorf("block %d(%x) not found", blockNumber, hash)
 	}
 	ibs := state.New(stateReader)
+	defer ibs.Close()
 
 	baseFee, err := overrideBaseFee(config, header.BaseFee)
 	if err != nil {
@@ -521,6 +524,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 	}
 
 	ibs := state.New(stateReader)
+	defer ibs.Close()
 
 	getHash := transactions.MakeBlockHashProvider(ctx, tx, api._blockReader, overrideBlockHash)
 
@@ -552,7 +556,8 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 		bundle.BlockOverride.OverrideBlockContext(&blockCtx, overrideBlockHash)
 		// do not reset ibs, because we want to keep the overrides and state change
 		// ibs.Reset()
-		for txnIndex, txn := range bundle.Transactions {
+		for txnIndex := range bundle.Transactions {
+			txn := &bundle.Transactions[txnIndex]
 			if txn.Gas == nil || *(txn.Gas) == 0 {
 				txn.Gas = (*hexutil.Uint64)(&api.GasCap)
 			}

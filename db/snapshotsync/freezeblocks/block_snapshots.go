@@ -198,13 +198,16 @@ func (br *BlockRetire) borSnapshots() *heimdall.RoSnapshots {
 	return br.blockReader.BorSnapshots().(*heimdall.RoSnapshots)
 }
 
-func CanRetire(curBlockNum uint64, blocksInSnapshots uint64, snapType snaptype.Enum, snCfg *snapcfg.Cfg) (blockFrom, blockTo uint64, can bool) {
-	var keep uint64 = dbg.MaxReorgDepth
+func (br *BlockRetire) canRetire(curBlockNum uint64, blocksInSnapshots uint64, snapType snaptype.Enum) (blockFrom, blockTo uint64, can bool) {
+	//
+	// TODO(milen): finalisedHash check
+	//
+	keep := br.config.MaxReorgDepth
 	if curBlockNum <= keep {
 		return
 	}
 	blockFrom = blocksInSnapshots + 1
-	return snapshotsync.CanRetire(blockFrom, curBlockNum-keep, snapType, snCfg)
+	return snapshotsync.CanRetire(blockFrom, curBlockNum-keep, snapType, br.snCfg, br.config.Snapshot.E2RetireStep)
 }
 
 func CanDeleteTo(curBlockNum uint64, blocksInSnapshots uint64) (blockTo uint64) {
@@ -270,8 +273,7 @@ func (br *BlockRetire) buildFiles(
 	notifier, logger, blockReader, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, br.workers.Load()
 	snapshots := br.snapshots()
 
-	blockFrom, blockTo, ok := CanRetire(maxBlockNum, minBlockNum, snaptype.Unknown, br.snCfg)
-
+	blockFrom, blockTo, ok := br.canRetire(maxBlockNum, minBlockNum, snaptype.Unknown)
 	if ok {
 		if has, err := br.dbHasEnoughDataForBlocksRetire(ctx); err != nil {
 			return false, err
@@ -279,7 +281,7 @@ func (br *BlockRetire) buildFiles(
 			return false, nil
 		}
 		logger.Log(lvl, "[snapshots] Retire Blocks", "range",
-			fmt.Sprintf("%s-%s", common.PrettyCounter(blockFrom), common.PrettyCounter(blockTo)))
+			fmt.Sprintf("%s-%s", common.PrettyExact(blockFrom), common.PrettyExact(blockTo)))
 		// in future we will do it in background
 		if err := DumpBlocks(ctx, blockFrom, blockTo, br.chainConfig, tmpDir, snapshots.Dir(), db, int(workers), lvl, logger, blockReader, br.snCfg, &snapshots.BaseRoSnapshots); err != nil {
 			return ok, fmt.Errorf("DumpBlocks: %w", err)
@@ -323,12 +325,12 @@ func (br *BlockRetire) MergeBlocks(
 
 		return seeder.Seed(ctx, mergedFileNames)
 	}
-	if err = merger.Merge(ctx, &snapshots.BaseRoSnapshots, snapshots.Types(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, seeder.Delete); err != nil {
+	if err := merger.Merge(ctx, &snapshots.BaseRoSnapshots, snapshots.Types(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, seeder.Delete); err != nil {
 		return false, err
 	}
 
 	// remove old garbage files
-	if err = snapshots.RemoveOverlaps(func(l []string) error {
+	if err := snapshots.RemoveOverlaps(func(l []string) error {
 		return seeder.Delete(ctx, l)
 	}); err != nil {
 		return false, err
@@ -800,12 +802,16 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 		parsers.SetLimit(workers)
 
 		valueBufs := make([][]byte, workers)
-
+		rawBufs := make([]*[16 * 4096]byte, workers)
 		for i := 0; i < workers; i++ {
-			valueBuf := bufPool.Get().(*[16 * 4096]byte)
-			defer bufPool.Put(valueBuf)
-			valueBufs[i] = valueBuf[:]
+			rawBufs[i] = bufPool.Get().(*[16 * 4096]byte)
+			valueBufs[i] = rawBufs[i][:]
 		}
+		defer func() {
+			for _, buf := range rawBufs {
+				bufPool.Put(buf)
+			}
+		}()
 
 		if err := addSystemTx(tx, body.BaseTxnID); err != nil {
 			return false, err
@@ -867,9 +873,9 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 			if lvl >= log.LvlInfo {
 				var m runtime.MemStats
 				dbg.ReadMemStats(&m)
-				logger.Log(lvl, "[snapshots] Dumping txs", "block num", blockNum, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+				logger.Log(lvl, "[snapshots] Dumping txs", "blockNum", blockNum, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 			} else {
-				logger.Log(lvl, "[snapshots] Dumping txs", "block num", blockNum)
+				logger.Log(lvl, "[snapshots] Dumping txs", "blockNum", blockNum)
 			}
 		default:
 		}
@@ -954,7 +960,7 @@ func DumpHeadersRaw(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom,
 			if lvl >= log.LvlInfo {
 				dbg.ReadMemStats(&m)
 			}
-			logger.Log(lvl, "[snapshots] Dumping headers", "block num", blockNum,
+			logger.Log(lvl, "[snapshots] Dumping headers", "blockNum", blockNum,
 				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 			)
 		default:
@@ -1036,7 +1042,7 @@ func DumpBodies(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blo
 			if lvl >= log.LvlInfo {
 				dbg.ReadMemStats(&m)
 			}
-			logger.Log(lvl, "[snapshots] Wrote into file", "block num", blockNum,
+			logger.Log(lvl, "[snapshots] Wrote into file", "blockNum", blockNum,
 				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 			)
 		default:

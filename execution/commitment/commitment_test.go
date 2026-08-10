@@ -22,7 +22,7 @@ import (
 	"encoding/binary"
 	"math/bits"
 	"math/rand"
-	"sort"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -44,7 +44,7 @@ func (n *noopPatriciaContext) Account(plainKey []byte) (*Update, error) { return
 func (n *noopPatriciaContext) Storage(plainKey []byte) (*Update, error) { return nil, nil }
 func (n *noopPatriciaContext) TxNum() uint64                            { return 0 }
 
-func noopCtxFactory() (PatriciaContext, func()) {
+func noopCtxFactory(context.Context) (PatriciaContext, func()) {
 	return &noopPatriciaContext{}, nil
 }
 
@@ -89,7 +89,7 @@ func (g *gatedPatriciaContext) TxNum() uint64                                 { 
 // batch resets while the rest run fast, so the producer's arena reset races its in-flight reads.
 func slowCtxFactory(stall time.Duration) TrieContextFactory {
 	var n atomic.Int32
-	return func() (PatriciaContext, func()) {
+	return func(context.Context) (PatriciaContext, func()) {
 		if n.Add(1) == 1 {
 			return &gatedPatriciaContext{sleep: stall, descend: true}, nil
 		}
@@ -100,7 +100,7 @@ func slowCtxFactory(stall time.Duration) TrieContextFactory {
 // gatedCtxFactory returns a factory whose contexts signal entered then block on
 // release inside Branch, for deterministic single-worker ordering tests.
 func gatedCtxFactory(entered, release chan struct{}) TrieContextFactory {
-	return func() (PatriciaContext, func()) {
+	return func(context.Context) (PatriciaContext, func()) {
 		return &gatedPatriciaContext{entered: entered, release: release}, nil
 	}
 }
@@ -218,7 +218,7 @@ func TestHashSort_WarmupLap(t *testing.T) {
 // first key) while every other worker runs fast, so exactly one ring slot stays occupied.
 func gatedStragglerFactory(entered, release chan struct{}) TrieContextFactory {
 	var n atomic.Int32
-	return func() (PatriciaContext, func()) {
+	return func(context.Context) (PatriciaContext, func()) {
 		if n.Add(1) == 1 {
 			return &gatedPatriciaContext{entered: entered, release: release}, nil
 		}
@@ -505,7 +505,7 @@ func TestBranchData_ReplacePlainKeys(t *testing.T) {
 
 	_, _, enc := encodeCellRow(t, 16)
 
-	original := common.Copy(enc)
+	original := bytes.Clone(enc)
 
 	target := make([]byte, 0, len(enc))
 	oldKeys := make([][]byte, 0)
@@ -529,7 +529,7 @@ func TestBranchData_ReplacePlainKeys(t *testing.T) {
 	require.EqualValues(t, original, replacedBack)
 
 	t.Run("merge replaced and original back", func(t *testing.T) {
-		orig := common.Copy(original)
+		orig := bytes.Clone(original)
 
 		merged, err := replaced.MergeHexBranches(original, nil)
 		require.NoError(t, err)
@@ -546,7 +546,7 @@ func TestBranchData_ReplacePlainKeys_WithEmpty(t *testing.T) {
 
 	_, _, enc := encodeCellRow(t, 16)
 
-	original := common.Copy(enc)
+	original := bytes.Clone(enc)
 
 	target := make([]byte, 0, len(enc))
 	oldKeys := make([][]byte, 0)
@@ -570,7 +570,7 @@ func TestBranchData_ReplacePlainKeys_WithEmpty(t *testing.T) {
 	require.EqualValues(t, original, replacedBack)
 
 	t.Run("merge replaced and original back", func(t *testing.T) {
-		orig := common.Copy(original)
+		orig := bytes.Clone(original)
 
 		merged, err := replaced.MergeHexBranches(original, nil)
 		require.NoError(t, err)
@@ -589,7 +589,7 @@ func TestBranchData_ReplacePlainKeys_PartialChange(t *testing.T) {
 
 	_, _, enc := encodeCellRow(t, 16)
 
-	original := common.Copy(enc)
+	original := bytes.Clone(enc)
 
 	// Collect original keys and shorten only account keys.
 	type keyRecord struct {
@@ -597,10 +597,10 @@ func TestBranchData_ReplacePlainKeys_PartialChange(t *testing.T) {
 		isStorage bool
 	}
 	var origKeys []keyRecord
-	replaced, err := BranchData(common.Copy(enc)).ReplacePlainKeys(
+	replaced, err := BranchData(bytes.Clone(enc)).ReplacePlainKeys(
 		make([]byte, 0, len(enc)),
 		func(key []byte, isStorage bool) ([]byte, error) {
-			origKeys = append(origKeys, keyRecord{common.Copy(key), isStorage})
+			origKeys = append(origKeys, keyRecord{bytes.Clone(key), isStorage})
 			if isStorage {
 				return nil, nil // keep original
 			}
@@ -689,8 +689,8 @@ func TestUpdates_TouchPlainKey(t *testing.T) {
 	for _, v := range uniqUpds {
 		sortedUniqUpds = append(sortedUniqUpds, v)
 	}
-	sort.Slice(sortedUniqUpds, func(i, j int) bool {
-		return bytes.Compare(sortedUniqUpds[i].key, sortedUniqUpds[j].key) < 0
+	slices.SortFunc(sortedUniqUpds, func(a, b tc) int {
+		return bytes.Compare(a.key, b.key)
 	})
 
 	sz := utUpdate.Size()
@@ -746,7 +746,7 @@ func (r *recordingCtx) Branch(_ []byte) ([]byte, kv.Step, error) {
 }
 func (r *recordingCtx) PutBranch(prefix, data, prev []byte) error {
 	r.puts = append(r.puts, struct{ prefix, data, prev []byte }{
-		common.Copy(prefix), common.Copy(data), common.Copy(prev),
+		bytes.Clone(prefix), bytes.Clone(data), bytes.Clone(prev),
 	})
 	return nil
 }

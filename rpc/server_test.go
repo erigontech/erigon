@@ -22,12 +22,13 @@ package rpc
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -121,8 +122,8 @@ func runTestScript(t *testing.T, file string, logger log.Logger) {
 			sent = strings.TrimRight(sent, "\r\n")
 			msgs, batch, _ := parseMessage(json.RawMessage(sent))
 			if batch {
-				sort.Slice(msgs, func(i, j int) bool {
-					return string(msgs[i].ID) < string(msgs[j].ID)
+				slices.SortFunc(msgs, func(a, b *jsonrpcMessage) int {
+					return cmp.Compare(string(a.ID), string(b.ID))
 				})
 				b, err := json.Marshal(msgs)
 				if err != nil {
@@ -130,8 +131,8 @@ func runTestScript(t *testing.T, file string, logger log.Logger) {
 				}
 				sent = string(b)
 				msgs, _, _ = parseMessage(json.RawMessage(want))
-				sort.Slice(msgs, func(i, j int) bool {
-					return string(msgs[i].ID) < string(msgs[j].ID)
+				slices.SortFunc(msgs, func(a, b *jsonrpcMessage) int {
+					return cmp.Compare(string(a.ID), string(b.ID))
 				})
 				b, err = json.Marshal(msgs)
 				if err != nil {

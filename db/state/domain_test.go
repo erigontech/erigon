@@ -18,6 +18,7 @@ package state
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
@@ -30,9 +31,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -102,6 +101,15 @@ func testDbAndDomainOfStep(t *testing.T, domainCfg statecfg.DomainCfg, aggStep u
 	return db, d
 }
 
+// requireFileNameMatches asserts the file name shape - base, step range and
+// extension - without pinning the schema version, which bumps independently.
+func requireFileNameMatches(t *testing.T, path, mask string) {
+	t.Helper()
+	matched, err := filepath.Match(mask, filepath.Base(path))
+	require.NoError(t, err)
+	require.Truef(t, matched, "%s does not match %s", path, mask)
+}
+
 func TestDomain_CollationBuild(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -147,7 +155,7 @@ func TestDomain_OpenFolder(t *testing.T) {
 
 	scanDirsRes, err := scanDirs(d.dirs)
 	require.NoError(t, err)
-	err = d.openFolder(t.Context(), scanDirsRes)
+	_, err = d.openFolder(t.Context(), scanDirsRes)
 	require.NoError(t, err)
 	d.Close()
 }
@@ -215,10 +223,9 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 		c, err := d.collate(ctx, 0, 0, 16, tx)
 
 		require.NoError(t, err)
-		require.True(t, strings.HasSuffix(c.valuesPath, "v2.0-accounts.0-1.kv"))
+		requireFileNameMatches(t, c.valuesPath, d.kvFileNameMask(0, 1))
 		require.Equal(t, 2, c.valuesCount)
-		require.True(t, strings.HasSuffix(c.historyPath, "v2.0"+
-			"-accounts.0-1.v"))
+		requireFileNameMatches(t, c.historyPath, d.History.vFileNameMask(0, 1))
 
 		require.Equal(t, seg.WordsAmount2PagesAmount(3, d.CompressorCfg.ValuesOnCompressedPage), 1) // 16 valus per page
 		require.Equal(t, 3, c.historyComp.Count())                                                  // no compression on collate
@@ -618,7 +625,7 @@ func checkDomainFileSortedKeyOrder(t *testing.T, dt *DomainRoTx) {
 					"file %d [%d-%d) pair %d: key %x not > prevKey %x",
 					i, f.startTxNum, f.endTxNum, pairIdx, key, prevKey)
 			}
-			prevKey = common.Copy(key)
+			prevKey = bytes.Clone(key)
 			if r.HasNext() {
 				r.Skip() // skip value
 			}
@@ -854,7 +861,8 @@ func TestDomain_ScanFiles(t *testing.T) {
 	d.closeWhatNotInList([]string{})
 	scanDirsRes, err := scanDirs(d.dirs)
 	require.NoError(t, err)
-	require.NoError(t, d.openFolder(t.Context(), scanDirsRes))
+	_, err = d.openFolder(t.Context(), scanDirsRes)
+	require.NoError(t, err)
 
 	// Check the history
 	checkHistory(t, db, d, txs)
@@ -917,7 +925,7 @@ func TestDomainRoTx_CursorParentCheck(t *testing.T) {
 	defer writer.Close()
 
 	val := []byte("value1")
-	writer.addValue([]byte("key1"), val, kv.Step(1/d.stepSize))
+	require.NoError(writer.addValue([]byte("key1"), val, kv.Step(1/d.stepSize)))
 
 	err = writer.Flush(ctx, tx)
 	require.NoError(err)
@@ -1109,7 +1117,7 @@ func TestNewSegStreamReader(t *testing.T) {
 		if prevK != nil {
 			require.Negative(t, bytes.Compare(prevK, k))
 		}
-		prevK = common.Copy(k)
+		prevK = bytes.Clone(k)
 
 		require.NoError(t, err)
 		require.NotEmpty(t, v)
@@ -1366,7 +1374,7 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 
 	scanDirsRes, err := scanDirs(dom.dirs)
 	require.NoError(t, err)
-	err = dom.openFolder(t.Context(), scanDirsRes)
+	_, err = dom.openFolder(t.Context(), scanDirsRes)
 
 	require.NoError(t, err)
 
@@ -1511,9 +1519,9 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	c, err := d.collate(ctx, 0, 0, maxTx, tx)
 
 	require.NoError(t, err)
-	require.True(t, strings.HasSuffix(c.valuesPath, "v2.0-accounts.0-1.kv"))
+	requireFileNameMatches(t, c.valuesPath, d.kvFileNameMask(0, 1))
 	require.Equal(t, 3, c.valuesCount)
-	require.True(t, strings.HasSuffix(c.historyPath, "v2.0-accounts.0-1.v"))
+	requireFileNameMatches(t, c.historyPath, d.History.vFileNameMask(0, 1))
 
 	require.Equal(t, seg.WordsAmount2PagesAmount(int(3*maxTx), d.CompressorCfg.ValuesOnCompressedPage), 469) // because 646 values at one page
 	require.Equal(t, int(3*maxTx), c.historyComp.Count())                                                    // no compression on collate
@@ -1760,7 +1768,7 @@ func generateRandomKey(r *rndGen, size uint64) string {
 
 func generateRandomKeyBytes(r *rndGen, size uint64) []byte {
 	key := make([]byte, size)
-	r.Read(key)
+	_, _ = r.Read(key)
 	return key
 }
 
@@ -1774,13 +1782,13 @@ func generateUpdates(r *rndGen, totalTx, keyTxsLimit uint64) []upd {
 
 		if r.Rand.IntN(100) < 85 || i == keyTxsLimit-1 { // 15% rate for delete, last tx is never a deletion
 			up.value = make([]byte, 10)
-			r.Read(up.value)
+			_, _ = r.Read(up.value)
 		}
 
 		updates = append(updates, up)
 		usedTxNums[txNum] = true
 	}
-	sort.Slice(updates, func(i, j int) bool { return updates[i].txNum < updates[j].txNum })
+	slices.SortFunc(updates, func(a, b upd) int { return cmp.Compare(a.txNum, b.txNum) })
 
 	return updates
 }
@@ -1830,7 +1838,7 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 			if i > 0 {
 				pv = updates[i-1].value
 			}
-			writer.PutWithPrev([]byte(key), updates[i].value, updates[i].txNum, pv)
+			require.NoError(writer.PutWithPrev([]byte(key), updates[i].value, updates[i].txNum, pv))
 		}
 	}
 
@@ -2019,8 +2027,8 @@ func TestDomain_CanScanPruneAfterAggregation(t *testing.T) {
 	for key, updates := range data {
 		p := []byte{}
 		for i := range updates {
-			writer.PutWithPrev([]byte(key), updates[i].value, updates[i].txNum, p)
-			p = common.Copy(updates[i].value)
+			require.NoError(t, writer.PutWithPrev([]byte(key), updates[i].value, updates[i].txNum, p))
+			p = bytes.Clone(updates[i].value)
 		}
 	}
 
@@ -2120,8 +2128,8 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 	for key, updates := range data {
 		p := []byte{}
 		for i := range updates {
-			writer.PutWithPrev([]byte(key), updates[i].value, updates[i].txNum, p)
-			p = common.Copy(updates[i].value)
+			require.NoError(t, writer.PutWithPrev([]byte(key), updates[i].value, updates[i].txNum, p))
+			p = bytes.Clone(updates[i].value)
 		}
 	}
 
@@ -2163,73 +2171,6 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 		require.Equalf(t, updates[len(updates)-1].value, v, "key %x latest", []byte(key))
 		require.True(t, ok)
 	}
-}
-
-func TestPruneProgress(t *testing.T) {
-	t.Parallel()
-
-	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 25, log.New())
-	defer db.Close()
-	defer d.Close()
-
-	latestKey := []byte("682c02b93b63aeb260eccc33705d584ffb5f0d4c")
-
-	t.Run("reset", func(t *testing.T) {
-		tx, err := db.BeginRw(t.Context())
-		require.NoError(t, err)
-		defer tx.Rollback()
-		err = SaveExecV3PruneProgress(tx, kv.TblAccountVals, latestKey)
-		require.NoError(t, err)
-		key, err := GetExecV3PruneProgress(tx, kv.TblAccountVals)
-		require.NoError(t, err)
-		require.Equalf(t, latestKey, key, "key %x", key)
-
-		err = SaveExecV3PruneProgress(tx, kv.TblAccountVals, nil)
-		require.NoError(t, err)
-
-		key, err = GetExecV3PruneProgress(tx, kv.TblAccountVals)
-		require.NoError(t, err)
-		require.Nil(t, key)
-	})
-
-	t.Run("someKey and reset", func(t *testing.T) {
-		tx, err := db.BeginRw(t.Context())
-		require.NoError(t, err)
-		defer tx.Rollback()
-		err = SaveExecV3PruneProgress(tx, kv.TblAccountVals, latestKey)
-		require.NoError(t, err)
-
-		key, err := GetExecV3PruneProgress(tx, kv.TblAccountVals)
-		require.NoError(t, err)
-		require.Equal(t, latestKey, key)
-
-		err = SaveExecV3PruneProgress(tx, kv.TblAccountVals, nil)
-		require.NoError(t, err)
-
-		key, err = GetExecV3PruneProgress(tx, kv.TblAccountVals)
-		require.NoError(t, err)
-		require.Nil(t, key)
-	})
-
-	t.Run("emptyKey and reset", func(t *testing.T) {
-		tx, err := db.BeginRw(t.Context())
-		require.NoError(t, err)
-		defer tx.Rollback()
-		expected := []byte{}
-		err = SaveExecV3PruneProgress(tx, kv.TblAccountVals, expected)
-		require.NoError(t, err)
-
-		key, err := GetExecV3PruneProgress(tx, kv.TblAccountVals)
-		require.NoError(t, err)
-		require.Equal(t, expected, key)
-
-		err = SaveExecV3PruneProgress(tx, kv.TblAccountVals, nil)
-		require.NoError(t, err)
-
-		key, err = GetExecV3PruneProgress(tx, kv.TblAccountVals)
-		require.NoError(t, err)
-		require.Nil(t, key)
-	})
 }
 
 // TestDomain_PruneProgress tests rolling-cursor progress tracking in domain.prune.
@@ -2552,7 +2493,7 @@ func TestDomain_Unwind(t *testing.T) {
 		currTx = unwindTo
 		require.NoError(t, err)
 		domainRoTx.Close()
-		tx.Commit()
+		require.NoError(t, tx.Commit())
 
 		t.Log("=====write expected data===== \n\n")
 		tmpDb, expected := testDbAndDomain(t, log.New())
@@ -2906,8 +2847,8 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 	for key, updates := range data {
 		p := []byte{}
 		for i := range updates {
-			writer.PutWithPrev([]byte(key), updates[i].value, updates[i].txNum, p)
-			p = common.Copy(updates[i].value)
+			require.NoError(t, writer.PutWithPrev([]byte(key), updates[i].value, updates[i].txNum, p))
+			p = bytes.Clone(updates[i].value)
 		}
 	}
 
@@ -3120,8 +3061,8 @@ func TestCommitmentDomain_DebugRangeLatest(t *testing.T) {
 				binary.BigEndian.PutUint64(k[:], keyNum)
 				binary.BigEndian.PutUint64(v[:], valNum)
 				err = writer.PutWithPrev(k[:], v[:], txNum, prev[keyNum])
-				prev[keyNum] = common.Copy(v[:])
-				keysLatest[string(k[:])] = common.Copy(v[:])
+				prev[keyNum] = bytes.Clone(v[:])
+				keysLatest[string(k[:])] = bytes.Clone(v[:])
 				require.NoError(t, err)
 			}
 		}
@@ -3230,7 +3171,7 @@ func TestDomain_DebugRangeLatestFromFiles(t *testing.T) {
 				binary.BigEndian.PutUint64(k[:], keyNum)
 				binary.BigEndian.PutUint64(v[:], txNum)
 				err = writer.PutWithPrev(k[:], v[:], txNum, prev[keyNum])
-				prev[keyNum] = common.Copy(v[:])
+				prev[keyNum] = bytes.Clone(v[:])
 				fileKeyNums[keyNum] = true
 				require.NoError(t, err)
 			}

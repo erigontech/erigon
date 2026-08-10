@@ -17,6 +17,7 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -99,7 +100,7 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account common.Ad
 		if err != nil {
 			return nil, err
 		}
-		keys = append(keys, common.Copy(k[20:]))
+		keys = append(keys, bytes.Clone(k[20:]))
 	}
 	return keys, nil
 }

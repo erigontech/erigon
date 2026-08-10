@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -75,7 +76,7 @@ func newOverlayAheadTestAPIWithEvents(t *testing.T) (base *BaseAPI, m *execmodul
 	cfg.LondonBlock = common.NewUint64(0)
 	m = execmoduletester.New(t, execmoduletester.WithChainConfig(&cfg))
 
-	c, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, overlayRaceChainSize, func(i int, gen *blockgen.BlockGen) {
+	c, err := m.GenerateChain(overlayRaceChainSize, func(i int, gen *blockgen.BlockGen) {
 		gen.SetCoinbase(common.Address{1})
 	})
 	require.NoError(t, err)
@@ -292,7 +293,7 @@ func TestGetBlockTransactionCountByHash_PinsOverlayView(t *testing.T) {
 func TestGetRawHeader_PinsOverlayView(t *testing.T) {
 	t.Parallel()
 	base, m, overlayHeader := newOverlayUnpublishTestAPI(t)
-	api := NewPrivateDebugAPI(base, m.DB, nil, 0, false)
+	api := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
 
 	header, err := api.GetRawHeader(m.Ctx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(overlayHeader.Number.Uint64())))
 	require.NoError(t, err)
@@ -307,7 +308,7 @@ func TestGetRawHeader_PinsOverlayView(t *testing.T) {
 func TestDebugAccountAt_OverlayHeadHash_CommittedView(t *testing.T) {
 	t.Parallel()
 	base, m, overlayHeader := newOverlayAheadTestAPI(t)
-	api := NewPrivateDebugAPI(base, m.DB, nil, 0, false)
+	api := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
 
 	result, err := api.AccountAt(m.Ctx, overlayHeader.Hash(), 0, m.Address)
 	require.NoError(t, err, "an in-flight (uncommitted) head hash must read as unknown, not error")

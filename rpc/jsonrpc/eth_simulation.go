@@ -388,12 +388,9 @@ func (s *simulator) sanitizeCall(
 		// Default to remaining block gas, but capped by the node's effective gas cap.
 		remaining := min(blockContext.GasLimit-gasUsed, effectiveCap)
 		args.Gas = (*hexutil.Uint64)(&remaining)
-	} else {
-		// Cap user-specified gas against the node's gas cap.
-		if globalGasCap > 0 && globalGasCap < uint64(*args.Gas) {
-			log.Warn("Caller gas above allowance, capping", "requested", args.Gas, "cap", globalGasCap)
-			args.Gas = (*hexutil.Uint64)(&globalGasCap)
-		}
+	} else if globalGasCap > 0 && globalGasCap < uint64(*args.Gas) {
+		log.Warn("Caller gas above allowance, capping", "requested", args.Gas, "cap", globalGasCap)
+		args.Gas = (*hexutil.Uint64)(&globalGasCap)
 	}
 	if gasUsed+uint64(*args.Gas) > blockContext.GasLimit {
 		return blockGasLimitReachedError(fmt.Sprintf("block gas limit reached: %d >= %d", gasUsed, blockContext.GasLimit))
@@ -545,6 +542,7 @@ func (s *simulator) simulateBlock(
 		return nil, nil, err
 	}
 	intraBlockState := state.New(stateReader)
+	defer intraBlockState.Close()
 
 	// Create a custom block context and apply any custom block overrides
 	blockCtx := transactions.NewEVMBlockContextWithOverrides(ctx, s.engine, header, tx, s.newSimulatedCanonicalReader(ancestors), s.chainConfig,
@@ -593,8 +591,9 @@ func (s *simulator) simulateBlock(
 
 	stateWriter := newDiffTrackingWriter(sharedDomains.AsPutDel(tx), minTxNum)
 	callResults := make([]CallResult, 0, len(bsc.Calls))
-	for callIndex, call := range bsc.Calls {
-		callResult, txn, receipt, err := s.simulateCall(ctx, blockCtx, intraBlockState, callIndex, &call, header,
+	for callIndex := range bsc.Calls {
+		call := &bsc.Calls[callIndex]
+		callResult, txn, receipt, err := s.simulateCall(ctx, blockCtx, intraBlockState, callIndex, call, header,
 			&cumulativeGasUsed, &cumulativeBlobGasUsed, tracer, vmConfig, activePrecompiles)
 		if err != nil {
 			return nil, nil, err

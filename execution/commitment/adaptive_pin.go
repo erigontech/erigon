@@ -21,6 +21,7 @@ import (
 	"encoding/hex"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
 )
@@ -40,11 +41,11 @@ type AdaptivePinControllerConfig struct {
 func DefaultAdaptivePinControllerConfig() AdaptivePinControllerConfig {
 	return AdaptivePinControllerConfig{
 		PromoteThresholdMisses:    100,
-		MaxPromotedContracts:      8,
+		MaxPromotedContracts:      4,
 		DemoteCooldownBlocks:      5,
-		InitialViewBudgetBytes:    4 << 20,
-		ExtensionBudgetBytes:      8 << 20,
-		PerContractMaxBudgetBytes: 64 << 20,
+		InitialViewBudgetBytes:    4 * 1024 * 1024,
+		ExtensionBudgetBytes:      8 * 1024 * 1024,
+		PerContractMaxBudgetBytes: 32 * 1024 * 1024,
 	}
 }
 
@@ -111,23 +112,24 @@ func (s *adaptiveContractState) pinnedPrefixes() [][]byte {
 }
 
 func NewAdaptivePinController(cache *BranchCache, cfg AdaptivePinControllerConfig, logger log.Logger) *AdaptivePinController {
+	def := DefaultAdaptivePinControllerConfig()
 	if cfg.InitialViewBudgetBytes <= 0 {
-		cfg.InitialViewBudgetBytes = 4 << 20
+		cfg.InitialViewBudgetBytes = def.InitialViewBudgetBytes
 	}
 	if cfg.ExtensionBudgetBytes <= 0 {
-		cfg.ExtensionBudgetBytes = 8 << 20
+		cfg.ExtensionBudgetBytes = def.ExtensionBudgetBytes
 	}
 	if cfg.PerContractMaxBudgetBytes <= 0 {
-		cfg.PerContractMaxBudgetBytes = 64 << 20
+		cfg.PerContractMaxBudgetBytes = def.PerContractMaxBudgetBytes
 	}
 	if cfg.MaxPromotedContracts <= 0 {
-		cfg.MaxPromotedContracts = 8
+		cfg.MaxPromotedContracts = def.MaxPromotedContracts
 	}
 	if cfg.DemoteCooldownBlocks <= 0 {
-		cfg.DemoteCooldownBlocks = 5
+		cfg.DemoteCooldownBlocks = def.DemoteCooldownBlocks
 	}
 	if cfg.PromoteThresholdMisses == 0 {
-		cfg.PromoteThresholdMisses = 100
+		cfg.PromoteThresholdMisses = def.PromoteThresholdMisses
 	}
 	return &AdaptivePinController{
 		cache:  cache,
@@ -299,12 +301,15 @@ func (c *AdaptivePinController) promoteLocked(
 		if provider != nil {
 			dbBranches = provider(hash[:])
 		}
+		started := time.Now()
 		if _, _, err := p.Run(c.cfg.InitialViewBudgetBytes, dbBranches, parallelResolve, c.cache, c.logger); err != nil {
+			recordPreload(started, 0)
 			for _, prefix := range p.PinnedPrefixes() {
 				c.cache.Invalidate(prefix)
 			}
 			return nil, err
 		}
+		recordPreload(started, p.usedBytes)
 		return &adaptiveContractState{
 			contractHash:    hash,
 			promotedAtTxNum: txNum,
@@ -316,12 +321,15 @@ func (c *AdaptivePinController) promoteLocked(
 		return nil, err
 	}
 	p.pinTxNum = txNum
+	started := time.Now()
 	if _, _, err := p.Run(c.cfg.InitialViewBudgetBytes, reader, c.cache, c.logger); err != nil {
+		recordPreload(started, 0)
 		for _, prefix := range p.PinnedPrefixes() {
 			c.cache.Invalidate(prefix)
 		}
 		return nil, err
 	}
+	recordPreload(started, p.usedBytes)
 	return &adaptiveContractState{
 		contractHash:    hash,
 		promotedAtTxNum: txNum,
@@ -350,11 +358,15 @@ func (c *AdaptivePinController) runExtensionLocked(
 			dbBranches = provider(state.contractHash[:])
 		}
 		state.parallel.pinTxNum = txNum
+		before, started := state.parallel.usedBytes, time.Now()
 		_, _, err := state.parallel.Run(stepBudget, dbBranches, parallelResolve, c.cache, c.logger)
+		recordPreload(started, state.parallel.usedBytes-before)
 		return err
 	}
 	state.preload.pinTxNum = txNum
+	before, started := state.preload.usedBytes, time.Now()
 	_, _, err := state.preload.Run(stepBudget, reader, c.cache, c.logger)
+	recordPreload(started, state.preload.usedBytes-before)
 	return err
 }
 

@@ -174,16 +174,42 @@ func TestDefaultGraffiti(t *testing.T) {
 		a := &ApiHandler{engine: engine, version: "1.2.3"}
 		var wg sync.WaitGroup
 		for range 16 {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				_ = a.defaultGraffiti()
-			}()
+			})
 		}
 		wg.Wait() // returns while the engine call is still blocked, proving proposals never block on it
 		close(release)
 		require.Eventually(t, func() bool {
 			return graffitiText(a.defaultGraffiti()) == "GEc3d4"+caplinClientCode+clCommit
 		}, time.Second, time.Millisecond)
+	})
+
+	// A proposal that reads the cache as empty and only then wins the fetch slot must
+	// not fetch again: the fetch it raced against may have populated the cache and
+	// released the slot in between.
+	t.Run("a proposal racing a completing fetch does not fetch again", func(t *testing.T) {
+		for range 200 {
+			ctrl := gomock.NewController(t)
+			engine := execution_client.NewMockExecutionEngine(ctrl)
+			engine.EXPECT().GetClientVersionV1(gomock.Any(), gomock.Any()).
+				Return([]engine_types.ClientVersionV1{{Code: "GE", Commit: "0xc3d4e5f6"}}, nil).
+				Times(1)
+
+			a := &ApiHandler{engine: engine, version: "1.2.3"}
+			var wg sync.WaitGroup
+			for range 8 {
+				wg.Go(func() {
+					for range 50 {
+						_ = a.defaultGraffiti()
+					}
+				})
+			}
+			wg.Wait()
+			// Let the fetch goroutine finish before the mock controller is checked.
+			require.Eventually(t, func() bool {
+				return a.elClientVersion.Load() != nil && !a.elClientVersionFetching.Load()
+			}, 200*time.Millisecond, time.Millisecond)
+		}
 	})
 }

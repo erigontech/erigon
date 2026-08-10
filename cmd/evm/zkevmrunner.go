@@ -151,14 +151,12 @@ func runZkevmTestsParallel(root string, files []string, re *regexp.Regexp, tm *t
 	close(fileCh)
 
 	for range workers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for item := range fileCh {
 				r, err := runZkevmTestFile(root, item.fname, re, tm)
 				resultCh <- fileResult{index: item.index, results: r, err: err}
 			}
-		}()
+		})
 	}
 	go func() {
 		wg.Wait()
@@ -250,8 +248,8 @@ func runWitnessTest(test *testutil.WitnessBlockTest) error {
 		return fmt.Errorf("commit commitment history flag: %w", err)
 	}
 
-	baseApi := jsonrpc.NewBaseApi(nil, m.StateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0, 0)
-	debugApi := jsonrpc.NewPrivateDebugAPI(baseApi, m.DB, nil, 0, false)
+	baseApi := jsonrpc.NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, nil, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
+	debugApi := jsonrpc.NewPrivateDebugAPI(baseApi, m.DB, nil, rpccfg.DefaultDebugApiConfig())
 	canonicalMode := "canonical"
 
 	for i := 0; i < test.NumBlocks(); i++ {

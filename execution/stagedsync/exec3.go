@@ -348,7 +348,7 @@ func ExecV3(ctx context.Context,
 		// serial and parallel paths uniformly.
 		if cfg.badBlockHalt && dbg.BadBlockHalt {
 			logger.Error(fmt.Sprintf("[%s] BAD_BLOCK_HALT: halting on invalid block (debug mode, no commit)", execStage.LogPrefix()), "err", execErr)
-			os.Exit(1)
+			os.Exit(1) //nolint:gocritic // exitAfterDefer: intentional process halt without running deferred rollback to preserve state
 		}
 		return execErr
 	}
@@ -416,6 +416,16 @@ type txExecutor struct {
 	enableChaosMonkey bool
 }
 
+// A wrong root under fork validation means a payload the CL offered was rejected,
+// which is the answer the CL asked for, not a fault of this node.
+func (te *txExecutor) logWrongTrieRoot(msg string) {
+	if te.isForkValidation {
+		te.logger.Warn(msg)
+		return
+	}
+	te.logger.Error(msg)
+}
+
 func (te *txExecutor) readState() *state.StateV3Buffered {
 	return te.rs
 }
@@ -458,7 +468,7 @@ func (te *txExecutor) getHeader(ctx context.Context, hash common.Hash, number ui
 // receipts are absent (block then left not receipts-complete).
 func (te *txExecutor) reconstructPriorReceipts(ctx context.Context, applyTx kv.TemporalTx, header *types.Header, txs types.Transactions, startTxIndex int, blockStartTxNum uint64) (types.Receipts, error) {
 	priorIbs := state.New(state.NewHistoryReaderV3(applyTx, blockStartTxNum))
-	defer priorIbs.Release(true)
+	defer priorIbs.Close()
 	priorGp := protocol.NewGasPool(header.GasLimit, te.cfg.chainConfig.GetMaxBlobGasPerBlock(header.Time))
 	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
 		return te.cfg.blockReader.Header(ctx, applyTx, hash, number)
@@ -470,10 +480,10 @@ func (te *txExecutor) reconstructPriorReceipts(ctx context.Context, applyTx kv.T
 	return priorReceipts, nil
 }
 
-func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHash common.Hash) {
+func (te *txExecutor) onBlockStart(ctx context.Context, block *types.Block) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			te.logger.Warn("hook paniced: %s", rec, "stack", dbg.Stack())
+			te.logger.Warn("hook panicked", "panic", rec, "stack", dbg.Stack())
 		}
 	}()
 
@@ -481,6 +491,8 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 		return
 	}
 
+	blockNum := block.NumberU64()
+	blockHash := block.Hash()
 	if blockHash == (common.Hash{}) {
 		te.logger.Warn("hooks ignored: zero block hash")
 		return
@@ -488,29 +500,17 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 
 	if blockNum == 0 {
 		if te.hooks.OnGenesisBlock != nil {
-			var b *types.Block
-			if err := te.applyTx.Apply(ctx, func(tx kv.Tx) (err error) {
-				b, err = te.cfg.blockReader.BlockByHash(ctx, tx, blockHash)
-				return err
-			}); err != nil {
-				te.logger.Warn("hook: OnGenesisBlock: abandoned", "err", err)
-			}
-			te.hooks.OnGenesisBlock(b, te.cfg.genesis.Alloc)
+			te.hooks.OnGenesisBlock(block, te.cfg.genesis.Alloc)
 		}
 	} else {
 		if te.hooks.OnBlockStart != nil {
-			var b *types.Block
 			var td *uint256.Int
 			var finalized *types.Header
 			var safe *types.Header
 
 			if err := te.applyTx.Apply(ctx, func(tx kv.Tx) (err error) {
-				b, err = te.cfg.blockReader.BlockByHash(ctx, tx, blockHash)
-				if err != nil {
-					return err
-				}
-				chainReader := exec.NewChainReader(te.cfg.chainConfig, te.applyTx, te.cfg.blockReader, te.logger)
-				td = chainReader.GetTd(b.ParentHash(), b.NumberU64()-1)
+				chainReader := exec.NewChainReader(te.cfg.chainConfig, tx, te.cfg.blockReader, te.logger)
+				td = chainReader.GetTd(block.ParentHash(), blockNum-1)
 				finalized = chainReader.CurrentFinalizedHeader()
 				safe = chainReader.CurrentSafeHeader()
 				return nil
@@ -519,7 +519,7 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 			}
 
 			te.hooks.OnBlockStart(tracing.BlockEvent{
-				Block:     b,
+				Block:     block,
 				TD:        td,
 				Finalized: finalized,
 				Safe:      safe,
@@ -528,7 +528,15 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 	}
 }
 
-func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, maxBlockNum uint64, blockLimit uint64, initialTxNum uint64, inputTxNum uint64, readAhead chan uint64, initialCycle bool, applyResults chan applyResult, blockRequests chan *blockRequest, commitResults ...chan applyResult) error {
+func blockAccessListBytes(blockTx kv.Getter, block *types.Block, blockNum uint64) ([]byte, error) {
+	data := block.BlockAccessList()
+	if len(data) == 0 && block.HeaderNoCopy().HasNonEmptyBAL() {
+		return rawdb.ReadBlockAccessListBytes(blockTx, block.Hash(), blockNum)
+	}
+	return data, nil
+}
+
+func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, maxBlockNum uint64, blockLimit uint64, initialTxNum uint64, inputTxNum uint64, readAhead chan uint64, initialCycle bool, applyResults chan applyResult, blockRequests chan *blockRequest, commitResults chan applyResult) error {
 	if te.execLoopGroup == nil {
 		return errors.New("no exec group")
 	}
@@ -601,7 +609,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			}
 			b, ok := te.cfg.readAheader.ReadBlockWithSenders(canonicalHash)
 			if b == nil || !ok {
-				b, err = exec.BlockWithSenders(ctx, te.cfg.db, blockTx, te.cfg.blockReader, blockNum)
+				b, _, err = te.cfg.blockReader.BlockWithSenders(ctx, blockTx, canonicalHash, blockNum)
 			}
 			if err != nil {
 				return err
@@ -612,10 +620,14 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			go warmTxsHashes(b)
 
 			var dbBAL types.BlockAccessList
-			// Read BAL through blockTx (overlay or execRoTx) — do NOT open
-			// a separate db.View() as it can deadlock with the stageloop's
-			// RW transaction when BlockOverlay is active.
-			data, err := rawdb.ReadBlockAccessListBytes(blockTx, b.Hash(), blockNum)
+			// Prefer the BAL carried on the block (the payload) — the newPayload /
+			// backward-sync paths attach it, so no read is needed. Fall back to the
+			// BAL sidecar in the DB (via blockTx: overlay or execRoTx) for blocks
+			// that don't carry it (snapshot / forward-sync); do NOT open a separate
+			// db.View() as it can deadlock with the stageloop's RW transaction when
+			// BlockOverlay is active. ProcessBAL still computes+validates the BAL
+			// from the write-set as the ultimate fallback.
+			data, err := blockAccessListBytes(blockTx, b, blockNum)
 			if err != nil {
 				return err
 			}
@@ -628,9 +640,19 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 					return fmt.Errorf("invalid block access list: %w", err)
 				}
 			}
+			header := b.HeaderNoCopy()
+			if dbBAL == nil && !dbg.IgnoreBAL && te.cfg.chainConfig.IsAmsterdam(header.Time) && header.HasBAL() {
+				te.logger.Debug("executing block without a BAL", "blockNum", blockNum)
+			}
+			if dbg.TraceBALFeed {
+				if dbBAL != nil {
+					fmt.Printf("BAL-FEED blk=%d bytes=%d accounts=%d\n", blockNum, len(data), len(dbBAL))
+				} else if te.cfg.chainConfig.IsAmsterdam(header.Time) {
+					fmt.Printf("BAL-MISSING blk=%d bytes=%d\n", blockNum, len(data))
+				}
+			}
 
 			txs := b.Transactions()
-			header := b.HeaderNoCopy()
 
 			// BlockContext: workers override GetHash with their own per-worker
 			// function (installWorkerGetHash) using their own roTx. The
@@ -685,10 +707,6 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			if shouldMarkExhaustedAtBlock(initialCycle, lastExecutedStep, lastFrozenStep, dbg.DiscardCommitment(), blockLimit, blockNum, startBlockNum, maxBlockNum) {
 				exhausted = &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block limit reached"}
 			}
-			var commitCh chan applyResult
-			if len(commitResults) > 0 {
-				commitCh = commitResults[0]
-			}
 			// Heads-up to the commitment calculator, ahead of the block's
 			// txResult/blockResult stream and on its own channel. inputTxNum
 			// has been advanced past this block's tasks by the loop above,
@@ -709,9 +727,15 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 				}
 			}
 			select {
-			case te.execRequests <- &execRequest{b.NumberU64(), b.Hash(),
-				protocol.NewGasPool(b.GasLimit(), te.cfg.chainConfig.GetMaxBlobGasPerBlock(b.Time())),
-				dbBAL, txTasks, applyResults, commitCh, false, exhausted}:
+			case te.execRequests <- &execRequest{
+				block:         b,
+				gasPool:       protocol.NewGasPool(b.GasLimit(), te.cfg.chainConfig.GetMaxBlobGasPerBlock(b.Time())),
+				accessList:    dbBAL,
+				tasks:         txTasks,
+				applyResults:  applyResults,
+				commitResults: commitResults,
+				exhausted:     exhausted,
+			}:
 			case <-ctx.Done():
 				return ctx.Err()
 			}

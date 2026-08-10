@@ -83,24 +83,25 @@ indicies:
 
 // WriteBlobSidecars writes the sidecars on the database. it assumes that all blobSidecars are for the same blockRoot and we have all of them.
 func (bs *BlobStore) WriteBlobSidecars(ctx context.Context, blockRoot common.Hash, blobSidecars []*cltypes.BlobSidecar) error {
-
 	for _, blobSidecar := range blobSidecars {
 		folderPath, filePath := blobSidecarFilePath(
 			blobSidecar.SignedBlockHeader.Header.Slot,
-			blobSidecar.Index, blockRoot)
+			blobSidecar.Index, blockRoot,
+		)
 		// mkdir the whole folder and subfolders
-		bs.fs.MkdirAll(folderPath, 0755)
+		bs.fs.MkdirAll(folderPath, 0o755)
 		// create the file
 		file, err := bs.fs.Create(filePath)
 		if err != nil {
 			return err
 		}
-		defer file.Close()
-
-		if err := ssz_snappy.EncodeAndWrite(file, blobSidecar); err != nil {
-			return err
-		}
-		if err := file.Sync(); err != nil {
+		if err := func() error {
+			defer file.Close()
+			if err := ssz_snappy.EncodeAndWrite(file, blobSidecar); err != nil {
+				return err
+			}
+			return file.Sync()
+		}(); err != nil {
 			return err
 		}
 	}
@@ -145,10 +146,15 @@ func (bs *BlobStore) ReadBlobSidecars(ctx context.Context, slot uint64, blockRoo
 			}
 			return nil, false, err
 		}
-		defer file.Close()
-
-		blobSidecar := &cltypes.BlobSidecar{}
-		if err := ssz_snappy.DecodeAndReadNoForkDigest(file, blobSidecar, clparams.DenebVersion); err != nil {
+		blobSidecar, err := func() (*cltypes.BlobSidecar, error) {
+			defer file.Close()
+			blobSidecar := &cltypes.BlobSidecar{}
+			if err := ssz_snappy.DecodeAndReadNoForkDigest(file, blobSidecar, clparams.DenebVersion); err != nil {
+				return nil, err
+			}
+			return blobSidecar, nil
+		}()
+		if err != nil {
 			return nil, false, err
 		}
 		blobSidecars = append(blobSidecars, blobSidecar)
@@ -185,6 +191,7 @@ func (bs *BlobStore) BlobSidecarExists(ctx context.Context, slot uint64, blockRo
 	}
 	return true, nil
 }
+
 func (bs *BlobStore) WriteStream(w io.Writer, slot uint64, blockRoot common.Hash, idx uint64) error {
 	_, filePath := blobSidecarFilePath(slot, idx, blockRoot)
 	file, err := bs.fs.Open(filePath)
@@ -304,9 +311,7 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 	var errAtomic atomic.Value
 	var wg sync.WaitGroup
 	for _, sds := range storableSidecars {
-		wg.Add(1)
-		go func(sds *sidecarsPayload) {
-			defer wg.Done()
+		wg.Go(func() {
 			blobs := make([]*goethkzg.Blob, len(sds.sidecars))
 			for i, sidecar := range sds.sidecars {
 				blobs[i] = (*goethkzg.Blob)(&sidecar.Blob)
@@ -329,7 +334,7 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 				inserted.Add(uint64(len(sds.sidecars)))
 			}
 
-		}(sds)
+		})
 	}
 	wg.Wait()
 	if err := errAtomic.Load(); err != nil {

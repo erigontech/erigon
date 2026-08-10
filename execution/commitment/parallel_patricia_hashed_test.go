@@ -86,14 +86,14 @@ func TestParallelPatriciaHashedSkeletonPlumbing(t *testing.T) {
 
 		ms := NewMockState(t)
 		called := 0
-		f := func() (PatriciaContext, func()) {
+		f := func(context.Context) (PatriciaContext, func()) {
 			called++
 			return ms, func() {}
 		}
 		p.SetTrieContextFactory(f)
 		require.NotNil(t, p.trieCtxFactory)
 
-		got, cleanup := p.trieCtxFactory()
+		got, cleanup := p.trieCtxFactory(context.Background())
 		assert.Same(t, ms, got)
 		assert.NotNil(t, cleanup)
 		assert.Equal(t, 1, called)
@@ -124,6 +124,24 @@ func TestParallelPatriciaHashedSkeletonReset(t *testing.T) {
 	p.Reset()
 	assert.Nil(t, p.rootHash.Load(), "Reset clears rootHash")
 	require.NotNil(t, p.template, "Reset preserves the template")
+}
+
+// Every checkout must be config-correct whether it hit the shared pool or
+// constructed fresh — that fungibility is what lets workers cross instances.
+func TestWorkerCheckoutAppliesConfig(t *testing.T) {
+	cfg := DefaultTrieConfig()
+	cfg.MemoizationOff = true
+
+	stale := NewHexPatriciaHashed(2*length.Addr, nil, DefaultTrieConfig())
+	stale.Release()
+
+	for range 2 {
+		w := NewHexPatriciaHashed(length.Addr, nil, cfg)
+		assert.Equal(t, int16(length.Addr), w.accountKeyLen)
+		assert.True(t, w.memoizationOff)
+		assert.Equal(t, cfg, w.cfg)
+		w.Release()
+	}
 }
 
 func TestParallelPatriciaHashedSkeletonRelease(t *testing.T) {
@@ -870,6 +888,53 @@ func runIncremental(t *testing.T, mode runMode, workers int, k1 [][]byte, u1 []U
 func requireIncrementalEquiv(t *testing.T, k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update, workers int) {
 	t.Helper()
 	requireAllEnginesParity(t, k1, u1, k2, u2, workers)
+}
+
+// Folds two batches on ONE trie instance with the per-block Reset + SetState
+// lifecycle in between, so batch-2 runs on workers cached by batch-1.
+func reusedInstanceIncrementalRoot(t *testing.T, variant TrieVariant, workers int, k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update) []byte {
+	t.Helper()
+	ctx := context.Background()
+	ms := NewMockState(t)
+	ms.SetConcurrentCommitment(true)
+
+	cfg := DefaultTrieConfig()
+	cfg.Variant = variant
+	trie, ut := InitializeTrieAndUpdates(ModeDirect, t.TempDir(), cfg)
+	defer ut.Close()
+	defer trie.Release()
+	pt := trie.(*ParallelPatriciaHashed)
+	pt.SetNumWorkers(workers)
+	pt.SetTrieContextFactory(mockTrieCtxFactory(ms))
+	pt.ResetContext(ms)
+
+	process := func(keys [][]byte, upds []Update) ([]byte, []byte) {
+		require.NoError(t, ms.applyPlainUpdates(keys, upds))
+		WrapKeyUpdatesInto(t, ut, keys, upds)
+		root, err := pt.Process(ctx, ut, "", nil, WarmupConfig{})
+		require.NoError(t, err)
+		blob, err := pt.RootTrie().EncodeCurrentState(nil)
+		require.NoError(t, err)
+		return bytes.Clone(root), blob
+	}
+
+	_, blob := process(k1, u1)
+	pt.Reset()
+	require.NoError(t, pt.RootTrie().SetState(blob))
+	root2, _ := process(k2, u2)
+	return root2
+}
+
+func TestParallelReuseAcrossResetParity(t *testing.T) {
+	t.Parallel()
+	k1, u1 := genRandomAccountsStorage(256)
+	k2, u2 := sparseBatch2(k1, 3, false)
+	seqRoot, _ := incrementalRoot(t, modeSeq, 0, k1, u1, k2, u2)
+
+	for _, variant := range []TrieVariant{VariantParallelHexPatricia, VariantStreamingHexPatricia} {
+		root := reusedInstanceIncrementalRoot(t, variant, 8, k1, u1, k2, u2)
+		require.Equalf(t, seqRoot, root, "reused-instance %s incremental root vs sequential", variant)
+	}
 }
 
 func TestVerifyParallel_WideNested(t *testing.T) {

@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"bytes"
 	"context"
 	"sync"
 	"sync/atomic"
@@ -10,7 +11,6 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -29,6 +29,7 @@ type BlockReadAheader struct {
 	headers *lru.Cache[common.Hash, *types.Header]
 	bodies  *lru.Cache[common.Hash, *types.Body]
 	senders *lru.Cache[common.Hash, []byte] // just do raw senders
+	bals    *lru.Cache[common.Hash, []byte]
 
 	// this is for warming state
 	warming atomic.Bool // only one warmBody can run at a time
@@ -56,10 +57,15 @@ func NewBlockReadAheader() *BlockReadAheader {
 	if err != nil {
 		panic(err)
 	}
+	bals, err := lru.New[common.Hash, []byte](4)
+	if err != nil {
+		panic(err)
+	}
 	return &BlockReadAheader{
 		headers: headers,
 		bodies:  bodies,
 		senders: senders,
+		bals:    bals,
 	}
 }
 
@@ -72,68 +78,34 @@ func (bra *BlockReadAheader) SetStateCache(sc *cache.StateCache) {
 	bra.stateCache = sc
 }
 
-// cachePopulatingGetter wraps a kv.TemporalGetter and writes successful
-// reads through to a cache.StateCache as a side effect. Used by warmBody
-// to make read-ahead prefetches populate the same in-process cache layer
-// that SharedDomains.GetLatest consults — eliminating the file-accessor
-// stack cost on the EVM's first touch of any prefetched address.
+// cachePopulatingGetter wraps a kv.TemporalGetter and fills a StateCache
+// ReadView as a side effect. Used by warmBody to make read-ahead prefetches
+// populate the same in-process cache layer that SharedDomains.GetLatest
+// consults — eliminating the file-accessor stack cost on the EVM's first
+// touch of any prefetched address.
 //
-// For the CodeDomain the wrapper also populates the codeHashToCode
-// (codeHash→bytes) + size-cache layers via PutCodeWithHashIfAbsent, keyed by
-// the code's own keccak hash so every cached pair is self-consistent.
+// Code reads also populate the content-addressed and size-cache layers.
 type cachePopulatingGetter struct {
-	g        kv.TemporalGetter
-	sc       *cache.StateCache
-	progress func(kv.Domain) uint64 // domain progress source for stamping negative fills
-	stepSize uint64                 // for the read txNum upper bound (last txNum of the read's step)
+	kv.TemporalGetter
+	view     cache.ReadView
+	stepSize uint64 // for the read txNum upper bound (last txNum of the read's step)
 }
 
-func newCachePopulatingGetter(tx kv.TemporalTx, sc *cache.StateCache) *cachePopulatingGetter {
-	debug := tx.Debug()
-	return &cachePopulatingGetter{g: tx, sc: sc, progress: debug.DomainProgress, stepSize: debug.StepSize()}
+func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache) kv.TemporalGetter {
+	if sc == nil {
+		return ttx
+	}
+	debug := ttx.Debug()
+	return &cachePopulatingGetter{TemporalGetter: ttx, view: sc.View(debug), stepSize: debug.StepSize()}
 }
 
 func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte) ([]byte, kv.Step, error) {
-	v, step, err := cpg.g.GetLatest(name, k)
-	if err == nil && cpg.sc != nil {
-		// If-absent writes only: this runs in a fire-and-forget goroutine over a
-		// committed snapshot, so an unconditional Put racing an FCU flush's
-		// cache-apply could replace the flushed value with the pre-flush one.
-		if name == kv.CodeDomain && len(v) > 0 {
-			// Key the content cache by the code's OWN hash, never a separately
-			// read account codeHash: under parallel/speculative exec that hash
-			// can be skewed or cross-account, and a (hash, code) pair that
-			// doesn't satisfy keccak(code)==hash poisons every account sharing
-			// the hash. keccak(v) makes each entry self-consistent.
-			cpg.sc.PutCodeWithHashIfAbsent(k, v, crypto.Keccak256(v), (uint64(step)+1)*cpg.stepSize-1)
-		} else {
-			// Cache including nil/empty results: a probe returning no
-			// bytes is a valid negative answer (missing account, empty
-			// storage slot; empty code lands here too but CodeCache drops
-			// zero-length puts) and caching it lets repeated probes
-			// skip the file accessor stack. Mirrors revm's CacheAccount
-			// { account: None, status: LoadedNotExisting } pattern.
-			// Stamp with an upper bound on the value's write txNum (last txNum
-			// of the step it came from) so unwind invalidation is correct. A
-			// negative carries no step — stamp it with the domain's progress
-			// at observation time so any unwind drops it (as the SD read-fill
-			// does).
-			readTxNum := (uint64(step)+1)*cpg.stepSize - 1
-			if len(v) == 0 && name != kv.CodeDomain && cpg.sc.GetCache(name) != nil {
-				readTxNum = cpg.progress(name)
-			}
-			cpg.sc.PutIfAbsent(name, k, v, readTxNum)
-		}
+	v, step, err := cpg.TemporalGetter.GetLatest(name, k)
+	if err == nil {
+		readTxNum := (uint64(step)+1)*cpg.stepSize - 1
+		cpg.view.Fill(name, k, v, readTxNum)
 	}
 	return v, step, err
-}
-
-func (cpg *cachePopulatingGetter) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
-	return cpg.g.HasPrefix(name, prefix)
-}
-
-func (cpg *cachePopulatingGetter) StepsInFiles(entitySet ...kv.Domain) kv.Step {
-	return cpg.g.StepsInFiles(entitySet...)
 }
 
 func (bra *BlockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, header *types.Header, body *types.Body) {
@@ -145,11 +117,9 @@ func (bra *BlockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, h
 		if !bra.warming.CompareAndSwap(false, true) {
 			return
 		}
-		bra.warmWg.Add(1)
-		go func() {
-			defer bra.warmWg.Done()
+		bra.warmWg.Go(func() {
 			bra.warmBody(ctx, db, header, body, 8) // use 8 workers for warming
-		}()
+		})
 	}
 }
 
@@ -172,7 +142,14 @@ func (bra *BlockReadAheader) AddSenders(senders []byte, blockHash common.Hash) {
 	if _, ok := bra.bodies.Get(blockHash); !ok {
 		return
 	}
-	bra.senders.Add(blockHash, common.Copy(senders))
+	bra.senders.Add(blockHash, bytes.Clone(senders))
+}
+
+func (bra *BlockReadAheader) AddBlockAccessList(blockHash common.Hash, bal []byte) {
+	if len(bal) == 0 {
+		return
+	}
+	bra.bals.Add(blockHash, bal)
 }
 
 // warmBody warms state for all transactions in a body using multiple workers.
@@ -240,11 +217,7 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 				if !ok {
 					return nil
 				}
-				var getter kv.TemporalGetter = ttx
-				if bra.stateCache != nil {
-					getter = newCachePopulatingGetter(ttx, bra.stateCache)
-				}
-				stateReader := state.NewReaderV3(getter)
+				stateReader := state.NewReaderV3(readAheadGetter(ttx, bra.stateCache))
 
 				for idx := workerStart; idx < workerEnd; idx++ {
 					select {
@@ -310,13 +283,7 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 			if !ok {
 				return nil
 			}
-			var getter kv.TemporalGetter = ttx
-			var cpg *cachePopulatingGetter
-			if bra.stateCache != nil {
-				cpg = newCachePopulatingGetter(ttx, bra.stateCache)
-				getter = cpg
-			}
-			stateReader := state.NewReaderV3(getter)
+			stateReader := state.NewReaderV3(readAheadGetter(ttx, bra.stateCache))
 
 			for txIdx := workerStart; txIdx < workerEnd; txIdx++ {
 				select {
@@ -376,7 +343,8 @@ func (bra *BlockReadAheader) ReadBlockWithSenders(blockHash common.Hash) (*types
 		sendersAddresses = append(sendersAddresses, common.BytesToAddress(senders[i:i+length.Addr]))
 	}
 	body.SendersToTxs(sendersAddresses)
-	return types.NewBlockFromStorage(header.Hash(), header, body.Transactions, body.Uncles, body.Withdrawals), true
+	bal, _ := bra.bals.Get(blockHash)
+	return types.NewBlockFromStorage(header.Hash(), header, body.Transactions, body.Uncles, body.Withdrawals, bal), true
 }
 
 func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.Engine, blockReader dbservices.FullBlockReader) (chan uint64, context.CancelFunc) {

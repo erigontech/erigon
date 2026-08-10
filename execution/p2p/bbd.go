@@ -26,7 +26,6 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/etl"
@@ -429,6 +428,19 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 	logProgressTicker *time.Ticker,
 	feed BbdResultFeed,
 ) error {
+	// Refresh the peer view for each window: a span download runs for hours,
+	// during which peers connect and drop. The tracker's block-range knowledge
+	// (fed by header/body fetch failures) keeps peers known to miss this
+	// window's blocks out of rotation, replacing the have-ness the one-shot
+	// header-phase exhaustion used to encode. A pinned-peer request keeps its
+	// single-peer context.
+	if config.peerId == nil {
+		current := bbd.peerTracker.ListPeersMayHaveBlockNum(headers[len(headers)-1].Number.Uint64())
+		if len(current) == 0 {
+			return errors.New("no peers available")
+		}
+		peers = newPeersContext(current)
+	}
 	// split the headers into batches
 	neededPeers := min(len(headers), config.maxParallelBodyDownloads)
 	availablePeers, err := peers.nextAvailablePeers(neededPeers)
@@ -471,7 +483,7 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 		batchIndex int
 	}
 	batchAssignments := make([]batchAssignment, 0, len(headerBatches))
-	blockBatches := make([][]*types.Block, len(availablePeers))
+	bodyBatches := make([][]*types.Body, len(availablePeers))
 	balBatches := make([]map[common.Hash][]byte, len(availablePeers))
 	pendingBatches := true
 	attempts := 1
@@ -480,7 +492,7 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 		var peerIndex int
 		batchAssignments = batchAssignments[:0]
 		for batchIndex := range headerBatches {
-			if blockBatches[batchIndex] != nil {
+			if bodyBatches[batchIndex] != nil {
 				continue // already fetched
 			}
 			if peerIndex == len(availablePeers) {
@@ -511,7 +523,9 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 				var (
 					bodiesResponse FetcherResponse[[]*types.Body]
 					balsResponse   map[common.Hash][]byte
+					balReqs        []BALRequest
 				)
+				balPrimary := peerId
 				var batchEg errgroup.Group
 				batchEg.Go(func() error {
 					var err error
@@ -519,9 +533,18 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 					return err
 				})
 				if bbd.balFetcher != nil {
-					reqs := balRequestsForHeaders(headerBatch)
+					balReqs = balRequestsForHeaders(headerBatch)
+					// Bodies stream from peerId concurrently; lead the BAL fetch
+					// with a different peer so the two do not serialize on one link.
+					balPeers := peers.peersExcept(peerId)
+					if len(balPeers) > 0 {
+						lead := batchIndex % len(balPeers)
+						balPrimary = balPeers[lead]
+						balPeers = append(balPeers[:lead], balPeers[lead+1:]...)
+						balPeers = append(balPeers, peerId)
+					}
 					batchEg.Go(func() error {
-						balsResponse = bbd.balFetcher.Fetch(ctx, reqs, &peerId, peers.peersExcept(peerId), config.bodiesBatchFetchTimeout)
+						balsResponse = bbd.balFetcher.Fetch(ctx, balReqs, &balPrimary, balPeers, config.balsBatchFetchTimeout, config.balsRequestTimeout)
 						return nil
 					})
 				}
@@ -540,7 +563,7 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 				}
 
 				bodies := bodiesResponse.Data
-				blockBatch := make([]*types.Block, 0, len(headerBatch))
+				bodyBatch := make([]*types.Body, 0, len(headerBatch))
 				for i, header := range headerBatch {
 					body := bodies[i]
 					err := body.MatchesHeader(header)
@@ -562,10 +585,23 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 						}
 						break
 					}
-					blockBatch = append(blockBatch, types.NewBlockFromNetwork(header, body))
+					bodyBatch = append(bodyBatch, body)
 				}
-				if len(blockBatch) == len(headerBatch) {
-					blockBatches[batchIndex] = blockBatch
+				if len(bodyBatch) == len(headerBatch) {
+					if bbd.balFetcher != nil {
+						if want := len(balReqs); len(balsResponse) < want {
+							bbd.logger.Debug(
+								"[backward-block-downloader] BALs download miss for batch",
+								"fromNum", headerBatch[0].Number.Uint64(),
+								"toNum", headerBatch[len(headerBatch)-1].Number.Uint64(),
+								"got", len(balsResponse),
+								"want", want,
+								"bodyPeerId", peerId.String(),
+								"balLeadPeerId", balPrimary.String(),
+							)
+						}
+					}
+					bodyBatches[batchIndex] = bodyBatch
 					if len(balsResponse) > 0 {
 						balBatches[batchIndex] = balsResponse
 						bbd.logger.Trace(
@@ -588,7 +624,7 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 		// mark peers as exhausted for those that had unsuccessful fetches
 		var incompleteBatches int
 		for _, assignment := range batchAssignments {
-			if blockBatches[assignment.batchIndex] == nil {
+			if bodyBatches[assignment.batchIndex] == nil {
 				peers.exhaustedPeers[peers.peerIdToIndex[assignment.peerId]] = true
 				incompleteBatches++
 			}
@@ -606,23 +642,15 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 	}
 
 	blocks := make([]*types.Block, 0, len(headers))
-	var bals [][]byte
-	for batchIndex, blocksBatch := range blockBatches {
+	for batchIndex, bodyBatch := range bodyBatches {
 		balMap := balBatches[batchIndex]
-		for _, block := range blocksBatch {
-			blocks = append(blocks, block)
-			bal, ok := balMap[block.Hash()]
-			if !ok {
-				continue
-			}
-			if bals == nil {
-				bals = make([][]byte, len(headers))
-			}
-			bals[len(blocks)-1] = bal
+		for i, body := range bodyBatch {
+			header := headerBatches[batchIndex][i]
+			blocks = append(blocks, types.NewBlockFromNetwork(header, body, balMap[header.Hash()]))
 		}
 	}
 
-	err = feed.consumeData(ctx, blocks, bals)
+	err = feed.consumeData(ctx, blocks)
 	if err != nil {
 		return fmt.Errorf("result feed could not consume blocks batch: %w", err)
 	}
@@ -633,7 +661,7 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 func balRequestsForHeaders(headers []*types.Header) []BALRequest {
 	reqs := make([]BALRequest, 0, len(headers))
 	for _, header := range headers {
-		if header.BlockAccessListHash == nil || *header.BlockAccessListHash == empty.BlockAccessListHash {
+		if !header.HasNonEmptyBAL() {
 			continue
 		}
 		reqs = append(reqs, BALRequest{

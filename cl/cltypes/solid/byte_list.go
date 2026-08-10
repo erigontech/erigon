@@ -17,15 +17,16 @@
 package solid
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/clonable"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/math"
 )
 
 // ByteListSSZ is a variable-length SSZ byte list (ByteList[N]) with a
@@ -90,7 +91,7 @@ func (b *ByteListSSZ) DecodeSSZ(buf []byte, _ int) error {
 	if uint64(len(buf)) > b.limit {
 		return fmt.Errorf("ByteListSSZ: SSZ data length %d exceeds limit %d", len(buf), b.limit)
 	}
-	b.data = common.Copy(buf)
+	b.data = bytes.Clone(buf)
 	return nil
 }
 
@@ -103,7 +104,7 @@ func (b *ByteListSSZ) HashSSZ() ([32]byte, error) {
 	chunkLimit := (b.limit + 31) / 32
 
 	// Pack the data into 32-byte chunks and merkleize with the chunk limit.
-	leafCount := merkle_tree.NextPowerOfTwo(uint64((len(b.data) + 31) / length.Hash))
+	leafCount := math.NextPowerOfTwo(uint64((len(b.data) + 31) / length.Hash))
 	if leafCount == 0 {
 		leafCount = 1
 	}
@@ -125,9 +126,13 @@ func (b *ByteListSSZ) HashSSZ() ([32]byte, error) {
 	return result, nil
 }
 
+func (b *ByteListSSZ) HashSSZProgressive() ([32]byte, error) {
+	return merkle_tree.ProgressiveBasicListRoot(b.data, uint64(len(b.data)))
+}
+
 // Bytes returns a copy of the underlying data.
 func (b *ByteListSSZ) Bytes() []byte {
-	return common.Copy(b.data)
+	return bytes.Clone(b.data)
 }
 
 // SetBytes replaces the underlying data with a copy of the provided slice.
@@ -136,7 +141,7 @@ func (b *ByteListSSZ) SetBytes(buf []byte) error {
 	if uint64(len(buf)) > b.limit {
 		return fmt.Errorf("ByteListSSZ: data length %d exceeds limit %d", len(buf), b.limit)
 	}
-	b.data = common.Copy(buf)
+	b.data = bytes.Clone(buf)
 	return nil
 }
 

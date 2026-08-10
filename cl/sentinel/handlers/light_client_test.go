@@ -41,9 +41,7 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
-var (
-	altairSlot = clparams.MainnetBeaconConfig.AltairForkEpoch*clparams.MainnetBeaconConfig.SlotsPerEpoch + 1
-)
+var altairSlot = clparams.MainnetBeaconConfig.AltairForkEpoch*clparams.MainnetBeaconConfig.SlotsPerEpoch + 1
 
 func TestLightClientOptimistic(t *testing.T) {
 	ctx := context.Background()
@@ -252,7 +250,7 @@ func TestLightClientBootstrap(t *testing.T) {
 	}
 	require.NoError(t, err)
 
-	reqData := common.Copy(reqBuf.Bytes())
+	reqData := bytes.Clone(reqBuf.Bytes())
 	_, err = stream.Write(reqData)
 	require.NoError(t, err)
 
@@ -327,7 +325,7 @@ func TestLightClientUpdates(t *testing.T) {
 	}
 	require.NoError(t, err)
 
-	reqData := common.Copy(reqBuf.Bytes())
+	reqData := bytes.Clone(reqBuf.Bytes())
 	_, err = stream.Write(reqData)
 	require.NoError(t, err)
 
@@ -390,7 +388,6 @@ func TestLightClientUpdates(t *testing.T) {
 	if err != io.EOF {
 		t.Fatal("Stream is not empty")
 	}
-
 }
 
 // BenchmarkLightClientPrefixConstruction benchmarks the prefix construction

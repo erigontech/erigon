@@ -236,13 +236,23 @@ func (a *AccessListTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, sc
 			// t.Stop(fmt.Errorf("failed to copy CREATE2 in prestate tracer input err: %s", err))
 			return
 		}
-		inithash := accounts.InternCodeHash(crypto.HashData(init))
+		inithash := accounts.InternCodeHash(crypto.Keccak256Hash(init))
 		salt := stackData[stackLen-4]
 		addr := types.CreateAddress2(scope.Address().Value(), salt.Bytes32(), inithash)
 		if _, ok := a.excl[addr]; !ok {
 			a.createdContracts[addr] = struct{}{}
 		}
 	}
+}
+
+// Close returns the state borrowed for CREATE nonce lookups to its pools.
+// Idempotent.
+func (a *AccessListTracer) Close() {
+	if a.state == nil {
+		return
+	}
+	a.state.Close()
+	a.state = nil
 }
 
 // AccessList returns the current accesslist maintained by the tracer.
