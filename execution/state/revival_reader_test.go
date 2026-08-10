@@ -57,9 +57,10 @@ func destructThenRevive(vm *VersionMap, addr accounts.Address) {
 
 // A value-transfer revival records Balance/Incarnation/SelfDestruct but no
 // Nonce or CodeHash, so the account record still floors on the pre-destruct
-// cells. Left alone it contradicts ReadAccountCode, which now reports the
-// account has none.
-func TestVersionedStateReader_AccountFieldsWipedByInRangeDestruct(t *testing.T) {
+// cells. The code hash has to be wiped — left alone it contradicts
+// ReadAccountCode, which reports the account has none — but the nonce must not
+// be, because that is the one the block goes on to commit.
+func TestVersionedStateReader_AccountCodeHashWipedByInRangeDestruct(t *testing.T) {
 	t.Parallel()
 	addr := getAddress(105)
 
@@ -74,8 +75,10 @@ func TestVersionedStateReader_AccountFieldsWipedByInRangeDestruct(t *testing.T) 
 	vr := NewVersionedStateReader(3, ReadSet{}, vm, newAccountStateReader(addr))
 	acc, err := vr.ReadAccountData(addr)
 	require.NoError(t, err)
-	require.Zero(t, acc.Nonce, "the destruct reset the nonce; the revival did not restore it")
 	require.Equal(t, accounts.EmptyCodeHash, acc.CodeHash, "code hash must agree with the code the reader reports")
+	// Nonce is inherited, matching what the block commits — see
+	// TestSelfDestructReceiveAccountRecord in execution/tests.
+	require.Equal(t, uint64(7), acc.Nonce)
 	require.Equal(t, uint64(1000), acc.Balance.Uint64(), "the revival's balance is the live value")
 }
 
@@ -249,7 +252,6 @@ func TestVersionedStateReader_DestructOwnCodeHashSurvives(t *testing.T) {
 	acc, err := vr.ReadAccountData(addr)
 	require.NoError(t, err)
 	require.Equal(t, recreated, acc.CodeHash, "the recreate's own code hash is not what the destruct erased")
-	require.Zero(t, acc.Nonce, "the pre-destruct nonce is still wiped")
 }
 
 // Same shape through IntraBlockState, which resolves code via versionedReadCore

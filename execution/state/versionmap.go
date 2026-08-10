@@ -450,12 +450,11 @@ func (vm *VersionMap) applySubFieldWrites(addr accounts.Address, txIdx int, acco
 	if _, cell := floorCell(e.Balance, txIdx); cell != nil {
 		account.Balance = cell.Value
 	}
-	if idx, cell := floorCell(e.Nonce, txIdx); cell != nil {
-		if selfDestructWipesLocked(e, NoncePath, idx, txIdx) {
-			account.Nonce = 0
-		} else {
-			account.Nonce = cell.Value
-		}
+	// Nonce is deliberately not wiped: a value-transfer resurrect inherits the
+	// pre-destruct nonce, and writeset_normalize.go only overrides that for a
+	// CREATE, so wiping here would report something the block never commits.
+	if _, cell := floorCell(e.Nonce, txIdx); cell != nil {
+		account.Nonce = cell.Value
 	}
 	if _, cell := floorCell(e.Incarnation, txIdx); cell != nil {
 		account.Incarnation = cell.Value
