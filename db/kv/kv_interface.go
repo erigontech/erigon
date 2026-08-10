@@ -525,6 +525,9 @@ type TemporalDebugTx interface {
 	// DomainVisibleEnd returns the exact exclusive txNum bound of the tx's
 	// domain read view. ok is false when the backend cannot provide an exact bound.
 	DomainVisibleEnd(domain Domain) (visibleEnd uint64, ok bool)
+	// HasExactDomainVisibleEnd reports DomainVisibleEnd's ok result without
+	// resolving the bound, which may require a database cursor.
+	HasExactDomainVisibleEnd(domain Domain) bool
 	IIProgress(name InvertedIdx) (txNum uint64)
 	StepSize() uint64
 	// Retire retires frozen history files entirely below their

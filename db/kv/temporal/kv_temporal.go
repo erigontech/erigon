@@ -796,6 +796,12 @@ func (tx *Tx) DomainVisibleEnd(domain kv.Domain) (uint64, bool) {
 func (tx *RwTx) DomainVisibleEnd(domain kv.Domain) (uint64, bool) {
 	return tx.aggtx.DomainVisibleEnd(domain, tx.RwTx)
 }
+func (tx *Tx) HasExactDomainVisibleEnd(domain kv.Domain) bool {
+	return tx.aggtx.HasExactDomainVisibleEnd(domain)
+}
+func (tx *RwTx) HasExactDomainVisibleEnd(domain kv.Domain) bool {
+	return tx.aggtx.HasExactDomainVisibleEnd(domain)
+}
 func (tx *Tx) IIProgress(domain kv.InvertedIdx) uint64 {
 	return tx.aggtx.IIProgress(domain, tx.Tx)
 }

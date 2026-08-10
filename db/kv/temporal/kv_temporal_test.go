@@ -294,6 +294,7 @@ func TestTemporalTx_DomainVisibleEndConcurrent(t *testing.T) {
 	defer baseTtx.Rollback()
 	for d := range kv.DomainLen {
 		expectedEnd[d], expectedOk[d] = baseTtx.Debug().DomainVisibleEnd(d)
+		require.Equal(t, expectedOk[d], baseTtx.Debug().HasExactDomainVisibleEnd(d))
 	}
 	baseTtx.Rollback()
 	require.Equal(t, uint64(2), expectedEnd[kv.StorageDomain])

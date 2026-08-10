@@ -132,12 +132,16 @@ func cacheGenerationsFor(debug kv.TemporalDebugTx, stateVersion uint64) (cache.G
 	return stateGeneration, branchGeneration
 }
 
-// cacheViewEligible rejects a dependency-clamped domain view. Its reads mix
-// database state with an older values frontier, so it has no exact cache
-// identity.
-func cacheViewEligible(debug kv.TemporalDebugTx, domains ...kv.Domain) bool {
+type exactDomainVisibleEnd interface {
+	HasExactDomainVisibleEnd(domain kv.Domain) bool
+}
+
+// cacheViewEligible checks only whether exact ends are available. Resolving the
+// ends would open database cursors, but their numeric frontier values are not
+// part of cache identity.
+func cacheViewEligible(debug exactDomainVisibleEnd, domains ...kv.Domain) bool {
 	for _, domain := range domains {
-		if _, ok := debug.DomainVisibleEnd(domain); !ok {
+		if !debug.HasExactDomainVisibleEnd(domain) {
 			return false
 		}
 	}

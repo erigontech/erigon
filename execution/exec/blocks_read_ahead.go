@@ -106,7 +106,7 @@ func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache) kv.TemporalGetter 
 	}
 	debug := ttx.Debug()
 	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
-		if _, ok := debug.DomainVisibleEnd(domain); !ok {
+		if !debug.HasExactDomainVisibleEnd(domain) {
 			return ttx
 		}
 	}

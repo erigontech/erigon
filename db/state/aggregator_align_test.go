@@ -231,6 +231,7 @@ func TestDomainVisibleEnd_ClampedViewHasNoExactFrontier(t *testing.T) {
 
 	_, ok := at.DomainVisibleEnd(kv.AccountsDomain, tx)
 	require.False(t, ok, "a dependency-clamped values view has no exact frontier")
+	require.False(t, at.HasExactDomainVisibleEnd(kv.AccountsDomain))
 }
 
 // The forbid assert must also watch the history-II ends: they are the base of

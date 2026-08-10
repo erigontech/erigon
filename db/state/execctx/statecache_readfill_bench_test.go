@@ -99,3 +99,53 @@ func BenchmarkGetLatestColdNegativeRw(b *testing.B) { benchColdNegativeReads(b, 
 func BenchmarkGetLatestColdNegativeRwNoCache(b *testing.B) {
 	benchColdNegativeReads(b, false, true)
 }
+
+var benchmarkTemporalGetter kv.TemporalGetter
+
+func benchmarkCacheGetterConstruction(b *testing.B, resolveVisibleEnds bool) {
+	db := benchSeedDb(b)
+	ctx := b.Context()
+	baseTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(b, err)
+	defer baseTx.Rollback()
+	sd, err := execctx.NewSharedDomains(ctx, baseTx, log.New())
+	require.NoError(b, err)
+	defer sd.Close()
+	stateCache := newSmallStateCache()
+	defer stateCache.Close()
+	sd.SetStateCacheForTest(stateCache)
+
+	domains := [...]kv.Domain{
+		kv.AccountsDomain,
+		kv.StorageDomain,
+		kv.CodeDomain,
+		kv.CommitmentDomain,
+	}
+	b.ResetTimer()
+	b.StopTimer()
+	for range b.N {
+		tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic // benchmark loop; explicit Rollback below
+		if err != nil {
+			b.Fatal(err)
+		}
+		b.StartTimer()
+		if resolveVisibleEnds {
+			debug := tx.Debug()
+			for _, domain := range domains {
+				debug.DomainVisibleEnd(domain)
+			}
+		}
+		benchmarkTemporalGetter = sd.AsGetter(tx)
+		b.StopTimer()
+		tx.Rollback()
+	}
+}
+
+func BenchmarkCacheGetterConstruction(b *testing.B) {
+	b.Run("exactness_check", func(b *testing.B) {
+		benchmarkCacheGetterConstruction(b, false)
+	})
+	b.Run("visible_end_resolution", func(b *testing.B) {
+		benchmarkCacheGetterConstruction(b, true)
+	})
+}
