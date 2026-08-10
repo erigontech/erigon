@@ -2083,6 +2083,17 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 	cfg.Snapshot.NoDownloader = ctx.Bool(NoDownloaderFlag.Name)
 	cfg.Snapshot.P2PManifest = ctx.Bool(SnapP2PManifestFlag.Name)
 	cfg.Snapshot.LifecycleDrivenByStorage = ctx.Bool(SnapLifecycleDrivenByStorageFlag.Name)
+	// --snap.p2p-manifest requires the storage-driven lifecycle (which
+	// wires manifest_exchange, sentry PeerConnected → chain.toml fetch
+	// → orchestrator → InitialStateReady). Setting p2p-manifest without
+	// LifecycleDrivenByStorage silently produces a broken bootstrap:
+	// the consumer discovers peer chain.toml but never populates its
+	// registry because mx never runs, then OtterSync falls back to
+	// preverified with nothing to download, salt-wait times out. Couple
+	// the two here so operators only need to set the user-facing flag.
+	if cfg.Snapshot.P2PManifest {
+		cfg.Snapshot.LifecycleDrivenByStorage = true
+	}
 	cfg.Snapshot.BootstrapFromPreverified = ctx.Bool(SnapBootstrapFromPreverifiedFlag.Name)
 	cfg.Snapshot.BlockAlignedBoundaries = ctx.Bool(SnapBlockAlignedBoundariesFlag.Name)
 	cfg.Snapshot.DelegationPath = ctx.String(SnapshotDelegationPath.Name)
