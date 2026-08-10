@@ -450,15 +450,44 @@ func (vm *VersionMap) applySubFieldWrites(addr accounts.Address, txIdx int, acco
 	if _, cell := floorCell(e.Balance, txIdx); cell != nil {
 		account.Balance = cell.Value
 	}
-	if _, cell := floorCell(e.Nonce, txIdx); cell != nil {
-		account.Nonce = cell.Value
+	if idx, cell := floorCell(e.Nonce, txIdx); cell != nil {
+		if wipedByDestructLocked(e, idx, txIdx) {
+			account.Nonce = 0
+		} else {
+			account.Nonce = cell.Value
+		}
 	}
 	if _, cell := floorCell(e.Incarnation, txIdx); cell != nil {
 		account.Incarnation = cell.Value
 	}
-	if _, cell := floorCell(e.CodeHash, txIdx); cell != nil {
-		account.CodeHash = cell.Value
+	if idx, cell := floorCell(e.CodeHash, txIdx); cell != nil {
+		if wipedByDestructLocked(e, idx, txIdx) {
+			account.CodeHash = accounts.EmptyCodeHash
+		} else {
+			account.CodeHash = cell.Value
+		}
 	}
+}
+
+// wipedByDestructLocked is wipedByInRangeDestruct for a caller already holding
+// e.mu: a Done SelfDestruct=true write at or above floor and below txIdx. Taking
+// the shared helper here would re-enter the read lock.
+func wipedByDestructLocked(e *AddressEntry, floor, txIdx int) bool {
+	if e.SelfDestruct == nil {
+		return false
+	}
+	found := false
+	e.SelfDestruct.Descend(txIdx-1, func(k int, v *WriteCell[bool]) bool {
+		if k < floor {
+			return false
+		}
+		if v.flag == FlagDone && v.Value {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
 }
 
 func (vm *VersionMap) ReadAddress(addr accounts.Address, txIdx int) (*accounts.Account, ReadResult, bool) {

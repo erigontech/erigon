@@ -35,6 +35,50 @@ func destructThenRevive(vm *VersionMap, addr accounts.Address) {
 	writeFor(vm, addr, IncarnationPath, accounts.NilKey, Version{TxIndex: 2}, uint64(2), true)
 }
 
+// A value-transfer revival records Balance/Incarnation/SelfDestruct but no
+// Nonce or CodeHash, so the account record still floors on the pre-destruct
+// cells. Left alone it contradicts ReadAccountCode, which now reports the
+// account has none.
+func TestVersionedStateReader_AccountFieldsWipedByInRangeDestruct(t *testing.T) {
+	t.Parallel()
+	addr := getAddress(105)
+
+	vm := NewVersionMap(nil)
+	code := accounts.NewCode([]byte{0x60, 0x00})
+	vm.WriteCode(addr, Version{TxIndex: 0}, code, true)
+	writeFor(vm, addr, CodeHashPath, accounts.NilKey, Version{TxIndex: 0}, code.Hash, true)
+	writeFor(vm, addr, NoncePath, accounts.NilKey, Version{TxIndex: 0}, uint64(7), true)
+	destructThenRevive(vm, addr)
+	writeFor(vm, addr, BalancePath, accounts.NilKey, Version{TxIndex: 2}, *uint256.NewInt(1000), true)
+
+	vr := NewVersionedStateReader(3, ReadSet{}, vm, newAccountStateReader(addr))
+	acc, err := vr.ReadAccountData(addr)
+	require.NoError(t, err)
+	require.Zero(t, acc.Nonce, "the destruct reset the nonce; the revival did not restore it")
+	require.Equal(t, accounts.EmptyCodeHash, acc.CodeHash, "code hash must agree with the code the reader reports")
+	require.Equal(t, uint64(1000), acc.Balance.Uint64(), "the revival's balance is the live value")
+}
+
+func TestVersionedStateReader_AccountFieldsSurviveWhenRevivalRewrote(t *testing.T) {
+	t.Parallel()
+	addr := getAddress(106)
+
+	vm := NewVersionMap(nil)
+	old := accounts.NewCode([]byte{0x60, 0x00})
+	writeFor(vm, addr, CodeHashPath, accounts.NilKey, Version{TxIndex: 0}, old.Hash, true)
+	writeFor(vm, addr, NoncePath, accounts.NilKey, Version{TxIndex: 0}, uint64(7), true)
+	destructThenRevive(vm, addr)
+	fresh := accounts.NewCode([]byte{0x60, 0x01})
+	writeFor(vm, addr, CodeHashPath, accounts.NilKey, Version{TxIndex: 2}, fresh.Hash, true)
+	writeFor(vm, addr, NoncePath, accounts.NilKey, Version{TxIndex: 2}, uint64(1), true)
+
+	vr := NewVersionedStateReader(3, ReadSet{}, vm, newAccountStateReader(addr))
+	acc, err := vr.ReadAccountData(addr)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), acc.Nonce, "a write above the destruct is the live value")
+	require.Equal(t, fresh.Hash, acc.CodeHash, "and so is the recreated contract's code hash")
+}
+
 func TestVersionedStateReader_StorageWipedByInRangeDestruct(t *testing.T) {
 	t.Parallel()
 	addr := getAddress(101)
