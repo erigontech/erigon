@@ -16,7 +16,8 @@ import (
 var cmtTiming = os.Getenv("ERIGON_CMT_TIMING") == "1"
 
 // deepStorageThreshold is the touched-slot count above which an account's storage subtree folds concurrently instead of streaming through its worker.
-const deepStorageThreshold = 1_000
+// Set below the common hot-contract straggler size (~150 touched slots) so those subtrees fold in parallel rather than serializing through one nibble worker.
+const deepStorageThreshold = 128
 
 // unfoldRootWall unfolds base at the root until row 0 forms the top-nibble mount wall,
 // consuming at most one nibble per step: a restored root extension sharing the probe's
