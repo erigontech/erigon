@@ -270,9 +270,10 @@ type BackingChange struct {
 
 // BeginBackingChange runs reconcile while publications and fills are blocked.
 // It always revokes an active generation when its files identity changes, but
-// clears entries only when reconcile reports foreign state. The returned
-// handle keeps publication blocked until Finish makes both the new files and
-// their matching cache generation observable.
+// clears entries only when reconcile cannot prove that the cache's publication
+// history covers the new files. The returned handle keeps publication blocked
+// until Finish makes both the new files and their matching cache generation
+// observable.
 func (p GenerationPublisher) BeginBackingChange(files FilesView, reconcile func() bool, clear func()) *BackingChange {
 	if p.gate == nil {
 		return nil

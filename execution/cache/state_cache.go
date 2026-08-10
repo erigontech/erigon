@@ -93,9 +93,9 @@ func NewDefaultStateCache() *StateCache {
 }
 
 // BeginFilesPublication revokes the old files generation. It retains entries
-// backed by this process's committed updates and clears them when the new files
-// contain foreign state. Finish publishes the new identity after the files
-// become visible.
+// when this process's committed updates cover the new files and clears them
+// when that compatibility cannot be proven. Finish publishes the new identity
+// after the files become visible.
 func (c *StateCache) BeginFilesPublication(filesEnd [kv.DomainLen]uint64) *BackingChange {
 	if c == nil {
 		return nil

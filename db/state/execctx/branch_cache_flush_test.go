@@ -44,6 +44,92 @@ func branchGenerationForTx(t *testing.T, tx kv.TemporalTx) cache.Generation {
 	return cache.BranchGeneration(stateVersion, tx.Debug().TxNumsInFiles(kv.CommitmentDomain))
 }
 
+// Flush changes only the write transaction. The retained memory batch must
+// continue to shadow the still-published durable cache for existing getters.
+func TestBareFlushRetainsMemoryAsAuthorityOverCacheViews(t *testing.T) {
+	accountKey := make([]byte, 20)
+	accountKey[0] = 0xaa
+
+	for _, tc := range []struct {
+		name          string
+		domain        kv.Domain
+		key, old, new []byte
+	}{
+		{"state", kv.AccountsDomain, accountKey, encAccount(1), encAccount(2)},
+		{"branch", kv.CommitmentDomain, []byte{0x0a, 0x0b}, []byte("old-branch"), []byte("new-branch")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			db := newTestDb(t, 100)
+			stateCache := newSmallStateCache()
+			t.Cleanup(stateCache.Close)
+
+			seedTx, err := db.BeginTemporalRw(ctx)
+			require.NoError(t, err)
+			defer seedTx.Rollback()
+			seedDomains, err := execctx.NewSharedDomains(ctx, seedTx, log.New())
+			require.NoError(t, err)
+			seedDomains.SetStateCacheForTest(stateCache)
+			seedDomains.SetTxNum(1)
+			require.NoError(t, seedDomains.DomainPut(tc.domain, seedTx, tc.key, tc.old, 1, nil))
+			require.NoError(t, seedDomains.Commit(ctx, seedTx))
+			seedDomains.Close()
+
+			rwTx, err := db.BeginTemporalRw(ctx)
+			require.NoError(t, err)
+			defer rwTx.Rollback()
+			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+			require.NoError(t, err)
+			defer domains.Close()
+			domains.SetStateCacheForTest(stateCache)
+
+			getter := domains.AsGetter(rwTx)
+			got, _, err := getter.GetLatest(tc.domain, tc.key)
+			require.NoError(t, err)
+			require.Equal(t, tc.old, got)
+
+			stateVersion, err := rawdb.GetStateVersion(rwTx)
+			require.NoError(t, err)
+			var cachedValue func() ([]byte, bool)
+			switch tc.domain {
+			case kv.AccountsDomain:
+				debug := rwTx.Debug()
+				view := stateCache.View(cache.StateGeneration(
+					stateVersion,
+					debug.TxNumsInFiles(kv.AccountsDomain),
+					debug.TxNumsInFiles(kv.StorageDomain),
+					debug.TxNumsInFiles(kv.CodeDomain),
+				))
+				cachedValue = func() ([]byte, bool) { return view.Get(tc.domain, tc.key) }
+			case kv.CommitmentDomain:
+				provider, ok := rwTx.AggTx().(commitment.BranchCacheProvider)
+				require.True(t, ok)
+				view := provider.BranchCache().View(branchGenerationForTx(t, rwTx))
+				cachedValue = func() ([]byte, bool) {
+					value, _, ok := view.Get(tc.key)
+					return value, ok
+				}
+			}
+
+			got, ok := cachedValue()
+			require.True(t, ok)
+			require.Equal(t, tc.old, got)
+
+			domains.SetTxNum(2)
+			require.NoError(t, domains.DomainPut(tc.domain, rwTx, tc.key, tc.new, 2, tc.old))
+			require.NoError(t, domains.Flush(ctx, rwTx))
+
+			got, ok = cachedValue()
+			require.True(t, ok, "bare Flush must not publish an uncommitted cache generation")
+			require.Equal(t, tc.old, got)
+
+			got, _, err = getter.GetLatest(tc.domain, tc.key)
+			require.NoError(t, err)
+			require.Equal(t, tc.new, got, "retained memory must shadow the old durable cache view")
+		})
+	}
+}
+
 // Commit, unlike Flush, publishes the rebuilt branch after the database commit.
 func TestBranchCacheCommitRefreshesAfterReadThrough(t *testing.T) {
 	stepSize := uint64(100)
