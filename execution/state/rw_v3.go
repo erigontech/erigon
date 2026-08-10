@@ -1205,13 +1205,18 @@ func (c *BlockStateCache) GetCurrentAccount(addr accounts.Address) ([]byte, bool
 // Falls back to committed state if no write exists. Returns (nil, false) if not cached.
 func (c *BlockStateCache) GetCurrentStorage(addr accounts.Address, key accounts.StorageKey) ([]byte, bool) {
 	c.mu.RLock()
-	defer c.mu.RUnlock()
 	if slots, ok := c.currentStorage[addr]; ok {
 		if val, ok := slots[key]; ok {
+			c.mu.RUnlock()
 			return val, true
 		}
 	}
-	// Kept under RLock so current+committed stay one atomic snapshot.
+	c.mu.RUnlock()
+	// Committed fallback runs after releasing mu, matching GetCurrentAccount:
+	// committedStorage is a write-once immutable pre-block view (a sync.Map for
+	// lock-free reads), so a concurrent WriteStorage can only add a currentStorage
+	// entry we'd miss — which the RLock-then-fallback ordering can't prevent
+	// regardless — never tear a committed value.
 	if v, ok := c.committedStorage.Load(committedStorageKey{addr: addr, key: key}); ok {
 		return v.([]byte), true
 	}
