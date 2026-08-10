@@ -82,6 +82,19 @@ import (
 	p2pnat "github.com/erigontech/erigon/p2p/nat"
 )
 
+// ErrGloasExecutionEngineUnavailable indicates that a scheduled Gloas fork has no execution engine.
+var ErrGloasExecutionEngineUnavailable = errors.New("Gloas requires an execution engine")
+
+func validateGloasExecutionEngine(beaconConfig *clparams.BeaconChainConfig, hasExecutionEngine bool) error {
+	if beaconConfig == nil {
+		return fmt.Errorf("%w: missing beacon configuration", ErrGloasExecutionEngineUnavailable)
+	}
+	if !hasExecutionEngine && beaconConfig.GloasForkEpoch != math.MaxUint64 {
+		return ErrGloasExecutionEngineUnavailable
+	}
+	return nil
+}
+
 func OpenCaplinDatabase(ctx context.Context,
 	beaconConfig *clparams.BeaconChainConfig,
 	ethClock eth_clock.EthereumClock,
@@ -252,6 +265,9 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 				return err
 			}
 		}
+	}
+	if err := validateGloasExecutionEngine(beaconConfig, engine != nil); err != nil {
+		return err
 	}
 
 	// init the current beacon config for global access

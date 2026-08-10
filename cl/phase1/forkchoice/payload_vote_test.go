@@ -373,7 +373,7 @@ func TestValidateParentPayloadPathRequiresVerifiedFullParent(t *testing.T) {
 	}{
 		{name: "persisted but unverified", withEL: true, wantErr: true},
 		{name: "persisted and verified", withEL: true, verified: true},
-		{name: "standalone without EL", wantErr: true},
+		{name: "standalone without EL"},
 		{name: "standalone with prior verification", verified: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

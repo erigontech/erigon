@@ -18,6 +18,7 @@ package fork_graph
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -206,6 +207,7 @@ func (f *forkGraphDisk) HasEnvelope(blockRoot common.Hash) bool {
 // [New in Gloas:EIP7732]
 func (f *forkGraphDisk) ReadEnvelopeFromDisk(blockRoot common.Hash) (envelope *cltypes.SignedExecutionPayloadEnvelope, err error) {
 	var file afero.File
+	var corrupt bool
 	f.stateDumpLock.Lock()
 	defer f.stateDumpLock.Unlock()
 
@@ -216,15 +218,16 @@ func (f *forkGraphDisk) ReadEnvelopeFromDisk(blockRoot common.Hash) (envelope *c
 		return
 	}
 	defer func() {
-		if closeErr := file.Close(); err == nil && closeErr != nil {
-			envelope = nil
-			err = closeErr
+		if closeErr := file.Close(); closeErr != nil {
+			log.Warn("failed to close envelope after read", "root", blockRoot, "err", closeErr)
 		}
-		if err != nil {
-			f.envelopeExists.Delete(blockRoot)
+		if corrupt {
 			if removeErr := f.fs.Remove(filename); removeErr != nil && !os.IsNotExist(removeErr) {
 				log.Warn("failed to remove corrupt envelope", "root", blockRoot, "err", removeErr)
 			}
+		}
+		if err != nil {
+			f.envelopeExists.Delete(blockRoot)
 		}
 	}()
 
@@ -239,35 +242,40 @@ func (f *forkGraphDisk) ReadEnvelopeFromDisk(blockRoot common.Hash) (envelope *c
 	var n int
 	n, err = io.ReadFull(f.sszSnappyReader, lengthBytes)
 	if err != nil {
+		corrupt = isCorruptEnvelopeReadError(err)
 		return nil, fmt.Errorf("failed to read length: %w, root: %x", err, blockRoot)
 	}
 	if n != 8 {
+		corrupt = true
 		return nil, fmt.Errorf("failed to read length: %d, want 8, root: %x", n, blockRoot)
 	}
 
 	envelopeLength := binary.BigEndian.Uint64(lengthBytes)
 	if envelopeLength > maxSSZObjectSize {
+		corrupt = true
 		return nil, fmt.Errorf("corrupt envelope file: length %d exceeds max %d, root: %x", envelopeLength, maxSSZObjectSize, blockRoot)
 	}
-	if envelopeLength > uint64(cap(f.sszBuffer)) {
-		f.sszBuffer = make([]byte, envelopeLength)
-	} else {
-		f.sszBuffer = f.sszBuffer[:envelopeLength]
-	}
-	n, err = io.ReadFull(f.sszSnappyReader, f.sszBuffer)
+	ownedBuffer := make([]byte, envelopeLength)
+	n, err = io.ReadFull(f.sszSnappyReader, ownedBuffer)
 	if err != nil {
+		corrupt = isCorruptEnvelopeReadError(err)
 		return nil, fmt.Errorf("failed to read snappy buffer: %w, root: %x", err, blockRoot)
 	}
-	f.sszBuffer = f.sszBuffer[:n]
+	ownedBuffer = ownedBuffer[:n]
 
 	envelope = &cltypes.SignedExecutionPayloadEnvelope{
 		Message: cltypes.NewExecutionPayloadEnvelope(f.beaconCfg),
 	}
-	if err = envelope.DecodeSSZ(f.sszBuffer, int(clparams.GloasVersion)); err != nil {
+	if err = envelope.DecodeSSZ(ownedBuffer, int(clparams.GloasVersion)); err != nil {
+		corrupt = true
 		return nil, fmt.Errorf("failed to decode envelope: %w, root: %x, len: %d", err, blockRoot, n)
 	}
 
 	return
+}
+
+func isCorruptEnvelopeReadError(err error) bool {
+	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, snappy.ErrCorrupt)
 }
 
 // DumpEnvelopeOnDisk dumps an execution payload envelope to disk.

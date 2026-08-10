@@ -18,6 +18,8 @@ package fork_graph
 
 import (
 	_ "embed"
+	"errors"
+	"sync"
 	"testing"
 
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
@@ -40,6 +42,49 @@ var block2 []byte
 
 //go:embed test_data/anchor_state.ssz_snappy
 var anchor []byte
+
+var errTestEnvelopeIO = errors.New("test envelope I/O error")
+
+type envelopeCloseErrorFile struct {
+	afero.File
+}
+
+func (f envelopeCloseErrorFile) Close() error {
+	_ = f.File.Close()
+	return errTestEnvelopeIO
+}
+
+type envelopeCloseErrorFs struct {
+	afero.Fs
+}
+
+func (f envelopeCloseErrorFs) Open(name string) (afero.File, error) {
+	file, err := f.Fs.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	return envelopeCloseErrorFile{File: file}, nil
+}
+
+type envelopeReadErrorFile struct {
+	afero.File
+}
+
+func (envelopeReadErrorFile) Read([]byte) (int, error) {
+	return 0, errTestEnvelopeIO
+}
+
+type envelopeReadErrorFs struct {
+	afero.Fs
+}
+
+func (f envelopeReadErrorFs) Open(name string) (afero.File, error) {
+	file, err := f.Fs.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	return envelopeReadErrorFile{File: file}, nil
+}
 
 func TestForkGraphInDisk(t *testing.T) {
 	blockA, blockB, blockC := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion),
@@ -117,4 +162,90 @@ func TestDumpEnvelopeAtomicallyPersistsReadableFile(t *testing.T) {
 	persisted, err := f.ReadEnvelopeFromDisk(root)
 	require.NoError(t, err)
 	require.Equal(t, root, persisted.Message.BeaconBlockRoot)
+}
+
+func TestReadEnvelopeOwnsDecodedTransactions(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
+	rootA := common.HexToHash("0xa")
+	rootB := common.HexToHash("0xb")
+	envelopeA := testEnvelopeWithTransaction(rootA, []byte{1, 2, 3})
+	envelopeB := testEnvelopeWithTransaction(rootB, []byte{9, 8, 7})
+	require.NoError(t, f.DumpEnvelopeOnDisk(rootA, envelopeA))
+
+	persistedA, err := f.ReadEnvelopeFromDisk(rootA)
+	require.NoError(t, err)
+	require.NoError(t, f.DumpEnvelopeOnDisk(rootB, envelopeB))
+	_, err = f.ReadEnvelopeFromDisk(rootB)
+	require.NoError(t, err)
+	require.Equal(t, [][]byte{{1, 2, 3}}, persistedA.Message.Payload.Transactions.UnderlyngReference())
+}
+
+func TestReadEnvelopeTransactionsDoNotRaceWithDump(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
+	rootA := common.HexToHash("0xa")
+	rootB := common.HexToHash("0xb")
+	require.NoError(t, f.DumpEnvelopeOnDisk(rootA, testEnvelopeWithTransaction(rootA, []byte{1, 2, 3})))
+	persistedA, err := f.ReadEnvelopeFromDisk(rootA)
+	require.NoError(t, err)
+	envelopeB := testEnvelopeWithTransaction(rootB, []byte{9, 8, 7})
+
+	start := make(chan struct{})
+	errCh := make(chan error, 1)
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		<-start
+		for range 100 {
+			if err := f.DumpEnvelopeOnDisk(rootB, envelopeB); err != nil {
+				errCh <- err
+				return
+			}
+		}
+	})
+	close(start)
+	var observed uint64
+	for range 100 {
+		observed += uint64(persistedA.Message.Payload.Transactions.UnderlyngReference()[0][0])
+	}
+	wg.Wait()
+	require.Equal(t, uint64(100), observed)
+	require.Equal(t, [][]byte{{1, 2, 3}}, persistedA.Message.Payload.Transactions.UnderlyngReference())
+	close(errCh)
+	for err := range errCh {
+		require.NoError(t, err)
+	}
+}
+
+func TestReadEnvelopeCloseErrorKeepsDecodedFile(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
+	root := common.HexToHash("0x1234")
+	require.NoError(t, f.DumpEnvelopeOnDisk(root, testEnvelopeWithTransaction(root, []byte{1})))
+	f.fs = envelopeCloseErrorFs{Fs: fs}
+
+	envelope, err := f.ReadEnvelopeFromDisk(root)
+	require.NoError(t, err)
+	require.NotNil(t, envelope)
+	require.True(t, f.HasEnvelope(root))
+}
+
+func TestReadEnvelopeTransientReadErrorKeepsFile(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
+	root := common.HexToHash("0x1234")
+	require.NoError(t, f.DumpEnvelopeOnDisk(root, testEnvelopeWithTransaction(root, []byte{1})))
+	f.fs = envelopeReadErrorFs{Fs: fs}
+
+	_, err := f.ReadEnvelopeFromDisk(root)
+	require.ErrorIs(t, err, errTestEnvelopeIO)
+	require.True(t, f.HasEnvelope(root))
+}
+
+func testEnvelopeWithTransaction(root common.Hash, transaction []byte) *cltypes.SignedExecutionPayloadEnvelope {
+	envelope := cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)
+	envelope.BeaconBlockRoot = root
+	envelope.Payload.Extra = solid.NewExtraData()
+	envelope.Payload.Transactions = solid.NewTransactionsSSZFromTransactions([][]byte{transaction})
+	return &cltypes.SignedExecutionPayloadEnvelope{Message: envelope}
 }
