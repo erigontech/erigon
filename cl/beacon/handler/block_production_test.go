@@ -33,10 +33,13 @@ import (
 
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	builder_mock "github.com/erigontech/erigon/cl/beacon/builder/mock_services"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -833,6 +836,86 @@ func TestStartPayloadPreparationStartsLocalEngine(t *testing.T) {
 	cancel()
 
 	handler.StartPayloadPreparation(ctx)
+}
+
+func TestPreparePayloadForSendsCompleteForkChoiceUpdate(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, _, fcu, validatorParams := setupTestingHandler(t, clparams.CapellaVersion, log.Root(), true)
+	config := *handler.beaconChainCfg
+	targetEpoch := postState.Slot()/config.SlotsPerEpoch + 1
+	targetSlot := targetEpoch * config.SlotsPerEpoch
+	config.DenebForkEpoch = targetEpoch
+	config.InitializeForkSchedule()
+
+	headState := state.New(&config)
+	require.NoError(t, postState.CopyInto(headState))
+	headState.SetFinalizedCheckpoint(solid.Checkpoint{Epoch: targetEpoch - 2, Root: common.Hash{0x31}})
+	headState.SetCurrentJustifiedCheckpoint(solid.Checkpoint{Epoch: targetEpoch - 1, Root: common.Hash{0x32}})
+	currentEpoch := headState.Slot() / config.SlotsPerEpoch
+	headState.SetRandaoMixAt(int(currentEpoch%config.EpochsPerHistoricalVector), common.Hash{0x51})
+	headState.SetRandaoMixAt(int(targetEpoch%config.EpochsPerHistoricalVector), common.Hash{0x52})
+	baseBlockRoot := common.Hash{0x41}
+	syncedData := synced_data.NewSyncedDataManager(&config, true)
+	require.NoError(t, syncedData.OnHeadStateWithBlockRoot(headState, baseBlockRoot))
+	handler.beaconChainCfg = &config
+	handler.syncedData = syncedData
+
+	proposerIndex, err := headState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+
+	feeRecipient := common.Address{0x11}
+	validatorParams.SetFeeRecipient(proposerIndex, feeRecipient)
+
+	advancedState, err := headState.Copy()
+	require.NoError(t, err)
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(advancedState, targetSlot))
+	require.Equal(t, clparams.CapellaVersion, headState.Version())
+	require.Equal(t, clparams.DenebVersion, advancedState.Version())
+	require.NotEqual(t, headState.GetRandaoMixes(targetEpoch), advancedState.GetRandaoMixes(targetEpoch))
+	finalizedRoot := advancedState.FinalizedCheckpoint().Root
+	justifiedRoot := advancedState.CurrentJustifiedCheckpoint().Root
+	require.NotEqual(t, finalizedRoot, justifiedRoot)
+	expectedFinalized := common.Hash{0x21}
+	expectedSafe := common.Hash{0x22}
+	fcu.Eth1Hashes[finalizedRoot] = expectedFinalized
+	fcu.Eth1Hashes[justifiedRoot] = expectedSafe
+	require.NotEqual(t, expectedFinalized, expectedSafe)
+
+	version := handler.beaconChainCfg.GetCurrentStateVersion(targetSlot / handler.beaconChainCfg.SlotsPerEpoch)
+	require.Equal(t, clparams.DenebVersion, version)
+	expectedWithdrawals, err := state.GetExpectedWithdrawals(advancedState, targetSlot/handler.beaconChainCfg.SlotsPerEpoch)
+	require.NoError(t, err)
+
+	payloadID := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, finalized, safe, head common.Hash, attrs *engine_types.PayloadAttributes, gotVersion clparams.StateVersion) ([]byte, error) {
+			require.Equal(t, expectedFinalized, finalized)
+			require.Equal(t, expectedSafe, safe)
+			require.Equal(t, advancedState.LatestExecutionPayloadHeader().BlockHash, head)
+			require.Equal(t, version, gotVersion)
+			require.Equal(t, hexutil.Uint64(state.ComputeTimestampAtSlot(advancedState, targetSlot)), attrs.Timestamp)
+			require.Equal(t, common.Hash(advancedState.GetRandaoMixes(targetSlot/handler.beaconChainCfg.SlotsPerEpoch)), attrs.PrevRandao)
+			require.Equal(t, feeRecipient, attrs.SuggestedFeeRecipient)
+			require.Equal(t, &baseBlockRoot, attrs.ParentBeaconBlockRoot)
+			require.Nil(t, attrs.SlotNumber)
+			require.Nil(t, attrs.TargetGasLimit)
+			require.NotNil(t, attrs.Withdrawals)
+			require.Len(t, attrs.Withdrawals, len(expectedWithdrawals.Withdrawals))
+			for i, withdrawal := range expectedWithdrawals.Withdrawals {
+				require.Equal(t, withdrawal.Index, attrs.Withdrawals[i].Index)
+				require.Equal(t, withdrawal.Amount, attrs.Withdrawals[i].Amount)
+				require.Equal(t, withdrawal.Validator, attrs.Withdrawals[i].Validator)
+				require.Equal(t, withdrawal.Address, attrs.Withdrawals[i].Address)
+			}
+			return payloadID, nil
+		})
+	handler.engine = engine
+
+	primedHead, err := handler.preparePayloadFor(t.Context(), targetSlot)
+	require.NoError(t, err)
+	require.Equal(t, baseBlockRoot, primedHead)
+	require.True(t, handler.preparedPayload.matches(targetSlot, payloadID, time.Now(), 0))
 }
 
 func TestShouldPreparePayloadVersion(t *testing.T) {
