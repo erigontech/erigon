@@ -71,6 +71,13 @@ func newTestSignedEnvelope(slot uint64, blockRoot common.Hash, builderIndex uint
 	}
 }
 
+func newTestSignedBlockWithBuilder(_ common.Hash, slot, builderIndex uint64) *cltypes.SignedBeaconBlock {
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	block.Block.Slot = slot
+	block.Block.Body.SignedExecutionPayloadBid.Message.BuilderIndex = builderIndex
+	return block
+}
+
 func TestExecutionPayloadServiceNilEnvelope(t *testing.T) {
 	service, _ := setupExecutionPayloadService(t)
 
@@ -341,9 +348,7 @@ func TestExecutionPayloadServiceRetriesEnvelopeUntilColumnDataAvailable(t *testi
 	impl, fcu := setupExecutionPayloadServiceWithoutLoop(t)
 	blockRoot := common.HexToHash("0x1234")
 	envelope := newTestSignedEnvelope(100, blockRoot, 1)
-	fcu.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{
-		Block: &cltypes.BeaconBlock{Slot: 100},
-	}
+	fcu.Blocks[blockRoot] = newTestSignedBlockWithBuilder(blockRoot, 100, 1)
 	fcu.OnExecutionPayloadErr = forkchoice.ErrEIP7594ColumnDataNotAvailable
 
 	err := impl.ProcessMessage(t.Context(), nil, envelope)
@@ -377,9 +382,7 @@ func TestExecutionPayloadServiceRetriesRecoveredEnvelope(t *testing.T) {
 	impl, fcu := setupExecutionPayloadServiceWithoutLoop(t)
 	blockRoot := common.HexToHash("0x1234")
 	envelope := newTestSignedEnvelope(100, blockRoot, 1)
-	fcu.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{
-		Block: &cltypes.BeaconBlock{Slot: 100},
-	}
+	fcu.Blocks[blockRoot] = newTestSignedBlockWithBuilder(blockRoot, 100, 1)
 	fcu.OnExecutionPayloadErr = forkchoice.ErrEIP7594ColumnDataNotAvailable
 
 	err := impl.ProcessRecoveredEnvelope(t.Context(), envelope, true)
@@ -400,9 +403,7 @@ func TestExecutionPayloadServiceRetriesRecoveredEnvelope(t *testing.T) {
 func TestExecutionPayloadServiceDataAvailabilityRetriesDeduplicateByRoot(t *testing.T) {
 	impl, fcu := setupExecutionPayloadServiceWithoutLoop(t)
 	blockRoot := common.HexToHash("0x1234")
-	fcu.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{
-		Block: &cltypes.BeaconBlock{Slot: 100},
-	}
+	fcu.Blocks[blockRoot] = newTestSignedBlockWithBuilder(blockRoot, 100, 1)
 	fcu.OnExecutionPayloadErr = forkchoice.ErrEIP7594ColumnDataNotAvailable
 
 	require.Error(t, impl.ProcessRecoveredEnvelope(t.Context(), newTestSignedEnvelope(100, blockRoot, 1), true))
@@ -439,9 +440,7 @@ func TestExecutionPayloadServiceRejectsGossipAfterRecoveredEnvelope(t *testing.T
 	impl, fcu := setupExecutionPayloadServiceWithoutLoop(t)
 	blockRoot := common.HexToHash("0x1234")
 	valid := newTestSignedEnvelope(100, blockRoot, 1)
-	fcu.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{
-		Block: &cltypes.BeaconBlock{Slot: 100},
-	}
+	fcu.Blocks[blockRoot] = newTestSignedBlockWithBuilder(blockRoot, 100, 1)
 	require.NoError(t, impl.ProcessRecoveredEnvelope(t.Context(), valid, true))
 	fcu.Envelopes[blockRoot] = valid
 
@@ -455,9 +454,7 @@ func TestExecutionPayloadServiceRejectsGossipAfterRecoveredEnvelope(t *testing.T
 func TestExecutionPayloadServiceRejectsConcurrentAlreadyStoredGossip(t *testing.T) {
 	impl, fcu := setupExecutionPayloadServiceWithoutLoop(t)
 	blockRoot := common.HexToHash("0x1234")
-	fcu.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{
-		Block: &cltypes.BeaconBlock{Slot: 100},
-	}
+	fcu.Blocks[blockRoot] = newTestSignedBlockWithBuilder(blockRoot, 100, 1)
 	fcu.Envelopes[blockRoot] = newTestSignedEnvelope(100, blockRoot, 1)
 	hasEnvelope := false
 	fcu.HasEnvelopeOverride = &hasEnvelope
@@ -470,15 +467,41 @@ func TestExecutionPayloadServiceRejectsConcurrentAlreadyStoredGossip(t *testing.
 	require.False(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 2}))
 }
 
-func TestExecutionPayloadServiceIgnoresLocalStoredEnvelopeReadFailure(t *testing.T) {
+func TestExecutionPayloadServiceIgnoresSameBuilderWithoutStoredEnvelopeRead(t *testing.T) {
 	impl, fcu := setupExecutionPayloadServiceWithoutLoop(t)
 	blockRoot := common.HexToHash("0x1234")
-	fcu.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100}}
+	fcu.Blocks[blockRoot] = newTestSignedBlockWithBuilder(blockRoot, 100, 1)
 	fcu.Envelopes[blockRoot] = newTestSignedEnvelope(100, blockRoot, 1)
-	fcu.ReadEnvelopeErr = errors.New("local storage failure")
 
-	err := impl.ProcessMessage(t.Context(), nil, newTestSignedEnvelope(100, blockRoot, 2))
+	err := impl.ProcessMessage(t.Context(), nil, newTestSignedEnvelope(100, blockRoot, 1))
 	require.ErrorIs(t, err, ErrIgnore)
+	require.Zero(t, fcu.ReadEnvelopeCalls.Load())
+}
+
+func TestExecutionPayloadServiceUsesCommittedBuilderForDuplicateGossip(t *testing.T) {
+	impl, fcu := setupExecutionPayloadServiceWithoutLoop(t)
+	blockRoot := common.HexToHash("0x1234")
+	fcu.Blocks[blockRoot] = newTestSignedBlockWithBuilder(blockRoot, 100, 1)
+	fcu.Envelopes[blockRoot] = newTestSignedEnvelope(100, blockRoot, 1)
+
+	for builderIndex := uint64(2); builderIndex <= 3; builderIndex++ {
+		err := impl.ProcessMessage(t.Context(), nil, newTestSignedEnvelope(100, blockRoot, builderIndex))
+		require.Error(t, err)
+		require.NotErrorIs(t, err, ErrIgnore)
+	}
+	require.Zero(t, fcu.ReadEnvelopeCalls.Load())
+}
+
+func TestExecutionPayloadServiceFinalizedDuplicateAvoidsStoredEnvelopeRead(t *testing.T) {
+	impl, fcu := setupExecutionPayloadServiceWithoutLoop(t)
+	blockRoot := common.HexToHash("0x1234")
+	fcu.Blocks[blockRoot] = newTestSignedBlockWithBuilder(blockRoot, 99, 1)
+	fcu.Envelopes[blockRoot] = newTestSignedEnvelope(99, blockRoot, 1)
+	fcu.FinalizedSlotVal = 100
+
+	err := impl.ProcessMessage(t.Context(), nil, newTestSignedEnvelope(99, blockRoot, 2))
+	require.ErrorIs(t, err, ErrIgnore)
+	require.Zero(t, fcu.ReadEnvelopeCalls.Load())
 }
 
 func TestExecutionPayloadServiceEmitsAvailabilityOnceAcrossProvenance(t *testing.T) {
@@ -661,6 +684,89 @@ func TestExecutionPayloadServiceDataAvailabilityRetryEvictsUnvalidatedAtCap(t *t
 	require.False(t, unvalidatedExists)
 	require.True(t, validatedExists)
 	require.Equal(t, int32(maxPendingEnvelopes), impl.pendingCount.Load())
+}
+
+func TestExecutionPayloadServiceDataAvailabilityRetryDoesNotEvictProcessingJob(t *testing.T) {
+	impl, _ := setupExecutionPayloadServiceWithoutLoop(t)
+	processingRoot := common.HexToHash("0x1111")
+	processingEnvelope := newTestSignedEnvelope(100, processingRoot, 1)
+	processingHash, err := processingEnvelope.HashSSZ()
+	require.NoError(t, err)
+	processingKey := pendingEnvelopeKey{blockRoot: processingRoot, envelopeHash: processingHash}
+	impl.pendingEnvelopes.Store(processingKey, &envelopeJob{envelope: processingEnvelope, creationTime: time.Now(), processing: true})
+
+	impl.pendingCount.Store(1)
+	impl.pendingMu.Lock()
+	impl.evictUnvalidatedPendingEnvelope()
+	impl.pendingMu.Unlock()
+
+	_, processingExists := impl.pendingEnvelopes.Load(processingKey)
+	require.True(t, processingExists)
+	require.Equal(t, int32(1), impl.pendingCount.Load())
+}
+
+func TestExecutionPayloadServiceInFlightPromotionSurvivesPriorityEviction(t *testing.T) {
+	impl, fcu := setupExecutionPayloadServiceWithoutLoop(t)
+	processingRoot := common.HexToHash("0x1111")
+	processingEnvelope := newTestSignedEnvelope(100, processingRoot, 1)
+	processingHash, err := processingEnvelope.HashSSZ()
+	require.NoError(t, err)
+	processingKey := pendingEnvelopeKey{blockRoot: processingRoot, envelopeHash: processingHash}
+	processingJob := &envelopeJob{envelope: processingEnvelope, creationTime: time.Now()}
+	processingJob.validate.Store(true)
+	impl.pendingEnvelopes.Store(processingKey, processingJob)
+	fcu.Blocks[processingRoot] = newTestSignedBlockWithBuilder(processingRoot, 100, 1)
+
+	evictableRoot := common.HexToHash("0x2222")
+	evictableEnvelope := newTestSignedEnvelope(100, evictableRoot, 2)
+	evictableHash, err := evictableEnvelope.HashSSZ()
+	require.NoError(t, err)
+	impl.pendingEnvelopes.Store(
+		pendingEnvelopeKey{blockRoot: evictableRoot, envelopeHash: evictableHash},
+		&envelopeJob{envelope: evictableEnvelope, creationTime: time.Now()},
+	)
+	impl.pendingCount.Store(maxPendingEnvelopes)
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	fcu.OnExecutionPayloadFunc = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {
+		close(entered)
+		<-release
+		return forkchoice.ErrEIP7594ColumnDataNotAvailable
+	}
+	done := make(chan struct{})
+	go func() {
+		impl.processPendingEnvelopes(t.Context())
+		close(done)
+	}()
+	<-entered
+
+	priorityRoot := common.HexToHash("0x3333")
+	impl.queuePendingEnvelopeWithOptions(priorityRoot, newTestSignedEnvelope(100, priorityRoot, 3), true, true, true)
+	close(release)
+	<-done
+
+	_, promoted := impl.pendingEnvelopes.Load(pendingEnvelopeKey{blockRoot: processingRoot, dataAvailability: true})
+	_, priority := impl.pendingEnvelopes.Load(pendingEnvelopeKey{blockRoot: priorityRoot, dataAvailability: true})
+	require.True(t, promoted)
+	require.True(t, priority)
+}
+
+func TestExecutionPayloadServicePendingDuplicateUpgradesAtCap(t *testing.T) {
+	impl, _ := setupExecutionPayloadServiceWithoutLoop(t)
+	blockRoot := common.HexToHash("0x1234")
+	envelope := newTestSignedEnvelope(100, blockRoot, 1)
+	impl.queuePendingEnvelopeWithOptions(blockRoot, envelope, false, false, false)
+	impl.pendingCount.Store(maxPendingEnvelopes)
+
+	impl.queuePendingEnvelopeWithOptions(blockRoot, envelope, true, true, false)
+
+	hash, err := envelope.HashSSZ()
+	require.NoError(t, err)
+	value, ok := impl.pendingEnvelopes.Load(pendingEnvelopeKey{blockRoot: blockRoot, envelopeHash: hash})
+	require.True(t, ok)
+	require.True(t, value.(*envelopeJob).recovered.Load())
+	require.True(t, value.(*envelopeJob).validate.Load())
 }
 
 func TestExecutionPayloadServicePendingQueuePreservesRecoveredEnvelope(t *testing.T) {

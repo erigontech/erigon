@@ -52,6 +52,7 @@ type pendingEnvelopeKey struct {
 type envelopeJob struct {
 	envelope     *cltypes.SignedExecutionPayloadEnvelope
 	creationTime time.Time
+	processing   bool
 	recovered    atomic.Bool
 	validate     atomic.Bool
 	nextAttempt  time.Time
@@ -165,9 +166,6 @@ func (s *executionPayloadService) processEnvelope(ctx context.Context, signedEnv
 	if block.Block == nil {
 		return errors.New("nil beacon block")
 	}
-	if !recovered && s.forkchoiceStore.HasEnvelope(beaconBlockRoot) {
-		return s.storedEnvelopeResult(beaconBlockRoot, builderIndex)
-	}
 
 	// [IGNORE] The node has not seen another valid SignedExecutionPayloadEnvelope
 	// for this block root from this builder.
@@ -186,12 +184,15 @@ func (s *executionPayloadService) processEnvelope(ctx context.Context, signedEnv
 			return fmt.Errorf("%w: envelope slot %d < finalized slot %d", ErrIgnore, block.Block.Slot, finalizedSlot)
 		}
 	}
+	if !recovered && s.forkchoiceStore.HasEnvelope(beaconBlockRoot) {
+		return storedEnvelopeResult(beaconBlockRoot, block, builderIndex)
+	}
 
 	// Process the execution payload through forkchoice
 	// Note: bid matching and signature verification are done in OnExecutionPayload.validateEnvelopeAgainstBlock
 	if err := s.forkchoiceStore.OnExecutionPayload(ctx, signedEnvelope, true, validatePayload); err != nil {
 		if errors.Is(err, forkchoice.ErrExecutionPayloadAlreadyStored) {
-			return s.storedEnvelopeResult(beaconBlockRoot, builderIndex)
+			return storedEnvelopeResult(beaconBlockRoot, block, builderIndex)
 		}
 		if errors.Is(err, forkchoice.ErrIgnore) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
 			if queueOnRetry {
@@ -238,16 +239,17 @@ func (s *executionPayloadService) accountStoredPendingEnvelope(block *cltypes.Si
 	return true
 }
 
-func (s *executionPayloadService) storedEnvelopeResult(blockRoot common.Hash, builderIndex uint64) error {
-	stored, err := s.forkchoiceStore.ReadEnvelopeFromDisk(blockRoot)
-	if err != nil {
-		return fmt.Errorf("%w: failed to read stored envelope for block %v: %v", ErrIgnore, blockRoot, err)
+func storedEnvelopeResult(blockRoot common.Hash, block *cltypes.SignedBeaconBlock, builderIndex uint64) error {
+	if block == nil || block.Block == nil || block.Block.Body == nil {
+		return fmt.Errorf("%w: stored envelope block is incomplete", ErrIgnore)
 	}
-	if stored == nil || stored.Message == nil {
-		return fmt.Errorf("%w: stored envelope missing for block %v", ErrIgnore, blockRoot)
+	bid := block.Block.Body.GetSignedExecutionPayloadBid()
+	if bid == nil || bid.Message == nil {
+		return fmt.Errorf("%w: stored envelope block has no committed bid", ErrIgnore)
 	}
-	if stored.Message.BuilderIndex != builderIndex {
-		return fmt.Errorf("envelope builder_index %d != stored builder_index %d", builderIndex, stored.Message.BuilderIndex)
+	storedBuilder := bid.Message.BuilderIndex
+	if storedBuilder != builderIndex {
+		return fmt.Errorf("envelope builder_index %d != stored builder_index %d", builderIndex, storedBuilder)
 	}
 	return fmt.Errorf("%w: envelope already applied for block %v from builder %d", ErrIgnore, blockRoot, builderIndex)
 }
@@ -262,9 +264,6 @@ func (s *executionPayloadService) queuePendingEnvelopeWithOptions(blockRoot comm
 
 	var envelopeHash common.Hash
 	if !dataAvailability {
-		if s.pendingCount.Load() >= maxPendingEnvelopes {
-			return
-		}
 		var err error
 		envelopeHash, err = envelope.HashSSZ()
 		if err != nil {
@@ -314,7 +313,8 @@ func (s *executionPayloadService) queuePendingEnvelopeWithOptions(blockRoot comm
 func (s *executionPayloadService) evictUnvalidatedPendingEnvelope() {
 	s.pendingEnvelopes.Range(func(key, value any) bool {
 		pendingKey := key.(pendingEnvelopeKey)
-		if pendingKey.dataAvailability {
+		job := value.(*envelopeJob)
+		if pendingKey.dataAvailability || job.processing {
 			return true
 		}
 		if s.pendingEnvelopes.CompareAndDelete(pendingKey, value) {
@@ -322,6 +322,23 @@ func (s *executionPayloadService) evictUnvalidatedPendingEnvelope() {
 		}
 		return false
 	})
+}
+
+func (s *executionPayloadService) claimPendingEnvelope(key pendingEnvelopeKey, job *envelopeJob) bool {
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+	actual, ok := s.pendingEnvelopes.Load(key)
+	if !ok || actual != job || job.processing {
+		return false
+	}
+	job.processing = true
+	return true
+}
+
+func (s *executionPayloadService) releasePendingEnvelope(job *envelopeJob) {
+	s.pendingMu.Lock()
+	job.processing = false
+	s.pendingMu.Unlock()
 }
 
 func upgradeEnvelopeJob(job *envelopeJob, recovered, validatePayload bool) {
@@ -443,6 +460,10 @@ func (s *executionPayloadService) processPendingEnvelopes(ctx context.Context) {
 		if pendingKey.dataAvailability && time.Now().Before(job.nextAttempt) {
 			return true
 		}
+		if !s.claimPendingEnvelope(pendingKey, job) {
+			return true
+		}
+		defer s.releasePendingEnvelope(job)
 
 		err := s.processEnvelope(ctx, job.envelope, job.recovered.Load(), job.validate.Load(), false)
 		if errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {

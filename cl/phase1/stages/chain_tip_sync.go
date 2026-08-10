@@ -263,7 +263,7 @@ MainLoop:
 				if block.Version() >= clparams.GloasVersion && len(envelopes) > 0 {
 					parentRoot := block.Block.ParentRoot
 					if env, ok := envelopes[common.Hash(parentRoot)]; ok {
-						if envErr := cfg.forkChoice.OnExecutionPayload(ctx, env, false, canRetryGloasPayloads(cfg)); envErr != nil && !errors.Is(envErr, forkchoice.ErrExecutionPayloadAlreadyStored) {
+						if envErr := cfg.forkChoice.OnExecutionPayload(ctx, env, false, canValidateGloasPayloads(cfg)); envErr != nil && !errors.Is(envErr, forkchoice.ErrExecutionPayloadAlreadyStored) {
 							log.Debug("[chainTipSync] failed to apply parent envelope", "slot", block.Block.Slot, "err", envErr)
 						}
 					}

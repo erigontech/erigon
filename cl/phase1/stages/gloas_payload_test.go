@@ -193,25 +193,25 @@ func TestStandaloneExecutionClientCanValidateGloasPayloads(t *testing.T) {
 	require.True(t, canValidateGloasPayloads(&Cfg{executionClient: &testExecutionEngine{supportInsertion: true}}))
 }
 
-func TestValidateAnchorPayloadIfLocalELFollowsSupportInsertion(t *testing.T) {
+func TestValidateAnchorPayloadUsesRemoteExecutionClient(t *testing.T) {
 	cfg, _, bid, env, anchorRoot := validAnchorEnvelopeFixture(t, 1)
 	remoteEL := &testExecutionEngine{
 		supportInsertion: false,
-		payloadStatus:    execution_client.PayloadStatusInvalidated,
+		payloadStatus:    execution_client.PayloadStatusValidated,
 	}
 
-	require.NoError(t, validateAnchorPayloadIfLocalEL(context.Background(), &Cfg{
+	require.NoError(t, validateAnchorPayloadWithExecutionClient(context.Background(), &Cfg{
 		beaconCfg:       cfg,
 		executionClient: remoteEL,
 		forkChoice:      &forkchoice.ForkChoiceStore{},
 	}, anchorRoot, bid, env))
-	require.Equal(t, 0, remoteEL.newPayloadCalls)
+	require.Equal(t, 1, remoteEL.newPayloadCalls)
 
 	localEL := &testExecutionEngine{
 		supportInsertion: true,
 		payloadStatus:    execution_client.PayloadStatusValidated,
 	}
-	require.NoError(t, validateAnchorPayloadIfLocalEL(context.Background(), &Cfg{
+	require.NoError(t, validateAnchorPayloadWithExecutionClient(context.Background(), &Cfg{
 		beaconCfg:       cfg,
 		executionClient: localEL,
 		forkChoice:      &forkchoice.ForkChoiceStore{},
