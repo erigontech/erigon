@@ -59,12 +59,13 @@ type envelopeJob struct {
 }
 
 const (
-	seenEnvelopeCacheSize        = 1000
-	pendingEnvelopeExpiry        = 2 * time.Minute
-	pendingEnvelopeCheckInterval = 100 * time.Millisecond
-	pendingEnvelopeInitialRetry  = time.Second
-	pendingEnvelopeMaxRetry      = 10 * time.Second
-	maxPendingEnvelopes          = 1024
+	seenEnvelopeCacheSize         = 1000
+	pendingEnvelopeExpiry         = 30 * time.Second
+	pendingDataAvailabilityExpiry = 2 * time.Minute
+	pendingEnvelopeCheckInterval  = 100 * time.Millisecond
+	pendingEnvelopeInitialRetry   = time.Second
+	pendingEnvelopeMaxRetry       = 10 * time.Second
+	maxPendingEnvelopes           = 1024
 )
 
 type executionPayloadService struct {
@@ -75,8 +76,9 @@ type executionPayloadService struct {
 	// Cache to track seen envelopes: (beaconBlockRoot, builderIndex) -> struct{}
 	seenEnvelopesCache *lru.Cache[seenEnvelopeKey, struct{}]
 
-	// Pending envelopes waiting for block to arrive
+	// pendingMu keeps map membership and count changes atomic; retry timing is owned by loop.
 	pendingEnvelopes sync.Map // pendingEnvelopeKey -> *envelopeJob
+	pendingMu        sync.Mutex
 	pendingCount     atomic.Int32
 	pendingCond      *sync.Cond
 }
@@ -188,6 +190,9 @@ func (s *executionPayloadService) processEnvelope(ctx context.Context, signedEnv
 	// Process the execution payload through forkchoice
 	// Note: bid matching and signature verification are done in OnExecutionPayload.validateEnvelopeAgainstBlock
 	if err := s.forkchoiceStore.OnExecutionPayload(ctx, signedEnvelope, true, validatePayload); err != nil {
+		if errors.Is(err, forkchoice.ErrExecutionPayloadAlreadyStored) {
+			return fmt.Errorf("%w: %w", ErrIgnore, err)
+		}
 		if errors.Is(err, forkchoice.ErrIgnore) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
 			if queueOnRetry {
 				s.queuePendingEnvelopeWithOptions(beaconBlockRoot, signedEnvelope, recovered, validatePayload, errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable))
@@ -199,9 +204,6 @@ func (s *executionPayloadService) processEnvelope(ctx context.Context, signedEnv
 
 	// Mark as seen AFTER successful validation
 	// This ensures invalid envelopes (e.g., with forged signatures) don't block valid ones
-	if recovered {
-		return nil
-	}
 	s.seenEnvelopesCache.Add(seenKey, struct{}{})
 
 	// Emit SSE event for execution_payload_available [New in Gloas:EIP7732]
@@ -210,7 +212,7 @@ func (s *executionPayloadService) processEnvelope(ctx context.Context, signedEnv
 		BlockRoot: beaconBlockRoot,
 	})
 
-	log.Trace("Processed execution payload via gossip",
+	log.Trace("Processed execution payload envelope",
 		"slot", block.Block.Slot,
 		"beaconBlockRoot", beaconBlockRoot,
 		"builderIndex", builderIndex)
@@ -225,23 +227,15 @@ func (s *executionPayloadService) queuePendingEnvelope(blockRoot common.Hash, en
 
 func (s *executionPayloadService) queuePendingEnvelopeWithOptions(blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope, recovered, validatePayload, dataAvailability bool) {
 	key := pendingEnvelopeKey{blockRoot: blockRoot, dataAvailability: dataAvailability}
-	if dataAvailability {
-		if actual, loaded := s.pendingEnvelopes.Load(key); loaded {
-			upgradeEnvelopeJob(actual.(*envelopeJob), recovered, validatePayload)
-			return
-		}
-	}
-	if s.pendingCount.Add(1) > maxPendingEnvelopes {
-		s.pendingCount.Add(-1)
-		return
-	}
 
 	var envelopeHash common.Hash
 	if !dataAvailability {
+		if s.pendingCount.Load() >= maxPendingEnvelopes {
+			return
+		}
 		var err error
 		envelopeHash, err = envelope.HashSSZ()
 		if err != nil {
-			s.pendingCount.Add(-1)
 			log.Warn("Failed to hash envelope for pending queue", "blockRoot", blockRoot, "err", err)
 			return
 		}
@@ -258,15 +252,24 @@ func (s *executionPayloadService) queuePendingEnvelopeWithOptions(blockRoot comm
 		job.retryDelay = pendingEnvelopeInitialRetry
 		job.nextAttempt = time.Now().Add(job.retryDelay)
 	}
-	actual, loaded := s.pendingEnvelopes.LoadOrStore(key, job)
-	if loaded {
+
+	s.pendingMu.Lock()
+	if actual, loaded := s.pendingEnvelopes.Load(key); loaded {
 		upgradeEnvelopeJob(actual.(*envelopeJob), recovered, validatePayload)
-		s.pendingCount.Add(-1)
-	} else {
-		s.pendingCond.L.Lock()
-		s.pendingCond.Signal()
-		s.pendingCond.L.Unlock()
+		s.pendingMu.Unlock()
+		return
 	}
+	if s.pendingCount.Load() >= maxPendingEnvelopes {
+		s.pendingMu.Unlock()
+		return
+	}
+	s.pendingEnvelopes.Store(key, job)
+	s.pendingCount.Add(1)
+	s.pendingMu.Unlock()
+
+	s.pendingCond.L.Lock()
+	s.pendingCond.Signal()
+	s.pendingCond.L.Unlock()
 }
 
 func upgradeEnvelopeJob(job *envelopeJob, recovered, validatePayload bool) {
@@ -276,6 +279,31 @@ func upgradeEnvelopeJob(job *envelopeJob, recovered, validatePayload bool) {
 	if recovered {
 		job.recovered.Store(true)
 	}
+}
+
+func (s *executionPayloadService) promoteDataAvailabilityRetry(oldKey pendingEnvelopeKey, job *envelopeJob) {
+	job.retryDelay = pendingEnvelopeInitialRetry
+	job.nextAttempt = time.Now().Add(job.retryDelay)
+	newKey := pendingEnvelopeKey{blockRoot: oldKey.blockRoot, dataAvailability: true}
+	s.pendingMu.Lock()
+	actual, loaded := s.pendingEnvelopes.Load(newKey)
+	if loaded {
+		upgradeEnvelopeJob(actual.(*envelopeJob), job.recovered.Load(), job.validate.Load())
+	} else {
+		s.pendingEnvelopes.Store(newKey, job)
+	}
+	if s.pendingEnvelopes.CompareAndDelete(oldKey, job) && loaded {
+		s.pendingCount.Add(-1)
+	}
+	s.pendingMu.Unlock()
+}
+
+func (s *executionPayloadService) removePendingEnvelope(key pendingEnvelopeKey, job *envelopeJob) {
+	s.pendingMu.Lock()
+	if s.pendingEnvelopes.CompareAndDelete(key, job) {
+		s.pendingCount.Add(-1)
+	}
+	s.pendingMu.Unlock()
 }
 
 // loop is the background goroutine that processes pending envelopes
@@ -325,9 +353,12 @@ func (s *executionPayloadService) processPendingEnvelopes(ctx context.Context) {
 		job := value.(*envelopeJob)
 
 		// Check expiry
-		if time.Since(job.creationTime) > pendingEnvelopeExpiry {
-			s.pendingEnvelopes.Delete(pendingKey)
-			s.pendingCount.Add(-1)
+		expiry := pendingEnvelopeExpiry
+		if pendingKey.dataAvailability {
+			expiry = pendingDataAvailabilityExpiry
+		}
+		if time.Since(job.creationTime) > expiry {
+			s.removePendingEnvelope(pendingKey, job)
 			log.Trace("Pending envelope expired", "blockRoot", pendingKey.blockRoot)
 			return true
 		}
@@ -344,9 +375,7 @@ func (s *executionPayloadService) processPendingEnvelopes(ctx context.Context) {
 		err := s.processEnvelope(ctx, job.envelope, job.recovered.Load(), job.validate.Load(), false)
 		if errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
 			if !pendingKey.dataAvailability {
-				s.pendingEnvelopes.Delete(pendingKey)
-				s.pendingCount.Add(-1)
-				s.queuePendingEnvelopeWithOptions(pendingKey.blockRoot, job.envelope, job.recovered.Load(), job.validate.Load(), true)
+				s.promoteDataAvailabilityRetry(pendingKey, job)
 				return true
 			}
 			job.retryDelay = min(job.retryDelay*2, pendingEnvelopeMaxRetry)
@@ -356,8 +385,7 @@ func (s *executionPayloadService) processPendingEnvelopes(ctx context.Context) {
 		if errors.Is(err, forkchoice.ErrIgnore) {
 			return true
 		}
-		s.pendingEnvelopes.Delete(pendingKey)
-		s.pendingCount.Add(-1)
+		s.removePendingEnvelope(pendingKey, job)
 		if err != nil {
 			log.Trace("Failed to process pending envelope", "blockRoot", pendingKey.blockRoot, "err", err)
 		}

@@ -64,6 +64,10 @@ func canRetryGloasPayloads(cfg *Cfg) bool {
 	return cfg.executionClient != nil && cfg.executionClient.SupportInsertion()
 }
 
+func canValidateGloasPayloads(cfg *Cfg) bool {
+	return cfg.executionClient != nil
+}
+
 // waitForExecutionEngineToBeFinished checks if the execution engine is ready within a specified timeout.
 // It periodically checks the readiness of the execution client and returns true if the client is ready before
 // the timeout occurs. If the context is canceled or a timeout occurs, it returns false with the corresponding error.
@@ -710,7 +714,7 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 			if headRoot != (common.Hash{}) && !cfg.forkChoice.HasEnvelope(headRoot) {
 				pollForEnvelope(ctx, cfg, headRoot, 2*time.Second)
 			}
-			if canRetryGloasPayloads(cfg) {
+			if canValidateGloasPayloads(cfg) {
 				verifyUnverifiedGloasPayloads(ctx, cfg)
 			}
 			// NOTE: recoverMissingEnvelopes runs unconditionally above (before

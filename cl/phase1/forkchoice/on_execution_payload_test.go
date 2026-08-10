@@ -62,6 +62,16 @@ func TestValidateEnvelopeAgainstBlock_NoBid(t *testing.T) {
 	require.Contains(t, err.Error(), "block missing signed_execution_payload_bid")
 }
 
+func TestOnExecutionPayloadReportsAlreadyStored(t *testing.T) {
+	f := &ForkChoiceStore{forkGraph: payloadVoteForkGraph{hasEnvelope: true}}
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{
+		Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: common.HexToHash("0x1234")},
+	}
+
+	err := f.OnExecutionPayload(t.Context(), envelope, true, true)
+	require.ErrorIs(t, err, ErrExecutionPayloadAlreadyStored)
+}
+
 // TestValidateEnvelopeAgainstBlock_SlotNumberMismatch tests that validation fails when
 // block.slot != envelope.payload.slot_number (EIP-7843 / GLOAS p2p-interface REJECT rule).
 func TestValidateEnvelopeAgainstBlock_SlotNumberMismatch(t *testing.T) {

@@ -187,6 +187,12 @@ func TestStandaloneExecutionClientDoesNotRunLocalGloasRetry(t *testing.T) {
 	require.True(t, canRetryGloasPayloads(&Cfg{executionClient: &testExecutionEngine{supportInsertion: true}}))
 }
 
+func TestStandaloneExecutionClientCanValidateGloasPayloads(t *testing.T) {
+	require.False(t, canValidateGloasPayloads(&Cfg{}))
+	require.True(t, canValidateGloasPayloads(&Cfg{executionClient: &testExecutionEngine{supportInsertion: false}}))
+	require.True(t, canValidateGloasPayloads(&Cfg{executionClient: &testExecutionEngine{supportInsertion: true}}))
+}
+
 func TestValidateAnchorPayloadIfLocalELFollowsSupportInsertion(t *testing.T) {
 	cfg, _, bid, env, anchorRoot := validAnchorEnvelopeFixture(t, 1)
 	remoteEL := &testExecutionEngine{

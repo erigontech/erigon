@@ -495,8 +495,11 @@ func (f *ForkChoiceStore) OnExecutionPayload(ctx context.Context, signedEnvelope
 	// Process envelope under f.mu; DB index write happens after unlock to avoid
 	// deadlock with postForkchoiceOperations (which holds MDBX tx then needs f.mu.RLock).
 	applied, err := f.applyEnvelope(ctx, signedEnvelope, checkBlobData, validatePayload)
-	if err != nil || !applied {
+	if err != nil {
 		return err
+	}
+	if !applied {
+		return ErrExecutionPayloadAlreadyStored
 	}
 
 	// Write execution block indices outside f.mu.
