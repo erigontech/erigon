@@ -87,12 +87,13 @@ func (p BranchPublisher) Enabled() bool {
 	return p.c != nil && p.generation.Enabled()
 }
 
-// Initialize binds an empty or previously published cache to generation.
+// Initialize binds the cache to generation. A mismatch clears branches and
+// their file provenance because neither can be attributed to that snapshot.
 func (p BranchPublisher) Initialize(generation cache.Generation) {
 	if p.c == nil {
 		return
 	}
-	p.generation.Initialize(generation, p.c.Clear)
+	p.generation.Initialize(generation, p.c.resetProvenanceAndClear)
 }
 
 // BranchPublication represents one pending durable branch transition.
@@ -120,14 +121,15 @@ func (p *BranchPublication) Abort() {
 
 // Publish applies staged pin changes and committed branch updates before it
 // exposes generation. clear is required after canonical unwind because its
-// diffset is not a complete list of branches from the discarded fork.
+// diffset is not a complete list of branches or file-coverage claims from the
+// discarded fork.
 func (p *BranchPublication) Publish(generation cache.Generation, updates []BranchUpdate, clear bool, adaptive *AdaptivePinPlan) {
 	if p == nil || p.c == nil {
 		return
 	}
 	p.generation.Publish(generation, func() {
 		if clear {
-			p.c.Clear()
+			p.c.resetProvenanceAndClear()
 		}
 		adaptive.apply(p.generation)
 		for i := range updates {

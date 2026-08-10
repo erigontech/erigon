@@ -72,3 +72,47 @@ func TestBranchCacheFilesPublication(t *testing.T) {
 	_, _, ok = current.Get(key)
 	require.True(t, ok, "an already absorbed files view must not clear again")
 }
+
+func TestBranchCacheCanonicalClearResetsFileProvenance(t *testing.T) {
+	branchCache, publisher, key := branchCacheWithPublishedCoverage(t)
+	publication := publisher.Begin()
+	publication.Publish(testBranchGeneration(3), nil, true, nil)
+	requireBranchCacheForeignFilesClear(t, branchCache, key, 3)
+}
+
+func TestBranchCacheInitializeMismatchResetsFileProvenance(t *testing.T) {
+	branchCache, publisher, key := branchCacheWithPublishedCoverage(t)
+	publisher.Initialize(testBranchGeneration(3))
+	requireBranchCacheForeignFilesClear(t, branchCache, key, 3)
+}
+
+func branchCacheWithPublishedCoverage(t *testing.T) (*BranchCache, BranchPublisher, []byte) {
+	t.Helper()
+	branchCache := NewBranchCache(64)
+	t.Cleanup(branchCache.Close)
+	publisher := branchCache.Publisher()
+	publisher.Initialize(testBranchGeneration(1))
+	key := []byte{0x01}
+
+	publication := publisher.Begin()
+	publication.Publish(testBranchGeneration(2), []BranchUpdate{{
+		Key:   key,
+		Value: []byte{0xbb},
+		Step:  1,
+		TxNum: 100,
+	}}, false, nil)
+	return branchCache, publisher, key
+}
+
+func requireBranchCacheForeignFilesClear(t *testing.T, branchCache *BranchCache, key []byte, stateVersion uint64) {
+	t.Helper()
+	current := branchCache.View(testBranchGeneration(stateVersion))
+	current.Fill(key, []byte{0xcc}, 2)
+
+	change := branchCache.BeginFilesPublication(50)
+	require.NotNil(t, change)
+	change.Finish()
+
+	_, _, ok := branchCache.View(cache.BranchGeneration(stateVersion, 50)).Get(key)
+	require.False(t, ok, "files not covered by the current lineage must clear cached branches")
+}

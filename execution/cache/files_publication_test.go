@@ -74,6 +74,49 @@ func TestStateCacheFilesPublication(t *testing.T) {
 	require.True(t, ok, "an already absorbed files view must not clear again")
 }
 
+func TestStateCacheCanonicalClearResetsFileProvenance(t *testing.T) {
+	stateCache, publisher, key := stateCacheWithPublishedCoverage(t)
+	publication := publisher.Begin()
+	publication.Publish(testStateGeneration(3), nil, true)
+	requireStateCacheForeignFilesClear(t, stateCache, key, 3)
+}
+
+func TestStateCacheInitializeMismatchResetsFileProvenance(t *testing.T) {
+	stateCache, publisher, key := stateCacheWithPublishedCoverage(t)
+	publisher.Initialize(testStateGeneration(3))
+	requireStateCacheForeignFilesClear(t, stateCache, key, 3)
+}
+
+func stateCacheWithPublishedCoverage(t *testing.T) (*StateCache, Publisher, []byte) {
+	t.Helper()
+	stateCache, publisher := readyStateCache(t, 1)
+	key := makeAddr(1)
+	publication := publisher.Begin()
+	publication.Publish(testStateGeneration(2), []Update{{
+		Domain: kv.AccountsDomain,
+		Key:    key,
+		Value:  makeValue(1),
+		Step:   1,
+		TxNum:  100,
+	}}, false)
+	return stateCache, publisher, key
+}
+
+func requireStateCacheForeignFilesClear(t *testing.T, stateCache *StateCache, key []byte, stateVersion uint64) {
+	t.Helper()
+	current := stateCache.View(testStateGeneration(stateVersion))
+	current.Fill(kv.AccountsDomain, key, makeValue(2), 2)
+
+	var filesEnd [kv.DomainLen]uint64
+	filesEnd[kv.AccountsDomain] = 50
+	change := stateCache.BeginFilesPublication(filesEnd)
+	require.NotNil(t, change)
+	change.Finish()
+
+	_, ok := stateCache.View(StateGeneration(stateVersion, 50, 0, 0)).Get(kv.AccountsDomain, key)
+	require.False(t, ok, "files not covered by the current lineage must clear cache entries")
+}
+
 func TestFilesPublicationBlocksCachePublicationUntilVisible(t *testing.T) {
 	stateCache, publisher := readyStateCache(t, 1)
 	var filesEnd [kv.DomainLen]uint64

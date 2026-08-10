@@ -43,8 +43,8 @@ type StateCache struct {
 	generation GenerationGate
 
 	// committedTxNumEnd is only a file-provenance watermark. Cache validity is
-	// decided by Generation; these ends distinguish files built from published
-	// updates from files downloaded outside that stream.
+	// decided by Generation; these ends distinguish files covered by published
+	// updates in the current canonical lineage from files downloaded outside it.
 	committedTxNumEnd [kv.DomainLen]uint64
 	caches            [kv.DomainLen]Cache
 	disableFills      bool
@@ -266,6 +266,11 @@ func (c *StateCache) clearLocked() {
 	}
 }
 
+func (c *StateCache) resetProvenanceAndClearLocked() {
+	c.committedTxNumEnd = [kv.DomainLen]uint64{}
+	c.clearLocked()
+}
+
 func (c *StateCache) Close() {
 	c.generation.Close()
 	for _, cache := range c.caches {
@@ -333,13 +338,13 @@ func (c *StateCache) Publisher() Publisher {
 func (p Publisher) Enabled() bool { return p.c != nil && p.generation.Enabled() }
 
 // Initialize binds the cache to the database and files generation seen by its
-// canonical owner. A mismatch clears entries because their origin cannot be
-// proven compatible with that snapshot.
+// canonical owner. A mismatch clears entries and their file provenance because
+// neither can be proven compatible with that snapshot.
 func (p Publisher) Initialize(generation Generation) {
 	if p.c == nil {
 		return
 	}
-	p.generation.Initialize(generation, p.c.clearLocked)
+	p.generation.Initialize(generation, p.c.resetProvenanceAndClearLocked)
 }
 
 // Publication represents one pending transition of the durable database
@@ -379,15 +384,15 @@ func (p *Publication) Abort() {
 //
 // A forward commit can retain entries that were not updated because they still
 // have the same value in the new state. Canonical unwind sets clear because its
-// callbacks do not enumerate every value that may belong to the discarded
-// fork.
+// callbacks do not enumerate every value or file-coverage claim that may belong
+// to the discarded fork.
 func (p *Publication) Publish(generation Generation, updates []Update, clear bool) {
 	if p == nil || p.c == nil {
 		return
 	}
 	p.generation.Publish(generation, func() {
 		if clear {
-			p.c.clearLocked()
+			p.c.resetProvenanceAndClearLocked()
 		}
 		for i := range updates {
 			p.c.applyLocked(updates[i])

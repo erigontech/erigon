@@ -53,8 +53,8 @@ type BranchCache struct {
 	generation cache.GenerationGate
 
 	// committedTxNumEnd is only a file-provenance watermark. Cache validity is
-	// decided by Generation; this end distinguishes locally built commitment
-	// files from files downloaded outside the publication stream.
+	// decided by Generation; this end distinguishes commitment files covered by
+	// updates in the current canonical lineage from files downloaded outside it.
 	committedTxNumEnd uint64
 	// clearEpoch lets optimistic adaptive plans detect that their pinned
 	// entries were removed without extending the cache publication lock.
@@ -358,10 +358,12 @@ func (c *BranchCache) Close() {
 // Reset clears cached branches and revokes all views until the next durable
 // publication.
 func (c *BranchCache) Reset() {
-	c.generation.Reset(func() {
-		c.committedTxNumEnd = 0
-		c.Clear()
-	})
+	c.generation.Reset(c.resetProvenanceAndClear)
+}
+
+func (c *BranchCache) resetProvenanceAndClear() {
+	c.committedTxNumEnd = 0
+	c.Clear()
 }
 
 // BeginFilesPublication revokes the old files generation. It retains entries
