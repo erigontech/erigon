@@ -166,7 +166,7 @@ func (s *executionPayloadService) processEnvelope(ctx context.Context, signedEnv
 		return errors.New("nil beacon block")
 	}
 	if !recovered && s.forkchoiceStore.HasEnvelope(beaconBlockRoot) {
-		return fmt.Errorf("%w: envelope already applied for block %v", ErrIgnore, beaconBlockRoot)
+		return s.storedEnvelopeResult(beaconBlockRoot, builderIndex)
 	}
 
 	// [IGNORE] The node has not seen another valid SignedExecutionPayloadEnvelope
@@ -191,7 +191,7 @@ func (s *executionPayloadService) processEnvelope(ctx context.Context, signedEnv
 	// Note: bid matching and signature verification are done in OnExecutionPayload.validateEnvelopeAgainstBlock
 	if err := s.forkchoiceStore.OnExecutionPayload(ctx, signedEnvelope, true, validatePayload); err != nil {
 		if errors.Is(err, forkchoice.ErrExecutionPayloadAlreadyStored) {
-			return fmt.Errorf("%w: %w", ErrIgnore, err)
+			return s.storedEnvelopeResult(beaconBlockRoot, builderIndex)
 		}
 		if errors.Is(err, forkchoice.ErrIgnore) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
 			if queueOnRetry {
@@ -202,15 +202,7 @@ func (s *executionPayloadService) processEnvelope(ctx context.Context, signedEnv
 		return fmt.Errorf("failed to process execution payload: %w", err)
 	}
 
-	// Mark as seen AFTER successful validation
-	// This ensures invalid envelopes (e.g., with forged signatures) don't block valid ones
-	s.seenEnvelopesCache.Add(seenKey, struct{}{})
-
-	// Emit SSE event for execution_payload_available [New in Gloas:EIP7732]
-	s.emitters.Operation().SendExecutionPayloadAvailable(&beaconevents.ExecutionPayloadAvailableData{
-		Slot:      block.Block.Slot,
-		BlockRoot: beaconBlockRoot,
-	})
+	s.markEnvelopeAvailable(seenKey, block.Block.Slot)
 
 	log.Trace("Processed execution payload envelope",
 		"slot", block.Block.Slot,
@@ -218,6 +210,46 @@ func (s *executionPayloadService) processEnvelope(ctx context.Context, signedEnv
 		"builderIndex", builderIndex)
 
 	return nil
+}
+
+func (s *executionPayloadService) markEnvelopeAvailable(key seenEnvelopeKey, slot uint64) {
+	if seen, _ := s.seenEnvelopesCache.ContainsOrAdd(key, struct{}{}); seen {
+		return
+	}
+	s.emitters.Operation().SendExecutionPayloadAvailable(&beaconevents.ExecutionPayloadAvailableData{
+		Slot:      slot,
+		BlockRoot: key.beaconBlockRoot,
+	})
+}
+
+func (s *executionPayloadService) accountStoredPendingEnvelope(block *cltypes.SignedBeaconBlock, key pendingEnvelopeKey, job *envelopeJob) bool {
+	stored, err := s.forkchoiceStore.ReadEnvelopeFromDisk(key.blockRoot)
+	if err != nil || stored == nil || stored.Message == nil || job.envelope == nil || job.envelope.Message == nil {
+		return false
+	}
+	if stored.Message.BuilderIndex != job.envelope.Message.BuilderIndex {
+		return false
+	}
+	s.markEnvelopeAvailable(seenEnvelopeKey{
+		beaconBlockRoot: key.blockRoot,
+		builderIndex:    stored.Message.BuilderIndex,
+	}, block.Block.Slot)
+	s.removePendingEnvelope(key, job)
+	return true
+}
+
+func (s *executionPayloadService) storedEnvelopeResult(blockRoot common.Hash, builderIndex uint64) error {
+	stored, err := s.forkchoiceStore.ReadEnvelopeFromDisk(blockRoot)
+	if err != nil {
+		return fmt.Errorf("%w: failed to read stored envelope for block %v: %v", ErrIgnore, blockRoot, err)
+	}
+	if stored == nil || stored.Message == nil {
+		return fmt.Errorf("%w: stored envelope missing for block %v", ErrIgnore, blockRoot)
+	}
+	if stored.Message.BuilderIndex != builderIndex {
+		return fmt.Errorf("envelope builder_index %d != stored builder_index %d", builderIndex, stored.Message.BuilderIndex)
+	}
+	return fmt.Errorf("%w: envelope already applied for block %v from builder %d", ErrIgnore, blockRoot, builderIndex)
 }
 
 // queuePendingEnvelope adds an envelope to the pending queue for later processing
@@ -255,9 +287,16 @@ func (s *executionPayloadService) queuePendingEnvelopeWithOptions(blockRoot comm
 
 	s.pendingMu.Lock()
 	if actual, loaded := s.pendingEnvelopes.Load(key); loaded {
-		upgradeEnvelopeJob(actual.(*envelopeJob), recovered, validatePayload)
+		storedJob := actual.(*envelopeJob)
+		upgradeEnvelopeJob(storedJob, recovered, validatePayload)
+		if dataAvailability {
+			storedJob.creationTime = time.Now()
+		}
 		s.pendingMu.Unlock()
 		return
+	}
+	if dataAvailability && s.pendingCount.Load() >= maxPendingEnvelopes {
+		s.evictUnvalidatedPendingEnvelope()
 	}
 	if s.pendingCount.Load() >= maxPendingEnvelopes {
 		s.pendingMu.Unlock()
@@ -270,6 +309,19 @@ func (s *executionPayloadService) queuePendingEnvelopeWithOptions(blockRoot comm
 	s.pendingCond.L.Lock()
 	s.pendingCond.Signal()
 	s.pendingCond.L.Unlock()
+}
+
+func (s *executionPayloadService) evictUnvalidatedPendingEnvelope() {
+	s.pendingEnvelopes.Range(func(key, value any) bool {
+		pendingKey := key.(pendingEnvelopeKey)
+		if pendingKey.dataAvailability {
+			return true
+		}
+		if s.pendingEnvelopes.CompareAndDelete(pendingKey, value) {
+			s.pendingCount.Add(-1)
+		}
+		return false
+	})
 }
 
 func upgradeEnvelopeJob(job *envelopeJob, recovered, validatePayload bool) {
@@ -286,10 +338,17 @@ func (s *executionPayloadService) promoteDataAvailabilityRetry(oldKey pendingEnv
 	job.nextAttempt = time.Now().Add(job.retryDelay)
 	newKey := pendingEnvelopeKey{blockRoot: oldKey.blockRoot, dataAvailability: true}
 	s.pendingMu.Lock()
+	if actual, ok := s.pendingEnvelopes.Load(oldKey); !ok || actual != job {
+		s.pendingMu.Unlock()
+		return
+	}
 	actual, loaded := s.pendingEnvelopes.Load(newKey)
 	if loaded {
-		upgradeEnvelopeJob(actual.(*envelopeJob), job.recovered.Load(), job.validate.Load())
+		storedJob := actual.(*envelopeJob)
+		upgradeEnvelopeJob(storedJob, job.recovered.Load(), job.validate.Load())
+		storedJob.creationTime = time.Now()
 	} else {
+		job.creationTime = time.Now()
 		s.pendingEnvelopes.Store(newKey, job)
 	}
 	if s.pendingEnvelopes.CompareAndDelete(oldKey, job) && loaded {
@@ -304,6 +363,20 @@ func (s *executionPayloadService) removePendingEnvelope(key pendingEnvelopeKey, 
 		s.pendingCount.Add(-1)
 	}
 	s.pendingMu.Unlock()
+}
+
+func (s *executionPayloadService) expirePendingEnvelope(key pendingEnvelopeKey, job *envelopeJob, expiry time.Duration) bool {
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+	actual, ok := s.pendingEnvelopes.Load(key)
+	if !ok || actual != job || time.Since(job.creationTime) <= expiry {
+		return false
+	}
+	if s.pendingEnvelopes.CompareAndDelete(key, job) {
+		s.pendingCount.Add(-1)
+		return true
+	}
+	return false
 }
 
 // loop is the background goroutine that processes pending envelopes
@@ -357,8 +430,7 @@ func (s *executionPayloadService) processPendingEnvelopes(ctx context.Context) {
 		if pendingKey.dataAvailability {
 			expiry = pendingDataAvailabilityExpiry
 		}
-		if time.Since(job.creationTime) > expiry {
-			s.removePendingEnvelope(pendingKey, job)
+		if s.expirePendingEnvelope(pendingKey, job, expiry) {
 			log.Trace("Pending envelope expired", "blockRoot", pendingKey.blockRoot)
 			return true
 		}
@@ -382,7 +454,10 @@ func (s *executionPayloadService) processPendingEnvelopes(ctx context.Context) {
 			job.nextAttempt = time.Now().Add(job.retryDelay)
 			return true
 		}
-		if errors.Is(err, forkchoice.ErrIgnore) {
+		if errors.Is(err, ErrIgnore) && s.accountStoredPendingEnvelope(block, pendingKey, job) {
+			return true
+		}
+		if errors.Is(err, forkchoice.ErrIgnore) || errors.Is(err, ErrIgnore) {
 			return true
 		}
 		s.removePendingEnvelope(pendingKey, job)

@@ -18,6 +18,7 @@ package consensus_tests
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"math"
@@ -423,6 +424,9 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 			err := spectest.ReadSsz(root, c.Version(), step.GetExecutionPayload()+".ssz_snappy", envelope)
 			require.NoError(t, err, stepstr)
 			err = forkStore.OnExecutionPayload(ctx, envelope, false, true)
+			if errors.Is(err, forkchoice.ErrExecutionPayloadAlreadyStored) {
+				err = nil
+			}
 			if step.GetValid() {
 				require.NoError(t, err, stepstr)
 			} else {

@@ -263,7 +263,7 @@ MainLoop:
 				if block.Version() >= clparams.GloasVersion && len(envelopes) > 0 {
 					parentRoot := block.Block.ParentRoot
 					if env, ok := envelopes[common.Hash(parentRoot)]; ok {
-						if envErr := cfg.forkChoice.OnExecutionPayload(ctx, env, false, canRetryGloasPayloads(cfg)); envErr != nil {
+						if envErr := cfg.forkChoice.OnExecutionPayload(ctx, env, false, canRetryGloasPayloads(cfg)); envErr != nil && !errors.Is(envErr, forkchoice.ErrExecutionPayloadAlreadyStored) {
 							log.Debug("[chainTipSync] failed to apply parent envelope", "slot", block.Block.Slot, "err", envErr)
 						}
 					}
@@ -314,7 +314,7 @@ func applyRecoveredEnvelopes(ctx context.Context, cfg *Cfg, envelopes map[common
 		} else {
 			err = cfg.forkChoice.OnExecutionPayload(ctx, env, true, true)
 		}
-		if err != nil {
+		if err != nil && !errors.Is(err, forkchoice.ErrExecutionPayloadAlreadyStored) {
 			log.Debug("[chainTipSync] failed to apply recovered GLOAS envelope", "beaconBlockRoot", root, "err", err)
 		}
 	}

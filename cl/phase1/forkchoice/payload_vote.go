@@ -425,12 +425,8 @@ func (f *ForkChoiceStore) validateParentPayloadPath(block *cltypes.BeaconBlock) 
 	}
 
 	if f.isParentNodeFull(block) {
-		// Parent is FULL - verify execution payload envelope exists on disk.
-		// Return ErrParentEnvelopePending (not a hard error) when the envelope is
-		// missing.  During forward sync the envelope may not yet be persisted (it
-		// arrives in the same batch or in a later batch), so a hard error would
-		// permanently reject the block and ban the peer.
-		if !f.forkGraph.HasEnvelope(block.ParentRoot) {
+		// A FULL parent remains pending until its payload is persisted and EL-verified.
+		if !f.forkGraph.HasEnvelope(block.ParentRoot) || !f.IsPayloadVerified(block.ParentRoot) {
 			return ErrParentEnvelopePending
 		}
 	} else {

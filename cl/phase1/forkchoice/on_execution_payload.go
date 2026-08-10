@@ -499,7 +499,7 @@ func (f *ForkChoiceStore) OnExecutionPayload(ctx context.Context, signedEnvelope
 		return err
 	}
 	if !applied {
-		return ErrExecutionPayloadAlreadyStored
+		return fmt.Errorf("%w: %w", ErrIgnore, ErrExecutionPayloadAlreadyStored)
 	}
 
 	// Write execution block indices outside f.mu.

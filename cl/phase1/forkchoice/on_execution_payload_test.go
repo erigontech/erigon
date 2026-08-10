@@ -70,6 +70,7 @@ func TestOnExecutionPayloadReportsAlreadyStored(t *testing.T) {
 
 	err := f.OnExecutionPayload(t.Context(), envelope, true, true)
 	require.ErrorIs(t, err, ErrExecutionPayloadAlreadyStored)
+	require.ErrorIs(t, err, ErrIgnore)
 }
 
 // TestValidateEnvelopeAgainstBlock_SlotNumberMismatch tests that validation fails when

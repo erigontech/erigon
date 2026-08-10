@@ -34,12 +34,18 @@ func (g ptcVoteForkGraph) GetBlock(root common.Hash) (*cltypes.SignedBeaconBlock
 type payloadVoteForkGraph struct {
 	fork_graph.ForkGraph
 	hasEnvelope       bool
+	blocks            map[common.Hash]*cltypes.SignedBeaconBlock
 	dumpedEnvelope    *common.Hash
 	invalidatedHeader *common.Hash
 }
 
 func (g payloadVoteForkGraph) HasEnvelope(common.Hash) bool {
 	return g.hasEnvelope
+}
+
+func (g payloadVoteForkGraph) GetBlock(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+	block, ok := g.blocks[root]
+	return block, ok
 }
 
 func (g payloadVoteForkGraph) DumpEnvelopeOnDisk(blockRoot common.Hash, _ *cltypes.SignedExecutionPayloadEnvelope) error {
@@ -336,6 +342,40 @@ func TestGloasForkChoiceRequiresVerifiedPayload(t *testing.T) {
 			require.Equal(t, tt.wantFullChild, f.ShouldExtendPayload(root))
 			require.Equal(t, tt.wantFullChild, f.payloadTimeliness(root, true))
 			require.Equal(t, tt.wantFullChild, f.payloadDataAvailability(root, true))
+		})
+	}
+}
+
+func TestValidateParentPayloadPathRequiresVerifiedFullParent(t *testing.T) {
+	parentRoot := common.HexToHash("0x1234")
+	parentBlockHash := common.HexToHash("0xabcd")
+	parent := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	parent.Block.Body.SignedExecutionPayloadBid.Message.BlockHash = parentBlockHash
+	child := cltypes.NewBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	child.ParentRoot = parentRoot
+	child.Body.SignedExecutionPayloadBid.Message.ParentBlockHash = parentBlockHash
+
+	for _, tt := range []struct {
+		name     string
+		verified bool
+		wantErr  bool
+	}{
+		{name: "persisted but unverified", wantErr: true},
+		{name: "persisted and verified", verified: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newPayloadVoteTestStore(t, parentRoot, true, tt.verified)
+			f.forkGraph = payloadVoteForkGraph{
+				hasEnvelope: true,
+				blocks:      map[common.Hash]*cltypes.SignedBeaconBlock{parentRoot: parent},
+			}
+
+			err := f.validateParentPayloadPath(child)
+			if tt.wantErr {
+				require.ErrorIs(t, err, ErrParentEnvelopePending)
+			} else {
+				require.NoError(t, err)
+			}
 		})
 	}
 }
