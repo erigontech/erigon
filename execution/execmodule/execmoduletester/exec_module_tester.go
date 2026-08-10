@@ -130,7 +130,6 @@ type ExecModuleTester struct {
 	StateCache      *execmodule.Cache
 	retirementStart chan bool
 	retirementDone  chan struct{}
-	retirementWg    sync.WaitGroup
 
 	Notifications      *shards.Notifications
 	stateChangesClient StateChangesClient
@@ -356,12 +355,6 @@ func WithoutAmsterdamBuilderContracts() Option {
 	}
 }
 
-func WithFcuBackgroundCommit() Option {
-	return func(opts *options) {
-		opts.fcuBackgroundCommit = true
-	}
-}
-
 // WithAlwaysGenerateChangesets pins --experimental.always-generate-changesets
 // regardless of the tester default: true for tests that reorg deeper than
 // MaxReorgDepth, false for tests that rely on the windowed-changesets
@@ -404,7 +397,6 @@ type options struct {
 	pruneMode                     *prune.Mode
 	withTxPool                    bool
 	enableDomains                 []kv.Domain
-	fcuBackgroundCommit           bool
 	fcuBackgroundPrune            bool
 	alwaysGenerateChangesets      *bool
 	maxReorgDepth                 *uint64
@@ -521,7 +513,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	cfg.Prune = pruneMode
 	cfg.ExperimentalBAL = opt.experimentalBAL
 	cfg.FcuBackgroundPrune = opt.fcuBackgroundPrune
-	cfg.FcuBackgroundCommit = opt.fcuBackgroundCommit
 
 	logLvl := log.LvlError
 	if lvl, ok := os.LookupEnv("EXEC_MODULE_TESTER_LOG_LEVEL"); ok {
@@ -584,10 +575,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 
 	if tb != nil {
 		tb.Cleanup(mock.Close)
-		tb.Cleanup(func() {
-			// Wait for all the background snapshot retirements launched by any stages2.StageLoopIteration to finish
-			mock.retirementWg.Wait()
-		})
 	}
 
 	// Committed genesis will be shared between download and mock sentry
@@ -803,7 +790,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		engine,
 		cfg.Sync,
 		cfg.FcuBackgroundPrune,
-		cfg.FcuBackgroundCommit,
 		onlySnapDownloadOnStart,
 		readAheader,
 		func() error { return nil },
@@ -872,16 +858,8 @@ func (emt *ExecModuleTester) GenerateChainWithConfig(config *chain.Config, paren
 }
 
 func (emt *ExecModuleTester) InsertBlocks(ctx context.Context, blocks []*types.Block) (execmodule.ExecutionStatus, error) {
-	rawBlocks := make([]*types.RawBlock, len(blocks))
-	for i, block := range blocks {
-		rawBlocks[i] = &types.RawBlock{
-			Header:          block.HeaderNoCopy(),
-			Body:            block.RawBody(),
-			BlockAccessList: block.BlockAccessList(),
-		}
-	}
 	return retryBusy(ctx, func() (execmodule.ExecutionStatus, bool, error) {
-		status, err := emt.ExecModule.InsertBlocks(ctx, rawBlocks)
+		status, err := emt.ExecModule.InsertBlocks(ctx, blocks)
 		if err != nil {
 			return execmodule.ExecutionStatusBusy, false, err
 		}
@@ -907,6 +885,24 @@ func (emt *ExecModuleTester) UpdateForkChoice(ctx context.Context, header *types
 		}
 		return result, result.Status == execmodule.ExecutionStatusBusy, nil
 	})
+}
+
+func (emt *ExecModuleTester) WaitForBlockRetirement(ctx context.Context) error {
+	select {
+	case started := <-emt.retirementStart:
+		if !started {
+			return nil
+		}
+	case <-ctx.Done():
+		return fmt.Errorf("waiting for block retirement start: %w", ctx.Err())
+	}
+
+	select {
+	case <-emt.retirementDone:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("waiting for block retirement completion: %w", ctx.Err())
+	}
 }
 
 func (emt *ExecModuleTester) InsertValidateAndUfc1By1(ctx context.Context, blocks []*types.Block) error {
@@ -985,14 +981,6 @@ func retryBusy[T any](ctx context.Context, f func() (T, bool, error)) (T, error)
 	)
 }
 
-func blockAccessLists(blocks []*types.Block) [][]byte {
-	bals := make([][]byte, len(blocks))
-	for i, block := range blocks {
-		bals[i] = block.BlockAccessList()
-	}
-	return bals
-}
-
 func (emt *ExecModuleTester) insertChain(chain *blockgen.ChainPack) error {
 	wr := chainreader.NewChainReaderEth1(emt.ChainConfig, emt.ExecModule, time.Hour)
 
@@ -1012,7 +1000,7 @@ func (emt *ExecModuleTester) insertChain(chain *blockgen.ChainPack) error {
 		insertedBlocks[chain.Blocks[i].NumberU64()] = struct{}{}
 	}
 
-	if err := wr.InsertBlocks(emt.Ctx, chain.Blocks, blockAccessLists(chain.Blocks)); err != nil {
+	if err := wr.InsertBlocks(emt.Ctx, chain.Blocks); err != nil {
 		return err
 	}
 
@@ -1123,7 +1111,7 @@ func (emt *ExecModuleTester) insertChainPoW(chain *blockgen.ChainPack) error {
 				return err
 			}
 		}
-		return wr.InsertBlocks(emt.Ctx, chain.Blocks, blockAccessLists(chain.Blocks))
+		return wr.InsertBlocks(emt.Ctx, chain.Blocks)
 	}
 	return emt.insertChain(chain)
 }

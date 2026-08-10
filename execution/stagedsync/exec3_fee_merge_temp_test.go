@@ -59,6 +59,7 @@ func TestRecordFeeMergeReleasesSupersededTemp(t *testing.T) {
 	// superseded and reclaimed.
 	temp2 := feeMergeTestWrites(t, addr, 3)
 	be.recordFeeMerge(0, temp1, temp2)
+	be.awaitMapReleases()
 	require.Same(t, temp2, be.feeMergeTemp[0])
 	require.Equal(t, 0, temp1.Count(), "superseded fee-merge temp must be released")
 	require.Equal(t, 1, temp2.Count())
@@ -68,6 +69,7 @@ func TestRecordFeeMergeReleasesSupersededTemp(t *testing.T) {
 	txOut2 := feeMergeTestWrites(t, addr, 4)
 	temp3 := feeMergeTestWrites(t, addr, 5)
 	be.recordFeeMerge(0, txOut2, temp3)
+	be.awaitMapReleases()
 	require.Same(t, temp3, be.feeMergeTemp[0])
 	require.Equal(t, 1, txOut2.Count(), "TxOut must survive the fee merge")
 	require.Equal(t, 1, temp2.Count(), "a temp that is not prev must not be released")
@@ -90,6 +92,7 @@ func TestRecordFeeMergeReleaseKeepsSharedWrites(t *testing.T) {
 	merged := temp1.MergeInto(tipWrites)
 	require.Same(t, tipWrites, merged)
 	be.recordFeeMerge(0, temp1, merged)
+	be.awaitMapReleases()
 
 	require.Equal(t, 0, temp1.Count())
 	vw, ok := merged.GetBalance(shared)

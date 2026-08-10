@@ -3,12 +3,13 @@ package machine
 import (
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	corestate "github.com/erigontech/erigon/cl/phase1/core/state"
-	"github.com/stretchr/testify/require"
 )
 
 type noopBlockOperationProcessor struct{}

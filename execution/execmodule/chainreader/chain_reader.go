@@ -216,9 +216,8 @@ func (c ChainReaderWriterEth1) FrozenBlocks(ctx context.Context) (uint64, bool) 
 	return frozen, hasGap
 }
 
-func (c ChainReaderWriterEth1) InsertBlocks(ctx context.Context, blocks []*types.Block, bals [][]byte) error {
-	rawBlocks := blocksToRaw(blocks, bals)
-	status, err := c.executionModule.InsertBlocks(ctx, rawBlocks)
+func (c ChainReaderWriterEth1) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
+	status, err := c.executionModule.InsertBlocks(ctx, blocks)
 	if err != nil {
 		return err
 	}
@@ -228,20 +227,8 @@ func (c ChainReaderWriterEth1) InsertBlocks(ctx context.Context, blocks []*types
 	return nil
 }
 
-func (c ChainReaderWriterEth1) InsertBlock(ctx context.Context, block *types.Block, bal []byte) error {
-	return c.InsertBlocks(ctx, []*types.Block{block}, [][]byte{bal})
-}
-
-func blocksToRaw(blocks []*types.Block, bals [][]byte) []*types.RawBlock {
-	raw := make([]*types.RawBlock, len(blocks))
-	for i, b := range blocks {
-		rb := &types.RawBlock{Header: b.Header(), Body: b.RawBody()}
-		if i < len(bals) {
-			rb.BlockAccessList = bals[i]
-		}
-		raw[i] = rb
-	}
-	return raw
+func (c ChainReaderWriterEth1) InsertBlock(ctx context.Context, block *types.Block) error {
+	return c.InsertBlocks(ctx, []*types.Block{block})
 }
 
 func (c ChainReaderWriterEth1) ValidateChain(ctx context.Context, hash common.Hash, number uint64) (execmodule.ExecutionStatus, *string, common.Hash, error) {

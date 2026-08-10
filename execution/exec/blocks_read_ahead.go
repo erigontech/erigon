@@ -29,6 +29,7 @@ type BlockReadAheader struct {
 	headers *lru.Cache[common.Hash, *types.Header]
 	bodies  *lru.Cache[common.Hash, *types.Body]
 	senders *lru.Cache[common.Hash, []byte] // just do raw senders
+	bals    *lru.Cache[common.Hash, []byte]
 
 	// this is for warming state
 	warming atomic.Bool // only one warmBody can run at a time
@@ -56,10 +57,15 @@ func NewBlockReadAheader() *BlockReadAheader {
 	if err != nil {
 		panic(err)
 	}
+	bals, err := lru.New[common.Hash, []byte](4)
+	if err != nil {
+		panic(err)
+	}
 	return &BlockReadAheader{
 		headers: headers,
 		bodies:  bodies,
 		senders: senders,
+		bals:    bals,
 	}
 }
 
@@ -137,6 +143,13 @@ func (bra *BlockReadAheader) AddSenders(senders []byte, blockHash common.Hash) {
 		return
 	}
 	bra.senders.Add(blockHash, bytes.Clone(senders))
+}
+
+func (bra *BlockReadAheader) AddBlockAccessList(blockHash common.Hash, bal []byte) {
+	if len(bal) == 0 {
+		return
+	}
+	bra.bals.Add(blockHash, bal)
 }
 
 // warmBody warms state for all transactions in a body using multiple workers.
@@ -330,7 +343,8 @@ func (bra *BlockReadAheader) ReadBlockWithSenders(blockHash common.Hash) (*types
 		sendersAddresses = append(sendersAddresses, common.BytesToAddress(senders[i:i+length.Addr]))
 	}
 	body.SendersToTxs(sendersAddresses)
-	return types.NewBlockFromStorage(header.Hash(), header, body.Transactions, body.Uncles, body.Withdrawals), true
+	bal, _ := bra.bals.Get(blockHash)
+	return types.NewBlockFromStorage(header.Hash(), header, body.Transactions, body.Uncles, body.Withdrawals, bal), true
 }
 
 func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.Engine, blockReader dbservices.FullBlockReader) (chan uint64, context.CancelFunc) {
