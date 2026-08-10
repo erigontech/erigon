@@ -86,6 +86,12 @@ func TestAssembleBlockSupersedesBuilderForSameTimestamp(t *testing.T) {
 	require.NotEqual(t, firstID, adjacentID)
 	require.False(t, first.interrupt.Load(), "a builder for another target timestamp must stay alive")
 
+	firstDuplicate, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: 100, ParentHash: common.Hash{0x01}})
+	require.NoError(t, err)
+	require.Equal(t, firstID, firstDuplicate.PayloadID)
+	require.False(t, first.interrupt.Load(), "an exact earlier-timestamp builder must stay alive")
+	require.False(t, adjacent.interrupt.Load())
+
 	secondID, second := assemble(100, common.Hash{0x03})
 	require.NotEqual(t, firstID, secondID)
 	require.Eventually(t, first.interrupt.Load, time.Second, time.Millisecond)
@@ -111,6 +117,87 @@ func TestAssembleBlockSupersedesBuilderForSameTimestamp(t *testing.T) {
 	require.Eventually(t, adjacent.interrupt.Load, time.Second, time.Millisecond)
 	require.NotContains(t, module.builders, adjacentID)
 	require.NotContains(t, module.buildersByTimestamp, uint64(101))
+	require.NotContains(t, module.builderParameters, adjacentID)
+}
+
+func TestAssembleBlockOwnsParameters(t *testing.T) {
+	type observedParameters struct {
+		parentRoot common.Hash
+		extraData  byte
+	}
+	readParameters := make(chan struct{})
+	observed := make(chan observedParameters, 1)
+	module := &ExecModule{
+		semaphore: semaphore.NewWeighted(1),
+		config:    &chain.Config{},
+		logger:    log.Root(),
+		builders:  map[uint64]*builder.BlockBuilder{},
+		builderFunc: func(params *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
+			<-readParameters
+			observed <- observedParameters{parentRoot: *params.ParentBeaconBlockRoot, extraData: params.ExtraData[0]}
+			for !interrupt.Load() {
+				time.Sleep(time.Millisecond)
+			}
+			return nil, errors.New("builder stopped")
+		},
+	}
+	root := common.Hash{0xaa}
+	params := &builder.Parameters{
+		Timestamp:             100,
+		ParentHash:            common.Hash{0x01},
+		ParentBeaconBlockRoot: &root,
+		ExtraData:             []byte{0xbb},
+	}
+	result, err := module.AssembleBlock(t.Context(), params)
+	require.NoError(t, err)
+	require.False(t, result.Busy)
+
+	root[0] = 0xcc
+	params.ExtraData[0] = 0xdd
+	close(readParameters)
+	require.Equal(t, observedParameters{parentRoot: common.Hash{0xaa}, extraData: 0xbb}, <-observed)
+
+	duplicate, err := module.AssembleBlock(t.Context(), &builder.Parameters{
+		Timestamp:             100,
+		ParentHash:            common.Hash{0x01},
+		ParentBeaconBlockRoot: &common.Hash{0xaa},
+		ExtraData:             []byte{0xbb},
+	})
+	require.NoError(t, err)
+	require.Equal(t, result.PayloadID, duplicate.PayloadID)
+	_, _ = module.builders[result.PayloadID].Stop(context.Background())
+}
+
+func TestCloneBuilderParametersPreservesRepresentations(t *testing.T) {
+	require.Nil(t, cloneBuilderParameters(nil))
+
+	empty := cloneBuilderParameters(&builder.Parameters{Withdrawals: []*types.Withdrawal{}, ExtraData: []byte{}})
+	require.NotNil(t, empty.Withdrawals)
+	require.NotNil(t, empty.ExtraData)
+
+	root := common.Hash{0x01}
+	slot := uint64(2)
+	gasLimit := uint64(3)
+	params := &builder.Parameters{
+		Withdrawals:           []*types.Withdrawal{nil, {Index: 4}},
+		ParentBeaconBlockRoot: &root,
+		SlotNumber:            &slot,
+		TargetGasLimit:        &gasLimit,
+		ExtraData:             []byte{5},
+	}
+	cloned := cloneBuilderParameters(params)
+	params.Withdrawals[1].Index = 40
+	root[0] = 10
+	slot = 20
+	gasLimit = 30
+	params.ExtraData[0] = 50
+
+	require.Nil(t, cloned.Withdrawals[0])
+	require.Equal(t, uint64(4), cloned.Withdrawals[1].Index)
+	require.Equal(t, common.Hash{0x01}, *cloned.ParentBeaconBlockRoot)
+	require.Equal(t, uint64(2), *cloned.SlotNumber)
+	require.Equal(t, uint64(3), *cloned.TargetGasLimit)
+	require.Equal(t, byte(5), cloned.ExtraData[0])
 }
 
 func TestBuildDuration(t *testing.T) {

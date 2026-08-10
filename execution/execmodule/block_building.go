@@ -17,6 +17,7 @@
 package execmodule
 
 import (
+	"bytes"
 	"context"
 	"reflect"
 	"time"
@@ -53,6 +54,36 @@ func buildDuration(payloadTimestamp uint64, now time.Time, secondsPerSlot uint64
 	return min(max(d, slot/4), 2*slot)
 }
 
+func cloneBuilderParameters(params *builder.Parameters) *builder.Parameters {
+	if params == nil {
+		return nil
+	}
+	cloned := *params
+	cloned.ExtraData = bytes.Clone(params.ExtraData)
+	if params.Withdrawals != nil {
+		cloned.Withdrawals = make([]*types.Withdrawal, len(params.Withdrawals))
+		for i, withdrawal := range params.Withdrawals {
+			if withdrawal != nil {
+				copy := *withdrawal
+				cloned.Withdrawals[i] = &copy
+			}
+		}
+	}
+	if params.ParentBeaconBlockRoot != nil {
+		copy := *params.ParentBeaconBlockRoot
+		cloned.ParentBeaconBlockRoot = &copy
+	}
+	if params.SlotNumber != nil {
+		copy := *params.SlotNumber
+		cloned.SlotNumber = &copy
+	}
+	if params.TargetGasLimit != nil {
+		copy := *params.TargetGasLimit
+		cloned.TargetGasLimit = &copy
+	}
+	return &cloned
+}
+
 func (e *ExecModule) evictOldBuilders() {
 	ids := common.SortedKeys(e.builders)
 
@@ -63,6 +94,7 @@ func (e *ExecModule) evictOldBuilders() {
 			old.Cancel()
 		}
 		delete(e.builders, id)
+		delete(e.builderParameters, id)
 		for timestamp, builderID := range e.buildersByTimestamp {
 			if builderID == id {
 				delete(e.buildersByTimestamp, timestamp)
@@ -81,15 +113,14 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 		return AssembleBlockResult{}, err
 	}
 
-	// First check if we're already building a block with the requested parameters
-	if e.lastParameters != nil {
-		params.PayloadId = e.lastParameters.PayloadId
-		if reflect.DeepEqual(e.lastParameters, params) {
-			e.logger.Info("[ForkChoiceUpdated] duplicate build request")
-			return AssembleBlockResult{PayloadID: e.lastParameters.PayloadId}, nil
-		}
-	}
 	if previousID, ok := e.buildersByTimestamp[params.Timestamp]; ok {
+		candidate := cloneBuilderParameters(params)
+		candidate.PayloadId = previousID
+		params.PayloadId = previousID
+		if reflect.DeepEqual(e.builderParameters[previousID], candidate) {
+			e.logger.Info("[ForkChoiceUpdated] duplicate build request")
+			return AssembleBlockResult{PayloadID: previousID}, nil
+		}
 		if previous := e.builders[previousID]; previous != nil {
 			previous.Cancel()
 		}
@@ -100,13 +131,17 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 
 	e.nextPayloadId++
 	params.PayloadId = e.nextPayloadId
-	e.lastParameters = params
+	ownedParams := cloneBuilderParameters(params)
 
-	e.builders[e.nextPayloadId] = builder.NewBlockBuilder(e.builderFunc, params, buildDuration(params.Timestamp, time.Now(), e.config.SecondsPerSlot()))
+	e.builders[e.nextPayloadId] = builder.NewBlockBuilder(e.builderFunc, ownedParams, buildDuration(params.Timestamp, time.Now(), e.config.SecondsPerSlot()))
 	if e.buildersByTimestamp == nil {
 		e.buildersByTimestamp = make(map[uint64]uint64)
 	}
+	if e.builderParameters == nil {
+		e.builderParameters = make(map[uint64]*builder.Parameters)
+	}
 	e.buildersByTimestamp[params.Timestamp] = e.nextPayloadId
+	e.builderParameters[e.nextPayloadId] = ownedParams
 	e.logger.Info("[ForkChoiceUpdated] BlockBuilder added", "payload", e.nextPayloadId)
 
 	return AssembleBlockResult{PayloadID: e.nextPayloadId}, nil
