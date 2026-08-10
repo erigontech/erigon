@@ -34,6 +34,9 @@ import (
 
 func callValueTransferGas(rules *chain.Rules) uint64 {
 	if rules.IsAmsterdam {
+		if rules.EIP8038Revised {
+			return params.CallValueTransferGasEIP8038Revised
+		}
 		return params.CallValueTransferGasEIP8038
 	}
 	return params.CallValueTransferGas
@@ -46,8 +49,27 @@ func coldAccountAccessCost(rules *chain.Rules) uint64 {
 	return params.ColdAccountAccessCostEIP2929
 }
 
+// accountWriteCost and sstoreClearsRefund are only reached under Amsterdam rules;
+// the pre-Amsterdam values have no EIP-8038 counterpart to fall back to.
+func accountWriteCost(rules *chain.Rules) uint64 {
+	if rules.EIP8038Revised {
+		return params.AccountWriteCostEIP8038Revised
+	}
+	return params.AccountWriteCostEIP8038
+}
+
+func sstoreClearsRefund(rules *chain.Rules) uint64 {
+	if rules.EIP8038Revised {
+		return params.SstoreClearsScheduleRefundEIP8038Revised
+	}
+	return params.SstoreClearsScheduleRefundEIP8038
+}
+
 func coldStorageAccessCost(rules *chain.Rules) uint64 {
 	if rules.IsAmsterdam {
+		if rules.EIP8038Revised {
+			return params.ColdStorageAccessCostEIP8038Revised
+		}
 		return params.ColdStorageAccessCostEIP8038
 	}
 	return params.ColdSloadCostEIP2929

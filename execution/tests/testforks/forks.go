@@ -225,9 +225,12 @@ func init() {
 	Forks["Amsterdam"] = cAms
 
 	// BinaryTree is Amsterdam with state committed through EIP-8297's binary tree
-	// instead of the MPT. The fork rules are identical; only the commitment engine
-	// differs, and the runner selects it from the network name.
+	// instead of the MPT, and the runner selects it from the network name. Its
+	// fixtures are generated from head-of-spec rather than a pinned release, so it
+	// also charges EIP-8038's revised state-access schedule; Amsterdam stays on the
+	// pre-revision one its pinned corpora were generated against.
 	Forks[BinaryTree] = configCopy(cAms)
+	Forks[BinaryTree].EIP8038Revised = true
 
 	// BPO3/BPO4 continue from BPO2 as a separate chain
 	c = configCopy(c)

@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tests/testforks"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -252,6 +253,44 @@ func TestEIP8038SStore(t *testing.T) {
 			require.Equal(t, tt.refund, vmenv.IntraBlockState().GetRefund(), "refund")
 		})
 	}
+}
+
+// TestEIP8038RevisedScheduleSelectedByConfig pins the revised state-access schedule
+// as a chain-config property rather than a global: the same SSTORE pays the
+// pre-revision cold access under a plain Amsterdam config and the revised one when
+// the config selects it.
+func TestEIP8038RevisedScheduleSelectedByConfig(t *testing.T) {
+	sstoreExecutionGas := func(t *testing.T, config *chain.Config) uint64 {
+		t.Helper()
+		tx, sd := testTemporalTxSD(t)
+		txNum, _, err := sd.SeekCommitment(t.Context(), tx)
+		require.NoError(t, err)
+		r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+		s := state.New(r)
+		defer s.Close()
+		address := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
+		require.NoError(t, s.CreateAccount(address, true))
+		require.NoError(t, s.SetCode(address, hexutil.MustDecode("0x6001600055"), tracing.CodeChangeUnspecified))
+		vmctx := evmtypes.BlockContext{
+			CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
+			Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
+				return nil
+			},
+		}
+		_ = s.CommitBlock(vmctx.Rules(config), w)
+		vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, config, vm.Config{})
+		pool := mdgas.MdGas{Execution: 10_000_000, State: 10_000_000}
+		_, gas, _, err := vmenv.Call(accounts.ZeroAddress, address, nil, pool, uint256.Int{}, false /* bailout */)
+		require.NoError(t, err)
+		return pool.Execution - gas.Execution
+	}
+
+	pinned := sstoreExecutionGas(t, testforks.Forks["Amsterdam"])
+	revised := sstoreExecutionGas(t, testforks.Forks[testforks.BinaryTree])
+	require.Equal(t,
+		params.ColdStorageAccessCostEIP8038-params.ColdStorageAccessCostEIP8038Revised,
+		pinned-revised,
+		"revised schedule must lower the cold storage access by the repricing delta")
 }
 
 func TestEIP7928SStoreReadRequiresAffordableAccess(t *testing.T) {

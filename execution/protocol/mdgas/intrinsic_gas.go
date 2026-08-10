@@ -41,6 +41,7 @@ type IntrinsicGasCalcArgs struct {
 	IsEIP7981          bool
 	IsEIP2780          bool
 	IsAATxn            bool
+	IsEIP8038Revised   bool
 }
 
 type IntrinsicGasCalcResult struct {
@@ -145,6 +146,9 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 		if args.IsEIP2780 {
 			addressGas = params.TxAccessListAddressGasEIP8038
 			storageKeyGas = params.TxAccessListStorageKeyGasEIP8038
+			if args.IsEIP8038Revised {
+				storageKeyGas = params.TxAccessListStorageKeyGasEIP8038Revised
+			}
 		} else {
 			addressGas = params.TxAccessListAddressGas
 			storageKeyGas = params.TxAccessListStorageKeyGas
@@ -268,9 +272,12 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 	// Add the cost of authorizations
 	var perAuthCost uint64
 	if args.IsEIP2780 {
-		if args.IsAATxn {
+		switch {
+		case args.IsAATxn && args.IsEIP8038Revised:
+			perAuthCost = params.PerAuthExecutionCostEIP8038Revised
+		case args.IsAATxn:
 			perAuthCost = params.PerAuthExecutionCostEIP8038
-		} else {
+		default:
 			perAuthCost = params.ExecutionPerAuthBaseCostEIP8038
 		}
 	} else {
