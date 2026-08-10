@@ -37,8 +37,19 @@ import (
 func withBinCommitment(t *testing.T, on bool) {
 	t.Helper()
 	orig := statecfg.ExperimentalBinCommitment
-	t.Cleanup(func() { statecfg.ExperimentalBinCommitment = orig })
+	origParallel, origStreaming := statecfg.ExperimentalParallelCommitment, statecfg.ExperimentalStreamingCommitment
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = orig
+		statecfg.ExperimentalParallelCommitment = origParallel
+		statecfg.ExperimentalStreamingCommitment = origStreaming
+	})
 	statecfg.ExperimentalBinCommitment = on
+	if on {
+		// erigondb.toml resolution refuses bin combined with either: the bin trie
+		// is sequential-only, regardless of a process-wide parallel/streaming default.
+		statecfg.ExperimentalParallelCommitment = false
+		statecfg.ExperimentalStreamingCommitment = false
+	}
 }
 
 func pbinTestGenesis() *types.Genesis {

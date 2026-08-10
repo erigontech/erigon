@@ -39,8 +39,17 @@ func TestPBinCommitmentReplayRefusesBin(t *testing.T) {
 	defer tx.Rollback()
 
 	orig := statecfg.ExperimentalBinCommitment
-	t.Cleanup(func() { statecfg.ExperimentalBinCommitment = orig })
+	origParallel, origStreaming := statecfg.ExperimentalParallelCommitment, statecfg.ExperimentalStreamingCommitment
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = orig
+		statecfg.ExperimentalParallelCommitment = origParallel
+		statecfg.ExperimentalStreamingCommitment = origStreaming
+	})
 	statecfg.ExperimentalBinCommitment = true
+	// erigondb.toml resolution refuses bin combined with either: the bin trie is
+	// sequential-only, regardless of a process-wide parallel/streaming default.
+	statecfg.ExperimentalParallelCommitment = false
+	statecfg.ExperimentalStreamingCommitment = false
 
 	// Fresh dirs: the replay resolves erigondb.toml itself, and a hex toml would
 	// be refused there instead of at the SharedDomains this test pins.
