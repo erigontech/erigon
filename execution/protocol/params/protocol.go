@@ -237,12 +237,12 @@ const (
 	// costs and adds the execution-gas write components (ACCOUNT_WRITE, STORAGE_WRITE)
 	// that the EIP-8037 state-gas model is charged alongside.
 	ColdAccountAccessCostEIP8038      = uint64(3000)                                           // COLD_ACCOUNT_ACCESS (EIP-2929: 2600)
-	ColdStorageAccessCostEIP8038      = uint64(3000)                                           // COLD_STORAGE_ACCESS (EIP-2929 cold SLOAD: 2100)
-	AccountWriteCostEIP8038           = uint64(8000)                                           // ACCOUNT_WRITE: account balance-leaf write
+	ColdStorageAccessCostEIP8038      = uint64(2100)                                           // COLD_STORAGE_ACCESS (EIP-2929 cold SLOAD: 2100)
+	AccountWriteCostEIP8038           = uint64(9000)                                           // ACCOUNT_WRITE: account balance-leaf write
 	StorageWriteCostEIP8038           = uint64(10000)                                          // STORAGE_WRITE: first write to a slot in the txn
-	CallValueTransferGasEIP8038       = AccountWriteCostEIP8038 + CallStipend                  // CALL_VALUE = 10300
-	CreateAccessEIP8038               = AccountWriteCostEIP8038 + ColdStorageAccessCostEIP8038 // CREATE_ACCESS = 11000
-	SstoreClearsScheduleRefundEIP8038 = uint64(12480)                                          // REFUND_STORAGE_CLEAR = (STORAGE_WRITE+COLD_STORAGE_ACCESS)*4800/5000
+	CallValueTransferGasEIP8038       = AccountWriteCostEIP8038 + CallStipend                  // CALL_VALUE = 11300
+	CreateAccessEIP8038               = AccountWriteCostEIP8038 + ColdAccountAccessCostEIP8038 // CREATE_ACCESS = 12000
+	SstoreClearsScheduleRefundEIP8038 = uint64(11616)                                          // REFUND_STORAGE_CLEAR = (STORAGE_WRITE+COLD_STORAGE_ACCESS)*4800/5000
 	TxAccessListAddressGasEIP8038     = ColdAccountAccessCostEIP8038                           // ACCESS_LIST_ADDRESS_COST
 	TxAccessListStorageKeyGasEIP8038  = ColdStorageAccessCostEIP8038                           // ACCESS_LIST_STORAGE_KEY_COST
 	ExtCodeWarmAccessGasEIP8038       = 2 * WarmStorageReadCostEIP2929                         // EXTCODESIZE/EXTCODECOPY: account access + second read for the code
