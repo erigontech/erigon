@@ -53,6 +53,14 @@ export USE_STATE_CACHE=false
 # launcher; the publisher needs it more (it serves those files).
 export ERIGON_MERGE_MIN_AGE_STEPS="${ERIGON_MERGE_MIN_AGE_STEPS:-6}"
 
+# --nat=extip:127.0.0.1 forces the publisher to advertise loopback in
+# its ENR. Without it, erigon auto-detects the machine's external IP
+# (via NAT probe / interface scan), which local consumers cannot reach
+# via hairpin NAT on many hosts — the BT/torrent connection to publisher
+# fails and chain.toml never downloads. Loopback works because publisher
+# + consumer share the host.
+PUB_ADVERTISE_IP="${PUB_ADVERTISE_IP:-127.0.0.1}"
+
 exec "$BIN" \
   --datadir="$DATADIR" \
   --chain=hoodi --prune.mode=minimal \
@@ -60,6 +68,7 @@ exec "$BIN" \
   --snap.bootstrap-from-preverified \
   --snap.p2p-manifest \
   --snapshot.trust-roots="$TRUST_ROOT_PUB" \
+  --nat="extip:$PUB_ADVERTISE_IP" \
   --http.api=eth,erigon,engine,debug,net,web3,trace,txpool,admin \
   --http.port=19845 --authrpc.port=19851 --private.api.addr=127.0.0.1:11890 \
   --torrent.port=43669 --port=31803 \
