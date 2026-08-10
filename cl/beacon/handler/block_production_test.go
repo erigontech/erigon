@@ -800,6 +800,20 @@ func TestPreparedPayloadRequiresBuilderContinuity(t *testing.T) {
 	require.False(t, canUsePreparedPayload(&p, false, 10, id, now, 2*time.Second))
 }
 
+func TestStartPayloadPreparationSkipsRemoteEngine(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().SupportInsertion().Return(false)
+	handler := &ApiHandler{
+		engine:         engine,
+		beaconChainCfg: &clparams.BeaconChainConfig{SecondsPerSlot: 12},
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	handler.StartPayloadPreparation(ctx)
+}
+
 func TestShouldPreparePayloadVersion(t *testing.T) {
 	for _, tc := range []struct {
 		version clparams.StateVersion

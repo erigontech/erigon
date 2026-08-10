@@ -85,6 +85,9 @@ func canUsePreparedPayload(p *preparedPayload, builderContinuity bool, slot uint
 // payload is already packed when the validator client asks for a block instead of being built from
 // scratch inside the proposal slot.
 func (a *ApiHandler) StartPayloadPreparation(ctx context.Context) {
+	if !a.engine.SupportInsertion() {
+		return
+	}
 	go a.preparePayloadLoop(ctx)
 }
 
