@@ -166,6 +166,7 @@ func (f *ForkChoiceStore) onNewFinalized(newFinalized solid.Checkpoint) {
 			root := element.Value.(common.Hash)
 			header, ok := f.forkGraph.GetHeader(root)
 			if !ok || header.Slot <= finalizedSlot {
+				delete(f.headSet, root)
 				f.removeGloasVerificationLeaf(root)
 			}
 			element = next

@@ -211,15 +211,18 @@ func TestCollectUnverifiedGloasPayloadsReturnsDeepLineageContinuation(t *testing
 		}
 		parentRoot = root
 	}
+	newestRoot := parentRoot
+	verified := make(map[common.Hash]bool)
+	shouldVerify := func(root common.Hash) bool { return !verified[root] }
 	items, continuations := collectUnverifiedGloasPayloads(
-		[]common.Hash{parentRoot},
+		[]common.Hash{newestRoot},
 		0,
 		&cfg,
 		func(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
 			block, ok := blocks[root]
 			return block, ok
 		},
-		func(root common.Hash) bool { return root == oldestRoot },
+		shouldVerify,
 	)
 
 	require.Empty(t, items)
@@ -232,10 +235,52 @@ func TestCollectUnverifiedGloasPayloadsReturnsDeepLineageContinuation(t *testing
 			block, ok := blocks[root]
 			return block, ok
 		},
-		func(root common.Hash) bool { return root == oldestRoot },
+		shouldVerify,
 	)
 	require.Empty(t, continuations)
 	require.Equal(t, []common.Hash{oldestRoot}, verificationRoots(items))
+	verified[oldestRoot] = true
+	items, continuations = collectUnverifiedGloasPayloads(
+		[]common.Hash{newestRoot},
+		0,
+		&cfg,
+		func(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+			block, ok := blocks[root]
+			return block, ok
+		},
+		shouldVerify,
+	)
+	require.Empty(t, continuations)
+	wantRoots := make([]common.Hash, 0, maxGloasVerificationSweepPerCycle)
+	for i := uint64(2); i <= maxGloasVerificationSweepPerCycle+1; i++ {
+		wantRoots = append(wantRoots, testGloasVerificationRoot(i))
+	}
+	require.Equal(t, wantRoots, verificationRoots(items))
+}
+
+func TestCollectUnverifiedGloasPayloadsDoesNotContinueThroughEmptyBoundary(t *testing.T) {
+	cfg := testGloasVerificationConfig()
+	blocks := make(map[common.Hash]*cltypes.SignedBeaconBlock, maxGloasVerificationScanPerLineage+1)
+	parentRoot := common.Hash{}
+	for i := 1; i <= maxGloasVerificationScanPerLineage+1; i++ {
+		root := testGloasVerificationRoot(uint64(i))
+		blocks[root] = testGloasVerificationBlock(&cfg, uint64(i), parentRoot)
+		parentRoot = root
+	}
+	newestRoot := parentRoot
+	items, continuations := collectUnverifiedGloasPayloads(
+		[]common.Hash{newestRoot},
+		0,
+		&cfg,
+		func(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+			block, ok := blocks[root]
+			return block, ok
+		},
+		func(root common.Hash) bool { return root == newestRoot },
+	)
+
+	require.Empty(t, continuations)
+	require.Equal(t, []common.Hash{newestRoot}, verificationRoots(items))
 }
 
 func TestCollectUnverifiedGloasPayloadsSharesOutputAcrossLineages(t *testing.T) {

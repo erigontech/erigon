@@ -551,6 +551,7 @@ func TestOnNewFinalizedPrunesGloasWeightTree(t *testing.T) {
 	f.onNewFinalized(solid.Checkpoint{Epoch: 1, Root: rootC2})
 
 	require.NotContains(t, f.gloasWeightTree.nodes, rootC2)
+	require.NotContains(t, f.headSet, rootC2)
 	require.NotContains(t, f.gloasVerificationLeafByRoot, rootC2)
 	require.True(t, f.gloasWeightTree.allDirty)
 }

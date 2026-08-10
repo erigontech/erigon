@@ -597,7 +597,9 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 		startRoots = append(startRoots, root)
 	}
 	for _, root := range cfg.gloasVerificationContinuations {
-		addStartRoot(root)
+		if !cfg.forkChoice.IsPayloadVerified(root) {
+			addStartRoot(root)
+		}
 	}
 	addStartRoot(canonicalRoot)
 	addStartRoot(highestSeenRoot)
@@ -708,8 +710,11 @@ func collectUnverifiedGloasPayloads(
 			}
 			root = common.Hash(block.Block.ParentRoot)
 		}
-		if scanned == maxGloasVerificationScanPerLineage && root != (common.Hash{}) && !slices.Contains(continuations, root) {
-			continuations = append(continuations, root)
+		if scanned == maxGloasVerificationScanPerLineage && root != (common.Hash{}) && shouldVerify(root) {
+			lineage = lineage[:0]
+			if !slices.Contains(continuations, root) {
+				continuations = append(continuations, root)
+			}
 		}
 		slices.Reverse(lineage)
 		lineages = append(lineages, lineage)
