@@ -598,20 +598,24 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 	}
 	for _, root := range oldRoots {
 		f.badBlocks.Delete(root)
-		f.blocks.Delete(root)
 		f.lightclientBootstraps.Delete(root)
 		f.currentJustifiedCheckpoints.Delete(root)
 		f.finalizedCheckpoints.Delete(root)
 		f.headers.Delete(root)
 		f.blockRewards.Delete(root)
+		f.stateDumpLock.Lock()
+		f.blocks.Delete(root)
 		if err := f.fs.Remove(getBeaconStateFilename(root)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			log.Debug("failed to remove pruned beacon state file", "root", root, "err", err)
 		}
-		// [New in Gloas:EIP7732] Also remove envelope files
 		f.envelopeExists.Delete(root)
 		if err := f.fs.Remove(getEnvelopeFilename(root)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			log.Debug("failed to remove pruned envelope file", "root", root, "err", err)
 		}
+		if err := f.fs.Remove(getEnvelopeTempFilename(root)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			log.Debug("failed to remove pruned envelope temp file", "root", root, "err", err)
+		}
+		f.stateDumpLock.Unlock()
 	}
 	log.Debug("Pruned old blocks", "pruneSlot", pruneSlot)
 	return
