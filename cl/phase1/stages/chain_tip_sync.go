@@ -28,6 +28,7 @@ const (
 	maxGloasVerificationStartRootsPerCycle = 8
 	maxGloasVerificationLeafRootsPerCycle  = maxGloasVerificationStartRootsPerCycle - 2
 	maxGloasVerificationStalledCycles      = 8
+	maxGloasVerificationCheckpoints        = 256
 )
 
 func gloasVersionedHashes(blobCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) ([]common.Hash, error) {
@@ -597,7 +598,7 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 	}
 	addStartRoot(canonicalRoot)
 	addStartRoot(cfg.forkChoice.HighestSeenRoot())
-	cfg.gloasVerificationLineages = mergeGloasVerificationLineages(cfg.gloasVerificationLineages, startRoots)
+	cfg.gloasVerificationLineages = prioritizeGloasVerificationLineages(cfg.gloasVerificationLineages, startRoots)
 	leafLimit := min(maxGloasVerificationLeafRootsPerCycle, maxGloasVerificationStartRootsPerCycle-len(cfg.gloasVerificationLineages))
 	if leafLimit > 0 {
 		cfg.gloasVerificationLineages = mergeGloasVerificationLineages(
@@ -681,7 +682,7 @@ func mergeGloasVerificationLineages(states []gloasVerificationLineage, roots []c
 		}
 		known := false
 		for i := range states {
-			if states[i].origin == root || states[i].cursor == root || slices.Contains(states[i].checkpoints, root) {
+			if states[i].origin == root || states[i].cursor == root {
 				known = true
 				break
 			}
@@ -691,6 +692,43 @@ func mergeGloasVerificationLineages(states []gloasVerificationLineage, roots []c
 		}
 	}
 	return states
+}
+
+func prioritizeGloasVerificationLineages(states []gloasVerificationLineage, roots []common.Hash) []gloasVerificationLineage {
+	prioritized := make([]gloasVerificationLineage, 0, maxGloasVerificationStartRootsPerCycle)
+	selected := make(map[int]struct{}, len(roots))
+	for _, root := range roots {
+		if len(prioritized) >= maxGloasVerificationStartRootsPerCycle {
+			break
+		}
+		if root == (common.Hash{}) {
+			continue
+		}
+		found := -1
+		for i := range states {
+			if states[i].origin == root || states[i].cursor == root {
+				found = i
+				break
+			}
+		}
+		if found >= 0 {
+			if _, ok := selected[found]; !ok {
+				prioritized = append(prioritized, states[found])
+				selected[found] = struct{}{}
+			}
+		} else {
+			prioritized = append(prioritized, gloasVerificationLineage{origin: root, cursor: root, checkpoints: []common.Hash{root}})
+		}
+	}
+	for i := range states {
+		if len(prioritized) >= maxGloasVerificationStartRootsPerCycle {
+			break
+		}
+		if _, ok := selected[i]; !ok {
+			prioritized = append(prioritized, states[i])
+		}
+	}
+	return prioritized
 }
 
 func shouldVerifyGloasPayload(hasEnvelope, verified bool, status execution_client.PayloadStatus, hasStatus bool) bool {
@@ -762,6 +800,7 @@ func collectUnverifiedGloasPayloadPages(
 		root := state.cursor
 		scanned := 0
 		blocked := false
+		unavailable := false
 		for ; root != (common.Hash{}) && scanned < maxGloasVerificationScanPerLineage; scanned++ {
 			if _, ok := seen[root]; ok {
 				if gloasPageDependsOnSharedAncestry(page, root, getBlock, shouldVerify) {
@@ -773,7 +812,12 @@ func collectUnverifiedGloasPayloadPages(
 			seen[root] = struct{}{}
 			pageRoots = append(pageRoots, root)
 			block, ok := getBlock(root)
-			if !ok || block == nil || block.Block == nil || block.Block.Slot <= finalizedSlot {
+			if !ok || block == nil || block.Block == nil {
+				unavailable = true
+				root = common.Hash{}
+				break
+			}
+			if block.Block.Slot <= finalizedSlot {
 				root = common.Hash{}
 				break
 			}
@@ -794,9 +838,16 @@ func collectUnverifiedGloasPayloadPages(
 			next = append(next, state)
 			continue
 		}
+		if unavailable {
+			state.pending = 0
+			state.stalled++
+			if state.stalled < maxGloasVerificationStalledCycles {
+				next = append(next, state)
+			}
+			continue
+		}
 		if scanned == maxGloasVerificationScanPerLineage && root != (common.Hash{}) && root != state.readyBoundary {
-			boundary, _ := getBlock(root)
-			if gloasPageDependsOnBoundary(page, boundary) {
+			if gloasPageDependsOnSharedAncestry(page, root, getBlock, shouldVerify) {
 				for _, pageRoot := range pageRoots {
 					delete(seen, pageRoot)
 				}
@@ -805,6 +856,9 @@ func collectUnverifiedGloasPayloadPages(
 			state.cursor = root
 			if state.checkpoints[len(state.checkpoints)-1] != root {
 				state.checkpoints = append(state.checkpoints, root)
+				if len(state.checkpoints) > maxGloasVerificationCheckpoints {
+					state.checkpoints = append([]common.Hash(nil), state.checkpoints[len(state.checkpoints)-maxGloasVerificationCheckpoints:]...)
+				}
 			}
 			state.pending = 0
 			state.stalled = 0
