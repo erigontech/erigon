@@ -755,46 +755,71 @@ func TestBlockBuilderWindowTakesPreparedPayloadEarly(t *testing.T) {
 func TestPreparedPayloadMatchesOnlyTheSamePrime(t *testing.T) {
 	var p preparedPayload
 	id := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+	now := time.Unix(100, 0)
 
-	require.False(t, p.matches(10, id), "nothing primed yet")
+	require.False(t, p.matches(10, id, now, 0), "nothing primed yet")
 
-	p.set(10, id)
-	require.True(t, p.matches(10, id))
+	p.set(10, id, now)
+	require.True(t, p.matches(10, id, now, 0))
 
 	// A different payload id means the execution layer started a fresh build — a reorg, a late
 	// block, or a changed fee recipient — so the warm builder is gone.
-	require.False(t, p.matches(10, []byte{9, 9, 9, 9, 9, 9, 9, 9}))
-	require.False(t, p.matches(11, id), "primed for another slot")
-	require.False(t, p.matches(10, nil), "no id from the execution layer")
+	require.False(t, p.matches(10, []byte{9, 9, 9, 9, 9, 9, 9, 9}, now, 0))
+	require.False(t, p.matches(11, id, now, 0), "primed for another slot")
+	require.False(t, p.matches(10, nil, now, 0), "no id from the execution layer")
+}
+
+func TestPreparedPayloadRequiresMinimumWarmup(t *testing.T) {
+	var p preparedPayload
+	id := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+	now := time.Unix(100, 0)
+	minAge := 2 * time.Second
+
+	p.set(10, id, now.Add(-minAge+time.Nanosecond))
+	require.False(t, p.matches(10, id, now, minAge))
+
+	p.set(10, id, now.Add(-minAge))
+	require.True(t, p.matches(10, id, now, minAge))
+}
+
+func TestPreparedPayloadMinimumWarmupPreservesBuildTime(t *testing.T) {
+	cfg := &clparams.BeaconChainConfig{
+		SecondsPerSlot:   12,
+		IntervalsPerSlot: 3,
+	}
+
+	require.Equal(t, 2*time.Second, preparedPayloadMinimumAge(cfg, clparams.ElectraVersion))
 }
 
 func TestPreparedPayloadKeepsConsecutiveSlots(t *testing.T) {
 	var p preparedPayload
 	first := []byte{1, 1, 1, 1, 1, 1, 1, 1}
 	second := []byte{2, 2, 2, 2, 2, 2, 2, 2}
+	now := time.Unix(100, 0)
 
 	// Consecutive proposals: priming slot 11 must not evict slot 10, whose block may still be
 	// in production.
-	p.set(10, first)
-	p.set(11, second)
-	require.True(t, p.matches(10, first))
-	require.True(t, p.matches(11, second))
+	p.set(10, first, now)
+	p.set(11, second, now)
+	require.True(t, p.matches(10, first, now, 0))
+	require.True(t, p.matches(11, second, now, 0))
 
 	// Records old enough that they can no longer be produced are dropped, so the map is bounded.
-	p.set(10+preparedPayloadRetainSlots+1, []byte{3, 3, 3, 3, 3, 3, 3, 3})
-	require.False(t, p.matches(10, first))
+	p.set(10+preparedPayloadRetainSlots+1, []byte{3, 3, 3, 3, 3, 3, 3, 3}, now)
+	require.False(t, p.matches(10, first, now, 0))
 }
 
 func TestPreparedPayloadCopiesTheID(t *testing.T) {
 	var p preparedPayload
 	id := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+	now := time.Unix(100, 0)
 
-	p.set(10, id)
+	p.set(10, id, now)
 	id[0] = 0xff
 
 	// The caller's buffer must not be able to invalidate, or forge, a later match.
-	require.True(t, p.matches(10, []byte{1, 2, 3, 4, 5, 6, 7, 8}))
-	require.False(t, p.matches(10, id))
+	require.True(t, p.matches(10, []byte{1, 2, 3, 4, 5, 6, 7, 8}, now, 0))
+	require.False(t, p.matches(10, id, now, 0))
 }
 
 func TestShouldPrepareAgainWhenTheHeadMoves(t *testing.T) {

@@ -17,12 +17,101 @@
 package execmodule
 
 import (
+	"context"
+	"errors"
 	"math"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"golang.org/x/sync/semaphore"
+
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
+	"github.com/erigontech/erigon/execution/types"
 )
+
+func TestAssembleBlockSupersedesBuilderForSameTimestamp(t *testing.T) {
+	type runningBuilder struct {
+		id        uint64
+		interrupt *atomic.Bool
+	}
+	started := make(chan runningBuilder, 4)
+	module := &ExecModule{
+		semaphore: semaphore.NewWeighted(1),
+		config:    &chain.Config{},
+		logger:    log.Root(),
+		builders:  map[uint64]*builder.BlockBuilder{},
+		builderFunc: func(params *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
+			started <- runningBuilder{id: params.PayloadId, interrupt: interrupt}
+			for !interrupt.Load() {
+				time.Sleep(time.Millisecond)
+			}
+			return nil, errors.New("builder stopped")
+		},
+	}
+	t.Cleanup(func() {
+		for _, blockBuilder := range module.builders {
+			if blockBuilder != nil {
+				_, _ = blockBuilder.Stop(context.Background())
+			}
+		}
+	})
+
+	waitStarted := func() runningBuilder {
+		t.Helper()
+		select {
+		case running := <-started:
+			return running
+		case <-time.After(time.Second):
+			t.Fatal("builder did not start")
+			return runningBuilder{}
+		}
+	}
+	assemble := func(timestamp uint64, parent common.Hash) (uint64, runningBuilder) {
+		t.Helper()
+		result, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: timestamp, ParentHash: parent})
+		require.NoError(t, err)
+		require.False(t, result.Busy)
+		return result.PayloadID, waitStarted()
+	}
+
+	firstID, first := assemble(100, common.Hash{0x01})
+	adjacentID, adjacent := assemble(101, common.Hash{0x02})
+	require.NotEqual(t, firstID, adjacentID)
+	require.False(t, first.interrupt.Load(), "a builder for another target timestamp must stay alive")
+
+	secondID, second := assemble(100, common.Hash{0x03})
+	require.NotEqual(t, firstID, secondID)
+	require.Eventually(t, first.interrupt.Load, time.Second, time.Millisecond)
+	require.False(t, adjacent.interrupt.Load(), "superseding timestamp 100 must not cancel timestamp 101")
+	require.False(t, second.interrupt.Load())
+
+	thirdID, third := assemble(100, common.Hash{0x04})
+	require.NotEqual(t, secondID, thirdID)
+	require.Eventually(t, second.interrupt.Load, time.Second, time.Millisecond)
+	require.False(t, adjacent.interrupt.Load())
+	require.False(t, third.interrupt.Load())
+
+	duplicate, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: 100, ParentHash: common.Hash{0x04}})
+	require.NoError(t, err)
+	require.Equal(t, thirdID, duplicate.PayloadID)
+	require.False(t, third.interrupt.Load(), "a duplicate request must keep its builder alive")
+
+	delete(module.builders, firstID)
+	for id := thirdID + 1; len(module.builders) < engine_helpers.MaxBuilders; id++ {
+		module.builders[id] = nil
+	}
+	module.evictOldBuilders()
+	require.Eventually(t, adjacent.interrupt.Load, time.Second, time.Millisecond)
+	require.NotContains(t, module.builders, adjacentID)
+	require.NotContains(t, module.buildersByTimestamp, uint64(101))
+}
 
 func TestBuildDuration(t *testing.T) {
 	const ethereum, gnosis = uint64(12), uint64(5)

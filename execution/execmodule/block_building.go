@@ -65,7 +65,16 @@ func (e *ExecModule) evictOldBuilders() {
 
 	// remove old builders so that at most MaxBuilders - 1 remain
 	for i := 0; i <= len(e.builders)-engine_helpers.MaxBuilders; i++ {
-		delete(e.builders, ids[i])
+		id := ids[i]
+		if old := e.builders[id]; old != nil {
+			old.Cancel()
+		}
+		delete(e.builders, id)
+		for timestamp, builderID := range e.buildersByTimestamp {
+			if builderID == id {
+				delete(e.buildersByTimestamp, timestamp)
+			}
+		}
 	}
 }
 
@@ -87,6 +96,11 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 			return AssembleBlockResult{PayloadID: e.lastParameters.PayloadId}, nil
 		}
 	}
+	if previousID, ok := e.buildersByTimestamp[params.Timestamp]; ok {
+		if previous := e.builders[previousID]; previous != nil {
+			previous.Cancel()
+		}
+	}
 
 	// Initiate payload building
 	e.evictOldBuilders()
@@ -96,6 +110,10 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 	e.lastParameters = params
 
 	e.builders[e.nextPayloadId] = builder.NewBlockBuilder(e.builderFunc, params, buildDuration(params.Timestamp, time.Now(), e.config.SecondsPerSlot()))
+	if e.buildersByTimestamp == nil {
+		e.buildersByTimestamp = make(map[uint64]uint64)
+	}
+	e.buildersByTimestamp[params.Timestamp] = e.nextPayloadId
 	e.logger.Info("[ForkChoiceUpdated] BlockBuilder added", "payload", e.nextPayloadId)
 
 	return AssembleBlockResult{PayloadID: e.nextPayloadId}, nil

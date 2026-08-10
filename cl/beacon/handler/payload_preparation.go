@@ -45,24 +45,21 @@ var (
 // priming the next slot cannot evict the record for a proposal that is still being produced.
 const preparedPayloadRetainSlots = 2
 
-// preparedPayload records the payload id the execution layer returned for a slot this node primed
-// ahead of time. Block production compares the id its own forkchoice update returns against this
-// record: an equal id means the execution layer recognised the request as a repeat and has been
-// packing transactions since the prime, so the payload is worth taking early. Anything else — a
-// reorg, a late block, a changed fee recipient, an execution layer that was busy — yields a
-// different id and leaves production on its usual later schedule.
-// Records are kept per slot: consecutive proposals would otherwise let the prime for the later slot
-// evict the one production is about to look up.
-type preparedPayload struct {
-	mu       sync.Mutex
-	payloads map[uint64][]byte
+type preparedPayloadRecord struct {
+	id       []byte
+	primedAt time.Time
 }
 
-func (p *preparedPayload) set(slot uint64, payloadID []byte) {
+type preparedPayload struct {
+	mu       sync.Mutex
+	payloads map[uint64]preparedPayloadRecord
+}
+
+func (p *preparedPayload) set(slot uint64, payloadID []byte, primedAt time.Time) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.payloads == nil {
-		p.payloads = map[uint64][]byte{}
+		p.payloads = map[uint64]preparedPayloadRecord{}
 	}
 	// Slots this far back can no longer be produced, so dropping them bounds the map.
 	for recorded := range p.payloads {
@@ -70,13 +67,14 @@ func (p *preparedPayload) set(slot uint64, payloadID []byte) {
 			delete(p.payloads, recorded)
 		}
 	}
-	p.payloads[slot] = bytes.Clone(payloadID)
+	p.payloads[slot] = preparedPayloadRecord{id: bytes.Clone(payloadID), primedAt: primedAt}
 }
 
-func (p *preparedPayload) matches(slot uint64, payloadID []byte) bool {
+func (p *preparedPayload) matches(slot uint64, payloadID []byte, now time.Time, minAge time.Duration) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return len(payloadID) > 0 && bytes.Equal(p.payloads[slot], payloadID)
+	record, ok := p.payloads[slot]
+	return ok && len(payloadID) > 0 && bytes.Equal(record.id, payloadID) && now.Sub(record.primedAt) >= minAge
 }
 
 // StartPayloadPreparation primes the execution layer for slots this node is due to propose, so the
@@ -129,10 +127,7 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 	}
 }
 
-// shouldPrepare reports whether the target slot still needs priming. Priming once per slot is not
-// enough: when the previous slot's block arrives late the head moves after we have already primed,
-// and the execution layer is left warming a builder on a parent that is no longer the head. That is
-// exactly the case where the proposal is most at risk, so prime again whenever the head changes.
+// shouldPrepare requires a fresh builder after the target slot or its parent head changes.
 func shouldPrepare(targetSlot, primedSlot uint64, head, primedHead common.Hash) bool {
 	return targetSlot != primedSlot || head != primedHead
 }
@@ -146,11 +141,7 @@ func isExpectedPreparationSkip(err error) bool {
 		errors.Is(err, synced_data.ErrNotSynced)
 }
 
-// preparePayloadFor sends the forkchoice update for targetSlot ahead of the slot itself. It returns
-// an error, rather than logging loudly, whenever there is simply nothing to do — the node is
-// syncing, the slot belongs to someone else, or the validator client has not registered a fee
-// recipient yet — because block production falls back to building inside the slot in every one of
-// those cases.
+// preparePayloadFor sends the forkchoice update for targetSlot ahead of the slot itself.
 func (a *ApiHandler) preparePayloadFor(ctx context.Context, targetSlot uint64) (common.Hash, error) {
 	var (
 		baseBlockRoot common.Hash
@@ -207,18 +198,12 @@ func (a *ApiHandler) preparePayloadFor(ctx context.Context, targetSlot uint64) (
 		return common.Hash{}, errNoPayloadID
 	}
 
-	a.preparedPayload.set(targetSlot, payloadID)
+	a.preparedPayload.set(targetSlot, payloadID, time.Now())
 	log.Info("PayloadPreparation: primed execution layer", "slot", targetSlot, "proposer", proposerIndex, "head", baseBlockRoot)
 	return baseBlockRoot, nil
 }
 
-// preparedForkChoiceInputs assembles the forkchoice-update arguments for building targetSlot on top
-// of baseState, mirroring the pre-Gloas path in produceBeaconBody.
-//
-// The two must derive byte-identical arguments: the execution layer keeps the builder it already
-// warmed only when it recognises the request as a repeat. Divergence costs that warm builder and
-// nothing else — production simply builds inside the slot as before — but it is silent, so
-// PayloadPreparation logs whether the primed id was still valid at production time.
+// preparedForkChoiceInputs mirrors the pre-Gloas production inputs so the execution layer can reuse the builder.
 func (a *ApiHandler) preparedForkChoiceInputs(
 	baseState *state.CachingBeaconState,
 	baseBlockRoot common.Hash,

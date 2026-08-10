@@ -234,6 +234,11 @@ func computeBlockBuilderWindow(now, slotStart time.Time, cfg *clparams.BeaconCha
 	}
 }
 
+func preparedPayloadMinimumAge(cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion) time.Duration {
+	due := attestationDue(cfg, stateVersion)
+	return max(due-2*due/payloadPublicationDivisor, 0)
+}
+
 func shouldRetryGetPayload(now, deadline time.Time) bool {
 	return now.Before(deadline)
 }
@@ -1070,9 +1075,13 @@ func (a *ApiHandler) produceBeaconBody(
 			return
 		}
 		slotStart := a.ethClock.GetSlotTime(targetSlot)
-		// An identical payload id means the execution layer kept the builder primed before the slot,
-		// so the payload is already packed and does not need the rest of the slot to fill.
-		prepared := a.preparedPayload.matches(targetSlot, idBytes)
+		// Early collection requires both the same builder and enough pre-slot packing time.
+		prepared := a.preparedPayload.matches(
+			targetSlot,
+			idBytes,
+			time.Now(),
+			preparedPayloadMinimumAge(a.beaconChainCfg, stateVersion),
+		)
 		log.Info("BlockProduction: payload preparation", "slot", targetSlot, "prepared", prepared)
 		buildWindow := computeBlockBuilderWindow(builderStartedAt, slotStart, a.beaconChainCfg, stateVersion, prepared)
 		payload, bundles, requestsBundle, blockValue, ok := pollAssembledPayload(ctx, buildWindow, retryTime, func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {

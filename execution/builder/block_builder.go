@@ -89,7 +89,7 @@ func NewBlockBuilder(build BlockBuilderFunc, param *Parameters, maxBuildTime tim
 }
 
 func (b *BlockBuilder) Stop(ctx context.Context) (*types.BlockWithReceipts, error) {
-	b.interrupt.Store(true)
+	b.Cancel()
 
 	select {
 	case <-ctx.Done():
@@ -100,6 +100,10 @@ func (b *BlockBuilder) Stop(ctx context.Context) (*types.BlockWithReceipts, erro
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.result, b.err
+}
+
+func (b *BlockBuilder) Cancel() {
+	b.interrupt.Store(true)
 }
 
 func (b *BlockBuilder) Block() *types.Block {
