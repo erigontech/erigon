@@ -25,12 +25,46 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+type stateVersionCountingTemporalTx struct {
+	kv.TemporalTx
+	viewID            uint64
+	stateVersionReads int
+}
+
+func (tx *stateVersionCountingTemporalTx) ViewID() uint64 {
+	return tx.viewID
+}
+
+func (tx *stateVersionCountingTemporalTx) ReadSequence(table string) (uint64, error) {
+	if table == string(kv.PlainStateVersion) {
+		tx.stateVersionReads++
+	}
+	return tx.TemporalTx.ReadSequence(table)
+}
+
+func TestAsOfStateReaderDerivesCacheViewsOncePerTransaction(t *testing.T) {
+	_, tx, doms := setupStepTest(t)
+	countingTx := &stateVersionCountingTemporalTx{
+		TemporalTx: tx,
+		viewID:     tx.ViewID() ^ (uint64(1) << 63),
+	}
+	reader := (&asOfStateReader{sd: doms, roTx: tx}).Clone(countingTx)
+
+	for range 2 {
+		_, _, err := reader.Read(kv.CommitmentDomain, []byte("missing-branch"), doms.StepSize())
+		require.NoError(t, err)
+	}
+
+	require.Equal(t, 1, countingTx.stateVersionReads)
+}
 
 // TestShouldComputeOnRequest_GenesisFirstBatch is the regression test for
 // the batch-mode genesis-commitment bug:
