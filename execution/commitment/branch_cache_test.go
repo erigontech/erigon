@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/execution/cache"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
 func testBranchGeneration(stateVersion uint64) cache.Generation {
@@ -75,6 +76,50 @@ func TestBranchCache_StorageTrunkPin(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, []byte("storage-root"), got)
 	require.Equal(t, uint64(1), c.pinnedHits.Load())
+}
+
+func TestBranchCache_ConcurrentFirstPinsShareStorageTrunk(t *testing.T) {
+	c := NewBranchCache(100)
+	defer c.Close()
+
+	path := make([]byte, 65)
+	path[64] = 1
+	prefixA := nibbles.HexToCompact(path)
+	path[64] = 2
+	prefixB := nibbles.HexToCompact(path)
+
+	previousProcs := runtime.GOMAXPROCS(1)
+	defer runtime.GOMAXPROCS(previousProcs)
+
+	c.pinnedMu.Lock()
+	var writers sync.WaitGroup
+	pin := func(started chan<- struct{}, prefix, value []byte) {
+		defer writers.Done()
+		close(started)
+		c.PinEntry(prefix, value, 0)
+	}
+
+	started := make(chan struct{})
+	writers.Add(1)
+	go pin(started, prefixA, []byte("a"))
+	<-started
+	runtime.Gosched()
+
+	started = make(chan struct{})
+	writers.Add(1)
+	go pin(started, prefixB, []byte("b"))
+	<-started
+	runtime.Gosched()
+
+	c.pinnedMu.Unlock()
+	writers.Wait()
+
+	got, _, ok := c.Get(prefixA)
+	require.True(t, ok)
+	require.Equal(t, []byte("a"), got)
+	got, _, ok = c.Get(prefixB)
+	require.True(t, ok)
+	require.Equal(t, []byte("b"), got)
 }
 
 // TestBranchCache_RootPinning verifies the root branch lands in the pinned

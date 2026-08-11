@@ -481,7 +481,7 @@ func (c *BranchCache) storageRoute(prefix []byte, create bool) (st *trunk, acct 
 		return nil, packed, stor, false
 	}
 	st = newStorageTrunk(c.maxDepth)
-	c.pinnedForWrite().Set(packed, st)
+	st, _ = c.pinnedForWrite().LoadOrStore(packed, st)
 	return st, packed, stor, true
 }
 
