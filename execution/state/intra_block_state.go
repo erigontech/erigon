@@ -303,6 +303,9 @@ func (sdb *IntraBlockState) VersionMap() *VersionMap {
 // SetNoMaterialize enables the cache-free parallel path: create/write flows
 // record only versioned cells and never populate the stateObject map.
 func (sdb *IntraBlockState) SetNoMaterialize(v bool) {
+	if dbg.AssertEnabled && v != sdb.noMaterialize && !sdb.stateObjectArena.empty() {
+		panic("noMaterialize changed with arena slots outstanding")
+	}
 	sdb.noMaterialize = v
 }
 

@@ -226,10 +226,10 @@ func TestStateObjectArenaRecyclesSlots(t *testing.T) {
 	assert.True(t, reused.arena, "hand-out re-tags the slot")
 }
 
-// TestArenaDrawOutsideNoMaterializeAsserts pins the mutual exclusion: arena slots
-// are rewound per transaction, so a path that caches its objects for the block
-// must never hold one.
-func TestArenaDrawOutsideNoMaterializeAsserts(t *testing.T) {
+// TestNoMaterializeIsStableWhileSlotsOutstanding pins the mutual exclusion: arena
+// slots are rewound per transaction, so the mode that decides whether an object is
+// cached for the block must not change while any are live.
+func TestNoMaterializeIsStableWhileSlotsOutstanding(t *testing.T) {
 	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
 	dbg.AssertEnabled = true
 
@@ -242,8 +242,7 @@ func TestArenaDrawOutsideNoMaterializeAsserts(t *testing.T) {
 
 	ibs.SetNoMaterialize(true)
 	require.True(t, ibs.allocStateObject().arena)
-	ibs.SetNoMaterialize(false) // mode flipped without a rewind
-	require.Panics(t, ibs.clearJournalAndRefund)
+	require.Panics(t, func() { ibs.SetNoMaterialize(false) }, "flipping with slots outstanding")
 }
 
 // TestStateObjectArenaFallsBackToHeap pins that the arena stops growing at its
