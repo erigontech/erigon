@@ -137,7 +137,12 @@ var (
 	UseCodeStore         = EnvBool("USE_CODE_STORE", true)
 	DisableAdaptivePin   = EnvBool("DISABLE_ADAPTIVE_PIN", false)
 	AssertStateCache     = EnvBool("ASSERT_STATE_CACHE", false)
-	ReadAhead            = EnvBool("READ_AHEAD", true)
+	// MmapPoison makes a closed file revoke its mapping instead of unmapping it,
+	// turning a read through a slice that outlived its file into a fault at that
+	// read. Without it the address is free for the next file, and the stale read
+	// silently returns another file's bytes. Leaks address space — diagnostics only.
+	MmapPoison = EnvBool("MMAP_POISON", false)
+	ReadAhead  = EnvBool("READ_AHEAD", true)
 	// FilesAsyncIO warms cold state .kv pages via io_uring before the mmap read, so
 	// a would-be blocking page fault becomes a non-blocking read that releases the
 	// goroutine's P. Linux + io_uring only; self-disables (reads use ordinary faults)

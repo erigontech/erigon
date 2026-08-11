@@ -578,7 +578,11 @@ func (d *Decompressor) Close() {
 		rb.stop() // join the refresh goroutine before munmap so no mincore touches freed memory
 		d.residency.Store(nil)
 	}
-	if err := mmap.Munmap(d.mmapHandle1, d.mmapHandle2); err != nil {
+	unmap := mmap.Munmap
+	if dbg.MmapPoison {
+		unmap = mmap.Poison
+	}
+	if err := unmap(d.mmapHandle1, d.mmapHandle2); err != nil {
 		log.Log(dbg.FileCloseLogLevel, "unmap", "err", err, "file", d.FileName(), "stack", dbg.Stack())
 	}
 	if err := d.f.Close(); err != nil {

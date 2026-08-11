@@ -91,3 +91,15 @@ func Munmap(mmapHandle1 []byte, _ *[MaxMapSize]byte) error {
 	err := unix.Munmap(mmapHandle1)
 	return err
 }
+
+// Poison revokes access to the range but deliberately leaves it mapped, so the
+// address can never be reused. A slice that outlived its file then faults at
+// the read that misuses it, instead of silently returning whichever file the
+// kernel mapped there next. Diagnostics only: the range leaks for the life of
+// the process.
+func Poison(mmapHandle1 []byte, _ *[MaxMapSize]byte) error {
+	if mmapHandle1 == nil {
+		return nil
+	}
+	return unix.Mprotect(mmapHandle1, unix.PROT_NONE)
+}
