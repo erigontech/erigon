@@ -234,14 +234,23 @@ func (v CommitmentDomainValidator) ValidateStep(ctx context.Context, files []*sn
 
 	// At fresh bootstrap, the snapshot files are on disk but the EL
 	// hasn't OpenSegments'd yet — BlockReader.FrozenBlocks() returns
-	// 0 and any header lookup will fail. Return ErrPause so the
-	// lifecycle retries on next sweep instead of accumulating
-	// failures toward quarantine. The block-aligned validators
-	// (HeaderChain / TxRoot / Receipt) detect this via per-block
-	// nil-header checks; commitment's deeper LoadCommitmentRoot path
-	// makes per-block detection awkward, so an early gate is cleaner.
+	// 0 and any header lookup will fail.
+	//
+	// In storage-driven mode this leads to a circular deadlock: this
+	// validator ErrPauses → statePending stays > 0 → InitialStateReady
+	// never fires → stage_snapshots' OpenFolder never runs → FrozenBlocks
+	// stays 0 → validator ErrPauses forever (leg-M cycle 8 2026-08-11).
+	//
+	// Break the cycle by triggering OpenFolder from the validator when
+	// FrozenBlocks==0 but block .seg files ARE on disk. If OpenFolder
+	// advances the frozen tip, proceed; else fall back to ErrPause.
 	if v.BlockReader.FrozenBlocks() == 0 {
-		return fmt.Errorf("BlockReader frozen tip = 0 (EL hasn't opened segments yet): %w", validation.ErrPause)
+		if snaps := v.BlockReader.Snapshots(); snaps != nil {
+			_ = snaps.OpenFolder()
+		}
+		if v.BlockReader.FrozenBlocks() == 0 {
+			return fmt.Errorf("BlockReader frozen tip = 0 (EL hasn't opened segments yet): %w", validation.ErrPause)
+		}
 	}
 
 	// State domain still loading — the aggregator hasn't finished
