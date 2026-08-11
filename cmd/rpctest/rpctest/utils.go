@@ -340,7 +340,7 @@ func requestAndCompare(request string, methodName string, errCtx string, reqGen 
 					// Keep going
 				} else {
 					reqFile, _ := os.Create("request.json")                //nolint:errcheck
-					reqFile.Write([]byte(request))                         //nolint:errcheck
+					reqFile.WriteString(request)                           //nolint:errcheck
 					reqFile.Close()                                        //nolint:errcheck
 					erigonRespFile, _ := os.Create("erigon-response.json") //nolint:errcheck
 					erigonRespFile.Write(res.Response)                     //nolint:errcheck
@@ -395,7 +395,7 @@ func requestAndCompareErigon(requestA, requestB string, methodNameA, methodNameB
 					// Keep going
 				} else {
 					reqFile, _ := os.Create("request.json")                //nolint:errcheck
-					reqFile.Write([]byte(requestA))                        //nolint:errcheck
+					reqFile.WriteString(requestA)                          //nolint:errcheck
 					reqFile.Close()                                        //nolint:errcheck
 					erigonRespFile, _ := os.Create("erigon-response.json") //nolint:errcheck
 					erigonRespFile.Write(res.Response)                     //nolint:errcheck

@@ -20,11 +20,12 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/math"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // Helper function to create a simple attestation for testing
