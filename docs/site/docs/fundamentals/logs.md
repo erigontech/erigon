@@ -31,6 +31,10 @@ Erigon provides extensive logging configuration through command-line flags. Key 
 * `--log.dir.verbosity`: Set file log level (default: `dbug`)
 * `--log.delays`: Enable block delay logging
 
+**Downloader (torrent) logs**
+
+The torrent client inside the Downloader keeps its own JSON-formatted file, `logs/torrent.log`. It is written at whichever is **more verbose** of `--torrent.verbosity` and `WARN`, so warnings and errors always reach it even at the default verbosity. Messages at `--torrent.verbosity` or above are additionally forwarded to Erigon's own file and console loggers, which emit them only if `--log.dir.verbosity` and `--verbosity` are themselves set to a verbose enough level.
+
 **Log Levels**
 
 The logging system defines six distinct log levels in hierarchical order:

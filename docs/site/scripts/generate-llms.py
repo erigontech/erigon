@@ -77,6 +77,158 @@ def _is_placeholder_brace(match):
     return bool(_IDENT_BRACE_INNER.match(inner))
 
 
+DEFAULT_TAB_HEADING_DEPTH = 3
+MAX_HEADING_DEPTH = 6
+
+_TABITEM_TAG = re.compile(r"<TabItem\b[^>]*>")
+_TABITEM_OPEN = re.compile(r"<TabItem\b")
+_TABS_OPEN = re.compile(r"<Tabs\b")
+_TABS_CLOSE = re.compile(r"</Tabs\s*>")
+_ATX_HEADING = re.compile(r"\s*(#{1,6})\s")
+# label="X" / label='X' / label={'X'} — Docusaurus accepts all three.
+_TAB_LABEL = re.compile(
+    r"""\blabel\s*=\s*(?:"([^"]*)"|'([^']*)'|\{\s*['"]([^'"]*)['"]\s*\})"""
+)
+# Docusaurus falls back to rendering `value` when `label` is absent, so we do too.
+_TAB_VALUE = re.compile(
+    r"""\bvalue\s*=\s*(?:"([^"]*)"|'([^']*)'|\{\s*['"]([^'"]*)['"]\s*\})"""
+)
+
+
+def _label_of(tag):
+    """A TabItem's visible text: its `label`, else its `value`, else ''."""
+    for pattern in (_TAB_LABEL, _TAB_VALUE):
+        m = pattern.search(tag)
+        if m:
+            return next(g for g in m.groups() if g is not None).strip()
+    return ""
+
+
+def _scan_tab_structure(text):
+    """Fence-aware scan returning (lines, headings, tabs, blocks).
+
+    headings maps line index → heading level; tabs maps line index → visible
+    text; blocks is a list of (open, close) line indices for each <Tabs> set.
+    """
+    lines = text.splitlines()
+    headings, tabs, blocks, open_at, in_fence = {}, {}, [], None, False
+    skip_to = -1
+    for i, line in enumerate(lines):
+        if i <= skip_to:  # continuation lines of a multiline <TabItem …> tag
+            continue
+        if line.lstrip().startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        heading = _ATX_HEADING.match(line)
+        if heading:
+            headings[i] = len(heading.group(1))
+            continue
+        if _TABS_OPEN.search(line) and open_at is None:
+            open_at = i
+        if _TABS_CLOSE.search(line) and open_at is not None:
+            blocks.append((open_at, i))
+            open_at = None
+        tag = _tabitem_tag_at(lines, i)
+        if tag:
+            text_, end, col_start, col_end = tag
+            skip_to = end
+            rest = (line[:col_start] + lines[end][col_end:]).strip()
+            tabs[i] = (_label_of(text_), end, rest)
+    if open_at is not None:  # unclosed <Tabs>: treat the rest of the doc as its body
+        blocks.append((open_at, len(lines)))
+    return lines, headings, tabs, blocks
+
+
+def _tabitem_tag_at(lines, i):
+    """Assemble a `<TabItem …>` opening tag that starts on line `i`.
+
+    Returns `(tag_text, end_line, start_col, end_col)`, or None if no tag starts
+    there. MDX lets the attributes span several lines, and matching only within
+    one line would find no `label` — the heading would be dropped and the later
+    multi-line component strip would delete the label text with the tag. Quotes
+    are tracked so a `>` inside an attribute value does not end the tag early.
+    """
+    m = _TABITEM_OPEN.search(lines[i])
+    if not m:
+        return None
+    quote, buf = None, []
+    for j in range(i, len(lines)):
+        line = lines[j]
+        start = m.start() if j == i else 0
+        for col in range(start, len(line)):
+            ch = line[col]
+            if quote:
+                if ch == quote:
+                    quote = None
+            elif ch in "\"'":
+                quote = ch
+            elif ch == ">":
+                buf.append(line[start : col + 1])
+                return "\n".join(buf), j, m.start(), col + 1
+        buf.append(line[start:])
+    return None  # unterminated tag: leave it to the generic component strip
+
+
+def _tab_heading_depth(start, end, headings):
+    """Pick a heading level for one tab set that nests correctly both ways.
+
+    One level below the enclosing section, so a tab never outranks the section
+    containing it — but never shallower than the first heading *after* the set,
+    so that heading stays a sibling of the tab set instead of being swallowed
+    as a subsection of the last tab.
+    """
+    before = [lvl for i, lvl in headings.items() if i < start]
+    after = [lvl for i, lvl in sorted(headings.items()) if i > end]
+    depth = (before[-1] if before else DEFAULT_TAB_HEADING_DEPTH - 1) + 1
+    if after:
+        depth = max(depth, after[0])
+    return min(depth, MAX_HEADING_DEPTH)
+
+
+def _tabitem_labels_to_headings(text):
+    """Turn each `<TabItem label="X">` into a heading carrying X.
+
+    Tabs are a browser affordance, but the label is often the only thing saying
+    *which* variant the block below describes — which network, OS, or install
+    method. The generic component strip in strip_mdx() drops the tag wholesale,
+    which used to leave sibling tables and code blocks indistinguishable in the
+    text output (five unlabelled disk-size tables in a row, for instance).
+    """
+    lines, headings, tabs, blocks = _scan_tab_structure(text)
+    if not tabs:
+        return text
+
+    # A tab set is delimited by <Tabs>…</Tabs>, not by "no heading in between":
+    # a heading inside one tab's body must not split the set and demote the
+    # tabs that follow it. Tabs outside any <Tabs> block are handled per-tab.
+    depth_at = {}
+    for start, end in blocks:
+        depth = _tab_heading_depth(start, end, headings)
+        for i in tabs:
+            if start < i < end:
+                depth_at[i] = depth
+    for i in tabs:
+        if i not in depth_at:
+            depth_at[i] = _tab_heading_depth(i, i, headings)
+
+    out, skip_to = [], -1
+    for i, line in enumerate(lines):
+        if i <= skip_to:  # attribute lines of a multiline tag, already consumed
+            continue
+        if i not in tabs:
+            out.append(line)
+            continue
+        label, end, rest = tabs[i]
+        skip_to = end
+        if label:
+            out.extend(["", "#" * depth_at[i] + f" {label}", ""])
+        if rest:
+            out.append(rest)
+    return "\n".join(out)
+
+
 def _strip_jsx_expr(match):
     """re.sub callback: drop JSX expressions, preserve placeholder identifiers.
 
@@ -243,6 +395,9 @@ def strip_mdx(text):
     # Remove MDX import/export statements only outside fenced code blocks.
     # This preserves shell `export VAR=...` inside ```bash fences.
     text = _strip_mdx_module_syntax(text)
+    # Promote TabItem labels to headings before the generic component strip
+    # below erases them along with the tag.
+    text = _tabitem_labels_to_headings(text)
     # Remove JSX block comments and multi-line component tags (fence-aware).
     # [^>]* in the component regexes matches newlines (char class), consuming
     # <Link\n  prop="val"\n> in one shot without DOTALL.

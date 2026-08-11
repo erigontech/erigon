@@ -3,7 +3,7 @@ import Link from '@docusaurus/Link';
 
 const cards = [
   {label: 'Get Started',   desc: 'Installation, hardware requirements, and first-run guides.',       to: '/get-started/'},
-  {label: 'Easy Nodes',    desc: 'One-command setup for Ethereum, Gnosis Chain, and Polygon.',       to: '/get-started/easy-nodes/'},
+  {label: 'Easy Nodes',    desc: 'One-command setup for Ethereum and Gnosis Chain.',                to: '/get-started/easy-nodes/'},
   {label: 'Fundamentals',  desc: 'Sync modes, Docker, configuration, and day-to-day operations.',    to: '/fundamentals/'},
   {label: 'Staking',       desc: 'Solo staking with Caplin or any external consensus client.',       to: '/staking/'},
   {label: 'Help Center',   desc: 'Troubleshooting guides, FAQs, and support resources.',             to: '/help-center/'},

@@ -63,19 +63,20 @@ Snapshots are organised into several subdirectories. The main ones are:
 
 ## What does it cost on disk?
 
-Real numbers from a Nov 2024 mainnet archive node:
+Measured on a mainnet archive node on 2026-08-04:
 
 ```sh
-# eth-mainnet — archive — prune.mode=archive
-chaindata           15 GB
-snapshots/accessor 120 GB
-snapshots/domain   300 GB
-snapshots/history  280 GB
-snapshots/idx      430 GB
-snapshots TOTAL    2.3 TB
+# eth-mainnet — prune.mode=archive
+chaindata             9.82 GB
+snapshots/idx       330.89 GB
+snapshots/domain    321.58 GB
+snapshots/history   254.43 GB
+snapshots/accessor  140.92 GB
+snapshots/*.seg     993.33 GB   # block and transaction segments
+snapshots TOTAL    2041.15 GB   # 2.04 TB
 ```
 
-The breakdown above lists the state/history snapshot subdirectories. The remaining ~1.2 TB is mostly block/transaction `.seg` data, which is not broken out separately here.
+Block and transaction segments are about half the datadir on their own; the state and history subdirectories account for the rest. Note how small `chaindata` stays even on an archive node — under 10 GB, because the bulk lives in the immutable snapshot files.
 
 For up-to-date totals across all networks and pruning modes, see [Hardware Requirements](../get-started/hardware-requirements).
 
@@ -93,7 +94,7 @@ Deleting `chaindata/` is **recoverable but not free**: it discards the latest mu
 
 ## Tuning knobs
 
-- **`--batchSize`** — size of the Execution stage's in-memory buffer before it is flushed to MDBX. Default: `512M`. Raising it (for example `--batchSize 1G` or higher) can speed up execution-heavy sync at the cost of more RAM.
+- **`--batchSize`** — size of the Execution stage's in-memory buffer before it is flushed to MDBX. Default: `512M`. Raising it (for example `--batchSize 1G` or higher) can speed up execution-heavy sync at the cost of more RAM. It is the Execution stage's commit threshold, so a larger value means larger single MDBX write transactions, which raise the file's high-water mark in bigger steps. Keeping it at or below `1G` is a useful heuristic if you want MDBX to grow more gradually.
 - **`--db.size.limit`** — caps the MDBX file size. Useful when running multiple Erigon instances on one disk to prevent one from starving the others.
 - **`--db.read.concurrency`** — number of concurrent MDBX read transactions. Increase when you run a high-throughput RPC Daemon against the same datadir.
 - **Symlinks for tiered storage.** Place `chaindata/` and `snapshots/domain/` on fast NVMe, leave `snapshots/idx/` and `snapshots/history/` on cheaper SATA. See [Optimizing Storage](optimizing-storage) for the recipe.
