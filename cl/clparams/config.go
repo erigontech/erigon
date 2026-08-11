@@ -1096,7 +1096,7 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	MaxDepositRequestsPerPayload:          8192,
 	MaxWithdrawalRequestsPerPayload:       16,
 	MaxConsolidationRequestsPerPayload:    2,
-	MaxBuilderDepositRequestsPerPayload:   256,
+	MaxBuilderDepositRequestsPerPayload:   64,
 	MaxBuilderExitRequestsPerPayload:      16,
 	MinSlashingPenaltyQuotientElectra:     4096,
 	WhistleBlowerRewardQuotientElectra:    4096,
@@ -1130,14 +1130,14 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	ChurnLimitQuotientGloas:              1 << 15,
 	ConsolidationChurnLimitQuotient:      1 << 16,
 	MaxPerEpochActivationChurnLimitGloas: 256_000_000_000,
-	BuilderWithdrawalPrefix:              0x03,
+	BuilderWithdrawalPrefix:              0xB0,
 	PayloadDueBps:                        7500,
 	PtcSize:                              512,
 	MaxPayloadAttestations:               4,
 	BuilderRegistryLimit:                 1 << 40,
 	BuilderPendingWithdrawalsLimit:       1 << 20,
 	MaxBuildersPerWithdrawalsSweep:       1 << 14,
-	MinBuilderWithdrawabilityDelay:       8192,
+	MinBuilderWithdrawabilityDelay:       64,
 }
 
 func mainnetConfig() BeaconChainConfig {

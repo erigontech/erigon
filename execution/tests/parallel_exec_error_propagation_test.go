@@ -114,6 +114,7 @@ func runParallelExecV3WithContext(t *testing.T, ctx context.Context, m *execmodu
 	rwTx, err := m.DB.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer rwTx.Rollback()
+	require.NoError(t, stages.SaveStageProgress(rwTx, stages.Senders, maxBlockNum))
 	doms, err := execctx.NewSharedDomains(ctx, rwTx, m.Log)
 	require.NoError(t, err)
 	defer doms.Close()
@@ -124,7 +125,7 @@ func runParallelExecV3WithContext(t *testing.T, ctx context.Context, m *execmodu
 		BlockNumber:      1,
 		CurrentSyncCycle: stagedsync.CurrentSyncCycleInfo{IsInitialCycle: true}, // enables the chaos gate
 	}
-	return stagedsync.ExecV3(ctx, s, nil /*Unwinder*/, execCfg, doms, rwTx, true /*parallel*/, maxBlockNum, m.Log)
+	return stagedsync.SpawnExecuteBlocksStage(s, nil /*Unwinder*/, doms, rwTx, maxBlockNum, ctx, execCfg, m.Log)
 }
 
 type cancelOnTemporalRoDB struct {

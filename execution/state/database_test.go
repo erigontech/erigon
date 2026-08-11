@@ -89,7 +89,7 @@ func TestCreate2Revive(t *testing.T) {
 	// In the third block, we cause the first child contract to selfdestruct
 	// In the forth block, we create the second child contract, and we expect it to have a "clean slate" of storage,
 	// i.e. without any storage items that "inherited" from the first child contract by mistake
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, block *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(4, func(i int, block *blockgen.BlockGen) {
 		var txn types.Transaction
 
 		switch i {
@@ -279,7 +279,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	// In the third block, we cause the first child contract to selfdestruct
 	// In the forth block, we create the second child contract
 	// In the 5th block, we delete and re-create the child contract twice
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 5, func(i int, block *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(5, func(i int, block *blockgen.BlockGen) {
 		var txn types.Transaction
 
 		switch i {
@@ -541,7 +541,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	var selfDestruct *contracts.Selfdestruct
 
 	// Here we generate 3 blocks, two of which (the one with "Change" invocation and "Destruct" invocation will be reverted during the reorg)
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(3, func(i int, block *blockgen.BlockGen) {
 		var txn types.Transaction
 
 		switch i {
@@ -576,7 +576,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	require.NoError(t, err)
 	transactOptsLonger.GasLimit = 1000000
 
-	longerChain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, block *blockgen.BlockGen) {
+	longerChain, err := m.GenerateChain(4, func(i int, block *blockgen.BlockGen) {
 		var txn types.Transaction
 
 		if i == 0 {
@@ -708,7 +708,7 @@ func TestReorgOverStateChange(t *testing.T) {
 	var selfDestruct *contracts.Selfdestruct
 
 	// Here we generate 3 blocks, two of which (the one with "Change" invocation and "Destruct" invocation will be reverted during the reorg)
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, block *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(2, func(i int, block *blockgen.BlockGen) {
 		var txn types.Transaction
 
 		switch i {
@@ -736,7 +736,7 @@ func TestReorgOverStateChange(t *testing.T) {
 	transactOptsLonger, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
 	require.NoError(t, err)
 	transactOptsLonger.GasLimit = 1000000
-	longerChain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *blockgen.BlockGen) {
+	longerChain, err := m.GenerateChain(3, func(i int, block *blockgen.BlockGen) {
 		var txn types.Transaction
 
 		if i == 0 {
@@ -880,7 +880,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 	// There is one block, and it ends up deploying Revive contract (could be any other contract, it does not really matter)
 	// On the address contractAddr, where there is a storage item in the genesis, but no contract code
 	// We expect the pre-existing storage items to be removed by the deployment
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, block *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(4, func(i int, block *blockgen.BlockGen) {
 		var txn types.Transaction
 
 		if i == 0 {
@@ -1024,7 +1024,7 @@ func TestEip2200Gas(t *testing.T) {
 
 	// Here we generate 1 block with 2 transactions, first creates a contract with some initial values in the
 	// It activates the SSTORE pricing rules specific to EIP-2200 (istanbul)
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(3, func(i int, block *blockgen.BlockGen) {
 		var txn types.Transaction
 
 		if i == 0 {
@@ -1127,7 +1127,7 @@ func TestWrongIncarnation(t *testing.T) {
 	var contractAddress common.Address
 	var changer *contracts.Changer
 
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, block *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(2, func(i int, block *blockgen.BlockGen) {
 		var txn types.Transaction
 
 		switch i {
@@ -1255,7 +1255,7 @@ func TestWrongIncarnation2(t *testing.T) {
 
 	var contractAddress common.Address
 
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, block *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(2, func(i int, block *blockgen.BlockGen) {
 		var txn types.Transaction
 
 		switch i {
@@ -1291,7 +1291,7 @@ func TestWrongIncarnation2(t *testing.T) {
 	transactOptsLonger, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
 	require.NoError(t, err)
 	transactOptsLonger.GasLimit = 1000000
-	longerChain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *blockgen.BlockGen) {
+	longerChain, err := m.GenerateChain(3, func(i int, block *blockgen.BlockGen) {
 		var txn types.Transaction
 
 		if i == 0 {
@@ -1536,7 +1536,7 @@ func TestRecreateAndRewind(t *testing.T) {
 	var reviveAddress common.Address
 	var phoenixAddress common.Address
 
-	chain, err1 := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, block *blockgen.BlockGen) {
+	chain, err1 := m.GenerateChain(4, func(i int, block *blockgen.BlockGen) {
 		var txn types.Transaction
 
 		switch i {
@@ -1595,7 +1595,7 @@ func TestRecreateAndRewind(t *testing.T) {
 	transactOptsLonger, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
 	require.NoError(t, err)
 	transactOptsLonger.GasLimit = 1000000
-	longerChain, err1 := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 5, func(i int, block *blockgen.BlockGen) {
+	longerChain, err1 := m.GenerateChain(5, func(i int, block *blockgen.BlockGen) {
 		var txn types.Transaction
 
 		switch i {
@@ -1743,7 +1743,7 @@ func TestTxLookupUnwind(t *testing.T) {
 	)
 
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
-	chain1, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, block *blockgen.BlockGen) {
+	chain1, err := m.GenerateChain(2, func(i int, block *blockgen.BlockGen) {
 		var txn types.Transaction
 		var e error
 		if i == 1 {
@@ -1757,7 +1757,7 @@ func TestTxLookupUnwind(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	chain2, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *blockgen.BlockGen) {
+	chain2, err := m.GenerateChain(3, func(i int, block *blockgen.BlockGen) {
 	})
 	if err != nil {
 		t.Fatal(err)

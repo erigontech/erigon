@@ -27,13 +27,15 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 )
 
-// GasPool tracks block-level gas availability across the two EIP-8037 dimensions.
+// GasPool tracks block-level gas availability across the two EIP-8037
+// dimensions, plus the EIP-4844 blob-gas budget.
 //
-// Each field is the remaining budget for its dimension, starting at the block
-// gas limit and decremented as transactions execute. A transaction is
-// includable iff its EIP-8037 contribution fits in the remaining budget:
-// min(TX_MAX_GAS_LIMIT, tx.gas) for execution and tx.gas for state. Pre-Amsterdam
-// only the execution dimension is exercised.
+// Each field is the remaining budget for its dimension, decremented as
+// transactions execute: execution and state start at the block gas limit, blob
+// at the block blob-gas budget. A transaction is includable iff its EIP-8037
+// contribution fits in the remaining budget: min(TX_MAX_GAS_LIMIT, tx.gas) for
+// execution and tx.gas for state. Pre-Amsterdam only the execution dimension is
+// exercised.
 type GasPool struct {
 	mu           sync.RWMutex
 	executionGas uint64
@@ -51,7 +53,8 @@ func NewBlockGasPool(executionGas, stateGas, blobGas uint64) *GasPool {
 	return &GasPool{executionGas: executionGas, stateGas: stateGas, blobGas: blobGas}
 }
 
-// Reset reinitialises the pool. Both gas dimensions return to gasLimit.
+// Reset reinitialises the pool: both gas dimensions return to gasLimit and
+// the blob budget to blobGas.
 func (gp *GasPool) Reset(gasLimit, blobGas uint64) {
 	if gp == nil {
 		return
@@ -119,7 +122,7 @@ func (gp *GasPool) ConsumeState(amount uint64) error {
 // stateGas is never consumed, so seeding it has no observable effect there.
 func (gp *GasPool) AddGas(amount uint64) *GasPool {
 	if gp == nil {
-		return gp
+		return nil
 	}
 	gp.mu.Lock()
 	defer gp.mu.Unlock()
@@ -144,7 +147,7 @@ func (gp *GasPool) Gas() uint64 {
 // AddBlobGas extends the blob-gas budget.
 func (gp *GasPool) AddBlobGas(amount uint64) *GasPool {
 	if gp == nil {
-		return gp
+		return nil
 	}
 	gp.mu.Lock()
 	defer gp.mu.Unlock()
@@ -169,18 +172,24 @@ func (gp *GasPool) SubBlobGas(amount uint64) error {
 	return nil
 }
 
-// CheckBlockGasInclusion verifies that the supplied per-dimension gas
-// values fit in the remaining EIP-8037 reservoirs. Callers obtain the
-// dimension contributions from InclusionContributions.
-func CheckBlockGasInclusion(gp *GasPool, executionGas, stateGas uint64) error {
+// CheckBlockGasInclusion verifies that the supplied gas fits in the block's
+// remaining budgets: execution and state in the EIP-8037 reservoirs, and blob in
+// the EIP-4844 blob-gas pool. Callers obtain the execution and state contributions
+// from InclusionContributions; blobGas is the transaction's blob gas.
+func CheckBlockGasInclusion(gp *GasPool, executionGas, stateGas, blobGas uint64) error {
 	if gp == nil {
 		return nil
 	}
-	if executionGas > gp.ExecutionGasAvailable() {
+	gp.mu.RLock()
+	defer gp.mu.RUnlock()
+	if executionGas > gp.executionGas {
 		return ErrGasLimitReached
 	}
-	if stateGas > gp.StateGasAvailable() {
+	if stateGas > gp.stateGas {
 		return ErrGasLimitReached
+	}
+	if blobGas > gp.blobGas {
+		return ErrBlobGasLimitReached
 	}
 	return nil
 }

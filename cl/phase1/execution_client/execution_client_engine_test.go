@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/execution/engineapi"
+	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 )
 
@@ -49,7 +50,7 @@ func TestNewExecutionClientEngineLocalPropagatesBeaconConfig(t *testing.T) {
 	require.Same(t, &cfg, engine.cfg)
 }
 
-func TestBuildExecutionPayload_BlockAccessListGloasOnly(t *testing.T) {
+func TestExecutionPayloadFromSSZBlock_BlockAccessListGloasOnly(t *testing.T) {
 	beaconCfg := clparams.MainnetBeaconConfig
 
 	t.Run("pre-Gloas payload omits blockAccessList", func(t *testing.T) {
@@ -58,7 +59,7 @@ func TestBuildExecutionPayload_BlockAccessListGloasOnly(t *testing.T) {
 		block.Transactions = &solid.TransactionsSSZ{}
 		block.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(beaconCfg.MaxWithdrawalsPerPayload), 44)
 
-		ep := buildExecutionPayload(block)
+		ep := engine_types.ExecutionPayloadFromSSZBlock(block, block.Version())
 
 		raw, err := json.Marshal(ep)
 		require.NoError(t, err)
@@ -98,7 +99,7 @@ func TestBuildExecutionPayload_BlockAccessListGloasOnly(t *testing.T) {
 
 	for _, tt := range gloasTests {
 		t.Run(tt.name, func(t *testing.T) {
-			ep := buildExecutionPayload(tt.block)
+			ep := engine_types.ExecutionPayloadFromSSZBlock(tt.block, tt.block.Version())
 
 			raw, err := json.Marshal(ep)
 			require.NoError(t, err)

@@ -338,7 +338,7 @@ func Downloader(cmd *cobra.Command, logger log.Logger) error {
 		verifyFiles = strings.Split(_verifyFiles, ",")
 	}
 	if manualDataVerification { // remove and create .torrent files (will re-read all snapshots)
-		if err = d.VerifyData(ctx, verifyFiles, verifyFailfast); err != nil {
+		if err := d.VerifyData(ctx, verifyFiles, verifyFailfast); err != nil {
 			return err
 		}
 		if verifyFailfast {

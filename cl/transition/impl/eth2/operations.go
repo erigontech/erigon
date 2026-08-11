@@ -623,6 +623,38 @@ func (imp *impl) ProcessExecutionPayloadBid(s abstract.BeaconState, block cltype
 // payment, and updates latest_block_hash. This is the spec's apply_parent_execution_payload.
 // [New in Gloas:EIP7732]
 func (imp *impl) ApplyParentExecutionPayload(s abstract.BeaconState, requests *cltypes.ExecutionRequests) error {
+	if requests == nil {
+		return errors.New("ApplyParentExecutionPayload: nil execution requests")
+	}
+	cfg := s.BeaconConfig()
+	withdrawalCount, consolidationCount, builderDepositCount, builderExitCount := 0, 0, 0, 0
+	if requests.Withdrawals != nil {
+		withdrawalCount = requests.Withdrawals.Len()
+	}
+	if requests.Consolidations != nil {
+		consolidationCount = requests.Consolidations.Len()
+	}
+	if requests.BuilderDeposits != nil {
+		builderDepositCount = requests.BuilderDeposits.Len()
+	}
+	if requests.BuilderExits != nil {
+		builderExitCount = requests.BuilderExits.Len()
+	}
+	requestCounts := []struct {
+		name  string
+		count int
+		limit uint64
+	}{
+		{"withdrawal", withdrawalCount, cfg.MaxWithdrawalRequestsPerPayload},
+		{"consolidation", consolidationCount, cfg.MaxConsolidationRequestsPerPayload},
+		{"builder deposit", builderDepositCount, cfg.MaxBuilderDepositRequestsPerPayload},
+		{"builder exit", builderExitCount, cfg.MaxBuilderExitRequestsPerPayload},
+	}
+	for _, requestCount := range requestCounts {
+		if uint64(requestCount.count) > requestCount.limit {
+			return fmt.Errorf("ApplyParentExecutionPayload: too many %s requests: %d > %d", requestCount.name, requestCount.count, requestCount.limit)
+		}
+	}
 	parentBid := s.GetLatestExecutionPayloadBid()
 	// Process execution requests (deposits, withdrawals, consolidations)
 	if requests.Deposits != nil {
@@ -669,12 +701,13 @@ func (imp *impl) ApplyParentExecutionPayload(s abstract.BeaconState, requests *c
 	currentEpoch := state.Epoch(s)
 
 	var paymentIndex int
-	if parentEpoch == currentEpoch {
+	switch {
+	case parentEpoch == currentEpoch:
 		paymentIndex = int(slotsPerEpoch + parentSlot%slotsPerEpoch)
-	} else if parentEpoch+1 == currentEpoch {
+	case parentEpoch+1 == currentEpoch:
 		// previous epoch
 		paymentIndex = int(parentSlot % slotsPerEpoch)
-	} else if parentBid.Value > 0 {
+	case parentBid.Value > 0:
 		// Parent is older than the previous epoch, its payment entry has been
 		// evicted from builder_pending_payments. Append the withdrawal directly.
 		withdrawals := s.GetBuilderPendingWithdrawals()
@@ -685,7 +718,7 @@ func (imp *impl) ApplyParentExecutionPayload(s abstract.BeaconState, requests *c
 		})
 		s.SetBuilderPendingWithdrawals(withdrawals)
 		paymentIndex = -1
-	} else {
+	default:
 		paymentIndex = -1
 	}
 

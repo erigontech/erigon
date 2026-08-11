@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
 )
 
 var _ tracing.IntraBlockState = (*postTxIBS)(nil)
@@ -60,6 +61,58 @@ func newTestPrestateTracer(cfg prestateTracerConfig) *prestateTracer {
 		created: make(map[accounts.Address]bool),
 		deleted: make(map[accounts.Address]bool),
 	}
+}
+
+// fakeOpContext is a minimal tracing.OpContext carrying only a stack and the
+// executing contract address, as seen by OnOpcode.
+type fakeOpContext struct {
+	stack []uint256.Int
+	addr  accounts.Address
+}
+
+func (c *fakeOpContext) MemoryData() []byte          { return nil }
+func (c *fakeOpContext) StackData() []uint256.Int    { return c.stack }
+func (c *fakeOpContext) Caller() accounts.Address    { return c.addr }
+func (c *fakeOpContext) Address() accounts.Address   { return c.addr }
+func (c *fakeOpContext) CallValue() uint256.Int      { return uint256.Int{} }
+func (c *fakeOpContext) CallInput() []byte           { return nil }
+func (c *fakeOpContext) Code() []byte                { return nil }
+func (c *fakeOpContext) CodeHash() accounts.CodeHash { return accounts.EmptyCodeHash }
+
+// TestPrestateTracerOnOpcodeFaultedSkipsLookup verifies that an opcode invoked
+// with a non-nil err (fault path, e.g. out-of-gas at the opcode itself) does not
+// record any touched account or storage slot: in consensus terms the access never
+// happened (no EIP-2929 warm-up), and go-ethereum skips it since PR #26848.
+func TestPrestateTracerOnOpcodeFaultedSkipsLookup(t *testing.T) {
+	caller := accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000001111"))
+	target := accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000002222"))
+
+	tr := newTestPrestateTracer(prestateTracerConfig{})
+	tr.env = &tracing.VMContext{
+		IntraBlockState: &postTxIBS{},
+	}
+	tr.lookupAccount(caller)
+
+	// EXTCODESIZE faulting with the target address as operand
+	// (real-world case: mainnet tx 0x84357b59..., block 25634962, OOG at EXTCODESIZE).
+	targetAddr := target.Value()
+	var operand uint256.Int
+	operand.SetBytes(targetAddr[:])
+	stack := []uint256.Int{operand}
+	tr.OnOpcode(0, byte(vm.EXTCODESIZE), 1724, 2600, &fakeOpContext{stack: stack, addr: caller}, nil, 2, vm.ErrOutOfGas)
+
+	_, ok := tr.pre[target]
+	require.False(t, ok, "account referenced by a faulted EXTCODESIZE must not be recorded in the prestate")
+
+	// SLOAD faulting with the slot key as operand
+	// (real-world case: mainnet tx 0xa4b924b4..., block 25638021, OOG at SLOAD).
+	slot := common.HexToHash("0xbaaed5f3d2bc4b0bc4f1758fde25c1522c4254f5b2fbfa513449670cff246a98")
+	operand.SetBytes(slot[:])
+	stack = []uint256.Int{operand}
+	tr.OnOpcode(0, byte(vm.SLOAD), 1577, 2100, &fakeOpContext{stack: stack, addr: caller}, nil, 1, vm.ErrOutOfGas)
+
+	require.NotContains(t, tr.pre[caller].Storage, slot,
+		"storage slot referenced by a faulted SLOAD must not be recorded in the prestate")
 }
 
 // TestPrestateTracerDiffModeDeletedAccount verifies that an account deleted during

@@ -583,7 +583,7 @@ func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 		if err != nil {
 			// Handshake transport error (stream reset, timeout, etc.) — keep the peer.
 			// The peer may still work for gossip even if status exchange failed.
-			log.Debug("[Sentinel] Handshake transport error (keeping connection)", "peer", peerId, "err", err)
+			log.Trace("[Sentinel] Handshake transport error (keeping connection)", "peer", peerId, "err", err)
 		}
 
 		if !valid && err == nil {

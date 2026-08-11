@@ -480,11 +480,12 @@ func (s *Sync) PrintTimings() []any {
 		if count == 50 {
 			break
 		}
-		if s.timings[i].isUnwind {
+		switch {
+		case s.timings[i].isUnwind:
 			logCtx = append(logCtx, "unwind "+string(s.timings[i].stage), s.timings[i].took.Truncate(time.Millisecond).String())
-		} else if s.timings[i].isPrune {
+		case s.timings[i].isPrune:
 			logCtx = append(logCtx, "prune "+string(s.timings[i].stage), s.timings[i].took.Truncate(time.Millisecond).String())
-		} else {
+		default:
 			logCtx = append(logCtx, string(s.timings[i].stage), s.timings[i].took.Truncate(time.Millisecond).String())
 		}
 	}
@@ -540,7 +541,7 @@ func (s *Sync) unwindStage(initialCycle bool, stage *Stage, sd *execctx.SharedDo
 		return nil
 	}
 
-	if err = s.SetCurrentStage(stage.ID); err != nil {
+	if err := s.SetCurrentStage(stage.ID); err != nil {
 		return err
 	}
 
@@ -572,7 +573,7 @@ func (s *Sync) pruneStage(ctx context.Context, initialCycle bool, stage *Stage, 
 	if err != nil {
 		return err
 	}
-	if err = s.SetCurrentStage(stage.ID); err != nil {
+	if err := s.SetCurrentStage(stage.ID); err != nil {
 		return err
 	}
 
