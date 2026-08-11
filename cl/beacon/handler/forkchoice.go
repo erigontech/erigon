@@ -38,7 +38,7 @@ func (a *ApiHandler) GetEthV2DebugBeaconHeads(w http.ResponseWriter, r *http.Req
 			map[string]any{
 				"slot":                 strconv.FormatUint(slot, 10),
 				"root":                 root,
-				"execution_optimistic": false,
+				"execution_optimistic": a.forkchoiceStore.IsRootOptimistic(root),
 			},
 		},
 	), nil

@@ -20,6 +20,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -54,6 +55,32 @@ func TestGetSelectedHeadDoesNotTrailTheMemoizedHeadState(t *testing.T) {
 	require.Equal(t, 0, statusCode)
 	require.Equal(t, common.Hash{0xaa}, root)
 	require.Equal(t, uint64(100), slot)
+}
+
+func TestDebugBeaconHeadsReportsSelectedHeadOptimistic(t *testing.T) {
+	for _, optimistic := range []bool{false, true} {
+		t.Run(strconv.FormatBool(optimistic), func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			syncedData := sync_mock_services.NewMockSyncedData(ctrl)
+			syncedData.EXPECT().Syncing().Return(false)
+			syncedData.EXPECT().StateHead().Return(common.Hash{0xbb}, uint64(99), true)
+			syncedData.EXPECT().SelectedHead().Return(common.Hash{0xaa}, uint64(100), true)
+
+			fcu := mock_services2.NewForkChoiceStorageMock(t)
+			fcu.IsRootOptimisticVal = optimistic
+			a := &ApiHandler{
+				enableMemoizedHeadState: true,
+				syncedData:              syncedData,
+				forkchoiceStore:         fcu,
+			}
+
+			response, err := a.GetEthV2DebugBeaconHeads(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/eth/v2/debug/beacon/heads", nil))
+			require.NoError(t, err)
+			heads := response.Data.([]any)
+			require.Len(t, heads, 1)
+			require.Equal(t, optimistic, heads[0].(map[string]any)["execution_optimistic"])
+		})
+	}
 }
 
 func TestGetStateHeadKeepsMemoizedStateIdentity(t *testing.T) {
@@ -124,7 +151,7 @@ func TestHeadBlockIDUsesSelectedHead(t *testing.T) {
 	require.Equal(t, common.Hash{0xaa}, root)
 }
 
-func TestGetHeadReportsSyncing(t *testing.T) {
+func TestGetStateHeadReportsSyncing(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	syncedData := sync_mock_services.NewMockSyncedData(ctrl)
 	syncedData.EXPECT().StateHead().Return(common.Hash{}, uint64(0), false)
