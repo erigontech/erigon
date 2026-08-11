@@ -154,8 +154,6 @@ func (sd *TemporalMemBatch) putHistory(domain kv.Domain, k, v []byte, txNum uint
 	return sd.domainWriters[domain].PutWithPrev(k, v, txNum, preval)
 }
 
-// putLatest reports whether this write is a same-txNum update of the key,
-// replacing the key's last entry in place instead of appending a version.
 // lockFor returns the latest-state lock guarding a single domain: CommitmentDomain
 // has its own lock, everything else shares latestStateLock.
 func (sd *TemporalMemBatch) lockFor(domain kv.Domain) *sync.RWMutex {
@@ -170,6 +168,8 @@ func (sd *TemporalMemBatch) lockFor(domain kv.Domain) *sync.RWMutex {
 func (sd *TemporalMemBatch) lockBoth()   { sd.latestStateLock.Lock(); sd.commitmentLock.Lock() }
 func (sd *TemporalMemBatch) unlockBoth() { sd.commitmentLock.Unlock(); sd.latestStateLock.Unlock() }
 
+// putLatest reports whether this write is a same-txNum update of the key,
+// replacing the key's last entry in place instead of appending a version.
 func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, txNum uint64) (sameTxNumUpdate bool) {
 	l := sd.lockFor(domain)
 	l.Lock()
@@ -261,8 +261,8 @@ func (sd *TemporalMemBatch) GetLatest(domain kv.Domain, key []byte) (v []byte, s
 }
 
 // getLatest is the lock-free implementation of GetLatest.
-// The caller must already hold latestStateLock (either RLock or Lock),
-// e.g. from within an IteratePrefix callback.
+// The caller must already hold the domain's lock (see lockFor), either RLock or
+// Lock, e.g. from within an IteratePrefix callback.
 func (sd *TemporalMemBatch) getLatest(domain kv.Domain, key []byte) (v []byte, step kv.Step, ok bool) {
 	var unwoundLatest = func(domain kv.Domain, key string) (v []byte, step kv.Step, ok bool) {
 		if sd.unwindChangeset != nil {
@@ -787,8 +787,8 @@ func (sd *TemporalMemBatch) flushLocked(ctx context.Context, tx kv.RwTx) error {
 // Flush writes the mem-batch to tx. With kv.WithFlushCallback options, the
 // registered per-domain callback is invoked for every (key, value, step, txNum)
 // tuple after the MDBX write succeeds, so a downstream cache can never be left
-// ahead of MDBX. Runs under latestStateLock so the callback's snapshot matches
-// flush-time state.
+// ahead of MDBX. Runs under both latest-state locks so the callback's snapshot
+// matches flush-time state.
 func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx, opts ...kv.FlushOption) error {
 	sd.lockBoth()
 	defer sd.unlockBoth()
