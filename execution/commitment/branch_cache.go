@@ -363,10 +363,10 @@ func (c *BranchCache) resetProvenanceAndClear() {
 	c.clear()
 }
 
-// BeginFilesPublication revokes the old files generation. It retains entries
-// when this process's committed updates cover the new files and clears them
-// when that compatibility cannot be proven. Finish publishes the new identity
-// after the files become visible.
+// BeginFilesPublication prepares BranchCache for new commitment files. It
+// retains branches covered by this process's committed updates and clears the
+// cache when compatibility cannot be proven. A non-nil result keeps cache
+// publication blocked until Finish is called after the files are visible.
 func (c *BranchCache) BeginFilesPublication(filesEnd uint64) *cache.BackingChange {
 	if c == nil {
 		return nil
