@@ -186,6 +186,26 @@ func TestSelectedHeadStateUsesWinningSideBranch(t *testing.T) {
 	require.Same(t, selectedState, headState)
 }
 
+func TestSelectedHeadStateReportsMissingAuxiliaryRoot(t *testing.T) {
+	auxiliaryRoot := common.Hash{0xaa}
+	a := &ApiHandler{forkchoiceStore: mock_services2.NewForkChoiceStorageMock(t)}
+
+	_, _, _, err := a.selectedHeadState(auxiliaryRoot)
+	require.EqualError(t, err, "failed to get auxiliary state for root 0xaa00000000000000000000000000000000000000000000000000000000000000")
+}
+
+func TestSelectedHeadStateReportsMissingSelectedRoot(t *testing.T) {
+	auxiliaryRoot := common.Hash{0xaa}
+	selectedRoot := common.Hash{0xbb}
+	fcu := mock_services2.NewForkChoiceStorageMock(t)
+	fcu.HeadVal = selectedRoot
+	fcu.StateAtBlockRootVal[auxiliaryRoot] = state.New(&clparams.MainnetBeaconConfig)
+	a := &ApiHandler{forkchoiceStore: fcu}
+
+	_, _, _, err := a.selectedHeadState(auxiliaryRoot)
+	require.EqualError(t, err, "failed to get selected head state for root 0xbb00000000000000000000000000000000000000000000000000000000000000")
+}
+
 func TestMemoizedExpectedWithdrawalsMatchesExplicitHeadRoot(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cfg.AltairForkEpoch = 0

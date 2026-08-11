@@ -2138,7 +2138,7 @@ func (a *ApiHandler) selectedHeadState(auxiliaryRoot common.Hash) (common.Hash, 
 		return common.Hash{}, 0, nil, err
 	}
 	if auxiliaryState == nil {
-		return common.Hash{}, 0, nil, errors.New("failed to get head state")
+		return common.Hash{}, 0, nil, fmt.Errorf("failed to get auxiliary state for root %s", auxiliaryRoot)
 	}
 	headRoot, headSlot, err := a.forkchoiceStore.GetHead(auxiliaryState)
 	if err != nil {
@@ -2152,7 +2152,7 @@ func (a *ApiHandler) selectedHeadState(auxiliaryRoot common.Hash) (common.Hash, 
 		return common.Hash{}, 0, nil, err
 	}
 	if headState == nil {
-		return common.Hash{}, 0, nil, errors.New("failed to get selected head state")
+		return common.Hash{}, 0, nil, fmt.Errorf("failed to get selected head state for root %s", headRoot)
 	}
 	return headRoot, headSlot, headState, nil
 }
