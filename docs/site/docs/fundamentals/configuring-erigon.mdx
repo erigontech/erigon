@@ -253,13 +253,13 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
 * `--ws.max.connections value`: Maximum number of concurrent WebSocket connections.
   * Default: `0` (unlimited)
 
-**HTTPS and IPC transports.** *(New in v3.7)* These flags are accepted by both the `erigon` binary and the standalone [RPC Daemon](/fundamentals/modules/rpc-daemon) — the embedded RPC server reads them from the same configuration. They serve the same JSON-RPC API as `--http`, over TLS or a local socket instead.
+**HTTPS and IPC transports.** *(New in v3.7)* These flags are accepted by both the `erigon` binary and the standalone [RPC Daemon](/fundamentals/modules/rpc-daemon) — the embedded RPC server reads them from the same configuration. They serve the same JSON-RPC API as `--http`, over TLS or a separate socket instead.
 
 :::warning
 `--http=false` is a master switch: it disables the whole RPC stack, including the HTTPS and IPC listeners, so `--http=false --https.enabled` yields no listener at all. To serve TLS only, leave `--http` alone and turn off just the plain HTTP listener with `--http.enabled=false`.
 :::
 
-* `--https.enabled`: Enables a JSON-RPC HTTPS server alongside the plain HTTP one.
+* `--https.enabled`: Enables a JSON-RPC HTTPS server on its own port, independently of the plain HTTP listener.
   * Default: `false`
   * `--https.cert` and `--https.key` are both required. If either is missing or unreadable the node still starts and the port still binds, but TLS serving fails and only a `Failed to serve https endpoint` warning is logged — so check the log rather than assuming success.
 * `--https.cert value`: Path to the certificate file for the HTTPS server.
@@ -271,7 +271,7 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
 * `--https.url value`: Full listen URL for the HTTPS server, which overrides `--https.addr` and `--https.port`. Supported schemes are `tcp://` and `unix://`.
   * Default: unset
   * Setting this **implies `--https.enabled`**: a non-empty value turns the HTTPS server on by itself.
-* `--socket.enabled`: Enables an IPC server that serves JSON-RPC over a local socket.
+* `--socket.enabled`: Enables a socket server that serves JSON-RPC on the endpoint given by `--socket.url` — a Unix socket by default, though a `tcp://` URL is also accepted.
   * Default: `false`
 * `--socket.url value`: Listen URL for the IPC server. Supported schemes are `unix://` and `tcp://`.
   * Default: `unix:///var/run/erigon.sock`

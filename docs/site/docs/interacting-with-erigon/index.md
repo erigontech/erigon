@@ -94,8 +94,9 @@ daemon:
 erigon --https.enabled --https.cert /path/to/cert.pem --https.key /path/to/key.pem
 ```
 
-The HTTPS listener runs alongside the plain HTTP one on its own port: `--https.port`, which defaults to `--http.port` +
-363 (`8908` with a default `--http.port`). Both `--https.cert` and `--https.key` are required — if either is missing the
+The HTTPS listener is independent of the plain HTTP one and binds its own port: `--https.port`, which defaults to
+`--http.port` + 363 (`8908` with a default `--http.port`) — the derivation reads `--http.port` whether or not the plain
+HTTP listener is running. Both `--https.cert` and `--https.key` are required — if either is missing the
 port still binds but TLS serving fails with only a `Failed to serve https endpoint` warning in the log. Setting
 `--https.url` enables the HTTPS server on its own and overrides `--https.addr` and `--https.port`.
 
