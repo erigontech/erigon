@@ -80,4 +80,10 @@ func TestErigonBlockNumber(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, hexutil.Uint64(7), result)
 	})
+
+	t.Run("invalid negative block number returns error", func(t *testing.T) {
+		num := rpc.BlockNumber(-10)
+		_, err := api.BlockNumber(ctx, &num)
+		require.Error(t, err)
+	})
 }
