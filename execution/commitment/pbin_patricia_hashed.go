@@ -129,7 +129,7 @@ func (pph *PBinPatriciaHashed) Release() {
 
 var (
 	errPBinMissingBranch     = errors.New("pbin: branch record missing")
-	errPBinDeleteUnsupported = errors.New("pbin: account record outlived its state")
+	errPBinDeleteUnsupported = errors.New("pbin: record outlived its state")
 	errPBinVisitOrder        = errors.New("pbin: visit order is not ascending")
 )
 
@@ -886,9 +886,9 @@ func (pph *PBinPatriciaHashed) cellHash(c *pbinCell, path *pbinBitpath) (common.
 }
 
 // loadCellState fills a leaf cell whose plain key arrived from a record and
-// whose value therefore did not. A storage leaf whose state reads absent carries
-// the zero it stands for; an account leaf cannot, since removal drops its whole
-// header stem before any record can name it.
+// whose value therefore did not. A read that comes back absent means the caller
+// left a removal out of its update set: the tree cannot hold the zero it stands
+// for, and the fold only walks forward, so the leaf can no longer be dropped.
 func (pph *PBinPatriciaHashed) loadCellState(c *pbinCell) error {
 	if c.accountAddrLen > 0 && !c.loaded.account() {
 		plainKey := c.accountAddr[:c.accountAddrLen]
@@ -909,9 +909,7 @@ func (pph *PBinPatriciaHashed) loadCellState(c *pbinCell) error {
 			return fmt.Errorf("pbin: read storage %x: %w", plainKey, err)
 		}
 		if update.Deleted() {
-			// A stored leaf whose state reads absent: the record outlived the value.
-			// Carry the zero it stands for; the update path is what removes leaves.
-			update = &Update{Flags: StorageUpdate}
+			return fmt.Errorf("%w: %x", errPBinDeleteUnsupported, plainKey)
 		}
 		c.setFromUpdate(update)
 		c.loaded = c.loaded.addFlag(cellLoadStorage)

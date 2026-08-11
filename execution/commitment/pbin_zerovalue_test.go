@@ -18,6 +18,7 @@ package commitment
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"sort"
 	"testing"
@@ -72,13 +73,12 @@ func TestPBinStorageZeroWriteRemovesLeaf(t *testing.T) {
 	}
 }
 
-// TestPBinStorageZeroOnUntouchedSiblingKeepsLeaf pins the fold path, where the
-// rule does not yet hold: a slot zeroed without being in the update set is
-// rehydrated from its branch record and committed as 32 zero bytes, which under
-// the current spec is a state the tree cannot hold. Removal lives on the update
-// path only. The domain always carries a zeroed slot in the same block's update
-// set, so this is out of reach through ordinary execution.
-func TestPBinStorageZeroOnUntouchedSiblingKeepsLeaf(t *testing.T) {
+// TestPBinStorageZeroOnUntouchedSiblingRefuses pins the fold boundary. A slot
+// zeroed without being in the update set reaches the fold through its branch
+// record, and the only value it could carry is the 32 zero bytes the tree cannot
+// hold. Removal lives on the update path, and the grid only walks forward, so
+// the fold refuses rather than committing a root no entry set produces.
+func TestPBinStorageZeroOnUntouchedSiblingRefuses(t *testing.T) {
 	t.Parallel()
 
 	addr := pbinOracleAddr(42)
@@ -97,20 +97,46 @@ func TestPBinStorageZeroOnUntouchedSiblingKeepsLeaf(t *testing.T) {
 	require.NoError(t, ms.applyPlainUpdates(touched.plainKeys, touched.updates))
 
 	pph.Reset()
-	root := pbinTestProcess(t, pph, touched.plainKeys, touched.updates)
-
-	// The zero leaf is not a state entries() can express, since it filters zeros.
-	survivor := new(pbinTestCorpus).storage(addr, pbinOracleSlot(257), 0x0B)
-	withZeroLeaf := append(survivor.entries(t), pbinOracleEntry{
-		key:   pbinTreeKeyStorage(addr, pbinOracleSlot(256)),
-		value: make([]byte, pbinValueLength),
-	})
-	want := pbinOracleRoot(withZeroLeaf)
-	require.Equal(t, want[:], root)
-
-	require.NotEqual(t, survivor.oracleRoot(t), root, "the leaf survives as a zero")
+	upd := WrapKeyUpdates(t, ModeDirect, pbinKeyHasher(), touched.plainKeys, touched.updates)
+	_, err := pph.Process(context.Background(), upd, "", nil, WarmupConfig{})
+	require.ErrorIs(t, err, errPBinDeleteUnsupported)
 }
 
+// TestPBinStorageZeroOnTouchedSiblingCollapses is the same shape with the
+// removal declared: the update path drops the leaf and the root matches the
+// entry set without it.
+func TestPBinStorageZeroOnTouchedSiblingCollapses(t *testing.T) {
+	t.Parallel()
+
+	addr := pbinOracleAddr(42)
+	stored := new(pbinTestCorpus).
+		storage(addr, pbinOracleSlot(256), 0x01).
+		storage(addr, pbinOracleSlot(257), 0x02)
+
+	pph, ms := pbinTestEngine(t)
+	require.NoError(t, ms.applyPlainUpdates(stored.plainKeys, stored.updates))
+	pbinTestProcess(t, pph, stored.plainKeys, stored.updates)
+
+	gone := new(pbinTestCorpus).storage(addr, pbinOracleSlot(256))
+	require.NoError(t, ms.applyPlainUpdates(gone.plainKeys, []Update{{Flags: DeleteUpdate}}))
+
+	touched := new(pbinTestCorpus).storage(addr, pbinOracleSlot(257), 0x0B)
+	require.NoError(t, ms.applyPlainUpdates(touched.plainKeys, touched.updates))
+
+	both := new(pbinTestCorpus).
+		storage(addr, pbinOracleSlot(256)).
+		storage(addr, pbinOracleSlot(257), 0x0B)
+	both.updates[0] = Update{Flags: DeleteUpdate}
+
+	pph.Reset()
+	root := pbinTestProcess(t, pph, both.plainKeys, both.updates)
+
+	survivor := new(pbinTestCorpus).storage(addr, pbinOracleSlot(257), 0x0B)
+	require.Equal(t, survivor.oracleRoot(t), root)
+}
+
+// TestPBinLoadCellStateAbsentRead: neither arm has a value it may carry for a
+// key the state no longer holds, so both refuse.
 func TestPBinLoadCellStateAbsentRead(t *testing.T) {
 	t.Parallel()
 
@@ -123,11 +149,7 @@ func TestPBinLoadCellStateAbsentRead(t *testing.T) {
 		c.storageAddrLen = length.Addr + length.Hash
 		copy(c.storageAddr[:], append(bytes.Clone(pbinOracleAddr(43)), pbinOracleSlot(1000)...))
 
-		require.NoError(t, pph.loadCellState(&c))
-		require.True(t, c.loaded.storage())
-		require.False(t, c.Update.Deleted())
-		value := pbinEncodeStorageValue(c.Update.Storage[:c.Update.StorageLen])
-		require.Equal(t, make([]byte, length.Hash), value[:])
+		require.ErrorIs(t, pph.loadCellState(&c), errPBinDeleteUnsupported)
 	})
 
 	t.Run("account", func(t *testing.T) {
