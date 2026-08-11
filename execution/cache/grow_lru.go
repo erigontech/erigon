@@ -35,12 +35,12 @@ import (
 //
 // Generation swaps (maybeGrow, Purge) are not fenced against writers — safe
 // only for content-addressed layers, where a key's payload never changes: a
-// write lost in a retired generation is a benign miss, and an entry whose
-// removal a racing copy undid serves correct bytes until its stale stamp
-// drops it on the next read. Do not reuse for mutable-per-key values — those
-// need GenericCache's fenced swap. The onEvict-maintained counters are
-// approximate across grow windows (a lost write is counted but never
-// evicted; a raced removal can subtract twice).
+// write lost in a retired generation is a benign miss, and a racing copy that
+// restores a removed entry can only restore the same immutable bytes. Do not
+// reuse this cache for mutable-per-key values — those need GenericCache's
+// fenced swap. The onEvict-maintained counters are approximate across grow
+// windows (a lost write is counted but never evicted; a raced removal can
+// subtract twice).
 type growLRU[V any] struct {
 	cur      atomic.Pointer[freelru.ShardedLRU[uint64, V]]
 	onEvict  func(uint64, V)

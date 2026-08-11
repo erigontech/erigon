@@ -134,9 +134,9 @@ func NewGenericCache[T any](capacityBytes datasize.ByteSize, sizeFunc func(T) in
 
 // NewGenericCacheWithAvg is NewGenericCache with an explicit per-domain average
 // entry size, so the byte-budget ceiling and the envelope accounting reflect the
-// domain's real entry cost (accounts ≈ 96 B, storage ≈ 88 B) rather than the
-// generic default. It starts small and jump-grows toward the ceiling on demand,
-// funding each step from the shared envelope.
+// domain's expected entry cost rather than the generic default. It starts small
+// and jump-grows toward the ceiling on demand, funding each step from the shared
+// envelope.
 func NewGenericCacheWithAvg[T any](capacityBytes datasize.ByteSize, avgBytes uint32, sizeFunc func(T) int, mode Mode) *GenericCache[T] {
 	if avgBytes == 0 {
 		avgBytes = avgBytesPerEntry
@@ -389,13 +389,13 @@ func (c *GenericCache[T]) putStriped(key []byte, value T, overwrite bool) bool {
 
 	// In ModeEvictLRU the byte budget is enforced through the entry-count cap,
 	// not a separate currentSize check: capacityEntries is derived from
-	// capacityB (capacityB/avgBytesPerEntry, see NewGenericCache /
+	// capacityB (capacityB/avgEntryBytes, see NewGenericCache /
 	// newDomainCacheBytes), so once the slot cap is reached the per-shard LRU
 	// evicts the oldest entry inside freelru.Add and currentSize settles at
-	// ≈ capacityEntries × avg ≈ capacityB. For the near-fixed-size domains this
-	// caches (account ~96 B, storage ~88 B) the variance against avg is small, so
-	// currentSize tracks capacityB closely rather than running away — freelru
-	// exposes no evict-until-bytes-fit primitive to enforce it more tightly.
+	// approximately capacityEntries × avgEntryBytes ≈ capacityB. Entry sizes in
+	// the domains cached here have low variance, so currentSize tracks capacityB
+	// closely rather than running away — freelru exposes no
+	// evict-until-bytes-fit primitive to enforce it more tightly.
 	// Eviction is per-shard, not globally-LRU — same trade-off code_cache.go /
 	// balcache.go / db/state/cache.go accept.
 
