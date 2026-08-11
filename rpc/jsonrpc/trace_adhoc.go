@@ -972,6 +972,9 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 }
 
 func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, traceTypes []string, gasBailOut *bool, traceConfig *config.TraceConfig) ([]*TraceCallResult, error) {
+	if err := rejectPending(blockNrOrHash); err != nil {
+		return nil, err
+	}
 	if gasBailOut == nil {
 		gasBailOut = new(bool) // false by default
 	}
@@ -1114,6 +1117,9 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	if blockNrOrHash == nil {
 		var num = rpc.LatestBlockNumber
 		blockNrOrHash = &rpc.BlockNumberOrHash{BlockNumber: &num}
+	}
+	if err := rejectPending(*blockNrOrHash); err != nil {
+		return nil, err
 	}
 
 	// nil filters: committed view — the replay below reads temporal data through this tx.
@@ -1310,6 +1316,9 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	if parentNrOrHash == nil {
 		var num = rpc.LatestBlockNumber
 		parentNrOrHash = &rpc.BlockNumberOrHash{BlockNumber: &num}
+	}
+	if err := rejectPending(*parentNrOrHash); err != nil {
+		return nil, err
 	}
 	// nil filters: committed view — the replay below reads temporal data through this tx.
 	blockNumber, hash, latest, err := rpchelper.GetBlockNumber(ctx, *parentNrOrHash, tx, api._blockReader, nil)

@@ -18,6 +18,7 @@ package jsonrpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -41,6 +42,26 @@ import (
 	"github.com/erigontech/erigon/rpc/transactions"
 )
 
+// errPendingNotSupported is returned for the "pending" tag by the tracing methods,
+// matching go-ethereum. They resolve and replay on the committed view, which holds
+// no pending block, so accepting the tag would trace the latest executed block
+// while reporting it as the one the caller asked for.
+var errPendingNotSupported = errors.New("tracing on top of pending is not supported")
+
+func rejectPendingNumber(blockNr rpc.BlockNumber) error {
+	if blockNr == rpc.PendingBlockNumber {
+		return errPendingNotSupported
+	}
+	return nil
+}
+
+func rejectPending(blockNrOrHash rpc.BlockNumberOrHash) error {
+	if blockNrOrHash.BlockNumber == nil {
+		return nil
+	}
+	return rejectPendingNumber(*blockNrOrHash.BlockNumber)
+}
+
 // TraceBlockByNumber implements debug_traceBlockByNumber. Returns Geth style block traces.
 func (api *DebugAPIImpl) TraceBlockByNumber(ctx context.Context, blockNum rpc.BlockNumber, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error {
 	return api.traceBlock(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), config, stream)
@@ -52,6 +73,9 @@ func (api *DebugAPIImpl) TraceBlockByHash(ctx context.Context, hash common.Hash,
 }
 
 func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error {
+	if err := rejectPending(blockNrOrHash); err != nil {
+		return err
+	}
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
@@ -361,6 +385,9 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 
 // TraceCall implements debug_traceCall. Returns Geth style call traces.
 func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error {
+	if err := rejectPending(blockNrOrHash); err != nil {
+		return err
+	}
 	dbtx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return fmt.Errorf("create ro transaction: %v", err)
@@ -454,6 +481,9 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 
 // TraceCall implements debug_traceCallMany. Returns Geth style call traces.
 func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, simulateContext StateContext, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error {
+	if err := rejectPending(simulateContext.BlockNumber); err != nil {
+		return err
+	}
 	var (
 		hash              common.Hash
 		evm               *vm.EVM
