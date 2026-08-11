@@ -392,6 +392,28 @@ func TestDumpEnvelopeSyncsDirectoryAfterRename(t *testing.T) {
 	require.Equal(t, 1, fs.syncs)
 }
 
+func TestSyncEnvelopeDirectorySkipsUnsupportedWindowsDirectoryFlush(t *testing.T) {
+	fs := &envelopeDirSyncFs{Fs: afero.NewMemMapFs(), fail: true}
+
+	require.NoError(t, syncEnvelopeDirectoryForOS(fs, "windows"))
+	require.Zero(t, fs.syncs)
+}
+
+func TestRemoveOrQuarantineEnvelopeTreatsSuccessfulRenameAsSuccess(t *testing.T) {
+	baseFs := afero.NewMemMapFs()
+	fs := envelopeRemoveFailureFs{Fs: baseFs, suffix: ".envelope.snappy_ssz"}
+	filename := getEnvelopeFilename(common.HexToHash("0x1234"))
+	require.NoError(t, afero.WriteFile(baseFs, filename, []byte("corrupt"), 0o644))
+
+	require.NoError(t, removeOrQuarantineEnvelope(fs, filename, ".corrupt"))
+	exists, err := afero.Exists(baseFs, filename)
+	require.NoError(t, err)
+	require.False(t, exists)
+	quarantined, err := afero.Exists(baseFs, filename+".corrupt")
+	require.NoError(t, err)
+	require.True(t, quarantined)
+}
+
 func TestDumpEnvelopeReturnsDirectorySyncErrorAfterCompleteRename(t *testing.T) {
 	baseFs := afero.NewMemMapFs()
 	fs := &envelopeDirSyncFs{Fs: baseFs, fail: true}

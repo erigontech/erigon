@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"strings"
 
 	"github.com/golang/snappy"
@@ -80,6 +81,13 @@ func cleanupEnvelopeArtifacts(fs afero.Fs) error {
 }
 
 func syncEnvelopeDirectory(fs afero.Fs) error {
+	return syncEnvelopeDirectoryForOS(fs, runtime.GOOS)
+}
+
+func syncEnvelopeDirectoryForOS(fs afero.Fs, goos string) error {
+	if goos == "windows" {
+		return nil
+	}
 	dir, err := fs.Open(".")
 	if err != nil {
 		return err
@@ -96,10 +104,11 @@ func removeOrQuarantineEnvelope(fs afero.Fs, filename, suffix string) error {
 	if err == nil || os.IsNotExist(err) {
 		return nil
 	}
-	if renameErr := fs.Rename(filename, filename+suffix); renameErr != nil && !os.IsNotExist(renameErr) {
-		return errors.Join(err, fmt.Errorf("quarantine envelope: %w", renameErr))
+	renameErr := fs.Rename(filename, filename+suffix)
+	if renameErr == nil || os.IsNotExist(renameErr) {
+		return nil
 	}
-	return err
+	return errors.Join(err, fmt.Errorf("quarantine envelope: %w", renameErr))
 }
 
 func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot common.Hash) (bs *state.CachingBeaconState, err error) {
