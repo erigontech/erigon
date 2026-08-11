@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"os"
 	"runtime"
 	"runtime/pprof"
@@ -1790,7 +1789,7 @@ type txResult struct {
 	blockGasUsed          int64
 	cumulativeBlobGasUsed uint64
 	receipt               *types.Receipt
-	logs                  []*types.Log
+	logs                  []*types.Log // yes, logs exist inside `receipt`, but Finalize txn producing `logs` without `receipt`
 	traceFroms            map[accounts.Address]struct{}
 	traceTos              map[accounts.Address]struct{}
 	writes                *state.WriteSet
@@ -2284,6 +2283,8 @@ type blockExecutor struct {
 	// recorded set is some execResult's TxOut, which stays live.
 	feeMergeTemp map[int]*state.WriteSet
 
+	mapReleasing sync.WaitGroup
+
 	// settledInput[tx]==true marks a task that was dispatched when every
 	// preceding task had already validated — so it executed against fully
 	// settled MVCC state, with no lower-indexed worker still in flight.
@@ -2460,10 +2461,44 @@ func (be *blockExecutor) invalidBlockResult(err error) *blockResult {
 // so pooling prev's maps leaves the writes merged now holds intact.
 func (be *blockExecutor) recordFeeMerge(tx int, prev, merged *state.WriteSet) {
 	if temp := be.feeMergeTemp[tx]; temp != nil && temp == prev && merged != temp {
-		temp.ReleaseMaps()
+		be.queueMapRelease(temp)
 	}
 	be.feeMergeTemp[tx] = merged
 }
+
+// ReleaseMaps clears every map before pooling it, which is O(entries), and a
+// superseded fee-merge set holds the whole tx's writes. Keep it off the apply
+// loop, which is the serial stage the workers wait behind.
+type mapRelease struct {
+	ws      *state.WriteSet
+	pending *sync.WaitGroup
+}
+
+var (
+	mapReleases     = make(chan mapRelease, 4096)
+	mapReleaseStart sync.Once
+)
+
+func (be *blockExecutor) queueMapRelease(ws *state.WriteSet) {
+	mapReleaseStart.Do(func() {
+		go func() {
+			for r := range mapReleases {
+				r.ws.ReleaseMaps()
+				r.pending.Done()
+			}
+		}()
+	})
+	be.mapReleasing.Add(1)
+	select {
+	case mapReleases <- mapRelease{ws, &be.mapReleasing}:
+	default:
+		// Releaser is behind; inline costs less than blocking the apply loop.
+		ws.ReleaseMaps()
+		be.mapReleasing.Done()
+	}
+}
+
+func (be *blockExecutor) awaitMapReleases() { be.mapReleasing.Wait() }
 
 // tooManyRetries returns an invalid-block result when tx has exceeded its
 // retry budget, otherwise nil. origin may be nil (validator-invalid path)
@@ -2969,8 +3004,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			applyResult := txResult{
 				blockNum:              be.number(),
 				blockHash:             be.hash(),
-				traceFroms:            map[accounts.Address]struct{}{},
-				traceTos:              map[accounts.Address]struct{}{},
+				traceFroms:            result.TraceFroms,
+				traceTos:              result.TraceTos,
 				txNum:                 task.Version().TxNum,
 				rules:                 task.Rules(),
 				cumulativeBlobGasUsed: result.cumulativeBlobGasUsed,
@@ -2990,15 +3025,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				// progress / uncommittedGas tracking; receipt gas is fine here.
 				applyResult.blockGasUsed = int64(result.Receipt.GasUsed)
 
-				receipt := *result.Receipt
-				applyResult.receipt = &receipt
-				applyResult.receipt.Logs = append([]*types.Log{}, result.Receipt.Logs...)
-				applyResult.logs = applyResult.receipt.Logs
+				applyResult.receipt = result.Receipt
+				applyResult.logs = result.Receipt.Logs
 				pe.executedGas.Add(int64(applyResult.blockGasUsed))
 			}
 
-			maps.Copy(applyResult.traceFroms, result.TraceFroms)
-			maps.Copy(applyResult.traceTos, result.TraceTos)
 			be.cntFinalized++
 			be.publishTasks.markComplete(tx)
 

@@ -898,15 +898,6 @@ func (sd *SharedDomains) PrintCacheStats() {
 	}
 }
 
-func (sd *SharedDomains) ClearRam(resetCommitment bool) {
-	// When the commitment calculator goroutine owns the Updates buffer,
-	// skip ClearRam on the commitment context to avoid concurrent btree access.
-	if resetCommitment && sd.sdCtx != nil && !sd.disableInlineTouchKey {
-		sd.sdCtx.ClearRam()
-	}
-	sd.mem.ClearRam()
-}
-
 func (sd *SharedDomains) Size() uint64 {
 	return sd.mem.SizeEstimate()
 }
@@ -1811,8 +1802,8 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, roTx kv.TemporalTx, p
 	return nil
 }
 
-// DiscardWrites disables updates collection for further flushing into db.
-// Instead, it keeps them temporarily available until .ClearRam/.Close will make them unavailable.
+// DiscardWrites disables updates collection for further flushing into db;
+// the values stay readable in memory.
 func (sd *SharedDomains) DiscardWrites(d kv.Domain) {
 	// TODO: Deprecated - need convert this method to Constructor-Builder configuration
 	if d >= kv.DomainLen {
