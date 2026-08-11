@@ -17,6 +17,7 @@
 package metrics
 
 import (
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -26,7 +27,7 @@ import (
 var (
 	delayBuckets = []float64{0.05, 0.125, 0.25, 0.5, 1, 2, 4, 8}
 
-	DelayLoggingEnabled bool
+	DelayLoggingEnabled atomic.Bool
 
 	BlockConsumerHeaderDownloadDelay = diagmetrics.NewSummary(`block_consumer_delay{type="header_download"}`)
 	BlockConsumerBodyDownloadDelay   = diagmetrics.NewSummary(`block_consumer_delay{type="body_download"}`)
@@ -47,7 +48,7 @@ func UpdateBlockConsumerHeaderDownloadDelay(blockTime uint64, blockNumber uint64
 	BlockConsumerHeaderDownloadDelay.ObserveDuration(t)
 	BlockConsumerHeaderDownloadDelayHistogram.ObserveDuration(t)
 
-	if DelayLoggingEnabled {
+	if DelayLoggingEnabled.Load() {
 		log.Info("[consumer-delay] Header", "blockNumber", blockNumber, "delay", time.Since(t))
 	}
 }
@@ -57,7 +58,7 @@ func UpdateBlockConsumerBodyDownloadDelay(blockTime uint64, blockNumber uint64, 
 	BlockConsumerBodyDownloadDelay.ObserveDuration(t)
 	BlockConsumerBodyDownloadDelayHistogram.ObserveDuration(t)
 
-	if DelayLoggingEnabled {
+	if DelayLoggingEnabled.Load() {
 		log.Info("[consumer-delay] Body", "blockNumber", blockNumber, "delay", time.Since(t))
 	}
 }
@@ -67,7 +68,7 @@ func UpdateBlockConsumerPreExecutionDelay(blockTime uint64, blockNumber uint64, 
 	BlockConsumerPreExecutionDelay.ObserveDuration(t)
 	BlockConsumerPreExecutionDelayHistogram.ObserveDuration(t)
 
-	if DelayLoggingEnabled {
+	if DelayLoggingEnabled.Load() {
 		log.Info("[consumer-delay] Pre-execution", "blockNumber", blockNumber, "delay", time.Since(t))
 	}
 }
@@ -77,7 +78,7 @@ func UpdateBlockConsumerPostExecutionDelay(blockTime uint64, blockNumber uint64,
 	BlockConsumerPostExecutionDelay.ObserveDuration(t)
 	BlockConsumerPostExecutionDelayHistogram.ObserveDuration(t)
 
-	if DelayLoggingEnabled {
+	if DelayLoggingEnabled.Load() {
 		log.Info("[consumer-delay] Post-execution", "blockNumber", blockNumber, "delay", time.Since(t))
 	}
 }
@@ -86,7 +87,7 @@ func UpdateBlockProducerProductionDelay(parentBlockTime uint64, producedBlockNum
 	t := time.Unix(int64(parentBlockTime), 0)
 	BlockProducerProductionDelay.ObserveDuration(t)
 
-	if DelayLoggingEnabled {
+	if DelayLoggingEnabled.Load() {
 		log.Info("[producer-delay] Production", "blockNumber", producedBlockNum, "delay", time.Since(t))
 	}
 }

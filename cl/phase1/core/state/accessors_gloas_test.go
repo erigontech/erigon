@@ -3,10 +3,11 @@ package state
 import (
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/stretchr/testify/require"
 )
 
 func TestIsValidIndexedAttestationRejectsOversizedGloasIndicesBeforeLookup(t *testing.T) {
