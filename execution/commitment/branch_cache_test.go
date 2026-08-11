@@ -226,7 +226,10 @@ func TestBranchCache_ClosePreventsPublication(t *testing.T) {
 	c.Close()
 
 	publisher.Initialize(testBranchGeneration(2))
-	require.False(t, c.View(testBranchGeneration(2)).current())
+	key := []byte{0x00}
+	c.View(testBranchGeneration(2)).Fill(key, []byte("root"), 0)
+	_, _, ok := c.Get(key)
+	require.False(t, ok)
 	publication := publisher.Begin()
 	publication.Abort()
 	require.Nil(t, publication)

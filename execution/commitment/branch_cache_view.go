@@ -35,10 +35,6 @@ func (c *BranchCache) View(generation cache.Generation) BranchReadView {
 	return BranchReadView{c: c, generation: c.generation.View(generation)}
 }
 
-func (v BranchReadView) current() bool {
-	return v.c != nil && v.generation.Current()
-}
-
 // Get returns a branch only while the view remains current.
 func (v BranchReadView) Get(prefix []byte) ([]byte, uint64, bool) {
 	return cache.ReadCurrentWithStep(v.generation, func() ([]byte, uint64, bool) {
@@ -48,7 +44,7 @@ func (v BranchReadView) Get(prefix []byte) ([]byte, uint64, bool) {
 
 // Fill admits a branch read from the view's database snapshot.
 func (v BranchReadView) Fill(prefix, value []byte, step uint64) {
-	if !v.current() || len(value) == 0 {
+	if len(value) == 0 {
 		return
 	}
 	v.generation.Admit(func() {
