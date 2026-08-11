@@ -19,9 +19,11 @@ package state
 import (
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -90,4 +92,100 @@ func TestStateReader_ReadMethods_Allocs(t *testing.T) {
 			require.Equal(t, tc.want, allocs, "%s: alloc count changed", tc.name)
 		})
 	}
+}
+
+func cacheReadTestAccount() *accounts.Account {
+	acc := accounts.NewAccount()
+	acc.Nonce = 42
+	acc.Balance = *uint256.NewInt(1e18)
+	acc.Incarnation = 1
+	acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash([]byte{0x60, 0x00}))
+	return &acc
+}
+
+func TestCachedReaderV3_CurrentReadsCommittedWhenUnwritten(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0xc0ffee"))
+	want := cacheReadTestAccount()
+
+	cache := NewBlockStateCache()
+	cache.PutCommittedAccount(addr, want)
+	got, err := NewCurrentCachedReaderV3(nil, cache).ReadAccountData(addr)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, want.Nonce, got.Nonce)
+	require.Equal(t, want.Balance, got.Balance)
+	require.Equal(t, want.Incarnation, got.Incarnation)
+	require.Equal(t, want.CodeHash, got.CodeHash)
+	require.NotSame(t, want, got, "the caller must not be able to mutate the cached account")
+}
+
+// A write this block shadows the committed view, and a nil write means the
+// account was destroyed — neither may fall through to the committed entry.
+func TestCachedReaderV3_CurrentPrefersBlockWrite(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0xc0ffee"))
+	cache := NewBlockStateCache()
+	cache.PutCommittedAccount(addr, cacheReadTestAccount())
+
+	written := cacheReadTestAccount()
+	written.Nonce = 43
+	cache.WriteAccount(addr, accounts.SerialiseV3(written), 1)
+	got, err := NewCurrentCachedReaderV3(nil, cache).ReadAccountData(addr)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, uint64(43), got.Nonce)
+
+	cache.WriteAccount(addr, nil, 2)
+	got, err = NewCurrentCachedReaderV3(nil, cache).ReadAccountData(addr)
+	require.NoError(t, err)
+	require.Nil(t, got)
+}
+
+func TestCachedReaderV3_CurrentReturnsNilForCommittedAbsence(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0xdead"))
+	cache := NewBlockStateCache()
+	cache.PutCommittedAccount(addr, nil)
+	got, err := NewCurrentCachedReaderV3(nil, cache).ReadAccountData(addr)
+	require.NoError(t, err)
+	require.Nil(t, got)
+}
+
+// BenchmarkCachedReaderAccountRead prices one apply-loop account read that hits
+// the block state cache, on each of its two paths.
+func BenchmarkCachedReaderAccountRead(b *testing.B) {
+	addr := accounts.InternAddress(common.HexToAddress("0xc0ffee"))
+	acc := cacheReadTestAccount()
+
+	b.Run("committed", func(b *testing.B) {
+		cache := NewBlockStateCache()
+		cache.PutCommittedAccount(addr, acc)
+		r := NewCurrentCachedReaderV3(nil, cache)
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			got, err := r.ReadAccountData(addr)
+			if err != nil || got == nil {
+				b.Fatal(err)
+			}
+		}
+	})
+
+	b.Run("written", func(b *testing.B) {
+		cache := NewBlockStateCache()
+		cache.WriteAccount(addr, accounts.SerialiseV3(acc), 1)
+		r := NewCurrentCachedReaderV3(nil, cache)
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			got, err := r.ReadAccountData(addr)
+			if err != nil || got == nil {
+				b.Fatal(err)
+			}
+		}
+	})
 }

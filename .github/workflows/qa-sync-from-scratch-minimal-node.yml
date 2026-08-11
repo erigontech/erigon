@@ -22,16 +22,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # chain: name as specified on the erigon command line.
-        # retirement_prune_distance: narrowed state-history window for the file
-        # retirement check, in blocks. It has to put the retirement cutoff between
-        # two snapshot-file boundaries, so it depends on how many blocks one step
-        # spans on that chain — see the file-retirement README in the QA repo.
-        include:
-          - chain: mainnet
-            retirement_prune_distance: 20000
-          - chain: gnosis
-            retirement_prune_distance: 50000
+        chain: [ mainnet, gnosis ]  # Chain name as specified on the erigon command line
     env:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
@@ -39,7 +30,6 @@ jobs:
       TRACKING_TIME_SECONDS: 7200 # 2 hours
       TOTAL_TIME_SECONDS: 43200 # 18 hours
       CHAIN: ${{ matrix.chain }}
-      RETIREMENT_PRUNE_DISTANCE: ${{ matrix.retirement_prune_distance }}
       RETIREMENT_TIMEOUT_SECONDS: 1800 # 30 minutes to observe the first retirement
 
     steps:
@@ -157,7 +147,14 @@ jobs:
       # narrower than the one it was synced with. That moves the retirement
       # cutoff past whole snapshot-file boundaries, so aged history files become
       # deletable within minutes instead of the days the default minimal window
-      # would need at tip. The distance is per-chain: see the matrix above.
+      # would need at tip.
+      #
+      # --distance auto sizes that window from the boundaries on disk and the
+      # transaction density at the tip. A fixed value cannot: a step holds a fixed
+      # number of transactions, so how many blocks it spans depends on the chain
+      # and on how busy it is right now, and the gap between the two newest
+      # boundaries is 1, 2, 4 ... steps depending on the merge ladder. Deriving it
+      # is also what lets Gnosis run the same check as mainnet.
       - name: Test old state-history file retirement (minimal node)
         id: retirement_step
         run: |
@@ -166,7 +163,7 @@ jobs:
           python3 $ERIGON_QA_PATH/test_system/qa-tests/file-retirement/run_and_check_file_retirement.py \
             ${{ github.workspace }}/build/bin $ERIGON_DATA_DIR \
             --chain $CHAIN \
-            --distance $RETIREMENT_PRUNE_DISTANCE \
+            --distance auto \
             --timeout $RETIREMENT_TIMEOUT_SECONDS \
             --result-file "$GITHUB_WORKSPACE/result-retirement-$CHAIN.json"
 
