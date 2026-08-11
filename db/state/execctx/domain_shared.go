@@ -290,8 +290,7 @@ type SharedDomains struct {
 // entry points instead of leaving Variant unset and relying on an implicit
 // fallback inside the trie constructor.
 func PickTrieVariant() commitment.TrieVariant {
-	switch {
-	case statecfg.ExperimentalParallelCommitment:
+	if statecfg.ExperimentalParallelCommitment {
 		return commitment.VariantParallelHexPatricia
 	}
 	return commitment.VariantHexPatriciaTrie
