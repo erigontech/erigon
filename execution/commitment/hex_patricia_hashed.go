@@ -389,36 +389,36 @@ func (cell *cell) reset() {
 func (cell *cell) FullString() string {
 	b := new(strings.Builder)
 	b.WriteString("{")
-	b.WriteString(fmt.Sprintf("loaded=%v", cell.loaded))
+	fmt.Fprintf(b, "loaded=%v", cell.loaded)
 	if cell.Deleted() {
 		b.WriteString(" DELETED ")
 	}
 
 	if cell.accountAddrLen > 0 {
-		b.WriteString(fmt.Sprintf(" addr=%x", cell.accountAddr[:cell.accountAddrLen]))
-		b.WriteString(fmt.Sprintf(" balance=%s", cell.Balance.String()))
-		b.WriteString(fmt.Sprintf(" nonce=%d", cell.Nonce))
+		fmt.Fprintf(b, " addr=%x", cell.accountAddr[:cell.accountAddrLen])
+		fmt.Fprintf(b, " balance=%s", cell.Balance.String())
+		fmt.Fprintf(b, " nonce=%d", cell.Nonce)
 		if cell.CodeHash != empty.CodeHash {
-			b.WriteString(fmt.Sprintf(" codeHash=%x", cell.CodeHash[:]))
+			fmt.Fprintf(b, " codeHash=%x", cell.CodeHash[:])
 		} else {
 			b.WriteString(" codeHash=EMPTY")
 		}
 	}
 	if cell.storageAddrLen > 0 {
-		b.WriteString(fmt.Sprintf(" addr[s]=%x", cell.storageAddr[:cell.storageAddrLen]))
-		b.WriteString(fmt.Sprintf(" storage=%x", cell.Storage[:cell.StorageLen]))
+		fmt.Fprintf(b, " addr[s]=%x", cell.storageAddr[:cell.storageAddrLen])
+		fmt.Fprintf(b, " storage=%x", cell.Storage[:cell.StorageLen])
 	}
 	if cell.hashLen > 0 {
-		b.WriteString(fmt.Sprintf(" h=%x", cell.hash[:cell.hashLen]))
+		fmt.Fprintf(b, " h=%x", cell.hash[:cell.hashLen])
 	}
 	if cell.stateHashLen > 0 {
-		b.WriteString(fmt.Sprintf(" memHash=%x", cell.stateHash[:cell.stateHashLen]))
+		fmt.Fprintf(b, " memHash=%x", cell.stateHash[:cell.stateHashLen])
 	}
 	if cell.extLen > 0 {
-		b.WriteString(fmt.Sprintf(" extension=%x", cell.extension[:cell.extLen]))
+		fmt.Fprintf(b, " extension=%x", cell.extension[:cell.extLen])
 	}
 	if cell.hashedExtLen > 0 {
-		b.WriteString(fmt.Sprintf(" hashedExtension=%x", cell.hashedExtension[:cell.hashedExtLen]))
+		fmt.Fprintf(b, " hashedExtension=%x", cell.hashedExtension[:cell.hashedExtLen])
 	}
 
 	b.WriteString("}")
