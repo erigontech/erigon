@@ -25,22 +25,15 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// TestCreateOverAbsenceConsumedBeforeDestructFlush pins the two-view fork the
-// EIP-8246 reconstruction in versionedAccountBase can otherwise smuggle past
-// validation: tx1's new-account gas probe (EIP-8037 chargeNewAccount) reads
-// the CREATE2 target as absent before tx0 — which created the account and
-// self-destructed it to itself, leaving a balance-only account — has flushed
-// its cells. When the create flow later re-reads the account, the flushed
-// destruct must NOT be silently adopted: the absence was already consumed
-// (new-account state gas was charged on it), so the tx must abort with
-// ErrDependency (or fail commit-time validation) and re-execute. Silent
-// adoption keeps the state view correct but leaves the inflated gas charge
-// standing, so the proposer and validator diverge on fees.
-//
-// The collisionCheck variant interleaves the CREATE2 collision reads between
-// the stale probe and the account load: the nonce read's destruct-wipe scan
-// records a SelfDestruct=true read, which must not be mistaken for the
-// absence having been concluded from the destruct.
+// TestCreateOverAbsenceConsumedBeforeDestructFlush pins the OCC invariant
+// that an execution which consumed an account's absence (e.g. for the
+// EIP-8037 new-account gas charge) must not silently adopt a destruct flushed
+// since: the attempt has to abort with ErrDependency or fail commit-time
+// validation, else its gas view forks from its state view. The
+// collisionCheckFirst variant interleaves the CREATE2 collision reads between
+// the probe and the account load — their destruct-wipe scan records a
+// SelfDestruct=true read that must not count as the absence having been
+// concluded from the destruct.
 func TestCreateOverAbsenceConsumedBeforeDestructFlush(t *testing.T) {
 	t.Parallel()
 	for _, collisionCheck := range []bool{false, true} {
