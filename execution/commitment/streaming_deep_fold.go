@@ -275,7 +275,7 @@ func storageRootFromSingleChild(base *HexPatriciaHashed) (cell, error) {
 
 	// The prior on-disk branch at the account prefix, if any, is now an extension: no branch record.
 	if base.branchBefore[0] {
-		if err := base.collectDeleteUpdate(nibbles.HexToCompact(base.currentKey[:base.currentKeyLen]), 0, true); err != nil {
+		if err := base.collectDeleteUpdate(nibbles.HexToCompact(base.currentKey[:base.currentKeyLen]), 0); err != nil {
 			return cell{}, err
 		}
 	}
