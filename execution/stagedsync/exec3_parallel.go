@@ -491,35 +491,31 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 		deliberateCancel := func() {
 			pe.cancelExecLoop(&stopCause{block: fail.block, kind: stopBadBlock, err: fail.err})
 		}
-		// processCommit records a commit failure into `fail`. Non-wrong-root
-		// commit errors (lazy-load / compute) are infrastructure faults, so
-		// fast-fail. A wrong-root is deferred so the block's own exec verdict can
+		// processCommit records a commit failure into `fail`. Infrastructure
+		// faults cancel execution immediately while the apply loop keeps draining.
+		// A wrong-root is deferred so the block's own exec verdict can
 		// supersede it — EXCEPT when exec has already applied the block: then its
 		// verdict is in (this is an incremental, not fold-ahead, wrong-root), so
 		// finalize and cancel eagerly rather than keep building on known-wrong
 		// state. Fold-ahead wrong-roots arrive before the block is applied and so
 		// still defer, with the cancel firing once exec cleanly applies the block.
-		processCommit := func(cr commitmentResult) error {
+		processCommit := func(cr commitmentResult) {
 			err := handleCommitResult(cr)
 			if err == nil {
-				return nil
+				return
 			}
 			fail.consider(cr.blockNum, cr.blockHash, false, err)
 			if !errors.Is(err, ErrWrongTrieRoot) {
-				// Infra fault (lazy-load / compute), not block-validity: report it
-				// but do NOT return here — a bare return kills the apply loop while
-				// the exec loop may be blocked on a mustDeliver send, wedging
-				// shutdown. Record + cancel + keep draining (which unblocks that
-				// send); fail.err surfaces at channel close.
+				// Keep draining after cancellation so terminal mustDeliver sends can
+				// finish. fail.err surfaces when the channels close.
 				finalized = true
 				deliberateCancel()
-				return nil
+				return
 			}
 			if _, applied := appliedBlocks[cr.blockNum]; applied {
 				finalized = true
 				deliberateCancel()
 			}
-			return nil
 		}
 
 		// Apply loop: exits ONLY when applyResults is closed by the exec loop.
@@ -538,9 +534,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					// channel hangs forever).
 					if !rootResultsClosed {
 						for cr := range rootResults {
-							if err := processCommit(cr); err != nil {
-								return err
-							}
+							processCommit(cr)
 						}
 					}
 					if lastBlock.blockNum > 0 {
@@ -819,9 +813,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					rootResultsClosed = true
 					continue
 				}
-				if err := processCommit(cr); err != nil {
-					return err
-				}
+				processCommit(cr)
 			case <-logEvery.C:
 				if time.Since(lastExecutedLog) > logInterval-(logInterval/90) {
 					hasLoggedExecution = true
