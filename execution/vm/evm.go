@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"sync/atomic"
+	"unsafe"
 
 	"github.com/holiman/uint256"
 
@@ -89,12 +90,19 @@ type EVM struct {
 	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse
 
-	// Pointers before counters: interleaving pads EVM past Go's 480-byte size class.
+	// Pointers before counters: interleaving them adds a word of padding.
 	internCache *storageKeyCache
 	addrCache   *addressCache
 	internOps   uint32
 	addrOps     uint32
 }
+
+// evmSizeClass is the Go allocation size class EVM fills exactly. One more word
+// moves every EVM into the 480-byte class, so a field added here has to either
+// pack into existing padding or accept that cost knowingly.
+const evmSizeClass = 448
+
+var _ [0]struct{} = [unsafe.Sizeof(EVM{}) - evmSizeClass]struct{}{}
 
 // storageKeyCacheSize must comfortably exceed a contract's live slot count,
 // or conflict misses dominate.
@@ -169,24 +177,27 @@ type addressCache struct {
 	words   [addressCacheSize]uint256.Int
 }
 
-// addrIndex skips word[3], which lies wholly above the 20 bytes Bytes20 keeps.
-// The remaining limbs still carry 4 bytes of slack, so a word with dirt there
-// buckets away from its clean twin — two entries for one address, never a wrong
-// one.
+// addrIndex mixes only what Bytes20 reads: limbs 0 and 1 plus the low half of
+// limb 2. A stack word may carry anything above the address, and that dirt must
+// reach neither the index nor the compare — the bucket is masked to the low
+// bits, so a dirty word lands on its clean twin's entry, where a whole-word
+// compare would have the two evict each other on every access.
 func addrIndex(word *uint256.Int) uint64 {
-	return (word[0] ^ word[1] ^ word[2]) & (addressCacheSize - 1)
+	return (word[0] ^ word[1] ^ uint64(uint32(word[2]))) & (addressCacheSize - 1)
 }
 
+// fill clears the bits above the address, so the entry hits for every form of
+// the word carrying it.
 func (c *addressCache) fill(i uint64, word *uint256.Int) accounts.Address {
 	h := accounts.InternAddress(word.Bytes20())
-	c.words[i], c.handles[i] = *word, h
+	c.words[i] = uint256.Int{word[0], word[1], uint64(uint32(word[2])), 0}
+	c.handles[i] = h
 	return h
 }
 
 // internAddress returns the low 20 bytes of word interned as an Address,
-// skipping unique.Make for words seen before. Entries are keyed by the whole
-// word, so a stack word carrying dirt above the address costs a miss, never a
-// wrong handle.
+// skipping unique.Make for words seen before. One entry serves an address in
+// every form its word can take.
 func (evm *EVM) internAddress(word *uint256.Int) accounts.Address {
 	c := evm.addrCache
 	if c == nil {
@@ -196,10 +207,10 @@ func (evm *EVM) internAddress(word *uint256.Int) accounts.Address {
 		}
 		c = new(addressCache)
 		evm.addrCache = c
-		return c.fill(addrIndex(word), word)
 	}
 	i := addrIndex(word)
-	if h := c.handles[i]; h != accounts.NilAddress && c.words[i] == *word {
+	if h := c.handles[i]; h != accounts.NilAddress && c.words[i][0] == word[0] &&
+		c.words[i][1] == word[1] && c.words[i][2] == uint64(uint32(word[2])) {
 		return h
 	}
 	return c.fill(i, word)
