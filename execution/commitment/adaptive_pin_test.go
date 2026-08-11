@@ -171,6 +171,33 @@ func TestAdaptivePinPlanSkipsStaleSourceAfterFilesPublication(t *testing.T) {
 	require.Zero(t, readerCalls, "a plan that cannot be published must not scan branches")
 }
 
+func TestAdaptivePinPlanPanicRestoresController(t *testing.T) {
+	branchCache := NewBranchCache(64)
+	t.Cleanup(branchCache.Close)
+	branchCache.Publisher().Initialize(testBranchGeneration(1))
+	controller := NewAdaptivePinController(branchCache, DefaultAdaptivePinControllerConfig(), log.Root())
+
+	var contractHash [32]byte
+	contractHash[0] = 1
+	previousState := &adaptiveContractState{contractHash: contractHash}
+	controller.states[contractHash] = previousState
+	controller.onCacheMiss(nibbles.HexToCompact(ContractNibbles(contractHash[:])))
+
+	var recovered any
+	func() {
+		defer func() { recovered = recover() }()
+		controller.PlanBlock(1, testBranchGeneration(1), nil, func() (BatchBranchResolver, func(), error) {
+			panic("factory failed")
+		}, nil)
+	}()
+
+	require.Equal(t, "factory failed", recovered)
+	require.True(t, controller.mu.TryLock(), "planning panic must release the controller")
+	controller.mu.Unlock()
+	require.Same(t, previousState, controller.states[contractHash])
+	require.Equal(t, uint64(1), controller.snapshotMisses()[contractHash])
+}
+
 func TestAdaptivePinControllerForgetsPinsClearedByFilesPublication(t *testing.T) {
 	branchCache := NewBranchCache(64)
 	t.Cleanup(branchCache.Close)
