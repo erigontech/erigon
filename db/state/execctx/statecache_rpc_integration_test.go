@@ -328,7 +328,7 @@ func TestSharedDomainsSameDatabaseViewUsesReadTxFilesGeneration(t *testing.T) {
 		freshDebug.TxNumsInFiles(kv.StorageDomain),
 		freshDebug.TxNumsInFiles(kv.CodeDomain),
 	)
-	stateCache.Publisher().Begin().Publish(freshGeneration, nil, true)
+	stateCache.Publisher().Begin().Publish(freshGeneration, 0, nil, true)
 	cacheOnlyValue := []byte{0xff}
 	freshCacheView := stateCache.View(freshGeneration)
 	freshCacheView.Fill(kv.AccountsDomain, key, cacheOnlyValue, 0)

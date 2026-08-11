@@ -170,7 +170,7 @@ func TestCachePopulatingGetterNegativeClearedByPublication(t *testing.T) {
 	_, ok := cacheView(sc, 1).Get(kv.AccountsDomain, key)
 	require.True(t, ok)
 
-	sc.Publisher().Begin().Publish(cache.StateGeneration(2, 0, 0, 0), nil, true)
+	sc.Publisher().Begin().Publish(cache.StateGeneration(2, 0, 0, 0), 0, nil, true)
 	_, ok = cacheView(sc, 2).Get(kv.AccountsDomain, key)
 	require.False(t, ok)
 }
@@ -196,7 +196,7 @@ func TestCachePopulatingGetterStaleViewDoesNotFill(t *testing.T) {
 		view:           cacheView(sc, 1),
 	}
 	publication := sc.Publisher().Begin()
-	publication.Publish(cache.StateGeneration(2, 0, 0, 0), nil, false)
+	publication.Publish(cache.StateGeneration(2, 0, 0, 0), 0, nil, false)
 
 	_, _, err := cpg.GetLatest(kv.AccountsDomain, key)
 	require.NoError(t, err)

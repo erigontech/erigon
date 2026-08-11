@@ -107,7 +107,7 @@ func TestResetExecResetsBoundStateCache(t *testing.T) {
 	publisher.Initialize(stateGeneration)
 	publication := publisher.Begin()
 	key := []byte{0x01}
-	publication.Publish(stateGeneration, []cache.Update{{
+	publication.Publish(stateGeneration, 0, []cache.Update{{
 		Domain: kv.AccountsDomain,
 		Key:    key,
 		Value:  []byte{0xaa},
@@ -122,7 +122,7 @@ func TestResetExecResetsBoundStateCache(t *testing.T) {
 	require.False(t, ok, "reset must revoke views of the pre-reset state")
 	oldView.Fill(kv.AccountsDomain, key, []byte{0xbb}, 0)
 	publication = publisher.Begin()
-	publication.Publish(stateGeneration, nil, false)
+	publication.Publish(stateGeneration, 0, nil, false)
 	_, ok = stateCache.View(stateGeneration).Get(kv.AccountsDomain, key)
 	require.False(t, ok, "the same numeric generation must not expose or accept pre-reset state")
 }

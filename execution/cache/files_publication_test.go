@@ -30,12 +30,11 @@ func TestStateCacheFilesPublication(t *testing.T) {
 	value := makeValue(1)
 
 	publication := publisher.Begin()
-	publication.Publish(testStateGeneration(2), []Update{{
+	publication.Publish(testStateGeneration(2), 101, []Update{{
 		Domain: kv.AccountsDomain,
 		Key:    key,
 		Value:  value,
 		Step:   1,
-		TxNum:  100,
 	}}, false)
 	view := stateCache.View(testStateGeneration(2))
 	got, ok := view.Get(kv.AccountsDomain, key)
@@ -63,7 +62,7 @@ func TestStateCacheFilesPublication(t *testing.T) {
 	change.Finish()
 
 	publication = publisher.Begin()
-	publication.Publish(StateGeneration(3, 150, 0, 0), nil, false)
+	publication.Publish(StateGeneration(3, 150, 0, 0), 150, nil, false)
 	current := stateCache.View(StateGeneration(3, 150, 0, 0))
 	_, ok = current.Get(kv.AccountsDomain, key)
 	require.False(t, ok, "the next commit must not reactivate entries from the old backing view")
@@ -74,10 +73,43 @@ func TestStateCacheFilesPublication(t *testing.T) {
 	require.True(t, ok, "an already absorbed files view must not clear again")
 }
 
+func TestStateCacheFilesPublicationRetainsSparseDomainsCoveredByCommit(t *testing.T) {
+	stateCache, publisher := readyStateCache(t, 1)
+	accountKey := makeAddr(1)
+	accountValue := makeValue(1)
+	storageKey := append(makeAddr(2), make([]byte, 32)...)
+	storageValue := makeValue(2)
+	stateCache.View(testStateGeneration(1)).Fill(kv.StorageDomain, storageKey, storageValue, 0)
+
+	publication := publisher.Begin()
+	publication.Publish(testStateGeneration(2), 101, []Update{{
+		Domain: kv.AccountsDomain,
+		Key:    accountKey,
+		Value:  accountValue,
+		Step:   1,
+	}}, false)
+
+	var filesEnd [kv.DomainLen]uint64
+	filesEnd[kv.AccountsDomain] = 101
+	filesEnd[kv.StorageDomain] = 101
+	filesEnd[kv.CodeDomain] = 101
+	change := stateCache.BeginFilesPublication(filesEnd)
+	require.NotNil(t, change)
+	change.Finish()
+
+	view := stateCache.View(StateGeneration(2, 101, 101, 101))
+	got, ok := view.Get(kv.AccountsDomain, accountKey)
+	require.True(t, ok)
+	require.Equal(t, accountValue, got)
+	got, ok = view.Get(kv.StorageDomain, storageKey)
+	require.True(t, ok)
+	require.Equal(t, storageValue, got)
+}
+
 func TestStateCacheCanonicalClearResetsFileProvenance(t *testing.T) {
 	stateCache, publisher, key := stateCacheWithPublishedCoverage(t)
 	publication := publisher.Begin()
-	publication.Publish(testStateGeneration(3), nil, true)
+	publication.Publish(testStateGeneration(3), 0, nil, true)
 	requireStateCacheForeignFilesClear(t, stateCache, key, 3)
 }
 
@@ -92,12 +124,11 @@ func stateCacheWithPublishedCoverage(t *testing.T) (*StateCache, Publisher, []by
 	stateCache, publisher := readyStateCache(t, 1)
 	key := makeAddr(1)
 	publication := publisher.Begin()
-	publication.Publish(testStateGeneration(2), []Update{{
+	publication.Publish(testStateGeneration(2), 101, []Update{{
 		Domain: kv.AccountsDomain,
 		Key:    key,
 		Value:  makeValue(1),
 		Step:   1,
-		TxNum:  100,
 	}}, false)
 	return stateCache, publisher, key
 }

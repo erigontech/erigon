@@ -1097,13 +1097,12 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 
 	var stateUpdates []cache.Update
 	stashState := func(domain kv.Domain) kv.FlushOption {
-		return kv.WithFlushCallback(domain, func(key, value []byte, step kv.Step, txNum uint64) {
+		return kv.WithFlushCallback(domain, func(key, value []byte, step kv.Step, _ uint64) {
 			stateUpdates = append(stateUpdates, cache.Update{
 				Domain: domain,
 				Key:    bytes.Clone(key),
 				Value:  bytes.Clone(value),
 				Step:   step,
-				TxNum:  txNum,
 			})
 		})
 	}
@@ -1130,7 +1129,7 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	// corrupts it (reorg/unwind wrong root).
 	var codeStoreWrites [][2][]byte
 	if stateCacheEnabled || sd.codeStore != nil {
-		opts = append(opts, kv.WithFlushCallback(kv.CodeDomain, func(key, value []byte, step kv.Step, txNum uint64) {
+		opts = append(opts, kv.WithFlushCallback(kv.CodeDomain, func(key, value []byte, step kv.Step, _ uint64) {
 			if sd.codeStore != nil && len(value) > 0 {
 				codeStoreWrites = append(codeStoreWrites, [2][]byte{crypto.Keccak256(value), bytes.Clone(value)})
 			}
@@ -1140,7 +1139,6 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 					Key:    bytes.Clone(key),
 					Value:  bytes.Clone(value),
 					Step:   step,
-					TxNum:  txNum,
 				})
 			}
 		}))
@@ -1197,7 +1195,7 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 		statePublication = sd.statePublisher.Begin()
 	}
 
-	statePublication.Publish(nextCacheGenerations.state, stateUpdates, sd.clearExecutionCaches)
+	statePublication.Publish(nextCacheGenerations.state, sd.txNum+1, stateUpdates, sd.clearExecutionCaches)
 	statePublication = nil
 	branchPublication.Publish(nextCacheGenerations.branch, branchUpdates, sd.clearExecutionCaches, adaptivePlan)
 	branchPublication = nil

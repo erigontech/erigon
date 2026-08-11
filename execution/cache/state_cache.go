@@ -44,12 +44,13 @@ const (
 type StateCache struct {
 	generation GenerationGate
 
-	// committedTxNumEnd is only a file-provenance watermark. Cache validity is
-	// decided by Generation; these ends distinguish files covered by published
-	// updates in the current canonical lineage from files downloaded outside it.
-	committedTxNumEnd [kv.DomainLen]uint64
-	caches            [kv.DomainLen]Cache
-	disableFills      bool
+	// coveredTxNumEnd is only a file-provenance watermark. Cache validity is
+	// decided by Generation; canonical commits advance every cached domain,
+	// including domains with no writes, while incompatible file changes reset
+	// each end to the newly visible view.
+	coveredTxNumEnd [kv.DomainLen]uint64
+	caches          [kv.DomainLen]Cache
+	disableFills    bool
 }
 
 func NewStateCache(accountBytes, storageBytes, codeBytes, addrBytes datasize.ByteSize) *StateCache {
@@ -117,15 +118,15 @@ func (c *StateCache) BeginFilesPublication(filesEnd [kv.DomainLen]uint64) *Backi
 	)
 	return c.generation.Publisher().BeginBackingChange(files, func(lowered bool) bool {
 		if lowered {
-			c.committedTxNumEnd = filesEnd
+			c.coveredTxNumEnd = filesEnd
 			return true
 		}
 		extended := false
 		for domain, cache := range c.caches {
-			if cache == nil || filesEnd[domain] <= c.committedTxNumEnd[domain] {
+			if cache == nil || filesEnd[domain] <= c.coveredTxNumEnd[domain] {
 				continue
 			}
-			c.committedTxNumEnd[domain] = filesEnd[domain]
+			c.coveredTxNumEnd[domain] = filesEnd[domain]
 			extended = true
 		}
 		return extended
@@ -229,9 +230,6 @@ func (c *StateCache) applyLocked(update Update) {
 	if cache == nil {
 		return
 	}
-	if committedEnd := update.TxNum + 1; committedEnd > c.committedTxNumEnd[update.Domain] {
-		c.committedTxNumEnd[update.Domain] = committedEnd
-	}
 
 	switch update.Domain {
 	case kv.AccountsDomain:
@@ -257,6 +255,14 @@ func (c *StateCache) applyLocked(update Update) {
 	}
 }
 
+func (c *StateCache) coverCanonicalStateLocked(txNumEnd uint64) {
+	for domain, stateCache := range c.caches {
+		if stateCache != nil && txNumEnd > c.coveredTxNumEnd[domain] {
+			c.coveredTxNumEnd[domain] = txNumEnd
+		}
+	}
+}
+
 func putOrDelete(cache Cache, key, value []byte, step kv.Step) {
 	if len(value) == 0 {
 		cache.Delete(key)
@@ -274,7 +280,7 @@ func (c *StateCache) clearLocked() {
 }
 
 func (c *StateCache) resetProvenanceAndClearLocked() {
-	c.committedTxNumEnd = [kv.DomainLen]uint64{}
+	c.coveredTxNumEnd = [kv.DomainLen]uint64{}
 	c.clearLocked()
 }
 
@@ -328,15 +334,12 @@ func (c *StateCache) PrintStatsAndReset() {
 
 // Update is one value written by the database transaction being published.
 // Step is the source step returned on cache hits, preserving bounded-read
-// semantics. TxNum records how far this process's committed writes cover the
-// domain, allowing file publication to detect downloaded state that never
-// passed through this publisher.
+// semantics.
 type Update struct {
 	Domain kv.Domain
 	Key    []byte
 	Value  []byte
 	Step   kv.Step
-	TxNum  uint64
 }
 
 // Publisher is the mutation capability for canonical state. Normal readers
@@ -399,15 +402,16 @@ func (p *Publication) Abort() {
 }
 
 // Publish applies updates from a successful database transaction and exposes
-// generation as one complete cache snapshot. The caller must invoke it
-// only after the database commit, so a visible cache generation is never ahead
-// of durable state.
+// generation as one complete cache snapshot. txNumEnd is the exclusive end of
+// canonical execution covered by that commit across every state domain. The
+// caller must invoke Publish only after the database commit, so a visible cache
+// generation is never ahead of durable state.
 //
 // A forward commit can retain entries that were not updated because they still
 // have the same value in the new state. Canonical unwind sets clear because its
 // callbacks do not enumerate every value or file-coverage claim that may belong
 // to the discarded fork.
-func (p *Publication) Publish(generation Generation, updates []Update, clear bool) {
+func (p *Publication) Publish(generation Generation, txNumEnd uint64, updates []Update, clear bool) {
 	if p == nil || p.c == nil {
 		return
 	}
@@ -415,6 +419,7 @@ func (p *Publication) Publish(generation Generation, updates []Update, clear boo
 		if clear {
 			p.c.resetProvenanceAndClearLocked()
 		}
+		p.c.coverCanonicalStateLocked(txNumEnd)
 		for i := range updates {
 			p.c.applyLocked(updates[i])
 		}

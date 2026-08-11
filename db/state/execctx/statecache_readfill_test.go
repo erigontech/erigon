@@ -200,7 +200,7 @@ func TestReadFill_UnwindDetachesWithoutRevokingStateCache(t *testing.T) {
 	sc := newSmallStateCache()
 	key, _, v2, diffs := twoStepRows(t, db, sc)
 	generation := currentStateCacheGeneration(t, db)
-	sc.Publisher().Begin().Publish(generation, nil, true)
+	sc.Publisher().Begin().Publish(generation, 0, nil, true)
 	durableView := sc.View(generation)
 	sentinelKey := make([]byte, 20)
 	sentinelKey[0] = 0xdd
@@ -297,7 +297,7 @@ func TestCodeHashFill_UnwindDetachesWithoutRevokingStateCache(t *testing.T) {
 	require.NoError(t, sd.DomainPut(kv.AccountsDomain, rwTx, key, value, 20, nil))
 	require.NoError(t, sd.Commit(ctx, rwTx))
 	generation := currentStateCacheGeneration(t, db)
-	sc.Publisher().Begin().Publish(generation, nil, true)
+	sc.Publisher().Begin().Publish(generation, 0, nil, true)
 	durableView := sc.View(generation)
 	sentinelKey := make([]byte, 20)
 	sentinelKey[0] = 0xee
