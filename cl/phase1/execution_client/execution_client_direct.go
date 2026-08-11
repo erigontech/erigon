@@ -126,8 +126,14 @@ func (cc *ExecutionClientDirect) NewPayload(
 	return PayloadStatusNone, errors.New("unexpected status")
 }
 
-// ErrForkChoiceUpdateBusy reports that the execution layer never adopted the requested head.
-var ErrForkChoiceUpdateBusy = errors.New("execution layer busy, forkchoice not adopted")
+// ErrForkChoiceNotAdopted reports that the execution layer did not adopt the requested head, so
+// there is nothing to build on.
+var ErrForkChoiceNotAdopted = errors.New("execution layer did not adopt forkchoice head")
+
+const (
+	forkChoiceBusyAttempts = 30
+	forkChoiceBusyDelay    = 200 * time.Millisecond
+)
 
 func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized, safe, head common.Hash, attr *engine_types.PayloadAttributes, _ clparams.StateVersion) ([]byte, error) {
 	status, _, _, err := cc.chainRW.UpdateForkChoice(ctx, head, safe, finalized)
@@ -143,11 +149,20 @@ func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized
 	if attr == nil {
 		return nil, nil
 	}
-	// A busy update means the execution layer never adopted this head. Assembling anyway
-	// builds on the wrong parent, and the timestamp dedup then pins that dead payload id for
-	// the rest of the slot, so every later getPayload fails.
-	if status == execmodule.ExecutionStatusBusy {
-		return nil, ErrForkChoiceUpdateBusy
+	// Only assemble once the execution layer has actually adopted the head. Building on a head it
+	// never took pins a payload id that can never be served, because the timestamp dedup then hands
+	// that dead id back for the rest of the slot. Busy is transient - the update continues on the
+	// module's own context - so wait for it to settle rather than giving up on the slot.
+	status, err = awaitForkChoiceAdopted(ctx, status, forkChoiceBusyAttempts, forkChoiceBusyDelay,
+		func(ctx context.Context) (execmodule.ExecutionStatus, error) {
+			retried, _, _, retryErr := cc.chainRW.UpdateForkChoice(ctx, head, safe, finalized)
+			return retried, retryErr
+		})
+	if err != nil {
+		return nil, err
+	}
+	if status != execmodule.ExecutionStatusSuccess {
+		return nil, fmt.Errorf("%w: status %d", ErrForkChoiceNotAdopted, status)
 	}
 	// Retry AssembleBlock if the EL is busy (semaphore contention with
 	// fork choice commits). This is common in single-process dev mode
@@ -161,6 +176,31 @@ func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized
 	}
 	binary.LittleEndian.PutUint64(idBytes, id)
 	return idBytes, nil
+}
+
+// awaitForkChoiceAdopted retries while the execution layer reports contention. The update itself
+// continues on the module's own context, so a later attempt observes it settle instead of starting
+// fresh work; giving up immediately would abandon a proposal over a transient condition.
+func awaitForkChoiceAdopted(
+	ctx context.Context,
+	status execmodule.ExecutionStatus,
+	attempts int,
+	delay time.Duration,
+	update func(context.Context) (execmodule.ExecutionStatus, error),
+) (execmodule.ExecutionStatus, error) {
+	for attempt := 0; status == execmodule.ExecutionStatusBusy && attempt < attempts; attempt++ {
+		select {
+		case <-ctx.Done():
+			return status, ctx.Err()
+		case <-time.After(delay):
+		}
+		retried, err := update(ctx)
+		if err != nil {
+			return status, fmt.Errorf("execution Client RPC failed to retrieve ForkChoiceUpdate response, err: %w", err)
+		}
+		status = retried
+	}
+	return status, nil
 }
 
 func retryAssembleBlock(ctx context.Context, attempts int, delay time.Duration, assemble func(context.Context) (uint64, error)) (uint64, error) {

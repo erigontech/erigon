@@ -193,7 +193,7 @@ func isExpectedPreparationSkip(err error) bool {
 		errors.Is(err, errNoPayloadID) ||
 		errors.Is(err, errHeadTooFarBack) ||
 		errors.Is(err, errPreparationHeadChanged) ||
-		errors.Is(err, execution_client.ErrForkChoiceUpdateBusy) ||
+		errors.Is(err, execution_client.ErrForkChoiceNotAdopted) ||
 		errors.Is(err, context.DeadlineExceeded) ||
 		errors.Is(err, context.Canceled) ||
 		errors.Is(err, synced_data.ErrNotSynced)
