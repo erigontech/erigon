@@ -124,7 +124,7 @@ func newObject(db *IntraBlockState, address accounts.Address, data, original *ac
 	return so
 }
 
-// reset clears every per-use field, leaving the storage maps allocated.
+// reset clears every per-use field, keeping any storage map already allocated.
 func (so *stateObject) reset() {
 	so.db = nil
 	so.address = accounts.NilAddress

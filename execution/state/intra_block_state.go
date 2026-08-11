@@ -2057,7 +2057,7 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 				if destructed || err != nil {
 					sdb.finalizeProvisionalAddressRead(addr)
 					if !sdb.noMaterialize {
-						so := stateObjectPool.Get().(*stateObject)
+						so := sdb.allocStateObject()
 						so.db = sdb
 						so.address = addr
 						so.selfdestructed = destructed
@@ -2102,7 +2102,7 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 			}
 			if !localResurrected {
 				if !sdb.noMaterialize {
-					so := stateObjectPool.Get().(*stateObject)
+					so := sdb.allocStateObject()
 					so.db = sdb
 					so.address = addr
 					so.selfdestructed = true

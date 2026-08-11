@@ -40,6 +40,9 @@ func (a *stateObjectArena) alloc() *stateObject {
 		return nil
 	}
 	so := &a.slabs[a.slab][a.idx]
+	// Tagged on hand-out, not on slab creation: reset() must not be able to drop
+	// the tag, or release() would hand a live slot to the shared pool.
+	so.arena = true
 	a.idx++
 	if a.idx == arenaSlabSize {
 		a.slab++
@@ -52,11 +55,7 @@ func (a *stateObjectArena) grow() bool {
 	if len(a.slabs) == arenaMaxSlabs {
 		return false
 	}
-	slab := new([arenaSlabSize]stateObject)
-	for i := range slab {
-		slab[i].arena = true
-	}
-	a.slabs = append(a.slabs, slab)
+	a.slabs = append(a.slabs, new([arenaSlabSize]stateObject))
 	return true
 }
 
