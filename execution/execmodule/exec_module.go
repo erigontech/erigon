@@ -196,9 +196,8 @@ type ExecModule struct {
 	// Block building
 	nextPayloadId       uint64
 	builderFunc         builder.BlockBuilderFunc
-	builders            map[uint64]*builder.BlockBuilder
+	builders            map[uint64]*builderEntry
 	buildersByTimestamp map[uint64]uint64
-	builderParameters   map[uint64]*builder.Parameters
 
 	// Changes accumulator
 	hook  *stageloop.Hook
@@ -267,9 +266,8 @@ func NewExecModule(
 		logger:                  logger,
 		forkValidator:           forkValidator,
 		pipelineExecutor:        pipelineExecutor,
-		builders:                make(map[uint64]*builder.BlockBuilder),
+		builders:                make(map[uint64]*builderEntry),
 		buildersByTimestamp:     make(map[uint64]uint64),
-		builderParameters:       make(map[uint64]*builder.Parameters),
 		builderFunc:             builderFunc,
 		config:                  config,
 		semaphore:               semaphore.NewWeighted(1),

@@ -211,10 +211,10 @@ func attestationDue(cfg *clparams.BeaconChainConfig, stateVersion clparams.State
 // computeBlockBuilderWindow uses the earlier collection window only for a sufficiently warmed builder.
 func computeBlockBuilderWindow(now, slotStart time.Time, cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion, prepared bool) blockBuilderWindow {
 	due := attestationDue(cfg, stateVersion)
-	pollUntil := slotStart.Add(due - due/payloadPublicationDivisor)
+	pollUntil := slotStart.Add(unpreparedGrabOffset(due))
 	firstGetAt := pollUntil.Add(-minPayloadPollingWindow)
 	if prepared {
-		firstGetAt = slotStart.Add(due / payloadPublicationDivisor).Add(-minPayloadPollingWindow)
+		firstGetAt = slotStart.Add(preparedGrabOffset(due)).Add(-minPayloadPollingWindow)
 	}
 	if firstGetAt.Before(now) {
 		firstGetAt = now
@@ -228,9 +228,20 @@ func computeBlockBuilderWindow(now, slotStart time.Time, cfg *clparams.BeaconCha
 	}
 }
 
+// unpreparedGrabOffset is when production starts polling for a payload it did not prime, and
+// preparedGrabOffset is when it may start for one it did. Their difference is the warm-up a
+// primed builder must already have, so the two paths give a builder the same total build time.
+func unpreparedGrabOffset(due time.Duration) time.Duration {
+	return due - due/payloadPublicationDivisor
+}
+
+func preparedGrabOffset(due time.Duration) time.Duration {
+	return due / payloadPublicationDivisor
+}
+
 func preparedPayloadMinimumAge(cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion) time.Duration {
 	due := attestationDue(cfg, stateVersion)
-	return max(due-2*due/payloadPublicationDivisor, 0)
+	return max(unpreparedGrabOffset(due)-preparedGrabOffset(due), 0)
 }
 
 func payloadAttributesForVersion(
@@ -1004,7 +1015,13 @@ func (a *ApiHandler) produceBeaconBody(
 			log.Info("BlockProduction: ForkChoiceUpdate&GetPayload took", "duration", time.Since(start))
 		}()
 		retryTime := 10 * time.Millisecond
-		feeRecipient, _ := a.validatorParams.GetFeeRecipient(proposerIndex)
+		feeRecipient, registered := a.validatorParams.GetFeeRecipient(proposerIndex)
+		if !registered {
+			// Preparation treats an unregistered proposer as someone else's slot; production
+			// still builds, so make the zero-address fallback visible rather than silent.
+			log.Warn("BlockProduction: no fee recipient registered for proposer, using zero address",
+				"proposer", proposerIndex)
+		}
 		fcuHead, fcuSafeHash, fcuFinalizedHash := head, safeHash, finalizedHash
 		var attrs *engine_types.PayloadAttributes
 		if stateVersion.Before(clparams.GloasVersion) {

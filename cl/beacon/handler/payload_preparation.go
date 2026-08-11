@@ -125,8 +125,15 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 
 		targetSlot := a.ethClock.GetCurrentSlot() + 1
 		stateVersion := a.beaconChainCfg.GetCurrentStateVersion(targetSlot / a.beaconChainCfg.SlotsPerEpoch)
-		if stateVersion.AfterOrEqual(clparams.GloasVersion) {
+		if preparationRetired(stateVersion) {
 			return
+		}
+		// Before genesis the current slot clamps to zero, so the next slot can be arbitrarily
+		// far off. A builder primed that early freezes at its own cap long before the slot and
+		// production would then reuse the stale payload, so leave those slots unprimed.
+		slotStart := a.ethClock.GetSlotTime(targetSlot)
+		if time.Until(slotStart) > maxPreparationLead(a.beaconChainCfg) {
+			continue
 		}
 		selectedRoot, _, selected := a.syncedData.SelectedHead()
 		if !selected {
@@ -145,7 +152,7 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 		if !shouldPreparePayloadVersion(stateVersion) {
 			continue
 		}
-		prepareCtx, cancel := context.WithDeadline(ctx, a.ethClock.GetSlotTime(targetSlot))
+		prepareCtx, cancel := context.WithDeadline(ctx, slotStart)
 		head, err := a.preparePayloadFor(prepareCtx, targetSlot)
 		cancel()
 		if err != nil {
@@ -164,8 +171,19 @@ func shouldPrepare(targetSlot, primedSlot uint64, head, primedHead common.Hash) 
 	return targetSlot != primedSlot || head != primedHead
 }
 
+// maxPreparationLead bounds how far ahead of a slot priming is worthwhile.
+func maxPreparationLead(cfg *clparams.BeaconChainConfig) time.Duration {
+	return 2 * time.Duration(cfg.SecondsPerSlot) * time.Second
+}
+
+// preparationRetired is the single authority for the fork after which builders gossip bids
+// instead of being primed, so the loop and the per-slot check cannot drift apart.
+func preparationRetired(version clparams.StateVersion) bool {
+	return version.AfterOrEqual(clparams.GloasVersion)
+}
+
 func shouldPreparePayloadVersion(version clparams.StateVersion) bool {
-	return version.AfterOrEqual(clparams.BellatrixVersion) && version.Before(clparams.GloasVersion)
+	return version.AfterOrEqual(clparams.BellatrixVersion) && !preparationRetired(version)
 }
 
 // isExpectedPreparationSkip reports whether there was simply nothing to prepare, as opposed to a

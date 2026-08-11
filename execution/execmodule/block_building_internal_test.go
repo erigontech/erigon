@@ -46,7 +46,7 @@ func TestAssembleBlockSupersedesBuilderForSameTimestamp(t *testing.T) {
 		semaphore: semaphore.NewWeighted(1),
 		config:    &chain.Config{},
 		logger:    log.Root(),
-		builders:  map[uint64]*builder.BlockBuilder{},
+		builders:  map[uint64]*builderEntry{},
 		builderFunc: func(params *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
 			started <- runningBuilder{id: params.PayloadId, interrupt: interrupt}
 			for !interrupt.Load() {
@@ -56,9 +56,9 @@ func TestAssembleBlockSupersedesBuilderForSameTimestamp(t *testing.T) {
 		},
 	}
 	t.Cleanup(func() {
-		for _, blockBuilder := range module.builders {
-			if blockBuilder != nil {
-				_, _ = blockBuilder.Stop(context.Background())
+		for _, entry := range module.builders {
+			if entry != nil && entry.builder != nil {
+				_, _ = entry.builder.Stop(context.Background())
 			}
 		}
 	})
@@ -117,7 +117,7 @@ func TestAssembleBlockSupersedesBuilderForSameTimestamp(t *testing.T) {
 	require.Eventually(t, adjacent.interrupt.Load, time.Second, time.Millisecond)
 	require.NotContains(t, module.builders, adjacentID)
 	require.NotContains(t, module.buildersByTimestamp, uint64(101))
-	require.NotContains(t, module.builderParameters, adjacentID)
+	require.NotContains(t, module.builders, adjacentID)
 }
 
 func TestSupersededPayloadIDStopsBeingRetrievable(t *testing.T) {
@@ -127,7 +127,7 @@ func TestSupersededPayloadIDStopsBeingRetrievable(t *testing.T) {
 		logger:    log.Root(),
 		config:    &chain.Config{},
 		semaphore: semaphore.NewWeighted(1),
-		builders:  map[uint64]*builder.BlockBuilder{},
+		builders:  map[uint64]*builderEntry{},
 		builderFunc: func(params *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
 			started <- struct{}{}
 			<-release
@@ -136,9 +136,9 @@ func TestSupersededPayloadIDStopsBeingRetrievable(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		close(release)
-		for _, blockBuilder := range module.builders {
-			if blockBuilder != nil {
-				_, _ = blockBuilder.Stop(context.Background())
+		for _, entry := range module.builders {
+			if entry != nil && entry.builder != nil {
+				_, _ = entry.builder.Stop(context.Background())
 			}
 		}
 	})
@@ -154,7 +154,7 @@ func TestSupersededPayloadIDStopsBeingRetrievable(t *testing.T) {
 	// A cancelled builder still holds whatever it had packed; serving that would mean
 	// proposing a near-empty block, so the superseded id must read as unknown instead.
 	require.NotContains(t, module.builders, first.PayloadID)
-	require.NotContains(t, module.builderParameters, first.PayloadID)
+	require.NotContains(t, module.builders, first.PayloadID)
 
 	assembled, err := module.GetAssembledBlock(t.Context(), first.PayloadID)
 	require.NoError(t, err)
@@ -172,7 +172,7 @@ func TestAssembleBlockOwnsParameters(t *testing.T) {
 		semaphore: semaphore.NewWeighted(1),
 		config:    &chain.Config{},
 		logger:    log.Root(),
-		builders:  map[uint64]*builder.BlockBuilder{},
+		builders:  map[uint64]*builderEntry{},
 		builderFunc: func(params *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
 			<-readParameters
 			observed <- observedParameters{parentRoot: *params.ParentBeaconBlockRoot, extraData: params.ExtraData[0]}
@@ -206,7 +206,7 @@ func TestAssembleBlockOwnsParameters(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, result.PayloadID, duplicate.PayloadID)
-	_, _ = module.builders[result.PayloadID].Stop(context.Background())
+	_, _ = module.builders[result.PayloadID].builder.Stop(context.Background())
 }
 
 func TestAssembleBlockCanceledContextDoesNotSupersedeBuilder(t *testing.T) {
@@ -215,7 +215,7 @@ func TestAssembleBlockCanceledContextDoesNotSupersedeBuilder(t *testing.T) {
 		semaphore: semaphore.NewWeighted(1),
 		config:    &chain.Config{},
 		logger:    log.Root(),
-		builders:  map[uint64]*builder.BlockBuilder{},
+		builders:  map[uint64]*builderEntry{},
 		builderFunc: func(_ *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
 			started <- interrupt
 			for !interrupt.Load() {
@@ -228,7 +228,7 @@ func TestAssembleBlockCanceledContextDoesNotSupersedeBuilder(t *testing.T) {
 	require.NoError(t, err)
 	interrupt := <-started
 	t.Cleanup(func() {
-		_, _ = module.builders[result.PayloadID].Stop(context.Background())
+		_, _ = module.builders[result.PayloadID].builder.Stop(context.Background())
 	})
 
 	ctx, cancel := context.WithCancel(t.Context())

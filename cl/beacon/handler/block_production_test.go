@@ -871,7 +871,7 @@ func TestPreparePayloadLoopRunsImmediatelyWithSlotDeadline(t *testing.T) {
 	require.NoError(t, err)
 	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
 
-	slotStart := time.Now().Add(time.Minute)
+	slotStart := time.Now().Add(6 * time.Second)
 	clock := eth_clock.NewMockEthereumClock(ctrl)
 	clock.EXPECT().GetCurrentSlot().Return(targetSlot - 1)
 	clock.EXPECT().GetSlotTime(targetSlot).Return(slotStart)
@@ -890,6 +890,31 @@ func TestPreparePayloadLoopRunsImmediatelyWithSlotDeadline(t *testing.T) {
 	handler.engine = engine
 
 	handler.preparePayloadLoop(ctx)
+}
+
+func TestPreparePayloadLoopSkipsSlotsTooFarAhead(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, _, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	targetSlot := postState.Slot() + 1
+	proposerIndex, err := postState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
+
+	// Before genesis the current slot clamps to zero, so the next slot can be hours out.
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetCurrentSlot().Return(targetSlot - 1).AnyTimes()
+	clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(time.Hour)).AnyTimes()
+	handler.ethClock = clock
+
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().SupportInsertion().Return(true)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+	handler.engine = engine
+
+	ctx, cancel := context.WithTimeout(t.Context(), 250*time.Millisecond)
+	defer cancel()
+	handler.StartPayloadPreparation(ctx)
+	<-ctx.Done()
 }
 
 func TestPreparePayloadForSendsCompleteForkChoiceUpdate(t *testing.T) {

@@ -41,7 +41,10 @@ func (e *ExecModule) checkWithdrawalsPresence(time uint64, withdrawals []*types.
 	return nil
 }
 
-// buildDuration spans the target slot for early requests while bounding late and implausibly future requests.
+// buildDuration spans the target slot for early requests while bounding late and implausibly
+// future requests. A consensus layer may send attributes well ahead of the slot and then call
+// getPayload against the cached id without sending fresh ones, so a builder that stopped before
+// the slot would hand back a payload missing every transaction that arrived in between.
 func buildDuration(payloadTimestamp uint64, now time.Time, secondsPerSlot uint64) time.Duration {
 	slot := time.Duration(secondsPerSlot) * time.Second
 	// Reject beyond the cap horizon before converting: a large enough timestamp overflows
@@ -84,6 +87,14 @@ func cloneBuilderParameters(params *builder.Parameters) *builder.Parameters {
 	return &cloned
 }
 
+// builderEntry keeps a builder with the parameters and timestamp it was created for, so the
+// three cannot drift apart and eviction can drop the timestamp index without scanning it.
+type builderEntry struct {
+	builder   *builder.BlockBuilder
+	params    *builder.Parameters
+	timestamp uint64
+}
+
 func (e *ExecModule) evictOldBuilders() {
 	ids := common.SortedKeys(e.builders)
 
@@ -91,47 +102,45 @@ func (e *ExecModule) evictOldBuilders() {
 	for i := 0; i <= len(e.builders)-engine_helpers.MaxBuilders; i++ {
 		id := ids[i]
 		if old := e.builders[id]; old != nil {
-			old.Cancel()
-		}
-		delete(e.builders, id)
-		delete(e.builderParameters, id)
-		for timestamp, builderID := range e.buildersByTimestamp {
-			if builderID == id {
-				delete(e.buildersByTimestamp, timestamp)
+			if old.builder != nil {
+				old.builder.Cancel()
+			}
+			if e.buildersByTimestamp[old.timestamp] == id {
+				delete(e.buildersByTimestamp, old.timestamp)
 			}
 		}
+		delete(e.builders, id)
 	}
 }
 
 func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Parameters) (AssembleBlockResult, error) {
+	// Cancellation is checked first so an expired request reports why it stopped instead of
+	// masquerading as contention, which callers retry.
+	if err := ctx.Err(); err != nil {
+		return AssembleBlockResult{}, err
+	}
 	if !e.semaphore.TryAcquire(1) {
 		return AssembleBlockResult{Busy: true}, nil
 	}
 	defer e.semaphore.Release(1)
-	if err := ctx.Err(); err != nil {
-		return AssembleBlockResult{}, err
-	}
 
 	if err := e.checkWithdrawalsPresence(params.Timestamp, params.Withdrawals); err != nil {
 		return AssembleBlockResult{}, err
 	}
 
 	if previousID, ok := e.buildersByTimestamp[params.Timestamp]; ok {
-		candidate := cloneBuilderParameters(params)
-		candidate.PayloadId = previousID
 		params.PayloadId = previousID
-		if reflect.DeepEqual(e.builderParameters[previousID], candidate) {
+		if previous := e.builders[previousID]; previous != nil && reflect.DeepEqual(previous.params, params) {
 			e.logger.Info("[ForkChoiceUpdated] duplicate build request")
 			return AssembleBlockResult{PayloadID: previousID}, nil
 		}
-		if previous := e.builders[previousID]; previous != nil {
-			previous.Cancel()
+		if previous := e.builders[previousID]; previous != nil && previous.builder != nil {
+			previous.builder.Cancel()
 		}
 		// Cancel freezes a builder where it stands, so a superseded id must stop being
 		// retrievable: otherwise GetAssembledBlock hands back whatever it had packed at
 		// that instant, which is near-empty when the supersede came early.
 		delete(e.builders, previousID)
-		delete(e.builderParameters, previousID)
 	}
 
 	// Initiate payload building
@@ -141,15 +150,15 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 	params.PayloadId = e.nextPayloadId
 	ownedParams := cloneBuilderParameters(params)
 
-	e.builders[e.nextPayloadId] = builder.NewBlockBuilder(e.builderFunc, ownedParams, buildDuration(params.Timestamp, time.Now(), e.config.SecondsPerSlot()))
 	if e.buildersByTimestamp == nil {
 		e.buildersByTimestamp = make(map[uint64]uint64)
 	}
-	if e.builderParameters == nil {
-		e.builderParameters = make(map[uint64]*builder.Parameters)
+	e.builders[e.nextPayloadId] = &builderEntry{
+		builder:   builder.NewBlockBuilder(e.builderFunc, ownedParams, buildDuration(params.Timestamp, time.Now(), e.config.SecondsPerSlot())),
+		params:    ownedParams,
+		timestamp: params.Timestamp,
 	}
 	e.buildersByTimestamp[params.Timestamp] = e.nextPayloadId
-	e.builderParameters[e.nextPayloadId] = ownedParams
 	e.logger.Info("[ForkChoiceUpdated] BlockBuilder added", "payload", e.nextPayloadId)
 
 	return AssembleBlockResult{PayloadID: e.nextPayloadId}, nil
@@ -172,16 +181,19 @@ func blockValue(br *types.BlockWithReceipts, baseFee *uint256.Int) *uint256.Int 
 }
 
 func (e *ExecModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (AssembledBlockResult, error) {
+	if err := ctx.Err(); err != nil {
+		return AssembledBlockResult{}, err
+	}
 	if !e.semaphore.TryAcquire(1) {
 		return AssembledBlockResult{Busy: true}, nil
 	}
 	defer e.semaphore.Release(1)
 
-	bldr, ok := e.builders[payloadID]
-	if !ok {
+	entry, ok := e.builders[payloadID]
+	if !ok || entry.builder == nil {
 		return AssembledBlockResult{}, nil
 	}
-	blockWithReceipts, err := bldr.Stop(ctx)
+	blockWithReceipts, err := entry.builder.Stop(ctx)
 	if err != nil {
 		e.logger.Error("Failed to build PoS block", "err", err)
 		return AssembledBlockResult{}, err
