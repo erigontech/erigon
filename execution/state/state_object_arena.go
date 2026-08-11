@@ -52,6 +52,9 @@ func (a *stateObjectArena) alloc() *stateObject {
 	return so
 }
 
+// empty reports whether no slot has been drawn since the last rewind.
+func (a *stateObjectArena) empty() bool { return a.slab == 0 && a.idx == 0 }
+
 func (a *stateObjectArena) grow() bool {
 	if len(a.slabs) == arenaMaxSlabs {
 		return false

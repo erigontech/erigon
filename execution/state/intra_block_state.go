@@ -2828,10 +2828,10 @@ func (sdb *IntraBlockState) clearJournalAndRefund() {
 	sdb.journal.Reset()
 	sdb.revisions.reset()
 	sdb.refund = uint64(0)
-	if dbg.AssertEnabled && sdb.journal.length() != 0 {
-		// A journal entry's prevObj can name an arena slot, so the rewind is only
-		// safe once the entries are gone.
-		panic("stateObjectArena rewound before the journal was cleared")
+	if dbg.AssertEnabled && !sdb.noMaterialize && !sdb.stateObjectArena.empty() {
+		// Slots are rewound per transaction, so only the path that caches nothing
+		// may draw them.
+		panic("stateObjectArena not empty with noMaterialize=false")
 	}
 	sdb.stateObjectArena.reset() // same lifetime with `journal`
 }

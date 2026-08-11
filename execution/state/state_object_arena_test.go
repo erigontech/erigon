@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/race"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -223,6 +224,26 @@ func TestStateObjectArenaRecyclesSlots(t *testing.T) {
 	assert.Nil(t, reused.code.Bytes)
 	assert.Nil(t, reused.dirtyStorage, "hand-out re-establishes the slot, dropping the map it held")
 	assert.True(t, reused.arena, "hand-out re-tags the slot")
+}
+
+// TestArenaDrawOutsideNoMaterializeAsserts pins the mutual exclusion: arena slots
+// are rewound per transaction, so a path that caches its objects for the block
+// must never hold one.
+func TestArenaDrawOutsideNoMaterializeAsserts(t *testing.T) {
+	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
+	dbg.AssertEnabled = true
+
+	ibs, _ := newNoMaterializeIBS(&emptyReader{})
+	defer ibs.Close()
+
+	ibs.SetNoMaterialize(true)
+	require.True(t, ibs.allocStateObject().arena)
+	require.NotPanics(t, ibs.clearJournalAndRefund, "drawn under noMaterialize, rewinds cleanly")
+
+	ibs.SetNoMaterialize(true)
+	require.True(t, ibs.allocStateObject().arena)
+	ibs.SetNoMaterialize(false) // mode flipped without a rewind
+	require.Panics(t, ibs.clearJournalAndRefund)
 }
 
 // TestStateObjectArenaFallsBackToHeap pins that the arena stops growing at its
