@@ -31,22 +31,17 @@ import (
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
-// The tracing methods resolve and replay on the committed view, which has no
-// pending block, so "pending" must be rejected rather than silently answered
-// for the latest executed block.
-func TestTracingRejectsPendingTag(t *testing.T) {
+// The methods that execute a call on top of a resolved state reject "pending":
+// they replay on the committed view, which holds no pending block, so accepting
+// the tag would run the call against the latest executed state and report it as
+// pending. go-ethereum answers the same way.
+func TestTraceCallRejectsPendingTag(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ctx := context.Background()
-	pending := rpc.PendingBlockNumber
-	pendingNrOrHash := rpc.BlockNumberOrHashWithNumber(pending)
+	pendingNrOrHash := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
 
 	debugAPI := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
 	traceAPI := newTraceApiForTest(m)
-
-	t.Run("debug_traceBlockByNumber", func(t *testing.T) {
-		err := debugAPI.TraceBlockByNumber(ctx, pending, nil, jsonstream.New(io.Discard))
-		require.ErrorIs(t, err, errPendingNotSupported)
-	})
 
 	t.Run("debug_traceCall", func(t *testing.T) {
 		err := debugAPI.TraceCall(ctx, ethapi.CallArgs{}, pendingNrOrHash, nil, jsonstream.New(io.Discard))
@@ -55,16 +50,6 @@ func TestTracingRejectsPendingTag(t *testing.T) {
 
 	t.Run("debug_traceCallMany", func(t *testing.T) {
 		err := debugAPI.TraceCallMany(ctx, nil, StateContext{BlockNumber: pendingNrOrHash}, nil, jsonstream.New(io.Discard))
-		require.ErrorIs(t, err, errPendingNotSupported)
-	})
-
-	t.Run("trace_block", func(t *testing.T) {
-		_, err := traceAPI.Block(ctx, pending, nil, nil)
-		require.ErrorIs(t, err, errPendingNotSupported)
-	})
-
-	t.Run("trace_replayBlockTransactions", func(t *testing.T) {
-		_, err := traceAPI.ReplayBlockTransactions(ctx, pendingNrOrHash, []string{TraceTypeTrace}, nil, nil)
 		require.ErrorIs(t, err, errPendingNotSupported)
 	})
 
@@ -77,4 +62,25 @@ func TestTracingRejectsPendingTag(t *testing.T) {
 		_, err := traceAPI.CallMany(ctx, json.RawMessage("[]"), &pendingNrOrHash, nil)
 		require.ErrorIs(t, err, errPendingNotSupported)
 	})
+}
+
+// Block tracing keeps accepting the tag: go-ethereum traces the pending block
+// rather than rejecting it, and the RPC integration suite pins that a pending
+// debug_traceBlockByNumber answers instead of erroring.
+func TestTraceBlockAcceptsPendingTag(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx := context.Background()
+	pending := rpc.PendingBlockNumber
+
+	debugAPI := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+	traceAPI := newTraceApiForTest(m)
+
+	err := debugAPI.TraceBlockByNumber(ctx, pending, nil, jsonstream.New(io.Discard))
+	require.NotErrorIs(t, err, errPendingNotSupported)
+
+	_, err = traceAPI.Block(ctx, pending, nil, nil)
+	require.NotErrorIs(t, err, errPendingNotSupported)
+
+	_, err = traceAPI.ReplayBlockTransactions(ctx, rpc.BlockNumberOrHashWithNumber(pending), []string{TraceTypeTrace}, nil, nil)
+	require.NotErrorIs(t, err, errPendingNotSupported)
 }

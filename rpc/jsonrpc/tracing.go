@@ -73,9 +73,6 @@ func (api *DebugAPIImpl) TraceBlockByHash(ctx context.Context, hash common.Hash,
 }
 
 func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error {
-	if err := rejectPending(blockNrOrHash); err != nil {
-		return err
-	}
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
