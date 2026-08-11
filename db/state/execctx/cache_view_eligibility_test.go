@@ -34,18 +34,18 @@ func (s *exactDomainViewStub) HasExactDomainVisibleEnd(domain kv.Domain) bool {
 	return s.exact[domain]
 }
 
-func TestCacheViewEligibleUsesExactViewAvailability(t *testing.T) {
+func TestHasExactVisibleEndsUsesViewAvailability(t *testing.T) {
 	exact := map[kv.Domain]bool{
 		kv.AccountsDomain: true,
 		kv.StorageDomain:  true,
 		kv.CodeDomain:     true,
 	}
 	debug := &exactDomainViewStub{exact: exact}
-	require.True(t, cacheViewEligible(debug, kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain))
+	require.True(t, hasExactVisibleEnds(debug, kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain))
 	require.Equal(t, []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain}, debug.checked)
 
 	exact[kv.StorageDomain] = false
 	debug.checked = nil
-	require.False(t, cacheViewEligible(debug, kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain))
+	require.False(t, hasExactVisibleEnds(debug, kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain))
 	require.Equal(t, []kv.Domain{kv.AccountsDomain, kv.StorageDomain}, debug.checked)
 }

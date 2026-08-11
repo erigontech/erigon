@@ -798,6 +798,9 @@ func (tx *Tx) HasExactDomainVisibleEnd(domain kv.Domain) bool {
 func (tx *RwTx) HasExactDomainVisibleEnd(domain kv.Domain) bool {
 	return tx.aggtx.HasExactDomainVisibleEnd(domain)
 }
+func (tx *tx) HasCacheableLatestView(domain kv.Domain) bool {
+	return tx.aggtx.HasCacheableLatestView(domain)
+}
 func (tx *Tx) IIProgress(domain kv.InvertedIdx) uint64 {
 	return tx.aggtx.IIProgress(domain, tx.Tx)
 }

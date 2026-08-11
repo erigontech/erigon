@@ -528,6 +528,10 @@ type TemporalDebugTx interface {
 	// HasExactDomainVisibleEnd reports DomainVisibleEnd's ok result without
 	// resolving the bound, which may require a database cursor.
 	HasExactDomainVisibleEnd(domain Domain) bool
+	// HasCacheableLatestView reports whether the state version and visible value
+	// files fully identify GetLatest results. Unlike DomainVisibleEnd, this may be
+	// true when history is disabled.
+	HasCacheableLatestView(domain Domain) bool
 	IIProgress(name InvertedIdx) (txNum uint64)
 	StepSize() uint64
 	// Retire retires frozen history files entirely below their

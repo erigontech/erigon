@@ -2779,6 +2779,12 @@ func (at *AggregatorRoTx) HasExactDomainVisibleEnd(name kv.Domain) bool {
 	return !d.d.HistoryDisabled && d.files.EndTxNum() >= d.ht.iit.files.EndTxNum()
 }
 
+// HasCacheableLatestView accepts history-disabled latest state and otherwise
+// requires the value files to cover history-II.
+func (at *AggregatorRoTx) HasCacheableLatestView(name kv.Domain) bool {
+	return at.d[name].d.HistoryDisabled || at.HasExactDomainVisibleEnd(name)
+}
+
 // DomainVisibleEnd returns the exact combined frontier after verifying that
 // the values files cover history-II.
 func (at *AggregatorRoTx) DomainVisibleEnd(name kv.Domain, tx kv.Tx) (uint64, bool) {

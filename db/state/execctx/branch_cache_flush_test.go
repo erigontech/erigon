@@ -100,6 +100,41 @@ func TestSharedBranchCacheDoesNotRequireVisibilityGuard(t *testing.T) {
 	sd.Close()
 }
 
+func TestBranchCacheReadsWithoutCommitmentHistory(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	db := newTestDb(t, 16)
+	branchCache := commitment.NewBranchCache(64)
+	t.Cleanup(branchCache.Close)
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	require.False(t, roTx.Debug().HasExactDomainVisibleEnd(kv.CommitmentDomain),
+		"the default commitment domain has no historical frontier")
+	require.True(t, roTx.Debug().HasCacheableLatestView(kv.CommitmentDomain),
+		"latest commitment state remains cacheable without history")
+
+	tx := &temporalTxWithAgg{
+		TemporalTx: roTx,
+		agg:        &branchCacheOnlyAgg{branchCache: branchCache},
+	}
+	sd, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+
+	generation := branchGenerationForTx(t, tx)
+	branchCache.Publisher().Initialize(generation)
+	key := []byte{0x0a, 0x0b}
+	value := []byte("cache-only branch")
+	branchCache.View(generation).Fill(key, value, 1)
+
+	got, step, err := sd.GetLatest(kv.CommitmentDomain, tx, key)
+	require.NoError(t, err)
+	require.Equal(t, value, got)
+	require.Equal(t, kv.Step(1), step)
+}
+
 type commitErrorTx struct {
 	kv.TemporalRwTx
 	err error

@@ -123,7 +123,9 @@ func (sd *SharedDomains) cacheViewsFor(tx kv.TemporalTx) cacheViews {
 	if stateView, identityKnown := stateCacheReadViewFor(debug, stateVersion, sd.stateCache); identityKnown {
 		views.state = stateView
 	}
-	if sd.branchCache != nil && cacheViewEligible(debug, kv.CommitmentDomain) {
+	// BranchCache serves only latest state, so disabling history does not make
+	// its pinned database-and-files identity ambiguous.
+	if sd.branchCache != nil && debug.HasCacheableLatestView(kv.CommitmentDomain) {
 		views.branch = sd.branchCache.View(branchCacheGenerationFor(debug, stateVersion))
 	}
 	return views
@@ -148,7 +150,7 @@ func stateCacheReadViewFor(
 	stateVersion uint64,
 	stateCache *cache.StateCache,
 ) (cache.ReadView, bool) {
-	if stateCache == nil || !cacheViewEligible(debug, kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain) {
+	if stateCache == nil || !hasExactVisibleEnds(debug, kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain) {
 		return cache.ReadView{}, false
 	}
 	return stateCache.View(stateCacheGenerationFor(debug, stateVersion)), true
@@ -178,10 +180,10 @@ type exactDomainVisibleEnd interface {
 	HasExactDomainVisibleEnd(domain kv.Domain) bool
 }
 
-// cacheViewEligible checks only whether exact ends are available. Resolving the
+// hasExactVisibleEnds checks only whether exact ends are available. Resolving the
 // ends would open database cursors, but their numeric frontier values are not
 // part of cache identity.
-func cacheViewEligible(debug exactDomainVisibleEnd, domains ...kv.Domain) bool {
+func hasExactVisibleEnds(debug exactDomainVisibleEnd, domains ...kv.Domain) bool {
 	for _, domain := range domains {
 		if !debug.HasExactDomainVisibleEnd(domain) {
 			return false

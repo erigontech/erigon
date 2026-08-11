@@ -259,6 +259,7 @@ func (tx *tx) DomainVisibleEnd(domain kv.Domain) (uint64, bool) {
 	return 0, false
 }
 func (tx *tx) HasExactDomainVisibleEnd(domain kv.Domain) bool { return false }
+func (tx *tx) HasCacheableLatestView(domain kv.Domain) bool   { return false }
 func (tx *tx) GetLatestFromDB(domain kv.Domain, k []byte) (v []byte, step kv.Step, found bool, err error) {
 	panic("not implemented")
 }
