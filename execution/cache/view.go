@@ -52,47 +52,29 @@ func (v ReadView) Get(domain kv.Domain, key []byte) ([]byte, bool) {
 }
 
 func (v ReadView) GetWithStep(domain kv.Domain, key []byte) ([]byte, kv.Step, bool) {
-	if !v.current() {
-		return nil, 0, false
-	}
-	value, step, ok := v.c.getWithStep(domain, key)
-	if !v.current() {
-		return nil, 0, false
-	}
-	return value, step, ok
+	value, step, ok := ReadCurrentWithStep(v.generation, func() ([]byte, uint64, bool) {
+		value, step, ok := v.c.getWithStep(domain, key)
+		return value, uint64(step), ok
+	})
+	return value, kv.Step(step), ok
 }
 
 func (v ReadView) GetCodeByHash(codeHash []byte) ([]byte, bool) {
-	if !v.current() {
-		return nil, false
-	}
-	value, ok := v.c.getCodeByHash(codeHash)
-	if !v.current() {
-		return nil, false
-	}
-	return value, ok
+	return ReadCurrent(v.generation, func() ([]byte, bool) {
+		return v.c.getCodeByHash(codeHash)
+	})
 }
 
 func (v ReadView) GetCodeSizeByHash(codeHash []byte) (int, bool) {
-	if !v.current() {
-		return 0, false
-	}
-	size, ok := v.c.getCodeSizeByHash(codeHash)
-	if !v.current() {
-		return 0, false
-	}
-	return size, ok
+	return ReadCurrent(v.generation, func() (int, bool) {
+		return v.c.getCodeSizeByHash(codeHash)
+	})
 }
 
 func (v ReadView) GetAddrCodeHash(addr []byte) ([32]byte, bool) {
-	if !v.current() {
-		return [32]byte{}, false
-	}
-	hash, ok := v.c.getAddrCodeHash(addr)
-	if !v.current() {
-		return [32]byte{}, false
-	}
-	return hash, ok
+	return ReadCurrent(v.generation, func() ([32]byte, bool) {
+		return v.c.getAddrCodeHash(addr)
+	})
 }
 
 func (v ReadView) canFill() bool {

@@ -95,7 +95,8 @@ type GenerationGate struct {
 	filesKnown bool
 }
 
-// GenerationView is the immutable validity token held by one cache view.
+// GenerationView is the immutable validity token held by one cache view. View
+// constructs it with both fields set or returns the inert zero value.
 type GenerationView struct {
 	gate       *GenerationGate
 	generation *publishedGeneration
@@ -116,6 +117,35 @@ func (g *GenerationGate) View(identity Generation) GenerationView {
 // Current reports whether the generation is still published.
 func (v GenerationView) Current() bool {
 	return v.gate != nil && v.generation != nil && v.gate.current.Load() == v.generation
+}
+
+// ReadCurrent returns a cache lookup only if the view remains published for
+// the whole read. A concurrent publication therefore turns the result into a
+// miss instead of exposing an entry from a mixed generation.
+func ReadCurrent[T any](view GenerationView, read func() (T, bool)) (T, bool) {
+	var zero T
+	if view.gate == nil || view.gate.current.Load() != view.generation {
+		return zero, false
+	}
+	value, ok := read()
+	if view.gate.current.Load() != view.generation {
+		return zero, false
+	}
+	return value, ok
+}
+
+// ReadCurrentWithStep applies the same guard to a lookup that also returns
+// source metadata such as a state step.
+func ReadCurrentWithStep[T any](view GenerationView, read func() (T, uint64, bool)) (T, uint64, bool) {
+	var zeroValue T
+	if view.gate == nil || view.gate.current.Load() != view.generation {
+		return zeroValue, 0, false
+	}
+	value, step, ok := read()
+	if view.gate.current.Load() != view.generation {
+		return zeroValue, 0, false
+	}
+	return value, step, ok
 }
 
 // Admit runs fill only if the view remains current while serialized against

@@ -41,14 +41,9 @@ func (v BranchReadView) current() bool {
 
 // Get returns a branch only while the view remains current.
 func (v BranchReadView) Get(prefix []byte) ([]byte, uint64, bool) {
-	if !v.current() {
-		return nil, 0, false
-	}
-	value, step, ok := v.c.Get(prefix)
-	if !v.current() {
-		return nil, 0, false
-	}
-	return value, step, ok
+	return cache.ReadCurrentWithStep(v.generation, func() ([]byte, uint64, bool) {
+		return v.c.Get(prefix)
+	})
 }
 
 // Fill admits a branch read from the view's database snapshot.
