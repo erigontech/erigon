@@ -203,16 +203,17 @@ func attestationDue(cfg *clparams.BeaconChainConfig, stateVersion clparams.State
 	return time.Duration(cfg.AttestationDueMs(stateVersion.AfterOrEqual(clparams.GloasVersion))) * time.Millisecond
 }
 
-// computeBlockBuilderWindow returns when to first poll for the assembled payload and when to stop,
-// reserving a publication margin before the attestation deadline (see payloadPublicationDivisor).
-func computeBlockBuilderWindow(now, slotStart time.Time, cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion) blockBuilderWindow {
+// computeBlockBuilderWindow uses the earlier collection window only for a sufficiently warmed builder.
+func computeBlockBuilderWindow(now, slotStart time.Time, cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion, prepared bool) blockBuilderWindow {
 	due := attestationDue(cfg, stateVersion)
-	grabBy := slotStart.Add(due - due/payloadPublicationDivisor)
-	firstGetAt := grabBy.Add(-minPayloadPollingWindow)
+	pollUntil := slotStart.Add(unpreparedGrabOffset(due))
+	firstGetAt := pollUntil.Add(-minPayloadPollingWindow)
+	if prepared {
+		firstGetAt = slotStart.Add(preparedGrabOffset(due)).Add(-minPayloadPollingWindow)
+	}
 	if firstGetAt.Before(now) {
 		firstGetAt = now
 	}
-	pollUntil := grabBy
 	if pollUntil.Before(firstGetAt) {
 		pollUntil = firstGetAt
 	}
@@ -220,6 +221,49 @@ func computeBlockBuilderWindow(now, slotStart time.Time, cfg *clparams.BeaconCha
 		firstGetAt: firstGetAt,
 		pollUntil:  pollUntil,
 	}
+}
+
+// unpreparedGrabOffset is when production starts polling for a payload it did not prime, and
+// preparedGrabOffset is when it may start for one it did. Their difference is the warm-up a
+// primed builder must already have, so the two paths give a builder the same total build time.
+func unpreparedGrabOffset(due time.Duration) time.Duration {
+	return due - due/payloadPublicationDivisor
+}
+
+func preparedGrabOffset(due time.Duration) time.Duration {
+	return due / payloadPublicationDivisor
+}
+
+func preparedPayloadMinimumAge(cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion) time.Duration {
+	due := attestationDue(cfg, stateVersion)
+	return max(unpreparedGrabOffset(due)-preparedGrabOffset(due), 0)
+}
+
+func payloadAttributesForVersion(
+	version clparams.StateVersion,
+	timestamp hexutil.Uint64,
+	prevRandao common.Hash,
+	feeRecipient common.Address,
+	withdrawals []*types.Withdrawal,
+	parentRoot *common.Hash,
+	slotNumber, targetGasLimit *hexutil.Uint64,
+) *engine_types.PayloadAttributes {
+	attrs := &engine_types.PayloadAttributes{
+		Timestamp:             timestamp,
+		PrevRandao:            prevRandao,
+		SuggestedFeeRecipient: feeRecipient,
+	}
+	if version.AfterOrEqual(clparams.CapellaVersion) {
+		attrs.Withdrawals = withdrawals
+	}
+	if version.AfterOrEqual(clparams.DenebVersion) {
+		attrs.ParentBeaconBlockRoot = parentRoot
+	}
+	if version.AfterOrEqual(clparams.GloasVersion) {
+		attrs.SlotNumber = slotNumber
+		attrs.TargetGasLimit = targetGasLimit
+	}
+	return attrs
 }
 
 func shouldRetryGetPayload(now, deadline time.Time) bool {
@@ -465,10 +509,6 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		}
 		return nil
 	}); err != nil {
-		return nil, err
-	}
-
-	if err != nil {
 		return nil, err
 	}
 	if baseState == nil {
@@ -944,8 +984,8 @@ func (a *ApiHandler) produceBeaconBody(
 			}
 		}
 	}
-	currEpoch := a.ethClock.GetCurrentEpoch()
-	random := baseState.GetRandaoMixes(currEpoch)
+	targetEpoch := targetSlot / a.beaconChainCfg.SlotsPerEpoch
+	random := baseState.GetRandaoMixes(targetEpoch)
 
 	var executionPayload *cltypes.Eth1Block
 	var executionValue uint64
@@ -966,7 +1006,23 @@ func (a *ApiHandler) produceBeaconBody(
 			log.Info("BlockProduction: ForkChoiceUpdate&GetPayload took", "duration", time.Since(start))
 		}()
 		retryTime := 10 * time.Millisecond
-		feeRecipient, _ := a.validatorParams.GetFeeRecipient(proposerIndex)
+		feeRecipient, registered := a.validatorParams.GetFeeRecipient(proposerIndex)
+		if !registered {
+			// Preparation treats an unregistered proposer as someone else's slot; production
+			// still builds, so make the zero-address fallback visible rather than silent.
+			log.Warn("BlockProduction: no fee recipient registered for proposer, using zero address",
+				"proposer", proposerIndex)
+		}
+		fcuHead, fcuSafeHash, fcuFinalizedHash := head, safeHash, finalizedHash
+		var attrs *engine_types.PayloadAttributes
+		if stateVersion.Before(clparams.GloasVersion) {
+			var err error
+			fcuHead, fcuSafeHash, fcuFinalizedHash, attrs, err = a.preGloasForkChoiceInputs(baseState, baseBlockRoot, targetSlot, feeRecipient, stateVersion)
+			if err != nil {
+				log.Error("BlockProduction: build forkchoice inputs failed", "err", err)
+				return
+			}
+		}
 		var withdrawals []*types.Withdrawal
 		if gloasWithdrawalsState != nil {
 			// GLOAS FULL: compute withdrawals from the state copy with parent payload applied
@@ -1002,45 +1058,29 @@ func (a *ApiHandler) produceBeaconBody(
 					})
 				}
 			}
-		} else {
-			// Pre-GLOAS: compute withdrawals normally
-			clWithdrawals, err := state.GetExpectedWithdrawals(
-				baseState,
-				targetSlot/a.beaconChainCfg.SlotsPerEpoch,
-			)
-			if err != nil {
-				log.Error("BlockProduction: GetExpectedWithdrawals failed", "err", err)
-				return
-			}
-			withdrawals = make([]*types.Withdrawal, 0, len(clWithdrawals.Withdrawals))
-			for _, w := range clWithdrawals.Withdrawals {
-				withdrawals = append(withdrawals, &types.Withdrawal{
-					Index:     w.Index,
-					Amount:    w.Amount,
-					Validator: w.Validator,
-					Address:   w.Address,
-				})
-			}
 		}
 
-		attrs := &engine_types.PayloadAttributes{
-			Timestamp:             hexutil.Uint64(state.ComputeTimestampAtSlot(baseState, targetSlot)),
-			PrevRandao:            random,
-			SuggestedFeeRecipient: feeRecipient,
-			Withdrawals:           withdrawals,
-			ParentBeaconBlockRoot: (*common.Hash)(&blockRoot),
-		}
 		if stateVersion.AfterOrEqual(clparams.GloasVersion) {
+			var slotNumber *hexutil.Uint64
 			sn := hexutil.Uint64(targetSlot)
-			attrs.SlotNumber = &sn
-			attrs.TargetGasLimit = targetGasLimit
+			slotNumber = &sn
+			attrs = payloadAttributesForVersion(
+				stateVersion,
+				hexutil.Uint64(state.ComputeTimestampAtSlot(baseState, targetSlot)),
+				random,
+				feeRecipient,
+				withdrawals,
+				(*common.Hash)(&blockRoot),
+				slotNumber,
+				targetGasLimit,
+			)
 		}
 		builderStartedAt := time.Now()
 		idBytes, err := a.engine.ForkChoiceUpdate(
 			ctx,
-			finalizedHash,
-			safeHash,
-			head,
+			fcuFinalizedHash,
+			fcuSafeHash,
+			fcuHead,
 			attrs,
 			stateVersion,
 		)
@@ -1053,7 +1093,16 @@ func (a *ApiHandler) produceBeaconBody(
 			return
 		}
 		slotStart := a.ethClock.GetSlotTime(targetSlot)
-		buildWindow := computeBlockBuilderWindow(builderStartedAt, slotStart, a.beaconChainCfg, stateVersion)
+		prepared := canUsePreparedPayload(
+			&a.preparedPayload,
+			a.engine.SupportInsertion(),
+			targetSlot,
+			idBytes,
+			time.Now(),
+			preparedPayloadMinimumAge(a.beaconChainCfg, stateVersion),
+		)
+		log.Info("BlockProduction: payload preparation", "slot", targetSlot, "prepared", prepared)
+		buildWindow := computeBlockBuilderWindow(builderStartedAt, slotStart, a.beaconChainCfg, stateVersion, prepared)
 		payload, bundles, requestsBundle, blockValue, ok := pollAssembledPayload(ctx, buildWindow, retryTime, func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			return a.engine.GetAssembledBlock(ctx, idBytes, stateVersion)
 		})

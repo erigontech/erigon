@@ -90,7 +90,7 @@ func NewBlockBuilder(build BlockBuilderFunc, param *Parameters, maxBuildTime tim
 }
 
 func (b *BlockBuilder) Stop() (*types.BlockWithReceipts, error) {
-	b.interrupt.Store(true)
+	b.Cancel()
 
 	b.syncCond.L.Lock()
 	defer b.syncCond.L.Unlock()
@@ -99,6 +99,10 @@ func (b *BlockBuilder) Stop() (*types.BlockWithReceipts, error) {
 	}
 
 	return b.result, b.err
+}
+
+func (b *BlockBuilder) Cancel() {
+	b.interrupt.Store(true)
 }
 
 func (b *BlockBuilder) Block() *types.Block {
