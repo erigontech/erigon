@@ -40,7 +40,6 @@ const (
 	blobLogInterval             = 30 * time.Second
 	blobBackfillWarningInterval = 4 * time.Minute
 	blocksBatchSize             = uint64(8)
-	minPeersForBlobDownload     = 16
 	// bounds a fulu block's column recovery; columns past the custody window are
 	// unfetchable and would otherwise block forever.
 	blobColumnBackfillTimeout = 30 * time.Second
@@ -56,16 +55,25 @@ type PeerDasGetter interface {
 	GetPeerDas() das.PeerDas
 }
 
+type blobPeerCounter interface {
+	Peers() (uint64, error)
+}
+
+type blobSnapshotReader interface {
+	FrozenBlobs() uint64
+}
+
 // BlobHistoryDownloader downloads blob history backwards from a head slot
 type BlobHistoryDownloader struct {
 	ctx context.Context
 
 	beaconCfg   *clparams.BeaconChainConfig
 	rpc         *rpc.BeaconRpcP2P
+	peerCounter blobPeerCounter
 	indiciesDB  kv.RoDB
 	blobStorage blob_storage.BlobStorage
 	blockReader freezeblocks.BeaconSnapshotReader
-	sn          *freezeblocks.CaplinSnapshots
+	sn          blobSnapshotReader
 
 	syncedChecker SyncedChecker
 	peerDasGetter PeerDasGetter
@@ -113,6 +121,7 @@ func NewBlobHistoryDownloader(
 		ctx:                       ctx,
 		beaconCfg:                 beaconCfg,
 		rpc:                       rpc,
+		peerCounter:               rpc,
 		indiciesDB:                indiciesDB,
 		blobStorage:               blobStorage,
 		blockReader:               blockReader,
@@ -207,13 +216,13 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 	startSlot := currentSlot
 
 	// Check peer count before proceeding
-	peers, err := b.rpc.Peers()
+	peers, err := b.peerCounter.Peers()
 	if err != nil {
 		b.logger.Warn("[BlobHistoryDownloader] Failed to get peer count", "err", err)
 		return nil
 	}
-	if peers < minPeersForBlobDownload {
-		b.logger.Warn("[BlobHistoryDownloader] Skipping iteration due to low peer count", "peers", peers, "required", minPeersForBlobDownload)
+	if peers == 0 {
+		b.logger.Warn("[BlobHistoryDownloader] Skipping iteration because no peers are available")
 		return nil
 	}
 
@@ -238,16 +247,14 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 		b.logger.Info("[BlobHistoryDownloader] Downloading blobs backwards", "slot", currentSlot)
 	}
 
-	for currentSlot >= targetSlot {
-		if currentSlot <= b.sn.FrozenBlobs() {
-			break
-		}
+	firstUnfrozenSlot := max(targetSlot, b.sn.FrozenBlobs())
+	for currentSlot >= firstUnfrozenSlot {
 		if !b.syncedChecker.Synced() {
 			time.Sleep(5 * time.Second)
 			continue
 		}
 
-		batch, visited, err := b.collectIncompleteBlocks(currentSlot, targetSlot)
+		batch, visited, err := b.collectIncompleteBlocks(currentSlot, firstUnfrozenSlot)
 		if err != nil {
 			return err
 		}
