@@ -291,8 +291,7 @@ const DefaultBranchCacheTailCapacity = 50000
 // commitment domain. Implemented by *db/state.AggregatorRoTx (via duck
 // typing) so callers in the SharedDomains construction path can fetch the
 // cache without forcing db/state/execctx to import db/state — that import
-// would create a cycle since db/state imports execctx (squeeze.go,
-// trie_reader_integration_test.go, …).
+// would create a cycle since db/state imports execctx (squeeze.go, …).
 //
 // Returning nil is permitted; callers MUST treat nil as "no shared cache,
 // behave as if disabled" rather than panic.
