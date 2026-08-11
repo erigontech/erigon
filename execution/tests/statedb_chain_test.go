@@ -170,85 +170,117 @@ func TestSelfDestructReceive(t *testing.T) {
 }
 
 // TestSelfDestructReceiveAccountRecord is TestSelfDestructReceive's scenario —
-// deploy, self-destruct, then revive by value transfer, all in one block — read
-// back as a whole account rather than through GetCode. The reconstruction
-// readers resolve the account record separately from code, so a stale code hash
-// or nonce survives there even when GetCode already reports empty.
+// self-destruct then revive by value transfer in one block — read back as a whole
+// account rather than through GetCode. The reconstruction readers resolve the
+// account record separately from code, so a stale code hash survives there even
+// when GetCode already reports empty.
+//
+// Both executors run it: versionedStateReader is on the parallel path only, and
+// its answer has to match what the serial path commits. Both deploy placements
+// run it too: a contract deployed in an earlier block leaves the reader no
+// in-block CodeHash cell to floor the destruct scan on, since SELFDESTRUCT
+// records Incarnation/SelfDestruct/Balance and nothing else.
 func TestSelfDestructReceiveAccountRecord(t *testing.T) {
-	var (
-		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-		address = accounts.InternAddress(crypto.PubkeyToAddress(key.PublicKey))
-		funds   = big.NewInt(1000000000)
-		gspec   = &types.Genesis{
-			Config: &chain.Config{
-				ChainID:               uint256.NewInt(1),
-				HomesteadBlock:        new(uint64),
-				ByzantiumBlock:        new(uint64),
-				ConstantinopleBlock:   new(uint64),
-				PetersburgBlock:       new(uint64),
-				TangerineWhistleBlock: new(uint64),
-				SpuriousDragonBlock:   new(uint64),
-			},
-			Alloc: types.GenesisAlloc{address.Value(): {Balance: funds}},
-		}
-		signer = types.LatestSignerForChainID(nil)
-	)
+	for _, tc := range []struct {
+		name           string
+		exec           execmoduletester.Option
+		preBlockDeploy bool
+	}{
+		{"serial/same-block-deploy", execmoduletester.WithoutExperimentalBAL(), false},
+		{"parallel/same-block-deploy", execmoduletester.WithExperimentalBAL(), false},
+		{"serial/pre-block-deploy", execmoduletester.WithoutExperimentalBAL(), true},
+		{"parallel/pre-block-deploy", execmoduletester.WithExperimentalBAL(), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var (
+				key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+				address = accounts.InternAddress(crypto.PubkeyToAddress(key.PublicKey))
+				funds   = big.NewInt(1000000000)
+				gspec   = &types.Genesis{
+					Config: &chain.Config{
+						ChainID:               uint256.NewInt(1),
+						HomesteadBlock:        new(uint64),
+						ByzantiumBlock:        new(uint64),
+						ConstantinopleBlock:   new(uint64),
+						PetersburgBlock:       new(uint64),
+						TangerineWhistleBlock: new(uint64),
+						SpuriousDragonBlock:   new(uint64),
+					},
+					Alloc: types.GenesisAlloc{address.Value(): {Balance: funds}},
+				}
+				signer = types.LatestSignerForChainID(nil)
+			)
 
-	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
-	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
-	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
-	require.NoError(t, err)
-
-	var contractAddress common.Address
-	var selfDestructorContract *contracts.SelfDestructor
-
-	chain, err := m.GenerateChain(2, func(i int, block *blockgen.BlockGen) {
-		if i == 0 {
-			var txn types.Transaction
-			contractAddress, txn, selfDestructorContract, err = contracts.DeploySelfDestructor(transactOpts, contractBackend)
+			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key), tc.exec)
+			contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
+			transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
 			require.NoError(t, err)
-			block.AddTx(txn)
 
-			txn, err = selfDestructorContract.SelfDestruct(transactOpts)
+			var contractAddress common.Address
+			var selfDestructorContract *contracts.SelfDestructor
+
+			deployAt, destructAt := 0, 0
+			if tc.preBlockDeploy {
+				destructAt = 1
+			}
+
+			chain, err := m.GenerateChain(3, func(i int, block *blockgen.BlockGen) {
+				var txn types.Transaction
+				if i == deployAt {
+					contractAddress, txn, selfDestructorContract, err = contracts.DeploySelfDestructor(transactOpts, contractBackend)
+					require.NoError(t, err)
+					block.AddTx(txn)
+				}
+				if i == destructAt {
+					txn, err = selfDestructorContract.SelfDestruct(transactOpts)
+					require.NoError(t, err)
+					block.AddTx(txn)
+
+					// Revive with a plain value transfer: no CREATE, so nothing writes a
+					// nonce or code hash and the pre-destruct cells stay the floor.
+					txn, err = types.SignTx(
+						types.NewTransaction(block.TxNonce(address.Value()), contractAddress, uint256.NewInt(1000), 21000, uint256.NewInt(1), nil),
+						*signer, key)
+					require.NoError(t, err)
+					block.AddTx(txn)
+				}
+				contractBackend.Commit()
+			})
 			require.NoError(t, err)
-			block.AddTx(txn)
+			require.NoError(t, m.InsertChain(chain.Slice(0, 3)))
 
-			// Revive with a plain value transfer: no CREATE, so nothing writes a
-			// nonce or code hash and the pre-destruct cells stay the floor.
-			txn, err = types.SignTx(
-				types.NewTransaction(block.TxNonce(address.Value()), contractAddress, uint256.NewInt(1000), 21000, uint256.NewInt(1), nil),
-				*signer, key)
-			require.NoError(t, err)
-			block.AddTx(txn)
-		}
-		contractBackend.Commit()
-	})
-	require.NoError(t, err)
-	require.NoError(t, m.InsertChain(chain.Slice(0, 2)))
+			require.NoError(t, m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+				st := state.New(m.NewStateReader(tx))
+				defer st.Close()
+				addr := accounts.InternAddress(contractAddress)
 
-	require.NoError(t, m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
-		st := state.New(m.NewStateReader(tx))
-		defer st.Close()
-		addr := accounts.InternAddress(contractAddress)
+				code, err := st.GetCode(addr)
+				require.NoError(t, err)
+				require.Empty(t, code, "the destruct removed the code and the transfer did not write any")
 
-		code, err := st.GetCode(addr)
-		require.NoError(t, err)
-		require.Empty(t, code, "the destruct removed the code and the transfer did not write any")
+				hash, err := st.GetCodeHash(addr)
+				require.NoError(t, err)
+				require.Equal(t, accounts.EmptyCodeHash, hash, "the code hash must agree with the code")
 
-		hash, err := st.GetCodeHash(addr)
-		require.NoError(t, err)
-		require.Equal(t, accounts.EmptyCodeHash, hash, "the code hash must agree with the code")
+				// The nonce goes by where the deploy landed. In-block, the resurrect
+				// inherits it through the version map, since writeset_normalize.go
+				// emits post-destruct defaults only for a CREATE. From an earlier
+				// block, the destruct deleted the domain record and the transfer
+				// recreates it at 0. Both executors agree either way, so a reader
+				// that picks one answer for both shapes is the one out of step.
+				wantNonce := uint64(1)
+				if tc.preBlockDeploy {
+					wantNonce = 0
+				}
+				nonce, err := st.GetNonce(addr)
+				require.NoError(t, err)
+				require.Equal(t, wantNonce, nonce)
 
-		// The nonce is NOT reset: a value-transfer resurrect inherits the
-		// pre-destruct account fields, which writeset_normalize.go only
-		// overrides for a CREATE. A reader must report what the block commits.
-		nonce, err := st.GetNonce(addr)
-		require.NoError(t, err)
-		require.Equal(t, uint64(1), nonce, "the deployed contract's nonce survives the value-transfer revival")
-
-		bal, err := st.GetBalance(addr)
-		require.NoError(t, err)
-		require.Equal(t, uint64(1000), bal.Uint64(), "the transfer that revived it is still credited")
-		return nil
-	}))
+				bal, err := st.GetBalance(addr)
+				require.NoError(t, err)
+				require.Equal(t, uint64(1000), bal.Uint64(), "the transfer that revived it is still credited")
+				return nil
+			}))
+		})
+	}
 }

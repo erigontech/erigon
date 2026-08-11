@@ -82,6 +82,29 @@ func TestVersionedStateReader_AccountCodeHashWipedByInRangeDestruct(t *testing.T
 	require.Equal(t, uint64(1000), acc.Balance.Uint64(), "the revival's balance is the live value")
 }
 
+// A pre-block contract records no CodeHash cell at all: SELFDESTRUCT writes only
+// Incarnation/SelfDestruct/Balance, and a value-transfer revival adds no code.
+// The wipe still has to reach the account the fall-through serves.
+func TestVersionedStateReader_PreBlockCodeHashWipedByInRangeDestruct(t *testing.T) {
+	t.Parallel()
+	addr := getAddress(111)
+
+	reader := newAccountStateReader(addr)
+	pre := reader.accounts[addr]
+	pre.CodeHash = accounts.NewCode([]byte{0x60, 0x00}).Hash
+	pre.Nonce = 1
+
+	vm := NewVersionMap(nil)
+	destructThenRevive(vm, addr)
+	writeFor(vm, addr, BalancePath, accounts.NilKey, Version{TxIndex: 2}, *uint256.NewInt(1000), true)
+
+	vr := NewVersionedStateReader(3, ReadSet{}, vm, reader)
+	acc, err := vr.ReadAccountData(addr)
+	require.NoError(t, err)
+	require.Equal(t, accounts.EmptyCodeHash, acc.CodeHash, "the destruct erased the pre-block code")
+	require.Zero(t, acc.Nonce, "and the domain record the pre-block nonce came from")
+}
+
 func TestVersionedStateReader_AccountFieldsSurviveWhenRevivalRewrote(t *testing.T) {
 	t.Parallel()
 	addr := getAddress(106)
@@ -133,6 +156,31 @@ func TestVersionedStateReader_StorageSurvivesWhenRevivalRewrote(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint64(9), val.Uint64(), "a write above the destruct is the live value")
 	require.True(t, found, "and it is present, not absent")
+}
+
+// HasStorage takes no key, so it cannot floor on a cell the way the slot readers
+// do. A slot rewritten above the destruct still makes the account hold storage,
+// and reporting otherwise would clear the EIP-684/7610 CREATE-collision check.
+func TestVersionedStateReader_HasStorageSurvivesWhenRevivalRewrote(t *testing.T) {
+	t.Parallel()
+	addr := getAddress(112)
+	key := accounts.InternKey(common.HexToHash("0x01"))
+
+	vm := NewVersionMap(nil)
+	writeFor(vm, addr, StoragePath, key, Version{TxIndex: 0}, *uint256.NewInt(5), true)
+	destructThenRevive(vm, addr)
+	writeFor(vm, addr, StoragePath, key, Version{TxIndex: 2}, *uint256.NewInt(9), true)
+
+	reader := &preBlockStateReader{
+		accountStateReader: newAccountStateReader(addr),
+		slot:               key,
+		val:                *uint256.NewInt(5),
+	}
+
+	vr := NewVersionedStateReader(3, ReadSet{}, vm, reader)
+	has, err := vr.HasStorage(addr)
+	require.NoError(t, err)
+	require.True(t, has, "the tx2 slot sits above the destruct, so the account holds storage")
 }
 
 func TestVersionedStateReader_CodeWipedByInRangeDestruct(t *testing.T) {

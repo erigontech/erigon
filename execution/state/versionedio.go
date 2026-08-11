@@ -1708,12 +1708,12 @@ func (vr versionedStateReader) ReadAccountStorage(address accounts.Address, key 
 	if vr.versionMap != nil {
 		val, res, ok := vr.versionMap.ReadStorage(address, key, vr.txIndex)
 		if ok && res.Status() != MVReadResultNone {
-			if vr.wipedByDestruct(address, StoragePath, res.Version().TxIndex) {
+			if _, wiped := vr.wipedByDestruct(address, StoragePath, res.Version().TxIndex); wiped {
 				return uint256.Int{}, false, nil
 			}
 			return val, true, nil
 		}
-		if vr.wipedByDestruct(address, StoragePath, -1) {
+		if _, wiped := vr.wipedByDestruct(address, StoragePath, -1); wiped {
 			return uint256.Int{}, false, nil
 		}
 	}
@@ -1727,11 +1727,12 @@ func (vr versionedStateReader) ReadAccountStorage(address accounts.Address, key 
 
 // wipedByDestruct reports whether an in-block SELFDESTRUCT cleared the value
 // this reader would otherwise return for path, floored at the version map cell
-// holding it (-1 when that value comes from before the block). The SelfDestruct
-// probe is what makes the common no-destruct case one lookup instead of two.
-func (vr versionedStateReader) wipedByDestruct(address accounts.Address, path AccountPath, floor int) bool {
+// holding it (-1 when that value comes from before the block), and the TxIndex
+// that destruct sits at. The SelfDestruct probe is what makes the common
+// no-destruct case one lookup instead of two.
+func (vr versionedStateReader) wipedByDestruct(address accounts.Address, path AccountPath, floor int) (int, bool) {
 	if _, _, ok := vr.versionMap.ReadSelfDestruct(address, vr.txIndex); !ok {
-		return false
+		return 0, false
 	}
 	return vr.versionMap.wipedByInRangeDestruct(address, path, floor, vr.txIndex)
 }
@@ -1742,9 +1743,13 @@ func (vr versionedStateReader) HasStorage(address accounts.Address) (bool, error
 	}
 
 	// An in-block destruct erased whatever the pre-block domain holds, so the
-	// fall-through below must not answer from it.
-	if vr.versionMap != nil && vr.wipedByDestruct(address, StoragePath, -1) {
-		return false, nil
+	// fall-through below must not answer from it. With no key to floor on, a slot
+	// rewritten above the destruct is what keeps the account holding storage.
+	if vr.versionMap != nil {
+		if at, wiped := vr.wipedByDestruct(address, StoragePath, -1); wiped &&
+			!vr.versionMap.storageWrittenAfter(address, at, vr.txIndex) {
+			return false, nil
+		}
 	}
 
 	if vr.stateReader != nil {
@@ -1764,12 +1769,12 @@ func (vr versionedStateReader) ReadAccountCode(address accounts.Address) ([]byte
 	if vr.versionMap != nil {
 		code, res, ok := vr.versionMap.ReadCode(address, vr.txIndex)
 		if ok && res.Status() != MVReadResultNone {
-			if vr.wipedByDestruct(address, CodePath, res.Version().TxIndex) {
+			if _, wiped := vr.wipedByDestruct(address, CodePath, res.Version().TxIndex); wiped {
 				return nil, nil
 			}
 			return code.Bytes, nil
 		}
-		if vr.wipedByDestruct(address, CodePath, -1) {
+		if _, wiped := vr.wipedByDestruct(address, CodePath, -1); wiped {
 			return nil, nil
 		}
 	}
@@ -1789,12 +1794,12 @@ func (vr versionedStateReader) ReadAccountCodeSize(address accounts.Address) (in
 	if vr.versionMap != nil {
 		code, res, ok := vr.versionMap.ReadCode(address, vr.txIndex)
 		if ok && res.Status() != MVReadResultNone {
-			if vr.wipedByDestruct(address, CodeSizePath, res.Version().TxIndex) {
+			if _, wiped := vr.wipedByDestruct(address, CodeSizePath, res.Version().TxIndex); wiped {
 				return 0, nil
 			}
 			return len(code.Bytes), nil
 		}
-		if vr.wipedByDestruct(address, CodeSizePath, -1) {
+		if _, wiped := vr.wipedByDestruct(address, CodeSizePath, -1); wiped {
 			return 0, nil
 		}
 	}
