@@ -102,11 +102,11 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 			continue
 		}
 
-		if !c.forkChoiceReader.HasEnvelope(blockRoot) {
+		if !c.chainDataReader.HasEnvelope(blockRoot) {
 			continue
 		}
 
-		envelope, err := c.forkChoiceReader.ReadEnvelopeFromDisk(blockRoot)
+		envelope, err := c.chainDataReader.ReadEnvelopeFromDisk(blockRoot)
 		if err != nil {
 			log.Debug("failed to read envelope from disk", "blockRoot", blockRoot, "error", err)
 			continue
@@ -208,11 +208,11 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRootHandler(s network.Str
 			return true
 		}
 
-		if !c.forkChoiceReader.HasEnvelope(blockRoot) {
+		if !c.chainDataReader.HasEnvelope(blockRoot) {
 			return true
 		}
 
-		envelope, err := c.forkChoiceReader.ReadEnvelopeFromDisk(blockRoot)
+		envelope, err := c.chainDataReader.ReadEnvelopeFromDisk(blockRoot)
 		if err != nil {
 			log.Debug("failed to read envelope from disk", "blockRoot", blockRoot, "error", err)
 			return true

@@ -32,9 +32,9 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	peerdasstatemock "github.com/erigontech/erigon/cl/das/state/mock_services"
-	forkchoicemock "github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
+	"github.com/erigontech/erigon/cl/sentinel/handlers/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/handshake"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/common"
@@ -90,7 +90,7 @@ func TestPing(t *testing.T) {
 	peersPool := peers.NewPool(host)
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := forkchoicemock.NewForkChoiceStorageMock(t)
+	f := mock_services.NewChainDataReaderMock()
 	ethClock := getEthClock(t)
 
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)
@@ -145,7 +145,7 @@ func TestGoodbye(t *testing.T) {
 	peersPool := peers.NewPool(host)
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := forkchoicemock.NewForkChoiceStorageMock(t)
+	f := mock_services.NewChainDataReaderMock()
 	ethClock := getEthClock(t)
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)
 	c := NewConsensusHandlers(
@@ -205,7 +205,7 @@ func TestMetadataV2(t *testing.T) {
 	peersPool := peers.NewPool(host)
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := forkchoicemock.NewForkChoiceStorageMock(t)
+	f := mock_services.NewChainDataReaderMock()
 	ethClock := getEthClock(t)
 	nc := clparams.NetworkConfigs[chainspec.MainnetChainID]
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)
@@ -263,7 +263,7 @@ func TestMetadataV1(t *testing.T) {
 	peersPool := peers.NewPool(host)
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := forkchoicemock.NewForkChoiceStorageMock(t)
+	f := mock_services.NewChainDataReaderMock()
 
 	nc := clparams.NetworkConfigs[chainspec.MainnetChainID]
 	ethClock := getEthClock(t)
@@ -321,7 +321,7 @@ func TestStatus(t *testing.T) {
 	peersPool := peers.NewPool(host)
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := forkchoicemock.NewForkChoiceStorageMock(t)
+	f := mock_services.NewChainDataReaderMock()
 
 	// Create mock for PeerDasStateReader
 	ctrl := gomock.NewController(t)

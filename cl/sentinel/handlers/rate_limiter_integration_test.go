@@ -31,9 +31,9 @@ import (
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
+	"github.com/erigontech/erigon/cl/sentinel/handlers/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 )
 
@@ -62,7 +62,7 @@ func TestPingRateLimit(t *testing.T) {
 	c := NewConsensusHandlers(
 		ctx, beaconDB, indiciesDB, server, peersPool,
 		&clparams.NetworkConfig{}, testLocalNode(t), beaconCfg, ethClock,
-		nil, &mock_services.ForkChoiceStorageMock{}, nil, nil, nil, true,
+		nil, &mock_services.ChainDataReaderMock{}, nil, nil, nil, true,
 	)
 	c.Start()
 
@@ -128,7 +128,7 @@ func TestBlocksByRangeRateLimit(t *testing.T) {
 	c := NewConsensusHandlers(
 		ctx, store, indiciesDB, server, peersPool,
 		&clparams.NetworkConfig{}, nil, beaconCfg, ethClock,
-		nil, &mock_services.ForkChoiceStorageMock{}, nil, nil, nil, true,
+		nil, &mock_services.ChainDataReaderMock{}, nil, nil, nil, true,
 	)
 	c.Start()
 

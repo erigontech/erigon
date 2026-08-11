@@ -35,9 +35,9 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
-	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
+	"github.com/erigontech/erigon/cl/sentinel/handlers/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
@@ -88,7 +88,7 @@ func TestBlocksByRangeHandler(t *testing.T) {
 		nil,
 		beaconCfg,
 		ethClock,
-		nil, &mock_services.ForkChoiceStorageMock{}, nil, nil, nil, true,
+		nil, &mock_services.ChainDataReaderMock{}, nil, nil, nil, true,
 	)
 	c.Start()
 	var req solid.HashListSSZ = solid.NewHashList(len(expBlocks))

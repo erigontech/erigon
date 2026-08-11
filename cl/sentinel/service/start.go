@@ -27,8 +27,8 @@ import (
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	"github.com/erigontech/erigon/cl/p2p"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
-	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/sentinel"
+	"github.com/erigontech/erigon/cl/sentinel/handlers"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -53,7 +53,7 @@ func createSentinel(
 	blockReader freezeblocks.BeaconSnapshotReader,
 	blobStorage blob_storage.BlobStorage,
 	indiciesDB kv.RwDB,
-	forkChoiceReader forkchoice.ForkChoiceStorageReader,
+	chainDataReader handlers.ChainDataReader,
 	ethClock eth_clock.EthereumClock,
 	dataColumnStorage blob_storage.DataColumnStorage,
 	peerDasStateReader peerdasstate.PeerDasStateReader,
@@ -69,7 +69,7 @@ func createSentinel(
 		blobStorage,
 		indiciesDB,
 		logger,
-		forkChoiceReader,
+		chainDataReader,
 		dataColumnStorage,
 		peerDasStateReader,
 		p2p,
@@ -99,7 +99,7 @@ func StartSentinelService(
 	indiciesDB kv.RwDB,
 	srvCfg *ServerConfig,
 	ethClock eth_clock.EthereumClock,
-	forkChoiceReader forkchoice.ForkChoiceStorageReader,
+	chainDataReader handlers.ChainDataReader,
 	dataColumnStorage blob_storage.DataColumnStorage,
 	peerDasStateReader peerdasstate.PeerDasStateReader,
 	p2p p2p.P2PManager,
@@ -111,7 +111,7 @@ func StartSentinelService(
 		blockReader,
 		blobStorage,
 		indiciesDB,
-		forkChoiceReader,
+		chainDataReader,
 		ethClock,
 		dataColumnStorage,
 		peerDasStateReader,

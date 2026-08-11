@@ -41,9 +41,9 @@ import (
 	"github.com/erigontech/erigon/cl/p2p"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
-	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
+	"github.com/erigontech/erigon/cl/sentinel/handlers/mock_services"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
@@ -144,7 +144,7 @@ func newTestSentinel(t *testing.T, ethClock eth_clock.EthereumClock, reader free
 			MaxPeerCount:  100,
 		},
 		EnableBlocks: true,
-	}, ethClock, reader, nil, db, log.New(), &mock_services.ForkChoiceStorageMock{}, nil, mockPeerDasStateReader, pm)
+	}, ethClock, reader, nil, db, log.New(), &mock_services.ChainDataReaderMock{}, nil, mockPeerDasStateReader, pm)
 	noErr(err)
 	t.Cleanup(func() { sent.Stop() })
 

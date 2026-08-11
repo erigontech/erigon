@@ -36,7 +36,6 @@ import (
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	"github.com/erigontech/erigon/cl/p2p"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
-	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/sentinel/handlers"
 	"github.com/erigontech/erigon/cl/sentinel/handshake"
 	"github.com/erigontech/erigon/cl/sentinel/httpreqresp"
@@ -75,7 +74,7 @@ type Sentinel struct {
 	subManager         *GossipManager
 	metrics            bool
 	logger             log.Logger
-	forkChoiceReader   forkchoice.ForkChoiceStorageReader
+	chainDataReader    handlers.ChainDataReader
 	pidToEnr           sync.Map
 	pidToEnodeId       sync.Map
 	ethClock           eth_clock.EthereumClock
@@ -101,7 +100,7 @@ func New(
 	blobStorage blob_storage.BlobStorage,
 	indiciesDB kv.RoDB,
 	logger log.Logger,
-	forkChoiceReader forkchoice.ForkChoiceStorageReader,
+	chainDataReader handlers.ChainDataReader,
 	dataColumnStorage blob_storage.DataColumnStorage,
 	peerDasStateReader peerdasstate.PeerDasStateReader,
 	p2p p2p.P2PManager,
@@ -129,7 +128,7 @@ func New(
 		indiciesDB:         indiciesDB,
 		metrics:            true,
 		logger:             logger,
-		forkChoiceReader:   forkChoiceReader,
+		chainDataReader:    chainDataReader,
 		blobStorage:        blobStorage,
 		ethClock:           ethClock,
 		dataColumnStorage:  dataColumnStorage,
@@ -177,7 +176,7 @@ func (s *Sentinel) Start() (*enode.LocalNode, error) {
 		s.peers,
 		s.cfg.NetworkConfig,
 		s.p2p.UDPv5Listener().LocalNode(),
-		s.cfg.BeaconConfig, s.ethClock, s.handshaker, s.forkChoiceReader, s.blobStorage, s.dataColumnStorage, s.peerDasStateReader, s.cfg.EnableBlocks,
+		s.cfg.BeaconConfig, s.ethClock, s.handshaker, s.chainDataReader, s.blobStorage, s.dataColumnStorage, s.peerDasStateReader, s.cfg.EnableBlocks,
 	).Start()
 
 	/*if err := s.connectToBootnodes(); err != nil {
@@ -332,7 +331,7 @@ func (s *Sentinel) Identity() (pid, enrStr string, p2pAddresses, discoveryAddres
 	if err := s.listener.LocalNode().Node().Load(syncNetEnr); err != nil {
 		s.logger.Debug("[IDENTITY] Could not load sync subnet", "err", err)
 	}
-	cgc := s.forkChoiceReader.GetPeerDas().StateReader().GetAdvertisedCgc()
+	cgc := s.peerDasStateReader.GetAdvertisedCgc()
 	metadata = &cltypes.Metadata{
 		SeqNumber:         s.listener.LocalNode().Seq(),
 		Attnets:           [8]byte(subnetField),

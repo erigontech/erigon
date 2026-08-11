@@ -543,11 +543,6 @@ func (f *ForkChoiceStore) JustifiedCheckpoint() solid.Checkpoint {
 	return f.justifiedCheckpoint.Load().(solid.Checkpoint)
 }
 
-// FinalizedCheckpoint returns justified checkpoint
-func (f *ForkChoiceStore) JustifiedSlot() uint64 {
-	return f.computeStartSlotAtEpoch(f.justifiedCheckpoint.Load().(solid.Checkpoint).Epoch)
-}
-
 // getUnrealizedJustification returns the per-block unrealized justified checkpoint
 // (spec: store.unrealized_justifications[block_root])
 func (f *ForkChoiceStore) getUnrealizedJustification(blockRoot common.Hash) (solid.Checkpoint, bool) {

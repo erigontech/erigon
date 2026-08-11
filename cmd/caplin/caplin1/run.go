@@ -359,8 +359,9 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	// create the public keys registry
 	pksRegistry := public_keys_registry.NewHeadViewPublicKeysRegistry(syncedDataManager)
 	validatorParameters := validator_params.NewValidatorParams()
+	forkGraph := fork_graph.NewForkGraphDisk(state, syncedDataManager, fcuFs, config.BeaconAPIRouter)
 	forkChoice, err := forkchoice.NewForkChoiceStore(
-		ethClock, state, engine, pool, fork_graph.NewForkGraphDisk(state, syncedDataManager, fcuFs, config.BeaconAPIRouter),
+		ethClock, state, engine, pool, forkGraph,
 		emitters, syncedDataManager, blobStorage, pksRegistry, validatorParameters, doLMDSampling, indexDB)
 	if err != nil {
 		logger.Error("Could not create forkchoice", "err", err)
@@ -450,7 +451,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 				HeadRoot:       anchorRoot,
 			}
 		}(),
-	}, ethClock, forkChoice, columnStorage, peerDasState, p2p, logger)
+	}, ethClock, forkGraph, columnStorage, peerDasState, p2p, logger)
 	if err != nil {
 		return err
 	}

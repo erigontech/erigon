@@ -29,7 +29,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
-	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/sentinel/handshake"
@@ -53,7 +52,7 @@ type ConsensusHandlers struct {
 
 	indiciesDB         kv.RoDB
 	rateLimiter        *peerRateLimiter
-	forkChoiceReader   forkchoice.ForkChoiceStorageReader
+	chainDataReader    ChainDataReader
 	host               host.Host
 	me                 *enode.LocalNode
 	netCfg             *clparams.NetworkConfig
@@ -81,7 +80,7 @@ func NewConsensusHandlers(
 	beaconConfig *clparams.BeaconChainConfig,
 	ethClock eth_clock.EthereumClock,
 	hs *handshake.HandShaker,
-	forkChoiceReader forkchoice.ForkChoiceStorageReader,
+	chainDataReader ChainDataReader,
 	blobsStorage blob_storage.BlobStorage,
 	dataColumnStorage blob_storage.DataColumnStorage,
 	peerDasStateReader peerdasstate.PeerDasStateReader,
@@ -97,7 +96,7 @@ func NewConsensusHandlers(
 		ctx:                ctx,
 		rateLimiter:        newPeerRateLimiter(),
 		enableBlocks:       enabledBlocks,
-		forkChoiceReader:   forkChoiceReader,
+		chainDataReader:    chainDataReader,
 		me:                 me,
 		netCfg:             netCfg,
 		blobsStorage:       blobsStorage,

@@ -33,9 +33,9 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
+	"github.com/erigontech/erigon/cl/sentinel/handlers/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
@@ -63,7 +63,7 @@ func TestLightClientOptimistic(t *testing.T) {
 	peersPool := peers.NewPool(host)
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := mock_services.NewForkChoiceStorageMock(t)
+	f := mock_services.NewChainDataReaderMock()
 
 	f.NewestLCUpdate = &cltypes.LightClientUpdate{
 		AttestedHeader:    cltypes.NewLightClientHeader(clparams.AltairVersion),
@@ -134,7 +134,7 @@ func TestLightClientFinality(t *testing.T) {
 	peersPool := peers.NewPool(host)
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := mock_services.NewForkChoiceStorageMock(t)
+	f := mock_services.NewChainDataReaderMock()
 
 	f.NewestLCUpdate = &cltypes.LightClientUpdate{
 		AttestedHeader:          cltypes.NewLightClientHeader(clparams.AltairVersion),
@@ -207,7 +207,7 @@ func TestLightClientBootstrap(t *testing.T) {
 	peersPool := peers.NewPool(host)
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := mock_services.NewForkChoiceStorageMock(t)
+	f := mock_services.NewChainDataReaderMock()
 
 	f.NewestLCUpdate = &cltypes.LightClientUpdate{
 		AttestedHeader:          cltypes.NewLightClientHeader(clparams.AltairVersion),
@@ -290,7 +290,7 @@ func TestLightClientUpdates(t *testing.T) {
 	peersPool := peers.NewPool(host)
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := mock_services.NewForkChoiceStorageMock(t)
+	f := mock_services.NewChainDataReaderMock()
 	ethClock := getEthClock(t)
 
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)

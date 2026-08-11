@@ -18,9 +18,9 @@ import (
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
+	"github.com/erigontech/erigon/cl/sentinel/handlers/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -86,7 +86,7 @@ func TestExecutionPayloadEnvelopesByRangeHandler(t *testing.T) {
 	require.NoError(t, tx.Commit())
 
 	// Create mock fork choice with envelopes
-	fcMock := mock_services.NewForkChoiceStorageMock(t)
+	chainDataMock := mock_services.NewChainDataReaderMock()
 
 	// Create envelopes for each block and store them in mock.
 	// The canonical block root is HashSSZ(header), computed by WriteBeaconBlockHeaderAndIndicies.
@@ -124,7 +124,7 @@ func TestExecutionPayloadEnvelopesByRangeHandler(t *testing.T) {
 		envelope.Message.BeaconBlockRoot = blockRoot
 		envelope.Message.BuilderIndex = uint64(i)
 
-		fcMock.Envelopes[blockRoot] = envelope
+		chainDataMock.Envelopes[blockRoot] = envelope
 		expEnvelopes = append(expEnvelopes, envelope)
 	}
 
@@ -138,7 +138,7 @@ func TestExecutionPayloadEnvelopesByRangeHandler(t *testing.T) {
 		nil,
 		beaconCfg,
 		ethClock,
-		nil, fcMock, nil, nil, nil, true,
+		nil, chainDataMock, nil, nil, nil, true,
 	)
 	c.Start()
 
@@ -244,7 +244,7 @@ func TestExecutionPayloadEnvelopesByRootHandler(t *testing.T) {
 	expBlocks := populateDatabaseWithBlocks(t, store, tx, startSlot, count)
 	require.NoError(t, tx.Commit())
 
-	fcMock := mock_services.NewForkChoiceStorageMock(t)
+	chainDataMock := mock_services.NewChainDataReaderMock()
 
 	// Create envelopes keyed by block root
 	expEnvelopes := make([]*cltypes.SignedExecutionPayloadEnvelope, 0, count)
@@ -279,7 +279,7 @@ func TestExecutionPayloadEnvelopesByRootHandler(t *testing.T) {
 		envelope.Message.BeaconBlockRoot = blockRoot
 		envelope.Message.BuilderIndex = uint64(i)
 
-		fcMock.Envelopes[blockRoot] = envelope
+		chainDataMock.Envelopes[blockRoot] = envelope
 		expEnvelopes = append(expEnvelopes, envelope)
 		blockRoots = append(blockRoots, blockRoot)
 	}
@@ -294,7 +294,7 @@ func TestExecutionPayloadEnvelopesByRootHandler(t *testing.T) {
 		nil,
 		beaconCfg,
 		ethClock,
-		nil, fcMock, nil, nil, nil, true,
+		nil, chainDataMock, nil, nil, nil, true,
 	)
 	c.Start()
 
@@ -380,7 +380,7 @@ func TestExecutionPayloadEnvelopesByRootHandler_PreGloas(t *testing.T) {
 	ethClock := getEthClock(t)
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)
 
-	fcMock := mock_services.NewForkChoiceStorageMock(t)
+	chainDataMock := mock_services.NewChainDataReaderMock()
 
 	c := NewConsensusHandlers(
 		ctx,
@@ -392,7 +392,7 @@ func TestExecutionPayloadEnvelopesByRootHandler_PreGloas(t *testing.T) {
 		nil,
 		beaconCfg,
 		ethClock,
-		nil, fcMock, nil, nil, nil, true,
+		nil, chainDataMock, nil, nil, nil, true,
 	)
 	c.Start()
 
@@ -434,7 +434,7 @@ func TestExecutionPayloadEnvelopesByRootHandlerRejectsOverLimit(t *testing.T) {
 	store := tests.NewMockBlockReader()
 	ethClock, beaconCfg := getGloasEthClockAndConfig(t)
 	beaconCfg.MaxRequestPayloads = 1
-	fcMock := mock_services.NewForkChoiceStorageMock(t)
+	chainDataMock := mock_services.NewChainDataReaderMock()
 
 	c := NewConsensusHandlers(
 		ctx,
@@ -446,7 +446,7 @@ func TestExecutionPayloadEnvelopesByRootHandlerRejectsOverLimit(t *testing.T) {
 		nil,
 		beaconCfg,
 		ethClock,
-		nil, fcMock, nil, nil, nil, true,
+		nil, chainDataMock, nil, nil, nil, true,
 	)
 	c.Start()
 
@@ -492,7 +492,7 @@ func TestExecutionPayloadEnvelopesByRangeHandler_PreGloas(t *testing.T) {
 	ethClock := getEthClock(t)
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)
 
-	fcMock := mock_services.NewForkChoiceStorageMock(t)
+	chainDataMock := mock_services.NewChainDataReaderMock()
 
 	c := NewConsensusHandlers(
 		ctx,
@@ -504,7 +504,7 @@ func TestExecutionPayloadEnvelopesByRangeHandler_PreGloas(t *testing.T) {
 		nil,
 		beaconCfg,
 		ethClock,
-		nil, fcMock, nil, nil, nil, true,
+		nil, chainDataMock, nil, nil, nil, true,
 	)
 	c.Start()
 

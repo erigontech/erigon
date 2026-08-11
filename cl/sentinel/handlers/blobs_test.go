@@ -37,9 +37,9 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
-	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
+	"github.com/erigontech/erigon/cl/sentinel/handlers/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
@@ -113,7 +113,7 @@ func TestBlobsByRangeHandler(t *testing.T) {
 		nil,
 		beaconCfg,
 		ethClock,
-		nil, &mock_services.ForkChoiceStorageMock{}, blobStorage, nil, nil, true,
+		nil, &mock_services.ChainDataReaderMock{}, blobStorage, nil, nil, true,
 	)
 	c.Start()
 	req := &cltypes.BlobsByRangeRequest{
@@ -236,7 +236,7 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 		nil,
 		beaconCfg,
 		ethClock,
-		nil, &mock_services.ForkChoiceStorageMock{}, blobStorage, nil, nil, true,
+		nil, &mock_services.ChainDataReaderMock{}, blobStorage, nil, nil, true,
 	)
 	c.Start()
 	req := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](40269, 40)

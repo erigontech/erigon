@@ -34,9 +34,9 @@ import (
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
+	"github.com/erigontech/erigon/cl/sentinel/handlers/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
@@ -78,9 +78,9 @@ func TestBlocksByHeadParentChainTraversal(t *testing.T) {
 
 func TestBlocksByHeadForkChoiceFallback(t *testing.T) {
 	blocks, roots := makeBlocksByHeadChain(t, 300, 1)
-	forkChoice := mock_services.NewForkChoiceStorageMock(t)
-	forkChoice.Blocks[roots[0]] = blocks[0]
-	_, stream := setupBlocksByHeadTest(t, nil, forkChoice)
+	chainData := mock_services.NewChainDataReaderMock()
+	chainData.Blocks[roots[0]] = blocks[0]
+	_, stream := setupBlocksByHeadTest(t, nil, chainData)
 
 	writeBlocksByHeadRequest(t, stream, roots[0], 1)
 
@@ -109,7 +109,7 @@ func TestBlocksByHeadZeroCount(t *testing.T) {
 func setupBlocksByHeadTest(
 	t *testing.T,
 	blocks []*cltypes.SignedBeaconBlock,
-	forkChoice *mock_services.ForkChoiceStorageMock,
+	chainData *mock_services.ChainDataReaderMock,
 ) (*tests.MockBlockReader, network.Stream) {
 	t.Helper()
 
@@ -136,8 +136,8 @@ func setupBlocksByHeadTest(
 	for _, block := range blocks {
 		store.U[block.Block.Slot] = block
 	}
-	if forkChoice == nil {
-		forkChoice = mock_services.NewForkChoiceStorageMock(t)
+	if chainData == nil {
+		chainData = mock_services.NewChainDataReaderMock()
 	}
 
 	ethClock := getEthClock(t)
@@ -152,7 +152,7 @@ func setupBlocksByHeadTest(
 		nil,
 		beaconCfg,
 		ethClock,
-		nil, forkChoice, nil, nil, nil, true,
+		nil, chainData, nil, nil, nil, true,
 	)
 	c.Start()
 

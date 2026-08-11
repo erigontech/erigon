@@ -52,8 +52,8 @@ func (c *ConsensusHandlers) beaconBlocksByHeadHandler(s network.Stream) error {
 		if err != nil {
 			return err
 		}
-		if block == nil && c.forkChoiceReader != nil {
-			block, _ = c.forkChoiceReader.GetBlock(currentRoot)
+		if block == nil && c.chainDataReader != nil {
+			block, _ = c.chainDataReader.GetBlock(currentRoot)
 		}
 		if block == nil {
 			log.Debug("[Sentinel] beaconBlocksByHead: block not found", "root", currentRoot)
