@@ -165,7 +165,9 @@ type IntraBlockState struct {
 
 	// Journal of state modifications. This is the backbone of
 	// Snapshot and RevertToSnapshot.
-	journal      *journal
+	journal          *journal
+	stateObjectArena stateObjectArena // same lifetime with `journal`
+
 	trace        bool
 	tracingHooks *tracing.Hooks
 	balanceInc   map[accounts.Address]*BalanceIncrease // Map of balance increases (without first reading the account)
@@ -210,8 +212,6 @@ type IntraBlockState struct {
 	// SelfDestruct cells. Left false for genesis/RPC/serial, which still commit
 	// via FinalizeTx→so.data.
 	noMaterialize bool
-
-	stateObjectArena stateObjectArena
 
 	// eip8246 pins whether SELFDESTRUCT preserves the account (EIP-8246 removes
 	// the balance burn). Set per-tx from the block rules in Prepare; under it a
@@ -2827,11 +2827,7 @@ func (sdb *IntraBlockState) clearJournalAndRefund() {
 	sdb.journal.Reset()
 	sdb.revisions.reset()
 	sdb.refund = uint64(0)
-	// Rewind here rather than in Reset: journal entries are the only thing that
-	// can name a transient slot past the call that made it, so the arena is free
-	// exactly when they are dropped. Callers that never Reset (the block
-	// assembler) still reach this at every transaction.
-	sdb.stateObjectArena.reset()
+	sdb.stateObjectArena.reset() // same lifetime with `journal`
 }
 
 // Prepare handles the preparatory steps for executing a state transition.
