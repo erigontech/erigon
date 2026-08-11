@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"runtime"
 	"strings"
 
 	"github.com/spf13/afero"
@@ -81,9 +80,6 @@ func cleanupEnvelopeArtifacts(fs afero.Fs) error {
 }
 
 func syncEnvelopeDirectory(fs afero.Fs) error {
-	if runtime.GOOS == "windows" {
-		return nil
-	}
 	dir, err := fs.Open(".")
 	if err != nil {
 		return err
@@ -287,6 +283,9 @@ func (f *forkGraphDisk) ReadEnvelopeFromDisk(blockRoot common.Hash) (envelope *c
 	}
 	f.stateDumpLock.Lock()
 	defer f.stateDumpLock.Unlock()
+	if _, invalid := f.invalidEnvelopes.Load(blockRoot); invalid {
+		return nil, fmt.Errorf("cannot read known invalid envelope for root %x", blockRoot)
+	}
 
 	filename := getEnvelopeFilename(blockRoot)
 	file, err = f.fs.Open(filename)
@@ -413,7 +412,7 @@ func (f *forkGraphDisk) DumpEnvelopeOnDisk(blockRoot common.Hash, envelope *clty
 
 	// Populate in-memory cache on successful write
 	defer func() {
-		if err == nil {
+		if err == nil || errors.Is(err, ErrEnvelopeCommitted) {
 			f.envelopeExists.Store(blockRoot, struct{}{})
 			f.envelopeMissing.Delete(blockRoot)
 			f.invalidEnvelopes.Delete(blockRoot)
@@ -424,6 +423,9 @@ func (f *forkGraphDisk) DumpEnvelopeOnDisk(blockRoot common.Hash, envelope *clty
 	f.sszBuffer, err = envelope.EncodeSSZ(f.sszBuffer[:0])
 	if err != nil {
 		return
+	}
+	if uint64(len(f.sszBuffer)) > clparams.MaxChunkSize {
+		return fmt.Errorf("cannot persist envelope: length %d exceeds max %d", len(f.sszBuffer), clparams.MaxChunkSize)
 	}
 
 	filename := getEnvelopeFilename(blockRoot)
@@ -479,7 +481,7 @@ func (f *forkGraphDisk) DumpEnvelopeOnDisk(blockRoot common.Hash, envelope *clty
 		return
 	}
 	if err = syncEnvelopeDirectory(f.fs); err != nil {
-		return
+		return fmt.Errorf("%w: sync envelope directory: %w", ErrEnvelopeCommitted, err)
 	}
 
 	return

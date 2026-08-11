@@ -62,6 +62,7 @@ type payloadVoteForkGraph struct {
 	fork_graph.ForkGraph
 	hasEnvelope        bool
 	dumpedEnvelope     *common.Hash
+	dumpEnvelopeErr    error
 	invalidatedHeader  *common.Hash
 	unavailablePayload *common.Hash
 	acceptedPayloads   map[common.Hash]bool
@@ -92,7 +93,7 @@ func (g payloadVoteForkGraph) DumpEnvelopeOnDisk(blockRoot common.Hash, _ *cltyp
 	if g.dumpedEnvelope != nil {
 		*g.dumpedEnvelope = blockRoot
 	}
-	return nil
+	return g.dumpEnvelopeErr
 }
 
 func (g payloadVoteForkGraph) MarkHeaderAsInvalid(blockRoot common.Hash) {

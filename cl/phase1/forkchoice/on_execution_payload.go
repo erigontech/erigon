@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
@@ -530,7 +531,10 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(ctx context.Context, signedEn
 
 	// Persist envelope to disk — this marks the root as "has payload" in store.payloads
 	if err := f.forkGraph.DumpEnvelopeOnDisk(beaconBlockRoot, signedEnvelope); err != nil {
-		return false, fmt.Errorf("OnExecutionPayload: failed to dump envelope: %w", err)
+		if !errors.Is(err, fork_graph.ErrEnvelopeCommitted) {
+			return false, fmt.Errorf("OnExecutionPayload: failed to dump envelope: %w", err)
+		}
+		log.Warn("envelope committed with durability warning", "root", beaconBlockRoot, "err", err)
 	}
 	if f.engine == nil && envelope.Payload != nil {
 		if _, retained := f.markPayloadStatusIfRetainedLocked(beaconBlockRoot, envelope.Payload.BlockHash, execution_client.PayloadStatusNotValidated); !retained {
@@ -663,8 +667,11 @@ func (f *ForkChoiceStore) StoreAnchorEnvelope(blockRoot common.Hash, signedEnvel
 
 	f.mu.Lock()
 	if err := f.forkGraph.DumpEnvelopeOnDisk(blockRoot, signedEnvelope); err != nil {
-		f.mu.Unlock()
-		return fmt.Errorf("StoreAnchorEnvelope: failed to dump envelope: %w", err)
+		if !errors.Is(err, fork_graph.ErrEnvelopeCommitted) {
+			f.mu.Unlock()
+			return fmt.Errorf("StoreAnchorEnvelope: failed to dump envelope: %w", err)
+		}
+		log.Warn("anchor envelope committed with durability warning", "root", blockRoot, "err", err)
 	}
 	if f.engine == nil {
 		if _, retained := f.markPayloadStatusIfRetainedLocked(blockRoot, envelope.Payload.BlockHash, execution_client.PayloadStatusNotValidated); !retained {
@@ -1059,7 +1066,10 @@ func (f *ForkChoiceStore) applyLocalSelfBuildEnvelopeCoordinated(ctx context.Con
 	}
 
 	if err := f.forkGraph.DumpEnvelopeOnDisk(beaconBlockRoot, signedEnvelope); err != nil {
-		return false, fmt.Errorf("applyLocalSelfBuildEnvelopeCoordinated: failed to dump envelope: %w", err)
+		if !errors.Is(err, fork_graph.ErrEnvelopeCommitted) {
+			return false, fmt.Errorf("applyLocalSelfBuildEnvelopeCoordinated: failed to dump envelope: %w", err)
+		}
+		log.Warn("local envelope committed with durability warning", "root", beaconBlockRoot, "err", err)
 	}
 
 	f.headHash = common.Hash{}
