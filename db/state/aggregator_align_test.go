@@ -17,7 +17,6 @@
 package state
 
 import (
-	"context"
 	"fmt"
 	"testing"
 
@@ -232,14 +231,12 @@ func craftedClampedVisible(t *testing.T, agg *Aggregator) {
 	agg.visible.Store(crafted)
 }
 
-// A dependency-clamped values view has no exact frontier: reads mix fresh
-// DB-resident keys with older file values for gap keys, and raising the
-// dependent file's visibility later reveals state without any cache apply —
-// nothing would invalidate a fill made during the clamp. DomainVisibleEnd
-// must report ok=false so such views never fill.
-func TestDomainVisibleEnd_ClampedViewHasNoExactFrontier(t *testing.T) {
+// A dependency-clamped values view cannot safely fill a shared latest-state
+// cache: later file publication can reveal state without a database version
+// change to invalidate those fills.
+func TestHasCacheableLatestViewRejectsClampedView(t *testing.T) {
 	t.Parallel()
-	db, agg := testDbAndAggregatorv3(t, alignStepSize)
+	_, agg := testDbAndAggregatorv3(t, alignStepSize)
 
 	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
 	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
@@ -250,19 +247,12 @@ func TestDomainVisibleEnd_ClampedViewHasNoExactFrontier(t *testing.T) {
 
 	at := agg.BeginFilesRo()
 	defer at.Close()
-	tx, err := db.BeginRo(context.Background())
-	require.NoError(t, err)
-	defer tx.Rollback()
-
-	_, ok := at.DomainVisibleEnd(kv.AccountsDomain, tx)
-	require.False(t, ok, "a dependency-clamped values view has no exact frontier")
 	require.False(t, at.HasCacheableLatestView(kv.AccountsDomain),
 		"history-enabled views remain uncacheable while values files lag history-II")
 }
 
-// The forbid assert must also watch the history-II ends: they are the base of
-// what DomainVisibleEnd reports, and with values dependency-clamped below the
-// ceiling they can lower while every values end stays put.
+// Cache eligibility depends on values files covering history-II, so the
+// visibility-lowering assert must watch history-II ends as well as values ends.
 func TestVisibilityLowering_StateCacheGuardsHistoryIIEnd(t *testing.T) {
 	t.Parallel()
 	_, agg := testDbAndAggregatorv3(t, alignStepSize)

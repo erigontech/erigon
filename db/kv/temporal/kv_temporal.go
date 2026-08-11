@@ -727,12 +727,6 @@ func (tx *Tx) DomainProgress(domain kv.Domain) uint64 {
 func (tx *RwTx) DomainProgress(domain kv.Domain) uint64 {
 	return tx.aggtx.DomainProgress(domain, tx.RwTx)
 }
-func (tx *Tx) DomainVisibleEnd(domain kv.Domain) (uint64, bool) {
-	return tx.aggtx.DomainVisibleEnd(domain, tx.Tx)
-}
-func (tx *RwTx) DomainVisibleEnd(domain kv.Domain) (uint64, bool) {
-	return tx.aggtx.DomainVisibleEnd(domain, tx.RwTx)
-}
 func (tx *tx) HasCacheableLatestView(domain kv.Domain) bool {
 	return tx.aggtx.HasCacheableLatestView(domain)
 }

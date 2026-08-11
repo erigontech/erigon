@@ -109,8 +109,6 @@ func TestStateCacheReadViewSupportsHistoryDisabledLatestState(t *testing.T) {
 	debug := tx.Debug()
 	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
 		require.True(t, debug.HasCacheableLatestView(domain))
-		_, exact := debug.DomainVisibleEnd(domain)
-		require.False(t, exact)
 	}
 
 	stateVersion, err := rawdb.GetStateVersion(tx)

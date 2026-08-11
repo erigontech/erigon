@@ -520,14 +520,11 @@ type TemporalDebugTx interface {
 	// DomainProgress is a best-effort progress number for reporting: it mixes
 	// an exclusive files end with an inclusive DB txNum (so it is ±1 depending
 	// on which side wins) and falls back to step granularity when history is
-	// disabled. For an exact bound use DomainVisibleEnd.
+	// disabled. It must not be used as an exact read-view bound.
 	DomainProgress(domain Domain) (txNum uint64)
-	// DomainVisibleEnd returns the exact exclusive txNum bound of the tx's
-	// domain read view. ok is false when the backend cannot provide an exact bound.
-	DomainVisibleEnd(domain Domain) (visibleEnd uint64, ok bool)
 	// HasCacheableLatestView reports whether the state version and visible value
-	// files fully identify GetLatest results. Unlike DomainVisibleEnd, this may be
-	// true when history is disabled.
+	// files fully identify GetLatest results. This may be true when history is
+	// disabled because latest DB values do not require a history frontier.
 	HasCacheableLatestView(domain Domain) bool
 	IIProgress(name InvertedIdx) (txNum uint64)
 	StepSize() uint64

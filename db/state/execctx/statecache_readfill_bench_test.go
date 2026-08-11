@@ -103,7 +103,7 @@ func BenchmarkGetLatestColdNegativeRwNoCache(b *testing.B) {
 
 var benchmarkTemporalGetter kv.TemporalGetter
 
-func benchmarkCacheGetterConstruction(b *testing.B, resolveVisibleEnds bool) {
+func BenchmarkCacheGetterConstruction(b *testing.B) {
 	db := benchSeedDb(b)
 	ctx := b.Context()
 	baseTx, err := db.BeginTemporalRo(ctx)
@@ -116,12 +116,6 @@ func benchmarkCacheGetterConstruction(b *testing.B, resolveVisibleEnds bool) {
 	defer stateCache.Close()
 	sd.SetCanonicalCachesForTest(stateCache)
 
-	domains := [...]kv.Domain{
-		kv.AccountsDomain,
-		kv.StorageDomain,
-		kv.CodeDomain,
-		kv.CommitmentDomain,
-	}
 	b.ResetTimer()
 	b.StopTimer()
 	for range b.N {
@@ -130,23 +124,8 @@ func benchmarkCacheGetterConstruction(b *testing.B, resolveVisibleEnds bool) {
 			b.Fatal(err)
 		}
 		b.StartTimer()
-		if resolveVisibleEnds {
-			debug := tx.Debug()
-			for _, domain := range domains {
-				debug.DomainVisibleEnd(domain)
-			}
-		}
 		benchmarkTemporalGetter = sd.AsGetter(tx)
 		b.StopTimer()
 		tx.Rollback()
 	}
-}
-
-func BenchmarkCacheGetterConstruction(b *testing.B) {
-	b.Run("exactness_check", func(b *testing.B) {
-		benchmarkCacheGetterConstruction(b, false)
-	})
-	b.Run("visible_end_resolution", func(b *testing.B) {
-		benchmarkCacheGetterConstruction(b, true)
-	})
 }

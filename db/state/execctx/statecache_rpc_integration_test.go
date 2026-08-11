@@ -399,11 +399,6 @@ func TestAccountOnlyDeleteDoesNotBlockUnrelatedCodeFill(t *testing.T) {
 	freshTx, err := db.BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer freshTx.Rollback()
-	codeEnd, ok := freshTx.Debug().DomainVisibleEnd(kv.CodeDomain)
-	require.True(t, ok)
-	accountsEnd, ok := freshTx.Debug().DomainVisibleEnd(kv.AccountsDomain)
-	require.True(t, ok)
-	require.Less(t, codeEnd, accountsEnd)
 
 	freshDomains, err := execctx.NewSharedDomains(ctx, freshTx, log.New())
 	require.NoError(t, err)

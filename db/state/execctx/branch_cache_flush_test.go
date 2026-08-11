@@ -99,9 +99,6 @@ func TestBranchCacheReadsWithoutCommitmentHistory(t *testing.T) {
 	roTx, err := db.BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer roTx.Rollback()
-	_, exact := roTx.Debug().DomainVisibleEnd(kv.CommitmentDomain)
-	require.False(t, exact,
-		"the default commitment domain has no historical frontier")
 	require.True(t, roTx.Debug().HasCacheableLatestView(kv.CommitmentDomain),
 		"latest commitment state remains cacheable without history")
 
