@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -127,7 +128,18 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 		if stateVersion.AfterOrEqual(clparams.GloasVersion) {
 			return
 		}
-		if !shouldPrepare(targetSlot, primedSlot, a.syncedData.HeadRoot(), primedHead) {
+		selectedRoot, _, selected := a.syncedData.SelectedHead()
+		if !selected {
+			continue
+		}
+		// Fork choice publishes the selected head before the execution layer is notified and
+		// before the memoized state catches up. Priming while those disagree would send
+		// attributes for a head the execution layer has already moved past, unwinding the
+		// block it just executed right before this node proposes.
+		if selectedRoot != a.syncedData.HeadRoot() {
+			continue
+		}
+		if !shouldPrepare(targetSlot, primedSlot, selectedRoot, primedHead) {
 			continue
 		}
 		if !shouldPreparePayloadVersion(stateVersion) {
@@ -163,6 +175,9 @@ func isExpectedPreparationSkip(err error) bool {
 		errors.Is(err, errNoPayloadID) ||
 		errors.Is(err, errHeadTooFarBack) ||
 		errors.Is(err, errPreparationHeadChanged) ||
+		errors.Is(err, execution_client.ErrForkChoiceUpdateBusy) ||
+		errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, context.Canceled) ||
 		errors.Is(err, synced_data.ErrNotSynced)
 }
 
@@ -223,7 +238,7 @@ func (a *ApiHandler) preparePayloadFor(ctx context.Context, targetSlot uint64) (
 	if err != nil {
 		return common.Hash{}, err
 	}
-	if a.syncedData.HeadRoot() != baseBlockRoot {
+	if selectedRoot, _, selected := a.syncedData.SelectedHead(); !selected || selectedRoot != baseBlockRoot {
 		return common.Hash{}, errPreparationHeadChanged
 	}
 	payloadID, err := a.engine.ForkChoiceUpdate(ctx, finalizedHash, safeHash, head, attrs, stateVersion)

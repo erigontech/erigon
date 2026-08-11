@@ -87,8 +87,14 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 	bcfg.InitializeForkSchedule()
 
 	if useRealSyncDataMgr {
-		syncedData = synced_data.NewSyncedDataManager(&bcfg, true)
-		syncedData.OnHeadState(postState)
+		manager := synced_data.NewSyncedDataManager(&bcfg, true)
+		manager.OnHeadState(postState)
+		// Fork choice publishes the selected head before the state is memoized, so a synced
+		// fixture has to expose both for handlers that read head identity.
+		headRoot, err := postState.BlockRoot()
+		require.NoError(t, err)
+		manager.OnSelectedHead(headRoot, postState.Slot())
+		syncedData = manager
 	} else {
 		syncedData = sync_mock_services.NewMockSyncedData(ctrl)
 	}

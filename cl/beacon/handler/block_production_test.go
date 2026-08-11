@@ -911,6 +911,7 @@ func TestPreparePayloadForSendsCompleteForkChoiceUpdate(t *testing.T) {
 	baseBlockRoot := common.Hash{0x41}
 	syncedData := synced_data.NewSyncedDataManager(&config, true)
 	require.NoError(t, syncedData.OnHeadStateWithBlockRoot(headState, baseBlockRoot))
+	syncedData.OnSelectedHead(baseBlockRoot, headState.Slot())
 	handler.beaconChainCfg = &config
 	handler.syncedData = syncedData
 
@@ -988,7 +989,7 @@ func TestPreparePayloadForRejectsChangedHeadBeforeForkChoiceUpdate(t *testing.T)
 			DoAndReturn(func(view synced_data.ViewHeadStateWithIdentityFn) error {
 				return view(postState, baseBlockRoot, postState.Slot())
 			}),
-		syncedDataMock.EXPECT().HeadRoot().Return(changedBlockRoot),
+		syncedDataMock.EXPECT().SelectedHead().Return(changedBlockRoot, postState.Slot(), true),
 	)
 	engine := execution_client.NewMockExecutionEngine(ctrl)
 	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
@@ -1049,7 +1050,7 @@ func TestPreparePayloadForUsesPostEpochProposer(t *testing.T) {
 		DoAndReturn(func(view synced_data.ViewHeadStateWithIdentityFn) error {
 			return view(headState, baseBlockRoot, headState.Slot())
 		})
-	syncedDataMock.EXPECT().HeadRoot().Return(baseBlockRoot)
+	syncedDataMock.EXPECT().SelectedHead().Return(baseBlockRoot, headState.Slot(), true)
 	engine := execution_client.NewMockExecutionEngine(ctrl)
 	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 		DoAndReturn(func(_ context.Context, _, _, _ common.Hash, attrs *engine_types.PayloadAttributes, _ clparams.StateVersion) ([]byte, error) {
