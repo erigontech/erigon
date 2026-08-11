@@ -124,7 +124,14 @@ func (a *ApiHandler) triggerELClientVersionFetch() {
 	if a.engine == nil || a.elClientVersion.Load() != nil {
 		return
 	}
-	if !a.elClientVersionFetching.CompareAndSwap(false, true) {
+	if a.elClientVersionFetching.Swap(true) {
+		return
+	}
+	// The fetch this call raced against may have cached the version and released the
+	// slot between the load above and this swap, so recheck before spending another
+	// engine round-trip.
+	if a.elClientVersion.Load() != nil {
+		a.elClientVersionFetching.Store(false)
 		return
 	}
 	go func() {

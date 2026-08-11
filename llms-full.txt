@@ -870,7 +870,7 @@ Follow these steps to configure and launch the All-in-One Client. Erigon uses it
 
 Create a new file named `docker-compose.yml` in a directory where you want to manage your Erigon setup, and paste the following content into it:
 
-```sh
+```yaml
 services:
   erigon:
     image: erigontech/erigon:v{ERIGON_VERSION}
@@ -879,48 +879,123 @@ services:
     command:
       # --- Basic Configuration ---
       - --chain=mainnet
+      # Must match the container side of the volume mount below.
+      - --datadir=/var/lib/erigon
       - --http.addr=0.0.0.0
       - --http.api=eth,web3,net,debug,trace,txpool
-      # --- Performance Tweaks ---
-      - --torrent.download.rate=512mb
+      # --- Reachability (recommended) ---
+      # Lets other nodes dial you. Set EXTERNAL_IP to your public IP, or drop
+      # both lines to run outbound-only with fewer peers.
+      - --nat=extip:${EXTERNAL_IP:?set EXTERNAL_IP to this host's public IP, or delete these two lines to run outbound-only}
+      - --caplin.nat=extip:${EXTERNAL_IP:?set EXTERNAL_IP to this host's public IP, or delete these two lines to run outbound-only}
       # --- Pruning Mode (Optional) ---
       # To change Pruning Mode, uncomment the line below:
       # - --prune.mode=archive
       # or
       # - --prune.mode=minimal
     ports:
-      - "8545:8545" # Exposes the RPC port (needed for wallets/dApps)
+      - "127.0.0.1:8545:8545" # RPC, reachable from this machine only
+      - "30303:30303/tcp"     # execution-layer p2p
+      - "30303:30303/udp"     # execution-layer discovery
+      - "42069:42069/tcp"     # snapshot downloader (BitTorrent)
+      - "42069:42069/udp"
+      - "4000:4000/udp"       # Caplin consensus-layer discovery
+      - "4001:4001/tcp"       # Caplin consensus-layer p2p
     volumes:
       # *** IMPORTANT: CHANGE THIS PATH! ***
-      # Replace the path below with an actual directory on your machine 
+      # Replace the path below with an actual directory on your machine
       # where you want the blockchain data stored (e.g., /mnt/ssd/erigon-data)
       - /path/to/erigon/data:/var/lib/erigon
 ```
 
+Set `EXTERNAL_IP` before starting, either in a `.env` file next to `docker-compose.yml`:
+
+```bash
+echo "EXTERNAL_IP=$(curl -s https://api.ipify.org)" > .env
+```
+
+or by exporting it in your shell. Forward the `30303`, `42069`, `4000` and `4001`
+ports on your router as well, otherwise peers still cannot reach you.
+
 :::warning
-⚠️ **Action Required**: You must change the volume path! Replace `/path/to/erigon/data` with a valid, empty directory on your machine where you want Erigon to store its files.
+⚠️ **Action Required**: the volume path should be changed to suit your setup — replace `/path/to/erigon/data` with a valid, empty directory on your machine where you want Erigon to store its files.
+
+The container runs as UID/GID `1000`, so the directory must be writable by that
+user — `sudo chown -R 1000:1000 /path/to/erigon/data`. See
+[Permission denied inside Docker](/help-center/common-errors-and-solutions) if
+you hit a `permission denied` error on startup.
 :::
 
 ### **B. Launch the Node and Monitor Progress**
 
 Open your terminal in the directory where you saved `docker-compose.yml`. To start the node and immediately see the sync process type:
 
-```text
+```bash
 docker compose up
 ```
+
+That keeps the logs in the foreground, which is what you want the first time.
+Once you are happy with the configuration, start it detached so the node keeps
+running after you close the terminal:
+
+```bash
+docker compose up -d
+```
+
+and follow the logs when you need them with `docker compose logs -f`.
 
 ## Flag explanation
 
 * `--chain=mainnet` specifies to run on Ethereum mainnet
 * Add `--prune.mode=minimal` to run minimal [Pruning Mode](/fundamentals/pruning-modes) or `--prune.mode=archive` to run an archive node
-* `--http.addr=0.0.0.0 --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](/fundamentals/web3-wallet)
-* `--torrent.download.rate` sets the torrent download rate cap. The default is `512mb` (megabytes per second). During initial sync Erigon will use the full allowance — on a dedicated machine this is fine, but if you share the machine with other work you may want to lower it (e.g. `--torrent.download.rate=128mb`). Set `--torrent.download.rate=Inf` to remove the limit entirely.
+* `--datadir=/var/lib/erigon` has to name the same path as the container side of the volume mount. Without it Erigon writes to its default location inside the container instead of your mounted directory, and the data ends up in an anonymous Docker volume rather than where you pointed it
+* `--http.addr=0.0.0.0 --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](/fundamentals/web3-wallet). `0.0.0.0` is the address *inside* the container, which is what lets Docker forward to it at all; the `127.0.0.1:8545:8545` port mapping is what keeps it off your LAN. Change that mapping to `8545:8545` only if you intend to expose RPC to other machines
+* `--nat=extip:<your public IP>` and `--caplin.nat=extip:<your public IP>` advertise a reachable address so other nodes can dial you — the first for the execution layer, the second for Caplin. Without them, and without the forwarded ports, the node still syncs but only through connections it opens itself
+* `--torrent.download.rate` is deliberately not set above, because its default of `512mb` (megabytes per second) is already the maximum this recipe would ask for. During initial sync Erigon uses the full allowance, which is what you want on a dedicated machine. Add the flag only to **lower** the cap if you share the machine with other work (e.g. `--torrent.download.rate=128mb`), or set `--torrent.download.rate=Inf` to remove the limit entirely.
 
 When you get familiar with running Erigon from CLI you may also consider [staking](/staking/caplin) and/or running an Ethereum node with an [external Consensus Layer](/get-started/easy-nodes/how-to-run-an-ethereum-node/ethereum-with-an-external-cl).
 
 :::tip
 Press `Ctrl+C` in your terminal to stop Erigon.
 :::
+
+## Host networking as an alternative
+
+Publishing each port individually is explicit, but Docker's NAT is also what
+makes `--nat=extip:...` necessary in the first place. Adding `network_mode:
+host` to the service instead gives the container the host's network stack
+directly, so peers see the host's own address and there is nothing to map:
+
+```yaml
+services:
+  erigon:
+    image: erigontech/erigon:v{ERIGON_VERSION}
+    network_mode: host
+    command:
+      - --chain=mainnet
+      - --datadir=/var/lib/erigon
+      # With host networking these bind on the host directly, so keep the
+      # local-only services on loopback rather than 0.0.0.0.
+      - --http.addr=127.0.0.1
+      - --http.api=eth,web3,net,debug,trace,txpool
+      - --authrpc.addr=127.0.0.1
+      - --private.api.addr=127.0.0.1:9090
+    volumes:
+      - /path/to/erigon/data:/var/lib/erigon
+```
+
+Two things change with it, and both matter:
+
+* the `ports:` section is ignored — port publishing does not apply, so the
+  firewall on the host is what governs access;
+* every listener binds on the host, so anything you do not want exposed must be
+  bound explicitly to `127.0.0.1`. That is why RPC, the Engine API and the
+  internal gRPC address are pinned to loopback above. `--nat` and `--caplin.nat`
+  are no longer needed for the container, though you still need the p2p ports
+  forwarded on your router.
+
+Host networking is Linux-only in practice; on Docker Desktop for macOS and
+Windows it does not behave the same way, so keep the published-ports form there.
 
 Additional flags can be added to [configure](/fundamentals/configuring-erigon/) Erigon with several options.
 
@@ -932,6 +1007,34 @@ URL: https://docs.erigon.tech/get-started/easy-nodes/how-to-run-an-ethereum-node
 
 You can use **Prysm**, **Lighthouse**, or any other Consensus Layer client with Erigon by including the `--externalcl` flag. This integration enables direct access to the Ethereum blockchain, allowing you to manage your keys for staking ETH and block production.
 
+:::warning
+The Engine API drives block processing, so anything that can reach it and holds
+your JWT secret controls the node. The steps below widen it past localhost only
+so a CL on another machine can connect — when you do that, protect it:
+
+* prefer the specific interface — `--authrpc.addr <this-host-LAN-IP>` — over
+  `0.0.0.0`, which listens on every interface including any public one;
+* restrict port `8551` at the firewall to the CL host's address, and never
+  expose it to the internet;
+* treat `--authrpc.vhosts` as a `Host`-header check, not a network control: it
+  is not a substitute for a firewall rule;
+* keep `jwt.hex` readable only by the accounts that need it, and copy it to the
+  CL host over a private channel.
+
+If both clients run on the same machine, leave the Engine API on its default
+localhost address and skip those flags entirely.
+:::
+
+:::tip
+Keep your consensus client current, the same way you would Erigon. Beyond fixes
+and performance work, a CL carries the fork schedule it was built with: a
+version released before an upcoming hard fork may not follow the chain through
+it, which stalls your execution layer too. Watch your client's releases
+([Prysm](https://github.com/OffchainLabs/prysm/releases),
+[Lighthouse](https://github.com/sigp/lighthouse/releases)) and upgrade before
+scheduled forks, not after.
+:::
+
 ## Erigon with Prysm as the external CL
 
 1.  Start Erigon adding the `--externalcl` flag:
@@ -942,7 +1045,7 @@ You can use **Prysm**, **Lighthouse**, or any other Consensus Layer client with 
 
     If your Consensus Layer (CL) client is on a different device, add the following flags:
 
-    * `--authrpc.addr 0.0.0.0`, since the Engine API listens on localhost by default;
+    * `--authrpc.addr <this-host-LAN-IP>` — the Engine API listens on localhost by default, so it has to be widened for a remote CL. Read the warning below before reaching for `0.0.0.0`;
     * `--authrpc.vhosts <CL_host>` where \ is the source host or the appropriate hostname that your CL client is using.
 2.  Install and run **Prysm** by following the official guide: [https://docs.prylabs.network/docs/install/install-with-script](https://docs.prylabs.network/docs/install/install-with-script).
 
@@ -961,7 +1064,7 @@ You can use **Prysm**, **Lighthouse**, or any other Consensus Layer client with 
 1.  Start Erigon adding the `--externalcl` flag:
 
     ```bash
-    ./build/bin/erigon --externalcl
+    erigon --externalcl
     ```
 2. Install and run Lighthouse by following the official guide: [https://lighthouse-book.sigmaprime.io/installation.html](https://lighthouse-book.sigmaprime.io/installation.html)
 3. Because Erigon needs a target head in order to sync, Lighthouse must be synced before Erigon can synchronize. The fastest way to synchronize Lighthouse is to use one of the many public checkpoint synchronization endpoints at [https://eth-clients.github.io/checkpoint-sync-endpoints](https://eth-clients.github.io/checkpoint-sync-endpoints).
@@ -973,7 +1076,7 @@ You can use **Prysm**, **Lighthouse**, or any other Consensus Layer client with 
     --network mainnet \
     --execution-endpoint http://localhost:8551 \
     --execution-jwt <your-datadir>/jwt.hex \
-    --checkpoint-sync-url https://mainnet.checkpoint.sigp.io \
+    --checkpoint-sync-url https://mainnet.checkpoint.sigp.io
     ```
 
 Check Erigon and your chosen CL logs to make sure that the Execution Layer (EL) and CL are communicating and that your node is syncing correctly.
@@ -999,7 +1102,7 @@ Follow these steps to configure and launch the All-in-One Client. Erigon uses it
 
 Create a new file named `docker-compose.yml` in a directory where you want to manage your Erigon setup, and paste the following content into it:
 
-```sh
+```yaml
 services:
   erigon:
     image: erigontech/erigon:v{ERIGON_VERSION}
@@ -1008,48 +1111,123 @@ services:
     command:
       # --- Basic Configuration ---
       - --chain=gnosis
-      - --http.addr="0.0.0.0"
+      # Must match the container side of the volume mount below.
+      - --datadir=/var/lib/erigon
+      - --http.addr=0.0.0.0
       - --http.api=eth,web3,net,debug,trace,txpool
-      # --- Performance Tweaks ---
-      - --torrent.download.rate=512mb
+      # --- Reachability (recommended) ---
+      # Lets other nodes dial you. Set EXTERNAL_IP to your public IP, or drop
+      # both lines to run outbound-only with fewer peers.
+      - --nat=extip:${EXTERNAL_IP:?set EXTERNAL_IP to this host's public IP, or delete these two lines to run outbound-only}
+      - --caplin.nat=extip:${EXTERNAL_IP:?set EXTERNAL_IP to this host's public IP, or delete these two lines to run outbound-only}
       # --- Pruning Mode (Optional) ---
       # To change Pruning Mode, uncomment the line below:
       # - --prune.mode=archive
       # or
       # - --prune.mode=minimal
     ports:
-      - "8545:8545" # Exposes the RPC port (needed for wallets/dApps)
+      - "127.0.0.1:8545:8545" # RPC, reachable from this machine only
+      - "30303:30303/tcp"     # execution-layer p2p
+      - "30303:30303/udp"     # execution-layer discovery
+      - "42069:42069/tcp"     # snapshot downloader (BitTorrent)
+      - "42069:42069/udp"
+      - "4000:4000/udp"       # Caplin consensus-layer discovery
+      - "4001:4001/tcp"       # Caplin consensus-layer p2p
     volumes:
       # *** IMPORTANT: CHANGE THIS PATH! ***
-      # Replace the path below with an actual directory on your machine 
+      # Replace the path below with an actual directory on your machine
       # where you want the blockchain data stored (e.g., /mnt/ssd/erigon-data)
       - /path/to/erigon/data:/var/lib/erigon
 ```
 
+Set `EXTERNAL_IP` before starting, either in a `.env` file next to `docker-compose.yml`:
+
+```bash
+echo "EXTERNAL_IP=$(curl -s https://api.ipify.org)" > .env
+```
+
+or by exporting it in your shell. Forward the `30303`, `42069`, `4000` and `4001`
+ports on your router as well, otherwise peers still cannot reach you.
+
 :::warning
-⚠️ **Action Required**: You must change the volume path! Replace `/path/to/erigon/data` with a valid, empty directory on your machine where you want Erigon to store its files.
+⚠️ **Action Required**: the volume path should be changed to suit your setup — replace `/path/to/erigon/data` with a valid, empty directory on your machine where you want Erigon to store its files.
+
+The container runs as UID/GID `1000`, so the directory must be writable by that
+user — `sudo chown -R 1000:1000 /path/to/erigon/data`. See
+[Permission denied inside Docker](/help-center/common-errors-and-solutions) if
+you hit a `permission denied` error on startup.
 :::
 
 ### **B. Launch the Node and Monitor Progress**
 
 Open your terminal in the directory where you saved `docker-compose.yml`. To start the node and immediately see the sync process type:
 
-```text
+```bash
 docker compose up
 ```
+
+That keeps the logs in the foreground, which is what you want the first time.
+Once you are happy with the configuration, start it detached so the node keeps
+running after you close the terminal:
+
+```bash
+docker compose up -d
+```
+
+and follow the logs when you need them with `docker compose logs -f`.
 
 ## Flag explanation
 
 * `--chain=gnosis` specifies to run on Gnosis Chain, use `--chain=chiado` for Chiado testnet
 * Add `--prune.mode=minimal` to run minimal [Pruning Mode](/fundamentals/pruning-modes) or `--prune.mode=archive` to run an archive node
-* `--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](/fundamentals/web3-wallet)
-* `--torrent.download.rate=512mb` to increase download speed. While the default downloading speed is 128mb, with this flag Erigon will use as much download speed as it can, up to a maximum of 512 megabytes per second. This means it will try to download data as quickly as possible, but it won't exceed the 512 MB/s limit you've set
+* `--datadir=/var/lib/erigon` has to name the same path as the container side of the volume mount. Without it Erigon writes to its default location inside the container instead of your mounted directory, and the data ends up in an anonymous Docker volume rather than where you pointed it
+* `--http.addr=0.0.0.0 --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](/fundamentals/web3-wallet). `0.0.0.0` is the address *inside* the container, which is what lets Docker forward to it at all; the `127.0.0.1:8545:8545` port mapping is what keeps it off your LAN. Change that mapping to `8545:8545` only if you intend to expose RPC to other machines
+* `--nat=extip:<your public IP>` and `--caplin.nat=extip:<your public IP>` advertise a reachable address so other nodes can dial you — the first for the execution layer, the second for Caplin. Without them, and without the forwarded ports, the node still syncs but only through connections it opens itself
+* `--torrent.download.rate` is deliberately not set above, because its default of `512mb` (megabytes per second) is already the maximum this recipe would ask for. During initial sync Erigon uses the full allowance, which is what you want on a dedicated machine. Add the flag only to **lower** the cap if you share the machine with other work (e.g. `--torrent.download.rate=128mb`), or set `--torrent.download.rate=Inf` to remove the limit entirely.
 
 When you get familiar with running Erigon from CLI you may also consider [staking](/staking/caplin) and/or run a Gnosis node with an [external Consensus Layer](/get-started/easy-nodes/how-to-run-a-gnosis-chain-node/gnosis-with-an-external-cl).
 
 :::tip
 Press `Ctrl+C` in your terminal to stop Erigon.
 :::
+
+## Host networking as an alternative
+
+Publishing each port individually is explicit, but Docker's NAT is also what
+makes `--nat=extip:...` necessary in the first place. Adding `network_mode:
+host` to the service instead gives the container the host's network stack
+directly, so peers see the host's own address and there is nothing to map:
+
+```yaml
+services:
+  erigon:
+    image: erigontech/erigon:v{ERIGON_VERSION}
+    network_mode: host
+    command:
+      - --chain=gnosis
+      - --datadir=/var/lib/erigon
+      # With host networking these bind on the host directly, so keep the
+      # local-only services on loopback rather than 0.0.0.0.
+      - --http.addr=127.0.0.1
+      - --http.api=eth,web3,net,debug,trace,txpool
+      - --authrpc.addr=127.0.0.1
+      - --private.api.addr=127.0.0.1:9090
+    volumes:
+      - /path/to/erigon/data:/var/lib/erigon
+```
+
+Two things change with it, and both matter:
+
+* the `ports:` section is ignored — port publishing does not apply, so the
+  firewall on the host is what governs access;
+* every listener binds on the host, so anything you do not want exposed must be
+  bound explicitly to `127.0.0.1`. That is why RPC, the Engine API and the
+  internal gRPC address are pinned to loopback above. `--nat` and `--caplin.nat`
+  are no longer needed for the container, though you still need the p2p ports
+  forwarded on your router.
+
+Host networking is Linux-only in practice; on Docker Desktop for macOS and
+Windows it does not behave the same way, so keep the published-ports form there.
 
 Additional flags can be added to [configure](/fundamentals/configuring-erigon/) Erigon with several options.
 
@@ -1066,23 +1244,51 @@ Alternatively, you can also run a Gnosis Chain node as an Execution Layer (EL) a
 Start Erigon adding the `--externalcl` flag.
 
 ```bash
-erigon --chain=gnosis --externalcl 
+erigon --chain=gnosis --externalcl
 ```
 
 If your CL client is on a different device, add the following flags:
 
-* `--authrpc.addr 0.0.0.0`, since the Engine API listens on localhost by default;
+* `--authrpc.addr <this-host-LAN-IP>` — the Engine API listens on localhost by default, so it has to be widened for a remote CL. Read the warning below before reaching for `0.0.0.0`;
 * `--authrpc.vhosts <CL_host>` where `<CL_host>` is the source host or the appropriate hostname that your CL client is using.
+
+:::warning
+The Engine API drives block processing, so anything that can reach it and holds
+your JWT secret controls the node. Only widen it when the CL really is on
+another machine, and protect the endpoint when you do:
+
+* prefer the specific interface — `--authrpc.addr <this-host-LAN-IP>` — over
+  `0.0.0.0`, which listens on every interface including any public one;
+* restrict port `8551` at the firewall to the CL host's address, and never
+  expose it to the internet;
+* treat `--authrpc.vhosts` as a `Host`-header check, not a network control: it
+  is not a substitute for a firewall rule;
+* keep `jwt.hex` readable only by the accounts that need it, and copy it to the
+  CL host over a private channel.
+:::
 
 ### 2. Install Lighthouse
 
 Install Lighthouse, following instructions at [https://lighthouse-book.sigmaprime.io/installation.html](https://lighthouse-book.sigmaprime.io/installation.html).
 
-* Compile it with a feature flag to enable Gnosis Chain:
+The official pre-built binaries already support Gnosis Chain and Chiado, so no special build is required. You can confirm this with `lighthouse --help`, which lists `gnosis` and `chiado` among the accepted `--network` values.
+
+:::tip
+Track Lighthouse releases and keep it current, the same way you would Erigon.
+Beyond fixes and performance work, a consensus client carries the fork schedule
+it was built with: a version released before an upcoming hard fork may not
+follow the chain through it, which stalls your execution layer too. Watch the
+[Lighthouse releases](https://github.com/sigp/lighthouse/releases) page and
+upgrade before scheduled forks, not after.
+:::
+
+:::note
+Only if you build Lighthouse **from source** do you need to enable the Gnosis Chain support explicitly, since it is not one of the default Cargo features:
 
 ```bash
 env FEATURES=gnosis make
 ```
+:::
 
 ### 3. Sync Lighthouse to a public checkpoint
 
@@ -1097,30 +1303,26 @@ To communicate with Erigon, the execution endpoint must be specified as `<erigon
 
 1.  Lighthouse must point to the [JWT secret](../../../fundamentals/jwt) automatically created by Erigon in the `--datadir` directory. In the following example the default data directory is used.
 
-    Copy
-
-    ```text
-     lighthouse \
-     --network gnosis beacon_node \
-     --datadir=data \
-     --http \
-     --execution-endpoint http://localhost:8551 \
-     --execution-jwt /home/user/.local/share/erigon/jwt.hex \
-     --checkpoint-sync-url "https://checkpoint.gnosischain.com"
+    ```bash
+    lighthouse bn \
+    --network gnosis \
+    --datadir=data \
+    --http \
+    --execution-endpoint http://localhost:8551 \
+    --execution-jwt /home/user/.local/share/erigon/jwt.hex \
+    --checkpoint-sync-url "https://checkpoint.gnosischain.com"
     ```
 
     Here is an example of Lighthouse running the Chiado testnet:
 
-    Copy
-
-    ```text
-     lighthouse \
-     --network chiado \
-     --datadir=data \
-     --http \
-     --execution-endpoint http://localhost:8551 \
-     --execution-jwt /home/user/.local/share/erigon/jwt.hex \
-     --checkpoint-sync-url "https://checkpoint.chiadochain.net"
+    ```bash
+    lighthouse bn \
+    --network chiado \
+    --datadir=data \
+    --http \
+    --execution-endpoint http://localhost:8551 \
+    --execution-jwt /home/user/.local/share/erigon/jwt.hex \
+    --checkpoint-sync-url "https://checkpoint.chiadochain.net"
     ```
 
 Check the Erigon and Lighthouse logs to make sure that the EL and CL are communicating and that your node is syncing correctly.
@@ -2298,8 +2500,6 @@ Flags for configuring Fork Choice Update behavior.
   * Default: `1s`
 * `--fcu.background.prune`: Enables background pruning after FCU.
   * Default: `true`
-* `--fcu.background.commit`: Enables background flush and commit after FCU.
-  * Default: `false`
 
 ### Execution
 
