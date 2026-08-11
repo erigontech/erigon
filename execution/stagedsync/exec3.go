@@ -612,6 +612,13 @@ func blockAccessListBytes(blockTx kv.Getter, block *types.Block, blockNum uint64
 	return data, nil
 }
 
+func recoveredPanicError(operation string, recovered any) error {
+	if err, ok := recovered.(error); ok {
+		return fmt.Errorf("%s panic: %w", operation, err)
+	}
+	return fmt.Errorf("%s panic: %v", operation, recovered)
+}
+
 func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, maxBlockNum uint64, blockLimit uint64, initialTxNum uint64, inputTxNum uint64, readAhead chan uint64, initialCycle bool, applyResults chan applyResult, blockRequests chan *blockRequest, commitResults chan applyResult) error {
 	if te.execLoopGroup == nil {
 		return errors.New("no exec group")
@@ -624,7 +631,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 		// Closing here would race with the exec loop sending results.
 		defer func() {
 			if rec := recover(); rec != nil {
-				err = fmt.Errorf("exec blocks panic: %v", rec)
+				err = recoveredPanicError("exec blocks", rec)
 				return
 			}
 			if err = commonerrors.NilIfCanceled(err); err != nil {

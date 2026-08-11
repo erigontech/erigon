@@ -876,7 +876,7 @@ func isQuietExit(err error) bool {
 func (pe *parallelExecutor) runApplyLoop(logPrefix string, applyResults <-chan applyResult, rootResults <-chan commitmentResult, apply func() error) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			err = fmt.Errorf("apply loop panic: %v", rec)
+			err = recoveredPanicError("apply loop", rec)
 			pe.logger.Warn("["+logPrefix+"] rw panic", "rec", rec, "stack", dbg.Stack())
 		} else if err != nil && !isQuietExit(err) {
 			pe.logger.Warn("["+logPrefix+"] rw exit", "err", err, "stack", dbg.Stack())
@@ -1002,7 +1002,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			pe.logger.Warn("["+pe.logPrefix+"] exec loop panic", "rec", rec, "stack", dbg.Stack())
-			err = fmt.Errorf("exec loop panic: %v", rec)
+			err = recoveredPanicError("exec loop", rec)
 		} else if err != nil && !commonerrors.IsOnlyCanceled(err) {
 			pe.logger.Warn("["+pe.logPrefix+"] exec loop error", "err", err)
 		} else {
