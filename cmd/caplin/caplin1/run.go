@@ -18,11 +18,16 @@ package caplin1
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
 	"os"
 	"path"
+	"path/filepath"
+	"runtime"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/spf13/afero"
@@ -343,9 +348,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	attestationProducer := attestation_producer.New(ctx, beaconConfig)
 
 	caplinFcuPath := path.Join(dirs.Tmp, "caplin-forkchoice")
-	dir.RemoveAll(caplinFcuPath)
-	err = os.MkdirAll(caplinFcuPath, 0o755)
-	if err != nil {
+	if err := prepareForkChoiceDirectory(caplinFcuPath); err != nil {
 		return err
 	}
 	fcuFs := afero.NewBasePathFs(afero.NewOsFs(), caplinFcuPath)
@@ -466,7 +469,8 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	committeeSub := committee_subscription.NewCommitteeSubscribeManagement(ctx, beaconConfig, networkConfig, ethClock, aggregationPool, syncedDataManager, gossipManager)
 	batchSignatureVerifier := services.NewBatchSignatureVerifier(ctx, sentinel)
 	// Define gossip services
-	blockService := services.NewBlockService(ctx, indexDB, forkChoice, syncedDataManager, ethClock, beaconConfig, emitters)
+	executionPayloadService := services.NewExecutionPayloadService(ctx, forkChoice, beaconConfig, emitters, beaconRpc)
+	blockService := services.NewBlockService(ctx, indexDB, forkChoice, syncedDataManager, ethClock, beaconConfig, emitters, executionPayloadService)
 	blobService := services.NewBlobSidecarService(ctx, beaconConfig, forkChoice, syncedDataManager, ethClock, emitters, false)
 	dataColumnSidecarService := services.NewDataColumnSidecarService(ctx, beaconConfig, ethClock, forkChoice, syncedDataManager, columnStorage, emitters)
 	syncCommitteeMessagesService := services.NewSyncCommitteeMessagesService(beaconConfig, ethClock, syncedDataManager, syncContributionPool, batchSignatureVerifier, false)
@@ -477,7 +481,6 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	blsToExecutionChangeService := services.NewBLSToExecutionChangeService(pool, emitters, syncedDataManager, beaconConfig, batchSignatureVerifier)
 	proposerSlashingService := services.NewProposerSlashingService(pool, syncedDataManager, beaconConfig, ethClock, emitters)
 	attesterSlashingService := services.NewAttesterSlashingService(forkChoice)
-	executionPayloadService := services.NewExecutionPayloadService(ctx, forkChoice, beaconConfig, emitters)
 	payloadAttestationService := services.NewPayloadAttestationService(ctx, forkChoice, ethClock, networkConfig, emitters)
 	proposerPreferencesService := services.NewProposerPreferencesService(syncedDataManager, forkChoice, ethClock, beaconConfig, epbsPool)
 	executionPayloadBidService := services.NewExecutionPayloadBidService(ctx, syncedDataManager, forkChoice, ethClock, beaconConfig, epbsPool, emitters)
@@ -660,4 +663,225 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		return err
 	}
 	return err
+}
+
+func prepareForkChoiceDirectory(forkChoicePath string) error {
+	return prepareForkChoiceDirectoryWithHook(forkChoicePath, nil)
+}
+
+func prepareForkChoiceDirectoryWithHook(forkChoicePath string, hook func(string) error) error {
+	recoveryPath := forkChoicePath + "-envelope-recovery"
+	if err := os.MkdirAll(forkChoicePath, 0o755); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(recoveryPath, 0o755); err != nil {
+		return err
+	}
+	if err := syncDirectory(filepath.Dir(forkChoicePath)); err != nil {
+		return err
+	}
+	if err := movePendingEnvelopeArtifacts(forkChoicePath, recoveryPath, hook); err != nil {
+		return err
+	}
+	if err := syncDirectory(forkChoicePath); err != nil {
+		return err
+	}
+	if err := syncDirectory(recoveryPath); err != nil {
+		return err
+	}
+	if err := dir.RemoveAll(forkChoicePath); err != nil {
+		return err
+	}
+	if err := runDirectoryBoundary(hook, "clear transient forkchoice"); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(forkChoicePath, 0o755); err != nil {
+		return err
+	}
+	if err := restorePendingEnvelopeArtifacts(recoveryPath, forkChoicePath, hook); err != nil {
+		return err
+	}
+	if err := syncDirectory(forkChoicePath); err != nil {
+		return err
+	}
+	if err := syncDirectory(filepath.Dir(forkChoicePath)); err != nil {
+		return err
+	}
+	if err := dir.RemoveFile(recoveryPath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if err := runDirectoryBoundary(hook, "remove recovery directory"); err != nil {
+		return err
+	}
+	if err := syncDirectory(filepath.Dir(forkChoicePath)); err != nil {
+		return err
+	}
+	return nil
+}
+
+func movePendingEnvelopeArtifacts(sourcePath, recoveryPath string, hook func(string) error) error {
+	const markerSuffix = ".envelope.indices-pending"
+	roots := make(map[string]struct{})
+	for _, directory := range []string{sourcePath, recoveryPath} {
+		entries, err := os.ReadDir(directory)
+		if err != nil {
+			return err
+		}
+		for _, entry := range entries {
+			if directory == recoveryPath && (entry.IsDir() || !isEnvelopeRecoveryArtifact(entry.Name())) {
+				return fmt.Errorf("unexpected recovery artifact %q", entry.Name())
+			}
+			if entry.IsDir() {
+				continue
+			}
+			rootHex, ok := envelopeArtifactRoot(entry.Name(), markerSuffix)
+			if ok {
+				roots[rootHex] = struct{}{}
+			}
+		}
+	}
+	recoveryEntries, err := os.ReadDir(recoveryPath)
+	if err != nil {
+		return err
+	}
+	for _, entry := range recoveryEntries {
+		rootHex, ok := envelopeRecoveryArtifactRoot(entry.Name())
+		if !ok {
+			return fmt.Errorf("unexpected recovery artifact %q", entry.Name())
+		}
+		if _, pending := roots[rootHex]; !pending {
+			return fmt.Errorf("recovery artifact has no pending marker %q", entry.Name())
+		}
+	}
+	orderedRoots := make([]string, 0, len(roots))
+	for rootHex := range roots {
+		orderedRoots = append(orderedRoots, rootHex)
+	}
+	sort.Strings(orderedRoots)
+	for _, rootHex := range orderedRoots {
+		filename := rootHex + ".envelope.snappy_ssz"
+		artifacts := []string{filename}
+		temporaryFiles, err := filepath.Glob(filepath.Join(sourcePath, filename+".tmp-*"))
+		if err != nil {
+			return err
+		}
+		for _, temporaryFile := range temporaryFiles {
+			artifacts = append(artifacts, filepath.Base(temporaryFile))
+		}
+		sort.Strings(artifacts)
+		artifacts = append(artifacts, rootHex+markerSuffix)
+		for _, artifact := range artifacts {
+			if _, err := moveFileIfPresent(sourcePath, recoveryPath, artifact, hook, "preserve "); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func restorePendingEnvelopeArtifacts(recoveryPath, destinationPath string, hook func(string) error) error {
+	entries, err := os.ReadDir(recoveryPath)
+	if err != nil {
+		return err
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		iMarker := strings.HasSuffix(entries[i].Name(), ".envelope.indices-pending")
+		jMarker := strings.HasSuffix(entries[j].Name(), ".envelope.indices-pending")
+		if iMarker != jMarker {
+			return !iMarker
+		}
+		return entries[i].Name() < entries[j].Name()
+	})
+	for _, entry := range entries {
+		if entry.IsDir() {
+			return fmt.Errorf("unexpected recovery directory %q", entry.Name())
+		}
+		if !isEnvelopeRecoveryArtifact(entry.Name()) {
+			return fmt.Errorf("unexpected recovery artifact %q", entry.Name())
+		}
+		if _, err := moveFileIfPresent(recoveryPath, destinationPath, entry.Name(), hook, "restore "); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func moveFileIfPresent(sourcePath, destinationPath, name string, hook func(string) error, boundaryPrefix string) (bool, error) {
+	source := filepath.Join(sourcePath, name)
+	if _, err := os.Stat(source); err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	destination := filepath.Join(destinationPath, name)
+	if _, err := os.Stat(destination); err == nil {
+		return false, fmt.Errorf("recovery artifact already exists: %s", destination)
+	} else if !os.IsNotExist(err) {
+		return false, err
+	}
+	if err := os.Rename(source, destination); err != nil {
+		return false, err
+	}
+	if err := syncDirectory(sourcePath); err != nil {
+		return true, err
+	}
+	if err := syncDirectory(destinationPath); err != nil {
+		return true, err
+	}
+	if err := runDirectoryBoundary(hook, boundaryPrefix+name); err != nil {
+		return true, err
+	}
+	return true, nil
+}
+
+func runDirectoryBoundary(hook func(string) error, boundary string) error {
+	if hook == nil {
+		return nil
+	}
+	return hook(boundary)
+}
+
+func syncDirectory(path string) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	directory, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	if err := directory.Sync(); err != nil {
+		_ = directory.Close()
+		return err
+	}
+	return directory.Close()
+}
+
+func envelopeArtifactRoot(name, suffix string) (string, bool) {
+	if !strings.HasSuffix(name, suffix) {
+		return "", false
+	}
+	rootHex := strings.TrimSuffix(name, suffix)
+	root, err := hex.DecodeString(rootHex)
+	return rootHex, err == nil && len(root) == len(common.Hash{})
+}
+
+func isEnvelopeRecoveryArtifact(name string) bool {
+	_, ok := envelopeRecoveryArtifactRoot(name)
+	return ok
+}
+
+func envelopeRecoveryArtifactRoot(name string) (string, bool) {
+	for _, suffix := range []string{".envelope.indices-pending", ".envelope.snappy_ssz"} {
+		if rootHex, ok := envelopeArtifactRoot(name, suffix); ok {
+			return rootHex, true
+		}
+	}
+	const temporarySeparator = ".envelope.snappy_ssz.tmp-"
+	parts := strings.SplitN(name, temporarySeparator, 2)
+	if len(parts) != 2 || parts[1] == "" {
+		return "", false
+	}
+	root, err := hex.DecodeString(parts[0])
+	return parts[0], err == nil && len(root) == len(common.Hash{})
 }

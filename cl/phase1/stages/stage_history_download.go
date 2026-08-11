@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/execution_client/block_collector"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/network"
+	eth2impl "github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -66,10 +67,12 @@ type historyDownloader interface {
 	SetExpectedRoot(common.Hash)
 	SetBlockChecker(network.BlockChecker)
 	SetOnNewBlock(network.OnNewBlock)
+	SetValidateFunctions(network.ValidateBlockFn, network.ValidateLookaheadFn)
 	Finished() bool
 	Progress() uint64
 	RequestMore(context.Context) error
 	SkippedFullBlocks() []network.SkippedFullBlock
+	AcknowledgeSkippedFullBlocks([]network.SkippedFullBlock)
 	HasEnvelopeRecoverySource() bool
 	RecoverSkippedEnvelopes(context.Context, []network.SkippedFullBlock, map[common.Hash]*cltypes.SignedBeaconBlock) network.EnvelopeRecoveryResult
 	SetThrottle(time.Duration)
@@ -83,9 +86,64 @@ const (
 	skippedEnvelopeRecoveryBatchSize      = 2
 	skippedEnvelopeRecoveryBatchTimeout   = 5 * time.Second
 	skippedEnvelopeRecoveryAttemptTimeout = 2 * time.Minute
+	skippedEnvelopeRecoverySweeps         = 3
+	skippedEnvelopeCanonicalFallbackSlots = 64
 )
 
 var errSkippedEnvelopeRecoveryIncomplete = errors.New("skipped envelope recovery incomplete")
+
+func configureHistoryEnvelopeAdmission(cfg StageHistoryReconstructionCfg) {
+	if cfg.forkchoiceStore == nil {
+		return
+	}
+	cfg.downloader.SetValidateFunctions(
+		func(block *cltypes.SignedBeaconBlock) error {
+			validationState, err := cfg.forkchoiceStore.GetStateAtBlockRoot(cfg.forkchoiceStore.FinalizedCheckpoint().Root, true)
+			if err != nil {
+				return fmt.Errorf("historical block signature state unavailable: %w", err)
+			}
+			if validationState == nil {
+				return errors.New("historical block signature state unavailable")
+			}
+			valid, err := eth2impl.VerifyBlockSignature(validationState, block)
+			if err != nil {
+				return err
+			}
+			if !valid {
+				return fmt.Errorf("invalid historical block signature at slot %d", block.Block.Slot)
+			}
+			return nil
+		},
+		func(anchor, child *cltypes.SignedBeaconBlock) error {
+			anchorRoot, err := anchor.Block.HashSSZ()
+			if err != nil {
+				return err
+			}
+			validationState, err := cfg.forkchoiceStore.GetStateAtBlockRoot(anchorRoot, true)
+			if err != nil {
+				return fmt.Errorf("lookahead admission state unavailable: %w", err)
+			}
+			if validationState == nil {
+				return errors.New("lookahead admission state unavailable")
+			}
+			expectedProposer, err := validationState.GetBeaconProposerIndexForSlot(child.Block.Slot)
+			if err != nil {
+				return err
+			}
+			if expectedProposer != child.Block.ProposerIndex {
+				return fmt.Errorf("unexpected lookahead proposer %d at slot %d, expected %d", child.Block.ProposerIndex, child.Block.Slot, expectedProposer)
+			}
+			valid, err := eth2impl.VerifyBlockSignature(validationState, child)
+			if err != nil {
+				return err
+			}
+			if !valid {
+				return fmt.Errorf("invalid lookahead signature at slot %d", child.Block.Slot)
+			}
+			return nil
+		},
+	)
+}
 
 func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, antiquary *antiquary.Antiquary, sn *freezeblocks.CaplinSnapshots, indiciesDB kv.RwDB, engine execution_client.ExecutionEngine, beaconCfg *clparams.BeaconChainConfig, caplinConfig clparams.CaplinConfig, waitForAllRoutines bool, startingRoot common.Hash, startinSlot uint64, tmpdir string, backfillingThrottling time.Duration, executionBlocksCollector block_collector.BlockCollector, blockReader freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, logger log.Logger, forkchoiceStore forkchoice.ForkChoiceStorage, blobDownloader *network.BlobHistoryDownloader) StageHistoryReconstructionCfg {
 	return StageHistoryReconstructionCfg{
@@ -168,6 +226,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	// EL block-number floor for snapshot-gap backfill, kept separate from the
 	// beacon-slot destinationSlotForEL since the units must not be mixed.
 	destinationBlockForEL := uint64(math.MaxUint64)
+	configureHistoryEnvelopeAdmission(cfg)
 	// Set up onNewBlock callback
 	// [Modified in Gloas:EIP7732] envelope is non-nil for GLOAS FULL blocks, nil for EMPTY or pre-GLOAS.
 	cfg.downloader.SetOnNewBlock(func(blk *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) (finished bool, err error) {
@@ -252,7 +311,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 
 				if !hasELBlock {
 					if blk.Version() >= clparams.GloasVersion {
-						if err := cfg.executionBlocksCollector.AddGloasBlock(blk.Block, envelope); err != nil {
+						if err := cfg.executionBlocksCollector.AddGloasBlock(ctx, blk.Block, envelope); err != nil {
 							return false, fmt.Errorf("error adding gloas block to execution blocks collector: %s", err)
 						}
 					} else {
@@ -414,7 +473,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			if cfg.engine != nil && cfg.downloader.Progress() <= destinationSlotForEL {
 				sendPublicResult(nil)
 			}
-			if err := cfg.downloader.RequestMore(ctx); err != nil {
+			if err := requestMoreWithEnvelopeRecovery(ctx, cfg); err != nil {
 				if !errors.Is(err, context.Canceled) {
 					log.Warn("closing backfilling routine", "err", err)
 				}
@@ -425,7 +484,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 
 		// Recover FULL blocks whose envelopes were skipped during backward download.
 		if skipped := cfg.downloader.SkippedFullBlocks(); len(skipped) > 0 {
-			if !recoverSkippedEnvelopesWithRetries(ctx, cfg, skipped) {
+			if pending := recoverSkippedEnvelopesWithRetries(ctx, cfg, skipped); len(pending) > 0 {
 				workerErr := ctx.Err()
 				if workerErr == nil {
 					workerErr = errSkippedEnvelopeRecoveryIncomplete
@@ -465,33 +524,73 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	return nil
 }
 
-func recoverSkippedEnvelopesWithRetries(ctx context.Context, cfg StageHistoryReconstructionCfg, skipped []network.SkippedFullBlock) bool {
-	return recoverSkippedEnvelopesWithRetryPolicy(ctx, cfg, skipped,
-		func(attemptCtx context.Context, pending []network.SkippedFullBlock) []network.SkippedFullBlock {
-			return recoverSkippedEnvelopes(attemptCtx, cfg, pending)
-		}, skippedEnvelopeRecoveryRetryInterval)
+func requestMoreWithEnvelopeRecovery(ctx context.Context, cfg StageHistoryReconstructionCfg) error {
+	return requestMoreWithEnvelopeRecoveryPolicy(ctx, cfg, skippedEnvelopeRecoveryRetryInterval)
 }
 
-func recoverSkippedEnvelopesWithRetryPolicy(ctx context.Context, cfg StageHistoryReconstructionCfg, skipped []network.SkippedFullBlock, recoverAttempt func(context.Context, []network.SkippedFullBlock) []network.SkippedFullBlock, retryInterval time.Duration) bool {
+func requestMoreWithEnvelopeRecoveryPolicy(ctx context.Context, cfg StageHistoryReconstructionCfg, retryInterval time.Duration) error {
+	err := cfg.downloader.RequestMore(ctx)
+	if !errors.Is(err, network.ErrSkippedEnvelopeRecoveryCapacity) {
+		return err
+	}
+	skipped := cfg.downloader.SkippedFullBlocks()
+	if len(skipped) == 0 {
+		return err
+	}
+	pending := recoverSkippedEnvelopesWithRetryInterval(ctx, cfg, skipped, retryInterval)
+	recovered := recoveredSkippedEnvelopes(skipped, pending)
+	cfg.downloader.AcknowledgeSkippedFullBlocks(recovered)
+	if len(recovered) == 0 {
+		return err
+	}
+	return nil
+}
+
+func recoveredSkippedEnvelopes(skipped, pending []network.SkippedFullBlock) []network.SkippedFullBlock {
+	counts := make(map[network.SkippedFullBlock]int, len(pending))
+	for _, item := range pending {
+		counts[item]++
+	}
+	recovered := make([]network.SkippedFullBlock, 0, len(skipped)-min(len(skipped), len(pending)))
+	for _, item := range skipped {
+		if counts[item] > 0 {
+			counts[item]--
+			continue
+		}
+		recovered = append(recovered, item)
+	}
+	return recovered
+}
+
+func recoverSkippedEnvelopesWithRetries(ctx context.Context, cfg StageHistoryReconstructionCfg, skipped []network.SkippedFullBlock) []network.SkippedFullBlock {
+	return recoverSkippedEnvelopesWithRetryInterval(ctx, cfg, skipped, skippedEnvelopeRecoveryRetryInterval)
+}
+
+func recoverSkippedEnvelopesWithRetryInterval(ctx context.Context, cfg StageHistoryReconstructionCfg, skipped []network.SkippedFullBlock, retryInterval time.Duration) []network.SkippedFullBlock {
 	if cfg.downloader == nil || !cfg.downloader.HasEnvelopeRecoverySource() {
 		log.Warn("[BackwardBeaconDownloader] envelope recovery unavailable", "remaining", len(skipped))
-		return false
+		return append([]network.SkippedFullBlock(nil), skipped...)
 	}
-	return recoverSkippedEnvelopesUntilComplete(ctx, skipped, recoverAttempt, retryInterval)
+	return recoverSkippedEnvelopesUntilComplete(ctx, skipped,
+		func(attemptCtx context.Context, pending []network.SkippedFullBlock) []network.SkippedFullBlock {
+			return recoverSkippedEnvelopes(attemptCtx, cfg, pending)
+		}, retryInterval)
 }
 
-func recoverSkippedEnvelopesUntilComplete(ctx context.Context, skipped []network.SkippedFullBlock, recoverAttempt func(context.Context, []network.SkippedFullBlock) []network.SkippedFullBlock, retryInterval time.Duration) bool {
+func recoverSkippedEnvelopesUntilComplete(ctx context.Context, skipped []network.SkippedFullBlock, recoverAttempt func(context.Context, []network.SkippedFullBlock) []network.SkippedFullBlock, retryInterval time.Duration) []network.SkippedFullBlock {
 	pending := skipped
-	for attempt := 1; ; attempt++ {
+	itemsPerAttempt := int(skippedEnvelopeRecoveryAttemptTimeout/skippedEnvelopeRecoveryBatchTimeout) * skippedEnvelopeRecoveryBatchSize
+	maxAttempts := max(1, (len(skipped)+itemsPerAttempt-1)/itemsPerAttempt) * skippedEnvelopeRecoverySweeps
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		if ctx.Err() != nil {
 			log.Warn("[BackwardBeaconDownloader] envelope recovery canceled", "remaining", len(pending), "err", ctx.Err())
-			return false
+			return pending
 		}
 		attemptCtx, cancel := context.WithTimeout(ctx, skippedEnvelopeRecoveryAttemptTimeout)
 		pending = recoverAttempt(attemptCtx, pending)
 		cancel()
 		if len(pending) == 0 {
-			return true
+			return nil
 		}
 
 		log.Warn("[BackwardBeaconDownloader] envelope recovery incomplete, retrying",
@@ -501,10 +600,13 @@ func recoverSkippedEnvelopesUntilComplete(ctx context.Context, skipped []network
 		select {
 		case <-ctx.Done():
 			log.Warn("[BackwardBeaconDownloader] envelope recovery canceled", "remaining", len(pending), "err", ctx.Err())
-			return false
+			return pending
 		case <-time.After(retryInterval):
 		}
 	}
+	log.Warn("[BackwardBeaconDownloader] envelope recovery exhausted",
+		"attempts", maxAttempts, "total", len(skipped), "remaining", len(pending))
+	return pending
 }
 
 // recoverSkippedEnvelopes attempts to fetch execution payload envelopes for
@@ -548,14 +650,18 @@ func recoverSkippedEnvelopeBatch(fetchCtx, persistCtx context.Context, cfg Stage
 		return append([]network.SkippedFullBlock(nil), batch...)
 	}
 	blocks := readSkippedEnvelopeBlocks(persistCtx, cfg, batch)
-	recovery := cfg.downloader.RecoverSkippedEnvelopes(fetchCtx, batch, blocks)
+	recoverable, unknown := classifyCanonicalSkippedEnvelopes(persistCtx, cfg, batch, blocks)
+	if len(recoverable) == 0 {
+		return unknown
+	}
+	recovery := cfg.downloader.RecoverSkippedEnvelopes(fetchCtx, recoverable, blocks)
 	tx, err := cfg.indiciesDB.BeginRo(persistCtx)
 	if err != nil {
-		return append([]network.SkippedFullBlock(nil), batch...)
+		return append(unknown, recoverable...)
 	}
 	defer tx.Rollback()
 
-	return unresolvedSkippedEnvelopes(batch, recovery, func(s network.SkippedFullBlock, env *cltypes.SignedExecutionPayloadEnvelope) bool {
+	remaining := unresolvedSkippedEnvelopes(recoverable, recovery, func(s network.SkippedFullBlock, env *cltypes.SignedExecutionPayloadEnvelope) bool {
 		block, err := cfg.blockReader.ReadBlockByRoot(persistCtx, tx, common.Hash(s.Root))
 		if err != nil || block == nil || block.Block == nil || block.Block.Body == nil {
 			log.Warn("[BackwardBeaconDownloader] skipped block unavailable during recovery", "slot", s.Slot, "root", common.Hash(s.Root), "err", err)
@@ -571,6 +677,131 @@ func recoverSkippedEnvelopeBatch(fetchCtx, persistCtx context.Context, cfg Stage
 		}
 		return recoverSkippedEnvelope(persistCtx, cfg, s, block, env)
 	})
+	if len(unknown) == 0 {
+		return remaining
+	}
+	pending := make(map[network.SkippedFullBlock]struct{}, len(unknown)+len(remaining))
+	for _, item := range unknown {
+		pending[item] = struct{}{}
+	}
+	for _, item := range remaining {
+		pending[item] = struct{}{}
+	}
+	ordered := make([]network.SkippedFullBlock, 0, len(pending))
+	for _, item := range batch {
+		if _, ok := pending[item]; ok {
+			ordered = append(ordered, item)
+		}
+	}
+	return ordered
+}
+
+func classifyCanonicalSkippedEnvelopes(ctx context.Context, cfg StageHistoryReconstructionCfg, batch []network.SkippedFullBlock, blocks map[common.Hash]*cltypes.SignedBeaconBlock) (recoverable, unknown []network.SkippedFullBlock) {
+	recoverable = make([]network.SkippedFullBlock, 0, len(batch))
+	unknown = make([]network.SkippedFullBlock, 0, len(batch))
+	tx, err := cfg.indiciesDB.BeginRo(ctx)
+	if err != nil {
+		return recoverable, append(unknown, batch...)
+	}
+	defer tx.Rollback()
+	for _, item := range batch {
+		full, known, err := findCanonicalSkippedEnvelopeAvailability(
+			ctx,
+			item,
+			blocks[common.Hash(item.Root)],
+			func(ctx context.Context, slot uint64) (*cltypes.SignedBeaconBlock, bool, error) {
+				canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
+				if err != nil || canonicalRoot == (common.Hash{}) {
+					return nil, false, err
+				}
+				child, err := cfg.blockReader.ReadBlockByRoot(ctx, tx, canonicalRoot)
+				if err != nil || child == nil || child.Block == nil {
+					return child, true, err
+				}
+				childRoot, err := child.Block.HashSSZ()
+				if err != nil || childRoot != canonicalRoot {
+					return nil, true, err
+				}
+				return child, true, nil
+			},
+		)
+		if err != nil || !known {
+			unknown = append(unknown, item)
+		} else if full {
+			recoverable = append(recoverable, item)
+		}
+	}
+	return recoverable, unknown
+}
+
+func findCanonicalSkippedEnvelopeAvailability(
+	ctx context.Context,
+	item network.SkippedFullBlock,
+	block *cltypes.SignedBeaconBlock,
+	readCanonicalBlock func(context.Context, uint64) (*cltypes.SignedBeaconBlock, bool, error),
+) (bool, bool, error) {
+	if block == nil || block.Block == nil || block.Block.Body == nil {
+		return false, false, nil
+	}
+	anchorSlot := block.Block.Slot
+	hintSlot := item.ChildSlot
+	hintAttempted := hintSlot > anchorSlot
+	var hintBlock *cltypes.SignedBeaconBlock
+	var hintFound bool
+	if hintAttempted {
+		if err := ctx.Err(); err != nil {
+			return false, false, err
+		}
+		var err error
+		hintBlock, hintFound, err = readCanonicalBlock(ctx, hintSlot)
+		if err != nil {
+			return false, false, err
+		}
+		if hintFound && hintBlock != nil && hintBlock.Block != nil && hintBlock.Block.Slot == hintSlot {
+			full, known := canonicalGloasBlockAvailability(block, hintBlock, common.Hash(item.Root))
+			if known {
+				return full, true, nil
+			}
+		}
+	}
+	for offset := uint64(1); offset <= skippedEnvelopeCanonicalFallbackSlots; offset++ {
+		if err := ctx.Err(); err != nil {
+			return false, false, err
+		}
+		if anchorSlot > ^uint64(0)-offset {
+			break
+		}
+		slot := anchorSlot + offset
+		child, found := hintBlock, hintFound
+		var err error
+		if !hintAttempted || slot != hintSlot {
+			child, found, err = readCanonicalBlock(ctx, slot)
+		}
+		if err != nil {
+			return false, false, err
+		}
+		if !found {
+			continue
+		}
+		if child == nil || child.Block == nil || child.Block.Slot != slot {
+			return false, false, nil
+		}
+		full, known := canonicalGloasBlockAvailability(block, child, common.Hash(item.Root))
+		return full, known, nil
+	}
+	return false, false, nil
+}
+
+func canonicalGloasBlockAvailability(block, child *cltypes.SignedBeaconBlock, blockRoot common.Hash) (bool, bool) {
+	if block == nil || block.Block == nil || block.Block.Body == nil || child == nil || child.Block == nil || child.Block.Body == nil || child.Block.ParentRoot != blockRoot || child.Block.Slot <= block.Block.Slot {
+		return false, false
+	}
+	bid := block.Block.Body.GetSignedExecutionPayloadBid()
+	childBid := child.Block.Body.GetSignedExecutionPayloadBid()
+	if bid == nil || bid.Message == nil || childBid == nil || childBid.Message == nil {
+		return false, false
+	}
+	return childBid.Message.ParentBlockHash == bid.Message.BlockHash, true
 }
 
 func unresolvedSkippedEnvelopes(batch []network.SkippedFullBlock, recovery network.EnvelopeRecoveryResult, persist func(network.SkippedFullBlock, *cltypes.SignedExecutionPayloadEnvelope) bool) []network.SkippedFullBlock {
@@ -608,7 +839,7 @@ func readSkippedEnvelopeBlocks(ctx context.Context, cfg StageHistoryReconstructi
 
 func recoverSkippedEnvelope(ctx context.Context, cfg StageHistoryReconstructionCfg, s network.SkippedFullBlock, block *cltypes.SignedBeaconBlock, env *cltypes.SignedExecutionPayloadEnvelope) bool {
 	if cfg.executionBlocksCollector != nil {
-		if err := cfg.executionBlocksCollector.AddGloasBlock(block.Block, env); err != nil {
+		if err := cfg.executionBlocksCollector.AddGloasBlock(ctx, block.Block, env); err != nil {
 			log.Warn("[BackwardBeaconDownloader] envelope recovery: add block failed", "err", err)
 			return false
 		}

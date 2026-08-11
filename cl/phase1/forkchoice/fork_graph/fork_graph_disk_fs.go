@@ -17,11 +17,14 @@
 package fork_graph
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"strings"
 
 	"github.com/golang/snappy"
@@ -254,12 +257,25 @@ func (f *forkGraphDisk) ReadEnvelopeFromDisk(blockRoot common.Hash) (envelope *c
 		return nil, fmt.Errorf("failed to read snappy buffer: %w, root: %x", err, blockRoot)
 	}
 	f.sszBuffer = f.sszBuffer[:n]
+	var trailing [1]byte
+	trailingN, trailingErr := f.sszSnappyReader.Read(trailing[:])
+	if trailingN != 0 || trailingErr != io.EOF {
+		return nil, fmt.Errorf("trailing envelope data, root: %x", blockRoot)
+	}
+	encoded := append([]byte(nil), f.sszBuffer...)
 
 	envelope = &cltypes.SignedExecutionPayloadEnvelope{
 		Message: cltypes.NewExecutionPayloadEnvelope(f.beaconCfg),
 	}
 	if err = envelope.DecodeSSZ(f.sszBuffer, int(clparams.GloasVersion)); err != nil {
 		return nil, fmt.Errorf("failed to decode envelope: %w, root: %x, len: %d", err, blockRoot, n)
+	}
+	canonical, err := envelope.EncodeSSZ(nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to re-encode envelope: %w, root: %x", err, blockRoot)
+	}
+	if !bytes.Equal(encoded, canonical) {
+		return nil, fmt.Errorf("non-canonical envelope encoding, root: %x", blockRoot)
 	}
 
 	return
@@ -290,7 +306,7 @@ func (f *forkGraphDisk) PrepareEnvelopeOnDisk(blockRoot common.Hash, envelope *c
 	}
 
 	filename := getEnvelopeFilename(blockRoot)
-	dumpedFile, err := afero.TempFile(f.fs, "", filename+".tmp-")
+	dumpedFile, err := afero.TempFile(f.fs, ".", filename+".tmp-")
 	if err != nil {
 		return nil, err
 	}
@@ -330,36 +346,54 @@ func (f *forkGraphDisk) PrepareEnvelopeOnDisk(blockRoot common.Hash, envelope *c
 		log.Error("failed to sync dumped file", "err", err)
 		return
 	}
-	if err = dumpedFile.Close(); err != nil {
+	if err := dumpedFile.Close(); err != nil {
 		return nil, err
 	}
 	markerFilename := getEnvelopeIndexMarkerFilename(blockRoot)
-	marker, err := f.fs.OpenFile(markerFilename, os.O_CREATE|os.O_TRUNC|os.O_RDWR, 0o644)
+	markerExisted, err := afero.Exists(f.fs, markerFilename)
 	if err != nil {
 		return nil, err
 	}
-	if err = marker.Sync(); err != nil {
-		_ = marker.Close()
-		_ = f.fs.Remove(markerFilename)
-		return nil, err
+	if !markerExisted {
+		marker, err := f.fs.OpenFile(markerFilename, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o644)
+		if err != nil {
+			return nil, err
+		}
+		if err = marker.Sync(); err != nil {
+			_ = marker.Close()
+			_ = f.fs.Remove(markerFilename)
+			return nil, err
+		}
+		if err = marker.Close(); err != nil {
+			_ = f.fs.Remove(markerFilename)
+			return nil, err
+		}
 	}
-	if err = marker.Close(); err != nil {
-		_ = f.fs.Remove(markerFilename)
+	if err := syncRootDirectory(f.fs); err != nil {
 		return nil, err
 	}
 	keepTemporary = true
+	cleanupFiles := []string{temporaryFilename}
+	if !markerExisted {
+		cleanupFiles = append(cleanupFiles, markerFilename)
+	}
 
 	return func() error {
 		f.stateDumpLock.Lock()
 		defer f.stateDumpLock.Unlock()
 		if _, blockPresent := f.blocks.Load(blockRoot); requireBlock && !blockPresent {
-			_ = f.fs.Remove(temporaryFilename)
-			_ = f.fs.Remove(markerFilename)
+			if cleanupErr := removeFilesAndSyncDirectory(f.fs, cleanupFiles...); cleanupErr != nil {
+				return fmt.Errorf("cannot publish envelope for pruned block %x: %w", blockRoot, cleanupErr)
+			}
 			return fmt.Errorf("cannot publish envelope for pruned block %x", blockRoot)
 		}
 		if err := f.fs.Rename(temporaryFilename, filename); err != nil {
-			_ = f.fs.Remove(temporaryFilename)
-			_ = f.fs.Remove(markerFilename)
+			if cleanupErr := removeFilesAndSyncDirectory(f.fs, cleanupFiles...); cleanupErr != nil {
+				return errors.Join(err, cleanupErr)
+			}
+			return err
+		}
+		if err := syncRootDirectory(f.fs); err != nil {
 			return err
 		}
 		f.envelopeExists.Store(blockRoot, struct{}{})
@@ -403,8 +437,32 @@ func (f *forkGraphDisk) MarkEnvelopeIndicesCommitted(blockRoot common.Hash) erro
 		}
 	}
 	err = f.fs.Remove(getEnvelopeIndexMarkerFilename(blockRoot))
-	if os.IsNotExist(err) {
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return syncRootDirectory(f.fs)
+}
+
+func removeFilesAndSyncDirectory(fs afero.Fs, filenames ...string) error {
+	for _, filename := range filenames {
+		if err := fs.Remove(filename); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return syncRootDirectory(fs)
+}
+
+func syncRootDirectory(fs afero.Fs) error {
+	if runtime.GOOS == "windows" {
 		return nil
 	}
-	return err
+	directory, err := fs.Open(".")
+	if err != nil {
+		return err
+	}
+	if err := directory.Sync(); err != nil {
+		_ = directory.Close()
+		return err
+	}
+	return directory.Close()
 }

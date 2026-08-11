@@ -227,9 +227,13 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 					return fmt.Errorf("OnBlock: failed to process kzg commitments: %v", err)
 				}
 			}
-			timeStartExec := time.Now()
-			payloadStatus, err := f.engine.NewPayload(ctx, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes, executionRequestsList)
-			monitor.ObserveNewPayloadTime(timeStartExec)
+			payloadStatus, err := f.newPayloadLocked(ctx, common.Hash(blockRoot), block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes, executionRequestsList)
+			currentFinalized := f.finalizedCheckpoint.Load().(solid.Checkpoint)
+			currentFinalizedSlot := f.computeStartSlotAtEpoch(currentFinalized.Epoch)
+			if currentFinalizedSlot >= f.forkGraph.AnchorSlot() &&
+				(block.Block.Slot <= currentFinalizedSlot || f.Ancestor(block.Block.ParentRoot, currentFinalizedSlot).Root != currentFinalized.Root) {
+				return ErrNotFinalizedDescendant
+			}
 			log.Trace("[OnBlock] NewPayload", "status", payloadStatus, "blockSlot", block.Block.Slot)
 
 			// Track payload status and gas limit by execution block hash for GLOAS parent payload validation
@@ -334,6 +338,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	// [New in Gloas:EIP7732] GLOAS-specific on_block logic (post state transition)
 	var appliedEnvelope *cltypes.ExecutionPayloadEnvelope
 	var pendingEnvelope *cltypes.SignedExecutionPayloadEnvelope
+	var pendingEnvelopeEntry *pendingExecutionPayloadEnvelopeEntry
 	var pendingLocalSelfBuild bool
 	if blockVersion >= clparams.GloasVersion {
 		// Initialize payload timeliness and data availability votes for this block
@@ -358,11 +363,13 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		// then the general gossip queue (full BLS verification). These are separate
 		// queues so that origin is determined by which queue wrote the entry, not by
 		// inspecting envelope contents (which an attacker could forge).
-		if pending, ok := f.pendingLocalSelfBuildEnvelopes.Get(common.Hash(blockRoot)); ok {
-			pendingEnvelope = pending
+		if pending, ok := f.pendingLocalSelfBuildEnvelopes.Peek(common.Hash(blockRoot)); ok && !f.pendingExecutionPayloadEnvelopeExpired(common.Hash(blockRoot), pending) {
+			pendingEnvelopeEntry = pending
+			pendingEnvelope = pending.envelope
 			pendingLocalSelfBuild = true
-		} else if pending, ok := f.pendingEnvelopes.Get(common.Hash(blockRoot)); ok {
-			pendingEnvelope = pending
+		} else if pending, ok := f.pendingEnvelopes.Peek(common.Hash(blockRoot)); ok && !f.pendingExecutionPayloadEnvelopeExpired(common.Hash(blockRoot), pending) {
+			pendingEnvelopeEntry = pending
+			pendingEnvelope = pending.envelope
 		}
 	}
 	if lastProcessedState.Slot()%f.beaconCfg.SlotsPerEpoch == 0 {
@@ -473,10 +480,10 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		if applyErr != nil {
 			log.Warn("OnBlock: failed to process pending envelope", "blockRoot", common.Hash(blockRoot), "err", applyErr)
 		} else {
-			f.removePendingExecutionPayloadEnvelope(pendingExecutionPayloadEnvelope{
-				root:     common.Hash(blockRoot),
-				envelope: pendingEnvelope,
-				local:    pendingLocalSelfBuild,
+			_ = f.removePendingExecutionPayloadEnvelope(ctx, pendingExecutionPayloadEnvelope{
+				root:  common.Hash(blockRoot),
+				entry: pendingEnvelopeEntry,
+				local: pendingLocalSelfBuild,
 			})
 			if applied {
 				appliedEnvelope = pendingEnvelope.Message
@@ -492,17 +499,6 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	}
 
 	return nil
-}
-
-func (f *ForkChoiceStore) refreshBlockStateAfterPayloadValidation(blockRoot common.Hash) (*state.CachingBeaconState, error) {
-	blockState, err := f.forkGraph.GetState(blockRoot, false)
-	if err != nil {
-		return nil, fmt.Errorf("OnBlock: failed to refresh block state after payload validation: %w", err)
-	}
-	if blockState == nil {
-		return nil, fmt.Errorf("OnBlock: block state disappeared after payload validation for block %v", blockRoot)
-	}
-	return blockState, nil
 }
 
 func (f *ForkChoiceStore) addChainSegmentAndQueueLightClientEvents(block *cltypes.SignedBeaconBlock, fullValidation bool) (*state.CachingBeaconState, fork_graph.ChainSegmentInsertionResult, error) {

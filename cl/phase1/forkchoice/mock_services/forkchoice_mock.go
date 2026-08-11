@@ -18,6 +18,7 @@ package mock_services
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 
 	"go.uber.org/mock/gomock"
@@ -77,6 +78,9 @@ type ForkChoiceStorageMock struct {
 	Envelopes                    map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
 	VerifiedPayloads             map[common.Hash]bool
 	OnExecutionPayloadErr        error
+	OnExecutionPayloadFunc       func(*cltypes.SignedExecutionPayloadEnvelope) error
+	OnBlockErr                   error
+	OnBlockCalls                 atomic.Int32
 	GetBeaconCommitteeMock       func(slot, committeeIndex uint64) ([]uint64, error)
 
 	Pool pool.OperationsPool
@@ -348,10 +352,14 @@ func (f *ForkChoiceStorageMock) OnBlock(
 	fullValidation bool,
 	checkDataAvaiability bool,
 ) error {
-	return nil
+	f.OnBlockCalls.Add(1)
+	return f.OnBlockErr
 }
 
 func (f *ForkChoiceStorageMock) OnExecutionPayload(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) error {
+	if f.OnExecutionPayloadFunc != nil {
+		return f.OnExecutionPayloadFunc(signedEnvelope)
+	}
 	return f.OnExecutionPayloadErr
 }
 

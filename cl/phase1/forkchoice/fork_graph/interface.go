@@ -63,9 +63,13 @@ type ForkGraph interface {
 	// and for the store.payloads membership check (HasEnvelope), but no separate
 	// execution_payload_state is maintained.
 	DumpEnvelopeOnDisk(blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) error
-	PrepareEnvelopeOnDisk(blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope, requireBlock bool) (publish func() error, err error)
 	ReadEnvelopeFromDisk(blockRoot common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error)
 	HasEnvelope(blockRoot common.Hash) bool
+}
+
+// EnvelopePersistence coordinates atomic envelope publication with index recovery.
+type EnvelopePersistence interface {
+	PrepareEnvelopeOnDisk(blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope, requireBlock bool) (publish func() error, err error)
 	PendingEnvelopeIndexRoots() ([]common.Hash, error)
 	MarkEnvelopeIndicesCommitted(blockRoot common.Hash) error
 }

@@ -34,20 +34,22 @@ func (g ptcVoteForkGraph) GetBlock(root common.Hash) (*cltypes.SignedBeaconBlock
 
 type payloadVoteForkGraph struct {
 	fork_graph.ForkGraph
-	hasEnvelope         bool
-	envelope            *cltypes.SignedExecutionPayloadEnvelope
-	block               *cltypes.SignedBeaconBlock
-	blockState          *state2.CachingBeaconState
-	dumpedEnvelope      *common.Hash
-	hasEnvelopeState    *atomic.Bool
-	dumpCalls           *atomic.Int32
-	dumpStarted         chan struct{}
-	releaseDump         chan struct{}
-	dumpErr             error
-	onEnvelopePublished func()
-	pruneStarted        chan struct{}
-	releasePrune        chan struct{}
-	invalidatedHeader   *common.Hash
+	hasEnvelope          bool
+	envelope             *cltypes.SignedExecutionPayloadEnvelope
+	block                *cltypes.SignedBeaconBlock
+	blockState           *state2.CachingBeaconState
+	dumpedEnvelope       *common.Hash
+	preparedEnvelope     **cltypes.SignedExecutionPayloadEnvelope
+	prepareRequiresBlock *bool
+	hasEnvelopeState     *atomic.Bool
+	dumpCalls            *atomic.Int32
+	dumpStarted          chan struct{}
+	releaseDump          chan struct{}
+	dumpErr              error
+	onEnvelopePublished  func()
+	pruneStarted         chan struct{}
+	releasePrune         chan struct{}
+	invalidatedHeader    *common.Hash
 }
 
 func (g payloadVoteForkGraph) Prune(uint64) error {
@@ -72,7 +74,10 @@ func (g payloadVoteForkGraph) DumpEnvelopeOnDisk(blockRoot common.Hash, _ *cltyp
 	return publish()
 }
 
-func (g payloadVoteForkGraph) PrepareEnvelopeOnDisk(blockRoot common.Hash, _ *cltypes.SignedExecutionPayloadEnvelope, _ bool) (func() error, error) {
+func (g payloadVoteForkGraph) PrepareEnvelopeOnDisk(blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope, requireBlock bool) (func() error, error) {
+	if g.prepareRequiresBlock != nil {
+		*g.prepareRequiresBlock = requireBlock
+	}
 	var call int32
 	if g.dumpCalls != nil {
 		call = g.dumpCalls.Add(1)
@@ -87,6 +92,9 @@ func (g payloadVoteForkGraph) PrepareEnvelopeOnDisk(blockRoot common.Hash, _ *cl
 		<-g.releaseDump
 	}
 	return func() error {
+		if g.preparedEnvelope != nil {
+			*g.preparedEnvelope = envelope
+		}
 		if g.dumpedEnvelope != nil {
 			*g.dumpedEnvelope = blockRoot
 		}

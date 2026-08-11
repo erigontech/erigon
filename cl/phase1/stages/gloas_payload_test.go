@@ -18,6 +18,8 @@ import (
 	state2 "github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	forkchoicemock "github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
+	eth2impl "github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
@@ -125,6 +127,94 @@ func TestValidateAnchorEnvelope(t *testing.T) {
 			require.ErrorContains(t, validateAnchorEnvelope(cfg, st, anchorRoot, bid, env), tt.wantErr)
 		})
 	}
+}
+
+func TestValidateForwardEnvelopeEvidenceRejectsValidSignatureFromWrongProposer(t *testing.T) {
+	cfg, validationState, _, _, _ := validAnchorEnvelopeFixture(t, 0)
+	privateKey, err := bls.NewPrivateKeyFromIKM([]byte("01234567890123456789012345678901"))
+	require.NoError(t, err)
+	publicKey := common.Bytes48(bls.CompressPublicKey(privateKey.PublicKey()))
+	validationState.AddValidator(
+		solid.NewValidatorFromParameters(publicKey, common.Hash{}, cfg.MaxEffectiveBalance, false, 0, 0, cfg.FarFutureEpoch, cfg.FarFutureEpoch),
+		cfg.MaxEffectiveBalance,
+	)
+
+	parentRoot := common.HexToHash("0x1234")
+	block := cltypes.NewSignedBeaconBlock(cfg, clparams.GloasVersion)
+	block.Block.Slot = validationState.Slot() + 1
+	block.Block.ParentRoot = parentRoot
+	expectedProposer, err := validationState.GetBeaconProposerIndexForSlot(block.Block.Slot)
+	require.NoError(t, err)
+	block.Block.ProposerIndex = 1 - expectedProposer
+	domain, err := validationState.GetDomain(cfg.DomainBeaconProposer, block.Block.Slot/cfg.SlotsPerEpoch)
+	require.NoError(t, err)
+	signingRoot, err := fork.ComputeSigningRoot(block.Block, domain)
+	require.NoError(t, err)
+	copy(block.Signature[:], privateKey.Sign(signingRoot[:]).Bytes())
+	valid, err := eth2impl.VerifyBlockSignature(validationState, block)
+	require.NoError(t, err)
+	require.True(t, valid)
+
+	fc := forkchoicemock.NewForkChoiceStorageMock(t)
+	fc.StateAtBlockRootVal[parentRoot] = validationState
+
+	_, err = validateForwardEnvelopeEvidence(fc, []*cltypes.SignedBeaconBlock{block})
+	require.ErrorContains(t, err, "unexpected proposer")
+}
+
+func TestValidateForwardEnvelopeEvidenceAcceptsExpectedProposer(t *testing.T) {
+	cfg, validationState, _, _, _ := validAnchorEnvelopeFixture(t, 0)
+	privateKey, err := bls.NewPrivateKeyFromIKM([]byte("01234567890123456789012345678901"))
+	require.NoError(t, err)
+	parentRoot := common.HexToHash("0x1234")
+	block := cltypes.NewSignedBeaconBlock(cfg, clparams.GloasVersion)
+	block.Block.Slot = validationState.Slot() + 1
+	block.Block.ParentRoot = parentRoot
+	block.Block.ProposerIndex, err = validationState.GetBeaconProposerIndexForSlot(block.Block.Slot)
+	require.NoError(t, err)
+	domain, err := validationState.GetDomain(cfg.DomainBeaconProposer, block.Block.Slot/cfg.SlotsPerEpoch)
+	require.NoError(t, err)
+	signingRoot, err := fork.ComputeSigningRoot(block.Block, domain)
+	require.NoError(t, err)
+	copy(block.Signature[:], privateKey.Sign(signingRoot[:]).Bytes())
+	fc := forkchoicemock.NewForkChoiceStorageMock(t)
+	fc.StateAtBlockRootVal[parentRoot] = validationState
+
+	authenticated, err := validateForwardEnvelopeEvidence(fc, []*cltypes.SignedBeaconBlock{block})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, authenticated)
+}
+
+func TestValidateForwardEnvelopeEvidenceFailsClosedWithoutState(t *testing.T) {
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	block.Block.Slot = 1
+	block.Block.ParentRoot = common.HexToHash("0x1234")
+	fc := forkchoicemock.NewForkChoiceStorageMock(t)
+
+	authenticated, err := validateForwardEnvelopeEvidence(fc, []*cltypes.SignedBeaconBlock{block})
+
+	require.ErrorContains(t, err, "state unavailable")
+	require.Zero(t, authenticated)
+}
+
+func TestValidateForwardEnvelopeEvidenceReturnsFuluLookaheadPrefix(t *testing.T) {
+	cfg, validationState, _, _, _ := validAnchorEnvelopeFixture(t, 0)
+	validationState.SetVersion(clparams.FuluVersion)
+	first := cltypes.NewSignedBeaconBlock(cfg, clparams.FuluVersion)
+	first.Block.Slot = validationState.Slot()
+	firstRoot, err := first.Block.HashSSZ()
+	require.NoError(t, err)
+	beyondLookahead := cltypes.NewSignedBeaconBlock(cfg, clparams.FuluVersion)
+	beyondLookahead.Block.Slot = validationState.Slot() + (cfg.MinSeedLookahead+1)*cfg.SlotsPerEpoch
+	beyondLookahead.Block.ParentRoot = firstRoot
+	fc := forkchoicemock.NewForkChoiceStorageMock(t)
+	fc.StateAtBlockRootVal[firstRoot] = validationState
+
+	authenticated, err := validateForwardEnvelopeEvidence(fc, []*cltypes.SignedBeaconBlock{first, beyondLookahead})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, authenticated)
 }
 
 func TestAnchorEnvelopeMatches(t *testing.T) {

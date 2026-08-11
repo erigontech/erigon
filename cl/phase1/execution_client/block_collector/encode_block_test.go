@@ -43,9 +43,12 @@ func signedTestTx(t *testing.T, nonce uint64) types.Transaction {
 // consecutive encodes on one collector reuse its scratch buffers, and each
 // result must decode back to the original execution block.
 func TestEncodeDecodeBlockRoundTrip(t *testing.T) {
-	c := &PersistentBlockCollector{beaconChainCfg: &clparams.MainnetBeaconConfig}
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c := &PersistentBlockCollector{
+		beaconChainCfg: &clparams.MainnetBeaconConfig,
+		operationSlot:  make(chan struct{}, 1),
+	}
+	require.NoError(t, c.acquire(t.Context()))
+	defer c.release()
 
 	parent := common.HexToHash("0xaa")
 	tx0, tx1, tx2 := signedTestTx(t, 0), signedTestTx(t, 1), signedTestTx(t, 2)

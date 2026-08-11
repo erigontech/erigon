@@ -19,6 +19,7 @@ package forkchoice
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -34,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
@@ -41,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/optimistic"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
 	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -52,6 +55,21 @@ import (
 type failFirstUpdateDB struct {
 	kv.RwDB
 	updates atomic.Int32
+}
+
+type ownerAdmissionContext struct {
+	context.Context
+	observed  chan struct{}
+	observeAt int32
+	calls     atomic.Int32
+	once      sync.Once
+}
+
+func (c *ownerAdmissionContext) Done() <-chan struct{} {
+	if c.calls.Add(1) == c.observeAt {
+		c.once.Do(func() { close(c.observed) })
+	}
+	return c.Context.Done()
 }
 
 func (db *failFirstUpdateDB) Update(ctx context.Context, f func(kv.RwTx) error) error {
@@ -281,7 +299,7 @@ func TestCheckDataAvailability_NoBlobs(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// TestValidatePayloadWithEL_NoEngine tests that validatePayloadWithEL returns nil when there's no engine
+// TestValidatePayloadWithEL_NoEngine tests that payload validation returns nil when there's no engine.
 func TestValidatePayloadWithEL_NoEngine(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
 	f := &ForkChoiceStore{
@@ -301,7 +319,7 @@ func TestValidatePayloadWithEL_NoEngine(t *testing.T) {
 		},
 	}
 
-	_, err := f.validatePayloadWithEL(context.TODO(), envelope, block, common.Hash{})
+	_, err := f.validatePayloadWithELLocked(context.TODO(), envelope, block, common.Hash{})
 	require.NoError(t, err)
 }
 
@@ -316,7 +334,7 @@ func TestOnExecutionPayloadRepairsIndicesAfterPriorWriteFailure(t *testing.T) {
 	envelope.Message.Payload.BlockNumber = 42
 
 	db := &failFirstUpdateDB{RwDB: memdb.NewTestDB(t, dbcfg.ChainDB)}
-	pending, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](16)
+	pending, err := lru.New[common.Hash, *pendingExecutionPayloadEnvelopeEntry](16)
 	require.NoError(t, err)
 	f := &ForkChoiceStore{
 		forkGraph:        payloadVoteForkGraph{hasEnvelope: true, envelope: envelope},
@@ -351,7 +369,7 @@ func TestApplyLocalSelfBuildEnvelopeRepairsIndicesAfterPriorWriteFailure(t *test
 	envelope.Message.Payload.BlockNumber = 42
 
 	db := &failFirstUpdateDB{RwDB: memdb.NewTestDB(t, dbcfg.ChainDB)}
-	pending, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](16)
+	pending, err := lru.New[common.Hash, *pendingExecutionPayloadEnvelopeEntry](16)
 	require.NoError(t, err)
 	f := &ForkChoiceStore{
 		forkGraph:                      payloadVoteForkGraph{hasEnvelope: true, envelope: envelope},
@@ -375,8 +393,10 @@ func TestApplyLocalSelfBuildEnvelopeRepairsIndicesAfterPriorWriteFailure(t *test
 func TestReconcilePendingEnvelopeIndicesAfterRestart(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
 	anchorState := state.New(cfg)
-	fs := afero.NewMemMapFs()
+	baseDir := t.TempDir()
+	fs := afero.NewBasePathFs(afero.NewOsFs(), baseDir)
 	graph := fork_graph.NewForkGraphDisk(anchorState, nil, fs, beacon_router_configuration.RouterConfiguration{})
+	persistence := graph.(fork_graph.EnvelopePersistence)
 	root := common.HexToHash("0x1234")
 	executionHash := common.HexToHash("0xabcd")
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(cfg)}
@@ -398,8 +418,12 @@ func TestReconcilePendingEnvelopeIndicesAfterRestart(t *testing.T) {
 	orphanRoot := common.HexToHash("0x9999")
 	orphanEnvelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(cfg)}
 	orphanEnvelope.Message.BeaconBlockRoot = orphanRoot
-	_, err := graph.PrepareEnvelopeOnDisk(orphanRoot, orphanEnvelope, false)
+	_, err := persistence.PrepareEnvelopeOnDisk(orphanRoot, orphanEnvelope, false)
 	require.NoError(t, err)
+
+	restartedFS := afero.NewBasePathFs(afero.NewOsFs(), baseDir)
+	graph = fork_graph.NewForkGraphDisk(anchorState, nil, restartedFS, beacon_router_configuration.RouterConfiguration{})
+	persistence = graph.(fork_graph.EnvelopePersistence)
 
 	_, err = NewForkChoiceStore(
 		nil,
@@ -434,7 +458,7 @@ func TestReconcilePendingEnvelopeIndicesAfterRestart(t *testing.T) {
 		require.Nil(t, orphanNumber)
 		return nil
 	}))
-	pendingRoots, err := graph.PendingEnvelopeIndexRoots()
+	pendingRoots, err := persistence.PendingEnvelopeIndexRoots()
 	require.NoError(t, err)
 	require.Empty(t, pendingRoots)
 }
@@ -555,6 +579,89 @@ func TestOnExecutionPayloadRejectsIncompleteCallerBeforePersistedFallback(t *tes
 	require.ErrorContains(t, err, "incomplete execution payload envelope")
 }
 
+func TestOnExecutionPayloadReplacesLocalSignatureWithAuthenticatedEnvelope(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	blockState := state.New(&cfg)
+	blockState.SetVersion(clparams.GloasVersion)
+	blockState.SetSlot(1)
+	parentRoot := common.HexToHash("0x2222")
+	stateRoot := common.HexToHash("0x1111")
+	header := &cltypes.BeaconBlockHeader{Slot: 1, ParentRoot: parentRoot, ProposerIndex: 0}
+	blockState.SetLatestBlockHeader(header)
+	blockState.SetPreviousStateRoot(stateRoot)
+	headerWithStateRoot := *header
+	headerWithStateRoot.Root = stateRoot
+	blockRoot, err := headerWithStateRoot.HashSSZ()
+	require.NoError(t, err)
+
+	privateKey, err := bls.NewPrivateKeyFromIKM([]byte("01234567890123456789012345678901"))
+	require.NoError(t, err)
+	pubkey := common.Bytes48(bls.CompressPublicKey(privateKey.PublicKey()))
+	blockState.AddValidator(solid.NewValidatorFromParameters(pubkey, common.Hash{}, cfg.MaxEffectiveBalance, false, 0, 0, cfg.FarFutureEpoch, cfg.FarFutureEpoch), cfg.MaxEffectiveBalance)
+
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&cfg)}
+	envelope.Message.BuilderIndex = clparams.BuilderIndexSelfBuild
+	envelope.Message.BeaconBlockRoot = blockRoot
+	envelope.Message.ParentBeaconBlockRoot = parentRoot
+	envelope.Message.Payload.SlotNumber = 1
+	envelope.Message.Payload.BlockHash = common.HexToHash("0xabcd")
+	envelope.Message.Payload.ParentHash = common.HexToHash("0x3333")
+	envelope.Message.Payload.Time = cfg.SecondsPerSlot
+	envelope.Message.Payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), 44)
+	requestsRoot, err := envelope.Message.ExecutionRequests.HashSSZ()
+	require.NoError(t, err)
+	bid := &cltypes.ExecutionPayloadBid{
+		BuilderIndex:          envelope.Message.BuilderIndex,
+		PrevRandao:            envelope.Message.Payload.PrevRandao,
+		GasLimit:              envelope.Message.Payload.GasLimit,
+		BlockHash:             envelope.Message.Payload.BlockHash,
+		ExecutionRequestsRoot: requestsRoot,
+		BlobKzgCommitments:    *solid.NewStaticListSSZ[*cltypes.KZGCommitment](0, 48),
+	}
+	blockState.SetLatestExecutionPayloadBid(bid)
+	blockState.SetLatestBlockHash(envelope.Message.Payload.ParentHash)
+	blockState.SetPayloadExpectedWithdrawals(envelope.Message.Payload.Withdrawals)
+	body := cltypes.NewBeaconBody(&cfg, clparams.GloasVersion)
+	body.SignedExecutionPayloadBid = &cltypes.SignedExecutionPayloadBid{Message: bid, Signature: common.Bytes96(bls.InfiniteSignature)}
+	block := &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 1, ParentRoot: parentRoot, StateRoot: stateRoot, Body: body}}
+	domain, err := blockState.GetDomain(cfg.DomainBeaconBuilder, state.GetEpochAtSlot(&cfg, 1))
+	require.NoError(t, err)
+	signingRoot, err := fork.ComputeSigningRoot(envelope.Message, domain)
+	require.NoError(t, err)
+	copy(envelope.Signature[:], privateKey.Sign(signingRoot[:]).Bytes())
+
+	localEnvelope := envelope.Clone().(*cltypes.SignedExecutionPayloadEnvelope)
+	localEnvelope.Signature = common.Bytes96(bls.InfiniteSignature)
+	var preparedEnvelope *cltypes.SignedExecutionPayloadEnvelope
+	var prepareRequiresBlock bool
+	eth2Roots, err := lru.New[common.Hash, common.Hash](16)
+	require.NoError(t, err)
+	f := &ForkChoiceStore{
+		beaconCfg: &cfg,
+		forkGraph: payloadVoteForkGraph{
+			hasEnvelope:          true,
+			envelope:             localEnvelope,
+			block:                block,
+			blockState:           blockState,
+			preparedEnvelope:     &preparedEnvelope,
+			prepareRequiresBlock: &prepareRequiresBlock,
+		},
+		eth2Roots: eth2Roots,
+	}
+
+	require.NoError(t, f.OnExecutionPayload(t.Context(), envelope, false, true))
+	require.Same(t, envelope, preparedEnvelope)
+	require.True(t, prepareRequiresBlock)
+}
+
+func TestOnExecutionPayloadRejectsInfiniteSignature(t *testing.T) {
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
+	envelope.Signature = common.Bytes96(bls.InfiniteSignature)
+
+	err := (&ForkChoiceStore{}).OnExecutionPayload(t.Context(), envelope, false, false)
+	require.ErrorContains(t, err, "unauthenticated")
+}
+
 func TestPendingLocalSelfBuildEnvelopeSurvivesCanceledApplyAndRetries(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
 	blockState := state.New(cfg)
@@ -605,7 +712,7 @@ func TestPendingLocalSelfBuildEnvelopeSurvivesCanceledApplyAndRetries(t *testing
 	engine := execution_client.NewMockExecutionEngine(ctrl)
 	engine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(execution_client.PayloadStatusNone, context.Canceled)
 	engine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(execution_client.PayloadStatusValidated, nil).Times(2)
-	pending, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](16)
+	pending, err := lru.New[common.Hash, *pendingExecutionPayloadEnvelopeEntry](16)
 	require.NoError(t, err)
 	verified, err := lru.New[common.Hash, struct{}](16)
 	require.NoError(t, err)
@@ -701,21 +808,21 @@ func TestPendingLocalSelfBuildEnvelopeSurvivesCanceledApplyAndRetries(t *testing
 }
 
 func TestRetryPendingExecutionPayloadEnvelopesIsBoundedAndFair(t *testing.T) {
-	gossip, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](16)
+	gossip, err := lru.New[common.Hash, *pendingExecutionPayloadEnvelopeEntry](16)
 	require.NoError(t, err)
-	local, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](16)
+	local, err := lru.New[common.Hash, *pendingExecutionPayloadEnvelopeEntry](16)
 	require.NoError(t, err)
 	f := &ForkChoiceStore{
 		pendingEnvelopes:               gossip,
 		pendingLocalSelfBuildEnvelopes: local,
 	}
 	for i := byte(1); i <= 3; i++ {
-		gossip.Add(common.Hash{i}, &cltypes.SignedExecutionPayloadEnvelope{
+		gossip.Add(common.Hash{i}, &pendingExecutionPayloadEnvelopeEntry{createdAt: time.Now(), envelope: &cltypes.SignedExecutionPayloadEnvelope{
 			Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: common.Hash{i}},
-		})
-		local.Add(common.Hash{i + 3}, &cltypes.SignedExecutionPayloadEnvelope{
+		}})
+		local.Add(common.Hash{i + 3}, &pendingExecutionPayloadEnvelopeEntry{createdAt: time.Now(), envelope: &cltypes.SignedExecutionPayloadEnvelope{
 			Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: common.Hash{i + 3}},
-		})
+		}})
 	}
 
 	canceled, cancel := context.WithCancel(t.Context())
@@ -735,26 +842,178 @@ func TestRetryPendingExecutionPayloadEnvelopesIsBoundedAndFair(t *testing.T) {
 }
 
 func TestRetryPendingExecutionPayloadEnvelopesRotatesDeferredWork(t *testing.T) {
-	gossip, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](16)
+	gossip, err := lru.New[common.Hash, *pendingExecutionPayloadEnvelopeEntry](16)
 	require.NoError(t, err)
 	f := &ForkChoiceStore{
 		forkGraph:        payloadVoteForkGraph{},
 		pendingEnvelopes: gossip,
 	}
 	for i := byte(1); i <= 3; i++ {
-		gossip.Add(common.Hash{i}, &cltypes.SignedExecutionPayloadEnvelope{
+		gossip.Add(common.Hash{i}, &pendingExecutionPayloadEnvelopeEntry{createdAt: time.Now(), envelope: &cltypes.SignedExecutionPayloadEnvelope{
 			Message: &cltypes.ExecutionPayloadEnvelope{
 				BeaconBlockRoot:   common.Hash{i},
 				Payload:           cltypes.NewEth1Block(clparams.GloasVersion, &clparams.MainnetBeaconConfig),
 				ExecutionRequests: cltypes.NewExecutionRequestsWithVersion(&clparams.MainnetBeaconConfig, clparams.GloasVersion),
 			},
-		})
+		}})
 	}
 
 	require.Equal(t, 2, f.RetryPendingExecutionPayloadEnvelopes(t.Context(), 2))
 	require.Equal(t, []common.Hash{{3}, {1}, {2}}, gossip.Keys())
 	require.Equal(t, 2, f.RetryPendingExecutionPayloadEnvelopes(t.Context(), 2))
 	require.Equal(t, []common.Hash{{2}, {3}, {1}}, gossip.Keys())
+}
+
+func TestRetryPendingExecutionPayloadEnvelopesExpiredWorkDoesNotConsumeLimit(t *testing.T) {
+	gossip, err := lru.New[common.Hash, *pendingExecutionPayloadEnvelopeEntry](16)
+	require.NoError(t, err)
+	expiredRoot := common.Hash{1}
+	freshRoot := common.Hash{2}
+	gossip.Add(expiredRoot, &pendingExecutionPayloadEnvelopeEntry{
+		createdAt: time.Now().Add(-pendingExecutionPayloadEnvelopeExpiry - time.Second),
+		envelope:  &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: expiredRoot}},
+	})
+	gossip.Add(freshRoot, &pendingExecutionPayloadEnvelopeEntry{
+		createdAt: time.Now(),
+		envelope:  &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: freshRoot}},
+	})
+	f := &ForkChoiceStore{pendingEnvelopes: gossip}
+
+	require.Equal(t, 1, f.RetryPendingExecutionPayloadEnvelopes(t.Context(), 1))
+	require.Zero(t, gossip.Len())
+}
+
+func TestPendingExecutionPayloadEnvelopeExpiryWithoutFinalizedCheckpoint(t *testing.T) {
+	f := &ForkChoiceStore{}
+	root := common.Hash{1}
+	require.False(t, f.pendingExecutionPayloadEnvelopeExpired(root, &pendingExecutionPayloadEnvelopeEntry{createdAt: time.Now()}))
+	require.True(t, f.pendingExecutionPayloadEnvelopeExpired(root, &pendingExecutionPayloadEnvelopeEntry{
+		createdAt: time.Now().Add(-pendingExecutionPayloadEnvelopeExpiry - time.Second),
+	}))
+}
+
+func TestPendingExecutionPayloadEnvelopeFinalizedBoundary(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	entry := &pendingExecutionPayloadEnvelopeEntry{createdAt: time.Now()}
+	f := &ForkChoiceStore{beaconCfg: cfg}
+	f.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: 1})
+	finalizedSlot := cfg.SlotsPerEpoch
+
+	for _, tc := range []struct {
+		name    string
+		slot    uint64
+		expired bool
+	}{
+		{name: "before boundary", slot: finalizedSlot - 1, expired: true},
+		{name: "exact boundary", slot: finalizedSlot, expired: true},
+		{name: "after boundary", slot: finalizedSlot + 1, expired: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f.forkGraph = payloadVoteForkGraph{block: &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: tc.slot}}}
+			require.Equal(t, tc.expired, f.pendingExecutionPayloadEnvelopeExpired(common.Hash{1}, entry))
+		})
+	}
+}
+
+func TestRetryPendingExecutionPayloadEnvelopesCancellationWhileOwnerHeld(t *testing.T) {
+	gossip, err := lru.New[common.Hash, *pendingExecutionPayloadEnvelopeEntry](16)
+	require.NoError(t, err)
+	root := common.Hash{1}
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
+	envelope.Message.BeaconBlockRoot = root
+	gossip.Add(root, &pendingExecutionPayloadEnvelopeEntry{createdAt: time.Now(), envelope: envelope})
+	f := &ForkChoiceStore{pendingEnvelopes: gossip}
+	unlocksOwner := f.lockEnvelopeOwner(root)
+
+	baseCtx, cancel := context.WithCancel(t.Context())
+	ctx := &ownerAdmissionContext{Context: baseCtx, observed: make(chan struct{}), observeAt: 2}
+	retryDone := make(chan int, 1)
+	go func() {
+		retryDone <- f.RetryPendingExecutionPayloadEnvelopes(ctx, 1)
+	}()
+	select {
+	case <-ctx.observed:
+	case <-time.After(time.Second):
+		unlocksOwner()
+		t.Fatal("retry did not reach envelope owner admission")
+	}
+	cancel()
+	select {
+	case attempted := <-retryDone:
+		require.Equal(t, 1, attempted)
+	case <-time.After(time.Second):
+		unlocksOwner()
+		t.Fatal("retry ignored cancellation while waiting for envelope owner")
+	}
+	require.Equal(t, 1, gossip.Len())
+	unlocksOwner()
+}
+
+func TestRetryPendingExecutionPayloadEnvelopesCancellationWhileAnotherRetryActive(t *testing.T) {
+	gossip, err := lru.New[common.Hash, *pendingExecutionPayloadEnvelopeEntry](16)
+	require.NoError(t, err)
+	root := common.Hash{1}
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
+	envelope.Message.BeaconBlockRoot = root
+	gossip.Add(root, &pendingExecutionPayloadEnvelopeEntry{createdAt: time.Now(), envelope: envelope})
+	f := &ForkChoiceStore{pendingEnvelopes: gossip}
+	unlocksOwner := f.lockEnvelopeOwner(root)
+
+	firstBaseCtx, cancelFirst := context.WithCancel(t.Context())
+	firstCtx := &ownerAdmissionContext{Context: firstBaseCtx, observed: make(chan struct{}), observeAt: 2}
+	firstDone := make(chan int, 1)
+	go func() { firstDone <- f.RetryPendingExecutionPayloadEnvelopes(firstCtx, 1) }()
+	select {
+	case <-firstCtx.observed:
+	case <-time.After(time.Second):
+		unlocksOwner()
+		t.Fatal("first retry did not reach envelope owner admission")
+	}
+
+	secondBaseCtx, cancelSecond := context.WithCancel(t.Context())
+	secondCtx := &ownerAdmissionContext{Context: secondBaseCtx, observed: make(chan struct{}), observeAt: 1}
+	secondDone := make(chan int, 1)
+	go func() { secondDone <- f.RetryPendingExecutionPayloadEnvelopes(secondCtx, 1) }()
+	select {
+	case <-secondCtx.observed:
+	case <-time.After(time.Second):
+		cancelFirst()
+		unlocksOwner()
+		t.Fatal("second retry did not reach global retry admission")
+	}
+	cancelSecond()
+	select {
+	case attempted := <-secondDone:
+		require.Zero(t, attempted)
+	case <-time.After(time.Second):
+		cancelFirst()
+		unlocksOwner()
+		t.Fatal("second retry ignored cancellation while waiting for global retry admission")
+	}
+	require.Equal(t, 1, gossip.Len())
+
+	cancelFirst()
+	require.Equal(t, 1, <-firstDone)
+	unlocksOwner()
+}
+
+func TestRetryPendingExecutionPayloadEnvelopesDropsFinalizedWork(t *testing.T) {
+	gossip, err := lru.New[common.Hash, *pendingExecutionPayloadEnvelopeEntry](16)
+	require.NoError(t, err)
+	root := common.Hash{1}
+	gossip.Add(root, &pendingExecutionPayloadEnvelopeEntry{
+		createdAt: time.Now(),
+		envelope:  &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: root}},
+	})
+	f := &ForkChoiceStore{
+		beaconCfg:        &clparams.MainnetBeaconConfig,
+		forkGraph:        payloadVoteForkGraph{block: &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 1}}},
+		pendingEnvelopes: gossip,
+	}
+	f.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: 1})
+
+	require.Zero(t, f.RetryPendingExecutionPayloadEnvelopes(t.Context(), 1))
+	require.Zero(t, gossip.Len())
 }
 
 func TestEnvelopeOwnershipAndPruneDoNotGloballyExcludeEachOther(t *testing.T) {
@@ -874,7 +1133,7 @@ func TestValidatePayloadWithELDoesNotRelockForkChoiceMu(t *testing.T) {
 			go func() {
 				f.mu.Lock()
 				defer f.mu.Unlock()
-				_, err := f.validatePayloadWithEL(context.Background(), envelope, block, blockRoot)
+				_, err := f.validatePayloadWithELLocked(context.Background(), envelope, block, blockRoot)
 				done <- err
 			}()
 
@@ -886,7 +1145,7 @@ func TestValidatePayloadWithELDoesNotRelockForkChoiceMu(t *testing.T) {
 					require.NoError(t, err)
 				}
 			case <-time.After(time.Second):
-				t.Fatal("validatePayloadWithEL blocked while forkchoice mutex was already held")
+				t.Fatal("validatePayloadWithELLocked blocked while forkchoice mutex was already held")
 			}
 			require.False(t, f.IsPayloadVerified(blockRoot))
 			if tt.status == execution_client.PayloadStatusInvalidated {
@@ -942,7 +1201,7 @@ func TestValidatePayloadWithELReleasesForkChoiceMuDuringNewPayload(t *testing.T)
 	go func() {
 		f.mu.Lock()
 		defer f.mu.Unlock()
-		_, err := f.validatePayloadWithEL(context.Background(), envelope, block, common.HexToHash("0x1234"))
+		_, err := f.validatePayloadWithELLocked(context.Background(), envelope, block, common.HexToHash("0x1234"))
 		validationDone <- err
 	}()
 	<-engineStarted
@@ -1020,7 +1279,7 @@ func TestValidatePayloadWithELDoesNotCoalesceDifferentPayloads(t *testing.T) {
 	validate := func(envelope *cltypes.ExecutionPayloadEnvelope) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
-		_, err := f.validatePayloadWithEL(context.Background(), envelope, block, blockRoot)
+		_, err := f.validatePayloadWithELLocked(context.Background(), envelope, block, blockRoot)
 		results <- err
 	}
 	go validate(first)
@@ -1063,7 +1322,7 @@ func TestNewPayloadCoalescesSameKey(t *testing.T) {
 		if acquired != nil {
 			close(acquired)
 		}
-		status, err := f.newPayloadWithoutForkChoiceLock(context.Background(), key, nil, nil, nil, nil)
+		status, err := f.newPayloadLocked(context.Background(), key, nil, nil, nil, nil)
 		f.mu.Unlock()
 		results <- result{status: status, err: err}
 	}
@@ -1101,7 +1360,7 @@ func TestNewPayloadCanceledWaiterDoesNotCancelLeader(t *testing.T) {
 	leaderDone := make(chan error, 1)
 	go func() {
 		f.mu.Lock()
-		_, err := f.newPayloadWithoutForkChoiceLock(context.Background(), key, nil, nil, nil, nil)
+		_, err := f.newPayloadLocked(context.Background(), key, nil, nil, nil, nil)
 		f.mu.Unlock()
 		leaderDone <- err
 	}()
@@ -1110,7 +1369,7 @@ func TestNewPayloadCanceledWaiterDoesNotCancelLeader(t *testing.T) {
 	waiterCtx, cancel := context.WithCancel(context.Background())
 	cancel()
 	f.mu.Lock()
-	_, err := f.newPayloadWithoutForkChoiceLock(waiterCtx, key, nil, nil, nil, nil)
+	_, err := f.newPayloadLocked(waiterCtx, key, nil, nil, nil, nil)
 	f.mu.Unlock()
 	require.ErrorIs(t, err, context.Canceled)
 
@@ -1142,7 +1401,7 @@ func TestNewPayloadConcurrencyIsBounded(t *testing.T) {
 	for i := range 3 {
 		go func(key byte) {
 			f.mu.Lock()
-			_, _ = f.newPayloadWithoutForkChoiceLock(context.Background(), hashWithFirstByte(key), nil, nil, nil, nil)
+			_, _ = f.newPayloadLocked(context.Background(), hashWithFirstByte(key), nil, nil, nil, nil)
 			f.mu.Unlock()
 			done <- struct{}{}
 		}(byte(i + 1))
@@ -1181,14 +1440,14 @@ func TestNewPayloadPanicRestoresForkChoiceState(t *testing.T) {
 		defer func() { require.Equal(t, "engine panic", recover()) }()
 		f.mu.Lock()
 		defer f.mu.Unlock()
-		_, _ = f.newPayloadWithoutForkChoiceLock(context.Background(), key, nil, nil, nil, nil)
+		_, _ = f.newPayloadLocked(context.Background(), key, nil, nil, nil, nil)
 	}()
 
 	done := make(chan error, 2)
 	for _, retryKey := range []common.Hash{key, hashWithFirstByte(2)} {
 		go func() {
 			f.mu.Lock()
-			_, err := f.newPayloadWithoutForkChoiceLock(context.Background(), retryKey, nil, nil, nil, nil)
+			_, err := f.newPayloadLocked(context.Background(), retryKey, nil, nil, nil, nil)
 			f.mu.Unlock()
 			done <- err
 		}()

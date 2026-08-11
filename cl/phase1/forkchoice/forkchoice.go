@@ -119,6 +119,7 @@ type ForkChoiceStore struct {
 	// Use go map because this is actually an unordered set
 	equivocatingIndicies []byte
 	forkGraph            fork_graph.ForkGraph
+	envelopePersistence  fork_graph.EnvelopePersistence
 	blobStorage          blob_storage.BlobStorage
 	peerDas              das.PeerDas
 	// Per-block unrealized checkpoints (spec: store.unrealized_justifications)
@@ -185,19 +186,15 @@ type ForkChoiceStore struct {
 	// Used by is_head_late and proposer boost reorg logic.
 	blockTimeliness sync.Map // map[common.Hash][clparams.NumBlockTimelinessDeadlines]bool
 	// [New in Gloas:EIP7732]
-	gloasWeightTree *gloasWeightTree
-	// [New in Gloas:EIP7732] Envelopes waiting for their corresponding block to arrive.
-	// In GLOAS, BeaconBlock and ExecutionPayloadEnvelope are gossiped separately.
-	// Due to network timing, the envelope may arrive before its corresponding block.
-	// When this happens, OnExecutionPayload queues the envelope here (keyed by beacon_block_root).
-	// Later, when OnBlock processes the block, it checks this cache and processes any pending envelope.
-	pendingEnvelopes *lru.Cache[common.Hash, *cltypes.SignedExecutionPayloadEnvelope]
+	gloasWeightTree  *gloasWeightTree
+	pendingEnvelopes *lru.Cache[common.Hash, *pendingExecutionPayloadEnvelopeEntry]
 
 	// [New in Gloas:EIP7732] Locally-produced self-build envelopes waiting for their block.
 	// Separate from pendingEnvelopes so that OnBlock replay can distinguish local origin
 	// (skip BLS) from gossip origin (full verification) without inspecting envelope contents.
-	pendingLocalSelfBuildEnvelopes *lru.Cache[common.Hash, *cltypes.SignedExecutionPayloadEnvelope]
-	pendingEnvelopeRetryMu         sync.Mutex
+	pendingLocalSelfBuildEnvelopes *lru.Cache[common.Hash, *pendingExecutionPayloadEnvelopeEntry]
+	pendingEnvelopeRetryOnce       sync.Once
+	pendingEnvelopeRetrySlot       chan struct{}
 	pendingEnvelopeRetryLocal      bool
 
 	// [New in Gloas:EIP7732] Execution blocks whose CL state transition succeeded but
@@ -217,7 +214,7 @@ type ForkChoiceStore struct {
 }
 
 type envelopeOwner struct {
-	mu   sync.Mutex
+	slot chan struct{}
 	refs int
 }
 
@@ -247,6 +244,7 @@ func NewForkChoiceStore(
 	probabilisticHeadGetter bool,
 	db kv.RwDB,
 ) (*ForkChoiceStore, error) {
+	envelopePersistence, _ := forkGraph.(fork_graph.EnvelopePersistence)
 	anchorRoot, err := anchorState.BlockRoot()
 	if err != nil {
 		return nil, err
@@ -322,13 +320,13 @@ func NewForkChoiceStore(
 	}
 
 	// [New in Gloas:EIP7732] LRU cache for pending envelopes waiting for their block
-	pendingEnvelopes, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](queueCacheSize)
+	pendingEnvelopes, err := lru.New[common.Hash, *pendingExecutionPayloadEnvelopeEntry](queueCacheSize)
 	if err != nil {
 		return nil, err
 	}
 
 	// [New in Gloas:EIP7732] Separate queue for locally-produced self-build envelopes
-	pendingLocalSelfBuildEnvelopes, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](queueCacheSize)
+	pendingLocalSelfBuildEnvelopes, err := lru.New[common.Hash, *pendingExecutionPayloadEnvelopeEntry](queueCacheSize)
 	if err != nil {
 		return nil, err
 	}
@@ -374,6 +372,7 @@ func NewForkChoiceStore(
 	headSet[anchorRoot] = struct{}{}
 	f := &ForkChoiceStore{
 		forkGraph:                      forkGraph,
+		envelopePersistence:            envelopePersistence,
 		equivocatingIndicies:           make([]byte, anchorState.ValidatorLength(), anchorState.ValidatorLength()*2),
 		latestMessages:                 newLatestMessagesStore(anchorState.ValidatorLength()),
 		eth2Roots:                      eth2Roots,

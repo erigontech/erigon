@@ -3,6 +3,7 @@ package rpc
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -15,6 +16,11 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
+
+type rawSSZ []byte
+
+func (r rawSSZ) EncodeSSZ(dst []byte) ([]byte, error) { return append(dst, r...), nil }
+func (r rawSSZ) EncodingSizeSSZ() int                 { return len(r) }
 
 type blockResponseSentinel struct {
 	sentinelproto.SentinelClient
@@ -89,4 +95,51 @@ func TestSendBeaconBlocksByRangeReqRejectsForkSchemaSlotMismatch(t *testing.T) {
 	require.Nil(t, blocks)
 	require.Equal(t, "malicious-peer", pid)
 	require.Equal(t, "malicious-peer", sentinel.bannedPeer)
+}
+
+func TestExecutionPayloadEnvelopeRequestsRejectNonCanonicalSSZ(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.InitializeForkSchedule()
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
+	gloasDigest, err := clock.ComputeForkDigest(cfg.GloasForkEpoch)
+	require.NoError(t, err)
+
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{
+		Message: cltypes.NewExecutionPayloadEnvelope(&cfg),
+	}
+	encoded, err := envelope.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	const signedEnvelopeFixedSize = 4 + 96
+	dynamicGap := make([]byte, 0, len(encoded)+1)
+	dynamicGap = append(dynamicGap, encoded[:signedEnvelopeFixedSize]...)
+	dynamicGap = append(dynamicGap, 0)
+	dynamicGap = append(dynamicGap, encoded[signedEnvelopeFixedSize:]...)
+	binary.LittleEndian.PutUint32(dynamicGap[:4], signedEnvelopeFixedSize+1)
+
+	for _, test := range []struct {
+		name string
+		ssz  []byte
+	}{
+		{name: "dynamic offset gap", ssz: dynamicGap},
+		{name: "trailing byte", ssz: append(append([]byte(nil), encoded...), 0)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var response bytes.Buffer
+			require.NoError(t, ssz_snappy.EncodeAndWrite(&response, rawSSZ(test.ssz), gloasDigest[:]...))
+			sentinel := &blockResponseSentinel{response: response.Bytes()}
+			client := &BeaconRpcP2P{
+				ctx:          context.Background(),
+				sentinel:     sentinel,
+				beaconConfig: &cfg,
+				ethClock:     clock,
+			}
+
+			_, _, rangeErr := client.SendExecutionPayloadEnvelopesByRangeReq(context.Background(), 10, 1)
+			require.Error(t, rangeErr)
+
+			_, _, rootErr := client.SendExecutionPayloadEnvelopesByRootReq(context.Background(), [][32]byte{{1}})
+			require.Error(t, rootErr)
+		})
+	}
 }

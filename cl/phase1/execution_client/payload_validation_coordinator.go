@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 )
@@ -81,6 +83,8 @@ func (c *PayloadValidationCoordinator) NewPayload(
 			panicValue any
 		)
 		func() {
+			started := time.Now()
+			defer monitor.ObserveNewPayloadTime(started)
 			defer func() {
 				panicValue = recover()
 			}()

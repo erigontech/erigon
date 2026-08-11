@@ -18,28 +18,14 @@ package forkchoice
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/phase1/core/state"
-	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/cl/utils"
-	"github.com/erigontech/erigon/common"
 )
-
-type refreshStateForkGraph struct {
-	fork_graph.ForkGraph
-	latest *state.CachingBeaconState
-	err    error
-}
-
-func (f *refreshStateForkGraph) GetState(common.Hash, bool) (*state.CachingBeaconState, error) {
-	return f.latest, f.err
-}
 
 // A response's decoded schema comes from the peer-chosen fork digest, so it is
 // independent of the slot the block claims. Gloas removed ExecutionPayload and
@@ -68,25 +54,4 @@ func TestOnBlockRejectsForkSchemaSlotMismatch(t *testing.T) {
 
 	err := store.OnBlock(context.Background(), mismatched, false, true, true)
 	require.ErrorIs(t, err, ErrForkSchemaSlotMismatch)
-}
-
-func TestRefreshBlockStateAfterPayloadValidationUsesLatestState(t *testing.T) {
-	latest := state.New(&clparams.MainnetBeaconConfig)
-	latest.SetSlot(12)
-	store := &ForkChoiceStore{forkGraph: &refreshStateForkGraph{latest: latest}}
-
-	got, err := store.refreshBlockStateAfterPayloadValidation(common.Hash{1})
-	require.NoError(t, err)
-	require.Same(t, latest, got)
-}
-
-func TestRefreshBlockStateAfterPayloadValidationRejectsMissingState(t *testing.T) {
-	store := &ForkChoiceStore{forkGraph: &refreshStateForkGraph{}}
-	_, err := store.refreshBlockStateAfterPayloadValidation(common.Hash{1})
-	require.Error(t, err)
-
-	expected := errors.New("read failed")
-	store.forkGraph = &refreshStateForkGraph{err: expected}
-	_, err = store.refreshBlockStateAfterPayloadValidation(common.Hash{1})
-	require.ErrorIs(t, err, expected)
 }

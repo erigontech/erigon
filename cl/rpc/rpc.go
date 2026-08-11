@@ -192,10 +192,8 @@ func (b *BeaconRpcP2P) SendExecutionPayloadEnvelopesByRangeReq(ctx context.Conte
 
 	envelopes := make([]*cltypes.SignedExecutionPayloadEnvelope, 0, len(responsePacket))
 	for _, data := range responsePacket {
-		envelope := &cltypes.SignedExecutionPayloadEnvelope{
-			Message: cltypes.NewExecutionPayloadEnvelope(b.beaconConfig),
-		}
-		if err := envelope.DecodeSSZ(data.raw, int(data.version)); err != nil {
+		envelope, err := decodeExecutionPayloadEnvelope(data, b.beaconConfig)
+		if err != nil {
 			return nil, pid, err
 		}
 		envelopes = append(envelopes, envelope)
@@ -229,15 +227,30 @@ func (b *BeaconRpcP2P) SendExecutionPayloadEnvelopesByRootReq(ctx context.Contex
 
 	envelopes := make([]*cltypes.SignedExecutionPayloadEnvelope, 0, len(responsePacket))
 	for _, data := range responsePacket {
-		envelope := &cltypes.SignedExecutionPayloadEnvelope{
-			Message: cltypes.NewExecutionPayloadEnvelope(b.beaconConfig),
-		}
-		if err := envelope.DecodeSSZ(data.raw, int(data.version)); err != nil {
+		envelope, err := decodeExecutionPayloadEnvelope(data, b.beaconConfig)
+		if err != nil {
 			return nil, pid, err
 		}
 		envelopes = append(envelopes, envelope)
 	}
 	return envelopes, pid, nil
+}
+
+func decodeExecutionPayloadEnvelope(data responseData, beaconConfig *clparams.BeaconChainConfig) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{
+		Message: cltypes.NewExecutionPayloadEnvelope(beaconConfig),
+	}
+	if err := envelope.DecodeSSZ(data.raw, int(data.version)); err != nil {
+		return nil, err
+	}
+	canonical, err := envelope.EncodeSSZ(nil)
+	if err != nil {
+		return nil, err
+	}
+	if !bytes.Equal(data.raw, canonical) {
+		return nil, errors.New("non-canonical SSZ encoding")
+	}
+	return envelope, nil
 }
 
 // SendBeaconBlocksByRangeReq retrieves blocks range from beacon chain.

@@ -17,6 +17,7 @@
 package network
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"errors"
@@ -47,6 +48,9 @@ type ProcessFn func(
 	newHighestSlotProcessed uint64,
 	err error)
 
+// ValidateBlocksFn returns the authenticated prefix available for envelope classification.
+type ValidateBlocksFn func([]*cltypes.SignedBeaconBlock) (int, error)
+
 type ForwardBeaconDownloader struct {
 	ctx                   context.Context
 	highestSlotProcessed  uint64
@@ -54,6 +58,7 @@ type ForwardBeaconDownloader struct {
 	minSlot               uint64 // earliest requestable slot (e.g. checkpoint anchor)
 	rpc                   *rpc.BeaconRpcP2P
 	process               ProcessFn
+	validate              ValidateBlocksFn
 	beaconCfg             *clparams.BeaconChainConfig
 	httpFallbackURL       string      // beacon API base URL for HTTP fallback when P2P fails
 	httpPreferred         atomic.Bool // set after first HTTP fallback success; skips P2P probing
@@ -74,6 +79,12 @@ func (f *ForwardBeaconDownloader) SetProcessFunction(fn ProcessFn) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.process = fn
+}
+
+func (f *ForwardBeaconDownloader) SetValidateFunction(fn ValidateBlocksFn) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.validate = fn
 }
 
 // SetHTTPFallbackURL sets the beacon API base URL for HTTP-based block fetching
@@ -280,14 +291,28 @@ Process:
 	// then trim to `count` before processing.
 	var envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
 	if anyGloasBlock(processBlocks) {
+		if f.validate == nil {
+			return
+		}
+		authenticatedCount, err := f.validate(processBlocks)
+		if err != nil {
+			if pid != "http-fallback" && f.rpc != nil {
+				f.rpc.BanPeer(pid)
+			}
+			return
+		}
+		if authenticatedCount < 2 || authenticatedCount > len(processBlocks) {
+			return
+		}
+		processBlocks = processBlocks[:authenticatedCount]
 		// Always keep at least 1 block as lookahead so the last processed
 		// block's FULL/EMPTY status is determined from the actual next block
 		// rather than guessed as EMPTY.  Without this, a FULL block at the
 		// batch boundary has its envelope skipped, and the next batch's first
 		// block fails with ErrParentEnvelopePending.
 		processCount := min(int(count), len(processBlocks)-1)
-		if processCount < 1 {
-			processCount = len(processBlocks) // single block: process it (best-effort)
+		if processCount == 0 {
+			return
 		}
 		fullRoots := determineFullGloasRoots(processBlocks, processCount)
 		processBlocks = processBlocks[:processCount]
@@ -517,6 +542,10 @@ func fetchBlocksFromBeaconAPI(ctx context.Context, baseURL string, startSlot, co
 				results[idx].err = fmt.Errorf("HTTP block decode slot %d: %w", slot, err)
 				return
 			}
+			if err := requireCanonicalSSZ(body, block); err != nil {
+				results[idx].err = fmt.Errorf("HTTP block decode slot %d: %w", slot, err)
+				return
+			}
 			results[idx].block = block
 		})
 	}
@@ -640,6 +669,10 @@ func fetchEnvelopesFromBeaconAPI(
 				log.Debug("[ForwardBeaconDownloader] HTTP envelope decode failed", "root", common.Hash(root), "err", err)
 				return
 			}
+			if err := requireCanonicalSSZ(body, envelope); err != nil {
+				log.Debug("[ForwardBeaconDownloader] HTTP envelope decode failed", "root", common.Hash(root), "err", err)
+				return
+			}
 			block := blockByRoot(blocks, common.Hash(root))
 			if err := ValidateFetchedEnvelope(beaconCfg, block, common.Hash(root), envelope); err != nil {
 				log.Debug("[ForwardBeaconDownloader] HTTP envelope mismatch", "root", common.Hash(root), "err", err)
@@ -658,6 +691,21 @@ func fetchEnvelopesFromBeaconAPI(
 		}
 	}
 	return fetched
+}
+
+type sszCanonicalEncoder interface {
+	EncodeSSZ([]byte) ([]byte, error)
+}
+
+func requireCanonicalSSZ(input []byte, value sszCanonicalEncoder) error {
+	encoded, err := value.EncodeSSZ(nil)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(input, encoded) {
+		return errors.New("non-canonical SSZ encoding")
+	}
+	return nil
 }
 
 // GetHighestProcessedSlot retrieve the highest processed slot we accumulated.

@@ -17,6 +17,7 @@
 package forkchoice
 
 import (
+	"context"
 	"errors"
 	"slices"
 	"sync"
@@ -25,17 +26,74 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 )
+
+func TestOnBlockRejectsFinalizationChangedDuringPayloadValidation(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	parentRoot := common.Hash{1}
+	initialFinalized := solid.Checkpoint{Epoch: 2, Root: parentRoot}
+
+	graph := &getFinalizedExecutionHashForkGraph{
+		headers: map[common.Hash]*cltypes.BeaconBlockHeader{
+			parentRoot: {Slot: 64},
+		},
+	}
+	ctrl := gomock.NewController(t)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	engine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (execution_client.PayloadStatus, error) {
+			close(started)
+			<-release
+			return execution_client.PayloadStatusValidated, nil
+		},
+	)
+	verified, err := lru.New[common.Hash, struct{}](16)
+	require.NoError(t, err)
+	store := &ForkChoiceStore{
+		beaconCfg:                &cfg,
+		forkGraph:                graph,
+		engine:                   engine,
+		verifiedExecutionPayload: verified,
+		ethClock:                 eth_clock.NewEthereumClock(0, common.Hash{}, &cfg),
+	}
+	store.finalizedCheckpoint.Store(initialFinalized)
+	store.time.Store(cfg.SecondsPerSlot * 100)
+
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.BellatrixVersion)
+	block.Block.Slot = 65
+	block.Block.ParentRoot = parentRoot
+	done := make(chan error, 1)
+	go func() {
+		done <- store.OnBlock(t.Context(), block, true, false, false)
+	}()
+	<-started
+
+	store.mu.Lock()
+	store.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: 3, Root: common.Hash{2}})
+	store.mu.Unlock()
+	close(release)
+
+	require.ErrorIs(t, <-done, ErrNotFinalizedDescendant)
+	require.False(t, graph.addChainSegmentCalled)
+}
 
 func TestGetFinalizedExecutionHash(t *testing.T) {
 	cache, err := lru.New[common.Hash, common.Hash](16)
@@ -511,18 +569,6 @@ func (g *getFinalizedExecutionHashForkGraph) DumpBeaconStateOnDisk(common.Hash, 
 }
 
 func (g *getFinalizedExecutionHashForkGraph) DumpEnvelopeOnDisk(common.Hash, *cltypes.SignedExecutionPayloadEnvelope) error {
-	panic("not used")
-}
-
-func (g *getFinalizedExecutionHashForkGraph) PrepareEnvelopeOnDisk(common.Hash, *cltypes.SignedExecutionPayloadEnvelope, bool) (func() error, error) {
-	panic("not used")
-}
-
-func (g *getFinalizedExecutionHashForkGraph) PendingEnvelopeIndexRoots() ([]common.Hash, error) {
-	panic("not used")
-}
-
-func (g *getFinalizedExecutionHashForkGraph) MarkEnvelopeIndicesCommitted(common.Hash) error {
 	panic("not used")
 }
 

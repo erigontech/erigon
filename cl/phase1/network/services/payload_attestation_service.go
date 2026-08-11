@@ -121,6 +121,9 @@ func (s *payloadAttestationService) DecodeGossipMessage(_ peer.ID, data []byte, 
 	if err := msg.DecodeSSZ(data, int(version)); err != nil {
 		return nil, err
 	}
+	if err := requireCanonicalSSZ(data, msg); err != nil {
+		return nil, err
+	}
 	return msg, nil
 }
 

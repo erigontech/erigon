@@ -3,6 +3,7 @@ package execution_client
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -58,6 +59,21 @@ func TestPayloadValidationCoordinatorLeaderCancellationDoesNotPoisonWaiter(t *te
 type payloadValidationContextResult struct {
 	status PayloadStatus
 	err    error
+}
+
+type payloadValidationObservedContext struct {
+	context.Context
+	observed chan struct{}
+	once     sync.Once
+}
+
+func newPayloadValidationObservedContext(parent context.Context) *payloadValidationObservedContext {
+	return &payloadValidationObservedContext{Context: parent, observed: make(chan struct{})}
+}
+
+func (c *payloadValidationObservedContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.observed) })
+	return c.Context.Done()
 }
 
 func TestPayloadValidationCoordinatorWaiterCancellationIsLocal(t *testing.T) {
@@ -153,11 +169,16 @@ func TestPayloadValidationCoordinatorReportsLeaderPanicToWaiter(t *testing.T) {
 	}()
 	<-started
 	waiterDone := make(chan error, 1)
+	waiterCtx := newPayloadValidationObservedContext(context.Background())
 	go func() {
-		_, err := coordinator.NewPayload(context.Background(), key, nil, nil, nil, nil)
+		_, err := coordinator.NewPayload(waiterCtx, key, nil, nil, nil, nil)
 		waiterDone <- err
 	}()
-	time.Sleep(10 * time.Millisecond)
+	select {
+	case <-waiterCtx.observed:
+	case <-time.After(time.Second):
+		t.Fatal("payload validation waiter did not reach its wait point")
+	}
 	close(release)
 	require.Equal(t, "engine panic", <-leaderPanic)
 	require.Error(t, <-waiterDone)

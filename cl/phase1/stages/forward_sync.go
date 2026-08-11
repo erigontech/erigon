@@ -20,6 +20,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	network2 "github.com/erigontech/erigon/cl/phase1/network"
+	eth2impl "github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
@@ -213,7 +214,7 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 				if fceErr := cfg.forkChoice.OnExecutionPayload(ctx, env, false, canValidateGloasPayloads(cfg)); fceErr != nil {
 					logger.Warn("[Caplin] forward sync: failed to process GLOAS envelope", "slot", block.Block.Slot, "err", fceErr)
 				} else if shouldInsert {
-					if err = cfg.blockCollector.AddGloasBlock(block.Block, env); err != nil {
+					if err = cfg.blockCollector.AddGloasBlock(ctx, block.Block, env); err != nil {
 						err = fmt.Errorf("failed to add gloas block to collector: %w", err)
 						return
 					}
@@ -321,6 +322,9 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 	// Always start from the current finalized checkpoint
 	downloader.SetHighestProcessedSlot(currentSlot.Load())
 	downloader.SetMinSlot(startSlot)
+	downloader.SetValidateFunction(func(blocks []*cltypes.SignedBeaconBlock) (int, error) {
+		return validateForwardEnvelopeEvidence(cfg.forkChoice, blocks)
+	})
 
 	// Set the function to process downloaded blocks
 	downloader.SetProcessFunction(func(initialHighestSlotProcessed uint64, blocks []*cltypes.SignedBeaconBlock, envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (newHighestSlotProcessed uint64, err error) {
@@ -402,6 +406,59 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 	}
 
 	return nil
+}
+
+type forwardEnvelopeStateReader interface {
+	GetStateAtBlockRoot(common.Hash, bool) (*state.CachingBeaconState, error)
+}
+
+func validateForwardEnvelopeEvidence(stateReader forwardEnvelopeStateReader, blocks []*cltypes.SignedBeaconBlock) (int, error) {
+	if len(blocks) == 0 || blocks[0] == nil || blocks[0].Block == nil {
+		return 0, errors.New("empty block admission batch")
+	}
+	validationState, err := stateReader.GetStateAtBlockRoot(blocks[0].Block.ParentRoot, true)
+	start := 0
+	if err != nil || validationState == nil {
+		firstRoot, hashErr := blocks[0].Block.HashSSZ()
+		if hashErr != nil {
+			return 0, hashErr
+		}
+		validationState, err = stateReader.GetStateAtBlockRoot(firstRoot, true)
+		start = 1
+	}
+	if err != nil {
+		return 0, fmt.Errorf("forward envelope admission state unavailable: %w", err)
+	}
+	if validationState == nil {
+		return 0, errors.New("forward envelope admission state unavailable")
+	}
+	for i, block := range blocks[start:] {
+		if block == nil || block.Block == nil || block.Block.Body == nil {
+			return 0, errors.New("incomplete block admission candidate")
+		}
+		if validationState.Version() >= clparams.FuluVersion {
+			stateEpoch := validationState.Slot() / validationState.BeaconConfig().SlotsPerEpoch
+			blockEpoch := block.Block.Slot / validationState.BeaconConfig().SlotsPerEpoch
+			if blockEpoch < stateEpoch || blockEpoch > stateEpoch+validationState.BeaconConfig().MinSeedLookahead {
+				return start + i, nil
+			}
+		}
+		expectedProposer, err := validationState.GetBeaconProposerIndexForSlot(block.Block.Slot)
+		if err != nil {
+			return start + i, nil
+		}
+		if expectedProposer != block.Block.ProposerIndex {
+			return 0, fmt.Errorf("unexpected proposer %d at slot %d, expected %d", block.Block.ProposerIndex, block.Block.Slot, expectedProposer)
+		}
+		valid, err := eth2impl.VerifyBlockSignature(validationState, block)
+		if err != nil {
+			return 0, err
+		}
+		if !valid {
+			return 0, fmt.Errorf("invalid proposer signature at slot %d", block.Block.Slot)
+		}
+	}
+	return len(blocks), nil
 }
 
 // setHeadStateFromForkChoice retrieves the current head state from the fork choice store

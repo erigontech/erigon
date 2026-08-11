@@ -603,6 +603,22 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 			f.stateDumpLock.Unlock()
 			continue
 		}
+		temporaryFiles, globErr := afero.Glob(f.fs, getEnvelopeFilename(root)+".tmp-*")
+		if globErr != nil {
+			f.stateDumpLock.Unlock()
+			return globErr
+		}
+		filesToRemove := make([]string, 0, 3+len(temporaryFiles))
+		filesToRemove = append(filesToRemove,
+			getBeaconStateFilename(root),
+			getEnvelopeFilename(root),
+			getEnvelopeIndexMarkerFilename(root),
+		)
+		filesToRemove = append(filesToRemove, temporaryFiles...)
+		if removeErr := removeFilesAndSyncDirectory(f.fs, filesToRemove...); removeErr != nil {
+			f.stateDumpLock.Unlock()
+			return removeErr
+		}
 		f.badBlocks.Delete(root)
 		f.blocks.Delete(root)
 		f.lightclientBootstraps.Delete(root)
@@ -610,16 +626,8 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 		f.finalizedCheckpoints.Delete(root)
 		f.headers.Delete(root)
 		f.blockRewards.Delete(root)
-		f.fs.Remove(getBeaconStateFilename(root))
 		// [New in Gloas:EIP7732] Also remove envelope files
 		f.envelopeExists.Delete(root)
-		f.fs.Remove(getEnvelopeFilename(root))
-		f.fs.Remove(getEnvelopeIndexMarkerFilename(root))
-		if temporaryFiles, err := afero.Glob(f.fs, getEnvelopeFilename(root)+".tmp-*"); err == nil {
-			for _, temporaryFile := range temporaryFiles {
-				f.fs.Remove(temporaryFile)
-			}
-		}
 		f.stateDumpLock.Unlock()
 	}
 	log.Debug("Pruned old blocks", "pruneSlot", pruneSlot)

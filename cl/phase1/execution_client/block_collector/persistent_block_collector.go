@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"sync"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/golang/snappy"
@@ -54,8 +53,8 @@ type PersistentBlockCollector struct {
 	logger         log.Logger
 	engine         execution_client.ExecutionEngine
 
-	mu sync.Mutex
-	// encodeBlock scratch buffers; guarded by mu.
+	operationSlot chan struct{}
+	// encodeBlock scratch buffers; guarded by operationSlot.
 	encodeBlockBuf   []byte
 	blockCompressBuf []byte
 }
@@ -101,13 +100,29 @@ func NewPersistentBlockCollector(
 		beaconChainCfg: beaconChainCfg,
 		logger:         logger,
 		engine:         engine,
+		operationSlot:  make(chan struct{}, 1),
 	}
+}
+
+func (p *PersistentBlockCollector) acquire(ctx context.Context) error {
+	select {
+	case p.operationSlot <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (p *PersistentBlockCollector) release() {
+	<-p.operationSlot
 }
 
 // AddBlock adds a block to the collector, persisting it to the database
 func (p *PersistentBlockCollector) AddBlock(block *cltypes.BeaconBlock) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	if err := p.acquire(context.Background()); err != nil {
+		return err
+	}
+	defer p.release()
 
 	if p.db == nil {
 		return fmt.Errorf("database not initialized")
@@ -126,9 +141,11 @@ func (p *PersistentBlockCollector) AddBlock(block *cltypes.BeaconBlock) error {
 
 // AddGloasBlock adds a GLOAS (EIP-7732) FULL block with its execution payload envelope to the collector.
 // The execution payload is extracted from the envelope, not the beacon block body.
-func (p *PersistentBlockCollector) AddGloasBlock(block *cltypes.BeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+func (p *PersistentBlockCollector) AddGloasBlock(ctx context.Context, block *cltypes.BeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) error {
+	if err := p.acquire(ctx); err != nil {
+		return err
+	}
+	defer p.release()
 
 	if p.db == nil {
 		return fmt.Errorf("database not initialized")
@@ -141,7 +158,7 @@ func (p *PersistentBlockCollector) AddGloasBlock(block *cltypes.BeaconBlock, env
 		return fmt.Errorf("failed to encode gloas block: %w", err)
 	}
 
-	return p.db.Update(context.Background(), func(tx kv.RwTx) error {
+	return p.db.Update(ctx, func(tx kv.RwTx) error {
 		return tx.Put(kv.Headers, payloadKey(payload), encodedBlock)
 	})
 }
@@ -156,7 +173,7 @@ const (
 // encodeBlock serializes the block value: snappy(version + parentRoot +
 // [requestsHash +] SSZ(payload)). The result aliases p.blockCompressBuf and is
 // valid only until the next call, so callers must copy it or fully consume it
-// before encoding again. Callers must hold p.mu.
+// before encoding again. Callers must own operationSlot.
 func (p *PersistentBlockCollector) encodeBlock(payload *cltypes.Eth1Block, parentRoot common.Hash, executionRequestsList []hexutil.Bytes) ([]byte, error) {
 	p.encodeBlockBuf = append(p.encodeBlockBuf[:0], byte(payload.Version()))
 	p.encodeBlockBuf = append(p.encodeBlockBuf, parentRoot[:]...)
@@ -196,8 +213,10 @@ func (p *PersistentBlockCollector) releaseOversizedScratch() {
 // If a real gap is detected, rows past the gap are kept so the next Flush can retry
 // once the missing range is re-downloaded.
 func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	if err := p.acquire(ctx); err != nil {
+		return err
+	}
+	defer p.release()
 	defer p.releaseOversizedScratch()
 
 	if p.db == nil {
@@ -517,8 +536,10 @@ func (p *PersistentBlockCollector) doForkChoiceUpdate(ctx context.Context, lastB
 
 // HasBlock checks if a block with the given number is already in the collector
 func (p *PersistentBlockCollector) HasBlock(blockNumber uint64) bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	if err := p.acquire(context.Background()); err != nil {
+		return false
+	}
+	defer p.release()
 
 	if p.db == nil {
 		return false
@@ -550,8 +571,10 @@ func (p *PersistentBlockCollector) HasBlock(blockNumber uint64) bool {
 
 // Close closes the database
 func (p *PersistentBlockCollector) Close() error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	if err := p.acquire(context.Background()); err != nil {
+		return err
+	}
+	defer p.release()
 
 	if p.db != nil {
 		p.db.Close()

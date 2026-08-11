@@ -18,14 +18,18 @@ package fork_graph
 
 import (
 	_ "embed"
+	"encoding/binary"
 	"errors"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/golang/snappy"
 	"github.com/spf13/afero"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -49,6 +53,77 @@ type blockingStatFS struct {
 	started chan struct{}
 	release chan struct{}
 	once    sync.Once
+}
+
+type directorySyncTrackingFS struct {
+	afero.Fs
+	mu       sync.Mutex
+	events   []string
+	failNext bool
+}
+
+type directorySyncTrackingFile struct {
+	afero.File
+	fs *directorySyncTrackingFS
+}
+
+func (f *directorySyncTrackingFS) Open(name string) (afero.File, error) {
+	file, err := f.Fs.Open(name)
+	if err != nil || name != "." {
+		return file, err
+	}
+	return &directorySyncTrackingFile{File: file, fs: f}, nil
+}
+
+func (f *directorySyncTrackingFS) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
+	if strings.HasSuffix(name, ".envelope.indices-pending") {
+		f.record("marker")
+	}
+	return f.Fs.OpenFile(name, flag, perm)
+}
+
+func (f *directorySyncTrackingFS) Rename(oldname, newname string) error {
+	f.record("rename")
+	return f.Fs.Rename(oldname, newname)
+}
+
+func (f *directorySyncTrackingFS) Remove(name string) error {
+	if strings.HasSuffix(name, ".envelope.indices-pending") {
+		f.record("remove marker")
+	}
+	return f.Fs.Remove(name)
+}
+
+func (f *directorySyncTrackingFS) record(event string) {
+	f.mu.Lock()
+	f.events = append(f.events, event)
+	f.mu.Unlock()
+}
+
+func (f *directorySyncTrackingFS) takeEvents() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	events := append([]string(nil), f.events...)
+	f.events = nil
+	return events
+}
+
+func (f *directorySyncTrackingFS) failNextSync() {
+	f.mu.Lock()
+	f.failNext = true
+	f.mu.Unlock()
+}
+
+func (f *directorySyncTrackingFile) Sync() error {
+	f.fs.mu.Lock()
+	f.fs.events = append(f.fs.events, "sync directory")
+	fail := f.fs.failNext
+	f.fs.failNext = false
+	f.fs.mu.Unlock()
+	if fail {
+		return errors.New("injected directory sync failure")
+	}
+	return f.File.Sync()
 }
 
 func (f *blockingStatFS) Stat(name string) (os.FileInfo, error) {
@@ -168,6 +243,166 @@ func TestDumpEnvelopeOnDiskKeepsPreviousFileWhenRenameFails(t *testing.T) {
 	require.False(t, exists)
 }
 
+func TestDumpEnvelopeOnDiskWithBasePathFs(t *testing.T) {
+	baseDir := t.TempDir()
+	fs := afero.NewBasePathFs(afero.NewOsFs(), baseDir)
+	root := common.Hash{1}
+	graph := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
+
+	require.NoError(t, graph.DumpEnvelopeOnDisk(root, testExecutionPayloadEnvelope(root, common.Hash{2})))
+	require.FileExists(t, filepath.Join(baseDir, getEnvelopeFilename(root)))
+	require.FileExists(t, filepath.Join(baseDir, getEnvelopeIndexMarkerFilename(root)))
+	matches, err := filepath.Glob(filepath.Join(baseDir, getEnvelopeFilename(root)+".tmp-*"))
+	require.NoError(t, err)
+	require.Empty(t, matches)
+
+	require.NoError(t, graph.MarkEnvelopeIndicesCommitted(root))
+	require.NoFileExists(t, filepath.Join(baseDir, getEnvelopeIndexMarkerFilename(root)))
+}
+
+func TestEnvelopeJournalSyncsDirectoryAtDurabilityBoundaries(t *testing.T) {
+	fs := &directorySyncTrackingFS{Fs: afero.NewMemMapFs()}
+	root := common.Hash{1}
+	graph := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
+
+	publish, err := graph.PrepareEnvelopeOnDisk(root, testExecutionPayloadEnvelope(root, common.Hash{2}), false)
+	require.NoError(t, err)
+	require.Equal(t, []string{"marker", "sync directory"}, fs.takeEvents())
+
+	require.NoError(t, publish())
+	require.Equal(t, []string{"rename", "sync directory"}, fs.takeEvents())
+
+	require.NoError(t, graph.MarkEnvelopeIndicesCommitted(root))
+	require.Equal(t, []string{"remove marker", "sync directory"}, fs.takeEvents())
+}
+
+func TestEnvelopeJournalPropagatesDirectorySyncFailures(t *testing.T) {
+	t.Run("prepare marker", func(t *testing.T) {
+		fs := &directorySyncTrackingFS{Fs: afero.NewMemMapFs()}
+		root := common.Hash{1}
+		graph := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
+		fs.failNextSync()
+
+		_, err := graph.PrepareEnvelopeOnDisk(root, testExecutionPayloadEnvelope(root, common.Hash{2}), false)
+		require.ErrorContains(t, err, "injected directory sync failure")
+	})
+
+	t.Run("publish rename", func(t *testing.T) {
+		fs := &directorySyncTrackingFS{Fs: afero.NewMemMapFs()}
+		root := common.Hash{1}
+		graph := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
+		publish, err := graph.PrepareEnvelopeOnDisk(root, testExecutionPayloadEnvelope(root, common.Hash{2}), false)
+		require.NoError(t, err)
+		fs.takeEvents()
+		fs.failNextSync()
+
+		err = publish()
+		require.ErrorContains(t, err, "injected directory sync failure")
+		_, cached := graph.envelopeExists.Load(root)
+		require.False(t, cached)
+	})
+
+	t.Run("commit marker removal", func(t *testing.T) {
+		fs := &directorySyncTrackingFS{Fs: afero.NewMemMapFs()}
+		root := common.Hash{1}
+		graph := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
+		require.NoError(t, graph.DumpEnvelopeOnDisk(root, testExecutionPayloadEnvelope(root, common.Hash{2})))
+		fs.takeEvents()
+		fs.failNextSync()
+
+		err := graph.MarkEnvelopeIndicesCommitted(root)
+		require.ErrorContains(t, err, "injected directory sync failure")
+	})
+}
+
+func TestEnvelopeJournalSyncsAbortedPublishCleanup(t *testing.T) {
+	fs := &directorySyncTrackingFS{Fs: afero.NewMemMapFs()}
+	root := common.Hash{1}
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	graph := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
+	graph.blocks.Store(root, block)
+	publish, err := graph.PrepareEnvelopeOnDisk(root, testExecutionPayloadEnvelope(root, common.Hash{2}), true)
+	require.NoError(t, err)
+	fs.takeEvents()
+	graph.blocks.Delete(root)
+
+	err = publish()
+	require.ErrorContains(t, err, "pruned block")
+	require.Equal(t, []string{"remove marker", "sync directory"}, fs.takeEvents())
+	pendingRoots, pendingErr := graph.PendingEnvelopeIndexRoots()
+	require.NoError(t, pendingErr)
+	require.NotContains(t, pendingRoots, root)
+}
+
+func TestReplacementPreservesPreexistingRecoveryMarker(t *testing.T) {
+	newGraph := func(t *testing.T) (*forkGraphDisk, *directorySyncTrackingFS, common.Hash) {
+		t.Helper()
+		fs := &directorySyncTrackingFS{Fs: afero.NewMemMapFs()}
+		root := common.Hash{1}
+		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+		graph := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
+		graph.blocks.Store(root, block)
+		require.NoError(t, graph.DumpEnvelopeOnDisk(root, testExecutionPayloadEnvelope(root, common.Hash{2})))
+		fs.takeEvents()
+		return graph, fs, root
+	}
+	assertMarker := func(t *testing.T, graph *forkGraphDisk, root common.Hash) {
+		t.Helper()
+		pendingRoots, err := graph.PendingEnvelopeIndexRoots()
+		require.NoError(t, err)
+		require.Contains(t, pendingRoots, root)
+	}
+
+	t.Run("pruned before replacement publish", func(t *testing.T) {
+		graph, fs, root := newGraph(t)
+		publish, err := graph.PrepareEnvelopeOnDisk(root, testExecutionPayloadEnvelope(root, common.Hash{3}), true)
+		require.NoError(t, err)
+		graph.blocks.Delete(root)
+		fs.takeEvents()
+
+		err = publish()
+		require.ErrorContains(t, err, "pruned block")
+		assertMarker(t, graph, root)
+		require.Equal(t, []string{"sync directory"}, fs.takeEvents())
+	})
+
+	t.Run("replacement publish sync failure", func(t *testing.T) {
+		graph, fs, root := newGraph(t)
+		publish, err := graph.PrepareEnvelopeOnDisk(root, testExecutionPayloadEnvelope(root, common.Hash{3}), true)
+		require.NoError(t, err)
+		fs.takeEvents()
+		fs.failNextSync()
+
+		err = publish()
+		require.ErrorContains(t, err, "injected directory sync failure")
+		assertMarker(t, graph, root)
+	})
+}
+
+func TestPrunePropagatesDirectorySyncFailureBeforeDroppingBlock(t *testing.T) {
+	fs := &directorySyncTrackingFS{Fs: afero.NewMemMapFs()}
+	oldRoot := common.Hash{1}
+	newRoot := common.Hash{2}
+	oldBlock := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	oldBlock.Block.Slot = 100
+	newBlock := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	newBlock.Block.Slot = 200
+	graph := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
+	graph.blocks.Store(oldRoot, oldBlock)
+	graph.blocks.Store(newRoot, newBlock)
+	require.NoError(t, afero.WriteFile(fs, getBeaconStateFilename(oldRoot), []byte{1}, 0o644))
+	require.NoError(t, afero.WriteFile(fs, getBeaconStateFilename(newRoot), []byte{1}, 0o644))
+	fs.failNextSync()
+
+	err := graph.Prune(150)
+	require.ErrorContains(t, err, "injected directory sync failure")
+	_, blockStillTracked := graph.blocks.Load(oldRoot)
+	require.True(t, blockStillTracked)
+	require.NoError(t, graph.Prune(150))
+	_, blockStillTracked = graph.blocks.Load(oldRoot)
+	require.False(t, blockStillTracked)
+}
+
 func testExecutionPayloadEnvelope(root, executionHash common.Hash) *cltypes.SignedExecutionPayloadEnvelope {
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{
 		Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig),
@@ -175,6 +410,51 @@ func testExecutionPayloadEnvelope(root, executionHash common.Hash) *cltypes.Sign
 	envelope.Message.BeaconBlockRoot = root
 	envelope.Message.Payload.BlockHash = executionHash
 	return envelope
+}
+
+func writeEncodedEnvelope(t *testing.T, fs afero.Fs, root common.Hash, encoded []byte) {
+	t.Helper()
+	file, err := fs.Create(getEnvelopeFilename(root))
+	require.NoError(t, err)
+	writer := snappy.NewBufferedWriter(file)
+	var length [8]byte
+	binary.BigEndian.PutUint64(length[:], uint64(len(encoded)))
+	_, err = writer.Write(length[:])
+	require.NoError(t, err)
+	_, err = writer.Write(encoded)
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+	require.NoError(t, file.Close())
+}
+
+func TestReadEnvelopeFromDiskRejectsTrailingSSZBytes(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	root := common.Hash{1}
+	graph := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
+	encoded, err := testExecutionPayloadEnvelope(root, common.Hash{2}).EncodeSSZ(nil)
+	require.NoError(t, err)
+	writeEncodedEnvelope(t, fs, root, append(encoded, 0))
+
+	_, err = graph.ReadEnvelopeFromDisk(root)
+	require.Error(t, err)
+}
+
+func TestReadEnvelopeFromDiskRejectsDynamicOffsetGap(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	root := common.Hash{1}
+	graph := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
+	encoded, err := testExecutionPayloadEnvelope(root, common.Hash{2}).EncodeSSZ(nil)
+	require.NoError(t, err)
+	messageOffset := binary.LittleEndian.Uint32(encoded[:4])
+	mutated := make([]byte, 0, len(encoded)+4)
+	mutated = append(mutated, encoded[:messageOffset]...)
+	mutated = append(mutated, 0, 0, 0, 0)
+	mutated = append(mutated, encoded[messageOffset:]...)
+	binary.LittleEndian.PutUint32(mutated[:4], messageOffset+4)
+	writeEncodedEnvelope(t, fs, root, mutated)
+
+	_, err = graph.ReadEnvelopeFromDisk(root)
+	require.ErrorContains(t, err, "non-canonical")
 }
 
 // A prune for an already-covered slot (e.g. from a concurrent lock-free drain)
@@ -266,4 +546,24 @@ func TestPreparedEnvelopeCannotPublishAfterItsBlockIsPruned(t *testing.T) {
 	pendingRoots, err := graph.PendingEnvelopeIndexRoots()
 	require.NoError(t, err)
 	require.NotContains(t, pendingRoots, oldRoot)
+}
+
+func TestEnvelopeCannotPrepareAfterItsBlockIsPruned(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	oldRoot := common.Hash{1}
+	newRoot := common.Hash{2}
+	oldBlock := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	oldBlock.Block.Slot = 100
+	newBlock := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	newBlock.Block.Slot = 200
+	graph := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
+	graph.blocks.Store(oldRoot, oldBlock)
+	graph.blocks.Store(newRoot, newBlock)
+	require.NoError(t, afero.WriteFile(fs, getBeaconStateFilename(oldRoot), []byte{1}, 0o644))
+	require.NoError(t, afero.WriteFile(fs, getBeaconStateFilename(newRoot), []byte{1}, 0o644))
+
+	require.NoError(t, graph.Prune(150))
+	_, err := graph.PrepareEnvelopeOnDisk(oldRoot, testExecutionPayloadEnvelope(oldRoot, common.Hash{3}), true)
+	require.ErrorContains(t, err, "missing block")
+	require.False(t, graph.HasEnvelope(oldRoot))
 }

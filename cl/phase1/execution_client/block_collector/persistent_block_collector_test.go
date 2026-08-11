@@ -145,6 +145,48 @@ func countRowsAtOrAbove(t *testing.T, db kv.RoDB, minNumber uint64) int {
 	return count
 }
 
+func TestAddGloasBlockHonorsCanceledContext(t *testing.T) {
+	h := newFlushTestHarness(t, 0)
+	block := makeBeaconBlock(t, 1, 1, common.Hash{})
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
+	envelope.Message.Payload = block.Body.ExecutionPayload
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	require.ErrorIs(t, h.collector.AddGloasBlock(ctx, block, envelope), context.Canceled)
+	require.Equal(t, 0, countRowsAtOrAbove(t, h.collector.db, 0))
+}
+
+func TestAddGloasBlockCancellationWhileFlushOwnsCollector(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	flushStarted := make(chan struct{})
+	releaseFlush := make(chan struct{})
+	engine.EXPECT().FrozenBlocks(gomock.Any()).DoAndReturn(func(context.Context) uint64 {
+		close(flushStarted)
+		<-releaseFlush
+		return 0
+	})
+	collector := NewPersistentBlockCollector(log.New(), engine, &clparams.MainnetBeaconConfig, filepath.Join(t.TempDir(), "collector"))
+	require.NotNil(t, collector)
+	t.Cleanup(func() { _ = collector.Close() })
+
+	flushDone := make(chan error, 1)
+	go func() { flushDone <- collector.Flush(t.Context()) }()
+	<-flushStarted
+
+	block := makeBeaconBlock(t, 1, 1, common.Hash{})
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
+	envelope.Message.Payload = block.Body.ExecutionPayload
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	require.ErrorIs(t, collector.AddGloasBlock(ctx, block, envelope), context.Canceled)
+
+	close(releaseFlush)
+	require.NoError(t, <-flushDone)
+}
+
 func TestDecodeBlockRejectsShortPersistentValue(t *testing.T) {
 	c := &PersistentBlockCollector{}
 	for name, raw := range map[string][]byte{

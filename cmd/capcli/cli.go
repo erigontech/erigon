@@ -51,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/network"
 	"github.com/erigontech/erigon/cl/phase1/stages"
 	"github.com/erigontech/erigon/cl/rpc"
+	eth2impl "github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -144,6 +145,10 @@ func (c *Chain) Run(ctx *Context) error {
 	freezingCfg := ethconfig.Defaults.Snapshot
 	freezingCfg.ChainName = c.Chain
 	csn := freezeblocks.NewCaplinSnapshots(freezingCfg, beaconConfig, dirs, log.Root())
+	if err := csn.OpenFolder(); err != nil {
+		return err
+	}
+	defer csn.Close()
 	bs, err := checkpoint_sync.NewRemoteCheckpointSync(beaconConfig, networkType).GetLatestBeaconState(ctx)
 	if err != nil {
 		return err
@@ -179,8 +184,59 @@ func (c *Chain) Run(ctx *Context) error {
 	}
 
 	downloader := network.NewBackwardBeaconDownloader(ctx, beacon, nil, nil, db, beaconConfig)
-	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, nil, dirs, nil, nil, nil, nil, nil, nil, nil, false, false, false, false, nil), csn, db, nil, beaconConfig, clparams.CaplinConfig{}, true, bRoot, bs.Slot(), "/tmp", 300*time.Millisecond, nil, nil, blobStorage, log.Root(), nil, nil)
+	admissionState, err := bs.Copy()
+	if err != nil {
+		return err
+	}
+	downloader.SetValidateFunctions(checkpointBackwardAdmissionValidators(admissionState, bRoot))
+	snr := freezeblocks.NewBeaconSnapshotReader(csn, nil, beaconConfig)
+	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, nil, dirs, nil, nil, nil, nil, nil, nil, nil, false, false, false, false, nil), csn, db, nil, beaconConfig, clparams.CaplinConfig{}, true, bRoot, bs.Slot(), "/tmp", 300*time.Millisecond, nil, snr, blobStorage, log.Root(), nil, nil)
 	return stages.SpawnStageHistoryDownload(cfg, ctx, log.Root())
+}
+
+func checkpointBackwardAdmissionValidators(admissionState *state.CachingBeaconState, startingRoot common.Hash) (network.ValidateBlockFn, network.ValidateLookaheadFn) {
+	validateBlock := func(block *cltypes.SignedBeaconBlock) error {
+		valid, err := eth2impl.VerifyBlockSignature(admissionState, block)
+		if err != nil {
+			return err
+		}
+		if !valid {
+			return fmt.Errorf("invalid historical block signature at slot %d", block.Block.Slot)
+		}
+		return nil
+	}
+	validateLookahead := func(anchor, child *cltypes.SignedBeaconBlock) error {
+		anchorRoot, err := anchor.Block.HashSSZ()
+		if err != nil {
+			return err
+		}
+		if anchorRoot != startingRoot {
+			return errors.New("lookahead anchor state unavailable")
+		}
+		if admissionState.Version() >= clparams.FuluVersion {
+			stateEpoch := admissionState.Slot() / admissionState.BeaconConfig().SlotsPerEpoch
+			childEpoch := child.Block.Slot / admissionState.BeaconConfig().SlotsPerEpoch
+			if childEpoch < stateEpoch || childEpoch > stateEpoch+admissionState.BeaconConfig().MinSeedLookahead {
+				return errors.New("lookahead proposer schedule unavailable")
+			}
+		}
+		expectedProposer, err := admissionState.GetBeaconProposerIndexForSlot(child.Block.Slot)
+		if err != nil {
+			return err
+		}
+		if expectedProposer != child.Block.ProposerIndex {
+			return fmt.Errorf("unexpected lookahead proposer %d at slot %d, expected %d", child.Block.ProposerIndex, child.Block.Slot, expectedProposer)
+		}
+		valid, err := eth2impl.VerifyBlockSignature(admissionState, child)
+		if err != nil {
+			return err
+		}
+		if !valid {
+			return fmt.Errorf("invalid lookahead signature at slot %d", child.Block.Slot)
+		}
+		return nil
+	}
+	return validateBlock, validateLookahead
 }
 
 type ChainEndpoint struct {

@@ -796,6 +796,19 @@ func TestExecutionPayloadBidServiceDecodeGossipMessageInvalid(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestExecutionPayloadBidServiceRejectsNonCanonicalSSZ(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	service, _, _, _, _ := setupExecutionPayloadBidService(t, ctrl)
+	original := newTestSignedExecutionPayloadBid(100, 1, 1000)
+	encoded, err := original.EncodeSSZ(nil)
+	require.NoError(t, err)
+	encoded = append(encoded, 0)
+
+	_, err = service.DecodeGossipMessage("peer123", encoded, clparams.GloasVersion)
+	require.Error(t, err)
+}
+
 func TestExecutionPayloadBidServiceNonZeroExecutionPayment(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()

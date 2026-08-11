@@ -148,6 +148,9 @@ func (s *executionPayloadBidService) DecodeGossipMessage(_ peer.ID, data []byte,
 	if err := msg.DecodeSSZ(data, int(version)); err != nil {
 		return nil, err
 	}
+	if err := requireCanonicalSSZ(data, msg); err != nil {
+		return nil, err
+	}
 	return msg, nil
 }
 
@@ -410,18 +413,15 @@ func (s *executionPayloadBidService) bidValidationState(parentBlockRoot common.H
 	}
 	if parentState.Slot() > bidSlot {
 		s.removeBidValidationState(cacheKey, entry)
-		return nil, fmt.Errorf("parent state slot %d is after bid slot %d", parentState.Slot(), bidSlot)
+		return nil, fmt.Errorf("bid slot %d is before parent state slot %d", bidSlot, parentState.Slot())
 	}
-	validationState := parentState
-	if parentState.Slot() == bidSlot {
-		entry.state = validationState
-		return entry, nil
+	if parentState.Slot() < bidSlot {
+		if err := transition.DefaultMachine.ProcessSlots(parentState, bidSlot); err != nil {
+			s.removeBidValidationState(cacheKey, entry)
+			return nil, fmt.Errorf("failed to advance parent state to bid slot %d: %w", bidSlot, err)
+		}
 	}
-	if err := transition.DefaultMachine.ProcessSlots(validationState, bidSlot); err != nil {
-		s.removeBidValidationState(cacheKey, entry)
-		return nil, err
-	}
-	entry.state = validationState
+	entry.state = parentState
 	return entry, nil
 }
 

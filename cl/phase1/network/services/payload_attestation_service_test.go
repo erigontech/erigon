@@ -647,3 +647,18 @@ func TestPayloadAttestationServiceDecodeGossipMessageInvalid(t *testing.T) {
 	_, err := service.DecodeGossipMessage("peer123", []byte{0x00, 0x01, 0x02}, clparams.GloasVersion)
 	require.Error(t, err)
 }
+
+func TestPayloadAttestationServiceRejectsNonCanonicalBoolean(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	service, _, _ := setupPayloadAttestationService(t, ctrl)
+	original := newTestPayloadAttestationMessage(100, 42, common.HexToHash("0x1234"))
+	encoded, err := original.EncodeSSZ(nil)
+	require.NoError(t, err)
+	encoded[48] = 2
+
+	lossy := new(cltypes.PayloadAttestationMessage)
+	require.NoError(t, lossy.DecodeSSZ(encoded, int(clparams.GloasVersion)))
+	_, err = service.DecodeGossipMessage("peer123", encoded, clparams.GloasVersion)
+	require.ErrorContains(t, err, "non-canonical SSZ")
+}

@@ -37,6 +37,30 @@ type payloadAttestationValidationContextResult struct {
 	err               error
 }
 
+type payloadAttestationObservedContext struct {
+	context.Context
+	observed chan struct{}
+	once     sync.Once
+}
+
+func newPayloadAttestationObservedContext(parent context.Context) *payloadAttestationObservedContext {
+	return &payloadAttestationObservedContext{Context: parent, observed: make(chan struct{})}
+}
+
+func (c *payloadAttestationObservedContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.observed) })
+	return c.Context.Done()
+}
+
+func waitForPayloadAttestationWaiter(t *testing.T, ctx *payloadAttestationObservedContext) {
+	t.Helper()
+	select {
+	case <-ctx.observed:
+	case <-time.After(time.Second):
+		t.Fatal("payload attestation validation call did not reach its wait point")
+	}
+}
+
 func TestOnPayloadAttestationMessageRejectsNil(t *testing.T) {
 	f := &ForkChoiceStore{}
 	require.Error(t, f.OnPayloadAttestationMessage(context.Background(), nil, false))
@@ -62,20 +86,23 @@ func TestPayloadAttestationValidationContextsCollapseConcurrentBuilds(t *testing
 	}
 
 	results := make(chan payloadAttestationValidationContextResult, 16)
-	var wg sync.WaitGroup
-	for range 16 {
-		wg.Go(func() {
-			validationContext, getErr := contexts.get(context.Background(), root, build)
-			results <- payloadAttestationValidationContextResult{validationContext, getErr}
-		})
-	}
+	go func() {
+		validationContext, getErr := contexts.get(context.Background(), root, build)
+		results <- payloadAttestationValidationContextResult{validationContext, getErr}
+	}()
 	<-started
+	for range 15 {
+		waiterCtx := newPayloadAttestationObservedContext(context.Background())
+		go func() {
+			validationContext, getErr := contexts.get(waiterCtx, root, build)
+			results <- payloadAttestationValidationContextResult{validationContext, getErr}
+		}()
+		waitForPayloadAttestationWaiter(t, waiterCtx)
+	}
 	require.Equal(t, int32(1), builds.Load())
 	close(release)
-	wg.Wait()
-	close(results)
-
-	for result := range results {
+	for range 16 {
+		result := <-results
 		require.NoError(t, result.err)
 		require.Same(t, expected, result.validationContext)
 	}
@@ -104,6 +131,131 @@ func TestPayloadAttestationValidationContextsDoNotCacheBuildErrors(t *testing.T)
 	require.NoError(t, err)
 	require.Same(t, expected, actual)
 	require.Equal(t, int32(2), builds.Load())
+}
+
+func TestPayloadAttestationValidationContextsCollapseConcurrentBuildErrors(t *testing.T) {
+	contexts, err := newPayloadAttestationValidationContexts()
+	require.NoError(t, err)
+
+	root := common.HexToHash("0x1234")
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var builds atomic.Int32
+	buildErr := errors.New("state unavailable")
+	build := func() (*payloadAttestationValidationContext, error) {
+		if builds.Add(1) == 1 {
+			close(started)
+		}
+		<-release
+		return nil, buildErr
+	}
+
+	results := make(chan error, 16)
+	go func() {
+		_, getErr := contexts.get(context.Background(), root, build)
+		results <- getErr
+	}()
+	<-started
+	for range 15 {
+		waiterCtx := newPayloadAttestationObservedContext(context.Background())
+		go func() {
+			_, getErr := contexts.get(waiterCtx, root, build)
+			results <- getErr
+		}()
+		waitForPayloadAttestationWaiter(t, waiterCtx)
+	}
+	require.Equal(t, int32(1), builds.Load())
+	close(release)
+	for range 16 {
+		require.ErrorIs(t, <-results, buildErr)
+	}
+	require.Equal(t, int32(1), builds.Load())
+}
+
+func TestPayloadAttestationValidationContextsCanceledWaiterDoesNotCancelBuild(t *testing.T) {
+	contexts, err := newPayloadAttestationValidationContexts()
+	require.NoError(t, err)
+
+	root := common.HexToHash("0x1234")
+	started := make(chan struct{})
+	release := make(chan struct{})
+	expected := &payloadAttestationValidationContext{slot: 100}
+	build := func() (*payloadAttestationValidationContext, error) {
+		close(started)
+		<-release
+		return expected, nil
+	}
+	leader := make(chan payloadAttestationValidationContextResult, 1)
+	go func() {
+		value, getErr := contexts.get(context.Background(), root, build)
+		leader <- payloadAttestationValidationContextResult{value, getErr}
+	}()
+	<-started
+
+	waiterCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = contexts.get(waiterCtx, root, build)
+	require.ErrorIs(t, err, context.Canceled)
+
+	close(release)
+	result := <-leader
+	require.NoError(t, result.err)
+	require.Same(t, expected, result.validationContext)
+}
+
+func TestPayloadAttestationValidationContextsCanceledLeaderDoesNotPoisonWaiter(t *testing.T) {
+	contexts, err := newPayloadAttestationValidationContexts()
+	require.NoError(t, err)
+	contexts.buildSlots <- struct{}{}
+	root := common.HexToHash("0x1234")
+	leaderParentCtx, cancelLeader := context.WithCancel(context.Background())
+	leaderCtx := newPayloadAttestationObservedContext(leaderParentCtx)
+	leaderResult := make(chan error, 1)
+	go func() {
+		_, getErr := contexts.get(leaderCtx, root, func() (*payloadAttestationValidationContext, error) {
+			return nil, errors.New("leader build must not run")
+		})
+		leaderResult <- getErr
+	}()
+	waitForPayloadAttestationWaiter(t, leaderCtx)
+
+	expected := &payloadAttestationValidationContext{slot: 100}
+	waiterResult := make(chan payloadAttestationValidationContextResult, 1)
+	waiterCtx := newPayloadAttestationObservedContext(context.Background())
+	go func() {
+		value, getErr := contexts.get(waiterCtx, root, func() (*payloadAttestationValidationContext, error) {
+			return expected, nil
+		})
+		waiterResult <- payloadAttestationValidationContextResult{value, getErr}
+	}()
+	waitForPayloadAttestationWaiter(t, waiterCtx)
+	cancelLeader()
+	require.ErrorIs(t, <-leaderResult, context.Canceled)
+	<-contexts.buildSlots
+
+	result := <-waiterResult
+	require.NoError(t, result.err)
+	require.Same(t, expected, result.validationContext)
+}
+
+func TestPayloadAttestationValidationContextsPanicCleansInflightBuild(t *testing.T) {
+	contexts, err := newPayloadAttestationValidationContexts()
+	require.NoError(t, err)
+	root := common.HexToHash("0x1234")
+
+	func() {
+		defer func() { require.Equal(t, "boom", recover()) }()
+		_, _ = contexts.get(context.Background(), root, func() (*payloadAttestationValidationContext, error) {
+			panic("boom")
+		})
+	}()
+
+	expected := &payloadAttestationValidationContext{slot: 100}
+	actual, err := contexts.get(context.Background(), root, func() (*payloadAttestationValidationContext, error) {
+		return expected, nil
+	})
+	require.NoError(t, err)
+	require.Same(t, expected, actual)
 }
 
 func TestPayloadAttestationValidationContextsBoundDifferentRootBuilds(t *testing.T) {

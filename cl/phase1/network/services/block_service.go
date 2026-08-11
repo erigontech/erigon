@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
@@ -51,8 +52,9 @@ type proposerIndexAndSlot struct {
 }
 
 type blockJob struct {
-	block        *cltypes.SignedBeaconBlock
-	creationTime time.Time
+	block                 *cltypes.SignedBeaconBlock
+	creationTime          time.Time
+	resolveParentEnvelope bool
 }
 
 type blockService struct {
@@ -68,7 +70,8 @@ type blockService struct {
 	emitter                          *beaconevents.EventEmitter
 	blocksScheduledForLaterExecution sync.Map
 	// store the block in db
-	db kv.RwDB
+	db               kv.RwDB
+	envelopeResolver executionPayloadEnvelopeResolver
 }
 
 // NewBlockService creates a new block service
@@ -80,19 +83,21 @@ func NewBlockService(
 	ethClock eth_clock.EthereumClock,
 	beaconCfg *clparams.BeaconChainConfig,
 	emitter *beaconevents.EventEmitter,
+	envelopeResolver executionPayloadEnvelopeResolver,
 ) BlockService {
 	seenBlocksCache, err := lru.New[proposerIndexAndSlot, struct{}]("seenblocks", seenBlockCacheSize)
 	if err != nil {
 		panic(err)
 	}
 	b := &blockService{
-		forkchoiceStore: forkchoiceStore,
-		syncedData:      syncedData,
-		ethClock:        ethClock,
-		beaconCfg:       beaconCfg,
-		seenBlocksCache: seenBlocksCache,
-		emitter:         emitter,
-		db:              db,
+		forkchoiceStore:  forkchoiceStore,
+		syncedData:       syncedData,
+		ethClock:         ethClock,
+		beaconCfg:        beaconCfg,
+		seenBlocksCache:  seenBlocksCache,
+		emitter:          emitter,
+		db:               db,
+		envelopeResolver: envelopeResolver,
 	}
 	go b.loop(ctx)
 	return b
@@ -155,7 +160,7 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 		return nil
 	}); err != nil {
 		if errors.Is(err, ErrIgnore) {
-			b.scheduleBlockForLaterProcessing(msg)
+			b.scheduleBlockForLaterProcessing(msg, false)
 		}
 		return err
 	}
@@ -163,7 +168,7 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	// [IGNORE] The block's parent (defined by block.parent_root) has been seen (via both gossip and non-gossip sources) (a client MAY queue blocks for processing once the parent block is retrieved).
 	parentHeader, ok := b.forkchoiceStore.GetHeader(msg.Block.ParentRoot)
 	if !ok {
-		b.scheduleBlockForLaterProcessing(msg)
+		b.scheduleBlockForLaterProcessing(msg, false)
 		return fmt.Errorf("%w: parent header not found: %v", ErrIgnore, msg.Block.ParentRoot)
 	}
 	if parentHeader.Slot >= msg.Block.Slot {
@@ -197,6 +202,10 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 		if bid.Message.ParentBlockRoot != msg.Block.ParentRoot {
 			return errors.New("bid.parent_block_root does not match block.parent_root")
 		}
+		if err := b.authenticateEnvelopeResolutionTrigger(msg); err != nil {
+			return err
+		}
+		resolveParentEnvelope := b.gloasChildProvesFull(msg)
 
 		// [IGNORE] The block's parent execution payload (defined by bid.parent_block_hash) has been seen
 		// (via gossip or non-gossip sources). A client MAY queue blocks for processing once the parent payload is retrieved.
@@ -205,8 +214,10 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 		parentBlockHash := bid.Message.ParentBlockHash
 		status, seen := b.forkchoiceStore.GetRecentExecutionPayloadStatus(parentBlockHash)
 		if !seen {
-			// Parent execution payload not seen yet, queue for later
-			b.scheduleBlockForLaterProcessing(msg)
+			if resolveParentEnvelope && b.envelopeResolver != nil {
+				b.envelopeResolver.ResolveExecutionPayloadEnvelope(msg.Block.ParentRoot)
+			}
+			b.scheduleBlockForLaterProcessing(msg, resolveParentEnvelope)
 			return fmt.Errorf("%w: parent execution payload not seen: %v", ErrIgnore, parentBlockHash)
 		}
 		if status == execution_client.PayloadStatusInvalidated {
@@ -220,11 +231,109 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	b.publishBlockGossipEvent(msg)
 	// the rest of the validation is done in the forkchoice store
 	if err := b.processAndStoreBlock(ctx, msg); err != nil {
-		if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) || errors.Is(err, forkchoice.ErrParentEnvelopePending) {
-			b.scheduleBlockForLaterProcessing(msg)
+		if errors.Is(err, forkchoice.ErrParentEnvelopePending) {
+			if blockVersion < clparams.GloasVersion {
+				return err
+			}
+			if b.envelopeResolver != nil {
+				b.envelopeResolver.ResolveExecutionPayloadEnvelope(msg.Block.ParentRoot)
+			}
+			b.scheduleBlockForLaterProcessing(msg, true)
+			return nil
+		}
+		if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
+			b.scheduleBlockForLaterProcessing(msg, false)
 			return nil
 		}
 		return err
+	}
+	return nil
+}
+
+func (b *blockService) gloasChildProvesFull(block *cltypes.SignedBeaconBlock) bool {
+	parent, ok := b.forkchoiceStore.GetBlock(block.Block.ParentRoot)
+	if !ok || parent == nil || parent.Block == nil || parent.Block.Body == nil {
+		return false
+	}
+	parentBid := parent.Block.Body.GetSignedExecutionPayloadBid()
+	childBid := block.Block.Body.GetSignedExecutionPayloadBid()
+	return parentBid != nil && parentBid.Message != nil && childBid != nil && childBid.Message != nil &&
+		childBid.Message.ParentBlockHash == parentBid.Message.BlockHash
+}
+
+func (b *blockService) validateScheduledGloasBlock(block *cltypes.SignedBeaconBlock) error {
+	if block == nil || block.Block == nil || block.Block.Body == nil {
+		return errors.New("missing Gloas block body")
+	}
+	bid := block.Block.Body.GetSignedExecutionPayloadBid()
+	if bid == nil || bid.Message == nil {
+		return errors.New("missing signed_execution_payload_bid in Gloas block")
+	}
+	if bid.Message.ParentBlockRoot != block.Block.ParentRoot {
+		return errors.New("bid.parent_block_root does not match block.parent_root")
+	}
+	epoch := block.Block.Slot / b.beaconCfg.SlotsPerEpoch
+	if bid.Message.BlobKzgCommitments.Len() > int(b.beaconCfg.GetBlobParameters(epoch).MaxBlobsPerBlock) {
+		return ErrInvalidCommitmentsCount
+	}
+	return nil
+}
+
+func (b *blockService) refreshScheduledResolverEligibility(key any, job *blockJob) (*blockJob, bool) {
+	if job.resolveParentEnvelope || b.beaconCfg.GetCurrentStateVersion(job.block.Block.Slot/b.beaconCfg.SlotsPerEpoch) < clparams.GloasVersion {
+		return job, true
+	}
+	if _, ok := b.forkchoiceStore.GetHeader(job.block.Block.ParentRoot); !ok {
+		return job, true
+	}
+	if err := b.validateScheduledGloasBlock(job.block); err != nil {
+		b.blocksScheduledForLaterExecution.CompareAndDelete(key, job)
+		return nil, false
+	}
+	if err := b.authenticateEnvelopeResolutionTrigger(job.block); err != nil {
+		if errors.Is(err, ErrIgnore) {
+			return job, true
+		}
+		b.blocksScheduledForLaterExecution.CompareAndDelete(key, job)
+		return nil, false
+	}
+	if !b.gloasChildProvesFull(job.block) {
+		return job, true
+	}
+	upgraded := *job
+	upgraded.resolveParentEnvelope = true
+	if !b.blocksScheduledForLaterExecution.CompareAndSwap(key, job, &upgraded) {
+		return nil, false
+	}
+	return &upgraded, true
+}
+
+func (b *blockService) authenticateEnvelopeResolutionTrigger(block *cltypes.SignedBeaconBlock) error {
+	parentState, err := b.forkchoiceStore.GetStateAtBlockRoot(block.Block.ParentRoot, true)
+	if err != nil || parentState == nil {
+		return fmt.Errorf("%w: parent state unavailable", ErrIgnore)
+	}
+	if parentState.Slot() > block.Block.Slot {
+		return ErrBlockYoungerThanParent
+	}
+	if parentState.Slot() < block.Block.Slot {
+		if err := transition.DefaultMachine.ProcessSlots(parentState, block.Block.Slot); err != nil {
+			return err
+		}
+	}
+	expectedProposer, err := parentState.GetBeaconProposerIndex()
+	if err != nil {
+		return err
+	}
+	if block.Block.ProposerIndex != expectedProposer {
+		return ErrInvalidSignature
+	}
+	valid, err := eth2.VerifyBlockSignature(parentState, block)
+	if err != nil {
+		return err
+	}
+	if !valid {
+		return ErrInvalidSignature
 	}
 	return nil
 }
@@ -247,7 +356,7 @@ func (b *blockService) publishBlockGossipEvent(block *cltypes.SignedBeaconBlock)
 }
 
 // scheduleBlockForLaterProcessing schedules a block for later processing
-func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeaconBlock) {
+func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeaconBlock, resolveParentEnvelope bool) {
 	// [Modified in Gloas:EIP7732] ExecutionPayload is not in block.body for GLOAS
 	var blockNum uint64
 	if block.Block.Body.ExecutionPayload != nil {
@@ -261,8 +370,9 @@ func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeac
 	}
 
 	b.blocksScheduledForLaterExecution.Store(blockRoot, &blockJob{
-		block:        block,
-		creationTime: time.Now(),
+		block:                 block,
+		creationTime:          time.Now(),
+		resolveParentEnvelope: resolveParentEnvelope,
 	})
 }
 
@@ -293,6 +403,32 @@ func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.
 		return err
 	}
 	return nil
+}
+
+func (b *blockService) deleteScheduledBlockJob(key any, expected *blockJob) {
+	b.blocksScheduledForLaterExecution.CompareAndDelete(key, expected)
+}
+
+func (b *blockService) scheduledBlockJobExpired(job *blockJob) bool {
+	expired, _ := b.scheduledBlockJobExpiry(job)
+	return expired
+}
+
+func (b *blockService) scheduledBlockJobExpiry(job *blockJob) (expired, envelopeGrace bool) {
+	if time.Since(job.creationTime) <= blockJobExpiry {
+		return false, false
+	}
+	if !job.resolveParentEnvelope || job.block == nil || job.block.Block == nil {
+		return true, false
+	}
+	root := job.block.Block.ParentRoot
+	if b.envelopeResolver != nil && b.envelopeResolver.HasPendingExecutionPayloadEnvelope(root) {
+		return false, false
+	}
+	if b.forkchoiceStore != nil && b.forkchoiceStore.HasEnvelope(root) {
+		return false, true
+	}
+	return true, false
 }
 
 // importBlockOperations imports block operations in parallel
@@ -330,19 +466,36 @@ func (b *blockService) loop(ctx context.Context) {
 			return
 		case <-ticker.C:
 		}
-		b.blocksScheduledForLaterExecution.Range(func(key, value any) bool {
-			blockJob := value.(*blockJob)
-			// check if it has expired
-			if time.Since(blockJob.creationTime) > blockJobExpiry {
-				b.blocksScheduledForLaterExecution.Delete(key.([32]byte))
-				return true
-			}
-			if err := b.processAndStoreBlock(ctx, blockJob.block); err != nil {
-				log.Trace("Failed to process and store block", "block", blockJob.block, "error", err)
-				return true
-			}
-			b.blocksScheduledForLaterExecution.Delete(key.([32]byte))
-			return true
-		})
+		b.processScheduledBlockJobs(ctx)
 	}
+}
+
+func (b *blockService) processScheduledBlockJobs(ctx context.Context) {
+	b.blocksScheduledForLaterExecution.Range(func(key, value any) bool {
+		blockJob := value.(*blockJob)
+		// check if it has expired
+		expired, envelopeGrace := b.scheduledBlockJobExpiry(blockJob)
+		if expired {
+			b.deleteScheduledBlockJob(key, blockJob)
+			return true
+		}
+		var current bool
+		blockJob, current = b.refreshScheduledResolverEligibility(key, blockJob)
+		if !current {
+			return true
+		}
+		if err := b.processAndStoreBlock(ctx, blockJob.block); err != nil {
+			if envelopeGrace && (b.envelopeResolver == nil || !b.envelopeResolver.HasPendingExecutionPayloadEnvelope(blockJob.block.Block.ParentRoot)) {
+				b.deleteScheduledBlockJob(key, blockJob)
+				return true
+			}
+			if errors.Is(err, forkchoice.ErrParentEnvelopePending) && blockJob.resolveParentEnvelope && b.envelopeResolver != nil {
+				b.envelopeResolver.ResolveExecutionPayloadEnvelope(blockJob.block.Block.ParentRoot)
+			}
+			log.Trace("Failed to process and store block", "block", blockJob.block, "error", err)
+			return true
+		}
+		b.deleteScheduledBlockJob(key, blockJob)
+		return true
+	})
 }
