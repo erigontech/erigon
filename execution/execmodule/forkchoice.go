@@ -121,7 +121,7 @@ func (e *ExecModule) UpdateForkChoice(ctx context.Context, headHash, safeHash, f
 	// as the result lands on outcomeCh — for a merge-extending fork at tip the
 	// result is sent before flush/commit, so the consensus client is not blocked
 	// on the EL commit. The semaphore is released — by the forkchoice goroutine, or
-	// by the background commit/prune goroutine it hands off to — only after the FCU
+	// by the background prune goroutine it hands off to — only after the FCU
 	// cleanup has run, so any follow-up op (AssembleBlock, next FCU) that acquires
 	// the semaphore observes fully-settled state.
 	go func() {
@@ -352,8 +352,8 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	}()
 
 	defer UpdateForkChoiceDuration(time.Now())
-	// The next semaphore acquirer must observe settled state, so the bg-commit/
-	// bg-prune paths run this eagerly before handing the semaphore to their goroutine.
+	// The next semaphore acquirer must observe settled state, so the bg-prune
+	// path runs this eagerly before handing the semaphore to its goroutine.
 	cleanupBeforeSemaRelease := sync.OnceFunc(func() {
 		e.currentContext.ResetPendingUpdates()
 		e.forkValidator.ClearWithUnwind()
@@ -371,7 +371,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	// overlay (MemoryMutation) which implements kv.TemporalRwTx. No MDBX write
 	// lock is held during pipeline execution — a brief RwTx is opened only at
 	// commit time to flush everything atomically.
-	roTx, err := e.db.BeginTemporalRo(ctx) //nolint:gocritic // deferred via closure below (bg-commit path sets roTx=nil after ownership transfer)
+	roTx, err := e.db.BeginTemporalRo(ctx) //nolint:gocritic // deferred via closure below
 	if err != nil {
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 	}
@@ -379,7 +379,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		if roTx != nil {
 			roTx.Rollback()
 		}
-	}() // closure: CommitCycle may reassign roTx; bg-commit path sets it to nil after ownership transfer
+	}() // closure: CommitCycle may reassign roTx, and leaves it nil if the reopen fails
 
 	// Check if InsertBlocks already created a block overlay with data
 	// (headers, bodies, TDs, canonical hashes).
@@ -576,7 +576,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			}
 			defer commitRwTx.Rollback() // idempotent after a successful Commit
 			// The committed sd is spent; RunLoop closes it and continues on the
-			// fresh SD built below (no ClearRam reuse).
+			// fresh SD built below (no reuse).
 			if err := sd.Commit(ctx, commitRwTx); err != nil {
 				return nil, nil, fmt.Errorf("updateForkChoice: flush+commit sd after hasMore: %w", err)
 			}
@@ -650,9 +650,6 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		}
 		currentContext.Close()
 		currentContext = nil
-		if e.fcuBackgroundCommit {
-			e.closeModuleContext()
-		}
 	} else {
 		status = ExecutionStatusSuccess
 		// Update forks...
@@ -694,7 +691,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		// After this, all consumers have the data — the semaphore can be
 		// released and flush/commit/prune can proceed without blocking the
 		// next FCU.
-		e.logger.Debug("[updateForkChoice] dispatching notifications", "head", blockHash, "bgCommit", e.fcuBackgroundCommit)
+		e.logger.Debug("[updateForkChoice] dispatching notifications", "head", blockHash)
 		if err := e.dispatchNotificationsFromOverlay(currentContext, finishProgressBefore); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("fcu: dispatch notifications: %w", err), stateFlushingInParallel)
 		}
@@ -712,56 +709,29 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			}()
 		}
 
-		// Flush + commit: foreground by default, background only if
-		// fcuBackgroundCommit is explicitly enabled.
-		var commitTimings []any
-		if e.fcuBackgroundCommit {
-			// Transfer roTx + SD ownership to the goroutine so the outer
-			// defers become no-ops.
-			bgRoTx, bgSD := roTx, currentContext
-			roTx, currentContext = nil, nil
-			dispatcher := e.pipelineExecutor.Dispatcher()
+		// Flush + commit: pass the outer roTx so it gets released between
+		// Flush and Commit, so the commit sees openTxs=1 in MDBX.
+		commitTimings, err := e.runForkchoiceFlushCommit(currentContext, roTx, finishProgressBefore, isSynced)
+		if err != nil {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
+		}
+
+		// Prune: background by default (fcuBackgroundPrune=true). RunPrune
+		// shares the pipeline Sync with the next FCU's RunLoop, so the
+		// goroutine keeps the semaphore until done.
+		if e.fcuBackgroundPrune {
+			// Prune doesn't use the overlay/SD — tear down eagerly to free
+			// the RAM now and keep the outer defer out of the next FCU's way.
+			teardownOverlay()
 			handOffSemaphore(func() error {
-				defer bgSD.Close()
-				// bgRoTx is rolled back inside runForkchoiceFlushCommit between
-				// Flush and Commit so the commit sees openTxs=1 in MDBX; this
-				// defer is redundant (Rollback is idempotent).
-				defer bgRoTx.Rollback()
-				err := e.runPostForkchoice(bgSD, bgRoTx, finishProgressBefore, isSynced, initialCycle)
-				// Signal that the DB commit is done — RPC consumers can
-				// drop their SD reference and read from committed DB.
-				if dispatcher != nil {
-					dispatcher.PublishOverlay(nil)
-				}
-				return err
+				return e.runPostForkchoice(initialCycle)
 			})
 		} else {
-			// Foreground commit: pass the outer roTx so it gets released
-			// between Flush and Commit (same openTxs=2→1 optimization as
-			// the bg-commit path).
-			ct, err := e.runForkchoiceFlushCommit(currentContext, roTx, finishProgressBefore, isSynced)
+			pruneTimings, err := e.runForkchoicePrune(initialCycle)
 			if err != nil {
 				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 			}
-			commitTimings = ct
-
-			// Prune: background by default (fcuBackgroundPrune=true). RunPrune
-			// shares the pipeline Sync with the next FCU's RunLoop, so the
-			// goroutine keeps the semaphore until done.
-			if e.fcuBackgroundPrune {
-				// Prune doesn't use the overlay/SD — tear down eagerly to free
-				// the RAM now and keep the outer defer out of the next FCU's way.
-				teardownOverlay()
-				handOffSemaphore(func() error {
-					return e.runPostForkchoice(nil, nil, finishProgressBefore, isSynced, initialCycle)
-				})
-			} else {
-				pruneTimings, err := e.runForkchoicePrune(initialCycle)
-				if err != nil {
-					return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
-				}
-				commitTimings = append(commitTimings, pruneTimings...)
-			}
+			commitTimings = append(commitTimings, pruneTimings...)
 		}
 
 		e.logTimings("Timings: Forkchoice", commitTimings)
@@ -774,24 +744,12 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	}, stateFlushingInParallel)
 }
 
-// runPostForkchoice runs the enabled background FCU work: flush+commit+UpdateHead
-// when fcuBackgroundCommit (sd non-nil), prune when fcuBackgroundPrune.
-// Notifications have already been dispatched inline from the overlay.
-func (e *ExecModule) runPostForkchoice(sd *execctx.SharedDomains, bgRoTx kv.TemporalTx, finishProgressBefore uint64, isSynced bool, initialCycle bool) error {
-	var timings []any
-	if e.fcuBackgroundCommit && sd != nil {
-		commitTimings, err := e.runForkchoiceFlushCommit(sd, bgRoTx, finishProgressBefore, isSynced)
-		if err != nil {
-			return err
-		}
-		timings = append(timings, commitTimings...)
-	}
-	if e.fcuBackgroundPrune {
-		pruneTimings, err := e.runForkchoicePrune(initialCycle)
-		if err != nil {
-			return err
-		}
-		timings = append(timings, pruneTimings...)
+// runPostForkchoice runs the background FCU prune. Flush+commit and the
+// notification dispatch have already run inline.
+func (e *ExecModule) runPostForkchoice(initialCycle bool) error {
+	timings, err := e.runForkchoicePrune(initialCycle)
+	if err != nil {
+		return err
 	}
 	e.logTimings("Timings: Post-Forkchoice", timings)
 	return nil
