@@ -53,6 +53,10 @@ func (e *ExecutionRequests) effectiveVersion() clparams.StateVersion {
 	return e.version
 }
 
+func (e *ExecutionRequests) Version() clparams.StateVersion {
+	return e.effectiveVersion()
+}
+
 func (e *ExecutionRequests) ensureLists() {
 	if e.cfg == nil {
 		panic("execution requests beacon config is nil")

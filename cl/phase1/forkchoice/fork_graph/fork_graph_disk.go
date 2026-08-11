@@ -19,6 +19,7 @@ package fork_graph
 import (
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -128,7 +129,8 @@ type forkGraphDisk struct {
 	lightClientUpdates sync.Map // period -> lightclientupdate
 
 	// in-memory cache of block roots that have envelopes on disk [Optimization for Gloas:EIP7732]
-	envelopeExists sync.Map // common.Hash -> struct{}
+	envelopeExists   sync.Map // common.Hash -> struct{}
+	invalidEnvelopes sync.Map // common.Hash -> struct{}
 
 	// reusable buffers
 	sszBuffer       []byte
@@ -199,6 +201,9 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_d
 	f.lowestAvailableBlock.Store(anchorState.Slot())
 	f.headers.Store(common.Hash(anchorRoot), &anchorHeader)
 	f.sszBuffer = make([]byte, 0, (anchorState.EncodingSizeSSZ()*3)/2)
+	if err := cleanupEnvelopeArtifacts(f.fs); err != nil {
+		log.Warn("Failed to clean envelope artifacts", "err", err)
+	}
 
 	f.DumpBeaconStateOnDisk(anchorRoot, anchorState, true)
 	// preallocate buffer
@@ -616,9 +621,19 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 		f.blocks.Delete(root)
 		f.fs.Remove(getBeaconStateFilename(root))
 		f.envelopeExists.Delete(root)
-		f.fs.Remove(getEnvelopeFilename(root))
-		f.fs.Remove(getEnvelopeTempFilename(root))
+		f.invalidEnvelopes.Delete(root)
+		if removeErr := removeOrQuarantineEnvelope(f.fs, getEnvelopeFilename(root), ".pruned"); removeErr != nil && !os.IsNotExist(removeErr) {
+			err = errors.Join(err, fmt.Errorf("remove envelope for root %x: %w", root, removeErr))
+		}
+		if removeErr := f.fs.Remove(getEnvelopeTempFilename(root)); removeErr != nil && !os.IsNotExist(removeErr) {
+			err = errors.Join(err, fmt.Errorf("remove envelope temp for root %x: %w", root, removeErr))
+		}
 		f.stateDumpLock.Unlock()
+	}
+	if len(oldRoots) > 0 {
+		if syncErr := syncEnvelopeDirectory(f.fs); syncErr != nil {
+			err = errors.Join(err, fmt.Errorf("sync envelope directory after prune: %w", syncErr))
+		}
 	}
 	log.Debug("Pruned old blocks", "pruneSlot", pruneSlot)
 	return
