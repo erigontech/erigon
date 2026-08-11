@@ -166,10 +166,10 @@ type commitmentCalculator struct {
 	// the same guard — the drop to the incremental path is reported once.
 	computeAheadStopped bool
 
-	// signalCtx is the shared executor context carrying the stopCause. The
-	// calculator reads it (never its own compute ctx) to cap compute-ahead at the
-	// batch's coalesce block M — compute/publish run on the separate uncancelled
-	// workCtx so a clean-stop cancel never aborts an in-flight commitment.
+	// signalCtx is the shared executor context and may carry a deliberate stop or
+	// failure. The calculator reads deliberate stop causes from it to cap
+	// compute-ahead at the coalesce block; compute and publish use the separate
+	// workCtx so executor-local cancellation does not abort an in-flight commitment.
 	signalCtx context.Context
 
 	// forcePerBlockCompute overrides dbg.BatchCommitments and triggers a
@@ -279,13 +279,10 @@ func (cc *commitmentCalculator) loop(ctx context.Context) {
 	pprof.SetGoroutineLabels(pprof.WithLabels(ctx, pprof.Labels("sub", "calculator")))
 	defer close(cc.out) // Signal apply loop that no more results will come.
 
-	// The calculator exits ONLY when cc.in is closed (by the exec loop).
-	// Do NOT add ctx.Done or cc.done checks here — the exec loop owns
-	// shutdown sequencing. Exiting early would leave commitment behind
-	// sd.mem, causing nonce mismatches on batch restart. The calculator
-	// must process ALL buffered items before exiting.
-	// Context cancellation is handled by the exec loop which closes
-	// cc.in after stopping.
+	// Drain cc.in until the exec loop closes it. Do not add ctx.Done or cc.done
+	// checks: leaving early would put commitment behind sd.mem and cause nonce
+	// mismatches on restart. The exec loop owns input closure on every exit, so
+	// all buffered items are processed before the calculator stops.
 	//
 	// blockRequests is multiplexed but not a gate: it is only a compute-ahead
 	// heads-up, and draining leftovers after cc.in closes would recompute
@@ -713,10 +710,9 @@ func (cc *commitmentCalculator) shadowCrossCheck(ctx context.Context, target com
 	cc.publish(ctx, commitmentResult{blockNum: target.blockNum, blockHash: target.blockHash, txNum: target.lastTxNum, rootHash: rh})
 }
 
-// fail publishes a calculator error. It does NOT cancel execution: the apply
-// loop is the sole cancellation authority — it classifies the published error
-// (deferring a compute-ahead wrong-root until the block's own exec verdict) and
-// drives the single UnwindTo.
+// fail publishes a calculator error without canceling execution. The apply loop
+// classifies it, including deferring a compute-ahead wrong-root until the block's
+// execution verdict, and the stage wrapper owns any resulting unwind.
 func (cc *commitmentCalculator) fail(ctx context.Context, target commitTarget, err error) {
 	if cc.logger != nil {
 		cc.logger.Error("["+cc.logPrefix+"] commitmentCalculator: reporting failure", "block", target.blockNum, "err", err)

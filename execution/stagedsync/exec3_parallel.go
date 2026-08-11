@@ -96,16 +96,12 @@ type parallelExecutor struct {
 	execWorkers []*exec.Worker
 	stopWorkers func()
 	waitWorkers func() error
-	// cancelExecLoop publishes the stopCause on the coordination context
-	// (execLoopCtx). It is a SIGNAL that the exec loop, calculator and apply loop
-	// each read to decide how to wind down. It cancels execLoopCtx and therefore
-	// its child workersCtx too, but every publish site is ordered after the exec
-	// loop has produced everything up to the coalesce block, so it never aborts an
-	// in-flight block mid-work.
+	// cancelExecLoop stops coordinated executor work with either a deliberate
+	// batch-stop cause or a failure. The exec loop still owns result-channel
+	// closure so consumers can drain before the group is joined.
 	cancelExecLoop context.CancelCauseFunc
-	// cancelWorkers stops the OCC worker pool via workersCtx (a child of the
-	// coordination context). It is the explicit, ordered halt the exec loop calls
-	// once it has produced everything up to the coalesce block.
+	// cancelWorkers stops the OCC worker pool. The exec loop calls it on exit,
+	// and final executor cleanup calls it again as a safety net.
 	cancelWorkers  context.CancelFunc
 	in             *exec.QueueWithRetry
 	rws            *exec.ResultsQueue
@@ -358,12 +354,13 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	// compute per-block — otherwise batch-mode dedupes branch updates across
 	// the batch and flushes them all into one block's changeset, which fails
 	// on subsequent reorgs. blockRequests feeds it BAL-declared block requests.
-	// The calculator only publishes results; the apply loop is the sole
-	// cancellation authority (it classifies errors and drives the single unwind).
+	// The calculator only publishes results. The apply loop classifies them, and
+	// the stage wrapper owns any resulting unwind.
 	forcePerBlockCompute := pe.cfg.syncCfg.KeepExecutionProofs
 	// workCtx (ctx) runs the calculator's roTx/compute/publish; signalCtx
-	// (executorContext) carries the stopCause. Separating them lets a clean-stop
-	// cancel signal the calculator without aborting an in-flight commitment.
+	// (executorContext) carries a deliberate stop or executor failure. Separating
+	// them lets the calculator finish an in-flight commitment after executor-local
+	// cancellation.
 	calculator, err := newCommitmentCalculator(ctx, executorContext, pe.rs.Domains(), pe.cfg.db, pe.cfg.chainConfig, pe.logPrefix, pe.logger, forcePerBlockCompute, pe.changesetWindowStart, commitResults, blockRequests, rootResults)
 	if err != nil {
 		return nil, nil, err
@@ -518,20 +515,17 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 			}
 		}
 
-		// Apply loop: exits ONLY when applyResults is closed by the exec loop.
-		// Do NOT add ctx.Done or executorContext.Done cases here — the exec
-		// loop owns shutdown sequencing. Adding context checks here causes
-		// the apply loop to exit before the calculator finishes, leaving
-		// sd.mem inconsistent with the commitment boundary.
+		// During normal operation, drain applyResults until the exec loop closes it.
+		// Do not add cancellation cases: leaving early can strand mandatory terminal
+		// sends or exit before the calculator reaches the same commitment boundary.
 		for {
 			select {
 			case applyResult, ok := <-applyResults:
 				if !ok {
-					// Exec loop closed the channel — batch is complete.
-					// Drain calculator results, then exit. Skip the drain
-					// if rootResults already closed (its select-arm was
-					// disabled by setting rootResults=nil; ranging a nil
-					// channel hangs forever).
+					// Production has ended. Drain calculator results before classifying
+					// the outcome. Skip this drain if rootResults has already closed; its
+					// select arm was disabled by setting rootResults=nil, and ranging a nil
+					// channel would hang forever.
 					if !rootResultsClosed {
 						for cr := range rootResults {
 							processCommit(cr)
@@ -541,42 +535,12 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						pe.txExecutor.lastCommittedBlockNum.Store(lastBlock.blockNum)
 						pe.txExecutor.lastCommittedTxNum.Store(lastBlock.lastTxNum)
 					}
-					// Two reasons the exec loop closes the channel:
-					//   (1) sizeEst > batchLimit — flush and tell the stage loop
-					//       there is more work pending (ErrLoopExhausted)
-					//   (2) the result block number reached pe.maxBlockNum — we processed
-					//       every block we were asked to; clean exit, not "more work"
-					// Fork validation (StateStep, single-block batches) only ever hits
-					// case (2); returning ErrLoopExhausted there causes the stage loop
-					// to error with "unexpected state step has more work".
-					// Completeness check: when the exec loop closes the apply channel,
-					// every block whose tx-results arrived must also have produced a
-					// blockResult. Otherwise the per-block validator never fires for
-					// it and an invalid block becomes canonical.
-					//
-					// We track this two ways:
-					//   - appliedBlocks: blockResults we fully processed (validated)
-					//   - txResultBlocks: any block we saw at least one tx-result for
-					// A block in txResultBlocks but not in appliedBlocks means
-					// its tx-results arrived but the trailing blockResult never did
-					// — exactly the silent-failure mode this catches.
-					//
-					// Not reaching maxBlockNum is a normal partial-batch state: when
-					// the exec loop hits its size budget mid-batch it stops with a
-					// stopMoreWork cause, the apply loop drops out via the
-					// ErrLoopExhausted return below, and the stage loop resumes from
-					// lastBlockResult+1 in a follow-up call. Each block still executes
-					// exactly once across the two batches, so we deliberately do NOT
-					// flag maxBlockNum-not-applied here.
-					// Surface the earliest recorded failure ahead of the
-					// missing-blocks check: a deliberate cancel manufactures a
-					// missing-block condition that would otherwise mask it.
-					//
-					// A deferred commit wrong-root does its unwind here, not inline
-					// at classification time — so a !initialCycle reorg marks the
-					// bad block with the implicated block's OWN hash (fail.blockHash),
-					// not whatever block exec had last applied when the wrong-root
-					// arrived. initialCycle has no reorg: the error is fatal.
+					// Channel closure ends production but does not establish success.
+					// Prefer a recorded execution or commitment failure because its
+					// cancellation may leave follow-on results incomplete. Otherwise,
+					// require every observed block to reach terminal validation before
+					// classifying the stop cause or observed progress. Executor-group
+					// errors and still-scheduled blocks are checked after teardown.
 					if fail.set {
 						// Unwind handling is hoisted to SpawnExecuteBlocksStage. Record the
 						// implicated block (not the last-applied one) so the stage can target
@@ -587,10 +551,8 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					if err := applyLoopMissingBlocksError(ctx, lastBlock.blockNum, pe.maxBlockNum, txResultBlocks, appliedBlocks); err != nil {
 						return err
 					}
-					// The stop kind rides in the shared context's cause: stopReachedMax
-					// is a clean batch end (nil); stopMoreWork is a partial batch to
-					// resume next cycle (ErrLoopExhausted). stopBadBlock is handled by the
-					// fail branch above.
+					// A deliberate stop distinguishes a completed requested range from
+					// a resumable partial batch. stopBadBlock is handled above.
 					if sc, ok := stopCauseOf(executorContext); ok {
 						switch sc.kind {
 						case stopReachedMax:
@@ -973,15 +935,14 @@ func (pe *parallelExecutor) resetWorkers(ctx context.Context, rs *state.StateV3B
 
 func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 	pprof.SetGoroutineLabels(pprof.WithLabels(ctx, pprof.Labels("sub", "exec-loop")))
-	// The exec loop is the owner of shutdown sequencing. On exit it
-	// closes commitResults then applyResults, causing the calculator
-	// and apply loop to drain and exit.
+	// The exec loop owns result-channel shutdown. On every exit it closes
+	// commitResults and then applyResults so the calculator and apply loop drain.
 	//
 	// Note: pe.applyTx is the stageloop's rwTx (externally supplied).
 	// Do NOT rollback it here — the stageloop owns its lifecycle.
 
-	// The exec loop owns the workers' inner context: whatever exit path it takes
-	// (clean stop, wrong-root drain, error), the workers must not outlive it.
+	// Stop workers on every exec-loop exit. Final cleanup repeats this cancellation
+	// as a safety net before joining the complete executor group.
 	defer pe.cancelWorkers()
 	defer pe.closeApplyChannels()
 	defer func() {
@@ -1728,11 +1689,10 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, func(erro
 	pe.taskExecMetrics = exec.NewWorkerMetrics()
 	pe.blockExecMetrics = newBlockExecMetrics()
 
-	// execLoopCtx (outer) carries the stopCause signal and is where the exec loop
-	// runs. workersCtx (inner) is its child: the OCC workers run on it so the exec
-	// loop — the controller — decides when they halt via cancelWorkers, rather
-	// than a worker sharing the controller's own context. The exec loop's exit
-	// path must call cancelWorkers so the workers can't outlive the controller.
+	// execLoopCtx carries a deliberate stop, parent cancellation, or the first
+	// executor-group failure. workersCtx is its child, with a separate cancel so
+	// the exec loop can stop the OCC pool on exit; final cleanup cancels both
+	// contexts before joining the group.
 	execLoopCtx, execLoopCtxCancel := context.WithCancelCause(ctx)
 	pe.execLoopGroup, execLoopCtx = errgroup.WithContext(execLoopCtx)
 	pe.cancelExecLoop = execLoopCtxCancel
