@@ -105,7 +105,11 @@ func (c *StateCache) BeginFilesPublication(filesEnd [kv.DomainLen]uint64) *Backi
 		filesEnd[kv.StorageDomain],
 		filesEnd[kv.CodeDomain],
 	)
-	return c.generation.Publisher().BeginBackingChange(files, func() bool {
+	return c.generation.Publisher().BeginBackingChange(files, func(lowered bool) bool {
+		if lowered {
+			c.committedTxNumEnd = filesEnd
+			return true
+		}
 		extended := false
 		for domain, cache := range c.caches {
 			if cache == nil || filesEnd[domain] <= c.committedTxNumEnd[domain] {

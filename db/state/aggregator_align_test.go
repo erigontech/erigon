@@ -62,6 +62,13 @@ type cacheAggregatorHolder struct{ agg *Aggregator }
 
 func (h cacheAggregatorHolder) Agg() any { return h.agg }
 
+func bindTestStateCache(t *testing.T, agg *Aggregator) {
+	t.Helper()
+	stateCache := cache.NewStateCache(1<<20, 1<<20, 1<<20, 1<<20)
+	t.Cleanup(stateCache.Close)
+	agg.BindStateCache(stateCache)
+}
+
 // state visible past commitment's files = state no commitment covers
 func TestVisibleFilesAligned_LaggingCommitmentClampsEveryone(t *testing.T) {
 	t.Parallel()
@@ -173,7 +180,7 @@ func TestUnalign_RejectsStateDomain(t *testing.T) {
 // aggregator; the transition that lowers a cached state domain's visible end
 // (here: realigning while receipt still lags, which drops the shared ceiling)
 // must panic, whichever entry point caused it.
-func TestVisibilityLowering_ForbiddenAggregatorPanicsOnLoweringOnly(t *testing.T) {
+func TestVisibilityLowering_StateCachePanicsOnStateLoweringOnly(t *testing.T) {
 	t.Parallel()
 	_, agg := testDbAndAggregatorv3(t, alignStepSize)
 
@@ -183,7 +190,7 @@ func TestVisibilityLowering_ForbiddenAggregatorPanicsOnLoweringOnly(t *testing.T
 	generateDomainFiles(t, "receipt", agg.Dirs(), []testFileRange{{0, 1}})
 	require.NoError(t, agg.OpenFolder())
 
-	agg.ForbidVisibilityLowering()
+	bindTestStateCache(t, agg)
 	realign := agg.Unalign(kv.ReceiptDomain) // raises the ceiling: allowed
 	require.Panics(t, func() { realign() }, "realigning a still-lagging receipt lowers the state domains' ends")
 }
@@ -195,7 +202,7 @@ func TestCloseDirtyFilesNoReopenRestoresVisibilityLoweringGuard(t *testing.T) {
 		t.Run(fmt.Sprintf("initially_forbidden_%t", initiallyForbidden), func(t *testing.T) {
 			_, agg := testDbAndAggregatorv3(t, alignStepSize)
 			if initiallyForbidden {
-				agg.ForbidVisibilityLowering()
+				bindTestStateCache(t, agg)
 			}
 
 			agg.closeDirtyFilesNoReopen()
@@ -255,7 +262,7 @@ func TestDomainVisibleEnd_ClampedViewHasNoExactFrontier(t *testing.T) {
 // The forbid assert must also watch the history-II ends: they are the base of
 // what DomainVisibleEnd reports, and with values dependency-clamped below the
 // ceiling they can lower while every values end stays put.
-func TestVisibilityLowering_GuardsHistoryIIEnd(t *testing.T) {
+func TestVisibilityLowering_StateCacheGuardsHistoryIIEnd(t *testing.T) {
 	t.Parallel()
 	_, agg := testDbAndAggregatorv3(t, alignStepSize)
 
@@ -265,7 +272,7 @@ func TestVisibilityLowering_GuardsHistoryIIEnd(t *testing.T) {
 	require.NoError(t, agg.OpenFolder())
 
 	craftedClampedVisible(t, agg)
-	agg.ForbidVisibilityLowering()
+	bindTestStateCache(t, agg)
 
 	// Drop the accounts history-II {1,2} segment in memory rather than from
 	// disk (Windows forbids removing a mapped file): the recalculation lowers
@@ -286,7 +293,7 @@ func TestVisibilityLowering_GuardsHistoryIIEnd(t *testing.T) {
 		"lowering a history-II end while values ends stay put must trip the forbid assert")
 }
 
-func TestVisibilityLowering_GuardsCommitmentDomain(t *testing.T) {
+func TestVisibilityLowering_StateCacheGuardAllowsCommitmentDomain(t *testing.T) {
 	t.Parallel()
 	_, agg := testDbAndAggregatorv3(t, alignStepSize)
 
@@ -295,8 +302,18 @@ func TestVisibilityLowering_GuardsCommitmentDomain(t *testing.T) {
 	generateStandaloneIIFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
 	require.NoError(t, agg.OpenFolder())
 
+	agg.DisableAllDependencies()
 	agg.Unalign(kv.CommitmentDomain)
-	agg.ForbidVisibilityLowering()
+	bindTestStateCache(t, agg)
+	branchCache := agg.d[kv.CommitmentDomain].branchCache
+	require.NotNil(t, branchCache)
+	publisher := branchCache.Publisher()
+	publisher.Initialize(cache.BranchGeneration(1, 2*alignStepSize))
+	key := []byte{0x01}
+	view := branchCache.View(cache.BranchGeneration(1, 2*alignStepSize))
+	view.Fill(key, []byte{0xbb}, 1)
+	_, _, ok := view.Get(key)
+	require.True(t, ok)
 
 	agg.dirtyFilesLock.Lock()
 	defer agg.dirtyFilesLock.Unlock()
@@ -310,8 +327,12 @@ func TestVisibilityLowering_GuardsCommitmentDomain(t *testing.T) {
 	})
 	require.Equal(t, 1, dropped)
 
-	require.Panics(t, func() { agg.recalcVisibleFiles(nil) },
-		"BranchCache validity requires the commitment frontier to remain monotonic")
+	require.NotPanics(t, func() { agg.recalcVisibleFiles(nil) },
+		"the StateCache guard must not reject a safe BranchCache reset")
+	_, _, ok = view.Get(key)
+	require.False(t, ok, "the old commitment-files generation must be revoked")
+	_, _, ok = branchCache.View(cache.BranchGeneration(1, alignStepSize)).Get(key)
+	require.False(t, ok, "branches from the removed commitment file must be cleared")
 }
 
 func TestFilePublicationRevokesCacheGenerations(t *testing.T) {

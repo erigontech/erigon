@@ -373,7 +373,11 @@ func (c *BranchCache) BeginFilesPublication(filesEnd uint64) *cache.BackingChang
 	if c == nil {
 		return nil
 	}
-	return c.generation.Publisher().BeginBackingChange(cache.BranchFilesView(filesEnd), func() bool {
+	return c.generation.Publisher().BeginBackingChange(cache.BranchFilesView(filesEnd), func(lowered bool) bool {
+		if lowered {
+			c.committedTxNumEnd = filesEnd
+			return true
+		}
 		if filesEnd <= c.committedTxNumEnd {
 			return false
 		}

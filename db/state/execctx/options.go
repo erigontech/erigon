@@ -36,9 +36,7 @@ func WithoutDeferredBranchUpdates() SharedDomainOption {
 	return func(o *sharedDomainOptions) { o.trieCfg.DeferBranchUpdates = false }
 }
 
-// WithoutSharedBranchCache disables BranchCache use and the monotonic
-// visibility guard it requires. Use it when tooling intentionally lowers or
-// rebuilds the commitment-file frontier.
+// WithoutSharedBranchCache keeps commitment reads within the transaction snapshot.
 func WithoutSharedBranchCache() SharedDomainOption {
 	return func(o *sharedDomainOptions) { o.useSharedBranchCache = false }
 }

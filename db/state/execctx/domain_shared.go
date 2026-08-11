@@ -344,9 +344,6 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	}
 	sd.branchCache = branchCache
 	sd.hasSharedBranchCache = branchCache != nil
-	if branchCache != nil {
-		forbidVisibilityLowering(tx.AggTx())
-	}
 	if p, ok := tx.AggTx().(kvmetrics.MetricsCollectorProvider); ok {
 		sd.collector = p.MetricsCollector()
 	}
@@ -931,14 +928,6 @@ func BindStateCacheToAggregator(db any, sc *cache.StateCache) {
 		panic(fmt.Sprintf("assert: aggregator %T lacks BindStateCache — file-publication cache invalidation would be silently dropped", agg))
 	}
 	b.BindStateCache(sc)
-}
-
-func forbidVisibilityLowering(agg any) {
-	f, ok := agg.(interface{ ForbidVisibilityLowering() })
-	if !ok {
-		panic(fmt.Sprintf("assert: aggregator %T lacks ForbidVisibilityLowering — the visibility-lowering guard would be silently dropped", agg))
-	}
-	f.ForbidVisibilityLowering()
 }
 
 // SetCodeStore sets the persistent codehash-keyed code cache.

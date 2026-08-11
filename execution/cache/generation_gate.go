@@ -31,6 +31,13 @@ type FilesView struct {
 	commitmentEnd uint64
 }
 
+func (v FilesView) lowerThan(previous FilesView) bool {
+	return v.accountsEnd < previous.accountsEnd ||
+		v.storageEnd < previous.storageEnd ||
+		v.codeEnd < previous.codeEnd ||
+		v.commitmentEnd < previous.commitmentEnd
+}
+
 func stateFilesView(accountsEnd, storageEnd, codeEnd uint64) FilesView {
 	return FilesView{accountsEnd: accountsEnd, storageEnd: storageEnd, codeEnd: codeEnd}
 }
@@ -269,12 +276,11 @@ type BackingChange struct {
 }
 
 // BeginBackingChange runs reconcile while publications and fills are blocked.
-// It always revokes an active generation when its files identity changes, but
-// clears entries only when reconcile cannot prove that the cache's publication
-// history covers the new files. The returned handle keeps publication blocked
-// until Finish makes both the new files and their matching cache generation
-// observable.
-func (p GenerationPublisher) BeginBackingChange(files FilesView, reconcile func() bool, clear func()) *BackingChange {
+// It revokes the active generation when the files identity changes and clears
+// entries when reconcile reports incompatibility. The callback receives whether
+// a file end moved backwards, which also requires resetting forward provenance.
+// Finish publishes the matching generation after the new files become visible.
+func (p GenerationPublisher) BeginBackingChange(files FilesView, reconcile func(lowered bool) bool, clear func()) *BackingChange {
 	if p.gate == nil {
 		return nil
 	}
@@ -289,7 +295,8 @@ func (p GenerationPublisher) BeginBackingChange(files FilesView, reconcile func(
 		}
 	}()
 
-	incompatible := reconcile != nil && reconcile()
+	lowered := gate.filesKnown && files.lowerThan(gate.files)
+	incompatible := reconcile != nil && reconcile(lowered)
 	current := gate.current.Load()
 	gate.files = files
 	gate.filesKnown = true

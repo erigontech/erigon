@@ -52,6 +52,12 @@ type exactVisibleDebug struct{ kv.TemporalDebugTx }
 
 func (*exactVisibleDebug) HasExactDomainVisibleEnd(kv.Domain) bool { return true }
 
+type branchCacheOnlyAgg struct {
+	branchCache *commitment.BranchCache
+}
+
+func (a *branchCacheOnlyAgg) BranchCache() *commitment.BranchCache { return a.branchCache }
+
 type boundedLatestAgg struct {
 	branchCache *commitment.BranchCache
 	domain      kv.Domain
@@ -62,7 +68,6 @@ type boundedLatestAgg struct {
 }
 
 func (a *boundedLatestAgg) BranchCache() *commitment.BranchCache { return a.branchCache }
-func (a *boundedLatestAgg) ForbidVisibilityLowering()            {}
 
 func (a *boundedLatestAgg) MeteredGetLatest(domain kv.Domain, key []byte, _ kv.Tx, maxStep kv.Step, _ *kvmetrics.DomainMetrics, _ time.Time) ([]byte, kv.Step, bool, error) {
 	if domain != a.domain || !bytes.Equal(key, a.key) {
@@ -70,6 +75,29 @@ func (a *boundedLatestAgg) MeteredGetLatest(domain kv.Domain, key []byte, _ kv.T
 	}
 	a.maxStep = maxStep
 	return a.value, a.step, true, nil
+}
+
+func TestSharedBranchCacheDoesNotRequireVisibilityGuard(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	db := newTestDb(t, 16)
+	branchCache := commitment.NewBranchCache(64)
+	t.Cleanup(branchCache.Close)
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	tx := &temporalTxWithAgg{
+		TemporalTx: roTx,
+		agg:        &branchCacheOnlyAgg{branchCache: branchCache},
+	}
+
+	var sd *execctx.SharedDomains
+	require.NotPanics(t, func() {
+		sd, err = execctx.NewSharedDomains(ctx, tx, log.New())
+	})
+	require.NoError(t, err)
+	sd.Close()
 }
 
 type commitErrorTx struct {

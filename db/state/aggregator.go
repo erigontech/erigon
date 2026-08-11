@@ -91,9 +91,9 @@ type Aggregator struct {
 	// regenerates them. Guarded by dirtyFilesLock.
 	unalignedDomain [kv.DomainLen]bool
 	unalignedIdx    [kv.StandaloneIdxLen]bool
-	// Cache provenance and exact-view eligibility assume that visible values and
-	// history-II ends only advance. Close clears this guard because shutdown is
-	// not a cache-read window.
+	// StateCache provenance and exact-view eligibility assume that visible state
+	// values and history-II ends only advance. Close clears this guard because
+	// shutdown is not a cache-read window.
 	visibilityLoweringForbidden atomic.Bool
 	// boundStateCache is reconciled before a new files view becomes visible.
 	// Guarded by dirtyFilesLock.
@@ -549,20 +549,6 @@ func (a *Aggregator) UnalignIdx(name kv.InvertedIdx) (realign func()) {
 		}
 	}
 	return func() {}
-}
-
-// ForbidVisibilityLowering marks this aggregator as backing shared latest-state
-// caches. It rejects lowering values-file ends because cache provenance only
-// advances, and history-II ends because they determine exact cache-view
-// eligibility. dirtyFilesLock orders the guard with a recalculation already in
-// progress.
-func (a *Aggregator) ForbidVisibilityLowering() {
-	if a.visibilityLoweringForbidden.Load() {
-		return
-	}
-	a.dirtyFilesLock.Lock()
-	defer a.dirtyFilesLock.Unlock()
-	a.visibilityLoweringForbidden.Store(true)
 }
 
 // BindStateCache prevents visibility lowering and reconciles the cache with
@@ -1990,14 +1976,14 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 
 	if a.visibilityLoweringForbidden.Load() {
 		prev := a.visible.Load()
-		for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain} {
+		for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
 			if prev.d[d] == nil || next.d[d] == nil {
 				continue
 			}
 			prevEnd := visibleFiles(prev.d[d].files).EndTxNum()
 			nextEnd := visibleFiles(next.d[d].files).EndTxNum()
 			if nextEnd < prevEnd {
-				panic(fmt.Sprintf("assert: %s visible end lowered %d -> %d while a shared cache is wired — file-provenance watermarks only advance", d, prevEnd, nextEnd))
+				panic(fmt.Sprintf("assert: %s visible end lowered %d -> %d while StateCache is wired — file-provenance watermarks only advance", d, prevEnd, nextEnd))
 			}
 			if prev.dhii[d] == nil || next.dhii[d] == nil {
 				continue
@@ -2005,7 +1991,7 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 			prevII := prev.dhii[d].files.EndTxNum()
 			nextII := next.dhii[d].files.EndTxNum()
 			if nextII < prevII {
-				panic(fmt.Sprintf("assert: %s history-II visible end lowered %d -> %d while a shared cache is wired — exact cache-view eligibility depends on history-II coverage", d, prevII, nextII))
+				panic(fmt.Sprintf("assert: %s history-II visible end lowered %d -> %d while StateCache is wired — exact cache-view eligibility depends on history-II coverage", d, prevII, nextII))
 			}
 		}
 	}
@@ -2766,10 +2752,6 @@ func (at *AggregatorRoTx) AdaptivePinController() *commitment.AdaptivePinControl
 // aggregate.
 func (at *AggregatorRoTx) MetricsCollector() *kvmetrics.Collector {
 	return at.a.metricsCollector
-}
-
-func (at *AggregatorRoTx) ForbidVisibilityLowering() {
-	at.a.ForbidVisibilityLowering()
 }
 
 func (at *AggregatorRoTx) BindStateCache(stateCache *cache.StateCache) {

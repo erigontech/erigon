@@ -73,6 +73,45 @@ func TestBranchCacheFilesPublication(t *testing.T) {
 	require.True(t, ok, "an already absorbed files view must not clear again")
 }
 
+func TestBranchCacheFilesPublicationClearsOnLowerEnd(t *testing.T) {
+	branchCache := NewBranchCache(64)
+	t.Cleanup(branchCache.Close)
+	publisher := branchCache.Publisher()
+	publisher.Initialize(testBranchGeneration(1))
+	key := []byte{0x01}
+	value := []byte{0xbb}
+
+	publication := publisher.Begin()
+	publication.Publish(testBranchGeneration(2), []BranchUpdate{{
+		Key:   key,
+		Value: value,
+		Step:  1,
+		TxNum: 100,
+	}}, false, nil)
+
+	change := branchCache.BeginFilesPublication(100)
+	require.NotNil(t, change)
+	change.Finish()
+	view := branchCache.View(cache.BranchGeneration(2, 100))
+	got, _, ok := view.Get(key)
+	require.True(t, ok)
+	require.Equal(t, value, got)
+
+	change = branchCache.BeginFilesPublication(50)
+	require.NotNil(t, change)
+	change.Finish()
+	lowered := branchCache.View(cache.BranchGeneration(2, 50))
+	_, _, ok = lowered.Get(key)
+	require.False(t, ok, "branches from files that are no longer visible must be cleared")
+
+	lowered.Fill(key, []byte{0xcc}, 2)
+	change = branchCache.BeginFilesPublication(75)
+	require.NotNil(t, change)
+	change.Finish()
+	_, _, ok = branchCache.View(cache.BranchGeneration(2, 75)).Get(key)
+	require.False(t, ok, "an extension after lowering must not reuse the old forward-coverage watermark")
+}
+
 func TestBranchCacheCanonicalClearResetsFileProvenance(t *testing.T) {
 	branchCache, publisher, key := branchCacheWithPublishedCoverage(t)
 	publication := publisher.Begin()
