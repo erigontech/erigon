@@ -21,6 +21,7 @@ import (
 	"encoding/hex"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
 )
@@ -300,12 +301,15 @@ func (c *AdaptivePinController) promoteLocked(
 		if provider != nil {
 			dbBranches = provider(hash[:])
 		}
+		started := time.Now()
 		if _, _, err := p.Run(c.cfg.InitialViewBudgetBytes, dbBranches, parallelResolve, c.cache, c.logger); err != nil {
+			recordPreload(started, 0)
 			for _, prefix := range p.PinnedPrefixes() {
 				c.cache.Invalidate(prefix)
 			}
 			return nil, err
 		}
+		recordPreload(started, p.usedBytes)
 		return &adaptiveContractState{
 			contractHash:    hash,
 			promotedAtTxNum: txNum,
@@ -317,12 +321,15 @@ func (c *AdaptivePinController) promoteLocked(
 		return nil, err
 	}
 	p.pinTxNum = txNum
+	started := time.Now()
 	if _, _, err := p.Run(c.cfg.InitialViewBudgetBytes, reader, c.cache, c.logger); err != nil {
+		recordPreload(started, 0)
 		for _, prefix := range p.PinnedPrefixes() {
 			c.cache.Invalidate(prefix)
 		}
 		return nil, err
 	}
+	recordPreload(started, p.usedBytes)
 	return &adaptiveContractState{
 		contractHash:    hash,
 		promotedAtTxNum: txNum,
@@ -351,11 +358,15 @@ func (c *AdaptivePinController) runExtensionLocked(
 			dbBranches = provider(state.contractHash[:])
 		}
 		state.parallel.pinTxNum = txNum
+		before, started := state.parallel.usedBytes, time.Now()
 		_, _, err := state.parallel.Run(stepBudget, dbBranches, parallelResolve, c.cache, c.logger)
+		recordPreload(started, state.parallel.usedBytes-before)
 		return err
 	}
 	state.preload.pinTxNum = txNum
+	before, started := state.preload.usedBytes, time.Now()
 	_, _, err := state.preload.Run(stepBudget, reader, c.cache, c.logger)
+	recordPreload(started, state.preload.usedBytes-before)
 	return err
 }
 
