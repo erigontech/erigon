@@ -1746,9 +1746,14 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, func(erro
 	workersCtx, cancelWorkers := context.WithCancel(execLoopCtx)
 	pe.cancelWorkers = cancelWorkers
 
+	var workerFault func() error
+	if pe.cfg.syncCfg.ChaosMonkey && pe.enableChaosMonkey {
+		workerFault = chaos_monkey.ThrowWorkerError
+	}
+
 	var err error
 	pe.execWorkers, _, pe.rws, pe.stopWorkers, pe.waitWorkers, err = exec.NewWorkersPool(
-		workersCtx, nil, true, pe.cfg.db, nil, nil, nil, pe.in,
+		workersCtx, workerFault, nil, true, pe.cfg.db, nil, nil, nil, pe.in,
 		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine,
 		pe.workerCount+1, pe.taskExecMetrics, pe.cfg.dirs, pe.logger)
 

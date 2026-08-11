@@ -40,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
-	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
 	"github.com/erigontech/erigon/execution/tracing/calltracer"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
@@ -124,11 +123,12 @@ type Worker struct {
 	historyMode bool // if true - stateReader is HistoryReaderV3, otherwise it's state reader
 	chainConfig *chain.Config
 
-	ctx     context.Context
-	engine  rules.Engine
-	genesis *types.Genesis
-	results *ResultsQueue
-	chain   rules.ChainReader
+	ctx      context.Context
+	engine   rules.Engine
+	genesis  *types.Genesis
+	results  *ResultsQueue
+	chain    rules.ChainReader
+	runFault func() error
 
 	evm *vm.EVM
 	ibs *state.IntraBlockState
@@ -388,9 +388,10 @@ func (rw *Worker) Run() (err error) {
 		}
 	}()
 
-	// Test-only fault injection; it returns nil unless explicitly armed.
-	if chaosErr := chaos_monkey.ThrowWorkerError(); chaosErr != nil {
-		return chaosErr
+	if rw.runFault != nil {
+		if err := rw.runFault(); err != nil {
+			return err
+		}
 	}
 
 	for txTask, ok := rw.in.Next(rw.ctx); ok; txTask, ok = rw.in.Next(rw.ctx) {
@@ -584,7 +585,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 	return result
 }
 
-func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, background bool, chainDb kv.TemporalRoDB,
+func NewWorkersPool(ctx context.Context, runFault func() error, accumulator *shards.Accumulator, background bool, chainDb kv.TemporalRoDB,
 	rs *state.StateV3Buffered, stateReader state.StateReader, stateWriter state.StateWriter, in *QueueWithRetry, blockReader dbservices.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis,
 	engine rules.Engine, workerCount int, metrics *WorkerMetrics, dirs datadir.Dirs, logger log.Logger) (reconWorkers []*Worker, applyWorker *Worker, rws *ResultsQueue, clear func(), wait func() error, err error) {
 	// Appended, so a part-way failure leaves clear only the workers actually built.
@@ -595,6 +596,7 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 
 	g, gctx := errgroup.WithContext(ctx)
 	applyWorker = NewWorker(ctx, false, nil, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs, logger)
+	applyWorker.runFault = runFault
 
 	// Assigned before anything can fail: every return path must hand back a callable clear.
 	var clearDone bool
@@ -612,6 +614,7 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 
 	for range workerCount {
 		w := NewWorker(gctx, background, metrics, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs, logger)
+		w.runFault = runFault
 		reconWorkers = append(reconWorkers, w)
 
 		if rs != nil {

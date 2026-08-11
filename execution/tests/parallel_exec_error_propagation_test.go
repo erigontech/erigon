@@ -102,9 +102,14 @@ func runParallelExecV3(t *testing.T, m *execmoduletester.ExecModuleTester, maxBl
 
 func runParallelExecV3WithContext(t *testing.T, ctx context.Context, m *execmoduletester.ExecModuleTester, maxBlockNum uint64) error {
 	t.Helper()
+	return runParallelExecV3WithChaosGate(t, ctx, m, maxBlockNum, true, true)
+}
+
+func runParallelExecV3WithChaosGate(t *testing.T, ctx context.Context, m *execmoduletester.ExecModuleTester, maxBlockNum uint64, chaosMonkey, initialCycle bool) error {
+	t.Helper()
 
 	syncCfg := m.Cfg().Sync
-	syncCfg.ChaosMonkey = true
+	syncCfg.ChaosMonkey = chaosMonkey
 	execCfg := stagedsync.StageExecuteBlocksCfg(
 		m.DB, m.Cfg().Prune, m.Cfg().BatchSize, m.ChainConfig, m.Engine, &vm.Config{},
 		m.Notifications, m.Cfg().StateStream, false /*badBlockHalt*/, m.Dirs, m.BlockReader,
@@ -123,7 +128,7 @@ func runParallelExecV3WithContext(t *testing.T, ctx context.Context, m *execmodu
 		State:            m.Sync,
 		ID:               stages.Execution,
 		BlockNumber:      1,
-		CurrentSyncCycle: stagedsync.CurrentSyncCycleInfo{IsInitialCycle: true}, // enables the chaos gate
+		CurrentSyncCycle: stagedsync.CurrentSyncCycleInfo{IsInitialCycle: initialCycle},
 	}
 	return stagedsync.SpawnExecuteBlocksStage(s, nil /*Unwinder*/, doms, rwTx, maxBlockNum, ctx, execCfg, m.Log)
 }
@@ -163,6 +168,31 @@ func TestParallelExec_WorkerPoolDeath_SurfacesInsteadOfHanging(t *testing.T) {
 	var exhausted *stagedsync.ErrLoopExhausted
 	require.False(t, errors.As(err, &exhausted),
 		"worker-pool death classified as ErrLoopExhausted → runStage retries forever with zero progress")
+}
+
+func TestParallelExec_WorkerFaultHookHonorsChaosGate(t *testing.T) {
+	tests := []struct {
+		name         string
+		chaosMonkey  bool
+		initialCycle bool
+	}{
+		{name: "config disabled", initialCycle: true},
+		{name: "initial cycle disabled", chaosMonkey: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m, b2 := tipWithUnexecutedBlock2(t)
+
+			chaosErr := errors.New("chaos monkey: worker fault must stay disabled")
+			disarm := chaos_monkey.ArmWorkerError(chaosErr)
+			t.Cleanup(disarm)
+
+			err := runParallelExecV3WithChaosGate(t, context.Background(), m, b2.NumberU64(), tc.chaosMonkey, tc.initialCycle)
+
+			require.NoError(t, err)
+		})
+	}
 }
 
 func TestParallelExec_EarlySetupCancellationDoesNotHideWorkerFailure(t *testing.T) {
