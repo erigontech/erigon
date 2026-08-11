@@ -16,7 +16,11 @@
 
 package commitment
 
-import "math/bits"
+import (
+	"math/bits"
+
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
+)
 
 const prefixSlabSize = 16384
 const prefixExtChunkSize = 65536
@@ -141,16 +145,6 @@ func (t *prefixTrie) Reset() {
 	t.root = t.arena.allocNode()
 }
 
-func commonPrefixLen(a, b []byte) int {
-	n := min(len(b), len(a))
-	for i := range n {
-		if a[i] != b[i] {
-			return i
-		}
-	}
-	return n
-}
-
 // Insert adds hashedKey (nibble form), recording plainKey and optional update (nil = re-read from ctx) at its terminating node.
 // Re-inserting merges updates copy-on-write so a snapshot of the old update stays intact; plainKey backing must outlive the trie.
 func (t *prefixTrie) Insert(hashedKey, plainKey []byte, update *Update) (isNew bool) {
@@ -166,7 +160,7 @@ func (t *prefixTrie) Insert(hashedKey, plainKey []byte, update *Update) (isNew b
 		t.visited = append(t.visited, node)
 
 		remain := hashedKey[keyOffset:]
-		m := commonPrefixLen(remain, node.ext)
+		m := nibbles.CommonPrefixLen(remain, node.ext)
 
 		if m < len(node.ext) {
 			// Partial match: split the node at position m.
