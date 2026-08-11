@@ -53,8 +53,7 @@ type pathKey struct {
 }
 
 func toPathKey(path []byte) pathKey {
-	// HexToCompact result may alias a reused buffer, so copy it.
-	return pathKey{path: path, key: bytes.Clone(nibbles.HexToCompact(path))}
+	return pathKey{path: path, key: nibbles.HexToCompact(path)}
 }
 
 // ContractTrunkPreloadParallel is the wave-BFS analogue of ContractTrunkPreload.
@@ -185,7 +184,7 @@ func (p *ContractTrunkPreloadParallel) Run(
 		// floor drops a preloaded pin before the cStep<=maxStep gate is consulted,
 		// so leaving step unset only keeps that gate trivially true for live pins.
 		cache.PinEntry(pk.key, v, 0, p.pinTxNum)
-		p.pinnedPrefixes = append(p.pinnedPrefixes, bytes.Clone(pk.key))
+		p.pinnedPrefixes = append(p.pinnedPrefixes, pk.key)
 		p.usedBytes += cost
 		p.pinned++
 		chunkPinned++

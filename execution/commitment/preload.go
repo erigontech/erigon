@@ -111,10 +111,7 @@ func (p *ContractTrunkPreload) Run(
 		}
 
 		cache.PinEntry(prefix, v, step, p.pinTxNum)
-		// HexToCompact may alias a reused buffer; copy for a stable Invalidate handle.
-		prefixCopy := make([]byte, len(prefix))
-		copy(prefixCopy, prefix)
-		p.pinnedPrefixes = append(p.pinnedPrefixes, prefixCopy)
+		p.pinnedPrefixes = append(p.pinnedPrefixes, prefix)
 		chunkUsedBytes += entryCost
 		chunkPinned++
 		if head.depth > p.maxDepthReached {
