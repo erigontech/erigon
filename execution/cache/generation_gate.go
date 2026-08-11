@@ -278,6 +278,13 @@ func (p *GenerationPublication) Publish(identity Generation, apply, clear func()
 	if gate.current.Load() != nil {
 		panic("cache generation publication changed before publish")
 	}
+	// Database commits are serialized, but their post-commit cache publications
+	// may arrive out of order. Keep a newer generation instead of applying an
+	// older transaction's partial update set to it.
+	if p.previous != nil && identity.stateVersion < p.previous.identity.stateVersion {
+		gate.current.Store(p.previous)
+		return
+	}
 	completed := false
 	defer func() {
 		if !completed && clear != nil {

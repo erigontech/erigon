@@ -70,3 +70,22 @@ func TestGenerationPublicationApplyPanicClearsPartialChanges(t *testing.T) {
 	require.Empty(t, entries)
 	require.False(t, gate.View(StateGeneration(2, 0, 0, 0)).Current())
 }
+
+func TestGenerationPublicationRejectsOlderStateVersion(t *testing.T) {
+	var gate GenerationGate
+	publisher := gate.Publisher()
+	newer := StateGeneration(3, 0, 0, 0)
+	publisher.Initialize(newer, nil)
+	newerView := gate.View(newer)
+	require.True(t, newerView.Current())
+
+	applied := false
+	publication := publisher.Begin()
+	publication.Publish(StateGeneration(2, 0, 0, 0), func() {
+		applied = true
+	}, nil)
+
+	require.False(t, applied, "an older publication must not apply its updates")
+	require.True(t, newerView.Current(), "an older publication must restore the newer token")
+	require.False(t, gate.View(StateGeneration(2, 0, 0, 0)).Current())
+}
