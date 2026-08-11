@@ -8,6 +8,8 @@ import (
 
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // feeCreditRound mirrors one apply-loop validation round for a single tx:
@@ -124,6 +126,69 @@ func TestCalcFees_SkipsRedundantReCreditWithBurntContract(t *testing.T) {
 
 	require.Nil(t, r.run(t),
 		"both halves of the credit are already recorded, so the round is a no-op")
+}
+
+func TestCalcFees_SkipsRedundantReCreditOnEmptyRemoval(t *testing.T) {
+	t.Parallel()
+	s := simpleTransferScenario()
+	// A zero tip on an already-empty coinbase is the EIP-161 case: the credit
+	// is a delete rather than a balance write, and takes a different path
+	// through both recordedIn and writeTo.
+	s.feeTipped = uint256.Int{}
+	r := newFeeCreditRound(t, s)
+
+	first := r.run(t)
+	require.NotNil(t, first, "an emptied coinbase must still be touched")
+	sd, ok := first.GetSelfDestruct(s.coinbase)
+	require.True(t, ok, "the credit is a SelfDestructPath delete")
+	require.True(t, sd.Val)
+
+	require.Nil(t, r.run(t),
+		"the delete is already recorded, so the round is a no-op")
+}
+
+// TestFeeEntryWriteToIsRecordedIn pins the two halves against each other: if
+// recordedIn stops accepting what writeTo produces the skip silently never
+// fires, and if it accepts more the credit can be skipped without ever having
+// been written.
+func TestFeeEntryWriteToIsRecordedIn(t *testing.T) {
+	t.Parallel()
+	version := state.Version{TxIndex: 3, Incarnation: 1}
+	addr := fAddr("credited")
+
+	entries := []feeEntry{
+		{
+			addr:   addr,
+			acc:    accounts.Account{Balance: *uint256.NewInt(7), Nonce: 2, Incarnation: 1, CodeHash: accounts.EmptyCodeHash},
+			reason: tracing.BalanceIncreaseRewardTransactionFee,
+			emit:   true,
+		},
+		{
+			addr:   addr,
+			acc:    accounts.Account{Balance: *uint256.NewInt(11), CodeHash: accounts.EmptyCodeHash},
+			reason: tracing.BalanceDecreaseGasBuy,
+			emit:   true,
+		},
+		{
+			addr:    addr,
+			reason:  tracing.BalanceIncreaseRewardTransactionFee,
+			deleted: true,
+			emit:    true,
+		},
+	}
+
+	for i := range entries {
+		e := &entries[i]
+		ws := &state.WriteSet{}
+		e.writeTo(ws, version)
+
+		require.True(t, e.recordedIn(ws, version),
+			"entry %d: recordedIn must accept what writeTo wrote", i)
+		require.False(t, e.recordedIn(ws, state.Version{TxIndex: 3, Incarnation: 2}),
+			"entry %d: a credit stamped at another incarnation is not this credit", i)
+		require.False(t, e.recordedIn(&state.WriteSet{}, version),
+			"entry %d: an empty set carries no credit", i)
+	}
 }
 
 var feeCreditSink *state.WriteSet
