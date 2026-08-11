@@ -1057,7 +1057,9 @@ type BlockStateCache struct {
 	// committed holds pre-block state, lazily populated on first read.
 	// These values are returned by CachedReaderV3 for GetCommittedState.
 	committedAccounts map[accounts.Address]*accounts.Account
-	committedStorage  map[accounts.Address]map[accounts.StorageKey][]byte
+	// committedStorage is write-once-per-key (an immutable pre-block view), so it
+	// is a sync.Map for lock-free reads off the shared mu hot path.
+	committedStorage sync.Map // committedStorageKey -> []byte (nil slice = cached empty slot)
 
 	// current holds the latest state including intra-block writes.
 	// Updated by WriteAccount/WriteStorage. Read by block finalize.
@@ -1084,6 +1086,12 @@ type BlockStateCache struct {
 	// commitment-domain reads) that ask for state at an intra-block
 	// txNum.
 	writeLog []bcWriteOp
+}
+
+// committedStorageKey is the sync.Map key for BlockStateCache.committedStorage.
+type committedStorageKey struct {
+	addr accounts.Address
+	key  accounts.StorageKey
 }
 
 // bcOpKind enumerates the operations recorded in BlockStateCache.writeLog.
@@ -1113,7 +1121,6 @@ type bcWriteOp struct {
 func NewBlockStateCache() *BlockStateCache {
 	return &BlockStateCache{
 		committedAccounts: make(map[accounts.Address]*accounts.Account),
-		committedStorage:  make(map[accounts.Address]map[accounts.StorageKey][]byte),
 		currentAccounts:   make(map[accounts.Address][]byte),
 		currentStorage:    make(map[accounts.Address]map[accounts.StorageKey][]byte),
 		currentCode:       make(map[accounts.Address][]byte),
@@ -1139,27 +1146,16 @@ func (c *BlockStateCache) PutCommittedAccount(addr accounts.Address, acc *accoun
 
 // GetCommittedStorage returns the pre-block storage value, or (nil, false) if not cached.
 func (c *BlockStateCache) GetCommittedStorage(addr accounts.Address, key accounts.StorageKey) ([]byte, bool) {
-	c.mu.RLock()
-	slots, addrOk := c.committedStorage[addr]
-	if !addrOk {
-		c.mu.RUnlock()
+	v, ok := c.committedStorage.Load(committedStorageKey{addr: addr, key: key})
+	if !ok {
 		return nil, false
 	}
-	val, ok := slots[key]
-	c.mu.RUnlock()
-	return val, ok
+	return v.([]byte), true
 }
 
 // PutCommittedStorage caches a pre-block storage value. nil = empty slot.
 func (c *BlockStateCache) PutCommittedStorage(addr accounts.Address, key accounts.StorageKey, val []byte) {
-	c.mu.Lock()
-	slots, ok := c.committedStorage[addr]
-	if !ok {
-		slots = make(map[accounts.StorageKey][]byte)
-		c.committedStorage[addr] = slots
-	}
-	slots[key] = val
-	c.mu.Unlock()
+	c.committedStorage.Store(committedStorageKey{addr: addr, key: key}, val)
 }
 
 // --- Current (write buffer) methods ---
@@ -1279,14 +1275,10 @@ func (c *BlockStateCache) GetCurrentStorage(addr accounts.Address, key accounts.
 			return val, true
 		}
 	}
-	// Fall back to committed.
-	if slots, ok := c.committedStorage[addr]; ok {
-		if val, ok := slots[key]; ok {
-			c.mu.RUnlock()
-			return val, true
-		}
-	}
 	c.mu.RUnlock()
+	if v, ok := c.committedStorage.Load(committedStorageKey{addr: addr, key: key}); ok {
+		return v.([]byte), true
+	}
 	return nil, false
 }
 
