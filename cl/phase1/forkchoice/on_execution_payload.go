@@ -424,11 +424,8 @@ func (f *ForkChoiceStore) applyEnvelopeLocked(ctx context.Context, signedEnvelop
 	}
 
 	// Persist envelope to disk — this marks the root as "has payload" in store.payloads
-	if err := f.forkGraph.DumpEnvelopeOnDisk(beaconBlockRoot, signedEnvelope); err != nil {
-		if !errors.Is(err, fork_graph.ErrEnvelopeCommitted) {
-			return false, fmt.Errorf("OnExecutionPayload: failed to dump envelope: %w", err)
-		}
-		log.Warn("envelope committed with durability warning", "root", beaconBlockRoot, "err", err)
+	if err := f.persistEnvelope(beaconBlockRoot, signedEnvelope); err != nil {
+		return false, fmt.Errorf("OnExecutionPayload: failed to dump envelope: %w", err)
 	}
 
 	// Invalidate head cache — payload status may have changed from PENDING to FULL.
@@ -459,12 +456,9 @@ func (f *ForkChoiceStore) StoreAnchorEnvelope(blockRoot common.Hash, signedEnvel
 	}
 
 	f.mu.Lock()
-	if err := f.forkGraph.DumpEnvelopeOnDisk(blockRoot, signedEnvelope); err != nil {
-		if !errors.Is(err, fork_graph.ErrEnvelopeCommitted) {
-			f.mu.Unlock()
-			return fmt.Errorf("StoreAnchorEnvelope: failed to dump envelope: %w", err)
-		}
-		log.Warn("anchor envelope committed with durability warning", "root", blockRoot, "err", err)
+	if err := f.persistEnvelope(blockRoot, signedEnvelope); err != nil {
+		f.mu.Unlock()
+		return fmt.Errorf("StoreAnchorEnvelope: failed to dump envelope: %w", err)
 	}
 	f.eth2Roots.Add(blockRoot, envelope.Payload.BlockHash)
 	f.headHash = common.Hash{}
@@ -627,11 +621,8 @@ func (f *ForkChoiceStore) applyLocalSelfBuildEnvelopeLocked(ctx context.Context,
 		f.eth2Roots.Add(beaconBlockRoot, envelope.Payload.BlockHash)
 	}
 
-	if err := f.forkGraph.DumpEnvelopeOnDisk(beaconBlockRoot, signedEnvelope); err != nil {
-		if !errors.Is(err, fork_graph.ErrEnvelopeCommitted) {
-			return false, fmt.Errorf("applyLocalSelfBuildEnvelopeLocked: failed to dump envelope: %w", err)
-		}
-		log.Warn("local envelope committed with durability warning", "root", beaconBlockRoot, "err", err)
+	if err := f.persistEnvelope(beaconBlockRoot, signedEnvelope); err != nil {
+		return false, fmt.Errorf("applyLocalSelfBuildEnvelopeLocked: failed to dump envelope: %w", err)
 	}
 
 	f.headHash = common.Hash{}
@@ -642,4 +633,13 @@ func (f *ForkChoiceStore) applyLocalSelfBuildEnvelopeLocked(ctx context.Context,
 	}
 
 	return true, nil
+}
+
+func (f *ForkChoiceStore) persistEnvelope(blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) error {
+	err := f.forkGraph.DumpEnvelopeOnDisk(blockRoot, envelope)
+	if errors.Is(err, fork_graph.ErrEnvelopeCommitted) {
+		log.Warn("envelope committed with durability warning", "root", blockRoot, "err", err)
+		return nil
+	}
+	return err
 }

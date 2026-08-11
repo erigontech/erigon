@@ -29,9 +29,13 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/memdb"
 )
 
 func TestStoreAnchorEnvelopeCompletesBookkeepingAfterCommittedDumpWarning(t *testing.T) {
@@ -39,19 +43,30 @@ func TestStoreAnchorEnvelopeCompletesBookkeepingAfterCommittedDumpWarning(t *tes
 	blockHash := common.HexToHash("0xabcd")
 	eth2Roots, err := lru.New[common.Hash, common.Hash](16)
 	require.NoError(t, err)
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
 	store := &ForkChoiceStore{
 		forkGraph: payloadVoteForkGraph{dumpEnvelopeErr: errors.Join(fork_graph.ErrEnvelopeCommitted, errors.New("sync directory"))},
 		eth2Roots: eth2Roots,
+		db:        db,
 	}
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
 		BeaconBlockRoot: root,
-		Payload:         &cltypes.Eth1Block{BlockHash: blockHash},
+		Payload:         &cltypes.Eth1Block{BlockHash: blockHash, BlockNumber: 42},
 	}}
 
 	require.NoError(t, store.StoreAnchorEnvelope(root, envelope))
 	persistedHash, ok := eth2Roots.Get(root)
 	require.True(t, ok)
 	require.Equal(t, blockHash, persistedHash)
+	require.NoError(t, db.View(context.Background(), func(tx kv.Tx) error {
+		blockNumber, err := beacon_indicies.ReadExecutionBlockNumber(tx, root)
+		require.NoError(t, err)
+		require.Equal(t, uint64(42), *blockNumber)
+		indexedHash, err := beacon_indicies.ReadExecutionBlockHash(tx, root)
+		require.NoError(t, err)
+		require.Equal(t, blockHash, indexedHash)
+		return nil
+	}))
 }
 
 // TestValidateEnvelopeAgainstBlock_NoBid tests that validation fails when block has no bid
