@@ -110,11 +110,15 @@ func TestAddChainSegmentQueuesLightClientEventsOnSuccess(t *testing.T) {
 
 type getFinalizedExecutionHashForkGraph struct {
 	blocks                map[common.Hash]*cltypes.SignedBeaconBlock
+	headers               map[common.Hash]*cltypes.BeaconBlockHeader
 	beforeUpdate          *cltypes.LightClientUpdate
 	afterUpdate           *cltypes.LightClientUpdate
 	addChainSegmentStatus fork_graph.ChainSegmentInsertionResult
 	addChainSegmentErr    error
 	addChainSegmentCalled bool
+	anchorRoot            common.Hash
+	anchorSlot            uint64
+	currentJustified      solid.Checkpoint
 }
 
 func (g *getFinalizedExecutionHashForkGraph) AddChainSegment(*cltypes.SignedBeaconBlock, bool) (*state.CachingBeaconState, fork_graph.ChainSegmentInsertionResult, error) {
@@ -122,8 +126,9 @@ func (g *getFinalizedExecutionHashForkGraph) AddChainSegment(*cltypes.SignedBeac
 	return nil, g.addChainSegmentStatus, g.addChainSegmentErr
 }
 
-func (g *getFinalizedExecutionHashForkGraph) GetHeader(common.Hash) (*cltypes.BeaconBlockHeader, bool) {
-	panic("not used")
+func (g *getFinalizedExecutionHashForkGraph) GetHeader(blockRoot common.Hash) (*cltypes.BeaconBlockHeader, bool) {
+	header := g.headers[blockRoot]
+	return header, header != nil
 }
 
 func (g *getFinalizedExecutionHashForkGraph) GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool) {
@@ -136,7 +141,7 @@ func (g *getFinalizedExecutionHashForkGraph) GetState(common.Hash, bool) (*state
 }
 
 func (g *getFinalizedExecutionHashForkGraph) GetCurrentJustifiedCheckpoint(common.Hash) (solid.Checkpoint, bool) {
-	panic("not used")
+	return g.currentJustified, true
 }
 
 func (g *getFinalizedExecutionHashForkGraph) GetFinalizedCheckpoint(common.Hash) (solid.Checkpoint, bool) {
@@ -152,11 +157,11 @@ func (g *getFinalizedExecutionHashForkGraph) MarkHeaderAsInvalid(common.Hash) {
 }
 
 func (g *getFinalizedExecutionHashForkGraph) AnchorSlot() uint64 {
-	panic("not used")
+	return g.anchorSlot
 }
 
 func (g *getFinalizedExecutionHashForkGraph) AnchorRoot() common.Hash {
-	panic("not used")
+	return g.anchorRoot
 }
 
 func (g *getFinalizedExecutionHashForkGraph) Prune(uint64) error {

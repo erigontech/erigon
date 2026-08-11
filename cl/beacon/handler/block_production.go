@@ -370,11 +370,11 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 		return newBeaconResponse(attestationData), nil
 	}
 
-	if err := a.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
+	if err := a.viewHeadStateWithIdentity(func(headState *state.CachingBeaconState, headRoot common.Hash, _ uint64) error {
 		attestationData, err = a.attestationProducer.ProduceAndCacheAttestationData(
 			tx,
 			headState,
-			a.syncedData.HeadRoot(),
+			headRoot,
 			*slot,
 		)
 
@@ -451,18 +451,14 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		}
 	}
 
-	baseBlockRoot := a.syncedData.HeadRoot()
-	if baseBlockRoot == (common.Hash{}) {
-		return nil, beaconhttp.NewEndpointError(
-			http.StatusServiceUnavailable,
-			errors.New("node is syncing"),
-		)
-	}
-
 	start := time.Now()
 
-	var baseState *state.CachingBeaconState
-	if err := a.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
+	var (
+		baseBlockRoot common.Hash
+		baseState     *state.CachingBeaconState
+	)
+	if err := a.viewHeadStateWithIdentity(func(headState *state.CachingBeaconState, root common.Hash, _ uint64) error {
+		baseBlockRoot = root
 		baseState, err = headState.Copy()
 		if err != nil {
 			return err
@@ -2094,30 +2090,53 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	if err := a.forkchoiceStore.OnBlock(ctx, block, true, false, false); err != nil {
 		return err
 	}
-	finalizedHash := a.forkchoiceStore.GetFinalizedExecutionHash(a.forkchoiceStore.FinalizedCheckpoint().Root)
-	safeHash := a.forkchoiceStore.GetFinalizedExecutionHash(a.forkchoiceStore.JustifiedCheckpoint().Root)
-	if _, err := a.engine.ForkChoiceUpdate(ctx, finalizedHash, safeHash, a.forkchoiceStore.GetEth1Hash(blockRoot), nil, block.Version()); err != nil {
-		return err
-	}
-	headState, err := a.forkchoiceStore.GetStateAtBlockRoot(blockRoot, false)
+	headRoot, headSlot, headState, err := a.selectedHeadState(blockRoot)
 	if err != nil {
 		return err
 	}
-	if headState == nil {
-		return errors.New("failed to get head state")
+	finalizedHash := a.forkchoiceStore.GetFinalizedExecutionHash(a.forkchoiceStore.FinalizedCheckpoint().Root)
+	safeHash := a.forkchoiceStore.GetFinalizedExecutionHash(a.forkchoiceStore.JustifiedCheckpoint().Root)
+	headVersion := a.beaconChainCfg.GetCurrentStateVersion(headSlot / a.beaconChainCfg.SlotsPerEpoch)
+	if _, err := a.engine.ForkChoiceUpdate(ctx, finalizedHash, safeHash, a.forkchoiceStore.GetEth1Hash(headRoot), nil, headVersion); err != nil {
+		return err
 	}
 
 	if err := a.indiciesDB.View(ctx, func(tx kv.Tx) error {
-		_, err := a.attestationProducer.ProduceAndCacheAttestationData(tx, headState, blockRoot, block.Block.Slot)
+		_, err := a.attestationProducer.ProduceAndCacheAttestationData(tx, headState, headRoot, block.Block.Slot)
 		return err
 	}); err != nil {
 		return err
 	}
-	if err := a.syncedData.OnHeadStateWithBlockRoot(headState, blockRoot); err != nil {
+	if err := a.syncedData.OnHeadStateWithBlockRoot(headState, headRoot); err != nil {
 		return fmt.Errorf("failed to update synced data: %w", err)
 	}
 
 	return nil
+}
+
+func (a *ApiHandler) selectedHeadState(auxiliaryRoot common.Hash) (common.Hash, uint64, *state.CachingBeaconState, error) {
+	auxiliaryState, err := a.forkchoiceStore.GetStateAtBlockRoot(auxiliaryRoot, false)
+	if err != nil {
+		return common.Hash{}, 0, nil, err
+	}
+	if auxiliaryState == nil {
+		return common.Hash{}, 0, nil, fmt.Errorf("failed to get auxiliary state for root %s", auxiliaryRoot)
+	}
+	headRoot, headSlot, err := a.forkchoiceStore.GetHead(auxiliaryState)
+	if err != nil {
+		return common.Hash{}, 0, nil, err
+	}
+	if headRoot == auxiliaryRoot {
+		return headRoot, headSlot, auxiliaryState, nil
+	}
+	headState, err := a.forkchoiceStore.GetStateAtBlockRoot(headRoot, false)
+	if err != nil {
+		return common.Hash{}, 0, nil, err
+	}
+	if headState == nil {
+		return common.Hash{}, 0, nil, fmt.Errorf("failed to get selected head state for root %s", headRoot)
+	}
+	return headRoot, headSlot, headState, nil
 }
 
 type attestationCandidate struct {
