@@ -41,7 +41,7 @@ const (
 	// DefaultCodeCacheBytes is the byte limit for the code cache.
 	DefaultCodeCacheBytes = 512 * datasize.MB
 	// DefaultAddrCacheBytes is the byte limit for address cache (16 MB)
-	DefaultAddrCacheBytes = 16 * datasize.MB
+	DefaultAddrCacheBytes = 32 * datasize.MB
 	// DefaultCodeSizeCacheEntries is the max entry count for the size-only
 	// cache (code size answers without loading bytes for
 	// EXTCODESIZE / EXTCODEHASH callers).
