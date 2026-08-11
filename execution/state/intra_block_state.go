@@ -145,7 +145,7 @@ type IntraBlockState struct {
 	stateReader StateReader
 
 	// This map holds 'live' objects, which will get modified while processing a state transition.
-	stateObjects      map[accounts.Address]*stateObject
+	stateObjects      map[accounts.Address]*stateObject // used only if `noMaterialize == false`
 	stateObjectsDirty map[accounts.Address]struct{}
 
 	nilAccounts map[accounts.Address]struct{} // Remember non-existent account to avoid reading them again
@@ -165,7 +165,9 @@ type IntraBlockState struct {
 
 	// Journal of state modifications. This is the backbone of
 	// Snapshot and RevertToSnapshot.
-	journal      *journal
+	journal          *journal
+	stateObjectArena stateObjectArena // same lifetime with `journal`. used only if `noMaterialize == true`
+
 	trace        bool
 	tracingHooks *tracing.Hooks
 	balanceInc   map[accounts.Address]*BalanceIncrease // Map of balance increases (without first reading the account)
@@ -210,8 +212,6 @@ type IntraBlockState struct {
 	// SelfDestruct cells. Left false for genesis/RPC/serial, which still commit
 	// via FinalizeTx→so.data.
 	noMaterialize bool
-
-	stateObjectArena stateObjectArena
 
 	// eip8246 pins whether SELFDESTRUCT preserves the account (EIP-8246 removes
 	// the balance burn). Set per-tx from the block rules in Prepare; under it a
@@ -303,6 +303,9 @@ func (sdb *IntraBlockState) VersionMap() *VersionMap {
 // SetNoMaterialize enables the cache-free parallel path: create/write flows
 // record only versioned cells and never populate the stateObject map.
 func (sdb *IntraBlockState) SetNoMaterialize(v bool) {
+	if dbg.AssertEnabled && v != sdb.noMaterialize && !sdb.stateObjectArena.empty() {
+		panic("noMaterialize changed with arena slots outstanding")
+	}
 	sdb.noMaterialize = v
 }
 
@@ -386,14 +389,11 @@ func (sdb *IntraBlockState) Reset() {
 	for _, so := range sdb.stateObjects {
 		so.release()
 	}
-	sdb.stateObjectArena.reset()
 	clear(sdb.stateObjects)
 	clear(sdb.stateObjectsDirty)
 	sdb.logs.reset()
 	clear(sdb.balanceInc)
-	sdb.journal.Reset()
-	sdb.revisions.reset()
-	sdb.refund = uint64(0)
+	sdb.clearJournalAndRefund()
 	sdb.txIndex = 0
 	sdb.sdProbeEpoch++
 	sdb.accessList.Reset()
@@ -2057,7 +2057,7 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 				if destructed || err != nil {
 					sdb.finalizeProvisionalAddressRead(addr)
 					if !sdb.noMaterialize {
-						so := stateObjectPool.Get().(*stateObject)
+						so := sdb.allocStateObject()
 						so.db = sdb
 						so.address = addr
 						so.selfdestructed = destructed
@@ -2102,7 +2102,7 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 			}
 			if !localResurrected {
 				if !sdb.noMaterialize {
-					so := stateObjectPool.Get().(*stateObject)
+					so := sdb.allocStateObject()
 					so.db = sdb
 					so.address = addr
 					so.selfdestructed = true
@@ -2147,6 +2147,10 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 }
 
 func (sdb *IntraBlockState) setStateObject(addr accounts.Address, object *stateObject) {
+	if dbg.AssertEnabled && object.arena {
+		// stateObjects lives for the block, an arena slot only for the transaction.
+		panic(fmt.Sprintf("arena slot cached in stateObjects: %x", addr))
+	}
 	if bi, ok := sdb.balanceInc[addr]; ok && !bi.transferred && sdb.versionMap == nil {
 		object.data.Balance = u256.Add(object.data.Balance, bi.increase)
 		bi.transferred = true
@@ -2827,6 +2831,12 @@ func (sdb *IntraBlockState) clearJournalAndRefund() {
 	sdb.journal.Reset()
 	sdb.revisions.reset()
 	sdb.refund = uint64(0)
+	if dbg.AssertEnabled && !sdb.noMaterialize && !sdb.stateObjectArena.empty() {
+		// Slots are rewound per transaction, so only the path that caches nothing
+		// may draw them.
+		panic("stateObjectArena not empty with noMaterialize=false")
+	}
+	sdb.stateObjectArena.reset() // same lifetime with `journal`
 }
 
 // Prepare handles the preparatory steps for executing a state transition.
