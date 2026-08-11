@@ -287,10 +287,12 @@ func (c *StateCache) Reset() {
 	c.generation.Reset(c.resetProvenanceAndClearLocked)
 }
 
-// Close revokes current views and releases the sub-caches' shared-envelope
-// reservations. It is idempotent.
+// Close permanently revokes publication, clears entries, and releases the
+// sub-caches' shared-envelope reservations. It is idempotent.
 func (c *StateCache) Close() {
-	c.generation.Close()
+	if !c.generation.Close(c.resetProvenanceAndClearLocked) {
+		return
+	}
 	for _, cache := range c.caches {
 		if cache != nil {
 			cache.Close()
@@ -378,7 +380,11 @@ func (p Publisher) Begin() *Publication {
 	if p.c == nil {
 		return nil
 	}
-	return &Publication{c: p.c, generation: p.c.generation.Publisher().Begin()}
+	generation := p.c.generation.Publisher().Begin()
+	if generation == nil {
+		return nil
+	}
+	return &Publication{c: p.c, generation: generation}
 }
 
 // Abort restores the previous generation after a failed or abandoned database

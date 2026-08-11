@@ -219,6 +219,66 @@ func TestBranchCache_CloseClearsEntries(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestBranchCache_ClosePreventsPublication(t *testing.T) {
+	c := NewBranchCache(100)
+	publisher := c.Publisher()
+	publisher.Initialize(testBranchGeneration(1))
+	c.Close()
+
+	publisher.Initialize(testBranchGeneration(2))
+	require.False(t, c.View(testBranchGeneration(2)).current())
+	publication := publisher.Begin()
+	publication.Abort()
+	require.Nil(t, publication)
+	change := c.BeginFilesPublication(1)
+	change.Finish()
+	require.Nil(t, change)
+}
+
+func TestBranchCache_CloseKeepsPublicationLockedWhileClearing(t *testing.T) {
+	c := NewBranchCache(100)
+	publisher := c.Publisher()
+	publisher.Initialize(testBranchGeneration(1))
+
+	previousProcs := runtime.GOMAXPROCS(1)
+	defer runtime.GOMAXPROCS(previousProcs)
+
+	c.putStripes[0].Lock()
+	closeStarted := make(chan struct{})
+	closeDone := make(chan struct{})
+	go func() {
+		close(closeStarted)
+		c.Close()
+		close(closeDone)
+	}()
+	<-closeStarted
+	runtime.Gosched()
+
+	beginStarted := make(chan struct{})
+	beginResult := make(chan *BranchPublication, 1)
+	go func() {
+		close(beginStarted)
+		beginResult <- publisher.Begin()
+	}()
+	<-beginStarted
+	runtime.Gosched()
+
+	publicationBeganDuringClear := false
+	select {
+	case publication := <-beginResult:
+		publicationBeganDuringClear = true
+		publication.Abort()
+	default:
+	}
+
+	c.putStripes[0].Unlock()
+	<-closeDone
+	if !publicationBeganDuringClear {
+		require.Nil(t, <-beginResult)
+	}
+	require.False(t, publicationBeganDuringClear)
+}
+
 func resetDuringBlockedBranchCacheWrite(c *BranchCache, block *sync.Mutex, write func()) {
 	// Limit Go execution to one logical processor. Each runtime.Gosched call
 	// yields to the queued goroutine, which runs until it reaches the blocked lock.

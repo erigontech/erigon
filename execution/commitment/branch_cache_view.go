@@ -105,7 +105,11 @@ func (p BranchPublisher) Begin() *BranchPublication {
 	if p.c == nil {
 		return nil
 	}
-	return &BranchPublication{c: p.c, generation: p.c.generation.Publisher().Begin()}
+	generation := p.c.generation.Publisher().Begin()
+	if generation == nil {
+		return nil
+	}
+	return &BranchPublication{c: p.c, generation: generation}
 }
 
 // Abort restores the previous branch generation after database rollback.

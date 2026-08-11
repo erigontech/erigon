@@ -86,6 +86,9 @@ type GenerationGate struct {
 	// publicationMu orders durable cache publication with independent changes
 	// to the backing-file view. Begin holds it until Publish or Abort.
 	publicationMu sync.Mutex
+	// closed is permanent and protected by publicationMu. Publisher operations
+	// become inert after Close, including through handles created beforehand.
+	closed bool
 	// files remembers the latest publication even while no durable generation
 	// is active, so a later commit cannot restore an older transaction's view.
 	files      FilesView
@@ -150,6 +153,9 @@ func (p GenerationPublisher) Initialize(identity Generation, clear func()) {
 	gate := p.gate
 	gate.publicationMu.Lock()
 	defer gate.publicationMu.Unlock()
+	if gate.closed {
+		return
+	}
 	gate.admissionMu.Lock()
 	defer gate.admissionMu.Unlock()
 
@@ -186,6 +192,10 @@ func (p GenerationPublisher) Begin() *GenerationPublication {
 	}
 	gate := p.gate
 	gate.publicationMu.Lock()
+	if gate.closed {
+		gate.publicationMu.Unlock()
+		return nil
+	}
 	gate.admissionMu.Lock()
 	defer gate.admissionMu.Unlock()
 
@@ -265,6 +275,9 @@ func (g *GenerationGate) Reset(clear func()) {
 	}
 	g.publicationMu.Lock()
 	defer g.publicationMu.Unlock()
+	if g.closed {
+		return
+	}
 	g.admissionMu.Lock()
 	defer g.admissionMu.Unlock()
 	g.current.Store(nil)
@@ -293,6 +306,10 @@ func (p GenerationPublisher) BeginBackingChange(files FilesView, reconcile func(
 	}
 	gate := p.gate
 	gate.publicationMu.Lock()
+	if gate.closed {
+		gate.publicationMu.Unlock()
+		return nil
+	}
 	gate.admissionMu.Lock()
 	keepPublicationLocked := false
 	defer func() {
@@ -340,15 +357,23 @@ func (c *BackingChange) Finish() {
 	c.gate = nil
 }
 
-// Close waits for in-flight fills and revokes current views before the owner
-// closes cache storage.
-func (g *GenerationGate) Close() {
+// Close permanently revokes publication and runs clear while publications and
+// fills remain blocked. It reports whether this call closed the gate.
+func (g *GenerationGate) Close(clear func()) bool {
 	if g == nil {
-		return
+		return false
 	}
 	g.publicationMu.Lock()
 	defer g.publicationMu.Unlock()
+	if g.closed {
+		return false
+	}
 	g.admissionMu.Lock()
+	defer g.admissionMu.Unlock()
+	g.closed = true
 	g.current.Store(nil)
-	g.admissionMu.Unlock()
+	if clear != nil {
+		clear()
+	}
+	return true
 }

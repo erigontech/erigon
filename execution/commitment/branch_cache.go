@@ -95,9 +95,8 @@ type BranchCache struct {
 
 	// maxDepth is the resident trunk depth for this cache (both the account trunk
 	// and every pinned storage trunk), chosen from the active-instance count at
-	// construction. closed guards the single paired active-count decrement.
+	// construction.
 	maxDepth uint8
-	closed   atomic.Bool
 
 	// trunkDisabled (env BRANCH_CACHE_TRUNK_DISABLE) routes depth-1-4 account
 	// branches back to the LRU tail instead of the resident account trunk — a
@@ -341,17 +340,16 @@ func NewBranchCache(tailCapacity int) *BranchCache {
 	return bc
 }
 
-// Close revokes all views, releases cached entries, and drops this cache from
-// the active-instance count. Idempotent.
+// Close permanently revokes publication, clears entries, and drops this cache
+// from the active-instance count. It is idempotent.
 func (c *BranchCache) Close() {
-	c.generation.Close()
-	if c.closed.CompareAndSwap(false, true) {
-		c.resetProvenanceAndClear()
-		if t := c.tail.Load(); t != nil {
-			t.Close()
-		}
-		activeBranchCaches.Add(-1)
+	if !c.generation.Close(c.resetProvenanceAndClear) {
+		return
 	}
+	if t := c.tail.Load(); t != nil {
+		t.Close()
+	}
+	activeBranchCaches.Add(-1)
 }
 
 // Reset clears cached branches and revokes all views until the next durable

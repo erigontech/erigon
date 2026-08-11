@@ -456,6 +456,20 @@ func TestStateCache_NewDefaultStateCache(t *testing.T) {
 	assert.NotNil(t, c.getCache(kv.CodeDomain))
 }
 
+func TestStateCache_ClosePreventsPublication(t *testing.T) {
+	c, publisher := readyStateCache(t, 1)
+	c.Close()
+
+	publisher.Initialize(testStateGeneration(2))
+	require.False(t, c.View(testStateGeneration(2)).current())
+	publication := publisher.Begin()
+	publication.Abort()
+	require.Nil(t, publication)
+	change := c.BeginFilesPublication([kv.DomainLen]uint64{kv.AccountsDomain: 1})
+	change.Finish()
+	require.Nil(t, change)
+}
+
 func TestStateCache_GetPut_Account(t *testing.T) {
 	c, _ := readyStateCache(t, 1)
 	view := c.View(testStateGeneration(1))
