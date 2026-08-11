@@ -1,6 +1,7 @@
 package state
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -11,6 +12,17 @@ import (
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+type publishOnAccountRead struct {
+	StateReader
+	once    sync.Once
+	publish func()
+}
+
+func (r *publishOnAccountRead) ReadAccountData(accounts.Address) (*accounts.Account, error) {
+	r.once.Do(r.publish)
+	return nil, nil
+}
 
 // EIP-8246 removes the SELFDESTRUCT balance burn, leaving a destroyed account
 // alive as a balance-only account. These tests cover that behavior inside
@@ -57,6 +69,53 @@ func TestEIP8246_PreservedSD_ReadsAsEmptyCodeAccountInLaterTx(t *testing.T) {
 	exists, err := tx1.Exist(addr)
 	require.NoError(t, err)
 	require.True(t, exists, "the preserved account still exists")
+}
+
+func TestEIP8246_DefinitiveAbsenceSurvivesLaterAccountReconstruction(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0x8246F"))
+	preserved := *uint256.NewInt(1_000_000)
+	priorTx := Version{TxIndex: 0}
+
+	vm := NewVersionMap(nil)
+	vm.WriteBalance(addr, priorTx, preserved, true)
+
+	published := &WriteSet{}
+	published.SetSelfDestruct(addr, &VersionedWrite[bool]{
+		WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: priorTx},
+		Val:         true,
+	})
+	published.SetBalance(addr, &VersionedWrite[uint256.Int]{
+		WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: priorTx},
+		Val:         preserved,
+	})
+	published.SetIncarnation(addr, &VersionedWrite[uint64]{
+		WriteHeader: WriteHeader{Address: addr, Path: IncarnationPath, Version: priorTx},
+	})
+
+	reader := &publishOnAccountRead{
+		StateReader: NewNoopReader(),
+		publish:     func() { vm.FlushVersionedWrites(published, true, "") },
+	}
+	ibs := New(reader)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 1)
+	ibs.SetVersionMap(vm)
+	ibs.SetNoMaterialize(true)
+	ibs.eip8246 = true
+	ibs.eip161 = true
+
+	empty, err := ibs.Empty(addr)
+	require.NoError(t, err)
+	require.True(t, empty, "the forced publication occurs after this attempt reads the address as absent")
+	require.NoError(t, ibs.CreateAccount(addr, true))
+	balance, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	require.Equal(t, preserved, balance)
+
+	io := NewVersionedIO(2)
+	io.RecordReads(Version{TxIndex: 1}, ibs.VersionedReads())
+	require.Equal(t, VersionInvalid, vm.ValidateVersion(1, io, validateEqualVersion, true, false, false, ""),
+		"the consumed absence must invalidate even if a later read reconstructs the published account")
 }
 
 // The block assembler runs every tx on one shared IBS (no per-tx Reset).

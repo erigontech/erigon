@@ -2969,6 +2969,12 @@ func (sdb *IntraBlockState) accountRead(addr accounts.Address, account *accounts
 			// synthetic tx-reads source into validation, which rejects it.
 			return
 		}
+		// Reconciliation may replace only the provisional nil probe made by
+		// this account load. A definitive read may already have affected EVM
+		// behavior and must remain in the read set for commit-time validation.
+		if previous, ok := sdb.versionedReads.GetAddress(addr); ok && previous.Source != ProvisionalRead {
+			return
+		}
 		data := *account
 		// Demote a sub-field MapRead promotion when AddressPath itself has no cell,
 		// or the validator non-converges on its recursive AddressPath check.
