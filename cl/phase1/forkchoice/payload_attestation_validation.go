@@ -17,10 +17,9 @@
 package forkchoice
 
 import (
+	"context"
 	"errors"
 	"fmt"
-
-	"golang.org/x/sync/singleflight"
 
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/fork"
@@ -44,7 +43,6 @@ type payloadAttestationValidationContext struct {
 
 type payloadAttestationValidationContexts struct {
 	cache      *lru.Cache[common.Hash, *payloadAttestationValidationContext]
-	buildGroup singleflight.Group
 	buildSlots chan struct{}
 }
 
@@ -63,36 +61,36 @@ func newPayloadAttestationValidationContexts() (*payloadAttestationValidationCon
 }
 
 func (c *payloadAttestationValidationContexts) get(
+	ctx context.Context,
 	blockRoot common.Hash,
 	build func() (*payloadAttestationValidationContext, error),
 ) (*payloadAttestationValidationContext, error) {
 	if validationContext, ok := c.cache.Get(blockRoot); ok {
 		return validationContext, nil
 	}
-	value, err, _ := c.buildGroup.Do(string(blockRoot[:]), func() (any, error) {
-		if validationContext, ok := c.cache.Get(blockRoot); ok {
-			return validationContext, nil
-		}
-		c.buildSlots <- struct{}{}
-		defer func() { <-c.buildSlots }()
-		validationContext, err := build()
-		if err != nil {
-			return nil, err
-		}
-		c.cache.Add(blockRoot, validationContext)
+	select {
+	case c.buildSlots <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	defer func() { <-c.buildSlots }()
+	if validationContext, ok := c.cache.Get(blockRoot); ok {
 		return validationContext, nil
-	})
+	}
+	validationContext, err := build()
 	if err != nil {
 		return nil, err
 	}
-	return value.(*payloadAttestationValidationContext), nil
+	c.cache.Add(blockRoot, validationContext)
+	return validationContext, nil
 }
 
 func (f *ForkChoiceStore) payloadAttestationValidationContext(
+	ctx context.Context,
 	blockRoot common.Hash,
 	slot uint64,
 ) (*payloadAttestationValidationContext, error) {
-	return f.payloadAttestationContexts.get(blockRoot, func() (*payloadAttestationValidationContext, error) {
+	return f.payloadAttestationContexts.get(ctx, blockRoot, func() (*payloadAttestationValidationContext, error) {
 		blockState, err := f.GetStateAtBlockRoot(blockRoot, true)
 		if err != nil {
 			return nil, err

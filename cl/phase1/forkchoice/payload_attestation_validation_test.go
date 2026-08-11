@@ -17,6 +17,7 @@
 package forkchoice
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"sync/atomic"
@@ -38,8 +39,8 @@ type payloadAttestationValidationContextResult struct {
 
 func TestOnPayloadAttestationMessageRejectsNil(t *testing.T) {
 	f := &ForkChoiceStore{}
-	require.Error(t, f.OnPayloadAttestationMessage(nil, false))
-	require.Error(t, f.OnPayloadAttestationMessage(&cltypes.PayloadAttestationMessage{}, false))
+	require.Error(t, f.OnPayloadAttestationMessage(context.Background(), nil, false))
+	require.Error(t, f.OnPayloadAttestationMessage(context.Background(), &cltypes.PayloadAttestationMessage{}, false))
 }
 
 func TestPayloadAttestationValidationContextsCollapseConcurrentBuilds(t *testing.T) {
@@ -64,7 +65,7 @@ func TestPayloadAttestationValidationContextsCollapseConcurrentBuilds(t *testing
 	var wg sync.WaitGroup
 	for range 16 {
 		wg.Go(func() {
-			validationContext, getErr := contexts.get(root, build)
+			validationContext, getErr := contexts.get(context.Background(), root, build)
 			results <- payloadAttestationValidationContextResult{validationContext, getErr}
 		})
 	}
@@ -78,7 +79,7 @@ func TestPayloadAttestationValidationContextsCollapseConcurrentBuilds(t *testing
 		require.NoError(t, result.err)
 		require.Same(t, expected, result.validationContext)
 	}
-	_, err = contexts.get(root, build)
+	_, err = contexts.get(context.Background(), root, build)
 	require.NoError(t, err)
 	require.Equal(t, int32(1), builds.Load())
 }
@@ -89,14 +90,14 @@ func TestPayloadAttestationValidationContextsDoNotCacheBuildErrors(t *testing.T)
 
 	root := common.HexToHash("0x1234")
 	var builds atomic.Int32
-	_, err = contexts.get(root, func() (*payloadAttestationValidationContext, error) {
+	_, err = contexts.get(context.Background(), root, func() (*payloadAttestationValidationContext, error) {
 		builds.Add(1)
 		return nil, errors.New("state unavailable")
 	})
 	require.ErrorContains(t, err, "state unavailable")
 
 	expected := &payloadAttestationValidationContext{slot: 100}
-	actual, err := contexts.get(root, func() (*payloadAttestationValidationContext, error) {
+	actual, err := contexts.get(context.Background(), root, func() (*payloadAttestationValidationContext, error) {
 		builds.Add(1)
 		return expected, nil
 	})
@@ -116,7 +117,7 @@ func TestPayloadAttestationValidationContextsBoundDifferentRootBuilds(t *testing
 	results := make(chan error, 3)
 	for i := range 3 {
 		go func() {
-			_, getErr := contexts.get(common.Hash{byte(i + 1)}, func() (*payloadAttestationValidationContext, error) {
+			_, getErr := contexts.get(context.Background(), common.Hash{byte(i + 1)}, func() (*payloadAttestationValidationContext, error) {
 				current := active.Add(1)
 				defer active.Add(-1)
 				for {
@@ -150,6 +151,21 @@ func TestPayloadAttestationValidationContextsBoundDifferentRootBuilds(t *testing
 		require.NoError(t, <-results)
 	}
 	require.Equal(t, int32(maxConcurrentValidationContextBuilds), maxActive.Load())
+}
+
+func TestPayloadAttestationValidationContextWaitHonorsCancellation(t *testing.T) {
+	contexts, err := newPayloadAttestationValidationContexts()
+	require.NoError(t, err)
+	contexts.buildSlots <- struct{}{}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = contexts.get(ctx, common.Hash{1}, func() (*payloadAttestationValidationContext, error) {
+		return &payloadAttestationValidationContext{}, nil
+	})
+
+	require.ErrorIs(t, err, context.Canceled)
+	<-contexts.buildSlots
 }
 
 func TestPayloadAttestationValidationContextPositions(t *testing.T) {

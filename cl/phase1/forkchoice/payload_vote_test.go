@@ -1,6 +1,7 @@
 package forkchoice
 
 import (
+	"sync/atomic"
 	"testing"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -33,20 +34,90 @@ func (g ptcVoteForkGraph) GetBlock(root common.Hash) (*cltypes.SignedBeaconBlock
 
 type payloadVoteForkGraph struct {
 	fork_graph.ForkGraph
-	hasEnvelope       bool
-	dumpedEnvelope    *common.Hash
-	invalidatedHeader *common.Hash
+	hasEnvelope         bool
+	envelope            *cltypes.SignedExecutionPayloadEnvelope
+	block               *cltypes.SignedBeaconBlock
+	blockState          *state2.CachingBeaconState
+	dumpedEnvelope      *common.Hash
+	hasEnvelopeState    *atomic.Bool
+	dumpCalls           *atomic.Int32
+	dumpStarted         chan struct{}
+	releaseDump         chan struct{}
+	dumpErr             error
+	onEnvelopePublished func()
+	pruneStarted        chan struct{}
+	releasePrune        chan struct{}
+	invalidatedHeader   *common.Hash
+}
+
+func (g payloadVoteForkGraph) Prune(uint64) error {
+	if g.pruneStarted != nil {
+		close(g.pruneStarted)
+	}
+	if g.releasePrune != nil {
+		<-g.releasePrune
+	}
+	return nil
 }
 
 func (g payloadVoteForkGraph) HasEnvelope(common.Hash) bool {
-	return g.hasEnvelope
+	return g.hasEnvelope || g.hasEnvelopeState != nil && g.hasEnvelopeState.Load()
 }
 
 func (g payloadVoteForkGraph) DumpEnvelopeOnDisk(blockRoot common.Hash, _ *cltypes.SignedExecutionPayloadEnvelope) error {
-	if g.dumpedEnvelope != nil {
-		*g.dumpedEnvelope = blockRoot
+	publish, err := g.PrepareEnvelopeOnDisk(blockRoot, nil, false)
+	if err != nil {
+		return err
 	}
+	return publish()
+}
+
+func (g payloadVoteForkGraph) PrepareEnvelopeOnDisk(blockRoot common.Hash, _ *cltypes.SignedExecutionPayloadEnvelope, _ bool) (func() error, error) {
+	var call int32
+	if g.dumpCalls != nil {
+		call = g.dumpCalls.Add(1)
+	}
+	if g.dumpErr != nil && call == 1 {
+		return nil, g.dumpErr
+	}
+	if g.dumpStarted != nil {
+		close(g.dumpStarted)
+	}
+	if g.releaseDump != nil {
+		<-g.releaseDump
+	}
+	return func() error {
+		if g.dumpedEnvelope != nil {
+			*g.dumpedEnvelope = blockRoot
+		}
+		if g.hasEnvelopeState != nil {
+			g.hasEnvelopeState.Store(true)
+		}
+		if g.onEnvelopePublished != nil {
+			g.onEnvelopePublished()
+		}
+		return nil
+	}, nil
+}
+
+func (g payloadVoteForkGraph) PendingEnvelopeIndexRoots() ([]common.Hash, error) {
+	return nil, nil
+}
+
+func (g payloadVoteForkGraph) MarkEnvelopeIndicesCommitted(common.Hash) error {
 	return nil
+}
+
+func (g payloadVoteForkGraph) ReadEnvelopeFromDisk(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+	return g.envelope, nil
+}
+
+func (g payloadVoteForkGraph) GetBlock(common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+	return g.block, g.block != nil
+}
+
+func (g payloadVoteForkGraph) GetState(common.Hash, bool) (*state2.CachingBeaconState, error) {
+	return g.blockState, nil
 }
 
 func (g payloadVoteForkGraph) MarkHeaderAsInvalid(blockRoot common.Hash) {

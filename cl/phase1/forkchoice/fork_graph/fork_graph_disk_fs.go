@@ -18,9 +18,11 @@ package fork_graph
 
 import (
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/golang/snappy"
 	"github.com/spf13/afero"
@@ -46,6 +48,10 @@ func getBeaconStateFilename(blockRoot common.Hash) string {
 // [New in Gloas:EIP7732]
 func getEnvelopeFilename(blockRoot common.Hash) string {
 	return fmt.Sprintf("%x.envelope.snappy_ssz", blockRoot)
+}
+
+func getEnvelopeIndexMarkerFilename(blockRoot common.Hash) string {
+	return fmt.Sprintf("%x.envelope.indices-pending", blockRoot)
 }
 
 func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot common.Hash) (bs *state.CachingBeaconState, err error) {
@@ -194,6 +200,10 @@ func (f *forkGraphDisk) HasEnvelope(blockRoot common.Hash) bool {
 	// Slow path: fall back to disk and populate cache on hit
 	exists, err := afero.Exists(f.fs, getEnvelopeFilename(blockRoot))
 	if err == nil && exists {
+		envelope, readErr := f.ReadEnvelopeFromDisk(blockRoot)
+		if readErr != nil || envelope == nil || envelope.Message == nil || envelope.Message.BeaconBlockRoot != blockRoot {
+			return false
+		}
 		f.envelopeExists.Store(blockRoot, struct{}{})
 		return true
 	}
@@ -258,15 +268,20 @@ func (f *forkGraphDisk) ReadEnvelopeFromDisk(blockRoot common.Hash) (envelope *c
 // DumpEnvelopeOnDisk dumps an execution payload envelope to disk.
 // [New in Gloas:EIP7732]
 func (f *forkGraphDisk) DumpEnvelopeOnDisk(blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) (err error) {
+	publish, err := f.PrepareEnvelopeOnDisk(blockRoot, envelope, false)
+	if err != nil {
+		return err
+	}
+	return publish()
+}
+
+func (f *forkGraphDisk) PrepareEnvelopeOnDisk(blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope, requireBlock bool) (publish func() error, err error) {
 	f.stateDumpLock.Lock()
 	defer f.stateDumpLock.Unlock()
-
-	// Populate in-memory cache on successful write
-	defer func() {
-		if err == nil {
-			f.envelopeExists.Store(blockRoot, struct{}{})
-		}
-	}()
+	_, blockWasPresent := f.blocks.Load(blockRoot)
+	if requireBlock && !blockWasPresent {
+		return nil, fmt.Errorf("cannot prepare envelope for missing block %x", blockRoot)
+	}
 
 	// Encode the envelope
 	f.sszBuffer, err = envelope.EncodeSSZ(f.sszBuffer[:0])
@@ -274,11 +289,19 @@ func (f *forkGraphDisk) DumpEnvelopeOnDisk(blockRoot common.Hash, envelope *clty
 		return
 	}
 
-	dumpedFile, err := f.fs.OpenFile(getEnvelopeFilename(blockRoot), os.O_TRUNC|os.O_CREATE|os.O_RDWR, 0o755)
+	filename := getEnvelopeFilename(blockRoot)
+	dumpedFile, err := afero.TempFile(f.fs, "", filename+".tmp-")
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer dumpedFile.Close()
+	temporaryFilename := dumpedFile.Name()
+	keepTemporary := false
+	defer func() {
+		_ = dumpedFile.Close()
+		if !keepTemporary {
+			_ = f.fs.Remove(temporaryFilename)
+		}
+	}()
 
 	if f.sszSnappyWriter == nil {
 		f.sszSnappyWriter = snappy.NewBufferedWriter(dumpedFile)
@@ -291,22 +314,97 @@ func (f *forkGraphDisk) DumpEnvelopeOnDisk(blockRoot common.Hash, envelope *clty
 	binary.BigEndian.PutUint64(length, uint64(len(f.sszBuffer)))
 	if _, err := f.sszSnappyWriter.Write(length); err != nil {
 		log.Error("failed to write length", "err", err)
-		return err
+		return nil, err
 	}
 	// Write the envelope
 	if _, err := f.sszSnappyWriter.Write(f.sszBuffer); err != nil {
 		log.Error("failed to write ssz buffer", "err", err)
-		return err
+		return nil, err
 	}
 	if err = f.sszSnappyWriter.Flush(); err != nil {
 		log.Error("failed to flush snappy writer", "err", err)
-		return err
+		return nil, err
 	}
 
 	if err = dumpedFile.Sync(); err != nil {
 		log.Error("failed to sync dumped file", "err", err)
 		return
 	}
+	if err = dumpedFile.Close(); err != nil {
+		return nil, err
+	}
+	markerFilename := getEnvelopeIndexMarkerFilename(blockRoot)
+	marker, err := f.fs.OpenFile(markerFilename, os.O_CREATE|os.O_TRUNC|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, err
+	}
+	if err = marker.Sync(); err != nil {
+		_ = marker.Close()
+		_ = f.fs.Remove(markerFilename)
+		return nil, err
+	}
+	if err = marker.Close(); err != nil {
+		_ = f.fs.Remove(markerFilename)
+		return nil, err
+	}
+	keepTemporary = true
 
-	return
+	return func() error {
+		f.stateDumpLock.Lock()
+		defer f.stateDumpLock.Unlock()
+		if _, blockPresent := f.blocks.Load(blockRoot); requireBlock && !blockPresent {
+			_ = f.fs.Remove(temporaryFilename)
+			_ = f.fs.Remove(markerFilename)
+			return fmt.Errorf("cannot publish envelope for pruned block %x", blockRoot)
+		}
+		if err := f.fs.Rename(temporaryFilename, filename); err != nil {
+			_ = f.fs.Remove(temporaryFilename)
+			_ = f.fs.Remove(markerFilename)
+			return err
+		}
+		f.envelopeExists.Store(blockRoot, struct{}{})
+		return nil
+	}, nil
+}
+
+func (f *forkGraphDisk) PendingEnvelopeIndexRoots() ([]common.Hash, error) {
+	f.stateDumpLock.Lock()
+	defer f.stateDumpLock.Unlock()
+	entries, err := afero.ReadDir(f.fs, ".")
+	if err != nil {
+		return nil, err
+	}
+	const suffix = ".envelope.indices-pending"
+	roots := make([]common.Hash, 0, len(entries))
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, suffix) {
+			continue
+		}
+		rootBytes, err := hex.DecodeString(strings.TrimSuffix(name, suffix))
+		if err != nil || len(rootBytes) != len(common.Hash{}) {
+			continue
+		}
+		roots = append(roots, common.BytesToHash(rootBytes))
+	}
+	return roots, nil
+}
+
+func (f *forkGraphDisk) MarkEnvelopeIndicesCommitted(blockRoot common.Hash) error {
+	f.stateDumpLock.Lock()
+	defer f.stateDumpLock.Unlock()
+	matches, err := afero.Glob(f.fs, getEnvelopeFilename(blockRoot)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	for _, match := range matches {
+		if err := f.fs.Remove(match); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	err = f.fs.Remove(getEnvelopeIndexMarkerFilename(blockRoot))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
 }

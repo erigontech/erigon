@@ -597,6 +597,12 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 		}
 	}
 	for _, root := range oldRoots {
+		f.stateDumpLock.Lock()
+		block, ok := f.blocks.Load(root)
+		if !ok || block.(*cltypes.SignedBeaconBlock).Block.Slot >= pruneSlot {
+			f.stateDumpLock.Unlock()
+			continue
+		}
 		f.badBlocks.Delete(root)
 		f.blocks.Delete(root)
 		f.lightclientBootstraps.Delete(root)
@@ -608,6 +614,13 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 		// [New in Gloas:EIP7732] Also remove envelope files
 		f.envelopeExists.Delete(root)
 		f.fs.Remove(getEnvelopeFilename(root))
+		f.fs.Remove(getEnvelopeIndexMarkerFilename(root))
+		if temporaryFiles, err := afero.Glob(f.fs, getEnvelopeFilename(root)+".tmp-*"); err == nil {
+			for _, temporaryFile := range temporaryFiles {
+				f.fs.Remove(temporaryFile)
+			}
+		}
+		f.stateDumpLock.Unlock()
 	}
 	log.Debug("Pruned old blocks", "pruneSlot", pruneSlot)
 	return

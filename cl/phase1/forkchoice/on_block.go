@@ -29,7 +29,6 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/monitor"
-	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
@@ -39,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -47,13 +45,14 @@ import (
 const foreseenProposers = 16
 
 var (
-	ErrEIP4844DataNotAvailable       = errors.New("EIP-4844 blob data is not available")
-	ErrEIP7594ColumnDataNotAvailable = errors.New("EIP-7594 column data is not available")
-	ErrNewPayloadNoStatus            = errors.New("newPayload returned no status")
-	ErrMissingSegment                = errors.New("missing segment: parent state not available")
-	ErrParentEnvelopePending         = errors.New("parent execution payload envelope not yet available")
-	ErrNotFinalizedDescendant        = errors.New("block is not a descendant of the finalized checkpoint")
-	ErrForkSchemaSlotMismatch        = errors.New("block schema fork disagrees with the fork implied by its slot")
+	ErrEIP4844DataNotAvailable        = errors.New("EIP-4844 blob data is not available")
+	ErrEIP7594ColumnDataNotAvailable  = errors.New("EIP-7594 column data is not available")
+	ErrNewPayloadNoStatus             = errors.New("newPayload returned no status")
+	ErrMissingSegment                 = errors.New("missing segment: parent state not available")
+	ErrParentEnvelopePending          = errors.New("parent execution payload envelope not yet available")
+	ErrNotFinalizedDescendant         = errors.New("block is not a descendant of the finalized checkpoint")
+	ErrForkSchemaSlotMismatch         = errors.New("block schema fork disagrees with the fork implied by its slot")
+	ErrELPayloadValidationUnavailable = errors.New("execution payload validation unavailable")
 )
 
 func verifyKzgCommitmentsAgainstTransactions(cfg *clparams.BeaconChainConfig, block *cltypes.BeaconBlock) error {
@@ -334,7 +333,8 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 
 	// [New in Gloas:EIP7732] GLOAS-specific on_block logic (post state transition)
 	var appliedEnvelope *cltypes.ExecutionPayloadEnvelope
-	stateMayBeStale := false
+	var pendingEnvelope *cltypes.SignedExecutionPayloadEnvelope
+	var pendingLocalSelfBuild bool
 	if blockVersion >= clparams.GloasVersion {
 		// Initialize payload timeliness and data availability votes for this block
 		f.payloadTimelinessVote.Store(common.Hash(blockRoot), [clparams.PtcSize]int8{})
@@ -359,34 +359,10 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		// queues so that origin is determined by which queue wrote the entry, not by
 		// inspecting envelope contents (which an attacker could forge).
 		if pending, ok := f.pendingLocalSelfBuildEnvelopes.Get(common.Hash(blockRoot)); ok {
-			f.pendingLocalSelfBuildEnvelopes.Remove(common.Hash(blockRoot))
-			log.Trace("OnBlock: processing pending local self-build envelope", "blockRoot", common.Hash(blockRoot))
-			stateMayBeStale = true
-			applied, applyErr := f.applyLocalSelfBuildEnvelopeLocked(ctx, pending)
-			if applyErr != nil {
-				log.Warn("OnBlock: failed to process pending local self-build envelope", "blockRoot", common.Hash(blockRoot), "err", applyErr)
-			} else if applied {
-				appliedEnvelope = pending.Message
-			}
+			pendingEnvelope = pending
+			pendingLocalSelfBuild = true
 		} else if pending, ok := f.pendingEnvelopes.Get(common.Hash(blockRoot)); ok {
-			f.pendingEnvelopes.Remove(common.Hash(blockRoot))
-			log.Trace("OnBlock: processing pending envelope", "blockRoot", common.Hash(blockRoot))
-			// Always validate payload with EL for pending envelopes, regardless of the caller's newPayload flag.
-			// During forward sync newPayload is false, but the envelope still needs to reach the EL;
-			// otherwise the EL never learns about this block and the chain stalls.
-			stateMayBeStale = true
-			applied, applyErr := f.applyEnvelopeLocked(ctx, pending, checkDataAvaiability, true)
-			if applyErr != nil {
-				log.Warn("OnBlock: failed to process pending envelope", "blockRoot", common.Hash(blockRoot), "err", applyErr)
-			} else if applied {
-				appliedEnvelope = pending.Message
-			}
-		}
-	}
-	if stateMayBeStale {
-		lastProcessedState, err = f.refreshBlockStateAfterPayloadValidation(common.Hash(blockRoot))
-		if err != nil {
-			return err
+			pendingEnvelope = pending
 		}
 	}
 	if lastProcessedState.Slot()%f.beaconCfg.SlotsPerEpoch == 0 {
@@ -486,13 +462,30 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	unlocked = true
 	f.mu.Unlock()
 	f.drainQueuedWork()
+	if pendingEnvelope != nil {
+		var applied bool
+		var applyErr error
+		if pendingLocalSelfBuild {
+			applied, applyErr = f.applyLocalSelfBuildEnvelope(ctx, pendingEnvelope)
+		} else {
+			applied, applyErr = f.applyEnvelope(ctx, pendingEnvelope, checkDataAvaiability, true)
+		}
+		if applyErr != nil {
+			log.Warn("OnBlock: failed to process pending envelope", "blockRoot", common.Hash(blockRoot), "err", applyErr)
+		} else {
+			f.removePendingExecutionPayloadEnvelope(pendingExecutionPayloadEnvelope{
+				root:     common.Hash(blockRoot),
+				envelope: pendingEnvelope,
+				local:    pendingLocalSelfBuild,
+			})
+			if applied {
+				appliedEnvelope = pendingEnvelope.Message
+			}
+		}
+	}
 
-	// Write execution payload envelope indices outside f.mu to avoid deadlock
-	// with postForkchoiceOperations (which holds MDBX tx then needs f.mu.RLock).
-	if appliedEnvelope != nil && f.db != nil {
-		if err := f.db.Update(ctx, func(tx kv.RwTx) error {
-			return beacon_indicies.WriteExecutionPayloadEnvelopeIndicies(tx, common.Hash(blockRoot), appliedEnvelope)
-		}); err != nil {
+	if appliedEnvelope != nil {
+		if err := f.writeEnvelopeIndices(ctx, common.Hash(blockRoot), appliedEnvelope, pendingEnvelope, pendingLocalSelfBuild); err != nil {
 			log.Warn("OnBlock: failed to write execution payload indices for pending envelope",
 				"blockRoot", common.Hash(blockRoot), "err", err)
 		}

@@ -45,7 +45,7 @@ type blockingPayloadAttestationForkchoice struct {
 	release chan struct{}
 }
 
-func (f *blockingPayloadAttestationForkchoice) OnPayloadAttestationMessage(*cltypes.PayloadAttestationMessage, bool) error {
+func (f *blockingPayloadAttestationForkchoice) OnPayloadAttestationMessage(context.Context, *cltypes.PayloadAttestationMessage, bool) error {
 	active := f.active.Add(1)
 	defer f.active.Add(-1)
 	for {
@@ -66,7 +66,7 @@ type retryPayloadAttestationForkchoice struct {
 	releaseFirst chan struct{}
 }
 
-func (f *retryPayloadAttestationForkchoice) OnPayloadAttestationMessage(*cltypes.PayloadAttestationMessage, bool) error {
+func (f *retryPayloadAttestationForkchoice) OnPayloadAttestationMessage(context.Context, *cltypes.PayloadAttestationMessage, bool) error {
 	if f.calls.Add(1) == 1 {
 		close(f.firstStarted)
 		<-f.releaseFirst

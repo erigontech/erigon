@@ -51,3 +51,20 @@ func TestPendingELPayloadsDeduplicateByEnvelopeRoot(t *testing.T) {
 	require.Len(t, payloads, 1)
 	require.Equal(t, uint64(1), payloads[0].Block.Block.Slot)
 }
+
+func TestDrainPendingELPayloadsLimitLeavesRemainderQueued(t *testing.T) {
+	f := &ForkChoiceStore{}
+	for i := range 3 {
+		f.RequeuePendingELPayload(PendingELPayload{Envelope: &cltypes.SignedExecutionPayloadEnvelope{
+			Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: common.Hash{byte(i + 1)}},
+		}})
+	}
+
+	first := f.DrainPendingELPayloadsLimit(2)
+	require.Len(t, first, 2)
+	require.Equal(t, common.Hash{1}, first[0].Envelope.Message.BeaconBlockRoot)
+	require.Equal(t, common.Hash{2}, first[1].Envelope.Message.BeaconBlockRoot)
+	remaining := f.DrainPendingELPayloads()
+	require.Len(t, remaining, 1)
+	require.Equal(t, common.Hash{3}, remaining[0].Envelope.Message.BeaconBlockRoot)
+}

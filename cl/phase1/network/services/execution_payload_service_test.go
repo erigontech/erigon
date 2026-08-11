@@ -19,6 +19,7 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -239,6 +240,36 @@ func TestExecutionPayloadServicePendingEnvelopeExpiry(t *testing.T) {
 	require.False(t, exists)
 }
 
+func TestExecutionPayloadServiceRetainsEnvelopeAcrossColumnSyncInterval(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
+	impl := &executionPayloadService{
+		forkchoiceStore: forkchoiceMock,
+		beaconCfg:       cfg,
+		emitters:        beaconevents.NewEventEmitter(),
+	}
+	seenCache, err := lru.New[seenEnvelopeKey, struct{}]("seen_envelopes", seenEnvelopeCacheSize)
+	require.NoError(t, err)
+	impl.seenEnvelopesCache = seenCache
+
+	blockRoot := common.HexToHash("0x1234")
+	envelope := newTestSignedEnvelope(100, blockRoot, 1)
+	envelopeHash, err := envelope.HashSSZ()
+	require.NoError(t, err)
+	key := pendingEnvelopeKey{blockRoot: blockRoot, envelopeHash: envelopeHash}
+	impl.pendingEnvelopes.Store(key, &envelopeJob{
+		envelope:     envelope,
+		creationTime: time.Now().Add(-time.Minute),
+	})
+	impl.pendingCount.Store(1)
+
+	impl.processPendingEnvelopes(t.Context())
+
+	require.Equal(t, int32(1), impl.pendingCount.Load())
+	_, exists := impl.pendingEnvelopes.Load(key)
+	require.True(t, exists)
+}
+
 func TestExecutionPayloadServicePendingEnvelopeProcessing(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
@@ -313,6 +344,62 @@ func TestExecutionPayloadServiceQueuesEnvelopeUntilDataAvailable(t *testing.T) {
 	require.True(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 1}))
 }
 
+func TestExecutionPayloadServiceQueuesInitialTemporaryELFailure(t *testing.T) {
+	service, fcu := setupExecutionPayloadService(t)
+	impl := service.(*executionPayloadService)
+	blockRoot := common.HexToHash("0x1234")
+	envelope := newTestSignedEnvelope(100, blockRoot, 1)
+	fcu.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100}}
+	fcu.OnExecutionPayloadErr = fmt.Errorf("%w: timeout", forkchoice.ErrELPayloadValidationUnavailable)
+
+	err := service.ProcessMessage(t.Context(), nil, envelope)
+	require.ErrorIs(t, err, forkchoice.ErrELPayloadValidationUnavailable)
+	require.Equal(t, int32(1), impl.pendingCount.Load())
+
+	envelopeHash, err := envelope.HashSSZ()
+	require.NoError(t, err)
+	_, exists := impl.pendingEnvelopes.Load(pendingEnvelopeKey{blockRoot: blockRoot, envelopeHash: envelopeHash})
+	require.True(t, exists)
+
+	fcu.OnExecutionPayloadErr = nil
+	impl.processPendingEnvelopes(t.Context())
+	require.Zero(t, impl.pendingCount.Load())
+	require.True(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 1}))
+}
+
+func TestExecutionPayloadServiceDoesNotExpireRetryableKnownBlock(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
+	impl := &executionPayloadService{
+		forkchoiceStore: forkchoiceMock,
+		beaconCfg:       cfg,
+		emitters:        beaconevents.NewEventEmitter(),
+	}
+	seenCache, err := lru.New[seenEnvelopeKey, struct{}]("seen_envelopes", seenEnvelopeCacheSize)
+	require.NoError(t, err)
+	impl.seenEnvelopesCache = seenCache
+
+	blockRoot := common.HexToHash("0x1234")
+	envelope := newTestSignedEnvelope(100, blockRoot, 1)
+	envelopeHash, err := envelope.HashSSZ()
+	require.NoError(t, err)
+	key := pendingEnvelopeKey{blockRoot: blockRoot, envelopeHash: envelopeHash}
+	impl.pendingEnvelopes.Store(key, &envelopeJob{
+		envelope:     envelope,
+		creationTime: time.Now().Add(-pendingEnvelopeExpiry - time.Second),
+	})
+	impl.pendingCount.Store(1)
+	forkchoiceMock.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100}}
+	forkchoiceMock.OnExecutionPayloadErr = fmt.Errorf("%w: timeout", forkchoice.ErrELPayloadValidationUnavailable)
+
+	impl.processPendingEnvelopes(t.Context())
+
+	require.Equal(t, int32(1), impl.pendingCount.Load())
+	value, exists := impl.pendingEnvelopes.Load(key)
+	require.True(t, exists)
+	require.True(t, value.(*envelopeJob).nextAttempt.After(time.Now()))
+}
+
 func TestExecutionPayloadServiceRetainsPendingEnvelopeUntilDataAvailable(t *testing.T) {
 	service, fcu := setupExecutionPayloadService(t)
 	impl := service.(*executionPayloadService)
@@ -337,8 +424,10 @@ func TestExecutionPayloadServiceRetainsPendingEnvelopeUntilDataAvailable(t *test
 	value, ok = impl.pendingEnvelopes.Load(key)
 	require.True(t, ok)
 	require.Equal(t, creationTime, value.(*envelopeJob).creationTime)
+	require.True(t, value.(*envelopeJob).nextAttempt.After(time.Now()))
 
 	fcu.OnExecutionPayloadErr = nil
+	value.(*envelopeJob).nextAttempt = time.Time{}
 	impl.processPendingEnvelopes(t.Context())
 
 	require.Equal(t, int32(0), impl.pendingCount.Load())
@@ -361,6 +450,25 @@ func TestExecutionPayloadServiceDropsPendingEnvelopeAfterValidationFailure(t *te
 
 	require.Equal(t, int32(0), impl.pendingCount.Load())
 	require.False(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 1}))
+}
+
+func TestExecutionPayloadServiceRetainsPendingEnvelopeAfterTemporaryELFailure(t *testing.T) {
+	service, fcu := setupExecutionPayloadService(t)
+	impl := service.(*executionPayloadService)
+	blockRoot := common.HexToHash("0x1234")
+	envelope := newTestSignedEnvelope(100, blockRoot, 1)
+
+	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, envelope), ErrIgnore)
+	fcu.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100}}
+	fcu.OnExecutionPayloadErr = fmt.Errorf("%w: timeout", forkchoice.ErrELPayloadValidationUnavailable)
+
+	impl.processPendingEnvelopes(t.Context())
+
+	require.Equal(t, int32(1), impl.pendingCount.Load())
+	envelopeHash, err := envelope.HashSSZ()
+	require.NoError(t, err)
+	_, exists := impl.pendingEnvelopes.Load(pendingEnvelopeKey{blockRoot: blockRoot, envelopeHash: envelopeHash})
+	require.True(t, exists)
 }
 
 func TestExecutionPayloadServiceMultiplePendingForSameBlock(t *testing.T) {
@@ -432,13 +540,216 @@ func TestExecutionPayloadServicePendingQueueCap(t *testing.T) {
 	blockRoot := common.HexToHash("0xffff")
 	envelope := newTestSignedEnvelope(100, blockRoot, 999)
 
-	impl.queuePendingEnvelope(blockRoot, envelope)
+	impl.queuePendingEnvelope(blockRoot, envelope, false)
 
 	require.Equal(t, int32(maxPendingEnvelopes), impl.pendingCount.Load())
 	envelopeHash, err := envelope.HashSSZ()
 	require.NoError(t, err)
 	_, exists := impl.pendingEnvelopes.Load(pendingEnvelopeKey{blockRoot, envelopeHash})
 	require.False(t, exists)
+}
+
+func TestExecutionPayloadServicePendingQueueRejectsUnknownWorkWhenAllJobsAreKnown(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
+	seenCache, err := lru.New[seenEnvelopeKey, struct{}]("seen_envelopes", seenEnvelopeCacheSize)
+	require.NoError(t, err)
+	impl := &executionPayloadService{
+		forkchoiceStore:    forkchoiceMock,
+		beaconCfg:          cfg,
+		emitters:           beaconevents.NewEventEmitter(),
+		seenEnvelopesCache: seenCache,
+		pendingCond:        sync.NewCond(&sync.Mutex{}),
+	}
+
+	var oldestKey pendingEnvelopeKey
+	for i := range maxPendingEnvelopes {
+		blockRoot := common.Hash{byte(i), byte(i >> 8)}
+		envelope := newTestSignedEnvelope(100, blockRoot, uint64(i))
+		envelopeHash, hashErr := envelope.HashSSZ()
+		require.NoError(t, hashErr)
+		key := pendingEnvelopeKey{blockRoot, envelopeHash}
+		if i == 0 {
+			oldestKey = key
+		}
+		job := &envelopeJob{
+			envelope:     envelope,
+			creationTime: time.Now().Add(-time.Hour + time.Duration(i)),
+		}
+		job.blockSeen.Store(true)
+		impl.pendingEnvelopes.Store(key, job)
+	}
+	impl.pendingCount.Store(maxPendingEnvelopes)
+
+	blockRoot := common.HexToHash("0xffff")
+	envelope := newTestSignedEnvelope(100, blockRoot, 9999)
+	impl.queuePendingEnvelope(blockRoot, envelope, false)
+
+	envelopeHash, err := envelope.HashSSZ()
+	require.NoError(t, err)
+	_, exists := impl.pendingEnvelopes.Load(pendingEnvelopeKey{blockRoot, envelopeHash})
+	require.False(t, exists)
+	_, exists = impl.pendingEnvelopes.Load(oldestKey)
+	require.True(t, exists)
+	require.Equal(t, int32(maxPendingEnvelopes), impl.pendingCount.Load())
+}
+
+func TestExecutionPayloadServicePendingQueueEvictsUnknownBeforeOlderKnownWork(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
+	seenCache, err := lru.New[seenEnvelopeKey, struct{}]("seen_envelopes", seenEnvelopeCacheSize)
+	require.NoError(t, err)
+	impl := &executionPayloadService{
+		forkchoiceStore:    forkchoiceMock,
+		beaconCfg:          cfg,
+		emitters:           beaconevents.NewEventEmitter(),
+		seenEnvelopesCache: seenCache,
+		pendingCond:        sync.NewCond(&sync.Mutex{}),
+	}
+
+	var oldestKnownKey, unknownKey pendingEnvelopeKey
+	for i := range maxPendingEnvelopes {
+		blockRoot := common.Hash{byte(i), byte(i >> 8)}
+		envelope := newTestSignedEnvelope(100, blockRoot, uint64(i))
+		envelopeHash, hashErr := envelope.HashSSZ()
+		require.NoError(t, hashErr)
+		key := pendingEnvelopeKey{blockRoot, envelopeHash}
+		job := &envelopeJob{
+			envelope:     envelope,
+			creationTime: time.Now(),
+		}
+		job.blockSeen.Store(true)
+		switch i {
+		case 0:
+			oldestKnownKey = key
+			job.creationTime = time.Now().Add(-2 * time.Hour)
+		case 1:
+			unknownKey = key
+			job.creationTime = time.Now().Add(-time.Hour)
+			job.blockSeen.Store(false)
+		}
+		impl.pendingEnvelopes.Store(key, job)
+	}
+	impl.pendingCount.Store(maxPendingEnvelopes)
+
+	blockRoot := common.HexToHash("0xffff")
+	envelope := newTestSignedEnvelope(100, blockRoot, 9999)
+	impl.queuePendingEnvelope(blockRoot, envelope, false)
+
+	envelopeHash, err := envelope.HashSSZ()
+	require.NoError(t, err)
+	_, exists := impl.pendingEnvelopes.Load(pendingEnvelopeKey{blockRoot, envelopeHash})
+	require.True(t, exists)
+	_, exists = impl.pendingEnvelopes.Load(oldestKnownKey)
+	require.True(t, exists)
+	_, exists = impl.pendingEnvelopes.Load(unknownKey)
+	require.False(t, exists)
+	require.Equal(t, int32(maxPendingEnvelopes), impl.pendingCount.Load())
+}
+
+func TestExecutionPayloadServicePendingQueueAdmitsKnownWorkWhenAllJobsAreKnown(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
+	seenCache, err := lru.New[seenEnvelopeKey, struct{}]("seen_envelopes", seenEnvelopeCacheSize)
+	require.NoError(t, err)
+	impl := &executionPayloadService{
+		forkchoiceStore:    forkchoiceMock,
+		beaconCfg:          cfg,
+		emitters:           beaconevents.NewEventEmitter(),
+		seenEnvelopesCache: seenCache,
+		pendingCond:        sync.NewCond(&sync.Mutex{}),
+	}
+
+	var oldestKey pendingEnvelopeKey
+	for i := range maxPendingEnvelopes {
+		blockRoot := common.Hash{byte(i), byte(i >> 8)}
+		envelope := newTestSignedEnvelope(100, blockRoot, uint64(i))
+		envelopeHash, hashErr := envelope.HashSSZ()
+		require.NoError(t, hashErr)
+		key := pendingEnvelopeKey{blockRoot, envelopeHash}
+		if i == 0 {
+			oldestKey = key
+		}
+		job := &envelopeJob{envelope: envelope, creationTime: time.Now().Add(-time.Hour + time.Duration(i))}
+		job.blockSeen.Store(true)
+		impl.pendingEnvelopes.Store(key, job)
+	}
+	impl.pendingCount.Store(maxPendingEnvelopes)
+
+	blockRoot := common.HexToHash("0xffff")
+	envelope := newTestSignedEnvelope(100, blockRoot, 9999)
+	impl.queuePendingEnvelope(blockRoot, envelope, true)
+
+	envelopeHash, err := envelope.HashSSZ()
+	require.NoError(t, err)
+	_, exists := impl.pendingEnvelopes.Load(pendingEnvelopeKey{blockRoot, envelopeHash})
+	require.True(t, exists)
+	_, exists = impl.pendingEnvelopes.Load(oldestKey)
+	require.False(t, exists)
+	require.Equal(t, int32(maxPendingEnvelopes), impl.pendingCount.Load())
+}
+
+func TestExecutionPayloadServicePendingQueueDoesNotEvictResolvingWork(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
+	seenCache, err := lru.New[seenEnvelopeKey, struct{}]("seen_envelopes", seenEnvelopeCacheSize)
+	require.NoError(t, err)
+	impl := &executionPayloadService{
+		forkchoiceStore:    forkchoiceMock,
+		beaconCfg:          cfg,
+		emitters:           beaconevents.NewEventEmitter(),
+		seenEnvelopesCache: seenCache,
+		pendingCond:        sync.NewCond(&sync.Mutex{}),
+	}
+
+	var resolvingKey, unknownKey pendingEnvelopeKey
+	for i := range maxPendingEnvelopes {
+		blockRoot := common.Hash{byte(i), byte(i >> 8)}
+		envelope := newTestSignedEnvelope(100, blockRoot, uint64(i))
+		envelopeHash, hashErr := envelope.HashSSZ()
+		require.NoError(t, hashErr)
+		key := pendingEnvelopeKey{blockRoot, envelopeHash}
+		job := &envelopeJob{envelope: envelope, creationTime: time.Now()}
+		job.blockSeen.Store(true)
+		switch i {
+		case 0:
+			resolvingKey = key
+			job.creationTime = time.Now().Add(-2 * time.Hour)
+			job.blockSeen.Store(false)
+			job.resolving.Store(true)
+		case 1:
+			unknownKey = key
+			job.creationTime = time.Now().Add(-time.Hour)
+			job.blockSeen.Store(false)
+		}
+		impl.pendingEnvelopes.Store(key, job)
+	}
+	impl.pendingCount.Store(maxPendingEnvelopes)
+
+	blockRoot := common.HexToHash("0xffff")
+	envelope := newTestSignedEnvelope(100, blockRoot, 9999)
+	impl.queuePendingEnvelope(blockRoot, envelope, false)
+
+	_, exists := impl.pendingEnvelopes.Load(resolvingKey)
+	require.True(t, exists)
+	_, exists = impl.pendingEnvelopes.Load(unknownKey)
+	require.False(t, exists)
+}
+
+func TestExecutionPayloadServiceStaleCompletionDoesNotDeleteReplacement(t *testing.T) {
+	impl := &executionPayloadService{}
+	key := pendingEnvelopeKey{blockRoot: common.HexToHash("0x1234")}
+	stale := &envelopeJob{}
+	replacement := &envelopeJob{}
+	impl.pendingEnvelopes.Store(key, replacement)
+	impl.pendingCount.Store(1)
+
+	impl.finishPendingEnvelopeAttempt(key, stale, nil)
+
+	value, exists := impl.pendingEnvelopes.Load(key)
+	require.True(t, exists)
+	require.Same(t, replacement, value)
+	require.Equal(t, int32(1), impl.pendingCount.Load())
 }
 
 func TestExecutionPayloadServicePendingQueueCapConcurrent(t *testing.T) {
@@ -462,7 +773,7 @@ func TestExecutionPayloadServicePendingQueueCapConcurrent(t *testing.T) {
 		wg.Go(func() {
 			blockRoot := common.Hash{byte(i), byte(i >> 8)}
 			envelope := newTestSignedEnvelope(100, blockRoot, uint64(10000+i))
-			impl.queuePendingEnvelope(blockRoot, envelope)
+			impl.queuePendingEnvelope(blockRoot, envelope, false)
 		})
 	}
 	wg.Wait()

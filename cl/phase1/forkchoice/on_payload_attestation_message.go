@@ -17,6 +17,7 @@
 package forkchoice
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -31,6 +32,7 @@ import (
 // Caller should handle errors appropriately based on isFromBlock context.
 // [New in Gloas:EIP7732]
 func (f *ForkChoiceStore) OnPayloadAttestationMessage(
+	ctx context.Context,
 	msg *cltypes.PayloadAttestationMessage,
 	isFromBlock bool,
 ) error {
@@ -49,7 +51,7 @@ func (f *ForkChoiceStore) OnPayloadAttestationMessage(
 		}
 	}
 
-	validationContext, err := f.payloadAttestationValidationContext(blockRoot, data.Slot)
+	validationContext, err := f.payloadAttestationValidationContext(ctx, blockRoot, data.Slot)
 	if err != nil {
 		return err
 	}

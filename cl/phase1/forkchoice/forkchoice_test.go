@@ -514,6 +514,18 @@ func (g *getFinalizedExecutionHashForkGraph) DumpEnvelopeOnDisk(common.Hash, *cl
 	panic("not used")
 }
 
+func (g *getFinalizedExecutionHashForkGraph) PrepareEnvelopeOnDisk(common.Hash, *cltypes.SignedExecutionPayloadEnvelope, bool) (func() error, error) {
+	panic("not used")
+}
+
+func (g *getFinalizedExecutionHashForkGraph) PendingEnvelopeIndexRoots() ([]common.Hash, error) {
+	panic("not used")
+}
+
+func (g *getFinalizedExecutionHashForkGraph) MarkEnvelopeIndicesCommitted(common.Hash) error {
+	panic("not used")
+}
+
 func (g *getFinalizedExecutionHashForkGraph) ReadEnvelopeFromDisk(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
 	panic("not used")
 }

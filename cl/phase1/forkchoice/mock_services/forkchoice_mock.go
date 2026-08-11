@@ -359,11 +359,15 @@ func (f *ForkChoiceStorageMock) ApplyLocalSelfBuildEnvelope(ctx context.Context,
 	return nil
 }
 
+func (f *ForkChoiceStorageMock) RetryPendingExecutionPayloadEnvelopes(context.Context, int) int {
+	return 0
+}
+
 func (f *ForkChoiceStorageMock) StoreAnchorEnvelope(blockRoot common.Hash, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
 	return nil
 }
 
-func (f *ForkChoiceStorageMock) OnPayloadAttestationMessage(msg *cltypes.PayloadAttestationMessage, isFromBlock bool) error {
+func (f *ForkChoiceStorageMock) OnPayloadAttestationMessage(_ context.Context, msg *cltypes.PayloadAttestationMessage, isFromBlock bool) error {
 	return nil
 }
 

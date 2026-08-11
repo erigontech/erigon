@@ -22,7 +22,12 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-const maxGloasVerificationSweepPerCycle = 32
+const (
+	maxGloasVerificationSweepPerCycle = 32
+	maxPendingGloasPayloadsPerCycle   = 32
+	maxPendingGloasEnvelopesPerCycle  = 32
+	pendingGloasEnvelopeRetryBudget   = 2 * time.Second
+)
 
 func gloasVersionedHashes(blobCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) ([]common.Hash, error) {
 	if blobCommitments == nil || blobCommitments.Len() == 0 {
@@ -540,7 +545,7 @@ func isGloasPayloadKnownInvalid(cfg *Cfg, envelope *cltypes.SignedExecutionPaylo
 }
 
 func drainPendingGloasPayloads(ctx context.Context, cfg *Cfg) {
-	for _, p := range cfg.forkChoice.DrainPendingELPayloads() {
+	for _, p := range cfg.forkChoice.DrainPendingELPayloadsLimit(maxPendingGloasPayloadsPerCycle) {
 		if !validPendingGloasPayload(p) {
 			continue
 		}
@@ -685,6 +690,10 @@ func retryUnverifiedAnchorPayload(ctx context.Context, cfg *Cfg) {
 // chainTipSync synchronizes the chain tip by fetching blocks from the highest seen block up to the target slot by listening to incoming blocks.
 // or by fetching blocks that might have been missed by gossip after a delay.
 func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
+	retryCtx, cancelRetry := context.WithTimeout(ctx, pendingGloasEnvelopeRetryBudget)
+	cfg.forkChoice.RetryPendingExecutionPayloadEnvelopes(retryCtx, maxPendingGloasEnvelopesPerCycle)
+	cancelRetry()
+
 	// [GLOAS] Recover any execution payload envelopes that were missed by gossip.
 	// This runs every cycle (not just when caught-up) because seenSlot < targetSlot
 	// is almost always true — by the time ChainTipSync finishes a slot, the next one

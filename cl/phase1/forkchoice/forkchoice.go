@@ -18,6 +18,8 @@ package forkchoice
 
 import (
 	"cmp"
+	"context"
+	"fmt"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -195,6 +197,8 @@ type ForkChoiceStore struct {
 	// Separate from pendingEnvelopes so that OnBlock replay can distinguish local origin
 	// (skip BLS) from gossip origin (full verification) without inspecting envelope contents.
 	pendingLocalSelfBuildEnvelopes *lru.Cache[common.Hash, *cltypes.SignedExecutionPayloadEnvelope]
+	pendingEnvelopeRetryMu         sync.Mutex
+	pendingEnvelopeRetryLocal      bool
 
 	// [New in Gloas:EIP7732] Execution blocks whose CL state transition succeeded but
 	// whose EL newPayload failed (e.g. because EL hasn't caught up after forward sync).
@@ -203,11 +207,18 @@ type ForkChoiceStore struct {
 	pendingELPayloadsMu sync.Mutex
 	pendingELPayloads   []PendingELPayload
 	payloadValidator    *execution_client.PayloadValidationCoordinator
+	envelopeOwnersMu    sync.Mutex
+	envelopeOwners      map[common.Hash]*envelopeOwner
 
 	// db is used to persist execution payload indices (block number/hash) when an envelope
 	// is accepted in OnExecutionPayload. May be nil (e.g. in tests), in which case the
 	// index writes are skipped.
 	db kv.RwDB
+}
+
+type envelopeOwner struct {
+	mu   sync.Mutex
+	refs int
 }
 
 // PendingELPayload holds a block+envelope pair that needs to be fed to the EL.
@@ -428,6 +439,9 @@ func NewForkChoiceStore(
 	f.payloadDataAvailabilityVote.Store(common.Hash(anchorRoot), anchorDataAvailabilityVotes)
 
 	f.gloasWeightTree = newGloasWeightTree(f)
+	if err := f.reconcilePendingEnvelopeIndices(context.Background()); err != nil {
+		return nil, fmt.Errorf("reconcile execution payload envelope indices: %w", err)
+	}
 
 	return f, nil
 }
@@ -1103,10 +1117,25 @@ func (f *ForkChoiceStore) RequeuePendingELPayload(p PendingELPayload) {
 // DrainPendingELPayloads returns and clears all queued EL payloads.
 // The stages layer calls this before Flush() to retry them with engine.NewPayload.
 func (f *ForkChoiceStore) DrainPendingELPayloads() []PendingELPayload {
+	return f.DrainPendingELPayloadsLimit(maxPendingELPayloads)
+}
+
+func (f *ForkChoiceStore) DrainPendingELPayloadsLimit(limit int) []PendingELPayload {
+	if limit <= 0 {
+		return nil
+	}
 	f.pendingELPayloadsMu.Lock()
 	defer f.pendingELPayloadsMu.Unlock()
 	if len(f.pendingELPayloads) == 0 {
 		return nil
+	}
+	if len(f.pendingELPayloads) > limit {
+		result := make([]PendingELPayload, limit)
+		copy(result, f.pendingELPayloads[:limit])
+		copy(f.pendingELPayloads, f.pendingELPayloads[limit:])
+		clear(f.pendingELPayloads[len(f.pendingELPayloads)-limit:])
+		f.pendingELPayloads = f.pendingELPayloads[:len(f.pendingELPayloads)-limit]
+		return result
 	}
 	if cap(f.pendingELPayloads) > pendingELPayloadsShrinkCap {
 		result := f.pendingELPayloads

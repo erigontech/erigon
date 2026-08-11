@@ -185,7 +185,7 @@ func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint6
 	// [IGNORE] block state not found
 	// [REJECT] validator is not in PTC
 	// [REJECT] signature verification
-	if err := s.forkchoiceStore.OnPayloadAttestationMessage(msg, false); err != nil {
+	if err := s.forkchoiceStore.OnPayloadAttestationMessage(ctx, msg, false); err != nil {
 		// Preserve IGNORE vs REJECT distinction from forkchoice
 		// forkchoice.ErrIgnore != services.ErrIgnore, so we need to convert
 		if errors.Is(err, forkchoice.ErrIgnore) {
@@ -218,6 +218,11 @@ func (s *payloadAttestationService) beginValidation(ctx context.Context, key see
 		validation := &payloadAttestationValidation{done: make(chan struct{})}
 		existing, loaded := s.validationsInFlight.LoadOrStore(key, validation)
 		if !loaded {
+			if s.seenAttestationsCache.Contains(key) {
+				s.validationsInFlight.CompareAndDelete(key, validation)
+				close(validation.done)
+				return nil, true, nil
+			}
 			return func() {
 				s.validationsInFlight.CompareAndDelete(key, validation)
 				close(validation.done)

@@ -18,12 +18,116 @@ package stages
 
 import (
 	"context"
+	"errors"
 	"math"
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/network"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 )
+
+type historyDownloaderStub struct {
+	finished       bool
+	progress       uint64
+	requestErr     error
+	requestMore    func() error
+	skipped        []network.SkippedFullBlock
+	recoverySource bool
+}
+
+func (d *historyDownloaderStub) SetSlotToDownload(uint64)             {}
+func (d *historyDownloaderStub) SetExpectedRoot(common.Hash)          {}
+func (d *historyDownloaderStub) SetBlockChecker(network.BlockChecker) {}
+func (d *historyDownloaderStub) SetOnNewBlock(network.OnNewBlock)     {}
+func (d *historyDownloaderStub) Finished() bool                       { return d.finished }
+func (d *historyDownloaderStub) Progress() uint64                     { return d.progress }
+func (d *historyDownloaderStub) RequestMore(context.Context) error {
+	if d.requestMore != nil {
+		return d.requestMore()
+	}
+	return d.requestErr
+}
+func (d *historyDownloaderStub) SkippedFullBlocks() []network.SkippedFullBlock {
+	return d.skipped
+}
+func (d *historyDownloaderStub) HasEnvelopeRecoverySource() bool { return d.recoverySource }
+func (d *historyDownloaderStub) RecoverSkippedEnvelopes(context.Context, []network.SkippedFullBlock, map[common.Hash]*cltypes.SignedBeaconBlock) network.EnvelopeRecoveryResult {
+	return network.EnvelopeRecoveryResult{}
+}
+func (d *historyDownloaderStub) SetThrottle(time.Duration) {}
+func (d *historyDownloaderStub) SetNeverSkip(bool)         {}
+
+func TestSpawnStageHistoryDownloadReturnsDownloaderFailure(t *testing.T) {
+	wantErr := errors.New("terminal downloader failure")
+	downloader := &historyDownloaderStub{progress: math.MaxUint64, requestErr: wantErr}
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+
+	err := SpawnStageHistoryDownload(StageHistoryReconstructionCfg{
+		beaconCfg:  &clparams.MainnetBeaconConfig,
+		downloader: downloader,
+	}, ctx, log.New())
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("SpawnStageHistoryDownload() error = %v, want %v", err, wantErr)
+	}
+}
+
+func TestSpawnStageHistoryDownloadReturnsFailureWhenRequestCrossesELFloor(t *testing.T) {
+	wantErr := errors.New("terminal downloader failure at EL floor")
+	destinationSlot := clparams.MainnetBeaconConfig.BellatrixForkEpoch * clparams.MainnetBeaconConfig.SlotsPerEpoch
+	downloader := &historyDownloaderStub{progress: destinationSlot + 1}
+	downloader.requestMore = func() error {
+		downloader.progress = destinationSlot
+		return wantErr
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+
+	err := SpawnStageHistoryDownload(StageHistoryReconstructionCfg{
+		beaconCfg:  &clparams.MainnetBeaconConfig,
+		downloader: downloader,
+		engine:     &testExecutionEngine{supportInsertion: true},
+	}, ctx, log.New())
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("SpawnStageHistoryDownload() error = %v, want %v", err, wantErr)
+	}
+}
+
+func TestSpawnStageHistoryDownloadReturnsEnvelopeRecoveryFailure(t *testing.T) {
+	downloader := &historyDownloaderStub{
+		finished: true,
+		skipped:  []network.SkippedFullBlock{{Slot: 1}},
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+
+	err := SpawnStageHistoryDownload(StageHistoryReconstructionCfg{
+		beaconCfg:  &clparams.MainnetBeaconConfig,
+		downloader: downloader,
+	}, ctx, log.New())
+	if err == nil {
+		t.Fatal("SpawnStageHistoryDownload() returned nil after envelope recovery failed")
+	}
+}
+
+func TestUnresolvedSkippedEnvelopesRetriesEveryMissingEnvelope(t *testing.T) {
+	first := network.SkippedFullBlock{Slot: 1, Root: [32]byte{1}}
+	second := network.SkippedFullBlock{Slot: 2, Root: [32]byte{2}}
+	result := network.EnvelopeRecoveryResult{}
+
+	remaining := unresolvedSkippedEnvelopes([]network.SkippedFullBlock{first, second}, result, func(network.SkippedFullBlock, *cltypes.SignedExecutionPayloadEnvelope) bool {
+		t.Fatal("missing envelopes must not be persisted")
+		return false
+	})
+
+	if len(remaining) != 2 || remaining[0] != first || remaining[1] != second {
+		t.Fatalf("remaining = %v, want both missing envelopes", remaining)
+	}
+}
 
 func TestRecoverSkippedEnvelopeBatchesDoesNotStarveLaterBatches(t *testing.T) {
 	skipped := []network.SkippedFullBlock{{Slot: 1}, {Slot: 2}, {Slot: 3}, {Slot: 4}, {Slot: 5}, {Slot: 6}, {Slot: 7}, {Slot: 8}}
@@ -61,6 +165,66 @@ func TestRecoverSkippedEnvelopeBatchesKeepsPartialSuccess(t *testing.T) {
 	pending := recoverSkippedEnvelopeBatches(context.Background(), skipped, 2, time.Millisecond, recoverBatch)
 	if len(pending) != 1 || pending[0].Slot != 2 {
 		t.Fatalf("pending = %v, want only slot 2", pending)
+	}
+}
+
+func TestRecoverSkippedEnvelopesWithoutSourcesDoesNotCompleteBackfill(t *testing.T) {
+	cfg := StageHistoryReconstructionCfg{downloader: &network.BackwardBeaconDownloader{}}
+	attempts := 0
+	recoverAttempt := func(_ context.Context, pending []network.SkippedFullBlock) []network.SkippedFullBlock {
+		attempts++
+		return pending
+	}
+
+	if recoverSkippedEnvelopesWithRetryPolicy(context.Background(), cfg, []network.SkippedFullBlock{{Slot: 1}}, recoverAttempt, 0) {
+		t.Fatal("recovery without an HTTP or P2P source must not report completion")
+	}
+	if attempts != 0 {
+		t.Fatalf("attempts = %d, want no recovery attempt without a source", attempts)
+	}
+}
+
+func TestRecoverSkippedEnvelopesRetriesBeyondThreeAttemptCapacity(t *testing.T) {
+	const itemsPerAttempt = int(skippedEnvelopeRecoveryAttemptTimeout/skippedEnvelopeRecoveryBatchTimeout) * skippedEnvelopeRecoveryBatchSize
+	downloader := &network.BackwardBeaconDownloader{}
+	downloader.SetHTTPFallbackURL("http://recovery.test")
+	cfg := StageHistoryReconstructionCfg{downloader: downloader}
+	skipped := make([]network.SkippedFullBlock, itemsPerAttempt*3+1)
+	for i := range skipped {
+		skipped[i].Slot = uint64(i + 1)
+	}
+
+	attemptStarts := make([]uint64, 0, 4)
+	recoverAttempt := func(_ context.Context, pending []network.SkippedFullBlock) []network.SkippedFullBlock {
+		attemptStarts = append(attemptStarts, pending[0].Slot)
+		return pending[min(itemsPerAttempt, len(pending)):]
+	}
+
+	if !recoverSkippedEnvelopesWithRetryPolicy(context.Background(), cfg, skipped, recoverAttempt, 0) {
+		t.Fatal("configured recovery stopped before all pending envelopes were recovered")
+	}
+	if len(attemptStarts) != 4 || attemptStarts[3] != uint64(itemsPerAttempt*3+1) {
+		t.Fatalf("attempt starts = %v, want a fourth attempt starting at slot %d", attemptStarts, itemsPerAttempt*3+1)
+	}
+}
+
+func TestRecoverSkippedEnvelopesStopsWhenParentContextIsCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	downloader := &network.BackwardBeaconDownloader{}
+	downloader.SetHTTPFallbackURL("http://recovery.test")
+	cfg := StageHistoryReconstructionCfg{downloader: downloader}
+	attempts := 0
+	recoverAttempt := func(_ context.Context, pending []network.SkippedFullBlock) []network.SkippedFullBlock {
+		attempts++
+		cancel()
+		return pending
+	}
+
+	if recoverSkippedEnvelopesWithRetryPolicy(ctx, cfg, []network.SkippedFullBlock{{Slot: 1}}, recoverAttempt, time.Hour) {
+		t.Fatal("recovery reported completion with a pending envelope after parent cancellation")
+	}
+	if attempts != 1 {
+		t.Fatalf("attempts = %d, want 1", attempts)
 	}
 }
 
