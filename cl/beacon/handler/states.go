@@ -39,7 +39,7 @@ func (a *ApiHandler) blockRootFromStateId(ctx context.Context, tx kv.Tx, stateId
 
 	switch {
 	case stateId.Head():
-		root, _, httpStatusErr, err = a.getHead()
+		root, _, httpStatusErr, err = a.getStateHead()
 		return
 	case stateId.Finalized():
 		root = a.forkchoiceStore.FinalizedCheckpoint().Root
