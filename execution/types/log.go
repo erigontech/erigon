@@ -251,49 +251,28 @@ func (l *RPCLog) UnmarshalJSON(input []byte) error {
 
 type RPCLogs []*RPCLog
 
-// CopyLogGroups flattens the groups into one slice of deep copies backed by
-// shared arrays. An empty result is nil.
-func CopyLogGroups(groups []Logs) Logs {
-	var total, totalTopics, totalData int
-	for _, g := range groups {
-		total += len(g)
-		for i := range g {
-			totalTopics += len(g[i].Topics)
-			totalData += len(g[i].Data)
-		}
-	}
-	if total == 0 {
-		return nil
-	}
-	topics := make([]common.Hash, totalTopics)
-	data := make([]byte, totalData)
-	out := make(Logs, total)
-	i := 0
-	for _, g := range groups {
-		for j := range g {
-			l := &g[j]
-			dst := &out[i]
-			nt, nd := len(l.Topics), len(l.Data)
-			// Capped so a later append to one copied log cannot bleed into the next.
-			dst.Topics, dst.Data = topics[:nt:nt], data[:nd:nd]
-			topics, data = topics[nt:], data[nd:]
-			l.copyTo(dst)
-			i++
-		}
-	}
-	return out
-}
-
 // Copy deep-copies the logs into freshly allocated shared backing arrays.
 func (logs Logs) Copy() Logs {
 	if logs == nil {
 		return nil
 	}
-	group := [1]Logs{logs}
-	if out := CopyLogGroups(group[:]); out != nil {
-		return out
+	var totalTopics, totalData int
+	for i := range logs {
+		totalTopics += len(logs[i].Topics)
+		totalData += len(logs[i].Data)
 	}
-	return Logs{}
+	topics := make([]common.Hash, totalTopics)
+	data := make([]byte, totalData)
+	out := make(Logs, len(logs))
+	for i := range logs {
+		dst := &out[i]
+		nt, nd := len(logs[i].Topics), len(logs[i].Data)
+		// Capped so a later append to one copied log cannot bleed into the next.
+		dst.Topics, dst.Data = topics[:nt:nt], data[:nd:nd]
+		topics, data = topics[nt:], data[nd:]
+		logs[i].copyTo(dst)
+	}
+	return out
 }
 
 // ToRPCTransactionLog converts types.Log in a RPCLog.
@@ -453,24 +432,20 @@ func (l *Log) DecodeRLP(s *rlp.Stream) error {
 	return err
 }
 
-// RlpHashLogs hashes the concatenation of the given log groups as one RLP list,
-// without flattening them into a single slice first.
-func RlpHashLogs(groups []Logs) common.Hash {
+// RlpHashLogs hashes the logs as one RLP list, encoding them through a shared
+// buffer rather than one per entry.
+func RlpHashLogs(logs Logs) common.Hash {
 	return rlpPayloadHash(func(w io.Writer, b []byte) error {
 		payloadSize := 0
-		for _, logs := range groups {
-			for i := range logs {
-				payloadSize += logs[i].encodingSize()
-			}
+		for i := range logs {
+			payloadSize += logs[i].encodingSize()
 		}
 		if err := rlp.EncodeListPrefix(payloadSize, w, b); err != nil {
 			return err
 		}
-		for _, logs := range groups {
-			for i := range logs {
-				if err := logs[i].encodeRLP(w, b); err != nil {
-					return err
-				}
+		for i := range logs {
+			if err := logs[i].encodeRLP(w, b); err != nil {
+				return err
 			}
 		}
 		return nil
