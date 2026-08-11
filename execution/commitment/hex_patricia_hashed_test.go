@@ -1680,3 +1680,38 @@ func TestSetTraceWriter_BufferCapturesOutput(t *testing.T) {
 	require.True(t, strings.Contains(output, "fold ["),
 		"trace output should contain fold-related lines, got:\n%s", output)
 }
+
+// feedBranchHashesToKeccak is the per-slot reference hashRow replaced. It takes the
+// empty-slot byte as an argument so the comparison stays differential: the reference
+// spells the RLP empty string itself instead of reading the value under test.
+func (hph *HexPatriciaHashed) feedBranchHashesToKeccak(row int, depth int16, emptyByte []byte) error {
+	for bitset, lastNib := hph.afterMap[row], 0; ; {
+		if bitset == 0 {
+			for i := lastNib; i < 17; i++ {
+				if _, err := hph.keccak2.Write(emptyByte); err != nil {
+					return err
+				}
+			}
+			break
+		}
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		for i := lastNib; i < nibble; i++ {
+			if _, err := hph.keccak2.Write(emptyByte); err != nil {
+				return err
+			}
+		}
+		lastNib = nibble + 1
+
+		cell := &hph.grid[row][nibble]
+		cellHash, err := hph.computeCellHash(cell, depth, hph.hashAuxBuffer[:0])
+		if err != nil {
+			return err
+		}
+		if _, err := hph.keccak2.Write(cellHash); err != nil {
+			return err
+		}
+		bitset ^= bit
+	}
+	return nil
+}
