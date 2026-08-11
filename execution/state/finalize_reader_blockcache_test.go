@@ -138,3 +138,43 @@ func TestFinalizeReaderSeesBlockCacheWrite(t *testing.T) {
 		"NewHistoryReaderV3WithSharedDomains is expected to NOT see the blockCache write; "+
 			"it reads only from sd.GetAsOf → ttx.GetAsOf and therefore returns the stale pre-block balance")
 }
+
+// TestFinalizeIBSSeesVersionMapWrite pins the invariant the block-finalize IBS
+// relies on after it stopped reading the BlockStateCache: an IBS backed by the
+// block version map (over a pre-block reader) must read a prior-tx in-block
+// write at the final txNum, not the stale pre-block value. The IBS reads its own
+// writes from its state objects, prior-tx writes from the version map (all cells
+// are Done at block end), and only the pre-block base from the reader.
+func TestFinalizeIBSSeesVersionMapWrite(t *testing.T) {
+	t.Parallel()
+
+	_, tx, domains := NewTestRwTx(t)
+
+	addr := accounts.InternAddress(common.HexToAddress("0x6be457e04092b28865e0cba84e3b2cfa0f871e67"))
+	addrValue := addr.Value()
+
+	preBlockBalance := uint256.NewInt(7290)
+	preAcc := &accounts.Account{Nonce: 1, Balance: *preBlockBalance, CodeHash: accounts.EmptyCodeHash}
+	require.NoError(t,
+		domains.DomainPut(kv.AccountsDomain, tx, addrValue[:], accounts.SerialiseV3(preAcc), 10, nil),
+	)
+
+	const tx28TxIndex = 28
+	const finalTxIndex = 30
+	postTx28Balance := uint256.NewInt(6707)
+
+	mvhm := NewVersionMap(nil)
+	// tx 28's SubBalance lands in the version map as a completed (Done) cell.
+	mvhm.WriteBalance(addr, Version{TxIndex: tx28TxIndex, Incarnation: 0}, *postTx28Balance, true)
+
+	reader := NewReaderV3(domains.AsGetter(tx)) // pre-block base only
+	ibs := NewWithVersionMap(reader, mvhm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, finalTxIndex)
+
+	bal, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	require.Equal(t, *postTx28Balance, bal,
+		"finalize IBS at the final txNum must read tx 28's in-block balance from the version map, "+
+			"not the stale pre-block balance; otherwise finalize stomps the in-block update")
+}
