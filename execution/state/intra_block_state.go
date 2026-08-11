@@ -2144,6 +2144,10 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 }
 
 func (sdb *IntraBlockState) setStateObject(addr accounts.Address, object *stateObject) {
+	if dbg.AssertEnabled && object.arena {
+		// stateObjects lives for the block, an arena slot only for the transaction.
+		panic(fmt.Sprintf("arena slot cached in stateObjects: %x", addr))
+	}
 	if bi, ok := sdb.balanceInc[addr]; ok && !bi.transferred && sdb.versionMap == nil {
 		object.data.Balance = u256.Add(object.data.Balance, bi.increase)
 		bi.transferred = true
