@@ -883,7 +883,7 @@ func (pe *parallelExecutor) runApplyLoop(logPrefix string, applyResults <-chan a
 		} else {
 			pe.logger.Debug("[" + logPrefix + "] rw exit")
 		}
-		if err != nil {
+		if err != nil && !errors.Is(err, &ErrLoopExhausted{}) {
 			pe.cancelAndDrainApplyLoop(err, applyResults, rootResults)
 		}
 	}()

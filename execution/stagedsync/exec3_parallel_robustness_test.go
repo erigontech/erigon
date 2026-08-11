@@ -1172,6 +1172,28 @@ func TestRunApplyLoopErrorDrainsChannels(t *testing.T) {
 	require.Same(t, boom, context.Cause(executorCtx))
 }
 
+func TestRunApplyLoopExhaustionDoesNotCancelExecutor(t *testing.T) {
+	applyResults := make(chan applyResult)
+	rootResults := make(chan commitmentResult)
+	close(applyResults)
+	close(rootResults)
+
+	executorCtx, cancelExecLoop := context.WithCancelCause(context.Background())
+	t.Cleanup(func() { cancelExecLoop(nil) })
+	pe := &parallelExecutor{
+		txExecutor:     txExecutor{logger: log.New()},
+		cancelExecLoop: cancelExecLoop,
+	}
+	exhausted := &ErrLoopExhausted{From: 1, To: 2, Reason: "block batch is full"}
+
+	got := pe.runApplyLoop("test", applyResults, rootResults, func() error {
+		return exhausted
+	})
+
+	require.Same(t, exhausted, got)
+	require.NoError(t, context.Cause(executorCtx))
+}
+
 // wait suppresses cancellation-only results and joins every group member.
 func TestParallelExecWait(t *testing.T) {
 	newPE := func(group func() error) *parallelExecutor {
