@@ -111,10 +111,10 @@ func TestCallBlockParallelMatchesSequential(t *testing.T) {
 	noop := state.NewNoopWriter()
 	cachedWriter := state.NewCachedWriter(noop, sc)
 	ibs := state.New(cachedReader)
-	defer ibs.Release(false)
+	defer ibs.Close()
 
-	consensusHeaderReader := consensuschain.NewReader(cfg, tx, api._blockReader, nil)
 	logger := log.New("trace_filtering_test")
+	consensusHeaderReader := consensuschain.NewReader(cfg, tx, api._blockReader, logger)
 	err = protocol.InitializeBlockExecution(engine.(protocolrules.Engine), consensusHeaderReader,
 		block.HeaderNoCopy(), cfg, ibs, nil, logger, nil)
 	require.NoError(t, err)
@@ -205,7 +205,7 @@ func chainWithWithdrawal(t *testing.T, withdrawalAddr common.Address, withdrawal
 		Alloc:  types.GenesisAlloc{withdrawalAddr: {Balance: bankFunds}},
 	}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec))
-	generated, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(_ int, b *blockgen.BlockGen) {
+	generated, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
 		b.AddWithdrawal(&types.Withdrawal{
 			Index:     0,
 			Validator: 42,
@@ -340,7 +340,7 @@ func TestReplayBlockTransactionsMultiWithdrawalSameAddr(t *testing.T) {
 		Alloc:  types.GenesisAlloc{withdrawalAddr: {Balance: testBankFunds()}},
 	}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec))
-	generated, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(_ int, b *blockgen.BlockGen) {
+	generated, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
 		b.AddWithdrawal(&types.Withdrawal{Index: 0, Validator: 42, Address: withdrawalAddr, Amount: wd1Gwei})
 		b.AddWithdrawal(&types.Withdrawal{Index: 1, Validator: 43, Address: withdrawalAddr, Amount: wd2Gwei})
 	})
@@ -387,7 +387,7 @@ func TestReplayBlockTransactionsWithdrawalNewAddress(t *testing.T) {
 	newAddr := common.HexToAddress("0xaaaabbbbccccddddeeeeffffaaaabbbbccccdddd")
 	gspec := &types.Genesis{Config: chain.AllProtocolChanges}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec))
-	generated, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(_ int, b *blockgen.BlockGen) {
+	generated, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
 		b.AddWithdrawal(&types.Withdrawal{Index: 0, Validator: 42, Address: newAddr, Amount: withdrawalGwei})
 	})
 	require.NoError(t, err)
@@ -431,7 +431,7 @@ func TestReplayBlockTransactionsMultiWithdrawalNewAddress(t *testing.T) {
 	newAddr := common.HexToAddress("0x1111222233334444555566667777888899990000")
 	gspec := &types.Genesis{Config: chain.AllProtocolChanges}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec))
-	generated, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(_ int, b *blockgen.BlockGen) {
+	generated, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
 		b.AddWithdrawal(&types.Withdrawal{Index: 0, Validator: 1, Address: newAddr, Amount: wd1Gwei})
 		b.AddWithdrawal(&types.Withdrawal{Index: 1, Validator: 2, Address: newAddr, Amount: wd2Gwei})
 	})

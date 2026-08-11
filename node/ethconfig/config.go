@@ -111,11 +111,10 @@ var Defaults = Config{
 		ProduceE2:  true,
 		ProduceE3:  true,
 	},
-	FcuTimeout:          1 * time.Second,
-	FcuBackgroundPrune:  true,
-	FcuBackgroundCommit: false, // to enable, we need to 1) have rawdb API go via execctx and 2) revive Coherent cache for rpcdaemon
-	ExperimentalBAL:     false,
-	WarmupKzgCtxOnInit:  true,
+	FcuTimeout:         1 * time.Second,
+	FcuBackgroundPrune: true,
+	ExperimentalBAL:    false,
+	WarmupKzgCtxOnInit: true,
 }
 
 const DefaultChainDBPageSize = 16 * datasize.KB
@@ -127,16 +126,17 @@ func init() {
 			home = user.HomeDir
 		}
 	}
-	if runtime.GOOS == "darwin" {
+	switch runtime.GOOS {
+	case "darwin":
 		Defaults.Ethash.DatasetDir = filepath.Join(home, "Library", "erigon-ethash")
-	} else if runtime.GOOS == "windows" {
+	case "windows":
 		localappdata := os.Getenv("LOCALAPPDATA")
 		if localappdata != "" {
 			Defaults.Ethash.DatasetDir = filepath.Join(localappdata, "erigon-thash")
 		} else {
 			Defaults.Ethash.DatasetDir = filepath.Join(home, "AppData", "Local", "erigon-ethash")
 		}
-	} else {
+	default:
 		if xdgDataDir := os.Getenv("XDG_DATA_HOME"); xdgDataDir != "" {
 			Defaults.Ethash.DatasetDir = filepath.Join(xdgDataDir, "erigon-ethash")
 		}
@@ -155,6 +155,7 @@ type BlocksFreezing struct {
 	DisableDownloadE3 bool // disable download state snapshots
 	DownloaderAddr    string
 	ChainName         string
+	E2RetireStep      uint64 // optional, 0 means we use hardcoded default of 1_000
 	// ChainTomlURL, when non-empty, overrides the default R2/GitHub fetch of
 	// the preverified chain.toml with a direct HTTP GET to this URL. Local
 	// preverified.toml in the datadir still takes precedence.
@@ -274,9 +275,8 @@ type Config struct {
 	AllowAA bool
 
 	// fork choice update timeout
-	FcuTimeout          time.Duration
-	FcuBackgroundPrune  bool
-	FcuBackgroundCommit bool
+	FcuTimeout         time.Duration
+	FcuBackgroundPrune bool
 
 	MCPAddress string
 

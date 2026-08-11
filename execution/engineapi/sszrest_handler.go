@@ -301,7 +301,7 @@ func (e *EngineServer) handleSSZForkchoice(w http.ResponseWriter, r *http.Reques
 	case 3:
 		resp, err = e.ForkchoiceUpdatedV3(r.Context(), &state, attrs)
 	case 4:
-		resp, err = e.ForkchoiceUpdatedV4(r.Context(), &state, attrs)
+		resp, err = e.ForkchoiceUpdatedV4(r.Context(), &state, attrs, nil)
 	}
 	if err != nil {
 		writeEngineError(w, err)

@@ -159,9 +159,14 @@ type ForkChoiceStore struct {
 
 	emitters *beaconevents.EventEmitter
 	// event sends queued under f.mu, emitted after release (see queueEmit)
-	queuedEmits  []func()
-	queuedPrunes []uint64
-	synced       atomic.Bool
+	queuedEmits           []func()
+	queuedPrunes          []uint64
+	queuedOperationPrunes []solid.Checkpoint
+	operationPruneMu      sync.Mutex
+	operationPruneTarget  solid.Checkpoint
+	operationPrunePending bool
+	operationPruneRunning bool
+	synced                atomic.Bool
 
 	ethClock                eth_clock.EthereumClock
 	optimisticStore         optimistic.OptimisticStore

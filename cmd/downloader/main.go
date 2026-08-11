@@ -248,7 +248,7 @@ func Downloader(cmd *cobra.Command, logger log.Logger) error {
 	}
 
 	logger.Info(
-		"[snapshots] cli flags",
+		"[Downloader] cli flags",
 		"chain", chain,
 		"addr", downloaderApiAddr,
 		"datadir", dirs.DataDir,
@@ -313,14 +313,12 @@ func Downloader(cmd *cobra.Command, logger log.Logger) error {
 	manualDataVerification := verify || verifyFailfast || len(verifyFiles) > 0
 	cfg.ManualDataVerification = manualDataVerification
 
-	cfg.LogPrefix = "[snapshots] "
-
 	d, err := downloader.New(ctx, cfg, logger)
 	if err != nil {
 		return err
 	}
 	defer d.Close()
-	logger.Info("[snapshots] Start bittorrent server", "my_peer_id", fmt.Sprintf("%x", d.TorrentClient().PeerID()))
+	logger.Info("[Downloader] Start bittorrent server", "my_peer_id", fmt.Sprintf("%x", d.TorrentClient().PeerID()))
 
 	d.HandleTorrentClientStatus(nil)
 
@@ -340,7 +338,7 @@ func Downloader(cmd *cobra.Command, logger log.Logger) error {
 		verifyFiles = strings.Split(_verifyFiles, ",")
 	}
 	if manualDataVerification { // remove and create .torrent files (will re-read all snapshots)
-		if err = d.VerifyData(ctx, verifyFiles, verifyFailfast); err != nil {
+		if err := d.VerifyData(ctx, verifyFiles, verifyFailfast); err != nil {
 			return err
 		}
 		if verifyFailfast {

@@ -18,7 +18,10 @@ package forkchoice
 
 import (
 	"errors"
+	"slices"
+	"sync"
 	"testing"
+	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/stretchr/testify/require"
@@ -29,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
+	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/common"
 )
@@ -108,8 +112,277 @@ func TestAddChainSegmentQueuesLightClientEventsOnSuccess(t *testing.T) {
 	require.Len(t, store.queuedEmits, 1)
 }
 
+func TestUpdateCheckpointsPrunesOperationsWithExactFinalizedState(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	finalizedRoot := common.Hash{0x42}
+	finalizedState := state.New(&cfg)
+	finalizedState.SetSlot(2 * cfg.SlotsPerEpoch)
+	validator := solid.NewValidatorFromParameters(
+		common.Bytes48{},
+		common.Hash{},
+		cfg.MaxEffectiveBalance,
+		false,
+		0,
+		0,
+		3,
+		cfg.FarFutureEpoch,
+	)
+	finalizedState.AddValidator(validator, cfg.MaxEffectiveBalance)
+
+	operationsPool := pool.NewOperationsPool(&cfg)
+	exit := &cltypes.SignedVoluntaryExit{
+		VoluntaryExit: &cltypes.VoluntaryExit{ValidatorIndex: 0},
+	}
+	operationsPool.VoluntaryExitsPool.Insert(0, exit)
+	graph := &getFinalizedExecutionHashForkGraph{
+		headers: map[common.Hash]*cltypes.BeaconBlockHeader{
+			finalizedRoot: {},
+		},
+		states: map[common.Hash]*state.CachingBeaconState{
+			finalizedRoot: finalizedState,
+		},
+		getStateStarted: make(chan common.Hash, 1),
+		getStateRelease: make(chan struct{}),
+	}
+	store := &ForkChoiceStore{
+		forkGraph:      graph,
+		operationsPool: operationsPool,
+		beaconCfg:      &cfg,
+		emitters:       beaconevents.NewEventEmitter(),
+	}
+	store.justifiedCheckpoint.Store(solid.Checkpoint{})
+	store.finalizedCheckpoint.Store(solid.Checkpoint{})
+
+	store.updateCheckpoints(
+		solid.Checkpoint{},
+		solid.Checkpoint{Epoch: 2, Root: finalizedRoot},
+	)
+	require.Empty(t, graph.stateRoots())
+
+	drained := make(chan struct{})
+	go func() {
+		store.drainQueuedWork()
+		close(drained)
+	}()
+	select {
+	case <-drained:
+	case <-time.After(time.Second):
+		close(graph.getStateRelease)
+		<-drained
+		t.Fatal("drainQueuedWork waited for finalized operation pruning")
+	}
+
+	require.Equal(t, finalizedRoot, waitForStateLoad(t, graph.getStateStarted))
+	require.True(t, operationsPool.VoluntaryExitsPool.Has(0))
+	close(graph.getStateRelease)
+	require.Eventually(t, func() bool {
+		return !operationsPool.VoluntaryExitsPool.Has(0)
+	}, time.Second, time.Millisecond)
+	require.Equal(t, []common.Hash{finalizedRoot}, graph.stateRoots())
+	require.Equal(t, []bool{true}, graph.stateCopyModes())
+	requireOperationPrunerIdle(t, store)
+}
+
+func TestAllAttesterSlashingIndicesSeen(t *testing.T) {
+	store := &ForkChoiceStore{
+		equivocatingIndicies: []byte{0b00000110},
+	}
+
+	require.True(t, store.allAttesterSlashingIndicesSeen([]uint64{1, 2}))
+	require.False(t, store.allAttesterSlashingIndicesSeen([]uint64{1, 3}))
+	require.True(t, store.allAttesterSlashingIndicesSeen(nil))
+}
+
+func TestAttesterSlashingIgnoresDisjointIndices(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	store := &ForkChoiceStore{}
+	slashing := &cltypes.AttesterSlashing{
+		Attestation_1: &cltypes.IndexedAttestation{
+			AttestingIndices: solid.NewRawUint64List(2048, []uint64{1}),
+		},
+		Attestation_2: &cltypes.IndexedAttestation{
+			AttestingIndices: solid.NewRawUint64List(2048, []uint64{2}),
+		},
+	}
+
+	err := store.onProcessAttesterSlashing(slashing, state.New(&cfg), false)
+
+	require.ErrorIs(t, err, ErrIgnore)
+}
+
+func TestAttesterSlashingSeenCheckPrecedesValidation(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	store := &ForkChoiceStore{
+		equivocatingIndicies: []byte{0b00000010},
+	}
+	slashing := &cltypes.AttesterSlashing{
+		Attestation_1: &cltypes.IndexedAttestation{
+			AttestingIndices: solid.NewRawUint64List(2048, []uint64{1}),
+		},
+		Attestation_2: &cltypes.IndexedAttestation{
+			AttestingIndices: solid.NewRawUint64List(2048, []uint64{1}),
+		},
+	}
+
+	err := store.onProcessAttesterSlashing(slashing, state.New(&cfg), false)
+
+	require.ErrorIs(t, err, ErrIgnore)
+}
+
+func TestAttesterSlashingSeenCheckHandlesUnsortedIndices(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	store := &ForkChoiceStore{
+		equivocatingIndicies: []byte{0b00000010},
+	}
+	slashing := &cltypes.AttesterSlashing{
+		Attestation_1: &cltypes.IndexedAttestation{
+			AttestingIndices: solid.NewRawUint64List(2048, []uint64{2, 1}),
+		},
+		Attestation_2: &cltypes.IndexedAttestation{
+			AttestingIndices: solid.NewRawUint64List(2048, []uint64{1}),
+		},
+	}
+
+	err := store.onProcessAttesterSlashing(slashing, state.New(&cfg), false)
+
+	require.ErrorIs(t, err, ErrIgnore)
+}
+
+func TestAttesterSlashingRejectsIndicesOverLimitBeforeSeenCheck(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	store := &ForkChoiceStore{
+		equivocatingIndicies: []byte{0b00000010},
+	}
+	slashing := &cltypes.AttesterSlashing{
+		Attestation_1: &cltypes.IndexedAttestation{
+			AttestingIndices: solid.NewRawUint64List(1, []uint64{2, 1}),
+		},
+		Attestation_2: &cltypes.IndexedAttestation{
+			AttestingIndices: solid.NewRawUint64List(1, []uint64{1}),
+		},
+	}
+
+	err := store.onProcessAttesterSlashing(slashing, state.New(&cfg), false)
+
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrIgnore)
+}
+
+func TestOnAttesterSlashingRejectsIncompleteOperation(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	store := &ForkChoiceStore{
+		operationsPool: pool.NewOperationsPool(&cfg),
+	}
+
+	require.NotPanics(t, func() {
+		require.Error(t, store.OnAttesterSlashing(&cltypes.AttesterSlashing{}, false))
+	})
+}
+
+func TestDrainQueuedWorkRetainsOperationsWhenFinalizedStateIsUnavailable(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	operationsPool := pool.NewOperationsPool(&cfg)
+	exit := &cltypes.SignedVoluntaryExit{
+		VoluntaryExit: &cltypes.VoluntaryExit{ValidatorIndex: 0},
+	}
+	operationsPool.VoluntaryExitsPool.Insert(0, exit)
+	store := &ForkChoiceStore{
+		forkGraph:      &getFinalizedExecutionHashForkGraph{},
+		operationsPool: operationsPool,
+	}
+	store.queueOperationPrune(solid.Checkpoint{Epoch: 1, Root: common.Hash{1}})
+
+	store.drainQueuedWork()
+
+	requireOperationPrunerIdle(t, store)
+	require.True(t, operationsPool.VoluntaryExitsPool.Has(0))
+}
+
+func TestDrainQueuedWorkSkipsOperationStateLoadWithoutPrunableOperations(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	graph := &getFinalizedExecutionHashForkGraph{}
+	operationsPool := pool.NewOperationsPool(&cfg)
+	operationsPool.AttestationsPool.Insert(common.Bytes96{1}, &solid.Attestation{})
+	store := &ForkChoiceStore{
+		forkGraph:      graph,
+		operationsPool: operationsPool,
+	}
+	store.queueOperationPrune(solid.Checkpoint{Epoch: 1, Root: common.Hash{1}})
+
+	store.drainQueuedWork()
+
+	requireOperationPrunerIdle(t, store)
+	require.Empty(t, graph.stateRoots())
+}
+
+func TestOperationPrunerCoalescesPendingFinalizedRoots(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	firstRoot := common.Hash{1}
+	skippedRoot := common.Hash{2}
+	latestRoot := common.Hash{3}
+	graph := &getFinalizedExecutionHashForkGraph{
+		states: map[common.Hash]*state.CachingBeaconState{
+			firstRoot:  state.New(&cfg),
+			latestRoot: state.New(&cfg),
+		},
+		getStateStarted: make(chan common.Hash, 3),
+		getStateRelease: make(chan struct{}),
+	}
+	operationsPool := pool.NewOperationsPool(&cfg)
+	operationsPool.VoluntaryExitsPool.Insert(0, &cltypes.SignedVoluntaryExit{
+		VoluntaryExit: &cltypes.VoluntaryExit{ValidatorIndex: 0},
+	})
+	store := &ForkChoiceStore{
+		forkGraph:      graph,
+		operationsPool: operationsPool,
+	}
+
+	store.queueOperationPrune(solid.Checkpoint{Epoch: 1, Root: firstRoot})
+	store.drainQueuedWork()
+	require.Equal(t, firstRoot, waitForStateLoad(t, graph.getStateStarted))
+
+	store.queueOperationPrune(solid.Checkpoint{Epoch: 3, Root: latestRoot})
+	store.drainQueuedWork()
+	store.queueOperationPrune(solid.Checkpoint{Epoch: 2, Root: skippedRoot})
+	store.drainQueuedWork()
+	close(graph.getStateRelease)
+	require.Equal(t, latestRoot, waitForStateLoad(t, graph.getStateStarted))
+	require.Eventually(t, func() bool {
+		return len(graph.stateRoots()) == 2
+	}, time.Second, time.Millisecond)
+	require.Equal(t, []common.Hash{firstRoot, latestRoot}, graph.stateRoots())
+	requireOperationPrunerIdle(t, store)
+}
+
+func requireOperationPrunerIdle(t *testing.T, store *ForkChoiceStore) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		store.operationPruneMu.Lock()
+		defer store.operationPruneMu.Unlock()
+		return !store.operationPruneRunning && !store.operationPrunePending
+	}, time.Second, time.Millisecond)
+}
+
+func waitForStateLoad(t *testing.T, started <-chan common.Hash) common.Hash {
+	t.Helper()
+	select {
+	case root := <-started:
+		return root
+	case <-time.After(time.Second):
+		t.Fatal("finalized state load did not start")
+		return common.Hash{}
+	}
+}
+
 type getFinalizedExecutionHashForkGraph struct {
 	blocks                map[common.Hash]*cltypes.SignedBeaconBlock
+	headers               map[common.Hash]*cltypes.BeaconBlockHeader
+	states                map[common.Hash]*state.CachingBeaconState
+	getStateMu            sync.Mutex
+	getStateRoots         []common.Hash
+	getStateAlwaysCopy    []bool
+	getStateStarted       chan common.Hash
+	getStateRelease       chan struct{}
 	beforeUpdate          *cltypes.LightClientUpdate
 	afterUpdate           *cltypes.LightClientUpdate
 	addChainSegmentStatus fork_graph.ChainSegmentInsertionResult
@@ -122,8 +395,9 @@ func (g *getFinalizedExecutionHashForkGraph) AddChainSegment(*cltypes.SignedBeac
 	return nil, g.addChainSegmentStatus, g.addChainSegmentErr
 }
 
-func (g *getFinalizedExecutionHashForkGraph) GetHeader(common.Hash) (*cltypes.BeaconBlockHeader, bool) {
-	panic("not used")
+func (g *getFinalizedExecutionHashForkGraph) GetHeader(blockRoot common.Hash) (*cltypes.BeaconBlockHeader, bool) {
+	header := g.headers[blockRoot]
+	return header, header != nil
 }
 
 func (g *getFinalizedExecutionHashForkGraph) GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool) {
@@ -131,8 +405,31 @@ func (g *getFinalizedExecutionHashForkGraph) GetBlock(blockRoot common.Hash) (*c
 	return block, block != nil
 }
 
-func (g *getFinalizedExecutionHashForkGraph) GetState(common.Hash, bool) (*state.CachingBeaconState, error) {
-	panic("not used")
+func (g *getFinalizedExecutionHashForkGraph) GetState(blockRoot common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
+	g.getStateMu.Lock()
+	g.getStateRoots = append(g.getStateRoots, blockRoot)
+	g.getStateAlwaysCopy = append(g.getStateAlwaysCopy, alwaysCopy)
+	g.getStateMu.Unlock()
+	if g.getStateStarted != nil {
+		g.getStateStarted <- blockRoot
+	}
+	if g.getStateRelease != nil {
+		<-g.getStateRelease
+	}
+	state := g.states[blockRoot]
+	return state, nil
+}
+
+func (g *getFinalizedExecutionHashForkGraph) stateRoots() []common.Hash {
+	g.getStateMu.Lock()
+	defer g.getStateMu.Unlock()
+	return slices.Clone(g.getStateRoots)
+}
+
+func (g *getFinalizedExecutionHashForkGraph) stateCopyModes() []bool {
+	g.getStateMu.Lock()
+	defer g.getStateMu.Unlock()
+	return slices.Clone(g.getStateAlwaysCopy)
 }
 
 func (g *getFinalizedExecutionHashForkGraph) GetCurrentJustifiedCheckpoint(common.Hash) (solid.Checkpoint, bool) {

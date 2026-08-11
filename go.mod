@@ -7,8 +7,7 @@ replace github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilte
 require (
 	github.com/erigontech/evmone_precompiles v0.0.0-20260414072133-b8b2bdc99de2
 	github.com/erigontech/fastkeccak v0.1.1-0.20260408010752-08e7b6602268
-	github.com/erigontech/go-libdeflate v0.1.0
-	github.com/erigontech/mdbx-go v0.40.3
+	github.com/erigontech/mdbx-go v0.42.0
 	github.com/erigontech/secp256k1 v1.3.0
 )
 
@@ -465,5 +464,3 @@ tool (
 	google.golang.org/protobuf/cmd/protoc-gen-go
 	mvdan.cc/gofumpt
 )
-
-replace github.com/crate-crypto/go-eth-kzg => github.com/erigontech/go-eth-kzg v0.0.0-20260401161010-070339460d07

@@ -174,3 +174,24 @@ func BenchmarkMapTxNum2BlockNumIter(b *testing.B) {
 		}
 	})
 }
+
+func TestMaxTxNumNilCursor(t *testing.T) {
+	require := require.New(t)
+	dirs := datadir.New(t.TempDir())
+	db := mdbx.New(dbcfg.ChainDB, log.New()).InMem(t, dirs.Chaindata).MustOpen()
+	t.Cleanup(db.Close)
+
+	require.NoError(db.Update(t.Context(), func(tx kv.RwTx) error {
+		require.NoError(TxNums.Append(tx, 0, 3))
+		require.NoError(TxNums.Append(tx, 1, 99))
+		return nil
+	}))
+
+	require.NoError(db.View(t.Context(), func(tx kv.Tx) error {
+		maxTxNum, ok, err := DefaultTxBlockIndexInstance.MaxTxNum(t.Context(), tx, nil, 1)
+		require.NoError(err)
+		require.True(ok)
+		require.Equal(99, int(maxTxNum))
+		return nil
+	}))
+}

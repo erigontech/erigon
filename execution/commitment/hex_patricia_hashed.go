@@ -389,36 +389,36 @@ func (cell *cell) reset() {
 func (cell *cell) FullString() string {
 	b := new(strings.Builder)
 	b.WriteString("{")
-	b.WriteString(fmt.Sprintf("loaded=%v", cell.loaded))
+	fmt.Fprintf(b, "loaded=%v", cell.loaded)
 	if cell.Deleted() {
 		b.WriteString(" DELETED ")
 	}
 
 	if cell.accountAddrLen > 0 {
-		b.WriteString(fmt.Sprintf(" addr=%x", cell.accountAddr[:cell.accountAddrLen]))
-		b.WriteString(fmt.Sprintf(" balance=%s", cell.Balance.String()))
-		b.WriteString(fmt.Sprintf(" nonce=%d", cell.Nonce))
+		fmt.Fprintf(b, " addr=%x", cell.accountAddr[:cell.accountAddrLen])
+		fmt.Fprintf(b, " balance=%s", cell.Balance.String())
+		fmt.Fprintf(b, " nonce=%d", cell.Nonce)
 		if cell.CodeHash != empty.CodeHash {
-			b.WriteString(fmt.Sprintf(" codeHash=%x", cell.CodeHash[:]))
+			fmt.Fprintf(b, " codeHash=%x", cell.CodeHash[:])
 		} else {
 			b.WriteString(" codeHash=EMPTY")
 		}
 	}
 	if cell.storageAddrLen > 0 {
-		b.WriteString(fmt.Sprintf(" addr[s]=%x", cell.storageAddr[:cell.storageAddrLen]))
-		b.WriteString(fmt.Sprintf(" storage=%x", cell.Storage[:cell.StorageLen]))
+		fmt.Fprintf(b, " addr[s]=%x", cell.storageAddr[:cell.storageAddrLen])
+		fmt.Fprintf(b, " storage=%x", cell.Storage[:cell.StorageLen])
 	}
 	if cell.hashLen > 0 {
-		b.WriteString(fmt.Sprintf(" h=%x", cell.hash[:cell.hashLen]))
+		fmt.Fprintf(b, " h=%x", cell.hash[:cell.hashLen])
 	}
 	if cell.stateHashLen > 0 {
-		b.WriteString(fmt.Sprintf(" memHash=%x", cell.stateHash[:cell.stateHashLen]))
+		fmt.Fprintf(b, " memHash=%x", cell.stateHash[:cell.stateHashLen])
 	}
 	if cell.extLen > 0 {
-		b.WriteString(fmt.Sprintf(" extension=%x", cell.extension[:cell.extLen]))
+		fmt.Fprintf(b, " extension=%x", cell.extension[:cell.extLen])
 	}
 	if cell.hashedExtLen > 0 {
-		b.WriteString(fmt.Sprintf(" hashedExtension=%x", cell.hashedExtension[:cell.hashedExtLen]))
+		fmt.Fprintf(b, " hashedExtension=%x", cell.hashedExtension[:cell.hashedExtLen])
 	}
 
 	b.WriteString("}")
@@ -946,7 +946,7 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 			// if account key is empty, then we need to hash storage key from the key beginning
 			koffset = 0
 		}
-		if err = hashKey(hph.keccak, cell.storageAddr[koffset:cell.storageAddrLen], hashedKeyBuf[:], hashedKeyOffset, hph.cellHashBuf[:]); err != nil {
+		if err := hashKey(hph.keccak, cell.storageAddr[koffset:cell.storageAddrLen], hashedKeyBuf[:], hashedKeyOffset, hph.cellHashBuf[:]); err != nil {
 			return nil, storageRootHashIsSet, nil, err
 		}
 		hashedKeyBuf[64-hashedKeyOffset] = terminatorHexByte // Add terminator
@@ -1018,7 +1018,8 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 		}
 		hashedKeyBuf[64-depth] = terminatorHexByte // Add terminator
 		if !storageRootHashIsSet {
-			if cell.extLen > 0 { // Extension
+			switch {
+			case cell.extLen > 0: // Extension
 				if cell.hashLen == 0 {
 					return nil, storageRootHashIsSet, nil, errors.New("computeCellHash extension without hash")
 				}
@@ -1034,10 +1035,10 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 				cell.stateHashLen = 0
 				hadToReset.Add(1)
 				storageRootHashIsSet = true
-			} else if cell.hashLen > 0 {
+			case cell.hashLen > 0:
 				storageRootHash = cell.hash
 				storageRootHashIsSet = true
-			} else {
+			default:
 				storageRootHash = empty.RootHash
 			}
 		}
@@ -1079,7 +1080,8 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 	}
 
 	buf = append(buf, 0x80+32)
-	if cell.extLen > 0 { // Extension
+	switch {
+	case cell.extLen > 0: // Extension
 		if cell.hashLen > 0 {
 			if hph.traceW != nil {
 				fmt.Fprintf(hph.traceW, "extensionHash for [%x]=>[%x]\n", cell.extension[:cell.extLen], cell.hash[:cell.hashLen])
@@ -1092,13 +1094,13 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 		} else {
 			return nil, storageRootHashIsSet, storageRootHash[:], errors.New("computeCellHash extension without hash")
 		}
-	} else if cell.hashLen > 0 {
+	case cell.hashLen > 0:
 		buf = append(buf, cell.hash[:cell.hashLen]...)
-	} else if storageRootHashIsSet {
+	case storageRootHashIsSet:
 		buf = append(buf, storageRootHash[:]...)
 		copy(cell.hash[:], storageRootHash[:])
 		cell.hashLen = int16(len(storageRootHash))
-	} else {
+	default:
 		buf = append(buf, emptyRootHashBytes...)
 	}
 	return buf, storageRootHashIsSet, storageRootHash[:], nil
@@ -1135,7 +1137,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 				// if account key is empty, then we need to hash storage key from the key beginning
 				koffset = 0
 			}
-			if err = cell.hashStorageKey(hph.keccak, koffset, 0, hashedKeyOffset, hph.cellHashBuf[:]); err != nil {
+			if err := cell.hashStorageKey(hph.keccak, koffset, 0, hashedKeyOffset, hph.cellHashBuf[:]); err != nil {
 				return nil, err
 			}
 			cell.hashedExtension[64-hashedKeyOffset] = terminatorHexByte // Add terminator
@@ -1173,7 +1175,8 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 		}
 		cell.hashedExtension[64-depth] = terminatorHexByte // Add terminator
 		if !storageRootHashIsSet {
-			if cell.extLen > 0 { // Extension
+			switch {
+			case cell.extLen > 0: // Extension
 				if cell.hashLen == 0 {
 					return nil, errors.New("computeCellHash extension without hash")
 				}
@@ -1188,9 +1191,9 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 				}
 				cell.stateHashLen = 0
 				hadToReset.Add(1)
-			} else if cell.hashLen > 0 {
+			case cell.hashLen > 0:
 				storageRootHash = cell.hash
-			} else {
+			default:
 				storageRootHash = empty.RootHash
 			}
 		}
@@ -1227,7 +1230,8 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 	}
 
 	buf = append(buf, 0x80+32)
-	if cell.extLen > 0 { // Extension
+	switch {
+	case cell.extLen > 0: // Extension
 		if cell.hashLen > 0 {
 			if hph.traceW != nil {
 				fmt.Fprintf(hph.traceW, "extensionHash for [%x]=>[%x]\n", cell.extension[:cell.extLen], cell.hash[:cell.hashLen])
@@ -1239,13 +1243,13 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 		} else {
 			return nil, errors.New("computeCellHash extension without hash")
 		}
-	} else if cell.hashLen > 0 {
+	case cell.hashLen > 0:
 		buf = append(buf, cell.hash[:cell.hashLen]...)
-	} else if storageRootHashIsSet {
+	case storageRootHashIsSet:
 		buf = append(buf, storageRootHash[:]...)
 		copy(cell.hash[:], storageRootHash[:])
 		cell.hashLen = int16(len(storageRootHash))
-	} else {
+	default:
 		buf = append(buf, emptyRootHashBytes...)
 	}
 	return buf, nil
@@ -1394,7 +1398,7 @@ func (hph *HexPatriciaHashed) witnessMaterializeBranch(branchPrefix []byte, chil
 		if childDepth > 64 {
 			c.accountAddrLen = 0
 		}
-		if err = c.deriveHashedKeys(childDepth, hph.keccak, hph.accountKeyLen, hph.cellHashBuf[:]); err != nil {
+		if err := c.deriveHashedKeys(childDepth, hph.keccak, hph.accountKeyLen, hph.cellHashBuf[:]); err != nil {
 			return nil, err
 		}
 		cellHash, _, _, err := hph.witnessComputeCellHashWithStorage(&c, childDepth, nil)
@@ -1955,15 +1959,16 @@ func (hph *HexPatriciaHashed) foldPropagate(row int, nibble, upDepth, depth int1
 // foldDelete handles the updateKindDelete case: everything at this row was deleted.
 func (hph *HexPatriciaHashed) foldDelete(row int, nibble, upDepth int16, upCell *cell, updateKey []byte) error {
 	if hph.touchMap[row] != 0 {
-		if row == 0 {
+		switch {
+		case row == 0:
 			// Root is deleted because the tree is empty
 			hph.rootTouched = true
 			hph.rootPresent = false
-		} else if upDepth == 64 {
+		case upDepth == 64:
 			// Special case - all storage items of an account have been deleted, but it does not automatically delete the account, just makes it empty storage
 			// Therefore we are not propagating deletion upwards, but turn it into a modification
 			hph.touchMap[row-1] |= uint16(1) << nibble
-		} else {
+		default:
 			// Deletion is propagated upwards
 			hph.touchMap[row-1] |= uint16(1) << nibble
 			hph.afterMap[row-1] &^= uint16(1) << nibble

@@ -124,7 +124,14 @@ func (a *ApiHandler) triggerELClientVersionFetch() {
 	if a.engine == nil || a.elClientVersion.Load() != nil {
 		return
 	}
-	if !a.elClientVersionFetching.CompareAndSwap(false, true) {
+	if a.elClientVersionFetching.Swap(true) {
+		return
+	}
+	// The fetch this call raced against may have cached the version and released the
+	// slot between the load above and this swap, so recheck before spending another
+	// engine round-trip.
+	if a.elClientVersion.Load() != nil {
+		a.elClientVersionFetching.Store(false)
 		return
 	}
 	go func() {
@@ -531,14 +538,15 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	rewardsCollector := blockBuldingMachine.BlockRewardsCollector
 	consensusValue := rewardsCollector.Attestations + rewardsCollector.ProposerSlashings + rewardsCollector.AttesterSlashings + rewardsCollector.SyncAggregate
 	var resp *beaconhttp.BeaconResponse
-	if block.IsBlinded() {
+	switch {
+	case block.IsBlinded():
 		resp = newBeaconResponse(block.ToBlinded())
-	} else if block.Version() >= clparams.GloasVersion {
+	case block.Version() >= clparams.GloasVersion:
 		// [Modified in Gloas:EIP7732] Return bare BeaconBlock (not BlockContents wrapper).
 		// In GLOAS/ePBS, blobs are delivered via the ExecutionPayloadEnvelope, not the
 		// block production response. The VC (Lighthouse v4) expects a plain BeaconBlock.
 		resp = newBeaconResponse(block.ToExecution().Block)
-	} else {
+	default:
 		resp = newBeaconResponse(block.ToExecution())
 	}
 	resp = resp.WithVersion(block.Version()).With("execution_payload_blinded", block.IsBlinded()).
@@ -885,11 +893,12 @@ func (a *ApiHandler) produceBeaconBody(
 			// parent bid. Pre-GLOAS blocks always had their payloads executed, so
 			// the EL head is parentBid.BlockHash (the last pre-GLOAS block hash).
 			isPreGloasParent := parentBid.ParentBlockHash == (common.Hash{}) && parentBid.Slot == 0
-			if isPreGloasParent {
+			switch {
+			case isPreGloasParent:
 				head = parentBid.BlockHash
-			} else if a.forkchoiceStore.GetHeadPayloadStatus() == cltypes.PayloadStatusFull &&
+			case a.forkchoiceStore.GetHeadPayloadStatus() == cltypes.PayloadStatusFull &&
 				a.forkchoiceStore.HasEnvelope(baseBlockRoot) &&
-				a.forkchoiceStore.ShouldBuildOnFull(forkchoice.ForkChoiceNode{Root: baseBlockRoot, PayloadStatus: cltypes.PayloadStatusFull}) {
+				a.forkchoiceStore.ShouldBuildOnFull(forkchoice.ForkChoiceNode{Root: baseBlockRoot, PayloadStatus: cltypes.PayloadStatusFull}):
 				head = parentBid.BlockHash
 				// Copy state and apply parent execution payload to compute correct withdrawals
 				stateCopy, err := baseState.Copy()
@@ -912,7 +921,7 @@ func (a *ApiHandler) produceBeaconBody(
 				// ProcessParentExecutionPayload can verify the root match
 				// against the parent bid's ExecutionRequestsRoot.
 				beaconBody.ParentExecutionRequests = envelope.Message.ExecutionRequests
-			} else {
+			default:
 				head = parentBid.ParentBlockHash
 			}
 		} else {
@@ -972,7 +981,8 @@ func (a *ApiHandler) produceBeaconBody(
 		retryTime := 10 * time.Millisecond
 		feeRecipient, _ := a.validatorParams.GetFeeRecipient(proposerIndex)
 		var withdrawals []*types.Withdrawal
-		if gloasWithdrawalsState != nil {
+		switch {
+		case gloasWithdrawalsState != nil:
 			// GLOAS FULL: compute withdrawals from the state copy with parent payload applied
 			clWithdrawals, err := state.GetExpectedWithdrawals(
 				gloasWithdrawalsState,
@@ -991,7 +1001,7 @@ func (a *ApiHandler) produceBeaconBody(
 					Address:   w.Address,
 				})
 			}
-		} else if stateVersion >= clparams.GloasVersion && gloasWithdrawalsState == nil {
+		case stateVersion >= clparams.GloasVersion && gloasWithdrawalsState == nil:
 			// GLOAS EMPTY: use cached payload_expected_withdrawals from state
 			cachedWithdrawals := baseState.GetPayloadExpectedWithdrawals()
 			if cachedWithdrawals != nil {
@@ -1006,7 +1016,7 @@ func (a *ApiHandler) produceBeaconBody(
 					})
 				}
 			}
-		} else {
+		default:
 			// Pre-GLOAS: compute withdrawals normally
 			clWithdrawals, err := state.GetExpectedWithdrawals(
 				baseState,
@@ -1550,6 +1560,11 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 		}
 	}
 	if err := validateBlindedBlockRequest(signedBlindedBlock, version); err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+	}
+	if err := solid.RangeErr(signedBlindedBlock.Block.Body.Attestations, func(_ int, attestation *solid.Attestation, _ int) error {
+		return attestation.ValidateForConfig(a.beaconChainCfg, version)
+	}); err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 	if isJSON {
@@ -2298,12 +2313,13 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) 
 		}
 		// aggregate signatures
 		var buf [96]byte
-		if len(signatures) == 0 {
+		switch len(signatures) {
+		case 0:
 			// no candidates to merge
 			return nil
-		} else if len(signatures) == 1 {
+		case 1:
 			copy(buf[:], signatures[0])
-		} else {
+		default:
 			aggSig, err := bls.AggregateSignatures(signatures)
 			if err != nil {
 				log.Warn("Cannot aggregate signatures", "err", err)

@@ -755,7 +755,7 @@ func TestOpTstore(t *testing.T) {
 		callContext = &CallContext{Contract: *NewContract(caller, caller, to, uint256.Int{})}
 		value       = common.Hex2Bytes("abcdef00000000000000abba000000000deaf000000c0de00100000000133700")
 	)
-	defer state.Release(false)
+	defer state.Close()
 
 	pc := uint64(0)
 	// push the value to the stack
@@ -990,7 +990,7 @@ func TestOpMCopy(t *testing.T) {
 		if dynamicCost, err := gasMcopy(evm, callContext, mdgas.MdGas{}, memorySize); err != nil {
 			t.Error(err)
 		} else {
-			haveGas = GasFastestStep + dynamicCost.Regular
+			haveGas = GasFastestStep + dynamicCost.Execution
 		}
 		// Expand mem
 		if memorySize > 0 {
