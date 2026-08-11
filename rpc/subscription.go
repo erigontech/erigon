@@ -194,6 +194,7 @@ func (n *RemoteNotifier) Notify(id ID, data any) error {
 }
 
 // Closed returns a channel that is closed when the RPC connection is closed.
+//
 // Deprecated: use subscription error channel
 func (n *RemoteNotifier) Closed() <-chan any {
 	return n.h.conn.closed()
