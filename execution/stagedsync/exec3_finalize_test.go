@@ -538,7 +538,7 @@ func (s *testFinalizeScenario) runFinalizeTx(t *testing.T, priorCoinbaseBalance 
 
 	task := result.Task.(*taskVersion)
 
-	writes, err := result.calcFees(task, vm, reader, s.rules)
+	writes, err := result.calcFees(task, vm, reader, s.rules, nil)
 	require.NoError(t, err)
 	return writes
 }
@@ -692,7 +692,7 @@ func TestFinalizeTxSimple_SenderIsCoinbase_AccumulatedAcrossTxs(t *testing.T) {
 
 		vm.FlushVersionedWrites(result.TxOut, true, "")
 
-		writes, err := result.calcFees(task, vm, reader, s.rules)
+		writes, err := result.calcFees(task, vm, reader, s.rules, nil)
 		require.NoError(t, err, "tx %d: calcFees", txIdx)
 
 		// Flush finalize writes so the next tx sees them via versionMap.
@@ -742,7 +742,7 @@ func TestFinalizeTxSimple_SenderIsCoinbase_ReExecutedIncarnation(t *testing.T) {
 
 	vm.FlushVersionedWrites(result.TxOut, true, "")
 
-	writes, err := result.calcFees(task, vm, reader, s.rules)
+	writes, err := result.calcFees(task, vm, reader, s.rules, nil)
 	require.NoError(t, err)
 
 	coinbaseWrite := findBalance(writes, s.coinbase)
@@ -833,7 +833,7 @@ func TestFinalizeTxSimple_AccumulatedFees(t *testing.T) {
 		// Flush TxOut to versionMap (simulates line 1928).
 		vm.FlushVersionedWrites(result.TxOut, true, "")
 
-		writes, err := result.calcFees(task, vm, reader, s.rules)
+		writes, err := result.calcFees(task, vm, reader, s.rules, nil)
 		require.NoError(t, err)
 
 		// Flush finalize writes to versionMap for next TX.
