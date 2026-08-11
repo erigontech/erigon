@@ -342,87 +342,65 @@ type Update struct {
 	Step   kv.Step
 }
 
+type canonicalPublisher = CanonicalPublisher
+
 // Publisher is the mutation capability for canonical state. Normal readers
 // receive only ReadView, while code that makes database state durable uses a
 // Publisher to move every cache layer to the same Generation.
 type Publisher struct {
+	canonicalPublisher
 	c *StateCache
 }
 
 // Publisher returns a handle that can change the cache's canonical generation.
 // It must not be given to speculative execution whose writes may be discarded.
 func (c *StateCache) Publisher() Publisher {
-	return Publisher{c: c}
-}
-
-func (p Publisher) Enabled() bool { return p.c != nil }
-
-// Initialize binds the cache to the database and files generation seen by its
-// canonical owner. A mismatch clears entries and their file provenance because
-// neither can be proven compatible with that snapshot.
-func (p Publisher) Initialize(generation Generation) {
-	if p.c == nil {
-		return
+	if c == nil {
+		return Publisher{}
 	}
-	p.c.generation.Publisher().Initialize(generation, p.c.resetProvenanceAndClearLocked)
+	return Publisher{
+		canonicalPublisher: NewCanonicalPublisher(&c.generation, c.resetProvenanceAndClearLocked),
+		c:                  c,
+	}
 }
 
 // Publication represents one pending transition of the durable database
 // state. Begin makes the cache unavailable without changing its entries, so
 // Abort can restore the previous generation if the transaction rolls back.
-// Publish consumes the transition after the database commit succeeds.
 type Publication struct {
-	c          *StateCache
-	generation *GenerationPublication
+	lifecycle *CanonicalPublication
+	c         *StateCache
 }
 
-// Begin revokes every existing ReadView and prevents creation of a new live
-// view. It does not alter cache entries; they remain available for Abort until
-// the canonical database transaction either commits or rolls back.
 func (p Publisher) Begin() *Publication {
-	if p.c == nil {
+	lifecycle := p.canonicalPublisher.Begin()
+	if lifecycle == nil {
 		return nil
 	}
-	generation := p.c.generation.Publisher().Begin()
-	if generation == nil {
-		return nil
-	}
-	return &Publication{c: p.c, generation: generation}
+	return &Publication{lifecycle: lifecycle, c: p.c}
 }
 
-// Abort restores the previous generation after a failed or abandoned database
-// transaction. The entries were not changed during the transition, so the old
-// ReadViews become valid again together with their database version.
 func (p *Publication) Abort() {
 	if p == nil || p.c == nil {
 		return
 	}
-	p.generation.Abort()
+	p.lifecycle.Abort()
 	p.c = nil
 }
 
-// Publish applies updates from a successful database transaction and exposes
-// generation as one complete cache snapshot. txNumEnd is the exclusive end of
-// canonical execution covered by that commit across every state domain. The
-// caller must invoke Publish only after the database commit, so a visible cache
-// generation is never ahead of durable state.
-//
-// A forward commit can retain entries that were not updated because they still
-// have the same value in the new state. Canonical unwind sets clear because its
-// callbacks do not enumerate every value or file-coverage claim that may belong
-// to the discarded fork.
+// Publish applies updates after a successful database commit. txNumEnd is the
+// exclusive canonical boundary covered across every state domain. Forward
+// commits retain unchanged entries. A lineage replacement sets clear because
+// its updates do not enumerate every entry from the discarded state.
 func (p *Publication) Publish(generation Generation, txNumEnd uint64, updates []Update, clear bool) {
 	if p == nil || p.c == nil {
 		return
 	}
-	p.generation.Publish(generation, func() {
-		if clear {
-			p.c.resetProvenanceAndClearLocked()
-		}
+	p.lifecycle.Publish(generation, clear, func(_ *GenerationPublication) {
 		p.c.coverCanonicalStateLocked(txNumEnd)
 		for i := range updates {
 			p.c.applyLocked(updates[i])
 		}
-	}, p.c.resetProvenanceAndClearLocked)
+	})
 	p.c = nil
 }

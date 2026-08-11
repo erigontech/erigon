@@ -71,69 +71,56 @@ type BranchUpdate struct {
 	TxNum uint64
 }
 
+type canonicalPublisher = cache.CanonicalPublisher
+
 // BranchPublisher is the canonical mutation handle for BranchCache.
 type BranchPublisher struct {
+	canonicalPublisher
 	c *BranchCache
 }
 
 // Publisher returns a handle that can publish durable branch generations.
 func (c *BranchCache) Publisher() BranchPublisher {
-	return BranchPublisher{c: c}
-}
-
-func (p BranchPublisher) Enabled() bool {
-	return p.c != nil
-}
-
-// Initialize binds the cache to generation. A mismatch clears branches and
-// their file provenance because neither can be attributed to that snapshot.
-func (p BranchPublisher) Initialize(generation cache.Generation) {
-	if p.c == nil {
-		return
+	if c == nil {
+		return BranchPublisher{}
 	}
-	p.c.generation.Publisher().Initialize(generation, p.c.resetProvenanceAndClear)
+	return BranchPublisher{
+		canonicalPublisher: cache.NewCanonicalPublisher(&c.generation, c.resetProvenanceAndClear),
+		c:                  c,
+	}
 }
 
-// BranchPublication represents one pending durable branch transition.
+// BranchPublication is one pending durable branch transition.
 type BranchPublication struct {
-	c          *BranchCache
-	generation *cache.GenerationPublication
+	lifecycle *cache.CanonicalPublication
+	c         *BranchCache
 }
 
-// Begin revokes current BranchReadViews without changing branch entries.
 func (p BranchPublisher) Begin() *BranchPublication {
-	if p.c == nil {
+	lifecycle := p.canonicalPublisher.Begin()
+	if lifecycle == nil {
 		return nil
 	}
-	generation := p.c.generation.Publisher().Begin()
-	if generation == nil {
-		return nil
-	}
-	return &BranchPublication{c: p.c, generation: generation}
+	return &BranchPublication{lifecycle: lifecycle, c: p.c}
 }
 
-// Abort restores the previous branch generation after database rollback.
 func (p *BranchPublication) Abort() {
 	if p == nil || p.c == nil {
 		return
 	}
-	p.generation.Abort()
+	p.lifecycle.Abort()
 	p.c = nil
 }
 
-// Publish applies staged pin changes and committed branch updates before it
-// exposes generation. clear is required after canonical unwind because its
-// diffset is not a complete list of branches or file-coverage claims from the
-// discarded fork.
+// Publish applies staged pin changes and committed branch updates. Forward
+// commits retain unchanged branches. A lineage replacement sets clear because
+// its updates do not enumerate every branch from the discarded state.
 func (p *BranchPublication) Publish(generation cache.Generation, updates []BranchUpdate, clear bool, adaptive *AdaptivePinPlan) {
 	if p == nil || p.c == nil {
 		return
 	}
-	p.generation.Publish(generation, func() {
-		if clear {
-			p.c.resetProvenanceAndClear()
-		}
-		adaptive.apply(p.generation)
+	p.lifecycle.Publish(generation, clear, func(publication *cache.GenerationPublication) {
+		adaptive.apply(publication)
 		for i := range updates {
 			update := &updates[i]
 			if committedEnd := update.TxNum + 1; committedEnd > p.c.committedTxNumEnd {
@@ -145,6 +132,6 @@ func (p *BranchPublication) Publish(generation cache.Generation, updates []Branc
 			}
 			p.c.Put(update.Key, update.Value, update.Step)
 		}
-	}, p.c.resetProvenanceAndClear)
+	})
 	p.c = nil
 }
