@@ -284,7 +284,9 @@ func NewExecModule(
 		stopNode:                stopNode,
 	}
 
-	// Share the execution state cache with read-ahead.
+	// Wire the process-global state cache into the read-ahead so its
+	// prefetches populate the same StateCache that SharedDomains.GetLatest
+	// probes on the EVM hot path.
 	if readAheader != nil {
 		readAheader.SetStateCache(domainCache)
 	}

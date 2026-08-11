@@ -42,11 +42,16 @@ func (c *StateCache) View(generation Generation) ReadView {
 	return ReadView{c: c, generation: c.generation.View(generation)}
 }
 
+// Get retrieves data for the given domain and key.
+// Returns (value, true) on cache hit — including (nil, true) for cached negatives —
+// and (nil, false) on cache miss.
 func (v ReadView) Get(domain kv.Domain, key []byte) ([]byte, bool) {
 	value, _, ok := v.GetWithStep(domain, key)
 	return value, ok
 }
 
+// GetWithStep also returns the entry's source step so an in-flight unwind can
+// reject a hit above its per-key bound.
 func (v ReadView) GetWithStep(domain kv.Domain, key []byte) ([]byte, kv.Step, bool) {
 	value, step, ok := ReadCurrentWithStep(v.generation, func() ([]byte, uint64, bool) {
 		value, step, ok := v.c.getWithStep(domain, key)
@@ -55,18 +60,23 @@ func (v ReadView) GetWithStep(domain kv.Domain, key []byte) ([]byte, kv.Step, bo
 	return value, kv.Step(step), ok
 }
 
+// GetCodeByHash retrieves code bytes by their Ethereum codeHash (keccak256),
+// bypassing the addr-keyed CodeDomain lookup. Returns (nil, false) on miss.
 func (v ReadView) GetCodeByHash(codeHash []byte) ([]byte, bool) {
 	return ReadCurrent(v.generation, func() ([]byte, bool) {
 		return v.c.getCodeByHash(codeHash)
 	})
 }
 
+// GetCodeSizeByHash returns the cached code length for codeHash.
 func (v ReadView) GetCodeSizeByHash(codeHash []byte) (int, bool) {
 	return ReadCurrent(v.generation, func() (int, bool) {
 		return v.c.getCodeSizeByHash(codeHash)
 	})
 }
 
+// GetAddrCodeHash returns the Ethereum codeHash for addr without an
+// account-domain round-trip. The hash is zero when ok is false.
 func (v ReadView) GetAddrCodeHash(addr []byte) ([32]byte, bool) {
 	return ReadCurrent(v.generation, func() ([32]byte, bool) {
 		return v.c.getAddrCodeHash(addr)
@@ -77,6 +87,8 @@ func (v ReadView) canFill() bool {
 	return v.c != nil && !v.c.disableFills && v.generation.Current()
 }
 
+// Fill offers a value read from this view. It never overwrites an authoritative
+// entry, and final admission rejects a view revoked by concurrent publication.
 func (v ReadView) Fill(domain kv.Domain, key, value []byte, step kv.Step) {
 	if !v.canFill() {
 		return
@@ -88,6 +100,7 @@ func (v ReadView) Fill(domain kv.Domain, key, value []byte, step kv.Step) {
 	v.c.fill(v.generation, domain, key, value, step)
 }
 
+// SeedAddrCodeHash offers a binding derived from an account read in this view.
 func (v ReadView) SeedAddrCodeHash(addr []byte, hash [32]byte) {
 	if !v.canFill() {
 		return
@@ -95,6 +108,7 @@ func (v ReadView) SeedAddrCodeHash(addr []byte, hash [32]byte) {
 	v.c.seedAddrCodeHash(v.generation, addr, hash)
 }
 
+// FillCodeSize records a derived size only while this generation is current.
 func (v ReadView) FillCodeSize(codeHash []byte, size int) {
 	if !v.canFill() {
 		return

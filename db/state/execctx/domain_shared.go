@@ -232,13 +232,17 @@ type SharedDomains struct {
 	mem               kv.TemporalMemBatch
 	metrics           kvmetrics.DomainMetrics
 
-	// blockOverlay accumulates block metadata while execution holds only a read
-	// transaction. It is flushed atomically with domain state. The pointer is
-	// atomic because concurrent readers may load it while Close clears it.
+	// blockOverlay is an in-memory overlay for block-level metadata writes (headers, bodies,
+	// canonical hashes, TD, stage progress, forkchoice markers). It allows execution to
+	// operate without holding an RwTx — writes accumulate here and are flushed atomically
+	// alongside domain state via Flush().
+	// Atomic because concurrent readers may load the pointer while Close clears it.
 	blockOverlay atomic.Pointer[membatchwithdb.MemoryMutation]
 
-	// parent is an optional read-through chain for uncommitted domain state and
-	// accumulated diffsets. A child reads but never writes its parent.
+	// parent is an optional parent SD for read-through chaining. When set,
+	// domain reads that miss in the local mem batch fall through to the parent's
+	// mem batch before consulting the underlying tx. Accumulated diffsets follow
+	// the same chain, and a child never writes its parent.
 	parent *SharedDomains
 
 	// stateCache provides generation-bound reads and fills. statePublisher is set
@@ -1032,9 +1036,10 @@ func (sd *SharedDomains) Close() {
 	sd.sdCtx = nil
 }
 
-// Flush writes the in-memory batch without committing or publishing cache
-// updates. A SharedDomains with canonical publication authority must use Commit
-// so the database and cache become visible in that order.
+// Flush writes the in-memory batch into tx without committing. It deliberately
+// does not publish cache updates because the caller may still roll the
+// transaction back. A SharedDomains with canonical publication authority must
+// use Commit so the database and cache become visible in that order.
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	defer mxFlushTook.ObserveDuration(time.Now())
 	return sd.flushMem(ctx, tx)

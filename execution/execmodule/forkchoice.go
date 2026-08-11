@@ -703,8 +703,8 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			}()
 		}
 
-		// Pass the outer roTx so it is released before Commit and the MDBX
-		// commit observes openTxs=1.
+		// Flush + commit: pass the outer roTx so it gets released between
+		// Flush and Commit, so the commit sees openTxs=1 in MDBX.
 		commitTimings, err := e.runForkchoiceFlushCommit(currentContext, roTx, finishProgressBefore, isSynced)
 		if err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
@@ -805,12 +805,13 @@ func (e *ExecModule) dispatchNotificationsFromOverlay(sd *execctx.SharedDomains,
 // runForkchoiceFlushCommit opens a brief RwTx, flushes the SharedDomains
 // (block overlay + domain mem), commits, then updates the sentry head.
 //
-// roTxToCloseBeforeCommit may be nil. Releasing it before Commit lets the write
-// transaction observe openTxs=1 in MDBX, so GC can reclaim pages freed during
-// the commit instead of pinning them behind the old reader. Commit flushes the
-// in-memory overlay into rwTx and does not read from the old transaction, so
-// closing that reader first is safe. Rollback is idempotent, so an outer defer
-// may still call it.
+// roTxToCloseBeforeCommit (may be nil) is released between Flush and Commit so
+// the commit transaction observes openTxs=1 in MDBX rather than 2. This lets
+// MDBX GC reclaim pages freed during the commit window immediately, instead of
+// pinning them behind the still-open RO reader until the next commit. SD.Flush
+// only writes in-memory state to rwTx and does not read from the RO tx, so
+// closing it after Flush is safe. Rollback is idempotent, so callers keep their
+// outer `defer roTx.Rollback()` unchanged.
 func (e *ExecModule) runForkchoiceFlushCommit(sd *execctx.SharedDomains, roTxToCloseBeforeCommit kv.TemporalTx, finishProgressBefore uint64, isSynced bool) ([]any, error) {
 	timings := make([]any, 0, 2)
 

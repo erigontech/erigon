@@ -33,9 +33,13 @@ import "github.com/erigontech/erigon/db/kv"
 // Cache is the interface for domain caches.
 // Implementations: DomainCache (for Account/Storage), CodeCache (for Code).
 type Cache interface {
+	// Get returns ok=true for a cached value, including a cached negative with a
+	// nil value. ok=false means the caller must read the backing store.
 	Get(key []byte) (value []byte, ok bool)
+	// GetWithStep also returns the source step used to enforce bounded reads.
 	GetWithStep(key []byte) (value []byte, step kv.Step, ok bool)
 	Put(key, value []byte, step kv.Step)
+	// PutIfAbsent is the reader-fill path; an existing authoritative value wins.
 	PutIfAbsent(key, value []byte, step kv.Step)
 
 	Delete(key []byte)
