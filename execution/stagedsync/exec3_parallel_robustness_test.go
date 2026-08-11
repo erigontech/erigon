@@ -1410,6 +1410,7 @@ func TestApplyLoopCloseBranchSurfacesDeferredRootBeforeMissing(t *testing.T) {
 		err := applyLoopMissingBlocksError(ctx, 5, 10, mkSet(5, 6), mkSet(5))
 		require.ErrorIs(t, err, context.Canceled)
 		require.True(t, commonerrors.IsOnlyCanceled(err))
+		require.ErrorContains(t, err, "without a blockResult: [6]")
 	})
 
 	t.Run("missing block during cancellation preserves a real cause", func(t *testing.T) {
@@ -1420,6 +1421,7 @@ func TestApplyLoopCloseBranchSurfacesDeferredRootBeforeMissing(t *testing.T) {
 		err := applyLoopMissingBlocksError(ctx, 5, 10, mkSet(5, 6), mkSet(5))
 		require.ErrorIs(t, err, cause)
 		require.False(t, commonerrors.IsOnlyCanceled(err))
+		require.ErrorContains(t, err, "without a blockResult: [6]")
 	})
 
 	t.Run("deferred root + no missing block — root error surfaces", func(t *testing.T) {

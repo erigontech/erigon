@@ -1432,18 +1432,19 @@ func applyLoopMissingBlocks(txResultBlocks, appliedBlocks map[uint64]struct{}) [
 	return missing
 }
 
-// applyLoopMissingBlocksError preserves a parent cancellation cause because
-// cancellation may close the result stream before terminal block results arrive.
+// applyLoopMissingBlocksError keeps missing-result details while preserving a
+// parent cancellation cause for classification.
 func applyLoopMissingBlocksError(ctx context.Context, lastBlockResult, maxBlockNum uint64, txResultBlocks, appliedBlocks map[uint64]struct{}) error {
 	missing := applyLoopMissingBlocks(txResultBlocks, appliedBlocks)
 	if len(missing) == 0 {
 		return nil
 	}
-	if cause := context.Cause(ctx); cause != nil {
-		return cause
-	}
-	return fmt.Errorf("parallel exec apply loop exited (lastBlockResult=%d maxBlockNum=%d) but %d block(s) had tx-results without a blockResult: %v",
+	detail := fmt.Sprintf("parallel exec apply loop exited (lastBlockResult=%d maxBlockNum=%d) but %d block(s) had tx-results without a blockResult: %v",
 		lastBlockResult, maxBlockNum, len(missing), missing)
+	if cause := context.Cause(ctx); cause != nil {
+		return fmt.Errorf("%s: %w", detail, cause)
+	}
+	return errors.New(detail)
 }
 
 // applyLoopFlushAsComplete returns the `complete` flag for
