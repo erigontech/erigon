@@ -57,7 +57,7 @@ type SharedDomainsCommitmentContext struct {
 	sharedDomains sd
 	updates       *commitment.Updates
 	patriciaTrie  commitment.Trie
-	variant       commitment.TrieVariant // selected trie engine, for the [commitment] log (updates.Mode() is ModeParallel for both parallel and streaming)
+	variant       commitment.TrieVariant // selected trie engine, for the [commitment] log (updates.Mode() is ModeParallel for the parallel trie)
 	justRestored  atomic.Bool            // set to true when commitment trie was just restored from snapshot
 	traceW        io.Writer
 	stateReader   StateReader
@@ -75,8 +75,8 @@ type SharedDomainsCommitmentContext struct {
 	// pendingUpdate stores a single deferred branch update to be flushed at the next ComputeCommitment call.
 	pendingUpdate *commitment.PendingCommitmentUpdate
 
-	// pendingVariant holds a parallel/streaming trie selection that waits for
-	// EnableParaTrieDB: those variants need the DB-backed TrieContextFactory.
+	// pendingVariant holds a parallel trie selection that waits for
+	// EnableParaTrieDB: that variant needs the DB-backed TrieContextFactory.
 	pendingVariant commitment.TrieVariant
 	pendingCfg     commitment.TrieConfig
 }
@@ -231,12 +231,11 @@ func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, tmpDir strin
 			NumWorkers: cfg.WarmupNumWorkersOrDefault(),
 		},
 	}
-	// The parallel and streaming tries need a per-worker TrieContextFactory that
-	// only DB-backed consumers can provide (via EnableParaTrieDB). Start on the
-	// sequential trie and upgrade when the DB arrives, so context holders that
-	// never wire one (RPC, integrity, tests) keep working under a global variant
-	// selection.
-	if variant == commitment.VariantParallelHexPatricia || variant == commitment.VariantStreamingHexPatricia {
+	// The parallel trie needs a per-worker TrieContextFactory that only DB-backed
+	// consumers can provide (via EnableParaTrieDB). Start on the sequential trie
+	// and upgrade when the DB arrives, so context holders that never wire one
+	// (RPC, integrity, tests) keep working under a global variant selection.
+	if variant == commitment.VariantParallelHexPatricia {
 		ctx.pendingVariant = variant
 		cfg.Variant = commitment.VariantHexPatriciaTrie
 		ctx.pendingCfg = cfg
@@ -561,8 +560,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 			trie.SetTrieContextFactory(concurrentFactory)
 		default:
 			// Serial: this factory only serves page-cache warmup, which does not
-			// compute the root, so its reads need no generation pin. (Streaming is
-			// a *ParallelPatriciaHashed and takes the pinned branch above.)
+			// compute the root, so its reads need no generation pin.
 			warmupConfig.CtxFactory = sdc.warmupTrieContextFactory(sdc.paraTrieDB, txNum)
 		}
 	}
@@ -792,7 +790,7 @@ func DecodeTxBlockNums(v []byte) (txNum, blockNum uint64) {
 // Found value does not become current state.
 func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(trieContext *TrieContext) (blockNum, txNum uint64, state []byte, err error) {
 	tv := sdc.patriciaTrie.Variant()
-	if tv != commitment.VariantHexPatriciaTrie && tv != commitment.VariantParallelHexPatricia && tv != commitment.VariantStreamingHexPatricia {
+	if tv != commitment.VariantHexPatriciaTrie && tv != commitment.VariantParallelHexPatricia {
 		return 0, 0, nil, errors.New("state storing is only supported hex patricia trie")
 	}
 	var step kv.Step
@@ -931,7 +929,7 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 			return 0, 0, errors.New("cannot typecast hex patricia trie")
 		}
 	}
-	if tv == commitment.VariantParallelHexPatricia || tv == commitment.VariantStreamingHexPatricia {
+	if tv == commitment.VariantParallelHexPatricia {
 		var ok bool
 		ppht, ok = sdc.patriciaTrie.(*commitment.ParallelPatriciaHashed)
 		if !ok {

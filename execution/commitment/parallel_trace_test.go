@@ -44,7 +44,7 @@ func TestTracePrefix_NilDisables(t *testing.T) {
 	require.Nil(t, tracePrefix(nil, "[x] "))
 }
 
-// Concurrent fold workers (the parallel/streaming trie) each own a prefixWriter
+// Concurrent fold workers (the parallel trie) each own a prefixWriter
 // over one shared syncWriter; every emitted line must stay whole and carry its
 // worker tag — never interleaved or corrupted mid-line.
 func TestSyncWriter_ConcurrentLinesStayAttributed(t *testing.T) {
