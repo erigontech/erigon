@@ -267,7 +267,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 		lastExecutedStep := kv.Step(uint64(se.lastExecutedTxNum.Load()) / se.doms.StepSize())
 
-		if shouldMarkExhaustedAtBlock(initialCycle, lastExecutedStep, lastFrozenStep, dbg.DiscardCommitment(), blockLimit, blockNum, startBlockNum, maxBlockNum) {
+		if shouldMarkExhaustedAtBlock(initialCycle, lastExecutedStep, lastFrozenStep, se.cfg.discardCommitment, blockLimit, blockNum, startBlockNum, maxBlockNum) {
 			return b.HeaderNoCopy(), rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block limit reached"}
 		}
 	}
