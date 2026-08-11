@@ -1194,6 +1194,77 @@ func TestRunApplyLoopExhaustionDoesNotCancelExecutor(t *testing.T) {
 	require.NoError(t, context.Cause(executorCtx))
 }
 
+type recordChannelHandler chan *log.Record
+
+func (h recordChannelHandler) Log(record *log.Record) error {
+	h <- record
+	return nil
+}
+
+func (h recordChannelHandler) Enabled(context.Context, log.Lvl) bool { return true }
+
+func TestWaitForTeardownPhase(t *testing.T) {
+	newExecutor := func() (*parallelExecutor, <-chan *log.Record) {
+		records := make(chan *log.Record, 1)
+		logger := log.New()
+		logger.SetHandler(recordChannelHandler(records))
+		return &parallelExecutor{txExecutor: txExecutor{logger: logger, logPrefix: "test"}}, records
+	}
+
+	t.Run("slow phase warns without returning", func(t *testing.T) {
+		const warnAfter = 10 * time.Millisecond
+		pe, records := newExecutor()
+		gate := make(chan struct{})
+		var releaseOnce sync.Once
+		release := func() { releaseOnce.Do(func() { close(gate) }) }
+		t.Cleanup(release)
+		started := make(chan struct{})
+		finished := make(chan struct{})
+
+		go func() {
+			pe.waitForTeardownPhase(warnAfter, "worker pool", func() {
+				close(started)
+				<-gate
+			})
+			close(finished)
+		}()
+		<-started
+
+		select {
+		case record := <-records:
+			require.Equal(t, log.LvlWarn, record.Lvl)
+			require.Contains(t, record.Msg, "executor teardown is still running")
+			require.Equal(t, []any{"phase", "worker pool", "elapsed", warnAfter}, record.Ctx)
+		case <-time.After(5 * time.Second):
+			t.Fatal("slow teardown phase did not emit a warning")
+		}
+
+		select {
+		case <-finished:
+			t.Fatal("warning deadline abandoned the teardown wait")
+		default:
+		}
+
+		release()
+		select {
+		case <-finished:
+		case <-time.After(5 * time.Second):
+			t.Fatal("teardown phase did not return after its work completed")
+		}
+	})
+
+	t.Run("completed phase stays silent", func(t *testing.T) {
+		pe, records := newExecutor()
+		pe.waitForTeardownPhase(time.Hour, "executor group", func() {})
+
+		select {
+		case record := <-records:
+			t.Fatalf("completed teardown phase emitted a warning: %s", record.Msg)
+		default:
+		}
+	})
+}
+
 // wait suppresses cancellation-only results and joins every group member.
 func TestParallelExecWait(t *testing.T) {
 	newPE := func(group func() error) *parallelExecutor {

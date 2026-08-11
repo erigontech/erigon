@@ -1762,10 +1762,16 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, func(erro
 		execLoopCtxCancel(cause)
 		cancelWorkers()
 
-		pe.in.Release()
-		pe.stopWorkers()
+		pe.waitForTeardownPhase(executorTeardownWarningDelay, "worker pool", func() {
+			pe.in.Release()
+			pe.stopWorkers()
+		})
 
-		return pe.wait()
+		var waitErr error
+		pe.waitForTeardownPhase(executorTeardownWarningDelay, "executor group", func() {
+			waitErr = pe.wait()
+		})
+		return waitErr
 	}
 
 	if err != nil {
@@ -1793,6 +1799,18 @@ func joinWorkers(waitWorkers func() error) error {
 		return fmt.Errorf("worker pool: %w", err)
 	}
 	return nil
+}
+
+const executorTeardownWarningDelay = 10 * time.Second
+
+func (pe *parallelExecutor) waitForTeardownPhase(warnAfter time.Duration, phase string, wait func()) {
+	logger := pe.logger
+	message := fmt.Sprintf("[%s] executor teardown is still running", pe.logPrefix)
+	timer := time.AfterFunc(warnAfter, func() {
+		logger.Warn(message, "phase", phase, "elapsed", warnAfter)
+	})
+	defer timer.Stop()
+	wait()
 }
 
 // wait joins every executor goroutine. Cancellation-only results are routine
