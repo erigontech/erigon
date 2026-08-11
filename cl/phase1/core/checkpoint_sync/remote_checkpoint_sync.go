@@ -181,7 +181,7 @@ func (r *RemoteCheckpointSync) fetchEnvelope(ctx context.Context, stateURI strin
 		return nil, fmt.Errorf("finalized envelope fetch failed, status %d", resp.StatusCode)
 	}
 
-	marshaled, err := io.ReadAll(resp.Body)
+	marshaled, err := readEnvelopeHTTPBody(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("finalized envelope read failed: %w", err)
 	}
@@ -194,6 +194,17 @@ func (r *RemoteCheckpointSync) fetchEnvelope(ctx context.Context, stateURI strin
 	}
 	log.Info("[Checkpoint Sync] Finalized envelope retrieved", "beaconBlockRoot", envelope.Message.BeaconBlockRoot)
 	return envelope, nil
+}
+
+func readEnvelopeHTTPBody(r io.Reader) ([]byte, error) {
+	body, err := io.ReadAll(io.LimitReader(r, int64(clparams.MaxChunkSize)+1))
+	if err != nil {
+		return nil, err
+	}
+	if uint64(len(body)) > clparams.MaxChunkSize {
+		return nil, fmt.Errorf("execution payload envelope response too large: max %d bytes", clparams.MaxChunkSize)
+	}
+	return body, nil
 }
 
 // normalizeCheckpointURL ensures the URL includes the beacon state API path.

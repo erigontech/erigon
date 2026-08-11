@@ -612,7 +612,7 @@ func fetchEnvelopesFromBeaconAPI(
 			if err != nil {
 				return
 			}
-			body, err := io.ReadAll(resp.Body)
+			body, err := readEnvelopeHTTPBody(resp.Body)
 			resp.Body.Close()
 			if err != nil || resp.StatusCode != http.StatusOK {
 				return
@@ -638,6 +638,17 @@ func fetchEnvelopesFromBeaconAPI(
 		}
 	}
 	return fetched
+}
+
+func readEnvelopeHTTPBody(r io.Reader) ([]byte, error) {
+	body, err := io.ReadAll(io.LimitReader(r, int64(clparams.MaxChunkSize)+1))
+	if err != nil {
+		return nil, err
+	}
+	if uint64(len(body)) > clparams.MaxChunkSize {
+		return nil, fmt.Errorf("execution payload envelope response too large: max %d bytes", clparams.MaxChunkSize)
+	}
+	return body, nil
 }
 
 // GetHighestProcessedSlot retrieve the highest processed slot we accumulated.

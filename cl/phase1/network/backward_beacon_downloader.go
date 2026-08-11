@@ -716,7 +716,7 @@ func (b *BackwardBeaconDownloader) fetchSingleEnvelope(ctx context.Context, bloc
 	if err != nil {
 		return nil, err
 	}
-	body, err := io.ReadAll(resp.Body)
+	body, err := readEnvelopeHTTPBody(resp.Body)
 	resp.Body.Close()
 	if err != nil {
 		return nil, err
