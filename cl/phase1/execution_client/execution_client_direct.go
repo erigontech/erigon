@@ -126,6 +126,9 @@ func (cc *ExecutionClientDirect) NewPayload(
 	return PayloadStatusNone, errors.New("unexpected status")
 }
 
+// ErrForkChoiceUpdateBusy reports that the execution layer never adopted the requested head.
+var ErrForkChoiceUpdateBusy = errors.New("execution layer busy, forkchoice not adopted")
+
 func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized, safe, head common.Hash, attr *engine_types.PayloadAttributes, _ clparams.StateVersion) ([]byte, error) {
 	status, _, _, err := cc.chainRW.UpdateForkChoice(ctx, head, safe, finalized)
 	if err != nil {
@@ -139,6 +142,12 @@ func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized
 	}
 	if attr == nil {
 		return nil, nil
+	}
+	// A busy update means the execution layer never adopted this head. Assembling anyway
+	// builds on the wrong parent, and the timestamp dedup then pins that dead payload id for
+	// the rest of the slot, so every later getPayload fails.
+	if status == execmodule.ExecutionStatusBusy {
+		return nil, ErrForkChoiceUpdateBusy
 	}
 	// Retry AssembleBlock if the EL is busy (semaphore contention with
 	// fork choice commits). This is common in single-process dev mode
