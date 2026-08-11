@@ -83,7 +83,6 @@ func BenchmarkMoreConflictsBigSerialFloor(b *testing.B) {
 						}
 					}
 				}
-				b.StartTimer()
 				d, e, a := runParallelStats(b, tasks, logger)
 				total += d
 				execs += e
@@ -98,19 +97,23 @@ func BenchmarkMoreConflictsBigSerialFloor(b *testing.B) {
 
 // runParallelStats is runParallel without the trailing write-set replay,
 // reporting how many task executions the block cost and how many were aborted.
-func runParallelStats(tb testing.TB, tasks []exec.Task, logger log.Logger) (time.Duration, int64, int64) {
-	tb.Helper()
-	ctx := tb.Context()
+// It runs the timer itself: building the db and seeding the state costs more the
+// wider the write sets get, which is the axis these benchmarks sweep, so leaving
+// it in ns/op would dilute the very effect they measure. The caller stops the
+// timer before it builds the tasks.
+func runParallelStats(b *testing.B, tasks []exec.Task, logger log.Logger) (time.Duration, int64, int64) {
+	b.Helper()
+	ctx := b.Context()
 
-	dirs := datadir.New(tb.TempDir())
-	db := temporaltest.NewTestDB(tb, dirs)
+	dirs := datadir.New(b.TempDir())
+	db := temporaltest.NewTestDB(b, dirs)
 
 	tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
-	require.NoError(tb, err)
+	require.NoError(b, err)
 	defer tx.Rollback()
 
 	domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
-	require.NoError(tb, err)
+	require.NoError(b, err)
 	defer domains.Close()
 
 	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
@@ -129,7 +132,7 @@ func runParallelStats(tb testing.TB, tasks []exec.Task, logger log.Logger) (time
 	}
 
 	executorContext, executorCancel, err := pe.run(ctx)
-	require.NoError(tb, err)
+	require.NoError(b, err)
 	defer executorCancel(nil)
 
 	for _, task := range tasks {
@@ -138,12 +141,14 @@ func runParallelStats(tb testing.TB, tasks []exec.Task, logger log.Logger) (time
 		task.ctx = executorContext //nolint:fatcontext
 	}
 
-	seedTaskState(tb, domains, tx, tasks)
+	seedTaskState(b, domains, tx, tasks)
 
+	b.StartTimer()
 	start := time.Now()
-	_, err = executeParallelWithCheck(tb, pe, tasks, false, nil, false)
+	_, err = executeParallelWithCheck(b, pe, tasks, false, nil, false)
 	d := time.Since(start)
-	require.NoError(tb, err)
+	b.StopTimer()
+	require.NoError(b, err)
 
 	return d, pe.execCount.Load(), pe.abortCount.Load()
 }
@@ -245,7 +250,6 @@ func BenchmarkApplyLoop(b *testing.B) {
 				for _, t := range tasks {
 					t.(*testExecTask).setupDelay = 0
 				}
-				b.StartTimer()
 				d, e, a := runParallelStats(b, tasks, logger)
 				total += d
 				execs += e
