@@ -1207,11 +1207,6 @@ var (
 		Usage: "Enables background pruning post fcu",
 		Value: ethconfig.Defaults.FcuBackgroundPrune,
 	}
-	FcuBackgroundCommitFlag = cli.BoolFlag{
-		Name:  "fcu.background.commit",
-		Usage: "Enables background flush and commit",
-		Value: ethconfig.Defaults.FcuBackgroundCommit,
-	}
 	MCPDisableFlag = cli.BoolFlag{
 		Name:  "mcp.disable",
 		Usage: "Disables the embedded MCP server",
@@ -2071,7 +2066,6 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 
 	cfg.FcuTimeout = ctx.Duration(FcuTimeoutFlag.Name)
 	cfg.FcuBackgroundPrune = ctx.Bool(FcuBackgroundPruneFlag.Name)
-	cfg.FcuBackgroundCommit = ctx.Bool(FcuBackgroundCommitFlag.Name)
 
 	// Executor performance toggles. When the user explicitly sets the CLI
 	// flag, it overrides the env-var default that dbg read at package init.
