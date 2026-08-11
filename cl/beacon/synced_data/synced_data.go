@@ -168,6 +168,10 @@ func (s *SyncedDataManager) ViewHeadState(fn ViewHeadStateFn) error {
 		return ErrNotSynced
 	}
 	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.stateHead.Load() == nil || s.headState == nil {
+		return ErrNotSynced
+	}
 	if dbg.CaplinSyncedDataMangerDeadlockDetection {
 		trace := dbg.Stack()
 		ch := make(chan struct{})
@@ -181,7 +185,6 @@ func (s *SyncedDataManager) ViewHeadState(fn ViewHeadStateFn) error {
 		}()
 		defer close(ch)
 	}
-	defer s.mu.RUnlock()
 	if err := fn(s.headState); err != nil {
 		return err
 	}

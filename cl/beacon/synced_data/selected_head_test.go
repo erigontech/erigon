@@ -134,3 +134,17 @@ func TestViewHeadStateWithIdentityStaysInOneGeneration(t *testing.T) {
 	}
 	writers.Wait()
 }
+
+func TestViewHeadStateRejectsMissingStateAfterReadinessPublished(t *testing.T) {
+	manager := NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+	manager.stateHead.Store(&headIdentity{root: common.Hash{0xaa}, slot: 100})
+	called := false
+
+	err := manager.ViewHeadState(func(*state.CachingBeaconState) error {
+		called = true
+		return nil
+	})
+
+	require.ErrorIs(t, err, ErrNotSynced)
+	require.False(t, called)
+}
