@@ -1058,6 +1058,26 @@ func TestExecutionPayloadIndexWritePanicDoesNotReportSuccessToWaiter(t *testing.
 	require.Equal(t, int32(2), db.calls.Load())
 }
 
+func TestStoreAnchorEnvelopeCompletesBookkeepingAfterCommittedDumpWarning(t *testing.T) {
+	root := common.HexToHash("0x1234")
+	blockHash := common.HexToHash("0xabcd")
+	eth2Roots, err := lru.New[common.Hash, common.Hash](16)
+	require.NoError(t, err)
+	store := &ForkChoiceStore{
+		forkGraph: payloadVoteForkGraph{dumpEnvelopeErr: errors.Join(fork_graph.ErrEnvelopeCommitted, errors.New("sync directory"))},
+		eth2Roots: eth2Roots,
+	}
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
+		BeaconBlockRoot: root,
+		Payload:         &cltypes.Eth1Block{BlockHash: blockHash},
+	}}
+
+	require.NoError(t, store.StoreAnchorEnvelope(root, envelope))
+	persistedHash, ok := eth2Roots.Get(root)
+	require.True(t, ok)
+	require.Equal(t, blockHash, persistedHash)
+}
+
 // TestValidateEnvelopeAgainstBlock_NoBid tests that validation fails when block has no bid
 func TestValidateEnvelopeAgainstBlock_NoBid(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
