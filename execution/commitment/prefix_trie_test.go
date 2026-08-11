@@ -225,6 +225,81 @@ func TestPrefixTrieArenaReuse(t *testing.T) {
 	assert.Equal(t, first, tr.arena.nodeCount())
 }
 
+func TestPrefixArenaAllocExt(t *testing.T) {
+	t.Run("capEqualsLen", func(t *testing.T) {
+		a := newPrefixArena()
+		ext := a.allocExt([]byte{1, 2, 3, 4, 5})
+		assert.Equal(t, []byte{1, 2, 3, 4, 5}, ext)
+		assert.Equal(t, len(ext), cap(ext), "allocExt must not hand out spare capacity")
+	})
+
+	t.Run("emptyInputReturnsNil", func(t *testing.T) {
+		a := newPrefixArena()
+		assert.Nil(t, a.allocExt(nil))
+		assert.Nil(t, a.allocExt([]byte{}))
+	})
+
+	t.Run("appendPastCapDoesNotAliasNextExtension", func(t *testing.T) {
+		a := newPrefixArena()
+		first := a.allocExt([]byte{1, 2, 3})
+		second := a.allocExt([]byte{4, 5, 6})
+
+		first = append(first, 0xFF, 0xFF, 0xFF, 0xFF)
+
+		assert.Equal(t, []byte{4, 5, 6}, second, "growing one extension past its cap must not corrupt the next")
+		assert.Equal(t, []byte{1, 2, 3, 0xFF, 0xFF, 0xFF, 0xFF}, first)
+	})
+}
+
+func TestPrefixTrieExtSurvivesChunkBoundary(t *testing.T) {
+	tr := newPrefixTrie()
+
+	// keys share nibbles [4:keyLen) so leaf extensions stay long; nibbles [0:4) alone already
+	// make every key distinct, which is what drives enough allocExt traffic to cross a chunk.
+	const keyLen = 32
+	const total = 6000
+	want := make(map[string]bool, total)
+	for i := range total {
+		k := make([]byte, keyLen)
+		v := i
+		for j := range 4 {
+			k[j] = byte(v % 16)
+			v /= 16
+		}
+		want[string(k)] = true
+		tr.Insert(k, nil, nil)
+	}
+	require.Greater(t, len(tr.arena.extChunks), 1, "test must actually cross a chunk boundary")
+
+	got := make(map[string]bool, total)
+	for _, e := range collectWalk(tr) {
+		if len(e.prefix) == keyLen {
+			got[string(e.prefix)] = true
+		}
+	}
+	assert.Equal(t, want, got, "leaf extensions must reproduce their original key bytes after crossing a chunk boundary")
+}
+
+func TestPrefixTrieArenaReusesExtChunkBacking(t *testing.T) {
+	tr := newPrefixTrie()
+	tr.Insert(nibs(0x01, 0x02, 0x03, 0x04), nil, nil)
+
+	chunk := tr.arena.extChunks[0]
+	full := chunk[:cap(chunk)]
+
+	tr.Reset()
+
+	require.Len(t, tr.arena.extChunks, 1, "Reset must trim trailing chunks")
+	assert.Empty(t, tr.arena.extChunks[0], "Reset must truncate the reused chunk's length")
+	assert.Equal(t, cap(chunk), cap(tr.arena.extChunks[0]), "Reset must keep the chunk's capacity")
+
+	tr.Insert(nibs(0x05, 0x06, 0x07, 0x08), nil, nil)
+	require.Len(t, tr.root.children, 1)
+	newExt := tr.root.children[0].ext
+	assert.Equal(t, nibs(0x06, 0x07, 0x08), newExt)
+	assert.Equal(t, newExt, full[:len(newExt)], "post-reset extension must land in the same backing array as before Reset")
+}
+
 func TestPrefixTrieArenaSpansMultipleSlabs(t *testing.T) {
 	tr := newPrefixTrie()
 	// Allocate directly to cross the slab boundary; reaching it via inserts needs >prefixSlabSize keys.
