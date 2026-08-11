@@ -79,6 +79,10 @@ type Args struct {
 	hasDownloaded bool
 }
 
+func (c *Cfg) BlobDownloader() *network2.BlobHistoryDownloader {
+	return c.blobDownloader
+}
+
 func ClStagesCfg(
 	ctx context.Context,
 	rpc *rpc.BeaconRpcP2P,

@@ -19,12 +19,14 @@ package network
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -70,10 +72,13 @@ func TestBlobHistoryDownloaderWaitsWithoutPeers(t *testing.T) {
 
 func newBoundaryDownloader(t *testing.T, headSlot, frozenBlobs, targetSlot, peers uint64, reader freezeblocks.BeaconSnapshotReader) *BlobHistoryDownloader {
 	t.Helper()
+	beaconCfg := clparams.MainnetBeaconConfig
+	beaconCfg.DenebForkEpoch = 0
+	beaconCfg.FuluForkEpoch = math.MaxUint64
 	downloader := &BlobHistoryDownloader{
 		ctx:           t.Context(),
-		beaconCfg:     &clparams.MainnetBeaconConfig,
-		peerCounter:   boundaryPeerCounter(peers),
+		beaconCfg:     &beaconCfg,
+		rpc:           boundaryPeerClient(peers),
 		indiciesDB:    memdb.NewTestDB(t, dbcfg.ChainDB),
 		blockReader:   reader,
 		sn:            boundarySnapshot(frozenBlobs),
@@ -97,9 +102,13 @@ func (r *boundaryBlockReader) ReadBeaconBlockBodyBySlot(_ context.Context, _ kv.
 	return nil, r.err
 }
 
-type boundaryPeerCounter uint64
+type boundaryPeerClient uint64
 
-func (p boundaryPeerCounter) Peers() (uint64, error) { return uint64(p), nil }
+func (p boundaryPeerClient) Peers() (uint64, error) { return uint64(p), nil }
+
+func (boundaryPeerClient) SendBlobsSidecarByIdentifierReq(context.Context, *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error) {
+	return nil, "", nil
+}
 
 type boundarySnapshot uint64
 

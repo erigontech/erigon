@@ -19,6 +19,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -29,7 +30,7 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 var blobSidecarSSZLenght = (*cltypes.BlobSidecar)(nil).EncodingSizeSSZ()
@@ -37,6 +38,10 @@ var blobSidecarSSZLenght = (*cltypes.BlobSidecar)(nil).EncodingSizeSSZ()
 type caplinBlobSnapshotReader interface {
 	FrozenBlobs() uint64
 	ReadBlobSidecars(slot uint64) ([]*cltypes.BlobSidecar, error)
+}
+
+type BlobBackfillStatus interface {
+	BlobBackfillPending(slot uint64) bool
 }
 
 func (a *ApiHandler) GetEthV1BeaconBlobSidecars(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -68,11 +73,23 @@ func (a *ApiHandler) GetEthV1BeaconBlobSidecars(w http.ResponseWriter, r *http.R
 		return nil, err
 	}
 
-	out, found, err := a.readBlobSidecars(ctx, *slot, blockRoot, canonicalRoot)
+	strIdxs, err := beaconhttp.StringListFromQueryParams(r, "indices")
 	if err != nil {
 		return nil, err
 	}
-	strIdxs, err := beaconhttp.StringListFromQueryParams(r, "indices")
+	included := make(map[uint64]struct{}, len(strIdxs))
+	for _, idx := range strIdxs {
+		i, err := strconv.ParseUint(idx, 10, 64)
+		if err != nil {
+			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+		}
+		if _, duplicate := included[i]; duplicate {
+			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("duplicate blob index %d", i))
+		}
+		included[i] = struct{}{}
+	}
+
+	out, _, pending, err := a.readBlobSidecarsWithBackfillStatus(ctx, *slot, blockRoot, canonicalRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -82,29 +99,25 @@ func (a *ApiHandler) GetEthV1BeaconBlobSidecars(w http.ResponseWriter, r *http.R
 	isFinalized := canonicalRoot == blockRoot && *slot <= a.forkchoiceStore.FinalizedSlot()
 
 	resp := solid.NewStaticListSSZ[*cltypes.BlobSidecar](696969, blobSidecarSSZLenght)
-	if !found {
-		return beaconhttp.NewBeaconResponse(resp).
-			WithFinalized(isFinalized).
-			WithVersion(version).
-			WithOptimistic(isOptimistic), nil
-	}
-	if len(strIdxs) == 0 {
+	includeAll := len(strIdxs) == 0
+	if includeAll {
 		for _, v := range out {
 			resp.Append(v)
 		}
 	} else {
-		included := make(map[uint64]struct{})
-		for _, idx := range strIdxs {
-			i, err := strconv.ParseUint(idx, 10, 64)
-			if err != nil {
-				return nil, err
-			}
-			included[i] = struct{}{}
-		}
 		for _, v := range out {
 			if _, ok := included[v.Index]; ok {
 				resp.Append(v)
 			}
+		}
+	}
+	if pending {
+		missingExpected, err := a.requestedBlobSidecarsMissing(ctx, tx, *slot, included, includeAll, out)
+		if err != nil {
+			return nil, err
+		}
+		if missingExpected {
+			return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("blob sidecars are still being backfilled"))
 		}
 	}
 
@@ -112,6 +125,47 @@ func (a *ApiHandler) GetEthV1BeaconBlobSidecars(w http.ResponseWriter, r *http.R
 		WithFinalized(isFinalized).
 		WithVersion(version).
 		WithOptimistic(isOptimistic), nil
+}
+
+func (a *ApiHandler) blobBackfillPending(slot uint64, blockRoot, canonicalRoot common.Hash) bool {
+	if a.blobBackfillStatus == nil || !a.blobBackfillStatus.BlobBackfillPending(slot) || blockRoot != canonicalRoot {
+		return false
+	}
+	if a.caplinSnapshots != nil && slot < a.caplinSnapshots.FrozenBlobs() {
+		return false
+	}
+	return true
+}
+
+func (a *ApiHandler) requestedBlobSidecarsMissing(ctx context.Context, tx kv.Tx, slot uint64, included map[uint64]struct{}, includeAll bool, available []*cltypes.BlobSidecar) (bool, error) {
+	block, err := a.blockReader.ReadBeaconBlockBodyBySlot(ctx, tx, slot)
+	if err != nil {
+		return false, err
+	}
+	if block == nil {
+		return false, nil
+	}
+	if block.Block == nil || block.Block.Body == nil {
+		return false, errors.New("block body is missing")
+	}
+	commitments := block.Block.Body.GetBlobKzgCommitments()
+	if commitments == nil || commitments.Len() == 0 {
+		return false, nil
+	}
+	availableIndices := make(map[uint64]struct{}, len(available))
+	for _, sidecar := range available {
+		availableIndices[sidecar.Index] = struct{}{}
+	}
+	if includeAll {
+		return len(availableIndices) < commitments.Len(), nil
+	}
+	for index := range included {
+		_, available := availableIndices[index]
+		if index < uint64(commitments.Len()) && !available {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (a *ApiHandler) readBlobSidecars(ctx context.Context, slot uint64, blockRoot, canonicalRoot common.Hash) ([]*cltypes.BlobSidecar, bool, error) {
@@ -122,7 +176,28 @@ func (a *ApiHandler) readBlobSidecars(ctx context.Context, slot uint64, blockRoo
 		}
 		return sidecars, len(sidecars) != 0, nil
 	}
-	return a.blobStoage.ReadBlobSidecars(ctx, slot, blockRoot)
+	sidecars, complete, err := a.blobStoage.ReadBlobSidecars(ctx, slot, blockRoot)
+	if err != nil || complete || blockRoot != canonicalRoot || a.caplinSnapshots == nil || slot >= a.caplinSnapshots.FrozenBlobs() {
+		return sidecars, complete, err
+	}
+	sidecars, err = a.caplinSnapshots.ReadBlobSidecars(slot)
+	return sidecars, len(sidecars) != 0, err
+}
+
+func (a *ApiHandler) readBlobSidecarsWithBackfillStatus(ctx context.Context, slot uint64, blockRoot, canonicalRoot common.Hash) ([]*cltypes.BlobSidecar, bool, bool, error) {
+	sidecars, complete, err := a.readBlobSidecars(ctx, slot, blockRoot, canonicalRoot)
+	if err != nil {
+		return sidecars, complete, false, err
+	}
+	pending := a.blobBackfillPending(slot, blockRoot, canonicalRoot)
+	if complete || pending {
+		return sidecars, complete, pending, nil
+	}
+	sidecars, complete, err = a.readBlobSidecars(ctx, slot, blockRoot, canonicalRoot)
+	if err != nil || complete {
+		return sidecars, complete, false, err
+	}
+	return sidecars, false, a.blobBackfillPending(slot, blockRoot, canonicalRoot), nil
 }
 
 func (a *ApiHandler) GetEthV1DebugBeaconDataColumnSidecars(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -262,41 +337,46 @@ func (a *ApiHandler) GetEthV1BeaconBlobs(w http.ResponseWriter, r *http.Request)
 			indicies[i] = uint64(i)
 		}
 	} else {
-		// take the blobs by the versioned hashes
-		versionedHashesToIndex := make(map[common.Hash]uint64)
+		selected := make(map[common.Hash]struct{}, len(versionedHashes))
+		for _, encodedHash := range versionedHashes {
+			var hash common.Hash
+			if err := hash.UnmarshalText([]byte(encodedHash)); err != nil {
+				return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("invalid versioned hash %q: %w", encodedHash, err))
+			}
+			if _, duplicate := selected[hash]; duplicate {
+				return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("duplicate versioned hash %s", hash))
+			}
+			selected[hash] = struct{}{}
+		}
 		commitments.Range(func(index int, value *cltypes.KZGCommitment, length int) bool {
 			hash, err := utils.KzgCommitmentToVersionedHash(common.Bytes48(*value))
 			if err != nil {
 				return false
 			}
-			versionedHashesToIndex[hash] = uint64(index)
+			if _, ok := selected[hash]; ok {
+				indicies = append(indicies, uint64(index))
+			}
 			return true
 		})
-		for _, hash := range versionedHashes {
-			index, ok := versionedHashesToIndex[common.HexToHash(hash)]
-			if ok {
-				indicies = append(indicies, index)
-			}
-		}
 	}
 
 	// collect the blobs
 	blobs := solid.NewStaticListSSZ[*cltypes.Blob](int(a.beaconChainCfg.MaxBlobCommittmentsPerBlock), int(cltypes.BYTES_PER_BLOB))
-	blobSidecars, found, err := a.readBlobSidecars(ctx, *slot, blockRoot, canonicalRoot)
+	blobSidecars, _, pending, err := a.readBlobSidecarsWithBackfillStatus(ctx, *slot, blockRoot, canonicalRoot)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
-	if !found {
-		return beaconhttp.NewBeaconResponse(blobs).
-			WithFinalized(canonicalRoot == blockRoot && *slot <= a.forkchoiceStore.FinalizedSlot()).
-			WithOptimistic(a.forkchoiceStore.IsRootOptimistic(blockRoot)), nil
+	byIndex := make(map[uint64]*cltypes.BlobSidecar, len(blobSidecars))
+	for _, sidecar := range blobSidecars {
+		byIndex[sidecar.Index] = sidecar
 	}
 	for _, index := range indicies {
-		if index >= uint64(len(blobSidecars)) {
-			log.Warn("blob index out of range", "index", index, "len", len(blobSidecars))
-			return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, errors.New("blob index out of range"))
+		if sidecar := byIndex[index]; sidecar != nil {
+			blobs.Append(&sidecar.Blob)
 		}
-		blobs.Append(&blobSidecars[index].Blob)
+	}
+	if pending && blobs.Len() < len(indicies) {
+		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("blobs are still being backfilled"))
 	}
 
 	return beaconhttp.NewBeaconResponse(blobs).

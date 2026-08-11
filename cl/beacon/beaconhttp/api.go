@@ -83,6 +83,7 @@ func (e EndpointError) Unwrap() error {
 }
 
 func (e *EndpointError) WriteTo(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(e.Code)
 	encErr := json.NewEncoder(w).Encode(e)
 	if encErr != nil {

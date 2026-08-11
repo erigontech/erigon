@@ -405,7 +405,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		}
 
 		if cfg.blobDownloader != nil {
-			cfg.blobDownloader.SetHeadSlot(cfg.startingSlot + 1)
+			cfg.blobDownloader.SetHead(cfg.startingSlot+1, common.Hash{}, 0)
 			cfg.blobDownloader.SetNotifyBlobBackfilled(cfg.antiquary.NotifyBlobBackfilled)
 			cfg.blobDownloader.Start()
 		}
