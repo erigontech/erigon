@@ -1169,7 +1169,7 @@ func (sdb *IntraBlockState) synthesizeCreatedAccountBase(addr accounts.Address) 
 	// the address mid-execution and reconcile the fork out of validation's
 	// sight. Only a provisional (mid-load) probe may adopt fresh cells — the
 	// stale conclusion re-executes via commit-time validation instead.
-	if tr, ok := sdb.versionedReads.GetAddress(addr); ok && tr.Source != ProvisionalRead && (tr.Val == nil || tr.Val.Account() == nil) {
+	if sdb.consumedAddressAbsence(addr) {
 		return nil, false
 	}
 	if destructed, sdRes, ok := sdb.versionMap.ReadSelfDestruct(addr, sdb.txIndex); ok && sdRes.Status() == MVReadResultDone && destructed {
@@ -1223,6 +1223,14 @@ func (sdb *IntraBlockState) synthesizeCreatedAccountBase(addr accounts.Address) 
 	}
 	acc.Root.SetBytes(trie.EmptyRoot[:])
 	return acc, true
+}
+
+// consumedAddressAbsence reports whether this tx holds a definitive
+// (non-provisional) nil AddressPath read — it already concluded the account is
+// absent, so later loads must not adopt cells flushed since.
+func (sdb *IntraBlockState) consumedAddressAbsence(addr accounts.Address) bool {
+	tr, ok := sdb.versionedReads.GetAddress(addr)
+	return ok && tr.Source != ProvisionalRead && (tr.Val == nil || tr.Val.Account() == nil)
 }
 
 // finalizeProvisionalAddressRead demotes a load's in-flight nil record probe
@@ -1315,6 +1323,18 @@ func (sdb *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 	// re-created it, in which case fall through to the normal read.
 	if sdb.eip8246 && readAccount == nil {
 		if destructed, sdRes, ok := sdb.versionMap.ReadSelfDestruct(addr, sdb.txIndex); ok && sdRes.Status() == MVReadResultDone && destructed {
+			// A definitive nil AddressPath read means this tx already consumed the
+			// account's absence, so reconstructing from cells flushed since would
+			// fork its view out of validation's sight — abort and re-execute.
+			// Exempt only an absence concluded from this destruct itself,
+			// recorded as a MapRead at the destruct cell's exact version.
+			if tr, ok := sdb.versionedReads.GetAddress(addr); ok && tr.Source != ProvisionalRead && (tr.Val == nil || tr.Val.Account() == nil) &&
+				!(tr.Source == MapRead && tr.Version.TxIndex == sdRes.DepIdx() && tr.Version.Incarnation == sdRes.Incarnation()) {
+				if sdRes.DepIdx() > sdb.dep {
+					sdb.dep = sdRes.DepIdx()
+				}
+				panic(ErrDependency)
+			}
 			destructTxIndex := sdRes.DepIdx()
 			// Only a genuine re-creation (a later CreateAccount, which writes
 			// AddressPath) skips reconstruction. Later Balance/Nonce/CodeHash
