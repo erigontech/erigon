@@ -412,6 +412,6 @@ func (p *Publication) Publish(generation Generation, updates []Update, clear boo
 		for i := range updates {
 			p.c.applyLocked(updates[i])
 		}
-	})
+	}, p.c.resetProvenanceAndClearLocked)
 	p.c = nil
 }

@@ -212,6 +212,7 @@ func (p *GenerationPublication) Abort() {
 		return
 	}
 	gate := p.gate
+	defer func() { p.gate = nil }()
 	gate.admissionMu.Lock()
 	defer gate.publicationMu.Unlock()
 	defer gate.admissionMu.Unlock()
@@ -219,24 +220,30 @@ func (p *GenerationPublication) Abort() {
 		panic("cache generation publication changed before abort")
 	}
 	gate.current.Store(p.previous)
-	p.gate = nil
 }
 
 // Publish applies the committed cache transition before exposing identity. The
 // state version comes from identity, while the files view is replaced by the
-// newest backing view known to the gate. This prevents a transaction opened
-// before a files publication from restoring its older files identity.
-func (p *GenerationPublication) Publish(identity Generation, apply func()) {
+// newest backing view known to the gate. If publication fails, clear runs while
+// fills remain blocked and the gate stays unpublished.
+func (p *GenerationPublication) Publish(identity Generation, apply, clear func()) {
 	if p == nil || p.gate == nil {
 		return
 	}
 	gate := p.gate
+	defer func() { p.gate = nil }()
 	gate.admissionMu.Lock()
 	defer gate.publicationMu.Unlock()
 	defer gate.admissionMu.Unlock()
 	if gate.current.Load() != nil {
 		panic("cache generation publication changed before publish")
 	}
+	completed := false
+	defer func() {
+		if !completed && clear != nil {
+			clear()
+		}
+	}()
 	if apply != nil {
 		apply()
 	}
@@ -247,7 +254,7 @@ func (p *GenerationPublication) Publish(identity Generation, apply func()) {
 		gate.filesKnown = true
 	}
 	gate.current.Store(&publishedGeneration{identity: identity})
-	p.gate = nil
+	completed = true
 }
 
 // Reset revokes all views, clears the cache, and leaves it unpublished. The

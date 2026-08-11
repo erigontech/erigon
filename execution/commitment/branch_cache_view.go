@@ -141,6 +141,6 @@ func (p *BranchPublication) Publish(generation cache.Generation, updates []Branc
 			}
 			p.c.Put(update.Key, update.Value, update.Step)
 		}
-	})
+	}, p.c.resetProvenanceAndClear)
 	p.c = nil
 }
