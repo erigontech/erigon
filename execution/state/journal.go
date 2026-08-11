@@ -108,11 +108,7 @@ func newJournal() *journal {
 // release returns the journal to the pool after resetting it.
 func (j *journal) release() {
 	j.Reset()
-	// [:cap] because Reset already resliced to zero. Only needed here: the pooled
-	// journal outlives the IntraBlockState, so a stale entry would pin the arena
-	// slab its prevObj names. While the state is alive the arena holds that slab
-	// anyway, so clearing per transaction would buy nothing.
-	clear(j.entries[:cap(j.entries)])
+	clear(j.entries[:cap(j.entries)]) // [:cap] because Reset already resliced to zero
 	journalPool.Put(j)
 }
 func (j *journal) Reset() {
