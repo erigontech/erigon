@@ -300,3 +300,41 @@ func TestComputeAheadCap_StopsComputeAhead(t *testing.T) {
 
 	assert.False(t, cc.computedAhead[5], "a compute-ahead past the coalesce block M must not run")
 }
+
+// TestContiguityGuard_ChainNeverRecovers pins that one block without a BAL ends
+// compute-ahead for the whole batch: the chain is anchored at the last block that
+// advanced the commitment domain, so every later block reads a stale baseline and
+// stays on the incremental path, however contiguous it is with its own predecessor.
+func TestContiguityGuard_ChainNeverRecovers(t *testing.T) {
+	defer func(prev bool) { dbg.BALDrivenCommitment = prev }(dbg.BALDrivenCommitment)
+	defer func(prev bool) { dbg.IgnoreBAL = prev }(dbg.IgnoreBAL)
+	dbg.BALDrivenCommitment = true
+	dbg.IgnoreBAL = false
+
+	ctx := context.Background()
+	cc := &commitmentCalculator{
+		signalCtx:     ctx,
+		pending:       map[uint64]*pendingBlock{},
+		computedAhead: map[uint64]bool{},
+		balRoots:      map[uint64][]byte{},
+		hasFirstBlock: true,
+		firstBlockNum: 5,
+		perBlockFrom:  1 << 62, // all blocks pre-window, so none owns a changeset
+		// Block 5 computed ahead, block 6 had no BAL and never advanced the domain.
+		hasComputedAhead:       true,
+		lastComputedAheadBlock: 5,
+		hasSeenBlockResult:     true,
+	}
+
+	for n := uint64(7); n <= 12; n++ {
+		cc.lastBlockResultSeen = n - 1 // gate open: only the contiguity guard may reject
+		cc.pending[n] = &pendingBlock{
+			req:  &blockRequest{blockNum: n, bal: make(types.BlockAccessList, 1)},
+			mode: calcModeBALDriven,
+		}
+		cc.maybeComputeAhead(ctx, n)
+		assert.False(t, cc.computedAhead[n], "block %d must not compute ahead across the gap at block 6", n)
+		assert.True(t, cc.computeAheadStopped, "the fall back to incremental must be reported at block %d", n)
+	}
+	assert.Equal(t, uint64(5), cc.lastComputedAheadBlock, "the chain must stay anchored at block 5")
+}
