@@ -25,6 +25,8 @@ const prefixExtChunkSize = 65536
 // children is dense: len == popcount(bitmap). subtreeCount is the number of distinct keys in the
 // subtree; re-inserting an existing key merges its update without bumping it.
 type prefixNode struct {
+	// ext is arena-backed: it stays valid only until the owning trie's Reset, which
+	// recycles the chunk in place. A reader that must outlive the batch copies it.
 	ext          []byte
 	children     []*prefixNode
 	plainKey     []byte  // set only where a key terminates
@@ -69,10 +71,16 @@ func (a *prefixArena) allocNode() *prefixNode {
 }
 
 // allocExt copies b into the current chunk, swapping in a fresh chunk instead of growing this one
-// so sub-slices already handed out keep their backing array.
+// so sub-slices already handed out keep their backing array. An extension larger than a chunk gets
+// its own allocation rather than forcing a chunk to grow under live sub-slices.
 func (a *prefixArena) allocExt(b []byte) []byte {
 	if len(b) == 0 {
 		return nil
+	}
+	if len(b) > prefixExtChunkSize {
+		own := make([]byte, len(b))
+		copy(own, b)
+		return own
 	}
 	chunk := a.extChunks[a.extChunkIdx]
 	if cap(chunk)-len(chunk) < len(b) {
@@ -88,7 +96,8 @@ func (a *prefixArena) allocExt(b []byte) []byte {
 	return chunk[off:len(chunk):len(chunk)]
 }
 
-// resetArena clears touched nodes for reuse, keeping the first slab and releasing the rest.
+// resetArena clears touched nodes for reuse, keeping the first slab and releasing the rest, and
+// truncates the extension chunks in place so the next batch refills them without reallocating.
 func (a *prefixArena) resetArena() {
 	for i := 0; i <= a.slabIdx && i < len(a.slabs); i++ {
 		limit := prefixSlabSize
@@ -103,9 +112,9 @@ func (a *prefixArena) resetArena() {
 	a.slabIdx = 0
 	a.nextIdx = 0
 
-	clear(a.extChunks[1:])
-	a.extChunks = a.extChunks[:1]
-	a.extChunks[0] = a.extChunks[0][:0]
+	for i := range a.extChunks {
+		a.extChunks[i] = a.extChunks[i][:0]
+	}
 	a.extChunkIdx = 0
 }
 
@@ -186,7 +195,7 @@ func (t *prefixTrie) Insert(hashedKey, plainKey []byte, update *Update) (isNew b
 			node.plainKey = nil
 			node.update = nil
 
-			node.ext = oldExt[:m]
+			node.ext = oldExt[:m:m]
 
 			if m == len(remain) {
 				// Key ends inside the old extension: one child, no new sibling.

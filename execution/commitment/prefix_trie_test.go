@@ -257,7 +257,7 @@ func TestPrefixTrieExtSurvivesChunkBoundary(t *testing.T) {
 	// keys share nibbles [4:keyLen) so leaf extensions stay long; nibbles [0:4) alone already
 	// make every key distinct, which is what drives enough allocExt traffic to cross a chunk.
 	const keyLen = 32
-	const total = 6000
+	const total = 2 * prefixExtChunkSize / keyLen
 	want := make(map[string]bool, total)
 	for i := range total {
 		k := make([]byte, keyLen)
@@ -505,4 +505,43 @@ func TestPrefixTrieInsertDuplicateMerges(t *testing.T) {
 
 	// Merge is copy-on-write: a concurrent fold snapshot may still hold the prior update pointer.
 	assert.Equal(t, BalanceUpdate, first.Flags, "merge must not mutate the previously stored update")
+}
+
+func TestPrefixArenaAllocExt_OversizeAndReuse(t *testing.T) {
+	t.Run("extension larger than a chunk gets its own backing", func(t *testing.T) {
+		a := newPrefixArena()
+		big := bytes.Repeat([]byte{0x7}, prefixExtChunkSize+1)
+		got := a.allocExt(big)
+		require.Equal(t, big, got)
+		require.Equal(t, len(got), cap(got))
+		require.Len(t, a.extChunks, 1, "an oversize extension must not consume a chunk")
+		require.Empty(t, a.extChunks[0], "the current chunk must be untouched")
+	})
+
+	t.Run("reset refills existing chunks instead of reallocating", func(t *testing.T) {
+		a := newPrefixArena()
+		block := make([]byte, prefixExtChunkSize/4)
+		for range 12 {
+			a.allocExt(block)
+		}
+		require.Greater(t, len(a.extChunks), 1, "test must cross a chunk boundary")
+		grown := len(a.extChunks)
+		backing := make([]*byte, grown)
+		for i := range a.extChunks {
+			backing[i] = &a.extChunks[i][:1][0]
+		}
+
+		a.resetArena()
+		require.Len(t, a.extChunks, grown, "reset must keep the grown chunks")
+		for i := range a.extChunks {
+			require.Empty(t, a.extChunks[i])
+		}
+		for range 12 {
+			a.allocExt(block)
+		}
+		require.Len(t, a.extChunks, grown, "refill must reuse chunks, not allocate new ones")
+		for i := range a.extChunks {
+			require.Same(t, backing[i], &a.extChunks[i][:1][0], "chunk backing array must be reused")
+		}
+	})
 }
