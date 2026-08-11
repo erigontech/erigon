@@ -47,12 +47,6 @@ func (c *cell) StorageAddrLen() int { return int(c.storageAddrLen) }
 // HashLen returns the length of the cell hash.
 func (c *cell) HashLen() int { return int(c.hashLen) }
 
-// AccountAddr returns the account plain key bytes (up to accountAddrLen).
-func (c *cell) GetAccountAddr() []byte { return c.accountAddr[:c.accountAddrLen] }
-
-// StorageAddr returns the storage plain key bytes (up to storageAddrLen).
-func (c *cell) GetStorageAddr() []byte { return c.storageAddr[:c.storageAddrLen] }
-
 // CellHash returns the cell hash bytes (up to hashLen).
 func (c *cell) CellHash() []byte { return c.hash[:c.hashLen] }
 
