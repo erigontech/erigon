@@ -61,6 +61,10 @@ func progressiveResourceLimit(bytesPerElement int) int {
 	return int(clparams.MaxChunkSize) / bytesPerElement / 2
 }
 
+func (e *ExecutionRequests) Version() clparams.StateVersion {
+	return e.effectiveVersion()
+}
+
 func (e *ExecutionRequests) ensureLists() {
 	if e.cfg == nil {
 		panic("execution requests beacon config is nil")
