@@ -127,6 +127,11 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 		if previous := e.builders[previousID]; previous != nil {
 			previous.Cancel()
 		}
+		// Cancel freezes a builder where it stands, so a superseded id must stop being
+		// retrievable: otherwise GetAssembledBlock hands back whatever it had packed at
+		// that instant, which is near-empty when the supersede came early.
+		delete(e.builders, previousID)
+		delete(e.builderParameters, previousID)
 	}
 
 	// Initiate payload building

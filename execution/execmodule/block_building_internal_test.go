@@ -120,6 +120,47 @@ func TestAssembleBlockSupersedesBuilderForSameTimestamp(t *testing.T) {
 	require.NotContains(t, module.builderParameters, adjacentID)
 }
 
+func TestSupersededPayloadIDStopsBeingRetrievable(t *testing.T) {
+	started := make(chan struct{}, 4)
+	release := make(chan struct{})
+	module := &ExecModule{
+		logger:    log.Root(),
+		config:    &chain.Config{},
+		semaphore: semaphore.NewWeighted(1),
+		builders:  map[uint64]*builder.BlockBuilder{},
+		builderFunc: func(params *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
+			started <- struct{}{}
+			<-release
+			return nil, nil
+		},
+	}
+	t.Cleanup(func() {
+		close(release)
+		for _, blockBuilder := range module.builders {
+			if blockBuilder != nil {
+				_, _ = blockBuilder.Stop(context.Background())
+			}
+		}
+	})
+
+	first, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: 100, ParentHash: common.Hash{0x01}})
+	require.NoError(t, err)
+	<-started
+
+	second, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: 100, ParentHash: common.Hash{0x02}})
+	require.NoError(t, err)
+	require.NotEqual(t, first.PayloadID, second.PayloadID)
+
+	// A cancelled builder still holds whatever it had packed; serving that would mean
+	// proposing a near-empty block, so the superseded id must read as unknown instead.
+	require.NotContains(t, module.builders, first.PayloadID)
+	require.NotContains(t, module.builderParameters, first.PayloadID)
+
+	assembled, err := module.GetAssembledBlock(t.Context(), first.PayloadID)
+	require.NoError(t, err)
+	require.Nil(t, assembled.Block)
+}
+
 func TestAssembleBlockOwnsParameters(t *testing.T) {
 	type observedParameters struct {
 		parentRoot common.Hash
