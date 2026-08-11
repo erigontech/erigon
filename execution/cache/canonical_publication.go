@@ -45,8 +45,8 @@ type CanonicalPublication struct {
 	clear      func()
 }
 
-// Begin revokes current read views without changing entries, allowing Abort to
-// restore the previous generation if the database transaction fails.
+// Begin revokes current read views without changing entries. Abort can restore
+// the previous generation while no cache changes have been applied.
 func (p CanonicalPublisher) Begin() *CanonicalPublication {
 	generation := p.generation.Begin()
 	if generation == nil {

@@ -1057,8 +1057,6 @@ func (sd *SharedDomains) flushMem(ctx context.Context, tx kv.RwTx, opts ...kv.Fl
 }
 
 // Commit flushes and commits tx before publishing either process-global cache.
-// Cache views are revoked only around the database commit, so they continue to
-// serve the old durable version while the in-memory batch is being flushed.
 // A SharedDomains attached to either process-global cache must call
 // SetCanonicalCaches before Commit.
 // tx must be dedicated to this operation because Commit consumes it.

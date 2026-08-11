@@ -364,9 +364,10 @@ func (c *StateCache) Publisher() Publisher {
 	}
 }
 
-// Publication represents one pending transition of the durable database
-// state. Begin makes the cache unavailable without changing its entries, so
-// Abort can restore the previous generation if the transaction rolls back.
+// Publication represents one pending cache transition after durable state has
+// committed. Begin makes the cache unavailable without changing its entries;
+// Abort restores the previous generation if publication is abandoned before
+// applying changes.
 type Publication struct {
 	lifecycle *CanonicalPublication
 	c         *StateCache
