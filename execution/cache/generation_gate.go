@@ -81,8 +81,11 @@ type publishedGeneration struct {
 // durable database state over one compatible files view.
 type GenerationGate struct {
 	// current is nil until initialization and while publication is in progress.
-	current     atomic.Pointer[publishedGeneration]
-	admissionMu sync.RWMutex
+	current atomic.Pointer[publishedGeneration]
+	// resetLineage invalidates publisher handles captured before a full reset.
+	// Publisher reads it without publicationMu, so the counter must be atomic.
+	resetLineage atomic.Uint64
+	admissionMu  sync.RWMutex
 	// publicationMu orders durable cache publication with independent changes
 	// to the backing-file view. Begin holds it until Publish or Abort.
 	publicationMu sync.Mutex
@@ -163,14 +166,19 @@ func (v GenerationView) Admit(fill func()) bool {
 	return true
 }
 
-// GenerationPublisher is the mutation capability for one generation gate.
+// GenerationPublisher is the mutation capability for one reset lineage.
 type GenerationPublisher struct {
-	gate *GenerationGate
+	gate         *GenerationGate
+	resetLineage uint64
 }
 
-// Publisher returns a handle that can initialize and publish the gate.
+// Publisher returns a handle bound to the current reset lineage. Reset makes
+// existing handles inert so older work cannot re-establish a cleared generation.
 func (g *GenerationGate) Publisher() GenerationPublisher {
-	return GenerationPublisher{gate: g}
+	if g == nil {
+		return GenerationPublisher{}
+	}
+	return GenerationPublisher{gate: g, resetLineage: g.resetLineage.Load()}
 }
 
 // Initialize binds the gate to identity's state version and the newest files
@@ -183,7 +191,7 @@ func (p GenerationPublisher) Initialize(identity Generation, clear func()) {
 	gate := p.gate
 	gate.publicationMu.Lock()
 	defer gate.publicationMu.Unlock()
-	if gate.closed {
+	if gate.closed || p.resetLineage != gate.resetLineage.Load() {
 		return
 	}
 	gate.admissionMu.Lock()
@@ -222,7 +230,7 @@ func (p GenerationPublisher) Begin() *GenerationPublication {
 	}
 	gate := p.gate
 	gate.publicationMu.Lock()
-	if gate.closed {
+	if gate.closed || p.resetLineage != gate.resetLineage.Load() {
 		gate.publicationMu.Unlock()
 		return nil
 	}
@@ -304,8 +312,9 @@ func (p *GenerationPublication) Publish(identity Generation, apply, clear func()
 	completed = true
 }
 
-// Reset revokes all views, clears the cache, and leaves it unpublished. The
-// next durable publication can start from this empty state.
+// Reset revokes all views, clears the cache, and leaves it unpublished. It also
+// invalidates existing publisher handles; only a handle acquired afterwards can
+// establish the next durable generation.
 func (g *GenerationGate) Reset(clear func()) {
 	if g == nil {
 		return
@@ -317,6 +326,7 @@ func (g *GenerationGate) Reset(clear func()) {
 	}
 	g.admissionMu.Lock()
 	defer g.admissionMu.Unlock()
+	g.resetLineage.Add(1)
 	g.current.Store(nil)
 	g.files = FilesView{}
 	g.filesKnown = false
@@ -343,7 +353,7 @@ func (p GenerationPublisher) BeginBackingChange(files FilesView, reconcile func(
 	}
 	gate := p.gate
 	gate.publicationMu.Lock()
-	if gate.closed {
+	if gate.closed || p.resetLineage != gate.resetLineage.Load() {
 		gate.publicationMu.Unlock()
 		return nil
 	}

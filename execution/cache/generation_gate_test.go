@@ -89,3 +89,49 @@ func TestGenerationPublicationRejectsOlderStateVersion(t *testing.T) {
 	require.True(t, newerView.Current(), "an older publication must restore the newer token")
 	require.False(t, gate.View(StateGeneration(2, 0, 0, 0)).Current())
 }
+
+func TestGenerationPublisherCannotPublishAcrossReset(t *testing.T) {
+	var gate GenerationGate
+	stalePublisher := gate.Publisher()
+	generation := StateGeneration(1, 0, 0, 0)
+	stalePublisher.Initialize(generation, nil)
+
+	gate.Reset(nil)
+	applied := false
+	publication := stalePublisher.Begin()
+	if publication != nil {
+		publication.Publish(generation, func() { applied = true }, nil)
+	}
+
+	require.False(t, applied, "a publisher created before Reset must not apply updates afterwards")
+	require.False(t, gate.View(generation).Current(), "a publisher created before Reset must not restore the old generation")
+}
+
+func TestGenerationPublisherCannotInitializeAcrossReset(t *testing.T) {
+	var gate GenerationGate
+	stalePublisher := gate.Publisher()
+	generation := StateGeneration(1, 0, 0, 0)
+
+	gate.Reset(nil)
+	cleared := false
+	stalePublisher.Initialize(generation, func() { cleared = true })
+
+	require.False(t, cleared, "a publisher created before Reset must not initialize or clear the cache afterwards")
+	require.False(t, gate.View(generation).Current(), "a publisher created before Reset must not initialize a generation")
+}
+
+func TestGenerationPublisherCannotChangeBackingAcrossReset(t *testing.T) {
+	var gate GenerationGate
+	stalePublisher := gate.Publisher()
+
+	gate.Reset(nil)
+	reconciled, cleared := false, false
+	change := stalePublisher.BeginBackingChange(BranchFilesView(1), func(bool) bool {
+		reconciled = true
+		return true
+	}, func() { cleared = true })
+	change.Finish()
+
+	require.False(t, reconciled, "a publisher created before Reset must not reconcile backing files afterwards")
+	require.False(t, cleared, "a publisher created before Reset must not clear the cache afterwards")
+}

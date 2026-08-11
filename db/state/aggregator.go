@@ -568,7 +568,8 @@ func (a *Aggregator) BindStateCache(stateCache *cache.StateCache) {
 
 // ResetExecutionCaches revokes state backed by execution tables that are about
 // to be replaced outside SharedDomains.Commit. Both caches remain unpublished
-// until a later canonical owner initializes or publishes their new generation.
+// until a later canonical owner acquires new publishers and establishes their
+// replacement generations.
 func (a *Aggregator) ResetExecutionCaches() {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()

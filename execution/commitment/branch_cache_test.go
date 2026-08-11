@@ -500,6 +500,8 @@ func TestBranchCache_ResetRevokesViewsUntilNextPublication(t *testing.T) {
 	_, _, ok = c.View(testBranchGeneration(1)).Get(key)
 	require.False(t, ok, "Reset must leave the cache unpublished")
 
+	require.Nil(t, publisher.Begin(), "a publisher created before Reset must remain inert")
+	publisher = c.Publisher()
 	publication := publisher.Begin()
 	publication.Publish(testBranchGeneration(2), []BranchUpdate{{
 		Key:   key,

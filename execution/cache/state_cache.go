@@ -314,8 +314,9 @@ func (c *StateCache) resetProvenanceAndClearLocked() {
 	c.clearLocked()
 }
 
-// Reset revokes all views, clears entries and file provenance, and leaves the
-// cache unpublished until its canonical owner initializes or publishes it.
+// Reset revokes all views, clears entries and file provenance, and invalidates
+// existing publishers. A canonical owner must acquire a new publisher before it
+// can initialize or publish the cache again.
 func (c *StateCache) Reset() {
 	if c == nil {
 		return

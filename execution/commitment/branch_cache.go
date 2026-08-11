@@ -351,8 +351,8 @@ func (c *BranchCache) Close() {
 	activeBranchCaches.Add(-1)
 }
 
-// Reset clears cached branches and revokes all views until the next durable
-// publication.
+// Reset clears cached branches, revokes all views, and invalidates existing
+// publishers. Durable publication requires a publisher acquired afterwards.
 func (c *BranchCache) Reset() {
 	c.generation.Reset(c.resetProvenanceAndClear)
 }
