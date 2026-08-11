@@ -2050,18 +2050,23 @@ func (result *execResult) calcFees(
 		return nil, nil
 	}
 
-	coinbaseEntry := feeEntry{
-		addr:    result.Coinbase,
-		acc:     feeAddressAccount(coinbaseAcc, newCoinbaseBalance, coinbaseNonce),
-		reason:  tracing.BalanceIncreaseRewardTransactionFee,
-		deleted: coinbaseEmptied,
-		emit:    emitCoinbase,
+	var coinbaseEntry, burntEntry feeEntry
+	if emitCoinbase {
+		coinbaseEntry = feeEntry{
+			addr:    result.Coinbase,
+			acc:     feeAddressAccount(coinbaseAcc, newCoinbaseBalance, coinbaseNonce),
+			reason:  tracing.BalanceIncreaseRewardTransactionFee,
+			deleted: coinbaseEmptied,
+			emit:    true,
+		}
 	}
-	burntEntry := feeEntry{
-		addr:   burntAddr,
-		acc:    feeAddressAccount(burntAcc, newBurntBalance, 0),
-		reason: tracing.BalanceDecreaseGasBuy,
-		emit:   emitBurnt,
+	if emitBurnt {
+		burntEntry = feeEntry{
+			addr:   burntAddr,
+			acc:    feeAddressAccount(burntAcc, newBurntBalance, 0),
+			reason: tracing.BalanceDecreaseGasBuy,
+			emit:   true,
+		}
 	}
 	// The apply loop re-credits a tx once per validation round, and the credit
 	// only moves when a prior tx's writes moved under it. An unchanged credit
@@ -2488,6 +2493,14 @@ func (be *blockExecutor) invalidBlockResult(err error) *blockResult {
 	}
 }
 
+// recordWorkerWrites installs a worker result's write set and drops the fee
+// credit along with it: the credit belonged to the incarnation this result
+// supersedes, and crediting is what the apply loop does next.
+func (be *blockExecutor) recordWorkerWrites(tx int, txVersion state.Version, writes *state.WriteSet) {
+	be.blockIO.RecordWrites(txVersion, writes)
+	delete(be.feeMergeTemp, tx)
+}
+
 // creditedWrites returns ws when an earlier fee merge produced it for tx, which
 // makes it the one set already carrying the tx's fee credit. Anything else is
 // the worker's own output, which calcFees reads as the pre-credit balance.
@@ -2667,7 +2680,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		be.blockIO.RecordReads(txVersion, res.TxIn)
 
 		if res.Version().Incarnation == 0 {
-			be.blockIO.RecordWrites(txVersion, res.TxOut)
+			be.recordWorkerWrites(tx, txVersion, res.TxOut)
 		} else {
 			prevWrites := be.blockIO.WriteSet(txVersion.TxIndex)
 			hasWriteChange := res.TxOut.HasNewWrite(prevWrites)
@@ -2693,7 +2706,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				)
 			}
 
-			be.blockIO.RecordWrites(txVersion, res.TxOut)
+			be.recordWorkerWrites(tx, txVersion, res.TxOut)
 
 			if hasWriteChange {
 				be.validateTasks.pushPendingSet(be.execTasks.getRevalidationRange(tx + 1))
