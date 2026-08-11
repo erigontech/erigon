@@ -145,7 +145,7 @@ type IntraBlockState struct {
 	stateReader StateReader
 
 	// This map holds 'live' objects, which will get modified while processing a state transition.
-	stateObjects      map[accounts.Address]*stateObject
+	stateObjects      map[accounts.Address]*stateObject // used only if `noMaterialize == false`
 	stateObjectsDirty map[accounts.Address]struct{}
 
 	nilAccounts map[accounts.Address]struct{} // Remember non-existent account to avoid reading them again
@@ -166,7 +166,7 @@ type IntraBlockState struct {
 	// Journal of state modifications. This is the backbone of
 	// Snapshot and RevertToSnapshot.
 	journal          *journal
-	stateObjectArena stateObjectArena // same lifetime with `journal`
+	stateObjectArena stateObjectArena // same lifetime with `journal`. used only if `noMaterialize == true`
 
 	trace        bool
 	tracingHooks *tracing.Hooks
@@ -2828,6 +2828,11 @@ func (sdb *IntraBlockState) clearJournalAndRefund() {
 	sdb.journal.Reset()
 	sdb.revisions.reset()
 	sdb.refund = uint64(0)
+	if dbg.AssertEnabled && sdb.journal.length() != 0 {
+		// A journal entry's prevObj can name an arena slot, so the rewind is only
+		// safe once the entries are gone.
+		panic("stateObjectArena rewound before the journal was cleared")
+	}
 	sdb.stateObjectArena.reset() // same lifetime with `journal`
 }
 
