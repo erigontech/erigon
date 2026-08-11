@@ -19,6 +19,7 @@ package errors
 import (
 	"context"
 	"errors"
+	"reflect"
 )
 
 // NilIfCanceled returns nil when err is nil or contains only context
@@ -36,12 +37,20 @@ func IsOnlyCanceled(err error) bool {
 	return IsOnly(err, context.Canceled)
 }
 
-// IsOnly reports whether err is non-nil and every leaf in its unwrap tree
-// matches a target.
-// Custom Is methods on non-leaf errors do not override their underlying causes.
+// IsOnly reports whether every branch in err's unwrap tree reaches a target.
+// An exact target ends its branch. Custom Is methods on other non-leaf errors
+// do not override their underlying causes.
 func IsOnly(err error, targets ...error) bool {
 	if err == nil || len(targets) == 0 {
 		return false
+	}
+	errType := reflect.TypeOf(err)
+	if errType.Comparable() {
+		for _, target := range targets {
+			if errType == reflect.TypeOf(target) && err == target {
+				return true
+			}
+		}
 	}
 	switch x := err.(type) {
 	case interface{ Unwrap() []error }:

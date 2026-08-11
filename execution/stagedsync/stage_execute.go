@@ -29,6 +29,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -488,6 +489,10 @@ func unwindOnExecError(execErr error, out execV3Outcome, cfg ExecuteBlockCfg, s 
 	}
 
 	if errors.Is(execErr, ErrWrongTrieRoot) {
+		// Only a pure wrong-root error may be consumed by scheduling an unwind.
+		if !commonerrors.IsOnly(execErr, ErrWrongTrieRoot) {
+			return execErr
+		}
 		// Initial sync has no competing fork to recover from, so a wrong trie root
 		// is fatal — the recovery handler would schedule an unwind (or none, when
 		// failedBlock <= s.BlockNumber) and return nil, silently swallowing the
