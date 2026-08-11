@@ -25,6 +25,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type cancellationMatchingError struct {
+	cause error
+}
+
+func (e *cancellationMatchingError) Error() string {
+	return "cancellation matching error: " + e.cause.Error()
+}
+
+func (e *cancellationMatchingError) Is(target error) bool {
+	return target == context.Canceled
+}
+
+func (e *cancellationMatchingError) Unwrap() error {
+	return e.cause
+}
+
 func TestNilIfCanceled(t *testing.T) {
 	require.NoError(t, NilIfCanceled(nil))
 	require.NoError(t, NilIfCanceled(context.Canceled))
@@ -56,4 +72,14 @@ func TestIsOnlyCanceled(t *testing.T) {
 	require.False(t, IsOnlyCanceled(context.DeadlineExceeded))
 	require.False(t, IsOnlyCanceled(errors.Join(context.Canceled, boom)))
 	require.False(t, IsOnlyCanceled(fmt.Errorf("teardown: %w", errors.Join(context.Canceled, boom))))
+}
+
+func TestIsOnlyCanceledPreservesCauseBehindNonLeafCancellationMatch(t *testing.T) {
+	cause := errors.New("boom")
+	err := &cancellationMatchingError{cause: cause}
+
+	require.ErrorIs(t, err, context.Canceled)
+	require.ErrorIs(t, err, cause)
+	require.False(t, IsOnlyCanceled(err))
+	require.Same(t, err, NilIfCanceled(err))
 }

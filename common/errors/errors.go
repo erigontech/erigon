@@ -31,7 +31,8 @@ func NilIfCanceled(err error) error {
 }
 
 // IsOnlyCanceled reports whether err is non-nil and every leaf in its unwrap
-// tree is context.Canceled.
+// tree matches context.Canceled. It deliberately ignores custom Is methods on
+// non-leaf errors so they cannot hide a non-cancellation cause.
 func IsOnlyCanceled(err error) bool {
 	if err == nil {
 		return false
