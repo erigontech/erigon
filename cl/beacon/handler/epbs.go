@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"strconv"
 
@@ -31,6 +32,21 @@ import (
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/common"
 )
+
+func requestContentType(r *http.Request) (string, error) {
+	contentTypeHeader := r.Header.Get("Content-Type")
+	if contentTypeHeader == "" {
+		return "application/json", nil
+	}
+	contentType, _, err := mime.ParseMediaType(contentTypeHeader)
+	if err != nil {
+		return "", fmt.Errorf("unsupported content type: %s", contentTypeHeader)
+	}
+	if contentType == "" {
+		return "application/json", nil
+	}
+	return contentType, nil
+}
 
 // ---- PTC Duties ----
 

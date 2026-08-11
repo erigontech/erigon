@@ -17,6 +17,7 @@
 package membatchwithdb_test
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -858,4 +859,45 @@ func TestMemoryMutationConcurrentDeleteAndRead(t *testing.T) {
 	}()
 
 	wg.Wait()
+}
+
+// erroringDomainReader fails every domain read, so a caller that swallows the
+// error is indistinguishable from a caller that saw no value at all.
+type erroringDomainReader struct{ err error }
+
+func (r erroringDomainReader) GetAsOf(kv.Domain, []byte, uint64) ([]byte, bool, error) {
+	return nil, false, r.err
+}
+
+func (r erroringDomainReader) HistorySeek(kv.Domain, []byte, uint64) ([]byte, bool, error) {
+	return nil, false, r.err
+}
+
+// TestDomainReadErrorsPropagate covers both overlay read views: a DomainReader
+// error must reach the caller rather than fall through to the committed tx,
+// which would silently answer with stale data.
+func TestDomainReadErrorsPropagate(t *testing.T) {
+	t.Parallel()
+
+	_, rwTx := newTestTx(t)
+	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
+	require.NoError(t, err)
+	defer batch.Close()
+
+	wantErr := errors.New("domain reader unavailable")
+	batch.DomainReader = erroringDomainReader{err: wantErr}
+
+	key := []byte{0x2}
+	for name, tx := range map[string]kv.TemporalTx{
+		"MemoryMutation":          batch,
+		"OverlayTemporalReadView": batch.NewTemporalReadView(rwTx),
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, _, err := tx.GetAsOf(kv.ReceiptDomain, key, 1)
+			require.ErrorIs(t, err, wantErr, "GetAsOf must propagate the DomainReader error")
+
+			_, _, err = tx.HistorySeek(kv.ReceiptDomain, key, 1)
+			require.ErrorIs(t, err, wantErr, "HistorySeek must propagate the DomainReader error")
+		})
+	}
 }
