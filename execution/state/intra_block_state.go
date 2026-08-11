@@ -386,14 +386,11 @@ func (sdb *IntraBlockState) Reset() {
 	for _, so := range sdb.stateObjects {
 		so.release()
 	}
-	sdb.stateObjectArena.reset()
 	clear(sdb.stateObjects)
 	clear(sdb.stateObjectsDirty)
 	sdb.logs.reset()
 	clear(sdb.balanceInc)
-	sdb.journal.Reset()
-	sdb.revisions.reset()
-	sdb.refund = uint64(0)
+	sdb.clearJournalAndRefund()
 	sdb.txIndex = 0
 	sdb.sdProbeEpoch++
 	sdb.accessList.Reset()
