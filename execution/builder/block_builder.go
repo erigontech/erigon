@@ -37,7 +37,7 @@ type BlockBuilder struct {
 	err       error
 }
 
-func NewBlockBuilder(build BlockBuilderFunc, param *Parameters, maxBuildTimeSecs uint64) *BlockBuilder {
+func NewBlockBuilder(build BlockBuilderFunc, param *Parameters, maxBuildTime time.Duration) *BlockBuilder {
 	builder := new(BlockBuilder)
 	builder.syncCond = sync.NewCond(new(sync.Mutex))
 	terminated := make(chan struct{})
@@ -73,7 +73,7 @@ func NewBlockBuilder(build BlockBuilderFunc, param *Parameters, maxBuildTimeSecs
 	}()
 
 	go func() {
-		timer := time.NewTimer(time.Duration(maxBuildTimeSecs) * time.Second)
+		timer := time.NewTimer(maxBuildTime)
 		defer timer.Stop()
 		select {
 		case <-timer.C:
