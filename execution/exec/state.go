@@ -595,6 +595,7 @@ func NewWorkersPool(ctx context.Context, runFault func() error, accumulator *sha
 	rws = NewResultsQueue(resultsSize, workerCount)
 
 	g, gctx := errgroup.WithContext(ctx)
+	wait = g.Wait
 	applyWorker = NewWorker(ctx, false, nil, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs, logger)
 	applyWorker.runFault = runFault
 
@@ -635,7 +636,6 @@ func NewWorkersPool(ctx context.Context, runFault func() error, accumulator *sha
 				return commonerrors.NilIfCanceled(reconWorkers[i].Run())
 			})
 		}
-		wait = func() error { return g.Wait() }
 	}
 
 	return reconWorkers, applyWorker, rws, clear, wait, err
