@@ -212,12 +212,6 @@ type IntraBlockState struct {
 	noMaterialize bool
 
 	stateObjectArena stateObjectArena
-	// stateObjectArenaOn opts into the arena. Reset clears it, so only a caller
-	// that re-enables it after every rewind can reach it — a caller that never
-	// rewinds would hold every slot, and the account and code it last served, for
-	// the life of the IntraBlockState. Journal entries can hold slot pointers
-	// until the rewind, so the rewind must stay paired with journal.Reset.
-	stateObjectArenaOn bool
 
 	// eip8246 pins whether SELFDESTRUCT preserves the account (EIP-8246 removes
 	// the balance burn). Set per-tx from the block rules in Prepare; under it a
@@ -310,14 +304,6 @@ func (sdb *IntraBlockState) VersionMap() *VersionMap {
 // record only versioned cells and never populate the stateObject map.
 func (sdb *IntraBlockState) SetNoMaterialize(v bool) {
 	sdb.noMaterialize = v
-}
-
-// SetTransientObjectArena serves the noMaterialize path's transient stateObjects
-// from a per-transaction slab arena. Only for callers that Reset at every
-// transaction boundary: Reset is what rewinds the arena, and it clears this opt-in
-// so a caller that stops resetting stops using it.
-func (sdb *IntraBlockState) SetTransientObjectArena(v bool) {
-	sdb.stateObjectArenaOn = v
 }
 
 func (sdb *IntraBlockState) IsVersioned() bool {
@@ -418,7 +404,6 @@ func (sdb *IntraBlockState) Reset() {
 	// suppressed (which would silently drop writes). The versioned worker re-sets
 	// both right after Reset; the block assembler never calls Reset mid-block.
 	sdb.noMaterialize = false
-	sdb.stateObjectArenaOn = false
 	clear(sdb.committedBase)
 	// Read side rebinds to a fresh empty set: VersionedReads() at end of
 	// tx hands the per-path maps to result.TxIn, so rebinding leaves the
@@ -467,10 +452,8 @@ func (sdb *IntraBlockState) Close() {
 // would be a one-way drain on the materializing paths.
 func (sdb *IntraBlockState) allocStateObject() *stateObject {
 	if sdb.noMaterialize {
-		if sdb.stateObjectArenaOn {
-			if so := sdb.stateObjectArena.alloc(); so != nil {
-				return so
-			}
+		if so := sdb.stateObjectArena.alloc(); so != nil {
+			return so
 		}
 		return newHeapObject()
 	}
@@ -2844,6 +2827,11 @@ func (sdb *IntraBlockState) clearJournalAndRefund() {
 	sdb.journal.Reset()
 	sdb.revisions.reset()
 	sdb.refund = uint64(0)
+	// Rewind here rather than in Reset: journal entries are the only thing that
+	// can name a transient slot past the call that made it, so the arena is free
+	// exactly when they are dropped. Callers that never Reset (the block
+	// assembler) still reach this at every transaction.
+	sdb.stateObjectArena.reset()
 }
 
 // Prepare handles the preparatory steps for executing a state transition.

@@ -63,39 +63,25 @@ func startNoMaterializeTx(ibs *IntraBlockState, vm *VersionMap, txIndex int) {
 	ibs.Reset()
 	ibs.SetVersionMap(vm)
 	ibs.SetNoMaterialize(true)
-	ibs.SetTransientObjectArena(true)
 	ibs.SetTxContext(1, txIndex)
 }
 
-// TestNoMaterializeWithoutRewindSkipsArena pins the opt-in: a caller that never
-// calls Reset (the BAL block assembler) must not draw arena slots, which it would
-// otherwise hold — with the account and code they last served — for the whole
-// block. Reset clears the opt-in, so only a caller that re-enables it after every
-// rewind can reach the arena.
-func TestNoMaterializeWithoutRewindSkipsArena(t *testing.T) {
+// TestTxBoundaryRewindsArenaWithoutReset pins that the rewind rides on the
+// journal clear rather than on Reset. The BAL block assembler sets noMaterialize
+// and never calls Reset — its per-tx boundary reaches clearJournalAndRefund
+// through FinalizeTx — so an arena rewound only by Reset would grow to its cap
+// there and hold every slot's account and code for the whole block.
+func TestTxBoundaryRewindsArenaWithoutReset(t *testing.T) {
 	ibs, _ := newNoMaterializeIBS(&emptyReader{})
 	defer ibs.Close()
-	ibs.SetNoMaterialize(true) // no SetTransientObjectArena: this caller never rewinds
-
-	so := ibs.allocStateObject()
-	assert.False(t, so.arena, "a caller that never rewinds must not draw from the arena")
-	assert.Empty(t, ibs.stateObjectArena.slabs, "arena must stay unallocated")
-}
-
-// TestResetClearsArenaOptIn pins that the opt-in does not survive a rewind: a
-// reused IntraBlockState that forgets to re-enable it falls back to the heap
-// rather than silently parking objects.
-func TestResetClearsArenaOptIn(t *testing.T) {
-	ibs, _ := newNoMaterializeIBS(&emptyReader{})
-	defer ibs.Close()
-
 	ibs.SetNoMaterialize(true)
-	ibs.SetTransientObjectArena(true)
-	require.True(t, ibs.allocStateObject().arena)
 
-	ibs.Reset()
-	ibs.SetNoMaterialize(true)
-	assert.False(t, ibs.allocStateObject().arena, "Reset must clear the arena opt-in")
+	first := ibs.allocStateObject()
+	require.True(t, first.arena)
+
+	ibs.SoftFinalise() // a transaction boundary, without Reset
+
+	require.Same(t, first, ibs.allocStateObject(), "the transaction boundary must free the slot")
 }
 
 // TestNoMaterializeReadReusesArena pins that account reads on the parallel path
@@ -138,7 +124,6 @@ func TestNoMaterializeAllocStateObjectUsesArena(t *testing.T) {
 	pooled.release()
 
 	ibs.SetNoMaterialize(true)
-	ibs.SetTransientObjectArena(true)
 	assert.True(t, ibs.allocStateObject().arena, "parallel path must use the arena")
 }
 
@@ -149,7 +134,6 @@ func TestNoMaterializeOverflowSkipsPool(t *testing.T) {
 	ibs, _ := newNoMaterializeIBS(&emptyReader{})
 	defer ibs.Close()
 	ibs.SetNoMaterialize(true)
-	ibs.SetTransientObjectArena(true)
 
 	for range arenaMaxObjects {
 		require.True(t, ibs.allocStateObject().arena)
