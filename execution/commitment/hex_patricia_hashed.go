@@ -730,7 +730,7 @@ func (cell *cell) accountForHashing(buffer []byte, storageRootHash common.Hash) 
 	return pos
 }
 
-func (hph *HexPatriciaHashed) completeLeafHash(buf []byte, compactLen int, key []byte, compact0 byte, ni int, val rlp.RlpSerializable, singleton bool) ([]byte, error) {
+func completeLeafHash[V rlp.RlpSerializable](hph *HexPatriciaHashed, buf []byte, compactLen int, key []byte, compact0 byte, ni int, val V, singleton bool) ([]byte, error) {
 	// Compute the total length of binary representation
 	var kp, kl int
 	if compactLen > 1 {
@@ -761,7 +761,6 @@ func (hph *HexPatriciaHashed) completeLeafHash(buf []byte, compactLen int, key [
 	canEmbed := !singleton && totalLen+pl < length.Hash
 	var writer io.Writer
 	if canEmbed {
-		//hph.byteArrayWriter.Setup(buf)
 		hph.auxBuffer.Reset()
 		writer = hph.auxBuffer
 	} else {
@@ -799,10 +798,10 @@ func (hph *HexPatriciaHashed) leafHashWithKeyVal(buf, key []byte, val rlp.RlpSer
 	} else {
 		compact0 = 0x20
 	}
-	return hph.completeLeafHash(buf, compactLen, key, compact0, ni, val, singleton)
+	return completeLeafHash(hph, buf, compactLen, key, compact0, ni, val, singleton)
 }
 
-func (hph *HexPatriciaHashed) accountLeafHashWithKey(buf, key []byte, val rlp.RlpSerializable) ([]byte, error) {
+func (hph *HexPatriciaHashed) accountLeafHashWithKey(buf, key []byte, val rlp.RlpEncodedBytes) ([]byte, error) {
 	// Write key
 	var compactLen int
 	var ni int
@@ -822,7 +821,7 @@ func (hph *HexPatriciaHashed) accountLeafHashWithKey(buf, key []byte, val rlp.Rl
 			ni = 1
 		}
 	}
-	return hph.completeLeafHash(buf, compactLen, key, compact0, ni, val, true)
+	return completeLeafHash(hph, buf, compactLen, key, compact0, ni, val, true)
 }
 
 func (hph *HexPatriciaHashed) extensionHash(key []byte, hash []byte) (common.Hash, error) {
