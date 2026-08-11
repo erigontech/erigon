@@ -731,7 +731,7 @@ func (b *BackwardBeaconDownloader) fetchSingleEnvelope(ctx context.Context, bloc
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{
 		Message: cltypes.NewExecutionPayloadEnvelope(b.beaconCfg),
 	}
-	if err := envelope.DecodeSSZ(body, int(clparams.GloasVersion)); err != nil {
+	if err := envelope.DecodeSSZStrict(body, int(clparams.GloasVersion)); err != nil {
 		return nil, fmt.Errorf("envelope decode: %w", err)
 	}
 	return envelope, nil

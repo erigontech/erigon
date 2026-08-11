@@ -115,6 +115,14 @@ func (e *ExecutionRequests) EncodeSSZ(buf []byte) ([]byte, error) {
 }
 
 func (e *ExecutionRequests) DecodeSSZ(buf []byte, version int) error {
+	return e.decodeSSZ(buf, version, false)
+}
+
+func (e *ExecutionRequests) DecodeSSZStrict(buf []byte, version int) error {
+	return e.decodeSSZ(buf, version, true)
+}
+
+func (e *ExecutionRequests) decodeSSZ(buf []byte, version int, strict bool) error {
 	decodedVersion := clparams.StateVersion(version)
 	if (e.effectiveVersion() >= clparams.GloasVersion) != (decodedVersion >= clparams.GloasVersion) {
 		e.Deposits = nil
@@ -125,10 +133,14 @@ func (e *ExecutionRequests) DecodeSSZ(buf []byte, version int) error {
 	}
 	e.version = decodedVersion
 	e.ensureLists()
-	if e.effectiveVersion() < clparams.GloasVersion {
-		return ssz2.UnmarshalSSZ(buf, version, e.Deposits, e.Withdrawals, e.Consolidations)
+	schema := []any{e.Deposits, e.Withdrawals, e.Consolidations}
+	if e.effectiveVersion() >= clparams.GloasVersion {
+		schema = append(schema, e.BuilderDeposits, e.BuilderExits)
 	}
-	return ssz2.UnmarshalSSZ(buf, version, e.Deposits, e.Withdrawals, e.Consolidations, e.BuilderDeposits, e.BuilderExits)
+	if strict {
+		return ssz2.UnmarshalSSZStrict(buf, version, schema...)
+	}
+	return ssz2.UnmarshalSSZ(buf, version, schema...)
 }
 
 func (e *ExecutionRequests) Clone() clonable.Clonable {

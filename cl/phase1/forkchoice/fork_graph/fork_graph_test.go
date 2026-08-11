@@ -412,6 +412,42 @@ func TestReadEnvelopeRejectsLengthAboveGossipLimit(t *testing.T) {
 	require.False(t, f.HasEnvelope(root))
 }
 
+func TestReadEnvelopeRejectsNonCanonicalSSZ(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
+	root := common.HexToHash("0x1234")
+	addEnvelopeTestBlock(f, root, 1)
+	encoded, err := testEnvelopeWithTransaction(root, []byte{1}).EncodeSSZ(nil)
+	require.NoError(t, err)
+	messageOffset := binary.LittleEndian.Uint32(encoded)
+	binary.LittleEndian.PutUint32(encoded, messageOffset+1)
+	encoded = append(encoded[:messageOffset], append([]byte{0}, encoded[messageOffset:]...)...)
+	writeEnvelopeTestFile(t, fs, root, clparams.GloasVersion, encoded)
+
+	_, err = f.ReadEnvelopeFromDisk(root)
+	require.Error(t, err)
+	require.False(t, f.HasEnvelope(root))
+}
+
+func TestReadEnvelopeValidatesDecodedEnvelopeAgainstConfig(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	cfg := clparams.MainnetBeaconConfig
+	cfg.MaxWithdrawalRequestsPerPayload = 1
+	f := &forkGraphDisk{fs: fs, beaconCfg: &cfg}
+	root := common.HexToHash("0x1234")
+	addEnvelopeTestBlock(f, root, 1)
+	envelope := testEnvelopeWithTransaction(root, []byte{1})
+	envelope.Message.ExecutionRequests.Withdrawals.Append(&solid.WithdrawalRequest{})
+	envelope.Message.ExecutionRequests.Withdrawals.Append(&solid.WithdrawalRequest{})
+	encoded, err := envelope.EncodeSSZ(nil)
+	require.NoError(t, err)
+	writeEnvelopeTestFile(t, fs, root, clparams.GloasVersion, encoded)
+
+	_, err = f.ReadEnvelopeFromDisk(root)
+	require.ErrorContains(t, err, "withdrawals")
+	require.False(t, f.HasEnvelope(root))
+}
+
 func TestReadEnvelopeRejectsKnownInvalidFileWithoutOpening(t *testing.T) {
 	baseFs := afero.NewMemMapFs()
 	fs := &envelopeWriteFailureFs{Fs: baseFs, stage: "open"}
@@ -433,6 +469,7 @@ func TestDumpEnvelopeRejectsLengthAboveGossipLimit(t *testing.T) {
 
 	err := f.DumpEnvelopeOnDisk(root, testEnvelopeWithTransaction(root, make([]byte, clparams.MaxChunkSize)))
 	require.ErrorContains(t, err, "exceeds max")
+	require.Zero(t, cap(f.sszBuffer))
 	require.False(t, f.HasEnvelope(root))
 }
 
@@ -874,4 +911,20 @@ func addEnvelopeTestBlock(f *forkGraphDisk, root common.Hash, slot uint64) {
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
 	block.Block.Slot = slot
 	f.blocks.Store(root, block)
+}
+
+func writeEnvelopeTestFile(t *testing.T, fs afero.Fs, root common.Hash, version clparams.StateVersion, encoded []byte) {
+	t.Helper()
+	var compressed bytes.Buffer
+	writer := snappy.NewBufferedWriter(&compressed)
+	_, err := writer.Write([]byte{byte(version)})
+	require.NoError(t, err)
+	length := make([]byte, 8)
+	binary.BigEndian.PutUint64(length, uint64(len(encoded)))
+	_, err = writer.Write(length)
+	require.NoError(t, err)
+	_, err = writer.Write(encoded)
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+	require.NoError(t, afero.WriteFile(fs, getEnvelopeFilename(root), compressed.Bytes(), 0o644))
 }

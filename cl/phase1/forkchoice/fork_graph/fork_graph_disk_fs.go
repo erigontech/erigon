@@ -291,9 +291,13 @@ func (f *forkGraphDisk) readEnvelopeFromDiskLocked(blockRoot common.Hash) (envel
 	envelope = &cltypes.SignedExecutionPayloadEnvelope{
 		Message: cltypes.NewExecutionPayloadEnvelope(f.beaconCfg),
 	}
-	if err = envelope.DecodeSSZ(f.sszBuffer, int(version)); err != nil {
+	if err = envelope.DecodeSSZStrict(f.sszBuffer, int(version)); err != nil {
 		corrupt = true
 		return nil, fmt.Errorf("failed to decode envelope: %w, root: %x, len: %d", err, blockRoot, n)
+	}
+	if err = envelope.ValidateForPersistence(f.beaconCfg); err != nil {
+		corrupt = true
+		return nil, fmt.Errorf("invalid persisted envelope: %w, root: %x", err, blockRoot)
 	}
 	if envelope.Message.BeaconBlockRoot != blockRoot {
 		corrupt = true
@@ -337,6 +341,10 @@ func (f *forkGraphDisk) DumpEnvelopeOnDisk(blockRoot common.Hash, envelope *clty
 	}
 	if envelope.Message.BeaconBlockRoot != blockRoot {
 		return fmt.Errorf("cannot persist envelope for root %x with embedded root %x", blockRoot, envelope.Message.BeaconBlockRoot)
+	}
+	envelopeSize := envelope.EncodingSizeSSZ()
+	if envelopeSize < 0 || uint64(envelopeSize) > clparams.MaxChunkSize {
+		return fmt.Errorf("cannot persist envelope: length %d exceeds max %d", envelopeSize, clparams.MaxChunkSize)
 	}
 	f.stateDumpLock.Lock()
 	defer f.stateDumpLock.Unlock()

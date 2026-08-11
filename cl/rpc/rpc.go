@@ -195,7 +195,7 @@ func (b *BeaconRpcP2P) SendExecutionPayloadEnvelopesByRangeReq(ctx context.Conte
 		envelope := &cltypes.SignedExecutionPayloadEnvelope{
 			Message: cltypes.NewExecutionPayloadEnvelope(b.beaconConfig),
 		}
-		if err := envelope.DecodeSSZ(data.raw, int(data.version)); err != nil {
+		if err := envelope.DecodeSSZStrict(data.raw, int(data.version)); err != nil {
 			return nil, pid, err
 		}
 		envelopes = append(envelopes, envelope)
@@ -232,7 +232,7 @@ func (b *BeaconRpcP2P) SendExecutionPayloadEnvelopesByRootReq(ctx context.Contex
 		envelope := &cltypes.SignedExecutionPayloadEnvelope{
 			Message: cltypes.NewExecutionPayloadEnvelope(b.beaconConfig),
 		}
-		if err := envelope.DecodeSSZ(data.raw, int(data.version)); err != nil {
+		if err := envelope.DecodeSSZStrict(data.raw, int(data.version)); err != nil {
 			return nil, pid, err
 		}
 		envelopes = append(envelopes, envelope)

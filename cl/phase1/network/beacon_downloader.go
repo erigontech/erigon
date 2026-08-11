@@ -621,7 +621,7 @@ func fetchEnvelopesFromBeaconAPI(
 			envelope := &cltypes.SignedExecutionPayloadEnvelope{
 				Message: cltypes.NewExecutionPayloadEnvelope(beaconCfg),
 			}
-			if err := envelope.DecodeSSZ(body, int(clparams.GloasVersion)); err != nil {
+			if err := envelope.DecodeSSZStrict(body, int(clparams.GloasVersion)); err != nil {
 				log.Debug("[ForwardBeaconDownloader] HTTP envelope decode failed", "slot", slot, "err", err)
 				return
 			}

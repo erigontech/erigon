@@ -352,6 +352,9 @@ func (f *ForkChoiceStorageMock) OnBlock(
 }
 
 func (f *ForkChoiceStorageMock) OnExecutionPayload(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) error {
+	if f.OnExecutionPayloadErr == nil && signedEnvelope != nil && signedEnvelope.Message != nil {
+		f.Envelopes[signedEnvelope.Message.BeaconBlockRoot] = signedEnvelope
+	}
 	return f.OnExecutionPayloadErr
 }
 
