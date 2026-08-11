@@ -710,16 +710,36 @@ func (r *RollingV2Publisher) Publish(
 	// Stays zero when no content minter is wired.
 	var contentUCANHash metainfo.Hash
 	if r.contentMinter != nil {
-		ucanBytes, err := r.contentMinter(tomlBytes)
-		if err != nil {
-			_ = dir.RemoveFile(path)
-			return metainfo.Hash{}, fmt.Errorf("publisher content UCAN %s: %w", name, err)
-		}
 		cucanName := ChainV2ContentUCANFileName(enrFP, genID)
 		cucanPath := filepath.Join(r.snapDir, cucanName)
-		if err := saveChainTomlFile(cucanPath, ucanBytes); err != nil {
-			_ = dir.RemoveFile(path)
-			return metainfo.Hash{}, fmt.Errorf("save %s: %w", cucanName, err)
+		// genID is content-addressed over the manifest+authority-UCAN
+		// bytes, so a republish of the same generation must reuse the
+		// existing .ucan/.torrent pair. Re-minting would produce
+		// different bytes (MintContentUCAN embeds time.Now() and a
+		// randomised signature), which then desynchronises the .ucan
+		// content from the piece hash in the already-built .torrent —
+		// consumers download the current .ucan bytes over BT, verify
+		// against the stale .torrent's piece hash, mismatch, retry
+		// forever. Skip the mint when both artefacts are already on
+		// disk from a prior publish of this generation.
+		_, cucanErr := os.Stat(cucanPath)
+		_, cucanTorrentErr := os.Stat(cucanPath + ".torrent")
+		if cucanErr != nil || cucanTorrentErr != nil {
+			ucanBytes, err := r.contentMinter(tomlBytes)
+			if err != nil {
+				_ = dir.RemoveFile(path)
+				return metainfo.Hash{}, fmt.Errorf("publisher content UCAN %s: %w", name, err)
+			}
+			// Removing any stale artefacts before write forces
+			// BuildTorrentIfNeed to rebuild the .torrent to match
+			// the fresh .ucan bytes — its exists-short-circuit would
+			// otherwise leave the .torrent pointing at the previous
+			// generation's piece hash.
+			_ = dir.RemoveFile(cucanPath + ".torrent")
+			if err := saveChainTomlFile(cucanPath, ucanBytes); err != nil {
+				_ = dir.RemoveFile(path)
+				return metainfo.Hash{}, fmt.Errorf("save %s: %w", cucanName, err)
+			}
 		}
 		if _, err := BuildTorrentIfNeed(ctx, cucanName, r.snapDir, r.torrentFS); err != nil {
 			_ = dir.RemoveFile(path)

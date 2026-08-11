@@ -18,12 +18,88 @@ package downloader
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/p2p/enr"
 )
+
+// TestRollingV2Publisher_ContentUCANRepublishStable pins the fix for
+// the leg-M cycle 7 bug: MintContentUCAN embeds time.Now() and a
+// randomised signature, so re-minting the SAME genID's Content UCAN
+// produces different bytes each call. If publishOne re-mints on
+// republish and overwrites the .ucan file, BuildTorrentIfNeed's
+// exists-short-circuit leaves the .torrent pointing at the previous
+// generation's piece hash — consumers download the current .ucan
+// bytes over BT, verify against the stale piece hash, mismatch,
+// retry forever ("downloading X: context deadline exceeded" in
+// consumer's UCAN gate).
+//
+// Fix: on republish of a genID whose .ucan + .torrent already exist,
+// skip the mint entirely — reuse the on-disk pair.
+func TestRollingV2Publisher_ContentUCANRepublishStable(t *testing.T) {
+	snapDir := t.TempDir()
+	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
+	require.NoError(t, err)
+	pub.SetENRFingerprint(testENRFP)
+
+	// Minter returning DIFFERENT bytes each call — simulating
+	// MintContentUCAN's non-determinism (time.Now() + random signature).
+	var mintCallCount int
+	pub.SetContentUCANMinter(func(tomlBytes []byte) ([]byte, error) {
+		mintCallCount++
+		out := []byte("content-ucan-attestation-bytes-call-")
+		out = append(out, byte('0'+mintCallCount))
+		return out, nil
+	})
+
+	inv := rollingTestInventory(t, 0x70)
+	updater := func(ct enr.ChainToml) {}
+
+	// Publish 1: mint fires, .ucan and .torrent land.
+	hash1, err := pub.Publish(context.Background(), inv, 12345, updater)
+	require.NoError(t, err)
+	require.Equal(t, 1, mintCallCount)
+
+	// Locate the .ucan and .torrent so we can byte-check them.
+	var ucanPath, ucanTorrentPath string
+	entries, err := os.ReadDir(snapDir)
+	require.NoError(t, err)
+	for _, e := range entries {
+		if filepath.Ext(e.Name()) == ".ucan" {
+			ucanPath = filepath.Join(snapDir, e.Name())
+			ucanTorrentPath = ucanPath + ".torrent"
+			break
+		}
+	}
+	require.NotEmpty(t, ucanPath, "publish must produce a .ucan file")
+	ucanBytes1, err := os.ReadFile(ucanPath)
+	require.NoError(t, err)
+	torrentBytes1, err := os.ReadFile(ucanTorrentPath)
+	require.NoError(t, err)
+
+	// Publish 2: same inventory, same genID. The mint MUST NOT run
+	// again — otherwise it overwrites the .ucan with different bytes
+	// while the .torrent stays at the piece hash of the first mint.
+	hash2, err := pub.Publish(context.Background(), inv, 12345, updater)
+	require.NoError(t, err)
+	require.Equal(t, hash1, hash2, "same inventory → same manifest hash")
+	require.Equal(t, 1, mintCallCount,
+		"republish of same genID must reuse the existing .ucan; re-minting would desync the .ucan bytes from the .torrent piece hash")
+
+	ucanBytes2, err := os.ReadFile(ucanPath)
+	require.NoError(t, err)
+	torrentBytes2, err := os.ReadFile(ucanTorrentPath)
+	require.NoError(t, err)
+
+	require.Equal(t, ucanBytes1, ucanBytes2,
+		".ucan bytes must be byte-identical across republishes of the same genID")
+	require.Equal(t, torrentBytes1, torrentBytes2,
+		".torrent bytes must be byte-identical across republishes of the same genID")
+}
 
 // TestSetENRUpdater_CachesLastEmittedCT pins the SetENRUpdater shim:
 // every enrUpdater invocation updates d.lastEmittedENRChainToml
