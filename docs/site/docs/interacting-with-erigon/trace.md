@@ -405,7 +405,7 @@ Replays all transactions in a block returning the requested traces for each tran
 
 #### Parameters
 
-1. `Quantity` or `Tag` - Integer of a block number, or the string `'earliest'`, `'latest'` or `'pending'`.
+1. `Quantity` or `Tag` - Integer of a block number, or the string `'earliest'` or `'latest'`. `'pending'` is not supported: tracing replays committed state, so there is no pending block to replay.
 2. `Array` - Type of trace, one or more of: `"vmTrace"`, `"trace"`, `"stateDiff"`.
 
 ```js
@@ -519,7 +519,7 @@ Returns traces created at given block.
 
 #### Parameters
 
-1. `Quantity` or `Tag` - Integer of a block number, or the string `'earliest'`, `'latest'` or `'pending'`.
+1. `Quantity` or `Tag` - Integer of a block number, or the string `'earliest'` or `'latest'`. `'pending'` is not supported: tracing replays committed state, so there is no pending block to replay.
 
 ```js
 params: [

@@ -187,6 +187,9 @@ func newRewardTrace(blockHash common.Hash, blockNum uint64, author common.Addres
 
 // Block implements trace_block
 func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gasBailOut *bool, traceConfig *config.TraceConfig) (ParityTraces, error) {
+	if err := rejectPendingNumber(blockNr); err != nil {
+		return nil, err
+	}
 	if gasBailOut == nil {
 		gasBailOut = new(bool) // false by default
 	}

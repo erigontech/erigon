@@ -972,6 +972,9 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 }
 
 func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, traceTypes []string, gasBailOut *bool, traceConfig *config.TraceConfig) ([]*TraceCallResult, error) {
+	if err := rejectPending(blockNrOrHash); err != nil {
+		return nil, err
+	}
 	if gasBailOut == nil {
 		gasBailOut = new(bool) // false by default
 	}

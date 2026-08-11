@@ -31,11 +31,10 @@ import (
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
-// The methods that execute a call on top of a resolved state reject "pending":
-// they replay on the committed view, which holds no pending block, so accepting
-// the tag would run the call against the latest executed state and report it as
-// pending. go-ethereum answers the same way.
-func TestTraceCallRejectsPendingTag(t *testing.T) {
+// Every tracing method rejects "pending": they replay on the committed view, which
+// holds no pending block, so accepting the tag would answer for the latest executed
+// block and report it as pending.
+func TestTracingRejectsPendingTag(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ctx := context.Background()
 	pendingNrOrHash := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
@@ -62,24 +61,19 @@ func TestTraceCallRejectsPendingTag(t *testing.T) {
 		_, err := traceAPI.CallMany(ctx, json.RawMessage("[]"), &pendingNrOrHash, nil)
 		require.ErrorIs(t, err, errPendingNotSupported)
 	})
-}
 
-// Block tracing keeps accepting the tag: go-ethereum traces the pending block
-// rather than rejecting it, and the RPC integration suite pins that a pending
-// debug_traceBlockByNumber answers instead of erroring.
-func TestTraceBlockAcceptsPendingTag(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	ctx := context.Background()
-	pending := rpc.PendingBlockNumber
+	t.Run("debug_traceBlockByNumber", func(t *testing.T) {
+		err := debugAPI.TraceBlockByNumber(ctx, rpc.PendingBlockNumber, nil, jsonstream.New(io.Discard))
+		require.ErrorIs(t, err, errPendingNotSupported)
+	})
 
-	debugAPI := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
-	traceAPI := newTraceApiForTest(m)
+	t.Run("trace_block", func(t *testing.T) {
+		_, err := traceAPI.Block(ctx, rpc.PendingBlockNumber, nil, nil)
+		require.ErrorIs(t, err, errPendingNotSupported)
+	})
 
-	require.NoError(t, debugAPI.TraceBlockByNumber(ctx, pending, nil, jsonstream.New(io.Discard)))
-
-	_, err := traceAPI.Block(ctx, pending, nil, nil)
-	require.NoError(t, err)
-
-	_, err = traceAPI.ReplayBlockTransactions(ctx, rpc.BlockNumberOrHashWithNumber(pending), []string{TraceTypeTrace}, nil, nil)
-	require.NoError(t, err)
+	t.Run("trace_replayBlockTransactions", func(t *testing.T) {
+		_, err := traceAPI.ReplayBlockTransactions(ctx, pendingNrOrHash, []string{TraceTypeTrace}, nil, nil)
+		require.ErrorIs(t, err, errPendingNotSupported)
+	})
 }
