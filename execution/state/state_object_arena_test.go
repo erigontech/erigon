@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/race"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -66,6 +67,24 @@ func startNoMaterializeTx(ibs *IntraBlockState, vm *VersionMap, txIndex int) {
 	ibs.SetTxContext(1, txIndex)
 }
 
+// TestTxBoundaryRewindsArenaWithoutReset pins that the rewind rides on the
+// journal clear rather than on Reset. The BAL block assembler sets noMaterialize
+// and never calls Reset — its per-tx boundary reaches clearJournalAndRefund
+// through FinalizeTx — so an arena rewound only by Reset would grow to its cap
+// there and hold every slot's account and code for the whole block.
+func TestTxBoundaryRewindsArenaWithoutReset(t *testing.T) {
+	ibs, _ := newNoMaterializeIBS(&emptyReader{})
+	defer ibs.Close()
+	ibs.SetNoMaterialize(true)
+
+	first := ibs.allocStateObject()
+	require.True(t, first.arena)
+
+	ibs.SoftFinalise() // a transaction boundary, without Reset
+
+	require.Same(t, first, ibs.allocStateObject(), "the transaction boundary must free the slot")
+}
+
 // TestNoMaterializeReadReusesArena pins that account reads on the parallel path
 // are served from the arena and that consecutive transactions reuse the same
 // slab instead of growing it.
@@ -78,15 +97,21 @@ func TestNoMaterializeReadReusesArena(t *testing.T) {
 	ibs, vm := newNoMaterializeIBS(&staticAccountReader{addr: addr, acc: &acc})
 	defer ibs.Close()
 
+	slabsAfterFirstTx := 0
 	for txIndex := range 200 {
 		startNoMaterializeTx(ibs, vm, txIndex)
 		balance, err := ibs.GetBalance(addr)
 		require.NoError(t, err)
 		require.EqualValues(t, 77, balance.Uint64())
 		require.Empty(t, ibs.stateObjects, "parallel read must not cache a stateObject")
+		if txIndex == 0 {
+			slabsAfterFirstTx = len(ibs.stateObjectArena.slabs)
+			require.NotZero(t, slabsAfterFirstTx, "the read must be served from the arena")
+		}
 	}
 
-	require.Len(t, ibs.stateObjectArena.slabs, 1, "200 transactions must reuse one slab")
+	require.Equal(t, slabsAfterFirstTx, len(ibs.stateObjectArena.slabs),
+		"the arena must stop growing after the first transaction")
 }
 
 // TestNoMaterializeAllocStateObjectUsesArena pins the routing: the parallel path
@@ -123,6 +148,13 @@ func TestNoMaterializeOverflowSkipsPool(t *testing.T) {
 		sentinels[i] = newHeapObject()
 		stateObjectPool.Put(sentinels[i])
 	}
+	// stateObjectPool is package-global: drain what this test pushed so sibling
+	// tests do not run against a pool it primed.
+	t.Cleanup(func() {
+		for range sentinels {
+			stateObjectPool.Get()
+		}
+	})
 
 	overflow := ibs.allocStateObject()
 	require.False(t, overflow.arena, "overflow object is not an arena slot")
@@ -151,6 +183,11 @@ func TestNoMaterializeAccountReadAllocs(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+
+	// Assert the arena served the read directly: the alloc bound alone would still
+	// pass if allocStateObject regressed to a pool draw, since a warm pool also
+	// costs nothing.
+	require.NotZero(t, ibs.stateObjectArena.idx, "the read must be served from the arena")
 
 	//goland:noinspection GoBoolExpressions
 	if !race.Enabled {
@@ -185,9 +222,27 @@ func TestStateObjectArenaRecyclesSlots(t *testing.T) {
 	assert.False(t, reused.dirtyCode)
 	assert.Zero(t, reused.data.Nonce)
 	assert.Nil(t, reused.code.Bytes)
-	assert.Empty(t, reused.dirtyStorage)
-	assert.NotNil(t, reused.dirtyStorage, "a map, once made, is kept and cleared rather than dropped")
-	assert.True(t, reused.arena, "slot identity survives reset")
+	assert.Nil(t, reused.dirtyStorage, "hand-out re-establishes the slot, dropping the map it held")
+	assert.True(t, reused.arena, "hand-out re-tags the slot")
+}
+
+// TestNoMaterializeIsStableWhileSlotsOutstanding pins the mutual exclusion: arena
+// slots are rewound per transaction, so the mode that decides whether an object is
+// cached for the block must not change while any are live.
+func TestNoMaterializeIsStableWhileSlotsOutstanding(t *testing.T) {
+	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
+	dbg.AssertEnabled = true
+
+	ibs, _ := newNoMaterializeIBS(&emptyReader{})
+	defer ibs.Close()
+
+	ibs.SetNoMaterialize(true)
+	require.True(t, ibs.allocStateObject().arena)
+	require.NotPanics(t, ibs.clearJournalAndRefund, "drawn under noMaterialize, rewinds cleanly")
+
+	ibs.SetNoMaterialize(true)
+	require.True(t, ibs.allocStateObject().arena)
+	require.Panics(t, func() { ibs.SetNoMaterialize(false) }, "flipping with slots outstanding")
 }
 
 // TestStateObjectArenaFallsBackToHeap pins that the arena stops growing at its

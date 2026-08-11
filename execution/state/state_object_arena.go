@@ -40,6 +40,10 @@ func (a *stateObjectArena) alloc() *stateObject {
 		return nil
 	}
 	so := &a.slabs[a.slab][a.idx]
+	// One store establishes every field, so what a caller gets never depends on
+	// the rewind having cleared the slot first. The arena tag rides along: it is
+	// slot identity, and release() must not hand a live slot to the shared pool.
+	*so = stateObject{arena: true}
 	a.idx++
 	if a.idx == arenaSlabSize {
 		a.slab++
@@ -48,30 +52,28 @@ func (a *stateObjectArena) alloc() *stateObject {
 	return so
 }
 
+// empty reports whether no slot has been drawn since the last rewind.
+func (a *stateObjectArena) empty() bool { return a.slab == 0 && a.idx == 0 }
+
 func (a *stateObjectArena) grow() bool {
 	if len(a.slabs) == arenaMaxSlabs {
 		return false
 	}
-	slab := new([arenaSlabSize]stateObject)
-	for i := range slab {
-		slab[i].arena = true
-	}
-	a.slabs = append(a.slabs, slab)
+	a.slabs = append(a.slabs, new([arenaSlabSize]stateObject))
 	return true
 }
 
-// reset makes every slot handed out since the last reset available again.
-// Slots are cleared here rather than on hand-out so a slot that is not reused
-// stops retaining the account and code it last held.
+// reset makes every slot handed out since the last reset available again. Slots
+// are zeroed as well as rewound so a slot that is not reused stops retaining the
+// account and code it last held; alloc re-establishes the slot, so correctness
+// does not depend on this pass.
 func (a *stateObjectArena) reset() {
 	for s := 0; s <= a.slab && s < len(a.slabs); s++ {
 		used := a.slabs[s][:]
 		if s == a.slab {
 			used = used[:a.idx]
 		}
-		for i := range used {
-			used[i].reset()
-		}
+		clear(used)
 	}
 	a.slab, a.idx = 0, 0
 }
