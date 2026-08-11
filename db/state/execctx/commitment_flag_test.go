@@ -106,4 +106,3 @@ func TestSharedDomains_ParallelFlag_RootEquivalence(t *testing.T) {
 		"sequential and parallel commitment roots must match: sequential=%x parallel=%x",
 		seqRoot, parRoot)
 }
-
