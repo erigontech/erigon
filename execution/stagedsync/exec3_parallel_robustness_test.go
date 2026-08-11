@@ -1150,6 +1150,7 @@ func TestRunApplyLoopPanicDrainsChannels(t *testing.T) {
 	}
 
 	<-calculatorDone
+	require.EqualError(t, recoveredErr, "apply loop panic: boom")
 	require.ErrorIs(t, recoveredErr, panicErr)
 	require.Same(t, recoveredErr, context.Cause(executorCtx))
 }
@@ -1161,6 +1162,16 @@ func TestRecoveredPanicError(t *testing.T) {
 	require.ErrorIs(t, recoveredErr, cause)
 
 	require.EqualError(t, recoveredPanicError("exec loop", "boom"), "exec loop panic: boom")
+}
+
+func TestRecoveredCancellationPanicIsFailure(t *testing.T) {
+	recoveredErr := recoveredPanicError("exec loop", context.Canceled)
+
+	require.EqualError(t, recoveredErr, "exec loop panic: context canceled")
+	require.NotErrorIs(t, recoveredErr, context.Canceled)
+	require.False(t, commonerrors.IsOnlyCanceled(recoveredErr))
+	require.Same(t, recoveredErr, commonerrors.NilIfCanceled(recoveredErr))
+	require.False(t, isQuietExit(recoveredErr))
 }
 
 func TestRunApplyLoopErrorDrainsChannels(t *testing.T) {

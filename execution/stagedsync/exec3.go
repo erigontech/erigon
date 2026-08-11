@@ -613,7 +613,7 @@ func blockAccessListBytes(blockTx kv.Getter, block *types.Block, blockNum uint64
 }
 
 func recoveredPanicError(operation string, recovered any) error {
-	if err, ok := recovered.(error); ok {
+	if err, ok := recovered.(error); ok && !isQuietExit(err) {
 		return fmt.Errorf("%s panic: %w", operation, err)
 	}
 	return fmt.Errorf("%s panic: %v", operation, recovered)
