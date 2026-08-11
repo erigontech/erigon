@@ -644,14 +644,11 @@ func TestExecLoopShouldExitPriority(t *testing.T) {
 	}
 }
 
-// TestApplyLoopCloseIsClean pins the no-stop-cause apply-loop close
-// classification. The load-bearing case is the empty loop
-// (txResultCount==0, lastBlockNum==0): under background commit the async
-// commit can advance execution progress to the validation target before a
-// single-block fork-validation step runs, so the exec loop executes nothing
-// and produces no blockResult. Treating that as pending work returns a
-// spurious ErrLoopExhausted, which the stage loop reports as
-// "unexpected state step has more work".
+// TestApplyLoopCloseIsClean covers close classification when no stop cause was
+// published. Completed and empty streams are clean at the apply-loop layer;
+// partial progress is resumable. An empty stream is only provisionally clean
+// because executor errors and scheduled blocks left pending are checked after
+// teardown.
 func TestApplyLoopCloseIsClean(t *testing.T) {
 	cases := []struct {
 		name         string

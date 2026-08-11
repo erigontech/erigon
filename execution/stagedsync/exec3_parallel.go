@@ -599,12 +599,11 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 							return &ErrLoopExhausted{From: startBlockNum, To: lastBlock.blockNum, Reason: "block batch is full"}
 						}
 					}
-					// Fallback for exit paths that publish no cause: a single-block
-					// fork-validation batch exits via execLoopExitCheck (no cause), and
-					// real shutdown cancels with context.Canceled. A fully-applied range
-					// — or an empty loop that executed nothing because the range was
-					// already applied (async background commit advanced progress) — is a
-					// clean end; otherwise there is more work.
+					// Without a stop cause, classify only what the apply loop observed.
+					// Reaching the requested maximum is complete, while observed progress
+					// below it is resumable. An empty stream is provisionally clean: after
+					// the executor is joined, later checks still surface executor errors and
+					// scheduled blocks that never reached apply-loop validation.
 					if applyLoopCloseIsClean(lastBlock.blockNum, pe.maxBlockNum, len(txResultBlocks)) {
 						return nil
 					}
@@ -760,10 +759,10 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					// return their map containers to the pools.
 					applyResult.TxIO.ReleaseOutputMaps()
 
-					// Mark this block as fully applied. The exit-completeness
-					// check at channel-close compares this set against the
-					// expected [startBlockNum, maxBlockNum] range to detect
-					// "block silently missed".
+					// Record that this block's terminal blockResult completed apply-loop
+					// processing, including post-execution validation. At channel close,
+					// a txResultBlocks entry without an appliedBlocks entry is reported as
+					// missing its terminal blockResult.
 					appliedBlocks[blockNum] = struct{}{}
 
 					// If a commit wrong-root was deferred for this (or an earlier)
@@ -1560,11 +1559,11 @@ func (progress *appliedBlockProgress) advance(blockNum, lastTxNum uint64) bool {
 	return true
 }
 
-// applyLoopCloseIsClean reports whether an apply-loop close with no published
-// stop cause is a clean end rather than a partial batch to resume. It is clean
-// when the requested range was fully applied (lastBlockNum >= maxBlockNum) or
-// when the loop executed nothing at all (no tx-results and no blockResult) —
-// the range was already applied before this call, so there is no pending work.
+// applyLoopCloseIsClean reports whether a close without a stop cause is clean
+// from the apply loop's observations. Reaching maxBlockNum completes the range.
+// Seeing neither transaction results nor a terminal blockResult is also clean
+// at this layer because executor errors and pending scheduled blocks are checked
+// after teardown. Any other close observed only part of the requested range.
 func applyLoopCloseIsClean(lastBlockNum, maxBlockNum uint64, txResultCount int) bool {
 	if lastBlockNum >= maxBlockNum {
 		return true
