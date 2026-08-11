@@ -18,6 +18,7 @@ package forkchoice
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -29,8 +30,29 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/common"
 )
+
+func TestStoreAnchorEnvelopeCompletesBookkeepingAfterCommittedDumpWarning(t *testing.T) {
+	root := common.HexToHash("0x1234")
+	blockHash := common.HexToHash("0xabcd")
+	eth2Roots, err := lru.New[common.Hash, common.Hash](16)
+	require.NoError(t, err)
+	store := &ForkChoiceStore{
+		forkGraph: payloadVoteForkGraph{dumpEnvelopeErr: errors.Join(fork_graph.ErrEnvelopeCommitted, errors.New("sync directory"))},
+		eth2Roots: eth2Roots,
+	}
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
+		BeaconBlockRoot: root,
+		Payload:         &cltypes.Eth1Block{BlockHash: blockHash},
+	}}
+
+	require.NoError(t, store.StoreAnchorEnvelope(root, envelope))
+	persistedHash, ok := eth2Roots.Get(root)
+	require.True(t, ok)
+	require.Equal(t, blockHash, persistedHash)
+}
 
 // TestValidateEnvelopeAgainstBlock_NoBid tests that validation fails when block has no bid
 func TestValidateEnvelopeAgainstBlock_NoBid(t *testing.T) {

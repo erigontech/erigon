@@ -357,6 +357,30 @@ func TestReadEnvelopeRejectsLengthAboveGossipLimit(t *testing.T) {
 	require.False(t, f.HasEnvelope(root))
 }
 
+func TestReadEnvelopeRejectsKnownInvalidFileWithoutOpening(t *testing.T) {
+	baseFs := afero.NewMemMapFs()
+	fs := &envelopeWriteFailureFs{Fs: baseFs, stage: "open"}
+	f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
+	root := common.HexToHash("0x1234")
+	addEnvelopeTestBlock(f, root, 1)
+	f.invalidEnvelopes.Store(root, struct{}{})
+
+	_, err := f.ReadEnvelopeFromDisk(root)
+	require.ErrorContains(t, err, "known invalid")
+	require.NotErrorIs(t, err, errTestEnvelopeIO)
+}
+
+func TestDumpEnvelopeRejectsLengthAboveGossipLimit(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
+	root := common.HexToHash("0x1234")
+	addEnvelopeTestBlock(f, root, 1)
+
+	err := f.DumpEnvelopeOnDisk(root, testEnvelopeWithTransaction(root, make([]byte, clparams.MaxChunkSize)))
+	require.ErrorContains(t, err, "exceeds max")
+	require.False(t, f.HasEnvelope(root))
+}
+
 func TestDumpEnvelopeSyncsDirectoryAfterRename(t *testing.T) {
 	baseFs := afero.NewMemMapFs()
 	fs := &envelopeDirSyncFs{Fs: baseFs}
@@ -374,11 +398,15 @@ func TestDumpEnvelopeReturnsDirectorySyncErrorAfterCompleteRename(t *testing.T) 
 	f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
 	root := common.HexToHash("0x1234")
 	addEnvelopeTestBlock(f, root, 1)
+	f.invalidEnvelopes.Store(root, struct{}{})
 
 	require.ErrorIs(t, f.DumpEnvelopeOnDisk(root, testEnvelopeWithTransaction(root, []byte{1})), errTestEnvelopeIO)
 	exists, err := afero.Exists(baseFs, getEnvelopeFilename(root))
 	require.NoError(t, err)
 	require.True(t, exists)
+	require.True(t, f.HasEnvelope(root))
+	_, err = f.ReadEnvelopeFromDisk(root)
+	require.NoError(t, err)
 }
 
 func TestDumpEnvelopeRejectsIncompleteInput(t *testing.T) {
