@@ -111,6 +111,10 @@ func (j *journal) release() {
 	journalPool.Put(j)
 }
 func (j *journal) Reset() {
+	// Zero before reslicing: the journal is pooled, so entries left in the
+	// backing array would keep their extra — and the arena slot a prevObj names —
+	// reachable for the life of the pooled journal.
+	clear(j.entries)
 	j.entries = j.entries[:0]
 	clear(j.dirties)
 }
