@@ -1131,8 +1131,8 @@ scheduled forks, not after.
     ./prysm.sh beacon-chain \
     --execution-endpoint http://localhost:8551 \
     --mainnet --jwt-secret=<your-datadir>/jwt.hex \
-    --checkpoint-sync-url=https://beaconstate.info \
-    --genesis-beacon-api-url=https://beaconstate.info
+    --checkpoint-sync-url=https://mainnet.checkpoint.sigp.io \
+    --genesis-beacon-api-url=https://mainnet.checkpoint.sigp.io
     ```
 
 1.  Start Erigon adding the `--externalcl` flag:
@@ -2154,6 +2154,29 @@ These flags cover the general behavior and configuration of the Erigon client.
 * `--keep.stored.chain.config`: Avoids overriding the chain configuration already stored in the database.
   * Default: `false`
 
+### Development, testing, and block-production helpers
+
+These flags are mainly for dev networks, testing, or specialized block-production setups.
+
+* `--allow-insecure-unlock`: Accepted for go-ethereum CLI compatibility but currently has **no effect** — the flag is registered and settable, yet nothing in the codebase reads it and Erigon exposes no account-unlocking RPC.
+  * Default: `false`
+* `--dev-validator-seed value`: Deterministic BLS key seed for the embedded dev validator. Read only in PoS dev mode, which is selected by `--chain dev`; on any other chain the flag does nothing.
+  * Default: `devnet`
+* `--dev-validator-count value`: Number of validators for PoS dev mode (`--chain dev`).
+  * Default: `64`
+* `--dev.slot-time value`: Slot duration in seconds for PoS dev mode (`--chain dev`). Values below `2` are silently raised to `2`.
+  * Default: `6`
+* `--miner.gaslimit value`: Target gas limit for mined blocks.
+  * Default: unset — the target falls back to the chain configuration's default block gas limit, or `60000000` where the chain config does not set one. An explicit `0` is ignored rather than applied as a zero limit, so the flag only takes effect when set to a positive value.
+* `--miner.extradata value`: Block extra data set by the miner. Values longer than 32 bytes are silently truncated.
+  * Default: the client version string
+* `--experimental.bal`: Generates block access lists.
+  * Default: `false`
+* `--experimental.always-generate-changesets`: Overrides changeset generation logic.
+  * Default: `false`, derived as the inverse of the `BATCH_COMMITMENTS` environment variable (itself `true` by default). Running with `BATCH_COMMITMENTS=false` therefore flips this default to `true` unless the flag is passed explicitly.
+* `--chaos.monkey`: Testing-only flag that enables spontaneous network, consensus, and other failures.
+  * Default: `false`
+
 ### Database and Caching
 
 These flags control database performance and memory usage. See [Database](/fundamentals/database) for the on-disk layout.
@@ -2170,6 +2193,8 @@ These flags control database performance and memory usage. See [Database](/funda
   * Default: `2`
 * `--batchSize value`: Sets the batch size for the execution stage.
   * Default: `512M`
+* `--etl.bufferSize value`: Buffer size for ETL operations. Also settable through the `ETL_OPTIMAL` environment variable.
+  * Default: `256MB`
 * `--bodies.cache value`: Sets the size limit for the block bodies cache.
   * Default: `268435456`
 * `--state.cache value`: Sets the amount of data to store in the StateCache.
@@ -2541,6 +2566,11 @@ Flags for configuring the parallel block execution engine.
   * Default: `true`
 * `--exec.state-cache`: Enable the executor's domain-shared read cache. Equivalent to `USE_STATE_CACHE=true`. Disable for cold-read performance measurements.
   * Default: `true`
+
+**Commitment-trie construction.** The following flag changes how the commitment (state-root) trie is computed during execution. It defaults off and is intended for comparing root hashes against a sequential sync before enabling broadly.
+
+* `--experimental.concurrent-commitment` (experimental): Compute the commitment trie concurrently instead of sequentially. Also applies when rebuilding commitment from existing state.
+  * Default: `false`
 
 ### Caplin (Consensus Layer)
 
