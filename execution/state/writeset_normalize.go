@@ -341,7 +341,15 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 			if SetAccountFieldFromMap(filtered, vm, addr, path, ver, txIndex+1) {
 				continue
 			}
-			// Fall back to stateReader for pre-block account
+			// Destroyed earlier in this block with no cell for this field: the
+			// value is the post-destruction default. The stateReader below serves
+			// the pre-block record, which would resurrect the destroyed
+			// contract's nonce and codeHash.
+			if sdEarlier {
+				SetAccountFieldZero(filtered, addr, path, ver)
+				continue
+			}
+			// Fall back to stateReader for the pre-block account.
 			if stateReader != nil {
 				if !fallbackLoaded {
 					acc, err := stateReader.ReadAccountData(addr)
