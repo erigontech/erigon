@@ -450,27 +450,39 @@ func (vm *VersionMap) applySubFieldWrites(addr accounts.Address, txIdx int, acco
 	if _, cell := floorCell(e.Balance, txIdx); cell != nil {
 		account.Balance = cell.Value
 	}
+	_, nonceCell := floorCell(e.Nonce, txIdx)
+	codeHashIdx, codeHashCell := floorCell(e.CodeHash, txIdx)
+
+	// A field with no cell of its own is served from before the block, and any
+	// destruct below txIdx erased that — SELFDESTRUCT records Incarnation,
+	// SelfDestruct and Balance, nothing else, so a pre-block contract reaches here
+	// with neither cell. Both fall back to the same floor, so one scan answers
+	// for both; it is the unbounded one, and running it twice would double the
+	// cost on an account carrying a long SelfDestruct history.
+	preBlockWiped := false
+	if nonceCell == nil || codeHashCell == nil {
+		_, preBlockWiped = selfDestructWipesLocked(e, NoncePath, -1, txIdx)
+	}
+
 	// A nonce cell below the destruct is still what the block commits: a
 	// non-CREATE resurrect inherits the pre-destruct account fields through the
 	// version map, and writeset_normalize.go overrides that only for a CREATE.
-	// A nonce with no cell at all comes from the domain record the destruct
-	// cascade deleted, so that one is gone.
-	if _, cell := floorCell(e.Nonce, txIdx); cell != nil {
-		account.Nonce = cell.Value
-	} else if _, wiped := selfDestructWipesLocked(e, NoncePath, -1, txIdx); wiped {
+	if nonceCell != nil {
+		account.Nonce = nonceCell.Value
+	} else if preBlockWiped {
 		account.Nonce = 0
 	}
 	if _, cell := floorCell(e.Incarnation, txIdx); cell != nil {
 		account.Incarnation = cell.Value
 	}
-	// With no cell of its own the code hash comes from before the block, which a
-	// destruct at any index erased — SELFDESTRUCT records no CodeHash, so a
-	// has-cell-only check would leave a pre-block contract's hash on a revival.
-	idx, cell := floorCell(e.CodeHash, txIdx)
-	if _, wiped := selfDestructWipesLocked(e, CodeHashPath, idx, txIdx); wiped {
+	if codeHashCell != nil {
+		if _, wiped := selfDestructWipesLocked(e, CodeHashPath, codeHashIdx, txIdx); wiped {
+			account.CodeHash = accounts.EmptyCodeHash
+		} else {
+			account.CodeHash = codeHashCell.Value
+		}
+	} else if preBlockWiped {
 		account.CodeHash = accounts.EmptyCodeHash
-	} else if cell != nil {
-		account.CodeHash = cell.Value
 	}
 }
 
