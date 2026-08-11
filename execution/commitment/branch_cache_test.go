@@ -17,12 +17,15 @@
 package commitment
 
 import (
+	"math/rand"
 	"runtime"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
 // TestBranchCache_AccountTrunkRouting verifies account-trie branches at nibble
@@ -448,4 +451,66 @@ func TestBranchCache_ConcurrentTailGrow(t *testing.T) {
 		})
 	}
 	wg.Wait()
+}
+
+// storageNibblesReference is the pre-optimization computation kept as the
+// oracle: full CompactToHex expansion, then slice past the 64 account
+// nibbles. storageNibbles must agree with it whenever the true count is <=4.
+func storageNibblesReference(prefix []byte) (nib [4]byte, n int) {
+	full := nibbles.CompactToHex(prefix)
+	n = len(full) - 64
+	for i := 0; i < n && i < 4; i++ {
+		nib[i] = full[64+i]
+	}
+	return nib, n
+}
+
+func TestStorageNibbles_MatchesReference(t *testing.T) {
+	rng := rand.New(rand.NewSource(2))
+	for range 5000 {
+		l := 33 + rng.Intn(20) // spans storLen 0 through comfortably past 4
+		prefix := make([]byte, l)
+		rng.Read(prefix)
+		oddBit := byte(0)
+		if rng.Intn(2) == 1 {
+			oddBit = 0x10
+		}
+		prefix[0] = prefix[0]&0x0f | oddBit // no terminator flag: storageNibbles' precondition
+
+		wantNib, wantN := storageNibblesReference(prefix)
+		var gotNib [4]byte
+		gotN := storageNibbles(prefix, &gotNib)
+		require.Equalf(t, wantN, gotN, "n mismatch len=%d prefix0=%#x", l, prefix[0])
+		if gotN <= 4 {
+			require.Equalf(t, wantNib, gotNib, "nibbles mismatch len=%d prefix0=%#x", l, prefix[0])
+		}
+	}
+}
+
+// TestBranchCache_StorageRoute_ZeroAlloc verifies storageRoute's account-hash
+// and storage-nibble decode no longer pay the CompactToHex + packed-key
+// allocations on a storage-tier lookup, for both odd and even flag parity.
+func TestBranchCache_StorageRoute_ZeroAlloc(t *testing.T) {
+	c := NewBranchCache(100)
+
+	even := make([]byte, 33) // even flag, storLen=0 → storage trunk's d0
+	for i := 1; i < 33; i++ {
+		even[i] = byte(i)
+	}
+	c.PinEntry(even, []byte("even"), 0, 100)
+
+	odd := make([]byte, 34) // odd flag, storLen=3 → storage trunk's d3
+	odd[0] = 0x10
+	for i := 1; i < 34; i++ {
+		odd[i] = byte(i * 7)
+	}
+	c.PinEntry(odd, []byte("odd"), 0, 100)
+
+	for _, prefix := range [][]byte{even, odd} {
+		allocs := testing.AllocsPerRun(1000, func() {
+			var nibBuf [4]byte // caller-owned scratch, as in Get/store/PinEntry/Invalidate
+			_, _, _ = c.storageRoute(prefix, false, &nibBuf)
+		})
+		require.Zerof(t, allocs, "storageRoute must not allocate on a storage-tier lookup, prefix0=%#x", prefix[0])
+	}
 }
