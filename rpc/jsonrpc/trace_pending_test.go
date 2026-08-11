@@ -75,12 +75,11 @@ func TestTraceBlockAcceptsPendingTag(t *testing.T) {
 	debugAPI := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
 	traceAPI := newTraceApiForTest(m)
 
-	err := debugAPI.TraceBlockByNumber(ctx, pending, nil, jsonstream.New(io.Discard))
-	require.NotErrorIs(t, err, errPendingNotSupported)
+	require.NoError(t, debugAPI.TraceBlockByNumber(ctx, pending, nil, jsonstream.New(io.Discard)))
 
-	_, err = traceAPI.Block(ctx, pending, nil, nil)
-	require.NotErrorIs(t, err, errPendingNotSupported)
+	_, err := traceAPI.Block(ctx, pending, nil, nil)
+	require.NoError(t, err)
 
 	_, err = traceAPI.ReplayBlockTransactions(ctx, rpc.BlockNumberOrHashWithNumber(pending), []string{TraceTypeTrace}, nil, nil)
-	require.NotErrorIs(t, err, errPendingNotSupported)
+	require.NoError(t, err)
 }
