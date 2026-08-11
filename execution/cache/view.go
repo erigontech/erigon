@@ -42,10 +42,6 @@ func (c *StateCache) View(generation Generation) ReadView {
 	return ReadView{c: c, generation: c.generation.View(generation)}
 }
 
-func (v ReadView) current() bool {
-	return v.c != nil && v.generation.Current()
-}
-
 func (v ReadView) Get(domain kv.Domain, key []byte) ([]byte, bool) {
 	value, _, ok := v.GetWithStep(domain, key)
 	return value, ok
@@ -78,7 +74,7 @@ func (v ReadView) GetAddrCodeHash(addr []byte) ([32]byte, bool) {
 }
 
 func (v ReadView) canFill() bool {
-	return v.current() && !v.c.disableFills
+	return v.c != nil && !v.c.disableFills && v.generation.Current()
 }
 
 func (v ReadView) Fill(domain kv.Domain, key, value []byte, step kv.Step) {

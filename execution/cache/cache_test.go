@@ -461,7 +461,10 @@ func TestStateCache_ClosePreventsPublication(t *testing.T) {
 	c.Close()
 
 	publisher.Initialize(testStateGeneration(2))
-	require.False(t, c.View(testStateGeneration(2)).current())
+	key := makeAddr(1)
+	c.View(testStateGeneration(2)).Fill(kv.AccountsDomain, key, makeValue(1), 0)
+	_, _, ok := c.getWithStep(kv.AccountsDomain, key)
+	require.False(t, ok)
 	publication := publisher.Begin()
 	publication.Abort()
 	require.Nil(t, publication)
