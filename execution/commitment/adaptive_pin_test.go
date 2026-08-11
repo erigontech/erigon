@@ -240,6 +240,25 @@ func TestAdaptivePinControllerForgetsPinsClearedByFilesPublication(t *testing.T)
 	require.Empty(t, controller.states, "residency state must not outlive the BranchCache entries it describes")
 }
 
+func TestAdaptivePinControllerDelayedResetPreservesSynchronizedState(t *testing.T) {
+	branchCache := NewBranchCache(64)
+	t.Cleanup(branchCache.Close)
+	controller := NewAdaptivePinController(branchCache, DefaultAdaptivePinControllerConfig(), log.Root())
+
+	branchCache.Reset()
+	controller.mu.Lock()
+	controller.syncCacheClearLocked()
+	var contractHash [32]byte
+	contractHash[0] = 1
+	state := &adaptiveContractState{contractHash: contractHash}
+	controller.states[contractHash] = state
+	controller.mu.Unlock()
+
+	controller.ResetAfterCacheClear()
+
+	require.Same(t, state, controller.states[contractHash], "a delayed reset must not discard state built after the cache clear")
+}
+
 // The trunk-preload counters are the only signal for how much work the adaptive
 // pin controller is doing, so promotion must feed them. Asserting the byte
 // counter is enough to prove recordPreload ran: nothing else writes it.

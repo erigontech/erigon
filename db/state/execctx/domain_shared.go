@@ -1202,7 +1202,7 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	adaptivePlan.Commit()
 	adaptivePlan = nil
 	if sd.clearExecutionCaches && sd.adaptivePinController != nil {
-		sd.adaptivePinController.Reset()
+		sd.adaptivePinController.ResetAfterCacheClear()
 	}
 	sd.clearExecutionCaches = false
 	return nil

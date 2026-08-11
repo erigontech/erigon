@@ -256,15 +256,18 @@ func (c *AdaptivePinController) PerContractBudgetBytes() int {
 	return c.cfg.PerContractMaxBudgetBytes
 }
 
-// Reset forgets residency state after BranchCache is cleared. Without this,
-// the controller would treat removed pins as live and wait for their normal
-// demotion before promoting them again.
-func (c *AdaptivePinController) Reset() {
+// ResetAfterCacheClear forgets residency state if BranchCache was cleared
+// since this controller last synchronized. A newer plan may synchronize first;
+// its state already describes the cleared cache and must remain live.
+func (c *AdaptivePinController) ResetAfterCacheClear() {
 	if c == nil {
 		return
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.cacheClearEpoch == c.cache.clearEpoch.Load() {
+		return
+	}
 	c.resetLocked()
 }
 
