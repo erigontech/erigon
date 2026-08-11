@@ -90,18 +90,22 @@ type frozenBlockReader struct {
 
 func (r frozenBlockReader) FrozenBlocks() uint64 { return r.frozen }
 
-// seedPreverified registers a two-file snapshot set so KnownCfg reports a
-// non-zero ExpectBlocks: the registry is empty until a chain TOML is loaded at
-// runtime, and the reporter is a no-op without a target.
-func seedPreverified(t *testing.T, chainName string) uint64 {
+// seedPreverified registers a two-file snapshot set (plus any extra TOML lines)
+// so KnownCfg reports a non-zero ExpectBlocks: the registry is empty until a
+// chain TOML is loaded at runtime, and the reporter is a no-op without a target.
+func seedPreverified(t *testing.T, chainName string, extraLines ...string) uint64 {
 	t.Helper()
 	empty, _ := snapcfg.KnownCfg(chainName)
 	require.Zero(t, empty.ExpectBlocks, "test chain must have no preverified set of its own")
 	t.Cleanup(func() { snapcfg.SetToml(chainName, []byte{}, false) })
 
-	snapcfg.SetToml(chainName, []byte(`"v1-000000-000500-headers.seg" = "aa"
+	toml := `"v1-000000-000500-headers.seg" = "aa"
 "v1-000000-000500-bodies.seg" = "bb"
-`), false)
+`
+	for _, line := range extraLines {
+		toml += line + "\n"
+	}
+	snapcfg.SetToml(chainName, []byte(toml), false)
 
 	cfg, known := snapcfg.KnownCfg(chainName)
 	require.True(t, known)
@@ -185,11 +189,28 @@ func (h *reporterHarness) requireNoEvent(t *testing.T) {
 	}
 }
 
+// The metadata gate keeps the first honest sample away for a while (minutes on
+// slow webseeds). Without an up-front publish the reply would flash the stage
+// list in that window and then drop it for the rest of the download.
+func TestSnapshotDownloadProgressReporterPublishesDownloadShapeAtStart(t *testing.T) {
+	h := newSeededReporterHarness(t, 0)
+
+	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
+	t.Cleanup(func() { stop(nil, true) })
+
+	reply := h.awaitEvent(t)
+	require.True(t, reply.Syncing)
+	require.Zero(t, reply.CurrentBlock)
+	require.Empty(t, reply.Stages)
+	require.Equal(t, h.expectBlocks, reply.LastNewBlockSeen)
+}
+
 func TestSnapshotDownloadProgressReporterMapsByteRatioToBlocks(t *testing.T) {
 	h := newSeededReporterHarness(t, 0)
 
 	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
-	t.Cleanup(func() { stop(nil) })
+	h.awaitEvent(t) // the start event marking the download active
+	t.Cleanup(func() { stop(nil, true) })
 	h.downloader.set(250, 1000)
 
 	reply := h.awaitEvent(t)
@@ -205,7 +226,7 @@ func TestSnapshotDownloadProgressReporterResetsStaleProgressAtStart(t *testing.T
 	// as-is would report the full snapshot set as downloaded.
 	h.downloader.set(1000, 1000)
 	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
-	defer func() { stop(nil) }()
+	defer func() { stop(nil, true) }()
 
 	require.Equal(t, 1, h.downloader.resetCount())
 	require.Zero(t, h.currentBlock(t))
@@ -215,7 +236,8 @@ func TestSnapshotDownloadProgressReporterSkipsCompleteSample(t *testing.T) {
 	h := newSeededReporterHarness(t, 0)
 
 	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
-	t.Cleanup(func() { stop(nil) })
+	h.awaitEvent(t) // the start event marking the download active
+	t.Cleanup(func() { stop(nil, true) })
 	h.downloader.set(1000, 1000)
 
 	h.requireNoEvent(t)
@@ -226,7 +248,8 @@ func TestSnapshotDownloadProgressReporterSkipsUnknownTotal(t *testing.T) {
 	h := newSeededReporterHarness(t, 0)
 
 	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
-	t.Cleanup(func() { stop(nil) })
+	h.awaitEvent(t) // the start event marking the download active
+	t.Cleanup(func() { stop(nil, true) })
 	h.downloader.set(400, 0)
 
 	h.requireNoEvent(t)
@@ -238,10 +261,11 @@ func TestSnapshotDownloadProgressReporterStopPinsFullProgressOnSuccess(t *testin
 	h := newSeededReporterHarness(t, frozen)
 
 	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
+	h.awaitEvent(t) // the start event marking the download active
 	h.downloader.set(400, 1000)
 	h.awaitEvent(t)
 
-	stop(nil)
+	stop(nil, true)
 
 	require.Equal(t, uint64(frozen), h.currentBlock(t))
 }
@@ -252,10 +276,11 @@ func TestSnapshotDownloadProgressReporterStopKeepsLastSampleOnFailure(t *testing
 	h := newSeededReporterHarness(t, 499_000)
 
 	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
+	h.awaitEvent(t) // the start event marking the download active
 	h.downloader.set(400, 1000)
 	h.awaitEvent(t)
 
-	stop(errors.New("webseed outage"))
+	stop(errors.New("webseed outage"), false)
 
 	require.InDelta(t, 0.4*float64(h.expectBlocks), float64(h.currentBlock(t)), 1)
 }
@@ -267,11 +292,12 @@ func TestSnapshotDownloadProgressReporterStopOnShutdownPublishesNothing(t *testi
 	ctx, cancel := context.WithCancel(t.Context())
 
 	stop := startSnapshotDownloadProgressReporter(ctx, h.cfg)
+	h.awaitEvent(t) // the start event marking the download active
 	h.downloader.set(400, 1000)
 	h.awaitEvent(t)
 
 	cancel()
-	stop(context.Canceled)
+	stop(context.Canceled, false)
 
 	h.requireNoEvent(t)
 	require.InDelta(t, 0.4*float64(h.expectBlocks), float64(h.currentBlock(t)), 1)
@@ -282,7 +308,7 @@ func TestSnapshotDownloadProgressReporterStopWithoutSamplePinsFullProgress(t *te
 	h := newSeededReporterHarness(t, frozen)
 
 	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
-	stop(nil)
+	stop(nil, true)
 
 	require.Equal(t, uint64(frozen), h.currentBlock(t))
 }
@@ -295,13 +321,30 @@ func TestSnapshotDownloadProgressReporterStopPinsWhenDownloaderReportsNoProgress
 	h := newSeededReporterHarness(t, frozen)
 
 	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
+	h.awaitEvent(t) // the start event marking the download active
 	h.downloader.set(400, 1000)
 	h.awaitEvent(t)
 	h.downloader.set(0, 0)
 
-	stop(nil)
+	stop(nil, true)
 
 	require.Equal(t, uint64(frozen), h.currentBlock(t))
+}
+
+// Without state files (--snap.skip-state-snapshot-download) there is no
+// commitment block and execution starts from genesis: pinning would claim the
+// frozen tip for the whole re-execution, so the stop func must clear instead.
+func TestSnapshotDownloadProgressReporterStopClearsWithoutCommitmentBlock(t *testing.T) {
+	h := newSeededReporterHarness(t, 499_000)
+
+	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
+	h.awaitEvent(t) // the start event marking the download active
+	h.downloader.set(400, 1000)
+	h.awaitEvent(t)
+
+	stop(nil, false)
+
+	require.Zero(t, h.currentBlock(t))
 }
 
 // The snapshots cover only the download target, so an FCU arriving mid-download
@@ -311,7 +354,8 @@ func TestSnapshotDownloadProgressReporterDoesNotScaleToLiveHead(t *testing.T) {
 	h.cfg.notifier.NewLastBlockSeen(h.expectBlocks + 1_000_000)
 
 	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
-	t.Cleanup(func() { stop(nil) })
+	h.awaitEvent(t) // the start event marking the download active
+	t.Cleanup(func() { stop(nil, true) })
 	h.downloader.set(500, 1000)
 
 	reply := h.awaitEvent(t)
@@ -326,7 +370,8 @@ func TestSnapshotDownloadProgressReporterCapsTargetAtDownloadToBlock(t *testing.
 	h.cfg.syncConfig.SnapshotDownloadToBlock = toBlock
 
 	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
-	t.Cleanup(func() { stop(nil) })
+	h.awaitEvent(t) // the start event marking the download active
+	t.Cleanup(func() { stop(nil, true) })
 	h.downloader.set(500, 1000)
 
 	reply := h.awaitEvent(t)
@@ -338,11 +383,30 @@ func TestSnapshotDownloadProgressReporterDownloadToBlockAboveTipKeepsTarget(t *t
 	h.cfg.syncConfig.SnapshotDownloadToBlock = 10 * h.expectBlocks
 
 	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
-	t.Cleanup(func() { stop(nil) })
+	h.awaitEvent(t) // the start event marking the download active
+	t.Cleanup(func() { stop(nil, true) })
 	h.downloader.set(500, 1000)
 
 	reply := h.awaitEvent(t)
 	require.InDelta(t, 0.5*float64(h.expectBlocks), float64(reply.CurrentBlock), 1)
+}
+
+// CL segments (beaconblocks, blobsidecars) are numbered by slot: on chains
+// where slots exceed block numbers, a target derived from every .seg would
+// report blocks past the EL tip and snap backwards at the success pin.
+func TestSnapshotDownloadProgressReporterTargetIgnoresSlotNumberedSegments(t *testing.T) {
+	h := newReporterHarness(t, networkname.Bloatnet, 0, &progressDownloader{})
+	seedPreverified(t, networkname.Bloatnet, `"v1.1-000000-000800-beaconblocks.seg" = "cc"`)
+	const headersTip = 499_999
+
+	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
+	h.awaitEvent(t) // the start event marking the download active
+	t.Cleanup(func() { stop(nil, true) })
+	h.downloader.set(500, 1000)
+
+	reply := h.awaitEvent(t)
+	require.InDelta(t, 0.5*float64(headersTip), float64(reply.CurrentBlock), 1)
+	require.Equal(t, uint64(headersTip), reply.LastNewBlockSeen)
 }
 
 func TestSnapshotDownloadProgressReporterNoopWithoutProgressCapability(t *testing.T) {
@@ -350,7 +414,7 @@ func TestSnapshotDownloadProgressReporterNoopWithoutProgressCapability(t *testin
 	seedPreverified(t, networkname.Bloatnet)
 
 	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
-	stop(nil)
+	stop(nil, false)
 
 	h.requireNoEvent(t)
 	require.Zero(t, h.currentBlock(t))
@@ -361,7 +425,7 @@ func TestSnapshotDownloadProgressReporterNoopWithoutKnownTarget(t *testing.T) {
 
 	h.downloader.set(250, 1000)
 	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
-	stop(nil)
+	stop(nil, false)
 
 	require.Zero(t, h.downloader.resetCount())
 	h.requireNoEvent(t)
@@ -373,7 +437,7 @@ func TestSnapshotDownloadProgressReporterNoopWithoutNotifier(t *testing.T) {
 	h.cfg.notifier = nil
 
 	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
-	stop(nil)
+	stop(nil, false)
 
 	require.Zero(t, h.downloader.resetCount())
 }

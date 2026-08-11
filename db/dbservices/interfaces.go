@@ -172,8 +172,8 @@ type DownloaderClient interface {
 
 // DownloadProgressReport is an optional capability of a DownloaderClient: it
 // reports snapshot-download progress in bytes so eth_syncing can surface it.
-// Only the in-process downloader implements it; an external one over gRPC does
-// not, and callers degrade to no progress.
+// Implementing it does not guarantee data: clients wrapping an external
+// downloader satisfy it too and always report total == 0 (unknown).
 type DownloadProgressReport interface {
 	// Completed reports downloaded and total bytes; total == 0 means unknown.
 	Completed() (done, total uint64)

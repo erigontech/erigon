@@ -412,6 +412,34 @@ func TestDownloaderResetProgressClearsHighWaterMark(t *testing.T) {
 	require.Equal(t, uint64(100), done)
 }
 
+// A same-name torrent retained under a different infohash (an existing local
+// file kept over the preverified one) must still count toward stats: resolving
+// batch entries only by the requested hash would keep MetadataReady short for
+// the whole session and gate Completed() at (0, 0).
+func TestNewStatsCountsRetainedSameNameTorrent(t *testing.T) {
+	require := require.New(t)
+	test := newDownloaderTest(t)
+	ctx := t.Context()
+
+	require.NoError(os.WriteFile(filepath.Join(test.dirs.Snap, "a.seg"), []byte("local snapshot data"), 0o644))
+	require.NoError(test.downloader.AddNewSeedableFile(ctx, "a.seg"))
+	localT := test.downloader.torrentsByName["a.seg"]
+	require.NotNil(localT)
+
+	preverifiedHash := snaptype.Hex2InfoHash("bb")
+	require.NotEqual(preverifiedHash, localT.InfoHash())
+	require.NoError(test.downloader.testStartSingleDownloadNoWait(ctx, preverifiedHash, "a.seg"))
+
+	stats := test.downloader.newStats(AggStats{}, []snapshot{{InfoHash: preverifiedHash, Name: "a.seg"}})
+	require.Equal(1, stats.NumTorrents)
+	require.Equal(1, stats.MetadataReady)
+	require.Positive(stats.BytesTotal)
+
+	test.downloader.storeStats(stats)
+	_, total := test.downloader.Completed()
+	require.Positive(total)
+}
+
 // noProgressDownloaderClient stands in for an external downloader reached over
 // gRPC, which cannot report progress.
 type noProgressDownloaderClient struct {

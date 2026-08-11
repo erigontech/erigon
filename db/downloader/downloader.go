@@ -561,7 +561,7 @@ func (d *Downloader) logNoMetadata(lvl log.Lvl, torrents []snapshot) {
 	noMetadata := make([]string, 0, len(torrents))
 
 	for _, ps := range torrents {
-		t, ok := d.torrentClient.Torrent(ps.InfoHash)
+		t, ok := d.resolveSnapshotTorrent(ps)
 		if !ok {
 			// Don't report missing metainfo, because we haven't even added it yet.
 			continue
@@ -580,6 +580,19 @@ func (d *Downloader) logNoMetadata(lvl log.Lvl, torrents []snapshot) {
 		noMetadata = append(noMetadata[:5], "...")
 	}
 	d.log(lvl, "No metadata yet", "files", amount, "list", noMetadata)
+}
+
+// resolveSnapshotTorrent resolves a requested snapshot to its live torrent: by
+// the requested infohash, or by name for a same-name torrent retained under a
+// different infohash, which never resolves by the requested hash.
+func (d *Downloader) resolveSnapshotTorrent(ps snapshot) (*torrent.Torrent, bool) {
+	if t, ok := d.torrentClient.Torrent(ps.InfoHash); ok {
+		return t, true
+	}
+	d.lock.RLock()
+	t, ok := d.torrentsByName[ps.Name]
+	d.lock.RUnlock()
+	return t, ok
 }
 
 // We take preverifiedSnapshot because it's convenient. We want to log torrents that potentially
@@ -603,7 +616,7 @@ func (d *Downloader) newStats(prevStats AggStats, torrents []snapshot) AggStats 
 	stats.NumTorrents = len(torrents)
 
 	for _, ps := range torrents {
-		t, ok := d.torrentClient.Torrent(ps.InfoHash)
+		t, ok := d.resolveSnapshotTorrent(ps)
 		if !ok {
 			// Don't report missing metainfo, because we haven't even added it yet.
 			continue
