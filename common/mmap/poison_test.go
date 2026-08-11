@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common/dir"
 )
 
 // A read through a poisoned range kills the process, so the read has to happen
@@ -29,7 +31,6 @@ func poisonChild() {
 	if err != nil {
 		os.Exit(3)
 	}
-	defer os.Remove(f.Name())
 	if err := f.Truncate(4096); err != nil {
 		os.Exit(3)
 	}
@@ -39,6 +40,11 @@ func poisonChild() {
 	}
 	borrowed := data[:8]
 	_ = borrowed[0] // readable while the file is open
+
+	// Unlink while mapped, the way a merge disposes of a superseded file.
+	if err := dir.RemoveFile(f.Name()); err != nil {
+		os.Exit(3)
+	}
 	if err := Poison(data, handle); err != nil {
 		os.Exit(3)
 	}
