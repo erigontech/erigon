@@ -105,9 +105,6 @@ type runMode int
 const (
 	modeSeq runMode = iota
 	modeParallel
-	modeStreaming
-	modeStreamingScheduled
-	modeStreamingPublic
 )
 
 func newSeqTrie(t *testing.T, ms *MockState) *HexPatriciaHashed {
@@ -121,34 +118,6 @@ func newParTrie(t *testing.T, ms *MockState, workers int) *ParallelPatriciaHashe
 	tr.SetNumWorkers(workers)
 	tr.ResetContext(ms)
 	return tr
-}
-
-// Requires ms.SetConcurrentCommitment(true) already set.
-func newStreamCommitter(t *testing.T, ms *MockState, workers int, scheduler bool) *StreamingCommitter {
-	t.Helper()
-	sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
-	sc.SetNumWorkers(workers)
-	if scheduler {
-		require.NoError(t, sc.StartScheduler(context.Background()))
-	}
-	return sc
-}
-
-// newStreamingFixture builds a concurrent MockState with keys/upds applied and a StreamingCommitter
-// wired to it. Pass scheduler=true to start the background scheduler before returning.
-func newStreamingFixture(t *testing.T, keys [][]byte, upds []Update, workers int, scheduler ...bool) (*StreamingCommitter, *MockState) {
-	t.Helper()
-	ms := NewMockState(t)
-	ms.SetConcurrentCommitment(true)
-	require.NoError(t, ms.applyPlainUpdates(keys, upds))
-	sc := newStreamCommitter(t, ms, workers, len(scheduler) > 0 && scheduler[0])
-	return sc, ms
-}
-
-func touchAll(sc *StreamingCommitter, keys [][]byte) {
-	for _, k := range keys {
-		sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
-	}
 }
 
 func processRoot(t *testing.T, trie Trie, ut *Updates) []byte {
@@ -171,7 +140,6 @@ func processModeBatch(t *testing.T, ms *MockState, mode runMode, workers int, ke
 // only through this blob.
 func processModeBatchState(t *testing.T, ms *MockState, mode runMode, workers int, keys [][]byte, upds []Update, blob []byte) ([]byte, []byte) {
 	t.Helper()
-	ctx := context.Background()
 	require.NoError(t, ms.applyPlainUpdates(keys, upds))
 
 	encoded := func(tr *HexPatriciaHashed) []byte {
@@ -196,39 +164,6 @@ func processModeBatchState(t *testing.T, ms *MockState, mode runMode, workers in
 			})
 		}
 		return processRoot(t, tr, ut), encoded(tr.RootTrie())
-	case modeStreaming, modeStreamingScheduled:
-		sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
-		defer sc.Release()
-		sc.SetNumWorkers(workers)
-		tmpl := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
-		defer tmpl.Release()
-		require.NoError(t, tmpl.SetState(blob))
-		sc.SeedRootFrom(tmpl)
-		if mode == modeStreamingScheduled {
-			require.NoError(t, sc.StartScheduler(context.Background()))
-		}
-		for _, k := range keys {
-			sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
-		}
-		r, err := sc.Process(ctx)
-		require.NoError(t, err)
-		sc.PromoteRootInto(tmpl)
-		return bytes.Clone(r), encoded(tmpl)
-	case modeStreamingPublic:
-		cfg := DefaultTrieConfig()
-		cfg.Variant = VariantStreamingHexPatricia
-		trie, ut := InitializeTrieAndUpdates(ModeDirect, t.TempDir(), cfg)
-		defer ut.Close()
-		defer trie.Release()
-		pt := trie.(*ParallelPatriciaHashed)
-		pt.SetNumWorkers(workers)
-		pt.SetTrieContextFactory(mockTrieCtxFactory(ms))
-		pt.ResetContext(ms)
-		require.NoError(t, pt.RootTrie().SetState(blob))
-		for _, key := range keys {
-			ut.TouchPlainKey(string(key), nil, ut.TouchAccount)
-		}
-		return processRoot(t, trie, ut), encoded(pt.RootTrie())
 	default:
 		tr := newSeqTrie(t, ms)
 		defer tr.Release()
@@ -239,6 +174,32 @@ func processModeBatchState(t *testing.T, ms *MockState, mode runMode, workers in
 	}
 }
 
+// parallelBatchDeepFolds folds one batch through the parallel engine, additionally
+// reporting how many big-storage accounts took the concurrent deep fold rather than
+// demoting to serial recursion.
+func parallelBatchDeepFolds(t *testing.T, ms *MockState, workers int, keys [][]byte, upds []Update, blob []byte) ([]byte, []byte, uint64) {
+	t.Helper()
+	require.NoError(t, ms.applyPlainUpdates(keys, upds))
+
+	tr := newParTrie(t, ms, workers)
+	defer tr.Release()
+	require.NoError(t, tr.RootTrie().SetState(blob))
+	ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+	defer ut.Close()
+	for i, k := range keys {
+		ks := string(k)
+		ut.TouchPlainKey(ks, nil, func(c *KeyUpdate, _ []byte) {
+			c.plainKey = ks
+			c.hashedKey = KeyToHexNibbleHash(k)
+			c.update = &upds[i]
+		})
+	}
+	root := processRoot(t, tr, ut)
+	encoded, err := tr.RootTrie().EncodeCurrentState(nil)
+	require.NoError(t, err)
+	return root, encoded, tr.DeepLocalFolds()
+}
+
 func engineRoot(t *testing.T, mode runMode, workers int, keys [][]byte, upds []Update) ([]byte, *MockState) {
 	t.Helper()
 	ms := NewMockState(t)
@@ -246,6 +207,11 @@ func engineRoot(t *testing.T, mode runMode, workers int, keys [][]byte, upds []U
 		ms.SetConcurrentCommitment(true)
 	}
 	return processModeBatch(t, ms, mode, workers, keys, upds), ms
+}
+
+func sequentialRoot(t *testing.T, keys [][]byte, upds []Update) ([]byte, *MockState) {
+	t.Helper()
+	return engineRoot(t, modeSeq, 0, keys, upds)
 }
 
 // Folds two batches into one MockState so batch-1 branches become on-disk state for
@@ -279,18 +245,6 @@ func requireAllEnginesParity(t *testing.T, k1 [][]byte, u1 []Update, k2 [][]byte
 		branchDiff(t, seqMs, parMs)
 	}
 	require.Equalf(t, seqRoot, parRoot, "parallel(workers=%d) vs sequential root mismatch", workers)
-
-	strRoot, strMs := incrementalRoot(t, modeStreaming, workers, k1, u1, k2, u2)
-	if !bytes.Equal(seqRoot, strRoot) {
-		branchDiff(t, seqMs, strMs)
-	}
-	require.Equalf(t, seqRoot, strRoot, "streaming(workers=%d) vs sequential root mismatch", workers)
-
-	schRoot, schMs := incrementalRoot(t, modeStreamingScheduled, workers, k1, u1, k2, u2)
-	if !bytes.Equal(seqRoot, schRoot) {
-		branchDiff(t, seqMs, schMs)
-	}
-	require.Equalf(t, seqRoot, schRoot, "streaming-scheduled(workers=%d) vs sequential root mismatch", workers)
 }
 
 func requireBranchParity(t *testing.T, seq, got *MockState) {

@@ -85,8 +85,6 @@ func TestDeepFold_SurvivorCollapseThenRetouch(t *testing.T) {
 		mode runMode
 	}{
 		{"parallel", modeParallel},
-		{"streaming", modeStreaming},
-		{"streaming_scheduled", modeStreamingScheduled},
 	} {
 		for _, w := range []int{1, 4, 8} {
 			roots, ms := runEngineBatches(t, tc.mode, w, batches)
