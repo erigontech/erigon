@@ -2,7 +2,6 @@ package temporal
 
 import (
 	"encoding/binary"
-	"sync"
 	"testing"
 	"time"
 
@@ -258,10 +257,9 @@ func TestTemporalTx_PinsBlockFilesView(t *testing.T) {
 	require.NotNil(t, roTx2.(*Tx).blocktx)
 }
 
-// DomainVisibleEnd's memo serves repeat readers lock-free while first loads
-// run under the memo mutex. Fresh txs each round make the two paths
-// interleave across goroutines; results must stay stable (run with -race).
-func TestTemporalTx_DomainVisibleEndConcurrent(t *testing.T) {
+// HasExactDomainVisibleEnd avoids resolving the numeric frontier, but its
+// answer must match DomainVisibleEnd's authoritative availability result.
+func TestTemporalTx_HasExactDomainVisibleEndMatchesDomainVisibleEnd(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 
@@ -287,43 +285,20 @@ func TestTemporalTx_DomainVisibleEndConcurrent(t *testing.T) {
 	require.NoError(t, sd.Flush(ctx, rwTtx))
 	require.NoError(t, rwTtx.Commit())
 
-	var expectedEnd [kv.DomainLen]uint64
-	var expectedOk [kv.DomainLen]bool
-	baseTtx, err := temporalDb.BeginTemporalRo(ctx)
+	roTtx, err := temporalDb.BeginTemporalRo(ctx)
 	require.NoError(t, err)
-	defer baseTtx.Rollback()
-	for d := range kv.DomainLen {
-		expectedEnd[d], expectedOk[d] = baseTtx.Debug().DomainVisibleEnd(d)
-		require.Equal(t, expectedOk[d], baseTtx.Debug().HasExactDomainVisibleEnd(d))
+	defer roTtx.Rollback()
+	for domain := range kv.DomainLen {
+		_, exact := roTtx.Debug().DomainVisibleEnd(domain)
+		require.Equal(t, exact, roTtx.Debug().HasExactDomainVisibleEnd(domain))
 	}
-	baseTtx.Rollback()
-	require.Equal(t, uint64(2), expectedEnd[kv.StorageDomain])
-	require.True(t, expectedOk[kv.StorageDomain])
-
-	for range 25 {
-		require.NoError(t, temporalDb.ViewTemporal(ctx, func(roTtx kv.TemporalTx) error {
-			var wg sync.WaitGroup
-			for range 8 {
-				wg.Go(func() {
-					for range 4 {
-						for d := range kv.DomainLen {
-							end, ok := roTtx.Debug().DomainVisibleEnd(d)
-							if end != expectedEnd[d] || ok != expectedOk[d] {
-								t.Errorf("domain %v: got (%d, %t), want (%d, %t)", d, end, ok, expectedEnd[d], expectedOk[d])
-							}
-						}
-					}
-				})
-			}
-			wg.Wait()
-			return nil
-		}))
-	}
+	end, exact := roTtx.Debug().DomainVisibleEnd(kv.StorageDomain)
+	require.True(t, exact)
+	require.Equal(t, uint64(2), end)
 }
 
-// A read-only temporal tx memoizes DomainVisibleEnd, while
-// ForceReopenUnderlyingFilesTx swaps in a fresh files view that can extend the
-// frontier — the memo must be re-derived after the swap.
+// ForceReopenUnderlyingFilesTx swaps in a fresh files view, so the visible
+// frontier can advance even though the database read view remains unchanged.
 func TestTemporalTx_ForceReopenRefreshesDomainVisibleEnd(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -375,7 +350,7 @@ func TestTemporalTx_ForceReopenRefreshesDomainVisibleEnd(t *testing.T) {
 	require.NoError(t, err)
 	defer freshRoTtx.Rollback()
 	filesEnd := freshRoTtx.Debug().TxNumsInFiles(kv.StorageDomain)
-	require.Greater(t, filesEnd, uint64(2), "the new files must extend past the memoized frontier")
+	require.Greater(t, filesEnd, uint64(2), "the new files must extend past the pinned frontier")
 
 	end, ok = roTtx.Debug().DomainVisibleEnd(kv.StorageDomain)
 	require.True(t, ok)

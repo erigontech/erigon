@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/db/datadir"
@@ -268,7 +267,6 @@ type tx struct {
 type Tx struct {
 	kv.Tx
 	tx
-	visibleEnds domainVisibleEnds
 }
 
 type RwTx struct {
@@ -276,59 +274,9 @@ type RwTx struct {
 	tx
 }
 
-type domainVisibleEnds struct {
-	// ends is atomic because a lock-free read may overlap reset after the files
-	// transaction reopens. state publishes a slot only after its end is stored;
-	// reset takes mu so an in-flight load cannot republish old data.
-	ends  [kv.DomainLen]atomic.Uint64
-	mu    sync.Mutex
-	state atomic.Uint32
-}
-
-// state packs two bits per domain into one word so a single atomic load
-// returns a consistent (loaded, ok) pair: loadedBit says ends[domain] is
-// memoized, okBit is the memoized ok answer of DomainVisibleEnd. The array
-// size asserts at compile time that both halves fit in uint32.
-var _ [32 - 2*int(kv.DomainLen)]struct{}
-
-func visibleEndBits(domain kv.Domain) (loadedBit, okBit uint32) {
-	loadedBit = uint32(1) << uint32(domain)
-	return loadedBit, loadedBit << uint32(kv.DomainLen)
-}
-
-func (v *domainVisibleEnds) get(tx *Tx, domain kv.Domain) (uint64, bool) {
-	loadedBit, okBit := visibleEndBits(domain)
-	state := v.state.Load()
-	if state&loadedBit != 0 {
-		return v.ends[domain].Load(), state&okBit != 0
-	}
-	return v.load(tx, domain, loadedBit, okBit)
-}
-
-func (v *domainVisibleEnds) load(tx *Tx, domain kv.Domain, loadedBit, okBit uint32) (uint64, bool) {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-
-	state := v.state.Load()
-	if state&loadedBit == 0 {
-		end, ok := tx.aggtx.DomainVisibleEnd(domain, tx.Tx)
-		v.ends[domain].Store(end)
-		state |= loadedBit
-		if ok {
-			state |= okBit
-		}
-		v.state.Store(state)
-	}
-	return v.ends[domain].Load(), state&okBit != 0
-}
-
-// reset takes mu so an in-flight load can't re-store pre-reset bits.
-func (v *domainVisibleEnds) reset() {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	v.state.Store(0)
-}
-
+// ForceReopenUnderlyingFilesTx replaces the transaction's pinned block and
+// state file views. It leaves the database transaction unchanged, so database
+// reads keep their original MVCC view while file-backed reads may see newer files.
 func (tx *tx) ForceReopenUnderlyingFilesTx() {
 	if tx.blocktx != nil {
 		tx.blocktx.Close()
@@ -338,13 +286,6 @@ func (tx *tx) ForceReopenUnderlyingFilesTx() {
 		tx.aggtx.Close()
 	}
 	tx.aggtx = tx.Agg().BeginFilesRo()
-}
-
-// ForceReopenUnderlyingFilesTx swaps in a fresh files view, which can extend
-// the visible frontier — drop the memoized ends so they are re-derived.
-func (tx *Tx) ForceReopenUnderlyingFilesTx() {
-	tx.tx.ForceReopenUnderlyingFilesTx()
-	tx.visibleEnds.reset()
 }
 func (tx *tx) FreezeInfo() kv.FreezeInfo { return tx.aggtx }
 
@@ -787,7 +728,7 @@ func (tx *RwTx) DomainProgress(domain kv.Domain) uint64 {
 	return tx.aggtx.DomainProgress(domain, tx.RwTx)
 }
 func (tx *Tx) DomainVisibleEnd(domain kv.Domain) (uint64, bool) {
-	return tx.visibleEnds.get(tx, domain)
+	return tx.aggtx.DomainVisibleEnd(domain, tx.Tx)
 }
 func (tx *RwTx) DomainVisibleEnd(domain kv.Domain) (uint64, bool) {
 	return tx.aggtx.DomainVisibleEnd(domain, tx.RwTx)
