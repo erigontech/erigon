@@ -3,6 +3,7 @@ package stagedsync
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"math/big"
 	"math/rand"
@@ -262,18 +263,34 @@ type opkey struct {
 	path state.AccountPath
 }
 
+// addrOf and hashOf are BigToAddress/BigToHash for a non-negative int without
+// the big.Int. A generator runs once per op, so on a big block the two
+// allocations were 40% of every object the benchmark made, and the garbage they
+// left was collected during the timed region.
+func addrOf(n int) common.Address {
+	var a common.Address
+	binary.BigEndian.PutUint64(a[len(a)-8:], uint64(n))
+	return a
+}
+
+func hashOf(n int) common.Hash {
+	var h common.Hash
+	binary.BigEndian.PutUint64(h[len(h)-8:], uint64(n))
+	return h
+}
+
 var randomPathGenerator = func(i int, j int, total int) opkey {
-	addr := accounts.InternAddress(common.BigToAddress((big.NewInt(int64(i % 10)))))
-	hash := accounts.InternKey(common.BigToHash((big.NewInt(int64(total)))))
+	addr := accounts.InternAddress(addrOf(i % 10))
+	hash := accounts.InternKey(hashOf(total))
 	return opkey{addr, hash, state.StoragePath}
 }
 
 var dexPathGenerator = func(i int, j int, total int) opkey {
 	if j == total-1 || j == 2 {
-		addr := accounts.InternAddress(common.BigToAddress(big.NewInt(int64(0))))
+		addr := accounts.InternAddress(addrOf(0))
 		return opkey{addr: addr, path: state.BalancePath}
 	} else {
-		addr := accounts.InternAddress(common.BigToAddress(big.NewInt(int64(j))))
+		addr := accounts.InternAddress(addrOf(j))
 		return opkey{addr: addr, path: state.BalancePath}
 	}
 }

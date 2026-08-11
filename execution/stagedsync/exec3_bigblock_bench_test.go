@@ -2,7 +2,6 @@ package stagedsync
 
 import (
 	"fmt"
-	"math/big"
 	"math/rand"
 	"os"
 	"runtime"
@@ -24,7 +23,6 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/holiman/uint256"
 )
 
@@ -221,8 +219,8 @@ func bigBlockWorkers() int {
 // per tx and nothing to show on a profile.
 func widePathGenerator(contracts int) PathGenerator {
 	return func(i int, j int, total int) opkey {
-		addr := accounts.InternAddress(common.BigToAddress(big.NewInt(int64(j % contracts))))
-		key := accounts.InternKey(common.BigToHash(big.NewInt(int64(i*total + j))))
+		addr := accounts.InternAddress(addrOf(j % contracts))
+		key := accounts.InternKey(hashOf(i*total + j))
 		return opkey{addr, key, state.StoragePath}
 	}
 }
