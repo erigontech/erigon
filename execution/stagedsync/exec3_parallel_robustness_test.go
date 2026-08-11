@@ -1540,6 +1540,13 @@ func TestCheckBlocksDrained(t *testing.T) {
 		require.NotErrorIs(t, err, &ErrLoopExhausted{})
 	})
 
+	t.Run("cancellation-only exec error does not hide an undrained block", func(t *testing.T) {
+		execErr := fmt.Errorf("apply loop: %w", context.Canceled)
+		err := withPending().checkBlocksDrained(context.Background(), context.Background(), execErr)
+		require.ErrorContains(t, err, "never reached apply-loop validation: [3]")
+		require.False(t, commonerrors.IsOnlyCanceled(err))
+	})
+
 	t.Run("more-work stop leaves undrained follow-on blocks alone", func(t *testing.T) {
 		// A batch boundary deliberately cancels queued follow-on blocks.
 		ectx, cancel := context.WithCancelCause(context.Background())

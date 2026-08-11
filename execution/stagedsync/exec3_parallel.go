@@ -1633,7 +1633,7 @@ func (pe *parallelExecutor) checkBlocksDrained(ctx, executorCtx context.Context,
 	if ctx.Err() != nil {
 		return reconcileExecErrors(execErr, context.Cause(ctx))
 	}
-	if execErr != nil && !errors.Is(execErr, &ErrLoopExhausted{}) {
+	if execErr != nil && !isQuietExit(execErr) {
 		return execErr
 	}
 	if sc, ok := stopCauseOf(executorCtx); ok && (sc.kind == stopBadBlock || sc.kind == stopMoreWork) {
