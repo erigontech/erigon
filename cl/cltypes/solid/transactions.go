@@ -138,6 +138,24 @@ func (t *TransactionsSSZ) EncodeSSZ(buf []byte) (dst []byte, err error) {
 	return dst, nil
 }
 
+func (t *TransactionsSSZ) ValidateBounds(maxTransactions, maxBytesPerTransaction uint64) error {
+	if maxTransactions == 0 {
+		maxTransactions = clparams.MaxTransactionsPerPayloadDefault
+	}
+	if maxBytesPerTransaction == 0 {
+		maxBytesPerTransaction = clparams.MaxBytesPerTransactionDefault
+	}
+	if uint64(len(t.underlying)) > maxTransactions {
+		return fmt.Errorf("too many transactions: got %d, max %d", len(t.underlying), maxTransactions)
+	}
+	for i, transaction := range t.underlying {
+		if uint64(len(transaction)) > maxBytesPerTransaction {
+			return fmt.Errorf("transaction %d is too large: got %d bytes, max %d", i, len(transaction), maxBytesPerTransaction)
+		}
+	}
+	return nil
+}
+
 func (t *TransactionsSSZ) HashSSZ() ([32]byte, error) {
 	var err error
 	if t.root != (common.Hash{}) {

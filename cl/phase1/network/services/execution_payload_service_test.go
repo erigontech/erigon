@@ -49,11 +49,24 @@ func newTestSignedEnvelope(slot uint64, blockRoot common.Hash, builderIndex uint
 	if envelope.Payload != nil {
 		envelope.Payload.Extra = solid.NewExtraData()
 		envelope.Payload.Transactions = &solid.TransactionsSSZ{}
+		envelope.Payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(clparams.MainnetBeaconConfig.MaxWithdrawalsPerPayload), 44)
+		envelope.Payload.BlockAccessList = solid.NewByteListSSZ(clparams.MainnetBeaconConfig.MaxBytesPerTransaction)
 	}
 	return &cltypes.SignedExecutionPayloadEnvelope{
 		Message:   envelope,
 		Signature: common.Bytes96{},
 	}
+}
+
+func TestExecutionPayloadServiceRejectsMalformedEnvelopeBeforePendingHash(t *testing.T) {
+	service, _ := setupExecutionPayloadService(t)
+	envelope := newTestSignedEnvelope(100, common.HexToHash("0x1234"), 1)
+	envelope.Message.Payload.Withdrawals.Append(nil)
+
+	require.NotPanics(t, func() {
+		err := service.ProcessMessage(context.Background(), nil, envelope)
+		require.ErrorContains(t, err, "nil withdrawal at index 0")
+	})
 }
 
 func TestExecutionPayloadServiceNilEnvelope(t *testing.T) {

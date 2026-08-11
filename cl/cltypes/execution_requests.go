@@ -209,6 +209,68 @@ func (e *ExecutionRequests) Static() bool {
 	return false
 }
 
+func (e *ExecutionRequests) validateForConfig(cfg *clparams.BeaconChainConfig) error {
+	if e.Deposits == nil {
+		return fmt.Errorf("nil deposit requests")
+	}
+	if e.Withdrawals == nil {
+		return fmt.Errorf("nil withdrawal requests")
+	}
+	if e.Consolidations == nil {
+		return fmt.Errorf("nil consolidation requests")
+	}
+	if e.BuilderDeposits == nil {
+		return fmt.Errorf("nil builder deposit requests")
+	}
+	if e.BuilderExits == nil {
+		return fmt.Errorf("nil builder exit requests")
+	}
+	if err := e.Withdrawals.ValidateBounds(int(cfg.MaxWithdrawalRequestsPerPayload)); err != nil {
+		return fmt.Errorf("withdrawals: %w", err)
+	}
+	if err := e.Consolidations.ValidateBounds(int(cfg.MaxConsolidationRequestsPerPayload)); err != nil {
+		return fmt.Errorf("consolidations: %w", err)
+	}
+	if err := e.BuilderDeposits.ValidateBounds(int(cfg.MaxBuilderDepositRequestsPerPayload)); err != nil {
+		return fmt.Errorf("builder deposits: %w", err)
+	}
+	if err := e.BuilderExits.ValidateBounds(int(cfg.MaxBuilderExitRequestsPerPayload)); err != nil {
+		return fmt.Errorf("builder exits: %w", err)
+	}
+	if err := solid.RangeErr(e.Deposits, rejectNilRequest("deposit", func(request *solid.DepositRequest) bool { return request == nil })); err != nil {
+		return err
+	}
+	if err := solid.RangeErr(e.Withdrawals, rejectNilRequest("withdrawal", func(request *solid.WithdrawalRequest) bool { return request == nil })); err != nil {
+		return err
+	}
+	if err := solid.RangeErr(e.Consolidations, rejectNilRequest("consolidation", func(request *solid.ConsolidationRequest) bool { return request == nil })); err != nil {
+		return err
+	}
+	if err := solid.RangeErr(e.BuilderDeposits, rejectNilRequest("builder deposit", func(request *solid.BuilderDepositRequest) bool { return request == nil })); err != nil {
+		return err
+	}
+	return solid.RangeErr(e.BuilderExits, rejectNilRequest("builder exit", func(request *solid.BuilderExitRequest) bool { return request == nil }))
+}
+
+func (e *ExecutionRequests) validateForPersistence(cfg *clparams.BeaconChainConfig) error {
+	if err := e.validateForConfig(cfg); err != nil {
+		return err
+	}
+	if err := e.Deposits.ValidateProgressiveDecodeBounds(int(cfg.MaxDepositRequestsPerPayload)); err != nil {
+		return fmt.Errorf("deposits exceed decoder resource limit: %w", err)
+	}
+	return nil
+}
+
+func rejectNilRequest[T solid.EncodableHashableSSZ](name string, isNil func(T) bool) func(int, T, int) error {
+	return func(i int, request T, _ int) error {
+		if isNil(request) {
+			return fmt.Errorf("nil %s request at index %d", name, i)
+		}
+		return nil
+	}
+}
+
 func (e *ExecutionRequests) UnmarshalJSON(b []byte) error {
 	e.ensureLists()
 	newDeposits := solid.NewStaticListSSZ[*solid.DepositRequest](int(e.cfg.MaxDepositRequestsPerPayload), solid.SizeDepositRequest)

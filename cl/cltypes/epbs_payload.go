@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -544,6 +545,84 @@ type SignedExecutionPayloadEnvelope struct {
 	Signature common.Bytes96            `json:"signature"`
 
 	beaconCfg *clparams.BeaconChainConfig
+}
+
+// ValidateForConfig checks structural and protocol constraints before hashing an envelope.
+func (s *SignedExecutionPayloadEnvelope) ValidateForConfig(cfg *clparams.BeaconChainConfig) error {
+	if s == nil {
+		return errors.New("nil execution payload envelope")
+	}
+	if cfg == nil {
+		return errors.New("nil beacon chain config")
+	}
+	if s.Message == nil {
+		return errors.New("nil execution payload envelope message")
+	}
+	payload := s.Message.Payload
+	if payload == nil {
+		return errors.New("execution payload envelope has nil payload")
+	}
+	if payload.Extra == nil {
+		return errors.New("execution payload envelope has nil extra data")
+	}
+	if err := payload.Extra.ValidateBounds(); err != nil {
+		return fmt.Errorf("invalid execution payload extra data: %w", err)
+	}
+	if payload.Transactions == nil {
+		return errors.New("execution payload envelope has nil transactions")
+	}
+	if payload.Withdrawals == nil {
+		return errors.New("execution payload envelope has nil withdrawals")
+	}
+	if err := payload.Withdrawals.ValidateBounds(int(cfg.MaxWithdrawalsPerPayload)); err != nil {
+		return fmt.Errorf("invalid execution payload withdrawals: %w", err)
+	}
+	if err := solid.RangeErr(payload.Withdrawals, func(i int, withdrawal *Withdrawal, _ int) error {
+		if withdrawal == nil {
+			return fmt.Errorf("nil withdrawal at index %d", i)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if payload.BlockAccessList == nil {
+		return errors.New("execution payload envelope has nil block access list")
+	}
+	requests := s.Message.ExecutionRequests
+	if requests == nil {
+		return errors.New("execution payload envelope has nil execution requests")
+	}
+	if payload.Version() < clparams.GloasVersion {
+		return fmt.Errorf("execution payload version %d predates Gloas", payload.Version())
+	}
+	if requests.Version() < clparams.GloasVersion {
+		return fmt.Errorf("execution requests version %d predates Gloas", requests.Version())
+	}
+	if payload.Version() != requests.Version() {
+		return fmt.Errorf("payload and execution requests versions differ: %d != %d", payload.Version(), requests.Version())
+	}
+	if err := requests.validateForConfig(cfg); err != nil {
+		return fmt.Errorf("invalid execution requests: %w", err)
+	}
+	return nil
+}
+
+// ValidateForPersistence checks that the configured decoder can read the encoded envelope.
+func (s *SignedExecutionPayloadEnvelope) ValidateForPersistence(cfg *clparams.BeaconChainConfig) error {
+	if err := s.ValidateForConfig(cfg); err != nil {
+		return err
+	}
+	payload := s.Message.Payload
+	if err := payload.Transactions.ValidateBounds(cfg.MaxTransactionsPerPayload, cfg.MaxBytesPerTransaction); err != nil {
+		return fmt.Errorf("transactions exceed decoder resource limit: %w", err)
+	}
+	if err := payload.BlockAccessList.ValidateBounds(cfg.MaxBytesPerTransaction); err != nil {
+		return fmt.Errorf("block access list exceeds decoder resource limit: %w", err)
+	}
+	if err := s.Message.ExecutionRequests.validateForPersistence(cfg); err != nil {
+		return fmt.Errorf("execution requests exceed decoder resource limit: %w", err)
+	}
+	return nil
 }
 
 func (s *SignedExecutionPayloadEnvelope) HashSSZ() ([32]byte, error) {

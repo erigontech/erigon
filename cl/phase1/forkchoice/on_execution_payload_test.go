@@ -18,7 +18,6 @@ package forkchoice
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
@@ -29,45 +28,9 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
-	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
 )
-
-func TestStoreAnchorEnvelopeCompletesBookkeepingAfterCommittedDumpWarning(t *testing.T) {
-	root := common.HexToHash("0x1234")
-	blockHash := common.HexToHash("0xabcd")
-	eth2Roots, err := lru.New[common.Hash, common.Hash](16)
-	require.NoError(t, err)
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
-	store := &ForkChoiceStore{
-		forkGraph: payloadVoteForkGraph{dumpEnvelopeErr: errors.Join(fork_graph.ErrEnvelopeCommitted, errors.New("sync directory"))},
-		eth2Roots: eth2Roots,
-		db:        db,
-	}
-	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
-		BeaconBlockRoot: root,
-		Payload:         &cltypes.Eth1Block{BlockHash: blockHash, BlockNumber: 42},
-	}}
-
-	require.NoError(t, store.StoreAnchorEnvelope(root, envelope))
-	persistedHash, ok := eth2Roots.Get(root)
-	require.True(t, ok)
-	require.Equal(t, blockHash, persistedHash)
-	require.NoError(t, db.View(context.Background(), func(tx kv.Tx) error {
-		blockNumber, err := beacon_indicies.ReadExecutionBlockNumber(tx, root)
-		require.NoError(t, err)
-		require.Equal(t, uint64(42), *blockNumber)
-		indexedHash, err := beacon_indicies.ReadExecutionBlockHash(tx, root)
-		require.NoError(t, err)
-		require.Equal(t, blockHash, indexedHash)
-		return nil
-	}))
-}
 
 // TestValidateEnvelopeAgainstBlock_NoBid tests that validation fails when block has no bid
 func TestValidateEnvelopeAgainstBlock_NoBid(t *testing.T) {
@@ -97,6 +60,22 @@ func TestValidateEnvelopeAgainstBlock_NoBid(t *testing.T) {
 	err := f.validateEnvelopeAgainstBlock(envelope, block, nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "block missing signed_execution_payload_bid")
+}
+
+func TestOnExecutionPayloadRejectsNilWithdrawalBeforeForkchoice(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	envelope := cltypes.NewExecutionPayloadEnvelope(cfg)
+	envelope.Payload.Extra = solid.NewExtraData()
+	envelope.Payload.Transactions = solid.NewTransactionsSSZFromTransactions(nil)
+	envelope.Payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), 44)
+	envelope.Payload.Withdrawals.Append(nil)
+	envelope.Payload.BlockAccessList = solid.NewByteListSSZ(cfg.MaxBytesPerTransaction)
+	f := &ForkChoiceStore{beaconCfg: cfg}
+
+	require.NotPanics(t, func() {
+		err := f.OnExecutionPayload(context.Background(), &cltypes.SignedExecutionPayloadEnvelope{Message: envelope}, false, true)
+		require.ErrorContains(t, err, "nil withdrawal at index 0")
+	})
 }
 
 // TestValidateEnvelopeAgainstBlock_SlotNumberMismatch tests that validation fails when

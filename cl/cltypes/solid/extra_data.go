@@ -124,3 +124,10 @@ func (e *ExtraData) SetBytes(buf []byte) {
 		e.l = len(e.data)
 	}
 }
+
+func (e *ExtraData) ValidateBounds() error {
+	if e.l > maxExtraDataBytes {
+		return fmt.Errorf("extra data length %d exceeds limit %d", e.l, maxExtraDataBytes)
+	}
+	return nil
+}

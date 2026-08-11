@@ -123,8 +123,8 @@ func (s *executionPayloadService) DecodeGossipMessage(_ peer.ID, data []byte, ve
 // Reference: https://github.com/ethereum/consensus-specs/blob/dev/specs/_features/epbs/p2p-interface.md#execution_payload
 // [New in Gloas:EIP7732]
 func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
-	if signedEnvelope == nil || signedEnvelope.Message == nil {
-		return errors.New("nil execution payload envelope")
+	if err := signedEnvelope.ValidateForConfig(s.beaconCfg); err != nil {
+		return fmt.Errorf("invalid execution payload envelope: %w", err)
 	}
 
 	envelope := signedEnvelope.Message

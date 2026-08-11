@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
-	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
@@ -424,7 +423,7 @@ func (f *ForkChoiceStore) applyEnvelopeLocked(ctx context.Context, signedEnvelop
 	}
 
 	// Persist envelope to disk — this marks the root as "has payload" in store.payloads
-	if err := f.persistEnvelope(beaconBlockRoot, signedEnvelope); err != nil {
+	if err := f.forkGraph.DumpEnvelopeOnDisk(beaconBlockRoot, signedEnvelope); err != nil {
 		return false, fmt.Errorf("OnExecutionPayload: failed to dump envelope: %w", err)
 	}
 
@@ -456,7 +455,7 @@ func (f *ForkChoiceStore) StoreAnchorEnvelope(blockRoot common.Hash, signedEnvel
 	}
 
 	f.mu.Lock()
-	if err := f.persistEnvelope(blockRoot, signedEnvelope); err != nil {
+	if err := f.forkGraph.DumpEnvelopeOnDisk(blockRoot, signedEnvelope); err != nil {
 		f.mu.Unlock()
 		return fmt.Errorf("StoreAnchorEnvelope: failed to dump envelope: %w", err)
 	}
@@ -486,8 +485,8 @@ func (f *ForkChoiceStore) StoreAnchorEnvelope(blockRoot common.Hash, signedEnvel
 //   - checkBlobData: if true, verify blob data availability via PeerDAS before processing
 //   - validatePayload: if true, call engine.NewPayload() to validate with EL before state transition
 func (f *ForkChoiceStore) OnExecutionPayload(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) error {
-	if signedEnvelope == nil || signedEnvelope.Message == nil {
-		return errors.New("nil execution payload envelope")
+	if err := signedEnvelope.ValidateForConfig(f.beaconCfg); err != nil {
+		return fmt.Errorf("invalid execution payload envelope: %w", err)
 	}
 
 	envelope := signedEnvelope.Message
@@ -526,8 +525,8 @@ func (f *ForkChoiceStore) OnExecutionPayload(ctx context.Context, signedEnvelope
 // verifies BLS signatures.
 // [New in Gloas:EIP7732]
 func (f *ForkChoiceStore) ApplyLocalSelfBuildEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
-	if signedEnvelope == nil || signedEnvelope.Message == nil {
-		return errors.New("nil execution payload envelope")
+	if err := signedEnvelope.ValidateForConfig(f.beaconCfg); err != nil {
+		return fmt.Errorf("invalid execution payload envelope: %w", err)
 	}
 
 	envelope := signedEnvelope.Message
@@ -621,7 +620,7 @@ func (f *ForkChoiceStore) applyLocalSelfBuildEnvelopeLocked(ctx context.Context,
 		f.eth2Roots.Add(beaconBlockRoot, envelope.Payload.BlockHash)
 	}
 
-	if err := f.persistEnvelope(beaconBlockRoot, signedEnvelope); err != nil {
+	if err := f.forkGraph.DumpEnvelopeOnDisk(beaconBlockRoot, signedEnvelope); err != nil {
 		return false, fmt.Errorf("applyLocalSelfBuildEnvelopeLocked: failed to dump envelope: %w", err)
 	}
 
@@ -633,13 +632,4 @@ func (f *ForkChoiceStore) applyLocalSelfBuildEnvelopeLocked(ctx context.Context,
 	}
 
 	return true, nil
-}
-
-func (f *ForkChoiceStore) persistEnvelope(blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) error {
-	err := f.forkGraph.DumpEnvelopeOnDisk(blockRoot, envelope)
-	if errors.Is(err, fork_graph.ErrEnvelopeCommitted) {
-		log.Warn("envelope committed with durability warning", "root", blockRoot, "err", err)
-		return nil
-	}
-	return err
 }
