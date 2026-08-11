@@ -136,6 +136,15 @@ type Downloader struct {
 	// inside PublishChainToml doesn't leave the ENR pointing at V1.
 	lastV2InfoHash [20]byte
 
+	// lastEmittedENRChainToml caches the exact enr.ChainToml struct
+	// most recently passed to enrUpdater by a successful V2 publish.
+	// The defensive re-assert path in publishLocalChainTomlInner uses
+	// this to re-emit verbatim rather than reconstructing a bare
+	// struct that would drop ContentUCANHash, DomainSteps, and
+	// MergeDepth — exactly what caused the leg-M 2026-08-10 UCAN gate
+	// failure (peer ENR carries no Content UCAN hash).
+	lastEmittedENRChainToml enr.ChainToml
+
 	// Single-flight + pending-follow-up for PublishLocalChainToml so
 	// concurrent DownloadSnapshots completions coalesce onto one publish;
 	// a pending flag makes the running publish loop once more if another
@@ -588,11 +597,25 @@ func (d *Downloader) InitBackgroundLogger(logSeeding bool) {
 func (d *Downloader) snapDir() string { return d.cfg.Dirs.Snap }
 
 // SetENRUpdater sets the callback used to advertise chain.toml info-hash via discv5 ENR.
-// Should be called after P2P servers are available.
+// Should be called after P2P servers are available. The stored updater
+// is a shim that caches the last-emitted ChainToml struct in
+// d.lastEmittedENRChainToml before invoking the caller's fn — the
+// defensive re-assert path in publishLocalChainTomlInner reads that
+// cache to re-emit verbatim rather than reconstructing a bare struct
+// that would drop ContentUCANHash / DomainSteps / MergeDepth.
 func (d *Downloader) SetENRUpdater(fn func(enr.ChainToml)) {
 	d.lock.Lock()
 	defer d.lock.Unlock()
-	d.enrUpdater = fn
+	if fn == nil {
+		d.enrUpdater = nil
+		return
+	}
+	d.enrUpdater = func(ct enr.ChainToml) {
+		d.lock.Lock()
+		d.lastEmittedENRChainToml = ct
+		d.lock.Unlock()
+		fn(ct)
+	}
 }
 
 // EnableV2PublishGate closes the chain.v2 first-publish gate:
@@ -862,14 +885,26 @@ func (d *Downloader) publishLocalChainTomlInner() error {
 		} else if updater != nil {
 			// Defensive re-assert so the ENR keeps pointing at the last V2
 			// info-hash. Normally a no-op, since PublishChainToml above
-			// runs with a nil updater in V2 mode. V2InfoHash mirrors
-			// InfoHash for v2-aware consumers.
-			updater(enr.ChainToml{
-				AuthoritativeBlocks: authoritativeBlocksFromCfg(d.cfg.ChainName),
-				KnownBlocks:         authoritativeBlocksFromCfg(d.cfg.ChainName),
-				InfoHash:            lastV2,
-				V2InfoHash:          lastV2,
-			})
+			// runs with a nil updater in V2 mode. Re-emit the exact
+			// last-emitted struct so ContentUCANHash + DomainSteps +
+			// MergeDepth carry through — a bare reconstruction here
+			// dropped CU (and other fields), which broke the consumer
+			// UCAN gate under load (leg-M 2026-08-10).
+			d.lock.RLock()
+			lastCT := d.lastEmittedENRChainToml
+			d.lock.RUnlock()
+			if lastCT.InfoHash == ([20]byte{}) {
+				// No V2 publish has completed yet — fall back to the
+				// legacy behaviour (which is still incomplete but at
+				// least sets the info-hash).
+				lastCT = enr.ChainToml{
+					AuthoritativeBlocks: authoritativeBlocksFromCfg(d.cfg.ChainName),
+					KnownBlocks:         authoritativeBlocksFromCfg(d.cfg.ChainName),
+					InfoHash:            lastV2,
+					V2InfoHash:          lastV2,
+				}
+			}
+			updater(lastCT)
 		}
 	}
 	return nil
