@@ -407,7 +407,8 @@ func doCall(ctx context.Context, caller *transactions.ReusableCaller, gasLimit u
 		}
 		return true, nil, err
 	}
-	return result.Failed(), result, nil
+	failed := result.Failed()
+	return failed, result, nil
 }
 
 type StorageKeysInfo struct {

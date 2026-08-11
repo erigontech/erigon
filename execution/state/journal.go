@@ -488,16 +488,7 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		return nil
 
 	case kindAddLog:
-		txIndex := int(je.aux)
-		if txIndex+1 >= len(s.logs) {
-			panic(fmt.Sprintf("can't revert log index %v, max: %v", txIndex, len(s.logs)-1))
-		}
-		txnLogs := s.logs[txIndex+1]
-		s.logs[txIndex+1] = txnLogs[:len(txnLogs)-1] // revert 1 log
-		if len(s.logs[txIndex+1]) == 0 {
-			s.logs = s.logs[:len(s.logs)-1] // revert txn
-		}
-		s.logIndexInBlock--
+		s.logs.revertLast(int(je.aux))
 		return nil
 
 	case kindTouch:

@@ -251,56 +251,37 @@ func (l *RPCLog) UnmarshalJSON(input []byte) error {
 
 type RPCLogs []*RPCLog
 
-// CopyLogGroups flattens the groups into one slice of deep copies backed by
-// shared arrays. Nil entries stay nil; an empty result is nil.
-func CopyLogGroups(groups []Logs) Logs {
-	var total, totalTopics, totalData int
-	for _, g := range groups {
-		total += len(g)
-		for _, l := range g {
-			if l == nil {
-				continue
-			}
-			totalTopics += len(l.Topics)
-			totalData += len(l.Data)
-		}
-	}
-	if total == 0 {
-		return nil
-	}
-	topics := make([]common.Hash, totalTopics)
-	data := make([]byte, totalData)
-	backing := make([]Log, total)
-	out := make(Logs, total)
-	i := 0
-	for _, g := range groups {
-		for _, l := range g {
-			if l != nil {
-				dst := &backing[i]
-				nt, nd := len(l.Topics), len(l.Data)
-				// Capped so a later append to one copied log cannot bleed into the next.
-				dst.Topics, dst.Data = topics[:nt:nt], data[:nd:nd]
-				topics, data = topics[nt:], data[nd:]
-				l.copyTo(dst)
-				out[i] = dst
-			}
-			i++
-		}
-	}
-	return out
-}
-
 // Copy deep-copies the logs into freshly allocated shared backing arrays.
 // Nil entries stay nil.
 func (logs Logs) Copy() Logs {
 	if logs == nil {
 		return nil
 	}
-	group := [1]Logs{logs}
-	if out := CopyLogGroups(group[:]); out != nil {
-		return out
+	var totalTopics, totalData int
+	for _, l := range logs {
+		if l == nil {
+			continue
+		}
+		totalTopics += len(l.Topics)
+		totalData += len(l.Data)
 	}
-	return Logs{}
+	topics := make([]common.Hash, totalTopics)
+	data := make([]byte, totalData)
+	backing := make([]Log, len(logs))
+	out := make(Logs, len(logs))
+	for i, l := range logs {
+		if l == nil {
+			continue
+		}
+		dst := &backing[i]
+		nt, nd := len(l.Topics), len(l.Data)
+		// Capped so a later append to one copied log cannot bleed into the next.
+		dst.Topics, dst.Data = topics[:nt:nt], data[:nd:nd]
+		topics, data = topics[nt:], data[nd:]
+		l.copyTo(dst)
+		out[i] = dst
+	}
+	return out
 }
 
 // ToRPCTransactionLog converts types.Log in a RPCLog.
@@ -510,24 +491,20 @@ func (l *Log) DecodeRLP(s *rlp.Stream) error {
 	return err
 }
 
-// RlpHashLogs hashes the concatenation of the given log groups as one RLP list,
-// without flattening them into a single slice first.
-func RlpHashLogs(groups []Logs) common.Hash {
+// RlpHashLogs hashes the logs as one RLP list, encoding them through a shared
+// buffer rather than one per entry.
+func RlpHashLogs(logs Logs) common.Hash {
 	return rlpPayloadHash(func(w io.Writer, b []byte) error {
 		payloadSize := 0
-		for _, logs := range groups {
-			for _, l := range logs {
-				payloadSize += l.encodingSize()
-			}
+		for _, l := range logs {
+			payloadSize += l.encodingSize()
 		}
 		if err := rlp.EncodeListPrefix(payloadSize, w, b); err != nil {
 			return err
 		}
-		for _, logs := range groups {
-			for _, l := range logs {
-				if err := l.encodeRLP(w, b); err != nil {
-					return err
-				}
+		for _, l := range logs {
+			if err := l.encodeRLP(w, b); err != nil {
+				return err
 			}
 		}
 		return nil
