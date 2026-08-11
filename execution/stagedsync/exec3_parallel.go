@@ -862,7 +862,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 // isQuietExit reports whether err is routine teardown (cancellation-only) or a
 // resumable batch boundary rather than a failure.
 func isQuietExit(err error) bool {
-	return commonerrors.IsOnlyCanceled(err) || errors.Is(err, &ErrLoopExhausted{})
+	return commonerrors.IsOnlyCanceled(err) || isOnlyLoopExhausted(err)
 }
 
 func (pe *parallelExecutor) runApplyLoop(logPrefix string, applyResults <-chan applyResult, rootResults <-chan commitmentResult, apply func() error) (err error) {
@@ -875,7 +875,7 @@ func (pe *parallelExecutor) runApplyLoop(logPrefix string, applyResults <-chan a
 		} else {
 			pe.logger.Debug("[" + logPrefix + "] rw exit")
 		}
-		if err != nil && !errors.Is(err, &ErrLoopExhausted{}) {
+		if err != nil && !isOnlyLoopExhausted(err) {
 			pe.cancelAndDrainApplyLoop(err, applyResults, rootResults)
 		}
 	}()
@@ -1824,7 +1824,7 @@ func reconcileExecErrors(execErr, concurrentErr error) error {
 	if concurrentErr = commonerrors.NilIfCanceled(concurrentErr); concurrentErr == nil {
 		return execErr
 	}
-	if execErr == nil || errors.Is(execErr, &ErrLoopExhausted{}) || commonerrors.IsOnlyCanceled(execErr) {
+	if execErr == nil || isQuietExit(execErr) {
 		return concurrentErr
 	}
 	return errors.Join(execErr, concurrentErr)

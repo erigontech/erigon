@@ -83,3 +83,15 @@ func TestIsOnlyCanceledPreservesCauseBehindNonLeafCancellationMatch(t *testing.T
 	require.False(t, IsOnlyCanceled(err))
 	require.Same(t, err, NilIfCanceled(err))
 }
+
+func TestIsOnly(t *testing.T) {
+	targetA := errors.New("target A")
+	targetB := errors.New("target B")
+	boom := errors.New("boom")
+
+	require.False(t, IsOnly(nil, targetA))
+	require.False(t, IsOnly(targetA))
+	require.True(t, IsOnly(fmt.Errorf("wrapped: %w", targetA), targetA))
+	require.True(t, IsOnly(errors.Join(targetA, fmt.Errorf("wrapped: %w", targetB)), targetA, targetB))
+	require.False(t, IsOnly(errors.Join(targetA, boom), targetA, targetB))
+}

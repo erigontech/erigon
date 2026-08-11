@@ -994,6 +994,21 @@ func TestReconcileExecErrors(t *testing.T) {
 		require.True(t, surfacesLoudly(got))
 	})
 
+	t.Run("mixed exhaustion and apply error is loud", func(t *testing.T) {
+		applyFail := errors.New("apply loop: boom")
+		got := reconcileExecErrors(errors.Join(exhausted, applyFail), nil)
+		require.ErrorIs(t, got, applyFail)
+		require.True(t, surfacesLoudly(got))
+	})
+
+	t.Run("mixed exhaustion keeps its apply error alongside the wait error", func(t *testing.T) {
+		applyFail := errors.New("apply loop: boom")
+		got := reconcileExecErrors(errors.Join(exhausted, applyFail), waitFail)
+		require.ErrorIs(t, got, applyFail)
+		require.ErrorIs(t, got, waitFail)
+		require.True(t, surfacesLoudly(got))
+	})
+
 	t.Run("canceled wait keeps a resumable batch resumable", func(t *testing.T) {
 		got := reconcileExecErrors(exhausted, context.Canceled)
 		require.Same(t, exhausted, got,
@@ -1039,6 +1054,17 @@ func TestReconcileExecErrors(t *testing.T) {
 		require.False(t, commonerrors.IsOnlyCanceled(got))
 		require.True(t, surfacesLoudly(got))
 	})
+}
+
+func TestIsOnlyLoopExhausted(t *testing.T) {
+	exhausted := &ErrLoopExhausted{From: 1, To: 2, Reason: "block batch is full"}
+	boom := errors.New("boom")
+
+	require.False(t, isOnlyLoopExhausted(nil))
+	require.True(t, isOnlyLoopExhausted(exhausted))
+	require.True(t, isOnlyLoopExhausted(fmt.Errorf("apply loop: %w", exhausted)))
+	require.False(t, isOnlyLoopExhausted(errors.Join(exhausted, context.Canceled)))
+	require.False(t, isOnlyLoopExhausted(errors.Join(exhausted, boom)))
 }
 
 func TestRunApplyLoopPanicDrainsChannels(t *testing.T) {
@@ -1201,6 +1227,43 @@ func TestRunApplyLoopExhaustionDoesNotCancelExecutor(t *testing.T) {
 
 	require.Same(t, exhausted, got)
 	require.NoError(t, context.Cause(executorCtx))
+}
+
+func TestRunApplyLoopMixedExhaustionDrainsChannels(t *testing.T) {
+	applyResults := make(chan applyResult, 1)
+	rootResults := make(chan commitmentResult)
+	applyResults <- &txResult{}
+	close(rootResults)
+
+	executorCtx, cancelExecLoop := context.WithCancelCause(context.Background())
+	pe := &parallelExecutor{
+		txExecutor:     txExecutor{logger: log.New()},
+		cancelExecLoop: cancelExecLoop,
+	}
+
+	sendDone := make(chan struct{})
+	go func() {
+		defer close(sendDone)
+		applyResults <- &blockResult{}
+		close(applyResults)
+	}()
+
+	boom := errors.New("apply loop: boom")
+	exhausted := &ErrLoopExhausted{From: 1, To: 2, Reason: "block batch is full"}
+	got := pe.runApplyLoop("test", applyResults, rootResults, func() error {
+		return errors.Join(exhausted, boom)
+	})
+
+	select {
+	case <-sendDone:
+	default:
+		<-applyResults
+		<-sendDone
+		t.Fatal("mixed exhaustion and real error returned before the terminal send completed")
+	}
+
+	require.ErrorIs(t, got, boom)
+	require.Same(t, got, context.Cause(executorCtx))
 }
 
 type recordChannelHandler chan *log.Record

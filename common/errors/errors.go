@@ -30,11 +30,17 @@ func NilIfCanceled(err error) error {
 	return err
 }
 
-// IsOnlyCanceled reports whether err is non-nil and every leaf in its unwrap
-// tree matches context.Canceled. It deliberately ignores custom Is methods on
-// non-leaf errors so they cannot hide a non-cancellation cause.
+// IsOnlyCanceled reports whether err is non-nil and contains only context
+// cancellation.
 func IsOnlyCanceled(err error) bool {
-	if err == nil {
+	return IsOnly(err, context.Canceled)
+}
+
+// IsOnly reports whether err is non-nil and every leaf in its unwrap tree
+// matches a target.
+// Custom Is methods on non-leaf errors do not override their underlying causes.
+func IsOnly(err error, targets ...error) bool {
+	if err == nil || len(targets) == 0 {
 		return false
 	}
 	switch x := err.(type) {
@@ -44,15 +50,20 @@ func IsOnlyCanceled(err error) bool {
 			return false
 		}
 		for _, e := range errs {
-			if !IsOnlyCanceled(e) {
+			if !IsOnly(e, targets...) {
 				return false
 			}
 		}
 		return true
 	case interface{ Unwrap() error }:
-		return IsOnlyCanceled(x.Unwrap())
+		return IsOnly(x.Unwrap(), targets...)
 	default:
-		return errors.Is(err, context.Canceled)
+		for _, target := range targets {
+			if errors.Is(err, target) {
+				return true
+			}
+		}
+		return false
 	}
 }
 
