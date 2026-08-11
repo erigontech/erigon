@@ -121,10 +121,10 @@ func newDomainCacheBytes(capacityBytes datasize.ByteSize, avgBytes uint32, mode 
 // that cache stops growing.
 func NewDefaultStateCache() *StateCache {
 	return NewStateCache(
-		dbg.EnvDataSize("STATE_CACHE_ACCOUNT", DefaultAccountCacheBytes),
+		dbg.EnvDataSize("STATE_CACHE_ACCOUNTS", DefaultAccountCacheBytes),
 		dbg.EnvDataSize("STATE_CACHE_STORAGE", DefaultStorageCacheBytes),
 		dbg.EnvDataSize("STATE_CACHE_CODE", DefaultCodeCacheBytes),
-		dbg.EnvDataSize("STATE_CACHE_ADDR", DefaultAddrCacheBytes),
+		dbg.EnvDataSize("STATE_CACHE_CODE_INDEX", DefaultAddrCacheBytes),
 	)
 }
 
