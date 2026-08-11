@@ -696,7 +696,8 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call bind.CallMsg) (
 			}
 			return true, nil, err // Bail out
 		}
-		return res.Failed(), res, nil
+		failed := res.Failed()
+		return failed, res, nil
 	}
 	// Execute the binary search and hone in on an executable gas limit
 	for lo+1 < hi {
