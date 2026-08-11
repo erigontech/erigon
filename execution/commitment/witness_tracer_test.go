@@ -37,15 +37,15 @@ func (r *recordingTracer) onNode(rlp, hash []byte) {
 
 // Test_witness_capture exercises the witness helper directly: an inactive witness
 // passes the keccak writer through untouched and emits nothing, while an active one
-// tees leaf bytes through leafBuf and accumulates a branch from its prefix and slots.
+// tees node bytes through nodeBuf and accumulates a branch from its prefix and slots.
 func Test_witness_capture(t *testing.T) {
 	var w witness
 	var sink bytes.Buffer
 
 	// inactive: passthrough writer, emits are no-ops, no panic on nil tracer
 	require.False(t, w.active())
-	require.Same(t, &sink, w.leafWriter(&sink))
-	w.emitLeaf([]byte("x"))
+	require.Same(t, &sink, w.nodeWriter(&sink))
+	w.emitNode([]byte("x"))
 	w.beginBranch([]byte("y"))
 	w.writeBranch([]byte("z"))
 	w.emitBranch([]byte("w"))
@@ -54,9 +54,9 @@ func Test_witness_capture(t *testing.T) {
 	w.tracer = rec
 	require.True(t, w.active())
 
-	lw := w.leafWriter(&sink)
+	lw := w.nodeWriter(&sink)
 	_, _ = lw.Write([]byte("leaf-rlp"))
-	w.emitLeaf([]byte("leaf-hash"))
+	w.emitNode([]byte("leaf-hash"))
 
 	w.beginBranch([]byte("pre"))
 	w.writeBranch([]byte("-slot1"))

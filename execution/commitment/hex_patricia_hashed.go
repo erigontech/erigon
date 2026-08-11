@@ -60,6 +60,7 @@ type CollapseTracer func(hashedKeyPath, branchPrefix []byte)
 // witnessTracer receives canonical trie nodes as they are hashed during a
 // witness fold pass; nil on the normal commitment path.
 type witnessTracer interface {
+	// Neither slice may be retained: both are scratch buffers reused by the next node.
 	onNode(rlp, hash []byte)
 }
 
@@ -69,30 +70,30 @@ type witnessTracer interface {
 // so reset() only detaches the tracer.
 type witness struct {
 	tracer          witnessTracer
-	leafBuf         bytes.Buffer
+	nodeBuf         bytes.Buffer
 	branchBuf       bytes.Buffer
-	leafWriterCache io.Writer // keccak+leafBuf tee, built once per keccak
+	nodeWriterCache io.Writer // keccak+nodeBuf tee, built once per keccak
 }
 
 func (w *witness) active() bool { return w.tracer != nil }
 func (w *witness) reset()       { w.tracer = nil }
 
-// leafWriter tees the keccak stream into leafBuf so the leaf node bytes can be
-// emitted once the hash is read; without a tracer it returns keccak unchanged.
-func (w *witness) leafWriter(keccak io.Writer) io.Writer {
+// nodeWriter tees the keccak stream into nodeBuf so the node bytes can be emitted
+// once the hash is read; without a tracer it returns keccak unchanged.
+func (w *witness) nodeWriter(keccak io.Writer) io.Writer {
 	if w.tracer == nil {
 		return keccak
 	}
-	w.leafBuf.Reset()
-	if w.leafWriterCache == nil {
-		w.leafWriterCache = io.MultiWriter(keccak, &w.leafBuf)
+	w.nodeBuf.Reset()
+	if w.nodeWriterCache == nil {
+		w.nodeWriterCache = io.MultiWriter(keccak, &w.nodeBuf)
 	}
-	return w.leafWriterCache
+	return w.nodeWriterCache
 }
 
-func (w *witness) emitLeaf(hash []byte) {
+func (w *witness) emitNode(hash []byte) {
 	if w.tracer != nil {
-		w.tracer.onNode(w.leafBuf.Bytes(), hash)
+		w.tracer.onNode(w.nodeBuf.Bytes(), hash)
 	}
 }
 
@@ -139,10 +140,12 @@ type HexPatriciaHashed struct {
 	rootPresent   bool
 	traceW        io.Writer // nil = disabled, non-nil = write trace output
 	ctx           PatriciaContext
-	hashAuxBuffer [128]byte           // buffer to compute cell hash or write hash-related things
-	cellHashBuf   common.Hash         // shared scratch buffer for hashKey calls (avoids per-cell allocation)
-	leafHashBuf   [33]byte            // shared scratch for leaf hash prefixing (avoids per-leaf escape)
-	leafRlpBuf    [maxLeafRlpLen]byte // shared scratch for a leaf's RLP list prefix + compact key
+	hashAuxBuffer [128]byte   // buffer to compute cell hash or write hash-related things
+	cellHashBuf   common.Hash // shared scratch buffer for hashKey calls (avoids per-cell allocation)
+	// Scratch for the one node being hashed at a time: keccak and the witness writer are
+	// interfaces, so a local buffer handed to Write or Read is heap-pinned per call.
+	nodeHashBuf   [33]byte            // 0x80+32 tag followed by the node hash
+	nodeRlpBuf    [maxNodeRlpLen]byte // node's RLP list prefix, key prefix and compact key
 	rlpPrefixBuf  [8]byte             // shared scratch for RlpSerializable length prefixes
 	auxBuffer     *bytes.Buffer       // auxiliary buffer used during branch updates encoding
 	branchEncoder *BranchEncoder
@@ -322,11 +325,15 @@ const (
 	cellLoadStorage = loadFlags(2)
 )
 
-// maxLeafRlpLen bounds a leaf's assembled RLP header: list prefix (tag plus up to
-// 8 length bytes), key prefix byte, then the compact key. Derived from the nibble
-// array rather than from the shorter keys today's depth arithmetic yields, so a
-// caller slicing deeper cannot overflow the buffer.
-const maxLeafRlpLen = 9 + 1 + (len(cell{}.hashedExtension)/2 + 1)
+// maxNodeRlpLen bounds a node's assembled RLP header: list prefix (tag plus up to 8
+// length bytes), key prefix byte, the compact key, then a hash tag byte. Derived from
+// the nibble arrays rather than from the shorter keys today's depth arithmetic yields,
+// so a caller slicing deeper cannot overflow the buffer.
+const maxNodeRlpLen = 9 + 1 + (len(cell{}.hashedExtension)/2 + 1) + 1
+
+// Both key arrays a node header can be built from must fit; negative shifts fail the build.
+const _ = uint(maxNodeRlpLen - (9 + 1 + (len(cell{}.hashedExtension)/2 + 1) + 1))
+const _ = uint(maxNodeRlpLen - (9 + 1 + (len(cell{}.extension)/2 + 1) + 1))
 
 func (f loadFlags) String() string {
 	var b strings.Builder
@@ -731,32 +738,9 @@ func (cell *cell) accountForHashing(buffer []byte, storageRootHash common.Hash) 
 }
 
 func (hph *HexPatriciaHashed) completeLeafHash(buf []byte, compactLen int, key []byte, compact0 byte, ni int, val rlp.RlpSerializable, singleton bool) ([]byte, error) {
-	// Compute the total length of binary representation
-	var kp, kl int
-	if compactLen > 1 {
-		kp = 1
-		kl = compactLen
-	} else {
-		kl = 1
-	}
-
-	totalLen := kp + kl + val.DoubleRLPLen()
-	// The header (list prefix, key prefix, compact key) is assembled into one scratch
-	// buffer: passing per-write stack arrays to the io.Writer interface heap-allocates them.
-	header := hph.leafRlpBuf[:]
-	pl := rlp.EncodeListPrefixToBuf(totalLen, header)
-	n := pl
-	if kp > 0 {
-		header[n] = 0x80 + byte(compactLen)
-		n++
-	}
-	header[n] = compact0
-	n++
-	for i := 1; i < compactLen; i++ {
-		header[n] = key[ni]*16 + key[ni+1]
-		n++
-		ni += 2
-	}
+	totalLen := keyRlpLen(compactLen) + val.DoubleRLPLen()
+	n, pl := hph.assembleNodeHeader(totalLen, compactLen, key, compact0, ni)
+	header := hph.nodeRlpBuf[:]
 
 	canEmbed := !singleton && totalLen+pl < length.Hash
 	var writer io.Writer
@@ -766,7 +750,7 @@ func (hph *HexPatriciaHashed) completeLeafHash(buf []byte, compactLen int, key [
 		writer = hph.auxBuffer
 	} else {
 		hph.keccak.Reset()
-		writer = hph.witness.leafWriter(hph.keccak)
+		writer = hph.witness.nodeWriter(hph.keccak)
 	}
 	if _, err := writer.Write(header[:n]); err != nil {
 		return nil, err
@@ -777,12 +761,12 @@ func (hph *HexPatriciaHashed) completeLeafHash(buf []byte, compactLen int, key [
 	if canEmbed {
 		buf = hph.auxBuffer.Bytes()
 	} else {
-		hph.leafHashBuf[0] = 0x80 + length.Hash
-		if _, err := hph.keccak.Read(hph.leafHashBuf[1:]); err != nil {
+		hph.nodeHashBuf[0] = 0x80 + length.Hash
+		if _, err := hph.keccak.Read(hph.nodeHashBuf[1:]); err != nil {
 			return nil, err
 		}
-		buf = append(buf, hph.leafHashBuf[:]...)
-		hph.witness.emitLeaf(hph.leafHashBuf[1:])
+		buf = append(buf, hph.nodeHashBuf[:]...)
+		hph.witness.emitNode(hph.nodeHashBuf[1:])
 	}
 	return buf, nil
 }
@@ -803,97 +787,82 @@ func (hph *HexPatriciaHashed) leafHashWithKeyVal(buf, key []byte, val rlp.RlpSer
 }
 
 func (hph *HexPatriciaHashed) accountLeafHashWithKey(buf, key []byte, val rlp.RlpSerializable) ([]byte, error) {
-	// Write key
-	var compactLen int
-	var ni int
-	var compact0 byte
+	compactLen, compact0, ni := compactKeyParams(key)
+	return hph.completeLeafHash(buf, compactLen, key, compact0, ni, val, true)
+}
+
+// compactKeyParams applies the hex-prefix rule to a key that may or may not carry a
+// terminator. Storage leaves always carry one and use the shorter form inline.
+func compactKeyParams(key []byte) (compactLen int, compact0 byte, ni int) {
 	if nibbles.HasTerm(key) {
 		compactLen = (len(key)-1)/2 + 1
 		if len(key)&1 == 0 {
-			compact0 = 48 + key[0] // Odd (1<<4) + first nibble
-			ni = 1
-		} else {
-			compact0 = 32
+			return compactLen, 0x30 + key[0], 1
 		}
-	} else {
-		compactLen = len(key)/2 + 1
-		if len(key)&1 == 1 {
-			compact0 = terminatorHexByte + key[0] // Odd (1<<4) + first nibble
-			ni = 1
-		}
+		return compactLen, 0x20, 0
 	}
-	return hph.completeLeafHash(buf, compactLen, key, compact0, ni, val, true)
+	compactLen = len(key)/2 + 1
+	if len(key)&1 == 1 {
+		return compactLen, terminatorHexByte + key[0], 1
+	}
+	return compactLen, 0, 0
 }
 
 func (hph *HexPatriciaHashed) extensionHash(key []byte, hash []byte) (common.Hash, error) {
 	var hashBuf common.Hash
 
-	// Compute the total length of binary representation
-	var kp, kl int
-	// Write key
-	var compactLen int
-	var ni int
-	var compact0 byte
-	if nibbles.HasTerm(key) {
-		compactLen = (len(key)-1)/2 + 1
-		if len(key)&1 == 0 {
-			compact0 = 0x30 + key[0] // Odd: (3<<4) + first nibble
-			ni = 1
-		} else {
-			compact0 = 0x20
-		}
-	} else {
-		compactLen = len(key)/2 + 1
-		if len(key)&1 == 1 {
-			compact0 = 0x10 + key[0] // Odd: (1<<4) + first nibble
-			ni = 1
-		}
-	}
-	var keyPrefix [1]byte
-	if compactLen > 1 {
-		keyPrefix[0] = 0x80 + byte(compactLen)
-		kp = 1
-		kl = compactLen
-	} else {
-		kl = 1
-	}
-	totalLen := kp + kl + 33
-	var lenPrefix [4]byte
-	pt := rlp.EncodeListPrefixToBuf(totalLen, lenPrefix[:])
+	compactLen, compact0, ni := compactKeyParams(key)
+	n, _ := hph.assembleNodeHeader(keyRlpLen(compactLen)+length.Hash+1, compactLen, key, compact0, ni)
+	header := hph.nodeRlpBuf[:]
+	header[n] = 0x80 + length.Hash
+	n++
 
 	hph.keccak.Reset()
-	w := hph.witness.leafWriter(hph.keccak)
-	if _, err := w.Write(lenPrefix[:pt]); err != nil {
-		return hashBuf, err
-	}
-	if _, err := w.Write(keyPrefix[:kp]); err != nil {
-		return hashBuf, err
-	}
-	var b [1]byte
-	b[0] = compact0
-	if _, err := w.Write(b[:]); err != nil {
-		return hashBuf, err
-	}
-	for i := 1; i < compactLen; i++ {
-		b[0] = key[ni]*16 + key[ni+1]
-		if _, err := w.Write(b[:]); err != nil {
-			return hashBuf, err
-		}
-		ni += 2
-	}
-	b[0] = 0x80 + length.Hash
-	if _, err := w.Write(b[:]); err != nil {
+	w := hph.witness.nodeWriter(hph.keccak)
+	if _, err := w.Write(header[:n]); err != nil {
 		return hashBuf, err
 	}
 	if _, err := w.Write(hash); err != nil {
 		return hashBuf, err
 	}
-	// Replace previous hash with the new one
-	if _, err := hph.keccak.Read(hashBuf[:]); err != nil {
+	hph.nodeHashBuf[0] = 0x80 + length.Hash
+	if _, err := hph.keccak.Read(hph.nodeHashBuf[1:]); err != nil {
 		return hashBuf, err
 	}
-	hph.witness.emitLeaf(hashBuf[:])
+	copy(hashBuf[:], hph.nodeHashBuf[1:])
+	hph.witness.emitNode(hph.nodeHashBuf[1:])
 	return hashBuf, nil
+}
+
+// keyRlpLen is the encoded length of a compacted key: its optional prefix byte plus
+// the compact bytes themselves.
+func keyRlpLen(compactLen int) int {
+	if compactLen > 1 {
+		return 1 + compactLen
+	}
+	return 1
+}
+
+// assembleNodeHeader writes a node's RLP list prefix, key prefix and compact key into
+// nodeRlpBuf, returning the bytes written and the list-prefix length. One buffer rather
+// than a write per byte: the writer is an interface, so every stack array handed to it
+// would be heap-allocated.
+func (hph *HexPatriciaHashed) assembleNodeHeader(payloadLen, compactLen int, key []byte, compact0 byte, ni int) (n, prefixLen int) {
+	header := hph.nodeRlpBuf[:]
+	prefixLen = rlp.EncodeListPrefixToBuf(payloadLen, header)
+	n = prefixLen
+	if compactLen > 1 {
+		header[n] = 0x80 + byte(compactLen)
+		n++
+	}
+	header[n] = compact0
+	n++
+	for i := 1; i < compactLen; i++ {
+		header[n] = key[ni]*16 + key[ni+1]
+		n++
+		ni += 2
+	}
+	return n, prefixLen
 }
 
 func (hph *HexPatriciaHashed) computeCellHashLen(cell *cell, depth int16) int16 {

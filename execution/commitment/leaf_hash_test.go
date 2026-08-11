@@ -22,6 +22,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -134,7 +135,7 @@ func TestCompleteLeafHashMatchesPerByteHeader(t *testing.T) {
 }
 
 // The table above pins named shapes; this sweeps every key length the nibble
-// arrays permit, so an undersized leafRlpBuf cannot pass by staying below the
+// arrays permit, so an undersized nodeRlpBuf cannot pass by staying below the
 // longest key the buffer is sized for.
 func TestCompleteLeafHashAllKeyLengths(t *testing.T) {
 	t.Parallel()
@@ -189,7 +190,7 @@ func TestCompleteLeafHashAllKeyLengths(t *testing.T) {
 // assembled in one buffer. It writes through the same witness wrapper production uses,
 // so enabling witness tracing cannot make the reference and the real path diverge.
 func referenceLeafHash(ref *HexPatriciaHashed, key []byte, val rlp.RlpSerializable, account, singleton bool) ([]byte, error) {
-	compactLen, compact0, ni := compactKeyParams(key, account)
+	compactLen, compact0, ni := referenceCompactKeyParams(key, account)
 	kp, kl := 0, 1
 	if compactLen > 1 {
 		kp, kl = 1, compactLen
@@ -203,7 +204,7 @@ func referenceLeafHash(ref *HexPatriciaHashed, key []byte, val rlp.RlpSerializab
 		writer = ref.auxBuffer
 	} else {
 		ref.keccak.Reset()
-		writer = ref.witness.leafWriter(ref.keccak)
+		writer = ref.witness.nodeWriter(ref.keccak)
 	}
 	if err := writeLeafHeaderPerByte(writer, totalLen, compactLen, key, compact0, ni); err != nil {
 		return nil, err
@@ -223,9 +224,9 @@ func referenceLeafHash(ref *HexPatriciaHashed, key []byte, val rlp.RlpSerializab
 	return hashBuf, nil
 }
 
-// compactKeyParams mirrors the compact-encoding decisions leafHashWithKeyVal and
+// referenceCompactKeyParams mirrors the compact-encoding decisions leafHashWithKeyVal and
 // accountLeafHashWithKey make before delegating to completeLeafHash.
-func compactKeyParams(key []byte, account bool) (compactLen int, compact0 byte, ni int) {
+func referenceCompactKeyParams(key []byte, account bool) (compactLen int, compact0 byte, ni int) {
 	if account {
 		if nibbles.HasTerm(key) {
 			compactLen = (len(key)-1)/2 + 1
@@ -245,4 +246,65 @@ func compactKeyParams(key []byte, account bool) (compactLen int, compact0 byte, 
 		return compactLen, 0x30 + key[0], 1
 	}
 	return compactLen, 0x20, 0
+}
+
+// The extension header is the leaf header plus a hash tag, assembled in the same
+// buffer, so it needs the same sweep over every key length the nibble arrays permit.
+func TestExtensionHashMatchesPerByteHeader(t *testing.T) {
+	t.Parallel()
+
+	hash := make([]byte, length.Hash)
+	for i := range hash {
+		hash[i] = byte(0xc0 + i)
+	}
+
+	for keyLen := 1; keyLen <= len(cell{}.hashedExtension); keyLen++ {
+		for _, terminated := range []bool{false, true} {
+			key := make([]byte, keyLen)
+			for i := range key {
+				key[i] = byte(i % 16)
+			}
+			if terminated {
+				key[keyLen-1] = terminatorHexByte
+			}
+
+			hph := NewHexPatriciaHashed(length.Addr, nil, TrieConfig{})
+			got, err := hph.extensionHash(key, hash)
+			require.NoError(t, err, "keyLen=%d terminated=%v", keyLen, terminated)
+
+			ref := NewHexPatriciaHashed(length.Addr, nil, TrieConfig{})
+			want, err := referenceExtensionHash(ref, key, hash)
+			require.NoError(t, err, "keyLen=%d terminated=%v", keyLen, terminated)
+			require.Equal(t, want, got, "keyLen=%d terminated=%v", keyLen, terminated)
+
+			ref.Release()
+			hph.Release()
+		}
+	}
+}
+
+// referenceExtensionHash reproduces extensionHash as it behaved before the header was
+// assembled in one buffer.
+func referenceExtensionHash(ref *HexPatriciaHashed, key, hash []byte) (common.Hash, error) {
+	var out common.Hash
+	compactLen, compact0, ni := referenceCompactKeyParams(key, true)
+	kp := 0
+	if compactLen > 1 {
+		kp = 1
+	}
+
+	ref.keccak.Reset()
+	w := ref.witness.nodeWriter(ref.keccak)
+	if err := writeLeafHeaderPerByte(w, kp+compactLen+length.Hash+1, compactLen, key, compact0, ni); err != nil {
+		return out, err
+	}
+	tag := [1]byte{0x80 + length.Hash}
+	if _, err := w.Write(tag[:]); err != nil {
+		return out, err
+	}
+	if _, err := w.Write(hash); err != nil {
+		return out, err
+	}
+	_, err := ref.keccak.Read(out[:])
+	return out, err
 }
