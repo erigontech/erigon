@@ -155,3 +155,39 @@ func TestPreloadContractTrunk_NilCacheWithLoggerReturnsError(t *testing.T) {
 		t.Fatalf("error %q, want it to name the nil cache", err)
 	}
 }
+
+// TestContractTrunkPreload_StopsAtMaxDepth pins the walk's own termination
+// contract: a reader that keeps resolving branches must not drive the BFS past
+// maxStorageTrunkDepth, which its parallel twin already bounds explicitly.
+func TestContractTrunkPreload_StopsAtMaxDepth(t *testing.T) {
+	hash := make([]byte, 32)
+	for i := range hash {
+		hash[i] = byte(i)
+	}
+	// Every prefix resolves to a branch with exactly one child, so termination
+	// can only come from the depth ceiling, never from a not-found.
+	endless := func(prefix []byte) ([]byte, uint64, bool, error) {
+		v := make([]byte, 8)
+		v[3] = 1 // bitmap: child at nibble 0
+		return v, 1, true, nil
+	}
+
+	c := NewBranchCache(1 << 16)
+	p, err := NewContractTrunkPreload(hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 4096 {
+		if _, done, err := p.Run(1<<20, endless, c, nil); err != nil {
+			t.Fatal(err)
+		} else if done {
+			break
+		}
+	}
+	if p.MaxDepthReached() > maxStorageTrunkDepth {
+		t.Errorf("maxDepthReached=%d, must not exceed maxStorageTrunkDepth=%d", p.MaxDepthReached(), maxStorageTrunkDepth)
+	}
+	if p.QueueRemaining() != 0 {
+		t.Errorf("queue must drain once the ceiling is reached, got %d remaining", p.QueueRemaining())
+	}
+}
