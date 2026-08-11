@@ -1020,12 +1020,9 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		}
 		roTx.Rollback()
 
-		streaming := statecfg.ExperimentalStreamingCommitment
 		parallel := statecfg.ExperimentalParallelCommitment
 		trieVariant := commitment.VariantHexPatriciaTrie
 		switch {
-		case streaming:
-			trieVariant = commitment.VariantStreamingHexPatricia
 		case parallel:
 			trieVariant = commitment.VariantParallelHexPatricia
 		}
@@ -1063,7 +1060,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			domains.SetTxNum(lastTxnumInShard - 1)
 			currentTxNum := lastTxnumInShard - 1
 			domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewFilesOnlyStateReader(rwTx, lastTxnumInShard-1))
-			if parallel || streaming {
+			if parallel {
 				domains.EnableParaTrieDB(rwDb)
 			}
 

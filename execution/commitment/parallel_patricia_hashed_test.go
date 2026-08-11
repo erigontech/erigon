@@ -931,7 +931,7 @@ func TestParallelReuseAcrossResetParity(t *testing.T) {
 	k2, u2 := sparseBatch2(k1, 3, false)
 	seqRoot, _ := incrementalRoot(t, modeSeq, 0, k1, u1, k2, u2)
 
-	for _, variant := range []TrieVariant{VariantParallelHexPatricia, VariantStreamingHexPatricia} {
+	for _, variant := range []TrieVariant{VariantParallelHexPatricia} {
 		root := reusedInstanceIncrementalRoot(t, variant, 8, k1, u1, k2, u2)
 		require.Equalf(t, seqRoot, root, "reused-instance %s incremental root vs sequential", variant)
 	}
@@ -1007,4 +1007,46 @@ func TestVerifyParallel_StorageIncrementalDeletes(t *testing.T) {
 	for _, w := range []int{1, 2, 4, 8} {
 		requireIncrementalEquiv(t, keys, upds, k2, u2, w)
 	}
+}
+
+func TestKeyArena_ChunkSizedFromRemaining(t *testing.T) {
+	const keyLen = 144
+
+	t.Run("small subtree does not burn a full chunk", func(t *testing.T) {
+		const keys = 32
+		arena := keyArena{remaining: keys}
+		for range keys {
+			arena.copy(make([]byte, keyLen))
+		}
+		require.Equal(t, keys*keyLen, cap(arena.buf))
+	})
+
+	t.Run("large subtree still caps at one chunk", func(t *testing.T) {
+		arena := keyArena{remaining: 10 * keyArenaChunk / keyLen}
+		arena.copy(make([]byte, keyLen))
+		require.Equal(t, keyArenaChunk, cap(arena.buf))
+	})
+
+	t.Run("oversized key gets its own backing", func(t *testing.T) {
+		arena := keyArena{remaining: 4}
+		got := arena.copy(make([]byte, 2*keyArenaChunk))
+		require.Len(t, got, 2*keyArenaChunk)
+		require.Equal(t, 2*keyArenaChunk, cap(arena.buf))
+	})
+
+	t.Run("copies stay stable across a chunk swap", func(t *testing.T) {
+		arena := keyArena{remaining: 2}
+		first := arena.copy(bytes.Repeat([]byte{0xAA}, keyLen))
+		for i := range 8 {
+			arena.copy(bytes.Repeat([]byte{byte(i)}, keyLen))
+		}
+		require.Equal(t, bytes.Repeat([]byte{0xAA}, keyLen), first)
+	})
+
+	t.Run("unhinted arena falls back to one key per chunk growth", func(t *testing.T) {
+		var arena keyArena
+		got := arena.copy(make([]byte, keyLen))
+		require.Len(t, got, keyLen)
+		require.Equal(t, keyLen, cap(arena.buf))
+	})
 }

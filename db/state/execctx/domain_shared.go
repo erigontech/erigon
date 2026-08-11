@@ -291,11 +291,6 @@ type SharedDomains struct {
 // fallback inside the trie constructor.
 func PickTrieVariant() commitment.TrieVariant {
 	switch {
-	// Selecting more than one experimental-commitment flag is a misconfiguration;
-	// they are alternative paths. Streaming overlaps folding with execution, so it
-	// wins over parallel.
-	case statecfg.ExperimentalStreamingCommitment:
-		return commitment.VariantStreamingHexPatricia
 	case statecfg.ExperimentalParallelCommitment:
 		return commitment.VariantParallelHexPatricia
 	}

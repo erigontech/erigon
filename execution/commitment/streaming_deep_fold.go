@@ -30,6 +30,14 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
+// touchedKey is a snapshotted touch a background fold replays; hk is copied off
+// the walk path while pk/upd reference the caller's stable backing.
+type touchedKey struct {
+	hk  []byte
+	pk  []byte
+	upd *Update
+}
+
 // maxFoldConcurrency caps the whale-storage fold fan-out at the CPUs the process
 // may run on. The account-mount and whale-storage fan-outs nest, so an unshared
 // per-level limit of numWorkers permits ~numWorkers² runnable leaf goroutines; one
@@ -301,6 +309,28 @@ func newDeferredStorageWorker(ctx context.Context, accountKeyLen int16, cfg Trie
 			cleanup()
 		}
 	}
+}
+
+// keyArena copies walk-path nibbles into chunked backing buffers so each
+// collected key gets a stable slice without one allocation per key. remaining
+// is the caller's expected key count; without it a subtree far smaller than a
+// chunk still burns a whole chunk, and most subtrees are.
+type keyArena struct {
+	buf       []byte
+	remaining int
+}
+
+const keyArenaChunk = 64 * 1024
+
+func (a *keyArena) copy(hk []byte) []byte {
+	if len(hk) > cap(a.buf)-len(a.buf) {
+		want := len(hk) * max(a.remaining, 1)
+		a.buf = make([]byte, 0, max(min(want, keyArenaChunk), len(hk)))
+	}
+	a.remaining--
+	start := len(a.buf)
+	a.buf = append(a.buf, hk...)
+	return a.buf[start:len(a.buf):len(a.buf)]
 }
 
 // collectSubtreeKeys walks a subtree in sorted order; it copies each key's hashed
