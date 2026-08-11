@@ -62,6 +62,8 @@ type testExecTask struct {
 	sender       accounts.Address
 	nonce        int
 	dependencies []int
+	// setupDelay models per-tx EVM work before the op stream.
+	setupDelay time.Duration
 }
 
 type PathGenerator func(i int, j int, total int) opkey
@@ -91,7 +93,27 @@ func NewTestExecTask(txIdx int, ops []Op, sender accounts.Address, nonce int) *t
 		sender:       sender,
 		nonce:        nonce,
 		dependencies: []int{},
+		setupDelay:   50 * time.Microsecond,
 	}
+}
+
+// spinFor busy-waits for d. time.Sleep bottoms out near the scheduler tick, so
+// microsecond-scale op costs only reproduce by spinning — and spinning keeps
+// workers on-CPU, which is what real EVM work does.
+func spinFor(d time.Duration) {
+	if d <= 0 {
+		return
+	}
+	deadline := time.Now().Add(d)
+	for time.Now().Before(deadline) {
+	}
+}
+
+func (t *testExecTask) delay(d time.Duration) {
+	if t.ctx.Err() != nil {
+		return
+	}
+	spinFor(d)
 }
 
 func newParallelTestBlock(blockNum uint64) *types.Block {
@@ -109,16 +131,6 @@ func newParallelTestBlockFromTasks(tasks []exec.Task) *types.Block {
 	return types.NewBlockFromStorage(tasks[0].BlockHash(), tasks[0].BlockHeader(), txs, nil, nil, nil)
 }
 
-func sleepWithContext(ctx context.Context, d time.Duration) error {
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-	}
-	time.Sleep(d)
-	return nil
-}
-
 func (t *testExecTask) Execute(evm *vm.EVM,
 	engine rules.Engine,
 	genesis *types.Genesis,
@@ -128,8 +140,7 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 	chainReader rules.ChainReader,
 	dirs datadir.Dirs,
 	calcFees bool) *exec.TxResult {
-	// Sleep for 50 microsecond to simulate setup time
-	sleepWithContext(t.ctx, time.Microsecond*50) //nolint:errcheck
+	t.delay(t.setupDelay)
 
 	version := t.Version()
 
@@ -144,7 +155,7 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 		switch op.opType {
 		case readType:
 			if t.writeMap.Has(state.WriteHeader{Address: k.addr, Path: k.path, Key: k.key}) {
-				sleepWithContext(t.ctx, op.duration) //nolint:errcheck
+				t.delay(op.duration)
 				continue
 			}
 
@@ -176,13 +187,13 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 				readKind = state.StorageRead
 			}
 
-			sleepWithContext(t.ctx, op.duration) //nolint:errcheck
+			t.delay(op.duration)
 
 			t.readMap.SetHeader(k.addr, k.path, k.key, state.ReadHeader{Source: readKind, Version: state.Version{TxIndex: result.DepIdx(), Incarnation: result.Incarnation()}})
 		case writeType:
 			testWriteSetInt(t.writeMap, k.addr, k.path, k.key, version, op.val)
 		case otherType:
-			sleepWithContext(t.ctx, op.duration) //nolint:errcheck
+			t.delay(op.duration)
 		default:
 			panic(fmt.Sprintf("Unknown op type: %d", op.opType))
 		}
@@ -567,7 +578,7 @@ func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, met
 
 	for _, writes := range finalWriteSet {
 		for _, d := range writes {
-			sleepWithContext(executorContext, d) //nolint:errcheck
+			spinFor(d)
 		}
 	}
 
@@ -747,7 +758,7 @@ func runProfileAndExecute(tb testing.TB, tasks []exec.Task, validation propertyC
 	}
 	for _, writes := range finalWriteSet {
 		for _, d := range writes {
-			sleepWithContext(executorCtx, d) //nolint:errcheck
+			spinFor(d)
 		}
 	}
 
