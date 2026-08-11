@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"io/fs"
 	"math"
-	"os"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -214,10 +213,6 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_d
 	f.lowestAvailableBlock.Store(anchorState.Slot())
 	f.headers.Store(common.Hash(anchorRoot), &anchorHeader)
 	f.sszBuffer = make([]byte, 0, (anchorState.EncodingSizeSSZ()*3)/2)
-	if err := cleanupEnvelopeArtifacts(f.fs); err != nil {
-		log.Warn("Failed to clean envelope artifacts", "err", err)
-	}
-
 	if err := f.DumpBeaconStateOnDisk(anchorRoot, anchorState, true); err != nil {
 		return nil, err
 	}
@@ -851,18 +846,13 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 		if removeErr := f.fs.Remove(getBeaconStateFilename(root)); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
 			log.Debug("failed to remove pruned beacon state file", "root", root, "err", removeErr)
 		}
-		if removeErr := removeOrQuarantineEnvelope(f.fs, getEnvelopeFilename(root), ".pruned"); removeErr != nil && !os.IsNotExist(removeErr) {
+		if removeErr := f.fs.Remove(getEnvelopeFilename(root)); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
 			err = errors.Join(err, fmt.Errorf("remove envelope for root %x: %w", root, removeErr))
 		}
-		if removeErr := f.fs.Remove(getEnvelopeTempFilename(root)); removeErr != nil && !os.IsNotExist(removeErr) {
+		if removeErr := f.fs.Remove(getEnvelopeTempFilename(root)); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
 			err = errors.Join(err, fmt.Errorf("remove envelope temp for root %x: %w", root, removeErr))
 		}
 		f.stateDumpLock.Unlock()
-	}
-	if len(oldRoots) > 0 {
-		if syncErr := syncEnvelopeDirectory(f.fs); syncErr != nil {
-			err = errors.Join(err, fmt.Errorf("sync envelope directory after prune: %w", syncErr))
-		}
 	}
 	log.Debug("Pruned old blocks", "pruneSlot", pruneSlot)
 	return

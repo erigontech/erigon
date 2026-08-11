@@ -93,7 +93,7 @@ func (g payloadVoteForkGraph) DumpEnvelopeOnDisk(blockRoot common.Hash, _ *cltyp
 	if g.dumpedEnvelope != nil {
 		*g.dumpedEnvelope = blockRoot
 	}
-	return g.dumpEnvelopeErr
+	return nil
 }
 
 func (g payloadVoteForkGraph) MarkHeaderAsInvalid(blockRoot common.Hash) {

@@ -157,6 +157,9 @@ func (s *executionPayloadService) processMessage(ctx context.Context, signedEnve
 	if signedEnvelope == nil || signedEnvelope.Message == nil {
 		return errors.New("nil execution payload envelope")
 	}
+	if err := signedEnvelope.ValidateForConfig(s.beaconCfg); err != nil {
+		return fmt.Errorf("invalid execution payload envelope: %w", err)
+	}
 
 	envelope := signedEnvelope.Message
 	beaconBlockRoot := envelope.BeaconBlockRoot

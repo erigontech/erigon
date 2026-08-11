@@ -149,3 +149,10 @@ func (b *ByteListSSZ) SetBytes(buf []byte) error {
 func (b *ByteListSSZ) Len() int {
 	return len(b.data)
 }
+
+func (b *ByteListSSZ) ValidateBounds(limit uint64) error {
+	if uint64(len(b.data)) > limit {
+		return fmt.Errorf("data length %d exceeds limit %d", len(b.data), limit)
+	}
+	return nil
+}

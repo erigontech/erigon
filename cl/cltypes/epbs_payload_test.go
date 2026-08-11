@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/ssz"
@@ -20,6 +21,84 @@ func TestSignedExecutionPayloadEnvelopeCloneNilMessage(t *testing.T) {
 	cloned := envelope.Clone().(*SignedExecutionPayloadEnvelope)
 	require.Nil(t, cloned.Message)
 	require.Equal(t, envelope.Signature, cloned.Signature)
+}
+
+func TestExecutionPayloadEnvelopeValidationSeparatesProtocolAndPersistenceBounds(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.MaxWithdrawalsPerPayload = 1
+	cfg.MaxWithdrawalRequestsPerPayload = 1
+	cfg.MaxConsolidationRequestsPerPayload = 1
+	cfg.MaxBuilderDepositRequestsPerPayload = 1
+	cfg.MaxBuilderExitRequestsPerPayload = 1
+	cfg.MaxTransactionsPerPayload = 1
+	cfg.MaxBytesPerTransaction = 1
+
+	for _, test := range []struct {
+		name   string
+		mutate func(*SignedExecutionPayloadEnvelope)
+	}{
+		{"payload withdrawals", func(e *SignedExecutionPayloadEnvelope) {
+			e.Message.Payload.Withdrawals.Append(&Withdrawal{})
+			e.Message.Payload.Withdrawals.Append(&Withdrawal{})
+		}},
+		{"withdrawal requests", func(e *SignedExecutionPayloadEnvelope) {
+			e.Message.ExecutionRequests.Withdrawals.Append(&solid.WithdrawalRequest{})
+			e.Message.ExecutionRequests.Withdrawals.Append(&solid.WithdrawalRequest{})
+		}},
+		{"consolidation requests", func(e *SignedExecutionPayloadEnvelope) {
+			e.Message.ExecutionRequests.Consolidations.Append(&solid.ConsolidationRequest{})
+			e.Message.ExecutionRequests.Consolidations.Append(&solid.ConsolidationRequest{})
+		}},
+		{"builder deposit requests", func(e *SignedExecutionPayloadEnvelope) {
+			e.Message.ExecutionRequests.BuilderDeposits.Append(&solid.BuilderDepositRequest{})
+			e.Message.ExecutionRequests.BuilderDeposits.Append(&solid.BuilderDepositRequest{})
+		}},
+		{"builder exit requests", func(e *SignedExecutionPayloadEnvelope) {
+			e.Message.ExecutionRequests.BuilderExits.Append(&solid.BuilderExitRequest{})
+			e.Message.ExecutionRequests.BuilderExits.Append(&solid.BuilderExitRequest{})
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			envelope := validTestExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)
+			test.mutate(envelope)
+			require.Error(t, envelope.ValidateForConfig(&cfg))
+		})
+	}
+
+	envelope := validTestExecutionPayloadEnvelope(&cfg)
+	for range 16_385 {
+		envelope.Message.ExecutionRequests.Deposits.Append(&solid.DepositRequest{})
+	}
+	require.NoError(t, envelope.ValidateForConfig(&cfg))
+	require.Error(t, envelope.ValidateForPersistence(&cfg))
+
+	for _, test := range []struct {
+		name   string
+		mutate func(*SignedExecutionPayloadEnvelope)
+	}{
+		{"transactions", func(e *SignedExecutionPayloadEnvelope) {
+			e.Message.Payload.Transactions = solid.NewTransactionsSSZFromTransactions([][]byte{{1}, {2}})
+		}},
+		{"block access list", func(e *SignedExecutionPayloadEnvelope) {
+			require.NoError(t, e.Message.Payload.BlockAccessList.SetBytes([]byte{1, 2}))
+		}},
+	} {
+		t.Run(test.name+" are resource bounded only", func(t *testing.T) {
+			envelope := validTestExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)
+			test.mutate(envelope)
+			require.NoError(t, envelope.ValidateForConfig(&cfg))
+			require.Error(t, envelope.ValidateForPersistence(&cfg))
+		})
+	}
+}
+
+func validTestExecutionPayloadEnvelope(cfg *clparams.BeaconChainConfig) *SignedExecutionPayloadEnvelope {
+	message := NewExecutionPayloadEnvelope(cfg)
+	message.Payload.Extra = solid.NewExtraData()
+	message.Payload.Transactions = solid.NewTransactionsSSZFromTransactions(nil)
+	message.Payload.Withdrawals = solid.NewStaticListSSZ[*Withdrawal](int(cfg.MaxWithdrawalsPerPayload), 44)
+	message.Payload.BlockAccessList = solid.NewByteListSSZ(cfg.MaxBytesPerTransaction)
+	return &SignedExecutionPayloadEnvelope{Message: message}
 }
 
 func TestBuilderPendingPaymentSSZIncludesProposerIndex(t *testing.T) {

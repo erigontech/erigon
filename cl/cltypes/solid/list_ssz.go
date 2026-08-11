@@ -19,6 +19,7 @@ package solid
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/common"
@@ -231,6 +232,17 @@ func (l *ListSSZ[T]) Range(fn func(index int, value T, length int) bool) {
 
 func (l *ListSSZ[T]) Len() int {
 	return len(l.list)
+}
+
+func (l *ListSSZ[T]) ValidateBounds(limit int) error {
+	if len(l.list) > limit {
+		return fmt.Errorf("list has %d elements, max %d", len(l.list), limit)
+	}
+	return nil
+}
+
+func (l *ListSSZ[T]) ValidateProgressiveDecodeBounds(configuredLimit int) error {
+	return l.ValidateBounds(progressiveDecodeLimit(configuredLimit))
 }
 
 func (l *ListSSZ[T]) Set(index int, value T) {
