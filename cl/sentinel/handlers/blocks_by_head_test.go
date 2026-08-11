@@ -76,7 +76,7 @@ func TestBlocksByHeadParentChainTraversal(t *testing.T) {
 	require.Equal(t, roots[0], got[2].Block.ParentRoot)
 }
 
-func TestBlocksByHeadForkChoiceFallback(t *testing.T) {
+func TestBlocksByHeadChainDataFallback(t *testing.T) {
 	blocks, roots := makeBlocksByHeadChain(t, 300, 1)
 	chainData := mock_services.NewChainDataReaderMock()
 	chainData.Blocks[roots[0]] = blocks[0]

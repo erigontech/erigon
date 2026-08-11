@@ -153,12 +153,12 @@ func newTestSentinel(t *testing.T, ethClock eth_clock.EthereumClock, reader free
 	return sent
 }
 
-func newMockPeerDasStateReader(t *testing.T) *peerdasstatemock.MockPeerDasStateReader {
+func newMockPeerDasStateReader(t *testing.T, advertisedCgc uint64) *peerdasstatemock.MockPeerDasStateReader {
 	ctrl := gomock.NewController(t)
 	m := peerdasstatemock.NewMockPeerDasStateReader(ctrl)
 	m.EXPECT().GetEarliestAvailableSlot().Return(uint64(0)).AnyTimes()
 	m.EXPECT().GetRealCgc().Return(uint64(0)).AnyTimes()
-	m.EXPECT().GetAdvertisedCgc().Return(uint64(0)).AnyTimes()
+	m.EXPECT().GetAdvertisedCgc().Return(advertisedCgc).AnyTimes()
 	return m
 }
 
@@ -168,7 +168,7 @@ func testSentinelBlocksByRange(t *testing.T) {
 	db, blocks, _, _, reader := loadChain(t)
 	_, beaconConfig := clparams.GetConfigsByNetwork(chainspec.MainnetChainID)
 
-	sent := newTestSentinel(t, ethClock, reader, db, newMockPeerDasStateReader(t))
+	sent := newTestSentinel(t, ethClock, reader, db, newMockPeerDasStateReader(t, 0))
 	h := sent.Host()
 
 	host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
@@ -244,7 +244,7 @@ func testSentinelBlocksByRoots(t *testing.T) {
 	ethClock := getEthClock(t)
 	_, beaconConfig := clparams.GetConfigsByNetwork(chainspec.MainnetChainID)
 
-	sent := newTestSentinel(t, ethClock, reader, db, newMockPeerDasStateReader(t))
+	sent := newTestSentinel(t, ethClock, reader, db, newMockPeerDasStateReader(t, 0))
 	h := sent.Host()
 
 	host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
@@ -323,7 +323,7 @@ func testSentinelStatusRequest(t *testing.T) {
 	db, blocks, _, _, reader := loadChain(t)
 	ethClock := getEthClock(t)
 
-	sent := newTestSentinel(t, ethClock, reader, db, newMockPeerDasStateReader(t))
+	sent := newTestSentinel(t, ethClock, reader, db, newMockPeerDasStateReader(t, 0))
 	h := sent.Host()
 
 	host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
@@ -358,6 +358,24 @@ func testSentinelStatusRequest(t *testing.T) {
 	assertPanic(req.HeadSlot == resp.HeadSlot, "HeadSlot mismatch: %v != %v", req.HeadSlot, resp.HeadSlot)
 	assertPanic(req.FinalizedRoot == resp.FinalizedRoot, "FinalizedRoot mismatch: %v != %v", req.FinalizedRoot, resp.FinalizedRoot)
 	assertPanic(req.FinalizedEpoch == resp.FinalizedEpoch, "FinalizedEpoch mismatch: %v != %v", req.FinalizedEpoch, resp.FinalizedEpoch)
+}
+
+func testSentinelIdentityCustodyGroupCount(t *testing.T) {
+	const expectedCgc = uint64(73)
+	ethClock := getEthClock(t)
+	db, _, _, _, reader := loadChain(t)
+
+	sent := newTestSentinel(t, ethClock, reader, db, newMockPeerDasStateReader(t, expectedCgc))
+
+	pid, enrStr, _, _, metadata := sent.Identity()
+	assertPanic(pid != "", "expected non-empty pid")
+	assertPanic(enrStr != "", "expected non-empty enr")
+	assertPanic(metadata.CustodyGroupCount != nil, "expected non-nil CustodyGroupCount")
+	assertPanic(*metadata.CustodyGroupCount == expectedCgc, "expected CustodyGroupCount=%d, got %d", expectedCgc, *metadata.CustodyGroupCount)
+}
+
+func TestSentinelIdentityCustodyGroupCount(t *testing.T) {
+	retryTestFunc(t, 3, func() { testSentinelIdentityCustodyGroupCount(t) })
 }
 
 func TestSentinelBlocksByRange(t *testing.T) {

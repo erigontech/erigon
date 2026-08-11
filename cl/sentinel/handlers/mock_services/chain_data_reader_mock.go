@@ -40,11 +40,13 @@ func NewChainDataReaderMock() *ChainDataReaderMock {
 }
 
 func (m *ChainDataReaderMock) GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool) {
-	return m.Blocks[blockRoot], m.Blocks[blockRoot] != nil
+	b, ok := m.Blocks[blockRoot]
+	return b, ok
 }
 
 func (m *ChainDataReaderMock) GetLightClientBootstrap(blockRoot common.Hash) (*cltypes.LightClientBootstrap, bool) {
-	return m.LightClientBootstraps[blockRoot], m.LightClientBootstraps[blockRoot] != nil
+	b, ok := m.LightClientBootstraps[blockRoot]
+	return b, ok
 }
 
 func (m *ChainDataReaderMock) NewestLightClientUpdate() *cltypes.LightClientUpdate {
@@ -52,7 +54,8 @@ func (m *ChainDataReaderMock) NewestLightClientUpdate() *cltypes.LightClientUpda
 }
 
 func (m *ChainDataReaderMock) GetLightClientUpdate(period uint64) (*cltypes.LightClientUpdate, bool) {
-	return m.LCUpdates[period], m.LCUpdates[period] != nil
+	u, ok := m.LCUpdates[period]
+	return u, ok
 }
 
 func (m *ChainDataReaderMock) HasEnvelope(blockRoot common.Hash) bool {

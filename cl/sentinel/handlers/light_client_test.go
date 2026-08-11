@@ -63,9 +63,9 @@ func TestLightClientOptimistic(t *testing.T) {
 	peersPool := peers.NewPool(host)
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := mock_services.NewChainDataReaderMock()
+	chainData := mock_services.NewChainDataReaderMock()
 
-	f.NewestLCUpdate = &cltypes.LightClientUpdate{
+	chainData.NewestLCUpdate = &cltypes.LightClientUpdate{
 		AttestedHeader:    cltypes.NewLightClientHeader(clparams.AltairVersion),
 		NextSyncCommittee: solid.NewSyncCommittee(),
 		SignatureSlot:     1234,
@@ -75,7 +75,7 @@ func TestLightClientOptimistic(t *testing.T) {
 		FinalityBranch:          solid.NewHashVector(8),
 		NextSyncCommitteeBranch: solid.NewHashVector(8),
 	}
-	f.NewestLCUpdate.AttestedHeader.Beacon.Slot = altairSlot
+	chainData.NewestLCUpdate.AttestedHeader.Beacon.Slot = altairSlot
 
 	ethClock := getEthClock(t)
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)
@@ -89,7 +89,7 @@ func TestLightClientOptimistic(t *testing.T) {
 		nil,
 		beaconCfg,
 		ethClock,
-		nil, f, nil, nil, nil, true,
+		nil, chainData, nil, nil, nil, true,
 	)
 	c.Start()
 
@@ -109,9 +109,9 @@ func TestLightClientOptimistic(t *testing.T) {
 	err = ssz_snappy.DecodeAndRead(stream, optimistic, &clparams.MainnetBeaconConfig, ethClock)
 	require.NoError(t, err)
 
-	require.Equal(t, f.NewestLCUpdate.AttestedHeader, optimistic.AttestedHeader)
-	require.Equal(t, f.NewestLCUpdate.SignatureSlot, optimistic.SignatureSlot)
-	require.Equal(t, f.NewestLCUpdate.SyncAggregate, optimistic.SyncAggregate)
+	require.Equal(t, chainData.NewestLCUpdate.AttestedHeader, optimistic.AttestedHeader)
+	require.Equal(t, chainData.NewestLCUpdate.SignatureSlot, optimistic.SignatureSlot)
+	require.Equal(t, chainData.NewestLCUpdate.SyncAggregate, optimistic.SyncAggregate)
 }
 
 func TestLightClientFinality(t *testing.T) {
@@ -134,9 +134,9 @@ func TestLightClientFinality(t *testing.T) {
 	peersPool := peers.NewPool(host)
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := mock_services.NewChainDataReaderMock()
+	chainData := mock_services.NewChainDataReaderMock()
 
-	f.NewestLCUpdate = &cltypes.LightClientUpdate{
+	chainData.NewestLCUpdate = &cltypes.LightClientUpdate{
 		AttestedHeader:          cltypes.NewLightClientHeader(clparams.AltairVersion),
 		NextSyncCommittee:       solid.NewSyncCommittee(),
 		SignatureSlot:           altairSlot,
@@ -145,7 +145,7 @@ func TestLightClientFinality(t *testing.T) {
 		FinalityBranch:          solid.NewHashVector(cltypes.FinalizedBranchSize),
 		NextSyncCommitteeBranch: solid.NewHashVector(cltypes.SyncCommitteeBranchSize),
 	}
-	f.NewestLCUpdate.AttestedHeader.Beacon.Slot = altairSlot
+	chainData.NewestLCUpdate.AttestedHeader.Beacon.Slot = altairSlot
 	ethClock := getEthClock(t)
 
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)
@@ -159,7 +159,7 @@ func TestLightClientFinality(t *testing.T) {
 		nil,
 		beaconCfg,
 		ethClock,
-		nil, f, nil, nil, nil, true,
+		nil, chainData, nil, nil, nil, true,
 	)
 	c.Start()
 
@@ -179,11 +179,11 @@ func TestLightClientFinality(t *testing.T) {
 	err = ssz_snappy.DecodeAndRead(stream, got, &clparams.MainnetBeaconConfig, ethClock)
 	require.NoError(t, err)
 
-	require.Equal(t, got.AttestedHeader, f.NewestLCUpdate.AttestedHeader)
-	require.Equal(t, got.SyncAggregate, f.NewestLCUpdate.SyncAggregate)
-	require.Equal(t, got.FinalizedHeader, f.NewestLCUpdate.FinalizedHeader)
-	require.Equal(t, got.FinalityBranch, f.NewestLCUpdate.FinalityBranch)
-	require.Equal(t, got.SignatureSlot, f.NewestLCUpdate.SignatureSlot)
+	require.Equal(t, got.AttestedHeader, chainData.NewestLCUpdate.AttestedHeader)
+	require.Equal(t, got.SyncAggregate, chainData.NewestLCUpdate.SyncAggregate)
+	require.Equal(t, got.FinalizedHeader, chainData.NewestLCUpdate.FinalizedHeader)
+	require.Equal(t, got.FinalityBranch, chainData.NewestLCUpdate.FinalityBranch)
+	require.Equal(t, got.SignatureSlot, chainData.NewestLCUpdate.SignatureSlot)
 }
 
 func TestLightClientBootstrap(t *testing.T) {
@@ -207,9 +207,9 @@ func TestLightClientBootstrap(t *testing.T) {
 	peersPool := peers.NewPool(host)
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := mock_services.NewChainDataReaderMock()
+	chainData := mock_services.NewChainDataReaderMock()
 
-	f.NewestLCUpdate = &cltypes.LightClientUpdate{
+	chainData.NewestLCUpdate = &cltypes.LightClientUpdate{
 		AttestedHeader:          cltypes.NewLightClientHeader(clparams.AltairVersion),
 		NextSyncCommittee:       solid.NewSyncCommittee(),
 		SignatureSlot:           altairSlot,
@@ -218,14 +218,14 @@ func TestLightClientBootstrap(t *testing.T) {
 		FinalityBranch:          solid.NewHashVector(cltypes.FinalizedBranchSize),
 		NextSyncCommitteeBranch: solid.NewHashVector(cltypes.SyncCommitteeBranchSize),
 	}
-	f.NewestLCUpdate.AttestedHeader.Beacon.Slot = altairSlot
+	chainData.NewestLCUpdate.AttestedHeader.Beacon.Slot = altairSlot
 	reqRoot := common.Hash{1, 2, 3}
-	f.LightClientBootstraps[reqRoot] = &cltypes.LightClientBootstrap{
+	chainData.LightClientBootstraps[reqRoot] = &cltypes.LightClientBootstrap{
 		Header:                     cltypes.NewLightClientHeader(clparams.AltairVersion),
 		CurrentSyncCommittee:       solid.NewSyncCommittee(),
 		CurrentSyncCommitteeBranch: solid.NewHashVector(cltypes.SyncCommitteeBranchSize),
 	}
-	f.LightClientBootstraps[reqRoot].Header.Beacon.Slot = altairSlot
+	chainData.LightClientBootstraps[reqRoot].Header.Beacon.Slot = altairSlot
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)
 	c := NewConsensusHandlers(
 		ctx,
@@ -237,7 +237,7 @@ func TestLightClientBootstrap(t *testing.T) {
 		nil,
 		beaconCfg,
 		ethClock,
-		nil, f, nil, nil, nil, true,
+		nil, chainData, nil, nil, nil, true,
 	)
 	c.Start()
 
@@ -264,7 +264,7 @@ func TestLightClientBootstrap(t *testing.T) {
 	err = ssz_snappy.DecodeAndRead(stream, got, &clparams.MainnetBeaconConfig, ethClock)
 	require.NoError(t, err)
 
-	expected := f.LightClientBootstraps[reqRoot]
+	expected := chainData.LightClientBootstraps[reqRoot]
 	require.Equal(t, expected.Header, got.Header)
 	require.Equal(t, expected.CurrentSyncCommittee, got.CurrentSyncCommittee)
 	require.Equal(t, expected.CurrentSyncCommitteeBranch, got.CurrentSyncCommitteeBranch)
@@ -290,7 +290,7 @@ func TestLightClientUpdates(t *testing.T) {
 	peersPool := peers.NewPool(host)
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := mock_services.NewChainDataReaderMock()
+	chainData := mock_services.NewChainDataReaderMock()
 	ethClock := getEthClock(t)
 
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)
@@ -300,7 +300,7 @@ func TestLightClientUpdates(t *testing.T) {
 		upC := cltypes.NewLightClientUpdate(clparams.AltairVersion, beaconCfg)
 		upC.AttestedHeader.Beacon.Slot = altairSlot
 		upC.SignatureSlot = uint64(i)
-		f.LCUpdates[uint64(i)] = upC
+		chainData.LCUpdates[uint64(i)] = upC
 	}
 	c := NewConsensusHandlers(
 		ctx,
@@ -312,7 +312,7 @@ func TestLightClientUpdates(t *testing.T) {
 		nil,
 		beaconCfg,
 		ethClock,
-		nil, f, nil, nil, nil, true,
+		nil, chainData, nil, nil, nil, true,
 	)
 	c.Start()
 
@@ -378,7 +378,7 @@ func TestLightClientUpdates(t *testing.T) {
 			require.NoError(t, err)
 			return
 		}
-		require.Equal(t, f.LCUpdates[uint64(currentPeriod)], update)
+		require.Equal(t, chainData.LCUpdates[uint64(currentPeriod)], update)
 		currentPeriod++
 
 		stream.Read(make([]byte, 1))

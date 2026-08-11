@@ -90,7 +90,7 @@ func TestPing(t *testing.T) {
 	peersPool := peers.NewPool(host)
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := mock_services.NewChainDataReaderMock()
+	chainData := mock_services.NewChainDataReaderMock()
 	ethClock := getEthClock(t)
 
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)
@@ -104,7 +104,7 @@ func TestPing(t *testing.T) {
 		testLocalNode(t),
 		beaconCfg,
 		ethClock,
-		nil, f, nil, nil, nil, true,
+		nil, chainData, nil, nil, nil, true,
 	)
 	c.Start()
 
@@ -145,7 +145,7 @@ func TestGoodbye(t *testing.T) {
 	peersPool := peers.NewPool(host)
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := mock_services.NewChainDataReaderMock()
+	chainData := mock_services.NewChainDataReaderMock()
 	ethClock := getEthClock(t)
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)
 	c := NewConsensusHandlers(
@@ -158,7 +158,7 @@ func TestGoodbye(t *testing.T) {
 		testLocalNode(t),
 		beaconCfg,
 		ethClock,
-		nil, f, nil, nil, nil, true,
+		nil, chainData, nil, nil, nil, true,
 	)
 	c.Start()
 
@@ -205,7 +205,7 @@ func TestMetadataV2(t *testing.T) {
 	peersPool := peers.NewPool(host)
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := mock_services.NewChainDataReaderMock()
+	chainData := mock_services.NewChainDataReaderMock()
 	ethClock := getEthClock(t)
 	nc := clparams.NetworkConfigs[chainspec.MainnetChainID]
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)
@@ -219,7 +219,7 @@ func TestMetadataV2(t *testing.T) {
 		testLocalNode(t),
 		beaconCfg,
 		ethClock,
-		nil, f, nil, nil, nil, true,
+		nil, chainData, nil, nil, nil, true,
 	)
 	c.Start()
 
@@ -263,7 +263,7 @@ func TestMetadataV1(t *testing.T) {
 	peersPool := peers.NewPool(host)
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := mock_services.NewChainDataReaderMock()
+	chainData := mock_services.NewChainDataReaderMock()
 
 	nc := clparams.NetworkConfigs[chainspec.MainnetChainID]
 	ethClock := getEthClock(t)
@@ -278,7 +278,7 @@ func TestMetadataV1(t *testing.T) {
 		testLocalNode(t),
 		beaconCfg,
 		ethClock,
-		nil, f, nil, nil, nil, true,
+		nil, chainData, nil, nil, nil, true,
 	)
 	c.Start()
 
@@ -321,7 +321,7 @@ func TestStatus(t *testing.T) {
 	peersPool := peers.NewPool(host)
 	beaconDB, indiciesDB := setupStore(t)
 
-	f := mock_services.NewChainDataReaderMock()
+	chainData := mock_services.NewChainDataReaderMock()
 
 	// Create mock for PeerDasStateReader
 	ctrl := gomock.NewController(t)
@@ -368,7 +368,7 @@ func TestStatus(t *testing.T) {
 		testLocalNode(t),
 		beaconCfg,
 		getEthClock(t),
-		hs, f, nil, nil, mockPeerDasStateReader, true,
+		hs, chainData, nil, nil, mockPeerDasStateReader, true,
 	)
 	c.Start()
 
