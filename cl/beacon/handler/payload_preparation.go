@@ -35,7 +35,6 @@ import (
 )
 
 var (
-	errNodeSyncing            = errors.New("node is syncing")
 	errNotOurProposal         = errors.New("next slot is not proposed by a registered validator")
 	errNoPayloadID            = errors.New("execution layer returned no payload id")
 	errHeadTooFarBack         = errors.New("head state is too far behind the slot to prepare")
@@ -161,7 +160,6 @@ func shouldPreparePayloadVersion(version clparams.StateVersion) bool {
 // failure worth reporting.
 func isExpectedPreparationSkip(err error) bool {
 	return errors.Is(err, errNotOurProposal) ||
-		errors.Is(err, errNodeSyncing) ||
 		errors.Is(err, errNoPayloadID) ||
 		errors.Is(err, errHeadTooFarBack) ||
 		errors.Is(err, errPreparationHeadChanged) ||
