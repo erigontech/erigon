@@ -890,7 +890,8 @@ func (pe *parallelExecutor) runApplyLoop(logPrefix string, applyResults <-chan a
 	return apply()
 }
 
-// Draining both streams lets blocked producers finish and close before the executor group is joined.
+// Draining applyResults and rootResults lets their blocked producers finish.
+// The calculator must keep draining commitResults until the exec loop closes it.
 func (pe *parallelExecutor) cancelAndDrainApplyLoop(cause error, applyResults <-chan applyResult, rootResults <-chan commitmentResult) {
 	pe.cancelExecLoop(cause)
 	for applyResults != nil || rootResults != nil {
