@@ -2280,3 +2280,34 @@ func TestBackwardGloasInitialAnchorRetainedWhileFullParentEnvelopeMissing(t *tes
 	require.Equal(t, 1, processed)
 	require.True(t, d.Finished())
 }
+
+func TestBackwardBeaconDownloaderRejectsOversizedEnvelopeResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(make([]byte, clparams.MaxChunkSize+1))
+	}))
+	defer server.Close()
+	downloader := &BackwardBeaconDownloader{
+		httpFallbackURL: server.URL,
+		beaconCfg:       &clparams.MainnetBeaconConfig,
+	}
+
+	_, err := downloader.fetchSingleEnvelope(context.Background(), makeGloasBlock(1, hash(1), hash(2)))
+	require.ErrorContains(t, err, "too large")
+}
+
+func TestForwardBeaconDownloaderRejectsOversizedEnvelopeResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(make([]byte, clparams.MaxChunkSize+1))
+	}))
+	defer server.Close()
+	block := makeGloasBlock(1, hash(1), hash(2))
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	received := map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{}
+
+	fetched := fetchEnvelopesFromBeaconAPI(
+		context.Background(), server.URL, []*cltypes.SignedBeaconBlock{block}, [][32]byte{root}, received, &clparams.MainnetBeaconConfig,
+	)
+	require.Zero(t, fetched)
+	require.Empty(t, received)
+}

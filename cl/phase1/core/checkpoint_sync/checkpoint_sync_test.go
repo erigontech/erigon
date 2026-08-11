@@ -211,6 +211,17 @@ func TestRemoteCheckpointSyncFetchEnvelopeUsesStandardPath(t *testing.T) {
 	require.NotNil(t, got)
 }
 
+func TestRemoteCheckpointSyncRejectsOversizedEnvelopeResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(make([]byte, clparams.MaxChunkSize+1))
+	}))
+	defer server.Close()
+	syncer := &RemoteCheckpointSync{beaconConfig: &clparams.MainnetBeaconConfig, net: chainspec.MainnetChainID, timeout: time.Second}
+
+	_, err := syncer.fetchEnvelope(context.Background(), server.URL+beaconStatePath)
+	require.ErrorContains(t, err, "too large")
+}
+
 func TestRemoteCheckpointSyncRejectsHTML(t *testing.T) {
 	mockHTMLServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
