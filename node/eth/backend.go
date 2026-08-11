@@ -959,7 +959,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		backend.engine,
 		config.Sync,
 		config.FcuBackgroundPrune,
-		config.FcuBackgroundCommit,
 		onlySnapDownloadOnStart,
 		backend.readAheader,
 		backend.stopNode,
