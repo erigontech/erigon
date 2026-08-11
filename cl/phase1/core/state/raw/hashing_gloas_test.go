@@ -3,9 +3,10 @@ package raw
 import (
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/merkle_tree"
-	"github.com/stretchr/testify/require"
 )
 
 func TestGloasBeaconStateUsesProgressiveHashing(t *testing.T) {
