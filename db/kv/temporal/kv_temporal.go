@@ -733,12 +733,6 @@ func (tx *Tx) DomainVisibleEnd(domain kv.Domain) (uint64, bool) {
 func (tx *RwTx) DomainVisibleEnd(domain kv.Domain) (uint64, bool) {
 	return tx.aggtx.DomainVisibleEnd(domain, tx.RwTx)
 }
-func (tx *Tx) HasExactDomainVisibleEnd(domain kv.Domain) bool {
-	return tx.aggtx.HasExactDomainVisibleEnd(domain)
-}
-func (tx *RwTx) HasExactDomainVisibleEnd(domain kv.Domain) bool {
-	return tx.aggtx.HasExactDomainVisibleEnd(domain)
-}
 func (tx *tx) HasCacheableLatestView(domain kv.Domain) bool {
 	return tx.aggtx.HasCacheableLatestView(domain)
 }

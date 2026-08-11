@@ -257,9 +257,7 @@ func TestTemporalTx_PinsBlockFilesView(t *testing.T) {
 	require.NotNil(t, roTx2.(*Tx).blocktx)
 }
 
-// HasExactDomainVisibleEnd avoids resolving the numeric frontier, but its
-// answer must match DomainVisibleEnd's authoritative availability result.
-func TestTemporalTx_HasExactDomainVisibleEndMatchesDomainVisibleEnd(t *testing.T) {
+func TestTemporalTx_DomainVisibleEnd(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 
@@ -288,10 +286,6 @@ func TestTemporalTx_HasExactDomainVisibleEndMatchesDomainVisibleEnd(t *testing.T
 	roTtx, err := temporalDb.BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer roTtx.Rollback()
-	for domain := range kv.DomainLen {
-		_, exact := roTtx.Debug().DomainVisibleEnd(domain)
-		require.Equal(t, exact, roTtx.Debug().HasExactDomainVisibleEnd(domain))
-	}
 	end, exact := roTtx.Debug().DomainVisibleEnd(kv.StorageDomain)
 	require.True(t, exact)
 	require.Equal(t, uint64(2), end)

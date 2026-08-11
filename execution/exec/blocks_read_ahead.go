@@ -91,8 +91,9 @@ type cachePopulatingGetter struct {
 }
 
 // readAheadGetter uses StateCache only when the transaction's durable state and
-// pinned files form an exact identity. Returning the transaction unchanged on
-// uncertainty still lets read-ahead warm the database and OS page cache.
+// pinned files fully identify its latest-state view. Returning the transaction
+// unchanged on uncertainty still lets read-ahead warm the database and OS page
+// cache.
 func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache) kv.TemporalGetter {
 	view, identityKnown := execctx.StateCacheReadView(ttx, sc)
 	if !identityKnown {

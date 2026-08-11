@@ -132,8 +132,9 @@ func (sd *SharedDomains) cacheViewsFor(tx kv.TemporalTx) cacheViews {
 }
 
 // StateCacheReadView binds stateCache to the state version and file ends pinned
-// by tx. It returns false if the cache is nil or that exact identity cannot be
-// derived. Even when true, the view is inert if the identity is not published.
+// by tx. It returns false if the cache is nil or those values do not fully
+// identify the transaction's latest-state view. Even when true, the view is
+// inert if the identity is not published.
 func StateCacheReadView(tx kv.TemporalTx, stateCache *cache.StateCache) (view cache.ReadView, identityKnown bool) {
 	if tx == nil || stateCache == nil {
 		return cache.ReadView{}, false
@@ -150,7 +151,10 @@ func stateCacheReadViewFor(
 	stateVersion uint64,
 	stateCache *cache.StateCache,
 ) (cache.ReadView, bool) {
-	if stateCache == nil || !hasExactVisibleEnds(debug, kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain) {
+	if stateCache == nil ||
+		!debug.HasCacheableLatestView(kv.AccountsDomain) ||
+		!debug.HasCacheableLatestView(kv.StorageDomain) ||
+		!debug.HasCacheableLatestView(kv.CodeDomain) {
 		return cache.ReadView{}, false
 	}
 	return stateCache.View(stateCacheGenerationFor(debug, stateVersion)), true
@@ -174,22 +178,6 @@ func stateCacheGenerationFor(debug kv.TemporalDebugTx, stateVersion uint64) cach
 
 func branchCacheGenerationFor(debug kv.TemporalDebugTx, stateVersion uint64) cache.Generation {
 	return cache.BranchGeneration(stateVersion, debug.TxNumsInFiles(kv.CommitmentDomain))
-}
-
-type exactDomainVisibleEnd interface {
-	HasExactDomainVisibleEnd(domain kv.Domain) bool
-}
-
-// hasExactVisibleEnds checks only whether exact ends are available. Resolving the
-// ends would open database cursors, but their numeric frontier values are not
-// part of cache identity.
-func hasExactVisibleEnds(debug exactDomainVisibleEnd, domains ...kv.Domain) bool {
-	for _, domain := range domains {
-		if !debug.HasExactDomainVisibleEnd(domain) {
-			return false
-		}
-	}
-	return true
 }
 
 func IsDomainAheadOfBlocks(ctx context.Context, tx kv.TemporalRwTx, logger log.Logger) bool {

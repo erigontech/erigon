@@ -98,6 +98,48 @@ func currentStateCacheView(t *testing.T, db kv.TemporalRoDB, stateCache *cache.S
 	return stateCache.View(currentStateCacheGeneration(t, db))
 }
 
+func TestStateCacheReadViewSupportsHistoryDisabledLatestState(t *testing.T) {
+	t.Parallel()
+
+	db := newTestDbWithoutHistory(t, 16)
+	tx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	debug := tx.Debug()
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+		require.True(t, debug.HasCacheableLatestView(domain))
+		_, exact := debug.DomainVisibleEnd(domain)
+		require.False(t, exact)
+	}
+
+	stateVersion, err := rawdb.GetStateVersion(tx)
+	require.NoError(t, err)
+	generation := cache.StateGeneration(
+		stateVersion,
+		debug.TxNumsInFiles(kv.AccountsDomain),
+		debug.TxNumsInFiles(kv.StorageDomain),
+		debug.TxNumsInFiles(kv.CodeDomain),
+	)
+	stateCache := newSmallStateCache()
+	t.Cleanup(stateCache.Close)
+	publisher := stateCache.Publisher()
+	publisher.Initialize(generation)
+	publication := publisher.Begin()
+	key, value := []byte("account"), []byte("value")
+	publication.Publish(generation, 1, []cache.Update{{
+		Domain: kv.AccountsDomain,
+		Key:    key,
+		Value:  value,
+	}}, false)
+
+	view, identityKnown := execctx.StateCacheReadView(tx, stateCache)
+	require.True(t, identityKnown)
+	got, ok := view.Get(kv.AccountsDomain, key)
+	require.True(t, ok)
+	require.Equal(t, value, got)
+}
+
 // During an in-flight unwind this SharedDomains is detached from StateCache,
 // so the assertion compares the bounded database read without observing the
 // cache generation that still serves readers of the durable state.

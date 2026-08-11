@@ -55,13 +55,27 @@ func NewTest(dirs datadir.Dirs) state.AggOpts { //nolint:gocritic
 }
 
 func newTestDb(tb testing.TB, stepSize uint64) kv.TemporalRwDB {
+	return newTestDbWithOptions(tb, stepSize, nil)
+}
+
+func newTestDbWithoutHistory(tb testing.TB, stepSize uint64) kv.TemporalRwDB {
+	return newTestDbWithOptions(tb, stepSize, func(opts state.AggOpts) state.AggOpts {
+		return opts.DisableHistory()
+	})
+}
+
+func newTestDbWithOptions(tb testing.TB, stepSize uint64, configure func(state.AggOpts) state.AggOpts) kv.TemporalRwDB {
 	tb.Helper()
 	logger := log.New()
 	dirs := datadir.New(tb.TempDir())
 	db := mdbx.New(dbcfg.ChainDB, logger).InMem(tb, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	tb.Cleanup(db.Close)
 
-	agg := NewTest(dirs).StepSize(stepSize).Logger(logger).MustOpen(tb.Context(), db)
+	opts := NewTest(dirs).StepSize(stepSize).Logger(logger)
+	if configure != nil {
+		opts = configure(opts)
+	}
+	agg := opts.MustOpen(tb.Context(), db)
 	tb.Cleanup(agg.Close)
 	err := agg.OpenFolder()
 	require.NoError(tb, err)

@@ -256,7 +256,6 @@ func TestDomainVisibleEnd_ClampedViewHasNoExactFrontier(t *testing.T) {
 
 	_, ok := at.DomainVisibleEnd(kv.AccountsDomain, tx)
 	require.False(t, ok, "a dependency-clamped values view has no exact frontier")
-	require.False(t, at.HasExactDomainVisibleEnd(kv.AccountsDomain))
 	require.False(t, at.HasCacheableLatestView(kv.AccountsDomain),
 		"history-enabled views remain uncacheable while values files lag history-II")
 }

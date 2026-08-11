@@ -36,21 +36,10 @@ import (
 
 type temporalTxWithAgg struct {
 	kv.TemporalTx
-	agg   any
-	debug kv.TemporalDebugTx
+	agg any
 }
 
 func (tx *temporalTxWithAgg) AggTx() any { return tx.agg }
-func (tx *temporalTxWithAgg) Debug() kv.TemporalDebugTx {
-	if tx.debug != nil {
-		return tx.debug
-	}
-	return tx.TemporalTx.Debug()
-}
-
-type exactVisibleDebug struct{ kv.TemporalDebugTx }
-
-func (*exactVisibleDebug) HasExactDomainVisibleEnd(kv.Domain) bool { return true }
 
 type branchCacheOnlyAgg struct {
 	branchCache *commitment.BranchCache
@@ -110,7 +99,8 @@ func TestBranchCacheReadsWithoutCommitmentHistory(t *testing.T) {
 	roTx, err := db.BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer roTx.Rollback()
-	require.False(t, roTx.Debug().HasExactDomainVisibleEnd(kv.CommitmentDomain),
+	_, exact := roTx.Debug().DomainVisibleEnd(kv.CommitmentDomain)
+	require.False(t, exact,
 		"the default commitment domain has no historical frontier")
 	require.True(t, roTx.Debug().HasCacheableLatestView(kv.CommitmentDomain),
 		"latest commitment state remains cacheable without history")
@@ -442,7 +432,6 @@ func TestBoundedReadDoesNotFillBranchCache(t *testing.T) {
 	tx := &temporalTxWithAgg{
 		TemporalTx: roTx,
 		agg:        agg,
-		debug:      &exactVisibleDebug{TemporalDebugTx: roTx.Debug()},
 	}
 	parent, err := execctx.NewSharedDomains(ctx, tx, log.New())
 	require.NoError(t, err)

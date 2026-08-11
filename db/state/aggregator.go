@@ -2771,10 +2771,7 @@ func (at *AggregatorRoTx) DomainProgress(name kv.Domain, tx kv.Tx) uint64 {
 	return at.d[name].ht.iit.Progress(tx)
 }
 
-// HasExactDomainVisibleEnd reports whether an exact combined frontier exists.
-// History must be enabled and values files must cover the history-II frontier;
-// otherwise reads mix newer database keys with older file values.
-func (at *AggregatorRoTx) HasExactDomainVisibleEnd(name kv.Domain) bool {
+func (at *AggregatorRoTx) hasExactDomainVisibleEnd(name kv.Domain) bool {
 	d := at.d[name]
 	return !d.d.HistoryDisabled && d.files.EndTxNum() >= d.ht.iit.files.EndTxNum()
 }
@@ -2782,13 +2779,13 @@ func (at *AggregatorRoTx) HasExactDomainVisibleEnd(name kv.Domain) bool {
 // HasCacheableLatestView accepts history-disabled latest state and otherwise
 // requires the value files to cover history-II.
 func (at *AggregatorRoTx) HasCacheableLatestView(name kv.Domain) bool {
-	return at.d[name].d.HistoryDisabled || at.HasExactDomainVisibleEnd(name)
+	return at.d[name].d.HistoryDisabled || at.hasExactDomainVisibleEnd(name)
 }
 
 // DomainVisibleEnd returns the exact combined frontier after verifying that
 // the values files cover history-II.
 func (at *AggregatorRoTx) DomainVisibleEnd(name kv.Domain, tx kv.Tx) (uint64, bool) {
-	if !at.HasExactDomainVisibleEnd(name) {
+	if !at.hasExactDomainVisibleEnd(name) {
 		return 0, false
 	}
 	d := at.d[name]

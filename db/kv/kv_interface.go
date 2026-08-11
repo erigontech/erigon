@@ -525,9 +525,6 @@ type TemporalDebugTx interface {
 	// DomainVisibleEnd returns the exact exclusive txNum bound of the tx's
 	// domain read view. ok is false when the backend cannot provide an exact bound.
 	DomainVisibleEnd(domain Domain) (visibleEnd uint64, ok bool)
-	// HasExactDomainVisibleEnd reports DomainVisibleEnd's ok result without
-	// resolving the bound, which may require a database cursor.
-	HasExactDomainVisibleEnd(domain Domain) bool
 	// HasCacheableLatestView reports whether the state version and visible value
 	// files fully identify GetLatest results. Unlike DomainVisibleEnd, this may be
 	// true when history is disabled.
