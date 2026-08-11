@@ -1064,7 +1064,7 @@ func (f *ForkChoiceStore) applyLocalSelfBuildEnvelopeCoordinated(ctx context.Con
 		f.eth2Roots.Add(beaconBlockRoot, envelope.Payload.BlockHash)
 	}
 
-	if err := f.persistEnvelope(beaconBlockRoot, signedEnvelope); err != nil {
+	if err := f.forkGraph.DumpEnvelopeOnDisk(beaconBlockRoot, signedEnvelope); err != nil {
 		return false, fmt.Errorf("applyLocalSelfBuildEnvelopeCoordinated: failed to dump envelope: %w", err)
 	}
 

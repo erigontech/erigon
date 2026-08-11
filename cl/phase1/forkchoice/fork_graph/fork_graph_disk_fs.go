@@ -269,7 +269,7 @@ func (f *forkGraphDisk) readEnvelopeFromDiskLocked(blockRoot common.Hash) (envel
 		return nil, fmt.Errorf("corrupt envelope file: length %d exceeds max %d, root: %x", envelopeLength, clparams.MaxChunkSize, blockRoot)
 	}
 	ownedBuffer := make([]byte, envelopeLength)
-	n, err = io.ReadFull(sr, ownedBuffer)
+	n, err := io.ReadFull(sr, ownedBuffer)
 	if err != nil {
 		corrupt = isCorruptEnvelopeReadError(err, readTracker.err)
 		return nil, fmt.Errorf("failed to read snappy buffer: %w, root: %x", err, blockRoot)
@@ -277,9 +277,13 @@ func (f *forkGraphDisk) readEnvelopeFromDiskLocked(blockRoot common.Hash) (envel
 	envelope = &cltypes.SignedExecutionPayloadEnvelope{
 		Message: cltypes.NewExecutionPayloadEnvelope(f.beaconCfg),
 	}
-	if err = envelope.DecodeSSZ(ownedBuffer, int(version)); err != nil {
+	if err = envelope.DecodeSSZStrict(ownedBuffer, int(version)); err != nil {
 		corrupt = true
 		return nil, fmt.Errorf("failed to decode envelope: %w, root: %x, len: %d", err, blockRoot, n)
+	}
+	if err = envelope.ValidateForPersistence(f.beaconCfg); err != nil {
+		corrupt = true
+		return nil, fmt.Errorf("invalid persisted envelope: %w, root: %x", err, blockRoot)
 	}
 	if envelope.Message.BeaconBlockRoot != blockRoot {
 		corrupt = true
@@ -323,6 +327,10 @@ func (f *forkGraphDisk) DumpEnvelopeOnDisk(blockRoot common.Hash, envelope *clty
 	}
 	if envelope.Message.BeaconBlockRoot != blockRoot {
 		return fmt.Errorf("cannot persist envelope for root %x with embedded root %x", blockRoot, envelope.Message.BeaconBlockRoot)
+	}
+	envelopeSize := envelope.EncodingSizeSSZ()
+	if envelopeSize < 0 || uint64(envelopeSize) > clparams.MaxChunkSize {
+		return fmt.Errorf("cannot persist envelope: length %d exceeds max %d", envelopeSize, clparams.MaxChunkSize)
 	}
 	f.lifecycleMu.RLock()
 	defer f.lifecycleMu.RUnlock()

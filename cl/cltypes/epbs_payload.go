@@ -702,17 +702,21 @@ func (s *SignedExecutionPayloadEnvelope) EncodeSSZ(buf []byte) ([]byte, error) {
 }
 
 func (s *SignedExecutionPayloadEnvelope) DecodeSSZ(buf []byte, version int) error {
-	if s.Message == nil {
-		s.Message = NewExecutionPayloadEnvelope(s.beaconCfg)
-	}
-	return ssz2.UnmarshalSSZ(buf, version, s.Message, s.Signature[:])
+	return s.decodeSSZ(buf, version, false)
 }
 
 func (s *SignedExecutionPayloadEnvelope) DecodeSSZStrict(buf []byte, version int) error {
+	return s.decodeSSZ(buf, version, true)
+}
+
+func (s *SignedExecutionPayloadEnvelope) decodeSSZ(buf []byte, version int, strict bool) error {
 	if s.Message == nil {
 		s.Message = NewExecutionPayloadEnvelope(s.beaconCfg)
 	}
-	return ssz2.UnmarshalSSZStrict(buf, version, s.Message, s.Signature[:])
+	if strict {
+		return ssz2.UnmarshalSSZStrict(buf, version, s.Message, s.Signature[:])
+	}
+	return ssz2.UnmarshalSSZ(buf, version, s.Message, s.Signature[:])
 }
 
 func (s *SignedExecutionPayloadEnvelope) EncodingSizeSSZ() int {
