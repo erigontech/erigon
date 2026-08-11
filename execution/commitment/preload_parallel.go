@@ -118,6 +118,9 @@ func (p *ContractTrunkPreloadParallel) sortAndPartitionFrontier(dbBranches map[s
 	for i := range p.frontier {
 		pk := &p.frontier[i]
 		if v, ok := dbBranches[string(pk.key)]; ok {
+			if len(v) == 0 { // deletion tombstone: DB shadows files, branch is gone
+				continue
+			}
 			dbHits = append(dbHits, *pk)
 			dbVals = append(dbVals, v)
 			dbHitsBytes += estimatedEntryCost(pk.key, v)

@@ -93,22 +93,24 @@ func (p *ContractTrunkPreload) Run(
 
 	for len(p.queue) > 0 {
 		head := p.queue[0]
-		p.queue = p.queue[1:]
 
 		prefix := nibbles.HexToCompact(head.path)
 		v, step, found, rerr := reader(prefix)
 		if rerr != nil {
+			p.pinned += chunkPinned
+			p.usedBytes += chunkUsedBytes
 			return chunkPinned, false, fmt.Errorf("preload at depth %d: %w", head.depth, rerr)
 		}
 		if !found {
+			p.queue = p.queue[1:]
 			continue
 		}
 
 		entryCost := estimatedEntryOverheadBytes + len(prefix) + len(v)
 		if chunkUsedBytes+entryCost > additionalBudgetBytes {
-			p.queue = append([]pathDepth{head}, p.queue...)
 			break
 		}
+		p.queue = p.queue[1:]
 
 		cache.PinEntry(prefix, v, step, p.pinTxNum)
 		p.pinnedPrefixes = append(p.pinnedPrefixes, prefix)
@@ -169,6 +171,9 @@ func PreloadContractTrunk(
 		return 0, err
 	}
 	pinned, queueEmpty, err := p.Run(ramBudgetBytes, reader, cache, logger)
+	if err != nil {
+		return pinned, err
+	}
 	if logger != nil {
 		logger.Info("[trunk-preload] complete",
 			"contract_hash", fmt.Sprintf("%x", contractHash),
@@ -180,5 +185,5 @@ func PreloadContractTrunk(
 			"queue_remaining", p.QueueRemaining(),
 			"cache_pinned_total", cache.PinnedCount())
 	}
-	return pinned, err
+	return pinned, nil
 }
