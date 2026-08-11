@@ -103,7 +103,7 @@ type stateObject struct {
 	newlyCreated    bool // true if this object was created in the current transaction
 	createdContract bool // true if this object represents a newly created contract
 
-	// Slot identity, not per-use state, so reset leaves it alone.
+	// Set by stateObjectArena.alloc; keeps release from pooling a slot the arena owns.
 	arena bool
 }
 
