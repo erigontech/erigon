@@ -496,20 +496,25 @@ func (e *ExecutionPayloadEnvelope) EncodeSSZ(buf []byte) ([]byte, error) {
 }
 
 func (e *ExecutionPayloadEnvelope) DecodeSSZ(buf []byte, version int) error {
+	return e.decodeSSZ(buf, version, false)
+}
+
+func (e *ExecutionPayloadEnvelope) DecodeSSZStrict(buf []byte, version int) error {
+	return e.decodeSSZ(buf, version, true)
+}
+
+func (e *ExecutionPayloadEnvelope) decodeSSZ(buf []byte, version int, strict bool) error {
 	if e.Payload == nil {
 		e.Payload = NewEth1Block(clparams.StateVersion(version), e.beaconCfg)
 	}
 	if e.ExecutionRequests == nil {
 		e.ExecutionRequests = NewExecutionRequestsWithVersion(e.beaconCfg, clparams.StateVersion(version))
 	}
-	return ssz2.UnmarshalSSZ(
-		buf, version,
-		e.Payload,
-		e.ExecutionRequests,
-		&e.BuilderIndex,
-		e.BeaconBlockRoot[:],
-		e.ParentBeaconBlockRoot[:],
-	)
+	schema := []any{e.Payload, e.ExecutionRequests, &e.BuilderIndex, e.BeaconBlockRoot[:], e.ParentBeaconBlockRoot[:]}
+	if strict {
+		return ssz2.UnmarshalSSZStrict(buf, version, schema...)
+	}
+	return ssz2.UnmarshalSSZ(buf, version, schema...)
 }
 
 func (e *ExecutionPayloadEnvelope) EncodingSizeSSZ() int {
@@ -638,8 +643,19 @@ func (s *SignedExecutionPayloadEnvelope) EncodeSSZ(buf []byte) ([]byte, error) {
 }
 
 func (s *SignedExecutionPayloadEnvelope) DecodeSSZ(buf []byte, version int) error {
+	return s.decodeSSZ(buf, version, false)
+}
+
+func (s *SignedExecutionPayloadEnvelope) DecodeSSZStrict(buf []byte, version int) error {
+	return s.decodeSSZ(buf, version, true)
+}
+
+func (s *SignedExecutionPayloadEnvelope) decodeSSZ(buf []byte, version int, strict bool) error {
 	if s.Message == nil {
 		s.Message = NewExecutionPayloadEnvelope(s.beaconCfg)
+	}
+	if strict {
+		return ssz2.UnmarshalSSZStrict(buf, version, s.Message, s.Signature[:])
 	}
 	return ssz2.UnmarshalSSZ(buf, version, s.Message, s.Signature[:])
 }

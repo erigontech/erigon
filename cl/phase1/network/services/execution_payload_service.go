@@ -111,7 +111,7 @@ func (s *executionPayloadService) DecodeGossipMessage(_ peer.ID, data []byte, ve
 	obj := &cltypes.SignedExecutionPayloadEnvelope{
 		Message: cltypes.NewExecutionPayloadEnvelope(s.beaconCfg),
 	}
-	if err := obj.DecodeSSZ(data, int(version)); err != nil {
+	if err := obj.DecodeSSZStrict(data, int(version)); err != nil {
 		return nil, err
 	}
 	return obj, nil
@@ -162,7 +162,7 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 		beaconBlockRoot: beaconBlockRoot,
 		builderIndex:    builderIndex,
 	}
-	if s.seenEnvelopesCache.Contains(seenKey) {
+	if s.seenEnvelopesCache.Contains(seenKey) && s.forkchoiceStore.HasEnvelope(beaconBlockRoot) {
 		return fmt.Errorf("%w: already seen envelope for block %v from builder %d", ErrIgnore, beaconBlockRoot, builderIndex)
 	}
 

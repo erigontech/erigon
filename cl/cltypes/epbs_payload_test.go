@@ -1,6 +1,7 @@
 package cltypes
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"testing"
@@ -12,6 +13,18 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/ssz"
 )
+
+func TestExecutionRequestsStrictDecodeRejectsNonCanonicalOffset(t *testing.T) {
+	requests := NewExecutionRequestsWithVersion(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	encoded, err := requests.EncodeSSZ(nil)
+	require.NoError(t, err)
+	firstOffset := binary.LittleEndian.Uint32(encoded)
+	binary.LittleEndian.PutUint32(encoded, firstOffset+1)
+	encoded = append(encoded[:firstOffset], append([]byte{0}, encoded[firstOffset:]...)...)
+
+	decoded := NewExecutionRequestsWithVersion(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	require.Error(t, decoded.DecodeSSZStrict(encoded, int(clparams.GloasVersion)))
+}
 
 func TestSignedExecutionPayloadEnvelopeCloneNilMessage(t *testing.T) {
 	envelope := &SignedExecutionPayloadEnvelope{

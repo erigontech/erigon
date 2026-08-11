@@ -19,6 +19,7 @@ package network
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -756,6 +757,8 @@ func TestForwardRequestMoreDropsHTTPPreferenceWhenFrontierAdvancesDuringEnvelope
 	require.NoError(t, err)
 	secondEncoded, err := second.EncodeSSZ(nil)
 	require.NoError(t, err)
+	firstRoot, err := first.Block.HashSSZ()
+	require.NoError(t, err)
 
 	envelopeStarted := make(chan struct{})
 	releaseEnvelope := make(chan struct{})
@@ -769,7 +772,7 @@ func TestForwardRequestMoreDropsHTTPPreferenceWhenFrontierAdvancesDuringEnvelope
 		case "/eth/v2/beacon/blocks/12":
 			w.Header().Set("Eth-Consensus-Version", "gloas")
 			_, _ = w.Write(secondEncoded)
-		case "/eth/v1/beacon/execution_payload_envelope/11":
+		case fmt.Sprintf("/eth/v1/beacon/execution_payload_envelope/0x%x", firstRoot):
 			envelopeOnce.Do(func() { close(envelopeStarted) })
 			<-releaseEnvelope
 			http.Error(w, "unavailable", http.StatusServiceUnavailable)
