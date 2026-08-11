@@ -19,12 +19,16 @@ package executiontests
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	commonerrors "github.com/erigontech/erigon/common/errors"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -93,7 +97,11 @@ func tipWithUnexecutedBlock2(t *testing.T) (*execmoduletester.ExecModuleTester, 
 // runParallelExecV3 runs one parallel execution batch with chaos hooks enabled.
 func runParallelExecV3(t *testing.T, m *execmoduletester.ExecModuleTester, maxBlockNum uint64) error {
 	t.Helper()
-	ctx := context.Background()
+	return runParallelExecV3WithContext(t, context.Background(), m, maxBlockNum)
+}
+
+func runParallelExecV3WithContext(t *testing.T, ctx context.Context, m *execmoduletester.ExecModuleTester, maxBlockNum uint64) error {
+	t.Helper()
 
 	syncCfg := m.Cfg().Sync
 	syncCfg.ChaosMonkey = true
@@ -119,6 +127,25 @@ func runParallelExecV3(t *testing.T, m *execmoduletester.ExecModuleTester, maxBl
 	return stagedsync.ExecV3(ctx, s, nil /*Unwinder*/, execCfg, doms, rwTx, true /*parallel*/, maxBlockNum, m.Log)
 }
 
+type cancelOnTemporalRoDB struct {
+	kv.TemporalRwDB
+	done    <-chan struct{}
+	cancel  context.CancelFunc
+	blocked atomic.Bool
+}
+
+func (db *cancelOnTemporalRoDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
+	if ctx.Done() != db.done || !db.blocked.CompareAndSwap(false, true) {
+		return db.TemporalRwDB.BeginTemporalRo(ctx)
+	}
+	db.cancel()
+	return nil, ctx.Err()
+}
+
+func (db *cancelOnTemporalRoDB) Agg() any {
+	return db.TemporalRwDB.(dbstate.HasAgg).Agg()
+}
+
 // A worker-pool failure must cancel the executor and surface instead of leaving
 // the exec loop waiting for results.
 func TestParallelExec_WorkerPoolDeath_SurfacesInsteadOfHanging(t *testing.T) {
@@ -135,6 +162,28 @@ func TestParallelExec_WorkerPoolDeath_SurfacesInsteadOfHanging(t *testing.T) {
 	var exhausted *stagedsync.ErrLoopExhausted
 	require.False(t, errors.As(err, &exhausted),
 		"worker-pool death classified as ErrLoopExhausted → runStage retries forever with zero progress")
+}
+
+func TestParallelExec_EarlySetupCancellationDoesNotHideWorkerFailure(t *testing.T) {
+	m, b2 := tipWithUnexecutedBlock2(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	db := &cancelOnTemporalRoDB{
+		TemporalRwDB: m.DB,
+		done:         ctx.Done(),
+		cancel:       cancel,
+	}
+	m.DB = db
+
+	chaosErr := errors.New("chaos monkey: simulated worker panic")
+	disarm := chaos_monkey.ArmWorkerError(chaosErr)
+	t.Cleanup(disarm)
+
+	err := runParallelExecV3WithContext(t, ctx, m, b2.NumberU64())
+
+	require.ErrorIs(t, err, chaosErr)
+	require.False(t, commonerrors.IsOnlyCanceled(err))
 }
 
 // A recovered apply-loop panic must fail the batch because the apply loop owns

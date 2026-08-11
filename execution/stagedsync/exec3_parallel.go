@@ -236,7 +236,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState, u Unwinder,
 	startBlockNum uint64, offsetFromBlockBeginning uint64, maxBlockNum uint64, blockLimit uint64,
 	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
-	stepsInDb float64, accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
+	stepsInDb float64, accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (outHeader *types.Header, outTx kv.TemporalRwTx, execErr error) {
 
 	// Do NOT set pe.applyTx to the stageloop's rwTx — the rwTx is thread-bound
 	// and cannot be shared with the execLoop goroutine. The execLoop creates
@@ -287,7 +287,12 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	pe.maxBlockNum = maxBlockNum
 
 	executorContext, executorCancel, err := pe.run(ctx)
-	defer executorCancel(nil)
+	executorJoined := false
+	defer func() {
+		if !executorJoined {
+			execErr = reconcileExecErrors(execErr, executorCancel(nil))
+		}
+	}()
 
 	if err != nil {
 		return nil, rwTx, err
@@ -368,7 +373,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 
 	var lastProgress commitment.CommitProgress
 
-	execErr := pe.runApplyLoop(execStage.LogPrefix(), applyResults, rootResults, func() (err error) {
+	execErr = pe.runApplyLoop(execStage.LogPrefix(), applyResults, rootResults, func() (err error) {
 		if pe.cfg.syncCfg.ChaosMonkey && pe.enableChaosMonkey {
 			chaos_monkey.ApplyLoopPanic()
 		}
@@ -467,7 +472,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 		}
 
 		// deliberateCancel is the light context-cancel — teardown (stopWorkers +
-		// wait) stays with execImpl's deferred executorCancel so only the main
+		// wait) stays with execImpl's executor cleanup so only the main
 		// goroutine drives cleanup.
 		deliberateCancel := func() {
 			pe.cancelExecLoop(&stopCause{block: fail.block, kind: stopBadBlock, err: fail.err})
@@ -821,14 +826,14 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 		}
 	})
 
-	executorCancel(nil)
+	// Stop and join all goroutines before reading shared state.
+	execErr = reconcileExecErrors(execErr, executorCancel(nil))
+	executorJoined = true
 
 	if !hasLoggedExecution {
 		pe.LogExecution()
 	}
 
-	// Wait for all goroutines to complete before reading shared state.
-	execErr = reconcileExecErrors(execErr, pe.wait())
 	execErr = pe.checkBlocksDrained(ctx, executorContext, execErr)
 
 	// Commitment is computed per-block by the calculator. Stage progress
@@ -1696,7 +1701,7 @@ func (pe *parallelExecutor) processResults(ctx context.Context, applyTx kv.Tempo
 	return blockResult, nil
 }
 
-func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.CancelCauseFunc, error) {
+func (pe *parallelExecutor) run(ctx context.Context) (context.Context, func(error) error, error) {
 	// execRequests holds one entry per decoded block (each containing all its TxTasks).
 	// A large buffer causes the block-loader goroutine to race far ahead of the apply
 	// loop, accumulating all decoded transaction objects in memory simultaneously.
@@ -1731,8 +1736,18 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine,
 		pe.workerCount+1, pe.taskExecMetrics, pe.cfg.dirs, pe.logger)
 
+	executorCancel := func(cause error) error {
+		execLoopCtxCancel(cause)
+		cancelWorkers()
+
+		pe.in.Release()
+		pe.stopWorkers()
+
+		return pe.wait()
+	}
+
 	if err != nil {
-		return execLoopCtx, execLoopCtxCancel, err
+		return execLoopCtx, executorCancel, err
 	}
 
 	// Join worker failures into the executor group so they cancel stalled consumers.
@@ -1747,15 +1762,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 		return commonerrors.NilIfCanceled(pe.execLoop(execLoopCtx))
 	})
 
-	return execLoopCtx, func(cause error) {
-		execLoopCtxCancel(cause)
-		cancelWorkers()
-
-		pe.in.Release()
-		pe.stopWorkers()
-
-		_ = pe.wait()
-	}, nil
+	return execLoopCtx, executorCancel, nil
 }
 
 // joinWorkers reports real worker failures and suppresses cancellation-only exits.

@@ -518,7 +518,9 @@ func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, met
 	assert.NoError(tb, err, "error occur during parallel init")
 	assert.NoError(tb, executorContext.Err(), "error occur during parallel init")
 
-	defer executorCancel(nil)
+	defer func() {
+		assert.NoError(tb, executorCancel(nil))
+	}()
 
 	for _, task := range tasks {
 		task := task.(*testExecTask)
@@ -624,7 +626,9 @@ func runParallelGetMetadata(tb testing.TB, tasks []exec.Task, validation propert
 	}
 
 	executorContext, executorCancel, err := pe.run(ctx)
-	defer executorCancel(nil)
+	defer func() {
+		assert.NoError(tb, executorCancel(nil))
+	}()
 	assert.NoError(tb, err, "error occur during parallel init")
 
 	for _, task := range tasks {
@@ -651,7 +655,7 @@ func runProfileAndExecute(tb testing.TB, tasks []exec.Task, validation propertyC
 	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
 
 	// newExecutor creates a fresh domains/state/executor on the shared DB.
-	newExecutor := func() (*parallelExecutor, context.Context, context.CancelCauseFunc, func()) {
+	newExecutor := func() (*parallelExecutor, context.Context, func(error) error, func()) {
 		tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
 		assert.NoError(tb, err)
 		domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
@@ -671,7 +675,7 @@ func runProfileAndExecute(tb testing.TB, tasks []exec.Task, validation propertyC
 		assert.NoError(tb, err, "error during parallel init")
 
 		cleanup := func() {
-			executorCancel(nil)
+			assert.NoError(tb, executorCancel(nil))
 			domains.Close()
 			tx.Rollback()
 		}
