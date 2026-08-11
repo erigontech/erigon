@@ -1119,6 +1119,22 @@ func TestValidateEnvelopeAgainstBlock_NoBid(t *testing.T) {
 	require.Contains(t, err.Error(), "block missing signed_execution_payload_bid")
 }
 
+func TestOnExecutionPayloadRejectsNilWithdrawalBeforeForkchoice(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	envelope := cltypes.NewExecutionPayloadEnvelope(cfg)
+	envelope.Payload.Extra = solid.NewExtraData()
+	envelope.Payload.Transactions = solid.NewTransactionsSSZFromTransactions(nil)
+	envelope.Payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), 44)
+	envelope.Payload.Withdrawals.Append(nil)
+	envelope.Payload.BlockAccessList = solid.NewByteListSSZ(cfg.MaxBytesPerTransaction)
+	f := &ForkChoiceStore{beaconCfg: cfg}
+
+	require.NotPanics(t, func() {
+		err := f.OnExecutionPayload(context.Background(), &cltypes.SignedExecutionPayloadEnvelope{Message: envelope}, false, true)
+		require.ErrorContains(t, err, "nil withdrawal at index 0")
+	})
+}
+
 // TestValidateEnvelopeAgainstBlock_SlotNumberMismatch tests that validation fails when
 // block.slot != envelope.payload.slot_number (EIP-7843 / GLOAS p2p-interface REJECT rule).
 func TestValidateEnvelopeAgainstBlock_SlotNumberMismatch(t *testing.T) {
