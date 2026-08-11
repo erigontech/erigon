@@ -63,7 +63,39 @@ func startNoMaterializeTx(ibs *IntraBlockState, vm *VersionMap, txIndex int) {
 	ibs.Reset()
 	ibs.SetVersionMap(vm)
 	ibs.SetNoMaterialize(true)
+	ibs.SetTransientObjectArena(true)
 	ibs.SetTxContext(1, txIndex)
+}
+
+// TestNoMaterializeWithoutRewindSkipsArena pins the opt-in: a caller that never
+// calls Reset (the BAL block assembler) must not draw arena slots, which it would
+// otherwise hold — with the account and code they last served — for the whole
+// block. Reset clears the opt-in, so only a caller that re-enables it after every
+// rewind can reach the arena.
+func TestNoMaterializeWithoutRewindSkipsArena(t *testing.T) {
+	ibs, _ := newNoMaterializeIBS(&emptyReader{})
+	defer ibs.Close()
+	ibs.SetNoMaterialize(true) // no SetTransientObjectArena: this caller never rewinds
+
+	so := ibs.allocStateObject()
+	assert.False(t, so.arena, "a caller that never rewinds must not draw from the arena")
+	assert.Empty(t, ibs.stateObjectArena.slabs, "arena must stay unallocated")
+}
+
+// TestResetClearsArenaOptIn pins that the opt-in does not survive a rewind: a
+// reused IntraBlockState that forgets to re-enable it falls back to the heap
+// rather than silently parking objects.
+func TestResetClearsArenaOptIn(t *testing.T) {
+	ibs, _ := newNoMaterializeIBS(&emptyReader{})
+	defer ibs.Close()
+
+	ibs.SetNoMaterialize(true)
+	ibs.SetTransientObjectArena(true)
+	require.True(t, ibs.allocStateObject().arena)
+
+	ibs.Reset()
+	ibs.SetNoMaterialize(true)
+	assert.False(t, ibs.allocStateObject().arena, "Reset must clear the arena opt-in")
 }
 
 // TestNoMaterializeReadReusesArena pins that account reads on the parallel path
@@ -78,15 +110,21 @@ func TestNoMaterializeReadReusesArena(t *testing.T) {
 	ibs, vm := newNoMaterializeIBS(&staticAccountReader{addr: addr, acc: &acc})
 	defer ibs.Close()
 
+	slabsAfterFirstTx := 0
 	for txIndex := range 200 {
 		startNoMaterializeTx(ibs, vm, txIndex)
 		balance, err := ibs.GetBalance(addr)
 		require.NoError(t, err)
 		require.EqualValues(t, 77, balance.Uint64())
 		require.Empty(t, ibs.stateObjects, "parallel read must not cache a stateObject")
+		if txIndex == 0 {
+			slabsAfterFirstTx = len(ibs.stateObjectArena.slabs)
+			require.NotZero(t, slabsAfterFirstTx, "the read must be served from the arena")
+		}
 	}
 
-	require.Len(t, ibs.stateObjectArena.slabs, 1, "200 transactions must reuse one slab")
+	require.Equal(t, slabsAfterFirstTx, len(ibs.stateObjectArena.slabs),
+		"the arena must stop growing after the first transaction")
 }
 
 // TestNoMaterializeAllocStateObjectUsesArena pins the routing: the parallel path
@@ -100,6 +138,7 @@ func TestNoMaterializeAllocStateObjectUsesArena(t *testing.T) {
 	pooled.release()
 
 	ibs.SetNoMaterialize(true)
+	ibs.SetTransientObjectArena(true)
 	assert.True(t, ibs.allocStateObject().arena, "parallel path must use the arena")
 }
 
@@ -110,6 +149,7 @@ func TestNoMaterializeOverflowSkipsPool(t *testing.T) {
 	ibs, _ := newNoMaterializeIBS(&emptyReader{})
 	defer ibs.Close()
 	ibs.SetNoMaterialize(true)
+	ibs.SetTransientObjectArena(true)
 
 	for range arenaMaxObjects {
 		require.True(t, ibs.allocStateObject().arena)
@@ -123,6 +163,13 @@ func TestNoMaterializeOverflowSkipsPool(t *testing.T) {
 		sentinels[i] = newHeapObject()
 		stateObjectPool.Put(sentinels[i])
 	}
+	// stateObjectPool is package-global: drain what this test pushed so sibling
+	// tests do not run against a pool it primed.
+	t.Cleanup(func() {
+		for range sentinels {
+			stateObjectPool.Get()
+		}
+	})
 
 	overflow := ibs.allocStateObject()
 	require.False(t, overflow.arena, "overflow object is not an arena slot")
@@ -151,6 +198,11 @@ func TestNoMaterializeAccountReadAllocs(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+
+	// Assert the arena served the read directly: the alloc bound alone would still
+	// pass if allocStateObject regressed to a pool draw, since a warm pool also
+	// costs nothing.
+	require.NotZero(t, ibs.stateObjectArena.idx, "the read must be served from the arena")
 
 	//goland:noinspection GoBoolExpressions
 	if !race.Enabled {
@@ -185,9 +237,8 @@ func TestStateObjectArenaRecyclesSlots(t *testing.T) {
 	assert.False(t, reused.dirtyCode)
 	assert.Zero(t, reused.data.Nonce)
 	assert.Nil(t, reused.code.Bytes)
-	assert.Empty(t, reused.dirtyStorage)
-	assert.NotNil(t, reused.dirtyStorage, "a map, once made, is kept and cleared rather than dropped")
-	assert.True(t, reused.arena, "slot identity survives reset")
+	assert.Nil(t, reused.dirtyStorage, "hand-out re-establishes the slot, dropping the map it held")
+	assert.True(t, reused.arena, "hand-out re-tags the slot")
 }
 
 // TestStateObjectArenaFallsBackToHeap pins that the arena stops growing at its

@@ -2250,6 +2250,8 @@ func (ev *taskVersion) Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer
 	}
 	ibs.SetVersionMap(ev.versionMap)
 	ibs.SetNoMaterialize(true)
+	// execTask.Reset above rewound the arena, so its slots are free again.
+	ibs.SetTransientObjectArena(true)
 	ibs.SetVersion(ev.version.Incarnation)
 	return nil
 }
