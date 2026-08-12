@@ -19,6 +19,7 @@ package membatchwithdb
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"sync"
 	"time"
@@ -55,7 +56,6 @@ type MemoryMutation struct {
 	deletedEntries   map[string]map[string]struct{}
 	deletedDups      map[string]map[string]map[string]struct{}
 	clearedTables    map[string]struct{}
-	sequenceWrites   map[string]struct{}
 	db               kv.TemporalTx
 	statelessCursors map[string]kv.RwCursor
 	DomainReader     DomainReader
@@ -73,9 +73,6 @@ type MemoryMutation struct {
 func NewMemoryBatch(tx kv.TemporalTx, tmpDir string, logger log.Logger) (*MemoryMutation, error) {
 	mem := newMemStore()
 	memDB := &memStoreDB{store: mem}
-	if err := initSequences(tx, mem); err != nil {
-		return nil, fmt.Errorf("NewMemoryBatch: init sequences: %w", err)
-	}
 
 	return &MemoryMutation{
 		mu:             &sync.RWMutex{},
@@ -85,7 +82,6 @@ func NewMemoryBatch(tx kv.TemporalTx, tmpDir string, logger log.Logger) (*Memory
 		deletedEntries: make(map[string]map[string]struct{}),
 		deletedDups:    map[string]map[string]map[string]struct{}{},
 		clearedTables:  make(map[string]struct{}),
-		sequenceWrites: make(map[string]struct{}),
 	}, nil
 }
 
@@ -103,11 +99,6 @@ func NewMemoryBatchMDBX(tx kv.TemporalTx, tmpDir string, logger log.Logger) (mm 
 	if err != nil {
 		return nil, fmt.Errorf("NewMemoryBatchMDBX: begin tx: %w", err)
 	}
-	if err = initSequences(tx, memTx); err != nil {
-		memTx.Rollback()
-		return nil, fmt.Errorf("NewMemoryBatchMDBX: init sequences: %w", err)
-	}
-
 	return &MemoryMutation{
 		mu:             &sync.RWMutex{},
 		db:             tx,
@@ -116,7 +107,6 @@ func NewMemoryBatchMDBX(tx kv.TemporalTx, tmpDir string, logger log.Logger) (mm 
 		deletedEntries: make(map[string]map[string]struct{}),
 		deletedDups:    map[string]map[string]map[string]struct{}{},
 		clearedTables:  make(map[string]struct{}),
-		sequenceWrites: make(map[string]struct{}),
 	}, nil
 }
 
@@ -188,54 +178,44 @@ func (m *MemoryMutation) DBSize() (uint64, error) {
 	panic("not implemented")
 }
 
-func initSequences(db kv.Tx, memTx kv.RwTx) error {
-	cursor, err := db.Cursor(kv.Sequence)
-	if err != nil {
-		return err
-	}
-	defer cursor.Close()
-	for k, v, err := cursor.First(); k != nil; k, v, err = cursor.Next() {
-		if err != nil {
-			return err
-		}
-		if err := memTx.Put(kv.Sequence, k, v); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func (m *MemoryMutation) IncrementSequence(bucket string, amount uint64) (uint64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	previous, err := m.memTx.IncrementSequence(bucket, amount)
-	if err == nil && amount != 0 {
-		m.markSequenceWrite(bucket)
+	current, err := m.readSequenceLocked(bucket)
+	if err != nil || amount == 0 {
+		return current, err
 	}
-	return previous, err
+	return current, m.memTx.ResetSequence(bucket, current+amount)
 }
 
 func (m *MemoryMutation) ReadSequence(bucket string) (uint64, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.memTx.ReadSequence(bucket)
+	return m.readSequenceLocked(bucket)
 }
 
 func (m *MemoryMutation) ResetSequence(bucket string, newValue uint64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if err := m.memTx.ResetSequence(bucket, newValue); err != nil {
-		return err
-	}
-	m.markSequenceWrite(bucket)
-	return nil
+	return m.memTx.ResetSequence(bucket, newValue)
 }
 
-func (m *MemoryMutation) markSequenceWrite(key string) {
-	if m.sequenceWrites == nil {
-		m.sequenceWrites = make(map[string]struct{})
+func (m *MemoryMutation) readSequenceLocked(bucket string) (uint64, error) {
+	key := []byte(bucket)
+	value, err := m.memTx.GetOne(kv.Sequence, key)
+	if err != nil {
+		return 0, err
 	}
-	m.sequenceWrites[key] = struct{}{}
+	if value != nil {
+		if len(value) == 0 {
+			return 0, nil
+		}
+		return binary.BigEndian.Uint64(value), nil
+	}
+	if m.isTableCleared(kv.Sequence) || m.isEntryDeleted(kv.Sequence, key) || m.db == nil {
+		return 0, nil
+	}
+	return m.db.ReadSequence(bucket)
 }
 
 func (m *MemoryMutation) ForAmount(bucket string, prefix []byte, amount uint32, walker func(k, v []byte) error) error {
@@ -339,25 +319,13 @@ func (m *MemoryMutation) Has(table string, key []byte) (bool, error) {
 func (m *MemoryMutation) Put(table string, k, v []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if err := m.memTx.Put(table, k, v); err != nil {
-		return err
-	}
-	if table == kv.Sequence {
-		m.markSequenceWrite(string(k))
-	}
-	return nil
+	return m.memTx.Put(table, k, v)
 }
 
 func (m *MemoryMutation) Append(table string, key []byte, value []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if err := m.memTx.Append(table, key, value); err != nil {
-		return err
-	}
-	if table == kv.Sequence {
-		m.markSequenceWrite(string(key))
-	}
-	return nil
+	return m.memTx.Append(table, key, value)
 }
 
 func (m *MemoryMutation) AppendDup(table string, key []byte, value []byte) error {
@@ -706,14 +674,6 @@ func (m *MemoryMutation) Flush(ctx context.Context, tx kv.RwTx) error {
 			return ctx.Err()
 		default:
 		}
-		if bucket == kv.Sequence {
-			// Constructor-copied sequence values support overlay reads but are not
-			// writes. Replay only keys explicitly changed through this mutation.
-			if err := m.flushSequenceWrites(tx); err != nil {
-				return err
-			}
-			continue
-		}
 		if isTablePurelyDupsort(bucket) {
 			if err := flushDupsortBucket(m.memTx, tx, bucket); err != nil {
 				return err
@@ -722,22 +682,6 @@ func (m *MemoryMutation) Flush(ctx context.Context, tx kv.RwTx) error {
 			if err := flushPlainBucket(m.memTx, tx, bucket); err != nil {
 				return err
 			}
-		}
-	}
-	return nil
-}
-
-func (m *MemoryMutation) flushSequenceWrites(tx kv.RwTx) error {
-	for key := range m.sequenceWrites {
-		value, err := m.memTx.GetOne(kv.Sequence, []byte(key))
-		if err != nil {
-			return err
-		}
-		if value == nil {
-			continue
-		}
-		if err := tx.Put(kv.Sequence, []byte(key), value); err != nil {
-			return err
 		}
 	}
 	return nil
@@ -1151,7 +1095,6 @@ func (m *MemoryMutation) newReadViewMut(tx kv.Tx) *MemoryMutation {
 		deletedEntries: m.deletedEntries,
 		deletedDups:    m.deletedDups,
 		clearedTables:  m.clearedTables,
-		sequenceWrites: m.sequenceWrites,
 		db:             dbTx,
 		DomainReader:   m.DomainReader,
 	}

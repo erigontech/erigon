@@ -507,22 +507,58 @@ func TestIncReadSequence(t *testing.T) {
 	_, rwTx := newTestTx(t)
 
 	initializeDbNonDupSort(rwTx)
+	require.NoError(t, rwTx.ResetSequence(kv.HeaderNumber, 7))
 
 	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
 	require.NoError(t, err)
 	defer batch.Close()
 
-	_, err = batch.IncrementSequence(kv.HeaderNumber, uint64(12))
+	previous, err := batch.IncrementSequence(kv.HeaderNumber, uint64(12))
 	require.NoError(t, err)
+	require.Equal(t, uint64(7), previous)
 
 	val, err := batch.ReadSequence(kv.HeaderNumber)
 	require.NoError(t, err)
-	require.Equal(t, uint64(12), val)
+	require.Equal(t, uint64(19), val)
 
 	require.NoError(t, batch.Flush(t.Context(), rwTx))
 	val, err = rwTx.ReadSequence(kv.HeaderNumber)
 	require.NoError(t, err)
-	require.Equal(t, uint64(12), val, "an explicitly changed sequence must be flushed")
+	require.Equal(t, uint64(19), val, "an explicitly changed sequence must be flushed")
+}
+
+func TestMemoryMutationUntouchedSequenceFollowsUpdatedTransaction(t *testing.T) {
+	db, seedTx := newTestTx(t)
+	ctx := t.Context()
+
+	_, err := rawdb.IncrementStateVersion(seedTx)
+	require.NoError(t, err)
+	require.NoError(t, seedTx.Commit())
+
+	initialTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer initialTx.Rollback()
+	batch, err := membatchwithdb.NewMemoryBatch(initialTx, "", log.Root())
+	require.NoError(t, err)
+	defer batch.Close()
+
+	advanceTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer advanceTx.Rollback()
+	_, err = rawdb.IncrementStateVersion(advanceTx)
+	require.NoError(t, err)
+	wantVersion, err := rawdb.GetStateVersion(advanceTx)
+	require.NoError(t, err)
+	require.NoError(t, advanceTx.Commit())
+
+	latestTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer latestTx.Rollback()
+	batch.UpdateTxn(latestTx)
+
+	gotVersion, err := rawdb.GetStateVersion(batch)
+	require.NoError(t, err)
+	require.Equal(t, wantVersion, gotVersion)
 }
 
 func TestMemoryMutationFlushDoesNotOverwriteUnchangedStateVersion(t *testing.T) {
