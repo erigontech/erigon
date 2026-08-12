@@ -562,21 +562,8 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					// require every observed block to reach terminal validation before
 					// classifying the stop cause or observed progress. Executor-group
 					// errors and still-scheduled blocks are checked after teardown.
-					if infraErr != nil || fail.set {
-						// Unwind handling is hoisted to SpawnExecuteBlocksStage; the
-						// verdict names the implicated block, not the last-applied one.
-						var opErr error
-						pe.verdict, opErr = classifyApplyFailures(infraErr, fail)
-						return opErr
-					}
-					if err := applyLoopMissingBlocksError(ctx, lastBlock.blockNum, pe.maxBlockNum, txResultBlocks, appliedBlocks); err != nil {
-						return err
-					}
-					// A resumable batch boundary is a result, not an error: record it
-					// and exit clean. stopBadBlock is handled above via the candidate.
 					sc, _ := stopCauseOf(executorContext)
-					pe.exhausted = classifyApplyClose(sc, startBlockNum, lastBlock.blockNum, pe.maxBlockNum, len(txResultBlocks))
-					return nil
+					return pe.resolveApplyLoopClose(ctx, infraErr, fail, sc, startBlockNum, lastBlock.blockNum, txResultBlocks, appliedBlocks)
 				}
 				switch applyResult := applyResult.(type) {
 				case *txResult:
@@ -1472,6 +1459,25 @@ func classifyApplyExit(fail failCandidate) (*blockVerdict, error) {
 func classifyApplyFailures(infraErr error, fail failCandidate) (*blockVerdict, error) {
 	verdict, opErr := classifyApplyExit(fail)
 	return verdict, errors.Join(infraErr, opErr)
+}
+
+// resolveApplyLoopClose stores block verdicts and resumable boundaries on pe;
+// only cancellation and operational failures are returned as errors. Recorded
+// failures take precedence because their cancellation can leave later results
+// incomplete, so completeness is checked only for an otherwise healthy stream.
+func (pe *parallelExecutor) resolveApplyLoopClose(ctx context.Context, infraErr error, fail failCandidate, sc *stopCause,
+	startBlockNum, lastBlockNum uint64, txResultBlocks, appliedBlocks map[uint64]struct{},
+) error {
+	if infraErr != nil || fail.set {
+		var err error
+		pe.verdict, err = classifyApplyFailures(infraErr, fail)
+		return err
+	}
+	if err := applyLoopMissingBlocksError(ctx, lastBlockNum, pe.maxBlockNum, txResultBlocks, appliedBlocks); err != nil {
+		return err
+	}
+	pe.exhausted = classifyApplyClose(sc, startBlockNum, lastBlockNum, pe.maxBlockNum, len(txResultBlocks))
+	return nil
 }
 
 // classifyApplyClose decides what a clean channel close means once the

@@ -402,10 +402,9 @@ func TestCheckBlocksDrainedConcurrentReads(t *testing.T) {
 // an invalid-block verdict.
 func TestApplyLoopCloseClassification(t *testing.T) {
 	run := func(txResultBlocks, appliedBlocks map[uint64]struct{}, sc *stopCause, lastBlockResult, maxBlockNum, startBlockNum uint64) (*ErrLoopExhausted, error) {
-		if err := applyLoopMissingBlocksError(context.Background(), lastBlockResult, maxBlockNum, txResultBlocks, appliedBlocks); err != nil {
-			return nil, err
-		}
-		return classifyApplyClose(sc, startBlockNum, lastBlockResult, maxBlockNum, len(txResultBlocks)), nil
+		pe := &parallelExecutor{maxBlockNum: maxBlockNum}
+		err := pe.resolveApplyLoopClose(context.Background(), nil, failCandidate{}, sc, startBlockNum, lastBlockResult, txResultBlocks, appliedBlocks)
+		return pe.exhausted, err
 	}
 
 	mkSet := func(ns ...uint64) map[uint64]struct{} {
@@ -1538,15 +1537,13 @@ func TestCanceledMemberCannotMaskRealError(t *testing.T) {
 	})
 }
 
-// Pins the close-branch precedence: the deferred failure must surface ahead of
-// the missing-blocks completeness error. Missing terminal results are an
-// executor failure, not proof that a block is invalid.
-func TestApplyLoopCloseBranchSurfacesDeferredRootBeforeMissing(t *testing.T) {
-	closeBranch := func(deferredRootErr error, txResultBlocks, appliedBlocks map[uint64]struct{}) error {
-		if deferredRootErr != nil {
-			return deferredRootErr
-		}
-		return applyLoopMissingBlocksError(context.Background(), 5, 10, txResultBlocks, appliedBlocks)
+// A recorded failure must take precedence over missing terminal results because
+// cancellation for that failure can prevent later block results from arriving.
+func TestResolveApplyLoopClosePrecedence(t *testing.T) {
+	run := func(ctx context.Context, infraErr error, fail failCandidate, txResultBlocks, appliedBlocks map[uint64]struct{}) (*parallelExecutor, error) {
+		pe := &parallelExecutor{maxBlockNum: 10}
+		err := pe.resolveApplyLoopClose(ctx, infraErr, fail, nil, 1, 5, txResultBlocks, appliedBlocks)
+		return pe, err
 	}
 
 	mkSet := func(ns ...uint64) map[uint64]struct{} {
@@ -1557,26 +1554,43 @@ func TestApplyLoopCloseBranchSurfacesDeferredRootBeforeMissing(t *testing.T) {
 		return s
 	}
 
-	t.Run("deferred root + missing block — root error wins", func(t *testing.T) {
+	t.Run("deferred root + missing block — root verdict wins", func(t *testing.T) {
 		rootErr := fmt.Errorf("%w, block=5", ErrWrongTrieRoot)
-		err := closeBranch(rootErr, mkSet(5, 6), mkSet(5))
-		require.ErrorIs(t, err, ErrWrongTrieRoot, "deferred root error must surface ahead of missing-block noise")
-		require.Equal(t, rootErr.Error(), err.Error(), "exact rootErr message must be returned — not the missing-block wrapper")
+		var fail failCandidate
+		fail.consider(5, common.HexToHash("0x05"), false, rootErr)
+
+		pe, err := run(context.Background(), nil, fail, mkSet(5, 6), mkSet(5))
+		require.NoError(t, err)
+		require.NotNil(t, pe.verdict)
+		require.ErrorIs(t, pe.verdict.err, ErrWrongTrieRoot)
+		require.Equal(t, rootErr.Error(), pe.verdict.err.Error())
+		require.Nil(t, pe.exhausted)
+	})
+
+	t.Run("infrastructure fault + missing block — infrastructure fault wins", func(t *testing.T) {
+		infraErr := errors.New("worker pool failed")
+		pe, err := run(context.Background(), infraErr, failCandidate{}, mkSet(5, 6), mkSet(5))
+		require.ErrorIs(t, err, infraErr)
+		require.NotContains(t, err.Error(), "without a blockResult")
+		require.Nil(t, pe.verdict)
+		require.Nil(t, pe.exhausted)
 	})
 
 	t.Run("missing block only — operational error stands", func(t *testing.T) {
-		err := closeBranch(nil, mkSet(5, 6), mkSet(5))
+		pe, err := run(context.Background(), nil, failCandidate{}, mkSet(5, 6), mkSet(5))
 		require.Error(t, err)
 		require.NotErrorIs(t, err, rules.ErrInvalidBlock)
 		require.NotErrorIs(t, err, ErrWrongTrieRoot)
 		require.Contains(t, err.Error(), "without a blockResult")
+		require.Nil(t, pe.verdict)
+		require.Nil(t, pe.exhausted)
 	})
 
 	t.Run("missing block during routine cancellation returns cancellation", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 
-		err := applyLoopMissingBlocksError(ctx, 5, 10, mkSet(5, 6), mkSet(5))
+		_, err := run(ctx, nil, failCandidate{}, mkSet(5, 6), mkSet(5))
 		require.ErrorIs(t, err, context.Canceled)
 		require.True(t, commonerrors.IsOnlyCanceled(err))
 		require.ErrorContains(t, err, "without a blockResult: [6]")
@@ -1587,20 +1601,29 @@ func TestApplyLoopCloseBranchSurfacesDeferredRootBeforeMissing(t *testing.T) {
 		ctx, cancel := context.WithCancelCause(context.Background())
 		cancel(cause)
 
-		err := applyLoopMissingBlocksError(ctx, 5, 10, mkSet(5, 6), mkSet(5))
+		_, err := run(ctx, nil, failCandidate{}, mkSet(5, 6), mkSet(5))
 		require.ErrorIs(t, err, cause)
 		require.False(t, commonerrors.IsOnlyCanceled(err))
 		require.ErrorContains(t, err, "without a blockResult: [6]")
 	})
 
-	t.Run("deferred root + no missing block — root error surfaces", func(t *testing.T) {
+	t.Run("deferred root + no missing block — root verdict surfaces", func(t *testing.T) {
 		rootErr := fmt.Errorf("%w, block=5", ErrWrongTrieRoot)
-		err := closeBranch(rootErr, mkSet(5), mkSet(5))
-		require.ErrorIs(t, err, ErrWrongTrieRoot)
+		var fail failCandidate
+		fail.consider(5, common.HexToHash("0x05"), false, rootErr)
+
+		pe, err := run(context.Background(), nil, fail, mkSet(5), mkSet(5))
+		require.NoError(t, err)
+		require.NotNil(t, pe.verdict)
+		require.ErrorIs(t, pe.verdict.err, ErrWrongTrieRoot)
+		require.Nil(t, pe.exhausted)
 	})
 
-	t.Run("clean exit — nil", func(t *testing.T) {
-		require.NoError(t, closeBranch(nil, mkSet(5), mkSet(5)))
+	t.Run("complete observed stream falls through to resumable boundary", func(t *testing.T) {
+		pe, err := run(context.Background(), nil, failCandidate{}, mkSet(5), mkSet(5))
+		require.NoError(t, err)
+		require.Nil(t, pe.verdict)
+		require.NotNil(t, pe.exhausted)
 	})
 }
 
