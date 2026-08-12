@@ -18,6 +18,8 @@ package blob_storage
 
 import (
 	"context"
+	"encoding/binary"
+	"strconv"
 	"testing"
 
 	"github.com/spf13/afero"
@@ -37,6 +39,40 @@ func setupTestDB(t *testing.T) kv.RwDB {
 	return db
 }
 
+func TestReadBlobSidecarsRejectsOversizedCommitmentCount(t *testing.T) {
+	db := setupTestDB(t)
+	beaconCfg := clparams.MainnetBeaconConfig
+	beaconCfg.MaxBlobsPerBlock = 1
+	beaconCfg.MaxBlobsPerBlockElectra = 1
+	beaconCfg.BlobSchedule = nil
+	store := NewBlobStore(db, afero.NewMemMapFs(), 12, &beaconCfg, nil)
+	blockRoot := common.Hash{1}
+	count := make([]byte, 4)
+	binary.LittleEndian.PutUint32(count, 2)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return tx.Put(kv.BlockRootToKzgCommitments, blockRoot[:], count)
+	}))
+
+	_, _, err := store.ReadBlobSidecars(t.Context(), 1, blockRoot)
+	require.ErrorContains(t, err, "commitment count 2 exceeds maximum 1")
+}
+
+func TestReadBlobSidecarsRejectsInvalidCommitmentCountEncoding(t *testing.T) {
+	for _, size := range []int{1, 2, 3, 5} {
+		t.Run(strconv.Itoa(size), func(t *testing.T) {
+			db := setupTestDB(t)
+			store := NewBlobStore(db, afero.NewMemMapFs(), 12, &clparams.MainnetBeaconConfig, nil)
+			blockRoot := common.Hash{byte(size)}
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				return tx.Put(kv.BlockRootToKzgCommitments, blockRoot[:], make([]byte, size))
+			}))
+
+			_, _, err := store.ReadBlobSidecars(t.Context(), 1, blockRoot)
+			require.ErrorContains(t, err, "invalid blob commitment count encoding")
+		})
+	}
+}
+
 func TestBlobDB(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
@@ -50,9 +86,9 @@ func TestBlobDB(t *testing.T) {
 	err := bs.WriteBlobSidecars(context.Background(), blockRoot, []*cltypes.BlobSidecar{s1, s2})
 	require.NoError(t, err)
 
-	sidecars, found, err := bs.ReadBlobSidecars(context.Background(), 1, blockRoot)
+	sidecars, complete, err := bs.ReadBlobSidecars(context.Background(), 1, blockRoot)
 	require.NoError(t, err)
-	require.True(t, found)
+	require.True(t, complete)
 	require.Len(t, sidecars, 2)
 
 	require.Equal(t, s1.Blob, sidecars[0].Blob)
@@ -67,4 +103,24 @@ func TestBlobDB(t *testing.T) {
 	require.Equal(t, s2.KzgProof, sidecars[1].KzgProof)
 	require.Equal(t, s1.SignedBlockHeader, sidecars[0].SignedBlockHeader)
 	require.Equal(t, s2.SignedBlockHeader, sidecars[1].SignedBlockHeader)
+}
+
+func TestReadBlobSidecarsReturnsAvailableSidecarsWhenBlockIsIncomplete(t *testing.T) {
+	db := setupTestDB(t)
+	fs := afero.NewMemMapFs()
+	store := NewBlobStore(db, fs, 12, &clparams.MainnetBeaconConfig, nil)
+	blockRoot := common.Hash{1}
+	sidecars := []*cltypes.BlobSidecar{
+		cltypes.NewBlobSidecar(0, &cltypes.Blob{1}, common.Bytes48{2}, common.Bytes48{3}, &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{Slot: 1}}, solid.NewHashVector(cltypes.CommitmentBranchSize)),
+		cltypes.NewBlobSidecar(1, &cltypes.Blob{4}, common.Bytes48{5}, common.Bytes48{6}, &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{Slot: 1}}, solid.NewHashVector(cltypes.CommitmentBranchSize)),
+	}
+	require.NoError(t, store.WriteBlobSidecars(t.Context(), blockRoot, sidecars))
+	_, missingPath := blobSidecarFilePath(1, 1, blockRoot)
+	require.NoError(t, fs.Remove(missingPath))
+
+	available, complete, err := store.ReadBlobSidecars(t.Context(), 1, blockRoot)
+	require.NoError(t, err)
+	require.False(t, complete)
+	require.Len(t, available, 1)
+	require.Equal(t, uint64(0), available[0].Index)
 }

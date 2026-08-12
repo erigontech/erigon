@@ -49,7 +49,8 @@ const (
 type BlobStorage interface {
 	WriteBlobSidecars(ctx context.Context, blockRoot common.Hash, blobSidecars []*cltypes.BlobSidecar) error
 	RemoveBlobSidecars(ctx context.Context, slot uint64, blockRoot common.Hash) error
-	ReadBlobSidecars(ctx context.Context, slot uint64, blockRoot common.Hash) (out []*cltypes.BlobSidecar, found bool, err error)
+	// ReadBlobSidecars returns all available sidecars and complete reports whether every indexed sidecar was read.
+	ReadBlobSidecars(ctx context.Context, slot uint64, blockRoot common.Hash) (out []*cltypes.BlobSidecar, complete bool, err error)
 	BlobSidecarExists(ctx context.Context, slot uint64, blockRoot common.Hash, idx uint64) (bool, error)
 	WriteStream(w io.Writer, slot uint64, blockRoot common.Hash, idx uint64) error // Used for P2P networking
 	KzgCommitmentsCount(ctx context.Context, blockRoot common.Hash) (uint32, error)
@@ -119,7 +120,7 @@ func (bs *BlobStore) WriteBlobSidecars(ctx context.Context, blockRoot common.Has
 	return tx.Commit()
 }
 
-// ReadBlobSidecars reads the sidecars from the database. it assumes that all blobSidecars are for the same blockRoot and we have all of them.
+// ReadBlobSidecars returns every available sidecar and reports whether the indexed block set is complete.
 func (bs *BlobStore) ReadBlobSidecars(ctx context.Context, slot uint64, blockRoot common.Hash) ([]*cltypes.BlobSidecar, bool, error) {
 	tx, err := bs.db.BeginRo(ctx)
 	if err != nil {
@@ -134,15 +135,24 @@ func (bs *BlobStore) ReadBlobSidecars(ctx context.Context, slot uint64, blockRoo
 	if len(val) == 0 {
 		return nil, false, nil
 	}
+	if len(val) != 4 {
+		return nil, false, fmt.Errorf("invalid blob commitment count encoding length %d", len(val))
+	}
 	kzgCommitmentsLength := binary.LittleEndian.Uint32(val)
+	maxCommitments := bs.beaconChainConfig.MaxBlobsPerBlockUpperBound()
+	if uint64(kzgCommitmentsLength) > maxCommitments {
+		return nil, false, fmt.Errorf("blob commitment count %d exceeds maximum %d", kzgCommitmentsLength, maxCommitments)
+	}
 
 	var blobSidecars []*cltypes.BlobSidecar
+	complete := true
 	for i := range kzgCommitmentsLength {
 		_, filePath := blobSidecarFilePath(slot, uint64(i), blockRoot)
 		file, err := bs.fs.Open(filePath)
 		if err != nil {
 			if errors.Is(err, afero.ErrFileNotFound) {
-				return nil, false, nil
+				complete = false
+				continue
 			}
 			return nil, false, err
 		}
@@ -159,7 +169,7 @@ func (bs *BlobStore) ReadBlobSidecars(ctx context.Context, slot uint64, blockRoo
 		}
 		blobSidecars = append(blobSidecars, blobSidecar)
 	}
-	return blobSidecars, true, nil
+	return blobSidecars, complete, nil
 }
 
 // Do a bit of pruning

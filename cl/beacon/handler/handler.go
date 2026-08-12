@@ -91,6 +91,7 @@ type ApiHandler struct {
 	blobStoage           blob_storage.BlobStorage
 	columnStorage        blob_storage.DataColumnStorage
 	caplinSnapshots      caplinBlobSnapshotReader
+	blobBackfillStatus   BlobBackfillStatus
 	caplinStateSnapshots *snapshotsync.CaplinStateSnapshots
 
 	peerDas das.PeerDas
@@ -149,6 +150,13 @@ type ApiHandler struct {
 	selfBuildEnvelopes *lru.Cache[uint64, *cltypes.ExecutionPayloadEnvelope]
 }
 
+type BlobDataDependencies struct {
+	Storage        blob_storage.BlobStorage
+	ColumnStorage  blob_storage.DataColumnStorage
+	Snapshots      *freezeblocks.CaplinSnapshots
+	BackfillStatus BlobBackfillStatus
+}
+
 func NewApiHandler(
 	logger log.Logger,
 	netConfig *clparams.NetworkConfig,
@@ -164,9 +172,7 @@ func NewApiHandler(
 	version string,
 	routerCfg *beacon_router_configuration.RouterConfiguration,
 	emitters *beaconevents.EventEmitter,
-	blobStoage blob_storage.BlobStorage,
-	columnStorage blob_storage.DataColumnStorage,
-	caplinSnapshots *freezeblocks.CaplinSnapshots,
+	blobData BlobDataDependencies,
 	validatorParams *validator_params.ValidatorParams,
 	attestationProducer attestation_producer.AttestationDataProducer,
 	engine execution_client.ExecutionEngine,
@@ -195,8 +201,8 @@ func NewApiHandler(
 		panic(err)
 	}
 	var blobSnapshots caplinBlobSnapshotReader
-	if caplinSnapshots != nil {
-		blobSnapshots = caplinSnapshots
+	if blobData.Snapshots != nil {
+		blobSnapshots = blobData.Snapshots
 	}
 
 	slotWaitedForAttestationProduction, err := lru.New[uint64, struct{}]("slotWaitedForAttestationProduction", 1024)
@@ -234,9 +240,10 @@ func NewApiHandler(
 		version:                          version,
 		routerCfg:                        routerCfg,
 		emitters:                         emitters,
-		blobStoage:                       blobStoage,
-		columnStorage:                    columnStorage,
+		blobStoage:                       blobData.Storage,
+		columnStorage:                    blobData.ColumnStorage,
 		caplinSnapshots:                  blobSnapshots,
+		blobBackfillStatus:               blobData.BackfillStatus,
 		attestationProducer:              attestationProducer,
 		blobBundles:                      blobBundles,
 		engine:                           engine,

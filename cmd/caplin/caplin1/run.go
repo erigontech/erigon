@@ -581,6 +581,26 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	}
 
 	statesReader := historical_states_reader.NewHistoricalStatesReader(beaconConfig, rcsn, vTables, genesisState, stateSnapshots, syncedDataManager)
+	stageCfg := stages.ClStagesCfg(
+		ctx,
+		beaconRpc,
+		antiq,
+		ethClock,
+		beaconConfig,
+		state,
+		engine,
+		forkChoice,
+		indexDB,
+		csn,
+		rcsn,
+		dirs,
+		config,
+		syncedDataManager,
+		emitters,
+		blobStorage,
+		attestationProducer,
+		peerDas,
+	)
 	if config.BeaconAPIRouter.Active {
 		apiHandler := handler.NewApiHandler(
 			logger,
@@ -597,9 +617,12 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			version.NodeVersion(),
 			&config.BeaconAPIRouter,
 			emitters,
-			blobStorage,
-			columnStorage,
-			csn,
+			handler.BlobDataDependencies{
+				Storage:        blobStorage,
+				ColumnStorage:  columnStorage,
+				Snapshots:      csn,
+				BackfillStatus: stageCfg.BlobDownloader(),
+			},
 			validatorParameters,
 			attestationProducer,
 			engine,
@@ -629,27 +652,6 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		log.Info("Beacon API started", "addr", config.BeaconAPIRouter.Address)
 	}
 
-	stageCfg := stages.ClStagesCfg(
-		ctx,
-		beaconRpc,
-		antiq,
-		ethClock,
-		beaconConfig,
-		state,
-		engine,
-		//gossipManager,
-		forkChoice,
-		indexDB,
-		csn,
-		rcsn,
-		dirs,
-		config,
-		syncedDataManager,
-		emitters,
-		blobStorage,
-		attestationProducer,
-		peerDas,
-	)
 	sync := stages.ConsensusClStages(ctx, stageCfg)
 
 	logger.Info("[Caplin] starting clstages loop")

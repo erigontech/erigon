@@ -2,6 +2,7 @@ package stages
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -9,11 +10,80 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	network2 "github.com/erigontech/erigon/cl/phase1/network"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
 )
+
+type failingCommitTx struct{ kv.RwTx }
+
+func (failingCommitTx) Commit() error { return errors.New("commit failed") }
+
+type observingCommitTx struct {
+	kv.RwTx
+	onCommit func()
+	err      error
+}
+
+func (tx observingCommitTx) Commit() error {
+	tx.onCommit()
+	return tx.err
+}
+
+type recordingBlobHeadTracker struct {
+	invalidated bool
+	published   bool
+}
+
+func (d *recordingBlobHeadTracker) InvalidateCompletionAbove(uint64) { d.invalidated = true }
+
+func (d *recordingBlobHeadTracker) SetHead(uint64, common.Hash, uint64) { d.published = true }
+
+func TestCommitCanonicalHeadInvalidatesBeforeCommitVisibility(t *testing.T) {
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	tracker := &recordingBlobHeadTracker{}
+
+	err = commitCanonicalHead(observingCommitTx{
+		RwTx: tx,
+		onCommit: func() {
+			require.True(t, tracker.invalidated)
+			require.False(t, tracker.published)
+		},
+		err: errors.New("commit failed"),
+	}, tracker, 10, common.Hash{1}, 9)
+
+	require.Error(t, err)
+	require.True(t, tracker.invalidated)
+	require.False(t, tracker.published)
+	tx.Rollback()
+}
+
+func TestCommitCanonicalHeadPublishesOnlyAfterSuccessfulCommit(t *testing.T) {
+	newDownloader := func() *network2.BlobHistoryDownloader {
+		return network2.NewBlobHistoryDownloader(t.Context(), &clparams.MainnetBeaconConfig, nil, nil, nil, nil, nil, nil, nil, false, false, nil)
+	}
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+
+	failedTx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer failedTx.Rollback()
+	failedDownloader := newDownloader()
+	require.Error(t, commitCanonicalHead(failingCommitTx{failedTx}, failedDownloader, 10, common.Hash{1}, 9))
+	require.Zero(t, failedDownloader.HeadSlot())
+	failedTx.Rollback()
+
+	successfulTx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer successfulTx.Rollback()
+	successfulDownloader := newDownloader()
+	require.NoError(t, commitCanonicalHead(successfulTx, successfulDownloader, 10, common.Hash{1}, 9))
+	require.Equal(t, uint64(10), successfulDownloader.HeadSlot())
+}
 
 func TestUpdateCanonicalChainReorgEvent(t *testing.T) {
 	db := memdb.NewTestDB(t, dbcfg.ChainDB)
@@ -53,7 +123,8 @@ func TestUpdateCanonicalChainReorgEvent(t *testing.T) {
 	writeBlock(root101b, root100, state101b, 101, false)
 	writeBlock(root102b, root101b, state102b, 102, false)
 
-	reorg := drainReorgEvent(t, ctx, tx, 102, root102b)
+	reorg, commonAncestorSlot := drainReorgEvent(t, ctx, tx, 102, root102b)
+	require.Equal(t, uint64(100), commonAncestorSlot)
 	require.NotNil(t, reorg, "expected a chain_reorg event to be emitted")
 	require.Equal(t, uint64(102), reorg.Slot, "reorg Slot")
 	require.Equal(t, uint64(2), reorg.Depth, "reorg Depth should be oldHeadSlot - forkPointSlot")
@@ -101,7 +172,7 @@ func TestUpdateCanonicalChainReorgShorterFork(t *testing.T) {
 	writeBlock(root101b, root100, common.Hash{0xb1}, 101, false)
 	writeBlock(root102b, root101b, state102b, 102, false)
 
-	reorg := drainReorgEvent(t, ctx, tx, 102, root102b)
+	reorg, _ := drainReorgEvent(t, ctx, tx, 102, root102b)
 	require.NotNil(t, reorg, "expected a chain_reorg event to be emitted")
 	require.Equal(t, uint64(102), reorg.Slot, "reorg Slot")
 	require.Equal(t, uint64(3), reorg.Depth, "reorg Depth: old tip 103 - fork point 100 = 3")
@@ -148,7 +219,8 @@ func TestUpdateCanonicalChainReorgLongerFork(t *testing.T) {
 	writeBlock(root102b, root101b, common.Hash{0xb2}, 102, false)
 	writeBlock(root103b, root102b, state103b, 103, false)
 
-	reorg := drainReorgEvent(t, ctx, tx, 103, root103b)
+	reorg, commonAncestorSlot := drainReorgEvent(t, ctx, tx, 103, root103b)
+	require.Equal(t, uint64(100), commonAncestorSlot)
 	require.NotNil(t, reorg, "expected a chain_reorg event to be emitted")
 	require.Equal(t, uint64(103), reorg.Slot, "reorg Slot")
 	require.Equal(t, uint64(2), reorg.Depth, "reorg Depth: old tip 102 - fork point 100 = 2")
@@ -186,7 +258,8 @@ func TestUpdateCanonicalChainNoReorg(t *testing.T) {
 
 	writeBlock(root102, root101, common.Hash{0xa2}, 102, false)
 
-	reorg := drainReorgEvent(t, ctx, tx, 102, root102)
+	reorg, commonAncestorSlot := drainReorgEvent(t, ctx, tx, 102, root102)
+	require.Equal(t, uint64(101), commonAncestorSlot)
 	require.Nil(t, reorg, "chain extension should NOT emit a chain_reorg event")
 }
 
@@ -220,7 +293,7 @@ func TestUpdateCanonicalChainReorgOneSlot(t *testing.T) {
 	writeBlock(root101a, root100, state101a, 101, true)
 	writeBlock(root101b, root100, state101b, 101, false)
 
-	reorg := drainReorgEvent(t, ctx, tx, 101, root101b)
+	reorg, _ := drainReorgEvent(t, ctx, tx, 101, root101b)
 	require.NotNil(t, reorg, "expected a chain_reorg event to be emitted")
 	require.Equal(t, uint64(101), reorg.Slot, "reorg Slot")
 	require.Equal(t, uint64(1), reorg.Depth, "reorg Depth: old tip 101 - fork point 100 = 1")
@@ -230,7 +303,7 @@ func TestUpdateCanonicalChainReorgOneSlot(t *testing.T) {
 	require.Equal(t, state101b, reorg.NewHeadState, "NewHeadState")
 }
 
-func drainReorgEvent(t *testing.T, ctx context.Context, tx kv.RwTx, headSlot uint64, headRoot common.Hash) *beaconevents.ChainReorgData {
+func drainReorgEvent(t *testing.T, ctx context.Context, tx kv.RwTx, headSlot uint64, headRoot common.Hash) (*beaconevents.ChainReorgData, uint64) {
 	t.Helper()
 	emitter := beaconevents.NewEventEmitter()
 	ch := make(chan *beaconevents.EventStream, 16)
@@ -242,17 +315,17 @@ func drainReorgEvent(t *testing.T, ctx context.Context, tx kv.RwTx, headSlot uin
 		beaconCfg: &clparams.MainnetBeaconConfig,
 	}
 
-	err := updateCanonicalChainInTheDatabase(ctx, tx, headSlot, headRoot, cfg)
+	commonAncestorSlot, err := updateCanonicalChainInTheDatabase(ctx, tx, headSlot, headRoot, cfg)
 	require.NoError(t, err)
 
 	for {
 		select {
 		case evt := <-ch:
 			if evt.Event == beaconevents.StateChainReorg {
-				return evt.Data.(*beaconevents.ChainReorgData)
+				return evt.Data.(*beaconevents.ChainReorgData), commonAncestorSlot
 			}
 		default:
-			return nil
+			return nil, commonAncestorSlot
 		}
 	}
 }

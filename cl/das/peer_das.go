@@ -66,6 +66,8 @@ type PeerDas interface {
 
 var numOfBlobRecoveryWorkers = 8
 
+const maxBlobRecoveryWaiters = 128
+
 type peerdas struct {
 	state             *peerdasstate.PeerDasState
 	nodeID            enode.ID
@@ -80,7 +82,7 @@ type peerdas struct {
 	recoverBlobsQueue chan recoverBlobsRequest
 
 	recoveringMutex   sync.Mutex
-	isRecovering      map[common.Hash]bool
+	isRecovering      map[common.Hash]*blobRecovery
 	blocksToCheckSync sync.Map // blockRoot -> ColumnSyncableSignedBlock (SignedBeaconBlock or SignedBlindedBeaconBlock)
 
 	// [New in Gloas:EIP7732] For fetching blocks to get kzg_commitments
@@ -121,7 +123,7 @@ func NewPeerDas(
 		recoverBlobsQueue: make(chan recoverBlobsRequest, 128),
 
 		recoveringMutex:   sync.Mutex{},
-		isRecovering:      make(map[common.Hash]bool),
+		isRecovering:      make(map[common.Hash]*blobRecovery),
 		blocksToCheckSync: sync.Map{},
 
 		blockReader:    blockReader,
@@ -347,15 +349,23 @@ func (d *peerdas) Prune(keepSlotDistance uint64) error {
 }
 
 type recoverBlobsRequest struct {
-	slot      uint64
-	blockRoot common.Hash
+	slot          uint64
+	blockRoot     common.Hash
+	expectedBlobs uint64
+	force         bool
+	ctx           context.Context
+	result        chan error
+}
+
+type blobRecovery struct {
+	waiters []chan error
 }
 
 func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
-	recover := func(toRecover recoverBlobsRequest) {
+	recover := func(recoveryCtx context.Context, toRecover recoverBlobsRequest) {
 		begin := time.Now()
 		log.Debug("[blobsRecover] recovering blobs", "slot", toRecover.slot, "blockRoot", toRecover.blockRoot)
-		ctx := context.Background()
+		ctx := recoveryCtx
 		slot, blockRoot := toRecover.slot, toRecover.blockRoot
 		existingColumns, err := d.columnStorage.GetSavedColumnIndex(ctx, slot, blockRoot)
 		if err != nil {
@@ -585,25 +595,123 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case toRecover := <-d.recoverBlobsQueue:
-			d.recoveringMutex.Lock()
-			if _, ok := d.isRecovering[toRecover.blockRoot]; ok {
-				// recovering, skip
-				d.recoveringMutex.Unlock()
-				continue
-			}
-			d.isRecovering[toRecover.blockRoot] = true
-			d.recoveringMutex.Unlock()
-
-			// check if the blobs are already recovered
-			if !d.IsBlobAlreadyRecovered(toRecover.blockRoot) {
-				// recover the blobs
-				recover(toRecover)
-			}
-			// remove the block from the recovering map
-			d.recoveringMutex.Lock()
-			delete(d.isRecovering, toRecover.blockRoot)
-			d.recoveringMutex.Unlock()
+			d.handleRecoverBlobsRequest(ctx, toRecover, recover)
 		}
+	}
+}
+
+func (d *peerdas) handleRecoverBlobsRequest(workerCtx context.Context, request recoverBlobsRequest, recover func(context.Context, recoverBlobsRequest)) {
+	requestCtx := request.ctx
+	if requestCtx == nil {
+		requestCtx = workerCtx
+	}
+	if err := requestCtx.Err(); err != nil {
+		d.completeRecoveryRequest(request.result, err)
+		return
+	}
+
+	d.recoveringMutex.Lock()
+	if active := d.isRecovering[request.blockRoot]; active != nil {
+		if request.result != nil {
+			if len(active.waiters) >= maxBlobRecoveryWaiters {
+				d.recoveringMutex.Unlock()
+				d.completeRecoveryRequest(request.result, errors.New("too many callers waiting for blob recovery"))
+				return
+			}
+			active.waiters = append(active.waiters, request.result)
+		}
+		d.recoveringMutex.Unlock()
+		return
+	}
+	active := &blobRecovery{}
+	if request.result != nil {
+		active.waiters = append(active.waiters, request.result)
+	}
+	d.isRecovering[request.blockRoot] = active
+	d.recoveringMutex.Unlock()
+
+	if request.force {
+		if complete, err := d.blobRecoveryComplete(requestCtx, request.slot, request.blockRoot, request.expectedBlobs); err != nil {
+			d.finishBlobRecovery(request.blockRoot, err)
+			return
+		} else if complete {
+			d.finishBlobRecovery(request.blockRoot, nil)
+			return
+		}
+	} else if d.IsBlobAlreadyRecovered(request.blockRoot) {
+		d.finishBlobRecovery(request.blockRoot, nil)
+		return
+	}
+	recover(requestCtx, request)
+	var err error
+	if request.force {
+		var complete bool
+		complete, err = d.blobRecoveryComplete(requestCtx, request.slot, request.blockRoot, request.expectedBlobs)
+		if err == nil && !complete {
+			err = errors.New("blob recovery did not complete")
+		}
+	}
+	d.finishBlobRecovery(request.blockRoot, err)
+}
+
+func (d *peerdas) blobRecoveryComplete(ctx context.Context, slot uint64, blockRoot common.Hash, expectedBlobs uint64) (bool, error) {
+	sidecars, complete, err := d.blobStorage.ReadBlobSidecars(ctx, slot, blockRoot)
+	return complete && uint64(len(sidecars)) == expectedBlobs, err
+}
+
+func (d *peerdas) completeRecoveryRequest(result chan error, err error) {
+	if result == nil {
+		return
+	}
+	select {
+	case result <- err:
+	default:
+	}
+}
+
+func (d *peerdas) finishBlobRecovery(blockRoot common.Hash, err error) {
+	d.recoveringMutex.Lock()
+	active := d.isRecovering[blockRoot]
+	delete(d.isRecovering, blockRoot)
+	d.recoveringMutex.Unlock()
+	if active == nil {
+		return
+	}
+	for _, waiter := range active.waiters {
+		d.completeRecoveryRequest(waiter, err)
+	}
+}
+
+func (d *peerdas) ForceScheduleRecover(ctx context.Context, slot uint64, blockRoot common.Hash, expectedBlobs uint64) error {
+	if complete, err := d.blobRecoveryComplete(ctx, slot, blockRoot, expectedBlobs); err != nil {
+		return err
+	} else if complete {
+		return nil
+	}
+	if !d.IsColumnOverHalf(slot, blockRoot) {
+		return errors.New("not enough columns to force blob recovery")
+	}
+	result := make(chan error, 1)
+	select {
+	case d.recoverBlobsQueue <- recoverBlobsRequest{slot: slot, blockRoot: blockRoot, expectedBlobs: expectedBlobs, force: true, ctx: ctx, result: result}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	select {
+	case err := <-result:
+		if err != nil {
+			return err
+		}
+		complete, err := d.blobRecoveryComplete(ctx, slot, blockRoot, expectedBlobs)
+		if err != nil {
+			return err
+		}
+		if !complete {
+			return errors.New("blob recovery did not complete")
+		}
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 

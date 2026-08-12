@@ -180,7 +180,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 			Events:     true,
 			Validator:  true,
 			Lighthouse: true,
-		}, nil, blobStorage, columnStorage, nil, vp, nil, nil, fcu.SyncContributionPool, nil, nil,
+		}, nil, BlobDataDependencies{Storage: blobStorage, ColumnStorage: columnStorage}, vp, nil, nil, fcu.SyncContributionPool, nil, nil,
 		syncCommitteeMessagesService,
 		syncContributionService,
 		aggregateAndProofsService,

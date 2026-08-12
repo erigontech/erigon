@@ -3,6 +3,7 @@ package beaconhttp
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -106,6 +107,16 @@ func TestHandleEndpoint_RejectsSSZOnlyAcceptWhenResponseDoesNotSupportSSZ(t *tes
 	}
 	if body.Message != ErrorSszNotSupported.Error() {
 		t.Fatalf("error = %#v, want %q", body, ErrorSszNotSupported.Error())
+	}
+}
+
+func TestEndpointErrorWritesJSONContentType(t *testing.T) {
+	rr := httptest.NewRecorder()
+
+	NewEndpointError(http.StatusServiceUnavailable, errors.New("temporarily unavailable")).WriteTo(rr)
+
+	if got := rr.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("Content-Type = %q, want %q", got, "application/json")
 	}
 }
 

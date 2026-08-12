@@ -182,8 +182,8 @@ type MockBlobStorageReadBlobSidecarsCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockBlobStorageReadBlobSidecarsCall) Return(out []*cltypes.BlobSidecar, found bool, err error) *MockBlobStorageReadBlobSidecarsCall {
-	c.Call = c.Call.Return(out, found, err)
+func (c *MockBlobStorageReadBlobSidecarsCall) Return(out []*cltypes.BlobSidecar, complete bool, err error) *MockBlobStorageReadBlobSidecarsCall {
+	c.Call = c.Call.Return(out, complete, err)
 	return c
 }
 
