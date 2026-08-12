@@ -50,6 +50,7 @@ import (
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
@@ -58,6 +59,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/privateapi"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
@@ -92,8 +94,8 @@ var debugTraceTransactionNoRefundTests = []struct {
 
 func TestGetRawBlockAccessListRPCSpec(t *testing.T) {
 	chainPack, client := newBlockAccessListRPCFixture(t)
-	availableRaw := marshalHexBytesJSON(t, chainPack.BlockAccessLists[1])
-	emptyRaw := marshalHexBytesJSON(t, chainPack.BlockAccessLists[2])
+	availableRaw := marshalHexBytesJSON(t, chainPack.Blocks[1].BlockAccessList())
+	emptyRaw := marshalHexBytesJSON(t, chainPack.Blocks[2].BlockAccessList())
 	cases := []blockAccessListRPCCase{
 		{name: "available by number", selector: "0x2", want: availableRaw},
 		{name: "available by tag", selector: "safe", want: availableRaw},
@@ -239,7 +241,7 @@ func TestTraceBlockByHashPrestateTracerCreate2MemoryOverflow(t *testing.T) {
 		},
 	}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec))
-	generated, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(_ int, gen *blockgen.BlockGen) {
+	generated, err := m.GenerateChain(1, func(_ int, gen *blockgen.BlockGen) {
 		gen.SetCoinbase(coinbase)
 		gen.AddTx(tx)
 	})
@@ -938,6 +940,51 @@ func TestGetModifiedAccountsByNumber(t *testing.T) {
 		_, err = api.GetModifiedAccountsByNumber(m.Ctx, rpc.BlockNumber(11), &n2)
 		require.Error(t, err)
 	})
+	t.Run("block tags", func(t *testing.T) {
+		latest := rpc.LatestBlockNumber
+		earliest := rpc.EarliestBlockNumber
+
+		result, err := api.GetModifiedAccountsByNumber(m.Ctx, latest, nil)
+		require.NoError(t, err)
+		require.NotEmpty(t, result)
+
+		result, err = api.GetModifiedAccountsByNumber(m.Ctx, earliest, &latest)
+		require.NoError(t, err)
+		require.NotEmpty(t, result)
+
+		n := rpc.BlockNumber(11)
+		result, err = api.GetModifiedAccountsByNumber(m.Ctx, n, &latest)
+		require.NoError(t, err)
+		require.NotEmpty(t, result)
+
+		result, err = api.GetModifiedAccountsByNumber(m.Ctx, rpc.PendingBlockNumber, nil)
+		require.NoError(t, err)
+		require.NotEmpty(t, result)
+
+		_, err = api.GetModifiedAccountsByNumber(m.Ctx, latest, &earliest)
+		require.Error(t, err)
+
+		result, err = api.GetModifiedAccountsByNumber(m.Ctx, rpc.SafeBlockNumber, nil)
+		require.NoError(t, err)
+		require.NotEmpty(t, result)
+
+		result, err = api.GetModifiedAccountsByNumber(m.Ctx, rpc.FinalizedBlockNumber, nil)
+		require.NoError(t, err)
+		require.NotEmpty(t, result)
+
+		// Non-nil filters with a LastPendingBlock exceeding latest executed block should return an error
+		ff := rpchelper.New(t.Context(), rpchelper.FiltersConfig{}, nil, nil, nil, func() {}, log.New(), nil)
+		pendingBlock := types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(100)})
+		payload, err := rlp.EncodeToBytes(pendingBlock)
+		require.NoError(t, err)
+		ff.HandlePendingBlock(&txpoolproto.OnPendingBlockReply{RplBlock: payload})
+
+		baseWithFilters := NewBaseApi(ff, m.StateCache, m.BlockReader, m.Engine, nil, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
+		apiWithFilters := NewPrivateDebugAPI(baseWithFilters, m.DB, nil, &rpccfg.DebugApiConfig{})
+
+		_, err = apiWithFilters.GetModifiedAccountsByNumber(m.Ctx, rpc.PendingBlockNumber, nil)
+		require.Error(t, err)
+	})
 }
 
 func TestMapTxNum2BlockNum(t *testing.T) {
@@ -1150,7 +1197,7 @@ func TestGetRawTransaction(t *testing.T) {
 	for i := range number {
 		tx, err := m.DB.BeginRo(ctx)
 		require.NoError(err)
-		defer tx.Rollback()
+		defer tx.Rollback() //nolint:gocritic
 		block, err := api._blockReader.BlockByNumber(ctx, tx, i)
 		require.NoError(err)
 		txns := block.Transactions()

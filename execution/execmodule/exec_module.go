@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"golang.org/x/sync/semaphore"
 
@@ -103,11 +104,11 @@ func GetBlockHashFromMissingSegmentError(err error) (common.Hash, bool) {
 // machinery is unnecessary.
 type Cache struct {
 	execModule  *ExecModule
-	publishedSD func() *execctx.SharedDomains // returns the latest published SD from Events (for background commit)
+	publishedSD func() *execctx.SharedDomains // returns the latest published SD from Events
 }
 
 // SetPublishedSD wires the Cache to fall back to the published SD from Events
-// when the exec module's currentContext is nil (e.g. during background commit).
+// when the exec module's currentContext is nil (e.g. while an FCU commits).
 func (c *Cache) SetPublishedSD(provider func() *execctx.SharedDomains) {
 	c.publishedSD = provider
 }
@@ -122,13 +123,17 @@ func (c *Cache) View(_ context.Context, tx kv.TemporalTx) (kvcache.CacheView, er
 		context = c.execModule.currentContext
 		c.execModule.lock.RUnlock()
 	}
-	// Fall back to the published SD from Events during background commits
+	// Fall back to the published SD from Events while an FCU commits
 	// (currentContext is nil but the SD is still valid in memory).
 	if context == nil && c.publishedSD != nil {
 		context = c.publishedSD()
 	}
 
-	return &CacheView{context: context, tx: tx}, nil
+	view := &CacheView{context: context, getter: tx}
+	if context != nil {
+		view.getter = context.AsGetter(tx)
+	}
+	return view, nil
 }
 func (c *Cache) OnNewBlock(sc *remoteproto.StateChangeBatch) {}
 func (c *Cache) Evict() int                                  { return 0 }
@@ -139,27 +144,21 @@ func (c *Cache) ValidateCurrentRoot(_ context.Context, _ kv.TemporalTx) (*kvcach
 
 type CacheView struct {
 	context *execctx.SharedDomains
-	tx      kv.TemporalTx
+	// getter is built once per view: it carries the per-tx cache ReadView, so
+	// per-read getter construction would cost an allocation on every call.
+	getter kv.TemporalGetter
 }
 
 func (c *CacheView) Get(k []byte) ([]byte, error) {
-	var getter kv.TemporalGetter = c.tx
-	if c.context != nil {
-		getter = c.context.AsGetter(c.tx)
-	}
 	if len(k) == 20 {
-		v, _, err := getter.GetLatest(kv.AccountsDomain, k)
+		v, _, err := c.getter.GetLatest(kv.AccountsDomain, k)
 		return v, err
 	}
-	v, _, err := getter.GetLatest(kv.StorageDomain, k)
+	v, _, err := c.getter.GetLatest(kv.StorageDomain, k)
 	return v, err
 }
 func (c *CacheView) GetCode(k []byte) ([]byte, error) {
-	var getter kv.TemporalGetter = c.tx
-	if c.context != nil {
-		getter = c.context.AsGetter(c.tx)
-	}
-	v, _, err := getter.GetLatest(kv.CodeDomain, k)
+	v, _, err := c.getter.GetLatest(kv.CodeDomain, k)
 	return v, err
 }
 
@@ -174,11 +173,7 @@ func (c *CacheView) GetAsOf(key []byte, ts uint64) (v []byte, ok bool, err error
 }
 
 func (c *CacheView) HasStorage(address common.Address) (bool, error) {
-	var getter kv.TemporalGetter = c.tx
-	if c.context != nil {
-		getter = c.context.AsGetter(c.tx)
-	}
-	_, _, hasStorage, err := getter.HasPrefix(kv.StorageDomain, address[:])
+	_, _, hasStorage, err := c.getter.HasPrefix(kv.StorageDomain, address[:])
 	return hasStorage, err
 }
 
@@ -216,7 +211,6 @@ type ExecModule struct {
 	balRegenerator *bal.Regenerator
 
 	fcuBackgroundPrune      bool
-	fcuBackgroundCommit     bool
 	onlySnapDownloadOnStart bool
 	nextForkActivated       bool
 	// gas-weighted EWMA: accumulate gas and time separately so near-empty blocks don't skew the average
@@ -225,7 +219,7 @@ type ExecModule struct {
 
 	lock           sync.RWMutex
 	currentContext *execctx.SharedDomains
-	publishedSD    func() *execctx.SharedDomains // fallback for background commit
+	publishedSD    func() *execctx.SharedDomains // fallback while an FCU commits
 
 	// stateCache is a cache for state data (accounts, storage, code)
 	stateCache *cache.StateCache
@@ -249,24 +243,17 @@ func NewExecModule(
 	hook *stageloop.Hook,
 	accum *Accumulation,
 	stateCache *Cache,
-	domainStateCache *cache.StateCache,
+	stateCacheBudget datasize.ByteSize,
 	logger log.Logger,
 	engine rules.Engine,
 	syncCfg ethconfig.Sync,
 	fcuBackgroundPrune bool,
-	fcuBackgroundCommit bool,
 	onlySnapDownloadOnStart bool,
 	readAheader *exec.BlockReadAheader,
 	stopNode func() error,
 ) *ExecModule {
-	// Production passes nil → full-size default cache. Test/CLI harnesses pass a
-	// small cache so building one ExecModule per fixture doesn't allocate
-	// hundreds of MB of LRU tables each (which stalled the parallel eest
-	// blocktest). Per-instance, so it never mutates the process-wide default.
-	domainCache := domainStateCache
-	if domainCache == nil {
-		domainCache = cache.NewDefaultStateCache()
-	}
+	domainCache := newDomainStateCache(stateCacheBudget)
+	execctx.GuardAggregatorForCache(db, domainCache)
 	var codeStore *cache.CodeStore
 	if dbg.UseCodeStore {
 		codeStore = cache.NewCodeStore(cache.DefaultCodeStoreMemBytes, cache.DefaultCodeStoreTableBytes)
@@ -290,7 +277,6 @@ func NewExecModule(
 		syncCfg:                 syncCfg,
 		bacgroundCtx:            ctx,
 		fcuBackgroundPrune:      fcuBackgroundPrune,
-		fcuBackgroundCommit:     fcuBackgroundCommit,
 		onlySnapDownloadOnStart: onlySnapDownloadOnStart,
 		stateCache:              domainCache,
 		codeStore:               codeStore,
@@ -320,6 +306,29 @@ func (e *ExecModule) WaitIdle(ctx context.Context) {
 	e.semaphore.Release(1)
 }
 
+// newDomainStateCache is the module's one construction site of the domain
+// state cache: USE_STATE_CACHE=false builds none, so nothing upstream can
+// allocate a cache that would only be discarded. A budget > 0 overrides the
+// production per-domain byte budget (test harnesses keep per-fixture modules
+// small); 0 means the production default.
+func newDomainStateCache(budget datasize.ByteSize) *cache.StateCache {
+	if !dbg.UseStateCache {
+		return nil
+	}
+	if budget > 0 {
+		return cache.NewStateCache(budget, budget, budget, budget)
+	}
+	return cache.NewDefaultStateCache()
+}
+
+// Close releases the domain state cache's reservation in the shared memory
+// envelope.
+func (e *ExecModule) Close() {
+	if e.stateCache != nil {
+		e.stateCache.Close()
+	}
+}
+
 // closeModuleContext closes and clears e.currentContext. The nil swap happens
 // under e.lock first, so getters holding the read lock (beginOverlayOrRo) can
 // never obtain a SharedDomains that is about to be closed.
@@ -337,7 +346,7 @@ func (e *ExecModule) closeModuleContext() {
 func (e *ExecModule) ForkValidator() *ForkValidator { return e.forkValidator }
 
 // SetPublishedSD wires the ExecModule to fall back to the published SD from Events
-// when currentContext is nil (e.g. during background commit).
+// when currentContext is nil (e.g. while an FCU commits).
 func (e *ExecModule) SetPublishedSD(provider func() *execctx.SharedDomains) {
 	e.publishedSD = provider
 }
@@ -385,12 +394,12 @@ func (e *ExecModule) canonicalHash(ctx context.Context, tx kv.Tx, blockNumber ui
 }
 
 // drainReadAhead blocks until any in-flight block-assembly warmup finishes.
-// warmBody is fire-and-forget and populates the shared state/branch caches; if
-// it is still running when an unwind bumps the cache epoch, it can Put a
+// warmBody is fire-and-forget and fills the shared state cache; if
+// it is still running when an unwind bumps the cache epoch, it can fill a
 // pre-unwind (dead-fork) value stamped with the post-unwind epoch — IsStale then
-// returns false and the stale value is served as canonical (wrong root). A
-// laggard Put can likewise land after a flush's cache-apply and pin the
-// pre-flush snapshot. Call before any unwind epoch-bump or flush cache-apply.
+// returns false and the stale value is served as canonical (wrong root). Fill
+// admission does not cover this direction: an unwind lowers the applied
+// frontier, so a pre-unwind view passes. Call before any unwind epoch-bump.
 func (e *ExecModule) drainReadAhead() {
 	if e.readAheader == nil {
 		return

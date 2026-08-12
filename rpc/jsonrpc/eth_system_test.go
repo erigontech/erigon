@@ -80,7 +80,7 @@ func TestCapabilities(t *testing.T) {
 
 		// Generate and insert blocks so Execution stage progress is set.
 		signer := types.LatestSigner(gspec.Config)
-		c, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainSize, func(i int, b *blockgen.BlockGen) {
+		c, err := m.GenerateChain(chainSize, func(i int, b *blockgen.BlockGen) {
 			b.SetCoinbase(common.Address{1})
 			tx, txErr := types.SignTx(types.NewTransaction(b.TxNonce(addr), common.HexToAddress("deadbeef"), uint256.NewInt(1), 21000, uint256.NewInt(uint64(i+1)*common.GWei), nil), *signer, key)
 			if txErr != nil {
@@ -127,7 +127,7 @@ func TestCapabilities(t *testing.T) {
 		}
 		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 		signer := types.LatestSigner(gspec.Config)
-		c, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainSize, func(i int, b *blockgen.BlockGen) {
+		c, err := m.GenerateChain(chainSize, func(i int, b *blockgen.BlockGen) {
 			b.SetCoinbase(common.Address{1})
 			tx, txErr := types.SignTx(types.NewTransaction(b.TxNonce(addr), common.HexToAddress("deadbeef"), uint256.NewInt(1), 21000, uint256.NewInt(uint64(i+1)*common.GWei), nil), *signer, key)
 			if txErr != nil {
@@ -663,7 +663,7 @@ func createGasPriceTestKV(t *testing.T, chainSize int) *execmoduletester.ExecMod
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 
 	// Generate testing blocks
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainSize, func(i int, b *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(chainSize, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		tx, txErr := types.SignTx(types.NewTransaction(b.TxNonce(addr), common.HexToAddress("deadbeef"), uint256.NewInt(100), 21000, uint256.NewInt(uint64(int64(i+1)*common.GWei)), nil), *signer, key)
 		if txErr != nil {

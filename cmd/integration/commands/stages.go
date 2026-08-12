@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
@@ -57,6 +58,7 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/stats"
+	"github.com/erigontech/erigon/execution/blockreplay"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/cache"
 	chain2 "github.com/erigontech/erigon/execution/chain"
@@ -131,6 +133,7 @@ var (
 	cmdStageSenders     = makeStageCmd("stage_senders", stageSenders, true, false, false)
 	cmdStageExec        = makeStageCmd("stage_exec", stageExec, true, true, false)
 	cmdStageExecReplay  = makeStageCmd("stage_exec_replay", stageExecReplay, true, true, false)
+	cmdCaptureBlock     = makeStageCmd("capture_block", captureBlock, false, true, false)
 	cmdStageCustomTrace = makeStageCmd("stage_custom_trace", stageCustomTrace, true, true, false)
 	cmdStageTxLookup    = makeStageCmd("stage_tx_lookup", stageTxLookup, true, false, false)
 	cmdPrintStages      = makeStageCmd("print_stages", printAllStages, false, false, true)
@@ -317,6 +320,10 @@ func init() {
 	withReset(cmdStageSenders)
 	withBlock(cmdStageSenders)
 	rootCmd.AddCommand(cmdStageSenders)
+
+	withStageBase(cmdCaptureBlock)
+	withBlock(cmdCaptureBlock)
+	rootCmd.AddCommand(cmdCaptureBlock)
 
 	withStageBase(cmdStageExec)
 	withReset(cmdStageExec)
@@ -846,6 +853,7 @@ func execBlocksBatch(ctx context.Context, db kv.TemporalRwDB, st *stagedsync.Syn
 	doms.SetInMemHistoryReads(false)
 	doms.SetStateCache(stateCache)
 	doms.SetCodeStore(codeStore)
+	execctx.GuardAggregatorForCache(db, stateCache)
 
 	s, err := st.StageState(stages.Execution, tx, initialCycle, false)
 	if err != nil {
@@ -865,6 +873,42 @@ func execBlocksBatch(ctx context.Context, db kv.TemporalRwDB, st *stagedsync.Syn
 		return 0, err
 	}
 	return progress, nil
+}
+
+// captureBlock writes a self-contained exec-witness fixture (inputs + the
+// block's authoritative post-state outputs) for --block, for offline replay
+// and profiling. Read-only against the node.
+func captureBlock(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
+	if block == 0 {
+		return fmt.Errorf("capture_block requires --block=<n>")
+	}
+	dirs := datadir.New(datadirCli)
+	_, clean, engine, _, _ := newSync(ctx, db, nil /* miningConfig */, logger)
+	defer clean()
+	defer engine.Close()
+
+	chainConfig := fromdb.ChainConfig(db)
+	blockReader, _ := blocksIO(db, logger)
+
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	fx, err := blockreplay.Capture(ctx, tx, blockReader, chainConfig, engine, block, logger)
+	if err != nil {
+		return err
+	}
+
+	out := filepath.Join(dirs.DataDir, fmt.Sprintf("block-%d.gob", block))
+	if err := fx.Save(out); err != nil {
+		return err
+	}
+	logger.Info("[capture_block] fixture written", "block", block, "path", out,
+		"accounts", len(fx.Accounts), "storageAccts", len(fx.Storage), "code", len(fx.Code),
+		"outAccounts", len(fx.Outputs.Accounts), "outStorage", len(fx.Outputs.Storage))
+	return nil
 }
 
 // stageExecReplay re-executes historic blocks using conflict-free parallel workers.
@@ -1114,6 +1158,9 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*blocksna
 			return
 		}
 		aggOpts := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings)
+		if reset {
+			aggOpts = aggOpts.SkipFilesDBGapCheck()
+		}
 		_aggSingleton = aggOpts.MustOpen(ctx, db)
 
 		_aggSingleton.SetProduceMod(snapCfg.ProduceE3)

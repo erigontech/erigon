@@ -93,23 +93,25 @@ func newBenchEnv(t testing.TB, gasLimit uint64, noMaterialize bool) *vm.EVM {
 }
 
 // deployContract deploys code at the given address in the state.
-func deployContract(statedb *state.IntraBlockState, addr accounts.Address, code []byte) {
-	statedb.CreateAccount(addr, true)
-	statedb.SetCode(addr, code, tracing.CodeChangeUnspecified)
+func deployContract(tb testing.TB, statedb *state.IntraBlockState, addr accounts.Address, code []byte) {
+	tb.Helper()
+	require.NoError(tb, statedb.CreateAccount(addr, true))
+	require.NoError(tb, statedb.SetCode(addr, code, tracing.CodeChangeUnspecified))
 }
 
 // deployContractWithBalance deploys code and sets an ETH balance.
-func deployContractWithBalance(statedb *state.IntraBlockState, addr accounts.Address, code []byte, balance *uint256.Int) {
-	statedb.CreateAccount(addr, true)
-	statedb.SetCode(addr, code, tracing.CodeChangeUnspecified)
-	statedb.SetBalance(addr, *balance, 0)
+func deployContractWithBalance(tb testing.TB, statedb *state.IntraBlockState, addr accounts.Address, code []byte, balance *uint256.Int) {
+	tb.Helper()
+	deployContract(tb, statedb, addr, code)
+	require.NoError(tb, statedb.SetBalance(addr, *balance, 0))
 }
 
 // setStorage pre-populates storage slots for a contract address.
-func setStorage(statedb *state.IntraBlockState, addr accounts.Address, slots map[uint256.Int]uint256.Int) {
+func setStorage(tb testing.TB, statedb *state.IntraBlockState, addr accounts.Address, slots map[uint256.Int]uint256.Int) {
+	tb.Helper()
 	for k, v := range slots {
 		key := accounts.InternKey(k.Bytes32())
-		statedb.SetState(addr, key, v)
+		require.NoError(tb, statedb.SetState(addr, key, v))
 	}
 }
 

@@ -918,7 +918,7 @@ func GenerateBlocks(t *testing.T, gspec *types.Genesis, txs map[int]txn) (*execm
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
 
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, len(txs), func(i int, block *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(len(txs), func(i int, block *blockgen.BlockGen) {
 		var txn types.Transaction
 		var isContractCall bool
 		signer := types.LatestSignerForChainID(nil)

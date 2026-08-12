@@ -407,7 +407,8 @@ func doCall(ctx context.Context, caller *transactions.ReusableCaller, gasLimit u
 		}
 		return true, nil, err
 	}
-	return result.Failed(), result, nil
+	failed := result.Failed()
+	return failed, result, nil
 }
 
 type StorageKeysInfo struct {
@@ -431,8 +432,17 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 	}
 	defer roTx.Rollback()
 
-	requestedBlockNr, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, roTx, api._blockReader, api.filters)
+	// nil filters: the gate below and the commitment-history reads both go through
+	// this plain roTx, so the tag has to resolve on that same committed view.
+	requestedBlockNr, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, roTx, api._blockReader, nil)
 	if err != nil {
+		return nil, err
+	}
+
+	// A canonical hash exists for blocks the header stage has downloaded but
+	// execution has not reached; the commitment history getProof needs is only
+	// written by execution.
+	if err := rpchelper.CheckBlockExecuted(roTx, uint64(requestedBlockNr)); err != nil {
 		return nil, err
 	}
 
@@ -1002,8 +1012,6 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		if uint64(len(args.AuthorizationList)) > gasCap/params.CallNewAccountGas {
 			return nil, errors.New("insufficient gas to process all authorizations")
 		}
-		var data bytes.Buffer
-		var buf [32]byte
 		rules := blockCtx.Rules(chainConfig)
 		for i := range args.AuthorizationList {
 			jsonAuth := &args.AuthorizationList[i]
@@ -1014,12 +1022,11 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 			if (!auth.ChainID.IsZero() && auth.ChainID.Cmp(rules.ChainID) != 0) || auth.Nonce+1 < auth.Nonce {
 				continue
 			}
-			data.Reset()
-			authorityPtr, err := auth.RecoverSigner(&data, buf[:])
+			authority, err := auth.RecoverSigner()
 			if err != nil {
 				continue
 			}
-			excl[*authorityPtr] = struct{}{}
+			excl[authority] = struct{}{}
 		}
 	}
 

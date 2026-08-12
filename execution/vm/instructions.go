@@ -1515,23 +1515,18 @@ func makeLog(size int) executionFunc {
 		if evm.readOnly {
 			return pc, nil, ErrWriteProtection
 		}
-		topics := make([]common.Hash, size)
-		stack := &scope.Stack
+		stack, ibs := &scope.Stack, evm.IntraBlockState()
 		mStart, mSize := stack.pop2Uint64()
+		mem := scope.Memory.GetPtr(mStart, mSize)
+		log := ibs.AllocLog(scope.Contract.Address().Value(), size, len(mem))
+		// This is a non-consensus field, but assigned here because
+		// execution/state doesn't know the current block number.
+		log.BlockNumber = hexutil.Uint64(evm.Context.BlockNumber)
 		for i := range size {
-			topics[i] = stack.pop().Bytes32()
+			log.Topics[i] = stack.pop().Bytes32()
 		}
-
-		d := scope.Memory.GetCopy(mStart, mSize)
-		evm.IntraBlockState().AddLog(&types.Log{
-			Address: scope.Contract.Address().Value(),
-			Topics:  topics,
-			Data:    d,
-			// This is a non-consensus field, but assigned here because
-			// execution/state doesn't know the current block number.
-			BlockNumber: hexutil.Uint64(evm.Context.BlockNumber),
-		})
-
+		copy(log.Data, mem)
+		ibs.NotifyLog(log)
 		return pc, nil, nil
 	}
 }
