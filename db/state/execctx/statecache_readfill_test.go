@@ -141,7 +141,7 @@ func (tx *failStateVersionOnceRwTx) ReadSequence(table string) (uint64, error) {
 	return tx.TemporalRwTx.ReadSequence(table)
 }
 
-func TestReadFill_RetriesStateVersionAfterConstructionError(t *testing.T) {
+func TestNewSharedDomains_StateVersionReadErrorFailsConstruction(t *testing.T) {
 	t.Parallel()
 
 	ctx := t.Context()
@@ -152,20 +152,12 @@ func TestReadFill_RetriesStateVersionAfterConstructionError(t *testing.T) {
 	tx := &failStateVersionOnceRwTx{TemporalRwTx: baseTx}
 
 	domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
-	require.NoError(t, err)
-	defer domains.Close()
-	stateCache := newSmallStateCache()
-	t.Cleanup(stateCache.Close)
-	domains.SetStateCacheForTest(stateCache)
-
-	missing := make([]byte, 20)
-	missing[0] = 0x01
-	value, _, err := domains.AsGetter(tx).GetLatest(kv.AccountsDomain, missing)
-	require.NoError(t, err)
-	require.Empty(t, value)
-	require.Equal(t, 2, tx.stateVersionReads, "binding the getter must retry the failed construction-time read")
-	_, ok := stateCache.View(nil).Get(kv.AccountsDomain, missing)
-	require.True(t, ok, "the recovered state-version read must restore fill authority")
+	if domains != nil {
+		defer domains.Close()
+	}
+	require.ErrorContains(t, err, "read base state version")
+	require.Nil(t, domains)
+	require.Equal(t, 1, tx.stateVersionReads)
 }
 
 func TestStateCache_MergedUnwindPublishesInvalidation(t *testing.T) {

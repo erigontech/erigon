@@ -199,8 +199,7 @@ func (sd *SharedDomains) cacheFrontierFor(tx kv.TemporalTx) cache.Frontier {
 	_, txWritable := generationTx.(kv.TemporalRwTx)
 	// A write transaction's ViewID is the snapshot ID it will create. After
 	// commit, a new read transaction can have that ID but a newer state version.
-	useBaseStateVersion := sd.baseStateVersionKnown &&
-		generationTx.ViewID() == sd.baseViewID && txWritable == sd.baseTxWritable
+	useBaseStateVersion := generationTx.ViewID() == sd.baseViewID && txWritable == sd.baseTxWritable
 	if !useBaseStateVersion {
 		var err error
 		stateVersion, err = rawdb.GetStateVersion(generationTx)
@@ -244,10 +243,9 @@ type SharedDomains struct {
 
 	logger log.Logger
 
-	baseViewID            uint64
-	baseTxWritable        bool
-	baseStateVersion      uint64
-	baseStateVersionKnown bool
+	baseViewID       uint64
+	baseTxWritable   bool
+	baseStateVersion uint64
 
 	txNum       uint64
 	currentStep kv.Step
@@ -368,16 +366,21 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	trieCfg := o.trieCfg
 
 	generationTx := cacheGenerationTx(tx)
-	stateVersion, stateVersionErr := rawdb.GetStateVersion(generationTx)
+	if generationTx == nil {
+		return nil, errors.New("state version transaction is nil")
+	}
+	stateVersion, err := rawdb.GetStateVersion(generationTx)
+	if err != nil {
+		return nil, fmt.Errorf("read base state version: %w", err)
+	}
 	_, baseTxWritable := generationTx.(kv.TemporalRwTx)
 	sd := &SharedDomains{
-		logger:                logger,
-		metrics:               kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
-		stepSize:              tx.Debug().StepSize(),
-		baseViewID:            generationTx.ViewID(),
-		baseTxWritable:        baseTxWritable,
-		baseStateVersion:      stateVersion,
-		baseStateVersionKnown: stateVersionErr == nil,
+		logger:           logger,
+		metrics:          kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
+		stepSize:         tx.Debug().StepSize(),
+		baseViewID:       generationTx.ViewID(),
+		baseTxWritable:   baseTxWritable,
+		baseStateVersion: stateVersion,
 	}
 
 	if o.mem != nil {
@@ -943,9 +946,7 @@ func (sd *SharedDomains) SetStateCache(stateCache *cache.StateCache) {
 func (sd *SharedDomains) bindStateCache(stateCache *cache.StateCache) {
 	sd.stateCache = stateCache
 	sd.cacheApplier = stateCache.Applier()
-	if sd.baseStateVersionKnown {
-		sd.cacheApplier.Initialize(sd.baseStateVersion)
-	}
+	sd.cacheApplier.Initialize(sd.baseStateVersion)
 }
 
 // GuardAggregatorForCache forbids visibility lowering on db's aggregator when
@@ -1119,9 +1120,6 @@ type branchCacheUpdate struct {
 // ProjectedStateVersion returns the durable state version produced by the next
 // successful Commit.
 func (sd *SharedDomains) ProjectedStateVersion() (uint64, error) {
-	if !sd.baseStateVersionKnown {
-		return 0, errors.New("state version was unavailable when SharedDomains was created")
-	}
 	if sd.baseStateVersion == math.MaxUint64 {
 		return 0, errors.New("state version overflow")
 	}
