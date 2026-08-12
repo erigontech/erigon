@@ -23,7 +23,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 )
 
@@ -162,8 +162,8 @@ func TestPBinAccountRemovalLeavesNoRecordBehind(t *testing.T) {
 
 	keep, gone := pbinOracleAddr(11), pbinOracleAddr(22)
 	stored := new(pbinTestCorpus).
-		account(keep, 1, 2, common.Hash{0x11}).
-		account(gone, 3, 4, common.Hash{0x22})
+		account(keep, 1, 2, empty.CodeHash).
+		account(gone, 3, 4, empty.CodeHash)
 	for i := range 16 {
 		stored.storage(gone, pbinOracleSlot(uint64(256+i)), byte(i+1))
 	}
@@ -183,7 +183,7 @@ func TestPBinAccountRemovalLeavesNoRecordBehind(t *testing.T) {
 	pph.Reset()
 	root := pbinTestProcess(t, pph, removal.plainKeys, removal.updates)
 
-	survivor := new(pbinTestCorpus).account(keep, 1, 2, common.Hash{0x11})
+	survivor := new(pbinTestCorpus).account(keep, 1, 2, empty.CodeHash)
 	require.Equal(t, survivor.oracleRoot(t), root)
 	pbinRequirePutsMatchStore(t, ctx.puts, snapshot)
 
@@ -203,7 +203,7 @@ func TestPBinProcessPutBranchCarriesRealPrev(t *testing.T) {
 	stored := new(pbinTestCorpus).
 		storage(addr, pbinOracleSlot(256), 0x01).
 		storage(addr, pbinOracleSlot(257), 0x02).
-		account(pbinOracleAddr(32), 3, 4, common.Hash{0x32})
+		account(pbinOracleAddr(32), 3, 4, empty.CodeHash)
 	touch := new(pbinTestCorpus).
 		storage(addr, pbinOracleSlot(256), 0x0A).
 		storage(addr, pbinOracleSlot(258), 0x03)

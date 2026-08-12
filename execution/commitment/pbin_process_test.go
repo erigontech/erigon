@@ -260,12 +260,12 @@ func TestPBinProcessMatchesOracle(t *testing.T) {
 	}{
 		{
 			name:   "one account",
-			corpus: new(pbinTestCorpus).account(pbinOracleAddr(1), 3, 7, common.Hash{0xC0, 0xDE}),
+			corpus: new(pbinTestCorpus).account(pbinOracleAddr(1), 3, 7, empty.CodeHash),
 		},
 		{
 			name: "accounts only",
 			corpus: new(pbinTestCorpus).
-				account(pbinOracleAddr(1), 1, 100, common.Hash{0x01}).
+				account(pbinOracleAddr(1), 1, 100, empty.CodeHash).
 				account(pbinOracleAddr(2), 0, 0, common.Hash{}).
 				account(pbinOracleAddr(3), 1<<40, 1<<62, empty.CodeHash),
 		},
@@ -287,7 +287,7 @@ func TestPBinProcessMatchesOracle(t *testing.T) {
 		{
 			name: "one account across both zones",
 			corpus: new(pbinTestCorpus).
-				account(pbinOracleAddr(6), 9, 1234, common.Hash{0xAB}).
+				account(pbinOracleAddr(6), 9, 1234, empty.CodeHash).
 				storage(pbinOracleAddr(6), pbinOracleSlot(0), 0x01).
 				storage(pbinOracleAddr(6), pbinOracleSlot(63), 0x02).
 				storage(pbinOracleAddr(6), pbinOracleSlot(64), 0x03).
@@ -315,7 +315,7 @@ func pbinTestMixedCorpus() *pbinTestCorpus {
 	c := new(pbinTestCorpus)
 	for i := uint64(1); i <= 6; i++ {
 		addr := pbinOracleAddr(i)
-		c.account(addr, i, i*1000, common.Hash{byte(i)})
+		c.account(addr, i, i*1000, empty.CodeHash)
 		for _, slot := range []uint64{0, 5, 63, 64, 255, 256, 1000, 1 << 20} {
 			c.storage(addr, pbinOracleSlot(slot), byte(i), byte(slot))
 		}
@@ -328,7 +328,7 @@ func pbinTestMixedCorpus() *pbinTestCorpus {
 func pbinTestDeepSharedPrefixCorpus() *pbinTestCorpus {
 	c := new(pbinTestCorpus)
 	for i, addr := range pbinOracleMinedAddrs() {
-		c.account(addr, uint64(i), uint64(i)*7, common.Hash{byte(i)})
+		c.account(addr, uint64(i), uint64(i)*7, empty.CodeHash)
 	}
 	return c
 }
@@ -340,7 +340,7 @@ func TestPBinProcessAccountFansOutToCodeHash(t *testing.T) {
 	t.Parallel()
 
 	addr := pbinOracleAddr(11)
-	codeHash := common.Hash{0xC0, 0xDE, 0xFF}
+	codeHash := common.Hash(empty.CodeHash)
 	corpus := new(pbinTestCorpus).account(addr, 5, 999, codeHash)
 
 	pph, root := corpus.process(t)
@@ -389,7 +389,7 @@ func TestPBinProcessMissingStateIsAbsent(t *testing.T) {
 		storage(addr, pbinOracleSlot(256), 0x01).
 		storage(addr, pbinOracleSlot(257), 0x02).
 		storage(addr, pbinOracleSlot(258), 0x03).
-		account(pbinOracleAddr(22), 1, 2, common.Hash{0x03})
+		account(pbinOracleAddr(22), 1, 2, empty.CodeHash)
 
 	pph, ms := pbinTestEngine(t)
 	require.NoError(t, ms.applyPlainUpdates(present.plainKeys, present.updates))
@@ -490,10 +490,10 @@ func TestPBinProcessSurfacesContextErrors(t *testing.T) {
 	stored := new(pbinTestCorpus).
 		storage(addr, pbinOracleSlot(256), 0x01).
 		storage(addr, pbinOracleSlot(257), 0x02).
-		account(pbinOracleAddr(82), 3, 4, common.Hash{0x82})
+		account(pbinOracleAddr(82), 3, 4, empty.CodeHash)
 	touch := new(pbinTestCorpus).
 		storage(addr, pbinOracleSlot(258), 0x03).
-		account(pbinOracleAddr(82), 5, 6, common.Hash{0x82})
+		account(pbinOracleAddr(82), 5, 6, empty.CodeHash)
 
 	for _, tc := range []struct {
 		name   string

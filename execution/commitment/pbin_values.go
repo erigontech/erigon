@@ -72,6 +72,12 @@ func pbinCodeHashValue(codeHash common.Hash) [pbinValueLength]byte {
 	return codeHash
 }
 
+// pbinIsEmptyCodeHash reads both spellings of a codeless account: the
+// empty-bytecode hash, and the unset hash a state read leaves behind.
+func pbinIsEmptyCodeHash(codeHash common.Hash) bool {
+	return codeHash == (common.Hash{}) || codeHash == empty.CodeHash
+}
+
 // EIP-7702 delegation indicators (eip:"Delegation"). Classification reads the
 // code bytes, never the hash — a code hash may begin with the marker too.
 var pbinDelegationMarker = [3]byte{0xEF, 0x01, 0x00}

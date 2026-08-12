@@ -218,36 +218,52 @@ sparser range divides by zero.
 
 Ordering is part of the deliverable — do not reorder:
 
-- [ ] write the gate test first: an account whose `CodeHash` is not the empty-code hash but whose
+- [x] write the gate test first: an account whose `CodeHash` is not the empty-code hash but whose
       `CodeSize` is 0 must error, not yield an empty code zone
-- [ ] add that check in `chunkSource` before the `CodeSize == 0` short-circuit (`:219`)
-- [ ] test that a bin context has `readCodeSize` set, pinning `commitment_context.go:283`
-- [ ] add a seen-set of code hashes to `pbinUpdateStream` recording code size per hash, cleared in
+- [x] add that check in `chunkSource` before the `CodeSize == 0` short-circuit (`:219`)
+- [x] test that a bin context has `readCodeSize` set, pinning `commitment_context.go:283`
+- [x] add a seen-set of code hashes to `pbinUpdateStream` recording code size per hash, cleared in
       **`reset()`** (`pbin_update_stream.go:85`), *not* `release()`. `release()` runs only on
       `Release()` (`pbin_patricia_hashed.go:120-127`) while `reset()` runs per `Process` (`:104`);
       a cache cleared only on release survives many `Process` calls on a pooled engine, and after an
       unwind rolls the tree back (`commitment_context.go:299-303`) a stale hit skips chunks the tree
       no longer holds
-- [ ] **disable the dedup when `s.witnessPass` is set.** `chunkSource:216-218` returns
+- [x] **disable the dedup when `s.witnessPass` is set.** `chunkSource:216-218` returns
       `keccak.Sum256(override)` under a witness pass, not `update.CodeHash`, so a set keyed on
       `update.CodeHash` keys on the wrong value; and `Witnesses` collects every emitted treeKey into
       `provedKeys` (`pbin_witness.go:104-107`), so deduping shrinks the witness regardless of key
-- [ ] place the hit check **after** the gate check, so a `CodeHash != empty && CodeSize == 0` account
+- [x] place the hit check **after** the gate check, so a `CodeHash != empty && CodeSize == 0` account
       errors on every occurrence, not only the first
-- [ ] on a hit skip `codeOf` and `queueChunks`, but still emit this account's `CODE_HASH` leaf and
+- [x] on a hit skip `codeOf` and `queueChunks`, but still emit this account's `CODE_HASH` leaf and
       the `DELEGATION` removal — per account, no code bytes needed
-- [ ] on a hit verify `update.CodeSize` matches the recorded size and error on mismatch; this
+- [x] on a hit verify `update.CodeSize` matches the recorded size and error on mismatch; this
       replaces both the length check at `chunkSource:226-229` and the cross-account conflict check
       at `flushCodeChunks:258-262`
-- [ ] **exclude delegation indicators from the set.** The skip path emits the non-delegation sibling
+- [x] **exclude delegation indicators from the set.** The skip path emits the non-delegation sibling
       pair (`:144-149`) while a delegation takes the early-return branch (`:137-143`); excluding
       them is what makes *hit ⇒ non-delegation* true, and that invariant is the entire licence for
       skipping `chunkSource`. Not because hits are rare — a designator is `0xef0100 || target`
       (`pbin_values.go:81-83`), so mass delegation to one implementation makes them identical
-- [ ] tests: N accounts sharing code chunk exactly once; root unchanged vs pre-dedup; size mismatch
+- [x] tests: N accounts sharing code chunk exactly once; root unchanged vs pre-dedup; size mismatch
       on a shared hash errors; delegation accounts unaffected; witness `provedKeys` unchanged;
       flush sort input shrinks from N·C to C
-- [ ] run tests — must pass before Task 5
+- [x] run tests — must pass before Task 5
+
+Landed shape: the gate lives inside the `CodeSize == 0` branch, so a codeless account still
+short-circuits and only a hash with no size errors. A cache hit returns nil code with the account's
+hash, which routes through the existing non-delegation branch and chunkifies nothing — no second
+skip path to keep in step with the first. `flushCodeChunks` keeps its two-values check: the witness
+pass runs with the cache off, so that is still the only guard there.
+
+The gate is loud enough to reject fixtures, not just wrong contexts: a corpus account carrying an
+invented code hash with no code is an unreachable state, and ~30 of them across the pbin tests now
+say `empty.CodeHash`. That keeps every leaf key and leaf count where it was — only the CODE_HASH
+leaf value moves — so the oracles follow without restructuring.
+
+Mutation-checked: dropping the cache lookup, moving the clear from `reset()` to `release()`,
+removing the gate, caching delegation indicators, and letting a witness pass touch the cache each
+fail a test. The last one is only visible as the cache being non-empty after a witness pass — chunk
+keys are deduped again at flush, so the emitted key set alone cannot tell the two apart.
 
 ### Task 5: Reject `--squeeze` for a bin rebuild
 

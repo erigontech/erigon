@@ -23,7 +23,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
 )
 
 // The binary engine runs in ModeDirect whatever mode the caller asks for:
@@ -175,7 +175,7 @@ func TestPBinRootHashAfterResetLoadsStoredRoot(t *testing.T) {
 func TestPBinResetContext(t *testing.T) {
 	t.Parallel()
 
-	corpus := new(pbinTestCorpus).account(pbinOracleAddr(7), 1, 2, common.Hash{0x07})
+	corpus := new(pbinTestCorpus).account(pbinOracleAddr(7), 1, 2, empty.CodeHash)
 
 	pph, _ := pbinTestEngine(t)
 	other := NewMockState(t)

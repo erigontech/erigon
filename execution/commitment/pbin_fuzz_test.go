@@ -21,7 +21,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 )
 
@@ -80,7 +80,7 @@ func pbinFuzzCorpus(data []byte, codeSalt byte) *pbinTestCorpus {
 			if code := pbinFuzzCode(addrSeed, codeSalt); code != nil {
 				c.accountWithCodeBytes(addr, uint64(value), uint64(value)*1_000_000_007, code)
 			} else {
-				c.account(addr, uint64(value), uint64(value)*1_000_000_007, common.Hash{value, 0xC0})
+				c.account(addr, uint64(value), uint64(value)*1_000_000_007, empty.CodeHash)
 			}
 		case value == 0:
 			c.storage(addr, pbinOracleSlot(pbinFuzzSlots[int(slot)%len(pbinFuzzSlots)]))

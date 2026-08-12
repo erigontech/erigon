@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
 )
 
 type pbinWitnessPruneFixture struct {
@@ -301,7 +302,7 @@ func TestPBinWitnessServesRemoval(t *testing.T) {
 	// Storage-zone sub-indices split on the low bits of the slot: 0 and 1 sit
 	// under one branch, 2 under the other.
 	stored := func(slots ...uint64) *pbinTestCorpus {
-		c := new(pbinTestCorpus).account(bystander, 1, 2, common.Hash{0x42})
+		c := new(pbinTestCorpus).account(bystander, 1, 2, empty.CodeHash)
 		for _, slot := range slots {
 			c.storage(addr, pbinOracleSlot(slot), 0x01)
 		}

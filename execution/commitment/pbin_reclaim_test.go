@@ -24,7 +24,7 @@ import (
 	keccak "github.com/erigontech/fastkeccak"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
 )
 
 // Code reclamation on account removal. A removed account's chunk leaves are
@@ -63,7 +63,7 @@ func TestPBinReclaimDropsCodeWithNoSurvivor(t *testing.T) {
 
 	bystander := pbinOracleAddr(91)
 	code := bytes.Repeat([]byte{0x5B}, 31*3)
-	stored := new(pbinTestCorpus).account(bystander, 1, 2, common.Hash{0x91})
+	stored := new(pbinTestCorpus).account(bystander, 1, 2, empty.CodeHash)
 
 	pph, ms := pbinTestEngine(t)
 	require.NoError(t, ms.applyPlainUpdates(stored.plainKeys, stored.updates))

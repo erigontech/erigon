@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
 )
 
 // pbinTestBatches runs the corpora through one engine and one state in order,
@@ -99,10 +100,10 @@ func TestPBinUntouchedSiblingSurvivesBatch(t *testing.T) {
 		{
 			name: "sibling under another account",
 			batchA: new(pbinTestCorpus).
-				account(pbinOracleAddr(42), 1, 10, common.Hash{0x01}).
-				account(pbinOracleAddr(43), 2, 20, common.Hash{0x02}),
+				account(pbinOracleAddr(42), 1, 10, empty.CodeHash).
+				account(pbinOracleAddr(43), 2, 20, empty.CodeHash),
 			batchB: new(pbinTestCorpus).
-				account(pbinOracleAddr(43), 3, 30, common.Hash{0x03}),
+				account(pbinOracleAddr(43), 3, 30, empty.CodeHash),
 		},
 		{
 			name: "a third key joins a shared branch",
@@ -115,7 +116,7 @@ func TestPBinUntouchedSiblingSurvivesBatch(t *testing.T) {
 		{
 			name: "one header slot of an account spanning both zones",
 			batchA: new(pbinTestCorpus).
-				account(pbinOracleAddr(45), 1, 10, common.Hash{0x01}).
+				account(pbinOracleAddr(45), 1, 10, empty.CodeHash).
 				storage(pbinOracleAddr(45), pbinOracleSlot(0), 0x01).
 				storage(pbinOracleAddr(45), pbinOracleSlot(63), 0x02).
 				storage(pbinOracleAddr(45), pbinOracleSlot(64), 0x03).
@@ -127,7 +128,7 @@ func TestPBinUntouchedSiblingSurvivesBatch(t *testing.T) {
 			name:   "one of a deep-shared-prefix cluster",
 			batchA: pbinTestDeepSharedPrefixCorpus(),
 			batchB: new(pbinTestCorpus).
-				account(pbinOracleMinedAddrs()[1], 99, 999, common.Hash{0x99}),
+				account(pbinOracleMinedAddrs()[1], 99, 999, empty.CodeHash),
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -150,7 +151,7 @@ func TestPBinSplitInsideStoredPrefix(t *testing.T) {
 
 	addr := pbinOracleAddr(61)
 	batchA := new(pbinTestCorpus).
-		account(addr, 1, 2, common.Hash{0x01}).
+		account(addr, 1, 2, empty.CodeHash).
 		storage(addr, pbinOracleSlot(256), 0x01).
 		storage(addr, pbinOracleSlot(257), 0x02)
 	// Sub-indices 0, 1 and 2 differ only in their last two bits, so the third slot
@@ -186,7 +187,7 @@ func TestPBinDeepSharedPrefixCorpus(t *testing.T) {
 	batches := make([]*pbinTestCorpus, 0, len(addrs))
 	for i, addr := range addrs {
 		batches = append(batches, new(pbinTestCorpus).
-			account(addr, uint64(i), uint64(i)*7, common.Hash{byte(i)}))
+			account(addr, uint64(i), uint64(i)*7, empty.CodeHash))
 	}
 
 	pph, ms, root := pbinTestBatches(t, batches...)
@@ -252,10 +253,10 @@ func pbinTestUniqueReprCorpora() []struct {
 		{
 			name: "accounts",
 			corpus: new(pbinTestCorpus).
-				account(pbinOracleAddr(71), 1, 999860099, common.Hash{0x01}).
-				account(pbinOracleAddr(72), 3, 900234, common.Hash{0x02}).
+				account(pbinOracleAddr(71), 1, 999860099, empty.CodeHash).
+				account(pbinOracleAddr(72), 3, 900234, empty.CodeHash).
 				account(pbinOracleAddr(73), 0, 0, common.Hash{}).
-				account(pbinOracleAddr(74), 7, 2000000000000138901, common.Hash{0x04}),
+				account(pbinOracleAddr(74), 7, 2000000000000138901, empty.CodeHash),
 		},
 		{
 			name: "storage across both zones",
@@ -305,12 +306,12 @@ func TestPBinUniqueRepresentationAcrossRounds(t *testing.T) {
 
 	addrs := [][]byte{pbinOracleAddr(81), pbinOracleAddr(82), pbinOracleAddr(83)}
 	round1 := new(pbinTestCorpus).
-		account(addrs[0], 1, 999860099, common.Hash{0x01}).
-		account(addrs[1], 3, 900234, common.Hash{0x02}).
+		account(addrs[0], 1, 999860099, empty.CodeHash).
+		account(addrs[1], 3, 900234, empty.CodeHash).
 		storage(addrs[1], pbinOracleSlot(64), 0x01).
-		account(addrs[2], 0, 2000000000000138901, common.Hash{0x03})
+		account(addrs[2], 0, 2000000000000138901, empty.CodeHash)
 	round2 := new(pbinTestCorpus).
-		account(addrs[0], 2, 2345234560099, common.Hash{0x11}).
+		account(addrs[0], 2, 2345234560099, empty.CodeHash).
 		storage(addrs[1], pbinOracleSlot(64), 0x02).
 		storage(addrs[1], pbinOracleSlot(1000), 0x03)
 

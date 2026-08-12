@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
 )
 
 // pbinWitnessContextCode is the code pbinWitnessCorpus commits for account 21.
@@ -39,7 +40,7 @@ func pbinWitnessContextCode() []byte { return bytes.Repeat([]byte{0x60}, 200) }
 func pbinWitnessContextPending() *pbinTestCorpus {
 	c := new(pbinTestCorpus)
 	c.accountWithCodeBytes(pbinOracleAddr(21), 5, 1500, pbinWitnessContextCode())
-	c.account(pbinOracleAddr(23), 3, 300, common.Hash{0x23})
+	c.account(pbinOracleAddr(23), 3, 300, empty.CodeHash)
 	c.storage(pbinOracleAddr(21), pbinOracleSlot(64), 0xEE)
 	c.storage(pbinOracleAddr(23), pbinOracleSlot(5), 0x55)
 	return c

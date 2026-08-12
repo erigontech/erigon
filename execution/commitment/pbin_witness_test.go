@@ -25,7 +25,7 @@ import (
 	keccak "github.com/erigontech/fastkeccak"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 )
 
@@ -109,7 +109,7 @@ func pbinWitnessCollectOracleNodes(t *testing.T, node pbinOracleNode, out map[st
 func pbinWitnessCorpus() *pbinTestCorpus {
 	c := new(pbinTestCorpus)
 	c.accountWithCodeBytes(pbinOracleAddr(21), 1, 500, bytes.Repeat([]byte{0x60}, 200))
-	c.account(pbinOracleAddr(22), 2, 900, common.Hash{0x22})
+	c.account(pbinOracleAddr(22), 2, 900, empty.CodeHash)
 	for _, slot := range []uint64{0, 63, 64, 256, 1 << 20} {
 		c.storage(pbinOracleAddr(21), pbinOracleSlot(slot), 0x11)
 		c.storage(pbinOracleAddr(22), pbinOracleSlot(slot), 0x22)
@@ -247,8 +247,8 @@ func pbinWitnessesOf(t *testing.T, ms *MockState, upd *Updates, produceExclusion
 // applied anything would be caught.
 func pbinWitnessPending() *pbinTestCorpus {
 	c := new(pbinTestCorpus)
-	c.account(pbinOracleAddr(22), 77, 7777, common.Hash{0x99})
-	c.account(pbinOracleAddr(23), 3, 300, common.Hash{0x23})
+	c.account(pbinOracleAddr(22), 77, 7777, empty.CodeHash)
+	c.account(pbinOracleAddr(23), 3, 300, empty.CodeHash)
 	c.storage(pbinOracleAddr(21), pbinOracleSlot(64), 0xEE)
 	c.storage(pbinOracleAddr(23), pbinOracleSlot(5), 0x55)
 	return c

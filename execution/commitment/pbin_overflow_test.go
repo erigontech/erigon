@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 )
 
@@ -201,7 +202,7 @@ func TestPBinCodeChunksFollowEveryAccountZoneKey(t *testing.T) {
 	corpus := new(pbinTestCorpus).accountWithCodeBytes(early, 1, 10, code)
 	for i := uint64(65); i < 70; i++ {
 		addr := pbinOracleAddr(i)
-		corpus.account(addr, i, i*2, common.Hash{byte(i)}).
+		corpus.account(addr, i, i*2, empty.CodeHash).
 			storage(addr, pbinOracleSlot(7), 0x01).
 			storage(addr, pbinOracleSlot(4096), 0x02)
 	}

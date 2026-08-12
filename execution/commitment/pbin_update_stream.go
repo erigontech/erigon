@@ -19,6 +19,7 @@ package commitment
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -29,6 +30,11 @@ import (
 )
 
 type pbinUpdateSink func(treeKey, plainKey []byte, update *Update) error
+
+var (
+	errPBinCodeSizeMissing  = errors.New("pbin: code-bearing account reports no code size")
+	errPBinCodeSizeConflict = errors.New("pbin: one code hash with two code sizes")
+)
 
 type pbinUpdateStream struct {
 	state PatriciaContext
@@ -46,6 +52,12 @@ type pbinUpdateStream struct {
 	// pendingRemoval holds storage-subtree prefixes waiting for the walk to reach
 	// their zone. Removals are queued in account order, which is prefix order.
 	pendingRemoval [][]byte
+
+	// codeSeen is the code size per code hash already chunked in this pass. Chunk
+	// keys are content-addressed, so accounts sharing a hash share their chunk
+	// leaves. It holds no delegation indicator, which makes a hit mean "chunk
+	// these leaves again" and nothing else.
+	codeSeen map[common.Hash]uint64
 }
 
 type pbinCodeChunk struct {
@@ -86,6 +98,7 @@ func (s *pbinUpdateStream) reset() {
 	s.state, s.emit = nil, nil
 	s.codeChunks = s.codeChunks[:0]
 	s.pendingRemoval = s.pendingRemoval[:0]
+	clear(s.codeSeen)
 }
 
 func (s *pbinUpdateStream) release() {
@@ -212,12 +225,30 @@ func (s *pbinUpdateStream) flushRemovals(upTo []byte) error {
 // same keys the fold did. Only key derivation moves; values stay pre-state.
 // A deletion's code fields are whatever the batch merge left behind, not
 // state, so a removed account is codeless here.
+//
+// Nil code with a hash is the answer for an account whose chunks this pass
+// already queued: the caller emits its header leaves and chunks nothing.
 func (s *pbinUpdateStream) chunkSource(plainKey []byte, update *Update) ([]byte, common.Hash, error) {
 	if code, ok := s.witness.Code[string(plainKey)]; ok && s.witnessPass {
 		return code, common.Hash(keccak.Sum256(code)), nil
 	}
-	if update.Deleted() || update.CodeSize == 0 {
+	if update.Deleted() {
 		return nil, common.Hash{}, nil
+	}
+	if update.CodeSize == 0 {
+		// Only a context that reads code_size can tell a codeless account from one
+		// whose size went unread, and the second would chunk to nothing.
+		if !pbinIsEmptyCodeHash(update.CodeHash) {
+			return nil, common.Hash{}, fmt.Errorf("%w: account %x carries code %x", errPBinCodeSizeMissing, plainKey, update.CodeHash)
+		}
+		return nil, common.Hash{}, nil
+	}
+	if size, seen := s.codeSeen[update.CodeHash]; seen && !s.witnessPass {
+		if size != update.CodeSize {
+			return nil, common.Hash{}, fmt.Errorf("%w: code %x is %d bytes for account %x and %d for an earlier one",
+				errPBinCodeSizeConflict, update.CodeHash, update.CodeSize, plainKey, size)
+		}
+		return nil, update.CodeHash, nil
 	}
 	code, err := s.codeOf(plainKey)
 	if err != nil {
@@ -226,6 +257,14 @@ func (s *pbinUpdateStream) chunkSource(plainKey []byte, update *Update) ([]byte,
 	if uint64(len(code)) != update.CodeSize {
 		return nil, common.Hash{}, fmt.Errorf("pbin: account %x says %d code bytes, the code domain holds %d",
 			plainKey, update.CodeSize, len(code))
+	}
+	// A witness pass keys its chunks on the code the block writes rather than on
+	// update.CodeHash, so a cache read there would name other chunks.
+	if !s.witnessPass && !pbinIsDelegation(code) {
+		if s.codeSeen == nil {
+			s.codeSeen = make(map[common.Hash]uint64)
+		}
+		s.codeSeen[update.CodeHash] = update.CodeSize
 	}
 	return code, update.CodeHash, nil
 }

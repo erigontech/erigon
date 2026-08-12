@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 )
 
@@ -180,7 +181,7 @@ func TestPBinAccountRemovalDropsBothSubtrees(t *testing.T) {
 		storage(addr, pbinOracleSlot(5), 0x01).   // header window
 		storage(addr, pbinOracleSlot(256), 0x02). // storage zone
 		storage(addr, pbinOracleSlot(1<<20), 0x03).
-		account(bystander, 1, 2, common.Hash{0x48})
+		account(bystander, 1, 2, empty.CodeHash)
 
 	pph, ms := pbinTestEngine(t)
 	stored.applyTo(t, ms)
@@ -192,7 +193,7 @@ func TestPBinAccountRemovalDropsBothSubtrees(t *testing.T) {
 	pph.Reset()
 	root := pbinTestProcess(t, pph, removal.plainKeys, removal.updates)
 
-	survivor := new(pbinTestCorpus).account(bystander, 1, 2, common.Hash{0x48})
+	survivor := new(pbinTestCorpus).account(bystander, 1, 2, empty.CodeHash)
 	want := survivor.entries(t)
 	codeHash := keccak.Sum256(code)
 	for i, chunk := range pbinChunkifyCode(code) {
@@ -216,7 +217,7 @@ func TestPBinFoldDeleteRunsOnProcess(t *testing.T) {
 	for i, slot := range slots {
 		stored.storage(addr, pbinOracleSlot(slot), byte(i+1))
 	}
-	stored.account(pbinOracleAddr(47), 1, 2, common.Hash{0x47})
+	stored.account(pbinOracleAddr(47), 1, 2, empty.CodeHash)
 
 	pph, ctx, ms := pbinTestStrictEngine(t)
 	require.NoError(t, ms.applyPlainUpdates(stored.plainKeys, stored.updates))
@@ -229,7 +230,7 @@ func TestPBinFoldDeleteRunsOnProcess(t *testing.T) {
 	// An absent key with no leaf of its own contributes nothing — the case a zero
 	// write over a live leaf must not be confused with.
 	zeroed.storage(addr, pbinOracleSlot(1<<20))
-	want.account(pbinOracleAddr(47), 1, 2, common.Hash{0x47})
+	want.account(pbinOracleAddr(47), 1, 2, empty.CodeHash)
 
 	for i := range zeroed.plainKeys {
 		require.NoError(t, ms.applyPlainUpdates(zeroed.plainKeys[i:i+1], []Update{{Flags: DeleteUpdate}}))
@@ -257,7 +258,7 @@ func TestPBinCollapsedRowLeavesNoRecord(t *testing.T) {
 
 	addr, bystander := pbinOracleAddr(51), pbinOracleAddr(52)
 	stored := new(pbinTestCorpus).
-		account(bystander, 1, 2, common.Hash{0x52}).
+		account(bystander, 1, 2, empty.CodeHash).
 		storage(addr, pbinOracleSlot(256), 0x01).
 		storage(addr, pbinOracleSlot(257), 0x02)
 
@@ -271,7 +272,7 @@ func TestPBinCollapsedRowLeavesNoRecord(t *testing.T) {
 	root := pbinTestProcess(t, pph, zeroed.plainKeys, zeroed.updates)
 
 	survivors := new(pbinTestCorpus).
-		account(bystander, 1, 2, common.Hash{0x52}).
+		account(bystander, 1, 2, empty.CodeHash).
 		storage(addr, pbinOracleSlot(256), 0x01)
 	require.Equal(t, survivors.oracleRoot(t), root)
 
