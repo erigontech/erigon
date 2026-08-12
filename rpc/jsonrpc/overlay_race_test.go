@@ -155,7 +155,7 @@ func TestGetBlockByTimestamp_SeesOverlayHead(t *testing.T) {
 	resp, err := api.GetBlockByTimestamp(m.Ctx, rpc.Timestamp(overlayHeader.Time), false)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
-	require.Equal(t, overlayHeader.Number.ToBig(), resp["number"].(*hexutil.Big).ToInt(),
+	require.Equal(t, overlayHeader.Number.ToBig(), resp["number"].(*hexutil.U256).ToInt(),
 		"must resolve to the overlay head block, not the stale MDBX-committed head")
 }
 

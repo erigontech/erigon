@@ -28,6 +28,11 @@ func convertDataToStringP(abstractMap map[string]any, field string) *string {
 			return nil
 		}
 		result = v.String()
+	case *hexutil.U256:
+		if v == nil {
+			return nil
+		}
+		result = v.String()
 	case hexutil.Bytes:
 		result = v.String()
 	case hexutil.Uint:
@@ -125,6 +130,8 @@ func convertDataToUint64P(abstractMap map[string]any, field string) *uint64 {
 		}
 	case *hexutil.Big:
 		result = v.ToInt().Uint64()
+	case *hexutil.U256:
+		result = v.Uint64()
 	case int:
 		result = uint64(v)
 	case uint64:
