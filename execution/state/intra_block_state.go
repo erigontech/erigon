@@ -1236,6 +1236,10 @@ func (sdb *IntraBlockState) synthesizeCreatedAccountBase(addr accounts.Address) 
 	return acc, true
 }
 
+// consumedAddressAbsence reports whether this attempt already recorded a
+// definitive nil AddressPath read. That absence may have affected gas or
+// control flow, so later loads must not replace it with an account assembled
+// from cells published mid-attempt.
 func (sdb *IntraBlockState) consumedAddressAbsence(addr accounts.Address) bool {
 	tr, ok := sdb.versionedReads.GetAddress(addr)
 	return ok && tr.Source != ProvisionalRead && (tr.Val == nil || tr.Val.Account() == nil)
@@ -1351,9 +1355,8 @@ func (sdb *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 					sdb.finalizeProvisionalAddressRead(addr)
 					return nil, StorageRead, UnknownVersion, nil
 				}
-				// The EVM consumes this conclusion: reconcile the provisional
-				// nil probe with the preserved account so a later flush
-				// conflicts with it instead of being silently adopted.
+				// Reconstruct before reconciling: an empty result agrees with an
+				// earlier absence, while a live result must conflict with it.
 				version := sdRes.Version()
 				if err := sdb.accountRead(addr, preserved, MapRead, version, SelfDestructPath); err != nil {
 					return nil, MapRead, version, err
@@ -2992,7 +2995,11 @@ func (sdb *IntraBlockState) AccessedAddr(addr accounts.Address) bool {
 	return ok
 }
 
-// accountRead records a resolved account unless this attempt already consumed its absence.
+// accountRead reconciles a resolved account with the AddressPath probe made
+// while loading it. A provisional nil may be replaced because no caller has
+// used it yet; a definitive nil must remain the attempt's account view. When
+// reconciliation would change that view, witnessPath and version identify the
+// newly visible cell and ErrDependency asks the executor to retry.
 func (sdb *IntraBlockState) accountRead(addr accounts.Address, account *accounts.Account, source ReadSource, version Version, witnessPath AccountPath) error {
 	if sdb.versionMap != nil {
 		sdb.MarkAddressAccess(addr, true)
@@ -3015,6 +3022,8 @@ func (sdb *IntraBlockState) accountRead(addr accounts.Address, account *accounts
 			}
 			hdr := ReadHeader{Source: source, Version: version}
 			if witnessPath == SelfDestructPath {
+				// Header-only recording would encode false, but preserved-account
+				// reconstruction depends on a true self-destruct.
 				sdb.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{ReadHeader: hdr, Val: true})
 			} else {
 				sdb.versionedReads.SetHeader(addr, witnessPath, accounts.NilKey, hdr)

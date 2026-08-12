@@ -25,6 +25,10 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
+// TestCreateOverAbsenceConsumedBeforePreservedDestructFlush requires a direct
+// dependency when a late destruct would turn a consumed absence into a live
+// preserved account. The collision-reads variant also proves that a stale
+// memoized destruct probe does not hide the conflict.
 func TestCreateOverAbsenceConsumedBeforePreservedDestructFlush(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -41,6 +45,7 @@ func TestCreateOverAbsenceConsumedBeforePreservedDestructFlush(t *testing.T) {
 			require.NoError(t, err)
 			require.True(t, empty)
 
+			// Publish only after Empty has populated the attempt's destruct memo.
 			destructVersion := Version{TxIndex: 0, Incarnation: 3}
 			writeAbsenceForkDestruct(vm, addr, destructVersion, 1_000_000, 1)
 
@@ -74,6 +79,8 @@ func TestCreateOverAbsenceConsumedBeforePreservedDestructFlush(t *testing.T) {
 	}
 }
 
+// TestCreateOverAbsenceConsumedBeforeEmptyDestructFlush verifies that no
+// dependency is raised when reconstruction agrees with the consumed absence.
 func TestCreateOverAbsenceConsumedBeforeEmptyDestructFlush(t *testing.T) {
 	t.Parallel()
 	ibs, vm, addr := newAbsenceForkState(t)
