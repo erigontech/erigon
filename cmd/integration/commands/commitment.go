@@ -281,6 +281,17 @@ func requireRebuildOutput(target dbstate.RebuildTarget, outPath string) error {
 	return nil
 }
 
+// refuseSqueezeForBinTarget rejects --squeeze for a bin rebuild. Squeeze rewrites
+// commitment values through BranchData, and a bin branch payload is not BranchData:
+// the same field bits name different things in the two encodings, so the pass would
+// read a branch flag as a plain-key flag and rewrite bytes that are not keys.
+func refuseSqueezeForBinTarget(target dbstate.RebuildTarget, squeeze bool) error {
+	if !squeeze || target.Variant != commitment.VariantBinPatriciaTrie {
+		return nil
+	}
+	return errors.New("--squeeze cannot run against a bin rebuild target: squeeze replaces plain keys in BranchData values, and a bin branch payload is not BranchData — its field bits carry other meanings, so the pass would rewrite bytes that are not plain keys")
+}
+
 func stageRebuildOutput(src datadir.Dirs, outPath string, target dbstate.RebuildTarget, resume bool, logger log.Logger) (*rebuildOutput, error) {
 	if outPath == "" {
 		return nil, errors.New("commitment rebuild: empty output datadir")
@@ -472,6 +483,9 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	}
 	if out != nil && reset {
 		return errors.New("--reset and --output.datadir are mutually exclusive: --reset writes to the source datadir")
+	}
+	if err := refuseSqueezeForBinTarget(rebuildTarget, squeeze); err != nil {
+		return err
 	}
 
 	dirs := datadir.New(datadirCli)

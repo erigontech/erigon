@@ -271,17 +271,29 @@ keys are deduped again at flush, so the emitted key set alone cannot tell the tw
 - Modify: `cmd/integration/commands/commitment.go`
 - Create: `cmd/integration/commands/commitment_squeeze_reject_test.go`
 
-- [ ] return an error when `squeeze` is set and the **requested rebuild target** is bin, in
+- [x] return an error when `squeeze` is set and the **requested rebuild target** is bin, in
       `commitmentRebuild` alongside the existing mutual-exclusion checks (`commitment.go:288-293`).
       Put it there, **not** at `squeeze.go:1125`: squeeze is the final pass, so erroring there wastes
       the entire rebuild, while `commitmentRebuild` runs before any work and `squeeze` is not
       consumed until `:403`/`:407`
-- [ ] key the check on the requested target variant, not on the datadir's scheme — the whole point of
+- [x] key the check on the requested target variant, not on the datadir's scheme — the whole point of
       Task 1 is that those can differ
-- [ ] error text names the reason: bin branch payloads are not `BranchData`
+- [x] error text names the reason: bin branch payloads are not `BranchData`
       (`execution/commitment/pbin_branch.go:55-57`) and their field bits collide (`:33-38`)
-- [ ] tests: bin target + `--squeeze` errors; bin target without it proceeds; hex unchanged
-- [ ] run tests — must pass before Task 6
+- [x] tests: bin target + `--squeeze` errors; bin target without it proceeds; hex unchanged
+- [x] run tests — must pass before Task 6
+
+Landed shape: `refuseSqueezeForBinTarget` is a predicate over `(target, squeeze)` — no globals, no
+datadir read — called from `commitmentRebuild` next to the other flag conflicts. The bits do collide
+concretely: `pbinFieldBranch` is 2 where hex reads `fieldAccountAddr`, and `pbinFieldAccountAddr` is
+4 where hex reads `fieldStorageAddr`, so a squeeze pass over a bin record would take a branch flag
+for a plain-key flag and rewrite bytes that are not keys.
+
+Ordering is pinned by passing a **nil** db to `commitmentRebuild`: the check must fire before
+anything touches the database or the filesystem. Mutation-checked — dropping the call makes that test
+crash in `blocksIO`. The two "proceeds" cases are asserted on the predicate rather than through
+`commitmentRebuild`, because getting past the checks with a nil db reaches `blocksIO`, whose
+`sync.Once` singleton would then be poisoned for every other test in the package.
 
 ### Task 6: Report commitment size per range
 
