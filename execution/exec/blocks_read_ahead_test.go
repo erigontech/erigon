@@ -19,6 +19,7 @@ package exec
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
@@ -66,6 +67,68 @@ func TestBlockReadAheaderCarriesBlockAccessList(t *testing.T) {
 	block, ok := bra.ReadBlockWithSenders(blockHash)
 	require.True(t, ok)
 	require.Equal(t, bal, block.BlockAccessList())
+}
+
+func TestBlockReadAheaderSuspendWarmupWaitsForActiveWarmup(t *testing.T) {
+	bra := NewBlockReadAheader()
+	warmupStarted := make(chan struct{})
+	finishWarmup := make(chan struct{})
+	warmupDone := make(chan struct{})
+	go func() {
+		bra.withWarmupPermit(func() {
+			close(warmupStarted)
+			<-finishWarmup
+		})
+		close(warmupDone)
+	}()
+	<-warmupStarted
+
+	suspendStarted := make(chan struct{})
+	resumeReadAhead := make(chan func())
+	go func() {
+		close(suspendStarted)
+		resumeReadAhead <- bra.SuspendWarmup()
+	}()
+	<-suspendStarted
+	select {
+	case resume := <-resumeReadAhead:
+		resume()
+		close(finishWarmup)
+		<-warmupDone
+		t.Fatal("SuspendWarmup returned while a warmup was active")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(finishWarmup)
+	resume := <-resumeReadAhead
+	resume()
+	<-warmupDone
+}
+
+func TestBlockReadAheaderSuspendWarmupBlocksNewWarmup(t *testing.T) {
+	bra := NewBlockReadAheader()
+	resume := bra.SuspendWarmup()
+
+	warmupStarted := make(chan struct{})
+	warmupAttempted := make(chan struct{})
+	go func() {
+		close(warmupAttempted)
+		bra.withWarmupPermit(func() { close(warmupStarted) })
+	}()
+	<-warmupAttempted
+	select {
+	case <-warmupStarted:
+		resume()
+		t.Fatal("warmup started while suspended")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	resume()
+	select {
+	case <-warmupStarted:
+	case <-time.After(time.Second):
+		t.Fatal("warmup did not start after suspension ended")
+	}
 }
 
 // seedFill places an entry with an exact txNum stamp through the public fill

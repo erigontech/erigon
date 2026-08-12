@@ -58,6 +58,9 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	}
 	defer e.semaphore.Release(1)
 
+	resumeReadAhead := e.suspendReadAhead()
+	defer resumeReadAhead()
+
 	tx, err := e.db.BeginTemporalRw(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to begin rw transaction: %w", err)
@@ -110,11 +113,6 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	// (BadBlock). Mirrors ValidateChain/forkchoice.
 	sd.SetStateCache(e.stateCache)
 	sd.SetCodeStore(e.codeStore)
-
-	// Drain in-flight warmup before the unwind bumps the cache epoch, so a
-	// fire-and-forget warmup can't Put a dead-fork value stamped with the new
-	// epoch (cross-fork contamination).
-	e.drainReadAhead()
 
 	// Set the unwind point and run the unwind
 	if err := e.pipelineExecutor.UnwindTo(targetBlock, stagedsync.StagedUnwind, tx); err != nil {

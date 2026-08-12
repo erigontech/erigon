@@ -33,8 +33,9 @@ type BlockReadAheader struct {
 	bals    *lru.Cache[common.Hash, []byte]
 
 	// this is for warming state
-	warming atomic.Bool // only one warmBody can run at a time
-	warmWg  sync.WaitGroup
+	warming    atomic.Bool // only one warmBody can run at a time
+	warmWg     sync.WaitGroup
+	warmupGate sync.RWMutex
 
 	// stateCache is the process-global state cache that SharedDomains.GetLatest
 	// consults on the EVM hot path. When set, warmBody routes its prefetches
@@ -124,9 +125,26 @@ func (bra *BlockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, h
 			return
 		}
 		bra.warmWg.Go(func() {
-			bra.warmBody(ctx, db, header, body, 8) // use 8 workers for warming
+			defer bra.warming.Store(false)
+			bra.withWarmupPermit(func() {
+				bra.warmBody(ctx, db, header, body, 8) // use 8 workers for warming
+			})
 		})
 	}
+}
+
+func (bra *BlockReadAheader) withWarmupPermit(warm func()) {
+	bra.warmupGate.RLock()
+	defer bra.warmupGate.RUnlock()
+	warm()
+}
+
+// SuspendWarmup waits for active state-cache warmup and prevents another
+// warmup from starting until the returned function is called. Keep it
+// suspended while staged unwind state is being read or published.
+func (bra *BlockReadAheader) SuspendWarmup() func() {
+	bra.warmupGate.Lock()
+	return bra.warmupGate.Unlock
 }
 
 // WaitForWarmup blocks until any in-flight warmBody goroutine finishes or
@@ -163,8 +181,6 @@ func (bra *BlockReadAheader) AddBlockAccessList(blockHash common.Hash, bal []byt
 // and block-level access lists. Each worker creates its own transaction.
 // Only one warmBody can run at a time - concurrent calls are no-ops.
 func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *types.Header, body *types.Body, workers int) {
-	defer bra.warming.Store(false)
-
 	if !dbg.ReadAhead {
 		return
 	}

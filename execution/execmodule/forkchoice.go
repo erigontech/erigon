@@ -360,10 +360,8 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	})
 	defer cleanupBeforeSemaRelease()
 
-	// Drain any warmup a preceding newPayload spawned: a fill from a pre-unwind
-	// view would survive this FCU's possible unwind epoch-bump as a live entry
-	// (see drainReadAhead). No new warmup starts while we hold the semaphore.
-	e.drainReadAhead()
+	resumeReadAhead := e.suspendReadAhead()
+	defer resumeReadAhead()
 
 	var validationError string
 
