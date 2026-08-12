@@ -1393,6 +1393,18 @@ func TestParallelExecWait(t *testing.T) {
 	})
 }
 
+// A send on a closed result channel is a channel-ownership bug: it must panic
+// loudly instead of being classified as routine cancellation, which the group
+// join would filter into silent result loss.
+func TestSendResultOnClosedChannelPanics(t *testing.T) {
+	applyResults := make(chan applyResult, 1)
+	close(applyResults)
+	be := &blockExecutor{applyResults: applyResults}
+	require.Panics(t, func() {
+		_ = be.sendResult(context.Background(), &blockResult{}, true)
+	})
+}
+
 // classifyApplyExit decides what the recorded fail-candidate means for the
 // executor outcome: block verdicts travel as data, infrastructure faults stay
 // operational errors.

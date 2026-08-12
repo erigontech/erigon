@@ -2449,18 +2449,10 @@ type blockExecutor struct {
 }
 
 // sendResult fans out an applyResult to the apply loop and commitment
-// calculator. The exec loop owns both channel closures.
-func (be *blockExecutor) sendResult(ctx context.Context, r applyResult, mustDeliver bool) (err error) {
-	defer func() {
-		// Treat a closed result channel as cancellation and re-raise other panics.
-		if rec := recover(); rec != nil {
-			if e, ok := rec.(runtime.Error); ok && strings.Contains(e.Error(), "send on closed channel") {
-				err = context.Canceled
-				return
-			}
-			panic(rec)
-		}
-	}()
+// calculator. Every sender and both channel closures run on the exec-loop
+// goroutine, so a send can never race a close — a send-on-closed panic here
+// is a channel-ownership bug and must stay loud.
+func (be *blockExecutor) sendResult(ctx context.Context, r applyResult, mustDeliver bool) error {
 	if err := be.deliver(ctx, be.applyResults, r, mustDeliver); err != nil {
 		return err
 	}
