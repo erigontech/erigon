@@ -19,7 +19,6 @@ package jsonrpc
 import (
 	"context"
 	"fmt"
-	"math/big"
 
 	"google.golang.org/grpc"
 
@@ -73,7 +72,7 @@ func (api *APIImpl) stateReaderAt(ctx context.Context, blockNrOrHash rpc.BlockNu
 }
 
 // GetBalance implements eth_getBalance. Returns the balance of an account for a given address.
-func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, blockNrOrHashArg *rpc.BlockNumberOrHash) (*hexutil.Big, error) {
+func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, blockNrOrHashArg *rpc.BlockNumberOrHash) (*hexutil.U256, error) {
 	blockNrOrHash := orLatest(blockNrOrHashArg)
 	tx, reader, err := api.stateReaderAt(ctx, blockNrOrHash)
 	if err != nil {
@@ -87,10 +86,10 @@ func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, bloc
 	}
 	if acc == nil {
 		// Special case - non-existent account is assumed to have zero balance
-		return (*hexutil.Big)(big.NewInt(0)), nil
+		return new(hexutil.U256), nil
 	}
 
-	return (*hexutil.Big)(acc.Balance.ToBig()), nil
+	return (*hexutil.U256)(&acc.Balance), nil
 }
 
 // GetTransactionCount implements eth_getTransactionCount. Returns the number of transactions sent from an address (the nonce).
