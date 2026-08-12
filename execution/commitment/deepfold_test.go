@@ -954,3 +954,82 @@ func TestFillFromLowerCell_StorageBranchSyncsNavPath(t *testing.T) {
 	require.Equal(t, []byte{0x5, 0xd}, branchCell.hashedExtension[:branchCell.hashedExtLen],
 		"a keyless cell deep in storage still navigates by its extension")
 }
+
+// keyArena backs collectSubtreeKeys in streaming_deep_fold.go.
+func TestKeyArena_PointerStability(t *testing.T) {
+	var arena keyArena
+
+	inputs := make([][]byte, 0, 4096)
+	got := make([][]byte, 0, 4096)
+	// 4096 small keys roll the arena over at least two chunks.
+	for i := range 4096 {
+		in := bytes.Repeat([]byte{byte(i), byte(i >> 8)}, 32)
+		inputs = append(inputs, in)
+		got = append(got, arena.copy(in))
+	}
+	// Oversized key forces the max(keyArenaChunk, len) allocation path.
+	big := bytes.Repeat([]byte{0xAB}, keyArenaChunk+128)
+	inputs = append(inputs, big)
+	got = append(got, arena.copy(big))
+
+	for i, in := range inputs {
+		require.True(t, bytes.Equal(in, got[i]),
+			"key %d corrupted: returned slice does not equal its input", i)
+		require.Equal(t, len(got[i]), cap(got[i]),
+			"key %d not full-cap: a caller append could overwrite the next key", i)
+	}
+
+	for i := range got {
+		for j := range got[i] {
+			got[i][j] = byte(i)
+		}
+	}
+	for i := range got {
+		for j := range got[i] {
+			require.Equal(t, byte(i), got[i][j],
+				"key %d overlaps another arena slice (overwritten at byte %d)", i, j)
+		}
+	}
+}
+
+func TestKeyArena_ChunkSizedFromRemaining(t *testing.T) {
+	const keyLen = 144
+
+	t.Run("small subtree does not burn a full chunk", func(t *testing.T) {
+		const keys = 32
+		arena := keyArena{remaining: keys}
+		for range keys {
+			arena.copy(make([]byte, keyLen))
+		}
+		require.Equal(t, keys*keyLen, cap(arena.buf))
+	})
+
+	t.Run("large subtree still caps at one chunk", func(t *testing.T) {
+		arena := keyArena{remaining: 10 * keyArenaChunk / keyLen}
+		arena.copy(make([]byte, keyLen))
+		require.Equal(t, keyArenaChunk, cap(arena.buf))
+	})
+
+	t.Run("oversized key gets its own backing", func(t *testing.T) {
+		arena := keyArena{remaining: 4}
+		got := arena.copy(make([]byte, 2*keyArenaChunk))
+		require.Len(t, got, 2*keyArenaChunk)
+		require.Equal(t, 2*keyArenaChunk, cap(arena.buf))
+	})
+
+	t.Run("copies stay stable across a chunk swap", func(t *testing.T) {
+		arena := keyArena{remaining: 2}
+		first := arena.copy(bytes.Repeat([]byte{0xAA}, keyLen))
+		for i := range 8 {
+			arena.copy(bytes.Repeat([]byte{byte(i)}, keyLen))
+		}
+		require.Equal(t, bytes.Repeat([]byte{0xAA}, keyLen), first)
+	})
+
+	t.Run("unhinted arena falls back to one key per chunk growth", func(t *testing.T) {
+		var arena keyArena
+		got := arena.copy(make([]byte, keyLen))
+		require.Len(t, got, keyLen)
+		require.Equal(t, keyLen, cap(arena.buf))
+	})
+}
