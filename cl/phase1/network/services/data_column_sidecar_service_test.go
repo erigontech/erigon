@@ -231,7 +231,7 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenInvalidDataColumnSid
 func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenIncorrectSubnet_ReturnsError() {
 	// Setup mock functions
 	incorrectSubnet := uint64(987654321)
-	computeSubnetForDataColumnSidecar = func(index uint64) uint64 { return 1234 } // Return different subnet
+	computeSubnetForDataColumnSidecar = func(index uint64, _ *clparams.BeaconChainConfig) uint64 { return 1234 } // Return different subnet
 	verifyDataColumnSidecar = t.mockFuncs.VerifyDataColumnSidecar
 	blsVerify = t.mockFuncs.BlsVerify
 
@@ -469,7 +469,7 @@ var testBlockRoot = common.Hash{0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 
 
 // createMockGloasDataColumnSidecar creates a GLOAS-style sidecar with Slot and BeaconBlockRoot
 func createMockGloasDataColumnSidecar(slot uint64, index uint64, blockRoot common.Hash) *cltypes.DataColumnSidecar {
-	sidecar := cltypes.NewDataColumnSidecarWithVersion(clparams.GloasVersion)
+	sidecar := cltypes.NewDataColumnSidecarWithVersion(clparams.GloasVersion, &clparams.MainnetBeaconConfig)
 	sidecar.Index = index
 	sidecar.Slot = slot
 	sidecar.BeaconBlockRoot = blockRoot
@@ -618,7 +618,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenInvalidSidecar_
 // TestGloasProcessMessage_WhenIncorrectSubnet_ReturnsError tests GLOAS subnet validation
 func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenIncorrectSubnet_ReturnsError() {
 	verifyDataColumnSidecarWithCommitments = t.mockFuncs.VerifyDataColumnSidecarWithCommitments
-	computeSubnetForDataColumnSidecar = func(index uint64) uint64 { return 1234 }
+	computeSubnetForDataColumnSidecar = func(index uint64, _ *clparams.BeaconChainConfig) uint64 { return 1234 }
 
 	incorrectSubnet := uint64(9999)
 

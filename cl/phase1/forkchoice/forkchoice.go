@@ -29,6 +29,8 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/consensus"
+	beaconengine "github.com/erigontech/erigon/cl/consensus/beacon"
 	"github.com/erigontech/erigon/cl/das"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -153,6 +155,9 @@ type ForkChoiceStore struct {
 	// EL
 	engine execution_client.ExecutionEngine
 
+	// CL consensus engine (pluggable per chain type)
+	consensusEngine consensus.Engine
+
 	// operations pool
 	operationsPool pool.OperationsPool
 	beaconCfg      *clparams.BeaconChainConfig
@@ -225,6 +230,7 @@ func NewForkChoiceStore(
 	localValidators *validator_params.ValidatorParams,
 	probabilisticHeadGetter bool,
 	db kv.RwDB,
+	clEngine ...consensus.Engine,
 ) (*ForkChoiceStore, error) {
 	anchorRoot, err := anchorState.BlockRoot()
 	if err != nil {
@@ -345,6 +351,12 @@ func NewForkChoiceStore(
 		eth2Roots.Add(common.Hash{}, anchorExecHeader.BlockHash)
 	}
 
+	var ce consensus.Engine
+	if len(clEngine) > 0 && clEngine[0] != nil {
+		ce = clEngine[0]
+	} else {
+		ce = &beaconengine.Engine{}
+	}
 	headSet := make(map[common.Hash]struct{})
 	headSet[anchorRoot] = struct{}{}
 	f := &ForkChoiceStore{
@@ -385,6 +397,7 @@ func NewForkChoiceStore(
 		payloadStatusByRoot:            payloadStatusByRoot,
 		executionPayloadGasLimit:       executionPayloadGasLimit,
 		db:                             db,
+		consensusEngine:                ce,
 	}
 	f.justifiedCheckpoint.Store(anchorCheckpoint)
 	f.finalizedCheckpoint.Store(anchorCheckpoint)
@@ -574,6 +587,10 @@ func (f *ForkChoiceStore) Engine() execution_client.ExecutionEngine {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	return f.engine
+}
+
+func (f *ForkChoiceStore) ConsensusEngine() consensus.Engine {
+	return f.consensusEngine
 }
 
 // FinalizedCheckpoint returns justified checkpoint

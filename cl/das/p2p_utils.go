@@ -26,9 +26,9 @@ const (
 // This function is re-entrant and thread-safe.
 // For Fulu: uses KzgCommitments from the sidecar.
 // For GLOAS: use VerifyDataColumnSidecarWithCommitments instead.
-func VerifyDataColumnSidecar(sidecar *cltypes.DataColumnSidecar) bool {
+func VerifyDataColumnSidecar(sidecar *cltypes.DataColumnSidecar, cfg *clparams.BeaconChainConfig) bool {
 	// The sidecar index must be within the valid range
-	if sidecar.Index >= clparams.GetBeaconConfig().NumberOfColumns {
+	if sidecar.Index >= cfg.NumberOfColumns {
 		return false
 	}
 
@@ -59,9 +59,9 @@ func VerifyDataColumnSidecar(sidecar *cltypes.DataColumnSidecar) bool {
 // VerifyDataColumnSidecarWithCommitments verifies if the data column sidecar is valid according to GLOAS protocol rules.
 // [Modified in Gloas:EIP7732] kzg_commitments is now passed as a parameter.
 // This function is re-entrant and thread-safe.
-func VerifyDataColumnSidecarWithCommitments(sidecar *cltypes.DataColumnSidecar, kzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) bool {
+func VerifyDataColumnSidecarWithCommitments(sidecar *cltypes.DataColumnSidecar, kzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment], cfg *clparams.BeaconChainConfig) bool {
 	// The sidecar index must be within the valid range
-	if sidecar.Index >= clparams.GetBeaconConfig().NumberOfColumns {
+	if sidecar.Index >= cfg.NumberOfColumns {
 		return false
 	}
 
@@ -162,8 +162,8 @@ func ComputeCells(blobs *cltypes.Blob) ([]cltypes.Cell, error) {
 
 // ComputeSubnetForDataColumnSidecar computes the subnet ID for a given data column sidecar index.
 // This function is re-entrant and thread-safe.
-func ComputeSubnetForDataColumnSidecar(columnIndex cltypes.ColumnIndex) uint64 {
-	return columnIndex % clparams.GetBeaconConfig().DataColumnSidecarSubnetCount
+func ComputeSubnetForDataColumnSidecar(columnIndex cltypes.ColumnIndex, cfg *clparams.BeaconChainConfig) uint64 {
+	return columnIndex % cfg.DataColumnSidecarSubnetCount
 }
 
 // VerifyDataColumnSidecarInclusionProof verifies if the inclusion proof in the sidecar is correct.

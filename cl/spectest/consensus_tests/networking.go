@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
 	"github.com/erigontech/erigon/cl/spectest/spectest"
 	"github.com/erigontech/erigon/p2p/enode"
@@ -29,7 +30,7 @@ func TestGetCustodyGroups(t *testing.T, root fs.FS, c spectest.TestCase) (err er
 	bigInt.FillBytes(nodeIDBytes)
 	nodeID := enode.ID(nodeIDBytes)
 
-	custodyGroups, err := peerdasutils.GetCustodyGroups(nodeID, meta.CustodyGroupCount)
+	custodyGroups, err := peerdasutils.GetCustodyGroups(nodeID, meta.CustodyGroupCount, &clparams.MainnetBeaconConfig)
 	require.NoError(t, err)
 
 	assert.Equal(t, meta.Result, custodyGroups)
@@ -44,7 +45,7 @@ func TestComputeColumnsForCustodyGroup(t *testing.T, root fs.FS, c spectest.Test
 	err = spectest.ReadMeta(root, "meta.yaml", &meta)
 	require.NoError(t, err)
 
-	columns, err := peerdasutils.ComputeColumnsForCustodyGroup(meta.CustodyGroup)
+	columns, err := peerdasutils.ComputeColumnsForCustodyGroup(meta.CustodyGroup, &clparams.MainnetBeaconConfig)
 	require.NoError(t, err)
 
 	assert.Equal(t, meta.Result, columns)

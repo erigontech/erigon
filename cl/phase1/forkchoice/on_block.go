@@ -89,6 +89,7 @@ func collectOnBlockLatencyToUnixTime(ethClock eth_clock.EthereumClock, slot, cur
 }
 
 func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
+	checkDataAvaiability = checkDataAvaiability && f.consensusEngine.ShouldVerifyDataAvailability()
 	f.mu.Lock()
 	unlocked := false
 	defer func() {

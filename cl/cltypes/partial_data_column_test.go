@@ -72,7 +72,7 @@ func TestPartialDataColumnHeader_Fulu(t *testing.T) {
 	if _, err := os.Stat(testDir); os.IsNotExist(err) {
 		t.Skip("spec test data not found")
 	}
-	obj := cltypes.NewPartialDataColumnHeader(clparams.FuluVersion)
+	obj := cltypes.NewPartialDataColumnHeader(clparams.FuluVersion, &clparams.MainnetBeaconConfig)
 	testSSZRoundTrip(t, testDir, clparams.FuluVersion, obj)
 }
 
@@ -81,7 +81,7 @@ func TestPartialDataColumnHeader_Gloas(t *testing.T) {
 	if _, err := os.Stat(testDir); os.IsNotExist(err) {
 		t.Skip("spec test data not found")
 	}
-	obj := cltypes.NewPartialDataColumnHeader(clparams.GloasVersion)
+	obj := cltypes.NewPartialDataColumnHeader(clparams.GloasVersion, &clparams.MainnetBeaconConfig)
 	testSSZRoundTrip(t, testDir, clparams.GloasVersion, obj)
 }
 
@@ -90,7 +90,7 @@ func TestPartialDataColumnSidecar_Fulu(t *testing.T) {
 	if _, err := os.Stat(testDir); os.IsNotExist(err) {
 		t.Skip("spec test data not found")
 	}
-	obj := cltypes.NewPartialDataColumnSidecar(clparams.FuluVersion)
+	obj := cltypes.NewPartialDataColumnSidecar(clparams.FuluVersion, &clparams.MainnetBeaconConfig)
 	testSSZRoundTrip(t, testDir, clparams.FuluVersion, obj)
 }
 
@@ -99,7 +99,7 @@ func TestPartialDataColumnSidecar_Gloas(t *testing.T) {
 	if _, err := os.Stat(testDir); os.IsNotExist(err) {
 		t.Skip("spec test data not found")
 	}
-	obj := cltypes.NewPartialDataColumnSidecar(clparams.GloasVersion)
+	obj := cltypes.NewPartialDataColumnSidecar(clparams.GloasVersion, &clparams.MainnetBeaconConfig)
 	testSSZRoundTrip(t, testDir, clparams.GloasVersion, obj)
 }
 
@@ -108,7 +108,7 @@ func TestPartialDataColumnPartsMetadata_Fulu(t *testing.T) {
 	if _, err := os.Stat(testDir); os.IsNotExist(err) {
 		t.Skip("spec test data not found")
 	}
-	obj := cltypes.NewPartialDataColumnPartsMetadata()
+	obj := cltypes.NewPartialDataColumnPartsMetadata(&clparams.MainnetBeaconConfig)
 	testSSZRoundTrip(t, testDir, clparams.FuluVersion, obj)
 }
 
@@ -117,6 +117,6 @@ func TestPartialDataColumnPartsMetadata_Gloas(t *testing.T) {
 	if _, err := os.Stat(testDir); os.IsNotExist(err) {
 		t.Skip("spec test data not found")
 	}
-	obj := cltypes.NewPartialDataColumnPartsMetadata()
+	obj := cltypes.NewPartialDataColumnPartsMetadata(&clparams.MainnetBeaconConfig)
 	testSSZRoundTrip(t, testDir, clparams.GloasVersion, obj)
 }

@@ -485,6 +485,7 @@ func (f *ForkChoiceStore) StoreAnchorEnvelope(blockRoot common.Hash, signedEnvel
 //   - checkBlobData: if true, verify blob data availability via PeerDAS before processing
 //   - validatePayload: if true, call engine.NewPayload() to validate with EL before state transition
 func (f *ForkChoiceStore) OnExecutionPayload(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) error {
+	checkBlobData = checkBlobData && f.consensusEngine.ShouldVerifyDataAvailability()
 	if signedEnvelope == nil || signedEnvelope.Message == nil {
 		return errors.New("nil execution payload envelope")
 	}

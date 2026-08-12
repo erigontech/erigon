@@ -371,10 +371,10 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 			if step.GetColumns() != nil {
 				allok := true
 				for _, filename := range step.GetColumns() {
-					column := cltypes.NewDataColumnSidecar()
+					column := cltypes.NewDataColumnSidecar(beaconConfig)
 					err := spectest.ReadSsz(root, c.Version(), filename+".ssz_snappy", column)
 					require.NoError(t, err, stepstr)
-					if das.VerifyDataColumnSidecar(column) && das.VerifyDataColumnSidecarInclusionProof(column) && das.VerifyDataColumnSidecarKZGProofs(column) {
+					if das.VerifyDataColumnSidecar(column, beaconConfig) && das.VerifyDataColumnSidecarInclusionProof(column) && das.VerifyDataColumnSidecarKZGProofs(column) {
 						// write to columnStorage
 						blockRoot, err := blk.Block.HashSSZ()
 						require.NoError(t, err)

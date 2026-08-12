@@ -126,8 +126,8 @@ func (s *dataColumnStorageImpl) ReadColumnSidecarByColumnIndex(ctx context.Conte
 		return nil, err
 	}
 	defer fh.Close()
-	data := &cltypes.DataColumnSidecar{}
 	version := s.beaconChainConfig.GetCurrentStateVersion(slot / s.beaconChainConfig.SlotsPerEpoch)
+	data := cltypes.NewDataColumnSidecarWithVersion(version, s.beaconChainConfig)
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(fh, data, version); err != nil {
 		return nil, err
 	}

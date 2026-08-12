@@ -214,24 +214,27 @@ func addSszTests() {
 		With("PendingConsolidation", sszStaticTestByEmptyObject(&solid.PendingConsolidation{}, runAfterVersion(clparams.ElectraVersion))).         // no need json test
 		With("PendingDeposit", sszStaticTestByEmptyObject(&solid.PendingDeposit{}, runAfterVersion(clparams.ElectraVersion))).                     // no need json test
 		With("PendingPartialWithdrawal", sszStaticTestByEmptyObject(&solid.PendingPartialWithdrawal{}, runAfterVersion(clparams.ElectraVersion))). // no need json test
-		With("DataColumnsByRootIdentifier", sszStaticTestByEmptyObject(&cltypes.DataColumnsByRootIdentifier{}, runAfterVersion(clparams.FuluVersion))).
+		With("DataColumnsByRootIdentifier", sszStaticTestNewObjectByFunc(
+			func(v clparams.StateVersion) *cltypes.DataColumnsByRootIdentifier {
+				return cltypes.NewDataColumnsByRootIdentifier(&clparams.MainnetBeaconConfig)
+			}, runAfterVersion(clparams.FuluVersion))).
 		With("MatrixEntry", sszStaticTestByEmptyObject(&cltypes.MatrixEntry{}, withTestJson(), runAfterVersion(clparams.FuluVersion))).
 		With("DataColumnSidecar", sszStaticTestNewObjectByFunc(
 			func(v clparams.StateVersion) *cltypes.DataColumnSidecar {
-				return cltypes.NewDataColumnSidecarWithVersion(v)
+				return cltypes.NewDataColumnSidecarWithVersion(v, &clparams.MainnetBeaconConfig)
 			}, withTestJson(), runAfterVersion(clparams.FuluVersion))).
 		// [New in Fulu] Partial data column types
 		With("PartialDataColumnHeader", sszStaticTestNewObjectByFunc(
 			func(v clparams.StateVersion) *cltypes.PartialDataColumnHeader {
-				return cltypes.NewPartialDataColumnHeader(v)
+				return cltypes.NewPartialDataColumnHeader(v, &clparams.MainnetBeaconConfig)
 			}, runAfterVersion(clparams.FuluVersion))).
 		With("PartialDataColumnSidecar", sszStaticTestNewObjectByFunc(
 			func(v clparams.StateVersion) *cltypes.PartialDataColumnSidecar {
-				return cltypes.NewPartialDataColumnSidecar(v)
+				return cltypes.NewPartialDataColumnSidecar(v, &clparams.MainnetBeaconConfig)
 			}, runAfterVersion(clparams.FuluVersion))).
 		With("PartialDataColumnPartsMetadata", sszStaticTestNewObjectByFunc(
 			func(v clparams.StateVersion) *cltypes.PartialDataColumnPartsMetadata {
-				return cltypes.NewPartialDataColumnPartsMetadata()
+				return cltypes.NewPartialDataColumnPartsMetadata(&clparams.MainnetBeaconConfig)
 			}, runAfterVersion(clparams.FuluVersion))).
 		// [New in Gloas:EIP7732] GLOAS SSZ types
 		With("Builder", sszStaticTestByEmptyObject(&cltypes.Builder{}, runAfterVersion(clparams.GloasVersion))).

@@ -53,10 +53,8 @@ func TestDataColumnSidecarsByRootMissingRootReturnsResourceUnavailable(t *testin
 	ctx, host, host1, beaconCfg := setupDataColumnSidecarHandlerTest(t)
 
 	req := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](1)
-	id := &cltypes.DataColumnsByRootIdentifier{
-		BlockRoot: common.Hash{0x42},
-		Columns:   solid.NewUint64ListSSZ(int(beaconCfg.NumberOfColumns)),
-	}
+	id := cltypes.NewDataColumnsByRootIdentifier(beaconCfg)
+	id.BlockRoot = common.Hash{0x42}
 	id.Columns.Append(0)
 	req.Append(id)
 
@@ -74,10 +72,8 @@ func TestDataColumnSidecarsByRootBeforeFuluReturnsResourceUnavailable(t *testing
 	ctx, host, host1, beaconCfg := setupDataColumnSidecarHandlerTestWithFuluForkEpoch(t, math.MaxUint64)
 
 	req := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](1)
-	id := &cltypes.DataColumnsByRootIdentifier{
-		BlockRoot: common.Hash{0x42},
-		Columns:   solid.NewUint64ListSSZ(int(beaconCfg.NumberOfColumns)),
-	}
+	id := cltypes.NewDataColumnsByRootIdentifier(beaconCfg)
+	id.BlockRoot = common.Hash{0x42}
 	id.Columns.Append(0)
 	req.Append(id)
 
@@ -95,10 +91,9 @@ func TestDataColumnSidecarsByRootBeforeFuluInvalidColumnReturnsInvalidRequest(t 
 	ctx, host, host1, beaconCfg := setupDataColumnSidecarHandlerTestWithFuluForkEpoch(t, math.MaxUint64)
 
 	req := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](1)
-	id := &cltypes.DataColumnsByRootIdentifier{
-		BlockRoot: common.Hash{0x42},
-		Columns:   solid.NewUint64ListSSZ(int(beaconCfg.NumberOfColumns) + 1),
-	}
+	id := cltypes.NewDataColumnsByRootIdentifier(beaconCfg)
+	id.BlockRoot = common.Hash{0x42}
+	id.Columns = solid.NewUint64ListSSZ(int(beaconCfg.NumberOfColumns) + 1)
 	id.Columns.Append(beaconCfg.NumberOfColumns)
 	req.Append(id)
 
@@ -126,16 +121,14 @@ func TestDataColumnSidecarsByRootFoundSidecarReturnsSuccessWithoutTrailingResour
 	blockRoot, err := header.Header.HashSSZ()
 	require.NoError(t, err)
 	columnIndex := uint64(0)
-	sidecar := cltypes.NewDataColumnSidecar()
+	sidecar := cltypes.NewDataColumnSidecar(beaconCfg)
 	sidecar.Index = columnIndex
 	sidecar.SignedBlockHeader.Header.Slot = slot
 	require.NoError(t, columnStorage.WriteColumnSidecars(ctx, blockRoot, int64(columnIndex), sidecar))
 
 	req := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](1)
-	id := &cltypes.DataColumnsByRootIdentifier{
-		BlockRoot: blockRoot,
-		Columns:   solid.NewUint64ListSSZ(int(beaconCfg.NumberOfColumns)),
-	}
+	id := cltypes.NewDataColumnsByRootIdentifier(beaconCfg)
+	id.BlockRoot = blockRoot
 	id.Columns.Append(columnIndex)
 	req.Append(id)
 
@@ -159,7 +152,7 @@ func TestDataColumnSidecarsByRootFoundSidecarReturnsSuccessWithoutTrailingResour
 	_, err = io.ReadFull(stream, forkDigest)
 	require.NoError(t, err)
 
-	got := cltypes.NewDataColumnSidecar()
+	got := cltypes.NewDataColumnSidecar(beaconCfg)
 	require.NoError(t, ssz_snappy.DecodeAndReadNoForkDigest(stream, got, clparams.FuluVersion))
 	require.Equal(t, columnIndex, got.Index)
 
@@ -189,10 +182,9 @@ func TestDataColumnSidecarsByRootEmptyColumnsReturnsEmptySuccess(t *testing.T) {
 	ctx, host, host1, beaconCfg := setupDataColumnSidecarHandlerTest(t)
 
 	req := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](1)
-	req.Append(&cltypes.DataColumnsByRootIdentifier{
-		BlockRoot: common.Hash{0x42},
-		Columns:   solid.NewUint64ListSSZ(int(beaconCfg.NumberOfColumns)),
-	})
+	emptyId := cltypes.NewDataColumnsByRootIdentifier(beaconCfg)
+	emptyId.BlockRoot = common.Hash{0x42}
+	req.Append(emptyId)
 
 	var reqBuf bytes.Buffer
 	require.NoError(t, ssz_snappy.EncodeAndWrite(&reqBuf, req))
@@ -208,10 +200,9 @@ func TestDataColumnSidecarsByRootInvalidColumnReturnsInvalidRequest(t *testing.T
 	ctx, host, host1, beaconCfg := setupDataColumnSidecarHandlerTest(t)
 
 	req := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](1)
-	id := &cltypes.DataColumnsByRootIdentifier{
-		BlockRoot: common.Hash{0x42},
-		Columns:   solid.NewUint64ListSSZ(int(beaconCfg.NumberOfColumns) + 1),
-	}
+	id := cltypes.NewDataColumnsByRootIdentifier(beaconCfg)
+	id.BlockRoot = common.Hash{0x42}
+	id.Columns = solid.NewUint64ListSSZ(int(beaconCfg.NumberOfColumns) + 1)
 	id.Columns.Append(beaconCfg.NumberOfColumns)
 	req.Append(id)
 
@@ -229,10 +220,9 @@ func TestDataColumnSidecarsByRootTooManyColumnsReturnsInvalidRequest(t *testing.
 	ctx, host, host1, beaconCfg := setupDataColumnSidecarHandlerTest(t)
 
 	req := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](1)
-	id := &cltypes.DataColumnsByRootIdentifier{
-		BlockRoot: common.Hash{0x42},
-		Columns:   solid.NewUint64ListSSZ(int(beaconCfg.NumberOfColumns) + 1),
-	}
+	id := cltypes.NewDataColumnsByRootIdentifier(beaconCfg)
+	id.BlockRoot = common.Hash{0x42}
+	id.Columns = solid.NewUint64ListSSZ(int(beaconCfg.NumberOfColumns) + 1)
 	for range beaconCfg.NumberOfColumns + 1 {
 		id.Columns.Append(0)
 	}
@@ -251,11 +241,8 @@ func TestDataColumnSidecarsByRootTooManyColumnsReturnsInvalidRequest(t *testing.
 func TestDataColumnSidecarsByRangeZeroCountReturnsEmptySuccess(t *testing.T) {
 	ctx, host, host1, beaconCfg := setupDataColumnSidecarHandlerTest(t)
 
-	req := &cltypes.ColumnSidecarsByRangeRequest{
-		StartSlot: 0,
-		Count:     0,
-		Columns:   solid.NewUint64ListSSZ(int(beaconCfg.NumberOfColumns)),
-	}
+	req := cltypes.NewColumnSidecarsByRangeRequest(beaconCfg)
+	req.Count = 0
 	req.Columns.Append(0)
 
 	var reqBuf bytes.Buffer
@@ -271,11 +258,8 @@ func TestDataColumnSidecarsByRangeZeroCountReturnsEmptySuccess(t *testing.T) {
 func TestDataColumnSidecarsByRangeEmptyColumnsReturnsEmptySuccess(t *testing.T) {
 	ctx, host, host1, beaconCfg := setupDataColumnSidecarHandlerTest(t)
 
-	req := &cltypes.ColumnSidecarsByRangeRequest{
-		StartSlot: 0,
-		Count:     1,
-		Columns:   solid.NewUint64ListSSZ(int(beaconCfg.NumberOfColumns)),
-	}
+	req := cltypes.NewColumnSidecarsByRangeRequest(beaconCfg)
+	req.Count = 1
 
 	var reqBuf bytes.Buffer
 	require.NoError(t, ssz_snappy.EncodeAndWrite(&reqBuf, req))
@@ -290,11 +274,8 @@ func TestDataColumnSidecarsByRangeEmptyColumnsReturnsEmptySuccess(t *testing.T) 
 func TestDataColumnSidecarsByRangeMissingSidecarsReturnsEmptySuccess(t *testing.T) {
 	ctx, host, host1, beaconCfg := setupDataColumnSidecarHandlerTest(t)
 
-	req := &cltypes.ColumnSidecarsByRangeRequest{
-		StartSlot: 0,
-		Count:     1,
-		Columns:   solid.NewUint64ListSSZ(int(beaconCfg.NumberOfColumns)),
-	}
+	req := cltypes.NewColumnSidecarsByRangeRequest(beaconCfg)
+	req.Count = 1
 	req.Columns.Append(0)
 
 	var reqBuf bytes.Buffer
@@ -310,11 +291,9 @@ func TestDataColumnSidecarsByRangeMissingSidecarsReturnsEmptySuccess(t *testing.
 func TestDataColumnSidecarsByRangeFutureRangeReturnsEmptySuccess(t *testing.T) {
 	ctx, host, host1, beaconCfg := setupDataColumnSidecarHandlerTest(t)
 
-	req := &cltypes.ColumnSidecarsByRangeRequest{
-		StartSlot: getEthClock(t).GetCurrentSlot() + 1,
-		Count:     1,
-		Columns:   solid.NewUint64ListSSZ(int(beaconCfg.NumberOfColumns)),
-	}
+	req := cltypes.NewColumnSidecarsByRangeRequest(beaconCfg)
+	req.StartSlot = getEthClock(t).GetCurrentSlot() + 1
+	req.Count = 1
 	req.Columns.Append(0)
 
 	var reqBuf bytes.Buffer
@@ -330,11 +309,8 @@ func TestDataColumnSidecarsByRangeFutureRangeReturnsEmptySuccess(t *testing.T) {
 func TestDataColumnSidecarsByRangeBeforeFuluReturnsEmptySuccess(t *testing.T) {
 	ctx, host, host1, beaconCfg := setupDataColumnSidecarHandlerTestWithFuluForkEpoch(t, 1)
 
-	req := &cltypes.ColumnSidecarsByRangeRequest{
-		StartSlot: 0,
-		Count:     beaconCfg.SlotsPerEpoch,
-		Columns:   solid.NewUint64ListSSZ(int(beaconCfg.NumberOfColumns)),
-	}
+	req := cltypes.NewColumnSidecarsByRangeRequest(beaconCfg)
+	req.Count = beaconCfg.SlotsPerEpoch
 	req.Columns.Append(0)
 
 	var reqBuf bytes.Buffer
@@ -350,11 +326,9 @@ func TestDataColumnSidecarsByRangeBeforeFuluReturnsEmptySuccess(t *testing.T) {
 func TestDataColumnSidecarsByRangeInvalidColumnReturnsInvalidRequest(t *testing.T) {
 	ctx, host, host1, beaconCfg := setupDataColumnSidecarHandlerTest(t)
 
-	req := &cltypes.ColumnSidecarsByRangeRequest{
-		StartSlot: 0,
-		Count:     1,
-		Columns:   solid.NewUint64ListSSZ(int(beaconCfg.NumberOfColumns) + 1),
-	}
+	req := cltypes.NewColumnSidecarsByRangeRequest(beaconCfg)
+	req.Count = 1
+	req.Columns = solid.NewUint64ListSSZ(int(beaconCfg.NumberOfColumns) + 1)
 	req.Columns.Append(beaconCfg.NumberOfColumns)
 
 	var reqBuf bytes.Buffer
@@ -370,11 +344,9 @@ func TestDataColumnSidecarsByRangeInvalidColumnReturnsInvalidRequest(t *testing.
 func TestDataColumnSidecarsByRangeTooManyColumnsReturnsInvalidRequest(t *testing.T) {
 	ctx, host, host1, beaconCfg := setupDataColumnSidecarHandlerTest(t)
 
-	req := &cltypes.ColumnSidecarsByRangeRequest{
-		StartSlot: 0,
-		Count:     1,
-		Columns:   solid.NewUint64ListSSZ(int(beaconCfg.NumberOfColumns) + 1),
-	}
+	req := cltypes.NewColumnSidecarsByRangeRequest(beaconCfg)
+	req.Count = 1
+	req.Columns = solid.NewUint64ListSSZ(int(beaconCfg.NumberOfColumns) + 1)
 	for range beaconCfg.NumberOfColumns + 1 {
 		req.Columns.Append(0)
 	}
@@ -392,11 +364,9 @@ func TestDataColumnSidecarsByRangeTooManyColumnsReturnsInvalidRequest(t *testing
 func TestDataColumnSidecarsByRangeOverflowReturnsInvalidRequest(t *testing.T) {
 	ctx, host, host1, beaconCfg := setupDataColumnSidecarHandlerTest(t)
 
-	req := &cltypes.ColumnSidecarsByRangeRequest{
-		StartSlot: math.MaxUint64,
-		Count:     1,
-		Columns:   solid.NewUint64ListSSZ(int(beaconCfg.NumberOfColumns)),
-	}
+	req := cltypes.NewColumnSidecarsByRangeRequest(beaconCfg)
+	req.StartSlot = math.MaxUint64
+	req.Count = 1
 	req.Columns.Append(0)
 
 	var reqBuf bytes.Buffer
@@ -412,11 +382,8 @@ func TestDataColumnSidecarsByRangeOverflowReturnsInvalidRequest(t *testing.T) {
 func TestDataColumnSidecarsByRangeTooLargeReturnsInvalidRequest(t *testing.T) {
 	ctx, host, host1, beaconCfg := setupDataColumnSidecarHandlerTest(t)
 
-	req := &cltypes.ColumnSidecarsByRangeRequest{
-		StartSlot: 0,
-		Count:     beaconCfg.MinEpochsForDataColumnSidecarsRequests*beaconCfg.SlotsPerEpoch + 1,
-		Columns:   solid.NewUint64ListSSZ(int(beaconCfg.NumberOfColumns)),
-	}
+	req := cltypes.NewColumnSidecarsByRangeRequest(beaconCfg)
+	req.Count = beaconCfg.MinEpochsForDataColumnSidecarsRequests*beaconCfg.SlotsPerEpoch + 1
 	req.Columns.Append(0)
 
 	var reqBuf bytes.Buffer
