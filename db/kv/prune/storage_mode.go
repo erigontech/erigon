@@ -124,7 +124,7 @@ func (m Mode) String() string {
 		var sb strings.Builder
 		sb.WriteString(fullModeStr + "(legacy)")
 		if m.History.toValue() != FullMode.History.toValue() {
-			fmt.Fprintf(&sb, " --prune.distance=%d", m.History.toValue())
+			fmt.Fprintf(&sb, " --prune.distance=%s", stateHistoryDistanceCLIValue(m.History.toValue()))
 		}
 		appendCommitmentHistory(&sb, m)
 		appendReceipts(&sb, m)
@@ -136,7 +136,7 @@ func (m Mode) String() string {
 		var sb strings.Builder
 		sb.WriteString(blockModeStr)
 		if m.History.toValue() != BlocksMode.History.toValue() {
-			fmt.Fprintf(&sb, " --prune.distance=%d", m.History.toValue())
+			fmt.Fprintf(&sb, " --prune.distance=%s", stateHistoryDistanceCLIValue(m.History.toValue()))
 		}
 		appendCommitmentHistory(&sb, m)
 		appendReceipts(&sb, m)
@@ -150,7 +150,7 @@ func (m Mode) String() string {
 	var sb strings.Builder
 	sb.WriteString(archiveModeStr)
 	if m.History.toValue() != DefaultMode.History.toValue() {
-		fmt.Fprintf(&sb, " --prune.distance=%d", m.History.toValue())
+		fmt.Fprintf(&sb, " --prune.distance=%s", stateHistoryDistanceCLIValue(m.History.toValue()))
 	}
 	if m.Blocks.toValue() != DefaultMode.Blocks.toValue() {
 		fmt.Fprintf(&sb, " --prune.distance.blocks=%s", blocksDistanceCLIValue(m.Blocks.toValue()))
@@ -169,7 +169,7 @@ func modeEquals(a, b Mode) bool {
 
 func appendCommitmentHistory(sb *strings.Builder, m Mode) {
 	if m.CommitmentHistory != nil && m.CommitmentHistory.toValue() != KeepAllBlocksPruneMode.toValue() {
-		fmt.Fprintf(sb, " --prune.commitment-history.distance=%d", m.CommitmentHistory.toValue())
+		fmt.Fprintf(sb, " --prune.commitment-history.distance=%s", stateHistoryDistanceCLIValue(m.CommitmentHistory.toValue()))
 	}
 }
 
@@ -182,7 +182,7 @@ func appendReceipts(sb *strings.Builder, m Mode) {
 	case KeepAllReceiptsPruneMode.toValue():
 		sb.WriteString(" --prune.receipts.distance=keep-all")
 	default:
-		fmt.Fprintf(sb, " --prune.receipts.distance=%d", m.Receipts.toValue())
+		fmt.Fprintf(sb, " --prune.receipts.distance=%s", stateHistoryDistanceCLIValue(m.Receipts.toValue()))
 	}
 }
 

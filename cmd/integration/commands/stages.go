@@ -674,7 +674,11 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	logger.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
 	chainConfig, pm := fromdb.ChainConfig(db), fromdb.PruneMode(db)
 	if pruneTo > 0 {
-		pm.History = prune.Distance(s.BlockNumber - pruneTo)
+		d, err := prune.DistanceFrom(s.BlockNumber, pruneTo)
+		if err != nil {
+			return err
+		}
+		pm.History = d
 	}
 
 	genesis := readGenesis(chain)
@@ -1059,7 +1063,11 @@ func stageTxLookup(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) e
 
 	s := stage(sync, tx, stages.TxLookup)
 	if pruneTo > 0 {
-		pm.History = prune.Distance(s.BlockNumber - pruneTo)
+		d, err := prune.DistanceFrom(s.BlockNumber, pruneTo)
+		if err != nil {
+			return err
+		}
+		pm.History = d
 	}
 	logger.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
 
