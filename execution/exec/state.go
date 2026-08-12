@@ -398,9 +398,9 @@ func (rw *Worker) Run() (err error) {
 			defer func() {
 				if rec := recover(); rec != nil {
 					result = &TxResult{
-						Task:     txTask,
-						Err:      fmt.Errorf("exec task panic: %v, %s", rec, dbg.Stack()),
-						Panicked: true,
+						Task:        txTask,
+						Err:         fmt.Errorf("exec task panic: %v, %s", rec, dbg.Stack()),
+						Operational: true,
 					}
 				}
 			}()
@@ -538,15 +538,17 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 
 		if err != nil {
 			return &TxResult{
-				Task: txTask,
-				Err:  err,
+				Task:        txTask,
+				Err:         fmt.Errorf("worker setup: %w", err),
+				Operational: true,
 			}
 		}
 
 		if err = rw.resetTx(chainTx); err != nil {
 			return &TxResult{
-				Task: txTask,
-				Err:  err,
+				Task:        txTask,
+				Err:         fmt.Errorf("worker setup: %w", err),
+				Operational: true,
 			}
 		}
 	}

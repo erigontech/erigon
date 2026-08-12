@@ -104,12 +104,12 @@ type TxResult struct {
 	ExecutionResult   evmtypes.ExecutionResult
 	ValidationResults []AAValidationResult
 	Err               error
-	// Panicked reports that Err holds a recovered task panic — an executor
-	// fault, never a block-validity verdict.
-	Panicked bool
-	Coinbase accounts.Address
-	TxIn     state.ReadSet
-	TxOut    *state.WriteSet
+	// Operational reports that Err is an executor fault — a recovered task
+	// panic or a worker setup failure — never a block-validity verdict.
+	Operational bool
+	Coinbase    accounts.Address
+	TxIn        state.ReadSet
+	TxOut       *state.WriteSet
 
 	Receipt *types.Receipt
 	Logs    []*types.Log

@@ -28,7 +28,9 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/state"
 )
 
 func TestNewWorkersPoolForegroundReturnsWait(t *testing.T) {
@@ -71,4 +73,31 @@ func TestNewWorkersPoolPreservesEveryWorkerFailure(t *testing.T) {
 	require.ErrorIs(t, got, boom)
 	require.Equal(t, 2, strings.Count(got.Error(), boom.Error()),
 		"both workers' failures must survive the join")
+}
+
+type failingRoDB struct{ kv.TemporalRoDB }
+
+func (db failingRoDB) BeginTemporalRo(context.Context) (kv.TemporalTx, error) {
+	return nil, errors.New("disk failure")
+}
+
+type stubStateReader struct{ state.StateReader }
+
+// A worker setup failure (chain tx open) is an executor fault: the result must
+// carry the operational marker so it cannot become a block verdict downstream.
+func TestRunTxTaskMarksWorkerSetupFailureOperational(t *testing.T) {
+	in := NewQueueWithRetry(1)
+	t.Cleanup(in.Release)
+	rws := NewResultsQueue(8, 1)
+	w := NewWorker(context.Background(), true, NewWorkerMetrics(), failingRoDB{}, in,
+		nil, chain.AllProtocolChanges, nil, rws, nil, datadir.Dirs{}, log.New())
+	t.Cleanup(w.Close)
+	w.stateReader = stubStateReader{}
+
+	res := w.RunTxTask(&TxTask{})
+
+	require.Error(t, res.Err)
+	require.ErrorContains(t, res.Err, "disk failure")
+	require.True(t, res.Operational,
+		"a chain-tx open failure is an executor fault, never a statement about the block")
 }

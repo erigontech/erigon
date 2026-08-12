@@ -2593,9 +2593,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	tx := task.index
 	be.results[tx] = &execResult{TxResult: res}
 	if res.Err != nil {
-		if res.Panicked {
-			// A task panic is an executor fault, not a statement about the block —
-			// surface it as an operational error, never as a verdict.
+		if res.Operational {
+			// A task panic or worker setup failure is an executor fault, not a
+			// statement about the block — surface it as an operational error,
+			// never as a verdict.
 			return nil, fmt.Errorf("block=%d txIdx=%d: %w", be.number(), res.Version().TxIndex, res.Err)
 		}
 		if execErr, ok := res.Err.(protocol.ErrExecAbortError); ok {
