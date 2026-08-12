@@ -62,14 +62,14 @@ type StateCache struct {
 	appliedEnd        [kv.DomainLen]uint64
 	stateVersion      uint64
 	stateVersionKnown bool
-	// readViewEpoch lets an unwind revoke fill authority from all older
-	// ReadViews. It is StateCache-wide and advances only on unwind. Per-cache
-	// entry epochs instead stamp stored values and also advance on Clear;
-	// sharing them would make Clear revoke otherwise valid read views.
+	// readViewEpoch lets an unwind or state-version discontinuity revoke fill
+	// authority from all older ReadViews. Per-cache entry epochs instead stamp
+	// stored values and also advance on Clear; sharing them would make an
+	// ordinary Clear revoke otherwise valid read views.
 	readViewEpoch atomic.Uint64
 	// disableFills (STATE_CACHE_FILLS=false) turns off every reader fill
-	// (including the content-addressed ones), leaving applies as the only
-	// writer ("apply-only" mode) — an A/B lever and an operational kill switch.
+	// (including the content-addressed ones), leaving canonical publication as
+	// the only writer — an A/B lever and an operational kill switch.
 	disableFills bool
 }
 
@@ -82,7 +82,7 @@ func NewStateCache(accountBytes, storageBytes, codeBytes, addrBytes datasize.Byt
 	sc := &StateCache{}
 	if !dbg.EnvBool("STATE_CACHE_FILLS", true) {
 		sc.disableFills = true
-		log.Info("[cache] STATE_CACHE_FILLS=false — read fills disabled, only post-commit applies populate the cache")
+		log.Info("[cache] STATE_CACHE_FILLS=false — read fills disabled, only post-commit publication populates the cache")
 	}
 	sc.caches[kv.AccountsDomain] = newDomainCacheBytes(accountBytes, avgAccountEntryBytes, mode)
 	sc.caches[kv.StorageDomain] = newDomainCacheBytes(storageBytes, avgStorageEntryBytes, mode)
@@ -217,15 +217,14 @@ func (c *StateCache) getAddrCodeHash(addr []byte) ([32]byte, bool) {
 // The mapping derives from an account record, so admission checks the accounts
 // frontier even though the mapping lives in the code cache.
 func (c *StateCache) seedAddrCodeHash(addr []byte, h [32]byte, txNum, visibleEnd,
-	stateVersion uint64, stateVersionKnown bool, viewEpoch uint64) {
+	viewEpoch uint64) {
 	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok {
 		return
 	}
 	c.admissionMu.RLock()
 	defer c.admissionMu.RUnlock()
-	if !c.acceptsStateVersion(stateVersion, stateVersionKnown) ||
-		viewEpoch != c.readViewEpoch.Load() ||
+	if viewEpoch != c.readViewEpoch.Load() ||
 		visibleEnd < c.appliedEnd[kv.AccountsDomain] {
 		return
 	}
@@ -242,7 +241,7 @@ func (c *StateCache) deleteAddrCodeHash(addr []byte) {
 
 // put stores data for the given domain and key, stamped with the txNum the
 // value reflects (for txNum/epoch unwind invalidation). It bypasses fill
-// admission: committed updates go through Applier.Apply, read fills through
+// admission: committed updates go through Applier.Publish, read fills through
 // ReadView.Fill.
 func (c *StateCache) put(domain kv.Domain, key []byte, value []byte, txNum uint64) {
 	cache := c.caches[domain]
@@ -256,13 +255,13 @@ func (c *StateCache) put(domain kv.Domain, key []byte, value []byte, txNum uint6
 // read view without replacing an authoritative entry. Negatives use the view's
 // last included txNum. Code goes through fillCodeIfFresh.
 func (c *StateCache) fillIfFresh(domain kv.Domain, key []byte, value []byte, readTxNum, visibleEnd,
-	stateVersion uint64, stateVersionKnown bool, viewEpoch uint64) {
+	viewEpoch uint64) {
 	cache := c.caches[domain]
 	if cache == nil {
 		return
 	}
 	// Clone outside the lock: a rejected fill wastes one copy (rare), but
-	// Apply's write lock never waits on a fill's memcpy.
+	// A publication's write lock never waits on a fill's memcpy.
 	cloned := bytes.Clone(value)
 	if len(value) == 0 {
 		readTxNum = 0
@@ -272,8 +271,7 @@ func (c *StateCache) fillIfFresh(domain kv.Domain, key []byte, value []byte, rea
 	}
 	c.admissionMu.RLock()
 	defer c.admissionMu.RUnlock()
-	if !c.acceptsStateVersion(stateVersion, stateVersionKnown) ||
-		viewEpoch != c.readViewEpoch.Load() ||
+	if viewEpoch != c.readViewEpoch.Load() ||
 		visibleEnd < c.appliedEnd[domain] {
 		return
 	}
@@ -286,7 +284,7 @@ func (c *StateCache) fillIfFresh(domain kv.Domain, key []byte, value []byte, rea
 // negatives are not cached here: "no code" is cached at the addr→codeHash
 // mapping instead (the zero-hash sentinel seeded by SeedAddrCodeHash).
 func (c *StateCache) fillCodeIfFresh(key []byte, value []byte, readTxNum, visibleEnd, accountsVisibleEnd,
-	stateVersion uint64, stateVersionKnown bool, viewEpoch uint64) {
+	viewEpoch uint64) {
 	codeCache, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok || len(value) == 0 {
 		return
@@ -295,20 +293,12 @@ func (c *StateCache) fillCodeIfFresh(key []byte, value []byte, readTxNum, visibl
 	cloned := bytes.Clone(value)
 	c.admissionMu.RLock()
 	defer c.admissionMu.RUnlock()
-	if !c.acceptsStateVersion(stateVersion, stateVersionKnown) ||
-		viewEpoch != c.readViewEpoch.Load() ||
+	if viewEpoch != c.readViewEpoch.Load() ||
 		visibleEnd < c.appliedEnd[kv.CodeDomain] ||
 		accountsVisibleEnd < c.appliedEnd[kv.AccountsDomain] {
 		return
 	}
 	codeCache.PutWithCodeHashIfAbsent(key, cloned, codeHash, readTxNum)
-}
-
-// acceptsStateVersion runs under admissionMu. Standalone caches remain
-// unversioned for low-level users; production initialization makes matching
-// the fill source's durable state version mandatory.
-func (c *StateCache) acceptsStateVersion(stateVersion uint64, known bool) bool {
-	return !c.stateVersionKnown || known && stateVersion == c.stateVersion
 }
 
 // deleteKey removes the data for the given domain and key. Authoritative
@@ -417,6 +407,9 @@ func (c *StateCache) clearLocked() {
 }
 
 func (c *StateCache) resetForStateVersionLocked() {
+	// Clearing entries is not enough: views bound to the previous state could
+	// otherwise refill them after continuity was lost.
+	c.readViewEpoch.Add(1)
 	c.clearLocked()
 	clear(c.appliedEnd[:])
 }
@@ -481,12 +474,12 @@ func (c *StateCache) publish(sourceStateVersion, committedStateVersion, unwindTo
 	if c.stateVersionKnown && committedStateVersion <= c.stateVersion {
 		return
 	}
-	if !c.stateVersionKnown || sourceStateVersion != c.stateVersion {
+	discontinuous := !c.stateVersionKnown || sourceStateVersion != c.stateVersion
+	if discontinuous {
 		// The cache missed part of the source state. Incremental updates cannot
 		// repair unknown retained entries, so publish into an empty generation.
 		c.resetForStateVersionLocked()
-	}
-	if hasUnwind {
+	} else if hasUnwind {
 		c.unwindLocked(unwindToTxNum)
 	}
 	for i := range prepared {

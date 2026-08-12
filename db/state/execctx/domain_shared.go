@@ -173,15 +173,6 @@ func (f sdFrontier) DomainVisibleEnd(domain kv.Domain) (uint64, bool) {
 	return f.sd.domainVisibleEnd(f.tx, domain)
 }
 
-func (f sdFrontier) StateVersion() (uint64, bool) {
-	return f.sd.baseStateVersion, f.sd.baseStateVersionKnown
-}
-
-type rejectedFrontier struct{}
-
-func (rejectedFrontier) DomainVisibleEnd(kv.Domain) (uint64, bool) { return 0, false }
-func (rejectedFrontier) StateVersion() (uint64, bool)              { return 0, false }
-
 // cacheGenerationTx unwraps table overlays because their sequence metadata
 // belongs to the overlay, while cache fills read temporal domains from the
 // backing transaction.
@@ -203,7 +194,7 @@ func (sd *SharedDomains) cacheFrontierFor(tx kv.TemporalTx) cache.Frontier {
 	// the real one on their first task; the placeholder can never fill.
 	generationTx := cacheGenerationTx(tx)
 	if generationTx == nil || !sd.baseStateVersionKnown {
-		return rejectedFrontier{}
+		return nil
 	}
 	sameStateGeneration := generationTx.ViewID() == sd.baseViewID
 	if !sameStateGeneration {
@@ -211,9 +202,9 @@ func (sd *SharedDomains) cacheFrontierFor(tx kv.TemporalTx) cache.Frontier {
 		sameStateGeneration = err == nil && stateVersion == sd.baseStateVersion
 	}
 	if !sameStateGeneration {
-		return rejectedFrontier{}
+		return nil
 	}
-	return sdFrontier{sd: sd, tx: tx}
+	return cache.FrontierWithStateVersion(sdFrontier{sd: sd, tx: tx}, sd.baseStateVersion)
 }
 
 // cacheViewFor binds the shared state cache to tx's read view. Boxing the

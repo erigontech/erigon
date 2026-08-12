@@ -82,18 +82,11 @@ func frontierAt(end uint64) cache.Frontier {
 	return cache.FrontierFunc(func(kv.Domain) (uint64, bool) { return end, true })
 }
 
-type stateVersionFrontier struct {
-	cache.Frontier
-	stateVersion uint64
-}
-
-func (f stateVersionFrontier) StateVersion() (uint64, bool) { return f.stateVersion, true }
-
 func frontierAtStateVersion(t *testing.T, tx kv.Tx, frontier cache.Frontier) cache.Frontier {
 	t.Helper()
 	stateVersion, err := rawdb.GetStateVersion(tx)
 	require.NoError(t, err)
-	return stateVersionFrontier{Frontier: frontier, stateVersion: stateVersion}
+	return cache.FrontierWithStateVersion(frontier, stateVersion)
 }
 
 // seed places an entry with an exact txNum stamp through the public fill API

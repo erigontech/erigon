@@ -62,15 +62,8 @@ func frontierAt(end uint64) Frontier {
 	return FrontierFunc(func(kv.Domain) (uint64, bool) { return end, true })
 }
 
-type versionedFrontier struct {
-	Frontier
-	stateVersion uint64
-}
-
-func (f versionedFrontier) StateVersion() (uint64, bool) { return f.stateVersion, true }
-
 func frontierAtVersion(end, stateVersion uint64) Frontier {
-	return versionedFrontier{Frontier: frontierAt(end), stateVersion: stateVersion}
+	return FrontierWithStateVersion(frontierAt(end), stateVersion)
 }
 
 // =============================================================================
@@ -1006,11 +999,15 @@ func TestStateCache_InitializeClearsUnversionedEntries(t *testing.T) {
 	t.Cleanup(sc.Close)
 
 	key := makeAddr(1)
-	sc.View(frontierAt(11)).Fill(kv.AccountsDomain, key, makeValue(1), 10)
+	view := sc.View(frontierAt(11))
+	view.Fill(kv.AccountsDomain, key, makeValue(1), 10)
 	sc.Applier().Initialize(1)
 
 	_, ok := sc.View(nil).Get(kv.AccountsDomain, key)
 	require.False(t, ok, "initialization cannot vouch for entries admitted without a state version")
+	view.Fill(kv.AccountsDomain, key, makeValue(1), 10)
+	_, ok = sc.View(nil).Get(kv.AccountsDomain, key)
+	require.False(t, ok, "initialization must revoke views bound before the state version was known")
 }
 
 func TestStateCache_PublishRejectsOlderStateVersion(t *testing.T) {
@@ -1041,11 +1038,15 @@ func TestStateCache_PublishClearsOnSkippedStateVersion(t *testing.T) {
 
 	key := makeAddr(1)
 	sc.Applier().Initialize(1)
-	sc.Applier().Apply(kv.AccountsDomain, key, makeValue(1), 10)
+	sc.apply(kv.AccountsDomain, key, makeValue(1), 10)
+	staleView := sc.View(frontierAtVersion(11, 1))
 	sc.Applier().Publish(2, 3, nil)
 
 	_, ok := sc.View(nil).Get(kv.AccountsDomain, key)
 	require.False(t, ok, "a skipped publication may omit the update that made an old entry stale")
+	staleView.Fill(kv.AccountsDomain, key, makeValue(1), 10)
+	_, ok = sc.View(nil).Get(kv.AccountsDomain, key)
+	require.False(t, ok, "a skipped publication must revoke previously bound views")
 }
 
 func TestStateCache_PublishKeepsEntriesWhenOneCommitAdvancesVersionMoreThanOnce(t *testing.T) {
@@ -1055,11 +1056,26 @@ func TestStateCache_PublishKeepsEntriesWhenOneCommitAdvancesVersionMoreThanOnce(
 
 	key := makeAddr(1)
 	sc.Applier().Initialize(1)
-	sc.Applier().Apply(kv.AccountsDomain, key, makeValue(1), 10)
+	sc.apply(kv.AccountsDomain, key, makeValue(1), 10)
 	sc.Applier().Publish(1, 3, nil)
 
 	_, ok := sc.View(nil).Get(kv.AccountsDomain, key)
 	require.True(t, ok, "a complete publication must preserve unchanged entries")
+}
+
+func TestStateCache_BoundViewCanFillAcrossContinuousPublication(t *testing.T) {
+	b := 1 * datasize.MB
+	sc := NewStateCache(b, b, b, b)
+	t.Cleanup(sc.Close)
+
+	key := makeAddr(1)
+	sc.Applier().Initialize(1)
+	view := sc.View(frontierAtVersion(11, 1))
+	sc.Applier().Publish(1, 2, nil)
+	view.Fill(kv.AccountsDomain, key, makeValue(1), 10)
+
+	_, ok := sc.View(nil).Get(kv.AccountsDomain, key)
+	require.True(t, ok, "a continuous forward publication must not revoke an already-eligible view")
 }
 
 func TestStateCache_PublishUnwindSerializesWithFill(t *testing.T) {
@@ -1243,7 +1259,7 @@ func TestDomainCache_ClearAtomicWithPut_NoSizeDrift(t *testing.T) {
 
 // STATE_CACHE_FILLS=false turns off the admission-gated read fills (apply-only
 // mode): the A/B lever for measuring what fills contribute, and the ops kill
-// switch. Applies keep working.
+// switch. Canonical publication keeps working.
 func TestStateCacheFillsSwitchDisablesReadFills(t *testing.T) {
 	t.Setenv("STATE_CACHE_FILLS", "false")
 	b := 1 * datasize.MB
@@ -1267,9 +1283,9 @@ func TestStateCacheFillsSwitchDisablesReadFills(t *testing.T) {
 	_, ok = c.View(nil).GetCodeSizeByHash(codeHash)
 	require.False(t, ok, "content-addressed fills must be disabled too: the switch means no reader writes at all")
 
-	c.Applier().Apply(kv.AccountsDomain, key, []byte("applied"), 20)
+	c.Applier().Publish(0, 1, []StateUpdate{{Domain: kv.AccountsDomain, Key: key, Value: []byte("applied"), TxNum: 20}})
 	got, ok := c.View(nil).Get(kv.AccountsDomain, key)
-	require.True(t, ok, "applies must keep working")
+	require.True(t, ok, "canonical publication must keep working")
 	require.Equal(t, []byte("applied"), got)
 }
 
@@ -1284,7 +1300,7 @@ func TestStateCache_StaleViewCannotFillAfterClear(t *testing.T) {
 	key := makeAddr(1)
 	oldView := sc.View(FrontierFunc(func(kv.Domain) (uint64, bool) { return 11, true }))
 
-	sc.Applier().Apply(kv.AccountsDomain, key, nil, 20) // canonical delete
+	sc.apply(kv.AccountsDomain, key, nil, 20) // canonical delete
 	sc.Applier().Clear()
 
 	oldView.Fill(kv.AccountsDomain, key, []byte("pre-delete"), 10)
@@ -1308,8 +1324,8 @@ func TestStateCache_AccountDeletionGatesStaleCodeFill(t *testing.T) {
 	addr, code := makeAddr(1), makeCode(1)
 	other, otherCode := makeAddr(2), makeCode(2)
 
-	c.Applier().Apply(kv.CodeDomain, addr, code, 100)
-	c.Applier().Apply(kv.AccountsDomain, addr, nil, 200)
+	c.apply(kv.CodeDomain, addr, code, 100)
+	c.apply(kv.AccountsDomain, addr, nil, 200)
 
 	stale := c.View(FrontierFunc(func(kv.Domain) (uint64, bool) { return 101, true }))
 	stale.Fill(kv.CodeDomain, addr, code, 100)

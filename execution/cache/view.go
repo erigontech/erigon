@@ -39,7 +39,23 @@ type Frontier interface {
 // from frontiers that report the same version.
 type stateVersionFrontier interface {
 	Frontier
-	StateVersion() (stateVersion uint64, ok bool)
+	StateVersion() uint64
+}
+
+type frontierWithStateVersion struct {
+	Frontier
+	stateVersion uint64
+}
+
+func (f frontierWithStateVersion) StateVersion() uint64 { return f.stateVersion }
+
+// FrontierWithStateVersion attaches the durable state identity used when a
+// StateCache decides whether a frontier may fill.
+func FrontierWithStateVersion(frontier Frontier, stateVersion uint64) Frontier {
+	if frontier == nil {
+		return nil
+	}
+	return frontierWithStateVersion{Frontier: frontier, stateVersion: stateVersion}
 }
 
 // FrontierFunc adapts a function to the Frontier interface.
@@ -49,8 +65,8 @@ func (f FrontierFunc) DomainVisibleEnd(domain kv.Domain) (uint64, bool) { return
 
 // ReadView is the read-and-fill handle of a StateCache, bound to one
 // transaction's read view: values filled through it are vouched for by that
-// view's frontier and durable state version, and it must not outlive the
-// transaction. A nil frontier disables the admission-gated fills
+// view's frontier, and it must not outlive the transaction. A nil frontier
+// disables the admission-gated fills
 // (Fill, SeedAddrCodeHash);
 // FillCodeSize is content-addressed and works on any view. The zero value is
 // inert: reads miss, fills no-op.
@@ -63,34 +79,65 @@ func (f FrontierFunc) DomainVisibleEnd(domain kv.Domain) (uint64, bool) { return
 // per-cache entry epoch and floor.
 // Each view also snapshots the StateCache read-view epoch. An unwind advances
 // that epoch, so older views can still read but cannot fill from the discarded
-// fork.
+// fork. State version is checked when the frontier is bound, not on every fill:
+// continuous forward publication keeps the view eligible, while the domain
+// frontier rejects values older than the latest update. A discontinuity also
+// advances the epoch and revokes every previously bound view.
 // Snapshot-isolated caching is kvcache's job (node/shards).
 type ReadView struct {
-	c                 *StateCache
-	frontier          Frontier
-	stateVersion      uint64
-	stateVersionKnown bool
-	readViewEpoch     uint64
+	c             *StateCache
+	frontier      Frontier
+	readViewEpoch uint64
 }
 
-// View creates a ReadView vouched for by f. A nil f disables admission-gated fills.
+// View creates a ReadView vouched for by f. If the cache has a durable state
+// version, f must report the same version when it is bound. A nil or rejected
+// frontier disables admission-gated fills.
 func (c *StateCache) View(f Frontier) ReadView {
 	if c == nil {
 		return ReadView{}
 	}
-	v := ReadView{c: c, readViewEpoch: c.readViewEpoch.Load()}
-	return v.WithFrontier(f)
+	if f == nil {
+		return ReadView{c: c, readViewEpoch: c.readViewEpoch.Load()}
+	}
+	c.admissionMu.RLock()
+	defer c.admissionMu.RUnlock()
+	return ReadView{
+		c:             c,
+		frontier:      c.eligibleFrontierLocked(f),
+		readViewEpoch: c.readViewEpoch.Load(),
+	}
 }
 
-// WithFrontier binds f and its optional state version while preserving the
-// original view's read-view epoch.
+// WithFrontier binds f while preserving the original view's read-view epoch.
+// Binding is serialized with publication so a transaction from an older
+// durable state cannot gain fill authority after an unwind commits.
 func (v ReadView) WithFrontier(f Frontier) ReadView {
-	v.frontier = f
-	v.stateVersion, v.stateVersionKnown = 0, false
-	if versioned, ok := f.(stateVersionFrontier); ok {
-		v.stateVersion, v.stateVersionKnown = versioned.StateVersion()
+	if v.c == nil {
+		return v
 	}
+	if f == nil {
+		v.frontier = nil
+		return v
+	}
+	v.c.admissionMu.RLock()
+	defer v.c.admissionMu.RUnlock()
+	v.frontier = v.c.eligibleFrontierLocked(f)
 	return v
+}
+
+func (c *StateCache) eligibleFrontierLocked(frontier Frontier) Frontier {
+	if frontier == nil || !c.stateVersionKnown {
+		return frontier
+	}
+	versioned, ok := frontier.(stateVersionFrontier)
+	if !ok {
+		return nil
+	}
+	if versioned.StateVersion() != c.stateVersion {
+		return nil
+	}
+	return frontier
 }
 
 // Get retrieves data for the given domain and key.
@@ -161,12 +208,10 @@ func (v ReadView) Fill(domain kv.Domain, key []byte, value []byte, readTxNum uin
 		if !ok {
 			return
 		}
-		v.c.fillCodeIfFresh(key, value, readTxNum, visibleEnd, accountsEnd,
-			v.stateVersion, v.stateVersionKnown, v.readViewEpoch)
+		v.c.fillCodeIfFresh(key, value, readTxNum, visibleEnd, accountsEnd, v.readViewEpoch)
 		return
 	}
-	v.c.fillIfFresh(domain, key, value, readTxNum, visibleEnd,
-		v.stateVersion, v.stateVersionKnown, v.readViewEpoch)
+	v.c.fillIfFresh(domain, key, value, readTxNum, visibleEnd, v.readViewEpoch)
 }
 
 // SeedAddrCodeHash offers an addr → codeHash mapping derived from an account
@@ -180,8 +225,7 @@ func (v ReadView) SeedAddrCodeHash(addr []byte, h [32]byte, txNum uint64) {
 	if !ok {
 		return
 	}
-	v.c.seedAddrCodeHash(addr, h, txNum, visibleEnd,
-		v.stateVersion, v.stateVersionKnown, v.readViewEpoch)
+	v.c.seedAddrCodeHash(addr, h, txNum, visibleEnd, v.readViewEpoch)
 }
 
 // FillCodeSize records the code length for codeHash. Content-addressed and
@@ -195,7 +239,7 @@ func (v ReadView) FillCodeSize(codeHash []byte, size int, txNum uint64) {
 }
 
 // Applier is the authoritative writer handle of a StateCache: post-commit
-// applies, unwinds and clears. It belongs to the authoritative mutation path
+// publications, unwinds and clears. It belongs to the authoritative mutation path
 // — the SharedDomains commit/unwind code. The zero value is a no-op.
 type Applier struct {
 	c *StateCache
@@ -240,16 +284,6 @@ func (a Applier) PublishUnwind(sourceStateVersion, committedStateVersion, unwind
 		return
 	}
 	a.c.publish(sourceStateVersion, committedStateVersion, unwindToTxNum, true, updates)
-}
-
-// Apply makes a committed domain update authoritative for subsequent fills:
-// it advances the domain's applied frontier and mutates the cache in the same
-// critical section, so a fill from an older read view can never land on top.
-func (a Applier) Apply(domain kv.Domain, key, value []byte, txNum uint64) {
-	if a.c == nil {
-		return
-	}
-	a.c.apply(domain, key, value, txNum)
 }
 
 // Unwind invalidates, across all caches, entries reflecting state above

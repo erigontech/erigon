@@ -29,10 +29,11 @@
 // behalf of a database reader after a miss); admission compares the view's
 // frontier — the exclusive txNum end of what its tx can see, so a view with
 // frontier N sees txNums < N — against the applied end, under the same lock
-// applies take. A ReadView also snapshots a separate, StateCache-wide
-// read-view epoch, which an unwind advances to revoke fills from older views.
+// publications take. A ReadView also snapshots a separate, StateCache-wide
+// read-view epoch, which an unwind or state-version discontinuity advances to
+// revoke fills from older views.
 // The Applier handle, held by the SharedDomains commit/unwind path, performs
-// the authoritative writes: post-commit applies, unwinds, clears.
+// the authoritative writes: post-commit publications, unwinds and clears.
 package cache
 
 // Cache is the interface for domain caches.

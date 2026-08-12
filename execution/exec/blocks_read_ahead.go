@@ -92,13 +92,6 @@ type cachePopulatingGetter struct {
 	stepSize uint64 // for the read txNum upper bound (last txNum of the read's step)
 }
 
-type readAheadFrontier struct {
-	cache.Frontier
-	stateVersion uint64
-}
-
-func (f readAheadFrontier) StateVersion() (uint64, bool) { return f.stateVersion, true }
-
 func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache) kv.TemporalGetter {
 	if sc == nil {
 		return ttx
@@ -108,7 +101,7 @@ func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache) kv.TemporalGetter 
 	if err != nil {
 		return ttx
 	}
-	frontier := readAheadFrontier{Frontier: debug, stateVersion: stateVersion}
+	frontier := cache.FrontierWithStateVersion(debug, stateVersion)
 	return &cachePopulatingGetter{TemporalGetter: ttx, view: sc.View(frontier), stepSize: debug.StepSize()}
 }
 

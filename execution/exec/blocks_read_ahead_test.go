@@ -190,11 +190,12 @@ func TestCachePopulatingGetterUnavailableVisibleEndNeverFills(t *testing.T) {
 func TestCachePopulatingGetterStaleViewDoesNotFill(t *testing.T) {
 	key := []byte("\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff\x00\x11\x22\x33\x44")
 	sc := newTestStateCache()
-	sc.Applier().Apply(kv.AccountsDomain, key, nil, 20)
+	sc.Applier().Publish(0, 1, []cache.StateUpdate{{Domain: kv.AccountsDomain, Key: key, TxNum: 20}})
 	cpg := &cachePopulatingGetter{
 		TemporalGetter: stubTemporalGetter{v: []byte("pre-delete-record")},
 		stepSize:       1_562_500,
-		view:           sc.View(cache.FrontierFunc(func(kv.Domain) (uint64, bool) { return 11, true })),
+		view: sc.View(cache.FrontierWithStateVersion(
+			cache.FrontierFunc(func(kv.Domain) (uint64, bool) { return 11, true }), 1)),
 	}
 
 	_, _, err := cpg.GetLatest(kv.AccountsDomain, key)
