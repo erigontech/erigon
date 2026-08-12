@@ -985,7 +985,18 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	var executionEngine executionclient.ExecutionEngine
 
-	executionEngine, err = executionclient.NewExecutionClientDirect(chainreader.NewChainReaderEth1(chainConfig, backend.execModule, config.FcuTimeout), txPoolRpcClient)
+	// clAssemblyChainReader builds the CL-driven assembly chainreader, threading
+	// a standing CustomTxnProvider when the caller supplied one (a based-rollup
+	// venue chain sources its slot body from the DAG's sealed rounds). nil keeps
+	// the default mempool source.
+	clAssemblyChainReader := func() chainreader.ChainReaderWriterEth1 {
+		if config.CLAssemblyTxnProvider != nil {
+			return chainreader.NewChainReaderEth1WithTxnProvider(chainConfig, backend.execModule, config.FcuTimeout, config.CLAssemblyTxnProvider)
+		}
+		return chainreader.NewChainReaderEth1(chainConfig, backend.execModule, config.FcuTimeout)
+	}
+
+	executionEngine, err = executionclient.NewExecutionClientDirect(clAssemblyChainReader(), txPoolRpcClient)
 	if err != nil {
 		return nil, err
 	}
@@ -1021,7 +1032,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		if config.CaplinConfig.EnableEngineAPI {
 			executionEngine, err = executionclient.NewExecutionClientEngineLocal(
 				engineBackendRPC,
-				chainreader.NewChainReaderEth1(chainConfig, backend.execModule, config.FcuTimeout),
+				clAssemblyChainReader(),
 				txPoolRpcClient,
 				nil, // beaconCfg: local mode uses chainRW which returns properly versioned blocks
 			)

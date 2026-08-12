@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/txnprovider"
 )
 
 type ChainReaderWriterEth1 struct {
@@ -45,6 +46,14 @@ type ChainReaderWriterEth1 struct {
 	executionModule execmodule.ExecutionModule
 
 	fcuTimeout time.Duration
+
+	// clAssemblyTxnProvider, when non-nil, overrides the transaction source for
+	// CL-driven block assembly on this chain: it is set as
+	// builder.Parameters.CustomTxnProvider, which the builder honors in place of
+	// the default mempool provider. A based-rollup venue chain uses this to feed
+	// its slot block body from the DAG's sealed rounds (the committed batches
+	// since the last slot) rather than the raw txpool. nil → normal mempool path.
+	clAssemblyTxnProvider txnprovider.TxnProvider
 }
 
 func NewChainReaderEth1(cfg *chain.Config, executionModule execmodule.ExecutionModule, fcuTimeout time.Duration) ChainReaderWriterEth1 {
@@ -52,6 +61,18 @@ func NewChainReaderEth1(cfg *chain.Config, executionModule execmodule.ExecutionM
 		cfg:             cfg,
 		executionModule: executionModule,
 		fcuTimeout:      fcuTimeout,
+	}
+}
+
+// NewChainReaderEth1WithTxnProvider is NewChainReaderEth1 plus a standing
+// CustomTxnProvider for CL-driven assembly (see clAssemblyTxnProvider). Used by
+// a based-rollup venue chain whose slot body is the DAG's sealed rounds.
+func NewChainReaderEth1WithTxnProvider(cfg *chain.Config, executionModule execmodule.ExecutionModule, fcuTimeout time.Duration, clAssemblyTxnProvider txnprovider.TxnProvider) ChainReaderWriterEth1 {
+	return ChainReaderWriterEth1{
+		cfg:                   cfg,
+		executionModule:       executionModule,
+		fcuTimeout:            fcuTimeout,
+		clAssemblyTxnProvider: clAssemblyTxnProvider,
 	}
 }
 
@@ -298,6 +319,9 @@ func (c ChainReaderWriterEth1) AssembleBlock(baseHash common.Hash, attributes *e
 		SlotNumber:            (*uint64)(attributes.SlotNumber),
 		TargetGasLimit:        (*uint64)(attributes.TargetGasLimit),
 		ParentBeaconBlockRoot: attributes.ParentBeaconBlockRoot,
+		// nil for the normal mempool path; a based-rollup venue chain sets this
+		// so CL-driven slot assembly draws its body from the DAG's sealed rounds.
+		CustomTxnProvider: c.clAssemblyTxnProvider,
 	}
 	result, err := c.executionModule.AssembleBlock(context.Background(), params)
 	if err != nil {

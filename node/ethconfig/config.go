@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash/ethashcfg"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/gasprice/gaspricecfg"
+	"github.com/erigontech/erigon/txnprovider"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
@@ -253,6 +254,15 @@ type Config struct {
 	Ethstats string
 	// Consensus layer
 	InternalCL bool
+
+	// CLAssemblyTxnProvider, when non-nil, is threaded into the CL-driven block
+	// assembly path (chainreader → builder.Parameters.CustomTxnProvider) so a
+	// caller can override the transaction source used when the embedded Caplin CL
+	// builds a slot's block. A based-rollup venue chain sets it to a standing
+	// provider fed from the DAG's sealed rounds, making the slot block body the
+	// rounds committed since the previous slot. nil → default mempool source.
+	// Not serialized (runtime wiring only).
+	CLAssemblyTxnProvider txnprovider.TxnProvider `toml:"-"`
 
 	OverrideOsakaTime     *uint64 `toml:",omitempty"`
 	OverrideAmsterdamTime *uint64 `toml:",omitempty"`
