@@ -127,19 +127,19 @@ Settled, not in scope:
 - Modify: `cmd/integration/commands/commitment.go`
 - Create: `db/state/rebuild_variant_test.go`
 
-- [ ] write the test first: a rebuild asked for bin output on a **hex-configured datadir** produces
+- [x] write the test first: a rebuild asked for bin output on a **hex-configured datadir** produces
       bin commitment files, without setting `statecfg.ExperimentalBinCommitment` and without
       tripping `reconcileTrieVariant` (`erigondb_settings.go:96-98`)
-- [ ] add an explicit target variant parameter to `RebuildCommitmentFiles`, replacing the
+- [x] add an explicit target variant parameter to `RebuildCommitmentFiles`, replacing the
       `execctx.PickTrieVariant()` read at `squeeze.go:1022`; default to the picked variant when the
       caller does not specify, so existing callers are unchanged
-- [ ] the rebuild MUST NOT mutate process-global `statecfg`; assert that in the test
-- [ ] for a bin target, bind the hash suite explicitly for the rebuild rather than relying on the
+- [x] the rebuild MUST NOT mutate process-global `statecfg`; assert that in the test
+- [x] for a bin target, bind the hash suite explicitly for the rebuild rather than relying on the
       datadir's `trie_hash` (`erigondb_settings.go:88-93`), and record which suite was used
-- [ ] keep the `EnableParaTrieDB` gate (`squeeze.go:1057-1058`) keyed on the hex parallel/streaming
+- [x] keep the `EnableParaTrieDB` gate (`squeeze.go:1057-1058`) keyed on the hex parallel/streaming
       variants, driven by the target variant
-- [ ] write a test that the hex rebuild path is unchanged when no target is specified
-- [ ] run tests — must pass before Task 2
+- [x] write a test that the hex rebuild path is unchanged when no target is specified
+- [x] run tests — must pass before Task 2
 
 ### Task 2: Write output to a separate location, self-described
 

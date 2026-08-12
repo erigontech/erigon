@@ -870,10 +870,102 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	return latestRoot, nil
 }
 
+// RebuildTarget is the commitment scheme a rebuild produces. It is a parameter of
+// the rebuild rather than a property of the source datadir: deriving bin files
+// from a hex datadir is the offline migration case, so the target must not be read
+// from process configuration once a caller names one.
+type RebuildTarget struct {
+	Variant  commitment.TrieVariant
+	HashName string // H for a bin target; empty keeps the suite this process selected
+}
+
+// DefaultRebuildTarget is what a rebuild produces when the caller names no
+// target: the scheme this process is configured for.
+func DefaultRebuildTarget() RebuildTarget {
+	t := RebuildTarget{Variant: execctx.PickTrieVariant()}
+	if t.Variant == commitment.VariantBinPatriciaTrie {
+		t.HashName = commitment.PBinHashSuiteName()
+	}
+	return t
+}
+
+// Resolve fills in what the caller left unset and refuses a combination the
+// rebuild cannot honour.
+func (t RebuildTarget) Resolve() (RebuildTarget, error) {
+	switch t.Variant {
+	case "":
+		return DefaultRebuildTarget(), nil
+	case commitment.VariantBinPatriciaTrie:
+		if t.HashName == "" {
+			t.HashName = commitment.PBinHashSuiteName()
+		}
+		if t.HashName != commitment.PBinHashKeccak && t.HashName != commitment.PBinHashBlake3 {
+			return RebuildTarget{}, fmt.Errorf("commitment rebuild: unknown hash suite %q", t.HashName)
+		}
+	case commitment.VariantHexPatriciaTrie, commitment.VariantParallelHexPatricia, commitment.VariantStreamingHexPatricia:
+		if t.HashName != "" {
+			return RebuildTarget{}, fmt.Errorf("commitment rebuild: hash suite %q needs the bin trie target", t.HashName)
+		}
+	default:
+		return RebuildTarget{}, fmt.Errorf("commitment rebuild: unknown trie variant %q", t.Variant)
+	}
+	return t, nil
+}
+
+// RebuildOption configures a commitment rebuild.
+type RebuildOption func(*rebuildOptions)
+
+type rebuildOptions struct {
+	target RebuildTarget
+}
+
+// WithRebuildTarget names the commitment scheme the rebuild produces.
+func WithRebuildTarget(t RebuildTarget) RebuildOption {
+	return func(o *rebuildOptions) { o.target = t }
+}
+
+func resolveRebuildOptions(opts []RebuildOption) (rebuildOptions, error) {
+	var o rebuildOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
+	target, err := o.target.Resolve()
+	if err != nil {
+		return o, err
+	}
+	o.target = target
+	return o, nil
+}
+
+// bindPBinHashSuite selects H for the duration of a bin rebuild and returns the
+// restore. H is process-wide, so the rebuild binds it from its own target instead
+// of inheriting whatever the source datadir's erigondb.toml resolved to.
+func bindPBinHashSuite(name string) (func(), error) {
+	prev := commitment.PBinHashSuiteName()
+	if err := commitment.SetPBinHashSuite(name); err != nil {
+		return nil, err
+	}
+	return func() { _ = commitment.SetPBinHashSuite(prev) }, nil
+}
+
 // RebuildCommitmentFiles recreates commitment files from existing accounts and storage kv files
 // If some commitment exists, they will be accepted as correct and next kv range will be processed.
 // DB expected to be empty, committed into db keys will be not processed.
-func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsReader *rawdbv3.TxNumsReader, logger log.Logger, squeeze bool) (latestRoot []byte, err error) {
+func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsReader *rawdbv3.TxNumsReader, logger log.Logger, squeeze bool, opts ...RebuildOption) (latestRoot []byte, err error) {
+	o, err := resolveRebuildOptions(opts)
+	if err != nil {
+		return nil, err
+	}
+	target := o.target
+	logger.Info("[commitment_rebuild] target", "variant", target.Variant, "hash", target.HashName)
+	if target.Variant == commitment.VariantBinPatriciaTrie {
+		restoreHashSuite, err := bindPBinHashSuite(target.HashName)
+		if err != nil {
+			return nil, err
+		}
+		defer restoreHashSuite()
+	}
+
 	a := rwDb.(HasAgg).Agg().(*Aggregator)
 
 	// disable hard alignment; allowing commitment and storage/account to have
@@ -1019,8 +1111,6 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		}
 		roTx.Rollback()
 
-		trieVariant := execctx.PickTrieVariant()
-
 		for shardFrom < lastShard { // recreate this file range 1+ steps
 			nextKey := func() (ok bool, k []byte) {
 				if !keyIter.HasNext() {
@@ -1045,7 +1135,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			defer rwTx.Rollback() //nolint:gocritic
 
 			iterTrieCfg := rebuildTrieCfg
-			iterTrieCfg.Variant = trieVariant
+			iterTrieCfg.Variant = target.Variant
 			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), execctx.WithTrieConfig(iterTrieCfg))
 			if err != nil {
 				return nil, err
@@ -1054,7 +1144,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			domains.SetTxNum(lastTxnumInShard - 1)
 			currentTxNum := lastTxnumInShard - 1
 			domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewFilesOnlyStateReader(rwTx, lastTxnumInShard-1))
-			if trieVariant == commitment.VariantParallelHexPatricia || trieVariant == commitment.VariantStreamingHexPatricia {
+			if target.Variant == commitment.VariantParallelHexPatricia || target.Variant == commitment.VariantStreamingHexPatricia {
 				domains.EnableParaTrieDB(rwDb)
 			}
 

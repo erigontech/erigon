@@ -292,6 +292,13 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 		return errors.New("--no-history and --clear-commitment are mutually exclusive")
 	}
 
+	// The scheme to produce is decided here and passed down, so the rebuild never
+	// re-reads it from process state further in.
+	rebuildTarget, err := dbstate.DefaultRebuildTarget().Resolve()
+	if err != nil {
+		return err
+	}
+
 	dirs := datadir.New(datadirCli)
 	if reset {
 		return rawdbreset.Reset(ctx, db, stages.Execution)
@@ -404,7 +411,7 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 			return err
 		}
 	} else {
-		if _, err := stagedsync.RebuildPatriciaTrieBasedOnFiles(ctx, cfg, squeeze); err != nil {
+		if _, err := stagedsync.RebuildPatriciaTrieBasedOnFiles(ctx, cfg, squeeze, dbstate.WithRebuildTarget(rebuildTarget)); err != nil {
 			return err
 		}
 	}
