@@ -112,6 +112,15 @@ func (c CaplinConfig) HaveInvalidDevnetParams() bool {
 	return c.CustomConfigPath == "" || c.CustomGenesisStatePath == ""
 }
 
+func (c CaplinConfig) ApplyNetworkOverrides(networkConfig *NetworkConfig) {
+	if len(c.BootstrapNodes) > 0 {
+		networkConfig.BootNodes = c.BootstrapNodes
+	}
+	if c.StaticPeers != nil {
+		networkConfig.StaticPeers = c.StaticPeers
+	}
+}
+
 func (c CaplinConfig) RelayUrlExist() bool {
 	return c.MevRelayUrl != ""
 }
@@ -198,6 +207,12 @@ var (
 		"enr:-Ly4QAtr21x5Ps7HYhdZkIBRBgcBkvlIfEel1YNjtFWf4cV3au2LgBGICz9PtEs9-p2HUl_eME8m1WImxTxSB3AkCMwBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhANHhOeJc2VjcDI1NmsxoQNLp1QPV8-pyMCohOtj6xGtSBM_GtVTqzlbvNsCF4ezkYhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
 		// GnosisDAO Bootnode: 3.69.35.13
 		"enr:-Ly4QLgn8Bx6faigkKUGZQvd1HDToV2FAxZIiENK-lczruzQb90qJK-4E65ADly0s4__dQOW7IkLMW7ZAyJy2vtiLy8Bh2F0dG5ldHOIAAAAAAAAAACEZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhANFIw2Jc2VjcDI1NmsxoQMa-fWEy9UJHfOl_lix3wdY5qust78sHAqZnWwEiyqKgYhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
+	}
+	ChiadoStaticPeers = []string{
+		"/ip4/65.109.93.224/tcp/9000/p2p/16Uiu2HAmEG2vHsiGdask9Weg5qVCsxtrezWCde1WArakqSNCY1EA",
+		"/ip4/185.127.230.20/tcp/9000/p2p/16Uiu2HAkzVyapm35N6PFLVVgPvfaR4PngLkzH1rQznHTNQk73hwt",
+		"/ip4/51.68.224.153/tcp/9000/p2p/16Uiu2HAkxcBE3LK7zhnyZERguonkKmXLgYPRcuDPaF6C2vaigYuT",
+		"/ip4/57.128.194.213/tcp/9000/p2p/16Uiu2HAmH8EQ7XHrz72cEspr6G7xHipCgV55gf211t6B9AnbRcgo",
 	}
 	HoodiBootstrapNodes = []string{
 		"enr:-Mq4QLkmuSwbGBUph1r7iHopzRpdqE-gcm5LNZfcE-6T37OCZbRHi22bXZkaqnZ6XdIyEDTelnkmMEQB8w6NbnJUt9GGAZWaowaYh2F0dG5ldHOIABgAAAAAAACEZXRoMpDS8Zl_YAAJEAAIAAAAAAAAgmlkgnY0gmlwhNEmfKCEcXVpY4IyyIlzZWNwMjU2azGhA0hGa4jZJZYQAS-z6ZFK-m4GCFnWS8wfjO0bpSQn6hyEiHN5bmNuZXRzAIN0Y3CCIyiDdWRwgiMo",
@@ -327,6 +342,7 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		NfdKey:                          "nfd",
 		MinimumPeersInSubnetSearch:      20,
 		BootNodes:                       ChiadoBootstrapNodes,
+		StaticPeers:                     ChiadoStaticPeers,
 	},
 
 	chainspec.HoodiChainID: {
