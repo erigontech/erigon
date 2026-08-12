@@ -597,7 +597,6 @@ func NewWorkersPool(ctx context.Context, runFault func() error, accumulator *sha
 	g, gctx := errgroup.WithContext(ctx)
 	wait = g.Wait
 	applyWorker = NewWorker(ctx, false, nil, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs, logger)
-	applyWorker.runFault = runFault
 
 	// Assigned before anything can fail: every return path must hand back a callable clear.
 	var clearDone bool

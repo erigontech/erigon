@@ -92,8 +92,8 @@ type parallelExecutor struct {
 	// verdict is the recorded invalid-block verdict and exhausted the recorded
 	// resumable batch boundary, if any. Both are written and read only on the
 	// execImpl goroutine (the apply loop runs there synchronously).
-	verdict   *blockVerdict
-	exhausted *ErrLoopExhausted
+	verdict     *blockVerdict
+	exhausted   *ErrLoopExhausted
 	execWorkers []*exec.Worker
 	stopWorkers func()
 	waitWorkers func() error
@@ -101,8 +101,7 @@ type parallelExecutor struct {
 	// batch-stop cause or a failure. The exec loop still owns result-channel
 	// closure so consumers can drain before the group is joined.
 	cancelExecLoop context.CancelCauseFunc
-	// cancelWorkers stops the OCC worker pool. The exec loop calls it on exit,
-	// and final executor cleanup calls it again as a safety net.
+	// cancelWorkers stops the OCC worker pool. Idempotent.
 	cancelWorkers  context.CancelFunc
 	in             *exec.QueueWithRetry
 	rws            *exec.ResultsQueue
@@ -398,7 +397,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	var lastProgress commitment.CommitProgress
 
 	execErr = pe.runApplyLoop(pe.logPrefix, applyResults, rootResults, func() (err error) {
-		if pe.cfg.syncCfg.ChaosMonkey && pe.enableChaosMonkey {
+		if pe.chaosMonkeyEnabled() {
 			chaos_monkey.ApplyLoopPanic()
 		}
 
@@ -798,8 +797,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 
 	execErr = pe.checkBlocksDrained(ctx, executorContext, execErr)
 
-	// Commitment is computed per-block by the calculator. Stage progress
-	// is updated in handleCommitResult when results are consumed.
+	// Commitment is computed per-block by the calculator; the committed
+	// block/txNum counters were recorded by handleCommitResult as results
+	// were consumed.
 
 	if !hasLoggedCommittments.Load() && !commitStart.IsZero() {
 		pe.LogCommitments(0, stepsInDb, lastProgress)
@@ -836,7 +836,6 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 
 	return lastHeader, rwTx, nil
 }
-
 
 func (pe *parallelExecutor) runApplyLoop(logPrefix string, applyResults <-chan applyResult, rootResults <-chan commitmentResult, apply func() error) (err error) {
 	defer func() {
@@ -953,8 +952,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 	// Note: pe.applyTx is the stageloop's rwTx (externally supplied).
 	// Do NOT rollback it here — the stageloop owns its lifecycle.
 
-	// Stop workers on every exec-loop exit. Final cleanup repeats this cancellation
-	// as a safety net before joining the complete executor group.
+	// Stop workers on every exec-loop exit.
 	defer pe.cancelWorkers()
 	defer pe.closeApplyChannels()
 	defer func() {
@@ -975,7 +973,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 		}
 	}()
 
-	if pe.cfg.syncCfg.ChaosMonkey && pe.enableChaosMonkey {
+	if pe.chaosMonkeyEnabled() {
 		chaos_monkey.ExecLoopPanic()
 	}
 
@@ -1691,7 +1689,7 @@ func (pe *parallelExecutor) processResults(ctx context.Context, applyTx kv.Tempo
 	for rwsIt.HasNext() && blockResult == nil {
 		txResult := rwsIt.PopNext()
 
-		if pe.cfg.syncCfg.ChaosMonkey && pe.enableChaosMonkey {
+		if pe.chaosMonkeyEnabled() {
 			chaosErr := chaos_monkey.ThrowRandomConsensusError(false, txResult.Version().TxIndex, pe.cfg.badBlockHalt, txResult.Err)
 			if chaosErr != nil {
 				log.Warn("Monkey in consensus")
@@ -1799,7 +1797,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, func(erro
 	pe.cancelWorkers = cancelWorkers
 
 	var workerFault func() error
-	if pe.cfg.syncCfg.ChaosMonkey && pe.enableChaosMonkey {
+	if pe.chaosMonkeyEnabled() {
 		workerFault = chaos_monkey.ThrowWorkerError
 	}
 

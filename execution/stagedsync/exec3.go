@@ -263,7 +263,7 @@ func execV3(ctx context.Context,
 	}
 	if out.verdict != nil {
 		haltOnBadBlockDebug(cfg, logPrefix, out.verdict.err, logger)
-		return out, execErr
+		return out, nil
 	}
 
 	execErr = execV3Finalize(ctx, execErr, cfg, doms, pe.lastCommittedTxNum.Load(), out.lastCommittedBlockNum,
@@ -629,10 +629,17 @@ func blockAccessListBytes(blockTx kv.Getter, block *types.Block, blockNum uint64
 }
 
 // recoveredPanicError formats a panic value with %v on purpose: a panic is
-// always an operational failure, never a block verdict or a quiet exit, so the
-// recovered value must not keep a sentinel identity that classifiers match.
+// always an operational failure — never a block verdict, a resumable boundary,
+// or routine cancellation — so the recovered value must not keep a sentinel
+// identity that classifiers match.
 func recoveredPanicError(operation string, recovered any) error {
 	return fmt.Errorf("%s panic: %v", operation, recovered)
+}
+
+// chaosMonkeyEnabled gates fault injection to explicitly configured runs on
+// the initial cycle.
+func (te *txExecutor) chaosMonkeyEnabled() bool {
+	return te.cfg.syncCfg.ChaosMonkey && te.enableChaosMonkey
 }
 
 func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, maxBlockNum uint64, blockLimit uint64, initialTxNum uint64, inputTxNum uint64, readAhead chan uint64, initialCycle bool, applyResults chan applyResult, blockRequests chan *blockRequest, commitResults chan applyResult) error {
@@ -664,7 +671,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			defer close(blockRequests)
 		}
 
-		if te.cfg.syncCfg.ChaosMonkey && te.enableChaosMonkey {
+		if te.chaosMonkeyEnabled() {
 			if chaosErr := chaos_monkey.ThrowPreExecutionError(); chaosErr != nil {
 				return chaosErr
 			}

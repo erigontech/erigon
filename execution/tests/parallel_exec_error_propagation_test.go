@@ -51,7 +51,7 @@ func TestParallelExec_PreDispatchFailure_SurfacesInsteadOfInfiniteLoop(t *testin
 	const maxBlockNum = uint64(2)
 	setupTx, err := m.DB.BeginTemporalRw(ctx)
 	require.NoError(t, err)
-	defer setupTx.Rollback() // safety net; no-op after the Commit below
+	defer setupTx.Rollback()
 	_, lastTxNum, err := m.BlockReader.TxnumReader().Last(setupTx)
 	require.NoError(t, err)
 	require.NoError(t, rawdbv3.TxNums.Append(setupTx, maxBlockNum, lastTxNum+2))
@@ -83,7 +83,7 @@ func tipWithUnexecutedBlock2(t *testing.T) (*execmoduletester.ExecModuleTester, 
 	b2 := chain.Blocks[1]
 	setupTx, err := m.DB.BeginTemporalRw(ctx)
 	require.NoError(t, err)
-	defer setupTx.Rollback() // safety net; no-op after the Commit below
+	defer setupTx.Rollback()
 	require.NoError(t, rawdb.WriteHeader(setupTx, b2.Header()))
 	require.NoError(t, rawdb.WriteBody(setupTx, b2.Hash(), b2.NumberU64(), b2.Body()))
 	require.NoError(t, rawdb.WriteCanonicalHash(setupTx, b2.Hash(), b2.NumberU64()))
