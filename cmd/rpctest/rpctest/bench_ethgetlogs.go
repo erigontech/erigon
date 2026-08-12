@@ -35,6 +35,10 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
+// maxTopicPositions is how many topic positions a log filter can have, fixed by the
+// LOG0..LOG4 opcodes.
+const maxTopicPositions = 4
+
 // BenchEthGetLogs compares response of Erigon with Geth
 // but also can be used for comparing RPCDaemon with Geth or infura
 // parameters:
@@ -210,13 +214,13 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 			}
 
 			sawAddr := map[common.Address]struct{}{}
-			topicsByPos := [4]map[common.Hash]struct{}{{}, {}, {}, {}}
+			topicsByPos := [maxTopicPositions]map[common.Hash]struct{}{{}, {}, {}, {}}
 			if baseOK {
 				for i := range resp.Result {
 					l := &resp.Result[i]
 					sawAddr[l.Address] = struct{}{}
 					for pos, t := range l.Topics {
-						if pos < 4 {
+						if pos < maxTopicPositions {
 							topicsByPos[pos][t] = struct{}{}
 						}
 					}
