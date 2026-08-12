@@ -195,8 +195,28 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 		return err
 	}
 	if onlySnapDownload {
+		// Nothing was committed and execution runs elsewhere (polygon-sync), so the
+		// download pin still has a handoff to bridge: leave it, and don't register
+		// the clear below.
 		return nil
 	}
+
+	// The snapshots stage pins download progress at ~100% to bridge the handoff to
+	// execution, which the loop below performs: dropping the pin belongs to its
+	// exit. On the failure exit nothing commits, so without this the node would
+	// report a stuck execution as nearly synced. Publish the drop too — subscribers
+	// keep the pinned state until a sync-state event tells them otherwise.
+	defer func() {
+		if !hook.ClearSnapshotDownloadPin() {
+			return
+		}
+		if viewErr := pe.db.View(ctx, func(tx kv.Tx) error {
+			hook.NotifySyncState(tx)
+			return nil
+		}); viewErr != nil {
+			pe.logger.Warn("[OtterSync] sync-state publish after dropping the download pin failed", "err", viewErr)
+		}
+	}()
 
 	// If domains are ahead of block files, nothing to execute.
 	if execctx.IsDomainAheadOfBlocks(ctx, tx, pe.logger) {

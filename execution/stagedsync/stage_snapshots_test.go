@@ -71,6 +71,8 @@ func (d *progressDownloader) ResetProgress() {
 	d.done, d.total = 0, 0
 }
 
+func (d *progressDownloader) DownloadProgress() dbservices.DownloadProgressReport { return d }
+
 func (d *progressDownloader) Seed(context.Context, []string) error   { return nil }
 func (d *progressDownloader) Delete(context.Context, []string) error { return nil }
 func (d *progressDownloader) Download(context.Context, *downloaderproto.DownloadRequest) error {
@@ -112,6 +114,10 @@ func seedPreverified(t *testing.T, chainName string, extraLines ...string) uint6
 	require.NotZero(t, cfg.ExpectBlocks)
 	return cfg.ExpectBlocks
 }
+
+// A commitment block just below the frozen tip used in the pin tests: the pin
+// must report it, not the tip.
+const testCommitBlock = 498_377
 
 type reporterHarness struct {
 	cfg          SnapshotsCfg
@@ -189,28 +195,22 @@ func (h *reporterHarness) requireNoEvent(t *testing.T) {
 	}
 }
 
-// The metadata gate keeps the first honest sample away for a while (minutes on
-// slow webseeds). Without an up-front publish the reply would flash the stage
-// list in that window and then drop it for the rest of the download.
-func TestSnapshotDownloadProgressReporterPublishesDownloadShapeAtStart(t *testing.T) {
+// Pins the no-up-front-publish behavior documented on the reporter itself.
+func TestSnapshotDownloadProgressReporterPublishesNothingBeforeFirstSample(t *testing.T) {
 	h := newSeededReporterHarness(t, 0)
 
 	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
-	t.Cleanup(func() { stop(nil, true) })
+	t.Cleanup(func() { stop(nil, 0) })
 
-	reply := h.awaitEvent(t)
-	require.True(t, reply.Syncing)
-	require.Zero(t, reply.CurrentBlock)
-	require.Empty(t, reply.Stages)
-	require.Equal(t, h.expectBlocks, reply.LastNewBlockSeen)
+	h.requireNoEvent(t)
+	require.Zero(t, h.currentBlock(t))
 }
 
 func TestSnapshotDownloadProgressReporterMapsByteRatioToBlocks(t *testing.T) {
 	h := newSeededReporterHarness(t, 0)
 
 	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
-	h.awaitEvent(t) // the start event marking the download active
-	t.Cleanup(func() { stop(nil, true) })
+	t.Cleanup(func() { stop(nil, 0) })
 	h.downloader.set(250, 1000)
 
 	reply := h.awaitEvent(t)
@@ -226,7 +226,7 @@ func TestSnapshotDownloadProgressReporterResetsStaleProgressAtStart(t *testing.T
 	// as-is would report the full snapshot set as downloaded.
 	h.downloader.set(1000, 1000)
 	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
-	defer func() { stop(nil, true) }()
+	defer func() { stop(nil, 0) }()
 
 	require.Equal(t, 1, h.downloader.resetCount())
 	require.Zero(t, h.currentBlock(t))
@@ -236,8 +236,7 @@ func TestSnapshotDownloadProgressReporterSkipsCompleteSample(t *testing.T) {
 	h := newSeededReporterHarness(t, 0)
 
 	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
-	h.awaitEvent(t) // the start event marking the download active
-	t.Cleanup(func() { stop(nil, true) })
+	t.Cleanup(func() { stop(nil, 0) })
 	h.downloader.set(1000, 1000)
 
 	h.requireNoEvent(t)
@@ -248,26 +247,26 @@ func TestSnapshotDownloadProgressReporterSkipsUnknownTotal(t *testing.T) {
 	h := newSeededReporterHarness(t, 0)
 
 	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
-	h.awaitEvent(t) // the start event marking the download active
-	t.Cleanup(func() { stop(nil, true) })
+	t.Cleanup(func() { stop(nil, 0) })
 	h.downloader.set(400, 0)
 
 	h.requireNoEvent(t)
 	require.Zero(t, h.currentBlock(t))
 }
 
-func TestSnapshotDownloadProgressReporterStopPinsFullProgressOnSuccess(t *testing.T) {
-	const frozen = 499_000
-	h := newSeededReporterHarness(t, frozen)
+// The pin reports the commitment block, where execution resumes; pinning the
+// frozen tip would make currentBlock step backwards at the handoff.
+func TestSnapshotDownloadProgressReporterStopPinsCommitmentBlockOnSuccess(t *testing.T) {
+	const commitBlock = testCommitBlock
+	h := newSeededReporterHarness(t, 499_000)
 
 	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
-	h.awaitEvent(t) // the start event marking the download active
 	h.downloader.set(400, 1000)
 	h.awaitEvent(t)
 
-	stop(nil, true)
+	stop(nil, commitBlock)
 
-	require.Equal(t, uint64(frozen), h.currentBlock(t))
+	require.Equal(t, uint64(commitBlock), h.currentBlock(t))
 }
 
 // A download that stopped at 40% must not report 100%: an operator watching
@@ -276,11 +275,10 @@ func TestSnapshotDownloadProgressReporterStopKeepsLastSampleOnFailure(t *testing
 	h := newSeededReporterHarness(t, 499_000)
 
 	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
-	h.awaitEvent(t) // the start event marking the download active
 	h.downloader.set(400, 1000)
 	h.awaitEvent(t)
 
-	stop(errors.New("webseed outage"), false)
+	stop(errors.New("webseed outage"), 0)
 
 	require.InDelta(t, 0.4*float64(h.expectBlocks), float64(h.currentBlock(t)), 1)
 }
@@ -292,90 +290,85 @@ func TestSnapshotDownloadProgressReporterStopOnShutdownPublishesNothing(t *testi
 	ctx, cancel := context.WithCancel(t.Context())
 
 	stop := startSnapshotDownloadProgressReporter(ctx, h.cfg)
-	h.awaitEvent(t) // the start event marking the download active
 	h.downloader.set(400, 1000)
 	h.awaitEvent(t)
 
 	cancel()
-	stop(context.Canceled, false)
+	stop(context.Canceled, 0)
 
 	h.requireNoEvent(t)
 	require.InDelta(t, 0.4*float64(h.expectBlocks), float64(h.currentBlock(t)), 1)
 }
 
-func TestSnapshotDownloadProgressReporterStopWithoutSamplePinsFullProgress(t *testing.T) {
-	const frozen = 499_000
-	h := newSeededReporterHarness(t, frozen)
+func TestSnapshotDownloadProgressReporterStopWithoutSamplePinsCommitmentBlock(t *testing.T) {
+	const commitBlock = testCommitBlock
+	h := newSeededReporterHarness(t, 499_000)
 
 	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
-	stop(nil, true)
+	stop(nil, commitBlock)
 
-	require.Equal(t, uint64(frozen), h.currentBlock(t))
+	require.Equal(t, uint64(commitBlock), h.currentBlock(t))
 }
 
-// Completion can land inside the last sampling window, while the downloader's
-// metadata gate still reports (0, 0). The success pin must not depend on
-// downloader state, or it clears the progress instead of pinning it.
+// Completion can land inside the last sampling window, where the downloader
+// still reports (0, 0): the pin must not depend on downloader state.
 func TestSnapshotDownloadProgressReporterStopPinsWhenDownloaderReportsNoProgress(t *testing.T) {
-	const frozen = 499_000
-	h := newSeededReporterHarness(t, frozen)
+	const commitBlock = testCommitBlock
+	h := newSeededReporterHarness(t, 499_000)
 
 	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
-	h.awaitEvent(t) // the start event marking the download active
 	h.downloader.set(400, 1000)
 	h.awaitEvent(t)
 	h.downloader.set(0, 0)
 
-	stop(nil, true)
+	stop(nil, commitBlock)
 
-	require.Equal(t, uint64(frozen), h.currentBlock(t))
+	require.Equal(t, uint64(commitBlock), h.currentBlock(t))
 }
 
-// Without state files (--snap.skip-state-snapshot-download) there is no
-// commitment block and execution starts from genesis: pinning would claim the
-// frozen tip for the whole re-execution, so the stop func must clear instead.
+// Pins the clear-instead-of-pin behavior documented on the stop func itself
+// (commitBlock == 0, e.g. --snap.skip-state-snapshot-download).
 func TestSnapshotDownloadProgressReporterStopClearsWithoutCommitmentBlock(t *testing.T) {
 	h := newSeededReporterHarness(t, 499_000)
 
 	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
-	h.awaitEvent(t) // the start event marking the download active
 	h.downloader.set(400, 1000)
 	h.awaitEvent(t)
 
-	stop(nil, false)
+	stop(nil, 0)
 
 	require.Zero(t, h.currentBlock(t))
 }
 
-// The snapshots cover only the download target, so an FCU arriving mid-download
-// must not scale the byte ratio onto the live head.
-func TestSnapshotDownloadProgressReporterDoesNotScaleToLiveHead(t *testing.T) {
-	h := newSeededReporterHarness(t, 0)
-	h.cfg.notifier.NewLastBlockSeen(h.expectBlocks + 1_000_000)
+// A capped download retains only the segments whose To is at or below the cap,
+// so the target must be the top retained boundary: scaling to the cap itself
+// overshoots and snaps backwards at completion.
+func TestSnapshotDownloadProgressReporterCapsTargetAtLastBoundaryBelowDownloadToBlock(t *testing.T) {
+	// Boundaries at 100k (extra headers file) and 500k (base seed); the cap
+	// falls between them, so the retained set tops out at the 100k boundary.
+	const retainedBoundaryTip = 100_000 - 1
+	h := newReporterHarness(t, networkname.Bloatnet, 0, &progressDownloader{})
+	seedPreverified(t, networkname.Bloatnet, `"v1-000000-000100-headers.seg" = "cc"`, `"v1-000000-000100-bodies.seg" = "dd"`)
+	h.cfg.syncConfig.SnapshotDownloadToBlock = 250_000
 
 	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
-	h.awaitEvent(t) // the start event marking the download active
-	t.Cleanup(func() { stop(nil, true) })
+	t.Cleanup(func() { stop(nil, 0) })
 	h.downloader.set(500, 1000)
 
 	reply := h.awaitEvent(t)
-	require.InDelta(t, 0.5*float64(h.expectBlocks), float64(reply.CurrentBlock), 1)
+	require.InDelta(t, 0.5*float64(retainedBoundaryTip), float64(reply.CurrentBlock), 1)
 }
 
-// With the download capped, the byte total covers only the capped file set, so
-// the target must be capped too or progress overshoots.
-func TestSnapshotDownloadProgressReporterCapsTargetAtDownloadToBlock(t *testing.T) {
-	const toBlock = 200_000
+func TestSnapshotDownloadProgressReporterNoopWhenDownloadToBlockBelowFirstBoundary(t *testing.T) {
 	h := newSeededReporterHarness(t, 0)
-	h.cfg.syncConfig.SnapshotDownloadToBlock = toBlock
+	h.cfg.syncConfig.SnapshotDownloadToBlock = 200_000
 
 	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
-	h.awaitEvent(t) // the start event marking the download active
-	t.Cleanup(func() { stop(nil, true) })
-	h.downloader.set(500, 1000)
+	stop(nil, 0)
 
-	reply := h.awaitEvent(t)
-	require.InDelta(t, 0.5*float64(toBlock-1), float64(reply.CurrentBlock), 1)
+	require.Zero(t, h.downloader.resetCount())
+	h.requireNoEvent(t)
+	require.Zero(t, h.currentBlock(t))
 }
 
 func TestSnapshotDownloadProgressReporterDownloadToBlockAboveTipKeepsTarget(t *testing.T) {
@@ -383,8 +376,7 @@ func TestSnapshotDownloadProgressReporterDownloadToBlockAboveTipKeepsTarget(t *t
 	h.cfg.syncConfig.SnapshotDownloadToBlock = 10 * h.expectBlocks
 
 	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
-	h.awaitEvent(t) // the start event marking the download active
-	t.Cleanup(func() { stop(nil, true) })
+	t.Cleanup(func() { stop(nil, 0) })
 	h.downloader.set(500, 1000)
 
 	reply := h.awaitEvent(t)
@@ -400,8 +392,7 @@ func TestSnapshotDownloadProgressReporterTargetIgnoresSlotNumberedSegments(t *te
 	const headersTip = 499_999
 
 	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
-	h.awaitEvent(t) // the start event marking the download active
-	t.Cleanup(func() { stop(nil, true) })
+	t.Cleanup(func() { stop(nil, 0) })
 	h.downloader.set(500, 1000)
 
 	reply := h.awaitEvent(t)
@@ -409,12 +400,14 @@ func TestSnapshotDownloadProgressReporterTargetIgnoresSlotNumberedSegments(t *te
 	require.Equal(t, uint64(headersTip), reply.LastNewBlockSeen)
 }
 
+// A successful stop must stay silent too: with no data source there was no
+// download shape to bridge, and the pin would fabricate 100%.
 func TestSnapshotDownloadProgressReporterNoopWithoutProgressCapability(t *testing.T) {
 	h := newReporterHarness(t, networkname.Bloatnet, 499_000, plainDownloader{})
 	seedPreverified(t, networkname.Bloatnet)
 
 	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
-	stop(nil, false)
+	stop(nil, testCommitBlock)
 
 	h.requireNoEvent(t)
 	require.Zero(t, h.currentBlock(t))
@@ -425,19 +418,9 @@ func TestSnapshotDownloadProgressReporterNoopWithoutKnownTarget(t *testing.T) {
 
 	h.downloader.set(250, 1000)
 	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
-	stop(nil, false)
+	stop(nil, 0)
 
 	require.Zero(t, h.downloader.resetCount())
 	h.requireNoEvent(t)
 	require.Zero(t, h.currentBlock(t))
-}
-
-func TestSnapshotDownloadProgressReporterNoopWithoutNotifier(t *testing.T) {
-	h := newSeededReporterHarness(t, 0)
-	h.cfg.notifier = nil
-
-	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
-	stop(nil, false)
-
-	require.Zero(t, h.downloader.resetCount())
 }

@@ -36,9 +36,7 @@ func DirectGrpcServerClient(server downloaderproto.DownloaderServer) downloaderp
 	return directGrpcServerClient{server: server}
 }
 
-// RpcClient reaches the progress capability through a type assertion on its
-// inner client, so losing it here would compile and silently report no progress.
-var _ dbservices.DownloadProgressReport = directGrpcServerClient{}
+var _ dbservices.DownloadProgressProvider = directGrpcServerClient{}
 
 func (c directGrpcServerClient) Download(ctx context.Context, in *downloaderproto.DownloadRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	return c.server.Download(ctx, in)
@@ -52,15 +50,9 @@ func (c directGrpcServerClient) Delete(ctx context.Context, in *downloaderproto.
 	return c.server.Delete(ctx, in)
 }
 
-func (c directGrpcServerClient) Completed() (done, total uint64) {
+func (c directGrpcServerClient) DownloadProgress() dbservices.DownloadProgressReport {
 	if s, ok := c.server.(*GrpcServer); ok {
-		return s.d.Completed()
+		return s.d
 	}
-	return 0, 0
-}
-
-func (c directGrpcServerClient) ResetProgress() {
-	if s, ok := c.server.(*GrpcServer); ok {
-		s.d.ResetProgress()
-	}
+	return nil
 }

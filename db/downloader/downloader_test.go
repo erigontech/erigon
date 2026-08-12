@@ -32,6 +32,7 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
@@ -423,7 +424,9 @@ func TestNewStatsCountsRetainedSameNameTorrent(t *testing.T) {
 
 	require.NoError(os.WriteFile(filepath.Join(test.dirs.Snap, "a.seg"), []byte("local snapshot data"), 0o644))
 	require.NoError(test.downloader.AddNewSeedableFile(ctx, "a.seg"))
+	test.downloader.lock.RLock()
 	localT := test.downloader.torrentsByName["a.seg"]
+	test.downloader.lock.RUnlock()
 	require.NotNil(localT)
 
 	preverifiedHash := snaptype.Hex2InfoHash("bb")
@@ -446,43 +449,19 @@ type noProgressDownloaderClient struct {
 	downloaderproto.DownloaderClient
 }
 
-// The capability travels through RpcClient by type assertion, so a broken bridge
-// compiles fine and silently reports no progress.
-func TestRpcClientForwardsProgressToInProcessDownloader(t *testing.T) {
+// The capability travels through two wrapping clients: each must unwrap to the
+// in-process downloader itself, not report on its behalf.
+func TestRpcClientProgressUnwrapsToInProcessDownloader(t *testing.T) {
 	test := newDownloaderTest(t)
 	grpcServer, err := NewGrpcServer(test.downloader)
 	require.NoError(t, err)
 	client := NewRpcClient(DirectGrpcServerClient(grpcServer), test.dirs.Snap)
 
-	test.downloader.storeStats(AggStats{BytesCompleted: 30, BytesTotal: 100, MetadataReady: 2, NumTorrents: 2})
-	done, total := client.Completed()
-	require.Equal(t, uint64(30), done)
-	require.Equal(t, uint64(100), total)
-
-	client.ResetProgress()
-	_, total = client.Completed()
-	require.Zero(t, total)
+	require.Equal(t, dbservices.DownloadProgressReport(test.downloader), client.DownloadProgress())
 }
 
-func TestRpcClientProgressDegradesWithoutCapability(t *testing.T) {
+func TestRpcClientProgressNilWithoutCapability(t *testing.T) {
 	client := NewRpcClient(noProgressDownloaderClient{}, t.TempDir())
 
-	done, total := client.Completed()
-	require.Zero(t, done)
-	require.Zero(t, total)
-	client.ResetProgress()
-}
-
-// The stored snapshot must not alias the caller's value, which the stats loop
-// overwrites on every iteration.
-func TestDownloaderStoreStatsSnapshotIsImmutable(t *testing.T) {
-	var d Downloader
-
-	s := AggStats{BytesCompleted: 10, BytesTotal: 100, MetadataReady: 2, NumTorrents: 2}
-	d.storeStats(s)
-	s.BytesCompleted = 999
-
-	done, total := d.Completed()
-	require.Equal(t, uint64(10), done)
-	require.Equal(t, uint64(100), total)
+	require.Nil(t, client.DownloadProgress())
 }

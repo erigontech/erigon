@@ -85,17 +85,14 @@ func (me *RpcClient) Delete(ctx context.Context, paths []string) (err error) {
 	return
 }
 
-func (me *RpcClient) Completed() (done, total uint64) {
-	if c, ok := me.inner.(dbservices.DownloadProgressReport); ok {
-		return c.Completed()
+// DownloadProgress exposes the wrapped client's progress capability; nil when
+// the underlying downloader (e.g. an external one reached over gRPC) cannot
+// report progress.
+func (me *RpcClient) DownloadProgress() dbservices.DownloadProgressReport {
+	if p, ok := me.inner.(dbservices.DownloadProgressProvider); ok {
+		return p.DownloadProgress()
 	}
-	return 0, 0
-}
-
-func (me *RpcClient) ResetProgress() {
-	if c, ok := me.inner.(dbservices.DownloadProgressReport); ok {
-		c.ResetProgress()
-	}
+	return nil
 }
 
 func NewRpcClient(inner downloaderproto.DownloaderClient, rootDir string) *RpcClient {
@@ -103,6 +100,6 @@ func NewRpcClient(inner downloaderproto.DownloaderClient, rootDir string) *RpcCl
 }
 
 var (
-	_ dbservices.DownloaderClient       = (*RpcClient)(nil)
-	_ dbservices.DownloadProgressReport = (*RpcClient)(nil)
+	_ dbservices.DownloaderClient         = (*RpcClient)(nil)
+	_ dbservices.DownloadProgressProvider = (*RpcClient)(nil)
 )

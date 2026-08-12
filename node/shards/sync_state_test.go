@@ -171,6 +171,25 @@ func TestBuildSyncingReplySnapshotDownloadProgressIsPublishedAtomically(t *testi
 	}
 }
 
+// Only a terminal sample — the pin bridging the handoff to execution — is
+// dropped: an in-flight sample is the last honest progress after a failed
+// download and must survive. The report tells the caller whether the reply
+// changed, so the transition can be published to subscribers.
+func TestClearSnapshotDownloadPin(t *testing.T) {
+	n := NewNotifications(nil)
+
+	require.False(t, n.ClearSnapshotDownloadPin(), "no sample to drop")
+
+	n.SetSnapshotDownloadProgress(400, 1000, 20_000_000)
+	require.False(t, n.ClearSnapshotDownloadPin())
+	require.NotNil(t, n.snapDownload.Load())
+
+	n.SetSnapshotDownloadProgress(1, 1, 20_000_000)
+	require.True(t, n.ClearSnapshotDownloadPin())
+	require.Nil(t, n.snapDownload.Load())
+	require.False(t, n.ClearSnapshotDownloadPin(), "already dropped")
+}
+
 func drainSyncStateEvents(ch chan *remoteproto.SyncingReply) []*remoteproto.SyncingReply {
 	var got []*remoteproto.SyncingReply
 	for {

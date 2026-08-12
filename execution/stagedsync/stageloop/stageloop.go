@@ -176,6 +176,15 @@ func (h *Hook) UpdateHead(tx kv.Tx, finishProgressBefore uint64, isSynced bool) 
 	return nil
 }
 
+// ClearSnapshotDownloadPin drops the download-completion pin from the sync
+// state; see Notifications.ClearSnapshotDownloadPin.
+func (h *Hook) ClearSnapshotDownloadPin() bool {
+	if h == nil || h.notifications == nil {
+		return false
+	}
+	return h.notifications.ClearSnapshotDownloadPin()
+}
+
 // NotifySyncState publishes the sync status on the event bus if it changed;
 // dedup and ordering live in Notifications.PublishSyncState.
 func (h *Hook) NotifySyncState(tx kv.Tx) {

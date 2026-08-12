@@ -132,11 +132,10 @@ type Downloader struct {
 	manifestReady chan struct{}
 
 	// Latest aggregated stats snapshot, published by the download logging loop
-	// so eth_syncing can report download progress.
+	// so eth_syncing can report download progress. One download session at a
+	// time: samples carry no batch identity, so concurrent Download calls would
+	// interleave progress over disjoint file sets.
 	lastStats atomic.Pointer[AggStats]
-
-	// Highest BytesCompleted published in this download session.
-	completedHighWater atomic.Uint64
 }
 
 // Completed reports the latest snapshot-download progress in bytes; total is 0
@@ -154,23 +153,15 @@ func (d *Downloader) Completed() (done, total uint64) {
 
 func (d *Downloader) ResetProgress() {
 	d.lastStats.Store(nil)
-	d.completedHighWater.Store(0)
 }
 
 // storeStats publishes an immutable snapshot of the current stats: s is a fresh
 // copy, so the stored pointer never aliases the loop buffer being overwritten.
-// BytesCompleted is raised to the session high-water mark, since it counts dirty
-// bytes and can go back down.
+// BytesCompleted counts dirty bytes and can go back down; it is held at the
+// previous sample's level so reported progress stays monotonic.
 func (d *Downloader) storeStats(s AggStats) {
-	for {
-		high := d.completedHighWater.Load()
-		if s.BytesCompleted <= high {
-			s.BytesCompleted = high
-			break
-		}
-		if d.completedHighWater.CompareAndSwap(high, s.BytesCompleted) {
-			break
-		}
+	if prev := d.lastStats.Load(); prev != nil {
+		s.BytesCompleted = max(s.BytesCompleted, prev.BytesCompleted)
 	}
 	d.lastStats.Store(&s)
 }

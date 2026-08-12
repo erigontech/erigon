@@ -359,6 +359,20 @@ func (n *Notifications) SetSnapshotDownloadProgress(done, total, targetBlock uin
 	n.snapDownload.Store(&snapDownloadProgress{done: done, total: total, targetBlock: targetBlock})
 }
 
+// ClearSnapshotDownloadPin drops a terminal (done == total) sample — the pin
+// published at download completion to bridge the handoff to execution — once
+// that handoff window is over, reporting whether it dropped one so the caller
+// can publish the change. An in-flight sample (done < total) is kept: after a
+// failed download it is the last honest progress the node can report.
+func (n *Notifications) ClearSnapshotDownloadPin() bool {
+	s := n.snapDownload.Load()
+	if s == nil || s.done < s.total {
+		return false
+	}
+	n.snapDownload.Store(nil)
+	return true
+}
+
 func NewNotifications(stateChangesConsumer StateChangeConsumer) *Notifications {
 	return &Notifications{
 		Events:               NewEvents(),

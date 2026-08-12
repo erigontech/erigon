@@ -162,26 +162,35 @@ func SpawnStageSnapshots(s *StageState, ctx context.Context, tx kv.RwTx, cfg Sna
 var snapshotDownloadProgressInterval = 2 * time.Second
 
 // startSnapshotDownloadProgressReporter periodically republishes sync state so
-// eth_syncing reports progress during the (long) snapshot download. Returns a
-// stop func that, on a successful download, pins progress at 100% to bridge the
-// handoff to execution — or clears it when no commitment block came with the
-// snapshots (execution restarts from genesis).
+// eth_syncing reports progress during the (long) snapshot download. The reply
+// switches to download-based progress only once the first sample arrives, so a
+// downloader with nothing to report never changes the reply shape. Returns a
+// stop func that, on a successful download, pins progress at 100% of the
+// commitment block to bridge the handoff to execution — or clears it when no
+// commitment block came with the snapshots (execution restarts from genesis).
 // No-op when the downloader can't report progress or the target is unknown.
-func startSnapshotDownloadProgressReporter(ctx context.Context, cfg SnapshotsCfg) func(downloadErr error, hasCommitment bool) {
-	noop := func(error, bool) {}
-	if cfg.notifier == nil {
+func startSnapshotDownloadProgressReporter(ctx context.Context, cfg SnapshotsCfg) func(downloadErr error, commitBlock uint64) {
+	noop := func(error, uint64) {}
+	provider, ok := cfg.snapshotDownloader.(dbservices.DownloadProgressProvider)
+	if !ok {
 		return noop
 	}
-	reporter, ok := cfg.snapshotDownloader.(dbservices.DownloadProgressReport)
-	if !ok {
+	reporter := provider.DownloadProgress()
+	if reporter == nil {
 		return noop
 	}
 	var target uint64
 	if c, known := snapcfg.KnownCfg(cfg.chainConfig.ChainName); known {
+		toBlock := cfg.syncConfig.SnapshotDownloadToBlock
 		// Not ExpectBlocks: it also counts slot-numbered CL segments, which can
-		// exceed the EL tip. The headers files bound the blocks this download covers.
+		// exceed the EL tip. The headers files bound the blocks this download
+		// covers; a capped download retains only the files up to the cap, so the
+		// byte total covers that set and the target has to match its top boundary.
 		for _, info := range c.PreverifiedParsed {
 			if info == nil || info.Ext != ".seg" || info.Type == nil || info.Type.Enum() != snaptype2.Enums.Headers {
+				continue
+			}
+			if toBlock > 0 && info.To > toBlock {
 				continue
 			}
 			target = max(target, info.To)
@@ -189,12 +198,6 @@ func startSnapshotDownloadProgressReporter(ctx context.Context, cfg SnapshotsCfg
 		if target > 0 {
 			target--
 		}
-	}
-	// A capped download requests only the files below toBlock, so the byte total
-	// covers the capped set and the target has to match it. Approximate: the cap
-	// gets rounded to step boundaries anyway.
-	if toBlock := cfg.syncConfig.SnapshotDownloadToBlock; toBlock > 0 {
-		target = min(target, toBlock-1)
 	}
 	if target == 0 {
 		return noop
@@ -210,11 +213,6 @@ func startSnapshotDownloadProgressReporter(ctx context.Context, cfg SnapshotsCfg
 			log.Warn("[OtterSync] sync-state publish failed", "err", err)
 		}
 	}
-
-	// The metadata gate holds the first honest sample back for a while. Publish a
-	// zero sample up front so the reply keeps the download shape (byte ratio, no
-	// stage list) for the whole download instead of flashing the stage list.
-	setAndPublish(0, 1, target)
 
 	// Owned by the ticker goroutine.
 	var lastDone, lastTotal uint64
@@ -251,7 +249,7 @@ func startSnapshotDownloadProgressReporter(ctx context.Context, cfg SnapshotsCfg
 		}
 	}()
 
-	return func(downloadErr error, hasCommitment bool) {
+	return func(downloadErr error, commitBlock uint64) {
 		cancel()
 		<-stopped
 		// A failed download must not claim 100%, and clearing would fabricate 0:
@@ -261,16 +259,16 @@ func startSnapshotDownloadProgressReporter(ctx context.Context, cfg SnapshotsCfg
 		}
 		// Without a commitment block execution starts from genesis, so the pin
 		// would claim the frozen tip for the whole re-execution. Clear instead.
-		if !hasCommitment {
+		if commitBlock == 0 {
 			setAndPublish(0, 0, 0)
 			return
 		}
-		// Pin at 100% instead of clearing: the download branch only applies while
-		// Execution progress is 0, so it self-clears the moment execution advances.
-		// Clearing here would report currentBlock=0 until then, i.e. a 100%→0% dip.
-		// Don't read the downloader here: completion can land inside the last
-		// sampling window, where it still reports (0, 0) and would clear instead.
-		setAndPublish(1, 1, cfg.blockReader.FrozenBlocks())
+		// Pin at 100% of the commitment block, where execution resumes, instead
+		// of clearing: clearing would report currentBlock=0 until the first-cycle
+		// commit, i.e. a 100%→0% dip. Don't read the downloader here: completion
+		// can land inside the last sampling window, where it still reports (0, 0)
+		// and would clear instead.
+		setAndPublish(1, 1, commitBlock)
 	}
 }
 
@@ -349,9 +347,9 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 
 	// Only this phase reports progress: the header-chain phase above downloads a
 	// small subset, so its ratio would jump backwards once the full set is known.
-	var hasCommitment bool
+	var commitBlock uint64
 	stopReporter := startSnapshotDownloadProgressReporter(ctx, cfg)
-	defer func() { stopReporter(err, hasCommitment) }()
+	defer func() { stopReporter(err, commitBlock) }()
 
 	if err := snapshotsync.SyncSnapshots(
 		ctx,
@@ -453,8 +451,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	// that crashed eth_call on Gnosis with "invalid opcode: SHR" (#21066).
 	// Bump Execution stage progress to the snapshot commitment block so RPC sees a
 	// consistent view immediately, matching what ExecV3 would set on its first run.
-	if commitBlock := readCommitmentBlockFromDB(ctx, cfg.db); commitBlock > 0 {
-		hasCommitment = true
+	if commitBlock = readCommitmentBlockFromDB(ctx, cfg.db); commitBlock > 0 {
 		execProgress, err := stages.GetStageProgress(tx, stages.Execution)
 		if err != nil {
 			return fmt.Errorf("get Execution stage progress: %w", err)

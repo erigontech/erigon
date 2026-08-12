@@ -172,14 +172,19 @@ type DownloaderClient interface {
 
 // DownloadProgressReport is an optional capability of a DownloaderClient: it
 // reports snapshot-download progress in bytes so eth_syncing can surface it.
-// Implementing it does not guarantee data: clients wrapping an external
-// downloader satisfy it too and always report total == 0 (unknown).
 type DownloadProgressReport interface {
 	// Completed reports downloaded and total bytes; total == 0 means unknown.
 	Completed() (done, total uint64)
 	// ResetProgress drops any stale sample, so that a phase downloading a small
 	// subset of the files cannot be mistaken for progress on the full set.
 	ResetProgress()
+}
+
+// DownloadProgressProvider is implemented by clients that wrap another
+// downloader client: it exposes the wrapped downloader's progress capability,
+// or nil when that downloader cannot report progress.
+type DownloadProgressProvider interface {
+	DownloadProgress() DownloadProgressReport
 }
 
 // A Seeder client that does nothing when delete or seed is requested, a common configuration pattern.
