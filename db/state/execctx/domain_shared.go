@@ -1586,7 +1586,7 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, view cache.ReadView, 
 	if len(addr) == 0 {
 		return nil
 	}
-	bounded := false
+	hasUnwindBound := false
 	// In-batch state is authoritative: sd.mem / parent.mem hold this batch's
 	// uncommitted account writes, while the addr→codeHash LRU is invalidated only
 	// on flush. Route mem-first; the LRU is a committed-state layer that may only
@@ -1595,13 +1595,22 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, view cache.ReadView, 
 	if ok {
 		return accounts.DeserialiseV3CodeHash(v)
 	}
-	bounded = step != kv.NoStepBound
+	hasUnwindBound = step != kv.NoStepBound
 	if sd.parent != nil {
 		v, step, ok = sd.parent.mem.GetLatest(kv.AccountsDomain, addr)
 		if ok {
 			return accounts.DeserialiseV3CodeHash(v)
 		}
-		bounded = bounded || step != kv.NoStepBound
+		hasUnwindBound = hasUnwindBound || step != kv.NoStepBound
+	}
+	if hasUnwindBound {
+		// A staged unwind bounds the committed lookup. Reuse the normal account
+		// path so every cache and database source observes the same bound.
+		v, _, err := sd.getLatestMetered(kv.AccountsDomain, tx, addr, nil, view)
+		if err != nil {
+			return nil
+		}
+		return accounts.DeserialiseV3CodeHash(v)
 	}
 
 	// Below mem: the addr → codeHash LRU caches committed state
@@ -1636,7 +1645,7 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, view cache.ReadView, 
 	}
 
 	h, fromReadView := resolve()
-	if fromReadView && !bounded && sd.stateCache != nil {
+	if fromReadView && sd.stateCache != nil {
 		var fixed [32]byte
 		if len(h) == 32 {
 			copy(fixed[:], h)

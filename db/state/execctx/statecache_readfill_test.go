@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -376,6 +377,68 @@ func TestCodeHashFill_SkipsInFlightUnwindRow(t *testing.T) {
 
 	_, ok := sc.View(nil).GetAddrCodeHash(key)
 	require.False(t, ok, "a bounded in-flight unwind read must not seed a code-hash mapping")
+}
+
+func TestGetCode_RespectsStagedUnwindBound(t *testing.T) {
+	t.Parallel()
+
+	const stepSize = uint64(16)
+	ctx := t.Context()
+	db := newTestDb(t, stepSize)
+	stateCache := newSmallStateCache()
+	t.Cleanup(stateCache.Close)
+	codeStore := cache.NewCodeStore(1<<20, 1<<20)
+
+	addr := make([]byte, 20)
+	addr[0] = 0xdd
+	code := []byte{0x60, 0x01, 0x60, 0x00, 0x55}
+	account := accounts.SerialiseV3(&accounts.Account{
+		Nonce:    1,
+		CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(code)),
+	})
+
+	seedTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer seedTx.Rollback()
+	seedDomains, err := execctx.NewSharedDomains(ctx, seedTx, log.New())
+	require.NoError(t, err)
+	defer seedDomains.Close()
+	seedDomains.SetStateCacheForTest(stateCache)
+	seedDomains.SetCodeStore(codeStore)
+	seedDomains.SetTxNum(20)
+	require.NoError(t, seedDomains.DomainPut(kv.AccountsDomain, seedTx, addr, account, 20, nil))
+	require.NoError(t, seedDomains.DomainPut(kv.CodeDomain, seedTx, addr, code, 20, nil))
+	require.NoError(t, seedDomains.Commit(ctx, seedTx))
+
+	stepBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(stepBytes, ^uint64(1))
+	var diffs [kv.DomainLen][]kv.DomainEntryDiff
+	diffs[kv.AccountsDomain] = []kv.DomainEntryDiff{{Key: string(addr) + string(stepBytes)}}
+	diffs[kv.CodeDomain] = []kv.DomainEntryDiff{{Key: string(addr) + string(stepBytes)}}
+
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	unwindDomains, err := execctx.NewSharedDomains(ctx, roTx, log.New())
+	require.NoError(t, err)
+	defer unwindDomains.Close()
+	unwindDomains.SetStateCacheForTest(stateCache)
+	unwindDomains.SetCodeStore(codeStore)
+	unwindDomains.Unwind(10, &diffs)
+
+	futureAddr := make([]byte, 20)
+	futureAddr[0] = 0xee
+	futureCode := []byte{0x60, 0x02, 0x60, 0x00, 0x55}
+	futureHash := crypto.Keccak256Hash(futureCode)
+	futureView := stateCache.View(frontierAtStateVersion(t, roTx, frontierAt(math.MaxUint64)))
+	futureView.Fill(kv.CodeDomain, futureAddr, futureCode, 40)
+	futureView.SeedAddrCodeHash(addr, [32]byte(futureHash), 40)
+
+	got, ok, err := unwindDomains.GetCode(roTx, addr, 20)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, code, got,
+		"the code-hash fast path must ignore cache entries above the staged unwind bound")
 }
 
 // Background exec workers are constructed with a nil chainTx placeholder and
