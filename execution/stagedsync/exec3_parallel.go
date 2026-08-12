@@ -2030,27 +2030,26 @@ func (result *execResult) calcFees(
 		return nil, nil
 	}
 
-	var coinbaseEntry, burntEntry feeEntry
+	var coinbaseEntry, burntEntry *feeEntry
 	if emitCoinbase {
-		coinbaseEntry = feeEntry{
-			addr:    result.Coinbase,
-			acc:     feeAddressAccount(coinbaseAcc, newCoinbaseBalance, coinbaseNonce),
-			reason:  tracing.BalanceIncreaseRewardTransactionFee,
-			deleted: coinbaseEmptied,
-			emit:    true,
+		coinbaseEntry = &feeEntry{addr: result.Coinbase, deleted: coinbaseEmptied}
+		if !coinbaseEmptied {
+			coinbaseEntry.acc = feeAddressAccount(coinbaseAcc, newCoinbaseBalance, coinbaseNonce)
+			coinbaseEntry.reason = tracing.BalanceIncreaseRewardTransactionFee
 		}
 	}
 	if emitBurnt {
-		burntEntry = feeEntry{
+		burntEntry = &feeEntry{
 			addr:   burntAddr,
 			acc:    feeAddressAccount(burntAcc, newBurntBalance, 0),
 			reason: tracing.BalanceDecreaseGasBuy,
-			emit:   true,
 		}
 	}
 	// The apply loop re-credits a tx once per validation round, and the credit
 	// only moves when a prior tx's writes moved under it. An unchanged credit
-	// would rebuild a set identical to the one already recorded.
+	// would rebuild a set identical to the one already recorded. A coinbase that
+	// is also the burnt address never matches: one write cannot carry both
+	// tracing reasons, so those blocks pay the full rebuild every round.
 	if coinbaseEntry.recordedIn(credited, taskVersion) && burntEntry.recordedIn(credited, taskVersion) {
 		return nil, nil
 	}
@@ -2062,20 +2061,22 @@ func (result *execResult) calcFees(
 	return addWrites, nil
 }
 
-// feeEntry is one address's share of a tip credit: the post-credit account,
-// whose Balance is also the BalancePath value, or a delete when EIP-161 removes
-// the emptied account instead.
+// feeEntry is one address's share of a fee adjustment: the post-adjustment
+// account, whose Balance is also the BalancePath value, or a delete when EIP-161
+// removes the emptied account instead. A nil *feeEntry is an address this
+// adjustment does not touch.
 type feeEntry struct {
 	addr    accounts.Address
 	acc     accounts.Account
 	reason  tracing.BalanceChangeReason
 	deleted bool
-	emit    bool
 }
 
-// recordedIn reports whether ws already carries this entry verbatim.
+// recordedIn reports whether ws already carries this entry verbatim. A same-
+// version SelfDestruct is only ever this entry's own: a worker's writes are
+// stamped with the pre-validation version, so they cannot match.
 func (e *feeEntry) recordedIn(ws *state.WriteSet, version state.Version) bool {
-	if !e.emit {
+	if e == nil {
 		return true
 	}
 	if e.deleted {
@@ -2087,11 +2088,11 @@ func (e *feeEntry) recordedIn(ws *state.WriteSet, version state.Version) bool {
 		return false
 	}
 	aw, ok := ws.GetAddress(e.addr)
-	return ok && aw.Val != nil && *aw.Val == e.acc && aw.Version == version
+	return ok && aw.Val != nil && aw.Val.Equals(&e.acc) && aw.Version == version
 }
 
 func (e *feeEntry) writeTo(ws *state.WriteSet, version state.Version) {
-	if !e.emit {
+	if e == nil {
 		return
 	}
 	if e.deleted {

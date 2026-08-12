@@ -48,7 +48,9 @@ func newFeeCreditRound(t testing.TB, s *testFinalizeScenario) *feeCreditRound {
 }
 
 // run performs one round and returns the credit calcFees produced, nil when it
-// found the recorded set already carries it.
+// found the recorded set already carries it. The returned set is a copy: the
+// merge folds the recorded set into the credit in place, so the credit itself is
+// only observable before it.
 func (r *feeCreditRound) run(t testing.TB) *state.WriteSet {
 	t.Helper()
 
@@ -57,9 +59,10 @@ func (r *feeCreditRound) run(t testing.TB) *state.WriteSet {
 	if tip.IsEmpty() {
 		return nil
 	}
+	credit := copyWrites(tip)
 	r.recorded = r.recorded.MergeInto(tip)
 	r.credited = r.recorded
-	return tip
+	return credit
 }
 
 func TestCalcFees_SkipsRedundantReCredit(t *testing.T) {
@@ -155,29 +158,21 @@ func TestFeeEntryWriteToIsRecordedIn(t *testing.T) {
 	version := state.Version{TxIndex: 3, Incarnation: 1}
 	addr := fAddr("credited")
 
-	entries := []feeEntry{
+	entries := []*feeEntry{
 		{
 			addr:   addr,
 			acc:    accounts.Account{Balance: *uint256.NewInt(7), Nonce: 2, Incarnation: 1, CodeHash: accounts.EmptyCodeHash},
 			reason: tracing.BalanceIncreaseRewardTransactionFee,
-			emit:   true,
 		},
 		{
 			addr:   addr,
 			acc:    accounts.Account{Balance: *uint256.NewInt(11), CodeHash: accounts.EmptyCodeHash},
 			reason: tracing.BalanceDecreaseGasBuy,
-			emit:   true,
 		},
-		{
-			addr:    addr,
-			reason:  tracing.BalanceIncreaseRewardTransactionFee,
-			deleted: true,
-			emit:    true,
-		},
+		{addr: addr, deleted: true},
 	}
 
-	for i := range entries {
-		e := &entries[i]
+	for i, e := range entries {
 		ws := &state.WriteSet{}
 		e.writeTo(ws, version)
 
@@ -188,6 +183,45 @@ func TestFeeEntryWriteToIsRecordedIn(t *testing.T) {
 		require.False(t, e.recordedIn(&state.WriteSet{}, version),
 			"entry %d: an empty set carries no credit", i)
 	}
+}
+
+// TestFeeEntryNilIsAbsent pins the absent entry: an adjustment that does not
+// touch this address writes nothing and reads as already recorded, so the skip
+// turns on the entries that do exist.
+func TestFeeEntryNilIsAbsent(t *testing.T) {
+	t.Parallel()
+	var absent *feeEntry
+	ws := &state.WriteSet{}
+
+	absent.writeTo(ws, state.Version{TxIndex: 3})
+	require.True(t, ws.IsEmpty(), "an absent entry has nothing to write")
+	require.True(t, absent.recordedIn(ws, state.Version{TxIndex: 3}))
+}
+
+// TestFeeEntryDeletedRejectsForeignSelfDestruct pins the fence the deleted arm
+// rests on: it accepts any SelfDestruct write for its address, so what keeps a
+// worker's own SELFDESTRUCT from reading as this credit is the version stamp.
+func TestFeeEntryDeletedRejectsForeignSelfDestruct(t *testing.T) {
+	t.Parallel()
+	addr := fAddr("emptied")
+	version := state.Version{TxIndex: 3, Incarnation: 1}
+	e := &feeEntry{addr: addr, deleted: true}
+
+	workerWrites := &state.WriteSet{}
+	workerWrites.SetSelfDestruct(addr, &state.VersionedWrite[bool]{
+		WriteHeader: state.WriteHeader{Address: addr, Path: state.SelfDestructPath},
+		Val:         true,
+	})
+	require.False(t, e.recordedIn(workerWrites, version),
+		"a worker's SELFDESTRUCT is stamped with its own version, not the credit's")
+
+	revived := &state.WriteSet{}
+	revived.SetSelfDestruct(addr, &state.VersionedWrite[bool]{
+		WriteHeader: state.WriteHeader{Address: addr, Path: state.SelfDestructPath, Version: version},
+		Val:         false,
+	})
+	require.False(t, e.recordedIn(revived, version),
+		"a SelfDestruct write that is not a delete carries no empty-removal")
 }
 
 var feeCreditSink *state.WriteSet
@@ -224,4 +258,3 @@ func BenchmarkCalcFees(b *testing.B) {
 		})
 	}
 }
-
