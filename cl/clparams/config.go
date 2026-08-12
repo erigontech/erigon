@@ -94,6 +94,14 @@ type CaplinConfig struct {
 
 	// Extra
 	EnableEngineAPI bool
+
+	// ConsensusEngineType selects the pluggable consensus engine (cl/consensus).
+	// Empty or "beacon" = the L1 beacon-chain engine (default). "rollup" = the
+	// L2 based-rollup engine (multi-node, L1-anchored finality, no DA).
+	// "rollup-dev" = the single-node dev variant (instant finality). Kept a
+	// plain string here to avoid a clparams->consensus import cycle; run.go maps
+	// it to the concrete consensus.Engine.
+	ConsensusEngineType string
 }
 
 func (c CaplinConfig) IsDevnet() bool {

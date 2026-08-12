@@ -38,7 +38,9 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/consensus"
 	beaconengine "github.com/erigontech/erigon/cl/consensus/beacon"
+	"github.com/erigontech/erigon/cl/consensus/rollup"
 	"github.com/erigontech/erigon/cl/das"
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	clp2p "github.com/erigontech/erigon/cl/p2p"
@@ -179,6 +181,27 @@ func upgradeGenesisState(s *state.CachingBeaconState, from, to clparams.StateVer
 		}
 	}
 	return nil
+}
+
+// selectConsensusEngine maps the CaplinConfig.ConsensusEngineType string to a
+// concrete cl/consensus.Engine. Empty or "beacon" yields the L1 beacon engine
+// (default). "rollup" / "rollup-dev" yield the L2 based-rollup engine variants.
+// An unrecognised value falls back to beacon with a warning rather than failing
+// the boot, so a typo degrades safely to L1 semantics.
+func selectConsensusEngine(engineType string, logger log.Logger) consensus.Engine {
+	switch consensus.EngineType(engineType) {
+	case consensus.RollupEngineType:
+		logger.Info("Caplin consensus engine: rollup (L2, L1-anchored finality)")
+		return rollup.NewEngine()
+	case consensus.DevEngineType:
+		logger.Info("Caplin consensus engine: rollup-dev (L2, instant finality)")
+		return rollup.NewDevEngine()
+	case "", consensus.BeaconChainEngineType:
+		return &beaconengine.Engine{}
+	default:
+		logger.Warn("unrecognised Caplin ConsensusEngineType; defaulting to beacon", "value", engineType)
+		return &beaconengine.Engine{}
+	}
 }
 
 func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngine, config clparams.CaplinConfig,
@@ -360,7 +383,11 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	// create the public keys registry
 	pksRegistry := public_keys_registry.NewHeadViewPublicKeysRegistry(syncedDataManager)
 	validatorParameters := validator_params.NewValidatorParams()
-	clConsensusEngine := &beaconengine.Engine{}
+	// Select the pluggable consensus engine (cl/consensus). L1 uses the beacon
+	// engine (Casper FFG, full DA); an L2 based rollup selects "rollup" (or
+	// "rollup-dev" single-node) so the fork choice + fork graph adapt their
+	// state-transition, DA, and finality behaviour per chain type.
+	clConsensusEngine := selectConsensusEngine(config.ConsensusEngineType, logger)
 	forkChoice, err := forkchoice.NewForkChoiceStore(
 		ethClock, state, engine, pool, fork_graph.NewForkGraphDisk(state, syncedDataManager, fcuFs, config.BeaconAPIRouter, emitters, clConsensusEngine),
 		emitters, syncedDataManager, blobStorage, pksRegistry, validatorParameters, doLMDSampling, indexDB, clConsensusEngine)
