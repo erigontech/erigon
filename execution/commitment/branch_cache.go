@@ -256,11 +256,8 @@ func adaptiveTrunkDepth(active int64) uint8 {
 	return trunkDepthShallow
 }
 
-// slot returns the fixed-array slot for a nibble path of length 0-3 (and length
-// 4 when the depth-4 array is present, i.e. the account trunk), or nil when the
-// path is deeper — the caller then uses deep (storage) or the tail (account).
 // slot returns the cell for an n-nibble path, nil when that depth has no
-// resident tier and the caller must use deep.
+// resident tier and the caller must use deep (storage) or the tail (account).
 func (t *trunk) slot(path *[4]byte, n int, forWrite bool) *atomic.Pointer[branchCacheEntry] {
 	switch n {
 	case 0:
@@ -429,7 +426,9 @@ func (c *BranchCache) trunkSlot(prefix []byte, forWrite bool) *atomic.Pointer[br
 // the caller falls through to the tail. nibBuf is caller-owned scratch —
 // storageRoute cannot inline, so a local would escape.
 func (c *BranchCache) storageRoute(prefix []byte, create bool, nibBuf *[4]byte) (st *trunk, n int, ok bool) {
-	if len(prefix) < 33 {
+	// A terminator adds a nibble storageNibbles does not count, so the depth would
+	// be one short and route to a neighbouring slot. Refusing sends it to the tail.
+	if len(prefix) < 33 || prefix[0]&0x20 != 0 {
 		return nil, 0, false
 	}
 	// Both decodes stay behind this check; ahead of it they are pure cost.
@@ -492,11 +491,9 @@ func ContractHashFromPrefix(prefix []byte) (hash [32]byte, ok bool) {
 
 // storageNibbles decodes the storage nibbles after the 64-nibble account hash,
 // matching nibbles.CompactToHex(prefix)[64:]. Only the first 4 are written; n is
-// the true count. Assumes no terminator flag, which holds for traversal paths.
+// the true count. Undefined for terminator-flagged prefixes; storageRoute
+// rejects those before calling.
 func storageNibbles(prefix []byte, nib *[4]byte) (n int) {
-	if len(prefix) < 33 {
-		return 0
-	}
 	off := 2
 	if prefix[0]&0x10 != 0 { // odd: the account hash starts at the low nibble of byte 0
 		off = 1
@@ -640,7 +637,9 @@ func (c *BranchCache) store(prefix []byte, entry *branchCacheEntry) {
 					return
 				}
 			}
-		} else if st.deep.ReplaceIfPresent(prefix, entry) {
+		} else if _, present := st.deep.Get(prefix); present && st.deep.ReplaceIfPresent(prefix, entry) {
+			// Get is lock-free; ReplaceIfPresent locks the bucket even on a miss,
+			// and the miss is the common case here.
 			return
 		}
 	}
@@ -669,17 +668,17 @@ func (c *BranchCache) PinEntry(prefix []byte, data []byte, step, txN uint64) {
 		c.tailForWrite().Add(maphash.Hash(prefix), entry)
 		return
 	}
+	// Eviction takes no put stripe, so publish and read the prior occupancy in one
+	// step — a separate check would let an eviction land in between and lose a count.
 	if slot := st.slot(&nibBuf, n, true); slot != nil {
-		if slot.Load() == nil {
+		if slot.Swap(entry) == nil {
 			c.pinnedEntries.Add(1)
 		}
-		slot.Store(entry)
 		return
 	}
-	if _, exists := st.deep.Get(prefix); !exists {
+	if _, loaded := st.deep.LoadAndStore(prefix, entry); !loaded {
 		c.pinnedEntries.Add(1)
 	}
-	st.deep.Set(prefix, entry)
 }
 
 // PinnedCount returns the number of currently pinned storage-trunk entries.
