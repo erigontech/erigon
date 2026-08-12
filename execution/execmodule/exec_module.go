@@ -694,14 +694,21 @@ func (e *ExecModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidH
 	return nil
 }
 
-// haltOnInitialSyncFailure reports whether a failed ProcessFrozenBlocks run
-// must stop the process. Initial sync runs once, so after any real failure —
-// deliberately regardless of its class — the node would stay up serving RPC
-// but never syncing; the operator's restart is the retry. The parallel
-// executor additionally cannot unwind an invalid block; serial keeps the
-// stay-up behavior.
+// haltOnInitialSyncFailure reports whether a parallel initial-sync failure must
+// stop the process. Routine shutdown and publication errors after sync do not
+// halt; serial execution keeps its stay-up behavior.
 func haltOnInitialSyncFailure(err error, exec3Parallel, experimentalBAL bool) bool {
-	return err != nil && !commonerrors.IsOnlyCanceled(err) && (exec3Parallel || experimentalBAL)
+	return err != nil && !isRoutineInitialSyncStop(err) && !isInitialSyncPublicationError(err) &&
+		(exec3Parallel || experimentalBAL)
+}
+
+func isRoutineInitialSyncStop(err error) bool {
+	return commonerrors.IsOnly(err, context.Canceled, common.ErrStopped)
+}
+
+func isInitialSyncPublicationError(err error) bool {
+	var publicationErr *initialSyncPublicationError
+	return errors.As(err, &publicationErr)
 }
 
 func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
@@ -714,8 +721,12 @@ func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 	defer e.semaphore.Release(1)
 
 	if err := e.pipelineExecutor.ProcessFrozenBlocks(ctx, hook, e.onlySnapDownloadOnStart); err != nil {
-		if !commonerrors.IsOnlyCanceled(err) {
-			e.logger.Error("Could not start execution service", "err", err)
+		if !isRoutineInitialSyncStop(err) {
+			if isInitialSyncPublicationError(err) {
+				e.logger.Error("Could not publish initial sync updates", "err", err)
+			} else {
+				e.logger.Error("Could not start execution service", "err", err)
+			}
 		}
 		if haltOnInitialSyncFailure(err, dbg.Exec3Parallel, e.experimentalBAL) {
 			e.logger.Error("Initial sync failed during parallel execution — halting process")

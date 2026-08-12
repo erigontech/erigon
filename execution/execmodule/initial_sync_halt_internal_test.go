@@ -24,13 +24,13 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 )
 
-// TestHaltOnInitialSyncFailure pins the decision for a failed one-shot
-// initial sync: any real failure under the parallel executor halts the
-// process (the operator's restart is the retry), while routine cancellation
-// and serial execution keep the node up.
+// TestHaltOnInitialSyncFailure pins the decision for a failed one-shot initial
+// sync: a real pipeline failure under the parallel executor halts the process,
+// while routine shutdown, post-sync errors, and serial execution keep it up.
 func TestHaltOnInitialSyncFailure(t *testing.T) {
 	t.Parallel()
 
@@ -46,6 +46,16 @@ func TestHaltOnInitialSyncFailure(t *testing.T) {
 	require.False(t, haltOnInitialSyncFailure(nil, true, false))
 	require.False(t, haltOnInitialSyncFailure(fmt.Errorf("[Execution] %w", context.Canceled), true, false),
 		"shutdown must not halt the node")
+	stopped := fmt.Errorf("[Senders] %w", common.ErrStopped)
+	require.False(t, haltOnInitialSyncFailure(stopped, true, false),
+		"ETL shutdown must not halt the node")
+	require.False(t, haltOnInitialSyncFailure(errors.Join(context.Canceled, stopped), true, false),
+		"joined shutdown signals must not halt the node")
+	require.True(t, haltOnInitialSyncFailure(errors.Join(stopped, operational), true, false),
+		"a real failure must not be hidden by a shutdown signal")
+	publicationErr := &initialSyncPublicationError{err: errors.New("notification dispatch failed")}
+	require.False(t, haltOnInitialSyncFailure(publicationErr, true, false),
+		"an error after initial sync completed must not halt the node")
 	require.False(t, haltOnInitialSyncFailure(operational, false, false),
 		"serial execution keeps the stay-up behavior")
 }
