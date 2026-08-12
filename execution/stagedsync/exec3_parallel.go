@@ -438,7 +438,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 		// would hang forever.
 		rootResultsClosed := false
 
-		// fail tracks the earliest block-validity failure across the exec
+		// fail tracks the earliest block-validity VERDICT across the exec
 		// (blockResult.Err) and commit (ErrWrongTrieRoot) streams. Block-
 		// validation errors take precedence over trie-root mismatches on the
 		// same block: a wrong error category breaks eest's validation taxonomy.
@@ -446,6 +446,11 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 		// verdict, so it is recorded and surfaced only after applyResults closes
 		// (once exec has had its say) — see failCandidate.consider.
 		var fail failCandidate
+		// infraErr collects operational faults (apply-side infrastructure and
+		// calculator errors), kept OUT of the block-ranked candidate so a
+		// coincident verdict can never displace them: they surface with
+		// unconditional precedence and the verdict is withheld upstream.
+		var infraErr error
 		// finalized flips once the reported failure is decided (an exec verdict,
 		// or exec cleanly passing the block a commit wrong-root was deferred on).
 		// Remaining results are then drained without re-validation so a post-
@@ -512,14 +517,15 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 			if err == nil {
 				return
 			}
-			fail.consider(cr.blockNum, cr.blockHash, false, err)
 			if !errors.Is(err, ErrWrongTrieRoot) {
 				// Keep draining after cancellation so terminal mustDeliver sends can
-				// finish. fail.err surfaces when the channels close.
+				// finish. infraErr surfaces when the channels close.
+				infraErr = errors.Join(infraErr, err)
 				finalized = true
-				deliberateCancel()
+				pe.cancelExecLoop(err)
 				return
 			}
+			fail.consider(cr.blockNum, cr.blockHash, false, err)
 			if _, applied := appliedBlocks[cr.blockNum]; applied {
 				finalized = true
 				deliberateCancel()
@@ -552,11 +558,11 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					// require every observed block to reach terminal validation before
 					// classifying the stop cause or observed progress. Executor-group
 					// errors and still-scheduled blocks are checked after teardown.
-					if fail.set {
+					if infraErr != nil || fail.set {
 						// Unwind handling is hoisted to SpawnExecuteBlocksStage; the
 						// verdict names the implicated block, not the last-applied one.
 						var opErr error
-						pe.verdict, opErr = classifyApplyExit(fail)
+						pe.verdict, opErr = classifyApplyFailures(infraErr, fail)
 						return opErr
 					}
 					if err := applyLoopMissingBlocksError(ctx, lastBlock.blockNum, pe.maxBlockNum, txResultBlocks, appliedBlocks); err != nil {
@@ -614,16 +620,16 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						finalized = true
 						continue
 					}
-					// failInfra routes an apply-loop infrastructure fault through
-					// failCandidate (earliest-block-wins) + cancel, and keeps the loop
-					// draining. Never bare-return from the apply loop while the exec
-					// loop may sit in a terminal mustDeliver send on a full applyResults
-					// — that strands closeApplyChannels and wedges pe.wait.
+					// failInfra records an apply-loop infrastructure fault and cancels,
+					// keeping the loop draining. Never bare-return from the apply loop
+					// while the exec loop may sit in a terminal mustDeliver send on a
+					// full applyResults — that strands closeApplyChannels and wedges
+					// pe.wait.
 					failInfra := func(err error) {
 						appliedBlocks[blockNum] = struct{}{}
-						fail.consider(blockNum, blockHash, true, err)
+						infraErr = errors.Join(infraErr, err)
 						finalized = true
-						deliberateCancel()
+						pe.cancelExecLoop(err)
 					}
 					header := block.HeaderNoCopy()
 					txs := block.Transactions()
@@ -1452,6 +1458,14 @@ func classifyApplyExit(fail failCandidate) (*blockVerdict, error) {
 		return &blockVerdict{blockNum: fail.block, blockHash: fail.blockHash, err: fail.err}, nil
 	}
 	return nil, fail.err
+}
+
+// classifyApplyFailures merges the operational slot with the fail-candidate:
+// operational faults surface unconditionally, while a coincident verdict is
+// still recorded so the executor can log its withholding.
+func classifyApplyFailures(infraErr error, fail failCandidate) (*blockVerdict, error) {
+	verdict, opErr := classifyApplyExit(fail)
+	return verdict, errors.Join(infraErr, opErr)
 }
 
 // classifyApplyClose decides what a clean channel close means once the

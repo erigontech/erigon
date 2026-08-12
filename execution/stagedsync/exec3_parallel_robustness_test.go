@@ -1769,3 +1769,41 @@ func TestWrapAsExecAbort_PreservesOriginError(t *testing.T) {
 		})
 	}
 }
+
+// Operational faults surface unconditionally; a coincident verdict is still
+// recorded for the withholding log. The block-ranked candidate holds verdicts
+// only, so an infrastructure fault can never be displaced by one.
+func TestClassifyApplyFailures(t *testing.T) {
+	t.Parallel()
+	verdictErr := fmt.Errorf("%w: bad receipts, block=3", rules.ErrInvalidBlock)
+	infra := errors.New("commitment: lazy load failed")
+
+	t.Run("infra fault survives a coincident verdict", func(t *testing.T) {
+		var fail failCandidate
+		fail.consider(3, common.HexToHash("0x03"), true, verdictErr)
+		verdict, opErr := classifyApplyFailures(infra, fail)
+		require.NotNil(t, verdict, "the verdict stays recorded for the withholding log")
+		require.ErrorIs(t, opErr, infra,
+			"an unhealthy run must fail operationally, not report INVALID")
+	})
+
+	t.Run("verdict alone stays a clean exit", func(t *testing.T) {
+		var fail failCandidate
+		fail.consider(3, common.HexToHash("0x03"), true, verdictErr)
+		verdict, opErr := classifyApplyFailures(nil, fail)
+		require.NotNil(t, verdict)
+		require.NoError(t, opErr)
+	})
+
+	t.Run("infra fault alone is operational", func(t *testing.T) {
+		verdict, opErr := classifyApplyFailures(infra, failCandidate{})
+		require.Nil(t, verdict)
+		require.ErrorIs(t, opErr, infra)
+	})
+
+	t.Run("nothing recorded is clean", func(t *testing.T) {
+		verdict, opErr := classifyApplyFailures(nil, failCandidate{})
+		require.Nil(t, verdict)
+		require.NoError(t, opErr)
+	})
+}
