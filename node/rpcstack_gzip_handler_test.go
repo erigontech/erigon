@@ -27,6 +27,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common/pool"
 )
 
 // decompressGzip reads a gzip-compressed body and returns the raw bytes.
@@ -153,11 +155,11 @@ func TestGzipHandlerStatusStreaming(t *testing.T) {
 	assert.Equal(t, "gzip", rec.Header().Get("Content-Encoding"))
 }
 
-// TestGzipHandlerLargeBody verifies that a response body larger than
-// gzPoolBufCap (1 MiB) is compressed correctly. This exercises the pool-cap
-// path: the oversized buffer must not be returned to the shared buffer pool.
+// TestGzipHandlerLargeBody verifies that a response body larger than the
+// shared buffer-pool cap is compressed correctly. This exercises the
+// pool-cap path: the oversized buffer must not be returned to the pool.
 func TestGzipHandlerLargeBody(t *testing.T) {
-	body := bytes.Repeat([]byte("x"), gzPoolBufCap+1)
+	body := bytes.Repeat([]byte("x"), pool.MaxBufferCap+1)
 	handler := newGzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(body)
 	}))
@@ -166,6 +168,32 @@ func TestGzipHandlerLargeBody(t *testing.T) {
 
 	assert.Equal(t, "gzip", rec.Header().Get("Content-Encoding"))
 	assert.Equal(t, body, decompressGzip(t, rec.Body))
+}
+
+// TestGzipMetricsCounters verifies the per-path raw/compressed byte counters:
+// in must grow by the uncompressed payload size, out by the bytes on the wire.
+func TestGzipMetricsCounters(t *testing.T) {
+	// Buffered path.
+	body := bytes.Repeat([]byte("erigon "), 1024) // compressible, > minGzipBodySize
+	inBefore, outBefore := gzipBufferedInBytes.GetValueUint64(), gzipBufferedOutBytes.GetValueUint64()
+	rec := gzipRequest(t, newGzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(body)
+	})))
+	require.Equal(t, "gzip", rec.Header().Get("Content-Encoding"))
+	assert.Equal(t, uint64(len(body)), gzipBufferedInBytes.GetValueUint64()-inBefore, "buffered in must count the raw payload")
+	assert.Equal(t, uint64(rec.Body.Len()), gzipBufferedOutBytes.GetValueUint64()-outBefore, "buffered out must count the compressed bytes")
+
+	// Streaming path: bytes written both before the Flush (drained from the
+	// buffer) and after it must be counted as raw input.
+	inBefore, outBefore = gzipStreamingInBytes.GetValueUint64(), gzipStreamingOutBytes.GetValueUint64()
+	rec = gzipRequest(t, newGzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(body[:1000])
+		w.(http.Flusher).Flush()
+		_, _ = w.Write(body[1000:])
+	})))
+	require.Equal(t, "gzip", rec.Header().Get("Content-Encoding"))
+	assert.Equal(t, uint64(len(body)), gzipStreamingInBytes.GetValueUint64()-inBefore, "streaming in must count raw bytes from both sides of the Flush")
+	assert.Equal(t, uint64(rec.Body.Len()), gzipStreamingOutBytes.GetValueUint64()-outBefore, "streaming out must count the compressed bytes")
 }
 
 // TestGzipResponseWriterFlushActivatesStreaming is a unit test on
@@ -187,7 +215,7 @@ func TestGzipResponseWriterFlushActivatesStreaming(t *testing.T) {
 	// Write more data in streaming mode, then close.
 	_, _ = grw.Write([]byte(" post-flush"))
 	require.NoError(t, grw.gzw.Close())
-	gzPool.Put(grw.gzw)
+	putStreamGzip(grw.gzw)
 
 	got := decompressGzip(t, rec.Body)
 	assert.Equal(t, []byte("pre-flush post-flush"), got)

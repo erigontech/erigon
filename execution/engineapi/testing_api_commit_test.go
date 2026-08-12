@@ -39,7 +39,7 @@ import (
 // commitRecorder captures the chain mutations performed by CommitBlockV1 so
 // tests can assert on what was inserted and which fork choice was applied.
 type commitRecorder struct {
-	inserted  []*types.RawBlock
+	inserted  []*types.Block
 	validated []common.Hash
 	fcuCalled bool
 	fcuHead   common.Hash
@@ -68,7 +68,7 @@ func newCommitStub(parentHdr *types.Header, assembled *types.BlockWithReceipts, 
 		getAssembledBlockFunc: func(_ context.Context, _ uint64) (execmodule.AssembledBlockResult, error) {
 			return execmodule.AssembledBlockResult{Block: assembled, BlockValue: uint256.NewInt(0), Busy: false}, nil
 		},
-		insertBlocksFunc: func(_ context.Context, blocks []*types.RawBlock) (execmodule.ExecutionStatus, error) {
+		insertBlocksFunc: func(_ context.Context, blocks []*types.Block) (execmodule.ExecutionStatus, error) {
 			rec.inserted = append(rec.inserted, blocks...)
 			return rec.insertRes, rec.insertErr
 		},
@@ -405,12 +405,15 @@ func TestCommitBlockV1(t *testing.T) {
 		t.Parallel()
 		assembled := defaultAssembled()
 		assembled.BlockAccessList = types.BlockAccessList{}
+		encodedBAL, err := types.EncodeBlockAccessListBytes(assembled.BlockAccessList)
+		require.NoError(t, err)
+		assembled.Block = types.NewBlockFromNetwork(assembled.Block.HeaderNoCopy(), assembled.Block.Body(), encodedBAL)
 		api, rec, _ := newEnv(assembled)
 
-		_, err := api.CommitBlockV1(context.Background(), validPayloadAttrs(parentTimestamp), nil, nil)
+		_, err = api.CommitBlockV1(context.Background(), validPayloadAttrs(parentTimestamp), nil, nil)
 		require.NoError(t, err)
 		require.Len(t, rec.inserted, 1)
-		assert.NotEmpty(t, rec.inserted[0].BlockAccessList, "encoded BAL must reach the inserted raw block")
+		assert.NotEmpty(t, rec.inserted[0].BlockAccessList(), "encoded BAL must reach the inserted block")
 	})
 
 	t.Run("busy on validation returns error without fork choice", func(t *testing.T) {

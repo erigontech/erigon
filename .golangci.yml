@@ -50,22 +50,8 @@ linters:
       enabled-checks:
         - ruleguard
       disabled-checks:
-        - captLocal
-        - commentFormatting
-        - ifElseChain
-        - sloppyReassign
-        - sprintfQuotedString
-        - deferInLoop
-        - nilValReturn
-        - evalOrder
-        - returnAfterHttpError
-        - weakCond
-        - builtinShadowDecl
-        - uncheckedInlineErr
-        - preferStringWriter
-        - commentedOutCode
-        - preferFprint
-        - deprecatedComment
+        - commentFormatting # disabled to avoid unnecessary friction on local lints and CI for minor whitespace changes without functional benefit
+        - commentedOutCode # disabled to avoid false positives on doc examples, EIP spec comments, and JSON templates
       enabled-tags:
         - performance
         - diagnostic

@@ -5,24 +5,31 @@
 #
 # Where <shard> is one of:
 #
-#   statetests-stable                          state tests vs. eest_stable
-#   statetests-devnet                          state tests vs. eest_devnet
-#   statetests-legacy                          complete legacy Cancun state tests
+#   statetests-stable-{sequential,parallel}    state tests vs. eest_stable
+#   statetests-devnet-{sequential,parallel}    state tests vs. eest_devnet
+#   statetests-legacy-{sequential,parallel}    complete legacy Cancun state tests
+#   rlptests-legacy-race                      complete legacy RLP tests
+#   transactiontests-legacy-race              complete legacy transaction tests
+#   difficultytests-legacy-race               complete legacy difficulty tests
 #   blocktests-stable-sequential               blockchain tests vs. eest_stable
-#   blocktests-devnet                          blockchain tests vs. eest_devnet
-#   blocktests-legacy-consensus-{sequential,parallel,race}
+#   blocktests-devnet-{sequential,parallel}    blockchain tests vs. eest_devnet
+#   blocktests-legacy-consensus-{sequential,parallel}
+#                                              Hive consensus suite
+#   blocktests-legacy-consensus-race-{sequential,parallel}
+#                                              race-detector variants of the
 #                                              Hive consensus suite
 #   blocktests-legacy-constantinople-{sequential,parallel}
 #                                              Hive legacy suite
-#   blocktests-legacy-constantinople-race-{constantinople,constantinople-fix,other-forks}
-#                                              race-detector partition of the
-#                                              Hive legacy suite
+#   blocktests-legacy-constantinople-race-*
+#                                              three fork partitions, each with
+#                                              sequential/parallel commitment
 #   blocktests-legacy-cancun-{sequential,parallel}
 #                                              Hive legacy-cancun suite
-#   blocktests-legacy-cancun-race-{berlin-shanghai-cancun,other-forks}
-#                                              race-detector partition of the
-#                                              Hive legacy-cancun suite
-#   enginextests-stable-sequential             engine-x tests vs. eest_stable
+#   blocktests-legacy-cancun-race-*
+#                                              six fork partitions, each with
+#                                              sequential/parallel commitment
+#   enginextests-stable-{sequential,parallel}  engine-x tests vs. eest_stable
+#   enginextests-devnet-{sequential,parallel}  engine-x tests vs. eest_devnet
 #   enginextests-benchmark-{1m,5m,10m,30m,60m,100m,150m}-sequential
 #                                              engine-x benchmark fixtures per
 #                                              gas-target subdir; each value
@@ -38,7 +45,8 @@
 #                                              export EVM_BIN to the race-built
 #                                              binary; otherwise -race
 #                                              detection doesn't fire.
-#   blocktests-devnet-race-amsterdam           race-detector variant filtered
+#   blocktests-devnet-race-amsterdam-{sequential,parallel}
+#                                              race-detector variants filtered
 #                                              to the Amsterdam fork only.
 #   zkevm-witness                              zkevm execution-witness conformance
 #                                              (eest_zkevm corpus) via the zkevmtest
@@ -46,13 +54,15 @@
 #                                              (canonical) per block.
 #   zkevm-witness-race                         race-detector variant of the above over
 #                                              the whole corpus (run via evm.race).
-#   *-parallel                                  variants run with
-#                                              ERIGON_EXEC3_PARALLEL=true;
-#                                              dedicated devnet/race shards may
-#                                              also opt in via the manifest.
-#                                              Every shard pins the mode so a
-#                                              runtime default change cannot
-#                                              redefine its coverage.
+#   *-parallel                                  any of the above with "-parallel"
+#                                              appended runs with
+#                                              ERIGON_COMMITMENT_PARALLEL=true. Every
+#                                              other shard runs with
+#                                              ERIGON_COMMITMENT_PARALLEL=false so
+#                                              the runtime default in
+#                                              statecfg.ExperimentalParallelCommitment
+#                                              can flip without redefining the shards.
+#                                              Execution is parallel in every shard.
 #
 # Each shard maps to one cmd/evm subcommand running with --jsonout. Pass/fail
 # is decided here (not by the binary, which always exits 0): the shard fails
@@ -86,7 +96,10 @@ case "$shard" in
 	*-stable*)                     fixture_sets=(eest_stable) ;;
 	*-devnet*)                     fixture_sets=(eest_devnet) ;;
 	*-benchmark*)                  fixture_sets=(eest_benchmark) ;;
-	statetests-legacy)                       fixture_sets=(legacy_cancun) ;;
+	statetests-legacy-*)                     fixture_sets=(legacy_cancun) ;;
+	rlptests-legacy-* | \
+		transactiontests-legacy-* | \
+		difficultytests-legacy-*)           fixture_sets=(legacy_tests) ;;
 	blocktests-legacy-consensus-*)           fixture_sets=(legacy_tests) ;;
 	blocktests-legacy-constantinople-* | \
 		blocktests-legacy-cancun-*)          fixture_sets=(legacy_cancun) ;;
@@ -100,27 +113,32 @@ fixture_base() {
 }
 base=$(fixture_base "${fixture_sets[0]}")
 
-# Resolve workers + failure budget + exec3-parallel + the optional race --run
-# regex from the single-source manifest. This script, the test-eest-spec.yml
-# load-matrix job, and the coverage guard all read tools/eest-spec-shards.yml,
-# so adding a shard / tweaking a budget / changing a fork filter is a one-file
-# edit. yq converts YAML→JSON so it can be queried with jq.
+# Resolve workers + failure budget + commitment-parallel + the optional race
+# --run regex from the single-source manifest. This script, the test-eest-spec.yml
+# load-matrix job, and the coverage guard all read tools/eest-spec-shards.yml, so
+# adding a shard / tweaking a budget / changing a fork filter is a one-file edit.
+# yq converts YAML→JSON so it can be queried with jq.
 manifest=tools/eest-spec-shards.yml
-shard_row=$(yq -o=json '.' "$manifest" | jq -r --arg s "$shard" '.[] | select(.shard == $s) | "\(.workers)\t\(."max-allowed-failures")\t\(."exec3-parallel" // false)\t\(."no-ramdisk" // false)\t\(."expected-tests" // 0)\t\(.run // "")"')
+shard_row=$(yq -o=json '.' "$manifest" | jq -r --arg s "$shard" '
+	.[] | select(.shard == $s)
+	| if (."commitment-parallel" | type) != "boolean"
+		then error("shard \($s) must define boolean commitment-parallel")
+		else "\(.workers)\t\(."max-allowed-failures")\t\(."commitment-parallel")\t\(."no-ramdisk" // false)\t\(."expected-tests" // 0)\t\(.run // "")"
+	end')
 if [[ -z "$shard_row" ]]; then
 	echo "shard $shard not found in $manifest" >&2
 	exit 2
 fi
-IFS=$'\t' read -r default_workers default_max exec3_parallel shard_no_ramdisk expected_tests run_regex <<<"$shard_row"
-# Always set ERIGON_EXEC3_PARALLEL explicitly (true or false) so the shard's
-# behaviour is pinned to the manifest, independent of whatever dbg.Exec3Parallel
-# defaults to at runtime. If the default flips, the shards still run the mode
-# they were defined for.
-export ERIGON_EXEC3_PARALLEL="$exec3_parallel"
+IFS=$'\t' read -r default_workers default_max commitment_parallel shard_no_ramdisk expected_tests run_regex <<<"$shard_row"
+# Always set ERIGON_COMMITMENT_PARALLEL explicitly (true or false) so the shard's
+# commitment mode is pinned to the manifest, independent of whatever
+# statecfg.ExperimentalParallelCommitment defaults to at runtime. Execution is
+# parallel in every shard (dbg.Exec3Parallel defaults true).
+export ERIGON_COMMITMENT_PARALLEL="$commitment_parallel"
 
 # Strip "-parallel" / "-sequential" suffix for case-arm routing — both variants
 # share the same fixture path / regex as the parent shard; only the
-# ERIGON_EXEC3_PARALLEL env var differs.
+# ERIGON_COMMITMENT_PARALLEL env var differs.
 shard_route="${shard%-parallel}"
 shard_route="${shard_route%-sequential}"
 
@@ -134,6 +152,12 @@ case "$shard_route" in
 		cmd=statetest;   paths=("$base/state_tests") ;;
 	statetests-legacy)
 		cmd=statetest;   paths=("$base/Cancun/GeneralStateTests") ;;
+	rlptests-legacy-*)
+		cmd=rlptest;   paths=("$base/RLPTests") ;;
+	transactiontests-legacy-*)
+		cmd=transactiontest;   paths=("$base/TransactionTests") ;;
+	difficultytests-legacy-*)
+		cmd=difficultytest;   paths=("$base/DifficultyTests") ;;
 	# race shards reuse this arm; each one's per-fork --run regex comes from the
 	# manifest `run` key (appended after this case), not from a per-shard arm.
 	blocktests-stable | blocktests-devnet | blocktests-stable-race-* | blocktests-devnet-race-*)
@@ -144,7 +168,7 @@ case "$shard_route" in
 		cmd=blocktest;   paths=("$base/Constantinople/BlockchainTests") ;;
 	blocktests-legacy-cancun | blocktests-legacy-cancun-*)
 		cmd=blocktest;   paths=("$base/Cancun/BlockchainTests") ;;
-	enginextests-stable)
+	enginextests-stable | enginextests-devnet)
 		cmd=enginextest
 		paths=("$base/blockchain_tests_engine_x")
 		extra=(--pre-alloc-dir "${paths[0]}/pre_alloc") ;;
@@ -172,6 +196,13 @@ workers="${EEST_SPEC_WORKERS:-$default_workers}"
 max="${EEST_SPEC_MAX_FAILURES:-$default_max}"
 evm_bin="${EVM_BIN:-build/bin/evm}"
 
+# Race-instrumented shards multiply RSS several-fold over the Go heap (TSAN
+# shadow + history). Bound the heap so allocation bursts trigger GC early
+# instead of growing the process into the CI runner's OOM range.
+if [[ "$shard" == *-race* ]]; then
+	export GOMEMLIMIT="${GOMEMLIMIT:-4GiB}"
+fi
+
 if [[ ! -x "$evm_bin" ]]; then
 	echo "$evm_bin not found or not executable; run 'make evm' first" >&2
 	exit 2
@@ -183,7 +214,7 @@ for fixture_set in "${fixture_sets[@]}"; do
 done
 
 for path in "${paths[@]}"; do
-	if [[ ! -d "$path" ]]; then
+	if [[ ! -e "$path" ]]; then
 		echo "fixture path $path does not exist" >&2
 		exit 2
 	fi
@@ -231,7 +262,7 @@ fi
 # code 66: the Go race runtime's "data race detected" signal, emitted even when
 # the run completes and the JSON parses clean, so it must be checked explicitly.
 # The grep filter strips any init-time log lines (e.g. dbg.envLookup's
-# "[WARN] [env]" message when ERIGON_EXEC3_PARALLEL is set fires before cmd/evm
+# "[WARN] [env]" message when ERIGON_COMMITMENT_PARALLEL is set fires before cmd/evm
 # sets the log handler, and the default log handler writes to stdout) so jq
 # sees only JSON.
 for path in "${paths[@]}"; do

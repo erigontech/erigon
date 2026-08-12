@@ -23,7 +23,6 @@ import (
 	"io"
 	"math/bits"
 	"runtime"
-	"sync"
 
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
@@ -289,16 +288,15 @@ func storageRootFromSingleChild(base *HexPatriciaHashed) (cell, error) {
 
 // newDeferredStorageWorker yields a pooled trie worker for a deferring storage fold
 // and a release that returns it to the pool and frees its context.
-func newDeferredStorageWorker(ctx context.Context, pool *sync.Pool, factory TrieContextFactory, traceW io.Writer) (*HexPatriciaHashed, func()) {
-	w := pool.Get().(*HexPatriciaHashed)
+func newDeferredStorageWorker(ctx context.Context, accountKeyLen int16, cfg TrieConfig, factory TrieContextFactory, traceW io.Writer) (*HexPatriciaHashed, func()) {
+	w := NewHexPatriciaHashed(accountKeyLen, nil, cfg)
 	wctx, cleanup := factory(ctx)
 	w.ResetContext(wctx)
 	w.SetTraceWriter(traceW)
 	w.branchEncoder.setDeferUpdates(true)
 	w.SetLeaveDeferredForCaller(true)
 	return w, func() {
-		w.resetForReuse()
-		pool.Put(w)
+		w.Release()
 		if cleanup != nil {
 			cleanup()
 		}
@@ -309,7 +307,7 @@ func newDeferredStorageWorker(ctx context.Context, pool *sync.Pool, factory Trie
 // nibbles off the reused walk path but leaves plainKey/update aliased.
 func collectSubtreeKeys(node *prefixNode, path []byte) []touchedKey {
 	out := make([]touchedKey, 0, node.subtreeCount)
-	var arena keyArena
+	arena := keyArena{remaining: int(node.subtreeCount)}
 	_ = dfsSubtree(node, path, func(hk, pk []byte, upd *Update) error {
 		out = append(out, touchedKey{hk: arena.copy(hk), pk: pk, upd: upd})
 		return nil

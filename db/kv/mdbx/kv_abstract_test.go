@@ -50,7 +50,7 @@ func TestSequence(t *testing.T) {
 	for _, db := range writeDBs {
 		tx, err := db.BeginRw(ctx)
 		require.NoError(t, err)
-		defer tx.Rollback()
+		defer tx.Rollback() //nolint:gocritic
 
 		i, err := tx.ReadSequence(kv.ChaindataTables[0])
 		require.NoError(t, err)
@@ -106,7 +106,7 @@ func TestManagedTx(t *testing.T) {
 	for _, db := range writeDBs {
 		tx, err := db.BeginRw(ctx)
 		require.NoError(t, err)
-		defer tx.Rollback()
+		defer tx.Rollback() //nolint:gocritic
 
 		c, err := tx.RwCursor(bucket1) //nolint:gocritic
 		require.NoError(t, err)
