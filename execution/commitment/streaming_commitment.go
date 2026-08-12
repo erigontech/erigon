@@ -601,15 +601,22 @@ func childForNib(root *prefixNode, nib byte) (*prefixNode, bool) {
 }
 
 // keyArena copies walk-path nibbles into chunked backing buffers so each
-// collected key gets a stable slice without one allocation per key.
-type keyArena struct{ buf []byte }
+// collected key gets a stable slice without one allocation per key. remaining
+// is the caller's expected key count; without it a subtree far smaller than a
+// chunk still burns a whole chunk, and most subtrees are.
+type keyArena struct {
+	buf       []byte
+	remaining int
+}
 
 const keyArenaChunk = 64 * 1024
 
 func (a *keyArena) copy(hk []byte) []byte {
 	if len(hk) > cap(a.buf)-len(a.buf) {
-		a.buf = make([]byte, 0, max(keyArenaChunk, len(hk)))
+		want := len(hk) * max(a.remaining, 1)
+		a.buf = make([]byte, 0, max(min(want, keyArenaChunk), len(hk)))
 	}
+	a.remaining--
 	start := len(a.buf)
 	a.buf = append(a.buf, hk...)
 	return a.buf[start:len(a.buf):len(a.buf)]
