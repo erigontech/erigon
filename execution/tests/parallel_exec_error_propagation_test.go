@@ -228,8 +228,11 @@ func TestParallelExec_ApplyLoopPanic_SurfacesInsteadOfCommitting(t *testing.T) {
 
 	err := runParallelExecV3(t, m, b2.NumberU64())
 
-	require.ErrorIs(t, err, chaosErr,
+	// The panic surfaces by message, not identity: recovered panics are always
+	// plain operational errors.
+	require.ErrorContains(t, err, "apply loop panic",
 		"a recovered apply-loop panic must fail the batch, not commit unvalidated blocks")
+	require.ErrorContains(t, err, chaosErr.Error())
 }
 
 // A recovered exec-loop panic must surface instead of looking like a resumable
@@ -243,8 +246,9 @@ func TestParallelExec_ExecLoopPanic_SurfacesInsteadOfRetrying(t *testing.T) {
 
 	err := runParallelExecV3(t, m, b2.NumberU64())
 
-	require.ErrorIs(t, err, chaosErr,
+	require.ErrorContains(t, err, "exec loop panic",
 		"a recovered exec-loop panic must surface as a hard error")
+	require.ErrorContains(t, err, chaosErr.Error())
 	var exhausted *stagedsync.ErrLoopExhausted
 	require.False(t, errors.As(err, &exhausted),
 		"exec-loop panic classified as ErrLoopExhausted → runStage retries forever with zero progress")

@@ -89,9 +89,11 @@ When rwLoop has nothing to do - it does Prune, or flush of WAL to RwTx (agg.rota
 
 type parallelExecutor struct {
 	txExecutor
-	// verdict is the recorded invalid-block verdict, if any. Written and read
-	// only on the execImpl goroutine (the apply loop runs there synchronously).
-	verdict *blockVerdict
+	// verdict is the recorded invalid-block verdict and exhausted the recorded
+	// resumable batch boundary, if any. Both are written and read only on the
+	// execImpl goroutine (the apply loop runs there synchronously).
+	verdict   *blockVerdict
+	exhausted *ErrLoopExhausted
 	execWorkers []*exec.Worker
 	stopWorkers func()
 	waitWorkers func() error
@@ -562,25 +564,11 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					if err := applyLoopMissingBlocksError(ctx, lastBlock.blockNum, pe.maxBlockNum, txResultBlocks, appliedBlocks); err != nil {
 						return err
 					}
-					// A deliberate stop distinguishes a completed requested range from
-					// a resumable partial batch. stopBadBlock is handled above.
-					if sc, ok := stopCauseOf(executorContext); ok {
-						switch sc.kind {
-						case stopReachedMax:
-							return nil
-						case stopMoreWork:
-							return &ErrLoopExhausted{From: startBlockNum, To: lastBlock.blockNum, Reason: "block batch is full"}
-						}
-					}
-					// Without a stop cause, classify only what the apply loop observed.
-					// Reaching the requested maximum is complete, while observed progress
-					// below it is resumable. An empty stream is provisionally clean: after
-					// the executor is joined, later checks still surface executor errors and
-					// scheduled blocks that never reached apply-loop validation.
-					if applyLoopCloseIsClean(lastBlock.blockNum, pe.maxBlockNum, len(txResultBlocks)) {
-						return nil
-					}
-					return &ErrLoopExhausted{From: startBlockNum, To: lastBlock.blockNum, Reason: "block batch is full"}
+					// A resumable batch boundary is a result, not an error: record it
+					// and exit clean. stopBadBlock is handled above via the candidate.
+					sc, _ := stopCauseOf(executorContext)
+					pe.exhausted = classifyApplyClose(sc, startBlockNum, lastBlock.blockNum, pe.maxBlockNum, len(txResultBlocks))
+					return nil
 				}
 				switch applyResult := applyResult.(type) {
 				case *txResult:
@@ -826,7 +814,10 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 				"block", pe.verdict.blockNum, "verdict", pe.verdict.err, "err", execErr)
 			pe.verdict = nil
 		}
-		if !isQuietExit(execErr) {
+		// A failed run's partial progress is not a resumable boundary: retrying
+		// as if the batch were clean is how a fatal error becomes a silent loop.
+		pe.exhausted = nil
+		if !commonerrors.IsOnlyCanceled(execErr) {
 			if lastHeader != nil {
 				pe.logger.Warn(fmt.Sprintf("[%s] Execution failed", pe.logPrefix), "err", execErr, "block", lastHeader.Number.Uint64(), "hash", lastHeader.Hash())
 			} else {
@@ -846,23 +837,18 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	return lastHeader, rwTx, nil
 }
 
-// isQuietExit reports whether err is routine teardown (cancellation-only) or a
-// resumable batch boundary rather than a failure.
-func isQuietExit(err error) bool {
-	return commonerrors.IsOnlyCanceled(err) || isOnlyLoopExhausted(err)
-}
 
 func (pe *parallelExecutor) runApplyLoop(logPrefix string, applyResults <-chan applyResult, rootResults <-chan commitmentResult, apply func() error) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = recoveredPanicError("apply loop", rec)
 			pe.logger.Warn("["+logPrefix+"] rw panic", "rec", rec, "stack", dbg.Stack())
-		} else if err != nil && !isQuietExit(err) {
+		} else if err != nil && !commonerrors.IsOnlyCanceled(err) {
 			pe.logger.Warn("["+logPrefix+"] rw exit", "err", err, "stack", dbg.Stack())
 		} else {
 			pe.logger.Debug("[" + logPrefix + "] rw exit")
 		}
-		if err != nil && !isOnlyLoopExhausted(err) {
+		if err != nil {
 			pe.cancelAndDrainApplyLoop(err, applyResults, rootResults)
 		}
 	}()
@@ -1471,6 +1457,27 @@ func classifyApplyExit(fail failCandidate) (*blockVerdict, error) {
 	return nil, fail.err
 }
 
+// classifyApplyClose decides what a clean channel close means once the
+// fail-candidate and completeness checks have passed. A deliberate stop maps
+// directly: stopReachedMax completed the requested range, stopMoreWork cut a
+// resumable batch. Without a stop cause, observed progress decides — reaching
+// the requested maximum (or an empty stream, whose executor-side failures are
+// checked after teardown) is complete, anything less is resumable.
+func classifyApplyClose(sc *stopCause, startBlockNum, lastBlockNum, maxBlockNum uint64, txResultCount int) *ErrLoopExhausted {
+	if sc != nil {
+		switch sc.kind {
+		case stopReachedMax:
+			return nil
+		case stopMoreWork:
+			return &ErrLoopExhausted{From: startBlockNum, To: lastBlockNum, Reason: "block batch is full"}
+		}
+	}
+	if applyLoopCloseIsClean(lastBlockNum, maxBlockNum, txResultCount) {
+		return nil
+	}
+	return &ErrLoopExhausted{From: startBlockNum, To: lastBlockNum, Reason: "block batch is full"}
+}
+
 // wrapAsExecAbort wraps origErr in ErrExecAbortError unless it already is one,
 // preserving the real origErr as OriginError instead of the zero-value an
 // inline type-assertion would substitute on the failure branch.
@@ -1626,7 +1633,7 @@ func (pe *parallelExecutor) checkBlocksDrained(ctx, executorCtx context.Context,
 	if ctx.Err() != nil {
 		return reconcileExecErrors(execErr, context.Cause(ctx))
 	}
-	if execErr != nil && !isQuietExit(execErr) {
+	if execErr != nil && !commonerrors.IsOnlyCanceled(execErr) {
 		return execErr
 	}
 	if pe.verdict != nil {
@@ -1868,14 +1875,13 @@ func (pe *parallelExecutor) wait() error {
 	return pe.execLoopGroup.Wait()
 }
 
-// reconcileExecErrors makes a real concurrent error authoritative over
-// resumable or cancellation-only apply results. Independent real errors are
-// preserved.
+// reconcileExecErrors joins a concurrent executor failure into the apply
+// result. Cancellation-only values never mask or displace a real error.
 func reconcileExecErrors(execErr, concurrentErr error) error {
 	if concurrentErr = commonerrors.NilIfCanceled(concurrentErr); concurrentErr == nil {
 		return execErr
 	}
-	if execErr == nil || isQuietExit(execErr) {
+	if commonerrors.NilIfCanceled(execErr) == nil {
 		return concurrentErr
 	}
 	return errors.Join(execErr, concurrentErr)

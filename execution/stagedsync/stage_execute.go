@@ -459,7 +459,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 	// Stage progress: target the SharedDomains overlay (not replaced during exec)
 	// when present, else the live post-exec applyTx (parallel exec may have rolled
 	// the passed-in rwTx via Flush/CommitAndBegin).
-	if (execErr == nil || isOnlyLoopExhausted(execErr)) && out.verdict == nil && out.applyTx != nil {
+	if execErr == nil && out.verdict == nil && out.applyTx != nil {
 		if overlay := doms.BlockOverlay(); overlay != nil {
 			if err := s.Update(overlay, out.lastCommittedBlockNum); err != nil {
 				return err
@@ -469,42 +469,46 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 		}
 	}
 
-	return unwindOnExecError(execErr, out, cfg, s, u, logger)
+	return renderExecOutcome(execErr, out, cfg, s, u, logger)
 }
 
-// unwindOnExecError renders the executor outcome at the stage boundary. An
-// operational executor failure passes through untouched — it is never a block
-// verdict, so it cannot be mistaken for one upstream. A wrong-root verdict on
-// a non-initial cycle routes to handleIncorrectRootHashError, which schedules
-// the unwind on u (binary-search from the implicated block); an initial-cycle
-// wrong root is fatal (no fork to recover from). Any other verdict propagates
-// as its rules.ErrInvalidBlock-wrapping error WITHOUT setting a stage unwind
-// point — the staged-sync loop that detects ErrInvalidBlock owns that unwind;
-// setting one here would leave a stale bad-block verdict that blocks a fresh
-// canonical block at the same height on the next fork-choice. Under
-// badBlockHalt (in-memory fork validation) or a nil unwinder it unwinds
-// nothing and propagates the verdict error.
-func unwindOnExecError(execErr error, out execV3Outcome, cfg ExecuteBlockCfg, s *StageState, u Unwinder, logger log.Logger) error {
+// renderExecOutcome converts the executor outcome into the stage's error
+// contract. An operational executor failure passes through untouched — it is
+// never a block verdict, so it cannot be mistaken for one upstream. A
+// wrong-root verdict on a non-initial cycle routes to
+// handleIncorrectRootHashError, which schedules the unwind on u (binary-search
+// from the implicated block); an initial-cycle wrong root is fatal (no fork to
+// recover from). Any other verdict propagates as its rules.ErrInvalidBlock-
+// wrapping error WITHOUT setting a stage unwind point — the staged-sync loop
+// that detects ErrInvalidBlock owns that unwind; setting one here would leave
+// a stale bad-block verdict that blocks a fresh canonical block at the same
+// height on the next fork-choice. Under badBlockHalt (in-memory fork
+// validation) or a nil unwinder it unwinds nothing and propagates the verdict
+// error. A resumable boundary renders as ErrLoopExhausted, the contract the
+// sync loop resumes on.
+func renderExecOutcome(execErr error, out execV3Outcome, cfg ExecuteBlockCfg, s *StageState, u Unwinder, logger log.Logger) error {
 	if execErr != nil {
 		return execErr
 	}
-	v := out.verdict
-	if v == nil {
-		return nil
-	}
 
-	if errors.Is(v.err, ErrWrongTrieRoot) && !cfg.badBlockHalt && u != nil {
-		// Initial sync has no competing fork to recover from, so a wrong trie root
-		// is fatal — the recovery handler would schedule an unwind (or none, when
-		// the implicated block <= s.BlockNumber) and return nil, silently
-		// swallowing the state-root mismatch. Only a non-initial-cycle reorg
-		// routes to recovery.
-		if !s.CurrentSyncCycle.IsInitialCycle {
-			return handleIncorrectRootHashError(v.blockNum, v.blockHash, out.applyTx, cfg, s, logger, u)
+	if v := out.verdict; v != nil {
+		if errors.Is(v.err, ErrWrongTrieRoot) && !cfg.badBlockHalt && u != nil {
+			// Initial sync has no competing fork to recover from, so a wrong trie
+			// root is fatal — the recovery handler would schedule an unwind (or
+			// none, when the implicated block <= s.BlockNumber) and return nil,
+			// silently swallowing the state-root mismatch. Only a non-initial-cycle
+			// reorg routes to recovery.
+			if !s.CurrentSyncCycle.IsInitialCycle {
+				return handleIncorrectRootHashError(v.blockNum, v.blockHash, out.applyTx, cfg, s, logger, u)
+			}
 		}
+		return v.err
 	}
 
-	return v.err
+	if out.exhausted != nil {
+		return out.exhausted
+	}
+	return nil
 }
 
 // unwindDomsToBlock drops in-mem state of blocks (unwindToBlock, ∞) and

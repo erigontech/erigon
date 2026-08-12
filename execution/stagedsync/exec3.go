@@ -121,14 +121,16 @@ type execRange struct {
 // execV3Outcome carries what the stage wrapper needs after the parallel
 // executor returns. applyTx is the live post-exec tx (parallel exec may have
 // rolled the stageloop tx via Flush/CommitAndBegin, leaving the caller's rwTx
-// stale). verdict is the invalid-block verdict of a healthy run, if any; it is
-// never set when execV3 also returns an error, so the error return means an
-// operational executor failure and nothing else.
+// stale). verdict is the invalid-block verdict of a healthy run and exhausted
+// its resumable batch boundary; at most one of {error, verdict, exhausted} is
+// set, so the error return means an operational executor failure and nothing
+// else.
 type execV3Outcome struct {
 	lastHeader            *types.Header
 	applyTx               kv.TemporalRwTx
 	lastCommittedBlockNum uint64
 	verdict               *blockVerdict
+	exhausted             *ErrLoopExhausted
 }
 
 // execV3 runs the parallel executor over the resolved window rng. It is
@@ -250,12 +252,13 @@ func execV3(ctx context.Context,
 		applyTx:               applyTx,
 		lastCommittedBlockNum: pe.lastCommittedBlockNum.Load(),
 		verdict:               pe.verdict,
+		exhausted:             pe.exhausted,
 	}
 
 	// The finalize tail (commitment persist guard + txpool notification) runs
 	// only for healthy or resumable batches — a failed or invalid batch left
 	// nothing durable to persist or report.
-	if execErr != nil && !isOnlyLoopExhausted(execErr) {
+	if execErr != nil {
 		return out, execErr
 	}
 	if out.verdict != nil {
@@ -625,10 +628,10 @@ func blockAccessListBytes(blockTx kv.Getter, block *types.Block, blockNum uint64
 	return data, nil
 }
 
+// recoveredPanicError formats a panic value with %v on purpose: a panic is
+// always an operational failure, never a block verdict or a quiet exit, so the
+// recovered value must not keep a sentinel identity that classifiers match.
 func recoveredPanicError(operation string, recovered any) error {
-	if err, ok := recovered.(error); ok && !isQuietExit(err) {
-		return fmt.Errorf("%s panic: %w", operation, err)
-	}
 	return fmt.Errorf("%s panic: %v", operation, recovered)
 }
 
@@ -930,8 +933,9 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 // has been crossed at the current block — which causes executeBlocks to
 // stamp the dispatched blockResult with `Exhausted` and break out of
 // its loop. The exec loop sees the Exhausted flag, fires its
-// partial-batch flush, and the apply loop returns ErrLoopExhausted so
-// the stage loop resumes from the next block.
+// partial-batch flush, and the apply loop records the resumable boundary
+// so the stage returns ErrLoopExhausted and the sync loop resumes from
+// the next block.
 //
 // Two gates protect the initial cycle:
 //  1. !initialCycle — later cycles enforce blockLimit unconditionally.

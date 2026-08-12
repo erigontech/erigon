@@ -395,29 +395,17 @@ func TestCheckBlocksDrainedConcurrentReads(t *testing.T) {
 	// Test passes iff no race detector fires AND no deadlock.
 }
 
-// TestApplyLoopCloseClassification covers the apply-loop close decisions.
-// A partial batch with every terminal result is resumable, a fully applied
-// batch is clean, and a missing terminal result is an operational executor
-// error rather than an invalid-block verdict.
+// TestApplyLoopCloseClassification covers the apply-loop close decisions via
+// the production helpers: a partial batch with every terminal result is a
+// resumable boundary (a result, not an error), a fully applied batch is clean,
+// and a missing terminal result is an operational executor error rather than
+// an invalid-block verdict.
 func TestApplyLoopCloseClassification(t *testing.T) {
-	// Reuse the production completeness and clean-close helpers so their
-	// classifications cannot drift from this test.
-	run := func(txResultBlocks, appliedBlocks map[uint64]struct{}, sc *stopCause, lastBlockResult, maxBlockNum, startBlockNum uint64) error {
+	run := func(txResultBlocks, appliedBlocks map[uint64]struct{}, sc *stopCause, lastBlockResult, maxBlockNum, startBlockNum uint64) (*ErrLoopExhausted, error) {
 		if err := applyLoopMissingBlocksError(context.Background(), lastBlockResult, maxBlockNum, txResultBlocks, appliedBlocks); err != nil {
-			return err
+			return nil, err
 		}
-		if sc != nil {
-			switch sc.kind {
-			case stopReachedMax:
-				return nil
-			case stopMoreWork:
-				return &ErrLoopExhausted{From: startBlockNum, To: lastBlockResult, Reason: "block batch is full"}
-			}
-		}
-		if applyLoopCloseIsClean(lastBlockResult, maxBlockNum, len(txResultBlocks)) {
-			return nil
-		}
-		return &ErrLoopExhausted{From: startBlockNum, To: lastBlockResult, Reason: "block batch is full"}
+		return classifyApplyClose(sc, startBlockNum, lastBlockResult, maxBlockNum, len(txResultBlocks)), nil
 	}
 
 	mkSet := func(ns ...uint64) map[uint64]struct{} {
@@ -429,24 +417,42 @@ func TestApplyLoopCloseClassification(t *testing.T) {
 	}
 
 	t.Run("partial batch, size-limit hit — exhausted (the regression case)", func(t *testing.T) {
-		err := run(mkSet(1, 2, 3, 4, 5), mkSet(1, 2, 3, 4, 5), &stopCause{kind: stopMoreWork}, 5, 200, 1)
-		require.ErrorIs(t, err, &ErrLoopExhausted{})
+		exhausted, err := run(mkSet(1, 2, 3, 4, 5), mkSet(1, 2, 3, 4, 5), &stopCause{kind: stopMoreWork}, 5, 200, 1)
+		require.NoError(t, err)
+		require.NotNil(t, exhausted)
+		require.Equal(t, uint64(5), exhausted.To)
 	})
 
-	t.Run("full batch, max reached — clean nil", func(t *testing.T) {
-		require.NoError(t, run(mkSet(1, 2, 3), mkSet(1, 2, 3), &stopCause{kind: stopReachedMax}, 3, 3, 1))
+	t.Run("full batch, max reached — clean", func(t *testing.T) {
+		exhausted, err := run(mkSet(1, 2, 3), mkSet(1, 2, 3), &stopCause{kind: stopReachedMax}, 3, 3, 1)
+		require.NoError(t, err)
+		require.Nil(t, exhausted)
 	})
 
 	t.Run("missing terminal result is an operational error", func(t *testing.T) {
-		err := run(mkSet(1, 2, 3), mkSet(1, 2), nil, 2, 5, 1)
+		exhausted, err := run(mkSet(1, 2, 3), mkSet(1, 2), nil, 2, 5, 1)
 		require.Error(t, err)
+		require.Nil(t, exhausted)
 		require.NotErrorIs(t, err, rules.ErrInvalidBlock)
 		require.Contains(t, err.Error(), "without a blockResult")
 	})
 
 	t.Run("partial batch with single block — exhausted", func(t *testing.T) {
-		err := run(mkSet(1), mkSet(1), &stopCause{kind: stopMoreWork}, 1, 200, 1)
-		require.ErrorIs(t, err, &ErrLoopExhausted{})
+		exhausted, err := run(mkSet(1), mkSet(1), &stopCause{kind: stopMoreWork}, 1, 200, 1)
+		require.NoError(t, err)
+		require.NotNil(t, exhausted)
+	})
+
+	t.Run("no stop cause below max — exhausted", func(t *testing.T) {
+		exhausted, err := run(mkSet(1, 2), mkSet(1, 2), nil, 2, 200, 1)
+		require.NoError(t, err)
+		require.NotNil(t, exhausted)
+	})
+
+	t.Run("no stop cause, empty stream — provisionally clean", func(t *testing.T) {
+		exhausted, err := run(mkSet(), mkSet(), nil, 0, 200, 1)
+		require.NoError(t, err)
+		require.Nil(t, exhausted, "executor-side failures are checked after teardown")
 	})
 }
 
@@ -949,24 +955,17 @@ func TestApplyLoopFlush_InvalidTxWritesAreEstimate(t *testing.T) {
 			"OCC must still see it as a dependency")
 }
 
-// Real concurrent errors take precedence over resumable or canceled apply
-// results. Cancellation-only errors never override the apply-loop result.
+// Real concurrent errors surface and are joined with a real apply result.
+// Cancellation-only values never mask or displace a real error on either side.
 func TestReconcileExecErrors(t *testing.T) {
-	exhausted := &ErrLoopExhausted{From: 100, To: 0, Reason: "block batch is full"}
 	waitFail := errors.New("snapshot step misalignment: snapshot files need rebuilding")
 
 	surfacesLoudly := func(err error) bool {
-		return err != nil && !isQuietExit(err)
+		return err != nil && !commonerrors.IsOnlyCanceled(err)
 	}
 
 	t.Run("both nil", func(t *testing.T) {
 		require.NoError(t, reconcileExecErrors(nil, nil))
-	})
-
-	t.Run("clean partial batch keeps ErrLoopExhausted", func(t *testing.T) {
-		got := reconcileExecErrors(exhausted, nil)
-		require.ErrorIs(t, got, &ErrLoopExhausted{})
-		require.False(t, surfacesLoudly(got), "a clean partial batch must resume, not fail")
 	})
 
 	t.Run("wait error with no apply error surfaces", func(t *testing.T) {
@@ -975,41 +974,12 @@ func TestReconcileExecErrors(t *testing.T) {
 		require.True(t, surfacesLoudly(got))
 	})
 
-	t.Run("wait error supersedes ErrLoopExhausted", func(t *testing.T) {
-		got := reconcileExecErrors(exhausted, waitFail)
-		require.ErrorIs(t, got, waitFail)
-		require.False(t, errors.Is(got, &ErrLoopExhausted{}),
-			"ErrLoopExhausted must not survive, or execImpl retries a fatal error forever")
-		require.True(t, surfacesLoudly(got))
-	})
-
 	t.Run("specific apply error is kept alongside the wait error", func(t *testing.T) {
-		invalid := fmt.Errorf("%w: bad receipts", rules.ErrInvalidBlock)
-		got := reconcileExecErrors(invalid, waitFail)
-		require.ErrorIs(t, got, rules.ErrInvalidBlock)
-		require.ErrorIs(t, got, waitFail)
-		require.True(t, surfacesLoudly(got))
-	})
-
-	t.Run("mixed exhaustion and apply error is loud", func(t *testing.T) {
-		applyFail := errors.New("apply loop: boom")
-		got := reconcileExecErrors(errors.Join(exhausted, applyFail), nil)
-		require.ErrorIs(t, got, applyFail)
-		require.True(t, surfacesLoudly(got))
-	})
-
-	t.Run("mixed exhaustion keeps its apply error alongside the wait error", func(t *testing.T) {
-		applyFail := errors.New("apply loop: boom")
-		got := reconcileExecErrors(errors.Join(exhausted, applyFail), waitFail)
+		applyFail := errors.New("apply loop: open roTx: boom")
+		got := reconcileExecErrors(applyFail, waitFail)
 		require.ErrorIs(t, got, applyFail)
 		require.ErrorIs(t, got, waitFail)
 		require.True(t, surfacesLoudly(got))
-	})
-
-	t.Run("canceled wait keeps a resumable batch resumable", func(t *testing.T) {
-		got := reconcileExecErrors(exhausted, context.Canceled)
-		require.Same(t, exhausted, got,
-			"a canceled wait must not supersede ErrLoopExhausted, or every batch-full commit under cancellation fails hard")
 	})
 
 	t.Run("canceled wait after a clean batch stays clean", func(t *testing.T) {
@@ -1017,9 +987,9 @@ func TestReconcileExecErrors(t *testing.T) {
 	})
 
 	t.Run("canceled wait does not contaminate a specific apply error", func(t *testing.T) {
-		invalid := fmt.Errorf("%w: bad receipts", rules.ErrInvalidBlock)
-		got := reconcileExecErrors(invalid, fmt.Errorf("worker: %w", context.Canceled))
-		require.Same(t, invalid, got)
+		applyFail := errors.New("apply loop: boom")
+		got := reconcileExecErrors(applyFail, fmt.Errorf("worker: %w", context.Canceled))
+		require.Same(t, applyFail, got)
 		require.NotErrorIs(t, got, context.Canceled,
 			"joining a cancellation would flip execImpl's quiet-exit gate and skip the failure handling")
 	})
@@ -1151,17 +1121,29 @@ func TestRunApplyLoopPanicDrainsChannels(t *testing.T) {
 
 	<-calculatorDone
 	require.EqualError(t, recoveredErr, "apply loop panic: boom")
-	require.ErrorIs(t, recoveredErr, panicErr)
+	require.NotErrorIs(t, recoveredErr, panicErr,
+		"a recovered panic keeps its message but not its sentinel identity")
 	require.Same(t, recoveredErr, context.Cause(executorCtx))
 }
 
+// A recovered panic is always an operational failure: the panic value keeps
+// its message but never a sentinel identity, so it cannot classify as a block
+// verdict, a resumable boundary, or routine cancellation anywhere upstream.
 func TestRecoveredPanicError(t *testing.T) {
 	cause := errors.New("boom")
 	recoveredErr := recoveredPanicError("apply loop", cause)
 	require.EqualError(t, recoveredErr, "apply loop panic: boom")
-	require.ErrorIs(t, recoveredErr, cause)
+	require.NotErrorIs(t, recoveredErr, cause)
 
 	require.EqualError(t, recoveredPanicError("exec loop", "boom"), "exec loop panic: boom")
+
+	verdictPanic := recoveredPanicError("apply loop", fmt.Errorf("%w, block=5", ErrWrongTrieRoot))
+	require.NotErrorIs(t, verdictPanic, rules.ErrInvalidBlock,
+		"a panic must not carry a block verdict — verdicts come only from the fail-candidate")
+
+	exhaustedPanic := recoveredPanicError("exec loop", &ErrLoopExhausted{From: 1, To: 2})
+	require.NotErrorIs(t, exhaustedPanic, &ErrLoopExhausted{},
+		"a panic must not read as a resumable boundary at the sync loop")
 }
 
 func TestRecoveredCancellationPanicIsFailure(t *testing.T) {
@@ -1171,7 +1153,6 @@ func TestRecoveredCancellationPanicIsFailure(t *testing.T) {
 	require.NotErrorIs(t, recoveredErr, context.Canceled)
 	require.False(t, commonerrors.IsOnlyCanceled(recoveredErr))
 	require.Same(t, recoveredErr, commonerrors.NilIfCanceled(recoveredErr))
-	require.False(t, isQuietExit(recoveredErr))
 }
 
 func TestRunApplyLoopErrorDrainsChannels(t *testing.T) {
@@ -1229,15 +1210,19 @@ func TestRunApplyLoopExhaustionDoesNotCancelExecutor(t *testing.T) {
 	}
 	exhausted := &ErrLoopExhausted{From: 1, To: 2, Reason: "block batch is full"}
 
+	// A resumable boundary is recorded as a result and returns nil, so the
+	// apply-loop exit must not publish any executor cancellation cause.
 	got := pe.runApplyLoop("test", applyResults, rootResults, func() error {
-		return exhausted
+		pe.exhausted = exhausted
+		return nil
 	})
 
-	require.Same(t, exhausted, got)
+	require.NoError(t, got)
+	require.Same(t, exhausted, pe.exhausted)
 	require.NoError(t, context.Cause(executorCtx))
 }
 
-func TestRunApplyLoopMixedExhaustionDrainsChannels(t *testing.T) {
+func TestRunApplyLoopErrorAfterRecordedBoundaryDrainsChannels(t *testing.T) {
 	applyResults := make(chan applyResult, 1)
 	rootResults := make(chan commitmentResult)
 	applyResults <- &txResult{}
@@ -1256,21 +1241,22 @@ func TestRunApplyLoopMixedExhaustionDrainsChannels(t *testing.T) {
 		close(applyResults)
 	}()
 
+	// A real error after a boundary was already recorded must still cancel and
+	// drain; the boundary itself never suppresses failure handling.
 	boom := errors.New("apply loop: boom")
 	exhausted := &ErrLoopExhausted{From: 1, To: 2, Reason: "block batch is full"}
 	got := pe.runApplyLoop("test", applyResults, rootResults, func() error {
-		return errors.Join(exhausted, boom)
+		pe.exhausted = exhausted
+		return boom
 	})
 
 	select {
 	case <-sendDone:
-	default:
-		<-applyResults
-		<-sendDone
-		t.Fatal("mixed exhaustion and real error returned before the terminal send completed")
+	case <-time.After(5 * time.Second):
+		t.Fatal("apply-loop error exit did not drain the blocked terminal send")
 	}
 
-	require.ErrorIs(t, got, boom)
+	require.Same(t, boom, got)
 	require.Same(t, got, context.Cause(executorCtx))
 }
 
@@ -1647,24 +1633,12 @@ func TestCheckBlocksDrained(t *testing.T) {
 		require.NotErrorIs(t, err, rules.ErrInvalidBlock)
 	})
 
-	t.Run("resumable batch keeps ErrLoopExhausted, not ErrInvalidBlock", func(t *testing.T) {
-		ectx, cancel := context.WithCancelCause(context.Background())
-		cancel(&stopCause{block: 2, kind: stopMoreWork})
-		exhausted := &ErrLoopExhausted{From: 1, To: 2, Reason: "block batch is full"}
-		got := withPending().checkBlocksDrained(context.Background(), ectx, exhausted)
-		require.Same(t, exhausted, got)
-		require.NotErrorIs(t, got, rules.ErrInvalidBlock)
-	})
-
-	t.Run("no-cause exhaustion with an undrained block still flags", func(t *testing.T) {
-		// Replacing exhaustion prevents a retry after work was silently lost.
-		ectx, cancel := context.WithCancelCause(context.Background())
-		cancel(nil)
-		exhausted := &ErrLoopExhausted{From: 1, To: 0, Reason: "block batch is full"}
-		err := withPending().checkBlocksDrained(context.Background(), ectx, exhausted)
-		require.Error(t, err)
-		require.NotErrorIs(t, err, rules.ErrInvalidBlock)
-		require.NotErrorIs(t, err, &ErrLoopExhausted{})
+	t.Run("recorded verdict leaves undrained follow-on blocks alone", func(t *testing.T) {
+		// A verdict deliberately abandons queued work even when no stop cause
+		// was published (the exec loop self-exits after an errored block).
+		pe := withPending()
+		pe.verdict = &blockVerdict{blockNum: 2, blockHash: common.HexToHash("0x02"), err: rules.ErrInvalidBlock}
+		require.NoError(t, pe.checkBlocksDrained(context.Background(), context.Background(), nil))
 	})
 
 	t.Run("cancellation-only exec error does not hide an undrained block", func(t *testing.T) {
