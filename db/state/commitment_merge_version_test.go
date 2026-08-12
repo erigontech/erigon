@@ -87,7 +87,7 @@ func TestCommitmentRebuildSqueezeReadableAfterReload(t *testing.T) {
 
 	db, agg = wipeCommitment(t, db, agg, dirs)
 
-	_, _, err := state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), true)
+	_, _, err := state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), true, state.RebuildTarget{})
 	require.NoError(t, err)
 
 	// reopen fresh so commitment file versions come from the on-disk names

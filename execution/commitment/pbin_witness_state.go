@@ -197,7 +197,17 @@ func (c *pbinWitnessContext) codeFromLeaves(addr []byte) ([]byte, error) {
 	}
 	codeHash := common.BytesToHash(hashValue)
 	if size == 0 {
+		if !pbinIsEmptyCodeHash(codeHash) {
+			return nil, fmt.Errorf("%w: account %x says no code but its CODE_HASH leaf holds %x",
+				errPBinWitnessNode, addr, codeHash)
+		}
 		return []byte{}, nil
+	}
+	// code_size is four bytes of a leaf the sender chose, and both the buffer and
+	// the chunk walk below scale with it, so it is bounded before either happens.
+	if size > pbinMaxWitnessCodeSize {
+		return nil, fmt.Errorf("%w: account %x claims %d code bytes, more than the %d a witness may carry",
+			errPBinWitnessNode, addr, size, uint64(pbinMaxWitnessCodeSize))
 	}
 
 	code := make([]byte, 0, size)
@@ -242,6 +252,12 @@ func (c *pbinWitnessContext) delegationCode(addr []byte, size uint64) ([]byte, e
 func pbinCodeChunkCount(size uint64) int {
 	return int((size + pbinChunkDataLen - 1) / pbinChunkDataLen)
 }
+
+// pbinMaxWitnessCodeSize is the largest code a witness may claim for an account.
+// It sits well above every deployed contract-size limit; its job is to keep an
+// arbitrary code_size from costing a multi-gigabyte buffer before the code it
+// describes has been checked against anything.
+const pbinMaxWitnessCodeSize = 1 << 20
 
 // hasSubtree reports whether the witness proves a leaf exists under prefix.
 // Unlike leaf, an unresolved hash is not an error here: a pruned witness proves

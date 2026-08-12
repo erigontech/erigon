@@ -17,6 +17,7 @@
 package testutil
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -53,10 +54,15 @@ func TestSelectCommitmentVariantLatches(t *testing.T) {
 // parallel subtests, so two of them hold the same variant at once and the one
 // that finishes first must not hand the process back under the other.
 func TestSelectCommitmentVariantHoldsForOverlappingUsers(t *testing.T) {
-	first, err := acquireCommitmentVariant(true)
+	rawFirst, err := acquireCommitmentVariant(true)
 	require.NoError(t, err)
-	second, err := acquireCommitmentVariant(true)
+	rawSecond, err := acquireCommitmentVariant(true)
 	require.NoError(t, err)
+	// A failed assertion between the two releases would otherwise leave the process
+	// latched as bin for every test that runs after this one.
+	first, second := sync.OnceFunc(rawFirst), sync.OnceFunc(rawSecond)
+	t.Cleanup(first)
+	t.Cleanup(second)
 
 	first()
 	require.True(t, statecfg.ExperimentalBinCommitment, "a variant is still held, so it cannot be handed back")

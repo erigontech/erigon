@@ -18,6 +18,7 @@ package commitment
 
 import (
 	"bytes"
+	"fmt"
 	"slices"
 	"testing"
 
@@ -26,6 +27,62 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 )
+
+// merkelize rehashes the tree from its root, so a decode that lost anything
+// fails here instead of downstream. A child hash the set has no preimage for is
+// blinded: opaque, and carried up as it stands. The replay path resolves leaves
+// through pbinWitnessContext and never rehashes the whole tree, so this is a
+// check the tests apply, not one the node runs.
+func (w *pbinWitnessTree) merkelize() (common.Hash, error) {
+	if len(w.nodes) == 0 {
+		return pbinEmptyTreeHash, nil
+	}
+	got, err := w.merkelizeFrom(w.root, 0)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	if got != w.root {
+		return common.Hash{}, fmt.Errorf("%w: root %x re-merkelizes to %x", errPBinWitnessNode, w.root, got)
+	}
+	return got, nil
+}
+
+// merkelizeFrom rehashes the subtree at hash, sitting at bit position depth. The
+// depth bounds the recursion, but not the work: a set whose nodes reference each
+// other can cost exponentially many calls, which is why this stays out of the
+// engine.
+func (w *pbinWitnessTree) merkelizeFrom(hash common.Hash, depth int16) (common.Hash, error) {
+	node, ok := w.nodes[hash]
+	if !ok {
+		return hash, nil
+	}
+	if node.isLeaf() {
+		return w.hasher.leafNodeHash(node.key, node.value), nil
+	}
+	next := depth + node.prefix.bitLen + 1
+	if int(next) > pbinMaxPathBits {
+		return common.Hash{}, fmt.Errorf("%w: branch at bit %d with a %d-bit prefix overflows the %d-bit path",
+			errPBinWitnessNode, depth, node.prefix.bitLen, pbinMaxPathBits)
+	}
+	left, err := w.merkelizeFrom(node.children[0], next)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	right, err := w.merkelizeFrom(node.children[1], next)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	return w.hasher.branchHash(&node.prefix, &left, &right), nil
+}
+
+// leafNodeHash is H over a leaf preimage built from a decoded key, where
+// leafCellHash packs the key from a path and a cell.
+func (h *pbinHasher) leafNodeHash(key, value []byte) common.Hash {
+	buf := append(h.buf[:0], pbinLeafTag)
+	buf = append(buf, key...)
+	buf = append(buf, value...)
+	return h.hash(buf)
+}
 
 // pbinWitnessCapture folds the corpus with the node set attached, giving the
 // root-first slice a witness carries.

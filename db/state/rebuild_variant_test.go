@@ -222,7 +222,7 @@ func TestRebuildCommitmentFilesBinTargetOnHexDatadir(t *testing.T) {
 	rebuildVariantSettingsStayHex(t, binDirs)
 
 	binRoot, binReport, err := state.RebuildCommitmentFiles(t.Context(), binDB, &rawdbv3.TxNums, log.New(), false,
-		state.WithRebuildTarget(state.RebuildTarget{Variant: commitment.VariantBinPatriciaTrie}))
+		state.RebuildTarget{Variant: commitment.VariantBinPatriciaTrie})
 	require.NoError(t, err)
 	require.NotEmpty(t, binRoot)
 	rebuildVariantReportCounts(t, binReport, binRoot, commitment.VariantBinPatriciaTrie)
@@ -234,7 +234,7 @@ func TestRebuildCommitmentFilesBinTargetOnHexDatadir(t *testing.T) {
 		"the rebuilt files must carry a bin trie state that restores to the rebuilt root")
 
 	hexDB, hexAgg, _ := rebuildVariantDatadir(t)
-	hexRoot, hexReport, err := state.RebuildCommitmentFiles(t.Context(), hexDB, &rawdbv3.TxNums, log.New(), false)
+	hexRoot, hexReport, err := state.RebuildCommitmentFiles(t.Context(), hexDB, &rawdbv3.TxNums, log.New(), false, state.RebuildTarget{})
 	require.NoError(t, err)
 	rebuildVariantReportCounts(t, hexReport, hexRoot, commitment.VariantHexPatriciaTrie)
 	require.NotEqual(t, hexRoot, binRoot, "bin and hex commit different key spaces under different hashes")
@@ -265,7 +265,7 @@ func rebuildVariantCommitmentFiles(t *testing.T, dirs datadir.Dirs) map[string]s
 // over its own output like a hex one does.
 func TestRebuildCommitmentFilesBinTargetResumeSkipsCoveredRanges(t *testing.T) {
 	db, _, dirs := rebuildVariantDatadir(t)
-	target := state.WithRebuildTarget(state.RebuildTarget{Variant: commitment.VariantBinPatriciaTrie})
+	target := state.RebuildTarget{Variant: commitment.VariantBinPatriciaTrie}
 
 	_, report, err := state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), false, target)
 	require.NoError(t, err)
@@ -282,19 +282,19 @@ func TestRebuildCommitmentFilesBinTargetResumeSkipsCoveredRanges(t *testing.T) {
 
 func TestRebuildCommitmentFilesDefaultTargetIsProcessVariant(t *testing.T) {
 	defaultDB, _, _ := rebuildVariantDatadir(t)
-	defaultRoot, _, err := state.RebuildCommitmentFiles(t.Context(), defaultDB, &rawdbv3.TxNums, log.New(), false)
+	defaultRoot, _, err := state.RebuildCommitmentFiles(t.Context(), defaultDB, &rawdbv3.TxNums, log.New(), false, state.RebuildTarget{})
 	require.NoError(t, err)
 	require.NotEmpty(t, defaultRoot)
 
 	hexDB, _, _ := rebuildVariantDatadir(t)
 	hexRoot, _, err := state.RebuildCommitmentFiles(t.Context(), hexDB, &rawdbv3.TxNums, log.New(), false,
-		state.WithRebuildTarget(state.RebuildTarget{Variant: commitment.VariantHexPatriciaTrie}))
+		state.RebuildTarget{Variant: commitment.VariantHexPatriciaTrie})
 	require.NoError(t, err)
 	require.Equal(t, defaultRoot, hexRoot, "no target named must rebuild exactly what the hex target does")
 
 	binDB, _, _ := rebuildVariantDatadir(t)
 	binRoot, _, err := state.RebuildCommitmentFiles(t.Context(), binDB, &rawdbv3.TxNums, log.New(), false,
-		state.WithRebuildTarget(state.RebuildTarget{Variant: commitment.VariantBinPatriciaTrie}))
+		state.RebuildTarget{Variant: commitment.VariantBinPatriciaTrie})
 	require.NoError(t, err)
 	require.NotEqual(t, hexRoot, binRoot)
 
@@ -304,7 +304,7 @@ func TestRebuildCommitmentFilesDefaultTargetIsProcessVariant(t *testing.T) {
 	statecfg.ExperimentalBinCommitment = true
 
 	pickedDB, _, _ := rebuildVariantDatadir(t)
-	pickedRoot, _, err := state.RebuildCommitmentFiles(t.Context(), pickedDB, &rawdbv3.TxNums, log.New(), false)
+	pickedRoot, _, err := state.RebuildCommitmentFiles(t.Context(), pickedDB, &rawdbv3.TxNums, log.New(), false, state.RebuildTarget{})
 	require.NoError(t, err)
 	require.Equal(t, binRoot, pickedRoot, "with no target named the rebuild must follow the process variant")
 }
@@ -312,17 +312,34 @@ func TestRebuildCommitmentFilesDefaultTargetIsProcessVariant(t *testing.T) {
 func TestRebuildCommitmentFilesBinTargetBindsHashSuite(t *testing.T) {
 	keccakDB, _, _ := rebuildVariantDatadir(t)
 	keccakRoot, _, err := state.RebuildCommitmentFiles(t.Context(), keccakDB, &rawdbv3.TxNums, log.New(), false,
-		state.WithRebuildTarget(state.RebuildTarget{Variant: commitment.VariantBinPatriciaTrie, HashName: commitment.PBinHashKeccak}))
+		state.RebuildTarget{Variant: commitment.VariantBinPatriciaTrie, HashName: commitment.PBinHashKeccak})
 	require.NoError(t, err)
 	require.Equal(t, commitment.PBinHashKeccak, commitment.PBinHashSuiteName())
 
 	blake3DB, _, _ := rebuildVariantDatadir(t)
 	blake3Root, _, err := state.RebuildCommitmentFiles(t.Context(), blake3DB, &rawdbv3.TxNums, log.New(), false,
-		state.WithRebuildTarget(state.RebuildTarget{Variant: commitment.VariantBinPatriciaTrie, HashName: commitment.PBinHashBlake3}))
+		state.RebuildTarget{Variant: commitment.VariantBinPatriciaTrie, HashName: commitment.PBinHashBlake3})
 	require.NoError(t, err)
 	require.NotEqual(t, keccakRoot, blake3Root, "H is part of the tree, so the two suites cannot agree")
 	require.Equal(t, commitment.PBinHashKeccak, commitment.PBinHashSuiteName(),
 		"the rebuild must restore the suite it bound for its own run")
+}
+
+// The hash flag and the selected suite are two different things: a tool that binds
+// its own suite per run (the integration rebuild) never calls SetPBinHashSuite, so
+// reading the suite back would silently answer keccak for --...hash=blake3.
+func TestDefaultRebuildTargetFollowsTheConfiguredHash(t *testing.T) {
+	// Mutates process-wide flags, so this test never runs in parallel.
+	bin, hash := statecfg.ExperimentalBinCommitment, statecfg.BinCommitmentHash
+	t.Cleanup(func() { statecfg.ExperimentalBinCommitment, statecfg.BinCommitmentHash = bin, hash })
+
+	statecfg.ExperimentalBinCommitment = true
+	statecfg.BinCommitmentHash = commitment.PBinHashBlake3
+	require.Equal(t, commitment.PBinHashBlake3, state.DefaultRebuildTarget().HashName)
+
+	statecfg.BinCommitmentHash = ""
+	require.Equal(t, commitment.PBinHashSuiteName(), state.DefaultRebuildTarget().HashName,
+		"with no flag the target keeps the suite this process selected")
 }
 
 func TestRebuildTargetResolve(t *testing.T) {

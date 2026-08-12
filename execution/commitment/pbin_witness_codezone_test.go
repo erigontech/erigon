@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"math"
 	"testing"
 
 	keccak "github.com/erigontech/fastkeccak"
@@ -249,6 +250,70 @@ func TestPBinWitnessAccountMissingCodeHashIsMalformed(t *testing.T) {
 
 	_, _, err = state.Account(addr)
 	require.ErrorIs(t, err, errPBinWitnessNode)
+}
+
+// TestPBinWitnessZeroCodeSizeNeedsTheEmptyCodeHash: the writer refuses to emit a
+// CODE_HASH leaf for real code with no code_size behind it, so a witness carrying
+// that pair is malformed. Reading it as empty code would hand the EVM no bytecode
+// for a contract and blame the divergence on the root.
+func TestPBinWitnessZeroCodeSizeNeedsTheEmptyCodeHash(t *testing.T) {
+	t.Parallel()
+
+	addr := pbinOracleAddr(79)
+	keys := pbinDigestCache{sum: pbinSelectedSum}
+	hasher := pbinHasher{sum: pbinSelectedSum}
+
+	var codeHash common.Hash
+	codeHash[0] = 0xCC
+	value := pbinCodeHashValue(codeHash)
+	preimage := append([]byte{pbinLeafTag}, keys.accountKey(addr, pbinCodeHashLeafKey)...)
+	preimage = append(preimage, value[:]...)
+	root := hasher.hash(preimage)
+
+	state, err := PBinNewWitnessState([][]byte{preimage}, root[:])
+	require.NoError(t, err)
+
+	_, _, err = state.Code(addr)
+	require.ErrorIs(t, err, errPBinWitnessNode)
+}
+
+// TestPBinWitnessOversizedCodeSizeIsRefused: code_size is four bytes the witness
+// itself carries, so a reader that trusts it allocates whatever the sender asks
+// for. The refusal must land before the buffer and the chunk walk.
+func TestPBinWitnessOversizedCodeSizeIsRefused(t *testing.T) {
+	t.Parallel()
+
+	addr := pbinOracleAddr(80)
+	keys := pbinDigestCache{sum: pbinSelectedSum}
+	hasher := pbinHasher{sum: pbinSelectedSum}
+
+	leaf := func(key []byte, value [pbinValueLength]byte) ([]byte, common.Hash) {
+		preimage := append(append([]byte{pbinLeafTag}, key...), value[:]...)
+		return preimage, hasher.hash(preimage)
+	}
+
+	basicKey := keys.accountKey(addr, pbinBasicDataLeafKey)
+	basic, err := pbinEncodeBasicData(1, new(uint256.Int), math.MaxUint32)
+	require.NoError(t, err)
+	basicNode, basicHash := leaf(basicKey, basic)
+
+	var codeHash common.Hash
+	codeHash[0] = 0xDD
+	hashNode, hashLeaf := leaf(keys.accountKey(addr, pbinCodeHashLeafKey), pbinCodeHashValue(codeHash))
+
+	// Sub-indices 0 and 1 diverge on the last bit of the key.
+	prefix := pbinPathFromBits(basicKey, int16(8*len(basicKey)-1))
+	branch := pbinAppendBitPrefix([]byte{pbinBranchTag}, &prefix)
+	branch = append(branch, basicHash[:]...)
+	branch = append(branch, hashLeaf[:]...)
+	root := hasher.hash(branch)
+
+	state, err := PBinNewWitnessState([][]byte{branch, basicNode, hashNode}, root[:])
+	require.NoError(t, err)
+
+	_, _, err = state.Code(addr)
+	require.ErrorIs(t, err, errPBinWitnessNode)
+	require.ErrorContains(t, err, "a witness may carry")
 }
 
 // TestPBinWitnessDelegationLeafPinsCodeSize: a DELEGATION leaf is a fixed shape,

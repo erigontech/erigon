@@ -50,9 +50,9 @@ func StageTrieCfg(db kv.TemporalRwDB, checkRoot, saveNewHashesToDB bool, tmpDir 
 
 var ErrInvalidStateRootHash = errors.New("invalid state root hash")
 
-func RebuildPatriciaTrieBasedOnFiles(ctx context.Context, cfg TrieCfg, squeeze bool, opts ...state.RebuildOption) (common.Hash, *state.RebuildReport, error) {
+func RebuildPatriciaTrieBasedOnFiles(ctx context.Context, cfg TrieCfg, squeeze bool, target state.RebuildTarget) (common.Hash, *state.RebuildReport, error) {
 	txNumsReader := cfg.blockReader.TxnumReader()
-	rh, report, err := state.RebuildCommitmentFiles(ctx, cfg.db, &txNumsReader, log.New(), squeeze, opts...)
+	rh, report, err := state.RebuildCommitmentFiles(ctx, cfg.db, &txNumsReader, log.New(), squeeze, target)
 	if err != nil {
 		return trie.EmptyRoot, report, err
 	}

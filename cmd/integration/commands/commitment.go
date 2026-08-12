@@ -299,8 +299,11 @@ func stageRebuildOutput(src datadir.Dirs, outPath string, target dbstate.Rebuild
 		return nil, errors.New("commitment rebuild: empty output datadir")
 	}
 	out := datadir.New(outPath)
-	if out.DataDir == src.DataDir {
-		return nil, fmt.Errorf("commitment rebuild: output datadir %s is the source datadir", out.DataDir)
+	// Nesting either way makes the hardlink walk descend into what it is creating.
+	if nested, err := pathsOverlap(src.DataDir, out.DataDir); err != nil {
+		return nil, err
+	} else if nested {
+		return nil, fmt.Errorf("commitment rebuild: output datadir %s overlaps the source datadir %s", out.DataDir, src.DataDir)
 	}
 
 	existing, err := commitmentFilesIn(out.SnapDomain)
@@ -322,11 +325,11 @@ func stageRebuildOutput(src datadir.Dirs, outPath string, target dbstate.Rebuild
 	}
 
 	o := &rebuildOutput{dirs: out, target: target, source: source}
-	// The staged toml carries the source's geometry but not the target variant: the
-	// aggregator opens this directory before any of its files exist, and a "bin"
-	// variant read there would be applied to the whole process. finalize() names it
-	// once the files it describes are on disk.
-	if err := dbstate.WriteErigonDBSettings(out, o.settings(false)); err != nil {
+	// The toml names the target before the rebuild starts, not after it finishes:
+	// the rebuild reopens this directory as a datadir, and the settings resolver
+	// refuses a bin run against a directory that reads as hex. It also leaves an
+	// interrupted run self-describing rather than passing its bin files off as hex.
+	if err := dbstate.WriteErigonDBSettings(out, o.settings()); err != nil {
 		return nil, err
 	}
 	logger.Info("[commitment_rebuild] staged output datadir", "path", out.DataDir,
@@ -334,14 +337,7 @@ func stageRebuildOutput(src datadir.Dirs, outPath string, target dbstate.Rebuild
 	return o, nil
 }
 
-// finalize records the scheme the rebuild actually produced, so a node started on
-// this directory with --experimental.bin-commitment is accepted rather than
-// refused for running the bin trie on a hex datadir.
-func (o *rebuildOutput) finalize() error {
-	return dbstate.WriteErigonDBSettings(o.dirs, o.settings(true))
-}
-
-func (o *rebuildOutput) settings(describeTarget bool) *dbstate.ErigonDBSettings {
+func (o *rebuildOutput) settings() *dbstate.ErigonDBSettings {
 	bin := o.target.Variant == commitment.VariantBinPatriciaTrie
 	refs := o.source.RefsInCommitmentBranches() && !bin
 	s := &dbstate.ErigonDBSettings{
@@ -349,11 +345,28 @@ func (o *rebuildOutput) settings(describeTarget bool) *dbstate.ErigonDBSettings 
 		StepsInFrozenFile:              o.source.StepsInFrozenFile,
 		ReferencesInCommitmentBranches: &refs,
 	}
-	if bin && describeTarget {
+	if bin {
 		variant, hash := dbstate.TrieVariantBin, o.target.HashName
 		s.TrieVariant, s.TrieHash = &variant, &hash
 	}
 	return s
+}
+
+// pathsOverlap reports whether either path is the other or contains it.
+func pathsOverlap(a, b string) (bool, error) {
+	absA, err := filepath.Abs(a)
+	if err != nil {
+		return false, err
+	}
+	absB, err := filepath.Abs(b)
+	if err != nil {
+		return false, err
+	}
+	if absA == absB {
+		return true, nil
+	}
+	return strings.HasPrefix(absA, absB+string(filepath.Separator)) ||
+		strings.HasPrefix(absB, absA+string(filepath.Separator)), nil
 }
 
 func isCommitmentFileName(name string) bool {
@@ -534,6 +547,12 @@ var cmdCommitmentRebuild = &cobra.Command{
 			logger.Error(err.Error())
 			return
 		}
+		// Staging creates the output datadir and hardlinks the source into it, so a
+		// flag combination that cannot run has to be refused ahead of it.
+		if err := checkRebuildFlags(target, rebuildOutputDatadir != ""); err != nil {
+			logger.Error(err.Error())
+			return
+		}
 
 		var out *rebuildOutput
 		if rebuildOutputDatadir != "" {
@@ -562,29 +581,32 @@ var cmdCommitmentRebuild = &cobra.Command{
 			}
 			return
 		}
-		if out != nil {
-			if err := out.finalize(); err != nil {
-				logger.Error(err.Error())
-				return
-			}
-		}
 	},
 }
 
-func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logger, rebuildTarget dbstate.RebuildTarget, out *rebuildOutput) error {
+// checkRebuildFlags refuses the flag combinations a rebuild cannot honour. It runs
+// before the output datadir is staged, so a refused run touches no filesystem.
+func checkRebuildFlags(target dbstate.RebuildTarget, hasOutput bool) error {
 	if clearCommitment && resume {
 		return errors.New("--clear-commitment and --resume are mutually exclusive")
 	}
 	if noHistory && clearCommitment {
 		return errors.New("--no-history and --clear-commitment are mutually exclusive")
 	}
-	if out != nil && clearCommitment {
+	if hasOutput && clearCommitment {
 		return errors.New("--clear-commitment and --output.datadir are mutually exclusive: --clear-commitment deletes the source datadir's commitment files")
 	}
-	if out != nil && reset {
+	if hasOutput && reset {
 		return errors.New("--reset and --output.datadir are mutually exclusive: --reset writes to the source datadir")
 	}
-	if err := refuseSqueezeForBinTarget(rebuildTarget, squeeze); err != nil {
+	if hasOutput && !noHistory {
+		return errors.New("--output.datadir needs --no-history: the staged directory holds no commitment history files to extend, and the with-history rebuild ignores the rebuild target")
+	}
+	return refuseSqueezeForBinTarget(target, squeeze)
+}
+
+func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logger, rebuildTarget dbstate.RebuildTarget, out *rebuildOutput) error {
+	if err := checkRebuildFlags(rebuildTarget, out != nil); err != nil {
 		return err
 	}
 
@@ -706,7 +728,7 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 			return err
 		}
 	} else {
-		if _, report, err = stagedsync.RebuildPatriciaTrieBasedOnFiles(ctx, cfg, squeeze, dbstate.WithRebuildTarget(rebuildTarget)); err != nil {
+		if _, report, err = stagedsync.RebuildPatriciaTrieBasedOnFiles(ctx, cfg, squeeze, rebuildTarget); err != nil {
 			return err
 		}
 	}

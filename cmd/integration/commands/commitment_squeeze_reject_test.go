@@ -85,6 +85,36 @@ func TestCommitmentRebuildRefusesSqueezeBeforeAnyWork(t *testing.T) {
 	require.ErrorContains(t, err, "--squeeze")
 }
 
+// Every one of these writes to the source datadir or to files the staged output
+// does not hold, so the refusal has to come from the flags alone — the run is
+// rejected before the output datadir is created and the source is hardlinked in.
+func TestCheckRebuildFlags(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		set     func()
+		output  bool
+		wantErr string
+	}{
+		{"output with no-history", func() { noHistory = true }, true, ""},
+		{"output without no-history", func() {}, true, "--no-history"},
+		{"output with clear-commitment", func() { noHistory, clearCommitment = true, true }, true, "--clear-commitment"},
+		{"output with reset", func() { noHistory, reset = true, true }, true, "--reset"},
+		{"clear-commitment with resume", func() { clearCommitment, resume = true, true }, false, "--resume"},
+		{"clear-commitment with no-history", func() { clearCommitment, noHistory = true, true }, false, "--no-history"},
+		{"in-place plain run", func() {}, false, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			withRebuildFlags(t, tc.set)
+			err := checkRebuildFlags(resolveTarget(t, commitment.VariantHexPatriciaTrie), tc.output)
+			if tc.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorContains(t, err, tc.wantErr)
+		})
+	}
+}
+
 // The datadir's own scheme does not decide this: a bin rebuild reading a
 // hex-configured datadir is the migration case Task 1 exists for.
 func TestRefuseSqueezeIgnoresDatadirScheme(t *testing.T) {

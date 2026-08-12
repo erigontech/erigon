@@ -169,7 +169,7 @@ func pbinCodeRebuild(t *testing.T, accts []pbinCodeAccount, txCount uint64) (kv.
 	require.NotEmpty(t, wantRoot, "the collated boundary must be one the forward run computed a root at")
 
 	db, agg = pbinM1AWipeCommitment(t, db, agg, dirs, pbinCodeStepSize)
-	rebuiltRoot, report, err := state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), false)
+	rebuiltRoot, report, err := state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), false, state.RebuildTarget{})
 	require.NoError(t, err)
 
 	require.NoError(t, agg.OpenFolder())
@@ -343,7 +343,7 @@ func TestPBinRebuildSharedCodeAcrossShards(t *testing.T) {
 
 	db, agg = pbinM1AWipeCommitment(t, db, agg, dirs, stepSize)
 
-	rebuiltRoot, report, err := state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), false)
+	rebuiltRoot, report, err := state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), false, state.RebuildTarget{})
 	require.NoError(t, err)
 	require.Len(t, report.Ranges, 1)
 	require.Len(t, report.Ranges[0].Shards, 2, "the fixture must split one range into two shards, otherwise it proves nothing")

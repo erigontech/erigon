@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	downloadertype "github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -884,7 +885,12 @@ type RebuildTarget struct {
 func DefaultRebuildTarget() RebuildTarget {
 	t := RebuildTarget{Variant: execctx.PickTrieVariant()}
 	if t.Variant == commitment.VariantBinPatriciaTrie {
-		t.HashName = commitment.PBinHashSuiteName()
+		// The configured hash, not the selected suite: a tool that binds its own
+		// suite per run never calls SetPBinHashSuite, so the suite still reads as
+		// the default while the flag asks for the other one.
+		if t.HashName = statecfg.BinCommitmentHash; t.HashName == "" {
+			t.HashName = commitment.PBinHashSuiteName()
+		}
 	}
 	return t
 }
@@ -941,31 +947,6 @@ type RebuildShardReport struct {
 	UniqueCodeHashes    uint64
 }
 
-// RebuildOption configures a commitment rebuild.
-type RebuildOption func(*rebuildOptions)
-
-type rebuildOptions struct {
-	target RebuildTarget
-}
-
-// WithRebuildTarget names the commitment scheme the rebuild produces.
-func WithRebuildTarget(t RebuildTarget) RebuildOption {
-	return func(o *rebuildOptions) { o.target = t }
-}
-
-func resolveRebuildOptions(opts []RebuildOption) (rebuildOptions, error) {
-	var o rebuildOptions
-	for _, opt := range opts {
-		opt(&o)
-	}
-	target, err := o.target.Resolve()
-	if err != nil {
-		return o, err
-	}
-	o.target = target
-	return o, nil
-}
-
 // bindPBinHashSuite selects H for the duration of a bin rebuild and returns the
 // restore. H is process-wide, so the rebuild binds it from its own target instead
 // of inheriting whatever the source datadir's erigondb.toml resolved to.
@@ -980,12 +961,12 @@ func bindPBinHashSuite(name string) (func(), error) {
 // RebuildCommitmentFiles recreates commitment files from existing accounts and storage kv files
 // If some commitment exists, they will be accepted as correct and next kv range will be processed.
 // DB expected to be empty, committed into db keys will be not processed.
-func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsReader *rawdbv3.TxNumsReader, logger log.Logger, squeeze bool, opts ...RebuildOption) (latestRoot []byte, report *RebuildReport, err error) {
-	o, err := resolveRebuildOptions(opts)
+// A zero target resolves to the scheme this process is configured for.
+func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsReader *rawdbv3.TxNumsReader, logger log.Logger, squeeze bool, target RebuildTarget) (latestRoot []byte, report *RebuildReport, err error) {
+	target, err = target.Resolve()
 	if err != nil {
 		return nil, nil, err
 	}
-	target := o.target
 	report = &RebuildReport{Target: target}
 	logger.Info("[commitment_rebuild] target", "variant", target.Variant, "hash", target.HashName)
 	if target.Variant == commitment.VariantBinPatriciaTrie {

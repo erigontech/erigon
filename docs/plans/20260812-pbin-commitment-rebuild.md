@@ -170,13 +170,16 @@ the wrong set gets read as the datadir's commitment.
       `--resume` refuses instead of overwriting
 - [x] run tests — must pass before Task 3
 
-Landed shape: the toml is written twice. Staging writes geometry only — the aggregator opens the
-output before its files exist, and a `trie_variant = "bin"` read there would be applied process-wide
-by `reconcileTrieVariant`, which Task 1 exists to avoid. `finalize()` names the variant and hash
-after the rebuild returns. A bin target also pins `references_in_commitment_branches = false`, which
-both satisfies reconcile's bin rule and keeps the refs-driven squeeze pass (`squeeze.go`, the
-`wantsReferencesInBranches` gate) out of a bin run. `--output.datadir` is refused together with
-`--reset` and `--clear-commitment`, which write to the source.
+Landed shape: staging writes the toml once, naming the target before the rebuild starts. The tool
+repoints its datadir at the output and reopens it, so `reconcileTrieVariant` runs over the staged
+directory: a toml that omits the variant reads as hex and the bin run is refused there, before any
+work. Naming it up front also leaves an interrupted run self-describing rather than passing its bin
+files off as hex. Applying the variant process-wide is a no-op — only `--experimental.bin-commitment`
+makes the target bin in the first place. A bin target also pins `references_in_commitment_branches =
+false`, which both satisfies reconcile's bin rule and keeps the refs-driven squeeze pass
+(`squeeze.go`, the `wantsReferencesInBranches` gate) out of a bin run. `--output.datadir` is refused
+together with `--reset` and `--clear-commitment`, which write to the source, and with a history
+rebuild, which the staged directory holds no files for.
 
 ### Task 3: Prove the code zone through a rebuild (TDD)
 

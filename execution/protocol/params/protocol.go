@@ -248,7 +248,7 @@ const (
 	ExtCodeWarmAccessGasEIP8038       = 2 * WarmStorageReadCostEIP2929                         // EXTCODESIZE/EXTCODECOPY: account access + second read for the code
 	// EXECUTION_PER_AUTH_BASE_COST = 101 auth-tuple bytes * 16 + ECRECOVER + COLD_ACCOUNT_ACCESS + 2*WARM_ACCESS = 7816
 	ExecutionPerAuthBaseCostEIP8038 = 101*TxDataNonZeroGasEIP2028 + EcrecoverGas + ColdAccountAccessCostEIP8038 + 2*WarmStorageReadCostEIP2929
-	// PER_AUTH execution intrinsic = ACCOUNT_WRITE + EXECUTION_PER_AUTH_BASE_COST = 14816
+	// PER_AUTH execution intrinsic = ACCOUNT_WRITE + EXECUTION_PER_AUTH_BASE_COST = 15816
 	PerAuthExecutionCostEIP8038 = AccountWriteCostEIP8038 + ExecutionPerAuthBaseCostEIP8038
 
 	// Revised EIP-8038 schedule, selected by Rules.EIP8038Revised. The constants

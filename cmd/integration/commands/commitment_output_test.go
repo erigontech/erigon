@@ -152,7 +152,6 @@ func TestStageRebuildOutputLeavesSourceIntact(t *testing.T) {
 	out, err := stageRebuildOutput(src, filepath.Join(t.TempDir(), "out"), binTarget(t), false, log.New())
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(out.dirs.SnapDomain, "v1.0-commitment.0-64.kv"), []byte("rebuilt"), 0o644))
-	require.NoError(t, out.finalize())
 
 	require.Equal(t, before, snapshotTree(t, src.Snap))
 }
@@ -182,21 +181,25 @@ func TestStageRebuildOutputRefusesSourceAsOutput(t *testing.T) {
 	require.Error(t, err)
 }
 
+// Staging creates the output tree before it walks the source, so an output nested
+// in the source would have the walk descend into what it is writing.
+func TestStageRebuildOutputRefusesNestedOutput(t *testing.T) {
+	src := sourceDatadirFixture(t)
+
+	_, err := stageRebuildOutput(src, filepath.Join(src.Snap, "out"), binTarget(t), false, log.New())
+	require.ErrorContains(t, err, "overlaps the source datadir")
+
+	outer := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(outer, "inner"), 0o755))
+	nestedSrc := datadir.New(filepath.Join(outer, "inner"))
+	_, err = stageRebuildOutput(nestedSrc, outer, binTarget(t), false, log.New())
+	require.ErrorContains(t, err, "overlaps the source datadir")
+}
+
 func TestRebuildOutputSettingsDescribeProducedScheme(t *testing.T) {
 	src := sourceDatadirFixture(t)
 	out, err := stageRebuildOutput(src, filepath.Join(t.TempDir(), "out"), binTarget(t), false, log.New())
 	require.NoError(t, err)
-
-	// Before the files exist the staged toml carries geometry only: a "bin" variant
-	// here would be applied to this process when the aggregator opens the directory.
-	staged, err := dbstate.ReadErigonDBSettings(out.dirs)
-	require.NoError(t, err)
-	require.Equal(t, uint64(testSourceStepSize), staged.StepSize)
-	require.Equal(t, uint64(testSourceStepsInFrozenFile), staged.StepsInFrozenFile)
-	require.Nil(t, staged.TrieVariant)
-	require.Nil(t, staged.TrieHash)
-
-	require.NoError(t, out.finalize())
 
 	final, err := dbstate.ReadErigonDBSettings(out.dirs)
 	require.NoError(t, err)
@@ -216,7 +219,6 @@ func TestRebuildOutputSettingsHexTargetCarriesSourceRefs(t *testing.T) {
 
 	out, err := stageRebuildOutput(src, filepath.Join(t.TempDir(), "out"), hex, false, log.New())
 	require.NoError(t, err)
-	require.NoError(t, out.finalize())
 
 	final, err := dbstate.ReadErigonDBSettings(out.dirs)
 	require.NoError(t, err)
@@ -231,15 +233,7 @@ func TestRebuildOutputStartsUnderTheBinFlag(t *testing.T) {
 	src := sourceDatadirFixture(t)
 	out, err := stageRebuildOutput(src, filepath.Join(t.TempDir(), "out"), binTarget(t), false, log.New())
 	require.NoError(t, err)
-	require.NoError(t, out.finalize())
-
-	bin, hash, suite := statecfg.ExperimentalBinCommitment, statecfg.BinCommitmentHash, commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment, statecfg.BinCommitmentHash = bin, hash
-		require.NoError(t, commitment.SetPBinHashSuite(suite))
-	})
-	statecfg.ExperimentalBinCommitment = true
-	statecfg.BinCommitmentHash = commitment.PBinHashBlake3
+	withBinCommitmentProcess(t, commitment.PBinHashBlake3)
 
 	settings, err := dbstate.ResolveErigonDBSettings(out.dirs, log.New(), true)
 	require.NoError(t, err)
@@ -251,13 +245,54 @@ func TestRebuildOutputStartsUnderTheBinFlag(t *testing.T) {
 	require.Error(t, err, "the hex source is what a separate output directory exists to avoid")
 }
 
+// withBinCommitmentProcess puts the process into the state a bin target implies:
+// nothing but --experimental.bin-commitment makes DefaultRebuildTarget pick bin.
+func withBinCommitmentProcess(t *testing.T, hash string) {
+	t.Helper()
+	bin, prevHash, suite := statecfg.ExperimentalBinCommitment, statecfg.BinCommitmentHash, commitment.PBinHashSuiteName()
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment, statecfg.BinCommitmentHash = bin, prevHash
+		require.NoError(t, commitment.SetPBinHashSuite(suite))
+	})
+	statecfg.ExperimentalBinCommitment = true
+	statecfg.BinCommitmentHash = hash
+}
+
+// The rebuild reopens the staged directory as a datadir before it writes a single
+// file into it, so the settings resolver has to accept it under the same bin flags
+// that made the target bin in the first place.
+func TestStagedRebuildOutputOpensUnderTheBinFlag(t *testing.T) {
+	src := sourceDatadirFixture(t)
+	withBinCommitmentProcess(t, commitment.PBinHashBlake3)
+
+	out, err := stageRebuildOutput(src, filepath.Join(t.TempDir(), "out"), binTarget(t), false, log.New())
+	require.NoError(t, err)
+
+	settings, err := dbstate.ResolveErigonDBSettings(out.dirs, log.New(), false)
+	require.NoError(t, err)
+	require.Equal(t, dbstate.TrieVariantBin, settings.TrieVariantName())
+	require.Equal(t, commitment.PBinHashBlake3, settings.TrieHashName())
+}
+
+// An interrupted run leaves bin commitment files behind. The directory must still
+// describe them, or the next start reads them as hex.
+func TestStagedRebuildOutputDescribesBinBeforeItFinishes(t *testing.T) {
+	src := sourceDatadirFixture(t)
+	out, err := stageRebuildOutput(src, filepath.Join(t.TempDir(), "out"), binTarget(t), false, log.New())
+	require.NoError(t, err)
+
+	staged, err := dbstate.ReadErigonDBSettings(out.dirs)
+	require.NoError(t, err)
+	require.Equal(t, dbstate.TrieVariantBin, staged.TrieVariantName())
+	require.Equal(t, commitment.PBinHashBlake3, staged.TrieHashName())
+}
+
 func TestStageRebuildOutputLeavesProcessConfigUnmodified(t *testing.T) {
 	src := sourceDatadirFixture(t)
 	bin, hash, suite := statecfg.ExperimentalBinCommitment, statecfg.BinCommitmentHash, commitment.PBinHashSuiteName()
 
-	out, err := stageRebuildOutput(src, filepath.Join(t.TempDir(), "out"), binTarget(t), false, log.New())
+	_, err := stageRebuildOutput(src, filepath.Join(t.TempDir(), "out"), binTarget(t), false, log.New())
 	require.NoError(t, err)
-	require.NoError(t, out.finalize())
 
 	require.Equal(t, bin, statecfg.ExperimentalBinCommitment)
 	require.Equal(t, hash, statecfg.BinCommitmentHash)
