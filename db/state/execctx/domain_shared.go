@@ -177,17 +177,32 @@ type rejectedFrontier struct{}
 
 func (rejectedFrontier) DomainVisibleEnd(kv.Domain) (uint64, bool) { return 0, false }
 
-// readViewEpoch rejects cache views created before an unwind. Requiring the same
-// state generation also rejects an old database transaction first bound after it.
+// cacheGenerationTx unwraps table overlays because their sequence metadata
+// belongs to the overlay, while cache fills read temporal domains from the
+// backing transaction.
+func cacheGenerationTx(tx kv.TemporalTx) kv.TemporalTx {
+	for tx != nil {
+		wrapper, ok := tx.(interface{ UnderlyingTx() kv.TemporalTx })
+		if !ok {
+			return tx
+		}
+		tx = wrapper.UnderlyingTx()
+	}
+	return nil
+}
+
+// cacheFrontierFor grants fill authority only to transactions in the durable
+// state generation from which this SharedDomains was created.
 func (sd *SharedDomains) cacheFrontierFor(tx kv.TemporalTx) cache.Frontier {
 	// Background exec workers bind getters with a nil placeholder tx and open
 	// the real one on their first task; the placeholder can never fill.
-	if tx == nil || !sd.baseStateVersionKnown {
+	generationTx := cacheGenerationTx(tx)
+	if generationTx == nil || !sd.baseStateVersionKnown {
 		return rejectedFrontier{}
 	}
-	sameStateGeneration := tx.ViewID() == sd.baseViewID
+	sameStateGeneration := generationTx.ViewID() == sd.baseViewID
 	if !sameStateGeneration {
-		stateVersion, err := rawdb.GetStateVersion(tx)
+		stateVersion, err := rawdb.GetStateVersion(generationTx)
 		sameStateGeneration = err == nil && stateVersion == sd.baseStateVersion
 	}
 	if !sameStateGeneration {
@@ -336,12 +351,13 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	}
 	trieCfg := o.trieCfg
 
-	stateVersion, stateVersionErr := rawdb.GetStateVersion(tx)
+	generationTx := cacheGenerationTx(tx)
+	stateVersion, stateVersionErr := rawdb.GetStateVersion(generationTx)
 	sd := &SharedDomains{
 		logger:                logger,
 		metrics:               kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
 		stepSize:              tx.Debug().StepSize(),
-		baseViewID:            tx.ViewID(),
+		baseViewID:            generationTx.ViewID(),
 		baseStateVersion:      stateVersion,
 		baseStateVersionKnown: stateVersionErr == nil,
 	}

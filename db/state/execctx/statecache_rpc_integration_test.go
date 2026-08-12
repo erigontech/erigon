@@ -145,6 +145,57 @@ func TestEmbeddedRPCTxBoundAfterUnwindDoesNotRefillUnwoundAccount(t *testing.T) 
 	require.Equal(t, v1, got)
 }
 
+func TestEmbeddedRPCOverlayTxBoundAfterUnwindDoesNotRefillUnwoundAccount(t *testing.T) {
+	const stepSize = uint64(16)
+	ctx := t.Context()
+	db := newTestDb(t, stepSize)
+	stateCache := newSmallStateCache()
+	t.Cleanup(stateCache.Close)
+	key, v1, v2, diffs := twoStepRows(t, db, stateCache)
+
+	rpcTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer rpcTx.Rollback()
+
+	unwindTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer unwindTx.Rollback()
+	unwindDomains, err := execctx.NewSharedDomains(ctx, unwindTx, log.New())
+	require.NoError(t, err)
+	unwindDomains.SetStateCacheForTest(stateCache)
+	unwindDomains.Unwind(10, &diffs)
+	require.NoError(t, unwindDomains.Commit(ctx, unwindTx))
+	unwindDomains.Close()
+
+	freshTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer freshTx.Rollback()
+	freshDomains, err := execctx.NewSharedDomains(ctx, freshTx, log.New())
+	require.NoError(t, err)
+	defer freshDomains.Close()
+	freshDomains.SetStateCacheForTest(stateCache)
+	require.NoError(t, freshDomains.InitBlockOverlay(freshTx, t.TempDir()))
+
+	overlayTx := freshDomains.BlockOverlay().NewReadView(rpcTx)
+	events := shards.NewEvents()
+	events.PublishOverlay(freshDomains)
+	rpcCache := &execmodule.Cache{}
+	rpcCache.SetPublishedSD(events.LatestSD)
+	rpcView, err := rpcCache.View(ctx, overlayTx)
+	require.NoError(t, err)
+
+	got, err := rpcView.Get(key)
+	require.NoError(t, err)
+	require.Equal(t, v2, got, "the overlay read view still reads from the old RPC transaction")
+
+	_, ok := stateCache.View(nil).Get(kv.AccountsDomain, key)
+	require.False(t, ok, "an overlay around an old RPC transaction must not refill the discarded fork")
+
+	got, _, err = freshDomains.GetLatest(kv.AccountsDomain, freshTx, key)
+	require.NoError(t, err)
+	require.Equal(t, v1, got)
+}
+
 func TestSharedDomainsOldTxBoundAfterUnwindDoesNotRefillUnwoundAccount(t *testing.T) {
 	const stepSize = uint64(16)
 	ctx := t.Context()
