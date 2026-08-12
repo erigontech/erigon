@@ -198,11 +198,9 @@ func (sd *SharedDomains) cacheFrontierFor(tx kv.TemporalTx) cache.Frontier {
 	_, txWritable := generationTx.(kv.TemporalRwTx)
 	// A write transaction's ViewID is the snapshot ID it will create. After
 	// commit, a new read transaction can have that ID but a newer state version.
-	if generationTx.ViewID() == sd.baseViewID && txWritable == sd.baseTxWritable {
-		if !sd.baseStateVersionKnown {
-			return nil
-		}
-	} else {
+	useBaseStateVersion := sd.baseStateVersionKnown &&
+		generationTx.ViewID() == sd.baseViewID && txWritable == sd.baseTxWritable
+	if !useBaseStateVersion {
 		var err error
 		stateVersion, err = rawdb.GetStateVersion(generationTx)
 		if err != nil {

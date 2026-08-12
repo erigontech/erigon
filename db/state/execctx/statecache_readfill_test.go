@@ -18,6 +18,7 @@ package execctx_test
 
 import (
 	"encoding/binary"
+	"errors"
 	"math"
 	"testing"
 
@@ -123,6 +124,48 @@ type visibleEndCountingRwTx struct {
 
 func (tx *visibleEndCountingRwTx) Debug() kv.TemporalDebugTx {
 	return tx.debug
+}
+
+type failStateVersionOnceRwTx struct {
+	kv.TemporalRwTx
+	stateVersionReads int
+}
+
+func (tx *failStateVersionOnceRwTx) ReadSequence(table string) (uint64, error) {
+	if table == string(kv.PlainStateVersion) {
+		tx.stateVersionReads++
+		if tx.stateVersionReads == 1 {
+			return 0, errors.New("temporary state-version read failure")
+		}
+	}
+	return tx.TemporalRwTx.ReadSequence(table)
+}
+
+func TestReadFill_RetriesStateVersionAfterConstructionError(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	db := newTestDb(t, 16)
+	baseTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer baseTx.Rollback()
+	tx := &failStateVersionOnceRwTx{TemporalRwTx: baseTx}
+
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+	stateCache := newSmallStateCache()
+	t.Cleanup(stateCache.Close)
+	domains.SetStateCacheForTest(stateCache)
+
+	missing := make([]byte, 20)
+	missing[0] = 0x01
+	value, _, err := domains.AsGetter(tx).GetLatest(kv.AccountsDomain, missing)
+	require.NoError(t, err)
+	require.Empty(t, value)
+	require.Equal(t, 2, tx.stateVersionReads, "binding the getter must retry the failed construction-time read")
+	_, ok := stateCache.View(nil).Get(kv.AccountsDomain, missing)
+	require.True(t, ok, "the recovered state-version read must restore fill authority")
 }
 
 func TestReadFill_MemoizesWritableVisibleEndUntilFlush(t *testing.T) {
