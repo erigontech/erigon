@@ -21,7 +21,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -70,7 +71,7 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 	}
 
 	if args.Value == nil {
-		args.Value = new(hexutil.Big)
+		args.Value = new(hexutil.U256)
 	}
 
 	if args.Nonce == nil {
@@ -128,15 +129,13 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 			if err != nil {
 				return nil, err
 			}
-			b := blobFee.ToBig()
-			args.MaxFeePerBlobGas = (*hexutil.Big)(b.Lsh(b, 1))
+			args.MaxFeePerBlobGas = (*hexutil.U256)(new(uint256.Int).Lsh(&blobFee, 1))
 		}
 	}
 
-	chainIDBig := cc.ChainID.ToBig()
 	if args.ChainID == nil {
-		args.ChainID = (*hexutil.Big)(chainIDBig)
-	} else if have := args.ChainID.ToInt(); have.Cmp(chainIDBig) != 0 {
+		args.ChainID = (*hexutil.U256)(new(uint256.Int).Set(cc.ChainID))
+	} else if have := (*uint256.Int)(args.ChainID); !have.Eq(cc.ChainID) {
 		return nil, fmt.Errorf("chainId does not match node's (have=%v, want=%v)", have, cc.ChainID)
 	}
 
@@ -178,23 +177,23 @@ func (api *APIImpl) fillFeeDefaults(ctx context.Context, args *ethapi.CallArgs, 
 			if err != nil {
 				return err
 			}
-			args.GasPrice = (*hexutil.Big)(price.ToBig())
+			args.GasPrice = (*hexutil.U256)(new(uint256.Int).Set(price))
 		}
 		return nil
 	}
 
 	if args.GasPrice == nil && args.MaxFeePerGas != nil && args.MaxPriorityFeePerGas != nil {
-		if args.MaxFeePerGas.ToInt().Sign() == 0 {
+		if (*uint256.Int)(args.MaxFeePerGas).IsZero() {
 			return errors.New("maxFeePerGas must be non-zero")
 		}
-		if args.MaxFeePerGas.ToInt().Cmp(args.MaxPriorityFeePerGas.ToInt()) < 0 {
+		if (*uint256.Int)(args.MaxFeePerGas).Lt((*uint256.Int)(args.MaxPriorityFeePerGas)) {
 			return fmt.Errorf("maxFeePerGas (%v) < maxPriorityFeePerGas (%v)", args.MaxFeePerGas, args.MaxPriorityFeePerGas)
 		}
 		return nil
 	}
 
 	if args.GasPrice != nil {
-		if args.GasPrice.ToInt().Sign() == 0 {
+		if (*uint256.Int)(args.GasPrice).IsZero() {
 			return errors.New("gasPrice must be non-zero after london fork")
 		}
 		return nil
@@ -206,14 +205,14 @@ func (api *APIImpl) fillFeeDefaults(ctx context.Context, args *ethapi.CallArgs, 
 		if err != nil {
 			return err
 		}
-		args.MaxPriorityFeePerGas = (*hexutil.Big)(tip.ToBig())
+		args.MaxPriorityFeePerGas = (*hexutil.U256)(new(uint256.Int).Set(tip))
 	}
 	if args.MaxFeePerGas == nil {
-		val := new(big.Int).Add(
-			args.MaxPriorityFeePerGas.ToInt(),
-			new(big.Int).Lsh(head.BaseFee.ToBig(), 1),
+		val := new(uint256.Int).Add(
+			(*uint256.Int)(args.MaxPriorityFeePerGas),
+			new(uint256.Int).Lsh(head.BaseFee, 1),
 		)
-		args.MaxFeePerGas = (*hexutil.Big)(val)
+		args.MaxFeePerGas = (*hexutil.U256)(val)
 	}
 	if args.MaxFeePerGas.ToInt().Cmp(args.MaxPriorityFeePerGas.ToInt()) < 0 {
 		if autoFilledPriorityFee {

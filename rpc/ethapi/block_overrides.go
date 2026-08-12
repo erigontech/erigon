@@ -37,14 +37,14 @@ type BlockHashOverrides map[uint64]common.Hash
 // overridden during simulation or call execution (eth_call, eth_estimateGas,
 // eth_simulateV1, eth_callMany).
 type BlockOverrides struct {
-	Number        *hexutil.Big            `json:"number"`
-	Difficulty    *hexutil.Big            `json:"difficulty"`
+	Number        *hexutil.U256           `json:"number"`
+	Difficulty    *hexutil.U256           `json:"difficulty"`
 	Time          *hexutil.Uint64         `json:"time"`
 	GasLimit      *hexutil.Uint64         `json:"gasLimit"`
 	FeeRecipient  *common.Address         `json:"feeRecipient"`
 	PrevRandao    *common.Hash            `json:"prevRandao"`
-	BaseFeePerGas *hexutil.Big            `json:"baseFeePerGas"`
-	BlobBaseFee   *hexutil.Big            `json:"blobBaseFee"`
+	BaseFeePerGas *hexutil.U256           `json:"baseFeePerGas"`
+	BlobBaseFee   *hexutil.U256           `json:"blobBaseFee"`
 	BeaconRoot    *common.Hash            `json:"beaconRoot"`
 	BlockHash     *map[uint64]common.Hash `json:"blockHash"`
 	Withdrawals   *types.Withdrawals      `json:"withdrawals"`
@@ -70,7 +70,7 @@ func (overrides *BlockOverrides) Override(context *evmtypes.BlockContext) error 
 		context.BlockNumber = overrides.Number.Uint64()
 	}
 	if overrides.Difficulty != nil {
-		context.Difficulty.SetFromBig(overrides.Difficulty.ToInt())
+		context.Difficulty.Set((*uint256.Int)(overrides.Difficulty))
 	}
 	if overrides.PrevRandao != nil {
 		context.PrevRanDao = overrides.PrevRandao
@@ -86,14 +86,10 @@ func (overrides *BlockOverrides) Override(context *evmtypes.BlockContext) error 
 		context.Coinbase = accounts.InternAddress(*overrides.FeeRecipient)
 	}
 	if overrides.BaseFeePerGas != nil {
-		if overflow := context.BaseFee.SetFromBig(overrides.BaseFeePerGas.ToInt()); overflow {
-			return errors.New("BlockOverrides.BaseFee uint256 overflow")
-		}
+		context.BaseFee.Set((*uint256.Int)(overrides.BaseFeePerGas))
 	}
 	if overrides.BlobBaseFee != nil {
-		if overflow := context.BlobBaseFee.SetFromBig(overrides.BlobBaseFee.ToInt()); overflow {
-			return errors.New("BlockOverrides.BlobBaseFee uint256 overflow")
-		}
+		context.BlobBaseFee.Set((*uint256.Int)(overrides.BlobBaseFee))
 	}
 	return nil
 }
@@ -105,11 +101,7 @@ func (overrides *BlockOverrides) OverrideBaseFee(baseFee *uint256.Int) (*uint256
 	if overrides == nil || overrides.BaseFeePerGas == nil {
 		return baseFee, nil
 	}
-	overridden := new(uint256.Int)
-	if overflow := overridden.SetFromBig(overrides.BaseFeePerGas.ToInt()); overflow {
-		return nil, errors.New("BlockOverrides.BaseFeePerGas uint256 overflow")
-	}
-	return overridden, nil
+	return new(uint256.Int).Set((*uint256.Int)(overrides.BaseFeePerGas)), nil
 }
 
 // OverrideHeader returns a modified copy of header with the overridden fields
@@ -122,10 +114,10 @@ func (overrides *BlockOverrides) OverrideHeader(header *types.Header) *types.Hea
 	}
 	h := types.CopyHeader(header)
 	if overrides.Number != nil {
-		h.Number.SetFromBig(overrides.Number.ToInt())
+		h.Number.Set((*uint256.Int)(overrides.Number))
 	}
 	if overrides.Difficulty != nil {
-		h.Difficulty.SetFromBig(overrides.Difficulty.ToInt())
+		h.Difficulty.Set((*uint256.Int)(overrides.Difficulty))
 	}
 	if overrides.Time != nil {
 		h.Time = uint64(*overrides.Time)
@@ -138,7 +130,7 @@ func (overrides *BlockOverrides) OverrideHeader(header *types.Header) *types.Hea
 	}
 	if overrides.BaseFeePerGas != nil {
 		baseFee := new(uint256.Int)
-		baseFee.SetFromBig(overrides.BaseFeePerGas.ToInt())
+		baseFee.Set((*uint256.Int)(overrides.BaseFeePerGas))
 		h.BaseFee = baseFee
 	}
 	if overrides.PrevRandao != nil {
@@ -159,7 +151,7 @@ func (overrides *BlockOverrides) OverrideBlockContext(blockCtx *evmtypes.BlockCo
 		blockCtx.BlockNumber = overrides.Number.Uint64()
 	}
 	if overrides.Difficulty != nil {
-		blockCtx.Difficulty.SetFromBig(overrides.Difficulty.ToInt())
+		blockCtx.Difficulty.Set((*uint256.Int)(overrides.Difficulty))
 	}
 	if overrides.Time != nil {
 		blockCtx.Time = uint64(*overrides.Time)
@@ -174,10 +166,10 @@ func (overrides *BlockOverrides) OverrideBlockContext(blockCtx *evmtypes.BlockCo
 		blockCtx.PrevRanDao = overrides.PrevRandao
 	}
 	if overrides.BaseFeePerGas != nil {
-		blockCtx.BaseFee.SetFromBig(overrides.BaseFeePerGas.ToInt())
+		blockCtx.BaseFee.Set((*uint256.Int)(overrides.BaseFeePerGas))
 	}
 	if overrides.BlobBaseFee != nil {
-		blockCtx.BlobBaseFee.SetFromBig(overrides.BlobBaseFee.ToInt())
+		blockCtx.BlobBaseFee.Set((*uint256.Int)(overrides.BlobBaseFee))
 	}
 	if overrides.BlockHash != nil {
 		maps.Copy(blockHashOverrides, *overrides.BlockHash)

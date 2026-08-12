@@ -277,7 +277,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		if allowance.IsUint64() && hi > allowance.Uint64() {
 			transfer := args.Value
 			if transfer == nil {
-				transfer = new(hexutil.Big)
+				transfer = new(hexutil.U256)
 			}
 			log.Warn("Gas estimation capped by limited funds", "original", hi, "balance", balance,
 				"sent", transfer.ToInt(), "maxFeePerGas", feeCap, "fundable", allowance)

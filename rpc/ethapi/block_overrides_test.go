@@ -2,7 +2,6 @@ package ethapi
 
 import (
 	"math"
-	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -18,7 +17,7 @@ import (
 
 // helpers
 
-func bigHex(n uint64) *hexutil.Big    { return (*hexutil.Big)(new(big.Int).SetUint64(n)) }
+func bigHex(n uint64) *hexutil.U256   { return (*hexutil.U256)(uint256.NewInt(n)) }
 func u64Hex(n uint64) *hexutil.Uint64 { u := hexutil.Uint64(n); return &u }
 func hash(b byte) *common.Hash        { h := common.Hash{b}; return &h }
 
@@ -86,23 +85,6 @@ func TestOverride_RejectsWithdrawals(t *testing.T) {
 	err := o.Override(&evmtypes.BlockContext{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "withdrawals")
-}
-
-func TestOverride_BaseFeeOverflow(t *testing.T) {
-	// value larger than 2^256-1 → overflow
-	tooBig := new(big.Int).Lsh(big.NewInt(1), 256) // 2^256
-	o := BlockOverrides{BaseFeePerGas: (*hexutil.Big)(tooBig)}
-	err := o.Override(&evmtypes.BlockContext{})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "BaseFee")
-}
-
-func TestOverride_BlobBaseFeeOverflow(t *testing.T) {
-	tooBig := new(big.Int).Lsh(big.NewInt(1), 256)
-	o := BlockOverrides{BlobBaseFee: (*hexutil.Big)(tooBig)}
-	err := o.Override(&evmtypes.BlockContext{})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "BlobBaseFee")
 }
 
 func TestOverride_PartialOverrideDoesNotTouchOtherFields(t *testing.T) {
@@ -180,14 +162,6 @@ func TestOverrideBaseFee_AppliesOverrideOnPreLondonBlock(t *testing.T) {
 	got, err := o.OverrideBaseFee(nil)
 	require.NoError(t, err)
 	assert.Equal(t, uint256.NewInt(500), got, "explicit BaseFeePerGas must apply even when the target block has no base fee")
-}
-
-func TestOverrideBaseFee_Overflow(t *testing.T) {
-	tooBig := new(big.Int).Lsh(big.NewInt(1), 256)
-	o := BlockOverrides{BaseFeePerGas: (*hexutil.Big)(tooBig)}
-	_, err := o.OverrideBaseFee(uint256.NewInt(1))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "BaseFeePerGas")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
