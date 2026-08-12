@@ -81,13 +81,19 @@ type Filters struct {
 	// syncingLock orders subscriber registration+seed against event delivery:
 	// every stream event lands either in the seed or on the channel, never
 	// reordered across the two.
-	syncingLock           sync.Mutex
-	lastSyncing           *remoteproto.SyncingReply
-	pendingTxsSubs        *concurrent.SyncMap[PendingTxsSubID, Sub[[]types.Transaction]]
-	logsSubs              *LogsFilterAggregator
-	logsRequestor         atomic.Value
+	syncingLock    sync.Mutex
+	lastSyncing    *remoteproto.SyncingReply
+	pendingTxsSubs *concurrent.SyncMap[PendingTxsSubID, Sub[[]types.Transaction]]
+	logsSubs       *LogsFilterAggregator
+	logsRequestor  atomic.Value
+	// logsRequestMu makes aggregate-snapshot + upstream send atomic: the remote
+	// replaces its filter with each request it receives, so a stale snapshot
+	// delivered after a newer one would silently stop delivery of the newer
+	// subscription's events.
+	logsRequestMu         sync.Mutex
 	receiptsSubs          *ReceiptsFilterAggregator
 	receiptsRequestor     atomic.Value
+	receiptsRequestMu     sync.Mutex // see logsRequestMu
 	pendingReceiptsUpdate atomic.Bool
 	onNewSnapshot         func()
 
@@ -740,6 +746,8 @@ func (ff *Filters) UnsubscribeReceipts(id ReceiptsSubID) bool {
 // The load-or-flag operation is atomic under ff.mu to prevent a race with onReady
 // storing the requestor concurrently.
 func (ff *Filters) sendReceiptsFilterUpdate() error {
+	ff.receiptsRequestMu.Lock()
+	defer ff.receiptsRequestMu.Unlock()
 	rfr := ff.receiptsSubs.createFilterRequest()
 	ff.mu.Lock()
 	loaded := ff.receiptsRequestor.Load()
@@ -808,22 +816,9 @@ func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria, prot
 	// Add the filter to the list of log filters
 	ff.logsSubs.addLogsFilters(f)
 
-	// Create a filter request based on the aggregated filters
-	lfr := ff.logsSubs.createFilterRequest()
-	addresses, topics := ff.logsSubs.getAggMaps()
-	for addr := range addresses {
-		lfr.Addresses = append(lfr.Addresses, gointerfaces.ConvertAddressToH160(addr))
-	}
-	for topic := range topics {
-		lfr.Topics = append(lfr.Topics, gointerfaces.ConvertHashToH256(topic))
-	}
-
-	loaded := ff.loadLogsRequester()
-	if loaded != nil {
-		if err := loaded.(func(*remoteproto.LogsFilterRequest) error)(lfr); err != nil {
-			ff.logsSubs.removeLogsFilter(id)
-			return nil, "", fmt.Errorf("could not update remote logs filter: %w", err)
-		}
+	if err := ff.pushRemoteLogsFilter(); err != nil {
+		ff.logsSubs.removeLogsFilter(id)
+		return nil, "", fmt.Errorf("could not update remote logs filter: %w", err)
 	}
 
 	ff.registerSubscription(SubscriptionID(id), FilterTypeLogs, sub)
@@ -873,9 +868,18 @@ func (ff *Filters) removeLogsSubscription(id LogsSubID, pushRemote bool) bool {
 }
 
 // updateRemoteLogsFilter pushes the aggregated filter state to the remote log source.
-// If any filters in the aggregate need all addresses or all topics then the request to
-// the central log subscription needs to honour this.
 func (ff *Filters) updateRemoteLogsFilter() {
+	if err := ff.pushRemoteLogsFilter(); err != nil {
+		ff.logger.Warn("Could not update remote logs filter", "err", err)
+	}
+}
+
+// pushRemoteLogsFilter sends the aggregated filter state to the remote log source.
+// If any filters in the aggregate need all addresses or all topics then the request
+// to the central log subscription needs to honour this.
+func (ff *Filters) pushRemoteLogsFilter() error {
+	ff.logsRequestMu.Lock()
+	defer ff.logsRequestMu.Unlock()
 	lfr := ff.logsSubs.createFilterRequest()
 	addresses, topics := ff.logsSubs.getAggMaps()
 	for addr := range addresses {
@@ -884,11 +888,11 @@ func (ff *Filters) updateRemoteLogsFilter() {
 	for topic := range topics {
 		lfr.Topics = append(lfr.Topics, gointerfaces.ConvertHashToH256(topic))
 	}
-	if loaded := ff.loadLogsRequester(); loaded != nil {
-		if err := loaded.(func(*remoteproto.LogsFilterRequest) error)(lfr); err != nil {
-			ff.logger.Warn("Could not update remote logs filter", "err", err)
-		}
+	loaded := ff.loadLogsRequester()
+	if loaded == nil {
+		return nil
 	}
+	return loaded.(func(*remoteproto.LogsFilterRequest) error)(lfr)
 }
 
 // deleteLogStore deletes the log store associated with the given subscription ID.
