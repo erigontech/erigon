@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -107,6 +108,25 @@ func newParallelTestBlockFromTasks(tasks []exec.Task) *types.Block {
 		}
 	}
 	return types.NewBlockFromStorage(tasks[0].BlockHash(), tasks[0].BlockHeader(), txs, nil, nil, nil)
+}
+
+type rulesEngineWithErrors struct {
+	rules.Engine
+	initializeErr error
+	finalizeErr   error
+}
+
+func (e rulesEngineWithErrors) Initialize(config *chain.Config, chainReader rules.ChainHeaderReader, header *types.Header,
+	ibs *state.IntraBlockState, syscall rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks,
+) error {
+	return e.initializeErr
+}
+
+func (e rulesEngineWithErrors) Finalize(config *chain.Config, header *types.Header, ibs *state.IntraBlockState,
+	uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
+	chainReader rules.ChainReader, syscall rules.SystemCall, skipReceiptsEval bool, logger log.Logger,
+) (types.FlatRequests, error) {
+	return nil, e.finalizeErr
 }
 
 func sleepWithContext(ctx context.Context, d time.Duration) error {
@@ -1421,6 +1441,99 @@ func newResumeTestExec(t *testing.T, db kv.TemporalRwDB, config *chain.Config) (
 		},
 	}
 	return pe, roTx
+}
+
+func TestParallelInitializeRulesEngineIOErrorIsOperational(t *testing.T) {
+	config := chain.TestChainBerlinConfig
+	engineErr := fmt.Errorf("epoch database read failed")
+	engine := rulesEngineWithErrors{Engine: ethash.NewFaker(), initializeErr: engineErr}
+	txTask := &exec.TxTask{
+		Header:          &types.Header{Number: *uint256.NewInt(1)},
+		TxIndex:         -1,
+		Config:          config,
+		Logger:          log.New(),
+		EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
+	}
+	eTask := &execTask{Task: txTask}
+	task := &taskVersion{
+		execTask: eTask,
+		version:  state.Version{BlockNum: 1, TxIndex: -1},
+	}
+	ibs := state.New(state.NewNoopReader())
+	t.Cleanup(ibs.Close)
+
+	result := task.Execute(&vm.EVM{}, engine, nil, ibs, state.NewNoopWriter(), config, nil, datadir.Dirs{}, false)
+
+	require.True(t, result.Operational)
+	require.ErrorIs(t, result.Err, engineErr)
+	require.NotErrorIs(t, result.Err, rules.ErrInvalidBlock)
+}
+
+func TestParallelFinalizeClassifiesRulesEngineError(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		engineErr   func(error) error
+		wantVerdict bool
+	}{
+		{
+			name:      "IO error is operational",
+			engineErr: func(cause error) error { return cause },
+		},
+		{
+			name: "explicit validation error is a verdict",
+			engineErr: func(cause error) error {
+				return fmt.Errorf("%w: %w", rules.ErrInvalidBlock, cause)
+			},
+			wantVerdict: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := newResumeTestDB(t)
+			config := chain.TestChainBerlinConfig
+			pe, roTx := newResumeTestExec(t, db, config)
+			cause := fmt.Errorf("epoch database write failed")
+			pe.cfg.engine = rulesEngineWithErrors{Engine: pe.cfg.engine, finalizeErr: tc.engineErr(cause)}
+
+			header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 10_000_000}
+			txTask := &exec.TxTask{
+				Header:          header,
+				TxNum:           1,
+				TxIndex:         0,
+				Config:          config,
+				Logger:          log.New(),
+				EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
+			}
+			eTask := &execTask{Task: txTask, index: 0}
+			version := state.Version{BlockNum: 1, TxNum: 1, TxIndex: 0}
+			task := &taskVersion{execTask: eTask, version: version}
+			gasPool := new(protocol.GasPool).AddGas(header.GasLimit)
+			be := newBlockExec(newParallelTestBlock(1), gasPool, nil, make(chan applyResult, 4), nil, false, nil)
+			be.tasks = []*execTask{eTask}
+			be.results = []*execResult{nil}
+			be.txIncarnations = []int{0}
+			be.execFailed = []int{0}
+			be.execAborted = []int{0}
+			be.estimateDeps[0] = []int{}
+			be.execTasks.setInProgress(0)
+
+			result, err := be.nextResult(context.Background(), pe, &exec.TxResult{
+				Task:  task,
+				TxIn:  state.ReadSet{},
+				TxOut: &state.WriteSet{},
+			}, roTx)
+
+			if tc.wantVerdict {
+				require.NoError(t, err)
+				require.NotNil(t, result)
+				require.ErrorIs(t, result.Err, rules.ErrInvalidBlock)
+				require.ErrorIs(t, result.Err, cause)
+				return
+			}
+			require.Nil(t, result)
+			require.ErrorIs(t, err, cause)
+			require.NotErrorIs(t, err, rules.ErrInvalidBlock)
+		})
+	}
 }
 
 func TestParallelResumeBoundaryOffsets(t *testing.T) {

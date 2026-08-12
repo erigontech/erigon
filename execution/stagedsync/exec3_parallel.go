@@ -2317,7 +2317,7 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	result = ev.execTask.Execute(evm, engine, genesis, ibs, stateWriter,
 		chainConfig, chainReader, dirs, !ev.shouldDelayFeeCalc)
 
-	if ibs.HadInvalidRead() || result.Err != nil {
+	if !result.Operational && (ibs.HadInvalidRead() || result.Err != nil) {
 		result.Err = wrapAsExecAbort(result.Err, ibs.DepTxIndex())
 	}
 
@@ -3278,7 +3278,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				if _, err := pe.cfg.engine.Finalize(
 					pe.cfg.chainConfig, types.CopyHeader(tt.Header), ibs, tt.Uncles, blockReceipts,
 					tt.Withdrawals, chainReader, syscall, false, pe.logger); err != nil {
-					return be.invalidBlockResult(fmt.Errorf("%w: can't finalize block %d: %v", rules.ErrInvalidBlock, be.number(), err)), nil
+					err = fmt.Errorf("can't finalize block %d: %w", be.number(), err)
+					if errors.Is(err, rules.ErrInvalidBlock) {
+						return be.invalidBlockResult(err), nil
+					}
+					return nil, err
 				}
 
 				be.blockIO.RecordReads(finalVersion, ibs.VersionedReads())

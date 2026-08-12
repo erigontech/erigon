@@ -104,8 +104,7 @@ type TxResult struct {
 	ExecutionResult   evmtypes.ExecutionResult
 	ValidationResults []AAValidationResult
 	Err               error
-	// Operational reports that Err is an executor fault — a recovered task
-	// panic or a worker setup failure — never a block-validity verdict.
+	// Operational reports that Err is an execution infrastructure failure, not a block-validity verdict.
 	Operational bool
 	Coinbase    accounts.Address
 	TxIn        state.ReadSet
@@ -500,7 +499,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 
 	ibs.SetTrace(txTask.Trace)
 
-	rules := txTask.Rules()
+	chainRules := txTask.Rules()
 
 	var err error
 	header := txTask.Header
@@ -523,7 +522,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 				ibs = genesisIbs
 			}
 			// For Genesis, rules should be empty, so that empty accounts can be included
-			rules = &chain.Rules{}
+			chainRules = &chain.Rules{}
 			break
 		}
 
@@ -537,7 +536,10 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		if result.Err == nil && !ibs.IsVersioned() {
 			// The versionMap path finalizes from the write-set after the switch;
 			// the serial path commits the init writes here.
-			result.Err = ibs.FinalizeTx(rules, state.NewNoopWriter())
+			result.Err = ibs.FinalizeTx(chainRules, state.NewNoopWriter())
+		}
+		if result.Err != nil {
+			result.Operational = !errors.Is(result.Err, rules.ErrInvalidBlock)
 		}
 	case txTask.IsBlockEnd():
 		if txTask.BlockNumber() == 0 {
@@ -619,9 +621,9 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		// write-set is not applied for it, so keep genesis on the MakeWriteSet path.
 		isGenesis := txTask.TxIndex == -1 && txTask.BlockNumber() == 0
 		if ibs.IsVersioned() && !isGenesis {
-			result.TxOut = ibs.FinalizedWrites(rules)
+			result.TxOut = ibs.FinalizedWrites(chainRules)
 		} else {
-			if err = ibs.MakeWriteSet(rules, stateWriter); err != nil {
+			if err = ibs.MakeWriteSet(chainRules, stateWriter); err != nil {
 				panic(err)
 			}
 			result.TxOut = txTask.VersionedWrites(ibs)
