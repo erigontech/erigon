@@ -1382,16 +1382,24 @@ func TestStateCache_StaleViewCannotFillAfterClear(t *testing.T) {
 	t.Cleanup(sc.Close)
 
 	key := makeAddr(1)
-	oldView := sc.View(FrontierFunc(func(kv.Domain) (uint64, bool) { return 11, true }))
+	applier := sc.Applier()
+	applier.Initialize(1)
+	oldView := sc.View(FrontierWithStateVersion(
+		FrontierFunc(func(kv.Domain) (uint64, bool) { return 11, true }),
+		1,
+	))
 
-	sc.apply(kv.AccountsDomain, key, nil, 20) // canonical delete
-	sc.Applier().Clear()
+	applier.Publish(1, 2, []StateUpdate{{Domain: kv.AccountsDomain, Key: key, TxNum: 20}})
+	applier.Clear()
 
 	oldView.Fill(kv.AccountsDomain, key, []byte("pre-delete"), 10)
 	_, ok := sc.View(nil).Get(kv.AccountsDomain, key)
 	require.False(t, ok, "a pre-apply view must not resurrect the deleted value through Clear")
 
-	freshView := sc.View(FrontierFunc(func(kv.Domain) (uint64, bool) { return 21, true }))
+	freshView := sc.View(FrontierWithStateVersion(
+		FrontierFunc(func(kv.Domain) (uint64, bool) { return 21, true }),
+		2,
+	))
 	freshView.Fill(kv.AccountsDomain, key, []byte("current"), 20)
 	got, ok := sc.View(nil).Get(kv.AccountsDomain, key)
 	require.True(t, ok, "a view at the applied frontier must still fill after Clear")
@@ -1408,20 +1416,30 @@ func TestStateCache_AccountDeletionGatesStaleCodeFill(t *testing.T) {
 	addr, code := makeAddr(1), makeCode(1)
 	other, otherCode := makeAddr(2), makeCode(2)
 
-	c.apply(kv.CodeDomain, addr, code, 100)
-	c.apply(kv.AccountsDomain, addr, nil, 200)
+	applier := c.Applier()
+	applier.Initialize(1)
+	stale := c.View(FrontierWithStateVersion(
+		FrontierFunc(func(kv.Domain) (uint64, bool) { return 101, true }),
+		1,
+	))
+	applier.Publish(1, 2, []StateUpdate{
+		{Domain: kv.CodeDomain, Key: addr, Value: code, TxNum: 100},
+		{Domain: kv.AccountsDomain, Key: addr, TxNum: 200},
+	})
 
-	stale := c.View(FrontierFunc(func(kv.Domain) (uint64, bool) { return 101, true }))
 	stale.Fill(kv.CodeDomain, addr, code, 100)
 	_, ok := c.View(nil).Get(kv.CodeDomain, addr)
 	require.False(t, ok, "code of a deleted account must not be refillable from a pre-deletion view")
 
-	fresh := c.View(FrontierFunc(func(d kv.Domain) (uint64, bool) {
-		if d == kv.AccountsDomain {
-			return 201, true
-		}
-		return 101, true
-	}))
+	fresh := c.View(FrontierWithStateVersion(
+		FrontierFunc(func(d kv.Domain) (uint64, bool) {
+			if d == kv.AccountsDomain {
+				return 201, true
+			}
+			return 101, true
+		}),
+		2,
+	))
 	fresh.Fill(kv.CodeDomain, other, otherCode, 100)
 	_, ok = c.View(nil).Get(kv.CodeDomain, other)
 	require.True(t, ok, "unrelated code fills from a current view must stay admitted")
