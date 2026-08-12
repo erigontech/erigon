@@ -181,6 +181,12 @@ false`, which both satisfies reconcile's bin rule and keeps the refs-driven sque
 together with `--reset` and `--clear-commitment`, which write to the source, and with a history
 rebuild, which the staged directory holds no files for.
 
+The same "a `.kv` names no variant" argument runs the other way, and the flags alone cannot tell:
+the target is resolved before the datadir is opened, so a run without `--experimental.bin-commitment`
+takes a bin datadir for a hex one and writes hex files into it. An in-place run therefore reads the
+source's `erigondb.toml` and refuses a target the datadir does not record. A `--resume` run compares
+the same way against the output's own toml, which staging is about to overwrite.
+
 ### Task 3: Prove the code zone through a rebuild (TDD)
 
 **Files:**

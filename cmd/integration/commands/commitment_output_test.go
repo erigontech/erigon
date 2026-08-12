@@ -63,6 +63,29 @@ func sourceDatadirFixture(t *testing.T) datadir.Dirs {
 	return dirs
 }
 
+// binSourceDatadirFixture is a source datadir that records the bin trie.
+func binSourceDatadirFixture(t *testing.T) datadir.Dirs {
+	t.Helper()
+	dirs := sourceDatadirFixture(t)
+	refs := false
+	variant, hash := dbstate.TrieVariantBin, commitment.PBinHashBlake3
+	require.NoError(t, dbstate.WriteErigonDBSettings(dirs, &dbstate.ErigonDBSettings{
+		StepSize:                       testSourceStepSize,
+		StepsInFrozenFile:              testSourceStepsInFrozenFile,
+		ReferencesInCommitmentBranches: &refs,
+		TrieVariant:                    &variant,
+		TrieHash:                       &hash,
+	}))
+	return dirs
+}
+
+func hexTarget(t *testing.T) dbstate.RebuildTarget {
+	t.Helper()
+	target, err := dbstate.RebuildTarget{Variant: commitment.VariantHexPatriciaTrie}.Resolve()
+	require.NoError(t, err)
+	return target
+}
+
 func binTarget(t *testing.T) dbstate.RebuildTarget {
 	t.Helper()
 	target, err := dbstate.RebuildTarget{
@@ -188,6 +211,8 @@ func TestStageRebuildOutputRefusesNestedOutput(t *testing.T) {
 
 	_, err := stageRebuildOutput(src, filepath.Join(src.Snap, "out"), binTarget(t), false, log.New())
 	require.ErrorContains(t, err, "overlaps the source datadir")
+	_, err = os.Stat(filepath.Join(src.Snap, "out"))
+	require.ErrorIs(t, err, os.ErrNotExist, "a refused output must not be created inside the source")
 
 	outer := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(outer, "inner"), 0o755))
@@ -285,6 +310,55 @@ func TestStagedRebuildOutputDescribesBinBeforeItFinishes(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, dbstate.TrieVariantBin, staged.TrieVariantName())
 	require.Equal(t, commitment.PBinHashBlake3, staged.TrieHashName())
+}
+
+// The target is resolved from the flags before the datadir is opened, so nothing
+// in the run has read the source's scheme yet. A commitment .kv records no trie
+// variant, so hex files written into a bin datadir are read back as bin.
+func TestRebuildRefusesHexTargetOnBinSource(t *testing.T) {
+	binSrc := binSourceDatadirFixture(t)
+	require.ErrorContains(t, refuseRebuildIntoBinSource(hexTarget(t), binSrc), "bin commitment trie")
+	require.NoError(t, refuseRebuildIntoBinSource(binTarget(t), binSrc))
+	require.NoError(t, refuseRebuildIntoBinSource(hexTarget(t), sourceDatadirFixture(t)))
+	// A datadir with no erigondb.toml predates the file and is hex.
+	require.NoError(t, refuseRebuildIntoBinSource(hexTarget(t), datadir.New(t.TempDir())))
+}
+
+// --resume keeps the commitment files the interrupted run wrote. Continuing under
+// a different scheme leaves one directory holding two sets of them, which nothing
+// downstream can tell apart.
+func TestStageRebuildOutputResumeRefusesADifferentTarget(t *testing.T) {
+	src := sourceDatadirFixture(t)
+	outPath := filepath.Join(t.TempDir(), "out")
+
+	out, err := stageRebuildOutput(src, outPath, binTarget(t), false, log.New())
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(out.dirs.SnapDomain, "v1.0-commitment.0-64.kv"), []byte("rebuilt"), 0o644))
+
+	keccak, err := dbstate.RebuildTarget{Variant: commitment.VariantBinPatriciaTrie, HashName: commitment.PBinHashKeccak}.Resolve()
+	require.NoError(t, err)
+	_, err = stageRebuildOutput(src, outPath, keccak, true, log.New())
+	require.ErrorContains(t, err, commitment.PBinHashKeccak)
+
+	_, err = stageRebuildOutput(src, outPath, hexTarget(t), true, log.New())
+	require.ErrorContains(t, err, dbstate.TrieVariantHex)
+
+	staged, err := dbstate.ReadErigonDBSettings(out.dirs)
+	require.NoError(t, err)
+	require.Equal(t, dbstate.TrieVariantBin, staged.TrieVariantName())
+	require.Equal(t, commitment.PBinHashBlake3, staged.TrieHashName())
+}
+
+// A source file the walk cannot hardlink would leave the output missing an input
+// the rebuild then derives commitment without.
+func TestStageRebuildOutputRefusesNonRegularSourceFile(t *testing.T) {
+	src := sourceDatadirFixture(t)
+	require.NoError(t, os.Symlink(
+		filepath.Join(src.SnapDomain, "v1.0-accounts.0-64.kv"),
+		filepath.Join(src.SnapDomain, "v1.0-storage.64-128.kv")))
+
+	_, err := stageRebuildOutput(src, filepath.Join(t.TempDir(), "out"), binTarget(t), false, log.New())
+	require.ErrorContains(t, err, "not a regular file")
 }
 
 func TestStageRebuildOutputLeavesProcessConfigUnmodified(t *testing.T) {

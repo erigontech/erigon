@@ -512,6 +512,29 @@ func TestAmsterdamAAIntrinsicGas(t *testing.T) {
 	}
 }
 
+func TestAmsterdamAAIntrinsicGasRevisedPerAuth(t *testing.T) {
+	args := IntrinsicGasCalcArgs{
+		AuthorizationsLen: 2,
+		IsEIP2:            true,
+		IsEIP2028:         true,
+		IsEIP2780:         true,
+		IsEIP8038Revised:  true,
+		IsAATxn:           true,
+	}
+	result, overflow := CalcIntrinsicGas(args)
+	assert.False(t, overflow)
+	assert.Equal(t, IntrinsicGasCalcResult{
+		ExecutionGas: params.TxAAGas + 2*params.PerAuthExecutionCostEIP8038Revised,
+		FloorGasCost: params.TxAAGas,
+	}, result)
+
+	args.IsEIP8038Revised = false
+	unrevised, overflow := CalcIntrinsicGas(args)
+	assert.False(t, overflow)
+	assert.Equal(t, 2*(params.AccountWriteCostEIP8038Revised-params.AccountWriteCostEIP8038),
+		result.ExecutionGas-unrevised.ExecutionGas)
+}
+
 // TestEIP7981NotActive verifies that when IsEIP7981 is false (but EIP-7976 is on),
 // the EIP-7976 floor formula is used and the access list is NOT included in the
 // floor or added to the standard intrinsic gas.
