@@ -30,15 +30,6 @@ const (
 // github.com/spaolacci/murmur3.Sum128WithSeed but allocation- and
 // indirection-free, which is measurably faster for the short keys
 // hashed on every index lookup.
-// wmul and wadd are murmur3's mixing operations. Both are taken modulo 2^64 by
-// design — the operations Rust implementations spell wrapping_mul/wrapping_add.
-
-// overflow_false_positive
-func wmul(a, b uint64) uint64 { return a * b }
-
-// overflow_false_positive
-func wadd(a, b uint64) uint64 { return a + b }
-
 func Sum128WithSeed(key []byte, seed uint32) (uint64, uint64) {
 	h1, h2 := uint64(seed), uint64(seed)
 	clen := len(key)
@@ -47,23 +38,23 @@ func Sum128WithSeed(key []byte, seed uint32) (uint64, uint64) {
 		k1 := binary.LittleEndian.Uint64(key)
 		k2 := binary.LittleEndian.Uint64(key[8:])
 
-		k1 = wmul(k1, murmurC1)
+		k1 *= murmurC1
 		k1 = bits.RotateLeft64(k1, 31)
-		k1 = wmul(k1, murmurC2)
+		k1 *= murmurC2
 		h1 ^= k1
 
 		h1 = bits.RotateLeft64(h1, 27)
-		h1 = wadd(h1, h2)
-		h1 = wadd(wmul(h1, 5), 0x52dce729)
+		h1 += h2
+		h1 = h1*5 + 0x52dce729
 
-		k2 = wmul(k2, murmurC2)
+		k2 *= murmurC2
 		k2 = bits.RotateLeft64(k2, 33)
-		k2 = wmul(k2, murmurC1)
+		k2 *= murmurC1
 		h2 ^= k2
 
 		h2 = bits.RotateLeft64(h2, 31)
-		h2 = wadd(h2, h1)
-		h2 = wadd(wmul(h2, 5), 0x38495ab5)
+		h2 += h1
+		h2 = h2*5 + 0x38495ab5
 
 		key = key[16:]
 	}
@@ -73,53 +64,53 @@ func Sum128WithSeed(key []byte, seed uint32) (uint64, uint64) {
 		if n > 8 {
 			// overlapping load of the last 8 bytes, shifted so only bytes 8..n-1 remain
 			k2 := binary.LittleEndian.Uint64(key[n-8:]) >> (8 * (16 - n))
-			k2 = wmul(k2, murmurC2)
+			k2 *= murmurC2
 			k2 = bits.RotateLeft64(k2, 33)
-			k2 = wmul(k2, murmurC1)
+			k2 *= murmurC1
 			h2 ^= k2
 			k1 = binary.LittleEndian.Uint64(key)
 		} else {
 			k1 = loadPartial(key, n)
 		}
-		k1 = wmul(k1, murmurC1)
+		k1 *= murmurC1
 		k1 = bits.RotateLeft64(k1, 31)
-		k1 = wmul(k1, murmurC2)
+		k1 *= murmurC2
 		h1 ^= k1
 	}
 
 	h1 ^= uint64(clen)
 	h2 ^= uint64(clen)
 
-	h1 = wadd(h1, h2)
-	h2 = wadd(h2, h1)
+	h1 += h2
+	h2 += h1
 
 	h1 = murmurFmix64(h1)
 	h2 = murmurFmix64(h2)
 
-	h1 = wadd(h1, h2)
-	h2 = wadd(h2, h1)
+	h1 += h2
+	h2 += h1
 
 	return h1, h2
 }
 
 func murmurBlock(h1, h2, k1, k2 uint64) (uint64, uint64) {
-	k1 = wmul(k1, murmurC1)
+	k1 *= murmurC1
 	k1 = bits.RotateLeft64(k1, 31)
-	k1 = wmul(k1, murmurC2)
+	k1 *= murmurC2
 	h1 ^= k1
 
 	h1 = bits.RotateLeft64(h1, 27)
-	h1 = wadd(h1, h2)
-	h1 = wadd(wmul(h1, 5), 0x52dce729)
+	h1 += h2
+	h1 = h1*5 + 0x52dce729
 
-	k2 = wmul(k2, murmurC2)
+	k2 *= murmurC2
 	k2 = bits.RotateLeft64(k2, 33)
-	k2 = wmul(k2, murmurC1)
+	k2 *= murmurC1
 	h2 ^= k2
 
 	h2 = bits.RotateLeft64(h2, 31)
-	h2 = wadd(h2, h1)
-	h2 = wadd(wmul(h2, 5), 0x38495ab5)
+	h2 += h1
+	h2 = h2*5 + 0x38495ab5
 	return h1, h2
 }
 
@@ -128,31 +119,31 @@ func murmurTail(h1, h2 uint64, tail []byte, clen int) (uint64, uint64) {
 		var k1 uint64
 		if n > 8 {
 			k2 := binary.LittleEndian.Uint64(tail[n-8:]) >> (8 * (16 - n))
-			k2 = wmul(k2, murmurC2)
+			k2 *= murmurC2
 			k2 = bits.RotateLeft64(k2, 33)
-			k2 = wmul(k2, murmurC1)
+			k2 *= murmurC1
 			h2 ^= k2
 			k1 = binary.LittleEndian.Uint64(tail)
 		} else {
 			k1 = loadPartial(tail, n)
 		}
-		k1 = wmul(k1, murmurC1)
+		k1 *= murmurC1
 		k1 = bits.RotateLeft64(k1, 31)
-		k1 = wmul(k1, murmurC2)
+		k1 *= murmurC2
 		h1 ^= k1
 	}
 
 	h1 ^= uint64(clen)
 	h2 ^= uint64(clen)
 
-	h1 = wadd(h1, h2)
-	h2 = wadd(h2, h1)
+	h1 += h2
+	h2 += h1
 
 	h1 = murmurFmix64(h1)
 	h2 = murmurFmix64(h2)
 
-	h1 = wadd(h1, h2)
-	h2 = wadd(h2, h1)
+	h1 += h2
+	h2 += h1
 
 	return h1, h2
 }
@@ -221,9 +212,9 @@ func loadPartial(p []byte, n int) uint64 {
 
 func murmurFmix64(k uint64) uint64 {
 	k ^= k >> 33
-	k = wmul(k, 0xff51afd7ed558ccd)
+	k *= 0xff51afd7ed558ccd
 	k ^= k >> 33
-	k = wmul(k, 0xc4ceb9fe1a85ec53)
+	k *= 0xc4ceb9fe1a85ec53
 	k ^= k >> 33
 	return k
 }

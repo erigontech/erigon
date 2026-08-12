@@ -299,7 +299,6 @@ func swarEdge(labels []byte, children []int32, lo, hi int32, b byte) int32 {
 	bcast := uint64(b) * swarOnes
 	for i := lo; i < hi; i += 8 {
 		v := binary.LittleEndian.Uint64(labels[i:]) ^ bcast
-		// overflow_false_positive
 		if z := (v - swarOnes) &^ v & swarHighs; z != 0 {
 			// borrows only propagate up, so the lowest flagged byte is a real hit
 			if k := i + int32(bits.TrailingZeros64(z)>>3); k < hi {
