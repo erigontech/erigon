@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -70,6 +71,9 @@ type BeaconRpcP2P struct {
 	ethClock eth_clock.EthereumClock
 
 	columnDataPeers *columnDataPeers
+
+	blobSidecarRequestsOnce sync.Once
+	blobSidecarRequests     chan struct{}
 }
 
 // NewBeaconRpcP2P creates a new BeaconRpcP2P struct and returns a pointer to it.
@@ -242,6 +246,15 @@ func (b *BeaconRpcP2P) SendExecutionPayloadEnvelopesByRootReq(ctx context.Contex
 
 // SendBeaconBlocksByRangeReq retrieves blocks range from beacon chain.
 func (b *BeaconRpcP2P) SendBlobsSidecarByIdentifierReq(ctx context.Context, req *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error) {
+	b.blobSidecarRequestsOnce.Do(func() {
+		b.blobSidecarRequests = make(chan struct{}, 2)
+	})
+	select {
+	case b.blobSidecarRequests <- struct{}{}:
+		defer func() { <-b.blobSidecarRequests }()
+	case <-ctx.Done():
+		return nil, "", ctx.Err()
+	}
 	var buffer buffer.Buffer
 	if err := ssz_snappy.EncodeAndWrite(&buffer, req); err != nil {
 		return nil, "", err

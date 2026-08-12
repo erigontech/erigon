@@ -19,19 +19,23 @@ package network
 import (
 	"context"
 	"errors"
-	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
 var ErrTimeout = errors.New("timeout")
 
 var requestBlobBatchExpiration = 15 * time.Second
+
+const (
+	initialBlobRequestBackoff = 100 * time.Millisecond
+	maxBlobRequestBackoff     = 2 * time.Second
+	maxConcurrentBlobRequests = 2
+)
 
 // This is just a bunch of functions to handle blobs
 
@@ -71,52 +75,71 @@ type PeerAndSidecars struct {
 	Responses []*cltypes.BlobSidecar
 }
 
-// RequestBlobsFrantically requests blobs from the network frantically.
-func RequestBlobsFrantically(ctx context.Context, r *rpc.BeaconRpcP2P, req *solid.ListSSZ[*cltypes.BlobIdentifier]) (*PeerAndSidecars, error) {
-	var atomicResp atomic.Value
+type BlobPeerClient interface {
+	Peers() (uint64, error)
+	SendBlobsSidecarByIdentifierReq(context.Context, *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error)
+}
 
-	atomicResp.Store(&PeerAndSidecars{})
-	timer := time.NewTimer(requestBlobBatchExpiration)
-	defer timer.Stop()
-	reqInterval := time.NewTicker(100 * time.Millisecond)
-	defer reqInterval.Stop()
-Loop:
+// RequestBlobsFrantically requests blobs from the network frantically.
+func RequestBlobsFrantically(ctx context.Context, r BlobPeerClient, req *solid.ListSSZ[*cltypes.BlobIdentifier]) (*PeerAndSidecars, error) {
+	type requestResult struct {
+		responses []*cltypes.BlobSidecar
+		peer      string
+		err       error
+	}
+	attemptCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	expiration := time.NewTimer(requestBlobBatchExpiration)
+	defer expiration.Stop()
+	retry := time.NewTimer(0)
+	defer retry.Stop()
+	retryC := retry.C
+	results := make(chan requestResult, maxConcurrentBlobRequests)
+	inFlight := 0
+	backoff := initialBlobRequestBackoff
+	resetRetry := func(delay time.Duration) {
+		if !retry.Stop() {
+			select {
+			case <-retry.C:
+			default:
+			}
+		}
+		retry.Reset(delay)
+		retryC = retry.C
+	}
+	launch := func() {
+		inFlight++
+		go func() {
+			responses, peer, err := r.SendBlobsSidecarByIdentifierReq(attemptCtx, req)
+			results <- requestResult{responses: responses, peer: peer, err: err}
+		}()
+	}
 	for {
 		select {
-		case <-reqInterval.C:
-			go func() {
-				if len(atomicResp.Load().(*PeerAndSidecars).Responses) > 0 {
-					return
-				}
-				// this is so we do not get stuck on a side-fork
-				responses, pid, err := r.SendBlobsSidecarByIdentifierReq(ctx, req)
-				if err != nil {
-					log.Trace("RequestBlobsFrantically: error", "err", err, "peer", pid)
-					return
-				}
-				if responses == nil {
-					log.Trace("RequestBlobsFrantically: response is nil", "peer", pid)
-					return
-				}
-				if len(atomicResp.Load().(*PeerAndSidecars).Responses) > 0 {
-					return
-				}
-				atomicResp.Store(&PeerAndSidecars{
-					Peer:      pid,
-					Responses: responses,
-				})
-			}()
+		case <-retryC:
+			launch()
+			if inFlight < maxConcurrentBlobRequests {
+				resetRetry(initialBlobRequestBackoff)
+			} else {
+				retryC = nil
+			}
+		case result := <-results:
+			inFlight--
+			if result.err == nil && len(result.responses) > 0 {
+				return &PeerAndSidecars{Peer: result.peer, Responses: result.responses}, nil
+			}
+			if result.err != nil {
+				log.Trace("RequestBlobsFrantically: error", "err", result.err, "peer", result.peer)
+			} else {
+				log.Trace("RequestBlobsFrantically: response is empty", "peer", result.peer)
+			}
+			backoff = min(backoff*2, maxBlobRequestBackoff)
+			resetRetry(backoff)
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-timer.C:
+		case <-expiration.C:
 			log.Trace("RequestBlobsFrantically: timeout")
 			return nil, ErrTimeout
-		default:
-			if len(atomicResp.Load().(*PeerAndSidecars).Responses) > 0 {
-				break Loop
-			}
-			time.Sleep(10 * time.Millisecond)
 		}
 	}
-	return atomicResp.Load().(*PeerAndSidecars), nil
 }
