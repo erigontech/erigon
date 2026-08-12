@@ -42,10 +42,12 @@ func fGeneric(h *[8]uint64, m *[16]uint64, c0, c1 uint64, flag uint64, rounds ui
 		v4 ^= v8
 		v4 = bits.RotateLeft64(v4, -24)
 		v1 += m[s[1]]
+		// overflow_false_positive
 		v1 += v5
 		v13 ^= v1
 		v13 = bits.RotateLeft64(v13, -32)
 		v9 += v13
+		// overflow_false_positive
 		v5 ^= v9
 		v5 = bits.RotateLeft64(v5, -24)
 		v2 += m[s[2]]

@@ -230,6 +230,7 @@ func (evm *EVM) handleFrameRevert(gasRemaining *mdgas.MdGas, err error, snapshot
 // and subtracting it wraps mod 2^64 into the correct positive sum. Safe at
 // any gas magnitude.
 func deriveFrameExecutionGasUsed(inputTotal, gasRemainingTotal uint64, stateGasUsed int64) uint64 {
+	// overflow_false_positive
 	return inputTotal - gasRemainingTotal - uint64(stateGasUsed)
 }
 

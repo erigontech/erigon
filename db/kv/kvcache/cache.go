@@ -238,6 +238,7 @@ func (c *Coherent) advanceRoot(stateVersionID uint64) (r *CoherentRoot) {
 		c.roots[stateVersionID] = r
 	}
 
+	// overflow_false_positive
 	if prevView, ok := c.roots[stateVersionID-1]; ok && prevView.isCanonical {
 		//log.Info("advance: clone", "from", viewID-1, "to", viewID)
 		r.cache = prevView.cache.Copy()

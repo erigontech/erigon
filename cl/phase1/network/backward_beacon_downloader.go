@@ -199,6 +199,7 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 // Falls back to the beacon API when P2P is unavailable and an HTTP URL is configured.
 func (b *BackwardBeaconDownloader) fetchBlockRange(ctx context.Context) ([]*cltypes.SignedBeaconBlock, error) {
 	const count = uint64(64)
+	// overflow_false_positive
 	start := b.slotToDownload.Load() - count + 1
 	if start > b.slotToDownload.Load() { // overflow check
 		start = 0

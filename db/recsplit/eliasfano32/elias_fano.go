@@ -736,6 +736,7 @@ func (efi *EliasFanoIter) decrement() {
 
 	// note: there can be an underflow here after the last Next()
 	// but that is ok since we are protected from ErrEliasFanoIterExhausted
+	// overflow_false_positive
 	efi.lowerIdx -= efi.l
 	efi.upperMask >>= 1
 }

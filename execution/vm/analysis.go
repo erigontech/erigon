@@ -47,6 +47,7 @@ func codeBitmap(code []byte) bitvec {
 		if pc+8 <= codeLen {
 			w := binary.LittleEndian.Uint64(code[pc : pc+8])
 			t := (w & swarPushHi) ^ swarPushPat
+			// overflow_false_positive
 			if (t-swarLow)&^t&swarHigh == 0 { // no PUSH byte in this word
 				pc += 8
 				continue

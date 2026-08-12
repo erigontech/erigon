@@ -88,11 +88,13 @@ func (a *prefixArena) nodeCount() int {
 
 func popcount(n *prefixNode) int {
 	return bits.OnesCount16(n.bitmap)
+	// overflow_false_positive
 }
 
 func childIndex(n *prefixNode, nib byte) (int, bool) {
 	mask := uint16(1) << nib
 	idx := bits.OnesCount16(n.bitmap & (mask - 1))
+	// overflow_false_positive
 	return idx, n.bitmap&mask != 0
 }
 

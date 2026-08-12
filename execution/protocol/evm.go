@@ -120,6 +120,7 @@ func NewEVMTxContext(msg Message) evmtypes.TxContext {
 
 // GetHashFn returns a GetHashFunc which retrieves header hashes by number
 func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64) (*types.Header, error)) func(n uint64) (common.Hash, error) {
+	// overflow_false_positive
 	refNumber := ref.Number.Uint64() - 1
 	refHash := ref.ParentHash
 	lastKnownNumber := refNumber

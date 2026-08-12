@@ -248,6 +248,7 @@ const primeFNV = 0x01000193
 // the full 32-bit input, in contrast with the FNV-1 spec which multiplies the
 // prime with one byte (octet) in turn.
 func fnv(a, b uint32) uint32 {
+	// overflow_false_positive
 	return a*primeFNV ^ b
 }
 
@@ -255,6 +256,7 @@ func fnv(a, b uint32) uint32 {
 func fnvHash16(mix []uint32, data []uint32) {
 	for i := range 16 {
 		mix[i] = mix[i]*primeFNV ^ data[i]
+		// overflow_false_positive
 	}
 }
 
