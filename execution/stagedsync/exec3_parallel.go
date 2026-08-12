@@ -485,8 +485,8 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 				// Lazy-load / ComputeCommitment errors from the calculator
 				// don't wrap ErrWrongTrieRoot. Treating them as a wrong-root
 				// would mark a valid block as bad and trigger an unwind that
-				// throws away valid state. Fail fast instead and preserve the
-				// original error in the message.
+				// throws away valid state. Surface them as operational faults
+				// instead, preserving the original error in the message.
 				if !errors.Is(cr.err, ErrWrongTrieRoot) {
 					return fmt.Errorf("[%s] commitment: %w", pe.logPrefix, cr.err)
 				}
@@ -621,15 +621,22 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						finalized = true
 						continue
 					}
-					// failInfra records an apply-loop infrastructure fault and cancels,
-					// keeping the loop draining. Never bare-return from the apply loop
-					// while the exec loop may sit in a terminal mustDeliver send on a
-					// full applyResults — that strands closeApplyChannels and wedges
-					// pe.wait.
-					failInfra := func(err error) {
+					// recordApplyFailure classifies an apply-side failure — a
+					// rules.ErrInvalidBlock chain (e.g. a BAL mismatch from bal.Process)
+					// is the block's verdict, anything else an operational fault — and
+					// cancels, keeping the loop draining. Never bare-return from the
+					// apply loop while the exec loop may sit in a terminal mustDeliver
+					// send on a full applyResults — that strands closeApplyChannels and
+					// wedges pe.wait.
+					recordApplyFailure := func(err error) {
 						appliedBlocks[blockNum] = struct{}{}
-						infraErr = errors.Join(infraErr, err)
 						finalized = true
+						if errors.Is(err, rules.ErrInvalidBlock) {
+							fail.consider(blockNum, blockHash, true, err)
+							deliberateCancel()
+							return
+						}
+						infraErr = errors.Join(infraErr, err)
 						pe.cancelExecLoop(err)
 					}
 					header := block.HeaderNoCopy()
@@ -642,7 +649,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					if pe.accumulator != nil {
 						rawTxs, marshalErr := types.MarshalTransactionsBinary(txs)
 						if marshalErr != nil {
-							failInfra(fmt.Errorf("marshal transactions for accumulator, block %d: %w", blockNum, marshalErr))
+							recordApplyFailure(fmt.Errorf("marshal transactions for accumulator, block %d: %w", blockNum, marshalErr))
 							continue
 						}
 						pe.accumulator.StartChange(header, rawTxs, false)
@@ -664,7 +671,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						lastHeader = header
 
 						if blockUpdateCount != applyResult.ApplyCount {
-							failInfra(fmt.Errorf("block %d: applyCount mismatch: got: %d expected %d", blockNum, blockUpdateCount, applyResult.ApplyCount))
+							recordApplyFailure(fmt.Errorf("block %d: applyCount mismatch: got: %d expected %d", blockNum, blockUpdateCount, applyResult.ApplyCount))
 							continue
 						}
 
@@ -703,7 +710,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					// against a full-block BAL.
 					if validateFullBlock && (isAmsterdam || pe.cfg.experimentalBAL) {
 						if err := bal.Process(rwTx, header, applyResult.TxIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger); err != nil {
-							failInfra(err)
+							recordApplyFailure(err)
 							continue
 						}
 					}
