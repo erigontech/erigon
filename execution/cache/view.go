@@ -66,10 +66,9 @@ func (f FrontierFunc) DomainVisibleEnd(domain kv.Domain) (uint64, bool) { return
 // ReadView is the read-and-fill handle of a StateCache, bound to one
 // transaction's read view: values filled through it are vouched for by that
 // view's frontier, and it must not outlive the transaction. A nil frontier
-// disables the admission-gated fills
-// (Fill, SeedAddrCodeHash);
-// FillCodeSize is content-addressed and works on any view. The zero value is
-// inert: reads miss, fills no-op.
+// disables Fill and SeedAddrCodeHash. FillCodeSize remains available because
+// code size is content-addressed. The zero value is inert: reads miss, fills
+// no-op.
 //
 // A ReadView does not isolate reads: the cache holds latest-applied state, so
 // a hit can be newer than the view — the same direction the exec overlay
