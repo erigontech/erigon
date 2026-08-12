@@ -77,6 +77,7 @@ func (f FrontierFunc) DomainVisibleEnd(domain kv.Domain) (uint64, bool) { return
 // monotonicity (content never regresses behind the applied frontier),
 // enforced on the fill side; unwinds invalidate stored entries by their
 // per-cache entry epoch and floor.
+//
 // Each view also snapshots the StateCache read-view epoch. An unwind advances
 // that epoch, so older views can still read but cannot fill from the discarded
 // fork. State version is checked when the frontier is bound, not on every fill:

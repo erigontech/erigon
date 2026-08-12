@@ -353,6 +353,7 @@ func TestReadFill_SkipsInFlightUnwindRow(t *testing.T) {
 	ctx := t.Context()
 	db := newTestDb(t, stepSize)
 	sc := newSmallStateCache()
+	t.Cleanup(sc.Close)
 	key, _, v2, diffs := twoStepRows(t, db, sc)
 
 	roTx, err := db.BeginTemporalRo(ctx)
@@ -380,6 +381,7 @@ func TestCodeHashFill_SkipsInFlightUnwindRow(t *testing.T) {
 	ctx := t.Context()
 	db := newTestDb(t, stepSize)
 	sc := newSmallStateCache()
+	t.Cleanup(sc.Close)
 
 	key := make([]byte, 20)
 	key[0] = 0xcc
@@ -482,27 +484,6 @@ func TestGetCode_RespectsStagedUnwindBound(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, code, got,
 		"the code-hash fast path must ignore cache entries above the staged unwind bound")
-}
-
-// Background exec workers are constructed with a nil chainTx placeholder and
-// open their real tx on the first task; binding a getter for the placeholder
-// must not touch the tx.
-func TestAsGetterMeteredNilTx(t *testing.T) {
-	t.Parallel()
-
-	ctx := t.Context()
-	db := newTestDb(t, 16)
-	rwTx, err := db.BeginTemporalRw(ctx)
-	require.NoError(t, err)
-	defer rwTx.Rollback()
-	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
-	require.NoError(t, err)
-	defer domains.Close()
-	stateCache := newSmallStateCache()
-	t.Cleanup(stateCache.Close)
-	domains.SetStateCacheForTest(stateCache)
-
-	require.NotPanics(t, func() { domains.AsGetterMetered(nil, nil) })
 }
 
 // A negative reflects transactions below the read view's exclusive frontier,

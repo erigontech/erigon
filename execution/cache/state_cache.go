@@ -429,7 +429,6 @@ func (c *StateCache) Close() {
 // GenericCaches and the CodeCache, all layers) bumps an epoch + lowers a floor
 // and drops stale entries lazily on read. This is the sole cache-invalidation
 // path on unwind — the executor never touches the cache during forward execution.
-// It also advances readViewEpoch to revoke fill authority from older views.
 func (c *StateCache) unwind(unwindToTxNum uint64) {
 	c.admissionMu.Lock()
 	defer c.admissionMu.Unlock()
