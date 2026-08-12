@@ -17,11 +17,18 @@
 package rpctest
 
 import (
+	"encoding/json"
+	"fmt"
+	"math/big"
+	"net/http"
+	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 )
 
 func MockRequestGenerator(reqId int) *RequestGenerator {
@@ -531,4 +538,100 @@ func TestRequestGenerator_getLogsForTopics(t *testing.T) {
 		got := reqGen.getLogsForTopics(100, 100, tc.topics)
 		require.Equal(t, tc.expected, got)
 	}
+}
+
+// TestEthGetLogsInvariants_WideFilters pins that a block with more distinct addresses or
+// topics than the server's query limit is still checked, by splitting the filter over
+// several requests.
+func TestEthGetLogsInvariants_WideFilters(t *testing.T) {
+	const (
+		queryLimit = 100
+		logCount   = 250
+		blockNum   = 1
+	)
+
+	sig := common.BigToHash(big.NewInt(1))
+	logs := make([]Log, logCount)
+	for i := range logs {
+		logs[i] = Log{
+			Address:     common.BigToAddress(big.NewInt(int64(i + 1))),
+			Topics:      []common.Hash{sig, sig, common.BigToHash(big.NewInt(int64(i + 2)))},
+			BlockNumber: blockNum,
+			Index:       hexutil.Uint(i),
+		}
+	}
+
+	srv := fakeLogsServer(t, logs, queryLimit)
+	err := EthGetLogsInvariants(t.Context(), srv.URL, "", false, blockNum, blockNum+1, false, true, queryLimit)
+	require.NoError(t, err)
+}
+
+// fakeLogsServer serves eth_blockNumber and eth_getLogs over logs, rejecting filters with
+// more than queryLimit addresses or topic alternatives at one position - the way rpcdaemon
+// does for --rpc.logs.querylimit.
+func fakeLogsServer(t *testing.T, logs []Log, queryLimit int) *httptest.Server {
+	t.Helper()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			ID     int    `json:"id"`
+			Method string `json:"method"`
+			Params []struct {
+				Address []common.Address `json:"address"`
+				Topics  [][]common.Hash  `json:"topics"`
+			} `json:"params"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decoding request: %v", err)
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+
+		if req.Method == "eth_blockNumber" {
+			fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%d,"result":"0x%x"}`, req.ID, 1_000_000)
+			return
+		}
+
+		crit := req.Params[0]
+		tooWide := len(crit.Address) > queryLimit
+		for _, alternatives := range crit.Topics {
+			tooWide = tooWide || len(alternatives) > queryLimit
+		}
+		if tooWide {
+			fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%d,"error":{"code":-32602,"message":"query exceeds the maximum of %d addresses or topics per search position"}}`, req.ID, queryLimit)
+			return
+		}
+
+		result := []Log{}
+		for i := range logs {
+			if logMatchesFilter(&logs[i], crit.Address, crit.Topics) {
+				result = append(result, logs[i])
+			}
+		}
+		resp, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": result})
+		if err != nil {
+			t.Errorf("encoding response: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Write(resp) //nolint:errcheck
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func logMatchesFilter(l *Log, addresses []common.Address, topics [][]common.Hash) bool {
+	if len(addresses) > 0 && !slices.Contains(addresses, l.Address) {
+		return false
+	}
+	for pos, alternatives := range topics {
+		if len(alternatives) == 0 {
+			continue
+		}
+		if pos >= len(l.Topics) || !slices.Contains(alternatives, l.Topics[pos]) {
+			return false
+		}
+	}
+	return true
 }
