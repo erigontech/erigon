@@ -1575,7 +1575,9 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 				return nil, nil, err
 			}
 		} else if !txFinalized {
-			if err := ibs.FinalizeTx(chainRules, noop); err != nil {
+			// Write into stateCache even when no stateDiff is requested: a later
+			// stateDiff call resets ibs and rebuilds its state from the cache.
+			if err := ibs.FinalizeTx(chainRules, cachedWriter); err != nil {
 				return nil, nil, err
 			}
 		}

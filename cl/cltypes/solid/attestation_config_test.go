@@ -4,8 +4,9 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/cl/clparams"
 )
 
 func TestAttestationDecodeSSZWithConfigRejectsWrongCommitteeBitsSize(t *testing.T) {

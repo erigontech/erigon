@@ -16,7 +16,8 @@ import (
 var cmtTiming = os.Getenv("ERIGON_CMT_TIMING") == "1"
 
 // deepStorageThreshold is the touched-slot count above which an account's storage subtree folds concurrently instead of streaming through its worker.
-const deepStorageThreshold = 1_000
+// Set below the common hot-contract straggler size (~150 touched slots) so those subtrees fold in parallel rather than serializing through one nibble worker.
+const deepStorageThreshold = 128
 
 // unfoldRootWall unfolds base at the root until row 0 forms the top-nibble mount wall,
 // consuming at most one nibble per step: a restored root extension sharing the probe's
@@ -69,11 +70,8 @@ func (hph *HexPatriciaHashed) mountTo(root *HexPatriciaHashed, nibble int) {
 	hph.mountedNib = nibble
 	hph.mounted = true
 	hph.mountWall = root.currentKeyLen + 1
-	for row := 0; row <= hph.activeRows; row++ {
-		for nib := range len(hph.grid[row]) {
-			hph.grid[row][nib] = root.grid[row][nib]
-		}
-	}
+	n := hph.activeRows + 1
+	copy(hph.grid[:n], root.grid[:n])
 }
 
 // processMounted folds each touched root-child subtree concurrently, stitches the resulting cells back into the base row, and folds the base up to the root.
