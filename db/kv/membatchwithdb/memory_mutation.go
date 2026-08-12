@@ -55,6 +55,7 @@ type MemoryMutation struct {
 	deletedEntries   map[string]map[string]struct{}
 	deletedDups      map[string]map[string]map[string]struct{}
 	clearedTables    map[string]struct{}
+	sequenceWrites   map[string]struct{}
 	db               kv.TemporalTx
 	statelessCursors map[string]kv.RwCursor
 	DomainReader     DomainReader
@@ -84,6 +85,7 @@ func NewMemoryBatch(tx kv.TemporalTx, tmpDir string, logger log.Logger) (*Memory
 		deletedEntries: make(map[string]map[string]struct{}),
 		deletedDups:    map[string]map[string]map[string]struct{}{},
 		clearedTables:  make(map[string]struct{}),
+		sequenceWrites: make(map[string]struct{}),
 	}, nil
 }
 
@@ -114,6 +116,7 @@ func NewMemoryBatchMDBX(tx kv.TemporalTx, tmpDir string, logger log.Logger) (mm 
 		deletedEntries: make(map[string]map[string]struct{}),
 		deletedDups:    map[string]map[string]map[string]struct{}{},
 		clearedTables:  make(map[string]struct{}),
+		sequenceWrites: make(map[string]struct{}),
 	}, nil
 }
 
@@ -205,7 +208,11 @@ func initSequences(db kv.Tx, memTx kv.RwTx) error {
 func (m *MemoryMutation) IncrementSequence(bucket string, amount uint64) (uint64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.memTx.IncrementSequence(bucket, amount)
+	previous, err := m.memTx.IncrementSequence(bucket, amount)
+	if err == nil && amount != 0 {
+		m.markSequenceWrite(bucket)
+	}
+	return previous, err
 }
 
 func (m *MemoryMutation) ReadSequence(bucket string) (uint64, error) {
@@ -217,7 +224,18 @@ func (m *MemoryMutation) ReadSequence(bucket string) (uint64, error) {
 func (m *MemoryMutation) ResetSequence(bucket string, newValue uint64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.memTx.ResetSequence(bucket, newValue)
+	if err := m.memTx.ResetSequence(bucket, newValue); err != nil {
+		return err
+	}
+	m.markSequenceWrite(bucket)
+	return nil
+}
+
+func (m *MemoryMutation) markSequenceWrite(key string) {
+	if m.sequenceWrites == nil {
+		m.sequenceWrites = make(map[string]struct{})
+	}
+	m.sequenceWrites[key] = struct{}{}
 }
 
 func (m *MemoryMutation) ForAmount(bucket string, prefix []byte, amount uint32, walker func(k, v []byte) error) error {
@@ -321,13 +339,25 @@ func (m *MemoryMutation) Has(table string, key []byte) (bool, error) {
 func (m *MemoryMutation) Put(table string, k, v []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.memTx.Put(table, k, v)
+	if err := m.memTx.Put(table, k, v); err != nil {
+		return err
+	}
+	if table == kv.Sequence {
+		m.markSequenceWrite(string(k))
+	}
+	return nil
 }
 
 func (m *MemoryMutation) Append(table string, key []byte, value []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.memTx.Append(table, key, value)
+	if err := m.memTx.Append(table, key, value); err != nil {
+		return err
+	}
+	if table == kv.Sequence {
+		m.markSequenceWrite(string(key))
+	}
+	return nil
 }
 
 func (m *MemoryMutation) AppendDup(table string, key []byte, value []byte) error {
@@ -676,6 +706,14 @@ func (m *MemoryMutation) Flush(ctx context.Context, tx kv.RwTx) error {
 			return ctx.Err()
 		default:
 		}
+		if bucket == kv.Sequence {
+			// Constructor-copied sequence values support overlay reads but are not
+			// writes. Replay only keys explicitly changed through this mutation.
+			if err := m.flushSequenceWrites(tx); err != nil {
+				return err
+			}
+			continue
+		}
 		if isTablePurelyDupsort(bucket) {
 			if err := flushDupsortBucket(m.memTx, tx, bucket); err != nil {
 				return err
@@ -684,6 +722,22 @@ func (m *MemoryMutation) Flush(ctx context.Context, tx kv.RwTx) error {
 			if err := flushPlainBucket(m.memTx, tx, bucket); err != nil {
 				return err
 			}
+		}
+	}
+	return nil
+}
+
+func (m *MemoryMutation) flushSequenceWrites(tx kv.RwTx) error {
+	for key := range m.sequenceWrites {
+		value, err := m.memTx.GetOne(kv.Sequence, []byte(key))
+		if err != nil {
+			return err
+		}
+		if value == nil {
+			continue
+		}
+		if err := tx.Put(kv.Sequence, []byte(key), value); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -1097,6 +1151,7 @@ func (m *MemoryMutation) newReadViewMut(tx kv.Tx) *MemoryMutation {
 		deletedEntries: m.deletedEntries,
 		deletedDups:    m.deletedDups,
 		clearedTables:  m.clearedTables,
+		sequenceWrites: m.sequenceWrites,
 		db:             dbTx,
 		DomainReader:   m.DomainReader,
 	}

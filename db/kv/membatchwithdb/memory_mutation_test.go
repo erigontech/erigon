@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/rawdb"
 )
 
 func initializeDbNonDupSort(rwTx kv.RwTx) {
@@ -517,6 +518,55 @@ func TestIncReadSequence(t *testing.T) {
 	val, err := batch.ReadSequence(kv.HeaderNumber)
 	require.NoError(t, err)
 	require.Equal(t, uint64(12), val)
+
+	require.NoError(t, batch.Flush(t.Context(), rwTx))
+	val, err = rwTx.ReadSequence(kv.HeaderNumber)
+	require.NoError(t, err)
+	require.Equal(t, uint64(12), val, "an explicitly changed sequence must be flushed")
+}
+
+func TestMemoryMutationFlushDoesNotOverwriteUnchangedStateVersion(t *testing.T) {
+	db, seedTx := newTestTx(t)
+	ctx := t.Context()
+
+	_, err := rawdb.IncrementStateVersion(seedTx)
+	require.NoError(t, err)
+	require.NoError(t, seedTx.Commit())
+
+	snapshotTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer snapshotTx.Rollback()
+	batch, err := membatchwithdb.NewMemoryBatch(snapshotTx, "", log.Root())
+	require.NoError(t, err)
+	defer batch.Close()
+	require.NoError(t, batch.Put(kv.HeaderNumber, []byte("overlay-key"), []byte("overlay-value")))
+
+	advanceTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer advanceTx.Rollback()
+	_, err = rawdb.IncrementStateVersion(advanceTx)
+	require.NoError(t, err)
+	wantVersion, err := rawdb.GetStateVersion(advanceTx)
+	require.NoError(t, err)
+	require.NoError(t, advanceTx.Commit())
+
+	flushTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer flushTx.Rollback()
+	require.NoError(t, batch.Flush(ctx, flushTx))
+	require.NoError(t, flushTx.Commit())
+
+	checkTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer checkTx.Rollback()
+	gotVersion, err := rawdb.GetStateVersion(checkTx)
+	require.NoError(t, err)
+	require.Equal(t, wantVersion, gotVersion,
+		"flushing an overlay must not replay the state-version value copied from its older snapshot")
+	overlayValue, err := checkTx.GetOne(kv.HeaderNumber, []byte("overlay-key"))
+	require.NoError(t, err)
+	require.Equal(t, []byte("overlay-value"), overlayValue,
+		"the overlay's explicit table writes must still be flushed")
 }
 
 func initializeDbDupSort(rwTx kv.RwTx) {
