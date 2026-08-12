@@ -2299,10 +2299,10 @@ type blockExecutor struct {
 	tasks   []*execTask
 	results []*execResult
 
-	// feeMergeTemp[tx] is the write set the fee merge created and recorded for
-	// tx. A revalidation round merges again and supersedes it; every other
+	// feeMergeTemp[txIndex] is the write set the fee merge created and recorded
+	// for a tx. A revalidation round merges again and supersedes it; every other
 	// recorded set is some execResult's TxOut, which stays live.
-	feeMergeTemp map[int]*state.WriteSet
+	feeMergeTemp map[int]feeMerge
 
 	mapReleasing sync.WaitGroup
 
@@ -2442,7 +2442,7 @@ func newBlockExec(block *types.Block, gasPool *protocol.GasPool, accessList type
 		begin:            time.Now(),
 		stats:            map[int]ExecutionStat{},
 		finalizedResults: map[int]*execResult{},
-		feeMergeTemp:     map[int]*state.WriteSet{},
+		feeMergeTemp:     map[int]feeMerge{},
 		settledInput:     map[int]bool{},
 		estimateDeps:     map[int][]int{},
 		preValidated:     map[int]bool{},
@@ -2475,34 +2475,53 @@ func (be *blockExecutor) invalidBlockResult(err error) *blockResult {
 	}
 }
 
-// recordWorkerWrites installs a worker result's write set and drops the fee
-// credit along with it: the credit belonged to the incarnation this result
-// supersedes, and crediting is what the apply loop does next.
-func (be *blockExecutor) recordWorkerWrites(tx int, txVersion state.Version, writes *state.WriteSet) {
-	be.blockIO.RecordWrites(txVersion, writes)
-	delete(be.feeMergeTemp, tx)
+// feeMerge is a recorded fee-merge product pinned to the tx version whose
+// credit it carries. The pin is what keeps a credit from outliving the
+// incarnation it was computed for.
+type feeMerge struct {
+	writes  *state.WriteSet
+	version state.Version
 }
 
-// creditedWrites returns ws when an earlier fee merge produced it for tx, which
-// makes it the one set already carrying the tx's fee credit. Anything else is
-// the worker's own output, which calcFees reads as the pre-credit balance.
-func (be *blockExecutor) creditedWrites(tx int, ws *state.WriteSet) *state.WriteSet {
-	if temp := be.feeMergeTemp[tx]; temp != nil && temp == ws {
+// recordWorkerWrites installs a worker result's write set and drops the fee
+// credit along with it: the credit belonged to the incarnation this result
+// supersedes, and crediting is what the apply loop does next. The displaced
+// merge product is feeMergeTemp's to reclaim — every other recorded set is some
+// execResult's TxOut, which stays live.
+func (be *blockExecutor) recordWorkerWrites(txVersion state.Version, writes *state.WriteSet) {
+	be.blockIO.RecordWrites(txVersion, writes)
+	if temp, ok := be.feeMergeTemp[txVersion.TxIndex]; ok {
+		be.queueMapRelease(temp.writes)
+		delete(be.feeMergeTemp, txVersion.TxIndex)
+	}
+}
+
+// creditedWrites returns ws when an earlier fee merge produced it for this tx
+// version, which makes it the one set already carrying the version's fee
+// credit. Anything else is the worker's own output, which calcFees reads as the
+// pre-credit balance.
+func (be *blockExecutor) creditedWrites(txVersion state.Version, ws *state.WriteSet) *state.WriteSet {
+	if temp, ok := be.feeMergeTemp[txVersion.TxIndex]; ok && temp.writes == ws && temp.version == txVersion {
 		return ws
 	}
 	return nil
 }
 
-// recordFeeMerge takes ownership of the set the fee merge just recorded for tx
-// and reclaims the one it superseded. Only a set an earlier fee merge created
-// may be released: prev is otherwise some execResult's TxOut, which stays live.
+// recordFeeMerge folds a fee credit into the tx's recorded write set and
+// reclaims the set it supersedes. Only a previous fee-merge product may be
+// released: prev is otherwise some execResult's TxOut, which stays live.
 // MergeInto shares VersionedWrite pointers rather than the maps holding them,
-// so pooling prev's maps leaves the writes merged now holds intact.
-func (be *blockExecutor) recordFeeMerge(tx int, prev, merged *state.WriteSet) {
-	if temp := be.feeMergeTemp[tx]; temp != nil && temp == prev && merged != temp {
-		be.queueMapRelease(temp)
+// so pooling those maps leaves the merged writes intact.
+func (be *blockExecutor) recordFeeMerge(txVersion state.Version, prev, tipWrites *state.WriteSet) {
+	if tipWrites.IsEmpty() {
+		return
 	}
-	be.feeMergeTemp[tx] = merged
+	merged := prev.MergeInto(tipWrites)
+	be.blockIO.RecordWrites(txVersion, merged)
+	if temp, ok := be.feeMergeTemp[txVersion.TxIndex]; ok && temp.writes == prev {
+		be.queueMapRelease(temp.writes)
+	}
+	be.feeMergeTemp[txVersion.TxIndex] = feeMerge{writes: merged, version: txVersion}
 }
 
 // ReleaseMaps clears every map before pooling it, which is O(entries), and a
@@ -2696,7 +2715,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		be.blockIO.RecordReads(txVersion, res.TxIn)
 
 		if res.Version().Incarnation == 0 {
-			be.recordWorkerWrites(tx, txVersion, res.TxOut)
+			be.recordWorkerWrites(txVersion, res.TxOut)
 		} else {
 			prevWrites := be.blockIO.WriteSet(txVersion.TxIndex)
 			hasWriteChange := res.TxOut.HasNewWrite(prevWrites)
@@ -2722,7 +2741,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				)
 			}
 
-			be.recordWorkerWrites(tx, txVersion, res.TxOut)
+			be.recordWorkerWrites(txVersion, res.TxOut)
 
 			if hasWriteChange {
 				be.validateTasks.pushPendingSet(be.execTasks.getRevalidationRange(tx + 1))
@@ -2799,15 +2818,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 			existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
 			tipWrites, err := txResult.calcFees(taskVer, be.versionMap, stateReader, txTask.Rules(),
-				be.creditedWrites(tx, existingWrites))
+				be.creditedWrites(txVersion, existingWrites))
 			if err != nil {
 				return nil, err
 			}
-			if !tipWrites.IsEmpty() {
-				merged := existingWrites.MergeInto(tipWrites)
-				be.blockIO.RecordWrites(txVersion, merged)
-				be.recordFeeMerge(tx, existingWrites, merged)
-			}
+			be.recordFeeMerge(txVersion, existingWrites, tipWrites)
 		}
 
 		validity := be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
