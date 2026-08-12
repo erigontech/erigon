@@ -183,17 +183,31 @@ both satisfies reconcile's bin rule and keeps the refs-driven squeeze pass (`squ
 **Files:**
 - Create: `execution/commitment/backtester/pbin_rebuild_code_test.go`
 
-- [ ] write the test first, modelled on `pbin_m1a_test.go:307`, with a fixture that writes real code
+- [x] write the test first, modelled on `pbin_m1a_test.go:307`, with a fixture that writes real code
       into `kv.CodeDomain` and flushes it to domain **files** before the rebuild (`squeeze.go:1161`
       discards code writes made during the rebuild)
-- [ ] case: contract whose code spans more than one code group; rebuilt root == forward root
-- [ ] case: two accounts sharing byte-identical code; root matches, shared chunks emitted once
-- [ ] case: contract whose code contains an all-zero chunk; that chunk absent from the tree
-- [ ] case: EIP-7702 delegated account; `DELEGATION` leaf present, no code leaves
-- [ ] **case: accounts sharing code split across two shards of the same range**, so the shard
+- [x] case: contract whose code spans more than one code group; rebuilt root == forward root
+- [x] case: two accounts sharing byte-identical code; root matches, shared chunks emitted once
+- [x] case: contract whose code contains an all-zero chunk; that chunk absent from the tree
+- [x] case: EIP-7702 delegated account; `DELEGATION` leaf present, no code leaves
+- [x] **case: accounts sharing code split across two shards of the same range**, so the shard
       boundary (`squeeze.go:1035`) falls between them; this is the case Task 4 puts at risk
-- [ ] assert the rebuilt code zone is non-empty, so the test cannot pass by emitting nothing
-- [ ] run tests — must pass before Task 4
+- [x] assert the rebuilt code zone is non-empty, so the test cannot pass by emitting nothing
+- [x] run tests — must pass before Task 4
+
+Landed shape: the code zone is read back through the commitment branch records, filtered to the
+paths that open with the CODE zone byte. A chunk leaf and a delegation indicator are values no state
+domain holds, so the record carries them inline and a byte scan answers presence without decoding.
+The zero-chunk case pins absence by record count against a two-chunk and a three-chunk control,
+since the count follows the leaf count. Mutation-checked: dropping `queueChunks` fails all four
+code-zone cases, dropping the delegation branch fails the delegation case, and a seen-set of code
+hashes that survives across `Process` calls fails the multi-shard case — the hazard Task 4 must
+avoid.
+
+Two shards need a range wider than `commitment.DefaultRebuildShardMaxSteps`, which the fixture
+reaches with one txNum per step and a 128-step merged accounts file. That range must also hold more
+keys than steps: `keysPerStep` is an integer division at `squeeze.go` in the shard loop, and a
+sparser range divides by zero.
 
 ### Task 4: Make the CodeSize gate loud, then chunk once per code hash (TDD)
 
