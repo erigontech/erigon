@@ -22,6 +22,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -89,6 +90,38 @@ func TestCreateOverAbsenceConsumedBeforeEmptyDestructFlush(t *testing.T) {
 	require.NoError(t, ibs.CreateAccount(addr, true))
 	_, created := ibs.VersionedWrites().GetAddress(addr)
 	require.True(t, created)
+
+	io := NewVersionedIO(2)
+	io.RecordReads(Version{TxIndex: 1, Incarnation: 0}, ibs.VersionedReads())
+	require.Equal(t, VersionValid, vm.ValidateVersion(1, io, validateEqualVersion, true, false, false, ""))
+}
+
+// TestDestructFlushAfterSlotReadReconstructsPreservedAccount requires the
+// account load to see a destruct published after an earlier slot read memoized
+// "no destruct": with no absence consumed, the preserved EIP-8246 account is
+// reconstructed and the attempt validates in one pass.
+func TestDestructFlushAfterSlotReadReconstructsPreservedAccount(t *testing.T) {
+	t.Parallel()
+	ibs, vm, addr := newAbsenceForkState(t)
+	slot, err := ibs.GetState(addr, accounts.InternKey(common.HexToHash("0x01")))
+	require.NoError(t, err)
+	require.True(t, slot.IsZero())
+
+	// Publish only after the slot read has populated the attempt's destruct
+	// memo, in the shape of a production destruct flush: SelfDestruct, Balance
+	// and Incarnation cells only.
+	destructVersion := Version{TxIndex: 0, Incarnation: 3}
+	writeFor(vm, addr, BalancePath, accounts.NilKey, destructVersion, *uint256.NewInt(1_000_000), true)
+	writeFor(vm, addr, IncarnationPath, accounts.NilKey, destructVersion, uint64(0), true)
+	writeFor(vm, addr, SelfDestructPath, accounts.NilKey, destructVersion, true, true)
+
+	exist, err := ibs.Exist(addr)
+	require.NoError(t, err)
+	require.True(t, exist)
+
+	balance, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	require.Equal(t, *uint256.NewInt(1_000_000), balance)
 
 	io := NewVersionedIO(2)
 	io.RecordReads(Version{TxIndex: 1, Incarnation: 0}, ibs.VersionedReads())

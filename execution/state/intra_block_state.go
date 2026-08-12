@@ -1335,12 +1335,9 @@ func (sdb *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 	// re-created it, in which case fall through to the normal read.
 	if sdb.eip8246 && readAccount == nil {
 		consumedAbsence := sdb.consumedAddressAbsence(addr)
-		destructed, sdRes, ok := sdb.readSelfDestructMemo(addr)
-		if consumedAbsence {
-			// Re-probe the map because a consumed absence is fixed for this attempt,
-			// while the memo may predate the destruct that conflicts with it.
-			destructed, sdRes, ok = sdb.versionMap.ReadSelfDestruct(addr, sdb.txIndex)
-		}
+		// Probe the map fresh: the memo may predate a destruct flushed
+		// mid-attempt, which this load must reconstruct from or conflict with.
+		destructed, sdRes, ok := sdb.versionMap.ReadSelfDestruct(addr, sdb.txIndex)
 		if ok && sdRes.Status() == MVReadResultDone && destructed {
 			destructVersion := sdRes.Version()
 			// Only a genuine re-creation (a later CreateAccount, which writes
