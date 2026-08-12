@@ -136,7 +136,8 @@ func TestRecordPreload_RecordsElapsedAndBytes(t *testing.T) {
 			if got := mxPreloadBytesTotal.GetValue() - bytesBefore; got != tc.wantBytes {
 				t.Errorf("commitment_trunk_preload_bytes_total advanced by %v, want %v", got, tc.wantBytes)
 			}
-			if got := mxPreloadDurationSecondsTotal.GetValue() - secondsBefore; got < elapsed.Seconds() {
+			const ulpSlack = 1e-9 // differencing a float64 accumulator lands just under
+			if got := mxPreloadDurationSecondsTotal.GetValue() - secondsBefore; got+ulpSlack < elapsed.Seconds() {
 				t.Errorf("commitment_trunk_preload_duration_seconds_total advanced by %v, want >= %v", got, elapsed.Seconds())
 			}
 		})
