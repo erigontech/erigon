@@ -168,8 +168,9 @@ func TestServerShortLivedConn(t *testing.T) {
 		wantResp = `{"jsonrpc":"2.0","id":1,"result":{"nftest":"1.0","rpc":"1.0","test":"1.0"}}` + "\n"
 		deadline = time.Now().Add(10 * time.Second)
 	)
+	var dialer net.Dialer
 	for range 20 {
-		conn, err := net.Dial("tcp", listener.Addr().String()) //nolint:noctx
+		conn, err := dialer.DialContext(t.Context(), "tcp", listener.Addr().String())
 		if err != nil {
 			t.Fatal("can't dial:", err)
 		}

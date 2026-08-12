@@ -113,7 +113,8 @@ func TestServerListen(t *testing.T) {
 	defer srv.Stop()
 
 	// dial the test server
-	conn, err := net.DialTimeout("tcp", srv.ListenAddr, 5*time.Second) //nolint:noctx
+	var dialer net.Dialer
+	conn, err := dialer.DialContext(t.Context(), "tcp", srv.ListenAddr)
 	if err != nil {
 		t.Fatalf("could not dial: %v", err)
 	}
@@ -584,7 +585,8 @@ func TestServerInboundUsesStaticEnode(t *testing.T) {
 	srv.AddPeer(staticEnode)
 
 	// Drive an inbound connection.
-	conn, err := net.DialTimeout("tcp", srv.ListenAddr, 5*time.Second) //nolint:noctx
+	var dialer net.Dialer
+	conn, err := dialer.DialContext(t.Context(), "tcp", srv.ListenAddr)
 	require.NoError(t, err)
 	defer conn.Close()
 
@@ -630,7 +632,8 @@ func TestServerInboundThrottle(t *testing.T) {
 	defer srv.Stop()
 
 	// Dial the test server.
-	conn, err := net.DialTimeout("tcp", srv.ListenAddr, timeout) //nolint:noctx
+	var dialer net.Dialer
+	conn, err := dialer.DialContext(t.Context(), "tcp", srv.ListenAddr)
 	if err != nil {
 		t.Fatalf("could not dial: %v", err)
 	}
@@ -644,7 +647,7 @@ func TestServerInboundThrottle(t *testing.T) {
 
 	// Dial again. This time the server should close the connection immediately.
 	connClosed := make(chan struct{}, 1)
-	conn, err = net.DialTimeout("tcp", srv.ListenAddr, timeout) //nolint:noctx
+	conn, err = dialer.DialContext(t.Context(), "tcp", srv.ListenAddr)
 	if err != nil {
 		t.Fatalf("could not dial: %v", err)
 	}

@@ -335,7 +335,8 @@ func TestHTTP2H2CUpgrade(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = httpSrv.Shutdown(context.Background()) })
 
-	conn, err := net.Dial("tcp", addr.String()) //nolint:noctx
+	var dialer net.Dialer
+	conn, err := dialer.DialContext(t.Context(), "tcp", addr.String())
 	require.NoError(t, err)
 	defer conn.Close()
 	require.NoError(t, conn.SetDeadline(time.Now().Add(10*time.Second)))

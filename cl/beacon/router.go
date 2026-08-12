@@ -19,6 +19,7 @@ package beacon
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"time"
@@ -39,8 +40,7 @@ func ListenAndServe(ctx context.Context, beaconHandler *LayeredBeaconHandler, ro
 	var lc net.ListenConfig
 	listener, err := lc.Listen(ctx, routerCfg.Protocol, routerCfg.Address)
 	if err != nil {
-		log.Warn("[Beacon API] Failed to start listening", "addr", routerCfg.Address, "err", err)
-		return err
+		return fmt.Errorf("[Beacon API] failed to start listening on %s: %w", routerCfg.Address, err)
 	}
 	defer listener.Close()
 	mux := chi.NewRouter()
@@ -75,6 +75,7 @@ func ListenAndServe(ctx context.Context, beaconHandler *LayeredBeaconHandler, ro
 		ReadTimeout:  routerCfg.ReadTimeTimeout,
 		IdleTimeout:  routerCfg.IdleTimeout,
 		WriteTimeout: routerCfg.WriteTimeout,
+		BaseContext:  func(net.Listener) context.Context { return ctx },
 	}
 
 	go func() {
@@ -85,8 +86,7 @@ func ListenAndServe(ctx context.Context, beaconHandler *LayeredBeaconHandler, ro
 	}()
 
 	if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Warn("[Beacon API] failed to start serving", "addr", routerCfg.Address, "err", err)
-		return err
+		return fmt.Errorf("[Beacon API] failed to serve on %s: %w", routerCfg.Address, err)
 	}
 	log.Info("[Beacon API] Listening", "addr", routerCfg.Address)
 	return nil

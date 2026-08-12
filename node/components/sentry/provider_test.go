@@ -20,7 +20,6 @@ import (
 	"net"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -180,13 +179,14 @@ func TestProviderClose_StopsSharedP2PServer(t *testing.T) {
 	require.NotNil(t, srv)
 
 	addr := srv.NodeInfo().ListenAddr
-	c, err := net.DialTimeout("tcp", addr, 200*time.Millisecond) //nolint:noctx
+	var dialer net.Dialer
+	c, err := dialer.DialContext(t.Context(), "tcp", addr)
 	require.NoError(t, err, "listener should be up before Close")
 	c.Close()
 
 	require.NoError(t, p.Close())
 	require.Nil(t, p.sharedP2PServer, "Close must clear the shared server reference")
 
-	_, err = net.DialTimeout("tcp", addr, 200*time.Millisecond) //nolint:noctx
+	_, err = dialer.DialContext(t.Context(), "tcp", addr)
 	require.Error(t, err, "Provider.Close must shut the shared p2p.Server's listener down")
 }

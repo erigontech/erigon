@@ -205,7 +205,8 @@ type fakeIGD struct {
 // httpu.Handler
 func (dev *fakeIGD) ServeMessage(r *http.Request) {
 	dev.t.Logf(`HTTPU request %s %s`, r.Method, r.RequestURI)
-	conn, err := net.Dial("udp4", r.RemoteAddr) //nolint:noctx
+	var dialer net.Dialer
+	conn, err := dialer.DialContext(r.Context(), "udp4", r.RemoteAddr)
 	if err != nil {
 		fmt.Printf("reply Dial error: %v", err)
 		return

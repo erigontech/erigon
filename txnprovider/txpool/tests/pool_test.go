@@ -54,8 +54,9 @@ var (
 // P2P helper is binded to node1 port, that's why we measure performance of local txs processing
 func skipIfNodeUnreachable(t *testing.T, addrs ...string) {
 	t.Helper()
+	var dialer net.Dialer
 	for _, addr := range addrs {
-		conn, err := net.DialTimeout("tcp", addr, 300*time.Millisecond) //nolint:noctx
+		conn, err := dialer.DialContext(t.Context(), "tcp", addr)
 		if err != nil {
 			t.Skipf("requires a running node at %s: %v", addr, err)
 		}

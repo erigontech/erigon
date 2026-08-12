@@ -101,7 +101,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 	opPool = pool.NewOperationsPool(&bcfg)
 	fcu.Pool = opPool
 
-	genesis, err := initial_state.GetGenesisState(context.Background(), chainspec.MainnetChainID)
+	genesis, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
 	require.NoError(t, err)
 	ethClock := eth_clock.NewEthereumClock(genesis.GenesisTime(), genesis.GenesisValidatorsRoot(), &bcfg)
 	blobStorage := blob_storage.NewBlobStore(blobDb, afero.NewMemMapFs(), math.MaxUint64, &bcfg, ethClock)
