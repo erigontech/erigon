@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/cmp"
 	"github.com/erigontech/erigon/common/dbg"
+	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -46,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/execution/receipts"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/shards"
@@ -350,7 +352,7 @@ func execV3Serial(ctx context.Context,
 	if u != nil && !u.HasUnwindPoint() {
 		if lastHeader != nil {
 			switch {
-			case execErr == nil || errors.Is(execErr, &ErrLoopExhausted{}):
+			case execErr == nil || isOnlyLoopExhausted(execErr):
 				_, _, err = computeAndCheckCommitmentV3(ctx, lastHeader, applyTx, se.domains(), cfg, execStage, false, logger, u)
 				if err != nil {
 					return err
@@ -384,7 +386,7 @@ func execV3Serial(ctx context.Context,
 				switch {
 				case errors.Is(execErr, ErrWrongTrieRoot):
 					return fmt.Errorf("can't handle incorrect root err: %w", execErr)
-				case errors.Is(execErr, &ErrLoopExhausted{}):
+				case isOnlyLoopExhausted(execErr):
 					break
 				default:
 					return execErr
@@ -610,6 +612,13 @@ func blockAccessListBytes(blockTx kv.Getter, block *types.Block, blockNum uint64
 	return data, nil
 }
 
+func recoveredPanicError(operation string, recovered any) error {
+	if err, ok := recovered.(error); ok && !isQuietExit(err) {
+		return fmt.Errorf("%s panic: %w", operation, err)
+	}
+	return fmt.Errorf("%s panic: %v", operation, recovered)
+}
+
 func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, maxBlockNum uint64, blockLimit uint64, initialTxNum uint64, inputTxNum uint64, readAhead chan uint64, initialCycle bool, applyResults chan applyResult, blockRequests chan *blockRequest, commitResults chan applyResult) error {
 	if te.execLoopGroup == nil {
 		return errors.New("no exec group")
@@ -622,8 +631,10 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 		// Closing here would race with the exec loop sending results.
 		defer func() {
 			if rec := recover(); rec != nil {
-				err = fmt.Errorf("exec blocks panic: %s", rec)
-			} else if err != nil && !errors.Is(err, context.Canceled) {
+				err = recoveredPanicError("exec blocks", rec)
+				return
+			}
+			if err = commonerrors.NilIfCanceled(err); err != nil {
 				err = fmt.Errorf("exec blocks error: %w", err)
 			} else {
 				te.logger.Debug("[" + te.logPrefix + "] exec blocks exit")
@@ -635,6 +646,12 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 		// race this send select and panic on "send on closed channel".
 		if blockRequests != nil {
 			defer close(blockRequests)
+		}
+
+		if te.cfg.syncCfg.ChaosMonkey && te.enableChaosMonkey {
+			if chaosErr := chaos_monkey.ThrowPreExecutionError(); chaosErr != nil {
+				return chaosErr
+			}
 		}
 
 		// Open a thread-local roTx for block metadata and StepsInFiles.

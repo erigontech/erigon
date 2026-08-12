@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"runtime"
 	"runtime/pprof"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -18,6 +20,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
@@ -92,17 +95,13 @@ type parallelExecutor struct {
 	failedHash  common.Hash
 	execWorkers []*exec.Worker
 	stopWorkers func()
-	waitWorkers func()
-	// cancelExecLoop publishes the stopCause on the coordination context
-	// (execLoopCtx). It is a SIGNAL that the exec loop, calculator and apply loop
-	// each read to decide how to wind down. It cancels execLoopCtx and therefore
-	// its child workersCtx too, but every publish site is ordered after the exec
-	// loop has produced everything up to the coalesce block, so it never aborts an
-	// in-flight block mid-work.
+	waitWorkers func() error
+	// cancelExecLoop stops coordinated executor work with either a deliberate
+	// batch-stop cause or a failure. The exec loop still owns result-channel
+	// closure so consumers can drain before the group is joined.
 	cancelExecLoop context.CancelCauseFunc
-	// cancelWorkers stops the OCC worker pool via workersCtx (a child of the
-	// coordination context). It is the explicit, ordered halt the exec loop calls
-	// once it has produced everything up to the coalesce block.
+	// cancelWorkers stops the OCC worker pool. The exec loop calls it on exit,
+	// and final executor cleanup calls it again as a safety net.
 	cancelWorkers  context.CancelFunc
 	in             *exec.QueueWithRetry
 	rws            *exec.ResultsQueue
@@ -237,7 +236,7 @@ func (pe *parallelExecutor) exec(ctx context.Context,
 func (pe *parallelExecutor) execImpl(ctx context.Context,
 	startBlockNum uint64, offsetFromBlockBeginning uint64, maxBlockNum uint64, blockLimit uint64,
 	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
-	stepsInDb float64, accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
+	stepsInDb float64, accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (outHeader *types.Header, outTx kv.TemporalRwTx, execErr error) {
 
 	// Do NOT set pe.applyTx to the stageloop's rwTx — the rwTx is thread-bound
 	// and cannot be shared with the execLoop goroutine. The execLoop creates
@@ -287,11 +286,23 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	// index lookup on every run and contradict the stage-agnostic split.
 	restoredTxNum := inputTxNum
 
-	// Set accumulator before pe.run() so execLoop sees it without a race.
+	// Set accumulator, channels and limits before pe.run() so execLoop sees
+	// them without a race — on an early group cancel its exit path reads the
+	// channel fields right away. blockRequests is intentionally not stashed:
+	// it is closed by its sole sender (the executeBlocks dispatch goroutine),
+	// not by execLoop — closing it from execLoop would race that send.
 	pe.accumulator = accumulator
+	pe.applyResultsCh = applyResults
+	pe.commitResultsCh = commitResults
+	pe.maxBlockNum = maxBlockNum
 
 	executorContext, executorCancel, err := pe.run(ctx)
-	defer executorCancel(nil)
+	executorJoined := false
+	defer func() {
+		if !executorJoined {
+			execErr = reconcileExecErrors(execErr, executorCancel(nil))
+		}
+	}()
 
 	if err != nil {
 		return nil, rwTx, err
@@ -328,14 +339,6 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	prevStateReader := sdCtx.StateReader()
 	defer sdCtx.SetStateReader(prevStateReader)
 
-	// Store channels and limits on pe so execLoop can access them.
-	// blockRequests is intentionally not stashed here: it is closed by its
-	// sole sender (the executeBlocks dispatch goroutine), not by execLoop —
-	// closing it from execLoop would race the dispatch goroutine's send.
-	pe.applyResultsCh = applyResults
-	pe.commitResultsCh = commitResults
-	pe.maxBlockNum = maxBlockNum
-
 	// Configure changeset capture and seed the initial accumulator BEFORE
 	// the exec loop / executeBlocks goroutines start touching sd.mem. The
 	// exec loop owns all subsequent SetChangesetAccumulator transitions
@@ -351,12 +354,13 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	// compute per-block — otherwise batch-mode dedupes branch updates across
 	// the batch and flushes them all into one block's changeset, which fails
 	// on subsequent reorgs. blockRequests feeds it BAL-declared block requests.
-	// The calculator only publishes results; the apply loop is the sole
-	// cancellation authority (it classifies errors and drives the single unwind).
+	// The calculator only publishes results. The apply loop classifies them, and
+	// the stage wrapper owns any resulting unwind.
 	forcePerBlockCompute := pe.cfg.syncCfg.KeepExecutionProofs
 	// workCtx (ctx) runs the calculator's roTx/compute/publish; signalCtx
-	// (executorContext) carries the stopCause. Separating them lets a clean-stop
-	// cancel signal the calculator without aborting an in-flight commitment.
+	// (executorContext) carries a deliberate stop or executor failure. Separating
+	// them lets the calculator finish an in-flight commitment after executor-local
+	// cancellation.
 	calculator, err := newCommitmentCalculator(ctx, executorContext, pe.rs.Domains(), pe.cfg.db, pe.cfg.chainConfig, pe.logPrefix, pe.logger, forcePerBlockCompute, pe.changesetWindowStart, commitResults, blockRequests, rootResults)
 	if err != nil {
 		return nil, nil, err
@@ -380,16 +384,10 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 
 	var lastProgress commitment.CommitProgress
 
-	execErr := func() (err error) {
-		defer func() {
-			if rec := recover(); rec != nil {
-				pe.logger.Warn("["+pe.logPrefix+"] rw panic", "rec", rec, "stack", dbg.Stack())
-			} else if err != nil && !(errors.Is(err, context.Canceled) || errors.Is(err, &ErrLoopExhausted{})) {
-				pe.logger.Warn("["+pe.logPrefix+"] rw exit", "err", err, "stack", dbg.Stack())
-			} else {
-				pe.logger.Debug("[" + pe.logPrefix + "] rw exit")
-			}
-		}()
+	execErr = pe.runApplyLoop(pe.logPrefix, applyResults, rootResults, func() (err error) {
+		if pe.cfg.syncCfg.ChaosMonkey && pe.enableChaosMonkey {
+			chaos_monkey.ApplyLoopPanic()
+		}
 
 		// Open a thread-local read-only tx for domain operations. The apply loop
 		// must not use the rwTx for domain reads — rwTx is thread-bound to the
@@ -485,103 +483,64 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 		}
 
 		// deliberateCancel is the light context-cancel — teardown (stopWorkers +
-		// wait) stays with execImpl's deferred executorCancel so only the main
+		// wait) stays with execImpl's executor cleanup so only the main
 		// goroutine drives cleanup.
 		deliberateCancel := func() {
 			pe.cancelExecLoop(&stopCause{block: fail.block, kind: stopBadBlock, err: fail.err})
 		}
-		// processCommit records a commit failure into `fail`. Non-wrong-root
-		// commit errors (lazy-load / compute) are infrastructure faults, so
-		// fast-fail. A wrong-root is deferred so the block's own exec verdict can
+		// processCommit records a commit failure into `fail`. Infrastructure
+		// faults cancel execution immediately while the apply loop keeps draining.
+		// A wrong-root is deferred so the block's own exec verdict can
 		// supersede it — EXCEPT when exec has already applied the block: then its
 		// verdict is in (this is an incremental, not fold-ahead, wrong-root), so
 		// finalize and cancel eagerly rather than keep building on known-wrong
 		// state. Fold-ahead wrong-roots arrive before the block is applied and so
 		// still defer, with the cancel firing once exec cleanly applies the block.
-		processCommit := func(cr commitmentResult) error {
+		processCommit := func(cr commitmentResult) {
 			err := handleCommitResult(cr)
 			if err == nil {
-				return nil
+				return
 			}
 			fail.consider(cr.blockNum, cr.blockHash, false, err)
 			if !errors.Is(err, ErrWrongTrieRoot) {
-				// Infra fault (lazy-load / compute), not block-validity: report it
-				// but do NOT return here — a bare return kills the apply loop while
-				// the exec loop may be blocked on a mustDeliver send, wedging
-				// shutdown. Record + cancel + keep draining (which unblocks that
-				// send); fail.err surfaces at channel close.
+				// Keep draining after cancellation so terminal mustDeliver sends can
+				// finish. fail.err surfaces when the channels close.
 				finalized = true
 				deliberateCancel()
-				return nil
+				return
 			}
 			if _, applied := appliedBlocks[cr.blockNum]; applied {
 				finalized = true
 				deliberateCancel()
 			}
-			return nil
 		}
 
-		// Apply loop: exits ONLY when applyResults is closed by the exec loop.
-		// Do NOT add ctx.Done or executorContext.Done cases here — the exec
-		// loop owns shutdown sequencing. Adding context checks here causes
-		// the apply loop to exit before the calculator finishes, leaving
-		// sd.mem inconsistent with the commitment boundary.
+		// During normal operation, drain applyResults until the exec loop closes it.
+		// Do not add cancellation cases: leaving early can strand mandatory terminal
+		// sends or exit before the calculator reaches the same commitment boundary.
 		for {
 			select {
 			case applyResult, ok := <-applyResults:
 				if !ok {
-					// Exec loop closed the channel — batch is complete.
-					// Drain calculator results, then exit. Skip the drain
-					// if rootResults already closed (its select-arm was
-					// disabled by setting rootResults=nil; ranging a nil
-					// channel hangs forever).
+					// Production has ended. Drain calculator results before classifying
+					// the outcome. Skip this drain if rootResults has already closed; its
+					// select arm was disabled by setting rootResults=nil, and ranging a nil
+					// channel would hang forever.
 					if !rootResultsClosed {
 						for cr := range rootResults {
-							if err := processCommit(cr); err != nil {
-								return err
-							}
+							processCommit(cr)
 						}
 					}
 					if lastBlock.blockNum > 0 {
 						pe.txExecutor.lastCommittedBlockNum.Store(lastBlock.blockNum)
 						pe.txExecutor.lastCommittedTxNum.Store(lastBlock.lastTxNum)
 					}
-					// Two reasons the exec loop closes the channel:
-					//   (1) sizeEst > batchLimit — flush and tell the stage loop
-					//       there is more work pending (ErrLoopExhausted)
-					//   (2) the result block number reached pe.maxBlockNum — we processed
-					//       every block we were asked to; clean exit, not "more work"
-					// Fork validation (StateStep, single-block batches) only ever hits
-					// case (2); returning ErrLoopExhausted there causes the stage loop
-					// to error with "unexpected state step has more work".
-					// Completeness check: when the exec loop closes the apply channel,
-					// every block whose tx-results arrived must also have produced a
-					// blockResult. Otherwise the per-block validator never fires for
-					// it and an invalid block becomes canonical.
-					//
-					// We track this two ways:
-					//   - appliedBlocks: blockResults we fully processed (validated)
-					//   - txResultBlocks: any block we saw at least one tx-result for
-					// A block in txResultBlocks but not in appliedBlocks means
-					// its tx-results arrived but the trailing blockResult never did
-					// — exactly the silent-failure mode this catches.
-					//
-					// Not reaching maxBlockNum is a normal partial-batch state: when
-					// the exec loop hits its size budget mid-batch it stops with a
-					// stopMoreWork cause, the apply loop drops out via the
-					// ErrLoopExhausted return below, and the stage loop resumes from
-					// lastBlockResult+1 in a follow-up call. Each block still executes
-					// exactly once across the two batches, so we deliberately do NOT
-					// flag maxBlockNum-not-applied here.
-					// Surface the earliest recorded failure ahead of the
-					// missing-blocks check: a deliberate cancel manufactures a
-					// missing-block condition that would otherwise mask it.
-					//
-					// A deferred commit wrong-root does its unwind here, not inline
-					// at classification time — so a !initialCycle reorg marks the
-					// bad block with the implicated block's OWN hash (fail.blockHash),
-					// not whatever block exec had last applied when the wrong-root
-					// arrived. initialCycle has no reorg: the error is fatal.
+					// Channel closure ends production but does not establish success.
+					// Prefer a recorded execution or commitment failure because its
+					// cancellation may leave follow-on results incomplete. Otherwise,
+					// require every observed block to reach terminal validation before
+					// classifying the stop cause or observed progress. Executor-group
+					// errors and still-scheduled blocks are checked after teardown.
 					if fail.set {
 						// Unwind handling is hoisted to SpawnExecuteBlocksStage. Record the
 						// implicated block (not the last-applied one) so the stage can target
@@ -589,14 +548,11 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						pe.failedBlock, pe.failedHash = fail.block, fail.blockHash
 						return fail.err
 					}
-					if missing := applyLoopMissingBlocks(txResultBlocks, appliedBlocks); len(missing) > 0 {
-						return fmt.Errorf("%w: apply loop exited (lastBlockResult=%d maxBlockNum=%d) but %d block(s) had tx-results without a blockResult: %v",
-							rules.ErrInvalidBlock, lastBlock.blockNum, pe.maxBlockNum, len(missing), missing)
+					if err := applyLoopMissingBlocksError(ctx, lastBlock.blockNum, pe.maxBlockNum, txResultBlocks, appliedBlocks); err != nil {
+						return err
 					}
-					// The stop kind rides in the shared context's cause: stopReachedMax
-					// is a clean batch end (nil); stopMoreWork is a partial batch to
-					// resume next cycle (ErrLoopExhausted). stopBadBlock is handled by the
-					// fail branch above.
+					// A deliberate stop distinguishes a completed requested range from
+					// a resumable partial batch. stopBadBlock is handled above.
 					if sc, ok := stopCauseOf(executorContext); ok {
 						switch sc.kind {
 						case stopReachedMax:
@@ -605,12 +561,11 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 							return &ErrLoopExhausted{From: startBlockNum, To: lastBlock.blockNum, Reason: "block batch is full"}
 						}
 					}
-					// Fallback for exit paths that publish no cause: a single-block
-					// fork-validation batch exits via execLoopExitCheck (no cause), and
-					// real shutdown cancels with context.Canceled. A fully-applied range
-					// — or an empty loop that executed nothing because the range was
-					// already applied (async background commit advanced progress) — is a
-					// clean end; otherwise there is more work.
+					// Without a stop cause, classify only what the apply loop observed.
+					// Reaching the requested maximum is complete, while observed progress
+					// below it is resumable. An empty stream is provisionally clean: after
+					// the executor is joined, later checks still surface executor errors and
+					// scheduled blocks that never reached apply-loop validation.
 					if applyLoopCloseIsClean(lastBlock.blockNum, pe.maxBlockNum, len(txResultBlocks)) {
 						return nil
 					}
@@ -766,10 +721,10 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					// return their map containers to the pools.
 					applyResult.TxIO.ReleaseOutputMaps()
 
-					// Mark this block as fully applied. The exit-completeness
-					// check at channel-close compares this set against the
-					// expected [startBlockNum, maxBlockNum] range to detect
-					// "block silently missed".
+					// Record that this block's terminal blockResult completed apply-loop
+					// processing, including post-execution validation. At channel close,
+					// a txResultBlocks entry without an appliedBlocks entry is reported as
+					// missing its terminal blockResult.
 					appliedBlocks[blockNum] = struct{}{}
 
 					// If a commit wrong-root was deferred for this (or an earlier)
@@ -819,9 +774,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					rootResultsClosed = true
 					continue
 				}
-				if err := processCommit(cr); err != nil {
-					return err
-				}
+				processCommit(cr)
 			case <-logEvery.C:
 				if time.Since(lastExecutedLog) > logInterval-(logInterval/90) {
 					hasLoggedExecution = true
@@ -834,22 +787,17 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 				}
 			}
 		}
-	}()
+	})
 
-	executorCancel(nil)
+	// Stop and join all goroutines before reading shared state.
+	execErr = reconcileExecErrors(execErr, executorCancel(nil))
+	executorJoined = true
 
 	if !hasLoggedExecution {
 		pe.LogExecution()
 	}
 
-	// Wait for all goroutines to complete before reading shared state.
-	if waitErr := pe.wait(ctx); waitErr != nil {
-		if execErr == nil {
-			execErr = waitErr
-		} else {
-			execErr = errors.Join(execErr, waitErr)
-		}
-	}
+	execErr = pe.checkBlocksDrained(ctx, executorContext, execErr)
 
 	// Commitment is computed per-block by the calculator. Stage progress
 	// is updated in handleCommitResult when results are consumed.
@@ -859,7 +807,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	}
 
 	if execErr != nil {
-		if !(errors.Is(execErr, context.Canceled) || errors.Is(execErr, &ErrLoopExhausted{})) {
+		if !isQuietExit(execErr) {
 			if lastHeader != nil {
 				pe.logger.Warn(fmt.Sprintf("[%s] Execution failed", pe.logPrefix), "err", execErr, "block", lastHeader.Number.Uint64(), "hash", lastHeader.Hash())
 			} else {
@@ -870,6 +818,47 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	}
 
 	return lastHeader, rwTx, execErr
+}
+
+// isQuietExit reports whether err is routine teardown (cancellation-only) or a
+// resumable batch boundary rather than a failure.
+func isQuietExit(err error) bool {
+	return commonerrors.IsOnlyCanceled(err) || isOnlyLoopExhausted(err)
+}
+
+func (pe *parallelExecutor) runApplyLoop(logPrefix string, applyResults <-chan applyResult, rootResults <-chan commitmentResult, apply func() error) (err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = recoveredPanicError("apply loop", rec)
+			pe.logger.Warn("["+logPrefix+"] rw panic", "rec", rec, "stack", dbg.Stack())
+		} else if err != nil && !isQuietExit(err) {
+			pe.logger.Warn("["+logPrefix+"] rw exit", "err", err, "stack", dbg.Stack())
+		} else {
+			pe.logger.Debug("[" + logPrefix + "] rw exit")
+		}
+		if err != nil && !isOnlyLoopExhausted(err) {
+			pe.cancelAndDrainApplyLoop(err, applyResults, rootResults)
+		}
+	}()
+	return apply()
+}
+
+// Draining applyResults and rootResults lets their blocked producers finish.
+// The calculator must keep draining commitResults until the exec loop closes it.
+func (pe *parallelExecutor) cancelAndDrainApplyLoop(cause error, applyResults <-chan applyResult, rootResults <-chan commitmentResult) {
+	pe.cancelExecLoop(cause)
+	for applyResults != nil || rootResults != nil {
+		select {
+		case _, ok := <-applyResults:
+			if !ok {
+				applyResults = nil
+			}
+		case _, ok := <-rootResults:
+			if !ok {
+				rootResults = nil
+			}
+		}
+	}
 }
 
 func (pe *parallelExecutor) LogExecution() {
@@ -946,15 +935,14 @@ func (pe *parallelExecutor) resetWorkers(ctx context.Context, rs *state.StateV3B
 
 func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 	pprof.SetGoroutineLabels(pprof.WithLabels(ctx, pprof.Labels("sub", "exec-loop")))
-	// The exec loop is the owner of shutdown sequencing. On exit it
-	// closes commitResults then applyResults, causing the calculator
-	// and apply loop to drain and exit.
+	// The exec loop owns result-channel shutdown. On every exit it closes
+	// commitResults and then applyResults so the calculator and apply loop drain.
 	//
 	// Note: pe.applyTx is the stageloop's rwTx (externally supplied).
 	// Do NOT rollback it here — the stageloop owns its lifecycle.
 
-	// The exec loop owns the workers' inner context: whatever exit path it takes
-	// (clean stop, wrong-root drain, error), the workers must not outlive it.
+	// Stop workers on every exec-loop exit. Final cleanup repeats this cancellation
+	// as a safety net before joining the complete executor group.
 	defer pe.cancelWorkers()
 	defer pe.closeApplyChannels()
 	defer func() {
@@ -967,12 +955,17 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			pe.logger.Warn("["+pe.logPrefix+"] exec loop panic", "rec", rec, "stack", dbg.Stack())
-		} else if err != nil && !errors.Is(err, context.Canceled) {
+			err = recoveredPanicError("exec loop", rec)
+		} else if err != nil && !commonerrors.IsOnlyCanceled(err) {
 			pe.logger.Warn("["+pe.logPrefix+"] exec loop error", "err", err)
 		} else {
 			pe.logger.Debug("[" + pe.logPrefix + "] exec loop exit")
 		}
 	}()
+
+	if pe.cfg.syncCfg.ChaosMonkey && pe.enableChaosMonkey {
+		chaos_monkey.ExecLoopPanic()
+	}
 
 	pe.RLock()
 	applyTx := pe.applyTx
@@ -1019,14 +1012,14 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 			return pe.drainOnCancel(ctx, applyTx)
 		case nextResult, ok := <-pe.rws.ResultCh():
 			if !ok {
-				return pe.execLoopExitCheck(ctx, "main-select: rws.ResultCh closed")
+				return nil
 			}
 			closed, err := pe.rws.Drain(ctx, nextResult)
 			if err != nil {
 				return err
 			}
 			if closed {
-				return pe.execLoopExitCheck(ctx, "main-select: rws.Drain returned closed")
+				return nil
 			}
 		}
 
@@ -1079,13 +1072,13 @@ func (pe *parallelExecutor) drainOnCancel(ctx context.Context, applyTx kv.Tempor
 		select {
 		case nextResult, ok := <-pe.rws.ResultCh():
 			if !ok {
-				return pe.execLoopExitCheck(ctx, "ctx-done-drain: rws.ResultCh closed")
+				return nil
 			}
 			if closed, err := pe.rws.Drain(ctx, nextResult); err != nil || closed {
 				if err != nil {
 					return err
 				}
-				return pe.execLoopExitCheck(ctx, "ctx-done-drain: rws.Drain returned closed")
+				return nil
 			}
 			blockResult, err := pe.processResults(ctx, applyTx)
 			if err != nil {
@@ -1115,7 +1108,7 @@ func (pe *parallelExecutor) drainOnCancel(ctx context.Context, applyTx kv.Tempor
 			pe.Unlock()
 			pe.scheduleNextPending(ctx)
 		default:
-			return pe.execLoopExitCheck(ctx, "ctx-done-drain: no more pending results")
+			return nil
 		}
 	}
 }
@@ -1374,19 +1367,13 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 	return nil
 }
 
-// applyLoopMissingBlocks returns the blockNums in txResultBlocks that
-// did not produce a corresponding blockResult — meaning the per-block
-// validator never fired for them and an invalid block could become
-// canonical. Returns nil if every block whose tx-results arrived also
-// produced a blockResult.
+// applyLoopMissingBlocks returns blocks that produced transaction results but
+// no terminal block result. Such blocks never reached apply-loop validation,
+// so the executor run is incomplete.
 //
-// Does NOT flag a short maxBlockNum: a partial batch
-// (size-limit hit) legitimately stops short of maxBlockNum, and the
-// stage loop's ErrLoopExhausted handling resumes from the next block
-// in a follow-up call. Flagging maxBlockNum here turns that legitimate
-// path into a spurious InvalidBlock error — the BenchmarkFeeHistory
-// 200-block fixture exhausts the 5MB batch budget at block 114 and
-// previously errored despite blocks 1..114 being applied cleanly.
+// The requested maximum is not part of this check. A partial batch may stop
+// before maxBlockNum and resume normally; completeness applies only to blocks
+// whose transaction results already reached the apply loop.
 func applyLoopMissingBlocks(txResultBlocks, appliedBlocks map[uint64]struct{}) []uint64 {
 	var missing []uint64
 	for n := range txResultBlocks {
@@ -1394,7 +1381,23 @@ func applyLoopMissingBlocks(txResultBlocks, appliedBlocks map[uint64]struct{}) [
 			missing = append(missing, n)
 		}
 	}
+	slices.Sort(missing)
 	return missing
+}
+
+// applyLoopMissingBlocksError keeps missing-result details while preserving a
+// parent cancellation cause for classification.
+func applyLoopMissingBlocksError(ctx context.Context, lastBlockResult, maxBlockNum uint64, txResultBlocks, appliedBlocks map[uint64]struct{}) error {
+	missing := applyLoopMissingBlocks(txResultBlocks, appliedBlocks)
+	if len(missing) == 0 {
+		return nil
+	}
+	detail := fmt.Sprintf("parallel exec apply loop exited (lastBlockResult=%d maxBlockNum=%d) but %d block(s) had tx-results without a blockResult: %v",
+		lastBlockResult, maxBlockNum, len(missing), missing)
+	if cause := context.Cause(ctx); cause != nil {
+		return fmt.Errorf("%s: %w", detail, cause)
+	}
+	return errors.New(detail)
 }
 
 // applyLoopFlushAsComplete returns the `complete` flag for
@@ -1517,11 +1520,11 @@ func (progress *appliedBlockProgress) advance(blockNum, lastTxNum uint64) bool {
 	return true
 }
 
-// applyLoopCloseIsClean reports whether an apply-loop close with no published
-// stop cause is a clean end rather than a partial batch to resume. It is clean
-// when the requested range was fully applied (lastBlockNum >= maxBlockNum) or
-// when the loop executed nothing at all (no tx-results and no blockResult) —
-// the range was already applied before this call, so there is no pending work.
+// applyLoopCloseIsClean reports whether a close without a stop cause is clean
+// from the apply loop's observations. Reaching maxBlockNum completes the range.
+// Seeing neither transaction results nor a terminal blockResult is also clean
+// at this layer because executor errors and pending scheduled blocks are checked
+// after teardown. Any other close observed only part of the requested range.
 func applyLoopCloseIsClean(lastBlockNum, maxBlockNum uint64, txResultCount int) bool {
 	if lastBlockNum >= maxBlockNum {
 		return true
@@ -1574,40 +1577,30 @@ func (pe *parallelExecutor) closeApplyChannels() (closedOrder []string) {
 	return
 }
 
-// execLoopExitCheck enforces the completeness invariant for the exec
-// loop's clean exit paths: all blocks the loop was asked to process must
-// be drained from pe.blockExecutors. A non-empty map at exit means a
-// block was scheduled (or queued) but never produced a blockResult,
-// which previously caused "block accepted when it should have been
-// rejected" failures (the apply loop never received the block, post-
-// validation never fired). Converts that silent-success path into a
-// loud InvalidBlock error so the failure surfaces through InsertChain.
-//
-// The reason argument tags the call site (which silent-return path
-// triggered the check) so a failure log identifies the exit path
-// involved without needing a stack trace.
-func (pe *parallelExecutor) execLoopExitCheck(ctx context.Context, reason string) error {
-	// Only a deliberate stopCause exempts the pending-blocks completeness check;
-	// an unrelated cancel (shutdown, parent cancel) with blocks still pending is a
-	// genuine silent-miss and must surface.
-	if _, ok := stopCauseOf(ctx); ok {
-		return nil
+// checkBlocksDrained reports scheduled blocks that never reached apply-loop
+// validation. This is an executor failure, not proof that a block is invalid.
+// Parent cancellation and stops that intentionally abandon queued follow-on
+// blocks (stopBadBlock and stopMoreWork) are exempt. stopReachedMax claims the
+// requested range completed, so pending blocks remain an executor failure.
+func (pe *parallelExecutor) checkBlocksDrained(ctx, executorCtx context.Context, execErr error) error {
+	if ctx.Err() != nil {
+		return reconcileExecErrors(execErr, context.Cause(ctx))
+	}
+	if execErr != nil && !isQuietExit(execErr) {
+		return execErr
+	}
+	if sc, ok := stopCauseOf(executorCtx); ok && (sc.kind == stopBadBlock || sc.kind == stopMoreWork) {
+		return execErr
 	}
 	pe.RLock()
-	pendingBlocks := len(pe.blockExecutors)
-	var pendingNums []uint64
-	if pendingBlocks > 0 {
-		pendingNums = make([]uint64, 0, pendingBlocks)
-		for n := range pe.blockExecutors {
-			pendingNums = append(pendingNums, n)
-		}
-	}
+	pending := slices.Collect(maps.Keys(pe.blockExecutors))
 	pe.RUnlock()
-	if pendingBlocks > 0 {
-		return fmt.Errorf("%w: parallel exec loop exited with %d block(s) still pending in pe.blockExecutors %v (reason=%s)",
-			rules.ErrInvalidBlock, pendingBlocks, pendingNums, reason)
+	if len(pending) == 0 {
+		return execErr
 	}
-	return nil
+	slices.Sort(pending)
+	return fmt.Errorf("parallel exec finished with %d scheduled block(s) that never reached apply-loop validation: %v",
+		len(pending), pending)
 }
 
 // scheduleNextPending picks the lowest-numbered block still queued in
@@ -1679,7 +1672,7 @@ func (pe *parallelExecutor) processResults(ctx context.Context, applyTx kv.Tempo
 	return blockResult, nil
 }
 
-func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.CancelCauseFunc, error) {
+func (pe *parallelExecutor) run(ctx context.Context) (context.Context, func(error) error, error) {
 	// execRequests holds one entry per decoded block (each containing all its TxTasks).
 	// A large buffer causes the block-loader goroutine to race far ahead of the apply
 	// loop, accumulating all decoded transaction objects in memory simultaneously.
@@ -1696,11 +1689,10 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	pe.taskExecMetrics = exec.NewWorkerMetrics()
 	pe.blockExecMetrics = newBlockExecMetrics()
 
-	// execLoopCtx (outer) carries the stopCause signal and is where the exec loop
-	// runs. workersCtx (inner) is its child: the OCC workers run on it so the exec
-	// loop — the controller — decides when they halt via cancelWorkers, rather
-	// than a worker sharing the controller's own context. The exec loop's exit
-	// path must call cancelWorkers so the workers can't outlive the controller.
+	// execLoopCtx carries a deliberate stop, parent cancellation, or the first
+	// executor-group failure. workersCtx is its child, with a separate cancel so
+	// the exec loop can stop the OCC pool on exit; final cleanup cancels both
+	// contexts before joining the group.
 	execLoopCtx, execLoopCtxCancel := context.WithCancelCause(ctx)
 	pe.execLoopGroup, execLoopCtx = errgroup.WithContext(execLoopCtx)
 	pe.cancelExecLoop = execLoopCtxCancel
@@ -1708,57 +1700,93 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	workersCtx, cancelWorkers := context.WithCancel(execLoopCtx)
 	pe.cancelWorkers = cancelWorkers
 
+	var workerFault func() error
+	if pe.cfg.syncCfg.ChaosMonkey && pe.enableChaosMonkey {
+		workerFault = chaos_monkey.ThrowWorkerError
+	}
+
 	var err error
 	pe.execWorkers, _, pe.rws, pe.stopWorkers, pe.waitWorkers, err = exec.NewWorkersPool(
-		workersCtx, nil, true, pe.cfg.db, nil, nil, nil, pe.in,
+		workersCtx, workerFault, nil, true, pe.cfg.db, nil, nil, nil, pe.in,
 		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine,
 		pe.workerCount+1, pe.taskExecMetrics, pe.cfg.dirs, pe.logger)
 
-	if err != nil {
-		return execLoopCtx, execLoopCtxCancel, err
+	executorCancel := func(cause error) error {
+		execLoopCtxCancel(cause)
+		cancelWorkers()
+
+		pe.waitForTeardownPhase(executorTeardownWarningDelay, "worker pool", func() {
+			pe.in.Release()
+			pe.stopWorkers()
+		})
+
+		var waitErr error
+		pe.waitForTeardownPhase(executorTeardownWarningDelay, "executor group", func() {
+			waitErr = pe.wait()
+		})
+		return waitErr
 	}
+
+	if err != nil {
+		return execLoopCtx, executorCancel, err
+	}
+
+	// Join worker failures into the executor group so they cancel stalled consumers.
+	pe.execLoopGroup.Go(func() error {
+		return joinWorkers(pe.waitWorkers)
+	})
 
 	pe.execLoopGroup.Go(func() error {
 		defer pe.rws.Close()
 		defer pe.in.Release()
 		pe.resetWorkers(workersCtx, pe.rs, nil)
-		return pe.execLoop(execLoopCtx)
+		return commonerrors.NilIfCanceled(pe.execLoop(execLoopCtx))
 	})
 
-	return execLoopCtx, func(cause error) {
-		execLoopCtxCancel(cause)
-		cancelWorkers()
-
-		pe.in.Release()
-		pe.stopWorkers()
-
-		_ = pe.wait(ctx)
-	}, nil
+	return execLoopCtx, executorCancel, nil
 }
 
-func (pe *parallelExecutor) wait(ctx context.Context) error {
-	doneCh := make(chan error, 1)
-
-	go func() {
-		if pe.execLoopGroup != nil {
-			err := pe.execLoopGroup.Wait()
-			if err != nil && !errors.Is(err, context.Canceled) {
-				doneCh <- err
-				return
-			}
-			pe.waitWorkers()
-		}
-		doneCh <- nil
-	}()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case err := <-doneCh:
-			return err
-		}
+// joinWorkers reports real worker failures and suppresses cancellation-only exits.
+func joinWorkers(waitWorkers func() error) error {
+	if err := commonerrors.NilIfCanceled(waitWorkers()); err != nil {
+		return fmt.Errorf("worker pool: %w", err)
 	}
+	return nil
+}
+
+const executorTeardownWarningDelay = 10 * time.Second
+
+func (pe *parallelExecutor) waitForTeardownPhase(warnAfter time.Duration, phase string, wait func()) {
+	logger := pe.logger
+	message := fmt.Sprintf("[%s] executor teardown is still running", pe.logPrefix)
+	timer := time.AfterFunc(warnAfter, func() {
+		logger.Warn(message, "phase", phase, "elapsed", warnAfter)
+	})
+	defer timer.Stop()
+	wait()
+}
+
+// wait joins every executor goroutine. Cancellation-only results are routine
+// teardown; all other errors surface. Result consumers drain to channel close,
+// allowing mandatory terminal sends to finish without a deadline.
+func (pe *parallelExecutor) wait() error {
+	if pe.execLoopGroup == nil {
+		return nil
+	}
+	return commonerrors.NilIfCanceled(pe.execLoopGroup.Wait())
+}
+
+// reconcileExecErrors makes a real concurrent error authoritative over
+// resumable or cancellation-only apply results. Independent real errors are
+// preserved.
+func reconcileExecErrors(execErr, concurrentErr error) error {
+	if concurrentErr = commonerrors.NilIfCanceled(concurrentErr); concurrentErr == nil {
+		return execErr
+	}
+	if execErr == nil || isQuietExit(execErr) {
+		return concurrentErr
+	}
+	return errors.Join(execErr, concurrentErr)
 }
 
 type applyResult any
@@ -2369,14 +2397,11 @@ type blockExecutor struct {
 	blockStateCache *state.BlockStateCache
 }
 
-// sendResult fans out an applyResult to both the apply loop and
-// the commitment calculator. Blocks if either channel is full.
-// Channels may be closed by executeBlocks — recover from panic.
+// sendResult fans out an applyResult to the apply loop and commitment
+// calculator. The exec loop owns both channel closures.
 func (be *blockExecutor) sendResult(ctx context.Context, r applyResult, mustDeliver bool) (err error) {
 	defer func() {
-		// "send on closed channel" panics here are benign — executeBlocks
-		// finished and closed applyResults/commitResults during batch
-		// shutdown. Re-raise anything else so real bugs still surface.
+		// Treat a closed result channel as cancellation and re-raise other panics.
 		if rec := recover(); rec != nil {
 			if e, ok := rec.(runtime.Error); ok && strings.Contains(e.Error(), "send on closed channel") {
 				err = context.Canceled

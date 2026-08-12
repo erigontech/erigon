@@ -2,6 +2,7 @@ package stagedsync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -131,6 +132,21 @@ func TestUnwindOnExecError(t *testing.T) {
 		got := unwindOnExecError(wrongRoot, out, ExecuteBlockCfg{}, s, u, logger)
 		require.NoError(t, got)
 		require.Empty(t, u.calls, "must not take the plain lastHeader-1 unwind branch")
+	})
+
+	t.Run("wrong root joined with executor failure propagates both", func(t *testing.T) {
+		u := &recordingUnwinder{}
+		s := &StageState{BlockNumber: 10}
+		s.CurrentSyncCycle.IsInitialCycle = false
+		executorErr := errors.New("worker failed")
+		execErr := errors.Join(wrongRoot, executorErr)
+		out := execV3Outcome{failedBlock: 5, failedHash: common.HexToHash("0xdead")}
+
+		got := unwindOnExecError(execErr, out, ExecuteBlockCfg{}, s, u, logger)
+
+		require.ErrorIs(t, got, ErrWrongTrieRoot)
+		require.ErrorIs(t, got, executorErr)
+		require.Empty(t, u.calls)
 	})
 
 	t.Run("wrong root on initial cycle is fatal (no fork to recover from)", func(t *testing.T) {

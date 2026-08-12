@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
@@ -122,11 +123,12 @@ type Worker struct {
 	historyMode bool // if true - stateReader is HistoryReaderV3, otherwise it's state reader
 	chainConfig *chain.Config
 
-	ctx     context.Context
-	engine  rules.Engine
-	genesis *types.Genesis
-	results *ResultsQueue
-	chain   rules.ChainReader
+	ctx      context.Context
+	engine   rules.Engine
+	genesis  *types.Genesis
+	results  *ResultsQueue
+	chain    rules.ChainReader
+	runFault func() error
 
 	evm *vm.EVM
 	ibs *state.IntraBlockState
@@ -372,7 +374,7 @@ func (rw *Worker) Run() (err error) {
 	pprof.SetGoroutineLabels(pprof.WithLabels(rw.ctx, pprof.Labels("sub", "exec-worker")))
 	defer func() {
 		if rec := recover(); rec != nil {
-			err = fmt.Errorf("exec.Worker panic: %s, %s", rec, dbg.Stack())
+			err = fmt.Errorf("exec.Worker panic: %v, %s", rec, dbg.Stack())
 			rw.logger.Warn("Worker failed", "err", err)
 		}
 	}()
@@ -386,13 +388,19 @@ func (rw *Worker) Run() (err error) {
 		}
 	}()
 
+	if rw.runFault != nil {
+		if err := rw.runFault(); err != nil {
+			return err
+		}
+	}
+
 	for txTask, ok := rw.in.Next(rw.ctx); ok; txTask, ok = rw.in.Next(rw.ctx) {
 		result := func() (result *TxResult) {
 			defer func() {
 				if rec := recover(); rec != nil {
 					result = &TxResult{
 						Task: txTask,
-						Err:  fmt.Errorf("exec task panic: %s, %s", rec, dbg.Stack()),
+						Err:  fmt.Errorf("exec task panic: %v, %s", rec, dbg.Stack()),
 					}
 				}
 			}()
@@ -577,9 +585,9 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 	return result
 }
 
-func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, background bool, chainDb kv.TemporalRoDB,
+func NewWorkersPool(ctx context.Context, runFault func() error, accumulator *shards.Accumulator, background bool, chainDb kv.TemporalRoDB,
 	rs *state.StateV3Buffered, stateReader state.StateReader, stateWriter state.StateWriter, in *QueueWithRetry, blockReader dbservices.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis,
-	engine rules.Engine, workerCount int, metrics *WorkerMetrics, dirs datadir.Dirs, logger log.Logger) (reconWorkers []*Worker, applyWorker *Worker, rws *ResultsQueue, clear func(), wait func(), err error) {
+	engine rules.Engine, workerCount int, metrics *WorkerMetrics, dirs datadir.Dirs, logger log.Logger) (reconWorkers []*Worker, applyWorker *Worker, rws *ResultsQueue, clear func(), wait func() error, err error) {
 	// Appended, so a part-way failure leaves clear only the workers actually built.
 	reconWorkers = make([]*Worker, 0, workerCount)
 
@@ -587,7 +595,9 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 	rws = NewResultsQueue(resultsSize, workerCount)
 
 	g, gctx := errgroup.WithContext(ctx)
+	wait = g.Wait
 	applyWorker = NewWorker(ctx, false, nil, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs, logger)
+	applyWorker.runFault = runFault
 
 	// Assigned before anything can fail: every return path must hand back a callable clear.
 	var clearDone bool
@@ -605,6 +615,7 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 
 	for range workerCount {
 		w := NewWorker(gctx, background, metrics, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs, logger)
+		w.runFault = runFault
 		reconWorkers = append(reconWorkers, w)
 
 		if rs != nil {
@@ -622,10 +633,9 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 	if background {
 		for i := range workerCount {
 			g.Go(func() error {
-				return reconWorkers[i].Run()
+				return commonerrors.NilIfCanceled(reconWorkers[i].Run())
 			})
 		}
-		wait = func() { g.Wait() }
 	}
 
 	return reconWorkers, applyWorker, rws, clear, wait, err

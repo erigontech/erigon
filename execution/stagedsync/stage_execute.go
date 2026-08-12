@@ -29,6 +29,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -459,7 +460,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 	// Stage progress: target the SharedDomains overlay (not replaced during exec)
 	// when present, else the live post-exec applyTx (parallel exec may have rolled
 	// the passed-in rwTx via Flush/CommitAndBegin).
-	if (execErr == nil || errors.Is(execErr, &ErrLoopExhausted{})) && out.applyTx != nil {
+	if (execErr == nil || isOnlyLoopExhausted(execErr)) && out.applyTx != nil {
 		if overlay := doms.BlockOverlay(); overlay != nil {
 			if err := s.Update(overlay, out.lastCommittedBlockNum); err != nil {
 				return err
@@ -488,6 +489,10 @@ func unwindOnExecError(execErr error, out execV3Outcome, cfg ExecuteBlockCfg, s 
 	}
 
 	if errors.Is(execErr, ErrWrongTrieRoot) {
+		// Only a pure wrong-root error may be consumed by scheduling an unwind.
+		if !commonerrors.IsOnly(execErr, ErrWrongTrieRoot) {
+			return execErr
+		}
 		// Initial sync has no competing fork to recover from, so a wrong trie root
 		// is fatal — the recovery handler would schedule an unwind (or none, when
 		// failedBlock <= s.BlockNumber) and return nil, silently swallowing the

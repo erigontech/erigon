@@ -16,7 +16,65 @@
 
 package errors
 
-import "errors"
+import (
+	"context"
+	"errors"
+	"reflect"
+)
+
+// NilIfCanceled returns nil when err is nil or contains only context
+// cancellation. Mixed errors are preserved.
+func NilIfCanceled(err error) error {
+	if err == nil || IsOnlyCanceled(err) {
+		return nil
+	}
+	return err
+}
+
+// IsOnlyCanceled reports whether err is non-nil and contains only context
+// cancellation.
+func IsOnlyCanceled(err error) bool {
+	return IsOnly(err, context.Canceled)
+}
+
+// IsOnly reports whether every branch in err's unwrap tree reaches a target.
+// An exact target ends its branch. Custom Is methods on other non-leaf errors
+// do not override their underlying causes.
+func IsOnly(err error, targets ...error) bool {
+	if err == nil || len(targets) == 0 {
+		return false
+	}
+	errType := reflect.TypeOf(err)
+	if errType.Comparable() {
+		for _, target := range targets {
+			if errType == reflect.TypeOf(target) && err == target {
+				return true
+			}
+		}
+	}
+	switch x := err.(type) {
+	case interface{ Unwrap() []error }:
+		errs := x.Unwrap()
+		if len(errs) == 0 {
+			return false
+		}
+		for _, e := range errs {
+			if !IsOnly(e, targets...) {
+				return false
+			}
+		}
+		return true
+	case interface{ Unwrap() error }:
+		return IsOnly(x.Unwrap(), targets...)
+	default:
+		for _, target := range targets {
+			if errors.Is(err, target) {
+				return true
+			}
+		}
+		return false
+	}
+}
 
 func IsOneOf(err error, targets []error) bool {
 	if err == nil {

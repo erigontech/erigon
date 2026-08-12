@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common/dbg"
+	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
@@ -373,6 +374,10 @@ func (e *ErrLoopExhausted) Is(err error) bool {
 	return errors.As(err, &errExhausted)
 }
 
+func isOnlyLoopExhausted(err error) bool {
+	return commonerrors.IsOnly(err, &ErrLoopExhausted{})
+}
+
 func (s *Sync) Run(sd *execctx.SharedDomains, tx kv.TemporalRwTx, initialCycle, firstCycle bool) (more bool, err error) {
 	s.prevUnwindPoint = nil
 	s.timings = s.timings[:0]
@@ -501,8 +506,7 @@ func (s *Sync) runStage(stage *Stage, doms *execctx.SharedDomains, rwTx kv.Tempo
 	}
 
 	if err = stage.Forward(badBlockUnwind, stageState, s, doms, rwTx, s.logger); err != nil {
-		var errExhausted *ErrLoopExhausted
-		if errors.As(err, &errExhausted) {
+		if isOnlyLoopExhausted(err) {
 			s.logger.Debug(fmt.Sprintf("[%s] loop exhausted", s.LogPrefix()), "msg", err.Error())
 			s.logRunStageDone(stageState, start)
 			return true, nil
