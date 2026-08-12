@@ -83,6 +83,21 @@ const (
  *
  */
 
+// wmul, wadd and wsub are this package's deliberately modular arithmetic. The
+// wraparound is load-bearing, so it is expressed here once rather than at each
+// use — the same operations Rust spells wrapping_mul/wrapping_add/wrapping_sub.
+// Package-level -overflowdetect exemption does not cover these, because they
+// are inlined into instrumented callers.
+
+// overflow_false_positive
+func wmul(a, b uint64) uint64 { return a * b }
+
+// overflow_false_positive
+func wadd(a, b uint64) uint64 { return a + b }
+
+// overflow_false_positive
+func wsub(a, b uint64) uint64 { return a - b }
+
 func Select64(x uint64, k int) (place int) {
 	/* Original implementation - a bit obfuscated to satisfy Golang's inlining costs
 	s := x
@@ -91,16 +106,16 @@ func Select64(x uint64, k int) (place int) {
 	s = (s + (s >> 4)) & (0xF * kOnesStep8)
 	byteSums := s * kOnesStep8
 	*/
-	s := x - ((x & kOnesStep4xA) >> 1)
-	s = (s & kOnesStep4x3) + ((s >> 2) & kOnesStep4x3)
-	byteSums := ((s + (s >> 4)) & kOnesStep8xF) * kOnesStep8
+	s := wsub(x, (x&kOnesStep4xA)>>1)
+	s = wadd(s&kOnesStep4x3, (s>>2)&kOnesStep4x3)
+	byteSums := wmul(wadd(s, s>>4)&kOnesStep8xF, kOnesStep8)
 	/* Original implementation:
 	kStep8 := uint64(k) * kOnesStep8
 	geqKStep8 := ((kStep8 | kLAMBDAsStep8) - byteSums) & kLAMBDAsStep8
 	place = bits.OnesCount64(geqKStep8) * 8
-	byteRank := uint64(k) - (((byteSums << 8) >> place) & uint64(0xFF))
+	byteRank := wsub(uint64(k), ((byteSums<<8)>>place)&uint64(0xFF))
 	*/
-	place = bits.OnesCount64((((uint64(k)*kOnesStep8)|kLAMBDAsStep8)-byteSums)&kLAMBDAsStep8) * 8
-	byteRank := uint64(k) - (((byteSums << 8) >> place) & uint64(0xFF))
+	place = bits.OnesCount64(wsub(wmul(uint64(k), kOnesStep8)|kLAMBDAsStep8, byteSums)&kLAMBDAsStep8) * 8
+	byteRank := wsub(uint64(k), ((byteSums<<8)>>place)&uint64(0xFF))
 	return place + int(kSelectInByte[((x>>place)&0xFF)|(byteRank<<8)])
 }
