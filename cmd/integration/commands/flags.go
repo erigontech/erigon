@@ -63,6 +63,7 @@ var (
 	clearCommitment                 bool
 	resume                          bool
 	noHistory                       bool
+	rebuildOutputDatadir            string
 	erigondbDomainStepsInFrozenFile string
 	syncCfg                         = ethconfig.Defaults.Sync
 
@@ -146,6 +147,11 @@ func withClearCommitment(cmd *cobra.Command) {
 
 func withResume(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&resume, "resume", false, "resume a previously interrupted commitment rebuild")
+}
+
+func withRebuildOutputDatadir(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&rebuildOutputDatadir, "output.datadir", "", "datadir the rebuilt commitment files are written into; the source datadir stays a read-only input. Required for a bin target, whose files are indistinguishable from hex ones by name")
+	must(cmd.MarkFlagDirname("output.datadir"))
 }
 
 func withNoHistory(cmd *cobra.Command) {

@@ -153,22 +153,30 @@ the new files MUST NOT land beside them: nothing distinguishes a bin `commitment
 one by name, location or header (`domainFiles`, `squeeze.go:1224-1237`), so co-locating them means
 the wrong set gets read as the datadir's commitment.
 
-- [ ] add an output-directory flag; refuse to run without one for a bin target, rather than
+- [x] add an output-directory flag; refuse to run without one for a bin target, rather than
       defaulting to the source datadir
-- [ ] stage the output as a datadir-shaped directory whose `SnapDomain` holds **hardlinks** to the
+- [x] stage the output as a datadir-shaped directory whose `SnapDomain` holds **hardlinks** to the
       source's account/storage/code `.kv` files and **no** commitment files, so the rebuild reads the
       same inputs without copying them and writes its commitment files into the staging dir
-- [ ] fail if the output `SnapDomain` already contains commitment files, unless `--resume` was asked
+- [x] fail if the output `SnapDomain` already contains commitment files, unless `--resume` was asked
       for; never overwrite silently
-- [ ] write `erigondb.toml` into the output directory with `trie_variant` and `trie_hash` set to what
+- [x] write `erigondb.toml` into the output directory with `trie_variant` and `trie_hash` set to what
       was actually produced, so a node started on it with `--experimental.bin-commitment` passes
       `reconcileTrieVariant` rather than being refused at `erigondb_settings.go:96-98`
-- [ ] carry `step_size` and `steps_in_frozen_file` over from the source settings, so the output
+- [x] carry `step_size` and `steps_in_frozen_file` over from the source settings, so the output
       describes the same geometry the files were built at
-- [ ] write tests: the source datadir's commitment files are byte-identical before and after; the
+- [x] write tests: the source datadir's commitment files are byte-identical before and after; the
       output holds the new files plus a toml describing bin and the hash used; a second run without
       `--resume` refuses instead of overwriting
-- [ ] run tests — must pass before Task 3
+- [x] run tests — must pass before Task 3
+
+Landed shape: the toml is written twice. Staging writes geometry only — the aggregator opens the
+output before its files exist, and a `trie_variant = "bin"` read there would be applied process-wide
+by `reconcileTrieVariant`, which Task 1 exists to avoid. `finalize()` names the variant and hash
+after the rebuild returns. A bin target also pins `references_in_commitment_branches = false`, which
+both satisfies reconcile's bin rule and keeps the refs-driven squeeze pass (`squeeze.go`, the
+`wantsReferencesInBranches` gate) out of a bin run. `--output.datadir` is refused together with
+`--reset` and `--clear-commitment`, which write to the source.
 
 ### Task 3: Prove the code zone through a rebuild (TDD)
 

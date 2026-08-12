@@ -120,6 +120,7 @@ func init() {
 	withClearCommitment(cmdCommitmentRebuild)
 	withResume(cmdCommitmentRebuild)
 	withNoHistory(cmdCommitmentRebuild)
+	withRebuildOutputDatadir(cmdCommitmentRebuild)
 	commitmentCmd.AddCommand(cmdCommitmentRebuild)
 
 	// commitment print
@@ -262,41 +263,215 @@ func readBranch(stateReader commitmentdb.StateReader, prefix []byte, stepSize ui
 	return nil
 }
 
+// rebuildOutput is a datadir a rebuild writes into instead of the source, whose
+// non-commitment snapshots appear here as hardlinks.
+type rebuildOutput struct {
+	dirs   datadir.Dirs
+	target dbstate.RebuildTarget
+	source *dbstate.ErigonDBSettings
+}
+
+// requireRebuildOutput refuses a bin rebuild that would write into its source:
+// nothing in a commitment .kv filename or header records the trie variant, so bin
+// files left in a hex datadir are read as hex.
+func requireRebuildOutput(target dbstate.RebuildTarget, outPath string) error {
+	if target.Variant == commitment.VariantBinPatriciaTrie && outPath == "" {
+		return errors.New("a bin rebuild needs --output.datadir: a commitment .kv does not record its trie variant, so bin files written into the source datadir would later be read as hex")
+	}
+	return nil
+}
+
+func stageRebuildOutput(src datadir.Dirs, outPath string, target dbstate.RebuildTarget, resume bool, logger log.Logger) (*rebuildOutput, error) {
+	if outPath == "" {
+		return nil, errors.New("commitment rebuild: empty output datadir")
+	}
+	out := datadir.New(outPath)
+	if out.DataDir == src.DataDir {
+		return nil, fmt.Errorf("commitment rebuild: output datadir %s is the source datadir", out.DataDir)
+	}
+
+	existing, err := commitmentFilesIn(out.SnapDomain)
+	if err != nil {
+		return nil, err
+	}
+	if len(existing) > 0 && !resume {
+		return nil, fmt.Errorf("commitment rebuild: %s already holds %d commitment files; pass --resume to continue that run or point --output.datadir elsewhere", out.SnapDomain, len(existing))
+	}
+
+	source, err := dbstate.ReadErigonDBSettings(src)
+	if err != nil {
+		return nil, fmt.Errorf("commitment rebuild: read source erigondb.toml: %w", err)
+	}
+
+	linked, err := linkSnapshotsExceptCommitment(src.Snap, out.Snap)
+	if err != nil {
+		return nil, err
+	}
+
+	o := &rebuildOutput{dirs: out, target: target, source: source}
+	// The staged toml carries the source's geometry but not the target variant: the
+	// aggregator opens this directory before any of its files exist, and a "bin"
+	// variant read there would be applied to the whole process. finalize() names it
+	// once the files it describes are on disk.
+	if err := dbstate.WriteErigonDBSettings(out, o.settings(false)); err != nil {
+		return nil, err
+	}
+	logger.Info("[commitment_rebuild] staged output datadir", "path", out.DataDir,
+		"linkedFiles", linked, "keptCommitmentFiles", len(existing))
+	return o, nil
+}
+
+// finalize records the scheme the rebuild actually produced, so a node started on
+// this directory with --experimental.bin-commitment is accepted rather than
+// refused for running the bin trie on a hex datadir.
+func (o *rebuildOutput) finalize() error {
+	return dbstate.WriteErigonDBSettings(o.dirs, o.settings(true))
+}
+
+func (o *rebuildOutput) settings(describeTarget bool) *dbstate.ErigonDBSettings {
+	bin := o.target.Variant == commitment.VariantBinPatriciaTrie
+	refs := o.source.RefsInCommitmentBranches() && !bin
+	s := &dbstate.ErigonDBSettings{
+		StepSize:                       o.source.StepSize,
+		StepsInFrozenFile:              o.source.StepsInFrozenFile,
+		ReferencesInCommitmentBranches: &refs,
+	}
+	if bin && describeTarget {
+		variant, hash := dbstate.TrieVariantBin, o.target.HashName
+		s.TrieVariant, s.TrieHash = &variant, &hash
+	}
+	return s
+}
+
+func isCommitmentFileName(name string) bool {
+	return strings.Contains(name, kv.CommitmentDomain.String())
+}
+
+func commitmentFilesIn(snapDomain string) ([]string, error) {
+	entries, err := os.ReadDir(snapDomain)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var found []string
+	for _, e := range entries {
+		if !e.IsDir() && isCommitmentFileName(e.Name()) {
+			found = append(found, e.Name())
+		}
+	}
+	return found, nil
+}
+
+// linkSnapshotsExceptCommitment hardlinks srcRoot's tree into dstRoot, leaving out
+// the source's commitment files and its erigondb.toml: those are the rebuild's own
+// output. Destinations that already exist are kept, which is what makes a --resume
+// run reuse the commitment files it produced earlier.
+func linkSnapshotsExceptCommitment(srcRoot, dstRoot string) (int, error) {
+	linked := 0
+	err := filepath.WalkDir(srcRoot, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(srcRoot, p)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return nil
+		}
+		dst := filepath.Join(dstRoot, rel)
+		if d.IsDir() {
+			return os.MkdirAll(dst, 0o755)
+		}
+		if !d.Type().IsRegular() {
+			return nil
+		}
+		if isCommitmentFileName(d.Name()) || d.Name() == dbstate.ERIGONDB_SETTINGS_FILE {
+			return nil
+		}
+		if _, err := os.Lstat(dst); err == nil {
+			return nil
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+		if err := os.Link(p, dst); err != nil {
+			return fmt.Errorf("commitment rebuild: hardlink %s: %w (the output datadir must be on the same filesystem as the source)", rel, err)
+		}
+		linked++
+		return nil
+	})
+	return linked, err
+}
+
 // integration commitment rebuild
 var cmdCommitmentRebuild = &cobra.Command{
 	Use:   "rebuild",
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
-		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
+
+		// The scheme to produce is decided here and passed down, so the rebuild never
+		// re-reads it from process state further in.
+		target, err := dbstate.DefaultRebuildTarget().Resolve()
+		if err != nil {
+			logger.Error(err.Error())
+			return
+		}
+		if err := requireRebuildOutput(target, rebuildOutputDatadir); err != nil {
+			logger.Error(err.Error())
+			return
+		}
+
+		var out *rebuildOutput
+		if rebuildOutputDatadir != "" {
+			if out, err = stageRebuildOutput(datadir.New(datadirCli), rebuildOutputDatadir, target, resume, logger); err != nil {
+				logger.Error(err.Error())
+				return
+			}
+			// openDB and allSnapshots take their dirs from datadirCli, so pointing it at
+			// the staged datadir is what makes the rebuild write there. chaindata was
+			// resolved from the source before this and stays the source's.
+			datadirCli = out.dirs.DataDir
+		}
+
+		// Migrations write to the source chaindata, which an output run treats as a
+		// read-only input.
+		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), out == nil, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
 		}
 		defer db.Close()
 
-		if err := commitmentRebuild(db, cmd.Context(), logger); err != nil {
+		if err := commitmentRebuild(db, cmd.Context(), logger, target, out); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}
 			return
 		}
+		if out != nil {
+			if err := out.finalize(); err != nil {
+				logger.Error(err.Error())
+				return
+			}
+		}
 	},
 }
 
-func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
+func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logger, rebuildTarget dbstate.RebuildTarget, out *rebuildOutput) error {
 	if clearCommitment && resume {
 		return errors.New("--clear-commitment and --resume are mutually exclusive")
 	}
 	if noHistory && clearCommitment {
 		return errors.New("--no-history and --clear-commitment are mutually exclusive")
 	}
-
-	// The scheme to produce is decided here and passed down, so the rebuild never
-	// re-reads it from process state further in.
-	rebuildTarget, err := dbstate.DefaultRebuildTarget().Resolve()
-	if err != nil {
-		return err
+	if out != nil && clearCommitment {
+		return errors.New("--clear-commitment and --output.datadir are mutually exclusive: --clear-commitment deletes the source datadir's commitment files")
+	}
+	if out != nil && reset {
+		return errors.New("--reset and --output.datadir are mutually exclusive: --reset writes to the source datadir")
 	}
 
 	dirs := datadir.New(datadirCli)
@@ -359,7 +534,12 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 		}
 	}
 
-	if !resume {
+	switch {
+	case out != nil:
+		// The staged output holds no commitment files unless --resume asked for them,
+		// so there is nothing to clear; the source datadir and its DB stay inputs.
+		rwTx.Rollback()
+	case !resume:
 		// remove all existing state commitment snapshots
 		// when not rebuilding with history, only delete domain files (preserve existing history/index)
 		if err := app.DeleteStateSnapshots(app.DeleteStateSnapshotsArgs{
@@ -385,7 +565,7 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 		if err := rwTx.Commit(); err != nil {
 			return err
 		}
-	} else {
+	default:
 		rwTx.Rollback()
 	}
 

@@ -108,6 +108,18 @@ func reconcileTrieVariant(s *ErigonDBSettings, logger log.Logger) error {
 	return nil
 }
 
+// ReadErigonDBSettings reads a datadir's erigondb.toml as plain data. Unlike
+// ResolveErigonDBSettings it does not apply the file to the process, so a tool
+// can inspect a datadir it is not running on.
+func ReadErigonDBSettings(dirs datadir.Dirs) (*ErigonDBSettings, error) {
+	return readErigonDBSettings(filepath.Join(dirs.Snap, ERIGONDB_SETTINGS_FILE))
+}
+
+// WriteErigonDBSettings writes a datadir's erigondb.toml.
+func WriteErigonDBSettings(dirs datadir.Dirs, s *ErigonDBSettings) error {
+	return writeErigonDBSettings(filepath.Join(dirs.Snap, ERIGONDB_SETTINGS_FILE), s)
+}
+
 func readErigonDBSettings(path string) (*ErigonDBSettings, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
