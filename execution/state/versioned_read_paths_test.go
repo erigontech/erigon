@@ -106,8 +106,7 @@ func warmReadIBS(t *testing.T, addr accounts.Address) (*IntraBlockState, *Versio
 }
 
 // destructInPriorTx makes a prior tx's selfdestruct visible and drives
-// getStateObject so it parks the deleted resident object through the
-// production path rather than the test building one by hand.
+// getStateObject so it parks the deleted resident object.
 func destructInPriorTx(t *testing.T, ibs *IntraBlockState, mvhm *VersionMap, addr accounts.Address) {
 	t.Helper()
 	mvhm.WriteSelfDestruct(addr, Version{TxIndex: 2, Incarnation: 0}, true, true)
@@ -126,11 +125,23 @@ func TestVersionedRead_B_DeletedStateObjectBeatsWarmStorageRead(t *testing.T) {
 	ibs, mvhm := warmReadIBS(t, addr)
 
 	key := accounts.InternKey([32]byte{0x01})
-	mvhm.WriteStorage(addr, key, Version{TxIndex: 1, Incarnation: 0}, *uint256.NewInt(99), true)
+	prior := Version{TxIndex: 1, Incarnation: 0}
+	mvhm.WriteStorage(addr, key, prior, *uint256.NewInt(99), true)
+	mvhm.WriteBalance(addr, prior, *uint256.NewInt(99), true)
+	mvhm.WriteCode(addr, prior, accounts.Code{Bytes: []byte{0xfe}}, true)
 
 	v, err := ibs.GetState(addr, key)
 	require.NoError(t, err)
 	require.EqualValues(t, 99, v.Uint64(), "first read resolves from the version map")
+
+	// Read balance and code too, so all three paths carry a recorded read the
+	// fast path could wrongly serve after the destruct.
+	bal, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	require.EqualValues(t, 99, bal.Uint64(), "first balance read resolves from the version map")
+	code, err := ibs.GetCode(addr)
+	require.NoError(t, err)
+	require.NotEmpty(t, code, "first code read resolves from the version map")
 
 	destructInPriorTx(t, ibs, mvhm, addr)
 
@@ -139,13 +150,36 @@ func TestVersionedRead_B_DeletedStateObjectBeatsWarmStorageRead(t *testing.T) {
 	assert.True(t, v.IsZero(), "slot of a destructed account reads as zero, not as the recorded value")
 
 	// The whole account is gone, not just the slot: the other paths must agree.
-	bal, err := ibs.GetBalance(addr)
+	bal, err = ibs.GetBalance(addr)
 	require.NoError(t, err)
 	assert.True(t, bal.IsZero(), "balance of a destructed account reads as zero")
 
-	code, err := ibs.GetCode(addr)
+	code, err = ibs.GetCode(addr)
 	require.NoError(t, err)
 	assert.Empty(t, code, "code of a destructed account reads as empty")
+}
+
+// The read-once fast path must return exactly what the read-set-hit branch it
+// replaces returns: same value, source, version and clean flag.
+func TestVersionedRead_B_WarmStorageReadReturnsReadSetTuple(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xb3})
+	ibs, mvhm := warmReadIBS(t, addr)
+
+	key := accounts.InternKey([32]byte{0x01})
+	version := Version{TxIndex: 1, Incarnation: 0}
+	mvhm.WriteStorage(addr, key, version, *uint256.NewInt(99), true)
+
+	_, err := ibs.GetState(addr, key)
+	require.NoError(t, err)
+	require.True(t, ibs.warmReadable(addr), "fast path is armed")
+
+	v, source, gotVersion, clean, err := readStateForSet(ibs, addr, key)
+	require.NoError(t, err)
+	assert.EqualValues(t, 99, v.Uint64())
+	assert.Equal(t, MapRead, source)
+	assert.Equal(t, version, gotVersion)
+	assert.False(t, clean, "a read-set hit is never clean: it carries no dirty value to keep on revert")
 }
 
 // ------------------------------------------------------------------
