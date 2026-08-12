@@ -30,8 +30,8 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
-// touchedKey is a snapshotted touch a background fold replays; hk is copied off
-// the walk path while pk/upd reference the caller's stable backing.
+// touchedKey is a snapshotted touch the mounted parallel fold replays; hk is
+// copied off the walk path while pk/upd reference the caller's stable backing.
 type touchedKey struct {
 	hk  []byte
 	pk  []byte
