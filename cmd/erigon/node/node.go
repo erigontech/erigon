@@ -111,7 +111,8 @@ func NewNodConfigUrfave(ctx *cli.Command, debugMux *http.ServeMux, logger log.Lo
 	}
 
 	nodeConfig := NewNodeConfig(debugMux)
-	if err := utils.SetNodeConfig(ctx, nodeConfig, logger); err != nil {
+	err := utils.SetNodeConfig(ctx, nodeConfig, logger)
+	if err != nil {
 		return nil, err
 	}
 	erigoncli.ApplyFlagsForNodeConfig(ctx, nodeConfig, logger)

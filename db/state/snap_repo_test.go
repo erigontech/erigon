@@ -288,7 +288,7 @@ func TestMergeRangeSnapRepo(t *testing.T) {
 	execTestCase := func(ranges []testFileRange, vfCount int, needMerge bool, mergeFromStep, mergeToStep uint64) {
 		testFn(ranges, vfCount, needMerge, mergeFromStep, mergeToStep)
 		// Clean up temporary files created by compressors/decompressors in dirs.Tmp
-		filepath.WalkDir(dirs.Tmp, func(path string, d os.DirEntry, err error) error {
+		require.NoError(t, filepath.WalkDir(dirs.Tmp, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
 				if os.IsNotExist(err) {
 					return nil
@@ -300,7 +300,7 @@ func TestMergeRangeSnapRepo(t *testing.T) {
 			}
 			_ = dir.RemoveFile(path)
 			return nil
-		})
+		}))
 	}
 
 	// 0-1, 1-2 => 0-2
@@ -549,7 +549,7 @@ func cleanupFiles(t *testing.T, repo *SnapshotRepo, dirs datadir.Dirs) {
 	repo.Close()
 	repo.RecalcVisibleFiles(0)
 
-	filepath.WalkDir(dirs.DataDir, func(path string, d os.DirEntry, err error) error {
+	require.NoError(t, filepath.WalkDir(dirs.DataDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			if os.IsNotExist(err) { //skip magically disappeared files
 				return nil
@@ -564,7 +564,7 @@ func cleanupFiles(t *testing.T, repo *SnapshotRepo, dirs datadir.Dirs) {
 			panic(err)
 		}
 		return nil
-	})
+	}))
 }
 
 func stepToRootNum(t *testing.T, step uint64, repo *SnapshotRepo) RootNum {
@@ -701,11 +701,11 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 			seg3, err := seg.NewDecompressor(sampleFile)
 			require.NoError(t, err)
 			defer seg3.Close()
-			defer dir.RemoveFile(sampleFile)
+			defer dir.RemoveFile(sampleFile) //nolint:errcheck
 
 			r := seg.NewReader(seg3.MakeGetter(), seg.CompressNone)
 			kveiFile := strings.TrimSuffix(filename, ".bt") + ".kvei"
-			bti, err := btindex.CreateBtreeIndexWithDecompressor(filename, kveiFile, 128, r, uint32(1), background.NewProgressSet(), dirs.Tmp, log.New(), true, statecfg.AccessorBTree|statecfg.AccessorExistence)
+			bti, err := btindex.CreateBtreeIndexWithDecompressor(filename, kveiFile, r, uint32(1), background.NewProgressSet(), dirs.Tmp, log.New(), true, statecfg.AccessorBTree|statecfg.AccessorExistence)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -102,14 +102,6 @@ func FlushToDisk(logPrefix string, b Buffer, tmpdir string, lvl log.Lvl) (dataPr
 func sortAndFlush(b Buffer, tmpdir string) (*os.File, error) {
 	b.Sort()
 
-	// if we are going to create files in the system temp dir, we don't need any
-	// subfolders.
-	if tmpdir != "" {
-		if err := os.MkdirAll(tmpdir, 0755); err != nil {
-			return nil, err
-		}
-	}
-
 	bufferFile, err := os.CreateTemp(tmpdir, "erigon-sortable-buf-")
 	if err != nil {
 		return nil, err

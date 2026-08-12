@@ -16,7 +16,8 @@ import (
 var cmtTiming = os.Getenv("ERIGON_CMT_TIMING") == "1"
 
 // deepStorageThreshold is the touched-slot count above which an account's storage subtree folds concurrently instead of streaming through its worker.
-const deepStorageThreshold = 1_000
+// Set below the common hot-contract straggler size (~150 touched slots) so those subtrees fold in parallel rather than serializing through one nibble worker.
+const deepStorageThreshold = 128
 
 // unfoldRootWall unfolds base at the root until row 0 forms the top-nibble mount wall,
 // consuming at most one nibble per step: a restored root extension sharing the probe's
@@ -69,11 +70,8 @@ func (hph *HexPatriciaHashed) mountTo(root *HexPatriciaHashed, nibble int) {
 	hph.mountedNib = nibble
 	hph.mounted = true
 	hph.mountWall = root.currentKeyLen + 1
-	for row := 0; row <= hph.activeRows; row++ {
-		for nib := range len(hph.grid[row]) {
-			hph.grid[row][nib] = root.grid[row][nib]
-		}
-	}
+	n := hph.activeRows + 1
+	copy(hph.grid[:n], root.grid[:n])
 }
 
 // processMounted folds each touched root-child subtree concurrently, stitches the resulting cells back into the base row, and folds the base up to the root.
@@ -127,7 +125,7 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 		child := root.children[childIdx]
 		ni, ch := nib, child
 		g.Go(func() error {
-			w := p.workerPool.Get().(*HexPatriciaHashed)
+			w := NewHexPatriciaHashed(p.accountKeyLen, nil, p.cfg)
 			w.mountTo(base, ni)
 			if p.template != nil && p.template.traceW != nil {
 				w.traceW = tracePrefix(p.template.traceW, fmt.Sprintf("[mnt %x] ", ni))
@@ -154,8 +152,7 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 				return foldStorageRoot(gctx, foldSem, p.newStorageWorker, pu, n, pth, accountFresh)
 			})
 			if buildErr != nil {
-				w.resetForReuse()
-				p.workerPool.Put(w)
+				w.Release()
 				return fmt.Errorf("mount[%x] build: %w", ni, buildErr)
 			}
 			var tf time.Time
@@ -168,8 +165,7 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 				foldDur[ni] = time.Since(tf)
 			}
 			if err != nil {
-				w.resetForReuse()
-				p.workerPool.Put(w)
+				w.Release()
 				return fmt.Errorf("mount[%x] fold: %w", ni, err)
 			}
 			cells[ni] = c
@@ -177,8 +173,7 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 			if deferred := w.TakeDeferredUpdates(); len(deferred) > 0 {
 				pu.appendDeferred(deferred)
 			}
-			w.resetForReuse()
-			p.workerPool.Put(w)
+			w.Release()
 			return nil
 		})
 		childIdx++
@@ -252,7 +247,7 @@ func (p *ParallelPatriciaHashed) newStorageWorker(ctx context.Context) (*HexPatr
 	if p.template != nil {
 		traceW = p.template.traceW
 	}
-	return newDeferredStorageWorker(ctx, &p.workerPool, p.trieCtxFactory, traceW)
+	return newDeferredStorageWorker(ctx, p.accountKeyLen, p.cfg, p.trieCtxFactory, traceW)
 }
 
 // setAccountStorageRoot writes the folded storage-root cell sr onto the account leaf.

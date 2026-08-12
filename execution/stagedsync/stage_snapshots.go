@@ -145,7 +145,7 @@ func SpawnStageSnapshots(s *StageState, ctx context.Context, tx kv.RwTx, cfg Sna
 	}
 
 	if minProgress > s.BlockNumber {
-		if err = s.Update(tx, minProgress); err != nil {
+		if err := s.Update(tx, minProgress); err != nil {
 			return err
 		}
 	}

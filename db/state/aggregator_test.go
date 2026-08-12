@@ -368,7 +368,7 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		fullpath := filepath.Join(dirs.SnapDomain, file)
 		ofile, err := os.Create(fullpath)
 		require.NoError(t, err)
-		ofile.Close()
+		require.NoError(t, ofile.Close())
 	}
 
 	t.Run("v1.0 files", func(t *testing.T) {

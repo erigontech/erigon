@@ -40,7 +40,8 @@ func estimatedEntryCost(key, value []byte) int {
 
 // minEntryBytes: true lower bound on estimatedEntryCost for a storage-trunk
 // branch (33 = shortest HexToCompact key at depth >= 64; value may be empty).
-// Bounds a wave's file fetch so the budget is guaranteed exhausted inside it.
+// Bounds a wave's file fetch to what the remaining budget could still pin; a
+// wave that pins nothing anyway is ended by the no-progress check in Run.
 const minEntryBytes = estimatedEntryOverheadBytes + 33
 
 // maxStorageTrunkDepth: 64 (account path) + 64 (keccak256(slot)) = 128.
@@ -52,8 +53,7 @@ type pathKey struct {
 }
 
 func toPathKey(path []byte) pathKey {
-	// HexToCompact result may alias a reused buffer, so copy it.
-	return pathKey{path: path, key: bytes.Clone(nibbles.HexToCompact(path))}
+	return pathKey{path: path, key: nibbles.HexToCompact(path)}
 }
 
 // ContractTrunkPreloadParallel is the wave-BFS analogue of ContractTrunkPreload.
@@ -118,6 +118,9 @@ func (p *ContractTrunkPreloadParallel) sortAndPartitionFrontier(dbBranches map[s
 	for i := range p.frontier {
 		pk := &p.frontier[i]
 		if v, ok := dbBranches[string(pk.key)]; ok {
+			if len(v) == 0 { // deletion tombstone: DB shadows files, branch is gone
+				continue
+			}
 			dbHits = append(dbHits, *pk)
 			dbVals = append(dbVals, v)
 			dbHitsBytes += estimatedEntryCost(pk.key, v)
@@ -164,19 +167,19 @@ func (p *ContractTrunkPreloadParallel) Run(
 		return 0, false, fmt.Errorf("ContractTrunkPreloadParallel.Run: resolver is nil")
 	}
 	if stepBudgetBytes <= 0 {
-		return 0, len(p.frontier) == 0, nil
+		return 0, p.queueEmpty(), nil
 	}
 	defer p.releaseScratch()
 
 	stepCap := p.usedBytes + stepBudgetBytes
 	chunkPinned := 0
-	budgetHit := false
+	endStep := false
 
 	// pin records the entry and queues its children. Returns false on budget hit.
 	pin := func(pk pathKey, v []byte, depth int, next *[]pathKey) bool {
 		cost := estimatedEntryCost(pk.key, v)
 		if p.usedBytes+cost > stepCap {
-			budgetHit = true
+			endStep = true
 			return false
 		}
 		// step=0: a storage-trunk branch resolved across merged files has no single
@@ -184,7 +187,7 @@ func (p *ContractTrunkPreloadParallel) Run(
 		// floor drops a preloaded pin before the cStep<=maxStep gate is consulted,
 		// so leaving step unset only keeps that gate trivially true for live pins.
 		cache.PinEntry(pk.key, v, 0, p.pinTxNum)
-		p.pinnedPrefixes = append(p.pinnedPrefixes, bytes.Clone(pk.key))
+		p.pinnedPrefixes = append(p.pinnedPrefixes, pk.key)
 		p.usedBytes += cost
 		p.pinned++
 		chunkPinned++
@@ -210,13 +213,15 @@ func (p *ContractTrunkPreloadParallel) Run(
 		return true
 	}
 
-	for !budgetHit && p.nextDepth <= maxStorageTrunkDepth && len(p.frontier) > 0 {
+	for !endStep && p.nextDepth <= maxStorageTrunkDepth && len(p.frontier) > 0 {
 		depth := p.nextDepth
+		wavePinnedBefore := chunkPinned
 		dbHits, dbVals, fileMiss, dbHitsBytes := p.sortAndPartitionFrontier(dbBranches)
 
-		// Cap the file fetch by what the budget can absorb after dbHits.
+		// Cap the file fetch by what the budget can absorb after dbHits. Below
+		// minEntryBytes no file entry can be pinned, so fetching any is waste.
 		var fileMissDeferred []pathKey
-		if fileBudget := stepCap - p.usedBytes - dbHitsBytes; fileBudget <= 0 {
+		if fileBudget := stepCap - p.usedBytes - dbHitsBytes; fileBudget < minEntryBytes {
 			fileMissDeferred = fileMiss
 			fileMiss = nil
 		} else if maxFileFetch := fileBudget/minEntryBytes + 1; maxFileFetch < len(fileMiss) {
@@ -247,8 +252,9 @@ func (p *ContractTrunkPreloadParallel) Run(
 			}
 			p.dbHitsPinned++
 		}
-		fileMissStop := len(fileMiss)
-		if !budgetHit {
+		fileMissStop := 0
+		if !endStep {
+			fileMissStop = len(fileMiss)
 			for i, pk := range fileMiss {
 				v := fileVals[i]
 				if v == nil {
@@ -261,7 +267,16 @@ func (p *ContractTrunkPreloadParallel) Run(
 			}
 		}
 
-		if budgetHit {
+		// Re-entering only helps if the next iteration sees a different budget.
+		// It does not when the whole miss set was deferred (dbHits consume
+		// exactly the bytes the deferral already accounted for), nor when a
+		// capped fetch pinned nothing because its keys were absent from the file
+		// layer. Either way, end the step; the tail resumes on the next Run.
+		if len(fileMissDeferred) > 0 && (len(fileMiss) == 0 || chunkPinned == wavePinnedBefore) {
+			endStep = true
+		}
+
+		if endStep {
 			// Preserve un-pinned items at current depth; pendingChildren stays
 			// at depth+1 for when this depth is drained on a future Run.
 			rest := make([]pathKey, 0, len(dbHits)-dbHitStop+len(fileMiss)-fileMissStop+len(fileMissDeferred))
@@ -273,8 +288,9 @@ func (p *ContractTrunkPreloadParallel) Run(
 		}
 
 		if len(fileMissDeferred) > 0 {
-			// Defensive: !budgetHit should mean no truncation. Clone out of the
-			// scratch-aliased slice so the next wave's partition can't overwrite it.
+			// Capped fetch that still pinned something: stay at this depth and
+			// resume with the tail. Clone out of the scratch-aliased slice so the
+			// next wave's partition can't overwrite it.
 			p.frontier = slices.Clone(fileMissDeferred)
 		} else {
 			p.frontier = p.pendingChildren
@@ -283,7 +299,7 @@ func (p *ContractTrunkPreloadParallel) Run(
 		}
 	}
 
-	queueEmpty = (len(p.frontier) == 0 && len(p.pendingChildren) == 0) || p.nextDepth > maxStorageTrunkDepth
+	queueEmpty = p.queueEmpty()
 	if logger != nil && (chunkPinned > 0 || queueEmpty) {
 		logger.Info("[trunk-preload-parallel] step",
 			"step_budget_mb", stepBudgetBytes/(1<<20),
@@ -310,6 +326,12 @@ func (p *ContractTrunkPreloadParallel) QueueRemaining() int {
 	return len(p.frontier) + len(p.pendingChildren)
 }
 
+// queueEmpty reports that no further Run can pin anything: the walk drained, or
+// it reached the depth ceiling with entries still queued below it.
+func (p *ContractTrunkPreloadParallel) queueEmpty() bool {
+	return p.QueueRemaining() == 0 || p.nextDepth > maxStorageTrunkDepth
+}
+
 // PinnedPrefixes returns slices aliasing internal storage — do not mutate.
 func (p *ContractTrunkPreloadParallel) PinnedPrefixes() [][]byte { return p.pinnedPrefixes }
 
@@ -326,12 +348,15 @@ func PreloadContractTrunkParallel(
 	if ramBudgetBytes <= 0 {
 		return 0, fmt.Errorf("PreloadContractTrunkParallel: ramBudgetBytes must be positive, got %d", ramBudgetBytes)
 	}
-	p, err := NewContractTrunkPreloadParallel(contractHash)
-	if err != nil {
-		return 0, err
+	if cache == nil {
+		return 0, fmt.Errorf("PreloadContractTrunkParallel: cache is nil")
 	}
 	if resolve == nil {
 		return 0, fmt.Errorf("PreloadContractTrunkParallel: resolver is nil")
+	}
+	p, err := NewContractTrunkPreloadParallel(contractHash)
+	if err != nil {
+		return 0, err
 	}
 	pinned, queueEmpty, err := p.Run(ramBudgetBytes, dbBranches, resolve, cache, logger)
 	if logger != nil {

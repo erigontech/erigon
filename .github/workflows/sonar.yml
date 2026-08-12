@@ -41,7 +41,6 @@ jobs:
           # from partial/blobless clones (known JGit limitation, no fix planned).
           # A full clone (filter: '') ensures all blobs are present upfront.
           filter: ''
-          submodules: true
           cleanup-space: true
           ramdisk: true
           cache-namespace: sonar
