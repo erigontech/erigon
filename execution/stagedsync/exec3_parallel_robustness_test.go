@@ -1277,6 +1277,50 @@ func TestWaitForTeardownPhase(t *testing.T) {
 		return &parallelExecutor{txExecutor: txExecutor{logger: logger, logPrefix: "test"}}, records
 	}
 
+	t.Run("apply loop drain warns without abandoning drain", func(t *testing.T) {
+		const warnAfter = 10 * time.Millisecond
+		pe, records := newExecutor()
+		pe.cancelExecLoop = func(error) {}
+		applyResults := make(chan applyResult)
+		rootResults := make(chan commitmentResult)
+		var releaseOnce sync.Once
+		release := func() {
+			releaseOnce.Do(func() {
+				close(applyResults)
+				close(rootResults)
+			})
+		}
+		t.Cleanup(release)
+		finished := make(chan struct{})
+
+		go func() {
+			pe.cancelAndDrainApplyLoop(warnAfter, errors.New("apply loop failed"), applyResults, rootResults)
+			close(finished)
+		}()
+
+		select {
+		case record := <-records:
+			require.Equal(t, log.LvlWarn, record.Lvl)
+			require.Contains(t, record.Msg, "executor teardown is still running")
+			require.Equal(t, []any{"phase", "apply loop drain", "elapsed", warnAfter}, record.Ctx)
+		case <-time.After(time.Second):
+			t.Fatal("blocked apply-loop drain did not emit a warning")
+		}
+
+		select {
+		case <-finished:
+			t.Fatal("warning deadline abandoned the apply-loop drain")
+		default:
+		}
+
+		release()
+		select {
+		case <-finished:
+		case <-time.After(time.Second):
+			t.Fatal("apply-loop drain did not return after both channels closed")
+		}
+	})
+
 	t.Run("slow phase warns without returning", func(t *testing.T) {
 		const warnAfter = 10 * time.Millisecond
 		pe, records := newExecutor()

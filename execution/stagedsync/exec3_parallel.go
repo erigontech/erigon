@@ -862,7 +862,7 @@ func (pe *parallelExecutor) runApplyLoop(logPrefix string, applyResults <-chan a
 			pe.logger.Debug("[" + logPrefix + "] rw exit")
 		}
 		if err != nil {
-			pe.cancelAndDrainApplyLoop(err, applyResults, rootResults)
+			pe.cancelAndDrainApplyLoop(executorTeardownWarningDelay, err, applyResults, rootResults)
 		}
 	}()
 	return apply()
@@ -870,20 +870,22 @@ func (pe *parallelExecutor) runApplyLoop(logPrefix string, applyResults <-chan a
 
 // Draining applyResults and rootResults lets their blocked producers finish.
 // The calculator must keep draining commitResults until the exec loop closes it.
-func (pe *parallelExecutor) cancelAndDrainApplyLoop(cause error, applyResults <-chan applyResult, rootResults <-chan commitmentResult) {
-	pe.cancelExecLoop(cause)
-	for applyResults != nil || rootResults != nil {
-		select {
-		case _, ok := <-applyResults:
-			if !ok {
-				applyResults = nil
-			}
-		case _, ok := <-rootResults:
-			if !ok {
-				rootResults = nil
+func (pe *parallelExecutor) cancelAndDrainApplyLoop(warnAfter time.Duration, cause error, applyResults <-chan applyResult, rootResults <-chan commitmentResult) {
+	pe.waitForTeardownPhase(warnAfter, "apply loop drain", func() {
+		pe.cancelExecLoop(cause)
+		for applyResults != nil || rootResults != nil {
+			select {
+			case _, ok := <-applyResults:
+				if !ok {
+					applyResults = nil
+				}
+			case _, ok := <-rootResults:
+				if !ok {
+					rootResults = nil
+				}
 			}
 		}
-	}
+	})
 }
 
 func (pe *parallelExecutor) LogExecution() {
