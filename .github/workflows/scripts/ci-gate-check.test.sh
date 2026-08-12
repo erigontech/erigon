@@ -26,6 +26,30 @@ run_case() {
   fi
 }
 
+# run_output <name> <want_exit> <want_regex|-> <reject_regex|-> [VAR=VAL ...]
+run_output() {
+  local name="$1" want="$2" want_re="$3" reject_re="$4"
+  shift 4
+  local out rc why=""
+  out=$(env -i PATH="$PATH" CI_GATE_NO_FETCH=1 "$@" bash "$script" 2>&1)
+  rc=$?
+  [ "$rc" -eq "$want" ] || why="want exit $want, got $rc"
+  if [ -z "$why" ] && [ "$want_re" != "-" ] && ! grep -qE "$want_re" <<<"$out"; then
+    why="output missing /$want_re/"
+  fi
+  if [ -z "$why" ] && [ "$reject_re" != "-" ] && grep -qE "$reject_re" <<<"$out"; then
+    why="output unexpectedly matched /$reject_re/"
+  fi
+  if [ -z "$why" ]; then
+    printf 'ok   - %s (exit %d)\n' "$name" "$rc"
+    pass=$((pass + 1))
+  else
+    printf 'FAIL - %s: %s\n' "$name" "$why"
+    printf '%s\n' "$out" | sed 's/^/       | /'
+    fail=$((fail + 1))
+  fi
+}
+
 # Everything green -> pass.
 run_case "all success" 0 \
   NEEDS='{"lint":{"result":"success"},"tests":{"result":"success"}}'
@@ -92,6 +116,34 @@ run_case "error page mid-pagination -> fail closed" 1 \
   RUN_CANCELLED=true \
   CI_GATE_JOBS_JSON='{"jobs":[{"name":"hive","steps":[{"name":"run","conclusion":"cancelled"}]}]}
 {"message":"Server Error"}'
+
+# A job killed by timeout-minutes reports conclusion "cancelled" and, because
+# its reporting step still runs, a failed step that is not the real cause.
+# Name the timeout and the step that overran; don't blame the reporting step.
+run_output "leaf timeout is named as a timeout" 1 \
+  'CI timeout::hive-eest .*glamsterdam-devnet.*Run hive tests and parse output' \
+  'root cause' \
+  NEEDS='{"hive-eest":{"result":"cancelled"},"lint":{"result":"success"}}' \
+  CI_GATE_JOBS_JSON='{"jobs":[{"id":1,"name":"hive-eest / test-hive-eest (glamsterdam-devnet, serial)","conclusion":"cancelled","steps":[{"name":"Run hive tests and parse output","conclusion":"cancelled"},{"name":"Test Results","conclusion":"failure"}]}]}' \
+  CI_GATE_ANNOTATIONS_JSON='{"1":["The job has exceeded the maximum execution time of 1h0m0s"]}'
+
+# A cancelled leaf with no timeout annotation (runner dropped the job, external
+# cancel) must not be mislabelled as a timeout.
+run_output "external cancel is not a timeout" 1 \
+  '-' 'CI timeout' \
+  NEEDS='{"hive":{"result":"cancelled"},"lint":{"result":"success"}}' \
+  CI_GATE_JOBS_JSON='{"jobs":[{"id":2,"name":"hive / test-hive (engine, api, parallel)","conclusion":"cancelled","steps":[{"name":"Set up job","conclusion":"cancelled"}]}]}' \
+  CI_GATE_ANNOTATIONS_JSON='{"2":["The operation was canceled."]}'
+
+# A timeout leaves no failed step at all when the reporting step is skipped, so
+# the reshuffle fast-path would otherwise swallow it -> must still fail.
+run_output "timeout is not absorbed by the reshuffle fast-path" 1 \
+  'CI timeout::tests / tests-mac-linux' '-' \
+  NEEDS='{"tests":{"result":"cancelled"},"lint":{"result":"success"}}' \
+  RUN_CANCELLED=true \
+  GITHUB_EVENT_NAME=merge_group \
+  CI_GATE_JOBS_JSON='{"jobs":[{"id":3,"name":"tests / tests-mac-linux (windows-2025, parallel)","conclusion":"cancelled","steps":[{"name":"Run tests","conclusion":"cancelled"}]}]}' \
+  CI_GATE_ANNOTATIONS_JSON='{"3":["The job has exceeded the maximum execution time of 1h0m0s"]}'
 
 echo "----"
 printf '%d passed, %d failed\n' "$pass" "$fail"
