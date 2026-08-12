@@ -2752,6 +2752,13 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				return nil, fmt.Errorf("apply loop: unexpected task type for tx %d: result.Task=%T", tx, txResult.Task)
 			}
 			if stateReader == nil {
+				// Shared base reader for this tx's calcFees and finalize (finalize
+				// reuses this stateReader). The version map is not a strict superset
+				// of the block write buffer in the EIP-161 empty-account sweep window
+				// (2016 Spurious Dragon): a finalize read there can miss the accumulated
+				// in-block state and fall to a stale pre-block value, corrupting the
+				// commitment structure and surfacing as a wrong trie root some blocks
+				// later. Keep the buffer as the fallback base.
 				if txTask.IsHistoric() {
 					stateReader = state.NewHistoryReaderV3WithBlockCache(applyTx, pe.rs.Domains(), be.blockStateCache, txTask.Version().TxNum)
 				} else {
@@ -2867,14 +2874,13 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 
 				if stateReader == nil {
+					// Same shared base as the calcFees block above (used when calcFees
+					// did not run for this tx). Keep the buffer as the fallback base:
+					// the version map is not a strict superset of it in the EIP-161
+					// empty-account sweep window.
 					if txTask.IsHistoric() {
 						stateReader = state.NewHistoryReaderV3WithBlockCache(applyTx, pe.rs.Domains(), be.blockStateCache, txTask.Version().TxNum)
 					} else {
-						// Use CachedReaderV3 with readCurrent=true so the
-						// finalize (including system TXs) reads from the
-						// BlockStateCache write buffer. This ensures the
-						// system TX sees all accumulated state from prior
-						// TXs in the block, not stale sd.mem values.
 						stateReader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsGetterNoMetrics(applyTx), be.blockStateCache)
 					}
 				}
@@ -3119,42 +3125,32 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 			pe.RLock()
 			var reader state.StateReader
+			// The block-finalize IBS (withdrawals, EIP-7002/7251 system calls)
+			// must see every prior-tx write of this block. It gets them from
+			// be.versionMap (set below); at block end all cells are Done and
+			// versionedReadCore applies self-destruct/revival. So this reader is
+			// only the pre-block base.
 			if finalTask.IsHistoric() {
-				// Chain blockCache → sd.mem → applyTx so the block-finalize
-				// IBS (withdrawals, EIP-7002/7251 system calls) sees every
-				// prior-tx write from the current block. Omitting blockCache
-				// here was the root cause of the trie-root race at block
-				// 24839300: a tip-adjacent historic block's withdrawal read
-				// the pre-block balance and stomped tx 28's in-block update.
-				reader = state.NewHistoryReaderV3WithBlockCache(applyTx, pe.rs.Domains(), be.blockStateCache, finalVersion.TxNum)
+				reader = state.NewHistoryReaderV3WithBlockCache(applyTx, pe.rs.Domains(), nil, finalVersion.TxNum)
 			} else {
-				reader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsGetterNoMetrics(applyTx), be.blockStateCache)
+				reader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsGetterNoMetrics(applyTx), nil)
 			}
 			pe.RUnlock()
 
 			ibs := state.New(reader)
 			defer ibs.Close()
 			ibs.SetVersion(finalVersion.Incarnation)
-			localVersionMap := state.NewVersionMap(nil)
-			ibs.SetVersionMap(localVersionMap)
+			ibs.SetVersionMap(be.versionMap)
 			ibs.SetTxContext(finalVersion.BlockNum, finalVersion.TxIndex)
 			ibs.StartAccessRecording()
 
 			if tt, ok := lastResult.Task.(*taskVersion).Task.(*exec.TxTask); ok {
 				// Syscalls share the main ibs so their writes (EIP-7002/7251
-				// dequeue, EIP-4788 beacon root) land in ibs.VersionedWrites
-				// and then in finalizeWrites via Normalize below. If we instead
-				// create a separate syscallIBS in historic mode, the syscall
-				// writes land only in BlockStateCache and never reach the
-				// commitment calculator's txResult feed — producing a wrong
-				// trie root whenever an EIP-7002/7251 SSTORE changes a
-				// previously-untouched slot (see the 24839762 race where
-				// slots 0x01/0x03 of the EIP-7002 predeploy ended with
-				// stale value 0x01 instead of cleared).
-				//
-				// Main ibs uses HistoryReaderV3WithBlockCache in historic
-				// mode (see finalTask.IsHistoric() branch above), so it can
-				// still see intra-batch writes from the blockCache.
+				// dequeue, EIP-4788 beacon root) land in ibs.VersionedWrites and
+				// then in finalizeWrites via Normalize below. A separate syscall
+				// IBS would keep those writes out of the versioned write-set, so
+				// the commitment calculator would never see them — a wrong trie
+				// root when a syscall SSTORE changes a previously-untouched slot.
 				syscallIBS := ibs
 
 				syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
