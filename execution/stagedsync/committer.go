@@ -380,19 +380,8 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		}
 
 	case *blockResult:
-		// Block-validity rejection (set by the worker-result path in
-		// nextResult — insufficient funds, gas overflow, finalize error,
-		// scheduler-exhausted incarnations). The apply loop's case
-		// *blockResult fast-paths Err != nil and returns it directly;
-		// we must NOT compute commitment for this block because (a)
-		// sd.mem may contain partial-tx writes from txs that succeeded
-		// before the failing one, so the computed root would be
-		// non-canonical, and (b) computing here would emit an
-		// ErrWrongTrieRoot through rootResults that races with the apply
-		// loop's Err return — the wrong-trie-root error wins and masks
-		// the original validation diagnostic (EEST assertions on the
-		// underlying exception class then fail). Skip silently and let
-		// the apply loop surface the worker's diagnosis.
+		// A failed block may contain only partial state. Do not compute its
+		// commitment; the apply loop owns error classification.
 		if r.Err != nil {
 			return
 		}

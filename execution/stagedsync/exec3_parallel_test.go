@@ -1538,7 +1538,7 @@ func TestParallelFinalizeClassifiesRulesEngineError(t *testing.T) {
 	}
 }
 
-func TestParallelStateReadErrorIsOperational(t *testing.T) {
+func TestParallelStateReadErrorUsesOperationalBlockResult(t *testing.T) {
 	db := newResumeTestDB(t)
 	config := chain.TestChainBerlinConfig
 	pe, roTx := newResumeTestExec(t, db, config)
@@ -1581,9 +1581,12 @@ func TestParallelStateReadErrorIsOperational(t *testing.T) {
 
 	blockResult, err := be.nextResult(context.Background(), pe, result, roTx)
 
-	require.Nil(t, blockResult)
-	require.ErrorIs(t, err, cause)
-	require.NotErrorIs(t, err, rules.ErrInvalidBlock)
+	require.NoError(t, err)
+	require.NotNil(t, blockResult)
+	require.Same(t, be.block, blockResult.Block)
+	require.True(t, blockResult.Operational)
+	require.ErrorIs(t, blockResult.Err, cause)
+	require.NotErrorIs(t, blockResult.Err, rules.ErrInvalidBlock)
 	require.True(t, result.Operational)
 }
 

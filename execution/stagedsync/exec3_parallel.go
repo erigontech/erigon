@@ -447,13 +447,13 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 		// verdict, so it is recorded and surfaced only after applyResults closes
 		// (once exec has had its say) — see failCandidate.consider.
 		var fail failCandidate
-		// infraErr collects operational faults (apply-side infrastructure and
-		// calculator errors), kept OUT of the block-ranked candidate so a
+		// infraErr collects operational faults (worker, apply-side, and calculator
+		// errors), kept OUT of the block-ranked candidate so a
 		// coincident verdict can never displace them: they surface with
 		// unconditional precedence and the verdict is withheld upstream.
 		var infraErr error
-		// finalized flips once the reported failure is decided (an exec verdict,
-		// or exec cleanly passing the block a commit wrong-root was deferred on).
+		// finalized flips once a terminal outcome is known: an operational fault,
+		// an exec verdict, or clean exec confirming a deferred wrong-root.
 		// Remaining results are then drained without re-validation so a post-
 		// cancel block can't mask the recorded failure.
 		finalized := false
@@ -598,27 +598,21 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					block := applyResult.Block
 					blockNum := block.NumberU64()
 					blockHash := block.Hash()
-					if finalized {
-						appliedBlocks[blockNum] = struct{}{}
-						continue
-					}
-					// Apply loop is the canonical error-emission point for
-					// block-validity rejections (insufficient funds, gas
-					// overflow, finalize rejection, scheduler-exhausted
-					// incarnations). The worker plumbs the diagnosis through
-					// blockResult.Err via nextResult → processResults → the
-					// exec loop's sendResult, then exits on its own. Record the
-					// exec verdict (it wins its block over a commit wrong-root)
-					// and keep draining so an earlier commit wrong-root still in
-					// rootResults can supersede it; the earliest recorded failure
-					// is returned at channel-close. No cancel here — the exec loop
-					// self-exits after an errored block, and cancelling would join
-					// context.Canceled onto the reported error.
+					// A terminal error still completes the block's result stream.
+					// Keep verdicts block-ranked and operational faults unconditional.
 					if applyResult.Err != nil {
 						appliedBlocks[blockNum] = struct{}{}
 						pendingAccumulatorWrites = pendingAccumulatorWrites[:0]
-						fail.consider(blockNum, blockHash, true, applyResult.Err)
 						finalized = true
+						if applyResult.Operational {
+							infraErr = errors.Join(infraErr, applyResult.Err)
+						} else {
+							fail.consider(blockNum, blockHash, true, applyResult.Err)
+						}
+						continue
+					}
+					if finalized {
+						appliedBlocks[blockNum] = struct{}{}
 						continue
 					}
 					// recordApplyFailure classifies an apply-side failure — a
@@ -1124,8 +1118,8 @@ func (pe *parallelExecutor) drainOnCancel(ctx context.Context, applyTx kv.Tempor
 			if err := blockExecutor.sendResult(ctx, blockResult, false); err != nil {
 				return err
 			}
-			// See completeBlock: invalid blockResult is the apply loop's
-			// signal — don't schedule next.
+			// See completeBlock: an errored blockResult is the apply loop's
+			// signal, so do not schedule the next block.
 			if blockResult.Err != nil {
 				return nil
 			}
@@ -1189,11 +1183,8 @@ func (pe *parallelExecutor) completeBlock(ctx context.Context, blockResult *bloc
 		}
 		pe.clearChangesetAccumulator()
 
-		// Block-validity rejection: the apply loop consumes blockResult and
-		// returns its Err; the calculator skips the commitment compute. Exit
-		// here so we don't schedule the next block on discarded state — the
-		// apply loop's Err is the canonical signal. No cancel: exec self-exits
-		// and cancelling would join context.Canceled onto the reported error.
+		// The apply loop classifies the terminal error and the calculator skips
+		// commitment. Exit without scheduling another block.
 		if blockResult.Err != nil {
 			return true, nil
 		}
@@ -1884,6 +1875,7 @@ type applyResult any
 type blockResult struct {
 	Block            *types.Block
 	Err              error
+	Operational      bool
 	BlockGasUsed     uint64
 	BlobGasUsed      uint64
 	lastTxNum        uint64
@@ -2547,17 +2539,18 @@ func (be *blockExecutor) number() uint64 { return be.block.NumberU64() }
 
 func (be *blockExecutor) hash() common.Hash { return be.block.Hash() }
 
-// invalidBlockResult wraps a block-validity failure (insufficient funds, gas
-// overflow, finalize rejection, etc.) as a *blockResult carrying Err. Returning
-// this from the worker-result processing path lets the apply loop see that the
-// block completed (with a rejection) rather than treating the dangling
-// tx-results as a silent miss. The apply loop's case *blockResult fast-paths
-// Err != nil at the top: marks the block applied so the channel-close
-// completeness check doesn't double-report, and surfaces the error.
 func (be *blockExecutor) invalidBlockResult(err error) *blockResult {
 	return &blockResult{
 		Block: be.block,
 		Err:   err,
+	}
+}
+
+func (be *blockExecutor) operationalBlockResult(err error) *blockResult {
+	return &blockResult{
+		Block:       be.block,
+		Err:         err,
+		Operational: true,
 	}
 }
 
@@ -2633,10 +2626,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	be.results[tx] = &execResult{TxResult: res}
 	if res.Err != nil {
 		if res.Operational {
-			// A task panic or worker setup failure is an executor fault, not a
-			// statement about the block — surface it as an operational error,
-			// never as a verdict.
-			return nil, fmt.Errorf("block=%d txIdx=%d: %w", be.number(), res.Version().TxIndex, res.Err)
+			return be.operationalBlockResult(fmt.Errorf("block=%d txIdx=%d: %w", be.number(), res.Version().TxIndex, res.Err)), nil
 		}
 		if execErr, ok := res.Err.(protocol.ErrExecAbortError); ok {
 			if res.Version().Incarnation > len(be.tasks) {
@@ -2749,19 +2739,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				be.cntAbort++
 			}
 		} else {
-			// Non-ErrExecAbortError from the worker (e.g. raw error from
-			// TxTask.Reset: TxMessage rejection, signer rejection, EIP-7702
-			// empty authorization list). Surface it as a block-validity
-			// failure through blockResult.Err so the apply loop returns
-			// ErrInvalidBlock the same way the other invalidBlockResult
-			// sites do. Returning (nil, err) instead silently exits the
-			// exec loop with no blockResult ever reaching the apply loop;
-			// the apply-channel-closed branch then sees blks=0 and
-			// fabricates ErrLoopExhausted, which the stage loop reports as
-			// "unexpected state step has more work" — engine API
-			// mis-categorises that as a state-machine error rather than the
-			// real block-validation failure (eest fork_Prague
-			// test_empty_authorization_list).
+			// A non-abort task error is a block-validity failure. Preserve the
+			// terminal block boundary so completeness cannot replace its diagnosis.
 			return be.invalidBlockResult(fmt.Errorf("%w: could not apply tx %d:%d [%v]: %w", rules.ErrInvalidBlock, be.number(), res.Version().TxIndex, task.TxHash(), res.Err)), nil
 		}
 	} else {
