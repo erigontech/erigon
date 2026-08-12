@@ -1608,12 +1608,16 @@ func TestCheckBlocksDrained(t *testing.T) {
 		require.ErrorIs(t, err, cause)
 	})
 
-	t.Run("bad-block stop leaves undrained follow-on blocks alone", func(t *testing.T) {
-		// A handled bad block cancels queued work; reporting that work would
-		// trigger a second unwind.
+	t.Run("bad-block stop without a recorded verdict does not exempt", func(t *testing.T) {
+		// A bad-block stop always records a verdict or an operational failure
+		// first (deliberateCancel closes over the fail-candidate), so a bare
+		// stopBadBlock cause with pending blocks means the failure was lost —
+		// report the lost work instead of trusting the cause alone.
 		ectx, cancel := context.WithCancelCause(context.Background())
 		cancel(&stopCause{block: 5, kind: stopBadBlock, err: errors.New("wrong root")})
-		require.NoError(t, withPending().checkBlocksDrained(context.Background(), ectx, nil))
+		err := withPending().checkBlocksDrained(context.Background(), ectx, nil)
+		require.Error(t, err)
+		require.NotErrorIs(t, err, rules.ErrInvalidBlock)
 	})
 
 	t.Run("reached-max stop with an undrained block still flags", func(t *testing.T) {
