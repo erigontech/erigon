@@ -187,24 +187,29 @@ func cacheGenerationTx(tx kv.TemporalTx) kv.TemporalTx {
 	return nil
 }
 
-// cacheFrontierFor grants fill authority only to transactions in the durable
-// state generation from which this SharedDomains was created.
+// cacheFrontierFor binds fill authority to the transaction's durable state
+// version. StateCache admits it only while that version is current.
 func (sd *SharedDomains) cacheFrontierFor(tx kv.TemporalTx) cache.Frontier {
-	// Background exec workers bind getters with a nil placeholder tx and open
-	// the real one on their first task; the placeholder can never fill.
 	generationTx := cacheGenerationTx(tx)
-	if generationTx == nil || !sd.baseStateVersionKnown {
+	if generationTx == nil {
 		return nil
 	}
-	sameStateGeneration := generationTx.ViewID() == sd.baseViewID
-	if !sameStateGeneration {
-		stateVersion, err := rawdb.GetStateVersion(generationTx)
-		sameStateGeneration = err == nil && stateVersion == sd.baseStateVersion
+	stateVersion := sd.baseStateVersion
+	_, txWritable := generationTx.(kv.TemporalRwTx)
+	// A write transaction's ViewID is the snapshot ID it will create. After
+	// commit, a new read transaction can have that ID but a newer state version.
+	if generationTx.ViewID() == sd.baseViewID && txWritable == sd.baseTxWritable {
+		if !sd.baseStateVersionKnown {
+			return nil
+		}
+	} else {
+		var err error
+		stateVersion, err = rawdb.GetStateVersion(generationTx)
+		if err != nil {
+			return nil
+		}
 	}
-	if !sameStateGeneration {
-		return nil
-	}
-	return cache.FrontierWithStateVersion(sdFrontier{sd: sd, tx: tx}, sd.baseStateVersion)
+	return cache.FrontierWithStateVersion(sdFrontier{sd: sd, tx: tx}, stateVersion)
 }
 
 // cacheViewFor binds the shared state cache to tx's read view. Boxing the
@@ -241,6 +246,7 @@ type SharedDomains struct {
 	logger log.Logger
 
 	baseViewID            uint64
+	baseTxWritable        bool
 	baseStateVersion      uint64
 	baseStateVersionKnown bool
 
@@ -356,11 +362,13 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 
 	generationTx := cacheGenerationTx(tx)
 	stateVersion, stateVersionErr := rawdb.GetStateVersion(generationTx)
+	_, baseTxWritable := generationTx.(kv.TemporalRwTx)
 	sd := &SharedDomains{
 		logger:                logger,
 		metrics:               kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
 		stepSize:              tx.Debug().StepSize(),
 		baseViewID:            generationTx.ViewID(),
+		baseTxWritable:        baseTxWritable,
 		baseStateVersion:      stateVersion,
 		baseStateVersionKnown: stateVersionErr == nil,
 	}

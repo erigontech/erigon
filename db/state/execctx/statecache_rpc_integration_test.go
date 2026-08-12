@@ -96,6 +96,47 @@ func TestEmbeddedRPCCacheViewDoesNotRefillUnwoundAccount(t *testing.T) {
 	require.Equal(t, v1, got)
 }
 
+func TestEmbeddedRPCViewOpenedAfterCommitCanFillStateCache(t *testing.T) {
+	const stepSize = uint64(16)
+	ctx := t.Context()
+	db := newTestDb(t, stepSize)
+	stateCache := newSmallStateCache()
+	t.Cleanup(stateCache.Close)
+
+	commitTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer commitTx.Rollback()
+	publishedDomains, err := execctx.NewSharedDomains(ctx, commitTx, log.New())
+	require.NoError(t, err)
+	defer publishedDomains.Close()
+	publishedDomains.SetStateCacheForTest(stateCache)
+
+	written := make([]byte, 20)
+	written[0] = 0x01
+	publishedDomains.SetTxNum(5)
+	require.NoError(t, publishedDomains.DomainPut(kv.AccountsDomain, commitTx, written, encAccount(1), 5, nil))
+	require.NoError(t, publishedDomains.Commit(ctx, commitTx))
+
+	events := shards.NewEvents()
+	events.PublishOverlay(publishedDomains)
+	rpcCache := &execmodule.Cache{}
+	rpcCache.SetPublishedSD(events.LatestSD)
+
+	rpcTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer rpcTx.Rollback()
+	rpcView, err := rpcCache.View(ctx, rpcTx)
+	require.NoError(t, err)
+
+	missing := make([]byte, 20)
+	missing[0] = 0x02
+	got, err := rpcView.Get(missing)
+	require.NoError(t, err)
+	require.Empty(t, got)
+	_, ok := stateCache.View(nil).Get(kv.AccountsDomain, missing)
+	require.True(t, ok, "a fresh RPC transaction must retain fill authority after the published SharedDomains commits")
+}
+
 func TestEmbeddedRPCViewCreatedDuringStagedUnwindDoesNotRefillUnwoundAccount(t *testing.T) {
 	const stepSize = uint64(16)
 	ctx := t.Context()
