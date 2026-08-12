@@ -116,7 +116,7 @@ func TestCompleteLeafHashMatchesPerByteHeader(t *testing.T) {
 			var val rlp.RlpSerializable
 			if tc.account {
 				val = rlp.RlpEncodedBytes(accountVal)
-				got, err = hph.accountLeafHashWithKey(nil, tc.key, val)
+				got, err = hph.accountLeafHashWithKey(nil, tc.key, rlp.RlpEncodedBytes(accountVal))
 			} else {
 				storage := rlp.RlpSerializableBytes(storageVal)
 				val = storage
@@ -165,7 +165,7 @@ func TestCompleteLeafHashAllKeyLengths(t *testing.T) {
 				var val rlp.RlpSerializable
 				if account {
 					val = rlp.RlpEncodedBytes(accountVal)
-					got, err = hph.accountLeafHashWithKey(nil, key, val)
+					got, err = hph.accountLeafHashWithKey(nil, key, rlp.RlpEncodedBytes(accountVal))
 				} else {
 					storage := rlp.RlpSerializableBytes(storageVal)
 					val = storage

@@ -17,6 +17,7 @@
 package commitment
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 
@@ -59,14 +60,9 @@ func NewContractTrunkPreload(contractHash []byte) (*ContractTrunkPreload, error)
 	if len(contractHash) != 32 {
 		return nil, fmt.Errorf("NewContractTrunkPreload: contractHash must be 32 bytes, got %d", len(contractHash))
 	}
-	contractNibbles := make([]byte, 64)
-	for i, b := range contractHash {
-		contractNibbles[2*i] = b >> 4
-		contractNibbles[2*i+1] = b & 0x0f
-	}
 	return &ContractTrunkPreload{
-		contractHash:    contractHash,
-		queue:           []pathDepth{{path: contractNibbles, depth: 64}},
+		contractHash:    bytes.Clone(contractHash),
+		queue:           []pathDepth{{path: ContractNibbles(contractHash), depth: 64}},
 		maxDepthReached: 64,
 	}, nil
 }
@@ -93,28 +89,27 @@ func (p *ContractTrunkPreload) Run(
 
 	for len(p.queue) > 0 {
 		head := p.queue[0]
-		p.queue = p.queue[1:]
 
 		prefix := nibbles.HexToCompact(head.path)
 		v, step, found, rerr := reader(prefix)
 		if rerr != nil {
+			p.pinned += chunkPinned
+			p.usedBytes += chunkUsedBytes
 			return chunkPinned, false, fmt.Errorf("preload at depth %d: %w", head.depth, rerr)
 		}
 		if !found {
+			p.queue = p.queue[1:]
 			continue
 		}
 
 		entryCost := estimatedEntryOverheadBytes + len(prefix) + len(v)
 		if chunkUsedBytes+entryCost > additionalBudgetBytes {
-			p.queue = append([]pathDepth{head}, p.queue...)
 			break
 		}
+		p.queue = p.queue[1:]
 
 		cache.PinEntry(prefix, v, step, p.pinTxNum)
-		// HexToCompact may alias a reused buffer; copy for a stable Invalidate handle.
-		prefixCopy := make([]byte, len(prefix))
-		copy(prefixCopy, prefix)
-		p.pinnedPrefixes = append(p.pinnedPrefixes, prefixCopy)
+		p.pinnedPrefixes = append(p.pinnedPrefixes, prefix)
 		chunkUsedBytes += entryCost
 		chunkPinned++
 		if head.depth > p.maxDepthReached {
@@ -133,6 +128,9 @@ func (p *ContractTrunkPreload) Run(
 		bitmap := binary.BigEndian.Uint16(v[2:4])
 		for n := range 16 {
 			if bitmap&(1<<uint(n)) == 0 {
+				continue
+			}
+			if head.depth+1 > maxStorageTrunkDepth {
 				continue
 			}
 			childPath := make([]byte, len(head.path)+1)
@@ -172,6 +170,9 @@ func PreloadContractTrunk(
 		return 0, err
 	}
 	pinned, queueEmpty, err := p.Run(ramBudgetBytes, reader, cache, logger)
+	if err != nil {
+		return pinned, err
+	}
 	if logger != nil {
 		logger.Info("[trunk-preload] complete",
 			"contract_hash", fmt.Sprintf("%x", contractHash),
@@ -183,5 +184,5 @@ func PreloadContractTrunk(
 			"queue_remaining", p.QueueRemaining(),
 			"cache_pinned_total", cache.PinnedCount())
 	}
-	return pinned, err
+	return pinned, nil
 }
