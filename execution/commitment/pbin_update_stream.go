@@ -58,6 +58,16 @@ type pbinUpdateStream struct {
 	// leaves. It holds no delegation indicator, which makes a hit mean "chunk
 	// these leaves again" and nothing else.
 	codeSeen map[common.Hash]uint64
+
+	codeStats PBinCodeStats
+}
+
+// PBinCodeStats counts the code one pass chunkified: the accounts whose code
+// reached the chunker, and the distinct code hashes among them. The gap between
+// the two is what the per-hash cache saved.
+type PBinCodeStats struct {
+	CodeBearingAccounts uint64
+	UniqueCodeHashes    uint64
 }
 
 type pbinCodeChunk struct {
@@ -99,6 +109,7 @@ func (s *pbinUpdateStream) reset() {
 	s.codeChunks = s.codeChunks[:0]
 	s.pendingRemoval = s.pendingRemoval[:0]
 	clear(s.codeSeen)
+	s.codeStats = PBinCodeStats{}
 }
 
 func (s *pbinUpdateStream) release() {
@@ -248,6 +259,7 @@ func (s *pbinUpdateStream) chunkSource(plainKey []byte, update *Update) ([]byte,
 			return nil, common.Hash{}, fmt.Errorf("%w: code %x is %d bytes for account %x and %d for an earlier one",
 				errPBinCodeSizeConflict, update.CodeHash, update.CodeSize, plainKey, size)
 		}
+		s.codeStats.CodeBearingAccounts++
 		return nil, update.CodeHash, nil
 	}
 	code, err := s.codeOf(plainKey)
@@ -258,13 +270,17 @@ func (s *pbinUpdateStream) chunkSource(plainKey []byte, update *Update) ([]byte,
 		return nil, common.Hash{}, fmt.Errorf("pbin: account %x says %d code bytes, the code domain holds %d",
 			plainKey, update.CodeSize, len(code))
 	}
-	// A witness pass keys its chunks on the code the block writes rather than on
-	// update.CodeHash, so a cache read there would name other chunks.
-	if !s.witnessPass && !pbinIsDelegation(code) {
-		if s.codeSeen == nil {
-			s.codeSeen = make(map[common.Hash]uint64)
+	if !pbinIsDelegation(code) {
+		s.codeStats.CodeBearingAccounts++
+		s.codeStats.UniqueCodeHashes++
+		// A witness pass keys its chunks on the code the block writes rather than on
+		// update.CodeHash, so a cache read there would name other chunks.
+		if !s.witnessPass {
+			if s.codeSeen == nil {
+				s.codeSeen = make(map[common.Hash]uint64)
+			}
+			s.codeSeen[update.CodeHash] = update.CodeSize
 		}
-		s.codeSeen[update.CodeHash] = update.CodeSize
 	}
 	return code, update.CodeHash, nil
 }

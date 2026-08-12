@@ -45,6 +45,7 @@ type pbinDedupRun struct {
 	chunkKeys []string
 	queued    int // chunks the flush had to sort
 	reads     int
+	stats     PBinCodeStats
 }
 
 func (r pbinDedupRun) count(key []byte) int {
@@ -78,6 +79,7 @@ func pbinDedupStream(t *testing.T, s *pbinUpdateStream, spy *pbinDedupSpy, c *pb
 	})
 	require.NoError(t, err)
 	run.reads = spy.reads - before
+	run.stats = s.codeStats
 	return run
 }
 
@@ -113,6 +115,7 @@ func TestPBinSharedCodeIsChunkedOncePerHash(t *testing.T) {
 	run := pbinDedupStream(t, new(pbinUpdateStream), spy, corpus)
 
 	require.Equal(t, 1, run.reads, "the code domain is read once per code hash")
+	require.Equal(t, PBinCodeStats{CodeBearingAccounts: accounts, UniqueCodeHashes: 1}, run.stats)
 	require.Equal(t, chunks, run.queued, "the flush sorts one chunk set, not one per account")
 	require.Len(t, run.chunkKeys, chunks)
 
@@ -146,8 +149,13 @@ func TestPBinChunkCacheDoesNotOutliveAProcess(t *testing.T) {
 	require.Equal(t, chunks, second.queued, "the second Process re-chunks the code it no longer knows")
 	require.Equal(t, 1, second.reads)
 
+	require.Equal(t, first.stats, second.stats)
+	require.Equal(t, PBinCodeStats{CodeBearingAccounts: 2, UniqueCodeHashes: 1}, second.stats,
+		"the counts describe one Process, so they are cleared with the cache")
+
 	stream.reset()
 	require.Empty(t, stream.codeSeen, "reset clears the cache; Release alone would keep it across a pooled reuse")
+	require.Zero(t, stream.codeStats)
 }
 
 // A hash naming two code sizes means one of the two reads is wrong, and the

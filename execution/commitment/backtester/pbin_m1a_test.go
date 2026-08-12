@@ -323,7 +323,7 @@ func TestPBinM1AForwardRunMatchesRebuildFromDomains(t *testing.T) {
 	db, agg = pbinM1AWipeCommitment(t, db, agg, dirs, pbinM1AStepSize)
 	require.Empty(t, pbinM1ABranchRecords(t, db), "the wipe must leave no commitment records")
 
-	rebuiltRoot, err := state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), false)
+	rebuiltRoot, _, err := state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), false)
 	require.NoError(t, err)
 	require.Equal(t, wantRoot, rebuiltRoot, "rebuild-from-domains must reproduce the forward root")
 

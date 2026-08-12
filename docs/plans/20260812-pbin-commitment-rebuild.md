@@ -302,15 +302,33 @@ crash in `blocksIO`. The two "proceeds" cases are asserted on the predicate rath
 - Modify: `cmd/integration/commands/commitment.go`
 - Create: `cmd/integration/commands/commitment_report_test.go`
 
-- [ ] stat the commitment `.kv` files in `dirs.SnapDomain` after the rebuild; report bytes per range
+- [x] stat the commitment `.kv` files in `dirs.SnapDomain` after the rebuild; report bytes per range
       and a total
-- [ ] for key counts, return them from `RebuildCommitmentFiles` — today it returns `latestRoot []byte`
+- [x] for key counts, return them from `RebuildCommitmentFiles` — today it returns `latestRoot []byte`
       only (`squeeze.go:876`) and the counts exist solely as `logger.Info` output (`:1104-1105`,
       `:1198-1200`), which a caller cannot read. Do not scrape logs
-- [ ] report unique code hashes vs total code-bearing accounts **per shard**, the ratio Task 4 acts on
-- [ ] stable field names so the output pastes into a table
-- [ ] write a test over a temp dir asserting reported sizes match the files on disk
-- [ ] run tests — must pass before Task 7
+- [x] report unique code hashes vs total code-bearing accounts **per shard**, the ratio Task 4 acts on
+- [x] stable field names so the output pastes into a table
+- [x] write a test over a temp dir asserting reported sizes match the files on disk
+- [x] run tests — must pass before Task 7
+
+Landed shape: `RebuildCommitmentFiles` returns a `*RebuildReport` — one entry per rebuilt range, each
+holding its shards. The code counts come from the bin engine, which counts what its update stream
+chunkified per `Process` and clears that with the chunk cache in `reset()`; the hex engines expose no
+such method and report zeros. Every range walks the whole key set at its own boundary, so the counts
+are per shard and summing them across ranges counts the same account again — the ratio to read is
+within one shard.
+
+Sizes stay on the caller's side: the rebuild does not know which directory it wrote to once
+`--output.datadir` repoints `datadirCli`, and a run with an output datadir must size the staged
+directory rather than the source it read. The report is three tab-separated tables under fixed column
+names, with a `total` row over the files.
+
+The shard count no longer has to be scraped from log lines: the across-shards test reads
+`len(report.Ranges[0].Shards)` and the log-handler counter it used is gone. Mutation-checked: dropping
+the `.kv` filter, sorting the files by name rather than by step, sizing the source instead of the
+output, dropping the per-shard append, and clearing the counts in `release()` rather than `reset()`
+each fail a test.
 
 ### Task 7: [Final] Verify acceptance criteria
 

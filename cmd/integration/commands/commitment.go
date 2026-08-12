@@ -19,6 +19,7 @@ package commands
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/hex"
 	"errors"
@@ -53,6 +54,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/snaptype"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -358,6 +360,104 @@ func isCommitmentFileName(name string) bool {
 	return strings.Contains(name, kv.CommitmentDomain.String())
 }
 
+// commitmentFileSize is one commitment .kv as it ended up on disk.
+type commitmentFileSize struct {
+	Name     string
+	StepFrom uint64
+	StepTo   uint64
+	Bytes    int64
+}
+
+// commitmentFileSizes stats the commitment .kv files a rebuild left in a
+// SnapDomain directory, in step order. A directory that was never written is a
+// rebuild with nothing to report rather than an error.
+func commitmentFileSizes(snapDomain string) ([]commitmentFileSize, error) {
+	entries, err := os.ReadDir(snapDomain)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var sizes []commitmentFileSize
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".kv" || !isCommitmentFileName(e.Name()) {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			return nil, err
+		}
+		f := commitmentFileSize{Name: e.Name(), Bytes: info.Size()}
+		if parsed, _, ok := snaptype.ParseFileName(snapDomain, e.Name()); ok {
+			f.StepFrom, f.StepTo = parsed.From, parsed.To
+		}
+		sizes = append(sizes, f)
+	}
+	slices.SortFunc(sizes, func(a, b commitmentFileSize) int {
+		if a.StepFrom != b.StepFrom {
+			return cmp.Compare(a.StepFrom, b.StepFrom)
+		}
+		return cmp.Compare(a.StepTo, b.StepTo)
+	})
+	return sizes, nil
+}
+
+func totalCommitmentBytes(files []commitmentFileSize) int64 {
+	var total int64
+	for _, f := range files {
+		total += f.Bytes
+	}
+	return total
+}
+
+// rebuildReportDir is the SnapDomain the rebuild wrote its commitment files to,
+// which for an output run is the staged directory and not the source it read.
+func rebuildReportDir(out *rebuildOutput, src datadir.Dirs) string {
+	if out != nil {
+		return out.dirs.SnapDomain
+	}
+	return src.SnapDomain
+}
+
+// formatRebuildReport lays the rebuild's counts and the sizes on disk out as
+// tab-separated tables. Column names are part of the output: the numbers are
+// meant to be pasted next to another run's.
+func formatRebuildReport(files []commitmentFileSize, report *dbstate.RebuildReport) string {
+	var b strings.Builder
+	if report != nil {
+		fmt.Fprintf(&b, "# commitment_rebuild target=%s hash=%s\n", report.Target.Variant, report.Target.HashName)
+	}
+
+	b.WriteString("# commitment_files\nfile\tstep_from\tstep_to\tbytes\n")
+	var stepFrom, stepTo uint64
+	for i, f := range files {
+		if i == 0 {
+			stepFrom = f.StepFrom
+		}
+		stepTo = max(stepTo, f.StepTo)
+		fmt.Fprintf(&b, "%s\t%d\t%d\t%d\n", f.Name, f.StepFrom, f.StepTo, f.Bytes)
+	}
+	fmt.Fprintf(&b, "total\t%d\t%d\t%d\n", stepFrom, stepTo, totalCommitmentBytes(files))
+	if report == nil {
+		return b.String()
+	}
+
+	b.WriteString("\n# rebuild_ranges\nstep_from\tstep_to\ttxn_from\ttxn_to\tkeys_in_files\tkeys_processed\troot\n")
+	for _, r := range report.Ranges {
+		fmt.Fprintf(&b, "%d\t%d\t%d\t%d\t%d\t%d\t%x\n", r.StepFrom, r.StepTo, r.TxnFrom, r.TxnTo, r.KeysInFiles, r.KeysProcessed, r.RootHash)
+	}
+
+	b.WriteString("\n# rebuild_shards\nrange_step_from\trange_step_to\tstep_from\tstep_to\tkeys\tcode_accounts\tunique_code_hashes\n")
+	for _, r := range report.Ranges {
+		for _, s := range r.Shards {
+			fmt.Fprintf(&b, "%d\t%d\t%d\t%d\t%d\t%d\t%d\n",
+				r.StepFrom, r.StepTo, s.StepFrom, s.StepTo, s.Keys, s.CodeBearingAccounts, s.UniqueCodeHashes)
+		}
+	}
+	return b.String()
+}
+
 func commitmentFilesIn(snapDomain string) ([]string, error) {
 	entries, err := os.ReadDir(snapDomain)
 	if err != nil {
@@ -600,15 +700,22 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	agg.PresetOfflineMerge()
 	agg.PeriodicalyPrintProcessSet(ctx)
 
+	var report *dbstate.RebuildReport
 	if withHistory {
 		if _, err := stagedsync.RebuildPatriciaTrieWithHistory(ctx, cfg, squeeze); err != nil {
 			return err
 		}
 	} else {
-		if _, err := stagedsync.RebuildPatriciaTrieBasedOnFiles(ctx, cfg, squeeze, dbstate.WithRebuildTarget(rebuildTarget)); err != nil {
+		if _, report, err = stagedsync.RebuildPatriciaTrieBasedOnFiles(ctx, cfg, squeeze, dbstate.WithRebuildTarget(rebuildTarget)); err != nil {
 			return err
 		}
 	}
+
+	files, err := commitmentFileSizes(rebuildReportDir(out, dirs))
+	if err != nil {
+		return err
+	}
+	fmt.Println(formatRebuildReport(files, report))
 	return nil
 }
 

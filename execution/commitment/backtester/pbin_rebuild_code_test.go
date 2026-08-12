@@ -21,9 +21,6 @@ package backtester_test
 
 import (
 	"bytes"
-	"context"
-	"strings"
-	"sync"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -160,7 +157,7 @@ func pbinCodeCollatedTxNum(t *testing.T, db kv.TemporalRwDB) uint64 {
 // pbinCodeRebuild runs the fixture forward, collates it into domain files, wipes
 // the commitment and rebuilds it from those files. It returns the forward root at
 // the collated boundary and the rebuilt one.
-func pbinCodeRebuild(t *testing.T, accts []pbinCodeAccount, txCount uint64) (kv.TemporalRwDB, []byte, []byte) {
+func pbinCodeRebuild(t *testing.T, accts []pbinCodeAccount, txCount uint64) (kv.TemporalRwDB, []byte, []byte, *state.RebuildReport) {
 	t.Helper()
 	db, agg, dirs := pbinM1ANewDatadir(t, pbinCodeStepSize)
 	stepRoots := pbinCodeForwardRun(t, db, pbinCodeStepSize, txCount, accts)
@@ -172,12 +169,12 @@ func pbinCodeRebuild(t *testing.T, accts []pbinCodeAccount, txCount uint64) (kv.
 	require.NotEmpty(t, wantRoot, "the collated boundary must be one the forward run computed a root at")
 
 	db, agg = pbinM1AWipeCommitment(t, db, agg, dirs, pbinCodeStepSize)
-	rebuiltRoot, err := state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), false)
+	rebuiltRoot, report, err := state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), false)
 	require.NoError(t, err)
 
 	require.NoError(t, agg.OpenFolder())
 	require.NoError(t, agg.BuildMissedAccessors(t.Context(), 1))
-	return db, wantRoot, rebuiltRoot
+	return db, wantRoot, rebuiltRoot, report
 }
 
 // pbinCodeZoneRecords keeps the branch records whose bit path runs through the
@@ -191,6 +188,20 @@ func pbinCodeZoneRecords(t *testing.T, db kv.TemporalRwDB) map[string][]byte {
 		}
 	}
 	return out
+}
+
+// pbinCodeReportShards flattens the shards a rebuild reports. Every range walks
+// the whole key set at its own boundary, so the code counts are per shard and
+// summing them over ranges counts the same account again.
+func pbinCodeReportShards(t *testing.T, report *state.RebuildReport) []state.RebuildShardReport {
+	t.Helper()
+	require.NotNil(t, report)
+	var shards []state.RebuildShardReport
+	for _, r := range report.Ranges {
+		shards = append(shards, r.Shards...)
+	}
+	require.NotEmpty(t, shards)
+	return shards
 }
 
 // pbinCodeRecordsHold reports whether some record carries this leaf value. A
@@ -210,7 +221,7 @@ func TestPBinRebuildCodeSpansGroups(t *testing.T) {
 
 	// One chunk past a full group, so the code takes two code-zone stems.
 	code := pbinCodeBytes(0x01, (pbinCodeGroupChunks+2)*pbinCodeChunkLen)
-	db, wantRoot, rebuiltRoot := pbinCodeRebuild(t, pbinCodeAccounts(code, 1), 4*pbinCodeStepSize)
+	db, wantRoot, rebuiltRoot, _ := pbinCodeRebuild(t, pbinCodeAccounts(code, 1), 4*pbinCodeStepSize)
 	require.Equal(t, wantRoot, rebuiltRoot, "a rebuild over code-bearing accounts must reproduce the forward root")
 
 	records := pbinCodeZoneRecords(t, db)
@@ -227,9 +238,9 @@ func TestPBinRebuildSharedCodeChunkedOnce(t *testing.T) {
 	code := pbinCodeBytes(0x02, 3*pbinCodeChunkLen)
 	txCount := 4 * pbinCodeStepSize
 
-	soleDB, soleWant, soleGot := pbinCodeRebuild(t, pbinCodeAccounts(code, 1), txCount)
+	soleDB, soleWant, soleGot, soleReport := pbinCodeRebuild(t, pbinCodeAccounts(code, 1), txCount)
 	require.Equal(t, soleWant, soleGot)
-	sharedDB, sharedWant, sharedGot := pbinCodeRebuild(t, pbinCodeAccounts(code, 1, 2), txCount)
+	sharedDB, sharedWant, sharedGot, sharedReport := pbinCodeRebuild(t, pbinCodeAccounts(code, 1, 2), txCount)
 	require.Equal(t, sharedWant, sharedGot)
 	require.NotEqual(t, soleWant, sharedWant, "the second holder must change the tree outside the code zone")
 
@@ -237,6 +248,15 @@ func TestPBinRebuildSharedCodeChunkedOnce(t *testing.T) {
 	require.NotEmpty(t, soleZone, "the rebuild must land the shared code in the code zone")
 	require.Equal(t, soleZone, pbinCodeZoneRecords(t, sharedDB),
 		"chunks are addressed by code hash, so a second holder of the same code adds no code-zone record")
+
+	for _, s := range pbinCodeReportShards(t, soleReport) {
+		require.Equal(t, uint64(1), s.CodeBearingAccounts)
+		require.Equal(t, uint64(1), s.UniqueCodeHashes)
+	}
+	for _, s := range pbinCodeReportShards(t, sharedReport) {
+		require.Equal(t, uint64(2), s.CodeBearingAccounts, "both holders reach the chunker")
+		require.Equal(t, uint64(1), s.UniqueCodeHashes, "one shard chunks one code hash once, whoever holds it")
+	}
 }
 
 func TestPBinRebuildZeroCodeChunkAbsent(t *testing.T) {
@@ -249,11 +269,11 @@ func TestPBinRebuildZeroCodeChunkAbsent(t *testing.T) {
 	}, nil)
 	txCount := 4 * pbinCodeStepSize
 
-	zeroDB, zeroWant, zeroGot := pbinCodeRebuild(t, pbinCodeAccounts(withZero, 1), txCount)
+	zeroDB, zeroWant, zeroGot, _ := pbinCodeRebuild(t, pbinCodeAccounts(withZero, 1), txCount)
 	require.Equal(t, zeroWant, zeroGot)
-	twoDB, twoWant, twoGot := pbinCodeRebuild(t, pbinCodeAccounts(pbinCodeBytes(0x05, 2*pbinCodeChunkLen), 1), txCount)
+	twoDB, twoWant, twoGot, _ := pbinCodeRebuild(t, pbinCodeAccounts(pbinCodeBytes(0x05, 2*pbinCodeChunkLen), 1), txCount)
 	require.Equal(t, twoWant, twoGot)
-	threeDB, threeWant, threeGot := pbinCodeRebuild(t, pbinCodeAccounts(pbinCodeBytes(0x06, 3*pbinCodeChunkLen), 1), txCount)
+	threeDB, threeWant, threeGot, _ := pbinCodeRebuild(t, pbinCodeAccounts(pbinCodeBytes(0x06, 3*pbinCodeChunkLen), 1), txCount)
 	require.Equal(t, threeWant, threeGot)
 
 	zeroZone := pbinCodeZoneRecords(t, zeroDB)
@@ -271,51 +291,18 @@ func TestPBinRebuildDelegatedAccountHasNoCodeLeaves(t *testing.T) {
 	pbinM1ABinVariant(t)
 
 	indicator := append([]byte{0xEF, 0x01, 0x00}, pbinCodeAddr(7)...)
-	db, wantRoot, rebuiltRoot := pbinCodeRebuild(t, pbinCodeAccounts(indicator, 1), 4*pbinCodeStepSize)
+	db, wantRoot, rebuiltRoot, delegationReport := pbinCodeRebuild(t, pbinCodeAccounts(indicator, 1), 4*pbinCodeStepSize)
 	require.Equal(t, wantRoot, rebuiltRoot)
 
 	require.Empty(t, pbinCodeZoneRecords(t, db), "a delegation indicator is not chunked")
+	for _, s := range pbinCodeReportShards(t, delegationReport) {
+		require.Zero(t, s.CodeBearingAccounts, "a delegated account holds no code the chunker sees")
+		require.Zero(t, s.UniqueCodeHashes)
+	}
 	leafValue := make([]byte, 32)
 	copy(leafValue, indicator)
 	require.True(t, pbinCodeRecordsHold(pbinM1ABranchRecords(t, db), leafValue),
 		"the rebuilt account must carry the indicator in its DELEGATION leaf")
-}
-
-// pbinCodeShardLog counts the shards a rebuild runs, which no return value
-// reports. The shard log lines are written through the SharedDomains logger the
-// rebuild builds itself, so the count has to be taken at the root handler.
-type pbinCodeShardLog struct {
-	mu     sync.Mutex
-	next   log.Handler
-	shards int
-}
-
-func pbinCodeCountShards(t *testing.T) *pbinCodeShardLog {
-	t.Helper()
-	prev := log.Root().GetHandler()
-	c := &pbinCodeShardLog{next: prev}
-	log.Root().SetHandler(c)
-	t.Cleanup(func() { log.Root().SetHandler(prev) })
-	return c
-}
-
-func (c *pbinCodeShardLog) Log(r *log.Record) error {
-	c.mu.Lock()
-	if strings.Contains(r.Msg, " shard ") && strings.HasSuffix(r.Msg, " started") {
-		c.shards++
-	}
-	c.mu.Unlock()
-	return c.next.Log(r)
-}
-
-func (c *pbinCodeShardLog) Enabled(ctx context.Context, lvl log.Lvl) bool {
-	return c.next.Enabled(ctx, lvl)
-}
-
-func (c *pbinCodeShardLog) count() int {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.shards
 }
 
 // A range wider than commitment.DefaultRebuildShardMaxSteps is rebuilt in
@@ -356,11 +343,17 @@ func TestPBinRebuildSharedCodeAcrossShards(t *testing.T) {
 
 	db, agg = pbinM1AWipeCommitment(t, db, agg, dirs, stepSize)
 
-	shardLog := pbinCodeCountShards(t)
-	rebuiltRoot, err := state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), false)
+	rebuiltRoot, report, err := state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), false)
 	require.NoError(t, err)
-	require.Equal(t, 2, shardLog.count(), "the fixture must split one range into two shards, otherwise it proves nothing")
+	require.Len(t, report.Ranges, 1)
+	require.Len(t, report.Ranges[0].Shards, 2, "the fixture must split one range into two shards, otherwise it proves nothing")
 	require.Equal(t, wantRoot, rebuiltRoot)
+
+	for i, s := range pbinCodeReportShards(t, report) {
+		require.Positive(t, s.CodeBearingAccounts, "shard %d holds no holder of the shared code, so the split proves nothing", i)
+		require.Equal(t, uint64(1), s.UniqueCodeHashes,
+			"the chunk cache lives for one shard, so shard %d must chunk the shared code itself", i)
+	}
 
 	require.NoError(t, agg.OpenFolder())
 	require.NoError(t, agg.BuildMissedAccessors(t.Context(), 1))
