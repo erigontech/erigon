@@ -161,8 +161,19 @@ func (m *TorrentPeerManager) sync() {
 	}
 	m.mu.Unlock()
 
+	// Skip torrents we have completely — snapshot files are one-off.
+	// Re-adding a peer to a completed torrent is worse than a no-op:
+	// anacrolix's addPeer unconditionally calls openNewConns, which
+	// re-dials any peer whose PeerConn was dropped after mutual
+	// completion (DropMutuallyCompletePeers default). With ~600 local
+	// torrents in a trusted-peer topology that produces thousands of
+	// dial+RST cycles per hour on loopback and blocks new-torrent
+	// metadata fetches behind the dial queue.
 	if len(pis) > 0 {
 		for _, t := range m.client.Torrents() {
+			if t.Complete().Bool() {
+				continue
+			}
 			t.AddPeers(pis)
 		}
 	}
