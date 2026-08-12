@@ -49,6 +49,23 @@ func TestChiadoDoesNotConfigureStaticPeers(t *testing.T) {
 	require.Empty(t, network.StaticPeers)
 }
 
+func TestChiadoConfiguresSuppliedBootstrapNodes(t *testing.T) {
+	network, _ := GetConfigsByNetwork(chainspec.ChiadoChainID)
+
+	require.Subset(t, network.BootNodes, []string{
+		"/ip4/57.131.40.177/tcp/9000/p2p/16Uiu2HAm6HQoX8sEJxr58GkuM9FPWkgLdCs71vz5qcu7hyisYRLS",
+		"/ip4/45.79.214.176/tcp/9000/p2p/16Uiu2HAm7jUXmkWrC5cTwSa9bVtzeAwUXu3MZZnhcsY5QTAiNmyL",
+		"/ip4/51.210.221.124/tcp/9500/p2p/16Uiu2HAmSnLLjZfkFCythED8tQS5kP4NJKBuMdd1FYE23ZymKwL6",
+		"/ip4/57.129.122.18/tcp/9000/p2p/16Uiu2HAmALSWURS5G4Qsmm7eFbH5oXxoFJEQuVdhAZ1MMcE9XjrU",
+		"/ip4/51.210.221.124/tcp/9100/p2p/16Uiu2HAmUhn8VR7HFY7SLPqbBhnTT1yfjKBJQKSodUkWsE5adNNu",
+		"/ip4/137.74.112.3/tcp/9000/p2p/16Uiu2HAm1merr7djndkMFf2TxacP53tA6rFoU4tXD5NNPGYz6RPa",
+		"/ip4/65.21.231.153/tcp/9009/p2p/16Uiu2HAm5tjLaFaGnEwtrB7sRynYs5VpE3hjT7G4tkKhTEU2pcaf",
+		"/ip4/51.68.224.153/udp/9001/quic-v1/p2p/16Uiu2HAkxcBE3LK7zhnyZERguonkKmXLgYPRcuDPaF6C2vaigYuT",
+		"/ip4/139.144.16.95/tcp/9000/p2p/16Uiu2HAmH5pPnGrQEq7Q6McNA24ExRKRyaRzmJ44M1kAvvHYAeer",
+		"/ip4/65.109.101.48/tcp/9000/p2p/16Uiu2HAm98ceLNE6X3mjVcsu6ZAaKZPPcqKmeofidTDy7UCHyTtY",
+	})
+}
+
 func TestCaplinConfigCanSetStaticPeers(t *testing.T) {
 	network := NetworkConfigs[chainspec.ChiadoChainID]
 

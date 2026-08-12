@@ -22,7 +22,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common/crypto"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/p2p/enode"
 )
 
@@ -113,6 +115,19 @@ func TestParseBootstrapNodesRejectsMalformedMixedInput(t *testing.T) {
 	require.Nil(t, discoveryNodes)
 	require.Nil(t, directPeers)
 	require.Nil(t, unsupportedPeers)
+}
+
+func TestChiadoBootstrapNodesClassification(t *testing.T) {
+	t.Parallel()
+
+	network, _ := clparams.GetConfigsByNetwork(chainspec.ChiadoChainID)
+	discoveryNodes, directPeers, unsupportedPeers, err := ParseBootstrapNodes(network.BootNodes)
+	require.NoError(t, err)
+	require.Len(t, discoveryNodes, 8)
+	require.Len(t, directPeers, 9)
+	require.Equal(t, []string{
+		"/ip4/51.68.224.153/udp/9001/quic-v1/p2p/16Uiu2HAkxcBE3LK7zhnyZERguonkKmXLgYPRcuDPaF6C2vaigYuT",
+	}, unsupportedPeers)
 }
 
 func TestParseStaticPeerRejectsMultiaddrWithoutPeerID(t *testing.T) {
