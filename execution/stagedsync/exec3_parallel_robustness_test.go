@@ -1600,13 +1600,14 @@ func TestCheckBlocksDrained(t *testing.T) {
 		require.NoError(t, withPending().checkBlocksDrained(ctx, context.Background(), nil))
 	})
 
-	t.Run("real parent cancellation cause surfaces via reconcileParentCause", func(t *testing.T) {
+	t.Run("real parent cancellation cause does not hide an undrained block", func(t *testing.T) {
 		cause := errors.New("parent execution failed")
 		ctx, cancel := context.WithCancelCause(context.Background())
 		cancel(cause)
 
 		err := reconcileParentCause(ctx, withPending().checkBlocksDrained(ctx, context.Background(), nil))
 		require.ErrorIs(t, err, cause)
+		require.ErrorContains(t, err, "never reached apply-loop validation: [3]")
 	})
 
 	t.Run("real parent cause preserves an existing error", func(t *testing.T) {

@@ -1645,14 +1645,15 @@ func (pe *parallelExecutor) closeApplyChannels() (closedOrder []string) {
 
 // checkBlocksDrained reports scheduled blocks that never reached apply-loop
 // validation. This is an executor failure, not proof that a block is invalid.
-// Parent cancellation (the caller reconciles its cause), a recorded verdict,
-// and a deliberate resumable-boundary stop (stopMoreWork) are exempt: all
-// intentionally abandon queued follow-on blocks. A bad-block stop always
-// records a verdict or an operational failure first, so it needs no exemption
-// of its own, and stopReachedMax claims the requested range completed —
-// pending blocks remain an executor failure.
+// Routine parent cancellation, a recorded verdict, and a deliberate
+// resumable-boundary stop (stopMoreWork) are exempt: all intentionally abandon
+// queued follow-on blocks. A real parent cause is reconciled after this check,
+// so it cannot hide an undrained block. A bad-block stop always records a
+// verdict or an operational failure first, so it needs no exemption of its own,
+// and stopReachedMax claims the requested range completed — pending blocks
+// remain an executor failure.
 func (pe *parallelExecutor) checkBlocksDrained(ctx, executorCtx context.Context, execErr error) error {
-	if ctx.Err() != nil {
+	if ctx.Err() != nil && commonerrors.IsOnlyCanceled(context.Cause(ctx)) {
 		return execErr
 	}
 	if execErr != nil && !commonerrors.IsOnlyCanceled(execErr) {
