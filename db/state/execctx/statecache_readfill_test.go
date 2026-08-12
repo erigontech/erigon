@@ -168,6 +168,49 @@ func TestReadFill_RetriesStateVersionAfterConstructionError(t *testing.T) {
 	require.True(t, ok, "the recovered state-version read must restore fill authority")
 }
 
+func TestStateCache_MergedUnwindPublishesInvalidation(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	db := newTestDb(t, 16)
+	tx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	parent, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	require.NoError(t, err)
+	defer parent.Close()
+	stateCache := newSmallStateCache()
+	t.Cleanup(stateCache.Close)
+	parent.SetStateCacheForTest(stateCache)
+
+	key := make([]byte, 20)
+	key[0] = 0x01
+	seed(t, stateCache, tx, kv.AccountsDomain, key, encAccount(1), 12)
+	_, ok := stateCache.View(nil).Get(kv.AccountsDomain, key)
+	require.True(t, ok)
+	var parentDiffs [kv.DomainLen][]kv.DomainEntryDiff
+	parent.Unwind(15, &parentDiffs)
+	_, ok = stateCache.View(nil).Get(kv.AccountsDomain, key)
+	require.True(t, ok, "an entry below the parent's unwind boundary must remain live")
+
+	child, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	require.NoError(t, err)
+	var childDiffs [kv.DomainLen][]kv.DomainEntryDiff
+	child.Unwind(10, &childDiffs)
+	require.NoError(t, parent.Merge(ctx, 0, child, 0))
+	_, ok = stateCache.View(nil).Get(kv.AccountsDomain, key)
+	require.False(t, ok, "the merged unwind must invalidate the cache before the parent serves reads")
+
+	seed(t, stateCache, tx, kv.AccountsDomain, key, encAccount(1), 12)
+	_, ok = stateCache.View(nil).Get(kv.AccountsDomain, key)
+	require.True(t, ok, "a fill admitted after staging exercises commit-time invalidation")
+	require.NoError(t, parent.Commit(ctx, tx))
+
+	_, ok = stateCache.View(nil).Get(kv.AccountsDomain, key)
+	require.False(t, ok, "the merged unwind must invalidate entries from the discarded range")
+}
+
 func TestReadFill_MemoizesWritableVisibleEndUntilFlush(t *testing.T) {
 	t.Parallel()
 

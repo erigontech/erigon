@@ -462,6 +462,14 @@ func (sd *SharedDomains) Merge(ctx context.Context, sdTxNum uint64, other *Share
 	if err := sd.mem.Merge(other.mem); err != nil {
 		return err
 	}
+	if other.cacheUnwindPending {
+		// A shared cache was invalidated when the child staged the unwind;
+		// otherwise invalidate the parent's cache before it serves merged state.
+		if sd.stateCache != other.stateCache {
+			sd.cacheApplier.Unwind(other.cacheUnwindTo)
+		}
+		sd.stageCacheUnwind(other.cacheUnwindTo)
+	}
 
 	// Merge block-level metadata from other's overlay into ours by flushing
 	// other's overlay writes directly into our overlay (which implements kv.RwTx).
@@ -847,6 +855,12 @@ func (sd *SharedDomains) Unwind(txNumUnwindTo uint64, changeset *[kv.DomainLen][
 	// they are not below the reorg window. Commit repeats the invalidation at the
 	// durable state-version boundary, so no fill admitted while staged survives.
 	sd.cacheApplier.Unwind(txNumUnwindTo)
+	sd.stageCacheUnwind(txNumUnwindTo)
+}
+
+// stageCacheUnwind retains the lowest staged boundary because merged batches
+// may contain cache entries from either discarded range.
+func (sd *SharedDomains) stageCacheUnwind(txNumUnwindTo uint64) {
 	if !sd.cacheUnwindPending || txNumUnwindTo < sd.cacheUnwindTo {
 		sd.cacheUnwindTo = txNumUnwindTo
 	}
