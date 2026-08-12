@@ -187,7 +187,7 @@ func TestBlocksByRootChainDataFallback(t *testing.T) {
 	t.Cleanup(func() { indiciesDB.Close() })
 	store := tests.NewMockBlockReader()
 
-	blocks, blockRoots := makeBlocksByHeadChain(t, 100, 1)
+	blocks, blockRoots := makeTestBlockChain(t, 100, 1)
 	chainData := mock_services.NewChainDataReaderMock()
 	chainData.Blocks[blockRoots[0]] = blocks[0]
 

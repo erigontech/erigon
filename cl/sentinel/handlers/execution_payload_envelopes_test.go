@@ -376,6 +376,7 @@ func TestExecutionPayloadEnvelopesByRootHandlerSkipsUnreadableEnvelope(t *testin
 
 	peersPool := peers.NewPool(host)
 	_, indiciesDB := setupStore(t)
+	t.Cleanup(func() { indiciesDB.Close() })
 	store := tests.NewMockBlockReader()
 
 	tx, err := indiciesDB.BeginRw(ctx)
@@ -462,12 +463,12 @@ func TestExecutionPayloadEnvelopesByRootHandlerSkipsUnreadableEnvelope(t *testin
 	require.NoError(t, err)
 
 	firstByte := make([]byte, 1)
-	_, err = stream.Read(firstByte)
+	_, err = io.ReadFull(stream, firstByte)
 	require.NoError(t, err)
 	require.Equal(t, byte(SuccessfulResponsePrefix), firstByte[0])
 
 	forkDigest := make([]byte, 4)
-	_, err = stream.Read(forkDigest)
+	_, err = io.ReadFull(stream, forkDigest)
 	require.NoError(t, err)
 	require.NotZero(t, binary.BigEndian.Uint32(forkDigest))
 

@@ -45,7 +45,7 @@ import (
 func TestBlocksByHeadCountCap(t *testing.T) {
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)
 	count := beaconCfg.MaxRequestBlocksDeneb + 5
-	blocks, roots := makeBlocksByHeadChain(t, 100, count)
+	blocks, roots := makeTestBlockChain(t, 100, count)
 
 	store, stream := setupBlocksByHeadTest(t, blocks, nil)
 	_ = store
@@ -60,7 +60,7 @@ func TestBlocksByHeadCountCap(t *testing.T) {
 }
 
 func TestBlocksByHeadParentChainTraversal(t *testing.T) {
-	blocks, roots := makeBlocksByHeadChain(t, 200, 4)
+	blocks, roots := makeTestBlockChain(t, 200, 4)
 	_, stream := setupBlocksByHeadTest(t, blocks, nil)
 
 	writeBlocksByHeadRequest(t, stream, roots[len(roots)-1], 3)
@@ -77,7 +77,7 @@ func TestBlocksByHeadParentChainTraversal(t *testing.T) {
 }
 
 func TestBlocksByHeadChainDataFallback(t *testing.T) {
-	blocks, roots := makeBlocksByHeadChain(t, 300, 1)
+	blocks, roots := makeTestBlockChain(t, 300, 1)
 	chainData := mock_services.NewChainDataReaderMock()
 	chainData.Blocks[roots[0]] = blocks[0]
 	_, stream := setupBlocksByHeadTest(t, nil, chainData)
@@ -98,7 +98,7 @@ func TestBlocksByHeadMissingRoot(t *testing.T) {
 }
 
 func TestBlocksByHeadZeroCount(t *testing.T) {
-	blocks, roots := makeBlocksByHeadChain(t, 400, 1)
+	blocks, roots := makeTestBlockChain(t, 400, 1)
 	_, stream := setupBlocksByHeadTest(t, blocks, nil)
 
 	writeBlocksByHeadRequest(t, stream, roots[0], 0)
@@ -163,7 +163,7 @@ func setupBlocksByHeadTest(
 	return store, stream
 }
 
-func makeBlocksByHeadChain(t *testing.T, startSlot, count uint64) ([]*cltypes.SignedBeaconBlock, []common.Hash) {
+func makeTestBlockChain(t *testing.T, startSlot, count uint64) ([]*cltypes.SignedBeaconBlock, []common.Hash) {
 	t.Helper()
 
 	parentRoot := common.Hash{0x99}
