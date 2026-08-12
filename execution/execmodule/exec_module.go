@@ -205,8 +205,9 @@ type ExecModule struct {
 	accum *Accumulation
 
 	// configuration
-	config  *chain.Config
-	syncCfg ethconfig.Sync
+	config          *chain.Config
+	syncCfg         ethconfig.Sync
+	experimentalBAL bool
 	// rules engine
 	engine         rules.Engine
 	balRegenerator *bal.Regenerator
@@ -248,6 +249,7 @@ func NewExecModule(
 	logger log.Logger,
 	engine rules.Engine,
 	syncCfg ethconfig.Sync,
+	experimentalBAL bool,
 	fcuBackgroundPrune bool,
 	onlySnapDownloadOnStart bool,
 	readAheader *exec.BlockReadAheader,
@@ -276,6 +278,7 @@ func NewExecModule(
 		engine:                  engine,
 		balRegenerator:          bal.NewRegenerator(blockReader, engine, logger),
 		syncCfg:                 syncCfg,
+		experimentalBAL:         experimentalBAL,
 		bacgroundCtx:            ctx,
 		fcuBackgroundPrune:      fcuBackgroundPrune,
 		onlySnapDownloadOnStart: onlySnapDownloadOnStart,
@@ -697,8 +700,8 @@ func (e *ExecModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidH
 // but never syncing; the operator's restart is the retry. The parallel
 // executor additionally cannot unwind an invalid block; serial keeps the
 // stay-up behavior.
-func haltOnInitialSyncFailure(err error, parallelExec bool) bool {
-	return err != nil && !commonerrors.IsOnlyCanceled(err) && parallelExec
+func haltOnInitialSyncFailure(err error, exec3Parallel, experimentalBAL bool) bool {
+	return err != nil && !commonerrors.IsOnlyCanceled(err) && (exec3Parallel || experimentalBAL)
 }
 
 func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
@@ -714,7 +717,7 @@ func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 		if !commonerrors.IsOnlyCanceled(err) {
 			e.logger.Error("Could not start execution service", "err", err)
 		}
-		if haltOnInitialSyncFailure(err, dbg.Exec3Parallel) {
+		if haltOnInitialSyncFailure(err, dbg.Exec3Parallel, e.experimentalBAL) {
 			e.logger.Error("Initial sync failed during parallel execution — halting process")
 			go func() {
 				if stopErr := e.stopNode(); stopErr != nil {

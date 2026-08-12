@@ -38,12 +38,14 @@ func TestHaltOnInitialSyncFailure(t *testing.T) {
 		errors.New("parallel exec finished with 1 scheduled block(s) that never reached apply-loop validation"))
 	verdict := fmt.Errorf("[Execution] %w", fmt.Errorf("%w: gas mismatch, block=12", rules.ErrInvalidBlock))
 
-	require.True(t, haltOnInitialSyncFailure(operational, true),
+	require.True(t, haltOnInitialSyncFailure(operational, true, false),
 		"a real failure must halt regardless of its class — the node would otherwise stay up but never sync")
-	require.True(t, haltOnInitialSyncFailure(verdict, true))
-	require.False(t, haltOnInitialSyncFailure(nil, true))
-	require.False(t, haltOnInitialSyncFailure(fmt.Errorf("[Execution] %w", context.Canceled), true),
+	require.True(t, haltOnInitialSyncFailure(verdict, true, false))
+	require.True(t, haltOnInitialSyncFailure(operational, false, true),
+		"experimental BAL also selects the parallel executor")
+	require.False(t, haltOnInitialSyncFailure(nil, true, false))
+	require.False(t, haltOnInitialSyncFailure(fmt.Errorf("[Execution] %w", context.Canceled), true, false),
 		"shutdown must not halt the node")
-	require.False(t, haltOnInitialSyncFailure(operational, false),
+	require.False(t, haltOnInitialSyncFailure(operational, false, false),
 		"serial execution keeps the stay-up behavior")
 }

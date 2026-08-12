@@ -958,6 +958,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		logger,
 		backend.engine,
 		config.Sync,
+		config.ExperimentalBAL,
 		config.FcuBackgroundPrune,
 		onlySnapDownloadOnStart,
 		backend.readAheader,
