@@ -117,6 +117,33 @@ Filters created with `eth_newFilter`, `eth_newBlockFilter`, and `eth_newPendingT
 
 ---
 
+# Erigon v3.5.5 — Tidal Tails — 2026-08-11
+
+v3.5.5 is a bugfix and security release recommended for all users, and especially for block proposers and archive-node operators. It fixes a panic on every Fulu blinded-block submission (#23150), a payload frozen before its slot began under an external consensus layer (#23102), and wrong `logIndex` values on archive nodes (#22951). It is a drop-in upgrade from 3.5.4 — no re-sync required.
+
+**Bugfixes**
+
+- cl/beacon: handle an empty Fulu builder response (#23150) by @domiwei — Builder API v2 answers a successful Fulu blinded-block submission with `202 Accepted` and no body, so the builder client returned all-nil and `publishBlindedBlocks` dereferenced the nil payload. The beacon router installs no `middleware.Recoverer`, so the validator client saw only a dropped connection and nothing reached the Erigon log. Fixes #22598.
+- execution: build payloads until the slot they are for (#23102) by @lystopad — the builder's time budget ran from when payload attributes arrived rather than from the payload timestamp, so a consensus layer sending attributes well ahead of the slot got a payload frozen before that slot began. The budget now derives from the timestamp, floored at the old value and capped at two slots. Non-proposing nodes and Caplin are unaffected.
+- db/state: route receipt-domain reads through the overlay `DomainReader` (#22951) by @Sahil-4555 and @mh0lt — a block admitted through the block overlay read its receipt metadata from the committed tx, where a history miss fell back to `GetLatest` and returned the previous writing block's final log count. The wrong `logIndex` was then cached in the RPC layer. Affected v3.5.1–v3.5.4. Fixes #22106.
+- db/state: roll back receipt domains on an in-RAM reorg unwind (#23064) by @MoonBoi9001 — the in-memory unwind path restored a hand-written list of the four state kinds that existed when it was written and never gained the receipt counters added later, so it left the abandoned blocks' values in place. It now walks every state kind, as the disk path does.
+- db/downloader: allow seeding caplin state snapshots with a nil global type (#22980) by @lystopad — a node upgraded in place from a recent `release/3.4` build logged `nil ptr after parsing file: caplin/…-NextSyncCommittee.seg` and silently stopped seeding its caplin state snapshots.
+
+**Security**
+
+- build: bump `golang.org/x/text` to v0.39.0 (#23178) by @lystopad — CVE-2026-56852: infinite loop in `unicode/norm` on invalid UTF-8. Reachable from the downloader's HTTP/3 webseed path, and the only advisory here that `govulncheck` reports as called.
+- build: bump `golang.org/x/net` to v0.56.0 (#23178) by @lystopad — CVE-2026-46600: panic parsing a malformed SVCB or HTTPS DNS resource record.
+- build: bump `github.com/quic-go/webtransport-go` to v0.11.1 (#23178) by @lystopad — CVE-2026-57497: memory exhaustion from unbounded buffering of unknown capsules. Not reachable in Erigon: no WebTransport libp2p transport is registered.
+- build: bump `github.com/go-chi/chi/v5` to v5.3.1 (#23178) by @lystopad — CVE-2025-69725 (open redirect in `RedirectSlashes`) plus three `middleware.RealIP` IP-spoofing advisories. Not reachable in Erigon: none of chi's middleware is used.
+
+**Improvements**
+
+- build: revert the `go-eth-kzg` verifier optimization (#23177) by @yperbasis — `release/3.5` pinned `crate-crypto/go-eth-kzg` to an Erigon fork carrying an upstream change that is still an unmerged draft. This restores the released upstream `v1.5.0` while the correctness concerns are investigated.
+
+**Full Changelog**: https://github.com/erigontech/erigon/compare/v3.5.4...v3.5.5
+
+---
+
 # Erigon v3.5.4 — Tidal Tails — 2026-07-28
 
 v3.5.4 is a bugfix release recommended for all users, and especially for operators running the RPC daemon with response compression enabled — archive nodes and high-traffic RPC endpoints — where a native-memory leak in the gzip path could grow by ~9-15 GiB/day (#22700). It is a drop-in upgrade from 3.5.3 — no re-sync required.
