@@ -35,6 +35,13 @@ export USE_STATE_CACHE=false
 # peer propagation.
 export ERIGON_MERGE_MIN_AGE_STEPS="${ERIGON_MERGE_MIN_AGE_STEPS:-6}"
 
+# ERIGON_TORRENT_KEEP_COMPLETED_PEERS disables anacrolix's per-torrent
+# drop-after-mutual-completion. In leg-M mode a single local publisher
+# serves every torrent; keeping the conn avoids the 5s-per-cycle re-dial
+# churn that would otherwise stall new-torrent metadata fetches.
+# Enabling in leg P is harmless (there are no other peers to keep).
+export ERIGON_TORRENT_KEEP_COMPLETED_PEERS="${ERIGON_TORRENT_KEEP_COMPLETED_PEERS:-true}"
+
 # leg-M extras: bind the consumer to the local publisher and pin its
 # trust root. Empty in leg P.
 EXTRA_ARGS=()
