@@ -904,13 +904,25 @@ func (o *Orchestrator) maybeFireInitialDownloadsComplete() {
 
 // onDownloadFailed removes the failed download from the pending map so a
 // retry (from this or another peer) isn't silently suppressed by the
-// role-coverage check.
+// role-coverage check, and decrements statePending so a failed
+// phase-1 file doesn't leave the InitialStateReady gate held forever.
 func (o *Orchestrator) onDownloadFailed(e DownloadFailed) {
 	o.log.Warn("[flow] onDownloadFailed", "file", e.FileName, "reason", e.Reason)
 	o.peerMu.Lock()
+	entry, wasPending := o.pending[e.FileName]
 	delete(o.pending, e.FileName)
+	var shouldFireStateReady bool
+	if wasPending && entry.Kind != snapshot.KindCaplin && o.statePending > 0 {
+		o.statePending--
+		if o.statePending == 0 && !o.stateReadyFired {
+			shouldFireStateReady = true
+		}
+	}
 	o.peerMu.Unlock()
 
+	if shouldFireStateReady {
+		o.tryFireInitialStateReady(o.ctx)
+	}
 	// A failure that drains the last in-flight download settles the
 	// initial set as far as it will go — fire the completion check so
 	// the publish gate is not held shut forever on an un-retried file.

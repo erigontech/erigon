@@ -98,3 +98,48 @@ func TestOnDownloadComplete_RecordFileError_DecrementsStatePending(t *testing.T)
 	require.Equal(t, 0, o.PendingCount(),
 		"pending map must be drained when RecordFile fails, so a future manifest can re-request")
 }
+
+// TestOnDownloadFailed_DecrementsStatePending pins the same invariant
+// on the direct DownloadFailed handler path. bus.go now publishes
+// DownloadFailed for zero-byte / missing files; if onDownloadFailed
+// didn't decrement statePending, the leak just moved sites.
+func TestOnDownloadFailed_DecrementsStatePending(t *testing.T) {
+	bus := newBusForTest()
+	storage := &recordingStorage{inv: snapshot.NewInventory()}
+	o := NewWithStorage(bus, storage, logger())
+
+	require.NoError(t, o.Start(context.Background()))
+	t.Cleanup(func() { _ = o.Close() })
+
+	var stateReadyFired atomic.Int32
+	require.NoError(t, bus.Subscribe(func(e InitialStateReady) {
+		stateReadyFired.Add(1)
+	}))
+
+	stateFile := &snapshot.FileEntry{
+		Domain: testDomain, FromStep: 0, ToStep: 256,
+		Name: "v1.0-accounts.0-256.kv",
+	}
+	bus.Publish(PeerManifestReceived{
+		PeerID:  "peer-1",
+		Domains: map[snapshot.Domain][]*snapshot.FileEntry{testDomain: {stateFile}},
+	})
+
+	waitUntil(t, func() bool {
+		return o.PendingCount() >= 1
+	}, 2*time.Second, "state file to enter pending")
+
+	// Downloader reports the file failed to arrive (e.g. bus.go's
+	// post-Stat check saw a zero-byte or missing file).
+	bus.Publish(DownloadFailed{
+		FileName: stateFile.Name,
+		Reason:   "download produced zero-byte file",
+	})
+
+	waitUntil(t, func() bool {
+		return stateReadyFired.Load() >= 1
+	}, 2*time.Second, "InitialStateReady after DownloadFailed drain")
+
+	require.Equal(t, 0, o.PendingCount(),
+		"pending must drain on DownloadFailed")
+}
