@@ -23,6 +23,9 @@ import (
 
 // ChainDataReader is the chain data the req/resp handlers serve to peers:
 // recent blocks, light-client objects and execution payload envelopes.
+// ReadEnvelopeFromDisk may fail transiently even for a root HasEnvelope just
+// confirmed (pruning is not atomic with reads); treat the error as a skip,
+// not a fault. Get* methods never return (nil, true).
 type ChainDataReader interface {
 	GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool)
 	GetLightClientBootstrap(blockRoot common.Hash) (*cltypes.LightClientBootstrap, bool)

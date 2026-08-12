@@ -52,6 +52,7 @@ func (c *ConsensusHandlers) beaconBlocksByHeadHandler(s network.Stream) error {
 		if err != nil {
 			return err
 		}
+		// Recently received blocks (e.g. via gossip) may not be persisted yet; fall back to the in-memory fork graph.
 		if block == nil && c.chainDataReader != nil {
 			block, _ = c.chainDataReader.GetBlock(currentRoot)
 		}

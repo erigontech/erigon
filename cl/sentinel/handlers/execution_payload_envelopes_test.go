@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"io"
+	"os"
 	"testing"
 
 	"github.com/golang/snappy"
@@ -354,6 +355,146 @@ func TestExecutionPayloadEnvelopesByRootHandler(t *testing.T) {
 
 	_, err = stream.Read(make([]byte, 1))
 	require.ErrorIs(t, err, io.EOF, "stream should be empty after all envelopes")
+}
+
+func TestExecutionPayloadEnvelopesByRootHandlerSkipsUnreadableEnvelope(t *testing.T) {
+	ctx := context.Background()
+
+	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	require.NoError(t, err)
+	t.Cleanup(func() { host.Close() })
+
+	host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	require.NoError(t, err)
+	t.Cleanup(func() { host1.Close() })
+
+	err = host.Connect(ctx, peer.AddrInfo{
+		ID:    host1.ID(),
+		Addrs: host1.Addrs(),
+	})
+	require.NoError(t, err)
+
+	peersPool := peers.NewPool(host)
+	_, indiciesDB := setupStore(t)
+	store := tests.NewMockBlockReader()
+
+	tx, err := indiciesDB.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	ethClock, beaconCfg := getGloasEthClockAndConfig(t)
+
+	startSlot := ethClock.GetCurrentSlot() - 10
+	count := uint64(2)
+
+	expBlocks := populateDatabaseWithBlocks(t, store, tx, startSlot, count)
+	require.NoError(t, tx.Commit())
+
+	chainDataMock := mock_services.NewChainDataReaderMock()
+
+	expEnvelopes := make([]*cltypes.SignedExecutionPayloadEnvelope, 0, count)
+	blockRoots := make([]common.Hash, 0, count)
+	for i, block := range expBlocks {
+		if uint64(i) >= count {
+			break
+		}
+		bodyRoot, err := block.Block.Body.HashSSZ()
+		require.NoError(t, err)
+
+		header := &cltypes.BeaconBlockHeader{
+			Slot:          block.Block.Slot,
+			ParentRoot:    block.Block.ParentRoot,
+			ProposerIndex: block.Block.ProposerIndex,
+			Root:          block.Block.StateRoot,
+			BodyRoot:      bodyRoot,
+		}
+		blockRoot, err := header.HashSSZ()
+		require.NoError(t, err)
+
+		payload := cltypes.NewEth1Block(clparams.GloasVersion, beaconCfg)
+		payload.Transactions = &solid.TransactionsSSZ{}
+		payload.Extra = solid.NewExtraData()
+		payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(beaconCfg.MaxWithdrawalsPerPayload), 44)
+		envelope := &cltypes.SignedExecutionPayloadEnvelope{
+			Message: &cltypes.ExecutionPayloadEnvelope{
+				Payload:           payload,
+				ExecutionRequests: cltypes.NewExecutionRequestsWithVersion(beaconCfg, clparams.GloasVersion),
+			},
+		}
+		envelope.Message.BeaconBlockRoot = blockRoot
+		envelope.Message.BuilderIndex = uint64(i)
+
+		chainDataMock.Envelopes[blockRoot] = envelope
+		expEnvelopes = append(expEnvelopes, envelope)
+		blockRoots = append(blockRoots, blockRoot)
+	}
+
+	// HasEnvelope succeeds for both roots, but the first one fails to read
+	// (as when pruning unlinks the file between the two calls).
+	chainDataMock.ReadErr[blockRoots[0]] = os.ErrNotExist
+
+	c := NewConsensusHandlers(
+		ctx,
+		store,
+		indiciesDB,
+		host,
+		peersPool,
+		&clparams.NetworkConfig{},
+		nil,
+		beaconCfg,
+		ethClock,
+		nil, chainDataMock, nil, nil, nil, true,
+	)
+	c.Start()
+
+	reqRoots := solid.NewHashList(int(beaconCfg.MaxRequestPayloads))
+	for _, root := range blockRoots {
+		reqRoots.Append(root)
+	}
+	var reqBuf bytes.Buffer
+	err = ssz_snappy.EncodeAndWrite(&reqBuf, reqRoots)
+	require.NoError(t, err)
+
+	stream, err := host1.NewStream(ctx, host.ID(), protocol.ID(communication.ExecutionPayloadEnvelopesByRootProtocolV1))
+	require.NoError(t, err)
+
+	_, err = stream.Write(reqBuf.Bytes())
+	require.NoError(t, err)
+
+	firstByte := make([]byte, 1)
+	_, err = stream.Read(firstByte)
+	require.NoError(t, err)
+	require.Equal(t, byte(SuccessfulResponsePrefix), firstByte[0])
+
+	forkDigest := make([]byte, 4)
+	_, err = stream.Read(forkDigest)
+	require.NoError(t, err)
+	require.NotZero(t, binary.BigEndian.Uint32(forkDigest))
+
+	encodedLn, _, err := ssz_snappy.ReadUvarint(stream)
+	require.NoError(t, err)
+
+	raw := make([]byte, encodedLn)
+	sr := snappy.NewReader(stream)
+	bytesRead := 0
+	for bytesRead < int(encodedLn) {
+		n, err := sr.Read(raw[bytesRead:])
+		require.NoError(t, err)
+		bytesRead += n
+	}
+
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{
+		Message: cltypes.NewExecutionPayloadEnvelope(beaconCfg),
+	}
+	err = envelope.DecodeSSZ(raw, int(clparams.GloasVersion))
+	require.NoError(t, err)
+
+	// Only the second envelope is served; the unreadable one is skipped
+	// without aborting the stream.
+	require.Equal(t, expEnvelopes[1].Message.BuilderIndex, envelope.Message.BuilderIndex)
+
+	_, err = stream.Read(make([]byte, 1))
+	require.ErrorIs(t, err, io.EOF, "stream should contain only the readable envelope")
 }
 
 func TestExecutionPayloadEnvelopesByRootHandler_PreGloas(t *testing.T) {

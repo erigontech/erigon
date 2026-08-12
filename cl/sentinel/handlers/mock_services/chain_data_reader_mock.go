@@ -17,6 +17,8 @@
 package mock_services
 
 import (
+	"os"
+
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/common"
 )
@@ -28,6 +30,7 @@ type ChainDataReaderMock struct {
 	NewestLCUpdate        *cltypes.LightClientUpdate
 	LCUpdates             map[uint64]*cltypes.LightClientUpdate
 	Envelopes             map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
+	ReadErr               map[common.Hash]error
 }
 
 func NewChainDataReaderMock() *ChainDataReaderMock {
@@ -36,6 +39,7 @@ func NewChainDataReaderMock() *ChainDataReaderMock {
 		LightClientBootstraps: make(map[common.Hash]*cltypes.LightClientBootstrap),
 		LCUpdates:             make(map[uint64]*cltypes.LightClientUpdate),
 		Envelopes:             make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope),
+		ReadErr:               make(map[common.Hash]error),
 	}
 }
 
@@ -64,5 +68,12 @@ func (m *ChainDataReaderMock) HasEnvelope(blockRoot common.Hash) bool {
 }
 
 func (m *ChainDataReaderMock) ReadEnvelopeFromDisk(blockRoot common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
-	return m.Envelopes[blockRoot], nil
+	if err, ok := m.ReadErr[blockRoot]; ok {
+		return nil, err
+	}
+	envelope, ok := m.Envelopes[blockRoot]
+	if !ok {
+		return nil, os.ErrNotExist
+	}
+	return envelope, nil
 }
