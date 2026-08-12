@@ -133,6 +133,13 @@ type execV3Outcome struct {
 	exhausted             *ErrLoopExhausted
 }
 
+func finalizeExecV3Outcome(out execV3Outcome, err error) (execV3Outcome, error) {
+	if err != nil {
+		out.exhausted = nil
+	}
+	return out, err
+}
+
 // execV3 runs the parallel executor over the resolved window rng. It is
 // stage-agnostic: the caller owns SeekCommitment/restoreTxNum (upstream) and
 // stage-progress update / bad-block unwind (downstream, via the returned
@@ -267,7 +274,7 @@ func execV3(ctx context.Context,
 
 	execErr = execV3Finalize(ctx, execErr, cfg, doms, pe.lastCommittedTxNum.Load(), out.lastCommittedBlockNum,
 		lastHeader, shouldReportToTxPool, logPrefix, logger)
-	return out, execErr
+	return finalizeExecV3Outcome(out, execErr)
 }
 
 // haltOnBadBlockDebug freezes the process on an invalid block when both the

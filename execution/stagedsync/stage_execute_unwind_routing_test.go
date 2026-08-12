@@ -34,6 +34,25 @@ func (r *recordingUnwinder) UnwindTo(point uint64, reason UnwindReason, tx kv.Tx
 func (r *recordingUnwinder) HasUnwindPoint() bool { return len(r.calls) > 0 }
 func (r *recordingUnwinder) LogPrefix() string    { return "test" }
 
+func TestFinalizeExecV3Outcome(t *testing.T) {
+	t.Parallel()
+
+	exhausted := &ErrLoopExhausted{From: 1, To: 2}
+	boom := errors.New("finalization failed")
+
+	t.Run("failure clears the resumable boundary", func(t *testing.T) {
+		out, err := finalizeExecV3Outcome(execV3Outcome{exhausted: exhausted}, boom)
+		require.ErrorIs(t, err, boom)
+		require.Nil(t, out.exhausted)
+	})
+
+	t.Run("success preserves the resumable boundary", func(t *testing.T) {
+		out, err := finalizeExecV3Outcome(execV3Outcome{exhausted: exhausted}, nil)
+		require.NoError(t, err)
+		require.Same(t, exhausted, out.exhausted)
+	})
+}
+
 // TestUnwindOnExecError pins the stage-boundary rendering of the executor
 // outcome: an operational error passes through and is never a block verdict; a
 // verdict propagates as its rules.ErrInvalidBlock-wrapping error, with only a
