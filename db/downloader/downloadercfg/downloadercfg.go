@@ -39,7 +39,6 @@ import (
 	"github.com/anacrolix/torrent"
 	pp "github.com/anacrolix/torrent/peer_protocol"
 
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -155,23 +154,6 @@ func defaultTorrentClientConfig() *torrent.ClientConfig {
 
 	torrentConfig.Seed = true
 	torrentConfig.UpnpID += " leecher"
-
-	// anacrolix drops PeerConns to peers we've mutually completed with
-	// (per-torrent). anacrolix's default is true — the right call for
-	// a public swarm with churning peers, where releasing connections
-	// keeps resource use bounded.
-	//
-	// Erigon's dedicated snapshot-distribution topology — a small trusted
-	// peer set where the same peer typically serves many torrents — pays
-	// a different cost: TorrentPeerManager's 5s AddPeers sync re-dials
-	// every dropped conn, and new torrents added between syncs stall
-	// behind the resulting dial churn. Measured on a local publisher:
-	// 15k dial-inits/hr, 4.5k RSTs, InitialStateReady in 6min for a ~5s
-	// workload. Opt out via ERIGON_TORRENT_KEEP_COMPLETED_PEERS=true —
-	// public-swarm nodes leave it at the default (drop).
-	if dbg.EnvBool("ERIGON_TORRENT_KEEP_COMPLETED_PEERS", false) {
-		torrentConfig.DropMutuallyCompletePeers = false
-	}
 
 	return torrentConfig
 }
