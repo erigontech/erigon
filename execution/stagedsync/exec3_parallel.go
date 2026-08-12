@@ -2752,17 +2752,14 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				return nil, fmt.Errorf("apply loop: unexpected task type for tx %d: result.Task=%T", tx, txResult.Task)
 			}
 			if stateReader == nil {
-				// Shared base reader for this tx's calcFees and finalize (finalize
-				// reuses this stateReader). The version map is not a strict superset
-				// of the block write buffer in the EIP-161 empty-account sweep window
-				// (2016 Spurious Dragon): a finalize read there can miss the accumulated
-				// in-block state and fall to a stale pre-block value, corrupting the
-				// commitment structure and surfacing as a wrong trie root some blocks
-				// later. Keep the buffer as the fallback base.
+				// Shared pre-block base reader for this tx's calcFees and finalize
+				// (finalize reuses this stateReader). The version map carries every
+				// in-block write, so the reader only supplies the pre-block base for
+				// keys the version map does not hold.
 				if txTask.IsHistoric() {
-					stateReader = state.NewHistoryReaderV3WithBlockCache(applyTx, pe.rs.Domains(), be.blockStateCache, txTask.Version().TxNum)
+					stateReader = state.NewHistoryReaderV3WithSharedDomains(applyTx, pe.rs.Domains(), txTask.Version().TxNum)
 				} else {
-					stateReader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsGetter(applyTx), be.blockStateCache)
+					stateReader = state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx))
 				}
 			}
 			tipWrites, err := txResult.calcFees(taskVer, be.versionMap, stateReader, txTask.Rules())
@@ -2874,14 +2871,12 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 
 				if stateReader == nil {
-					// Same shared base as the calcFees block above (used when calcFees
-					// did not run for this tx). Keep the buffer as the fallback base:
-					// the version map is not a strict superset of it in the EIP-161
-					// empty-account sweep window.
+					// Same shared pre-block base as the calcFees block above (used
+					// when calcFees did not run for this tx).
 					if txTask.IsHistoric() {
-						stateReader = state.NewHistoryReaderV3WithBlockCache(applyTx, pe.rs.Domains(), be.blockStateCache, txTask.Version().TxNum)
+						stateReader = state.NewHistoryReaderV3WithSharedDomains(applyTx, pe.rs.Domains(), txTask.Version().TxNum)
 					} else {
-						stateReader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsGetterNoMetrics(applyTx), be.blockStateCache)
+						stateReader = state.NewReaderV3(pe.rs.Domains().AsGetterNoMetrics(applyTx))
 					}
 				}
 
