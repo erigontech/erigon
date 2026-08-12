@@ -51,6 +51,8 @@ type TestCmd struct {
 	Func    template.FuncMap
 	Data    any
 	Cleanup func()
+	// Env holds extra "KEY=VALUE" entries appended to the child's environment.
+	Env []string
 
 	cmd    *exec.Cmd
 	stdout *bufio.Reader
@@ -71,6 +73,9 @@ func (tt *TestCmd) Run(name string, args ...string) {
 		Path:   reexec.Self(),
 		Args:   append([]string{name}, args...),
 		Stderr: tt.stderr,
+	}
+	if len(tt.Env) > 0 {
+		tt.cmd.Env = append(os.Environ(), tt.Env...)
 	}
 	stdout, err := tt.cmd.StdoutPipe()
 	if err != nil {
