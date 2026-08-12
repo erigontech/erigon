@@ -218,6 +218,29 @@ func TestParallelExec_EarlySetupCancellationDoesNotHideWorkerFailure(t *testing.
 	require.False(t, commonerrors.IsOnlyCanceled(err))
 }
 
+// A custom parent-cancellation cause must survive an early setup exit: the
+// batch aborts before the executor is joined, and the cause is the only
+// record of why.
+func TestParallelExec_EarlySetupExitKeepsParentCause(t *testing.T) {
+	m, b2 := tipWithUnexecutedBlock2(t)
+
+	parentFailure := errors.New("stage loop failed: snapshot files vanished")
+	ctx, cancel := context.WithCancelCause(context.Background())
+	t.Cleanup(func() { cancel(nil) })
+	db := &cancelOnTemporalRoDB{
+		TemporalRwDB: m.DB,
+		done:         ctx.Done(),
+		cancel:       func() { cancel(parentFailure) },
+	}
+	m.DB = db
+
+	err := runParallelExecV3WithContext(t, ctx, m, b2.NumberU64())
+
+	require.ErrorIs(t, err, parentFailure,
+		"the parent cause must not degrade to plain context.Canceled")
+	require.False(t, commonerrors.IsOnlyCanceled(err))
+}
+
 // A recovered apply-loop panic must fail the batch because the apply loop owns
 // post-execution validation.
 func TestParallelExec_ApplyLoopPanic_SurfacesInsteadOfCommitting(t *testing.T) {

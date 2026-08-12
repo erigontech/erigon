@@ -1600,12 +1600,12 @@ func TestCheckBlocksDrained(t *testing.T) {
 		require.NoError(t, withPending().checkBlocksDrained(ctx, context.Background(), nil))
 	})
 
-	t.Run("real parent cancellation cause surfaces", func(t *testing.T) {
+	t.Run("real parent cancellation cause surfaces via reconcileParentCause", func(t *testing.T) {
 		cause := errors.New("parent execution failed")
 		ctx, cancel := context.WithCancelCause(context.Background())
 		cancel(cause)
 
-		err := withPending().checkBlocksDrained(ctx, context.Background(), nil)
+		err := reconcileParentCause(ctx, withPending().checkBlocksDrained(ctx, context.Background(), nil))
 		require.ErrorIs(t, err, cause)
 	})
 
@@ -1615,9 +1615,16 @@ func TestCheckBlocksDrained(t *testing.T) {
 		ctx, cancel := context.WithCancelCause(context.Background())
 		cancel(cause)
 
-		err := withPending().checkBlocksDrained(ctx, context.Background(), execErr)
+		err := reconcileParentCause(ctx, withPending().checkBlocksDrained(ctx, context.Background(), execErr))
 		require.ErrorIs(t, err, execErr)
 		require.ErrorIs(t, err, cause)
+	})
+
+	t.Run("plain parent cancellation stays routine through the pair", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		err := reconcileParentCause(ctx, withPending().checkBlocksDrained(ctx, context.Background(), nil))
+		require.NoError(t, err)
 	})
 
 	t.Run("bad-block stop without a recorded verdict does not exempt", func(t *testing.T) {

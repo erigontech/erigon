@@ -312,6 +312,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	defer func() {
 		if !executorJoined {
 			execErr = reconcileExecErrors(execErr, executorCancel(nil))
+			execErr = reconcileParentCause(ctx, execErr)
 		}
 	}()
 
@@ -801,6 +802,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	}
 
 	execErr = pe.checkBlocksDrained(ctx, executorContext, execErr)
+	execErr = reconcileParentCause(ctx, execErr)
 
 	// Commitment is computed per-block by the calculator; the committed
 	// block/txNum counters were recorded by handleCommitResult as results
@@ -1636,14 +1638,15 @@ func (pe *parallelExecutor) closeApplyChannels() (closedOrder []string) {
 
 // checkBlocksDrained reports scheduled blocks that never reached apply-loop
 // validation. This is an executor failure, not proof that a block is invalid.
-// Parent cancellation, a recorded verdict, and a deliberate resumable-boundary
-// stop (stopMoreWork) are exempt: both intentionally abandon queued follow-on
-// blocks. A bad-block stop always records a verdict or an operational failure
-// first, so it needs no exemption of its own, and stopReachedMax claims the
-// requested range completed — pending blocks remain an executor failure.
+// Parent cancellation (the caller reconciles its cause), a recorded verdict,
+// and a deliberate resumable-boundary stop (stopMoreWork) are exempt: all
+// intentionally abandon queued follow-on blocks. A bad-block stop always
+// records a verdict or an operational failure first, so it needs no exemption
+// of its own, and stopReachedMax claims the requested range completed —
+// pending blocks remain an executor failure.
 func (pe *parallelExecutor) checkBlocksDrained(ctx, executorCtx context.Context, execErr error) error {
 	if ctx.Err() != nil {
-		return reconcileExecErrors(execErr, context.Cause(ctx))
+		return execErr
 	}
 	if execErr != nil && !commonerrors.IsOnlyCanceled(execErr) {
 		return execErr
@@ -1852,6 +1855,16 @@ func reconcileExecErrors(execErr, concurrentErr error) error {
 		return concurrentErr
 	}
 	return errors.Join(execErr, concurrentErr)
+}
+
+// reconcileParentCause joins a real parent-cancellation cause into execErr so
+// an abort explained upstream is not reported as routine teardown. A plain
+// context.Canceled cause stays routine.
+func reconcileParentCause(ctx context.Context, execErr error) error {
+	if ctx.Err() == nil {
+		return execErr
+	}
+	return reconcileExecErrors(execErr, context.Cause(ctx))
 }
 
 type applyResult any
