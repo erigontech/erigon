@@ -25,7 +25,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -154,10 +153,9 @@ type IntraBlockState struct {
 	// The refund counter, also used by state transitioning.
 	refund uint64
 
-	txIndex         int
-	blockNum        uint64
-	logs            []types.Logs
-	logIndexInBlock uint
+	txIndex  int
+	blockNum uint64
+	logs     logArena
 
 	// Per-transaction access list
 	accessList accessList
@@ -241,7 +239,6 @@ func New(stateReader StateReader) *IntraBlockState {
 		stateObjects:      map[accounts.Address]*stateObject{},
 		stateObjectsDirty: map[accounts.Address]struct{}{},
 		nilAccounts:       map[accounts.Address]struct{}{},
-		logs:              []types.Logs{},
 		journal:           newJournal(),
 		accessList:        accessList{addresses: make(map[accounts.Address]int)},
 		transientStorage:  newTransientStorage(),
@@ -389,14 +386,13 @@ func (sdb *IntraBlockState) Reset() {
 	}
 	clear(sdb.stateObjects)
 	clear(sdb.stateObjectsDirty)
-	sdb.resetLogs()
+	sdb.logs.reset()
 	clear(sdb.balanceInc)
 	sdb.journal.Reset()
 	sdb.revisions.reset()
 	sdb.refund = uint64(0)
 	sdb.txIndex = 0
 	sdb.sdProbeEpoch++
-	sdb.logIndexInBlock = 0
 	sdb.accessList.Reset()
 	clear(sdb.transientStorage)
 	sdb.versionMap = nil
@@ -439,7 +435,7 @@ func (sdb *IntraBlockState) Close() {
 
 	stateObjects, journal := sdb.stateObjects, sdb.journal
 	sdb.stateObjects, sdb.journal = nil, nil
-	sdb.logs = nil
+	sdb.logs.release()
 	sdb.revisions.reset()
 	// Safe to pool: VersionedWrites/FinalizedWrites hand out deep clones, and the
 	// set is unexported, so nothing outside holds a raw VersionedWrite.
@@ -457,76 +453,13 @@ func releaseResources(stateObjects map[accounts.Address]*stateObject, journal *j
 	}
 }
 
-// Log entries outlive the block that emitted them, so what one IntraBlockState
-// keeps for reuse must be capped in total: a burst of logs at a fresh tx index
-// every block would otherwise add a high-water-mark buffer per block, forever.
-// The budget holds any realistic block in full.
-const (
-	maxReusableLogEntries = 4096
-	maxReusableLogBytes   = 4 * 1024 * 1024
-	maxReusableLogDataCap = 64 * 1024
-)
-
-// resetLogs truncates the per-tx buffers, keeping entries and their Topics/Data
-// for AllocLog to reuse, up to the budget. It scans buffers to cap: a reverted
-// entry hides behind the length and is retained memory all the same.
-func (sdb *IntraBlockState) resetLogs() {
-	entries, dataBytes := 0, 0
-	slots := sdb.logs[:cap(sdb.logs)]
-	for i, slot := range slots {
-		buf := slot[:cap(slot)]
-		if entries+cap(buf) > maxReusableLogEntries {
-			slots[i] = nil // an all-nil buffer is retention too
-			continue
-		}
-		entries += cap(buf)
-		for j, lp := range buf {
-			if lp == nil {
-				continue
-			}
-			data := cap(lp.Data)
-			if data > maxReusableLogDataCap || dataBytes+data > maxReusableLogBytes {
-				buf[j] = nil
-				continue
-			}
-			dataBytes += data
-		}
-		slots[i] = buf[:0]
-	}
-}
-
 // AllocLog reserves the next log slot of the current tx and returns it sized for
 // numTopics/dataSize. The caller must write every topic and every data byte, then
-// call NotifyLog; whatever it leaves unwritten is the previous block's. The entry
-// is owned by the buffer and reused by later blocks, so it must never be handed
-// out without copying.
+// call NotifyLog; whatever it leaves unwritten belongs to whichever transaction
+// held the entry before. The entry is owned by the arena and handed to a later
+// transaction, so it must never be passed on without copying.
 func (sdb *IntraBlockState) AllocLog(addr common.Address, numTopics, dataSize int) *types.Log {
-	sdb.journal.addLogChange(sdb.txIndex)
-	ti := sdb.txIndex + 1
-	if len(sdb.logs) <= ti {
-		sdb.logs = slices.Grow(sdb.logs, ti+1-len(sdb.logs))[:ti+1]
-	}
-	logIdx := len(sdb.logs[ti])
-	sdb.logs[ti] = slices.Grow(sdb.logs[ti], 1)[:logIdx+1]
-	logs := sdb.logs[ti]
-
-	lp := logs[logIdx] // a prior block's entry to reuse, or nil for a fresh slot
-	if lp == nil {
-		lp = &types.Log{}
-		logs[logIdx] = lp
-	}
-	lp.Address = addr
-	lp.Topics = slices.Grow(lp.Topics[:0], numTopics)[:numTopics]
-	lp.Data = slices.Grow(lp.Data[:0], dataSize)[:dataSize]
-	lp.Removed = false
-	lp.TxHash, lp.BlockHash = common.Hash{}, common.Hash{}
-	lp.TxIndex = hexutil.Uint(sdb.txIndex)
-	lp.BlockNumber = 0 // non-consensus field, assigned by the caller
-	// Block-wide, not per-tx: receipts.DeriveFields reads Logs[0].Index to
-	// recover FirstLogIndexWithinBlock.
-	lp.Index = hexutil.Uint(sdb.logIndexInBlock)
-	sdb.logIndexInBlock++
-	return lp
+	return sdb.logs.alloc(sdb.journal, addr, sdb.txIndex, numTopics, dataSize)
 }
 
 // NotifyLog runs the OnLog hook after a log's fields are populated.
@@ -542,7 +475,7 @@ func (sdb *IntraBlockState) NotifyLog(lp *types.Log) {
 		fmt.Printf("%d (%d.%d) Log: Index:%d Account:%x Topics: %s Data:%x\n", sdb.blockNum, sdb.txIndex, sdb.version, lp.Index, lp.Address, topics, lp.Data)
 	}
 	if sdb.tracingHooks != nil && sdb.tracingHooks.OnLog != nil {
-		// The hook may retain the value; the buffer entry is reused by later blocks.
+		// The hook may retain the value; the arena entry is reused by later blocks.
 		sdb.tracingHooks.OnLog(lp.Copy())
 	}
 }
@@ -560,12 +493,9 @@ func (sdb *IntraBlockState) AddLog(log *types.Log) {
 }
 
 // GetLogs deep-copies the tx's logs, so the result is safe to hold after the
-// emit buffer is reused.
+// arena reuses the entry.
 func (sdb *IntraBlockState) GetLogs(txIndex int, txnHash common.Hash, blockNumber uint64, blockHash common.Hash) types.Logs {
-	if txIndex+1 >= len(sdb.logs) {
-		return nil
-	}
-	logs := sdb.logs[txIndex+1].Copy()
+	logs := sdb.logs.forTx(txIndex).Copy()
 	for _, l := range logs {
 		l.TxHash = txnHash
 		l.BlockHash = blockHash
@@ -577,19 +507,19 @@ func (sdb *IntraBlockState) GetLogs(txIndex int, txnHash common.Hash, blockNumbe
 // GetRawLogs - is like GetLogs, but allow postpone calculation of `txn.Hash()`.
 // Example: if you need filter logs and only then set `txn.Hash()` for filtered logs - then no reason to calc for all transactions.
 func (sdb *IntraBlockState) GetRawLogs(txIndex int) types.Logs {
-	if txIndex+1 >= len(sdb.logs) {
-		return nil
-	}
-	return sdb.logs[txIndex+1].Copy()
+	return sdb.logs.forTx(txIndex).Copy()
 }
 
 func (sdb *IntraBlockState) Logs() types.Logs {
-	return types.CopyLogGroups(sdb.logs)
+	if len(sdb.logs.entries) == 0 {
+		return nil
+	}
+	return sdb.logs.entries.Copy()
 }
 
 // LogsRlpHash is rlpHash of Logs, without building the flattened slice.
 func (sdb *IntraBlockState) LogsRlpHash() common.Hash {
-	return types.RlpHashLogs(sdb.logs)
+	return types.RlpHashLogs(sdb.logs.entries)
 }
 
 // AddRefund adds gas to the refund counter
@@ -1239,7 +1169,7 @@ func (sdb *IntraBlockState) synthesizeCreatedAccountBase(addr accounts.Address) 
 	// the address mid-execution and reconcile the fork out of validation's
 	// sight. Only a provisional (mid-load) probe may adopt fresh cells — the
 	// stale conclusion re-executes via commit-time validation instead.
-	if tr, ok := sdb.versionedReads.GetAddress(addr); ok && tr.Source != ProvisionalRead && (tr.Val == nil || tr.Val.Account() == nil) {
+	if sdb.consumedAddressAbsence(addr) {
 		return nil, false
 	}
 	if destructed, sdRes, ok := sdb.versionMap.ReadSelfDestruct(addr, sdb.txIndex); ok && sdRes.Status() == MVReadResultDone && destructed {
@@ -1293,6 +1223,14 @@ func (sdb *IntraBlockState) synthesizeCreatedAccountBase(addr accounts.Address) 
 	}
 	acc.Root.SetBytes(trie.EmptyRoot[:])
 	return acc, true
+}
+
+// consumedAddressAbsence reports whether this tx holds a definitive
+// (non-provisional) nil AddressPath read — it already concluded the account is
+// absent, so later loads must not adopt cells flushed since.
+func (sdb *IntraBlockState) consumedAddressAbsence(addr accounts.Address) bool {
+	tr, ok := sdb.versionedReads.GetAddress(addr)
+	return ok && tr.Source != ProvisionalRead && (tr.Val == nil || tr.Val.Account() == nil)
 }
 
 // finalizeProvisionalAddressRead demotes a load's in-flight nil record probe
@@ -1385,6 +1323,18 @@ func (sdb *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 	// re-created it, in which case fall through to the normal read.
 	if sdb.eip8246 && readAccount == nil {
 		if destructed, sdRes, ok := sdb.versionMap.ReadSelfDestruct(addr, sdb.txIndex); ok && sdRes.Status() == MVReadResultDone && destructed {
+			// A definitive nil AddressPath read means this tx already consumed the
+			// account's absence, so reconstructing from cells flushed since would
+			// fork its view out of validation's sight — abort and re-execute.
+			// Exempt only an absence concluded from this destruct itself,
+			// recorded as a MapRead at the destruct cell's exact version.
+			if tr, ok := sdb.versionedReads.GetAddress(addr); ok && tr.Source != ProvisionalRead && (tr.Val == nil || tr.Val.Account() == nil) &&
+				!(tr.Source == MapRead && tr.Version.TxIndex == sdRes.DepIdx() && tr.Version.Incarnation == sdRes.Incarnation()) {
+				if sdRes.DepIdx() > sdb.dep {
+					sdb.dep = sdRes.DepIdx()
+				}
+				panic(ErrDependency)
+			}
 			destructTxIndex := sdRes.DepIdx()
 			// Only a genuine re-creation (a later CreateAccount, which writes
 			// AddressPath) skips reconstruction. Later Balance/Nonce/CodeHash
@@ -2862,8 +2812,8 @@ func (sdb *IntraBlockState) Print(chainRules chain.Rules, all bool) {
 // transaction execution.
 func (sdb *IntraBlockState) SetTxContext(bn uint64, ti int) {
 	/* Not sure what this test is for it seems to break some tests
-	if len(sdb.logs) > 0 && ti == 0 {
-		err := fmt.Errorf("seems you forgot `ibs.Reset` or `ibs.TxIndex()`. len(sdb.logs)=%d, ti=%d", len(sdb.logs), ti)
+	if len(sdb.logs.entries) > 0 && ti == 0 {
+		err := fmt.Errorf("seems you forgot `ibs.Reset` or `ibs.TxIndex()`. len(sdb.logs.entries)=%d, ti=%d", len(sdb.logs.entries), ti)
 		panic(err)
 	}
 	if sdb.txIndex >= 0 && sdb.txIndex > ti {

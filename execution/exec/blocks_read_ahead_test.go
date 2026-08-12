@@ -17,14 +17,18 @@
 package exec
 
 import (
+	"context"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/cache"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // stubTemporalGetter stands in for the committed-state read view a warmup
@@ -47,6 +51,21 @@ func (s stubTemporalGetter) StepsInFiles(...kv.Domain) kv.Step { return 0 }
 func newTestStateCache() *cache.StateCache {
 	b := 1 * datasize.MB
 	return cache.NewStateCache(b, b, b, b)
+}
+
+func TestBlockReadAheaderCarriesBlockAccessList(t *testing.T) {
+	bra := NewBlockReadAheader()
+	header := &types.Header{Number: *uint256.NewInt(1)}
+	body := &types.Body{Transactions: []types.Transaction{types.NewTransaction(0, common.Address{}, new(uint256.Int), 0, new(uint256.Int), nil)}}
+	blockHash := header.Hash()
+	bal := []byte{0xc0}
+	sender := common.Address{1}
+	bra.AddHeaderAndBody(context.Background(), nil, header, body)
+	bra.AddBlockAccessList(blockHash, bal)
+	bra.AddSenders(sender[:], blockHash)
+	block, ok := bra.ReadBlockWithSenders(blockHash)
+	require.True(t, ok)
+	require.Equal(t, bal, block.BlockAccessList())
 }
 
 // seedFill places an entry with an exact txNum stamp through the public fill

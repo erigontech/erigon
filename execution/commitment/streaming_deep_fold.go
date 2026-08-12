@@ -307,7 +307,7 @@ func newDeferredStorageWorker(ctx context.Context, accountKeyLen int16, cfg Trie
 // nibbles off the reused walk path but leaves plainKey/update aliased.
 func collectSubtreeKeys(node *prefixNode, path []byte) []touchedKey {
 	out := make([]touchedKey, 0, node.subtreeCount)
-	var arena keyArena
+	arena := keyArena{remaining: int(node.subtreeCount)}
 	_ = dfsSubtree(node, path, func(hk, pk []byte, upd *Update) error {
 		out = append(out, touchedKey{hk: arena.copy(hk), pk: pk, upd: upd})
 		return nil

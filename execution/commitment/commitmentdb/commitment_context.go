@@ -278,12 +278,6 @@ func (sdc *SharedDomainsCommitmentContext) Reset() {
 	}
 }
 
-func (sdc *SharedDomainsCommitmentContext) ClearRam() {
-	sdc.updates.Reset()
-	sdc.Reset()
-	sdc.stateReader = nil
-}
-
 func (sdc *SharedDomainsCommitmentContext) KeysCount() uint64 {
 	return sdc.updates.Size()
 }
@@ -975,7 +969,7 @@ type TrieContext struct {
 	localCollector *etl.Collector // per-goroutine collector for concurrent PutBranch
 }
 
-// NewTrieContextRo creates a read-only TrieContext suitable for TrieReader lookups.
+// NewTrieContextRo creates a read-only TrieContext for Branch-only lookups.
 // Only Branch() is functional; PutBranch/Account/Storage will return errors or nil.
 func NewTrieContextRo(reader StateReader, stepSize uint64) *TrieContext {
 	return &TrieContext{stateReader: reader, stepSize: stepSize}
