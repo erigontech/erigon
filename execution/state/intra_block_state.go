@@ -1360,16 +1360,10 @@ func (sdb *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 					return nil, StorageRead, UnknownVersion, nil
 				}
 				if consumedAbsence {
-					// A definitive nil read may already have affected gas or control
-					// flow. Keep it as this attempt's account view, record the destruct
-					// that exposed the conflict, and retry the attempt.
+					// A definitive nil read may already have affected gas or control flow.
 					if destructVersion.TxIndex > sdb.dep {
 						sdb.dep = destructVersion.TxIndex
 					}
-					sdb.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
-						ReadHeader: ReadHeader{Source: MapRead, Version: destructVersion},
-						Val:        true,
-					})
 					panic(ErrDependency)
 				}
 				sdb.accountRead(addr, preserved, MapRead, destructVersion)
