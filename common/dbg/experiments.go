@@ -135,7 +135,7 @@ var (
 	UseTxDependencies    = EnvBool("USE_TX_DEPENDENCIES", false)
 	UseStateCache        = EnvBool("USE_STATE_CACHE", true)
 	UseCodeStore         = EnvBool("USE_CODE_STORE", true)
-	DisableAdaptivePin   = EnvBool("DISABLE_ADAPTIVE_PIN", false)
+	DisableAdaptivePin   = EnvBool("DISABLE_ADAPTIVE_PIN", true)
 	AssertStateCache     = EnvBool("ASSERT_STATE_CACHE", false)
 	// MmapPoison makes a closed file revoke its mapping instead of unmapping it,
 	// turning a read through a slice that outlived its file into a fault at that
