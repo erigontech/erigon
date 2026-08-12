@@ -268,6 +268,7 @@ func TestAssertStateCache_NoFalsePanicDuringInFlightUnwind(t *testing.T) {
 	ctx := t.Context()
 	db := newTestDb(t, stepSize)
 	sc := newSmallStateCache()
+	t.Cleanup(sc.Close)
 	key, v1, _, diffs := twoStepRows(t, db, sc)
 
 	roTx, err := db.BeginTemporalRo(ctx)
@@ -309,6 +310,7 @@ func TestAssertStateCache_NoFalsePanicDuringInFlightUnwindStepZero(t *testing.T)
 	ctx := t.Context()
 	db := newTestDb(t, stepSize)
 	sc := newSmallStateCache()
+	t.Cleanup(sc.Close)
 
 	key := make([]byte, 20)
 	key[0] = 0xbb
@@ -363,6 +365,7 @@ func TestReadFill_DoesNotClobberLiveEntry(t *testing.T) {
 	ctx := t.Context()
 	db := newTestDb(t, stepSize)
 	sc := newSmallStateCache()
+	t.Cleanup(sc.Close)
 	key, _, v2, diffs := twoStepRows(t, db, sc)
 
 	roTx, err := db.BeginTemporalRo(ctx)
@@ -538,6 +541,7 @@ func TestReadFill_NegativeUsesLastVisibleTxNum(t *testing.T) {
 	ctx := t.Context()
 	db := newTestDb(t, stepSize)
 	sc := newSmallStateCache()
+	t.Cleanup(sc.Close)
 
 	rwTx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
