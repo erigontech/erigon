@@ -16,7 +16,6 @@
 set -euo pipefail
 
 GOSENTRY=${GOSENTRY:-$HOME/fzz/gosentry}
-OUT=${OUT:-./build/bin/erigon-gosentry}
 P=github.com/erigontech/erigon
 
 # entire package is modular arithmetic by design
@@ -40,7 +39,9 @@ case "${1:-build}" in
 build)
 	# -truncationdetect=true is deliberately NOT set: it fires within the first
 	# few executions of nearly every package, so it needs its own triage pass.
-	exec "$GOSENTRY/bin/go" build "${flags[@]}" -o "$OUT" ./cmd/erigon
+	target=${2:-./cmd/erigon}
+	out=${OUT:-./build/bin/$(basename "$target")-gosentry}
+	exec "$GOSENTRY/bin/go" build "${flags[@]}" -o "$out" "$target"
 	;;
 test)
 	shift
@@ -55,7 +56,7 @@ fuzz)
 		--focus-on-new-code=false --catch-races=false --catch-leaks=false "${flags[@]}"
 	;;
 *)
-	echo "usage: $0 {build|test [pkgs...]|fuzz <pkg> <FuzzTarget> [dur]}" >&2
+	echo "usage: $0 {build [pkg]|test [pkgs...]|fuzz <pkg> <FuzzTarget> [dur]}" >&2
 	exit 2
 	;;
 esac
