@@ -1259,20 +1259,11 @@ func TestRunApplyLoopErrorAfterRecordedBoundaryDrainsChannels(t *testing.T) {
 	require.Same(t, got, context.Cause(executorCtx))
 }
 
-type recordChannelHandler chan *log.Record
-
-func (h recordChannelHandler) Log(record *log.Record) error {
-	h <- record
-	return nil
-}
-
-func (h recordChannelHandler) Enabled(context.Context, log.Lvl) bool { return true }
-
 func TestWaitForTeardownPhase(t *testing.T) {
 	newExecutor := func() (*parallelExecutor, <-chan *log.Record) {
 		records := make(chan *log.Record, 1)
 		logger := log.New()
-		logger.SetHandler(recordChannelHandler(records))
+		logger.SetHandler(log.ChannelHandler(records))
 		return &parallelExecutor{txExecutor: txExecutor{logger: logger, logPrefix: "test"}}, records
 	}
 

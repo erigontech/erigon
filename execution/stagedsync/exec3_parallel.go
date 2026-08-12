@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"os"
 	"runtime"
 	"runtime/pprof"
@@ -1669,12 +1668,11 @@ func (pe *parallelExecutor) checkBlocksDrained(ctx, executorCtx context.Context,
 		return execErr
 	}
 	pe.RLock()
-	pending := slices.Collect(maps.Keys(pe.blockExecutors))
+	pending := common.SortedKeys(pe.blockExecutors)
 	pe.RUnlock()
 	if len(pending) == 0 {
 		return execErr
 	}
-	slices.Sort(pending)
 	return fmt.Errorf("parallel exec finished with %d scheduled block(s) that never reached apply-loop validation: %v",
 		len(pending), pending)
 }
