@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -1093,6 +1094,44 @@ type branchCacheUpdate struct {
 	txN  uint64
 }
 
+// ProjectedStateVersion returns the durable state version produced by the next
+// successful Commit.
+func (sd *SharedDomains) ProjectedStateVersion() (uint64, error) {
+	if !sd.baseStateVersionKnown {
+		return 0, errors.New("state version was unavailable when SharedDomains was created")
+	}
+	if sd.baseStateVersion == math.MaxUint64 {
+		return 0, errors.New("state version overflow")
+	}
+	return sd.baseStateVersion + 1, nil
+}
+
+func (sd *SharedDomains) stateVersionsForCommit(tx kv.Tx) (source, target uint64, err error) {
+	target, err = sd.ProjectedStateVersion()
+	if err != nil {
+		return 0, 0, err
+	}
+	current, err := rawdb.GetStateVersion(tx)
+	if err != nil {
+		return 0, 0, fmt.Errorf("read state version before flush: %w", err)
+	}
+	if current != sd.baseStateVersion {
+		return 0, 0, fmt.Errorf("state version changed since SharedDomains was created: base=%d current=%d", sd.baseStateVersion, current)
+	}
+	return sd.baseStateVersion, target, nil
+}
+
+func requireStateVersion(tx kv.Tx, expected uint64) error {
+	actual, err := rawdb.GetStateVersion(tx)
+	if err != nil {
+		return fmt.Errorf("read state version before commit: %w", err)
+	}
+	if actual != expected {
+		return fmt.Errorf("unexpected state version after flush: expected=%d actual=%d", expected, actual)
+	}
+	return nil
+}
+
 // Commit flushes the in-memory batch into tx, commits tx, and only then applies
 // the flushed domain bytes to the in-memory caches — CommitmentDomain to the
 // BranchCache, Accounts/Storage/Code to the StateCache. The flush is implicit in
@@ -1104,9 +1143,14 @@ type branchCacheUpdate struct {
 // invalidation is tx-precise: an unwind to a txNum inside the latest step drops
 // exactly the entries above it, not the whole step. All caches honor the
 // same (txNum, epoch) model. tx MUST be a flush-specific transaction: it is
-// committed here.
+// committed here. The domain flush advances PlainStateVersion exactly once;
+// Commit verifies both its starting version and the version it will publish.
 func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...func(tx kv.RwTx) error) error {
 	defer mxFlushTook.ObserveDuration(time.Now())
+	sourceStateVersion, committedStateVersion, err := sd.stateVersionsForCommit(tx)
+	if err != nil {
+		return err
+	}
 
 	runValidate := func() error {
 		for _, v := range validate {
@@ -1127,15 +1171,10 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 		if err := runValidate(); err != nil {
 			return err
 		}
-		return tx.Commit()
-	}
-	var sourceStateVersion uint64
-	if sd.stateCache != nil {
-		stateVersion, err := rawdb.GetStateVersion(tx)
-		if err != nil {
-			return fmt.Errorf("read state version before flush: %w", err)
+		if err := requireStateVersion(tx, committedStateVersion); err != nil {
+			return err
 		}
-		sourceStateVersion = stateVersion
+		return tx.Commit()
 	}
 
 	// Stash every cache-bound domain tuple during the flush; apply them only
@@ -1254,13 +1293,8 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 			sd.adaptivePinController.OnBlockComplete(ctx, sd.txNum, reader, factory, provider)
 		}
 	}
-	var committedStateVersion uint64
-	if sd.stateCache != nil {
-		stateVersion, err := rawdb.GetStateVersion(tx)
-		if err != nil {
-			return fmt.Errorf("read state version before commit: %w", err)
-		}
-		committedStateVersion = stateVersion
+	if err := requireStateVersion(tx, committedStateVersion); err != nil {
+		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return err

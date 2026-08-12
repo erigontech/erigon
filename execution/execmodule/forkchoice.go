@@ -784,6 +784,10 @@ func (e *ExecModule) dispatchNotificationsFromOverlay(sd *execctx.SharedDomains,
 	if err != nil {
 		return err
 	}
+	stateVersion, err := sd.ProjectedStateVersion()
+	if err != nil {
+		return fmt.Errorf("project notification state version: %w", err)
+	}
 	// Publish the overlay BEFORE dispatching notifications. This ensures
 	// the BlockListener (overlay-aware shutter) sees the overlay as active
 	// before any StateChangeBatch arrives, so it can buffer events properly.
@@ -794,6 +798,7 @@ func (e *ExecModule) dispatchNotificationsFromOverlay(sd *execctx.SharedDomains,
 	if err := dispatcher.Dispatch(
 		e.bacgroundCtx,
 		overlay,
+		stateVersion,
 		e.accum.Accumulator,
 		e.accum.RecentReceipts,
 		finishProgressBefore,
