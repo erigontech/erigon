@@ -227,8 +227,6 @@ func TestStreaming_ExtensionToppedMountSplit(t *testing.T) {
 		mode runMode
 	}{
 		{"parallel", modeParallel},
-		{"streaming", modeStreaming},
-		{"streaming_scheduled", modeStreamingScheduled},
 	} {
 		for _, w := range []int{1, 4, 8} {
 			roots, ms := runEngineBatches(t, tc.mode, w, batches)
@@ -399,7 +397,7 @@ func TestDeepFold_PreExistingWhale_SingleNibbleOnDisk(t *testing.T) {
 
 // A FRESH whale — its account absent from the pre-state trie — provably has nothing on
 // disk beneath its storage prefix, so the deep fold seeds an empty base and folds the
-// slots concurrently instead of demoting to serial streaming.
+// slots concurrently instead of demoting to serial recursion.
 func TestDeepFold_FreshWhaleFoldsParallel(t *testing.T) {
 	k1, u1, _, _ := buildSubsetTouchedWhale(20260707, nibs(3, 7), nil, 700, 0)
 	fk, fu := buildMixedCorpus(555, 200)
@@ -410,17 +408,9 @@ func TestDeepFold_FreshWhaleFoldsParallel(t *testing.T) {
 
 	ms := NewMockState(t)
 	ms.SetConcurrentCommitment(true)
-	require.NoError(t, ms.applyPlainUpdates(keys, upds))
-	sc := newStreamCommitter(t, ms, 4, false)
-	defer sc.Release()
-	touchAll(sc, keys)
-	got, err := sc.Process(context.Background())
-	require.NoError(t, err)
-	require.Equal(t, seqRoot, got, "fresh-whale concurrent fold diverged from sequential")
-	require.Positive(t, sc.DeepLocalFolds(), "a fresh whale must take the concurrent deep fold, not the serial demotion")
-
-	parRoot, _ := engineRoot(t, modeParallel, 4, keys, upds)
+	parRoot, _, deepFolds := parallelBatchDeepFolds(t, ms, 4, keys, upds, nil)
 	require.Equal(t, seqRoot, parRoot)
+	require.Positive(t, deepFolds, "a fresh whale must take the concurrent deep fold, not the serial demotion")
 }
 
 // The demotion gate stays for accounts present in the pre-state without a branch record
@@ -435,18 +425,10 @@ func TestDeepFold_ExistingWhaleStillDemotes(t *testing.T) {
 
 	ms := NewMockState(t)
 	ms.SetConcurrentCommitment(true)
-	sc := newStreamCommitter(t, ms, 4, false)
-	defer sc.Release()
-	require.NoError(t, ms.applyPlainUpdates(k1, u1))
-	touchAll(sc, k1)
-	_, err := sc.Process(context.Background())
-	require.NoError(t, err)
-	require.NoError(t, ms.applyPlainUpdates(k2, u2))
-	touchAll(sc, k2)
-	got, err := sc.Process(context.Background())
-	require.NoError(t, err)
-	require.Equal(t, seqRoot, got)
-	require.Zero(t, sc.DeepLocalFolds(), "an account present in the pre-state must keep the serial demotion")
+	_, blob, _ := parallelBatchDeepFolds(t, ms, 4, k1, u1, nil)
+	parRoot, _, deepFolds := parallelBatchDeepFolds(t, ms, 4, k2, u2, blob)
+	require.Equal(t, seqRoot, parRoot)
+	require.Zero(t, deepFolds, "an account present in the pre-state must keep the serial demotion")
 }
 
 // A whale's storage collapses to a single surviving slot through the streaming recursion (sub-threshold
@@ -529,8 +511,6 @@ func TestDeepFold_SingleSlotCollapseThenDeepReexpand(t *testing.T) {
 		mode runMode
 	}{
 		{"parallel", modeParallel},
-		{"streaming", modeStreaming},
-		{"streaming_scheduled", modeStreamingScheduled},
 	} {
 		for _, w := range []int{1, 4, 8} {
 			roots, ms := runEngineBatches(t, tc.mode, w, batches)
@@ -605,8 +585,6 @@ func TestDeepFold_SurvivorCollapseThenRetouch(t *testing.T) {
 		mode runMode
 	}{
 		{"parallel", modeParallel},
-		{"streaming", modeStreaming},
-		{"streaming_scheduled", modeStreamingScheduled},
 	} {
 		for _, w := range []int{1, 4, 8} {
 			roots, ms := runEngineBatches(t, tc.mode, w, batches)
@@ -677,8 +655,6 @@ func TestDeepFold_EmptyStorageThenRepopulate(t *testing.T) {
 		mode runMode
 	}{
 		{"parallel", modeParallel},
-		{"streaming", modeStreaming},
-		{"streaming_scheduled", modeStreamingScheduled},
 	} {
 		for _, w := range []int{1, 4, 8} {
 			roots, ms := runEngineBatches(t, tc.mode, w, batches)
