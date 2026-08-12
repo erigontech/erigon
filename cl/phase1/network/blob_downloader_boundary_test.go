@@ -19,6 +19,7 @@ package network
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -49,6 +50,20 @@ func TestBlobHistoryDownloaderBatchStopsAtFrozenBoundary(t *testing.T) {
 
 	require.NoError(t, downloader.downloadOnce(false))
 	require.Equal(t, []uint64{firstUnfrozenSlot + 1, firstUnfrozenSlot}, reader.slots)
+}
+
+func TestBlobHistoryDownloaderRefreshesFrozenBoundaryBetweenBatches(t *testing.T) {
+	snapshot := &boundaryMutableSnapshot{}
+	reader := &boundaryBlockReader{onRead: func(slot uint64) {
+		if slot == 13 {
+			snapshot.frozen.Store(13)
+		}
+	}}
+	downloader := newBoundaryDownloader(t, 20, 0, 0, 1, reader)
+	downloader.sn = snapshot
+
+	require.NoError(t, downloader.downloadOnce(false))
+	require.Equal(t, []uint64{20, 19, 18, 17, 16, 15, 14, 13}, reader.slots)
 }
 
 func TestBlobHistoryDownloaderRunsWithAvailablePeer(t *testing.T) {
@@ -88,12 +103,16 @@ func newBoundaryDownloader(t *testing.T, headSlot, frozenBlobs, targetSlot, peer
 
 type boundaryBlockReader struct {
 	freezeblocks.BeaconSnapshotReader
-	slots []uint64
-	err   error
+	slots  []uint64
+	err    error
+	onRead func(uint64)
 }
 
 func (r *boundaryBlockReader) ReadBeaconBlockBodyBySlot(_ context.Context, _ kv.Tx, slot uint64) (*cltypes.SignedBeaconBlock, error) {
 	r.slots = append(r.slots, slot)
+	if r.onRead != nil {
+		r.onRead(slot)
+	}
 	return nil, r.err
 }
 
@@ -104,6 +123,12 @@ func (p boundaryPeerCounter) Peers() (uint64, error) { return uint64(p), nil }
 type boundarySnapshot uint64
 
 func (s boundarySnapshot) FrozenBlobs() uint64 { return uint64(s) }
+
+type boundaryMutableSnapshot struct {
+	frozen atomic.Uint64
+}
+
+func (s *boundaryMutableSnapshot) FrozenBlobs() uint64 { return s.frozen.Load() }
 
 type boundarySyncedChecker bool
 

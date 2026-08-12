@@ -247,8 +247,11 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 		b.logger.Info("[BlobHistoryDownloader] Downloading blobs backwards", "slot", currentSlot)
 	}
 
-	firstUnfrozenSlot := max(targetSlot, b.sn.FrozenBlobs())
-	for currentSlot >= firstUnfrozenSlot {
+	for currentSlot >= targetSlot {
+		firstUnfrozenSlot := max(targetSlot, b.sn.FrozenBlobs())
+		if currentSlot < firstUnfrozenSlot {
+			break
+		}
 		if !b.syncedChecker.Synced() {
 			time.Sleep(5 * time.Second)
 			continue
