@@ -151,11 +151,21 @@ func (r *ephemeralReplay) newDomains(tb testing.TB, fx *blockreplay.Fixture) (kv
 }
 
 // exec runs the block once through parallel ExecV3. This is the only thing a
-// benchmark should time. Receipts/gas/bloom are validated inside the apply loop.
+// benchmark should time. Receipts/gas/bloom verdicts arrive in the outcome and
+// must fail the replay like any error.
 func (r *ephemeralReplay) exec(tx kv.TemporalRwTx, doms *execctx.SharedDomains) error {
 	src := &singleBlockSource{block: r.block, num: r.num, parent: r.parent, bal: r.bal}
-	_, err := execV3(r.ctx, r.cfg, doms, tx, stages.ModeApplyingBlocks, false, "replay", r.rng, src, r.logger)
-	return err
+	out, err := execV3(r.ctx, r.cfg, doms, tx, stages.ModeApplyingBlocks, false, "replay", r.rng, src, r.logger)
+	if err != nil {
+		return err
+	}
+	if out.verdict != nil {
+		return out.verdict.err
+	}
+	if out.exhausted != nil {
+		return fmt.Errorf("replay incomplete: %w", out.exhausted)
+	}
+	return nil
 }
 
 // verify checks the post-state (Flush -> outputs read via the domains) against
