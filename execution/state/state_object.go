@@ -197,6 +197,7 @@ func (so *stateObject) GetCommittedState(key accounts.StorageKey) (uint256.Int, 
 	}
 	so.db.storageReadCount++
 	so.db.stateReader.SetTrace(false, "")
+	so.db.recordStateReadError(err)
 
 	if err != nil {
 		return uint256.Int{}, err
@@ -416,6 +417,7 @@ func (so *stateObject) CodeTyped() (accounts.Code, error) {
 		so.db.codeReadCount++
 	}
 	so.db.stateReader.SetTrace(false, "")
+	so.db.recordStateReadError(err)
 
 	if err != nil {
 		return accounts.Code{}, fmt.Errorf("can't read code for %x: %w", so.Address(), err)

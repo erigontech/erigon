@@ -194,6 +194,7 @@ type IntraBlockState struct {
 	codeReadCount       int64
 	version             int
 	dep                 int
+	stateReadErr        error
 
 	// Per-attempt memo of the shared-versionMap SelfDestruct probe. The probe
 	// (read_paths.go) fires on every versionedReadCore call but reads only
@@ -374,6 +375,7 @@ func (sdb *IntraBlockState) HasStorage(addr accounts.Address) (bool, error) {
 	// the reader — on snapshot-backed storage this is a kv.HasPrefix(StorageDomain)
 	// walk through the .bt index, a validation hot-path cost.
 	result, err := sdb.stateReader.HasStorage(addr)
+	sdb.recordStateReadError(err)
 	return result, err
 }
 
@@ -419,6 +421,7 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.codeReadDuration = 0
 	sdb.codeReadCount = 0
 	sdb.dep = UnknownDep
+	sdb.stateReadErr = nil
 }
 
 // Release Deprecated use Close
@@ -785,6 +788,7 @@ func (sdb *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
 		// ReadAccountCode there returns nil (EXTCODESIZE 0) and diverges from
 		// consensus.
 		size, err := sdb.stateReader.ReadAccountCodeSize(addr)
+		sdb.recordStateReadError(err)
 		if err != nil {
 			return 0, err
 		}
@@ -1382,6 +1386,7 @@ func (sdb *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 					sdb.accountReadCount++
 				}
 				sdb.stateReader.SetTrace(false, "")
+				sdb.recordStateReadError(err)
 				if err == nil {
 					if sdb.committedBase == nil {
 						sdb.committedBase = make(map[accounts.Address]*accounts.Account)
@@ -2025,6 +2030,7 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 		sdb.accountReadCount++
 	}
 	sdb.stateReader.SetTrace(false, "")
+	sdb.recordStateReadError(err)
 
 	accountSource := StorageRead
 	// A DB-loaded record is pre-block state — older than any in-block cell.
@@ -3374,6 +3380,16 @@ func (sdb *IntraBlockState) HadInvalidRead() bool {
 	return sdb.dep >= 0
 }
 
+func (sdb *IntraBlockState) StateReadError() error {
+	return sdb.stateReadErr
+}
+
+func (sdb *IntraBlockState) recordStateReadError(err error) {
+	if err != nil && sdb.stateReadErr == nil {
+		sdb.stateReadErr = err
+	}
+}
+
 func (sdb *IntraBlockState) DepTxIndex() int {
 	return sdb.dep
 }
@@ -3402,6 +3418,7 @@ func (sdb *IntraBlockState) ResetVersionedIO() {
 	sdb.versionedReads = ReadSet{}
 	sdb.versionedWrites.ReleaseAndReset()
 	sdb.dep = UnknownDep
+	sdb.stateReadErr = nil
 	sdb.recordAccess = false
 }
 

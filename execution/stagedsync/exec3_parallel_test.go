@@ -116,6 +116,15 @@ type rulesEngineWithErrors struct {
 	finalizeErr   error
 }
 
+type failingAccountStateReader struct {
+	*state.NoopReader
+	err error
+}
+
+func (r failingAccountStateReader) ReadAccountData(accounts.Address) (*accounts.Account, error) {
+	return nil, r.err
+}
+
 func (e rulesEngineWithErrors) Initialize(config *chain.Config, chainReader rules.ChainHeaderReader, header *types.Header,
 	ibs *state.IntraBlockState, syscall rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks,
 ) error {
@@ -1527,6 +1536,55 @@ func TestParallelFinalizeClassifiesRulesEngineError(t *testing.T) {
 			require.ErrorContains(t, result.Err, cause.Error())
 		})
 	}
+}
+
+func TestParallelStateReadErrorIsOperational(t *testing.T) {
+	db := newResumeTestDB(t)
+	config := chain.TestChainBerlinConfig
+	pe, roTx := newResumeTestExec(t, db, config)
+	cause := fmt.Errorf("account domain read failed")
+
+	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 10_000_000}
+	txTask := &exec.TxTask{
+		Header:          header,
+		TxNum:           1,
+		TxIndex:         0,
+		Config:          config,
+		Txs:             []types.Transaction{signSelfSendTx(t, 0, 0, 1, 21_000, config, 0)},
+		Logger:          log.New(),
+		EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
+	}
+	eTask := &execTask{Task: txTask, index: 0}
+	gasPool := new(protocol.GasPool).AddGas(header.GasLimit)
+	be := newBlockExec(newParallelTestBlock(1), gasPool, nil, make(chan applyResult, 4), nil, false, nil)
+	be.tasks = []*execTask{eTask}
+	be.results = []*execResult{nil}
+	be.txIncarnations = []int{0}
+	be.execFailed = []int{0}
+	be.execAborted = []int{0}
+	be.estimateDeps[0] = []int{}
+	be.execTasks.setInProgress(0)
+	be.settledInput[0] = true
+
+	task := &taskVersion{
+		execTask:   eTask,
+		version:    state.Version{BlockNum: 1, TxNum: 1, TxIndex: 0},
+		versionMap: be.versionMap,
+	}
+	ibs := state.New(failingAccountStateReader{NoopReader: state.NewNoopReader(), err: cause})
+	t.Cleanup(ibs.Close)
+	evm := &vm.EVM{}
+	require.NoError(t, task.Reset(evm, ibs, nil))
+	result := task.Execute(evm, pe.cfg.engine, nil, ibs, state.NewNoopWriter(), config, nil, datadir.Dirs{}, false)
+	result.Task = task
+	require.Zero(t, result.TxIn.Len())
+
+	blockResult, err := be.nextResult(context.Background(), pe, result, roTx)
+
+	require.Nil(t, blockResult)
+	require.ErrorIs(t, err, cause)
+	require.NotErrorIs(t, err, rules.ErrInvalidBlock)
+	require.True(t, result.Operational)
 }
 
 func TestParallelResumeBoundaryOffsets(t *testing.T) {

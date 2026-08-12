@@ -609,6 +609,10 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		}
 
 	}
+	if stateErr := ibs.StateReadError(); stateErr != nil && txTask.TxIndex >= 0 && !txTask.IsBlockEnd() {
+		result.Operational = true
+		result.Err = stateErr
+	}
 	// Prepare read set, write set and balanceIncrease set and send for serialisation
 	if result.Err == nil {
 		txTask.BalanceIncreaseSet = ibs.BalanceIncreaseSet()
