@@ -412,13 +412,15 @@ func TestHashOrNumberEncodeRLPPointerIsAllocFree(t *testing.T) {
 	}
 	valueAllocs := testing.AllocsPerRun(200, mustEncode(hn.Hash))
 	pointerAllocs := testing.AllocsPerRun(200, mustEncode(&hn.Hash))
-	t.Logf("allocs/op: byValue=%v byPointer=%v", valueAllocs, pointerAllocs)
-	if pointerAllocs >= valueAllocs {
-		t.Errorf("pointer form should allocate less: value=%v pointer=%v", valueAllocs, pointerAllocs)
-	}
-	// encBuffer is pooled, and sync.Pool drops values under the race detector.
-	//goland:noinspection GoBoolExpressions
-	if !race.Enabled && pointerAllocs != 0 {
-		t.Errorf("pointer form should not allocate, got %v", pointerAllocs)
+	if !race.Enabled {
+		t.Logf("allocs/op: byValue=%v byPointer=%v", valueAllocs, pointerAllocs)
+		if pointerAllocs >= valueAllocs {
+			t.Errorf("pointer form should allocate less: value=%v pointer=%v", valueAllocs, pointerAllocs)
+		}
+		// encBuffer is pooled, and sync.Pool drops values under the race detector.
+		//goland:noinspection GoBoolExpressions
+		if pointerAllocs != 0 {
+			t.Errorf("pointer form should not allocate, got %v", pointerAllocs)
+		}
 	}
 }

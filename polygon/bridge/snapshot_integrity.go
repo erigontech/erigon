@@ -10,7 +10,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	polychain "github.com/erigontech/erigon/polygon/chain"
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
@@ -21,22 +20,13 @@ func ValidateBorEvents(ctx context.Context, db kv.TemporalRoDB, blockReader bloc
 
 	var cc *chain.Config
 
-	if db == nil {
-		genesis := polychain.BorMainnetGenesisBlock()
-		cc = genesis.Config
-	} else {
-		err = db.View(ctx, func(tx kv.Tx) error {
-			cc, err = chain.GetConfig(tx, nil)
-			if err != nil {
-				return err
-			}
-			return nil
-		})
-
-		if err != nil {
-			err = fmt.Errorf("cant read chain config from db: %w", err)
-			return err
-		}
+	err = db.View(ctx, func(tx kv.Tx) error {
+		cc, err = chain.GetConfig(tx, nil)
+		return err
+	})
+	if err != nil {
+		err = fmt.Errorf("cant read chain config from db: %w", err)
+		return err
 	}
 
 	if cc.BorJSON == nil {
@@ -78,16 +68,6 @@ func ValidateBorEvents(ctx context.Context, db kv.TemporalRoDB, blockReader bloc
 		prevEventId, err = ValidateEvents(ctx, config, db, blockReader, snapshots, eventSegment, prevEventId, maxBlockNum, failFast, logEvery)
 
 		if err != nil && failFast {
-			return err
-		}
-	}
-
-	if db != nil {
-		err = db.View(ctx, func(tx kv.Tx) error {
-			return nil
-		})
-
-		if err != nil {
 			return err
 		}
 	}

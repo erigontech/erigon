@@ -81,9 +81,28 @@ func TestBlockReaderPrefersTxBlockView(t *testing.T) {
 	require.False(t, okLive, "retired segment must be gone from the live set")
 
 	// ...but a reader using the tx's pinned view still does.
-	_, okTx, relTx := blockReader.viewSingleFile(tx, snaptype2.Transactions, blk)
-	relTx()
+	_, okTx := blockReader.viewSingleFile(tx, snaptype2.Transactions, blk)
 	require.True(t, okTx, "reader must resolve the retired segment via the tx's pinned view")
+}
+
+// A tx that pins no view cannot read block files: the reader used to open its
+// own view per read, which let a file retire between two reads of one tx.
+func TestBlockReaderRejectsTxWithoutBlockView(t *testing.T) {
+	cfg := ethconfig.Defaults.Snapshot
+	cfg.ChainName = networkname.Mainnet
+	snapshots := blocksnapshots.NewRoSnapshots(cfg, t.TempDir(), log.New())
+	defer snapshots.Close()
+	require.NoError(t, snapshots.OpenFolder())
+
+	blockReader := NewBlockReader(snapshots, nil)
+
+	require.Panics(t, func() {
+		blockReader.viewSingleFile(nil, snaptype2.Transactions, 0)
+	}, "a tx that is not a view provider must be rejected")
+
+	require.Panics(t, func() {
+		blockReader.viewSingleFile(blockFilesTxStub{}, snaptype2.Transactions, 0)
+	}, "a view provider holding no view must be rejected")
 }
 
 // The minimal/full-node step: expire old transaction segments (handing their files to the

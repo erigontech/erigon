@@ -440,7 +440,7 @@ func (s *SnapshotStore) EventsByIdFromSnapshot(from uint64, to time.Time, limit 
 	return result, maxTime, nil
 }
 
-func ValidateEvents(ctx context.Context, config *borcfg.BorConfig, db kv.RoDB, blockReader blockReader, snapshots *heimdall.RoSnapshots, eventSegment *snapshotsync.VisibleSegment, prevEventId uint64, maxBlockNum uint64, failFast bool, logEvery *time.Ticker) (uint64, error) {
+func ValidateEvents(ctx context.Context, config *borcfg.BorConfig, db kv.TemporalRoDB, blockReader blockReader, snapshots *heimdall.RoSnapshots, eventSegment *snapshotsync.VisibleSegment, prevEventId uint64, maxBlockNum uint64, failFast bool, logEvery *time.Ticker) (uint64, error) {
 	g := eventSegment.Src().MakeGetter()
 
 	word := make([]byte, 0, 4096)
@@ -490,14 +490,10 @@ func ValidateEvents(ctx context.Context, config *borcfg.BorConfig, db kv.RoDB, b
 		if prevBlock != 0 && prevBlock != block {
 			var err error
 
-			if db != nil {
-				err = db.View(ctx, func(tx kv.Tx) error {
-					prevEventTime, err = checkBlockEvents(ctx, config, blockReader, snapshots, block, prevBlock, eventId, prevBlockStartId, prevEventTime, tx, failFast)
-					return err
-				})
-			} else {
-				prevEventTime, err = checkBlockEvents(ctx, config, blockReader, snapshots, block, prevBlock, eventId, prevBlockStartId, prevEventTime, nil, failFast)
-			}
+			err = db.View(ctx, func(tx kv.Tx) error {
+				prevEventTime, err = checkBlockEvents(ctx, config, blockReader, snapshots, block, prevBlock, eventId, prevBlockStartId, prevEventTime, tx, failFast)
+				return err
+			})
 
 			if err != nil {
 				return prevEventId, err
