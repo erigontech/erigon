@@ -64,6 +64,29 @@ These flags cover the general behavior and configuration of the Erigon client.
 * `--keep.stored.chain.config`: Avoids overriding the chain configuration already stored in the database.
   * Default: `false`
 
+### Development, testing, and block-production helpers
+
+These flags are mainly for dev networks, testing, or specialized block-production setups.
+
+* `--allow-insecure-unlock`: Allows insecure account unlocking when account-related RPCs are exposed by HTTP. Use only on trusted networks.
+  * Default: `false`
+* `--dev-validator-seed value`: Deterministic BLS key seed for the embedded dev validator; enables PoS dev mode.
+  * Default: `devnet`
+* `--dev-validator-count value`: Number of validators for PoS dev mode.
+  * Default: `64`
+* `--dev.slot-time value`: Slot duration in seconds for PoS dev mode.
+  * Default: `6`
+* `--miner.gaslimit value`: Target gas limit for mined blocks.
+  * Default: `0`
+* `--miner.extradata value`: Block extra data set by the miner; defaults to the client version string.
+  * Default: client version string
+* `--experimental.bal`: Generates block access lists.
+  * Default: `false`
+* `--experimental.always-generate-changesets`: Overrides changeset generation logic.
+  * Default: `false`
+* `--chaos.monkey`: Testing-only flag that enables spontaneous network, consensus, and other failures.
+  * Default: `false`
+
 ### Database and Caching
 
 These flags control database performance and memory usage. See [Database](/fundamentals/database) for the on-disk layout.
@@ -74,12 +97,14 @@ These flags control database performance and memory usage. See [Database](/funda
   * Default: `1TB`
 * `--db.writemap`: Enables `WRITE_MAP` for fast database writes.
   * Default: `true`
-* `--db.read.concurrency value`: Maximum number of concurrent open database read transactions (the MDBX read-transaction semaphore); when it is full, extra readers wait for a slot by default, though some RPC paths (HTTP/WebSocket) fail fast with an overload response instead. Low values are fine for low read-concurrency nodes (for example, validators); raise it for nodes serving heavy parallel RPC.
+* `--db.read.concurrency value`: Maximum number of concurrent open database read transactions (the MDBX read-transaction semaphore); when it is full, extra readers wait for a slot by default, though some RPC paths (HTTP/WebSocket) fail fast with an overload response instead. Raise it for nodes serving heavy parallel RPC. Lowering it does not reduce read concurrency: each parallel-execution worker holds a long-lived read transaction, so a value below the worker count would deadlock and is silently raised to it. To genuinely reduce read concurrency, lower `--exec.workers` instead.
   * Default: scales with the host as `min(max(10, GOMAXPROCS * 64), 9000)` — kept well above the CPU count because reads are I/O-bound, and capped below Go's roughly 10,000 OS-thread limit.
 * `--database.verbosity value`: Enables internal database logs.
   * Default: `2`
 * `--batchSize value`: Sets the batch size for the execution stage.
   * Default: `512M`
+* `--etl.bufferSize value`: Buffer size for ETL operations.
+  * Default: `256MB`
 * `--bodies.cache value`: Sets the size limit for the block bodies cache.
   * Default: `268435456`
 * `--state.cache value`: Sets the amount of data to store in the StateCache.
@@ -165,9 +190,7 @@ These flags manage network connectivity, peer discovery, and traffic control. Se
 * `--port value`: The main network listening port.
   * Default: `30303`
 * `--p2p.protocol value`: The version of the `eth` P2P protocol.
-  * Default: `68`, `69`
-* `--p2p.allowed-ports value`: A comma-separated list of allowed ports for different P2P protocols.
-  * Default: `30303, 30304, 30305, 30306, 30307`
+  * Default: `69`, `70`, `71`
 * `--nat value`: The NAT port mapping mechanism (See [here](/fundamentals/nat) for more details).
 * `--nodiscover`: Disables peer discovery.
   * Default: `false`
@@ -298,6 +321,12 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
   * Default: `2m0s`
 * `--healthcheck`: Enables gRPC health checks.
   * Default: `false`
+* `--witness.cache.blocks value` *(New in v3.6)*: Number of recent blocks whose legacy `debug_executionWitness` result is eagerly cached in memory, keyed by block hash in an LRU. Each witness is held as serialized JSON and served verbatim on a hit, so memory use is roughly this count multiplied by the per-block witness size. Embedded RPC only, and requires `--prune.include-commitment-history` (runtime errors from `debug_executionWitness` and `eth_getWitness` name its `--prune.experimental.include-commitment-history` alias instead). This flag also gates `debug_subscribe("executionWitnesses")`, which pushes each witness over WebSocket as the cache builds it. That stream is best-effort rather than contiguous — catch-up bursts, skipped or failed builds, and slow subscribers all leave gaps — so a client that needs every height re-requests the missing ones with `debug_executionWitness`.
+  * Default: `0` (cache disabled); values above the cap of `96` are clamped
+* `--witness.cache.head-capture`: Serves recent-block `debug_executionWitness` on a minimal node without commitment-history by building each head block from a pinned parent commitment snapshot and the account/storage/code history the node keeps. Cache-only serving: out-of-window requests miss, and no history recompute is attempted. Embedded RPC only.
+  * Default: `false`
+* `--witness.cache.maxmb value`: Resident-memory cap, in MB, for the witness cache; whichever limit binds first wins between the byte budget and `--witness.cache.blocks` (still capped at `96`). `0` means count-only (no byte cap).
+  * Default: `0`
 
 ### MCP Server
 
@@ -354,13 +383,6 @@ Flags for controlling logging and performance profiling. See [Logs](/fundamental
 
 Flags related to consensus mechanisms and network forks.
 
-* `--clique.checkpoint value`: The number of blocks after which to save the vote snapshot.
-  * Default: `10`
-* `--clique.snapshots value`: The number of recent vote snapshots to keep in memory.
-  * Default: `1024`
-* `--clique.signatures value`: The number of recent block signatures to keep in memory.
-  * Default: `16384`
-* `--clique.datadir value`: The path to the clique database folder.
 * `--fakepow`: Disables proof-of-work verification.
   * Default: `false`
 * `--gpo.blocks value`: The number of recent blocks to check for gas prices.
@@ -445,8 +467,6 @@ Flags for configuring Fork Choice Update behavior.
   * Default: `1s`
 * `--fcu.background.prune`: Enables background pruning after FCU.
   * Default: `true`
-* `--fcu.background.commit`: Enables background flush and commit after FCU.
-  * Default: `false`
 
 ### Execution
 
@@ -518,6 +538,8 @@ Flags for configuring the [Caplin](/fundamentals/caplin) consensus layer.
   * Default: `131072` (~18 days)
 * `--caplin.checkpoint-sync.disable`: Disables checkpoint sync.
   * Default: `false`
+* `--caplin.resume-max-staleness-epochs value`: Max epochs a locally-finalized state may be stale for Caplin to resume from it on restart instead of remote checkpoint syncing. Data-availability bound; larger values are clamped to the anchor fork's sidecar-retention window.
+  * Default: `0` (resolves to the anchor fork's sidecar-retention window)
 * `--caplin.snapgen`: Enables snapshot generation.
   * Default: `false`
 * `--caplin.mev-relay-url value`: The MEV relay endpoint.

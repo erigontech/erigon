@@ -488,16 +488,7 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		return nil
 
 	case kindAddLog:
-		txIndex := int(je.aux)
-		if txIndex+1 >= len(s.logs) {
-			panic(fmt.Sprintf("can't revert log index %v, max: %v", txIndex, len(s.logs)-1))
-		}
-		txnLogs := s.logs[txIndex+1]
-		s.logs[txIndex+1] = txnLogs[:len(txnLogs)-1] // revert 1 log
-		if len(s.logs[txIndex+1]) == 0 {
-			s.logs = s.logs[:len(s.logs)-1] // revert txn
-		}
-		s.logSize--
+		s.logs.revertLast(int(je.aux))
 		return nil
 
 	case kindTouch:
@@ -512,7 +503,12 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		// lets Normalize's EIP-161 pass delete an account whose touch was rolled back.
 		// Mirror kindBalance — drop the write if the touch created it, else restore
 		// the prior value.
-		if s.versionMap != nil {
+		//
+		// RIPEMD-160 is the exception: touchAccount bumps its dirty count so the
+		// touch outlives the revert and EIP-161 still sweeps it. Undoing the write
+		// here would drop that sweep on the versioned path only, leaving the
+		// account in the trie and diverging from serial's root.
+		if s.versionMap != nil && je.account != ripemd {
 			if je.committed() {
 				s.versionedWrites.DelBalance(je.account)
 			} else if _, ok := s.versionedWrites.GetBalance(je.account); ok {

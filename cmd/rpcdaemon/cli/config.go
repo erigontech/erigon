@@ -82,7 +82,6 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/logging"
 	"github.com/erigontech/erigon/node/nodecfg"
-	"github.com/erigontech/erigon/node/paths"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
@@ -122,7 +121,7 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 
 	cfg := &httpcfg.HttpCfg{Sync: ethconfig.Defaults.Sync, Enabled: true, StateCache: kvcache.DefaultCoherentConfig}
 	rootCmd.PersistentFlags().StringVar(&cfg.PrivateApiAddr, "private.api.addr", "127.0.0.1:9090", "Erigon's components (txpool, rpcdaemon, sentry, downloader, ...) can be deployed as independent Processes on same/another server. Then components will connect to erigon by this internal grpc API. Example: 127.0.0.1:9090")
-	rootCmd.PersistentFlags().StringVar(&cfg.DataDir, "datadir", "", "path to Erigon working directory")
+	flags.DirVar(rootCmd.PersistentFlags(), &cfg.DataDir, "datadir", "", "path to Erigon working directory")
 	rootCmd.PersistentFlags().BoolVar(&cfg.GraphQLEnabled, "graphql", false, "enables graphql endpoint (disabled by default)")
 	rootCmd.PersistentFlags().Uint64Var(&cfg.Gascap, "rpc.gascap", 50_000_000, "Sets a cap on gas that can be used in eth_call/estimateGas")
 	rootCmd.PersistentFlags().Uint64Var(&cfg.MaxTraces, "trace.maxtraces", 200, "Sets a limit on traces that can be returned in trace_filter")
@@ -136,6 +135,9 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().IntVar(&cfg.WsMaxConnections, utils.WsMaxConnectionsFlag.Name, utils.WsMaxConnectionsFlag.Value, utils.WsMaxConnectionsFlag.Usage)
 	rootCmd.PersistentFlags().BoolVar(&cfg.TraceCompatibility, "trace.compat", false, "Bug for bug compatibility with OE for trace_ routines")
 	rootCmd.PersistentFlags().BoolVar(&cfg.GethCompatibility, "rpc.gethcompat", false, "Enables Geth-compatible storage iteration order for debug_storageRangeAt (sorted by keccak256 hash). Disabled by default for performance.")
+	rootCmd.PersistentFlags().UintVar(&cfg.WitnessCacheBlocks, utils.WitnessCacheBlocksFlag.Name, utils.WitnessCacheBlocksFlag.Value, utils.WitnessCacheBlocksFlag.Usage)
+	rootCmd.PersistentFlags().BoolVar(&cfg.WitnessCacheHeadCapture, utils.WitnessCacheHeadCaptureFlag.Name, false, utils.WitnessCacheHeadCaptureFlag.Usage+" (standalone daemon parses this flag but does not act on it; head-capture runs embedded only)")
+	rootCmd.PersistentFlags().UintVar(&cfg.WitnessCacheMaxMB, utils.WitnessCacheMaxMBFlag.Name, utils.WitnessCacheMaxMBFlag.Value, utils.WitnessCacheMaxMBFlag.Usage)
 	rootCmd.PersistentFlags().StringVar(&cfg.TxPoolApiAddr, "txpool.api.addr", "", "txpool api network address, for example: 127.0.0.1:9090 (default: use value of --private.api.addr)")
 
 	rootCmd.PersistentFlags().StringVar(&stateCacheStr, "state.cache", "0MB", "Amount of data to store in StateCache (enabled if no --datadir set). Set 0 to disable StateCache. Defaults to 0MB RAM")
@@ -153,22 +155,22 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().BoolVar(&cfg.HttpServerEnabled, "http.enabled", true, "Enable HTTP server")
 	rootCmd.PersistentFlags().StringVar(&cfg.HttpListenAddress, "http.addr", nodecfg.DefaultHTTPHost, "HTTP server listening interface")
 	rootCmd.PersistentFlags().IntVar(&cfg.HttpPort, "http.port", nodecfg.DefaultHTTPPort, "HTTP server listening port")
-	rootCmd.PersistentFlags().StringVar(&cfg.HttpURL, "http.url", "", "HTTP server listening url. will OVERRIDE http.addr and http.port. will NOT respect http paths. prefix supported are tcp, unix")
+	rootCmd.PersistentFlags().StringVar(&cfg.HttpURL, utils.HTTPURLFlag.Name, utils.HTTPURLFlag.Value, utils.HTTPURLFlag.Usage)
 	rootCmd.PersistentFlags().StringSliceVar(&cfg.HttpCORSDomain, "http.corsdomain", []string{}, "Comma separated list of domains from which to accept cross origin requests (browser enforced)")
 	rootCmd.PersistentFlags().StringSliceVar(&cfg.HttpVirtualHost, "http.vhosts", nodecfg.DefaultConfig.HTTPVirtualHosts, "Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts '*' wildcard.")
 	rootCmd.PersistentFlags().BoolVar(&cfg.HttpCompression, "http.compression", true, "Enable http compression enabled by default. Use --http.compression=false to disable it")
 	rootCmd.PersistentFlags().BoolVar(&cfg.WebsocketEnabled, "ws", false, "Enable Websockets - Same port as HTTP[S]")
 	rootCmd.PersistentFlags().BoolVar(&cfg.WebsocketCompression, "ws.compression", true, "Enable Websocket compression (RFC 7692) enabled by default is Websockets is enabled. Use --ws.compression=false to disable it")
 	rootCmd.PersistentFlags().IntVar(&cfg.WebsocketPort, "ws.port", nodecfg.DefaultWSPort, "rpc WebSocket server listening port")
-	rootCmd.PersistentFlags().BoolVar(&cfg.HttpsServerEnabled, "https.enabled", false, "Enable HTTPS server")
-	rootCmd.PersistentFlags().StringVar(&cfg.HttpsListenAddress, "https.addr", nodecfg.DefaultHTTPHost, "rpc HTTPS server listening interface")
-	rootCmd.PersistentFlags().IntVar(&cfg.HttpsPort, "https.port", 0, "rpc HTTPS server listening port. default to http.port + 363 if not set")
-	rootCmd.PersistentFlags().StringVar(&cfg.HttpsURL, "https.url", "", "rpc HTTPS server listening url. will OVERRIDE https.addr and https.port. will NOT respect paths. prefix supported are tcp, unix")
-	rootCmd.PersistentFlags().StringVar(&cfg.HttpsCertfile, "https.cert", "", "certificate for rpc HTTPS server")
-	rootCmd.PersistentFlags().StringVar(&cfg.HttpsKeyFile, "https.key", "", "key file for rpc HTTPS server")
+	rootCmd.PersistentFlags().BoolVar(&cfg.HttpsServerEnabled, utils.HTTPSEnabledFlag.Name, utils.HTTPSEnabledFlag.Value, utils.HTTPSEnabledFlag.Usage)
+	rootCmd.PersistentFlags().StringVar(&cfg.HttpsListenAddress, utils.HTTPSListenAddrFlag.Name, utils.HTTPSListenAddrFlag.Value, utils.HTTPSListenAddrFlag.Usage)
+	rootCmd.PersistentFlags().IntVar(&cfg.HttpsPort, utils.HTTPSPortFlag.Name, utils.HTTPSPortFlag.Value, utils.HTTPSPortFlag.Usage)
+	rootCmd.PersistentFlags().StringVar(&cfg.HttpsURL, utils.HTTPSURLFlag.Name, utils.HTTPSURLFlag.Value, utils.HTTPSURLFlag.Usage)
+	rootCmd.PersistentFlags().StringVar(&cfg.HttpsCertfile, utils.HTTPSCertFlag.Name, utils.HTTPSCertFlag.Value, utils.HTTPSCertFlag.Usage)
+	rootCmd.PersistentFlags().StringVar(&cfg.HttpsKeyFile, utils.HTTPSKeyFlag.Name, utils.HTTPSKeyFlag.Value, utils.HTTPSKeyFlag.Usage)
 
-	rootCmd.PersistentFlags().BoolVar(&cfg.SocketServerEnabled, "socket.enabled", false, "Enable IPC server")
-	rootCmd.PersistentFlags().StringVar(&cfg.SocketListenUrl, "socket.url", "unix:///var/run/erigon.sock", "IPC server listening url. prefix supported are tcp, unix")
+	rootCmd.PersistentFlags().BoolVar(&cfg.SocketServerEnabled, utils.SocketEnabledFlag.Name, utils.SocketEnabledFlag.Value, utils.SocketEnabledFlag.Usage)
+	rootCmd.PersistentFlags().StringVar(&cfg.SocketListenUrl, utils.SocketURLFlag.Name, utils.SocketURLFlag.Value, utils.SocketURLFlag.Usage)
 
 	rootCmd.PersistentFlags().BoolVar(&cfg.TraceRequests, utils.HTTPTraceFlag.Name, false, "Trace HTTP requests with INFO level")
 	rootCmd.PersistentFlags().DurationVar(&cfg.HTTPTimeouts.ReadTimeout, "http.timeouts.read", rpccfg.DefaultHTTPTimeouts.ReadTimeout, "Maximum duration for reading the entire request, including the body.")
@@ -216,12 +218,7 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 
 		cfg.WithDatadir = cfg.DataDir != ""
 		if cfg.WithDatadir {
-			if cfg.DataDir == "" {
-				cfg.DataDir = paths.DefaultDataDir()
-			}
-			var dataDir flags.DirectoryString
-			dataDir.Set(cfg.DataDir)
-			cfg.Dirs = datadir.New(string(dataDir))
+			cfg.Dirs = datadir.New(cfg.DataDir)
 		}
 		if cfg.TxPoolApiAddr == "" {
 			cfg.TxPoolApiAddr = cfg.PrivateApiAddr
@@ -302,11 +299,12 @@ func checkDbCompatibility(ctx context.Context, db kv.RoDB) error {
 	if ok {
 		var compatible bool
 		dbSchemaVersion := &kv.DBSchemaVersion
-		if major != dbSchemaVersion.Major {
+		switch {
+		case major != dbSchemaVersion.Major:
 			compatible = false
-		} else if minor != dbSchemaVersion.Minor {
+		case minor != dbSchemaVersion.Minor:
 			compatible = false
-		} else {
+		default:
 			compatible = true
 		}
 		if !compatible {
@@ -328,16 +326,17 @@ func EmbeddedServices(ctx context.Context,
 	miningServer txpoolproto.MiningServer, stateDiffClient StateChangesClient,
 	logger log.Logger, events *shards.Events,
 ) (eth rpchelper.ApiBackend, txPool txpoolproto.TxpoolClient, mining txpoolproto.MiningClient, stateCache kvcache.Cache, ff *rpchelper.Filters) {
-	if stateCacheCfg.LocalCache != nil {
+	switch {
+	case stateCacheCfg.LocalCache != nil:
 		// In-process: read state directly from SharedDomains overlay.
 		// This replaces the coherent cache (kvcache) for embedded mode —
 		// the overlay is always current, has zero memory overhead, and
 		// doesn't need the StateChanges gRPC stream to stay coherent.
 		stateCache = stateCacheCfg.LocalCache
-	} else if stateCacheCfg.CacheSize > 0 {
+	case stateCacheCfg.CacheSize > 0:
 		// Remote RPCDaemon: use coherent cache fed by StateChanges stream.
 		stateCache = kvcache.New(stateCacheCfg)
-	} else {
+	default:
 		stateCache = kvcache.NewLatestBatchCache()
 	}
 
@@ -574,7 +573,8 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 	var remoteHeimdallReader *heimdall.RemoteReader
 
 	if cfg.WithDatadir {
-		if cc != nil && cc.Bor != nil {
+		switch {
+		case cc != nil && cc.Bor != nil:
 			stateReceiverContractAddress := cc.Bor.StateReceiverContractAddress()
 
 			bridgeConfig := bridge.ReaderConfig{
@@ -599,7 +599,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			}
 
 			engine = bor.NewRo(cc, blockReader, logger)
-		} else if cc != nil && cc.Aura != nil {
+		case cc != nil && cc.Aura != nil:
 			consensusDB, err := kv2.New(dbcfg.ConsensusDB, logger).Path(filepath.Join(cfg.DataDir, "aura")).Accede(true).Open(ctx)
 			if err != nil {
 				return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, err
@@ -611,7 +611,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			if cc.TerminalTotalDifficulty != nil {
 				engine = merge.New(engine) // the Merge
 			}
-		} else {
+		default:
 			engine = ethash.NewFaker()
 			if cc.TerminalTotalDifficulty != nil {
 				engine = merge.New(engine) // the Merge
@@ -1066,7 +1066,8 @@ func (e *remoteRulesEngine) init(db kv.RoDB, blockReader dbservices.FullBlockRea
 
 	// TODO(yperbasis): try to unify with CreateRulesEngine
 	var eng rules.Engine
-	if cc.Aura != nil {
+	switch {
+	case cc.Aura != nil:
 		auraKv, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), logger, remoteKV).
 			WithBucketsConfig(kv.AuRaTablesCfg).
 			Open()
@@ -1079,9 +1080,9 @@ func (e *remoteRulesEngine) init(db kv.RoDB, blockReader dbservices.FullBlockRea
 		if err != nil {
 			return err
 		}
-	} else if cc.Bor != nil {
+	case cc.Bor != nil:
 		eng = bor.NewRo(cc, blockReader, logger)
-	} else {
+	default:
 		eng = ethash.NewFaker()
 	}
 

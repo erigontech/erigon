@@ -92,8 +92,8 @@ var debugTraceTransactionNoRefundTests = []struct {
 
 func TestGetRawBlockAccessListRPCSpec(t *testing.T) {
 	chainPack, client := newBlockAccessListRPCFixture(t)
-	availableRaw := marshalHexBytesJSON(t, chainPack.BlockAccessLists[1])
-	emptyRaw := marshalHexBytesJSON(t, chainPack.BlockAccessLists[2])
+	availableRaw := marshalHexBytesJSON(t, chainPack.Blocks[1].BlockAccessList())
+	emptyRaw := marshalHexBytesJSON(t, chainPack.Blocks[2].BlockAccessList())
 	cases := []blockAccessListRPCCase{
 		{name: "available by number", selector: "0x2", want: availableRaw},
 		{name: "available by tag", selector: "safe", want: availableRaw},
@@ -239,7 +239,7 @@ func TestTraceBlockByHashPrestateTracerCreate2MemoryOverflow(t *testing.T) {
 		},
 	}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec))
-	generated, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(_ int, gen *blockgen.BlockGen) {
+	generated, err := m.GenerateChain(1, func(_ int, gen *blockgen.BlockGen) {
 		gen.SetCoinbase(coinbase)
 		gen.AddTx(tx)
 	})
@@ -249,16 +249,16 @@ func TestTraceBlockByHashPrestateTracerCreate2MemoryOverflow(t *testing.T) {
 	require.NoError(t, err)
 	defer dbtx.Rollback()
 	st := state.New(m.NewStateReader(dbtx))
-	defer st.Release(false)
+	defer st.Close()
 	senderBalance, err := st.GetBalance(accounts.InternAddress(sender))
 	require.NoError(t, err)
-	require.Equal(t, uint256.MustFromHex("0x286a802d7b04d897"), &senderBalance)
+	require.Equal(t, uint256.MustFromHex("0x2869323611617c47"), &senderBalance)
 	senderNonce, err := st.GetNonce(accounts.InternAddress(sender))
 	require.NoError(t, err)
 	require.Equal(t, uint64(4258), senderNonce)
 	coinbaseBalance, err := st.GetBalance(accounts.InternAddress(coinbase))
 	require.NoError(t, err)
-	require.Equal(t, uint256.MustFromHex("0x14a5fadeb16dd327696"), &coinbaseBalance)
+	require.Equal(t, uint256.MustFromHex("0x14a5faf390e46c23696"), &coinbaseBalance)
 	tracer := "prestateTracer"
 	var buf bytes.Buffer
 	stream := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
@@ -1150,7 +1150,7 @@ func TestGetRawTransaction(t *testing.T) {
 	for i := range number {
 		tx, err := m.DB.BeginRo(ctx)
 		require.NoError(err)
-		defer tx.Rollback()
+		defer tx.Rollback() //nolint:gocritic
 		block, err := api._blockReader.BlockByNumber(ctx, tx, i)
 		require.NoError(err)
 		txns := block.Transactions()
@@ -1297,11 +1297,110 @@ func TestExecutionWitness(t *testing.T) {
 		require.NotNil(t, result.State, "State should not be nil")
 	})
 
+	// Guards the buildWitnessResult seam: the append-vs-sort tail must produce a stable,
+	// fully sorted State so a byte-identical witness comes out on every build.
+	t.Run("result bytes stable and sorted", func(t *testing.T) {
+		for blockNum := uint64(1); blockNum <= latestBlockNum; blockNum++ {
+			bn := rpc.BlockNumber(blockNum)
+			first, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+			require.NoError(t, err, "block %d", blockNum)
+			for i := 1; i < len(first.State); i++ {
+				require.LessOrEqual(t, bytes.Compare(first.State[i-1], first.State[i]), 0,
+					"block %d State must be sorted ascending", blockNum)
+			}
+			firstBytes, err := json.Marshal(first)
+			require.NoError(t, err)
+
+			second, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+			require.NoError(t, err, "block %d", blockNum)
+			secondBytes, err := json.Marshal(second)
+			require.NoError(t, err)
+
+			require.Equal(t, firstBytes, secondBytes, "block %d witness bytes must be deterministic", blockNum)
+		}
+	})
+
 	t.Run("non-existent block", func(t *testing.T) {
 		// Very high block number that doesn't exist
 		blockNum := rpc.BlockNumber(999999999)
 		_, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNum}, nil)
 		require.Error(t, err, "should error for non-existent block")
+	})
+}
+
+// TestExecutionWitnessCacheServe pins the Task 2 serve hook: a legacy request for a
+// cached (num, hash) returns the stored pointer, while canonical requests, empty-cache
+// misses, and the nil-cache path all fall through to the unchanged on-demand build.
+func TestExecutionWitnessCacheServe(t *testing.T) {
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() {
+		statecfg.Schema = previousSchema
+	})
+
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+	ctx := context.Background()
+
+	err := m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	})
+	require.NoError(t, err)
+
+	var block1Hash common.Hash
+	err = m.DB.View(ctx, func(tx kv.Tx) error {
+		block1Hash, _, err = m.BlockReader.CanonicalHash(ctx, tx, 1)
+		return err
+	})
+	require.NoError(t, err)
+
+	bn := rpc.BlockNumber(1)
+	sentinel := &ExecutionWitnessResult{State: []hexutil.Bytes{{0xde, 0xad, 0xbe, 0xef}}}
+
+	t.Run("legacy hit returns cached pointer", func(t *testing.T) {
+		cache := newWitnessResultCache(96, 0, false, false)
+		cache.Add(block1Hash, sentinel)
+		api.witnessCache = cache
+		t.Cleanup(func() { api.witnessCache = nil })
+
+		hitBefore := witnessCacheHitCounter.GetValueUint64()
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+		require.NoError(t, err)
+		require.Same(t, sentinel, result, "legacy request must serve the cached pointer")
+		require.Equal(t, uint64(1), witnessCacheHitCounter.GetValueUint64()-hitBefore, "a hit increments the hit counter once")
+	})
+
+	t.Run("canonical request bypasses the cache", func(t *testing.T) {
+		cache := newWitnessResultCache(96, 0, false, false)
+		cache.Add(block1Hash, sentinel)
+		api.witnessCache = cache
+		t.Cleanup(func() { api.witnessCache = nil })
+
+		canonical := "canonical"
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, &canonical)
+		require.NoError(t, err)
+		require.NotSame(t, sentinel, result, "canonical request must never serve the legacy cache")
+		require.NotNil(t, result.State, "canonical request must build a real witness on demand")
+	})
+
+	t.Run("empty-cache miss falls through to on-demand", func(t *testing.T) {
+		api.witnessCache = newWitnessResultCache(96, 0, false, false)
+		t.Cleanup(func() { api.witnessCache = nil })
+
+		missBefore := witnessCacheMissCounter.GetValueUint64()
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+		require.NoError(t, err)
+		require.NotSame(t, sentinel, result)
+		require.NotNil(t, result.State, "miss must build a real witness on demand")
+		require.Equal(t, uint64(1), witnessCacheMissCounter.GetValueUint64()-missBefore, "a miss increments the miss counter once")
+	})
+
+	t.Run("nil cache path unaffected", func(t *testing.T) {
+		api.witnessCache = nil
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+		require.NoError(t, err)
+		require.NotSame(t, sentinel, result)
+		require.NotNil(t, result.State)
 	})
 }
 

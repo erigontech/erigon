@@ -62,7 +62,7 @@ func (br *BlockRetire) retireBorBlocks(
 			continue
 		}
 
-		blockFrom, blockTo, ok := CanRetire(maxBlockNum, minSnapBlockNum, snap.Enum(), br.snCfg)
+		blockFrom, blockTo, ok := br.canRetire(maxBlockNum, minSnapBlockNum, snap.Enum())
 		if ok {
 			blocksRetired = true
 
@@ -73,7 +73,7 @@ func (br *BlockRetire) retireBorBlocks(
 			}
 
 			logger.Log(lvl, "[bor snapshots] Retire Bor Blocks", "type", snap,
-				"range", fmt.Sprintf("%s-%s", common.PrettyCounter(blockFrom), common.PrettyCounter(blockTo)))
+				"range", fmt.Sprintf("%s-%s", common.PrettyExact(blockFrom), common.PrettyExact(blockTo)))
 
 			var firstKeyGetter snaptype.FirstKeyGetter
 

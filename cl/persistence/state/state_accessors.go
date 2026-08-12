@@ -83,7 +83,8 @@ func ReadSlotData(getFn GetValFn, slot uint64, cfg *clparams.BeaconChainConfig) 
 	}
 	buf := bytes.NewBuffer(v)
 
-	return sd, sd.ReadFrom(buf, cfg)
+	err = sd.ReadFrom(buf, cfg)
+	return sd, err
 }
 
 func ReadEpochData(getFn GetValFn, slot uint64, beaconConfig *clparams.BeaconChainConfig) (*EpochData, error) {
@@ -100,7 +101,8 @@ func ReadEpochData(getFn GetValFn, slot uint64, beaconConfig *clparams.BeaconCha
 	}
 	buf := bytes.NewBuffer(v)
 
-	return ed, ed.ReadFrom(buf)
+	err = ed.ReadFrom(buf)
+	return ed, err
 }
 
 // ReadCheckpoints reads the checkpoints from the database, Current, Previous and Finalized
@@ -125,7 +127,7 @@ func ReadNextSyncCommittee(getFn GetValFn, slot uint64) (committee *solid.SyncCo
 		return nil, nil
 	}
 	committee = solid.NewSyncCommitteeWithSize(len(v)/48 - 1)
-	if err = committee.DecodeSSZ(v, 0); err != nil {
+	if err := committee.DecodeSSZ(v, 0); err != nil {
 		return nil, err
 	}
 	return
@@ -141,7 +143,7 @@ func ReadCurrentSyncCommittee(getFn GetValFn, slot uint64) (committee *solid.Syn
 		return nil, nil
 	}
 	committee = solid.NewSyncCommitteeWithSize(len(v)/48 - 1)
-	if err = committee.DecodeSSZ(v, 0); err != nil {
+	if err := committee.DecodeSSZ(v, 0); err != nil {
 		return nil, err
 	}
 	return

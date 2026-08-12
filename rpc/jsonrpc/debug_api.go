@@ -70,6 +70,7 @@ type PrivateDebugAPI interface {
 	GetBadBlocks(ctx context.Context) ([]map[string]any, error)
 	GetRawTransaction(ctx context.Context, hash common.Hash) (hexutil.Bytes, error)
 	ExecutionWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, mode *string) (*ExecutionWitnessResult, error)
+	ExecutionWitnesses(ctx context.Context, opts *WitnessSubscriptionOpts) (*rpc.Subscription, error)
 	SetHead(ctx context.Context, number hexutil.Uint64) error
 	FreeOSMemory()
 	SetGCPercent(v int) int
@@ -85,6 +86,9 @@ type DebugAPIImpl struct {
 	ethBackend        rpchelper.ApiBackend
 	GasCap            uint64
 	gethCompatibility bool // Geth-compatible storage iteration order for debug_storageRangeAt
+	// witnessCache serves recent legacy-mode debug_executionWitness results from
+	// memory, keyed by block hash; nil disables it (only the embedded node wires one).
+	witnessCache *witnessResultCache
 }
 
 // NewPrivateDebugAPI returns PrivateDebugAPIImpl instance
@@ -323,7 +327,7 @@ func (api *DebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context, startN
 
 	if endNumber == nil {
 		// Single param: cover exactly block startNum.
-		if err = api.BaseAPI.checkPruneHistory(ctx, tx, startNum); err != nil {
+		if err := api.BaseAPI.checkPruneHistory(ctx, tx, startNum); err != nil {
 			return nil, err
 		}
 		startTxNum, err := api._txNumReader.Min(ctx, tx, startNum)
@@ -349,7 +353,7 @@ func (api *DebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context, startN
 	// Checking startNum+1 is sufficient under sequential-pruning semantics: if block N is
 	// available, all blocks > N are too. If pruning semantics ever change this would need
 	// to also check endNum.
-	if err = api.BaseAPI.checkPruneHistory(ctx, tx, startNum+1); err != nil {
+	if err := api.BaseAPI.checkPruneHistory(ctx, tx, startNum+1); err != nil {
 		return nil, err
 	}
 
@@ -524,7 +528,7 @@ func (api *DebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, startHas
 
 	if endHash == nil {
 		// Single param: cover exactly block startNum.
-		if err = api.BaseAPI.checkPruneHistory(ctx, tx, startNum); err != nil {
+		if err := api.BaseAPI.checkPruneHistory(ctx, tx, startNum); err != nil {
 			return nil, err
 		}
 		startTxNum, err := api._txNumReader.Min(ctx, tx, startNum)
@@ -553,7 +557,7 @@ func (api *DebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, startHas
 	// Checking startNum+1 is sufficient under sequential-pruning semantics: if block N is
 	// available, all blocks > N are too. If pruning semantics ever change this would need
 	// to also check endNum.
-	if err = api.BaseAPI.checkPruneHistory(ctx, tx, startNum+1); err != nil {
+	if err := api.BaseAPI.checkPruneHistory(ctx, tx, startNum+1); err != nil {
 		return nil, err
 	}
 

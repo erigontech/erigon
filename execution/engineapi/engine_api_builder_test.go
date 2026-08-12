@@ -46,6 +46,130 @@ import (
 	"github.com/erigontech/erigon/rpc"
 )
 
+func TestEngineApiClearsFreshTouchedEmptyAccount(t *testing.T) {
+	tests := []struct {
+		name            string
+		experimentalBAL bool
+	}{
+		{name: "serial builder"},
+		{name: "experimental BAL builder", experimentalBAL: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			testEngineApiClearsFreshTouchedEmptyAccount(t, test.experimentalBAL)
+		})
+	}
+}
+
+func testEngineApiClearsFreshTouchedEmptyAccount(t *testing.T, experimentalBAL bool) {
+	parallel := dbg.Exec3Parallel
+	dbg.Exec3Parallel = true
+	t.Cleanup(func() { dbg.Exec3Parallel = parallel })
+
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlError)
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
+	genesis.Config.AmsterdamTime = nil
+
+	senderKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(senderKey.PublicKey)
+	genesis.Alloc[senderAddr] = types.GenesisAccount{
+		Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil),
+	}
+
+	emptyKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	emptyAddr := crypto.PubkeyToAddress(emptyKey.PublicKey)
+
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger: logger, DataDir: t.TempDir(), Genesis: genesis, CoinbaseKey: coinbaseKey,
+		EthConfigTweaker: func(cfg *ethconfig.Config) {
+			cfg.ExperimentalBAL = experimentalBAL
+		},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, eat.Close()) })
+
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		chainID := eat.ChainId()
+		signer := types.LatestSignerForChainID(chainID)
+		rpcClient := eat.Transactor.RpcClient()
+		feeCap := uint256.NewInt(1_000_000_000)
+
+		send := func(txn types.Transaction) {
+			signed, err := types.SignTx(txn, *signer, senderKey)
+			require.NoError(t, err)
+			_, err = rpcClient.SendTransaction(signed)
+			require.NoError(t, err)
+		}
+
+		// Deploy runtime code that pushes emptyAddr and executes SELFDESTRUCT.
+		initCode := append([]byte{0x75, 0x73}, emptyAddr[:]...)
+		initCode = append(initCode, 0xff, 0x60, 0x00, 0x52, 0x60, 0x16, 0x60, 0x0a, 0xf3)
+		send(&types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{Nonce: 0, GasLimit: 200_000, Data: initCode},
+			ChainID:  *chainID, TipCap: *feeCap, FeeCap: *feeCap,
+		})
+		_, err = eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+
+		selfDestructor := types.CreateAddress(senderAddr, 0)
+		send(&types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{Nonce: 1, GasLimit: 200_000, To: &selfDestructor},
+			ChainID:  *chainID, TipCap: *feeCap, FeeCap: *feeCap,
+		})
+		auth, err := types.SignAuthorization(emptyKey, *chainID, common.Address{0xaa}, 0)
+		require.NoError(t, err)
+		send(&types.SetCodeTransaction{
+			DynamicFeeTransaction: types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{Nonce: 2, GasLimit: 500_000, To: &senderAddr},
+				ChainID:  *chainID, TipCap: *feeCap, FeeCap: *feeCap,
+			},
+			Authorizations: []types.Authorization{auth},
+		})
+
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		const gasUsedWithoutAuthorityExistenceRefund = uint64(74_603)
+		require.Equal(t, gasUsedWithoutAuthorityExistenceRefund, uint64(payload.ExecutionPayload.GasUsed))
+	})
+}
+
+func TestEngineApiClearsFreshZeroAmountWithdrawal(t *testing.T) {
+	parallel := dbg.Exec3Parallel
+	dbg.Exec3Parallel = true
+	t.Cleanup(func() { dbg.Exec3Parallel = parallel })
+
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlError)
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
+
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger: logger, DataDir: t.TempDir(), Genesis: genesis, CoinbaseKey: coinbaseKey,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, eat.Close()) })
+
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		fresh := common.Address{0xbe, 0xef}
+		withdrawals := []*types.Withdrawal{{Index: 1, Validator: 1, Address: fresh, Amount: 0}}
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx, engineapitester.WithWithdrawals(withdrawals))
+		require.NoError(t, err)
+
+		bal := decodeAndValidateBAL(t, payload)
+		changes := findAccountChanges(bal, accounts.InternAddress(fresh))
+		require.NotNilf(t, changes, "zero-amount withdrawal recipient must remain an access-only BAL entry\n%s", bal.DebugString())
+		require.Empty(t, changes.StorageChanges)
+		require.Empty(t, changes.StorageReads)
+		require.Empty(t, changes.BalanceChanges)
+		require.Empty(t, changes.NonceChanges)
+		require.Empty(t, changes.CodeChanges)
+	})
+}
+
 func TestEngineApiBuiltBlockStateMatchesValidation(t *testing.T) {
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlDebug)
