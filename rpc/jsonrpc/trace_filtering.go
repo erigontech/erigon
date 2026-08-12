@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"math/big"
 	"runtime"
+	"slices"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -134,24 +135,19 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 }
 
 // Get implements trace_get
-func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, indicies []hexutil.Uint64, gasBailOut *bool, traceConfig *config.TraceConfig) (*ParityTrace, error) {
-	// Parity fails if it gets more than a single index. It returns nothing in this case. Must we?
-	if len(indicies) > 1 {
-		return nil, nil
-	}
+func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, traceAddress []hexutil.Uint64, gasBailOut *bool, traceConfig *config.TraceConfig) (*ParityTrace, error) {
 	traces, err := api.Transaction(ctx, txHash, gasBailOut, traceConfig)
 	if err != nil {
 		return nil, err
 	}
 
-	// 'trace_get' index starts at one (oddly)
-	firstIndex := int(indicies[0]) + 1
+	path := common.SliceMap(traceAddress, func(level hexutil.Uint64) int { return int(level) })
 	for i := range traces {
-		if i == firstIndex {
+		if slices.Equal(traces[i].TraceAddress, path) {
 			return &traces[i], nil
 		}
 	}
-	return nil, err
+	return nil, nil
 }
 
 func rewardKindToString(kind protocolrules.RewardKind) string {
@@ -846,7 +842,7 @@ func (api *TraceAPIImpl) callBlock(
 	if err != nil {
 		return nil, nil, err
 	}
-	if err = ibs.CommitBlock(rules, cachedWriter); err != nil {
+	if err := ibs.CommitBlock(rules, cachedWriter); err != nil {
 		return nil, nil, err
 	}
 
@@ -1191,7 +1187,7 @@ func (api *TraceAPIImpl) callTransaction(
 	if err != nil {
 		return nil, err
 	}
-	if err = ibs.CommitBlock(rules, cachedWriter); err != nil {
+	if err := ibs.CommitBlock(rules, cachedWriter); err != nil {
 		return nil, err
 	}
 

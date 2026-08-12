@@ -424,11 +424,10 @@ var snapshotCommand = cli.Command{
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&cli.StringFlag{Name: "check", Usage: fmt.Sprintf("comma separated list from: %s", integrity.FastChecks)},
-				&cli.StringFlag{Name: "skip-check", Usage: fmt.Sprintf("comma separated list from: %s", integrity.FastChecks)},
-				&cli.BoolFlag{Name: "failFast", Value: true, Usage: "to stop after 1st problem or print WARN log and continue check"},
+				&cli.StringFlag{Name: "skip-check", Usage: fmt.Sprintf("comma separated list from: %s, plus %s", integrity.FastChecks, integrity.TorrentPieces)},
+				&cli.BoolFlag{Name: "failFast", Value: true, Usage: "stop after the 1st problem, or WARN and keep checking (a torrent piece-hash mismatch still fails the run)"},
 				&cli.Uint64Flag{Name: "fromStep", Value: 0, Usage: "skip files before given step"},
 				&cli.StringFlag{Name: "file-integrity-cache", Usage: "path to integrity check cache file (speeds up repeated runs)"},
-				&cli.BoolFlag{Name: "skip-torrent-verify", Usage: "skip torrent piece verification when using file-integrity-cache"},
 				&cli.Int64Flag{Name: "seed", Usage: "random seed for sampling (auto-generated if not set)"},
 				&cli.Float64Flag{Name: "sample", Usage: "fraction of items to check via pseudo-random sampling (0.0-1.0)", Value: 0.01},
 				&cli.DurationFlag{Name: "integrity.budget", Value: 0, Usage: "total wall-clock budget for the run; each check gets (remaining / remaining_checks). 0 (default) means no limit"},
@@ -1522,7 +1521,7 @@ func doDebugKey(ctx context.Context, cliCtx *cli.Command) error {
 	return nil
 }
 
-func doIntegrity(ctx context.Context, cliCtx *cli.Command) error {
+func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 	logger := log.Root()
 
 	checkStr := cliCtx.String("check")
@@ -1543,9 +1542,8 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) error {
 		requestedChecks = integrity.FastChecks
 	}
 
-	skipChecks := cliCtx.String("skip-check")
-	if len(skipChecks) > 0 {
-		skipSet := map[integrity.Check]struct{}{}
+	skipSet := map[integrity.Check]struct{}{}
+	if skipChecks := cliCtx.String("skip-check"); len(skipChecks) > 0 {
 		for skipCheck := range strings.SplitSeq(skipChecks, ",") {
 			skipSet[integrity.Check(skipCheck)] = struct{}{}
 		}
@@ -1570,6 +1568,14 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) error {
 	fromStep := cliCtx.Uint64("fromStep")
 
 	var cache *integrity.IntegrityCache
+	// A torrent-verification failure must survive whatever the checks below return,
+	// including an early error or a cancellation on their way out.
+	var torrentVerifyErr error
+	defer func() {
+		if torrentVerifyErr != nil {
+			retErr = errors.Join(torrentVerifyErr, retErr)
+		}
+	}()
 	if cachePath := cliCtx.String("file-integrity-cache"); cachePath != "" {
 		var err error
 		cache, err = integrity.LoadIntegrityCache(cachePath)
@@ -1583,11 +1589,18 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) error {
 		}()
 
 		// When using cache, verify torrent piece hashes first (unless skipped)
-		if !cliCtx.Bool("skip-torrent-verify") {
+		if _, skip := skipSet[integrity.TorrentPieces]; !skip {
 			dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 			logger.Info("[integrity] verifying torrent piece hashes before integrity checks")
 			if err := integrity.VerifyTorrentFiles(ctx, dirs.Snap, failFast, logger); err != nil {
-				return fmt.Errorf("torrent verification failed: %w", err)
+				err = fmt.Errorf("torrent verification failed: %w", err)
+				if failFast {
+					return err
+				}
+				// failFast=false means "warn and keep checking", so the run still has to
+				// produce its check results; the error is reported at the end instead.
+				logger.Warn("[integrity] continuing after torrent verification failure", "err", err)
+				torrentVerifyErr = err
 			}
 		}
 	}
@@ -1716,6 +1729,12 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) error {
 			return integrity.CheckCommitmentHistAtBlkRange(ctx, scCopy, db, blockReader, 1, to+1, logger)
 		case integrity.StateVerify:
 			return integrity.CheckStateVerify(ctx, db, failFast, fromStep, logger)
+		case integrity.TorrentPieces:
+			// Already run as a pre-pass when --file-integrity-cache enabled it.
+			if cache == nil {
+				return integrity.VerifyTorrentFiles(ctx, dirs.Snap, failFast, logger)
+			}
+			return nil
 		default:
 			return fmt.Errorf("unknown check: %s", chk)
 		}
@@ -2130,6 +2149,10 @@ func checkIfCaplinSnapshotsPublishable(dirs datadir.Dirs, emptyOk bool) error {
 }
 
 func checkIfBlockSnapshotsPublishable(snapDir string) error {
+	if err := checkNoDuplicateFileVersions(snapDir); err != nil {
+		return err
+	}
+
 	var sum uint64
 	var maxTo uint64
 	verMap := map[string]map[string]version.Versions{
@@ -2291,9 +2314,38 @@ var (
 	ErrSnapGap             = errors.New("gap in snapshot ranges")
 	ErrSnapMissingFile     = errors.New("missing snapshot file")
 	ErrSnapMaxStepMismatch = errors.New("max step mismatch across directories")
+
+	ErrSnapDuplicateVersions = errors.New("same snapshot range published under multiple versions")
 )
 
+// checkNoDuplicateFileVersions rejects publishing the same file twice under different
+// versions (e.g. v1.0-code.0-32.vi next to v1.1-code.0-32.vi): readers pick the highest
+// version, so the lower one is dead weight in the torrent and its hash mapping is ambiguous.
+// Subdirectories are skipped, so callers pass each snapshot directory they own.
+func checkNoDuplicateFileVersions(dirPaths ...string) error {
+	for _, dirPath := range dirPaths {
+		groups, err := version.GroupByMaskedName(filepath.Join(dirPath, "*"))
+		if err != nil {
+			return err
+		}
+		for _, g := range groups {
+			if len(g) < 2 {
+				continue
+			}
+			if !snaptype.IsSeedableExtension(g[0].Name) && !strings.HasSuffix(g[0].Name, ".torrent") {
+				continue // not an erigon snapshot file
+			}
+			return fmt.Errorf("%w: %s and %s in %s", ErrSnapDuplicateVersions, g[0].Name, g[1].Name, dirPath)
+		}
+	}
+	return nil
+}
+
 func checkStateSnapshotFiles(dirs datadir.Dirs, persistReceiptCache, commitmentHistory bool) error {
+	if err := checkNoDuplicateFileVersions(dirs.SnapDomain, dirs.SnapHistory, dirs.SnapIdx, dirs.SnapAccessors); err != nil {
+		return err
+	}
+
 	var maxStepDomain uint64 // across all files in SnapDomain
 	var accFiles []snaptype.FileInfo
 
@@ -3099,7 +3151,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		snTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(indexDB)
 		blkFreezeCfg := ethconfig.BlocksFreezing{ChainName: beaconConfig.ConfigName}
 		res.CaplinStateSnaps = snapshotsync.NewCaplinStateSnapshots(blkFreezeCfg, beaconConfig, dirs, snTypes, logger)
-		if err = res.CaplinStateSnaps.OpenFolder(); err != nil {
+		if err := res.CaplinStateSnaps.OpenFolder(); err != nil {
 			return res, nil, err
 		}
 		res.CaplinStateSnaps.LogStat("caplin-state")
@@ -3339,11 +3391,12 @@ func doUnmerge(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) erro
 	compresCfg.Workers = workers
 	var word = make([]byte, 0, 4096)
 
-	if info.Type.Enum() == snaptype2.Enums.Headers || info.Type.Enum() == snaptype2.Enums.Bodies {
+	switch {
+	case info.Type.Enum() == snaptype2.Enums.Headers || info.Type.Enum() == snaptype2.Enums.Bodies:
 		for g.HasNext() {
 			if blockFrom%1000 == 0 {
 				if compressor != nil {
-					if err = compressor.Compress(); err != nil {
+					if err := compressor.Compress(); err != nil {
 						return err
 					}
 					compressor.Close()
@@ -3369,9 +3422,9 @@ func doUnmerge(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) erro
 			}
 			compressor.Close()
 		}
-	} else if info.Type.Enum() != snaptype2.Enums.Transactions {
+	case info.Type.Enum() != snaptype2.Enums.Transactions:
 		return fmt.Errorf("unsupported type %s", info.Type.Enum().String())
-	} else {
+	default:
 		// tx unmerge
 		for ; blockFrom < blockTo; blockFrom += 1000 {
 			um_fileinfo := snaptype2.Enums.Bodies.Type().FileInfo(dirs.Snap, blockFrom, blockFrom+1000)
@@ -3379,9 +3432,9 @@ func doUnmerge(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) erro
 			if err != nil {
 				return err
 			}
-			defer bodiesSegment.Close()
 
 			_, expectedCount, err := snaptype2.TxsAmountBasedOnBodiesSnapshots(bodiesSegment, um_fileinfo.Len()-1)
+			bodiesSegment.Close()
 			if err != nil {
 				return err
 			}
@@ -3404,7 +3457,7 @@ func doUnmerge(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) erro
 				return fmt.Errorf("unexpected count %d", expectedCount)
 			}
 
-			if err = compressor.Compress(); err != nil {
+			if err := compressor.Compress(); err != nil {
 				return err
 			}
 			compressor.Close()
@@ -3528,7 +3581,7 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 
 	logger.Info("Work on state history snapshots")
 	indexWorkers := estimate.IndexSnapshot.Workers()
-	if err = temporalDb.BuildMissedAccessors(ctx, indexWorkers); err != nil {
+	if err := temporalDb.BuildMissedAccessors(ctx, indexWorkers); err != nil {
 		return err
 	}
 
@@ -3543,7 +3596,7 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 	}
 
 	logger.Info("Build state history snapshots")
-	if err = agg.BuildFiles(lastTxNum); err != nil {
+	if err := agg.BuildFiles(lastTxNum); err != nil {
 		return err
 	}
 
@@ -3560,10 +3613,10 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 	logger.Info("waiting for background build/merge to drain")
 	agg.WaitForFiles()
 
-	if err = agg.MergeLoop(ctx); err != nil {
+	if err := agg.MergeLoop(ctx); err != nil {
 		return err
 	}
-	if err = agg.RemoveOverlapsAfterMerge(ctx); err != nil {
+	if err := agg.RemoveOverlapsAfterMerge(ctx); err != nil {
 		return err
 	}
 

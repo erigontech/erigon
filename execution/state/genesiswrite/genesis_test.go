@@ -44,7 +44,6 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
-	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -358,11 +357,11 @@ func TestSetupGenesis(t *testing.T) {
 				key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 				m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&oldcustomg), execmoduletester.WithKey(key))
 
-				chainBlocks, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, nil)
+				chainBlocks, err := m.GenerateChain(4, nil)
 				if err != nil {
 					return nil, nil, err
 				}
-				if err = m.InsertChain(chainBlocks); err != nil {
+				if err := m.InsertChain(chainBlocks); err != nil {
 					return nil, nil, err
 				}
 				// This should return a compatibility error.

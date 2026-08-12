@@ -1575,7 +1575,11 @@ func (d *Domain) dataReader(f *seg.Decompressor) *seg.Reader {
 	if !strings.Contains(f.FileName(), ".kv") {
 		panic("assert: miss-use " + f.FileName())
 	}
-	return seg.NewReader(f.MakeGetter(), d.Compression)
+	g := f.MakeGetter()
+	if dbg.FilesAsyncIO {
+		g.EnableResidencyGate()
+	}
+	return seg.NewReader(g, d.Compression)
 }
 func (d *Domain) dataWriter(f *seg.Compressor, forceNoCompress bool) *seg.Writer {
 	if !strings.Contains(f.FileName(), ".kv") {
@@ -1819,33 +1823,16 @@ func (dt *DomainRoTx) canBuild(dbtx kv.Tx) bool { //nolint
 	return maxStepInFiles < dt.d.maxStepInDB(dbtx)
 }
 
-func (dt *DomainRoTx) canPruneDomainTables(tx kv.Tx, untilTx uint64) (can bool, maxStepToPrune kv.Step) {
-	if m := dt.files.EndTxNum(); m > 0 {
-		maxStepToPrune = kv.Step((m - 1) / dt.stepSize)
-	}
-	var untilStep kv.Step
-	if untilTx > 0 {
-		untilStep = kv.Step((untilTx - 1) / dt.stepSize)
-	}
-	sm, err := GetExecV3PrunableProgress(tx, []byte(dt.d.ValuesTable))
+func (dt *DomainRoTx) checkFilesDBGap(tx kv.Tx) error {
+	prg, err := GetPruneValProgress(tx, []byte(dt.d.ValuesTable))
 	if err != nil {
-		dt.d.logger.Error("get domain pruning progress", "name", dt.d.FilenameBase, "error", err)
-		return false, maxStepToPrune
+		return err
 	}
-
-	delta := float64(max(maxStepToPrune, sm) - min(maxStepToPrune, sm)) // maxStep could be 0
-	switch dt.d.FilenameBase {
-	case "account":
-		mxPrunableDAcc.Set(delta)
-	case "storage":
-		mxPrunableDSto.Set(delta)
-	case "code":
-		mxPrunableDCode.Set(delta)
-	case "commitment":
-		mxPrunableDComm.Set(delta)
+	if filesEnd := dt.files.EndTxNum(); prg.TxTo > filesEnd {
+		return fmt.Errorf("gap between snapshot files and DB for domain %s: files end at txNum %d but the DB was pruned up to %d — [%d, %d) is in neither. Maybe you removed snapshot files (e.g. `snapshots rm-state --latest`) but forgot to run `integration stage_exec --reset` (or `integration stage_custom_trace --reset` for custom-trace domains)?",
+			dt.d.FilenameBase, filesEnd, prg.TxTo, filesEnd, prg.TxTo)
 	}
-	//fmt.Printf("smallestToPrune[%s] minInDB %d inFiles %d until %d\n", dt.d.filenameBase, sm, maxStepToPrune, untilStep)
-	return sm <= min(maxStepToPrune, untilStep) && dt.files.EndTxNum() > 0, maxStepToPrune
+	return nil
 }
 
 // checks if there is anything to prune in DOMAIN tables.

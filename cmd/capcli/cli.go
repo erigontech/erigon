@@ -999,7 +999,7 @@ func (b *BenchmarkNode) Run(ctx *Context) error {
 			log.Warn("Failed to benchmark", "error", err, "uri", uri)
 			continue
 		}
-		_, err = f.WriteString(fmt.Sprintf("%d,%d\n", i, elapsed.Milliseconds()))
+		_, err = fmt.Fprintf(f, "%d,%d\n", i, elapsed.Milliseconds())
 		if err != nil {
 			return err
 		}

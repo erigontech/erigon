@@ -84,7 +84,7 @@ func createRPCMetricsLabel(method string, valid bool) string {
 		status = "success"
 	}
 
-	return fmt.Sprintf(`rpc_duration_seconds{method="%s",success="%s"}`, method, status)
+	return fmt.Sprintf(`rpc_duration_seconds{method=%q,success=%q}`, method, status)
 
 }
 

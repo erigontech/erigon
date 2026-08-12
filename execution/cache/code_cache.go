@@ -41,7 +41,7 @@ const (
 	// DefaultCodeCacheBytes is the byte limit for the code cache.
 	DefaultCodeCacheBytes = 512 * datasize.MB
 	// DefaultAddrCacheBytes is the byte limit for address cache (16 MB)
-	DefaultAddrCacheBytes = 16 * datasize.MB
+	DefaultAddrCacheBytes = 32 * datasize.MB
 	// DefaultCodeSizeCacheEntries is the max entry count for the size-only
 	// cache (code size answers without loading bytes for
 	// EXTCODESIZE / EXTCODEHASH callers).
@@ -559,7 +559,9 @@ func (c *CodeCache) putCodeSizeByCodeHashLocked(codeHash []byte, size int, hcs, 
 
 // Delete removes the address → code mapping for addr.
 func (c *CodeCache) Delete(addr []byte) {
+	c.addrBindMu.Lock()
 	c.addrToHash.Remove(common.BytesToAddress(addr))
+	c.addrBindMu.Unlock()
 }
 
 // Clear removes every layer, resets accounting, and starts a new coherence
