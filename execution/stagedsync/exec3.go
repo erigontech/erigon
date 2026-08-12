@@ -127,7 +127,6 @@ type execRange struct {
 // set, so the error return means an operational executor failure and nothing
 // else.
 type execV3Outcome struct {
-	lastHeader            *types.Header
 	applyTx               kv.TemporalRwTx
 	lastCommittedBlockNum uint64
 	verdict               *blockVerdict
@@ -249,7 +248,6 @@ func execV3(ctx context.Context,
 		initialTxNum, inputTxNum, initialCycle, applyTx, stepsInDb, accumulator, readAhead, logEvery)
 
 	out = execV3Outcome{
-		lastHeader:            lastHeader,
 		applyTx:               applyTx,
 		lastCommittedBlockNum: pe.lastCommittedBlockNum.Load(),
 		verdict:               pe.verdict,
