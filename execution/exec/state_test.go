@@ -18,6 +18,10 @@ package exec
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -40,4 +44,31 @@ func TestNewWorkersPoolForegroundReturnsWait(t *testing.T) {
 	t.Cleanup(clear)
 	require.NotNil(t, wait)
 	require.NoError(t, wait())
+}
+
+// The background pool must keep every worker's failure, mirroring the
+// executor-group guarantee: a concurrent second failure is diagnostic
+// evidence, not noise to drop on the first-error slot.
+func TestNewWorkersPoolPreservesEveryWorkerFailure(t *testing.T) {
+	in := NewQueueWithRetry(1)
+	t.Cleanup(in.Release)
+
+	boom := errors.New("worker start fault")
+	var n atomic.Int64
+	faults := WorkerFaults{RunStart: func() error {
+		return fmt.Errorf("worker %d: %w", n.Add(1), boom)
+	}}
+
+	_, _, _, clear, wait, err := NewWorkersPool(
+		context.Background(), faults, nil, true, nil,
+		nil, nil, nil, in, nil, chain.AllProtocolChanges, nil,
+		nil, 2, NewWorkerMetrics(), datadir.Dirs{}, log.New(),
+	)
+	require.NoError(t, err)
+	t.Cleanup(clear)
+
+	got := wait()
+	require.ErrorIs(t, got, boom)
+	require.Equal(t, 2, strings.Count(got.Error(), boom.Error()),
+		"both workers' failures must survive the join")
 }

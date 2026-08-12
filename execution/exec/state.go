@@ -24,8 +24,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"golang.org/x/sync/errgroup"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	commonerrors "github.com/erigontech/erigon/common/errors"
@@ -606,7 +604,7 @@ func NewWorkersPool(ctx context.Context, faults WorkerFaults, accumulator *shard
 	resultsSize := workerCount * 8
 	rws = NewResultsQueue(resultsSize, workerCount)
 
-	g, gctx := errgroup.WithContext(ctx)
+	g, gctx := commonerrors.NewGroup(ctx)
 	wait = g.Wait
 	applyWorker = NewWorker(ctx, false, nil, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs, logger)
 
@@ -644,9 +642,7 @@ func NewWorkersPool(ctx context.Context, faults WorkerFaults, accumulator *shard
 	}
 	if background {
 		for i := range workerCount {
-			g.Go(func() error {
-				return commonerrors.NilIfCanceled(reconWorkers[i].Run())
-			})
+			g.Go(reconWorkers[i].Run)
 		}
 	}
 

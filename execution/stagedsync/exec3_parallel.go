@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -1720,54 +1719,6 @@ func (pe *parallelExecutor) processResults(ctx context.Context, applyTx kv.Tempo
 	return blockResult, nil
 }
 
-// execGroup joins executor goroutines like errgroup but keeps every member's
-// return instead of only the first: Wait reports all real failures together,
-// and a cancellation-only member exit can never occupy the first-error slot
-// and hide a concurrent real failure. Members return their errors raw — no
-// self-filtering.
-type execGroup struct {
-	g    *errgroup.Group
-	mu   sync.Mutex
-	errs []error
-}
-
-// newExecGroup mirrors errgroup.WithContext: the returned context is canceled
-// on the first member error, which is how sibling goroutines learn to stop.
-func newExecGroup(ctx context.Context) (*execGroup, context.Context) {
-	g, gctx := errgroup.WithContext(ctx)
-	return &execGroup{g: g}, gctx
-}
-
-func (eg *execGroup) Go(fn func() error) {
-	eg.g.Go(func() error {
-		err := fn()
-		if err != nil {
-			eg.mu.Lock()
-			eg.errs = append(eg.errs, err)
-			eg.mu.Unlock()
-		}
-		return err
-	})
-}
-
-// Wait joins every member, then reports the recorded real failures together.
-// Cancellation-only member exits are routine teardown.
-func (eg *execGroup) Wait() error {
-	_ = eg.g.Wait()
-	eg.mu.Lock()
-	defer eg.mu.Unlock()
-	real := make([]error, 0, len(eg.errs))
-	for _, err := range eg.errs {
-		if commonerrors.NilIfCanceled(err) != nil {
-			real = append(real, err)
-		}
-	}
-	if len(real) == 1 {
-		return real[0]
-	}
-	return errors.Join(real...)
-}
-
 func (pe *parallelExecutor) run(ctx context.Context) (context.Context, func(error) error, error) {
 	// execRequests holds one entry per decoded block (each containing all its TxTasks).
 	// A large buffer causes the block-loader goroutine to race far ahead of the apply
@@ -1790,7 +1741,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, func(erro
 	// the exec loop can stop the OCC pool on exit; final cleanup cancels both
 	// contexts before joining the group.
 	execLoopCtx, execLoopCtxCancel := context.WithCancelCause(ctx)
-	pe.execLoopGroup, execLoopCtx = newExecGroup(execLoopCtx)
+	pe.execLoopGroup, execLoopCtx = commonerrors.NewGroup(execLoopCtx)
 	pe.cancelExecLoop = execLoopCtxCancel
 
 	workersCtx, cancelWorkers := context.WithCancel(execLoopCtx)

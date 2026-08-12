@@ -1335,7 +1335,7 @@ func TestWaitForTeardownPhase(t *testing.T) {
 func TestParallelExecWait(t *testing.T) {
 	newPE := func(group func() error) *parallelExecutor {
 		pe := &parallelExecutor{}
-		pe.execLoopGroup, _ = newExecGroup(context.Background())
+		pe.execLoopGroup, _ = commonerrors.NewGroup(context.Background())
 		pe.execLoopGroup.Go(group)
 		return pe
 	}
@@ -1468,7 +1468,7 @@ func TestCanceledMemberCannotMaskRealError(t *testing.T) {
 	t.Run("a raw canceled member cannot mask a late real worker error", func(t *testing.T) {
 		canceledReturned := make(chan struct{})
 		pe := &parallelExecutor{}
-		pe.execLoopGroup, _ = newExecGroup(context.Background())
+		pe.execLoopGroup, _ = commonerrors.NewGroup(context.Background())
 		pe.execLoopGroup.Go(func() error {
 			defer close(canceledReturned)
 			return context.Canceled
