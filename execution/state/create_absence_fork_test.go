@@ -25,20 +25,18 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// TestCreateOverAbsenceConsumedBeforePreservedDestructFlush requires a direct
-// dependency when a late destruct would turn a consumed absence into a live
-// preserved account. The collision-reads variant also proves that a stale
+// TestCreateOverAbsenceConsumedBeforeDestructFlush requires a direct dependency
+// when a destruct published mid-attempt changes a consumed absence into a live
+// EIP-8246 account. The collision-check variant also proves that a previously
 // memoized destruct probe does not hide the conflict.
-func TestCreateOverAbsenceConsumedBeforePreservedDestructFlush(t *testing.T) {
+func TestCreateOverAbsenceConsumedBeforeDestructFlush(t *testing.T) {
 	t.Parallel()
-	for _, tc := range []struct {
-		name           string
-		collisionReads bool
-	}{
-		{name: "createOnly"},
-		{name: "collisionReadsFirst", collisionReads: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
+	for _, collisionCheck := range []bool{false, true} {
+		name := "createOnly"
+		if collisionCheck {
+			name = "collisionCheckFirst"
+		}
+		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			ibs, vm, addr := newAbsenceForkState(t)
 			empty, err := ibs.Empty(addr)
@@ -49,20 +47,18 @@ func TestCreateOverAbsenceConsumedBeforePreservedDestructFlush(t *testing.T) {
 			destructVersion := Version{TxIndex: 0, Incarnation: 3}
 			writeAbsenceForkDestruct(vm, addr, destructVersion, 1_000_000, 1)
 
-			if tc.collisionReads {
-				codeHash, _, _, err := readCodeHash(ibs, addr)
+			if collisionCheck {
+				codeHash, err := ibs.GetCodeHash(addr)
 				require.NoError(t, err)
 				require.Equal(t, accounts.EmptyCodeHash, codeHash)
-				nonce, _, _, err := readNonce(ibs, addr)
+				nonce, err := ibs.GetNonce(addr)
 				require.NoError(t, err)
 				require.Zero(t, nonce)
 			}
 
-			var createErr error
-			require.NotPanics(t, func() {
-				createErr = ibs.CreateAccount(addr, true)
+			require.PanicsWithValue(t, ErrDependency, func() {
+				_ = ibs.CreateAccount(addr, true)
 			})
-			require.ErrorIs(t, createErr, ErrDependency)
 			require.Equal(t, destructVersion.TxIndex, ibs.DepTxIndex())
 
 			reads := ibs.VersionedReads()
@@ -90,11 +86,7 @@ func TestCreateOverAbsenceConsumedBeforeEmptyDestructFlush(t *testing.T) {
 
 	writeAbsenceForkDestruct(vm, addr, Version{TxIndex: 0, Incarnation: 3}, 0, 0)
 
-	var createErr error
-	require.NotPanics(t, func() {
-		createErr = ibs.CreateAccount(addr, true)
-	})
-	require.NoError(t, createErr)
+	require.NoError(t, ibs.CreateAccount(addr, true))
 	_, created := ibs.VersionedWrites().GetAddress(addr)
 	require.True(t, created)
 

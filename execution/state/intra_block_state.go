@@ -1334,8 +1334,15 @@ func (sdb *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 	// covering both committed and in-block-created accounts — unless a later tx
 	// re-created it, in which case fall through to the normal read.
 	if sdb.eip8246 && readAccount == nil {
-		if destructed, sdRes, ok := sdb.versionMap.ReadSelfDestruct(addr, sdb.txIndex); ok && sdRes.Status() == MVReadResultDone && destructed {
-			destructTxIndex := sdRes.DepIdx()
+		consumedAbsence := sdb.consumedAddressAbsence(addr)
+		destructed, sdRes, ok := sdb.readSelfDestructMemo(addr)
+		if consumedAbsence {
+			// Re-probe the map because a consumed absence is fixed for this attempt,
+			// while the memo may predate the destruct that conflicts with it.
+			destructed, sdRes, ok = sdb.versionMap.ReadSelfDestruct(addr, sdb.txIndex)
+		}
+		if ok && sdRes.Status() == MVReadResultDone && destructed {
+			destructVersion := sdRes.Version()
 			// Only a genuine re-creation (a later CreateAccount, which writes
 			// AddressPath) skips reconstruction. Later Balance/Nonce/CodeHash
 			// writes are updates to the still-preserved account, not a revival:
@@ -1343,7 +1350,7 @@ func (sdb *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 			// balance, nonce and code hash, so e.g. an account funded after its
 			// SELFDESTRUCT still reads as existing — matching serial.
 			revived := false
-			if hi, ok := sdb.versionMap.LatestTxIndex(addr, AddressPath, accounts.NilKey, sdb.txIndex-1); ok && hi > destructTxIndex {
+			if hi, ok := sdb.versionMap.LatestTxIndex(addr, AddressPath, accounts.NilKey, sdb.txIndex-1); ok && hi > destructVersion.TxIndex {
 				revived = true
 			}
 			if !revived {
@@ -1355,13 +1362,21 @@ func (sdb *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 					sdb.finalizeProvisionalAddressRead(addr)
 					return nil, StorageRead, UnknownVersion, nil
 				}
-				// Reconstruct before reconciling: an empty result agrees with an
-				// earlier absence, while a live result must conflict with it.
-				version := sdRes.Version()
-				if err := sdb.accountRead(addr, preserved, MapRead, version, SelfDestructPath); err != nil {
-					return nil, MapRead, version, err
+				if consumedAbsence {
+					// A definitive nil read may already have affected gas or control
+					// flow. Keep it as this attempt's account view, record the destruct
+					// that exposed the conflict, and retry the attempt.
+					if destructVersion.TxIndex > sdb.dep {
+						sdb.dep = destructVersion.TxIndex
+					}
+					sdb.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
+						ReadHeader: ReadHeader{Source: MapRead, Version: destructVersion},
+						Val:        true,
+					})
+					panic(ErrDependency)
 				}
-				return preserved, MapRead, version, nil
+				sdb.accountRead(addr, preserved, MapRead, destructVersion)
+				return preserved, MapRead, destructVersion, nil
 			}
 		}
 	}
@@ -1400,9 +1415,7 @@ func (sdb *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 				// from the BAL-prepopulated sub-field cells; the fields
 				// themselves flow through the per-field cell reads downstream.
 				if synth, ok := sdb.synthesizeCreatedAccountBase(addr); ok {
-					if err := sdb.accountRead(addr, synth, MapRead, UnknownVersion, AddressPath); err != nil {
-						return nil, StorageRead, UnknownVersion, err
-					}
+					sdb.accountRead(addr, synth, MapRead, UnknownVersion)
 					return synth, StorageRead, UnknownVersion, nil
 				}
 			}
@@ -1425,9 +1438,7 @@ func (sdb *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 		// the account, so reconcile the recorded read — a later record cell
 		// would otherwise spuriously invalidate the nil against a live
 		// account.
-		if err := sdb.accountRead(addr, readAccount, source, version, AddressPath); err != nil {
-			return nil, source, version, err
-		}
+		sdb.accountRead(addr, readAccount, source, version)
 	}
 
 	return readAccount, source, version, nil
@@ -2049,9 +2060,7 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 			if readAccount == nil || err != nil {
 				if err == nil {
 					if synth, ok := sdb.synthesizeCreatedAccountBase(addr); ok {
-						if err := sdb.accountRead(addr, synth, MapRead, UnknownVersion, AddressPath); err != nil {
-							return nil, err
-						}
+						sdb.accountRead(addr, synth, MapRead, UnknownVersion)
 						readAccount = synth
 						accountSource = StorageRead
 						accountVersion = UnknownVersion
@@ -2137,9 +2146,7 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 	// already recorded a nil marker (refreshAccount/getVersionedAccount), and a
 	// wrong nil read would spuriously invalidate against a later record cell.
 	if recordRead || sdb.versionMap != nil {
-		if err := sdb.accountRead(addr, account, accountSource, accountVersion, AddressPath); err != nil {
-			return nil, err
-		}
+		sdb.accountRead(addr, account, accountSource, accountVersion)
 	}
 	obj := newObject(sdb, addr, account, account)
 	if code.Bytes != nil {
@@ -2591,9 +2598,7 @@ func printAccount(eip161Enabled bool, isAura bool, addr accounts.Address, stateO
 func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter StateWriter) error {
 	for addr, bi := range sdb.balanceInc {
 		if !bi.transferred {
-			if _, err := sdb.getStateObject(addr, true); err != nil {
-				return err
-			}
+			sdb.getStateObject(addr, true)
 		}
 	}
 	for addr := range sdb.journal.dirties {
@@ -2995,12 +3000,7 @@ func (sdb *IntraBlockState) AccessedAddr(addr accounts.Address) bool {
 	return ok
 }
 
-// accountRead reconciles a resolved account with the AddressPath probe made
-// while loading it. A provisional nil may be replaced because no caller has
-// used it yet; a definitive nil must remain the attempt's account view. When
-// reconciliation would change that view, witnessPath and version identify the
-// newly visible cell and ErrDependency asks the executor to retry.
-func (sdb *IntraBlockState) accountRead(addr accounts.Address, account *accounts.Account, source ReadSource, version Version, witnessPath AccountPath) error {
+func (sdb *IntraBlockState) accountRead(addr accounts.Address, account *accounts.Account, source ReadSource, version Version) {
 	if sdb.versionMap != nil {
 		sdb.MarkAddressAccess(addr, true)
 		if source == WriteSetRead {
@@ -3008,27 +3008,13 @@ func (sdb *IntraBlockState) accountRead(addr accounts.Address, account *accounts
 			// cross-tx dependency; recording it would make the validator
 			// (floored below the tx's own writes) return None and wrongly
 			// invalidate the tx.
-			return nil
+			return
 		}
 		if source == ReadSetRead {
 			// Served from the read set: the entry being reconciled is already
 			// recorded with its real source; re-recording would launder the
 			// synthetic tx-reads source into validation, which rejects it.
-			return nil
-		}
-		if sdb.consumedAddressAbsence(addr) {
-			if version.TxIndex > sdb.dep {
-				sdb.dep = version.TxIndex
-			}
-			hdr := ReadHeader{Source: source, Version: version}
-			if witnessPath == SelfDestructPath {
-				// Header-only recording would encode false, but preserved-account
-				// reconstruction depends on a true self-destruct.
-				sdb.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{ReadHeader: hdr, Val: true})
-			} else {
-				sdb.versionedReads.SetHeader(addr, witnessPath, accounts.NilKey, hdr)
-			}
-			return ErrDependency
+			return
 		}
 		data := *account
 		// Demote a sub-field MapRead promotion when AddressPath itself has no cell,
@@ -3044,7 +3030,6 @@ func (sdb *IntraBlockState) accountRead(addr accounts.Address, account *accounts
 			Val:        NewAccountView(&data),
 		})
 	}
-	return nil
 }
 
 // recordWriteX helpers record a versioned write at the specified path

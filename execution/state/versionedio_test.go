@@ -950,7 +950,7 @@ func TestAccountRead_BalancePathPromotion_DoesNotInvalidate(t *testing.T) {
 	acc := accounts.NewAccount()
 	acc.Balance = postWithdrawalBalance
 	acc.CodeHash = accounts.EmptyCodeHash
-	require.NoError(t, ibs.accountRead(addr, &acc, MapRead, Version{TxIndex: 0, Incarnation: 0}, AddressPath))
+	ibs.accountRead(addr, &acc, MapRead, Version{TxIndex: 0, Incarnation: 0})
 
 	// Same call the parallel-exec scheduler makes between worker
 	// completion and apply.
