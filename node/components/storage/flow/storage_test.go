@@ -128,7 +128,14 @@ func TestNewWithStorageRecordFileOnDownloadComplete(t *testing.T) {
 	require.True(t, got[0].Local)
 }
 
-func TestNewWithStorageRecordFileFailureKeepsPending(t *testing.T) {
+// TestNewWithStorageRecordFileFailureDrainsPending pins the corrected
+// invariant: RecordFile failure is treated as a functional download
+// failure so the statePending counter does not leak. Pre-fix the
+// orchestrator kept the pending entry on the assumption a retry would
+// arrive; no retry mechanism ever existed, so statePending stayed
+// non-zero forever and InitialStateReady never fired (observed on
+// leg-M cycle 9 with zero-byte DownloadComplete events).
+func TestNewWithStorageRecordFileFailureDrainsPending(t *testing.T) {
 	bus := newBusForTest()
 	storage := &recordingStorage{inv: snapshot.NewInventory(), failWith: errors.New("disk full")}
 	o := NewWithStorage(bus, storage, logger())
@@ -150,9 +157,10 @@ func TestNewWithStorageRecordFileFailureKeepsPending(t *testing.T) {
 	}, 2*time.Second, "pending count")
 
 	bus.Publish(DownloadComplete{FileName: entry.Name, Size: entry.Size})
-	// Give the handler a moment to run.
-	time.Sleep(50 * time.Millisecond)
+
+	waitUntil(t, func() bool {
+		return o.PendingCount() == 0
+	}, 2*time.Second, "pending must drain after RecordFile failure")
 
 	require.Empty(t, storage.snapshotRecorded(), "RecordFile should not commit on failure")
-	require.Equal(t, 1, o.PendingCount(), "pending must stay after RecordFile failure")
 }

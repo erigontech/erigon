@@ -353,17 +353,31 @@ func (p *Provider) onDownloadRequested(req flow.DownloadRequested) {
 	}
 
 	localPath := filepath.Join(p.dirs.Snap, req.FileName)
-	var size int64
-	if fi, err := os.Stat(localPath); err == nil {
-		size = fi.Size()
+	fi, statErr := os.Stat(localPath)
+	if statErr != nil || fi.Size() == 0 {
+		var reason string
+		if statErr != nil {
+			reason = fmt.Sprintf("post-download stat: %v", statErr)
+		} else {
+			reason = "download produced zero-byte file"
+		}
+		if p.logger != nil {
+			p.logger.Warn("[downloader-bus] Client.Download returned but file not on disk; publishing DownloadFailed",
+				"file", req.FileName, "reason", reason)
+		}
+		p.bus.Publish(flow.DownloadFailed{
+			FileName: req.FileName,
+			Reason:   reason,
+		})
+		return
 	}
 	if p.logger != nil {
-		p.logger.Info("[downloader-bus] publishing DownloadComplete", "file", req.FileName, "size", size)
+		p.logger.Info("[downloader-bus] publishing DownloadComplete", "file", req.FileName, "size", fi.Size())
 	}
 	p.bus.Publish(flow.DownloadComplete{
 		FileName:  req.FileName,
 		InfoHash:  req.InfoHash,
 		LocalPath: localPath,
-		Size:      size,
+		Size:      fi.Size(),
 	})
 }

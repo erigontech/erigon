@@ -1208,11 +1208,23 @@ func (o *Orchestrator) onDownloadComplete(e DownloadComplete) {
 	}
 
 	if err := o.storage.RecordFile(localEntry); err != nil {
-		o.log.Warn("[flow] storage.RecordFile failed", "file", e.FileName, "err", err)
-		// Leave pending as-is; a retry or a subsequent DownloadComplete
-		// will re-attempt. Dropping pending here would let gap-fill re-
-		// request the file immediately, amplifying a transient storage
-		// error into redundant downloads.
+		o.log.Warn("[flow] storage.RecordFile failed; treating as functional download failure", "file", e.FileName, "err", err)
+		o.peerMu.Lock()
+		delete(o.pending, e.FileName)
+		isStatePhase := peerEntry.Kind != snapshot.KindCaplin
+		var shouldFireStateReady bool
+		if isStatePhase && o.statePending > 0 {
+			o.statePending--
+			if o.statePending == 0 && !o.stateReadyFired {
+				shouldFireStateReady = true
+			}
+		}
+		o.peerMu.Unlock()
+		o.bus.Publish(DownloadFailed{FileName: e.FileName, Reason: err.Error()})
+		if shouldFireStateReady {
+			o.tryFireInitialStateReady(o.ctx)
+		}
+		o.maybeFireInitialDownloadsComplete()
 		return
 	}
 
