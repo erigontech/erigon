@@ -24,7 +24,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
 // internMemoWords exercises every limb of the source word, alone and together,
@@ -151,6 +153,26 @@ func TestInternAddressIgnoresBitsAboveTheAddress(t *testing.T) {
 		require.True(t, want == evm.internAddress(&clean))
 		require.True(t, want == evm.internAddress(&dirty))
 	}
+}
+
+// TestInternAddressSurvivesResetBetweenBlocks pins what makes the memo worth
+// having on a reused worker EVM: interning is pure, so a warmed entry stays
+// valid across blocks and clearing it would throw away exactly the reuse the
+// table exists for.
+func TestInternAddressSurvivesResetBetweenBlocks(t *testing.T) {
+	evm := &EVM{}
+	word := uint256.Int{0x1122334455667788, 0x99aabbccddeeff00, 0x12345678, 0}
+	for range addressCacheMinOps + 1 {
+		evm.internAddress(&word)
+	}
+	sentinel := accounts.InternAddress(common.HexToAddress("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"))
+	require.Equal(t, 1, poisonEntry(evm.addrCache.handles[:], accounts.InternAddress(word.Bytes20()), sentinel))
+
+	evm.ResetBetweenBlocks(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, Config{}, &chain.Rules{})
+
+	require.NotNil(t, evm.addrCache, "the memo is per-EVM, not per-block")
+	require.True(t, sentinel == evm.internAddress(&word),
+		"a warmed address must still hit after the worker moves to the next block")
 }
 
 var internSink accounts.Address

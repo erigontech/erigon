@@ -217,7 +217,7 @@ func BenchmarkAddressDiversity(b *testing.B) {
 			b.ReportAllocs()
 			vmenv := benchConfig(b, 100_000_000)
 			statedb := vmenv.IntraBlockState()
-			deployContract(statedb, addrContract, code)
+			deployContract(b, statedb, addrContract, code)
 			for i, a := range addrs {
 				addr := accounts.InternAddress(a)
 				require.NoError(b, statedb.CreateAccount(addr, false))
