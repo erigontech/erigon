@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -628,6 +629,7 @@ func executeParallelWithCheck(tb testing.TB, pe *parallelExecutor, tasks []exec.
 		}
 	}
 
+	pe.cancelExecLoop(nil)
 	if err := pe.wait(); err != nil {
 		return result, err
 	}
@@ -637,6 +639,43 @@ func executeParallelWithCheck(tb testing.TB, pe *parallelExecutor, tasks []exec.
 	}
 
 	return result, err
+}
+
+func TestExecuteParallelWithCheckCancelsBeforeWait(t *testing.T) {
+	executorCtx, cancelExecLoop := context.WithCancelCause(context.Background())
+	executorGroup, executorCtx := commonerrors.NewGroup(executorCtx)
+	executorGroup.Go(func() error {
+		<-executorCtx.Done()
+		return executorCtx.Err()
+	})
+
+	pe := &parallelExecutor{
+		txExecutor: txExecutor{
+			execRequests:  make(chan *execRequest, 1),
+			execLoopGroup: executorGroup,
+		},
+		cancelExecLoop: cancelExecLoop,
+	}
+	go func() {
+		request := <-pe.execRequests
+		request.applyResults <- &blockResult{Block: request.block}
+	}()
+
+	task := NewTestExecTask(0, nil, accounts.InternAddress(common.Address{}), 0)
+	done := make(chan error, 1)
+	go func() {
+		_, err := executeParallelWithCheck(t, pe, []exec.Task{task}, false, nil, false)
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		cancelExecLoop(nil)
+		require.NoError(t, <-done)
+		t.Fatal("executeParallelWithCheck waited without stopping the executor")
+	}
 }
 
 func runParallelGetMetadata(tb testing.TB, tasks []exec.Task, validation propertyCheck) map[int]map[int]bool {
