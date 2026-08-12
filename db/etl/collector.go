@@ -376,7 +376,7 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 
 	if args.BufferType == SortableAppendBuffer {
 		if prevK != nil {
-			if err = loadFunc(prevK, prevV); err != nil {
+			if err := loadFunc(prevK, prevV); err != nil {
 				return err
 			}
 		}
