@@ -1349,7 +1349,7 @@ func TestWaitForTeardownPhase(t *testing.T) {
 func TestParallelExecWait(t *testing.T) {
 	newPE := func(group func() error) *parallelExecutor {
 		pe := &parallelExecutor{}
-		pe.execLoopGroup = &errgroup.Group{}
+		pe.execLoopGroup, _ = newExecGroup(context.Background())
 		pe.execLoopGroup.Go(group)
 		return pe
 	}
@@ -1391,18 +1391,31 @@ func TestParallelExecWait(t *testing.T) {
 		})
 		require.ErrorIs(t, pe.wait(), boom)
 	})
+
+	t.Run("independent real member errors are both preserved", func(t *testing.T) {
+		first := errors.New("exec blocks error: first")
+		second := errors.New("worker pool: second")
+		pe := newPE(func() error { return first })
+		pe.execLoopGroup.Go(func() error {
+			time.Sleep(20 * time.Millisecond)
+			return second
+		})
+		got := pe.wait()
+		require.ErrorIs(t, got, first)
+		require.ErrorIs(t, got, second,
+			"a second independent failure must not be lost to the first-error slot")
+	})
 }
 
-// Worker cancellation is routine; real worker failures must reach the executor.
+// joinWorkers labels pool failures; cancellation filtering is the group Wait's
+// job, pinned by TestParallelExecWait.
 func TestJoinWorkers(t *testing.T) {
 	require.NoError(t, joinWorkers(func() error { return nil }))
-	require.NoError(t, joinWorkers(func() error { return context.Canceled }))
-	require.NoError(t, joinWorkers(func() error { return fmt.Errorf("results.Add: %w", context.Canceled) }))
 
 	boom := errors.New("exec.Worker panic: boom")
 	got := joinWorkers(func() error { return boom })
 	require.ErrorIs(t, got, boom)
-	require.NotErrorIs(t, got, context.Canceled)
+	require.EqualError(t, got, "worker pool: exec.Worker panic: boom")
 }
 
 // errgroup keeps its first non-nil error, so members must filter cancellation.
@@ -1422,21 +1435,20 @@ func TestCanceledMemberCannotMaskRealError(t *testing.T) {
 			"errgroup keeps the first non-nil return — the raw Canceled masks the real error")
 	})
 
-	t.Run("filtered members surface a late real worker error", func(t *testing.T) {
-		cancellationFiltered := make(chan struct{})
+	t.Run("a raw canceled member cannot mask a late real worker error", func(t *testing.T) {
+		canceledReturned := make(chan struct{})
 		pe := &parallelExecutor{}
-		pe.execLoopGroup = &errgroup.Group{}
+		pe.execLoopGroup, _ = newExecGroup(context.Background())
 		pe.execLoopGroup.Go(func() error {
-			err := commonerrors.NilIfCanceled(context.Canceled)
-			close(cancellationFiltered)
-			return err
+			defer close(canceledReturned)
+			return context.Canceled
 		})
 		pe.execLoopGroup.Go(func() error {
-			<-cancellationFiltered
+			<-canceledReturned
 			return joinWorkers(func() error { return boom })
 		})
 		require.ErrorIs(t, pe.wait(), boom,
-			"a routine cancellation must not mask a concurrent real worker failure")
+			"members must not need to self-filter cancellation for real failures to survive")
 	})
 }
 

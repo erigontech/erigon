@@ -28,12 +28,10 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/cmp"
 	"github.com/erigontech/erigon/common/dbg"
-	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -480,7 +478,7 @@ type txExecutor struct {
 	lastCommittedTxNum    atomic.Uint64
 	committedGas          atomic.Int64
 
-	execLoopGroup *errgroup.Group
+	execLoopGroup *execGroup
 
 	execRequests chan *execRequest
 	execCount    atomic.Int64
@@ -634,7 +632,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 				err = recoveredPanicError("exec blocks", rec)
 				return
 			}
-			if err = commonerrors.NilIfCanceled(err); err != nil {
+			if err != nil {
 				err = fmt.Errorf("exec blocks error: %w", err)
 			} else {
 				te.logger.Debug("[" + te.logPrefix + "] exec blocks exit")
