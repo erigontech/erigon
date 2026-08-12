@@ -1027,7 +1027,7 @@ func minimalP2PServerWithListener(t *testing.T) *p2p.Server {
 func listenerReachable(t *testing.T, srv *p2p.Server) bool {
 	t.Helper()
 	addr := srv.NodeInfo().ListenAddr
-	c, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
+	c, err := net.DialTimeout("tcp", addr, 200*time.Millisecond) //nolint:noctx
 	if err != nil {
 		return false
 	}

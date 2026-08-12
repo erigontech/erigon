@@ -244,7 +244,7 @@ func TestAllowList(t *testing.T) {
 
 func testCustomRequest(t *testing.T, url, method string) bool {
 	body := bytes.NewReader(fmt.Appendf(nil, `{"jsonrpc":"2.0","id":1,"method":"%s"}`, method))
-	req, _ := http.NewRequest("POST", url, body)
+	req, _ := http.NewRequestWithContext(t.Context(), "POST", url, body)
 	req.Header.Set("content-type", "application/json")
 
 	client := http.DefaultClient
@@ -265,7 +265,7 @@ func rpcRequest(t *testing.T, url string, extraHeaders ...string) *http.Response
 
 	// Create the request.
 	body := bytes.NewReader([]byte(`{"jsonrpc":"2.0","id":1,"method":"rpc_modules","params":[]}`))
-	req, err := http.NewRequest("POST", url, body)
+	req, err := http.NewRequestWithContext(t.Context(), "POST", url, body)
 	if err != nil {
 		t.Fatal("could not create http request:", err)
 	}
@@ -307,7 +307,10 @@ func TestHTTP2H2C(t *testing.T) {
 	client := &http.Client{Transport: transport}
 
 	body := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"rpc_modules","params":[]}`)
-	resp, err := client.Post("http://"+addr.String(), "application/json", body)
+	req, err := http.NewRequestWithContext(t.Context(), "POST", "http://"+addr.String(), body)
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -332,7 +335,7 @@ func TestHTTP2H2CUpgrade(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = httpSrv.Shutdown(context.Background()) })
 
-	conn, err := net.Dial("tcp", addr.String())
+	conn, err := net.Dial("tcp", addr.String()) //nolint:noctx
 	require.NoError(t, err)
 	defer conn.Close()
 	require.NoError(t, conn.SetDeadline(time.Now().Add(10*time.Second)))
@@ -386,7 +389,10 @@ func TestHTTPSEndpoint(t *testing.T) {
 			defer client.CloseIdleConnections()
 
 			body := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"rpc_modules","params":[]}`)
-			resp, err := client.Post("https://"+addr.String(), "application/json", body)
+			req, err := http.NewRequestWithContext(t.Context(), "POST", "https://"+addr.String(), body)
+			require.NoError(t, err)
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := client.Do(req)
 			require.NoError(t, err)
 			defer resp.Body.Close()
 
@@ -440,14 +446,14 @@ func TestRPCAdmissionHandler(t *testing.T) {
 	t.Run("disabled when limit is zero", func(t *testing.T) {
 		h := newRPCAdmissionHandler(0, okHandler)
 		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", nil))
+		h.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil))
 		assert.Equal(t, http.StatusOK, rec.Code)
 	})
 
 	t.Run("allows requests under the limit", func(t *testing.T) {
 		h := newRPCAdmissionHandler(5, okHandler)
 		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", nil))
+		h.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil))
 		assert.Equal(t, http.StatusOK, rec.Code)
 	})
 
@@ -466,7 +472,7 @@ func TestRPCAdmissionHandler(t *testing.T) {
 		var wg sync.WaitGroup
 		for range limit {
 			wg.Go(func() {
-				h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/", nil))
+				h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil))
 			})
 		}
 
@@ -479,7 +485,7 @@ func TestRPCAdmissionHandler(t *testing.T) {
 
 		// Now the limit is reached — next request must be rejected.
 		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", nil))
+		h.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil))
 		assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
 
 		// Release the held requests.
@@ -540,7 +546,7 @@ func TestNewWSConnectionLimiter(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	rr0 := httptest.NewRecorder()
-	passthrough.ServeHTTP(rr0, httptest.NewRequest(http.MethodGet, "/", nil))
+	passthrough.ServeHTTP(rr0, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil))
 	assert.Equal(t, http.StatusOK, rr0.Code)
 
 	// Build a limiter with limit=1.
@@ -554,7 +560,7 @@ func TestNewWSConnectionLimiter(t *testing.T) {
 
 	// First request: should be accepted (blocks on hold).
 	go func() {
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 		limiter.ServeHTTP(httptest.NewRecorder(), req)
 	}()
 
@@ -565,7 +571,7 @@ func TestNewWSConnectionLimiter(t *testing.T) {
 
 	// Second request: should be rejected with 503.
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 	limiter.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusServiceUnavailable, rr.Code)
 

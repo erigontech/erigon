@@ -63,7 +63,7 @@ func (p *p2pClient) Connect() (<-chan TxMessage, <-chan error, error) {
 		PrivateKey:      privateKey,
 	}
 
-	r, err := http.Post(p.adminRPC, "application/json", strings.NewReader(
+	r, err := http.Post(p.adminRPC, "application/json", strings.NewReader( //nolint:noctx
 		`{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}`,
 	))
 	if err != nil {
@@ -144,7 +144,7 @@ func (p *p2pClient) Connect() (<-chan TxMessage, <-chan error, error) {
 func (p *p2pClient) notifyWhenReady() (<-chan struct{}, error) {
 	ready := make(chan struct{})
 
-	r, err := http.Post(p.adminRPC, "application/json", strings.NewReader(
+	r, err := http.Post(p.adminRPC, "application/json", strings.NewReader( //nolint:noctx
 		`{"jsonrpc":"2.0","method":"admin_peers","params":[],"id":1}`,
 	))
 	if err != nil {
@@ -168,7 +168,7 @@ func (p *p2pClient) notifyWhenReady() (<-chan struct{}, error) {
 		for {
 			time.Sleep(100 * time.Millisecond)
 
-			r, err := http.Post(p.adminRPC, "application/json", strings.NewReader(
+			r, err := http.Post(p.adminRPC, "application/json", strings.NewReader( //nolint:noctx
 				`{"jsonrpc":"2.0","method":"admin_peers","params":[],"id":1}`,
 			))
 			if err != nil {

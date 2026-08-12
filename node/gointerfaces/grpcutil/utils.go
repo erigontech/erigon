@@ -98,7 +98,7 @@ func NewServerWithOpts(creds credentials.TransportCredentials, extraOpts ...grpc
 }
 
 func StartServer(srv *grpc.Server, addr string, healthCheck bool, logger log.Logger, serveErrMsg string) error {
-	lis, err := net.Listen("tcp", addr)
+	lis, err := net.Listen("tcp", addr) //nolint:noctx
 	if err != nil {
 		return fmt.Errorf("could not create listener: %w, addr=%s", err, addr)
 	}

@@ -18,6 +18,7 @@ package beacon
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"time"
@@ -34,8 +35,9 @@ type LayeredBeaconHandler struct {
 	ArchiveApi *handler.ApiHandler
 }
 
-func ListenAndServe(beaconHandler *LayeredBeaconHandler, routerCfg beacon_router_configuration.RouterConfiguration) error {
-	listener, err := net.Listen(routerCfg.Protocol, routerCfg.Address)
+func ListenAndServe(ctx context.Context, beaconHandler *LayeredBeaconHandler, routerCfg beacon_router_configuration.RouterConfiguration) error {
+	var lc net.ListenConfig
+	listener, err := lc.Listen(ctx, routerCfg.Protocol, routerCfg.Address)
 	if err != nil {
 		log.Warn("[Beacon API] Failed to start listening", "addr", routerCfg.Address, "err", err)
 		return err
@@ -75,7 +77,14 @@ func ListenAndServe(beaconHandler *LayeredBeaconHandler, routerCfg beacon_router
 		WriteTimeout: routerCfg.WriteTimeout,
 	}
 
-	if err := server.Serve(listener); err != nil {
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = server.Shutdown(shutdownCtx)
+	}()
+
+	if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Warn("[Beacon API] failed to start serving", "addr", routerCfg.Address, "err", err)
 		return err
 	}

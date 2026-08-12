@@ -233,13 +233,13 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 	// happy path the http server's Shutdown closes the listener first and the
 	// cleanup is a silent no-op. The sentry/P2P stack picks its own kernel-
 	// assigned port directly via its config below, so no pre-bind there.
-	jsonRpcListener, err := net.Listen("tcp", localhostEphemeral)
+	jsonRpcListener, err := net.Listen("tcp", localhostEphemeral) //nolint:noctx
 	if err != nil {
 		return EngineApiTester{}, fmt.Errorf("listen json-rpc: %w", err)
 	}
 	addCleanup(closeListenerCleanup(jsonRpcListener))
 	jsonRpcPort := jsonRpcListener.Addr().(*net.TCPAddr).Port
-	engineApiListener, err := net.Listen("tcp", localhostEphemeral)
+	engineApiListener, err := net.Listen("tcp", localhostEphemeral) //nolint:noctx
 	if err != nil {
 		return EngineApiTester{}, fmt.Errorf("listen engine-api: %w", err)
 	}

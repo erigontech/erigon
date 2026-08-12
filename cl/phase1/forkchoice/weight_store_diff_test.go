@@ -81,7 +81,7 @@ func buildExAnteStore(tb testing.TB) *ForkChoiceStore {
 	anchor := state2.New(cfg)
 	require.NoError(tb, utils.DecodeSSZSnappy(anchor, diffAnchorEnc, int(clparams.AltairVersion)))
 	em := beaconevents.NewEventEmitter()
-	gs, err := initial_state.GetGenesisState(1)
+	gs, err := initial_state.GetGenesisState(tb.Context(), 1)
 	require.NoError(tb, err)
 	clk := eth_clock.NewEthereumClock(gs.GenesisTime(), gs.GenesisValidatorsRoot(), cfg)
 	bs := blob_storage.NewBlobStore(memdb.NewTestDB(tb, dbcfg.ChainDB), afero.NewMemMapFs(), math.MaxUint64, cfg, clk)

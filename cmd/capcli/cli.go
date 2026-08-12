@@ -691,7 +691,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 		return err
 	}
 	snr := freezeblocks.NewBeaconSnapshotReader(csn, eth1Getter, beaconConfig)
-	gSpot, err := initial_state.GetGenesisState(t)
+	gSpot, err := initial_state.GetGenesisState(context.Background(), t)
 	if err != nil {
 		return err
 	}
@@ -815,7 +815,7 @@ type ArchiveSanitizer struct {
 
 func getHead(beaconApiURL string) (uint64, error) {
 	headResponse := map[string]any{}
-	req, err := http.NewRequest("GET", beaconApiURL+"/eth/v2/debug/beacon/heads", nil)
+	req, err := http.NewRequestWithContext(context.Background(), "GET", beaconApiURL+"/eth/v2/debug/beacon/heads", nil)
 	if err != nil {
 		return 0, err
 	}
@@ -846,7 +846,7 @@ func getHead(beaconApiURL string) (uint64, error) {
 
 func getStateRootAtSlot(beaconApiURL string, slot uint64) (common.Hash, error) {
 	response := map[string]any{}
-	req, err := http.NewRequest("GET", fmt.Sprintf("%s/eth/v1/beacon/states/%d/root", beaconApiURL, slot), nil)
+	req, err := http.NewRequestWithContext(context.Background(), "GET", fmt.Sprintf("%s/eth/v1/beacon/states/%d/root", beaconApiURL, slot), nil)
 	if err != nil {
 		return common.Hash{}, err
 	}
@@ -1009,7 +1009,7 @@ func (b *BenchmarkNode) Run(ctx *Context) error {
 }
 
 func timeRequest(uri, accept, method, body string) (time.Duration, error) {
-	req, err := http.NewRequest(method, uri, nil)
+	req, err := http.NewRequestWithContext(context.Background(), method, uri, nil)
 	if err != nil {
 		return 0, err
 	}

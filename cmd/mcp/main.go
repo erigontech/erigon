@@ -197,7 +197,7 @@ func autoDiscover(logger log.Logger) string {
 	logger.Info("[MCP] Auto-discovering Erigon JSON-RPC endpoint...")
 	for _, p := range defaultRPCPorts {
 		addr := fmt.Sprintf("127.0.0.1:%d", p)
-		conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
+		conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond) //nolint:noctx
 		if err == nil {
 			conn.Close()
 			url := fmt.Sprintf("http://%s", addr)

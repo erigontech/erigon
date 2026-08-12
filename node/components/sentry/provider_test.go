@@ -180,13 +180,13 @@ func TestProviderClose_StopsSharedP2PServer(t *testing.T) {
 	require.NotNil(t, srv)
 
 	addr := srv.NodeInfo().ListenAddr
-	c, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
+	c, err := net.DialTimeout("tcp", addr, 200*time.Millisecond) //nolint:noctx
 	require.NoError(t, err, "listener should be up before Close")
 	c.Close()
 
 	require.NoError(t, p.Close())
 	require.Nil(t, p.sharedP2PServer, "Close must clear the shared server reference")
 
-	_, err = net.DialTimeout("tcp", addr, 200*time.Millisecond)
+	_, err = net.DialTimeout("tcp", addr, 200*time.Millisecond) //nolint:noctx
 	require.Error(t, err, "Provider.Close must shut the shared p2p.Server's listener down")
 }

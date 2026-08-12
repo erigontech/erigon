@@ -55,7 +55,7 @@ var (
 func skipIfNodeUnreachable(t *testing.T, addrs ...string) {
 	t.Helper()
 	for _, addr := range addrs {
-		conn, err := net.DialTimeout("tcp", addr, 300*time.Millisecond)
+		conn, err := net.DialTimeout("tcp", addr, 300*time.Millisecond) //nolint:noctx
 		if err != nil {
 			t.Skipf("requires a running node at %s: %v", addr, err)
 		}

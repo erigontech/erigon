@@ -205,7 +205,7 @@ type fakeIGD struct {
 // httpu.Handler
 func (dev *fakeIGD) ServeMessage(r *http.Request) {
 	dev.t.Logf(`HTTPU request %s %s`, r.Method, r.RequestURI)
-	conn, err := net.Dial("udp4", r.RemoteAddr)
+	conn, err := net.Dial("udp4", r.RemoteAddr) //nolint:noctx
 	if err != nil {
 		fmt.Printf("reply Dial error: %v", err)
 		return
@@ -230,7 +230,7 @@ func (dev *fakeIGD) replaceListenAddr(resp string) string {
 }
 
 func (dev *fakeIGD) listen() (err error) {
-	if dev.listener, err = net.Listen("tcp", "127.0.0.1:0"); err != nil {
+	if dev.listener, err = net.Listen("tcp", "127.0.0.1:0"); err != nil { //nolint:noctx
 		return err
 	}
 	laddr := &net.UDPAddr{IP: net.ParseIP("239.255.255.250"), Port: 1900}
