@@ -261,13 +261,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		config.NetworkId = clparams.NetworkType(beaconConfig.DepositNetworkID)
 	}
 
-	if len(config.BootstrapNodes) > 0 {
-		networkConfig.BootNodes = config.BootstrapNodes
-	}
-
-	if len(config.StaticPeers) > 0 {
-		networkConfig.StaticPeers = config.StaticPeers
-	}
+	config.ApplyNetworkOverrides(networkConfig)
 	if genesisState != nil {
 		genesisDb.Initialize(genesisState)
 	} else {

@@ -1944,7 +1944,14 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 	cfg.CaplinConfig.SentinelAddr = ctx.String(SentinelAddrFlag.Name)
 	cfg.CaplinConfig.SentinelPort = ctx.Uint64(SentinelPortFlag.Name)
 	cfg.CaplinConfig.BootstrapNodes = ctx.StringSlice(SentinelBootnodes.Name)
-	cfg.CaplinConfig.StaticPeers = ctx.StringSlice(SentinelStaticPeers.Name)
+	if ctx.IsSet(SentinelStaticPeers.Name) {
+		cfg.CaplinConfig.StaticPeers = []string{}
+		for _, staticPeer := range ctx.StringSlice(SentinelStaticPeers.Name) {
+			if staticPeer != "" {
+				cfg.CaplinConfig.StaticPeers = append(cfg.CaplinConfig.StaticPeers, staticPeer)
+			}
+		}
+	}
 
 	chain := resolveChainName(ctx)
 	if ctx.IsSet(NetworkIdFlag.Name) {

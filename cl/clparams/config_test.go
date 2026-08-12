@@ -42,6 +42,32 @@ func TestGetConfigsByNetwork(t *testing.T) {
 	testConfig(t, chainspec.HoodiChainID)
 }
 
+func TestChiadoUsesBootnodesAndStaticPeers(t *testing.T) {
+	network, _ := GetConfigsByNetwork(chainspec.ChiadoChainID)
+
+	require.NotEmpty(t, network.BootNodes)
+	require.Equal(t, []string{
+		"/ip4/65.109.93.224/tcp/9000/p2p/16Uiu2HAmEG2vHsiGdask9Weg5qVCsxtrezWCde1WArakqSNCY1EA",
+		"/ip4/185.127.230.20/tcp/9000/p2p/16Uiu2HAkzVyapm35N6PFLVVgPvfaR4PngLkzH1rQznHTNQk73hwt",
+		"/ip4/51.68.224.153/tcp/9000/p2p/16Uiu2HAkxcBE3LK7zhnyZERguonkKmXLgYPRcuDPaF6C2vaigYuT",
+		"/ip4/57.128.194.213/tcp/9000/p2p/16Uiu2HAmH8EQ7XHrz72cEspr6G7xHipCgV55gf211t6B9AnbRcgo",
+	}, network.StaticPeers)
+}
+
+func TestCaplinConfigCanDisableDefaultStaticPeers(t *testing.T) {
+	network := NetworkConfigs[chainspec.ChiadoChainID]
+
+	CaplinConfig{}.ApplyNetworkOverrides(&network)
+	require.Equal(t, ChiadoStaticPeers, network.StaticPeers)
+
+	CaplinConfig{StaticPeers: []string{}}.ApplyNetworkOverrides(&network)
+	require.Empty(t, network.StaticPeers)
+	require.NotEmpty(t, network.BootNodes)
+
+	CaplinConfig{StaticPeers: []string{"replacement"}}.ApplyNetworkOverrides(&network)
+	require.Equal(t, []string{"replacement"}, network.StaticPeers)
+}
+
 // TestCustomConfigMinimalPreset verifies that CustomConfig() correctly loads
 // a minimal-preset YAML config with GLOAS parameters. This simulates what
 // epbs-devnet-1 will use: SLOTS_PER_EPOCH=8, GLOAS_FORK_EPOCH=1, etc.
