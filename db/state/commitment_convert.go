@@ -967,7 +967,7 @@ func writeRestoreManifestAtomic(path string, entries []string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := f.Write([]byte(strings.Join(entries, "\n"))); err != nil {
+	if _, err := f.WriteString(strings.Join(entries, "\n")); err != nil {
 		_ = f.Close()
 		return err
 	}
