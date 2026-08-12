@@ -52,6 +52,13 @@ fuzz)
 	# runtime that evmone's modexp needs
 	export RUSTFLAGS="-C link-arg=-lstdc++"
 	pkg=$2 target=$3 dur=${4:-60s}
+	# Overflow detection off by default here: hunting crashes and hunting
+	# overflow are different jobs, and leaving it on makes every campaign stall
+	# on the first deliberate wraparound instead of exploring. OVERFLOW=1 turns
+	# it back on for an overflow-specific run.
+	if [ "${OVERFLOW:-0}" != "1" ]; then
+		flags+=("-gcflags=all=-overflowdetect=false")
+	fi
 	exec "$GOSENTRY/bin/go" test "$pkg" -run='^$' -fuzz="^$target\$" -fuzztime="$dur" \
 		--focus-on-new-code=false --catch-races=false --catch-leaks=false "${flags[@]}"
 	;;
