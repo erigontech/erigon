@@ -53,7 +53,7 @@ var ProtocolToString = map[uint]string{
 const ProtocolName = "eth"
 
 // maxMessageSize is the maximum cap on the size of a protocol message.
-const maxMessageSize = 10 * 1024 * 1024
+const maxMessageSize = 10 * common.Mebi
 const ProtocolMaxMsgSize = maxMessageSize
 
 var ProtocolLengths = map[uint]uint64{ETH68: 17, ETH69: 18, ETH70: 18, ETH71: 20}

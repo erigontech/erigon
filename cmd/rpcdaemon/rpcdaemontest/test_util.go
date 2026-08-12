@@ -440,7 +440,7 @@ func CreateTestGrpcConn(t *testing.T, m *execmoduletester.ExecModuleTester) (con
 		m.BlockReader, nil, log.New(), builder.NewLatestBlockBuiltStore(), nil))
 	txpoolproto.RegisterTxpoolServer(server, m.TxPoolGrpcServer)
 	txpoolproto.RegisterMiningServer(server, privateapi.NewMiningServer(ctx, &IsMiningMock{}, ethashApi, m.Log))
-	listener := bufconn.Listen(1024 * 1024)
+	listener := bufconn.Listen(common.Mebi)
 
 	dialer := func() func(context.Context, string) (net.Conn, error) {
 		go func() {

@@ -28,6 +28,7 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 )
@@ -38,7 +39,7 @@ func writeTorrentPair(t *testing.T, dir, name string, corrupt bool) {
 	require.NoError(t, os.MkdirAll(filepath.Dir(dataPath), 0o755))
 	require.NoError(t, os.WriteFile(dataPath, bytes.Repeat([]byte{0xAA}, 1024), 0o644))
 
-	info := metainfo.Info{PieceLength: 16 * 1024}
+	info := metainfo.Info{PieceLength: 16 * common.Kibi}
 	require.NoError(t, info.BuildFromFilePath(dataPath))
 	infoBytes, err := bencode.Marshal(info)
 	require.NoError(t, err)

@@ -24,6 +24,7 @@ import (
 
 	"github.com/shirou/gopsutil/v4/process"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
@@ -60,7 +61,7 @@ func ReadVirtualMemStats() (process.MemoryMapsStat, error) {
 		field := val.Field(i)
 
 		if field.Kind() == reflect.Uint64 {
-			field.SetUint(field.Interface().(uint64) * 1024)
+			field.SetUint(field.Interface().(uint64) * common.Kibi)
 		}
 	}
 

@@ -23,6 +23,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
@@ -43,9 +44,9 @@ func DefaultAdaptivePinControllerConfig() AdaptivePinControllerConfig {
 		PromoteThresholdMisses:    100,
 		MaxPromotedContracts:      4,
 		DemoteCooldownBlocks:      5,
-		InitialViewBudgetBytes:    4 * 1024 * 1024,
-		ExtensionBudgetBytes:      8 * 1024 * 1024,
-		PerContractMaxBudgetBytes: 32 * 1024 * 1024,
+		InitialViewBudgetBytes:    4 * common.Mebi,
+		ExtensionBudgetBytes:      8 * common.Mebi,
+		PerContractMaxBudgetBytes: 32 * common.Mebi,
 	}
 }
 

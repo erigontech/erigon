@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
+
+	"github.com/erigontech/erigon/common"
 )
 
 // logTools implements the logs_* tool handlers.
@@ -168,8 +170,8 @@ func readLogTail(filename string, lines int, filter string) ([]string, error) {
 	scanner := bufio.NewScanner(file)
 
 	// Increase buffer size for long log lines
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 1024*1024)
+	buf := make([]byte, 0, 64*common.Kibi)
+	scanner.Buffer(buf, common.Mebi)
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -200,8 +202,8 @@ func readLogHead(filename string, lines int, filter string) ([]string, error) {
 	scanner := bufio.NewScanner(file)
 
 	// Increase buffer size for long log lines
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 1024*1024)
+	buf := make([]byte, 0, 64*common.Kibi)
+	scanner.Buffer(buf, common.Mebi)
 
 	count := 0
 	for scanner.Scan() && count < lines {
@@ -231,8 +233,8 @@ func grepLog(filename, pattern string, maxLines int, caseInsensitive bool) ([]st
 	scanner := bufio.NewScanner(file)
 
 	// Increase buffer size for long log lines
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 1024*1024)
+	buf := make([]byte, 0, 64*common.Kibi)
+	scanner.Buffer(buf, common.Mebi)
 
 	searchPattern := pattern
 	if caseInsensitive {
@@ -279,8 +281,8 @@ func getLogStats(filename string) (map[string]any, error) {
 	var infoLines int
 
 	scanner := bufio.NewScanner(file)
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 1024*1024)
+	buf := make([]byte, 0, 64*common.Kibi)
+	scanner.Buffer(buf, common.Mebi)
 
 	for scanner.Scan() {
 		totalLines++
@@ -303,7 +305,7 @@ func getLogStats(filename string) (map[string]any, error) {
 	stats := map[string]any{
 		"file_name":    filepath.Base(filename),
 		"file_size":    fileInfo.Size(),
-		"file_size_mb": float64(fileInfo.Size()) / (1024 * 1024),
+		"file_size_mb": float64(fileInfo.Size()) / common.Mebi,
 		"modified":     fileInfo.ModTime().Format("2006-01-02 15:04:05"),
 		"total_lines":  totalLines,
 		"error_lines":  errorLines,

@@ -44,7 +44,7 @@ import (
 )
 
 const (
-	maxRequestContentLength = 1024 * 1024 * 32 // 32MB
+	maxRequestContentLength = 32 * common.Mebi // 32MB
 	contentType             = "application/json"
 	jwtTokenExpiry          = 60 * time.Second
 )

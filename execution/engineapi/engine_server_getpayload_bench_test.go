@@ -29,6 +29,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/jwt"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
@@ -144,7 +145,7 @@ func BenchmarkEngineGetPayloadWithBlobs(b *testing.B) {
 
 	respBytes, err := getPayloadRaw()
 	require.NoError(b, err)
-	b.Logf("%s over JSON-RPC: %d blobs in bundle, ~%d KiB response (client decode excluded)", method, len(built.BlobsBundle.Blobs), respBytes/1024)
+	b.Logf("%s over JSON-RPC: %d blobs in bundle, ~%d KiB response (client decode excluded)", method, len(built.BlobsBundle.Blobs), respBytes/common.Kibi)
 
 	b.SetBytes(respBytes)
 	b.ReportAllocs()

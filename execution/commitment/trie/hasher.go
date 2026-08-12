@@ -38,7 +38,7 @@ type hasher struct {
 
 	valueNodesRlpEncoded bool
 	prefixBuf            [8]byte
-	buffers              [1024 * 1024]byte
+	buffers              [common.Mebi]byte
 }
 
 const rlpPrefixLength = 4

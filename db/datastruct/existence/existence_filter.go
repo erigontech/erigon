@@ -26,6 +26,7 @@ import (
 
 	bloomfilter "github.com/holiman/bloomfilter/v2"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/datastruct/fusefilter"
@@ -162,7 +163,7 @@ func OpenFilter(filePath string, _ bool) (idx *Filter, err error) {
 
 	if isBloomMagic(peek[:]) {
 		filter := new(bloomfilter.Filter)
-		_, err = filter.UnmarshalFromReaderNoVerify(bufio.NewReaderSize(f, 1*1024*1024))
+		_, err = filter.UnmarshalFromReaderNoVerify(bufio.NewReaderSize(f, common.Mebi))
 		if err != nil {
 			return nil, fmt.Errorf("OpenFilter: %w, %s", err, fileName)
 		}

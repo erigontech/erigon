@@ -34,6 +34,7 @@ import (
 	"github.com/coder/websocket"
 	mapset "github.com/deckarep/golang-set/v2"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 )
@@ -41,7 +42,7 @@ import (
 const (
 	wsPingInterval     = 60 * time.Second
 	wsPingWriteTimeout = 5 * time.Second
-	wsMessageSizeLimit = 32 * 1024 * 1024
+	wsMessageSizeLimit = 32 * common.Mebi
 )
 
 // WebsocketHandler returns a handler that serves JSON-RPC to WebSocket connections.

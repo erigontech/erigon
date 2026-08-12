@@ -85,7 +85,7 @@ var LightClientGPO = gaspricecfg.Config{
 var Defaults = Config{
 	Sync: Sync{
 		ExecWorkerCount:            dbg.Exec3Workers, //only half of CPU, other half will spend for snapshots build/merge/prune
-		BodyCacheLimit:             256 * 1024 * 1024,
+		BodyCacheLimit:             256 * common.Mebi,
 		BodyDownloadTimeoutSeconds: 2,
 		//LoopBlockLimit:             100_000,
 		ParallelStateFlushing:    true,

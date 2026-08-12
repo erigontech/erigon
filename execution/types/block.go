@@ -627,7 +627,7 @@ func (h *Header) SanityCheck() error {
 	if diffLen := h.Difficulty.BitLen(); diffLen > 192 {
 		return fmt.Errorf("too large block difficulty: bitlen %d", diffLen)
 	}
-	if eLen := len(h.Extra); eLen > 100*1024 {
+	if eLen := len(h.Extra); eLen > 100*common.Kibi {
 		return fmt.Errorf("too large block extradata: size %d", eLen)
 	}
 	if h.BaseFee != nil {

@@ -25,19 +25,16 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
-const (
-	witnessCacheMaxBlocks = 96
-	bytesPerMB            = 1024 * 1024
-)
+const witnessCacheMaxBlocks = 96
 
 // witnessCacheMaxBytes converts a MB byte-cap to bytes, clamping to avoid int
 // overflow on 32-bit builds or absurd values. 0 stays 0 (byte cap disabled).
 func witnessCacheMaxBytes(mb uint) int {
-	const maxMB = uint(math.MaxInt / bytesPerMB)
+	const maxMB = uint(math.MaxInt / common.Mebi)
 	if mb > maxMB {
 		mb = maxMB
 	}
-	return int(mb) * bytesPerMB
+	return int(mb) * common.Mebi
 }
 
 // witnessResultCache maps a canonical block hash to its pre-marshaled legacy-mode

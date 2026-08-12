@@ -10,6 +10,7 @@ import (
 	"testing"
 	"unsafe"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/mmap"
 )
 
@@ -34,7 +35,7 @@ func readFieldU16(m *mmapBytesReader) ([]byte, error) {
 // BenchmarkSequentialRead compares mmap vs bufio for sequential reads of length-prefixed records
 // from a 128MB file. Compares native16 (current format) vs native32 length encoding.
 func BenchmarkSequentialRead(b *testing.B) {
-	const fileSize = 128 * 1024 * 1024 // 128MB
+	const fileSize = 128 * common.Mebi // 128MB
 
 	for _, valSize := range []int{32, 128, 1024} {
 		name := fmt.Sprintf("val%d", valSize)

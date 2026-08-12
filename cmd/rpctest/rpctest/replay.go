@@ -22,6 +22,8 @@ import (
 	"os"
 
 	"github.com/valyala/fastjson"
+
+	"github.com/erigontech/erigon/common"
 )
 
 func Replay(erigonURL string, recordFile string) error {
@@ -33,7 +35,7 @@ func Replay(erigonURL string, recordFile string) error {
 	}
 	defer f.Close()
 	s := bufio.NewScanner(f)
-	var buf [64 * 1024 * 1024]byte // 64 Mb line buffer
+	var buf [64 * common.Mebi]byte // 64 Mb line buffer
 	s.Buffer(buf[:], len(buf))
 	var res CallResult
 	reqGen := &RequestGenerator{}

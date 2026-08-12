@@ -24,10 +24,12 @@ import (
 
 	"github.com/golang/snappy"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common"
 )
 
 func TestMaxWireResponseBytes(t *testing.T) {
-	const rawItem = 15 * 1024 * 1024
+	const rawItem = 15 * common.Mebi
 	perItem := uint64(snappy.MaxEncodedLen(rawItem)) + reqRespChunkFraming
 
 	// A realistic count multiplies out exactly.
@@ -59,7 +61,7 @@ func TestMaxWireResponseBytesBoundsStreamEncoding(t *testing.T) {
 		}
 	}
 	// tiny inputs, a blob sidecar (~129 KiB), 1 MiB, and the spec per-chunk maximum.
-	for _, raw := range []int{1, 100, 4096, 131928, 1 << 20, 15 * 1024 * 1024} {
+	for _, raw := range []int{1, 100, 4096, 131928, 1 << 20, 15 * common.Mebi} {
 		payload := make([]byte, raw)
 		fill(payload)
 

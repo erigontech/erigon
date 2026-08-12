@@ -33,7 +33,7 @@ const (
 	// It is a soft, per-block-boundary limit: once the running total exceeds this
 	// threshold the server stops adding more blocks, but the current block is
 	// still included in full. Used by all protocol versions (eth/68–70).
-	softResponseLimit = 2 * 1024 * 1024
+	softResponseLimit = 2 * common.Mebi
 
 	// Eth70ResponseSizeLimit is the hard, per-receipt limit introduced in eth/70.
 	// Unlike softResponseLimit, it can cut a block's receipt list short (setting

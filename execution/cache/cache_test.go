@@ -295,7 +295,7 @@ func TestCodeCache_AddrCapacityLimit(t *testing.T) {
 		return []byte{0x60, byte(i >> 8), byte(i)}
 	}
 
-	c := closeOnCleanup(t, NewCodeCache(1024*1024, 1024*28)) // 1MB code, ~1024 addr LRU entries
+	c := closeOnCleanup(t, NewCodeCache(common.Mebi, 28*common.Kibi)) // 1MB code, ~1024 addr LRU entries
 	for i := range 1100 {
 		c.Put(wideAddr(i), wideCode(i), 0)
 	}
@@ -329,7 +329,7 @@ func TestCodeCache_AddrCapacityLimit(t *testing.T) {
 func TestCodeCache_CodeCapacityLimit(t *testing.T) {
 	// Tiny byte budget → a 1-entry code layer cap. Successive distinct codes
 	// LRU-evict the coldest rather than freezing the layer.
-	c := closeOnCleanup(t, NewCodeCache(25, 1024*1024)) // 25 bytes code, 1MB addr
+	c := closeOnCleanup(t, NewCodeCache(25, common.Mebi)) // 25 bytes code, 1MB addr
 
 	c.Put(makeAddr(1), makeCode(1), 0)
 	c.Put(makeAddr(2), makeCode(2), 0)
@@ -395,7 +395,7 @@ func TestCodeCache_PrintStatsAndReset_NoOps(t *testing.T) {
 }
 
 func TestCodeCache_GetMissingCode(t *testing.T) {
-	c := closeOnCleanup(t, NewCodeCache(1024*1024, 1024*1024)) // 1MB each
+	c := closeOnCleanup(t, NewCodeCache(common.Mebi, common.Mebi)) // 1MB each
 
 	// Manually set addr mapping without code (simulates capacity limit scenario)
 	addr := makeAddr(1)

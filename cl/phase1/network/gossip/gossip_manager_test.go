@@ -114,11 +114,11 @@ func (s *newPubsubValidatorTestSuite) SetupTest() {
 		beaconConfig,
 		networkConfig,
 		s.mockClock,
-		false,                        // subscribeAll
-		0,                            // activeIndicies
-		datasize.ByteSize(1024*1024), // maxInboundTrafficPerPeer
-		datasize.ByteSize(1024*1024), // maxOutboundTrafficPerPeer
-		false,                        // adaptableTrafficRequirements
+		false,       // subscribeAll
+		0,           // activeIndicies
+		datasize.MB, // maxInboundTrafficPerPeer
+		datasize.MB, // maxOutboundTrafficPerPeer
+		false,       // adaptableTrafficRequirements
 	)
 }
 
@@ -419,11 +419,11 @@ func (s *subscribeUpcomingTopicsTestSuite) SetupTest() {
 		beaconConfig,
 		networkConfig,
 		s.mockClock,
-		false,                        // subscribeAll
-		0,                            // activeIndicies
-		datasize.ByteSize(1024*1024), // maxInboundTrafficPerPeer
-		datasize.ByteSize(1024*1024), // maxOutboundTrafficPerPeer
-		false,                        // adaptableTrafficRequirements
+		false,       // subscribeAll
+		0,           // activeIndicies
+		datasize.MB, // maxInboundTrafficPerPeer
+		datasize.MB, // maxOutboundTrafficPerPeer
+		false,       // adaptableTrafficRequirements
 	)
 }
 

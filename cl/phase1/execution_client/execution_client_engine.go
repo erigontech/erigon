@@ -481,7 +481,7 @@ func executionPayloadToEth1Block(ep *engine_types.ExecutionPayload, version clpa
 		block.SlotNumber = uint64(*ep.SlotNumber)
 	}
 	if ep.BlockAccessList != nil && len(*ep.BlockAccessList) > 0 {
-		maxBytes := uint64(1073741824) // MAX_BYTES_PER_TRANSACTION default
+		maxBytes := uint64(common.Gibi) // MAX_BYTES_PER_TRANSACTION default
 		if beaconCfg != nil {
 			maxBytes = beaconCfg.MaxBytesPerTransaction
 		}

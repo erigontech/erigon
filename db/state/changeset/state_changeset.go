@@ -317,7 +317,7 @@ func deserializeKeys(in []byte) [kv.DomainLen][]kv.DomainEntryDiff {
 }
 
 const DiffChunkKeyLen = 48
-const DiffChunkLen = 4*1024 - 32
+const DiffChunkLen = 4*common.Kibi - 32
 
 type threadSafeBuf struct {
 	b []byte

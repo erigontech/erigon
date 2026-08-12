@@ -699,7 +699,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	hc.w = cw
 	r := bufiopool.Reader(intermediateFile)
 	defer bufiopool.PutReader(r)
-	copyNBuf := make([]byte, 32*1024)
+	copyNBuf := make([]byte, 32*common.Kibi)
 
 	var l uint64
 	var e error

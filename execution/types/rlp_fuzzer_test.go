@@ -27,6 +27,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
@@ -51,7 +52,7 @@ func FuzzRLP(f *testing.F) {
 }
 
 func fuzzRlp(t *testing.T, input []byte) {
-	if len(input) == 0 || len(input) > 500*1024 {
+	if len(input) == 0 || len(input) > 500*common.Kibi {
 		return
 	}
 	rlp.Split(input)

@@ -200,7 +200,7 @@ func BenchmarkSerializeDiffSet(b *testing.B) {
 		})
 	}
 
-	out := make([]byte, 0, 128*1024)
+	out := make([]byte, 0, 128*common.Kibi)
 	b.ResetTimer()
 	b.ReportAllocs()
 

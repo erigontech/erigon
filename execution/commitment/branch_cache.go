@@ -23,6 +23,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
 	"github.com/erigontech/erigon/execution/cache/coherence"
@@ -830,6 +831,6 @@ func (c *BranchCache) Stats() string {
 		kh, km, pct(kh, km),
 		ph, pm, pct(ph, pm), int(c.pinnedEntries.Load()),
 		th, tm, pct(th, tm), c.tailLen(),
-		float64(bb)/1024/1024, c.staleEvicted.Load(),
+		float64(bb)/common.Mebi, c.staleEvicted.Load(),
 	)
 }

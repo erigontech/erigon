@@ -324,8 +324,8 @@ var client = &http.Client{
 		MaxIdleConnsPerHost: 600,
 		MaxConnsPerHost:     600,
 		IdleConnTimeout:     90 * time.Second,
-		ReadBufferSize:      64 * 1024,
-		WriteBufferSize:     16 * 1024,
+		ReadBufferSize:      64 * common.Kibi,
+		WriteBufferSize:     16 * common.Kibi,
 	},
 	Timeout: 600 * time.Second, // Per-request timeout
 }

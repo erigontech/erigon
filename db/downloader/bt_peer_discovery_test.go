@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
@@ -136,7 +137,7 @@ func newTestClientConfig(t *testing.T, dataDir string) *torrent.ClientConfig {
 func buildTestMetainfo(t *testing.T, dir, filename string) metainfo.MetaInfo {
 	t.Helper()
 	info := metainfo.Info{
-		PieceLength: 256 * 1024,
+		PieceLength: 256 * common.Kibi,
 	}
 	err := info.BuildFromFilePath(filepath.Join(dir, filename))
 	require.NoError(t, err)

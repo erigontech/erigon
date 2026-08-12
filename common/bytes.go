@@ -24,7 +24,7 @@ import (
 )
 
 func ByteCount(b uint64) string {
-	const unit = 1024
+	const unit = Kibi
 	if b < unit {
 		return fmt.Sprintf("%dB", b)
 	}

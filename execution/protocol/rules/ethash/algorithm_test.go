@@ -26,6 +26,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 
 	"github.com/erigontech/erigon/common/length"
@@ -64,7 +65,7 @@ func TestCacheGeneration(t *testing.T) {
 		cache []byte
 	}{
 		{
-			size:  1024,
+			size:  common.Kibi,
 			epoch: 0,
 			cache: hexutil.MustDecode("0x" +
 				"7ce2991c951f7bf4c4c1bb119887ee07871eb5339d7b97b8588e85c742de90e5bafd5bbe6ce93a134fb6be9ad3e30db99d9528a2ea7846833f52e9ca119b6b54" +
@@ -85,7 +86,7 @@ func TestCacheGeneration(t *testing.T) {
 				"845f64fd8324bb85312979dead74f764c9677aab89801ad4f927f1c00f12e28f22422bb44200d1969d9ab377dd6b099dc6dbc3222e9321b2c1e84f8e2f07731c"),
 		},
 		{
-			size:  1024,
+			size:  common.Kibi,
 			epoch: 1,
 			cache: hexutil.MustDecode("0x" +
 				"1f56855d59cc5a085720899b4377a0198f1abe948d85fe5820dc0e346b7c0931b9cde8e541d751de3b2b3275d0aabfae316209d5879297d8bd99f8a033c9d4df" +
@@ -128,8 +129,8 @@ func TestDatasetGeneration(t *testing.T) {
 	}{
 		{
 			epoch:       0,
-			cacheSize:   1024,
-			datasetSize: 32 * 1024,
+			cacheSize:   common.Kibi,
+			datasetSize: 32 * common.Kibi,
 			dataset: hexutil.MustDecode("0x" +
 				"4bc09fbd530a041dd2ec296110a29e8f130f179c59d223f51ecce3126e8b0c74326abc2f32ccd9d7f976bd0944e3ccf8479db39343cbbffa467046ca97e2da63" +
 				"da5f9d9688c7c33ab7b8aace570e422fa48b24659b72fc534669209d66389ca15b099c5604601e7581488e3bd6925cec0f12d465f8004d4fa84793f8e1e46a1b" +
@@ -666,10 +667,10 @@ func TestDatasetGeneration(t *testing.T) {
 // datasets.
 func TestHashimoto(t *testing.T) {
 	// Create the verification cache and mining dataset
-	cache := make([]uint32, 1024/4)
+	cache := make([]uint32, common.Kibi/4)
 	generateCache(cache, 0, make([]byte, 32))
 
-	dataset := make([]uint32, 32*1024/4)
+	dataset := make([]uint32, 32*common.Kibi/4)
 	generateDataset(dataset, 0, cache)
 
 	// Create a block to verify
@@ -679,7 +680,7 @@ func TestHashimoto(t *testing.T) {
 	wantDigest := hexutil.MustDecode("0xe4073cffaef931d37117cefd9afd27ea0f1cad6a981dd2605c4a1ac97c519800")
 	wantResult := hexutil.MustDecode("0xd3539235ee2e6f8db665c0a72169f55b7f6c605712330b778ec3944f0eb5a557")
 
-	digest, result := hashimotoLight(32*1024, cache, hash, nonce)
+	digest, result := hashimotoLight(32*common.Kibi, cache, hash, nonce)
 	if !bytes.Equal(digest, wantDigest) {
 		t.Errorf("light hashimoto digest mismatch: have %x, want %x", digest, wantDigest)
 	}

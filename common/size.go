@@ -47,17 +47,17 @@ func formatStorageSize(s StorageSize, addSpace bool) string {
 	unit := "B"
 
 	switch {
-	case s >= 1099511627776:
-		value /= 1099511627776
+	case s >= Tebi:
+		value /= Tebi
 		unit = "TiB"
-	case s >= 1073741824:
-		value /= 1073741824
+	case s >= Gibi:
+		value /= Gibi
 		unit = "GiB"
-	case s >= 1048576:
-		value /= 1048576
+	case s >= Mebi:
+		value /= Mebi
 		unit = "MiB"
-	case s >= 1024:
-		value /= 1024
+	case s >= Kibi:
+		value /= Kibi
 		unit = "KiB"
 	}
 

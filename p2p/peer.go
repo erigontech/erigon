@@ -31,6 +31,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -48,7 +49,7 @@ var (
 const (
 	baseProtocolVersion    = 5
 	baseProtocolLength     = uint64(16)
-	baseProtocolMaxMsgSize = 2 * 1024
+	baseProtocolMaxMsgSize = 2 * common.Kibi
 
 	snappyProtocolVersion = 5
 

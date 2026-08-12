@@ -26,6 +26,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/elastic/go-freelru"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/cachebudget"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
@@ -566,7 +567,7 @@ func (c *GenericCache[T]) PrintStatsAndReset(name string) {
 		"hits", hits, "misses", misses, "hit_rate", hitRate,
 		"inserts", inserts, "evictions", evictions, "dropped", dropped,
 		"stale_evicted", staleEvicted, "epoch", c.coh.Epoch(),
-		"entries", c.data.Load().Len(), "size_mb", sizeBytes/(1024*1024),
+		"entries", c.data.Load().Len(), "size_mb", sizeBytes/common.Mebi,
 		"capacity_mb", int64(c.capacityB/datasize.MB), "usage_pct", usagePct,
 	)
 }

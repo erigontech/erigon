@@ -321,7 +321,7 @@ func TestAnswerGetReceiptsQueryCacheOnly70_LastBlockIncomplete(t *testing.T) {
 	// Create receipts with large log data to force truncation
 	var bigReceipts types.Receipts
 	for i := range 20 {
-		bigReceipts = append(bigReceipts, makeReceipt(uint64(i+1)*100, 1024*1024)) // 1MB log data each
+		bigReceipts = append(bigReceipts, makeReceipt(uint64(i+1)*100, common.Mebi)) // 1MB log data each
 	}
 	getter := &mockReceiptsGetter{
 		cached: map[common.Hash]types.Receipts{
@@ -363,7 +363,7 @@ func TestAnswerGetReceiptsQueryCacheOnly70_MultipleBlocksTruncatesLast(t *testin
 	// Second block: very large receipts that force truncation
 	var bigReceipts types.Receipts
 	for i := range 20 {
-		bigReceipts = append(bigReceipts, makeReceipt(uint64(i+1)*100, 1024*1024))
+		bigReceipts = append(bigReceipts, makeReceipt(uint64(i+1)*100, common.Mebi))
 	}
 	getter := &mockReceiptsGetter{
 		cached: map[common.Hash]types.Receipts{
@@ -624,7 +624,7 @@ func TestAnswerGetBlockAccessListsQuery_SoftSizeLimit(t *testing.T) {
 	// Each BAL just over 1 MiB so that three of them exceed softResponseLimit (2 MiB)
 	// but the first two plus the current entry still trigger the break after the
 	// second full BAL is appended.
-	balSize := 1024*1024 + 1
+	balSize := common.Mebi + 1
 	big := make([]byte, balSize)
 	for i := range big {
 		big[i] = byte(i)

@@ -30,6 +30,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 )
 
@@ -609,7 +610,7 @@ type keyArena struct {
 	remaining int
 }
 
-const keyArenaChunk = 64 * 1024
+const keyArenaChunk = 64 * common.Kibi
 
 func (a *keyArena) copy(hk []byte) []byte {
 	if len(hk) > cap(a.buf)-len(a.buf) {

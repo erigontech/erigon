@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/program"
 )
@@ -174,8 +175,8 @@ func formatGas(gas uint64) string {
 
 func formatSize(size int) string {
 	switch {
-	case size >= 1024:
-		return fmt.Sprintf("%dKB", size/1024)
+	case size >= common.Kibi:
+		return fmt.Sprintf("%dKB", size/common.Kibi)
 	default:
 		return fmt.Sprintf("%dB", size)
 	}

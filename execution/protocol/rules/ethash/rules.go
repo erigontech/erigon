@@ -375,7 +375,7 @@ func (ethash *Ethash) verifySeal(header *types.Header, fulldag bool) error { //n
 
 		size := datasetSize(number)
 		if ethash.config.PowMode == ethashcfg.ModeTest {
-			size = 32 * 1024
+			size = 32 * common.Kibi
 		}
 		digest, result = hashimotoLight(size, cache.cache, sealHash[:], header.Nonce.Uint64())
 

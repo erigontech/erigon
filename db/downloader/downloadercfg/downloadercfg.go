@@ -39,6 +39,7 @@ import (
 	"github.com/anacrolix/torrent"
 	pp "github.com/anacrolix/torrent/peer_protocol"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -48,11 +49,11 @@ import (
 // DefaultPieceSize - Erigon serves many big files, bigger pieces will reduce
 // amount of network announcements, but can't go over 2Mb. TODO: This is definitely not true.
 // see https://wiki.theory.org/BitTorrentSpecification#Metainfo_File_Structure
-const DefaultPieceSize = 2 * 1024 * 1024
+const DefaultPieceSize = 2 * common.Mebi
 
 // DefaultNetworkChunkSize - how much data request per 1 network call to peer.
 // BitTorrent client default: 16Kb
-var NetworkChunkSize pp.Integer = 256 << 10 // 256 KiB
+var NetworkChunkSize pp.Integer = 256 * common.Kibi // 256 KiB
 
 func init() {
 	s := os.Getenv("DOWNLOADER_NETWORK_CHUNK_SIZE")

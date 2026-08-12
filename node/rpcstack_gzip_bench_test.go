@@ -29,6 +29,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/erigontech/erigon/common"
 )
 
 const rpcEndpoint = "http://localhost:8545"
@@ -156,7 +158,7 @@ func measureHandlerLatency(t testing.TB, payload []byte, wrap func(http.Handler)
 		resp.Body.Close()
 		latencies = append(latencies, time.Since(start))
 	}
-	return computeStats(latencies, len(payload)/1024)
+	return computeStats(latencies, len(payload)/common.Kibi)
 }
 
 // measureRPCLatency measures end-to-end latency of a real rpcdaemon at endpoint.
@@ -185,7 +187,7 @@ func measureRPCLatency(t testing.TB, endpoint, blockTag string) latencyStats {
 		data, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if i == 0 {
-			payloadKB = len(data) / 1024
+			payloadKB = len(data) / common.Kibi
 		}
 	}
 

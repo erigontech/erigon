@@ -65,7 +65,7 @@ import (
 // txMaxBroadcastSize is the max size of a transaction that will be broadcast.
 // All transactions with a higher size will be announced and need to be fetched
 // by the peer.
-const txMaxBroadcastSize = 4 * 1024
+const txMaxBroadcastSize = 4 * common.Kibi
 
 // Pool is interface for the transaction pool
 // This interface exists for the convenience of testing, and not yet because
@@ -1329,7 +1329,7 @@ func (p *TxPool) ValidateSerializedTxn(serializedTxn []byte) error {
 		// takes up based on its size. The slots are used as DoS protection, ensuring
 		// that validating a new transaction remains a constant operation (in reality
 		// O(maxslots), where max slots are 4 currently).
-		txnSlotSize = 32 * 1024
+		txnSlotSize = 32 * common.Kibi
 
 		// txnMaxSize is the maximum size a single transaction can have. This field has
 		// non-trivial consequences: larger transactions are significantly harder and
@@ -1338,7 +1338,7 @@ func (p *TxPool) ValidateSerializedTxn(serializedTxn []byte) error {
 		txnMaxSize = 4 * txnSlotSize // 128KB
 
 		// Should be enough for a transaction with 6 blobs
-		blobTxnMaxSize = 1024 * 1024
+		blobTxnMaxSize = common.Mebi
 	)
 	txnType, err := PeekTransactionType(serializedTxn)
 	if err != nil {
@@ -2354,7 +2354,7 @@ func (p *TxPool) Run(ctx context.Context) error {
 					continue
 				}
 				writeToDBBytesCounter.SetUint64(written)
-				p.logger.Debug("[txpool] Commit", "written_kb", written/1024, "in", time.Since(t))
+				p.logger.Debug("[txpool] Commit", "written_kb", written/common.Kibi, "in", time.Since(t))
 			}
 		case <-dormancySweep.C:
 			if p.Started() {

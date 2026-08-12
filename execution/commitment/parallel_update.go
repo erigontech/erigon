@@ -18,6 +18,8 @@ package commitment
 
 import (
 	"sync"
+
+	"github.com/erigontech/erigon/common"
 )
 
 // plainKeyArena hands out stable plainKey copies; a full chunk is replaced, not
@@ -26,7 +28,7 @@ type plainKeyArena struct {
 	buf []byte
 }
 
-const plainKeyArenaChunk = 64 * 1024
+const plainKeyArenaChunk = 64 * common.Kibi
 
 func (a *plainKeyArena) intern(b []byte) []byte {
 	if len(b) > plainKeyArenaChunk {

@@ -34,6 +34,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
+	"github.com/erigontech/erigon/common"
 )
 
 const (
@@ -51,7 +52,7 @@ const (
 	maxResponseChunks = 1024
 	// maxSingleObjectResponse bounds single-chunk protocols (status, ping, metadata,
 	// goodbye, light-client singles), whose responses are at most tens of KiB.
-	maxSingleObjectResponse = 1024 * 1024
+	maxSingleObjectResponse = common.Mebi
 )
 
 // maxMultiChunkResponse is the on-wire MAX_REQUEST_BLOCKS × MAX_CHUNK_SIZE ceiling: the backstop a

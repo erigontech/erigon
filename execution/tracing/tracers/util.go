@@ -22,10 +22,12 @@ import (
 	"math"
 
 	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/common"
 )
 
 const (
-	memoryPadLimit = 1024 * 1024
+	memoryPadLimit = common.Mebi
 )
 
 // GetMemoryCopyPadded returns offset + size as a new slice.

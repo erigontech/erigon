@@ -388,7 +388,7 @@ func BenchmarkLogEmitWorstCaseTx(b *testing.B) {
 		ibs.Reset()
 	}
 	b.ReportMetric(float64(len(ibs.logs.pool)), "pooled")
-	b.ReportMetric(float64(ibs.logs.poolBytes)/1024, "poolKB")
+	b.ReportMetric(float64(ibs.logs.poolBytes)/common.Kibi, "poolKB")
 }
 
 // Blocks whose transactions each emit a 64KB log — the shape an attack sends.
@@ -398,7 +398,7 @@ func BenchmarkLogEmitLargeDataPerTx(b *testing.B) {
 	log := &types.Log{
 		Address: common.HexToAddress("0x1"),
 		Topics:  []common.Hash{common.HexToHash("0xaa")},
-		Data:    bytes.Repeat([]byte{0x11}, 64*1024+1),
+		Data:    bytes.Repeat([]byte{0x11}, 64*common.Kibi+1),
 	}
 	for _, txs := range []int{16, 100} {
 		b.Run(fmt.Sprintf("txs=%d", txs), func(b *testing.B) {
@@ -468,7 +468,7 @@ func BenchmarkLogEmitShiftingShape(b *testing.B) {
 	entries, slotCap, dataBytes := retainedLogs(ibs)
 	b.ReportMetric(float64(slotCap), "slots")
 	b.ReportMetric(float64(entries), "entries")
-	b.ReportMetric(float64(dataBytes)/1024, "retainedKB")
+	b.ReportMetric(float64(dataBytes)/common.Kibi, "retainedKB")
 }
 
 func BenchmarkLogEmitAndResetPerTx(b *testing.B) {
@@ -706,5 +706,5 @@ func TestArenaRetentionStaysBounded(t *testing.T) {
 	require.LessOrEqual(t, ibs.logs.poolBytes, maxPooledLogBytes, "pooled Data")
 
 	held := slotBytes + len(ibs.logs.pool)*304 + ibs.logs.poolBytes
-	require.Less(t, held, 3<<20, "an arena holds %dKB after mixed traffic", held/1024)
+	require.Less(t, held, 3*common.Mebi, "an arena holds %dKB after mixed traffic", held/common.Kibi)
 }

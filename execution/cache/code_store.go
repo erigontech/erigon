@@ -22,6 +22,7 @@ import (
 
 	"github.com/maypok86/otter/v2"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 )
 
@@ -54,8 +55,8 @@ func (s *CodeStore) Stats() (memHits, tableHits, misses uint64) {
 }
 
 const (
-	DefaultCodeStoreMemBytes   = 256 * 1024 * 1024
-	DefaultCodeStoreTableBytes = 1024 * 1024 * 1024
+	DefaultCodeStoreMemBytes   = 256 * common.Mebi
+	DefaultCodeStoreTableBytes = common.Gibi
 )
 
 func NewCodeStore(memCapBytes, tableCapBytes uint64) *CodeStore {

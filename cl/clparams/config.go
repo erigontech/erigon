@@ -123,11 +123,11 @@ const CustomNetwork NetworkType = -1
 const (
 	MaxDialTimeout               = 15 * time.Second
 	VersionLength  int           = 4
-	MaxChunkSize   uint64        = 15 * 1024 * 1024
+	MaxChunkSize   uint64        = 15 * common.Mebi
 	ReqTimeout     time.Duration = 5 * time.Second
 	RespTimeout    time.Duration = 10 * time.Second
 	// ExecutionPayload transactions bounds from consensus specs.
-	MaxBytesPerTransactionDefault    uint64 = 1 << 30
+	MaxBytesPerTransactionDefault    uint64 = common.Gibi
 	MaxTransactionsPerPayloadDefault uint64 = 1 << 20
 )
 

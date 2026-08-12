@@ -27,6 +27,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -1052,16 +1053,16 @@ func TestDUFormatHuman(t *testing.T) {
 		DetectedMode: "archive",
 		BlockRange:   [2]uint64{0, 21500000},
 		StepRange:    [2]uint64{0, 2048},
-		TotalBytes:   1024 * 1024 * 1024 * 100, // 100 GB
+		TotalBytes:   100 * common.Gibi, // 100 GB
 		TotalFiles:   500,
 		Categories: map[string]duCategoryStat{
-			duCatDomains: {Bytes: 50 * 1024 * 1024 * 1024, Files: 200},
-			duCatHistory: {Bytes: 30 * 1024 * 1024 * 1024, Files: 150},
-			duCatBlocks:  {Bytes: 20 * 1024 * 1024 * 1024, Files: 150},
+			duCatDomains: {Bytes: 50 * common.Gibi, Files: 200},
+			duCatHistory: {Bytes: 30 * common.Gibi, Files: 150},
+			duCatBlocks:  {Bytes: 20 * common.Gibi, Files: 150},
 		},
 		Estimates: []duEstimate{
-			{Mode: "archive", TotalBytes: 100 * 1024 * 1024 * 1024, Delta: 0, BlocksDesc: "all blocks", HistoryDesc: "all history"},
-			{Mode: "full", TotalBytes: 80 * 1024 * 1024 * 1024, Delta: -20 * 1024 * 1024 * 1024, BlocksDesc: "all blocks", HistoryDesc: "last 100.000"},
+			{Mode: "archive", TotalBytes: 100 * common.Gibi, Delta: 0, BlocksDesc: "all blocks", HistoryDesc: "all history"},
+			{Mode: "full", TotalBytes: 80 * common.Gibi, Delta: -20 * common.Gibi, BlocksDesc: "all blocks", HistoryDesc: "last 100.000"},
 		},
 	}
 

@@ -129,7 +129,7 @@ func BenchmarkEngineGetBlobsV3(b *testing.B) {
 			respBytes, err := getBlobsRaw()
 			require.NoError(b, err)
 			require.Greater(b, respBytes, minRespBytes, "response must carry the blobs")
-			b.Logf("getBlobsV3 over JSON-RPC: %d blobs, %d cell proofs/blob, ~%d KiB response (client decode excluded)", len(tc.hashes), params.CellsPerExtBlob, respBytes/1024)
+			b.Logf("getBlobsV3 over JSON-RPC: %d blobs, %d cell proofs/blob, ~%d KiB response (client decode excluded)", len(tc.hashes), params.CellsPerExtBlob, respBytes/common.Kibi)
 
 			b.SetBytes(respBytes)
 			b.ReportAllocs()

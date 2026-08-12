@@ -66,8 +66,8 @@ func CompareAccountRange(logger log.Logger, erigonURL, gethURL, tmpDataDir, geth
 	var client = &http.Client{
 		Timeout: time.Minute * 60,
 		Transport: &http.Transport{
-			MaxResponseHeaderBytes: 256 * 1024 * 1024,
-			ReadBufferSize:         64 * 1024 * 1024,
+			MaxResponseHeaderBytes: 256 * common.Mebi,
+			ReadBufferSize:         64 * common.Mebi,
 			DialContext: (&net.Dialer{
 				//Timeout:   60 * time.Minute,
 				KeepAlive: 60 * time.Minute,

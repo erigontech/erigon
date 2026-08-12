@@ -31,13 +31,13 @@ var ProtocolVersions = []uint{WIT1}
 var ProtocolLengths = map[uint]uint64{WIT1: 4}
 
 // MaxMessageSize is the maximum cap on the size of a protocol message.
-const MaxMessageSize = 16 * 1024 * 1024
+const MaxMessageSize = 16 * common.Mebi
 
 // Witness Response constants
 const (
-	PageSize                       = 15 * 1024 * 1024  // 15 MB
-	MaximumCachedWitnessOnARequest = 200 * 1024 * 1024 // 200 MB, the maximum amount of memory a request can demand while getting witness
-	MaximumResponseSize            = 16 * 1024 * 1024  // 16 MB, helps to fast fail check
+	PageSize                       = 15 * common.Mebi  // 15 MB
+	MaximumCachedWitnessOnARequest = 200 * common.Mebi // 200 MB, the maximum amount of memory a request can demand while getting witness
+	MaximumResponseSize            = 16 * common.Mebi  // 16 MB, helps to fast fail check
 
 	// MaxWitnessPages caps the TotalPages a peer may advertise in a response. A
 	// legitimate witness fits in MaximumCachedWitnessOnARequest bytes split into

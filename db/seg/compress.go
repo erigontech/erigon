@@ -33,6 +33,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
 	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -422,7 +423,7 @@ func (c *Compressor) fsync(f *os.File) error {
 // superstringLimit limits how large can one "superstring" get before it is processed
 // CompressorSequential allocates 7 bytes for each uint of superstringLimit. For example,
 // superstingLimit 16m will result in 112Mb being allocated for various arrays
-const superstringLimit = 16 * 1024 * 1024
+const superstringLimit = 16 * common.Mebi
 
 type DictionaryBuilder struct {
 	lastWord      []byte
@@ -1008,7 +1009,7 @@ func (f *RawWordsFile) ForEach(walker func(v []byte, compressed bool) error) err
 	}
 	r := bufiopool.Reader(f.f)
 	defer bufiopool.PutReader(r)
-	buf := make([]byte, 16*1024)
+	buf := make([]byte, 16*common.Kibi)
 	l, e := binary.ReadUvarint(r)
 	for ; e == nil; l, e = binary.ReadUvarint(r) {
 		// extract lowest bit of length prefix as "uncompressed" flag and shift to obtain correct length

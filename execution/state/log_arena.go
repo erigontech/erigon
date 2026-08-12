@@ -50,7 +50,7 @@ const (
 	// Slots the arena keeps between resets. The run is a block for a caller that
 	// resets per block, so this is bounded by the memory it costs rather than by
 	// a transaction's budget: 32KB of pointers, holding the p99 block of 1706.
-	maxRetainedLogSlots = 32 * 1024 / 8
+	maxRetainedLogSlots = 32 * common.Kibi / 8
 )
 
 // logArena owns a block's log entries and recycles them through a pool, so what

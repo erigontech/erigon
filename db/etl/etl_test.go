@@ -730,7 +730,7 @@ func TestSortable(t *testing.T) {
 }
 
 func TestSortableBufferStableSort(t *testing.T) {
-	buf := NewSortableBuffer(256 * 1024 * 1024)
+	buf := NewSortableBuffer(256 * common.Mebi)
 
 	// Need enough duplicates to trigger pdqsort's partitioning (not just insertion sort).
 	// Insert 1000 entries under each of 4 duplicate keys, interleaved with unique keys.
@@ -764,7 +764,7 @@ func TestSortableBufferStableSort(t *testing.T) {
 }
 
 func TestSortableBufferNilAndEmptyKeys(t *testing.T) {
-	buf := NewSortableBuffer(256 * 1024)
+	buf := NewSortableBuffer(256 * common.Kibi)
 
 	buf.Put([]byte{0x01}, []byte("normal"))
 	buf.Put(nil, []byte("nil-key"))
@@ -1100,7 +1100,7 @@ func BenchmarkSortableBufferSort(b *testing.B) {
 	const valLen = 64
 
 	makeBuffer := func(n int, sorted bool) *sortableBuffer {
-		buf := NewSortableBuffer(256 * 1024 * 1024)
+		buf := NewSortableBuffer(256 * common.Mebi)
 		buf.Prealloc(n, n*(keyLen+valLen))
 		key := make([]byte, keyLen)
 		val := make([]byte, valLen)
@@ -1159,7 +1159,7 @@ func BenchmarkSortableBufferPutSort(b *testing.B) {
 			b.ReportAllocs()
 			key := make([]byte, keyLen)
 			val := make([]byte, valLen)
-			buf := NewSortableBuffer(256 * 1024 * 1024)
+			buf := NewSortableBuffer(256 * common.Mebi)
 			buf.Prealloc(tc.count, tc.count*(keyLen+valLen))
 			for b.Loop() {
 				buf.Reset()
@@ -1198,7 +1198,7 @@ func BenchmarkSortableBufferPutSortLoad(b *testing.B) {
 			b.ReportAllocs()
 			key := make([]byte, keyLen)
 			val := make([]byte, valLen)
-			buf := NewSortableBuffer(256 * 1024 * 1024)
+			buf := NewSortableBuffer(256 * common.Mebi)
 			buf.Prealloc(tc.count, tc.count*(keyLen+valLen))
 			for b.Loop() {
 				buf.Reset()
@@ -1241,7 +1241,7 @@ func BenchmarkSortableBufferPutOnly(b *testing.B) {
 			b.ReportAllocs()
 			key := make([]byte, keyLen)
 			val := make([]byte, valLen)
-			buf := NewSortableBuffer(256 * 1024 * 1024)
+			buf := NewSortableBuffer(256 * common.Mebi)
 			buf.Prealloc(tc.count, tc.count*(keyLen+valLen))
 			for b.Loop() {
 				buf.Reset()
@@ -1279,7 +1279,7 @@ func BenchmarkSortableBufferInmemLoadOnly(b *testing.B) {
 			b.ReportAllocs()
 			key := make([]byte, keyLen)
 			val := make([]byte, valLen)
-			buf := NewSortableBuffer(256 * 1024 * 1024)
+			buf := NewSortableBuffer(256 * common.Mebi)
 			buf.Prealloc(tc.count, tc.count*(keyLen+valLen))
 			for i := range tc.count {
 				if tc.sorted {

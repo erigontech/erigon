@@ -51,7 +51,7 @@ const (
 	// the resident-code skew (hot contracts run 10-24 KB) rather than the raw
 	// average so the cap keeps RAM near the budget instead of several × over; the
 	// persistent (MDBX-backed) cold tier backstops entries the tighter cap evicts.
-	avgCodeEntryBytes = 12 * 1024
+	avgCodeEntryBytes = 12 * common.Kibi
 	// codeSizeEntryBytes is the resident cost of one size-layer slot (freelru
 	// element holding size/keyHash/txNum/epoch), used to map the size-layer entry
 	// ceiling to an envelope byte budget.
@@ -658,9 +658,9 @@ func (c *CodeCache) PrintStatsAndReset() {
 		"code_hit_rate", codeHitRate,
 		"addr_entries", c.addrToHash.Len(),
 		"code_entries", c.CodeLen(),
-		"addr_size_mb", addrSizeB/(1024*1024),
+		"addr_size_mb", addrSizeB/common.Mebi,
 		"addr_usage_pct", addrUsagePct,
-		"code_size_mb", codeSizeB/(1024*1024),
+		"code_size_mb", codeSizeB/common.Mebi,
 		"code_usage_pct", codeUsagePct,
 	)
 }

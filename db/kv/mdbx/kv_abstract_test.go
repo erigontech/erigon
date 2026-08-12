@@ -28,6 +28,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/test/bufconn"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -157,7 +158,7 @@ func TestRemoteKvVersion(t *testing.T) {
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
 	writeDB := temporaltest.NewTestDB(t, dirs)
-	conn := bufconn.Listen(1024 * 1024)
+	conn := bufconn.Listen(common.Mebi)
 	grpcServer := grpc.NewServer()
 	go func() {
 		remoteproto.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(ctx, writeDB, nil, nil, nil, logger))
@@ -201,7 +202,7 @@ func TestRemoteKvRange(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	writeDB := temporaltest.NewTestDB(t, dirs)
 	ctx := t.Context()
-	grpcServer, conn := grpc.NewServer(), bufconn.Listen(1024*1024)
+	grpcServer, conn := grpc.NewServer(), bufconn.Listen(common.Mebi)
 	go func() {
 		kvServer := remotedbserver.NewKvServer(ctx, writeDB, nil, nil, nil, logger)
 		remoteproto.RegisterKVServer(grpcServer, kvServer)
@@ -339,7 +340,7 @@ func setupDatabases(t *testing.T, logger log.Logger) (writeDBs []kv.TemporalRwDB
 		//mdbx.New(dbcfg.ChainDB, logger).InMem(t, "").MustOpen(), // for remote db
 	}
 
-	conn := bufconn.Listen(1024 * 1024)
+	conn := bufconn.Listen(common.Mebi)
 
 	grpcServer := grpc.NewServer()
 	f2 := func() {

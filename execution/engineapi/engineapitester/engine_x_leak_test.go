@@ -30,6 +30,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
@@ -131,7 +132,7 @@ func printSample(t *testing.T, iter int) {
 		vmKb/1024/1024,
 		mapsLines,
 		runtime.NumGoroutine(),
-		ms.HeapAlloc/(1024*1024),
+		ms.HeapAlloc/common.Mebi,
 	)
 }
 

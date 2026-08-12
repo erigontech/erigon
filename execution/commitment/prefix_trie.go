@@ -19,11 +19,12 @@ package commitment
 import (
 	"math/bits"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
 const prefixSlabSize = 16384
-const prefixExtChunkSize = 64 * 1024
+const prefixExtChunkSize = 64 * common.Kibi
 
 // prefixNode is a path-compressed prefix-trie node keyed on nibbles (each ext byte is one nibble 0x00..0x0F).
 // children is dense: len == popcount(bitmap). subtreeCount is the number of distinct keys in the

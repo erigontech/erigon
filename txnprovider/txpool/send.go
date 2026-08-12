@@ -24,6 +24,7 @@ import (
 
 	"google.golang.org/grpc"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/p2p/sentry/libsentry"
@@ -51,7 +52,7 @@ func NewSend(ctx context.Context, sentryClients []sentryproto.SentryClient, logg
 const (
 	// This is the target size for the packs of transactions or announcements. A
 	// pack can get larger than this if a single transactions exceeds this size.
-	p2pTxPacketLimit = 100 * 1024
+	p2pTxPacketLimit = 100 * common.Kibi
 )
 
 func (f *Send) notifyTests() {

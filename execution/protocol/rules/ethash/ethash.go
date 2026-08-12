@@ -37,6 +37,7 @@ import (
 	"github.com/edsrzf/mmap-go"
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -359,7 +360,7 @@ func (d *dataset) generate(dir string, limit int, lock bool, test bool) {
 		seed := seedHash(d.epoch*epochLength + 1)
 		if test {
 			csize = 1024
-			dsize = 32 * 1024
+			dsize = 32 * common.Kibi
 		}
 		// If we don't store anything on disk, generate and return
 		if dir == "" {

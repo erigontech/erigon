@@ -34,13 +34,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/sentinel/communication"
+	"github.com/erigontech/erigon/common"
 )
 
 func TestMaxResponseBodySize(t *testing.T) {
 	// Drive the cap off communication.AllProtocols, the single source of truth for response-size
 	// classification, so a protocol added there is automatically covered here.
 	ceiling := maxMultiChunkResponse
-	const budget = 5 * 1024 * 1024
+	const budget = 5 * common.Mebi
 	for _, p := range communication.AllProtocols {
 		if !p.MultiChunk {
 			// Single-object protocols ignore the caller's byte budget.
@@ -263,7 +264,7 @@ func fetchPeerResponse(t *testing.T, topic string, payloadSize int, maxResponseB
 		if _, err := s.Write([]byte{0x00}); err != nil {
 			return
 		}
-		buf := make([]byte, 1024*1024)
+		buf := make([]byte, common.Mebi)
 		for sent := 0; sent < payloadSize; {
 			chunk := buf
 			if remaining := payloadSize - sent; remaining < len(chunk) {
@@ -346,7 +347,7 @@ func TestResponseBodyRejectedOnFlood(t *testing.T) {
 	require.Equal(t, "0", code, "a compliant response carries the peer's success code")
 	require.Len(t, body, 1000, "a compliant single-object response must pass through in full")
 
-	const floodSize = 40 * 1024 * 1024 // well above the single-object cap
+	const floodSize = 40 * common.Mebi // well above the single-object cap
 	_, _, body, err = fetchPeerResponse(t, communication.StatusProtocolV1, floodSize, 0)
 	require.ErrorIs(t, err, ErrResponseTooLarge,
 		"a single-object flood must surface an explicit too-large error, not be truncated and accepted")
@@ -376,7 +377,7 @@ func TestSingleChunkEmptyCloseReturnsBadRequest(t *testing.T) {
 // ceiling — so a missing budget can never let a flooding peer drive an OOM. A budgeted multi-chunk
 // response above the single-object cap still passes; see TestMultiChunkResponseRejectedOverByteBudget.
 func TestMultiChunkResponseCappedWithoutBudget(t *testing.T) {
-	const floodSize = 5 * 1024 * 1024 // above the single-object cap
+	const floodSize = 5 * common.Mebi // above the single-object cap
 	_, _, body, err := fetchPeerResponse(t, communication.BeaconBlocksByRangeProtocolV2, floodSize, 0)
 	require.ErrorIs(t, err, ErrResponseTooLarge,
 		"an unbudgeted multi-chunk response over the single-object cap must be rejected, not streamed toward the ceiling")
@@ -388,15 +389,15 @@ func TestMultiChunkResponseCappedWithoutBudget(t *testing.T) {
 // full, a flood beyond it surfaces ErrResponseTooLarge (not truncated, and not clamped to the
 // single-object cap).
 func TestMultiChunkResponseRejectedOverByteBudget(t *testing.T) {
-	const budget = 8 * 1024 * 1024
+	const budget = 8 * common.Mebi
 
-	const okSize = 4 * 1024 * 1024 // within the budget
+	const okSize = 4 * common.Mebi // within the budget
 	status, _, body, err := fetchPeerResponse(t, communication.BeaconBlocksByRangeProtocolV2, okSize, budget)
 	require.NoError(t, err, "a response within the budget must stream through without error")
 	require.Equal(t, http.StatusOK, status)
 	require.EqualValues(t, okSize, len(body), "a response within the budget must pass through in full")
 
-	const floodSize = 40 * 1024 * 1024 // > budget, < the ceiling
+	const floodSize = 40 * common.Mebi // > budget, < the ceiling
 	_, _, body, err = fetchPeerResponse(t, communication.BeaconBlocksByRangeProtocolV2, floodSize, budget)
 	require.ErrorIs(t, err, ErrResponseTooLarge,
 		"a multi-chunk response over the byte budget must be rejected")

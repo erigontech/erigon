@@ -31,6 +31,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/urfave/cli/v3"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/math"
 )
 
@@ -176,7 +177,7 @@ func DBPageSizeFlagUnmarshal(cliCtx *cli.Command, flagName, flagUsage string) da
 		panic(err)
 	}
 	sz := pageSize.Bytes()
-	if !isPowerOfTwo(sz) || sz < 256 || sz > 64*1024 {
+	if !isPowerOfTwo(sz) || sz < 256 || sz > 64*common.Kibi {
 		panic(fmt.Errorf("invalid --%s: %d, see: %s", flagName, sz, flagUsage))
 	}
 	return pageSize

@@ -201,7 +201,7 @@ func DirtySpace() uint64 {
 		if v != "" {
 			i := MustParseInt(v)
 			log.Info("[Experiment]", "MDBX_DIRTY_SPACE_MB", i)
-			dirtySace = uint64(i * 1024 * 1024)
+			dirtySace = uint64(i * common.Mebi)
 		}
 	})
 	return dirtySace
