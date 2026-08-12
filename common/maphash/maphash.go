@@ -65,6 +65,14 @@ func (m *Map[V]) ReplaceIfPresent(key []byte, value V) bool {
 	return ok
 }
 
+// LoadAndStore stores value and returns the previous one, loaded reporting
+// prior presence. Probing with a separate Get first races a concurrent delete,
+// so external counters must key off loaded.
+func (m *Map[V]) LoadAndStore(key []byte, value V) (previous V, loaded bool) {
+	h := Hash(key)
+	return m.m.LoadAndStore(h, value)
+}
+
 // Delete removes a key from the map.
 func (m *Map[V]) Delete(key []byte) {
 	h := Hash(key)
