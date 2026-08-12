@@ -1917,29 +1917,21 @@ func TestFeeEntryWriteToIsRecordedIn(t *testing.T) {
 	version := state.Version{TxIndex: 3, Incarnation: 1}
 	addr := fAddr("credited")
 
-	entries := []feeEntry{
+	entries := []*feeEntry{
 		{
 			addr:   addr,
 			acc:    accounts.Account{Balance: *uint256.NewInt(7), Nonce: 2, Incarnation: 1, CodeHash: accounts.EmptyCodeHash},
 			reason: tracing.BalanceIncreaseRewardTransactionFee,
-			emit:   true,
 		},
 		{
 			addr:   addr,
 			acc:    accounts.Account{Balance: *uint256.NewInt(11), CodeHash: accounts.EmptyCodeHash},
 			reason: tracing.BalanceDecreaseGasBuy,
-			emit:   true,
 		},
-		{
-			addr:    addr,
-			reason:  tracing.BalanceIncreaseRewardTransactionFee,
-			deleted: true,
-			emit:    true,
-		},
+		{addr: addr, deleted: true},
 	}
 
-	for i := range entries {
-		e := &entries[i]
+	for i, e := range entries {
 		ws := &state.WriteSet{}
 		e.writeTo(ws, version)
 
@@ -1950,6 +1942,46 @@ func TestFeeEntryWriteToIsRecordedIn(t *testing.T) {
 		require.False(t, e.recordedIn(&state.WriteSet{}, version),
 			"entry %d: an empty set carries no credit", i)
 	}
+}
+
+// TestFeeEntryNilIsAbsent pins the absent entry: an adjustment that does not
+// touch this address writes nothing and reads as already recorded, so the skip
+// turns on the entries that do exist.
+func TestFeeEntryNilIsAbsent(t *testing.T) {
+	t.Parallel()
+	var absent *feeEntry
+	ws := &state.WriteSet{}
+
+	absent.writeTo(ws, state.Version{TxIndex: 3})
+	require.True(t, ws.IsEmpty(), "an absent entry has nothing to write")
+	require.True(t, absent.recordedIn(ws, state.Version{TxIndex: 3}))
+}
+
+// TestFeeEntryDeletedMatchesAnyWriterAtThisVersion pins what the deleted arm
+// accepts. It keys on version and value only, so a worker's own SELFDESTRUCT at
+// this version reads as the credit — harmless, because the entry writes that
+// same delete.
+func TestFeeEntryDeletedMatchesAnyWriterAtThisVersion(t *testing.T) {
+	t.Parallel()
+	addr := fAddr("emptied")
+	version := state.Version{TxIndex: 3, Incarnation: 1}
+	e := &feeEntry{addr: addr, deleted: true}
+
+	selfDestruct := func(v state.Version, val bool) *state.WriteSet {
+		ws := &state.WriteSet{}
+		ws.SetSelfDestruct(addr, &state.VersionedWrite[bool]{
+			WriteHeader: state.WriteHeader{Address: addr, Path: state.SelfDestructPath, Version: v},
+			Val:         val,
+		})
+		return ws
+	}
+
+	require.False(t, e.recordedIn(selfDestruct(state.Version{TxIndex: 3}, true), version),
+		"a delete stamped at another incarnation is not this credit")
+	require.False(t, e.recordedIn(selfDestruct(version, false), version),
+		"a SelfDestruct write that is not a delete carries no empty-removal")
+	require.True(t, e.recordedIn(selfDestruct(version, true), version),
+		"any delete at this version counts, whichever writer produced it")
 }
 
 var feeCreditSink *state.WriteSet
