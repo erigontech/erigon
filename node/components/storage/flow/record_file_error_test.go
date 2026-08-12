@@ -143,3 +143,49 @@ func TestOnDownloadFailed_DecrementsStatePending(t *testing.T) {
 	require.Equal(t, 0, o.PendingCount(),
 		"pending must drain on DownloadFailed")
 }
+
+// TestOnDownloadFailed_EvictsPhase1Files pins the companion invariant:
+// a permanently-failed phase-1 file must be removed from phase1Files
+// so tryFireInitialStateReady's LifecycleIndexed gate (Gate 3) doesn't
+// block forever waiting for a file that will never appear on disk.
+//
+// Failure discovered on publisher's own bootstrap: v1.1-*-headers.seg
+// files listed in preverified for hoodi are superseded and never
+// download; before this eviction, Gate 3 saw phase1_total=273 but
+// phase1_indexed=248 and InitialStateReady never fired.
+func TestOnDownloadFailed_EvictsPhase1Files(t *testing.T) {
+	bus := newBusForTest()
+	storage := &recordingStorage{inv: snapshot.NewInventory()}
+	o := NewWithStorage(bus, storage, logger())
+
+	require.NoError(t, o.Start(context.Background()))
+	t.Cleanup(func() { _ = o.Close() })
+
+	stateFile := &snapshot.FileEntry{
+		Domain: testDomain, FromStep: 0, ToStep: 256,
+		Name: "v1.0-accounts.0-256.kv",
+	}
+	bus.Publish(PeerManifestReceived{
+		PeerID:  "peer-1",
+		Domains: map[snapshot.Domain][]*snapshot.FileEntry{testDomain: {stateFile}},
+	})
+
+	waitUntil(t, func() bool {
+		o.peerMu.RLock()
+		defer o.peerMu.RUnlock()
+		_, ok := o.phase1Files[stateFile.Name]
+		return ok
+	}, 2*time.Second, "phase1Files to record the state file")
+
+	bus.Publish(DownloadFailed{
+		FileName: stateFile.Name,
+		Reason:   "download produced zero-byte file",
+	})
+
+	waitUntil(t, func() bool {
+		o.peerMu.RLock()
+		defer o.peerMu.RUnlock()
+		_, ok := o.phase1Files[stateFile.Name]
+		return !ok
+	}, 2*time.Second, "phase1Files to evict the failed file")
+}
