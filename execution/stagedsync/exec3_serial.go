@@ -474,7 +474,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, block *types.Block, 
 				se.onBlockStart(ctx, block)
 			}
 
-			if se.chaosMonkeyEnabled() {
+			if se.randomConsensusChaosEnabled() {
 				chaosErr := chaos_monkey.ThrowRandomConsensusError(false, txTask.TxIndex, se.cfg.badBlockHalt, result.Err)
 				if chaosErr != nil {
 					log.Warn("Monkey in a consensus")

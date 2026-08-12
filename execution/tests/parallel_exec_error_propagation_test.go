@@ -59,10 +59,7 @@ func TestParallelExec_PreDispatchFailure_SurfacesInsteadOfInfiniteLoop(t *testin
 	require.NoError(t, setupTx.Commit())
 
 	chaosErr := errors.New("chaos monkey: simulated pre-dispatch failure (snapshot step misalignment)")
-	disarm := chaos_monkey.ArmPreExecutionError(chaosErr)
-	t.Cleanup(disarm)
-
-	err = runParallelExecV3(t, m, maxBlockNum)
+	err = runParallelExecV3(t, m, maxBlockNum, chaos_monkey.Faults{PreExecutionError: chaosErr})
 
 	require.ErrorIs(t, err, chaosErr,
 		"the pre-dispatch failure must surface as a hard error, wrapping the original")
@@ -95,15 +92,16 @@ func tipWithUnexecutedBlock2(t *testing.T) (*execmoduletester.ExecModuleTester, 
 	return m, b2
 }
 
-// runParallelExecV3 runs one parallel execution batch with chaos hooks enabled.
-func runParallelExecV3(t *testing.T, m *execmoduletester.ExecModuleTester, maxBlockNum uint64) error {
+// runParallelExecV3 runs one parallel execution batch with scoped faults.
+func runParallelExecV3(t *testing.T, m *execmoduletester.ExecModuleTester, maxBlockNum uint64, faults chaos_monkey.Faults) error {
 	t.Helper()
-	return runParallelExecV3WithContext(t, context.Background(), m, maxBlockNum)
+	ctx := chaos_monkey.WithFaults(context.Background(), faults)
+	return runParallelExecV3WithContext(t, ctx, m, maxBlockNum)
 }
 
 func runParallelExecV3WithContext(t *testing.T, ctx context.Context, m *execmoduletester.ExecModuleTester, maxBlockNum uint64) error {
 	t.Helper()
-	return runParallelExecV3WithChaosGate(t, ctx, m, maxBlockNum, true, true)
+	return runParallelExecV3WithChaosGate(t, ctx, m, maxBlockNum, false, true)
 }
 
 func runParallelExecV3WithChaosGate(t *testing.T, ctx context.Context, m *execmoduletester.ExecModuleTester, maxBlockNum uint64, chaosMonkey, initialCycle bool) error {
@@ -159,10 +157,7 @@ func TestParallelExec_WorkerPoolDeath_SurfacesInsteadOfHanging(t *testing.T) {
 	m, b2 := tipWithUnexecutedBlock2(t)
 
 	chaosErr := errors.New("chaos monkey: simulated worker panic")
-	disarm := chaos_monkey.ArmWorkerError(chaosErr)
-	t.Cleanup(disarm)
-
-	err := runParallelExecV3(t, m, b2.NumberU64())
+	err := runParallelExecV3(t, m, b2.NumberU64(), chaos_monkey.Faults{WorkerError: chaosErr})
 
 	require.ErrorIs(t, err, chaosErr,
 		"a dead worker pool must surface its error through the executor group")
@@ -171,29 +166,26 @@ func TestParallelExec_WorkerPoolDeath_SurfacesInsteadOfHanging(t *testing.T) {
 		"worker-pool death classified as ErrLoopExhausted → runStage retries forever with zero progress")
 }
 
-func TestParallelExec_WorkerFaultHookHonorsChaosGate(t *testing.T) {
-	tests := []struct {
-		name         string
-		chaosMonkey  bool
-		initialCycle bool
-	}{
-		{name: "config disabled", initialCycle: true},
-		{name: "initial cycle disabled", chaosMonkey: true},
-	}
+func TestParallelExec_DeterministicWorkerFaultRunsWithRandomChaosDisabled(t *testing.T) {
+	m, b2 := tipWithUnexecutedBlock2(t)
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			m, b2 := tipWithUnexecutedBlock2(t)
+	chaosErr := errors.New("chaos monkey: deterministic worker fault")
+	ctx := chaos_monkey.WithFaults(context.Background(), chaos_monkey.Faults{WorkerError: chaosErr})
 
-			chaosErr := errors.New("chaos monkey: worker fault must stay disabled")
-			disarm := chaos_monkey.ArmWorkerError(chaosErr)
-			t.Cleanup(disarm)
+	err := runParallelExecV3WithChaosGate(t, ctx, m, b2.NumberU64(), false, true)
 
-			err := runParallelExecV3WithChaosGate(t, context.Background(), m, b2.NumberU64(), tc.chaosMonkey, tc.initialCycle)
+	require.ErrorIs(t, err, chaosErr)
+}
 
-			require.NoError(t, err)
-		})
-	}
+func TestParallelExec_DeterministicWorkerFaultHonorsInitialCycleGate(t *testing.T) {
+	m, b2 := tipWithUnexecutedBlock2(t)
+
+	chaosErr := errors.New("chaos monkey: worker fault must stay disabled")
+	ctx := chaos_monkey.WithFaults(context.Background(), chaos_monkey.Faults{WorkerError: chaosErr})
+
+	err := runParallelExecV3WithChaosGate(t, ctx, m, b2.NumberU64(), false, false)
+
+	require.NoError(t, err)
 }
 
 func TestParallelExec_EarlySetupCancellationDoesNotHideWorkerFailure(t *testing.T) {
@@ -201,16 +193,14 @@ func TestParallelExec_EarlySetupCancellationDoesNotHideWorkerFailure(t *testing.
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
+	chaosErr := errors.New("chaos monkey: simulated worker panic")
+	ctx = chaos_monkey.WithFaults(ctx, chaos_monkey.Faults{WorkerError: chaosErr})
 	db := &cancelOnTemporalRoDB{
 		TemporalRwDB: m.DB,
 		done:         ctx.Done(),
 		cancel:       cancel,
 	}
 	m.DB = db
-
-	chaosErr := errors.New("chaos monkey: simulated worker panic")
-	disarm := chaos_monkey.ArmWorkerError(chaosErr)
-	t.Cleanup(disarm)
 
 	err := runParallelExecV3WithContext(t, ctx, m, b2.NumberU64())
 
@@ -247,10 +237,7 @@ func TestParallelExec_ApplyLoopPanic_SurfacesInsteadOfCommitting(t *testing.T) {
 	m, b2 := tipWithUnexecutedBlock2(t)
 
 	chaosErr := errors.New("chaos monkey: simulated apply-loop panic")
-	disarm := chaos_monkey.ArmApplyLoopPanic(chaosErr)
-	t.Cleanup(disarm)
-
-	err := runParallelExecV3(t, m, b2.NumberU64())
+	err := runParallelExecV3(t, m, b2.NumberU64(), chaos_monkey.Faults{ApplyLoopPanic: chaosErr})
 
 	// The panic surfaces by message, not identity: recovered panics are always
 	// plain operational errors.
@@ -265,10 +252,7 @@ func TestParallelExec_ExecLoopPanic_SurfacesInsteadOfRetrying(t *testing.T) {
 	m, b2 := tipWithUnexecutedBlock2(t)
 
 	chaosErr := errors.New("chaos monkey: simulated exec-loop panic")
-	disarm := chaos_monkey.ArmExecLoopPanic(chaosErr)
-	t.Cleanup(disarm)
-
-	err := runParallelExecV3(t, m, b2.NumberU64())
+	err := runParallelExecV3(t, m, b2.NumberU64(), chaos_monkey.Faults{ExecLoopPanic: chaosErr})
 
 	require.ErrorContains(t, err, "exec loop panic",
 		"a recovered exec-loop panic must surface as a hard error")
@@ -284,10 +268,7 @@ func TestParallelExec_TaskPanic_SurfacesAsOperationalError(t *testing.T) {
 	m, b2 := tipWithUnexecutedBlock2(t)
 
 	chaosErr := errors.New("chaos monkey: simulated task panic")
-	disarm := chaos_monkey.ArmTaskPanic(chaosErr)
-	t.Cleanup(disarm)
-
-	err := runParallelExecV3(t, m, b2.NumberU64())
+	err := runParallelExecV3(t, m, b2.NumberU64(), chaos_monkey.Faults{TaskPanic: chaosErr})
 
 	require.Error(t, err)
 	require.NotErrorIs(t, err, rules.ErrInvalidBlock,

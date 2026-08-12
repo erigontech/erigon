@@ -397,8 +397,8 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	var lastProgress commitment.CommitProgress
 
 	execErr = pe.runApplyLoop(pe.logPrefix, applyResults, rootResults, func() (err error) {
-		if pe.chaosMonkeyEnabled() {
-			chaos_monkey.ApplyLoopPanic()
+		if chaosErr := pe.chaosFaults.ApplyLoopPanic; pe.enableChaosMonkey && chaosErr != nil {
+			panic(chaosErr)
 		}
 
 		// Open a thread-local read-only tx for domain operations. The apply loop
@@ -987,8 +987,8 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 		}
 	}()
 
-	if pe.chaosMonkeyEnabled() {
-		chaos_monkey.ExecLoopPanic()
+	if chaosErr := pe.chaosFaults.ExecLoopPanic; pe.enableChaosMonkey && chaosErr != nil {
+		panic(chaosErr)
 	}
 
 	pe.RLock()
@@ -1714,7 +1714,7 @@ func (pe *parallelExecutor) processResults(ctx context.Context, applyTx kv.Tempo
 	for rwsIt.HasNext() && blockResult == nil {
 		txResult := rwsIt.PopNext()
 
-		if pe.chaosMonkeyEnabled() {
+		if pe.randomConsensusChaosEnabled() {
 			chaosErr := chaos_monkey.ThrowRandomConsensusError(false, txResult.Version().TxIndex, pe.cfg.badBlockHalt, txResult.Err)
 			if chaosErr != nil {
 				log.Warn("Monkey in consensus")
@@ -1774,10 +1774,12 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, func(erro
 	pe.cancelWorkers = cancelWorkers
 
 	var workerFaults exec.WorkerFaults
-	if pe.chaosMonkeyEnabled() {
-		workerFaults = exec.WorkerFaults{
-			RunStart: chaos_monkey.ThrowWorkerError,
-			TaskBody: chaos_monkey.TaskPanic,
+	if pe.enableChaosMonkey {
+		if chaosErr := pe.chaosFaults.WorkerError; chaosErr != nil {
+			workerFaults.RunStart = func() error { return chaosErr }
+		}
+		if chaosErr := pe.chaosFaults.TaskPanic; chaosErr != nil {
+			workerFaults.TaskBody = func() { panic(chaosErr) }
 		}
 	}
 

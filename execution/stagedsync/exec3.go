@@ -233,6 +233,7 @@ func execV3(ctx context.Context,
 			logPrefix:         logPrefix,
 			progress:          NewProgress(blockNum, inputTxNum, commitThreshold, false, logPrefix, logger),
 			enableChaosMonkey: initialCycle,
+			chaosFaults:       chaos_monkey.FaultsFromContext(ctx),
 			hooks:             hooks,
 			blockSrc:          blockSrc,
 		},
@@ -512,6 +513,7 @@ type txExecutor struct {
 	writeCount   atomic.Int64
 
 	enableChaosMonkey bool
+	chaosFaults       chaos_monkey.Faults
 }
 
 // A wrong root under fork validation means a payload the CL offered was rejected,
@@ -642,9 +644,7 @@ func recoveredPanicError(operation string, recovered any) error {
 	return fmt.Errorf("%s panic: %v", operation, recovered)
 }
 
-// chaosMonkeyEnabled gates fault injection to explicitly configured runs on
-// the initial cycle.
-func (te *txExecutor) chaosMonkeyEnabled() bool {
+func (te *txExecutor) randomConsensusChaosEnabled() bool {
 	return te.cfg.syncCfg.ChaosMonkey && te.enableChaosMonkey
 }
 
@@ -677,10 +677,8 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			defer close(blockRequests)
 		}
 
-		if te.chaosMonkeyEnabled() {
-			if chaosErr := chaos_monkey.ThrowPreExecutionError(); chaosErr != nil {
-				return chaosErr
-			}
+		if chaosErr := te.chaosFaults.PreExecutionError; te.enableChaosMonkey && chaosErr != nil {
+			return chaosErr
 		}
 
 		// Open a thread-local roTx for block metadata and StepsInFiles.
