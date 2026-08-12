@@ -129,7 +129,7 @@ func (tx *AccountAbstractionTransaction) TotalGasLimit(base uint64) (uint64, boo
 }
 
 func (tx *AccountAbstractionTransaction) GetGasLimit() uint64 {
-	// saturate: the interface cannot report overflow, and a wrapped-small total would pass gas checks
+	// Saturate: the interface cannot report overflow, and a wrapped-small total would pass gas checks.
 	total, ok := tx.TotalGasLimit(params.TxAAGas)
 	if !ok {
 		return math.MaxUint64
