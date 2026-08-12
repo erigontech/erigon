@@ -189,3 +189,41 @@ func TestModeString_ReceiptsKeepAll(t *testing.T) {
 	assert.True(t, def.ReceiptsFollowHistory(), "unset receipts follows history")
 	assert.NotContains(t, def.String(), "prune.receipts.distance")
 }
+
+// A Distance built by bare subtraction underflows when the target is above the
+// stage head, and lands exactly on the policy sentinels: off-by-one becomes
+// KeepPostMergeBlocksPruneMode, off-by-two becomes KeepAllBlocksPruneMode. Both
+// report Enabled()==false, so pruning silently turns into a different policy.
+func TestDistanceFrom(t *testing.T) {
+	const head = uint64(1000)
+
+	got, err := DistanceFrom(head, 900)
+	require.NoError(t, err)
+	assert.Equal(t, Distance(100), got)
+	assert.Equal(t, uint64(900), got.PruneTo(head))
+
+	got, err = DistanceFrom(head, head)
+	require.NoError(t, err)
+	assert.Equal(t, Distance(0), got)
+
+	for _, target := range []uint64{head + 1, head + 2, head + 3} {
+		_, err := DistanceFrom(head, target)
+		require.Error(t, err, "target %d is above head %d", target, head)
+	}
+
+	overshot := head + 1
+	assert.Equal(t, KeepPostMergeBlocksPruneMode, Distance(head-overshot))
+	assert.False(t, Distance(head-overshot).Enabled())
+}
+
+// Sentinels must render as their CLI alias, never as the raw magic number --
+// the rendered string is what EnsureNotChanged tells the operator to re-pass.
+func TestModeString_HistorySentinelRendersByName(t *testing.T) {
+	m := ArchiveMode
+	m.History = KeepAllBlocksPruneMode
+	assert.NotContains(t, m.String(), "18446744073709551614")
+
+	m = ArchiveMode
+	m.CommitmentHistory = KeepPostMergeBlocksPruneMode
+	assert.NotContains(t, m.String(), "18446744073709551615")
+}
