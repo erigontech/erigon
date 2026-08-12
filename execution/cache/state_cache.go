@@ -55,10 +55,13 @@ const (
 // Code uses CodeCache (two-level for deduplication).
 type StateCache struct {
 	caches [kv.DomainLen]Cache
-	// admissionMu serializes fill admission with canonical publication.
-	// stateVersion identifies the durable state allowed to fill; appliedEnd
-	// rejects older domain frontiers within that state version.
+	// applierMu serializes authoritative operations while a batch publication
+	// releases admissionMu around cache writes.
+	applierMu sync.Mutex
+	// admissionMu protects fill eligibility and publication identity.
+	// publishing disables admission-gated fills while an update is incomplete.
 	admissionMu       sync.RWMutex
+	publishing        bool
 	appliedEnd        [kv.DomainLen]uint64
 	stateVersion      uint64
 	stateVersionKnown bool
@@ -224,7 +227,8 @@ func (c *StateCache) seedAddrCodeHash(addr []byte, h [32]byte, txNum, visibleEnd
 	}
 	c.admissionMu.RLock()
 	defer c.admissionMu.RUnlock()
-	if viewEpoch != c.readViewEpoch.Load() ||
+	if c.publishing ||
+		viewEpoch != c.readViewEpoch.Load() ||
 		visibleEnd < c.appliedEnd[kv.AccountsDomain] {
 		return
 	}
@@ -260,8 +264,7 @@ func (c *StateCache) fillIfFresh(domain kv.Domain, key []byte, value []byte, rea
 	if cache == nil {
 		return
 	}
-	// Clone outside the lock: a rejected fill wastes one copy (rare), but
-	// A publication's write lock never waits on a fill's memcpy.
+	// Clone outside the lock so admission never waits on the copy.
 	cloned := bytes.Clone(value)
 	if len(value) == 0 {
 		readTxNum = 0
@@ -271,7 +274,8 @@ func (c *StateCache) fillIfFresh(domain kv.Domain, key []byte, value []byte, rea
 	}
 	c.admissionMu.RLock()
 	defer c.admissionMu.RUnlock()
-	if viewEpoch != c.readViewEpoch.Load() ||
+	if c.publishing ||
+		viewEpoch != c.readViewEpoch.Load() ||
 		visibleEnd < c.appliedEnd[domain] {
 		return
 	}
@@ -293,7 +297,8 @@ func (c *StateCache) fillCodeIfFresh(key []byte, value []byte, readTxNum, visibl
 	cloned := bytes.Clone(value)
 	c.admissionMu.RLock()
 	defer c.admissionMu.RUnlock()
-	if viewEpoch != c.readViewEpoch.Load() ||
+	if c.publishing ||
+		viewEpoch != c.readViewEpoch.Load() ||
 		visibleEnd < c.appliedEnd[kv.CodeDomain] ||
 		accountsVisibleEnd < c.appliedEnd[kv.AccountsDomain] {
 		return
@@ -335,12 +340,14 @@ func prepareStateUpdate(update StateUpdate) preparedStateUpdate {
 // apply makes a committed domain update authoritative for subsequent fills.
 func (c *StateCache) apply(domain kv.Domain, key, value []byte, txNum uint64) {
 	prepared := prepareStateUpdate(StateUpdate{Domain: domain, Key: key, Value: value, TxNum: txNum})
+	c.applierMu.Lock()
+	defer c.applierMu.Unlock()
 	c.admissionMu.Lock()
 	defer c.admissionMu.Unlock()
-	c.applyLocked(prepared)
+	c.applyPrepared(prepared)
 }
 
-func (c *StateCache) applyLocked(update preparedStateUpdate) {
+func (c *StateCache) applyPrepared(update preparedStateUpdate) {
 	cache := c.caches[update.domain]
 	if cache == nil {
 		return
@@ -393,6 +400,8 @@ func (c *StateCache) noteApplied(domain kv.Domain, txNum uint64) {
 // survives: clearing drops entries, it does not rewind canonical state, and a
 // zeroed frontier would let a still-live older ReadView refill pre-apply data.
 func (c *StateCache) clear() {
+	c.applierMu.Lock()
+	defer c.applierMu.Unlock()
 	c.admissionMu.Lock()
 	defer c.admissionMu.Unlock()
 	c.clearLocked()
@@ -430,6 +439,8 @@ func (c *StateCache) Close() {
 // and drops stale entries lazily on read. This is the sole cache-invalidation
 // path on unwind — the executor never touches the cache during forward execution.
 func (c *StateCache) unwind(unwindToTxNum uint64) {
+	c.applierMu.Lock()
+	defer c.applierMu.Unlock()
 	c.admissionMu.Lock()
 	defer c.admissionMu.Unlock()
 	c.unwindLocked(unwindToTxNum)
@@ -448,6 +459,8 @@ func (c *StateCache) unwindLocked(unwindToTxNum uint64) {
 }
 
 func (c *StateCache) initialize(stateVersion uint64) {
+	c.applierMu.Lock()
+	defer c.applierMu.Unlock()
 	c.admissionMu.Lock()
 	defer c.admissionMu.Unlock()
 	if c.stateVersionKnown && stateVersion <= c.stateVersion {
@@ -456,6 +469,34 @@ func (c *StateCache) initialize(stateVersion uint64) {
 	c.resetForStateVersionLocked()
 	c.stateVersion = stateVersion
 	c.stateVersionKnown = true
+	c.publishing = false
+}
+
+func (c *StateCache) beginPublication(sourceStateVersion, committedStateVersion, unwindToTxNum uint64,
+	hasUnwind bool) bool {
+	c.admissionMu.Lock()
+	defer c.admissionMu.Unlock()
+	if c.stateVersionKnown && committedStateVersion <= c.stateVersion {
+		return false
+	}
+	c.publishing = true
+	discontinuous := !c.stateVersionKnown || sourceStateVersion != c.stateVersion
+	if discontinuous {
+		// The cache missed part of the source state. Incremental updates cannot
+		// repair unknown retained entries, so publish into an empty generation.
+		c.resetForStateVersionLocked()
+	} else if hasUnwind {
+		c.unwindLocked(unwindToTxNum)
+	}
+	return true
+}
+
+func (c *StateCache) finishPublication(committedStateVersion uint64) {
+	c.admissionMu.Lock()
+	defer c.admissionMu.Unlock()
+	c.stateVersion = committedStateVersion
+	c.stateVersionKnown = true
+	c.publishing = false
 }
 
 func (c *StateCache) publish(sourceStateVersion, committedStateVersion, unwindToTxNum uint64,
@@ -468,24 +509,20 @@ func (c *StateCache) publish(sourceStateVersion, committedStateVersion, unwindTo
 		prepared[i] = prepareStateUpdate(updates[i])
 	}
 
-	c.admissionMu.Lock()
-	defer c.admissionMu.Unlock()
-	if c.stateVersionKnown && committedStateVersion <= c.stateVersion {
+	c.applierMu.Lock()
+	defer c.applierMu.Unlock()
+	if !c.beginPublication(sourceStateVersion, committedStateVersion, unwindToTxNum, hasUnwind) {
 		return
 	}
-	discontinuous := !c.stateVersionKnown || sourceStateVersion != c.stateVersion
-	if discontinuous {
-		// The cache missed part of the source state. Incremental updates cannot
-		// repair unknown retained entries, so publish into an empty generation.
-		c.resetForStateVersionLocked()
-	} else if hasUnwind {
-		c.unwindLocked(unwindToTxNum)
-	}
+
+	// Sub-caches synchronize their own reads and writes. While publishing is
+	// true, admission-gated fills cannot mutate state entries or read appliedEnd,
+	// so the serialized applier can install the batch without admissionMu.
 	for i := range prepared {
-		c.applyLocked(prepared[i])
+		c.applyPrepared(prepared[i])
 	}
-	c.stateVersion = committedStateVersion
-	c.stateVersionKnown = true
+
+	c.finishPublication(committedStateVersion)
 }
 
 // Caches reports whether the given domain has a cache attached.

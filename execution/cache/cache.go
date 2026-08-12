@@ -28,8 +28,9 @@
 // view and not outliving it — serves reads and fills (cache writes made on
 // behalf of a database reader after a miss); admission compares the view's
 // frontier — the exclusive txNum end of what its tx can see, so a view with
-// frontier N sees txNums < N — against the applied end, under the same lock
-// publications take.
+// frontier N sees txNums < N — against the applied end. Publication disables
+// state fills while its authoritative update batch is incomplete, without
+// blocking cache reads or view binding.
 //
 // The Applier handle, held by the SharedDomains commit/unwind path, performs
 // the authoritative writes: post-commit publications, unwinds and clears.

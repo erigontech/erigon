@@ -84,6 +84,8 @@ func (f FrontierFunc) DomainVisibleEnd(domain kv.Domain) (uint64, bool) { return
 // continuous forward publication keeps the view eligible, while the domain
 // frontier rejects values older than the latest update. A discontinuity also
 // advances the epoch and revokes every previously bound view.
+// During publication, reads remain available but admission-gated view binding
+// and fills are temporarily inert until the complete update batch is installed.
 // Snapshot-isolated caching is kvcache's job (node/shards).
 type ReadView struct {
 	c             *StateCache
@@ -93,7 +95,7 @@ type ReadView struct {
 
 // View creates a ReadView vouched for by f. If the cache has a durable state
 // version, f must report the same version when it is bound. A nil or rejected
-// frontier disables admission-gated fills.
+// frontier disables admission-gated fills, as does binding during publication.
 func (c *StateCache) View(f Frontier) ReadView {
 	if c == nil {
 		return ReadView{}
@@ -111,8 +113,8 @@ func (c *StateCache) View(f Frontier) ReadView {
 }
 
 // WithFrontier binds f while preserving the original view's read-view epoch.
-// Binding is serialized with publication so a transaction from an older
-// durable state cannot gain fill authority after an unwind commits.
+// Binding is serialized with publication boundaries so a transaction from an
+// older durable state cannot gain fill authority after an unwind commits.
 func (v ReadView) WithFrontier(f Frontier) ReadView {
 	if v.c == nil {
 		return v
@@ -128,7 +130,10 @@ func (v ReadView) WithFrontier(f Frontier) ReadView {
 }
 
 func (c *StateCache) eligibleFrontierLocked(frontier Frontier) Frontier {
-	if frontier == nil || !c.stateVersionKnown {
+	if frontier == nil || c.publishing {
+		return nil
+	}
+	if !c.stateVersionKnown {
 		return frontier
 	}
 	versioned, ok := frontier.(stateVersionFrontier)
@@ -268,9 +273,10 @@ func (a Applier) Initialize(stateVersion uint64) {
 }
 
 // Publish applies one successful commit and advances the cache from its source
-// state version to the committed state version in one critical section. Source
-// continuity lets unchanged entries survive even if one commit advances the
-// durable counter more than once.
+// state version to the committed state version. Admission-gated fills are
+// disabled while the update batch is incomplete, but readers do not wait for
+// the batch. Source continuity lets unchanged entries survive even if one
+// commit advances the durable counter more than once.
 func (a Applier) Publish(sourceStateVersion, committedStateVersion uint64, updates []StateUpdate) {
 	if a.c == nil {
 		return

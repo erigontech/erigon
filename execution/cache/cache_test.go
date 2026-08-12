@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/assert"
@@ -43,6 +44,26 @@ func makeAddr(i int) []byte {
 	addr[19] = byte(i)
 	return addr
 }
+
+type blockingPutCache struct {
+	started chan struct{}
+	release chan struct{}
+	filled  chan struct{}
+	once    sync.Once
+}
+
+func (c *blockingPutCache) Get([]byte) ([]byte, bool)                  { return nil, false }
+func (c *blockingPutCache) GetWithTxNum([]byte) ([]byte, uint64, bool) { return nil, 0, false }
+func (c *blockingPutCache) Put([]byte, []byte, uint64) {
+	c.once.Do(func() { close(c.started) })
+	<-c.release
+}
+func (c *blockingPutCache) PutIfAbsent([]byte, []byte, uint64) { c.filled <- struct{}{} }
+func (c *blockingPutCache) Delete([]byte)                      {}
+func (c *blockingPutCache) Clear()                             {}
+func (c *blockingPutCache) Unwind(uint64)                      {}
+func (c *blockingPutCache) Close()                             {}
+func (c *blockingPutCache) Len() int                           { return 0 }
 
 func makeHash(i int) common.Hash {
 	var h common.Hash
@@ -1029,6 +1050,69 @@ func TestStateCache_PublishRejectsOlderStateVersion(t *testing.T) {
 	sc.View(frontierAtVersion(31, 2)).Fill(kv.AccountsDomain, staleKey, makeValue(2), 30)
 	_, ok = sc.View(nil).Get(kv.AccountsDomain, staleKey)
 	require.False(t, ok, "a rejected publication must not move fill admission backward")
+}
+
+func TestStateCache_PublicationDoesNotBlockViewBinding(t *testing.T) {
+	cache := &blockingPutCache{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+		filled:  make(chan struct{}, 1),
+	}
+	sc := &StateCache{}
+	sc.caches[kv.AccountsDomain] = cache
+	sc.Applier().Initialize(1)
+	existingView := sc.View(frontierAtVersion(21, 1))
+
+	published := make(chan struct{})
+	go func() {
+		sc.Applier().Publish(1, 2, []StateUpdate{{
+			Domain: kv.AccountsDomain,
+			Key:    makeAddr(1),
+			Value:  makeValue(1),
+			TxNum:  20,
+		}})
+		close(published)
+	}()
+	<-cache.started
+	publicationDone := false
+	defer func() {
+		if !publicationDone {
+			close(cache.release)
+			<-published
+		}
+	}()
+
+	existingView.Fill(kv.AccountsDomain, makeAddr(2), makeValue(2), 10)
+	select {
+	case <-cache.filled:
+		t.Fatal("cache fill was admitted during publication")
+	default:
+	}
+
+	viewBound := make(chan ReadView, 1)
+	go func() {
+		viewBound <- sc.View(frontierAtVersion(21, 2))
+	}()
+	var duringPublication ReadView
+	select {
+	case view := <-viewBound:
+		duringPublication = view
+		require.False(t, view.CanFill(), "a view bound during publication must not fill partial state")
+	case <-time.After(time.Second):
+		t.Fatal("cache publication blocked view binding")
+	}
+
+	close(cache.release)
+	<-published
+	publicationDone = true
+	require.False(t, duringPublication.CanFill(), "an inert view must be rebound explicitly")
+	require.True(t, sc.View(frontierAtVersion(21, 2)).CanFill(), "the committed version must admit new views")
+	existingView.Fill(kv.AccountsDomain, makeAddr(2), makeValue(2), 10)
+	select {
+	case <-cache.filled:
+	case <-time.After(time.Second):
+		t.Fatal("continuous publication did not restore fill admission")
+	}
 }
 
 func TestStateCache_PublishClearsOnSkippedStateVersion(t *testing.T) {
