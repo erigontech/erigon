@@ -340,7 +340,7 @@ func requestAndCompare(request string, methodName string, errCtx string, reqGen 
 					// Keep going
 				} else {
 					reqFile, _ := os.Create("request.json")                //nolint:errcheck
-					reqFile.Write([]byte(request))                         //nolint:errcheck
+					reqFile.WriteString(request)                           //nolint:errcheck
 					reqFile.Close()                                        //nolint:errcheck
 					erigonRespFile, _ := os.Create("erigon-response.json") //nolint:errcheck
 					erigonRespFile.Write(res.Response)                     //nolint:errcheck
@@ -395,7 +395,7 @@ func requestAndCompareErigon(requestA, requestB string, methodNameA, methodNameB
 					// Keep going
 				} else {
 					reqFile, _ := os.Create("request.json")                //nolint:errcheck
-					reqFile.Write([]byte(requestA))                        //nolint:errcheck
+					reqFile.WriteString(requestA)                          //nolint:errcheck
 					reqFile.Close()                                        //nolint:errcheck
 					erigonRespFile, _ := os.Create("erigon-response.json") //nolint:errcheck
 					erigonRespFile.Write(res.Response)                     //nolint:errcheck
@@ -755,7 +755,7 @@ func post2(client *http.Client, url, request string) ([]byte, *fastjson.Value, e
 	return response, v, nil
 }
 
-func print(client *http.Client, url, request string) {
+func printRPCRequest(client *http.Client, url, request string) {
 	r, err := client.Post(url, "application/json", strings.NewReader(request))
 	if err != nil {
 		fmt.Printf("Could not print: %v\n", err)
