@@ -279,10 +279,9 @@ type SharedDomains struct {
 
 	// stateCache is an optional cache for state data (accounts, storage, code);
 	// cacheApplier is its authoritative writer handle (commit/unwind only).
-	stateCache         *cache.StateCache
-	cacheApplier       cache.Applier
-	cacheUnwindTo      uint64
-	cacheUnwindPending bool
+	stateCache   *cache.StateCache
+	cacheApplier cache.Applier
+	cacheUnwind  cacheUnwindState
 
 	// Backing frontiers stay fixed while writes and staged unwinds remain in
 	// mem; both reach the transaction during flush, which resets the memo.
@@ -327,6 +326,15 @@ type SharedDomains struct {
 	// Its miss callback is wired via Bind in EnableParaTrieDB; OnBlockComplete fires
 	// from Commit using the in-flight (pre-Commit) tx.
 	adaptivePinController *commitment.AdaptivePinController
+}
+
+// cacheUnwindState records the lowest boundary that the next durable cache
+// publication must invalidate. It is separate from mem-batch changesets
+// because an unwind without changesets must still revoke cache entries;
+// merging states keeps the lowest boundary to cover every discarded range.
+type cacheUnwindState struct {
+	toTxNum uint64
+	pending bool
 }
 
 // PickTrieVariant returns the commitment trie variant selected by the
@@ -462,13 +470,13 @@ func (sd *SharedDomains) Merge(ctx context.Context, sdTxNum uint64, other *Share
 	if err := sd.mem.Merge(other.mem); err != nil {
 		return err
 	}
-	if other.cacheUnwindPending {
+	if other.cacheUnwind.pending {
 		// A shared cache was invalidated when the child staged the unwind;
 		// otherwise invalidate the parent's cache before it serves merged state.
 		if sd.stateCache != other.stateCache {
-			sd.cacheApplier.Unwind(other.cacheUnwindTo)
+			sd.cacheApplier.Unwind(other.cacheUnwind.toTxNum)
 		}
-		sd.stageCacheUnwind(other.cacheUnwindTo)
+		sd.stageCacheUnwind(other.cacheUnwind.toTxNum)
 	}
 
 	// Merge block-level metadata from other's overlay into ours by flushing
@@ -858,13 +866,13 @@ func (sd *SharedDomains) Unwind(txNumUnwindTo uint64, changeset *[kv.DomainLen][
 	sd.stageCacheUnwind(txNumUnwindTo)
 }
 
-// stageCacheUnwind retains the lowest staged boundary because merged batches
-// may contain cache entries from either discarded range.
+// stageCacheUnwind retains the lowest boundary so every staged discarded
+// range is covered by the next durable cache publication.
 func (sd *SharedDomains) stageCacheUnwind(txNumUnwindTo uint64) {
-	if !sd.cacheUnwindPending || txNumUnwindTo < sd.cacheUnwindTo {
-		sd.cacheUnwindTo = txNumUnwindTo
+	if !sd.cacheUnwind.pending || txNumUnwindTo < sd.cacheUnwind.toTxNum {
+		sd.cacheUnwind.toTxNum = txNumUnwindTo
 	}
-	sd.cacheUnwindPending = true
+	sd.cacheUnwind.pending = true
 }
 
 func (sd *SharedDomains) GetMemBatch() kv.TemporalMemBatch { return sd.mem }
@@ -1322,12 +1330,12 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 		}
 	}
 	if sd.stateCache != nil {
-		if sd.cacheUnwindPending {
-			sd.cacheApplier.PublishUnwind(sourceStateVersion, committedStateVersion, sd.cacheUnwindTo, pendingState)
+		if sd.cacheUnwind.pending {
+			sd.cacheApplier.PublishUnwind(sourceStateVersion, committedStateVersion, sd.cacheUnwind.toTxNum, pendingState)
 		} else {
 			sd.cacheApplier.Publish(sourceStateVersion, committedStateVersion, pendingState)
 		}
-		sd.cacheUnwindPending = false
+		sd.cacheUnwind = cacheUnwindState{}
 	}
 	return nil
 }
