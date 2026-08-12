@@ -55,11 +55,10 @@ func destructThenRevive(vm *VersionMap, addr accounts.Address) {
 	writeFor(vm, addr, IncarnationPath, accounts.NilKey, Version{TxIndex: 2}, uint64(2), true)
 }
 
-// A value-transfer revival records Balance/Incarnation/SelfDestruct but no
-// Nonce or CodeHash, so the account record still floors on the pre-destruct
-// cells. The code hash has to be wiped — left alone it contradicts
-// ReadAccountCode, which reports the account has none — but the nonce must not
-// be, because that is the one the block goes on to commit.
+// A value-transfer revival records Balance/Incarnation/SelfDestruct but no Nonce
+// or CodeHash, so the account record still floors on the pre-destruct cells.
+// Both have to be wiped: the destruct deleted the account, and leaving either
+// contradicts the code and nonce versionedReadCore serves the EVM.
 func TestVersionedStateReader_AccountCodeHashWipedByInRangeDestruct(t *testing.T) {
 	t.Parallel()
 	addr := getAddress(105)
@@ -76,9 +75,7 @@ func TestVersionedStateReader_AccountCodeHashWipedByInRangeDestruct(t *testing.T
 	acc, err := vr.ReadAccountData(addr)
 	require.NoError(t, err)
 	require.Equal(t, accounts.EmptyCodeHash, acc.CodeHash, "code hash must agree with the code the reader reports")
-	// Nonce is inherited, matching what the block commits — see
-	// TestSelfDestructReceiveAccountRecord in execution/tests.
-	require.Equal(t, uint64(7), acc.Nonce)
+	require.Zero(t, acc.Nonce, "the destruct deleted the account the nonce belonged to")
 	require.Equal(t, uint64(1000), acc.Balance.Uint64(), "the revival's balance is the live value")
 }
 
@@ -183,6 +180,51 @@ func TestVersionedStateReader_HasStorageSurvivesWhenRevivalRewrote(t *testing.T)
 	require.True(t, has, "the tx2 slot sits above the destruct, so the account holds storage")
 }
 
+// The pre-block domain holds nothing, so falling through to it answers false for
+// an account whose storage was created and rewritten entirely in this block.
+func TestVersionedStateReader_HasStorageSeesInBlockOnlyStorage(t *testing.T) {
+	t.Parallel()
+	addr := getAddress(114)
+	key := accounts.InternKey(common.HexToHash("0x01"))
+
+	vm := NewVersionMap(nil)
+	writeFor(vm, addr, StoragePath, key, Version{TxIndex: 0}, *uint256.NewInt(5), true)
+	destructThenRevive(vm, addr)
+	writeFor(vm, addr, StoragePath, key, Version{TxIndex: 2}, *uint256.NewInt(9), true)
+
+	vr := NewVersionedStateReader(3, ReadSet{}, vm, newAccountStateReader(addr))
+	has, err := vr.HasStorage(addr)
+	require.NoError(t, err)
+	val, found, err := vr.ReadAccountStorage(addr, key)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, uint64(9), val.Uint64())
+	require.True(t, has, "HasStorage must agree with the slot ReadAccountStorage serves")
+}
+
+// A zero write above the destruct leaves the account with no storage, so the
+// erased pre-block slots must not answer for it either.
+func TestVersionedStateReader_HasStorageZeroWriteAboveDestruct(t *testing.T) {
+	t.Parallel()
+	addr := getAddress(115)
+	key := accounts.InternKey(common.HexToHash("0x01"))
+
+	vm := NewVersionMap(nil)
+	writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 1}, true, true)
+	writeFor(vm, addr, StoragePath, key, Version{TxIndex: 2}, uint256.Int{}, true)
+
+	reader := &preBlockStateReader{
+		accountStateReader: newAccountStateReader(addr),
+		slot:               key,
+		val:                *uint256.NewInt(5),
+	}
+
+	vr := NewVersionedStateReader(3, ReadSet{}, vm, reader)
+	has, err := vr.HasStorage(addr)
+	require.NoError(t, err)
+	require.False(t, has, "the only live slot is zero; the pre-block ones are gone")
+}
+
 func TestVersionedStateReader_CodeWipedByInRangeDestruct(t *testing.T) {
 	t.Parallel()
 	addr := getAddress(103)
@@ -275,31 +317,60 @@ func TestVersionedStateReader_EstimateDestructStillWipes(t *testing.T) {
 	require.False(t, found)
 }
 
-// A same-tx destroy-and-recreate writes the new contract's code hash at the same
-// TxIndex as the destruct, so that entry is already the post-destruct value and
-// the scan must start above it — the convention read_paths.go applies to
-// CodeHash and Balance but not to the other paths.
-func TestVersionedStateReader_DestructOwnCodeHashSurvives(t *testing.T) {
+// Every newly created account writes SelfDestruct=false, so an invalidated
+// creating tx leaves an Estimate cell holding false. Reading that as a destruct
+// would report a live account's storage as absent.
+func TestVersionedStateReader_EstimateCreationIsNotADestruct(t *testing.T) {
+	t.Parallel()
+	addr := getAddress(113)
+	key := accounts.InternKey(common.HexToHash("0x01"))
+
+	vm := NewVersionMap(nil)
+	writeFor(vm, addr, StoragePath, key, Version{TxIndex: 0}, *uint256.NewInt(5), true)
+	writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 2}, false, true)
+	vm.MarkEstimate(addr, SelfDestructPath, accounts.NilKey, 2)
+
+	vr := NewVersionedStateReader(3, ReadSet{}, vm, nil)
+	val, found, err := vr.ReadAccountStorage(addr, key)
+	require.NoError(t, err)
+	require.Equal(t, uint64(5), val.Uint64(), "no destruct ever happened here")
+	require.True(t, found)
+}
+
+// A recreate above the destruct restores the account, and the record and the code
+// readers have to serve the same contract. The recreate cannot land at the
+// destruct's own TxIndex: WriteSet.Snapshot drops Address/Code/CodeHash/Nonce
+// from any tx whose final SelfDestruct is true, so a destruct cell never shares
+// an index with a surviving code hash.
+func TestVersionedStateReader_RecreateAboveDestructIsServedWhole(t *testing.T) {
 	t.Parallel()
 	addr := getAddress(109)
-	recreated := accounts.NewCode([]byte{0x60, 0x01}).Hash
+	recreated := accounts.NewCode([]byte{0x60, 0x01})
 
 	vm := NewVersionMap(nil)
 	writeFor(vm, addr, NoncePath, accounts.NilKey, Version{TxIndex: 0}, uint64(7), true)
 	writeFor(vm, addr, CodeHashPath, accounts.NilKey, Version{TxIndex: 0}, accounts.NewCode([]byte{0x60, 0x00}).Hash, true)
-
-	// The recreate lands at the destruct's own TxIndex, AddressPath included —
-	// that is what marks the account revived rather than gone.
-	fresh := accounts.NewAccount()
-	fresh.CodeHash = recreated
 	writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 1}, true, true)
-	writeFor(vm, addr, AddressPath, accounts.NilKey, Version{TxIndex: 1}, &fresh, true)
-	writeFor(vm, addr, CodeHashPath, accounts.NilKey, Version{TxIndex: 1}, recreated, true)
+
+	fresh := accounts.NewAccount()
+	fresh.CodeHash = recreated.Hash
+	writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 2}, false, true)
+	writeFor(vm, addr, AddressPath, accounts.NilKey, Version{TxIndex: 2}, &fresh, true)
+	writeFor(vm, addr, CodeHashPath, accounts.NilKey, Version{TxIndex: 2}, recreated.Hash, true)
+	writeFor(vm, addr, CodePath, accounts.NilKey, Version{TxIndex: 2}, recreated, true)
 
 	vr := NewVersionedStateReader(3, ReadSet{}, vm, newAccountStateReader(addr))
 	acc, err := vr.ReadAccountData(addr)
 	require.NoError(t, err)
-	require.Equal(t, recreated, acc.CodeHash, "the recreate's own code hash is not what the destruct erased")
+	require.Equal(t, recreated.Hash, acc.CodeHash, "the recreate's code hash is not what the destruct erased")
+
+	code, err := vr.ReadAccountCode(addr)
+	require.NoError(t, err)
+	require.Equal(t, recreated.Bytes, code, "and the code readers must serve the same contract")
+
+	size, err := vr.ReadAccountCodeSize(addr)
+	require.NoError(t, err)
+	require.Equal(t, len(recreated.Bytes), size)
 }
 
 // Same shape through IntraBlockState, which resolves code via versionedReadCore

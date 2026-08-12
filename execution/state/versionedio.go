@@ -1742,12 +1742,14 @@ func (vr versionedStateReader) HasStorage(address accounts.Address) (bool, error
 		return true, nil
 	}
 
-	// An in-block destruct erased whatever the pre-block domain holds, so the
-	// fall-through below must not answer from it. With no key to floor on, a slot
-	// rewritten above the destruct is what keeps the account holding storage.
 	if vr.versionMap != nil {
-		if at, wiped := vr.wipedByDestruct(address, StoragePath, -1); wiped &&
-			!vr.versionMap.storageWrittenAfter(address, at, vr.txIndex) {
+		at, wiped := vr.wipedByDestruct(address, StoragePath, -1)
+		if vr.versionMap.hasLiveStorage(address, at, wiped, vr.txIndex) {
+			return true, nil
+		}
+		// An in-block destruct erased whatever the pre-block domain holds, so with
+		// nothing live above it the fall-through must not answer from it.
+		if wiped {
 			return false, nil
 		}
 	}

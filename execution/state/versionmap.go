@@ -450,39 +450,24 @@ func (vm *VersionMap) applySubFieldWrites(addr accounts.Address, txIdx int, acco
 	if _, cell := floorCell(e.Balance, txIdx); cell != nil {
 		account.Balance = cell.Value
 	}
-	_, nonceCell := floorCell(e.Nonce, txIdx)
-	codeHashIdx, codeHashCell := floorCell(e.CodeHash, txIdx)
-
-	// A field with no cell of its own is served from before the block, and any
-	// destruct below txIdx erased that — SELFDESTRUCT records Incarnation,
-	// SelfDestruct and Balance, nothing else, so a pre-block contract reaches here
-	// with neither cell. Both fall back to the same floor, so one scan answers
-	// for both; it is the unbounded one, and running it twice would double the
-	// cost on an account carrying a long SelfDestruct history.
-	preBlockWiped := false
-	if nonceCell == nil || codeHashCell == nil {
-		_, preBlockWiped = selfDestructWipesLocked(e, NoncePath, -1, txIdx)
-	}
-
-	// A nonce cell below the destruct is still what the block commits: a
-	// non-CREATE resurrect inherits the pre-destruct account fields through the
-	// version map, and writeset_normalize.go overrides that only for a CREATE.
-	if nonceCell != nil {
-		account.Nonce = nonceCell.Value
-	} else if preBlockWiped {
+	// Nonce and CodeHash are the two the destruct erases without leaving a cell of
+	// its own — SELFDESTRUCT records Incarnation, SelfDestruct and Balance, and
+	// nothing else — so each scans from its own cell, or from before the block
+	// when it has none.
+	nonceIdx, nonceCell := floorCell(e.Nonce, txIdx)
+	if _, wiped := selfDestructWipesLocked(e, NoncePath, nonceIdx, txIdx); wiped {
 		account.Nonce = 0
+	} else if nonceCell != nil {
+		account.Nonce = nonceCell.Value
 	}
 	if _, cell := floorCell(e.Incarnation, txIdx); cell != nil {
 		account.Incarnation = cell.Value
 	}
-	if codeHashCell != nil {
-		if _, wiped := selfDestructWipesLocked(e, CodeHashPath, codeHashIdx, txIdx); wiped {
-			account.CodeHash = accounts.EmptyCodeHash
-		} else {
-			account.CodeHash = codeHashCell.Value
-		}
-	} else if preBlockWiped {
+	codeHashIdx, codeHashCell := floorCell(e.CodeHash, txIdx)
+	if _, wiped := selfDestructWipesLocked(e, CodeHashPath, codeHashIdx, txIdx); wiped {
 		account.CodeHash = accounts.EmptyCodeHash
+	} else if codeHashCell != nil {
+		account.CodeHash = codeHashCell.Value
 	}
 }
 
@@ -688,10 +673,12 @@ func (vm *VersionMap) wipedByInRangeDestruct(addr accounts.Address, path Account
 	return selfDestructWipesLocked(e, path, floor, txIndex)
 }
 
-// storageWrittenAfter reports whether any of addr's slots holds a cell above at
-// that is visible at txIdx. HasStorage has no key to floor on, so this is what
-// separates a slot the destruct erased from one rewritten since.
-func (vm *VersionMap) storageWrittenAfter(addr accounts.Address, at, txIdx int) bool {
+// hasLiveStorage reports whether addr holds a non-zero slot visible at txIdx that
+// a destruct at wipedAt did not erase. HasStorage takes no key, so it cannot
+// floor on a cell the way the slot readers do and has to weigh the values
+// themselves: a cell position alone says nothing, since a zero write above the
+// destruct leaves the account with no storage just as an erased slot does.
+func (vm *VersionMap) hasLiveStorage(addr accounts.Address, wipedAt int, wiped bool, txIdx int) bool {
 	e := vm.load(addr)
 	if e == nil {
 		return false
@@ -699,12 +686,12 @@ func (vm *VersionMap) storageWrittenAfter(addr accounts.Address, at, txIdx int) 
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	for _, cells := range e.Storage {
-		above := false
-		cells.Descend(txIdx-1, func(k int, _ *WriteCell[uint256.Int]) bool {
-			above = k > at
+		live := false
+		cells.Descend(txIdx-1, func(k int, v *WriteCell[uint256.Int]) bool {
+			live = (!wiped || k > wipedAt) && !v.Value.IsZero()
 			return false
 		})
-		if above {
+		if live {
 			return true
 		}
 	}
@@ -712,11 +699,10 @@ func (vm *VersionMap) storageWrittenAfter(addr accounts.Address, at, txIdx int) 
 }
 
 // selfDestructWipesLocked is the wipe rule itself, for callers already holding
-// e.mu, and reports the TxIndex the wiping destruct sits at. An Estimate cell
-// counts as a destruct whatever its value: MarkEstimate only flips the flag, so
-// the value left there belongs to the incarnation being re-executed. These
-// readers serve Estimate values and record no read, so skipping an Estimate
-// destruct would hand back pre-destruct data with nothing to catch it later.
+// e.mu, and reports the TxIndex the wiping destruct sits at. The flag is not
+// consulted, only the value: MarkEstimate leaves the value of the incarnation
+// being re-executed, so an Estimate destruct still wipes, while an Estimate
+// SelfDestruct=false — which every newly created account writes — is not one.
 func selfDestructWipesLocked(e *AddressEntry, path AccountPath, floor, txIdx int) (int, bool) {
 	if e.SelfDestruct == nil {
 		return 0, false
@@ -727,7 +713,7 @@ func selfDestructWipesLocked(e *AddressEntry, path AccountPath, floor, txIdx int
 		if k < lo {
 			return false
 		}
-		if v.flag == FlagEstimate || v.Value {
+		if v.Value {
 			at, found = k, true
 			return false
 		}
