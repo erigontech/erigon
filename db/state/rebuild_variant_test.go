@@ -241,6 +241,45 @@ func TestRebuildCommitmentFilesBinTargetOnHexDatadir(t *testing.T) {
 	require.Equal(t, hexRoot, rebuildVariantRestoredRoot(t, hexDB, hexAgg, commitment.VariantHexPatriciaTrie))
 }
 
+// The commitment files a rebuild left behind, by name and content: a resumed run
+// must neither rewrite nor add to them.
+func rebuildVariantCommitmentFiles(t *testing.T, dirs datadir.Dirs) map[string]string {
+	t.Helper()
+	paths, err := dir.ListFiles(dirs.SnapDomain)
+	require.NoError(t, err)
+	got := map[string]string{}
+	for _, p := range paths {
+		name := filepath.Base(p)
+		if !strings.Contains(name, kv.CommitmentDomain.String()) {
+			continue
+		}
+		data, err := os.ReadFile(p)
+		require.NoError(t, err)
+		got[name] = string(data)
+	}
+	return got
+}
+
+// A resume takes any commitment file covering a range as that range done. The
+// skip reads the files, not the scheme that wrote them, so a bin target resumes
+// over its own output like a hex one does.
+func TestRebuildCommitmentFilesBinTargetResumeSkipsCoveredRanges(t *testing.T) {
+	db, _, dirs := rebuildVariantDatadir(t)
+	target := state.WithRebuildTarget(state.RebuildTarget{Variant: commitment.VariantBinPatriciaTrie})
+
+	_, report, err := state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), false, target)
+	require.NoError(t, err)
+	require.NotEmpty(t, report.Ranges)
+
+	built := rebuildVariantCommitmentFiles(t, dirs)
+	require.NotEmpty(t, built)
+
+	_, resumed, err := state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), false, target)
+	require.NoError(t, err)
+	require.Empty(t, resumed.Ranges, "every range is covered, so the resumed run walks none of them")
+	require.Equal(t, built, rebuildVariantCommitmentFiles(t, dirs))
+}
+
 func TestRebuildCommitmentFilesDefaultTargetIsProcessVariant(t *testing.T) {
 	defaultDB, _, _ := rebuildVariantDatadir(t)
 	defaultRoot, _, err := state.RebuildCommitmentFiles(t.Context(), defaultDB, &rawdbv3.TxNums, log.New(), false)

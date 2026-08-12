@@ -332,21 +332,50 @@ each fail a test.
 
 ### Task 7: [Final] Verify acceptance criteria
 
-- [ ] a bin rebuild runs against a hex-configured datadir and produces usable bin commitment files
-- [ ] the source datadir is unmodified: its commitment files and `erigondb.toml` are byte-identical
-      before and after
-- [ ] the output directory alone is sufficient to start a node with `--experimental.bin-commitment`
-- [ ] the rebuild leaves process-global `statecfg` unmodified
-- [ ] a bin rebuild with code-bearing accounts reproduces the forward root (Task 3 oracle)
-- [ ] the multi-shard shared-code case passes, proving the seen-set is correctly scoped
-- [ ] the hex rebuild path is unchanged
-- [ ] `--squeeze` with a bin target errors before any rebuild work starts
-- [ ] `--resume` still skips covered ranges for a bin target
-- [ ] chunkification count and flush sort size are proportional to unique code hashes, not accounts
+- [x] a bin rebuild runs against a hex-configured datadir and produces usable bin commitment files
+      — `TestRebuildCommitmentFilesBinTargetOnHexDatadir`, which restores the root back out of the
+      files it wrote rather than trusting the return value
+- [x] the source datadir is unmodified: its commitment files and `erigondb.toml` are byte-identical
+      before and after — `TestStageRebuildOutputLeavesSourceIntact` compares a content map of the
+      whole `Snap` tree, which is where `erigondb.toml` lives
+- [x] the output directory alone is sufficient to start a node with `--experimental.bin-commitment`
+      — `TestRebuildOutputStartsUnderTheBinFlag`
+- [x] the rebuild leaves process-global `statecfg` unmodified —
+      `rebuildVariantProcessStateUntouched`, `TestStageRebuildOutputLeavesProcessConfigUnmodified`
+- [x] a bin rebuild with code-bearing accounts reproduces the forward root (Task 3 oracle)
+      — the four `TestPBinRebuildCode*` / `TestPBinRebuild*Code*` cases
+- [x] the multi-shard shared-code case passes, proving the seen-set is correctly scoped
+      — `TestPBinRebuildSharedCodeAcrossShards`
+- [x] the hex rebuild path is unchanged — `TestRebuildCommitmentFilesDefaultTargetIsProcessVariant`
+- [x] `--squeeze` with a bin target errors before any rebuild work starts
+      — `TestCommitmentRebuildRefusesSqueezeBeforeAnyWork`, ordered by a nil db
+- [x] `--resume` still skips covered ranges for a bin target
+      — `TestRebuildCommitmentFilesBinTargetResumeSkipsCoveredRanges`
+- [x] chunkification count and flush sort size are proportional to unique code hashes, not accounts
       (code-domain reads remain per account by design — see Context)
-- [ ] witness output is byte-identical to pre-dedup
-- [ ] run: `go test ./db/state/... ./execution/commitment/... ./cmd/integration/...`
-- [ ] run `go build ./...` and `gofmt -l` over touched packages
+      — `TestPBinSharedCodeIsChunkedOncePerHash` pins reads, queued chunks and the shard counts
+- [x] witness output is byte-identical to pre-dedup — `TestPBinWitnessPassChunksEveryAccount`
+- [x] run: `go test ./db/state/... ./execution/commitment/... ./cmd/integration/...`
+- [x] run `go build ./...` and `gofmt -l` over touched packages
+
+Landed shape: this pass was verification, not implementation — nine of the eleven criteria were
+already pinned by a Task 1-6 test, so the work was mapping each one to the assertion that would fail
+if it regressed, and writing the two that nothing covered.
+
+The first gap was the startability of the output. Task 2 asserted what `finalize()` puts in the toml,
+which is not the same claim as the settings resolver accepting that directory: the check that would
+refuse it lives in `reconcileTrieVariant`, and nothing ran it. The new test sets the bin flag and
+hash, resolves the output, and resolves the source for contrast — the source must be refused, since
+being refused there is the reason a separate output directory exists at all.
+
+The second was resume under a bin target. The skip is a comparison against the commitment txNum in
+files, so it never consults the scheme, but "it does not consult the scheme" is exactly the kind of
+claim that a later change to the loop breaks silently. The test rebuilds twice over one datadir and
+asserts the second run reports no ranges and leaves the commitment files byte-identical.
+
+Both were mutation-checked, since a verification test that passes on first run has proven nothing
+yet: disabling the range skip fails the resume test, and having `finalize()` omit the variant fails
+the startability test with the refusal it exists to prevent.
 
 ## Post-Completion
 

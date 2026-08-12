@@ -225,6 +225,32 @@ func TestRebuildOutputSettingsHexTargetCarriesSourceRefs(t *testing.T) {
 	require.True(t, final.RefsInCommitmentBranches())
 }
 
+// The output directory on its own is what a node is started on, so the settings
+// resolver must accept it under the bin flag that the source datadir refuses.
+func TestRebuildOutputStartsUnderTheBinFlag(t *testing.T) {
+	src := sourceDatadirFixture(t)
+	out, err := stageRebuildOutput(src, filepath.Join(t.TempDir(), "out"), binTarget(t), false, log.New())
+	require.NoError(t, err)
+	require.NoError(t, out.finalize())
+
+	bin, hash, suite := statecfg.ExperimentalBinCommitment, statecfg.BinCommitmentHash, commitment.PBinHashSuiteName()
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment, statecfg.BinCommitmentHash = bin, hash
+		require.NoError(t, commitment.SetPBinHashSuite(suite))
+	})
+	statecfg.ExperimentalBinCommitment = true
+	statecfg.BinCommitmentHash = commitment.PBinHashBlake3
+
+	settings, err := dbstate.ResolveErigonDBSettings(out.dirs, log.New(), true)
+	require.NoError(t, err)
+	require.Equal(t, dbstate.TrieVariantBin, settings.TrieVariantName())
+	require.Equal(t, commitment.PBinHashBlake3, settings.TrieHashName())
+	require.Equal(t, commitment.PBinHashBlake3, commitment.PBinHashSuiteName())
+
+	_, err = dbstate.ResolveErigonDBSettings(src, log.New(), true)
+	require.Error(t, err, "the hex source is what a separate output directory exists to avoid")
+}
+
 func TestStageRebuildOutputLeavesProcessConfigUnmodified(t *testing.T) {
 	src := sourceDatadirFixture(t)
 	bin, hash, suite := statecfg.ExperimentalBinCommitment, statecfg.BinCommitmentHash, commitment.PBinHashSuiteName()
