@@ -83,8 +83,9 @@ func (f FrontierFunc) DomainVisibleEnd(domain kv.Domain) (uint64, bool) { return
 // continuous forward publication keeps the view eligible, while the domain
 // frontier rejects values older than the latest update. A discontinuity also
 // advances the epoch and revokes every previously bound view.
-// During publication, reads remain available but admission-gated view binding
-// and fills are temporarily inert until the complete update batch is installed.
+// During publication, reads remain available. Existing eligible views cannot
+// fill until the complete update batch is installed. A view bound during
+// publication has no frontier and remains fill-inert until explicitly rebound.
 // Snapshot-isolated caching is kvcache's job (node/shards).
 type ReadView struct {
 	c             *StateCache
