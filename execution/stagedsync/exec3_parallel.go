@@ -2072,9 +2072,10 @@ type feeEntry struct {
 	deleted bool
 }
 
-// recordedIn reports whether ws already carries this entry verbatim. A same-
-// version SelfDestruct is only ever this entry's own: a worker's writes are
-// stamped with the pre-validation version, so they cannot match.
+// recordedIn reports whether ws already carries this entry verbatim. Reason
+// fences the balance arm from a worker's own balance write. The deleted arm has
+// no fence: a worker's SELFDESTRUCT carries the same version and reads as
+// recorded, which is harmless because the entry writes that identical delete.
 func (e *feeEntry) recordedIn(ws *state.WriteSet, version state.Version) bool {
 	if e == nil {
 		return true
