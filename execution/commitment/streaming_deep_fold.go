@@ -312,15 +312,22 @@ func newDeferredStorageWorker(ctx context.Context, accountKeyLen int16, cfg Trie
 }
 
 // keyArena copies walk-path nibbles into chunked backing buffers so each
-// collected key gets a stable slice without one allocation per key.
-type keyArena struct{ buf []byte }
+// collected key gets a stable slice without one allocation per key. remaining
+// is the caller's expected key count; without it a subtree far smaller than a
+// chunk still burns a whole chunk, and most subtrees are.
+type keyArena struct {
+	buf       []byte
+	remaining int
+}
 
 const keyArenaChunk = 64 * 1024
 
 func (a *keyArena) copy(hk []byte) []byte {
 	if len(hk) > cap(a.buf)-len(a.buf) {
-		a.buf = make([]byte, 0, max(keyArenaChunk, len(hk)))
+		want := len(hk) * max(a.remaining, 1)
+		a.buf = make([]byte, 0, max(min(want, keyArenaChunk), len(hk)))
 	}
+	a.remaining--
 	start := len(a.buf)
 	a.buf = append(a.buf, hk...)
 	return a.buf[start:len(a.buf):len(a.buf)]
@@ -330,7 +337,7 @@ func (a *keyArena) copy(hk []byte) []byte {
 // nibbles off the reused walk path but leaves plainKey/update aliased.
 func collectSubtreeKeys(node *prefixNode, path []byte) []touchedKey {
 	out := make([]touchedKey, 0, node.subtreeCount)
-	var arena keyArena
+	arena := keyArena{remaining: int(node.subtreeCount)}
 	_ = dfsSubtree(node, path, func(hk, pk []byte, upd *Update) error {
 		out = append(out, touchedKey{hk: arena.copy(hk), pk: pk, upd: upd})
 		return nil
