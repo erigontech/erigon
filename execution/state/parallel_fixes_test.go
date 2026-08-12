@@ -323,33 +323,6 @@ func TestTouchUpdates_MixedBatch(t *testing.T) {
 	assert.Equal(t, uint64(2), updates.Size(), "2 unique keys (addr1 merged, addr2 storage)")
 }
 
-// TestBlockStateCacheWriteAccount_NilCommitted verifies that WriteAccount
-// doesn't panic when the committed cache has a nil account entry.
-// This can happen when PutCommittedAccount stores nil (account doesn't exist).
-func TestBlockStateCacheWriteAccount_NilCommitted(t *testing.T) {
-	cache := NewBlockStateCache()
-
-	addr := accounts.InternAddress([20]byte{0x42})
-
-	// Put a nil committed account (account doesn't exist in pre-block state)
-	cache.PutCommittedAccount(addr, nil)
-
-	// Write a new account — should not panic
-	acc := accounts.NewAccount()
-	acc.Balance = *uint256.NewInt(1000)
-	acc.Nonce = 1
-	enc := accounts.SerialiseV3(&acc)
-
-	assert.NotPanics(t, func() {
-		cache.WriteAccount(addr, enc, 1)
-	}, "WriteAccount should not panic with nil committed account")
-
-	// Verify the write is recorded.
-	current, ok := cache.GetCurrentAccount(addr)
-	assert.True(t, ok, "Should have current account")
-	assert.Equal(t, enc, current, "Current account should match written value")
-}
-
 // TestBlockStateCacheWriteAccountUpdatesCurrent verifies that successive
 // writes update the current view to the latest value (last write wins
 // for read access via GetCurrentAccount). The full per-tx history is
@@ -359,12 +332,9 @@ func TestBlockStateCacheWriteAccountUpdatesCurrent(t *testing.T) {
 
 	addr := accounts.InternAddress([20]byte{0x55})
 
-	// Set up committed account
 	acc := accounts.NewAccount()
 	acc.Balance = *uint256.NewInt(500)
 	acc.Nonce = 3
-	cache.PutCommittedAccount(addr, &acc)
-
 	enc := accounts.SerialiseV3(&acc)
 	cache.WriteAccount(addr, enc, 3)
 

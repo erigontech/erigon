@@ -84,9 +84,8 @@ func TestFinalizeReaderSeesBlockCacheWrite(t *testing.T) {
 		domains.DomainPut(kv.AccountsDomain, tx, addrValue[:], preEnc, preBlockTxNum, nil),
 	)
 
-	// Simulate tx 28's SubBalance landing in the BlockStateCache (and only
-	// the BlockStateCache — applyVersionedWrites never touches sd.mem in the
-	// parallel path).
+	// Simulate tx 28's SubBalance landing in the BlockStateCache current tier
+	// (applyVersionedWrites buffers writes there until the block-end Flush).
 	postTx28Balance := uint256.NewInt(6707)
 	postAcc := &accounts.Account{
 		Nonce:       1,
@@ -97,7 +96,6 @@ func TestFinalizeReaderSeesBlockCacheWrite(t *testing.T) {
 	postEnc := accounts.SerialiseV3(postAcc)
 
 	blockCache := NewBlockStateCache()
-	blockCache.PutCommittedAccount(addr, preAcc)
 	blockCache.WriteAccount(addr, postEnc, 100)
 
 	// Sanity: CurrentCachedReaderV3 (the reader used for non-historic

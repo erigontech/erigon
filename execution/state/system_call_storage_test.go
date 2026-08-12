@@ -106,16 +106,9 @@ func TestSystemCallStoragePropagation_BlockStateCache(t *testing.T) {
 		// Read from cache (empty) → fallthrough to sd.mem
 		val, ok := cache.GetCurrentStorage(addr, slot)
 		if !ok {
-			val, ok = cache.GetCommittedStorage(addr, slot)
-		}
-		if !ok {
 			// Fallthrough to sd.mem (simulates ReaderV3.ReadAccountStorage)
 			val = sdMem[string(composite)]
 			ok = len(val) > 0
-			if ok {
-				// Populate committed cache (like CachedReaderV3 does)
-				cache.PutCommittedStorage(addr, slot, val)
-			}
 		}
 
 		t.Logf("Block %d: read slot4=%x (from %s)", blockIdx, val, func() string {
@@ -172,8 +165,6 @@ func TestBlockStateCacheStorageWriteLog(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x42})
 	slot := accounts.InternKey([32]byte{0x01})
 
-	cache.PutCommittedStorage(addr, slot, []byte{0x01})
-
 	// Write same value — must still produce a writeLog entry so Flush
 	// emits a DomainPut and the commitment touch is recorded.
 	cache.WriteStorage(addr, slot, []byte{0x01}, 7)
@@ -204,10 +195,8 @@ func TestBlockStateCacheWriteLogPerTxNum(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x42})
 	slot := accounts.InternKey([32]byte{0x04})
 
-	oldVal := []byte{0x3f, 0x2f}
 	newVal := []byte{0x7c, 0x1f}
 
-	cache.PutCommittedStorage(addr, slot, oldVal)
 	cache.WriteStorage(addr, slot, newVal, 42)
 
 	require.Len(t, cache.writeLog, 1)
@@ -221,8 +210,4 @@ func TestBlockStateCacheWriteLogPerTxNum(t *testing.T) {
 	val, ok := cache.GetCurrentStorage(addr, slot)
 	require.True(t, ok)
 	assert.Equal(t, newVal, val)
-
-	committed, ok := cache.GetCommittedStorage(addr, slot)
-	require.True(t, ok)
-	assert.Equal(t, oldVal, committed)
 }

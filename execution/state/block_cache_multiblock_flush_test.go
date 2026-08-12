@@ -68,15 +68,9 @@ func TestBlockStateCacheFlushClearsAcrossBlocks(t *testing.T) {
 	// in exec3_parallel.go (one BlockStateCache per blockExecutor/batch).
 	cache := NewBlockStateCache()
 
-	// Block 1: syscall reads slot first (populating committedStorage with
-	// the pre-batch value, empty here), then writes 0x01, then Flush.
-	// The read is what CachedReaderV3.ReadAccountStorage does on first
-	// access — that's the production path that seeds committedStorage.
+	// Block 1: syscall writes 0x01, then Flush.
 	const block1TxNum uint64 = 100
 	domains.SetTxNum(block1TxNum)
-	// Simulate the first read — value is empty (pre-batch slot is zero).
-	// CachedReaderV3 caches this as committed[slot] = nil/empty.
-	cache.PutCommittedStorage(addr, slot, nil)
 	cache.WriteStorage(addr, slot, []byte{0x01}, block1TxNum)
 	require.NoError(t, cache.Flush(domains, tx))
 
@@ -85,11 +79,8 @@ func TestBlockStateCacheFlushClearsAcrossBlocks(t *testing.T) {
 	require.True(t, bytes.Equal(enc1, []byte{0x01}),
 		"after block 1 flush, domain should hold value 0x01, got %x", enc1)
 
-	// Block 2: syscall clears the slot back to 0x00. Prior to the fix the
-	// Flush dedup compared the (nil) cleared value against the stale
-	// `committedStorage[slot]` (still nil from a never-populated entry)
-	// and skipped the delete. After the fix the delete propagates and the
-	// domain no longer returns 0x01.
+	// Block 2: syscall clears the slot back to 0x00; the delete must
+	// propagate through Flush so the domain no longer returns 0x01.
 	const block2TxNum uint64 = 200
 	domains.SetTxNum(block2TxNum)
 	cache.WriteStorage(addr, slot, nil, block2TxNum)
@@ -98,9 +89,7 @@ func TestBlockStateCacheFlushClearsAcrossBlocks(t *testing.T) {
 	enc2, _, err := domains.GetLatest(kv.StorageDomain, tx, composite)
 	require.NoError(t, err)
 	require.Empty(t, enc2,
-		"after block 2 flush, domain should be cleared (value=empty); "+
-			"got %x — this is the 24839762 trie-root race: Flush skipped "+
-			"the delete because committedStorage was never refreshed",
+		"after block 2 flush, domain should be cleared (value=empty); got %x",
 	)
 }
 
@@ -157,7 +146,6 @@ func TestBlockStateCacheFlushPreservesPerTxHistory(t *testing.T) {
 	require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addrVal[:], preEnc, preTxNum, nil))
 
 	cache := NewBlockStateCache()
-	cache.PutCommittedAccount(addr, &preAcc)
 
 	// Tx 3 increments balance to 1100.
 	tx3Acc := accounts.NewAccount()

@@ -987,13 +987,6 @@ func (r *ReaderV3) TracePrefix() string {
 type BlockStateCache struct {
 	mu sync.RWMutex
 
-	// committed holds pre-block state, lazily populated on first read.
-	// These values are returned by CachedReaderV3 for GetCommittedState.
-	// Both are write-once-per-key (an immutable pre-block view), so they are
-	// sync.Maps for lock-free reads off the shared mu hot path.
-	committedAccounts sync.Map // accounts.Address -> *accounts.Account (nil ptr = absent)
-	committedStorage  sync.Map // committedStorageKey -> []byte (nil slice = cached empty slot)
-
 	// current holds the latest state including intra-block writes.
 	// Updated by WriteAccount/WriteStorage. Read by block finalize.
 	// At block boundary, dirty entries are flushed to SharedDomains.
@@ -1019,12 +1012,6 @@ type BlockStateCache struct {
 	// commitment-domain reads) that ask for state at an intra-block
 	// txNum.
 	writeLog []bcWriteOp
-}
-
-// committedStorageKey is the sync.Map key for BlockStateCache.committedStorage.
-type committedStorageKey struct {
-	addr accounts.Address
-	key  accounts.StorageKey
 }
 
 // bcOpKind enumerates the operations recorded in BlockStateCache.writeLog.
@@ -1057,36 +1044,6 @@ func NewBlockStateCache() *BlockStateCache {
 		currentStorage:  make(map[accounts.Address]map[accounts.StorageKey][]byte),
 		currentCode:     make(map[accounts.Address][]byte),
 	}
-}
-
-// --- Committed (read cache) methods ---
-
-// GetCommittedAccount returns the pre-block account, or (nil, false) if not cached.
-func (c *BlockStateCache) GetCommittedAccount(addr accounts.Address) (*accounts.Account, bool) {
-	v, ok := c.committedAccounts.Load(addr)
-	if !ok {
-		return nil, false
-	}
-	return v.(*accounts.Account), true
-}
-
-// PutCommittedAccount caches a pre-block account. Nil = doesn't exist.
-func (c *BlockStateCache) PutCommittedAccount(addr accounts.Address, acc *accounts.Account) {
-	c.committedAccounts.Store(addr, acc)
-}
-
-// GetCommittedStorage returns the pre-block storage value, or (nil, false) if not cached.
-func (c *BlockStateCache) GetCommittedStorage(addr accounts.Address, key accounts.StorageKey) ([]byte, bool) {
-	v, ok := c.committedStorage.Load(committedStorageKey{addr: addr, key: key})
-	if !ok {
-		return nil, false
-	}
-	return v.([]byte), true
-}
-
-// PutCommittedStorage caches a pre-block storage value. nil = empty slot.
-func (c *BlockStateCache) PutCommittedStorage(addr accounts.Address, key accounts.StorageKey, val []byte) {
-	c.committedStorage.Store(committedStorageKey{addr: addr, key: key}, val)
 }
 
 // --- Current (write buffer) methods ---
@@ -1150,70 +1107,46 @@ func (c *BlockStateCache) DeleteAccount(addr accounts.Address, txNum uint64) {
 	c.mu.Unlock()
 }
 
-// GetCurrentAccountDecoded returns the latest account (including intra-block
-// writes), avoiding GetCurrentAccount's re-encode of the committed entry.
+// GetCurrentAccountDecoded returns the intra-block write for addr, if any.
+// A miss (no in-block write) returns (nil, false, nil): the caller falls to the
+// pre-block base (sd.mem → StateCache), which is frozen for the whole block.
 func (c *BlockStateCache) GetCurrentAccountDecoded(addr accounts.Address) (*accounts.Account, bool, error) {
 	c.mu.RLock()
 	enc, written := c.currentAccounts[addr]
 	c.mu.RUnlock()
-	if written {
-		if enc == nil {
-			return nil, true, nil
-		}
-		acc := new(accounts.Account)
-		if err := accounts.DeserialiseV3(acc, enc); err != nil {
-			return nil, true, err
-		}
-		return acc, true, nil
+	if !written {
+		return nil, false, nil
 	}
-	if acc, ok := c.GetCommittedAccount(addr); ok {
-		if acc == nil {
-			return nil, true, nil
-		}
-		result := *acc
-		return &result, true, nil
+	if enc == nil {
+		return nil, true, nil
 	}
-	return nil, false, nil
+	acc := new(accounts.Account)
+	if err := accounts.DeserialiseV3(acc, enc); err != nil {
+		return nil, true, err
+	}
+	return acc, true, nil
 }
 
-// GetCurrentAccount returns the latest account blob (including intra-block writes).
-// Falls back to committed state if no write exists. Returns (nil, false) if not cached.
+// GetCurrentAccount returns the intra-block account write for addr, if any.
+// A miss returns (nil, false): the caller falls to the pre-block base.
 func (c *BlockStateCache) GetCurrentAccount(addr accounts.Address) ([]byte, bool) {
 	c.mu.RLock()
+	defer c.mu.RUnlock()
 	if enc, ok := c.currentAccounts[addr]; ok {
-		c.mu.RUnlock()
 		return enc, true
-	}
-	c.mu.RUnlock()
-	// The committed fallback runs after releasing mu, so the two reads are not one
-	// point-in-time snapshot. That is safe because committedAccounts is a
-	// write-once immutable pre-block view (a sync.Map for lock-free reads): a
-	// concurrent WriteAccount can only add a currentAccounts entry we'd miss —
-	// which the RLock-then-fallback ordering can't prevent regardless — never tear
-	// a committed value.
-	if v, ok := c.committedAccounts.Load(addr); ok {
-		acc := v.(*accounts.Account)
-		if acc == nil {
-			return nil, true
-		}
-		return accounts.SerialiseV3(acc), true
 	}
 	return nil, false
 }
 
-// GetCurrentStorage returns the latest storage value (including intra-block writes).
-// Falls back to committed state if no write exists. Returns (nil, false) if not cached.
+// GetCurrentStorage returns the intra-block storage write for addr/key, if any.
+// A miss returns (nil, false): the caller falls to the pre-block base.
 func (c *BlockStateCache) GetCurrentStorage(addr accounts.Address, key accounts.StorageKey) ([]byte, bool) {
 	c.mu.RLock()
+	defer c.mu.RUnlock()
 	if slots, ok := c.currentStorage[addr]; ok {
 		if val, ok := slots[key]; ok {
-			c.mu.RUnlock()
 			return val, true
 		}
-	}
-	c.mu.RUnlock()
-	if v, ok := c.committedStorage.Load(committedStorageKey{addr: addr, key: key}); ok {
-		return v.([]byte), true
 	}
 	return nil, false
 }
@@ -1296,7 +1229,7 @@ func (c *BlockStateCache) Flush(domains *execctx.SharedDomains, roTx kv.Temporal
 type CachedReaderV3 struct {
 	*ReaderV3
 	blockCache  *BlockStateCache
-	readCurrent bool // when true, read from currentAccounts (post-TX) instead of committedAccounts (pre-block)
+	readCurrent bool // when true, read the current tier (post-TX writes) before the pre-block base
 }
 
 func NewCachedReaderV3(getter kv.TemporalGetter, blockCache *BlockStateCache) *CachedReaderV3 {
@@ -1323,39 +1256,18 @@ func (r *CachedReaderV3) SetBlockStateCache(cache *BlockStateCache) {
 }
 
 func (r *CachedReaderV3) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
-	if r.blockCache != nil {
-		if r.readCurrent {
-			// Sees accumulated per-TX writes.
-			acc, ok, err := r.blockCache.GetCurrentAccountDecoded(address)
-			if err != nil {
-				return nil, err
-			}
-			if ok {
-				return acc, nil
-			}
-		} else {
-			// Read from committed cache — stable pre-block view.
-			if acc, ok := r.blockCache.GetCommittedAccount(address); ok {
-				if acc == nil {
-					return nil, nil
-				}
-				result := *acc
-				return &result, nil
-			}
+	if r.blockCache != nil && r.readCurrent {
+		// Sees accumulated per-TX writes; a miss falls to the pre-block base below.
+		acc, ok, err := r.blockCache.GetCurrentAccountDecoded(address)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			return acc, nil
 		}
 	}
-	acc, err := r.ReaderV3.ReadAccountData(address)
-	if err != nil {
-		return nil, err
-	}
-	if r.blockCache != nil {
-		r.blockCache.PutCommittedAccount(address, acc)
-	}
-	if acc != nil {
-		result := *acc
-		return &result, nil
-	}
-	return nil, nil
+	// Pre-block base (frozen for the whole block): sd.mem → StateCache → files.
+	return r.ReaderV3.ReadAccountData(address)
 }
 
 func (r *CachedReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
@@ -1377,17 +1289,8 @@ func (r *CachedReaderV3) ReadAccountCodeSize(address accounts.Address) (int, err
 }
 
 func (r *CachedReaderV3) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
-	if r.blockCache != nil {
-		if r.readCurrent {
-			if val, ok := r.blockCache.GetCurrentStorage(address, key); ok {
-				var v uint256.Int
-				if len(val) > 0 {
-					v.SetBytes(val)
-				}
-				return v, len(val) > 0, nil
-			}
-		}
-		if val, ok := r.blockCache.GetCommittedStorage(address, key); ok {
+	if r.blockCache != nil && r.readCurrent {
+		if val, ok := r.blockCache.GetCurrentStorage(address, key); ok {
 			var v uint256.Int
 			if len(val) > 0 {
 				v.SetBytes(val)
@@ -1395,18 +1298,8 @@ func (r *CachedReaderV3) ReadAccountStorage(address accounts.Address, key accoun
 			return v, len(val) > 0, nil
 		}
 	}
-	v, ok, err := r.ReaderV3.ReadAccountStorage(address, key)
-	if err != nil {
-		return v, ok, err
-	}
-	if r.blockCache != nil {
-		if ok {
-			r.blockCache.PutCommittedStorage(address, key, v.Bytes())
-		} else {
-			r.blockCache.PutCommittedStorage(address, key, nil)
-		}
-	}
-	return v, ok, nil
+	// Pre-block base (frozen for the whole block): sd.mem → StateCache → files.
+	return r.ReaderV3.ReadAccountStorage(address, key)
 }
 
 func (r *ReaderV3) HasStorage(address accounts.Address) (bool, error) {

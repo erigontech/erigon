@@ -57,11 +57,6 @@ func TestStateReader_ReadMethods_Allocs(t *testing.T) {
 	key := accounts.InternKey(common.Hash{0x22})
 	hr := NewHistoryReaderV3(histMockTx{val: accEnc}, 0)
 
-	cache := NewBlockStateCache()
-	cache.PutCommittedStorage(addr, key, make([]byte, 32))
-	cache.PutCommittedAccount(addr, &acc)
-	cr := NewCachedReaderV3(fixedGetter{val: make([]byte, 32)}, cache)
-
 	for _, tc := range []struct {
 		name string
 		want float64
@@ -81,11 +76,6 @@ func TestStateReader_ReadMethods_Allocs(t *testing.T) {
 		{"HistoryReaderV3.ReadAccountData", 1, func() { _, _ = hr.ReadAccountData(addr) }},                 // 1: returns *accounts.Account
 		{"HistoryReaderV3.ReadAccountDataForDebug", 1, func() { _, _ = hr.ReadAccountDataForDebug(addr) }}, // 1: returns *accounts.Account
 
-		{"CachedReaderV3.ReadAccountStorage (cache hit)", 0, func() { _, _, _ = cr.ReadAccountStorage(addr, key) }},
-		{"CachedReaderV3.ReadAccountData (cache hit)", 1, func() { _, _ = cr.ReadAccountData(addr) }}, // 1: returns *accounts.Account
-		{"CachedReaderV3.ReadAccountCode", 0, func() { _, _ = cr.ReadAccountCode(addr) }},
-		{"CachedReaderV3.ReadAccountCodeSize", 0, func() { _, _ = cr.ReadAccountCodeSize(addr) }},
-		{"CachedReaderV3.HasStorage", 0, func() { _, _ = cr.HasStorage(addr) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			allocs := testing.AllocsPerRun(100, tc.fn)
@@ -103,32 +93,13 @@ func cacheReadTestAccount() *accounts.Account {
 	return &acc
 }
 
-func TestCachedReaderV3_CurrentReadsCommittedWhenUnwritten(t *testing.T) {
-	t.Parallel()
-
-	addr := accounts.InternAddress(common.HexToAddress("0xc0ffee"))
-	want := cacheReadTestAccount()
-
-	cache := NewBlockStateCache()
-	cache.PutCommittedAccount(addr, want)
-	got, err := NewCurrentCachedReaderV3(nil, cache).ReadAccountData(addr)
-	require.NoError(t, err)
-	require.NotNil(t, got)
-	require.Equal(t, want.Nonce, got.Nonce)
-	require.Equal(t, want.Balance, got.Balance)
-	require.Equal(t, want.Incarnation, got.Incarnation)
-	require.Equal(t, want.CodeHash, got.CodeHash)
-	require.NotSame(t, want, got, "the caller must not be able to mutate the cached account")
-}
-
-// A write this block shadows the committed view, and a nil write means the
-// account was destroyed — neither may fall through to the committed entry.
+// A block write is seen by the reader; a nil write means the account was
+// destroyed this block and the reader returns nil.
 func TestCachedReaderV3_CurrentPrefersBlockWrite(t *testing.T) {
 	t.Parallel()
 
 	addr := accounts.InternAddress(common.HexToAddress("0xc0ffee"))
 	cache := NewBlockStateCache()
-	cache.PutCommittedAccount(addr, cacheReadTestAccount())
 
 	written := cacheReadTestAccount()
 	written.Nonce = 43
@@ -144,36 +115,11 @@ func TestCachedReaderV3_CurrentPrefersBlockWrite(t *testing.T) {
 	require.Nil(t, got)
 }
 
-func TestCachedReaderV3_CurrentReturnsNilForCommittedAbsence(t *testing.T) {
-	t.Parallel()
-
-	addr := accounts.InternAddress(common.HexToAddress("0xdead"))
-	cache := NewBlockStateCache()
-	cache.PutCommittedAccount(addr, nil)
-	got, err := NewCurrentCachedReaderV3(nil, cache).ReadAccountData(addr)
-	require.NoError(t, err)
-	require.Nil(t, got)
-}
-
 // BenchmarkCachedReaderAccountRead prices one apply-loop account read that hits
 // the block state cache, on each of its two paths.
 func BenchmarkCachedReaderAccountRead(b *testing.B) {
 	addr := accounts.InternAddress(common.HexToAddress("0xc0ffee"))
 	acc := cacheReadTestAccount()
-
-	b.Run("committed", func(b *testing.B) {
-		cache := NewBlockStateCache()
-		cache.PutCommittedAccount(addr, acc)
-		r := NewCurrentCachedReaderV3(nil, cache)
-		b.ReportAllocs()
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			got, err := r.ReadAccountData(addr)
-			if err != nil || got == nil {
-				b.Fatal(err)
-			}
-		}
-	})
 
 	b.Run("written", func(b *testing.B) {
 		cache := NewBlockStateCache()
