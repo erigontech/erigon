@@ -32,7 +32,7 @@ func TestNewWorkersPoolForegroundReturnsWait(t *testing.T) {
 	t.Cleanup(in.Release)
 
 	_, _, _, clear, wait, err := NewWorkersPool(
-		context.Background(), nil, nil, false, nil,
+		context.Background(), WorkerFaults{}, nil, false, nil,
 		nil, nil, nil, in, nil, chain.AllProtocolChanges, nil,
 		nil, 1, NewWorkerMetrics(), datadir.Dirs{}, log.New(),
 	)

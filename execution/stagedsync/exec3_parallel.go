@@ -1796,14 +1796,17 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, func(erro
 	workersCtx, cancelWorkers := context.WithCancel(execLoopCtx)
 	pe.cancelWorkers = cancelWorkers
 
-	var workerFault func() error
+	var workerFaults exec.WorkerFaults
 	if pe.chaosMonkeyEnabled() {
-		workerFault = chaos_monkey.ThrowWorkerError
+		workerFaults = exec.WorkerFaults{
+			RunStart: chaos_monkey.ThrowWorkerError,
+			TaskBody: chaos_monkey.TaskPanic,
+		}
 	}
 
 	var err error
 	pe.execWorkers, _, pe.rws, pe.stopWorkers, pe.waitWorkers, err = exec.NewWorkersPool(
-		workersCtx, workerFault, nil, true, pe.cfg.db, nil, nil, nil, pe.in,
+		workersCtx, workerFaults, nil, true, pe.cfg.db, nil, nil, nil, pe.in,
 		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine,
 		pe.workerCount+1, pe.taskExecMetrics, pe.cfg.dirs, pe.logger)
 
@@ -2646,6 +2649,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	tx := task.index
 	be.results[tx] = &execResult{TxResult: res}
 	if res.Err != nil {
+		if res.Panicked {
+			// A task panic is an executor fault, not a statement about the block —
+			// surface it as an operational error, never as a verdict.
+			return nil, fmt.Errorf("block=%d txIdx=%d: %w", be.number(), res.Version().TxIndex, res.Err)
+		}
 		if execErr, ok := res.Err.(protocol.ErrExecAbortError); ok {
 			if res.Version().Incarnation > len(be.tasks) {
 				// Parallel scheduler exhausted retries for this tx. Surface

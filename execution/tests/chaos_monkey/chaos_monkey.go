@@ -62,6 +62,7 @@ func (a *armedError) throw() error {
 var (
 	preExecErr     armedError
 	workerErr      armedError
+	taskFault      armedError
 	execLoopFault  armedError
 	applyLoopFault armedError
 )
@@ -94,6 +95,18 @@ func ArmExecLoopPanic(err error) (disarm func()) {
 // ExecLoopPanic panics with the armed fault, if any.
 func ExecLoopPanic() {
 	if err := execLoopFault.throw(); err != nil {
+		panic(err)
+	}
+}
+
+// ArmTaskPanic makes TaskPanic panic with err until disarm runs.
+func ArmTaskPanic(err error) (disarm func()) {
+	return taskFault.arm(err)
+}
+
+// TaskPanic panics with the armed fault, if any.
+func TaskPanic() {
+	if err := taskFault.throw(); err != nil {
 		panic(err)
 	}
 }

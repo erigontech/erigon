@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
@@ -252,4 +253,25 @@ func TestParallelExec_ExecLoopPanic_SurfacesInsteadOfRetrying(t *testing.T) {
 	var exhausted *stagedsync.ErrLoopExhausted
 	require.False(t, errors.As(err, &exhausted),
 		"exec-loop panic classified as ErrLoopExhausted → runStage retries forever with zero progress")
+}
+
+// A panic inside a worker task is an executor fault, never a block verdict: it
+// must surface as an operational error instead of marking the block INVALID.
+func TestParallelExec_TaskPanic_SurfacesAsOperationalError(t *testing.T) {
+	m, b2 := tipWithUnexecutedBlock2(t)
+
+	chaosErr := errors.New("chaos monkey: simulated task panic")
+	disarm := chaos_monkey.ArmTaskPanic(chaosErr)
+	t.Cleanup(disarm)
+
+	err := runParallelExecV3(t, m, b2.NumberU64())
+
+	require.Error(t, err)
+	require.NotErrorIs(t, err, rules.ErrInvalidBlock,
+		"a task panic must never become a bad-block verdict")
+	require.ErrorContains(t, err, "exec task panic")
+	require.ErrorContains(t, err, chaosErr.Error())
+	var exhausted *stagedsync.ErrLoopExhausted
+	require.False(t, errors.As(err, &exhausted),
+		"task panic classified as ErrLoopExhausted → runStage retries forever with zero progress")
 }
