@@ -34,6 +34,14 @@ type Frontier interface {
 	DomainVisibleEnd(domain kv.Domain) (visibleEnd uint64, ok bool)
 }
 
+// stateVersionFrontier identifies the durable state snapshot behind a
+// frontier. A StateCache initialized with a state version admits fills only
+// from frontiers that report the same version.
+type stateVersionFrontier interface {
+	Frontier
+	StateVersion() (stateVersion uint64, ok bool)
+}
+
 // FrontierFunc adapts a function to the Frontier interface.
 type FrontierFunc func(domain kv.Domain) (visibleEnd uint64, ok bool)
 
@@ -41,8 +49,9 @@ func (f FrontierFunc) DomainVisibleEnd(domain kv.Domain) (uint64, bool) { return
 
 // ReadView is the read-and-fill handle of a StateCache, bound to one
 // transaction's read view: values filled through it are vouched for by that
-// view's frontier alone, and it must not outlive the transaction. A nil
-// frontier disables the admission-gated fills (Fill, SeedAddrCodeHash);
+// view's frontier and durable state version, and it must not outlive the
+// transaction. A nil frontier disables the admission-gated fills
+// (Fill, SeedAddrCodeHash);
 // FillCodeSize is content-addressed and works on any view. The zero value is
 // inert: reads miss, fills no-op.
 //
@@ -57,9 +66,11 @@ func (f FrontierFunc) DomainVisibleEnd(domain kv.Domain) (uint64, bool) { return
 // fork.
 // Snapshot-isolated caching is kvcache's job (node/shards).
 type ReadView struct {
-	c             *StateCache
-	frontier      Frontier
-	readViewEpoch uint64
+	c                 *StateCache
+	frontier          Frontier
+	stateVersion      uint64
+	stateVersionKnown bool
+	readViewEpoch     uint64
 }
 
 // View creates a ReadView vouched for by f. A nil f disables admission-gated fills.
@@ -67,12 +78,18 @@ func (c *StateCache) View(f Frontier) ReadView {
 	if c == nil {
 		return ReadView{}
 	}
-	return ReadView{c: c, frontier: f, readViewEpoch: c.readViewEpoch.Load()}
+	v := ReadView{c: c, readViewEpoch: c.readViewEpoch.Load()}
+	return v.WithFrontier(f)
 }
 
-// WithFrontier binds f while preserving the original view's read-view epoch.
+// WithFrontier binds f and its optional state version while preserving the
+// original view's read-view epoch.
 func (v ReadView) WithFrontier(f Frontier) ReadView {
 	v.frontier = f
+	v.stateVersion, v.stateVersionKnown = 0, false
+	if versioned, ok := f.(stateVersionFrontier); ok {
+		v.stateVersion, v.stateVersionKnown = versioned.StateVersion()
+	}
 	return v
 }
 
@@ -144,10 +161,12 @@ func (v ReadView) Fill(domain kv.Domain, key []byte, value []byte, readTxNum uin
 		if !ok {
 			return
 		}
-		v.c.fillCodeIfFresh(key, value, readTxNum, visibleEnd, accountsEnd, v.readViewEpoch)
+		v.c.fillCodeIfFresh(key, value, readTxNum, visibleEnd, accountsEnd,
+			v.stateVersion, v.stateVersionKnown, v.readViewEpoch)
 		return
 	}
-	v.c.fillIfFresh(domain, key, value, readTxNum, visibleEnd, v.readViewEpoch)
+	v.c.fillIfFresh(domain, key, value, readTxNum, visibleEnd,
+		v.stateVersion, v.stateVersionKnown, v.readViewEpoch)
 }
 
 // SeedAddrCodeHash offers an addr → codeHash mapping derived from an account
@@ -161,7 +180,8 @@ func (v ReadView) SeedAddrCodeHash(addr []byte, h [32]byte, txNum uint64) {
 	if !ok {
 		return
 	}
-	v.c.seedAddrCodeHash(addr, h, txNum, visibleEnd, v.readViewEpoch)
+	v.c.seedAddrCodeHash(addr, h, txNum, visibleEnd,
+		v.stateVersion, v.stateVersionKnown, v.readViewEpoch)
 }
 
 // FillCodeSize records the code length for codeHash. Content-addressed and
@@ -181,8 +201,46 @@ type Applier struct {
 	c *StateCache
 }
 
+// StateUpdate is one committed domain mutation published to StateCache.
+type StateUpdate struct {
+	Domain kv.Domain
+	Key    []byte
+	Value  []byte
+	TxNum  uint64
+}
+
 // Applier creates the writer handle.
 func (c *StateCache) Applier() Applier { return Applier{c: c} }
+
+// Initialize establishes the first durable version or moves the cache forward
+// when a newer read view proves that a publication was missed. Moving forward
+// without a complete delta clears entries; an equal or older view does nothing.
+func (a Applier) Initialize(stateVersion uint64) {
+	if a.c == nil {
+		return
+	}
+	a.c.initialize(stateVersion)
+}
+
+// Publish applies one successful commit and advances the cache from its source
+// state version to the committed state version in one critical section. Source
+// continuity lets unchanged entries survive even if one commit advances the
+// durable counter more than once.
+func (a Applier) Publish(sourceStateVersion, committedStateVersion uint64, updates []StateUpdate) {
+	if a.c == nil {
+		return
+	}
+	a.c.publish(sourceStateVersion, committedStateVersion, 0, false, updates)
+}
+
+// PublishUnwind republishes an unwind at commit so fills admitted after the
+// staged invalidation cannot survive into the committed state version.
+func (a Applier) PublishUnwind(sourceStateVersion, committedStateVersion, unwindToTxNum uint64, updates []StateUpdate) {
+	if a.c == nil {
+		return
+	}
+	a.c.publish(sourceStateVersion, committedStateVersion, unwindToTxNum, true, updates)
+}
 
 // Apply makes a committed domain update authoritative for subsequent fills:
 // it advances the domain's applied frontier and mutates the cache in the same

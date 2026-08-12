@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -81,16 +82,31 @@ func frontierAt(end uint64) cache.Frontier {
 	return cache.FrontierFunc(func(kv.Domain) (uint64, bool) { return end, true })
 }
 
+type stateVersionFrontier struct {
+	cache.Frontier
+	stateVersion uint64
+}
+
+func (f stateVersionFrontier) StateVersion() (uint64, bool) { return f.stateVersion, true }
+
+func frontierAtStateVersion(t *testing.T, tx kv.Tx, frontier cache.Frontier) cache.Frontier {
+	t.Helper()
+	stateVersion, err := rawdb.GetStateVersion(tx)
+	require.NoError(t, err)
+	return stateVersionFrontier{Frontier: frontier, stateVersion: stateVersion}
+}
+
 // seed places an entry with an exact txNum stamp through the public fill API
 // without moving the applied frontier. A positive passes admission at any
 // applied end; a negative is stamped frontier-1 by the fill path, so it must
 // be seeded while the applied end is at most txNum+1.
-func seed(sc *cache.StateCache, domain kv.Domain, k, v []byte, txNum uint64) {
+func seed(t *testing.T, sc *cache.StateCache, tx kv.Tx, domain kv.Domain, k, v []byte, txNum uint64) {
+	t.Helper()
 	end := uint64(math.MaxUint64)
 	if len(v) == 0 {
 		end = txNum + 1
 	}
-	sc.View(frontierAt(end)).Fill(domain, k, v, txNum)
+	sc.View(frontierAtStateVersion(t, tx, frontierAt(end))).Fill(domain, k, v, txNum)
 }
 
 type visibleEndCountingDebugTx struct {
@@ -186,7 +202,7 @@ func TestAssertStateCache_NoFalsePanicDuringInFlightUnwind(t *testing.T) {
 	sd.Unwind(10, &diffs) // in-flight: mem publishes maxStep=1; MDBX still holds the step-1 row
 	// A live cache entry below the unwind floor: the restored (correct) value,
 	// as a post-unwind fill would insert it.
-	seed(sc, kv.AccountsDomain, key, v1, 5)
+	seed(t, sc, roTx, kv.AccountsDomain, key, v1, 5)
 
 	old := dbg.AssertStateCache
 	dbg.AssertStateCache = true
@@ -242,7 +258,7 @@ func TestAssertStateCache_NoFalsePanicDuringInFlightUnwindStepZero(t *testing.T)
 	sd2.SetStateCacheForTest(sc)
 
 	sd2.Unwind(3, &diffs)
-	seed(sc, kv.AccountsDomain, key, nil, 2)
+	seed(t, sc, roTx, kv.AccountsDomain, key, nil, 2)
 
 	old := dbg.AssertStateCache
 	dbg.AssertStateCache = true
@@ -282,7 +298,7 @@ func TestReadFill_DoesNotClobberLiveEntry(t *testing.T) {
 	// A live (current-epoch) entry above the read bound: the maxStep gate turns
 	// the hit into a miss, so the read falls through to the bounded DB read.
 	v3 := encAccount(3)
-	seed(sc, kv.AccountsDomain, key, v3, 40)
+	seed(t, sc, roTx, kv.AccountsDomain, key, v3, 40)
 
 	v, _, err := sd.GetLatest(kv.AccountsDomain, roTx, key)
 	require.NoError(t, err)

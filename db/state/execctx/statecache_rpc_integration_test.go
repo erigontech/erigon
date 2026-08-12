@@ -96,6 +96,71 @@ func TestEmbeddedRPCCacheViewDoesNotRefillUnwoundAccount(t *testing.T) {
 	require.Equal(t, v1, got)
 }
 
+func TestEmbeddedRPCViewCreatedDuringStagedUnwindDoesNotRefillUnwoundAccount(t *testing.T) {
+	const stepSize = uint64(16)
+	ctx := t.Context()
+	db := newTestDb(t, stepSize)
+	stateCache := newSmallStateCache()
+	t.Cleanup(stateCache.Close)
+	key, v1, v2, diffs := twoStepRows(t, db, stateCache)
+
+	publishedTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer publishedTx.Rollback()
+	publishedDomains, err := execctx.NewSharedDomains(ctx, publishedTx, log.New())
+	require.NoError(t, err)
+	defer publishedDomains.Close()
+	publishedDomains.SetStateCacheForTest(stateCache)
+
+	events := shards.NewEvents()
+	events.PublishOverlay(publishedDomains)
+	rpcCache := &execmodule.Cache{}
+	rpcCache.SetPublishedSD(events.LatestSD)
+
+	unwindTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer unwindTx.Rollback()
+	unwindDomains, err := execctx.NewSharedDomains(ctx, unwindTx, log.New())
+	require.NoError(t, err)
+	unwindDomains.SetStateCacheForTest(stateCache)
+	unwindDomains.Unwind(10, &diffs)
+
+	rpcTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer rpcTx.Rollback()
+	rpcView, err := rpcCache.View(ctx, rpcTx)
+	require.NoError(t, err)
+
+	got, err := rpcView.Get(key)
+	require.NoError(t, err)
+	require.Equal(t, v2, got, "the database still holds the old canonical state before unwind commit")
+
+	require.NoError(t, unwindDomains.Commit(ctx, unwindTx))
+	unwindDomains.Close()
+
+	_, ok := stateCache.View(nil).Get(kv.AccountsDomain, key)
+	require.False(t, ok, "the commit must invalidate fills admitted during the staged unwind")
+	lateRPCView, err := rpcCache.View(ctx, rpcTx)
+	require.NoError(t, err)
+	got, err = lateRPCView.Get(key)
+	require.NoError(t, err)
+	require.Equal(t, v2, got, "the previous published SD still serves its old durable snapshot")
+	_, ok = stateCache.View(nil).Get(kv.AccountsDomain, key)
+	require.False(t, ok, "the committed state version must reject later fills from the previous published SD")
+
+	freshTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer freshTx.Rollback()
+	freshDomains, err := execctx.NewSharedDomains(ctx, freshTx, log.New())
+	require.NoError(t, err)
+	defer freshDomains.Close()
+	freshDomains.SetStateCacheForTest(stateCache)
+
+	got, _, err = freshDomains.GetLatest(kv.AccountsDomain, freshTx, key)
+	require.NoError(t, err)
+	require.Equal(t, v1, got)
+}
+
 func TestEmbeddedRPCTxBoundAfterUnwindDoesNotRefillUnwoundAccount(t *testing.T) {
 	const stepSize = uint64(16)
 	ctx := t.Context()

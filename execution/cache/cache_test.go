@@ -62,6 +62,17 @@ func frontierAt(end uint64) Frontier {
 	return FrontierFunc(func(kv.Domain) (uint64, bool) { return end, true })
 }
 
+type versionedFrontier struct {
+	Frontier
+	stateVersion uint64
+}
+
+func (f versionedFrontier) StateVersion() (uint64, bool) { return f.stateVersion, true }
+
+func frontierAtVersion(end, stateVersion uint64) Frontier {
+	return versionedFrontier{Frontier: frontierAt(end), stateVersion: stateVersion}
+}
+
 // =============================================================================
 // DomainCache Tests
 // =============================================================================
@@ -968,6 +979,119 @@ func TestStateCache_PreReorgViewCannotFillAfterUnwind(t *testing.T) {
 	preReorg.Fill(kv.AccountsDomain, key, fork, 100)
 	_, ok = sc.get(kv.AccountsDomain, key)
 	require.False(t, ok, "a pre-reorg view must not reinstate the discarded fork's value")
+}
+
+func TestStateCache_InitializeDoesNotMoveStateVersionBackward(t *testing.T) {
+	b := 1 * datasize.MB
+	sc := NewStateCache(b, b, b, b)
+	t.Cleanup(sc.Close)
+
+	sc.Applier().Initialize(3)
+	sc.Applier().Initialize(2)
+
+	staleKey := makeAddr(1)
+	sc.View(frontierAtVersion(11, 2)).Fill(kv.AccountsDomain, staleKey, makeValue(1), 10)
+	_, ok := sc.View(nil).Get(kv.AccountsDomain, staleKey)
+	require.False(t, ok, "an older initializer must not reactivate stale fills")
+
+	currentKey := makeAddr(2)
+	sc.View(frontierAtVersion(11, 3)).Fill(kv.AccountsDomain, currentKey, makeValue(2), 10)
+	_, ok = sc.View(nil).Get(kv.AccountsDomain, currentKey)
+	require.True(t, ok, "the accepted state version must remain active")
+}
+
+func TestStateCache_InitializeClearsUnversionedEntries(t *testing.T) {
+	b := 1 * datasize.MB
+	sc := NewStateCache(b, b, b, b)
+	t.Cleanup(sc.Close)
+
+	key := makeAddr(1)
+	sc.View(frontierAt(11)).Fill(kv.AccountsDomain, key, makeValue(1), 10)
+	sc.Applier().Initialize(1)
+
+	_, ok := sc.View(nil).Get(kv.AccountsDomain, key)
+	require.False(t, ok, "initialization cannot vouch for entries admitted without a state version")
+}
+
+func TestStateCache_PublishRejectsOlderStateVersion(t *testing.T) {
+	b := 1 * datasize.MB
+	sc := NewStateCache(b, b, b, b)
+	t.Cleanup(sc.Close)
+
+	key := makeAddr(1)
+	newer := makeValue(3)
+	sc.Applier().Initialize(1)
+	sc.Applier().Publish(1, 3, []StateUpdate{{Domain: kv.AccountsDomain, Key: key, Value: newer, TxNum: 30}})
+	sc.Applier().Publish(1, 2, []StateUpdate{{Domain: kv.AccountsDomain, Key: key, Value: makeValue(2), TxNum: 20}})
+
+	got, ok := sc.View(nil).Get(kv.AccountsDomain, key)
+	require.True(t, ok)
+	require.Equal(t, newer, got, "a delayed older publication must not overwrite newer state")
+
+	staleKey := makeAddr(2)
+	sc.View(frontierAtVersion(31, 2)).Fill(kv.AccountsDomain, staleKey, makeValue(2), 30)
+	_, ok = sc.View(nil).Get(kv.AccountsDomain, staleKey)
+	require.False(t, ok, "a rejected publication must not move fill admission backward")
+}
+
+func TestStateCache_PublishClearsOnSkippedStateVersion(t *testing.T) {
+	b := 1 * datasize.MB
+	sc := NewStateCache(b, b, b, b)
+	t.Cleanup(sc.Close)
+
+	key := makeAddr(1)
+	sc.Applier().Initialize(1)
+	sc.Applier().Apply(kv.AccountsDomain, key, makeValue(1), 10)
+	sc.Applier().Publish(2, 3, nil)
+
+	_, ok := sc.View(nil).Get(kv.AccountsDomain, key)
+	require.False(t, ok, "a skipped publication may omit the update that made an old entry stale")
+}
+
+func TestStateCache_PublishKeepsEntriesWhenOneCommitAdvancesVersionMoreThanOnce(t *testing.T) {
+	b := 1 * datasize.MB
+	sc := NewStateCache(b, b, b, b)
+	t.Cleanup(sc.Close)
+
+	key := makeAddr(1)
+	sc.Applier().Initialize(1)
+	sc.Applier().Apply(kv.AccountsDomain, key, makeValue(1), 10)
+	sc.Applier().Publish(1, 3, nil)
+
+	_, ok := sc.View(nil).Get(kv.AccountsDomain, key)
+	require.True(t, ok, "a complete publication must preserve unchanged entries")
+}
+
+func TestStateCache_PublishUnwindSerializesWithFill(t *testing.T) {
+	b := 1 * datasize.MB
+	sc := NewStateCache(b, b, b, b)
+	t.Cleanup(sc.Close)
+	sc.Applier().Initialize(0)
+
+	for committedStateVersion := uint64(1); committedStateVersion <= 100; committedStateVersion++ {
+		key := makeAddr(int(committedStateVersion))
+		sc.Applier().Unwind(10)
+		view := sc.View(frontierAtVersion(11, committedStateVersion-1))
+
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			view.Fill(kv.AccountsDomain, key, makeValue(1), 10)
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			sc.Applier().PublishUnwind(committedStateVersion-1, committedStateVersion, 10, nil)
+		}()
+		close(start)
+		wg.Wait()
+
+		_, ok := sc.View(nil).Get(kv.AccountsDomain, key)
+		require.False(t, ok, "a fill from the pre-commit state must not survive unwind publication")
+	}
 }
 
 func TestStateCache_FileEndViewCannotFillAtAppliedTx(t *testing.T) {

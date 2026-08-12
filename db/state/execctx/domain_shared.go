@@ -173,9 +173,14 @@ func (f sdFrontier) DomainVisibleEnd(domain kv.Domain) (uint64, bool) {
 	return f.sd.domainVisibleEnd(f.tx, domain)
 }
 
+func (f sdFrontier) StateVersion() (uint64, bool) {
+	return f.sd.baseStateVersion, f.sd.baseStateVersionKnown
+}
+
 type rejectedFrontier struct{}
 
 func (rejectedFrontier) DomainVisibleEnd(kv.Domain) (uint64, bool) { return 0, false }
+func (rejectedFrontier) StateVersion() (uint64, bool)              { return 0, false }
 
 // cacheGenerationTx unwraps table overlays because their sequence metadata
 // belongs to the overlay, while cache fills read temporal domains from the
@@ -278,8 +283,10 @@ type SharedDomains struct {
 
 	// stateCache is an optional cache for state data (accounts, storage, code);
 	// cacheApplier is its authoritative writer handle (commit/unwind only).
-	stateCache   *cache.StateCache
-	cacheApplier cache.Applier
+	stateCache         *cache.StateCache
+	cacheApplier       cache.Applier
+	cacheUnwindTo      uint64
+	cacheUnwindPending bool
 
 	// Backing frontiers stay fixed while writes and staged unwinds remain in
 	// mem; both reach the transaction during flush, which resets the memo.
@@ -839,8 +846,13 @@ func (sd *SharedDomains) Unwind(txNumUnwindTo uint64, changeset *[kv.DomainLen][
 	// Invalidate the state cache for everything above the unwind point. txNum/epoch
 	// based and diffset-free (see Applier.Unwind), so it runs unconditionally —
 	// independent of whether changesets were generated for the unwound range, which
-	// they are not below the reorg window. Matches the domain overlay's maxtx prune.
+	// they are not below the reorg window. Commit repeats the invalidation at the
+	// durable state-version boundary, so no fill admitted while staged survives.
 	sd.cacheApplier.Unwind(txNumUnwindTo)
+	if !sd.cacheUnwindPending || txNumUnwindTo < sd.cacheUnwindTo {
+		sd.cacheUnwindTo = txNumUnwindTo
+	}
+	sd.cacheUnwindPending = true
 }
 
 func (sd *SharedDomains) GetMemBatch() kv.TemporalMemBatch { return sd.mem }
@@ -905,8 +917,15 @@ func (sd *SharedDomains) SetStateCache(stateCache *cache.StateCache) {
 	if !dbg.UseStateCache || stateCache == nil {
 		return
 	}
+	sd.bindStateCache(stateCache)
+}
+
+func (sd *SharedDomains) bindStateCache(stateCache *cache.StateCache) {
 	sd.stateCache = stateCache
 	sd.cacheApplier = stateCache.Applier()
+	if sd.baseStateVersionKnown {
+		sd.cacheApplier.Initialize(sd.baseStateVersion)
+	}
 }
 
 // GuardAggregatorForCache forbids visibility lowering on db's aggregator when
@@ -1070,12 +1089,11 @@ func (sd *SharedDomains) flushMem(ctx context.Context, tx kv.RwTx, opts ...kv.Fl
 	return sd.mem.Flush(ctx, tx, opts...)
 }
 
-type cacheUpdate struct {
-	domain kv.Domain
-	key    []byte
-	val    []byte
-	step   kv.Step
-	txN    uint64
+type branchCacheUpdate struct {
+	key  []byte
+	val  []byte
+	step kv.Step
+	txN  uint64
 }
 
 // Commit flushes the in-memory batch into tx, commits tx, and only then applies
@@ -1114,21 +1132,38 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 		}
 		return tx.Commit()
 	}
+	var sourceStateVersion uint64
+	if sd.stateCache != nil {
+		stateVersion, err := rawdb.GetStateVersion(tx)
+		if err != nil {
+			return fmt.Errorf("read state version before flush: %w", err)
+		}
+		sourceStateVersion = stateVersion
+	}
 
 	// Stash every cache-bound domain tuple during the flush; apply them only
 	// after the commit succeeds. On a failed commit the stash is discarded, so
 	// no cache apply ever runs ahead of durable MDBX state. (Reads through
 	// this SD between flush and a failed commit can still fill flushed
 	// values; a failed commit is fatal, so they die with the process.)
-	var pending []cacheUpdate
+	var pendingBranches []branchCacheUpdate
+	var pendingState []cache.StateUpdate
 	stash := func(domain kv.Domain) kv.FlushOption {
 		return kv.WithFlushCallback(domain, func(k []byte, v []byte, step kv.Step, txNum uint64) {
-			pending = append(pending, cacheUpdate{
-				domain: domain,
-				key:    append([]byte(nil), k...),
-				val:    append([]byte(nil), v...),
-				step:   step,
-				txN:    txNum,
+			if domain == kv.CommitmentDomain {
+				pendingBranches = append(pendingBranches, branchCacheUpdate{
+					key:  append([]byte(nil), k...),
+					val:  append([]byte(nil), v...),
+					step: step,
+					txN:  txNum,
+				})
+				return
+			}
+			pendingState = append(pendingState, cache.StateUpdate{
+				Domain: domain,
+				Key:    append([]byte(nil), k...),
+				Value:  append([]byte(nil), v...),
+				TxNum:  txNum,
 			})
 		})
 	}
@@ -1150,12 +1185,11 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 				codeStoreWrites = append(codeStoreWrites, [2][]byte{crypto.Keccak256(v), append([]byte(nil), v...)})
 			}
 			if sd.stateCache != nil {
-				pending = append(pending, cacheUpdate{
-					domain: kv.CodeDomain,
-					key:    append([]byte(nil), k...),
-					val:    append([]byte(nil), v...),
-					step:   step,
-					txN:    txNum,
+				pendingState = append(pendingState, cache.StateUpdate{
+					Domain: kv.CodeDomain,
+					Key:    append([]byte(nil), k...),
+					Value:  append([]byte(nil), v...),
+					TxNum:  txNum,
 				})
 			}
 		}))
@@ -1223,20 +1257,32 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 			sd.adaptivePinController.OnBlockComplete(ctx, sd.txNum, reader, factory, provider)
 		}
 	}
+	var committedStateVersion uint64
+	if sd.stateCache != nil {
+		stateVersion, err := rawdb.GetStateVersion(tx)
+		if err != nil {
+			return fmt.Errorf("read state version before commit: %w", err)
+		}
+		committedStateVersion = stateVersion
+	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	for i := range pending {
-		u := &pending[i]
-		if u.domain == kv.CommitmentDomain {
-			if len(u.val) == 0 {
-				sd.branchCache.Invalidate(u.key)
-			} else {
-				sd.branchCache.Put(u.key, u.val, uint64(u.step), u.txN)
-			}
-			continue
+	for i := range pendingBranches {
+		u := &pendingBranches[i]
+		if len(u.val) == 0 {
+			sd.branchCache.Invalidate(u.key)
+		} else {
+			sd.branchCache.Put(u.key, u.val, uint64(u.step), u.txN)
 		}
-		sd.cacheApplier.Apply(u.domain, u.key, u.val, u.txN)
+	}
+	if sd.stateCache != nil {
+		if sd.cacheUnwindPending {
+			sd.cacheApplier.PublishUnwind(sourceStateVersion, committedStateVersion, sd.cacheUnwindTo, pendingState)
+		} else {
+			sd.cacheApplier.Publish(sourceStateVersion, committedStateVersion, pendingState)
+		}
+		sd.cacheUnwindPending = false
 	}
 	return nil
 }

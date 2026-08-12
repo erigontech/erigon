@@ -17,6 +17,7 @@ import (
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
@@ -91,12 +92,24 @@ type cachePopulatingGetter struct {
 	stepSize uint64 // for the read txNum upper bound (last txNum of the read's step)
 }
 
+type readAheadFrontier struct {
+	cache.Frontier
+	stateVersion uint64
+}
+
+func (f readAheadFrontier) StateVersion() (uint64, bool) { return f.stateVersion, true }
+
 func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache) kv.TemporalGetter {
 	if sc == nil {
 		return ttx
 	}
 	debug := ttx.Debug()
-	return &cachePopulatingGetter{TemporalGetter: ttx, view: sc.View(debug), stepSize: debug.StepSize()}
+	stateVersion, err := rawdb.GetStateVersion(ttx)
+	if err != nil {
+		return ttx
+	}
+	frontier := readAheadFrontier{Frontier: debug, stateVersion: stateVersion}
+	return &cachePopulatingGetter{TemporalGetter: ttx, view: sc.View(frontier), stepSize: debug.StepSize()}
 }
 
 func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte) ([]byte, kv.Step, error) {
