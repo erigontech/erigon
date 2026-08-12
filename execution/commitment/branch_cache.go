@@ -259,8 +259,10 @@ func adaptiveTrunkDepth(active int64) uint8 {
 // slot returns the fixed-array slot for a nibble path of length 0-3 (and length
 // 4 when the depth-4 array is present, i.e. the account trunk), or nil when the
 // path is deeper — the caller then uses deep (storage) or the tail (account).
-func (t *trunk) slot(path []byte, forWrite bool) *atomic.Pointer[branchCacheEntry] {
-	switch len(path) {
+// slot returns the cell for an n-nibble path, nil when that depth has no
+// resident tier and the caller must use deep.
+func (t *trunk) slot(path *[4]byte, n int, forWrite bool) *atomic.Pointer[branchCacheEntry] {
+	switch n {
 	case 0:
 		return &t.d0
 	case 1:
@@ -422,43 +424,35 @@ func (c *BranchCache) trunkSlot(prefix []byte, forWrite bool) *atomic.Pointer[br
 	return nil
 }
 
-// storageRoute decodes a storage-trunk prefix (compact-hex of 64 account
-// nibbles + S storage nibbles) into its contract storageTrunk and the
-// storage-nibble path. Returns ok=false for non-storage prefixes (< 64 nibbles)
-// so the caller falls through to the LRU tail. When create is true the
-// contract's storageTrunk is allocated on demand (PinEntry path). nibBuf is
-// caller-owned scratch space for the returned stor slice — storageRoute is too
-// large to inline, so a value it returned a slice into would otherwise force
-// a heap allocation on every call; letting the caller's own stack array back
-// it instead keeps the common lookup allocation-free.
-func (c *BranchCache) storageRoute(prefix []byte, create bool, nibBuf *[4]byte) (st *trunk, stor []byte, ok bool) {
+// storageRoute resolves a storage prefix to its contract trunk and storage
+// depth, allocating the trunk when create is set. ok=false means non-storage;
+// the caller falls through to the tail. nibBuf is caller-owned scratch —
+// storageRoute cannot inline, so a local would escape.
+func (c *BranchCache) storageRoute(prefix []byte, create bool, nibBuf *[4]byte) (st *trunk, n int, ok bool) {
+	if len(prefix) < 33 {
+		return nil, 0, false
+	}
+	// Both decodes stay behind this check; ahead of it they are pure cost.
+	p := c.pinned.Load()
+	if !create && p == nil {
+		return nil, 0, false
+	}
 	acctHash, ok := ContractHashFromPrefix(prefix)
 	if !ok {
-		return nil, nil, false
-	}
-	// Nothing pinned and not creating: skip the stor decode that every
-	// >=64-nibble read would otherwise pay before finding no pins.
-	if !create && c.pinned.Load() == nil {
-		return nil, nil, false
+		return nil, 0, false
 	}
 	packed := acctHash[:]
-	n := storageNibbles(prefix, nibBuf)
-	if n > 4 {
-		stor = prefix // slot() only inspects len(path) past 4, never the content
-	} else {
-		stor = nibBuf[:n]
-	}
-	if p := c.pinned.Load(); p != nil {
+	if p != nil {
 		if st, found := p.Get(packed); found {
-			return st, stor, true
+			return st, storageNibbles(prefix, nibBuf), true
 		}
 	}
 	if !create {
-		return nil, stor, false
+		return nil, 0, false
 	}
-	st = newStorageTrunk(c.maxDepth)
-	c.pinnedForWrite().Set(packed, st)
-	return st, stor, true
+	// Two slots of one contract can take different put stripes, so this races itself.
+	st, _ = c.pinnedForWrite().LoadOrStore(packed, newStorageTrunk(c.maxDepth))
+	return st, storageNibbles(prefix, nibBuf), true
 }
 
 // pinnedForWrite returns the pinned-contract map, allocating it on first pin.
@@ -496,37 +490,24 @@ func ContractHashFromPrefix(prefix []byte) (hash [32]byte, ok bool) {
 	return hash, true
 }
 
-// storageNibbles decodes the storage-trie path nibbles that follow the
-// 64-nibble account hash in prefix into nib, matching
-// nibbles.CompactToHex(prefix)[64:]. Only the first 4 are materialized (n
-// reports the true count) since that is as deep as the fixed-array tier
-// goes; n > 4 routes to the deep overflow map, which is keyed by prefix
-// directly and never inspects these nibbles. Assumes prefix carries no
-// terminator flag, true for every BranchCache prefix — a trie traversal
-// path, never a full leaf key.
+// storageNibbles decodes the storage nibbles after the 64-nibble account hash,
+// matching nibbles.CompactToHex(prefix)[64:]. Only the first 4 are written; n is
+// the true count. Assumes no terminator flag, which holds for traversal paths.
 func storageNibbles(prefix []byte, nib *[4]byte) (n int) {
-	odd := prefix[0]&0x10 != 0
-	n = 2*len(prefix) - 2 - 64
-	if odd {
-		n++
+	if len(prefix) < 33 {
+		return 0
 	}
+	off := 2
+	if prefix[0]&0x10 != 0 { // odd: the account hash starts at the low nibble of byte 0
+		off = 1
+	}
+	n = 2*len(prefix) - 64 - off
 	if n > 4 {
 		return n
 	}
-	if odd {
-		for i := 0; i < n; i++ {
-			b := prefix[32+(i+1)/2]
-			if i&1 == 0 {
-				nib[i] = b & 0x0f
-			} else {
-				nib[i] = b >> 4
-			}
-		}
-		return n
-	}
-	for i := 0; i < n; i++ {
-		b := prefix[33+i/2]
-		if i&1 == 0 {
+	for i := range n {
+		j := 64 + i + off
+		if b := prefix[j/2]; j&1 == 0 {
 			nib[i] = b >> 4
 		} else {
 			nib[i] = b & 0x0f
@@ -611,9 +592,9 @@ func (c *BranchCache) lookup(prefix []byte) (*branchCacheEntry, bool) {
 	// Only a lookup that actually routes to a pinned trunk counts toward the
 	// pinned hit/miss stats; account-trie and tail-only prefixes are excluded.
 	var nibBuf [4]byte
-	if st, stor, ok := c.storageRoute(prefix, false, &nibBuf); ok {
+	if st, n, ok := c.storageRoute(prefix, false, &nibBuf); ok {
 		var entry *branchCacheEntry
-		if slot := st.slot(stor, false); slot != nil {
+		if slot := st.slot(&nibBuf, n, false); slot != nil {
 			entry = slot.Load()
 		} else {
 			entry, _ = st.deep.Get(prefix)
@@ -652,14 +633,14 @@ func (c *BranchCache) store(prefix []byte, entry *branchCacheEntry) {
 	// Keep a prefix already pinned in a storage trunk in place across the
 	// per-block invalidate+Put refresh rather than dropping it to the tail.
 	var nibBuf [4]byte
-	if st, stor, ok := c.storageRoute(prefix, false, &nibBuf); ok {
-		if slot := st.slot(stor, false); slot != nil {
-			if slot.Load() != nil {
-				slot.Store(entry)
-				return
+	if st, n, ok := c.storageRoute(prefix, false, &nibBuf); ok {
+		if slot := st.slot(&nibBuf, n, false); slot != nil {
+			for cur := slot.Load(); cur != nil; cur = slot.Load() {
+				if slot.CompareAndSwap(cur, entry) {
+					return
+				}
 			}
-		} else if _, exists := st.deep.Get(prefix); exists {
-			st.deep.Set(prefix, entry)
+		} else if st.deep.ReplaceIfPresent(prefix, entry) {
 			return
 		}
 	}
@@ -683,12 +664,12 @@ func (c *BranchCache) PinEntry(prefix []byte, data []byte, step, txN uint64) {
 
 	entry := &branchCacheEntry{data: dataCopy, step: step, txN: txN, epoch: c.coh.Epoch()}
 	var nibBuf [4]byte
-	st, stor, ok := c.storageRoute(prefix, true, &nibBuf)
+	st, n, ok := c.storageRoute(prefix, true, &nibBuf)
 	if !ok {
 		c.tailForWrite().Add(maphash.Hash(prefix), entry)
 		return
 	}
-	if slot := st.slot(stor, true); slot != nil {
+	if slot := st.slot(&nibBuf, n, true); slot != nil {
 		if slot.Load() == nil {
 			c.pinnedEntries.Add(1)
 		}
@@ -770,8 +751,8 @@ func (c *BranchCache) Invalidate(prefix []byte) {
 		return
 	}
 	var nibBuf [4]byte
-	if st, stor, ok := c.storageRoute(prefix, false, &nibBuf); ok {
-		if slot := st.slot(stor, false); slot != nil {
+	if st, n, ok := c.storageRoute(prefix, false, &nibBuf); ok {
+		if slot := st.slot(&nibBuf, n, false); slot != nil {
 			if slot.Swap(nil) != nil {
 				c.pinnedEntries.Add(-1)
 			}

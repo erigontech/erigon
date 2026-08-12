@@ -17,6 +17,7 @@
 package commitment
 
 import (
+	"fmt"
 	"math/rand"
 	"runtime"
 	"strings"
@@ -492,6 +493,7 @@ func TestStorageNibbles_MatchesReference(t *testing.T) {
 // allocations on a storage-tier lookup, for both odd and even flag parity.
 func TestBranchCache_StorageRoute_ZeroAlloc(t *testing.T) {
 	c := NewBranchCache(100)
+	defer c.Close()
 
 	even := make([]byte, 33) // even flag, storLen=0 → storage trunk's d0
 	for i := 1; i < 33; i++ {
@@ -512,5 +514,41 @@ func TestBranchCache_StorageRoute_ZeroAlloc(t *testing.T) {
 			_, _, _ = c.storageRoute(prefix, false, &nibBuf)
 		})
 		require.Zerof(t, allocs, "storageRoute must not allocate on a storage-tier lookup, prefix0=%#x", prefix[0])
+	}
+}
+
+// A right-nibbles/wrong-count decode routes the pin and the read to different
+// depths — a permanent miss the reference comparison cannot see.
+func TestBranchCache_StorageTrunkRoundTripAcrossDepths(t *testing.T) {
+	for _, oddFlag := range []bool{false, true} {
+		for storLen := range 9 {
+			// storLen storage nibbles after 64 account nibbles, in compact form.
+			total := 64 + storLen
+			if oddFlag {
+				total++
+			}
+			prefix := make([]byte, total/2+1)
+			if oddFlag {
+				prefix[0] = 0x10
+			}
+			for i := 1; i < len(prefix); i++ {
+				prefix[i] = byte(i*11 + storLen)
+			}
+
+			c := NewBranchCache(100)
+			want := fmt.Sprintf("d%d-%v", storLen, oddFlag)
+			c.PinEntry(prefix, []byte(want), 0, 100)
+
+			got, _, ok := c.Get(prefix)
+			require.Truef(t, ok, "pinned entry must read back, storLen=%d odd=%v", storLen, oddFlag)
+			require.Equal(t, want, string(got))
+			require.Equalf(t, 1, c.PinnedCount(), "storLen=%d odd=%v", storLen, oddFlag)
+
+			c.Invalidate(prefix)
+			_, _, ok = c.Get(prefix)
+			require.Falsef(t, ok, "invalidated entry must be gone, storLen=%d odd=%v", storLen, oddFlag)
+			require.Zerof(t, c.PinnedCount(), "storLen=%d odd=%v", storLen, oddFlag)
+			c.Close()
+		}
 	}
 }
