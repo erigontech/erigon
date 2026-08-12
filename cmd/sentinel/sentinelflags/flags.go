@@ -79,7 +79,7 @@ var (
 
 	SentinelStaticPeersFlag = cli.StringFlag{
 		Name:  "sentinel.staticpeers",
-		Usage: "connect to comma-separated Consensus static peers",
+		Usage: "connect to comma-separated Consensus static peers provided as ENRs or direct TCP libp2p multiaddrs",
 		Value: "",
 	}
 )

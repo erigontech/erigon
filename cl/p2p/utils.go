@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strconv"
 
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/libp2p/go-libp2p/core/crypto"
@@ -42,6 +43,49 @@ func ConvertToAddrInfo(node *enode.Node) (*peer.AddrInfo, multiaddr.Multiaddr, e
 		return nil, nil, err
 	}
 	return info, multiAddr, nil
+}
+
+func ParseStaticPeer(value string) (multiaddr.Multiaddr, error) {
+	node, nodeErr := enode.Parse(enode.ValidSchemes, value)
+	if nodeErr == nil {
+		return ConvertToSingleMultiAddr(node)
+	}
+
+	addr, addrErr := multiaddr.NewMultiaddr(value)
+	if addrErr != nil {
+		return nil, fmt.Errorf("static peer is neither a valid node record nor a multiaddr: %w", errors.Join(nodeErr, addrErr))
+	}
+	info, err := peer.AddrInfoFromP2pAddr(addr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid libp2p static peer: %w", err)
+	}
+	if len(info.Addrs) == 0 {
+		return nil, errors.New("libp2p static peer does not provide a dial address")
+	}
+	protocols := addr.Protocols()
+	if len(protocols) != 3 || protocols[1].Code != multiaddr.P_TCP || protocols[2].Code != multiaddr.P_P2P {
+		return nil, errors.New("libp2p static peer must use a direct TCP address")
+	}
+	switch protocols[0].Code {
+	case multiaddr.P_IP4, multiaddr.P_IP6, multiaddr.P_DNS, multiaddr.P_DNS4, multiaddr.P_DNS6:
+	default:
+		return nil, errors.New("libp2p static peer must use an IP or DNS address")
+	}
+	portValue, err := addr.ValueForProtocol(multiaddr.P_TCP)
+	if err != nil {
+		return nil, errors.New("libp2p static peer does not provide a TCP address")
+	}
+	port, err := strconv.ParseUint(portValue, 10, 16)
+	if err != nil || port == 0 {
+		return nil, errors.New("libp2p static peer does not provide a valid TCP port")
+	}
+	for _, protocol := range []int{multiaddr.P_IP4, multiaddr.P_IP6} {
+		ipValue, err := addr.ValueForProtocol(protocol)
+		if err == nil && net.ParseIP(ipValue).IsUnspecified() {
+			return nil, errors.New("libp2p static peer uses an unspecified IP address")
+		}
+	}
+	return addr, nil
 }
 
 func ConvertToSingleMultiAddr(node *enode.Node) (multiaddr.Multiaddr, error) {
