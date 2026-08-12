@@ -275,6 +275,34 @@ func TestPreloadParallel_CapsWaveFetch(t *testing.T) {
 	}
 }
 
+// TestPreloadParallel_DbTombstoneDropsBranch confirms that a dbBranches entry
+// carrying a deletion tombstone (present key, empty value) is dropped rather
+// than pinned as a dbHit or falling through to the stale file value.
+func TestPreloadParallel_DbTombstoneDropsBranch(t *testing.T) {
+	hash, tree, _ := buildSyntheticTree(t)
+	root := ""
+	for p := range tree {
+		if root == "" || len(p) < len(root) {
+			root = p
+		}
+	}
+	const valSz = 100
+	rootKey := nibbles.HexToCompact([]byte(root))
+	dbBranches := map[string][]byte{string(rootKey): {}}
+
+	c := NewBranchCache(64)
+	n, err := PreloadContractTrunkParallel(hash, 1<<20, dbBranches, fakeResolver(tree, nil, valSz, ""), c, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("pinned %d, want 0: the DB tombstone must drop the root, not fall through to the stale file value", n)
+	}
+	if _, _, ok := c.Get(rootKey); ok {
+		t.Fatal("root should not be pinned: dbBranches holds a deletion tombstone for it")
+	}
+}
+
 func TestPreloadParallel_DbHitsShadowFiles(t *testing.T) {
 	// A branch present in both dbBranches (fresh) and the file layer (stale)
 	// must resolve to the DB value — and the DB value's child bitmap must drive
