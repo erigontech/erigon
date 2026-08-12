@@ -155,7 +155,7 @@ type stopKind uint8
 const (
 	stopReachedMax stopKind = iota // all requested work applied — clean batch end
 	stopMoreWork                   // size/exhausted cut before maxBlock — resume next cycle
-	stopBadBlock                   // wrong trie root — fail the implicated block and unwind
+	stopBadBlock                   // invalid-block verdict — fail the implicated block and unwind
 )
 
 func (k stopKind) String() string {
@@ -3278,11 +3278,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				if _, err := pe.cfg.engine.Finalize(
 					pe.cfg.chainConfig, types.CopyHeader(tt.Header), ibs, tt.Uncles, blockReceipts,
 					tt.Withdrawals, chainReader, syscall, false, pe.logger); err != nil {
-					err = fmt.Errorf("can't finalize block %d: %w", be.number(), err)
-					if errors.Is(err, rules.ErrInvalidBlock) {
-						return be.invalidBlockResult(err), nil
-					}
-					return nil, err
+					return be.invalidBlockResult(fmt.Errorf("%w: can't finalize block %d: %v", rules.ErrInvalidBlock, be.number(), err)), nil
 				}
 
 				be.blockIO.RecordReads(finalVersion, ibs.VersionedReads())

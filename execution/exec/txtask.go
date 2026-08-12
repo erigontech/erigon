@@ -499,7 +499,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 
 	ibs.SetTrace(txTask.Trace)
 
-	chainRules := txTask.Rules()
+	rules := txTask.Rules()
 
 	var err error
 	header := txTask.Header
@@ -522,7 +522,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 				ibs = genesisIbs
 			}
 			// For Genesis, rules should be empty, so that empty accounts can be included
-			chainRules = &chain.Rules{}
+			rules = &chain.Rules{}
 			break
 		}
 
@@ -536,10 +536,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		if result.Err == nil && !ibs.IsVersioned() {
 			// The versionMap path finalizes from the write-set after the switch;
 			// the serial path commits the init writes here.
-			result.Err = ibs.FinalizeTx(chainRules, state.NewNoopWriter())
-		}
-		if result.Err != nil {
-			result.Operational = !errors.Is(result.Err, rules.ErrInvalidBlock)
+			result.Err = ibs.FinalizeTx(rules, state.NewNoopWriter())
 		}
 	case txTask.IsBlockEnd():
 		if txTask.BlockNumber() == 0 {
@@ -621,9 +618,9 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		// write-set is not applied for it, so keep genesis on the MakeWriteSet path.
 		isGenesis := txTask.TxIndex == -1 && txTask.BlockNumber() == 0
 		if ibs.IsVersioned() && !isGenesis {
-			result.TxOut = ibs.FinalizedWrites(chainRules)
+			result.TxOut = ibs.FinalizedWrites(rules)
 		} else {
-			if err = ibs.MakeWriteSet(chainRules, stateWriter); err != nil {
+			if err = ibs.MakeWriteSet(rules, stateWriter); err != nil {
 				panic(err)
 			}
 			result.TxOut = txTask.VersionedWrites(ibs)

@@ -122,10 +122,10 @@ type execRange struct {
 // execV3Outcome carries what the stage wrapper needs after the parallel
 // executor returns. applyTx is the live post-exec tx (parallel exec may have
 // rolled the stageloop tx via Flush/CommitAndBegin, leaving the caller's rwTx
-// stale). verdict is the invalid-block verdict of a healthy run and exhausted
-// its resumable batch boundary; at most one of {error, verdict, exhausted} is
-// set, so the error return means an operational executor failure and nothing
-// else.
+// stale). verdict carries the invalid-block verdict of a healthy run;
+// exhausted carries its resumable batch boundary. At most one of {error,
+// verdict, exhausted} is set, so the error return means an operational
+// executor failure and nothing else.
 type execV3Outcome struct {
 	applyTx               kv.TemporalRwTx
 	lastCommittedBlockNum uint64

@@ -1443,7 +1443,7 @@ func newResumeTestExec(t *testing.T, db kv.TemporalRwDB, config *chain.Config) (
 	return pe, roTx
 }
 
-func TestParallelInitializeRulesEngineIOErrorIsOperational(t *testing.T) {
+func TestParallelInitializeRulesEngineErrorUsesVerdictPath(t *testing.T) {
 	config := chain.TestChainBerlinConfig
 	engineErr := fmt.Errorf("epoch database read failed")
 	engine := rulesEngineWithErrors{Engine: ethash.NewFaker(), initializeErr: engineErr}
@@ -1464,27 +1464,26 @@ func TestParallelInitializeRulesEngineIOErrorIsOperational(t *testing.T) {
 
 	result := task.Execute(&vm.EVM{}, engine, nil, ibs, state.NewNoopWriter(), config, nil, datadir.Dirs{}, false)
 
-	require.True(t, result.Operational)
-	require.ErrorIs(t, result.Err, engineErr)
-	require.NotErrorIs(t, result.Err, rules.ErrInvalidBlock)
+	require.False(t, result.Operational)
+	var abort protocol.ErrExecAbortError
+	require.ErrorAs(t, result.Err, &abort)
+	require.ErrorIs(t, abort.OriginError, engineErr)
 }
 
 func TestParallelFinalizeClassifiesRulesEngineError(t *testing.T) {
 	for _, tc := range []struct {
-		name        string
-		engineErr   func(error) error
-		wantVerdict bool
+		name      string
+		engineErr func(error) error
 	}{
 		{
-			name:      "IO error is operational",
+			name:      "plain error",
 			engineErr: func(cause error) error { return cause },
 		},
 		{
-			name: "explicit validation error is a verdict",
+			name: "preclassified invalid block",
 			engineErr: func(cause error) error {
 				return fmt.Errorf("%w: %w", rules.ErrInvalidBlock, cause)
 			},
-			wantVerdict: true,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1522,16 +1521,10 @@ func TestParallelFinalizeClassifiesRulesEngineError(t *testing.T) {
 				TxOut: &state.WriteSet{},
 			}, roTx)
 
-			if tc.wantVerdict {
-				require.NoError(t, err)
-				require.NotNil(t, result)
-				require.ErrorIs(t, result.Err, rules.ErrInvalidBlock)
-				require.ErrorIs(t, result.Err, cause)
-				return
-			}
-			require.Nil(t, result)
-			require.ErrorIs(t, err, cause)
-			require.NotErrorIs(t, err, rules.ErrInvalidBlock)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.ErrorIs(t, result.Err, rules.ErrInvalidBlock)
+			require.ErrorContains(t, result.Err, cause.Error())
 		})
 	}
 }
