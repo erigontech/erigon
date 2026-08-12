@@ -53,12 +53,6 @@ export USE_STATE_CACHE=false
 # launcher; the publisher needs it more (it serves those files).
 export ERIGON_MERGE_MIN_AGE_STEPS="${ERIGON_MERGE_MIN_AGE_STEPS:-6}"
 
-# ERIGON_TORRENT_KEEP_COMPLETED_PEERS disables anacrolix's per-torrent
-# drop-after-mutual-completion. Bootstrap publishers serve many torrents
-# to the same trusted consumer(s); keeping the conn open lets new
-# torrents' metadata piggyback via PEX instead of re-dialing per torrent.
-export ERIGON_TORRENT_KEEP_COMPLETED_PEERS="${ERIGON_TORRENT_KEEP_COMPLETED_PEERS:-true}"
-
 # --nat=extip:127.0.0.1 forces the publisher to advertise loopback in
 # its ENR. Without it, erigon auto-detects the machine's external IP
 # (via NAT probe / interface scan), which local consumers cannot reach
