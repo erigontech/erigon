@@ -458,12 +458,16 @@ func (c *StateCache) unwindLocked(unwindToTxNum uint64) {
 	}
 }
 
+func (c *StateCache) canAdvanceStateVersionLocked(stateVersion uint64) bool {
+	return !c.stateVersionKnown || stateVersion > c.stateVersion
+}
+
 func (c *StateCache) initialize(stateVersion uint64) {
 	c.applierMu.Lock()
 	defer c.applierMu.Unlock()
 	c.admissionMu.Lock()
 	defer c.admissionMu.Unlock()
-	if c.stateVersionKnown && stateVersion <= c.stateVersion {
+	if !c.canAdvanceStateVersionLocked(stateVersion) {
 		return
 	}
 	c.resetForStateVersionLocked()
@@ -476,7 +480,7 @@ func (c *StateCache) beginPublication(sourceStateVersion, committedStateVersion,
 	hasUnwind bool) bool {
 	c.admissionMu.Lock()
 	defer c.admissionMu.Unlock()
-	if c.stateVersionKnown && committedStateVersion <= c.stateVersion {
+	if !c.canAdvanceStateVersionLocked(committedStateVersion) {
 		return false
 	}
 	c.publishing = true
