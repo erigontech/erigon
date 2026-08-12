@@ -260,15 +260,47 @@ type sidecarsPayload struct {
 
 type verifyHeaderSignatureFn func(header *cltypes.SignedBeaconBlockHeader) error
 
+// VerifyBlobSidecars validates sidecar proofs and optionally their signed headers.
+func VerifyBlobSidecars(sidecars []*cltypes.BlobSidecar, verifySignatureFn verifyHeaderSignatureFn) error {
+	if len(sidecars) == 0 {
+		return nil
+	}
+	blobs := make([]*goethkzg.Blob, len(sidecars))
+	commitments := make([]goethkzg.KZGCommitment, len(sidecars))
+	proofs := make([]goethkzg.KZGProof, len(sidecars))
+	for i, sidecar := range sidecars {
+		if sidecar == nil || sidecar.SignedBlockHeader == nil || sidecar.SignedBlockHeader.Header == nil {
+			return errors.New("blob response contains incomplete sidecar")
+		}
+		if !cltypes.VerifyCommitmentInclusionProof(sidecar.KzgCommitment, sidecar.CommitmentInclusionProof, sidecar.Index, clparams.DenebVersion, sidecar.SignedBlockHeader.Header.BodyRoot) {
+			return errors.New("could not verify blob's inclusion proof")
+		}
+		if verifySignatureFn != nil {
+			if err := verifySignatureFn(sidecar.SignedBlockHeader); err != nil {
+				return err
+			}
+		}
+		blobs[i] = (*goethkzg.Blob)(&sidecar.Blob)
+		commitments[i] = goethkzg.KZGCommitment(sidecar.KzgCommitment)
+		proofs[i] = goethkzg.KZGProof(sidecar.KzgProof)
+	}
+	if err := kzg.Ctx().VerifyBlobKZGProofBatch(blobs, commitments, proofs); err != nil {
+		return errors.New("sidecar is wrong")
+	}
+	return nil
+}
+
 // VerifyAgainstIdentifiersAndInsertIntoTheBlobStore does all due verification for blobs before database insertion. it also returns the latest correctly return blob.
 func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, storage BlobStorage, identifiers *solid.ListSSZ[*cltypes.BlobIdentifier], sidecars []*cltypes.BlobSidecar, verifySignatureFn verifyHeaderSignatureFn) (uint64, uint64, error) {
-	kzgCtx := kzg.Ctx()
 	inserted := atomic.Uint64{}
 	if identifiers.Len() == 0 || len(sidecars) == 0 {
 		return 0, 0, nil
 	}
 	if len(sidecars) > identifiers.Len() {
 		return 0, 0, errors.New("sidecars length is greater than identifiers length")
+	}
+	if sidecars[0] == nil || sidecars[0].SignedBlockHeader == nil || sidecars[0].SignedBlockHeader.Header == nil {
+		return 0, 0, errors.New("blob response contains incomplete sidecar")
 	}
 	prevBlockRoot := identifiers.Get(0).BlockRoot
 	totalProcessed := 0
@@ -278,6 +310,9 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 	lastProcessed := sidecars[0].SignedBlockHeader.Header.Slot
 	// Some will be stored, truncate when validation goes to shit
 	for i, sidecar := range sidecars {
+		if sidecar == nil || sidecar.SignedBlockHeader == nil || sidecar.SignedBlockHeader.Header == nil {
+			return 0, 0, errors.New("blob response contains incomplete sidecar")
+		}
 		identifier := identifiers.Get(i)
 		// check if the root of the block matches the identifier
 		sidecarBlockRoot, err := sidecar.SignedBlockHeader.Header.HashSSZ()
@@ -292,15 +327,6 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 			break
 		}
 
-		if !cltypes.VerifyCommitmentInclusionProof(sidecar.KzgCommitment, sidecar.CommitmentInclusionProof, sidecar.Index, clparams.DenebVersion, sidecar.SignedBlockHeader.Header.BodyRoot) {
-			return 0, 0, errors.New("could not verify blob's inclusion proof")
-		}
-		if verifySignatureFn != nil {
-			// verify the signature of the sidecar head, we leave this step up to the caller to define
-			if err := verifySignatureFn(sidecar.SignedBlockHeader); err != nil {
-				return 0, 0, err
-			}
-		}
 		// if the sidecar is valid, add it to the current payload of sidecars being built.
 		if identifier.BlockRoot != prevBlockRoot {
 			storableSidecars = append(storableSidecars, currentSidecarsPayload)
@@ -322,20 +348,8 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 	var wg sync.WaitGroup
 	for _, sds := range storableSidecars {
 		wg.Go(func() {
-			blobs := make([]*goethkzg.Blob, len(sds.sidecars))
-			for i, sidecar := range sds.sidecars {
-				blobs[i] = (*goethkzg.Blob)(&sidecar.Blob)
-			}
-			kzgCommitments := make([]goethkzg.KZGCommitment, len(sds.sidecars))
-			for i, sidecar := range sds.sidecars {
-				kzgCommitments[i] = goethkzg.KZGCommitment(sidecar.KzgCommitment)
-			}
-			kzgProofs := make([]goethkzg.KZGProof, len(sds.sidecars))
-			for i, sidecar := range sds.sidecars {
-				kzgProofs[i] = goethkzg.KZGProof(sidecar.KzgProof)
-			}
-			if err := kzgCtx.VerifyBlobKZGProofBatch(blobs, kzgCommitments, kzgProofs); err != nil {
-				errAtomic.Store(errors.New("sidecar is wrong"))
+			if err := VerifyBlobSidecars(sds.sidecars, verifySignatureFn); err != nil {
+				errAtomic.Store(err)
 				return
 			}
 			if err := storage.WriteBlobSidecars(ctx, sds.blockRoot, sds.sidecars); err != nil {

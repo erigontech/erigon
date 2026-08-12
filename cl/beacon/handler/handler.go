@@ -150,6 +150,7 @@ type ApiHandler struct {
 	selfBuildEnvelopes *lru.Cache[uint64, *cltypes.ExecutionPayloadEnvelope]
 }
 
+// BlobDataDependencies groups storage and backfill availability dependencies for blob endpoints.
 type BlobDataDependencies struct {
 	Storage        blob_storage.BlobStorage
 	ColumnStorage  blob_storage.DataColumnStorage

@@ -45,7 +45,11 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
-const maxMessageLength = 18 * datasize.MB
+const (
+	maxMessageLength                         = 18 * datasize.MB
+	maxConcurrentBlobSidecarRequests         = 2
+	maxConcurrentBlobSidecarBackfillRequests = 1
+)
 
 var errBlockForkSchemaSlotMismatch = errors.New("block schema fork disagrees with the fork implied by its slot")
 
@@ -72,8 +76,9 @@ type BeaconRpcP2P struct {
 
 	columnDataPeers *columnDataPeers
 
-	blobSidecarRequestsOnce sync.Once
-	blobSidecarRequests     chan struct{}
+	blobSidecarAdmissionOnce sync.Once
+	blobSidecarRequests      chan struct{}
+	blobSidecarBackfill      chan struct{}
 }
 
 // NewBeaconRpcP2P creates a new BeaconRpcP2P struct and returns a pointer to it.
@@ -244,11 +249,28 @@ func (b *BeaconRpcP2P) SendExecutionPayloadEnvelopesByRootReq(ctx context.Contex
 	return envelopes, pid, nil
 }
 
-// SendBeaconBlocksByRangeReq retrieves blocks range from beacon chain.
 func (b *BeaconRpcP2P) SendBlobsSidecarByIdentifierReq(ctx context.Context, req *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error) {
-	b.blobSidecarRequestsOnce.Do(func() {
-		b.blobSidecarRequests = make(chan struct{}, 2)
+	return b.sendBlobsSidecarByIdentifierReq(ctx, req, false)
+}
+
+// SendBlobsSidecarByIdentifierReqForBackfill admits a background request without exhausting live request capacity.
+func (b *BeaconRpcP2P) SendBlobsSidecarByIdentifierReqForBackfill(ctx context.Context, req *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error) {
+	return b.sendBlobsSidecarByIdentifierReq(ctx, req, true)
+}
+
+func (b *BeaconRpcP2P) sendBlobsSidecarByIdentifierReq(ctx context.Context, req *solid.ListSSZ[*cltypes.BlobIdentifier], backfill bool) ([]*cltypes.BlobSidecar, string, error) {
+	b.blobSidecarAdmissionOnce.Do(func() {
+		b.blobSidecarRequests = make(chan struct{}, maxConcurrentBlobSidecarRequests)
+		b.blobSidecarBackfill = make(chan struct{}, maxConcurrentBlobSidecarBackfillRequests)
 	})
+	if backfill {
+		select {
+		case b.blobSidecarBackfill <- struct{}{}:
+			defer func() { <-b.blobSidecarBackfill }()
+		case <-ctx.Done():
+			return nil, "", ctx.Err()
+		}
+	}
 	select {
 	case b.blobSidecarRequests <- struct{}{}:
 		defer func() { <-b.blobSidecarRequests }()

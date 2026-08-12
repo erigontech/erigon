@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -221,6 +222,8 @@ func TestBlobHistoryDownloaderContinuesPastFailedDenebBatch(t *testing.T) {
 	require.True(t, complete)
 	require.Len(t, stored, 1)
 	require.False(t, d.backfillCompleted.Load())
+	require.False(t, d.BlobBackfillPending(olderSlot))
+	require.True(t, d.BlobBackfillPending(headSlot))
 }
 
 func TestBlobHistoryDownloaderFuluFailureDoesNotCompleteBackfill(t *testing.T) {
@@ -502,6 +505,39 @@ func TestBlobHistoryDownloaderInvalidateCompletionAboveMakesReorgRangePending(t 
 	require.Equal(t, uint64(100), d.HeadSlot())
 }
 
+func TestBlobHistoryDownloaderTransitionCeilingBlocksOldCanonicalPass(t *testing.T) {
+	const slot = uint64(100)
+	d := newBlobDownloaderForBoundaryTest(t, slot, slot, slot, 16, &recordingBlobBlockReader{})
+	d.SetHead(slot, common.HexToHash("0x01"), slot)
+	d.mu.Lock()
+	d.completedRanges = []backfillRange{{start: slot, end: slot}}
+	d.backfillCompleted.Store(true)
+	d.mu.Unlock()
+
+	d.InvalidateCompletionAbove(slot - 1)
+	require.NoError(t, d.downloadOnce(false))
+	require.True(t, d.BlobBackfillPending(slot))
+
+	d.SetHead(slot, common.HexToHash("0x02"), slot-1)
+	require.True(t, d.BlobBackfillPending(slot))
+}
+
+func TestBlobHistoryDownloaderAbortHeadUpdateAllowsOldCanonicalRetry(t *testing.T) {
+	const slot = uint64(100)
+	d := newBlobDownloaderForBoundaryTest(t, slot, slot, slot, 16, &recordingBlobBlockReader{})
+	d.SetHead(slot, common.HexToHash("0x01"), slot)
+	d.mu.Lock()
+	d.completedRanges = []backfillRange{{start: slot, end: slot}}
+	d.backfillCompleted.Store(true)
+	d.mu.Unlock()
+
+	d.InvalidateCompletionAbove(slot - 1)
+	d.AbortHeadUpdate()
+	require.True(t, d.BlobBackfillPending(slot))
+	require.NoError(t, d.downloadOnce(false))
+	require.False(t, d.BlobBackfillPending(slot))
+}
+
 func TestBlobHistoryDownloaderHigherHeadReorgRescansChangedSuffix(t *testing.T) {
 	const (
 		headSlot   = uint64(100)
@@ -518,6 +554,79 @@ func TestBlobHistoryDownloaderHigherHeadReorgRescansChangedSuffix(t *testing.T) 
 	require.True(t, d.BlobBackfillPending(forkSlot+1))
 	require.NoError(t, d.downloadOnce(false))
 	require.Equal(t, []uint64{102, 101, 100, 99}, reader.slots)
+}
+
+func TestBlobHistoryDownloaderStalePassCannotRestoreReorgedSuffix(t *testing.T) {
+	const slot = uint64(100)
+	oldBlock, oldSidecars := makeBlobBoundaryObjects(t, slot, 1)
+	newBlock, newSidecars := makeBlobBoundaryObjects(t, slot, 2)
+	oldRoot, err := oldBlock.Block.HashSSZ()
+	require.NoError(t, err)
+	newRoot, err := newBlock.Block.HashSSZ()
+	require.NoError(t, err)
+	require.NotEqual(t, oldRoot, newRoot)
+
+	reader := &mappedBlobBlockReader{blocks: map[uint64]*cltypes.SignedBeaconBlock{slot: oldBlock}}
+	d := newBlobDownloaderForBoundaryTest(t, slot, slot, slot, 1, reader)
+	d.blobStorage = newBlobBoundaryStorage(t)
+	d.SetHead(slot, oldRoot, slot-1)
+	collected := make(chan struct{})
+	resume := make(chan struct{})
+	requestedRoots := make(chan common.Hash, 2)
+	var requests atomic.Int64
+	d.requestBlobs = func(_ context.Context, _ BlobPeerClient, req *solid.ListSSZ[*cltypes.BlobIdentifier]) (*PeerAndSidecars, error) {
+		requestedRoots <- req.Get(0).BlockRoot
+		if requests.Add(1) == 1 {
+			close(collected)
+			<-resume
+			return &PeerAndSidecars{Peer: "peer", Responses: oldSidecars}, nil
+		}
+		return &PeerAndSidecars{Peer: "peer", Responses: newSidecars}, nil
+	}
+
+	firstPass := make(chan error, 1)
+	go func() { firstPass <- d.downloadOnce(false) }()
+	<-collected
+	d.InvalidateCompletionAbove(slot - 1)
+	reader.blocks[slot] = newBlock
+	d.SetHead(slot, newRoot, slot-1)
+	close(resume)
+	require.NoError(t, <-firstPass)
+	require.True(t, d.BlobBackfillPending(slot))
+
+	require.NoError(t, d.downloadOnce(false))
+	require.Equal(t, common.Hash(oldRoot), <-requestedRoots)
+	require.Equal(t, common.Hash(newRoot), <-requestedRoots)
+	require.False(t, d.BlobBackfillPending(slot))
+}
+
+func TestBlobHistoryDownloaderStalePassPreservesSafeHeadExtensionPrefix(t *testing.T) {
+	const slot = uint64(100)
+	block, sidecars := makeBlobBoundaryObjects(t, slot, 1)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+
+	reader := &mappedBlobBlockReader{blocks: map[uint64]*cltypes.SignedBeaconBlock{slot: block}}
+	d := newBlobDownloaderForBoundaryTest(t, slot, slot, slot, 1, reader)
+	d.blobStorage = newBlobBoundaryStorage(t)
+	d.SetHead(slot, root, slot-1)
+	collected := make(chan struct{})
+	resume := make(chan struct{})
+	d.requestBlobs = func(context.Context, BlobPeerClient, *solid.ListSSZ[*cltypes.BlobIdentifier]) (*PeerAndSidecars, error) {
+		close(collected)
+		<-resume
+		return &PeerAndSidecars{Peer: "peer", Responses: sidecars}, nil
+	}
+
+	firstPass := make(chan error, 1)
+	go func() { firstPass <- d.downloadOnce(false) }()
+	<-collected
+	d.SetHead(slot+1, common.HexToHash("0x101"), slot)
+	close(resume)
+	require.NoError(t, <-firstPass)
+
+	require.False(t, d.BlobBackfillPending(slot))
+	require.True(t, d.BlobBackfillPending(slot+1))
 }
 
 func TestBlobHistoryDownloaderHeadJumpStartsAtCurrentRetentionFloor(t *testing.T) {

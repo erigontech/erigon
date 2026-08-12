@@ -79,6 +79,7 @@ type Args struct {
 	hasDownloaded bool
 }
 
+// BlobDownloader returns the canonical blob-history availability tracker.
 func (c *Cfg) BlobDownloader() *network2.BlobHistoryDownloader {
 	return c.blobDownloader
 }

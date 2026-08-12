@@ -58,6 +58,12 @@ func (s *changingBlobBackfillStatus) BlobBackfillPending(uint64) bool {
 	return s.calls.Add(1) > 1
 }
 
+type completingBlobBackfillStatus struct{ calls atomic.Int64 }
+
+func (s *completingBlobBackfillStatus) BlobBackfillPending(uint64) bool {
+	return s.calls.Add(1) == 1
+}
+
 type partialBlobStorage struct {
 	blob_storage.BlobStorage
 	sidecars []*cltypes.BlobSidecar
@@ -89,13 +95,14 @@ func (s *advancingFrozenBlobSnapshots) ReadBlobSidecars(uint64) ([]*cltypes.Blob
 
 type freezingBlobStorage struct {
 	blob_storage.BlobStorage
-	snapshots *advancingFrozenBlobSnapshots
-	freezeAt  uint64
+	snapshots       *advancingFrozenBlobSnapshots
+	freezeAt        uint64
+	storageSidecars []*cltypes.BlobSidecar
 }
 
 func (s freezingBlobStorage) ReadBlobSidecars(context.Context, uint64, common.Hash) ([]*cltypes.BlobSidecar, bool, error) {
 	s.snapshots.frozen.Store(s.freezeAt)
-	return nil, false, nil
+	return s.storageSidecars, false, nil
 }
 
 func (s partialBlobStorage) ReadBlobSidecars(context.Context, uint64, common.Hash) ([]*cltypes.BlobSidecar, bool, error) {
@@ -108,6 +115,14 @@ type bodyOnlyBlobBlockReader struct {
 
 func (r bodyOnlyBlobBlockReader) ReadBlockByRoot(context.Context, kv.Tx, common.Hash) (*cltypes.SignedBeaconBlock, error) {
 	return nil, errors.New("full block unavailable")
+}
+
+type unavailableBlobBodyReader struct {
+	freezeblocks.BeaconSnapshotReader
+}
+
+func (r unavailableBlobBodyReader) ReadBeaconBlockBodyBySlot(context.Context, kv.Tx, uint64) (*cltypes.SignedBeaconBlock, error) {
+	return nil, nil
 }
 
 func (r frozenBlobSnapshotReader) FrozenBlobs() uint64 { return r.frozenBlobsExclusive }
@@ -274,6 +289,27 @@ func TestGetBlobSidecarsBackfillStatusDoesNotRequireFullBlock(t *testing.T) {
 	require.Equal(t, http.StatusServiceUnavailable, getBlobSidecarsStatus(t, f, ""))
 }
 
+func TestGetBlobSidecarsErrorsWhenCanonicalBodyIsUnavailable(t *testing.T) {
+	f := setupBlobsTest(t)
+	f.handler.blobBackfillStatus = blobBackfillStatusStub(true)
+	f.handler.blockReader = unavailableBlobBodyReader{BeaconSnapshotReader: f.handler.blockReader}
+
+	require.Equal(t, http.StatusInternalServerError, getBlobSidecarsStatus(t, f, ""))
+}
+
+func TestRequestedBlobSidecarsMissingTreatsZeroCanonicalRootAsEmptySlot(t *testing.T) {
+	f := setupBlobsTest(t)
+	f.handler.blockReader = unavailableBlobBodyReader{BeaconSnapshotReader: f.handler.blockReader}
+	tx, err := f.handler.indiciesDB.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	missing, err := f.handler.requestedBlobSidecarsMissing(t.Context(), tx, f.slot+1, nil, true, nil)
+
+	require.NoError(t, err)
+	require.False(t, missing)
+}
+
 func TestGetBlobSidecarsEmptyForBlockWithoutCommitmentsDuringBackfill(t *testing.T) {
 	f := setupBlobsTestWithoutCommitments(t)
 	f.handler.blobBackfillStatus = blobBackfillStatusStub(true)
@@ -320,7 +356,7 @@ func TestReadBlobSidecarsRechecksPendingAfterIncompleteReread(t *testing.T) {
 	require.Equal(t, int64(2), status.calls.Load())
 }
 
-func TestGetBlobSidecarsRereadsAfterBackfillCompletes(t *testing.T) {
+func TestGetBlobSidecarsDoesNotRereadWithoutBackfillTransition(t *testing.T) {
 	f := setupBlobsTest(t)
 	storage := &completingBlobStorage{BlobStorage: f.handler.blobStoage, sidecars: f.sidecars}
 	f.handler.blobStoage = storage
@@ -336,7 +372,23 @@ func TestGetBlobSidecarsRereadsAfterBackfillCompletes(t *testing.T) {
 		Data []json.RawMessage `json:"data"`
 	}
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&envelope))
-	require.Len(t, envelope.Data, 1)
+	require.Empty(t, envelope.Data)
+	require.Equal(t, int64(1), storage.reads.Load())
+}
+
+func TestReadBlobSidecarsRereadsWhenBackfillCompletesDuringRead(t *testing.T) {
+	f := setupBlobsTest(t)
+	status := &completingBlobBackfillStatus{}
+	storage := &completingBlobStorage{BlobStorage: f.handler.blobStoage, sidecars: f.sidecars}
+	f.handler.blobBackfillStatus = status
+	f.handler.blobStoage = storage
+
+	out, complete, pending, err := f.handler.readBlobSidecarsWithBackfillStatus(t.Context(), f.slot, f.blockRoot, f.blockRoot)
+
+	require.NoError(t, err)
+	require.True(t, complete)
+	require.False(t, pending)
+	require.Equal(t, f.sidecars, out)
 	require.Equal(t, int64(2), storage.reads.Load())
 }
 
@@ -485,6 +537,65 @@ func TestReadBlobSidecarsRetriesSnapshotWhenFrozenBoundaryAdvances(t *testing.T)
 	require.NoError(t, err)
 	require.True(t, found)
 	require.Equal(t, f.sidecars, out)
+}
+
+func TestReadBlobSidecarsRetainsPartialStorageWhenAdvancedSnapshotIsEmpty(t *testing.T) {
+	f := setupBlobsTest(t)
+	snapshots := &advancingFrozenBlobSnapshots{}
+	snapshots.frozen.Store(f.slot)
+	f.handler.caplinSnapshots = snapshots
+	f.handler.blobStoage = freezingBlobStorage{
+		BlobStorage:     f.handler.blobStoage,
+		snapshots:       snapshots,
+		freezeAt:        f.slot + 1,
+		storageSidecars: f.sidecars[:1],
+	}
+
+	out, found, err := f.handler.readBlobSidecars(t.Context(), f.slot, f.blockRoot, f.blockRoot)
+
+	require.NoError(t, err)
+	require.False(t, found)
+	require.Equal(t, f.sidecars[:1], out)
+}
+
+func TestGetBlobSidecarsRetainsPartialStorageWhenBackfillCompletesIntoEmptySnapshot(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		query      string
+		statusCode int
+		dataLen    int
+	}{
+		{name: "stored member", query: "?indices=0", statusCode: http.StatusOK, dataLen: 1},
+		{name: "missing member", query: "?indices=1", statusCode: http.StatusServiceUnavailable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := setupBlobsTest(t)
+			snapshots := &advancingFrozenBlobSnapshots{}
+			snapshots.frozen.Store(f.slot)
+			f.handler.caplinSnapshots = snapshots
+			f.handler.blobBackfillStatus = &completingBlobBackfillStatus{}
+			f.handler.blobStoage = freezingBlobStorage{
+				BlobStorage:     f.handler.blobStoage,
+				snapshots:       snapshots,
+				freezeAt:        f.slot + 1,
+				storageSidecars: f.sidecars[:1],
+			}
+
+			server := httptest.NewServer(f.handler.mux)
+			defer server.Close()
+			resp, err := http.Get(server.URL + "/eth/v1/beacon/blob_sidecars/" + strconv.FormatUint(f.slot, 10) + tc.query)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+			require.Equal(t, tc.statusCode, resp.StatusCode)
+			if tc.statusCode == http.StatusOK {
+				var envelope struct {
+					Data []json.RawMessage `json:"data"`
+				}
+				require.NoError(t, json.NewDecoder(resp.Body).Decode(&envelope))
+				require.Len(t, envelope.Data, tc.dataLen)
+			}
+		})
+	}
 }
 
 type beaconBlobsResponse struct {

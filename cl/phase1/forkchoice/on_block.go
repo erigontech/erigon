@@ -569,7 +569,6 @@ func (f *ForkChoiceStore) isDataAvailable(ctx context.Context, slot uint64, bloc
 		return ErrEIP4844DataNotAvailable // This should then schedule the block for reprocessing
 	}
 	if !completeOnDisk {
-		// Persist the complete set assembled from disk and memory.
 		slices.SortFunc(sidecars, func(a, b *cltypes.BlobSidecar) int {
 			return cmp.Compare(a.Index, b.Index)
 		})

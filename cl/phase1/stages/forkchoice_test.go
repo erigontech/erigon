@@ -35,11 +35,14 @@ func (tx observingCommitTx) Commit() error {
 type recordingBlobHeadTracker struct {
 	invalidated bool
 	published   bool
+	aborted     bool
 }
 
 func (d *recordingBlobHeadTracker) InvalidateCompletionAbove(uint64) { d.invalidated = true }
 
 func (d *recordingBlobHeadTracker) SetHead(uint64, common.Hash, uint64) { d.published = true }
+
+func (d *recordingBlobHeadTracker) AbortHeadUpdate() { d.aborted = true }
 
 func TestCommitCanonicalHeadInvalidatesBeforeCommitVisibility(t *testing.T) {
 	db := memdb.NewTestDB(t, dbcfg.ChainDB)
@@ -60,6 +63,7 @@ func TestCommitCanonicalHeadInvalidatesBeforeCommitVisibility(t *testing.T) {
 	require.Error(t, err)
 	require.True(t, tracker.invalidated)
 	require.False(t, tracker.published)
+	require.True(t, tracker.aborted)
 	tx.Rollback()
 }
 
@@ -83,6 +87,42 @@ func TestCommitCanonicalHeadPublishesOnlyAfterSuccessfulCommit(t *testing.T) {
 	successfulDownloader := newDownloader()
 	require.NoError(t, commitCanonicalHead(successfulTx, successfulDownloader, 10, common.Hash{1}, 9))
 	require.Equal(t, uint64(10), successfulDownloader.HeadSlot())
+}
+
+func TestCommitCanonicalUpdateEmitsReorgOnlyAfterCommitAndHeadPublication(t *testing.T) {
+	emitter := beaconevents.NewEventEmitter()
+	events := make(chan *beaconevents.EventStream, 1)
+	sub := emitter.State().Subscribe(events)
+	defer sub.Unsubscribe()
+	want := &beaconevents.ChainReorgData{Slot: 10}
+
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	failedTx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer failedTx.Rollback()
+	failedTracker := &recordingBlobHeadTracker{}
+	require.Error(t, commitCanonicalUpdate(failingCommitTx{failedTx}, failedTracker, 10, common.Hash{1}, canonicalUpdate{commonAncestorSlot: 9, reorgEvent: want}, emitter))
+	require.False(t, failedTracker.published)
+	select {
+	case <-events:
+		t.Fatal("reorg event emitted for failed commit")
+	default:
+	}
+	failedTx.Rollback()
+
+	successfulTx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer successfulTx.Rollback()
+	successfulTracker := &recordingBlobHeadTracker{}
+	require.NoError(t, commitCanonicalUpdate(successfulTx, successfulTracker, 10, common.Hash{1}, canonicalUpdate{commonAncestorSlot: 9, reorgEvent: want}, emitter))
+	require.True(t, successfulTracker.published)
+	select {
+	case event := <-events:
+		require.Equal(t, beaconevents.StateChainReorg, event.Event)
+		require.Same(t, want, event.Data)
+	default:
+		t.Fatal("reorg event not emitted after successful commit")
+	}
 }
 
 func TestUpdateCanonicalChainReorgEvent(t *testing.T) {
@@ -315,17 +355,21 @@ func drainReorgEvent(t *testing.T, ctx context.Context, tx kv.RwTx, headSlot uin
 		beaconCfg: &clparams.MainnetBeaconConfig,
 	}
 
-	commonAncestorSlot, err := updateCanonicalChainInTheDatabase(ctx, tx, headSlot, headRoot, cfg)
+	update, err := updateCanonicalChainInTheDatabase(ctx, tx, headSlot, headRoot, cfg)
 	require.NoError(t, err)
+	require.NoError(t, tx.Commit())
+	if update.reorgEvent != nil {
+		cfg.emitter.State().SendChainReorg(update.reorgEvent)
+	}
 
 	for {
 		select {
 		case evt := <-ch:
 			if evt.Event == beaconevents.StateChainReorg {
-				return evt.Data.(*beaconevents.ChainReorgData), commonAncestorSlot
+				return evt.Data.(*beaconevents.ChainReorgData), update.commonAncestorSlot
 			}
 		default:
-			return nil, commonAncestorSlot
+			return nil, update.commonAncestorSlot
 		}
 	}
 }

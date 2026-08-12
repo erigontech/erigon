@@ -125,6 +125,46 @@ func TestBlobSidecarByRootRequestsShareConcurrencyLimit(t *testing.T) {
 	}
 }
 
+func TestBlobSidecarBackfillLeavesCapacityForLiveSync(t *testing.T) {
+	sentinel := &blockingBlobSentinel{enter: make(chan struct{}, 2)}
+	client := &BeaconRpcP2P{ctx: t.Context(), sentinel: sentinel, beaconConfig: &clparams.MainnetBeaconConfig}
+	req := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](1, 40)
+	req.Append(&cltypes.BlobIdentifier{})
+	backfillCtx, cancelBackfill := context.WithCancel(t.Context())
+	defer cancelBackfill()
+	backfillDone := make(chan struct{}, 2)
+	for range 2 {
+		go func() {
+			_, _, _ = client.SendBlobsSidecarByIdentifierReqForBackfill(backfillCtx, req)
+			backfillDone <- struct{}{}
+		}()
+	}
+	select {
+	case <-sentinel.enter:
+	case <-time.After(time.Second):
+		t.Fatal("backfill request did not enter")
+	}
+
+	liveCtx, cancelLive := context.WithCancel(t.Context())
+	liveDone := make(chan struct{})
+	go func() {
+		_, _, _ = client.SendBlobsSidecarByIdentifierReq(liveCtx, req)
+		close(liveDone)
+	}()
+	select {
+	case <-sentinel.enter:
+	case <-time.After(time.Second):
+		t.Fatal("live request was starved by backfill")
+	}
+	require.Equal(t, int64(2), sentinel.max.Load())
+	cancelLive()
+	cancelBackfill()
+	<-liveDone
+	for range 2 {
+		<-backfillDone
+	}
+}
+
 func TestSendBeaconBlocksByRangeReqRejectsForkSchemaSlotMismatch(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cfg.InitializeForkSchedule()

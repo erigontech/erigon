@@ -80,8 +80,20 @@ type BlobPeerClient interface {
 	SendBlobsSidecarByIdentifierReq(context.Context, *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error)
 }
 
+type blobBackfillPeerClient interface {
+	SendBlobsSidecarByIdentifierReqForBackfill(context.Context, *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error)
+}
+
 // RequestBlobsFrantically requests blobs from the network frantically.
 func RequestBlobsFrantically(ctx context.Context, r BlobPeerClient, req *solid.ListSSZ[*cltypes.BlobIdentifier]) (*PeerAndSidecars, error) {
+	return requestBlobsFrantically(ctx, req, r.SendBlobsSidecarByIdentifierReq)
+}
+
+func requestBlobsFranticallyForBackfill(ctx context.Context, r blobBackfillPeerClient, req *solid.ListSSZ[*cltypes.BlobIdentifier]) (*PeerAndSidecars, error) {
+	return requestBlobsFrantically(ctx, req, r.SendBlobsSidecarByIdentifierReqForBackfill)
+}
+
+func requestBlobsFrantically(ctx context.Context, req *solid.ListSSZ[*cltypes.BlobIdentifier], send func(context.Context, *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error)) (*PeerAndSidecars, error) {
 	type requestResult struct {
 		responses []*cltypes.BlobSidecar
 		peer      string
@@ -110,7 +122,7 @@ func RequestBlobsFrantically(ctx context.Context, r BlobPeerClient, req *solid.L
 	launch := func() {
 		inFlight++
 		go func() {
-			responses, peer, err := r.SendBlobsSidecarByIdentifierReq(attemptCtx, req)
+			responses, peer, err := send(attemptCtx, req)
 			results <- requestResult{responses: responses, peer: peer, err: err}
 		}()
 	}

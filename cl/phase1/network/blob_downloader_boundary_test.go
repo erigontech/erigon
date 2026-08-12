@@ -28,6 +28,8 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -83,6 +85,26 @@ func TestBlobHistoryDownloaderWaitsWithoutPeers(t *testing.T) {
 
 	require.NoError(t, downloader.downloadOnce(false))
 	require.Empty(t, reader.slots)
+}
+
+func TestBlobHistoryDownloaderErrorsWhenCanonicalBodyIsUnavailable(t *testing.T) {
+	const slot = uint64(100)
+	downloader := newBoundaryDownloader(t, slot, 0, slot, 1, &boundaryBlockReader{})
+	tx, err := downloader.indiciesDB.(kv.RwDB).BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, beacon_indicies.MarkRootCanonical(t.Context(), tx, slot, common.HexToHash("0x01")))
+	require.NoError(t, tx.Commit())
+
+	require.ErrorContains(t, downloader.downloadOnce(false), "canonical block body is unavailable")
+}
+
+func TestBlobHistoryDownloaderTreatsZeroCanonicalRootAsEmptySlot(t *testing.T) {
+	const slot = uint64(100)
+	downloader := newBoundaryDownloader(t, slot, 0, slot, 1, &boundaryBlockReader{})
+
+	require.NoError(t, downloader.downloadOnce(false))
+	require.False(t, downloader.BlobBackfillPending(slot))
 }
 
 func newBoundaryDownloader(t *testing.T, headSlot, frozenBlobs, targetSlot, peers uint64, reader freezeblocks.BeaconSnapshotReader) *BlobHistoryDownloader {

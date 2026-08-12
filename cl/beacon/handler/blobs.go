@@ -40,6 +40,7 @@ type caplinBlobSnapshotReader interface {
 	ReadBlobSidecars(slot uint64) ([]*cltypes.BlobSidecar, error)
 }
 
+// BlobBackfillStatus reports whether canonical blob history is still incomplete at a slot.
 type BlobBackfillStatus interface {
 	BlobBackfillPending(slot uint64) bool
 }
@@ -143,6 +144,13 @@ func (a *ApiHandler) requestedBlobSidecarsMissing(ctx context.Context, tx kv.Tx,
 		return false, err
 	}
 	if block == nil {
+		canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
+		if err != nil {
+			return false, err
+		}
+		if canonicalRoot != (common.Hash{}) {
+			return false, errors.New("canonical block body is unavailable")
+		}
 		return false, nil
 	}
 	if block.Block == nil || block.Block.Body == nil {
@@ -180,24 +188,42 @@ func (a *ApiHandler) readBlobSidecars(ctx context.Context, slot uint64, blockRoo
 	if err != nil || complete || blockRoot != canonicalRoot || a.caplinSnapshots == nil || slot >= a.caplinSnapshots.FrozenBlobs() {
 		return sidecars, complete, err
 	}
-	sidecars, err = a.caplinSnapshots.ReadBlobSidecars(slot)
-	return sidecars, len(sidecars) != 0, err
+	snapshotSidecars, err := a.caplinSnapshots.ReadBlobSidecars(slot)
+	if err != nil || len(snapshotSidecars) == 0 {
+		return sidecars, complete, err
+	}
+	return snapshotSidecars, true, nil
 }
 
 func (a *ApiHandler) readBlobSidecarsWithBackfillStatus(ctx context.Context, slot uint64, blockRoot, canonicalRoot common.Hash) ([]*cltypes.BlobSidecar, bool, bool, error) {
+	pendingBefore := a.blobBackfillPending(slot, blockRoot, canonicalRoot)
 	sidecars, complete, err := a.readBlobSidecars(ctx, slot, blockRoot, canonicalRoot)
 	if err != nil {
 		return sidecars, complete, false, err
 	}
-	pending := a.blobBackfillPending(slot, blockRoot, canonicalRoot)
-	if complete || pending {
-		return sidecars, complete, pending, nil
+	pendingAfter := a.blobBackfillPending(slot, blockRoot, canonicalRoot)
+	if complete || pendingBefore == pendingAfter || pendingAfter {
+		return sidecars, complete, pendingAfter, nil
 	}
-	sidecars, complete, err = a.readBlobSidecars(ctx, slot, blockRoot, canonicalRoot)
+	reread, complete, err := a.readBlobSidecars(ctx, slot, blockRoot, canonicalRoot)
 	if err != nil || complete {
-		return sidecars, complete, false, err
+		return reread, complete, false, err
 	}
-	return sidecars, false, a.blobBackfillPending(slot, blockRoot, canonicalRoot), nil
+	byIndex := make(map[uint64]struct{}, len(sidecars)+len(reread))
+	merged := make([]*cltypes.BlobSidecar, 0, len(sidecars)+len(reread))
+	for _, source := range [][]*cltypes.BlobSidecar{sidecars, reread} {
+		for _, sidecar := range source {
+			if sidecar == nil {
+				continue
+			}
+			if _, exists := byIndex[sidecar.Index]; exists {
+				continue
+			}
+			byIndex[sidecar.Index] = struct{}{}
+			merged = append(merged, sidecar)
+		}
+	}
+	return merged, false, true, nil
 }
 
 func (a *ApiHandler) GetEthV1DebugBeaconDataColumnSidecars(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
