@@ -646,14 +646,14 @@ func (vm *VersionMap) AccountLifecycle(addr accounts.Address, txIdx int) (destro
 }
 
 // destructScanFloor is the lowest TxIndex a wipe scan covers for a value floored
-// at floor, or -1 when the value predates the block. Balance and CodeHash keep
-// the destroying tx's own entry, which already holds the post-destruct value —
-// EIP-8246 retains the balance and the code hash is reset there.
+// at floor, or -1 when the value predates the block. CodeHash keeps the
+// destroying tx's own entry, matching read_paths.go — the convention read_paths
+// also applies to Balance, which no wipe scan here consults.
 func destructScanFloor(path AccountPath, floor int) int {
 	if floor < 0 {
 		return -1
 	}
-	if path == BalancePath || path == CodeHashPath {
+	if path == CodeHashPath {
 		return floor + 1
 	}
 	return floor

@@ -1728,12 +1728,8 @@ func (vr versionedStateReader) ReadAccountStorage(address accounts.Address, key 
 // wipedByDestruct reports whether an in-block SELFDESTRUCT cleared the value
 // this reader would otherwise return for path, floored at the version map cell
 // holding it (-1 when that value comes from before the block), and the TxIndex
-// that destruct sits at. The SelfDestruct probe is what makes the common
-// no-destruct case one lookup instead of two.
+// that destruct sits at.
 func (vr versionedStateReader) wipedByDestruct(address accounts.Address, path AccountPath, floor int) (int, bool) {
-	if _, _, ok := vr.versionMap.ReadSelfDestruct(address, vr.txIndex); !ok {
-		return 0, false
-	}
 	return vr.versionMap.wipedByInRangeDestruct(address, path, floor, vr.txIndex)
 }
 
