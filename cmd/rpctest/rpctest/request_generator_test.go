@@ -577,8 +577,10 @@ func fakeLogsServer(t *testing.T, logs []Log, queryLimit int) *httptest.Server {
 			ID     int    `json:"id"`
 			Method string `json:"method"`
 			Params []struct {
-				Address []common.Address `json:"address"`
-				Topics  [][]common.Hash  `json:"topics"`
+				FromBlock hexutil.Uint64   `json:"fromBlock"`
+				ToBlock   hexutil.Uint64   `json:"toBlock"`
+				Address   []common.Address `json:"address"`
+				Topics    [][]common.Hash  `json:"topics"`
 			} `json:"params"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -593,6 +595,11 @@ func fakeLogsServer(t *testing.T, logs []Log, queryLimit int) *httptest.Server {
 			return
 		}
 
+		if len(req.Params) == 0 {
+			t.Errorf("no params in %s request", req.Method)
+			http.Error(w, "no params", http.StatusBadRequest)
+			return
+		}
 		crit := req.Params[0]
 		tooWide := len(crit.Address) > queryLimit
 		for _, alternatives := range crit.Topics {
@@ -605,8 +612,12 @@ func fakeLogsServer(t *testing.T, logs []Log, queryLimit int) *httptest.Server {
 
 		result := []Log{}
 		for i := range logs {
-			if logMatchesFilter(&logs[i], crit.Address, crit.Topics) {
-				result = append(result, logs[i])
+			l := &logs[i]
+			if l.BlockNumber < crit.FromBlock || l.BlockNumber > crit.ToBlock {
+				continue
+			}
+			if logMatchesFilter(l, crit.Address, crit.Topics) {
+				result = append(result, *l)
 			}
 		}
 		resp, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": result})
@@ -623,6 +634,9 @@ func fakeLogsServer(t *testing.T, logs []Log, queryLimit int) *httptest.Server {
 
 func logMatchesFilter(l *Log, addresses []common.Address, topics [][]common.Hash) bool {
 	if len(addresses) > 0 && !slices.Contains(addresses, l.Address) {
+		return false
+	}
+	if len(topics) > len(l.Topics) {
 		return false
 	}
 	for pos, alternatives := range topics {

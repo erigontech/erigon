@@ -214,7 +214,10 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 			}
 
 			sawAddr := map[common.Address]struct{}{}
-			topicsByPos := [maxTopicPositions]map[common.Hash]struct{}{{}, {}, {}, {}}
+			var topicsByPos [maxTopicPositions]map[common.Hash]struct{}
+			for i := range topicsByPos {
+				topicsByPos[i] = map[common.Hash]struct{}{}
+			}
 			if baseOK {
 				for i := range resp.Result {
 					l := &resp.Result[i]
@@ -228,33 +231,25 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 			}
 
 			if len(sawAddr) > 0 {
-				var addrLogs []Log
-				addrOK := true
-				for batch := range batches(slices.Collect(maps.Keys(sawAddr)), queryLimit) {
-					var batchResp EthGetLogs
-					res = reqGen.Erigon("eth_getLogs", reqGen.getLogsForAddresses(bn, bn, batch), &batchResp)
-					if res.Err != nil {
-						if failFast {
-							return fmt.Errorf("could not get eth_getLogs by address (Erigon): %v", res.Err)
+				logsByAddr := make(map[common.Address][]Log, len(sawAddr))
+				err := getLogsBatched(reqGen, slices.Collect(maps.Keys(sawAddr)), queryLimit,
+					func(batch []common.Address) string { return reqGen.getLogsForAddresses(bn, bn, batch) },
+					func(logs []Log) {
+						for i := range logs {
+							l := &logs[i]
+							if _, ok := sawAddr[l.Address]; ok {
+								logsByAddr[l.Address] = append(logsByAddr[l.Address], *l)
+							}
 						}
-						log.Error("[ethGetLogsInvariants] could not get eth_getLogs by address", "blockNum", bn, "error", res.Err.Error())
-						addrOK = false
-						break
+					})
+				if err != nil {
+					if failFast {
+						return fmt.Errorf("eth_getLogs by address (Erigon): %w", err)
 					}
-					if batchResp.Error != nil {
-						if failFast {
-							return fmt.Errorf("error getting eth_getLogs by address (Erigon): %d %s", batchResp.Error.Code, batchResp.Error.Message)
-						}
-						log.Error("[ethGetLogsInvariants] error getting eth_getLogs by address", "blockNum", bn, "error", batchResp.Error.Code, "message", batchResp.Error.Message)
-						addrOK = false
-						break
-					}
-					addrLogs = append(addrLogs, batchResp.Result...)
-				}
-
-				if addrOK {
+					log.Error("[ethGetLogsInvariants] eth_getLogs by address (Erigon)", "blockNum", bn, "error", err.Error())
+				} else {
 					for k := range sawAddr {
-						logs := filterLogsByAddr(addrLogs, k)
+						logs := logsByAddr[k]
 						if len(logs) == 0 {
 							if failFast {
 								return fmt.Errorf("eth_getLogs: at blockNum=%d and addr %x not indexed", bn, k)
@@ -278,41 +273,28 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 					continue
 				}
 				logsByTopic := make(map[common.Hash][]Log, len(topicsAtPos))
-				posOK := true
-				for batch := range batches(slices.Collect(maps.Keys(topicsAtPos)), queryLimit) {
-					filter := make([][]common.Hash, pos+1)
-					filter[pos] = batch
-
-					var batchResp EthGetLogs
-					res = reqGen.Erigon("eth_getLogs", reqGen.getLogsForTopics(bn, bn, filter), &batchResp)
-					if res.Err != nil {
-						if failFast {
-							return fmt.Errorf("could not get logs by topics pos %d (Erigon): %v", pos, res.Err)
-						}
-						log.Error("[ethGetLogsInvariants] could not get logs by topics (Erigon)", "blockNum", bn, "pos", pos, "error", res.Err.Error())
-						posOK = false
-						break
-					}
-					if batchResp.Error != nil {
-						if failFast {
-							return fmt.Errorf("error getting logs by topics pos %d (Erigon): %d %s", pos, batchResp.Error.Code, batchResp.Error.Message)
-						}
-						log.Error("[ethGetLogsInvariants] error getting logs by topics (Erigon)", "blockNum", bn, "pos", pos, "error", batchResp.Error.Code, "message", batchResp.Error.Message)
-						posOK = false
-						break
-					}
-
-					for i := range batchResp.Result {
-						l := &batchResp.Result[i]
-						if pos < len(l.Topics) {
-							t := l.Topics[pos]
-							if _, ok := topicsAtPos[t]; ok {
-								logsByTopic[t] = append(logsByTopic[t], *l)
+				err := getLogsBatched(reqGen, slices.Collect(maps.Keys(topicsAtPos)), queryLimit,
+					func(batch []common.Hash) string {
+						filter := make([][]common.Hash, pos+1)
+						filter[pos] = batch
+						return reqGen.getLogsForTopics(bn, bn, filter)
+					},
+					func(logs []Log) {
+						for i := range logs {
+							l := &logs[i]
+							if pos < len(l.Topics) {
+								t := l.Topics[pos]
+								if _, ok := topicsAtPos[t]; ok {
+									logsByTopic[t] = append(logsByTopic[t], *l)
+								}
 							}
 						}
+					})
+				if err != nil {
+					if failFast {
+						return fmt.Errorf("eth_getLogs by topics pos %d (Erigon): %w", pos, err)
 					}
-				}
-				if !posOK {
+					log.Error("[ethGetLogsInvariants] eth_getLogs by topics (Erigon)", "blockNum", bn, "pos", pos, "error", err.Error())
 					continue
 				}
 
@@ -462,21 +444,28 @@ func BenchEthGetLogsRandomBlock(erigonURL string, concurentRequests int) error {
 	}
 }
 
+// getLogsBatched sends one eth_getLogs per batch of at most queryLimit filter entries and
+// feeds every response to collect. On error what collect already gathered is incomplete,
+// so the caller must discard it.
+func getLogsBatched[T any](reqGen *RequestGenerator, keys []T, queryLimit int, request func(batch []T) string, collect func(logs []Log)) error {
+	for batch := range batches(keys, queryLimit) {
+		var resp EthGetLogs
+		if res := reqGen.Erigon("eth_getLogs", request(batch), &resp); res.Err != nil {
+			return fmt.Errorf("could not get logs: %w", res.Err)
+		}
+		if resp.Error != nil {
+			return fmt.Errorf("error getting logs: %d %s", resp.Error.Code, resp.Error.Message)
+		}
+		collect(resp.Result)
+	}
+	return nil
+}
+
 // batches splits s into slices of at most limit elements, so that one eth_getLogs request
-// stays within the server's --rpc.logs.querylimit. limit<=0 means unlimited: one batch.
+// stays within the server's --rpc.logs.querylimit. limit<=0 disables splitting.
 func batches[T any](s []T, limit int) iter.Seq[[]T] {
 	if limit <= 0 {
 		limit = max(len(s), 1)
 	}
 	return slices.Chunk(s, limit)
-}
-
-func filterLogsByAddr(logs []Log, addr common.Address) (filtered []Log) {
-	for i := range logs {
-		l := &logs[i]
-		if l.Address == addr {
-			filtered = append(filtered, *l)
-		}
-	}
-	return
 }
