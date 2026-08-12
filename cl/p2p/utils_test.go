@@ -22,6 +22,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/p2p/enode"
 )
@@ -96,6 +97,15 @@ func TestParseStaticPeerAcceptsSupportedTCPAddresses(t *testing.T) {
 		parsed, err := ParseStaticPeer(input)
 		require.NoError(t, err)
 		require.Equal(t, input, parsed.String())
+	}
+}
+
+func TestChiadoStaticPeersAreValid(t *testing.T) {
+	t.Parallel()
+
+	for _, input := range clparams.ChiadoStaticPeers {
+		_, err := ParseStaticPeer(input)
+		require.NoError(t, err, input)
 	}
 }
 
