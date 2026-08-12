@@ -106,10 +106,10 @@ func TestGetBalanceChangesInBlock(t *testing.T) {
 	if err != nil {
 		t.Errorf("calling GetBalanceChangesInBlock resulted in an error: %v", err)
 	}
-	expected := map[common.Address]*hexutil.Big{
-		common.HexToAddress("0x0D3ab14BBaD3D99F4203bd7a11aCB94882050E7e"): (*hexutil.Big)(uint256.NewInt(200000000000000000).ToBig()),
-		common.HexToAddress("0x703c4b2bD70c169f5717101CaeE543299Fc946C7"): (*hexutil.Big)(uint256.NewInt(300000000000000000).ToBig()),
-		common.HexToAddress("0x71562b71999873DB5b286dF957af199Ec94617F7"): (*hexutil.Big)(uint256.NewInt(9000000000000000000).ToBig()),
+	expected := map[common.Address]*hexutil.U256{
+		common.HexToAddress("0x0D3ab14BBaD3D99F4203bd7a11aCB94882050E7e"): (*hexutil.U256)(uint256.NewInt(200000000000000000)),
+		common.HexToAddress("0x703c4b2bD70c169f5717101CaeE543299Fc946C7"): (*hexutil.U256)(uint256.NewInt(300000000000000000)),
+		common.HexToAddress("0x71562b71999873DB5b286dF957af199Ec94617F7"): (*hexutil.U256)(uint256.NewInt(9000000000000000000)),
 	}
 	assert.Len(balances, len(expected))
 	for i := range balances {

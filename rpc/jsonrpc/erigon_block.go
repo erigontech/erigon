@@ -209,14 +209,14 @@ func buildBlockResponse(ctx context.Context, br dbservices.FullBlockReader, db k
 	return response, err
 }
 
-func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (map[common.Address]*hexutil.Big, error) {
+func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (map[common.Address]*hexutil.U256, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	balancesMapping := make(map[common.Address]*hexutil.Big)
+	balancesMapping := make(map[common.Address]*hexutil.U256)
 
 	blockNumber, _, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
@@ -277,8 +277,7 @@ func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHa
 		}
 
 		if !oldBalance.Eq(newBalance) {
-			newBalanceDesc := (*hexutil.Big)(newBalance.ToBig())
-			balancesMapping[address.Value()] = newBalanceDesc
+			balancesMapping[address.Value()] = (*hexutil.U256)(newBalance)
 		}
 	}
 
