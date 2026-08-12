@@ -51,6 +51,10 @@ func TestChiadoUsesBootnodesAndStaticPeers(t *testing.T) {
 		"/ip4/185.127.230.20/tcp/9000/p2p/16Uiu2HAkzVyapm35N6PFLVVgPvfaR4PngLkzH1rQznHTNQk73hwt",
 		"/ip4/51.68.224.153/tcp/9000/p2p/16Uiu2HAkxcBE3LK7zhnyZERguonkKmXLgYPRcuDPaF6C2vaigYuT",
 		"/ip4/57.128.194.213/tcp/9000/p2p/16Uiu2HAmH8EQ7XHrz72cEspr6G7xHipCgV55gf211t6B9AnbRcgo",
+		"/ip4/23.92.177.94/tcp/29410/p2p/16Uiu2HAm2XtDtp1FvSSorMp6A7qStBSLxHvdSQewtWm8VpLA5yke",
+		"/ip4/134.65.192.121/tcp/19000/p2p/16Uiu2HAm1TwYCeKTdwYayAr8Vru7Ku9HKHH7MiWS6G5QuVsVqUy2",
+		"/ip4/103.219.170.121/tcp/12000/p2p/16Uiu2HAmN8DWDZprSvsM3ZTYDm5FmPsaDAYs4DmvVtzSwBnetrNG",
+		"/ip4/40.160.27.251/tcp/9001/p2p/16Uiu2HAmA6dX87khYTKGownJmmCjp9chuTJyZ5T3bqh15bX8q5as",
 	}, network.StaticPeers)
 }
 
