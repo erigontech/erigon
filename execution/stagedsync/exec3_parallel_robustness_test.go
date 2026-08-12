@@ -1407,6 +1407,50 @@ func TestParallelExecWait(t *testing.T) {
 	})
 }
 
+// classifyApplyExit decides what the recorded fail-candidate means for the
+// executor outcome: block verdicts travel as data, infrastructure faults stay
+// operational errors.
+func TestClassifyApplyExit(t *testing.T) {
+	t.Parallel()
+
+	t.Run("unset candidate is clean", func(t *testing.T) {
+		verdict, err := classifyApplyExit(failCandidate{})
+		require.Nil(t, verdict)
+		require.NoError(t, err)
+	})
+
+	t.Run("exec verdict becomes the block's verdict", func(t *testing.T) {
+		var fail failCandidate
+		fail.consider(7, common.HexToHash("0xbad7"), true,
+			fmt.Errorf("%w: could not apply tx, block=7", rules.ErrInvalidBlock))
+		verdict, err := classifyApplyExit(fail)
+		require.NoError(t, err)
+		require.NotNil(t, verdict)
+		require.Equal(t, uint64(7), verdict.blockNum)
+		require.Equal(t, common.HexToHash("0xbad7"), verdict.blockHash)
+		require.ErrorIs(t, verdict.err, rules.ErrInvalidBlock)
+	})
+
+	t.Run("wrong root becomes the block's verdict", func(t *testing.T) {
+		var fail failCandidate
+		fail.consider(9, common.HexToHash("0xbad9"), false, fmt.Errorf("%w, block=9", ErrWrongTrieRoot))
+		verdict, err := classifyApplyExit(fail)
+		require.NoError(t, err)
+		require.NotNil(t, verdict)
+		require.ErrorIs(t, verdict.err, ErrWrongTrieRoot)
+		require.ErrorIs(t, verdict.err, rules.ErrInvalidBlock)
+	})
+
+	t.Run("infrastructure fault stays an operational error", func(t *testing.T) {
+		var fail failCandidate
+		boom := errors.New("marshal transactions for accumulator, block 3: boom")
+		fail.consider(3, common.HexToHash("0x03"), true, boom)
+		verdict, err := classifyApplyExit(fail)
+		require.Nil(t, verdict, "an infrastructure fault is not a statement about the block")
+		require.ErrorIs(t, err, boom)
+	})
+}
+
 // joinWorkers labels pool failures; cancellation filtering is the group Wait's
 // job, pinned by TestParallelExecWait.
 func TestJoinWorkers(t *testing.T) {

@@ -29,7 +29,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
-	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -460,7 +459,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 	// Stage progress: target the SharedDomains overlay (not replaced during exec)
 	// when present, else the live post-exec applyTx (parallel exec may have rolled
 	// the passed-in rwTx via Flush/CommitAndBegin).
-	if (execErr == nil || isOnlyLoopExhausted(execErr)) && out.applyTx != nil {
+	if (execErr == nil || isOnlyLoopExhausted(execErr)) && out.verdict == nil && out.applyTx != nil {
 		if overlay := doms.BlockOverlay(); overlay != nil {
 			if err := s.Update(overlay, out.lastCommittedBlockNum); err != nil {
 				return err
@@ -473,41 +472,39 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 	return unwindOnExecError(execErr, out, cfg, s, u, logger)
 }
 
-// unwindOnExecError decides the unwind after parallel exec reports an invalid
-// block. A non-initial-cycle wrong trie root routes to handleIncorrectRootHashError,
-// which schedules the unwind on u (binary-search from out.failedBlock/Hash). An
-// initial-cycle wrong root is fatal (no fork to recover from) and returns execErr.
-// Any other invalid block also returns execErr WITHOUT setting a stage unwind
+// unwindOnExecError renders the executor outcome at the stage boundary. An
+// operational executor failure passes through untouched — it is never a block
+// verdict, so it cannot be mistaken for one upstream. A wrong-root verdict on
+// a non-initial cycle routes to handleIncorrectRootHashError, which schedules
+// the unwind on u (binary-search from the implicated block); an initial-cycle
+// wrong root is fatal (no fork to recover from). Any other verdict propagates
+// as its rules.ErrInvalidBlock-wrapping error WITHOUT setting a stage unwind
 // point — the staged-sync loop that detects ErrInvalidBlock owns that unwind;
 // setting one here would leave a stale bad-block verdict that blocks a fresh
-// canonical block at the same height on the next fork-choice. Under badBlockHalt
-// (in-memory fork validation) or a non-invalid error it unwinds nothing and
-// returns execErr for the caller to propagate.
+// canonical block at the same height on the next fork-choice. Under
+// badBlockHalt (in-memory fork validation) or a nil unwinder it unwinds
+// nothing and propagates the verdict error.
 func unwindOnExecError(execErr error, out execV3Outcome, cfg ExecuteBlockCfg, s *StageState, u Unwinder, logger log.Logger) error {
-	if !errors.Is(execErr, rules.ErrInvalidBlock) || cfg.badBlockHalt || u == nil {
+	if execErr != nil {
 		return execErr
 	}
-
-	if errors.Is(execErr, ErrWrongTrieRoot) {
-		// Only a pure wrong-root error may be consumed by scheduling an unwind.
-		if !commonerrors.IsOnly(execErr, ErrWrongTrieRoot) {
-			return execErr
-		}
-		// Initial sync has no competing fork to recover from, so a wrong trie root
-		// is fatal — the recovery handler would schedule an unwind (or none, when
-		// failedBlock <= s.BlockNumber) and return nil, silently swallowing the
-		// state-root mismatch. Only a non-initial-cycle reorg routes to recovery.
-		if s.CurrentSyncCycle.IsInitialCycle {
-			return execErr
-		}
-		return handleIncorrectRootHashError(out.failedBlock, out.failedHash, out.applyTx, cfg, s, logger, u)
+	v := out.verdict
+	if v == nil {
+		return nil
 	}
 
-	// A plain invalid block propagates the error without setting a stage unwind
-	// point — the caller owns the unwind. Setting one here would leave a stale
-	// bad-block verdict that blocks a fresh canonical block at the same height
-	// from being re-executed on the next fork-choice.
-	return execErr
+	if errors.Is(v.err, ErrWrongTrieRoot) && !cfg.badBlockHalt && u != nil {
+		// Initial sync has no competing fork to recover from, so a wrong trie root
+		// is fatal — the recovery handler would schedule an unwind (or none, when
+		// the implicated block <= s.BlockNumber) and return nil, silently
+		// swallowing the state-root mismatch. Only a non-initial-cycle reorg
+		// routes to recovery.
+		if !s.CurrentSyncCycle.IsInitialCycle {
+			return handleIncorrectRootHashError(v.blockNum, v.blockHash, out.applyTx, cfg, s, logger, u)
+		}
+	}
+
+	return v.err
 }
 
 // unwindDomsToBlock drops in-mem state of blocks (unwindToBlock, ∞) and

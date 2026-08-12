@@ -89,10 +89,9 @@ When rwLoop has nothing to do - it does Prune, or flush of WAL to RwTx (agg.rota
 
 type parallelExecutor struct {
 	txExecutor
-	// failedBlock/failedHash record the implicated block when execution fails
-	// (wrong-root or invalid block), so the stage wrapper can target the unwind.
-	failedBlock uint64
-	failedHash  common.Hash
+	// verdict is the recorded invalid-block verdict, if any. Written and read
+	// only on the execImpl goroutine (the apply loop runs there synchronously).
+	verdict *blockVerdict
 	execWorkers []*exec.Worker
 	stopWorkers func()
 	waitWorkers func() error
@@ -137,8 +136,20 @@ type parallelExecutor struct {
 	currentChangeSetBlock uint64
 }
 
+// blockVerdict is a definitive invalid-block verdict from the apply loop's
+// fail-candidate decision point: err wraps rules.ErrInvalidBlock (a wrong
+// trie root additionally matches ErrWrongTrieRoot). It travels as data, not
+// as an error, and only out of a run whose executor stayed healthy — an
+// operational failure in the same batch withholds it, because the machinery
+// that produced the verdict was itself failing.
+type blockVerdict struct {
+	blockNum  uint64
+	blockHash common.Hash
+	err       error
+}
+
 // stopKind classifies why the executor was asked to stop. It maps directly
-// to the stage return: done→nil, more→ErrLoopExhausted, bad→fail.err+unwind.
+// to the stage return: done→nil, more→ErrLoopExhausted, bad→verdict+unwind.
 type stopKind uint8
 
 const (
@@ -542,11 +553,11 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					// classifying the stop cause or observed progress. Executor-group
 					// errors and still-scheduled blocks are checked after teardown.
 					if fail.set {
-						// Unwind handling is hoisted to SpawnExecuteBlocksStage. Record the
-						// implicated block (not the last-applied one) so the stage can target
-						// the unwind correctly, then surface the failure.
-						pe.failedBlock, pe.failedHash = fail.block, fail.blockHash
-						return fail.err
+						// Unwind handling is hoisted to SpawnExecuteBlocksStage; the
+						// verdict names the implicated block, not the last-applied one.
+						var opErr error
+						pe.verdict, opErr = classifyApplyExit(fail)
+						return opErr
 					}
 					if err := applyLoopMissingBlocksError(ctx, lastBlock.blockNum, pe.maxBlockNum, txResultBlocks, appliedBlocks); err != nil {
 						return err
@@ -807,6 +818,14 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	}
 
 	if execErr != nil {
+		if pe.verdict != nil {
+			// A verdict is unverified next to any concurrent failure or abort — the
+			// mismatch may be its fallout. A retry that reproduces the verdict on a
+			// healthy run makes it authoritative.
+			pe.logger.Warn(fmt.Sprintf("[%s] Withholding invalid-block verdict from a failed run", pe.logPrefix),
+				"block", pe.verdict.blockNum, "verdict", pe.verdict.err, "err", execErr)
+			pe.verdict = nil
+		}
 		if !isQuietExit(execErr) {
 			if lastHeader != nil {
 				pe.logger.Warn(fmt.Sprintf("[%s] Execution failed", pe.logPrefix), "err", execErr, "block", lastHeader.Number.Uint64(), "hash", lastHeader.Hash())
@@ -815,9 +834,16 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 			}
 			return nil, rwTx, execErr
 		}
+		return lastHeader, rwTx, execErr
 	}
 
-	return lastHeader, rwTx, execErr
+	if pe.verdict != nil {
+		pe.logger.Warn(fmt.Sprintf("[%s] Invalid block", pe.logPrefix),
+			"block", pe.verdict.blockNum, "hash", pe.verdict.blockHash, "err", pe.verdict.err)
+		return nil, rwTx, nil
+	}
+
+	return lastHeader, rwTx, nil
 }
 
 // isQuietExit reports whether err is routine teardown (cancellation-only) or a
@@ -1432,6 +1458,19 @@ func (fc *failCandidate) consider(block uint64, blockHash common.Hash, exec bool
 	}
 }
 
+// classifyApplyExit converts the fail-candidate recorded at channel close into
+// the executor outcome: a rules.ErrInvalidBlock-wrapping failure is the
+// implicated block's verdict, anything else stays an operational error.
+func classifyApplyExit(fail failCandidate) (*blockVerdict, error) {
+	if !fail.set {
+		return nil, nil
+	}
+	if errors.Is(fail.err, rules.ErrInvalidBlock) {
+		return &blockVerdict{blockNum: fail.block, blockHash: fail.blockHash, err: fail.err}, nil
+	}
+	return nil, fail.err
+}
+
 // wrapAsExecAbort wraps origErr in ErrExecAbortError unless it already is one,
 // preserving the real origErr as OriginError instead of the zero-value an
 // inline type-assertion would substitute on the failure branch.
@@ -1579,14 +1618,18 @@ func (pe *parallelExecutor) closeApplyChannels() (closedOrder []string) {
 
 // checkBlocksDrained reports scheduled blocks that never reached apply-loop
 // validation. This is an executor failure, not proof that a block is invalid.
-// Parent cancellation and stops that intentionally abandon queued follow-on
-// blocks (stopBadBlock and stopMoreWork) are exempt. stopReachedMax claims the
-// requested range completed, so pending blocks remain an executor failure.
+// Parent cancellation, a recorded verdict, and stops that intentionally
+// abandon queued follow-on blocks (stopBadBlock and stopMoreWork) are exempt.
+// stopReachedMax claims the requested range completed, so pending blocks
+// remain an executor failure.
 func (pe *parallelExecutor) checkBlocksDrained(ctx, executorCtx context.Context, execErr error) error {
 	if ctx.Err() != nil {
 		return reconcileExecErrors(execErr, context.Cause(ctx))
 	}
 	if execErr != nil && !isQuietExit(execErr) {
+		return execErr
+	}
+	if pe.verdict != nil {
 		return execErr
 	}
 	if sc, ok := stopCauseOf(executorCtx); ok && (sc.kind == stopBadBlock || sc.kind == stopMoreWork) {
