@@ -9,6 +9,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
@@ -114,8 +115,26 @@ func (tx *AccountAbstractionTransaction) GetFeeCap() *uint256.Int {
 	return tx.FeeCap
 }
 
+// TotalGasLimit reports whether base plus the declared gas limits fits in a uint64.
+func (tx *AccountAbstractionTransaction) TotalGasLimit(base uint64) (uint64, bool) {
+	total := base
+	for _, gas := range [...]uint64{tx.ValidationGasLimit, tx.PaymasterValidationGasLimit, tx.GasLimit, tx.PostOpGasLimit} {
+		sum, overflow := math.SafeAdd(total, gas)
+		if overflow {
+			return 0, false
+		}
+		total = sum
+	}
+	return total, true
+}
+
 func (tx *AccountAbstractionTransaction) GetGasLimit() uint64 {
-	return params.TxAAGas + tx.ValidationGasLimit + tx.PaymasterValidationGasLimit + tx.GasLimit + tx.PostOpGasLimit
+	// saturate: the interface cannot report overflow, and a wrapped-small total would pass gas checks
+	total, ok := tx.TotalGasLimit(params.TxAAGas)
+	if !ok {
+		return math.MaxUint64
+	}
+	return total
 }
 
 func (tx *AccountAbstractionTransaction) GetTipCap() *uint256.Int {
