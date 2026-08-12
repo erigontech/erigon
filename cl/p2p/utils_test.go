@@ -41,6 +41,80 @@ func TestParseStaticPeerAcceptsENRAndLibp2pMultiaddr(t *testing.T) {
 	}
 }
 
+func TestParseBootstrapNodesClassifiesLibp2pMultiaddrAsDirectPeer(t *testing.T) {
+	t.Parallel()
+
+	discoveryNodes, directPeers, unsupportedPeers, err := ParseBootstrapNodes([]string{publicNodeChiadoMultiaddr})
+	require.NoError(t, err)
+	require.Empty(t, discoveryNodes)
+	require.Equal(t, []string{publicNodeChiadoMultiaddr}, directPeers)
+	require.Empty(t, unsupportedPeers)
+}
+
+func TestParseBootstrapNodesClassifiesMixedInputs(t *testing.T) {
+	t.Parallel()
+
+	secondDirectPeer := "/dns4/chiado.example/tcp/9000/p2p/16Uiu2HAmBciu61DBo623TByPbuBaGh9So6hRQfvHpCegCE71JNp9"
+	discoveryNodes, directPeers, unsupportedPeers, err := ParseBootstrapNodes([]string{
+		publicNodeChiadoMultiaddr,
+		publicNodeChiadoENR,
+		secondDirectPeer,
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{publicNodeChiadoENR}, discoveryNodes)
+	require.Equal(t, []string{publicNodeChiadoMultiaddr, secondDirectPeer}, directPeers)
+	require.Empty(t, unsupportedPeers)
+}
+
+func TestParseBootstrapNodesAcceptsEmptyInput(t *testing.T) {
+	t.Parallel()
+
+	discoveryNodes, directPeers, unsupportedPeers, err := ParseBootstrapNodes(nil)
+	require.NoError(t, err)
+	require.Empty(t, discoveryNodes)
+	require.Empty(t, directPeers)
+	require.Empty(t, unsupportedPeers)
+}
+
+func TestParseBootstrapNodesClassifiesUnsupportedTransport(t *testing.T) {
+	t.Parallel()
+
+	quicPeer := "/ip4/51.68.224.153/udp/9001/quic-v1/p2p/16Uiu2HAkxcBE3LK7zhnyZERguonkKmXLgYPRcuDPaF6C2vaigYuT"
+	discoveryNodes, directPeers, unsupportedPeers, err := ParseBootstrapNodes([]string{
+		publicNodeChiadoMultiaddr,
+		quicPeer,
+	})
+	require.NoError(t, err)
+	require.Empty(t, discoveryNodes)
+	require.Equal(t, []string{publicNodeChiadoMultiaddr}, directPeers)
+	require.Equal(t, []string{quicPeer}, unsupportedPeers)
+}
+
+func TestParseBootstrapNodesRejectsOnlyUnsupportedTransport(t *testing.T) {
+	t.Parallel()
+
+	quicPeer := "/ip4/51.68.224.153/udp/9001/quic-v1/p2p/16Uiu2HAkxcBE3LK7zhnyZERguonkKmXLgYPRcuDPaF6C2vaigYuT"
+	discoveryNodes, directPeers, unsupportedPeers, err := ParseBootstrapNodes([]string{quicPeer})
+	require.Error(t, err)
+	require.Nil(t, discoveryNodes)
+	require.Nil(t, directPeers)
+	require.Nil(t, unsupportedPeers)
+}
+
+func TestParseBootstrapNodesRejectsMalformedMixedInput(t *testing.T) {
+	t.Parallel()
+
+	discoveryNodes, directPeers, unsupportedPeers, err := ParseBootstrapNodes([]string{
+		publicNodeChiadoENR,
+		"not-a-bootstrap-node",
+		publicNodeChiadoMultiaddr,
+	})
+	require.Error(t, err)
+	require.Nil(t, discoveryNodes)
+	require.Nil(t, directPeers)
+	require.Nil(t, unsupportedPeers)
+}
+
 func TestParseStaticPeerRejectsMultiaddrWithoutPeerID(t *testing.T) {
 	t.Parallel()
 

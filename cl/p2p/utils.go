@@ -88,6 +88,35 @@ func ParseStaticPeer(value string) (multiaddr.Multiaddr, error) {
 	return addr, nil
 }
 
+func ParseBootstrapNodes(values []string) (discoveryNodes, directPeers, unsupportedPeers []string, err error) {
+	for _, value := range values {
+		if _, nodeErr := enode.Parse(enode.ValidSchemes, value); nodeErr == nil {
+			discoveryNodes = append(discoveryNodes, value)
+			continue
+		}
+		addr, addrErr := multiaddr.NewMultiaddr(value)
+		if addrErr != nil {
+			return nil, nil, nil, fmt.Errorf("invalid bootstrap node %q: %w", value, addrErr)
+		}
+		info, infoErr := peer.AddrInfoFromP2pAddr(addr)
+		if infoErr != nil {
+			return nil, nil, nil, fmt.Errorf("invalid libp2p bootstrap node %q: %w", value, infoErr)
+		}
+		if len(info.Addrs) == 0 {
+			return nil, nil, nil, fmt.Errorf("libp2p bootstrap node %q does not provide a dial address", value)
+		}
+		if _, directErr := ParseStaticPeer(value); directErr != nil {
+			unsupportedPeers = append(unsupportedPeers, value)
+			continue
+		}
+		directPeers = append(directPeers, value)
+	}
+	if len(values) > 0 && len(discoveryNodes) == 0 && len(directPeers) == 0 {
+		return nil, nil, nil, errors.New("bootstrap nodes do not contain a supported ENR or direct TCP libp2p address")
+	}
+	return discoveryNodes, directPeers, unsupportedPeers, nil
+}
+
 func ConvertToSingleMultiAddr(node *enode.Node) (multiaddr.Multiaddr, error) {
 	if node.TCP() == 0 {
 		return nil, fmt.Errorf("node %s does not provide a tcp port", node.ID())
