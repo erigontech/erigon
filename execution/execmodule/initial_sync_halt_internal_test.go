@@ -1,0 +1,49 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package execmodule
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/execution/protocol/rules"
+)
+
+// TestHaltOnInitialSyncFailure pins the decision for a failed one-shot
+// initial sync: any real failure under the parallel executor halts the
+// process (the operator's restart is the retry), while routine cancellation
+// and serial execution keep the node up.
+func TestHaltOnInitialSyncFailure(t *testing.T) {
+	t.Parallel()
+
+	operational := fmt.Errorf("[Execution] %w",
+		errors.New("parallel exec finished with 1 scheduled block(s) that never reached apply-loop validation"))
+	verdict := fmt.Errorf("[Execution] %w", fmt.Errorf("%w: gas mismatch, block=12", rules.ErrInvalidBlock))
+
+	require.True(t, haltOnInitialSyncFailure(operational, true),
+		"a real failure must halt regardless of its class — the node would otherwise stay up but never sync")
+	require.True(t, haltOnInitialSyncFailure(verdict, true))
+	require.False(t, haltOnInitialSyncFailure(nil, true))
+	require.False(t, haltOnInitialSyncFailure(fmt.Errorf("[Execution] %w", context.Canceled), true),
+		"shutdown must not halt the node")
+	require.False(t, haltOnInitialSyncFailure(operational, false),
+		"serial execution keeps the stay-up behavior")
+}

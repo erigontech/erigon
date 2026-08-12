@@ -691,6 +691,16 @@ func (e *ExecModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidH
 	return nil
 }
 
+// haltOnInitialSyncFailure reports whether a failed ProcessFrozenBlocks run
+// must stop the process. Initial sync runs once, so after any real failure —
+// deliberately regardless of its class — the node would stay up serving RPC
+// but never syncing; the operator's restart is the retry. The parallel
+// executor additionally cannot unwind an invalid block; serial keeps the
+// stay-up behavior.
+func haltOnInitialSyncFailure(err error, parallelExec bool) bool {
+	return err != nil && !commonerrors.IsOnlyCanceled(err) && parallelExec
+}
+
 func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 	if err := e.semaphore.Acquire(ctx, 1); err != nil {
 		if !commonerrors.IsOnlyCanceled(err) {
@@ -704,15 +714,11 @@ func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 		if !commonerrors.IsOnlyCanceled(err) {
 			e.logger.Error("Could not start execution service", "err", err)
 		}
-		// During parallel execution, an invalid block in initial sync (ProcessFrozenBlocks)
-		// is unrecoverable: the parallel executor cannot unwind and retrying will hit the
-		// same block forever, pushing Caplin's backward target further back.
-		// Exit the process so the operator can investigate.
-		if dbg.Exec3Parallel && errors.Is(err, rules.ErrInvalidBlock) {
-			e.logger.Error("Invalid block during parallel initial sync — halting process")
+		if haltOnInitialSyncFailure(err, dbg.Exec3Parallel) {
+			e.logger.Error("Initial sync failed during parallel execution — halting process")
 			go func() {
 				if stopErr := e.stopNode(); stopErr != nil {
-					e.logger.Error("Could not stop node on invalid block", "err", stopErr)
+					e.logger.Error("Could not stop node on initial sync failure", "err", stopErr)
 				}
 			}()
 			return
