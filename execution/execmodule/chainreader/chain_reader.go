@@ -279,6 +279,10 @@ func (c ChainReaderWriterEth1) HasBlock(ctx context.Context, hash common.Hash) (
 	return c.executionModule.HasBlock(ctx, &hash, nil)
 }
 
+// ErrExecutionBusy separates contention, which settles on its own, from a rejection that will
+// return the same answer however many times it is asked.
+var ErrExecutionBusy = errors.New("execution data is still syncing")
+
 func (c ChainReaderWriterEth1) AssembleBlock(ctx context.Context, baseHash common.Hash, attributes *engine_types.PayloadAttributes) (id uint64, err error) {
 	params := &builder.Parameters{
 		ParentHash:            baseHash,
@@ -295,18 +299,18 @@ func (c ChainReaderWriterEth1) AssembleBlock(ctx context.Context, baseHash commo
 		return 0, err
 	}
 	if result.Busy {
-		return 0, errors.New("execution data is still syncing")
+		return 0, ErrExecutionBusy
 	}
 	return result.PayloadID, nil
 }
 
-func (c ChainReaderWriterEth1) GetAssembledBlock(id uint64) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
-	result, err := c.executionModule.GetAssembledBlock(context.Background(), id)
+func (c ChainReaderWriterEth1) GetAssembledBlock(ctx context.Context, id uint64) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+	result, err := c.executionModule.GetAssembledBlock(ctx, id)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
 	if result.Busy {
-		return nil, nil, nil, nil, errors.New("execution data is still syncing")
+		return nil, nil, nil, nil, ErrExecutionBusy
 	}
 	if result.Block == nil {
 		return nil, nil, nil, nil, nil

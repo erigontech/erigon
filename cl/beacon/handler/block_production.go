@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/network/subnets"
 	"github.com/erigontech/erigon/cl/pool"
@@ -208,7 +209,10 @@ func attestationDue(cfg *clparams.BeaconChainConfig, stateVersion clparams.State
 	return time.Duration(cfg.AttestationDueMs(stateVersion.AfterOrEqual(clparams.GloasVersion))) * time.Millisecond
 }
 
-// computeBlockBuilderWindow uses the earlier collection window only for a sufficiently warmed builder.
+// computeBlockBuilderWindow uses the earlier collection window only for a sufficiently warmed
+// builder. Collecting stops the builder, so the earlier window trades the transactions that would
+// have arrived during the rest of the slot for the time it takes to sign, publish and gossip the
+// block before attesters vote on it.
 func computeBlockBuilderWindow(now, slotStart time.Time, cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion, prepared bool) blockBuilderWindow {
 	due := attestationDue(cfg, stateVersion)
 	pollUntil := slotStart.Add(unpreparedGrabOffset(due))
@@ -244,31 +248,50 @@ func preparedPayloadMinimumAge(cfg *clparams.BeaconChainConfig, stateVersion clp
 	return max(unpreparedGrabOffset(due)-preparedGrabOffset(due), 0)
 }
 
-func payloadAttributesForVersion(
-	version clparams.StateVersion,
+const forkChoiceBusyRetryDelay = 100 * time.Millisecond
+
+// forkChoiceUpdateForProposal keeps asking while the execution layer reports contention, but only
+// until the payload would have to be collected: an id obtained after that is no use to this slot.
+// The head is not re-read because a proposal is committed to the parent it is being built on.
+func (a *ApiHandler) forkChoiceUpdateForProposal(
+	ctx context.Context,
+	targetSlot uint64,
+	finalized, safe, head common.Hash,
+	attrs *engine_types.PayloadAttributes,
+	stateVersion clparams.StateVersion,
+) ([]byte, error) {
+	retryUntil := a.ethClock.GetSlotTime(targetSlot).Add(unpreparedGrabOffset(attestationDue(a.beaconChainCfg, stateVersion)))
+	for {
+		idBytes, err := a.engine.ForkChoiceUpdate(ctx, finalized, safe, head, attrs, stateVersion)
+		if !errors.Is(err, execution_client.ErrForkChoiceBusy) || !time.Now().Before(retryUntil) {
+			return idBytes, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(forkChoiceBusyRetryDelay):
+		}
+	}
+}
+
+// payloadAttributes builds the attributes preparation and production must agree on. Withdrawals and
+// the parent beacon block root are set for every fork because the execution layer decides what to do
+// with them from the payload timestamp; gating them on the consensus fork instead puts the two sides
+// on different oracles, which disagree on any chain where the forks are not aligned.
+func payloadAttributes(
 	timestamp hexutil.Uint64,
 	prevRandao common.Hash,
 	feeRecipient common.Address,
 	withdrawals []*types.Withdrawal,
 	parentRoot *common.Hash,
-	slotNumber, targetGasLimit *hexutil.Uint64,
 ) *engine_types.PayloadAttributes {
-	attrs := &engine_types.PayloadAttributes{
+	return &engine_types.PayloadAttributes{
 		Timestamp:             timestamp,
 		PrevRandao:            prevRandao,
 		SuggestedFeeRecipient: feeRecipient,
+		Withdrawals:           withdrawals,
+		ParentBeaconBlockRoot: parentRoot,
 	}
-	if version.AfterOrEqual(clparams.CapellaVersion) {
-		attrs.Withdrawals = withdrawals
-	}
-	if version.AfterOrEqual(clparams.DenebVersion) {
-		attrs.ParentBeaconBlockRoot = parentRoot
-	}
-	if version.AfterOrEqual(clparams.GloasVersion) {
-		attrs.SlotNumber = slotNumber
-		attrs.TargetGasLimit = targetGasLimit
-	}
-	return attrs
 }
 
 func shouldRetryGetPayload(now, deadline time.Time) bool {
@@ -296,11 +319,26 @@ func pollAssembledPayload(
 	defer deadlineTimer.Stop()
 	retryTicker := time.NewTicker(retryTime)
 	defer retryTicker.Stop()
+	// A slot that fails fails on every poll of the window, so report the first and then a count
+	// rather than hundreds of copies of one line.
+	var (
+		failures int
+		lastErr  error
+	)
+	defer func() {
+		if failures > 1 {
+			log.Error("BlockProduction: payload polling kept failing", "attempts", failures, "err", lastErr)
+		}
+	}()
 	for {
 		// Grab at least once, even past the deadline, so a late produce request still gets a payload.
 		payload, bundles, requestsBundle, blockValue, err := get()
 		if err != nil {
-			log.Error("BlockProduction: Failed to get payload", "err", err)
+			failures++
+			lastErr = err
+			if failures == 1 {
+				log.Error("BlockProduction: Failed to get payload", "err", err)
+			}
 		} else if payload != nil {
 			return payload, bundles, requestsBundle, blockValue, true
 		}
@@ -903,6 +941,9 @@ func (a *ApiHandler) produceBeaconBody(
 			baseBlockSlot,
 		)
 	}
+	a.proposalsInFlight.Add(1)
+	defer a.proposalsInFlight.Add(-1)
+
 	var wg sync.WaitGroup
 	stateVersion := a.beaconChainCfg.GetCurrentStateVersion(
 		targetSlot / a.beaconChainCfg.SlotsPerEpoch,
@@ -964,14 +1005,7 @@ func (a *ApiHandler) produceBeaconBody(
 			head = baseState.GetLatestBlockHash()
 		}
 	}
-	finalizedHash := a.forkchoiceStore.GetFinalizedExecutionHash(baseState.FinalizedCheckpoint().Root)
-	if finalizedHash == (common.Hash{}) {
-		finalizedHash = head
-	}
-	safeHash := a.forkchoiceStore.GetFinalizedExecutionHash(baseState.CurrentJustifiedCheckpoint().Root)
-	if safeHash == (common.Hash{}) {
-		safeHash = head
-	}
+	safeHash, finalizedHash := a.executionCheckpointHashes(baseState, head)
 	proposerIndex, err := baseState.GetBeaconProposerIndexForSlot(targetSlot)
 	if err != nil {
 		return nil, 0, err
@@ -1026,7 +1060,7 @@ func (a *ApiHandler) produceBeaconBody(
 		var attrs *engine_types.PayloadAttributes
 		if stateVersion.Before(clparams.GloasVersion) {
 			var err error
-			fcuHead, fcuSafeHash, fcuFinalizedHash, attrs, err = a.preGloasForkChoiceInputs(baseState, baseBlockRoot, targetSlot, feeRecipient, stateVersion)
+			fcuHead, fcuSafeHash, fcuFinalizedHash, attrs, err = a.preGloasForkChoiceInputs(baseState, baseBlockRoot, targetSlot, feeRecipient)
 			if err != nil {
 				log.Error("BlockProduction: build forkchoice inputs failed", "err", err)
 				return
@@ -1044,56 +1078,33 @@ func (a *ApiHandler) produceBeaconBody(
 				log.Error("BlockProduction: GetExpectedWithdrawals (FULL) failed", "err", err)
 				return
 			}
-			withdrawals = make([]*types.Withdrawal, 0, len(clWithdrawals.Withdrawals))
-			for _, w := range clWithdrawals.Withdrawals {
-				withdrawals = append(withdrawals, &types.Withdrawal{
-					Index:     w.Index,
-					Amount:    w.Amount,
-					Validator: w.Validator,
-					Address:   w.Address,
-				})
-			}
+			withdrawals = cltypes.ConvertConsensusWithdrawalsToExecutionWithdrawals(clWithdrawals.Withdrawals)
 		case stateVersion >= clparams.GloasVersion && gloasWithdrawalsState == nil:
 			// GLOAS EMPTY: use cached payload_expected_withdrawals from state
 			cachedWithdrawals := baseState.GetPayloadExpectedWithdrawals()
 			if cachedWithdrawals != nil {
-				withdrawals = make([]*types.Withdrawal, 0, cachedWithdrawals.Len())
-				for i := 0; i < cachedWithdrawals.Len(); i++ {
-					w := cachedWithdrawals.Get(i)
-					withdrawals = append(withdrawals, &types.Withdrawal{
-						Index:     w.Index,
-						Amount:    w.Amount,
-						Validator: w.Validator,
-						Address:   w.Address,
-					})
+				consensusWithdrawals := make([]*cltypes.Withdrawal, cachedWithdrawals.Len())
+				for i := range consensusWithdrawals {
+					consensusWithdrawals[i] = cachedWithdrawals.Get(i)
 				}
+				withdrawals = cltypes.ConvertConsensusWithdrawalsToExecutionWithdrawals(consensusWithdrawals)
 			}
 		}
 
 		if stateVersion.AfterOrEqual(clparams.GloasVersion) {
-			var slotNumber *hexutil.Uint64
-			sn := hexutil.Uint64(targetSlot)
-			slotNumber = &sn
-			attrs = payloadAttributesForVersion(
-				stateVersion,
+			attrs = payloadAttributes(
 				hexutil.Uint64(state.ComputeTimestampAtSlot(baseState, targetSlot)),
 				random,
 				feeRecipient,
 				withdrawals,
 				(*common.Hash)(&blockRoot),
-				slotNumber,
-				targetGasLimit,
 			)
+			slotNumber := hexutil.Uint64(targetSlot)
+			attrs.SlotNumber = &slotNumber
+			attrs.TargetGasLimit = targetGasLimit
 		}
 		builderStartedAt := time.Now()
-		idBytes, err := a.engine.ForkChoiceUpdate(
-			ctx,
-			fcuFinalizedHash,
-			fcuSafeHash,
-			fcuHead,
-			attrs,
-			stateVersion,
-		)
+		idBytes, err := a.forkChoiceUpdateForProposal(ctx, targetSlot, fcuFinalizedHash, fcuSafeHash, fcuHead, attrs, stateVersion)
 		if err != nil {
 			log.Error("BlockProduction: Failed to get payload id", "err", err)
 			return
@@ -2641,15 +2652,12 @@ func (a *ApiHandler) cacheExecutionBody(payload *cltypes.Eth1Block) {
 	}
 	var ws []*types.Withdrawal
 	if payload.Withdrawals != nil {
-		payload.Withdrawals.Range(func(idx int, w *cltypes.Withdrawal, total int) bool {
-			ws = append(ws, &types.Withdrawal{
-				Index:     w.Index,
-				Validator: w.Validator,
-				Address:   w.Address,
-				Amount:    w.Amount,
-			})
+		consensusWithdrawals := make([]*cltypes.Withdrawal, 0, payload.Withdrawals.Len())
+		payload.Withdrawals.Range(func(_ int, w *cltypes.Withdrawal, _ int) bool {
+			consensusWithdrawals = append(consensusWithdrawals, w)
 			return true
 		})
+		ws = cltypes.ConvertConsensusWithdrawalsToExecutionWithdrawals(consensusWithdrawals)
 	}
 	a.blockReader.CacheBlockBody(payload.BlockNumber, rawTxs, ws)
 }

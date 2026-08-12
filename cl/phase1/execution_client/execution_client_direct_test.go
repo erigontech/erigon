@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/execution/execmodule"
+	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 )
 
 func TestRetryAssembleBlockStopsWhenContextIsCanceled(t *testing.T) {
@@ -33,7 +34,7 @@ func TestRetryAssembleBlockStopsWhenContextIsCanceled(t *testing.T) {
 	_, err := retryAssembleBlock(ctx, 30, time.Hour, func(context.Context) (uint64, error) {
 		calls++
 		cancel()
-		return 0, errors.New("busy")
+		return 0, chainreader.ErrExecutionBusy
 	})
 
 	require.ErrorIs(t, err, context.Canceled)
@@ -46,11 +47,24 @@ func TestRetryAssembleBlockDoesNotStartWithCanceledContext(t *testing.T) {
 	calls := 0
 	_, err := retryAssembleBlock(ctx, 30, time.Hour, func(context.Context) (uint64, error) {
 		calls++
-		return 0, errors.New("busy")
+		return 0, chainreader.ErrExecutionBusy
 	})
 
 	require.ErrorIs(t, err, context.Canceled)
 	require.Zero(t, calls)
+}
+
+func TestRetryAssembleBlockStopsOnPermanentError(t *testing.T) {
+	rejected := errors.New("withdrawals before shanghai")
+	calls := 0
+	_, err := retryAssembleBlock(t.Context(), 30, time.Hour, func(context.Context) (uint64, error) {
+		calls++
+		return 0, rejected
+	})
+
+	// A rejection answers the same way however often it is asked, so retrying it only burns the slot.
+	require.ErrorIs(t, err, rejected)
+	require.Equal(t, 1, calls)
 }
 
 func TestRetryAssembleBlockReturnsFirstSuccess(t *testing.T) {
@@ -58,7 +72,7 @@ func TestRetryAssembleBlockReturnsFirstSuccess(t *testing.T) {
 	id, err := retryAssembleBlock(t.Context(), 3, time.Millisecond, func(context.Context) (uint64, error) {
 		calls++
 		if calls < 3 {
-			return 0, errors.New("busy")
+			return 0, chainreader.ErrExecutionBusy
 		}
 		return 7, nil
 	})
@@ -75,59 +89,19 @@ func TestRetryAssembleBlockRejectsNoAttempts(t *testing.T) {
 	require.EqualError(t, err, "assemble block requires at least one attempt")
 }
 
-func TestAwaitForkChoiceAdoptedPassesThroughSettledStatus(t *testing.T) {
-	calls := 0
-	status, err := awaitForkChoiceAdopted(t.Context(), execmodule.ExecutionStatusSuccess, 30, time.Hour,
-		func(context.Context) (execmodule.ExecutionStatus, error) {
-			calls++
-			return execmodule.ExecutionStatusSuccess, nil
+func TestForkChoiceStatusErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status execmodule.ExecutionStatus
+		want   error
+	}{
+		{"busy is contention, not rejection", execmodule.ExecutionStatusBusy, ErrForkChoiceBusy},
+		{"too far away", execmodule.ExecutionStatusTooFarAway, ErrForkChoiceNotAdopted},
+		{"missing segment", execmodule.ExecutionStatusMissingSegment, ErrForkChoiceNotAdopted},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.ErrorIs(t, forkChoiceStatusError(tc.status), tc.want)
 		})
-
-	require.NoError(t, err)
-	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
-	require.Zero(t, calls, "a settled status must not be re-sent")
-}
-
-func TestAwaitForkChoiceAdoptedWaitsForBusyToSettle(t *testing.T) {
-	calls := 0
-	status, err := awaitForkChoiceAdopted(t.Context(), execmodule.ExecutionStatusBusy, 30, time.Millisecond,
-		func(context.Context) (execmodule.ExecutionStatus, error) {
-			calls++
-			if calls < 3 {
-				return execmodule.ExecutionStatusBusy, nil
-			}
-			return execmodule.ExecutionStatusSuccess, nil
-		})
-
-	require.NoError(t, err)
-	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
-	require.Equal(t, 3, calls)
-}
-
-func TestAwaitForkChoiceAdoptedGivesUpAfterAttempts(t *testing.T) {
-	calls := 0
-	status, err := awaitForkChoiceAdopted(t.Context(), execmodule.ExecutionStatusBusy, 2, time.Millisecond,
-		func(context.Context) (execmodule.ExecutionStatus, error) {
-			calls++
-			return execmodule.ExecutionStatusBusy, nil
-		})
-
-	// Still Busy, so the caller reports the head was never adopted rather than assembling on it.
-	require.NoError(t, err)
-	require.Equal(t, execmodule.ExecutionStatusBusy, status)
-	require.Equal(t, 2, calls)
-}
-
-func TestAwaitForkChoiceAdoptedStopsWhenContextIsCanceled(t *testing.T) {
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	calls := 0
-	_, err := awaitForkChoiceAdopted(ctx, execmodule.ExecutionStatusBusy, 30, time.Hour,
-		func(context.Context) (execmodule.ExecutionStatus, error) {
-			calls++
-			return execmodule.ExecutionStatusSuccess, nil
-		})
-
-	require.ErrorIs(t, err, context.Canceled)
-	require.Zero(t, calls)
+	}
+	require.NoError(t, forkChoiceStatusError(execmodule.ExecutionStatusSuccess))
 }

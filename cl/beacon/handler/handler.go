@@ -108,6 +108,10 @@ type ApiHandler struct {
 
 	// preparedPayload tracks the payload primed ahead of a slot this node proposes.
 	preparedPayload preparedPayload
+	// proposalsInFlight counts block productions running on this node, so preparation can stand
+	// off. Both go through the execution layer's weight-one semaphore, and a prime holding it
+	// across the collection window turns a fully built payload into a missed slot.
+	proposalsInFlight atomic.Int64
 
 	// Validator data structures
 	validatorParams                    *validator_params.ValidatorParams

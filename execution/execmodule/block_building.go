@@ -95,6 +95,13 @@ type builderEntry struct {
 	timestamp uint64
 }
 
+func (e *ExecModule) dropBuilder(id uint64, entry *builderEntry) {
+	if e.buildersByTimestamp[entry.timestamp] == id {
+		delete(e.buildersByTimestamp, entry.timestamp)
+	}
+	delete(e.builders, id)
+}
+
 func (e *ExecModule) evictOldBuilders() {
 	ids := common.SortedKeys(e.builders)
 
@@ -129,18 +136,22 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 	}
 
 	if previousID, ok := e.buildersByTimestamp[params.Timestamp]; ok {
-		params.PayloadId = previousID
-		if previous := e.builders[previousID]; previous != nil && reflect.DeepEqual(previous.params, params) {
-			e.logger.Info("[ForkChoiceUpdated] duplicate build request")
-			return AssembleBlockResult{PayloadID: previousID}, nil
-		}
-		if previous := e.builders[previousID]; previous != nil && previous.builder != nil {
+		// A stale builder can never grow its payload, so reusing its id would spend the slot
+		// waiting on a block that will not arrive. Take a fresh builder instead and leave the
+		// old id answerable for whoever already holds it.
+		if previous := e.builders[previousID]; previous != nil && previous.builder != nil && !previous.builder.Stale() {
+			params.PayloadId = previousID
+			if reflect.DeepEqual(previous.params, params) {
+				e.logger.Info("[ForkChoiceUpdated] duplicate build request")
+				return AssembleBlockResult{PayloadID: previousID}, nil
+			}
+			// Superseding must not outlive the caller that asked for it: cancelling on behalf of
+			// an expired request would freeze a builder the next request is already waiting on.
+			if err := ctx.Err(); err != nil {
+				return AssembleBlockResult{}, err
+			}
 			previous.builder.Cancel()
 		}
-		// Cancel freezes a builder where it stands, so a superseded id must stop being
-		// retrievable: otherwise GetAssembledBlock hands back whatever it had packed at
-		// that instant, which is near-empty when the supersede came early.
-		delete(e.builders, previousID)
 	}
 
 	// Initiate payload building
@@ -190,11 +201,16 @@ func (e *ExecModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (A
 	defer e.semaphore.Release(1)
 
 	entry, ok := e.builders[payloadID]
-	if !ok || entry.builder == nil {
+	if !ok || entry == nil || entry.builder == nil {
 		return AssembledBlockResult{}, nil
 	}
 	blockWithReceipts, err := entry.builder.Stop(ctx)
 	if err != nil {
+		// A failed builder latches its error, so keeping the entry would hand the same failure to
+		// every retry. A caller whose own context expired says nothing about the builder.
+		if ctx.Err() == nil {
+			e.dropBuilder(payloadID, entry)
+		}
 		e.logger.Error("Failed to build PoS block", "err", err)
 		return AssembledBlockResult{}, err
 	}

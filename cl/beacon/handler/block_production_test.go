@@ -917,6 +917,93 @@ func TestPreparePayloadLoopSkipsSlotsTooFarAhead(t *testing.T) {
 	<-ctx.Done()
 }
 
+func TestPreparePayloadLoopStandsOffWhileProducing(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, _, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	targetSlot := postState.Slot() + 1
+	proposerIndex, err := postState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
+
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetCurrentSlot().Return(targetSlot - 1).AnyTimes()
+	clock.EXPECT().GetSlotTime(gomock.Any()).Times(0)
+	handler.ethClock = clock
+
+	// Priming would contend with the block being produced for the execution layer's single slot.
+	handler.proposalsInFlight.Add(1)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+	handler.engine = engine
+
+	ctx, cancel := context.WithTimeout(t.Context(), 250*time.Millisecond)
+	defer cancel()
+	handler.preparePayloadLoop(ctx)
+}
+
+func TestPreparePayloadLoopSkipsSlotsAboutToStart(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, _, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	targetSlot := postState.Slot() + 1
+	proposerIndex, err := postState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
+
+	// Too close to the slot for the prime to ever reach the age production demands of it, so the
+	// state copy and the forkchoice update would both be spent for nothing.
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetCurrentSlot().Return(targetSlot - 1).AnyTimes()
+	clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(200 * time.Millisecond)).AnyTimes()
+	handler.ethClock = clock
+
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+	handler.engine = engine
+
+	ctx, cancel := context.WithTimeout(t.Context(), 250*time.Millisecond)
+	defer cancel()
+	handler.preparePayloadLoop(ctx)
+}
+
+func TestForkChoiceUpdateForProposalWaitsOutContention(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetSlotTime(uint64(10)).Return(time.Now())
+
+	calls := 0
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(context.Context, common.Hash, common.Hash, common.Hash, *engine_types.PayloadAttributes, clparams.StateVersion) ([]byte, error) {
+			calls++
+			if calls < 3 {
+				return nil, execution_client.ErrForkChoiceBusy
+			}
+			return []byte{1, 2, 3, 4, 5, 6, 7, 8}, nil
+		}).Times(3)
+
+	a := &ApiHandler{engine: engine, ethClock: clock, beaconChainCfg: &clparams.MainnetBeaconConfig}
+	id, err := a.forkChoiceUpdateForProposal(t.Context(), 10, common.Hash{}, common.Hash{}, common.Hash{}, &engine_types.PayloadAttributes{}, clparams.ElectraVersion)
+
+	require.NoError(t, err)
+	require.Len(t, id, 8)
+}
+
+func TestForkChoiceUpdateForProposalStopsOnceTheWindowClosed(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetSlotTime(uint64(10)).Return(time.Now().Add(-time.Minute))
+
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(nil, execution_client.ErrForkChoiceBusy).Times(1)
+
+	// Past the point the payload has to be collected, another attempt cannot help this slot.
+	a := &ApiHandler{engine: engine, ethClock: clock, beaconChainCfg: &clparams.MainnetBeaconConfig}
+	_, err := a.forkChoiceUpdateForProposal(t.Context(), 10, common.Hash{}, common.Hash{}, common.Hash{}, &engine_types.PayloadAttributes{}, clparams.ElectraVersion)
+
+	require.ErrorIs(t, err, execution_client.ErrForkChoiceBusy)
+}
+
 func TestPreparePayloadForSendsCompleteForkChoiceUpdate(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, _, fcu, validatorParams := setupTestingHandler(t, clparams.CapellaVersion, log.Root(), true)
@@ -1146,41 +1233,19 @@ func TestShouldPreparePayloadVersion(t *testing.T) {
 	}
 }
 
-func TestPayloadAttributesForkFields(t *testing.T) {
+func TestPayloadAttributesCarryEveryFieldTheExecutionLayerGates(t *testing.T) {
 	root := common.Hash{0xaa}
-	slot := hexutil.Uint64(10)
-	gasLimit := hexutil.Uint64(30_000_000)
 	withdrawals := []*types.Withdrawal{{Index: 1}}
 
-	for _, tc := range []struct {
-		version         clparams.StateVersion
-		wantWithdrawals bool
-		wantParentRoot  bool
-		wantGloasFields bool
-	}{
-		{clparams.BellatrixVersion, false, false, false},
-		{clparams.CapellaVersion, true, false, false},
-		{clparams.DenebVersion, true, true, false},
-		{clparams.FuluVersion, true, true, false},
-		{clparams.GloasVersion, true, true, true},
-	} {
-		t.Run(tc.version.String(), func(t *testing.T) {
-			attrs := payloadAttributesForVersion(
-				tc.version,
-				1,
-				common.Hash{0xbb},
-				common.Address{0xcc},
-				withdrawals,
-				&root,
-				&slot,
-				&gasLimit,
-			)
-			require.Equal(t, tc.wantWithdrawals, attrs.Withdrawals != nil)
-			require.Equal(t, tc.wantParentRoot, attrs.ParentBeaconBlockRoot != nil)
-			require.Equal(t, tc.wantGloasFields, attrs.SlotNumber != nil)
-			require.Equal(t, tc.wantGloasFields, attrs.TargetGasLimit != nil)
-		})
-	}
+	attrs := payloadAttributes(1, common.Hash{0xbb}, common.Address{0xcc}, withdrawals, &root)
+
+	// The execution layer decides from the payload timestamp what these mean, and rejects a request
+	// that disagrees with it. Withholding them on a consensus-fork rule puts the two on separate
+	// oracles, so both are sent whatever the fork.
+	require.Equal(t, withdrawals, attrs.Withdrawals)
+	require.Equal(t, &root, attrs.ParentBeaconBlockRoot)
+	require.Nil(t, attrs.SlotNumber, "only a Gloas proposal knows its slot number")
+	require.Nil(t, attrs.TargetGasLimit)
 }
 
 func TestPreparedPayloadKeepsConsecutiveSlots(t *testing.T) {
@@ -1214,20 +1279,21 @@ func TestPreparedPayloadCopiesTheID(t *testing.T) {
 	require.False(t, p.matches(10, id, now, 0))
 }
 
-func TestShouldPrepareAgainWhenTheHeadMoves(t *testing.T) {
+func TestSlotHeadMatchesOnlyTheExactPairing(t *testing.T) {
 	headA := common.Hash{0xaa}
 	headB := common.Hash{0xbb}
+	settled := slotHead{slot: 10, head: headA}
 
-	// Nothing primed yet.
-	require.True(t, shouldPrepare(10, 0, headA, common.Hash{}))
+	// Nothing recorded yet matches nothing.
+	require.False(t, slotHead{}.is(10, headA))
 
-	// Already primed this slot on this head: nothing to do.
-	require.False(t, shouldPrepare(10, 10, headA, headA))
+	// Already settled for this slot on this head: nothing to do.
+	require.True(t, settled.is(10, headA))
 
 	// The previous slot's block arrived late and moved the head, so the warm builder is on a parent
 	// that is no longer the head — prime again rather than wait for the next slot.
-	require.True(t, shouldPrepare(10, 10, headB, headA))
+	require.False(t, settled.is(10, headB))
 
 	// A new target slot always needs priming.
-	require.True(t, shouldPrepare(11, 10, headA, headA))
+	require.False(t, settled.is(11, headA))
 }

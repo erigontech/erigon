@@ -120,28 +120,21 @@ func TestAssembleBlockSupersedesBuilderForSameTimestamp(t *testing.T) {
 	require.NotContains(t, module.builders, adjacentID)
 }
 
-func TestSupersededPayloadIDStopsBeingRetrievable(t *testing.T) {
+func TestSupersededPayloadIDStaysRetrievable(t *testing.T) {
 	started := make(chan struct{}, 4)
-	release := make(chan struct{})
 	module := &ExecModule{
 		logger:    log.Root(),
 		config:    &chain.Config{},
 		semaphore: semaphore.NewWeighted(1),
 		builders:  map[uint64]*builderEntry{},
-		builderFunc: func(params *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
+		builderFunc: func(_ *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
 			started <- struct{}{}
-			<-release
-			return nil, nil
+			for !interrupt.Load() {
+				time.Sleep(time.Millisecond)
+			}
+			return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil)}, nil
 		},
 	}
-	t.Cleanup(func() {
-		close(release)
-		for _, entry := range module.builders {
-			if entry != nil && entry.builder != nil {
-				_, _ = entry.builder.Stop(context.Background())
-			}
-		}
-	})
 
 	first, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: 100, ParentHash: common.Hash{0x01}})
 	require.NoError(t, err)
@@ -150,15 +143,76 @@ func TestSupersededPayloadIDStopsBeingRetrievable(t *testing.T) {
 	second, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: 100, ParentHash: common.Hash{0x02}})
 	require.NoError(t, err)
 	require.NotEqual(t, first.PayloadID, second.PayloadID)
+	<-started
 
-	// A cancelled builder still holds whatever it had packed; serving that would mean
-	// proposing a near-empty block, so the superseded id must read as unknown instead.
-	require.NotContains(t, module.builders, first.PayloadID)
-	require.NotContains(t, module.builders, first.PayloadID)
-
+	// Superseding hands the timestamp to a fresh builder, but an id already returned to a caller
+	// stays answerable: dropping it would turn a getPayload into an unknown-payload error.
 	assembled, err := module.GetAssembledBlock(t.Context(), first.PayloadID)
 	require.NoError(t, err)
-	require.Nil(t, assembled.Block)
+	require.NotNil(t, assembled.Block)
+
+	_, _ = module.builders[second.PayloadID].builder.Stop(context.Background())
+}
+
+func TestAssembleBlockDoesNotReuseFailedBuilder(t *testing.T) {
+	var failNext atomic.Bool
+	failNext.Store(true)
+	started := make(chan struct{}, 4)
+	module := &ExecModule{
+		logger:    log.Root(),
+		config:    &chain.Config{},
+		semaphore: semaphore.NewWeighted(1),
+		builders:  map[uint64]*builderEntry{},
+		builderFunc: func(_ *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
+			started <- struct{}{}
+			if failNext.Swap(false) {
+				return nil, errors.New("build failed")
+			}
+			for !interrupt.Load() {
+				time.Sleep(time.Millisecond)
+			}
+			return nil, errors.New("builder stopped")
+		},
+	}
+
+	params := func() *builder.Parameters {
+		return &builder.Parameters{Timestamp: 100, ParentHash: common.Hash{0x01}}
+	}
+	first, err := module.AssembleBlock(t.Context(), params())
+	require.NoError(t, err)
+	<-started
+	require.Eventually(t, module.builders[first.PayloadID].builder.Stale, time.Second, time.Millisecond)
+
+	// Identical parameters would normally dedup onto the same id. A builder that already died
+	// latches its error, so reusing it would spend the slot on a payload that can never arrive.
+	second, err := module.AssembleBlock(t.Context(), params())
+	require.NoError(t, err)
+	require.NotEqual(t, first.PayloadID, second.PayloadID)
+	<-started
+
+	_, _ = module.builders[second.PayloadID].builder.Stop(context.Background())
+}
+
+func TestGetAssembledBlockDropsFailedBuilder(t *testing.T) {
+	module := &ExecModule{
+		logger:    log.Root(),
+		config:    &chain.Config{},
+		semaphore: semaphore.NewWeighted(1),
+		builders:  map[uint64]*builderEntry{},
+		builderFunc: func(_ *builder.Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
+			return nil, errors.New("build failed")
+		},
+	}
+
+	result, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: 100, ParentHash: common.Hash{0x01}})
+	require.NoError(t, err)
+
+	_, err = module.GetAssembledBlock(t.Context(), result.PayloadID)
+	require.Error(t, err)
+
+	// The error is latched, so leaving the entry in place would keep serving it to every retry.
+	require.NotContains(t, module.builders, result.PayloadID)
+	require.NotContains(t, module.buildersByTimestamp, uint64(100))
 }
 
 func TestAssembleBlockOwnsParameters(t *testing.T) {

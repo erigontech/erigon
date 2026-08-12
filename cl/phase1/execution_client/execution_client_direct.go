@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
@@ -130,10 +131,24 @@ func (cc *ExecutionClientDirect) NewPayload(
 // there is nothing to build on.
 var ErrForkChoiceNotAdopted = errors.New("execution layer did not adopt forkchoice head")
 
-const (
-	forkChoiceBusyAttempts = 30
-	forkChoiceBusyDelay    = 200 * time.Millisecond
-)
+// ErrForkChoiceBusy reports contention rather than rejection: the update continues on the module's
+// own context. Retrying is the caller's decision because only the caller knows whether the head it
+// asked for is still the one it wants.
+var ErrForkChoiceBusy = errors.New("execution layer busy with a forkchoice update")
+
+// forkChoiceStatusError classifies a status reached with payload attributes attached. Only an
+// adopted head is safe to build on: a builder ignores the parent it was asked for and packs on top
+// of whatever the execution tip really is.
+func forkChoiceStatusError(status execmodule.ExecutionStatus) error {
+	switch status {
+	case execmodule.ExecutionStatusSuccess:
+		return nil
+	case execmodule.ExecutionStatusBusy:
+		return ErrForkChoiceBusy
+	default:
+		return fmt.Errorf("%w: status %d", ErrForkChoiceNotAdopted, status)
+	}
+}
 
 func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized, safe, head common.Hash, attr *engine_types.PayloadAttributes, _ clparams.StateVersion) ([]byte, error) {
 	status, _, _, err := cc.chainRW.UpdateForkChoice(ctx, head, safe, finalized)
@@ -147,22 +162,13 @@ func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized
 		return nil, errors.New("bad block as forkchoice")
 	}
 	if attr == nil {
+		if status == execmodule.ExecutionStatusBusy {
+			log.Warn("[ForkChoiceUpdated] execution layer was busy, head not applied", "head", head)
+		}
 		return nil, nil
 	}
-	// Only assemble once the execution layer has actually adopted the head. Building on a head it
-	// never took pins a payload id that can never be served, because the timestamp dedup then hands
-	// that dead id back for the rest of the slot. Busy is transient - the update continues on the
-	// module's own context - so wait for it to settle rather than giving up on the slot.
-	status, err = awaitForkChoiceAdopted(ctx, status, forkChoiceBusyAttempts, forkChoiceBusyDelay,
-		func(ctx context.Context) (execmodule.ExecutionStatus, error) {
-			retried, _, _, retryErr := cc.chainRW.UpdateForkChoice(ctx, head, safe, finalized)
-			return retried, retryErr
-		})
-	if err != nil {
+	if err := forkChoiceStatusError(status); err != nil {
 		return nil, err
-	}
-	if status != execmodule.ExecutionStatusSuccess {
-		return nil, fmt.Errorf("%w: status %d", ErrForkChoiceNotAdopted, status)
 	}
 	// Retry AssembleBlock if the EL is busy (semaphore contention with
 	// fork choice commits). This is common in single-process dev mode
@@ -176,31 +182,6 @@ func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized
 	}
 	binary.LittleEndian.PutUint64(idBytes, id)
 	return idBytes, nil
-}
-
-// awaitForkChoiceAdopted retries while the execution layer reports contention. The update itself
-// continues on the module's own context, so a later attempt observes it settle instead of starting
-// fresh work; giving up immediately would abandon a proposal over a transient condition.
-func awaitForkChoiceAdopted(
-	ctx context.Context,
-	status execmodule.ExecutionStatus,
-	attempts int,
-	delay time.Duration,
-	update func(context.Context) (execmodule.ExecutionStatus, error),
-) (execmodule.ExecutionStatus, error) {
-	for attempt := 0; status == execmodule.ExecutionStatusBusy && attempt < attempts; attempt++ {
-		select {
-		case <-ctx.Done():
-			return status, ctx.Err()
-		case <-time.After(delay):
-		}
-		retried, err := update(ctx)
-		if err != nil {
-			return status, fmt.Errorf("execution Client RPC failed to retrieve ForkChoiceUpdate response, err: %w", err)
-		}
-		status = retried
-	}
-	return status, nil
 }
 
 func retryAssembleBlock(ctx context.Context, attempts int, delay time.Duration, assemble func(context.Context) (uint64, error)) (uint64, error) {
@@ -217,6 +198,11 @@ func retryAssembleBlock(ctx context.Context, attempts int, delay time.Duration, 
 		}
 		if id, err = assemble(ctx); err == nil {
 			return id, nil
+		}
+		// Only contention settles by waiting. A rejected request returns the same answer however
+		// many times it is asked, and retrying it burns the slot instead of reporting it.
+		if !errors.Is(err, chainreader.ErrExecutionBusy) {
+			return 0, err
 		}
 		if attempt+1 == attempts {
 			break
@@ -280,8 +266,8 @@ func (cc *ExecutionClientDirect) HasBlock(ctx context.Context, hash common.Hash)
 	return cc.chainRW.HasBlock(ctx, hash)
 }
 
-func (cc *ExecutionClientDirect) GetAssembledBlock(_ context.Context, idBytes []byte, _ clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
-	return cc.chainRW.GetAssembledBlock(binary.LittleEndian.Uint64(idBytes))
+func (cc *ExecutionClientDirect) GetAssembledBlock(ctx context.Context, idBytes []byte, _ clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+	return cc.chainRW.GetAssembledBlock(ctx, binary.LittleEndian.Uint64(idBytes))
 }
 
 func (cc *ExecutionClientDirect) HasGapInSnapshots(ctx context.Context) bool {

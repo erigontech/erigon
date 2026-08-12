@@ -106,6 +106,23 @@ func (b *BlockBuilder) Cancel() {
 	b.interrupt.Store(true)
 }
 
+// Stale reports whether the builder can no longer improve on what it holds, because it was
+// cancelled or finished with an error. A builder that filled its block is not stale: it simply
+// has nothing left to add.
+func (b *BlockBuilder) Stale() bool {
+	if b.interrupt.Load() {
+		return true
+	}
+	select {
+	case <-b.done:
+	default:
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.err != nil
+}
+
 func (b *BlockBuilder) Block() *types.Block {
 	b.mu.Lock()
 	defer b.mu.Unlock()

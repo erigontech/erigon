@@ -87,6 +87,16 @@ func convertExecutionWithdrawalsToConsensusWithdrawals(executionWithdrawal []*ty
 	return ret
 }
 
+// ConvertConsensusWithdrawalsToExecutionWithdrawals is the single crossing point between the two
+// representations, so payload attributes built on different code paths cannot drift apart.
+func ConvertConsensusWithdrawalsToExecutionWithdrawals(consensusWithdrawals []*Withdrawal) []*types.Withdrawal {
+	ret := make([]*types.Withdrawal, len(consensusWithdrawals))
+	for i, w := range consensusWithdrawals {
+		ret[i] = convertConsensusWithdrawalToExecutionWithdrawal(w)
+	}
+	return ret
+}
+
 // ExpectedWithdrawals represents the expected withdrawals for a beacon state
 type ExpectedWithdrawals struct {
 	Withdrawals                      []*Withdrawal `json:"withdrawals"`

@@ -25,6 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/transition"
@@ -32,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
-	"github.com/erigontech/erigon/execution/types"
 )
 
 var (
@@ -104,8 +104,8 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 	defer ticker.Stop()
 
 	var (
-		primedSlot     uint64
-		primedHead     common.Hash
+		primed         slotHead
+		notOurs        slotHead
 		lastFailureLog time.Time
 	)
 	for immediate := true; ; immediate = false {
@@ -128,11 +128,21 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 		if preparationRetired(stateVersion) {
 			return
 		}
-		// Before genesis the current slot clamps to zero, so the next slot can be arbitrarily
-		// far off. A builder primed that early freezes at its own cap long before the slot and
-		// production would then reuse the stale payload, so leave those slots unprimed.
+		if !shouldPreparePayloadVersion(stateVersion) {
+			continue
+		}
+		// On consecutive proposals the prime for the next slot lands inside this one, where it
+		// would compete for the execution layer with the block being produced right now.
+		if a.proposalsInFlight.Load() > 0 {
+			continue
+		}
+		// Before genesis the current slot clamps to zero, so the next slot can be arbitrarily far
+		// off; a builder primed that early hits its own cap before the slot even starts. Too late
+		// and the prime can never reach the age production demands of it, so the state copy and the
+		// forkchoice update would both be spent for nothing.
 		slotStart := a.ethClock.GetSlotTime(targetSlot)
-		if time.Until(slotStart) > maxPreparationLead(a.beaconChainCfg) {
+		lead := time.Until(slotStart)
+		if lead > maxPreparationLead(a.beaconChainCfg) || lead < preparedPayloadMinimumAge(a.beaconChainCfg, stateVersion) {
 			continue
 		}
 		selectedRoot, _, selected := a.syncedData.SelectedHead()
@@ -146,34 +156,43 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 		if selectedRoot != a.syncedData.HeadRoot() {
 			continue
 		}
-		if !shouldPrepare(targetSlot, primedSlot, selectedRoot, primedHead) {
-			continue
-		}
-		if !shouldPreparePayloadVersion(stateVersion) {
+		// Both verdicts hold until the slot or its parent head moves. Re-deriving the proposer costs
+		// a state copy, and an epoch transition on top when the slot is in the next epoch.
+		if primed.is(targetSlot, selectedRoot) || notOurs.is(targetSlot, selectedRoot) {
 			continue
 		}
 		prepareCtx, cancel := context.WithDeadline(ctx, slotStart)
 		head, err := a.preparePayloadFor(prepareCtx, targetSlot)
 		cancel()
 		if err != nil {
+			if errors.Is(err, errNotOurProposal) {
+				notOurs = slotHead{slot: targetSlot, head: selectedRoot}
+			}
 			if !isExpectedPreparationSkip(err) && time.Since(lastFailureLog) >= time.Minute {
 				log.Warn("PayloadPreparation: failed", "slot", targetSlot, "err", err)
 				lastFailureLog = time.Now()
 			}
 			continue
 		}
-		primedSlot, primedHead = targetSlot, head
+		primed = slotHead{slot: targetSlot, head: head}
 	}
 }
 
-// shouldPrepare requires a fresh builder after the target slot or its parent head changes.
-func shouldPrepare(targetSlot, primedSlot uint64, head, primedHead common.Hash) bool {
-	return targetSlot != primedSlot || head != primedHead
+// slotHead records work already settled for a target slot on a given head, so a later tick can skip
+// repeating it. A zero value matches nothing reachable: slot zero is never primed.
+type slotHead struct {
+	slot uint64
+	head common.Hash
 }
 
-// maxPreparationLead bounds how far ahead of a slot priming is worthwhile.
+func (s slotHead) is(slot uint64, head common.Hash) bool {
+	return s.slot == slot && s.head == head
+}
+
+// maxPreparationLead bounds how far ahead of a slot priming is worthwhile. One slot is all a live
+// chain ever offers, since preparation only ever targets the slot after the current one.
 func maxPreparationLead(cfg *clparams.BeaconChainConfig) time.Duration {
-	return 2 * time.Duration(cfg.SecondsPerSlot) * time.Second
+	return time.Duration(cfg.SecondsPerSlot) * time.Second
 }
 
 // preparationRetired is the single authority for the fork after which builders gossip bids
@@ -194,6 +213,7 @@ func isExpectedPreparationSkip(err error) bool {
 		errors.Is(err, errHeadTooFarBack) ||
 		errors.Is(err, errPreparationHeadChanged) ||
 		errors.Is(err, execution_client.ErrForkChoiceNotAdopted) ||
+		errors.Is(err, execution_client.ErrForkChoiceBusy) ||
 		errors.Is(err, context.DeadlineExceeded) ||
 		errors.Is(err, context.Canceled) ||
 		errors.Is(err, synced_data.ErrNotSynced)
@@ -252,7 +272,7 @@ func (a *ApiHandler) preparePayloadFor(ctx context.Context, targetSlot uint64) (
 	}
 
 	stateVersion := a.beaconChainCfg.GetCurrentStateVersion(targetSlot / a.beaconChainCfg.SlotsPerEpoch)
-	head, safeHash, finalizedHash, attrs, err := a.preGloasForkChoiceInputs(baseState, baseBlockRoot, targetSlot, feeRecipient, stateVersion)
+	head, safeHash, finalizedHash, attrs, err := a.preGloasForkChoiceInputs(baseState, baseBlockRoot, targetSlot, feeRecipient)
 	if err != nil {
 		return common.Hash{}, err
 	}
@@ -272,16 +292,9 @@ func (a *ApiHandler) preparePayloadFor(ctx context.Context, targetSlot uint64) (
 	return baseBlockRoot, nil
 }
 
-// preGloasForkChoiceInputs builds the shared preparation and production inputs.
-func (a *ApiHandler) preGloasForkChoiceInputs(
-	baseState *state.CachingBeaconState,
-	baseBlockRoot common.Hash,
-	targetSlot uint64,
-	feeRecipient common.Address,
-	stateVersion clparams.StateVersion,
-) (head, safeHash, finalizedHash common.Hash, attrs *engine_types.PayloadAttributes, err error) {
-	head = baseState.LatestExecutionPayloadHeader().BlockHash
-
+// executionCheckpointHashes resolves the safe and finalized execution hashes, falling back to the
+// head for a checkpoint whose execution block this node has not seen yet.
+func (a *ApiHandler) executionCheckpointHashes(baseState *state.CachingBeaconState, head common.Hash) (safeHash, finalizedHash common.Hash) {
 	finalizedHash = a.forkchoiceStore.GetFinalizedExecutionHash(baseState.FinalizedCheckpoint().Root)
 	if finalizedHash == (common.Hash{}) {
 		finalizedHash = head
@@ -290,34 +303,31 @@ func (a *ApiHandler) preGloasForkChoiceInputs(
 	if safeHash == (common.Hash{}) {
 		safeHash = head
 	}
+	return safeHash, finalizedHash
+}
+
+// preGloasForkChoiceInputs builds the shared preparation and production inputs.
+func (a *ApiHandler) preGloasForkChoiceInputs(
+	baseState *state.CachingBeaconState,
+	baseBlockRoot common.Hash,
+	targetSlot uint64,
+	feeRecipient common.Address,
+) (head, safeHash, finalizedHash common.Hash, attrs *engine_types.PayloadAttributes, err error) {
+	head = baseState.LatestExecutionPayloadHeader().BlockHash
+	safeHash, finalizedHash = a.executionCheckpointHashes(baseState, head)
 
 	epoch := targetSlot / a.beaconChainCfg.SlotsPerEpoch
-	var withdrawals []*types.Withdrawal
-	if stateVersion.AfterOrEqual(clparams.CapellaVersion) {
-		clWithdrawals, err := state.GetExpectedWithdrawals(baseState, epoch)
-		if err != nil {
-			return head, safeHash, finalizedHash, nil, err
-		}
-		withdrawals = make([]*types.Withdrawal, 0, len(clWithdrawals.Withdrawals))
-		for _, w := range clWithdrawals.Withdrawals {
-			withdrawals = append(withdrawals, &types.Withdrawal{
-				Index:     w.Index,
-				Amount:    w.Amount,
-				Validator: w.Validator,
-				Address:   w.Address,
-			})
-		}
+	clWithdrawals, err := state.GetExpectedWithdrawals(baseState, epoch)
+	if err != nil {
+		return head, safeHash, finalizedHash, nil, err
 	}
 
-	attrs = payloadAttributesForVersion(
-		stateVersion,
+	attrs = payloadAttributes(
 		hexutil.Uint64(state.ComputeTimestampAtSlot(baseState, targetSlot)),
 		baseState.GetRandaoMixes(epoch),
 		feeRecipient,
-		withdrawals,
+		cltypes.ConvertConsensusWithdrawalsToExecutionWithdrawals(clWithdrawals.Withdrawals),
 		&baseBlockRoot,
-		nil,
-		nil,
 	)
 	return head, safeHash, finalizedHash, attrs, nil
 }
