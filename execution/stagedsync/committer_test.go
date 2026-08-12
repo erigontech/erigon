@@ -18,6 +18,7 @@ package stagedsync
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -265,6 +266,38 @@ func TestComputeAheadCap_StopsComputeAhead(t *testing.T) {
 	cc.maybeComputeAhead(context.Background(), 5) // must return before computeBlockFromBAL
 
 	assert.False(t, cc.computedAhead[5], "a compute-ahead past the coalesce block M must not run")
+}
+
+func TestComputeAheadCap_StopsOperationalWindDown(t *testing.T) {
+	defer func(prev bool) { dbg.BALDrivenCommitment = prev }(dbg.BALDrivenCommitment)
+	dbg.BALDrivenCommitment = true
+
+	signalCtx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+
+	cause := errors.New("commitment lazy-load failed")
+	pe := &parallelExecutor{cancelExecLoop: cancel}
+	pe.cancelOperational(4, cause)
+
+	sc, ok := stopCauseOf(signalCtx)
+	require.True(t, ok, "operational cancellation must publish its block boundary")
+	require.Equal(t, uint64(4), sc.block)
+	require.Equal(t, stopOperational, sc.kind)
+	require.Same(t, cause, sc.err)
+
+	cc := &commitmentCalculator{
+		signalCtx: signalCtx,
+		pending: map[uint64]*pendingBlock{
+			5: {req: &blockRequest{blockNum: 5, bal: make(types.BlockAccessList, 1)}, mode: calcModeBALDriven},
+		},
+		computedAhead: map[uint64]bool{},
+		balRoots:      map[uint64][]byte{},
+		hasFirstBlock: true,
+		firstBlockNum: 5,
+	}
+
+	cc.maybeComputeAhead(context.Background(), 5)
+	assert.False(t, cc.computedAhead[5], "failure wind-down must not compute ahead past its block")
 }
 
 // TestContiguityGuard_ChainNeverRecovers pins that one block without a BAL ends

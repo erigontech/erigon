@@ -167,8 +167,8 @@ type commitmentCalculator struct {
 	computeAheadStopped bool
 
 	// signalCtx is the shared executor context and may carry a deliberate stop or
-	// failure. The calculator reads deliberate stop causes from it to cap
-	// compute-ahead at the coalesce block; compute and publish use the separate
+	// failure. The calculator reads block-aware stop causes from it to cap
+	// compute-ahead at the stop boundary; compute and publish use the separate
 	// workCtx so executor-local cancellation does not abort an in-flight commitment.
 	signalCtx context.Context
 
@@ -520,10 +520,9 @@ func (cc *commitmentCalculator) maybeComputeAhead(ctx context.Context, n uint64)
 	if !ok || pb.mode != calcModeBALDriven || cc.computedAhead[n] {
 		return
 	}
-	// Batch cut: the shared executor context carries the coalesce block M. Compute
-	// ahead no further than M so commitment cannot outrun the state exec will stop
-	// at (an orphan → wrong root on restart). Read the signal context, never the
-	// compute ctx — compute must still finish blocks up to M.
+	// The shared executor context carries the stop boundary M. Compute ahead no
+	// further than M so commitment cannot outrun state. Read the signal context,
+	// never the compute context, because in-flight work through M must finish.
 	if sc, stopping := stopCauseOf(cc.signalCtx); stopping && n > sc.block {
 		return
 	}

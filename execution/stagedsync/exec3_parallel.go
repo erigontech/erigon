@@ -148,14 +148,14 @@ type blockVerdict struct {
 	err       error
 }
 
-// stopKind classifies why the executor was asked to stop. It maps directly
-// to the stage return: done→nil, more→ErrLoopExhausted, bad→verdict+unwind.
+// stopKind classifies why the executor was asked to stop.
 type stopKind uint8
 
 const (
-	stopReachedMax stopKind = iota // all requested work applied — clean batch end
-	stopMoreWork                   // size/exhausted cut before maxBlock — resume next cycle
-	stopBadBlock                   // invalid-block verdict — fail the implicated block and unwind
+	stopReachedMax  stopKind = iota // all requested work applied — clean batch end
+	stopMoreWork                    // size/exhausted cut before maxBlock — resume next cycle
+	stopBadBlock                    // invalid-block verdict — fail the implicated block and unwind
+	stopOperational                 // infrastructure failure — abort without a block verdict
 )
 
 func (k stopKind) String() string {
@@ -166,17 +166,16 @@ func (k stopKind) String() string {
 		return "more-work"
 	case stopBadBlock:
 		return "bad-block"
+	case stopOperational:
+		return "operational"
 	default:
 		return fmt.Sprintf("stopKind(%d)", uint8(k))
 	}
 }
 
-// stopCause is the cancel cause published on the shared executor context. It
-// carries the block the batch coalesces to (M) and the kind so every goroutine
-// reads the same signal and decides how to wind down: exec produces state up to
-// M then stops; the calculator caps fold-ahead at M and keeps computing to M on
-// its own (uncancelled) context; the apply loop derives the commit boundary and
-// stage return. A stopBadBlock cause aborts immediately.
+// stopCause is the cancel cause published on the shared executor context. Its
+// block is the boundary where the calculator caps fold-ahead; the kind tells
+// consumers how execution is winding down.
 type stopCause struct {
 	block uint64
 	kind  stopKind
@@ -197,6 +196,10 @@ func stopCauseOf(ctx context.Context) (*stopCause, bool) {
 		return s, true
 	}
 	return nil, false
+}
+
+func (pe *parallelExecutor) cancelOperational(blockNum uint64, err error) {
+	pe.cancelExecLoop(&stopCause{block: blockNum, kind: stopOperational, err: err})
 }
 
 // ensureChangesetAccumulator makes pe.currentChangeSet point at a fresh,
@@ -523,7 +526,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 				// finish. infraErr surfaces when the channels close.
 				infraErr = errors.Join(infraErr, err)
 				finalized = true
-				pe.cancelExecLoop(err)
+				pe.cancelOperational(cr.blockNum, err)
 				return
 			}
 			fail.consider(cr.blockNum, cr.blockHash, false, err)
@@ -606,6 +609,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						finalized = true
 						if applyResult.Operational {
 							infraErr = errors.Join(infraErr, applyResult.Err)
+							pe.cancelOperational(blockNum, applyResult.Err)
 						} else {
 							fail.consider(blockNum, blockHash, true, applyResult.Err)
 						}
@@ -631,7 +635,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 							return
 						}
 						infraErr = errors.Join(infraErr, err)
-						pe.cancelExecLoop(err)
+						pe.cancelOperational(blockNum, err)
 					}
 					header := block.HeaderNoCopy()
 					txs := block.Transactions()
