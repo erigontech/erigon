@@ -178,38 +178,33 @@ func (s *StatusDataProvider) GetStatusData(ctx context.Context) (*sentryproto.St
 // fetchChainHead reads MinimumBlockAvailable and ChainHead in a single DB
 // read transaction. Falls back to snapshot data when the DB head is missing.
 func (s *StatusDataProvider) fetchChainHead(ctx context.Context) (ChainHead, error) {
-	var (
-		chainHead    ChainHead
-		minimumBlock uint64
-		headErr      error
-	)
+	var chainHead ChainHead
+	var headErr error
 
 	if err := s.db.View(ctx, func(tx kv.Tx) error {
-		var err error
-		minimumBlock, err = s.blockReader.MinimumBlockAvailable(ctx, tx)
+		minimumBlock, err := s.blockReader.MinimumBlockAvailable(ctx, tx)
 		if err != nil {
 			return fmt.Errorf("MinimumBlockAvailable: %w", err)
 		}
 		chainHead, headErr = ReadChainHeadWithTx(tx, minimumBlock)
-		return nil // headErr handled below (ErrNoHead → snapshot fallback)
+		if headErr == nil || !errors.Is(headErr, ErrNoHead) {
+			return nil // headErr handled below
+		}
+
+		s.logger.Warn("sentry.StatusDataProvider: The canonical chain current header not found in the database. Check the database consistency. Using latest available snapshot data.")
+
+		chainHead, headErr = s.readChainHeadFromSnapshots(ctx, tx, minimumBlock)
+		if headErr != nil {
+			headErr = fmt.Errorf("failed to read chain head from snapshots: %w", headErr)
+		}
+		return nil
 	}); err != nil {
 		return ChainHead{}, fmt.Errorf("GetStatusData: %w", err)
 	}
-
-	if headErr == nil {
-		return chainHead, nil
-	}
-	if !errors.Is(headErr, ErrNoHead) {
+	if headErr != nil {
 		return ChainHead{}, headErr
 	}
-
-	s.logger.Warn("sentry.StatusDataProvider: The canonical chain current header not found in the database. Check the database consistency. Using latest available snapshot data.")
-
-	snapHead, err := s.ReadChainHeadFromSnapshots(ctx, minimumBlock)
-	if err != nil {
-		return ChainHead{}, fmt.Errorf("failed to read chain head from snapshots: %w", err)
-	}
-	return snapHead, nil
+	return chainHead, nil
 }
 
 // ReadChainHeadWithTx reads chain head in DB
@@ -244,14 +239,14 @@ func ReadChainHead(ctx context.Context, db kv.RoDB, minimumBlock uint64) (ChainH
 	return head, err
 }
 
-// ReadChainHeadFromSnapshots attempts to construct a ChainHead from snapshot data.
-func (s *StatusDataProvider) ReadChainHeadFromSnapshots(ctx context.Context, minimumBlock uint64) (ChainHead, error) {
+// readChainHeadFromSnapshots attempts to construct a ChainHead from snapshot data.
+func (s *StatusDataProvider) readChainHeadFromSnapshots(ctx context.Context, tx kv.Tx, minimumBlock uint64) (ChainHead, error) {
 	latest := s.blockReader.FrozenBlocks()
 	if latest == 0 {
 		return ChainHead{}, ErrNoSnapshots
 	}
 
-	header, err := s.blockReader.HeaderByNumber(ctx, nil, latest)
+	header, err := s.blockReader.HeaderByNumber(ctx, tx, latest)
 	if err != nil || header == nil {
 		return ChainHead{}, fmt.Errorf("failed reading snapshot header %d: %w", latest, err)
 	}
