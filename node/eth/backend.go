@@ -853,6 +853,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			}
 		}
 		backend.privateAPI, err = privateapi2.StartGrpc(
+			ctx,
 			backend.kvRPC,
 			backend.ethBackendRPC,
 			backend.txPoolGrpcServer,
