@@ -94,7 +94,7 @@ func TestHexCompactRoundtrip(t *testing.T) {
 
 		// half with terminator, half without
 		if i%2 == 0 {
-			hex = append(hex, Terminator)
+			hex = append(hex, Terminator) //nolint:makezero
 		}
 
 		compact := HexToCompact(hex)

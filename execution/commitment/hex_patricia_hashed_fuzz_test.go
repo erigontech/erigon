@@ -240,7 +240,7 @@ func Fuzz_HexPatriciaHashed_ReviewKeys(f *testing.F) {
 			addr := hex.EncodeToString(key)
 			builder.Balance(addr, rnd.Uint64())
 			builder.Nonce(addr, uint64(i))
-			builder.CodeHash(addr, hex.EncodeToString(append(key, make([]byte, 12)...)))
+			builder.CodeHash(addr, hex.EncodeToString(append(key, make([]byte, 12)...))) //nolint:makezero
 		}
 		t.Logf("keys count: %d", kc)
 

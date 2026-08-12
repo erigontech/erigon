@@ -1398,7 +1398,7 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		// returns the smallest. nil = different step, skip; []byte{} = absent, write tombstone.
 		lastForKey := i+1 == len(domainDiffs) || domainDiffs[i+1].Key[:len(domainDiffs[i+1].Key)-8] != keyStr[:len(keyStr)-8]
 		if value != nil && lastForKey {
-			if err := valsCursor.Put(fullKey, append(unwindStepBytes, value...)); err != nil {
+			if err := valsCursor.Put(fullKey, append(unwindStepBytes, value...)); err != nil { //nolint:makezero
 				return err
 			}
 		}

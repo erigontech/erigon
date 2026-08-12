@@ -103,7 +103,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		err = domains.DomainPut(kv.StorageDomain, tx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, nil)
 		require.NoError(t, err)
 
-		keys[txNum-1] = append(addr, loc...)
+		keys[txNum-1] = append(addr, loc...) //nolint:makezero
 
 		if (txNum+1)%stepSize == 0 {
 			trieState, err := hph.EncodeCurrentState(nil)
@@ -243,7 +243,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 		n, err = rnd.Read(loc)
 		require.NoError(t, err)
 		require.Equal(t, length.Hash, n)
-		keys[txNum-1] = append(addr, loc...)
+		keys[txNum-1] = append(addr, loc...) //nolint:makezero
 
 		acc := accounts.Account{
 			Nonce:       1,
