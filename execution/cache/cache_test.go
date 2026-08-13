@@ -1100,6 +1100,7 @@ func TestStateCache_PublicationDoesNotBlockViewBinding(t *testing.T) {
 	case view := <-viewBound:
 		duringPublication = view
 		require.False(t, view.CanFill(), "a view bound during publication must not fill partial state")
+		require.True(t, view.NeedsFrontier(), "publication is temporary, so the view may retry binding afterward")
 	case <-time.After(time.Second):
 		t.Fatal("cache publication blocked view binding")
 	}
@@ -1108,6 +1109,8 @@ func TestStateCache_PublicationDoesNotBlockViewBinding(t *testing.T) {
 	<-published
 	publicationDone = true
 	require.False(t, duringPublication.CanFill(), "an inert view must be rebound explicitly")
+	duringPublication = duringPublication.WithFrontier(frontierAtVersion(21, 2))
+	require.True(t, duringPublication.CanFill(), "an explicitly rebound view may fill after publication")
 	require.True(t, sc.View(frontierAtVersion(21, 2)).CanFill(), "the committed version must admit new views")
 	existingView.Fill(kv.AccountsDomain, makeAddr(2), makeValue(2), 10)
 	select {
@@ -1115,6 +1118,23 @@ func TestStateCache_PublicationDoesNotBlockViewBinding(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("continuous publication did not restore fill admission")
 	}
+}
+
+func TestStateCache_OnlyRetryPotentiallyEligibleFrontier(t *testing.T) {
+	b := 1 * datasize.MB
+	sc := NewStateCache(b, b, b, b)
+	t.Cleanup(sc.Close)
+	sc.Applier().Initialize(2)
+
+	require.True(t, sc.View(nil).NeedsFrontier(), "an unbound view may acquire a frontier later")
+	stale := sc.View(frontierAtVersion(21, 1))
+	require.False(t, stale.CanFill(), "a stale transaction must remain fill-inert")
+	require.False(t, stale.NeedsFrontier(),
+		"a stale transaction cannot become current as state versions advance")
+	require.False(t, sc.View(frontierAtVersion(21, 2)).NeedsFrontier(),
+		"an accepted frontier needs no retry")
+	require.True(t, sc.View(frontierAtVersion(21, 3)).NeedsFrontier(),
+		"a transaction ahead of the cache may become eligible when publication catches up")
 }
 
 func TestStateCache_PublishClearsOnSkippedStateVersion(t *testing.T) {
@@ -1496,9 +1516,9 @@ func TestApplyOnlyCacheReportsFillsDisabled(t *testing.T) {
 // collapsing rather than as ns/op moving.
 //
 // version=current models a reader bound to the state the cache just published.
-// version=stale models an RPC transaction opened before the last commit: its
-// frontier is rejected, so it can read but never fill, and every miss re-runs
-// the eligibility resolution.
+// version=stale repeatedly constructs views for a transaction opened before
+// the last commit. Production getters retain this rejection; constructing each
+// view here deliberately measures the worst-case binding contention.
 func BenchmarkStateCachePublicationUnderLoad(b *testing.B) {
 	const keySpace = 4096
 

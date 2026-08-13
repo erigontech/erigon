@@ -1493,10 +1493,9 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 	if maxStep == kv.NoStepBound && sd.stateCache != nil && sd.stateCache.Caches(domain) {
 		readTxNum := (uint64(step)+1)*sd.StepSize() - 1
 		fillView := view
-		if !fillView.CanFill() {
-			// Frontier-less view from the plain GetLatest wrappers: bind a
-			// frontier here, on the miss path, where the boxing amortizes
-			// against the backing read it follows.
+		if fillView.NeedsFrontier() {
+			// Frontier-less views retry on the miss path, where binding cost is
+			// amortized by the backing read. Stale views do not request a retry.
 			fillView = fillView.WithFrontier(sd.cacheFrontierFor(tx))
 		}
 		fillView.Fill(domain, k, v, readTxNum)
@@ -1711,9 +1710,9 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, view cache.ReadView, 
 		// bound (>= the resolved account's write txNum), so the mapping drops
 		// on any unwind that reverts that account.
 		seedView := view
-		if !seedView.CanFill() {
-			// Frontier-less view from the plain wrappers: bind one on this cold
-			// seed path, where the boxing amortizes against the account read.
+		if seedView.NeedsFrontier() {
+			// Resolve fill authority only after the account lookup has missed the
+			// cache. A stale view is terminal and skips this retry.
 			seedView = seedView.WithFrontier(sd.cacheFrontierFor(tx))
 		}
 		seedView.SeedAddrCodeHash(addr, fixed, txNum)

@@ -141,6 +141,18 @@ func (tx *failStateVersionOnceRwTx) ReadSequence(table string) (uint64, error) {
 	return tx.TemporalRwTx.ReadSequence(table)
 }
 
+type stateVersionCountingTx struct {
+	kv.TemporalTx
+	stateVersionReads int
+}
+
+func (tx *stateVersionCountingTx) ReadSequence(table string) (uint64, error) {
+	if table == string(kv.PlainStateVersion) {
+		tx.stateVersionReads++
+	}
+	return tx.TemporalTx.ReadSequence(table)
+}
+
 func TestNewSharedDomains_StateVersionReadErrorFailsConstruction(t *testing.T) {
 	t.Parallel()
 
@@ -158,6 +170,58 @@ func TestNewSharedDomains_StateVersionReadErrorFailsConstruction(t *testing.T) {
 	require.ErrorContains(t, err, "read base state version")
 	require.Nil(t, domains)
 	require.Equal(t, 1, tx.stateVersionReads)
+}
+
+func TestStaleGetterResolvesCacheStateVersionOnce(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	db := newTestDb(t, 16)
+
+	seedTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer seedTx.Rollback()
+	seedDomains, err := execctx.NewSharedDomains(ctx, seedTx, log.New())
+	require.NoError(t, err)
+	require.NoError(t, seedDomains.Commit(ctx, seedTx))
+	seedDomains.Close()
+
+	staleTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer staleTx.Rollback()
+
+	advanceTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer advanceTx.Rollback()
+	advanceDomains, err := execctx.NewSharedDomains(ctx, advanceTx, log.New())
+	require.NoError(t, err)
+	require.NoError(t, advanceDomains.Commit(ctx, advanceTx))
+	advanceDomains.Close()
+
+	currentTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer currentTx.Rollback()
+	currentDomains, err := execctx.NewSharedDomains(ctx, currentTx, log.New())
+	require.NoError(t, err)
+	defer currentDomains.Close()
+	stateCache := newSmallStateCache()
+	t.Cleanup(stateCache.Close)
+	currentDomains.SetStateCacheForTest(stateCache)
+
+	countingTx := &stateVersionCountingTx{TemporalTx: staleTx}
+	getter := currentDomains.AsGetter(countingTx)
+	require.Equal(t, 1, countingTx.stateVersionReads, "getter construction resolves its transaction version")
+
+	for i := byte(1); i <= 3; i++ {
+		missing := make([]byte, 20)
+		missing[0] = i
+		value, _, err := getter.GetLatest(kv.AccountsDomain, missing)
+		require.NoError(t, err)
+		require.Empty(t, value)
+	}
+
+	require.Equal(t, 1, countingTx.stateVersionReads,
+		"a transaction older than the cache cannot become eligible, so misses must not retry its binding")
 }
 
 func TestStateCache_MergedUnwindPublishesInvalidation(t *testing.T) {

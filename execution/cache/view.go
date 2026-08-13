@@ -63,12 +63,18 @@ type FrontierFunc func(domain kv.Domain) (visibleEnd uint64, ok bool)
 
 func (f FrontierFunc) DomainVisibleEnd(domain kv.Domain) (uint64, bool) { return f(domain) }
 
+// rejectedFrontier distinguishes a non-retryable rejection from a nil, retryable
+// binding without growing ReadView, which is embedded in every state getter.
+type rejectedFrontier struct{}
+
+func (rejectedFrontier) DomainVisibleEnd(kv.Domain) (uint64, bool) { return 0, false }
+
 // ReadView is the read-and-fill handle of a StateCache, bound to one
 // transaction's read view: values filled through it are vouched for by that
-// view's frontier, and it must not outlive the transaction. A nil frontier
-// disables Fill and SeedAddrCodeHash. FillCodeSize remains available because
-// code size is content-addressed. The zero value is inert: reads miss, fills
-// no-op.
+// view's frontier, and it must not outlive the transaction. Without an accepted
+// frontier, Fill and SeedAddrCodeHash are no-ops. FillCodeSize remains available
+// because code size is content-addressed. The zero value is inert: reads miss,
+// fills no-op.
 //
 // A ReadView does not isolate reads: the cache holds latest-applied state, so
 // a hit can be newer than the view — the same direction the exec overlay
@@ -94,8 +100,9 @@ type ReadView struct {
 }
 
 // View creates a ReadView vouched for by f. If the cache has a durable state
-// version, f must report the same version when it is bound. A nil or rejected
-// frontier disables admission-gated fills, as does binding during publication.
+// version, f must report the same version when it is bound. A stale or
+// versionless frontier is not retried automatically. A nil frontier,
+// publication in progress, or a cache behind f may be retried later.
 func (c *StateCache) View(f Frontier) ReadView {
 	if c == nil {
 		return ReadView{}
@@ -107,7 +114,7 @@ func (c *StateCache) View(f Frontier) ReadView {
 	defer c.admissionMu.RUnlock()
 	return ReadView{
 		c:             c,
-		frontier:      c.eligibleFrontierLocked(f),
+		frontier:      c.bindFrontierLocked(f),
 		readViewEpoch: c.readViewEpoch.Load(),
 	}
 }
@@ -125,11 +132,11 @@ func (v ReadView) WithFrontier(f Frontier) ReadView {
 	}
 	v.c.admissionMu.RLock()
 	defer v.c.admissionMu.RUnlock()
-	v.frontier = v.c.eligibleFrontierLocked(f)
+	v.frontier = v.c.bindFrontierLocked(f)
 	return v
 }
 
-func (c *StateCache) eligibleFrontierLocked(frontier Frontier) Frontier {
+func (c *StateCache) bindFrontierLocked(frontier Frontier) Frontier {
 	if frontier == nil || c.publishing {
 		return nil
 	}
@@ -138,9 +145,13 @@ func (c *StateCache) eligibleFrontierLocked(frontier Frontier) Frontier {
 	}
 	versioned, ok := frontier.(stateVersionFrontier)
 	if !ok {
-		return nil
+		return rejectedFrontier{}
 	}
-	if versioned.StateVersion() != c.stateVersion {
+	stateVersion := versioned.StateVersion()
+	if stateVersion < c.stateVersion {
+		return rejectedFrontier{}
+	}
+	if stateVersion > c.stateVersion {
 		return nil
 	}
 	return frontier
@@ -191,9 +202,18 @@ func (v ReadView) GetAddrCodeHash(addr []byte) ([32]byte, bool) {
 	return v.c.getAddrCodeHash(addr)
 }
 
-// CanFill reports whether this view carries a frontier, i.e. Fill and
+// CanFill reports whether this view carries an accepted frontier, i.e. Fill and
 // SeedAddrCodeHash can admit values through it.
-func (v ReadView) CanFill() bool { return v.c != nil && v.frontier != nil }
+func (v ReadView) CanFill() bool {
+	if v.c == nil || v.frontier == nil {
+		return false
+	}
+	_, rejected := v.frontier.(rejectedFrontier)
+	return !rejected
+}
+
+// NeedsFrontier reports whether rebinding could make this view fill-eligible.
+func (v ReadView) NeedsFrontier() bool { return v.c != nil && v.frontier == nil }
 
 // Fill offers a value read from this view without replacing an authoritative
 // entry. Admission is checked against the view's frontier for the domain;
