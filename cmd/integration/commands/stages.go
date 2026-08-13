@@ -328,7 +328,6 @@ func init() {
 	withStageBase(cmdStageExec)
 	withReset(cmdStageExec)
 	withBlock(cmdStageExec)
-	withPruneTo(cmdStageExec)
 	withTraceFlags(cmdStageExec)
 	withChainTipMode(cmdStageExec)
 	withErigondbDomainStepsInFrozenFile(cmdStageExec)
@@ -341,7 +340,6 @@ func init() {
 	withStageBase(cmdStageCustomTrace)
 	withReset(cmdStageCustomTrace)
 	withBlock(cmdStageCustomTrace)
-	withPruneTo(cmdStageCustomTrace)
 	withTraceFlags(cmdStageCustomTrace)
 	withDomain(cmdStageCustomTrace)
 	withErigondbDomainStepsInFrozenFile(cmdStageCustomTrace)
@@ -350,7 +348,6 @@ func init() {
 	withStageBase(cmdStageTxLookup)
 	withReset(cmdStageTxLookup)
 	withBlock(cmdStageTxLookup)
-	withPruneTo(cmdStageTxLookup)
 	rootCmd.AddCommand(cmdStageTxLookup)
 
 	withConfig(cmdPrintMigrations)
@@ -625,9 +622,6 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 		if err := stagedsync.UnwindSendersStage(u, tx, cfg, ctx); err != nil {
 			return err
 		}
-	case pruneTo > 0:
-		//noop
-		return nil
 	default:
 		if err := stagedsync.SpawnRecoverSendersStage(cfg, s, sync, tx, block, ctx, logger); err != nil {
 			return err
@@ -673,13 +667,6 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 
 	logger.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
 	chainConfig, pm := fromdb.ChainConfig(db), fromdb.PruneMode(db)
-	if pruneTo > 0 {
-		d, err := prune.DistanceFrom(s.BlockNumber, pruneTo)
-		if err != nil {
-			return err
-		}
-		pm.History = d
-	}
 
 	genesis := readGenesis(chain)
 	br, _ := blocksIO(db, logger)
@@ -700,10 +687,6 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			return nil
 		}); err != nil {
 			return err
-		}
-
-		if unwind < pruneTo {
-			return fmt.Errorf("can't prune beyond unwind: unwind=%d, prune=%d", unwind, pruneTo)
 		}
 	}
 
@@ -734,18 +717,6 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		err = tx.Commit()
 		tx = nil
 		return err
-	}
-
-	if pruneTo > 0 {
-		p, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, true)
-		if err != nil {
-			return err
-		}
-		err = stagedsync.PruneExecutionStage(ctx, p, tx, cfg, 0, logger)
-		if err != nil {
-			return err
-		}
-		return tx.Commit()
 	}
 
 	var sendersProgress, execProgress uint64
@@ -1062,13 +1033,6 @@ func stageTxLookup(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) e
 	defer tx.Rollback()
 
 	s := stage(sync, tx, stages.TxLookup)
-	if pruneTo > 0 {
-		d, err := prune.DistanceFrom(s.BlockNumber, pruneTo)
-		if err != nil {
-			return err
-		}
-		pm.History = d
-	}
 	logger.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
 
 	br, _ := blocksIO(db, logger)
@@ -1081,15 +1045,6 @@ func stageTxLookup(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) e
 
 		u := sync.NewUnwindState(stages.TxLookup, s.BlockNumber-unwind, s.BlockNumber, true, false)
 		err = stagedsync.UnwindTxLookup(u, s, tx, cfg, ctx, logger)
-		if err != nil {
-			return err
-		}
-	case pruneTo > 0:
-		p, err := sync.PruneStageState(stages.TxLookup, s.BlockNumber, tx, true)
-		if err != nil {
-			return err
-		}
-		err = stagedsync.PruneTxLookup(p, tx, cfg, ctx, logger)
 		if err != nil {
 			return err
 		}
