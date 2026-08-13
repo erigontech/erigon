@@ -86,7 +86,21 @@ func TestBlobBackfillRequestRejectsPartialCandidateAndAcceptsFullLaterCandidate(
 		err    error
 	}, 1)
 	persisted := atomic.Bool{}
+	requestIndex := uint64(0)
+	requestFactory := func() *solid.ListSSZ[*cltypes.BlobIdentifier] {
+		request := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](0, 2)
+		request.Append(&cltypes.BlobIdentifier{Index: requestIndex})
+		requestIndex++
+		return request
+	}
 	accept := func(_ context.Context, candidate *PeerAndSidecars) (bool, bool, error) {
+		expectedIndex := uint64(0)
+		if candidate.Peer == "full" {
+			expectedIndex = 1
+		}
+		if candidate.requested.Len() != 1 || candidate.requested.Get(0).Index != expectedIndex {
+			return false, false, errors.New("candidate lost its launch-time request snapshot")
+		}
 		if len(candidate.Responses) != 2 {
 			return false, false, errors.New("candidate is incomplete")
 		}
@@ -94,7 +108,7 @@ func TestBlobBackfillRequestRejectsPartialCandidateAndAcceptsFullLaterCandidate(
 		return true, true, nil
 	}
 	go func() {
-		result, err := requestBlobsForBackfillWithSchedule(t.Context(), client, emptyBlobRequest, accept, blobBackfillRequestSchedule{
+		result, err := requestBlobsForBackfillWithSchedule(t.Context(), client, requestFactory, accept, blobBackfillRequestSchedule{
 			ticks:   ticks,
 			expires: expires,
 			now:     func() time.Time { return time.Unix(100, 0) },
@@ -121,6 +135,43 @@ func TestBlobBackfillRequestRejectsPartialCandidateAndAcceptsFullLaterCandidate(
 	require.Equal(t, "full", result.result.Peer)
 	require.Len(t, result.result.Responses, 2)
 	require.True(t, persisted.Load())
+}
+
+func TestBlobBackfillRequestRetriesProgressingCandidateWithoutRefetch(t *testing.T) {
+	ticks := make(chan time.Time)
+	expires := make(chan time.Time)
+	requests := make(chan struct{}, 2)
+	validationReady := make(chan struct{}, 2)
+	client := blobRequesterFunc(func(context.Context, *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error) {
+		requests <- struct{}{}
+		return []*cltypes.BlobSidecar{{}}, "peer", nil
+	})
+	attempts := 0
+	done := make(chan error, 1)
+	go func() {
+		_, err := requestBlobsForBackfillWithSchedule(t.Context(), client, emptyBlobRequest, func(context.Context, *PeerAndSidecars) (bool, bool, error) {
+			attempts++
+			if attempts == 1 {
+				return true, false, errors.New("temporary persistence failure")
+			}
+			return true, true, nil
+		}, blobBackfillRequestSchedule{
+			ticks: ticks, expires: expires, now: func() time.Time { return time.Unix(100, 0) },
+			validationReady: func() { validationReady <- struct{}{} },
+		})
+		done <- err
+	}()
+
+	receiveBlobTestSignal(t, requests)
+	receiveBlobTestSignal(t, validationReady)
+	ticks <- time.Unix(101, 0)
+	require.NoError(t, receiveBlobTestValue(t, done))
+	require.Equal(t, 2, attempts)
+	select {
+	case <-requests:
+		t.Fatal("refetched a candidate that had already made validation progress")
+	default:
+	}
 }
 
 func TestBlobBackfillRequestPacingBacksOffEveryFailure(t *testing.T) {

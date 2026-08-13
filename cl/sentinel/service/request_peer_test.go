@@ -18,6 +18,8 @@ package service
 
 import (
 	"context"
+	"errors"
+	"io"
 	"net/http"
 	"testing"
 	"time"
@@ -26,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/sentinel"
+	"github.com/erigontech/erigon/cl/sentinel/httpreqresp"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
@@ -48,6 +51,42 @@ func TestPeerRequestUsesCallerContext(t *testing.T) {
 	require.ErrorIs(t, receivePeerRequestTestValue(t, done), context.Canceled)
 	receivePeerRequestTestValue(t, requestCancelled)
 }
+
+func TestPeerProtocolErrorBodyClosesOnCancellation(t *testing.T) {
+	body := &blockingResponseBody{closed: make(chan struct{})}
+	ctx, cancel := context.WithCancel(t.Context())
+	stopClose := closeBodyOnCancel(ctx, body)
+	defer stopClose()
+	done := make(chan error, 1)
+	go func() {
+		_, err := httpreqresp.ResponseCodeServerError.ErrorMessage(&http.Response{Body: body})
+		done <- err
+	}()
+
+	cancel()
+	require.Error(t, receivePeerRequestTestValue(t, done))
+	receivePeerRequestTestValue(t, body.closed)
+}
+
+type blockingResponseBody struct {
+	closed chan struct{}
+}
+
+func (b *blockingResponseBody) Read([]byte) (int, error) {
+	<-b.closed
+	return 0, errors.New("response body closed")
+}
+
+func (b *blockingResponseBody) Close() error {
+	select {
+	case <-b.closed:
+	default:
+		close(b.closed)
+	}
+	return nil
+}
+
+var _ io.ReadCloser = (*blockingResponseBody)(nil)
 
 type peerRequestBackendStub struct {
 	handler http.Handler
