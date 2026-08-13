@@ -69,6 +69,11 @@ func (r *calcDomainReader) ReadAccountStorage(addr accounts.Address, key account
 	return val, true, nil
 }
 
+// accountBaselineReader supplies an address's pre-write account fields.
+type accountBaselineReader interface {
+	ReadAccountData(addr accounts.Address) (*accounts.Account, error)
+}
+
 // storageEnumerator lists every persisted storage slot under an address.
 type storageEnumerator interface {
 	EachStorageSlot(addr accounts.Address, fn func(key accounts.StorageKey) error) error
@@ -87,7 +92,7 @@ type calcState struct {
 	storageDirty map[accounts.Address]map[accounts.StorageKey]bool
 
 	// domainReader provides lazy-load from the domain via asOfStateReader.
-	domainReader *calcDomainReader
+	domainReader accountBaselineReader
 
 	// storageEnum enumerates an account's persisted storage subtree for
 	// self-destruct; nil disables the on-disk subtree wipe.
@@ -121,8 +126,17 @@ func newCalcState(reader *asOfStateReader, logger log.Logger, logPrefix string) 
 	}
 }
 
+// writesCoverBaseline reports whether writes set every field ensureAccount would
+// lazy-load, making the domain read dead. Normalize fills all three for every
+// address it does not drop, so this holds for all but self-destructed ones.
+func writesCoverBaseline(writes *state.WriteSet, addr accounts.Address) bool {
+	return writes.Has(state.WriteHeader{Address: addr, Path: state.BalancePath}) &&
+		writes.Has(state.WriteHeader{Address: addr, Path: state.NoncePath}) &&
+		writes.Has(state.WriteHeader{Address: addr, Path: state.CodeHashPath})
+}
+
 // ensureAccount returns the account state, lazy-loading from domain on first touch.
-func (cs *calcState) ensureAccount(addr accounts.Address) *calcAccountState {
+func (cs *calcState) ensureAccount(addr accounts.Address, writes *state.WriteSet) *calcAccountState {
 	if acc, ok := cs.accounts[addr]; ok {
 		return acc
 	}
@@ -130,7 +144,7 @@ func (cs *calcState) ensureAccount(addr accounts.Address) *calcAccountState {
 	acc := &calcAccountState{
 		CodeHash: empty.CodeHash,
 	}
-	if cs.domainReader != nil {
+	if cs.domainReader != nil && !writesCoverBaseline(writes, addr) {
 		dbAcc, err := cs.domainReader.ReadAccountData(addr)
 		if err != nil {
 			// Sticky — recorded so the next compute fails fast instead of
@@ -164,7 +178,7 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 	for addr, vw := range writes.SelfDestructs() {
 		sdThisCall[addr] = vw.Val
 		if vw.Val {
-			acc := cs.ensureAccount(addr)
+			acc := cs.ensureAccount(addr, writes)
 			acc.Deleted = true
 			acc.dirty = true
 			cs.deleteStorageSubtree(addr)
@@ -174,7 +188,7 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 		return nonZero || !sdThisCall[addr]
 	}
 	for addr, vw := range writes.Balances() {
-		acc := cs.ensureAccount(addr)
+		acc := cs.ensureAccount(addr, writes)
 		acc.Balance = vw.Val
 		acc.dirty = true
 		if clearsDeleted(addr, !acc.Balance.IsZero()) {
@@ -182,7 +196,7 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 		}
 	}
 	for addr, vw := range writes.Nonces() {
-		acc := cs.ensureAccount(addr)
+		acc := cs.ensureAccount(addr, writes)
 		acc.Nonce = vw.Val
 		acc.dirty = true
 		if clearsDeleted(addr, acc.Nonce != 0) {
@@ -190,7 +204,7 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 		}
 	}
 	for addr, vw := range writes.CodeHashes() {
-		acc := cs.ensureAccount(addr)
+		acc := cs.ensureAccount(addr, writes)
 		acc.CodeHash = vw.Val.Value()
 		acc.dirty = true
 		if clearsDeleted(addr, vw.Val.Value() != empty.CodeHash) {
@@ -198,7 +212,7 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 		}
 	}
 	for addr, vw := range writes.Codes() {
-		acc := cs.ensureAccount(addr)
+		acc := cs.ensureAccount(addr, writes)
 		acc.CodeHash = vw.Val.Hash.Value()
 		acc.dirty = true
 		if clearsDeleted(addr, vw.Val.Len() > 0) {
@@ -206,7 +220,7 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 		}
 	}
 	for addr, vw := range writes.Incarnations() {
-		acc := cs.ensureAccount(addr)
+		acc := cs.ensureAccount(addr, writes)
 		acc.Incarnation = vw.Val
 		acc.dirty = true
 	}
