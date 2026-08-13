@@ -2023,15 +2023,6 @@ var coinbaseVec = dbg.EnvBool("COINBASE_VEC", false)
 // yet changing behaviour (calcFees still materializes). Off by default.
 var coinbaseApplyCheck = dbg.EnvBool("COINBASE_APPLY_CHECK", false)
 
-// relaxDispatch (prototype, default OFF) relaxes the deferred-tx re-dispatch gate
-// from strict predecessor order (maxValidated >= tx-1) to actual observed
-// dependencies (!isBlocked). A deferred tx that no longer has unresolved blockers
-// is re-queued immediately rather than waiting for its immediate predecessor to
-// validate — keeping otherwise-idle workers fed with runnable work. Correctness
-// is still enforced by the versionMap OCC validation (premature re-runs abort and
-// re-defer); this only changes WHEN a re-try is offered to a worker.
-var relaxDispatch = dbg.EnvBool("RELAX_DISPATCH", false)
-
 // depOrderVal (prototype, default OFF) makes ValidateVersion + state-commit
 // dependency-ordered instead of gated on the contiguous maxComplete prefix: a tx
 // validates as soon as it is exec-complete and its read-dependencies are all
@@ -4521,7 +4512,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 	drainMaxValidated := be.validateTasks.maxComplete()
 	drainMinIP := be.execTasks.minInProgress()
 	be.execTasks.drainDeferredIfReady(func(tx int) bool {
-		if relaxDispatch || depOrderVal {
+		if depOrderVal {
 			// Dependency-driven drain: re-queue as soon as the tx's actual blockers
 			// clear, not when the contiguous prefix reaches tx-1. The contiguous
 			// maxValidated gate deadlocks dependency-ordered validation — a real
