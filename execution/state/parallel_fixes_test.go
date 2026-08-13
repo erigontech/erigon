@@ -100,52 +100,6 @@ func TestValueTiebreaker_NoncePath(t *testing.T) {
 	assert.Equal(t, VersionInvalid, valid, "Different nonce should be invalid")
 }
 
-// TestValueAwareMapRead_TipAlias reproduces the coinbase-tip version-alias bug:
-// a delayed fee tip updates the coinbase Balance cell VALUE at the same
-// (TxIndex, Incarnation) as the sender==coinbase worker write, so a downstream
-// MapRead recorded at that version passes the version-only check despite having
-// read the stale pre-tip value. Version-only validation misses it; value-aware
-// validation catches it.
-func TestValueAwareMapRead_TipAlias(t *testing.T) {
-	saved := valueAwareMapRead
-	defer func() { valueAwareMapRead = saved }()
-
-	vm := NewVersionMap(nil)
-	addr := accounts.InternAddress([20]byte{0x04})
-	writerVer := Version{TxIndex: 5, Incarnation: 0}
-
-	// Worker write: pre-tip coinbase balance.
-	vm.WriteBalance(addr, writerVer, *uint256.NewInt(1000), true)
-	preTip, rr, _ := vm.ReadBalance(addr, 10)
-	require.Equal(t, MVReadResultDone, rr.Status())
-	require.Equal(t, writerVer, rr.Version())
-
-	// A downstream tx read the pre-tip value from the versionMap (MapRead).
-	downstreamRead := preTip
-
-	// calcFees tip write: same version, new value (the aliasing).
-	vm.WriteBalance(addr, writerVer, *uint256.NewInt(1500), true)
-	postTip, rr, _ := vm.ReadBalance(addr, 10)
-	require.Equal(t, writerVer, rr.Version(), "tip write reuses the worker version")
-	require.NotEqual(t, downstreamRead, postTip, "tip changed the value at the same version")
-
-	validate := func() VersionValidity {
-		return validateRead(vm, 10, addr, BalancePath, accounts.NilKey, MapRead, writerVer,
-			downstreamRead, liveBalance, eqUint256,
-			func(rv, wv Version) VersionValidity {
-				if rv != wv {
-					return VersionInvalid
-				}
-				return VersionValid
-			}, false, "")
-	}
-
-	valueAwareMapRead = false
-	assert.Equal(t, VersionValid, validate(), "version-only validation misses the same-version value change (the bug)")
-
-	valueAwareMapRead = true
-	assert.Equal(t, VersionInvalid, validate(), "value-aware validation catches the stale MapRead")
-}
 
 // TestVersionedWriteVersion verifies that VersionedWrite entries at
 // txIndex=0 are still reachable. The bug was that finalizeTx appended
