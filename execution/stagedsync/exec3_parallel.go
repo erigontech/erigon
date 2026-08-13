@@ -1799,8 +1799,6 @@ func (pe *parallelExecutor) scheduleNextPending(ctx context.Context) {
 // processSingleResult routes one worker result to its block executor's
 // nextResult.
 func (pe *parallelExecutor) processSingleResult(ctx context.Context, applyTx kv.TemporalTx, txResult *exec.TxResult) (*blockResult, error) {
-	injectSpineDelay()
-
 	if pe.cfg.syncCfg.ChaosMonkey && pe.enableChaosMonkey {
 		chaosErr := chaos_monkey.ThrowRandomConsensusError(false, txResult.Version().TxIndex, pe.cfg.badBlockHalt, txResult.Err)
 		if chaosErr != nil {
@@ -2027,13 +2025,6 @@ var coinbaseVec = dbg.EnvBool("COINBASE_VEC", false)
 // yet changing behaviour (calcFees still materializes). Off by default.
 var coinbaseApplyCheck = dbg.EnvBool("COINBASE_APPLY_CHECK", false)
 var slDbgTx = dbg.EnvInt("SL_DBG_TX", -1)
-
-// spineDelayUs (diagnostic, default 0) injects a busy-spin of N microseconds per
-// scheduling iteration (per PopNext) on the serial exec-loop drain, WITHOUT
-// touching worker compute. Sweeping it isolates the causal effect of serial-spine
-// cost on worker occupancy / scaling — the correlation test for the "reduce the
-// spine → more parallelism" hypothesis.
-var spineDelayUs = dbg.EnvInt("SPINE_DELAY_US", 0)
 
 // relaxDispatch (prototype, default OFF) relaxes the deferred-tx re-dispatch gate
 // from strict predecessor order (maxValidated >= tx-1) to actual observed
@@ -2516,15 +2507,6 @@ func (be *blockExecutor) selfLoopEvaluate(tv *taskVersion, result *exec.TxResult
 		target = tv.index - 1
 	}
 	return true, target, -1
-}
-
-func injectSpineDelay() {
-	if spineDelayUs <= 0 {
-		return
-	}
-	deadline := time.Now().Add(time.Duration(spineDelayUs) * time.Microsecond)
-	for time.Now().Before(deadline) {
-	}
 }
 
 // blockRequest is the commitment calculator's per-block heads-up, sent by the
