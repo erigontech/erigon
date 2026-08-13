@@ -1924,7 +1924,6 @@ type txResult struct {
 // no-op filter, SD storage cascade via the sdSubtree GC marker). Consensus-
 // critical: off by default until gated by eest + a tip re-exec.
 var rawViewCollapse = dbg.EnvBool("RAW_VIEW_COLLAPSE", false)
-var finalizeReval = dbg.EnvBool("FINALIZE_REVAL", true)
 
 // prevBlockReads reads each block's committed base through the finished-but-not-
 // yet-committed prior blocks' versionMaps, so under splitApply (exec off sd.mem)
@@ -3310,7 +3309,7 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 		// re-check skips already-published txs — so the dependent finalizes stale.
 		// If stale here, un-commit and stop the sweep; the fixpoint loop re-executes
 		// it against the now-final predecessors before it can finalize.
-		if finalizeReval && txVersion.TxIndex >= 0 && !txTask.IsBlockEnd() && txResult.Err == nil {
+		if txVersion.TxIndex >= 0 && !txTask.IsBlockEnd() && txResult.Err == nil {
 			be.finRevalChecks++
 			if be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
 				func(rv, wv state.Version) state.VersionValidity {
