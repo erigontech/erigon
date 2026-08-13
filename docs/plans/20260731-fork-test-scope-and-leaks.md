@@ -6,6 +6,12 @@
 plan defines Tiers 1-4; this one defines the *matrix* Tiers exercise and
 the *discipline* by which we close it).
 
+**Endgame this feeds into:** [20260802-fork-endgame-shadow-fork-automation.md](20260802-fork-endgame-shadow-fork-automation.md)
+— single-command shadow-fork creation. Every phase 1/2 leak closed here
+is a prerequisite for one of the gaps that endgame doc enumerates. Read
+the endgame first for the north star; then this doc for the current
+phase's discipline.
+
 ---
 
 ## Why this document

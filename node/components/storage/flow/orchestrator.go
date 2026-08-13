@@ -913,7 +913,9 @@ func (o *Orchestrator) maybeFireInitialDownloadsComplete() {
 		}
 		pendingLen := len(o.pending)
 		o.peerMu.Unlock()
-		o.log.Info("[flow] maybeFireInitialDownloadsComplete: blocked", "reason", "pending>0", "pending", pendingLen, "sample", strings.Join(pending, ","))
+		// Debug — fires on every DownloadComplete decrement (thousands
+		// on a cold archive publisher). Info-level would drown the log.
+		o.log.Debug("[flow] maybeFireInitialDownloadsComplete: blocked", "reason", "pending>0", "pending", pendingLen, "sample", strings.Join(pending, ","))
 		return
 	}
 	o.initialDownloadsCompleteFired = true
