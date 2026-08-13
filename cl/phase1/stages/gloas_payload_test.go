@@ -4,6 +4,7 @@ import (
 	"context"
 	"math/big"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -262,6 +263,39 @@ func TestDrainPendingGloasPayloadsRequeuesNotValidatedPayload(t *testing.T) {
 	require.Equal(t, blockRoot, queued[0].Envelope.Message.BeaconBlockRoot)
 }
 
+func TestDrainPendingGloasPayloadsStopsAfterCancellation(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	engine := &testExecutionEngine{supportInsertion: false}
+	engine.newPayloadFn = func(ctx context.Context) (execution_client.PayloadStatus, error) {
+		<-ctx.Done()
+		return execution_client.PayloadStatusNone, ctx.Err()
+	}
+	fc := &forkchoice.ForkChoiceStore{}
+	for i := byte(1); i <= 3; i++ {
+		root := common.Hash{i}
+		payload := cltypes.NewEth1Block(clparams.GloasVersion, cfg)
+		payload.BlockHash = common.Hash{i + 10}
+		envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(cfg)}
+		envelope.Message.BeaconBlockRoot = root
+		envelope.Message.Payload = payload
+		body := cltypes.NewBeaconBody(cfg, clparams.GloasVersion)
+		body.SignedExecutionPayloadBid = &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{
+			BlobKzgCommitments: *solid.NewStaticListSSZ[*cltypes.KZGCommitment](0, 48),
+		}}
+		fc.RequeuePendingELPayload(forkchoice.PendingELPayload{
+			Block:    &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Body: body}},
+			Envelope: envelope,
+		})
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	drainPendingGloasPayloads(ctx, &Cfg{beaconCfg: cfg, executionClient: engine, forkChoice: fc})
+
+	require.Equal(t, 1, engine.newPayloadCalls)
+	require.Len(t, fc.DrainPendingELPayloads(), 3)
+}
+
 func validAnchorEnvelopeFixture(t *testing.T, builderIndex uint64) (*clparams.BeaconChainConfig, *state2.CachingBeaconState, *cltypes.ExecutionPayloadBid, *cltypes.SignedExecutionPayloadEnvelope, common.Hash) {
 	t.Helper()
 
@@ -392,10 +426,14 @@ type testExecutionEngine struct {
 	supportInsertion bool
 	payloadStatus    execution_client.PayloadStatus
 	newPayloadCalls  int
+	newPayloadFn     func(context.Context) (execution_client.PayloadStatus, error)
 }
 
-func (t *testExecutionEngine) NewPayload(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (execution_client.PayloadStatus, error) {
+func (t *testExecutionEngine) NewPayload(ctx context.Context, _ *cltypes.Eth1Block, _ *common.Hash, _ []common.Hash, _ []hexutil.Bytes) (execution_client.PayloadStatus, error) {
 	t.newPayloadCalls++
+	if t.newPayloadFn != nil {
+		return t.newPayloadFn(ctx)
+	}
 	return t.payloadStatus, nil
 }
 

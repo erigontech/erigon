@@ -18,6 +18,7 @@ package forkchoice
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -28,9 +29,154 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	state2 "github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/memdb"
 )
+
+type failingUpdateDB struct {
+	kv.RwDB
+	fail  bool
+	calls int
+}
+
+func (db *failingUpdateDB) Update(ctx context.Context, f func(kv.RwTx) error) error {
+	db.calls++
+	if db.fail {
+		return errors.New("injected update failure")
+	}
+	return db.RwDB.Update(ctx, f)
+}
+
+type pendingRetryForkGraph struct {
+	fork_graph.ForkGraph
+	completed         common.Hash
+	completedEnvelope *cltypes.SignedExecutionPayloadEnvelope
+}
+
+func (g pendingRetryForkGraph) HasEnvelope(root common.Hash) bool { return root == g.completed }
+func (g pendingRetryForkGraph) ReadEnvelopeFromDisk(root common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+	if root != g.completed {
+		return nil, nil
+	}
+	return g.completedEnvelope, nil
+}
+func (g pendingRetryForkGraph) GetState(common.Hash, bool) (*state2.CachingBeaconState, error) {
+	return nil, nil
+}
+
+func TestApplyPendingEnvelopeDoesNotIndexConcurrentWinner(t *testing.T) {
+	pending, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](1)
+	require.NoError(t, err)
+	blockRoot := common.HexToHash("0x1234")
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: blockRoot}}
+	pending.Add(blockRoot, envelope)
+	f := &ForkChoiceStore{
+		forkGraph:        payloadVoteForkGraph{hasEnvelope: true},
+		pendingEnvelopes: pending,
+	}
+
+	appliedEnvelope := f.applyPendingEnvelope(context.Background(), blockRoot, envelope, false, false)
+	require.Nil(t, appliedEnvelope)
+	require.False(t, pending.Contains(blockRoot))
+}
+
+func TestRetryPendingExecutionPayloadEnvelopesCleansCompletedWork(t *testing.T) {
+	pending, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](2)
+	require.NoError(t, err)
+	local, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](1)
+	require.NoError(t, err)
+	blockRoot := common.HexToHash("0x1234")
+	otherRoot := common.HexToHash("0x5678")
+	pending.Add(blockRoot, &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: blockRoot}})
+	pending.Add(otherRoot, &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: otherRoot}})
+	f := &ForkChoiceStore{
+		forkGraph:                      payloadVoteForkGraph{hasEnvelope: true},
+		pendingEnvelopes:               pending,
+		pendingLocalSelfBuildEnvelopes: local,
+	}
+
+	f.RetryPendingExecutionPayloadEnvelopes(context.Background(), 1)
+	require.Equal(t, 1, pending.Len())
+}
+
+func TestRetryPendingExecutionPayloadEnvelopesSharesBudgetAcrossOrigins(t *testing.T) {
+	pending, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](2)
+	require.NoError(t, err)
+	local, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](2)
+	require.NoError(t, err)
+	localRoot := common.HexToHash("0x1234")
+	gossipRoot := common.HexToHash("0x5678")
+	local.Add(localRoot, &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: localRoot}})
+	pending.Add(gossipRoot, &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: gossipRoot}})
+	f := &ForkChoiceStore{
+		forkGraph:                      payloadVoteForkGraph{hasEnvelope: true},
+		pendingEnvelopes:               pending,
+		pendingLocalSelfBuildEnvelopes: local,
+	}
+
+	f.RetryPendingExecutionPayloadEnvelopes(context.Background(), 2)
+	require.Zero(t, local.Len())
+	require.Zero(t, pending.Len())
+}
+
+func TestRetryPendingExecutionPayloadEnvelopesRotatesFailures(t *testing.T) {
+	pending, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](3)
+	require.NoError(t, err)
+	local, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](1)
+	require.NoError(t, err)
+	roots := []common.Hash{common.HexToHash("0x1"), common.HexToHash("0x2"), common.HexToHash("0x3")}
+	for _, root := range roots {
+		envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
+		envelope.Message.BeaconBlockRoot = root
+		pending.Add(root, envelope)
+	}
+	completedEnvelope, ok := pending.Peek(roots[2])
+	require.True(t, ok)
+	f := &ForkChoiceStore{
+		forkGraph:                      pendingRetryForkGraph{completed: roots[2], completedEnvelope: completedEnvelope},
+		pendingEnvelopes:               pending,
+		pendingLocalSelfBuildEnvelopes: local,
+	}
+
+	f.RetryPendingExecutionPayloadEnvelopes(context.Background(), 2)
+	require.True(t, pending.Contains(roots[2]))
+	f.RetryPendingExecutionPayloadEnvelopes(context.Background(), 2)
+	require.False(t, pending.Contains(roots[2]))
+}
+
+func TestPendingEnvelopeIndexWriteRetriesThroughOriginQueue(t *testing.T) {
+	pending, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](1)
+	require.NoError(t, err)
+	local, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](1)
+	require.NoError(t, err)
+	blockRoot := common.HexToHash("0x1234")
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
+	envelope.Message.BeaconBlockRoot = blockRoot
+	envelope.Message.Payload.BlockNumber = 42
+	envelope.Message.Payload.BlockHash = common.HexToHash("0xabcd")
+	pending.Add(blockRoot, envelope)
+	db := &failingUpdateDB{RwDB: memdb.NewTestDB(t, dbcfg.ChainDB), fail: true}
+	f := &ForkChoiceStore{
+		forkGraph:                      pendingRetryForkGraph{completed: blockRoot, completedEnvelope: envelope},
+		pendingEnvelopes:               pending,
+		pendingLocalSelfBuildEnvelopes: local,
+		db:                             db,
+	}
+
+	f.processPendingEnvelopeAfterBlock(context.Background(), blockRoot, false)
+	require.True(t, pending.Contains(blockRoot))
+	require.Equal(t, 1, db.calls)
+	db.fail = false
+	f.RetryPendingExecutionPayloadEnvelopes(context.Background(), 1)
+	require.False(t, pending.Contains(blockRoot))
+	require.Equal(t, 2, db.calls)
+}
 
 // TestValidateEnvelopeAgainstBlock_NoBid tests that validation fails when block has no bid
 func TestValidateEnvelopeAgainstBlock_NoBid(t *testing.T) {
@@ -272,7 +418,7 @@ func TestValidatePayloadWithEL_NoEngine(t *testing.T) {
 		},
 	}
 
-	err := f.validatePayloadWithEL(context.TODO(), envelope, block, common.Hash{})
+	_, err := f.validatePayloadWithEL(context.TODO(), envelope, block, common.Hash{})
 	require.NoError(t, err)
 }
 
@@ -342,7 +488,8 @@ func TestValidatePayloadWithELDoesNotRelockForkChoiceMu(t *testing.T) {
 			go func() {
 				f.mu.Lock()
 				defer f.mu.Unlock()
-				done <- f.validatePayloadWithEL(context.Background(), envelope, block, blockRoot)
+				status, validationErr := f.validatePayloadWithEL(context.Background(), envelope, block, blockRoot)
+				done <- f.applyPayloadValidationResultLocked(status, validationErr, envelope, block, blockRoot)
 			}()
 
 			select {
@@ -361,4 +508,69 @@ func TestValidatePayloadWithELDoesNotRelockForkChoiceMu(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestValidatePayloadWithELReleasesForkChoiceMuDuringNewPayload(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	ctrl := gomock.NewController(t)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engineStarted := make(chan struct{})
+	releaseEngine := make(chan struct{})
+	engine.EXPECT().
+		NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (execution_client.PayloadStatus, error) {
+			close(engineStarted)
+			<-releaseEngine
+			return execution_client.PayloadStatusValidated, nil
+		})
+
+	verifiedExecutionPayload, err := lru.New[common.Hash, struct{}](16)
+	require.NoError(t, err)
+	executionPayloadStatus, err := lru.New[common.Hash, execution_client.PayloadStatus](16)
+	require.NoError(t, err)
+	payloadStatusByRoot, err := lru.New[common.Hash, execution_client.PayloadStatus](16)
+	require.NoError(t, err)
+	executionPayloadGasLimit, err := lru.New[common.Hash, uint64](16)
+	require.NoError(t, err)
+
+	f := &ForkChoiceStore{
+		beaconCfg:                cfg,
+		engine:                   engine,
+		forkGraph:                payloadVoteForkGraph{},
+		verifiedExecutionPayload: verifiedExecutionPayload,
+		executionPayloadStatus:   executionPayloadStatus,
+		payloadStatusByRoot:      payloadStatusByRoot,
+		executionPayloadGasLimit: executionPayloadGasLimit,
+	}
+	body := cltypes.NewBeaconBody(cfg, clparams.GloasVersion)
+	body.SignedExecutionPayloadBid = &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{
+		BlobKzgCommitments: *solid.NewStaticListSSZ[*cltypes.KZGCommitment](0, 48),
+	}}
+	block := &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Body: body}}
+	envelope := cltypes.NewExecutionPayloadEnvelope(cfg)
+	envelope.Payload.BlockHash = common.HexToHash("0xabcd")
+
+	done := make(chan error, 1)
+	go func() {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		status, validationErr := f.validatePayloadWithEL(context.Background(), envelope, block, common.HexToHash("0x1234"))
+		done <- f.applyPayloadValidationResultLocked(status, validationErr, envelope, block, common.HexToHash("0x1234"))
+	}()
+	<-engineStarted
+
+	lockAcquired := make(chan struct{})
+	go func() {
+		f.mu.Lock()
+		close(lockAcquired)
+		f.mu.Unlock()
+	}()
+	select {
+	case <-lockAcquired:
+	case <-time.After(time.Second):
+		close(releaseEngine)
+		t.Fatal("forkchoice mutex stayed locked during NewPayload")
+	}
+	close(releaseEngine)
+	require.NoError(t, <-done)
 }

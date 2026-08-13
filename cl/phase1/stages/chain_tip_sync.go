@@ -22,7 +22,11 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-const maxGloasVerificationSweepPerCycle = 32
+const (
+	maxGloasVerificationSweepPerCycle = 32
+	maxPendingGloasPayloadsPerCycle   = 32
+	gloasPayloadRetryBudget           = 2 * time.Second
+)
 
 func gloasVersionedHashes(blobCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) ([]common.Hash, error) {
 	if blobCommitments == nil || blobCommitments.Len() == 0 {
@@ -524,7 +528,14 @@ func isGloasPayloadKnownInvalid(cfg *Cfg, envelope *cltypes.SignedExecutionPaylo
 }
 
 func drainPendingGloasPayloads(ctx context.Context, cfg *Cfg) {
-	for _, p := range cfg.forkChoice.DrainPendingELPayloads() {
+	pending := cfg.forkChoice.DrainPendingELPayloadsLimit(maxPendingGloasPayloadsPerCycle)
+	for i, p := range pending {
+		if ctx.Err() != nil {
+			for _, deferred := range pending[i:] {
+				cfg.forkChoice.RequeuePendingELPayload(deferred)
+			}
+			return
+		}
 		if !validPendingGloasPayload(p) {
 			continue
 		}
@@ -584,6 +595,9 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 
 	swept := 0
 	for _, item := range slices.Backward(blocks) {
+		if ctx.Err() != nil {
+			break
+		}
 		if cfg.forkChoice.IsPayloadVerified(item.root) {
 			continue
 		}
@@ -622,6 +636,9 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 }
 
 func retryUnverifiedAnchorPayload(ctx context.Context, cfg *Cfg) {
+	if ctx.Err() != nil {
+		return
+	}
 	anchorSlot := cfg.forkChoice.AnchorSlot()
 	epoch := anchorSlot / cfg.beaconCfg.SlotsPerEpoch
 	if cfg.beaconCfg.GetCurrentStateVersion(epoch) < clparams.GloasVersion {
@@ -677,10 +694,13 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 	recoverMissingEnvelopes(ctx, cfg)
 
 	if canValidateGloasPayloads(cfg) {
+		payloadRetryCtx, cancelPayloadRetry := context.WithTimeout(ctx, gloasPayloadRetryBudget)
+		cfg.forkChoice.RetryPendingExecutionPayloadEnvelopes(payloadRetryCtx, maxPendingGloasPayloadsPerCycle)
 		// [New in Gloas:EIP7732] Drain execution blocks whose CL transition succeeded
 		// but whose EL newPayload previously returned SYNCING/ACCEPTED.
-		drainPendingGloasPayloads(ctx, cfg)
-		retryUnverifiedAnchorPayload(ctx, cfg)
+		drainPendingGloasPayloads(payloadRetryCtx, cfg)
+		retryUnverifiedAnchorPayload(payloadRetryCtx, cfg)
+		cancelPayloadRetry()
 		if cfg.executionClient.SupportInsertion() {
 			if err := cfg.blockCollector.Flush(context.Background()); err != nil {
 				log.Warn("[chainTipSync] blockCollector.Flush failed (EL may still be catching up)", "err", err)
@@ -699,7 +719,9 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 				pollForEnvelope(ctx, cfg, headRoot, 2*time.Second)
 			}
 			if canValidateGloasPayloads(cfg) {
-				verifyUnverifiedGloasPayloads(ctx, cfg)
+				verifyCtx, cancelVerify := context.WithTimeout(ctx, gloasPayloadRetryBudget)
+				verifyUnverifiedGloasPayloads(verifyCtx, cfg)
+				cancelVerify()
 			}
 			// NOTE: recoverMissingEnvelopes runs unconditionally above (before
 			// SupportInsertion check), so it covers every cycle.

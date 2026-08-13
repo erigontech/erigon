@@ -296,6 +296,9 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	}
 	switch status {
 	case fork_graph.PreValidated:
+		unlocked = true
+		f.mu.Unlock()
+		f.processPendingEnvelopeAfterBlock(ctx, common.Hash(blockRoot), checkDataAvaiability)
 		return nil
 	case fork_graph.Success:
 		f.updateChildren(block.Block.Slot-1, block.Block.ParentRoot, blockRoot) // parent slot can be innacurate
@@ -333,7 +336,8 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	f.updateProposerBoostRoot(headBeforeBlock, common.Hash(blockRoot))
 
 	// [New in Gloas:EIP7732] GLOAS-specific on_block logic (post state transition)
-	var appliedEnvelope *cltypes.ExecutionPayloadEnvelope
+	var pendingEnvelope *cltypes.SignedExecutionPayloadEnvelope
+	var pendingEnvelopeLocal bool
 	if blockVersion >= clparams.GloasVersion {
 		// Initialize payload timeliness and data availability votes for this block
 		f.payloadTimelinessVote.Store(common.Hash(blockRoot), [clparams.PtcSize]int8{})
@@ -346,38 +350,12 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			f.notifyPtcMessages(lastProcessedState, block.Block.Body.PayloadAttestations)
 		}
 
-		// [New in Gloas:EIP7732] Check if there's a pending envelope waiting for this block.
-		// This handles the case where envelope arrives before the block via gossip.
-		// IMPORTANT: must run BEFORE ProcessJustificationBitsAndFinality below, which
-		// temporarily mutates the state for unrealized justification. The envelope's
-		// ProcessExecutionPayloadEnvelope spec check requires state.HashSSZ() to match
-		// the block's state_root, and the mutation+restoration cycle can cause the
-		// incremental hash cache to diverge.
-		// Check for pending envelopes: first the local self-build queue (skip BLS),
-		// then the general gossip queue (full BLS verification). These are separate
-		// queues so that origin is determined by which queue wrote the entry, not by
-		// inspecting envelope contents (which an attacker could forge).
+		// Preserve envelope origin so the post-commit path applies the correct BLS policy.
 		if pending, ok := f.pendingLocalSelfBuildEnvelopes.Get(common.Hash(blockRoot)); ok {
-			f.pendingLocalSelfBuildEnvelopes.Remove(common.Hash(blockRoot))
-			log.Trace("OnBlock: processing pending local self-build envelope", "blockRoot", common.Hash(blockRoot))
-			applied, applyErr := f.applyLocalSelfBuildEnvelopeLocked(ctx, pending)
-			if applyErr != nil {
-				log.Warn("OnBlock: failed to process pending local self-build envelope", "blockRoot", common.Hash(blockRoot), "err", applyErr)
-			} else if applied {
-				appliedEnvelope = pending.Message
-			}
+			pendingEnvelope = pending
+			pendingEnvelopeLocal = true
 		} else if pending, ok := f.pendingEnvelopes.Get(common.Hash(blockRoot)); ok {
-			f.pendingEnvelopes.Remove(common.Hash(blockRoot))
-			log.Trace("OnBlock: processing pending envelope", "blockRoot", common.Hash(blockRoot))
-			// Always validate payload with EL for pending envelopes, regardless of the caller's newPayload flag.
-			// During forward sync newPayload is false, but the envelope still needs to reach the EL;
-			// otherwise the EL never learns about this block and the chain stalls.
-			applied, applyErr := f.applyEnvelopeLocked(ctx, pending, checkDataAvaiability, true)
-			if applyErr != nil {
-				log.Warn("OnBlock: failed to process pending envelope", "blockRoot", common.Hash(blockRoot), "err", applyErr)
-			} else if applied {
-				appliedEnvelope = pending.Message
-			}
+			pendingEnvelope = pending
 		}
 	}
 	if lastProcessedState.Slot()%f.beaconCfg.SlotsPerEpoch == 0 {
@@ -454,13 +432,6 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	if blockEpoch < currentEpoch {
 		f.updateCheckpoints(postPullupJustified, postPullupFinalized)
 	}
-	blockData := &beaconevents.BlockData{
-		Slot:                block.Block.Slot,
-		Block:               blockRoot,
-		ExecutionOptimistic: f.optimisticStore.IsOptimistic(blockRoot),
-	}
-	f.queueEmit(func() { f.emitters.State().SendBlock(blockData) })
-
 	if !isVerifiedExecutionPayload {
 		log.Debug("OnBlock", "elapsed", time.Since(start), "slot", block.Block.Slot)
 	}
@@ -476,6 +447,16 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	// Release lock (via defer) before writing DB indices for the applied envelope.
 	unlocked = true
 	f.mu.Unlock()
+
+	appliedEnvelope := f.applyPendingEnvelope(ctx, common.Hash(blockRoot), pendingEnvelope, pendingEnvelopeLocal, checkDataAvaiability)
+	f.mu.Lock()
+	blockData := &beaconevents.BlockData{
+		Slot:                block.Block.Slot,
+		Block:               blockRoot,
+		ExecutionOptimistic: f.optimisticStore.IsOptimistic(blockRoot),
+	}
+	f.queueEmit(func() { f.emitters.State().SendBlock(blockData) })
+	f.mu.Unlock()
 	f.drainQueuedWork()
 
 	// Write execution payload envelope indices outside f.mu to avoid deadlock
@@ -484,12 +465,117 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		if err := f.db.Update(ctx, func(tx kv.RwTx) error {
 			return beacon_indicies.WriteExecutionPayloadEnvelopeIndicies(tx, common.Hash(blockRoot), appliedEnvelope)
 		}); err != nil {
+			if pendingEnvelopeLocal {
+				f.pendingLocalSelfBuildEnvelopes.Add(common.Hash(blockRoot), pendingEnvelope)
+			} else {
+				f.pendingEnvelopes.Add(common.Hash(blockRoot), pendingEnvelope)
+			}
 			log.Warn("OnBlock: failed to write execution payload indices for pending envelope",
 				"blockRoot", common.Hash(blockRoot), "err", err)
 		}
 	}
 
 	return nil
+}
+
+func (f *ForkChoiceStore) processPendingEnvelopeAfterBlock(ctx context.Context, blockRoot common.Hash, checkDataAvailability bool) {
+	var pending *cltypes.SignedExecutionPayloadEnvelope
+	local := false
+	if candidate, ok := f.pendingLocalSelfBuildEnvelopes.Peek(blockRoot); ok {
+		pending = candidate
+		local = true
+	} else if candidate, ok := f.pendingEnvelopes.Peek(blockRoot); ok {
+		pending = candidate
+	}
+	appliedEnvelope := f.applyPendingEnvelope(ctx, blockRoot, pending, local, checkDataAvailability)
+	if appliedEnvelope != nil && f.db != nil {
+		if err := f.db.Update(ctx, func(tx kv.RwTx) error {
+			return beacon_indicies.WriteExecutionPayloadEnvelopeIndicies(tx, blockRoot, appliedEnvelope)
+		}); err != nil {
+			if local {
+				f.pendingLocalSelfBuildEnvelopes.Add(blockRoot, pending)
+			} else {
+				f.pendingEnvelopes.Add(blockRoot, pending)
+			}
+			log.Warn("OnBlock: failed to write execution payload indices for pending envelope", "blockRoot", blockRoot, "err", err)
+		}
+	}
+}
+
+func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopes(ctx context.Context, limit int) {
+	if limit <= 0 || f.pendingLocalSelfBuildEnvelopes == nil || f.pendingEnvelopes == nil {
+		return
+	}
+	localRoots := f.pendingLocalSelfBuildEnvelopes.Keys()
+	gossipRoots := f.pendingEnvelopes.Keys()
+	seen := make(map[common.Hash]struct{}, len(localRoots)+len(gossipRoots))
+	for i := 0; limit > 0 && (i < len(localRoots) || i < len(gossipRoots)); i++ {
+		for _, roots := range [][]common.Hash{localRoots, gossipRoots} {
+			if i >= len(roots) {
+				continue
+			}
+			root := roots[i]
+			if _, ok := seen[root]; ok {
+				continue
+			}
+			seen[root] = struct{}{}
+			f.processPendingEnvelopeAfterBlock(ctx, root, true)
+			if f.pendingLocalSelfBuildEnvelopes.Contains(root) {
+				f.pendingLocalSelfBuildEnvelopes.Get(root)
+			}
+			if f.pendingEnvelopes.Contains(root) {
+				f.pendingEnvelopes.Get(root)
+			}
+			limit--
+			if limit == 0 || ctx.Err() != nil {
+				return
+			}
+		}
+	}
+}
+
+func (f *ForkChoiceStore) applyPendingEnvelope(ctx context.Context, blockRoot common.Hash, pending *cltypes.SignedExecutionPayloadEnvelope, local, checkDataAvailability bool) *cltypes.ExecutionPayloadEnvelope {
+	if pending == nil {
+		return nil
+	}
+	var applied bool
+	var err error
+	if local {
+		applied, err = f.applyLocalSelfBuildEnvelope(ctx, pending)
+	} else {
+		applied, err = f.applyEnvelope(ctx, pending, checkDataAvailability, true)
+	}
+	if err != nil {
+		log.Warn("OnBlock: failed to process pending envelope", "blockRoot", blockRoot, "local", local, "err", err)
+		return nil
+	}
+	completedByAnother := !applied && f.forkGraph.HasEnvelope(blockRoot)
+	if !applied && !completedByAnother {
+		return nil
+	}
+	completedSameEnvelope := applied
+	if completedByAnother {
+		persisted, err := f.forkGraph.ReadEnvelopeFromDisk(blockRoot)
+		if err != nil {
+			return nil
+		}
+		if persisted != nil && persisted.Message != nil {
+			persistedRoot, persistedErr := persisted.Message.HashSSZ()
+			pendingRoot, pendingErr := pending.Message.HashSSZ()
+			completedSameEnvelope = persistedErr == nil && pendingErr == nil && persistedRoot == pendingRoot
+		}
+	}
+	if local {
+		if current, ok := f.pendingLocalSelfBuildEnvelopes.Peek(blockRoot); ok && current == pending {
+			f.pendingLocalSelfBuildEnvelopes.Remove(blockRoot)
+		}
+	} else if current, ok := f.pendingEnvelopes.Peek(blockRoot); ok && current == pending {
+		f.pendingEnvelopes.Remove(blockRoot)
+	}
+	if !completedSameEnvelope {
+		return nil
+	}
+	return pending.Message
 }
 
 func (f *ForkChoiceStore) addChainSegmentAndQueueLightClientEvents(block *cltypes.SignedBeaconBlock, fullValidation bool) (*state.CachingBeaconState, fork_graph.ChainSegmentInsertionResult, error) {

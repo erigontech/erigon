@@ -2,6 +2,7 @@ package checkpoint_sync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -44,6 +45,13 @@ func (l *LocalCheckpointSyncer) GetLatestBeaconState(ctx context.Context) (*stat
 	}
 	if err := bs.DecodeSSZ(decompressedSnappy, int(beaconCfg.GetCurrentStateVersion(slot/beaconCfg.SlotsPerEpoch))); err != nil {
 		return nil, fmt.Errorf("could not deserialize state: %s", err)
+	}
+	if err := RestoreFinalizedStateRoot(l.dir, snappyEncoded, bs); err != nil {
+		if errors.Is(err, ErrFinalizedGloasStateRootMissing) {
+			log.Warn("Local finalized Gloas state predates state-root persistence, starting sync from genesis.")
+			return l.genesisState.Copy()
+		}
+		return nil, err
 	}
 	// Same-network gate as the remote-sync resume paths: a file left by another chain must never
 	// anchor the node. Staleness is not gated here — there is no remote to fall back to, and a stale

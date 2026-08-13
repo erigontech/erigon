@@ -18,6 +18,7 @@ import (
 	"github.com/erigontech/erigon/cl/monitor/shuffling_metrics"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/caches"
+	"github.com/erigontech/erigon/cl/phase1/core/checkpoint_sync"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
@@ -305,27 +306,66 @@ func writeFinalizedStateFile(dirs datadir.Dirs, st *state.CachingBeaconState) er
 	if err := os.MkdirAll(dirs.CaplinLatest, 0o755); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
+	rootFileName := checkpoint_sync.FinalizedStateRootFileName(dat)
+	rootPath := filepath.Join(dirs.CaplinLatest, rootFileName)
+	rootTmpPath := rootPath + ".tmp"
+	stateRoot := st.PeekPreviousStateRoot()
+	if err := replaceDurableFile(rootTmpPath, rootPath, checkpoint_sync.EncodeFinalizedStateRoot(dat, stateRoot)); err != nil {
+		return fmt.Errorf("failed to replace finalized state root: %w", err)
+	}
 	tmpName := filepath.Join(dirs.CaplinLatest, clparams.LatestFinalizedStateFileName+".tmp")
-	tmp, err := os.OpenFile(tmpName, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
-	if err != nil {
-		return fmt.Errorf("failed to create temp finalized state file: %w", err)
+	statePath := filepath.Join(dirs.CaplinLatest, clparams.LatestFinalizedStateFileName)
+	if err := replaceDurableFile(tmpName, statePath, dat); err != nil {
+		return fmt.Errorf("failed to replace finalized state: %w", err)
 	}
-	defer func() { _ = dir.RemoveFile(tmpName) }()
-	if _, err := tmp.Write(dat); err != nil {
-		tmp.Close()
-		return fmt.Errorf("failed to write finalized state to disk: %w", err)
+	if err := checkpoint_sync.RemoveObsoleteFinalizedStateRoots(dirs.CaplinLatest, rootPath); err != nil {
+		return fmt.Errorf("failed to remove obsolete finalized state roots: %w", err)
 	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return fmt.Errorf("failed to sync finalized state temp file: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("failed to close finalized state temp file: %w", err)
-	}
-	if err := os.Rename(tmpName, filepath.Join(dirs.CaplinLatest, clparams.LatestFinalizedStateFileName)); err != nil {
-		return fmt.Errorf("failed to rename finalized state file: %w", err)
+	if err := syncDirectory(dirs.CaplinLatest); err != nil {
+		return fmt.Errorf("failed to sync finalized state root cleanup: %w", err)
 	}
 	return nil
+}
+
+func replaceDurableFile(tmpPath, finalPath string, data []byte) (err error) {
+	tmp, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+	closed := false
+	defer func() {
+		if !closed {
+			err = errors.Join(err, tmp.Close())
+		}
+		_ = dir.RemoveFile(tmpPath)
+	}()
+	if _, err = tmp.Write(data); err != nil {
+		return err
+	}
+	if syncErr := tmp.Sync(); syncErr != nil {
+		return syncErr
+	}
+	closeErr := tmp.Close()
+	closed = true
+	if closeErr != nil {
+		return closeErr
+	}
+	if renameErr := os.Rename(tmpPath, finalPath); renameErr != nil {
+		return renameErr
+	}
+	return syncDirectory(filepath.Dir(finalPath))
+}
+
+func syncDirectory(path string) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	directory, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer directory.Close()
+	return directory.Sync()
 }
 
 // saveFinalizedStateOnDiskIfNeeded persists the node's own most-recently-finalized state so a

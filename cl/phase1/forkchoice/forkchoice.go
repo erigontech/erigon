@@ -199,8 +199,10 @@ type ForkChoiceStore struct {
 	// whose EL newPayload failed (e.g. because EL hasn't caught up after forward sync).
 	// The stages layer drains these into blockCollector before each Flush() so EL
 	// eventually receives the blocks.
-	pendingELPayloadsMu sync.Mutex
-	pendingELPayloads   []PendingELPayload
+	pendingELPayloadsMu        sync.Mutex
+	pendingELPayloads          []PendingELPayload
+	payloadValidationOnce      sync.Once
+	payloadValidationAdmission chan struct{}
 
 	// db is used to persist execution payload indices (block number/hash) when an envelope
 	// is accepted in OnExecutionPayload. May be nil (e.g. in tests), in which case the
@@ -1091,10 +1093,25 @@ func (f *ForkChoiceStore) RequeuePendingELPayload(p PendingELPayload) {
 // DrainPendingELPayloads returns and clears all queued EL payloads.
 // The stages layer calls this before Flush() to retry them with engine.NewPayload.
 func (f *ForkChoiceStore) DrainPendingELPayloads() []PendingELPayload {
+	return f.DrainPendingELPayloadsLimit(maxPendingELPayloads)
+}
+
+func (f *ForkChoiceStore) DrainPendingELPayloadsLimit(limit int) []PendingELPayload {
+	if limit <= 0 {
+		return nil
+	}
 	f.pendingELPayloadsMu.Lock()
 	defer f.pendingELPayloadsMu.Unlock()
 	if len(f.pendingELPayloads) == 0 {
 		return nil
+	}
+	if len(f.pendingELPayloads) > limit {
+		result := make([]PendingELPayload, limit)
+		copy(result, f.pendingELPayloads[:limit])
+		copy(f.pendingELPayloads, f.pendingELPayloads[limit:])
+		clear(f.pendingELPayloads[len(f.pendingELPayloads)-limit:])
+		f.pendingELPayloads = f.pendingELPayloads[:len(f.pendingELPayloads)-limit]
+		return result
 	}
 	if cap(f.pendingELPayloads) > pendingELPayloadsShrinkCap {
 		result := f.pendingELPayloads
