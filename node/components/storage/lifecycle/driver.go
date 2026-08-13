@@ -148,6 +148,13 @@ type Driver struct {
 	subUnsub    func() // returned by Inv.Subscribe; called on Stop
 	failures    map[string]int
 	quarantined map[string]bool
+	// pauseLogged records (file, pause-reason) tuples we've already
+	// Info-logged, so a validator that keeps pausing for the same
+	// reason across sweeps only surfaces once — enough for an operator
+	// to see the missing dependency, without the per-sweep spam a
+	// blanket Info-level pause log produces (thousands per second on
+	// cold boot with many paused files).
+	pauseLogged map[string]bool
 }
 
 // Start launches the driver. It subscribes to inventory ChangeSets,
@@ -186,6 +193,27 @@ func (d *Driver) Start(ctx context.Context) error {
 
 	go d.run(runCtx, sub, interval, logger)
 	return nil
+}
+
+// logFirstPauseSeen surfaces at Info the first time a given (file,
+// pause-reason) is observed, and stays at Debug for subsequent sweeps
+// of the same tuple. Under lock — pauseLogged is not otherwise
+// guarded.
+func (d *Driver) logFirstPauseSeen(name string, err error, logger log.Logger) {
+	reason := err.Error()
+	key := name + "\x00" + reason
+	d.mu.Lock()
+	if d.pauseLogged == nil {
+		d.pauseLogged = make(map[string]bool)
+	}
+	seen := d.pauseLogged[key]
+	if !seen {
+		d.pauseLogged[key] = true
+	}
+	d.mu.Unlock()
+	if !seen {
+		logger.Info("[storage-lifecycle] OnValidation paused (first-seen)", "name", name, "err", err)
+	}
 }
 
 // Stop signals the driver to shut down and waits for the sweep loop to
@@ -557,6 +585,12 @@ func (d *Driver) dispatch(ctx context.Context, e *snapshot.FileEntry, logger log
 				// quarantine counter, and don't clear prior real
 				// failures either. Next sweep retries.
 				logger.Debug("[storage-lifecycle] OnValidation paused (transient)", "name", e.Name, "err", err)
+				// First-time-seen (file, pause-reason) surfaces at Info
+				// so an operator sees which dependency the validator is
+				// blocked on. Subsequent sweeps for the same tuple stay
+				// at Debug — a blocked validator would otherwise emit
+				// hundreds of Info lines per second on cold boot.
+				d.logFirstPauseSeen(e.Name, err, logger)
 				return
 			}
 			logger.Debug("[storage-lifecycle] OnValidation failed", "name", e.Name, "err", err)
