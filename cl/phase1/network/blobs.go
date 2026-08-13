@@ -63,11 +63,11 @@ func validateBlobResponseCandidate(req *solid.ListSSZ[*cltypes.BlobIdentifier], 
 var ErrTimeout = errors.New("timeout")
 
 var requestBlobBatchExpiration = 15 * time.Second
+var requestBlobRetryInterval = 100 * time.Millisecond
 
 const (
-	initialBlobRequestBackoff = 100 * time.Millisecond
-	maxBlobRequestBackoff     = 2 * time.Second
 	maxConcurrentBlobRequests = 2
+	requestBlobMaxBackoff     = time.Second
 )
 
 // This is just a bunch of functions to handle blobs
@@ -121,6 +121,43 @@ type blobPeerRejecter interface {
 	BanPeer(string)
 }
 
+type blobRequestResult struct {
+	peer      string
+	responses []*cltypes.BlobSidecar
+	err       error
+}
+
+type blobRequestPacing struct {
+	backoff     time.Duration
+	nextRequest time.Time
+}
+
+func newBlobRequestPacing() blobRequestPacing {
+	return blobRequestPacing{backoff: requestBlobRetryInterval}
+}
+
+func (p *blobRequestPacing) ready(now time.Time) bool {
+	return !now.Before(p.nextRequest)
+}
+
+func (p *blobRequestPacing) failed(now time.Time) {
+	p.backoff = min(p.backoff*2, requestBlobMaxBackoff)
+	p.nextRequest = now.Add(p.backoff)
+}
+
+func (p *blobRequestPacing) reset() {
+	p.backoff = requestBlobRetryInterval
+	p.nextRequest = time.Time{}
+}
+
+func (p *blobRequestPacing) complete(now time.Time, err error) {
+	if err != nil {
+		p.failed(now)
+		return
+	}
+	p.reset()
+}
+
 // RequestBlobsFrantically requests blobs from the network frantically.
 func RequestBlobsFrantically(ctx context.Context, r BlobPeerClient, req *solid.ListSSZ[*cltypes.BlobIdentifier]) (*PeerAndSidecars, error) {
 	return requestBlobsFrantically(ctx, req, r.SendBlobsSidecarByIdentifierReq, blobPeerRejecterFor(r))
@@ -142,76 +179,80 @@ func requestBlobsFrantically(ctx context.Context, req *solid.ListSSZ[*cltypes.Bl
 }
 
 func requestBlobsFranticallyValidated(ctx context.Context, req *solid.ListSSZ[*cltypes.BlobIdentifier], send func(context.Context, *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error), rejectPeer func(string), validate func([]*cltypes.BlobSidecar) error) (*PeerAndSidecars, error) {
-	type requestResult struct {
-		responses []*cltypes.BlobSidecar
-		peer      string
-		err       error
-	}
-	attemptCtx, cancel := context.WithCancel(ctx)
+	requestCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	expiration := time.NewTimer(requestBlobBatchExpiration)
-	defer expiration.Stop()
-	retry := time.NewTimer(0)
-	defer retry.Stop()
-	retryC := retry.C
-	results := make(chan requestResult, maxConcurrentBlobRequests)
+	timer := time.NewTimer(requestBlobBatchExpiration)
+	defer timer.Stop()
+	reqInterval := time.NewTicker(requestBlobRetryInterval)
+	defer reqInterval.Stop()
+	results := make(chan blobRequestResult, maxConcurrentBlobRequests)
+	validationResults := make(chan error, 1)
 	inFlight := 0
-	backoff := initialBlobRequestBackoff
-	resetRetry := func(delay time.Duration) {
-		if !retry.Stop() {
-			select {
-			case <-retry.C:
-			default:
-			}
-		}
-		retry.Reset(delay)
-		retryC = retry.C
-	}
+	var candidate *PeerAndSidecars
+	var resultC <-chan blobRequestResult = results
+	var validationC <-chan error
+	pacing := newBlobRequestPacing()
 	launch := func() {
 		inFlight++
 		go func() {
-			responses, peer, err := send(attemptCtx, req)
+			responses, peer, err := send(requestCtx, req)
 			select {
-			case results <- requestResult{responses: responses, peer: peer, err: err}:
-			case <-attemptCtx.Done():
+			case results <- blobRequestResult{peer: peer, responses: responses, err: err}:
+			case <-requestCtx.Done():
 			}
 		}()
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	launch()
 	for {
 		select {
-		case <-retryC:
+		case now := <-reqInterval.C:
+			if inFlight >= cap(results) || !pacing.ready(now) {
+				continue
+			}
 			launch()
-			if inFlight < maxConcurrentBlobRequests {
-				resetRetry(initialBlobRequestBackoff)
-			} else {
-				retryC = nil
-			}
-		case result := <-results:
+		case result := <-resultC:
 			inFlight--
-			if result.err == nil && len(result.responses) > 0 {
-				result.err = validateBlobResponseCandidate(req, result.responses)
-				if result.err == nil && validate != nil {
-					result.err = validate(result.responses)
-				}
-				if result.err == nil {
-					return &PeerAndSidecars{Peer: result.peer, Responses: result.responses}, nil
-				}
-				if rejectPeer != nil {
-					rejectPeer(result.peer)
-				}
-			}
 			if result.err != nil {
+				pacing.failed(time.Now())
 				log.Trace("RequestBlobsFrantically: error", "err", result.err, "peer", result.peer)
-				backoff = min(backoff*2, maxBlobRequestBackoff)
-				resetRetry(backoff)
-			} else {
-				log.Trace("RequestBlobsFrantically: response is empty", "peer", result.peer)
-				backoff = initialBlobRequestBackoff
-				resetRetry(initialBlobRequestBackoff)
+				continue
 			}
+			if len(result.responses) == 0 {
+				pacing.reset()
+				log.Trace("RequestBlobsFrantically: response is empty", "peer", result.peer)
+				continue
+			}
+			candidate = &PeerAndSidecars{Peer: result.peer, Responses: result.responses}
+			resultC = nil
+			validationC = validationResults
+			go func(candidate *PeerAndSidecars) {
+				err := validateBlobResponseCandidate(req, candidate.Responses)
+				if err == nil && validate != nil {
+					err = validate(candidate.Responses)
+				}
+				select {
+				case validationResults <- err:
+				case <-requestCtx.Done():
+				}
+			}(candidate)
+		case err := <-validationC:
+			if err == nil {
+				return candidate, nil
+			}
+			if rejectPeer != nil && candidate.Peer != "" {
+				rejectPeer(candidate.Peer)
+			}
+			log.Trace("RequestBlobsFrantically: rejected response", "err", err, "peer", candidate.Peer)
+			pacing.failed(time.Now())
+			candidate = nil
+			validationC = nil
+			resultC = results
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-expiration.C:
+		case <-timer.C:
 			log.Trace("RequestBlobsFrantically: timeout")
 			return nil, ErrTimeout
 		}
