@@ -26,14 +26,6 @@ import (
 // Removed once proven.
 var vmapAddrOrigin = dbg.EnvBool("VMAP_ADDR_ORIGIN", false)
 
-// valueAwareMapRead (A/B gate, temporary): also compare the recorded read VALUE
-// against the current cell value for MapRead-sourced Done reads, not just the
-// version. Closes the coinbase-tip aliasing gap where a delayed fee tip write
-// updates the coinbase Balance cell VALUE at the same (TxIndex,Incarnation) as
-// the sender==coinbase worker write, so a downstream reader recorded at that
-// version passes the version-only check despite reading the stale pre-tip value.
-var valueAwareMapRead = dbg.EnvBool("VALUE_AWARE_MAPREAD", false)
-
 // oneValPerVer enforces the versionMap invariant that a cell holds ONE value per
 // version: overwriting a cell at the same (TxIndex, Incarnation) with a DIFFERENT
 // value is a bug (a post-execution mutation of an already-published cell), which

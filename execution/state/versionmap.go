@@ -1057,9 +1057,6 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 			}
 		} else {
 			valid = checkVersion(version, rr.Version())
-			if valid == VersionValid && valueAwareMapRead && matchesLive != nil && !matchesLive() {
-				valid = VersionInvalid
-			}
 			// An AddressPath read resolved to the seeded origin (-1) is the committed
 			// baseline, equivalent to a storage read of a non-existent cell; re-run the
 			// create/destruct cross-checks the storage-read path does so a concurrent
