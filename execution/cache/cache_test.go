@@ -1235,8 +1235,10 @@ func FuzzStateCacheConsistency(f *testing.F) {
 				to := uint64(script[i+2]) % (appliedEnd + 4)
 				ap.Unwind(to)
 				appliedEnd = min(appliedEnd, to)
+				// Unwind's boundary is inclusive: unwindToTxNum is the first
+				// rolled-back txNum, so an entry at exactly `to` is dead too.
 				for k, e := range model {
-					if e.txNum > to {
+					if e.txNum >= to {
 						delete(model, k)
 					}
 				}
