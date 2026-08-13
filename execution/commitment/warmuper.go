@@ -161,8 +161,9 @@ func (w *Warmuper) Start() {
 // If cache is enabled, the data is also stored in the cache for later use.
 func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDepth int) {
 	depth := startDepth
+	var compactBuf [maxCompactKeyLen]byte
 	for depth <= len(hashedKey) && depth <= w.maxDepth {
-		prefix := nibbles.HexToCompact(hashedKey[:depth])
+		prefix := nibbles.HexToCompactInto(compactBuf[:], hashedKey[:depth])
 
 		// Check cache first, then fall back to DB
 		branchData, _, err := trieCtx.Branch(prefix)

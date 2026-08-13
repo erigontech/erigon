@@ -30,12 +30,26 @@ const Terminator byte = 0x10
 // as defined by the Ethereum Yellow Paper. The result is a fresh allocation the
 // caller owns and may retain.
 func HexToCompact(hex []byte) []byte {
+	return HexToCompactInto(nil, hex)
+}
+
+// HexToCompactInto is HexToCompact but writes into dst's backing array when it
+// has enough capacity, returning dst re-sliced to the result; otherwise it
+// allocates, same as HexToCompact. The caller must not retain the result past
+// dst's next reuse.
+func HexToCompactInto(dst, hex []byte) []byte {
 	terminator := byte(0)
 	if HasTerm(hex) {
 		terminator = 1
 		hex = hex[:len(hex)-1]
 	}
-	buf := make([]byte, len(hex)/2+1)
+	need := len(hex)/2 + 1
+	buf := dst
+	if cap(buf) < need {
+		buf = make([]byte, need)
+	} else {
+		buf = buf[:need]
+	}
 	buf[0] = terminator << 5 // the flag byte
 	if len(hex)&1 == 1 {
 		buf[0] |= 1 << 4 // odd flag

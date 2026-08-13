@@ -139,12 +139,13 @@ type HexPatriciaHashed struct {
 	rootPresent   bool
 	traceW        io.Writer // nil = disabled, non-nil = write trace output
 	ctx           PatriciaContext
-	hashAuxBuffer [128]byte           // buffer to compute cell hash or write hash-related things
-	cellHashBuf   common.Hash         // shared scratch buffer for hashKey calls (avoids per-cell allocation)
-	leafHashBuf   [33]byte            // shared scratch for leaf hash prefixing (avoids per-leaf escape)
-	leafRlpBuf    [maxLeafRlpLen]byte // shared scratch for a leaf's RLP list prefix + compact key
-	rlpPrefixBuf  [8]byte             // shared scratch for RlpSerializable length prefixes
-	auxBuffer     *bytes.Buffer       // auxiliary buffer used during branch updates encoding
+	hashAuxBuffer [128]byte              // buffer to compute cell hash or write hash-related things
+	cellHashBuf   common.Hash            // shared scratch buffer for hashKey calls (avoids per-cell allocation)
+	leafHashBuf   [33]byte               // shared scratch for leaf hash prefixing (avoids per-leaf escape)
+	leafRlpBuf    [maxLeafRlpLen]byte    // shared scratch for a leaf's RLP list prefix + compact key
+	rlpPrefixBuf  [8]byte                // shared scratch for RlpSerializable length prefixes
+	compactKeyBuf [maxCompactKeyLen]byte // shared scratch for HexToCompact on the fold/unfold path
+	auxBuffer     *bytes.Buffer          // auxiliary buffer used during branch updates encoding
 	branchEncoder *BranchEncoder
 
 	mounted    bool  // true if this trie is mounted to some root trie
@@ -322,11 +323,14 @@ const (
 	cellLoadStorage = loadFlags(2)
 )
 
+// maxCompactKeyLen bounds a compact-encoded (hex-prefix) key or branch prefix,
+// derived from the nibble array rather than from the shorter keys today's depth
+// arithmetic yields, so a caller slicing deeper cannot overflow the buffer.
+const maxCompactKeyLen = len(cell{}.hashedExtension)/2 + 1
+
 // maxLeafRlpLen bounds a leaf's assembled RLP header: list prefix (tag plus up to
-// 8 length bytes), key prefix byte, then the compact key. Derived from the nibble
-// array rather than from the shorter keys today's depth arithmetic yields, so a
-// caller slicing deeper cannot overflow the buffer.
-const maxLeafRlpLen = 9 + 1 + (len(cell{}.hashedExtension)/2 + 1)
+// 8 length bytes), key prefix byte, then the compact key.
+const maxLeafRlpLen = 9 + 1 + maxCompactKeyLen
 
 func (f loadFlags) String() string {
 	var b strings.Builder
@@ -1380,7 +1384,7 @@ func (hph *HexPatriciaHashed) PrintGrid() {
 // witnessMaterializeBranch decodes the branch stored at the given hashed-nibble prefix into
 // a trie.FullNode whose children are HashNodes. Mirrors unfoldBranchNode's branch decode.
 func (hph *HexPatriciaHashed) witnessMaterializeBranch(branchPrefix []byte, childDepth int16) (*trie.FullNode, error) {
-	compact := nibbles.HexToCompact(branchPrefix)
+	compact := nibbles.HexToCompactInto(hph.compactKeyBuf[:], branchPrefix)
 	branchData, err := hph.readBranchAndCheckForFlushing(compact)
 	if err != nil {
 		return nil, err
@@ -1450,7 +1454,7 @@ func (hph *HexPatriciaHashed) readBranchAndCheckForFlushing(prefix []byte) ([]by
 
 // unfoldBranchNode returns true if unfolding has been done
 func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted bool) error {
-	key := nibbles.HexToCompact(hph.currentKey[:hph.currentKeyLen])
+	key := nibbles.HexToCompactInto(hph.compactKeyBuf[:], hph.currentKey[:hph.currentKeyLen])
 	hph.metrics.BranchLoad(hph.currentKey[:hph.currentKeyLen])
 
 	branchData, err := hph.readBranchAndCheckForFlushing(key)
@@ -1991,7 +1995,7 @@ func (hph *HexPatriciaHashed) fold() error {
 
 	depth := hph.depths[row]
 
-	updateKey := nibbles.HexToCompact(hph.currentKey[:updateKeyLen])
+	updateKey := nibbles.HexToCompactInto(hph.compactKeyBuf[:], hph.currentKey[:updateKeyLen])
 	defer func() { hph.depthsToTxNum[depth] = 0 }()
 
 	if hph.traceW != nil {
