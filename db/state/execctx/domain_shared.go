@@ -1193,11 +1193,9 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 		return tx.Commit()
 	}
 
-	// Stash every cache-bound domain tuple during the flush; apply them only
-	// after the commit succeeds. On a failed commit the stash is discarded, so
-	// no cache apply ever runs ahead of durable MDBX state. (Reads through
-	// this SD between flush and a failed commit can still fill flushed
-	// values; a failed commit is fatal, so they die with the process.)
+	// Stash every cache-bound domain tuple during the flush and publish it only
+	// after the commit succeeds. If the commit fails, the stash is discarded, so
+	// the cache never advances ahead of durable MDBX state.
 	var pendingBranches []branchCacheUpdate
 	var pendingState []cache.StateUpdate
 	stash := func(domain kv.Domain) kv.FlushOption {
@@ -1846,12 +1844,9 @@ func (sd *SharedDomains) domainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 		}
 	}
 
-	// The state cache is NOT updated here. This write goes into sd.mem and
-	// is served from there (checked first on every read, fork-isolated via
-	// the parent chain); the shared cache is refreshed only on flush
-	// (SharedDomains.Flush → FlushWithCallback), so it mirrors committed,
-	// fork-agnostic state. A per-write update would leak non-flushed,
-	// fork-specific bytes into a sibling fork's reads.
+	// The shared state cache is not updated here. The write remains isolated in
+	// sd.mem and is published to the cache only after a successful Commit;
+	// publishing it earlier could expose uncommitted, fork-specific state.
 
 	// Serialize against the calculator's accumulator-swap window — see
 	// changesetMu doc on the SharedDomains struct. Skipped when the caller
@@ -1908,9 +1903,9 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte,
 		return nil
 	}
 
-	// State cache is refreshed on flush only — see DomainPut. Serialize against
-	// the calculator's swap window for non-commitment domains; CommitmentDomain
-	// skipped — see DomainPut comment.
+	// As in DomainPut, a deletion reaches the shared state cache only after a
+	// successful Commit. Serialize against the calculator's swap window for
+	// non-commitment domains; CommitmentDomain is skipped as described there.
 	if domain != kv.CommitmentDomain {
 		sd.changesetMu.Lock()
 		defer sd.changesetMu.Unlock()
