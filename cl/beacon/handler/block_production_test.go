@@ -709,11 +709,11 @@ func TestCaplinBlockProductionGlamsterdamSlotNumber(t *testing.T) {
 
 	// GLOAS deferred payload: the mock returns GetHeadPayloadStatus=FULL and ShouldBuildOnFull=true,
 	// so block production expects an envelope on disk. Provide one with empty ExecutionRequests.
-	fcu.Envelopes[baseBlockRoot] = &cltypes.SignedExecutionPayloadEnvelope{
+	fcu.SetEnvelope(baseBlockRoot, &cltypes.SignedExecutionPayloadEnvelope{
 		Message: &cltypes.ExecutionPayloadEnvelope{
 			ExecutionRequests: cltypes.NewExecutionRequestsWithVersion(h.beaconChainCfg, clparams.GloasVersion),
 		},
-	}
+	})
 
 	beaconBody, _, err := h.produceBeaconBody(
 		ctx, 3, baseBlock.Slot, baseBlockRoot, postState, targetSlot,

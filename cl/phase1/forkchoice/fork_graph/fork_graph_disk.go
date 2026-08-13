@@ -133,9 +133,10 @@ type forkGraphDisk struct {
 	invalidEnvelopes sync.Map // common.Hash -> struct{}
 
 	// reusable buffers
-	sszBuffer       []byte
-	sszSnappyWriter *snappy.Writer
-	sszSnappyReader *snappy.Reader
+	sszBuffer            []byte
+	sszSnappyWriter      *snappy.Writer
+	sszSnappyReader      *snappy.Reader
+	envelopeSnappyReader *snappy.Reader
 
 	rcfg       beacon_router_configuration.RouterConfiguration
 	syncedData synced_data.SyncedData

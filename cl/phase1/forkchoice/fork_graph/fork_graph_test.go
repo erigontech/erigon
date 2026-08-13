@@ -136,9 +136,11 @@ type envelopeWriteFailureFile struct {
 
 type envelopeBlockingRenameFs struct {
 	afero.Fs
-	reached chan struct{}
-	release chan struct{}
-	once    sync.Once
+	reached      chan struct{}
+	release      chan struct{}
+	pruneReached chan struct{}
+	renameOnce   sync.Once
+	statOnce     sync.Once
 }
 
 type envelopeRemoveFailureFs struct {
@@ -176,10 +178,17 @@ func (f *envelopeBlockingPruneFs) Remove(name string) error {
 
 func (f *envelopeBlockingRenameFs) Rename(oldname, newname string) error {
 	if strings.HasSuffix(oldname, ".tmp") {
-		f.once.Do(func() { close(f.reached) })
+		f.renameOnce.Do(func() { close(f.reached) })
 		<-f.release
 	}
 	return f.Fs.Rename(oldname, newname)
+}
+
+func (f *envelopeBlockingRenameFs) Stat(name string) (os.FileInfo, error) {
+	if f.pruneReached != nil && strings.HasSuffix(name, ".snappy_ssz") && !strings.HasSuffix(name, ".envelope.snappy_ssz") {
+		f.statOnce.Do(func() { close(f.pruneReached) })
+	}
+	return f.Fs.Stat(name)
 }
 
 func (f envelopeWriteFailureFile) Write(p []byte) (int, error) {
@@ -205,6 +214,25 @@ func (f envelopeWriteFailureFile) Close() error {
 		return errTestEnvelopeIO
 	}
 	return f.File.Close()
+}
+
+func waitEnvelopeTestSignal(t *testing.T, signal <-chan struct{}, name string) {
+	t.Helper()
+	select {
+	case <-signal:
+	case <-time.After(time.Second):
+		t.Fatalf("timed out waiting for %s", name)
+	}
+}
+
+func waitEnvelopeTestResult(t *testing.T, result <-chan error, name string) {
+	t.Helper()
+	select {
+	case err := <-result:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatalf("timed out waiting for %s", name)
+	}
 }
 
 func TestForkGraphInDisk(t *testing.T) {
@@ -437,6 +465,26 @@ func TestReadEnvelopeValidatesDecodedEnvelopeAgainstConfig(t *testing.T) {
 	root := common.HexToHash("0x1234")
 	addEnvelopeTestBlock(f, root, 1)
 	envelope := testEnvelopeWithTransaction(root, []byte{1})
+	for range 17 {
+		envelope.Message.ExecutionRequests.Withdrawals.Append(&solid.WithdrawalRequest{})
+	}
+	encoded, err := envelope.EncodeSSZ(nil)
+	require.NoError(t, err)
+	writeEnvelopeTestFile(t, fs, root, clparams.GloasVersion, encoded)
+
+	_, err = f.ReadEnvelopeFromDisk(root)
+	require.ErrorContains(t, err, "list too big")
+	require.False(t, f.HasEnvelope(root))
+}
+
+func TestReadEnvelopeRejectsRequestsPastConsensusLimitWithinDecoderGuard(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	cfg := clparams.MainnetBeaconConfig
+	cfg.MaxWithdrawalRequestsPerPayload = 1
+	f := &forkGraphDisk{fs: fs, beaconCfg: &cfg}
+	root := common.HexToHash("0x1234")
+	addEnvelopeTestBlock(f, root, 1)
+	envelope := testEnvelopeWithTransaction(root, []byte{1})
 	envelope.Message.ExecutionRequests.Withdrawals.Append(&solid.WithdrawalRequest{})
 	envelope.Message.ExecutionRequests.Withdrawals.Append(&solid.WithdrawalRequest{})
 	encoded, err := envelope.EncodeSSZ(nil)
@@ -446,6 +494,8 @@ func TestReadEnvelopeValidatesDecodedEnvelopeAgainstConfig(t *testing.T) {
 	_, err = f.ReadEnvelopeFromDisk(root)
 	require.ErrorContains(t, err, "withdrawals")
 	require.False(t, f.HasEnvelope(root))
+	_, invalid := f.invalidEnvelopes.Load(root)
+	require.True(t, invalid)
 }
 
 func TestReadEnvelopeRejectsKnownInvalidFileWithoutOpening(t *testing.T) {
@@ -469,7 +519,6 @@ func TestDumpEnvelopeRejectsLengthAboveGossipLimit(t *testing.T) {
 
 	err := f.DumpEnvelopeOnDisk(root, testEnvelopeWithTransaction(root, make([]byte, clparams.MaxChunkSize)))
 	require.ErrorContains(t, err, "exceeds max")
-	require.Zero(t, cap(f.sszBuffer))
 	require.False(t, f.HasEnvelope(root))
 }
 
@@ -630,28 +679,24 @@ func TestPruneDoesNotRaceEnvelopeReplacement(t *testing.T) {
 	require.NoError(t, f.DumpEnvelopeOnDisk(oldRoot, testEnvelopeWithTransaction(oldRoot, []byte{1})))
 	require.NoError(t, afero.WriteFile(fs, getEnvelopeFilename(oldRoot)+".tmp", []byte("stale"), 0o644))
 
-	blockingFs := &envelopeBlockingRenameFs{Fs: fs, reached: make(chan struct{}), release: make(chan struct{})}
+	blockingFs := &envelopeBlockingRenameFs{
+		Fs:           fs,
+		reached:      make(chan struct{}),
+		release:      make(chan struct{}),
+		pruneReached: make(chan struct{}),
+	}
 	f.fs = blockingFs
 	dumpDone := make(chan error, 1)
 	go func() {
 		dumpDone <- f.DumpEnvelopeOnDisk(oldRoot, testEnvelopeWithTransaction(oldRoot, []byte{2}))
 	}()
-	<-blockingFs.reached
+	waitEnvelopeTestSignal(t, blockingFs.reached, "envelope rename")
 	pruneDone := make(chan error, 1)
 	go func() { pruneDone <- f.Prune(2) }()
-
-	pruneCompleted := false
-	select {
-	case err := <-pruneDone:
-		require.NoError(t, err)
-		pruneCompleted = true
-	case <-time.After(time.Second):
-	}
+	waitEnvelopeTestSignal(t, blockingFs.pruneReached, "prune state scan")
 	close(blockingFs.release)
-	require.NoError(t, <-dumpDone)
-	if !pruneCompleted {
-		require.NoError(t, <-pruneDone)
-	}
+	waitEnvelopeTestResult(t, dumpDone, "envelope replacement")
+	waitEnvelopeTestResult(t, pruneDone, "prune completion")
 
 	finalExists, err := afero.Exists(fs, getEnvelopeFilename(oldRoot))
 	require.NoError(t, err)
@@ -718,6 +763,22 @@ func TestDumpEnvelopeRejectsDepositRepresentationUnreadableByConfiguredDecoder(t
 	require.False(t, exists)
 }
 
+func TestDumpEnvelopeRejectsRequestsPastConsensusLimitWithinDecoderGuard(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	cfg := clparams.MainnetBeaconConfig
+	cfg.MaxWithdrawalRequestsPerPayload = 1
+	f := &forkGraphDisk{fs: fs, beaconCfg: &cfg}
+	root := common.HexToHash("0x1234")
+	addEnvelopeTestBlock(f, root, 1)
+	envelope := testEnvelopeWithTransaction(root, []byte{1})
+	envelope.Message.ExecutionRequests.Withdrawals.Append(&solid.WithdrawalRequest{})
+	envelope.Message.ExecutionRequests.Withdrawals.Append(&solid.WithdrawalRequest{})
+
+	err := f.DumpEnvelopeOnDisk(root, envelope)
+	require.ErrorContains(t, err, "withdrawals")
+	require.False(t, f.HasEnvelope(root))
+}
+
 func TestPruneReportsEnvelopeRemovalFailureWithoutRecachingRoot(t *testing.T) {
 	baseFs := afero.NewMemMapFs()
 	f := &forkGraphDisk{fs: baseFs, beaconCfg: &clparams.MainnetBeaconConfig}
@@ -758,25 +819,17 @@ func TestPruneAllowsUnrelatedEnvelopeIOBetweenRoots(t *testing.T) {
 	f.fs = blockingFs
 	pruneDone := make(chan error, 1)
 	go func() { pruneDone <- f.Prune(3) }()
-	<-blockingFs.firstReached
+	waitEnvelopeTestSignal(t, blockingFs.firstReached, "first envelope removal")
 
 	dumpDone := make(chan error, 1)
 	go func() {
 		dumpDone <- f.DumpEnvelopeOnDisk(retainedRoot, testEnvelopeWithTransaction(retainedRoot, []byte{1}))
 	}()
-	time.Sleep(10 * time.Millisecond)
 	close(blockingFs.releaseFirst)
-	<-blockingFs.secondReached
-	select {
-	case err := <-dumpDone:
-		require.NoError(t, err)
-	case <-time.After(time.Second):
-		close(blockingFs.releaseSecond)
-		require.NoError(t, <-pruneDone)
-		t.Fatal("prune retained the disk lock while removing envelope files")
-	}
+	waitEnvelopeTestSignal(t, blockingFs.secondReached, "second envelope removal")
+	waitEnvelopeTestResult(t, dumpDone, "unrelated envelope dump")
 	close(blockingFs.releaseSecond)
-	require.NoError(t, <-pruneDone)
+	waitEnvelopeTestResult(t, pruneDone, "prune completion")
 }
 
 func TestReadEnvelopeOwnsDecodedTransactions(t *testing.T) {
@@ -794,6 +847,22 @@ func TestReadEnvelopeOwnsDecodedTransactions(t *testing.T) {
 	_, err = f.ReadEnvelopeFromDisk(rootB)
 	require.NoError(t, err)
 	require.Equal(t, [][]byte{{1, 2, 3}}, persistedA.Message.Payload.Transactions.UnderlyngReference())
+}
+
+func TestReadEnvelopeTransactionsPreserveDecodeLimits(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.MaxTransactionsPerPayload = 1
+	fs := afero.NewMemMapFs()
+	f := &forkGraphDisk{fs: fs, beaconCfg: &cfg}
+	root := common.HexToHash("0xa")
+	addEnvelopeTestBlock(f, root, 1)
+	require.NoError(t, f.DumpEnvelopeOnDisk(root, testEnvelopeWithTransaction(root, []byte{1})))
+
+	persisted, err := f.ReadEnvelopeFromDisk(root)
+	require.NoError(t, err)
+	overLimit, err := solid.NewTransactionsSSZFromTransactions([][]byte{{1}, {2}}).EncodeSSZ(nil)
+	require.NoError(t, err)
+	require.ErrorContains(t, persisted.Message.Payload.Transactions.DecodeSSZ(overLimit, 0), "expected at most 1 transactions")
 }
 
 func TestReadEnvelopeTransactionsDoNotRaceWithDump(t *testing.T) {

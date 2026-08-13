@@ -175,14 +175,14 @@ func TestExecutionPayloadServiceAlreadySeen(t *testing.T) {
 	require.Contains(t, err.Error(), "already seen envelope")
 }
 
-func TestExecutionPayloadServiceRetriesSeenEnvelopeWhenPersistenceIsUnavailable(t *testing.T) {
+func TestExecutionPayloadServiceIgnoresSeenEnvelopeWhenPersistenceIsUnavailable(t *testing.T) {
 	service, fcu := setupExecutionPayloadService(t)
 	blockRoot := common.HexToHash("0x1234")
 	envelope := newTestSignedEnvelope(100, blockRoot, 1)
 	fcu.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100}}
 	service.(*executionPayloadService).seenEnvelopesCache.Add(seenEnvelopeKey{blockRoot, 1}, struct{}{})
 
-	require.NoError(t, service.ProcessMessage(context.Background(), nil, envelope))
+	require.ErrorIs(t, service.ProcessMessage(context.Background(), nil, envelope), ErrIgnore)
 }
 
 func TestExecutionPayloadServiceSlotBelowFinalized(t *testing.T) {

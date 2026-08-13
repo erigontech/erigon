@@ -161,7 +161,7 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 		beaconBlockRoot: beaconBlockRoot,
 		builderIndex:    builderIndex,
 	}
-	if s.seenEnvelopesCache.Contains(seenKey) && s.forkchoiceStore.HasEnvelope(beaconBlockRoot) {
+	if s.seenEnvelopesCache.Contains(seenKey) {
 		return fmt.Errorf("%w: already seen envelope for block %v from builder %d", ErrIgnore, beaconBlockRoot, builderIndex)
 	}
 

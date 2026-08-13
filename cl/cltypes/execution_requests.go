@@ -222,6 +222,25 @@ func (e *ExecutionRequests) Static() bool {
 }
 
 func (e *ExecutionRequests) validateForConfig(cfg *clparams.BeaconChainConfig) error {
+	if err := e.validateListsPresent(); err != nil {
+		return err
+	}
+	if err := e.Withdrawals.ValidateBounds(int(cfg.MaxWithdrawalRequestsPerPayload)); err != nil {
+		return fmt.Errorf("withdrawals: %w", err)
+	}
+	if err := e.Consolidations.ValidateBounds(int(cfg.MaxConsolidationRequestsPerPayload)); err != nil {
+		return fmt.Errorf("consolidations: %w", err)
+	}
+	if err := e.BuilderDeposits.ValidateBounds(int(cfg.MaxBuilderDepositRequestsPerPayload)); err != nil {
+		return fmt.Errorf("builder deposits: %w", err)
+	}
+	if err := e.BuilderExits.ValidateBounds(int(cfg.MaxBuilderExitRequestsPerPayload)); err != nil {
+		return fmt.Errorf("builder exits: %w", err)
+	}
+	return e.validateListElements()
+}
+
+func (e *ExecutionRequests) validateListsPresent() error {
 	if e.Deposits == nil {
 		return fmt.Errorf("nil deposit requests")
 	}
@@ -237,18 +256,10 @@ func (e *ExecutionRequests) validateForConfig(cfg *clparams.BeaconChainConfig) e
 	if e.BuilderExits == nil {
 		return fmt.Errorf("nil builder exit requests")
 	}
-	if err := e.Withdrawals.ValidateBounds(int(cfg.MaxWithdrawalRequestsPerPayload)); err != nil {
-		return fmt.Errorf("withdrawals: %w", err)
-	}
-	if err := e.Consolidations.ValidateBounds(int(cfg.MaxConsolidationRequestsPerPayload)); err != nil {
-		return fmt.Errorf("consolidations: %w", err)
-	}
-	if err := e.BuilderDeposits.ValidateBounds(int(cfg.MaxBuilderDepositRequestsPerPayload)); err != nil {
-		return fmt.Errorf("builder deposits: %w", err)
-	}
-	if err := e.BuilderExits.ValidateBounds(int(cfg.MaxBuilderExitRequestsPerPayload)); err != nil {
-		return fmt.Errorf("builder exits: %w", err)
-	}
+	return nil
+}
+
+func (e *ExecutionRequests) validateListElements() error {
 	if err := solid.RangeErr(e.Deposits, rejectNilRequest("deposit", func(request *solid.DepositRequest) bool { return request == nil })); err != nil {
 		return err
 	}
@@ -265,13 +276,25 @@ func (e *ExecutionRequests) validateForConfig(cfg *clparams.BeaconChainConfig) e
 }
 
 func (e *ExecutionRequests) validateForPersistence(cfg *clparams.BeaconChainConfig) error {
-	if err := e.validateForConfig(cfg); err != nil {
+	if err := e.validateListsPresent(); err != nil {
 		return err
 	}
 	if err := e.Deposits.ValidateProgressiveDecodeBounds(int(cfg.MaxDepositRequestsPerPayload)); err != nil {
 		return fmt.Errorf("deposits exceed decoder resource limit: %w", err)
 	}
-	return nil
+	if err := e.Withdrawals.ValidateProgressiveDecodeBounds(int(cfg.MaxWithdrawalRequestsPerPayload)); err != nil {
+		return fmt.Errorf("withdrawals exceed decoder resource limit: %w", err)
+	}
+	if err := e.Consolidations.ValidateProgressiveDecodeBounds(int(cfg.MaxConsolidationRequestsPerPayload)); err != nil {
+		return fmt.Errorf("consolidations exceed decoder resource limit: %w", err)
+	}
+	if err := e.BuilderDeposits.ValidateProgressiveDecodeBounds(int(cfg.MaxBuilderDepositRequestsPerPayload)); err != nil {
+		return fmt.Errorf("builder deposits exceed decoder resource limit: %w", err)
+	}
+	if err := e.BuilderExits.ValidateProgressiveDecodeBounds(int(cfg.MaxBuilderExitRequestsPerPayload)); err != nil {
+		return fmt.Errorf("builder exits exceed decoder resource limit: %w", err)
+	}
+	return e.validateListElements()
 }
 
 func rejectNilRequest[T solid.EncodableHashableSSZ](name string, isNil func(T) bool) func(int, T, int) error {
