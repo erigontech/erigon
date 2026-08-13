@@ -17,13 +17,37 @@
 package execmodule
 
 import (
+	"context"
+	"errors"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/db/dbservices"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/types"
 )
+
+type headerNumberErrorReader struct {
+	dbservices.FullBlockReader
+	err error
+}
+
+func (r headerNumberErrorReader) HeaderNumber(context.Context, kv.Getter, common.Hash) (*uint64, error) {
+	return nil, r.err
+}
+
+type emptyStageProgressTx struct {
+	kv.TemporalRwTx
+}
+
+func (emptyStageProgressTx) GetOne(string, []byte) ([]byte, error) {
+	return nil, nil
+}
 
 // The module is the one owner of the domain state cache: callers pass a byte
 // budget, never a constructed cache, so a disabled cache cannot be built
@@ -43,4 +67,17 @@ func TestNewDomainStateCacheRespectsUseStateCache(t *testing.T) {
 	scDefault := newDomainStateCache(0)
 	require.NotNil(t, scDefault, "zero budget means the production default, not no cache")
 	scDefault.Close()
+}
+
+func TestUnwindToCommonCanonicalReturnsCanonicalityError(t *testing.T) {
+	expectedErr := errors.New("canonicality read failed")
+	e := &ExecModule{
+		bacgroundCtx: t.Context(),
+		blockReader:  headerNumberErrorReader{err: expectedErr},
+	}
+	header := &types.Header{Number: *uint256.NewInt(0)}
+
+	err := e.unwindToCommonCanonical(nil, emptyStageProgressTx{}, header)
+
+	require.ErrorIs(t, err, expectedErr)
 }

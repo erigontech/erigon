@@ -18,6 +18,7 @@ package commitment
 
 import (
 	"context"
+	"math"
 	"testing"
 	"time"
 
@@ -136,7 +137,11 @@ func TestRecordPreload_RecordsElapsedAndBytes(t *testing.T) {
 			if got := mxPreloadBytesTotal.GetValue() - bytesBefore; got != tc.wantBytes {
 				t.Errorf("commitment_trunk_preload_bytes_total advanced by %v, want %v", got, tc.wantBytes)
 			}
-			if got := mxPreloadDurationSecondsTotal.GetValue() - secondsBefore; got < elapsed.Seconds() {
+			// Differencing a growing accumulator loses up to half an ULP of its
+			// magnitude, so a constant slack stops covering it as the total rises.
+			secondsAfter := mxPreloadDurationSecondsTotal.GetValue()
+			slack := math.Nextafter(secondsAfter, math.Inf(1)) - secondsAfter
+			if got := secondsAfter - secondsBefore; got+slack < elapsed.Seconds() {
 				t.Errorf("commitment_trunk_preload_duration_seconds_total advanced by %v, want >= %v", got, elapsed.Seconds())
 			}
 		})
