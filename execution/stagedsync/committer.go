@@ -350,11 +350,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		// the lazy-load path and never leaks into the trie fold path.
 		if r.writes != nil && !r.writes.IsEmpty() {
 			cc.asOfReader.txNum = r.txNum
-			if r.commitWrites != nil {
-				cc.state.ApplyWrites(r.commitWrites, r.rules.IsAmsterdam)
-			} else {
-				cc.state.ApplyWrites(r.writes, r.rules.IsAmsterdam)
-			}
+			cc.state.ApplyWrites(r.writes, r.rules.IsAmsterdam)
 		}
 
 		// A computed-ahead block already emitted its interior step checkpoints from
@@ -460,7 +456,6 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			residual := stageWall - execActive - commitActive + overlap - gap
 			cc.logger.Info("[np-phase] stage", "blk", r.BlockNum,
 				"stage", stageWall, "exec", execActive, "commit", commitActive,
-				"flush", r.flushDur, "execNoFlush", execActive-r.flushDur,
 				"overlap", overlap, "gap", gap, "residual", residual)
 		}
 		// In BatchCommitments mode (without forcePerBlockCompute): just

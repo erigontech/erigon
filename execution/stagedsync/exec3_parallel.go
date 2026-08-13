@@ -1249,7 +1249,6 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						"tasks", len(blockExecutor.tasks), "exec", blockExecutor.cntExec,
 						"spec", blockExecutor.cntSpecExec, "abort", blockExecutor.cntAbort,
 						"valFail", blockExecutor.cntValidationFail,
-						"blockEndApplyMs", fmt.Sprintf("%.1f", float64(blockResult.flushDur.Nanoseconds())/1e6),
 						"spineUsPerIter", fmt.Sprintf("%.1f", float64(npProc.Nanoseconds())/float64(max(1, blockExecutor.cntExec))/1e3))
 					npWait, npProc = 0, 0
 				}
@@ -1870,7 +1869,6 @@ type blockResult struct {
 	// directly rather than inferring it.
 	execStartedAt time.Time
 	execEndedAt   time.Time
-	flushDur      time.Duration
 }
 
 type txResult struct {
@@ -1884,7 +1882,6 @@ type txResult struct {
 	traceFroms            map[accounts.Address]struct{}
 	traceTos              map[accounts.Address]struct{}
 	writes                state.WriteSetView
-	commitWrites          state.WriteSetView // VMAP_COMMIT_VIEW A/B: versionMap-slice view fed to the calculator instead of the normalized writes
 	rules                 *chain.Rules
 	isFinalize            bool // block-end finalize writes — apply to sd.mem directly
 }
@@ -3813,7 +3810,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 		// The apply loop folds the block's writes to sd.mem at block end (off the
 		// exec spine); nothing populates blockStateCache here.
-		var flushDur time.Duration
 
 		// The block is fully finalized here: every tx sealed, block-end writes in
 		// the versionMap. Publish it as an overlay so the next block reads its
@@ -3844,7 +3840,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			blockStateCache:  be.blockStateCache,
 			execStartedAt:    be.execStarted,
 			execEndedAt:      time.Now(),
-			flushDur:         flushDur,
 		}
 		return be.result, nil
 	}
