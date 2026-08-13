@@ -667,6 +667,24 @@ func modexpU256Applicable(base, mod []byte) bool {
 	return bitutil.TestBytes(mod[:len(mod)-24])
 }
 
+const modexpU256MaxWindow = 5
+
+// modexpU256WindowWidth picks the sliding-window width minimising the modular
+// multiplies. Both methods square once per exponent bit, so only multiplies
+// differ: width 1 needs one per set bit, while a wider window builds a 2^(w-1)
+// entry table and then needs one per window. Sparse exponents such as 65537 have
+// far fewer set bits than their width suggests, and stay on width 1.
+func modexpU256WindowWidth(expBits, expOnes int) int {
+	best, bestCost := 1, expOnes
+	for w := 2; w <= modexpU256MaxWindow; w++ {
+		cost := 1<<(w-1) + min(expOnes, (expBits+w)/(w+1))
+		if cost < bestCost {
+			best, bestCost = w, cost
+		}
+	}
+	return best
+}
+
 // modexpU256 computes base^exp mod modulus and writes the big-endian result into
 // dst, which must be len(modulus) zero bytes. Operands must satisfy
 // modexpU256Applicable; the exponent may be any length.
@@ -698,23 +716,60 @@ func modexpU256(dst, base, exp, mod []byte) {
 	}
 	mu := uint256.Reciprocal(&m)
 
-	// started stays false until the first set exponent bit, so leading zero bits
-	// of the top byte cost no squarings. It is always set by the end: exp[0] != 0.
-	var result uint256.Int
-	started := false
+	// Leading zero bits of the top byte cost no squarings: exp[0] != 0, so the
+	// exponent's own top bit is set and the loops below start from it.
+	lead := bits.LeadingZeros8(exp[0])
+	expBits := 8*len(exp) - lead
+	expOnes := 0
 	for _, by := range exp {
-		for bit := 7; bit >= 0; bit-- {
-			if started {
-				result.MulModWithReciprocal(&result, &result, &m, &mu) // square
+		expOnes += bits.OnesCount8(by)
+	}
+	bit := func(i int) uint8 {
+		i += lead
+		return (exp[i>>3] >> (7 - uint(i&7))) & 1
+	}
+
+	var result uint256.Int
+	if w := modexpU256WindowWidth(expBits, expOnes); w == 1 {
+		result.Set(&b) // the top bit is set, so the first squaring would be of 1
+		for i := 1; i < expBits; i++ {
+			result.MulModWithReciprocal(&result, &result, &m, &mu)
+			if bit(i) == 1 {
+				result.MulModWithReciprocal(&result, &b, &m, &mu)
 			}
-			if (by>>uint(bit))&1 == 1 {
-				if !started {
-					started = true
-					result.Set(&b) // result was 1, so 1*b = b
-				} else {
-					result.MulModWithReciprocal(&result, &b, &m, &mu) // multiply
+		}
+	} else {
+		var table [1 << (modexpU256MaxWindow - 1)]uint256.Int // b^1, b^3, b^5, ...
+		var bSq uint256.Int
+		bSq.MulModWithReciprocal(&b, &b, &m, &mu)
+		table[0].Set(&b)
+		for k := 1; k < 1<<(w-1); k++ {
+			table[k].MulModWithReciprocal(&table[k-1], &bSq, &m, &mu)
+		}
+		for i := 0; i < expBits; {
+			if i > 0 && bit(i) == 0 {
+				result.MulModWithReciprocal(&result, &result, &m, &mu)
+				i++
+				continue
+			}
+			// Take the widest window ending on a set bit, so its value is odd.
+			l := min(w, expBits-i)
+			for bit(i+l-1) == 0 {
+				l--
+			}
+			v := 0
+			for j := range l {
+				v = v<<1 | int(bit(i+j))
+			}
+			if i == 0 {
+				result.Set(&table[v>>1])
+			} else {
+				for range l {
+					result.MulModWithReciprocal(&result, &result, &m, &mu)
 				}
+				result.MulModWithReciprocal(&result, &table[v>>1], &m, &mu)
 			}
+			i += l
 		}
 	}
 	b32 := result.Bytes32()

@@ -350,3 +350,57 @@ func TestModexpRoutingAgrees(t *testing.T) {
 		}
 	}
 }
+
+// TestModexpU256Windows walks exponent bit lengths across every window-width
+// boundary, with bit patterns that stress window edges: all-ones (every window
+// full), a lone top bit, alternating bits, and sparse ones separated by runs of
+// zeros longer than the widest window.
+func TestModexpU256Windows(t *testing.T) {
+	mod := make([]byte, 32)
+	for i := range mod {
+		mod[i] = 0xd7
+	}
+	mod[31] |= 1
+	modBig := new(big.Int).SetBytes(mod)
+	base := bytes.Repeat([]byte{0x9c}, 32)
+	baseBig := new(big.Int).SetBytes(base)
+
+	patterns := map[string]func(n int) *big.Int{
+		"all ones": func(n int) *big.Int { return new(big.Int).Sub(bigLsh(uint(n)), big.NewInt(1)) },
+		"top bit":  func(n int) *big.Int { return bigLsh(uint(n - 1)) },
+		"alternating": func(n int) *big.Int {
+			return new(big.Int).Div(new(big.Int).Sub(bigLsh(uint(n+1)), big.NewInt(1)), big.NewInt(3))
+		},
+		"sparse": func(n int) *big.Int {
+			e := bigLsh(uint(n - 1))
+			for s := n - 1 - 7; s > 0; s -= 7 {
+				e.SetBit(e, s, 1)
+			}
+			return e
+		},
+	}
+	var bitLens []int
+	for _, edge := range []int{1, 7, 25, 81, 241, 1024} {
+		for _, d := range []int{-1, 0, 1, 2} {
+			if n := edge + d; n >= 1 {
+				bitLens = append(bitLens, n)
+			}
+		}
+	}
+	for name, gen := range patterns {
+		for _, n := range bitLens {
+			expBig := gen(n)
+			if expBig.BitLen() != n {
+				continue // pattern cannot express this width
+			}
+			dst := make([]byte, 32)
+			modexpU256(dst, base, expBig.Bytes(), mod)
+
+			want := make([]byte, 32)
+			new(big.Int).Exp(baseBig, expBig, modBig).FillBytes(want)
+			if !bytes.Equal(dst, want) {
+				t.Fatalf("%s, %d-bit exponent:\n got %x\nwant %x", name, n, dst, want)
+			}
+		}
+	}
+}
