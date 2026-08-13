@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -199,7 +198,7 @@ func (api *GraphQLAPIImpl) buildBlockDetailsResponse(ctx context.Context, tx kv.
 		}
 		if txType == types.BlobTxType {
 			if blobTx, ok := txn.(*types.BlobTx); ok {
-				transaction["maxFeePerBlobGas"] = (*hexutil.Big)(blobTx.MaxFeePerBlobGas.ToBig())
+				transaction["maxFeePerBlobGas"] = (*hexutil.U256)(new(uint256.Int).Set(&blobTx.MaxFeePerBlobGas))
 			}
 		}
 		transaction["accessList"] = txn.GetAccessList()
@@ -211,9 +210,9 @@ func (api *GraphQLAPIImpl) buildBlockDetailsResponse(ctx context.Context, tx kv.
 		return nil, err
 	}
 	if td != nil {
-		getBlockRes["totalDifficulty"] = (*hexutil.Big)(td.ToBig())
+		getBlockRes["totalDifficulty"] = (*hexutil.U256)(td)
 	} else {
-		getBlockRes["totalDifficulty"] = (*hexutil.Big)(new(big.Int))
+		getBlockRes["totalDifficulty"] = new(hexutil.U256)
 	}
 
 	response := map[string]any{}
