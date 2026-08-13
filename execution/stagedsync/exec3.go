@@ -856,7 +856,7 @@ type FlushAndComputeCommitmentTimes struct {
 	ComputeCommitment time.Duration
 }
 
-// computeAndCheckCommitmentV3 - does write state to db and then check commitment
+// computeAndCheckCommitmentV3 records execution progress and checks the commitment.
 func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.TemporalRwTx, doms *execctx.SharedDomains, cfg ExecuteBlockCfg, e *StageState, parallel bool, logger log.Logger, u Unwinder) (ok bool, times FlushAndComputeCommitmentTimes, err error) {
 	if header == nil {
 		return false, times, errors.New("header is nil")
@@ -869,9 +869,6 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 	if !parallel {
 		if err := e.Update(applyTx, header.Number.Uint64()); err != nil {
 			return false, times, err
-		}
-		if _, err := rawdb.IncrementStateVersion(applyTx); err != nil {
-			return false, times, fmt.Errorf("writing plain state version: %w", err)
 		}
 	}
 

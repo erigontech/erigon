@@ -393,25 +393,19 @@ func (e *ExecModule) canonicalHash(ctx context.Context, tx kv.Tx, blockNumber ui
 	return canonical, nil
 }
 
-// drainReadAhead blocks until any in-flight block-assembly warmup finishes.
-// warmBody is fire-and-forget and fills the shared state cache; if
-// it is still running when an unwind bumps the cache epoch, it can fill a
-// pre-unwind (dead-fork) value stamped with the post-unwind epoch — IsStale then
-// returns false and the stale value is served as canonical (wrong root). Fill
-// admission does not cover this direction: an unwind lowers the applied
-// frontier, so a pre-unwind view passes. Call before any unwind epoch-bump.
-func (e *ExecModule) drainReadAhead() {
+// suspendReadAhead prevents raw-database warmup from filling the shared state
+// cache while an unwind's staged state is being read or published. It returns
+// the context error rather than allowing the unwind to proceed unsuspended.
+func (e *ExecModule) suspendReadAhead(ctx context.Context) (func(), error) {
 	if e.readAheader == nil {
-		return
+		return func() {}, nil
 	}
-	ctx := e.bacgroundCtx
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	e.readAheader.WaitForWarmup(ctx)
+	return e.readAheader.SuspendWarmup(ctx)
 }
 
-func (e *ExecModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header) error {
+// unwindToCommonCanonical keeps read-ahead suspended after staging an unwind.
+// Its caller must resume only after all reads of the staged state have ended.
+func (e *ExecModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header, ensureReadAheadSuspended func() error) error {
 	currentHeader := header
 	for {
 		isCanonical, err := e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash())
@@ -446,7 +440,9 @@ func (e *ExecModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.Te
 		return err
 	}
 
-	e.drainReadAhead()
+	if err := ensureReadAheadSuspended(); err != nil {
+		return fmt.Errorf("suspend read-ahead: %w", err)
+	}
 	if err := e.pipelineExecutor.UnwindTo(unwindPoint, stagedsync.ExecUnwind, tx); err != nil {
 		return err
 	}
@@ -588,19 +584,36 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	// Set state cache in SharedDomains for use during state reading
 	doms.SetStateCache(e.stateCache)
 	doms.SetCodeStore(e.codeStore)
-	if err = e.unwindToCommonCanonical(doms, tx, header); err != nil {
+	// Either unwind path may run, and both can run in one validation. Share one
+	// lazy suspension so it spans every staged-state read without penalising the
+	// common case where validation needs no unwind.
+	var resumeReadAhead func()
+	var suspendReadAheadErr error
+	var suspendReadAheadOnce sync.Once
+	ensureReadAheadSuspended := func() error {
+		suspendReadAheadOnce.Do(func() {
+			resumeReadAhead, suspendReadAheadErr = e.suspendReadAhead(ctx)
+		})
+		return suspendReadAheadErr
+	}
+	defer func() {
+		if resumeReadAhead != nil {
+			resumeReadAhead()
+		}
+	}()
+
+	if err := e.unwindToCommonCanonical(doms, tx, header, ensureReadAheadSuspended); err != nil {
 		doms.Close()
 		return ValidationResult{}, err
 	}
-	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(ctx, doms, tx, header, body.RawBody(), e.logger)
+	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(ctx, doms, tx, header, body.RawBody(), ensureReadAheadSuspended, e.logger)
 	if criticalError != nil {
 		return ValidationResult{}, criticalError
 	}
-	// No cache invalidation needed on an invalid payload: the state cache is
-	// populated only at flush (committed, fork-agnostic state) and this
-	// validation path never flushes, so a rejected payload leaves nothing
-	// fork-specific in the cache. Reads during validation only add canonical
-	// committed bytes. (Cache invalidation happens solely on unwind.)
+
+	// An invalid payload needs no additional cache cleanup. Validation never
+	// publishes its writes, staged-unwind reads cannot fill, and an unwind has
+	// already performed its own cache invalidation.
 	// Validation tx is the SD's BlockOverlay; defer doms.Close() above handles
 	// its rollback. By design we do not persist validation-run writes — there
 	// is no Flush/Commit on this path.
