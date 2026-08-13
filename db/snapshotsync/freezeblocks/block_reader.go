@@ -513,10 +513,9 @@ type HasBlockFiles interface {
 	DebugBlockFiles() *blocksnapshots.RoSnapshots
 }
 
-// txBlockView returns the block-files view pinned by tx. Reads go through a view
-// that lives as long as the tx: a view opened per read lets a file retire between
-// two reads of one tx, so the tx would see a moving file set.
-func txBlockView(tx kv.Getter) *blocksnapshots.View {
+// view returns tx's pinned block-files view. Block files are only ever read
+// through it, so a tx that pins none is a bug at the caller, not a fallback.
+func (r *BlockReader) view(tx kv.Getter) *blocksnapshots.View {
 	p, ok := tx.(HasBlockFilesRoTx)
 	if !ok {
 		panic(fmt.Sprintf("block reads require a tx that pins a block-files view, got %T", tx))
@@ -530,17 +529,12 @@ func txBlockView(tx kv.Getter) *blocksnapshots.View {
 
 // viewSingleFile returns the segment of type t covering blockNum, from tx's pinned view.
 func (r *BlockReader) viewSingleFile(tx kv.Getter, t snaptype.Type, blockNum uint64) (*snapshotsync.VisibleSegment, bool) {
-	return txBlockView(tx).Segment(t, blockNum)
+	return r.view(tx).Segment(t, blockNum)
 }
 
 // viewType returns type t's segments, from tx's pinned view.
 func (r *BlockReader) viewType(tx kv.Getter, t snaptype.Type) []*snapshotsync.VisibleSegment {
-	return txBlockView(tx).Segments(t)
-}
-
-// view returns tx's pinned block-files view.
-func (r *BlockReader) view(tx kv.Getter) *blocksnapshots.View {
-	return txBlockView(tx)
+	return r.view(tx).Segments(t)
 }
 
 func (r *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (h *types.Header, err error) {
