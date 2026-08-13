@@ -89,16 +89,6 @@ func parseDistanceNumber(s, flag, aliasHint string) (uint64, error) {
 	return n, nil
 }
 
-// DistanceFrom returns the retention distance from stageHead back to target.
-// Subtracting the two directly underflows when target is above stageHead, and
-// lands on a policy sentinel rather than a large distance.
-func DistanceFrom(stageHead, target uint64) (Distance, error) {
-	if target > stageHead {
-		return 0, fmt.Errorf("prune target %d is above stage progress %d", target, stageHead)
-	}
-	return Distance(stageHead - target), nil
-}
-
 // stateHistoryDistanceCLIValue renders a state-history-style distance as its
 // operator-facing argument. Every sentinel disables pruning for these fields, so
 // all of them render as the alias the parser accepts rather than as a raw magic
