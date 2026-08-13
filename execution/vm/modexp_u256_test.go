@@ -8,6 +8,8 @@ import (
 	"math/big"
 	"math/rand"
 	"testing"
+
+	evmone "github.com/erigontech/evmone_precompiles"
 )
 
 func bigLsh(n uint) *big.Int { return new(big.Int).Lsh(big.NewInt(1), n) }
@@ -160,5 +162,103 @@ func TestModexpU256Random(t *testing.T) {
 		if !bytes.Equal(dst, want) {
 			t.Fatalf("iter %d: base=%x exp=%x mod=%x\n got %x\nwant %x", iter, base, exp, modB, dst, want)
 		}
+	}
+}
+
+// benchModexpCase is one operand triple at its declared field widths, as the
+// precompile sees them.
+type benchModexpCase struct {
+	name           string
+	base, exp, mod []byte
+}
+
+func benchModexpCases() []benchModexpCase {
+	rng := rand.New(rand.NewSource(7))
+	fill := func(n int) []byte {
+		b := make([]byte, n)
+		rng.Read(b)
+		b[0] |= 0x80 // keep the value at its full declared width
+		return b
+	}
+	// A value of the given bit width placed in a field of n bytes.
+	widthIn := func(n int, bits uint) []byte {
+		b := make([]byte, n)
+		v := new(big.Int).Sub(bigLsh(bits), big.NewInt(1))
+		v.FillBytes(b)
+		return b
+	}
+	base32, base1024 := fill(32), fill(1024)
+	mod256, mod2048 := fill(32), fill(256)
+	mod256[31] |= 1
+	mod2048[255] |= 1
+	exp3 := []byte{3}
+	exp65537 := []byte{0x01, 0x00, 0x01}
+	exp64, exp256, exp512, exp2048, exp8192 := fill(8), fill(32), fill(64), fill(256), fill(1024)
+
+	return []benchModexpCase{
+		{"mod256/exp65537", base32, exp65537, mod256},
+		{"mod256/exp64bit", base32, exp64, mod256},
+		{"mod256/exp256bit", base32, exp256, mod256},
+		{"mod256/exp512bit", base32, exp512, mod256},
+		{"mod256/exp2048bit", base32, exp2048, mod256},
+		{"mod256/exp8192bit", base32, exp8192, mod256},
+		{"mod2^192/exp64bit", base32, exp64, widthIn(32, 193)},
+		{"mod128bit/exp64bit", base32, exp64, widthIn(32, 128)},
+		{"mod64bit/exp64bit", base32, exp64, widthIn(32, 64)},
+		{"base1024/mod256/exp65537", base1024, exp65537, mod256},
+		{"mod2048/exp3", base32, exp3, mod2048},
+		{"mod2048/exp65537", base32, exp65537, mod2048},
+		{"mod2048/exp2048bit", base32, exp2048, mod2048},
+	}
+}
+
+// BenchmarkModexpBackends measures each MODEXP backend on the same operands, so
+// that the routing in bigModExp.Run can be re-derived when a backend changes.
+func BenchmarkModexpBackends(b *testing.B) {
+	for _, c := range benchModexpCases() {
+		dst := make([]byte, len(c.mod))
+		b.Run(c.name+"/big", func(b *testing.B) {
+			for range b.N {
+				new(big.Int).Exp(new(big.Int).SetBytes(c.base), new(big.Int).SetBytes(c.exp),
+					new(big.Int).SetBytes(c.mod)).FillBytes(dst)
+			}
+		})
+		b.Run(c.name+"/evmone", func(b *testing.B) {
+			for range b.N {
+				evmone.ModExp(dst, c.base, c.exp, c.mod)
+			}
+		})
+		if !modexpU256Applicable(c.base, c.mod) {
+			continue
+		}
+		b.Run(c.name+"/u256", func(b *testing.B) {
+			for range b.N {
+				clear(dst)
+				modexpU256(dst, c.base, c.exp, c.mod)
+			}
+		})
+	}
+}
+
+// BenchmarkModexpRouted measures the precompile as callers see it, backend
+// selection included.
+func BenchmarkModexpRouted(b *testing.B) {
+	c7883 := &bigModExp{osaka: true}
+	for _, c := range benchModexpCases() {
+		input := make([]byte, 0, 96+len(c.base)+len(c.exp)+len(c.mod))
+		for _, n := range []int{len(c.base), len(c.exp), len(c.mod)} {
+			input = append(input, make([]byte, 24)...)
+			input = append(input, new(big.Int).SetInt64(int64(n)).FillBytes(make([]byte, 8))...)
+		}
+		input = append(input, c.base...)
+		input = append(input, c.exp...)
+		input = append(input, c.mod...)
+		b.Run(c.name, func(b *testing.B) {
+			for range b.N {
+				if _, err := c7883.Run(input); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }
