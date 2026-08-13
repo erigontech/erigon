@@ -17,7 +17,6 @@
 package cache
 
 import (
-	"encoding/binary"
 	"fmt"
 	"sync"
 	"testing"
@@ -27,29 +26,29 @@ import (
 	"github.com/erigontech/erigon/common/cachebudget"
 )
 
-func BenchmarkGenericCache_InsertAtCapacityGrowthDenied(b *testing.B) {
+func BenchmarkGrowLRU_InsertAtCapacityGrowthDenied(b *testing.B) {
 	for _, workers := range []int{1, 128} {
 		b.Run(fmt.Sprintf("workers=%d", workers), func(b *testing.B) {
-			benchmarkGenericCacheInsertAtCapacity(b, workers)
+			benchmarkGrowLRUInsertAtCapacity(b, workers)
 		})
 	}
 }
 
-func benchmarkGenericCacheInsertAtCapacity(b *testing.B, workers int) {
-	const capacity = uint32(8_192)
-	c := newGenericCacheEntries[[]byte](64*datasize.MB, capacity, func(v []byte) int { return len(v) }, ModeEvictLRU)
-	defer c.Close()
-	value := []byte{1}
-	var key [8]byte
-	for i := range capacity {
-		binary.BigEndian.PutUint64(key[:], uint64(i))
-		c.Put(key[:], value, 1)
+func benchmarkGrowLRUInsertAtCapacity(b *testing.B, workers int) {
+	const capacity = uint32(genericCacheStartCapacity)
+	const keyMix = uint64(0x9e3779b97f4a7c15)
+	g := newGrowLRU[int](64*datasize.MB, avgBytesPerEntry, nil)
+	defer g.Close()
+	for i := uint64(0); g.entryCount.Load() < int64(capacity); i++ {
+		g.Add(i*keyMix, int(i))
+		if i > 1<<20 {
+			b.Fatal("could not fill growLRU to its starting capacity")
+		}
 	}
-	c.maxCap = capacity * genericCacheGrowFactor
-	growEntries := int64(c.maxCap - capacity)
-	c.avgEntryBytes = cachebudget.Global.Limit()/growEntries + 1
-	c.enveloped = true
-	if delta := growEntries * c.avgEntryBytes; delta <= cachebudget.Global.Limit() {
+	g.maxCap = capacity * genericCacheGrowFactor
+	growEntries := int64(g.maxCap - capacity)
+	g.avgBytes = cachebudget.Global.Limit()/growEntries + 1
+	if delta := growEntries * g.avgBytes; delta <= cachebudget.Global.Limit() {
 		b.Fatalf("growth delta %d does not exceed the cache budget %d", delta, cachebudget.Global.Limit())
 	}
 	b.ReportAllocs()
@@ -60,17 +59,14 @@ func benchmarkGenericCacheInsertAtCapacity(b *testing.B, workers int) {
 		start := worker * chunk
 		end := min(start+chunk, b.N)
 		wg.Go(func() {
-			var key [16]byte
-			binary.BigEndian.PutUint64(key[:8], uint64(worker+1))
 			for i := start; i < end; i++ {
-				binary.BigEndian.PutUint64(key[8:], uint64(i))
-				c.Put(key[:], value, 1)
+				g.Add((uint64(i)+(uint64(1)<<32))*keyMix, i)
 			}
 		})
 	}
 	wg.Wait()
-	if got := c.curCap.Load(); got != capacity {
-		b.Fatalf("cache grew to %d slots; benchmark requires denied growth at %d", got, capacity)
+	if got := g.curCap.Load(); got != capacity {
+		b.Fatalf("growLRU grew to %d slots; benchmark requires denied growth at %d", got, capacity)
 	}
 	b.ReportMetric(float64(workers), "workers")
 }
