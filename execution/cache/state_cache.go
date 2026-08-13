@@ -24,6 +24,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -204,6 +205,14 @@ func (c *StateCache) getAddrCodeHash(addr []byte) ([32]byte, bool) {
 	return cc.GetAddrCodeHash(addr)
 }
 
+func (c *StateCache) getAddrCodeHashWithTxNum(addr []byte) ([32]byte, uint64, bool) {
+	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
+	if !ok {
+		return [32]byte{}, 0, false
+	}
+	return cc.GetAddrCodeHashWithTxNum(addr)
+}
+
 // seedAddrCodeHash conditionally records an addr → codeHash mapping.
 // The mapping derives from an account record, so admission checks the accounts
 // frontier even though the mapping lives in the code cache.
@@ -271,18 +280,25 @@ func (c *StateCache) fillIfFresh(domain kv.Domain, key []byte, value []byte, rea
 // negatives are not cached here: "no code" is cached at the addr→codeHash
 // mapping instead (the zero-hash sentinel seeded by SeedAddrCodeHash).
 func (c *StateCache) fillCodeIfFresh(key []byte, value []byte, readTxNum, visibleEnd, accountsVisibleEnd uint64) {
-	codeCache, ok := c.caches[kv.CodeDomain].(*CodeCache)
-	if !ok || len(value) == 0 {
+	if len(value) == 0 {
 		return
 	}
 	codeHash := crypto.Keccak256(value)
 	cloned := bytes.Clone(value)
+	c.fillCodeWithHashIfFresh(key, cloned, codeHash, readTxNum, visibleEnd, accountsVisibleEnd)
+}
+
+func (c *StateCache) fillCodeWithHashIfFresh(key, value, codeHash []byte, readTxNum, visibleEnd, accountsVisibleEnd uint64) {
+	codeCache, ok := c.caches[kv.CodeDomain].(*CodeCache)
+	if !ok || len(value) == 0 || len(codeHash) != len(common.Hash{}) {
+		return
+	}
 	c.admissionMu.RLock()
 	defer c.admissionMu.RUnlock()
 	if visibleEnd < c.appliedEnd[kv.CodeDomain] || accountsVisibleEnd < c.appliedEnd[kv.AccountsDomain] {
 		return
 	}
-	codeCache.PutWithCodeHashIfAbsent(key, cloned, codeHash, readTxNum)
+	codeCache.PutWithCodeHashIfAbsent(key, value, codeHash, readTxNum)
 }
 
 // deleteKey removes the data for the given domain and key. Authoritative

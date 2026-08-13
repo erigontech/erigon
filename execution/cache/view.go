@@ -105,6 +105,41 @@ func (v ReadView) GetAddrCodeHash(addr []byte) ([32]byte, bool) {
 	return v.c.getAddrCodeHash(addr)
 }
 
+// GetCodeByAddressHash resolves the durable addr→codeHash mapping and then
+// probes the content-addressed code cache. On a hit it also fills the
+// addr-keyed code binding with the mapping's original txNum, avoiding both a
+// database read and a redundant keccak of the cached code.
+func (v ReadView) GetCodeByAddressHash(addr []byte) ([]byte, bool) {
+	if v.c == nil {
+		return nil, false
+	}
+	codeHash, readTxNum, ok := v.c.getAddrCodeHashWithTxNum(addr)
+	if !ok || codeHash == ([32]byte{}) {
+		return nil, false
+	}
+	code, ok := v.c.getCodeByHash(codeHash[:])
+	if !ok {
+		return nil, false
+	}
+	v.fillCodeWithHash(addr, code, codeHash[:], readTxNum)
+	return code, true
+}
+
+func (v ReadView) fillCodeWithHash(addr, code, codeHash []byte, readTxNum uint64) {
+	if v.c == nil || v.c.disableFills || v.frontier == nil {
+		return
+	}
+	visibleEnd, ok := v.frontier.DomainVisibleEnd(kv.CodeDomain)
+	if !ok {
+		return
+	}
+	accountsEnd, ok := v.frontier.DomainVisibleEnd(kv.AccountsDomain)
+	if !ok {
+		return
+	}
+	v.c.fillCodeWithHashIfFresh(addr, code, codeHash, readTxNum, visibleEnd, accountsEnd)
+}
+
 // CanFill reports whether this view carries a frontier, i.e. Fill and
 // SeedAddrCodeHash can admit values through it.
 func (v ReadView) CanFill() bool { return v.c != nil && v.frontier != nil }
@@ -144,6 +179,12 @@ func (v ReadView) SeedAddrCodeHash(addr []byte, h [32]byte, txNum uint64) {
 	visibleEnd, ok := v.frontier.DomainVisibleEnd(kv.AccountsDomain)
 	if !ok {
 		return
+	}
+	if h == ([32]byte{}) {
+		txNum = 0
+		if visibleEnd > 0 {
+			txNum = visibleEnd - 1
+		}
 	}
 	v.c.seedAddrCodeHash(addr, h, txNum, visibleEnd)
 }
