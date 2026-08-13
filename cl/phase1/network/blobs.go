@@ -85,6 +85,37 @@ type blobRequestResult struct {
 	err       error
 }
 
+type blobRequestPacing struct {
+	backoff     time.Duration
+	nextRequest time.Time
+}
+
+func newBlobRequestPacing() blobRequestPacing {
+	return blobRequestPacing{backoff: requestBlobRetryInterval}
+}
+
+func (p *blobRequestPacing) ready(now time.Time) bool {
+	return !now.Before(p.nextRequest)
+}
+
+func (p *blobRequestPacing) failed(now time.Time) {
+	p.backoff = min(p.backoff*2, requestBlobMaxBackoff)
+	p.nextRequest = now.Add(p.backoff)
+}
+
+func (p *blobRequestPacing) reset() {
+	p.backoff = requestBlobRetryInterval
+	p.nextRequest = time.Time{}
+}
+
+func (p *blobRequestPacing) complete(now time.Time, err error) {
+	if err != nil {
+		p.failed(now)
+		return
+	}
+	p.reset()
+}
+
 // RequestBlobsFrantically requests blobs from the network frantically.
 func RequestBlobsFrantically(ctx context.Context, r blobRequester, req *solid.ListSSZ[*cltypes.BlobIdentifier]) (*PeerAndSidecars, error) {
 	return requestBlobsFrantically(ctx, r, req, nil)
@@ -103,12 +134,11 @@ func requestBlobsFrantically(ctx context.Context, r blobRequester, req *solid.Li
 	var candidate *PeerAndSidecars
 	var resultC <-chan blobRequestResult = results
 	var validationC <-chan error
-	backoff := requestBlobRetryInterval
-	nextRequest := time.Time{}
+	pacing := newBlobRequestPacing()
 	for {
 		select {
 		case now := <-reqInterval.C:
-			if inFlight >= cap(results) || now.Before(nextRequest) {
+			if inFlight >= cap(results) || !pacing.ready(now) {
 				continue
 			}
 			inFlight++
@@ -118,14 +148,11 @@ func requestBlobsFrantically(ctx context.Context, r blobRequester, req *solid.Li
 			}()
 		case result := <-resultC:
 			inFlight--
+			pacing.complete(time.Now(), result.err)
 			if result.err != nil {
 				log.Trace("RequestBlobsFrantically: error", "err", result.err, "peer", result.peer)
-				backoff = min(backoff*2, requestBlobMaxBackoff)
-				nextRequest = time.Now().Add(backoff)
 				continue
 			}
-			backoff = requestBlobRetryInterval
-			nextRequest = time.Time{}
 			if len(result.responses) == 0 {
 				log.Trace("RequestBlobsFrantically: response is empty", "peer", result.peer)
 				continue
@@ -143,8 +170,7 @@ func requestBlobsFrantically(ctx context.Context, r blobRequester, req *solid.Li
 				return candidate, nil
 			}
 			log.Trace("RequestBlobsFrantically: rejected response", "err", err, "peer", candidate.Peer)
-			backoff = min(backoff*2, requestBlobMaxBackoff)
-			nextRequest = time.Now().Add(backoff)
+			pacing.failed(time.Now())
 			candidate = nil
 			validationC = nil
 			resultC = results

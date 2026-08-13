@@ -30,7 +30,6 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/utils"
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
@@ -56,8 +55,7 @@ type PeerDasGetter interface {
 	GetPeerDas() das.PeerDas
 }
 
-type blobPeerClient interface {
-	blobRequester
+type blobPeerCounter interface {
 	Peers() (uint64, error)
 }
 
@@ -65,17 +63,13 @@ type blobSnapshotReader interface {
 	FrozenBlobs() uint64
 }
 
-type frozenBlobCleanup struct {
-	slot      uint64
-	blockRoot common.Hash
-}
-
 // BlobHistoryDownloader downloads blob history backwards from a head slot
 type BlobHistoryDownloader struct {
 	ctx context.Context
 
 	beaconCfg   *clparams.BeaconChainConfig
-	peerClient  blobPeerClient
+	rpc         *rpc.BeaconRpcP2P
+	peerCounter blobPeerCounter
 	indiciesDB  kv.RoDB
 	blobStorage blob_storage.BlobStorage
 	blockReader freezeblocks.BeaconSnapshotReader
@@ -96,7 +90,6 @@ type BlobHistoryDownloader struct {
 	immediateBlobsBackfilling bool
 	// columnBackfillTimeout bounds each fulu block's PeerDAS column recovery
 	columnBackfillTimeout time.Duration
-	frozenBlobCleanup     map[frozenBlobCleanup]struct{}
 
 	running           atomic.Bool
 	backfillCompleted atomic.Bool
@@ -127,7 +120,8 @@ func NewBlobHistoryDownloader(
 	return &BlobHistoryDownloader{
 		ctx:                       ctx,
 		beaconCfg:                 beaconCfg,
-		peerClient:                rpc,
+		rpc:                       rpc,
+		peerCounter:               rpc,
 		indiciesDB:                indiciesDB,
 		blobStorage:               blobStorage,
 		blockReader:               blockReader,
@@ -215,7 +209,6 @@ func (b *BlobHistoryDownloader) run() {
 
 // downloadOnce performs a single download pass
 func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
-	b.cleanupFrozenBlobs()
 	currentSlot := b.headSlot.Load()
 	if currentSlot == 0 {
 		return nil // not initialized yet
@@ -223,7 +216,7 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 	startSlot := currentSlot
 
 	// Check peer count before proceeding
-	peers, err := b.peerClient.Peers()
+	peers, err := b.peerCounter.Peers()
 	if err != nil {
 		b.logger.Warn("[BlobHistoryDownloader] Failed to get peer count", "err", err)
 		return nil
@@ -392,49 +385,7 @@ func (b *BlobHistoryDownloader) processBatch(batch []*cltypes.SignedBeaconBlock)
 	if len(fuluBlocks) > 0 && !b.recoverFuluColumns(fuluBlocks) {
 		succeeded = false
 	}
-	if !b.queueAndCleanupFrozenBatchBlobs(batch) {
-		succeeded = false
-	}
 	return succeeded
-}
-
-func (b *BlobHistoryDownloader) queueAndCleanupFrozenBatchBlobs(batch []*cltypes.SignedBeaconBlock) bool {
-	firstUnfrozenSlot := b.sn.FrozenBlobs()
-	succeeded := true
-	for _, block := range batch {
-		if block.GetSlot() >= firstUnfrozenSlot {
-			continue
-		}
-		blockRoot, err := block.Block.HashSSZ()
-		if err != nil {
-			b.logger.Warn("[BlobHistoryDownloader] Error hashing blobs now covered by snapshots", "err", err, "slot", block.GetSlot())
-			succeeded = false
-			continue
-		}
-		if b.frozenBlobCleanup == nil {
-			b.frozenBlobCleanup = make(map[frozenBlobCleanup]struct{})
-		}
-		b.frozenBlobCleanup[frozenBlobCleanup{slot: block.GetSlot(), blockRoot: blockRoot}] = struct{}{}
-	}
-	b.cleanupFrozenBlobs()
-	return succeeded
-}
-
-func (b *BlobHistoryDownloader) cleanupFrozenBlobs() {
-	for item := range b.frozenBlobCleanup {
-		if item.slot >= b.sn.FrozenBlobs() {
-			continue
-		}
-		stored, err := b.blobStorage.KzgCommitmentsCount(b.ctx, item.blockRoot)
-		if err != nil || stored == 0 {
-			continue
-		}
-		if err := b.blobStorage.RemoveBlobSidecars(b.ctx, item.slot, item.blockRoot); err != nil {
-			b.logger.Warn("[BlobHistoryDownloader] Error removing blobs now covered by snapshots", "err", err, "slot", item.slot)
-			continue
-		}
-		delete(b.frozenBlobCleanup, item)
-	}
 }
 
 func (b *BlobHistoryDownloader) recoverDenebBlobs(blocks []*cltypes.SignedBeaconBlock) bool {
@@ -443,7 +394,7 @@ func (b *BlobHistoryDownloader) recoverDenebBlobs(blocks []*cltypes.SignedBeacon
 		b.logger.Debug("[BlobHistoryDownloader] Error generating blob identifiers", "err", err)
 		return false
 	}
-	_, err = requestBlobsFrantically(b.ctx, b.peerClient, req, func(ctx context.Context, blobs *PeerAndSidecars) error {
+	_, err = requestBlobsFrantically(b.ctx, b.rpc, req, func(ctx context.Context, blobs *PeerAndSidecars) error {
 		_, inserted, err := blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, b.blobStorage, req, blobs.Responses, func(header *cltypes.SignedBeaconBlockHeader) error {
 			for _, block := range blocks {
 				if block.Block.Slot != header.Header.Slot {
@@ -500,10 +451,6 @@ func (b *BlobHistoryDownloader) recoverFuluColumns(blocks []*cltypes.SignedBeaco
 		stored, err := b.blobStorage.KzgCommitmentsCount(b.ctx, blockRoot)
 		if err != nil || uint64(stored) != uint64(commitments.Len()) {
 			b.logger.Warn("[BlobHistoryDownloader] Blob recovery did not persist every commitment", "err", err, "slot", block.GetSlot(), "stored", stored, "expected", commitments.Len())
-			if b.frozenBlobCleanup == nil {
-				b.frozenBlobCleanup = make(map[frozenBlobCleanup]struct{})
-			}
-			b.frozenBlobCleanup[frozenBlobCleanup{slot: block.GetSlot(), blockRoot: blockRoot}] = struct{}{}
 			succeeded = false
 		}
 	}
