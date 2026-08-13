@@ -1940,10 +1940,6 @@ var prevBlockReads = dbg.EnvBool("PREV_BLOCK_READS", false)
 // inclusive Done in the in-order sweep. Closes the [validate,finalize] residual.
 var coinbaseSum = dbg.EnvBool("COINBASE_SUM", false)
 
-// coinbaseVec (item 5, validation scaffold) populates a raw FeeDeltaVec with each
-// tx's tip and asserts base + Σdeltas equals calcFees's chained coinbase over the
-// pure-tip prefix — proving the additive fold before switching calcFees onto it.
-var coinbaseVec = dbg.EnvBool("COINBASE_VEC", false)
 
 // depOrderVal (prototype, default OFF) makes ValidateVersion + state-commit
 // dependency-ordered instead of gated on the contiguous maxComplete prefix: a tx
@@ -2179,13 +2175,6 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 				}
 			}
 			result := w.RunTxTask(tv)
-			if coinbaseVec && be.coinbaseDeltas != nil {
-				var tip uint256.Int
-				if tv.version.TxIndex >= 0 && result.Err == nil && !tv.Task.IsBlockEnd() {
-					tip = result.ExecutionResult.FeeTipped
-				}
-				be.coinbaseDeltas.Set(tv.index, &tip)
-			}
 			releaseSlot()
 			if result.Err != nil {
 				pe.releaseWorker(w)
@@ -2963,15 +2952,6 @@ type blockExecutor struct {
 	// readers gate on it; -1 means none flushed yet.
 	coinbaseFlushedUpTo int
 
-	// coinbaseVec scaffold (item 5): raw per-tx tip deltas + the block-start
-	// coinbase base, to cross-check the additive fold against calcFees over the
-	// pure-tip prefix. coinbaseHadDirect trips once a tx writes the coinbase
-	// directly (a checkpoint reset), after which base+Σ no longer holds.
-	coinbaseDeltas    *state.FeeDeltaVec
-	coinbaseBase      uint256.Int
-	coinbaseBaseSet   bool
-	coinbaseHadDirect bool
-
 	// writeChangedPrev holds the PREVIOUS write-set of a tx whose re-executed
 	// write-set differs from the incarnation its dependents were validated
 	// against (DEP_ORDER_VAL). Set at result arrival; consumed once the tx's new
@@ -3315,36 +3295,6 @@ func (be *blockExecutor) finalizeValidatedTx(pe *parallelExecutor, applyTx kv.Te
 	return nil, nil
 }
 
-// coinbaseVecCrossCheck (item 5 scaffold) proves the raw additive fold matches
-// calcFees over the pure-tip prefix: base + Σ deltas[0..tx] must equal the
-// coinbase balance calcFees wrote. Once a tx writes the coinbase directly (a
-// checkpoint reset), base+Σ no longer holds and the check stops for the block.
-func (be *blockExecutor) coinbaseVecCrossCheck(tx int, txResult *execResult, tipWrites *state.WriteSet, sr state.StateReader) {
-	if !be.coinbaseBaseSet {
-		if acc, err := sr.ReadAccountData(be.coinbase); err == nil && acc != nil {
-			be.coinbaseBase = acc.Balance
-		}
-		be.coinbaseBaseSet = true
-	}
-	if _, ok := txResult.TxOut.GetBalance(be.coinbase); ok {
-		be.coinbaseHadDirect = true
-	}
-	if be.coinbaseHadDirect {
-		return
-	}
-	bw, ok := tipWrites.GetBalance(be.coinbase)
-	if !ok {
-		return
-	}
-	s := be.coinbaseDeltas.Sum(-1, tx)
-	var want uint256.Int
-	want.Add(&be.coinbaseBase, &s)
-	if want != bw.Val {
-		panic(fmt.Sprintf("coinbaseVec mismatch tx=%d want=%s got=%s base=%s sum=%s",
-			tx, want.String(), bw.Val.String(), be.coinbaseBase.String(), s.String()))
-	}
-}
-
 // advanceCoinbaseAndFinalize runs the in-order tail for dependency-ordered
 // validation over the contiguous validated prefix that has not yet been
 // finalized. For each tx it computes the calcFees coinbase credit (flushing the
@@ -3409,9 +3359,6 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 			tipWrites, err := txResult.calcFees(taskVer, be.versionMap, *stateReader, txTask.Rules())
 			if err != nil {
 				return nil, err
-			}
-			if coinbaseVec {
-				be.coinbaseVecCrossCheck(tx, txResult, tipWrites, *stateReader)
 			}
 			if !tipWrites.IsEmpty() {
 				existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
@@ -4363,9 +4310,6 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 			be.runInc[i].Store(-1)
 		}
 		be.wakeAt = map[int][]int{}
-		if coinbaseVec {
-			be.coinbaseDeltas = state.NewFeeDeltaVec(len(be.tasks))
-		}
 	}
 	// Drain deferred tx N when its predecessor is validated AND no worker
 	// at index < N is in flight. Lower-indexed workers' flushes land at
