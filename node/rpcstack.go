@@ -20,6 +20,9 @@
 package node
 
 import (
+	"bufio"
+	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"strings"
@@ -28,15 +31,12 @@ import (
 	"github.com/klauspost/compress/gzip"
 	"github.com/rs/cors"
 
-	"bufio"
-	"errors"
-	"fmt"
+	"github.com/klauspost/compress/gzhttp"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/klauspost/compress/gzhttp"
 )
 
 // NewHTTPHandlerStack returns wrapped http-related handlers.
@@ -63,8 +63,10 @@ type rpcAdmissionHandler struct {
 	next     http.Handler
 }
 
-var rpcAdmissionRejected = metrics.GetOrCreateCounter(`rpc_admission_rejected_total`)
-var wsConnectionRejected = metrics.GetOrCreateCounter(`ws_connection_rejected_total`)
+var (
+	rpcAdmissionRejected = metrics.GetOrCreateCounter(`rpc_admission_rejected_total`)
+	wsConnectionRejected = metrics.GetOrCreateCounter(`ws_connection_rejected_total`)
+)
 
 func newRPCAdmissionHandler(limit int64, next http.Handler) http.Handler {
 	return &rpcAdmissionHandler{limit: limit, next: next}
@@ -200,6 +202,10 @@ var gzipWrapper = func() func(http.Handler) http.HandlerFunc {
 	wrapper, err := gzhttp.NewWrapper(
 		gzhttp.MinSize(minGzipBodySize),
 		gzhttp.CompressionLevel(gzip.BestSpeed),
+		// gzhttp enables and prefers zstd by default. CompressionLevel applies
+		// only to gzip, so enabling zstd would silently serve an unmeasured
+		// encoder at its own default level to every browser that advertises it.
+		gzhttp.EnableZstd(false),
 	)
 	if err != nil {
 		panic(fmt.Sprintf("rpc gzip wrapper: %v", err))
@@ -208,8 +214,8 @@ var gzipWrapper = func() func(http.Handler) http.HandlerFunc {
 }()
 
 // countingResponseWriter counts body bytes while forwarding the optional
-// interfaces the RPC stack needs: Flusher for streaming responses and Hijacker
-// for the websocket upgrade.
+// interfaces gzhttp probes for: Flusher for streaming responses, and Hijacker,
+// which newNoGzipResponseWriter looks for on the pass-through path.
 type countingResponseWriter struct {
 	http.ResponseWriter
 	c metrics.Counter
@@ -226,6 +232,9 @@ func (w *countingResponseWriter) Flush() {
 		f.Flush()
 	}
 }
+
+// Unwrap lets http.NewResponseController reach the real writer.
+func (w *countingResponseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 func (w *countingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	if hj, ok := w.ResponseWriter.(http.Hijacker); ok {
