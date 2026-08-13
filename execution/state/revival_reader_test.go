@@ -57,9 +57,8 @@ func destructThenRevive(vm *VersionMap, addr accounts.Address) {
 	writeFor(vm, addr, IncarnationPath, accounts.NilKey, Version{TxIndex: 2}, uint64(2), true)
 }
 
-// A value-transfer revival records Balance/Incarnation/SelfDestruct but no Nonce
-// or CodeHash, so the account record still floors on the pre-destruct cells.
-// Both have to be wiped: the destruct deleted the account, and leaving either
+// A value-transfer revival writes no Nonce or CodeHash, so the account record
+// still floors on the pre-destruct cells. Both have to be wiped, or the record
 // contradicts the code and nonce versionedReadCore serves the EVM.
 func TestVersionedStateReader_AccountCodeHashWipedByInRangeDestruct(t *testing.T) {
 	t.Parallel()
@@ -248,10 +247,9 @@ func TestVersionedStateReader_CodeWipedByInRangeDestruct(t *testing.T) {
 	require.Zero(t, size, "code size must agree with code")
 }
 
-// A destruct with no revival above it must not wipe a cell written after it.
-// Storage cells arrive without a matching SelfDestruct=false — BAL
-// pre-population writes value paths only — so the latest entry stays the
-// destruct while the value above it is live.
+// A destruct with no revival above it must not wipe a cell written after it. BAL
+// pre-population writes value paths only, so the latest SelfDestruct entry stays
+// the destruct while the value above it is live.
 func TestVersionedStateReader_StorageSurvivesDestructWithoutRevivalEntry(t *testing.T) {
 	t.Parallel()
 	addr := getAddress(107)

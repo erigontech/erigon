@@ -1749,8 +1749,7 @@ func (vr versionedStateReader) HasStorage(address accounts.Address) (bool, error
 }
 
 // versionedCode resolves code from the read set and the version map, reporting
-// whether either answered. The two code readers differ only in what they make of
-// the result.
+// whether either answered.
 func (vr versionedStateReader) versionedCode(address accounts.Address) ([]byte, bool) {
 	if r, ok := vr.reads.GetCode(address); ok && r.Val != nil {
 		return r.Val, true

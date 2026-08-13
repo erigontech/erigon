@@ -1613,10 +1613,9 @@ func TestCalcFees_EmitsAddressPathForCoinbase(t *testing.T) {
 }
 
 // An invalidated tx leaves an Estimate SELFDESTRUCT and its Estimate
-// BalancePath=0 sibling behind. Neither may make a zero-tip calcFees read a
-// live coinbase as EIP-161-empty: the delete it emits is merged additively, and
-// the pass that heals the estimate emits nothing to merge over it. The contract
-// arm turns on the destruct scan, the balance-only arm on the balance floor.
+// BalancePath=0 sibling behind, and neither may make a zero-tip calcFees read a
+// live coinbase as EIP-161-empty. The contract arm turns on the destruct scan,
+// the balance-only arm on the balance floor.
 func TestCalcFees_EstimateDestructDoesNotPruneCoinbase(t *testing.T) {
 	t.Parallel()
 	code := []byte{0x60, 0x00}

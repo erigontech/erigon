@@ -170,18 +170,14 @@ func TestSelfDestructReceive(t *testing.T) {
 
 }
 
-// TestSelfDestructReceiveAccountRecord is TestSelfDestructReceive's scenario —
-// self-destruct then revive by value transfer in one block — read back as a whole
-// account rather than through GetCode. The reconstruction readers resolve the
-// account record separately from code, so a stale code hash survives there even
-// when GetCode already reports empty.
+// TestSelfDestructReceive's scenario — self-destruct then revive by value
+// transfer in one block — read back as a whole account rather than through
+// GetCode, which resolves separately and can already report empty while a stale
+// code hash survives on the record. The parallel reader's answer has to match
+// what serial commits, and a pre-block deploy leaves it no in-block CodeHash
+// cell to floor the destruct scan on, so both axes run.
 //
-// Both executors run it, since versionedStateReader is on the parallel path only
-// and its answer has to match what the serial path commits. Both deploy
-// placements run it too: a contract deployed in an earlier block leaves the
-// reader no in-block CodeHash cell to floor the destruct scan on.
-//
-// Executor choice is dbg.Exec3Parallel || cfg.experimentalBAL, and
+// Executor choice is dbg.Exec3Parallel || cfg.experimentalBAL and
 // Exec3Parallel defaults true, so the driver has to flip it — clearing
 // experimentalBAL alone leaves the parallel executor running. Not safe to
 // t.Parallel.
@@ -270,11 +266,10 @@ func TestSelfDestructReceiveAccountRecord(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, accounts.EmptyCodeHash, hash, "the code hash must agree with the code")
 
-				// The destruct deleted the account, so the transfer recreates it at
-				// nonce 0. The parallel executor keeps the pre-destruct nonce when the
-				// deploy is in the same block — erigontech/erigon#23206, a writeset
-				// normalization divergence these readers do not decide. Assert what is
-				// settled rather than pinning that value as the expected one.
+				// The transfer recreates the deleted account at nonce 0. Parallel keeps
+				// the pre-destruct nonce when the deploy is in the same block — a
+				// writeset normalization divergence these readers do not decide, so
+				// that arm asserts nothing rather than pinning it. erigontech/erigon#23206
 				if !tc.parallel || tc.preBlockDeploy {
 					nonce, err := st.GetNonce(addr)
 					require.NoError(t, err)

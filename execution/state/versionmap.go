@@ -695,9 +695,8 @@ func (vm *VersionMap) readCodeLive(addr accounts.Address, txIdx int) (accounts.C
 
 // liveStorage reports whether addr holds a non-zero slot visible at txIdx that an
 // in-block destruct did not erase, and whether such a destruct erased the
-// pre-block slots too. With no key to floor on it has to weigh the values: a zero
-// write above the destruct leaves the account with no storage just as an erased
-// slot does.
+// pre-block slots too. With no key to floor on it weighs the values: a zero write
+// above the destruct leaves the account with no storage just as an erased slot.
 func (vm *VersionMap) liveStorage(addr accounts.Address, txIdx int) (bool, bool) {
 	if vm == nil {
 		return false, false
@@ -730,8 +729,7 @@ func selfDestructWipesLocked(e *AddressEntry, path AccountPath, floor, txIdx int
 }
 
 // AnyEstimateAccountCell reports whether the account record addr reads at txIdx
-// rests on a write from an in-flight incarnation, on any of the paths an
-// EIP-161 emptiness verdict is drawn from.
+// rests on an in-flight incarnation, across the paths an emptiness verdict uses.
 func (vm *VersionMap) AnyEstimateAccountCell(addr accounts.Address, txIdx int) bool {
 	if vm == nil {
 		return false
@@ -867,10 +865,9 @@ func (vm *VersionMap) FindDoneSelfDestructInRange(addr accounts.Address, lo, hi 
 }
 
 // findDoneSelfDestructLocked is the destruct scan every consumer shares, for
-// callers already holding e.mu. Estimate cells do not count: the readers built
-// on it record no read, so a verdict taken off an in-flight incarnation is never
-// re-checked, and the EIP-161 delete it can produce cannot be pulled back out of
-// an already-merged write set.
+// callers already holding e.mu. Estimate cells do not count: the readers built on
+// it record no read, and the EIP-161 delete a wrong verdict produces cannot be
+// pulled back out of an already-merged write set.
 func findDoneSelfDestructLocked(e *AddressEntry, lo, hi int, target bool) (Version, bool) {
 	if e.SelfDestruct == nil {
 		return Version{}, false

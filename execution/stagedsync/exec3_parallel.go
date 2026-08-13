@@ -2040,10 +2040,8 @@ func (result *execResult) calcFees(
 	// must respect those writes — otherwise SelfDestructPath is emitted
 	// and Normalize's sdSet filter drops them.
 	//
-	// The delete is also the one write here that cannot be taken back: merging is
-	// additive and the pass that heals an estimate emits nothing to merge over it.
-	// So an emptiness read off an in-flight incarnation is left to the pass that
-	// commits this tx, where every prior write is committed.
+	// The delete cannot be taken back either, so an emptiness resting on an
+	// in-flight incarnation waits for the pass that commits this tx.
 	coinbaseEmptyPre := (coinbaseAcc == nil || coinbaseAcc.Balance.IsZero()) &&
 		coinbaseNonce == 0 && coinbaseEmptyCodeHash && !coinbaseHasCodeHashWrite &&
 		!vm.AnyEstimateAccountCell(result.Coinbase, txIndex)
