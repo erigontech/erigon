@@ -120,7 +120,29 @@ func (p *Provider) ensureHistoryForUnwindWalk(ctx context.Context, opts UnwindOp
 
 	needed := neededPreverifiedHistoryForWalk(cfg.Preverified.Items, baselineStep, walkEndStep, stepSize)
 	if len(needed) == 0 {
-		return noop, nil
+		// File starvation is a first-class error, not a silent noop:
+		// the walk range is non-empty but the preverified registry has
+		// no history entries covering it. Aborting the unwind here is
+		// strictly better than letting the compute run against missing
+		// history (0 touches → baseline root returned unchanged →
+		// header mismatch cascade). Recovery is a config problem —
+		// either the source publisher class lacks history retention
+		// (add an archive publisher) or the preverified registry is
+		// stale (LoadRemotePreverified didn't repopulate).
+		return noop, fmt.Errorf(
+			"history starvation: walk range (%d, %d] × {accounts,storage,code} is non-empty but the preverified registry has no history entries covering it (baseline=%d walkEnd=%d spanSteps=%d)",
+			baselineStep, walkEndStep, baselineStep, walkEndStep, walkEndStep-baselineStep)
+	}
+
+	// Per-domain coverage check: for each walked step in (baselineStep,
+	// walkEndStep], every walk domain (accounts, storage, code) must have
+	// at least one preverified history file whose step range covers that
+	// step. Missing coverage for any (domain, step) tuple is starvation —
+	// abort loud before wasting the download round-trip.
+	if missingCoverage := findStarvedCoverage(needed, baselineStep, walkEndStep); len(missingCoverage) > 0 {
+		return noop, fmt.Errorf(
+			"history starvation: preverified coverage gaps in walk range (%d, %d]: %s",
+			baselineStep, walkEndStep, strings.Join(missingCoverage, ", "))
 	}
 
 	missing, downloadedPaths, downloadedNames := filterMissingOnDisk(needed, p.snapDir)
@@ -229,6 +251,87 @@ func localCommitmentBaselineStep(snapDir string, walkEndStep, stepSize uint64) (
 		}
 	}
 	return best, found
+}
+
+// findStarvedCoverage enumerates every (domain, step) tuple in the
+// walk range and returns the list of tuples for which `needed` has no
+// covering history entry. Empty return means full coverage. A non-empty
+// return means the preverified registry can't satisfy the walk — the
+// caller should abort the unwind loudly instead of proceeding with a
+// partial download that would leave the compute short of touches.
+//
+// The domain assumption mirrors ensureHistoryForUnwindWalk: the mode-B
+// compute walks accounts, storage, and code history. Non-walked
+// domains (receipt, rcache) are excluded — their coverage is not the
+// mode-B compute's business.
+func findStarvedCoverage(needed []snapcfg.PreverifiedItem, baselineStep, walkEndStep uint64) []string {
+	type key struct {
+		domain string
+		step   uint64
+	}
+	covered := make(map[key]struct{}, len(needed))
+	for _, item := range needed {
+		domain := historyDomainOf(item.Name)
+		if domain == "" {
+			continue
+		}
+		fromStep, toStep, ok := parseStateFileStepRange(item.Name, stepSizeFromName(item.Name))
+		if !ok {
+			continue
+		}
+		for s := fromStep; s < toStep; s++ {
+			if s <= baselineStep || s > walkEndStep {
+				continue
+			}
+			covered[key{domain: domain, step: s}] = struct{}{}
+		}
+	}
+	var missing []string
+	for domain := range walkDomains {
+		for s := baselineStep + 1; s <= walkEndStep; s++ {
+			if _, ok := covered[key{domain: domain, step: s}]; ok {
+				continue
+			}
+			missing = append(missing, fmt.Sprintf("%s@%d", domain, s))
+		}
+	}
+	return missing
+}
+
+// historyDomainOf extracts the domain segment ("accounts"/"storage"/
+// "code"/…) from a preverified history-file name like
+// "history/v2.1-accounts.307-308.v". Returns "" when the name doesn't
+// parse or when the domain isn't in the walk set.
+func historyDomainOf(name string) string {
+	base := filepath.Base(name)
+	_, after, ok := strings.Cut(base, "-")
+	if !ok {
+		return ""
+	}
+	dot := strings.IndexByte(after, '.')
+	if dot <= 0 {
+		return ""
+	}
+	dom := after[:dot]
+	if _, ok := walkDomains[dom]; !ok {
+		return ""
+	}
+	return dom
+}
+
+// stepSizeFromName is a small shim so findStarvedCoverage can reuse
+// parseStateFileStepRange without threading the Aggregator step size
+// through every helper. Pre-v4.0 names carry step indices directly;
+// v4.0+ names carry raw txNums but the aggregator step size is the
+// authoritative divisor. Callers of findStarvedCoverage today only
+// pass v2.x/v3.x names — the pre-v4 path — where the divisor is unused.
+func stepSizeFromName(name string) uint64 {
+	// parseStateFileStepRange short-circuits on Version.Cmp < TxNumNamingPivot
+	// and returns From/To directly; the stepSize argument is only consulted
+	// on the v4+ branch. Return 1 as a safe non-zero sentinel to avoid a
+	// false "no ok" return there — findStarvedCoverage's caller ignores
+	// the v4+ items today because they don't appear in walk-history sets.
+	return 1
 }
 
 // neededPreverifiedHistoryForWalk returns preverified items that

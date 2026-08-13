@@ -120,11 +120,26 @@ run_leg_m() {
   fi
   wait_publisher_tip || return 1
 
-  eval "$(scripts/publisher-info.sh)"
-  echo "[continuous-soak] publisher ENR=$ENR" >"$out/publisher-info.txt"
-  echo "[continuous-soak] publisher TRUST_ROOT=$TRUST_ROOT" >>"$out/publisher-info.txt"
+  eval "$(scripts/publisher-info.sh master)"
+  echo "[continuous-soak] master ENR=$ENR" >"$out/publisher-info.txt"
+  echo "[continuous-soak] master TRUST_ROOT=$TRUST_ROOT" >>"$out/publisher-info.txt"
 
-  PUBLISHER_ENR="$ENR" PUBLISHER_TRUST_ROOT="$TRUST_ROOT" \
+  # Archive publisher (optional): serves deep-history .v/.ef so mode-B
+  # unwinds past the master's retention can pull the needed files via
+  # chain.toml aggregation. Skip silently when the archive publisher
+  # isn't running — leg-M then tests the minimal-only class alone.
+  ARCHIVE_ENV=""
+  if archive_info=$(scripts/publisher-info.sh archive 2>/dev/null); then
+    eval "$archive_info"
+    echo "[continuous-soak] archive ENR=$ARCHIVE_ENR" >>"$out/publisher-info.txt"
+    echo "[continuous-soak] archive TRUST_ROOT=$ARCHIVE_TRUST_ROOT" >>"$out/publisher-info.txt"
+    ARCHIVE_ENV="ARCHIVE_ENR=$ARCHIVE_ENR ARCHIVE_TRUST_ROOT=$ARCHIVE_TRUST_ROOT"
+  else
+    echo "[continuous-soak] archive publisher not running; leg-M with master only" >>"$out/publisher-info.txt"
+  fi
+
+  env PUBLISHER_ENR="$ENR" PUBLISHER_TRUST_ROOT="$TRUST_ROOT" \
+    ${ARCHIVE_ENV:+ARCHIVE_ENR="$ARCHIVE_ENR" ARCHIVE_TRUST_ROOT="$ARCHIVE_TRUST_ROOT"} \
     ITER="$ITER" RANDOMIZE_DEPTHS="$RANDOMIZE_DEPTHS" \
     LAUNCH_CMD=scripts/erigon-launch-hoodi-soak.sh \
     DATADIR=/erigon/tmp/erigon-hoodi-soak.continuous \

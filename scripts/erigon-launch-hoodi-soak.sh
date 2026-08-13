@@ -15,6 +15,12 @@
 #   discovery MUST succeed via the publisher — no preverified fallback
 #   should fire. The soak wrapper post-checks the log for the fallback
 #   line and fails the leg if it appears.
+#
+#   Optional second publisher (ARCHIVE_ENR + ARCHIVE_TRUST_ROOT set):
+#   also staticpeer a full-history publisher so mode-B unwinds deeper
+#   than the minimal publisher's retention can pull the needed .v/.ef
+#   files on-demand via chain.toml aggregation. Trust-roots is a
+#   comma-separated list; both keys get pinned.
 
 set -u
 
@@ -35,14 +41,38 @@ export USE_STATE_CACHE=false
 # peer propagation.
 export ERIGON_MERGE_MIN_AGE_STEPS="${ERIGON_MERGE_MIN_AGE_STEPS:-6}"
 
-# leg-M extras: bind the consumer to the local publisher and pin its
-# trust root. Empty in leg P.
-EXTRA_ARGS=()
+# leg-M extras: bind the consumer to the local publisher(s) and pin
+# trust root(s). Empty in leg P. When both master and archive
+# publishers are running the consumer needs BOTH: master for tip
+# freshness, archive for deep-history .v/.ef files.
+STATICPEERS=""
 if [[ -n "${PUBLISHER_ENR:-}" ]]; then
-  EXTRA_ARGS+=(--staticpeers="$PUBLISHER_ENR")
+  STATICPEERS="$PUBLISHER_ENR"
 fi
+if [[ -n "${ARCHIVE_ENR:-}" ]]; then
+  if [[ -n "$STATICPEERS" ]]; then
+    STATICPEERS="$STATICPEERS,$ARCHIVE_ENR"
+  else
+    STATICPEERS="$ARCHIVE_ENR"
+  fi
+fi
+TRUST_ROOTS=""
 if [[ -n "${PUBLISHER_TRUST_ROOT:-}" ]]; then
-  EXTRA_ARGS+=(--snapshot.trust-roots="$PUBLISHER_TRUST_ROOT")
+  TRUST_ROOTS="$PUBLISHER_TRUST_ROOT"
+fi
+if [[ -n "${ARCHIVE_TRUST_ROOT:-}" ]]; then
+  if [[ -n "$TRUST_ROOTS" ]]; then
+    TRUST_ROOTS="$TRUST_ROOTS,$ARCHIVE_TRUST_ROOT"
+  else
+    TRUST_ROOTS="$ARCHIVE_TRUST_ROOT"
+  fi
+fi
+EXTRA_ARGS=()
+if [[ -n "$STATICPEERS" ]]; then
+  EXTRA_ARGS+=(--staticpeers="$STATICPEERS")
+fi
+if [[ -n "$TRUST_ROOTS" ]]; then
+  EXTRA_ARGS+=(--snapshot.trust-roots="$TRUST_ROOTS")
 fi
 
 exec "$BIN" \
