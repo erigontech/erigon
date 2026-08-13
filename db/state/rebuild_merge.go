@@ -18,10 +18,9 @@ package state
 
 import (
 	"context"
+	"math/bits"
 
-	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/execution/commitment"
 )
 
 // keepCommitmentMergeOnly holds every domain but commitment. A rebuild shard runs
@@ -77,23 +76,30 @@ func (a *Aggregator) mergeCommitmentStep(ctx context.Context, toTxNum uint64) (s
 	return true, nil
 }
 
-// rebuildShardMaxSteps sizes a rebuild shard for the machine. A shard holds its
-// whole key slice in memory before dumping, so the step count tracks RAM. Tiers
-// sit below the nominal sizes because a box reports less than it is sold with,
-// and the top one is clamped: past it the range becomes too few, too large shards
-// to recover from an interrupted run cheaply.
-func rebuildShardMaxSteps(totalMemory uint64) uint64 {
-	const gb = uint64(1) << 30
-	for _, tier := range []struct{ atLeast, steps uint64 }{
-		{384 * gb, 512},
-		{192 * gb, 256},
-		{96 * gb, 128},
-	} {
-		if totalMemory >= tier.atLeast {
-			return tier.steps
-		}
+// rebuildShardSteps sizes a shard from the memory on the machine and the key
+// density of the range it covers. The range itself is the only upper bound: a
+// constant one puts a wide enough range back into the many-shard regime however
+// large the box, which is the cost sharding exists to avoid in the first place.
+//
+// The budget charges a shard for every key it walks, well above the marginal
+// cost measured on mainnet, so it errs towards more and smaller shards.
+func rebuildShardSteps(totalMemory, stepsInRange, keysPerStep uint64) uint64 {
+	const bytesPerKey = 1400
+
+	stepsInRange = prevPowerOfTwo(stepsInRange)
+	if stepsInRange == 0 {
+		return 1
 	}
-	return commitment.DefaultRebuildShardMaxSteps
+	if keysPerStep == 0 {
+		return stepsInRange
+	}
+	steps := prevPowerOfTwo(totalMemory / 2 / (bytesPerKey * keysPerStep))
+	return min(max(steps, 1), stepsInRange)
 }
 
-func defaultRebuildShardMaxSteps() uint64 { return rebuildShardMaxSteps(estimate.TotalMemory()) }
+func prevPowerOfTwo(n uint64) uint64 {
+	if n == 0 {
+		return 0
+	}
+	return uint64(1) << (bits.Len64(n) - 1)
+}

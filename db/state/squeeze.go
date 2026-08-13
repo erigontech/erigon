@@ -920,9 +920,6 @@ func (t RebuildTarget) Resolve() (RebuildTarget, error) {
 	default:
 		return RebuildTarget{}, fmt.Errorf("commitment rebuild: unknown trie variant %q", t.Variant)
 	}
-	if t.MaxShardSteps == 0 {
-		t.MaxShardSteps = defaultRebuildShardMaxSteps()
-	}
 	return t, nil
 }
 
@@ -1057,9 +1054,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	// variant enables it explicitly. Variant is set per-iteration in the inner loop.
 	rebuildTrieCfg := commitment.DefaultTrieConfig()
 	rebuildTrieCfg.EnableTrieWarmup = false
-	maxShardSteps := target.MaxShardSteps
-	logger.Info("[commitment_rebuild] shard sizing", "maxShardSteps", maxShardSteps,
-		"totalMemory", common.ByteCount(estimate.TotalMemory()))
+	totalMemory := estimate.TotalMemory()
 
 	var totalKeysCommitted uint64
 
@@ -1089,7 +1084,14 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		stepsInShard := uint64(shardTo - shardFrom)
 		keysPerStep := totalKeys / stepsInShard // how many keys in just one step?
 
-		shardStepsSize := kv.Step(min(uint64(math.Pow(2, math.Log2(float64(stepsInShard)))), maxShardSteps))
+		shardSteps := rebuildShardSteps(totalMemory, stepsInShard, keysPerStep)
+		if target.MaxShardSteps != 0 {
+			shardSteps = min(target.MaxShardSteps, prevPowerOfTwo(stepsInShard))
+		}
+		logger.Info("[commitment_rebuild] shard sizing", "shardSteps", shardSteps,
+			"stepsInRange", stepsInShard, "keysPerStep", keysPerStep,
+			"totalMemory", common.ByteCount(totalMemory))
+		shardStepsSize := kv.Step(shardSteps)
 		if uint64(shardStepsSize) != stepsInShard { // processing shard in several smaller steps
 			shardTo = shardFrom + shardStepsSize // if shard is quite big, we will process it in several steps
 		}
