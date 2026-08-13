@@ -23,11 +23,14 @@ import (
 )
 
 const prefixSlabSize = 16384
+const prefixExtChunkSize = 64 * 1024
 
 // prefixNode is a path-compressed prefix-trie node keyed on nibbles (each ext byte is one nibble 0x00..0x0F).
 // children is dense: len == popcount(bitmap). subtreeCount is the number of distinct keys in the
 // subtree; re-inserting an existing key merges its update without bumping it.
 type prefixNode struct {
+	// ext is arena-backed: it stays valid only until the owning trie's Reset, which
+	// recycles the chunk in place. A reader that must outlive the batch copies it.
 	ext          []byte
 	children     []*prefixNode
 	plainKey     []byte  // set only where a key terminates
@@ -41,15 +44,20 @@ type prefixSlab struct {
 	nodes [prefixSlabSize]prefixNode
 }
 
-// prefixArena bump-allocates prefixNodes from a list of slabs.
+// prefixArena bump-allocates prefixNodes from a list of slabs and leaf extensions from a list of byte chunks.
 type prefixArena struct {
-	slabs   []*prefixSlab
-	slabIdx int
-	nextIdx int
+	slabs       []*prefixSlab
+	slabIdx     int
+	nextIdx     int
+	extChunks   [][]byte
+	extChunkIdx int
 }
 
 func newPrefixArena() *prefixArena {
-	return &prefixArena{slabs: []*prefixSlab{new(prefixSlab)}}
+	return &prefixArena{
+		slabs:     []*prefixSlab{new(prefixSlab)},
+		extChunks: [][]byte{make([]byte, 0, prefixExtChunkSize)},
+	}
 }
 
 func (a *prefixArena) allocNode() *prefixNode {
@@ -66,7 +74,34 @@ func (a *prefixArena) allocNode() *prefixNode {
 	return n
 }
 
-// resetArena clears touched nodes for reuse, keeping the first slab and releasing the rest.
+// allocExt copies b into the current chunk, swapping in a fresh chunk instead of growing this one
+// so sub-slices already handed out keep their backing array. An extension larger than a chunk gets
+// its own allocation rather than forcing a chunk to grow under live sub-slices.
+func (a *prefixArena) allocExt(b []byte) []byte {
+	if len(b) == 0 {
+		return nil
+	}
+	if len(b) > prefixExtChunkSize {
+		own := make([]byte, len(b))
+		copy(own, b)
+		return own
+	}
+	chunk := a.extChunks[a.extChunkIdx]
+	if cap(chunk)-len(chunk) < len(b) {
+		a.extChunkIdx++
+		if a.extChunkIdx >= len(a.extChunks) {
+			a.extChunks = append(a.extChunks, make([]byte, 0, prefixExtChunkSize))
+		}
+		chunk = a.extChunks[a.extChunkIdx]
+	}
+	off := len(chunk)
+	chunk = append(chunk, b...)
+	a.extChunks[a.extChunkIdx] = chunk
+	return chunk[off:len(chunk):len(chunk)]
+}
+
+// resetArena clears touched nodes for reuse, keeping the first slab and releasing the rest, and
+// truncates the extension chunks in place so the next batch refills them without reallocating.
 func (a *prefixArena) resetArena() {
 	for i := 0; i <= a.slabIdx && i < len(a.slabs); i++ {
 		limit := prefixSlabSize
@@ -80,6 +115,11 @@ func (a *prefixArena) resetArena() {
 	a.slabs = a.slabs[:1]
 	a.slabIdx = 0
 	a.nextIdx = 0
+
+	for i := range a.extChunks {
+		a.extChunks[i] = a.extChunks[i][:0]
+	}
+	a.extChunkIdx = 0
 }
 
 func (a *prefixArena) nodeCount() int {
@@ -149,7 +189,7 @@ func (t *prefixTrie) Insert(hashedKey, plainKey []byte, update *Update) (isNew b
 			node.plainKey = nil
 			node.update = nil
 
-			node.ext = oldExt[:m]
+			node.ext = oldExt[:m:m]
 
 			if m == len(remain) {
 				// Key ends inside the old extension: one child, no new sibling.
@@ -163,7 +203,7 @@ func (t *prefixTrie) Insert(hashedKey, plainKey []byte, update *Update) (isNew b
 
 			newLeaf := t.arena.allocNode()
 			newNib := remain[m]
-			newLeaf.ext = append([]byte(nil), remain[m+1:]...)
+			newLeaf.ext = t.arena.allocExt(remain[m+1:])
 			newLeaf.subtreeCount = 1
 			newLeaf.plainKey = plainKey
 			newLeaf.update = update
@@ -204,7 +244,7 @@ func (t *prefixTrie) Insert(hashedKey, plainKey []byte, update *Update) (isNew b
 		idx, ok := childIndex(node, nib)
 		if !ok {
 			newLeaf := t.arena.allocNode()
-			newLeaf.ext = append([]byte(nil), hashedKey[keyOffset+1:]...)
+			newLeaf.ext = t.arena.allocExt(hashedKey[keyOffset+1:])
 			newLeaf.subtreeCount = 1
 			newLeaf.plainKey = plainKey
 			newLeaf.update = update

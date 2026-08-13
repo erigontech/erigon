@@ -264,6 +264,126 @@ func TestApplyWrites_BalancePathClearsDeleted(t *testing.T) {
 	assert.Equal(t, uint64(42), acc.Balance.Uint64())
 }
 
+// countingBaselineReader counts calcState's baseline reads.
+type countingBaselineReader struct {
+	reads int
+	acc   *accounts.Account
+}
+
+func (r *countingBaselineReader) ReadAccountData(accounts.Address) (*accounts.Account, error) {
+	r.reads++
+	return r.acc, nil
+}
+
+// TestApplyWrites_SkipsBaselineReadWhenWritesCoverAccount: writes carrying
+// balance, nonce and codeHash overwrite every field the baseline read supplies.
+func TestApplyWrites_SkipsBaselineReadWhenWritesCoverAccount(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xe1})
+	reader := &countingBaselineReader{acc: &accounts.Account{
+		Nonce:   7,
+		Balance: *uint256.NewInt(99),
+	}}
+	cs := newTestCalcState()
+	cs.domainReader = reader
+
+	codeHash := accounts.InternCodeHash(common.Hash{0xab})
+	writes := newWS().
+		bal(addr, state.Version{}, *uint256.NewInt(5)).
+		nonce(addr, state.Version{}, 3).
+		codeHash(addr, state.Version{}, codeHash).
+		build()
+	cs.ApplyWrites(writes, false)
+
+	assert.Equal(t, 0, reader.reads, "writes cover balance/nonce/codeHash — the baseline read is dead")
+
+	acc, ok := cs.accounts[addr]
+	require.True(t, ok)
+	assert.Equal(t, uint64(5), acc.Balance.Uint64())
+	assert.Equal(t, uint64(3), acc.Nonce)
+	assert.Equal(t, [32]byte(common.Hash{0xab}), acc.CodeHash)
+}
+
+// TestApplyWrites_ReadsBaselineWhenWritesIncomplete: a missing field must still
+// load, else it would flush as zero.
+func TestApplyWrites_ReadsBaselineWhenWritesIncomplete(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xe2})
+	reader := &countingBaselineReader{acc: &accounts.Account{
+		Nonce:   7,
+		Balance: *uint256.NewInt(99),
+	}}
+	cs := newTestCalcState()
+	cs.domainReader = reader
+
+	writes := newWS().bal(addr, state.Version{}, *uint256.NewInt(5)).build()
+	cs.ApplyWrites(writes, false)
+
+	assert.Equal(t, 1, reader.reads, "nonce and codeHash are not in the writes — they must come from the domain")
+
+	acc, ok := cs.accounts[addr]
+	require.True(t, ok)
+	assert.Equal(t, uint64(5), acc.Balance.Uint64(), "the write wins over the baseline")
+	assert.Equal(t, uint64(7), acc.Nonce, "the untouched nonce comes from the baseline")
+}
+
+// TestApplyWrites_ReadsBaselineForSelfDestruct: Normalize drops the SD'd
+// address's nonce/codeHash, and an EIP-8246 residual balance revives the
+// account — which then flushes those baseline fields.
+func TestApplyWrites_ReadsBaselineForSelfDestruct(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xe3})
+	reader := &countingBaselineReader{acc: &accounts.Account{
+		Nonce:   7,
+		Balance: *uint256.NewInt(99),
+	}}
+	cs := newTestCalcState()
+	cs.domainReader = reader
+
+	writes := newWS().
+		selfDestruct(addr, state.Version{}, true).
+		bal(addr, state.Version{}, *uint256.NewInt(42)).
+		build()
+	cs.ApplyWrites(writes, true /*eip8246*/)
+
+	assert.Equal(t, 1, reader.reads, "a self-destructed address has no nonce/codeHash write to cover it")
+
+	acc, ok := cs.accounts[addr]
+	require.True(t, ok)
+	assert.False(t, acc.Deleted, "a non-zero residual balance revives the account")
+	assert.Equal(t, uint64(7), acc.Nonce, "the revived account keeps its baseline nonce")
+}
+
+// TestNormalizeCoversBaseline pins the coupling the skip relies on: Normalize
+// fills all three fields whatever the raw write set held. If this stops
+// holding, the skip silently stops firing.
+func TestNormalizeCoversBaseline(t *testing.T) {
+	balanceOnly := accounts.InternAddress([20]byte{0xf1})
+	storageOnly := accounts.InternAddress([20]byte{0xf2})
+	slot := accounts.InternKey(common.Hash{0x01})
+
+	raw := newWS().
+		bal(balanceOnly, state.Version{}, *uint256.NewInt(11)).
+		stor(storageOnly, slot, state.Version{}, *uint256.NewInt(22)).
+		build()
+
+	// Non-empty pre-block account, else EIP-161 removal strips the fields.
+	reader := &everyAddrReader{acc: &accounts.Account{Nonce: 7}}
+	norm, err := raw.Normalize(state.NewVersionMap(nil), 0, 0, reader, nil,
+		true /*emptyRemoval*/, false /*isAura*/, false /*eip8246*/)
+	require.NoError(t, err)
+
+	assert.True(t, writesCoverBaseline(norm, balanceOnly), "a balance-only write comes out with nonce and codeHash filled")
+	assert.True(t, writesCoverBaseline(norm, storageOnly), "a storage-only address gets its account fields filled too")
+}
+
+// everyAddrReader serves the same pre-block account for every address.
+type everyAddrReader struct {
+	preBlockReader
+	acc *accounts.Account
+}
+
+func (r *everyAddrReader) ReadAccountData(accounts.Address) (*accounts.Account, error) {
+	return r.acc, nil
+}
+
 // preBlockReader is a minimal StateReader stub for the integration test
 // below — returns the configured pre-block account for a single address.
 type preBlockReader struct {

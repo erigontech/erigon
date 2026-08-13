@@ -971,8 +971,9 @@ func TestGetModifiedAccountsByNumber(t *testing.T) {
 		result, err = api.GetModifiedAccountsByNumber(m.Ctx, rpc.FinalizedBlockNumber, nil)
 		require.NoError(t, err)
 		require.NotEmpty(t, result)
+	})
 
-		// Non-nil filters with a LastPendingBlock exceeding latest executed block should return an error
+	t.Run("pending tag uses committed view", func(t *testing.T) {
 		ff := rpchelper.New(t.Context(), rpchelper.FiltersConfig{}, nil, nil, nil, func() {}, log.New(), nil)
 		pendingBlock := types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(100)})
 		payload, err := rlp.EncodeToBytes(pendingBlock)
@@ -982,8 +983,9 @@ func TestGetModifiedAccountsByNumber(t *testing.T) {
 		baseWithFilters := NewBaseApi(ff, m.StateCache, m.BlockReader, m.Engine, nil, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 		apiWithFilters := NewPrivateDebugAPI(baseWithFilters, m.DB, nil, &rpccfg.DebugApiConfig{})
 
-		_, err = apiWithFilters.GetModifiedAccountsByNumber(m.Ctx, rpc.PendingBlockNumber, nil)
-		require.Error(t, err)
+		result, err := apiWithFilters.GetModifiedAccountsByNumber(m.Ctx, rpc.PendingBlockNumber, nil)
+		require.NoError(t, err)
+		require.NotEmpty(t, result)
 	})
 }
 
