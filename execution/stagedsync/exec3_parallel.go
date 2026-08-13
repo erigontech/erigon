@@ -350,9 +350,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	// EnablePrevBlockReads(pe.prevBlocks), and a nil registry panics on the first
 	// per-task SetBlock. run() resets workers on its own goroutine, so setting this
 	// after run() is a race.
-	if prevBlockReads {
-		pe.prevBlocks = state.NewPrevBlockList()
-	}
+	pe.prevBlocks = state.NewPrevBlockList()
 
 	executorContext, executorCancel, err := pe.run(ctx)
 	defer executorCancel(nil)
@@ -772,9 +770,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						// This block's writes are now in the shared domain: drop it from
 						// the tail of the prev-block list so later blocks read it from the
 						// domain (fire-and-forget — readers never block on this).
-						if prevBlockReads {
-							pe.prevBlocks.RemoveTail()
-						}
+						pe.prevBlocks.RemoveTail()
 					}
 					// StartChange + NotifyAccumulator must both run in the apply
 					// goroutine — keeps all accumulator access single-threaded
@@ -1041,9 +1037,7 @@ func (pe *parallelExecutor) resetWorkers(ctx context.Context, rs *state.StateV3B
 	for _, worker := range pe.execWorkers {
 		// parallel workers hold thier own tx don't pass in an externals tx
 		worker.ResetState(rs, nil, nil, state.NewLightCollector(), nil)
-		if prevBlockReads {
-			worker.EnablePrevBlockReads(pe.prevBlocks)
-		}
+		worker.EnablePrevBlockReads(pe.prevBlocks)
 	}
 
 	return nil
@@ -1056,9 +1050,7 @@ func (pe *parallelExecutor) newExecWorker() *exec.WorkerContext {
 	w := exec.NewWorkerContext(pe.workersCtx, true, pe.taskExecMetrics, pe.cfg.db,
 		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine, pe.cfg.dirs, pe.logger)
 	_ = w.ResetState(pe.rs, nil, nil, state.NewLightCollector(), nil)
-	if prevBlockReads {
-		w.EnablePrevBlockReads(pe.prevBlocks)
-	}
+	w.EnablePrevBlockReads(pe.prevBlocks)
 	pe.mintMu.Lock()
 	pe.mintedWorkers = append(pe.mintedWorkers, w)
 	pe.mintMu.Unlock()
@@ -1072,9 +1064,6 @@ func (pe *parallelExecutor) newExecWorker() *exec.WorkerContext {
 // materialization reads a stale sd.mem base and writes a stale account into the
 // current block's versionMap.
 func (pe *parallelExecutor) prevBlockBase(raw state.StateReader, blockNum uint64) state.StateReader {
-	if !prevBlockReads {
-		return raw
-	}
 	return state.PrevBlockBase(raw, pe.prevBlocks, blockNum)
 }
 
@@ -1918,16 +1907,6 @@ type txResult struct {
 }
 
 
-// prevBlockReads reads each block's committed base through the finished-but-not-
-// yet-committed prior blocks' versionMaps, so under splitApply (exec off sd.mem)
-// block N+1 reads N's writes from N's map before apply commits them to the shared
-// domain — without it N+1 reads a stale sd.mem base and fails "nonce too high".
-// Requires splitApply (the commit that drops a block from the list is the fold).
-var prevBlockReads = dbg.EnvBool("PREV_BLOCK_READS", false)
-
-
-
-
 
 // splitApply moves the state apply off the exec loop: the apply loop folds each
 // block's per-tx versionMap views to sd.mem at block end (blockCache=nil→direct
@@ -1945,11 +1924,10 @@ var splitApply = dbg.EnvBool("SPLIT_APPLY", false)
 // at package init from env vars; splitApply alone is not a valid configuration.
 // Test-only; not concurrency-safe (mutates package globals).
 func SetSplitApplyStackForTest() (restore func()) {
-	prev := [3]bool{splitApply, selfLoop, prevBlockReads}
-	splitApply, selfLoop, prevBlockReads = true, true, true
+	prev := [2]bool{splitApply, selfLoop}
+	splitApply, selfLoop = true, true
 	return func() {
-		splitApply, selfLoop, prevBlockReads =
-			prev[0], prev[1], prev[2]
+		splitApply, selfLoop = prev[0], prev[1]
 	}
 }
 
@@ -2767,7 +2745,6 @@ func (ev *taskVersion) Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer
 	ibs.SetVersionMap(ev.versionMap)
 	// Point the per-task reader at this task's block: it reads blocks < this one
 	// (finished, not yet committed to the shared domain) in front of the raw base.
-	// Only present under prevBlockReads (EnablePrevBlockReads installed one).
 	if r, ok := ibs.StateReader().(*state.PrevBlockReader); ok {
 		r.SetBlock(ev.version.BlockNum)
 	}
@@ -4012,9 +3989,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		// The block is fully finalized here: every tx sealed, block-end writes in
 		// the versionMap. Publish it as an overlay so the next block reads its
 		// writes before apply drains them to sd.mem; dropped on commit.
-		if prevBlockReads {
-			pe.prevBlocks.PushHead(be.blockNum, txTask.Version().TxNum, be.versionMap)
-		}
+		pe.prevBlocks.PushHead(be.blockNum, txTask.Version().TxNum, be.versionMap)
 
 		be.result = &blockResult{
 			BlockNum:         be.blockNum,
