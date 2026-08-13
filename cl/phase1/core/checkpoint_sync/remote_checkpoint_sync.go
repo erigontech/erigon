@@ -185,11 +185,15 @@ func (r *RemoteCheckpointSync) fetchEnvelope(ctx context.Context, stateURI strin
 	if err != nil {
 		return nil, fmt.Errorf("finalized envelope read failed: %w", err)
 	}
+	version, err := cltypes.ParseExecutionPayloadEnvelopeVersion(resp.Header.Get("Eth-Consensus-Version"))
+	if err != nil {
+		return nil, fmt.Errorf("finalized envelope consensus version: %w", err)
+	}
 
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{
-		Message: cltypes.NewExecutionPayloadEnvelope(r.beaconConfig),
+		Message: cltypes.NewExecutionPayloadEnvelopeWithVersion(r.beaconConfig, version),
 	}
-	if err := envelope.DecodeSSZStrict(marshaled, int(clparams.GloasVersion)); err != nil {
+	if err := envelope.DecodeSSZStrict(marshaled, int(version)); err != nil {
 		return nil, fmt.Errorf("finalized envelope decode failed: %w", err)
 	}
 	log.Info("[Checkpoint Sync] Finalized envelope retrieved", "beaconBlockRoot", envelope.Message.BeaconBlockRoot)

@@ -285,3 +285,34 @@ func TestEnvelopeHTTPFallbackRejectsMismatchedBlockRoot(t *testing.T) {
 	require.Zero(t, fetched)
 	require.Empty(t, received)
 }
+
+func TestEnvelopeHTTPFallbackRejectsPreGloasVersion(t *testing.T) {
+	block := makeGloasBlock(1, hash(1), hash(2))
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{
+		Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig),
+	}
+	envelope.Message.BeaconBlockRoot = root
+	encoded, err := envelope.EncodeSSZ(nil)
+	require.NoError(t, err)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Eth-Consensus-Version", clparams.FuluVersion.String())
+		_, _ = w.Write(encoded)
+	}))
+	defer server.Close()
+
+	downloader := &BackwardBeaconDownloader{
+		httpFallbackURL: server.URL,
+		beaconCfg:       &clparams.MainnetBeaconConfig,
+	}
+	_, err = downloader.fetchSingleEnvelope(context.Background(), block)
+	require.ErrorContains(t, err, "consensus version")
+
+	received := map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{}
+	fetched := fetchEnvelopesFromBeaconAPI(
+		context.Background(), server.URL, []*cltypes.SignedBeaconBlock{block}, [][32]byte{root}, received, &clparams.MainnetBeaconConfig,
+	)
+	require.Zero(t, fetched)
+	require.Empty(t, received)
+}

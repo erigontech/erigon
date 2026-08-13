@@ -69,6 +69,11 @@ func NewStaticProgressiveListSSZ[T EncodableHashableSSZ](limit int, bytesPerElem
 	return &ListSSZ[T]{list: make([]T, 0), limit: progressiveDecodeLimit(limit), static: true, bytesPerElement: bytesPerElement, progressive: true}
 }
 
+// NewStaticProgressiveListSSZWithDecodeLimit creates a progressive list with an explicit resource guard.
+func NewStaticProgressiveListSSZWithDecodeLimit[T EncodableHashableSSZ](decodeLimit int, bytesPerElement int) *ListSSZ[T] {
+	return &ListSSZ[T]{list: make([]T, 0), limit: decodeLimit, static: true, bytesPerElement: bytesPerElement, progressive: true}
+}
+
 func (l *ListSSZ[T]) EnsureStaticProgressive(limit int, bytesPerElement int) {
 	if l.progressive && l.static && l.bytesPerElement == bytesPerElement {
 		return

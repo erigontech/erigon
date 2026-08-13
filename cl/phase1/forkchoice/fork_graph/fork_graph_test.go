@@ -363,7 +363,7 @@ func TestDumpEnvelopeAtomicallyPersistsReadableFile(t *testing.T) {
 	require.Equal(t, root, persisted.Message.BeaconBlockRoot)
 }
 
-func TestDumpEnvelopePreservesPostGloasVersion(t *testing.T) {
+func TestDumpEnvelopeRejectsUnsupportedVersion(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
 	root := common.HexToHash("0x1234")
@@ -371,11 +371,21 @@ func TestDumpEnvelopePreservesPostGloasVersion(t *testing.T) {
 	version := clparams.GloasVersion + 1
 	envelope := testEnvelopeWithVersion(root, []byte{1, 2, 3}, version)
 
-	require.NoError(t, f.DumpEnvelopeOnDisk(root, envelope))
-	persisted, err := f.ReadEnvelopeFromDisk(root)
+	require.ErrorContains(t, f.DumpEnvelopeOnDisk(root, envelope), "unsupported execution payload envelope consensus version")
+}
+
+func TestReadEnvelopeRejectsUnsupportedFramingVersion(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
+	root := common.HexToHash("0x1234")
+	addEnvelopeTestBlock(f, root, 1)
+	encoded, err := testEnvelopeWithTransaction(root, []byte{1}).EncodeSSZ(nil)
 	require.NoError(t, err)
-	require.Equal(t, version, persisted.Message.Payload.Version())
-	require.Equal(t, version, persisted.Message.ExecutionRequests.Version())
+	writeEnvelopeTestFile(t, fs, root, clparams.GloasVersion+1, encoded)
+
+	_, err = f.ReadEnvelopeFromDisk(root)
+	require.ErrorContains(t, err, "unsupported execution payload envelope consensus version")
+	require.False(t, f.HasEnvelope(root))
 }
 
 func TestDumpEnvelopeRejectsMismatchedNestedVersions(t *testing.T) {
@@ -504,7 +514,7 @@ func TestReadEnvelopeValidatesDecodedEnvelopeAgainstConfig(t *testing.T) {
 	writeEnvelopeTestFile(t, fs, root, clparams.GloasVersion, encoded)
 
 	_, err = f.ReadEnvelopeFromDisk(root)
-	require.ErrorContains(t, err, "list too big")
+	require.ErrorContains(t, err, "withdrawals: list has 17 elements, max 1")
 	require.False(t, f.HasEnvelope(root))
 }
 
@@ -776,7 +786,7 @@ func TestDumpEnvelopeRejectsTooManyTransactionsBeforeWriting(t *testing.T) {
 	require.False(t, exists)
 }
 
-func TestDumpEnvelopeRejectsDepositRepresentationUnreadableByConfiguredDecoder(t *testing.T) {
+func TestDumpEnvelopeAcceptsProtocolValidProgressiveDepositCount(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
 	root := common.HexToHash("0x1234")
@@ -788,10 +798,13 @@ func TestDumpEnvelopeRejectsDepositRepresentationUnreadableByConfiguredDecoder(t
 	}
 
 	err := f.DumpEnvelopeOnDisk(root, envelope)
-	require.ErrorContains(t, err, "decoder resource limit")
+	require.NoError(t, err)
 	exists, existsErr := afero.Exists(fs, getEnvelopeFilename(root))
 	require.NoError(t, existsErr)
-	require.False(t, exists)
+	require.True(t, exists)
+	decoded, err := f.ReadEnvelopeFromDisk(root)
+	require.NoError(t, err)
+	require.Equal(t, 16_385, decoded.Message.ExecutionRequests.Deposits.Len())
 }
 
 func TestDumpEnvelopeRejectsRequestsPastConsensusLimitWithinDecoderGuard(t *testing.T) {

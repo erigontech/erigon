@@ -262,9 +262,9 @@ func (f *forkGraphDisk) readEnvelopeFromDiskLocked(blockRoot common.Hash) (envel
 		return nil, fmt.Errorf("failed to read envelope version: %w, root: %x", err, blockRoot)
 	}
 	version := clparams.StateVersion(versionBytes[0])
-	if version < clparams.GloasVersion {
+	if versionErr := cltypes.ValidateExecutionPayloadEnvelopeVersion(version); versionErr != nil {
 		corrupt = true
-		return nil, fmt.Errorf("corrupt envelope file: version %d predates Gloas, root: %x", version, blockRoot)
+		return nil, fmt.Errorf("corrupt envelope file: %w, root: %x", versionErr, blockRoot)
 	}
 
 	// Read the length
@@ -298,7 +298,7 @@ func (f *forkGraphDisk) readEnvelopeFromDiskLocked(blockRoot common.Hash) (envel
 		return nil, fmt.Errorf("failed to verify envelope end: %w, root: %x", readErr, blockRoot)
 	}
 	envelope = &cltypes.SignedExecutionPayloadEnvelope{
-		Message: cltypes.NewExecutionPayloadEnvelope(f.beaconCfg),
+		Message: cltypes.NewExecutionPayloadEnvelopeWithVersion(f.beaconCfg, version),
 	}
 	if err = envelope.DecodeSSZStrict(f.sszBuffer, int(version)); err != nil {
 		corrupt = true

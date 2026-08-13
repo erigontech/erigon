@@ -417,14 +417,12 @@ func (f *ForkChoiceStore) applyEnvelopeLocked(ctx context.Context, signedEnvelop
 		return false, fmt.Errorf("OnExecutionPayload: failed to verify execution payload: %w", err)
 	}
 
-	// Update eth2Roots mapping for FCU
-	if envelope.Payload != nil {
-		f.eth2Roots.Add(beaconBlockRoot, envelope.Payload.BlockHash)
-	}
-
 	// Persist envelope to disk — this marks the root as "has payload" in store.payloads
 	if err := f.forkGraph.DumpEnvelopeOnDisk(beaconBlockRoot, signedEnvelope); err != nil {
 		return false, fmt.Errorf("OnExecutionPayload: failed to dump envelope: %w", err)
+	}
+	if envelope.Payload != nil {
+		f.eth2Roots.Add(beaconBlockRoot, envelope.Payload.BlockHash)
 	}
 
 	// Invalidate head cache — payload status may have changed from PENDING to FULL.
@@ -498,8 +496,15 @@ func (f *ForkChoiceStore) OnExecutionPayload(ctx context.Context, signedEnvelope
 	// Process envelope under f.mu; DB index write happens after unlock to avoid
 	// deadlock with postForkchoiceOperations (which holds MDBX tx then needs f.mu.RLock).
 	applied, err := f.applyEnvelope(ctx, signedEnvelope, checkBlobData, validatePayload)
-	if err != nil || !applied {
+	if err != nil {
 		return err
+	}
+	if !applied {
+		persisted, err := f.forkGraph.ReadEnvelopeFromDisk(beaconBlockRoot)
+		if err != nil {
+			return fmt.Errorf("OnExecutionPayload: failed to read persisted envelope: %w", err)
+		}
+		envelope = persisted.Message
 	}
 
 	// Write execution block indices outside f.mu.
@@ -539,8 +544,15 @@ func (f *ForkChoiceStore) ApplyLocalSelfBuildEnvelope(ctx context.Context, signe
 	beaconBlockRoot := envelope.BeaconBlockRoot
 
 	applied, err := f.applyLocalSelfBuildEnvelope(ctx, signedEnvelope)
-	if err != nil || !applied {
+	if err != nil {
 		return err
+	}
+	if !applied {
+		persisted, err := f.forkGraph.ReadEnvelopeFromDisk(beaconBlockRoot)
+		if err != nil {
+			return fmt.Errorf("ApplyLocalSelfBuildEnvelope: failed to read persisted envelope: %w", err)
+		}
+		envelope = persisted.Message
 	}
 
 	if f.db != nil {
@@ -622,12 +634,11 @@ func (f *ForkChoiceStore) applyLocalSelfBuildEnvelopeLocked(ctx context.Context,
 		return false, fmt.Errorf("applyLocalSelfBuildEnvelopeLocked: failed to verify execution payload: %w", err)
 	}
 
-	if envelope.Payload != nil {
-		f.eth2Roots.Add(beaconBlockRoot, envelope.Payload.BlockHash)
-	}
-
 	if err := f.forkGraph.DumpEnvelopeOnDisk(beaconBlockRoot, signedEnvelope); err != nil {
 		return false, fmt.Errorf("applyLocalSelfBuildEnvelopeLocked: failed to dump envelope: %w", err)
+	}
+	if envelope.Payload != nil {
+		f.eth2Roots.Add(beaconBlockRoot, envelope.Payload.BlockHash)
 	}
 
 	f.headHash = common.Hash{}

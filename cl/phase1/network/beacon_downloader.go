@@ -617,11 +617,16 @@ func fetchEnvelopesFromBeaconAPI(
 			if err != nil || resp.StatusCode != http.StatusOK {
 				return
 			}
+			version, err := cltypes.ParseExecutionPayloadEnvelopeVersion(resp.Header.Get("Eth-Consensus-Version"))
+			if err != nil {
+				log.Debug("[ForwardBeaconDownloader] HTTP envelope consensus version invalid", "slot", slot, "err", err)
+				return
+			}
 
 			envelope := &cltypes.SignedExecutionPayloadEnvelope{
-				Message: cltypes.NewExecutionPayloadEnvelope(beaconCfg),
+				Message: cltypes.NewExecutionPayloadEnvelopeWithVersion(beaconCfg, version),
 			}
-			if err := envelope.DecodeSSZStrict(body, int(clparams.GloasVersion)); err != nil {
+			if err := envelope.DecodeSSZStrict(body, int(version)); err != nil {
 				log.Debug("[ForwardBeaconDownloader] HTTP envelope decode failed", "slot", slot, "err", err)
 				return
 			}

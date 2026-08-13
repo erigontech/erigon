@@ -185,6 +185,23 @@ func TestRemoteCheckpointSyncRejectsOversizedEnvelopeResponse(t *testing.T) {
 	require.ErrorContains(t, err, "too large")
 }
 
+func TestRemoteCheckpointSyncRejectsPreGloasEnvelopeVersion(t *testing.T) {
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{
+		Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig),
+	}
+	encoded, err := envelope.EncodeSSZ(nil)
+	require.NoError(t, err)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Eth-Consensus-Version", clparams.FuluVersion.String())
+		_, _ = w.Write(encoded)
+	}))
+	defer server.Close()
+	syncer := &RemoteCheckpointSync{&clparams.MainnetBeaconConfig, chainspec.MainnetChainID, time.Second}
+
+	_, err = syncer.fetchEnvelope(context.Background(), server.URL+beaconStatePath)
+	require.ErrorContains(t, err, "consensus version")
+}
+
 func TestRemoteCheckpointSyncRejectsHTML(t *testing.T) {
 	mockHTMLServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")

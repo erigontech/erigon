@@ -727,11 +727,15 @@ func (b *BackwardBeaconDownloader) fetchSingleEnvelope(ctx context.Context, bloc
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("envelope fetch: HTTP %d", resp.StatusCode)
 	}
+	version, err := cltypes.ParseExecutionPayloadEnvelopeVersion(resp.Header.Get("Eth-Consensus-Version"))
+	if err != nil {
+		return nil, fmt.Errorf("envelope consensus version: %w", err)
+	}
 
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{
-		Message: cltypes.NewExecutionPayloadEnvelope(b.beaconCfg),
+		Message: cltypes.NewExecutionPayloadEnvelopeWithVersion(b.beaconCfg, version),
 	}
-	if err := envelope.DecodeSSZStrict(body, int(clparams.GloasVersion)); err != nil {
+	if err := envelope.DecodeSSZStrict(body, int(version)); err != nil {
 		return nil, fmt.Errorf("envelope decode: %w", err)
 	}
 	blockRoot, err := block.Block.HashSSZ()
