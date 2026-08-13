@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"net/http"
 	"os"
 	"path"
 	"time"
@@ -627,7 +626,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		go func() {
 			if err := beacon.ListenAndServe(ctx, &beacon.LayeredBeaconHandler{
 				ArchiveApi: apiHandler,
-			}, config.BeaconAPIRouter); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			}, config.BeaconAPIRouter); err != nil {
 				log.Warn("[Beacon API] error serving", "err", err)
 			}
 		}()

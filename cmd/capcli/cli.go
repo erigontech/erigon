@@ -691,7 +691,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 		return err
 	}
 	snr := freezeblocks.NewBeaconSnapshotReader(csn, eth1Getter, beaconConfig)
-	gSpot, err := initial_state.GetGenesisState(context.Background(), t)
+	gSpot, err := initial_state.GetGenesisState(ctx, t)
 	if err != nil {
 		return err
 	}

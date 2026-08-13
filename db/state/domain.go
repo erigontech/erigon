@@ -1368,8 +1368,13 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 			}
 			// nil = different step, skip; []byte{} = absent previously, write empty tombstone
 			if value != nil {
-				fullKey := key[:len(key)-8]
-				if err := rwTx.Put(d.ValuesTable, append(fullKey, unwindStepBytes...), value); err != nil {
+				// key aliases the diff's immutable string, and dropping its trailing
+				// step leaves exactly the 8 bytes of spare capacity the append needs,
+				// so appending in place would rewrite that string. Build a new key.
+				unwindKey := make([]byte, 0, len(key))
+				unwindKey = append(unwindKey, key[:len(key)-8]...)
+				unwindKey = append(unwindKey, unwindStepBytes...)
+				if err := rwTx.Put(d.ValuesTable, unwindKey, value); err != nil {
 					return err
 				}
 			}
