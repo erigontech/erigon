@@ -58,7 +58,10 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	}
 	defer e.semaphore.Release(1)
 
-	resumeReadAhead := e.suspendReadAhead()
+	resumeReadAhead, err := e.suspendReadAhead(ctx)
+	if err != nil {
+		return fmt.Errorf("suspend read-ahead: %w", err)
+	}
 	defer resumeReadAhead()
 
 	tx, err := e.db.BeginTemporalRw(ctx)

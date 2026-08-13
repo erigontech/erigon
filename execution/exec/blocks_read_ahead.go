@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"context"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -32,10 +32,10 @@ type BlockReadAheader struct {
 	senders *lru.Cache[common.Hash, []byte] // just do raw senders
 	bals    *lru.Cache[common.Hash, []byte]
 
-	// this is for warming state
-	warming    atomic.Bool // only one warmBody can run at a time
-	warmWg     sync.WaitGroup
-	warmupGate sync.RWMutex
+	// The single permit belongs either to one warmup or to the code suspending
+	// warmup across an unwind. Warmups never wait for it: read-ahead is
+	// best-effort, and queued work would be stale by the time an unwind ends.
+	warmupGate *semaphore.Weighted
 
 	// stateCache is the process-global state cache that SharedDomains.GetLatest
 	// consults on the EVM hot path. When set, warmBody routes its prefetches
@@ -64,10 +64,11 @@ func NewBlockReadAheader() *BlockReadAheader {
 		panic(err)
 	}
 	return &BlockReadAheader{
-		headers: headers,
-		bodies:  bodies,
-		senders: senders,
-		bals:    bals,
+		headers:    headers,
+		bodies:     bodies,
+		senders:    senders,
+		bals:       bals,
+		warmupGate: semaphore.NewWeighted(1),
 	}
 }
 
@@ -120,45 +121,40 @@ func (bra *BlockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, h
 	bra.headers.Add(blockHash, header)
 	bra.bodies.Add(blockHash, body)
 	if db != nil && ctx != nil {
-		// Only allow one warmBody to run at a time
-		if !bra.warming.CompareAndSwap(false, true) {
-			return
-		}
-		bra.warmWg.Go(func() {
-			defer bra.warming.Store(false)
-			bra.withWarmupPermit(func() {
-				bra.warmBody(ctx, db, header, body, 8) // use 8 workers for warming
-			})
+		bra.startWarmup(func() {
+			bra.warmBody(ctx, db, header, body, 8) // use 8 workers for warming
 		})
 	}
 }
 
-func (bra *BlockReadAheader) withWarmupPermit(warm func()) {
-	bra.warmupGate.RLock()
-	defer bra.warmupGate.RUnlock()
-	warm()
+func (bra *BlockReadAheader) startWarmup(warm func()) bool {
+	if !bra.warmupGate.TryAcquire(1) {
+		return false
+	}
+	go func() {
+		defer bra.warmupGate.Release(1)
+		warm()
+	}()
+	return true
 }
 
 // SuspendWarmup waits for active state-cache warmup and prevents another
 // warmup from starting until the returned function is called. Keep it
-// suspended while staged unwind state is being read or published.
-func (bra *BlockReadAheader) SuspendWarmup() func() {
-	bra.warmupGate.Lock()
-	return bra.warmupGate.Unlock
+// suspended while staged unwind state is being read or published. If ctx is
+// cancelled first, no suspension remains pending.
+func (bra *BlockReadAheader) SuspendWarmup(ctx context.Context) (func(), error) {
+	if err := bra.warmupGate.Acquire(ctx, 1); err != nil {
+		return nil, err
+	}
+	return sync.OnceFunc(func() { bra.warmupGate.Release(1) }), nil
 }
 
-// WaitForWarmup blocks until any in-flight warmBody goroutine finishes or
-// the context is cancelled. Call before closing the database to avoid
-// waitTxsAllDoneOnClose hangs.
+// WaitForWarmup waits until neither a warmup nor a suspension owns the permit,
+// or until the context is cancelled. Call it before closing the database to
+// avoid waitTxsAllDoneOnClose hangs.
 func (bra *BlockReadAheader) WaitForWarmup(ctx context.Context) {
-	done := make(chan struct{})
-	go func() {
-		bra.warmWg.Wait()
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-ctx.Done():
+	if err := bra.warmupGate.Acquire(ctx, 1); err == nil {
+		bra.warmupGate.Release(1)
 	}
 }
 
@@ -179,7 +175,8 @@ func (bra *BlockReadAheader) AddBlockAccessList(blockHash common.Hash, bal []byt
 // warmBody warms state for all transactions in a body using multiple workers.
 // It reads: To accounts, To account code, To account storage from access lists,
 // and block-level access lists. Each worker creates its own transaction.
-// Only one warmBody can run at a time - concurrent calls are no-ops.
+// AddHeaderAndBody permits only one warmBody at a time; concurrent requests
+// skip warming.
 func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *types.Header, body *types.Body, workers int) {
 	if !dbg.ReadAhead {
 		return

@@ -74,25 +74,29 @@ func TestBlockReadAheaderSuspendWarmupWaitsForActiveWarmup(t *testing.T) {
 	warmupStarted := make(chan struct{})
 	finishWarmup := make(chan struct{})
 	warmupDone := make(chan struct{})
-	go func() {
-		bra.withWarmupPermit(func() {
-			close(warmupStarted)
-			<-finishWarmup
-		})
+	require.True(t, bra.startWarmup(func() {
+		close(warmupStarted)
+		<-finishWarmup
 		close(warmupDone)
-	}()
+	}))
 	<-warmupStarted
 
 	suspendStarted := make(chan struct{})
-	resumeReadAhead := make(chan func())
+	type suspendResult struct {
+		resume func()
+		err    error
+	}
+	suspended := make(chan suspendResult)
 	go func() {
 		close(suspendStarted)
-		resumeReadAhead <- bra.SuspendWarmup()
+		resume, err := bra.SuspendWarmup(t.Context())
+		suspended <- suspendResult{resume: resume, err: err}
 	}()
 	<-suspendStarted
 	select {
-	case resume := <-resumeReadAhead:
-		resume()
+	case result := <-suspended:
+		require.NoError(t, result.err)
+		result.resume()
 		close(finishWarmup)
 		<-warmupDone
 		t.Fatal("SuspendWarmup returned while a warmup was active")
@@ -100,35 +104,81 @@ func TestBlockReadAheaderSuspendWarmupWaitsForActiveWarmup(t *testing.T) {
 	}
 
 	close(finishWarmup)
-	resume := <-resumeReadAhead
-	resume()
+	result := <-suspended
+	require.NoError(t, result.err)
+	result.resume()
 	<-warmupDone
 }
 
-func TestBlockReadAheaderSuspendWarmupBlocksNewWarmup(t *testing.T) {
+func TestBlockReadAheaderSuspendWarmupSkipsNewWarmup(t *testing.T) {
 	bra := NewBlockReadAheader()
-	resume := bra.SuspendWarmup()
+	resume, err := bra.SuspendWarmup(t.Context())
+	require.NoError(t, err)
 
 	warmupStarted := make(chan struct{})
-	warmupAttempted := make(chan struct{})
-	go func() {
-		close(warmupAttempted)
-		bra.withWarmupPermit(func() { close(warmupStarted) })
-	}()
-	<-warmupAttempted
-	select {
-	case <-warmupStarted:
-		resume()
-		t.Fatal("warmup started while suspended")
-	case <-time.After(50 * time.Millisecond):
-	}
+	require.False(t, bra.startWarmup(func() { close(warmupStarted) }),
+		"warmup must be skipped rather than queued behind the suspension")
 
 	resume()
 	select {
 	case <-warmupStarted:
-	case <-time.After(time.Second):
-		t.Fatal("warmup did not start after suspension ended")
+		t.Fatal("a skipped warmup started after suspension ended")
+	default:
 	}
+
+	nextWarmupDone := make(chan struct{})
+	require.True(t, bra.startWarmup(func() { close(nextWarmupDone) }))
+	select {
+	case <-nextWarmupDone:
+	case <-time.After(time.Second):
+		t.Fatal("a new warmup did not start after suspension ended")
+	}
+	bra.WaitForWarmup(t.Context())
+}
+
+func TestBlockReadAheaderSuspendWarmupHonorsContext(t *testing.T) {
+	bra := NewBlockReadAheader()
+	warmupStarted := make(chan struct{})
+	finishWarmup := make(chan struct{})
+	warmupDone := make(chan struct{})
+	require.True(t, bra.startWarmup(func() {
+		close(warmupStarted)
+		<-finishWarmup
+		close(warmupDone)
+	}))
+	<-warmupStarted
+
+	ctx, cancel := context.WithCancel(t.Context())
+	suspendStarted := make(chan struct{})
+	suspendResult := make(chan error)
+	go func() {
+		close(suspendStarted)
+		resume, err := bra.SuspendWarmup(ctx)
+		if resume != nil {
+			resume()
+		}
+		suspendResult <- err
+	}()
+	<-suspendStarted
+	cancel()
+
+	select {
+	case err := <-suspendResult:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		close(finishWarmup)
+		<-warmupDone
+		<-suspendResult
+		t.Fatal("SuspendWarmup did not return when its context was cancelled")
+	}
+
+	close(finishWarmup)
+	<-warmupDone
+	bra.WaitForWarmup(t.Context())
+	nextWarmupDone := make(chan struct{})
+	require.True(t, bra.startWarmup(func() { close(nextWarmupDone) }),
+		"a cancelled suspension must not retain the warmup permit")
+	<-nextWarmupDone
 }
 
 // seedFill places an entry with an exact txNum stamp through the public fill

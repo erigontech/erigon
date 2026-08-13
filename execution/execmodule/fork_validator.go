@@ -162,8 +162,9 @@ type HasDiff interface {
 // fork after staging an unwind to the common canonical ancestor and accepts a
 // payload when required chain data is unavailable. Before a fork unwind it
 // invokes ensureReadAheadSuspended, which must idempotently acquire a
-// caller-owned suspension lasting until validation stops reading staged state.
-func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header, body *types.RawBody, ensureReadAheadSuspended func(), logger log.Logger) (status engine_types.EngineStatus, latestValidHash common.Hash, validationError error, criticalError error) {
+// caller-owned suspension lasting until validation stops reading staged state;
+// an acquisition error aborts validation before the unwind.
+func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header, body *types.RawBody, ensureReadAheadSuspended func() error, logger log.Logger) (status engine_types.EngineStatus, latestValidHash common.Hash, validationError error, criticalError error) {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	if fv.executor == nil {
@@ -246,7 +247,9 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 		unwindPoint = 0
 	}
 	if unwindPoint != 0 {
-		ensureReadAheadSuspended()
+		if criticalError = ensureReadAheadSuspended(); criticalError != nil {
+			return
+		}
 	}
 	if fv.sharedDom != nil {
 		fv.sharedDom.Close()

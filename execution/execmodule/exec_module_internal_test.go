@@ -103,7 +103,7 @@ func TestUnwindToCommonCanonicalReturnsCanonicalityError(t *testing.T) {
 	}
 	header := &types.Header{Number: *uint256.NewInt(0)}
 
-	err := e.unwindToCommonCanonical(nil, emptyStageProgressTx{}, header, func() {})
+	err := e.unwindToCommonCanonical(nil, emptyStageProgressTx{}, header, func() error { return nil })
 
 	require.ErrorIs(t, err, expectedErr)
 }
@@ -120,11 +120,10 @@ func TestForkValidatorSuspendsReadAheadBeforeItsOwnUnwind(t *testing.T) {
 	fv := newForkValidator(t.Context(), 10, &PipelineExecutor{}, reader, 16)
 
 	// Stop at the suspension boundary; this test needs no execution pipeline to
-	// prove that read-ahead is suspended before the validator stages its unwind.
-	const stopAfterSuspension = "read-ahead suspended"
-	require.PanicsWithValue(t, stopAfterSuspension, func() {
-		fv.ValidatePayload(t.Context(), nil, nil, payloadHeader, &types.RawBody{}, func() {
-			panic(stopAfterSuspension)
-		}, log.New())
-	})
+	// prove that suspension failure aborts before the validator stages its unwind.
+	suspendErr := errors.New("read-ahead suspension cancelled")
+	_, _, _, criticalErr := fv.ValidatePayload(t.Context(), nil, nil, payloadHeader, &types.RawBody{}, func() error {
+		return suspendErr
+	}, log.New())
+	require.ErrorIs(t, criticalErr, suspendErr)
 }

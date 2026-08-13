@@ -394,17 +394,18 @@ func (e *ExecModule) canonicalHash(ctx context.Context, tx kv.Tx, blockNumber ui
 }
 
 // suspendReadAhead prevents raw-database warmup from filling the shared state
-// cache while an unwind's staged state is being read or published.
-func (e *ExecModule) suspendReadAhead() func() {
+// cache while an unwind's staged state is being read or published. It returns
+// the context error rather than allowing the unwind to proceed unsuspended.
+func (e *ExecModule) suspendReadAhead(ctx context.Context) (func(), error) {
 	if e.readAheader == nil {
-		return func() {}
+		return func() {}, nil
 	}
-	return e.readAheader.SuspendWarmup()
+	return e.readAheader.SuspendWarmup(ctx)
 }
 
 // unwindToCommonCanonical keeps read-ahead suspended after staging an unwind.
 // Its caller must resume only after all reads of the staged state have ended.
-func (e *ExecModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header, ensureReadAheadSuspended func()) error {
+func (e *ExecModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header, ensureReadAheadSuspended func() error) error {
 	currentHeader := header
 	for {
 		isCanonical, err := e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash())
@@ -439,7 +440,9 @@ func (e *ExecModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.Te
 		return err
 	}
 
-	ensureReadAheadSuspended()
+	if err := ensureReadAheadSuspended(); err != nil {
+		return fmt.Errorf("suspend read-ahead: %w", err)
+	}
 	if err := e.pipelineExecutor.UnwindTo(unwindPoint, stagedsync.ExecUnwind, tx); err != nil {
 		return err
 	}
@@ -594,10 +597,13 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	// lazy suspension so it spans every staged-state read without penalising the
 	// common case where validation needs no unwind.
 	var resumeReadAhead func()
-	ensureReadAheadSuspended := func() {
-		if resumeReadAhead == nil {
-			resumeReadAhead = e.suspendReadAhead()
-		}
+	var suspendReadAheadErr error
+	var suspendReadAheadOnce sync.Once
+	ensureReadAheadSuspended := func() error {
+		suspendReadAheadOnce.Do(func() {
+			resumeReadAhead, suspendReadAheadErr = e.suspendReadAhead(ctx)
+		})
+		return suspendReadAheadErr
 	}
 	defer func() {
 		if resumeReadAhead != nil {
