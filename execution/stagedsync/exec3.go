@@ -384,7 +384,7 @@ func execV3Serial(ctx context.Context,
 	if u != nil && !u.HasUnwindPoint() {
 		if lastHeader != nil {
 			switch {
-			case execErr == nil || isOnlyLoopExhausted(execErr):
+			case execErr == nil || IsOnlyLoopExhausted(execErr):
 				_, _, err = computeAndCheckCommitmentV3(ctx, lastHeader, applyTx, se.domains(), cfg, execStage, false, logger, u)
 				if err != nil {
 					return err
@@ -418,7 +418,7 @@ func execV3Serial(ctx context.Context,
 				switch {
 				case errors.Is(execErr, ErrWrongTrieRoot):
 					return fmt.Errorf("can't handle incorrect root err: %w", execErr)
-				case isOnlyLoopExhausted(execErr):
+				case IsOnlyLoopExhausted(execErr):
 					break
 				default:
 					return execErr

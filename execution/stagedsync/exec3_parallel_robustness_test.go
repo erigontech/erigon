@@ -1026,11 +1026,11 @@ func TestIsOnlyLoopExhausted(t *testing.T) {
 	exhausted := &ErrLoopExhausted{From: 1, To: 2, Reason: "block batch is full"}
 	boom := errors.New("boom")
 
-	require.False(t, isOnlyLoopExhausted(nil))
-	require.True(t, isOnlyLoopExhausted(exhausted))
-	require.True(t, isOnlyLoopExhausted(fmt.Errorf("apply loop: %w", exhausted)))
-	require.False(t, isOnlyLoopExhausted(errors.Join(exhausted, context.Canceled)))
-	require.False(t, isOnlyLoopExhausted(errors.Join(exhausted, boom)))
+	require.False(t, IsOnlyLoopExhausted(nil))
+	require.True(t, IsOnlyLoopExhausted(exhausted))
+	require.True(t, IsOnlyLoopExhausted(fmt.Errorf("apply loop: %w", exhausted)))
+	require.False(t, IsOnlyLoopExhausted(errors.Join(exhausted, context.Canceled)))
+	require.False(t, IsOnlyLoopExhausted(errors.Join(exhausted, boom)))
 }
 
 func TestRunApplyLoopPanicDrainsChannels(t *testing.T) {
