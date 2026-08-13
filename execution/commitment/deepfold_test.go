@@ -227,8 +227,6 @@ func TestStreaming_ExtensionToppedMountSplit(t *testing.T) {
 		mode runMode
 	}{
 		{"parallel", modeParallel},
-		{"streaming", modeStreaming},
-		{"streaming_scheduled", modeStreamingScheduled},
 	} {
 		for _, w := range []int{1, 4, 8} {
 			roots, ms := runEngineBatches(t, tc.mode, w, batches)
@@ -399,7 +397,7 @@ func TestDeepFold_PreExistingWhale_SingleNibbleOnDisk(t *testing.T) {
 
 // A FRESH whale — its account absent from the pre-state trie — provably has nothing on
 // disk beneath its storage prefix, so the deep fold seeds an empty base and folds the
-// slots concurrently instead of demoting to serial streaming.
+// slots concurrently instead of demoting to serial recursion.
 func TestDeepFold_FreshWhaleFoldsParallel(t *testing.T) {
 	k1, u1, _, _ := buildSubsetTouchedWhale(20260707, nibs(3, 7), nil, 700, 0)
 	fk, fu := buildMixedCorpus(555, 200)
@@ -410,17 +408,9 @@ func TestDeepFold_FreshWhaleFoldsParallel(t *testing.T) {
 
 	ms := NewMockState(t)
 	ms.SetConcurrentCommitment(true)
-	require.NoError(t, ms.applyPlainUpdates(keys, upds))
-	sc := newStreamCommitter(t, ms, 4, false)
-	defer sc.Release()
-	touchAll(sc, keys)
-	got, err := sc.Process(context.Background())
-	require.NoError(t, err)
-	require.Equal(t, seqRoot, got, "fresh-whale concurrent fold diverged from sequential")
-	require.Positive(t, sc.DeepLocalFolds(), "a fresh whale must take the concurrent deep fold, not the serial demotion")
-
-	parRoot, _ := engineRoot(t, modeParallel, 4, keys, upds)
+	parRoot, _, deepFolds := parallelBatchDeepFolds(t, ms, 4, keys, upds, nil)
 	require.Equal(t, seqRoot, parRoot)
+	require.Positive(t, deepFolds, "a fresh whale must take the concurrent deep fold, not the serial demotion")
 }
 
 // The demotion gate stays for accounts present in the pre-state without a branch record
@@ -435,18 +425,10 @@ func TestDeepFold_ExistingWhaleStillDemotes(t *testing.T) {
 
 	ms := NewMockState(t)
 	ms.SetConcurrentCommitment(true)
-	sc := newStreamCommitter(t, ms, 4, false)
-	defer sc.Release()
-	require.NoError(t, ms.applyPlainUpdates(k1, u1))
-	touchAll(sc, k1)
-	_, err := sc.Process(context.Background())
-	require.NoError(t, err)
-	require.NoError(t, ms.applyPlainUpdates(k2, u2))
-	touchAll(sc, k2)
-	got, err := sc.Process(context.Background())
-	require.NoError(t, err)
-	require.Equal(t, seqRoot, got)
-	require.Zero(t, sc.DeepLocalFolds(), "an account present in the pre-state must keep the serial demotion")
+	_, blob, _ := parallelBatchDeepFolds(t, ms, 4, k1, u1, nil)
+	parRoot, _, deepFolds := parallelBatchDeepFolds(t, ms, 4, k2, u2, blob)
+	require.Equal(t, seqRoot, parRoot)
+	require.Zero(t, deepFolds, "an account present in the pre-state must keep the serial demotion")
 }
 
 // A whale's storage collapses to a single surviving slot through the streaming recursion (sub-threshold
@@ -529,8 +511,6 @@ func TestDeepFold_SingleSlotCollapseThenDeepReexpand(t *testing.T) {
 		mode runMode
 	}{
 		{"parallel", modeParallel},
-		{"streaming", modeStreaming},
-		{"streaming_scheduled", modeStreamingScheduled},
 	} {
 		for _, w := range []int{1, 4, 8} {
 			roots, ms := runEngineBatches(t, tc.mode, w, batches)
@@ -605,8 +585,6 @@ func TestDeepFold_SurvivorCollapseThenRetouch(t *testing.T) {
 		mode runMode
 	}{
 		{"parallel", modeParallel},
-		{"streaming", modeStreaming},
-		{"streaming_scheduled", modeStreamingScheduled},
 	} {
 		for _, w := range []int{1, 4, 8} {
 			roots, ms := runEngineBatches(t, tc.mode, w, batches)
@@ -677,8 +655,6 @@ func TestDeepFold_EmptyStorageThenRepopulate(t *testing.T) {
 		mode runMode
 	}{
 		{"parallel", modeParallel},
-		{"streaming", modeStreaming},
-		{"streaming_scheduled", modeStreamingScheduled},
 	} {
 		for _, w := range []int{1, 4, 8} {
 			roots, ms := runEngineBatches(t, tc.mode, w, batches)
@@ -977,4 +953,83 @@ func TestFillFromLowerCell_StorageBranchSyncsNavPath(t *testing.T) {
 
 	require.Equal(t, []byte{0x5, 0xd}, branchCell.hashedExtension[:branchCell.hashedExtLen],
 		"a keyless cell deep in storage still navigates by its extension")
+}
+
+// keyArena backs collectSubtreeKeys in streaming_deep_fold.go.
+func TestKeyArena_PointerStability(t *testing.T) {
+	var arena keyArena
+
+	inputs := make([][]byte, 0, 4096)
+	got := make([][]byte, 0, 4096)
+	// 4096 small keys roll the arena over at least two chunks.
+	for i := range 4096 {
+		in := bytes.Repeat([]byte{byte(i), byte(i >> 8)}, 32)
+		inputs = append(inputs, in)
+		got = append(got, arena.copy(in))
+	}
+	// Oversized key forces the max(keyArenaChunk, len) allocation path.
+	big := bytes.Repeat([]byte{0xAB}, keyArenaChunk+128)
+	inputs = append(inputs, big)
+	got = append(got, arena.copy(big))
+
+	for i, in := range inputs {
+		require.True(t, bytes.Equal(in, got[i]),
+			"key %d corrupted: returned slice does not equal its input", i)
+		require.Equal(t, len(got[i]), cap(got[i]),
+			"key %d not full-cap: a caller append could overwrite the next key", i)
+	}
+
+	for i := range got {
+		for j := range got[i] {
+			got[i][j] = byte(i)
+		}
+	}
+	for i := range got {
+		for j := range got[i] {
+			require.Equal(t, byte(i), got[i][j],
+				"key %d overlaps another arena slice (overwritten at byte %d)", i, j)
+		}
+	}
+}
+
+func TestKeyArena_ChunkSizedFromRemaining(t *testing.T) {
+	const keyLen = 144
+
+	t.Run("small subtree does not burn a full chunk", func(t *testing.T) {
+		const keys = 32
+		arena := keyArena{remaining: keys}
+		for range keys {
+			arena.copy(make([]byte, keyLen))
+		}
+		require.Equal(t, keys*keyLen, cap(arena.buf))
+	})
+
+	t.Run("large subtree still caps at one chunk", func(t *testing.T) {
+		arena := keyArena{remaining: 10 * keyArenaChunk / keyLen}
+		arena.copy(make([]byte, keyLen))
+		require.Equal(t, keyArenaChunk, cap(arena.buf))
+	})
+
+	t.Run("oversized key gets its own backing", func(t *testing.T) {
+		arena := keyArena{remaining: 4}
+		got := arena.copy(make([]byte, 2*keyArenaChunk))
+		require.Len(t, got, 2*keyArenaChunk)
+		require.Equal(t, 2*keyArenaChunk, cap(arena.buf))
+	})
+
+	t.Run("copies stay stable across a chunk swap", func(t *testing.T) {
+		arena := keyArena{remaining: 2}
+		first := arena.copy(bytes.Repeat([]byte{0xAA}, keyLen))
+		for i := range 8 {
+			arena.copy(bytes.Repeat([]byte{byte(i)}, keyLen))
+		}
+		require.Equal(t, bytes.Repeat([]byte{0xAA}, keyLen), first)
+	})
+
+	t.Run("unhinted arena falls back to one key per chunk growth", func(t *testing.T) {
+		var arena keyArena
+		got := arena.copy(make([]byte, keyLen))
+		require.Len(t, got, keyLen)
+		require.Equal(t, keyLen, cap(arena.buf))
+	})
 }

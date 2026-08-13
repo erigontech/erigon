@@ -103,6 +103,7 @@ func (p *ParallelPatriciaHashed) Reset() {
 		p.template.Reset()
 	}
 	p.rootHash.Store(nil)
+	p.deepLocalFolds.Store(0)
 }
 
 // Release frees the template and worker pool; the instance must not be used afterwards. Repeat calls are no-ops.

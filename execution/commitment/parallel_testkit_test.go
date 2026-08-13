@@ -155,13 +155,9 @@ func processModeBatchState(t *testing.T, ms *MockState, mode runMode, workers in
 		require.NoError(t, tr.RootTrie().SetState(blob))
 		ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
 		defer ut.Close()
-		for i, k := range keys {
-			ks := string(k)
-			ut.TouchPlainKey(ks, nil, func(c *KeyUpdate, _ []byte) {
-				c.plainKey = ks
-				c.hashedKey = KeyToHexNibbleHash(k)
-				c.update = &upds[i]
-			})
+		// ModeParallel ignores the callback; values reach the trie via MockState.
+		for _, k := range keys {
+			ut.TouchPlainKey(string(k), nil, nil)
 		}
 		return processRoot(t, tr, ut), encoded(tr.RootTrie())
 	default:
@@ -186,13 +182,9 @@ func parallelBatchDeepFolds(t *testing.T, ms *MockState, workers int, keys [][]b
 	require.NoError(t, tr.RootTrie().SetState(blob))
 	ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
 	defer ut.Close()
-	for i, k := range keys {
-		ks := string(k)
-		ut.TouchPlainKey(ks, nil, func(c *KeyUpdate, _ []byte) {
-			c.plainKey = ks
-			c.hashedKey = KeyToHexNibbleHash(k)
-			c.update = &upds[i]
-		})
+	// ModeParallel ignores the callback; values reach the trie via MockState.
+	for _, k := range keys {
+		ut.TouchPlainKey(string(k), nil, nil)
 	}
 	root := processRoot(t, tr, ut)
 	encoded, err := tr.RootTrie().EncodeCurrentState(nil)
