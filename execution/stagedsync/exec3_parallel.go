@@ -1922,9 +1922,7 @@ const elasticWorkerCap = 4096
 // sent to the exec loop, which commits it in order. The context is released
 // while parked so dependencies can run; a fresh one is taken to re-execute.
 func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersion) {
-	pe.runWG.Add(1)
-	go func() {
-		defer pe.runWG.Done()
+	pe.runWG.Go(func() {
 		// The roTx is bound to the execution slot, not the goroutine: opened when a
 		// slot is acquired and rolled back when it is released — across a mid-EVM
 		// dependency wait and while parked committed-valid awaiting re-exec. This
@@ -2135,7 +2133,7 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 				return
 			}
 		}
-	}()
+	})
 }
 
 // selfLoopFlush publishes tv's writes to the versionMap (SELF_LOOP): its writes
