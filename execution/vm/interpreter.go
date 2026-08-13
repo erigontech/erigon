@@ -501,7 +501,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		inlineConstsOnce.Do(func() { assertInlineConsts(evm.jt) })
 	}
 
-	if !anyTrace && optimizedFlow {
+	if !anyTrace {
 		res, err = evm.runOptimized(callContext, &contract)
 		return res, callContext.Gas(), mdgas.MdGasUsage{}, err
 	}
@@ -645,9 +645,6 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 
 	return res, callContext.Gas(), mdgas.MdGasUsage{}, err
 }
-
-// optimizedFlow routes the trace-free case through runOptimized. A/B gate.
-var optimizedFlow = dbg.EnvBool("OPT_FLOW", false)
 
 // runOptimized is the interpreter loop for the trace-free case (no tracer,
 // no instruction trace). It drops everything that exists only to feed the
