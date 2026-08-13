@@ -19,13 +19,46 @@ package network
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/common/log/v3"
 )
+
+func validateBlobResponseCandidate(req *solid.ListSSZ[*cltypes.BlobIdentifier], responses []*cltypes.BlobSidecar) error {
+	type identity struct {
+		root  [32]byte
+		index uint64
+	}
+	requested := make(map[identity]struct{}, req.Len())
+	req.Range(func(_ int, value *cltypes.BlobIdentifier, _ int) bool {
+		requested[identity{root: value.BlockRoot, index: value.Index}] = struct{}{}
+		return true
+	})
+	seen := make(map[identity]struct{}, len(responses))
+	for _, sidecar := range responses {
+		if sidecar == nil || sidecar.SignedBlockHeader == nil || sidecar.SignedBlockHeader.Header == nil {
+			return errors.New("blob response contains incomplete sidecar")
+		}
+		root, err := sidecar.SignedBlockHeader.Header.HashSSZ()
+		if err != nil {
+			return err
+		}
+		key := identity{root: root, index: sidecar.Index}
+		if _, ok := requested[key]; !ok {
+			return fmt.Errorf("blob response contains unrequested identity %x:%d", root, sidecar.Index)
+		}
+		if _, duplicate := seen[key]; duplicate {
+			return fmt.Errorf("blob response contains duplicate identity %x:%d", root, sidecar.Index)
+		}
+		seen[key] = struct{}{}
+	}
+	return blob_storage.VerifyBlobSidecars(responses, nil)
+}
 
 var ErrTimeout = errors.New("timeout")
 
@@ -84,16 +117,31 @@ type blobBackfillPeerClient interface {
 	SendBlobsSidecarByIdentifierReqForBackfill(context.Context, *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error)
 }
 
+type blobPeerRejecter interface {
+	BanPeer(string)
+}
+
 // RequestBlobsFrantically requests blobs from the network frantically.
 func RequestBlobsFrantically(ctx context.Context, r BlobPeerClient, req *solid.ListSSZ[*cltypes.BlobIdentifier]) (*PeerAndSidecars, error) {
-	return requestBlobsFrantically(ctx, req, r.SendBlobsSidecarByIdentifierReq)
+	return requestBlobsFrantically(ctx, req, r.SendBlobsSidecarByIdentifierReq, blobPeerRejecterFor(r))
 }
 
 func requestBlobsFranticallyForBackfill(ctx context.Context, r blobBackfillPeerClient, req *solid.ListSSZ[*cltypes.BlobIdentifier]) (*PeerAndSidecars, error) {
-	return requestBlobsFrantically(ctx, req, r.SendBlobsSidecarByIdentifierReqForBackfill)
+	return requestBlobsFrantically(ctx, req, r.SendBlobsSidecarByIdentifierReqForBackfill, blobPeerRejecterFor(r))
 }
 
-func requestBlobsFrantically(ctx context.Context, req *solid.ListSSZ[*cltypes.BlobIdentifier], send func(context.Context, *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error)) (*PeerAndSidecars, error) {
+func blobPeerRejecterFor(client any) func(string) {
+	if rejecter, ok := client.(blobPeerRejecter); ok {
+		return rejecter.BanPeer
+	}
+	return nil
+}
+
+func requestBlobsFrantically(ctx context.Context, req *solid.ListSSZ[*cltypes.BlobIdentifier], send func(context.Context, *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error), rejectPeer func(string)) (*PeerAndSidecars, error) {
+	return requestBlobsFranticallyValidated(ctx, req, send, rejectPeer, nil)
+}
+
+func requestBlobsFranticallyValidated(ctx context.Context, req *solid.ListSSZ[*cltypes.BlobIdentifier], send func(context.Context, *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error), rejectPeer func(string), validate func([]*cltypes.BlobSidecar) error) (*PeerAndSidecars, error) {
 	type requestResult struct {
 		responses []*cltypes.BlobSidecar
 		peer      string
@@ -123,7 +171,10 @@ func requestBlobsFrantically(ctx context.Context, req *solid.ListSSZ[*cltypes.Bl
 		inFlight++
 		go func() {
 			responses, peer, err := send(attemptCtx, req)
-			results <- requestResult{responses: responses, peer: peer, err: err}
+			select {
+			case results <- requestResult{responses: responses, peer: peer, err: err}:
+			case <-attemptCtx.Done():
+			}
 		}()
 	}
 	for {
@@ -138,15 +189,26 @@ func requestBlobsFrantically(ctx context.Context, req *solid.ListSSZ[*cltypes.Bl
 		case result := <-results:
 			inFlight--
 			if result.err == nil && len(result.responses) > 0 {
-				return &PeerAndSidecars{Peer: result.peer, Responses: result.responses}, nil
+				result.err = validateBlobResponseCandidate(req, result.responses)
+				if result.err == nil && validate != nil {
+					result.err = validate(result.responses)
+				}
+				if result.err == nil {
+					return &PeerAndSidecars{Peer: result.peer, Responses: result.responses}, nil
+				}
+				if rejectPeer != nil {
+					rejectPeer(result.peer)
+				}
 			}
 			if result.err != nil {
 				log.Trace("RequestBlobsFrantically: error", "err", result.err, "peer", result.peer)
+				backoff = min(backoff*2, maxBlobRequestBackoff)
+				resetRetry(backoff)
 			} else {
 				log.Trace("RequestBlobsFrantically: response is empty", "peer", result.peer)
+				backoff = initialBlobRequestBackoff
+				resetRetry(initialBlobRequestBackoff)
 			}
-			backoff = min(backoff*2, maxBlobRequestBackoff)
-			resetRetry(backoff)
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-expiration.C:

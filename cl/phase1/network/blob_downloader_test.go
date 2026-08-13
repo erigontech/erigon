@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -44,9 +45,67 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 )
 
+func waitBlobDownloaderSignal(t *testing.T, signal <-chan struct{}, name string) {
+	t.Helper()
+	select {
+	case <-signal:
+	case <-time.After(time.Second):
+		t.Fatalf("timed out waiting for %s", name)
+	}
+}
+
+func receiveBlobDownloaderError(t *testing.T, result <-chan error, name string) error {
+	t.Helper()
+	select {
+	case err := <-result:
+		return err
+	case <-time.After(time.Second):
+		t.Fatalf("timed out waiting for %s", name)
+		return nil
+	}
+}
+
+func receiveBlobDownloaderRoot(t *testing.T, roots <-chan common.Hash) common.Hash {
+	t.Helper()
+	select {
+	case root := <-roots:
+		return root
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for requested root")
+		return common.Hash{}
+	}
+}
+
 type staticPeerDasGetter struct{ pd das.PeerDas }
 
 func (s staticPeerDasGetter) GetPeerDas() das.PeerDas { return s.pd }
+
+type signatureCandidateBlobPeerClient struct {
+	responses [][]*cltypes.BlobSidecar
+	peers     []string
+	calls     atomic.Int64
+	mu        sync.Mutex
+	banned    []string
+}
+
+func (*signatureCandidateBlobPeerClient) Peers() (uint64, error) { return 2, nil }
+
+func (c *signatureCandidateBlobPeerClient) SendBlobsSidecarByIdentifierReq(context.Context, *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error) {
+	index := int(c.calls.Add(1)) - 1
+	return c.responses[index], c.peers[index], nil
+}
+
+func (c *signatureCandidateBlobPeerClient) BanPeer(peer string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.banned = append(c.banned, peer)
+}
+
+func (c *signatureCandidateBlobPeerClient) bannedPeers() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.banned...)
+}
 
 type forcedRecoveryPeerDas struct {
 	das.PeerDas
@@ -90,6 +149,39 @@ func TestBlobHistoryDownloaderFuluColumnRecoveryIsBounded(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("recoverFuluColumns hung — unbounded PeerDAS column recovery")
 	}
+}
+
+func TestBlobHistoryDownloaderRejectsSignatureMismatchedCandidateAndPersistsHonestResponse(t *testing.T) {
+	const slot = uint64(100)
+	block, honest := makeBlobBoundaryObjects(t, slot, 1)
+	maliciousSidecar := *honest[0]
+	maliciousHeader := *maliciousSidecar.SignedBlockHeader
+	maliciousHeader.Signature[0]++
+	maliciousSidecar.SignedBlockHeader = &maliciousHeader
+	client := &signatureCandidateBlobPeerClient{
+		responses: [][]*cltypes.BlobSidecar{{&maliciousSidecar}, honest},
+		peers:     []string{"malicious-peer", "honest-peer"},
+	}
+	storage := newBlobBoundaryStorage(t)
+	d := &BlobHistoryDownloader{
+		ctx:         t.Context(),
+		beaconCfg:   &clparams.MainnetBeaconConfig,
+		rpc:         client,
+		blobStorage: storage,
+		requestBlobs: func(ctx context.Context, client BlobPeerClient, req *solid.ListSSZ[*cltypes.BlobIdentifier], validate func([]*cltypes.BlobSidecar) error) (*PeerAndSidecars, error) {
+			return requestBlobsFranticallyValidated(ctx, req, client.SendBlobsSidecarByIdentifierReq, blobPeerRejecterFor(client), validate)
+		},
+	}
+
+	require.NoError(t, d.recoverDenebBlobs([]*cltypes.SignedBeaconBlock{block}))
+	require.Equal(t, []string{"malicious-peer"}, client.bannedPeers())
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	stored, complete, err := storage.ReadBlobSidecars(t.Context(), slot, root)
+	require.NoError(t, err)
+	require.True(t, complete)
+	require.Len(t, stored, 1)
+	require.Equal(t, block.Signature, stored[0].SignedBlockHeader.Signature)
 }
 
 func TestBlobHistoryDownloaderReportsPendingSlots(t *testing.T) {
@@ -175,7 +267,7 @@ func TestBlobHistoryDownloaderPreservesArchiveTargetAfterDenebFailure(t *testing
 	})
 	d.blobStorage = emptyBlobStorage{}
 	wantErr := errors.New("Deneb request failed")
-	d.requestBlobs = func(context.Context, BlobPeerClient, *solid.ListSSZ[*cltypes.BlobIdentifier]) (*PeerAndSidecars, error) {
+	d.requestBlobs = func(context.Context, BlobPeerClient, *solid.ListSSZ[*cltypes.BlobIdentifier], func([]*cltypes.BlobSidecar) error) (*PeerAndSidecars, error) {
 		return nil, wantErr
 	}
 
@@ -186,6 +278,21 @@ func TestBlobHistoryDownloaderPreservesArchiveTargetAfterDenebFailure(t *testing
 	if d.backfillCompleted.Load() {
 		t.Fatal("backfill marked complete after Deneb failure")
 	}
+}
+
+func TestBlobHistoryDownloaderRejectsNilCanonicalCommitments(t *testing.T) {
+	const slot = uint64(100)
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	block.Block.Slot = slot
+	block.Block.Body.SyncAggregate = cltypes.NewSyncAggregate()
+	block.Block.Body.BlobKzgCommitments = nil
+	d := newBlobDownloaderForBoundaryTest(t, slot, slot, slot, 16, &mappedBlobBlockReader{
+		blocks: map[uint64]*cltypes.SignedBeaconBlock{slot: block},
+	})
+
+	require.ErrorContains(t, d.downloadOnce(false), "nil kzg commitments")
+	require.True(t, d.BlobBackfillPending(slot))
+	require.False(t, d.backfillCompleted.Load())
 }
 
 func TestBlobHistoryDownloaderContinuesPastFailedDenebBatch(t *testing.T) {
@@ -209,7 +316,7 @@ func TestBlobHistoryDownloaderContinuesPastFailedDenebBatch(t *testing.T) {
 	})
 	d.blobStorage = storage
 	wantErr := errors.New("newest batch unavailable")
-	d.requestBlobs = func(_ context.Context, _ BlobPeerClient, req *solid.ListSSZ[*cltypes.BlobIdentifier]) (*PeerAndSidecars, error) {
+	d.requestBlobs = func(_ context.Context, _ BlobPeerClient, req *solid.ListSSZ[*cltypes.BlobIdentifier], _ func([]*cltypes.BlobSidecar) error) (*PeerAndSidecars, error) {
 		if req.Get(0).BlockRoot == failedRoot {
 			return nil, wantErr
 		}
@@ -308,6 +415,12 @@ func TestBlobHistoryDownloaderRejectsInvalidStoredBlobSet(t *testing.T) {
 				sidecar.KzgCommitment[0]++
 			},
 		},
+		{
+			name: "wrong blob proof",
+			mutate: func(sidecar *cltypes.BlobSidecar) {
+				sidecar.KzgProof[0]++
+			},
+		},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -340,7 +453,7 @@ func TestBlobHistoryDownloaderRunsFuluRecoveryAfterDenebFailure(t *testing.T) {
 	d.peerDasGetter = staticPeerDasGetter{pd: peerDas}
 	d.columnBackfillTimeout = time.Second
 	wantErr := errors.New("deneb unavailable")
-	d.requestBlobs = func(context.Context, BlobPeerClient, *solid.ListSSZ[*cltypes.BlobIdentifier]) (*PeerAndSidecars, error) {
+	d.requestBlobs = func(context.Context, BlobPeerClient, *solid.ListSSZ[*cltypes.BlobIdentifier], func([]*cltypes.BlobSidecar) error) (*PeerAndSidecars, error) {
 		return nil, wantErr
 	}
 	peerDas.EXPECT().DownloadColumnsAndRecoverBlobs(gomock.Any(), gomock.Any()).DoAndReturn(
@@ -370,7 +483,7 @@ func TestBlobHistoryDownloaderHeadAdvanceOnlyMarksNewRangePending(t *testing.T) 
 	reader.blocks[headSlot+1] = newBlock
 	d.SetHead(headSlot+1, common.Hash{}, headSlot)
 	wantErr := errors.New("new head unavailable")
-	d.requestBlobs = func(context.Context, BlobPeerClient, *solid.ListSSZ[*cltypes.BlobIdentifier]) (*PeerAndSidecars, error) {
+	d.requestBlobs = func(context.Context, BlobPeerClient, *solid.ListSSZ[*cltypes.BlobIdentifier], func([]*cltypes.BlobSidecar) error) (*PeerAndSidecars, error) {
 		return nil, wantErr
 	}
 
@@ -399,7 +512,7 @@ func TestBlobHistoryDownloaderDoesNotMarkSkippedFuluGapComplete(t *testing.T) {
 	require.Contains(t, reader.slots, uint64(105))
 }
 
-func TestBlobHistoryDownloaderDoesNotRescanCompletedHead(t *testing.T) {
+func TestBlobHistoryDownloaderAuditsBoundedCompletedHead(t *testing.T) {
 	const (
 		headSlot   = uint64(100)
 		targetSlot = uint64(90)
@@ -410,10 +523,10 @@ func TestBlobHistoryDownloaderDoesNotRescanCompletedHead(t *testing.T) {
 	require.NoError(t, d.downloadOnce(false))
 	reader.slots = nil
 	require.NoError(t, d.downloadOnce(false))
-	require.Empty(t, reader.slots)
+	require.Equal(t, []uint64{100, 99, 98, 97, 96, 95, 94, 93}, reader.slots)
 }
 
-func TestBlobHistoryDownloaderHeadAdvanceScansOnlyUncoveredSuffix(t *testing.T) {
+func TestBlobHistoryDownloaderHeadAdvanceAuditsAndScansUncoveredSuffix(t *testing.T) {
 	const (
 		headSlot   = uint64(100)
 		targetSlot = uint64(90)
@@ -425,7 +538,7 @@ func TestBlobHistoryDownloaderHeadAdvanceScansOnlyUncoveredSuffix(t *testing.T) 
 	reader.slots = nil
 	d.SetHead(headSlot+2, common.Hash{}, headSlot)
 	require.NoError(t, d.downloadOnce(false))
-	require.Equal(t, []uint64{headSlot + 2, headSlot + 1}, reader.slots)
+	require.Equal(t, []uint64{100, 99, 98, 97, 96, 95, 94, 93, headSlot + 2, headSlot + 1}, reader.slots)
 }
 
 func TestBlobHistoryDownloaderHeadRegressionExpandsEpochAlignedLowerEdge(t *testing.T) {
@@ -553,7 +666,7 @@ func TestBlobHistoryDownloaderHigherHeadReorgRescansChangedSuffix(t *testing.T) 
 	d.SetHead(headSlot+2, common.HexToHash("0x02"), forkSlot)
 	require.True(t, d.BlobBackfillPending(forkSlot+1))
 	require.NoError(t, d.downloadOnce(false))
-	require.Equal(t, []uint64{102, 101, 100, 99}, reader.slots)
+	require.Equal(t, []uint64{98, 97, 96, 95, 94, 93, 92, 91, 102, 101, 100, 99}, reader.slots)
 }
 
 func TestBlobHistoryDownloaderStalePassCannotRestoreReorgedSuffix(t *testing.T) {
@@ -574,7 +687,7 @@ func TestBlobHistoryDownloaderStalePassCannotRestoreReorgedSuffix(t *testing.T) 
 	resume := make(chan struct{})
 	requestedRoots := make(chan common.Hash, 2)
 	var requests atomic.Int64
-	d.requestBlobs = func(_ context.Context, _ BlobPeerClient, req *solid.ListSSZ[*cltypes.BlobIdentifier]) (*PeerAndSidecars, error) {
+	d.requestBlobs = func(_ context.Context, _ BlobPeerClient, req *solid.ListSSZ[*cltypes.BlobIdentifier], _ func([]*cltypes.BlobSidecar) error) (*PeerAndSidecars, error) {
 		requestedRoots <- req.Get(0).BlockRoot
 		if requests.Add(1) == 1 {
 			close(collected)
@@ -586,17 +699,17 @@ func TestBlobHistoryDownloaderStalePassCannotRestoreReorgedSuffix(t *testing.T) 
 
 	firstPass := make(chan error, 1)
 	go func() { firstPass <- d.downloadOnce(false) }()
-	<-collected
+	waitBlobDownloaderSignal(t, collected, "first stale pass collection")
 	d.InvalidateCompletionAbove(slot - 1)
 	reader.blocks[slot] = newBlock
 	d.SetHead(slot, newRoot, slot-1)
 	close(resume)
-	require.NoError(t, <-firstPass)
+	require.NoError(t, receiveBlobDownloaderError(t, firstPass, "first stale pass"))
 	require.True(t, d.BlobBackfillPending(slot))
 
 	require.NoError(t, d.downloadOnce(false))
-	require.Equal(t, common.Hash(oldRoot), <-requestedRoots)
-	require.Equal(t, common.Hash(newRoot), <-requestedRoots)
+	require.Equal(t, common.Hash(oldRoot), receiveBlobDownloaderRoot(t, requestedRoots))
+	require.Equal(t, common.Hash(newRoot), receiveBlobDownloaderRoot(t, requestedRoots))
 	require.False(t, d.BlobBackfillPending(slot))
 }
 
@@ -612,7 +725,7 @@ func TestBlobHistoryDownloaderStalePassPreservesSafeHeadExtensionPrefix(t *testi
 	d.SetHead(slot, root, slot-1)
 	collected := make(chan struct{})
 	resume := make(chan struct{})
-	d.requestBlobs = func(context.Context, BlobPeerClient, *solid.ListSSZ[*cltypes.BlobIdentifier]) (*PeerAndSidecars, error) {
+	d.requestBlobs = func(context.Context, BlobPeerClient, *solid.ListSSZ[*cltypes.BlobIdentifier], func([]*cltypes.BlobSidecar) error) (*PeerAndSidecars, error) {
 		close(collected)
 		<-resume
 		return &PeerAndSidecars{Peer: "peer", Responses: sidecars}, nil
@@ -620,13 +733,59 @@ func TestBlobHistoryDownloaderStalePassPreservesSafeHeadExtensionPrefix(t *testi
 
 	firstPass := make(chan error, 1)
 	go func() { firstPass <- d.downloadOnce(false) }()
-	<-collected
+	waitBlobDownloaderSignal(t, collected, "head extension pass collection")
 	d.SetHead(slot+1, common.HexToHash("0x101"), slot)
 	close(resume)
-	require.NoError(t, <-firstPass)
+	require.NoError(t, receiveBlobDownloaderError(t, firstPass, "head extension pass"))
 
 	require.False(t, d.BlobBackfillPending(slot))
 	require.True(t, d.BlobBackfillPending(slot+1))
+}
+
+func TestBlobHistoryDownloaderAuditCannotRegisterStaleReorgSuffix(t *testing.T) {
+	const (
+		oldHead        = uint64(100)
+		commonAncestor = uint64(95)
+		targetSlot     = uint64(90)
+	)
+	reader := &barrierBlobBlockReader{entered: make(chan struct{}), resume: make(chan struct{})}
+	d := newBlobDownloaderForBoundaryTest(t, oldHead, targetSlot, targetSlot, 16, reader)
+	d.mu.Lock()
+	d.completedRanges = []backfillRange{{start: targetSlot, end: oldHead}}
+	d.backfillCompleted.Store(true)
+	d.mu.Unlock()
+
+	passDone := make(chan error, 1)
+	go func() { passDone <- d.downloadOnce(false) }()
+	waitBlobDownloaderSignal(t, reader.entered, "completion audit")
+	d.InvalidateCompletionAbove(commonAncestor)
+	d.SetHead(commonAncestor, common.HexToHash("0x02"), commonAncestor)
+	close(reader.resume)
+	require.NoError(t, receiveBlobDownloaderError(t, passDone, "completion audit pass"))
+
+	d.mu.RLock()
+	for _, completed := range d.completedRanges {
+		require.LessOrEqual(t, completed.end, commonAncestor)
+	}
+	d.mu.RUnlock()
+
+	block, _ := makeBlobBoundaryObjects(t, oldHead, 1)
+	d.blockReader = &mappedBlobBlockReader{blocks: map[uint64]*cltypes.SignedBeaconBlock{oldHead: block}}
+	d.blobStorage = newBlobBoundaryStorage(t)
+	requested := make(chan struct{}, 1)
+	wantErr := errors.New("new canonical suffix unavailable")
+	d.requestBlobs = func(context.Context, BlobPeerClient, *solid.ListSSZ[*cltypes.BlobIdentifier], func([]*cltypes.BlobSidecar) error) (*PeerAndSidecars, error) {
+		requested <- struct{}{}
+		return nil, wantErr
+	}
+	d.SetHead(oldHead, common.HexToHash("0x03"), oldHead)
+	require.True(t, d.BlobBackfillPending(oldHead))
+	require.ErrorIs(t, d.downloadOnce(false), wantErr)
+	select {
+	case <-requested:
+	default:
+		t.Fatal("new canonical suffix was not requested")
+	}
 }
 
 func TestBlobHistoryDownloaderHeadJumpStartsAtCurrentRetentionFloor(t *testing.T) {
@@ -659,7 +818,7 @@ func TestBlobHistoryDownloaderAcceptsReorderedDenebResponse(t *testing.T) {
 		blocks: map[uint64]*cltypes.SignedBeaconBlock{headSlot: first, headSlot - 1: second},
 	})
 	d.blobStorage = storage
-	d.requestBlobs = func(context.Context, BlobPeerClient, *solid.ListSSZ[*cltypes.BlobIdentifier]) (*PeerAndSidecars, error) {
+	d.requestBlobs = func(context.Context, BlobPeerClient, *solid.ListSSZ[*cltypes.BlobIdentifier], func([]*cltypes.BlobSidecar) error) (*PeerAndSidecars, error) {
 		return &PeerAndSidecars{Peer: "peer", Responses: []*cltypes.BlobSidecar{secondSidecars[0], firstSidecars[0]}}, nil
 	}
 
@@ -684,7 +843,7 @@ func TestBlobHistoryDownloaderPersistsCompleteBlocksFromShortResponse(t *testing
 		blocks: map[uint64]*cltypes.SignedBeaconBlock{headSlot: first, headSlot - 1: second},
 	})
 	d.blobStorage = storage
-	d.requestBlobs = func(context.Context, BlobPeerClient, *solid.ListSSZ[*cltypes.BlobIdentifier]) (*PeerAndSidecars, error) {
+	d.requestBlobs = func(context.Context, BlobPeerClient, *solid.ListSSZ[*cltypes.BlobIdentifier], func([]*cltypes.BlobSidecar) error) (*PeerAndSidecars, error) {
 		return &PeerAndSidecars{Peer: "peer", Responses: firstSidecars}, nil
 	}
 
@@ -695,6 +854,94 @@ func TestBlobHistoryDownloaderPersistsCompleteBlocksFromShortResponse(t *testing
 	require.False(t, d.backfillCompleted.Load())
 }
 
+func TestBlobHistoryDownloaderBoundsAuditWhileAnotherSlotRemainsPending(t *testing.T) {
+	const headSlot = uint64(100)
+	completeBlock, completeSidecars := makeBlobBoundaryObjects(t, headSlot, 1)
+	missingBlock, _ := makeBlobBoundaryObjects(t, headSlot-1, 1)
+	completeRoot, err := completeBlock.Block.HashSSZ()
+	require.NoError(t, err)
+	storage := newBlobBoundaryStorage(t)
+	require.NoError(t, storage.WriteBlobSidecars(t.Context(), completeRoot, completeSidecars))
+	reader := &mappedBlobBlockReader{blocks: map[uint64]*cltypes.SignedBeaconBlock{
+		headSlot:     completeBlock,
+		headSlot - 1: missingBlock,
+	}}
+	d := newBlobDownloaderForBoundaryTest(t, headSlot, headSlot-1, headSlot-1, 16, reader)
+	d.blobStorage = storage
+	d.requestBlobs = func(context.Context, BlobPeerClient, *solid.ListSSZ[*cltypes.BlobIdentifier], func([]*cltypes.BlobSidecar) error) (*PeerAndSidecars, error) {
+		return nil, errors.New("blob unavailable")
+	}
+
+	require.Error(t, d.downloadOnce(false))
+	reader.slots = nil
+	require.Error(t, d.downloadOnce(false))
+	require.Contains(t, reader.slots, headSlot)
+	require.Contains(t, reader.slots, headSlot-1)
+	require.Len(t, reader.slots, 2)
+}
+
+func TestBlobHistoryDownloaderAuditsCompletedSlotWhileAnotherSlotRemainsPending(t *testing.T) {
+	const completeSlot = uint64(100)
+	const pendingSlot = completeSlot - 1
+	completeBlock, completeSidecars := makeBlobBoundaryObjects(t, completeSlot, 1)
+	pendingBlock, _ := makeBlobBoundaryObjects(t, pendingSlot, 1)
+	completeRoot, err := completeBlock.Block.HashSSZ()
+	require.NoError(t, err)
+	underlying := newBlobBoundaryStorage(t)
+	require.NoError(t, underlying.WriteBlobSidecars(t.Context(), completeRoot, completeSidecars))
+	storage := &lossyBlobStorage{BlobStorage: underlying}
+	d := newBlobDownloaderForBoundaryTest(t, completeSlot, pendingSlot, pendingSlot, 16, &mappedBlobBlockReader{
+		blocks: map[uint64]*cltypes.SignedBeaconBlock{completeSlot: completeBlock, pendingSlot: pendingBlock},
+	})
+	d.blobStorage = storage
+	requestedRoots := make([][]common.Hash, 0, 2)
+	d.requestBlobs = func(_ context.Context, _ BlobPeerClient, req *solid.ListSSZ[*cltypes.BlobIdentifier], _ func([]*cltypes.BlobSidecar) error) (*PeerAndSidecars, error) {
+		roots := make([]common.Hash, 0, req.Len())
+		for index := range req.Len() {
+			roots = append(roots, req.Get(index).BlockRoot)
+		}
+		requestedRoots = append(requestedRoots, roots)
+		return nil, errors.New("blob unavailable")
+	}
+
+	require.Error(t, d.downloadOnce(false))
+	require.False(t, d.BlobBackfillPending(completeSlot))
+	storage.missing.Store(true)
+
+	require.Error(t, d.downloadOnce(false))
+	require.True(t, d.BlobBackfillPending(completeSlot))
+	require.Len(t, requestedRoots, 2)
+	require.Contains(t, requestedRoots[1], common.Hash(completeRoot))
+}
+
+func TestBlobHistoryDownloaderDropsFrozenCompletedRangeFragments(t *testing.T) {
+	const (
+		headSlot          = uint64(200_000)
+		firstUnfrozenSlot = uint64(199_000)
+		fragmentCount     = 100_000
+	)
+	d := newBlobDownloaderForBoundaryTest(t, headSlot, firstUnfrozenSlot, 1, 0, &recordingBlobBlockReader{})
+	d.completedRanges = make([]backfillRange, 0, fragmentCount)
+	for slot := uint64(1); slot < headSlot; slot += 2 {
+		d.completedRanges = append(d.completedRanges, backfillRange{start: slot, end: slot})
+	}
+
+	require.NoError(t, d.downloadOnce(false))
+	require.False(t, d.BlobBackfillPending(firstUnfrozenSlot-2))
+	require.LessOrEqual(t, len(d.completedRanges), int((headSlot-firstUnfrozenSlot)/2))
+	require.LessOrEqual(t, cap(d.completedRanges), int(headSlot-firstUnfrozenSlot))
+	for _, completed := range d.completedRanges {
+		require.GreaterOrEqual(t, completed.start, firstUnfrozenSlot)
+	}
+}
+
+func TestBlobHistoryDownloaderDoesNotRestoreCompletionAcrossFrozenReorgBoundary(t *testing.T) {
+	d := newBlobDownloaderForBoundaryTest(t, 100, 80, 1, 0, &recordingBlobBlockReader{})
+	d.addPassCompletedRanges(&backfillPass{safeThrough: 50}, []backfillRange{{start: 1, end: 100}})
+
+	require.Empty(t, d.completedRanges)
+}
+
 func TestBlobHistoryDownloaderDoesNotTrustIndexedCountWhenSidecarIsMissing(t *testing.T) {
 	const slot = uint64(100)
 	block, _ := makeBlobBoundaryObjects(t, slot, 1)
@@ -702,13 +949,54 @@ func TestBlobHistoryDownloaderDoesNotTrustIndexedCountWhenSidecarIsMissing(t *te
 		blocks: map[uint64]*cltypes.SignedBeaconBlock{slot: block},
 	})
 	d.blobStorage = indexedButMissingBlobStorage{}
-	d.requestBlobs = func(context.Context, BlobPeerClient, *solid.ListSSZ[*cltypes.BlobIdentifier]) (*PeerAndSidecars, error) {
+	d.requestBlobs = func(context.Context, BlobPeerClient, *solid.ListSSZ[*cltypes.BlobIdentifier], func([]*cltypes.BlobSidecar) error) (*PeerAndSidecars, error) {
 		return nil, errors.New("recovery required")
 	}
 
 	require.ErrorContains(t, d.downloadOnce(false), "recovery required")
 	require.False(t, d.backfillCompleted.Load())
 	require.True(t, d.BlobBackfillPending(slot))
+}
+
+func TestBlobHistoryDownloaderRepairsCorruptDurableSidecar(t *testing.T) {
+	const slot = uint64(100)
+	block, sidecars := makeBlobBoundaryObjects(t, slot, 1)
+	storage := &corruptBlobStorage{}
+	d := newBlobDownloaderForBoundaryTest(t, slot, slot, slot, 16, &mappedBlobBlockReader{
+		blocks: map[uint64]*cltypes.SignedBeaconBlock{slot: block},
+	})
+	d.blobStorage = storage
+	d.requestBlobs = func(context.Context, BlobPeerClient, *solid.ListSSZ[*cltypes.BlobIdentifier], func([]*cltypes.BlobSidecar) error) (*PeerAndSidecars, error) {
+		return &PeerAndSidecars{Peer: "peer", Responses: sidecars}, nil
+	}
+
+	require.Error(t, d.downloadOnce(false))
+	require.True(t, storage.removed)
+	require.True(t, storage.written)
+}
+
+func TestBlobHistoryDownloaderRevalidatesCompletedRangeAfterDurableLoss(t *testing.T) {
+	const slot = uint64(100)
+	block, sidecars := makeBlobBoundaryObjects(t, slot, 1)
+	underlying := newBlobBoundaryStorage(t)
+	storage := &lossyBlobStorage{BlobStorage: underlying}
+	d := newBlobDownloaderForBoundaryTest(t, slot, slot, slot, 16, &mappedBlobBlockReader{
+		blocks: map[uint64]*cltypes.SignedBeaconBlock{slot: block},
+	})
+	d.blobStorage = storage
+	requests := 0
+	d.requestBlobs = func(context.Context, BlobPeerClient, *solid.ListSSZ[*cltypes.BlobIdentifier], func([]*cltypes.BlobSidecar) error) (*PeerAndSidecars, error) {
+		requests++
+		return &PeerAndSidecars{Peer: "peer", Responses: sidecars}, nil
+	}
+
+	require.NoError(t, d.downloadOnce(false))
+	require.Equal(t, 1, requests)
+	storage.missing.Store(true)
+
+	require.NoError(t, d.downloadOnce(false))
+	require.Equal(t, 2, requests)
+	require.False(t, storage.missing.Load())
 }
 
 func TestBlobHistoryDownloaderAccumulatesPartialBlockAcrossRequests(t *testing.T) {
@@ -722,7 +1010,7 @@ func TestBlobHistoryDownloaderAccumulatesPartialBlockAcrossRequests(t *testing.T
 	})
 	d.blobStorage = storage
 	requests := 0
-	d.requestBlobs = func(_ context.Context, _ BlobPeerClient, req *solid.ListSSZ[*cltypes.BlobIdentifier]) (*PeerAndSidecars, error) {
+	d.requestBlobs = func(_ context.Context, _ BlobPeerClient, req *solid.ListSSZ[*cltypes.BlobIdentifier], _ func([]*cltypes.BlobSidecar) error) (*PeerAndSidecars, error) {
 		requests++
 		require.Equal(t, 3-requests, req.Len())
 		return &PeerAndSidecars{Peer: "peer", Responses: []*cltypes.BlobSidecar{sidecars[requests-1]}}, nil
@@ -744,7 +1032,7 @@ func TestBlobHistoryDownloaderRejectsRepeatedPartialResponse(t *testing.T) {
 	})
 	d.blobStorage = newBlobBoundaryStorage(t)
 	requests := 0
-	d.requestBlobs = func(context.Context, BlobPeerClient, *solid.ListSSZ[*cltypes.BlobIdentifier]) (*PeerAndSidecars, error) {
+	d.requestBlobs = func(context.Context, BlobPeerClient, *solid.ListSSZ[*cltypes.BlobIdentifier], func([]*cltypes.BlobSidecar) error) (*PeerAndSidecars, error) {
 		requests++
 		return &PeerAndSidecars{Peer: "peer", Responses: sidecars[:1]}, nil
 	}
@@ -815,7 +1103,7 @@ func TestBlobHistoryDownloaderRejectsInvalidOrIncompleteDenebResponse(t *testing
 				&clparams.MainnetBeaconConfig,
 				nil,
 			)
-			d.requestBlobs = func(context.Context, BlobPeerClient, *solid.ListSSZ[*cltypes.BlobIdentifier]) (*PeerAndSidecars, error) {
+			d.requestBlobs = func(context.Context, BlobPeerClient, *solid.ListSSZ[*cltypes.BlobIdentifier], func([]*cltypes.BlobSidecar) error) (*PeerAndSidecars, error) {
 				return tc.alterResponse(sidecars), nil
 			}
 
@@ -850,7 +1138,7 @@ func TestBlobHistoryDownloaderPersistsBoundaryBlobAcrossRestart(t *testing.T) {
 	}
 	d := newDownloader()
 	requests := 0
-	d.requestBlobs = func(context.Context, BlobPeerClient, *solid.ListSSZ[*cltypes.BlobIdentifier]) (*PeerAndSidecars, error) {
+	d.requestBlobs = func(context.Context, BlobPeerClient, *solid.ListSSZ[*cltypes.BlobIdentifier], func([]*cltypes.BlobSidecar) error) (*PeerAndSidecars, error) {
 		requests++
 		return &PeerAndSidecars{Peer: "peer", Responses: sidecars}, nil
 	}
@@ -863,7 +1151,7 @@ func TestBlobHistoryDownloaderPersistsBoundaryBlobAcrossRestart(t *testing.T) {
 	require.Len(t, stored, 1)
 
 	restarted := newDownloader()
-	restarted.requestBlobs = func(context.Context, BlobPeerClient, *solid.ListSSZ[*cltypes.BlobIdentifier]) (*PeerAndSidecars, error) {
+	restarted.requestBlobs = func(context.Context, BlobPeerClient, *solid.ListSSZ[*cltypes.BlobIdentifier], func([]*cltypes.BlobSidecar) error) (*PeerAndSidecars, error) {
 		return nil, errors.New("persisted boundary blob requested after restart")
 	}
 	require.NoError(t, restarted.downloadOnce(false))
@@ -986,12 +1274,29 @@ type recordingBlobBlockReader struct {
 	err   error
 }
 
+type barrierBlobBlockReader struct {
+	freezeblocks.BeaconSnapshotReader
+	entered chan struct{}
+	resume  chan struct{}
+	once    sync.Once
+}
+
+func (r *barrierBlobBlockReader) ReadBeaconBlockBodyBySlot(context.Context, kv.Tx, uint64) (*cltypes.SignedBeaconBlock, error) {
+	r.once.Do(func() {
+		close(r.entered)
+		<-r.resume
+	})
+	return nil, nil
+}
+
 type mappedBlobBlockReader struct {
 	freezeblocks.BeaconSnapshotReader
 	blocks map[uint64]*cltypes.SignedBeaconBlock
+	slots  []uint64
 }
 
 func (r *mappedBlobBlockReader) ReadBeaconBlockBodyBySlot(_ context.Context, _ kv.Tx, slot uint64) (*cltypes.SignedBeaconBlock, error) {
+	r.slots = append(r.slots, slot)
 	return r.blocks[slot], nil
 }
 
@@ -1009,6 +1314,51 @@ type indexedButMissingBlobStorage struct{ emptyBlobStorage }
 
 func (indexedButMissingBlobStorage) KzgCommitmentsCount(context.Context, common.Hash) (uint32, error) {
 	return 1, nil
+}
+
+type lossyBlobStorage struct {
+	blob_storage.BlobStorage
+	missing atomic.Bool
+}
+
+func (s *lossyBlobStorage) ReadBlobSidecars(ctx context.Context, slot uint64, root common.Hash) ([]*cltypes.BlobSidecar, bool, error) {
+	sidecars, complete, err := s.BlobStorage.ReadBlobSidecars(ctx, slot, root)
+	if err != nil || !s.missing.Load() || len(sidecars) == 0 {
+		return sidecars, complete, err
+	}
+	return sidecars[:len(sidecars)-1], false, nil
+}
+
+func (s *lossyBlobStorage) WriteBlobSidecars(ctx context.Context, root common.Hash, sidecars []*cltypes.BlobSidecar) error {
+	if err := s.BlobStorage.WriteBlobSidecars(ctx, root, sidecars); err != nil {
+		return err
+	}
+	s.missing.Store(false)
+	return nil
+}
+
+type corruptBlobStorage struct {
+	emptyBlobStorage
+	removed bool
+	written bool
+}
+
+func (*corruptBlobStorage) KzgCommitmentsCount(context.Context, common.Hash) (uint32, error) {
+	return 1, nil
+}
+
+func (*corruptBlobStorage) ReadBlobSidecars(context.Context, uint64, common.Hash) ([]*cltypes.BlobSidecar, bool, error) {
+	return nil, false, blob_storage.ErrBlobSidecarCorrupt
+}
+
+func (s *corruptBlobStorage) RemoveBlobSidecars(context.Context, uint64, common.Hash) error {
+	s.removed = true
+	return nil
+}
+
+func (s *corruptBlobStorage) WriteBlobSidecars(context.Context, common.Hash, []*cltypes.BlobSidecar) error {
+	s.written = true
+	return errors.New("test stops after repair write")
 }
 
 type completeBlobStorage struct {
@@ -1032,6 +1382,35 @@ func (s frozenBlobSnapshot) FrozenBlobs() uint64 { return s.exclusiveEnd }
 type syncedChecker bool
 
 func (s syncedChecker) Synced() bool { return bool(s) }
+
+type notifyingUnsyncedChecker struct{ checked chan struct{} }
+
+func (s notifyingUnsyncedChecker) Synced() bool {
+	select {
+	case s.checked <- struct{}{}:
+	default:
+	}
+	return false
+}
+
+func TestBlobHistoryDownloaderUnsyncedWaitObservesCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	d := newBlobDownloaderForBoundaryTest(t, 100, 100, 1, 1, &recordingBlobBlockReader{})
+	d.ctx = ctx
+	checked := make(chan struct{}, 1)
+	d.syncedChecker = notifyingUnsyncedChecker{checked: checked}
+	done := make(chan error, 1)
+	go func() { done <- d.downloadOnce(false) }()
+	waitBlobDownloaderSignal(t, checked, "sync status check")
+	cancel()
+
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("unsynced wait ignored downloader cancellation")
+	}
+}
 
 type peerCountClient struct{ active uint64 }
 

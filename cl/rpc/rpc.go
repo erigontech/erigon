@@ -128,6 +128,10 @@ func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqD
 func (b *BeaconRpcP2P) sendBlobsSidecar(ctx context.Context, topic string, reqData []byte, maxResponseBytes uint64) ([]*cltypes.BlobSidecar, string, error) {
 	responses, pid, err := b.sendRequest(ctx, topic, reqData, maxResponseBytes)
 	if err != nil {
+		var malformed *malformedPeerResponseError
+		if pid != "" && errors.As(err, &malformed) {
+			b.BanPeer(pid)
+		}
 		return nil, pid, err
 	}
 
@@ -135,6 +139,7 @@ func (b *BeaconRpcP2P) sendBlobsSidecar(ctx context.Context, topic string, reqDa
 	for _, data := range responses {
 		responseChunk := &cltypes.BlobSidecar{}
 		if err := responseChunk.DecodeSSZ(data.raw, int(data.version)); err != nil {
+			b.BanPeer(pid)
 			return nil, pid, err
 		}
 		responsePacket = append(responsePacket, responseChunk)
@@ -375,11 +380,25 @@ type responseData struct {
 	raw     []byte
 }
 
+type malformedPeerResponseError struct {
+	err error
+}
+
+func (e *malformedPeerResponseError) Error() string { return e.err.Error() }
+func (e *malformedPeerResponseError) Unwrap() error { return e.err }
+
+func malformedPeerResponse(err error) error {
+	return &malformedPeerResponseError{err: err}
+}
+
 // parseResponseData parses the response data from a sentinel message and returns the parsed response data.
 func (b *BeaconRpcP2P) parseResponseData(message *sentinelproto.ResponseData) ([]responseData, string, error) {
 	if message.Error {
 		rd := snappy.NewReader(bytes.NewBuffer(message.Data))
-		errBytes, _ := io.ReadAll(rd)
+		errBytes, err := io.ReadAll(rd)
+		if err != nil {
+			return nil, message.Peer.Pid, malformedPeerResponse(fmt.Errorf("decode peer error response: %w", err))
+		}
 		errMsg := string(errBytes)
 		log.Trace("received range req error", "err", errMsg, "raw", string(message.Data))
 		return nil, message.Peer.Pid, fmt.Errorf("peer error response: %s", errMsg)
@@ -393,7 +412,7 @@ func (b *BeaconRpcP2P) parseResponseData(message *sentinelproto.ResponseData) ([
 			if err == io.EOF {
 				break
 			}
-			return nil, message.Peer.Pid, err
+			return nil, message.Peer.Pid, malformedPeerResponse(err)
 		} else if n == 0 {
 			break
 		}
@@ -401,11 +420,11 @@ func (b *BeaconRpcP2P) parseResponseData(message *sentinelproto.ResponseData) ([
 		// Read varint for length of message.
 		encodedLn, _, err := ssz_snappy.ReadUvarint(r)
 		if err != nil {
-			return nil, message.Peer.Pid, fmt.Errorf("sendRequest failed. Unable to read varint from message prefix: %w", err)
+			return nil, message.Peer.Pid, malformedPeerResponse(fmt.Errorf("sendRequest failed. Unable to read varint from message prefix: %w", err))
 		}
 		// Sanity check for message size.
 		if encodedLn > uint64(maxMessageLength) {
-			return nil, message.Peer.Pid, errors.New("received message too big")
+			return nil, message.Peer.Pid, malformedPeerResponse(errors.New("received message too big"))
 		}
 
 		// Read bytes using snappy into a new raw buffer of side encodedLn.
@@ -415,19 +434,22 @@ func (b *BeaconRpcP2P) parseResponseData(message *sentinelproto.ResponseData) ([
 		for bytesRead < int(encodedLn) {
 			n, err := sr.Read(raw[bytesRead:])
 			if err != nil {
-				return nil, message.Peer.Pid, fmt.Errorf("read error: %w", err)
+				return nil, message.Peer.Pid, malformedPeerResponse(fmt.Errorf("read error: %w", err))
+			}
+			if n == 0 {
+				return nil, message.Peer.Pid, malformedPeerResponse(io.ErrNoProgress)
 			}
 			bytesRead += n
 		}
 		// Fork digests
 		respForkDigest := binary.BigEndian.Uint32(forkDigest)
 		if respForkDigest == 0 {
-			return nil, message.Peer.Pid, errors.New("null fork digest")
+			return nil, message.Peer.Pid, malformedPeerResponse(errors.New("null fork digest"))
 		}
 
 		version, err := b.ethClock.StateVersionByForkDigest(utils.Uint32ToBytes4(respForkDigest))
 		if err != nil {
-			return nil, message.Peer.Pid, fmt.Errorf("unknown fork digest %x: %w", respForkDigest, err)
+			return nil, message.Peer.Pid, malformedPeerResponse(fmt.Errorf("unknown fork digest %x: %w", respForkDigest, err))
 		}
 		responsePacket = append(responsePacket, responseData{
 			version: version,
@@ -439,7 +461,7 @@ func (b *BeaconRpcP2P) parseResponseData(message *sentinelproto.ResponseData) ([
 			break
 		} else if err != nil {
 			log.Debug("failed to read byte", "err", err)
-			return nil, message.Peer.Pid, err
+			return nil, message.Peer.Pid, malformedPeerResponse(err)
 		}
 	}
 	return responsePacket, message.Peer.Pid, nil

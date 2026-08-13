@@ -57,6 +57,8 @@ type BlobStorage interface {
 	Prune() error
 }
 
+var ErrBlobSidecarCorrupt = errors.New("blob sidecar storage is corrupt")
+
 type BlobStore struct {
 	db                kv.RwDB
 	fs                afero.Fs
@@ -136,12 +138,12 @@ func (bs *BlobStore) ReadBlobSidecars(ctx context.Context, slot uint64, blockRoo
 		return nil, false, nil
 	}
 	if len(val) != 4 {
-		return nil, false, fmt.Errorf("invalid blob commitment count encoding length %d", len(val))
+		return nil, false, fmt.Errorf("%w: invalid blob commitment count encoding length %d", ErrBlobSidecarCorrupt, len(val))
 	}
 	kzgCommitmentsLength := binary.LittleEndian.Uint32(val)
 	maxCommitments := bs.beaconChainConfig.MaxBlobsPerBlockUpperBound()
 	if uint64(kzgCommitmentsLength) > maxCommitments {
-		return nil, false, fmt.Errorf("blob commitment count %d exceeds maximum %d", kzgCommitmentsLength, maxCommitments)
+		return nil, false, fmt.Errorf("%w: blob commitment count %d exceeds maximum %d", ErrBlobSidecarCorrupt, kzgCommitmentsLength, maxCommitments)
 	}
 
 	var blobSidecars []*cltypes.BlobSidecar
@@ -165,7 +167,7 @@ func (bs *BlobStore) ReadBlobSidecars(ctx context.Context, slot uint64, blockRoo
 			return blobSidecar, nil
 		}()
 		if err != nil {
-			return nil, false, err
+			return nil, false, fmt.Errorf("%w: decode sidecar %d: %v", ErrBlobSidecarCorrupt, i, err)
 		}
 		blobSidecars = append(blobSidecars, blobSidecar)
 	}
@@ -214,7 +216,7 @@ func (bs *BlobStore) WriteStream(w io.Writer, slot uint64, blockRoot common.Hash
 }
 
 func (bs *BlobStore) KzgCommitmentsCount(ctx context.Context, blockRoot common.Hash) (uint32, error) {
-	tx, err := bs.db.BeginRo(context.Background())
+	tx, err := bs.db.BeginRo(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -242,12 +244,30 @@ func (bs *BlobStore) RemoveBlobSidecars(ctx context.Context, slot uint64, blockR
 	if len(val) == 0 {
 		return nil
 	}
+	if len(val) != 4 {
+		if err := tx.Delete(kv.BlockRootToKzgCommitments, blockRoot[:]); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
 	kzgCommitmentsLength := binary.LittleEndian.Uint32(val)
+	if uint64(kzgCommitmentsLength) > bs.beaconChainConfig.MaxBlobsPerBlockUpperBound() {
+		if err := tx.Delete(kv.BlockRootToKzgCommitments, blockRoot[:]); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
+	var removeErr error
 	for i := range kzgCommitmentsLength {
 		_, filePath := blobSidecarFilePath(slot, uint64(i), blockRoot)
 		if err := bs.fs.Remove(filePath); err != nil {
-			return err
+			if !errors.Is(err, afero.ErrFileNotFound) {
+				removeErr = errors.Join(removeErr, err)
+			}
 		}
+	}
+	if removeErr != nil {
+		return removeErr
 	}
 	tx.Delete(kv.BlockRootToKzgCommitments, blockRoot[:])
 	return tx.Commit()
@@ -344,16 +364,21 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 		lastProcessed = sidecars[len(sidecars)-1].SignedBlockHeader.Header.Slot
 	}
 
-	var errAtomic atomic.Value
+	var groupErr error
+	var errMu sync.Mutex
 	var wg sync.WaitGroup
 	for _, sds := range storableSidecars {
 		wg.Go(func() {
 			if err := VerifyBlobSidecars(sds.sidecars, verifySignatureFn); err != nil {
-				errAtomic.Store(err)
+				errMu.Lock()
+				groupErr = errors.Join(groupErr, err)
+				errMu.Unlock()
 				return
 			}
 			if err := storage.WriteBlobSidecars(ctx, sds.blockRoot, sds.sidecars); err != nil {
-				errAtomic.Store(err)
+				errMu.Lock()
+				groupErr = errors.Join(groupErr, err)
+				errMu.Unlock()
 			} else {
 				inserted.Add(uint64(len(sds.sidecars)))
 			}
@@ -361,8 +386,8 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 		})
 	}
 	wg.Wait()
-	if err := errAtomic.Load(); err != nil {
-		return 0, 0, err.(error)
+	if groupErr != nil {
+		return 0, 0, groupErr
 	}
 	return lastProcessed, inserted.Load(), nil
 }

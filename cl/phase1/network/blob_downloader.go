@@ -23,10 +23,12 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -35,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
@@ -72,7 +75,7 @@ type blobSnapshotReader interface {
 	FrozenBlobs() uint64
 }
 
-type blobRequestFn func(context.Context, BlobPeerClient, *solid.ListSSZ[*cltypes.BlobIdentifier]) (*PeerAndSidecars, error)
+type blobRequestFn func(context.Context, BlobPeerClient, *solid.ListSSZ[*cltypes.BlobIdentifier], func([]*cltypes.BlobSidecar) error) (*PeerAndSidecars, error)
 
 // BlobHistoryDownloader downloads blob history backwards from a head slot
 type BlobHistoryDownloader struct {
@@ -109,6 +112,8 @@ type BlobHistoryDownloader struct {
 	activePasses      map[*backfillPass]struct{}
 	transitionCeiling uint64
 	transitionActive  bool
+	completionAudit   uint64
+	auditInitialized  bool
 	logger            log.Logger
 
 	// notifyBlobBackfilled is called when blob backfilling is complete
@@ -133,19 +138,18 @@ func NewBlobHistoryDownloader(
 	logger log.Logger,
 ) *BlobHistoryDownloader {
 	targetSlot, _ := denebStartSlot(beaconCfg)
-	return &BlobHistoryDownloader{
+	downloader := &BlobHistoryDownloader{
 		ctx:         ctx,
 		beaconCfg:   beaconCfg,
 		rpc:         rpc,
 		indiciesDB:  indiciesDB,
 		blobStorage: blobStorage,
 		blockReader: blockReader,
-		sn:          sn,
-		requestBlobs: func(ctx context.Context, client BlobPeerClient, req *solid.ListSSZ[*cltypes.BlobIdentifier]) (*PeerAndSidecars, error) {
+		requestBlobs: func(ctx context.Context, client BlobPeerClient, req *solid.ListSSZ[*cltypes.BlobIdentifier], validate func([]*cltypes.BlobSidecar) error) (*PeerAndSidecars, error) {
 			if backfillClient, ok := client.(blobBackfillRequester); ok {
-				return requestBlobsFranticallyForBackfill(ctx, backfillClient, req)
+				return requestBlobsFranticallyValidated(ctx, req, backfillClient.SendBlobsSidecarByIdentifierReqForBackfill, blobPeerRejecterFor(client), validate)
 			}
-			return RequestBlobsFrantically(ctx, client, req)
+			return requestBlobsFranticallyValidated(ctx, req, client.SendBlobsSidecarByIdentifierReq, blobPeerRejecterFor(client), validate)
 		},
 		syncedChecker:             syncedChecker,
 		peerDasGetter:             peerDasGetter,
@@ -155,6 +159,10 @@ func NewBlobHistoryDownloader(
 		columnBackfillTimeout:     blobColumnBackfillTimeout,
 		logger:                    logger,
 	}
+	if sn != nil {
+		downloader.sn = sn
+	}
+	return downloader
 }
 
 // SetHead sets the inclusive upper bound and preserves completion only through safeThrough.
@@ -167,7 +175,8 @@ func (b *BlobHistoryDownloader) SetHead(slot uint64, root common.Hash, safeThrou
 	b.trimCompletedRanges(safeThrough)
 	b.headRoot = root
 	b.transitionActive = false
-	if !b.completedRangesContain(b.backfillRanges(slot)) {
+	unfrozenRanges := b.unfrozenBackfillRanges(slot, b.frozenBlobs())
+	if len(unfrozenRanges) > 0 && !b.completedRangesContain(unfrozenRanges) {
 		b.backfillCompleted.Store(false)
 	}
 }
@@ -193,7 +202,8 @@ func (b *BlobHistoryDownloader) InvalidateCompletionAbove(safeThrough uint64) {
 	b.constrainActivePasses(b.transitionCeiling)
 	b.headGeneration++
 	b.trimCompletedRanges(b.transitionCeiling)
-	if !b.completedRangesContain(b.backfillRanges(b.headSlot.Load())) {
+	unfrozenRanges := b.unfrozenBackfillRanges(b.headSlot.Load(), b.frozenBlobs())
+	if len(unfrozenRanges) > 0 && !b.completedRangesContain(unfrozenRanges) {
 		b.backfillCompleted.Store(false)
 	}
 }
@@ -230,6 +240,9 @@ func (b *BlobHistoryDownloader) Running() bool {
 // BlobBackfillPending reports whether a slot remains outside durable completed coverage.
 func (b *BlobHistoryDownloader) BlobBackfillPending(slot uint64) bool {
 	if !b.archiveBlobs && !b.immediateBlobsBackfilling {
+		return false
+	}
+	if slot < b.frozenBlobs() {
 		return false
 	}
 	b.mu.RLock()
@@ -278,6 +291,8 @@ type backfillRange struct{ start, end uint64 }
 
 type backfillPass struct {
 	safeThrough uint64
+	headSlot    uint64
+	generation  uint64
 }
 
 func (b *BlobHistoryDownloader) constrainActivePasses(safeThrough uint64) {
@@ -287,15 +302,28 @@ func (b *BlobHistoryDownloader) constrainActivePasses(safeThrough uint64) {
 }
 
 func (b *BlobHistoryDownloader) addPassCompletedRanges(pass *backfillPass, ranges []backfillRange) {
+	firstUnfrozenSlot := b.frozenBlobs()
+	b.trimCompletedBefore(firstUnfrozenSlot)
 	accepted := make([]backfillRange, 0, len(ranges))
 	for _, completed := range ranges {
-		if completed.start > pass.safeThrough {
+		if completed.start > pass.safeThrough || completed.end < firstUnfrozenSlot {
 			continue
 		}
+		completed.start = max(completed.start, firstUnfrozenSlot)
 		completed.end = min(completed.end, pass.safeThrough)
+		if completed.start > completed.end {
+			continue
+		}
 		accepted = append(accepted, completed)
 	}
 	b.addCompletedRanges(accepted)
+}
+
+func (b *BlobHistoryDownloader) constrainPassForCurrentHead(pass *backfillPass) {
+	if pass.generation == b.headGeneration {
+		return
+	}
+	pass.safeThrough = min(pass.safeThrough, pass.headSlot, b.headSlot.Load())
 }
 
 func (b *BlobHistoryDownloader) backfillRanges(head uint64) []backfillRange {
@@ -332,6 +360,25 @@ func (b *BlobHistoryDownloader) backfillRanges(head uint64) []backfillRange {
 	return ranges
 }
 
+func (b *BlobHistoryDownloader) frozenBlobs() uint64 {
+	if b.sn == nil {
+		return 0
+	}
+	return b.sn.FrozenBlobs()
+}
+
+func (b *BlobHistoryDownloader) unfrozenBackfillRanges(head, firstUnfrozenSlot uint64) []backfillRange {
+	ranges := b.backfillRanges(head)
+	unfrozen := ranges[:0]
+	for _, candidate := range ranges {
+		candidate.start = max(candidate.start, firstUnfrozenSlot)
+		if candidate.start <= candidate.end {
+			unfrozen = append(unfrozen, candidate)
+		}
+	}
+	return unfrozen
+}
+
 func (b *BlobHistoryDownloader) slotWithinBackfillRange(slot, head uint64) bool {
 	for _, r := range b.backfillRanges(head) {
 		if slot >= r.start && slot <= r.end {
@@ -342,12 +389,20 @@ func (b *BlobHistoryDownloader) slotWithinBackfillRange(slot, head uint64) bool 
 }
 
 func (b *BlobHistoryDownloader) completedRangeContains(start, end uint64) bool {
-	for _, completed := range b.completedRanges {
-		if start >= completed.start && end <= completed.end {
-			return true
+	index, found := slices.BinarySearchFunc(b.completedRanges, start, func(completed backfillRange, slot uint64) int {
+		switch {
+		case completed.end < slot:
+			return -1
+		case completed.start > slot:
+			return 1
+		default:
+			return 0
 		}
+	})
+	if !found {
+		return false
 	}
-	return false
+	return end <= b.completedRanges[index].end
 }
 
 func (b *BlobHistoryDownloader) completedSlot(slot uint64) bool {
@@ -372,6 +427,25 @@ func (b *BlobHistoryDownloader) trimCompletedRanges(safeThrough uint64) {
 		r.end = min(r.end, safeThrough)
 		kept = append(kept, r)
 	}
+	b.completedRanges = kept
+}
+
+func (b *BlobHistoryDownloader) trimCompletedBefore(firstUnfrozenSlot uint64) {
+	first := sort.Search(len(b.completedRanges), func(i int) bool {
+		return b.completedRanges[i].end >= firstUnfrozenSlot
+	})
+	if first == 0 {
+		if len(b.completedRanges) > 0 {
+			b.completedRanges[0].start = max(b.completedRanges[0].start, firstUnfrozenSlot)
+		}
+		return
+	}
+	if first == len(b.completedRanges) {
+		b.completedRanges = nil
+		return
+	}
+	kept := append([]backfillRange(nil), b.completedRanges[first:]...)
+	kept[0].start = max(kept[0].start, firstUnfrozenSlot)
 	b.completedRanges = kept
 }
 
@@ -412,6 +486,92 @@ func (b *BlobHistoryDownloader) incompleteRanges(desired []backfillRange) []back
 		}
 	}
 	return pending
+}
+
+func (b *BlobHistoryDownloader) completedAuditRanges(desired []backfillRange, firstUnfrozenSlot uint64) []backfillRange {
+	auditable := make([]backfillRange, 0, len(b.completedRanges))
+	for _, completed := range b.completedRanges {
+		for _, wanted := range desired {
+			start := max(completed.start, wanted.start, firstUnfrozenSlot)
+			end := min(completed.end, wanted.end)
+			if start <= end {
+				auditable = append(auditable, backfillRange{start: start, end: end})
+			}
+		}
+	}
+	return auditable
+}
+
+func (b *BlobHistoryDownloader) nextCompletionAuditRange(desired []backfillRange) backfillRange {
+	rangeIndex := len(desired) - 1
+	if b.auditInitialized {
+		for i, candidate := range desired {
+			if b.completionAudit >= candidate.start && b.completionAudit <= candidate.end {
+				rangeIndex = i
+				break
+			}
+		}
+	} else {
+		b.auditInitialized = true
+		b.completionAudit = desired[rangeIndex].end
+	}
+	selected := desired[rangeIndex]
+	end := b.completionAudit
+	if end < selected.start || end > selected.end {
+		end = selected.end
+	}
+	start := selected.start
+	if end-selected.start >= blocksBatchSize-1 {
+		start = end - (blocksBatchSize - 1)
+	}
+	switch {
+	case start > selected.start:
+		b.completionAudit = start - 1
+	case rangeIndex > 0:
+		b.completionAudit = desired[rangeIndex-1].end
+	default:
+		b.completionAudit = desired[len(desired)-1].end
+	}
+	return backfillRange{start: start, end: end}
+}
+
+func (b *BlobHistoryDownloader) removeCompletedRange(removed backfillRange) {
+	kept := make([]backfillRange, 0, len(b.completedRanges)+1)
+	for _, completed := range b.completedRanges {
+		if removed.end < completed.start || removed.start > completed.end {
+			kept = append(kept, completed)
+			continue
+		}
+		if completed.start < removed.start {
+			kept = append(kept, backfillRange{start: completed.start, end: removed.start - 1})
+		}
+		if removed.end < completed.end {
+			kept = append(kept, backfillRange{start: removed.end + 1, end: completed.end})
+		}
+	}
+	b.completedRanges = kept
+}
+
+func (b *BlobHistoryDownloader) revalidateCompletedRange(headSlot, generation uint64, audit backfillRange) error {
+	batch, _, _, err := b.collectIncompleteBlocks(audit.end, audit.start, headSlot)
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if generation != b.headGeneration {
+		return nil
+	}
+	if err != nil {
+		b.removeCompletedRange(audit)
+		b.backfillCompleted.Store(false)
+		return err
+	}
+	for _, block := range batch {
+		b.removeCompletedRange(backfillRange{start: block.GetSlot(), end: block.GetSlot()})
+	}
+	if len(batch) == 0 {
+		return nil
+	}
+	b.backfillCompleted.Store(false)
+	return nil
 }
 
 // Start begins the blob history download loop, querying every 12 seconds
@@ -462,11 +622,40 @@ func (b *BlobHistoryDownloader) run() {
 func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 	b.mu.Lock()
 	headSlot := b.headSlot.Load()
-	desiredRanges := b.backfillRanges(headSlot)
+	headGeneration := b.headGeneration
+	firstUnfrozenSlot := b.frozenBlobs()
+	b.trimCompletedBefore(firstUnfrozenSlot)
+	desiredRanges := b.unfrozenBackfillRanges(headSlot, firstUnfrozenSlot)
 	if len(desiredRanges) == 0 {
 		b.backfillCompleted.Store(true)
 		b.mu.Unlock()
 		return nil
+	}
+	auditableRanges := b.completedAuditRanges(desiredRanges, firstUnfrozenSlot)
+	var audit *backfillRange
+	if len(auditableRanges) > 0 {
+		next := b.nextCompletionAuditRange(auditableRanges)
+		audit = &next
+	}
+	b.mu.Unlock()
+	if audit != nil {
+		if err := b.revalidateCompletedRange(headSlot, headGeneration, *audit); err != nil {
+			return err
+		}
+	}
+
+	b.mu.Lock()
+	if headGeneration != b.headGeneration {
+		headSlot = b.headSlot.Load()
+		headGeneration = b.headGeneration
+		firstUnfrozenSlot = b.frozenBlobs()
+		b.trimCompletedBefore(firstUnfrozenSlot)
+		desiredRanges = b.unfrozenBackfillRanges(headSlot, firstUnfrozenSlot)
+		if len(desiredRanges) == 0 {
+			b.backfillCompleted.Store(true)
+			b.mu.Unlock()
+			return nil
+		}
 	}
 	pendingRanges := b.incompleteRanges(desiredRanges)
 	if len(pendingRanges) == 0 {
@@ -478,7 +667,7 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 	if b.transitionActive {
 		passCeiling = b.transitionCeiling
 	}
-	pass := &backfillPass{safeThrough: passCeiling}
+	pass := &backfillPass{safeThrough: passCeiling, headSlot: headSlot, generation: headGeneration}
 	if b.activePasses == nil {
 		b.activePasses = make(map[*backfillPass]struct{})
 	}
@@ -516,20 +705,39 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 	}
 
 	var passErr error
+	partiallyCompleted := make([]backfillRange, 0)
+	defer func() {
+		if len(partiallyCompleted) == 0 {
+			return
+		}
+		b.mu.Lock()
+		b.constrainPassForCurrentHead(pass)
+		b.addPassCompletedRanges(pass, partiallyCompleted)
+		b.mu.Unlock()
+	}()
 	for _, work := range slices.Backward(pendingRanges) {
 		currentSlot := work.end
 		targetSlot := work.start
 		for currentSlot >= targetSlot {
-			firstUnfrozenSlot := max(targetSlot, b.sn.FrozenBlobs())
+			firstUnfrozenSlot := max(targetSlot, b.frozenBlobs())
 			if currentSlot < firstUnfrozenSlot {
 				break
 			}
 			if !b.syncedChecker.Synced() {
-				time.Sleep(5 * time.Second)
+				timer := time.NewTimer(5 * time.Second)
+				select {
+				case <-b.ctx.Done():
+					if !timer.Stop() {
+						<-timer.C
+					}
+					return b.ctx.Err()
+				case <-timer.C:
+				}
 				continue
 			}
 
-			batch, visited, err := b.collectIncompleteBlocks(currentSlot, firstUnfrozenSlot, headSlot)
+			batch, alreadyCompleted, visited, err := b.collectIncompleteBlocks(currentSlot, firstUnfrozenSlot, headSlot)
+			partiallyCompleted = append(partiallyCompleted, alreadyCompleted...)
 			if err != nil {
 				return err
 			}
@@ -567,9 +775,7 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 						continue
 					}
 					if complete {
-						b.mu.Lock()
-						b.addPassCompletedRanges(pass, []backfillRange{{start: block.GetSlot(), end: block.GetSlot()}})
-						b.mu.Unlock()
+						partiallyCompleted = append(partiallyCompleted, backfillRange{start: block.GetSlot(), end: block.GetSlot()})
 					}
 				}
 			}
@@ -591,9 +797,10 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 	}
 
 	b.mu.Lock()
+	b.constrainPassForCurrentHead(pass)
 	b.addPassCompletedRanges(pass, pendingRanges)
-	currentDesiredRanges := b.backfillRanges(b.headSlot.Load())
-	complete := b.completedRangesContain(currentDesiredRanges)
+	currentDesiredRanges := b.unfrozenBackfillRanges(b.headSlot.Load(), b.frozenBlobs())
+	complete := len(currentDesiredRanges) == 0 || b.completedRangesContain(currentDesiredRanges)
 	b.backfillCompleted.Store(complete)
 	notify := b.notifyBlobBackfilled
 	b.mu.Unlock()
@@ -612,10 +819,10 @@ func intervalsTouch(firstStart, firstEnd, secondStart, secondEnd uint64) bool {
 
 // collectIncompleteBlocks scans backwards from currentSlot for Deneb+ blocks still
 // missing blobs. Its read tx is released before the caller's network download.
-func (b *BlobHistoryDownloader) collectIncompleteBlocks(currentSlot, targetSlot, rangeHead uint64) (batch []*cltypes.SignedBeaconBlock, visited uint64, err error) {
+func (b *BlobHistoryDownloader) collectIncompleteBlocks(currentSlot, targetSlot, rangeHead uint64) (batch []*cltypes.SignedBeaconBlock, completed []backfillRange, visited uint64, err error) {
 	tx, err := b.indiciesDB.BeginRo(b.ctx)
 	if err != nil {
-		return nil, 0, err
+		return nil, nil, 0, err
 	}
 	defer tx.Rollback()
 
@@ -626,17 +833,23 @@ func (b *BlobHistoryDownloader) collectIncompleteBlocks(currentSlot, targetSlot,
 		}
 		block, err := b.blockReader.ReadBeaconBlockBodyBySlot(b.ctx, tx, currentSlot-visited)
 		if err != nil {
-			return nil, 0, err
+			return batch, completed, visited, err
 		}
 		if block == nil {
 			canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, currentSlot-visited)
 			if err != nil {
-				return nil, 0, err
+				return batch, completed, visited, err
 			}
 			if canonicalRoot != (common.Hash{}) {
-				return nil, 0, fmt.Errorf("canonical block body is unavailable at slot %d", currentSlot-visited)
+				return batch, completed, visited, fmt.Errorf("canonical block body is unavailable at slot %d", currentSlot-visited)
 			}
 			continue
+		}
+		if block.Block == nil {
+			return batch, completed, visited, fmt.Errorf("canonical block is incomplete at slot %d", currentSlot-visited)
+		}
+		if block.Block.Body == nil {
+			return batch, completed, visited, fmt.Errorf("canonical block body is incomplete at slot %d", currentSlot-visited)
 		}
 		if block.Version() < clparams.DenebVersion {
 			break
@@ -644,27 +857,25 @@ func (b *BlobHistoryDownloader) collectIncompleteBlocks(currentSlot, targetSlot,
 		if !b.slotWithinBackfillRange(currentSlot-visited, rangeHead) {
 			continue
 		}
-		blockRoot, err := block.Block.HashSSZ()
-		if err != nil {
-			return nil, 0, err
-		}
 		commitments := block.Block.Body.GetBlobKzgCommitments()
 		if commitments == nil {
-			// For GLOAS, nil means SignedExecutionPayloadBid is absent — unexpected for a valid block.
-			// For pre-GLOAS this should not happen on Deneb+.
-			b.logger.Warn("[BlobHistoryDownloader] skipping block with nil kzg commitments", "slot", block.Block.Slot, "version", block.Version())
-			continue
+			return batch, completed, visited, fmt.Errorf("canonical block at slot %d has nil kzg commitments", block.Block.Slot)
+		}
+		blockRoot, err := block.Block.HashSSZ()
+		if err != nil {
+			return batch, completed, visited, err
 		}
 		complete, err := b.actualBlobSetComplete(block, blockRoot)
 		if err != nil {
-			return nil, 0, err
+			return batch, completed, visited, err
 		}
 		if complete {
+			completed = append(completed, backfillRange{start: block.GetSlot(), end: block.GetSlot()})
 			continue
 		}
 		batch = append(batch, block)
 	}
-	return batch, visited, nil
+	return batch, completed, visited, nil
 }
 
 func (b *BlobHistoryDownloader) actualBlobSetComplete(block *cltypes.SignedBeaconBlock, blockRoot common.Hash) (bool, error) {
@@ -680,6 +891,12 @@ func (b *BlobHistoryDownloader) actualBlobSetComplete(block *cltypes.SignedBeaco
 		return false, err
 	}
 	sidecars, complete, err := b.blobStorage.ReadBlobSidecars(b.ctx, block.GetSlot(), blockRoot)
+	if errors.Is(err, blob_storage.ErrBlobSidecarCorrupt) {
+		if removeErr := b.blobStorage.RemoveBlobSidecars(b.ctx, block.GetSlot(), blockRoot); removeErr != nil {
+			return false, errors.Join(err, removeErr)
+		}
+		return false, nil
+	}
 	if err != nil || !complete || len(sidecars) != commitments.Len() {
 		return false, err
 	}
@@ -694,6 +911,15 @@ func (b *BlobHistoryDownloader) actualBlobSetComplete(block *cltypes.SignedBeaco
 			return false, err
 		}
 		if sidecarRoot != blockRoot {
+			return false, nil
+		}
+		if sidecar.SignedBlockHeader.Signature != block.Signature {
+			return false, nil
+		}
+		if err := kzg.Ctx().VerifyBlobKZGProof((*goethkzg.Blob)(&sidecar.Blob), goethkzg.KZGCommitment(sidecar.KzgCommitment), goethkzg.KZGProof(sidecar.KzgProof)); err != nil {
+			return false, nil
+		}
+		if block.Version() < clparams.GloasVersion && !cltypes.VerifyCommitmentInclusionProof(sidecar.KzgCommitment, sidecar.CommitmentInclusionProof, sidecar.Index, clparams.DenebVersion, sidecar.SignedBlockHeader.Header.BodyRoot) {
 			return false, nil
 		}
 	}
@@ -739,7 +965,7 @@ func (b *BlobHistoryDownloader) recoverDenebBlobs(blocks []*cltypes.SignedBeacon
 	}
 	remaining := req
 	for remaining.Len() > 0 {
-		blobs, err := b.requestBlobs(b.ctx, b.rpc, remaining)
+		blobs, err := b.requestBlobs(b.ctx, b.rpc, remaining, batch.validateCandidate)
 		if err != nil {
 			return fmt.Errorf("request blobs: %w", err)
 		}
@@ -904,6 +1130,23 @@ func (b *denebRecoveryBatch) validate(req *solid.ListSSZ[*cltypes.BlobIdentifier
 		group.sidecars[sidecar.Index] = sidecar
 	}
 	return len(sidecars), nil
+}
+
+func (b *denebRecoveryBatch) validateCandidate(sidecars []*cltypes.BlobSidecar) error {
+	for _, sidecar := range sidecars {
+		root, err := sidecar.SignedBlockHeader.Header.HashSSZ()
+		if err != nil {
+			return err
+		}
+		group := b.groups[root]
+		if group == nil || group.block == nil {
+			return fmt.Errorf("blob response block %x is not in batch", root)
+		}
+		if sidecar.SignedBlockHeader.Signature != group.block.Signature {
+			return errors.New("signature mismatch between blob and stored block")
+		}
+	}
+	return nil
 }
 
 func (b *denebRecoveryBatch) store(ctx context.Context, storage blob_storage.BlobStorage) error {

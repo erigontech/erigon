@@ -107,6 +107,24 @@ func TestBlobHistoryDownloaderTreatsZeroCanonicalRootAsEmptySlot(t *testing.T) {
 	require.False(t, downloader.BlobBackfillPending(slot))
 }
 
+func TestBlobHistoryDownloaderRejectsBlockWithoutMessage(t *testing.T) {
+	const slot = uint64(100)
+	downloader := newBoundaryDownloader(t, slot, 0, slot, 1, &boundaryBlockReader{
+		block: &cltypes.SignedBeaconBlock{},
+	})
+
+	require.ErrorContains(t, downloader.downloadOnce(false), "canonical block is incomplete")
+}
+
+func TestBlobHistoryDownloaderRejectsBlockWithoutBody(t *testing.T) {
+	const slot = uint64(100)
+	downloader := newBoundaryDownloader(t, slot, 0, slot, 1, &boundaryBlockReader{
+		block: &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: slot}},
+	})
+
+	require.ErrorContains(t, downloader.downloadOnce(false), "canonical block body is incomplete")
+}
+
 func newBoundaryDownloader(t *testing.T, headSlot, frozenBlobs, targetSlot, peers uint64, reader freezeblocks.BeaconSnapshotReader) *BlobHistoryDownloader {
 	t.Helper()
 	beaconCfg := clparams.MainnetBeaconConfig
@@ -132,6 +150,7 @@ type boundaryBlockReader struct {
 	freezeblocks.BeaconSnapshotReader
 	slots  []uint64
 	err    error
+	block  *cltypes.SignedBeaconBlock
 	onRead func(uint64)
 }
 
@@ -140,7 +159,7 @@ func (r *boundaryBlockReader) ReadBeaconBlockBodyBySlot(_ context.Context, _ kv.
 	if r.onRead != nil {
 		r.onRead(slot)
 	}
-	return nil, r.err
+	return r.block, r.err
 }
 
 type boundaryPeerClient uint64

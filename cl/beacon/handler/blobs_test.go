@@ -27,6 +27,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -37,6 +38,7 @@ import (
 	forkchoicemock "github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
@@ -125,6 +127,19 @@ func (r unavailableBlobBodyReader) ReadBeaconBlockBodyBySlot(context.Context, kv
 	return nil, nil
 }
 
+type nilCommitmentsBlobBlockReader struct {
+	freezeblocks.BeaconSnapshotReader
+	block *cltypes.SignedBeaconBlock
+}
+
+func (r nilCommitmentsBlobBlockReader) ReadBlockByRoot(context.Context, kv.Tx, common.Hash) (*cltypes.SignedBeaconBlock, error) {
+	return r.block, nil
+}
+
+func (r nilCommitmentsBlobBlockReader) ReadBeaconBlockBodyBySlot(context.Context, kv.Tx, uint64) (*cltypes.SignedBeaconBlock, error) {
+	return r.block, nil
+}
+
 func (r frozenBlobSnapshotReader) FrozenBlobs() uint64 { return r.frozenBlobsExclusive }
 func (r frozenBlobSnapshotReader) ReadBlobSidecars(slot uint64) ([]*cltypes.BlobSidecar, error) {
 	if r.err != nil {
@@ -147,10 +162,7 @@ func TestGetBlobsFromFrozenSnapshots(t *testing.T) {
 
 	f.handler.caplinSnapshots = frozenBlobSnapshotReader{
 		frozenBlobsExclusive: f.slot + 1,
-		sidecars: []*cltypes.BlobSidecar{
-			{Index: 0, Blob: cltypes.Blob{1}},
-			{Index: 1, Blob: cltypes.Blob{2}},
-		},
+		sidecars:             f.sidecars,
 	}
 
 	out := getBeaconBlobs(t, f)
@@ -244,6 +256,26 @@ func TestGetBlobSidecarsReturnsRequestedStoredIndexFromIncompleteBlock(t *testin
 	require.Equal(t, "0", envelope.Data[0].Index)
 }
 
+func TestGetBlobSidecarsUnavailableForIncompleteCanonicalStorageAfterBackfill(t *testing.T) {
+	f := setupBlobsTest(t)
+	f.handler.blobBackfillStatus = blobBackfillStatusStub(false)
+	f.handler.blobStoage = partialBlobStorage{BlobStorage: f.handler.blobStoage, sidecars: f.sidecars[:1]}
+
+	for _, tc := range []struct {
+		name       string
+		query      string
+		statusCode int
+	}{
+		{name: "all", statusCode: http.StatusServiceUnavailable},
+		{name: "missing index", query: "?indices=1", statusCode: http.StatusServiceUnavailable},
+		{name: "stored index", query: "?indices=0", statusCode: http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.statusCode, getBlobSidecarsStatus(t, f, tc.query))
+		})
+	}
+}
+
 func TestGetBlobSidecarsDoesNotTrustTooSmallCompleteSet(t *testing.T) {
 	testCases := []struct {
 		name       string
@@ -263,6 +295,243 @@ func TestGetBlobSidecarsDoesNotTrustTooSmallCompleteSet(t *testing.T) {
 			require.Equal(t, tc.statusCode, getBlobSidecarsStatus(t, f, tc.query))
 		})
 	}
+}
+
+func TestCanonicalCompleteStorageRejectsDuplicateBlobIndex(t *testing.T) {
+	f := setupBlobsTest(t)
+	f.handler.blobBackfillStatus = blobBackfillStatusStub(false)
+	f.handler.blobStoage = partialBlobStorage{
+		BlobStorage: f.handler.blobStoage,
+		sidecars:    []*cltypes.BlobSidecar{f.sidecars[0], f.sidecars[0]},
+		complete:    true,
+	}
+
+	require.Equal(t, http.StatusServiceUnavailable, getBlobSidecarsStatus(t, f, ""))
+	require.Equal(t, http.StatusServiceUnavailable, getBlobSidecarsStatus(t, f, "?indices=1"))
+	require.Equal(t, http.StatusServiceUnavailable, getBeaconBlobsStatusWithQuery(t, f, ""))
+	require.Equal(t, http.StatusServiceUnavailable, getBeaconBlobsStatusWithQuery(t, f, "?versioned_hashes="+f.versionedHash.Hex()))
+}
+
+func TestCanonicalCompleteStorageRejectsWrongBlobIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*cltypes.BlobSidecar)
+	}{
+		{
+			name: "block root",
+			mutate: func(sidecar *cltypes.BlobSidecar) {
+				header := *sidecar.SignedBlockHeader.Header
+				header.ParentRoot[0] ^= 0xff
+				signedHeader := *sidecar.SignedBlockHeader
+				signedHeader.Header = &header
+				sidecar.SignedBlockHeader = &signedHeader
+			},
+		},
+		{
+			name: "commitment",
+			mutate: func(sidecar *cltypes.BlobSidecar) {
+				sidecar.KzgCommitment[0] ^= 0xff
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := setupBlobsTest(t)
+			invalid := *f.sidecars[1]
+			tc.mutate(&invalid)
+			f.handler.blobBackfillStatus = blobBackfillStatusStub(false)
+			f.handler.blobStoage = partialBlobStorage{
+				BlobStorage: f.handler.blobStoage,
+				sidecars:    []*cltypes.BlobSidecar{f.sidecars[0], &invalid},
+				complete:    true,
+			}
+
+			require.Equal(t, http.StatusServiceUnavailable, getBlobSidecarsStatus(t, f, ""))
+			require.Equal(t, http.StatusServiceUnavailable, getBlobSidecarsStatus(t, f, "?indices=1"))
+			require.Equal(t, http.StatusServiceUnavailable, getBeaconBlobsStatusWithQuery(t, f, ""))
+			require.Equal(t, http.StatusServiceUnavailable, getBeaconBlobsStatusWithQuery(t, f, "?versioned_hashes="+f.versionedHash.Hex()))
+		})
+	}
+}
+
+func TestCanonicalCompleteStorageRejectsInvalidBlobCryptography(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*cltypes.BlobSidecar)
+	}{
+		{
+			name: "signature",
+			mutate: func(sidecar *cltypes.BlobSidecar) {
+				signedHeader := *sidecar.SignedBlockHeader
+				signedHeader.Signature[0] ^= 0xff
+				sidecar.SignedBlockHeader = &signedHeader
+			},
+		},
+		{
+			name: "blob",
+			mutate: func(sidecar *cltypes.BlobSidecar) {
+				sidecar.Blob[0] ^= 0xff
+			},
+		},
+		{
+			name: "proof",
+			mutate: func(sidecar *cltypes.BlobSidecar) {
+				sidecar.KzgProof[0] ^= 0xff
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := setupBlobsTest(t)
+			invalid := *f.sidecars[1]
+			tc.mutate(&invalid)
+			f.handler.blobBackfillStatus = blobBackfillStatusStub(false)
+			f.handler.blobStoage = partialBlobStorage{
+				BlobStorage: f.handler.blobStoage,
+				sidecars:    []*cltypes.BlobSidecar{f.sidecars[0], &invalid},
+				complete:    true,
+			}
+
+			require.Equal(t, http.StatusServiceUnavailable, getBlobSidecarsStatus(t, f, "?indices=1"))
+			require.Equal(t, http.StatusServiceUnavailable, getBeaconBlobsStatusWithQuery(t, f, "?versioned_hashes="+f.versionedHash.Hex()))
+		})
+	}
+}
+
+func TestSideBranchCompleteStorageFiltersInvalidBlobSidecars(t *testing.T) {
+	f := setupBlobsTest(t)
+	invalid := *f.sidecars[1]
+	signedHeader := *invalid.SignedBlockHeader
+	signedHeader.Signature[0] ^= 0xff
+	invalid.SignedBlockHeader = &signedHeader
+	f.handler.blobStoage = partialBlobStorage{
+		BlobStorage: f.handler.blobStoage,
+		sidecars:    []*cltypes.BlobSidecar{f.sidecars[0], &invalid},
+		complete:    true,
+	}
+	tx, err := f.handler.indiciesDB.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, beacon_indicies.MarkRootCanonical(t.Context(), tx, f.slot, common.Hash{0xff}))
+	require.NoError(t, tx.Commit())
+
+	require.Equal(t, 1, getBlobSidecarsDataLenByID(t, f.handler, f.blockRoot.Hex()))
+	require.Equal(t, 1, getBeaconBlobsDataLenByID(t, f.handler, f.blockRoot.Hex()))
+}
+
+func TestFrozenSnapshotFiltersDuplicateAndInvalidBlobSidecars(t *testing.T) {
+	f := setupBlobsTest(t)
+	invalid := *f.sidecars[1]
+	signedHeader := *invalid.SignedBlockHeader
+	signedHeader.Signature[0] ^= 0xff
+	invalid.SignedBlockHeader = &signedHeader
+	f.handler.caplinSnapshots = frozenBlobSnapshotReader{
+		frozenBlobsExclusive: f.slot + 1,
+		sidecars:             []*cltypes.BlobSidecar{f.sidecars[0], f.sidecars[0], &invalid},
+	}
+
+	require.Equal(t, 1, getBlobSidecarsDataLenByID(t, f.handler, strconv.FormatUint(f.slot, 10)))
+	require.Equal(t, 1, getBeaconBlobsDataLenByID(t, f.handler, strconv.FormatUint(f.slot, 10)))
+}
+
+func TestBlobStorageValidationSurvivesFrozenBoundaryAdvance(t *testing.T) {
+	f := setupBlobsTest(t)
+	invalid := *f.sidecars[1]
+	signedHeader := *invalid.SignedBlockHeader
+	signedHeader.Signature[0] ^= 0xff
+	invalid.SignedBlockHeader = &signedHeader
+	snapshots := &advancingFrozenBlobSnapshots{sidecars: []*cltypes.BlobSidecar{f.sidecars[0], &invalid}}
+	snapshots.frozen.Store(f.slot)
+	f.handler.caplinSnapshots = snapshots
+	f.handler.blobStoage = freezingBlobStorage{BlobStorage: f.handler.blobStoage, snapshots: snapshots, freezeAt: f.slot + 1}
+
+	require.Equal(t, 1, getBlobSidecarsDataLenByID(t, f.handler, strconv.FormatUint(f.slot, 10)))
+}
+
+func TestCanonicalGloasStorageAcceptsSidecarWithoutInclusionProof(t *testing.T) {
+	blob := cltypes.Blob{1}
+	commitment, err := kzg.Ctx().BlobToKZGCommitment((*goethkzg.Blob)(&blob), 0)
+	require.NoError(t, err)
+	proof, err := kzg.Ctx().ComputeBlobKZGProof((*goethkzg.Blob)(&blob), commitment, 0)
+	require.NoError(t, err)
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	block.Block.Slot = 100
+	blockCommitment := cltypes.KZGCommitment(commitment)
+	block.Block.Body.SignedExecutionPayloadBid.Message.BlobKzgCommitments.Append(&blockCommitment)
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	sidecar := cltypes.NewBlobSidecar(
+		0,
+		&blob,
+		common.Bytes48(commitment),
+		common.Bytes48(proof),
+		block.SignedBeaconBlockHeader(),
+		solid.NewHashVector(cltypes.CommitmentBranchSize),
+	)
+
+	valid, complete, err := validateBlobSidecars(block, blockRoot, []*cltypes.BlobSidecar{sidecar})
+
+	require.NoError(t, err)
+	require.True(t, complete)
+	require.Equal(t, []*cltypes.BlobSidecar{sidecar}, valid)
+}
+
+func TestPreDenebCanonicalBlockDoesNotServeStrayStoredSidecar(t *testing.T) {
+	db, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
+	block := blocks[0]
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	slot := block.Block.Slot
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, beacon_indicies.WriteHeaderSlot(tx, blockRoot, slot))
+	require.NoError(t, beacon_indicies.MarkRootCanonical(t.Context(), tx, slot, blockRoot))
+	require.NoError(t, tx.Commit())
+	handler.blobStoage = partialBlobStorage{
+		BlobStorage: handler.blobStoage,
+		sidecars:    []*cltypes.BlobSidecar{{Index: 0, Blob: cltypes.Blob{1}}},
+		complete:    true,
+	}
+	f := blobsTestFixture{handler: handler, fcu: fcu, slot: slot, blockRoot: blockRoot}
+
+	require.Equal(t, http.StatusOK, getBlobSidecarsStatus(t, f, ""))
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+	resp, err := http.Get(server.URL + "/eth/v1/beacon/blob_sidecars/" + strconv.FormatUint(slot, 10))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	var envelope struct {
+		Data []json.RawMessage `json:"data"`
+	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&envelope))
+	require.Empty(t, envelope.Data)
+}
+
+func getBlobSidecarsDataLenByID(t *testing.T, handler *ApiHandler, blockID string) int {
+	t.Helper()
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+	resp, err := http.Get(server.URL + "/eth/v1/beacon/blob_sidecars/" + blockID)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var envelope struct {
+		Data []json.RawMessage `json:"data"`
+	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&envelope))
+	return len(envelope.Data)
+}
+
+func getBeaconBlobsDataLenByID(t *testing.T, handler *ApiHandler, blockID string) int {
+	t.Helper()
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+	resp, err := http.Get(server.URL + "/eth/v1/beacon/blobs/" + blockID)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var envelope beaconBlobsResponse
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&envelope))
+	return len(envelope.Data)
 }
 
 func TestGetBlobSidecarsUnavailableForRequestedMissingIndex(t *testing.T) {
@@ -317,6 +586,17 @@ func TestGetBlobSidecarsEmptyForBlockWithoutCommitmentsDuringBackfill(t *testing
 	require.Equal(t, http.StatusOK, getBlobSidecarsStatus(t, f, ""))
 }
 
+func TestGetBlobSidecarsRejectsNilCommitmentsDuringBackfill(t *testing.T) {
+	f := setupBlobsTestWithoutCommitments(t)
+	f.handler.blobBackfillStatus = blobBackfillStatusStub(true)
+	block, err := f.handler.blockReader.ReadBlockByRoot(t.Context(), nil, f.blockRoot)
+	require.NoError(t, err)
+	block.Block.Body.BlobKzgCommitments = nil
+	f.handler.blockReader = nilCommitmentsBlobBlockReader{BeaconSnapshotReader: f.handler.blockReader, block: block}
+
+	require.Equal(t, http.StatusInternalServerError, getBlobSidecarsStatus(t, f, ""))
+}
+
 func TestGetBlobSidecarsEmptyForUnmatchedIndexDuringBackfill(t *testing.T) {
 	f := setupBlobsTest(t)
 	f.handler.blobBackfillStatus = blobBackfillStatusStub(true)
@@ -356,7 +636,7 @@ func TestReadBlobSidecarsRechecksPendingAfterIncompleteReread(t *testing.T) {
 	require.Equal(t, int64(2), status.calls.Load())
 }
 
-func TestGetBlobSidecarsDoesNotRereadWithoutBackfillTransition(t *testing.T) {
+func TestGetBlobSidecarsReturnsUnavailableWithoutRereadAfterBackfill(t *testing.T) {
 	f := setupBlobsTest(t)
 	storage := &completingBlobStorage{BlobStorage: f.handler.blobStoage, sidecars: f.sidecars}
 	f.handler.blobStoage = storage
@@ -367,12 +647,7 @@ func TestGetBlobSidecarsDoesNotRereadWithoutBackfillTransition(t *testing.T) {
 	resp, err := http.Get(server.URL + "/eth/v1/beacon/blob_sidecars/" + strconv.FormatUint(f.slot, 10) + "?indices=0")
 	require.NoError(t, err)
 	defer resp.Body.Close()
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-	var envelope struct {
-		Data []json.RawMessage `json:"data"`
-	}
-	require.NoError(t, json.NewDecoder(resp.Body).Decode(&envelope))
-	require.Empty(t, envelope.Data)
+	require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
 	require.Equal(t, int64(1), storage.reads.Load())
 }
 
@@ -400,13 +675,11 @@ func TestGetBlobSidecarsFrozenMissingDuringBackfillKeepsExistingResponse(t *test
 	require.Equal(t, http.StatusOK, getBlobSidecarsStatus(t, f, ""))
 }
 
-func TestGetBlobsEmptyAfterBackfillCompleted(t *testing.T) {
+func TestGetBlobsUnavailableWhenStorageIsIncompleteAfterBackfill(t *testing.T) {
 	f := setupBlobsTest(t)
 	f.handler.blobBackfillStatus = blobBackfillStatusStub(false)
 
-	out := getBeaconBlobs(t, f)
-
-	require.Empty(t, out.Data)
+	require.Equal(t, http.StatusServiceUnavailable, getBeaconBlobsStatus(t, f))
 }
 
 func TestGetBlobsReturnsStoredDataDuringBackfill(t *testing.T) {
@@ -427,6 +700,28 @@ func TestGetBlobsReturnsRequestedStoredDataFromIncompleteBlock(t *testing.T) {
 	out := getBeaconBlobs(t, f)
 
 	require.Len(t, out.Data, 1)
+}
+
+func TestGetBlobsDoesNotReturnIncompleteCanonicalStorageAfterBackfill(t *testing.T) {
+	f := setupBlobsTest(t)
+	f.handler.blobBackfillStatus = blobBackfillStatusStub(false)
+	f.handler.blobStoage = partialBlobStorage{BlobStorage: f.handler.blobStoage, sidecars: f.sidecars[:1]}
+	storedHash, err := utils.KzgCommitmentToVersionedHash(f.sidecars[0].KzgCommitment)
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name       string
+		query      string
+		statusCode int
+	}{
+		{name: "all", statusCode: http.StatusServiceUnavailable},
+		{name: "missing hash", query: "?versioned_hashes=" + f.versionedHash.Hex(), statusCode: http.StatusServiceUnavailable},
+		{name: "stored hash", query: "?versioned_hashes=" + storedHash.Hex(), statusCode: http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.statusCode, getBeaconBlobsStatusWithQuery(t, f, tc.query))
+		})
+	}
 }
 
 func TestGetBlobsUnavailableWhenAnyRequestedHashIsMissing(t *testing.T) {
@@ -495,6 +790,17 @@ func TestGetBlobsEmptyForBlockWithoutCommitmentsDuringBackfill(t *testing.T) {
 	out := getBeaconBlobs(t, f)
 
 	require.Empty(t, out.Data)
+}
+
+func TestGetBlobsRejectsNilCommitmentsDuringBackfill(t *testing.T) {
+	f := setupBlobsTestWithoutCommitments(t)
+	f.handler.blobBackfillStatus = blobBackfillStatusStub(true)
+	block, err := f.handler.blockReader.ReadBlockByRoot(t.Context(), nil, f.blockRoot)
+	require.NoError(t, err)
+	block.Block.Body.BlobKzgCommitments = nil
+	f.handler.blockReader = nilCommitmentsBlobBlockReader{BeaconSnapshotReader: f.handler.blockReader, block: block}
+
+	require.Equal(t, http.StatusInternalServerError, getBeaconBlobsStatus(t, f))
 }
 
 func TestGetBlobsErrorsWhenFrozenSnapshotReadFails(t *testing.T) {
@@ -660,7 +966,7 @@ func getBlobSidecarsStatus(t *testing.T, f blobsTestFixture, query string) int {
 
 func setupBlobsTest(t *testing.T) blobsTestFixture {
 	t.Helper()
-	return setupBlobsTestWithCommitments(t, []cltypes.KZGCommitment{{69}, {1}})
+	return setupBlobsTestWithCommitments(t, make([]cltypes.KZGCommitment, 2))
 }
 
 func setupBlobsTestWithoutCommitments(t *testing.T) blobsTestFixture {
@@ -676,7 +982,16 @@ func setupBlobsTestWithCommitments(t *testing.T, commitments []cltypes.KZGCommit
 	slot := block.Block.Slot
 
 	block.Block.Body.BlobKzgCommitments.Clear()
+	blobs := make([]cltypes.Blob, len(commitments))
+	proofs := make([]common.Bytes48, len(commitments))
 	for i := range commitments {
+		blobs[i][0] = byte(i + 1)
+		commitment, err := kzg.Ctx().BlobToKZGCommitment((*goethkzg.Blob)(&blobs[i]), 0)
+		require.NoError(t, err)
+		proof, err := kzg.Ctx().ComputeBlobKZGProof((*goethkzg.Blob)(&blobs[i]), commitment, 0)
+		require.NoError(t, err)
+		commitments[i] = cltypes.KZGCommitment(commitment)
+		proofs[i] = common.Bytes48(proof)
 		block.Block.Body.BlobKzgCommitments.Append(&commitments[i])
 	}
 	blockRoot, err := block.Block.HashSSZ()
@@ -688,13 +1003,19 @@ func setupBlobsTestWithCommitments(t *testing.T, commitments []cltypes.KZGCommit
 	}
 	sidecars := make([]*cltypes.BlobSidecar, len(commitments))
 	for i := range commitments {
+		branch, err := block.Block.Body.KzgCommitmentMerkleProof(i)
+		require.NoError(t, err)
+		inclusionProof := solid.NewHashVector(cltypes.CommitmentBranchSize)
+		for branchIndex, hash := range branch {
+			inclusionProof.Set(branchIndex, hash)
+		}
 		sidecars[i] = cltypes.NewBlobSidecar(
 			uint64(i),
-			&cltypes.Blob{byte(i + 1)},
+			&blobs[i],
 			common.Bytes48(commitments[i]),
-			common.Bytes48{},
+			proofs[i],
 			block.SignedBeaconBlockHeader(),
-			solid.NewHashVector(cltypes.CommitmentBranchSize),
+			inclusionProof,
 		)
 	}
 

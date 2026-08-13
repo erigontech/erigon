@@ -19,6 +19,7 @@ package blob_storage
 import (
 	"context"
 	"encoding/binary"
+	"math"
 	"strconv"
 	"testing"
 
@@ -103,6 +104,50 @@ func TestBlobDB(t *testing.T) {
 	require.Equal(t, s2.KzgProof, sidecars[1].KzgProof)
 	require.Equal(t, s1.SignedBlockHeader, sidecars[0].SignedBlockHeader)
 	require.Equal(t, s2.SignedBlockHeader, sidecars[1].SignedBlockHeader)
+}
+
+func TestRemoveBlobSidecarsContinuesPastMissingFile(t *testing.T) {
+	db := setupTestDB(t)
+	fs := afero.NewMemMapFs()
+	store := NewBlobStore(db, fs, 12, &clparams.MainnetBeaconConfig, nil)
+	root := common.Hash{2}
+	sidecars := []*cltypes.BlobSidecar{
+		cltypes.NewBlobSidecar(0, &cltypes.Blob{}, common.Bytes48{}, common.Bytes48{}, &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{Slot: 2}}, solid.NewHashVector(cltypes.CommitmentBranchSize)),
+		cltypes.NewBlobSidecar(1, &cltypes.Blob{}, common.Bytes48{}, common.Bytes48{}, &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{Slot: 2}}, solid.NewHashVector(cltypes.CommitmentBranchSize)),
+	}
+	require.NoError(t, store.WriteBlobSidecars(t.Context(), root, sidecars))
+	_, firstPath := blobSidecarFilePath(2, 0, root)
+	require.NoError(t, fs.Remove(firstPath))
+
+	require.NoError(t, store.RemoveBlobSidecars(t.Context(), 2, root))
+	count, err := store.KzgCommitmentsCount(t.Context(), root)
+	require.NoError(t, err)
+	require.Zero(t, count)
+}
+
+func TestRemoveBlobSidecarsClearsMalformedMetadataWithoutScanning(t *testing.T) {
+	for name, metadata := range map[string][]byte{
+		"short": {1},
+		"oversized": func() []byte {
+			value := make([]byte, 4)
+			binary.LittleEndian.PutUint32(value, math.MaxUint32)
+			return value
+		}(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			db := setupTestDB(t)
+			store := NewBlobStore(db, afero.NewMemMapFs(), 12, &clparams.MainnetBeaconConfig, nil)
+			root := common.Hash{3}
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				return tx.Put(kv.BlockRootToKzgCommitments, root[:], metadata)
+			}))
+
+			require.NoError(t, store.RemoveBlobSidecars(t.Context(), 3, root))
+			count, err := store.KzgCommitmentsCount(t.Context(), root)
+			require.NoError(t, err)
+			require.Zero(t, count)
+		})
+	}
 }
 
 func TestReadBlobSidecarsReturnsAvailableSidecarsWhenBlockIsIncomplete(t *testing.T) {
