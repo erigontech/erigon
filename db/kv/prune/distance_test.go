@@ -99,6 +99,37 @@ func TestParseHistoryDistance(t *testing.T) {
 	}
 }
 
+// Every state-history flag maps "keep-all" to its own sentinel, so rendering the
+// alias for a sentinel that is not the flag's own would re-parse to a different
+// value — and for Receipts, to a different meaning.
+func TestStateHistoryDistanceCLIValueRoundTrips(t *testing.T) {
+	flags := []struct {
+		name    string
+		keepAll Distance
+		parse   func(string, string) (uint64, error)
+	}{
+		{"prune.distance", KeepPostMergeBlocksPruneMode, ParseHistoryDistance},
+		{"prune.commitment-history.distance", KeepAllBlocksPruneMode, ParseCommitmentHistoryDistance},
+		{"prune.receipts.distance", KeepAllReceiptsPruneMode, ParseReceiptsDistance},
+	}
+	values := []Distance{
+		KeepPostMergeBlocksPruneMode,
+		KeepAllBlocksPruneMode,
+		KeepAllReceiptsPruneMode,
+		100_000,
+	}
+	for _, f := range flags {
+		t.Run(f.name, func(t *testing.T) {
+			for _, v := range values {
+				rendered := stateHistoryDistanceCLIValue(uint64(v), f.keepAll)
+				got, err := f.parse(rendered, f.name)
+				require.NoError(t, err)
+				assert.Equal(t, uint64(v), got, "--%s=%s must re-parse to the value it was rendered from", f.name, rendered)
+			}
+		})
+	}
+}
+
 func TestBlocksDistanceCLIValue(t *testing.T) {
 	assert.Equal(t, "keep-post-merge", blocksDistanceCLIValue(uint64(KeepPostMergeBlocksPruneMode)))
 	assert.Equal(t, "keep-all", blocksDistanceCLIValue(uint64(KeepAllBlocksPruneMode)))
@@ -190,14 +221,15 @@ func TestModeString_ReceiptsKeepAll(t *testing.T) {
 	assert.NotContains(t, def.String(), "prune.receipts.distance")
 }
 
-// Sentinels must render as their CLI alias, never as the raw magic number --
-// the rendered string is what EnsureNotChanged tells the operator to re-pass.
-func TestModeString_HistorySentinelRendersByName(t *testing.T) {
+// A legacy datadir can hold a sentinel that is not this flag's own keep-all.
+// Rendering it as the alias would re-parse to a different value, so it stays a
+// number -- which the parser still accepts unchanged.
+func TestModeString_ForeignSentinelRendersAsNumber(t *testing.T) {
 	m := ArchiveMode
 	m.History = KeepAllBlocksPruneMode
-	assert.NotContains(t, m.String(), "18446744073709551614")
+	assert.Contains(t, m.String(), "--prune.distance=18446744073709551614")
 
 	m = ArchiveMode
 	m.CommitmentHistory = KeepPostMergeBlocksPruneMode
-	assert.NotContains(t, m.String(), "18446744073709551615")
+	assert.Contains(t, m.String(), "--prune.commitment-history.distance=18446744073709551615")
 }
