@@ -502,14 +502,11 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 		deliberateCancel := func() {
 			pe.cancelExecLoop(&stopCause{block: fail.block, kind: stopBadBlock, err: fail.err})
 		}
-		// processCommit records a commit failure into `fail`. Infrastructure
-		// faults cancel execution immediately while the apply loop keeps draining.
-		// A wrong-root is deferred so the block's own exec verdict can
-		// supersede it — EXCEPT when exec has already applied the block: then its
-		// verdict is in (this is an incremental, not fold-ahead, wrong-root), so
-		// finalize and cancel eagerly rather than keep building on known-wrong
-		// state. Fold-ahead wrong-roots arrive before the block is applied and so
-		// still defer, with the cancel firing once exec cleanly applies the block.
+		// processCommit classifies commitment failures. Infrastructure faults go
+		// to infraErr and cancel execution while the apply loop keeps draining.
+		// Wrong roots go to fail so an execution verdict for the same block can
+		// supersede them. A wrong root cancels immediately after its block has been
+		// applied; a fold-ahead wrong root waits until execution reaches that block.
 		processCommit := func(cr commitmentResult) {
 			err := handleCommitResult(cr)
 			if err == nil {

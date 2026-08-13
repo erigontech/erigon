@@ -701,9 +701,9 @@ func (e *ExecModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidH
 	return nil
 }
 
-// haltOnInitialSyncFailure reports whether a parallel initial-sync failure must
-// stop the process. Routine shutdown and publication errors after sync do not
-// halt; serial execution keeps its stay-up behavior.
+// haltOnInitialSyncFailure reports whether a non-routine initial-sync failure
+// must stop the process when parallel or experimental BAL execution is selected.
+// Post-sync publication errors do not halt; serial execution stays up.
 func haltOnInitialSyncFailure(err error, exec3Parallel, experimentalBAL bool) bool {
 	return err != nil && !isRoutineInitialSyncStop(err) && !isInitialSyncPublicationError(err) &&
 		(exec3Parallel || experimentalBAL)
