@@ -525,9 +525,6 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 		// splitApply: buffer each block's per-tx results (versionMap views) and fold
 		// them to sd.mem at block end, so sd.mem stays N-1 during exec.
 		var splitApplyBuf []*txResult
-		// streamApply: an apply error from the txResult arm is carried to the block's
-		// blockResult arm (which owns the failInfra machinery) and routed there.
-		var streamApplyErr error
 
 		// coinbaseApplyCheck: apply-side reconstruction of the coinbase from traveling
 		// tip deltas, cross-checked against the calcFees-materialized value (step 5).
@@ -713,22 +710,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					blockUpdateCount += writeCount
 					// Without splitApply the exec loop is the sole sd.mem writer and
 					// the apply loop only collects counters. Under splitApply the fold
-					// moves here: streamApply applies each tx to sd.mem as it arrives
-					// (in publish order); otherwise buffer and fold at block end.
+					// moves here: buffer each tx's per-tx result and fold at block end.
 					if splitApply {
-						if streamApply {
-							if streamApplyErr == nil && !finalized {
-								if err := pe.rs.ApplyStateWrites(ctx, rwTx, applyResult.blockNum, applyResult.txNum, applyResult.writes, nil, applyResult.rules, nil); err != nil {
-									streamApplyErr = fmt.Errorf("streamApply state block=%d txNum=%d: %w", applyResult.blockNum, applyResult.txNum, err)
-								} else if !applyResult.isFinalize {
-									if err := pe.rs.ApplyTxIndexes(rwTx, applyResult.txNum, applyResult.receipt, applyResult.cumulativeBlobGasUsed, applyResult.logs, applyResult.traceFroms, applyResult.traceTos); err != nil {
-										streamApplyErr = fmt.Errorf("streamApply index block=%d txNum=%d: %w", applyResult.blockNum, applyResult.txNum, err)
-									}
-								}
-							}
-						} else {
-							splitApplyBuf = append(splitApplyBuf, applyResult)
-						}
+						splitApplyBuf = append(splitApplyBuf, applyResult)
 					}
 					if pe.accumulator != nil {
 						pendingAccumulatorWrites = append(pendingAccumulatorWrites, applyResult.writes)
@@ -771,39 +755,29 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						deliberateCancel()
 					}
 					// splitApply fold: apply the block's per-tx versionMap views to
-					// sd.mem. streamApply already applied each tx as it arrived; the
-					// batch path folds the buffer now (block end), in publish order.
+					// sd.mem, folding the buffer at block end in publish order.
 					// blockCache=nil writes domains directly; the versionMap composes
 					// each tx's base. Finalize skips ApplyTxIndexes, matching the exec loop.
 					if splitApply {
-						if streamApply {
-							if streamApplyErr != nil {
-								err := streamApplyErr
-								streamApplyErr = nil
-								failInfra(err)
-								continue
+						restoreCS := pe.bindBlockChangesetForFold(applyResult.BlockNum, applyResult.BlockHash)
+						var applyErr error
+						for _, r := range splitApplyBuf {
+							if err := pe.rs.ApplyStateWrites(ctx, rwTx, r.blockNum, r.txNum, r.writes, nil, r.rules, nil); err != nil {
+								applyErr = fmt.Errorf("splitApply state block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
+								break
 							}
-						} else {
-							restoreCS := pe.bindBlockChangesetForFold(applyResult.BlockNum, applyResult.BlockHash)
-							var applyErr error
-							for _, r := range splitApplyBuf {
-								if err := pe.rs.ApplyStateWrites(ctx, rwTx, r.blockNum, r.txNum, r.writes, nil, r.rules, nil); err != nil {
-									applyErr = fmt.Errorf("splitApply state block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
+							if !r.isFinalize {
+								if err := pe.rs.ApplyTxIndexes(rwTx, r.txNum, r.receipt, r.cumulativeBlobGasUsed, r.logs, r.traceFroms, r.traceTos); err != nil {
+									applyErr = fmt.Errorf("splitApply index block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
 									break
 								}
-								if !r.isFinalize {
-									if err := pe.rs.ApplyTxIndexes(rwTx, r.txNum, r.receipt, r.cumulativeBlobGasUsed, r.logs, r.traceFroms, r.traceTos); err != nil {
-										applyErr = fmt.Errorf("splitApply index block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
-										break
-									}
-								}
 							}
-							restoreCS()
-							splitApplyBuf = splitApplyBuf[:0]
-							if applyErr != nil {
-								failInfra(applyErr)
-								continue
-							}
+						}
+						restoreCS()
+						splitApplyBuf = splitApplyBuf[:0]
+						if applyErr != nil {
+							failInfra(applyErr)
+							continue
 						}
 						// This block's writes are now in the shared domain: drop it from
 						// the tail of the prev-block list so later blocks read it from the
@@ -2035,13 +2009,6 @@ func SetSplitApplyStackForTest() (restore func()) {
 }
 
 
-// streamApply applies each block's per-tx versionMap views to sd.mem as the
-// results arrive (in publish order) instead of buffering the whole block and
-// folding at block end. Overlaps the domain write with exec rather than
-// serializing it into the block-end spine. Only consulted under splitApply;
-// prevBlockReads keeps every in-flight block's writes shadowed by its versionMap
-// until RemoveTail, so no concurrent worker reads a half-streamed key from sd.mem.
-var streamApply = dbg.EnvBool("STREAM_APPLY", false)
 
 
 // selfLoop is the true Block-STM model: workers own execution AND validation.
