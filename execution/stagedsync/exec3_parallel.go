@@ -2085,11 +2085,6 @@ var streamApply = dbg.EnvBool("STREAM_APPLY", false)
 // (coinbase fold, extra sinks, backpressure) extend. Only consulted under splitApply.
 var consumerApply = dbg.EnvBool("CONSUMER_APPLY", false)
 
-// workerValidate: trust the read-set verdict the worker computed (in RunTxTask)
-// instead of re-walking on the exec loop. Same env the worker reads; a premature
-// "valid" is caught by the reverse-index revalidation of committed dependents.
-var workerValidate = dbg.EnvBool("WORKER_VALIDATE", false)
-
 // selfLoop is the true Block-STM model: workers own execution AND validation.
 // Each worker flushes its writes to the versionMap speculatively (as estimate),
 // validates its own read-set, and loops — parking on the commit-frontier signal

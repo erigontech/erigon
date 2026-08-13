@@ -292,12 +292,6 @@ func (rw *WorkerContext) bindTx(chainTx kv.TemporalTx) error {
 	return nil
 }
 
-// workerValidate makes the worker walk its own read-set against the versionMap
-// right after executing, so the exec loop can commit on the verdict without
-// re-walking (dep-order). A premature "valid" (a predecessor flushes later) is
-// caught by the exec loop's reverse-index revalidation.
-var workerValidate = dbg.EnvBool("WORKER_VALIDATE", false)
-
 func (rw *WorkerContext) RunTxTask(txTask Task) (result *TxResult) {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
@@ -440,29 +434,6 @@ func (rw *WorkerContext) RunTxTaskNoLock(txTask Task) *TxResult {
 	// writes so finalize can use them directly without IBS reconstruction.
 	if lc, ok := rw.stateWriter.(*state.LightCollector); ok {
 		result.CollectorWrites = lc.TakeWrites()
-	}
-
-	// Validate the read-set in the worker (parallel) so the exec loop commits on
-	// the verdict without re-walking. Regular txs only; skip when execution errored
-	// (the exec loop handles aborts) or no reads were recorded.
-	if workerValidate && result.Err == nil {
-		if txIdx := txTask.Version().TxIndex; txIdx >= 0 && !txTask.IsBlockEnd() {
-			if vm := rw.ibs.VersionMap(); vm != nil {
-				blocker := -1
-				result.WorkerValidated = vm.ValidateReadSet(txIdx, result.TxIn,
-					func(rv, wv state.Version) state.VersionValidity {
-						if rv != wv {
-							if wv.TxIndex > blocker {
-								blocker = wv.TxIndex
-							}
-							return state.VersionInvalid
-						}
-						return state.VersionValid
-					}, false, "")
-				result.WorkerBlocker = blocker
-				result.WorkerVerdictSet = true
-			}
-		}
 	}
 
 	return result
