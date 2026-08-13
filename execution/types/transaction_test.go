@@ -876,3 +876,35 @@ func TestTypedTxEmptyToErrorMessage(t *testing.T) {
 		})
 	}
 }
+
+// A typed transaction whose JSON omits a fee field the decoder reads must be
+// rejected, not panic. The dynamic-fee decoder guarded 'gasPrice' but then read
+// 'maxFeePerGas'/'maxPriorityFeePerGas', and the blob decoder guarded neither.
+func TestUnmarshalTransactionFromJSONMissingFields(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		json string
+	}{
+		{"dynamicFee without maxFeePerGas", `{"type":"0x2","chainId":"0x1","nonce":"0x1","maxPriorityFeePerGas":"0x1","gas":"0x5208","value":"0x0","input":"0x","v":"0x0","r":"0x0","s":"0x0"}`},
+		{"dynamicFee without maxPriorityFeePerGas", `{"type":"0x2","chainId":"0x1","nonce":"0x1","maxFeePerGas":"0x1","gas":"0x5208","value":"0x0","input":"0x","v":"0x0","r":"0x0","s":"0x0"}`},
+		{"blob without maxFeePerGas", `{"type":"0x3","chainId":"0x1","nonce":"0x1","maxPriorityFeePerGas":"0x1","gas":"0x5208","value":"0x0","input":"0x","maxFeePerBlobGas":"0x1","v":"0x0","r":"0x0","s":"0x0"}`},
+		{"blob without maxPriorityFeePerGas", `{"type":"0x3","chainId":"0x1","nonce":"0x1","maxFeePerGas":"0x1","gas":"0x5208","value":"0x0","input":"0x","maxFeePerBlobGas":"0x1","v":"0x0","r":"0x0","s":"0x0"}`},
+		{"setCode without authorizationList", `{"type":"0x4","chainId":"0x1","nonce":"0x1","maxFeePerGas":"0x1","maxPriorityFeePerGas":"0x1","gas":"0x5208","value":"0x0","input":"0x","v":"0x0","r":"0x0","s":"0x0"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := UnmarshalTransactionFromJSON([]byte(tc.json))
+			assert.Error(t, err)
+		})
+	}
+}
+
+// A type-2 transaction carries no 'gasPrice' field, so its absence must not be
+// an error.
+func TestUnmarshalDynamicFeeTransactionFromJSONWithoutGasPrice(t *testing.T) {
+	t.Parallel()
+	const txJSON = `{"type":"0x2","chainId":"0x1","nonce":"0x1","maxFeePerGas":"0x3b9aca00","maxPriorityFeePerGas":"0x1","gas":"0x5208","value":"0x0","input":"0x","v":"0x0","r":"0x0","s":"0x0"}`
+	txn, err := UnmarshalTransactionFromJSON([]byte(txJSON))
+	assert.NoError(t, err)
+	assert.Equal(t, uint256.NewInt(1_000_000_000), txn.GetFeeCap())
+}
