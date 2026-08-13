@@ -306,7 +306,11 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 				// updateAccount and the balance-increase loop below. A raw
 				// versionMap view still carries the touched-empty account's field
 				// writes (Normalize converted them to a delete upstream).
-				if EIP161EmptyRemoval(rules.IsEIP161Enabled(), rules.IsAura, addr) && acc.Nonce == 0 && acc.Balance.IsZero() && acc.IsEmptyCodeHash() {
+				// Incarnation>0 with empty fields is a storage-bearing contract
+				// account (only produced by genesis allocs — a normal CREATE always
+				// sets code/nonce): it holds state and must not be removed. Serial
+				// avoids this because genesis commits under empty (EIP-161-off) rules.
+				if EIP161EmptyRemoval(rules.IsEIP161Enabled(), rules.IsAura, addr) && acc.Nonce == 0 && acc.Balance.IsZero() && acc.IsEmptyCodeHash() && acc.Incarnation == 0 {
 					if dbg.TraceApply && (trace || dbg.TraceAccount(addr.Handle())) {
 						fmt.Printf("%d apply:del empty account: %x\n", blockNum, addr)
 					}
@@ -427,7 +431,9 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 			}
 		}
 		acc.Balance.Add(&acc.Balance, &increase)
-		if EIP161EmptyRemoval(rules.IsEIP161Enabled(), rules.IsAura, addr) && acc.Nonce == 0 && acc.Balance.IsZero() && acc.IsEmptyCodeHash() {
+		// See the incarnation==0 rationale at the account-write EIP-161 site above:
+		// a storage-bearing genesis account (incarnation>0, empty fields) must survive.
+		if EIP161EmptyRemoval(rules.IsEIP161Enabled(), rules.IsAura, addr) && acc.Nonce == 0 && acc.Balance.IsZero() && acc.IsEmptyCodeHash() && acc.Incarnation == 0 {
 			if blockCache != nil {
 				blockCache.DeleteAccount(addr, txNum)
 				if !domains.InlineTouchKeyDisabled() {
