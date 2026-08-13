@@ -1330,10 +1330,9 @@ func (r *BlockReader) IterateFrozenBodies(tx kv.Getter, f func(blockNum, baseTxN
 	return nil
 }
 
-func (r *BlockReader) IntegrityTxnID(ctx context.Context, failFast bool) error {
+func (r *BlockReader) IntegrityTxnID(ctx context.Context, tx kv.Getter, failFast bool) error {
 	defer log.Info("[integrity] BlocksTxnID done")
-	view := r.sn.View()
-	defer view.Close()
+	view := r.view(tx)
 
 	var expectedFirstTxnID uint64
 	for i, snb := range view.Bodies() {
@@ -1484,9 +1483,8 @@ func (r *BlockReader) ensureHeaderNumber(n uint64, seg *snapshotsync.VisibleSegm
 	return nil
 }
 
-func (r *BlockReader) Integrity(ctx context.Context, _ kv.Getter) error {
-	view := r.sn.View()
-	defer view.Close()
+func (r *BlockReader) Integrity(ctx context.Context, tx kv.Getter) error {
+	view := r.view(tx)
 	for _, seg := range view.Headers() {
 		if err := r.ensureHeaderNumber(seg.From(), seg); err != nil {
 			return err
@@ -1543,13 +1541,13 @@ func (t *txBlockIndexWithBlockReader) MaxTxNum(ctx context.Context, tx kv.Tx, c 
 }
 
 func (t *txBlockIndexWithBlockReader) BlockNumber(ctx context.Context, tx kv.Tx, txNum uint64) (blockNum uint64, ok bool, err error) {
-	if _, ok := t.r.(*BlockReader); !ok {
+	br, isBlockReader := t.r.(*BlockReader)
+	if !isBlockReader {
 		return t.r.BlockForTxNum(ctx, tx, txNum)
 	}
 	var buf []byte
 	var b *types.BodyOnlyTxn
-	view := t.r.Snapshots().(*blocksnapshots.RoSnapshots).View()
-	defer view.Close()
+	view := br.view(tx)
 
 	getMaxTxNum := func(seg *snapshotsync.VisibleSegment) GetMaxTxNum {
 		return func(i uint64) (uint64, error) {

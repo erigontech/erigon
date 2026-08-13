@@ -25,6 +25,8 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snaptype"
@@ -37,10 +39,10 @@ import (
 
 const testMergeLimit = snaptype.Erigon2MergeLimit
 
-// blockFilesTxStub is a kv.Getter that also exposes a pinned block-files view,
+// blockFilesTxStub is a kv.Tx that also exposes a pinned block-files view,
 // like a temporal tx does.
 type blockFilesTxStub struct {
-	kv.Getter
+	kv.Tx
 	view *blocksnapshots.View
 }
 
@@ -103,6 +105,57 @@ func TestBlockReaderRejectsTxWithoutBlockView(t *testing.T) {
 	require.Panics(t, func() {
 		blockReader.viewSingleFile(blockFilesTxStub{}, snaptype2.Transactions, 0)
 	}, "a view provider holding no view must be rejected")
+}
+
+// The integrity checks read block files through the caller's tx, so a tx pinning no
+// view is rejected rather than falling back to whatever the live set holds.
+func TestIntegrityChecksUseTxBlockView(t *testing.T) {
+	cfg := ethconfig.Defaults.Snapshot
+	cfg.ChainName = networkname.Mainnet
+	snapshots := blocksnapshots.NewRoSnapshots(cfg, t.TempDir(), log.New())
+	defer snapshots.Close()
+	require.NoError(t, snapshots.OpenFolder())
+
+	blockReader := NewBlockReader(snapshots, nil)
+
+	require.Panics(t, func() {
+		_ = blockReader.IntegrityTxnID(t.Context(), blockFilesTxStub{}, true)
+	})
+	require.Panics(t, func() {
+		_ = blockReader.Integrity(t.Context(), blockFilesTxStub{})
+	})
+}
+
+// txNum -> block resolves through the tx's own pinned view, so segments integrated
+// after the tx started stay invisible to it.
+func TestBlockNumberUsesTxBlockView(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	cfg := ethconfig.Defaults.Snapshot
+	cfg.ChainName = networkname.Mainnet
+	snapshots := blocksnapshots.NewRoSnapshots(cfg, dir, logger)
+	defer snapshots.Close()
+	require.NoError(t, snapshots.OpenFolder())
+
+	memTx, err := memdb.NewTestDB(t, dbcfg.ChainDB).BeginRo(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(memTx.Rollback)
+
+	// Pinned while the store still holds nothing.
+	tx := blockFilesTxStub{Tx: memTx, view: snapshots.View()}
+	defer tx.view.Close()
+
+	ver := version.V1_0
+	for _, typ := range snaptype2.BlockSnapshotTypes {
+		createTestSegmentFile(t, 0, testMergeLimit, typ.Enum(), dir, ver, logger)
+	}
+	require.NoError(t, snapshots.OpenFolder())
+
+	txBlockIndex := TxBlockIndexFromBlockReader(NewBlockReader(snapshots, nil))
+	blockNum, ok, err := txBlockIndex.BlockNumber(t.Context(), tx, 1)
+	require.NoError(t, err)
+	require.False(t, ok, "bodies integrated after the view was pinned must be invisible to the tx")
+	require.Zero(t, blockNum)
 }
 
 // The minimal/full-node step: expire old transaction segments (handing their files to the
