@@ -180,6 +180,8 @@ func (v ReadView) SeedAddrCodeHash(addr []byte, h [32]byte, txNum uint64) {
 	if !ok {
 		return
 	}
+	// A negative mapping describes committed state observed by this view, not
+	// the executing transaction that requested the lookup.
 	if h == ([32]byte{}) {
 		txNum = 0
 		if visibleEnd > 0 {

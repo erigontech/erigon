@@ -32,7 +32,7 @@ type BlockReadAheader struct {
 	bals    *lru.Cache[common.Hash, []byte]
 
 	// this is for warming state
-	warmDone chan struct{} // contains one token while no warmBody is running
+	warmup atomic.Pointer[blockReadAheadWarmup]
 
 	// stateCache is the process-global state cache that SharedDomains.GetLatest
 	// consults on the EVM hot path. When set, warmBody routes its prefetches
@@ -41,6 +41,10 @@ type BlockReadAheader struct {
 	// cursors — disconnected from the cache layer the EVM actually reads.
 	// Mirrors reth's CachedReads / ExecutionCache "same hashmap" property.
 	stateCache *cache.StateCache
+}
+
+type blockReadAheadWarmup struct {
+	done chan struct{}
 }
 
 func NewBlockReadAheader() *BlockReadAheader {
@@ -60,14 +64,11 @@ func NewBlockReadAheader() *BlockReadAheader {
 	if err != nil {
 		panic(err)
 	}
-	warmDone := make(chan struct{}, 1)
-	warmDone <- struct{}{}
 	return &BlockReadAheader{
-		headers:  headers,
-		bodies:   bodies,
-		senders:  senders,
-		bals:     bals,
-		warmDone: warmDone,
+		headers: headers,
+		bodies:  bodies,
+		senders: senders,
+		bals:    bals,
 	}
 }
 
@@ -133,16 +134,15 @@ func (bra *BlockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, t
 	blockHash := header.Hash()
 	bra.headers.Add(blockHash, header)
 	bra.bodies.Add(blockHash, body)
-	if db == nil || ctx == nil || !dbg.ReadAhead {
+	if db == nil || tx == nil || ctx == nil || !dbg.ReadAhead {
 		return
 	}
-	select {
-	case <-bra.warmDone:
-	default:
+	warmup := &blockReadAheadWarmup{done: make(chan struct{})}
+	if !bra.warmup.CompareAndSwap(nil, warmup) {
 		return
 	}
 	var balBytes []byte
-	if header.HasBAL() {
+	if header.HasNonEmptyBAL() {
 		var ok bool
 		balBytes, ok = bra.bals.Get(blockHash)
 		if !ok {
@@ -155,7 +155,10 @@ func (bra *BlockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, t
 		}
 	}
 	go func() {
-		defer func() { bra.warmDone <- struct{}{} }()
+		defer func() {
+			close(warmup.done)
+			bra.warmup.CompareAndSwap(warmup, nil)
+		}()
 		bra.warmBody(ctx, db, header, body, balBytes, dbg.ReadAheadWorkers)
 	}()
 }
@@ -164,9 +167,12 @@ func (bra *BlockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, t
 // the context is cancelled. Call before closing the database to avoid
 // waitTxsAllDoneOnClose hangs.
 func (bra *BlockReadAheader) WaitForWarmup(ctx context.Context) {
+	warmup := bra.warmup.Load()
+	if warmup == nil {
+		return
+	}
 	select {
-	case <-bra.warmDone:
-		bra.warmDone <- struct{}{}
+	case <-warmup.done:
 	case <-ctx.Done():
 	}
 }
@@ -347,7 +353,7 @@ func (bra *BlockReadAheader) warmBALState(ctx context.Context, db kv.RoDB, bal t
 				task := tasks[taskIndex]
 				account := bal[task.accountIndex]
 				if err := warmBALStateTask(stateReader, account, task, codeMode, txCodeDestinations); err != nil {
-					return err
+					log.Warn("[warmBAL] state task failed", "worker", w, "account", account.Address, "err", err)
 				}
 				tasksProcessed++
 			}
@@ -399,11 +405,10 @@ func (bra *BlockReadAheader) warmTxns(ctx context.Context, db kv.RoDB, txns type
 					to := accounts.InternAddress(*toAddr)
 					acct, err := stateReader.ReadAccountData(to)
 					if err != nil {
-						return err
-					}
-					if acct != nil && !acct.CodeHash.IsEmpty() {
+						log.Warn("[warmTxns] account read failed", "worker", w, "tx", txIdx, "address", to, "err", err)
+					} else if acct != nil && !acct.CodeHash.IsEmpty() {
 						if _, err := stateReader.ReadAccountCode(to); err != nil {
-							return err
+							log.Warn("[warmTxns] code read failed", "worker", w, "tx", txIdx, "address", to, "err", err)
 						}
 					}
 				}
@@ -412,16 +417,15 @@ func (bra *BlockReadAheader) warmTxns(ctx context.Context, db kv.RoDB, txns type
 					addr := accounts.InternAddress(entry.Address)
 					acct, err := stateReader.ReadAccountData(addr)
 					if err != nil {
-						return err
-					}
-					if acct != nil && !acct.CodeHash.IsEmpty() {
+						log.Warn("[warmTxns] access-list account read failed", "worker", w, "tx", txIdx, "address", addr, "err", err)
+					} else if acct != nil && !acct.CodeHash.IsEmpty() {
 						if _, err := stateReader.ReadAccountCode(addr); err != nil {
-							return err
+							log.Warn("[warmTxns] access-list code read failed", "worker", w, "tx", txIdx, "address", addr, "err", err)
 						}
 					}
 					for _, slot := range entry.StorageKeys {
 						if _, _, err := stateReader.ReadAccountStorage(addr, accounts.InternKey(slot)); err != nil {
-							return err
+							log.Warn("[warmTxns] access-list storage read failed", "worker", w, "tx", txIdx, "address", addr, "slot", slot, "err", err)
 						}
 					}
 				}
