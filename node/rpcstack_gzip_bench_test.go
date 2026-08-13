@@ -27,6 +27,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -518,5 +519,68 @@ func BenchmarkGzipStreamingThroughput(b *testing.B) {
 				})
 			}
 		}
+	}
+}
+
+// BenchmarkGzipPeakMemoryParallel reports peak live heap while many clients
+// request a large response at once. Per-request throughput hides this: the
+// one-shot path holds the whole uncompressed response per in-flight request,
+// so peak memory scales with concurrency, not with response size.
+func BenchmarkGzipPeakMemoryParallel(b *testing.B) {
+	for _, clients := range []int{8, 64} {
+		b.Run(fmt.Sprintf("clients=%d/payload=2MB", clients), func(b *testing.B) {
+			payload := syntheticBlockJSON(2 << 20)
+			srv := httptest.NewServer(newGzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.Write(payload) //nolint:errcheck
+			})))
+			defer srv.Close()
+
+			var peak uint64
+			done := make(chan struct{})
+			var sampler sync.WaitGroup
+			sampler.Add(1)
+			go func() {
+				defer sampler.Done()
+				var ms runtime.MemStats
+				for {
+					select {
+					case <-done:
+						return
+					default:
+					}
+					runtime.ReadMemStats(&ms)
+					if ms.HeapInuse > atomic.LoadUint64(&peak) {
+						atomic.StoreUint64(&peak, ms.HeapInuse)
+					}
+				}
+			}()
+
+			runtime.GC()
+			b.ResetTimer()
+			var wg sync.WaitGroup
+			for range clients {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					c := &http.Client{Transport: &http.Transport{DisableCompression: true, MaxIdleConnsPerHost: 4}}
+					for range b.N {
+						req, _ := http.NewRequest(http.MethodPost, srv.URL, nil)
+						req.Header.Set("Accept-Encoding", "gzip")
+						resp, err := c.Do(req)
+						if err != nil {
+							return
+						}
+						io.Copy(io.Discard, resp.Body) //nolint:errcheck
+						resp.Body.Close()
+					}
+				}()
+			}
+			wg.Wait()
+			b.StopTimer()
+			close(done)
+			sampler.Wait()
+			b.ReportMetric(float64(atomic.LoadUint64(&peak))/(1<<20), "peak-heap-MiB")
+		})
 	}
 }
