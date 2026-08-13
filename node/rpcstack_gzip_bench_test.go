@@ -454,7 +454,7 @@ func BenchmarkGzipStreamingThroughput(b *testing.B) {
 					for i := range stackWords {
 						stackWords[i] = fmt.Sprintf("0x%064x", i*2654435761)
 					}
-					var wrote int64
+					var wrote atomic.Int64
 					inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 						w.Header().Set("Content-Type", "application/json")
 						// Production enters streaming mode via the gzip hook before
@@ -483,7 +483,7 @@ func BenchmarkGzipStreamingThroughput(b *testing.B) {
 						}
 						stream.WriteArrayEnd()
 						stream.Flush() //nolint:errcheck
-						atomic.AddInt64(&wrote, int64(st.Buffered()))
+						wrote.Add(int64(st.Buffered()))
 					})
 					var handler http.Handler = inner
 					if gz {
@@ -536,12 +536,10 @@ func BenchmarkGzipPeakMemoryParallel(b *testing.B) {
 			})))
 			defer srv.Close()
 
-			var peak uint64
+			var peak atomic.Uint64
 			done := make(chan struct{})
 			var sampler sync.WaitGroup
-			sampler.Add(1)
-			go func() {
-				defer sampler.Done()
+			sampler.Go(func() {
 				var ms runtime.MemStats
 				for {
 					select {
@@ -550,19 +548,17 @@ func BenchmarkGzipPeakMemoryParallel(b *testing.B) {
 					default:
 					}
 					runtime.ReadMemStats(&ms)
-					if ms.HeapInuse > atomic.LoadUint64(&peak) {
-						atomic.StoreUint64(&peak, ms.HeapInuse)
+					if ms.HeapInuse > peak.Load() {
+						peak.Store(ms.HeapInuse)
 					}
 				}
-			}()
+			})
 
 			runtime.GC()
 			b.ResetTimer()
 			var wg sync.WaitGroup
 			for range clients {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
+				wg.Go(func() {
 					c := &http.Client{Transport: &http.Transport{DisableCompression: true, MaxIdleConnsPerHost: 4}}
 					for range b.N {
 						req, _ := http.NewRequest(http.MethodPost, srv.URL, nil)
@@ -574,13 +570,13 @@ func BenchmarkGzipPeakMemoryParallel(b *testing.B) {
 						io.Copy(io.Discard, resp.Body) //nolint:errcheck
 						resp.Body.Close()
 					}
-				}()
+				})
 			}
 			wg.Wait()
 			b.StopTimer()
 			close(done)
 			sampler.Wait()
-			b.ReportMetric(float64(atomic.LoadUint64(&peak))/(1<<20), "peak-heap-MiB")
+			b.ReportMetric(float64(peak.Load())/(1<<20), "peak-heap-MiB")
 		})
 	}
 }
