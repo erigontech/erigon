@@ -713,6 +713,9 @@ func (f *ForkChoiceStore) OnExecutionPayloadAt(ctx context.Context, signedEnvelo
 	if err := signedEnvelope.ValidateForConfig(f.beaconCfg); err != nil {
 		return fmt.Errorf("invalid execution payload envelope: %w", err)
 	}
+	if err := signedEnvelope.ValidateForPersistence(f.beaconCfg); err != nil {
+		return fmt.Errorf("unpersistable execution payload envelope: %w", err)
+	}
 
 	envelope := signedEnvelope.Message
 	beaconBlockRoot := envelope.BeaconBlockRoot
@@ -787,6 +790,9 @@ func (f *ForkChoiceStore) ApplyLocalSelfBuildEnvelope(ctx context.Context, signe
 	}
 	if err := signedEnvelope.ValidateForConfig(f.beaconCfg); err != nil {
 		return fmt.Errorf("invalid execution payload envelope: %w", err)
+	}
+	if err := signedEnvelope.ValidateForPersistence(f.beaconCfg); err != nil {
+		return fmt.Errorf("unpersistable execution payload envelope: %w", err)
 	}
 
 	envelope := signedEnvelope.Message

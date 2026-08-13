@@ -1295,8 +1295,11 @@ func (b *BackwardBeaconDownloader) fetchSingleEnvelopeHTTP(ctx context.Context, 
 	if err := envelope.DecodeSSZStrict(body, int(clparams.GloasVersion)); err != nil {
 		return nil, fmt.Errorf("envelope decode: %w", err)
 	}
-	if envelope.Message == nil || envelope.Message.BeaconBlockRoot != blockRoot {
-		return nil, fmt.Errorf("envelope block root mismatch: requested %v", blockRoot)
+	if envelope.Message == nil {
+		return nil, fmt.Errorf("envelope block root mismatch: requested %x", blockRoot)
+	}
+	if envelope.Message.BeaconBlockRoot != blockRoot {
+		return nil, fmt.Errorf("envelope block root %x does not match requested block root %x", envelope.Message.BeaconBlockRoot, blockRoot)
 	}
 	if b.validateGloasEnvelope != nil {
 		if err := b.validateGloasEnvelope(block, envelope); err != nil {
