@@ -79,6 +79,8 @@ type GenericCache[T any] struct {
 	startCap      uint32
 	maxCap        uint32
 	curCap        atomic.Uint32
+	entryCount    atomic.Int64
+	growClaimed   atomic.Bool
 	avgEntryBytes int64 // per-domain byte estimate; maps slot count ↔ envelope bytes
 	resizeMu      sync.Mutex
 	reservedBytes int64
@@ -205,6 +207,7 @@ func (c *GenericCache[T]) newShards(capacity, shards uint32) *freelru.ShardedLRU
 	}
 	lru.SetOnEvict(func(_ uint64, e entry[T]) {
 		c.currentSize.Add(-int64(e.size))
+		c.entryCount.Add(-1)
 	})
 	return lru
 }
@@ -226,7 +229,7 @@ func (c *GenericCache[T]) maybeGrow() {
 
 	old := c.data.Load()
 	curCap := c.curCap.Load()
-	if curCap >= c.maxCap || old.Len() < int(curCap) {
+	if curCap >= c.maxCap || c.entryCount.Load() < int64(curCap) {
 		return
 	}
 	newCap := min(curCap*genericCacheGrowFactor, c.maxCap)
@@ -362,15 +365,20 @@ func (c *GenericCache[T]) PutIfAbsent(key []byte, value T, txNum uint64) {
 
 func (c *GenericCache[T]) put(key []byte, value T, txNum uint64, overwrite bool) {
 	if c.putStriped(key, value, txNum, overwrite) {
-		// Grow outside the stripe — maybeGrow takes every stripe.
-		c.maybeGrow()
+		c.tryGrow()
 	}
 }
 
+func (c *GenericCache[T]) tryGrow() {
+	if !c.growClaimed.CompareAndSwap(false, true) {
+		return
+	}
+	defer c.growClaimed.Store(false)
+	c.maybeGrow()
+}
+
 // putStriped performs the write under the key's stripe and reports whether the
-// insert landed in a full LRU with ceiling headroom, i.e. the caller should
-// grow. Detection stays on the insert path — Len locks every shard, too costly
-// per warm update.
+// insert crossed the current capacity with ceiling headroom.
 func (c *GenericCache[T]) putStriped(key []byte, value T, txNum uint64, overwrite bool) bool {
 	h := maphash.Hash(key)
 	valBytes := c.sizeFunc(value)
@@ -399,6 +407,7 @@ func (c *GenericCache[T]) putStriped(key []byte, value T, txNum uint64, overwrit
 		// another stripe over-admits past the budget. Over-stating is safe — at
 		// worst a new key is dropped, which is within "drop new keys when full".
 		c.currentSize.Add(int64(newSize))
+		c.entryCount.Add(1)
 		lru.Remove(h)
 		if lru.Add(h, entry[T]{key: existing.key, val: value, size: newSize, txNum: txNum, epoch: ep}) {
 			c.evictions.Add(1)
@@ -409,17 +418,13 @@ func (c *GenericCache[T]) putStriped(key []byte, value T, txNum uint64, overwrit
 	if c.mode == ModeNoOp {
 		// Refuse once full by either bound — freelru would otherwise evict at the
 		// entry-count cap, which ModeNoOp ("drop new keys when full") must not do.
-		if c.currentSize.Load()+int64(newSize) > int64(c.capacityB) || lru.Len() >= int(c.maxCap) {
+		if c.currentSize.Load()+int64(newSize) > int64(c.capacityB) || c.entryCount.Load() >= int64(c.maxCap) {
 			c.dropped.Add(1)
 			return false
 		}
 	}
 
 	curCap := c.curCap.Load()
-	// The insert lands before the grow (which must run outside the stripe), so
-	// it and any racers until the swap evict at the pre-grow cap — a transient
-	// bounded by the grow window.
-	needGrow := c.mode != ModeNoOp && curCap < c.maxCap && lru.Len() >= int(curCap)
 
 	// In ModeEvictLRU the byte budget is enforced through the entry-count cap,
 	// not a separate currentSize check: capacityEntries is derived from
@@ -438,6 +443,7 @@ func (c *GenericCache[T]) putStriped(key []byte, value T, txNum uint64, overwrit
 	// freelru.Add would replace it in place without firing OnEvict. The size
 	// is reserved before the removal (see the update path above).
 	c.currentSize.Add(int64(newSize))
+	newCount := c.entryCount.Add(1)
 	if hasExisting {
 		lru.Remove(h)
 	}
@@ -446,7 +452,7 @@ func (c *GenericCache[T]) putStriped(key []byte, value T, txNum uint64, overwrit
 		c.evictions.Add(1)
 	}
 	c.inserts.Add(1)
-	return needGrow
+	return c.mode != ModeNoOp && !hasExisting && curCap < c.maxCap && newCount > int64(curCap)
 }
 
 // Delete removes the data for the given key. Runs under the key's put stripe
@@ -498,6 +504,7 @@ func (c *GenericCache[T]) Clear() {
 		c.putStripes[i].Lock()
 	}
 	c.currentSize.Store(0)
+	c.entryCount.Store(0)
 	c.shardCount = shards
 	c.curCap.Store(c.startCap)
 	c.data.Store(next)
@@ -533,7 +540,7 @@ func (c *GenericCache[T]) Unwind(unwindToTxNum uint64) {
 
 // Len returns the number of entries in the cache.
 func (c *GenericCache[T]) Len() int {
-	return c.data.Load().Len()
+	return int(c.entryCount.Load())
 }
 
 // SizeBytes returns the current size of the cache in bytes.
@@ -566,7 +573,7 @@ func (c *GenericCache[T]) PrintStatsAndReset(name string) {
 		"hits", hits, "misses", misses, "hit_rate", hitRate,
 		"inserts", inserts, "evictions", evictions, "dropped", dropped,
 		"stale_evicted", staleEvicted, "epoch", c.coh.Epoch(),
-		"entries", c.data.Load().Len(), "size_mb", sizeBytes/(1024*1024),
+		"entries", c.entryCount.Load(), "size_mb", sizeBytes/(1024*1024),
 		"capacity_mb", int64(c.capacityB/datasize.MB), "usage_pct", usagePct,
 	)
 }
