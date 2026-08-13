@@ -90,11 +90,12 @@ func parseDistanceNumber(s, flag, aliasHint string) (uint64, error) {
 }
 
 // stateHistoryDistanceCLIValue renders a state-history-style distance as its
-// operator-facing argument. Every sentinel disables pruning for these fields, so
-// all of them render as the alias the parser accepts rather than as a raw magic
-// number the operator cannot re-pass.
-func stateHistoryDistanceCLIValue(v uint64) string {
-	if !Distance(v).Enabled() {
+// operator-facing argument. keepAll is the flag's own "keep-all" sentinel, the
+// same one parseStateHistoryDistance takes: each flag maps the alias to a
+// different value, so only that one may render as the alias. Other sentinels
+// render as their number, which the parser still accepts unchanged.
+func stateHistoryDistanceCLIValue(v uint64, keepAll Distance) string {
+	if Distance(v) == keepAll {
 		return "keep-all"
 	}
 	return strconv.FormatUint(v, 10)
