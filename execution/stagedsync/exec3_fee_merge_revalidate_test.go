@@ -94,10 +94,21 @@ func (f *feeMergeRevalidationFixture) fundCoinbase() {
 }
 
 // mergeFeePass runs one apply-loop validation round's fee merge — the same
-// calcFees + blockExecutor.mergeFeeWrites sequence exec3_parallel.go's
-// validate loop runs — and returns calcFees' own output for the caller to
-// inspect.
+// calcFees + blockExecutor.mergeFeeWrites + versionMap flush sequence
+// exec3_parallel.go's validate loop runs — and returns calcFees' own output
+// for the caller to inspect.
 func (f *feeMergeRevalidationFixture) mergeFeePass(t *testing.T) *state.WriteSet {
+	t.Helper()
+	tipWrites, err := f.result.calcFees(f.task, f.be.versionMap, f.reader, f.rules)
+	require.NoError(t, err)
+	f.be.mergeFeeWrites(0, f.version, f.result.TxOut, tipWrites)
+	f.be.versionMap.FlushVersionedWrites(f.be.blockIO.WriteSet(f.version.TxIndex), true, "")
+	return tipWrites
+}
+
+// mergeFeePassUnflushed is a round that never reaches the flush, which is what
+// the validate loop does when a read comes back too early to judge.
+func (f *feeMergeRevalidationFixture) mergeFeePassUnflushed(t *testing.T) *state.WriteSet {
 	t.Helper()
 	tipWrites, err := f.result.calcFees(f.task, f.be.versionMap, f.reader, f.rules)
 	require.NoError(t, err)
@@ -114,9 +125,9 @@ func (f *feeMergeRevalidationFixture) normalize(t *testing.T) *state.WriteSet {
 	return norm
 }
 
-// TestFeeMergeRevalidationDropsStaleDelete pins #23237: a zero-tip tx that
-// doesn't touch the coinbase first validates in a batch where an earlier tx
-// is still invalid and the coinbase is genuinely EIP-161-empty, so calcFees
+// TestFeeMergeRevalidationDropsStaleDelete covers a zero-tip tx that doesn't
+// touch the coinbase and first validates in a batch where an earlier tx is
+// still invalid and the coinbase is genuinely EIP-161-empty, so calcFees
 // emits a SelfDestructPath delete for it. The earlier tx is then fixed and
 // funds the coinbase without this tx re-executing, so its second calcFees
 // pass emits nothing. The recorded write set must reflect that — not keep
@@ -144,6 +155,45 @@ func TestFeeMergeRevalidationDropsStaleDelete(t *testing.T) {
 	// the funded balance is tx 1's own contribution, not this tx's.
 	_, hasBal := norm.GetBalance(f.coinbase)
 	require.False(t, hasBal, "this tx must stay silent about the coinbase, not fabricate a balance write either")
+}
+
+// TestFeeMergeRevalidationRetractsStaleVersionMapCell covers the version-map
+// side of the same scenario: FlushVersionedWrites is upsert-only, so pass 1's
+// fee cell stays in the version map even after pass 2's merge drops it from
+// blockIO. A downstream tx reading through that cell must not see a delete
+// this tx no longer commits.
+func TestFeeMergeRevalidationRetractsStaleVersionMapCell(t *testing.T) {
+	f := newFeeMergeRevalidationFixture(t)
+
+	pass1 := f.mergeFeePass(t)
+	require.False(t, pass1.IsEmpty(), "pass 1 should emit the EIP-161 delete")
+	_, ok := pass1.GetSelfDestruct(f.coinbase)
+	require.True(t, ok)
+
+	_, _, found := f.be.versionMap.ReadSelfDestruct(f.coinbase, f.version.TxIndex+1)
+	require.True(t, found, "pass 1's flush must land a cell in the version map")
+
+	f.fundCoinbase()
+
+	pass2 := f.mergeFeePass(t)
+	require.True(t, pass2.IsEmpty(), "coinbase is funded now, calcFees has nothing to contribute")
+
+	_, _, found = f.be.versionMap.ReadSelfDestruct(f.coinbase, f.version.TxIndex+1)
+	require.False(t, found, "pass 1's stale delete cell must be retracted from the version map once pass 2 no longer produces it")
+}
+
+// A round can record a fee contribution and never flush it, so the retraction
+// has to tolerate a header the version map never received.
+func TestFeeMergeRevalidationRetractsUnflushedHeader(t *testing.T) {
+	f := newFeeMergeRevalidationFixture(t)
+
+	pass1 := f.mergeFeePassUnflushed(t)
+	_, ok := pass1.GetSelfDestruct(f.coinbase)
+	require.True(t, ok, "pass 1 emits the delete but never reaches the flush")
+
+	f.fundCoinbase()
+
+	require.NotPanics(t, func() { f.mergeFeePassUnflushed(t) })
 }
 
 // A later round that contributes something else must replace the earlier round

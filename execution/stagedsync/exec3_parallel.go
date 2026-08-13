@@ -2458,8 +2458,16 @@ func (be *blockExecutor) invalidBlockResult(err error) *blockResult {
 // txOut (the worker's raw output) on every call rather than layered onto a
 // prior round's result — an empty tipWrites on a later round must drop an
 // earlier round's contribution, not leave it stacked on top of the new one.
+// A header the prior round's temp had that merged no longer has is also
+// retracted from the version map at this tx's own index, so a downstream
+// read through it doesn't see a fee cell this tx no longer writes.
 func (be *blockExecutor) mergeFeeWrites(tx int, txVersion state.Version, txOut, tipWrites *state.WriteSet) {
 	merged := txOut.MergeInto(tipWrites)
+	for h := range be.feeMergeTemp[tx].AllHeaders() {
+		if !merged.Has(h) {
+			be.versionMap.Delete(h.Address, h.Path, h.Key, txVersion.TxIndex, false)
+		}
+	}
 	be.blockIO.RecordWrites(txVersion, merged)
 	be.recordFeeMerge(tx, txOut, merged)
 }
