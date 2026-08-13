@@ -2028,9 +2028,10 @@ func (result *execResult) calcFees(
 	// The apply loop re-credits a tx once per validation round, and the credit
 	// only moves when a prior tx's writes moved under it. An unchanged credit
 	// would rebuild a set identical to the one already recorded — including the
-	// CollectorWrites entries an earlier round already put there. A coinbase that
-	// is also the burnt address never matches: one write cannot carry both
-	// tracing reasons, so those blocks pay the full rebuild every round.
+	// CollectorWrites entries an earlier round already put there. When the
+	// coinbase is also the burnt address and both entries take the balance arm,
+	// the two never match at once — one write cannot carry both tracing
+	// reasons — so those blocks pay the full rebuild every round.
 	if coinbaseEntry.recordedIn(credited, taskVersion) && burntEntry.recordedIn(credited, taskVersion) {
 		return nil, nil
 	}
@@ -2065,9 +2066,10 @@ type feeEntry struct {
 }
 
 // recordedIn reports whether ws already carries this entry verbatim. Reason
-// fences the balance arm from a worker's own balance write. The deleted arm has
-// no fence: a worker's SELFDESTRUCT carries the same version and reads as
-// recorded, which is harmless because the entry writes that identical delete.
+// fences the balance arm from a worker's own balance write. The deleted arm
+// carries no Reason, so its only fence is the whole-struct version compare:
+// writeTo stamps the task version, whose TxNum is non-zero, while a worker
+// stamps its own writes from IntraBlockState.Version, which leaves TxNum zero.
 func (e *feeEntry) recordedIn(ws *state.WriteSet, version state.Version) bool {
 	if e == nil {
 		return true
@@ -2492,7 +2494,12 @@ type feeMerge struct {
 func (be *blockExecutor) recordWorkerWrites(txVersion state.Version, writes *state.WriteSet) {
 	be.blockIO.RecordWrites(txVersion, writes)
 	if temp, ok := be.feeMergeTemp[txVersion.TxIndex]; ok {
-		be.queueMapRelease(temp.writes)
+		// Never release the set just recorded: a worker TxOut is not supposed to
+		// be the recorded merge product, but releasing on identity would zero
+		// live writes on the background goroutine if that ever stopped holding.
+		if temp.writes != writes {
+			be.queueMapRelease(temp.writes)
+		}
 		delete(be.feeMergeTemp, txVersion.TxIndex)
 	}
 }
@@ -2519,7 +2526,10 @@ func (be *blockExecutor) recordFeeMerge(txVersion state.Version, prev, tipWrites
 	}
 	merged := prev.MergeInto(tipWrites)
 	be.blockIO.RecordWrites(txVersion, merged)
-	if temp, ok := be.feeMergeTemp[txVersion.TxIndex]; ok && temp.writes == prev {
+	// merged != temp.writes guards the self-release: MergeInto is expected to
+	// return a fresh set, but if it ever returned prev in place, releasing it
+	// would zero the writes just recorded.
+	if temp, ok := be.feeMergeTemp[txVersion.TxIndex]; ok && temp.writes == prev && merged != temp.writes {
 		be.queueMapRelease(temp.writes)
 	}
 	be.feeMergeTemp[txVersion.TxIndex] = feeMerge{writes: merged, version: txVersion}
