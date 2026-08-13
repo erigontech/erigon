@@ -19,23 +19,19 @@ package network
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
 var ErrTimeout = errors.New("timeout")
 
 var requestBlobBatchExpiration = 15 * time.Second
-var requestBlobRetryInterval = 100 * time.Millisecond
-
-const (
-	maxConcurrentBlobRequests = 2
-	requestBlobMaxBackoff     = time.Second
-)
 
 // This is just a bunch of functions to handle blobs
 
@@ -75,110 +71,52 @@ type PeerAndSidecars struct {
 	Responses []*cltypes.BlobSidecar
 }
 
-type blobRequester interface {
-	SendBlobsSidecarByIdentifierReq(context.Context, *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error)
-}
-
-type blobRequestResult struct {
-	peer      string
-	responses []*cltypes.BlobSidecar
-	err       error
-}
-
-type blobRequestPacing struct {
-	backoff     time.Duration
-	nextRequest time.Time
-}
-
-func newBlobRequestPacing() blobRequestPacing {
-	return blobRequestPacing{backoff: requestBlobRetryInterval}
-}
-
-func (p *blobRequestPacing) ready(now time.Time) bool {
-	return !now.Before(p.nextRequest)
-}
-
-func (p *blobRequestPacing) failed(now time.Time) {
-	p.backoff = min(p.backoff*2, requestBlobMaxBackoff)
-	p.nextRequest = now.Add(p.backoff)
-}
-
-func (p *blobRequestPacing) reset() {
-	p.backoff = requestBlobRetryInterval
-	p.nextRequest = time.Time{}
-}
-
-func (p *blobRequestPacing) complete(now time.Time, err error) {
-	if err != nil {
-		p.failed(now)
-		return
-	}
-	p.reset()
-}
-
 // RequestBlobsFrantically requests blobs from the network frantically.
-func RequestBlobsFrantically(ctx context.Context, r blobRequester, req *solid.ListSSZ[*cltypes.BlobIdentifier]) (*PeerAndSidecars, error) {
-	return requestBlobsFrantically(ctx, r, req, nil)
-}
+func RequestBlobsFrantically(ctx context.Context, r *rpc.BeaconRpcP2P, req *solid.ListSSZ[*cltypes.BlobIdentifier]) (*PeerAndSidecars, error) {
+	var atomicResp atomic.Value
 
-func requestBlobsFrantically(ctx context.Context, r blobRequester, req *solid.ListSSZ[*cltypes.BlobIdentifier], accept func(context.Context, *PeerAndSidecars) error) (*PeerAndSidecars, error) {
-	requestCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	atomicResp.Store(&PeerAndSidecars{})
 	timer := time.NewTimer(requestBlobBatchExpiration)
 	defer timer.Stop()
-	reqInterval := time.NewTicker(requestBlobRetryInterval)
+	reqInterval := time.NewTicker(100 * time.Millisecond)
 	defer reqInterval.Stop()
-	results := make(chan blobRequestResult, maxConcurrentBlobRequests)
-	validationResults := make(chan error, 1)
-	inFlight := 0
-	var candidate *PeerAndSidecars
-	var resultC <-chan blobRequestResult = results
-	var validationC <-chan error
-	pacing := newBlobRequestPacing()
+Loop:
 	for {
 		select {
-		case now := <-reqInterval.C:
-			if inFlight >= cap(results) || !pacing.ready(now) {
-				continue
-			}
-			inFlight++
+		case <-reqInterval.C:
 			go func() {
-				responses, peer, err := r.SendBlobsSidecarByIdentifierReq(requestCtx, req)
-				results <- blobRequestResult{peer: peer, responses: responses, err: err}
+				if len(atomicResp.Load().(*PeerAndSidecars).Responses) > 0 {
+					return
+				}
+				// this is so we do not get stuck on a side-fork
+				responses, pid, err := r.SendBlobsSidecarByIdentifierReq(ctx, req)
+				if err != nil {
+					log.Trace("RequestBlobsFrantically: error", "err", err, "peer", pid)
+					return
+				}
+				if responses == nil {
+					log.Trace("RequestBlobsFrantically: response is nil", "peer", pid)
+					return
+				}
+				if len(atomicResp.Load().(*PeerAndSidecars).Responses) > 0 {
+					return
+				}
+				atomicResp.Store(&PeerAndSidecars{
+					Peer:      pid,
+					Responses: responses,
+				})
 			}()
-		case result := <-resultC:
-			inFlight--
-			pacing.complete(time.Now(), result.err)
-			if result.err != nil {
-				log.Trace("RequestBlobsFrantically: error", "err", result.err, "peer", result.peer)
-				continue
-			}
-			if len(result.responses) == 0 {
-				log.Trace("RequestBlobsFrantically: response is empty", "peer", result.peer)
-				continue
-			}
-			candidate = &PeerAndSidecars{Peer: result.peer, Responses: result.responses}
-			if accept != nil {
-				resultC = nil
-				validationC = validationResults
-				go func() { validationResults <- accept(requestCtx, candidate) }()
-				continue
-			}
-			return candidate, nil
-		case err := <-validationC:
-			if err == nil {
-				return candidate, nil
-			}
-			log.Trace("RequestBlobsFrantically: rejected response", "err", err, "peer", candidate.Peer)
-			pacing.failed(time.Now())
-			candidate = nil
-			validationC = nil
-			resultC = results
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-timer.C:
 			log.Trace("RequestBlobsFrantically: timeout")
 			return nil, ErrTimeout
+		default:
+			if len(atomicResp.Load().(*PeerAndSidecars).Responses) > 0 {
+				break Loop
+			}
+			time.Sleep(10 * time.Millisecond)
 		}
 	}
+	return atomicResp.Load().(*PeerAndSidecars), nil
 }

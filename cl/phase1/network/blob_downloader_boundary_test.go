@@ -37,7 +37,7 @@ func TestBlobHistoryDownloaderProcessesFirstUnfrozenSlot(t *testing.T) {
 	const firstUnfrozenSlot = uint64(100)
 	wantErr := errors.New("first unfrozen slot visited")
 	reader := &boundaryBlockReader{err: wantErr}
-	downloader := newBoundaryDownloader(t, firstUnfrozenSlot, firstUnfrozenSlot, firstUnfrozenSlot, 1, reader)
+	downloader := newBoundaryDownloader(t, firstUnfrozenSlot, firstUnfrozenSlot, firstUnfrozenSlot, reader)
 
 	require.ErrorIs(t, downloader.downloadOnce(false), wantErr)
 	require.Equal(t, []uint64{firstUnfrozenSlot}, reader.slots)
@@ -46,7 +46,7 @@ func TestBlobHistoryDownloaderProcessesFirstUnfrozenSlot(t *testing.T) {
 func TestBlobHistoryDownloaderBatchStopsAtFrozenBoundary(t *testing.T) {
 	const firstUnfrozenSlot = uint64(100)
 	reader := &boundaryBlockReader{}
-	downloader := newBoundaryDownloader(t, firstUnfrozenSlot+1, firstUnfrozenSlot, 0, 1, reader)
+	downloader := newBoundaryDownloader(t, firstUnfrozenSlot+1, firstUnfrozenSlot, 0, reader)
 
 	require.NoError(t, downloader.downloadOnce(false))
 	require.Equal(t, []uint64{firstUnfrozenSlot + 1, firstUnfrozenSlot}, reader.slots)
@@ -59,36 +59,19 @@ func TestBlobHistoryDownloaderRefreshesFrozenBoundaryBetweenBatches(t *testing.T
 			snapshot.frozen.Store(13)
 		}
 	}}
-	downloader := newBoundaryDownloader(t, 20, 0, 0, 1, reader)
+	downloader := newBoundaryDownloader(t, 20, 0, 0, reader)
 	downloader.sn = snapshot
 
 	require.NoError(t, downloader.downloadOnce(false))
 	require.Equal(t, []uint64{20, 19, 18, 17, 16, 15, 14, 13}, reader.slots)
 }
 
-func TestBlobHistoryDownloaderRunsWithAvailablePeer(t *testing.T) {
-	const slot = uint64(100)
-	wantErr := errors.New("available peer used")
-	reader := &boundaryBlockReader{err: wantErr}
-	downloader := newBoundaryDownloader(t, slot, 0, slot, 1, reader)
-
-	require.ErrorIs(t, downloader.downloadOnce(false), wantErr)
-}
-
-func TestBlobHistoryDownloaderWaitsWithoutPeers(t *testing.T) {
-	reader := &boundaryBlockReader{}
-	downloader := newBoundaryDownloader(t, 100, 0, 100, 0, reader)
-
-	require.NoError(t, downloader.downloadOnce(false))
-	require.Empty(t, reader.slots)
-}
-
-func newBoundaryDownloader(t *testing.T, headSlot, frozenBlobs, targetSlot, peers uint64, reader freezeblocks.BeaconSnapshotReader) *BlobHistoryDownloader {
+func newBoundaryDownloader(t *testing.T, headSlot, frozenBlobs, targetSlot uint64, reader freezeblocks.BeaconSnapshotReader) *BlobHistoryDownloader {
 	t.Helper()
 	downloader := &BlobHistoryDownloader{
 		ctx:           t.Context(),
 		beaconCfg:     &clparams.MainnetBeaconConfig,
-		peerCounter:   boundaryPeerCounter(peers),
+		peerCounter:   boundaryPeerCounter(minPeersForBlobDownload),
 		indiciesDB:    memdb.NewTestDB(t, dbcfg.ChainDB),
 		blockReader:   reader,
 		sn:            boundarySnapshot(frozenBlobs),
