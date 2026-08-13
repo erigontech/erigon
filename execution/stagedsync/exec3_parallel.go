@@ -2004,7 +2004,6 @@ var finalizeReval = dbg.EnvBool("FINALIZE_REVAL", true)
 // domain — without it N+1 reads a stale sd.mem base and fails "nonce too high".
 // Requires splitApply (the commit that drops a block from the list is the fold).
 var prevBlockReads = dbg.EnvBool("PREV_BLOCK_READS", false)
-var cbTrace = dbg.EnvBool("CB_TRACE", false)
 
 // coinbaseSum defers coinbase materialization to the calcFees finalize sweep:
 // the worker's direct coinbase writes (sender==coinbase gas-debit) stay Estimate
@@ -2174,9 +2173,6 @@ func (pe *parallelExecutor) dispatchRun(t exec.Task) {
 // sent to the exec loop, which commits it in order. The context is released
 // while parked so dependencies can run; a fresh one is taken to re-execute.
 func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersion) {
-	if cbTrace {
-		fmt.Printf("[CB_DISPATCH] blk=%d tx=%d inc=%d\n", be.blockNum, tv.index, tv.version.Incarnation)
-	}
 	pe.runWG.Add(1)
 	be.slInflight.Add(1)
 	go func() {
@@ -2632,10 +2628,6 @@ func (result *execResult) calcFees(
 	txIndex := task.Version().TxIndex
 	taskVersion := task.Version()
 
-	if cbTrace {
-		fmt.Printf("[CB_ENTER] blk=%d tx=%d inc=%d cb=%x\n", task.Version().BlockNum, txIndex, taskVersion.Incarnation, result.Coinbase)
-	}
-
 	// Read at txIndex (floor txIndex-1) — strictly prior tx, excluding this tx's
 	// own prior incarnations that would double-apply the tip on re-execution.
 	// WorkerContext writes for the current tx are picked up below via TxOut.
@@ -2679,7 +2671,6 @@ func (result *execResult) calcFees(
 	coinbaseEmptyCodeHash := coinbaseAcc == nil || coinbaseAcc.IsEmptyCodeHash()
 	coinbaseSelfdestructed := false
 	coinbaseCreatedContract := false
-	cbFloorBal := newCoinbaseBalance
 	cbOverride := false
 	if bw, ok := result.TxOut.GetBalance(result.Coinbase); ok {
 		newCoinbaseBalance = bw.Val
@@ -2711,12 +2702,6 @@ func (result *execResult) calcFees(
 	burnCoinbaseTip := !chainRules.IsAmsterdam && coinbaseSelfdestructed && coinbaseWasContract
 	if !burnCoinbaseTip {
 		newCoinbaseBalance.Add(&newCoinbaseBalance, &result.ExecutionResult.FeeTipped)
-	}
-	if cbTrace {
-		fmt.Printf("[CB_TRACE] blk=%d tx=%d inc=%d cb=%x floor=%s override=%v ovVal=%s tip=%s new=%s burnTip=%v\n",
-			task.Version().BlockNum, txIndex, taskVersion.Incarnation, result.Coinbase,
-			cbFloorBal.String(), cbOverride, oldCoinbaseBalance.String(),
-			result.ExecutionResult.FeeTipped.String(), newCoinbaseBalance.String(), burnCoinbaseTip)
 	}
 	oldBurntBalance := newBurntBalance
 	if hasBurnt && chainRules.IsLondon {
@@ -3523,9 +3508,6 @@ func (be *blockExecutor) coinbaseVecCrossCheck(tx int, txResult *execResult, tip
 // both hold on the contiguous validated prefix.
 func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyTx kv.TemporalTx, stateReader *state.StateReader) (*blockResult, error) {
 	maxValidated := be.validateTasks.maxComplete()
-	if cbTrace {
-		fmt.Printf("[CB_ADV] blk=%d cbFlushed=%d maxValidated=%d\n", be.blockNum, be.coinbaseFlushedUpTo, maxValidated)
-	}
 	for tx := be.coinbaseFlushedUpTo + 1; tx <= maxValidated; tx++ {
 		// Use the validated snapshot, not be.results[tx]: validate and finalize
 		// are separate passes under dependency-ordered validation, so a
