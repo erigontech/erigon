@@ -908,3 +908,18 @@ func TestUnmarshalDynamicFeeTransactionFromJSONWithoutGasPrice(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, uint256.NewInt(1_000_000_000), txn.GetFeeCap())
 }
+
+func TestAATotalGasLimitOverflow(t *testing.T) {
+	t.Parallel()
+
+	tx := &AccountAbstractionTransaction{ValidationGasLimit: 1, PaymasterValidationGasLimit: 2, PostOpGasLimit: 4}
+	tx.GasLimit = 8
+	total, ok := tx.TotalGasLimit(16)
+	assert.True(t, ok)
+	assert.Equal(t, uint64(31), total)
+
+	overflowing := &AccountAbstractionTransaction{ValidationGasLimit: ^uint64(0), PaymasterValidationGasLimit: 1}
+	_, ok = overflowing.TotalGasLimit(params.TxAAGas)
+	assert.False(t, ok)
+	assert.Equal(t, ^uint64(0), overflowing.GetGasLimit())
+}
