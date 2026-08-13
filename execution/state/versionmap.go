@@ -127,14 +127,6 @@ func putCell[T any](vm *VersionMap, cells *btree.Map[int, *WriteCell[T]], addr a
 		if ci.incarnation > incarnation {
 			panic(fmt.Errorf("existing transaction value does not have lower incarnation: %x %s, %v", addr, path, txIdx))
 		}
-		// A cell's value may change only while it is an Estimate (no reader commits
-		// against an estimate — it reads back as a dependency). Once published Done,
-		// the value is immutable at that version; a different value here is a
-		// post-publish mutation that version-based OCC validation cannot detect.
-		if oneValPerVer && ci.incarnation == incarnation && ci.flag == FlagDone && eq != nil && !eq(ci.Value, value) {
-			panic(fmt.Sprintf("versionMap: value changed on a published Done cell: tx=%d inc=%d addr=%x path=%s",
-				txIdx, incarnation, addr.Value(), path))
-		}
 		ci.flag = flag
 		ci.incarnation = incarnation
 		ci.Value = value

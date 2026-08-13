@@ -26,13 +26,6 @@ import (
 // Removed once proven.
 var vmapAddrOrigin = dbg.EnvBool("VMAP_ADDR_ORIGIN", false)
 
-// oneValPerVer enforces the versionMap invariant that a cell holds ONE value per
-// version: overwriting a cell at the same (TxIndex, Incarnation) with a DIFFERENT
-// value is a bug (a post-execution mutation of an already-published cell), which
-// version-based OCC validation cannot detect. Re-flushing the same value is
-// idempotent and allowed; a higher incarnation is a new version and allowed.
-var oneValPerVer = dbg.EnvBool("ONE_VAL_PER_VER", false)
-
 // originTxIndex is the versionMap index of the pre-block committed base ("origin"
 // = all account fields read at once, the old stateObject.original). It is the
 // highest slot below every real task index: the lowest task is the block-begin
