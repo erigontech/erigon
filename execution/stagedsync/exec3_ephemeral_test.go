@@ -202,9 +202,7 @@ func BenchmarkEphemeralParallelReplay(b *testing.B) {
 
 		b.StopTimer()
 		require.NoError(b, execErr)
-		if !dbg.EnvBool("DISCARD_APPLY", false) {
-			require.NoError(b, r.verify(tx, doms, expected))
-		}
+		require.NoError(b, r.verify(tx, doms, expected))
 		doms.Close()
 		tx.Rollback()
 	}

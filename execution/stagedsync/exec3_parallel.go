@@ -2062,12 +2062,6 @@ func SetSplitApplyStackForTest() (restore func()) {
 	}
 }
 
-// discardApply is a PERF DIAGNOSTIC ONLY (produces incorrect state): it skips the
-// apply work (ApplyStateWrites + ApplyTxIndexes + block-end Flush) so the benchmark
-// measures the pure exec wall — dispatch + parallel EVM + validation + finalize +
-// publish — with the state-persistence work removed. The ephemeral benchmark skips
-// its post-state verify when this is set.
-var discardApply = dbg.EnvBool("DISCARD_APPLY", false)
 
 // streamApply applies each block's per-tx versionMap views to sd.mem as the
 // results arrive (in publish order) instead of buffering the whole block and
@@ -4189,7 +4183,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			// Apply state + per-tx indexes to sd.mem. Under splitApply the apply loop
 			// folds the versionMap views the txResults carry at block end, keeping
 			// sd.mem at N-1 during exec so seedOrigin reads the committed base.
-			if !splitApply && !discardApply {
+			if !splitApply {
 				if err := pe.rs.ApplyStateWrites(ctx, applyTx, applyResult.blockNum, applyResult.txNum, applyResult.writes,
 					nil, applyResult.rules, be.blockStateCache); err != nil {
 					return nil, err
@@ -4373,7 +4367,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				// Apply finalize writes to the BlockStateCache. Under splitApply the
 				// apply loop folds them (via the isFinalize txResult below) at block end.
-				if !splitApply && !discardApply {
+				if !splitApply {
 					if err := pe.rs.ApplyStateWrites(ctx, applyTx, be.blockNum, finalVersion.TxNum,
 						finalizeWrites, nil, lastResult.Rules(), be.blockStateCache); err != nil {
 						return nil, err
@@ -4406,7 +4400,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		// visible. Under splitApply the apply loop folds the block's writes at block
 		// end instead (off the exec spine); nothing populates blockStateCache here.
 		var flushDur time.Duration
-		if !splitApply && !discardApply {
+		if !splitApply {
 			flushStart := time.Now()
 			if err := be.blockStateCache.Flush(pe.rs.Domains(), applyTx); err != nil {
 				return nil, err
