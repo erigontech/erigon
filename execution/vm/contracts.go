@@ -44,7 +44,6 @@ import (
 	libbn254 "github.com/erigontech/erigon/common/crypto/bn254"
 	libkzg "github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/crypto/secp256r1"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -325,9 +324,7 @@ type ecrecover struct{}
 // are memoized in a bounded global cache: this dedups OCC re-executions (a re-run
 // tx repeats the same recovery) and repeated signatures, skipping the secp256k1 +
 // keccak compute on a hit. Gas is charged by RequiredGas regardless, so the cache
-// is consensus-neutral. Gated for A/B.
-var sigCacheEnabled = dbg.EnvBool("SIG_CACHE", false)
-
+// is consensus-neutral.
 var ecrecoverCache, _ = lru.New[[128]byte, []byte](100_000)
 
 func (c *ecrecover) RequiredGas(input []byte) uint64 {
@@ -342,11 +339,9 @@ func (c *ecrecover) Run(input []byte) ([]byte, error) {
 	// but for ecrecover we want (r, s, v)
 
 	var key [ecRecoverInputLength]byte
-	if sigCacheEnabled {
-		copy(key[:], input)
-		if out, ok := ecrecoverCache.Get(key); ok {
-			return out, nil
-		}
+	copy(key[:], input)
+	if out, ok := ecrecoverCache.Get(key); ok {
+		return out, nil
 	}
 
 	r := new(uint256.Int).SetBytes(input[64:96])
@@ -371,9 +366,7 @@ func (c *ecrecover) Run(input []byte) ([]byte, error) {
 
 	// the first byte of pubkey is bitcoin heritage
 	out := common.LeftPadBytes(crypto.Keccak256(pubKey[1:])[12:], 32)
-	if sigCacheEnabled {
-		ecrecoverCache.Add(key, out)
-	}
+	ecrecoverCache.Add(key, out)
 	return out, nil
 }
 
