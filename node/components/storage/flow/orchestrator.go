@@ -893,12 +893,32 @@ func (o *Orchestrator) fireInitialStateReady() {
 // NOT hold peerMu.
 func (o *Orchestrator) maybeFireInitialDownloadsComplete() {
 	o.peerMu.Lock()
-	if o.initialDownloadsCompleteFired || !o.stateReadyFired || len(o.pending) != 0 {
+	if o.initialDownloadsCompleteFired {
 		o.peerMu.Unlock()
+		return
+	}
+	if !o.stateReadyFired {
+		pendingLen := len(o.pending)
+		o.peerMu.Unlock()
+		o.log.Debug("[flow] maybeFireInitialDownloadsComplete: blocked", "reason", "stateReadyFired=false", "pending", pendingLen)
+		return
+	}
+	if len(o.pending) != 0 {
+		pending := make([]string, 0, len(o.pending))
+		for name := range o.pending {
+			pending = append(pending, name)
+			if len(pending) >= 5 {
+				break
+			}
+		}
+		pendingLen := len(o.pending)
+		o.peerMu.Unlock()
+		o.log.Info("[flow] maybeFireInitialDownloadsComplete: blocked", "reason", "pending>0", "pending", pendingLen, "sample", strings.Join(pending, ","))
 		return
 	}
 	o.initialDownloadsCompleteFired = true
 	o.peerMu.Unlock()
+	o.log.Info("[flow] InitialDownloadsComplete published")
 	o.bus.Publish(InitialDownloadsComplete{})
 }
 
