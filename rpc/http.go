@@ -292,9 +292,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	ctx = context.WithValue(ctx, peerInfoContextKey{}, connInfo)
 	ctx, overloaded := withOverloadedFlag(ctx)
-	// Note: the gzip-streaming hook (httpFlusherContextKey) is injected by the gzip
-	// middleware via WithGzipStreamingHook, not here, to avoid prematurely committing
-	// HTTP headers when gzip is disabled.
 
 	// All checks passed, create a codec that reads directly from the request body
 	// until EOF, writes the response to w, and orders the server to process a
