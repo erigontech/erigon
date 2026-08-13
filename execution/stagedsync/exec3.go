@@ -107,6 +107,10 @@ func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, curr
 	return inputTxNum, maxTxNum, offsetFromBlockBeginning, blockNum, nil
 }
 
+func shouldWaitForReadAhead(isValidatingBlocks bool) bool {
+	return dbg.ReadAheadWait && isValidatingBlocks
+}
+
 // execRange is the resolved block/txNum window the executor runs over. The
 // stage wrapper resolves it (SeekCommitment + restoreTxNum) and passes it in;
 // the exec core does not touch the stage's DB metadata to derive it.
@@ -201,6 +205,9 @@ func execV3(ctx context.Context,
 			doms.SetDeferCommitmentUpdates(true)
 		}
 		defer doms.SetDeferCommitmentUpdates(false)
+	}
+	if shouldWaitForReadAhead(isForkValidation) && cfg.readAheader != nil {
+		cfg.readAheader.WaitForWarmup(ctx)
 	}
 	// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
 	// can't use OS-level ReadAhead - because Data >> RAM
@@ -313,6 +320,9 @@ func execV3Serial(ctx context.Context,
 		doms.SetDeferCommitmentUpdates(true)
 	}
 	defer doms.SetDeferCommitmentUpdates(false)
+	if shouldWaitForReadAhead(isForkValidation) && cfg.readAheader != nil {
+		cfg.readAheader.WaitForWarmup(ctx)
+	}
 	if !initialCycle && isApplyingBlocks {
 		var clean func()
 

@@ -1513,6 +1513,44 @@ func TestStateCache_AccountDeletionGatesStaleCodeFill(t *testing.T) {
 	require.True(t, ok, "unrelated code fills from a current view must stay admitted")
 }
 
+func TestStateCache_CodeHashHitBindsAddress(t *testing.T) {
+	b := 1 * datasize.MB
+	c := NewStateCache(b, b, b, b)
+	t.Cleanup(c.Close)
+	firstAddr, secondAddr, code := makeAddr(1), makeAddr(2), makeCode(1)
+	codeHash := crypto.Keccak256Hash(code)
+	view := c.View(FrontierFunc(func(kv.Domain) (uint64, bool) { return 100, true }))
+	view.Fill(kv.CodeDomain, firstAddr, code, 10)
+	view.SeedAddrCodeHash(secondAddr, codeHash, 11)
+	_, ok := c.View(nil).Get(kv.CodeDomain, secondAddr)
+	require.False(t, ok, "the second address must start without an addr-keyed code binding")
+	got, ok := view.GetCodeByAddressHash(secondAddr)
+	require.True(t, ok)
+	require.Equal(t, code, got)
+	got, ok = c.View(nil).Get(kv.CodeDomain, secondAddr)
+	require.True(t, ok, "the hash hit must populate the addr-keyed code binding")
+	require.Equal(t, code, got)
+	c.Applier().Unwind(11)
+	_, ok = c.View(nil).Get(kv.CodeDomain, secondAddr)
+	require.False(t, ok, "the derived binding must keep the mapping stamp for unwind invalidation")
+}
+
+func TestStateCache_EmptyCodeHashUsesViewFrontierStamp(t *testing.T) {
+	b := 1 * datasize.MB
+	c := NewStateCache(b, b, b, b)
+	t.Cleanup(c.Close)
+	addr := makeAddr(1)
+	view := c.View(FrontierFunc(func(kv.Domain) (uint64, bool) { return 100, true }))
+	view.SeedAddrCodeHash(addr, [32]byte{}, 4)
+	codeHash, txNum, ok := c.getAddrCodeHashWithTxNum(addr)
+	require.True(t, ok)
+	require.Zero(t, codeHash)
+	require.Equal(t, uint64(99), txNum, "a negative mapping reflects the view, not a nonexistent value's reported step")
+	c.Applier().Unwind(99)
+	_, _, ok = c.getAddrCodeHashWithTxNum(addr)
+	require.False(t, ok)
+}
+
 // An apply-only cache (STATE_CACHE_FILLS=false) has no fill for a lowered
 // frontier to poison; wire-up code keys the aggregator forbid on this.
 func TestApplyOnlyCacheReportsFillsDisabled(t *testing.T) {

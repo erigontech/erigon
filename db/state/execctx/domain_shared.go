@@ -1635,10 +1635,11 @@ func (sd *SharedDomains) getCode(tx kv.TemporalTx, view cache.ReadView, addr []b
 // Returns nil quietly on any error or missing account — the caller falls
 // through to the addr-keyed file read so correctness is unaffected.
 //
-// txNum stamps the addr→codeHash cache entry (a conservative upper bound for
-// unwind invalidation). It is passed in by the caller — never read from the
-// shared sd.txNum, which a parallel exec worker on this read path must not
-// touch (the exec loop advances it concurrently).
+// txNum stamps a positive addr→codeHash cache entry as a conservative upper
+// bound for unwind invalidation. ReadView stamps a negative entry at the
+// committed account frontier that established the absence of code. The value
+// is passed in by the caller rather than read from sd.txNum, which the parallel
+// execution loop advances concurrently.
 func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, view cache.ReadView, addr []byte, txNum uint64) []byte {
 	if len(addr) == 0 {
 		return nil
@@ -1701,9 +1702,7 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, view cache.ReadView, 
 		// Only a view-sourced record (including the zero-hash sentinel for
 		// misses) may seed the mapping: the admission gate vouches for the tx's
 		// frontier, and a cache-sourced record can lag a just-committed flush,
-		// slipping pre-apply state past the gate. txNum is a conservative upper
-		// bound (>= the resolved account's write txNum), so the mapping drops
-		// on any unwind that reverts that account.
+		// slipping pre-apply state past the gate.
 		seedView := view
 		if seedView.NeedsFrontier() {
 			// Resolve fill authority only after the account lookup has missed the
