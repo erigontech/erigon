@@ -261,12 +261,19 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		config.NetworkId = clparams.NetworkType(beaconConfig.DepositNetworkID)
 	}
 
-	if len(config.BootstrapNodes) > 0 {
-		networkConfig.BootNodes = config.BootstrapNodes
+	config.ApplyNetworkOverrides(networkConfig)
+	discoveryNodes, directBootnodes, unsupportedBootnodes, err := clp2p.ParseBootstrapNodes(networkConfig.BootNodes)
+	if err != nil {
+		return err
 	}
-
-	if len(config.StaticPeers) > 0 {
-		networkConfig.StaticPeers = config.StaticPeers
+	for _, bootnode := range unsupportedBootnodes {
+		log.Warn("Ignoring unsupported Consensus bootstrap node", "bootnode", bootnode)
+	}
+	networkConfig.BootNodes = discoveryNodes
+	if len(directBootnodes) > 0 {
+		staticPeers := make([]string, 0, len(networkConfig.StaticPeers)+len(directBootnodes))
+		staticPeers = append(staticPeers, networkConfig.StaticPeers...)
+		networkConfig.StaticPeers = append(staticPeers, directBootnodes...)
 	}
 	if genesisState != nil {
 		genesisDb.Initialize(genesisState)
