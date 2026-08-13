@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -81,6 +82,7 @@ type ForkChoiceStorageMock struct {
 	Headers                             map[common.Hash]*cltypes.BeaconBlockHeader
 	Blocks                              map[common.Hash]*cltypes.SignedBeaconBlock
 	Envelopes                           map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
+	envelopesMu                         sync.RWMutex
 	ExecutionPayloadReceivedAt          map[common.Hash]time.Time
 	VerifiedPayloads                    map[common.Hash]bool
 	OnBlockErr                          error
@@ -427,7 +429,12 @@ func (f *ForkChoiceStorageMock) OnExecutionPayload(ctx context.Context, signedEn
 	if f.OnExecutionPayloadFn != nil {
 		return f.OnExecutionPayloadFn(ctx, signedEnvelope, checkBlobData, validatePayload)
 	}
+	f.envelopesMu.Lock()
+	defer f.envelopesMu.Unlock()
 	if f.OnExecutionPayloadErr == nil && signedEnvelope != nil && signedEnvelope.Message != nil {
+		if f.Envelopes == nil {
+			f.Envelopes = make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)
+		}
 		f.Envelopes[signedEnvelope.Message.BeaconBlockRoot] = signedEnvelope
 	}
 	return f.OnExecutionPayloadErr
@@ -550,6 +557,8 @@ func (f *ForkChoiceStorageMock) GetBlock(
 }
 
 func (f *ForkChoiceStorageMock) HasEnvelope(blockRoot common.Hash) bool {
+	f.envelopesMu.RLock()
+	defer f.envelopesMu.RUnlock()
 	_, ok := f.Envelopes[blockRoot]
 	return ok
 }
@@ -557,6 +566,15 @@ func (f *ForkChoiceStorageMock) HasEnvelope(blockRoot common.Hash) bool {
 func (f *ForkChoiceStorageMock) ExecutionPayloadReceivedBefore(blockRoot common.Hash, deadline time.Time) bool {
 	receivedAt, ok := f.ExecutionPayloadReceivedAt[blockRoot]
 	return ok && receivedAt.Before(deadline)
+}
+
+func (f *ForkChoiceStorageMock) SetEnvelope(blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) {
+	f.envelopesMu.Lock()
+	defer f.envelopesMu.Unlock()
+	if f.Envelopes == nil {
+		f.Envelopes = make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)
+	}
+	f.Envelopes[blockRoot] = envelope
 }
 
 func (f *ForkChoiceStorageMock) IsPayloadVerified(blockRoot common.Hash) bool {
@@ -567,6 +585,8 @@ func (f *ForkChoiceStorageMock) IsPayloadVerified(blockRoot common.Hash) bool {
 }
 
 func (f *ForkChoiceStorageMock) ReadEnvelopeFromDisk(blockRoot common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+	f.envelopesMu.RLock()
+	defer f.envelopesMu.RUnlock()
 	return f.Envelopes[blockRoot], nil
 }
 

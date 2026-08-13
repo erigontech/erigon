@@ -188,8 +188,15 @@ func (t *TransactionsSSZ) EncodingSizeSSZ() (size int) {
 }
 
 func NewTransactionsSSZFromTransactions(txs [][]byte) *TransactionsSSZ {
+	return NewTransactionsSSZFromTransactionsWithLimits(txs, 0, 0)
+}
+
+// NewTransactionsSSZFromTransactionsWithLimits constructs transactions with decoder resource limits.
+func NewTransactionsSSZFromTransactionsWithLimits(txs [][]byte, maxTransactionsPerPayload, maxBytesPerTransaction uint64) *TransactionsSSZ {
 	return &TransactionsSSZ{
-		underlying: txs,
+		underlying:                txs,
+		maxTransactionsPerPayload: maxTransactionsPerPayload,
+		maxBytesPerTransaction:    maxBytesPerTransaction,
 	}
 }
 

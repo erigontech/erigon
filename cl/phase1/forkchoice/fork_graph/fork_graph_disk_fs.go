@@ -216,7 +216,6 @@ func (f *forkGraphDisk) ReadEnvelopeFromDisk(blockRoot common.Hash) (envelope *c
 func (f *forkGraphDisk) readEnvelopeFromDiskLocked(blockRoot common.Hash) (envelope *cltypes.SignedExecutionPayloadEnvelope, err error) {
 	var file afero.File
 	var corrupt bool
-	_, wasCached := f.envelopeExists.Load(blockRoot)
 	if _, invalid := f.invalidEnvelopes.Load(blockRoot); invalid {
 		return nil, fmt.Errorf("cannot read known invalid envelope for root %x", blockRoot)
 	}
@@ -224,7 +223,7 @@ func (f *forkGraphDisk) readEnvelopeFromDiskLocked(blockRoot common.Hash) (envel
 	filename := getEnvelopeFilename(blockRoot)
 	file, err = f.fs.Open(filename)
 	if err != nil {
-		if !wasCached || errors.Is(err, os.ErrNotExist) {
+		if errors.Is(err, os.ErrNotExist) {
 			f.envelopeExists.Delete(blockRoot)
 		}
 		return
@@ -235,8 +234,6 @@ func (f *forkGraphDisk) readEnvelopeFromDiskLocked(blockRoot common.Hash) (envel
 		}
 		if corrupt {
 			f.invalidEnvelopes.Store(blockRoot, struct{}{})
-			f.envelopeExists.Delete(blockRoot)
-		} else if err != nil && !wasCached {
 			f.envelopeExists.Delete(blockRoot)
 		}
 	}()
@@ -281,6 +278,10 @@ func (f *forkGraphDisk) readEnvelopeFromDiskLocked(blockRoot common.Hash) (envel
 		corrupt = true
 		return nil, fmt.Errorf("failed to decode envelope: %w, root: %x, len: %d", err, blockRoot, n)
 	}
+	if err = envelope.ValidateForConfig(f.beaconCfg); err != nil {
+		corrupt = true
+		return nil, fmt.Errorf("invalid persisted envelope: %w, root: %x", err, blockRoot)
+	}
 	if err = envelope.ValidateForPersistence(f.beaconCfg); err != nil {
 		corrupt = true
 		return nil, fmt.Errorf("invalid persisted envelope: %w, root: %x", err, blockRoot)
@@ -295,7 +296,11 @@ func (f *forkGraphDisk) readEnvelopeFromDiskLocked(blockRoot common.Hash) (envel
 		ownedTransactions[i] = bytes.Clone(transaction)
 	}
 	// TransactionsSSZ decode aliases its input, so detach it before reusing the shared buffer.
-	envelope.Message.Payload.Transactions = solid.NewTransactionsSSZFromTransactions(ownedTransactions)
+	envelope.Message.Payload.Transactions = solid.NewTransactionsSSZFromTransactionsWithLimits(
+		ownedTransactions,
+		f.beaconCfg.MaxTransactionsPerPayload,
+		f.beaconCfg.MaxBytesPerTransaction,
+	)
 	f.envelopeExists.Store(blockRoot, struct{}{})
 	f.invalidEnvelopes.Delete(blockRoot)
 
@@ -322,6 +327,9 @@ func isCorruptEnvelopeReadError(err, sourceErr error) bool {
 // DumpEnvelopeOnDisk dumps an execution payload envelope to disk.
 // [New in Gloas:EIP7732]
 func (f *forkGraphDisk) DumpEnvelopeOnDisk(blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) (err error) {
+	if validateErr := envelope.ValidateForConfig(f.beaconCfg); validateErr != nil {
+		return fmt.Errorf("cannot persist invalid envelope: %w", validateErr)
+	}
 	if validateErr := envelope.ValidateForPersistence(f.beaconCfg); validateErr != nil {
 		return fmt.Errorf("cannot persist invalid envelope: %w", validateErr)
 	}
