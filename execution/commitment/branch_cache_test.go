@@ -17,6 +17,7 @@
 package commitment
 
 import (
+	"fmt"
 	"math/rand"
 	"runtime"
 	"strings"
@@ -57,6 +58,48 @@ func TestBranchCache_AccountTrunkRouting(t *testing.T) {
 	c.Unwind(60)
 	_, _, ok = c.Get(trunkKey)
 	require.False(t, ok, "trunk entry with txN=100 must drop at unwind floor 60")
+}
+
+// A pin that checked occupancy before writing could skip its +1 while a racing
+// Invalidate's -1 still lands, leaving PinnedCount below the resident count.
+func TestBranchCache_PinnedCountSurvivesConcurrentInvalidate(t *testing.T) {
+	newPrefix := func(contract byte, storageNibbles int) []byte {
+		p := make([]byte, 33+(storageNibbles+1)/2)
+		if storageNibbles%2 == 1 {
+			p[0] = 0x10
+		}
+		p[1] = contract
+		for i := 2; i < len(p); i++ {
+			p[i] = byte(i * 3)
+		}
+		return p
+	}
+
+	// The window only opens on an already-occupied slot, hence the pin per round.
+	for _, storageNibbles := range []int{0, 6} {
+		t.Run(fmt.Sprintf("depth%d", storageNibbles), func(t *testing.T) {
+			prefix := newPrefix(1, storageNibbles)
+
+			for range 20000 {
+				c := NewBranchCache(100)
+				c.PinEntry(prefix, []byte("v0"), 0, 100)
+
+				var wg sync.WaitGroup
+				wg.Go(func() { c.PinEntry(prefix, []byte("v1"), 0, 100) })
+				wg.Go(func() { c.Invalidate(prefix) })
+				wg.Wait()
+
+				_, _, resident := c.Get(prefix)
+				want := 0
+				if resident {
+					want = 1
+				}
+				require.Equalf(t, want, c.PinnedCount(),
+					"PinnedCount must match residency (resident=%v)", resident)
+				c.Close()
+			}
+		})
+	}
 }
 
 // TestBranchCache_StorageTrunkPin verifies PinEntry routes a storage-trunk
@@ -487,11 +530,34 @@ func TestStorageNibbles_MatchesReference(t *testing.T) {
 	}
 }
 
+// Terminator-flagged keys must be refused a trunk route, not routed one slot short.
+func TestBranchCache_StorageRouteRejectsTerminator(t *testing.T) {
+	prefix := make([]byte, 34)
+	for i := 1; i < len(prefix); i++ {
+		prefix[i] = byte(i)
+	}
+	for _, flag := range []byte{0x20, 0x30} {
+		prefix[0] = flag
+		c := NewBranchCache(100)
+		var nibBuf [4]byte
+		_, _, routed := c.storageRoute(prefix, true, &nibBuf)
+		require.Falsef(t, routed, "terminator-flagged prefix (%#x) must fall through to the tail", flag)
+
+		// Still cached, just on the slower tier — a refused route is not a drop.
+		c.PinEntry(prefix, []byte("v"), 0, 100)
+		got, _, ok := c.Get(prefix)
+		require.Truef(t, ok, "terminator-flagged prefix (%#x) must still round-trip", flag)
+		require.Equal(t, []byte("v"), got)
+		c.Close()
+	}
+}
+
 // TestBranchCache_StorageRoute_ZeroAlloc verifies storageRoute's account-hash
 // and storage-nibble decode no longer pay the CompactToHex + packed-key
 // allocations on a storage-tier lookup, for both odd and even flag parity.
 func TestBranchCache_StorageRoute_ZeroAlloc(t *testing.T) {
 	c := NewBranchCache(100)
+	defer c.Close()
 
 	even := make([]byte, 33) // even flag, storLen=0 → storage trunk's d0
 	for i := 1; i < 33; i++ {
@@ -512,5 +578,47 @@ func TestBranchCache_StorageRoute_ZeroAlloc(t *testing.T) {
 			_, _, _ = c.storageRoute(prefix, false, &nibBuf)
 		})
 		require.Zerof(t, allocs, "storageRoute must not allocate on a storage-tier lookup, prefix0=%#x", prefix[0])
+
+		// create=true reaches LoadOrStore; if that ever retained the key, escape
+		// analysis would heap-promote the 32-byte hash on both routes.
+		allocs = testing.AllocsPerRun(1000, func() {
+			var nibBuf [4]byte
+			_, _, _ = c.storageRoute(prefix, true, &nibBuf)
+		})
+		require.Zerof(t, allocs, "storageRoute must not allocate routing to a resident contract, prefix0=%#x", prefix[0])
+	}
+}
+
+// A right-nibbles/wrong-count decode routes the pin and the read to different
+// depths — a permanent miss the reference comparison cannot see.
+func TestBranchCache_StorageTrunkRoundTripAcrossDepths(t *testing.T) {
+	for depth := range 9 {
+		// The parity of 64+depth fixes the compact odd flag: one encoding per depth.
+		total := 64 + depth
+		oddFlag := total%2 == 1
+		prefix := make([]byte, total/2+1)
+		if oddFlag {
+			prefix[0] = 0x10
+		}
+		for i := 1; i < len(prefix); i++ {
+			prefix[i] = byte(i*11 + depth)
+		}
+
+		t.Run(fmt.Sprintf("depth%d", depth), func(t *testing.T) {
+			c := NewBranchCache(100)
+			defer c.Close() // a require failure here must not leak activeBranchCaches
+			want := fmt.Sprintf("d%d", depth)
+			c.PinEntry(prefix, []byte(want), 0, 100)
+
+			got, _, ok := c.Get(prefix)
+			require.Truef(t, ok, "pinned entry must read back, depth=%d", depth)
+			require.Equal(t, want, string(got))
+			require.Equalf(t, 1, c.PinnedCount(), "depth=%d", depth)
+
+			c.Invalidate(prefix)
+			_, _, ok = c.Get(prefix)
+			require.Falsef(t, ok, "invalidated entry must be gone, depth=%d", depth)
+			require.Zerof(t, c.PinnedCount(), "depth=%d", depth)
+		})
 	}
 }
