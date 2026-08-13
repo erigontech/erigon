@@ -2454,14 +2454,27 @@ func (be *blockExecutor) invalidBlockResult(err error) *blockResult {
 	}
 }
 
-// recordFeeMerge takes ownership of the set the fee merge just recorded for tx
-// and reclaims the one it superseded. Only a set an earlier fee merge created
-// may be released: prev is otherwise some execResult's TxOut, which stays live.
-// MergeInto shares VersionedWrite pointers rather than the maps holding them,
-// so pooling prev's maps leaves the writes merged now holds intact.
-func (be *blockExecutor) recordFeeMerge(tx int, prev, merged *state.WriteSet) {
-	if temp := be.feeMergeTemp[tx]; temp != nil && temp == prev && merged != temp {
+// mergeFeeWrites records tipWrites as tx's fee contribution, rebuilt from
+// txOut (the worker's raw output) on every call rather than layered onto a
+// prior round's result — an empty tipWrites on a later round must drop an
+// earlier round's contribution, not leave it stacked on top of the new one.
+func (be *blockExecutor) mergeFeeWrites(tx int, txVersion state.Version, txOut, tipWrites *state.WriteSet) {
+	merged := txOut.MergeInto(tipWrites)
+	be.blockIO.RecordWrites(txVersion, merged)
+	be.recordFeeMerge(tx, txOut, merged)
+}
+
+// recordFeeMerge tracks the write set a fee-merge round produced for tx and
+// reclaims the one it superseded. txOut is the merge's immutable baseline and
+// is never released. When tipWrites is empty, MergeInto returns txOut itself
+// as merged, so there is no new temp to track.
+func (be *blockExecutor) recordFeeMerge(tx int, txOut, merged *state.WriteSet) {
+	if temp := be.feeMergeTemp[tx]; temp != nil && temp != txOut && temp != merged {
 		be.queueMapRelease(temp)
+	}
+	if merged == txOut {
+		delete(be.feeMergeTemp, tx)
+		return
 	}
 	be.feeMergeTemp[tx] = merged
 }
@@ -2762,12 +2775,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			if err != nil {
 				return nil, err
 			}
-			if !tipWrites.IsEmpty() {
-				existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
-				merged := existingWrites.MergeInto(tipWrites)
-				be.blockIO.RecordWrites(txVersion, merged)
-				be.recordFeeMerge(tx, existingWrites, merged)
-			}
+			be.mergeFeeWrites(tx, txVersion, txResult.TxOut, tipWrites)
 		}
 
 		validity := be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,

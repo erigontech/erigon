@@ -37,47 +37,51 @@ func feeMergeTestWrites(t *testing.T, addr accounts.Address, balance uint64) *st
 	return ws
 }
 
-// TestRecordFeeMergeReleasesSupersededTemp pins the three transitions the fee
-// merge goes through for one tx: the first merge has no temp to reclaim, a
-// revalidation round reclaims the temp it replaces, and a round whose input is
-// an execResult's TxOut (after a re-execution replaced the recorded slot)
-// reclaims nothing.
+// TestRecordFeeMergeReleasesSupersededTemp pins the fee-merge temp's lifecycle
+// across a tx's validation rounds: the first round has nothing to reclaim, a
+// same-baseline revalidation reclaims the temp it replaces, a round against a
+// new baseline (a re-execution's TxOut) still reclaims the stale temp since
+// MergeInto only ever reads from the baseline and never from a temp, and a
+// round with no fee contribution reverts the recorded set to the baseline
+// itself and reclaims the last temp with nothing left to track.
 func TestRecordFeeMergeReleasesSupersededTemp(t *testing.T) {
 	t.Parallel()
 
 	addr := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
 	be := &blockExecutor{feeMergeTemp: map[int]*state.WriteSet{}}
 
-	// First round: prev is the worker's TxOut, so nothing may be released.
-	txOut := feeMergeTestWrites(t, addr, 1)
-	temp1 := feeMergeTestWrites(t, addr, 2)
-	be.recordFeeMerge(0, txOut, temp1)
-	require.Same(t, temp1, be.feeMergeTemp[0])
-	require.Equal(t, 1, txOut.Count(), "TxOut must survive the fee merge")
+	txOutA := feeMergeTestWrites(t, addr, 1)
 
-	// Revalidation round: prev is the temp the first round recorded, so it is
-	// superseded and reclaimed.
-	temp2 := feeMergeTestWrites(t, addr, 3)
-	be.recordFeeMerge(0, temp1, temp2)
+	temp1 := txOutA.MergeInto(feeMergeTestWrites(t, addr, 2))
+	be.recordFeeMerge(0, txOutA, temp1)
+	require.Same(t, temp1, be.feeMergeTemp[0])
+
+	temp2 := txOutA.MergeInto(feeMergeTestWrites(t, addr, 3))
+	be.recordFeeMerge(0, txOutA, temp2)
 	be.awaitMapReleases()
 	require.Same(t, temp2, be.feeMergeTemp[0])
 	require.Equal(t, 0, temp1.Count(), "superseded fee-merge temp must be released")
-	require.Equal(t, 1, temp2.Count())
+	require.Equal(t, 1, txOutA.Count(), "txOut must survive the fee merge")
 
-	// After a re-execution the recorded slot is the new TxOut again, so the
-	// stale temp does not match prev and stays untouched.
-	txOut2 := feeMergeTestWrites(t, addr, 4)
-	temp3 := feeMergeTestWrites(t, addr, 5)
-	be.recordFeeMerge(0, txOut2, temp3)
+	txOutB := feeMergeTestWrites(t, addr, 4)
+	temp3 := txOutB.MergeInto(feeMergeTestWrites(t, addr, 5))
+	be.recordFeeMerge(0, txOutB, temp3)
 	be.awaitMapReleases()
 	require.Same(t, temp3, be.feeMergeTemp[0])
-	require.Equal(t, 1, txOut2.Count(), "TxOut must survive the fee merge")
-	require.Equal(t, 1, temp2.Count(), "a temp that is not prev must not be released")
+	require.Equal(t, 0, temp2.Count(), "stale fee-merge temp must be released across a new baseline")
+	require.Equal(t, 1, txOutB.Count(), "txOut must survive the fee merge")
+
+	be.recordFeeMerge(0, txOutB, txOutB)
+	be.awaitMapReleases()
+	require.Nil(t, be.feeMergeTemp[0])
+	require.Equal(t, 0, temp3.Count(), "superseded fee-merge temp must be released")
+	require.Equal(t, 1, txOutB.Count(), "txOut must survive the fee merge")
 }
 
-// TestRecordFeeMergeReleaseKeepsSharedWrites pins what makes the release safe:
-// MergeInto shares VersionedWrite pointers rather than the maps holding them,
-// so pooling the superseded temp's maps leaves the surviving set readable.
+// TestRecordFeeMergeReleaseKeepsSharedWrites pins what makes the release
+// safe: MergeInto shares VersionedWrite pointers with txOut rather than
+// cloning them, so pooling a superseded temp's maps must leave both the
+// surviving merged set and txOut itself readable.
 func TestRecordFeeMergeReleaseKeepsSharedWrites(t *testing.T) {
 	t.Parallel()
 
@@ -85,17 +89,23 @@ func TestRecordFeeMergeReleaseKeepsSharedWrites(t *testing.T) {
 	fresh := accounts.InternAddress(common.HexToAddress("0x3333333333333333333333333333333333333333"))
 	be := &blockExecutor{feeMergeTemp: map[int]*state.WriteSet{}}
 
-	temp1 := feeMergeTestWrites(t, shared, 7)
-	be.recordFeeMerge(0, feeMergeTestWrites(t, shared, 1), temp1)
+	txOut := feeMergeTestWrites(t, shared, 7)
 
-	tipWrites := feeMergeTestWrites(t, fresh, 9)
-	merged := temp1.MergeInto(tipWrites)
-	require.Same(t, tipWrites, merged)
-	be.recordFeeMerge(0, temp1, merged)
+	temp1 := txOut.MergeInto(feeMergeTestWrites(t, fresh, 1))
+	be.recordFeeMerge(0, txOut, temp1)
+
+	merged := txOut.MergeInto(feeMergeTestWrites(t, fresh, 2))
+	require.NotSame(t, temp1, merged)
+	be.recordFeeMerge(0, txOut, merged)
 	be.awaitMapReleases()
 
-	require.Equal(t, 0, temp1.Count())
+	require.Equal(t, 0, temp1.Count(), "superseded fee-merge temp must be released")
+
 	vw, ok := merged.GetBalance(shared)
-	require.True(t, ok, "entry shared from the released temp must still be reachable")
+	require.True(t, ok, "entry shared with txOut must still be reachable after releasing a temp that also shared it")
 	require.Equal(t, uint64(7), vw.Val.Uint64())
+
+	txOutVW, ok := txOut.GetBalance(shared)
+	require.True(t, ok, "txOut itself must survive the release")
+	require.Equal(t, uint64(7), txOutVW.Val.Uint64())
 }
