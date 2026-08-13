@@ -41,6 +41,25 @@ func closeOnCleanup[T interface{ Close() }](tb testing.TB, c T) T {
 	return c
 }
 
+// These helpers bypass the public fill and publication protocols so tests can
+// exercise the underlying entry and frontier mechanics directly.
+func (c *StateCache) put(domain kv.Domain, key []byte, value []byte, txNum uint64) {
+	cache := c.caches[domain]
+	if cache == nil {
+		return
+	}
+	cache.Put(key, bytes.Clone(value), txNum)
+}
+
+func (c *StateCache) apply(domain kv.Domain, key, value []byte, txNum uint64) {
+	prepared := prepareStateUpdate(StateUpdate{Domain: domain, Key: key, Value: value, TxNum: txNum})
+	c.applierMu.Lock()
+	defer c.applierMu.Unlock()
+	c.admissionMu.Lock()
+	defer c.admissionMu.Unlock()
+	c.applyPrepared(prepared)
+}
+
 func makeAddr(i int) []byte {
 	addr := make([]byte, 20)
 	addr[19] = byte(i)

@@ -243,18 +243,6 @@ func (c *StateCache) deleteAddrCodeHash(addr []byte) {
 	cc.DeleteAddrCodeHash(addr)
 }
 
-// put stores data for the given domain and key, stamped with the txNum the
-// value reflects (for txNum/epoch unwind invalidation). It bypasses fill
-// admission: committed updates go through Applier.Publish, read fills through
-// ReadView.Fill.
-func (c *StateCache) put(domain kv.Domain, key []byte, value []byte, txNum uint64) {
-	cache := c.caches[domain]
-	if cache == nil {
-		return
-	}
-	cache.Put(key, bytes.Clone(value), txNum)
-}
-
 // fillIfFresh conditionally inserts an accounts or storage value read from a
 // read view without replacing an authoritative entry. Negatives use the view's
 // last included txNum. Code goes through fillCodeIfFresh.
@@ -306,8 +294,8 @@ func (c *StateCache) fillCodeIfFresh(key []byte, value []byte, readTxNum, visibl
 	codeCache.PutWithCodeHashIfAbsent(key, cloned, codeHash, readTxNum)
 }
 
-// deleteKey removes the data for the given domain and key. Authoritative
-// deletions go through apply, which also advances the fill-admission frontier.
+// deleteKey removes the data for the given domain and key. The authoritative
+// publication path advances the fill-admission frontier before calling it.
 func (c *StateCache) deleteKey(domain kv.Domain, key []byte) {
 	cache := c.caches[domain]
 	if cache == nil {
@@ -335,16 +323,6 @@ func prepareStateUpdate(update StateUpdate) preparedStateUpdate {
 		prepared.codeHash = crypto.Keccak256(prepared.value)
 	}
 	return prepared
-}
-
-// apply makes a committed domain update authoritative for subsequent fills.
-func (c *StateCache) apply(domain kv.Domain, key, value []byte, txNum uint64) {
-	prepared := prepareStateUpdate(StateUpdate{Domain: domain, Key: key, Value: value, TxNum: txNum})
-	c.applierMu.Lock()
-	defer c.applierMu.Unlock()
-	c.admissionMu.Lock()
-	defer c.admissionMu.Unlock()
-	c.applyPrepared(prepared)
 }
 
 func (c *StateCache) applyPrepared(update preparedStateUpdate) {

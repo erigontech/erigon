@@ -621,11 +621,9 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		return ValidationResult{}, criticalError
 	}
 
-	// No cache invalidation needed on an invalid payload: the state cache is
-	// populated only at flush (committed, fork-agnostic state) and this
-	// validation path never flushes, so a rejected payload leaves nothing
-	// fork-specific in the cache. Reads during validation only add canonical
-	// committed bytes. (Cache invalidation happens solely on unwind.)
+	// An invalid payload needs no additional cache cleanup. Validation never
+	// publishes its writes, staged-unwind reads cannot fill, and an unwind has
+	// already performed its own cache invalidation.
 
 	// Validation tx is the SD's BlockOverlay; defer doms.Close() above handles
 	// its rollback. By design we do not persist validation-run writes — there
