@@ -585,6 +585,11 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			}
 
 			if applyErr != nil {
+				var panicErr *protocol.ErrExecPanic
+				if errors.As(applyErr, &panicErr) {
+					result.Operational = true
+					return evmtypes.ExecutionResult{}, applyErr
+				}
 				if _, ok := applyErr.(protocol.ErrExecAbortError); !ok {
 					return evmtypes.ExecutionResult{}, protocol.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex(), OriginError: applyErr}
 				}
