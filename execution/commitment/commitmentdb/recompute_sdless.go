@@ -18,7 +18,9 @@ package commitmentdb
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
+	"hash/fnv"
 
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -197,6 +199,14 @@ func RecomputeAtTxNumWithoutSD(
 		touchFromTxNum = baselineTxNum + 1
 	}
 	touchesByDomain := make(map[kv.Domain]uint64, 3)
+	// Per-domain FNV hash of the walked (key, txN) tuple sequence. Two
+	// runs of the same compute on the same visible-file set MUST produce
+	// the same hash — if they don't, the walk itself is non-deterministic
+	// (heap order, file iteration, MDBX merge). If they do, the walk is
+	// deterministic and any root divergence lives downstream in
+	// trie.Process (fold order, warmup config, PutBranch collector).
+	// Cheap, log-once diagnostic. Remove after root-cause.
+	touchHashByDomain := make(map[kv.Domain]uint64, 3)
 	for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
 		it, ierr := tx.Debug().HistoryKeyTxNumRange(d, int(touchFromTxNum), int(toTxNum+1), order.Asc, -1)
 		if ierr != nil {
@@ -209,16 +219,22 @@ func RecomputeAtTxNumWithoutSD(
 		case kv.CodeDomain:
 			touchFn = updates.TouchCode
 		}
+		domHash := fnv.New64a()
+		var txNumBuf [8]byte
 		for it.HasNext() {
-			k, _, terr := it.Next()
+			k, txN, terr := it.Next()
 			if terr != nil {
 				it.Close()
 				return nil, nil, 0, nil, fmt.Errorf("HistoryKeyTxNumRange next(%s): %w", d, terr)
 			}
+			domHash.Write(k)
+			binary.BigEndian.PutUint64(txNumBuf[:], txN)
+			domHash.Write(txNumBuf[:])
 			updates.TouchPlainKey(string(k), nil, touchFn)
 			touchesByDomain[d]++
 		}
 		it.Close()
+		touchHashByDomain[d] = domHash.Sum64()
 	}
 
 	// Refuse to return the baseline root unchanged when the walk range
@@ -255,6 +271,9 @@ func RecomputeAtTxNumWithoutSD(
 		"touchesAccounts", touchesByDomain[kv.AccountsDomain],
 		"touchesStorage", touchesByDomain[kv.StorageDomain],
 		"touchesCode", touchesByDomain[kv.CodeDomain],
+		"touchHashAccounts", fmt.Sprintf("%016x", touchHashByDomain[kv.AccountsDomain]),
+		"touchHashStorage", fmt.Sprintf("%016x", touchHashByDomain[kv.StorageDomain]),
+		"touchHashCode", fmt.Sprintf("%016x", touchHashByDomain[kv.CodeDomain]),
 	)
 	return root, encodedTrieState, baselineTxNum, branches, nil
 }

@@ -176,6 +176,18 @@ func (p *Provider) ensureHistoryForUnwindWalk(ctx context.Context, opts UnwindOp
 	reopener.ForceReopenUnderlyingFilesTx()
 
 	return func() {
+		// TEMPORARY DEBUG — ERIGON_KEEP_UNWIND_HISTORY=1 makes cleanup a
+		// no-op so the postmortem datadir retains the .v/.ef files that
+		// the compute walked. Lets `integration commitment recompute-at`
+		// iterate on the same on-disk state without re-triggering the
+		// download. Remove after root-cause of deep-unwind wrong-root.
+		if os.Getenv("ERIGON_KEEP_UNWIND_HISTORY") == "1" {
+			if p.logger != nil {
+				p.logger.Warn("[storage] Provider.Unwind: ERIGON_KEEP_UNWIND_HISTORY=1 — SKIPPING history cleanup",
+					"files", len(downloadedNames))
+			}
+			return
+		}
 		p.discardDownloadedHistory(ctx, downloadedPaths, downloadedNames)
 		if err := p.Aggregator.OpenFolder(); err != nil && p.logger != nil {
 			p.logger.Warn("[storage] Provider.Unwind: OpenFolder after temp-history cleanup failed", "err", err)
