@@ -2024,7 +2024,6 @@ var coinbaseVec = dbg.EnvBool("COINBASE_VEC", false)
 // them — proving the deltas travel and apply can reconstruct the coinbase, without
 // yet changing behaviour (calcFees still materializes). Off by default.
 var coinbaseApplyCheck = dbg.EnvBool("COINBASE_APPLY_CHECK", false)
-var slDbgTx = dbg.EnvInt("SL_DBG_TX", -1)
 
 // relaxDispatch (prototype, default OFF) relaxes the deferred-tx re-dispatch gate
 // from strict predecessor order (maxValidated >= tx-1) to actual observed
@@ -2357,10 +2356,6 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 			pe.releaseWorker(w)
 
 			valid, target, blocker := be.selfLoopEvaluate(tv, result)
-			if slDbgTx == tv.index {
-				fmt.Printf("[SLDBG] tx=%d inc=%d EVAL valid=%v target=%d blocker=%d frontier=%d\n",
-					tv.index, tv.version.Incarnation, valid, target, blocker, be.frontier())
-			}
 			if !valid {
 				if blocker > be.frontier() && !waitTo(blocker) {
 					return
