@@ -23,9 +23,7 @@ import (
 	"math/rand"
 	"runtime"
 	"slices"
-	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
@@ -290,92 +288,6 @@ func Benchmark_StorageConcurrency(b *testing.B) {
 				})
 			}
 		})
-	}
-}
-
-// Keeps burnCPU's result observable so the compiler cannot elide the synthetic work.
-var benchCPUSink atomic.Uint64
-
-// Synthetic per-touch CPU cost standing in for block execution.
-func burnCPU(iters int) {
-	var x uint64 = 1469598103934665603
-	for i := range iters {
-		x = (x ^ uint64(i)) * 1099511628211
-	}
-	benchCPUSink.Add(x)
-}
-
-func streamingBenchCorpora() []struct {
-	name string
-	pk   [][]byte
-	upds []Update
-} {
-	wk, wu := buildWhaleCorpus(bigAccountWhale(40_000))
-	mk, mu := buildMixedCorpus(99, 20_000)
-	return []struct {
-		name string
-		pk   [][]byte
-		upds []Update
-	}{
-		{"whale", wk, wu},
-		{"mixed", mk, mu},
-	}
-}
-
-// scheduler=true overlaps folds with the per-touch CPU burn; false defers all folds to Process.
-func runStreamingOverlapBench(b *testing.B, pk [][]byte, upds []Update, cpuIters int, scheduler bool) {
-	ctx := context.Background()
-	b.ReportAllocs()
-	var (
-		totalProcess time.Duration
-		totalRefold  uint64
-		iters        int
-	)
-	for b.Loop() {
-		b.StopTimer()
-		ms := NewMockState(b)
-		ms.SetConcurrentCommitment(true)
-		require.NoError(b, ms.applyPlainUpdates(pk, upds))
-		sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
-		sc.SetNumWorkers(runtime.NumCPU())
-		if scheduler {
-			require.NoError(b, sc.StartScheduler(ctx))
-		}
-		b.StartTimer()
-
-		for _, k := range pk {
-			burnCPU(cpuIters)
-			sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
-		}
-		procStart := time.Now()
-		_, err := sc.Process(ctx)
-		procDur := time.Since(procStart)
-
-		b.StopTimer()
-		require.NoError(b, err)
-		totalProcess += procDur
-		totalRefold += sc.RefoldCount()
-		iters++
-		sc.Release()
-		b.StartTimer()
-	}
-	if iters > 0 {
-		b.ReportMetric(float64(totalProcess.Nanoseconds())/float64(iters), "process-ns/op")
-		b.ReportMetric(float64(totalRefold)/float64(iters), "refolds/op")
-	}
-}
-
-// Mechanism sanity-check with synthetic CPU cost; numbers are not a performance claim.
-func Benchmark_StreamingOverlap(b *testing.B) {
-	for _, c := range streamingBenchCorpora() {
-		for _, cpu := range []int{0, 500, 5000} {
-			b.Run(fmt.Sprintf("%s/cpu=%d/overlap", c.name, cpu), func(b *testing.B) {
-				runStreamingOverlapBench(b, c.pk, c.upds, cpu, true)
-			})
-			b.Run(fmt.Sprintf("%s/cpu=%d/batch", c.name, cpu), func(b *testing.B) {
-				runStreamingOverlapBench(b, c.pk, c.upds, cpu, false)
-			})
-		}
 	}
 }
 
