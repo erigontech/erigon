@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -460,14 +461,46 @@ type ExecutionPayloadEnvelope struct {
 }
 
 func NewExecutionPayloadEnvelope(cfg *clparams.BeaconChainConfig) *ExecutionPayloadEnvelope {
+	return NewExecutionPayloadEnvelopeWithVersion(cfg, clparams.GloasVersion)
+}
+
+// NewExecutionPayloadEnvelopeWithVersion creates an envelope for the advertised consensus version.
+func NewExecutionPayloadEnvelopeWithVersion(cfg *clparams.BeaconChainConfig, version clparams.StateVersion) *ExecutionPayloadEnvelope {
 	return &ExecutionPayloadEnvelope{
-		Payload:               NewEth1Block(clparams.GloasVersion, cfg),
-		ExecutionRequests:     NewExecutionRequestsWithVersion(cfg, clparams.GloasVersion),
+		Payload:               NewEth1Block(version, cfg),
+		ExecutionRequests:     NewExecutionRequestsWithVersion(cfg, version),
 		BuilderIndex:          0,
 		BeaconBlockRoot:       common.Hash{},
 		ParentBeaconBlockRoot: common.Hash{},
 		beaconCfg:             cfg,
 	}
+}
+
+// ParseExecutionPayloadEnvelopeVersion validates the consensus version advertised by an envelope endpoint.
+func ParseExecutionPayloadEnvelopeVersion(header string) (clparams.StateVersion, error) {
+	if header == "" {
+		return clparams.GloasVersion, nil
+	}
+	name := strings.ToLower(header)
+	if name == "glamsterdam" {
+		return clparams.GloasVersion, nil
+	}
+	version, err := clparams.StringToClVersion(name)
+	if err != nil {
+		return 0, err
+	}
+	if version < clparams.GloasVersion {
+		return 0, fmt.Errorf("execution payload envelope consensus version %s predates Gloas", header)
+	}
+	return version, nil
+}
+
+// ValidateExecutionPayloadEnvelopeVersion rejects fork schemas unsupported by this build.
+func ValidateExecutionPayloadEnvelopeVersion(version clparams.StateVersion) error {
+	if version != clparams.GloasVersion {
+		return fmt.Errorf("unsupported execution payload envelope consensus version %d", version)
+	}
+	return nil
 }
 
 func (e *ExecutionPayloadEnvelope) HashSSZ() ([32]byte, error) {
@@ -623,6 +656,12 @@ func (s *SignedExecutionPayloadEnvelope) validateForConfig(
 func (s *SignedExecutionPayloadEnvelope) ValidateForPersistence(cfg *clparams.BeaconChainConfig) error {
 	if err := s.validateForConfig(cfg, (*ExecutionRequests).validateForPersistence); err != nil {
 		return err
+	}
+	if err := ValidateExecutionPayloadEnvelopeVersion(s.Message.Payload.Version()); err != nil {
+		return err
+	}
+	if size := s.EncodingSizeSSZ(); uint64(size) > clparams.MaxChunkSize {
+		return fmt.Errorf("execution payload envelope encoding size %d exceeds max %d", size, clparams.MaxChunkSize)
 	}
 	payload := s.Message.Payload
 	if err := payload.Transactions.ValidateBounds(cfg.MaxTransactionsPerPayload, cfg.MaxBytesPerTransaction); err != nil {

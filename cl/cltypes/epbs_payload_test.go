@@ -26,6 +26,24 @@ func TestExecutionRequestsStrictDecodeRejectsNonCanonicalOffset(t *testing.T) {
 	require.Error(t, decoded.DecodeSSZStrict(encoded, int(clparams.GloasVersion)))
 }
 
+func TestParseExecutionPayloadEnvelopeVersion(t *testing.T) {
+	for _, header := range []string{"", "GLOAS", "glamsterdam"} {
+		version, err := ParseExecutionPayloadEnvelopeVersion(header)
+		require.NoError(t, err)
+		require.Equal(t, clparams.GloasVersion, version)
+	}
+	for _, header := range []string{"fulu", "unknown"} {
+		_, err := ParseExecutionPayloadEnvelopeVersion(header)
+		require.Error(t, err)
+	}
+}
+
+func TestValidateExecutionPayloadEnvelopeVersion(t *testing.T) {
+	require.NoError(t, ValidateExecutionPayloadEnvelopeVersion(clparams.GloasVersion))
+	require.Error(t, ValidateExecutionPayloadEnvelopeVersion(clparams.FuluVersion))
+	require.Error(t, ValidateExecutionPayloadEnvelopeVersion(clparams.StateVersion(255)))
+}
+
 func TestSignedExecutionPayloadEnvelopeCloneNilMessage(t *testing.T) {
 	envelope := &SignedExecutionPayloadEnvelope{
 		Signature: common.Bytes96{1, 2, 3},
@@ -67,7 +85,14 @@ func TestExecutionPayloadEnvelopeValidationSeparatesProtocolAndPersistenceBounds
 		envelope.Message.ExecutionRequests.Deposits.Append(&solid.DepositRequest{})
 	}
 	require.NoError(t, envelope.ValidateForConfig(&cfg))
-	require.Error(t, envelope.ValidateForPersistence(&cfg))
+	encoded, err := envelope.EncodeSSZ(nil)
+	require.NoError(t, err)
+	require.Less(t, uint64(len(encoded)), clparams.MaxChunkSize)
+	require.NoError(t, envelope.ValidateForPersistence(&cfg))
+
+	decoded := &SignedExecutionPayloadEnvelope{Message: NewExecutionPayloadEnvelope(&cfg)}
+	require.NoError(t, decoded.DecodeSSZStrict(encoded, int(clparams.GloasVersion)))
+	require.Equal(t, 16_385, decoded.Message.ExecutionRequests.Deposits.Len())
 
 	for _, test := range []struct {
 		name   string
@@ -87,6 +112,16 @@ func TestExecutionPayloadEnvelopeValidationSeparatesProtocolAndPersistenceBounds
 			require.Error(t, envelope.ValidateForPersistence(&cfg))
 		})
 	}
+}
+
+func TestExecutionPayloadEnvelopeValidateForPersistenceRejectsOversizedEncoding(t *testing.T) {
+	envelope := validTestExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)
+	for range progressiveRequestDecodeLimit(solid.SizeDepositRequest) {
+		envelope.Message.ExecutionRequests.Deposits.Append(&solid.DepositRequest{})
+	}
+
+	require.Greater(t, uint64(envelope.EncodingSizeSSZ()), clparams.MaxChunkSize)
+	require.ErrorContains(t, envelope.ValidateForPersistence(&clparams.MainnetBeaconConfig), "exceeds max")
 }
 
 func TestExecutionPayloadEnvelopeValidateForPersistenceAllowsProgressiveListsPastConfiguredLimit(t *testing.T) {

@@ -501,14 +501,12 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(ctx context.Context, signedEn
 		}
 	}
 
-	// Update eth2Roots mapping for FCU
+	// Persist envelope to disk — this marks the root as "has payload" in store.payloads
+	if err := f.persistEnvelope(beaconBlockRoot, signedEnvelope); err != nil {
+		return false, fmt.Errorf("OnExecutionPayload: failed to dump envelope: %w", err)
+	}
 	if envelope.Payload != nil {
 		f.eth2Roots.Add(beaconBlockRoot, envelope.Payload.BlockHash)
-	}
-
-	// Persist envelope to disk — this marks the root as "has payload" in store.payloads
-	if err := f.forkGraph.DumpEnvelopeOnDisk(beaconBlockRoot, signedEnvelope); err != nil {
-		return false, fmt.Errorf("OnExecutionPayload: failed to dump envelope: %w", err)
 	}
 
 	// Invalidate head cache — payload status may have changed from PENDING to FULL.
@@ -823,12 +821,11 @@ func (f *ForkChoiceStore) applyLocalSelfBuildEnvelopeCoordinated(ctx context.Con
 		}
 	}
 
-	if envelope.Payload != nil {
-		f.eth2Roots.Add(beaconBlockRoot, envelope.Payload.BlockHash)
-	}
-
 	if err := f.persistEnvelope(beaconBlockRoot, signedEnvelope); err != nil {
 		return false, fmt.Errorf("applyLocalSelfBuildEnvelopeCoordinated: failed to dump envelope: %w", err)
+	}
+	if envelope.Payload != nil {
+		f.eth2Roots.Add(beaconBlockRoot, envelope.Payload.BlockHash)
 	}
 
 	f.headHash = common.Hash{}

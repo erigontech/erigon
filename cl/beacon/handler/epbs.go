@@ -776,8 +776,13 @@ func (a *ApiHandler) GetEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrite
 // The envelope is processed through forkchoice and broadcast on gossip.
 // [New in Gloas:EIP7732]
 func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWriter, r *http.Request) {
+	version, err := cltypes.ParseExecutionPayloadEnvelopeVersion(r.Header.Get("Eth-Consensus-Version"))
+	if err != nil {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+		return
+	}
 	signedEnvelope := &cltypes.SignedExecutionPayloadEnvelope{
-		Message: cltypes.NewExecutionPayloadEnvelope(a.beaconChainCfg),
+		Message: cltypes.NewExecutionPayloadEnvelopeWithVersion(a.beaconChainCfg, version),
 	}
 
 	contentType, err := requestContentType(r)
@@ -797,7 +802,7 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
 		}
-		if err := signedEnvelope.DecodeSSZStrict(octect, int(clparams.GloasVersion)); err != nil {
+		if err := signedEnvelope.DecodeSSZStrict(octect, int(version)); err != nil {
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
 		}
