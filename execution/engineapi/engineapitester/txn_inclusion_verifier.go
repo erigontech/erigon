@@ -91,21 +91,24 @@ func (v TxnInclusionVerifier) VerifyTxnsOrderedInclusion(
 	payload *enginetypes.ExecutionPayload,
 	inclusions ...OrderedInclusion,
 ) error {
-	orderedInclusions := make(map[uint64]common.Hash, len(inclusions))
-	for _, inclusion := range inclusions {
-		orderedInclusions[inclusion.TxnIndex] = inclusion.TxnHash
-	}
-
 	var accErr error
-	for i, txnBytes := range payload.Transactions {
-		txn, err := types.DecodeTransaction(txnBytes)
-		if err != nil {
-			return err
+	markMissing := func(inclusion OrderedInclusion) {
+		if accErr == nil {
+			accErr = errors.New("txns missing")
 		}
 
-		inclusionHash, ok := orderedInclusions[uint64(i)]
-		if !ok {
+		accErr = fmt.Errorf("%w: (%d,%s)", accErr, inclusion.TxnIndex, inclusion.TxnHash)
+	}
+
+	for _, inclusion := range inclusions {
+		if inclusion.TxnIndex >= uint64(len(payload.Transactions)) {
+			markMissing(inclusion)
 			continue
+		}
+
+		txn, err := types.DecodeTransaction(payload.Transactions[inclusion.TxnIndex])
+		if err != nil {
+			return err
 		}
 
 		// fcu persistance is now asynchronous so this can get called
@@ -122,27 +125,11 @@ func (v TxnInclusionVerifier) VerifyTxnsOrderedInclusion(
 		}
 
 		if r.Status != types.ReceiptStatusSuccessful {
-			return fmt.Errorf("txn %d in block %d not successful", i, r.BlockNumber)
+			return fmt.Errorf("txn %d in block %d not successful", inclusion.TxnIndex, r.BlockNumber)
 		}
 
-		if txn.Hash() == inclusionHash {
-			continue
-		}
-
-		if accErr == nil {
-			accErr = errors.New("txns missing")
-		}
-
-		accErr = fmt.Errorf("%w: (%d,%s)", accErr, i, inclusionHash)
-	}
-
-	for _, inclusion := range inclusions {
-		if inclusion.TxnIndex >= uint64(len(payload.Transactions)) {
-			if accErr == nil {
-				accErr = errors.New("txns missing")
-			}
-
-			accErr = fmt.Errorf("%w: (%d,%s)", accErr, inclusion.TxnIndex, inclusion.TxnHash)
+		if txn.Hash() != inclusion.TxnHash {
+			markMissing(inclusion)
 		}
 	}
 

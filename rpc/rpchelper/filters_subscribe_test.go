@@ -101,7 +101,11 @@ func TestSubscribeLogsConcurrentSubscribersDoNotSendStaleRequest(t *testing.T) {
 		_, _, err := f.SubscribeLogs(8, filters.FilterCriteria{Addresses: []common.Address{addr1}}, ProtocolHTTP)
 		firstDone <- err
 	}()
-	<-firstSendEntered
+	select {
+	case <-firstSendEntered:
+	case err := <-firstDone:
+		t.Fatalf("first subscriber finished without sending a filter request: %v", err)
+	}
 
 	secondDone := make(chan error, 1)
 	go func() {
@@ -169,7 +173,11 @@ func TestSubscribeReceiptsConcurrentSubscribersDoNotSendStaleRequest(t *testing.
 		_, _, err := f.SubscribeReceipts(8, filters.ReceiptsFilterCriteria{TransactionHashes: []common.Hash{hash1}})
 		firstDone <- err
 	}()
-	<-firstSendEntered
+	select {
+	case <-firstSendEntered:
+	case err := <-firstDone:
+		t.Fatalf("first subscriber finished without sending a filter request: %v", err)
+	}
 
 	secondDone := make(chan error, 1)
 	go func() {
