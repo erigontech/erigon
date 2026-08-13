@@ -266,17 +266,6 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 						// without a read), so the compose is complete.
 						if base := NewVersionedAccountView(addr, vw.txIdx, vw.vm, nil).Account(); base != nil {
 							acc = *base
-						} else if dbg.EnvBool("VMAP_NOBASE_ASSERT", false) {
-							// A missing compose base is correct for a new account but wrong
-							// for a committed one whose origin was never seeded; the domain
-							// read (only on this rare no-base path) distinguishes them.
-							if enc0, err := getLatestAcct(address[:]); err == nil && len(enc0) > 0 {
-								var da accounts.Account
-								if accounts.DeserialiseV3(&da, enc0) == nil && (da.Nonce != 0 || !da.Balance.IsZero() || !da.IsEmptyCodeHash()) {
-									fmt.Printf("VMAP-NOBASE-MISS addr=%x txIdx=%d nonce=%d bal=%d ch=%x create=%v\n",
-										addr, vw.txIdx, da.Nonce, &da.Balance, da.CodeHash, d.createContract)
-								}
-							}
 						}
 					} else if blockCache != nil {
 						// Prefer values we already hold over a fresh domain read:
