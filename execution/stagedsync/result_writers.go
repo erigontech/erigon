@@ -1,13 +1,10 @@
 package stagedsync
 
 import (
-	"context"
 	"fmt"
-	"slices"
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -78,106 +75,3 @@ func coinbaseBalanceWrite(writes state.WriteSetView, coinbase accounts.Address) 
 	}
 	return uint256.Int{}, false
 }
-
-// ResultConsumer is one logical stage of the apply pipeline. The pipeline drives
-// consumers in registration order per streamed result and owns their lifecycle;
-// a consumer implements only its own per-result work (plus optional Open/Close)
-// and declares whether its output feeds the next block's read base.
-//
-// FeedsReadBase marks the consumer whose applied frontier gates the next block's
-// read base (the domain writer): once its writes reach the shared domain the
-// block's prev-block map can be dropped. Every other consumer is a pure sink that
-// never gates a read. Recorded here as the seam later steps (backpressure, a
-// concurrent log writer) wire; the pipeline itself drives all consumers alike.
-type ResultConsumer interface {
-	Name() string
-	FeedsReadBase() bool
-	Open(ctx context.Context) error
-	OnTxResult(ctx context.Context, r *txResult) error
-	OnBlockEnd(ctx context.Context, r *blockResult) error
-	Close(cause error) error
-}
-
-// consumerPipeline drives an ordered set of ResultConsumers within the apply
-// goroutine (shape A: logical split, single writer of the shared domain). It owns
-// delivery order and lifecycle; per-consumer per-result work is the consumer's.
-type consumerPipeline struct {
-	consumers []ResultConsumer
-}
-
-func (p *consumerPipeline) open(ctx context.Context) error {
-	for _, c := range p.consumers {
-		if err := c.Open(ctx); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (p *consumerPipeline) onTx(ctx context.Context, r *txResult) error {
-	for _, c := range p.consumers {
-		if err := c.OnTxResult(ctx, r); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (p *consumerPipeline) onBlock(ctx context.Context, r *blockResult) error {
-	for _, c := range p.consumers {
-		if err := c.OnBlockEnd(ctx, r); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// closeAll closes consumers in reverse registration order and returns the first
-// close error, mirroring the registry's commit-before-apply reverse-close rule.
-func (p *consumerPipeline) closeAll(cause error) error {
-	var first error
-	for _, c := range slices.Backward(p.consumers) {
-		if err := c.Close(cause); err != nil && first == nil {
-			first = err
-		}
-	}
-	return first
-}
-
-// domainWriter applies each tx's state writes (accounts, storage, code) to the
-// shared domain. It feeds the next block's read base: N+1 resolves these once the
-// block's prev-block map is dropped. blockCache=nil writes the domain directly;
-// the versionMap composes each tx's base.
-type domainWriter struct {
-	pe   *parallelExecutor
-	rwTx kv.TemporalRwTx
-}
-
-func (w *domainWriter) Name() string               { return "domain" }
-func (w *domainWriter) FeedsReadBase() bool        { return true }
-func (w *domainWriter) Open(context.Context) error { return nil }
-func (w *domainWriter) OnTxResult(ctx context.Context, r *txResult) error {
-	return w.pe.rs.ApplyStateWrites(ctx, w.rwTx, r.blockNum, r.txNum, r.writes, nil, r.rules, nil)
-}
-func (w *domainWriter) OnBlockEnd(context.Context, *blockResult) error { return nil }
-func (w *domainWriter) Close(error) error                              { return nil }
-
-// logWriter applies each tx's per-tx indexes (receipts, logs, trace indices) to
-// the shared domain. It is a pure sink: logs are never read back during
-// execution, so it never gates a read. Finalize results carry no indexes.
-type logWriter struct {
-	pe   *parallelExecutor
-	rwTx kv.TemporalRwTx
-}
-
-func (w *logWriter) Name() string               { return "log" }
-func (w *logWriter) FeedsReadBase() bool        { return false }
-func (w *logWriter) Open(context.Context) error { return nil }
-func (w *logWriter) OnTxResult(_ context.Context, r *txResult) error {
-	if r.isFinalize {
-		return nil
-	}
-	return w.pe.rs.ApplyTxIndexes(w.rwTx, r.txNum, r.receipt, r.cumulativeBlobGasUsed, r.logs, r.traceFroms, r.traceTos)
-}
-func (w *logWriter) OnBlockEnd(context.Context, *blockResult) error { return nil }
-func (w *logWriter) Close(error) error                              { return nil }
