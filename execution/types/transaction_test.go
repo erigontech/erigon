@@ -33,6 +33,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -877,9 +878,8 @@ func TestTypedTxEmptyToErrorMessage(t *testing.T) {
 	}
 }
 
-// A typed transaction whose JSON omits a fee field the decoder reads must be
-// rejected, not panic. The dynamic-fee decoder guarded 'gasPrice' but then read
-// 'maxFeePerGas'/'maxPriorityFeePerGas', and the blob decoder guarded neither.
+// Typed-transaction JSON that omits a field the decoder dereferences must be
+// rejected, not panic.
 func TestUnmarshalTransactionFromJSONMissingFields(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -905,7 +905,7 @@ func TestUnmarshalDynamicFeeTransactionFromJSONWithoutGasPrice(t *testing.T) {
 	t.Parallel()
 	const txJSON = `{"type":"0x2","chainId":"0x1","nonce":"0x1","maxFeePerGas":"0x3b9aca00","maxPriorityFeePerGas":"0x1","gas":"0x5208","value":"0x0","input":"0x","v":"0x0","r":"0x0","s":"0x0"}`
 	txn, err := UnmarshalTransactionFromJSON([]byte(txJSON))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, uint256.NewInt(1_000_000_000), txn.GetFeeCap())
 }
 
