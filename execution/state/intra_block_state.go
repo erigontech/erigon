@@ -2060,12 +2060,16 @@ func (sdb *IntraBlockState) createObject(addr accounts.Address, previous *stateO
 	// invalidated.  newObject normalises the zero-value CodeHash to
 	// EmptyCodeHash, so this records keccak256("") for a fresh account.
 	sdb.recordWriteCodeHash(addr, newobj.data.CodeHash)
-	// Write NoncePath for the same reason: a recreate over a self-destructed
-	// account resets the nonce to zero, but without an explicit NoncePath write
-	// the version-map floor keeps the prior incarnation's nonce, which a
-	// write-set view then resurrects (a fresh account read back with a stale
-	// nonce). A contract CREATE overwrites this with nonce=1 immediately after.
-	sdb.recordWriteNonce(addr, newobj.data.Nonce, tracing.NonceChangeNewContract)
+	// Write NoncePath only when recreating a destroyed account (previous != nil):
+	// its version-map floor still holds the prior incarnation's nonce, which a
+	// write-set view would otherwise resurrect (a fresh account read back with a
+	// stale nonce). A contract CREATE overwrites this with nonce=1 immediately
+	// after. A genuinely fresh account (previous == nil, e.g. a coinbase or system
+	// account first touched via AddBalance) has no stale floor, so recording a
+	// nonce=0 write here would be a net-zero change the BAL wrongly reports.
+	if previous != nil {
+		sdb.recordWriteNonce(addr, newobj.data.Nonce, tracing.NonceChangeNewContract)
+	}
 	return newobj
 }
 
