@@ -447,6 +447,37 @@ func TestSelfdestructWriteSetShape(t *testing.T) {
 	}
 }
 
+// Every path the account record is drawn from has to answer, since an EIP-161
+// verdict resting on any one of them is provisional.
+func TestAnyEstimateAccountCell(t *testing.T) {
+	t.Parallel()
+	acc := accounts.NewAccount()
+
+	for _, path := range []AccountPath{AddressPath, BalancePath, NoncePath, CodeHashPath} {
+		t.Run(path.String(), func(t *testing.T) {
+			t.Parallel()
+			addr := getAddress(120)
+			var value any = &acc
+			switch path {
+			case BalancePath:
+				value = *uint256.NewInt(1)
+			case NoncePath:
+				value = uint64(1)
+			case CodeHashPath:
+				value = accounts.EmptyCodeHash
+			}
+
+			vm := NewVersionMap(nil)
+			writeFor(vm, addr, path, accounts.NilKey, Version{TxIndex: 1}, value, true)
+			require.False(t, vm.AnyEstimateAccountCell(addr, 3), "a committed cell is not provisional")
+
+			vm.MarkEstimate(addr, path, accounts.NilKey, 1)
+			require.True(t, vm.AnyEstimateAccountCell(addr, 3))
+			require.False(t, vm.AnyEstimateAccountCell(addr, 1), "the cell is above this reader")
+		})
+	}
+}
+
 // Same shape through IntraBlockState, which resolves code via versionedReadCore
 // rather than these readers.
 func TestGetCodeAfterDestructThenRevivalIsEmpty(t *testing.T) {

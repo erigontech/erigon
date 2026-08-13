@@ -2039,8 +2039,14 @@ func (result *execResult) calcFees(
 	// have already bumped Nonce or set CodeHash, and EIP-161 emptiness
 	// must respect those writes — otherwise SelfDestructPath is emitted
 	// and Normalize's sdSet filter drops them.
+	//
+	// The delete is also the one write here that cannot be taken back: merging is
+	// additive and the pass that heals an estimate emits nothing to merge over it.
+	// So an emptiness read off an in-flight incarnation is left to the pass that
+	// commits this tx, where every prior write is committed.
 	coinbaseEmptyPre := (coinbaseAcc == nil || coinbaseAcc.Balance.IsZero()) &&
-		coinbaseNonce == 0 && coinbaseEmptyCodeHash && !coinbaseHasCodeHashWrite
+		coinbaseNonce == 0 && coinbaseEmptyCodeHash && !coinbaseHasCodeHashWrite &&
+		!vm.AnyEstimateAccountCell(result.Coinbase, txIndex)
 	emitCoinbase := newCoinbaseBalance != oldCoinbaseBalance ||
 		(coinbaseEmptyRemoval && coinbaseEmptyPre && newCoinbaseBalance.IsZero())
 

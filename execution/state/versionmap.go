@@ -729,6 +729,34 @@ func selfDestructWipesLocked(e *AddressEntry, path AccountPath, floor, txIdx int
 	return ver.TxIndex, found
 }
 
+// AnyEstimateAccountCell reports whether the account record addr reads at txIdx
+// rests on a write from an in-flight incarnation, on any of the paths an
+// EIP-161 emptiness verdict is drawn from.
+func (vm *VersionMap) AnyEstimateAccountCell(addr accounts.Address, txIdx int) bool {
+	if vm == nil {
+		return false
+	}
+	e := vm.load(addr)
+	if e == nil {
+		return false
+	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if _, cell := floorCell(e.Address, txIdx); cell != nil && cell.flag == FlagEstimate {
+		return true
+	}
+	if _, cell := floorCell(e.Balance, txIdx); cell != nil && cell.flag == FlagEstimate {
+		return true
+	}
+	if _, cell := floorCell(e.Nonce, txIdx); cell != nil && cell.flag == FlagEstimate {
+		return true
+	}
+	if _, cell := floorCell(e.CodeHash, txIdx); cell != nil && cell.flag == FlagEstimate {
+		return true
+	}
+	return false
+}
+
 // AnyDoneSelfDestructEquals reports whether any Done SelfDestruct write at
 // TxIdx ≤ txIdxLimit has value == target. Detects a prior in-block
 // SelfDestructPath=true write that a later revival flipped back to false

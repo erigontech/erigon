@@ -1612,19 +1612,73 @@ func TestCalcFees_EmitsAddressPathForCoinbase(t *testing.T) {
 		"AddressPath sibling must share version with the BalancePath write")
 }
 
-// An invalidated tx leaves an Estimate SELFDESTRUCT behind. Reading it as a
-// destruct makes a zero-tip calcFees see a live contract coinbase as
-// EIP-161-empty and emit a delete — one the additive tipWrites merge never
-// retracts, since the healing round emits nothing to merge over it.
-func TestCalcFees_EstimateDestructDoesNotPruneContractCoinbase(t *testing.T) {
+// An invalidated tx leaves an Estimate SELFDESTRUCT and its Estimate
+// BalancePath=0 sibling behind. Neither may make a zero-tip calcFees read a
+// live coinbase as EIP-161-empty: the delete it emits is merged additively, and
+// the pass that heals the estimate emits nothing to merge over it. The contract
+// arm turns on the destruct scan, the balance-only arm on the balance floor.
+func TestCalcFees_EstimateDestructDoesNotPruneCoinbase(t *testing.T) {
 	t.Parallel()
-
-	coinbase := fAddr("cbcontract")
 	code := []byte{0x60, 0x00}
 
+	for _, tc := range []struct {
+		name string
+		acc  *accounts.Account
+		code []byte
+	}{
+		{"contract", &accounts.Account{Nonce: 1, CodeHash: accounts.NewCode(code).Hash, Incarnation: 1}, code},
+		{"balance-only", &accounts.Account{Balance: *uint256.NewInt(5_000_000), Incarnation: 1}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			coinbase := fAddr("coinbase")
+
+			reader := newMapStateReader()
+			reader.accounts[coinbase] = tc.acc
+			reader.code[coinbase] = tc.code
+
+			header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 30_000_000, GasUsed: 21000}
+			version := state.Version{BlockNum: 1, TxNum: 3, TxIndex: 2}
+			txTask := &exec.TxTask{
+				Header: header, TxNum: version.TxNum, TxIndex: version.TxIndex,
+				Config:          chain.TestChainBerlinConfig,
+				EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
+			}
+			task := &taskVersion{
+				execTask: &execTask{Task: txTask, shouldDelayFeeCalc: true},
+				version:  version,
+			}
+			result := &execResult{TxResult: &exec.TxResult{
+				Task:            task,
+				ExecutionResult: evmtypes.ExecutionResult{BurntContractAddress: accounts.NilAddress},
+				Coinbase:        coinbase,
+			}}
+			result.TxOut = &state.WriteSet{}
+
+			vm := state.NewVersionMap(nil)
+			destruct := state.Version{TxIndex: 1}
+			vm.WriteSelfDestruct(coinbase, destruct, true, true)
+			vm.WriteBalance(coinbase, destruct, uint256.Int{}, true)
+			vm.WriteIncarnation(coinbase, destruct, 2, true)
+			for _, path := range []state.AccountPath{state.SelfDestructPath, state.BalancePath, state.IncarnationPath} {
+				vm.MarkEstimate(coinbase, path, accounts.NilKey, destruct.TxIndex)
+			}
+
+			writes, err := result.calcFees(task, vm, reader, &chain.Rules{IsSpuriousDragon: true})
+			require.NoError(t, err)
+			require.True(t, writes.IsEmpty(), "a live coinbase with no tip needs no write at all")
+		})
+	}
+}
+
+// Once the destruct commits the coinbase really is gone, so the delete must be
+// emitted — the suppression above is about provisional data, not about deletes.
+func TestCalcFees_DoneDestructStillPrunesCoinbase(t *testing.T) {
+	t.Parallel()
+	coinbase := fAddr("coinbase")
+
 	reader := newMapStateReader()
-	reader.accounts[coinbase] = &accounts.Account{Nonce: 1, CodeHash: accounts.NewCode(code).Hash, Incarnation: 1}
-	reader.code[coinbase] = code
+	reader.accounts[coinbase] = &accounts.Account{Balance: *uint256.NewInt(5_000_000), Incarnation: 1}
 
 	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 30_000_000, GasUsed: 21000}
 	version := state.Version{BlockNum: 1, TxNum: 3, TxIndex: 2}
@@ -1649,11 +1703,10 @@ func TestCalcFees_EstimateDestructDoesNotPruneContractCoinbase(t *testing.T) {
 	vm.WriteSelfDestruct(coinbase, destruct, true, true)
 	vm.WriteBalance(coinbase, destruct, uint256.Int{}, true)
 	vm.WriteIncarnation(coinbase, destruct, 2, true)
-	for _, path := range []state.AccountPath{state.SelfDestructPath, state.BalancePath, state.IncarnationPath} {
-		vm.MarkEstimate(coinbase, path, accounts.NilKey, destruct.TxIndex)
-	}
 
 	writes, err := result.calcFees(task, vm, reader, &chain.Rules{IsSpuriousDragon: true})
 	require.NoError(t, err)
-	require.True(t, writes.IsEmpty(), "a live contract coinbase with no tip needs no write at all")
+	sd, ok := writes.GetSelfDestruct(coinbase)
+	require.True(t, ok, "a committed destruct leaves an empty coinbase to prune")
+	require.True(t, sd.Val)
 }
