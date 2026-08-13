@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -98,6 +99,7 @@ func newOverlayAheadTestAPI(t *testing.T) (base *BaseAPI, m *execmoduletester.Ex
 	// enough for the reader paths under test to resolve this header as current.
 	require.NoError(t, rawdb.WriteHeader(overlay, overlayHeader))
 	require.NoError(t, rawdb.WriteHeadHeaderHash(overlay, hash))
+	rawdb.WriteForkchoiceHead(overlay, hash)
 	require.NoError(t, rawdb.WriteCanonicalHash(overlay, hash, overlayNumber))
 	require.NoError(t, rawdb.WriteBody(overlay, hash, overlayNumber, &types.Body{}))
 
@@ -157,6 +159,27 @@ func TestGetBlockByTimestamp_SeesOverlayHead(t *testing.T) {
 	require.NotNil(t, resp)
 	require.Equal(t, overlayHeader.Number.ToBig(), resp["number"].(*hexutil.Big).ToInt(),
 		"must resolve to the overlay head block, not the stale MDBX-committed head")
+}
+
+func TestGetModifiedAccountsByNumber_UsesCommittedStartTag(t *testing.T) {
+	t.Parallel()
+	base, m, _ := newOverlayAheadTestAPI(t)
+	api := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
+
+	result, err := api.GetModifiedAccountsByNumber(m.Ctx, rpc.LatestBlockNumber, nil)
+	require.NoError(t, err)
+	require.NotEmpty(t, result)
+}
+
+func TestGetModifiedAccountsByNumber_UsesCommittedEndTag(t *testing.T) {
+	t.Parallel()
+	base, m, _ := newOverlayAheadTestAPI(t)
+	api := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
+	latest := rpc.LatestBlockNumber
+
+	result, err := api.GetModifiedAccountsByNumber(m.Ctx, rpc.EarliestBlockNumber, &latest)
+	require.NoError(t, err)
+	require.NotEmpty(t, result)
 }
 
 // TestGetTransactionByHash_PendingTx_UsesOverlayHead pins that the pending-tx

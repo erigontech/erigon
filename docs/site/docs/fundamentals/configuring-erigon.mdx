@@ -68,22 +68,22 @@ These flags cover the general behavior and configuration of the Erigon client.
 
 These flags are mainly for dev networks, testing, or specialized block-production setups.
 
-* `--allow-insecure-unlock`: Allows insecure account unlocking when account-related RPCs are exposed by HTTP. Use only on trusted networks.
+* `--allow-insecure-unlock`: Accepted for go-ethereum CLI compatibility but currently has **no effect** — the flag is registered and settable, yet nothing in the codebase reads it and Erigon exposes no account-unlocking RPC.
   * Default: `false`
-* `--dev-validator-seed value`: Deterministic BLS key seed for the embedded dev validator; enables PoS dev mode.
+* `--dev-validator-seed value`: Deterministic BLS key seed for the embedded dev validator. Read only in PoS dev mode, which is selected by `--chain dev`; on any other chain the flag does nothing.
   * Default: `devnet`
-* `--dev-validator-count value`: Number of validators for PoS dev mode.
+* `--dev-validator-count value`: Number of validators for PoS dev mode (`--chain dev`).
   * Default: `64`
-* `--dev.slot-time value`: Slot duration in seconds for PoS dev mode.
+* `--dev.slot-time value`: Slot duration in seconds for PoS dev mode (`--chain dev`). Values below `2` are silently raised to `2`.
   * Default: `6`
 * `--miner.gaslimit value`: Target gas limit for mined blocks.
-  * Default: `0`
-* `--miner.extradata value`: Block extra data set by the miner; defaults to the client version string.
-  * Default: client version string
+  * Default: unset — the target falls back to the chain configuration's default block gas limit, or `60000000` where the chain config does not set one. An explicit `0` is ignored rather than applied as a zero limit, so the flag only takes effect when set to a positive value.
+* `--miner.extradata value`: Block extra data set by the miner. Values longer than 32 bytes are silently truncated.
+  * Default: the client version string
 * `--experimental.bal`: Generates block access lists.
   * Default: `false`
 * `--experimental.always-generate-changesets`: Overrides changeset generation logic.
-  * Default: `false`
+  * Default: `false`, derived as the inverse of the `BATCH_COMMITMENTS` environment variable (itself `true` by default). Running with `BATCH_COMMITMENTS=false` therefore flips this default to `true` unless the flag is passed explicitly.
 * `--chaos.monkey`: Testing-only flag that enables spontaneous network, consensus, and other failures.
   * Default: `false`
 
@@ -103,7 +103,7 @@ These flags control database performance and memory usage. See [Database](/funda
   * Default: `2`
 * `--batchSize value`: Sets the batch size for the execution stage.
   * Default: `512M`
-* `--etl.bufferSize value`: Buffer size for ETL operations.
+* `--etl.bufferSize value`: Buffer size for ETL operations. Also settable through the `ETL_OPTIMAL` environment variable.
   * Default: `256MB`
 * `--bodies.cache value`: Sets the size limit for the block bodies cache.
   * Default: `268435456`
@@ -226,6 +226,10 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
   * Default: `localhost`
 * `--http.port value`: The HTTP-RPC server listening port.
   * Default: `8545`
+* `--http.url value` *(New in v3.7)*: Full listen URL for the HTTP-RPC server, which overrides `--http.addr` and `--http.port`. Supported schemes are `tcp://` and `unix://` — for example `tcp://0.0.0.0:8545` or `unix:///var/run/erigon-rpc.sock`.
+  * Default: unset (the endpoint is built from `--http.addr` and `--http.port`)
+  * Only takes effect while the HTTP server is enabled.
+  * **Do not add a path to a `tcp://` URL.** The URL's host and path are concatenated into the listen address, so `tcp://0.0.0.0:8545/rpc` is not a route prefix — it produces an invalid address and the node fails to start. Only a `unix://` URL takes a path, where it *is* the socket path.
 * `--authrpc.addr value`: The HTTP-RPC server listening interface for the Engine API.
   * Default: `localhost`
 * `--authrpc.port value`: The HTTP-RPC server listening port for the Engine API.
@@ -248,6 +252,31 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
   * Default: `true`
 * `--ws.max.connections value`: Maximum number of concurrent WebSocket connections.
   * Default: `0` (unlimited)
+
+**HTTPS and IPC transports.** *(New in v3.7)* These flags are accepted by both the `erigon` binary and the standalone [RPC Daemon](/fundamentals/modules/rpc-daemon) — the embedded RPC server reads them from the same configuration. They serve the same JSON-RPC API as `--http`, over TLS or a separate socket instead.
+
+:::warning
+`--http=false` is a master switch: it disables the whole RPC stack, including the HTTPS and IPC listeners, so `--http=false --https.enabled` yields no listener at all. To serve TLS only, leave `--http` alone and turn off just the plain HTTP listener with `--http.enabled=false`.
+:::
+
+* `--https.enabled`: Enables a JSON-RPC HTTPS server on its own port, independently of the plain HTTP listener.
+  * Default: `false`
+  * `--https.cert` and `--https.key` are both required. If either is missing or unreadable the node still starts and the port still binds, but TLS serving fails and only a `Failed to serve https endpoint` warning is logged — so check the log rather than assuming success.
+* `--https.cert value`: Path to the certificate file for the HTTPS server.
+* `--https.key value`: Path to the private key file for the HTTPS server.
+* `--https.addr value`: The HTTPS-RPC server listening interface.
+  * Default: `localhost`
+* `--https.port value`: The HTTPS-RPC server listening port.
+  * Default: `0`, which means `--http.port` + 363 — so `8908` with a default `--http.port`. Set an explicit port if you need a predictable one.
+* `--https.url value`: Full listen URL for the HTTPS server, which overrides `--https.addr` and `--https.port`. Supported schemes are `tcp://` and `unix://`.
+  * Default: unset
+  * Setting this **implies `--https.enabled`**: a non-empty value turns the HTTPS server on by itself.
+* `--socket.enabled`: Enables a socket server that serves JSON-RPC on the endpoint given by `--socket.url` — a Unix socket by default, though a `tcp://` URL is also accepted.
+  * Default: `false`
+* `--socket.url value`: Listen URL for the IPC server. Supported schemes are `unix://` and `tcp://`.
+  * Default: `unix:///var/run/erigon.sock`
+  * The parent directory must exist and be writable by the Erigon user; `/var/run` normally is not, so point this at your datadir (for example `unix:///<your-datadir>/erigon.ipc`) unless you have arranged otherwise.
+
 * `--rpc.batch.concurrency value`: Limits the number of goroutines for batch requests.
   * Default: `2`
 * `--rpc.max.concurrency value`: Maximum number of concurrent HTTP RPC requests (HTTP admission control).
@@ -467,8 +496,6 @@ Flags for configuring Fork Choice Update behavior.
   * Default: `1s`
 * `--fcu.background.prune`: Enables background pruning after FCU.
   * Default: `true`
-* `--fcu.background.commit`: Enables background flush and commit after FCU.
-  * Default: `false`
 
 ### Execution
 

@@ -104,11 +104,11 @@ func GetBlockHashFromMissingSegmentError(err error) (common.Hash, bool) {
 // machinery is unnecessary.
 type Cache struct {
 	execModule  *ExecModule
-	publishedSD func() *execctx.SharedDomains // returns the latest published SD from Events (for background commit)
+	publishedSD func() *execctx.SharedDomains // returns the latest published SD from Events
 }
 
 // SetPublishedSD wires the Cache to fall back to the published SD from Events
-// when the exec module's currentContext is nil (e.g. during background commit).
+// when the exec module's currentContext is nil (e.g. while an FCU commits).
 func (c *Cache) SetPublishedSD(provider func() *execctx.SharedDomains) {
 	c.publishedSD = provider
 }
@@ -123,7 +123,7 @@ func (c *Cache) View(_ context.Context, tx kv.TemporalTx) (kvcache.CacheView, er
 		context = c.execModule.currentContext
 		c.execModule.lock.RUnlock()
 	}
-	// Fall back to the published SD from Events during background commits
+	// Fall back to the published SD from Events while an FCU commits
 	// (currentContext is nil but the SD is still valid in memory).
 	if context == nil && c.publishedSD != nil {
 		context = c.publishedSD()
@@ -211,7 +211,6 @@ type ExecModule struct {
 	balRegenerator *bal.Regenerator
 
 	fcuBackgroundPrune      bool
-	fcuBackgroundCommit     bool
 	onlySnapDownloadOnStart bool
 	nextForkActivated       bool
 	// gas-weighted EWMA: accumulate gas and time separately so near-empty blocks don't skew the average
@@ -220,7 +219,7 @@ type ExecModule struct {
 
 	lock           sync.RWMutex
 	currentContext *execctx.SharedDomains
-	publishedSD    func() *execctx.SharedDomains // fallback for background commit
+	publishedSD    func() *execctx.SharedDomains // fallback while an FCU commits
 
 	// stateCache is a cache for state data (accounts, storage, code)
 	stateCache *cache.StateCache
@@ -249,7 +248,6 @@ func NewExecModule(
 	engine rules.Engine,
 	syncCfg ethconfig.Sync,
 	fcuBackgroundPrune bool,
-	fcuBackgroundCommit bool,
 	onlySnapDownloadOnStart bool,
 	readAheader *exec.BlockReadAheader,
 	stopNode func() error,
@@ -279,7 +277,6 @@ func NewExecModule(
 		syncCfg:                 syncCfg,
 		bacgroundCtx:            ctx,
 		fcuBackgroundPrune:      fcuBackgroundPrune,
-		fcuBackgroundCommit:     fcuBackgroundCommit,
 		onlySnapDownloadOnStart: onlySnapDownloadOnStart,
 		stateCache:              domainCache,
 		codeStore:               codeStore,
@@ -349,7 +346,7 @@ func (e *ExecModule) closeModuleContext() {
 func (e *ExecModule) ForkValidator() *ForkValidator { return e.forkValidator }
 
 // SetPublishedSD wires the ExecModule to fall back to the published SD from Events
-// when currentContext is nil (e.g. during background commit).
+// when currentContext is nil (e.g. while an FCU commits).
 func (e *ExecModule) SetPublishedSD(provider func() *execctx.SharedDomains) {
 	e.publishedSD = provider
 }
@@ -416,7 +413,14 @@ func (e *ExecModule) drainReadAhead() {
 
 func (e *ExecModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header) error {
 	currentHeader := header
-	for isCanonical, err := e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash()); !isCanonical && err == nil; isCanonical, err = e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash()) {
+	for {
+		isCanonical, err := e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash())
+		if err != nil {
+			return err
+		}
+		if isCanonical {
+			break
+		}
 		parentBlockHash, parentBlockNum := currentHeader.ParentHash, currentHeader.Number.Uint64()-1
 		currentHeader, err = e.getHeader(e.bacgroundCtx, tx, parentBlockHash, parentBlockNum)
 		if err != nil {

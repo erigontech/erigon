@@ -32,12 +32,8 @@ import (
 )
 
 const (
-	// DefaultAccountCacheBytes is the byte limit for the account cache.
-	DefaultAccountCacheBytes = 1 * datasize.GB
-	// DefaultStorageCacheBytes is the byte limit for storage cache. 150 MB
-	// holds the hot storage working set with headroom so eviction pressure
-	// doesn't push the hot set out.
-	DefaultStorageCacheBytes = 150 * datasize.MB
+	DefaultAccountCacheBytes = 150 * datasize.MB
+	DefaultStorageCacheBytes = 1 * datasize.GB
 
 	// Per-domain avg entry size used to translate the byte budget into the
 	// entry-count cap the underlying sharded LRU is sized against. Account
@@ -116,16 +112,20 @@ func newDomainCacheBytes(capacityBytes datasize.ByteSize, avgBytes uint32, mode 
 	}
 }
 
-// NewDefaultStateCache creates a new StateCache with the production byte budgets
-// (Account 1GB, Storage 150MB, Code 512MB, Addr 16MB). Harnesses that build
-// many short-lived ExecModules set a small ethconfig.Config.StateCacheBudget
-// instead.
+// NewDefaultStateCache creates a new StateCache with the production byte
+// budgets, each overridable by env (values parse as "150MB", "1GB") so a
+// sizing A/B needs no rebuild. Harnesses that build many short-lived
+// ExecModules set a small ethconfig.Config.StateCacheBudget instead.
+//
+// The budgets draw from one shared envelope (cachebudget.Global), so raising
+// them all at once buys nothing — a step that would overflow it is refused and
+// that cache stops growing.
 func NewDefaultStateCache() *StateCache {
 	return NewStateCache(
-		DefaultAccountCacheBytes,
-		DefaultStorageCacheBytes,
-		DefaultCodeCacheBytes,
-		DefaultAddrCacheBytes,
+		dbg.EnvDataSize("STATE_CACHE_ACCOUNTS", DefaultAccountCacheBytes),
+		dbg.EnvDataSize("STATE_CACHE_STORAGE", DefaultStorageCacheBytes),
+		dbg.EnvDataSize("STATE_CACHE_CODE", DefaultCodeCacheBytes),
+		dbg.EnvDataSize("STATE_CACHE_CODE_INDEX", DefaultAddrCacheBytes),
 	)
 }
 
