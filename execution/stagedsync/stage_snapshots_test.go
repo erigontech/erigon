@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/shards"
@@ -80,17 +81,19 @@ func (d *progressDownloader) Download(context.Context, *downloaderproto.Download
 }
 
 // plainDownloader lacks the progress capability, like an external downloader
-// reached over gRPC.
+// in another process.
 type plainDownloader struct {
 	dbservices.DownloaderClient
 }
 
 type frozenBlockReader struct {
 	dbservices.FullBlockReader
-	frozen uint64
+	frozen   uint64
+	freezing ethconfig.BlocksFreezing
 }
 
-func (r frozenBlockReader) FrozenBlocks() uint64 { return r.frozen }
+func (r frozenBlockReader) FrozenBlocks() uint64                  { return r.frozen }
+func (r frozenBlockReader) FreezingCfg() ethconfig.BlocksFreezing { return r.freezing }
 
 // seedPreverified registers a two-file snapshot set (plus any extra TOML lines)
 // so KnownCfg reports a non-zero ExpectBlocks: the registry is empty until a
@@ -409,6 +412,22 @@ func TestSnapshotDownloadProgressReporterNoopWithoutProgressCapability(t *testin
 	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
 	stop(nil, testCommitBlock)
 
+	h.requireNoEvent(t)
+	require.Zero(t, h.currentBlock(t))
+}
+
+// Pins the DisableDownloadE3 no-op documented on the reporter.
+func TestSnapshotDownloadProgressReporterNoopWithoutStateSnapshotDownload(t *testing.T) {
+	h := newSeededReporterHarness(t, 0)
+	br := h.cfg.blockReader.(frozenBlockReader)
+	br.freezing = ethconfig.BlocksFreezing{DisableDownloadE3: true}
+	h.cfg.blockReader = br
+
+	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
+	t.Cleanup(func() { stop(nil, 0) })
+	h.downloader.set(250, 1000)
+
+	require.Zero(t, h.downloader.resetCount())
 	h.requireNoEvent(t)
 	require.Zero(t, h.currentBlock(t))
 }

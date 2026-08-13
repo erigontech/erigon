@@ -190,33 +190,34 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 	// to roll back the current value at function exit, not the original.
 	defer func() { tx.Rollback() }()
 
-	// Run snapshots stage — downloads block files.
-	if err := pe.sync.RunSnapshots(nil, tx); err != nil {
-		return err
-	}
-	if onlySnapDownload {
-		// Nothing was committed and execution runs elsewhere (polygon-sync), so the
-		// download pin still has a handoff to bridge: leave it, and don't register
-		// the clear below.
-		return nil
-	}
-
-	// The snapshots stage pins download progress at ~100% to bridge the handoff to
-	// execution, which the loop below performs: dropping the pin belongs to its
-	// exit. On the failure exit nothing commits, so without this the node would
-	// report a stuck execution as nearly synced. Publish the drop too — subscribers
-	// keep the pinned state until a sync-state event tells them otherwise.
+	// Drop the snapshots stage's download-completion pin on every exit (see
+	// Notifications.ClearSnapshotDownloadPin for its lifecycle). Registered
+	// before the stage so a failure inside it, after the pin is published, is
+	// covered too; the publish runs on a non-cancelled ctx because the failure
+	// often IS a cancellation. Skipped when only downloading — execution, and
+	// with it the handoff the pin bridges, happens elsewhere.
 	defer func() {
+		if onlySnapDownload {
+			return
+		}
 		if !hook.ClearSnapshotDownloadPin() {
 			return
 		}
-		if viewErr := pe.db.View(ctx, func(tx kv.Tx) error {
+		if viewErr := pe.db.View(context.WithoutCancel(ctx), func(tx kv.Tx) error {
 			hook.NotifySyncState(tx)
 			return nil
 		}); viewErr != nil {
 			pe.logger.Warn("[OtterSync] sync-state publish after dropping the download pin failed", "err", viewErr)
 		}
 	}()
+
+	// Run snapshots stage — downloads block files.
+	if err := pe.sync.RunSnapshots(nil, tx); err != nil {
+		return err
+	}
+	if onlySnapDownload {
+		return nil
+	}
 
 	// If domains are ahead of block files, nothing to execute.
 	if execctx.IsDomainAheadOfBlocks(ctx, tx, pe.logger) {

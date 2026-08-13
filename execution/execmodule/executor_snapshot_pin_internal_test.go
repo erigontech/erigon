@@ -18,6 +18,7 @@ package execmodule
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -33,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/shards"
 )
 
@@ -74,10 +76,9 @@ func pinSurvived(n *shards.Notifications) bool {
 	return n.ClearSnapshotDownloadPin()
 }
 
-// A Bor node's startup pipeline only downloads snapshots — Sync.RunSnapshots
-// covers the snapshots stage — and execution runs elsewhere (polygon-sync).
-// The download pin still has a handoff to bridge there, so ProcessFrozenBlocks
-// must not touch it on this path.
+// A Bor node's startup pipeline only downloads snapshots, and execution runs
+// elsewhere: the download pin still has a handoff to bridge there, so
+// ProcessFrozenBlocks must not touch it on this path.
 func TestProcessFrozenBlocksOnlySnapDownloadKeepsPin(t *testing.T) {
 	pe, hook, notifications := newPinTestExecutor(t, func(bool, *stagedsync.StageState, stagedsync.Unwinder, *execctx.SharedDomains, kv.TemporalRwTx, log.Logger) error {
 		return nil
@@ -89,15 +90,36 @@ func TestProcessFrozenBlocksOnlySnapDownloadKeepsPin(t *testing.T) {
 	require.True(t, pinSurvived(notifications), "onlySnapDownload must not touch the download pin")
 }
 
-// When execution does run (onlySnapDownload=false) and the pipeline fails
-// before completing, the pin's handoff never happens: it must be dropped so
-// eth_syncing does not keep reporting a stuck node as nearly synced.
+// lastPublished drains the subscription channel and returns the most recent
+// reply, or nil when nothing was published.
+func lastPublished(ch chan *remoteproto.SyncingReply) (last *remoteproto.SyncingReply) {
+	for {
+		select {
+		case reply := <-ch:
+			last = reply
+		default:
+			return last
+		}
+	}
+}
+
+// requirePinDropped asserts the pin is gone and that the drop reached
+// subscribers: the LAST published reply must reflect it, since BeforeRun
+// publishes the still-pinned state earlier.
+func requirePinDropped(t *testing.T, n *shards.Notifications, ch chan *remoteproto.SyncingReply) {
+	t.Helper()
+	require.False(t, n.ClearSnapshotDownloadPin(), "the pin must already be dropped")
+	last := lastPublished(ch)
+	require.NotNil(t, last, "the drop must be published to subscribers")
+	require.Zero(t, last.CurrentBlock, "the last published reply must reflect the dropped pin")
+}
+
+// When execution runs and the pipeline fails, the pin's handoff never
+// happens: it must be dropped and the drop published — even when the failure
+// is a ctx cancellation, where a publish on the caller's ctx would fail.
 func TestProcessFrozenBlocksClearsPinOnFailure(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	// Cancelling right after the snapshots stage (RunSnapshots) succeeds forces
-	// the pipeline to fail on its next context-aware operation — after the pin's
-	// defer is registered, without needing a real execution failure to reach it.
 	pe, hook, notifications := newPinTestExecutor(t, func(bool, *stagedsync.StageState, stagedsync.Unwinder, *execctx.SharedDomains, kv.TemporalRwTx, log.Logger) error {
 		cancel()
 		return nil
@@ -108,10 +130,21 @@ func TestProcessFrozenBlocksClearsPinOnFailure(t *testing.T) {
 
 	require.Error(t, pe.ProcessFrozenBlocks(ctx, hook, false))
 
-	require.False(t, pinSurvived(notifications), "a pipeline failure past the handoff must drop the pin")
-	select {
-	case <-ch:
-	default:
-		t.Fatal("dropping the pin must publish the sync-state change to subscribers")
-	}
+	requirePinDropped(t, notifications, ch)
+}
+
+// A failure inside the snapshots stage itself, after the pin was published
+// (e.g. in the stage tail), must drop the pin too: the pipeline exits before
+// executing anything, and nothing else would ever clear it.
+func TestProcessFrozenBlocksClearsPinOnSnapshotsStageFailure(t *testing.T) {
+	pe, hook, notifications := newPinTestExecutor(t, func(bool, *stagedsync.StageState, stagedsync.Unwinder, *execctx.SharedDomains, kv.TemporalRwTx, log.Logger) error {
+		return errors.New("stage tail failed after the pin")
+	})
+	notifications.SetSnapshotDownloadProgress(1, 1, 100)
+	ch, unsubscribe := notifications.Events.AddSyncStateSubscription()
+	defer unsubscribe()
+
+	require.Error(t, pe.ProcessFrozenBlocks(t.Context(), hook, false))
+
+	requirePinDropped(t, notifications, ch)
 }

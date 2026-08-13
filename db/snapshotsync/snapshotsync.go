@@ -587,6 +587,14 @@ func SyncSnapshots(
 	return nil
 }
 
+// BlockFileRetainedUnderCap reports whether a block-segment file ending at
+// `to` survives a download capped at toBlock; toBlock == 0 means no cap. The
+// download progress reporter derives its block target with this same rule, so
+// the target and the downloaded byte total describe the same file set.
+func BlockFileRetainedUnderCap(to, toBlock uint64) bool {
+	return toBlock == 0 || to <= toBlock
+}
+
 func filterToBlock(name string, toBlock uint64, toStep kv.Step, headerchain bool) bool {
 	if toBlock == 0 {
 		return false // toBlock filtering is not enabled
@@ -609,5 +617,5 @@ func filterToBlock(name string, toBlock uint64, toStep kv.Step, headerchain bool
 		// so that we can correctly calculate its maxTxNum from the body segment files (we will later on delete this file)
 		return fileInfo.From > toBlock
 	}
-	return fileInfo.To > toBlock
+	return !BlockFileRetainedUnderCap(fileInfo.To, toBlock)
 }

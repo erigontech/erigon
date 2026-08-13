@@ -51,7 +51,9 @@ func (c directGrpcServerClient) Delete(ctx context.Context, in *downloaderproto.
 }
 
 func (c directGrpcServerClient) DownloadProgress() dbservices.DownloadProgressReport {
-	if s, ok := c.server.(*GrpcServer); ok {
+	// The s.d != nil check avoids returning a typed nil, which would pass the
+	// caller's == nil test as a non-nil interface.
+	if s, ok := c.server.(*GrpcServer); ok && s.d != nil {
 		return s.d
 	}
 	return nil

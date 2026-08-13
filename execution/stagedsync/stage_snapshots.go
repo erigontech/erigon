@@ -179,6 +179,12 @@ func startSnapshotDownloadProgressReporter(ctx context.Context, cfg SnapshotsCfg
 	if reporter == nil {
 		return noop
 	}
+	// No state files means no commitment block: execution restarts from genesis,
+	// so a byte ratio mapped onto the headers tip would climb to ~tip and then
+	// reset to 0. Keep the stage-list reply instead.
+	if cfg.blockReader.FreezingCfg().DisableDownloadE3 {
+		return noop
+	}
 	var target uint64
 	if c, known := snapcfg.KnownCfg(cfg.chainConfig.ChainName); known {
 		toBlock := cfg.syncConfig.SnapshotDownloadToBlock
@@ -190,7 +196,7 @@ func startSnapshotDownloadProgressReporter(ctx context.Context, cfg SnapshotsCfg
 			if info == nil || info.Ext != ".seg" || info.Type == nil || info.Type.Enum() != snaptype2.Enums.Headers {
 				continue
 			}
-			if toBlock > 0 && info.To > toBlock {
+			if !snapshotsync.BlockFileRetainedUnderCap(info.To, toBlock) {
 				continue
 			}
 			target = max(target, info.To)
@@ -207,6 +213,9 @@ func startSnapshotDownloadProgressReporter(ctx context.Context, cfg SnapshotsCfg
 
 	setAndPublish := func(done, total, targetBlock uint64) {
 		cfg.notifier.SetSnapshotDownloadProgress(done, total, targetBlock)
+		if cfg.notifier.Events == nil {
+			return
+		}
 		if err := cfg.db.View(ctx, func(tx kv.Tx) error {
 			return cfg.notifier.PublishSyncState(tx, cfg.blockReader.FrozenBlocks())
 		}); err != nil {
@@ -349,7 +358,15 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	// small subset, so its ratio would jump backwards once the full set is known.
 	var commitBlock uint64
 	stopReporter := startSnapshotDownloadProgressReporter(ctx, cfg)
-	defer func() { stopReporter(err, commitBlock) }()
+	defer func() {
+		// A panic unwinds with err == nil; stopping as a success would clear the
+		// last honest sample. Stop as a failure instead, then keep unwinding.
+		if r := recover(); r != nil {
+			stopReporter(fmt.Errorf("snapshots stage panic: %v", r), 0)
+			panic(r)
+		}
+		stopReporter(err, commitBlock)
+	}()
 
 	if err := snapshotsync.SyncSnapshots(
 		ctx,
@@ -451,7 +468,10 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	// that crashed eth_call on Gnosis with "invalid opcode: SHR" (#21066).
 	// Bump Execution stage progress to the snapshot commitment block so RPC sees a
 	// consistent view immediately, matching what ExecV3 would set on its first run.
-	if commitBlock = readCommitmentBlockFromDB(ctx, cfg.db); commitBlock > 0 {
+	// Plain assignment: the deferred stopReporter reads this variable, and a
+	// reflexive := here would shadow it and silently disable the handoff pin.
+	commitBlock = readCommitmentBlockFromDB(ctx, cfg.db)
+	if commitBlock > 0 {
 		execProgress, err := stages.GetStageProgress(tx, stages.Execution)
 		if err != nil {
 			return fmt.Errorf("get Execution stage progress: %w", err)

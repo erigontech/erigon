@@ -25,6 +25,7 @@ import (
 	"runtime"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -441,6 +442,28 @@ func TestNewStatsCountsRetainedSameNameTorrent(t *testing.T) {
 	test.downloader.storeStats(stats)
 	_, total := test.downloader.Completed()
 	require.Positive(total)
+}
+
+// The download's logging loop is the only production writer of the progress
+// sample: drive a real batch and require the sample to reach Completed(), so
+// a change gating that loop cannot silently kill the download progress.
+func TestDownloaderCompletedFedByDownloadBatch(t *testing.T) {
+	test := newDownloaderTest(t)
+	ctx := t.Context()
+
+	require.NoError(t, os.WriteFile(filepath.Join(test.dirs.Snap, "a.seg"), []byte("local snapshot data"), 0o644))
+	require.NoError(t, test.downloader.AddNewSeedableFile(ctx, "a.seg"))
+	test.downloader.lock.RLock()
+	localT := test.downloader.torrentsByName["a.seg"]
+	test.downloader.lock.RUnlock()
+	require.NotNil(t, localT)
+
+	require.NoError(t, test.downloader.testStartSingleDownloadNoWait(ctx, localT.InfoHash(), "a.seg"))
+
+	require.Eventually(t, func() bool {
+		_, total := test.downloader.Completed()
+		return total > 0
+	}, 2*time.Second, 10*time.Millisecond, "the download's logging loop must feed Completed()")
 }
 
 // noProgressDownloaderClient stands in for an external downloader reached over
