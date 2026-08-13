@@ -23,6 +23,7 @@ import (
 	"math"
 	"os"
 	"path"
+	"slices"
 	"time"
 
 	"github.com/spf13/afero"
@@ -271,9 +272,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	}
 	networkConfig.BootNodes = discoveryNodes
 	if len(directBootnodes) > 0 {
-		staticPeers := make([]string, 0, len(networkConfig.StaticPeers)+len(directBootnodes))
-		staticPeers = append(staticPeers, networkConfig.StaticPeers...)
-		networkConfig.StaticPeers = append(staticPeers, directBootnodes...)
+		networkConfig.StaticPeers = slices.Concat(networkConfig.StaticPeers, directBootnodes)
 	}
 	if genesisState != nil {
 		genesisDb.Initialize(genesisState)
