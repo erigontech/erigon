@@ -1068,12 +1068,11 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 			cell.setFromUpdate(update)
 		}
 
-		var valBuf [128]byte
-		valLen := cell.accountForHashing(valBuf[:], storageRootHash)
+		valLen := cell.accountForHashing(hph.accValBuf, storageRootHash)
 		if hph.traceW != nil {
-			fmt.Fprintf(hph.traceW, "accountLeafHashWithKey for [%s]=>[%s]\n", traceHex(hashedKeyBuf[:65-depth]), traceHex(valBuf[:valLen]))
+			fmt.Fprintf(hph.traceW, "accountLeafHashWithKey for [%s]=>[%s]\n", traceHex(hashedKeyBuf[:65-depth]), traceHex(hph.accValBuf[:valLen]))
 		}
-		leafHash, err := hph.accountLeafHashWithKey(buf, hashedKeyBuf[:65-depth], rlp.RlpEncodedBytes(valBuf[:valLen]))
+		leafHash, err := hph.accountLeafHashWithKey(buf, hashedKeyBuf[:65-depth], rlp.RlpEncodedBytes(hph.accValBuf[:valLen]))
 		if err != nil {
 			return nil, storageRootHashIsSet, nil, err
 		}
@@ -3125,8 +3124,4 @@ func HexTrieStateToString(enc []byte) (string, error) {
 	printAfterMap(sb, "afterMap", s.AfterMap[:], s.Depths[:], s.BranchBefore[:])
 
 	return sb.String(), nil
-}
-
-func (hph *HexPatriciaHashed) Grid() [128][16]cell {
-	return hph.grid
 }
