@@ -78,6 +78,35 @@ func (m *execStatusList) pushPending(tx int) {
 	m.pending = insertInList(m.pending, tx)
 }
 
+// restoreHeldBack re-inserts an ascending, pending-disjoint holdBack list in
+// O(H+R) via a single merge. Restoring per tx with pushPending is O(H*R): the
+// held-back retries all sort before the untouched pending suffix, so each
+// insert shifts the whole suffix.
+func (m *execStatusList) restoreHeldBack(holdBack []int) {
+	if len(holdBack) == 0 {
+		return
+	}
+	merged := make([]int, 0, len(holdBack)+len(m.pending))
+	i, j := 0, 0
+	for i < len(holdBack) && j < len(m.pending) {
+		switch {
+		case holdBack[i] < m.pending[j]:
+			merged = append(merged, holdBack[i])
+			i++
+		case holdBack[i] > m.pending[j]:
+			merged = append(merged, m.pending[j])
+			j++
+		default:
+			merged = append(merged, holdBack[i])
+			i++
+			j++
+		}
+	}
+	merged = append(merged, holdBack[i:]...)
+	merged = append(merged, m.pending[j:]...)
+	m.pending = merged
+}
+
 // pushDeferred parks a tx that hit ErrDependency with no effective blocker
 // (or was invalidated mid-flight). Immediate re-dispatch re-enters the
 // race; drainDeferredIfReady gates retry on a directed-delay predicate.

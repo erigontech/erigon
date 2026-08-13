@@ -3365,9 +3365,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 			be.cntExec++
 			dispatched++
 		}
-		for _, tx := range holdBack {
-			be.execTasks.pushPending(tx)
-		}
+		be.execTasks.restoreHeldBack(holdBack)
 		return dispatched
 	}
 
