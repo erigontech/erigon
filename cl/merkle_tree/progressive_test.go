@@ -166,10 +166,35 @@ func TestMixInActiveFieldsReferenceVectors(t *testing.T) {
 	}
 }
 
-func TestMixInActiveFieldsRejectsMoreThan256Bits(t *testing.T) {
-	mixed, err := merkle_tree.MixInActiveFields([32]byte{}, make([]bool, 257))
-	require.EqualError(t, err, "active fields exceed 256 bits")
-	require.Zero(t, mixed)
+func TestMixInActiveFieldsRejectsInvalidConfigurations(t *testing.T) {
+	tests := []struct {
+		name         string
+		activeFields []bool
+		expected     string
+	}{
+		{
+			name:     "empty active fields",
+			expected: "active fields cannot be empty",
+		},
+		{
+			name:         "more than 256 active fields",
+			activeFields: make([]bool, 257),
+			expected:     "active fields exceed 256 bits",
+		},
+		{
+			name:         "trailing inactive field",
+			activeFields: []bool{true, false},
+			expected:     "active fields must end with an active field",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			mixed, err := merkle_tree.MixInActiveFields([32]byte{}, test.activeFields)
+			require.EqualError(t, err, test.expected)
+			require.Zero(t, mixed)
+		})
+	}
 }
 
 func TestMixInActiveFieldsDoesNotModifyActiveFields(t *testing.T) {
@@ -207,6 +232,12 @@ func TestProgressiveContainerRootReferenceVectors(t *testing.T) {
 			fieldRoots:   progressiveTestChunks(1),
 			activeFields: []bool{true},
 			expected:     "0xa21da97c8a597221c87c9ea5ecdfbd860fcd52fd6fb5b001723f6437856c8df1",
+		},
+		{
+			name:         "first field inactive",
+			fieldRoots:   progressiveTestChunks(2),
+			activeFields: []bool{false, true, true},
+			expected:     "0xda82da2e7cc18aaaef8a1bb578dff2126cb2b4e7fe33b76caac0fd23b01bf165",
 		},
 		{
 			name:         "EIP-7807 ExecutionPayload fields",
@@ -270,9 +301,15 @@ func TestProgressiveContainerRootRejectsInvalidConfigurations(t *testing.T) {
 			expected:     "active fields must end with an active field",
 		},
 		{
-			name:         "active field count mismatch",
+			name:         "more field roots than active fields",
 			fieldRoots:   progressiveTestChunks(2),
 			activeFields: []bool{true},
+			expected:     "active field count does not match field roots",
+		},
+		{
+			name:         "fewer field roots than active fields",
+			fieldRoots:   progressiveTestChunks(1),
+			activeFields: []bool{true, true},
 			expected:     "active field count does not match field roots",
 		},
 	}
