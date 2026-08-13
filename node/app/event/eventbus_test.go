@@ -173,9 +173,7 @@ func TestSubcribeOnceAsync(t *testing.T) {
 		t.Fail()
 	}
 
-	var cb func(a int, out *[]int)
-
-	if bus.HasCallback(reflect.TypeOf(cb)) {
+	if bus.HasCallback(reflect.TypeFor[func(a int, out *[]int)]()) {
 		t.Fail()
 	}
 }
