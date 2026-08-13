@@ -298,8 +298,26 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 		if key, value, err := provider.Next(); err == nil {
 			heapPush(h, &HeapElem{key, value, i})
 		} else /* we must have at least one entry per file */ {
-			eee := fmt.Errorf("%s: error reading first readers: n=%d current=%d provider=%s err=%w",
-				logPrefix, len(providers), i, provider, err)
+			// Enumerate every provider and its file size so a repro of the
+			// empty-provider panic tells us which providers are empty vs
+			// non-empty, not just the first one to fail. Historical plan
+			// section "Fix A" listed this as the missing diagnostic.
+			var providerDesc string
+			for j, p := range providers {
+				sz := int64(-1)
+				if fp, ok := p.(*fileDataProvider); ok && fp.file != nil {
+					if st, statErr := fp.file.Stat(); statErr == nil {
+						sz = st.Size()
+					}
+				}
+				marker := " "
+				if j == i {
+					marker = "*"
+				}
+				providerDesc += fmt.Sprintf("\n  [%d]%s size=%d provider=%s", j, marker, sz, p)
+			}
+			eee := fmt.Errorf("%s: error reading first readers: n=%d current=%d err=%w providers:%s",
+				logPrefix, len(providers), i, err, providerDesc)
 			panic(eee)
 		}
 	}

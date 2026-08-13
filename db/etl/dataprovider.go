@@ -22,6 +22,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sync/atomic"
 
 	"golang.org/x/sync/errgroup"
@@ -100,6 +101,7 @@ func FlushToDisk(logPrefix string, b Buffer, tmpdir string, lvl log.Lvl) (dataPr
 }
 
 func sortAndFlush(b Buffer, tmpdir string) (*os.File, error) {
+	preLen := b.Len()
 	b.Sort()
 
 	bufferFile, err := os.CreateTemp(tmpdir, "erigon-sortable-buf-")
@@ -115,6 +117,18 @@ func sortAndFlush(b Buffer, tmpdir string) (*os.File, error) {
 	}
 	if err = w.Flush(); err != nil {
 		return bufferFile, fmt.Errorf("error flushing buffer to disk: %w", err)
+	}
+	// Post-flush stat: catch the empty-provider case at its source. If the
+	// buffer said it had entries but the file is 0 bytes, capture the
+	// stack — the merge-time panic can't tell which call site produced it.
+	if st, statErr := bufferFile.Stat(); statErr == nil {
+		if st.Size() == 0 {
+			log.Warn("[etl] sortAndFlush produced 0-byte file",
+				"file", bufferFile.Name(),
+				"buf.Len.before-sort", preLen,
+				"buf.Len.after-sort", b.Len(),
+				"stack", string(debug.Stack()))
+		}
 	}
 	return bufferFile, nil
 }
@@ -142,6 +156,9 @@ func (p *fileDataProvider) initMmap() error {
 		return err
 	}
 	if fi.Size() == 0 {
+		log.Warn("[etl] initMmap: 0-byte file → EOF",
+			"file", p.file.Name(),
+			"stack", string(debug.Stack()))
 		return io.EOF
 	}
 	p.mmapData, p.mmapHandle2, err = mmap.Mmap(p.file, int(fi.Size()))
