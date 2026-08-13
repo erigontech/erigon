@@ -2,9 +2,12 @@ package stagedsync
 
 import (
 	"errors"
+	"fmt"
 	"slices"
 	"sort"
 	"time"
+
+	"github.com/erigontech/erigon/common/dbg"
 )
 
 type ExecutionStat struct {
@@ -78,33 +81,28 @@ func (m *execStatusList) pushPending(tx int) {
 	m.pending = insertInList(m.pending, tx)
 }
 
-// restoreHeldBack re-inserts an ascending, pending-disjoint holdBack list in
-// O(H+R) via a single merge. Restoring per tx with pushPending is O(H*R): the
-// held-back retries all sort before the untouched pending suffix, so each
-// insert shifts the whole suffix.
+// restoreHeldBack re-inserts holdBack ahead of pending in O(H+R). holdBack must
+// be strictly ascending and every entry below the current pending minimum: the
+// dispatch loop consumes pending front-to-back and nothing re-adds to it, so
+// held-back retries are always lower than the untouched suffix. Restoring per tx
+// with pushPending is O(H*R) — each held-back index sorts before the whole
+// suffix, so every insert shifts it.
 func (m *execStatusList) restoreHeldBack(holdBack []int) {
 	if len(holdBack) == 0 {
 		return
 	}
-	merged := make([]int, 0, len(holdBack)+len(m.pending))
-	i, j := 0, 0
-	for i < len(holdBack) && j < len(m.pending) {
-		switch {
-		case holdBack[i] < m.pending[j]:
-			merged = append(merged, holdBack[i])
-			i++
-		case holdBack[i] > m.pending[j]:
-			merged = append(merged, m.pending[j])
-			j++
-		default:
-			merged = append(merged, holdBack[i])
-			i++
-			j++
+	if dbg.AssertEnabled {
+		for i := 1; i < len(holdBack); i++ {
+			if holdBack[i] <= holdBack[i-1] {
+				panic(fmt.Errorf("restoreHeldBack: holdBack not strictly ascending: %v", holdBack))
+			}
+		}
+		if len(m.pending) > 0 && holdBack[len(holdBack)-1] >= m.pending[0] {
+			panic(fmt.Errorf("restoreHeldBack: holdBack max %d not below pending min %d", holdBack[len(holdBack)-1], m.pending[0]))
 		}
 	}
-	merged = append(merged, holdBack[i:]...)
-	merged = append(merged, m.pending[j:]...)
-	m.pending = merged
+	m.ensureLen(holdBack[len(holdBack)-1])
+	m.pending = slices.Insert(m.pending, 0, holdBack...)
 }
 
 // pushDeferred parks a tx that hit ErrDependency with no effective blocker

@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -1773,6 +1774,117 @@ func TestNextResult_NilVsEmptyRecordForkAware(t *testing.T) {
 				require.NotNil(t, be.finalizedResults[0])
 			} else {
 				require.Nil(t, be.finalizedResults[0])
+			}
+		})
+	}
+}
+
+func TestRestoreHeldBack(t *testing.T) {
+	m := &execStatusList{pending: []int{10, 11, 12, 15}}
+	m.ensureLen(15)
+	m.restoreHeldBack([]int{3, 5, 7})
+	require.Equal(t, []int{3, 5, 7, 10, 11, 12, 15}, m.pending)
+}
+
+func TestRestoreHeldBackEdgeCases(t *testing.T) {
+	t.Run("empty holdBack leaves pending untouched", func(t *testing.T) {
+		m := &execStatusList{pending: []int{4, 8}}
+		m.restoreHeldBack(nil)
+		require.Equal(t, []int{4, 8}, m.pending)
+	})
+	t.Run("empty pending", func(t *testing.T) {
+		m := &execStatusList{}
+		m.restoreHeldBack([]int{1, 2, 3})
+		require.Equal(t, []int{1, 2, 3}, m.pending)
+	})
+}
+
+// restoreHeldBack must leave pending, complete and inProgress in the same state
+// as restoring each held-back tx with pushPending (the second and third catch a
+// dropped ensureLen).
+func TestRestoreHeldBackMatchesPushPending(t *testing.T) {
+	shapes := []struct {
+		holdBack []int
+		suffix   []int
+	}{
+		{[]int{0, 1, 2}, []int{3, 4, 5, 6, 7}},
+		{[]int{2, 4, 9}, []int{11, 20, 30}},
+		{[]int{}, []int{5, 6}},
+		{[]int{5, 6}, []int{}},
+		{[]int{1, 3, 5, 7}, []int{8, 9, 10, 11, 12, 13}},
+	}
+	for i, s := range shapes {
+		t.Run(fmt.Sprintf("shape%d", i), func(t *testing.T) {
+			want := &execStatusList{pending: append([]int{}, s.suffix...)}
+			for _, tx := range s.holdBack {
+				want.pushPending(tx)
+			}
+			got := &execStatusList{pending: append([]int{}, s.suffix...)}
+			got.restoreHeldBack(append([]int{}, s.holdBack...))
+			require.Equal(t, want.pending, got.pending, "pending")
+			require.Equal(t, len(want.complete), len(got.complete), "complete len")
+			require.Equal(t, len(want.inProgress), len(got.inProgress), "inProgress len")
+		})
+	}
+}
+
+func TestRestoreHeldBackAssertsPrecondition(t *testing.T) {
+	old := dbg.AssertEnabled
+	dbg.AssertEnabled = true
+	defer func() { dbg.AssertEnabled = old }()
+
+	t.Run("non-ascending holdBack panics", func(t *testing.T) {
+		m := &execStatusList{pending: []int{10}}
+		require.Panics(t, func() { m.restoreHeldBack([]int{5, 3}) })
+	})
+	t.Run("holdBack not below pending panics", func(t *testing.T) {
+		m := &execStatusList{pending: []int{4}}
+		require.Panics(t, func() { m.restoreHeldBack([]int{7}) })
+	})
+}
+
+func holdBackBenchInput(total int) (holdBack, suffix []int) {
+	h := total / 2
+	holdBack = make([]int, h)
+	for i := range holdBack {
+		holdBack[i] = i
+	}
+	suffix = make([]int, total-h)
+	for i := range suffix {
+		suffix[i] = h + i
+	}
+	return
+}
+
+// BenchmarkHoldBackReinsertion contrasts the previous per-tx pushPending restore
+// with the bulk prepend, on a sorted low-index held-back prefix in front of a
+// large untouched suffix. Each iteration rebuilds pending in a reused buffer, so
+// no per-iteration StopTimer is needed and both variants pay the same reset cost.
+func BenchmarkHoldBackReinsertion(b *testing.B) {
+	for _, total := range []int{1024, 2048, 4096, 8192} {
+		holdBack, suffix := holdBackBenchInput(total)
+		b.Run(fmt.Sprintf("perTx/%d", total), func(b *testing.B) {
+			m := &execStatusList{}
+			m.ensureLen(total)
+			buf := make([]int, 0, total)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				buf = append(buf[:0], suffix...)
+				m.pending = buf
+				for _, tx := range holdBack {
+					m.pushPending(tx)
+				}
+			}
+		})
+		b.Run(fmt.Sprintf("merge/%d", total), func(b *testing.B) {
+			m := &execStatusList{}
+			m.ensureLen(total)
+			buf := make([]int, 0, total)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				buf = append(buf[:0], suffix...)
+				m.pending = buf
+				m.restoreHeldBack(holdBack)
 			}
 		})
 	}

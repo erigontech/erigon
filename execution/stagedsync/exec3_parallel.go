@@ -3294,7 +3294,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 			return 0
 		}
 		budget := pe.in.Capacity() - pe.in.NewTasksLen()
-		var holdBack sort.IntSlice
+		var holdBack []int
 		for {
 			nextTx := be.execTasks.minPending()
 			if nextTx < 0 {
