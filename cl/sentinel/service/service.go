@@ -44,10 +44,17 @@ var _ sentinelproto.SentinelServer = (*SentinelServer)(nil)
 type SentinelServer struct {
 	sentinelproto.UnimplementedSentinelServer
 
-	ctx      context.Context
-	sentinel *sentinel.Sentinel
+	ctx                context.Context
+	sentinel           *sentinel.Sentinel
+	peerRequestBackend peerRequestBackend
 
 	logger log.Logger
+}
+
+type peerRequestBackend interface {
+	GetPeersCount() (active int, connected int, disconnected int)
+	Config() *sentinel.SentinelConfig
+	ReqRespHandler() http.Handler
 }
 
 type (
@@ -58,9 +65,10 @@ type (
 
 func NewSentinelServer(ctx context.Context, sentinel *sentinel.Sentinel, logger log.Logger) *SentinelServer {
 	return &SentinelServer{
-		sentinel: sentinel,
-		ctx:      ctx,
-		logger:   logger,
+		sentinel:           sentinel,
+		peerRequestBackend: sentinel,
+		ctx:                ctx,
+		logger:             logger,
 	}
 }
 
@@ -95,17 +103,16 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 		return nil, err
 	}
 
-	activePeers, _, _ := s.sentinel.GetPeersCount()
+	activePeers, _, _ := s.peerRequestBackend.GetPeersCount()
 
-	shouldBanOnFail := activePeers >= int(s.sentinel.Config().MaxPeerCount)
+	shouldBanOnFail := activePeers >= int(s.peerRequestBackend.Config().MaxPeerCount)
 	// set the peer and topic we are requesting
 	httpReq.Header.Set("REQRESP-PEER-ID", pid.String())
 	httpReq.Header.Set("REQRESP-TOPIC", req.Topic)
 	if req.MaxResponseBytes > 0 {
 		httpReq.Header.Set(httpreqresp.MaxResponseBytesHeader, strconv.FormatUint(req.MaxResponseBytes, 10))
 	}
-	// for now this can't actually error. in the future, it can due to a network error
-	resp, err := httpreqresp.Do(s.sentinel.ReqRespHandler(), httpReq)
+	resp, err := httpreqresp.Do(s.peerRequestBackend.ReqRespHandler(), httpReq)
 	if err != nil {
 		// we remove, but dont ban the peer if we fail. this is because its probably not their fault, but maybe it is.
 		return nil, err
