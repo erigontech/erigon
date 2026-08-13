@@ -19,6 +19,7 @@ package exec
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
@@ -66,6 +67,118 @@ func TestBlockReadAheaderCarriesBlockAccessList(t *testing.T) {
 	block, ok := bra.ReadBlockWithSenders(blockHash)
 	require.True(t, ok)
 	require.Equal(t, bal, block.BlockAccessList())
+}
+
+func TestBlockReadAheaderSuspendWarmupWaitsForActiveWarmup(t *testing.T) {
+	bra := NewBlockReadAheader()
+	warmupStarted := make(chan struct{})
+	finishWarmup := make(chan struct{})
+	warmupDone := make(chan struct{})
+	require.True(t, bra.startWarmup(func() {
+		close(warmupStarted)
+		<-finishWarmup
+		close(warmupDone)
+	}))
+	<-warmupStarted
+
+	suspendStarted := make(chan struct{})
+	type suspendResult struct {
+		resume func()
+		err    error
+	}
+	suspended := make(chan suspendResult)
+	go func() {
+		close(suspendStarted)
+		resume, err := bra.SuspendWarmup(t.Context())
+		suspended <- suspendResult{resume: resume, err: err}
+	}()
+	<-suspendStarted
+	select {
+	case result := <-suspended:
+		require.NoError(t, result.err)
+		result.resume()
+		close(finishWarmup)
+		<-warmupDone
+		t.Fatal("SuspendWarmup returned while a warmup was active")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(finishWarmup)
+	result := <-suspended
+	require.NoError(t, result.err)
+	result.resume()
+	<-warmupDone
+}
+
+func TestBlockReadAheaderSuspendWarmupSkipsNewWarmup(t *testing.T) {
+	bra := NewBlockReadAheader()
+	resume, err := bra.SuspendWarmup(t.Context())
+	require.NoError(t, err)
+
+	warmupStarted := make(chan struct{})
+	require.False(t, bra.startWarmup(func() { close(warmupStarted) }),
+		"warmup must be skipped rather than queued behind the suspension")
+
+	resume()
+	select {
+	case <-warmupStarted:
+		t.Fatal("a skipped warmup started after suspension ended")
+	default:
+	}
+
+	nextWarmupDone := make(chan struct{})
+	require.True(t, bra.startWarmup(func() { close(nextWarmupDone) }))
+	select {
+	case <-nextWarmupDone:
+	case <-time.After(time.Second):
+		t.Fatal("a new warmup did not start after suspension ended")
+	}
+	bra.WaitForWarmup(t.Context())
+}
+
+func TestBlockReadAheaderSuspendWarmupHonorsContext(t *testing.T) {
+	bra := NewBlockReadAheader()
+	warmupStarted := make(chan struct{})
+	finishWarmup := make(chan struct{})
+	warmupDone := make(chan struct{})
+	require.True(t, bra.startWarmup(func() {
+		close(warmupStarted)
+		<-finishWarmup
+		close(warmupDone)
+	}))
+	<-warmupStarted
+
+	ctx, cancel := context.WithCancel(t.Context())
+	suspendStarted := make(chan struct{})
+	suspendResult := make(chan error)
+	go func() {
+		close(suspendStarted)
+		resume, err := bra.SuspendWarmup(ctx)
+		if resume != nil {
+			resume()
+		}
+		suspendResult <- err
+	}()
+	<-suspendStarted
+	cancel()
+
+	select {
+	case err := <-suspendResult:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		close(finishWarmup)
+		<-warmupDone
+		<-suspendResult
+		t.Fatal("SuspendWarmup did not return when its context was cancelled")
+	}
+
+	close(finishWarmup)
+	<-warmupDone
+	bra.WaitForWarmup(t.Context())
+	nextWarmupDone := make(chan struct{})
+	require.True(t, bra.startWarmup(func() { close(nextWarmupDone) }),
+		"a cancelled suspension must not retain the warmup permit")
+	<-nextWarmupDone
 }
 
 // seedFill places an entry with an exact txNum stamp through the public fill
@@ -190,11 +303,12 @@ func TestCachePopulatingGetterUnavailableVisibleEndNeverFills(t *testing.T) {
 func TestCachePopulatingGetterStaleViewDoesNotFill(t *testing.T) {
 	key := []byte("\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff\x00\x11\x22\x33\x44")
 	sc := newTestStateCache()
-	sc.Applier().Apply(kv.AccountsDomain, key, nil, 20)
+	sc.Applier().Publish(0, 1, []cache.StateUpdate{{Domain: kv.AccountsDomain, Key: key, TxNum: 20}})
 	cpg := &cachePopulatingGetter{
 		TemporalGetter: stubTemporalGetter{v: []byte("pre-delete-record")},
 		stepSize:       1_562_500,
-		view:           sc.View(cache.FrontierFunc(func(kv.Domain) (uint64, bool) { return 11, true })),
+		view: sc.View(cache.FrontierWithStateVersion(
+			cache.FrontierFunc(func(kv.Domain) (uint64, bool) { return 11, true }), 1)),
 	}
 
 	_, _, err := cpg.GetLatest(kv.AccountsDomain, key)
