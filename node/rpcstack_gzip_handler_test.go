@@ -197,3 +197,52 @@ func TestGzipMetricsCounters(t *testing.T) {
 	assert.Equal(t, uint64(len(body)), gzipInBytes.GetValueUint64()-inBefore, "streaming in must count raw bytes from both sides of the Flush")
 	assert.Equal(t, uint64(rec.Body.Len()), gzipOutBytes.GetValueUint64()-outBefore, "streaming out must count the compressed bytes")
 }
+
+// With --http.compression=false the stack must not wrap the handler at all:
+// no Content-Encoding, verbatim body, working Flush, and a status written by
+// an inner handler must survive (the removed streaming hook once risked
+// committing 200 before a 503 could be sent).
+func TestHTTPHandlerStackCompressionDisabled(t *testing.T) {
+	body := bytes.Repeat([]byte(`{"jsonrpc":"2.0","result":"x"}`), 200) // well over minGzipBodySize
+
+	for _, tc := range []struct {
+		name        string
+		compression bool
+		wantEnc     string
+	}{
+		{"compression off", false, ""},
+		{"compression on", true, "gzip"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_, _ = w.Write(body)
+				if f, ok := w.(http.Flusher); ok {
+					f.Flush()
+				}
+			})
+			srv := httptest.NewServer(NewHTTPHandlerStack(inner, nil, nil, tc.compression, 0, false))
+			defer srv.Close()
+
+			req, _ := http.NewRequest(http.MethodPost, srv.URL, nil)
+			req.Header.Set("Accept-Encoding", "gzip")
+			resp, err := (&http.Client{Transport: &http.Transport{DisableCompression: true}}).Do(req)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+
+			require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode, "inner status must survive the stack")
+			require.Equal(t, tc.wantEnc, resp.Header.Get("Content-Encoding"))
+
+			got, err := io.ReadAll(resp.Body)
+			require.NoError(t, err)
+			if tc.compression {
+				zr, err := gzip.NewReader(bytes.NewReader(got))
+				require.NoError(t, err)
+				got, err = io.ReadAll(zr)
+				require.NoError(t, err)
+			}
+			require.Equal(t, body, got, "body must round-trip unchanged")
+		})
+	}
+}
