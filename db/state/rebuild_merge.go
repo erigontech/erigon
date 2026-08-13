@@ -82,11 +82,13 @@ func (a *Aggregator) mergeCommitmentStep(ctx context.Context, toTxNum uint64) (s
 // large the box, which is the cost sharding exists to avoid in the first place.
 //
 // The budget charges a shard for every key it walks, well above the marginal
-// cost measured on mainnet, so it errs towards more and smaller shards.
+// cost measured on mainnet, so it errs towards more and smaller shards. Ranges
+// come from the accounts file step ranges and are already power-of-two spans;
+// only the memory-derived count needs flooring to keep shard boundaries aligned
+// with the merge ranges they feed.
 func rebuildShardSteps(totalMemory, stepsInRange, keysPerStep uint64) uint64 {
 	const bytesPerKey = 1400
 
-	stepsInRange = prevPowerOfTwo(stepsInRange)
 	if stepsInRange == 0 {
 		return 1
 	}
