@@ -221,6 +221,24 @@ func RecomputeAtTxNumWithoutSD(
 		it.Close()
 	}
 
+	// Refuse to return the baseline root unchanged when the walk range
+	// is non-empty. A gap in on-disk history for (baselineTxNum, toTxNum]
+	// — typical when the source publisher runs --prune.mode=minimal and
+	// consumers bootstrap its manifest without on-demand history download
+	// — makes HistoryKeyTxNumRange silently emit zero touches, and
+	// trie.Process against zero touches returns the SetState root as-is.
+	// That root reflects state at baselineTxNum, not at toTxNum, and it
+	// almost always mismatches the header the caller is validating
+	// against. Fail loudly so Provider.Unwind cannot commit a wrong root.
+	if toTxNum > baselineTxNum {
+		total := touchesByDomain[kv.AccountsDomain] + touchesByDomain[kv.StorageDomain] + touchesByDomain[kv.CodeDomain]
+		if total == 0 {
+			return nil, nil, baselineTxNum, nil, fmt.Errorf(
+				"commitment recompute: walk range (%d, %d] is non-empty but HistoryKeyTxNumRange returned zero touches across accounts/storage/code — history .v/.ef coverage is missing for this range (baseline=%d target=%d span=%d)",
+				baselineTxNum, toTxNum, baselineTxNum, toTxNum, toTxNum-baselineTxNum)
+		}
+	}
+
 	root, err = trie.Process(ctx, updates, "commitment-recompute-no-sd", nil, commitment.WarmupConfig{})
 	if err != nil {
 		return nil, nil, baselineTxNum, nil, fmt.Errorf("trie.Process: %w", err)
