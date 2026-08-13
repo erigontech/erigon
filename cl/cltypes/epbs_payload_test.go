@@ -54,22 +54,6 @@ func TestExecutionPayloadEnvelopeValidationSeparatesProtocolAndPersistenceBounds
 			e.Message.Payload.Withdrawals.Append(&Withdrawal{})
 			e.Message.Payload.Withdrawals.Append(&Withdrawal{})
 		}},
-		{"withdrawal requests", func(e *SignedExecutionPayloadEnvelope) {
-			e.Message.ExecutionRequests.Withdrawals.Append(&solid.WithdrawalRequest{})
-			e.Message.ExecutionRequests.Withdrawals.Append(&solid.WithdrawalRequest{})
-		}},
-		{"consolidation requests", func(e *SignedExecutionPayloadEnvelope) {
-			e.Message.ExecutionRequests.Consolidations.Append(&solid.ConsolidationRequest{})
-			e.Message.ExecutionRequests.Consolidations.Append(&solid.ConsolidationRequest{})
-		}},
-		{"builder deposit requests", func(e *SignedExecutionPayloadEnvelope) {
-			e.Message.ExecutionRequests.BuilderDeposits.Append(&solid.BuilderDepositRequest{})
-			e.Message.ExecutionRequests.BuilderDeposits.Append(&solid.BuilderDepositRequest{})
-		}},
-		{"builder exit requests", func(e *SignedExecutionPayloadEnvelope) {
-			e.Message.ExecutionRequests.BuilderExits.Append(&solid.BuilderExitRequest{})
-			e.Message.ExecutionRequests.BuilderExits.Append(&solid.BuilderExitRequest{})
-		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			envelope := validTestExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)
@@ -103,6 +87,95 @@ func TestExecutionPayloadEnvelopeValidationSeparatesProtocolAndPersistenceBounds
 			require.Error(t, envelope.ValidateForPersistence(&cfg))
 		})
 	}
+}
+
+func TestExecutionPayloadEnvelopeValidateForPersistenceAllowsProgressiveListsPastConfiguredLimit(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.MaxWithdrawalRequestsPerPayload = 1
+	cfg.MaxConsolidationRequestsPerPayload = 1
+	cfg.MaxBuilderDepositRequestsPerPayload = 1
+	cfg.MaxBuilderExitRequestsPerPayload = 1
+
+	for _, test := range []struct {
+		name   string
+		mutate func(*SignedExecutionPayloadEnvelope)
+	}{
+		{"withdrawals", func(envelope *SignedExecutionPayloadEnvelope) {
+			envelope.Message.ExecutionRequests.Withdrawals.Append(&solid.WithdrawalRequest{})
+			envelope.Message.ExecutionRequests.Withdrawals.Append(&solid.WithdrawalRequest{})
+		}},
+		{"consolidations", func(envelope *SignedExecutionPayloadEnvelope) {
+			envelope.Message.ExecutionRequests.Consolidations.Append(&solid.ConsolidationRequest{})
+			envelope.Message.ExecutionRequests.Consolidations.Append(&solid.ConsolidationRequest{})
+		}},
+		{"builder deposits", func(envelope *SignedExecutionPayloadEnvelope) {
+			envelope.Message.ExecutionRequests.BuilderDeposits.Append(&solid.BuilderDepositRequest{})
+			envelope.Message.ExecutionRequests.BuilderDeposits.Append(&solid.BuilderDepositRequest{})
+		}},
+		{"builder exits", func(envelope *SignedExecutionPayloadEnvelope) {
+			envelope.Message.ExecutionRequests.BuilderExits.Append(&solid.BuilderExitRequest{})
+			envelope.Message.ExecutionRequests.BuilderExits.Append(&solid.BuilderExitRequest{})
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			envelope := validTestExecutionPayloadEnvelope(&cfg)
+			test.mutate(envelope)
+
+			require.NoError(t, envelope.ValidateForPersistence(&cfg))
+		})
+	}
+}
+
+func TestExecutionPayloadEnvelopeValidateForConfigRejectsGloasRequestsPastConsensusLimit(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.MaxWithdrawalRequestsPerPayload = 1
+	cfg.MaxConsolidationRequestsPerPayload = 1
+	cfg.MaxBuilderDepositRequestsPerPayload = 1
+	cfg.MaxBuilderExitRequestsPerPayload = 1
+
+	for _, test := range []struct {
+		name   string
+		mutate func(*SignedExecutionPayloadEnvelope)
+	}{
+		{"withdrawals", func(envelope *SignedExecutionPayloadEnvelope) {
+			envelope.Message.ExecutionRequests.Withdrawals.Append(&solid.WithdrawalRequest{})
+			envelope.Message.ExecutionRequests.Withdrawals.Append(&solid.WithdrawalRequest{})
+		}},
+		{"consolidations", func(envelope *SignedExecutionPayloadEnvelope) {
+			envelope.Message.ExecutionRequests.Consolidations.Append(&solid.ConsolidationRequest{})
+			envelope.Message.ExecutionRequests.Consolidations.Append(&solid.ConsolidationRequest{})
+		}},
+		{"builder deposits", func(envelope *SignedExecutionPayloadEnvelope) {
+			envelope.Message.ExecutionRequests.BuilderDeposits.Append(&solid.BuilderDepositRequest{})
+			envelope.Message.ExecutionRequests.BuilderDeposits.Append(&solid.BuilderDepositRequest{})
+		}},
+		{"builder exits", func(envelope *SignedExecutionPayloadEnvelope) {
+			envelope.Message.ExecutionRequests.BuilderExits.Append(&solid.BuilderExitRequest{})
+			envelope.Message.ExecutionRequests.BuilderExits.Append(&solid.BuilderExitRequest{})
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			envelope := validTestExecutionPayloadEnvelope(&cfg)
+			test.mutate(envelope)
+
+			require.Error(t, envelope.ValidateForConfig(&cfg))
+		})
+	}
+}
+
+func TestExecutionRequestsElectraDecodeKeepsConfiguredLimit(t *testing.T) {
+	producerCfg := clparams.MainnetBeaconConfig
+	producerCfg.MaxWithdrawalRequestsPerPayload = 2
+	requests := NewExecutionRequestsWithVersion(&producerCfg, clparams.ElectraVersion)
+	requests.Withdrawals.Append(&solid.WithdrawalRequest{})
+	requests.Withdrawals.Append(&solid.WithdrawalRequest{})
+	encoded, err := requests.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	consumerCfg := clparams.MainnetBeaconConfig
+	consumerCfg.MaxWithdrawalRequestsPerPayload = 1
+	decoded := NewExecutionRequestsWithVersion(&consumerCfg, clparams.ElectraVersion)
+	require.Error(t, decoded.DecodeSSZStrict(encoded, int(clparams.ElectraVersion)))
 }
 
 func validTestExecutionPayloadEnvelope(cfg *clparams.BeaconChainConfig) *SignedExecutionPayloadEnvelope {

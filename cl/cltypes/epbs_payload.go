@@ -554,6 +554,13 @@ type SignedExecutionPayloadEnvelope struct {
 
 // ValidateForConfig checks structural and protocol constraints before hashing an envelope.
 func (s *SignedExecutionPayloadEnvelope) ValidateForConfig(cfg *clparams.BeaconChainConfig) error {
+	return s.validateForConfig(cfg, (*ExecutionRequests).validateForConfig)
+}
+
+func (s *SignedExecutionPayloadEnvelope) validateForConfig(
+	cfg *clparams.BeaconChainConfig,
+	validateRequests func(*ExecutionRequests, *clparams.BeaconChainConfig) error,
+) error {
 	if s == nil {
 		return errors.New("nil execution payload envelope")
 	}
@@ -606,7 +613,7 @@ func (s *SignedExecutionPayloadEnvelope) ValidateForConfig(cfg *clparams.BeaconC
 	if payload.Version() != requests.Version() {
 		return fmt.Errorf("payload and execution requests versions differ: %d != %d", payload.Version(), requests.Version())
 	}
-	if err := requests.validateForConfig(cfg); err != nil {
+	if err := validateRequests(requests, cfg); err != nil {
 		return fmt.Errorf("invalid execution requests: %w", err)
 	}
 	return nil
@@ -614,7 +621,7 @@ func (s *SignedExecutionPayloadEnvelope) ValidateForConfig(cfg *clparams.BeaconC
 
 // ValidateForPersistence checks that the configured decoder can read the encoded envelope.
 func (s *SignedExecutionPayloadEnvelope) ValidateForPersistence(cfg *clparams.BeaconChainConfig) error {
-	if err := s.ValidateForConfig(cfg); err != nil {
+	if err := s.validateForConfig(cfg, (*ExecutionRequests).validateForPersistence); err != nil {
 		return err
 	}
 	payload := s.Message.Payload
@@ -623,9 +630,6 @@ func (s *SignedExecutionPayloadEnvelope) ValidateForPersistence(cfg *clparams.Be
 	}
 	if err := payload.BlockAccessList.ValidateBounds(cfg.MaxBytesPerTransaction); err != nil {
 		return fmt.Errorf("block access list exceeds decoder resource limit: %w", err)
-	}
-	if err := s.Message.ExecutionRequests.validateForPersistence(cfg); err != nil {
-		return fmt.Errorf("execution requests exceed decoder resource limit: %w", err)
 	}
 	return nil
 }

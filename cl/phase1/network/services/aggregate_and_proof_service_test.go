@@ -508,7 +508,7 @@ func TestAggregateAndProofGloasAllowIndex1WhenSlotsDiffer(t *testing.T) {
 	}
 
 	// Set envelope as seen/validated (required for index=1)
-	fcu.Envelopes[blockRoot] = &cltypes.SignedExecutionPayloadEnvelope{}
+	fcu.SetEnvelope(blockRoot, &cltypes.SignedExecutionPayloadEnvelope{})
 	fcu.VerifiedPayloads = map[common.Hash]bool{blockRoot: true}
 
 	// Should pass (index=1 is allowed when slots differ and envelope exists)
@@ -588,9 +588,6 @@ func TestAggregateAndProofGloasIgnoreIndex1NoEnvelope(t *testing.T) {
 		Slot: blockSlot,
 	}
 
-	// Do NOT set envelope — simulate payload not yet seen
-	// fcu.Envelopes is empty
-
 	err := aggService.ProcessMessage(context.Background(), nil, agg)
 	require.Error(t, err)
 	require.ErrorIs(t, err, ErrIgnore)
@@ -621,12 +618,12 @@ func TestAggregateAndProofGloasIgnoreIndex1EnvelopeNotVerified(t *testing.T) {
 	fcu.Headers[blockRoot] = &cltypes.BeaconBlockHeader{
 		Slot: agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot - 1,
 	}
-	fcu.Envelopes[blockRoot] = &cltypes.SignedExecutionPayloadEnvelope{
+	fcu.SetEnvelope(blockRoot, &cltypes.SignedExecutionPayloadEnvelope{
 		Message: &cltypes.ExecutionPayloadEnvelope{
 			BeaconBlockRoot: blockRoot,
 			Payload:         &cltypes.Eth1Block{BlockHash: common.HexToHash("0x1234")},
 		},
-	}
+	})
 	fcu.VerifiedPayloads = map[common.Hash]bool{blockRoot: false}
 	fcu.ExecutionPayloadStatusMap[common.HexToHash("0x1234")] = execution_client.PayloadStatusInvalidated
 
@@ -661,12 +658,12 @@ func TestAggregateAndProofGloasRejectIndex1InvalidPayload(t *testing.T) {
 	fcu.Headers[blockRoot] = &cltypes.BeaconBlockHeader{
 		Slot: agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot - 1,
 	}
-	fcu.Envelopes[blockRoot] = &cltypes.SignedExecutionPayloadEnvelope{
+	fcu.SetEnvelope(blockRoot, &cltypes.SignedExecutionPayloadEnvelope{
 		Message: &cltypes.ExecutionPayloadEnvelope{
 			BeaconBlockRoot: blockRoot,
 			Payload:         &cltypes.Eth1Block{BlockHash: execHash},
 		},
-	}
+	})
 	fcu.VerifiedPayloads = map[common.Hash]bool{blockRoot: false}
 	fcu.PayloadStatusByRootMap[blockRoot] = execution_client.PayloadStatusInvalidated
 
