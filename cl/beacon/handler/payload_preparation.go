@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 )
 
 var (
@@ -40,6 +41,7 @@ var (
 	errNoPayloadID            = errors.New("execution layer returned no payload id")
 	errHeadTooFarBack         = errors.New("head state is too far behind the slot to prepare")
 	errPreparationHeadChanged = errors.New("head changed while preparing payload")
+	errPreparationTooLate     = errors.New("slot is too close to prime a payload production would use")
 )
 
 // preparedPayloadRetainSlots keeps a primed record alive past the slot it was primed for, so
@@ -131,15 +133,19 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 		if !shouldPreparePayloadVersion(stateVersion) {
 			continue
 		}
-		// On consecutive proposals the prime for the next slot lands inside this one, where it
-		// would compete for the execution layer with the block being produced right now.
+		// On consecutive proposals the prime for the next slot lands inside this one.
 		if a.proposalsInFlight.Load() > 0 {
+			continue
+		}
+		// Nothing is registered, so nothing here can be ours. Checking first keeps a non-validating
+		// node off the state copy entirely.
+		generation := a.validatorParams.Generation()
+		if generation == 0 {
 			continue
 		}
 		// Before genesis the current slot clamps to zero, so the next slot can be arbitrarily far
 		// off; a builder primed that early hits its own cap before the slot even starts. Too late
-		// and the prime can never reach the age production demands of it, so the state copy and the
-		// forkchoice update would both be spent for nothing.
+		// and the prime can never reach the age production demands of it.
 		slotStart := a.ethClock.GetSlotTime(targetSlot)
 		lead := time.Until(slotStart)
 		if lead > maxPreparationLead(a.beaconChainCfg) || lead < preparedPayloadMinimumAge(a.beaconChainCfg, stateVersion) {
@@ -156,9 +162,11 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 		if selectedRoot != a.syncedData.HeadRoot() {
 			continue
 		}
-		// Both verdicts hold until the slot or its parent head moves. Re-deriving the proposer costs
-		// a state copy, and an epoch transition on top when the slot is in the next epoch.
-		if primed.is(targetSlot, selectedRoot) || notOurs.is(targetSlot, selectedRoot) {
+		// Both verdicts survive only while the slot, its parent head and the registrations they
+		// were taken under all hold. Re-deriving the proposer costs a state copy, and an epoch
+		// transition on top when the slot is in the next epoch.
+		settled := slotHead{slot: targetSlot, head: selectedRoot, generation: generation}
+		if primed == settled || notOurs == settled {
 			continue
 		}
 		prepareCtx, cancel := context.WithDeadline(ctx, slotStart)
@@ -166,7 +174,7 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 		cancel()
 		if err != nil {
 			if errors.Is(err, errNotOurProposal) {
-				notOurs = slotHead{slot: targetSlot, head: selectedRoot}
+				notOurs = settled
 			}
 			if !isExpectedPreparationSkip(err) && time.Since(lastFailureLog) >= time.Minute {
 				log.Warn("PayloadPreparation: failed", "slot", targetSlot, "err", err)
@@ -174,19 +182,17 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 			}
 			continue
 		}
-		primed = slotHead{slot: targetSlot, head: head}
+		primed = slotHead{slot: targetSlot, head: head, generation: generation}
 	}
 }
 
-// slotHead records work already settled for a target slot on a given head, so a later tick can skip
-// repeating it. A zero value matches nothing reachable: slot zero is never primed.
+// slotHead records work already settled for a target slot, on a given head, under a given set of
+// validator registrations. A zero value matches nothing reachable: preparation never runs before
+// the first registration arrives.
 type slotHead struct {
-	slot uint64
-	head common.Hash
-}
-
-func (s slotHead) is(slot uint64, head common.Hash) bool {
-	return s.slot == slot && s.head == head
+	slot       uint64
+	head       common.Hash
+	generation uint64
 }
 
 // maxPreparationLead bounds how far ahead of a slot priming is worthwhile. One slot is all a live
@@ -201,8 +207,10 @@ func preparationRetired(version clparams.StateVersion) bool {
 	return version.AfterOrEqual(clparams.GloasVersion)
 }
 
+// shouldPreparePayloadVersion starts at Capella because payload attributes always carry withdrawals,
+// which the execution layer rejects before Shanghai: priming earlier could only ever fail.
 func shouldPreparePayloadVersion(version clparams.StateVersion) bool {
-	return version.AfterOrEqual(clparams.BellatrixVersion) && !preparationRetired(version)
+	return version.AfterOrEqual(clparams.CapellaVersion) && !preparationRetired(version)
 }
 
 // isExpectedPreparationSkip reports whether there was simply nothing to prepare, as opposed to a
@@ -212,8 +220,10 @@ func isExpectedPreparationSkip(err error) bool {
 		errors.Is(err, errNoPayloadID) ||
 		errors.Is(err, errHeadTooFarBack) ||
 		errors.Is(err, errPreparationHeadChanged) ||
+		errors.Is(err, errPreparationTooLate) ||
 		errors.Is(err, execution_client.ErrForkChoiceNotAdopted) ||
 		errors.Is(err, execution_client.ErrForkChoiceBusy) ||
+		errors.Is(err, chainreader.ErrExecutionBusy) ||
 		errors.Is(err, context.DeadlineExceeded) ||
 		errors.Is(err, context.Canceled) ||
 		errors.Is(err, synced_data.ErrNotSynced)
@@ -272,14 +282,16 @@ func (a *ApiHandler) preparePayloadFor(ctx context.Context, targetSlot uint64) (
 	}
 
 	stateVersion := a.beaconChainCfg.GetCurrentStateVersion(targetSlot / a.beaconChainCfg.SlotsPerEpoch)
+	// The lead was measured before the copy and the epoch transition, which are slow enough to have
+	// spent it. Stop rather than record a prime production would reject on age.
+	if time.Until(a.ethClock.GetSlotTime(targetSlot)) < preparedPayloadMinimumAge(a.beaconChainCfg, stateVersion) {
+		return common.Hash{}, errPreparationTooLate
+	}
 	head, safeHash, finalizedHash, attrs, err := a.preGloasForkChoiceInputs(baseState, baseBlockRoot, targetSlot, feeRecipient)
 	if err != nil {
 		return common.Hash{}, err
 	}
-	if selectedRoot, _, selected := a.syncedData.SelectedHead(); !selected || selectedRoot != baseBlockRoot {
-		return common.Hash{}, errPreparationHeadChanged
-	}
-	payloadID, err := a.engine.ForkChoiceUpdate(ctx, finalizedHash, safeHash, head, attrs, stateVersion)
+	payloadID, err := a.forkChoiceUpdateForPreparation(ctx, baseBlockRoot, finalizedHash, safeHash, head, attrs, stateVersion)
 	if err != nil {
 		return common.Hash{}, err
 	}
@@ -290,6 +302,33 @@ func (a *ApiHandler) preparePayloadFor(ctx context.Context, targetSlot uint64) (
 	a.preparedPayload.set(targetSlot, payloadID, time.Now())
 	log.Info("PayloadPreparation: primed execution layer", "slot", targetSlot, "proposer", proposerIndex, "head", baseBlockRoot)
 	return baseBlockRoot, nil
+}
+
+// forkChoiceUpdateForPreparation retries contention within the prime, whose context already ends at
+// the slot it is for. Everything upstream of it — the head view, the state copy, the epoch
+// transition — is far more expensive to repeat than the update itself. The head is re-checked before
+// every attempt so a retry can never assert one fork choice has already left behind.
+func (a *ApiHandler) forkChoiceUpdateForPreparation(
+	ctx context.Context,
+	baseBlockRoot common.Hash,
+	finalized, safe, head common.Hash,
+	attrs *engine_types.PayloadAttributes,
+	stateVersion clparams.StateVersion,
+) ([]byte, error) {
+	for {
+		if selectedRoot, _, selected := a.syncedData.SelectedHead(); !selected || selectedRoot != baseBlockRoot {
+			return nil, errPreparationHeadChanged
+		}
+		payloadID, err := a.engine.ForkChoiceUpdate(ctx, finalized, safe, head, attrs, stateVersion)
+		if !errors.Is(err, execution_client.ErrForkChoiceBusy) {
+			return payloadID, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(forkChoiceBusyRetryDelay):
+		}
+	}
 }
 
 // executionCheckpointHashes resolves the safe and finalized execution hashes, falling back to the

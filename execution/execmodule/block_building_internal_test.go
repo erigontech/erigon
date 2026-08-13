@@ -36,7 +36,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-func TestAssembleBlockSupersedesBuilderForSameTimestamp(t *testing.T) {
+func TestAssembleBlockKeepsBuildersApartByTimestamp(t *testing.T) {
 	type runningBuilder struct {
 		id        uint64
 		interrupt *atomic.Bool
@@ -84,32 +84,33 @@ func TestAssembleBlockSupersedesBuilderForSameTimestamp(t *testing.T) {
 	firstID, first := assemble(100, common.Hash{0x01})
 	adjacentID, adjacent := assemble(101, common.Hash{0x02})
 	require.NotEqual(t, firstID, adjacentID)
-	require.False(t, first.interrupt.Load(), "a builder for another target timestamp must stay alive")
 
 	firstDuplicate, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: 100, ParentHash: common.Hash{0x01}})
 	require.NoError(t, err)
 	require.Equal(t, firstID, firstDuplicate.PayloadID)
-	require.False(t, first.interrupt.Load(), "an exact earlier-timestamp builder must stay alive")
-	require.False(t, adjacent.interrupt.Load())
 
+	// Superseding hands the timestamp to a new builder and leaves the old ones running, so only the
+	// index moves. Timestamp 101 is a different proposal and is untouched throughout.
 	secondID, second := assemble(100, common.Hash{0x03})
 	require.NotEqual(t, firstID, secondID)
-	require.Eventually(t, first.interrupt.Load, time.Second, time.Millisecond)
-	require.False(t, adjacent.interrupt.Load(), "superseding timestamp 100 must not cancel timestamp 101")
-	require.False(t, second.interrupt.Load())
+	require.Equal(t, secondID, module.buildersByTimestamp[100])
+	require.Equal(t, adjacentID, module.buildersByTimestamp[101])
 
 	thirdID, third := assemble(100, common.Hash{0x04})
 	require.NotEqual(t, secondID, thirdID)
-	require.Eventually(t, second.interrupt.Load, time.Second, time.Millisecond)
-	require.False(t, adjacent.interrupt.Load())
-	require.False(t, third.interrupt.Load())
+	require.Equal(t, thirdID, module.buildersByTimestamp[100])
 
 	duplicate, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: 100, ParentHash: common.Hash{0x04}})
 	require.NoError(t, err)
 	require.Equal(t, thirdID, duplicate.PayloadID)
-	require.False(t, third.interrupt.Load(), "a duplicate request must keep its builder alive")
 
+	for _, running := range []runningBuilder{first, second, third, adjacent} {
+		require.False(t, running.interrupt.Load(), "builder %d must still be packing", running.id)
+	}
+
+	// Eviction is where a builder is actually stopped, and it takes the timestamp index with it.
 	delete(module.builders, firstID)
+	delete(module.builders, secondID)
 	for id := thirdID + 1; len(module.builders) < engine_helpers.MaxBuilders; id++ {
 		module.builders[id] = nil
 	}
@@ -117,10 +118,47 @@ func TestAssembleBlockSupersedesBuilderForSameTimestamp(t *testing.T) {
 	require.Eventually(t, adjacent.interrupt.Load, time.Second, time.Millisecond)
 	require.NotContains(t, module.builders, adjacentID)
 	require.NotContains(t, module.buildersByTimestamp, uint64(101))
-	require.NotContains(t, module.builders, adjacentID)
+	require.False(t, third.interrupt.Load(), "the current builder for a timestamp must survive eviction")
 }
 
-func TestSupersededPayloadIDStaysRetrievable(t *testing.T) {
+func TestSupersededBuilderKeepsPackingAndStaysRetrievable(t *testing.T) {
+	started := make(chan *atomic.Bool, 4)
+	module := &ExecModule{
+		logger:    log.Root(),
+		config:    &chain.Config{},
+		semaphore: semaphore.NewWeighted(1),
+		builders:  map[uint64]*builderEntry{},
+		builderFunc: func(_ *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
+			started <- interrupt
+			for !interrupt.Load() {
+				time.Sleep(time.Millisecond)
+			}
+			return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil)}, nil
+		},
+	}
+
+	first, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: 100, ParentHash: common.Hash{0x01}})
+	require.NoError(t, err)
+	firstInterrupt := <-started
+
+	second, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: 100, ParentHash: common.Hash{0x02}})
+	require.NoError(t, err)
+	require.NotEqual(t, first.PayloadID, second.PayloadID)
+	secondInterrupt := <-started
+
+	// The timestamp index moves to the new builder, so nothing reaches the old one by dedup. It is
+	// left running: freezing it would answer an id already handed out with a near-empty payload.
+	require.Equal(t, second.PayloadID, module.buildersByTimestamp[100])
+	require.False(t, firstInterrupt.Load())
+
+	assembled, err := module.GetAssembledBlock(t.Context(), first.PayloadID)
+	require.NoError(t, err)
+	require.NotNil(t, assembled.Block)
+
+	secondInterrupt.Store(true)
+}
+
+func TestCollectedPayloadIsHandedBackToARepeatedRequest(t *testing.T) {
 	started := make(chan struct{}, 4)
 	module := &ExecModule{
 		logger:    log.Root(),
@@ -136,22 +174,23 @@ func TestSupersededPayloadIDStaysRetrievable(t *testing.T) {
 		},
 	}
 
-	first, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: 100, ParentHash: common.Hash{0x01}})
+	params := func() *builder.Parameters {
+		return &builder.Parameters{Timestamp: 100, ParentHash: common.Hash{0x01}}
+	}
+	first, err := module.AssembleBlock(t.Context(), params())
 	require.NoError(t, err)
 	<-started
 
-	second, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: 100, ParentHash: common.Hash{0x02}})
-	require.NoError(t, err)
-	require.NotEqual(t, first.PayloadID, second.PayloadID)
-	<-started
-
-	// Superseding hands the timestamp to a fresh builder, but an id already returned to a caller
-	// stays answerable: dropping it would turn a getPayload into an unknown-payload error.
 	assembled, err := module.GetAssembledBlock(t.Context(), first.PayloadID)
 	require.NoError(t, err)
 	require.NotNil(t, assembled.Block)
 
-	_, _ = module.builders[second.PayloadID].builder.Stop(context.Background())
+	// Collecting stops the builder. A repeated request must still be handed that payload: rebuilding
+	// from scratch this late means the next grab takes a near-empty block.
+	repeat, err := module.AssembleBlock(t.Context(), params())
+	require.NoError(t, err)
+	require.Equal(t, first.PayloadID, repeat.PayloadID)
+	require.Empty(t, started, "a repeated request must not start a second builder")
 }
 
 func TestAssembleBlockDoesNotReuseFailedBuilder(t *testing.T) {
@@ -181,7 +220,7 @@ func TestAssembleBlockDoesNotReuseFailedBuilder(t *testing.T) {
 	first, err := module.AssembleBlock(t.Context(), params())
 	require.NoError(t, err)
 	<-started
-	require.Eventually(t, module.builders[first.PayloadID].builder.Stale, time.Second, time.Millisecond)
+	require.Eventually(t, module.builders[first.PayloadID].builder.Failed, time.Second, time.Millisecond)
 
 	// Identical parameters would normally dedup onto the same id. A builder that already died
 	// latches its error, so reusing it would spend the slot on a payload that can never arrive.

@@ -131,9 +131,10 @@ func (cc *ExecutionClientDirect) NewPayload(
 // there is nothing to build on.
 var ErrForkChoiceNotAdopted = errors.New("execution layer did not adopt forkchoice head")
 
-// ErrForkChoiceBusy reports contention rather than rejection: the update continues on the module's
-// own context. Retrying is the caller's decision because only the caller knows whether the head it
-// asked for is still the one it wants.
+// ErrForkChoiceBusy reports contention rather than rejection. The execution layer either declined
+// the update outright or is still running it in the background; the two are indistinguishable from
+// here, and in both cases only a later attempt settles it. Retrying is the caller's decision,
+// because only the caller knows whether the head it asked for is still the one it wants.
 var ErrForkChoiceBusy = errors.New("execution layer busy with a forkchoice update")
 
 // forkChoiceStatusError classifies a status reached with payload attributes attached. Only an
@@ -163,7 +164,7 @@ func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized
 	}
 	if attr == nil {
 		if status == execmodule.ExecutionStatusBusy {
-			log.Warn("[ForkChoiceUpdated] execution layer was busy, head not applied", "head", head)
+			log.Debug("[ForkChoiceUpdated] execution layer busy, head may not have been applied", "head", head)
 		}
 		return nil, nil
 	}
@@ -199,8 +200,6 @@ func retryAssembleBlock(ctx context.Context, attempts int, delay time.Duration, 
 		if id, err = assemble(ctx); err == nil {
 			return id, nil
 		}
-		// Only contention settles by waiting. A rejected request returns the same answer however
-		// many times it is asked, and retrying it burns the slot instead of reporting it.
 		if !errors.Is(err, chainreader.ErrExecutionBusy) {
 			return 0, err
 		}

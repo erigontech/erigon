@@ -874,7 +874,7 @@ func TestPreparePayloadLoopRunsImmediatelyWithSlotDeadline(t *testing.T) {
 	slotStart := time.Now().Add(6 * time.Second)
 	clock := eth_clock.NewMockEthereumClock(ctrl)
 	clock.EXPECT().GetCurrentSlot().Return(targetSlot - 1)
-	clock.EXPECT().GetSlotTime(targetSlot).Return(slotStart)
+	clock.EXPECT().GetSlotTime(targetSlot).Return(slotStart).AnyTimes()
 	handler.ethClock = clock
 
 	ctx, cancel := context.WithCancel(t.Context())
@@ -1079,6 +1079,10 @@ func TestPreparePayloadForSendsCompleteForkChoiceUpdate(t *testing.T) {
 		})
 	handler.engine = engine
 
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetSlotTime(gomock.Any()).Return(time.Now().Add(6 * time.Second)).AnyTimes()
+	handler.ethClock = clock
+
 	primedHead, err := handler.preparePayloadFor(t.Context(), targetSlot)
 	require.NoError(t, err)
 	require.Equal(t, baseBlockRoot, primedHead)
@@ -1106,6 +1110,10 @@ func TestPreparePayloadForRejectsChangedHeadBeforeForkChoiceUpdate(t *testing.T)
 	engine := execution_client.NewMockExecutionEngine(ctrl)
 	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
 	handler.engine = engine
+
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetSlotTime(gomock.Any()).Return(time.Now().Add(6 * time.Second)).AnyTimes()
+	handler.ethClock = clock
 
 	_, err = handler.preparePayloadFor(t.Context(), targetSlot)
 	require.ErrorIs(t, err, errPreparationHeadChanged)
@@ -1171,33 +1179,49 @@ func TestPreparePayloadForUsesPostEpochProposer(t *testing.T) {
 		})
 	handler.engine = engine
 
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetSlotTime(gomock.Any()).Return(time.Now().Add(6 * time.Second)).AnyTimes()
+	handler.ethClock = clock
+
 	_, err := handler.preparePayloadFor(t.Context(), targetSlot)
 	require.NoError(t, err)
 }
 
-func TestProduceBeaconBodyTakesRootAndStateFromOneView(t *testing.T) {
-	_, _, _, _, postState, _, _, syncedData, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
-	expectedRoot := common.Hash{0x41}
+func TestPreparePayloadForPairsRootAndStateFromOneView(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	targetSlot := postState.Slot() + 1
+	proposerIndex, err := postState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
+
+	// The root the view hands over is the only one preparation may use. Reading it separately would
+	// let a head update in between pair a parent beacon block root with a different state, priming a
+	// builder production can never match.
+	viewRoot := common.Hash{0x41}
 	syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
 	syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).
 		DoAndReturn(func(view synced_data.ViewHeadStateWithIdentityFn) error {
-			return view(postState, expectedRoot, postState.Slot())
+			return view(postState, viewRoot, postState.Slot())
 		})
+	syncedDataMock.EXPECT().SelectedHead().Return(viewRoot, postState.Slot(), true)
 
-	var (
-		gotRoot common.Hash
-		copied  *state.CachingBeaconState
-	)
-	require.NoError(t, syncedData.ViewHeadStateWithIdentity(
-		func(headState *state.CachingBeaconState, root common.Hash, _ uint64) error {
-			var err error
-			gotRoot = root
-			copied, err = headState.Copy()
-			return err
-		}))
-	require.Equal(t, expectedRoot, gotRoot)
-	require.NotSame(t, postState, copied)
-	require.Equal(t, postState.Slot(), copied.Slot())
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetSlotTime(gomock.Any()).Return(time.Now().Add(6 * time.Second)).AnyTimes()
+	handler.ethClock = clock
+
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, _, _, _ common.Hash, attrs *engine_types.PayloadAttributes, _ clparams.StateVersion) ([]byte, error) {
+			require.NotNil(t, attrs.ParentBeaconBlockRoot)
+			require.Equal(t, viewRoot, *attrs.ParentBeaconBlockRoot)
+			return []byte{1, 2, 3, 4, 5, 6, 7, 8}, nil
+		})
+	handler.engine = engine
+
+	primedHead, err := handler.preparePayloadFor(t.Context(), targetSlot)
+	require.NoError(t, err)
+	require.Equal(t, viewRoot, primedHead)
 }
 
 func TestGetEthV3ValidatorBlockMapsNotSyncedToServiceUnavailable(t *testing.T) {
@@ -1223,7 +1247,7 @@ func TestShouldPreparePayloadVersion(t *testing.T) {
 	}{
 		{clparams.Phase0Version, false},
 		{clparams.AltairVersion, false},
-		{clparams.BellatrixVersion, true},
+		{clparams.BellatrixVersion, false},
 		{clparams.CapellaVersion, true},
 		{clparams.DenebVersion, true},
 		{clparams.FuluVersion, true},
@@ -1239,9 +1263,6 @@ func TestPayloadAttributesCarryEveryFieldTheExecutionLayerGates(t *testing.T) {
 
 	attrs := payloadAttributes(1, common.Hash{0xbb}, common.Address{0xcc}, withdrawals, &root)
 
-	// The execution layer decides from the payload timestamp what these mean, and rejects a request
-	// that disagrees with it. Withholding them on a consensus-fork rule puts the two on separate
-	// oracles, so both are sent whatever the fork.
 	require.Equal(t, withdrawals, attrs.Withdrawals)
 	require.Equal(t, &root, attrs.ParentBeaconBlockRoot)
 	require.Nil(t, attrs.SlotNumber, "only a Gloas proposal knows its slot number")
@@ -1282,18 +1303,22 @@ func TestPreparedPayloadCopiesTheID(t *testing.T) {
 func TestSlotHeadMatchesOnlyTheExactPairing(t *testing.T) {
 	headA := common.Hash{0xaa}
 	headB := common.Hash{0xbb}
-	settled := slotHead{slot: 10, head: headA}
+	settled := slotHead{slot: 10, head: headA, generation: 3}
 
 	// Nothing recorded yet matches nothing.
-	require.False(t, slotHead{}.is(10, headA))
+	require.NotEqual(t, settled, slotHead{})
 
-	// Already settled for this slot on this head: nothing to do.
-	require.True(t, settled.is(10, headA))
+	// Already settled for this slot, on this head, under these registrations: nothing to do.
+	require.Equal(t, settled, slotHead{slot: 10, head: headA, generation: 3})
 
 	// The previous slot's block arrived late and moved the head, so the warm builder is on a parent
 	// that is no longer the head — prime again rather than wait for the next slot.
-	require.False(t, settled.is(10, headB))
+	require.NotEqual(t, settled, slotHead{slot: 10, head: headB, generation: 3})
 
 	// A new target slot always needs priming.
-	require.False(t, settled.is(11, headA))
+	require.NotEqual(t, settled, slotHead{slot: 11, head: headA, generation: 3})
+
+	// A registration arriving late can make a slot ours after it was ruled out, or change the fee
+	// recipient a prime already went out with.
+	require.NotEqual(t, settled, slotHead{slot: 10, head: headA, generation: 4})
 }

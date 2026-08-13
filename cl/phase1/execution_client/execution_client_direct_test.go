@@ -62,7 +62,6 @@ func TestRetryAssembleBlockStopsOnPermanentError(t *testing.T) {
 		return 0, rejected
 	})
 
-	// A rejection answers the same way however often it is asked, so retrying it only burns the slot.
 	require.ErrorIs(t, err, rejected)
 	require.Equal(t, 1, calls)
 }

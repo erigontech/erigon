@@ -27,7 +27,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-func TestBlockBuilderRunningIsNotStale(t *testing.T) {
+func TestBlockBuilderRunningHasNotFailed(t *testing.T) {
 	t.Parallel()
 
 	release := make(chan struct{})
@@ -37,31 +37,35 @@ func TestBlockBuilderRunningIsNotStale(t *testing.T) {
 		return nil, errors.New("builder stopped")
 	}, &Parameters{}, time.Minute)
 
-	require.Never(t, b.Stale, 50*time.Millisecond, 5*time.Millisecond)
+	require.Never(t, b.Failed, 50*time.Millisecond, 5*time.Millisecond)
 }
 
-func TestBlockBuilderIsStaleOnceCancelled(t *testing.T) {
+func TestBlockBuilderStoppedForItsPayloadHasNotFailed(t *testing.T) {
 	t.Parallel()
 
 	b := NewBlockBuilder(func(_ *Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
 		for !interrupt.Load() {
 			time.Sleep(time.Millisecond)
 		}
-		return nil, errors.New("builder stopped")
+		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil)}, nil
 	}, &Parameters{}, time.Minute)
 
-	b.Cancel()
-	require.True(t, b.Stale())
+	_, err := b.Stop(t.Context())
+	require.NoError(t, err)
+
+	// Collecting the payload is what a proposal does. Reading that as failure would make a repeated
+	// request rebuild from scratch instead of being handed the block that was just built.
+	require.False(t, b.Failed())
 }
 
-func TestBlockBuilderIsStaleOnceItFails(t *testing.T) {
+func TestBlockBuilderHasFailedOnceItErrors(t *testing.T) {
 	t.Parallel()
 
 	b := NewBlockBuilder(func(_ *Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
 		return nil, errors.New("build failed")
 	}, &Parameters{}, time.Minute)
 
-	require.Eventually(t, b.Stale, time.Second, time.Millisecond)
+	require.Eventually(t, b.Failed, time.Second, time.Millisecond)
 }
 
 func TestBlockBuilderStaysReusableOnceItFillsTheBlock(t *testing.T) {
@@ -75,5 +79,5 @@ func TestBlockBuilderStaysReusableOnceItFillsTheBlock(t *testing.T) {
 
 	<-built
 	// A builder that ran out of room holds a complete payload, so its id is still worth reusing.
-	require.Never(t, b.Stale, 50*time.Millisecond, 5*time.Millisecond)
+	require.Never(t, b.Failed, 50*time.Millisecond, 5*time.Millisecond)
 }

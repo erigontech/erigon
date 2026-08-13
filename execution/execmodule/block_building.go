@@ -135,26 +135,20 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 		return AssembleBlockResult{}, err
 	}
 
+	// A stopped builder is still worth reusing: it holds the payload it was stopped for, which is
+	// exactly what a repeated request is asking for. Only a failed one has to be passed over.
 	if previousID, ok := e.buildersByTimestamp[params.Timestamp]; ok {
-		// A stale builder can never grow its payload, so reusing its id would spend the slot
-		// waiting on a block that will not arrive. Take a fresh builder instead and leave the
-		// old id answerable for whoever already holds it.
-		if previous := e.builders[previousID]; previous != nil && previous.builder != nil && !previous.builder.Stale() {
+		if previous := e.builders[previousID]; previous != nil && previous.builder != nil && !previous.builder.Failed() {
 			params.PayloadId = previousID
 			if reflect.DeepEqual(previous.params, params) {
 				e.logger.Info("[ForkChoiceUpdated] duplicate build request")
 				return AssembleBlockResult{PayloadID: previousID}, nil
 			}
-			// Superseding must not outlive the caller that asked for it: cancelling on behalf of
-			// an expired request would freeze a builder the next request is already waiting on.
-			if err := ctx.Err(); err != nil {
-				return AssembleBlockResult{}, err
-			}
-			previous.builder.Cancel()
 		}
 	}
-
-	// Initiate payload building
+	// A superseded builder keeps running to its own deadline. The timestamp index moves to the new
+	// one, so nothing reaches it by dedup, while an id already handed out goes on answering with a
+	// payload that is still growing.
 	e.evictOldBuilders()
 
 	e.nextPayloadId++
@@ -206,8 +200,8 @@ func (e *ExecModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (A
 	}
 	blockWithReceipts, err := entry.builder.Stop(ctx)
 	if err != nil {
-		// A failed builder latches its error, so keeping the entry would hand the same failure to
-		// every retry. A caller whose own context expired says nothing about the builder.
+		// Keeping a failed entry would hand the same latched error to every retry. A caller whose
+		// own context expired says nothing about the builder.
 		if ctx.Err() == nil {
 			e.dropBuilder(payloadID, entry)
 		}

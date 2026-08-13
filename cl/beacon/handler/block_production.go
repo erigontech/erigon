@@ -250,9 +250,11 @@ func preparedPayloadMinimumAge(cfg *clparams.BeaconChainConfig, stateVersion clp
 
 const forkChoiceBusyRetryDelay = 100 * time.Millisecond
 
-// forkChoiceUpdateForProposal keeps asking while the execution layer reports contention, but only
-// until the payload would have to be collected: an id obtained after that is no use to this slot.
-// The head is not re-read because a proposal is committed to the parent it is being built on.
+// forkChoiceUpdateForProposal bounds acquiring a payload id by the moment the payload has to be
+// collected, so neither the retries here nor the assemble retry below them can eat the margin the
+// block needs to reach attesters. One attempt always runs past that bound, because failing a
+// proposal outright is worse than answering late. The head is not re-read between attempts: a
+// proposal is committed to the parent it is being built on.
 func (a *ApiHandler) forkChoiceUpdateForProposal(
 	ctx context.Context,
 	targetSlot uint64,
@@ -260,11 +262,19 @@ func (a *ApiHandler) forkChoiceUpdateForProposal(
 	attrs *engine_types.PayloadAttributes,
 	stateVersion clparams.StateVersion,
 ) ([]byte, error) {
-	retryUntil := a.ethClock.GetSlotTime(targetSlot).Add(unpreparedGrabOffset(attestationDue(a.beaconChainCfg, stateVersion)))
-	for {
-		idBytes, err := a.engine.ForkChoiceUpdate(ctx, finalized, safe, head, attrs, stateVersion)
-		if !errors.Is(err, execution_client.ErrForkChoiceBusy) || !time.Now().Before(retryUntil) {
-			return idBytes, err
+	collectAt := a.ethClock.GetSlotTime(targetSlot).Add(unpreparedGrabOffset(attestationDue(a.beaconChainCfg, stateVersion)))
+	boundedCtx, cancel := context.WithDeadline(ctx, collectAt)
+	defer cancel()
+
+	for time.Now().Before(collectAt) {
+		idBytes, err := a.engine.ForkChoiceUpdate(boundedCtx, finalized, safe, head, attrs, stateVersion)
+		switch {
+		case err == nil:
+			return idBytes, nil
+		case ctx.Err() != nil:
+			return nil, ctx.Err()
+		case !errors.Is(err, execution_client.ErrForkChoiceBusy) && !errors.Is(err, context.DeadlineExceeded):
+			return nil, err
 		}
 		select {
 		case <-ctx.Done():
@@ -272,6 +282,7 @@ func (a *ApiHandler) forkChoiceUpdateForProposal(
 		case <-time.After(forkChoiceBusyRetryDelay):
 		}
 	}
+	return a.engine.ForkChoiceUpdate(ctx, finalized, safe, head, attrs, stateVersion)
 }
 
 // payloadAttributes builds the attributes preparation and production must agree on. Withdrawals and
@@ -292,6 +303,27 @@ func payloadAttributes(
 		Withdrawals:           withdrawals,
 		ParentBeaconBlockRoot: parentRoot,
 	}
+}
+
+// gloasWithdrawals reads the withdrawals for a Gloas proposal from the state copy carrying the
+// parent payload when the head is FULL, and from the cached expectation when it is EMPTY.
+func gloasWithdrawals(baseState, withParentPayload *state.CachingBeaconState, epoch uint64) ([]*types.Withdrawal, error) {
+	if withParentPayload != nil {
+		clWithdrawals, err := state.GetExpectedWithdrawals(withParentPayload, epoch)
+		if err != nil {
+			return nil, err
+		}
+		return cltypes.ConvertConsensusWithdrawalsToExecutionWithdrawals(clWithdrawals.Withdrawals), nil
+	}
+	cached := baseState.GetPayloadExpectedWithdrawals()
+	if cached == nil {
+		return nil, nil
+	}
+	consensusWithdrawals := make([]*cltypes.Withdrawal, cached.Len())
+	for i := range consensusWithdrawals {
+		consensusWithdrawals[i] = cached.Get(i)
+	}
+	return cltypes.ConvertConsensusWithdrawalsToExecutionWithdrawals(consensusWithdrawals), nil
 }
 
 func shouldRetryGetPayload(now, deadline time.Time) bool {
@@ -319,14 +351,16 @@ func pollAssembledPayload(
 	defer deadlineTimer.Stop()
 	retryTicker := time.NewTicker(retryTime)
 	defer retryTicker.Stop()
-	// A slot that fails fails on every poll of the window, so report the first and then a count
-	// rather than hundreds of copies of one line.
+	// A slot that fails tends to fail on every poll of the window, so report the first and then a
+	// count rather than hundreds of copies of one line. Contention that clears is not worth an
+	// alert, so the summary is only for a window that never produced anything.
 	var (
-		failures int
-		lastErr  error
+		failures  int
+		lastErr   error
+		collected bool
 	)
 	defer func() {
-		if failures > 1 {
+		if failures > 1 && !collected {
 			log.Error("BlockProduction: payload polling kept failing", "attempts", failures, "err", lastErr)
 		}
 	}()
@@ -340,6 +374,7 @@ func pollAssembledPayload(
 				log.Error("BlockProduction: Failed to get payload", "err", err)
 			}
 		} else if payload != nil {
+			collected = true
 			return payload, bundles, requestsBundle, blockValue, true
 		}
 		select {
@@ -1056,8 +1091,12 @@ func (a *ApiHandler) produceBeaconBody(
 			log.Warn("BlockProduction: no fee recipient registered for proposer, using zero address",
 				"proposer", proposerIndex)
 		}
-		fcuHead, fcuSafeHash, fcuFinalizedHash := head, safeHash, finalizedHash
-		var attrs *engine_types.PayloadAttributes
+		// One branch per fork: the pre-Gloas inputs are the same ones preparation builds, and the
+		// prepared-id match depends on production not deriving its own variant of them.
+		var (
+			fcuHead, fcuSafeHash, fcuFinalizedHash common.Hash
+			attrs                                  *engine_types.PayloadAttributes
+		)
 		if stateVersion.Before(clparams.GloasVersion) {
 			var err error
 			fcuHead, fcuSafeHash, fcuFinalizedHash, attrs, err = a.preGloasForkChoiceInputs(baseState, baseBlockRoot, targetSlot, feeRecipient)
@@ -1065,33 +1104,13 @@ func (a *ApiHandler) produceBeaconBody(
 				log.Error("BlockProduction: build forkchoice inputs failed", "err", err)
 				return
 			}
-		}
-		var withdrawals []*types.Withdrawal
-		switch {
-		case gloasWithdrawalsState != nil:
-			// GLOAS FULL: compute withdrawals from the state copy with parent payload applied
-			clWithdrawals, err := state.GetExpectedWithdrawals(
-				gloasWithdrawalsState,
-				targetSlot/a.beaconChainCfg.SlotsPerEpoch,
-			)
+		} else {
+			fcuHead, fcuSafeHash, fcuFinalizedHash = head, safeHash, finalizedHash
+			withdrawals, err := gloasWithdrawals(baseState, gloasWithdrawalsState, targetSlot/a.beaconChainCfg.SlotsPerEpoch)
 			if err != nil {
-				log.Error("BlockProduction: GetExpectedWithdrawals (FULL) failed", "err", err)
+				log.Error("BlockProduction: GetExpectedWithdrawals failed", "err", err)
 				return
 			}
-			withdrawals = cltypes.ConvertConsensusWithdrawalsToExecutionWithdrawals(clWithdrawals.Withdrawals)
-		case stateVersion >= clparams.GloasVersion && gloasWithdrawalsState == nil:
-			// GLOAS EMPTY: use cached payload_expected_withdrawals from state
-			cachedWithdrawals := baseState.GetPayloadExpectedWithdrawals()
-			if cachedWithdrawals != nil {
-				consensusWithdrawals := make([]*cltypes.Withdrawal, cachedWithdrawals.Len())
-				for i := range consensusWithdrawals {
-					consensusWithdrawals[i] = cachedWithdrawals.Get(i)
-				}
-				withdrawals = cltypes.ConvertConsensusWithdrawalsToExecutionWithdrawals(consensusWithdrawals)
-			}
-		}
-
-		if stateVersion.AfterOrEqual(clparams.GloasVersion) {
 			attrs = payloadAttributes(
 				hexutil.Uint64(state.ComputeTimestampAtSlot(baseState, targetSlot)),
 				random,

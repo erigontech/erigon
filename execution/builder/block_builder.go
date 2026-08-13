@@ -106,13 +106,10 @@ func (b *BlockBuilder) Cancel() {
 	b.interrupt.Store(true)
 }
 
-// Stale reports whether the builder can no longer improve on what it holds, because it was
-// cancelled or finished with an error. A builder that filled its block is not stale: it simply
-// has nothing left to add.
-func (b *BlockBuilder) Stale() bool {
-	if b.interrupt.Load() {
-		return true
-	}
+// Failed reports whether the builder finished without producing anything. The error is latched, so
+// a caller that would otherwise reuse this builder has to treat it as absent. Being cancelled is
+// not failure: a stopped builder still holds the payload it was stopped for.
+func (b *BlockBuilder) Failed() bool {
 	select {
 	case <-b.done:
 	default:
