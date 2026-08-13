@@ -255,3 +255,33 @@ func TestForwardBeaconDownloaderRejectsOversizedEnvelopeResponse(t *testing.T) {
 	require.Zero(t, fetched)
 	require.Empty(t, received)
 }
+
+func TestEnvelopeHTTPFallbackRejectsMismatchedBlockRoot(t *testing.T) {
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{
+		Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig),
+	}
+	envelope.Message.BeaconBlockRoot = hash(0xff)
+	encoded, err := envelope.EncodeSSZ(nil)
+	require.NoError(t, err)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(encoded)
+	}))
+	defer server.Close()
+
+	block := makeGloasBlock(1, hash(1), hash(2))
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	downloader := &BackwardBeaconDownloader{
+		httpFallbackURL: server.URL,
+		beaconCfg:       &clparams.MainnetBeaconConfig,
+	}
+	_, err = downloader.fetchSingleEnvelope(context.Background(), block)
+	require.ErrorContains(t, err, "block root")
+
+	received := map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{}
+	fetched := fetchEnvelopesFromBeaconAPI(
+		context.Background(), server.URL, []*cltypes.SignedBeaconBlock{block}, [][32]byte{root}, received, &clparams.MainnetBeaconConfig,
+	)
+	require.Zero(t, fetched)
+	require.Empty(t, received)
+}

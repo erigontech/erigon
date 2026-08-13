@@ -289,6 +289,14 @@ func (f *forkGraphDisk) readEnvelopeFromDiskLocked(blockRoot common.Hash) (envel
 		corrupt = isCorruptEnvelopeReadError(err, readTracker.err)
 		return nil, fmt.Errorf("failed to read snappy buffer: %w, root: %x", err, blockRoot)
 	}
+	var trailing [1]byte
+	if _, readErr := io.ReadFull(f.envelopeSnappyReader, trailing[:]); readErr == nil {
+		corrupt = true
+		return nil, fmt.Errorf("corrupt envelope file: trailing data after declared payload, root: %x", blockRoot)
+	} else if !errors.Is(readErr, io.EOF) {
+		corrupt = isCorruptEnvelopeReadError(readErr, readTracker.err)
+		return nil, fmt.Errorf("failed to verify envelope end: %w, root: %x", readErr, blockRoot)
+	}
 	envelope = &cltypes.SignedExecutionPayloadEnvelope{
 		Message: cltypes.NewExecutionPayloadEnvelope(f.beaconCfg),
 	}

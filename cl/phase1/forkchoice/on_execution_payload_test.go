@@ -78,6 +78,36 @@ func TestOnExecutionPayloadRejectsNilWithdrawalBeforeForkchoice(t *testing.T) {
 	})
 }
 
+func TestExecutionPayloadIngressRejectsUnpersistableEnvelopeBeforeForkchoice(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.MaxTransactionsPerPayload = 1
+	envelope := cltypes.NewExecutionPayloadEnvelope(&cfg)
+	envelope.Payload.Extra = solid.NewExtraData()
+	envelope.Payload.Transactions = solid.NewTransactionsSSZFromTransactions([][]byte{{1}, {2}})
+	envelope.Payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), 44)
+	envelope.Payload.BlockAccessList = solid.NewByteListSSZ(cfg.MaxBytesPerTransaction)
+	signedEnvelope := &cltypes.SignedExecutionPayloadEnvelope{Message: envelope}
+
+	for _, test := range []struct {
+		name string
+		call func(*ForkChoiceStore) error
+	}{
+		{name: "remote", call: func(f *ForkChoiceStore) error {
+			return f.OnExecutionPayload(context.Background(), signedEnvelope, false, true)
+		}},
+		{name: "local", call: func(f *ForkChoiceStore) error {
+			return f.ApplyLocalSelfBuildEnvelope(context.Background(), signedEnvelope)
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f := &ForkChoiceStore{beaconCfg: &cfg}
+			require.NotPanics(t, func() {
+				require.ErrorContains(t, test.call(f), "too many transactions")
+			})
+		})
+	}
+}
+
 // TestValidateEnvelopeAgainstBlock_SlotNumberMismatch tests that validation fails when
 // block.slot != envelope.payload.slot_number (EIP-7843 / GLOAS p2p-interface REJECT rule).
 func TestValidateEnvelopeAgainstBlock_SlotNumberMismatch(t *testing.T) {

@@ -457,6 +457,37 @@ func TestReadEnvelopeRejectsNonCanonicalSSZ(t *testing.T) {
 	require.False(t, f.HasEnvelope(root))
 }
 
+func TestReadEnvelopeRejectsTrailingFileData(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
+	root := common.HexToHash("0x1234")
+	addEnvelopeTestBlock(f, root, 1)
+	envelope := testEnvelopeWithTransaction(root, []byte{1})
+	encoded, err := envelope.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	var compressed bytes.Buffer
+	writer := snappy.NewBufferedWriter(&compressed)
+	_, err = writer.Write([]byte{byte(clparams.GloasVersion)})
+	require.NoError(t, err)
+	length := make([]byte, 8)
+	binary.BigEndian.PutUint64(length, uint64(len(encoded)))
+	_, err = writer.Write(length)
+	require.NoError(t, err)
+	_, err = writer.Write(encoded)
+	require.NoError(t, err)
+	_, err = writer.Write([]byte{1})
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+	require.NoError(t, afero.WriteFile(fs, getEnvelopeFilename(root), compressed.Bytes(), 0o644))
+
+	_, err = f.ReadEnvelopeFromDisk(root)
+	require.ErrorContains(t, err, "trailing data")
+	require.False(t, f.HasEnvelope(root))
+	_, invalid := f.invalidEnvelopes.Load(root)
+	require.True(t, invalid)
+}
+
 func TestReadEnvelopeValidatesDecodedEnvelopeAgainstConfig(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	cfg := clparams.MainnetBeaconConfig
