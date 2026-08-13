@@ -106,6 +106,11 @@ func (p *blobBackfillRequestPacing) failed(now time.Time) {
 	p.backoff = min(p.backoff*2, requestBlobMaxBackoff)
 }
 
+func (p *blobBackfillRequestPacing) empty(now time.Time) {
+	p.backoff = requestBlobRetryInterval
+	p.nextRequest = now.Add(requestBlobRetryInterval)
+}
+
 type blobBackfillRequestSchedule struct {
 	ticks           <-chan time.Time
 	expires         <-chan time.Time
@@ -168,6 +173,11 @@ func requestBlobsForBackfillWithSchedule(ctx context.Context, r blobRequester, r
 			}
 		}()
 	}
+	waitForValidation := func() {
+		if validating {
+			<-validationResults
+		}
+	}
 	handleRequest := func(result blobRequestResult) {
 		inFlight--
 		if result.err != nil {
@@ -183,7 +193,11 @@ func requestBlobsForBackfillWithSchedule(ctx context.Context, r blobRequester, r
 			if result.err != nil && result.progress {
 				retryCandidate = result.candidate
 			}
-			pacing.failed(schedule.now())
+			if len(result.candidate.Responses) == 0 {
+				pacing.empty(schedule.now())
+			} else {
+				pacing.failed(schedule.now())
+			}
 			log.Trace("requestBlobsForBackfill: candidate rejected", "err", result.err, "peer", result.candidate.Peer)
 			return nil
 		}
@@ -223,6 +237,8 @@ func requestBlobsForBackfillWithSchedule(ctx context.Context, r blobRequester, r
 				return response, nil
 			}
 		case <-ctx.Done():
+			cancel()
+			waitForValidation()
 			return nil, ctx.Err()
 		case <-schedule.expires:
 			select {
@@ -232,6 +248,8 @@ func requestBlobsForBackfillWithSchedule(ctx context.Context, r blobRequester, r
 				}
 			default:
 			}
+			cancel()
+			waitForValidation()
 			log.Trace("requestBlobsForBackfill: timeout")
 			return nil, ErrTimeout
 		}

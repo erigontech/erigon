@@ -204,7 +204,7 @@ func (bs *BlobStore) WriteStream(w io.Writer, slot uint64, blockRoot common.Hash
 }
 
 func (bs *BlobStore) KzgCommitmentsCount(ctx context.Context, blockRoot common.Hash) (uint32, error) {
-	tx, err := bs.db.BeginRo(context.Background())
+	tx, err := bs.db.BeginRo(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -235,7 +235,7 @@ func (bs *BlobStore) RemoveBlobSidecars(ctx context.Context, slot uint64, blockR
 	kzgCommitmentsLength := binary.LittleEndian.Uint32(val)
 	for i := range kzgCommitmentsLength {
 		_, filePath := blobSidecarFilePath(slot, uint64(i), blockRoot)
-		if err := bs.fs.Remove(filePath); err != nil {
+		if err := bs.fs.Remove(filePath); err != nil && !errors.Is(err, afero.ErrFileNotFound) {
 			return err
 		}
 	}
@@ -251,7 +251,7 @@ type sidecarsPayload struct {
 type verifyHeaderSignatureFn func(header *cltypes.SignedBeaconBlockHeader) error
 
 // VerifyBlobSidecars validates sidecar proofs and optionally their signed headers.
-func VerifyBlobSidecars(sidecars []*cltypes.BlobSidecar, verifySignatureFn func(*cltypes.SignedBeaconBlockHeader) error) error {
+func VerifyBlobSidecars(sidecars []*cltypes.BlobSidecar, version clparams.StateVersion, verifySignatureFn func(*cltypes.SignedBeaconBlockHeader) error) error {
 	if len(sidecars) == 0 {
 		return nil
 	}
@@ -262,7 +262,7 @@ func VerifyBlobSidecars(sidecars []*cltypes.BlobSidecar, verifySignatureFn func(
 		if sidecar == nil || sidecar.SignedBlockHeader == nil || sidecar.SignedBlockHeader.Header == nil {
 			return errors.New("blob response contains incomplete sidecar")
 		}
-		if !cltypes.VerifyCommitmentInclusionProof(sidecar.KzgCommitment, sidecar.CommitmentInclusionProof, sidecar.Index, clparams.DenebVersion, sidecar.SignedBlockHeader.Header.BodyRoot) {
+		if version < clparams.GloasVersion && !cltypes.VerifyCommitmentInclusionProof(sidecar.KzgCommitment, sidecar.CommitmentInclusionProof, sidecar.Index, clparams.DenebVersion, sidecar.SignedBlockHeader.Header.BodyRoot) {
 			return errors.New("could not verify blob's inclusion proof")
 		}
 		if verifySignatureFn != nil {
