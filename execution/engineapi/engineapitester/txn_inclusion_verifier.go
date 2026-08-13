@@ -136,6 +136,16 @@ func (v TxnInclusionVerifier) VerifyTxnsOrderedInclusion(
 		accErr = fmt.Errorf("%w: (%d,%s)", accErr, i, inclusionHash)
 	}
 
+	for _, inclusion := range inclusions {
+		if inclusion.TxnIndex >= uint64(len(payload.Transactions)) {
+			if accErr == nil {
+				accErr = errors.New("txns missing")
+			}
+
+			accErr = fmt.Errorf("%w: (%d,%s)", accErr, inclusion.TxnIndex, inclusion.TxnHash)
+		}
+	}
+
 	return accErr
 }
 
