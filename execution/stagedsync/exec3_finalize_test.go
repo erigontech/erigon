@@ -1791,14 +1791,16 @@ func TestFeeEntryNilIsAbsent(t *testing.T) {
 	require.True(t, absent.recordedIn(ws, state.Version{TxIndex: 3}))
 }
 
-// TestFeeEntryDeletedMatchesAnyWriterAtThisVersion pins what the deleted arm
-// accepts. It keys on version and value only, so a worker's own SELFDESTRUCT at
-// this version reads as the credit — harmless, because the entry writes that
-// same delete.
-func TestFeeEntryDeletedMatchesAnyWriterAtThisVersion(t *testing.T) {
+// TestFeeEntryDeletedFencedByTxNum pins what fences the deleted arm. It carries
+// no Reason, so the whole-struct version compare is the only fence: writeTo
+// stamps the task version, whose TxNum is non-zero, while a worker's own
+// SELFDESTRUCT comes from IntraBlockState.Version, which leaves TxNum zero.
+func TestFeeEntryDeletedFencedByTxNum(t *testing.T) {
 	t.Parallel()
 	addr := fAddr("emptied")
-	version := state.Version{TxIndex: 3, Incarnation: 1}
+	taskVersion := state.Version{BlockNum: 9, TxNum: 42, TxIndex: 3, Incarnation: 1}
+	// What IntraBlockState.Version() produces for the same tx: no TxNum.
+	workerVersion := state.Version{BlockNum: 9, TxIndex: 3, Incarnation: 1}
 	e := &feeEntry{addr: addr, deleted: true}
 
 	selfDestruct := func(v state.Version, val bool) *state.WriteSet {
@@ -1810,12 +1812,110 @@ func TestFeeEntryDeletedMatchesAnyWriterAtThisVersion(t *testing.T) {
 		return ws
 	}
 
-	require.False(t, e.recordedIn(selfDestruct(state.Version{TxIndex: 3}, true), version),
+	require.True(t, e.recordedIn(selfDestruct(taskVersion, true), taskVersion),
+		"the credit's own delete is recorded")
+	require.False(t, e.recordedIn(selfDestruct(workerVersion, true), taskVersion),
+		"a worker's SELFDESTRUCT leaves TxNum zero, so it cannot pass as this credit")
+	require.False(t, e.recordedIn(selfDestruct(state.Version{BlockNum: 9, TxNum: 42, TxIndex: 3, Incarnation: 2}, true), taskVersion),
 		"a delete stamped at another incarnation is not this credit")
-	require.False(t, e.recordedIn(selfDestruct(version, false), version),
+	require.False(t, e.recordedIn(selfDestruct(taskVersion, false), taskVersion),
 		"a SelfDestruct write that is not a delete carries no empty-removal")
-	require.True(t, e.recordedIn(selfDestruct(version, true), version),
-		"any delete at this version counts, whichever writer produced it")
+}
+
+// TestFeeEntryRecordedInRejectsMutations pins the rejecting direction: flipping
+// any component writeTo emits must refuse the skip. Accepting too much is the
+// failure that skips a credit which was never written.
+func TestFeeEntryRecordedInRejectsMutations(t *testing.T) {
+	t.Parallel()
+	version := state.Version{BlockNum: 9, TxNum: 42, TxIndex: 3, Incarnation: 1}
+	addr := fAddr("credited")
+	entry := &feeEntry{
+		addr:   addr,
+		acc:    accounts.Account{Balance: *uint256.NewInt(7), Nonce: 2, Incarnation: 1, CodeHash: accounts.EmptyCodeHash},
+		reason: tracing.BalanceIncreaseRewardTransactionFee,
+	}
+
+	for _, tc := range []struct {
+		name   string
+		mutate func(ws *state.WriteSet)
+	}{
+		{"balance value", func(ws *state.WriteSet) {
+			w, _ := ws.GetBalance(addr)
+			w.Val = *uint256.NewInt(8)
+		}},
+		{"balance reason", func(ws *state.WriteSet) {
+			w, _ := ws.GetBalance(addr)
+			w.Reason = tracing.BalanceDecreaseGasBuy
+		}},
+		{"balance txnum", func(ws *state.WriteSet) {
+			w, _ := ws.GetBalance(addr)
+			w.Version.TxNum = version.TxNum + 1
+		}},
+		{"balance incarnation", func(ws *state.WriteSet) {
+			w, _ := ws.GetBalance(addr)
+			w.Version.Incarnation = version.Incarnation + 1
+		}},
+		{"account nonce", func(ws *state.WriteSet) {
+			w, _ := ws.GetAddress(addr)
+			acc := *w.Val
+			acc.Nonce++
+			w.Val = &acc
+		}},
+		{"account balance", func(ws *state.WriteSet) {
+			w, _ := ws.GetAddress(addr)
+			acc := *w.Val
+			acc.Balance = *uint256.NewInt(8)
+			w.Val = &acc
+		}},
+		{"account code hash", func(ws *state.WriteSet) {
+			w, _ := ws.GetAddress(addr)
+			acc := *w.Val
+			acc.CodeHash = accounts.InternCodeHash(common.Hash{0xAB})
+			w.Val = &acc
+		}},
+		{"account incarnation", func(ws *state.WriteSet) {
+			w, _ := ws.GetAddress(addr)
+			acc := *w.Val
+			acc.Incarnation++
+			w.Val = &acc
+		}},
+		{"account version", func(ws *state.WriteSet) {
+			w, _ := ws.GetAddress(addr)
+			w.Version.TxNum = version.TxNum + 1
+		}},
+		{"account write nil", func(ws *state.WriteSet) {
+			w, _ := ws.GetAddress(addr)
+			w.Val = nil
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ws := &state.WriteSet{}
+			entry.writeTo(ws, version)
+			require.True(t, entry.recordedIn(ws, version), "unmutated set must be accepted")
+			tc.mutate(ws)
+			require.False(t, entry.recordedIn(ws, version),
+				"a set differing in %s is not this credit", tc.name)
+		})
+	}
+
+	full := &state.WriteSet{}
+	entry.writeTo(full, version)
+
+	t.Run("balance write missing", func(t *testing.T) {
+		aw, ok := full.GetAddress(addr)
+		require.True(t, ok)
+		ws := &state.WriteSet{}
+		ws.SetAddress(addr, aw)
+		require.False(t, entry.recordedIn(ws, version), "the AddressPath sibling alone is not the credit")
+	})
+
+	t.Run("address write missing", func(t *testing.T) {
+		bw, ok := full.GetBalance(addr)
+		require.True(t, ok)
+		ws := &state.WriteSet{}
+		ws.SetBalance(addr, bw)
+		require.False(t, entry.recordedIn(ws, version), "a balance write without its AddressPath sibling is not the credit")
+	})
 }
 
 var feeCreditSink *state.WriteSet
