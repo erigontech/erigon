@@ -624,10 +624,9 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 	case len(base) > 0 && !bitutil.TestBytes(base[:len(base)-1]) && base[len(base)-1] == 1:
 		// If base == 1 (and mod > 1), then the result is 1
 		result[modLen-1] = 1
-	case modLen > 32 && len(exp) > 0 && !bitutil.TestBytes(exp[:len(exp)-1]):
-		// For small exponents (≤255) with large moduli (>256 bits), use Go's math/big
-		// directly. evmone uses Montgomery multiplication whose O(n²) setup (converting
-		// to Montgomery form) doesn't pay off when the exponent only needs a few squarings.
+	case modexpBigIntFaster(exp, modLen):
+		// math/big's Montgomery inner loop is `hand-written assembly`, which pulls
+		// ahead of `evmone's portable C++` as the modulus grows.
 		baseBig := new(big.Int).SetBytes(base)
 		expBig := new(big.Int).SetBytes(exp)
 		modBig := new(big.Int).SetBytes(mod)
@@ -640,6 +639,20 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 		evmone.ModExp(result, base, exp, mod)
 	}
 	return result, nil
+}
+
+// modexpBigIntFaster reports whether math/big beats evmone for these operand
+// widths. math/big only takes its windowed Montgomery path once the exponent
+// exceeds one word, and from there it wins on 512-bit and wider moduli; on its
+// plain square-and-multiply path it needs a 1024-bit modulus to catch up.
+func modexpBigIntFaster(exp []byte, modLen uint64) bool {
+	if modLen <= 32 {
+		return false
+	}
+	if len(exp) > 8 && bitutil.TestBytes(exp[:len(exp)-8]) {
+		return modLen >= 64
+	}
+	return modLen >= 128
 }
 
 // modexpU256Applicable reports whether modexpU256 may be used for these operands,
