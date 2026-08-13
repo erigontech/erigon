@@ -115,8 +115,22 @@ run_leg_m() {
   echo "[continuous-soak] cycle $cycle leg M → $out"
 
   if [[ "$REFRESH_BEFORE_LEG_M" == "1" ]]; then
-    echo "[continuous-soak] refreshing publisher before leg M..."
-    scripts/refresh-publisher.sh || return 1
+    echo "[continuous-soak] refreshing master publisher before leg M..."
+    scripts/refresh-publisher.sh master || return 1
+    # Archive publisher only refreshed if it was running. Persistent
+    # publisher state hides latent bugs (a consumer's on-demand history
+    # download may appear to work only because the publisher happens
+    # to still hold files a previous consumer left in its torrent
+    # client) — wiping is what surfaces them.
+    if curl -sSf -m 2 -X POST -H "Content-Type: application/json" \
+        --data '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' \
+        "http://127.0.0.1:19945" >/dev/null 2>&1; then
+      echo "[continuous-soak] refreshing archive publisher before leg M..."
+      scripts/refresh-publisher.sh archive || return 1
+      # Archive resync includes downloading full history — bounded but
+      # not fast (~30 min on hoodi). Bake into the tip-wait cap.
+      MAX_WAIT_MIN=90
+    fi
   fi
   wait_publisher_tip || return 1
 
