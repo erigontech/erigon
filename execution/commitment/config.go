@@ -46,7 +46,7 @@ func (c TrieConfig) Subtrie() TrieConfig {
 }
 
 // WarmupNumWorkersOrDefault resolves the warmup worker count: the configured
-// value if set, otherwise the env-tunable dbg.TipTrieWarmupers (default NumCPU*8).
+// value if set, otherwise the env-tunable dbg.TipTrieWarmupers (default estimate.HalfCPUs()).
 // An explicit dbg.TipTrieWarmupers of 0 propagates as 0, disabling the warmup pool.
 func (c TrieConfig) WarmupNumWorkersOrDefault() int {
 	if c.WarmupNumWorkers != 0 {

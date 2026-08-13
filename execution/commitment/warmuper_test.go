@@ -18,6 +18,7 @@ package commitment
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 )
@@ -132,5 +133,115 @@ func TestWarmuperNilFactoryResultUnblocksProducers(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("WarmKey blocked: workers exited on a nil factory result without cancelling the group")
+	}
+}
+
+// DrainPending must return once the buffer it owns is empty, whether or not
+// Close ran first — never spin.
+func TestDrainPendingAfterCloseReturnsPromptly(t *testing.T) {
+	t.Parallel()
+	factory := func(ctx context.Context) (PatriciaContext, func()) {
+		<-ctx.Done()
+		return nil, nil
+	}
+	w := NewWarmuper(context.Background(), WarmupConfig{
+		Enabled:    true,
+		CtxFactory: factory,
+		NumWorkers: 1,
+		MaxDepth:   WarmupMaxDepth,
+	})
+	w.Start()
+
+	key := make([]byte, 32)
+	const pending = 5
+	for i := range pending {
+		w.WarmKey(key, 0, uint64(i))
+	}
+	for i := range pending {
+		if got := w.outstanding[uint64(i)%arenaRingSize].Load(); got == 0 {
+			t.Fatalf("gen %d not recorded as outstanding before Close", i)
+		}
+	}
+
+	w.Close()
+
+	done := make(chan struct{})
+	go func() {
+		w.DrainPending()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("DrainPending spun after Close instead of returning")
+	}
+
+	for i := range pending {
+		if got := w.outstanding[uint64(i)%arenaRingSize].Load(); got != 0 {
+			t.Fatalf("gen %d outstanding = %d, want 0 after DrainPending", i, got)
+		}
+	}
+}
+
+// A WarmKey call that already passed the closed check when Close runs must
+// still observe cancellation safely, never panic on the send. The window
+// between the check and the send is a handful of instructions, so this races
+// many probes against one Close, over many rounds, to make the interleaving
+// land; -race also flags the underlying unsynchronized access on its own.
+func TestWarmKeyCloseRaceDoesNotPanic(t *testing.T) {
+	t.Parallel()
+	const rounds = 150
+	const numWorkers = 4
+	const numProbes = 500
+
+	for round := range rounds {
+		factory := func(ctx context.Context) (PatriciaContext, func()) {
+			<-ctx.Done()
+			return nil, nil
+		}
+		w := NewWarmuper(context.Background(), WarmupConfig{
+			Enabled:    true,
+			CtxFactory: factory,
+			NumWorkers: numWorkers,
+			MaxDepth:   WarmupMaxDepth,
+		})
+		w.Start()
+
+		key := make([]byte, 32)
+		var wg sync.WaitGroup
+		ready := make(chan struct{})
+		panics := make(chan any, numProbes)
+		for i := range numProbes {
+			wg.Add(1)
+			gen := uint64(i)
+			go func() {
+				defer wg.Done()
+				<-ready
+				defer func() {
+					if r := recover(); r != nil {
+						panics <- r
+					}
+				}()
+				w.WarmKey(key, 0, gen)
+			}()
+		}
+		close(ready) // release every probe at once so some land mid-WarmKey when Close runs
+		w.Close()
+
+		done := make(chan struct{})
+		go func() {
+			wg.Wait()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("round %d: probe WarmKey calls did not return after Close", round)
+		}
+
+		close(panics)
+		for r := range panics {
+			t.Fatalf("round %d: WarmKey panicked racing Close: %v", round, r)
+		}
 	}
 }
