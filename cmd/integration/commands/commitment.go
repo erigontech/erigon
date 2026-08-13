@@ -124,6 +124,8 @@ func init() {
 	withResume(cmdCommitmentRebuild)
 	withNoHistory(cmdCommitmentRebuild)
 	withRebuildOutputDatadir(cmdCommitmentRebuild)
+	cmdCommitmentRebuild.Flags().Uint64Var(&rebuildMaxShardSteps, "shard.steps", 0,
+		"steps one rebuild shard covers; 0 sizes it from the machine's RAM")
 	commitmentCmd.AddCommand(cmdCommitmentRebuild)
 
 	// commitment print
@@ -583,7 +585,9 @@ var cmdCommitmentRebuild = &cobra.Command{
 
 		// The scheme to produce is decided here and passed down, so the rebuild never
 		// re-reads it from process state further in.
-		target, err := dbstate.DefaultRebuildTarget().Resolve()
+		target := dbstate.DefaultRebuildTarget()
+		target.MaxShardSteps = rebuildMaxShardSteps
+		target, err := target.Resolve()
 		if err != nil {
 			logger.Error(err.Error())
 			return

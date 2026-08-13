@@ -22,6 +22,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -878,6 +879,8 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 type RebuildTarget struct {
 	Variant  commitment.TrieVariant
 	HashName string // H for a bin target; empty keeps the suite this process selected
+	// MaxShardSteps caps how many steps one shard covers; 0 sizes it from the machine.
+	MaxShardSteps uint64
 }
 
 // DefaultRebuildTarget is what a rebuild produces when the caller names no
@@ -900,7 +903,9 @@ func DefaultRebuildTarget() RebuildTarget {
 func (t RebuildTarget) Resolve() (RebuildTarget, error) {
 	switch t.Variant {
 	case "":
-		return DefaultRebuildTarget(), nil
+		shardSteps := t.MaxShardSteps
+		t = DefaultRebuildTarget()
+		t.MaxShardSteps = shardSteps
 	case commitment.VariantBinPatriciaTrie:
 		if t.HashName == "" {
 			t.HashName = commitment.PBinHashSuiteName()
@@ -914,6 +919,9 @@ func (t RebuildTarget) Resolve() (RebuildTarget, error) {
 		}
 	default:
 		return RebuildTarget{}, fmt.Errorf("commitment rebuild: unknown trie variant %q", t.Variant)
+	}
+	if t.MaxShardSteps == 0 {
+		t.MaxShardSteps = defaultRebuildShardMaxSteps()
 	}
 	return t, nil
 }
@@ -1049,7 +1057,9 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	// variant enables it explicitly. Variant is set per-iteration in the inner loop.
 	rebuildTrieCfg := commitment.DefaultTrieConfig()
 	rebuildTrieCfg.EnableTrieWarmup = false
-	maxShardSteps := uint64(commitment.DefaultRebuildShardMaxSteps)
+	maxShardSteps := target.MaxShardSteps
+	logger.Info("[commitment_rebuild] shard sizing", "maxShardSteps", maxShardSteps,
+		"totalMemory", common.ByteCount(estimate.TotalMemory()))
 
 	var totalKeysCommitted uint64
 
@@ -1199,6 +1209,16 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			a.recalcVisibleFiles(nil)
 			a.dirtyFilesLock.Unlock()
 			rwTx.Rollback()
+
+			for {
+				smthDone, err := a.mergeCommitmentStep(ctx, rangeToTxNum)
+				if err != nil {
+					return nil, nil, err
+				}
+				if !smthDone {
+					break
+				}
+			}
 
 			if shardTo+shardStepsSize > lastShard && shardStepsSize > 1 {
 				shardStepsSize /= 2

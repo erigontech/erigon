@@ -64,6 +64,7 @@ var (
 	resume                          bool
 	noHistory                       bool
 	rebuildOutputDatadir            string
+	rebuildMaxShardSteps            uint64
 	erigondbDomainStepsInFrozenFile string
 	syncCfg                         = ethconfig.Defaults.Sync
 

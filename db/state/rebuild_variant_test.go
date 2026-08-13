@@ -363,5 +363,14 @@ func TestRebuildTargetResolve(t *testing.T) {
 
 	unset, err := state.RebuildTarget{}.Resolve()
 	require.NoError(t, err)
-	require.Equal(t, state.DefaultRebuildTarget(), unset)
+	require.Equal(t, state.DefaultRebuildTarget().Variant, unset.Variant)
+	require.Equal(t, state.DefaultRebuildTarget().HashName, unset.HashName)
+
+	require.Positive(t, unset.MaxShardSteps, "an unset shard size resolves to the machine's")
+	require.Positive(t, hex.MaxShardSteps)
+	require.Positive(t, bin.MaxShardSteps)
+
+	pinned, err := state.RebuildTarget{MaxShardSteps: 16}.Resolve()
+	require.NoError(t, err)
+	require.Equal(t, uint64(16), pinned.MaxShardSteps, "an explicit shard size survives resolution")
 }

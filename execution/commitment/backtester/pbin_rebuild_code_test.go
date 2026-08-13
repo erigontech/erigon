@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -305,7 +306,7 @@ func TestPBinRebuildDelegatedAccountHasNoCodeLeaves(t *testing.T) {
 		"the rebuilt account must carry the indicator in its DELEGATION leaf")
 }
 
-// A range wider than commitment.DefaultRebuildShardMaxSteps is rebuilt in
+// A range wider than one shard is rebuilt in
 // several shards, each its own Process over its own slice of the key order. The
 // two accounts running the same code sit at the ends of that order, so the
 // shard boundary falls between them and the code zone comes out right only if
@@ -343,7 +344,9 @@ func TestPBinRebuildSharedCodeAcrossShards(t *testing.T) {
 
 	db, agg = pbinM1AWipeCommitment(t, db, agg, dirs, stepSize)
 
-	rebuiltRoot, report, err := state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), false, state.RebuildTarget{})
+	// Pinned, not machine-derived: the split is the whole point of the fixture.
+	rebuiltRoot, report, err := state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), false,
+		state.RebuildTarget{MaxShardSteps: commitment.DefaultRebuildShardMaxSteps})
 	require.NoError(t, err)
 	require.Len(t, report.Ranges, 1)
 	require.Len(t, report.Ranges[0].Shards, 2, "the fixture must split one range into two shards, otherwise it proves nothing")
