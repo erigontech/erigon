@@ -526,13 +526,6 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 		// them to sd.mem at block end, so sd.mem stays N-1 during exec.
 		var splitApplyBuf []*txResult
 
-		// coinbaseApplyCheck: apply-side reconstruction of the coinbase from traveling
-		// tip deltas, cross-checked against the calcFees-materialized value (step 5).
-		var cbCheck coinbaseFoldCheck
-		if coinbaseApplyCheck {
-			cbCheck.baseReader = state.NewCurrentCachedReaderV3(pe.domainsRead().AsGetter(applyRoTx), nil)
-		}
-
 		// handleCommitResult processes a single commitment result from the
 		// calculator. Defined here so both the blockResult handler and the
 		// rootResults case in the main select can use it.
@@ -697,9 +690,6 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 				switch applyResult := applyResult.(type) {
 				case *txResult:
 					txResultBlocks[applyResult.blockNum] = struct{}{}
-					if coinbaseApplyCheck {
-						cbCheck.onTx(applyResult)
-					}
 					uncommittedGas += applyResult.blockGasUsed
 					uncommittedTransactions++
 					writeCount := applyResult.writes.Count()
@@ -1925,13 +1915,6 @@ type txResult struct {
 	commitWrites          state.WriteSetView // VMAP_COMMIT_VIEW A/B: versionMap-slice view fed to the calculator instead of the normalized writes
 	rules                 *chain.Rules
 	isFinalize            bool // block-end finalize writes — apply to sd.mem directly
-	// coinbase fold (step 5, COINBASE_APPLY_CHECK): the per-tx tip credited to the
-	// coinbase and whether this tx wrote the coinbase balance directly (an EVM write,
-	// not just the calcFees tip). Let the apply loop reconstruct the coinbase from
-	// the traveling deltas and cross-check it against the value calcFees materialized.
-	feeTipped      uint256.Int
-	coinbase       accounts.Address
-	coinbaseDirect bool
 }
 
 // rawViewCollapse feeds BOTH apply and the commitment calculator the read-only
@@ -1961,13 +1944,6 @@ var coinbaseSum = dbg.EnvBool("COINBASE_SUM", false)
 // tx's tip and asserts base + Σdeltas equals calcFees's chained coinbase over the
 // pure-tip prefix — proving the additive fold before switching calcFees onto it.
 var coinbaseVec = dbg.EnvBool("COINBASE_VEC", false)
-
-// coinbaseApplyCheck (step 5, foundation for moving the coinbase fold into apply)
-// travels each tx's tip delta + direct-write flag to the apply loop and cross-checks
-// that consecutive coinbase balance writes differ by exactly the summed tips between
-// them — proving the deltas travel and apply can reconstruct the coinbase, without
-// yet changing behaviour (calcFees still materializes). Off by default.
-var coinbaseApplyCheck = dbg.EnvBool("COINBASE_APPLY_CHECK", false)
 
 // depOrderVal (prototype, default OFF) makes ValidateVersion + state-commit
 // dependency-ordered instead of gated on the contiguous maxComplete prefix: a tx
@@ -4102,14 +4078,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			if result.writes != nil {
 				applyResult.writes = result.writes
 				be.applyCount += applyResult.writes.Count()
-			}
-
-			if coinbaseApplyCheck && !be.coinbase.IsNil() {
-				applyResult.coinbase = be.coinbase
-				applyResult.feeTipped = result.ExecutionResult.FeeTipped
-				if result.TxOut != nil {
-					_, applyResult.coinbaseDirect = result.TxOut.GetBalance(be.coinbase)
-				}
 			}
 
 			// Apply state + per-tx indexes to sd.mem. Under splitApply the apply loop
