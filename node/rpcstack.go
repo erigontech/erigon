@@ -20,23 +20,23 @@
 package node
 
 import (
-	"bytes"
-	"io"
 	"net"
 	"net/http"
-	"strconv"
 	"strings"
-	"sync"
 	"sync/atomic"
 
 	"github.com/klauspost/compress/gzip"
 	"github.com/rs/cors"
 
+	"bufio"
+	"errors"
+	"fmt"
+
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/common/pool"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/klauspost/compress/gzhttp"
 )
 
 // NewHTTPHandlerStack returns wrapped http-related handlers.
@@ -184,176 +184,65 @@ func (h *virtualHostHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // smaller than this are sent as-is: gzip framing overhead would exceed savings.
 const minGzipBodySize = 1024
 
-// streamGzipLevel is pinned to BestSpeed: bytes leave as they are produced,
-// so per-flush latency matters more than ratio.
-const streamGzipLevel = gzip.BestSpeed
-
-// bufferedGzipLevel controls fully buffered (one-shot) responses. It may
-// diverge from streamGzipLevel in the future (e.g. become configurable): the
-// writer pools are kept separate because a pooled writer's level is fixed at
-// creation.
-const bufferedGzipLevel = gzip.BestSpeed
-
-// Raw and compressed byte counters per gzip path: out/in gives the live
-// compression ratio, the out rate tracks RPC egress.
+// Raw and compressed byte counters: out/in gives the live compression ratio,
+// the out rate tracks RPC egress.
 var (
-	gzipBufferedInBytes   = metrics.GetOrCreateCounter(`rpc_gzip_in_bytes_total{path="buffered"}`)
-	gzipBufferedOutBytes  = metrics.GetOrCreateCounter(`rpc_gzip_out_bytes_total{path="buffered"}`)
-	gzipStreamingInBytes  = metrics.GetOrCreateCounter(`rpc_gzip_in_bytes_total{path="streaming"}`)
-	gzipStreamingOutBytes = metrics.GetOrCreateCounter(`rpc_gzip_out_bytes_total{path="streaming"}`)
+	gzipInBytes  = metrics.GetOrCreateCounter(`rpc_gzip_in_bytes_total`)
+	gzipOutBytes = metrics.GetOrCreateCounter(`rpc_gzip_out_bytes_total`)
 )
 
-// countingWriter forwards to w and adds the written byte count to c.
-type countingWriter struct {
-	w io.Writer
+// gzipWrapper compresses with klauspost's gzhttp middleware. It buffers only
+// minGzipBodySize bytes -- enough to decide whether compressing pays -- and
+// streams everything after, so no response is ever held whole. BestSpeed
+// because bytes leave as they are produced, making per-flush latency matter
+// more than ratio.
+var gzipWrapper = func() func(http.Handler) http.HandlerFunc {
+	wrapper, err := gzhttp.NewWrapper(
+		gzhttp.MinSize(minGzipBodySize),
+		gzhttp.CompressionLevel(gzip.BestSpeed),
+	)
+	if err != nil {
+		panic(fmt.Sprintf("rpc gzip wrapper: %v", err))
+	}
+	return wrapper
+}()
+
+// countingResponseWriter counts body bytes while forwarding the optional
+// interfaces the RPC stack needs: Flusher for streaming responses and Hijacker
+// for the websocket upgrade.
+type countingResponseWriter struct {
+	http.ResponseWriter
 	c metrics.Counter
 }
 
-func (cw countingWriter) Write(p []byte) (int, error) {
-	n, err := cw.w.Write(p)
-	cw.c.AddInt(n)
+func (w *countingResponseWriter) Write(b []byte) (int, error) {
+	n, err := w.ResponseWriter.Write(b)
+	w.c.AddInt(n)
 	return n, err
 }
 
-var gzStreamPool = sync.Pool{
-	New: func() any { w, _ := gzip.NewWriterLevel(io.Discard, streamGzipLevel); return w },
-}
-
-var gzBufferedPool = sync.Pool{
-	New: func() any { w, _ := gzip.NewWriterLevel(io.Discard, bufferedGzipLevel); return w },
-}
-
-func putStreamGzip(gz *gzip.Writer) {
-	gz.Reset(io.Discard)
-	gzStreamPool.Put(gz)
-}
-
-func putBufferedGzip(gz *gzip.Writer) {
-	gz.Reset(io.Discard)
-	gzBufferedPool.Put(gz)
-}
-
-type gzipResponseWriter struct {
-	buf    *bytes.Buffer
-	gzw    *gzip.Writer
-	status int
-	http.ResponseWriter
-}
-
-func (w *gzipResponseWriter) WriteHeader(status int) {
-	if w.gzw != nil {
-		w.ResponseWriter.WriteHeader(status)
-	} else {
-		w.status = status
-	}
-}
-
-func (w *gzipResponseWriter) Write(b []byte) (int, error) {
-	if w.gzw != nil {
-		gzipStreamingInBytes.AddInt(len(b))
-		return w.gzw.Write(b)
-	}
-	return w.buf.Write(b)
-}
-
-// Flush switches to streaming gzip on first call; subsequent calls flush incrementally.
-func (w *gzipResponseWriter) Flush() {
-	if w.gzw == nil {
-		w.ResponseWriter.Header().Set("Content-Encoding", "gzip")
-		w.ResponseWriter.Header().Del("Content-Length")
-		if w.status != 0 {
-			w.ResponseWriter.WriteHeader(w.status)
-		}
-		w.gzw = gzStreamPool.Get().(*gzip.Writer)
-		w.gzw.Reset(countingWriter{w: w.ResponseWriter, c: gzipStreamingOutBytes})
-		if w.buf.Len() > 0 {
-			gzipStreamingInBytes.AddInt(w.buf.Len())
-			_, _ = w.gzw.Write(w.buf.Bytes())
-			w.buf.Reset()
-		}
-	}
-	_ = w.gzw.Flush()
+func (w *countingResponseWriter) Flush() {
 	if f, ok := w.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}
 }
 
-// writeBufferedGzip compresses src fully before writing, so the response
-// carries an exact Content-Length instead of chunked encoding.
-func writeBufferedGzip(w http.ResponseWriter, src []byte, status int) {
-	buf := pool.GetBuffer()
-	defer pool.PutBuffer(buf)
-
-	// LIFO: the writer is reset to io.Discard before buf goes back to its pool,
-	// so a pooled writer never retains a pooled buffer.
-	gz := gzBufferedPool.Get().(*gzip.Writer)
-	defer putBufferedGzip(gz)
-
-	// Pre-size for the expected ~8x JSON compression ratio: bytes.Buffer would
-	// otherwise re-grow through a chain of realloc+copy on large responses.
-	buf.Grow(len(src) / 8)
-	gz.Reset(buf)
-	_, err := gz.Write(src)
-	if err == nil {
-		err = gz.Close()
+func (w *countingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if hj, ok := w.ResponseWriter.(http.Hijacker); ok {
+		return hj.Hijack()
 	}
-	if err != nil {
-		// Writing to a bytes.Buffer cannot fail in practice, but src is still
-		// intact here, so keep the uncompressed fallback the libdeflate path had.
-		w.Header().Set("Content-Length", strconv.Itoa(len(src)))
-		if status != 0 {
-			w.WriteHeader(status)
-		}
-		w.Write(src) //nolint:errcheck
-		return
-	}
-
-	gzipBufferedInBytes.AddInt(len(src))
-	gzipBufferedOutBytes.AddInt(buf.Len())
-
-	w.Header().Set("Content-Encoding", "gzip")
-	w.Header().Set("Content-Length", strconv.Itoa(buf.Len()))
-	if status != 0 {
-		w.WriteHeader(status)
-	}
-	w.Write(buf.Bytes()) //nolint:errcheck
-}
-
-func sendGzipResponse(w http.ResponseWriter, grw *gzipResponseWriter) {
-	defer pool.PutBuffer(grw.buf)
-
-	if grw.gzw != nil {
-		defer putStreamGzip(grw.gzw)
-		grw.gzw.Close() //nolint:errcheck
-		return
-	}
-
-	src := grw.buf.Bytes()
-	if len(src) < minGzipBodySize {
-		w.Header().Set("Content-Length", strconv.Itoa(len(src)))
-		if grw.status != 0 {
-			w.WriteHeader(grw.status)
-		}
-		w.Write(src) //nolint:errcheck
-		return
-	}
-
-	writeBufferedGzip(w, src, grw.status)
+	return nil, nil, errors.New("http.Hijacker interface is not supported")
 }
 
 func newGzipHandler(next http.Handler) http.Handler {
+	// Counted on both sides of the compressor: the inner writer sees the
+	// handler's raw bytes, the outer one sees what goes on the wire.
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(&countingResponseWriter{ResponseWriter: w, c: gzipInBytes}, r)
+	})
+	compressed := gzipWrapper(inner)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
-			next.ServeHTTP(w, r)
-			return
-		}
-
-		grw := &gzipResponseWriter{buf: pool.GetBuffer(), ResponseWriter: w}
-		// The hook activates streaming mode before the first write; absent when gzip
-		// is off so it cannot prematurely commit HTTP headers (e.g. 200 before 503).
-		r = r.WithContext(rpc.WithGzipStreamingHook(r.Context(), grw.Flush))
-		next.ServeHTTP(grw, r)
-		sendGzipResponse(w, grw)
+		compressed.ServeHTTP(&countingResponseWriter{ResponseWriter: w, c: gzipOutBytes}, r)
 	})
 }
 

@@ -175,48 +175,23 @@ func TestGzipHandlerLargeBody(t *testing.T) {
 func TestGzipMetricsCounters(t *testing.T) {
 	// Buffered path.
 	body := bytes.Repeat([]byte("erigon "), 1024) // compressible, > minGzipBodySize
-	inBefore, outBefore := gzipBufferedInBytes.GetValueUint64(), gzipBufferedOutBytes.GetValueUint64()
+	inBefore, outBefore := gzipInBytes.GetValueUint64(), gzipOutBytes.GetValueUint64()
 	rec := gzipRequest(t, newGzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(body)
 	})))
 	require.Equal(t, "gzip", rec.Header().Get("Content-Encoding"))
-	assert.Equal(t, uint64(len(body)), gzipBufferedInBytes.GetValueUint64()-inBefore, "buffered in must count the raw payload")
-	assert.Equal(t, uint64(rec.Body.Len()), gzipBufferedOutBytes.GetValueUint64()-outBefore, "buffered out must count the compressed bytes")
+	assert.Equal(t, uint64(len(body)), gzipInBytes.GetValueUint64()-inBefore, "buffered in must count the raw payload")
+	assert.Equal(t, uint64(rec.Body.Len()), gzipOutBytes.GetValueUint64()-outBefore, "buffered out must count the compressed bytes")
 
 	// Streaming path: bytes written both before the Flush (drained from the
 	// buffer) and after it must be counted as raw input.
-	inBefore, outBefore = gzipStreamingInBytes.GetValueUint64(), gzipStreamingOutBytes.GetValueUint64()
+	inBefore, outBefore = gzipInBytes.GetValueUint64(), gzipOutBytes.GetValueUint64()
 	rec = gzipRequest(t, newGzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(body[:1000])
 		w.(http.Flusher).Flush()
 		_, _ = w.Write(body[1000:])
 	})))
 	require.Equal(t, "gzip", rec.Header().Get("Content-Encoding"))
-	assert.Equal(t, uint64(len(body)), gzipStreamingInBytes.GetValueUint64()-inBefore, "streaming in must count raw bytes from both sides of the Flush")
-	assert.Equal(t, uint64(rec.Body.Len()), gzipStreamingOutBytes.GetValueUint64()-outBefore, "streaming out must count the compressed bytes")
-}
-
-// TestGzipResponseWriterFlushActivatesStreaming is a unit test on
-// gzipResponseWriter.Flush(): verifies it switches from buffered to streaming
-// mode and that buffered bytes are drained into the gzip writer.
-func TestGzipResponseWriterFlushActivatesStreaming(t *testing.T) {
-	rec := httptest.NewRecorder()
-	buf := &bytes.Buffer{}
-	grw := &gzipResponseWriter{buf: buf, ResponseWriter: rec}
-
-	// Write into the buffer before activating streaming.
-	_, _ = grw.Write([]byte("pre-flush"))
-	require.Nil(t, grw.gzw, "gzw must be nil before first Flush")
-
-	grw.Flush()
-	require.NotNil(t, grw.gzw, "Flush must activate the gzip writer")
-	assert.Equal(t, 0, buf.Len(), "buf must be drained into gzw after Flush")
-
-	// Write more data in streaming mode, then close.
-	_, _ = grw.Write([]byte(" post-flush"))
-	require.NoError(t, grw.gzw.Close())
-	putStreamGzip(grw.gzw)
-
-	got := decompressGzip(t, rec.Body)
-	assert.Equal(t, []byte("pre-flush post-flush"), got)
+	assert.Equal(t, uint64(len(body)), gzipInBytes.GetValueUint64()-inBefore, "streaming in must count raw bytes from both sides of the Flush")
+	assert.Equal(t, uint64(rec.Body.Len()), gzipOutBytes.GetValueUint64()-outBefore, "streaming out must count the compressed bytes")
 }
