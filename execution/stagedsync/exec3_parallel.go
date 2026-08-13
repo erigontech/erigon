@@ -3259,10 +3259,14 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 
 				chainReader := consensuschain.NewReader(pe.cfg.chainConfig, applyTx, pe.cfg.blockReader, pe.logger)
-				if _, err := pe.cfg.engine.Finalize(
+				_, finalizeErr := pe.cfg.engine.Finalize(
 					pe.cfg.chainConfig, types.CopyHeader(tt.Header), ibs, tt.Uncles, blockReceipts,
-					tt.Withdrawals, chainReader, syscall, false, pe.logger); err != nil {
-					return be.invalidBlockResult(fmt.Errorf("%w: can't finalize block %d: %v", rules.ErrInvalidBlock, be.number(), err)), nil
+					tt.Withdrawals, chainReader, syscall, false, pe.logger)
+				if stateErr := ibs.StateReadError(); stateErr != nil {
+					return be.operationalBlockResult(fmt.Errorf("can't finalize block %d: state read: %w", be.number(), stateErr)), nil
+				}
+				if finalizeErr != nil {
+					return be.invalidBlockResult(fmt.Errorf("%w: can't finalize block %d: %v", rules.ErrInvalidBlock, be.number(), finalizeErr)), nil
 				}
 
 				be.blockIO.RecordReads(finalVersion, ibs.VersionedReads())

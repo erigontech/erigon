@@ -3,6 +3,7 @@ package stagedsync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"math/rand"
@@ -135,6 +136,23 @@ func (r panickingAccountStateReader) ReadAccountData(accounts.Address) (*account
 	panic(r.panicValue)
 }
 
+type failingAccountTemporalTx struct {
+	kv.TemporalTx
+	address common.Address
+	err     error
+}
+
+func (tx failingAccountTemporalTx) GetLatest(domain kv.Domain, key []byte) ([]byte, kv.Step, error) {
+	if domain == kv.AccountsDomain && common.BytesToAddress(key) == tx.address {
+		return nil, 0, tx.err
+	}
+	return tx.TemporalTx.GetLatest(domain, key)
+}
+
+func (tx failingAccountTemporalTx) AggTx() any {
+	return nil
+}
+
 func (e rulesEngineWithErrors) Initialize(config *chain.Config, chainReader rules.ChainHeaderReader, header *types.Header,
 	ibs *state.IntraBlockState, syscall rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks,
 ) error {
@@ -146,6 +164,18 @@ func (e rulesEngineWithErrors) Finalize(config *chain.Config, header *types.Head
 	chainReader rules.ChainReader, syscall rules.SystemCall, skipReceiptsEval bool, logger log.Logger,
 ) (types.FlatRequests, error) {
 	return nil, e.finalizeErr
+}
+
+type rulesEngineWithFinalizeBalance struct {
+	rules.Engine
+	beneficiary accounts.Address
+}
+
+func (e rulesEngineWithFinalizeBalance) Finalize(_ *chain.Config, _ *types.Header, ibs *state.IntraBlockState,
+	_ []*types.Header, _ types.Receipts, _ []*types.Withdrawal, _ rules.ChainReader, _ rules.SystemCall,
+	_ bool, _ log.Logger,
+) (types.FlatRequests, error) {
+	return nil, ibs.AddBalance(e.beneficiary, *uint256.NewInt(1), tracing.BalanceIncreaseWithdrawal)
 }
 
 func sleepWithContext(ctx context.Context, d time.Duration) error {
@@ -1500,6 +1530,30 @@ func newResumeTestExec(t *testing.T, db kv.TemporalRwDB, config *chain.Config) (
 	return pe, roTx
 }
 
+func newParallelFinalizeTestBlock(config *chain.Config) (*blockExecutor, *taskVersion) {
+	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 10_000_000}
+	txTask := &exec.TxTask{
+		Header:          header,
+		TxNum:           1,
+		TxIndex:         0,
+		Config:          config,
+		Logger:          log.New(),
+		EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
+	}
+	eTask := &execTask{Task: txTask, index: 0}
+	task := &taskVersion{execTask: eTask, version: state.Version{BlockNum: 1, TxNum: 1, TxIndex: 0}}
+	gasPool := new(protocol.GasPool).AddGas(header.GasLimit)
+	be := newBlockExec(newParallelTestBlock(1), gasPool, nil, make(chan applyResult, 4), nil, false, nil)
+	be.tasks = []*execTask{eTask}
+	be.results = []*execResult{nil}
+	be.txIncarnations = []int{0}
+	be.execFailed = []int{0}
+	be.execAborted = []int{0}
+	be.estimateDeps[0] = []int{}
+	be.execTasks.setInProgress(0)
+	return be, task
+}
+
 func TestParallelInitializeRulesEngineErrorUsesVerdictPath(t *testing.T) {
 	config := chain.TestChainBerlinConfig
 	engineErr := fmt.Errorf("epoch database read failed")
@@ -1549,28 +1603,7 @@ func TestParallelFinalizeClassifiesRulesEngineError(t *testing.T) {
 			pe, roTx := newResumeTestExec(t, db, config)
 			cause := fmt.Errorf("epoch database write failed")
 			pe.cfg.engine = rulesEngineWithErrors{Engine: pe.cfg.engine, finalizeErr: tc.engineErr(cause)}
-
-			header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 10_000_000}
-			txTask := &exec.TxTask{
-				Header:          header,
-				TxNum:           1,
-				TxIndex:         0,
-				Config:          config,
-				Logger:          log.New(),
-				EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
-			}
-			eTask := &execTask{Task: txTask, index: 0}
-			version := state.Version{BlockNum: 1, TxNum: 1, TxIndex: 0}
-			task := &taskVersion{execTask: eTask, version: version}
-			gasPool := new(protocol.GasPool).AddGas(header.GasLimit)
-			be := newBlockExec(newParallelTestBlock(1), gasPool, nil, make(chan applyResult, 4), nil, false, nil)
-			be.tasks = []*execTask{eTask}
-			be.results = []*execResult{nil}
-			be.txIncarnations = []int{0}
-			be.execFailed = []int{0}
-			be.execAborted = []int{0}
-			be.estimateDeps[0] = []int{}
-			be.execTasks.setInProgress(0)
+			be, task := newParallelFinalizeTestBlock(config)
 
 			result, err := be.nextResult(context.Background(), pe, &exec.TxResult{
 				Task:  task,
@@ -1584,6 +1617,28 @@ func TestParallelFinalizeClassifiesRulesEngineError(t *testing.T) {
 			require.ErrorContains(t, result.Err, cause.Error())
 		})
 	}
+}
+
+func TestParallelFinalizeStateReadErrorUsesOperationalBlockResult(t *testing.T) {
+	db := newResumeTestDB(t)
+	config := chain.TestChainBerlinConfig
+	pe, roTx := newResumeTestExec(t, db, config)
+	cause := errors.New("withdrawal account read failed")
+	beneficiary := accounts.InternAddress(common.Address{19: 0x42})
+	pe.cfg.engine = rulesEngineWithFinalizeBalance{Engine: pe.cfg.engine, beneficiary: beneficiary}
+	be, task := newParallelFinalizeTestBlock(config)
+
+	result, err := be.nextResult(context.Background(), pe, &exec.TxResult{
+		Task:  task,
+		TxIn:  state.ReadSet{},
+		TxOut: &state.WriteSet{},
+	}, failingAccountTemporalTx{TemporalTx: roTx, address: beneficiary.Value(), err: cause})
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.True(t, result.Operational)
+	require.ErrorIs(t, result.Err, cause)
+	require.NotErrorIs(t, result.Err, rules.ErrInvalidBlock)
 }
 
 func TestParallelStateReadErrorUsesOperationalBlockResult(t *testing.T) {
