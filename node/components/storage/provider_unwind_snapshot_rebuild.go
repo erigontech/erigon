@@ -146,6 +146,14 @@ func (p *Provider) straddleBlockFileForType(toBlock uint64, typeEnum snaptype.En
 		if info.Type == nil || info.Type.Enum() != typeEnum {
 			continue
 		}
+		// .seg files only — .idx (accessor) files parse to the same
+		// Type enum for headers/bodies/transactions but they are index
+		// files, not compressed .seg files. seedLeftoverBlocks opens
+		// via seg.NewDecompressor which crashes on a .idx (invalid
+		// dictSize). Only .seg is a valid straddle source.
+		if info.Ext != ".seg" {
+			continue
+		}
 		span := info.To - info.From
 		if widest == nil || span > widestSpan {
 			infoCopy := info
