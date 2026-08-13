@@ -926,7 +926,7 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	// Witness capture is served by the sequential HexPatriciaHashed and by
 	// PBinPatriciaHashed, so bin is allowed through; only the parallel trie
 	// cannot serve it and is demoted.
-	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates(), execctx.WithoutParallelCommitment())
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
 	if err != nil {
 		return nil, err
 	}

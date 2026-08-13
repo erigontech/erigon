@@ -201,12 +201,6 @@ func commitmentKVWriteVersion(c *DomainCfg) version.Version {
 // COMMITMENT_PARALLEL env var (or the CLI flag) turns it on.
 var ExperimentalParallelCommitment = dbg.EnvBool("COMMITMENT_PARALLEL", false)
 
-// ExperimentalStreamingCommitment toggles the StreamingCommitter trie path
-// (commitment.ModeParallel + VariantStreamingHexPatricia), which overlaps
-// commitment folding with execution. Default false. Takes precedence over
-// ExperimentalParallelCommitment.
-var ExperimentalStreamingCommitment = false
-
 // ExperimentalBinCommitment selects the EIP-8297 binary commitment trie
 // (commitment.ModeDirect + VariantBinPatriciaTrie). A whole-datadir property:
 // persisted to erigondb.toml on first start and adopted from it on later

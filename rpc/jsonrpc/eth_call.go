@@ -432,8 +432,17 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 	}
 	defer roTx.Rollback()
 
-	requestedBlockNr, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, roTx, api._blockReader, api.filters)
+	// nil filters: the gate below and the commitment-history reads both go through
+	// this plain roTx, so the tag has to resolve on that same committed view.
+	requestedBlockNr, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, roTx, api._blockReader, nil)
 	if err != nil {
+		return nil, err
+	}
+
+	// A canonical hash exists for blocks the header stage has downloaded but
+	// execution has not reached; the commitment history getProof needs is only
+	// written by execution.
+	if err := rpchelper.CheckBlockExecuted(roTx, uint64(requestedBlockNr)); err != nil {
 		return nil, err
 	}
 

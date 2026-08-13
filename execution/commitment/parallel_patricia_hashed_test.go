@@ -948,7 +948,7 @@ func TestParallelReuseAcrossResetParity(t *testing.T) {
 	k2, u2 := sparseBatch2(k1, 3, false)
 	seqRoot, _ := incrementalRoot(t, modeSeq, 0, k1, u1, k2, u2)
 
-	for _, variant := range []TrieVariant{VariantParallelHexPatricia, VariantStreamingHexPatricia} {
+	for _, variant := range []TrieVariant{VariantParallelHexPatricia} {
 		root := reusedInstanceIncrementalRoot(t, variant, 8, k1, u1, k2, u2)
 		require.Equalf(t, seqRoot, root, "reused-instance %s incremental root vs sequential", variant)
 	}

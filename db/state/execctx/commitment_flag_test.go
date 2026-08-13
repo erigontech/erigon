@@ -33,13 +33,10 @@ import (
 
 func withCommitmentFlag(t *testing.T, variant commitment.TrieVariant) {
 	t.Helper()
-	origStream := statecfg.ExperimentalStreamingCommitment
 	origPar := statecfg.ExperimentalParallelCommitment
 	t.Cleanup(func() {
-		statecfg.ExperimentalStreamingCommitment = origStream
 		statecfg.ExperimentalParallelCommitment = origPar
 	})
-	statecfg.ExperimentalStreamingCommitment = variant == commitment.VariantStreamingHexPatricia
 	statecfg.ExperimentalParallelCommitment = variant == commitment.VariantParallelHexPatricia
 }
 
@@ -110,18 +107,6 @@ func TestSharedDomains_ParallelFlag_RootEquivalence(t *testing.T) {
 		seqRoot, parRoot)
 }
 
-func TestPickTrieVariant_StreamingFlag(t *testing.T) {
-	// No t.Parallel: mutates process-global statecfg flags.
-	withCommitmentFlag(t, commitment.VariantStreamingHexPatricia)
-	require.Equal(t, commitment.VariantStreamingHexPatricia, execctx.PickTrieVariant())
-
-	statecfg.ExperimentalParallelCommitment = true
-	require.Equal(t, commitment.VariantStreamingHexPatricia, execctx.PickTrieVariant())
-
-	statecfg.ExperimentalStreamingCommitment = false
-	require.Equal(t, commitment.VariantParallelHexPatricia, execctx.PickTrieVariant())
-}
-
 func TestPickTrieVariant_BinFlag(t *testing.T) {
 	// No t.Parallel: mutates process-global statecfg flags.
 	origBin := statecfg.ExperimentalBinCommitment
@@ -130,50 +115,7 @@ func TestPickTrieVariant_BinFlag(t *testing.T) {
 	statecfg.ExperimentalBinCommitment = true
 	require.Equal(t, commitment.VariantBinPatriciaTrie, execctx.PickTrieVariant())
 
-	// Bin is a persisted datadir property, so it wins over the runtime experiments.
-	withCommitmentFlag(t, commitment.VariantStreamingHexPatricia)
+	// Bin is a persisted datadir property, so it wins over the runtime experiment.
+	withCommitmentFlag(t, commitment.VariantParallelHexPatricia)
 	require.Equal(t, commitment.VariantBinPatriciaTrie, execctx.PickTrieVariant())
-}
-
-func TestSharedDomains_StreamingFlag_RootEquivalence(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-	// No t.Parallel: mutates process-global statecfg flags.
-
-	stepSize := uint64(16)
-
-	runOnce := func(t *testing.T, streaming bool) []byte {
-		t.Helper()
-		variant := commitment.VariantHexPatriciaTrie
-		if streaming {
-			variant = commitment.VariantStreamingHexPatricia
-		}
-		withCommitmentFlag(t, variant)
-
-		db := newTestDb(t, stepSize)
-
-		ctx := t.Context()
-		rwTx, err := db.BeginTemporalRw(ctx)
-		require.NoError(t, err)
-		defer rwTx.Rollback()
-
-		sd, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
-		require.NoError(t, err)
-		defer sd.Close()
-
-		sd.EnableParaTrieDB(db)
-
-		got := sd.GetCommitmentCtx().Trie().Variant()
-		require.Equalf(t, variant, got, "trie variant for streaming=%v", streaming)
-
-		return runWriteCommitBatch(t, sd, rwTx)
-	}
-
-	seqRoot := runOnce(t, false)
-	strRoot := runOnce(t, true)
-
-	require.Equalf(t, seqRoot, strRoot,
-		"sequential and streaming commitment roots must match: sequential=%x streaming=%x",
-		seqRoot, strRoot)
 }

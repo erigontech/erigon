@@ -70,8 +70,8 @@ func reconcileTrieVariant(s *ErigonDBSettings, logger log.Logger) error {
 		if s.RefsInCommitmentBranches() {
 			return errors.New("trie_variant \"bin\" conflicts with references_in_commitment_branches = true")
 		}
-		if statecfg.ExperimentalStreamingCommitment || statecfg.ExperimentalParallelCommitment {
-			return errors.New("the bin commitment trie is sequential-only; drop --experimental.streaming-commitment / --experimental.parallel-commitment")
+		if statecfg.ExperimentalParallelCommitment {
+			return errors.New("the bin commitment trie is sequential-only; drop --experimental.parallel-commitment")
 		}
 		if !statecfg.ExperimentalBinCommitment {
 			logger.Info("datadir uses the bin commitment trie; enabling it for this process")

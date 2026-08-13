@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
@@ -82,6 +83,11 @@ type ExecuteBlockCfg struct {
 
 	experimentalBAL bool
 	readAheader     *exec.BlockReadAheader
+	// discardCommitment runs execution without computing/persisting commitment
+	// (exec-only). Initialized from dbg.DiscardCommitment() at the stage boundary;
+	// the ephemeral single-block replay harness sets it directly since the env is
+	// read only at package init.
+	discardCommitment bool
 }
 
 func StageExecuteBlocksCfg(
@@ -107,22 +113,23 @@ func StageExecuteBlocksCfg(
 	}
 
 	return ExecuteBlockCfg{
-		db:              db,
-		prune:           pm,
-		batchSize:       batchSize,
-		chainConfig:     chainConfig,
-		engine:          engine,
-		vmConfig:        vmConfig,
-		dirs:            dirs,
-		notifications:   notifications,
-		stateStream:     stateStream,
-		badBlockHalt:    badBlockHalt,
-		blockReader:     blockReader,
-		genesis:         genesis,
-		historyV3:       true,
-		syncCfg:         syncCfg,
-		experimentalBAL: experimentalBAL,
-		readAheader:     readAheader,
+		db:                db,
+		prune:             pm,
+		batchSize:         batchSize,
+		chainConfig:       chainConfig,
+		engine:            engine,
+		vmConfig:          vmConfig,
+		dirs:              dirs,
+		notifications:     notifications,
+		stateStream:       stateStream,
+		badBlockHalt:      badBlockHalt,
+		blockReader:       blockReader,
+		genesis:           genesis,
+		historyV3:         true,
+		syncCfg:           syncCfg,
+		experimentalBAL:   experimentalBAL,
+		readAheader:       readAheader,
+		discardCommitment: dbg.DiscardCommitment(),
 	}
 }
 
@@ -362,6 +369,23 @@ func stageProgress(tx kv.Tx, db kv.RoDB, stage stages.SyncStage) (prevStageProgr
 
 // ================ Erigon3 End ================
 
+// resolveExecResumePoint picks where a resumed exec run restarts. The committed
+// commitment boundary (SeekCommitment) is normally authoritative. Exec-only mode
+// (discardCommitment) never advances KeyCommitmentState, so a resume would restart
+// at the stale pre-run boundary and re-execute blocks whose flat state a prior
+// size-limited batch already flushed. When Execution progress has moved past the
+// commitment boundary, resume from Execution progress instead.
+func resolveExecResumePoint(ctx context.Context, txNumReader rawdbv3.TxNumsReader, tx kv.Tx, discardCommitment bool, execProgress, seekTxNum, seekBlock uint64) (txNum, blockNum uint64, err error) {
+	if !discardCommitment || execProgress <= seekBlock {
+		return seekTxNum, seekBlock, nil
+	}
+	execTxNum, err := txNumReader.Max(ctx, tx, execProgress)
+	if err != nil {
+		return 0, 0, err
+	}
+	return execTxNum, execProgress, nil
+}
+
 func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) (err error) {
 	if dbg.StagesOnlyBlocks {
 		return nil
@@ -380,11 +404,105 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 		return nil
 	}
 
-	parallel := executeInParallel(doms.GetCommitmentCtx().Trie().Variant(), dbg.Exec3Parallel, cfg.experimentalBAL)
-	if err := ExecV3(ctx, s, u, cfg, doms, rwTx, parallel, to, logger); err != nil {
+	// Stage coordination hoisted out of the exec core: resolve the start point
+	// and exec window from committed domains + the txNum index before handing a
+	// resolved execRange to ExecV3.
+	initialTxNum, blockNum, err := doms.SeekCommitment(ctx, rwTx)
+	if err != nil {
 		return err
 	}
-	return nil
+	initialTxNum, blockNum, err = resolveExecResumePoint(ctx, cfg.blockReader.TxnumReader(), rwTx, cfg.discardCommitment, s.BlockNumber, initialTxNum, blockNum)
+	if err != nil {
+		return err
+	}
+
+	if s.SyncMode() == stages.ModeApplyingBlocks {
+		agg := cfg.db.(state.HasAgg).Agg().(*state.Aggregator)
+		if s.CurrentSyncCycle.IsInitialCycle {
+			agg.PresetNonChainTipConcurrency()
+		} else {
+			agg.PresetChainTipConcurrency()
+		}
+	}
+
+	if to < blockNum {
+		return nil
+	}
+
+	inputTxNum, maxTxNum, offsetFromBlockBeginning, blockNum, err := restoreTxNum(ctx, &cfg, rwTx, initialTxNum, to)
+	if err != nil {
+		return err
+	}
+
+	if maxTxNum == 0 {
+		// nothing to exec, make sure the stage is in sync with the sd
+		if s.BlockNumber < blockNum {
+			return s.Update(rwTx, blockNum)
+		}
+		return nil
+	}
+
+	rng := execRange{
+		blockNum:                 blockNum,
+		initialTxNum:             initialTxNum,
+		inputTxNum:               inputTxNum,
+		offsetFromBlockBeginning: offsetFromBlockBeginning,
+		maxBlockNum:              to,
+	}
+
+	if !executeInParallel(doms.GetCommitmentCtx().Trie().Variant(), dbg.Exec3Parallel, cfg.experimentalBAL) {
+		return execV3Serial(ctx, s, u, cfg, doms, rwTx, rng, logger)
+	}
+
+	out, execErr := execV3(ctx, cfg, doms, rwTx, s.SyncMode(), s.CurrentSyncCycle.IsInitialCycle, s.LogPrefix(), rng, nil, logger)
+
+	// Stage progress: target the SharedDomains overlay (not replaced during exec)
+	// when present, else the live post-exec applyTx (parallel exec may have rolled
+	// the passed-in rwTx via Flush/CommitAndBegin).
+	if (execErr == nil || errors.Is(execErr, &ErrLoopExhausted{})) && out.applyTx != nil {
+		if overlay := doms.BlockOverlay(); overlay != nil {
+			if err := s.Update(overlay, out.lastCommittedBlockNum); err != nil {
+				return err
+			}
+		} else if err := s.Update(out.applyTx, out.lastCommittedBlockNum); err != nil {
+			return err
+		}
+	}
+
+	return unwindOnExecError(execErr, out, cfg, s, u, logger)
+}
+
+// unwindOnExecError decides the unwind after parallel exec reports an invalid
+// block. A non-initial-cycle wrong trie root routes to handleIncorrectRootHashError,
+// which schedules the unwind on u (binary-search from out.failedBlock/Hash). An
+// initial-cycle wrong root is fatal (no fork to recover from) and returns execErr.
+// Any other invalid block also returns execErr WITHOUT setting a stage unwind
+// point — the staged-sync loop that detects ErrInvalidBlock owns that unwind;
+// setting one here would leave a stale bad-block verdict that blocks a fresh
+// canonical block at the same height on the next fork-choice. Under badBlockHalt
+// (in-memory fork validation) or a non-invalid error it unwinds nothing and
+// returns execErr for the caller to propagate.
+func unwindOnExecError(execErr error, out execV3Outcome, cfg ExecuteBlockCfg, s *StageState, u Unwinder, logger log.Logger) error {
+	if !errors.Is(execErr, rules.ErrInvalidBlock) || cfg.badBlockHalt || u == nil {
+		return execErr
+	}
+
+	if errors.Is(execErr, ErrWrongTrieRoot) {
+		// Initial sync has no competing fork to recover from, so a wrong trie root
+		// is fatal — the recovery handler would schedule an unwind (or none, when
+		// failedBlock <= s.BlockNumber) and return nil, silently swallowing the
+		// state-root mismatch. Only a non-initial-cycle reorg routes to recovery.
+		if s.CurrentSyncCycle.IsInitialCycle {
+			return execErr
+		}
+		return handleIncorrectRootHashError(out.failedBlock, out.failedHash, out.applyTx, cfg, s, logger, u)
+	}
+
+	// A plain invalid block propagates the error without setting a stage unwind
+	// point — the caller owns the unwind. Setting one here would leave a stale
+	// bad-block verdict that blocks a fresh canonical block at the same height
+	// from being re-executed on the next fork-choice.
+	return execErr
 }
 
 // unwindDomsToBlock drops in-mem state of blocks (unwindToBlock, ∞) and

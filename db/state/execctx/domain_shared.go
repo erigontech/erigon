@@ -211,8 +211,13 @@ type SharedDomains struct {
 	// Used when the commitment calculator goroutine owns the Updates buffer
 	// and feeds touches via TouchPlainKeyDirect from the fan-out channel.
 	disableInlineTouchKey bool
-	mem                   kv.TemporalMemBatch
-	metrics               kvmetrics.DomainMetrics
+	// discardCommitment mirrors ExecuteBlockCfg.discardCommitment (exec-only mode):
+	// the single source of truth is the cfg, threaded here via SetDiscardCommitment
+	// at exec start, so IsUnfrozenStepEdge does not read dbg.DiscardCommitment()
+	// independently.
+	discardCommitment bool
+	mem               kv.TemporalMemBatch
+	metrics           kvmetrics.DomainMetrics
 
 	// blockOverlay is an in-memory overlay for block-level metadata writes (headers, bodies,
 	// canonical hashes, TD, stage progress, forkchoice markers). It allows execution to
@@ -286,15 +291,10 @@ type SharedDomains struct {
 // fallback inside the trie constructor.
 func PickTrieVariant() commitment.TrieVariant {
 	switch {
-	// Selecting more than one experimental-commitment flag is a misconfiguration;
-	// they are alternative paths. Bin is a persisted whole-datadir property, so
-	// it wins over the runtime experiments (the settings resolver refuses the
-	// combination outright); streaming overlaps folding with execution, so it
-	// wins over parallel.
+	// Bin is a persisted whole-datadir property, so it wins over the runtime
+	// experiment (the settings resolver refuses the combination outright).
 	case statecfg.ExperimentalBinCommitment:
 		return commitment.VariantBinPatriciaTrie
-	case statecfg.ExperimentalStreamingCommitment:
-		return commitment.VariantStreamingHexPatricia
 	case statecfg.ExperimentalParallelCommitment:
 		return commitment.VariantParallelHexPatricia
 	}
@@ -326,7 +326,11 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 		stepSize: tx.Debug().StepSize(),
 	}
 
-	sd.mem = tx.Debug().NewMemBatch(&sd.metrics)
+	if o.mem != nil {
+		sd.mem = o.mem
+	} else {
+		sd.mem = tx.Debug().NewMemBatch(&sd.metrics)
+	}
 	// Fetch the aggregator-scope branch cache (lives on the commitment
 	// Domain, shared across all SharedDomains derived from this
 	// aggregator). The duck-typed BranchCacheProvider lookup avoids
@@ -924,7 +928,7 @@ func (sd *SharedDomains) HasSharedBranchCache() bool { return sd.branchCache != 
 // must be written.
 func (sd *SharedDomains) IsUnfrozenStepEdge(roTx kv.TemporalTx, txNum uint64) bool {
 	ss := sd.stepSize
-	if ss == 0 || dbg.DiscardCommitment() {
+	if ss == 0 || sd.discardCommitment {
 		return false
 	}
 	if (txNum+1)%ss != 0 {
@@ -947,6 +951,12 @@ func (sd *SharedDomains) TxNum() uint64 { return sd.txNum }
 // TouchKey must be disabled to avoid concurrent writes.
 func (sd *SharedDomains) SetDisableInlineTouchKey(disable bool) {
 	sd.disableInlineTouchKey = disable
+}
+
+// SetDiscardCommitment threads ExecuteBlockCfg.discardCommitment (exec-only mode)
+// into the domains so IsUnfrozenStepEdge uses the cfg value, not a separate env read.
+func (sd *SharedDomains) SetDiscardCommitment(v bool) {
+	sd.discardCommitment = v
 }
 
 // InlineTouchKeyDisabled returns true when inline TouchKey is disabled.

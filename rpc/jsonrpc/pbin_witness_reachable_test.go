@@ -43,21 +43,19 @@ func withBinCommitmentDatadir(t *testing.T) {
 	t.Helper()
 
 	origBin, origHash, origSuite := statecfg.ExperimentalBinCommitment, statecfg.BinCommitmentHash, commitment.PBinHashSuiteName()
-	origParallel, origStreaming := statecfg.ExperimentalParallelCommitment, statecfg.ExperimentalStreamingCommitment
+	origParallel := statecfg.ExperimentalParallelCommitment
 	t.Cleanup(func() {
 		statecfg.ExperimentalBinCommitment = origBin
 		statecfg.BinCommitmentHash = origHash
 		require.NoError(t, commitment.SetPBinHashSuite(origSuite))
 		statecfg.ExperimentalParallelCommitment = origParallel
-		statecfg.ExperimentalStreamingCommitment = origStreaming
 	})
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.BinCommitmentHash = commitment.PBinHashBlake3
 	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
-	// erigondb.toml resolution refuses bin combined with either: the bin trie is
-	// sequential-only, regardless of a process-wide parallel/streaming default.
+	// erigondb.toml resolution refuses the combination: the bin trie is
+	// sequential-only, regardless of a process-wide parallel default.
 	statecfg.ExperimentalParallelCommitment = false
-	statecfg.ExperimentalStreamingCommitment = false
 }
 
 func withCommitmentHistory(t *testing.T) {

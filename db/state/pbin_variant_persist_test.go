@@ -32,18 +32,15 @@ import (
 )
 
 // Mutates process-wide statecfg flags, so no test in this file may run in parallel.
-func pbinWithVariantFlags(t *testing.T, bin, streaming, parallel bool) {
+func pbinWithVariantFlags(t *testing.T, bin, parallel bool) {
 	t.Helper()
 	origBin := statecfg.ExperimentalBinCommitment
-	origStream := statecfg.ExperimentalStreamingCommitment
 	origPar := statecfg.ExperimentalParallelCommitment
 	t.Cleanup(func() {
 		statecfg.ExperimentalBinCommitment = origBin
-		statecfg.ExperimentalStreamingCommitment = origStream
 		statecfg.ExperimentalParallelCommitment = origPar
 	})
 	statecfg.ExperimentalBinCommitment = bin
-	statecfg.ExperimentalStreamingCommitment = streaming
 	statecfg.ExperimentalParallelCommitment = parallel
 }
 
@@ -55,7 +52,7 @@ func pbinWriteToml(t *testing.T, dirs datadir.Dirs, content string) string {
 }
 
 func TestPBinVariantFirstStartPersistsBin(t *testing.T) {
-	pbinWithVariantFlags(t, true, false, false)
+	pbinWithVariantFlags(t, true, false)
 	dirs := datadir.New(t.TempDir())
 
 	settings, err := ResolveErigonDBSettings(dirs, log.New(), true)
@@ -69,7 +66,7 @@ func TestPBinVariantFirstStartPersistsBin(t *testing.T) {
 }
 
 func TestPBinVariantHexFirstStartWritesNoVariantKey(t *testing.T) {
-	pbinWithVariantFlags(t, false, false, false)
+	pbinWithVariantFlags(t, false, false)
 	dirs := datadir.New(t.TempDir())
 
 	settings, err := ResolveErigonDBSettings(dirs, log.New(), true)
@@ -82,7 +79,7 @@ func TestPBinVariantHexFirstStartWritesNoVariantKey(t *testing.T) {
 }
 
 func TestPBinVariantFlaglessRestartStaysBin(t *testing.T) {
-	pbinWithVariantFlags(t, true, false, false)
+	pbinWithVariantFlags(t, true, false)
 	dirs := datadir.New(t.TempDir())
 	_, err := ResolveErigonDBSettings(dirs, log.New(), true)
 	require.NoError(t, err)
@@ -97,7 +94,7 @@ func TestPBinVariantFlaglessRestartStaysBin(t *testing.T) {
 }
 
 func TestPBinVariantHexDatadirRefusesBinFlag(t *testing.T) {
-	pbinWithVariantFlags(t, true, false, false)
+	pbinWithVariantFlags(t, true, false)
 
 	for name, content := range map[string]string{
 		"absent_field": "step_size = 100\nsteps_in_frozen_file = 8\n",
@@ -112,35 +109,24 @@ func TestPBinVariantHexDatadirRefusesBinFlag(t *testing.T) {
 	}
 }
 
-func TestPBinVariantBinDatadirRefusesStreamingAndParallel(t *testing.T) {
-	const binToml = "step_size = 100\nsteps_in_frozen_file = 8\ntrie_variant = \"bin\"\n"
-
-	t.Run("streaming", func(t *testing.T) {
-		pbinWithVariantFlags(t, false, true, false)
-		dirs := datadir.New(t.TempDir())
-		pbinWriteToml(t, dirs, binToml)
-		_, err := ResolveErigonDBSettings(dirs, log.New(), false)
-		require.ErrorContains(t, err, "sequential-only")
-	})
-	t.Run("parallel", func(t *testing.T) {
-		pbinWithVariantFlags(t, false, false, true)
-		dirs := datadir.New(t.TempDir())
-		pbinWriteToml(t, dirs, binToml)
-		_, err := ResolveErigonDBSettings(dirs, log.New(), false)
-		require.ErrorContains(t, err, "sequential-only")
-	})
+func TestPBinVariantBinDatadirRefusesParallel(t *testing.T) {
+	pbinWithVariantFlags(t, false, true)
+	dirs := datadir.New(t.TempDir())
+	pbinWriteToml(t, dirs, "step_size = 100\nsteps_in_frozen_file = 8\ntrie_variant = \"bin\"\n")
+	_, err := ResolveErigonDBSettings(dirs, log.New(), false)
+	require.ErrorContains(t, err, "sequential-only")
 }
 
 func TestPBinVariantRefusesReferences(t *testing.T) {
 	t.Run("persisted", func(t *testing.T) {
-		pbinWithVariantFlags(t, false, false, false)
+		pbinWithVariantFlags(t, false, false)
 		dirs := datadir.New(t.TempDir())
 		pbinWriteToml(t, dirs, "step_size = 100\nsteps_in_frozen_file = 8\nreferences_in_commitment_branches = true\ntrie_variant = \"bin\"\n")
 		_, err := ResolveErigonDBSettings(dirs, log.New(), false)
 		require.ErrorContains(t, err, "references_in_commitment_branches")
 	})
 	t.Run("first_start", func(t *testing.T) {
-		pbinWithVariantFlags(t, true, false, false)
+		pbinWithVariantFlags(t, true, false)
 		dirs := datadir.New(t.TempDir())
 		refs := true
 		_, err := ResolveErigonDBSettingsWithRefsDefault(dirs, log.New(), true, &refs)
@@ -149,7 +135,7 @@ func TestPBinVariantRefusesReferences(t *testing.T) {
 }
 
 func TestPBinVariantLegacyDatadirRefusesBin(t *testing.T) {
-	pbinWithVariantFlags(t, true, false, false)
+	pbinWithVariantFlags(t, true, false)
 	dirs := datadir.New(t.TempDir())
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, datadir.PreverifiedFileName), []byte(""), 0644))
 
@@ -158,7 +144,7 @@ func TestPBinVariantLegacyDatadirRefusesBin(t *testing.T) {
 }
 
 func TestPBinVariantUnknownVariantRefused(t *testing.T) {
-	pbinWithVariantFlags(t, false, false, false)
+	pbinWithVariantFlags(t, false, false)
 	dirs := datadir.New(t.TempDir())
 	pbinWriteToml(t, dirs, "step_size = 100\nsteps_in_frozen_file = 8\ntrie_variant = \"verkle\"\n")
 
@@ -167,7 +153,7 @@ func TestPBinVariantUnknownVariantRefused(t *testing.T) {
 }
 
 func TestPBinVariantFreshWithDownloaderPersistsBin(t *testing.T) {
-	pbinWithVariantFlags(t, true, false, false)
+	pbinWithVariantFlags(t, true, false)
 	dirs := datadir.New(t.TempDir())
 
 	settings, err := ResolveErigonDBSettings(dirs, log.New(), false)
@@ -184,7 +170,7 @@ func TestPBinVariantFreshWithDownloaderPersistsBin(t *testing.T) {
 // snapshot hashes. Without a persisted variant that reads as a legacy datadir at the
 // next resolve, and the bin run gets refused on its own fresh datadir.
 func TestPBinVariantSurvivesEmptyPreverifiedFromSnapshotsStage(t *testing.T) {
-	pbinWithVariantFlags(t, true, false, false)
+	pbinWithVariantFlags(t, true, false)
 	dirs := datadir.New(t.TempDir())
 
 	_, err := ResolveErigonDBSettings(dirs, log.New(), false)
@@ -198,7 +184,7 @@ func TestPBinVariantSurvivesEmptyPreverifiedFromSnapshotsStage(t *testing.T) {
 }
 
 func TestPBinVariantFreshWithDownloaderRefusesDeliveredHexToml(t *testing.T) {
-	pbinWithVariantFlags(t, true, false, false)
+	pbinWithVariantFlags(t, true, false)
 	dirs := datadir.New(t.TempDir())
 
 	_, err := ResolveErigonDBSettings(dirs, log.New(), false)

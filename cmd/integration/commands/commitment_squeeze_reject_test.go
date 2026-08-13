@@ -61,7 +61,6 @@ func TestRefuseSqueezeForBinTarget(t *testing.T) {
 		{"hex with squeeze", commitment.VariantHexPatriciaTrie, true, false},
 		{"hex without squeeze", commitment.VariantHexPatriciaTrie, false, false},
 		{"parallel hex with squeeze", commitment.VariantParallelHexPatricia, true, false},
-		{"streaming hex with squeeze", commitment.VariantStreamingHexPatricia, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := refuseSqueezeForBinTarget(resolveTarget(t, tc.variant), tc.squeeze)

@@ -35,16 +35,15 @@ func withBinCommitmentFlag(t *testing.T, on bool) {
 	statecfg.ExperimentalBinCommitment = on
 }
 
-// Bin is a persisted datadir property, so WithoutParallelCommitment demotes only the
+// Bin is a persisted datadir property, so WithSequentialCommitment demotes only the
 // experimental parallel/streaming tries: demoting bin would give a hex block-0 root.
-func TestPBinWithoutParallelCommitmentKeepsBin(t *testing.T) {
+func TestPBinWithSequentialCommitmentKeepsBin(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		flag commitment.TrieVariant
 		want commitment.TrieVariant
 	}{
 		{"hex", commitment.VariantHexPatriciaTrie, commitment.VariantHexPatriciaTrie},
-		{"streaming", commitment.VariantStreamingHexPatricia, commitment.VariantHexPatriciaTrie},
 		{"parallel", commitment.VariantParallelHexPatricia, commitment.VariantHexPatriciaTrie},
 		{"bin", commitment.VariantBinPatriciaTrie, commitment.VariantBinPatriciaTrie},
 	} {
@@ -57,7 +56,7 @@ func TestPBinWithoutParallelCommitmentKeepsBin(t *testing.T) {
 			require.NoError(t, err)
 			defer tx.Rollback()
 
-			sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithoutParallelCommitment())
+			sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithSequentialCommitment())
 			require.NoError(t, err)
 			defer sd.Close()
 

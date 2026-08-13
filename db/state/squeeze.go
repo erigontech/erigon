@@ -908,7 +908,7 @@ func (t RebuildTarget) Resolve() (RebuildTarget, error) {
 		if t.HashName != commitment.PBinHashKeccak && t.HashName != commitment.PBinHashBlake3 {
 			return RebuildTarget{}, fmt.Errorf("commitment rebuild: unknown hash suite %q", t.HashName)
 		}
-	case commitment.VariantHexPatriciaTrie, commitment.VariantParallelHexPatricia, commitment.VariantStreamingHexPatricia:
+	case commitment.VariantHexPatriciaTrie, commitment.VariantParallelHexPatricia:
 		if t.HashName != "" {
 			return RebuildTarget{}, fmt.Errorf("commitment rebuild: hash suite %q needs the bin trie target", t.HashName)
 		}
@@ -1167,7 +1167,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			domains.SetTxNum(lastTxnumInShard - 1)
 			currentTxNum := lastTxnumInShard - 1
 			domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewFilesOnlyStateReader(rwTx, lastTxnumInShard-1))
-			if target.Variant == commitment.VariantParallelHexPatricia || target.Variant == commitment.VariantStreamingHexPatricia {
+			if target.Variant == commitment.VariantParallelHexPatricia {
 				domains.EnableParaTrieDB(rwDb)
 			}
 

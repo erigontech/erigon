@@ -111,11 +111,10 @@ var Defaults = Config{
 		ProduceE2:  true,
 		ProduceE3:  true,
 	},
-	FcuTimeout:          1 * time.Second,
-	FcuBackgroundPrune:  true,
-	FcuBackgroundCommit: false, // to enable, we need to 1) have rawdb API go via execctx and 2) revive Coherent cache for rpcdaemon
-	ExperimentalBAL:     false,
-	WarmupKzgCtxOnInit:  true,
+	FcuTimeout:         1 * time.Second,
+	FcuBackgroundPrune: true,
+	ExperimentalBAL:    false,
+	WarmupKzgCtxOnInit: true,
 }
 
 const DefaultChainDBPageSize = 16 * datasize.KB
@@ -276,9 +275,8 @@ type Config struct {
 	AllowAA bool
 
 	// fork choice update timeout
-	FcuTimeout          time.Duration
-	FcuBackgroundPrune  bool
-	FcuBackgroundCommit bool
+	FcuTimeout         time.Duration
+	FcuBackgroundPrune bool
 
 	MCPAddress string
 
@@ -321,14 +319,13 @@ type Sync struct {
 	LoopBlockLimit             uint
 	ParallelStateFlushing      bool
 
-	ChaosMonkey                     bool
-	AlwaysGenerateChangesets        bool
-	MaxReorgDepth                   uint64
-	KeepExecutionProofs             bool
-	ExperimentalParallelCommitment  bool
-	ExperimentalStreamingCommitment bool
-	ExperimentalBinCommitment       bool
-	BinCommitmentHash               string
-	PersistReceiptsCacheV2          bool
-	SnapshotDownloadToBlock         uint64 // exclusive [0,toBlock)
+	ChaosMonkey                    bool
+	AlwaysGenerateChangesets       bool
+	MaxReorgDepth                  uint64
+	KeepExecutionProofs            bool
+	ExperimentalParallelCommitment bool
+	ExperimentalBinCommitment      bool
+	BinCommitmentHash              string
+	PersistReceiptsCacheV2         bool
+	SnapshotDownloadToBlock        uint64 // exclusive [0,toBlock)
 }

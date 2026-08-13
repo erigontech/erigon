@@ -161,6 +161,11 @@ type commitmentCalculator struct {
 	lastComputedAheadBlock uint64
 	hasComputedAhead       bool
 
+	// computeAheadStopped marks that the contiguity guard has already rejected a
+	// block in this batch. The chain cannot re-anchor, so every later block hits
+	// the same guard — the drop to the incremental path is reported once.
+	computeAheadStopped bool
+
 	// signalCtx is the shared executor context carrying the stopCause. The
 	// calculator reads it (never its own compute ctx) to cap compute-ahead at the
 	// batch's coalesce block M — compute/publish run on the separate uncancelled
@@ -293,15 +298,38 @@ func (cc *commitmentCalculator) loop(ctx context.Context) {
 				in = nil
 				continue
 			}
+			reqs = cc.drainBlockRequests(ctx, reqs)
 			cc.handleMessage(ctx, result)
 		case req, ok := <-reqs:
-			if !ok {
-				reqs = nil
-				continue
-			}
-			cc.handleBlockRequest(ctx, req)
+			reqs = cc.acceptBlockRequest(ctx, reqs, req, ok)
 		}
 	}
+}
+
+// acceptBlockRequest handles a request received from reqs, returning the channel
+// to keep selecting on — nil once it is closed.
+func (cc *commitmentCalculator) acceptBlockRequest(ctx context.Context, reqs chan *blockRequest, req *blockRequest, ok bool) chan *blockRequest {
+	if !ok {
+		return nil
+	}
+	cc.handleBlockRequest(ctx, req)
+	return reqs
+}
+
+// drainBlockRequests handles every buffered request, returning nil once the
+// channel is closed. A block's request is always sent before the exec that
+// produces its result, so draining before handling a result keeps that order
+// past select, which would otherwise let the result drop the request as stale.
+func (cc *commitmentCalculator) drainBlockRequests(ctx context.Context, reqs chan *blockRequest) chan *blockRequest {
+	for reqs != nil {
+		select {
+		case req, ok := <-reqs:
+			reqs = cc.acceptBlockRequest(ctx, reqs, req, ok)
+		default:
+			return reqs
+		}
+	}
+	return nil
 }
 
 // perBlockCompute reports whether the given block computes commitment at its
@@ -347,11 +375,9 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		// the BAL (checkpointStepsFromBAL), computed while the domain sat exactly at
 		// each edge. Re-checkpointing here from the partially-accumulated cc.state
 		// on an already-advanced domain would let the last writer win and leave the
-		// step's commitment .kv inconsistent — so the incremental path is normally
-		// the sole checkpointer for a block. The in/reqs select has no cross-channel
-		// priority, so a late-consumed blockRequest can leave computedAhead[n] unset
-		// when this hook fires and let both paths checkpoint the same edge; that is
-		// benign — both emit identical values at the same txNum (idempotent).
+		// step's commitment .kv inconsistent — so exactly one of the two paths
+		// checkpoints a block. loop() drains a block's request before its results,
+		// so computedAhead[n] is already settled when this hook fires.
 		if !cc.computedAhead[r.blockNum] && cc.doms.IsUnfrozenStepEdge(cc.roTx, r.txNum) {
 			cc.computeStepBoundary(ctx, commitTarget{blockNum: r.blockNum, blockHash: r.blockHash, lastTxNum: r.txNum})
 		}
@@ -453,11 +479,10 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 // BALDrivenCommitment is set, else incremental — then tries to compute the
 // block ahead of its result stream (maybeComputeAhead).
 func (cc *commitmentCalculator) handleBlockRequest(ctx context.Context, req *blockRequest) {
-	// Record the batch's first block before the drop-guard: if blockResult(n) is
-	// consumed before blockRequest(n) (the in/reqs select has no cross-channel
-	// ordering), a dropped first request must still set firstBlockNum to n rather
-	// than leave n+1 to claim it — else computeAheadGateOpen and the contiguity guard
-	// are both bypassed via n == firstBlockNum and n+1 computes ahead on a baseline missing n.
+	// Record the batch's first block before the drop-guard below: were the first
+	// request ever dropped, leaving n+1 to claim firstBlockNum would bypass
+	// computeAheadGateOpen's and the contiguity guard's n == firstBlockNum
+	// exception, letting n+1 compute ahead on a baseline missing n.
 	if !cc.hasFirstBlock {
 		cc.firstBlockNum = req.blockNum
 		cc.hasFirstBlock = true
@@ -523,9 +548,25 @@ func (cc *commitmentCalculator) maybeComputeAhead(ctx context.Context, n uint64)
 		return
 	}
 	if n != cc.firstBlockNum && !(cc.hasComputedAhead && cc.lastComputedAheadBlock == n-1) {
+		cc.reportComputeAheadStopped(n)
 		return
 	}
 	cc.computeBlockFromBAL(ctx, pb)
+}
+
+// reportComputeAheadStopped logs the first block the contiguity guard rejects.
+// Compute-ahead never re-anchors within a batch, so this one line marks where the
+// whole remaining batch fell back to incremental commitment.
+func (cc *commitmentCalculator) reportComputeAheadStopped(n uint64) {
+	if cc.computeAheadStopped {
+		return
+	}
+	cc.computeAheadStopped = true
+	if cc.logger == nil {
+		return
+	}
+	cc.logger.Info("["+cc.logPrefix+"] BAL compute-ahead stopped, rest of batch computes incrementally",
+		"block", n, "lastComputedAhead", cc.lastComputedAheadBlock, "hasComputedAhead", cc.hasComputedAhead)
 }
 
 // computeBlockFromBAL computes block pb's commitment from its BAL, ahead of the

@@ -1168,14 +1168,6 @@ var (
 		Usage: "EXPERIMENTAL: enables fully parallel trie for commitment (ParallelPatriciaHashed).",
 		Value: false,
 	}
-	// ExperimentalStreamingCommitmentFlag selects the StreamingCommitter, which
-	// overlaps commitment fold work with block execution. Default off; takes
-	// precedence over the parallel flag when set.
-	ExperimentalStreamingCommitmentFlag = cli.BoolFlag{
-		Name:  "experimental.streaming-commitment",
-		Usage: "EXPERIMENTAL: enables streaming trie for commitment (StreamingCommitter, overlaps folding with execution). Takes precedence over --experimental.parallel-commitment if set.",
-		Value: false,
-	}
 	// ExperimentalBinCommitmentFlag selects the EIP-8297 binary commitment trie.
 	// A whole-datadir property: honoured on a fresh datadir, persisted to
 	// erigondb.toml there, and adopted from it on later starts.
@@ -1225,11 +1217,6 @@ var (
 		Name:  "fcu.background.prune",
 		Usage: "Enables background pruning post fcu",
 		Value: ethconfig.Defaults.FcuBackgroundPrune,
-	}
-	FcuBackgroundCommitFlag = cli.BoolFlag{
-		Name:  "fcu.background.commit",
-		Usage: "Enables background flush and commit",
-		Value: ethconfig.Defaults.FcuBackgroundCommit,
 	}
 	MCPDisableFlag = cli.BoolFlag{
 		Name:  "mcp.disable",
@@ -2084,10 +2071,6 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 		cfg.ExperimentalParallelCommitment = true
 	}
 
-	if ctx.Bool(ExperimentalStreamingCommitmentFlag.Name) {
-		cfg.ExperimentalStreamingCommitment = true
-	}
-
 	if ctx.Bool(ExperimentalBinCommitmentFlag.Name) {
 		cfg.ExperimentalBinCommitment = true
 		// The variant has to be process-wide before any genesis is computed here:
@@ -2108,7 +2091,6 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 
 	cfg.FcuTimeout = ctx.Duration(FcuTimeoutFlag.Name)
 	cfg.FcuBackgroundPrune = ctx.Bool(FcuBackgroundPruneFlag.Name)
-	cfg.FcuBackgroundCommit = ctx.Bool(FcuBackgroundCommitFlag.Name)
 
 	// Executor performance toggles. When the user explicitly sets the CLI
 	// flag, it overrides the env-var default that dbg read at package init.

@@ -148,9 +148,8 @@ type TrieVariant string
 
 const (
 	// VariantHexPatriciaTrie used as default commitment approach
-	VariantHexPatriciaTrie      TrieVariant = "hex-patricia-hashed"
-	VariantParallelHexPatricia  TrieVariant = "hex-parallel-patricia-hashed"
-	VariantStreamingHexPatricia TrieVariant = "hex-streaming-patricia-hashed"
+	VariantHexPatriciaTrie     TrieVariant = "hex-patricia-hashed"
+	VariantParallelHexPatricia TrieVariant = "hex-parallel-patricia-hashed"
 	// VariantBinPatriciaTrie is EIP-8297's binary tree. Experimental: a
 	// whole-datadir property resolved at first start, sequential only, and
 	// unsupported on the paths listed in PBinPatriciaHashed's doc.
@@ -164,13 +163,6 @@ func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *
 		// ParallelPatriciaHashed requires ModeParallel to allocate the prefix-trie state it reads.
 		trie := NewParallelPatriciaHashed(nil, length.Addr, cfg)
 		tree := NewUpdates(ModeParallel, tmpdir, KeyToHexNibbleHash)
-		return trie, tree
-	case VariantStreamingHexPatricia:
-		trie := NewParallelPatriciaHashed(nil, length.Addr, cfg)
-		sc := NewStreamingCommitter(nil, length.Addr, cfg)
-		trie.SetStreamingCommitter(sc)
-		tree := NewUpdates(ModeParallel, tmpdir, KeyToHexNibbleHash)
-		tree.SetStreamingCommitter(sc)
 		return trie, tree
 	case VariantBinPatriciaTrie:
 		// ModeDirect regardless of the argument: the parallel prefix trie is a
@@ -709,8 +701,11 @@ func (branchData BranchData) ChildCount() int {
 	return bits.OnesCount16(binary.BigEndian.Uint16(branchData[2:4]))
 }
 
+// IsTombstone checks if given branch a domain's tombstone (will be removed on next .kv merge)
+func (branchData BranchData) IsTombstone() bool { return len(branchData) == 0 }
+
 func (branchData BranchData) String() string {
-	if len(branchData) == 0 {
+	if branchData.IsTombstone() {
 		return ""
 	}
 	touchMap := binary.BigEndian.Uint16(branchData[0:])
@@ -935,6 +930,9 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 // touch - whether this child has been modified or deleted in this branchData (corresponding bit in touchMap is set)
 // after - whether after this branchData application, the child is present in the tree or not (corresponding bit in afterMap is set)
 func (branchData BranchData) IsComplete() bool {
+	if len(branchData) < 4 {
+		return false
+	}
 	touchMap := binary.BigEndian.Uint16(branchData[0:])
 	afterMap := binary.BigEndian.Uint16(branchData[2:])
 	return ^touchMap&afterMap == 0
@@ -1042,7 +1040,7 @@ func (branchData BranchData) decodeCells() (touchMap, afterMap uint16, row [16]*
 }
 
 func (branchData BranchData) Validate(branchKey []byte) error {
-	if len(branchData) == 0 {
+	if branchData.IsTombstone() {
 		return nil
 	}
 	_, afterMap, row, err := branchData.decodeCells()
@@ -1390,12 +1388,6 @@ const (
 	ModeParallel Mode = 3
 )
 
-// streamingSink receives touched keys for a StreamingCommitter's fold; plainKey
-// and update must stay valid until the committer's Process call.
-type streamingSink interface {
-	TouchKey(hashedKey, plainKey []byte, update *Update)
-}
-
 func (m Mode) String() string {
 	switch m {
 	case ModeDisabled:
@@ -1436,10 +1428,6 @@ type Updates struct {
 	direct         []KeyUpdate
 	directBytes    int
 	directMemLimit int
-
-	// streaming (ModeParallel only) forwards every touched key to streamer.
-	streaming bool
-	streamer  streamingSink
 
 	batchSlab []KeyUpdate // grow-only slab for HashSort batch (avoids per-key heap allocs)
 
@@ -1516,13 +1504,9 @@ func (t *Updates) hashKey(key []byte) []byte {
 	return t.hasher(key)
 }
 
-// NewEmpty creates a fresh Updates matching the receiver. The streaming sink must
-// carry over, or a buffer rotated mid-stream silently computes a stale root.
+// NewEmpty creates a fresh Updates matching the receiver.
 func (t *Updates) NewEmpty() *Updates {
-	n := NewUpdates(t.mode, t.tmpdir, t.hasher)
-	n.streamer = t.streamer
-	n.streaming = t.streaming
-	return n
+	return NewUpdates(t.mode, t.tmpdir, t.hasher)
 }
 
 func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
@@ -1625,15 +1609,6 @@ func (t *Updates) spillDirect() {
 
 func (t *Updates) Mode() Mode { return t.mode }
 
-// SetStreamingCommitter forwards ModeParallel touches to sink; nil disables streaming.
-func (t *Updates) SetStreamingCommitter(sink streamingSink) {
-	t.streamer = sink
-	t.streaming = sink != nil
-}
-
-// Streaming reports whether touches are being forwarded to a StreamingCommitter.
-func (t *Updates) Streaming() bool { return t.streaming }
-
 // PlainKeys returns a copy of the set of plain keys that have been touched.
 // Meaningful only in ModeDirect and ModeParallel; nil otherwise.
 func (t *Updates) PlainKeys() map[string]struct{} {
@@ -1681,9 +1656,8 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 			t.keys[key] = struct{}{}
 		}
 	case ModeParallel:
-		// The dedup map only guards plain-key interning: every touch reaches the prefix
-		// trie and the streamer, so a same-block re-touch invalidates any eager fold of
-		// its split instead of leaving it stale.
+		// The dedup map only guards plain-key interning: every touch still reaches
+		// the prefix trie, so a same-block re-touch updates its merged value there.
 		keyBytes := common.ToBytesZeroCopy(key)
 		hashedKey := t.hashKey(keyBytes)
 		ik := keyBytes
@@ -1692,9 +1666,6 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 			t.keys[key] = struct{}{}
 		}
 		t.parallel.Insert(hashedKey, ik, nil)
-		if t.streaming && t.streamer != nil {
-			t.streamer.TouchKey(hashedKey, ik, nil)
-		}
 	default:
 	}
 }
@@ -1763,9 +1734,6 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 			t.keys[key] = struct{}{}
 		}
 		t.parallel.Insert(hashedKey, ik, u)
-		if t.streaming && t.streamer != nil {
-			t.streamer.TouchKey(hashedKey, ik, u)
-		}
 	default:
 	}
 }
