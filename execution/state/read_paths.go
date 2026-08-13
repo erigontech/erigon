@@ -18,14 +18,6 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// vmapAddrOrigin (A/B gate, temporary): on the first cold read of an account,
-// readAccountInternal reads the whole committed account once and seeds it into
-// the versionMap AddressPath at originTxIndex, so subsequent reads and apply
-// resolve the base from the versionMap instead of re-reading the app store
-// (SharedDomain). Step 1 of collapsing the block cache into the versionMap.
-// Removed once proven.
-var vmapAddrOrigin = dbg.EnvBool("VMAP_ADDR_ORIGIN", false)
-
 // originTxIndex is the versionMap index of the pre-block committed base ("origin"
 // = all account fields read at once, the old stateObject.original). It is the
 // highest slot below every real task index: the lowest task is the block-begin
@@ -835,7 +827,7 @@ func readAccountInternal(s *IntraBlockState, addr accounts.Address) (*accounts.A
 		// path, whose self-destruct dependency travels on the field reads. Recording
 		// it would trip the origin cross-check (an Incarnation cell from the destruct
 		// exists) and invalidate the tx forever.
-		if vmapAddrOrigin && r.version.TxIndex == originTxIndex && gateOriginAccount(s, addr, acc) == nil {
+		if r.version.TxIndex == originTxIndex && gateOriginAccount(s, addr, acc) == nil {
 			return nil, r.source, r.version, nil
 		}
 		if r.recordVR {
@@ -843,12 +835,10 @@ func readAccountInternal(s *IntraBlockState, addr accounts.Address) (*accounts.A
 		}
 		return acc, r.source, r.version, nil
 	case outcomeReturnZero, outcomeReturnDefault:
-		// versionMap miss.  Under vmapAddrOrigin this is the single point where
-		// the committed whole-account origin enters the execution store.
-		if vmapAddrOrigin {
-			if acc, src, ver, seeded, err := seedOrigin(s, addr); seeded {
-				return acc, src, ver, err
-			}
+		// versionMap miss: the single point where the committed whole-account
+		// origin enters the execution store.
+		if acc, src, ver, seeded, err := seedOrigin(s, addr); seeded {
+			return acc, src, ver, err
 		}
 		// outcomeReturnDefault from the skipStorage branch may carry
 		// recordVR=true.  The AddressPath defaultV is nil.
@@ -869,7 +859,7 @@ func readAccountInternal(s *IntraBlockState, addr accounts.Address) (*accounts.A
 // balance) is absent from the versionMap and the apply compose wipes it. No-op
 // unless the origin gate is on and the account exists.
 func SeedOrigin(vm *VersionMap, addr accounts.Address, acc *accounts.Account) {
-	if !vmapAddrOrigin || vm == nil || acc == nil {
+	if vm == nil || acc == nil {
 		return
 	}
 	origin := *acc
@@ -890,8 +880,8 @@ func gateOriginAccount(s *IntraBlockState, addr accounts.Address, acc *accounts.
 	return acc
 }
 
-// seedOrigin handles an AddressPath versionMap miss under vmapAddrOrigin: it reads
-// the committed pre-block account once (the "origin" = all fields at once), seeds
+// seedOrigin handles an AddressPath versionMap miss: it reads the committed
+// pre-block account once (the "origin" = all fields at once), seeds
 // it into the versionMap at originTxIndex so later reads and apply resolve the
 // base from the execution store, and records this read at originTxIndex so the
 // tx's own re-reads agree (no self-dependency). seeded=false means the account

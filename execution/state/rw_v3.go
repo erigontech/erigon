@@ -257,7 +257,7 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 				// its base stays empty so cleared fields cannot be resurrected.
 				acc := accounts.NewAccount()
 				if !d.selfDestruct {
-					if vw, ok := writes.(*versionMapWriteView); vmapAddrOrigin && ok {
+					if vw, ok := writes.(*versionMapWriteView); ok {
 						// Execution-store base: the pre-tx account composed from the
 						// versionMap (seeded origin + prior txs' field cells). One-way
 						// fold — no app-store read, no block cache, no stateObject. Every
@@ -285,21 +285,6 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 						}
 					} else if enc0, err := getLatestAcct(address[:]); err == nil && len(enc0) > 0 {
 						_ = accounts.DeserialiseV3(&acc, enc0)
-					}
-				}
-				// derive-and-verify (tripwire, no behavior change): createContract ⟺
-				// this tx bumped Incarnation (new > base incarnation). Proves the
-				// CreateContractPath cell is redundant with the incarnation write
-				// before the path is dropped. acc is the pre-overlay base here.
-				if vmapAddrOrigin {
-					derivedCreateContract := d.incarnation != nil && *d.incarnation > acc.Incarnation
-					if derivedCreateContract != d.createContract {
-						ni := int64(-1)
-						if d.incarnation != nil {
-							ni = int64(*d.incarnation)
-						}
-						fmt.Printf("CC-DERIVE-MISMATCH addr=%x baseInc=%d newInc=%d derived=%v actual=%v selfDestruct=%v codeWritten=%v\n",
-							addr, acc.Incarnation, ni, derivedCreateContract, d.createContract, d.selfDestruct, d.codeWritten)
 					}
 				}
 				if d.balance != nil {
