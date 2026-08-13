@@ -536,22 +536,6 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 			cbCheck.baseReader = state.NewCurrentCachedReaderV3(pe.domainsRead().AsGetter(applyRoTx), nil)
 		}
 
-		// consumerApply: the streaming per-tx apply expressed as an ordered
-		// ResultConsumer pipeline (domainWriter then logWriter) driven in this
-		// apply goroutine. domain-before-log matches the inline order (state then
-		// indexes). Errors route through streamApplyErr like the inline path.
-		var applyPipeline *consumerPipeline
-		if splitApply && consumerApply {
-			applyPipeline = &consumerPipeline{consumers: []ResultConsumer{
-				&domainWriter{pe: pe, rwTx: rwTx},
-				&logWriter{pe: pe, rwTx: rwTx},
-			}}
-			if err := applyPipeline.open(ctx); err != nil {
-				return fmt.Errorf("apply loop: open consumer pipeline: %w", err)
-			}
-			defer func() { _ = applyPipeline.closeAll(err) }()
-		}
-
 		// handleCommitResult processes a single commitment result from the
 		// calculator. Defined here so both the blockResult handler and the
 		// rootResults case in the main select can use it.
@@ -732,13 +716,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					// moves here: streamApply applies each tx to sd.mem as it arrives
 					// (in publish order); otherwise buffer and fold at block end.
 					if splitApply {
-						if consumerApply {
-							if streamApplyErr == nil && !finalized {
-								if err := applyPipeline.onTx(ctx, applyResult); err != nil {
-									streamApplyErr = fmt.Errorf("consumerApply block=%d txNum=%d: %w", applyResult.blockNum, applyResult.txNum, err)
-								}
-							}
-						} else if streamApply {
+						if streamApply {
 							if streamApplyErr == nil && !finalized {
 								if err := pe.rs.ApplyStateWrites(ctx, rwTx, applyResult.blockNum, applyResult.txNum, applyResult.writes, nil, applyResult.rules, nil); err != nil {
 									streamApplyErr = fmt.Errorf("streamApply state block=%d txNum=%d: %w", applyResult.blockNum, applyResult.txNum, err)
@@ -798,18 +776,12 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					// blockCache=nil writes domains directly; the versionMap composes
 					// each tx's base. Finalize skips ApplyTxIndexes, matching the exec loop.
 					if splitApply {
-						if streamApply || consumerApply {
+						if streamApply {
 							if streamApplyErr != nil {
 								err := streamApplyErr
 								streamApplyErr = nil
 								failInfra(err)
 								continue
-							}
-							if consumerApply {
-								if err := applyPipeline.onBlock(ctx, applyResult); err != nil {
-									failInfra(err)
-									continue
-								}
 							}
 						} else {
 							restoreCS := pe.bindBlockChangesetForFold(applyResult.BlockNum, applyResult.BlockHash)
@@ -2071,13 +2043,6 @@ func SetSplitApplyStackForTest() (restore func()) {
 // until RemoveTail, so no concurrent worker reads a half-streamed key from sd.mem.
 var streamApply = dbg.EnvBool("STREAM_APPLY", false)
 
-// consumerApply routes the streaming per-tx apply through the ResultConsumer
-// pipeline (domainWriter + logWriter) instead of the inline ApplyStateWrites/
-// ApplyTxIndexes calls. Behavior-identical to streamApply — same per-tx work in
-// the same order in the same apply goroutine (shape A: logical split, single
-// shared-domain writer) — but expressed as the consumer framework later steps
-// (coinbase fold, extra sinks, backpressure) extend. Only consulted under splitApply.
-var consumerApply = dbg.EnvBool("CONSUMER_APPLY", false)
 
 // selfLoop is the true Block-STM model: workers own execution AND validation.
 // Each worker flushes its writes to the versionMap speculatively (as estimate),
