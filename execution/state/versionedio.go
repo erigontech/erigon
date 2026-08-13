@@ -1640,13 +1640,13 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 	// AddressPath / stateReader. Synthesize an empty account and let
 	// applyVersionedUpdates apply the BAL-preloaded fields.
 	if vr.versionMap != nil {
+		// Whether a field was applied, not whether the result differs from the zero
+		// account: the wipe writes EmptyCodeHash, which differs from a zero
+		// account's NilCodeHash on its own and would synthesize a record for an
+		// address that holds nothing.
 		var synth accounts.Account
-		updated := vr.applyVersionedUpdates(address, synth)
-		// Only return the synthesized account if applyVersionedUpdates
-		// actually applied at least one field — otherwise we'd return a
-		// zero account for addresses that have no versionMap entries.
-		if updated != synth {
-			return &updated, nil
+		if vr.versionMap.applySubFieldWrites(address, vr.txIndex, &synth) {
+			return &synth, nil
 		}
 	}
 
@@ -1703,8 +1703,12 @@ func (vr versionedStateReader) ReadAccountDataForDebug(address accounts.Address)
 }
 
 func (vr versionedStateReader) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
-	if r, ok := vr.reads.GetStorage(address, key); ok {
-		return r.Val, true, nil
+	// A non-zero recorded read is the tx's own conclusion. A zero one may instead
+	// be the zero recordWipedRead left behind, which is an absent slot rather than
+	// one holding zero, so the map settles it.
+	recorded, hasRecorded := vr.reads.GetStorage(address, key)
+	if hasRecorded && !recorded.Val.IsZero() {
+		return recorded.Val, true, nil
 	}
 
 	val, found, wiped := vr.versionMap.readStorageLive(address, key, vr.txIndex)
@@ -1713,6 +1717,9 @@ func (vr versionedStateReader) ReadAccountStorage(address accounts.Address, key 
 	}
 	if wiped {
 		return uint256.Int{}, false, nil
+	}
+	if hasRecorded {
+		return recorded.Val, true, nil
 	}
 
 	if vr.stateReader != nil {
@@ -1731,21 +1738,19 @@ func (vr versionedStateReader) HasStorage(address accounts.Address) (bool, error
 		}
 	}
 
-	live, wiped := vr.versionMap.liveStorage(address, vr.txIndex)
-	if live {
-		return true, nil
+	// Ask the domain before walking the map: a contract with pre-block storage
+	// answers here, and only an account the domain does not answer for — which is
+	// the CREATE case this serves — pays for the per-slot scan.
+	wipedAt, wiped := vr.versionMap.storageWipedAt(address, vr.txIndex)
+	if !wiped && vr.stateReader != nil {
+		has, err := vr.stateReader.HasStorage(address)
+		if has || err != nil {
+			return has, err
+		}
 	}
-	// A destruct erased the pre-block domain too, so with nothing live above it
-	// the fall-through must not answer from it.
-	if wiped {
-		return false, nil
-	}
-
-	if vr.stateReader != nil {
-		return vr.stateReader.HasStorage(address)
-	}
-
-	return false, nil
+	// Either the destruct erased whatever the domain holds, or the domain holds
+	// nothing and only an in-block write can still make this true.
+	return vr.versionMap.hasLiveSlot(address, wipedAt, wiped, vr.txIndex), nil
 }
 
 // versionedCode resolves code from the read set and the version map, reporting

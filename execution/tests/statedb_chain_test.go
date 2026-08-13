@@ -173,9 +173,12 @@ func TestSelfDestructReceive(t *testing.T) {
 // TestSelfDestructReceive's scenario — self-destruct then revive by value
 // transfer in one block — read back as a whole account rather than through
 // GetCode, which resolves separately and can already report empty while a stale
-// code hash survives on the record. The parallel reader's answer has to match
-// what serial commits, and a pre-block deploy leaves it no in-block CodeHash
-// cell to floor the destruct scan on, so both axes run.
+// code hash survives on the record. A pre-block deploy leaves the reader no
+// in-block CodeHash cell to floor the destruct scan on, so both placements run.
+//
+// Each arm generates and inserts under the same executor, so the header root
+// check is self-consistent and cannot catch a serial-parallel divergence — the
+// per-field assertions are what compare the two.
 //
 // Executor choice is dbg.Exec3Parallel || cfg.experimentalBAL and
 // Exec3Parallel defaults true, so the driver has to flip it — clearing
@@ -266,15 +269,17 @@ func TestSelfDestructReceiveAccountRecord(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, accounts.EmptyCodeHash, hash, "the code hash must agree with the code")
 
-				// The transfer recreates the deleted account at nonce 0. Parallel keeps
+				// The transfer recreates the deleted account, so nonce 0. Parallel keeps
 				// the pre-destruct nonce when the deploy is in the same block — a
-				// writeset normalization divergence these readers do not decide, so
-				// that arm asserts nothing rather than pinning it. erigontech/erigon#23206
-				if !tc.parallel || tc.preBlockDeploy {
-					nonce, err := st.GetNonce(addr)
-					require.NoError(t, err)
-					require.Zero(t, nonce)
+				// writeset normalization divergence these readers do not decide. Pin it
+				// as it stands so the arm still fails when it moves.
+				wantNonce := uint64(0)
+				if tc.parallel && !tc.preBlockDeploy {
+					wantNonce = 1
 				}
+				nonce, err := st.GetNonce(addr)
+				require.NoError(t, err)
+				require.Equal(t, wantNonce, nonce)
 
 				bal, err := st.GetBalance(addr)
 				require.NoError(t, err)

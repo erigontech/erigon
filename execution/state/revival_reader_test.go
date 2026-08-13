@@ -46,6 +46,10 @@ func (r *preBlockStateReader) ReadAccountStorage(_ accounts.Address, key account
 
 func (r *preBlockStateReader) ReadAccountCode(accounts.Address) ([]byte, error) { return r.code, nil }
 
+func (r *preBlockStateReader) ReadAccountCodeSize(accounts.Address) (int, error) {
+	return len(r.code), nil
+}
+
 func (r *preBlockStateReader) HasStorage(accounts.Address) (bool, error) { return true, nil }
 
 // destructThenRevive seeds a version map with a value at tx0, a destruct at tx1
@@ -295,6 +299,10 @@ func TestVersionedStateReader_PreBlockValueWipedByInRangeDestruct(t *testing.T) 
 	require.NoError(t, err)
 	require.Empty(t, code, "nor the pre-block code")
 
+	size, err := vr.ReadAccountCodeSize(addr)
+	require.NoError(t, err)
+	require.Zero(t, size, "code size must agree with code")
+
 	has, err := vr.HasStorage(addr)
 	require.NoError(t, err)
 	require.False(t, has, "HasStorage must agree with ReadAccountStorage")
@@ -445,13 +453,123 @@ func TestSelfdestructWriteSetShape(t *testing.T) {
 	}
 }
 
+// An in-flight incarnation's slot cannot settle the EIP-684/7610 collision
+// check: HasStorage records no read, so nothing re-checks it when that tx
+// re-executes without the write.
+func TestVersionedStateReader_HasStorageIgnoresEstimateSlot(t *testing.T) {
+	t.Parallel()
+	addr := getAddress(121)
+	key := accounts.InternKey(common.HexToHash("0x01"))
+
+	vm := NewVersionMap(nil)
+	writeFor(vm, addr, StoragePath, key, Version{TxIndex: 1}, *uint256.NewInt(5), true)
+	vm.MarkEstimate(addr, StoragePath, key, 1)
+
+	vr := NewVersionedStateReader(3, ReadSet{}, vm, newAccountStateReader(addr))
+	has, err := vr.HasStorage(addr)
+	require.NoError(t, err)
+	require.False(t, has, "the only slot belongs to a tx that has not committed")
+}
+
+// The wipe does not honour an uncommitted destruct, so consuming the Balance and
+// Incarnation that same destruct wrote would build a record — contract code and
+// nonce, but the destruct's zero balance — that no state ever held.
+func TestVersionedStateReader_UncommittedDestructLeavesRecordWhole(t *testing.T) {
+	t.Parallel()
+	addr := getAddress(122)
+
+	reader := newAccountStateReader(addr)
+	pre := reader.accounts[addr]
+	pre.Nonce = 7
+	pre.Incarnation = 1
+	pre.CodeHash = accounts.NewCode([]byte{0x60, 0x00}).Hash
+
+	vm := NewVersionMap(nil)
+	destruct := Version{TxIndex: 1}
+	writeFor(vm, addr, SelfDestructPath, accounts.NilKey, destruct, true, true)
+	writeFor(vm, addr, BalancePath, accounts.NilKey, destruct, uint256.Int{}, true)
+	writeFor(vm, addr, IncarnationPath, accounts.NilKey, destruct, uint64(9), true)
+	for _, path := range []AccountPath{SelfDestructPath, BalancePath, IncarnationPath} {
+		vm.MarkEstimate(addr, path, accounts.NilKey, destruct.TxIndex)
+	}
+
+	vr := NewVersionedStateReader(3, ReadSet{}, vm, reader)
+	acc, err := vr.ReadAccountData(addr)
+	require.NoError(t, err)
+	require.Equal(t, uint64(100), acc.Balance.Uint64(), "the destruct's balance has not committed")
+	require.Equal(t, uint64(1), acc.Incarnation, "nor its incarnation")
+	require.Equal(t, uint64(7), acc.Nonce, "and the record it belongs to is still the live contract")
+	require.Equal(t, pre.CodeHash, acc.CodeHash)
+}
+
+// A revival below the reader hides an earlier destruct from the lifecycle gate,
+// so the record falls through to the synth branch. The wipe alone must not make
+// it synthesize an account for an address that holds nothing.
+func TestVersionedStateReader_WipeAloneSynthesizesNoRecord(t *testing.T) {
+	t.Parallel()
+	addr := getAddress(123)
+
+	vm := NewVersionMap(nil)
+	writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 1}, true, true)
+	writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 2}, false, true)
+
+	vr := NewVersionedStateReader(3, ReadSet{}, vm, newAccountStateReader())
+	acc, err := vr.ReadAccountData(addr)
+	require.NoError(t, err)
+	require.Nil(t, acc)
+}
+
+// The zero recordWipedRead leaves behind is an absent slot, not one holding
+// zero, and both readers have to say so.
+func TestVersionedStateReader_RecordedWipeZeroReadsAbsent(t *testing.T) {
+	t.Parallel()
+	addr := getAddress(124)
+	key := accounts.InternKey(common.HexToHash("0x01"))
+
+	vm := NewVersionMap(nil)
+	writeFor(vm, addr, StoragePath, key, Version{TxIndex: 0}, *uint256.NewInt(5), true)
+	writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 1}, true, true)
+
+	reads := ReadSet{}
+	reads.SetStorage(addr, key, VersionedRead[uint256.Int]{})
+
+	vr := NewVersionedStateReader(3, reads, vm, nil)
+	val, found, err := vr.ReadAccountStorage(addr, key)
+	require.NoError(t, err)
+	require.True(t, val.IsZero())
+	require.False(t, found, "must agree with HasStorage, which distrusts the same entry")
+}
+
+// A genuine zero read is still the tx's own conclusion when no destruct explains
+// it away.
+func TestVersionedStateReader_RecordedZeroWithoutDestructStands(t *testing.T) {
+	t.Parallel()
+	addr := getAddress(125)
+	key := accounts.InternKey(common.HexToHash("0x01"))
+
+	reads := ReadSet{}
+	reads.SetStorage(addr, key, VersionedRead[uint256.Int]{})
+
+	reader := &preBlockStateReader{
+		accountStateReader: newAccountStateReader(addr),
+		slot:               key,
+		val:                *uint256.NewInt(5),
+	}
+
+	vr := NewVersionedStateReader(3, reads, NewVersionMap(nil), reader)
+	val, found, err := vr.ReadAccountStorage(addr, key)
+	require.NoError(t, err)
+	require.True(t, val.IsZero(), "the recorded zero wins over the pre-block slot")
+	require.True(t, found)
+}
+
 // Every path the account record is drawn from has to answer, since an EIP-161
 // verdict resting on any one of them is provisional.
 func TestAnyEstimateAccountCell(t *testing.T) {
 	t.Parallel()
 	acc := accounts.NewAccount()
 
-	for _, path := range []AccountPath{AddressPath, BalancePath, NoncePath, CodeHashPath} {
+	for _, path := range []AccountPath{AddressPath, BalancePath, NoncePath, CodeHashPath, CodePath, CodeSizePath} {
 		t.Run(path.String(), func(t *testing.T) {
 			t.Parallel()
 			addr := getAddress(120)
@@ -463,6 +581,10 @@ func TestAnyEstimateAccountCell(t *testing.T) {
 				value = uint64(1)
 			case CodeHashPath:
 				value = accounts.EmptyCodeHash
+			case CodePath:
+				value = accounts.NewCode([]byte{0x60, 0x00})
+			case CodeSizePath:
+				value = 2
 			}
 
 			vm := NewVersionMap(nil)
