@@ -220,3 +220,46 @@ func TestGzipResponseWriterFlushActivatesStreaming(t *testing.T) {
 	got := decompressGzip(t, rec.Body)
 	assert.Equal(t, []byte("pre-flush post-flush"), got)
 }
+
+// A response past maxBufferedGzipSize switches to the streaming path: it is
+// served chunked without Content-Length, the way net/http, nginx and Caddy all
+// frame a body whose size is not known before the headers go out. Smaller
+// responses keep the exact Content-Length.
+func TestGzipLargeResponseStreamsWithoutContentLength(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		size          int
+		wantStreaming bool
+	}{
+		{"under threshold keeps Content-Length", 64 << 10, false},
+		{"over threshold streams", maxBufferedGzipSize + (1 << 20), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := bytes.Repeat([]byte(`{"k":"0123456789abcdef"},`), tc.size/25)
+			srv := httptest.NewServer(newGzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.Write(payload) //nolint:errcheck
+			})))
+			defer srv.Close()
+
+			req, _ := http.NewRequest(http.MethodPost, srv.URL, nil)
+			req.Header.Set("Accept-Encoding", "gzip")
+			resp, err := (&http.Client{Transport: &http.Transport{DisableCompression: true}}).Do(req)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+
+			require.Equal(t, "gzip", resp.Header.Get("Content-Encoding"))
+			if tc.wantStreaming {
+				require.Empty(t, resp.Header.Get("Content-Length"), "streamed response must not declare a length")
+			} else {
+				require.NotEmpty(t, resp.Header.Get("Content-Length"), "buffered response must declare a length")
+			}
+
+			zr, err := gzip.NewReader(resp.Body)
+			require.NoError(t, err)
+			got, err := io.ReadAll(zr)
+			require.NoError(t, err)
+			require.Equal(t, payload, got, "decompressed body must be byte-identical")
+		})
+	}
+}

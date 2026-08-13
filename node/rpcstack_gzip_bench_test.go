@@ -375,3 +375,57 @@ func BenchmarkKlauspostGzipBestSpeed(b *testing.B) {
 func BenchmarkStdlibGzipBestSpeed(b *testing.B) {
 	benchmarkGzipHandler(b, getBenchPayload(b), newStdlibGzipHandler)
 }
+
+// syntheticBlockJSON builds a payload shaped like eth_getBlockByNumber output:
+// many repeated tx objects with high-entropy hex fields, so the compressor sees
+// realistic redundancy rather than a trivially compressible run.
+func syntheticBlockJSON(targetBytes int) []byte {
+	var b bytes.Buffer
+	b.WriteString(`{"jsonrpc":"2.0","id":1,"result":{"number":"0xc65d58","transactions":[`)
+	i := 0
+	for b.Len() < targetBytes {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		fmt.Fprintf(&b, `{"hash":"0x%064x","from":"0x%040x","to":"0x%040x","value":"0x%x","gas":"0x%x","input":"0x%0128x"}`,
+			i*2654435761, i*40503, i*2246822519, i*97, 21000+i, uint64(i)*11400714819323198485)
+		i++
+	}
+	b.WriteString(`]}}`)
+	return b.Bytes()
+}
+
+// BenchmarkGzipOneShotThroughput measures server throughput: concurrent clients,
+// unlike the sequential per-request loop in rpcstack_gzip_bench_test.go which
+// reports latency. -cpu controls the client concurrency.
+func BenchmarkGzipOneShotThroughput(b *testing.B) {
+	for _, size := range []int{16 << 10, 256 << 10, 2 << 20} {
+		payload := syntheticBlockJSON(size)
+		b.Run(fmt.Sprintf("payload=%dKB", len(payload)>>10), func(b *testing.B) {
+			handler := newGzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.Write(payload) //nolint:errcheck
+			}))
+			srv := httptest.NewServer(handler)
+			defer srv.Close()
+
+			b.SetBytes(int64(len(payload)))
+			b.ReportAllocs()
+			b.ResetTimer()
+			b.RunParallel(func(pb *testing.PB) {
+				client := &http.Client{Transport: &http.Transport{DisableCompression: true, MaxIdleConnsPerHost: 64}}
+				for pb.Next() {
+					req, _ := http.NewRequest(http.MethodPost, srv.URL, nil)
+					req.Header.Set("Accept-Encoding", "gzip")
+					resp, err := client.Do(req)
+					if err != nil {
+						b.Error(err)
+						return
+					}
+					io.Copy(io.Discard, resp.Body) //nolint:errcheck
+					resp.Body.Close()
+				}
+			})
+		})
+	}
+}

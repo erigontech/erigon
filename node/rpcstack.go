@@ -180,6 +180,13 @@ func (h *virtualHostHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "invalid host specified", http.StatusForbidden)
 }
 
+// maxBufferedGzipSize is the point above which a one-shot response stops
+// accumulating and switches to the streaming path. Past pool.MaxBufferCap the
+// buffer can no longer be returned to its pool, so holding the whole response
+// only to compute an exact Content-Length costs a multi-MB allocation per
+// request. net/http drops the header above 2KB for the same reason.
+const maxBufferedGzipSize = pool.MaxBufferCap
+
 // minGzipBodySize is the minimum response body size to compress. Responses
 // smaller than this are sent as-is: gzip framing overhead would exceed savings.
 const minGzipBodySize = 1024
@@ -249,6 +256,9 @@ func (w *gzipResponseWriter) WriteHeader(status int) {
 }
 
 func (w *gzipResponseWriter) Write(b []byte) (int, error) {
+	if w.gzw == nil && w.buf.Len()+len(b) > maxBufferedGzipSize {
+		w.Flush()
+	}
 	if w.gzw != nil {
 		gzipStreamingInBytes.AddInt(len(b))
 		return w.gzw.Write(b)
