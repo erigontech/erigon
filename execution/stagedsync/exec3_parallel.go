@@ -2172,10 +2172,8 @@ func (pe *parallelExecutor) dispatchRun(t exec.Task) {
 // while parked so dependencies can run; a fresh one is taken to re-execute.
 func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersion) {
 	pe.runWG.Add(1)
-	be.slInflight.Add(1)
 	go func() {
 		defer pe.runWG.Done()
-		defer be.slInflight.Add(-1)
 		// The roTx is bound to the execution slot, not the goroutine: opened when a
 		// slot is acquired and rolled back when it is released — across a mid-EVM
 		// dependency wait and while parked committed-valid awaiting re-exec. This
@@ -2243,7 +2241,6 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 			return w.BindTxHeld(goRoTx) == nil
 		}
 		send := func(r *exec.TxResult) {
-			be.slSent.Add(1)
 			select {
 			case pe.results <- r:
 			case <-pe.workersCtx.Done():
@@ -2264,7 +2261,6 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 		// it bumps the incarnation and reacquires a context to re-execute. Returns
 		// false on the incarnation limit or shutdown.
 		reExec := func() bool {
-			be.slReExec.Add(1)
 			return bumpInc() && acquire()
 		}
 		// waitTo releases the context, waits for the commit frontier to reach t.
@@ -2368,7 +2364,6 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 				reexec := false
 				for {
 					if be.slReexecFlag[tv.index].Swap(false) {
-						be.slReexecConsumed.Add(1)
 						reexec = true
 						break
 					}
@@ -3131,15 +3126,6 @@ type blockExecutor struct {
 	slFin            []chan struct{}
 	slDone           chan struct{}
 	slDoneOnce       sync.Once
-	slInflight       atomic.Int64
-	slParked         atomic.Int64
-	slSent           atomic.Int64
-	slReExec         atomic.Int64
-	slReexecSent     atomic.Int64
-	slReexecDrop     atomic.Int64
-	slReexecConsumed atomic.Int64
-	slHazardSkip     atomic.Int64   // base-read hazard: finalized dependent skipped by revalidation (would be stale)
-	slLateFinalized  atomic.Int64   // late-result hazard: a result landed on an already-finalized tx (committed-prefix corruption)
 	// selfLoopDispatched guards against re-dispatching a task the self-loop
 	// worker already owns: under SELF_LOOP the worker owns all re-execution, so
 	// the exec-loop scheduler must dispatch each task exactly once. Touched only
@@ -3600,9 +3586,7 @@ func (be *blockExecutor) signalSelfLoopReexec(tx int) {
 	be.slReexecFlag[tx].Store(true)
 	select {
 	case be.slReexec[tx] <- struct{}{}:
-		be.slReexecSent.Add(1)
 	default:
-		be.slReexecDrop.Add(1)
 	}
 }
 
@@ -3633,8 +3617,6 @@ func (be *blockExecutor) waitDep(tx, target int) bool {
 		panic(fmt.Sprintf("[self-loop] block %d: task %d waiting for HIGHER target %d (forward dependency — invariant violation); "+
 			"block start TxIndex=%d", be.blockNum, tx, target, be.tasks[0].Version().TxIndex))
 	}
-	be.slParked.Add(1)
-	defer be.slParked.Add(-1)
 	for {
 		be.wakeMu.Lock()
 		if int(be.committedFrontier.Load()) >= target {
@@ -3691,12 +3673,6 @@ func (be *blockExecutor) revalidateCommittedDependents(changedTx int, oldWrites 
 		// a permanent stall. Under selfLoop the finalize→publish window makes this
 		// reachable (publishTasks lags the frontier).
 		if tx <= be.coinbaseFlushedUpTo {
-			// Detector: this finalized dependent actually reads a key changedTx just
-			// (re)wrote — it would be re-validated if not already final, so its
-			// committed value may now be stale. Counts the live base-read hazard.
-			if hasDep {
-				be.slHazardSkip.Add(1)
-			}
 			continue
 		}
 		if !hasDep {
@@ -3728,9 +3704,7 @@ func (be *blockExecutor) revalidateCommittedDependents(changedTx int, oldWrites 
 			be.slReexecFlag[tx].Store(true)
 			select {
 			case be.slReexec[tx] <- struct{}{}:
-				be.slReexecSent.Add(1)
 			default:
-				be.slReexecDrop.Add(1)
 			}
 			continue
 		}
@@ -3952,12 +3926,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	tx := task.index
 	if !selfLoop && be.coinbase.IsNil() && !res.Coinbase.IsNil() {
 		be.coinbase = res.Coinbase
-	}
-	// Detector: a result arriving for an already-finalized tx (tx <=
-	// coinbaseFlushedUpTo) would RecordWrites/versionMap.Delete on the committed
-	// prefix below the finalize frontier — corruption. Counts the late-result hazard.
-	if selfLoop && tx >= 0 && tx <= be.coinbaseFlushedUpTo {
-		be.slLateFinalized.Add(1)
 	}
 	be.results[tx] = &execResult{TxResult: res}
 	if res.Err != nil {
