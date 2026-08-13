@@ -117,6 +117,8 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 		// we remove, but dont ban the peer if we fail. this is because its probably not their fault, but maybe it is.
 		return nil, err
 	}
+	stopBodyClose := closeBodyOnCancel(ctx, resp.Body)
+	defer stopBodyClose()
 	defer resp.Body.Close()
 	// some standard http error code parsing
 	if resp.StatusCode < 200 || resp.StatusCode > 399 {
@@ -147,6 +149,9 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 	if !responseCode.Success() {
 		errorMessage, err := responseCode.ErrorMessage(resp)
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 			if shouldBanOnFail {
 				s.sentinel.Peers().RemovePeer(pid)
 				s.sentinel.Host().Peerstore().RemovePeer(pid)
@@ -168,6 +173,9 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 	// read the body from the response
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		// An over-cap flood surfaces here as ErrResponseTooLarge rather than a non-2xx status, so
 		// drop the peer as the status path above would.
 		if errors.Is(err, httpreqresp.ErrResponseTooLarge) && shouldBanOnFail {
@@ -185,6 +193,10 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 		},
 	}
 	return ans, nil
+}
+
+func closeBodyOnCancel(ctx context.Context, body io.Closer) func() bool {
+	return context.AfterFunc(ctx, func() { _ = body.Close() })
 }
 
 func (s *SentinelServer) SendRequest(ctx context.Context, req *sentinelproto.RequestData) (*sentinelproto.ResponseData, error) {

@@ -74,6 +74,7 @@ func BlobsIdentifiersFromBlocks(blocks []*cltypes.SignedBeaconBlock, cfg *clpara
 type PeerAndSidecars struct {
 	Peer      string
 	Responses []*cltypes.BlobSidecar
+	requested *solid.ListSSZ[*cltypes.BlobIdentifier]
 }
 
 type blobRequester interface {
@@ -83,6 +84,7 @@ type blobRequester interface {
 type blobRequestResult struct {
 	peer      string
 	responses []*cltypes.BlobSidecar
+	requested *solid.ListSSZ[*cltypes.BlobIdentifier]
 	err       error
 }
 
@@ -143,25 +145,20 @@ func requestBlobsForBackfillWithSchedule(ctx context.Context, r blobRequester, r
 	validationResults := make(chan blobValidationResult, 1)
 	inFlight := 0
 	validating := false
+	var retryCandidate *PeerAndSidecars
 	pacing := newBlobBackfillRequestPacing()
 	launch := func() {
 		inFlight++
+		requested := req()
 		go func() {
-			responses, peer, err := r.SendBlobsSidecarByIdentifierReq(requestCtx, req())
+			responses, peer, err := r.SendBlobsSidecarByIdentifierReq(requestCtx, requested)
 			select {
-			case results <- blobRequestResult{peer: peer, responses: responses, err: err}:
+			case results <- blobRequestResult{peer: peer, responses: responses, requested: requested, err: err}:
 			case <-requestCtx.Done():
 			}
 		}()
 	}
-	startValidation := func(result blobRequestResult) {
-		inFlight--
-		if result.err != nil {
-			pacing.failed(schedule.now())
-			log.Trace("requestBlobsForBackfill: error", "err", result.err, "peer", result.peer)
-			return
-		}
-		candidate := &PeerAndSidecars{Peer: result.peer, Responses: result.responses}
+	startValidation := func(candidate *PeerAndSidecars) {
 		validating = true
 		go func() {
 			progress, complete, err := acceptCandidate(requestCtx, candidate)
@@ -171,9 +168,21 @@ func requestBlobsForBackfillWithSchedule(ctx context.Context, r blobRequester, r
 			}
 		}()
 	}
+	handleRequest := func(result blobRequestResult) {
+		inFlight--
+		if result.err != nil {
+			pacing.failed(schedule.now())
+			log.Trace("requestBlobsForBackfill: error", "err", result.err, "peer", result.peer)
+			return
+		}
+		startValidation(&PeerAndSidecars{Peer: result.peer, Responses: result.responses, requested: result.requested})
+	}
 	handleValidation := func(result blobValidationResult) *PeerAndSidecars {
 		validating = false
 		if result.err != nil || !result.progress {
+			if result.err != nil && result.progress {
+				retryCandidate = result.candidate
+			}
 			pacing.failed(schedule.now())
 			log.Trace("requestBlobsForBackfill: candidate rejected", "err", result.err, "peer", result.candidate.Peer)
 			return nil
@@ -191,11 +200,24 @@ func requestBlobsForBackfillWithSchedule(ctx context.Context, r blobRequester, r
 		}
 		select {
 		case now := <-schedule.ticks:
-			if !validating && inFlight < maxConcurrentBlobBackfillRequest && pacing.ready(now) {
-				launch()
+			select {
+			case result := <-validationResults:
+				if response := handleValidation(result); response != nil {
+					return response, nil
+				}
+			default:
+			}
+			if !validating && pacing.ready(now) {
+				if retryCandidate != nil {
+					candidate := retryCandidate
+					retryCandidate = nil
+					startValidation(candidate)
+				} else if inFlight < maxConcurrentBlobBackfillRequest {
+					launch()
+				}
 			}
 		case result := <-requestResults:
-			startValidation(result)
+			handleRequest(result)
 		case result := <-validationResults:
 			if response := handleValidation(result); response != nil {
 				return response, nil

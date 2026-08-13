@@ -18,6 +18,8 @@ package network
 
 import (
 	"context"
+	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -136,7 +138,7 @@ func TestDenebRecoveryBatchRejectsMalformedCandidates(t *testing.T) {
 	}
 	for name, candidate := range tests {
 		t.Run(name, func(t *testing.T) {
-			_, err := batch.validate(candidate.Responses)
+			_, err := batch.validate(batch.remaining(), candidate.Responses)
 			require.Error(t, err)
 		})
 	}
@@ -150,18 +152,80 @@ func TestDenebRecoveryBatchAccumulatesComplementaryPartialsAndStoresCompleteGrou
 	require.NoError(t, err)
 	batch.verifier = func([]*cltypes.BlobSidecar, func(*cltypes.SignedBeaconBlockHeader) error) error { return nil }
 
-	progress, err := batch.validate([]*cltypes.BlobSidecar{sidecars[1]})
+	progress, err := batch.validate(req, []*cltypes.BlobSidecar{sidecars[1]})
 	require.NoError(t, err)
 	require.Equal(t, 1, progress)
-	require.NoError(t, batch.store(t.Context(), storage))
+	_, err = batch.store(t.Context(), storage)
+	require.NoError(t, err)
 	require.Equal(t, uint64(0), batch.remaining().Get(0).Index)
 
 	storage.EXPECT().WriteBlobSidecars(gomock.Any(), req.Get(0).BlockRoot, []*cltypes.BlobSidecar{sidecars[0], sidecars[1]}).Return(nil)
-	progress, err = batch.validate([]*cltypes.BlobSidecar{sidecars[0]})
+	progress, err = batch.validate(batch.remaining(), []*cltypes.BlobSidecar{sidecars[0]})
 	require.NoError(t, err)
 	require.Equal(t, 1, progress)
-	require.NoError(t, batch.store(t.Context(), storage))
+	_, err = batch.store(t.Context(), storage)
+	require.NoError(t, err)
 	require.Zero(t, batch.remaining().Len())
+}
+
+func TestDenebRecoveryBatchAcceptsUsefulOverlapFromInflightRequest(t *testing.T) {
+	block, req, sidecars := denebRecoveryFixture(t, 2)
+	batch, err := newDenebRecoveryBatch([]*cltypes.SignedBeaconBlock{block}, req)
+	require.NoError(t, err)
+	batch.verifier = func([]*cltypes.BlobSidecar, func(*cltypes.SignedBeaconBlockHeader) error) error { return nil }
+
+	progress, err := batch.validate(req, []*cltypes.BlobSidecar{sidecars[0]})
+	require.NoError(t, err)
+	require.Equal(t, 1, progress)
+
+	progress, err = batch.validate(req, []*cltypes.BlobSidecar{sidecars[0], sidecars[1]})
+	require.NoError(t, err)
+	require.Equal(t, 1, progress)
+	require.Zero(t, batch.remaining().Len())
+}
+
+func TestDenebRecoveryBatchRetriesStorageWithoutRefetch(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	storage := blobstoragemock.NewMockBlobStorage(ctrl)
+	block, req, sidecars := denebRecoveryFixture(t, 1)
+	batch, err := newDenebRecoveryBatch([]*cltypes.SignedBeaconBlock{block}, req)
+	require.NoError(t, err)
+	batch.verifier = func([]*cltypes.BlobSidecar, func(*cltypes.SignedBeaconBlockHeader) error) error { return nil }
+	storage.EXPECT().WriteBlobSidecars(gomock.Any(), req.Get(0).BlockRoot, sidecars).Return(errors.New("temporary write failure"))
+	storage.EXPECT().WriteBlobSidecars(gomock.Any(), req.Get(0).BlockRoot, sidecars).Return(nil)
+
+	ticks := make(chan time.Time)
+	expires := make(chan time.Time)
+	validationReady := make(chan struct{}, 2)
+	var requests atomic.Int32
+	client := blobRequesterFunc(func(context.Context, *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error) {
+		requests.Add(1)
+		return sidecars, "peer", nil
+	})
+	done := make(chan error, 1)
+	go func() {
+		_, err := requestBlobsForBackfillWithSchedule(t.Context(), client, batch.remaining, func(ctx context.Context, candidate *PeerAndSidecars) (bool, bool, error) {
+			progress, err := batch.validate(candidate.requested, candidate.Responses)
+			if err != nil {
+				return false, false, err
+			}
+			stored, err := batch.store(ctx, storage)
+			if err != nil {
+				return progress > 0 || batch.hasCompleteUnstoredGroup(), false, err
+			}
+			return progress > 0 || stored > 0, batch.complete(), nil
+		}, blobBackfillRequestSchedule{
+			ticks: ticks, expires: expires, now: func() time.Time { return time.Unix(100, 0) },
+			validationReady: func() { validationReady <- struct{}{} },
+		})
+		done <- err
+	}()
+
+	receiveBlobTestSignal(t, validationReady)
+	ticks <- time.Unix(101, 0)
+	require.NoError(t, receiveBlobTestValue(t, done))
+	require.Equal(t, int32(1), requests.Load())
+	require.True(t, batch.complete())
 }
 
 func TestDenebRecoveryBatchInvalidResponsesDoNotPoisonAccumulator(t *testing.T) {
@@ -170,15 +234,15 @@ func TestDenebRecoveryBatchInvalidResponsesDoNotPoisonAccumulator(t *testing.T) 
 	require.NoError(t, err)
 	batch.verifier = func([]*cltypes.BlobSidecar, func(*cltypes.SignedBeaconBlockHeader) error) error { return nil }
 
-	_, err = batch.validate([]*cltypes.BlobSidecar{sidecars[0], sidecars[0]})
+	_, err = batch.validate(req, []*cltypes.BlobSidecar{sidecars[0], sidecars[0]})
 	require.Error(t, err)
 	unrequested := *sidecars[0]
 	unrequested.Index = 3
-	_, err = batch.validate([]*cltypes.BlobSidecar{&unrequested})
+	_, err = batch.validate(req, []*cltypes.BlobSidecar{&unrequested})
 	require.Error(t, err)
 	require.Equal(t, 2, batch.remaining().Len())
 
-	progress, err := batch.validate([]*cltypes.BlobSidecar{sidecars[0]})
+	progress, err := batch.validate(req, []*cltypes.BlobSidecar{sidecars[0]})
 	require.NoError(t, err)
 	require.Equal(t, 1, progress)
 	require.Equal(t, uint64(1), batch.remaining().Get(0).Index)

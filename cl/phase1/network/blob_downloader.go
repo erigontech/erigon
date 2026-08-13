@@ -410,14 +410,15 @@ func (b *BlobHistoryDownloader) recoverDenebBlobs(blocks []*cltypes.SignedBeacon
 		return false
 	}
 	_, err = requestBlobsForBackfill(b.ctx, b.rpc, batch.remaining, func(ctx context.Context, candidate *PeerAndSidecars) (bool, bool, error) {
-		progress, err := batch.validate(candidate.Responses)
+		progress, err := batch.validate(candidate.requested, candidate.Responses)
 		if err != nil {
 			return false, false, err
 		}
-		if err := batch.store(ctx, b.blobStorage); err != nil {
-			return false, false, err
+		stored, err := batch.store(ctx, b.blobStorage)
+		if err != nil {
+			return progress > 0 || batch.hasCompleteUnstoredGroup(), false, err
 		}
-		return progress > 0, batch.remaining().Len() == 0, nil
+		return progress > 0 || stored > 0, batch.complete(), nil
 	})
 	if err != nil {
 		b.logger.Debug("[BlobHistoryDownloader] Error requesting blobs", "err", err)
@@ -471,14 +472,14 @@ func newDenebRecoveryBatch(blocks []*cltypes.SignedBeaconBlock, req *solid.ListS
 	return batch, nil
 }
 
-func (b *denebRecoveryBatch) validate(sidecars []*cltypes.BlobSidecar) (int, error) {
-	remaining := b.remaining()
-	requested := make(map[blobIdentifierKey]struct{}, remaining.Len())
-	for i := range remaining.Len() {
-		id := remaining.Get(i)
+func (b *denebRecoveryBatch) validate(request *solid.ListSSZ[*cltypes.BlobIdentifier], sidecars []*cltypes.BlobSidecar) (int, error) {
+	requested := make(map[blobIdentifierKey]struct{}, request.Len())
+	for i := range request.Len() {
+		id := request.Get(i)
 		requested[blobIdentifierKey{root: id.BlockRoot, index: id.Index}] = struct{}{}
 	}
 	seen := make(map[blobIdentifierKey]struct{}, len(sidecars))
+	newSidecars := make([]*cltypes.BlobSidecar, 0, len(sidecars))
 	for _, sidecar := range sidecars {
 		if sidecar == nil || sidecar.SignedBlockHeader == nil || sidecar.SignedBlockHeader.Header == nil {
 			return 0, errors.New("blob response contains incomplete sidecar")
@@ -499,11 +500,17 @@ func (b *denebRecoveryBatch) validate(sidecars []*cltypes.BlobSidecar) (int, err
 			return 0, fmt.Errorf("duplicate blob sidecar %x:%d", root, sidecar.Index)
 		}
 		seen[key] = struct{}{}
+		if group.sidecars[sidecar.Index] == nil {
+			newSidecars = append(newSidecars, sidecar)
+		}
 	}
 	if len(sidecars) == 0 {
 		return 0, errors.New("empty blob response")
 	}
-	if err := b.verifier(sidecars, func(header *cltypes.SignedBeaconBlockHeader) error {
+	if len(newSidecars) == 0 {
+		return 0, nil
+	}
+	if err := b.verifier(newSidecars, func(header *cltypes.SignedBeaconBlockHeader) error {
 		root, err := header.Header.HashSSZ()
 		if err != nil {
 			return err
@@ -516,14 +523,15 @@ func (b *denebRecoveryBatch) validate(sidecars []*cltypes.BlobSidecar) (int, err
 	}); err != nil {
 		return 0, err
 	}
-	for _, sidecar := range sidecars {
+	for _, sidecar := range newSidecars {
 		root, _ := sidecar.SignedBlockHeader.Header.HashSSZ()
 		b.groups[root].sidecars[sidecar.Index] = sidecar
 	}
-	return len(sidecars), nil
+	return len(newSidecars), nil
 }
 
-func (b *denebRecoveryBatch) store(ctx context.Context, storage blob_storage.BlobStorage) error {
+func (b *denebRecoveryBatch) store(ctx context.Context, storage blob_storage.BlobStorage) (int, error) {
+	stored := 0
 	for _, root := range b.order {
 		group := b.groups[root]
 		if group.stored || len(group.sidecars) != len(group.ids) {
@@ -534,11 +542,30 @@ func (b *denebRecoveryBatch) store(ctx context.Context, storage blob_storage.Blo
 			ordered = append(ordered, group.sidecars[id.Index])
 		}
 		if err := storage.WriteBlobSidecars(ctx, root, ordered); err != nil {
-			return err
+			return stored, err
 		}
 		group.stored = true
+		stored++
 	}
-	return nil
+	return stored, nil
+}
+
+func (b *denebRecoveryBatch) hasCompleteUnstoredGroup() bool {
+	for _, group := range b.groups {
+		if !group.stored && len(group.sidecars) == len(group.ids) {
+			return true
+		}
+	}
+	return false
+}
+
+func (b *denebRecoveryBatch) complete() bool {
+	for _, group := range b.groups {
+		if !group.stored {
+			return false
+		}
+	}
+	return true
 }
 
 func (b *denebRecoveryBatch) remaining() *solid.ListSSZ[*cltypes.BlobIdentifier] {
