@@ -227,11 +227,21 @@ func (v ReceiptRootValidator) ValidateStep(ctx context.Context, files []*snapsho
 		// execution extends it. A step whose blocks reach beyond
 		// DomainProgress(RCacheDomain) has no receipts to read:
 		// CheckRCacheRootAtBlkRange computes DeriveSha over an empty set
-		// (the empty-trie root) and reports a spurious mismatch. Pause
-		// until the domain covers the step. Mirrors the rcacheTip clamp
-		// in db/integrity CheckRCacheRoot — InitialStateReady gates the
-		// state domain but not the receipt domain's per-block progress.
+		// (the empty-trie root) and reports a spurious mismatch. Mirrors
+		// the rcacheTip clamp in db/integrity CheckRCacheRoot —
+		// InitialStateReady gates the state domain but not the receipt
+		// domain's per-block progress.
 		rcacheProgress := tx.Debug().DomainProgress(kv.RCacheDomain)
+		// Receipts are optional. RCache==0 after StateReady + execution
+		// running means this instance is not populating the RCache domain
+		// (some chains / configurations don't). Blocking IVC forever on a
+		// domain we have no data for would be a stall on absent data, not
+		// a real validation failure. Skip cleanly, log INFO. Same shape
+		// as the History.Enabled() skip at the top.
+		if rcacheProgress == 0 && v.BlockReader.FrozenBlocks() > 0 {
+			rangeEmpty = true
+			return nil
+		}
 		rcacheTip, ok, err := txNumReader.FindBlockNum(ctx, tx, rcacheProgress)
 		if err != nil {
 			return fmt.Errorf("FindBlockNum(rcacheProgress=%d): %w", rcacheProgress, err)
@@ -246,12 +256,12 @@ func (v ReceiptRootValidator) ValidateStep(ctx context.Context, files []*snapsho
 		return err
 	}
 	if rangeEmpty {
-		// Both boundaries were partial; nothing left to validate in
-		// this step alone. Not an error — the validator's per-step
-		// coverage is fundamentally limited to full blocks within the
-		// step.
+		// Both boundaries were partial (step-partial case) OR RCache is
+		// not populated on this instance. Skip per-block check; receipts
+		// are optional and blocking IVC on absent data is a stall, not a
+		// validation failure.
 		if v.Logger != nil {
-			v.Logger.Info("[storage] receipt step has only partial-boundary blocks; skipping per-block check",
+			v.Logger.Info("[storage] receipt step per-block check skipped (partial-boundary or empty RCache)",
 				"step", fmt.Sprintf("[%d, %d)", fromStep, toStep))
 		}
 		return nil
