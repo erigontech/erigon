@@ -142,6 +142,8 @@ func (m *MemoryMutation) UpdateTxn(tx kv.TemporalTx) {
 // is a pure in-memory structure with no external resources — Close/Rollback
 // only frees the in-memory memDb. This makes the overlay safe to publish via
 // Events for concurrent RPC reads (consumers create ReadViews with their own tx).
+// Untouched sequences also require a read view because the overlay stores only
+// explicit sequence changes.
 func (m *MemoryMutation) DetachDB() kv.TemporalTx {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -221,7 +223,7 @@ func (m *MemoryMutation) readSequenceLocked(bucket string) (uint64, error) {
 		return 0, nil
 	}
 	if m.readTx == nil {
-		return 0, nil
+		return 0, fmt.Errorf("read sequence %q: no backing transaction is attached", bucket)
 	}
 	return m.readTx.ReadSequence(bucket)
 }

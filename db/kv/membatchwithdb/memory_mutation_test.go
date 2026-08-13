@@ -600,6 +600,30 @@ func TestMemoryMutationDetachedReadViewUsesPlainTx(t *testing.T) {
 	require.Equal(t, []byte("value"), gotValue)
 }
 
+func TestMemoryMutationDetachedSequenceAccessRequiresReadView(t *testing.T) {
+	_, rwTx := newTestTx(t)
+	require.NoError(t, rwTx.ResetSequence(kv.HeaderNumber, 7))
+
+	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
+	require.NoError(t, err)
+	defer batch.Close()
+	require.NoError(t, batch.ResetSequence(kv.EthTx, 9))
+	require.NotNil(t, batch.DetachDB())
+
+	_, err = batch.ReadSequence(kv.HeaderNumber)
+	require.ErrorContains(t, err, "no backing transaction")
+	_, err = batch.IncrementSequence(kv.HeaderNumber, 1)
+	require.ErrorContains(t, err, "no backing transaction")
+	previous, err := batch.IncrementSequence(kv.EthTx, 1)
+	require.NoError(t, err)
+	require.Equal(t, uint64(9), previous, "an explicitly written sequence needs no backing transaction")
+
+	view := batch.NewReadView(nonTemporalTx{Tx: rwTx})
+	got, err := view.ReadSequence(kv.HeaderNumber)
+	require.NoError(t, err)
+	require.Equal(t, uint64(7), got, "a failed increment must not create a zero-based sequence")
+}
+
 func TestMemoryMutationFlushDoesNotOverwriteUnchangedStateVersion(t *testing.T) {
 	db, seedTx := newTestTx(t)
 	ctx := t.Context()

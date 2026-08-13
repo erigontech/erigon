@@ -1157,8 +1157,10 @@ func requireStateVersion(tx kv.Tx, expected uint64) error {
 // invalidation is tx-precise: an unwind to a txNum inside the latest step drops
 // exactly the entries above it, not the whole step. All caches honor the
 // same (txNum, epoch) model. tx MUST be a flush-specific transaction: it is
-// committed here. The domain flush advances PlainStateVersion exactly once;
-// Commit verifies both its starting version and the version it will publish.
+// committed here. Commit is terminal for this SharedDomains value; continue
+// with a new one on a fresh transaction. The domain flush advances
+// PlainStateVersion exactly once; Commit verifies both its starting version and
+// the version it will publish.
 func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...func(tx kv.RwTx) error) error {
 	defer mxFlushTook.ObserveDuration(time.Now())
 	sourceStateVersion, committedStateVersion, err := sd.stateVersionsForCommit(tx)
