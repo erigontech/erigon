@@ -21,6 +21,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -109,9 +110,13 @@ func (d *Dispatcher) Dispatch(
 			// Genesis (block 0): notify from block 0.
 			notifyFrom = 0
 		default:
-			heightSpan := min(finishProgressAfter-finishProgressBefore, 1024)
-			notifyFrom = finishProgressAfter - heightSpan
-			notifyFrom++
+			// finishProgressAfter can trail finishProgressBefore, and a wrapped
+			// span would clamp to 1024 and notify over a range that never ran.
+			span, underflow := math.SafeSub(finishProgressAfter, finishProgressBefore)
+			if underflow {
+				span = 0
+			}
+			notifyFrom = finishProgressAfter - min(span, 1024) + 1
 		}
 		notifyTo := finishProgressAfter + 1 //[from, to)
 
