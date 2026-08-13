@@ -9,49 +9,77 @@ const versionReplace = require('./src/remark/version-replace.js');
 // below derives everything from this list, no per-version config edits required.
 const archivedVersions: string[] = require('./versions.json');
 
+// The docs series this branch publishes. Declared here so the {ERIGON_VERSION}
+// lookup below is scoped to it; `docs-version-bump.yml` rewrites the `label:
+// 'vX.Y'` literal at each cutover, so this stays the single source of truth.
+const currentDocsVersion = {
+  label: 'v3.5',
+  badge: false,
+};
+
+// Pre-release tag shapes that must never reach the install page. The API's
+// `prerelease` flag alone is not enough: release.yml drafts releases without it,
+// so e.g. v3.6.0-rc.1 exists with `prerelease: false`.
+const PRERELEASE_TAG = /-(rc|alpha|beta|pre)/i;
+
+type Release = {tag_name: string; prerelease: boolean; draft: boolean};
+
 function githubHeaders(): Record<string, string> {
   const headers: Record<string, string> = {Accept: 'application/vnd.github.v3+json'};
   if (process.env.GITHUB_TOKEN) headers['Authorization'] = `Bearer ${process.env.GITHUB_TOKEN}`;
   return headers;
 }
 
-async function fetchLatestVersion(): Promise<string> {
-  try {
-    const res = await fetch(
-      'https://api.github.com/repos/erigontech/erigon/releases/latest',
-      {headers: githubHeaders()},
+// One request serves every series resolved below. 100 is the API maximum for a
+// single page; the repo has ~250 releases total, so this covers the newest ~6
+// series — comfortably more than the current version plus the 5-archive cap.
+async function fetchReleases(): Promise<Release[]> {
+  const res = await fetch(
+    'https://api.github.com/repos/erigontech/erigon/releases?per_page=100',
+    {headers: githubHeaders()},
+  );
+  if (!res.ok) {
+    throw new Error(
+      `Release lookup failed: ${res.status} ${res.statusText}. ` +
+      'Set GITHUB_TOKEN if this is rate limiting.',
     );
-    if (!res.ok) return 'latest';
-    const data = await res.json() as {tag_name?: string};
-    return data.tag_name?.replace(/^v/, '') ?? 'latest';
-  } catch {
-    return 'latest';
   }
+  return await res.json() as Release[];
 }
 
-async function fetchLatestSeriesVersion(prefix: string): Promise<string> {
-  try {
-    const res = await fetch(
-      'https://api.github.com/repos/erigontech/erigon/releases?per_page=50',
-      {headers: githubHeaders()},
+// Newest stable release of one series, e.g. 'v3.5.' -> '3.5.5'.
+//
+// Scoped by series rather than using /releases/latest, which returns the newest
+// release across the whole repo ordered by commit date, not by version — so a
+// back-ported patch or a pre-release could otherwise be pasted into this
+// branch's install commands.
+//
+// Throws instead of falling back to a placeholder: the result is substituted
+// into copy-paste `docker pull` / `git checkout` commands, so an unresolved
+// value ships instructions that look valid and are not, on a green build.
+function latestStableInSeries(releases: Release[], series: string): string {
+  const prefix = `${series}.`;
+  const match = releases.find(
+    (r) => !r.draft
+      && !r.prerelease
+      && !PRERELEASE_TAG.test(r.tag_name)
+      && r.tag_name.startsWith(prefix),
+  );
+  if (!match) {
+    throw new Error(
+      `No stable ${series} release found in the newest 100 releases. ` +
+      'If that series is genuinely older than the API window, widen fetchReleases().',
     );
-    if (!res.ok) return 'latest';
-    const releases = await res.json() as Array<{tag_name: string; prerelease: boolean}>;
-    const latest = releases.find((r) => !r.prerelease && r.tag_name.startsWith(prefix));
-    return latest?.tag_name.replace(/^v/, '') ?? 'latest';
-  } catch {
-    return 'latest';
   }
+  return match.tag_name.replace(/^v/, '');
 }
 
 export default async function createConfig(): Promise<Config> {
-  const [latestVersion, ...archivedVersionStrings] = await Promise.all([
-    fetchLatestVersion(),
-    ...archivedVersions.map((v) => fetchLatestSeriesVersion(`${v}.`)),
-  ]);
+  const releases = await fetchReleases();
+  const latestVersion = latestStableInSeries(releases, currentDocsVersion.label);
   // Map each archived version id (e.g. "v3.4") to its latest patch release string.
   const versionStrings: Record<string, string> = Object.fromEntries(
-    archivedVersions.map((v, i) => [v, archivedVersionStrings[i]]),
+    archivedVersions.map((v) => [v, latestStableInSeries(releases, v)]),
   );
 
   return {
@@ -138,10 +166,7 @@ export default async function createConfig(): Promise<Config> {
           routeBasePath: '/',
           lastVersion: 'current',
           versions: {
-            current: {
-              label: 'v3.5',
-              badge: false,
-            },
+            current: currentDocsVersion,
           },
           remarkPlugins: [[versionReplace, {currentVersion: latestVersion, versionStrings}]],
         },
