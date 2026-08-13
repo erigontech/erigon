@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"math/big"
+	"slices"
 	"strconv"
 	"sync"
 	"testing"
@@ -79,12 +80,6 @@ type overlayAheadHarness struct {
 	overlayHeader *types.Header
 	events        *shards.Events
 	doms          *execctx.SharedDomains
-}
-
-func newOverlayAheadTestAPI(t *testing.T) (base *BaseAPI, m *execmoduletester.ExecModuleTester, overlayHeader *types.Header) {
-	t.Helper()
-	h := newOverlayAheadHarness(t, false)
-	return h.base, h.m, h.overlayHeader
 }
 
 // newOverlayAheadHarness builds overlayRaceChainSize committed MDBX blocks,
@@ -149,10 +144,7 @@ func newOverlayAheadHarness(t *testing.T, withOverlayTxs bool) *overlayAheadHarn
 	writeHeadBlockMarkers(t, overlay, overlayHeader, &types.Body{Transactions: overlayTxs})
 
 	if withOverlayTxs {
-		senders := make([]common.Address, len(overlayTxs))
-		for i := range senders {
-			senders[i] = m.Address
-		}
+		senders := slices.Repeat([]common.Address{m.Address}, len(overlayTxs))
 		require.NoError(t, rawdb.WriteSenders(overlay, hash, overlayNumber, senders))
 		// Receipt-domain entries go through the SharedDomains (like execution writes
 		// them), so readers reach them via the view's DomainReader, not the overlay tables.
@@ -219,33 +211,33 @@ func marshalOverlayRaceTestTx(t *testing.T, txn types.Transaction) []byte {
 // overlay head must return that in-flight block, not the last MDBX-committed one.
 func TestGetBlockByTimestamp_SeesOverlayHead(t *testing.T) {
 	t.Parallel()
-	base, m, overlayHeader := newOverlayAheadTestAPI(t)
-	api := NewErigonAPI(base, m.DB, nil)
+	h := newOverlayAheadHarness(t, false)
+	api := NewErigonAPI(h.base, h.m.DB, nil)
 
-	resp, err := api.GetBlockByTimestamp(m.Ctx, rpc.Timestamp(overlayHeader.Time), false)
+	resp, err := api.GetBlockByTimestamp(h.m.Ctx, rpc.Timestamp(h.overlayHeader.Time), false)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
-	require.Equal(t, overlayHeader.Number.ToBig(), resp["number"].(*hexutil.Big).ToInt(),
+	require.Equal(t, h.overlayHeader.Number.ToBig(), resp["number"].(*hexutil.Big).ToInt(),
 		"must resolve to the overlay head block, not the stale MDBX-committed head")
 }
 
 func TestGetModifiedAccountsByNumber_UsesCommittedStartTag(t *testing.T) {
 	t.Parallel()
-	base, m, _ := newOverlayAheadTestAPI(t)
-	api := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
+	h := newOverlayAheadHarness(t, false)
+	api := NewPrivateDebugAPI(h.base, h.m.DB, nil, &rpccfg.DebugApiConfig{})
 
-	result, err := api.GetModifiedAccountsByNumber(m.Ctx, rpc.LatestBlockNumber, nil)
+	result, err := api.GetModifiedAccountsByNumber(h.m.Ctx, rpc.LatestBlockNumber, nil)
 	require.NoError(t, err)
 	require.NotEmpty(t, result)
 }
 
 func TestGetModifiedAccountsByNumber_UsesCommittedEndTag(t *testing.T) {
 	t.Parallel()
-	base, m, _ := newOverlayAheadTestAPI(t)
-	api := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
+	h := newOverlayAheadHarness(t, false)
+	api := NewPrivateDebugAPI(h.base, h.m.DB, nil, &rpccfg.DebugApiConfig{})
 	latest := rpc.LatestBlockNumber
 
-	result, err := api.GetModifiedAccountsByNumber(m.Ctx, rpc.EarliestBlockNumber, &latest)
+	result, err := api.GetModifiedAccountsByNumber(h.m.Ctx, rpc.EarliestBlockNumber, &latest)
 	require.NoError(t, err)
 	require.NotEmpty(t, result)
 }
@@ -256,18 +248,18 @@ func TestGetModifiedAccountsByNumber_UsesCommittedEndTag(t *testing.T) {
 // must reflect the overlay head, not the stale MDBX-committed head.
 func TestGetTransactionByHash_PendingTx_UsesOverlayHead(t *testing.T) {
 	t.Parallel()
-	base, m, overlayHeader := newOverlayAheadTestAPI(t)
+	h := newOverlayAheadHarness(t, false)
 
-	pendingTxn := signOverlayRaceTestTx(t, m, 1)
+	pendingTxn := signOverlayRaceTestTx(t, h.m, 1)
 	pool := &overlayRaceTxPoolClient{
 		transactionsReply: &txpoolproto.TransactionsReply{RlpTxs: [][]byte{marshalOverlayRaceTestTx(t, pendingTxn)}},
 	}
-	api := newEthApiForTest(base, m.DB, pool, nil)
+	api := newEthApiForTest(h.base, h.m.DB, pool, nil)
 
-	got, err := api.GetTransactionByHash(m.Ctx, pendingTxn.Hash())
+	got, err := api.GetTransactionByHash(h.m.Ctx, pendingTxn.Hash())
 	require.NoError(t, err)
 	require.NotNil(t, got)
-	require.Equal(t, overlayHeader.BaseFee.ToBig(), got.GasPrice.ToInt(),
+	require.Equal(t, h.overlayHeader.BaseFee.ToBig(), got.GasPrice.ToInt(),
 		"pending tx gas price must be derived from the overlay head's base fee, not the stale MDBX head")
 }
 
@@ -290,15 +282,15 @@ func newOverlayRacePendingPool(t *testing.T, m *execmoduletester.ExecModuleTeste
 // header through the block overlay, matching TestGetTransactionByHash_PendingTx_UsesOverlayHead.
 func TestTxPoolContent_UsesOverlayHead(t *testing.T) {
 	t.Parallel()
-	base, m, overlayHeader := newOverlayAheadTestAPI(t)
-	pool, txn := newOverlayRacePendingPool(t, m)
-	api := NewTxPoolAPI(base, m.DB, pool)
+	h := newOverlayAheadHarness(t, false)
+	pool, txn := newOverlayRacePendingPool(t, h.m)
+	api := NewTxPoolAPI(h.base, h.m.DB, pool)
 
-	content, err := api.Content(m.Ctx)
+	content, err := api.Content(h.m.Ctx)
 	require.NoError(t, err)
-	got := content["pending"][m.Address.Hex()][strconv.FormatUint(txn.GetNonce(), 10)]
+	got := content["pending"][h.m.Address.Hex()][strconv.FormatUint(txn.GetNonce(), 10)]
 	require.NotNil(t, got)
-	require.Equal(t, overlayHeader.BaseFee.ToBig(), got.GasPrice.ToInt(),
+	require.Equal(t, h.overlayHeader.BaseFee.ToBig(), got.GasPrice.ToInt(),
 		"pending tx gas price must be derived from the overlay head's base fee, not the stale MDBX head")
 }
 
@@ -306,15 +298,15 @@ func TestTxPoolContent_UsesOverlayHead(t *testing.T) {
 // current header through the block overlay, matching TestTxPoolContent_UsesOverlayHead.
 func TestTxPoolContentFrom_UsesOverlayHead(t *testing.T) {
 	t.Parallel()
-	base, m, overlayHeader := newOverlayAheadTestAPI(t)
-	pool, txn := newOverlayRacePendingPool(t, m)
-	api := NewTxPoolAPI(base, m.DB, pool)
+	h := newOverlayAheadHarness(t, false)
+	pool, txn := newOverlayRacePendingPool(t, h.m)
+	api := NewTxPoolAPI(h.base, h.m.DB, pool)
 
-	content, err := api.ContentFrom(m.Ctx, m.Address)
+	content, err := api.ContentFrom(h.m.Ctx, h.m.Address)
 	require.NoError(t, err)
 	got := content["pending"][strconv.FormatUint(txn.GetNonce(), 10)]
 	require.NotNil(t, got)
-	require.Equal(t, overlayHeader.BaseFee.ToBig(), got.GasPrice.ToInt(),
+	require.Equal(t, h.overlayHeader.BaseFee.ToBig(), got.GasPrice.ToInt(),
 		"pending tx gas price must be derived from the overlay head's base fee, not the stale MDBX head")
 }
 
@@ -325,16 +317,16 @@ func TestTxPoolContentFrom_UsesOverlayHead(t *testing.T) {
 // publishes via eth_blockNumber.
 func TestFeeHistory_SeesOverlayHead(t *testing.T) {
 	t.Parallel()
-	base, m, overlayHeader := newOverlayAheadTestAPI(t)
-	api := newEthApiForTest(base, m.DB, nil, nil)
+	h := newOverlayAheadHarness(t, false)
+	api := newEthApiForTest(h.base, h.m.DB, nil, nil)
 
-	got, err := api.FeeHistory(m.Ctx, 1, rpc.LatestBlockNumber, nil)
+	got, err := api.FeeHistory(h.m.Ctx, 1, rpc.LatestBlockNumber, nil)
 	require.NoError(t, err)
 	require.NotNil(t, got)
-	require.Equal(t, overlayHeader.Number.ToBig(), got.OldestBlock.ToInt(),
+	require.Equal(t, h.overlayHeader.Number.ToBig(), got.OldestBlock.ToInt(),
 		"the fee history window must end on the overlay head, not the stale MDBX-committed head")
 	require.NotEmpty(t, got.BaseFee)
-	require.Equal(t, overlayHeader.BaseFee.ToBig(), got.BaseFee[0].ToInt(),
+	require.Equal(t, h.overlayHeader.BaseFee.ToBig(), got.BaseFee[0].ToInt(),
 		"the first base fee must come from the overlay head's header")
 }
 
@@ -394,10 +386,9 @@ func TestGasPriceOracle_ForkKeepsOverlayAfterUnpublish(t *testing.T) {
 	require.Equal(t, h.overlayHeader.Hash(), got.Hash())
 }
 
-// publishSiblingOverlay publishes a second overlay holding a same-height
-// sibling of the harness's overlay head, with a different base fee so its
-// hash and header are distinguishable from the original.
-func publishSiblingOverlay(t *testing.T, h *overlayAheadHarness) *types.Header {
+// publishOverlayHead publishes a fresh overlay whose forkchoice head is the
+// given header, with an empty body.
+func publishOverlayHead(t *testing.T, h *overlayAheadHarness, head *types.Header) {
 	t.Helper()
 	ctx := h.m.Ctx
 	roTx, err := h.m.DB.BeginTemporalRo(ctx)
@@ -408,13 +399,38 @@ func publishSiblingOverlay(t *testing.T, h *overlayAheadHarness) *types.Header {
 	t.Cleanup(doms.Close)
 	require.NoError(t, doms.InitBlockOverlay(roTx, h.m.Dirs.Tmp))
 
+	writeHeadBlockMarkers(t, doms.BlockOverlay(), head, &types.Body{})
+
+	h.events.PublishOverlay(doms)
+}
+
+// publishSiblingOverlay publishes a second overlay holding a same-height
+// sibling of the harness's overlay head, with a different base fee so its
+// hash and header are distinguishable from the original.
+func publishSiblingOverlay(t *testing.T, h *overlayAheadHarness) *types.Header {
+	t.Helper()
 	sibling := types.CopyHeader(h.overlayHeader)
 	sibling.BaseFee = uint256.NewInt(overlayRaceBaseFee + 1111)
 	require.NotEqual(t, h.overlayHeader.Hash(), sibling.Hash())
+	publishOverlayHead(t, h, sibling)
+	return sibling
+}
 
-	writeHeadBlockMarkers(t, doms.BlockOverlay(), sibling, &types.Body{})
+// publishCommittedSiblingOverlay publishes an overlay whose forkchoice head is
+// a same-height sibling of an already-committed block — an in-RAM reorg below
+// the committed head.
+func publishCommittedSiblingOverlay(t *testing.T, h *overlayAheadHarness, number uint64) *types.Header {
+	t.Helper()
+	roTx, err := h.m.DB.BeginTemporalRo(h.m.Ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	committed := rawdb.ReadHeaderByNumber(roTx, number)
+	require.NotNil(t, committed)
 
-	h.events.PublishOverlay(doms)
+	sibling := types.CopyHeader(committed)
+	sibling.BaseFee = uint256.NewInt(overlayRaceBaseFee + 2222)
+	require.NotEqual(t, committed.Hash(), sibling.Hash())
+	publishOverlayHead(t, h, sibling)
 	return sibling
 }
 
@@ -465,6 +481,87 @@ func TestFeeHistory_DeadOverlayBlockNotServedFromCache(t *testing.T) {
 		"fees cached for the dead overlay block must not be served for its same-height sibling")
 }
 
+// TestGasPriceOracle_ForkSharesCallerPinnedOverlay pins that when the caller
+// hands the backend a tx already pinned to an overlay (as FillTransaction
+// does), Fork wraps its fresh txs with that same overlay: re-capturing the
+// live one would let parent and fork resolve two different heads within one
+// oracle operation.
+func TestGasPriceOracle_ForkSharesCallerPinnedOverlay(t *testing.T) {
+	t.Parallel()
+	h := newOverlayAheadHarness(t, false)
+	tx, err := h.m.DB.BeginTemporalRo(h.m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	pinnedTx := h.base.filters.WithTemporalOverlay(tx)
+
+	sibling := publishSiblingOverlay(t, h)
+
+	backend := NewGasPriceOracleBackend(h.m.DB, pinnedTx, h.base)
+	parentHead, err := backend.HeaderByNumber(h.m.Ctx, rpc.LatestBlockNumber)
+	require.NoError(t, err)
+	require.Equal(t, h.overlayHeader.Hash(), parentHead.Hash())
+
+	forked, cleanup, err := backend.Fork(h.m.Ctx)
+	require.NoError(t, err)
+	require.NotNil(t, forked)
+	defer cleanup()
+
+	forkHead, err := forked.HeaderByNumber(h.m.Ctx, rpc.LatestBlockNumber)
+	require.NoError(t, err)
+	require.NotEqual(t, sibling.Hash(), forkHead.Hash(),
+		"the fork must not re-capture the overlay published after the caller pinned its tx")
+	require.Equal(t, parentHead.Hash(), forkHead.Hash(),
+		"parent and fork must resolve the same pinned head")
+}
+
+// TestGasPriceOracle_NilOverlayPinIgnoresLaterPublish pins that a backend built
+// while no overlay was published keeps reading only committed data: an overlay
+// published mid-request (a same-height sibling of the committed head) must not
+// leak in through downstream helpers re-resolving the live overlay.
+func TestGasPriceOracle_NilOverlayPinIgnoresLaterPublish(t *testing.T) {
+	t.Parallel()
+	h := newOverlayAheadHarness(t, false)
+	commitOverlayBlock(t, h)
+	h.events.PublishOverlay(nil)
+	h.doms.Close()
+
+	tx, err := h.m.DB.BeginTemporalRo(h.m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	backend := NewGasPriceOracleBackend(h.m.DB, tx, h.base)
+
+	sibling := publishSiblingOverlay(t, h)
+
+	got, err := backend.HeaderByNumber(h.m.Ctx, rpc.LatestBlockNumber)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.NotEqual(t, sibling.Hash(), got.Hash(),
+		"the request pinned to no overlay must not pick up one published mid-request")
+	require.Equal(t, h.overlayHeader.Hash(), got.Hash(),
+		"the request must keep serving the committed head it resolved at construction")
+}
+
+// TestFeeHistory_ReorgedCommittedBlockNotServedFromCache pins that fee data
+// memoized for a committed block stops being served once an overlay reorg
+// replaces that height: a block number alone does not identify a block.
+func TestFeeHistory_ReorgedCommittedBlockNotServedFromCache(t *testing.T) {
+	t.Parallel()
+	h := newOverlayAheadHarness(t, false)
+	api := newEthApiForTest(h.base, h.m.DB, nil, nil)
+
+	first, err := api.FeeHistory(h.m.Ctx, 2, rpc.LatestBlockNumber, nil)
+	require.NoError(t, err)
+	require.Len(t, first.BaseFee, 3)
+
+	sibling := publishCommittedSiblingOverlay(t, h, overlayRaceChainSize)
+
+	second, err := api.FeeHistory(h.m.Ctx, 1, rpc.LatestBlockNumber, nil)
+	require.NoError(t, err)
+	require.Equal(t, sibling.Number.ToBig(), second.OldestBlock.ToInt())
+	require.Equal(t, sibling.BaseFee.ToBig(), second.BaseFee[0].ToInt(),
+		"fees cached for the reorged-out committed block must not be served for its same-height sibling")
+}
+
 // commitOverlayBlock writes the harness's overlay head into MDBX the way the
 // background commit would (header, canonical marker, forkchoice head), so txs
 // opened afterwards resolve it as the committed head.
@@ -477,27 +574,61 @@ func commitOverlayBlock(t *testing.T, h *overlayAheadHarness) {
 	require.NoError(t, rwTx.Commit())
 }
 
-// unpublishOnBeginDB simulates the commit window closing while a request
-// acquires its tx: the first BeginTemporalRo returns a tx whose snapshot
-// predates the commit, with the commit landing and the overlay being
-// unpublished right after the open. Later opens behave normally.
-type unpublishOnBeginDB struct {
+// beginHookDB runs a hook right after each BeginTemporalRo returns, simulating
+// commit/publish activity landing while a request acquires its tx. One-shot
+// scenarios pass a sync.OnceFunc-wrapped hook.
+type beginHookDB struct {
 	kv.TemporalRoDB
-	t    *testing.T
-	h    *overlayAheadHarness
-	once sync.Once
+	hook func()
 }
 
-func (db *unpublishOnBeginDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
+func (db *beginHookDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	tx, err := db.TemporalRoDB.BeginTemporalRo(ctx) //nolint:gocritic
 	if err != nil {
 		return nil, err
 	}
-	db.once.Do(func() {
-		commitOverlayBlock(db.t, db.h)
-		db.h.events.PublishOverlay(nil)
-	})
+	db.hook()
 	return tx, nil
+}
+
+// TestFeeHistory_PublishCycleDuringTxAcquisition pins that overlay-capture
+// stability is tracked with a publish sequence number: a full publish/commit/
+// unpublish cycle landing during tx acquisition leaves the overlay nil on both
+// sides of the open, so pointer identity alone would accept a tx snapshot that
+// predates the commit and hides the head block.
+func TestFeeHistory_PublishCycleDuringTxAcquisition(t *testing.T) {
+	t.Parallel()
+	h := newOverlayAheadHarness(t, false)
+	h.events.PublishOverlay(nil)
+	h.doms.Close()
+
+	db := &beginHookDB{TemporalRoDB: h.m.DB, hook: sync.OnceFunc(func() {
+		publishOverlayHead(t, h, h.overlayHeader)
+		commitOverlayBlock(t, h)
+		h.events.PublishOverlay(nil)
+	})}
+	api := newEthApiForTest(h.base, db, nil, nil)
+
+	got, err := api.FeeHistory(h.m.Ctx, 1, rpc.LatestBlockNumber, nil)
+	require.NoError(t, err)
+	require.Equal(t, h.overlayHeader.Number.ToBig(), got.OldestBlock.ToInt(),
+		"a publish/commit/unpublish cycle during tx acquisition must not hide the head block")
+	require.Equal(t, h.overlayHeader.BaseFee.ToBig(), got.BaseFee[0].ToInt())
+}
+
+// TestFeeHistory_OverlayUnstableDuringTxAcquisition pins that when the overlay
+// keeps changing across every acquisition attempt (a fresh sibling published
+// on every open), the request fails instead of proceeding on a (tx, overlay)
+// pair it has just proven inconsistent.
+func TestFeeHistory_OverlayUnstableDuringTxAcquisition(t *testing.T) {
+	t.Parallel()
+	h := newOverlayAheadHarness(t, false)
+	db := &beginHookDB{TemporalRoDB: h.m.DB, hook: func() { publishSiblingOverlay(t, h) }}
+	api := newEthApiForTest(h.base, db, nil, nil)
+
+	_, err := api.FeeHistory(h.m.Ctx, 1, rpc.LatestBlockNumber, nil)
+	require.Error(t, err,
+		"a request whose overlay capture never stabilizes must fail, not serve a gapped view")
 }
 
 // publishSiblingOnGetCache publishes the sibling overlay the first time the
@@ -548,7 +679,10 @@ func TestGasPrice_BaseFeeFromPinnedOverlay(t *testing.T) {
 func TestFeeHistory_HeadCommittedDuringTxAcquisition(t *testing.T) {
 	t.Parallel()
 	h := newOverlayAheadHarness(t, false)
-	db := &unpublishOnBeginDB{TemporalRoDB: h.m.DB, t: t, h: h}
+	db := &beginHookDB{TemporalRoDB: h.m.DB, hook: sync.OnceFunc(func() {
+		commitOverlayBlock(t, h)
+		h.events.PublishOverlay(nil)
+	})}
 	api := newEthApiForTest(h.base, db, nil, nil)
 
 	got, err := api.FeeHistory(h.m.Ctx, 1, rpc.LatestBlockNumber, nil)

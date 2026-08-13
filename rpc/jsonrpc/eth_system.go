@@ -258,20 +258,19 @@ func (api *APIImpl) ProtocolVersion(ctx context.Context) (hexutil.Uint, error) {
 
 // GasPrice implements eth_gasPrice. Returns the current price per gas in wei.
 func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.Big, error) {
-	tx, overlay, err := api.beginTxWithOverlay(ctx)
+	pinnedTx, tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	backend := newGasPriceOracleBackendPinned(api.db, tx, api.BaseAPI, overlay)
-	oracle := api.newGasOracleFromBackend(backend)
+	oracle := api.newGasOracleFromBackend(NewGasPriceOracleBackend(api.db, pinnedTx, api.BaseAPI))
 	tipcap, err := oracle.SuggestTipCap(ctx)
 	if err != nil {
 		return nil, err
 	}
 	gasResult := uint256.NewInt(0)
 	gasResult.Set(tipcap)
-	if head := rawdb.ReadCurrentHeader(backend.tx); head != nil && head.BaseFee != nil {
+	if head := rawdb.ReadCurrentHeader(pinnedTx); head != nil && head.BaseFee != nil {
 		gasResult.Add(tipcap, head.BaseFee)
 	}
 
@@ -280,12 +279,12 @@ func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.Big, error) {
 
 // MaxPriorityFeePerGas returns a suggestion for a gas tip cap for dynamic fee transactions.
 func (api *APIImpl) MaxPriorityFeePerGas(ctx context.Context) (*hexutil.Big, error) {
-	tx, overlay, err := api.beginTxWithOverlay(ctx)
+	pinnedTx, tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	oracle := api.newGasOracleFromBackend(newGasPriceOracleBackendPinned(api.db, tx, api.BaseAPI, overlay))
+	oracle := api.newGasOracleFromBackend(NewGasPriceOracleBackend(api.db, pinnedTx, api.BaseAPI))
 	tipcap, err := oracle.SuggestTipCap(ctx)
 	if err != nil {
 		return nil, err
@@ -303,12 +302,12 @@ type feeHistoryResult struct {
 }
 
 func (api *APIImpl) FeeHistory(ctx context.Context, blockCount rpc.DecimalOrHex, lastBlock rpc.BlockNumber, rewardPercentiles []float64) (*feeHistoryResult, error) {
-	tx, overlay, err := api.beginTxWithOverlay(ctx)
+	pinnedTx, tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	oracle := api.newGasOracleFromBackend(newGasPriceOracleBackendPinned(api.db, tx, api.BaseAPI, overlay))
+	oracle := api.newGasOracleFromBackend(NewGasPriceOracleBackend(api.db, pinnedTx, api.BaseAPI))
 
 	oldest, reward, baseFee, gasUsed, blobBaseFee, blobGasUsedRatio, err := oracle.FeeHistory(ctx, int(blockCount), lastBlock, rewardPercentiles)
 	if err != nil {
@@ -494,63 +493,21 @@ func fillForkConfig(chainConfig *chain.Config, forkId [4]byte, activationTime ui
 
 type GasPriceOracleBackend struct {
 	db      kv.TemporalRoDB // nil if Fork is not supported
-	rawTx   kv.TemporalTx   // the caller's tx before the overlay wrap
 	tx      kv.TemporalTx
 	baseApi *BaseAPI
 	overlay *membatchwithdb.MemoryMutation // pinned at construction; nil when no overlay was published
 }
 
 // NewGasPriceOracleBackend pins the block overlay once so the head the oracle
-// resolves stays readable for the whole request, including on the txs Fork opens.
+// resolves stays readable for the whole request, including on the txs Fork
+// opens. A tx that already carries a pinned view keeps its own overlay.
 func NewGasPriceOracleBackend(db kv.TemporalRoDB, tx kv.TemporalTx, baseApi *BaseAPI) *GasPriceOracleBackend {
-	return newGasPriceOracleBackendPinned(db, tx, baseApi, baseApi.filters.LatestOverlay())
-}
-
-func newGasPriceOracleBackendPinned(db kv.TemporalRoDB, tx kv.TemporalTx, baseApi *BaseAPI, overlay *membatchwithdb.MemoryMutation) *GasPriceOracleBackend {
-	b := &GasPriceOracleBackend{db: db, rawTx: tx, baseApi: baseApi, overlay: overlay}
-	b.tx = b.withOverlay(tx)
-	return b
-}
-
-// beginTxWithOverlay opens a read tx and captures the published block overlay
-// as one consistent pair. A commit or (un)publish landing between the two
-// steps can leave a head block visible in neither the overlay nor the tx
-// snapshot, so on a mid-acquisition overlay change the tx is reopened.
-func (api *APIImpl) beginTxWithOverlay(ctx context.Context) (kv.TemporalTx, *membatchwithdb.MemoryMutation, error) {
-	const maxAttempts = 3
-	for attempt := 1; ; attempt++ {
-		overlay := api.filters.LatestOverlay()
-		tx, err := api.db.BeginTemporalRo(ctx) //nolint:gocritic
-		if err != nil {
-			return nil, nil, err
-		}
-		current := api.filters.LatestOverlay()
-		if current == overlay || attempt == maxAttempts {
-			return tx, current, nil
-		}
-		tx.Rollback()
+	overlay, pinned := membatchwithdb.ViewOverlay(tx)
+	if !pinned {
+		overlay = baseApi.filters.LatestOverlay()
+		tx = membatchwithdb.PinToOverlay(tx, overlay)
 	}
-}
-
-// CacheableBlockLimit resolves the committed head from the unwrapped tx:
-// blocks past it live only in the overlay and stay uncacheable until their
-// commit lands. Only the fee-history path pays for the resolution.
-func (b *GasPriceOracleBackend) CacheableBlockLimit() uint64 {
-	if b.overlay == nil {
-		return math.MaxUint64
-	}
-	committedHead, err := rpchelper.GetLatestBlockNumber(b.rawTx)
-	if err != nil {
-		return 0
-	}
-	return committedHead
-}
-
-func (b *GasPriceOracleBackend) withOverlay(tx kv.TemporalTx) kv.TemporalTx {
-	if b.overlay == nil || membatchwithdb.CarriesOverlayView(tx) {
-		return tx
-	}
-	return b.overlay.NewReadView(tx)
+	return &GasPriceOracleBackend{db: db, tx: tx, baseApi: baseApi, overlay: overlay}
 }
 
 func (b *GasPriceOracleBackend) Fork(ctx context.Context) (gasprice.OracleBackend, func(), error) {
@@ -563,9 +520,13 @@ func (b *GasPriceOracleBackend) Fork(ctx context.Context) (gasprice.OracleBacken
 	}
 	// Reuse the pinned overlay instead of re-resolving: it may have been
 	// unpublished since the request started.
-	return &GasPriceOracleBackend{db: b.db, rawTx: tx, tx: b.withOverlay(tx), baseApi: b.baseApi, overlay: b.overlay},
+	return &GasPriceOracleBackend{db: b.db, tx: membatchwithdb.PinToOverlay(tx, b.overlay), baseApi: b.baseApi, overlay: b.overlay},
 		func() { tx.Rollback() },
 		nil
+}
+
+func (b *GasPriceOracleBackend) CanonicalHash(ctx context.Context, number uint64) (common.Hash, bool, error) {
+	return b.baseApi._blockReader.CanonicalHash(ctx, b.tx, number)
 }
 
 func (b *GasPriceOracleBackend) HeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error) {

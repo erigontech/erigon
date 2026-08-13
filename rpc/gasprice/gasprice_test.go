@@ -300,7 +300,9 @@ func (m *mockOracleBackend) PendingBlockAndReceipts() (*types.Block, types.Recei
 	return nil, nil
 }
 
-func (m *mockOracleBackend) CacheableBlockLimit() uint64 { return math.MaxUint64 }
+func (m *mockOracleBackend) CanonicalHash(_ context.Context, _ uint64) (common.Hash, bool, error) {
+	return m.head.Hash(), true, nil
+}
 
 func (m *mockOracleBackend) Fork(_ context.Context) (gasprice.OracleBackend, func(), error) {
 	return nil, nil, nil // sequential mode

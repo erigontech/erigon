@@ -1186,6 +1186,49 @@ func (ff *Filters) WithOverlay(tx kv.Tx) kv.Tx {
 	return tx
 }
 
+// OverlaySnapshot returns the published block overlay together with its
+// publish sequence number as one coherent pair, or (nil, 0) in remote mode
+// where no overlay is ever published.
+func (ff *Filters) OverlaySnapshot() (*membatchwithdb.MemoryMutation, uint64) {
+	if ff == nil || ff.events == nil {
+		return nil, 0
+	}
+	sd, seq := ff.events.OverlaySnapshot()
+	if sd == nil {
+		return nil, seq
+	}
+	return sd.BlockOverlay(), seq
+}
+
+// errOverlayUnstable is returned when the overlay keeps changing across every
+// tx acquisition attempt; the client can simply retry the request.
+var errOverlayUnstable = errors.New("block overlay changed during every tx acquisition attempt; retry the request")
+
+// BeginTemporalRoWithOverlay opens a read tx and pins it to the block overlay
+// published at that moment, as one consistent pair: a commit or (un)publish
+// landing between the overlay capture and the tx open can leave a head block
+// visible in neither layer, so the tx is reopened whenever the publish
+// sequence number moves around the open. The pinned view is returned for
+// reads; the raw tx is returned for Rollback (rolling back a view does not
+// release the underlying tx).
+func (ff *Filters) BeginTemporalRoWithOverlay(ctx context.Context, db kv.TemporalRoDB) (pinned kv.TemporalTx, raw kv.TemporalTx, err error) {
+	const maxAttempts = 3
+	for attempt := 1; ; attempt++ {
+		overlay, seq := ff.OverlaySnapshot()
+		tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
+		if err != nil {
+			return nil, nil, err
+		}
+		if _, current := ff.OverlaySnapshot(); current == seq {
+			return membatchwithdb.PinToOverlay(tx, overlay), tx, nil
+		}
+		tx.Rollback()
+		if attempt == maxAttempts {
+			return nil, nil, errOverlayUnstable
+		}
+	}
+}
+
 // LatestOverlay returns the block overlay behind the latest published SD, or nil.
 // Callers that must keep serving one consistent head across several txs (e.g. a
 // forked backend) pin this instance instead of re-resolving, which could observe
@@ -1204,13 +1247,7 @@ func (ff *Filters) LatestOverlay() *membatchwithdb.MemoryMutation {
 // WithTemporalOverlay is like WithOverlay but returns kv.TemporalTx directly,
 // avoiding repeated type assertions at callsites that need temporal access.
 func (ff *Filters) WithTemporalOverlay(tx kv.TemporalTx) kv.TemporalTx {
-	if membatchwithdb.CarriesOverlayView(tx) {
-		return tx
-	}
-	if overlay := ff.LatestOverlay(); overlay != nil {
-		return overlay.NewReadView(tx)
-	}
-	return tx
+	return ff.WithOverlay(tx).(kv.TemporalTx)
 }
 
 func (ff *Filters) incrementMetrics(ft FilterType, protocol SubProtocol) {

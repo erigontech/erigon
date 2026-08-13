@@ -47,11 +47,9 @@ type OracleBackend interface {
 	GetReceiptsGasUsed(ctx context.Context, block *types.Block) (types.Receipts, error)
 	PendingBlockAndReceipts() (*types.Block, types.Receipts)
 
-	// CacheableBlockLimit returns the highest block number whose per-block fee
-	// data may be memoized across requests. Blocks above it are not durably
-	// committed yet and can still be replaced by a same-height sibling, so
-	// their results must not outlive the request.
-	CacheableBlockLimit() uint64
+	// CanonicalHash returns the canonical block hash at the given height on
+	// the backend's view, or ok=false when the height is beyond the head.
+	CanonicalHash(ctx context.Context, number uint64) (common.Hash, bool, error)
 
 	// Fork opens a new TemporalTx and returns a goroutine-local backend together
 	// with a cleanup function (call via defer cleanup()).

@@ -58,7 +58,7 @@ type MemoryMutation struct {
 	db               kv.TemporalTx
 	statelessCursors map[string]kv.RwCursor
 	DomainReader     DomainReader
-	readView         bool
+	overlay          *MemoryMutation // non-nil marks a read view, pointing at the overlay it was created from
 }
 
 // NewMemoryBatch creates a pure Go in-memory batch with no OS-thread affinity.
@@ -1084,18 +1084,60 @@ func (m *MemoryMutation) NewReadView(tx kv.Tx) kv.TemporalTx {
 	return m.newReadViewMut(tx)
 }
 
-// CarriesOverlayView reports whether tx is already a read view over a block
-// overlay. Overlay wrap points skip such txs so the first wrap pins the
-// overlay a request reads from: re-wrapping would layer a possibly newer
-// overlay on top, mixing two heads within one request.
+// OverlayViewCarrier is implemented by txs that are pinned overlay views.
+// A tx wrapper that embeds such a tx keeps the marker through method
+// promotion, where a concrete-type switch would silently lose it.
+type OverlayViewCarrier interface {
+	// OverlayView returns the overlay the tx was pinned to and whether the
+	// tx is a pinned view at all. A pinned view with a nil overlay resolved
+	// "no overlay published" and must keep reading committed data only.
+	OverlayView() (overlay *MemoryMutation, pinned bool)
+}
+
+// CarriesOverlayView reports whether tx is already a pinned overlay view.
+// Overlay wrap points skip such txs so the first wrap pins the overlay a
+// request reads from: re-wrapping would layer a possibly newer overlay on
+// top, mixing two heads within one request.
 func CarriesOverlayView(tx kv.Tx) bool {
-	switch v := tx.(type) {
-	case *OverlayTemporalReadView:
-		return true
-	case *MemoryMutation:
-		return v.readView
+	_, ok := ViewOverlay(tx)
+	return ok
+}
+
+// ViewOverlay returns the overlay tx was pinned to, and whether tx is a
+// pinned view at all.
+func ViewOverlay(tx kv.Tx) (*MemoryMutation, bool) {
+	if c, ok := tx.(OverlayViewCarrier); ok {
+		return c.OverlayView()
 	}
-	return false
+	return nil, false
+}
+
+// OverlayView implements OverlayViewCarrier for read views; a MemoryMutation
+// that owns its overlay data is not a view and carries no pin.
+func (m *MemoryMutation) OverlayView() (*MemoryMutation, bool) {
+	return m.overlay, m.overlay != nil
+}
+
+// noOverlayView pins a tx to "no overlay": it reads committed data only and
+// overlay wrap points leave it alone, so an overlay published mid-request
+// cannot leak into the view.
+type noOverlayView struct {
+	kv.TemporalTx
+}
+
+func (v *noOverlayView) OverlayView() (*MemoryMutation, bool) { return nil, true }
+
+// PinToOverlay pins tx to the given overlay: a read view when overlay is
+// non-nil, a no-overlay pin otherwise. Txs already carrying a pinned view
+// are returned unchanged.
+func PinToOverlay(tx kv.TemporalTx, overlay *MemoryMutation) kv.TemporalTx {
+	if CarriesOverlayView(tx) {
+		return tx
+	}
+	if overlay == nil {
+		return &noOverlayView{tx}
+	}
+	return overlay.NewReadView(tx)
 }
 
 // newReadViewMut is the internal constructor that returns the full
@@ -1104,6 +1146,10 @@ func (m *MemoryMutation) newReadViewMut(tx kv.Tx) *MemoryMutation {
 	var dbTx kv.TemporalTx
 	if t, ok := tx.(kv.TemporalTx); ok {
 		dbTx = t
+	}
+	overlay := m
+	if m.overlay != nil {
+		overlay = m.overlay
 	}
 	return &MemoryMutation{
 		mu:             m.mu, // share parent's mutex for synchronization
@@ -1114,7 +1160,7 @@ func (m *MemoryMutation) newReadViewMut(tx kv.Tx) *MemoryMutation {
 		clearedTables:  m.clearedTables,
 		db:             dbTx,
 		DomainReader:   m.DomainReader,
-		readView:       true,
+		overlay:        overlay,
 	}
 }
 

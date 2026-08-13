@@ -57,11 +57,14 @@ const (
 	maxBlockFetchers = 4
 )
 
-// cacheKey identifies a processed block in the fee history cache.
+// cacheKey identifies a processed block in the fee history cache. Keying by
+// header hash instead of number makes an entry live exactly as long as the
+// block itself: a same-height sibling (reorg, or an in-flight block replaced
+// before its commit lands) has a different hash and misses.
 // The percentiles string is a binary encoding of the requested percentile slice,
 // so identical percentile arrays produce the same key.
 type cacheKey struct {
-	number      uint64
+	hash        common.Hash
 	percentiles string
 }
 
@@ -345,10 +348,6 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 
 	// Pre-fetch chain config once using the main backend (safe: single goroutine).
 	chainconfig := oracle.backend.ChainConfig()
-	var cacheableUpTo uint64
-	if oracle.historyCache != nil {
-		cacheableUpTo = oracle.backend.CacheableBlockLimit()
-	}
 
 	// Launch up to maxBlockFetchers goroutines. Each goroutine opens its own
 	// TemporalTx via Fork so MDBX transactions are never shared across goroutines.
@@ -384,16 +383,24 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 				}
 				idx := int(blockNumber - oldestBlock)
 
-				// Try the LRU cache first. Pending and not-yet-committed blocks are
-				// excluded from both lookup and store: their number can be re-used by
-				// a same-height sibling, so an entry keyed by number alone would keep
-				// serving the dead block's fees.
+				// The pending block comes from the mining cache and is rebuilt
+				// continuously, so its results are never memoized. The cache key
+				// comes from the canonical-hash index — one cheap lookup, no
+				// header fetch and no keccak on the hit path.
 				isPending := pendingBlock != nil && blockNumber >= pendingBlock.NumberU64()
-				cacheable := !isPending && oracle.historyCache != nil && blockNumber <= cacheableUpTo
+				cacheable := !isPending && oracle.historyCache != nil
+				var blockHash common.Hash
 				if cacheable {
-					if cached, ok := oracle.historyCache.get(cacheKey{blockNumber, percentileKey}); ok {
-						blockResults[idx] = blockResult{processed: cached, hasResult: true}
-						continue
+					hash, ok, err := localBackend.CanonicalHash(fetchCtx, blockNumber)
+					if err != nil {
+						return err
+					}
+					blockHash, cacheable = hash, ok
+					if ok {
+						if cached, ok := oracle.historyCache.get(cacheKey{blockHash, percentileKey}); ok {
+							blockResults[idx] = blockResult{processed: cached, hasResult: true}
+							continue
+						}
 					}
 				}
 
@@ -429,7 +436,7 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 
 				blockResults[idx] = blockResult{processed: fees.results, hasResult: true}
 				if cacheable {
-					oracle.historyCache.add(cacheKey{blockNumber, percentileKey}, fees.results)
+					oracle.historyCache.add(cacheKey{blockHash, percentileKey}, fees.results)
 				}
 			}
 		})
