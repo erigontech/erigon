@@ -253,15 +253,6 @@ func (etp *EncryptedTxnsPool) handleEncryptedTxnSubmissionEvent(ctx context.Cont
 			"event", encryptedTxnSubmission.TxnIndex,
 		)
 		return nil
-		//
-		// TODO looks like we have an issue on unwind
-		//
-
-		//return fmt.Errorf(
-		//	"unexpected new encrypted txn submission index is lte last: %d >= %d",
-		//	lastEncryptedTxnSubmission.TxnIndex,
-		//	encryptedTxnSubmission.TxnIndex,
-		//)
 	}
 
 	etp.addSubmission(encryptedTxnSubmission)
@@ -290,6 +281,12 @@ func (etp *EncryptedTxnsPool) fillSubmissionGap(ctx context.Context, last, new E
 	fromTxnIndex := last.TxnIndex + 1
 	startBlockNum := last.BlockNum + 1
 	endBlockNum := new.BlockNum
+	if startBlockNum > endBlockNum {
+		// both events are in the same block: anything between them arrives through
+		// the same ordered subscription, so there is nothing to backfill
+		return nil
+	}
+
 	etp.logger.Info(
 		"filling submission gap",
 		"startBlockNum", startBlockNum,

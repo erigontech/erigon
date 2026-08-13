@@ -109,6 +109,33 @@ func TestEncryptedTxnsPoolAcceptsOldEonSubmissionAfterNewEonStarted(t *testing.T
 	require.Equal(t, TxnIndex(5), txns[0].TxnIndex)
 }
 
+// The sequencer contract does not validate the eon argument, so two submissions in
+// one block can jump eons arbitrarily. That must not produce an inverted gap-fill
+// block range (start > end), which would error out and kill the submissions watch.
+func TestEncryptedTxnsPoolSameBlockEonJumpDoesNotBreakWatch(t *testing.T) {
+	t.Parallel()
+	ctrl := gomock.NewController(t)
+	backend := contracts.NewMockBackend(ctrl) // no FilterLogs expected: nothing to backfill
+	p := newTestEncryptedTxnsPool(t, backend)
+	p.addSubmission(EncryptedTxnSubmission{
+		EonIndex: 0,
+		TxnIndex: 4,
+		BlockNum: 10,
+		GasLimit: big.NewInt(21_000),
+	})
+	err := p.handleEncryptedTxnSubmissionEvent(context.Background(), &shuttercontracts.SequencerTransactionSubmitted{
+		Eon:      2,
+		TxIndex:  0,
+		GasLimit: big.NewInt(21_000),
+		Raw:      types.Log{BlockNumber: 10},
+	})
+	require.NoError(t, err)
+	txns, err := p.Txns(2, 0, 1, 1_000_000)
+	require.NoError(t, err)
+	require.Len(t, txns, 1)
+	require.Equal(t, TxnIndex(0), txns[0].TxnIndex)
+}
+
 func newTestEncryptedTxnsPool(t *testing.T, backend *contracts.MockBackend) *EncryptedTxnsPool {
 	config := shuttercfg.Config{
 		SequencerContractAddress: "0x0000000000000000000000000000000000000bad",
