@@ -46,36 +46,30 @@ func TestRequestBlobsFranticallyBoundsInflightRequests(t *testing.T) {
 
 	_, err := RequestBlobsFrantically(t.Context(), client, solid.NewStaticListSSZ[*cltypes.BlobIdentifier](0, 1))
 	require.ErrorIs(t, err, ErrTimeout)
+	require.Positive(t, maximum.Load())
 	require.LessOrEqual(t, maximum.Load(), int64(2))
 	close(release)
 	require.Eventually(t, func() bool { return active.Load() == 0 }, time.Second, time.Millisecond)
 }
 
-func TestRequestBlobsFranticallyBacksOffErrors(t *testing.T) {
-	restoreBlobRequestTiming(t, 5*time.Millisecond, 60*time.Millisecond)
-	var calls atomic.Int64
-	client := blobRequesterFunc(func(context.Context, *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error) {
-		calls.Add(1)
-		return nil, "peer", errors.New("unavailable")
-	})
+func TestBlobRequestPacingBackoffAndReset(t *testing.T) {
+	restoreBlobRequestTiming(t, 5*time.Millisecond, time.Second)
+	now := time.Unix(100, 0)
+	pacing := newBlobRequestPacing()
 
-	_, err := RequestBlobsFrantically(t.Context(), client, solid.NewStaticListSSZ[*cltypes.BlobIdentifier](0, 1))
-	require.ErrorIs(t, err, ErrTimeout)
-	require.GreaterOrEqual(t, calls.Load(), int64(2))
-	require.LessOrEqual(t, calls.Load(), int64(5))
-}
+	pacing.complete(now, errors.New("unavailable"))
+	require.Equal(t, 10*time.Millisecond, pacing.backoff)
+	require.False(t, pacing.ready(now.Add(9*time.Millisecond)))
+	require.True(t, pacing.ready(now.Add(10*time.Millisecond)))
 
-func TestRequestBlobsFranticallyKeepsFlatCadenceForEmptyResponses(t *testing.T) {
-	restoreBlobRequestTiming(t, 5*time.Millisecond, 60*time.Millisecond)
-	var calls atomic.Int64
-	client := blobRequesterFunc(func(context.Context, *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error) {
-		calls.Add(1)
-		return nil, "peer", nil
-	})
+	for range 20 {
+		pacing.failed(now)
+	}
+	require.Equal(t, requestBlobMaxBackoff, pacing.backoff)
 
-	_, err := RequestBlobsFrantically(t.Context(), client, solid.NewStaticListSSZ[*cltypes.BlobIdentifier](0, 1))
-	require.ErrorIs(t, err, ErrTimeout)
-	require.GreaterOrEqual(t, calls.Load(), int64(8))
+	pacing.complete(now, nil)
+	require.Equal(t, requestBlobRetryInterval, pacing.backoff)
+	require.True(t, pacing.ready(now))
 }
 
 func TestRequestBlobsFranticallyKeepsWaitingAfterPartialResponse(t *testing.T) {
