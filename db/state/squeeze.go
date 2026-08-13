@@ -1155,7 +1155,11 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 			iterTrieCfg := rebuildTrieCfg
 			iterTrieCfg.Variant = target.Variant
-			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), execctx.WithTrieConfig(iterTrieCfg))
+			sdOpts := []execctx.SharedDomainOption{execctx.WithTrieConfig(iterTrieCfg)}
+			if target.Variant == commitment.VariantBinPatriciaTrie {
+				sdOpts = append(sdOpts, execctx.WithoutCommitmentSeek())
+			}
+			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), sdOpts...)
 			if err != nil {
 				return nil, nil, err
 			}

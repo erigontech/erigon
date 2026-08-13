@@ -348,6 +348,10 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 		sd.adaptivePinController = p.AdaptivePinController()
 	}
 
+	if o.skipCommitmentSeek {
+		return sd, nil
+	}
+
 	_, blockNum, err := sd.SeekCommitment(ctx, tx)
 	if err != nil {
 		return sd, err

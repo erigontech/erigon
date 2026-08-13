@@ -30,6 +30,7 @@ type sharedDomainOptions struct {
 	trieCfg              commitment.TrieConfig
 	useSharedBranchCache bool
 	hexCommitmentOnly    bool
+	skipCommitmentSeek   bool
 }
 
 // SharedDomainOption configures NewSharedDomains.
@@ -38,6 +39,13 @@ type SharedDomainOption func(*sharedDomainOptions)
 // WithTrieConfig replaces the trie configuration wholesale; the caller owns Variant.
 func WithTrieConfig(cfg commitment.TrieConfig) SharedDomainOption {
 	return func(o *sharedDomainOptions) { o.trieCfg = cfg }
+}
+
+// WithoutCommitmentSeek skips restoring the persisted trie state. A rebuild that
+// produces a scheme other than the one the DB's blob was written under cannot
+// decode it, and recomputes every key in the shard from files regardless.
+func WithoutCommitmentSeek() SharedDomainOption {
+	return func(o *sharedDomainOptions) { o.skipCommitmentSeek = true }
 }
 
 // WithoutDeferredBranchUpdates disables deferred branch updates (read-only / one-shot domains).

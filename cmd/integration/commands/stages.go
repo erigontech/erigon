@@ -1118,6 +1118,12 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*blocksna
 		if reset {
 			aggOpts = aggOpts.SkipFilesDBGapCheck()
 		}
+		// A staged rebuild output holds the source's state files and no commitment,
+		// and is opened against the source's DB. Neither the commitment alignment nor
+		// a files-vs-DB comparison across two datadirs says anything here.
+		if rebuildOutputDatadir != "" {
+			aggOpts = aggOpts.SkipFilesDBGapCheck().DisableInterDomainDeps()
+		}
 		_aggSingleton = aggOpts.MustOpen(ctx, db)
 
 		_aggSingleton.SetProduceMod(snapCfg.ProduceE3)
