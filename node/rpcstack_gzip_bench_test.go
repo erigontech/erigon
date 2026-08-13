@@ -402,7 +402,7 @@ func syntheticBlockJSON(targetBytes int) []byte {
 // unlike the sequential per-request loop in rpcstack_gzip_bench_test.go which
 // reports latency. -cpu controls the client concurrency.
 func BenchmarkGzipOneShotThroughput(b *testing.B) {
-	for _, size := range []int{16 << 10, 256 << 10, 2 << 20} {
+	for _, size := range []int{16 << 10, 256 << 10, 768 << 10, 2 << 20} {
 		payload := syntheticBlockJSON(size)
 		b.Run(fmt.Sprintf("payload=%dKB", len(payload)>>10), func(b *testing.B) {
 			handler := newGzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
