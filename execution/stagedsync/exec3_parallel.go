@@ -1418,15 +1418,13 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 
 			if !ok {
 				executor = newBlockExec(blockNum, execRequest.blockHash, execRequest.gasPool, execRequest.accessList, execRequest.consumers, execRequest.profile, execRequest.exhausted)
-				if selfLoop {
-					// Set the coinbase once, before any worker runs, so self-loop
-					// workers can read it during validation without racing the exec
-					// loop (which otherwise sets it from the first result).
-					if h := txTask.BlockHeader(); h != nil {
-						executor.coinbase = accounts.InternAddress(h.Coinbase)
-					}
-					go executor.selfLoopWatchdog(pe.workersCtx)
+				// Set the coinbase once, before any worker runs, so self-loop
+				// workers can read it during validation without racing the exec
+				// loop (which otherwise sets it from the first result).
+				if h := txTask.BlockHeader(); h != nil {
+					executor.coinbase = accounts.InternAddress(h.Coinbase)
 				}
+				go executor.selfLoopWatchdog(pe.workersCtx)
 			}
 		}
 
@@ -1903,27 +1901,14 @@ type txResult struct {
 
 
 
-// SetSplitApplyStackForTest enables the parallel-execution gate stack at runtime
-// and returns a restore closure. Test-only; not concurrency-safe (mutates package
-// globals).
-func SetSplitApplyStackForTest() (restore func()) {
-	prev := selfLoop
-	selfLoop = true
-	return func() {
-		selfLoop = prev
-	}
-}
-
-// selfLoop is the true Block-STM model: workers own execution AND validation.
+// The executor is the true Block-STM model: workers own execution AND validation.
 // Each worker flushes its writes to the versionMap speculatively (as estimate),
 // validates its own read-set, and loops — parking on the commit-frontier signal
 // until every read-dependency has committed — returning only a stable-valid
-// result. The exec loop then becomes a pure in-order commit loop: flush the
-// result's writes as complete, run the coinbase/finalize sweep, and broadcast
-// the advanced frontier. No exec-loop ValidateVersion walk, no committed-
-// dependent re-validation, no re-dispatch. Builds on depOrderVal + splitApply.
-var selfLoop = dbg.EnvBool("SELF_LOOP", false)
-
+// result. The exec loop is then a pure in-order commit loop: flush the result's
+// writes as complete, run the coinbase/finalize sweep, and broadcast the advanced
+// frontier. No exec-loop ValidateVersion walk, no committed-dependent
+// re-validation, no re-dispatch.
 
 // Mid-flow dep-pause is the sole dependency mechanism: workers flush their writes
 // as ESTIMATE, and a read that observes an in-flight estimate pauses (via the IBS
@@ -2929,21 +2914,8 @@ func (be *blockExecutor) readyForDepOrderValidation(tx int, coinbase accounts.Ad
 	if !be.execTasks.checkComplete(tx) || be.validateTasks.checkComplete(tx) {
 		return false
 	}
-	// Under selfLoop the worker only sends a result once every read-dependency has
-	// committed and its read-set re-validates, so an exec-complete result is ready
-	// to commit in order — the depsValidated/coinbase heuristics (which index
-	// blockIO by task index, off by one from its block-TxIndex keying) are the
-	// worker's job here, not the exec loop's.
-	if selfLoop {
-		return true
-	}
-	if !be.depsValidated(tx) {
-		return false
-	}
-	rs := be.blockIO.ReadSet(tx)
-	if rs.ReadsAccount(coinbase) {
-		return coinbaseFlushedUpTo >= tx-1
-	}
+	// The worker only sends a result once every read-dependency has committed and
+	// its read-set re-validates, so an exec-complete result is ready to commit.
 	return true
 }
 
@@ -3223,13 +3195,7 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 				be.finRevalFires++
 				be.validateTasks.clearComplete(tx)
 				be.preValidated[tx] = false
-				if selfLoop {
-					be.signalSelfLoopReexec(tx)
-				} else {
-					be.execTasks.clearComplete(tx)
-					be.txIncarnations[tx]++
-					be.execTasks.pushDeferred(tx)
-				}
+				be.signalSelfLoopReexec(tx)
 				break
 			}
 		}
@@ -3272,9 +3238,7 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 		if r, ferr := be.finalizeValidatedTx(pe, applyTx, tx, txTask, txResult, txVersion, stateReader); ferr != nil || r != nil {
 			return r, ferr
 		}
-		if selfLoop {
-			be.signalCommitted(tx)
-		}
+		be.signalCommitted(tx)
 	}
 	return nil, nil
 }
@@ -3413,23 +3377,14 @@ func (be *blockExecutor) revalidateCommittedDependents(changedTx int, oldWrites 
 		be.execFailed[tx]++
 		be.validateTasks.clearComplete(tx)
 		be.preValidated[tx] = false
-		// Under selfLoop the committed worker is still alive, parked on slReexec.
-		// Signal it to re-execute in place (it owns its incarnation, so no
-		// re-dispatch and no be.txIncarnations sync); leave execTasks complete so the
-		// re-sent result re-validates without going through the dispatch path.
-		if selfLoop {
-			be.slReexecFlag[tx].Store(true)
-			select {
-			case be.slReexec[tx] <- struct{}{}:
-			default:
-			}
-			continue
-		}
-		be.execTasks.clearComplete(tx)
-		be.txIncarnations[tx]++
-		be.execTasks.pushDeferred(tx)
-		if r := be.tooManyRetries(tx, txVersion.TxIndex, "dep-revalidate", nil); r != nil {
-			return r
+		// The committed worker is still alive, parked on slReexec. Signal it to
+		// re-execute in place (it owns its incarnation, so no re-dispatch and no
+		// be.txIncarnations sync); leave execTasks complete so the re-sent result
+		// re-validates without going through the dispatch path.
+		be.slReexecFlag[tx].Store(true)
+		select {
+		case be.slReexec[tx] <- struct{}{}:
+		default:
 		}
 	}
 	return nil
@@ -3564,23 +3519,12 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 			if r := be.revalidateCommittedDependents(tx, nil); r != nil {
 				return r, nil
 			}
-			// Under selfLoop the worker whose stale verdict we just rejected is alive
-			// and parked on slReexec. Signal an in-place re-exec (it owns its
-			// incarnation) and leave execTasks complete so the re-sent result
-			// re-validates without going through the dispatch path — same as
-			// revalidateCommittedDependents' selfLoop re-exec.
-			if selfLoop {
-				be.preValidated[tx] = false
-				be.signalSelfLoopReexec(tx)
-				continue
-			}
-			be.execTasks.clearComplete(tx)
-			be.execTasks.pushDeferred(tx)
+			// The worker whose stale verdict we just rejected is alive and parked on
+			// slReexec. Signal an in-place re-exec (it owns its incarnation) and leave
+			// execTasks complete so the re-sent result re-validates without going
+			// through the dispatch path — same as revalidateCommittedDependents.
 			be.preValidated[tx] = false
-			be.txIncarnations[tx]++
-			if r := be.tooManyRetries(tx, txVersion.TxIndex, "validator-invalid", nil); r != nil {
-				return r, nil
-			}
+			be.signalSelfLoopReexec(tx)
 		}
 
 		if r, ferr := be.advanceCoinbaseAndFinalize(pe, applyTx, stateReader); ferr != nil || r != nil {
@@ -3603,9 +3547,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	}
 
 	tx := task.index
-	if !selfLoop && be.coinbase.IsNil() && !res.Coinbase.IsNil() {
-		be.coinbase = res.Coinbase
-	}
 	be.results[tx] = &execResult{TxResult: res}
 	if res.Err != nil {
 		if res.Version().Incarnation > len(be.tasks) {
@@ -3622,7 +3563,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		// re-validation confirms its read-set is still current; otherwise the
 		// error may stem from a predecessor re-validated since dispatch — defer
 		// for re-execution.
-		if be.settledInput[tx] || (selfLoop && be.frontier() >= tx-1) {
+		if be.settledInput[tx] || be.frontier() >= tx-1 {
 			txVersion := res.Version()
 			validity := be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
 				func(readVersion, writtenVersion state.Version) state.VersionValidity {
@@ -3688,7 +3629,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		// committed-dependent re-check) already has execTasks complete — only its
 		// validation was cleared. markComplete would panic on the non-in-progress
 		// task, so skip it; the re-validation below re-commits it.
-		if !selfLoop || !be.execTasks.checkComplete(tx) {
+		if !be.execTasks.checkComplete(tx) {
 			be.execTasks.markComplete(tx)
 			be.execTasks.removeDependency(tx)
 		}
@@ -3758,7 +3699,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			// its still-parked self-loop worker can never be signalled to re-execute
 			// again — release it. Closing earlier (at finalize) would let a re-check
 			// in the finalize→publish window signal an already-exited worker.
-			if selfLoop && tx >= 0 && tx < len(be.slFin) {
+			if tx >= 0 && tx < len(be.slFin) {
 				close(be.slFin[tx])
 			}
 
@@ -3979,7 +3920,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 }
 
 func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExecutor) {
-	if selfLoop && be.slWake == nil && len(be.tasks) > 0 {
+	if be.slWake == nil && len(be.tasks) > 0 {
 		be.slWake = make([]chan struct{}, len(be.tasks))
 		be.slReexec = make([]chan struct{}, len(be.tasks))
 		be.slReexecFlag = make([]atomic.Bool, len(be.tasks))
@@ -4065,34 +4006,23 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 				execCpuNanos: &be.execCpuNanos,
 			}
 
-			if selfLoop {
-				// The worker owns its own re-execution loop; the scheduler dispatches a
-				// task once, then again only when the committed-dependent re-check
-				// un-commits it (guard cleared, incarnation bumped) — start that fresh
-				// worker at the bumped incarnation so its versionMap flush stays
-				// monotonic over the one the exited worker left.
-				if be.selfLoopDispatched[nextTx] {
-					be.settledInput[nextTx] = isNextValidated
-					be.cntExec++
-					dispatched++
-					continue
-				}
-				be.selfLoopDispatched[nextTx] = true
-				version := execTask.Version()
-				version.Incarnation = incarnation
-				tv.version = version
-				pe.dispatchRunSelfLoop(be, tv)
-				budget--
-			} else if incarnation == 0 {
-				tv.version = execTask.Version()
-				pe.dispatchRun(tv)
-				budget--
-			} else {
-				version := execTask.Version()
-				version.Incarnation = incarnation
-				tv.version = version
-				pe.dispatchRun(tv)
+			// The worker owns its own re-execution loop; the scheduler dispatches a
+			// task once, then again only when the committed-dependent re-check
+			// un-commits it (guard cleared, incarnation bumped) — start that fresh
+			// worker at the bumped incarnation so its versionMap flush stays
+			// monotonic over the one the exited worker left.
+			if be.selfLoopDispatched[nextTx] {
+				be.settledInput[nextTx] = isNextValidated
+				be.cntExec++
+				dispatched++
+				continue
 			}
+			be.selfLoopDispatched[nextTx] = true
+			version := execTask.Version()
+			version.Incarnation = incarnation
+			tv.version = version
+			pe.dispatchRunSelfLoop(be, tv)
+			budget--
 
 			// Commit side-effects only after successful enqueue. Record whether
 			// this dispatch runs against fully settled input (every predecessor

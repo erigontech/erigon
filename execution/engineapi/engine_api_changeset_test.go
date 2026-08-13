@@ -30,7 +30,6 @@ import (
 	"github.com/erigontech/erigon/db/state/changeset"
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
-	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
@@ -44,9 +43,6 @@ import (
 // silently fails to revert state on an unwind, giving a deterministic wrong trie
 // root when a reorg re-executes a competing block on the un-reverted base.
 func TestEngineApiSplitApplyChangesetIsComplete(t *testing.T) {
-	restore := stagedsync.SetSplitApplyStackForTest()
-	t.Cleanup(restore)
-
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlWarn)
 	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
@@ -131,9 +127,6 @@ func TestEngineApiSplitApplyChangesetIsComplete(t *testing.T) {
 // splitApply gate stack; pre-Amsterdam to avoid the (orthogonal) block-assembler
 // BAL mismatch.
 func TestEngineApiSplitApplyUnwindRevertsState(t *testing.T) {
-	restore := stagedsync.SetSplitApplyStackForTest()
-	t.Cleanup(restore)
-
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlWarn)
 	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
