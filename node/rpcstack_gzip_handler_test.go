@@ -263,3 +263,34 @@ func TestGzipLargeResponseStreamsWithoutContentLength(t *testing.T) {
 		})
 	}
 }
+
+// A single write larger than the cap must stream rather than grow the buffer
+// past it: the threshold is checked against the incoming write, not only
+// against what is already buffered.
+func TestGzipSingleOversizedWriteStreams(t *testing.T) {
+	payload := bytes.Repeat([]byte(`{"k":"0123456789abcdef"},`), (8<<20)/25)
+	require.Greater(t, len(payload), maxBufferedGzipSize, "payload must exceed the cap in one write")
+
+	srv := httptest.NewServer(newGzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		n, err := w.Write(payload) // one Write call, nothing buffered before it
+		require.NoError(t, err)
+		require.Equal(t, len(payload), n)
+	})))
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodPost, srv.URL, nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	resp, err := (&http.Client{Transport: &http.Transport{DisableCompression: true}}).Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	require.Equal(t, "gzip", resp.Header.Get("Content-Encoding"))
+	require.Empty(t, resp.Header.Get("Content-Length"), "an oversized single write must stream")
+
+	zr, err := gzip.NewReader(resp.Body)
+	require.NoError(t, err)
+	got, err := io.ReadAll(zr)
+	require.NoError(t, err)
+	require.Equal(t, payload, got)
+}

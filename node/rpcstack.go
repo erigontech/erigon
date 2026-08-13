@@ -256,8 +256,11 @@ func (w *gzipResponseWriter) WriteHeader(status int) {
 }
 
 func (w *gzipResponseWriter) Write(b []byte) (int, error) {
+	// Switch on the write that would exceed the cap, so a single oversized
+	// write streams rather than growing the buffer past it. Only the mode
+	// switch: flushing here would emit an empty sync block before any data.
 	if w.gzw == nil && w.buf.Len()+len(b) > maxBufferedGzipSize {
-		w.Flush()
+		w.switchToStreaming()
 	}
 	if w.gzw != nil {
 		gzipStreamingInBytes.AddInt(len(b))
@@ -267,21 +270,29 @@ func (w *gzipResponseWriter) Write(b []byte) (int, error) {
 }
 
 // Flush switches to streaming gzip on first call; subsequent calls flush incrementally.
-func (w *gzipResponseWriter) Flush() {
-	if w.gzw == nil {
-		w.ResponseWriter.Header().Set("Content-Encoding", "gzip")
-		w.ResponseWriter.Header().Del("Content-Length")
-		if w.status != 0 {
-			w.ResponseWriter.WriteHeader(w.status)
-		}
-		w.gzw = gzStreamPool.Get().(*gzip.Writer)
-		w.gzw.Reset(countingWriter{w: w.ResponseWriter, c: gzipStreamingOutBytes})
-		if w.buf.Len() > 0 {
-			gzipStreamingInBytes.AddInt(w.buf.Len())
-			_, _ = w.gzw.Write(w.buf.Bytes())
-			w.buf.Reset()
-		}
+// switchToStreaming activates the gzip stream and drains whatever is already
+// buffered. Content-Length is dropped here: past this point the body length is
+// not known before the headers go out.
+func (w *gzipResponseWriter) switchToStreaming() {
+	if w.gzw != nil {
+		return
 	}
+	w.ResponseWriter.Header().Set("Content-Encoding", "gzip")
+	w.ResponseWriter.Header().Del("Content-Length")
+	if w.status != 0 {
+		w.ResponseWriter.WriteHeader(w.status)
+	}
+	w.gzw = gzStreamPool.Get().(*gzip.Writer)
+	w.gzw.Reset(countingWriter{w: w.ResponseWriter, c: gzipStreamingOutBytes})
+	if w.buf.Len() > 0 {
+		gzipStreamingInBytes.AddInt(w.buf.Len())
+		_, _ = w.gzw.Write(w.buf.Bytes())
+		w.buf.Reset()
+	}
+}
+
+func (w *gzipResponseWriter) Flush() {
+	w.switchToStreaming()
 	_ = w.gzw.Flush()
 	if f, ok := w.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
