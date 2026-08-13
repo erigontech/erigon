@@ -1934,14 +1934,6 @@ var prevBlockReads = dbg.EnvBool("PREV_BLOCK_READS", false)
 
 
 
-// depOrderVal (prototype, default OFF) makes ValidateVersion + state-commit
-// dependency-ordered instead of gated on the contiguous maxComplete prefix: a tx
-// validates as soon as it is exec-complete and its read-dependencies are all
-// validated. The cheap in-order calcFees coinbase chain stays a separate in-order
-// sweep (its writes un-merged from per-tx commit); a tx that reads the coinbase
-// (ReadsAccount) falls back to the all-prior gate. Publish stays on the
-// contiguous maxValidated = the final total-ordered pass.
-var depOrderVal = dbg.EnvBool("DEP_ORDER_VAL", false)
 
 
 // splitApply moves the state apply off the exec loop: the apply loop folds each
@@ -1960,11 +1952,11 @@ var splitApply = dbg.EnvBool("SPLIT_APPLY", false)
 // at package init from env vars; splitApply alone is not a valid configuration.
 // Test-only; not concurrency-safe (mutates package globals).
 func SetSplitApplyStackForTest() (restore func()) {
-	prev := [5]bool{splitApply, selfLoop, depOrderVal, rawViewCollapse, prevBlockReads}
-	splitApply, selfLoop, depOrderVal, rawViewCollapse, prevBlockReads = true, true, true, true, true
+	prev := [4]bool{splitApply, selfLoop, rawViewCollapse, prevBlockReads}
+	splitApply, selfLoop, rawViewCollapse, prevBlockReads = true, true, true, true
 	return func() {
-		splitApply, selfLoop, depOrderVal, rawViewCollapse, prevBlockReads =
-			prev[0], prev[1], prev[2], prev[3], prev[4]
+		splitApply, selfLoop, rawViewCollapse, prevBlockReads =
+			prev[0], prev[1], prev[2], prev[3]
 	}
 }
 
@@ -3757,14 +3749,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			be.blockIO.RecordWrites(txVersion, res.TxOut)
 
 			if hasWriteChange {
-				if depOrderVal {
-					// Defer dependent re-validation until this tx's new writes are
-					// flushed during validation (they aren't in the versionMap yet).
-					if _, ok := be.writeChangedPrev[tx]; !ok {
-						be.writeChangedPrev[tx] = prevWrites
-					}
-				} else {
-					be.validateTasks.pushPendingSet(be.execTasks.getRevalidationRange(tx + 1))
+				// Defer dependent re-validation until this tx's new writes are
+				// flushed during validation (they aren't in the versionMap yet).
+				if _, ok := be.writeChangedPrev[tx]; !ok {
+					be.writeChangedPrev[tx] = prevWrites
 				}
 			}
 		}
@@ -3795,130 +3783,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	// do validations ...
 	var stateReader state.StateReader
 
-	if depOrderVal {
-		if r, derr := be.runDepOrderValidation(pe, applyTx, &stateReader); derr != nil || r != nil {
-			return r, derr
-		}
-	} else {
-		maxComplete := be.execTasks.maxComplete()
-		toValidate := make(sort.IntSlice, 0, 2)
-
-		for be.validateTasks.minPending() <= maxComplete && be.validateTasks.minPending() >= 0 {
-			toValidate = append(toValidate, be.validateTasks.takeNextPending())
-		}
-
-		cntInvalid := 0
-		for i := 0; i < len(toValidate); i++ {
-
-			be.cntTotalValidations++
-
-			tx := toValidate[i]
-			txTask := be.tasks[tx].Task
-			txResult := be.results[tx]
-			// txResult.Task is the *taskVersion wrapper from this scheduled run,
-			// carrying the current Incarnation. be.tasks[tx].Task is the bare
-			// TxTask whose Version().Incarnation never advances past 0.
-			txVersion := txResult.Task.Version()
-
-			var trace bool
-			var tracePrefix string
-
-			if trace = dbg.TraceTransactionIO && dbg.TraceTx(be.blockNum, txVersion.TxIndex); trace {
-				tracePrefix = fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txVersion.Incarnation)
-			}
-
-			// Credit tip pre-validate for regular TXs so the validator sees the
-			// post-tip coinbase write. Caveat: the tip write is stamped at the
-			// same (TxIndex, Incarnation) as the worker's coinbase write, so a
-			// downstream tx that read coinbase via versionMap between the worker
-			// write and the tip write records the same Version the validator
-			// observes — the version-only validator will NOT catch that case.
-			// In practice this is unusual: only sender==coinbase produces a
-			// worker coinbase write, and downstream BALANCE(coinbase) reads
-			// across this window are rare. Value-aware validation would close
-			// the gap if it surfaces.
-			if txVersion.TxIndex >= 0 && !txTask.IsBlockEnd() && txResult != nil && txResult.Err == nil {
-				taskVer, ok := txResult.Task.(*taskVersion)
-				if !ok {
-					return nil, fmt.Errorf("apply loop: unexpected task type for tx %d: result.Task=%T", tx, txResult.Task)
-				}
-				if stateReader == nil {
-					if txTask.IsHistoric() {
-						stateReader = pe.prevBlockBase(state.NewHistoryReaderV3WithBlockCache(applyTx, pe.domainsRead(), be.blockStateCache, txTask.Version().TxNum), be.blockNum)
-					} else {
-						stateReader = pe.prevBlockBase(state.NewCurrentCachedReaderV3(pe.domainsRead().AsGetter(applyTx), be.blockStateCache), be.blockNum)
-					}
-				}
-				tipWrites, err := txResult.calcFees(taskVer, be.versionMap, stateReader, txTask.Rules())
-				if err != nil {
-					return nil, err
-				}
-				if !tipWrites.IsEmpty() {
-					existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
-					merged := MergeVersionedWrites(existingWrites, tipWrites)
-					be.blockIO.RecordWrites(txVersion, merged)
-				}
-			}
-
-			validity := be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
-				func(readVersion, writtenVersion state.Version) state.VersionValidity {
-					vv := state.VersionValid
-
-					if readVersion != writtenVersion {
-						vv = state.VersionInvalid
-					} else if writtenVersion.TxIndex == state.UnknownDep && tx-1 > be.validateTasks.maxComplete() {
-						vv = state.VersionTooEarly
-					}
-
-					return vv
-				}, trace, tracePrefix)
-			be.versionMap.SetTrace(false)
-
-			if validity == state.VersionTooEarly {
-				cntInvalid++
-				continue
-			}
-
-			// The validator verdict is the single source of truth (issue #21319):
-			// a result is committed only if validation explicitly passed it.
-			valid := validity == state.VersionValid
-
-			be.versionMap.SetTrace(trace)
-			writeSet := be.blockIO.WriteSet(txVersion.TxIndex)
-			be.versionMap.FlushVersionedWrites(writeSet, applyLoopFlushAsComplete(valid, cntInvalid), tracePrefix)
-			be.versionMap.SetTrace(false)
-
-			if valid {
-				if cntInvalid == 0 {
-					be.validateTasks.markComplete(tx)
-
-					if r, ferr := be.finalizeValidatedTx(pe, applyTx, tx, txTask, txResult, txVersion, &stateReader); ferr != nil || r != nil {
-						return r, ferr
-					}
-				}
-			} else {
-				cntInvalid++
-				be.cntValidationFail++
-				be.execFailed[tx]++
-
-				if dbg.TraceTransactionIO && be.txIncarnations[tx] > 1 {
-					fmt.Println(be.blockNum, "FAILED", tx, be.txIncarnations[tx], "failed", be.execFailed[tx], "aborted", be.execAborted[tx])
-				}
-
-				// 'create validation tasks for all transactions > tx ...'
-				be.validateTasks.pushPendingSet(be.execTasks.getRevalidationRange(tx + 1))
-				be.validateTasks.clearInProgress(tx) // clear in progress - pending will be added again once new incarnation executes
-				be.execTasks.clearComplete(tx)
-				// Defer: validator-invalid may be race-induced (worker raced an
-				// exec-loop flush). Drain predicate in scheduleExecution waits.
-				be.execTasks.pushDeferred(tx)
-				be.preValidated[tx] = false
-				be.txIncarnations[tx]++
-				if r := be.tooManyRetries(tx, txVersion.TxIndex, "validator-invalid", nil); r != nil {
-					return r, nil
-				}
-			}
-		}
+	if r, derr := be.runDepOrderValidation(pe, applyTx, &stateReader); derr != nil || r != nil {
+		return r, derr
 	}
 
 	maxValidated := be.validateTasks.maxComplete()
@@ -4275,20 +4141,16 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 	// at index < N is in flight. Lower-indexed workers' flushes land at
 	// indices visible to N's reads via vm.Read's floor(N-1); higher-indexed
 	// ones don't. Non-deferred txs keep dispatching via pending.
-	drainMaxValidated := be.validateTasks.maxComplete()
 	drainMinIP := be.execTasks.minInProgress()
 	be.execTasks.drainDeferredIfReady(func(tx int) bool {
-		if depOrderVal {
-			// Dependency-driven drain: re-queue as soon as the tx's actual blockers
-			// clear, not when the contiguous prefix reaches tx-1. The contiguous
-			// maxValidated gate deadlocks dependency-ordered validation — a real
-			// invalidation regresses it and permanently strands deferred txs whose
-			// true dependencies are already satisfied.
-			// The in-flight guard keeps a lower-indexed worker's floor writes
-			// visible on re-read — but it serializes independent re-runs by index.
-			return !be.execTasks.isBlocked(tx) && (drainMinIP < 0 || drainMinIP >= tx)
-		}
-		return drainMaxValidated >= tx-1 && (drainMinIP < 0 || drainMinIP >= tx)
+		// Dependency-driven drain: re-queue as soon as the tx's actual blockers
+		// clear, not when the contiguous prefix reaches tx-1. The contiguous
+		// maxValidated gate deadlocks dependency-ordered validation — a real
+		// invalidation regresses it and permanently strands deferred txs whose
+		// true dependencies are already satisfied.
+		// The in-flight guard keeps a lower-indexed worker's floor writes
+		// visible on re-read — but it serializes independent re-runs by index.
+		return !be.execTasks.isBlocked(tx) && (drainMinIP < 0 || drainMinIP >= tx)
 	})
 
 	maxValidated := be.validateTasks.maxComplete()
