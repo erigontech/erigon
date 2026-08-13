@@ -60,9 +60,14 @@ func (s *Service) Start(ctx context.Context) {
 		return
 	}
 
-	// Resolve validator indices from the beacon state.
-	if err := s.resolveIndices(ctx); err != nil {
-		s.logger.Error("[dev-validator] failed to resolve indices", "err", err)
+	// Resolve validator indices from the beacon state. The /genesis endpoint that
+	// waitForReady polls answers BEFORE the beacon node has synced to head, so the
+	// first /states/head/validators call can transiently return 503 "beacon node is
+	// syncing" (or an empty state). Giving up here permanently killed one of the
+	// per-chain dev-validators at random on a multi-chain boot, stalling that chain
+	// at block 0. Retry until the node serves the state (or the context is
+	// cancelled) — the failure is transient startup ordering, not a real error.
+	if !s.resolveIndicesWithRetry(ctx) {
 		return
 	}
 
@@ -116,6 +121,29 @@ func (s *Service) waitForReady(ctx context.Context) {
 			return
 		}
 		time.Sleep(time.Second)
+	}
+}
+
+// resolveIndicesWithRetry calls resolveIndices until it succeeds or the context
+// is cancelled, polling every second. During a multi-chain boot the beacon node
+// briefly reports "syncing" (503) on /states/head/validators even after /genesis
+// is up, so a single attempt races startup; retrying makes the dev-validator
+// start reliably instead of dying on the transient failure. Returns false only
+// when the context is cancelled (shutdown).
+func (s *Service) resolveIndicesWithRetry(ctx context.Context) bool {
+	for attempt := 1; ; attempt++ {
+		if err := s.resolveIndices(ctx); err == nil {
+			return true
+		} else if ctx.Err() != nil {
+			return false
+		} else {
+			s.logger.Warn("[dev-validator] resolve indices not ready, retrying", "attempt", attempt, "err", err)
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(time.Second):
+		}
 	}
 }
 
