@@ -257,29 +257,25 @@ func GetDeferredUpdateMetrics() int64 {
 	return getDeferredUpdateCount.Load()
 }
 
-// getDeferredUpdate gets a DeferredBranchUpdate from the global pool and copies the
-// prefix, the collect-time raw encoding, and the predecessor. The copies transfer to
-// whoever the apply hands them to (putBranch retains prefix and data), so pooled
-// objects never keep their backing arrays.
+// getDeferredUpdate gets a DeferredBranchUpdate from the pool and copies prefix,
+// raw, and prev into its own reused backing arrays. Because putDeferredUpdate
+// recycles those arrays for a later, unrelated update, every PutBranch
+// implementation must copy them rather than retain the slices it's given.
 func getDeferredUpdate(prefix []byte, raw, prev []byte) *DeferredBranchUpdate {
 	getDeferredUpdateCount.Add(1)
 	upd := deferredUpdatePool.Get().(*DeferredBranchUpdate)
 
-	upd.prefix = bytes.Clone(prefix)
-	upd.raw = bytes.Clone(raw)
-	upd.prev = bytes.Clone(prev)
+	upd.prefix = append(upd.prefix[:0], prefix...)
+	upd.raw = append(upd.raw[:0], raw...)
+	upd.prev = append(upd.prev[:0], prev...)
 	upd.encoded = nil
 
 	return upd
 }
 
 // putDeferredUpdate returns a DeferredBranchUpdate to the global pool.
-// Clears slice references so pooled objects don't hold stale memory.
 func putDeferredUpdate(upd *DeferredBranchUpdate) {
 	if upd != nil {
-		upd.prefix = nil
-		upd.raw = nil
-		upd.prev = nil
 		upd.encoded = nil
 		deferredUpdatePool.Put(upd)
 	}

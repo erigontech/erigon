@@ -69,7 +69,7 @@ func (ms *MockState) PutBranch(prefix []byte, data []byte, prevData []byte) erro
 		ms.mu.Lock()
 		defer ms.mu.Unlock()
 	}
-	ms.cm[string(prefix)] = data
+	ms.cm[string(prefix)] = bytes.Clone(data)
 	return nil
 }
 

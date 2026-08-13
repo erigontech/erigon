@@ -829,6 +829,49 @@ func TestCollectDeferredUpdate_IsNewSkipsLookupAndMatchesNilPath(t *testing.T) {
 	require.Equal(t, ctxA.puts[0].prev, ctxB.puts[0].prev)
 }
 
+// TestCollectDeferredUpdate_PoolRecycleDoesNotCorruptEarlierApply pins the
+// contract documented on getDeferredUpdate: putDeferredUpdate recycles the
+// prefix/raw/prev backing arrays for a later, unrelated update, so a PutBranch
+// implementation that copies (as recordingCtx and every real implementation
+// do) must see its own copy stay correct across that recycle.
+func TestCollectDeferredUpdate_PoolRecycleDoesNotCorruptEarlierApply(t *testing.T) {
+	t.Parallel()
+	rowA, bmA := generateCellRow(t, 8)
+	cellsA := generateCellEncodeDataRow(t, rowA, bmA)
+	rowB, bmB := generateCellRow(t, 2)
+	cellsB := generateCellEncodeDataRow(t, rowB, bmB)
+
+	wantBE := NewBranchEncoder(1024)
+	rawA, err := wantBE.EncodeBranch(bmA, bmA, bmA, &cellsA)
+	require.NoError(t, err)
+	wantA := bytes.Clone([]byte(rawA))
+	rawB, err := wantBE.EncodeBranch(bmB, bmB, bmB, &cellsB)
+	require.NoError(t, err)
+	wantB := bytes.Clone([]byte(rawB))
+	require.NotEqual(t, wantA, wantB, "test rows must be distinctive")
+	require.Greater(t, len(wantA), len(wantB), "round A must be longer so a truncation bug on reuse is visible")
+
+	ctx := &recordingCtx{}
+	be := NewBranchEncoder(1024)
+	be.setDeferUpdates(true)
+
+	require.NoError(t, be.CollectDeferredUpdate(ctx, []byte{0xAA, 0xAA}, bmA, bmA, bmA, &cellsA, true))
+	require.NoError(t, be.ApplyDeferredUpdates(1, ctx.PutBranch))
+	be.ClearDeferred() // recycles this round's DeferredBranchUpdate into the pool
+
+	require.Len(t, ctx.puts, 1)
+	require.Equal(t, wantA, ctx.puts[0].data)
+
+	// A shorter, distinctive second round reuses the pool's backing arrays.
+	require.NoError(t, be.CollectDeferredUpdate(ctx, []byte{0xBB, 0xBB}, bmB, bmB, bmB, &cellsB, true))
+	require.NoError(t, be.ApplyDeferredUpdates(1, ctx.PutBranch))
+	be.ClearDeferred()
+
+	require.Len(t, ctx.puts, 2)
+	require.Equal(t, wantA, ctx.puts[0].data, "recycling the pool must not corrupt data already handed to PutBranch")
+	require.Equal(t, wantB, ctx.puts[1].data, "reused buffer must not retain stale bytes from the earlier, longer round")
+}
+
 func TestUpdates_TouchStorageClearsDeleteOnRewrite(t *testing.T) {
 	t.Parallel()
 
