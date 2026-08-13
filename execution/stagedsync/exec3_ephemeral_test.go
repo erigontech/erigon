@@ -280,7 +280,12 @@ func TestSelfLoopEvaluateBlockerTaskSpaceOnPartialBlock(t *testing.T) {
 		versionMap: vm,
 		tasks:      []*execTask{{Task: &exec.TxTask{TxIndex: startTxIndex}, index: 0}},
 	}
-	tv := &taskVersion{version: state.Version{TxIndex: readerTxIndex}}
+	// The reader is task (readerTxIndex - startTxIndex) in dense task-list space;
+	// selfLoopEvaluate reads tv.index (the embedded execTask) for the forward-dep guard.
+	tv := &taskVersion{
+		execTask: &execTask{index: readerTxIndex - startTxIndex},
+		version:  state.Version{TxIndex: readerTxIndex},
+	}
 
 	valid, _, blocker := be.selfLoopEvaluate(tv, &exec.TxResult{TxIn: rs})
 	require.False(t, valid, "a stale read must revalidate as invalid")
