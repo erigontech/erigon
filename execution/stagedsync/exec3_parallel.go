@@ -2090,13 +2090,6 @@ var consumerApply = dbg.EnvBool("CONSUMER_APPLY", false)
 // "valid" is caught by the reverse-index revalidation of committed dependents.
 var workerValidate = dbg.EnvBool("WORKER_VALIDATE", false)
 
-// depTrueDepsOnly re-dispatches deferred (re-execution) txs gated on true data
-// dependencies (isBlocked) ALONE, dropping the lower-index in-flight guard that
-// serialized mutually-independent re-runs by tx index. The independent re-runs
-// then go out as a parallel set; a re-run reading a not-yet-final lower value is
-// caught by validation and re-queued. Dep-order path only.
-var depTrueDepsOnly = dbg.EnvBool("DEP_TRUE_DEPS_ONLY", false)
-
 // selfLoop is the true Block-STM model: workers own execution AND validation.
 // Each worker flushes its writes to the versionMap speculatively (as estimate),
 // validates its own read-set, and loops — parking on the commit-frontier signal
@@ -3786,7 +3779,6 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 				tracePrefix = fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txVersion.Incarnation)
 			}
 
-			blockerTxIndex := -1
 			// The worker's read-set verdict is a parallel pre-filter, not
 			// authoritative: a lower tx can write a key this tx read AFTER the worker
 			// validated and parked (its target is the version it read, not the later
@@ -3797,9 +3789,6 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 			validity := be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
 				func(readVersion, writtenVersion state.Version) state.VersionValidity {
 					if readVersion != writtenVersion {
-						if writtenVersion.TxIndex > blockerTxIndex {
-							blockerTxIndex = writtenVersion.TxIndex
-						}
 						return state.VersionInvalid
 					}
 					return state.VersionValid
@@ -3871,23 +3860,7 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 				continue
 			}
 			be.execTasks.clearComplete(tx)
-			// Record the writer whose value this tx read stale as its true blocker, so
-			// re-dispatch waits on that writer alone (via removeDependency when it
-			// completes) instead of the index proxy. Only pushDeferred when no live
-			// blocker could be registered (the writer already completed).
-			blocked := false
-			if depTrueDepsOnly && blockerTxIndex >= 0 {
-				// blockerTxIndex is a versionMap TxIndex; translate to task-index space.
-				depTask := be.taskIndexOf(blockerTxIndex)
-				if depTask >= tx {
-					panic(fmt.Sprintf("[self-loop] block %d: task %d re-dispatch depends on HIGHER task %d (writer TxIndex %d) — forward dependency",
-						be.blockNum, tx, depTask, blockerTxIndex))
-				}
-				blocked = be.execTasks.addDependency(depTask, tx)
-			}
-			if !blocked {
-				be.execTasks.pushDeferred(tx)
-			}
+			be.execTasks.pushDeferred(tx)
 			be.preValidated[tx] = false
 			be.txIncarnations[tx]++
 			if r := be.tooManyRetries(tx, txVersion.TxIndex, "validator-invalid", nil); r != nil {
@@ -4518,9 +4491,6 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 			// maxValidated gate deadlocks dependency-ordered validation — a real
 			// invalidation regresses it and permanently strands deferred txs whose
 			// true dependencies are already satisfied.
-			if depTrueDepsOnly {
-				return !be.execTasks.isBlocked(tx)
-			}
 			// The in-flight guard keeps a lower-indexed worker's floor writes
 			// visible on re-read — but it serializes independent re-runs by index.
 			return !be.execTasks.isBlocked(tx) && (drainMinIP < 0 || drainMinIP >= tx)
