@@ -449,7 +449,7 @@ func RPCMarshalBlockDeprecated(block *types.Block, inclTx bool, fullTx bool) (ma
 }
 
 func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, borTx types.Transaction, borTxHash common.Hash) (map[string]any, error) {
-	fields := RPCMarshalHeader(block.HeaderNoCopy())
+	fields := RPCMarshalHeader(block.Header())
 	fields["size"] = hexutil.Uint64(block.Size())
 	if _, ok := fields["transactions"]; !ok {
 		fields["transactions"] = make([]any, 0)
