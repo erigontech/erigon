@@ -585,13 +585,24 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case toRecover := <-d.recoverBlobsQueue:
+			d.recoveringMutex.Lock()
+			if _, ok := d.isRecovering[toRecover.blockRoot]; ok {
+				// recovering, skip
+				d.recoveringMutex.Unlock()
+				continue
+			}
+			d.isRecovering[toRecover.blockRoot] = true
+			d.recoveringMutex.Unlock()
+
 			// check if the blobs are already recovered
 			if !d.IsBlobAlreadyRecovered(toRecover.blockRoot) {
 				// recover the blobs
 				recover(toRecover)
 			}
 			// remove the block from the recovering map
-			d.releaseRecovery(toRecover.blockRoot)
+			d.recoveringMutex.Lock()
+			delete(d.isRecovering, toRecover.blockRoot)
+			d.recoveringMutex.Unlock()
 		}
 	}
 }
@@ -606,10 +617,13 @@ func (d *peerdas) TryScheduleRecover(slot uint64, blockRoot common.Hash) error {
 		return nil
 	}
 
-	// Reserve the root before enqueueing so queued and running work share one owner.
-	if !d.reserveRecovery(blockRoot) {
+	// early check if the blobs are recovering
+	d.recoveringMutex.Lock()
+	if _, ok := d.isRecovering[blockRoot]; ok {
+		d.recoveringMutex.Unlock()
 		return nil
 	}
+	d.recoveringMutex.Unlock()
 
 	// schedule
 	timer := time.NewTimer(3 * time.Second)
@@ -620,26 +634,9 @@ func (d *peerdas) TryScheduleRecover(slot uint64, blockRoot common.Hash) error {
 		blockRoot: blockRoot,
 	}:
 	case <-timer.C:
-		d.releaseRecovery(blockRoot)
 		return errors.New("failed to schedule recover: timeout")
 	}
 	return nil
-}
-
-func (d *peerdas) reserveRecovery(blockRoot common.Hash) bool {
-	d.recoveringMutex.Lock()
-	defer d.recoveringMutex.Unlock()
-	if d.isRecovering[blockRoot] {
-		return false
-	}
-	d.isRecovering[blockRoot] = true
-	return true
-}
-
-func (d *peerdas) releaseRecovery(blockRoot common.Hash) {
-	d.recoveringMutex.Lock()
-	defer d.recoveringMutex.Unlock()
-	delete(d.isRecovering, blockRoot)
 }
 
 var allColumns = func() map[cltypes.CustodyIndex]bool {
