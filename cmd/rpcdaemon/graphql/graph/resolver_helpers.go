@@ -243,15 +243,11 @@ func decodeOptionalU256(s *string, fieldName string) (*hexutil.U256, error) {
 	if s == nil {
 		return nil, nil
 	}
-	b, err := hexutil.DecodeBig(*s)
+	u, err := hexutil.DecodeU256(*s)
 	if err != nil {
 		return nil, fmt.Errorf("invalid %s: %w", fieldName, err)
 	}
-	u, overflow := (*hexutil.Big)(b).ToUint256()
-	if overflow {
-		return nil, fmt.Errorf("invalid %s: %w", fieldName, hexutil.ErrBig256Range)
-	}
-	return (*hexutil.U256)(u), nil
+	return (*hexutil.U256)(&u), nil
 }
 
 func callDataToArgs(data model.CallData) (ethapi.CallArgs, error) {

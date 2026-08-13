@@ -189,10 +189,12 @@ func TestUnmarshalPubkey(t *testing.T) {
 
 	var (
 		enc, _ = hex.DecodeString("760c4460e5336ac9bbd87952a3c7ec4363fc0a97bd31c86430806e287b437fd1b01abc6e1db640cf3106b520344af1d58b00b57823db3e1407cbc433e1b6d04d")
+		pubX   = hexutil.MustDecodeU256("0x760c4460e5336ac9bbd87952a3c7ec4363fc0a97bd31c86430806e287b437fd1")
+		pubY   = hexutil.MustDecodeU256("0xb01abc6e1db640cf3106b520344af1d58b00b57823db3e1407cbc433e1b6d04d")
 		dec    = &ecdsa.PublicKey{
 			Curve: S256(),
-			X:     hexutil.MustDecodeBig("0x760c4460e5336ac9bbd87952a3c7ec4363fc0a97bd31c86430806e287b437fd1"),
-			Y:     hexutil.MustDecodeBig("0xb01abc6e1db640cf3106b520344af1d58b00b57823db3e1407cbc433e1b6d04d"),
+			X:     pubX.ToBig(),
+			Y:     pubY.ToBig(),
 		}
 	)
 	key, err = UnmarshalPubkey(enc)
