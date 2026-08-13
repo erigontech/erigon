@@ -625,15 +625,15 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 		// If base == 1 (and mod > 1), then the result is 1
 		result[modLen-1] = 1
 	case modexpBigIntFaster(exp, modLen):
-		// math/big's Montgomery inner loop is `hand-written assembly`, which pulls
-		// ahead of `evmone's portable C++` as the modulus grows.
+		// math/big's Montgomery inner loop is `hand-written assembly`, which beats
+		// `evmone's portable C++` once the modulus is large enough.
 		baseBig := new(big.Int).SetBytes(base)
 		expBig := new(big.Int).SetBytes(exp)
 		modBig := new(big.Int).SetBytes(mod)
 		baseBig.Exp(baseBig, expBig, modBig).FillBytes(result)
 	case modexpU256Applicable(base, mod):
-		// A fixed-width uint256 square-and-multiply avoids arbitrary-precision
-		// overhead and the cgo boundary.
+		// A fixed-width uint256 exponentiation avoids arbitrary-precision overhead
+		// and the cgo boundary.
 		modexpU256(result, base, exp, mod)
 	default:
 		evmone.ModExp(result, base, exp, mod)
@@ -646,10 +646,11 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 // exceeds one word, and from there it wins on 512-bit and wider moduli; on its
 // plain square-and-multiply path it needs a 1024-bit modulus to catch up.
 func modexpBigIntFaster(exp []byte, modLen uint64) bool {
+	const wordBytes = bits.UintSize / 8 // a math/big Word, so the bound tracks the platform
 	if modLen <= 32 {
 		return false
 	}
-	if len(exp) > 8 && bitutil.TestBytes(exp[:len(exp)-8]) {
+	if len(exp) > wordBytes && bitutil.TestBytes(exp[:len(exp)-wordBytes]) {
 		return modLen >= 64
 	}
 	return modLen >= 128
@@ -674,11 +675,17 @@ const modexpU256MaxWindow = 5
 // differ: width 1 needs one per set bit, while a wider window builds a 2^(w-1)
 // entry table and then needs one per window. Sparse exponents such as 65537 have
 // far fewer set bits than their width suggests, and stay on width 1.
+//
+// The window count assumes set bits cluster enough to share a window, which an
+// evenly spread exponent never does: every window shrinks back to a single bit
+// and the table is wasted. Requiring the saving to beat the table cost twice
+// over keeps those exponents on width 1.
 func modexpU256WindowWidth(expBits, expOnes int) int {
 	best, bestCost := 1, expOnes
 	for w := 2; w <= modexpU256MaxWindow; w++ {
-		cost := 1<<(w-1) + min(expOnes, (expBits+w)/(w+1))
-		if cost < bestCost {
+		table := 1 << (w - 1)
+		cost := table + min(expOnes, (expBits+w)/(w+1))
+		if cost+2*table < bestCost {
 			best, bestCost = w, cost
 		}
 	}
@@ -689,9 +696,9 @@ func modexpU256WindowWidth(expBits, expOnes int) int {
 // dst, which must be len(modulus) zero bytes. Operands must satisfy
 // modexpU256Applicable; the exponent may be any length.
 //
-// It is a fixed-width uint256 left-to-right square-and-multiply using a
-// precomputed reciprocal, so each modular multiply is a multiply+reduce with no
-// division and no heap allocation.
+// It is a fixed-width uint256 left-to-right sliding-window exponentiation using
+// a precomputed reciprocal, so each modular multiply is a multiply+reduce with
+// no division. The odd-power table is a stack array, so nothing is allocated.
 func modexpU256(dst, base, exp, mod []byte) {
 	// Operands are padded to their declared field widths, which EIP-7823 caps at
 	// 1024 bytes. The loops below cost the field width, not the value, so the

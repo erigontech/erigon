@@ -297,8 +297,11 @@ func TestModexpBigIntFaster(t *testing.T) {
 		{"512-bit modulus, wide exponent", exp(16), 64, true},
 		{"512-bit modulus, exponent just over one word", exp(9), 64, true},
 		{"512-bit modulus, one word in a padded field", padded(9), 64, false},
+		{"264-bit modulus, wide exponent", exp(16), 33, false},
+		{"504-bit modulus, wide exponent", exp(16), 63, false},
 		{"768-bit modulus, one-word exponent", exp(8), 96, false},
 		{"768-bit modulus, wide exponent", exp(32), 96, true},
+		{"1016-bit modulus, one-byte exponent", exp(1), 127, false},
 		{"1024-bit modulus, one-byte exponent", exp(1), 128, true},
 		{"1024-bit modulus, wide exponent", exp(32), 128, true},
 		{"2048-bit modulus, 65537", []byte{0x01, 0x00, 0x01}, 256, true},
@@ -330,21 +333,32 @@ func TestModexpRoutingAgrees(t *testing.T) {
 	for _, modLen := range []int{24, 25, 32, 33, 40, 63, 64, 65, 96, 127, 128, 129, 256} {
 		for _, expLen := range []int{0, 1, 3, 8, 9, 16, 64} {
 			for _, baseLen := range []int{0, 1, 32, 33, 64} {
-				base, exp, mod := make([]byte, baseLen), make([]byte, expLen), make([]byte, modLen)
-				rng.Read(base)
-				rng.Read(exp)
-				rng.Read(mod)
-				mod[modLen-1] |= 1 // keep the modulus above 1
+				// Parity matters: an even modulus takes a different path in every
+				// backend (evmone splits off the power of two and recombines, math/big
+				// leaves Montgomery), so both must agree.
+				for _, odd := range []bool{true, false} {
+					base, exp, mod := make([]byte, baseLen), make([]byte, expLen), make([]byte, modLen)
+					rng.Read(base)
+					rng.Read(exp)
+					rng.Read(mod)
+					mod[0] |= 0x80 // full-width modulus, so it stays above 1
+					if odd {
+						mod[modLen-1] |= 1
+					} else {
+						mod[modLen-1] &^= 1
+					}
 
-				got, err := c.Run(pack(base, exp, mod))
-				if err != nil {
-					t.Fatalf("mod %d exp %d base %d: %v", modLen, expLen, baseLen, err)
-				}
-				want := make([]byte, modLen)
-				new(big.Int).Exp(new(big.Int).SetBytes(base), new(big.Int).SetBytes(exp),
-					new(big.Int).SetBytes(mod)).FillBytes(want)
-				if !bytes.Equal(got, want) {
-					t.Fatalf("mod %d exp %d base %d:\n got %x\nwant %x", modLen, expLen, baseLen, got, want)
+					got, err := c.Run(pack(base, exp, mod))
+					if err != nil {
+						t.Fatalf("mod %d exp %d base %d odd %v: %v", modLen, expLen, baseLen, odd, err)
+					}
+					want := make([]byte, modLen)
+					new(big.Int).Exp(new(big.Int).SetBytes(base), new(big.Int).SetBytes(exp),
+						new(big.Int).SetBytes(mod)).FillBytes(want)
+					if !bytes.Equal(got, want) {
+						t.Fatalf("mod %d exp %d base %d odd %v:\n got %x\nwant %x",
+							modLen, expLen, baseLen, odd, got, want)
+					}
 				}
 			}
 		}
@@ -379,14 +393,13 @@ func TestModexpU256Windows(t *testing.T) {
 			return e
 		},
 	}
+	// Sweep every width up to well past the last transition rather than a fixed
+	// list of edges, so the cases follow modexpU256WindowWidth wherever it moves.
 	var bitLens []int
-	for _, edge := range []int{1, 7, 25, 81, 241, 1024} {
-		for _, d := range []int{-1, 0, 1, 2} {
-			if n := edge + d; n >= 1 {
-				bitLens = append(bitLens, n)
-			}
-		}
+	for n := 1; n <= 300; n++ {
+		bitLens = append(bitLens, n)
 	}
+	bitLens = append(bitLens, 511, 512, 513, 1023, 1024, 1025, 8192)
 	for name, gen := range patterns {
 		for _, n := range bitLens {
 			expBig := gen(n)
