@@ -251,9 +251,8 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
 	stepsInDb float64, accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (outHeader *types.Header, outTx kv.TemporalRwTx, execErr error) {
 
-	// Do NOT set pe.applyTx to the stageloop's rwTx — the rwTx is thread-bound
-	// and cannot be shared with the execLoop goroutine. The execLoop creates
-	// its own roTx at line 571. executeBlocks uses its own roTx too.
+	// The stage write transaction remains on this goroutine. The exec loop and
+	// block dispatcher each open their own read-only transaction.
 
 	// applyResults receives completed block/tx results from execLoop for the apply goroutine.
 	// commitResults receives the same stream for the commitment calculator.
@@ -944,9 +943,6 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 	pprof.SetGoroutineLabels(pprof.WithLabels(ctx, pprof.Labels("sub", "exec-loop")))
 	// The exec loop owns result-channel shutdown. On every exit it closes
 	// commitResults and then applyResults so the calculator and apply loop drain.
-	//
-	// Note: pe.applyTx is the stageloop's rwTx (externally supplied).
-	// Do NOT rollback it here — the stageloop owns its lifecycle.
 
 	// Stop workers on every exec-loop exit.
 	defer pe.cancelWorkers()

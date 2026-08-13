@@ -456,9 +456,8 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 
 	out, execErr := execV3(ctx, cfg, doms, rwTx, s.SyncMode(), s.CurrentSyncCycle.IsInitialCycle, s.LogPrefix(), rng, nil, logger)
 
-	// Stage progress: target the SharedDomains overlay (not replaced during exec)
-	// when present, else the live post-exec applyTx (parallel exec may have rolled
-	// the passed-in rwTx via Flush/CommitAndBegin).
+	// Write stage progress to the SharedDomains overlay when present; otherwise
+	// use the caller-owned stage transaction, which parallel execution preserves.
 	if execErr == nil && out.verdict == nil && out.applyTx != nil {
 		if overlay := doms.BlockOverlay(); overlay != nil {
 			if err := s.Update(overlay, out.lastCommittedBlockNum); err != nil {
@@ -473,8 +472,8 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 }
 
 // renderExecOutcome converts the executor outcome into the stage's error
-// contract. An operational executor failure passes through untouched — it is
-// never a block verdict, so it cannot be mistaken for one upstream. A
+// contract. Operational failures and cancellation pass through untouched;
+// neither is a block verdict, so they cannot be mistaken for one upstream. A
 // wrong-root verdict on a non-initial cycle routes to
 // handleIncorrectRootHashError, which schedules the unwind on u (binary-search
 // from the implicated block); an initial-cycle wrong root is fatal (no fork to

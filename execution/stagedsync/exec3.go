@@ -120,12 +120,12 @@ type execRange struct {
 }
 
 // execV3Outcome carries what the stage wrapper needs after the parallel
-// executor returns. applyTx is the live post-exec tx (parallel exec may have
-// rolled the stageloop tx via Flush/CommitAndBegin, leaving the caller's rwTx
-// stale). verdict carries the invalid-block verdict of a healthy run;
-// exhausted carries its resumable batch boundary. At most one of {error,
-// verdict, exhausted} is set. The error return carries an operational
-// executor failure or cancellation, never a block verdict or batch boundary.
+// executor returns. applyTx is the caller-owned stage transaction; parallel
+// execution does not replace it. verdict carries the invalid-block verdict of
+// a healthy run, while exhausted carries its resumable batch boundary. At most
+// one of {error, verdict, exhausted} is set. The error return carries an
+// operational executor failure or cancellation, never a block verdict or
+// batch boundary.
 type execV3Outcome struct {
 	applyTx               kv.TemporalRwTx
 	lastCommittedBlockNum uint64
@@ -449,8 +449,6 @@ func execV3Finalize(ctx context.Context, execErr error, cfg ExecuteBlockCfg, dom
 	}
 
 	lastCommittedStep := kv.Step(lastCommittedTxNum / doms.StepSize())
-	// applyTx may be stale after parallel execution (the underlying mdbx tx
-	// was invalidated by Flush/CommitAndBegin). Use a fresh roTx for the check.
 	var lastFrozenStep kv.Step
 	if stepCheckTx, stepErr := cfg.db.BeginTemporalRo(ctx); stepErr == nil {
 		lastFrozenStep = kv.Step(stepCheckTx.StepsInFiles(kv.CommitmentDomain))

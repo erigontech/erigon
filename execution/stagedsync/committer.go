@@ -166,10 +166,10 @@ type commitmentCalculator struct {
 	// the same guard — the drop to the incremental path is reported once.
 	computeAheadStopped bool
 
-	// signalCtx is the shared executor context and may carry a deliberate stop or
-	// failure. The calculator reads block-aware stop causes from it to cap
-	// compute-ahead at the stop boundary; compute and publish use the separate
-	// workCtx so executor-local cancellation does not abort an in-flight commitment.
+	// signalCtx is the shared executor context. A block-aware stop caps
+	// compute-ahead at its boundary; any other cancellation disables new
+	// speculative work. Compute and publish use workCtx so work already in flight
+	// can finish during executor teardown.
 	signalCtx context.Context
 
 	// forcePerBlockCompute overrides dbg.BatchCommitments and triggers a
@@ -520,11 +520,13 @@ func (cc *commitmentCalculator) maybeComputeAhead(ctx context.Context, n uint64)
 	if !ok || pb.mode != calcModeBALDriven || cc.computedAhead[n] {
 		return
 	}
-	// The shared executor context carries the stop boundary M. Compute ahead no
-	// further than M so commitment cannot outrun state. Read the signal context,
-	// never the compute context, because in-flight work through M must finish.
-	if sc, stopping := stopCauseOf(cc.signalCtx); stopping && n > sc.block {
-		return
+	// Read the shared signal context, not the compute context: work already in
+	// flight must finish. A block-aware stop allows catch-up through its boundary;
+	// any other cancellation starts no new speculative work.
+	if cc.signalCtx != nil && cc.signalCtx.Err() != nil {
+		if sc, bounded := stopCauseOf(cc.signalCtx); !bounded || n > sc.block {
+			return
+		}
 	}
 	if cc.ownsChangeset(n) {
 		return
