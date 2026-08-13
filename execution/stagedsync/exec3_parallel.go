@@ -2119,12 +2119,6 @@ var depTrueDepsOnly = dbg.EnvBool("DEP_TRUE_DEPS_ONLY", false)
 // dependent re-validation, no re-dispatch. Builds on depOrderVal + splitApply.
 var selfLoop = dbg.EnvBool("SELF_LOOP", false)
 
-// finalizeDelayUs (SELF_LOOP_FINALIZE_DELAY_US, debug) sleeps before each
-// finalize step to widen the window in which workers run ahead flushing to the
-// versionMap while the exec loop reads it in calcFees — a repro aid for races
-// between speculative worker writes and the finalize sweep.
-var finalizeDelayUs = dbg.EnvInt("SELF_LOOP_FINALIZE_DELAY_US", 0)
-
 var selfLoopDebug = dbg.EnvBool("SELF_LOOP_DEBUG", false)
 
 // Mid-flow dep-pause is the sole dependency mechanism: workers flush their writes
@@ -3538,9 +3532,6 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 		fmt.Printf("[CB_ADV] blk=%d cbFlushed=%d maxValidated=%d\n", be.blockNum, be.coinbaseFlushedUpTo, maxValidated)
 	}
 	for tx := be.coinbaseFlushedUpTo + 1; tx <= maxValidated; tx++ {
-		if finalizeDelayUs > 0 {
-			time.Sleep(time.Duration(finalizeDelayUs) * time.Microsecond)
-		}
 		// Use the validated snapshot, not be.results[tx]: validate and finalize
 		// are separate passes under dependency-ordered validation, so a
 		// concurrent worker may have overwritten be.results[tx] with a later
