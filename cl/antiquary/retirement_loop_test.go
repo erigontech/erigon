@@ -87,6 +87,21 @@ func (h *tickHarness) tick(n int) {
 	}
 }
 
+// ticksUntilBlobsRun ticks until the blobs step runs again and reports how many ticks
+// its backoff refused first, so a test can assert the exact width of the gap.
+func (h *tickHarness) ticksUntilBlobsRun(t *testing.T) int {
+	t.Helper()
+	before := h.blobsRuns
+	for skipped := 0; skipped <= maxRetirementSkipTicks*2; skipped++ {
+		h.tick(1)
+		if h.blobsRuns > before {
+			return skipped
+		}
+	}
+	t.Fatal("blobs step never ran again")
+	return 0
+}
+
 // A step that keeps failing must not drag its sibling down with it.
 func TestRetirementTickBacksOffEachStepIndependently(t *testing.T) {
 	h := newTickHarness(t)
@@ -136,6 +151,26 @@ func TestRetirementTickRecoversAfterSuccess(t *testing.T) {
 	h.tick(3)
 
 	require.Equal(t, before+3, h.blobsRuns)
+}
+
+// A success must clear the accumulated gap, not merely let the current one elapse:
+// the next failure has to restart at the minimum width.
+func TestRetirementTickSuccessClearsAccumulatedGap(t *testing.T) {
+	h := newTickHarness(t)
+
+	h.blobsFails = true
+	for range 4 {
+		h.ticksUntilBlobsRun(t)
+	}
+	require.Greater(t, h.ticksUntilBlobsRun(t), 1, "repeated failures must widen the gap")
+
+	h.blobsFails = false
+	h.ticksUntilBlobsRun(t)
+
+	h.blobsFails = true
+	h.ticksUntilBlobsRun(t)
+	require.Equal(t, 1, h.ticksUntilBlobsRun(t),
+		"after a success the next failure must restart at the minimum gap")
 }
 
 func TestRetirementTickSkipsBlobsBeforeDeneb(t *testing.T) {
