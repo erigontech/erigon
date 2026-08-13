@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"os"
 	"runtime"
 	"runtime/pprof"
@@ -87,6 +86,10 @@ When rwLoop has nothing to do - it does Prune, or flush of WAL to RwTx (agg.rota
 
 type parallelExecutor struct {
 	txExecutor
+	// failedBlock/failedHash record the implicated block when execution fails
+	// (wrong-root or invalid block), so the stage wrapper can target the unwind.
+	failedBlock uint64
+	failedHash  common.Hash
 	execWorkers []*exec.Worker
 	stopWorkers func()
 	waitWorkers func()
@@ -215,7 +218,7 @@ func (pe *parallelExecutor) clearChangesetAccumulator() {
 	pe.currentChangeSetBlock = 0
 }
 
-func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u Unwinder,
+func (pe *parallelExecutor) exec(ctx context.Context,
 	startBlockNum uint64, offsetFromBlockBeginning uint64, maxBlockNum uint64, blockLimit uint64,
 	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
 	stepsInDb float64, accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
@@ -225,13 +228,13 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 		outErr    error
 	)
 	pprof.Do(ctx, pprof.Labels("phase", "pe-exec"), func(lctx context.Context) {
-		outHeader, outTx, outErr = pe.execImpl(lctx, execStage, u, startBlockNum, offsetFromBlockBeginning,
+		outHeader, outTx, outErr = pe.execImpl(lctx, startBlockNum, offsetFromBlockBeginning,
 			maxBlockNum, blockLimit, initialTxNum, inputTxNum, initialCycle, rwTx, stepsInDb, accumulator, readAhead, logEvery)
 	})
 	return outHeader, outTx, outErr
 }
 
-func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState, u Unwinder,
+func (pe *parallelExecutor) execImpl(ctx context.Context,
 	startBlockNum uint64, offsetFromBlockBeginning uint64, maxBlockNum uint64, blockLimit uint64,
 	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
 	stepsInDb float64, accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
@@ -245,11 +248,22 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	// Both are fed by the fan-out in the execLoop's blockExecutor.
 	applyResults := make(chan applyResult, 2_048)
 	commitResults := make(chan applyResult, 2_048)
-	// Only wire the BAL fold-ahead pipeline when BAL-driven commitment is on.
-	// A nil channel leaves the per-block alloc+send and calculator select arm
-	// inert (the receive on nil blocks forever, so the loop stays gated on cc.in).
+	// Exec-only (DISCARD_COMMITMENT): nil the commit stream. The exec loop's
+	// fan-out (sendResult) and the batch-commit trigger both no-op on a nil
+	// channel, so no commitment work runs; the calculator sees a nil input,
+	// exits immediately, and closes rootResults, which the apply loop's normal
+	// close-handling absorbs. Used by ephemeral single-block replay over a flat
+	// witness (no trie). Real staged sync leaves this non-nil.
+	if pe.cfg.discardCommitment {
+		commitResults = nil
+	}
+	// Only wire the BAL fold-ahead pipeline when BAL-driven commitment is on AND
+	// the commit stream is live. Under exec-only (commitResults nil) the calculator
+	// exits before draining blockRequests, so a live channel would let executeBlocks'
+	// blocking send wedge once a bulk replay exceeds the buffer. A nil channel leaves
+	// the per-block alloc+send and calculator select arm inert.
 	var blockRequests chan *blockRequest
-	if dbg.BALDrivenCommitment {
+	if dbg.BALDrivenCommitment && commitResults != nil {
 		blockRequests = make(chan *blockRequest, 2_048)
 	}
 
@@ -261,18 +275,17 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 		if blockLimit > 0 {
 			lastBlock = min(startBlockNum+blockLimit-1, maxBlockNum)
 		}
-		log.Info(fmt.Sprintf("[%s] parallel starting", execStage.LogPrefix()),
+		log.Info(fmt.Sprintf("[%s] parallel starting", pe.logPrefix),
 			"from", startBlockNum, "to", maxBlockNum, "limit", lastBlock, "initialTxNum", initialTxNum,
 			"initialBlockTxOffset", offsetFromBlockBeginning, "initialCycle", initialCycle,
 			"isForkValidation", pe.isForkValidation, "isApplyingBlocks", pe.isApplyingBlocks)
 	}
 
-	// restoreTxNum must run before pe.run() so that doms.SetTxNum() completes
-	// before any goroutine reads txNum (via AsGetter/GetLatest).
-	restoredTxNum, _, _, _, err := restoreTxNum(ctx, &pe.cfg, rwTx, inputTxNum, maxBlockNum)
-	if err != nil {
-		return nil, rwTx, err
-	}
+	// The caller resolves the exec range (SeekCommitment + restoreTxNum) and passes
+	// the already-resolved inputTxNum in, for both the DB-backed and the injected-
+	// source paths. It is used as-is here — re-resolving would repeat the TxNums-
+	// index lookup on every run and contradict the stage-agnostic split.
+	restoredTxNum := inputTxNum
 
 	// Set accumulator before pe.run() so execLoop sees it without a race.
 	pe.accumulator = accumulator
@@ -370,11 +383,11 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	execErr := func() (err error) {
 		defer func() {
 			if rec := recover(); rec != nil {
-				pe.logger.Warn("["+execStage.LogPrefix()+"] rw panic", "rec", rec, "stack", dbg.Stack())
+				pe.logger.Warn("["+pe.logPrefix+"] rw panic", "rec", rec, "stack", dbg.Stack())
 			} else if err != nil && !(errors.Is(err, context.Canceled) || errors.Is(err, &ErrLoopExhausted{})) {
-				pe.logger.Warn("["+execStage.LogPrefix()+"] rw exit", "err", err, "stack", dbg.Stack())
+				pe.logger.Warn("["+pe.logPrefix+"] rw exit", "err", err, "stack", dbg.Stack())
 			} else {
-				pe.logger.Debug("[" + execStage.LogPrefix() + "] rw exit")
+				pe.logger.Debug("[" + pe.logPrefix + "] rw exit")
 			}
 		}()
 
@@ -570,12 +583,10 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 					// not whatever block exec had last applied when the wrong-root
 					// arrived. initialCycle has no reorg: the error is fatal.
 					if fail.set {
-						if !fail.exec && errors.Is(fail.err, ErrWrongTrieRoot) && !initialCycle {
-							if err := handleIncorrectRootHashError(fail.block, fail.blockHash, rwTx, pe.cfg, execStage, pe.logger, u); err != nil {
-								return err
-							}
-							return nil
-						}
+						// Unwind handling is hoisted to SpawnExecuteBlocksStage. Record the
+						// implicated block (not the last-applied one) so the stage can target
+						// the unwind correctly, then surface the failure.
+						pe.failedBlock, pe.failedHash = fail.block, fail.blockHash
 						return fail.err
 					}
 					if missing := applyLoopMissingBlocks(txResultBlocks, appliedBlocks); len(missing) > 0 {
@@ -706,7 +717,8 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 
 					}
 
-					if blockNum > 0 && applyResult.receiptsComplete && !execStage.CurrentSyncCycle.IsInitialCycle {
+					if blockNum > 0 && applyResult.receiptsComplete && !initialCycle &&
+						pe.cfg.notifications != nil && pe.cfg.notifications.RecentReceipts != nil {
 						pe.cfg.notifications.RecentReceipts.Add(applyResult.Receipts, txs, header)
 					}
 
@@ -853,39 +865,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 			} else {
 				pe.logger.Warn(fmt.Sprintf("[%s] Execution failed", pe.logPrefix), "err", execErr)
 			}
-			if errors.Is(execErr, rules.ErrInvalidBlock) {
-				if pe.cfg.badBlockHalt {
-					return nil, rwTx, execErr
-				}
-				if u != nil && lastHeader != nil {
-					unwindTo := uint64(0)
-					if lastHeader.Number.Uint64() > 0 {
-						unwindTo = lastHeader.Number.Uint64() - 1
-					}
-					if err := u.UnwindTo(unwindTo, BadBlock(lastHeader.Hash(), execErr), rwTx); err != nil {
-						return nil, rwTx, err
-					}
-				}
-			}
 			return nil, rwTx, execErr
-		}
-	}
-
-	// Do NOT flush here — the stageloop owns flush/commit lifecycle.
-	// pe.exec() returns with sd.mem containing the batch's writes.
-	// The stageloop will flush, commit the rwTx, and create a new sd.
-	//
-	// But DO update stage progress so the stageloop knows we advanced.
-	if (execErr == nil || errors.Is(execErr, &ErrLoopExhausted{})) && rwTx != nil {
-		overlay := pe.doms.BlockOverlay()
-		if overlay != nil {
-			if err := execStage.Update(overlay, pe.lastCommittedBlockNum.Load()); err != nil {
-				return nil, rwTx, err
-			}
-		} else {
-			if err := execStage.Update(rwTx, pe.lastCommittedBlockNum.Load()); err != nil {
-				return nil, rwTx, err
-			}
 		}
 	}
 
@@ -2303,6 +2283,8 @@ type blockExecutor struct {
 	// recorded set is some execResult's TxOut, which stays live.
 	feeMergeTemp map[int]*state.WriteSet
 
+	mapReleasing sync.WaitGroup
+
 	// settledInput[tx]==true marks a task that was dispatched when every
 	// preceding task had already validated — so it executed against fully
 	// settled MVCC state, with no lower-indexed worker still in flight.
@@ -2479,10 +2461,44 @@ func (be *blockExecutor) invalidBlockResult(err error) *blockResult {
 // so pooling prev's maps leaves the writes merged now holds intact.
 func (be *blockExecutor) recordFeeMerge(tx int, prev, merged *state.WriteSet) {
 	if temp := be.feeMergeTemp[tx]; temp != nil && temp == prev && merged != temp {
-		temp.ReleaseMaps()
+		be.queueMapRelease(temp)
 	}
 	be.feeMergeTemp[tx] = merged
 }
+
+// ReleaseMaps clears every map before pooling it, which is O(entries), and a
+// superseded fee-merge set holds the whole tx's writes. Keep it off the apply
+// loop, which is the serial stage the workers wait behind.
+type mapRelease struct {
+	ws      *state.WriteSet
+	pending *sync.WaitGroup
+}
+
+var (
+	mapReleases     = make(chan mapRelease, 4096)
+	mapReleaseStart sync.Once
+)
+
+func (be *blockExecutor) queueMapRelease(ws *state.WriteSet) {
+	mapReleaseStart.Do(func() {
+		go func() {
+			for r := range mapReleases {
+				r.ws.ReleaseMaps()
+				r.pending.Done()
+			}
+		}()
+	})
+	be.mapReleasing.Add(1)
+	select {
+	case mapReleases <- mapRelease{ws, &be.mapReleasing}:
+	default:
+		// Releaser is behind; inline costs less than blocking the apply loop.
+		ws.ReleaseMaps()
+		be.mapReleasing.Done()
+	}
+}
+
+func (be *blockExecutor) awaitMapReleases() { be.mapReleasing.Wait() }
 
 // tooManyRetries returns an invalid-block result when tx has exceeded its
 // retry budget, otherwise nil. origin may be nil (validator-invalid path)
@@ -2988,8 +3004,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			applyResult := txResult{
 				blockNum:              be.number(),
 				blockHash:             be.hash(),
-				traceFroms:            map[accounts.Address]struct{}{},
-				traceTos:              map[accounts.Address]struct{}{},
+				traceFroms:            result.TraceFroms,
+				traceTos:              result.TraceTos,
 				txNum:                 task.Version().TxNum,
 				rules:                 task.Rules(),
 				cumulativeBlobGasUsed: result.cumulativeBlobGasUsed,
@@ -3014,8 +3030,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				pe.executedGas.Add(int64(applyResult.blockGasUsed))
 			}
 
-			maps.Copy(applyResult.traceFroms, result.TraceFroms)
-			maps.Copy(applyResult.traceTos, result.TraceTos)
 			be.cntFinalized++
 			be.publishTasks.markComplete(tx)
 
