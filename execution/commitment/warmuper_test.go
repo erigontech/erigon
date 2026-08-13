@@ -183,11 +183,9 @@ func TestDrainPendingAfterCloseReturnsPromptly(t *testing.T) {
 	}
 }
 
-// A WarmKey call that already passed the closed check when Close runs must
-// still observe cancellation safely, never panic on the send. The window
-// between the check and the send is a handful of instructions, so this races
-// many probes against one Close, over many rounds, to make the interleaving
-// land; -race also flags the underlying unsynchronized access on its own.
+// A WarmKey send that already passed the closed check must observe
+// cancellation safely, never panic. The race window is a few instructions
+// wide, so this hammers many probes against one Close over many rounds.
 func TestWarmKeyCloseRaceDoesNotPanic(t *testing.T) {
 	t.Parallel()
 	const rounds = 150
