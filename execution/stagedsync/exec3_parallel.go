@@ -696,12 +696,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						fmt.Println(applyResult.blockNum, "apply", applyResult.txNum, writeCount)
 					}
 					blockUpdateCount += writeCount
-					// Without splitApply the exec loop is the sole sd.mem writer and
-					// the apply loop only collects counters. Under splitApply the fold
-					// moves here: buffer each tx's per-tx result and fold at block end.
-					if splitApply {
-						splitApplyBuf = append(splitApplyBuf, applyResult)
-					}
+					// The apply loop is the sole sd.mem writer: buffer each tx's
+					// per-tx result and fold the buffer to sd.mem at block end.
+					splitApplyBuf = append(splitApplyBuf, applyResult)
 					if pe.accumulator != nil {
 						pendingAccumulatorWrites = append(pendingAccumulatorWrites, applyResult.writes)
 					}
@@ -742,36 +739,34 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						finalized = true
 						deliberateCancel()
 					}
-					// splitApply fold: apply the block's per-tx versionMap views to
-					// sd.mem, folding the buffer at block end in publish order.
-					// blockCache=nil writes domains directly; the versionMap composes
-					// each tx's base. Finalize skips ApplyTxIndexes, matching the exec loop.
-					if splitApply {
-						restoreCS := pe.bindBlockChangesetForFold(applyResult.BlockNum, applyResult.BlockHash)
-						var applyErr error
-						for _, r := range splitApplyBuf {
-							if err := pe.rs.ApplyStateWrites(ctx, rwTx, r.blockNum, r.txNum, r.writes, nil, r.rules, nil); err != nil {
-								applyErr = fmt.Errorf("splitApply state block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
+					// Apply the block's per-tx versionMap views to sd.mem, folding the
+					// buffer at block end in publish order. blockCache=nil writes domains
+					// directly; the versionMap composes each tx's base. Finalize skips
+					// ApplyTxIndexes, matching the exec loop.
+					restoreCS := pe.bindBlockChangesetForFold(applyResult.BlockNum, applyResult.BlockHash)
+					var applyErr error
+					for _, r := range splitApplyBuf {
+						if err := pe.rs.ApplyStateWrites(ctx, rwTx, r.blockNum, r.txNum, r.writes, nil, r.rules, nil); err != nil {
+							applyErr = fmt.Errorf("splitApply state block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
+							break
+						}
+						if !r.isFinalize {
+							if err := pe.rs.ApplyTxIndexes(rwTx, r.txNum, r.receipt, r.cumulativeBlobGasUsed, r.logs, r.traceFroms, r.traceTos); err != nil {
+								applyErr = fmt.Errorf("splitApply index block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
 								break
 							}
-							if !r.isFinalize {
-								if err := pe.rs.ApplyTxIndexes(rwTx, r.txNum, r.receipt, r.cumulativeBlobGasUsed, r.logs, r.traceFroms, r.traceTos); err != nil {
-									applyErr = fmt.Errorf("splitApply index block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
-									break
-								}
-							}
 						}
-						restoreCS()
-						splitApplyBuf = splitApplyBuf[:0]
-						if applyErr != nil {
-							failInfra(applyErr)
-							continue
-						}
-						// This block's writes are now in the shared domain: drop it from
-						// the tail of the prev-block list so later blocks read it from the
-						// domain (fire-and-forget — readers never block on this).
-						pe.prevBlocks.RemoveTail()
 					}
+					restoreCS()
+					splitApplyBuf = splitApplyBuf[:0]
+					if applyErr != nil {
+						failInfra(applyErr)
+						continue
+					}
+					// This block's writes are now in the shared domain: drop it from
+					// the tail of the prev-block list so later blocks read it from the
+					// domain (fire-and-forget — readers never block on this).
+					pe.prevBlocks.RemoveTail()
 					// StartChange + NotifyAccumulator must both run in the apply
 					// goroutine — keeps all accumulator access single-threaded
 					// (avoids data race with the executor goroutine).
@@ -1908,31 +1903,16 @@ type txResult struct {
 
 
 
-// splitApply moves the state apply off the exec loop: the apply loop folds each
-// block's per-tx versionMap views to sd.mem at block end (blockCache=nil→direct
-// DomainPut), so the exec-loop spine drops ApplyStateWrites+ApplyTxIndexes+Flush.
-// Requires read-vmap-only (blockCache is no longer populated). Single-block
-// correct today; multi-block needs the finalized-versionMap chained as N+1's base.
-// blockStateCache is never populated (apply folds direct to sd.mem), so exec-side
-// readers over an empty cache fall through to sd.mem N-1 and see in-block writes
-// via the IBS versionMap overlay — no reader change needed.
-var splitApply = dbg.EnvBool("SPLIT_APPLY", false)
-
-// SetSplitApplyStackForTest enables the parallel-execution gate stack that
-// splitApply builds on (selfLoop + depOrderVal + the raw-view/reval/prev-block
-// reads) at runtime and returns a restore closure. The gates are otherwise fixed
-// at package init from env vars; splitApply alone is not a valid configuration.
-// Test-only; not concurrency-safe (mutates package globals).
+// SetSplitApplyStackForTest enables the parallel-execution gate stack at runtime
+// and returns a restore closure. Test-only; not concurrency-safe (mutates package
+// globals).
 func SetSplitApplyStackForTest() (restore func()) {
-	prev := [2]bool{splitApply, selfLoop}
-	splitApply, selfLoop = true, true
+	prev := selfLoop
+	selfLoop = true
 	return func() {
-		splitApply, selfLoop = prev[0], prev[1]
+		selfLoop = prev
 	}
 }
-
-
-
 
 // selfLoop is the true Block-STM model: workers own execution AND validation.
 // Each worker flushes its writes to the versionMap speculatively (as estimate),
@@ -3788,21 +3768,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				be.applyCount += applyResult.writes.Count()
 			}
 
-			// Apply state + per-tx indexes to sd.mem. Under splitApply the apply loop
-			// folds the versionMap views the txResults carry at block end, keeping
-			// sd.mem at N-1 during exec so seedOrigin reads the committed base.
-			if !splitApply {
-				if err := pe.rs.ApplyStateWrites(ctx, applyTx, applyResult.blockNum, applyResult.txNum, applyResult.writes,
-					nil, applyResult.rules, be.blockStateCache); err != nil {
-					return nil, err
-				}
-
-				if err := pe.rs.ApplyTxIndexes(applyTx, applyResult.txNum, applyResult.receipt, applyResult.cumulativeBlobGasUsed,
-					applyResult.logs, applyResult.traceFroms, applyResult.traceTos); err != nil {
-					return nil, fmt.Errorf("ApplyTxIndexes block=%d txNum=%d: %w", applyResult.blockNum, applyResult.txNum, err)
-				}
-			}
-
+			// The apply loop folds the versionMap views the txResults carry to sd.mem
+			// at block end, keeping sd.mem at N-1 during exec so seedOrigin reads the
+			// committed base.
 			if err := be.sendResult(ctx, &applyResult, false); err != nil {
 				return nil, err
 			}
@@ -3942,15 +3910,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				// versionedWrites so the write-path stateObject is redundant.
 				finalizeWrites = state.NewVersionMapWriteView(ivw, be.versionMap, finalVersion.TxIndex)
 				be.applyCount += finalizeWrites.Count()
-
-				// Apply finalize writes to the BlockStateCache. Under splitApply the
-				// apply loop folds them (via the isFinalize txResult below) at block end.
-				if !splitApply {
-					if err := pe.rs.ApplyStateWrites(ctx, applyTx, be.blockNum, finalVersion.TxNum,
-						finalizeWrites, nil, lastResult.Rules(), be.blockStateCache); err != nil {
-						return nil, err
-					}
-				}
+				// The apply loop folds the finalize writes (via the isFinalize
+				// txResult below) at block end.
 			}
 		}
 
@@ -3974,17 +3935,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 		}
 
-		// Flush block state cache to sd.mem — all writes (per-TX + finalize) are now
-		// visible. Under splitApply the apply loop folds the block's writes at block
-		// end instead (off the exec spine); nothing populates blockStateCache here.
+		// The apply loop folds the block's writes to sd.mem at block end (off the
+		// exec spine); nothing populates blockStateCache here.
 		var flushDur time.Duration
-		if !splitApply {
-			flushStart := time.Now()
-			if err := be.blockStateCache.Flush(pe.rs.Domains(), applyTx); err != nil {
-				return nil, err
-			}
-			flushDur = time.Since(flushStart)
-		}
 
 		// The block is fully finalized here: every tx sealed, block-end writes in
 		// the versionMap. Publish it as an overlay so the next block reads its
