@@ -480,7 +480,12 @@ func (c *StateCache) beginPublication(sourceStateVersion, committedStateVersion,
 	hasUnwind bool) bool {
 	c.admissionMu.Lock()
 	defer c.admissionMu.Unlock()
-	if !c.canAdvanceStateVersionLocked(committedStateVersion) {
+	if committedStateVersion <= sourceStateVersion || !c.canAdvanceStateVersionLocked(committedStateVersion) {
+		// PublishUnwind follows a durable commit, so its invalidation remains
+		// authoritative even when a newer cache generation rejects its updates.
+		if hasUnwind {
+			c.unwindLocked(unwindToTxNum)
+		}
 		return false
 	}
 	c.publishing = true
@@ -505,9 +510,6 @@ func (c *StateCache) finishPublication(committedStateVersion uint64) {
 
 func (c *StateCache) publish(sourceStateVersion, committedStateVersion, unwindToTxNum uint64,
 	hasUnwind bool, updates []StateUpdate) {
-	if committedStateVersion <= sourceStateVersion {
-		return
-	}
 	prepared := make([]preparedStateUpdate, len(updates))
 	for i := range updates {
 		prepared[i] = prepareStateUpdate(updates[i])

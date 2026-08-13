@@ -1196,6 +1196,33 @@ func TestStateCache_PublishUnwindSerializesWithFill(t *testing.T) {
 	}
 }
 
+func TestStateCache_RejectedPublishUnwindStillInvalidates(t *testing.T) {
+	b := 1 * datasize.MB
+	sc := NewStateCache(b, b, b, b)
+	t.Cleanup(sc.Close)
+
+	key := makeAddr(1)
+	deadForkValue := makeValue(1)
+	applier := sc.Applier()
+	applier.Initialize(10)
+	applier.Publish(10, 11, []StateUpdate{{Domain: kv.AccountsDomain, Key: key, Value: deadForkValue, TxNum: 100}})
+	applier.Unwind(50)
+	_, ok := sc.View(nil).Get(kv.AccountsDomain, key)
+	require.False(t, ok)
+
+	inWindow := sc.View(frontierAtVersion(101, 11))
+	inWindow.Fill(kv.AccountsDomain, key, deadForkValue, 100)
+	got, ok := sc.View(nil).Get(kv.AccountsDomain, key)
+	require.True(t, ok)
+	require.Equal(t, deadForkValue, got)
+	applier.Publish(11, 20, nil)
+	applier.PublishUnwind(11, 12, 50, nil)
+
+	_, ok = sc.View(nil).Get(kv.AccountsDomain, key)
+	require.False(t, ok, "the durable unwind must invalidate fills even when its publication is older")
+	require.True(t, sc.View(frontierAtVersion(51, 20)).CanFill(), "the rejected publication must not move the cache generation backwards")
+}
+
 func TestStateCache_FileEndViewCannotFillAtAppliedTx(t *testing.T) {
 	b := 1 * datasize.MB
 	sc := NewStateCache(b, b, b, b)

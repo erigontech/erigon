@@ -285,7 +285,8 @@ func (a Applier) Publish(sourceStateVersion, committedStateVersion uint64, updat
 }
 
 // PublishUnwind republishes an unwind at commit so fills admitted after the
-// staged invalidation cannot survive into the committed state version.
+// staged invalidation cannot survive into the committed state version. An
+// older rejected publication still invalidates without moving the version.
 func (a Applier) PublishUnwind(sourceStateVersion, committedStateVersion, unwindToTxNum uint64, updates []StateUpdate) {
 	if a.c == nil {
 		return
