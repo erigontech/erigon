@@ -1917,13 +1917,6 @@ type txResult struct {
 	isFinalize            bool // block-end finalize writes — apply to sd.mem directly
 }
 
-// rawViewCollapse feeds BOTH apply and the commitment calculator the read-only
-// versionMap-slice view over the tx's RAW write-set (touched keys + vm-floor
-// values), skipping Normalize entirely. Apply and calc own the semantics
-// Normalize used to pre-compute (SD account-field drop, EIP-161 empty removal,
-// no-op filter, SD storage cascade via the sdSubtree GC marker). Consensus-
-// critical: off by default until gated by eest + a tip re-exec.
-var rawViewCollapse = dbg.EnvBool("RAW_VIEW_COLLAPSE", false)
 
 // prevBlockReads reads each block's committed base through the finished-but-not-
 // yet-committed prior blocks' versionMaps, so under splitApply (exec off sd.mem)
@@ -1952,11 +1945,11 @@ var splitApply = dbg.EnvBool("SPLIT_APPLY", false)
 // at package init from env vars; splitApply alone is not a valid configuration.
 // Test-only; not concurrency-safe (mutates package globals).
 func SetSplitApplyStackForTest() (restore func()) {
-	prev := [4]bool{splitApply, selfLoop, rawViewCollapse, prevBlockReads}
-	splitApply, selfLoop, rawViewCollapse, prevBlockReads = true, true, true, true
+	prev := [3]bool{splitApply, selfLoop, prevBlockReads}
+	splitApply, selfLoop, prevBlockReads = true, true, true
 	return func() {
-		splitApply, selfLoop, rawViewCollapse, prevBlockReads =
-			prev[0], prev[1], prev[2], prev[3]
+		splitApply, selfLoop, prevBlockReads =
+			prev[0], prev[1], prev[2]
 	}
 }
 
@@ -3218,46 +3211,11 @@ func (be *blockExecutor) finalizeValidatedTx(pe *parallelExecutor, applyTx kv.Te
 	}
 
 	{
-		// Build clean write set from versionMap WriteSet — not CollectorWrites.
-		// The WriteSet has the raw versionWritten output from the validated
-		// incarnation. Normalize filters no-ops, stale incarnations,
-		// and resolves account values from the versionMap.
-		resultIncarnation := txResult.Version().Incarnation
+		// The write set is a read-only versionMap-slice view over the tx's raw
+		// write-set (touched keys + vm-floor values); apply and the calculator
+		// resolve each account's base from the versionMap.
 		rawWrites := be.blockIO.WriteSet(txVersion.TxIndex)
-		if rawViewCollapse {
-			txResult.writes = state.NewVersionMapWriteView(rawWrites, be.versionMap, txVersion.TxIndex)
-		} else {
-			// domainStorageKeys: enumerate every storage slot currently
-			// committed for addr (sd.mem + domain files), so a self-destruct
-			// emits the full StoragePath=0 cascade — covers genesis-allocated
-			// and prior-block storage that vm.StorageKeys doesn't see.
-			var domainKeysErr error
-			domainStorageKeys := func(addr accounts.Address) []accounts.StorageKey {
-				av := addr.Value()
-				const addrLen, hashLen = 20, 32 // StorageDomain composite key = addr ++ slotHash
-				var keys []accounts.StorageKey
-				if iterErr := pe.domainsRead().IteratePrefix(kv.StorageDomain, av[:], applyTx, func(k, _ []byte) (bool, error) {
-					if len(k) >= addrLen+hashLen {
-						keys = append(keys, accounts.InternKey(common.BytesToHash(k[addrLen:addrLen+hashLen])))
-					}
-					return true, nil
-				}); iterErr != nil {
-					domainKeysErr = iterErr
-					return nil
-				}
-				return keys
-			}
-			// Mirror txtask.go's genesis rules-clobber so empty allocs (AuRa ZeroAddress) survive.
-			emptyRemoval := be.blockNum != 0 && pe.cfg.chainConfig.IsEIP161Enabled(be.blockNum)
-			normWrites, normErr := rawWrites.Normalize(be.versionMap, txVersion.TxIndex, resultIncarnation, *stateReader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil, txTask.Rules().IsAmsterdam)
-			if domainKeysErr != nil {
-				return nil, fmt.Errorf("[parallel] iterate storage prefix for block write normalization: %w", domainKeysErr)
-			}
-			if normErr != nil {
-				return nil, fmt.Errorf("[parallel] normalize block writes: %w", normErr)
-			}
-			txResult.writes = normWrites
-		}
+		txResult.writes = state.NewVersionMapWriteView(rawWrites, be.versionMap, txVersion.TxIndex)
 	}
 
 	// Snapshot the finalized result before pushing — prevents
@@ -4002,40 +3960,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					be.versionMap.FlushVersionedWrites(ivw, true, "")
 				}
 
-				// Commit finalize writes from the versionMap write-set, the
-				// same Normalize path regular txs use, rather than from
-				// so.data via MakeWriteSet. This keeps the parallel commit sourced
-				// solely from versionedWrites so the write-path stateObject is
-				// redundant.
-				if rawViewCollapse {
-					finalizeWrites = state.NewVersionMapWriteView(ivw, be.versionMap, finalVersion.TxIndex)
-				} else {
-					var domainKeysErr error
-					domainStorageKeys := func(addr accounts.Address) []accounts.StorageKey {
-						av := addr.Value()
-						const addrLen, hashLen = 20, 32
-						var keys []accounts.StorageKey
-						if iterErr := pe.domainsRead().IteratePrefix(kv.StorageDomain, av[:], applyTx, func(k, _ []byte) (bool, error) {
-							if len(k) >= addrLen+hashLen {
-								keys = append(keys, accounts.InternKey(common.BytesToHash(k[addrLen:addrLen+hashLen])))
-							}
-							return true, nil
-						}); iterErr != nil {
-							domainKeysErr = iterErr
-							return nil
-						}
-						return keys
-					}
-					emptyRemoval := be.blockNum != 0 && pe.cfg.chainConfig.IsEIP161Enabled(be.blockNum)
-					var normErr error
-					finalizeWrites, normErr = ivw.Normalize(be.versionMap, finalVersion.TxIndex, finalVersion.Incarnation, reader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil, pe.cfg.chainConfig.IsAmsterdam(tt.Header.Time))
-					if domainKeysErr != nil {
-						return nil, fmt.Errorf("[parallel] finalize iterate storage prefix for block write normalization: %w", domainKeysErr)
-					}
-					if normErr != nil {
-						return nil, fmt.Errorf("[parallel] normalize finalize writes: %w", normErr)
-					}
-				}
+				// Commit finalize writes as a read-only versionMap-slice view over
+				// the finalize write-set, sourcing the parallel commit solely from
+				// versionedWrites so the write-path stateObject is redundant.
+				finalizeWrites = state.NewVersionMapWriteView(ivw, be.versionMap, finalVersion.TxIndex)
 				be.applyCount += finalizeWrites.Count()
 
 				// Apply finalize writes to the BlockStateCache. Under splitApply the

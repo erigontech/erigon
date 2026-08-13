@@ -778,14 +778,10 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 			err: fmt.Errorf("commitmentCalculator: %slazy-load failed: %w", m.label, err)})
 		return
 	}
-	// Under rawViewCollapse the calc consumes the raw versionMap view, which
-	// carries no EIP-161 deletion marker (Normalize used to synthesize one). The
-	// normalize path already reflects the removal (empty→SelfDestruct→Deleted), so
-	// this is a no-op there — but gate it anyway to keep flag-off byte-identical.
-	if rawViewCollapse {
-		emptyRemoval := t.blockNum != 0 && cc.chainConfig.IsEIP161Enabled(t.blockNum)
-		cc.state.ApplyEIP161Removal(emptyRemoval, cc.chainConfig.Aura != nil)
-	}
+	// The calc consumes the raw versionMap view, which carries no EIP-161 deletion
+	// marker; synthesize the empty→removal here (Normalize used to do it).
+	emptyRemoval := t.blockNum != 0 && cc.chainConfig.IsEIP161Enabled(t.blockNum)
+	cc.state.ApplyEIP161Removal(emptyRemoval, cc.chainConfig.Aura != nil)
 	cc.state.flushToUpdates(cc.updates)
 	if !m.midBlock {
 		cc.state.ResetBlockFlags()
