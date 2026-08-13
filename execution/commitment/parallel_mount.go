@@ -74,6 +74,25 @@ func (hph *HexPatriciaHashed) mountTo(root *HexPatriciaHashed, nibble int) {
 	copy(hph.grid[:n], root.grid[:n])
 }
 
+// stitchSplitCells drops each folded split cell into the base row at its top-nibble slot;
+// foldMounted already returns cells excluding the mount nibble, so they are stitched verbatim.
+func stitchSplitCells(base *HexPatriciaHashed, cells *[16]cell, present *[16]bool) {
+	for nib := range 16 {
+		if !present[nib] {
+			continue
+		}
+		c := cells[nib]
+		base.touchMap[0] |= uint16(1) << nib
+		if !c.IsEmpty() {
+			base.afterMap[0] |= uint16(1) << nib
+		} else {
+			base.afterMap[0] &^= uint16(1) << nib
+		}
+		base.depths[0] = 1
+		base.grid[0][nib] = c
+	}
+}
+
 // processMounted folds each touched root-child subtree concurrently, stitches the resulting cells back into the base row, and folds the base up to the root.
 func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Updates) ([]byte, error) {
 	pu := updates.parallel
@@ -149,7 +168,11 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 			path = append(path, byte(ni))
 			path = append(path, ch.ext...)
 			buildErr := dfsSubtreeDeep(w, ch, path, func(n *prefixNode, pth []byte, accountFresh bool) (cell, error) {
-				return foldStorageRoot(gctx, foldSem, p.newStorageWorker, pu, n, pth, accountFresh)
+				sr, err := foldStorageRoot(gctx, foldSem, p.newStorageWorker, pu, n, pth, accountFresh)
+				if err == nil {
+					p.deepLocalFolds.Add(1)
+				}
+				return sr, err
 			})
 			if buildErr != nil {
 				w.Release()

@@ -406,7 +406,14 @@ func (e *ExecModule) suspendReadAhead() func() {
 // caller resumes it after validation stops reading the staged unwind state.
 func (e *ExecModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header) (func(), error) {
 	currentHeader := header
-	for isCanonical, err := e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash()); !isCanonical && err == nil; isCanonical, err = e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash()) {
+	for {
+		isCanonical, err := e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash())
+		if err != nil {
+			return nil, err
+		}
+		if isCanonical {
+			break
+		}
 		parentBlockHash, parentBlockNum := currentHeader.ParentHash, currentHeader.Number.Uint64()-1
 		currentHeader, err = e.getHeader(e.bacgroundCtx, tx, parentBlockHash, parentBlockNum)
 		if err != nil {

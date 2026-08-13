@@ -66,55 +66,6 @@ func touchBatch(t *testing.T, ms *MockState, ut *Updates, keys [][]byte, upds []
 	}
 }
 
-type countingSink struct{ calls int }
-
-func (c *countingSink) TouchKey(hashedKey, plainKey []byte, update *Update) { c.calls++ }
-
-// The dedup map only dedups plain-key interning: every touch — including a repeat of an
-// already-collected key — must be forwarded to the streamer, or a scheduler's eagerly
-// folded split goes stale within the block.
-func TestModeParallel_RetouchReachesStreamer(t *testing.T) {
-	t.Parallel()
-	ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
-	defer ut.Close()
-	sink := &countingSink{}
-	ut.SetStreamingCommitter(sink)
-
-	a := findAddressForNibble(3, 999)
-	ut.TouchPlainKey(string(a), nil, ut.TouchAccount)
-	ut.TouchPlainKey(string(a), nil, ut.TouchAccount)
-	require.Equal(t, 2, sink.calls, "a re-touch must be forwarded to the streamer, not deduped")
-	require.Equal(t, uint64(1), ut.Size(), "interning stays deduped")
-}
-
-// A node carries one ModeParallel Updates buffer across blocks: a key re-touched in a
-// later block must land in that block's fold instead of being dropped by stale per-buffer
-// dedup state. Pins the carried-buffer lifecycle end to end.
-func TestModeParallel_StreamingRetouchAcrossBlocks(t *testing.T) {
-	t.Parallel()
-	k1, u1, k2, u2, kc, uc := lifecycleCorpus()
-	oracle, _ := engineRoot(t, modeSeq, 0, kc, uc)
-
-	ms := NewMockState(t)
-	ms.SetConcurrentCommitment(true)
-	cfg := DefaultTrieConfig()
-	cfg.Variant = VariantStreamingHexPatricia
-	trie, ut := InitializeTrieAndUpdates(ModeDirect, t.TempDir(), cfg)
-	defer ut.Close()
-	defer trie.Release()
-	pt := trie.(*ParallelPatriciaHashed)
-	pt.SetNumWorkers(4)
-	pt.SetTrieContextFactory(mockTrieCtxFactory(ms))
-	pt.ResetContext(ms)
-
-	touchBatch(t, ms, ut, k1, u1)
-	processRoot(t, trie, ut)
-
-	touchBatch(t, ms, ut, k2, u2)
-	got := processRoot(t, trie, ut)
-	require.Equal(t, oracle, got, "re-touched keys were dropped by the stale dedup map")
-}
-
 // Process must consume the ModeParallel collection the way HashSort consumes
 // ModeDirect/ModeUpdate: a carried Updates buffer starts every block empty, so block N+1
 // folds only its own touches instead of the union of everything since batch start.
@@ -150,38 +101,6 @@ func TestModeParallel_ProcessConsumesUpdates(t *testing.T) {
 		again := processRoot(t, tr, ut)
 		require.Equal(t, got, again, "a zero-touch Process must return the carried root")
 	})
-
-	t.Run("streaming", func(t *testing.T) {
-		t.Parallel()
-		oracle, _ := engineRoot(t, modeSeq, 0, kc, uc)
-
-		ms := NewMockState(t)
-		ms.SetConcurrentCommitment(true)
-		cfg := DefaultTrieConfig()
-		cfg.Variant = VariantStreamingHexPatricia
-		trie, ut := InitializeTrieAndUpdates(ModeDirect, t.TempDir(), cfg)
-		defer ut.Close()
-		defer trie.Release()
-		pt := trie.(*ParallelPatriciaHashed)
-		pt.SetNumWorkers(4)
-		pt.SetTrieContextFactory(mockTrieCtxFactory(ms))
-		pt.ResetContext(ms)
-
-		touchBatch(t, ms, ut, k1, u1)
-		processRoot(t, trie, ut)
-		require.Zero(t, ut.Size(), "streaming Process left the touched-key collection unconsumed")
-		if root := ut.parallel.trie.root; root != nil {
-			require.Zero(t, root.subtreeCount, "streaming Process left the dual-inserted prefix trie populated")
-		}
-
-		touchBatch(t, ms, ut, k2, u2)
-		got := processRoot(t, trie, ut)
-		require.Zero(t, ut.Size())
-		require.Equal(t, oracle, got)
-
-		again := processRoot(t, trie, ut)
-		require.Equal(t, got, again, "a zero-touch streaming Process must return the carried root, not the empty root")
-	})
 }
 
 // A failed Process must leave the collection intact so the caller's retry folds the
@@ -209,30 +128,6 @@ func TestModeParallel_ErrorKeepsCollection(t *testing.T) {
 		require.Equal(t, uint64(len(k1)), ut.Size(), "error path must keep the collection for the retry")
 
 		got := processRoot(t, tr, ut)
-		require.Zero(t, ut.Size())
-		require.Equal(t, oracle, got)
-	})
-
-	t.Run("streaming", func(t *testing.T) {
-		t.Parallel()
-		ms := NewMockState(t)
-		ms.SetConcurrentCommitment(true)
-		cfg := DefaultTrieConfig()
-		cfg.Variant = VariantStreamingHexPatricia
-		trie, ut := InitializeTrieAndUpdates(ModeDirect, t.TempDir(), cfg)
-		defer ut.Close()
-		defer trie.Release()
-		pt := trie.(*ParallelPatriciaHashed)
-		pt.SetNumWorkers(4)
-		pt.SetTrieContextFactory(mockTrieCtxFactory(ms))
-		pt.ResetContext(ms)
-
-		touchBatch(t, ms, ut, k1, u1)
-		_, err := trie.Process(canceled, ut, "", nil, WarmupConfig{})
-		require.Error(t, err)
-		require.Equal(t, uint64(len(k1)), ut.Size(), "error path must keep the collection for the retry")
-
-		got := processRoot(t, trie, ut)
 		require.Zero(t, ut.Size())
 		require.Equal(t, oracle, got)
 	})

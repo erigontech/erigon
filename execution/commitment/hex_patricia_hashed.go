@@ -1914,7 +1914,7 @@ func (hph *HexPatriciaHashed) foldPropagate(row int, nibble, upDepth, depth int1
 	// propagate cell into parent row
 	upCell.fillFromLowerCell(cell, depth, hph.currentKey[upDepth:hph.currentKeyLen], childNibble)
 
-	if err := hph.collectDeleteUpdate(updateKey, row, true); err != nil {
+	if err := hph.collectDeleteUpdate(updateKey, row); err != nil {
 		return err
 	}
 	if hph.traceW != nil {
@@ -1946,15 +1946,14 @@ func (hph *HexPatriciaHashed) foldDelete(row int, nibble, upDepth int16, upCell 
 	}
 
 	upCell.reset()
-	return hph.collectDeleteUpdate(updateKey, row, true)
+	return hph.collectDeleteUpdate(updateKey, row)
 }
 
 // collectDeleteUpdate encodes a branch deletion if a branch existed before at this row.
-// If evictCache is true, it also evicts the branch from the cache.
-func (hph *HexPatriciaHashed) collectDeleteUpdate(updateKey []byte, row int, evictCache bool) error {
+func (hph *HexPatriciaHashed) collectDeleteUpdate(updateKey []byte, row int) error {
 	if hph.branchBefore[row] {
 		if err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, nil, false); err != nil {
-			return fmt.Errorf("failed to encode leaf node update: %w", err)
+			return fmt.Errorf("failed to encode branch deletion: %w", err)
 		}
 	}
 	return nil
