@@ -767,11 +767,11 @@ func (e *ExecModule) logTimings(msg string, timings []any) {
 	e.logger.Info(msg, timings...)
 }
 
-// dispatchNotificationsFromOverlay sends notifications reading from the SD's
-// blockOverlay (MemoryMutation). All required data — headers, canonical hashes,
-// state version, forkchoice markers — exists in the overlay before flush/commit.
-// Called inline (under semaphore) so consumers have the data before the next
-// FCU can start.
+// dispatchNotificationsFromOverlay sends pre-commit notifications from the
+// SD's block overlay. The state version is supplied separately because the
+// domain flush, not the metadata overlay, owns its durable sequence advance.
+// Dispatch must finish before the execution semaphore is released so the next
+// FCU cannot overtake these notifications.
 func (e *ExecModule) dispatchNotificationsFromOverlay(sd *execctx.SharedDomains, finishProgressBefore uint64) error {
 	dispatcher := e.pipelineExecutor.Dispatcher()
 	if dispatcher == nil || e.accum == nil {
