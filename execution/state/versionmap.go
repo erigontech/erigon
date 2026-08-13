@@ -450,10 +450,9 @@ func (vm *VersionMap) applySubFieldWrites(addr accounts.Address, txIdx int, acco
 	if _, cell := floorCell(e.Balance, txIdx); cell != nil {
 		account.Balance = cell.Value
 	}
-	// Nonce and CodeHash are the two the destruct erases without leaving a cell of
-	// its own — SELFDESTRUCT records Incarnation, SelfDestruct and Balance, and
-	// nothing else — so each scans from its own cell, or from before the block
-	// when it has none.
+	// Nonce and CodeHash are the two a destruct erases without leaving a cell of
+	// its own, so they need the scan; Balance and Incarnation get one at the
+	// destruct index, or (EIP-8246) deliberately keep the prior cell.
 	nonceIdx, nonceCell := floorCell(e.Nonce, txIdx)
 	if _, wiped := selfDestructWipesLocked(e, NoncePath, nonceIdx, txIdx); wiped {
 		account.Nonce = 0
@@ -647,8 +646,7 @@ func (vm *VersionMap) AccountLifecycle(addr accounts.Address, txIdx int) (destro
 
 // destructScanFloor is the lowest TxIndex a wipe scan covers for a value floored
 // at floor, or -1 when the value predates the block. CodeHash keeps the
-// destroying tx's own entry, matching read_paths.go — the convention read_paths
-// also applies to Balance, which no wipe scan here consults.
+// destroying tx's own entry, matching read_paths.go.
 func destructScanFloor(path AccountPath, floor int) int {
 	if floor < 0 {
 		return -1
@@ -659,32 +657,58 @@ func destructScanFloor(path AccountPath, floor int) int {
 	return floor
 }
 
-// wipedByInRangeDestruct reports whether an in-block SELFDESTRUCT cleared the
-// value a reader would otherwise return for path. The latest SelfDestruct entry
-// cannot answer this alone: once the account is revived, that entry is the
-// revival.
-func (vm *VersionMap) wipedByInRangeDestruct(addr accounts.Address, path AccountPath, floor, txIndex int) (int, bool) {
+// readFloorLive is readFloor plus the destruct check under one entry lookup and
+// read lock. wiped covers the pre-block value too, so a caller that gets neither
+// found nor wiped may fall through to the domain.
+func readFloorLive[T any](vm *VersionMap, addr accounts.Address, path AccountPath, txIdx int, sel func(*AddressEntry) *btree.Map[int, *WriteCell[T]]) (val T, found, wiped bool) {
+	if vm == nil {
+		return val, false, false
+	}
 	e := vm.load(addr)
 	if e == nil {
-		return 0, false
+		return val, false, false
 	}
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	return selfDestructWipesLocked(e, path, floor, txIndex)
+	floor, cell := floorCell(sel(e), txIdx)
+	if _, w := selfDestructWipesLocked(e, path, floor, txIdx); w {
+		return val, false, true
+	}
+	if cell == nil {
+		return val, false, false
+	}
+	return cell.Value, true, false
 }
 
-// hasLiveStorage reports whether addr holds a non-zero slot visible at txIdx that
-// a destruct at wipedAt did not erase. HasStorage takes no key, so it cannot
-// floor on a cell the way the slot readers do and has to weigh the values
-// themselves: a cell position alone says nothing, since a zero write above the
-// destruct leaves the account with no storage just as an erased slot does.
-func (vm *VersionMap) hasLiveStorage(addr accounts.Address, wipedAt int, wiped bool, txIdx int) bool {
+func (vm *VersionMap) readStorageLive(addr accounts.Address, key accounts.StorageKey, txIdx int) (uint256.Int, bool, bool) {
+	return readFloorLive(vm, addr, StoragePath, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[uint256.Int]] {
+		if e.Storage == nil {
+			return nil
+		}
+		return e.Storage[key]
+	})
+}
+
+func (vm *VersionMap) readCodeLive(addr accounts.Address, txIdx int) (accounts.Code, bool, bool) {
+	return readFloorLive(vm, addr, CodePath, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[accounts.Code]] { return e.Code })
+}
+
+// liveStorage reports whether addr holds a non-zero slot visible at txIdx that an
+// in-block destruct did not erase, and whether such a destruct erased the
+// pre-block slots too. With no key to floor on it has to weigh the values: a zero
+// write above the destruct leaves the account with no storage just as an erased
+// slot does.
+func (vm *VersionMap) liveStorage(addr accounts.Address, txIdx int) (bool, bool) {
+	if vm == nil {
+		return false, false
+	}
 	e := vm.load(addr)
 	if e == nil {
-		return false
+		return false, false
 	}
 	e.mu.RLock()
 	defer e.mu.RUnlock()
+	wipedAt, wiped := selfDestructWipesLocked(e, StoragePath, UnknownDep, txIdx)
 	for _, cells := range e.Storage {
 		live := false
 		cells.Descend(txIdx-1, func(k int, v *WriteCell[uint256.Int]) bool {
@@ -692,34 +716,17 @@ func (vm *VersionMap) hasLiveStorage(addr accounts.Address, wipedAt int, wiped b
 			return false
 		})
 		if live {
-			return true
+			return true, wiped
 		}
 	}
-	return false
+	return false, wiped
 }
 
-// selfDestructWipesLocked is the wipe rule itself, for callers already holding
-// e.mu, and reports the TxIndex the wiping destruct sits at. The flag is not
-// consulted, only the value: MarkEstimate leaves the value of the incarnation
-// being re-executed, so an Estimate destruct still wipes, while an Estimate
-// SelfDestruct=false — which every newly created account writes — is not one.
+// selfDestructWipesLocked applies the per-path floor to the destruct scan and
+// reports the TxIndex the wiping destruct sits at.
 func selfDestructWipesLocked(e *AddressEntry, path AccountPath, floor, txIdx int) (int, bool) {
-	if e.SelfDestruct == nil {
-		return 0, false
-	}
-	lo := destructScanFloor(path, floor)
-	at, found := 0, false
-	e.SelfDestruct.Descend(txIdx-1, func(k int, v *WriteCell[bool]) bool {
-		if k < lo {
-			return false
-		}
-		if v.Value {
-			at, found = k, true
-			return false
-		}
-		return true
-	})
-	return at, found
+	ver, found := findDoneSelfDestructLocked(e, destructScanFloor(path, floor), txIdx, true)
+	return ver.TxIndex, found
 }
 
 // AnyDoneSelfDestructEquals reports whether any Done SelfDestruct write at
@@ -828,6 +835,15 @@ func (vm *VersionMap) FindDoneSelfDestructInRange(addr accounts.Address, lo, hi 
 	}
 	e.mu.RLock()
 	defer e.mu.RUnlock()
+	return findDoneSelfDestructLocked(e, lo, hi, target)
+}
+
+// findDoneSelfDestructLocked is the destruct scan every consumer shares, for
+// callers already holding e.mu. Estimate cells do not count: the readers built
+// on it record no read, so a verdict taken off an in-flight incarnation is never
+// re-checked, and the EIP-161 delete it can produce cannot be pulled back out of
+// an already-merged write set.
+func findDoneSelfDestructLocked(e *AddressEntry, lo, hi int, target bool) (Version, bool) {
 	if e.SelfDestruct == nil {
 		return Version{}, false
 	}

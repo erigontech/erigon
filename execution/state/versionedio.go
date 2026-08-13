@@ -1691,6 +1691,9 @@ func (vr versionedStateReader) ReadAccountDataForDebug(address accounts.Address)
 		if err != nil {
 			return nil, err
 		}
+		if account == nil {
+			return nil, nil
+		}
 
 		updated := vr.applyVersionedUpdates(address, *account)
 		return &updated, nil
@@ -1705,17 +1708,12 @@ func (vr versionedStateReader) ReadAccountStorage(address accounts.Address, key 
 	}
 
 	// Check version map for storage written by prior transactions.
-	if vr.versionMap != nil {
-		val, res, ok := vr.versionMap.ReadStorage(address, key, vr.txIndex)
-		if ok && res.Status() != MVReadResultNone {
-			if _, wiped := vr.wipedByDestruct(address, StoragePath, res.Version().TxIndex); wiped {
-				return uint256.Int{}, false, nil
-			}
-			return val, true, nil
-		}
-		if _, wiped := vr.wipedByDestruct(address, StoragePath, -1); wiped {
-			return uint256.Int{}, false, nil
-		}
+	val, found, wiped := vr.versionMap.readStorageLive(address, key, vr.txIndex)
+	if found {
+		return val, true, nil
+	}
+	if wiped {
+		return uint256.Int{}, false, nil
 	}
 
 	if vr.stateReader != nil {
@@ -1725,29 +1723,23 @@ func (vr versionedStateReader) ReadAccountStorage(address accounts.Address, key 
 	return uint256.Int{}, false, nil
 }
 
-// wipedByDestruct reports whether an in-block SELFDESTRUCT cleared the value
-// this reader would otherwise return for path, floored at the version map cell
-// holding it (-1 when that value comes from before the block), and the TxIndex
-// that destruct sits at.
-func (vr versionedStateReader) wipedByDestruct(address accounts.Address, path AccountPath, floor int) (int, bool) {
-	return vr.versionMap.wipedByInRangeDestruct(address, path, floor, vr.txIndex)
-}
-
 func (vr versionedStateReader) HasStorage(address accounts.Address) (bool, error) {
-	if _, ok := vr.reads.storage[address]; ok {
-		return true, nil
-	}
-
-	if vr.versionMap != nil {
-		at, wiped := vr.wipedByDestruct(address, StoragePath, -1)
-		if vr.versionMap.hasLiveStorage(address, at, wiped, vr.txIndex) {
+	// recordWipedRead stores the zero a destruct left behind, so only a non-zero
+	// recorded read proves storage.
+	for _, r := range vr.reads.storage[address] {
+		if !r.Val.IsZero() {
 			return true, nil
 		}
-		// An in-block destruct erased whatever the pre-block domain holds, so with
-		// nothing live above it the fall-through must not answer from it.
-		if wiped {
-			return false, nil
-		}
+	}
+
+	live, wiped := vr.versionMap.liveStorage(address, vr.txIndex)
+	if live {
+		return true, nil
+	}
+	// A destruct erased the pre-block domain too, so with nothing live above it
+	// the fall-through must not answer from it.
+	if wiped {
+		return false, nil
 	}
 
 	if vr.stateReader != nil {
@@ -1757,24 +1749,23 @@ func (vr versionedStateReader) HasStorage(address accounts.Address) (bool, error
 	return false, nil
 }
 
-func (vr versionedStateReader) ReadAccountCode(address accounts.Address) ([]byte, error) {
+// versionedCode resolves code from the read set and the version map, reporting
+// whether either answered. The two code readers differ only in what they make of
+// the result.
+func (vr versionedStateReader) versionedCode(address accounts.Address) ([]byte, bool) {
 	if r, ok := vr.reads.GetCode(address); ok && r.Val != nil {
-		return r.Val, nil
+		return r.Val, true
 	}
+	code, found, wiped := vr.versionMap.readCodeLive(address, vr.txIndex)
+	if found {
+		return code.Bytes, true
+	}
+	return nil, wiped
+}
 
-	// Check version map for CodePath entries written by prior transactions
-	// (e.g. EIP-7702 delegation set by an earlier tx in the same block).
-	if vr.versionMap != nil {
-		code, res, ok := vr.versionMap.ReadCode(address, vr.txIndex)
-		if ok && res.Status() != MVReadResultNone {
-			if _, wiped := vr.wipedByDestruct(address, CodePath, res.Version().TxIndex); wiped {
-				return nil, nil
-			}
-			return code.Bytes, nil
-		}
-		if _, wiped := vr.wipedByDestruct(address, CodePath, -1); wiped {
-			return nil, nil
-		}
+func (vr versionedStateReader) ReadAccountCode(address accounts.Address) ([]byte, error) {
+	if code, ok := vr.versionedCode(address); ok {
+		return code, nil
 	}
 
 	if vr.stateReader != nil {
@@ -1785,21 +1776,8 @@ func (vr versionedStateReader) ReadAccountCode(address accounts.Address) ([]byte
 }
 
 func (vr versionedStateReader) ReadAccountCodeSize(address accounts.Address) (int, error) {
-	if r, ok := vr.reads.GetCode(address); ok && r.Val != nil {
-		return len(r.Val), nil
-	}
-
-	if vr.versionMap != nil {
-		code, res, ok := vr.versionMap.ReadCode(address, vr.txIndex)
-		if ok && res.Status() != MVReadResultNone {
-			if _, wiped := vr.wipedByDestruct(address, CodeSizePath, res.Version().TxIndex); wiped {
-				return 0, nil
-			}
-			return len(code.Bytes), nil
-		}
-		if _, wiped := vr.wipedByDestruct(address, CodeSizePath, -1); wiped {
-			return 0, nil
-		}
+	if code, ok := vr.versionedCode(address); ok {
+		return len(code), nil
 	}
 
 	if vr.stateReader != nil {

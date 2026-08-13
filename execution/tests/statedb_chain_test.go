@@ -179,8 +179,7 @@ func TestSelfDestructReceive(t *testing.T) {
 // Both executors run it, since versionedStateReader is on the parallel path only
 // and its answer has to match what the serial path commits. Both deploy
 // placements run it too: a contract deployed in an earlier block leaves the
-// reader no in-block CodeHash cell to floor the destruct scan on, since
-// SELFDESTRUCT records Incarnation/SelfDestruct/Balance and nothing else.
+// reader no in-block CodeHash cell to floor the destruct scan on.
 //
 // Executor choice is dbg.Exec3Parallel || cfg.experimentalBAL, and
 // Exec3Parallel defaults true, so the driver has to flip it — clearing
