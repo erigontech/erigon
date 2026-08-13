@@ -403,34 +403,40 @@ func syntheticBlockJSON(targetBytes int) []byte {
 // unlike the sequential per-request loop in rpcstack_gzip_bench_test.go which
 // reports latency. -cpu controls the client concurrency.
 func BenchmarkGzipOneShotThroughput(b *testing.B) {
-	for _, size := range []int{16 << 10, 256 << 10, 768 << 10, 2 << 20} {
-		payload := syntheticBlockJSON(size)
-		b.Run(fmt.Sprintf("payload=%dKB", len(payload)>>10), func(b *testing.B) {
-			handler := newGzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				w.Write(payload) //nolint:errcheck
-			}))
-			srv := httptest.NewServer(handler)
-			defer srv.Close()
-
-			b.SetBytes(int64(len(payload)))
-			b.ReportAllocs()
-			b.ResetTimer()
-			b.RunParallel(func(pb *testing.PB) {
-				client := &http.Client{Transport: &http.Transport{DisableCompression: true, MaxIdleConnsPerHost: 64}}
-				for pb.Next() {
-					req, _ := http.NewRequest(http.MethodPost, srv.URL, nil)
-					req.Header.Set("Accept-Encoding", "gzip")
-					resp, err := client.Do(req)
-					if err != nil {
-						b.Error(err)
-						return
-					}
-					io.Copy(io.Discard, resp.Body) //nolint:errcheck
-					resp.Body.Close()
+	for _, gz := range []bool{false, true} {
+		for _, size := range []int{16 << 10, 256 << 10, 768 << 10, 2 << 20} {
+			payload := syntheticBlockJSON(size)
+			b.Run(fmt.Sprintf("gzip=%v/payload=%dKB", gz, len(payload)>>10), func(b *testing.B) {
+				inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					w.Write(payload) //nolint:errcheck
+				})
+				var handler http.Handler = inner
+				if gz {
+					handler = newGzipHandler(inner)
 				}
+				srv := httptest.NewServer(handler)
+				defer srv.Close()
+
+				b.SetBytes(int64(len(payload)))
+				b.ReportAllocs()
+				b.ResetTimer()
+				b.RunParallel(func(pb *testing.PB) {
+					client := &http.Client{Transport: &http.Transport{DisableCompression: true, MaxIdleConnsPerHost: 64}}
+					for pb.Next() {
+						req, _ := http.NewRequest(http.MethodPost, srv.URL, nil)
+						req.Header.Set("Accept-Encoding", "gzip")
+						resp, err := client.Do(req)
+						if err != nil {
+							b.Error(err)
+							return
+						}
+						io.Copy(io.Discard, resp.Body) //nolint:errcheck
+						resp.Body.Close()
+					}
+				})
 			})
-		})
+		}
 	}
 }
 
