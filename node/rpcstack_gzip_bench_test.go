@@ -439,76 +439,84 @@ func BenchmarkGzipOneShotThroughput(b *testing.B) {
 // (rpc/jsonstream/factory.go) -- on a several-hundred-MB trace that is tens of
 // thousands of write calls through the middleware.
 func BenchmarkGzipStreamingThroughput(b *testing.B) {
-	for _, bufSize := range []int{4096, 64 << 10, 256 << 10} {
-		for _, entries := range []int{2000, 60000} {
-			name := fmt.Sprintf("jsonbuf=%dKB/entries=%d", bufSize>>10, entries)
-			if bufSize < 1024 {
-				name = fmt.Sprintf("jsonbuf=%dB/entries=%d", bufSize, entries)
-			}
-			b.Run(name, func(b *testing.B) {
-				// Precomputed: formatting inside the write loop would make the
-				// benchmark measure fmt rather than the streaming path.
-				stackWords := make([]string, 64)
-				for i := range stackWords {
-					stackWords[i] = fmt.Sprintf("0x%064x", i*2654435761)
+	for _, gz := range []bool{false, true} {
+		for _, bufSize := range []int{4096, 256 << 10} {
+			for _, entries := range []int{2000, 60000} {
+				name := fmt.Sprintf("gzip=%v/jsonbuf=%dKB/entries=%d", gz, bufSize>>10, entries)
+				if bufSize < 1024 {
+					name = fmt.Sprintf("gzip=%v/jsonbuf=%dB/entries=%d", gz, bufSize, entries)
 				}
-				var wrote int64
-				handler := newGzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					w.Header().Set("Content-Type", "application/json")
-					// Production enters streaming mode via the gzip hook before
-					// the first write; Flush is that same entry point.
-					w.(http.Flusher).Flush()
-
-					st := jsoniter.NewStream(jsoniter.ConfigDefault, w, bufSize)
-					stream := jsonstream.Wrap(st)
-					stream.WriteArrayStart()
-					for i := range entries {
-						if i > 0 {
-							stream.WriteMore()
-						}
-						stream.WriteObjectStart()
-						stream.WriteObjectField("pc")
-						stream.WriteInt(i)
-						stream.WriteMore()
-						stream.WriteObjectField("op")
-						stream.WriteString("SSTORE")
-						stream.WriteMore()
-						stream.WriteObjectField("stack")
-						stream.WriteString(stackWords[i%len(stackWords)])
-						stream.WriteObjectEnd()
+				b.Run(name, func(b *testing.B) {
+					// Precomputed: formatting inside the write loop would make the
+					// benchmark measure fmt rather than the streaming path.
+					stackWords := make([]string, 64)
+					for i := range stackWords {
+						stackWords[i] = fmt.Sprintf("0x%064x", i*2654435761)
 					}
-					stream.WriteArrayEnd()
-					stream.Flush() //nolint:errcheck
-					atomic.AddInt64(&wrote, int64(st.Buffered()))
-				}))
-				srv := httptest.NewServer(handler)
-				defer srv.Close()
-
-				// One warmup request to learn the uncompressed size for MB/s.
-				req, _ := http.NewRequest(http.MethodPost, srv.URL, nil)
-				req.Header.Set("Accept-Encoding", "gzip")
-				if resp, err := (&http.Client{Transport: &http.Transport{DisableCompression: true}}).Do(req); err == nil {
-					io.Copy(io.Discard, resp.Body) //nolint:errcheck
-					resp.Body.Close()
-				}
-				b.SetBytes(int64(entries) * 96) // approx bytes of JSON per entry
-				b.ReportAllocs()
-				b.ResetTimer()
-				b.RunParallel(func(pb *testing.PB) {
-					client := &http.Client{Transport: &http.Transport{DisableCompression: true, MaxIdleConnsPerHost: 64}}
-					for pb.Next() {
-						req, _ := http.NewRequest(http.MethodPost, srv.URL, nil)
-						req.Header.Set("Accept-Encoding", "gzip")
-						resp, err := client.Do(req)
-						if err != nil {
-							b.Error(err)
-							return
+					var wrote int64
+					inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						w.Header().Set("Content-Type", "application/json")
+						// Production enters streaming mode via the gzip hook before
+						// the first write; Flush is that same entry point.
+						if f, ok := w.(http.Flusher); ok {
+							f.Flush()
 						}
+
+						st := jsoniter.NewStream(jsoniter.ConfigDefault, w, bufSize)
+						stream := jsonstream.Wrap(st)
+						stream.WriteArrayStart()
+						for i := range entries {
+							if i > 0 {
+								stream.WriteMore()
+							}
+							stream.WriteObjectStart()
+							stream.WriteObjectField("pc")
+							stream.WriteInt(i)
+							stream.WriteMore()
+							stream.WriteObjectField("op")
+							stream.WriteString("SSTORE")
+							stream.WriteMore()
+							stream.WriteObjectField("stack")
+							stream.WriteString(stackWords[i%len(stackWords)])
+							stream.WriteObjectEnd()
+						}
+						stream.WriteArrayEnd()
+						stream.Flush() //nolint:errcheck
+						atomic.AddInt64(&wrote, int64(st.Buffered()))
+					})
+					var handler http.Handler = inner
+					if gz {
+						handler = newGzipHandler(inner)
+					}
+					srv := httptest.NewServer(handler)
+					defer srv.Close()
+
+					// One warmup request to learn the uncompressed size for MB/s.
+					req, _ := http.NewRequest(http.MethodPost, srv.URL, nil)
+					req.Header.Set("Accept-Encoding", "gzip")
+					if resp, err := (&http.Client{Transport: &http.Transport{DisableCompression: true}}).Do(req); err == nil {
 						io.Copy(io.Discard, resp.Body) //nolint:errcheck
 						resp.Body.Close()
 					}
+					b.SetBytes(int64(entries) * 96) // approx bytes of JSON per entry
+					b.ReportAllocs()
+					b.ResetTimer()
+					b.RunParallel(func(pb *testing.PB) {
+						client := &http.Client{Transport: &http.Transport{DisableCompression: true, MaxIdleConnsPerHost: 64}}
+						for pb.Next() {
+							req, _ := http.NewRequest(http.MethodPost, srv.URL, nil)
+							req.Header.Set("Accept-Encoding", "gzip")
+							resp, err := client.Do(req)
+							if err != nil {
+								b.Error(err)
+								return
+							}
+							io.Copy(io.Discard, resp.Body) //nolint:errcheck
+							resp.Body.Close()
+						}
+					})
 				})
-			})
+			}
 		}
 	}
 }
