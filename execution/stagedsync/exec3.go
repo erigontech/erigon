@@ -124,8 +124,8 @@ type execRange struct {
 // rolled the stageloop tx via Flush/CommitAndBegin, leaving the caller's rwTx
 // stale). verdict carries the invalid-block verdict of a healthy run;
 // exhausted carries its resumable batch boundary. At most one of {error,
-// verdict, exhausted} is set, so the error return means an operational
-// executor failure and nothing else.
+// verdict, exhausted} is set. The error return carries an operational
+// executor failure or cancellation, never a block verdict or batch boundary.
 type execV3Outcome struct {
 	applyTx               kv.TemporalRwTx
 	lastCommittedBlockNum uint64

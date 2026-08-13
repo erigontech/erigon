@@ -358,6 +358,9 @@ func (se *serialExecutor) executeBlock(ctx context.Context, block *types.Block, 
 				return result.Err
 			}
 			if result.Err != nil {
+				if result.Operational {
+					return fmt.Errorf("txnIdx=%d: %w", txTask.TxIndex, result.Err)
+				}
 				return fmt.Errorf("%w, txnIdx=%d, %v", rules.ErrInvalidBlock, txTask.TxIndex, result.Err) //same as in stage_exec.go
 			}
 

@@ -53,12 +53,11 @@ func TestFinalizeExecV3Outcome(t *testing.T) {
 	})
 }
 
-// TestUnwindOnExecError pins the stage-boundary rendering of the executor
-// outcome: an operational error passes through and is never a block verdict; a
-// verdict propagates as its rules.ErrInvalidBlock-wrapping error, with only a
-// non-initial-cycle wrong root consumed by handleIncorrectRootHashError's
-// binary-search unwind keyed off the implicated block.
-func TestUnwindOnExecError(t *testing.T) {
+// TestRenderExecOutcome pins the stage boundary that converts typed executor
+// results back to legacy behavior: errors take precedence, verdicts retain
+// invalid-block routing, and exhaustion remains resumable. Only a healthy
+// non-initial-cycle wrong-root verdict enters the binary-search unwind path.
+func TestRenderExecOutcome(t *testing.T) {
 	t.Parallel()
 	logger := log.New()
 

@@ -472,15 +472,11 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 		// StartChange (which arrives with the blockResult, after all txResults).
 		var pendingAccumulatorWrites []*state.WriteSet
 
-		// handleCommitResult processes a single commitment result from the
-		// calculator. Defined here so both the blockResult handler and the
-		// rootResults case in the main select can use it.
-		// handleCommitResult classifies a commitment result. It performs NO
-		// unwind side-effects: a wrong-root is only classified here and routed
-		// through the fail/finalized machinery, so the reported failure and its
-		// block hash are chosen after exec has had its say (under fold-ahead a
-		// commit wrong-root can arrive before the block's exec verdict). The
-		// actual unwind for a !initialCycle wrong-root happens at finalization
+		// handleCommitResult classifies a commitment result without unwinding.
+		// A wrong root is routed through the fail/finalized machinery, so the
+		// reported failure and block hash are chosen after execution has had its
+		// say. With fold-ahead, a commitment wrong root can arrive before the
+		// block's execution verdict. The actual unwind happens at finalization
 		// with the implicated block's own hash.
 		handleCommitResult := func(cr commitmentResult) error {
 			if cr.err != nil {
