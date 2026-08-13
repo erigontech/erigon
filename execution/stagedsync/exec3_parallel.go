@@ -1991,12 +1991,6 @@ type txResult struct {
 	coinbaseDirect bool
 }
 
-// useVersionMapCommitView routes the commitment calculator's per-tx input
-// through the read-only versionMap-slice view (NewVersionMapWriteView) instead
-// of the normalized *WriteSet — an A/B to check commitment consistency of the
-// single-source-of-truth path. Off by default.
-var useVersionMapCommitView = dbg.EnvBool("VMAP_COMMIT_VIEW", false)
-
 // rawViewCollapse feeds BOTH apply and the commitment calculator the read-only
 // versionMap-slice view over the tx's RAW write-set (touched keys + vm-floor
 // values), skipping Normalize entirely. Apply and calc own the semantics
@@ -4365,12 +4359,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			if result.writes != nil {
 				applyResult.writes = result.writes
 				be.applyCount += applyResult.writes.Count()
-				// Under rawViewCollapse result.writes is already the versionMap
-				// view; leave commitWrites nil so the calculator falls back to it
-				// (committer prefers commitWrites, else r.writes) — no double-wrap.
-				if useVersionMapCommitView && !rawViewCollapse {
-					applyResult.commitWrites = state.NewVersionMapWriteView(result.writes, be.versionMap, task.Version().TxIndex)
-				}
 			}
 
 			if coinbaseApplyCheck && !be.coinbase.IsNil() {
