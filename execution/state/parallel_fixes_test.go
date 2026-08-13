@@ -100,7 +100,6 @@ func TestValueTiebreaker_NoncePath(t *testing.T) {
 	assert.Equal(t, VersionInvalid, valid, "Different nonce should be invalid")
 }
 
-
 // TestVersionedWriteVersion verifies that VersionedWrite entries at
 // txIndex=0 are still reachable. The bug was that finalizeTx appended
 // writes without Version (zero value = txIndex=0), making them only

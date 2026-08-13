@@ -1886,8 +1886,6 @@ type txResult struct {
 	isFinalize            bool // block-end finalize writes — apply to sd.mem directly
 }
 
-
-
 // The executor is the true Block-STM model: workers own execution AND validation.
 // Each worker flushes its writes to the versionMap speculatively (as estimate),
 // validates its own read-set, and loops — parking on the commit-frontier signal
@@ -1915,7 +1913,6 @@ var selfLoopSlots = dbg.EnvInt("SELF_LOOP_SLOTS", 0)
 // live context count tracks the peak number of simultaneously-parked workers,
 // which is bounded by the block's task count.
 const elasticWorkerCap = 4096
-
 
 // dispatchRunSelfLoop runs one task on a worker context, looping until its
 // result is stable-valid (SELF_LOOP true Block-STM): execute, flush its writes
@@ -2853,10 +2850,10 @@ type blockExecutor struct {
 	// runInc[i] is the highest incarnation ever RUN for task i, enforcing the
 	// invariant that each execution of a tx uses a strictly ascending incarnation
 	// (two concurrent runs sharing one incarnation is a scheduling bug). Init -1.
-	runInc           []atomic.Int64
-	slFin            []chan struct{}
-	slDone           chan struct{}
-	slDoneOnce       sync.Once
+	runInc     []atomic.Int64
+	slFin      []chan struct{}
+	slDone     chan struct{}
+	slDoneOnce sync.Once
 	// selfLoopDispatched guards against re-dispatching a task the self-loop
 	// worker already owns: under SELF_LOOP the worker owns all re-execution, so
 	// the exec-loop scheduler must dispatch each task exactly once. Touched only
