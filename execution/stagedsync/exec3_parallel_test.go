@@ -510,6 +510,9 @@ func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, met
 		},
 		workerCount: runtime.NumCPU() - 1,
 	}
+	// prevBlocks must exist before pe.run(): the per-task SetBlock reads it and a
+	// nil registry panics (matches production setup in blockExecutor.execute).
+	pe.prevBlocks = state.NewPrevBlockList()
 
 	executorContext, executorCancel, err := pe.run(ctx)
 
@@ -632,6 +635,7 @@ func runParallelGetMetadata(tb testing.TB, tasks []exec.Task, validation propert
 		},
 		workerCount: runtime.NumCPU() - 1,
 	}
+	pe.prevBlocks = state.NewPrevBlockList()
 
 	executorContext, executorCancel, err := pe.run(ctx)
 	defer executorCancel(nil)
@@ -676,6 +680,7 @@ func runProfileAndExecute(tb testing.TB, tasks []exec.Task, validation propertyC
 			},
 			workerCount: runtime.NumCPU() - 1,
 		}
+		pe.prevBlocks = state.NewPrevBlockList()
 
 		executorCtx, executorCancel, err := pe.run(ctx)
 		assert.NoError(tb, err, "error during parallel init")
@@ -1409,6 +1414,7 @@ func newResumeTestExec(t *testing.T, db kv.TemporalRwDB, config *chain.Config) (
 			logger: logger,
 		},
 	}
+	pe.prevBlocks = state.NewPrevBlockList()
 	return pe, roTx
 }
 
