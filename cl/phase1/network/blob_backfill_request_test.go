@@ -25,6 +25,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 )
@@ -188,6 +189,99 @@ func TestBlobBackfillRequestPacingBacksOffEveryFailure(t *testing.T) {
 	require.Equal(t, requestBlobMaxBackoff, pacing.backoff)
 }
 
+func TestBlobBackfillEmptyResponsesKeepBaseCadence(t *testing.T) {
+	ticks := make(chan time.Time)
+	expires := make(chan time.Time)
+	requests := make(chan struct{}, 3)
+	validationReady := make(chan struct{}, 3)
+	done := make(chan error, 1)
+	base := time.Unix(100, 0)
+	var elapsed atomic.Int64
+	var attempts atomic.Int64
+	client := blobRequesterFunc(func(context.Context, *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error) {
+		elapsed.Store((attempts.Add(1) - 1) * int64(requestBlobRetryInterval))
+		requests <- struct{}{}
+		return nil, "peer", nil
+	})
+	go func() {
+		_, err := requestBlobsForBackfillWithSchedule(t.Context(), client, emptyBlobRequest, func(context.Context, *PeerAndSidecars) (bool, bool, error) {
+			return false, false, nil
+		}, blobBackfillRequestSchedule{
+			ticks:   ticks,
+			expires: expires,
+			now:     func() time.Time { return base.Add(time.Duration(elapsed.Load())) },
+			validationReady: func() {
+				validationReady <- struct{}{}
+			},
+		})
+		done <- err
+	}()
+
+	receiveBlobTestSignal(t, requests)
+	receiveBlobTestSignal(t, validationReady)
+	ticks <- base.Add(requestBlobRetryInterval)
+	receiveBlobTestSignal(t, requests)
+	receiveBlobTestSignal(t, validationReady)
+	ticks <- base.Add(2 * requestBlobRetryInterval)
+	select {
+	case <-requests:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("empty response introduced exponential retry delay")
+	}
+	expires <- base.Add(3 * requestBlobRetryInterval)
+	require.ErrorIs(t, receiveBlobTestValue(t, done), ErrTimeout)
+}
+
+func TestBlobBackfillDenebEmptyResponsesKeepBaseCadence(t *testing.T) {
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	request, err := BlobsIdentifiersFromBlocks([]*cltypes.SignedBeaconBlock{block}, &clparams.MainnetBeaconConfig)
+	require.NoError(t, err)
+	batch, err := newDenebRecoveryBatch([]*cltypes.SignedBeaconBlock{block}, request)
+	require.NoError(t, err)
+
+	ticks := make(chan time.Time)
+	expires := make(chan time.Time)
+	requests := make(chan struct{}, 3)
+	validationReady := make(chan struct{}, 3)
+	done := make(chan error, 1)
+	base := time.Unix(100, 0)
+	var elapsed atomic.Int64
+	var attempts atomic.Int64
+	client := blobRequesterFunc(func(context.Context, *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error) {
+		elapsed.Store((attempts.Add(1) - 1) * int64(requestBlobRetryInterval))
+		requests <- struct{}{}
+		return nil, "peer", nil
+	})
+	go func() {
+		_, err := requestBlobsForBackfillWithSchedule(t.Context(), client, batch.remaining, func(_ context.Context, candidate *PeerAndSidecars) (bool, bool, error) {
+			progress, err := batch.validate(candidate.requested, candidate.Responses)
+			return progress > 0, false, err
+		}, blobBackfillRequestSchedule{
+			ticks: ticks, expires: expires,
+			now: func() time.Time { return base.Add(time.Duration(elapsed.Load())) },
+			validationReady: func() {
+				validationReady <- struct{}{}
+			},
+		})
+		done <- err
+	}()
+
+	receiveBlobTestSignal(t, requests)
+	receiveBlobTestSignal(t, validationReady)
+	ticks <- base.Add(requestBlobRetryInterval)
+	receiveBlobTestSignal(t, requests)
+	receiveBlobTestSignal(t, validationReady)
+	ticks <- base.Add(2 * requestBlobRetryInterval)
+	select {
+	case <-requests:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("production Deneb empty response introduced exponential retry delay")
+	}
+	expires <- base.Add(3 * requestBlobRetryInterval)
+	require.ErrorIs(t, receiveBlobTestValue(t, done), ErrTimeout)
+}
+
 func TestBlobBackfillReadyValidationWinsExpiration(t *testing.T) {
 	ticks := make(chan time.Time)
 	expires := make(chan time.Time, 1)
@@ -240,6 +334,61 @@ func TestBlobBackfillBlockedValidationCancelsWithoutBlockingSender(t *testing.T)
 	expires <- time.Now()
 	require.ErrorIs(t, receiveBlobTestValue(t, done), ErrTimeout)
 	receiveBlobTestSignal(t, validationReady)
+}
+
+func TestBlobBackfillStopWaitsForValidationOwnership(t *testing.T) {
+	tests := map[string]struct {
+		stop func(context.CancelFunc, chan<- time.Time)
+		want error
+	}{
+		"expiration": {
+			stop: func(_ context.CancelFunc, expires chan<- time.Time) { expires <- time.Now() },
+			want: ErrTimeout,
+		},
+		"caller cancellation": {
+			stop: func(cancel context.CancelFunc, _ chan<- time.Time) { cancel() },
+			want: context.Canceled,
+		},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			ticks := make(chan time.Time)
+			expires := make(chan time.Time, 1)
+			validationStarted := make(chan struct{})
+			validationContext := make(chan context.Context, 1)
+			releaseValidation := make(chan struct{})
+			client := blobRequesterFunc(func(context.Context, *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error) {
+				return []*cltypes.BlobSidecar{{}}, "peer", nil
+			})
+			done := make(chan error, 1)
+			go func() {
+				_, err := requestBlobsForBackfillWithSchedule(ctx, client, emptyBlobRequest, func(ctx context.Context, _ *PeerAndSidecars) (bool, bool, error) {
+					validationContext <- ctx
+					close(validationStarted)
+					<-releaseValidation
+					return true, false, nil
+				}, blobBackfillRequestSchedule{
+					ticks:   ticks,
+					expires: expires,
+					now:     time.Now,
+				})
+				done <- err
+			}()
+
+			receiveBlobTestSignal(t, validationStarted)
+			validationCtx := receiveBlobTestValue(t, validationContext)
+			test.stop(cancel, expires)
+			receiveBlobTestSignal(t, validationCtx.Done())
+			select {
+			case err := <-done:
+				t.Fatalf("request returned before validation released ownership: %v", err)
+			case <-time.After(100 * time.Millisecond):
+			}
+			close(releaseValidation)
+			require.ErrorIs(t, receiveBlobTestValue(t, done), test.want)
+		})
+	}
 }
 
 func emptyBlobRequest() *solid.ListSSZ[*cltypes.BlobIdentifier] {

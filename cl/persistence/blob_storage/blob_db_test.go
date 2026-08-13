@@ -24,16 +24,38 @@ import (
 	"testing"
 	"time"
 
+	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
+
+func TestVerifyBlobSidecarsGloasDoesNotRequireInclusionProof(t *testing.T) {
+	blob := goethkzg.Blob{}
+	commitment, err := kzg.Ctx().BlobToKZGCommitment(&blob, 0)
+	require.NoError(t, err)
+	proof, err := kzg.Ctx().ComputeBlobKZGProof(&blob, commitment, 0)
+	require.NoError(t, err)
+	sidecar := cltypes.NewBlobSidecar(
+		0,
+		(*cltypes.Blob)(&blob),
+		common.Bytes48(commitment),
+		common.Bytes48(proof),
+		&cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{}},
+		solid.NewHashVector(cltypes.CommitmentBranchSize),
+	)
+
+	require.NoError(t, VerifyBlobSidecars([]*cltypes.BlobSidecar{sidecar}, clparams.GloasVersion, nil))
+	require.Error(t, VerifyBlobSidecars([]*cltypes.BlobSidecar{sidecar}, clparams.FuluVersion, nil))
+}
 
 func setupTestDB(t *testing.T) kv.RwDB {
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
@@ -248,4 +270,16 @@ func TestBlobStoreEmptyBatchRecordsItsZeroRowWithoutLocking(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, found)
 	require.Empty(t, sidecars)
+}
+
+func TestKzgCommitmentsCountHonorsCanceledContext(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	bs := NewBlobStore(db, afero.NewMemMapFs())
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	_, err := bs.KzgCommitmentsCount(ctx, common.Hash{})
+	require.ErrorIs(t, err, context.Canceled)
 }
