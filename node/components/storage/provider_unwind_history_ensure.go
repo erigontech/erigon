@@ -118,7 +118,18 @@ func (p *Provider) ensureHistoryForUnwindWalk(ctx context.Context, opts UnwindOp
 		return noop, nil
 	}
 
-	needed := neededPreverifiedHistoryForWalk(cfg.Preverified.Items, baselineStep, walkEndStep, stepSize)
+	// Contiguity extension. The compute walks (baselineStep, walkEndStep]
+	// but the visible-set gap between our walk range and any locally-built
+	// tip .v file (from forward execution before the unwind) corrupts
+	// HistorySeek even for keys the walk owns. Download every step from
+	// baseline up through the highest local .v step so the visible-file
+	// set stays contiguous. See root-cause investigation 2026-08-13.
+	coverEndStep := walkEndStep
+	if tipStep, hasTip := highestLocalHistoryStep(p.snapDir, stepSize); hasTip && tipStep > coverEndStep {
+		coverEndStep = tipStep
+	}
+
+	needed := neededPreverifiedHistoryForWalk(cfg.Preverified.Items, baselineStep, coverEndStep, stepSize)
 	if len(needed) == 0 {
 		// File starvation is a first-class error, not a silent noop:
 		// the walk range is non-empty but the preverified registry has
@@ -222,6 +233,48 @@ func (p *Provider) discardDownloadedHistory(ctx context.Context, paths []string,
 			p.logger.Debug("[storage] Provider.Unwind: remove temp history torrent failed", "path", torrentPath, "err", err)
 		}
 	}
+}
+
+// highestLocalHistoryStep scans snapDir/history for `.v` files of the
+// walk domains (accounts/storage/code) and returns the largest toStep
+// across all of them. Used by ensureHistoryForUnwindWalk to extend the
+// download range so the aggregator's visible-file set stays contiguous
+// through any tip-region file (typically the locally-built per-step
+// file from forward execution). A visible-set gap corrupts HistorySeek
+// even for walks that don't span the gap, producing wrong-root failures
+// (root-cause bisected 2026-08-13 on hoodi with .288-304 walked while
+// .304-308 missing between it and locally-built .308-309).
+//
+// Returns (0, false) when no walk-domain history file is on disk.
+func highestLocalHistoryStep(snapDir string, stepSize uint64) (uint64, bool) {
+	historyDir := filepath.Join(snapDir, "history")
+	entries, err := os.ReadDir(historyDir)
+	if err != nil {
+		return 0, false
+	}
+	var best uint64
+	found := false
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".v") {
+			continue
+		}
+		if !isWalkDomain("history/" + name) {
+			continue
+		}
+		_, toStep, ok := parseStateFileStepRange(name, stepSize)
+		if !ok {
+			continue
+		}
+		if !found || toStep > best {
+			best = toStep
+			found = true
+		}
+	}
+	return best, found
 }
 
 // localCommitmentBaselineStep scans snapDir/domain for `*-commitment.*.kv`
