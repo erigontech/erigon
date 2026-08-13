@@ -21,12 +21,16 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
+	"github.com/erigontech/erigon/rpc/jsonstream"
+	jsoniter "github.com/json-iterator/go"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -374,4 +378,209 @@ func BenchmarkKlauspostGzipBestSpeed(b *testing.B) {
 
 func BenchmarkStdlibGzipBestSpeed(b *testing.B) {
 	benchmarkGzipHandler(b, getBenchPayload(b), newStdlibGzipHandler)
+}
+
+// syntheticBlockJSON builds a payload shaped like eth_getBlockByNumber output:
+// many repeated tx objects with high-entropy hex fields, so the compressor sees
+// realistic redundancy rather than a trivially compressible run.
+func syntheticBlockJSON(targetBytes int) []byte {
+	var b bytes.Buffer
+	b.WriteString(`{"jsonrpc":"2.0","id":1,"result":{"number":"0xc65d58","transactions":[`)
+	i := 0
+	for b.Len() < targetBytes {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		fmt.Fprintf(&b, `{"hash":"0x%064x","from":"0x%040x","to":"0x%040x","value":"0x%x","gas":"0x%x","input":"0x%0128x"}`,
+			i*2654435761, i*40503, i*2246822519, i*97, 21000+i, uint64(i)*11400714819323198485)
+		i++
+	}
+	b.WriteString(`]}}`)
+	return b.Bytes()
+}
+
+// BenchmarkGzipOneShotThroughput measures server throughput: concurrent clients,
+// unlike the sequential per-request loop in rpcstack_gzip_bench_test.go which
+// reports latency. -cpu controls the client concurrency.
+func BenchmarkGzipOneShotThroughput(b *testing.B) {
+	for _, size := range []int{16 << 10, 256 << 10, 768 << 10, 2 << 20} {
+		payload := syntheticBlockJSON(size)
+		b.Run(fmt.Sprintf("payload=%dKB", len(payload)>>10), func(b *testing.B) {
+			handler := newGzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.Write(payload) //nolint:errcheck
+			}))
+			srv := httptest.NewServer(handler)
+			defer srv.Close()
+
+			b.SetBytes(int64(len(payload)))
+			b.ReportAllocs()
+			b.ResetTimer()
+			b.RunParallel(func(pb *testing.PB) {
+				client := &http.Client{Transport: &http.Transport{DisableCompression: true, MaxIdleConnsPerHost: 64}}
+				for pb.Next() {
+					req, _ := http.NewRequest(http.MethodPost, srv.URL, nil)
+					req.Header.Set("Accept-Encoding", "gzip")
+					resp, err := client.Do(req)
+					if err != nil {
+						b.Error(err)
+						return
+					}
+					io.Copy(io.Discard, resp.Body) //nolint:errcheck
+					resp.Body.Close()
+				}
+			})
+		})
+	}
+}
+
+// BenchmarkGzipStreamingThroughput drives the streaming path the way
+// debug_trace* does: a jsonstream writing through the gzip middleware. It
+// varies the jsoniter buffer, which is InitialBufferSize=4096 in production
+// (rpc/jsonstream/factory.go) -- on a several-hundred-MB trace that is tens of
+// thousands of write calls through the middleware.
+func BenchmarkGzipStreamingThroughput(b *testing.B) {
+	for _, gz := range []bool{false, true} {
+		for _, bufSize := range []int{4096, 256 << 10} {
+			for _, entries := range []int{2000, 60000} {
+				name := fmt.Sprintf("gzip=%v/jsonbuf=%dKB/entries=%d", gz, bufSize>>10, entries)
+				if bufSize < 1024 {
+					name = fmt.Sprintf("gzip=%v/jsonbuf=%dB/entries=%d", gz, bufSize, entries)
+				}
+				b.Run(name, func(b *testing.B) {
+					// Precomputed: formatting inside the write loop would make the
+					// benchmark measure fmt rather than the streaming path.
+					stackWords := make([]string, 64)
+					for i := range stackWords {
+						stackWords[i] = fmt.Sprintf("0x%064x", i*2654435761)
+					}
+					var wrote int64
+					inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						w.Header().Set("Content-Type", "application/json")
+						// Production enters streaming mode via the gzip hook before
+						// the first write; Flush is that same entry point.
+						if f, ok := w.(http.Flusher); ok {
+							f.Flush()
+						}
+
+						st := jsoniter.NewStream(jsoniter.ConfigDefault, w, bufSize)
+						stream := jsonstream.Wrap(st)
+						stream.WriteArrayStart()
+						for i := range entries {
+							if i > 0 {
+								stream.WriteMore()
+							}
+							stream.WriteObjectStart()
+							stream.WriteObjectField("pc")
+							stream.WriteInt(i)
+							stream.WriteMore()
+							stream.WriteObjectField("op")
+							stream.WriteString("SSTORE")
+							stream.WriteMore()
+							stream.WriteObjectField("stack")
+							stream.WriteString(stackWords[i%len(stackWords)])
+							stream.WriteObjectEnd()
+						}
+						stream.WriteArrayEnd()
+						stream.Flush() //nolint:errcheck
+						atomic.AddInt64(&wrote, int64(st.Buffered()))
+					})
+					var handler http.Handler = inner
+					if gz {
+						handler = newGzipHandler(inner)
+					}
+					srv := httptest.NewServer(handler)
+					defer srv.Close()
+
+					// One warmup request to learn the uncompressed size for MB/s.
+					req, _ := http.NewRequest(http.MethodPost, srv.URL, nil)
+					req.Header.Set("Accept-Encoding", "gzip")
+					if resp, err := (&http.Client{Transport: &http.Transport{DisableCompression: true}}).Do(req); err == nil {
+						io.Copy(io.Discard, resp.Body) //nolint:errcheck
+						resp.Body.Close()
+					}
+					b.SetBytes(int64(entries) * 96) // approx bytes of JSON per entry
+					b.ReportAllocs()
+					b.ResetTimer()
+					b.RunParallel(func(pb *testing.PB) {
+						client := &http.Client{Transport: &http.Transport{DisableCompression: true, MaxIdleConnsPerHost: 64}}
+						for pb.Next() {
+							req, _ := http.NewRequest(http.MethodPost, srv.URL, nil)
+							req.Header.Set("Accept-Encoding", "gzip")
+							resp, err := client.Do(req)
+							if err != nil {
+								b.Error(err)
+								return
+							}
+							io.Copy(io.Discard, resp.Body) //nolint:errcheck
+							resp.Body.Close()
+						}
+					})
+				})
+			}
+		}
+	}
+}
+
+// BenchmarkGzipPeakMemoryParallel reports peak live heap while many clients
+// request a large response at once. Per-request throughput hides this: the
+// one-shot path holds the whole uncompressed response per in-flight request,
+// so peak memory scales with concurrency, not with response size.
+func BenchmarkGzipPeakMemoryParallel(b *testing.B) {
+	for _, clients := range []int{8, 64} {
+		b.Run(fmt.Sprintf("clients=%d/payload=2MB", clients), func(b *testing.B) {
+			payload := syntheticBlockJSON(2 << 20)
+			srv := httptest.NewServer(newGzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.Write(payload) //nolint:errcheck
+			})))
+			defer srv.Close()
+
+			var peak uint64
+			done := make(chan struct{})
+			var sampler sync.WaitGroup
+			sampler.Add(1)
+			go func() {
+				defer sampler.Done()
+				var ms runtime.MemStats
+				for {
+					select {
+					case <-done:
+						return
+					default:
+					}
+					runtime.ReadMemStats(&ms)
+					if ms.HeapInuse > atomic.LoadUint64(&peak) {
+						atomic.StoreUint64(&peak, ms.HeapInuse)
+					}
+				}
+			}()
+
+			runtime.GC()
+			b.ResetTimer()
+			var wg sync.WaitGroup
+			for range clients {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					c := &http.Client{Transport: &http.Transport{DisableCompression: true, MaxIdleConnsPerHost: 4}}
+					for range b.N {
+						req, _ := http.NewRequest(http.MethodPost, srv.URL, nil)
+						req.Header.Set("Accept-Encoding", "gzip")
+						resp, err := c.Do(req)
+						if err != nil {
+							return
+						}
+						io.Copy(io.Discard, resp.Body) //nolint:errcheck
+						resp.Body.Close()
+					}
+				}()
+			}
+			wg.Wait()
+			b.StopTimer()
+			close(done)
+			sampler.Wait()
+			b.ReportMetric(float64(atomic.LoadUint64(&peak))/(1<<20), "peak-heap-MiB")
+		})
+	}
 }

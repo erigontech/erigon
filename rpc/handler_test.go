@@ -167,7 +167,7 @@ func TestRunMethodFlushHookNilFunc(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx := context.WithValue(context.Background(), httpFlusherContextKey{}, (func())(nil))
+	ctx := context.Background()
 
 	var buf bytes.Buffer
 	stream := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))

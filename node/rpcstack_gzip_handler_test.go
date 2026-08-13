@@ -22,7 +22,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -64,7 +63,7 @@ func TestGzipHandlerNonStreaming(t *testing.T) {
 	rec := gzipRequest(t, handler)
 
 	assert.Equal(t, "gzip", rec.Header().Get("Content-Encoding"))
-	assert.Equal(t, strconv.Itoa(rec.Body.Len()), rec.Header().Get("Content-Length"))
+	assert.Empty(t, rec.Header().Get("Content-Length"), "compressed responses are chunked")
 	assert.Equal(t, body, decompressGzip(t, rec.Body))
 }
 
@@ -80,8 +79,9 @@ func TestGzipHandlerSmallBody(t *testing.T) {
 
 	rec := gzipRequest(t, handler)
 
+	// Content-Length on an uncompressed passthrough is set by net/http, not by
+	// the middleware, so it is absent on a bare recorder.
 	assert.Empty(t, rec.Header().Get("Content-Encoding"))
-	assert.Equal(t, strconv.Itoa(len(body)), rec.Header().Get("Content-Length"))
 	assert.Equal(t, body, rec.Body.Bytes())
 }
 
@@ -110,16 +110,18 @@ func TestGzipHandlerStreaming(t *testing.T) {
 		[]byte(`}`),
 	}
 	handler := newGzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.(http.Flusher).Flush() // activates streaming mode
 		for _, p := range parts {
 			_, _ = w.Write(p)
 		}
+		// Pad past minGzipBodySize: below it a response is sent verbatim.
+		_, _ = w.Write(bytes.Repeat([]byte(" "), minGzipBodySize))
+		w.(http.Flusher).Flush()
 	}))
 
 	rec := gzipRequest(t, handler)
 
 	assert.Equal(t, "gzip", rec.Header().Get("Content-Encoding"))
-	want := []byte(`{"jsonrpc":"2.0","result":"hello"}`)
+	want := append([]byte(`{"jsonrpc":"2.0","result":"hello"}`), bytes.Repeat([]byte(" "), minGzipBodySize)...)
 	assert.Equal(t, want, decompressGzip(t, rec.Body))
 }
 
@@ -145,8 +147,8 @@ func TestGzipHandlerStatusBuffered(t *testing.T) {
 func TestGzipHandlerStatusStreaming(t *testing.T) {
 	handler := newGzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write(bytes.Repeat([]byte(`ok`), minGzipBodySize))
 		w.(http.Flusher).Flush()
-		_, _ = w.Write([]byte(`ok`))
 	}))
 
 	rec := gzipRequest(t, handler)

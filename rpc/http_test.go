@@ -20,7 +20,6 @@
 package rpc
 
 import (
-	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -225,16 +224,6 @@ func TestHTTPPeerInfo(t *testing.T) {
 	if info.HTTP.Origin != "origin.example.com" {
 		t.Errorf("wrong HTTP.Origin %q", info.HTTP.UserAgent)
 	}
-}
-
-// TestWithGzipStreamingHookPanicsOnNilHook pins the write-side contract of the gzip-streaming
-// hook mechanism: WithGzipStreamingHook must never store a nil hook, since a typed-nil func()
-// stored under httpFlusherContextKey silently disables gzip streaming instead of activating it.
-// Misuse must fail loudly here rather than degrade quietly at the runMethod call site.
-func TestWithGzipStreamingHookPanicsOnNilHook(t *testing.T) {
-	require.Panics(t, func() {
-		WithGzipStreamingHook(context.Background(), nil)
-	})
 }
 
 func signJwt(t *testing.T, secret []byte) string {

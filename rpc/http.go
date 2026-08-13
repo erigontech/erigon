@@ -242,29 +242,6 @@ func (t *httpServerConn) SetWriteDeadline(time.Time) error { return nil }
 // ServeHTTP injects the *bool; runMethod sets it so the correct HTTP 503 status is written before flush.
 type httpOverloadedKey struct{}
 
-// httpFlusherContextKey carries a gzip-activation hook for the current request.
-// It must only be set by the gzip middleware (not by a generic http.Flusher check),
-// so that it is absent when gzip is disabled and cannot prematurely commit HTTP headers.
-type httpFlusherContextKey struct{}
-
-// WithGzipStreamingHook stores hook in ctx so that runMethod will call it before
-// writing the first byte of a streamable response, switching the gzip middleware from
-// one-shot buffering to incremental streaming. Must only be called by the gzip middleware.
-func WithGzipStreamingHook(ctx context.Context, hook func()) context.Context {
-	if hook == nil {
-		panic("rpc: WithGzipStreamingHook called with a nil hook")
-	}
-	return context.WithValue(ctx, httpFlusherContextKey{}, hook)
-}
-
-// withoutGzipStreamingHook masks any gzip-streaming hook set on an ancestor context. Batch
-// sub-calls write into a private per-item buffer rather than the HTTP response writer, so
-// the hook must not fire for them; calling it concurrently from multiple batch goroutines is
-// unsafe, since the underlying gzip.Writer it activates is not safe for concurrent use.
-func withoutGzipStreamingHook(ctx context.Context) context.Context {
-	return context.WithValue(ctx, httpFlusherContextKey{}, nil)
-}
-
 func withOverloadedFlag(ctx context.Context) (context.Context, *bool) {
 	flag := new(bool)
 	return context.WithValue(ctx, httpOverloadedKey{}, flag), flag
