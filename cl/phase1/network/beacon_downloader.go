@@ -1163,23 +1163,23 @@ func fetchEnvelopesFromBeaconAPI(
 			if resp.StatusCode != http.StatusOK {
 				return
 			}
-			version, err := httpConsensusVersion(resp.Header.Get("Eth-Consensus-Version"))
-			if err != nil || version != clparams.GloasVersion || validateHTTPBlockVersion(beaconCfg, slot, version) != nil {
+			version, err := cltypes.ParseExecutionPayloadEnvelopeVersion(resp.Header.Get("Eth-Consensus-Version"))
+			if err != nil {
+				log.Debug("[ForwardBeaconDownloader] HTTP envelope consensus version invalid", "slot", slot, "err", err)
+				return
+			}
+			if err := validateHTTPBlockVersion(beaconCfg, slot, version); err != nil {
 				return
 			}
 
 			envelope := &cltypes.SignedExecutionPayloadEnvelope{
-				Message: cltypes.NewExecutionPayloadEnvelope(beaconCfg),
+				Message: cltypes.NewExecutionPayloadEnvelopeWithVersion(beaconCfg, version),
 			}
-			if err := envelope.DecodeSSZStrict(body, int(clparams.GloasVersion)); err != nil {
+			if err := envelope.DecodeSSZStrict(body, int(version)); err != nil {
 				log.Debug("[ForwardBeaconDownloader] HTTP envelope decode failed", "root", common.Hash(root), "err", err)
 				return
 			}
 			if envelope.Message == nil || envelope.Message.BeaconBlockRoot != common.Hash(root) {
-				return
-			}
-			if envelope.Message.BeaconBlockRoot != common.Hash(root) {
-				log.Debug("[ForwardBeaconDownloader] HTTP envelope block root mismatch", "slot", slot, "requested", common.Hash(root), "received", envelope.Message.BeaconBlockRoot)
 				return
 			}
 			results[idx] = envResult{hash: common.Hash(root), envelope: envelope}

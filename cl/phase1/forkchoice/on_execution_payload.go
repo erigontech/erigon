@@ -523,21 +523,18 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(ctx context.Context, signedEn
 		}
 	}
 
-	// Update eth2Roots mapping for FCU
-	if envelope.Payload != nil {
-		f.eth2Roots.Add(beaconBlockRoot, envelope.Payload.BlockHash)
-	}
-
 	// Persist envelope to disk — this marks the root as "has payload" in store.payloads
 	if err := f.forkGraph.DumpEnvelopeOnDisk(beaconBlockRoot, signedEnvelope); err != nil {
 		return false, fmt.Errorf("OnExecutionPayload: failed to dump envelope: %w", err)
+	}
+	if envelope.Payload != nil {
+		f.eth2Roots.Add(beaconBlockRoot, envelope.Payload.BlockHash)
 	}
 	if f.engine == nil && envelope.Payload != nil {
 		if _, retained := f.markPayloadStatusIfRetainedLocked(beaconBlockRoot, envelope.Payload.BlockHash, execution_client.PayloadStatusNotValidated); !retained {
 			return false, fmt.Errorf("%w: block disappeared while storing payload status for beacon_block_root %v", ErrIgnore, beaconBlockRoot)
 		}
 	}
-
 	// Invalidate head cache — payload status may have changed from PENDING to FULL.
 	// This forces GetHead to recompute on next call so GetHeadPayloadStatus is fresh.
 	f.headHash = common.Hash{}
@@ -1066,12 +1063,11 @@ func (f *ForkChoiceStore) applyLocalSelfBuildEnvelopeCoordinated(ctx context.Con
 		}
 	}
 
-	if envelope.Payload != nil {
-		f.eth2Roots.Add(beaconBlockRoot, envelope.Payload.BlockHash)
-	}
-
 	if err := f.forkGraph.DumpEnvelopeOnDisk(beaconBlockRoot, signedEnvelope); err != nil {
 		return false, fmt.Errorf("applyLocalSelfBuildEnvelopeCoordinated: failed to dump envelope: %w", err)
+	}
+	if envelope.Payload != nil {
+		f.eth2Roots.Add(beaconBlockRoot, envelope.Payload.BlockHash)
 	}
 
 	f.headHash = common.Hash{}
