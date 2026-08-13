@@ -300,7 +300,10 @@ func (m *mockOracleBackend) PendingBlockAndReceipts() (*types.Block, types.Recei
 	return nil, nil
 }
 
-func (m *mockOracleBackend) CanonicalHash(_ context.Context, _ uint64) (common.Hash, bool, error) {
+func (m *mockOracleBackend) CanonicalHash(_ context.Context, number uint64) (common.Hash, bool, error) {
+	if number > m.head.Number.Uint64() {
+		return common.Hash{}, false, nil
+	}
 	return m.head.Hash(), true, nil
 }
 

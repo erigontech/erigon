@@ -50,15 +50,13 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 		return nil, errors.New("maxFeePerBlobGas, if specified, must be non-zero")
 	}
 
-	dbTx, err := api.db.BeginTemporalRo(ctx)
+	// The pinned view keeps ReadCurrentHeader and the gas oracle on one head
+	// for the whole request, including the in-flight overlay block.
+	overlayTx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
-	defer dbTx.Rollback()
-
-	// Use the overlay so ReadCurrentHeader and the gas oracle see the latest
-	// in-flight block (which may not yet be committed to MDBX).
-	overlayTx := api.filters.WithTemporalOverlay(dbTx)
+	defer overlayTx.Rollback()
 
 	cc, err := api.chainConfig(ctx, overlayTx)
 	if err != nil {

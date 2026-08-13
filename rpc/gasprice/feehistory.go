@@ -435,7 +435,9 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 				}
 
 				blockResults[idx] = blockResult{processed: fees.results, hasResult: true}
-				if cacheable {
+				// Store only when the fetched block is the one the key names,
+				// so a resolution/fetch divergence can never poison the cache.
+				if cacheable && fees.header.Hash() == blockHash {
 					oracle.historyCache.add(cacheKey{blockHash, percentileKey}, fees.results)
 				}
 			}

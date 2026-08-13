@@ -1085,8 +1085,9 @@ func (m *MemoryMutation) NewReadView(tx kv.Tx) kv.TemporalTx {
 }
 
 // OverlayViewCarrier is implemented by txs that are pinned overlay views.
-// A tx wrapper that embeds such a tx keeps the marker through method
-// promotion, where a concrete-type switch would silently lose it.
+// A wrapper that embeds a concrete view type keeps the marker through method
+// promotion; one that embeds the bare tx interface must forward OverlayView
+// explicitly, or the wrap points will treat it as unpinned.
 type OverlayViewCarrier interface {
 	// OverlayView returns the overlay the tx was pinned to and whether the
 	// tx is a pinned view at all. A pinned view with a nil overlay resolved
@@ -1118,38 +1119,12 @@ func (m *MemoryMutation) OverlayView() (*MemoryMutation, bool) {
 	return m.overlay, m.overlay != nil
 }
 
-// noOverlayView pins a tx to "no overlay": it reads committed data only and
-// overlay wrap points leave it alone, so an overlay published mid-request
-// cannot leak into the view.
-type noOverlayView struct {
-	kv.TemporalTx
-}
-
-func (v *noOverlayView) OverlayView() (*MemoryMutation, bool) { return nil, true }
-
-// PinToOverlay pins tx to the given overlay: a read view when overlay is
-// non-nil, a no-overlay pin otherwise. Txs already carrying a pinned view
-// are returned unchanged.
-func PinToOverlay(tx kv.TemporalTx, overlay *MemoryMutation) kv.TemporalTx {
-	if CarriesOverlayView(tx) {
-		return tx
-	}
-	if overlay == nil {
-		return &noOverlayView{tx}
-	}
-	return overlay.NewReadView(tx)
-}
-
 // newReadViewMut is the internal constructor that returns the full
 // *MemoryMutation. Used by NewTemporalReadView which needs to embed it.
 func (m *MemoryMutation) newReadViewMut(tx kv.Tx) *MemoryMutation {
 	var dbTx kv.TemporalTx
 	if t, ok := tx.(kv.TemporalTx); ok {
 		dbTx = t
-	}
-	overlay := m
-	if m.overlay != nil {
-		overlay = m.overlay
 	}
 	return &MemoryMutation{
 		mu:             m.mu, // share parent's mutex for synchronization
@@ -1160,7 +1135,7 @@ func (m *MemoryMutation) newReadViewMut(tx kv.Tx) *MemoryMutation {
 		clearedTables:  m.clearedTables,
 		db:             dbTx,
 		DomainReader:   m.DomainReader,
-		overlay:        overlay,
+		overlay:        m,
 	}
 }
 

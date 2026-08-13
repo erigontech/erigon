@@ -1200,32 +1200,26 @@ func (ff *Filters) OverlaySnapshot() (*membatchwithdb.MemoryMutation, uint64) {
 	return sd.BlockOverlay(), seq
 }
 
-// errOverlayUnstable is returned when the overlay keeps changing across every
-// tx acquisition attempt; the client can simply retry the request.
-var errOverlayUnstable = errors.New("block overlay changed during every tx acquisition attempt; retry the request")
-
 // BeginTemporalRoWithOverlay opens a read tx and pins it to the block overlay
 // published at that moment, as one consistent pair: a commit or (un)publish
 // landing between the overlay capture and the tx open can leave a head block
 // visible in neither layer, so the tx is reopened whenever the publish
-// sequence number moves around the open. The pinned view is returned for
-// reads; the raw tx is returned for Rollback (rolling back a view does not
-// release the underlying tx).
-func (ff *Filters) BeginTemporalRoWithOverlay(ctx context.Context, db kv.TemporalRoDB) (pinned kv.TemporalTx, raw kv.TemporalTx, err error) {
+// sequence number moves around the open. Under sustained publish churn the
+// last capture is served anyway — a slightly stale pinned view beats a
+// client-visible error. The returned handle reads through the pinned view
+// and its Rollback releases the underlying tx.
+func (ff *Filters) BeginTemporalRoWithOverlay(ctx context.Context, db kv.TemporalRoDB) (kv.TemporalTx, error) {
 	const maxAttempts = 3
 	for attempt := 1; ; attempt++ {
 		overlay, seq := ff.OverlaySnapshot()
 		tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
-		if _, current := ff.OverlaySnapshot(); current == seq {
-			return membatchwithdb.PinToOverlay(tx, overlay), tx, nil
+		if _, current := ff.OverlaySnapshot(); current == seq || attempt == maxAttempts {
+			return PinToOverlay(tx, overlay), nil
 		}
 		tx.Rollback()
-		if attempt == maxAttempts {
-			return nil, nil, errOverlayUnstable
-		}
 	}
 }
 
@@ -1234,14 +1228,8 @@ func (ff *Filters) BeginTemporalRoWithOverlay(ctx context.Context, db kv.Tempora
 // forked backend) pin this instance instead of re-resolving, which could observe
 // the overlay being unpublished mid-request.
 func (ff *Filters) LatestOverlay() *membatchwithdb.MemoryMutation {
-	if ff == nil {
-		return nil
-	}
-	sd := ff.LatestSD()
-	if sd == nil {
-		return nil
-	}
-	return sd.BlockOverlay()
+	overlay, _ := ff.OverlaySnapshot()
+	return overlay
 }
 
 // WithTemporalOverlay is like WithOverlay but returns kv.TemporalTx directly,
