@@ -471,6 +471,25 @@ func TestVersionedStateReader_HasStorageIgnoresEstimateSlot(t *testing.T) {
 	require.False(t, has, "the only slot belongs to a tx that has not committed")
 }
 
+// An in-flight write does not hide the committed value under it: skipping the
+// Estimate cell has to mean falling back to the latest Done one, not stopping
+// there and calling the account empty.
+func TestVersionedStateReader_HasStorageSeesDoneSlotUnderEstimate(t *testing.T) {
+	t.Parallel()
+	addr := getAddress(126)
+	key := accounts.InternKey(common.HexToHash("0x01"))
+
+	vm := NewVersionMap(nil)
+	writeFor(vm, addr, StoragePath, key, Version{TxIndex: 0}, *uint256.NewInt(5), true)
+	writeFor(vm, addr, StoragePath, key, Version{TxIndex: 1}, uint256.Int{}, true)
+	vm.MarkEstimate(addr, StoragePath, key, 1)
+
+	vr := NewVersionedStateReader(3, ReadSet{}, vm, newAccountStateReader(addr))
+	has, err := vr.HasStorage(addr)
+	require.NoError(t, err)
+	require.True(t, has, "the committed slot below the in-flight zero still holds storage")
+}
+
 // The wipe does not honour an uncommitted destruct, so consuming the Balance and
 // Incarnation that same destruct wrote would build a record — contract code and
 // nonce, but the destruct's zero balance — that no state ever held.
@@ -569,7 +588,7 @@ func TestAnyEstimateAccountCell(t *testing.T) {
 	t.Parallel()
 	acc := accounts.NewAccount()
 
-	for _, path := range []AccountPath{AddressPath, BalancePath, NoncePath, CodeHashPath, CodePath, CodeSizePath} {
+	for _, path := range []AccountPath{AddressPath, BalancePath, NoncePath, CodeHashPath, CodePath, CodeSizePath, SelfDestructPath, IncarnationPath} {
 		t.Run(path.String(), func(t *testing.T) {
 			t.Parallel()
 			addr := getAddress(120)
@@ -585,6 +604,10 @@ func TestAnyEstimateAccountCell(t *testing.T) {
 				value = accounts.NewCode([]byte{0x60, 0x00})
 			case CodeSizePath:
 				value = 2
+			case SelfDestructPath:
+				value = true
+			case IncarnationPath:
+				value = uint64(2)
 			}
 
 			vm := NewVersionMap(nil)

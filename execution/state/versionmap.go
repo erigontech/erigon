@@ -766,7 +766,10 @@ func (vm *VersionMap) hasLiveSlot(addr accounts.Address, wipedAt int, wiped bool
 	for _, cells := range e.Storage {
 		live := false
 		cells.Descend(txIdx-1, func(k int, v *WriteCell[uint256.Int]) bool {
-			live = (!wiped || k > wipedAt) && v.flag == FlagDone && !v.Value.IsZero()
+			if v.flag != FlagDone {
+				return true
+			}
+			live = (!wiped || k > wipedAt) && !v.Value.IsZero()
 			return false
 		})
 		if live {
@@ -784,8 +787,10 @@ func selfDestructWipesLocked(e *AddressEntry, path AccountPath, floor, txIdx int
 }
 
 // AnyEstimateAccountCell reports whether the account record addr reads at txIdx
-// rests on an in-flight incarnation. It spans the same paths accountLiveSince
-// weighs, since either is answering whether the account is alive.
+// rests on an in-flight incarnation. It spans the paths accountLiveSince weighs,
+// since either is answering whether the account is alive, plus the lifecycle
+// pair a destruct can write on its own — EIP-8246 leaves no balance cell to
+// notice it by.
 func (vm *VersionMap) AnyEstimateAccountCell(addr accounts.Address, txIdx int) bool {
 	if vm == nil {
 		return false
@@ -798,7 +803,8 @@ func (vm *VersionMap) AnyEstimateAccountCell(addr accounts.Address, txIdx int) b
 	defer e.mu.RUnlock()
 	return estimateFloor(e.Address, txIdx) || estimateFloor(e.Balance, txIdx) ||
 		estimateFloor(e.Nonce, txIdx) || estimateFloor(e.CodeHash, txIdx) ||
-		estimateFloor(e.Code, txIdx) || estimateFloor(e.CodeSize, txIdx)
+		estimateFloor(e.Code, txIdx) || estimateFloor(e.CodeSize, txIdx) ||
+		estimateFloor(e.SelfDestruct, txIdx) || estimateFloor(e.Incarnation, txIdx)
 }
 
 // estimateFloor reports whether the cell a reader at txIdx would take is an
