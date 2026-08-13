@@ -1933,12 +1933,6 @@ var finalizeReval = dbg.EnvBool("FINALIZE_REVAL", true)
 // Requires splitApply (the commit that drops a block from the list is the fold).
 var prevBlockReads = dbg.EnvBool("PREV_BLOCK_READS", false)
 
-// coinbaseSum defers coinbase materialization to the calcFees finalize sweep:
-// the worker's direct coinbase writes (sender==coinbase gas-debit) stay Estimate
-// at the validation flush so a case-(c) reader pauses via the Dep machinery
-// instead of reading a tip-stale Done, and calcFees re-materializes the tip-
-// inclusive Done in the in-order sweep. Closes the [validate,finalize] residual.
-var coinbaseSum = dbg.EnvBool("COINBASE_SUM", false)
 
 
 // depOrderVal (prototype, default OFF) makes ValidateVersion + state-commit
@@ -2518,10 +2512,8 @@ func (result *execResult) calcFees(
 	coinbaseEmptyCodeHash := coinbaseAcc == nil || coinbaseAcc.IsEmptyCodeHash()
 	coinbaseSelfdestructed := false
 	coinbaseCreatedContract := false
-	cbOverride := false
 	if bw, ok := result.TxOut.GetBalance(result.Coinbase); ok {
 		newCoinbaseBalance = bw.Val
-		cbOverride = true
 	}
 	if nw, ok := result.TxOut.GetNonce(result.Coinbase); ok {
 		coinbaseNonce = nw.Val
@@ -2571,11 +2563,7 @@ func (result *execResult) calcFees(
 	coinbaseEmptyPre := (coinbaseAcc == nil || coinbaseAcc.Balance.IsZero()) &&
 		coinbaseNonce == 0 && coinbaseEmptyCodeHash && !coinbaseHasCodeHashWrite
 	emitCoinbase := newCoinbaseBalance != oldCoinbaseBalance ||
-		(coinbaseEmptyRemoval && coinbaseEmptyPre && newCoinbaseBalance.IsZero()) ||
-		// Under coinbaseSum the worker's direct coinbase write was flushed Estimate
-		// at validation; calcFees must re-materialize the Done even at zero tip, else
-		// a reader pauses on the Estimate forever.
-		(coinbaseSum && cbOverride)
+		(coinbaseEmptyRemoval && coinbaseEmptyPre && newCoinbaseBalance.IsZero())
 
 	addWrites := &state.WriteSet{}
 	if emitCoinbase {
@@ -3649,18 +3637,7 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 				be.versionMap.SetTrace(trace)
 			}
 			writeSet := be.blockIO.WriteSet(txVersion.TxIndex)
-			if coinbaseSum && valid && !be.coinbase.IsNil() {
-				cb := be.coinbase
-				isCoinbaseBal := func(h state.WriteHeader) bool {
-					return h.Address == cb && (h.Path == state.BalancePath || h.Path == state.AddressPath)
-				}
-				be.versionMap.FlushVersionedWrites(writeSet.Filter(func(h state.WriteHeader) bool { return !isCoinbaseBal(h) }), true, tracePrefix)
-				// Coinbase balance stays Estimate: its tip is not folded until calcFees
-				// materializes the Done in the finalize sweep, so a reader pauses here.
-				be.versionMap.FlushVersionedWrites(writeSet.Filter(isCoinbaseBal), false, tracePrefix)
-			} else {
-				be.versionMap.FlushVersionedWrites(writeSet, valid, tracePrefix)
-			}
+			be.versionMap.FlushVersionedWrites(writeSet, valid, tracePrefix)
 			if dbg.TraceTransactionIO {
 				be.versionMap.SetTrace(false)
 			}
