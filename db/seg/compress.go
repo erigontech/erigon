@@ -108,6 +108,7 @@ type Compressor struct {
 	Cfg
 	ctx              context.Context
 	wg               *sync.WaitGroup
+	stopWorkersOnce  sync.Once
 	superstrings     chan []uint16
 	uncompressedFile *RawWordsFile
 	tmpDir           string // temporary directory to use for ETL when building dictionary
@@ -199,7 +200,15 @@ func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cf
 	return cc, nil
 }
 
+func (c *Compressor) stopWorkers() {
+	c.stopWorkersOnce.Do(func() {
+		close(c.superstrings)
+		c.wg.Wait()
+	})
+}
+
 func (c *Compressor) Close() {
+	c.stopWorkers()
 	c.uncompressedFile.CloseAndRemove()
 	for _, collector := range c.suffixCollectors {
 		collector.Close()
@@ -307,8 +316,7 @@ func (c *Compressor) Compress() error {
 	if len(c.superstring) > 0 {
 		c.superstrings <- c.superstring
 	}
-	close(c.superstrings)
-	c.wg.Wait()
+	c.stopWorkers()
 
 	cf, err := dir.CreateTemp(c.outputFile)
 	if err != nil {
@@ -948,6 +956,7 @@ func NewRawWordsFile(filePath string) (*RawWordsFile, error) {
 	}
 	return &RawWordsFile{filePath: filePath, f: f, w: bufiopool.Writer(f), buf: make([]byte, 128)}, nil
 }
+
 func OpenRawWordsFile(filePath string) (*RawWordsFile, error) {
 	f, err := os.Open(filePath)
 	if err != nil {
@@ -955,9 +964,11 @@ func OpenRawWordsFile(filePath string) (*RawWordsFile, error) {
 	}
 	return &RawWordsFile{filePath: filePath, f: f, w: bufiopool.Writer(f), buf: make([]byte, 128)}, nil
 }
+
 func (f *RawWordsFile) Flush() error {
 	return f.w.Flush()
 }
+
 func (f *RawWordsFile) Close() {
 	if f.w != nil {
 		f.w.Flush()
@@ -967,10 +978,12 @@ func (f *RawWordsFile) Close() {
 		f.f = nil
 	}
 }
+
 func (f *RawWordsFile) CloseAndRemove() {
 	f.Close()
 	dir2.RemoveFile(f.filePath)
 }
+
 func (f *RawWordsFile) Append(v []byte) error {
 	f.count++
 	// For compressed words, the length prefix is shifted to make lowest bit zero
@@ -985,6 +998,7 @@ func (f *RawWordsFile) Append(v []byte) error {
 	}
 	return nil
 }
+
 func (f *RawWordsFile) AppendUncompressed(v []byte) error {
 	f.count++
 	// For uncompressed words, the length prefix is shifted to make lowest bit one
