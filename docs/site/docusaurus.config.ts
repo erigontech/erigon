@@ -39,10 +39,12 @@ async function fetchReleases(): Promise<Release[]> {
     {headers: githubHeaders()},
   );
   if (!res.ok) {
-    throw new Error(
-      `Release lookup failed: ${res.status} ${res.statusText}. ` +
-      'Set GITHUB_TOKEN if this is rate limiting.',
-    );
+    // Unauthenticated builds share a 60 req/hour pool, so exhaustion is the one
+    // failure worth hinting at — but only when the status actually says so.
+    const hint = res.status === 403 || res.status === 429
+      ? ' Set GITHUB_TOKEN if this is rate limiting.'
+      : '';
+    throw new Error(`Release lookup failed: ${res.status} ${res.statusText}.${hint}`);
   }
   return await res.json() as Release[];
 }
