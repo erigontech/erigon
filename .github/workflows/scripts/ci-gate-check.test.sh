@@ -145,6 +145,15 @@ run_output "timeout is not absorbed by the reshuffle fast-path" 1 \
   CI_GATE_JOBS_JSON='{"jobs":[{"id":3,"name":"tests / tests-mac-linux (windows-2025, parallel)","conclusion":"cancelled","steps":[{"name":"Run tests","conclusion":"cancelled"}]}]}' \
   CI_GATE_ANNOTATIONS_JSON='{"3":["The job has exceeded the maximum execution time of 1h0m0s"]}'
 
+# An unreadable annotations endpoint cannot tell a timeout from a reshuffle, so
+# the fast-path must be withheld rather than passing an unclassified leaf.
+run_case "annotations fetch failure -> fail closed" 1 \
+  NEEDS='{"tests":{"result":"cancelled"},"lint":{"result":"success"}}' \
+  RUN_CANCELLED=true \
+  GITHUB_EVENT_NAME=merge_group \
+  CI_GATE_JOBS_JSON='{"jobs":[{"id":4,"name":"tests / tests-mac-linux (windows-2025, parallel)","conclusion":"cancelled","steps":[{"name":"Run tests","conclusion":"cancelled"}]}]}' \
+  CI_GATE_ANNOTATIONS_FAIL=1
+
 echo "----"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

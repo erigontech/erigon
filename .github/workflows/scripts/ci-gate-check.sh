@@ -9,7 +9,8 @@
 # GH_TOKEN/GITHUB_REPOSITORY/GITHUB_RUN_ID to fetch the jobs list.
 # Test seam: CI_GATE_NO_FETCH=1 uses CI_GATE_JOBS_JSON verbatim instead of the
 # API (an empty value simulates a failed fetch) and CI_GATE_ANNOTATIONS_JSON
-# ({"<job id>": ["<message>"]}) instead of the per-job annotations endpoint.
+# ({"<job id>": ["<message>"]}) instead of the per-job annotations endpoint;
+# CI_GATE_ANNOTATIONS_FAIL=1 simulates that endpoint erroring.
 set -eo pipefail
 
 needs="${NEEDS:-}"
@@ -39,12 +40,17 @@ fi
 # so a failed step still signals a real failure.
 failed_steps=$(jq -r '.jobs[] | select(.name != "ci-gate") | select(any(.steps[]?; .conclusion == "failure")) | .name' <<<"$jobs" 2>/dev/null || true)
 
+# An Actions job id is also its check-run id (the job payload's check_run_url
+# ends in the same number), so the jobs list needs no extra lookup to reach the
+# annotations. Returns non-zero when the fetch itself failed, which the caller
+# must not read as "no timeout" — see annotations_failed.
 annotations_of() {
   if [ -n "${CI_GATE_NO_FETCH:-}" ]; then
+    [ -z "${CI_GATE_ANNOTATIONS_FAIL:-}" ] || return 1
     jq -r --arg id "$1" '.[$id] // [] | .[]' <<<"${CI_GATE_ANNOTATIONS_JSON:-{\}}" 2>/dev/null || true
     return 0
   fi
-  gh api "repos/${GITHUB_REPOSITORY}/check-runs/$1/annotations" --jq '.[].message' 2>/dev/null || true
+  gh api "repos/${GITHUB_REPOSITORY}/check-runs/$1/annotations" --paginate --jq '.[].message'
 }
 
 # `timeout-minutes` kills a job with conclusion "cancelled" — the same value an
@@ -53,9 +59,14 @@ annotations_of() {
 # annotation is the only reliable discriminator.
 timed_out_names=""
 timeouts=""
+annotations_failed=""
 while IFS=$'\t' read -r job_id job_name; do
   [ -n "$job_id" ] && [ "$job_id" != "null" ] || continue
-  case "$(annotations_of "$job_id")" in
+  if ! job_annotations=$(annotations_of "$job_id"); then
+    annotations_failed=1
+    continue
+  fi
+  case "$job_annotations" in
     *"exceeded the maximum execution time"*) ;;
     *) continue ;;
   esac
@@ -70,8 +81,10 @@ done < <(jq -r '.jobs[] | select(.name != "ci-gate") | select(.conclusion == "ca
 # (reshuffle); failing here would spuriously evict the PR. Scope to merge_group
 # (reshuffles only happen in the queue) and require a successful jobs fetch so an
 # empty failed_steps can be trusted. A timed-out leaf looks identical from the
-# needs rollup, so it is excluded explicitly or it would merge unchecked.
-if [ -z "$failed" ] && [ -n "$jobs" ] && [ -z "$failed_steps" ] && [ -z "$timeouts" ] && [ "${RUN_CANCELLED:-}" = "true" ] && [ "${GITHUB_EVENT_NAME:-}" = "merge_group" ]; then
+# needs rollup, so it is excluded explicitly or it would merge unchecked — and an
+# unreadable annotation means a leaf could not be classified at all, so the
+# fast-path is withheld rather than guessing it was benign.
+if [ -z "$failed" ] && [ -n "$jobs" ] && [ -z "$failed_steps" ] && [ -z "$timeouts" ] && [ -z "$annotations_failed" ] && [ "${RUN_CANCELLED:-}" = "true" ] && [ "${GITHUB_EVENT_NAME:-}" = "merge_group" ]; then
   echo "::notice::Merge-queue reshuffle cancelled this run (no failed jobs or steps); passing the gate so the PR stays queued."
   echo "Cancelled jobs: $(tr '\n' ' ' <<<"$cancelled")"
   exit 0
