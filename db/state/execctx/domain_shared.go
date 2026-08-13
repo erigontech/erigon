@@ -1347,14 +1347,34 @@ func (sd *SharedDomains) GetLatestContext(ctx context.Context, domain kv.Domain,
 	return sd.getLatestMetered(domain, tx, k, kvmetrics.MetricsFromContext(ctx), sd.cacheReader())
 }
 
-// servableUnderBound gates a cached entry against an in-flight unwind's
-// per-key maxStep: a hit above the bound would diverge from the bounded read
-// the cache-disabled path takes (the epoch floor usually drops such entries
-// already; the gate keeps the two paths identical regardless). Callers convert
-// their unit first — the StateCache stamps txNums (divide by step size), the
-// BranchCache stores step indices (no divide).
+// servableUnderBound gates a value against an in-flight unwind's per-key
+// maxStep. Callers convert their unit first: StateCache stamps txNums, while
+// mem batches and BranchCache already use step indices.
 func servableUnderBound(cStep, maxStep kv.Step) bool {
 	return cStep <= maxStep
+}
+
+// latestFromMem carries a child's staged-unwind bound into its parent lookup.
+// A parent value above that bound belongs to the discarded fork and is skipped.
+func (sd *SharedDomains) latestFromMem(domain kv.Domain, key []byte) (v []byte, step, maxStep kv.Step, ok bool) {
+	maxStep = kv.NoStepBound
+	v, step, ok = sd.mem.GetLatest(domain, key)
+	if ok {
+		return v, step, maxStep, true
+	}
+	maxStep = min(maxStep, step)
+
+	if sd.parent == nil {
+		return nil, 0, maxStep, false
+	}
+	v, step, ok = sd.parent.mem.GetLatest(domain, key)
+	if ok {
+		if servableUnderBound(step, maxStep) {
+			return v, step, maxStep, true
+		}
+		return nil, 0, maxStep, false
+	}
+	return nil, 0, min(maxStep, step), false
 }
 
 // getLatestMetered is the read implementation. wm is the caller's lock-free
@@ -1375,30 +1395,14 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 			wm = sd.reqMetrics
 		}
 	}
-	maxStep := kv.NoStepBound
-
-	// Check mem batch first - it has the current transaction's uncommitted state.
-	// No need to populate stateCache here — mem is checked first on every read,
-	// so the value is already accessible without caching it again.
-	if v, step, ok := sd.mem.GetLatest(domain, k); ok {
+	// Mem batches hold the current transaction's uncommitted state, so a hit
+	// needs no shared-cache fill. Parent hits also obey any bound from the child.
+	v, step, maxStep, ok := sd.latestFromMem(domain, k)
+	if ok {
 		if dbg.KVReadLevelledMetrics {
 			wm.UpdateCacheReads(domain, start)
 		}
 		return v, step, nil
-	} else if step < maxStep {
-		maxStep = step
-	}
-
-	// Check parent's mem batch (read-through chaining for child SDs)
-	if sd.parent != nil {
-		if v, step, ok := sd.parent.mem.GetLatest(domain, k); ok {
-			if dbg.KVReadLevelledMetrics {
-				wm.UpdateCacheReads(domain, start)
-			}
-			return v, step, nil
-		} else if step < maxStep {
-			maxStep = step
-		}
 	}
 
 	type MeteredGetter interface {
@@ -1639,24 +1643,15 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, view cache.ReadView, 
 	if len(addr) == 0 {
 		return nil
 	}
-	hasUnwindBound := false
 	// In-batch state is authoritative: sd.mem / parent.mem hold this batch's
 	// uncommitted account writes, while the addr→codeHash LRU is invalidated only
 	// on flush. Route mem-first; the LRU is a committed-state layer that may only
 	// answer once mem has missed.
-	v, step, ok := sd.mem.GetLatest(kv.AccountsDomain, addr)
+	v, _, maxStep, ok := sd.latestFromMem(kv.AccountsDomain, addr)
 	if ok {
 		return accounts.DeserialiseV3CodeHash(v)
 	}
-	hasUnwindBound = step != kv.NoStepBound
-	if sd.parent != nil {
-		v, step, ok = sd.parent.mem.GetLatest(kv.AccountsDomain, addr)
-		if ok {
-			return accounts.DeserialiseV3CodeHash(v)
-		}
-		hasUnwindBound = hasUnwindBound || step != kv.NoStepBound
-	}
-	if hasUnwindBound {
+	if maxStep != kv.NoStepBound {
 		// A staged unwind bounds the committed lookup. Reuse the normal account
 		// path so every cache and database source observes the same bound.
 		v, _, err := sd.getLatestMetered(kv.AccountsDomain, tx, addr, nil, view)

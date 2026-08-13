@@ -476,6 +476,84 @@ func TestReadFill_SkipsInFlightUnwindRow(t *testing.T) {
 	require.False(t, ok, "a bounded in-flight unwind read must not populate the shared cache")
 }
 
+func TestGetLatest_RejectsParentMemHitAboveStagedUnwindBound(t *testing.T) {
+	t.Parallel()
+
+	const stepSize = uint64(16)
+	ctx := t.Context()
+	db := newTestDb(t, stepSize)
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	parent, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer parent.Close()
+	child, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer child.Close()
+	child.SetParent(parent)
+
+	addr := make([]byte, 20)
+	addr[0] = 0xc1
+	deadForkAccount := encAccount(1)
+	require.NoError(t, parent.DomainPut(kv.AccountsDomain, rwTx, addr, deadForkAccount, 40, nil)) // step 2
+
+	stepBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(stepBytes, ^uint64(1))
+	var diffs [kv.DomainLen][]kv.DomainEntryDiff
+	diffs[kv.AccountsDomain] = []kv.DomainEntryDiff{{Key: string(addr) + string(stepBytes), Value: nil}}
+	child.Unwind(10, &diffs)
+
+	got, _, err := child.GetLatest(kv.AccountsDomain, rwTx, addr)
+	require.NoError(t, err)
+	require.Empty(t, got, "a parent value above the child's unwind bound belongs to the discarded fork")
+}
+
+func TestGetCode_RejectsParentAccountAboveStagedUnwindBound(t *testing.T) {
+	t.Parallel()
+
+	const stepSize = uint64(16)
+	ctx := t.Context()
+	db := newTestDb(t, stepSize)
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	parent, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer parent.Close()
+	child, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer child.Close()
+	child.SetParent(parent)
+
+	addr := make([]byte, 20)
+	addr[0] = 0xc2
+	deadForkCode := []byte{0x60, 0x01, 0x60, 0x00, 0x55}
+	codeHash := crypto.Keccak256Hash(deadForkCode)
+	deadForkAccount := accounts.SerialiseV3(&accounts.Account{
+		Nonce:    1,
+		CodeHash: accounts.InternCodeHash(codeHash),
+	})
+	require.NoError(t, parent.DomainPut(kv.AccountsDomain, rwTx, addr, deadForkAccount, 40, nil)) // step 2
+
+	codeStore := cache.NewCodeStore(1<<20, 1<<20)
+	require.NoError(t, codeStore.PutByHash(rwTx, codeHash[:], deadForkCode))
+	child.SetCodeStore(codeStore)
+
+	stepBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(stepBytes, ^uint64(1))
+	var diffs [kv.DomainLen][]kv.DomainEntryDiff
+	diffs[kv.AccountsDomain] = []kv.DomainEntryDiff{{Key: string(addr) + string(stepBytes), Value: nil}}
+	child.Unwind(10, &diffs)
+
+	got, ok, err := child.GetCode(rwTx, addr, 40)
+	require.NoError(t, err)
+	require.False(t, ok, "an above-bound parent account must not resolve dead-fork code")
+	require.Empty(t, got)
+}
+
 func TestCodeHashFill_SkipsInFlightUnwindRow(t *testing.T) {
 	t.Parallel()
 
