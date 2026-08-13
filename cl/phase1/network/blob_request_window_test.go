@@ -74,24 +74,27 @@ func TestBlobRequestPacingBackoffAndReset(t *testing.T) {
 
 func TestRequestBlobsFranticallyKeepsWaitingAfterPartialResponse(t *testing.T) {
 	restoreBlobRequestTiming(t, 5*time.Millisecond, 100*time.Millisecond)
+	block, sidecars := makeBlobBoundaryObjects(t, 100, 2)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
 	var calls atomic.Int64
 	client := blobRequesterFunc(func(ctx context.Context, _ *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error) {
 		if calls.Add(1) == 1 {
-			return []*cltypes.BlobSidecar{{}}, "partial", nil
+			return sidecars[:1], "partial", nil
 		}
 		select {
 		case <-ctx.Done():
 			return nil, "complete", ctx.Err()
 		case <-time.After(10 * time.Millisecond):
-			return []*cltypes.BlobSidecar{{}, {}}, "complete", nil
+			return sidecars, "complete", nil
 		}
 	})
 	req := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](0, 2)
-	req.Append(&cltypes.BlobIdentifier{})
-	req.Append(&cltypes.BlobIdentifier{})
+	req.Append(&cltypes.BlobIdentifier{BlockRoot: root, Index: 0})
+	req.Append(&cltypes.BlobIdentifier{BlockRoot: root, Index: 1})
 
-	response, err := requestBlobsFrantically(t.Context(), client, req, func(_ context.Context, candidate *PeerAndSidecars) error {
-		if len(candidate.Responses) != req.Len() {
+	response, err := requestBlobsFranticallyValidated(t.Context(), req, client.SendBlobsSidecarByIdentifierReq, nil, func(responses []*cltypes.BlobSidecar) error {
+		if len(responses) != req.Len() {
 			return errors.New("partial")
 		}
 		return nil
@@ -103,21 +106,35 @@ func TestRequestBlobsFranticallyKeepsWaitingAfterPartialResponse(t *testing.T) {
 
 func TestRequestBlobsFranticallyTimesOutBlockedValidation(t *testing.T) {
 	restoreBlobRequestTiming(t, 5*time.Millisecond, 30*time.Millisecond)
+	block, sidecars := makeBlobBoundaryObjects(t, 100, 1)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
 	requestCanceled := make(chan struct{})
+	validationStarted := make(chan struct{})
+	validationRelease := make(chan struct{})
 	var canceledOnce sync.Once
 	client := blobRequesterFunc(func(ctx context.Context, _ *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error) {
 		go func() {
 			<-ctx.Done()
 			canceledOnce.Do(func() { close(requestCanceled) })
 		}()
-		return []*cltypes.BlobSidecar{{}}, "peer", nil
+		return sidecars, "peer", nil
 	})
 
-	_, err := requestBlobsFrantically(t.Context(), client, solid.NewStaticListSSZ[*cltypes.BlobIdentifier](0, 1), func(ctx context.Context, _ *PeerAndSidecars) error {
-		<-ctx.Done()
-		return ctx.Err()
+	req := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](0, 1)
+	req.Append(&cltypes.BlobIdentifier{BlockRoot: root, Index: 0})
+	_, err = requestBlobsFranticallyValidated(t.Context(), req, client.SendBlobsSidecarByIdentifierReq, nil, func([]*cltypes.BlobSidecar) error {
+		close(validationStarted)
+		<-validationRelease
+		return nil
 	})
 	require.ErrorIs(t, err, ErrTimeout)
+	select {
+	case <-validationStarted:
+	default:
+		t.Fatal("candidate validation did not start")
+	}
+	close(validationRelease)
 	require.Eventually(t, func() bool {
 		select {
 		case <-requestCanceled:
@@ -126,6 +143,68 @@ func TestRequestBlobsFranticallyTimesOutBlockedValidation(t *testing.T) {
 			return false
 		}
 	}, time.Second, time.Millisecond)
+}
+
+func TestRequestBlobsFranticallyBacksOffRepeatedValidationFailures(t *testing.T) {
+	restoreBlobRequestTiming(t, 5*time.Millisecond, 95*time.Millisecond)
+	block, sidecars := makeBlobBoundaryObjects(t, 100, 1)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	var calls atomic.Int64
+	client := blobRequesterFunc(func(context.Context, *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error) {
+		calls.Add(1)
+		return sidecars, "invalid-peer", nil
+	})
+	req := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](0, 1)
+	req.Append(&cltypes.BlobIdentifier{BlockRoot: root, Index: 0})
+
+	_, err = requestBlobsFranticallyValidated(t.Context(), req, client.SendBlobsSidecarByIdentifierReq, nil, func([]*cltypes.BlobSidecar) error {
+		return errors.New("invalid candidate")
+	})
+	require.ErrorIs(t, err, ErrTimeout)
+	require.GreaterOrEqual(t, calls.Load(), int64(3))
+	require.LessOrEqual(t, calls.Load(), int64(5))
+}
+
+func TestRequestBlobsFranticallyStartsFirstRequestImmediately(t *testing.T) {
+	restoreBlobRequestTiming(t, time.Second, 100*time.Millisecond)
+	started := make(chan struct{})
+	client := blobRequesterFunc(func(ctx context.Context, _ *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error) {
+		close(started)
+		<-ctx.Done()
+		return nil, "peer", ctx.Err()
+	})
+	done := make(chan error, 1)
+	go func() {
+		_, err := RequestBlobsFrantically(t.Context(), client, solid.NewStaticListSSZ[*cltypes.BlobIdentifier](0, 1))
+		done <- err
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(50 * time.Millisecond):
+		t.Fatal("first blob request waited for the retry interval")
+	}
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, ErrTimeout)
+	case <-time.After(time.Second):
+		t.Fatal("blob request did not stop after expiration")
+	}
+}
+
+func TestRequestBlobsFranticallyDoesNotStartAfterCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	var calls atomic.Int64
+	client := blobRequesterFunc(func(context.Context, *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error) {
+		calls.Add(1)
+		return nil, "peer", nil
+	})
+
+	_, err := RequestBlobsFrantically(ctx, client, solid.NewStaticListSSZ[*cltypes.BlobIdentifier](0, 1))
+	require.ErrorIs(t, err, context.Canceled)
+	require.Zero(t, calls.Load())
 }
 
 func restoreBlobRequestTiming(t *testing.T, retryInterval, expiration time.Duration) {
@@ -141,6 +220,8 @@ func restoreBlobRequestTiming(t *testing.T, retryInterval, expiration time.Durat
 }
 
 type blobRequesterFunc func(context.Context, *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error)
+
+func (blobRequesterFunc) Peers() (uint64, error) { return 1, nil }
 
 func (f blobRequesterFunc) SendBlobsSidecarByIdentifierReq(ctx context.Context, req *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error) {
 	return f(ctx, req)

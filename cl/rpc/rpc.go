@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -44,7 +45,11 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
-const maxMessageLength = 18 * datasize.MB
+const (
+	maxMessageLength                         = 18 * datasize.MB
+	maxConcurrentBlobSidecarRequests         = 2
+	maxConcurrentBlobSidecarBackfillRequests = 1
+)
 
 var errBlockForkSchemaSlotMismatch = errors.New("block schema fork disagrees with the fork implied by its slot")
 
@@ -70,6 +75,10 @@ type BeaconRpcP2P struct {
 	ethClock eth_clock.EthereumClock
 
 	columnDataPeers *columnDataPeers
+
+	blobSidecarAdmissionOnce sync.Once
+	blobSidecarRequests      chan struct{}
+	blobSidecarBackfill      chan struct{}
 }
 
 // NewBeaconRpcP2P creates a new BeaconRpcP2P struct and returns a pointer to it.
@@ -119,6 +128,10 @@ func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqD
 func (b *BeaconRpcP2P) sendBlobsSidecar(ctx context.Context, topic string, reqData []byte, maxResponseBytes uint64) ([]*cltypes.BlobSidecar, string, error) {
 	responses, pid, err := b.sendRequest(ctx, topic, reqData, maxResponseBytes)
 	if err != nil {
+		var malformed *malformedPeerResponseError
+		if pid != "" && errors.As(err, &malformed) {
+			b.BanPeer(pid)
+		}
 		return nil, pid, err
 	}
 
@@ -126,6 +139,7 @@ func (b *BeaconRpcP2P) sendBlobsSidecar(ctx context.Context, topic string, reqDa
 	for _, data := range responses {
 		responseChunk := &cltypes.BlobSidecar{}
 		if err := responseChunk.DecodeSSZ(data.raw, int(data.version)); err != nil {
+			b.BanPeer(pid)
 			return nil, pid, err
 		}
 		responsePacket = append(responsePacket, responseChunk)
@@ -240,8 +254,34 @@ func (b *BeaconRpcP2P) SendExecutionPayloadEnvelopesByRootReq(ctx context.Contex
 	return envelopes, pid, nil
 }
 
-// SendBeaconBlocksByRangeReq retrieves blocks range from beacon chain.
 func (b *BeaconRpcP2P) SendBlobsSidecarByIdentifierReq(ctx context.Context, req *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error) {
+	return b.sendBlobsSidecarByIdentifierReq(ctx, req, false)
+}
+
+// SendBlobsSidecarByIdentifierReqForBackfill admits a background request without exhausting live request capacity.
+func (b *BeaconRpcP2P) SendBlobsSidecarByIdentifierReqForBackfill(ctx context.Context, req *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error) {
+	return b.sendBlobsSidecarByIdentifierReq(ctx, req, true)
+}
+
+func (b *BeaconRpcP2P) sendBlobsSidecarByIdentifierReq(ctx context.Context, req *solid.ListSSZ[*cltypes.BlobIdentifier], backfill bool) ([]*cltypes.BlobSidecar, string, error) {
+	b.blobSidecarAdmissionOnce.Do(func() {
+		b.blobSidecarRequests = make(chan struct{}, maxConcurrentBlobSidecarRequests)
+		b.blobSidecarBackfill = make(chan struct{}, maxConcurrentBlobSidecarBackfillRequests)
+	})
+	if backfill {
+		select {
+		case b.blobSidecarBackfill <- struct{}{}:
+			defer func() { <-b.blobSidecarBackfill }()
+		case <-ctx.Done():
+			return nil, "", ctx.Err()
+		}
+	}
+	select {
+	case b.blobSidecarRequests <- struct{}{}:
+		defer func() { <-b.blobSidecarRequests }()
+	case <-ctx.Done():
+		return nil, "", ctx.Err()
+	}
 	var buffer buffer.Buffer
 	if err := ssz_snappy.EncodeAndWrite(&buffer, req); err != nil {
 		return nil, "", err
@@ -340,11 +380,25 @@ type responseData struct {
 	raw     []byte
 }
 
+type malformedPeerResponseError struct {
+	err error
+}
+
+func (e *malformedPeerResponseError) Error() string { return e.err.Error() }
+func (e *malformedPeerResponseError) Unwrap() error { return e.err }
+
+func malformedPeerResponse(err error) error {
+	return &malformedPeerResponseError{err: err}
+}
+
 // parseResponseData parses the response data from a sentinel message and returns the parsed response data.
 func (b *BeaconRpcP2P) parseResponseData(message *sentinelproto.ResponseData) ([]responseData, string, error) {
 	if message.Error {
 		rd := snappy.NewReader(bytes.NewBuffer(message.Data))
-		errBytes, _ := io.ReadAll(rd)
+		errBytes, err := io.ReadAll(rd)
+		if err != nil {
+			return nil, message.Peer.Pid, malformedPeerResponse(fmt.Errorf("decode peer error response: %w", err))
+		}
 		errMsg := string(errBytes)
 		log.Trace("received range req error", "err", errMsg, "raw", string(message.Data))
 		return nil, message.Peer.Pid, fmt.Errorf("peer error response: %s", errMsg)
@@ -358,7 +412,7 @@ func (b *BeaconRpcP2P) parseResponseData(message *sentinelproto.ResponseData) ([
 			if err == io.EOF {
 				break
 			}
-			return nil, message.Peer.Pid, err
+			return nil, message.Peer.Pid, malformedPeerResponse(err)
 		} else if n == 0 {
 			break
 		}
@@ -366,11 +420,11 @@ func (b *BeaconRpcP2P) parseResponseData(message *sentinelproto.ResponseData) ([
 		// Read varint for length of message.
 		encodedLn, _, err := ssz_snappy.ReadUvarint(r)
 		if err != nil {
-			return nil, message.Peer.Pid, fmt.Errorf("sendRequest failed. Unable to read varint from message prefix: %w", err)
+			return nil, message.Peer.Pid, malformedPeerResponse(fmt.Errorf("sendRequest failed. Unable to read varint from message prefix: %w", err))
 		}
 		// Sanity check for message size.
 		if encodedLn > uint64(maxMessageLength) {
-			return nil, message.Peer.Pid, errors.New("received message too big")
+			return nil, message.Peer.Pid, malformedPeerResponse(errors.New("received message too big"))
 		}
 
 		// Read bytes using snappy into a new raw buffer of side encodedLn.
@@ -380,19 +434,22 @@ func (b *BeaconRpcP2P) parseResponseData(message *sentinelproto.ResponseData) ([
 		for bytesRead < int(encodedLn) {
 			n, err := sr.Read(raw[bytesRead:])
 			if err != nil {
-				return nil, message.Peer.Pid, fmt.Errorf("read error: %w", err)
+				return nil, message.Peer.Pid, malformedPeerResponse(fmt.Errorf("read error: %w", err))
+			}
+			if n == 0 {
+				return nil, message.Peer.Pid, malformedPeerResponse(io.ErrNoProgress)
 			}
 			bytesRead += n
 		}
 		// Fork digests
 		respForkDigest := binary.BigEndian.Uint32(forkDigest)
 		if respForkDigest == 0 {
-			return nil, message.Peer.Pid, errors.New("null fork digest")
+			return nil, message.Peer.Pid, malformedPeerResponse(errors.New("null fork digest"))
 		}
 
 		version, err := b.ethClock.StateVersionByForkDigest(utils.Uint32ToBytes4(respForkDigest))
 		if err != nil {
-			return nil, message.Peer.Pid, fmt.Errorf("unknown fork digest %x: %w", respForkDigest, err)
+			return nil, message.Peer.Pid, malformedPeerResponse(fmt.Errorf("unknown fork digest %x: %w", respForkDigest, err))
 		}
 		responsePacket = append(responsePacket, responseData{
 			version: version,
@@ -404,7 +461,7 @@ func (b *BeaconRpcP2P) parseResponseData(message *sentinelproto.ResponseData) ([
 			break
 		} else if err != nil {
 			log.Debug("failed to read byte", "err", err)
-			return nil, message.Peer.Pid, err
+			return nil, message.Peer.Pid, malformedPeerResponse(err)
 		}
 	}
 	return responsePacket, message.Peer.Pid, nil

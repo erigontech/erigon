@@ -34,6 +34,7 @@ const (
 )
 
 var (
+	errRetryRecoveryScheduling                      = errors.New("retry recovery scheduling")
 	verifyDataColumnSidecarInclusionProof           = das.VerifyDataColumnSidecarInclusionProof
 	verifyDataColumnSidecarKZGProofs                = das.VerifyDataColumnSidecarKZGProofs
 	verifyDataColumnSidecar                         = das.VerifyDataColumnSidecar
@@ -167,8 +168,11 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 	}
 
 	if s.forkChoice.GetPeerDas().IsArchivedMode() {
-		if s.forkChoice.GetPeerDas().IsColumnOverHalf(blockHeader.Slot, blockRoot) ||
-			s.forkChoice.GetPeerDas().IsBlobAlreadyRecovered(blockRoot) {
+		if s.forkChoice.GetPeerDas().IsColumnOverHalf(blockHeader.Slot, blockRoot) {
+			if err := s.forkChoice.GetPeerDas().TryScheduleRecover(blockHeader.Slot, blockRoot); err != nil {
+				return errors.Join(ErrIgnore, errRetryRecoveryScheduling, fmt.Errorf("failed to schedule recover: %w", err))
+			}
+			s.seenSidecar.Add(seenKey, struct{}{})
 			return ErrIgnore
 		}
 	} else {
@@ -245,11 +249,10 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 	if err := s.columnSidecarStorage.WriteColumnSidecars(ctx, blockRoot, int64(msg.Index), msg); err != nil {
 		return fmt.Errorf("failed to write data column sidecar: %v", err)
 	}
-	s.seenSidecar.Add(seenKey, struct{}{})
-
 	if err := s.forkChoice.GetPeerDas().TryScheduleRecover(blockHeader.Slot, blockRoot); err != nil {
-		log.Warn("failed to schedule recover", "err", err, "slot", blockHeader.Slot, "blockRoot", common.Hash(blockRoot).String())
+		return errors.Join(ErrIgnore, errRetryRecoveryScheduling, fmt.Errorf("failed to schedule recover: %w", err))
 	}
+	s.seenSidecar.Add(seenKey, struct{}{})
 	log.Trace("[dataColumnSidecarService] processed fulu data column sidecar", "slot", blockHeader.Slot, "blockRoot", common.Hash(blockRoot).String(), "index", msg.Index)
 	return nil
 }
@@ -282,8 +285,11 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 
 	// Check custody columns
 	if s.forkChoice.GetPeerDas().IsArchivedMode() {
-		if s.forkChoice.GetPeerDas().IsColumnOverHalf(slot, blockRoot) ||
-			s.forkChoice.GetPeerDas().IsBlobAlreadyRecovered(blockRoot) {
+		if s.forkChoice.GetPeerDas().IsColumnOverHalf(slot, blockRoot) {
+			if err := s.forkChoice.GetPeerDas().TryScheduleRecover(slot, blockRoot); err != nil {
+				return errors.Join(ErrIgnore, errRetryRecoveryScheduling, fmt.Errorf("failed to schedule recover: %w", err))
+			}
+			s.seenGloasSidecar.Add(seenKey, struct{}{})
 			return ErrIgnore
 		}
 	} else {
@@ -303,6 +309,9 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 	if !ok {
 		s.scheduleSidecarForLaterProcessing(msg, subnet)
 		return ErrIgnore
+	}
+	if block == nil || block.Block == nil || block.Block.Body == nil {
+		return errors.New("canonical Gloas block is incomplete")
 	}
 
 	// [REJECT] The sidecar's slot matches the slot of the block
@@ -341,11 +350,10 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 	if err := s.columnSidecarStorage.WriteColumnSidecars(ctx, blockRoot, int64(msg.Index), msg); err != nil {
 		return fmt.Errorf("failed to write data column sidecar: %v", err)
 	}
-	s.seenGloasSidecar.Add(seenKey, struct{}{})
-
 	if err := s.forkChoice.GetPeerDas().TryScheduleRecover(slot, blockRoot); err != nil {
-		log.Warn("failed to schedule recover", "err", err, "slot", slot, "blockRoot", blockRoot.String())
+		return errors.Join(ErrIgnore, errRetryRecoveryScheduling, fmt.Errorf("failed to schedule recover: %w", err))
 	}
+	s.seenGloasSidecar.Add(seenKey, struct{}{})
 	log.Trace("[dataColumnSidecarService] processed gloas data column sidecar", "slot", slot, "blockRoot", blockRoot.String(), "index", msg.Index)
 	return nil
 }
@@ -452,13 +460,13 @@ func (s *dataColumnSidecarService) loopPendingGloasSidecars(ctx context.Context)
 
 			// Block is available, try to process
 			if err := s.processGloasMessage(ctx, job.subnet, job.sidecar); err != nil {
-				// Processing failed for another reason (not block delay), remove from pending
+				if errors.Is(err, errRetryRecoveryScheduling) {
+					return true
+				}
 				s.pendingGloasSidecars.Delete(sidecarKey)
 				s.pendingGloasSidecarCount.Add(-1)
-				if !errors.Is(err, ErrIgnore) {
-					log.Trace("[dataColumnSidecarService] failed to process pending GLOAS sidecar",
-						"slot", job.sidecar.Slot, "blockRoot", job.sidecar.BeaconBlockRoot.String(), "index", job.sidecar.Index, "err", err)
-				}
+				log.Trace("[dataColumnSidecarService] failed to process pending GLOAS sidecar",
+					"slot", job.sidecar.Slot, "blockRoot", job.sidecar.BeaconBlockRoot.String(), "index", job.sidecar.Index, "err", err)
 				return true
 			}
 

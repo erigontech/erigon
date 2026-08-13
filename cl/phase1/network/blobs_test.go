@@ -1,0 +1,76 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package network
+
+import (
+	"context"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+)
+
+type emptyBlobPeerClient struct{ calls atomic.Int64 }
+
+func (*emptyBlobPeerClient) Peers() (uint64, error) { return 1, nil }
+
+func (c *emptyBlobPeerClient) SendBlobsSidecarByIdentifierReq(context.Context, *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error) {
+	c.calls.Add(1)
+	return nil, "peer", nil
+}
+
+func TestRequestBlobsFranticallyKeepsFlatCadenceAfterEmptyResponses(t *testing.T) {
+	client := &emptyBlobPeerClient{}
+	req := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](0, 40)
+	req.Append(&cltypes.BlobIdentifier{})
+	ctx, cancel := context.WithTimeout(t.Context(), 650*time.Millisecond)
+	defer cancel()
+
+	_, err := RequestBlobsFrantically(ctx, client, req)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.GreaterOrEqual(t, client.calls.Load(), int64(5))
+	require.LessOrEqual(t, client.calls.Load(), int64(8))
+}
+
+func TestRequestBlobsFranticallyRejectsFastInvalidCandidate(t *testing.T) {
+	validBlock, validSidecars := makeBlobBoundaryObjects(t, 100, 1)
+	invalidBlock, invalidSidecars := makeBlobBoundaryObjects(t, 101, 1)
+	validRoot, err := validBlock.Block.HashSSZ()
+	require.NoError(t, err)
+	_, err = invalidBlock.Block.HashSSZ()
+	require.NoError(t, err)
+	req := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](1, 40)
+	req.Append(&cltypes.BlobIdentifier{BlockRoot: validRoot, Index: 0})
+	var calls atomic.Int64
+
+	rejected := make(chan string, 1)
+	result, err := requestBlobsFrantically(t.Context(), req, func(context.Context, *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error) {
+		if calls.Add(1) == 1 {
+			return invalidSidecars, "invalid-peer", nil
+		}
+		return validSidecars, "valid-peer", nil
+	}, func(peer string) { rejected <- peer })
+
+	require.NoError(t, err)
+	require.Equal(t, "valid-peer", result.Peer)
+	require.GreaterOrEqual(t, calls.Load(), int64(2))
+	require.Equal(t, "invalid-peer", <-rejected)
+}

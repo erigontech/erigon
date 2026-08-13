@@ -99,7 +99,12 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 // updateCanonicalChainInTheDatabase updates the canonical chain in the database by marking the given head slot and root as canonical.
 // It traces back through parent block roots to find the common ancestor with the existing canonical chain, truncates the chain,
 // and then marks the new chain segments as canonical.
-func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot uint64, headRoot common.Hash, cfg *Cfg) error {
+type canonicalUpdate struct {
+	commonAncestorSlot uint64
+	reorgEvent         *beaconevents.ChainReorgData
+}
+
+func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot uint64, headRoot common.Hash, cfg *Cfg) (canonicalUpdate, error) {
 	type canonicalEntry struct {
 		slot uint64
 		root common.Hash
@@ -109,13 +114,13 @@ func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot
 	// Read the current canonical block root for the given slot
 	currentCanonical, err := beacon_indicies.ReadCanonicalBlockRoot(tx, currentSlot)
 	if err != nil {
-		return fmt.Errorf("failed to read canonical block root: %w", err)
+		return canonicalUpdate{}, fmt.Errorf("failed to read canonical block root: %w", err)
 	}
 
 	// Capture the actual old canonical tip before any mutations.
 	oldHeadSlot, oldHeadRoot, err := beacon_indicies.ReadCanonicalHead(tx)
 	if err != nil {
-		return fmt.Errorf("failed to read canonical head: %w", err)
+		return canonicalUpdate{}, fmt.Errorf("failed to read canonical head: %w", err)
 	}
 
 	// List of new canonical chain entries
@@ -127,15 +132,15 @@ func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot
 
 		// Read the parent block root
 		if currentRoot, err = beacon_indicies.ReadParentBlockRoot(ctx, tx, currentRoot); err != nil {
-			return fmt.Errorf("failed to read parent block root: %w", err)
+			return canonicalUpdate{}, fmt.Errorf("failed to read parent block root: %w", err)
 		}
 
 		// Read the slot for the current block root
 		if newFoundSlot, err = beacon_indicies.ReadBlockSlotByBlockRoot(tx, currentRoot); err != nil {
-			return fmt.Errorf("failed to read block slot by block root: %w", err)
+			return canonicalUpdate{}, fmt.Errorf("failed to read block slot by block root: %w", err)
 		}
 		if newFoundSlot == nil {
-			break
+			return canonicalUpdate{}, fmt.Errorf("common ancestor is unavailable for block root %x", currentRoot)
 		}
 
 		currentSlot = *newFoundSlot
@@ -143,29 +148,34 @@ func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot
 		// Read the canonical block root for the new slot
 		currentCanonical, err = beacon_indicies.ReadCanonicalBlockRoot(tx, currentSlot)
 		if err != nil {
-			return fmt.Errorf("failed to read canonical block root: %w", err)
+			return canonicalUpdate{}, fmt.Errorf("failed to read canonical block root: %w", err)
 		}
 
 		// Append the current slot and root to the list of reconnection roots
 		reconnectionRoots = append(reconnectionRoots, canonicalEntry{currentSlot, currentRoot})
 	}
+	commonAncestorSlot := uint64(0)
+	if currentRoot == currentCanonical {
+		commonAncestorSlot = currentSlot
+	}
 
 	// Truncate the canonical chain at the current slot
 	if err := beacon_indicies.TruncateCanonicalChain(ctx, tx, currentSlot); err != nil {
-		return fmt.Errorf("failed to truncate canonical chain: %w", err)
+		return canonicalUpdate{}, fmt.Errorf("failed to truncate canonical chain: %w", err)
 	}
 
 	// Mark the new canonical chain segments in reverse order
 	for _, reconnectionRoot := range slices.Backward(reconnectionRoots) {
 		if err := beacon_indicies.MarkRootCanonical(ctx, tx, reconnectionRoot.slot, reconnectionRoot.root); err != nil {
-			return fmt.Errorf("failed to mark root canonical: %w", err)
+			return canonicalUpdate{}, fmt.Errorf("failed to mark root canonical: %w", err)
 		}
 	}
 
 	// Mark the head slot and root as canonical
 	if err := beacon_indicies.MarkRootCanonical(ctx, tx, headSlot, headRoot); err != nil {
-		return fmt.Errorf("failed to mark root canonical: %w", err)
+		return canonicalUpdate{}, fmt.Errorf("failed to mark root canonical: %w", err)
 	}
+	update := canonicalUpdate{commonAncestorSlot: commonAncestorSlot}
 
 	// A reorg occurred if the fork point (currentSlot) is strictly below the
 	// old canonical tip. Normal chain extension lands exactly at oldHeadSlot.
@@ -174,12 +184,12 @@ func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot
 		oldStateRoot, err := beacon_indicies.ReadStateRootByBlockRoot(ctx, tx, oldHeadRoot)
 		if err != nil {
 			log.Warn("failed to read state root by block root", "err", err, "block_root", oldHeadRoot)
-			return nil
+			return update, nil
 		}
 		newStateRoot, err := beacon_indicies.ReadStateRootByBlockRoot(ctx, tx, headRoot)
 		if err != nil {
 			log.Warn("failed to read state root by block root", "err", err, "block_root", headRoot)
-			return nil
+			return update, nil
 		}
 		reorgDepth := uint64(0)
 		if oldHeadSlot > currentSlot {
@@ -189,7 +199,7 @@ func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot
 		if cfg.forkChoice != nil {
 			executionOptimistic = cfg.forkChoice.IsRootOptimistic(headRoot)
 		}
-		reorgEvent := &beaconevents.ChainReorgData{
+		update.reorgEvent = &beaconevents.ChainReorgData{
 			Slot:                headSlot,
 			Depth:               reorgDepth,
 			OldHeadBlock:        oldHeadRoot,
@@ -199,10 +209,9 @@ func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot
 			Epoch:               headSlot / cfg.beaconCfg.SlotsPerEpoch,
 			ExecutionOptimistic: executionOptimistic,
 		}
-		cfg.emitter.State().SendChainReorg(reorgEvent)
 	}
 
-	return nil
+	return update, nil
 }
 
 // emitHeadEvent emits the head event with the given head slot, head root, and head state.
@@ -349,29 +358,33 @@ func saveFinalizedStateOnDiskIfNeeded(fc forkchoice.ForkChoiceStorageReader, bea
 
 // postForkchoiceOperations performs the post fork choice operations such as updating the head state, producing and caching attestation data,
 // these sets of operations can take as long as they need to run, as by-now we are already synced.
-func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger, cfg *Cfg, headSlot uint64, headRoot common.Hash) error {
+func prepareForkchoiceCommit(tx kv.RwTx, cfg *Cfg, headRoot common.Hash) (*state.CachingBeaconState, error) {
 	// Retrieve the head state.
 	var headState *state.CachingBeaconState
 	var err error
 	headState, err = cfg.forkChoice.GetStateAtBlockRoot(headRoot, false)
 	if err != nil {
-		return fmt.Errorf("failed to get state at block root: %w", err)
+		return nil, fmt.Errorf("failed to get state at block root: %w", err)
 	}
 	// fail-safe check§
 	if headState == nil {
-		return nil
+		return nil, nil
 	}
-	cfg.blobDownloader.SetHeadSlot(headSlot)
-	// First emit events that depend on the head state.
-	emitHeadEvent(cfg, headSlot, headRoot, headState)
-	emitNextPaylodAttributesEvent(cfg, headSlot, headRoot, headState)
-
 	if _, err = cfg.attestationDataProducer.ProduceAndCacheAttestationData(tx, headState, headRoot, headState.Slot()); err != nil {
-		logger.Warn("failed to produce and cache attestation data", "err", err)
+		log.Warn("failed to produce and cache attestation data", "err", err)
 	}
 	if err := beacon_indicies.WriteHighestFinalized(tx, cfg.forkChoice.FinalizedSlot()); err != nil {
-		return err
+		return nil, err
 	}
+	return headState, nil
+}
+
+func postForkchoiceOperations(ctx context.Context, logger log.Logger, cfg *Cfg, headSlot uint64, headRoot common.Hash, headState *state.CachingBeaconState) error {
+	if headState == nil {
+		return nil
+	}
+	emitHeadEvent(cfg, headSlot, headRoot, headState)
+	emitNextPaylodAttributesEvent(cfg, headSlot, headRoot, headState)
 	start := time.Now()
 	cfg.forkChoice.SetSynced(true) // Now we are synced
 	// Update the head state with the new head state
@@ -414,12 +427,14 @@ func doForkchoiceRoutine(ctx context.Context, logger log.Logger, cfg *Cfg, args 
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer tx.Rollback()
-	if err := updateCanonicalChainInTheDatabase(ctx, tx, headSlot, headRoot, cfg); err != nil {
+	canonicalUpdate, err := updateCanonicalChainInTheDatabase(ctx, tx, headSlot, headRoot, cfg)
+	if err != nil {
 		return fmt.Errorf("failed to update canonical chain in the database: %w", err)
 	}
 
-	if err := postForkchoiceOperations(ctx, tx, logger, cfg, headSlot, headRoot); err != nil {
-		return fmt.Errorf("failed to post forkchoice operations: %w", err)
+	headState, err := prepareForkchoiceCommit(tx, cfg, headRoot)
+	if err != nil {
+		return fmt.Errorf("failed to prepare forkchoice commit: %w", err)
 	}
 
 	var m runtime.MemStats
@@ -429,7 +444,39 @@ func doForkchoiceRoutine(ctx context.Context, logger log.Logger, cfg *Cfg, args 
 		"alloc", common.ByteCount(m.Alloc),
 		"sys", common.ByteCount(m.Sys))
 
-	return tx.Commit()
+	if err := commitCanonicalUpdate(tx, cfg.blobDownloader, headSlot, headRoot, canonicalUpdate, cfg.emitter); err != nil {
+		return err
+	}
+	if err := postForkchoiceOperations(ctx, logger, cfg, headSlot, headRoot, headState); err != nil {
+		return fmt.Errorf("failed to post forkchoice operations: %w", err)
+	}
+	return nil
+}
+
+type blobHeadTracker interface {
+	InvalidateCompletionAbove(uint64)
+	AbortHeadUpdate()
+	SetHead(uint64, common.Hash, uint64)
+}
+
+func commitCanonicalHead(tx kv.RwTx, downloader blobHeadTracker, headSlot uint64, headRoot common.Hash, commonAncestorSlot uint64) error {
+	downloader.InvalidateCompletionAbove(commonAncestorSlot)
+	if err := tx.Commit(); err != nil {
+		downloader.AbortHeadUpdate()
+		return err
+	}
+	downloader.SetHead(headSlot, headRoot, commonAncestorSlot)
+	return nil
+}
+
+func commitCanonicalUpdate(tx kv.RwTx, downloader blobHeadTracker, headSlot uint64, headRoot common.Hash, update canonicalUpdate, emitter *beaconevents.EventEmitter) error {
+	if err := commitCanonicalHead(tx, downloader, headSlot, headRoot, update.commonAncestorSlot); err != nil {
+		return err
+	}
+	if update.reorgEvent != nil {
+		emitter.State().SendChainReorg(update.reorgEvent)
+	}
+	return nil
 }
 
 // we need to generate only one goroutine for pre-caching shuffled set

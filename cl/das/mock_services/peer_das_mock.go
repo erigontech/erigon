@@ -158,44 +158,6 @@ func (c *MockPeerDasIsArchivedModeCall) DoAndReturn(f func() bool) *MockPeerDasI
 	return c
 }
 
-// IsBlobAlreadyRecovered mocks base method.
-func (m *MockPeerDas) IsBlobAlreadyRecovered(blockRoot common.Hash) bool {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "IsBlobAlreadyRecovered", blockRoot)
-	ret0, _ := ret[0].(bool)
-	return ret0
-}
-
-// IsBlobAlreadyRecovered indicates an expected call of IsBlobAlreadyRecovered.
-func (mr *MockPeerDasMockRecorder) IsBlobAlreadyRecovered(blockRoot any) *MockPeerDasIsBlobAlreadyRecoveredCall {
-	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsBlobAlreadyRecovered", reflect.TypeOf((*MockPeerDas)(nil).IsBlobAlreadyRecovered), blockRoot)
-	return &MockPeerDasIsBlobAlreadyRecoveredCall{Call: call}
-}
-
-// MockPeerDasIsBlobAlreadyRecoveredCall wrap *gomock.Call
-type MockPeerDasIsBlobAlreadyRecoveredCall struct {
-	*gomock.Call
-}
-
-// Return rewrite *gomock.Call.Return
-func (c *MockPeerDasIsBlobAlreadyRecoveredCall) Return(arg0 bool) *MockPeerDasIsBlobAlreadyRecoveredCall {
-	c.Call = c.Call.Return(arg0)
-	return c
-}
-
-// Do rewrite *gomock.Call.Do
-func (c *MockPeerDasIsBlobAlreadyRecoveredCall) Do(f func(common.Hash) bool) *MockPeerDasIsBlobAlreadyRecoveredCall {
-	c.Call = c.Call.Do(f)
-	return c
-}
-
-// DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockPeerDasIsBlobAlreadyRecoveredCall) DoAndReturn(f func(common.Hash) bool) *MockPeerDasIsBlobAlreadyRecoveredCall {
-	c.Call = c.Call.DoAndReturn(f)
-	return c
-}
-
 // IsColumnOverHalf mocks base method.
 func (m *MockPeerDas) IsColumnOverHalf(slot uint64, blockRoot common.Hash) bool {
 	m.ctrl.T.Helper()

@@ -543,12 +543,20 @@ func (f *ForkChoiceStore) isDataAvailable(ctx context.Context, slot uint64, bloc
 		return true
 	})
 	// Blobs are preverified so we skip verification, we just need to check if commitments checks out.
-	sidecars, foundOnDisk, err := f.blobStorage.ReadBlobSidecars(ctx, slot, blockRoot)
+	sidecars, completeOnDisk, err := f.blobStorage.ReadBlobSidecars(ctx, slot, blockRoot)
 	if err != nil {
 		return fmt.Errorf("cannot check data avaiability. failed to read blob sidecars: %v", err)
 	}
-	if !foundOnDisk {
-		sidecars = f.hotSidecars[blockRoot] // take it from memory
+	if !completeOnDisk {
+		byIndex := make(map[uint64]struct{}, len(sidecars))
+		for _, sidecar := range sidecars {
+			byIndex[sidecar.Index] = struct{}{}
+		}
+		for _, sidecar := range f.hotSidecars[blockRoot] {
+			if _, exists := byIndex[sidecar.Index]; !exists {
+				sidecars = append(sidecars, sidecar)
+			}
+		}
 	}
 
 	if blobKzgCommitments.Len() != len(sidecars) {
@@ -560,8 +568,7 @@ func (f *ForkChoiceStore) isDataAvailable(ctx context.Context, slot uint64, bloc
 	if len(commitmentsLeftToCheck) > 0 {
 		return ErrEIP4844DataNotAvailable // This should then schedule the block for reprocessing
 	}
-	if !foundOnDisk {
-		// If we didn't find the sidecars on disk, we should write them to disk now
+	if !completeOnDisk {
 		slices.SortFunc(sidecars, func(a, b *cltypes.BlobSidecar) int {
 			return cmp.Compare(a.Index, b.Index)
 		})

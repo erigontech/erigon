@@ -19,13 +19,46 @@ package network
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/common/log/v3"
 )
+
+func validateBlobResponseCandidate(req *solid.ListSSZ[*cltypes.BlobIdentifier], responses []*cltypes.BlobSidecar) error {
+	type identity struct {
+		root  [32]byte
+		index uint64
+	}
+	requested := make(map[identity]struct{}, req.Len())
+	req.Range(func(_ int, value *cltypes.BlobIdentifier, _ int) bool {
+		requested[identity{root: value.BlockRoot, index: value.Index}] = struct{}{}
+		return true
+	})
+	seen := make(map[identity]struct{}, len(responses))
+	for _, sidecar := range responses {
+		if sidecar == nil || sidecar.SignedBlockHeader == nil || sidecar.SignedBlockHeader.Header == nil {
+			return errors.New("blob response contains incomplete sidecar")
+		}
+		root, err := sidecar.SignedBlockHeader.Header.HashSSZ()
+		if err != nil {
+			return err
+		}
+		key := identity{root: root, index: sidecar.Index}
+		if _, ok := requested[key]; !ok {
+			return fmt.Errorf("blob response contains unrequested identity %x:%d", root, sidecar.Index)
+		}
+		if _, duplicate := seen[key]; duplicate {
+			return fmt.Errorf("blob response contains duplicate identity %x:%d", root, sidecar.Index)
+		}
+		seen[key] = struct{}{}
+	}
+	return blob_storage.VerifyBlobSidecars(responses, nil)
+}
 
 var ErrTimeout = errors.New("timeout")
 
@@ -75,8 +108,17 @@ type PeerAndSidecars struct {
 	Responses []*cltypes.BlobSidecar
 }
 
-type blobRequester interface {
+type BlobPeerClient interface {
+	Peers() (uint64, error)
 	SendBlobsSidecarByIdentifierReq(context.Context, *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error)
+}
+
+type blobBackfillPeerClient interface {
+	SendBlobsSidecarByIdentifierReqForBackfill(context.Context, *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error)
+}
+
+type blobPeerRejecter interface {
+	BanPeer(string)
 }
 
 type blobRequestResult struct {
@@ -117,11 +159,26 @@ func (p *blobRequestPacing) complete(now time.Time, err error) {
 }
 
 // RequestBlobsFrantically requests blobs from the network frantically.
-func RequestBlobsFrantically(ctx context.Context, r blobRequester, req *solid.ListSSZ[*cltypes.BlobIdentifier]) (*PeerAndSidecars, error) {
-	return requestBlobsFrantically(ctx, r, req, nil)
+func RequestBlobsFrantically(ctx context.Context, r BlobPeerClient, req *solid.ListSSZ[*cltypes.BlobIdentifier]) (*PeerAndSidecars, error) {
+	return requestBlobsFrantically(ctx, req, r.SendBlobsSidecarByIdentifierReq, blobPeerRejecterFor(r))
 }
 
-func requestBlobsFrantically(ctx context.Context, r blobRequester, req *solid.ListSSZ[*cltypes.BlobIdentifier], accept func(context.Context, *PeerAndSidecars) error) (*PeerAndSidecars, error) {
+func requestBlobsFranticallyForBackfill(ctx context.Context, r blobBackfillPeerClient, req *solid.ListSSZ[*cltypes.BlobIdentifier]) (*PeerAndSidecars, error) {
+	return requestBlobsFrantically(ctx, req, r.SendBlobsSidecarByIdentifierReqForBackfill, blobPeerRejecterFor(r))
+}
+
+func blobPeerRejecterFor(client any) func(string) {
+	if rejecter, ok := client.(blobPeerRejecter); ok {
+		return rejecter.BanPeer
+	}
+	return nil
+}
+
+func requestBlobsFrantically(ctx context.Context, req *solid.ListSSZ[*cltypes.BlobIdentifier], send func(context.Context, *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error), rejectPeer func(string)) (*PeerAndSidecars, error) {
+	return requestBlobsFranticallyValidated(ctx, req, send, rejectPeer, nil)
+}
+
+func requestBlobsFranticallyValidated(ctx context.Context, req *solid.ListSSZ[*cltypes.BlobIdentifier], send func(context.Context, *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error), rejectPeer func(string), validate func([]*cltypes.BlobSidecar) error) (*PeerAndSidecars, error) {
 	requestCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	timer := time.NewTimer(requestBlobBatchExpiration)
@@ -135,39 +192,58 @@ func requestBlobsFrantically(ctx context.Context, r blobRequester, req *solid.Li
 	var resultC <-chan blobRequestResult = results
 	var validationC <-chan error
 	pacing := newBlobRequestPacing()
+	launch := func() {
+		inFlight++
+		go func() {
+			responses, peer, err := send(requestCtx, req)
+			select {
+			case results <- blobRequestResult{peer: peer, responses: responses, err: err}:
+			case <-requestCtx.Done():
+			}
+		}()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	launch()
 	for {
 		select {
 		case now := <-reqInterval.C:
 			if inFlight >= cap(results) || !pacing.ready(now) {
 				continue
 			}
-			inFlight++
-			go func() {
-				responses, peer, err := r.SendBlobsSidecarByIdentifierReq(requestCtx, req)
-				results <- blobRequestResult{peer: peer, responses: responses, err: err}
-			}()
+			launch()
 		case result := <-resultC:
 			inFlight--
-			pacing.complete(time.Now(), result.err)
 			if result.err != nil {
+				pacing.failed(time.Now())
 				log.Trace("RequestBlobsFrantically: error", "err", result.err, "peer", result.peer)
 				continue
 			}
 			if len(result.responses) == 0 {
+				pacing.reset()
 				log.Trace("RequestBlobsFrantically: response is empty", "peer", result.peer)
 				continue
 			}
 			candidate = &PeerAndSidecars{Peer: result.peer, Responses: result.responses}
-			if accept != nil {
-				resultC = nil
-				validationC = validationResults
-				go func() { validationResults <- accept(requestCtx, candidate) }()
-				continue
-			}
-			return candidate, nil
+			resultC = nil
+			validationC = validationResults
+			go func(candidate *PeerAndSidecars) {
+				err := validateBlobResponseCandidate(req, candidate.Responses)
+				if err == nil && validate != nil {
+					err = validate(candidate.Responses)
+				}
+				select {
+				case validationResults <- err:
+				case <-requestCtx.Done():
+				}
+			}(candidate)
 		case err := <-validationC:
 			if err == nil {
 				return candidate, nil
+			}
+			if rejectPeer != nil && candidate.Peer != "" {
+				rejectPeer(candidate.Peer)
 			}
 			log.Trace("RequestBlobsFrantically: rejected response", "err", err, "peer", candidate.Peer)
 			pacing.failed(time.Now())
