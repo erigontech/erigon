@@ -54,7 +54,7 @@ var (
 // P2P helper is binded to node1 port, that's why we measure performance of local txs processing
 func skipIfNodeUnreachable(t *testing.T, addrs ...string) {
 	t.Helper()
-	var dialer net.Dialer
+	dialer := net.Dialer{Timeout: 300 * time.Millisecond}
 	for _, addr := range addrs {
 		conn, err := dialer.DialContext(t.Context(), "tcp", addr)
 		if err != nil {
@@ -72,7 +72,7 @@ func TestSimpleLocalTxThroughputBenchmark(t *testing.T) {
 
 	p2p := helper.NewP2P(fmt.Sprintf("http://%s/", rpcAddressNode1))
 
-	gotTxCh, errCh, err := p2p.Connect()
+	gotTxCh, errCh, err := p2p.Connect(t.Context())
 	require.NoError(t, err)
 
 	start := time.Now()
@@ -148,7 +148,7 @@ func TestSimpleLocalTxLatencyBenchmark(t *testing.T) {
 
 	p2p := helper.NewP2P(fmt.Sprintf("http://%s/", rpcAddressNode1))
 
-	gotTxCh, errCh, err := p2p.Connect()
+	gotTxCh, errCh, err := p2p.Connect(t.Context())
 	require.NoError(t, err)
 
 	rpcClient := requests.NewRequestGenerator(
@@ -215,7 +215,7 @@ func TestSimpleRemoteTxThroughputBenchmark(t *testing.T) {
 
 	p2p := helper.NewP2P(fmt.Sprintf("http://%s/", rpcAddressNode1))
 
-	gotTxCh, errCh, err := p2p.Connect()
+	gotTxCh, errCh, err := p2p.Connect(t.Context())
 	require.NoError(t, err)
 
 	start := time.Now()
@@ -300,7 +300,7 @@ func TestSimpleRemoteTxLatencyBenchmark(t *testing.T) {
 
 	p2p := helper.NewP2P(fmt.Sprintf("http://%s/", rpcAddressNode1))
 
-	gotTxCh, errCh, err := p2p.Connect()
+	gotTxCh, errCh, err := p2p.Connect(t.Context())
 	require.NoError(t, err)
 
 	rpcClient := requests.NewRequestGenerator(
