@@ -402,14 +402,14 @@ func (e *ExecModule) suspendReadAhead() func() {
 	return e.readAheader.SuspendWarmup()
 }
 
-// unwindToCommonCanonical leaves read-ahead suspended after an unwind. The
-// caller resumes it after validation stops reading the staged unwind state.
-func (e *ExecModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header) (func(), error) {
+// unwindToCommonCanonical keeps read-ahead suspended after staging an unwind.
+// Its caller must resume only after all reads of the staged state have ended.
+func (e *ExecModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header, ensureReadAheadSuspended func()) error {
 	currentHeader := header
 	for {
 		isCanonical, err := e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash())
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if isCanonical {
 			break
@@ -417,10 +417,10 @@ func (e *ExecModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.Te
 		parentBlockHash, parentBlockNum := currentHeader.ParentHash, currentHeader.Number.Uint64()-1
 		currentHeader, err = e.getHeader(e.bacgroundCtx, tx, parentBlockHash, parentBlockNum)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if currentHeader == nil {
-			return nil, makeErrMissingChainSegment(parentBlockHash)
+			return makeErrMissingChainSegment(parentBlockHash)
 		}
 	}
 	// Check if you can skip unwind by comparing the current header number with the progress of all stages.
@@ -429,31 +429,24 @@ func (e *ExecModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.Te
 	commonProgress, allEqual, err := stages.GetStageProgressIfAllEqual(tx,
 		stages.Headers, stages.Senders, stages.Execution)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if allEqual && commonProgress == unwindPoint {
-		return nil, nil
+		return nil
 	}
 
 	if err := e.hook.BeforeRun(tx, true); err != nil {
-		return nil, err
+		return err
 	}
 
-	resumeReadAhead := e.suspendReadAhead()
-	handedOff := false
-	defer func() {
-		if !handedOff {
-			resumeReadAhead()
-		}
-	}()
+	ensureReadAheadSuspended()
 	if err := e.pipelineExecutor.UnwindTo(unwindPoint, stagedsync.ExecUnwind, tx); err != nil {
-		return nil, err
+		return err
 	}
 	if err := e.pipelineExecutor.RunUnwind(sd, tx); err != nil {
-		return nil, err
+		return err
 	}
-	handedOff = true
-	return resumeReadAhead, nil
+	return nil
 }
 
 const nextForkBanner = `
@@ -597,16 +590,27 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	// Set state cache in SharedDomains for use during state reading
 	doms.SetStateCache(e.stateCache)
 	doms.SetCodeStore(e.codeStore)
-	resumeReadAhead, err := e.unwindToCommonCanonical(doms, tx, header)
-	if err != nil {
+	// Either unwind path may run, and both can run in one validation. Share one
+	// lazy suspension so it spans every staged-state read without penalising the
+	// common case where validation needs no unwind.
+	var resumeReadAhead func()
+	ensureReadAheadSuspended := func() {
+		if resumeReadAhead == nil {
+			resumeReadAhead = e.suspendReadAhead()
+		}
+	}
+	defer func() {
+		if resumeReadAhead != nil {
+			resumeReadAhead()
+		}
+	}()
+
+	if err := e.unwindToCommonCanonical(doms, tx, header, ensureReadAheadSuspended); err != nil {
 		doms.Close()
 		return ValidationResult{}, err
 	}
-	if resumeReadAhead != nil {
-		defer resumeReadAhead()
-	}
 
-	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(ctx, doms, tx, header, body.RawBody(), e.logger)
+	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(ctx, doms, tx, header, body.RawBody(), ensureReadAheadSuspended, e.logger)
 	if criticalError != nil {
 		return ValidationResult{}, criticalError
 	}
