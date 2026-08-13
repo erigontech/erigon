@@ -556,7 +556,15 @@ func (d *Driver) dispatch(ctx context.Context, e *snapshot.FileEntry, logger log
 				// progress nor failure. Don't tick the per-file
 				// quarantine counter, and don't clear prior real
 				// failures either. Next sweep retries.
-				logger.Debug("[storage-lifecycle] OnValidation paused (transient)", "name", e.Name, "err", err)
+				//
+				// Log at Info: an OnValidation that keeps pausing past
+				// InitialDownloadsComplete blocks FirstPublishGate
+				// indefinitely (leg-M cold-boot failure mode 2026-08-13).
+				// The publisher would silently sit with no chain-toml
+				// advertisement while every consumer's manifest_exchange
+				// times out — surface the pause reason so an operator can
+				// see what dependency is missing.
+				logger.Info("[storage-lifecycle] OnValidation paused (transient)", "name", e.Name, "err", err)
 				return
 			}
 			logger.Debug("[storage-lifecycle] OnValidation failed", "name", e.Name, "err", err)
