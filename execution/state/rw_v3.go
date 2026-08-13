@@ -998,14 +998,9 @@ func (w *Writer) WriteAccountStorage(address accounts.Address, incarnation uint6
 	return w.tx.DomainPut(kv.StorageDomain, composite, v, w.txNum, nil)
 }
 
-var fastCreate = dbg.EnvBool("FAST_CREATE", false)
-
 func (w *Writer) CreateContract(address accounts.Address) error {
 	if w.trace {
 		fmt.Printf("create contract: %x\n", address)
-	}
-	if fastCreate {
-		return nil
 	}
 	addressValue := address.Value()
 	if err := w.tx.DomainDelPrefix(kv.StorageDomain, addressValue[:], w.txNum); err != nil {
