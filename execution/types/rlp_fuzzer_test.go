@@ -23,6 +23,7 @@ import (
 	"bytes"
 	"fmt"
 	"math/big"
+	"strings"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -47,6 +48,38 @@ func decodeEncode(input []byte, val any) error {
 }
 
 func FuzzRLP(f *testing.F) {
+	// Without seeds the fuzzer has to invent valid RLP before it reaches any
+	// decoder logic, and never gets past the length prefix. These cover the
+	// encoding's branch structure: every size class either side of the
+	// single-byte, 55-byte and long-form boundaries, for both strings and
+	// lists, plus the shapes fuzzRlp decodes into.
+	seed := func(v any) {
+		if b, err := rlp.EncodeToBytes(v); err == nil {
+			f.Add(b)
+		}
+	}
+	for _, n := range []int{0, 1, 2, 32, 54, 55, 56, 57, 255, 256, 1024} {
+		seed(make([]byte, n))        // string size classes
+		seed([]any{make([]byte, n)}) // list holding one
+		seed(strings.Repeat("x", n))
+	}
+	for _, u := range []uint64{0, 1, 127, 128, 255, 256, 65535, 1 << 32, ^uint64(0)} {
+		seed(u) // integer minimal-encoding edges
+	}
+	seed([]any{})                                     // empty list
+	seed([]any{[]any{}, []any{[]any{}}})              // nesting
+	seed([]any{uint(1), "two", []byte{3}})            // the Int/String/Bytes shape
+	seed([]any{true, []byte{0x01}, []any{}, []any{}}) // the Types shape
+	// a legacy transaction body: nonce, gasPrice, gas, to, value, data, v, r, s
+	seed([]any{uint64(9), uint64(20e9), uint64(21000), make([]byte, 20),
+		uint64(1e18), []byte{}, uint64(37), make([]byte, 32), make([]byte, 32)})
+	// deep nesting, to reach the recursion limits
+	deep := any([]any{})
+	for range 24 {
+		deep = []any{deep}
+	}
+	seed(deep)
+
 	f.Fuzz(fuzzRlp)
 }
 

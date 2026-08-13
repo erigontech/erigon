@@ -606,3 +606,119 @@ func TestSyncInterruptLongUnwind(t *testing.T) {
 func unwindOf(s stages.SyncStage) stages.SyncStage {
 	return stages.SyncStage(append([]byte(s), 0xF0))
 }
+
+// FuzzUnwindStageProgress drives a sync cycle whose stage count, forward
+// targets and unwind point all come from the fuzzer, and checks what the unwind
+// loop promises: reverse order, stages behind the point left alone, the point
+// recorded, and the whole thing idempotent under repetition.
+func FuzzUnwindStageProgress(f *testing.F) {
+	f.Add(uint8(3), uint16(500), uint16(2000))
+	f.Add(uint8(2), uint16(0), uint16(1))
+	f.Add(uint8(5), uint16(3000), uint16(1000))
+	f.Add(uint8(4), uint16(1), uint16(5))
+
+	ids := []stages.SyncStage{stages.Headers, stages.Bodies, stages.Senders, stages.Execution, stages.Finish}
+
+	// run one cycle and report the resulting per-stage progress plus the order
+	// in which Unwind was invoked
+	run := func(t *testing.T, n int, forwardOf []uint64, unwindPoint uint64, twice bool) ([]uint64, []stages.SyncStage) {
+		var unwindFlow []stages.SyncStage
+		unwinds := 0
+		forwarded := make([]bool, n)
+		st := make([]*Stage, n)
+		for i := range n {
+			i := i
+			st[i] = &Stage{
+				ID:          ids[i],
+				Description: "fuzz",
+				Forward: func(_ bool, s *StageState, u Unwinder, _ *execctx.SharedDomains, tx kv.TemporalRwTx, _ log.Logger) error {
+					if !forwarded[i] {
+						forwarded[i] = true
+						if err := s.Update(tx, forwardOf[i]); err != nil {
+							return err
+						}
+					}
+					want := 1
+					if twice {
+						want = 2
+					}
+					if i == n-1 && unwinds < want {
+						unwinds++
+						return u.UnwindTo(unwindPoint, UnwindReason{}, tx)
+					}
+					return nil
+				},
+				Unwind: func(u *UnwindState, _ *StageState, _ *execctx.SharedDomains, tx kv.TemporalRwTx, _ log.Logger) error {
+					unwindFlow = append(unwindFlow, u.ID)
+					return u.Done(tx)
+				},
+			}
+		}
+
+		order := make([]stages.SyncStage, n)
+		for i := range n {
+			order[i] = st[n-1-i].ID
+		}
+
+		state := New(ethconfig.Defaults.Sync, st, order, nil, log.New(), stages.ModeApplyingBlocks)
+		_, tx := temporaltest.NewTestTx(t)
+		if _, err := state.Run(nil, tx, true, false); err != nil {
+			return nil, nil
+		}
+
+		// (10) the point just used is retained for the notify range, and the
+		// pending point is cleared
+		require.Nil(t, state.unwindPoint, "unwindPoint not cleared after the cycle")
+		if prev := state.PrevUnwindPoint(); prev != nil {
+			require.Equalf(t, unwindPoint, *prev, "prevUnwindPoint mismatch")
+		}
+
+		got := make([]uint64, n)
+		for i := range n {
+			p, err := stages.GetStageProgress(tx, ids[i])
+			require.NoError(t, err)
+			got[i] = p
+		}
+		return got, unwindFlow
+	}
+
+	f.Fuzz(func(t *testing.T, nStages uint8, unwindPoint, forwardTo uint16) {
+		n := int(nStages)%(len(ids)-1) + 2 // 2..5 stages
+		if forwardTo == 0 {
+			t.Skip()
+		}
+		forwardOf := make([]uint64, n)
+		for i := range forwardOf {
+			forwardOf[i] = uint64(forwardTo) - uint64(i)*uint64(forwardTo)/uint64(n)
+		}
+		up := uint64(unwindPoint)
+
+		got, flow := run(t, n, forwardOf, up, false)
+		if got == nil {
+			return // a rejected cycle is not a violation
+		}
+
+		// every stage lands at min(itsProgress, unwindPoint)
+		for i := range n {
+			require.Equalf(t, min(forwardOf[i], up), got[i],
+				"stage %v: forwarded to %d, unwind to %d", ids[i], forwardOf[i], up)
+		}
+
+		// (8) a stage already at or behind the point must not be unwound at all
+		var wantFlow []stages.SyncStage
+		for i := n - 1; i >= 0; i-- {
+			if forwardOf[i] > up {
+				wantFlow = append(wantFlow, ids[i])
+			}
+		}
+		// (7) and the ones that are unwound go in reverse stage order
+		require.Equalf(t, wantFlow, flow,
+			"unwind flow: forwardOf=%v unwindPoint=%d", forwardOf, up)
+
+		// (9) unwinding to the same point again changes nothing
+		again, _ := run(t, n, forwardOf, up, true)
+		if again != nil {
+			require.Equalf(t, got, again, "unwind to %d is not idempotent", up)
+		}
+	})
+}

@@ -1173,3 +1173,178 @@ func TestApplyOnlyCacheReportsFillsDisabled(t *testing.T) {
 	t.Cleanup(c2.Close)
 	require.True(t, c2.FillsEnabled())
 }
+
+// FuzzStateCacheConsistency drives Apply/Fill/Unwind against a model and
+// checks the view StateCache claims to provide. Capacity is deliberately far
+// larger than the key space (keys are 2 bytes, so <=256 per domain against
+// ~700 entries of budget) so the LRU never evicts: without that, "a fill did
+// not overwrite" is indistinguishable from "the entry was evicted and refilled"
+// and the stronger assertions below would be unsound.
+func FuzzStateCacheConsistency(f *testing.F) {
+	f.Add([]byte{0, 1, 2, 3, 1, 4, 5, 6}, uint16(0))
+	f.Add([]byte{2, 9, 9, 9, 0, 1, 1, 1, 3, 0}, uint16(7))
+	f.Add([]byte{0, 0, 1, 5, 1, 0, 1, 9, 3, 0, 1, 0, 2, 0, 0, 0}, uint16(3))
+
+	f.Fuzz(func(t *testing.T, script []byte, seed uint16) {
+		if len(script) < 4 {
+			t.Skip()
+		}
+		c := NewStateCache(64*datasize.KB, 64*datasize.KB, 64*datasize.KB, 8*datasize.KB)
+		defer c.Close()
+		ap := c.Applier()
+
+		type entry struct {
+			val   []byte
+			txNum uint64
+		}
+		model := map[string]entry{}
+		var appliedEnd uint64
+		domains := []kv.Domain{kv.AccountsDomain, kv.StorageDomain}
+		mkey := func(d kv.Domain, k []byte) string { return string(k) + string(rune(d)) }
+
+		for i := 0; i+3 < len(script); i += 4 {
+			op := script[i] % 6
+			dom := domains[int(script[i+1])%len(domains)]
+			key := []byte{script[i+2], byte(seed)}
+			val := []byte{script[i+3]}
+			txNum := uint64(i) + 1
+
+			switch op {
+			case 0: // authoritative commit
+				before := c.appliedEnd[dom]
+				ap.Apply(dom, key, val, txNum)
+				// (1) the admission frontier only ever moves forward under Apply
+				require.GreaterOrEqualf(t, c.appliedEnd[dom], before,
+					"appliedEnd went backwards on Apply: %d -> %d", before, c.appliedEnd[dom])
+				if txNum > appliedEnd {
+					appliedEnd = txNum
+				}
+				model[mkey(dom, key)] = entry{val: bytes.Clone(val), txNum: txNum}
+
+			case 1: // read-path fill honouring Fill's contract
+				visibleEnd := uint64(script[i+3]) % (appliedEnd + 8)
+				cur, known := model[mkey(dom, key)]
+				fillVal, fillTxNum := []byte(nil), visibleEnd
+				if known {
+					fillVal, fillTxNum = cur.val, cur.txNum
+				}
+				v := c.View(FrontierFunc(func(kv.Domain) (uint64, bool) { return visibleEnd, true }))
+				v.Fill(dom, key, fillVal, fillTxNum)
+
+			case 2: // unwind
+				to := uint64(script[i+2]) % (appliedEnd + 4)
+				ap.Unwind(to)
+				appliedEnd = min(appliedEnd, to)
+				for k, e := range model {
+					if e.txNum > to {
+						delete(model, k)
+					}
+				}
+				// (3) nothing newer than the unwind target may remain readable
+				rv := c.View(nil)
+				for _, d := range domains {
+					for b := range 256 {
+						probe := []byte{byte(b), byte(seed)}
+						if _, tn, ok := rv.GetWithTxNum(d, probe); ok {
+							require.LessOrEqualf(t, tn, to,
+								"unwind to %d left domain=%v key=%x readable at txNum %d", to, d, probe, tn)
+						}
+					}
+				}
+
+			case 3: // read back and check against the model
+				v := c.View(nil)
+				got, ok := v.Get(dom, key)
+				if !ok {
+					continue
+				}
+				want, known := model[mkey(dom, key)]
+				if !known {
+					continue
+				}
+				require.Equalf(t, want.val, got,
+					"stale read: domain=%v key=%x applied at %d, appliedEnd=%d", dom, key, want.txNum, appliedEnd)
+
+			case 4: // (2) applied beats filled, and (4) a stale fill is a no-op
+				ap.Apply(dom, key, val, txNum)
+				if txNum > appliedEnd {
+					appliedEnd = txNum
+				}
+				model[mkey(dom, key)] = entry{val: bytes.Clone(val), txNum: txNum}
+
+				rv := c.View(nil)
+				before, hadBefore := rv.Get(dom, key)
+				before = bytes.Clone(before)
+
+				// a fill vouched for by a frontier behind the applied end must
+				// not be admitted, whatever it carries
+				stale := c.View(FrontierFunc(func(kv.Domain) (uint64, bool) {
+					if appliedEnd == 0 {
+						return 0, true
+					}
+					return appliedEnd - 1, true
+				}))
+				stale.Fill(dom, key, []byte{^val[0]}, txNum)
+
+				after, hadAfter := rv.Get(dom, key)
+				require.Equalf(t, hadBefore, hadAfter, "stale fill changed presence for key=%x", key)
+				if hadBefore {
+					require.Equalf(t, before, after,
+						"stale fill overwrote an applied value: domain=%v key=%x", dom, key)
+				}
+
+			case 5: // (6) an absent-key fill must never read back as present data
+				visibleEnd := appliedEnd
+				v := c.View(FrontierFunc(func(kv.Domain) (uint64, bool) { return visibleEnd, true }))
+				v.Fill(dom, key, nil, txNum)
+				if _, known := model[mkey(dom, key)]; known {
+					continue
+				}
+				got, ok := c.View(nil).Get(dom, key)
+				if ok {
+					require.Emptyf(t, got,
+						"empty fill read back as present data: domain=%v key=%x got=%x", dom, key, got)
+				}
+			}
+		}
+	})
+}
+
+// FuzzStateCacheCodeFrontier pins the coupling in fillCodeIfFresh: an addr-keyed
+// code entry derives from the account, so admission checks the accounts frontier
+// as well as the code one. Nothing else covers a regression of only the accounts
+// side.
+func FuzzStateCacheCodeFrontier(f *testing.F) {
+	f.Add(uint8(1), uint8(2), uint16(5))
+	f.Add(uint8(9), uint8(0), uint16(0))
+
+	f.Fuzz(func(t *testing.T, addrByte, codeByte uint8, applyAt uint16) {
+		c := NewStateCache(64*datasize.KB, 64*datasize.KB, 64*datasize.KB, 8*datasize.KB)
+		defer c.Close()
+
+		addr := []byte{addrByte, 0xAA}
+		code := []byte{codeByte, 0xBB, 0xCC}
+		at := uint64(applyAt) + 1
+
+		// advance the accounts frontier only
+		c.Applier().Apply(kv.AccountsDomain, addr, []byte{1}, at)
+
+		// a code fill whose accounts frontier is behind that must be rejected
+		// even though its own code frontier is current
+		v := c.View(FrontierFunc(func(d kv.Domain) (uint64, bool) {
+			if d == kv.AccountsDomain {
+				if at == 0 {
+					return 0, true
+				}
+				return at - 1, true
+			}
+			return at + 100, true
+		}))
+		v.Fill(kv.CodeDomain, addr, code, at)
+
+		if got, ok := c.View(nil).Get(kv.CodeDomain, addr); ok {
+			require.NotEqualf(t, code, got,
+				"code fill admitted despite a stale accounts frontier (accounts applied at %d)", at)
+		}
+	})
+}
