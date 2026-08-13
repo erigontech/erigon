@@ -627,7 +627,7 @@ func (api *DebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, t
 		return nil, err
 	}
 	result := &AccountResult{}
-	result.Balance.ToInt().Set(a.Balance.ToBig())
+	result.Balance = hexutil.U256(a.Balance)
 	result.Nonce = hexutil.Uint64(a.Nonce)
 	result.CodeHash = a.CodeHash.Value()
 
@@ -640,7 +640,7 @@ func (api *DebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, t
 }
 
 type AccountResult struct {
-	Balance  hexutil.Big    `json:"balance"`
+	Balance  hexutil.U256   `json:"balance"`
 	Nonce    hexutil.Uint64 `json:"nonce"`
 	Code     hexutil.Bytes  `json:"code"`
 	CodeHash common.Hash    `json:"codeHash"`
