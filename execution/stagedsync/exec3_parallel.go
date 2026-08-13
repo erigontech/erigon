@@ -117,7 +117,7 @@ type parallelExecutor struct {
 	// coordination context). It is the explicit, ordered halt the exec loop calls
 	// once it has produced everything up to the coalesce block.
 	cancelWorkers context.CancelFunc
-	// dispatch runs a task on a semaphore-held worker context (dispatchRun) and
+	// dispatch runs a task on a semaphore-held worker context (dispatchRunSelfLoop) and
 	// pushes the result to the plain results channel. runSem holds the idle worker
 	// contexts; runWG tracks in-flight task goroutines for teardown.
 	runSem chan *exec.WorkerContext
@@ -130,7 +130,7 @@ type parallelExecutor struct {
 	execSem    chan struct{}
 	runWG      sync.WaitGroup
 	workersCtx context.Context
-	// results is the plain results channel: dispatchRun pushes finished tasks here
+	// results is the plain results channel: dispatchRunSelfLoop pushes finished tasks here
 	// (as-arrive) and the exec loop consumes them directly via processSingleResult.
 	results        chan *exec.TxResult
 	workerCount    int
@@ -1521,16 +1521,6 @@ func applyLoopMissingBlocks(txResultBlocks, appliedBlocks map[uint64]struct{}) [
 	return missing
 }
 
-// applyLoopFlushAsComplete returns the `complete` flag for
-// versionMap.FlushVersionedWrites. cntInvalid counts prior VersionTooEarly
-// and VersionInvalid txs seen earlier in this iteration but excludes the
-// current tx's own verdict, so the `valid` term is required to prevent an
-// invalidated tx's writes being flushed as Done and read as committed by
-// downstream OCC consumers.
-func applyLoopFlushAsComplete(valid bool, cntInvalid int) bool {
-	return valid && cntInvalid == 0
-}
-
 // failCandidate is the apply loop's running "worst" block-validity failure across
 // the exec (blockResult.Err) and commit (ErrWrongTrieRoot) streams. Fold-ahead
 // lets a commit failure for block N be observed before N's exec verdict, so the
@@ -1780,7 +1770,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	pe.execLoopGroup.Go(func() error {
 		pe.resetWorkers(workersCtx, pe.rs, nil)
 		// Hand the reset worker contexts to the dispatcher as a semaphore
-		// (see dispatchRun). The buffer is oversized so the pool can grow
+		// (see dispatchRunSelfLoop). The buffer is oversized so the pool can grow
 		// elastically (acquireWorker mints extras when workers park mid-EVM) and
 		// return them without blocking; excess is reclaimed at teardown.
 		pe.runSem = make(chan *exec.WorkerContext, elasticWorkerCap)
@@ -1929,32 +1919,6 @@ var selfLoopSlots = dbg.EnvInt("SELF_LOOP_SLOTS", 0)
 // which is bounded by the block's task count.
 const elasticWorkerCap = 4096
 
-// dispatchRun executes a task on a free worker context in its own goroutine and
-// pushes the result to pe.results. Bounded by runSem (one slot per worker
-// context); the goroutine blocks until a context is free, so at most len(runSem)
-// tasks execute concurrently.
-func (pe *parallelExecutor) dispatchRun(t exec.Task) {
-	pe.runWG.Go(func() {
-		goRoTx, roErr := pe.cfg.db.BeginTemporalRo(pe.workersCtx)
-		if roErr != nil {
-			return
-		}
-		defer goRoTx.Rollback()
-		w := pe.acquireWorker()
-		if w == nil {
-			return
-		}
-		defer func() { pe.releaseWorker(w) }()
-		if err := w.ResetTx(goRoTx); err != nil {
-			return
-		}
-		result := w.RunTxTask(t)
-		select {
-		case pe.results <- result:
-		case <-pe.workersCtx.Done():
-		}
-	})
-}
 
 // dispatchRunSelfLoop runs one task on a worker context, looping until its
 // result is stable-valid (SELF_LOOP true Block-STM): execute, flush its writes
@@ -2904,43 +2868,15 @@ type blockExecutor struct {
 }
 
 // readyForDepOrderValidation decides whether tx may be validated out of
-// contiguous order under dependency-ordered validation. It must be
-// exec-complete, not already validated, and have all its versionMap
-// predecessors validated. A tx that reads the coinbase account is implicitly
-// dependent on every prior tx (each credits fees to the coinbase), so it stays
-// gated on the coinbase-flush frontier (the contiguous prefix whose fee tips
-// the calcFees sweep has flushed to the versionMap) reaching tx-1.
-func (be *blockExecutor) readyForDepOrderValidation(tx int, coinbase accounts.Address, coinbaseFlushedUpTo int) bool {
+// contiguous order: exec-complete and not already validated. The self-loop
+// worker only sends a result once every read-dependency has committed and its
+// read-set re-validates, so an exec-complete result is ready to commit — no
+// dependency or coinbase-frontier gate is needed here.
+func (be *blockExecutor) readyForDepOrderValidation(tx int) bool {
 	if !be.execTasks.checkComplete(tx) || be.validateTasks.checkComplete(tx) {
 		return false
 	}
-	// The worker only sends a result once every read-dependency has committed and
-	// its read-set re-validates, so an exec-complete result is ready to commit.
 	return true
-}
-
-// depsValidated reports whether every versionMap (MapRead) predecessor tx reads
-// has already been validated — i.e. its read-dependencies are settled and it can
-// be validated out of contiguous order. Reads sourced from anywhere other than
-// the versionMap, or naming a predecessor outside [0, tx), impose no constraint.
-func (be *blockExecutor) depsValidated(tx int) bool {
-	rs := be.blockIO.ReadSet(tx)
-	ready := true
-	rs.RangeHeaders(func(_ state.AccountPath, hdr state.ReadHeader) bool {
-		if hdr.Source != state.MapRead {
-			return true
-		}
-		p := hdr.Version.TxIndex
-		if p < 0 || p >= tx {
-			return true
-		}
-		if !be.validateTasks.checkComplete(p) {
-			ready = false
-			return false
-		}
-		return true
-	})
-	return ready
 }
 
 // sendResult fans out an applyResult to every registered consumer. The
@@ -3444,9 +3380,8 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 			return r, ferr
 		}
 
-		coinbase := be.coinbase
 		toValidate := be.validateTasks.takePendingWhere(func(t int) bool {
-			return be.readyForDepOrderValidation(t, coinbase, be.coinbaseFlushedUpTo)
+			return be.readyForDepOrderValidation(t)
 		})
 
 		for _, tx := range toValidate {
