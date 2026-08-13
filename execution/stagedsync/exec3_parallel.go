@@ -1943,11 +1943,6 @@ var prevBlockReads = dbg.EnvBool("PREV_BLOCK_READS", false)
 // contiguous maxValidated = the final total-ordered pass.
 var depOrderVal = dbg.EnvBool("DEP_ORDER_VAL", false)
 
-// revalIndex uses the readerIdx reverse index in revalidateCommittedDependents
-// (re-check only actual readers of the changed keys) instead of scanning every
-// later committed task. Correctness-identical (same per-candidate check); cuts
-// the O(n²) revalidation spine.
-var revalIndex = dbg.EnvBool("REVAL_INDEX", false)
 
 // splitApply moves the state apply off the exec loop: the apply loop folds each
 // block's per-tx versionMap views to sd.mem at block end (blockCache=nil→direct
@@ -1965,11 +1960,11 @@ var splitApply = dbg.EnvBool("SPLIT_APPLY", false)
 // at package init from env vars; splitApply alone is not a valid configuration.
 // Test-only; not concurrency-safe (mutates package globals).
 func SetSplitApplyStackForTest() (restore func()) {
-	prev := [6]bool{splitApply, selfLoop, depOrderVal, rawViewCollapse, revalIndex, prevBlockReads}
-	splitApply, selfLoop, depOrderVal, rawViewCollapse, revalIndex, prevBlockReads = true, true, true, true, true, true
+	prev := [5]bool{splitApply, selfLoop, depOrderVal, rawViewCollapse, prevBlockReads}
+	splitApply, selfLoop, depOrderVal, rawViewCollapse, prevBlockReads = true, true, true, true, true
 	return func() {
-		splitApply, selfLoop, depOrderVal, rawViewCollapse, revalIndex, prevBlockReads =
-			prev[0], prev[1], prev[2], prev[3], prev[4], prev[5]
+		splitApply, selfLoop, depOrderVal, rawViewCollapse, prevBlockReads =
+			prev[0], prev[1], prev[2], prev[3], prev[4]
 	}
 }
 
@@ -3539,13 +3534,6 @@ func (be *blockExecutor) revalidateCommittedDependents(changedTx int, oldWrites 
 // (new ∪ old write-sets) — the exact set for which HasReadDep can be true —
 // sorted ascending so the cascade order matches the scan.
 func (be *blockExecutor) revalCandidates(changedTx int, newWrites, oldWrites *state.WriteSet) []int {
-	if !revalIndex {
-		out := make([]int, 0, len(be.tasks)-changedTx-1)
-		for tx := changedTx + 1; tx < len(be.tasks); tx++ {
-			out = append(out, tx)
-		}
-		return out
-	}
 	set := map[int]struct{}{}
 	add := func(ws *state.WriteSet) {
 		if ws == nil {
@@ -3720,9 +3708,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			return be.invalidBlockResult(fmt.Errorf("%w: could not apply tx %d:%d [%v]: %w: too many incarnations: %d, expected: %d", rules.ErrInvalidBlock, be.blockNum, res.Version().TxIndex, task.TxHash(), res.Err, res.Version().Incarnation, len(be.tasks))), nil
 		}
 		be.blockIO.RecordReads(res.Version(), res.TxIn)
-		if revalIndex {
-			be.indexReads(tx, res.TxIn)
-		}
+		be.indexReads(tx, res.TxIn)
 		// A sent error is genuine: a tx that read an in-flight or mid-execution
 		// changed value re-executes via result.Dep and is never sent. Reject the
 		// block only when this task ran against settled input and a post-hoc
@@ -3751,9 +3737,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		txVersion := res.Version()
 
 		be.blockIO.RecordReads(txVersion, res.TxIn)
-		if revalIndex {
-			be.indexReads(tx, res.TxIn)
-		}
+		be.indexReads(tx, res.TxIn)
 
 		if res.Version().Incarnation == 0 {
 			be.blockIO.RecordWrites(txVersion, res.TxOut)
