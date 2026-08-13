@@ -8,7 +8,6 @@ import (
 	"os"
 	"runtime/pprof"
 	"sort"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -2117,7 +2116,6 @@ var depTrueDepsOnly = dbg.EnvBool("DEP_TRUE_DEPS_ONLY", false)
 // dependent re-validation, no re-dispatch. Builds on depOrderVal + splitApply.
 var selfLoop = dbg.EnvBool("SELF_LOOP", false)
 
-var selfLoopDebug = dbg.EnvBool("SELF_LOOP_DEBUG", false)
 
 // Mid-flow dep-pause is the sole dependency mechanism: workers flush their writes
 // as ESTIMATE, and a read that observes an in-flight estimate pauses (via the IBS
@@ -2246,9 +2244,6 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 		}
 		send := func(r *exec.TxResult) {
 			be.slSent.Add(1)
-			if be.slTgt != nil {
-				be.slTgt[tv.index].Store(-3)
-			}
 			select {
 			case pe.results <- r:
 			case <-pe.workersCtx.Done():
@@ -2256,9 +2251,6 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 		}
 		if !acquire() {
 			return
-		}
-		if be.slTgt != nil {
-			be.slTgt[tv.index].Store(-4)
 		}
 		bumpInc := func() bool {
 			tv.version.Incarnation++
@@ -2275,17 +2267,10 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 			be.slReExec.Add(1)
 			return bumpInc() && acquire()
 		}
-		// waitTo releases the context, waits for the commit frontier to reach t, then
-		// records the debug marker. Returns false on shutdown.
+		// waitTo releases the context, waits for the commit frontier to reach t.
+		// Returns false on shutdown.
 		waitTo := func(t int) bool {
-			if be.slTgt != nil {
-				be.slTgt[tv.index].Store(int64(t))
-			}
-			ok := be.waitDep(tv.index, t)
-			if be.slTgt != nil {
-				be.slTgt[tv.index].Store(-4)
-			}
-			return ok
+			return be.waitDep(tv.index, t)
 		}
 		var prevWrites *state.WriteSet
 		for {
@@ -2376,9 +2361,6 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 				// finds a later write invalidated us, it signals slReexec and we
 				// re-execute in place. slFin closes when we finalize (never un-
 				// committed again), slDone on shutdown.
-				if be.slTgt != nil {
-					be.slTgt[tv.index].Store(-3)
-				}
 				// Lossless wait: the re-exec request is a sticky flag, so a dropped
 				// wake (buffered channel full, or set just before we parked) is
 				// recovered by re-checking the flag on the next wake. slFin/slDone
@@ -2435,7 +2417,7 @@ func (be *blockExecutor) selfLoopFlush(version state.Version, result *exec.TxRes
 }
 
 // taskIndexOf maps a versionMap block-TxIndex into this block's dense task-list
-// index space (what slTgt/waitDep/committedFrontier use). For a full block task 0
+// index space (what waitDep/committedFrontier use). For a full block task 0
 // is the block-init sys tx (TxIndex -1), so the offset is +1; for a resumed
 // (partial) block whose leading committed txs were skipped, task 0 starts at a
 // higher TxIndex and the offset shrinks accordingly. Without this, a dependency's
@@ -3158,8 +3140,6 @@ type blockExecutor struct {
 	slReexecConsumed atomic.Int64
 	slHazardSkip     atomic.Int64   // base-read hazard: finalized dependent skipped by revalidation (would be stale)
 	slLateFinalized  atomic.Int64   // late-result hazard: a result landed on an already-finalized tx (committed-prefix corruption)
-	slProcessed      atomic.Int64   // exec-loop heartbeat: results processed by nextResult
-	slTgt            []atomic.Int64 // per-task state: -2 undispatched, -4 active, -3 sent, >=0 parked-on-target
 	// selfLoopDispatched guards against re-dispatching a task the self-loop
 	// worker already owns: under SELF_LOOP the worker owns all re-execution, so
 	// the exec-loop scheduler must dispatch each task exactly once. Touched only
@@ -3617,9 +3597,6 @@ func (be *blockExecutor) signalCommitted(tx int) {
 // re-execute in place (it owns its incarnation, so no re-dispatch / no
 // txIncarnations sync). Mirrors revalidateCommittedDependents' re-exec signal.
 func (be *blockExecutor) signalSelfLoopReexec(tx int) {
-	if be.slTgt != nil {
-		be.slTgt[tx].Store(-6)
-	}
 	be.slReexecFlag[tx].Store(true)
 	select {
 	case be.slReexec[tx] <- struct{}{}:
@@ -3680,34 +3657,6 @@ func (be *blockExecutor) waitDep(tx, target int) bool {
 // stall.
 func (be *blockExecutor) selfLoopWatchdog(ctx context.Context) {
 	done := func() { be.slDoneOnce.Do(func() { close(be.slDone) }) }
-	if selfLoopDebug {
-		// One-shot dump long after the block should have finished, so the deadlock
-		// (which forms in ~ms) is already established and the timer barely perturbs
-		// timing. Prints the state around the stuck frontier to expose the missing
-		// signal.
-		select {
-		case <-ctx.Done():
-			done()
-			return
-		case <-time.After(8 * time.Second):
-		}
-		mv := be.validateTasks.maxComplete()
-		var nb strings.Builder
-		for i := mv - 1; i < mv+14 && i < len(be.slTgt); i++ {
-			if i < 0 {
-				continue
-			}
-			fmt.Fprintf(&nb, "t%d[tgt=%d vc=%t xc=%t pc=%t bl=%d] ", i, be.slTgt[i].Load(),
-				be.validateTasks.checkComplete(i), be.execTasks.checkComplete(i), be.publishTasks.checkComplete(i),
-				len(be.execTasks.blocker[i]))
-		}
-		log.Warn("[self-loop] STALL", "blk", be.blockNum, "frontier", be.frontier(), "cbFlushed", be.coinbaseFlushedUpTo,
-			"maxValidated", mv, "minPending", be.execTasks.minPending(), "inProgress", be.execTasks.inProgressCount(),
-			"tasks", len(be.tasks), "inflight", be.slInflight.Load(), "parked", be.slParked.Load(),
-			"sent", be.slSent.Load(), "reExec", be.slReExec.Load(), "processed", be.slProcessed.Load(),
-			"rxSent", be.slReexecSent.Load(), "rxDrop", be.slReexecDrop.Load(), "rxConsumed", be.slReexecConsumed.Load(),
-			"tasks", nb.String())
-	}
 	<-ctx.Done()
 	done()
 }
@@ -3776,9 +3725,6 @@ func (be *blockExecutor) revalidateCommittedDependents(changedTx int, oldWrites 
 		// re-dispatch and no be.txIncarnations sync); leave execTasks complete so the
 		// re-sent result re-validates without going through the dispatch path.
 		if selfLoop {
-			if be.slTgt != nil {
-				be.slTgt[tx].Store(-6)
-			}
 			be.slReexecFlag[tx].Store(true)
 			select {
 			case be.slReexec[tx] <- struct{}{}:
@@ -3924,9 +3870,6 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 			if valid {
 				be.validateTasks.markComplete(tx)
 				be.finalizedResults[tx] = txResult
-				if be.slTgt != nil {
-					be.slTgt[tx].Store(-5)
-				}
 				// This tx's writes are now flushed to the versionMap. A committed
 				// dependent may have validated earlier against the pre-flush state:
 				// reading one of these keys from base (missing this tx's first write)
@@ -4000,9 +3943,6 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 }
 
 func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, res *exec.TxResult, applyTx kv.TemporalTx) (result *blockResult, err error) {
-	if selfLoopDebug {
-		be.slProcessed.Add(1)
-	}
 	task, ok := res.Task.(*taskVersion)
 
 	if !ok {
@@ -4604,12 +4544,6 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 		be.wakeAt = map[int][]int{}
 		if coinbaseVec {
 			be.coinbaseDeltas = state.NewFeeDeltaVec(len(be.tasks))
-		}
-		if selfLoopDebug {
-			be.slTgt = make([]atomic.Int64, len(be.tasks))
-			for i := range be.slTgt {
-				be.slTgt[i].Store(-2)
-			}
 		}
 	}
 	// Drain deferred tx N when its predecessor is validated AND no worker
