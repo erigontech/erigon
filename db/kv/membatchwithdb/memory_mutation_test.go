@@ -561,6 +561,45 @@ func TestMemoryMutationUntouchedSequenceFollowsUpdatedTransaction(t *testing.T) 
 	require.Equal(t, wantVersion, gotVersion)
 }
 
+type nonTemporalTx struct{ kv.Tx }
+
+func TestMemoryMutationReadViewUsesPlainTx(t *testing.T) {
+	_, rwTx := newTestTx(t)
+	require.NoError(t, rwTx.ResetSequence(kv.HeaderNumber, 7))
+	require.NoError(t, rwTx.Put(kv.HeaderNumber, []byte("key"), []byte("value")))
+
+	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
+	require.NoError(t, err)
+	defer batch.Close()
+
+	view := batch.NewReadView(nonTemporalTx{Tx: rwTx})
+	gotSequence, err := view.ReadSequence(kv.HeaderNumber)
+	require.NoError(t, err)
+	require.Equal(t, uint64(7), gotSequence)
+	gotValue, err := view.GetOne(kv.HeaderNumber, []byte("key"))
+	require.NoError(t, err)
+	require.Equal(t, []byte("value"), gotValue)
+}
+
+func TestMemoryMutationDetachedReadViewUsesPlainTx(t *testing.T) {
+	_, rwTx := newTestTx(t)
+	require.NoError(t, rwTx.ResetSequence(kv.HeaderNumber, 7))
+	require.NoError(t, rwTx.Put(kv.HeaderNumber, []byte("key"), []byte("value")))
+
+	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
+	require.NoError(t, err)
+	defer batch.Close()
+	require.NotNil(t, batch.DetachDB())
+
+	view := batch.NewReadView(nonTemporalTx{Tx: rwTx})
+	gotSequence, err := view.ReadSequence(kv.HeaderNumber)
+	require.NoError(t, err)
+	require.Equal(t, uint64(7), gotSequence)
+	gotValue, err := view.GetOne(kv.HeaderNumber, []byte("key"))
+	require.NoError(t, err)
+	require.Equal(t, []byte("value"), gotValue)
+}
+
 func TestMemoryMutationFlushDoesNotOverwriteUnchangedStateVersion(t *testing.T) {
 	db, seedTx := newTestTx(t)
 	ctx := t.Context()

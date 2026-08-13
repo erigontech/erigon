@@ -56,6 +56,7 @@ type MemoryMutation struct {
 	deletedEntries   map[string]map[string]struct{}
 	deletedDups      map[string]map[string]map[string]struct{}
 	clearedTables    map[string]struct{}
+	readTx           kv.Tx
 	db               kv.TemporalTx
 	statelessCursors map[string]kv.RwCursor
 	DomainReader     DomainReader
@@ -76,6 +77,7 @@ func NewMemoryBatch(tx kv.TemporalTx, tmpDir string, logger log.Logger) (*Memory
 
 	return &MemoryMutation{
 		mu:             &sync.RWMutex{},
+		readTx:         tx,
 		db:             tx,
 		memDb:          memDB,
 		memTx:          mem,
@@ -101,6 +103,7 @@ func NewMemoryBatchMDBX(tx kv.TemporalTx, tmpDir string, logger log.Logger) (mm 
 	}
 	return &MemoryMutation{
 		mu:             &sync.RWMutex{},
+		readTx:         tx,
 		db:             tx,
 		memDb:          tmpDB,
 		memTx:          memTx,
@@ -130,6 +133,7 @@ func (m *MemoryMutation) Pin() kv.TemporalFilesPin {
 func (m *MemoryMutation) UpdateTxn(tx kv.TemporalTx) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.readTx = tx
 	m.db = tx
 	m.statelessCursors = nil
 }
@@ -142,6 +146,7 @@ func (m *MemoryMutation) DetachDB() kv.TemporalTx {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	db := m.db
+	m.readTx = nil
 	m.db = nil
 	m.statelessCursors = nil
 	return db
@@ -212,10 +217,13 @@ func (m *MemoryMutation) readSequenceLocked(bucket string) (uint64, error) {
 		}
 		return binary.BigEndian.Uint64(value), nil
 	}
-	if m.isTableCleared(kv.Sequence) || m.isEntryDeleted(kv.Sequence, key) || m.db == nil {
+	if m.isTableCleared(kv.Sequence) || m.isEntryDeleted(kv.Sequence, key) {
 		return 0, nil
 	}
-	return m.db.ReadSequence(bucket)
+	if m.readTx == nil {
+		return 0, nil
+	}
+	return m.readTx.ReadSequence(bucket)
 }
 
 func (m *MemoryMutation) ForAmount(bucket string, prefix []byte, amount uint32, walker func(k, v []byte) error) error {
@@ -283,11 +291,11 @@ func (m *MemoryMutation) GetOne(table string, key []byte) ([]byte, error) {
 	if v != nil {
 		return v, nil
 	}
-	// Fall back to underlying DB (nil when overlay is detached for publishing).
-	if m.db == nil {
+	// Fall back to the caller's transaction (nil on an unbound detached overlay).
+	if m.readTx == nil {
 		return nil, nil
 	}
-	return m.db.GetOne(table, key)
+	return m.readTx.GetOne(table, key)
 }
 
 func (m *MemoryMutation) Last(table string) ([]byte, []byte, error) {
@@ -310,10 +318,10 @@ func (m *MemoryMutation) Has(table string, key []byte) (bool, error) {
 	if err != nil || has {
 		return has, err
 	}
-	if m.db == nil {
+	if m.readTx == nil {
 		return false, nil
 	}
-	return m.db.Has(table, key)
+	return m.readTx.Has(table, key)
 }
 
 func (m *MemoryMutation) Put(table string, k, v []byte) error {
@@ -380,8 +388,8 @@ func (m *MemoryMutation) StreamDescend(table string, fromPrefix, toPrefix []byte
 func (m *MemoryMutation) Range(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
 	s := &rangeIter{orderAscend: bool(asc), limit: int64(limit)}
 	var err error
-	if m.db != nil {
-		if s.iterDb, err = m.db.Range(table, fromPrefix, toPrefix, asc, limit); err != nil {
+	if m.readTx != nil {
+		if s.iterDb, err = m.readTx.Range(table, fromPrefix, toPrefix, asc, limit); err != nil {
 			return s, err
 		}
 	}
@@ -465,8 +473,8 @@ func (s *rangeIter) Next() (k, v []byte, err error) {
 func (m *MemoryMutation) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
 	s := &rangeDupSortIter{key: key, orderAscend: bool(asc), limit: int64(limit)}
 	var err error
-	if m.db != nil {
-		if s.iterDb, err = m.db.RangeDupSort(table, key, fromPrefix, toPrefix, asc, limit); err != nil {
+	if m.readTx != nil {
+		if s.iterDb, err = m.readTx.RangeDupSort(table, key, fromPrefix, toPrefix, asc, limit); err != nil {
 			return s, err
 		}
 	}
@@ -885,8 +893,8 @@ func (m *MemoryMutation) makeCursor(bucket string) (kv.RwCursorDupSort, error) {
 	c.table = bucket
 
 	var err error
-	if m.db != nil {
-		c.cursor, err = m.db.CursorDupSort(bucket) //nolint:gocritic
+	if m.readTx != nil {
+		c.cursor, err = m.readTx.CursorDupSort(bucket) //nolint:gocritic
 		if err != nil {
 			return nil, err
 		}
@@ -928,7 +936,7 @@ func (m *MemoryMutation) ApplyRw(_ context.Context, f func(tx kv.RwTx) error) er
 }
 
 func (m *MemoryMutation) ViewID() uint64 {
-	return m.db.ViewID()
+	return m.readTx.ViewID()
 }
 
 func (m *MemoryMutation) CHandle() unsafe.Pointer {
@@ -1069,10 +1077,9 @@ func (m *MemoryMutation) Unwind(ctx context.Context, txNumUnwindTo uint64, chang
 }
 
 // NewReadView creates a lightweight read-only view of this overlay backed by
-// the given tx for fallback reads. The view shares the same in-memory data
-// (memTx, deletedEntries, clearedTables) and the parent's mutex, but has its
-// own db field set to the caller's tx. All existing cursor/read logic works
-// naturally — memTx first, then db fallback.
+// the given tx for fallback reads. The view shares the in-memory data and the
+// parent's mutex, but uses the caller's tx for its own backing reads. Temporal
+// methods also use it when it implements kv.TemporalTx.
 //
 // The returned kv.TemporalTx only exposes read methods. Callers cannot write
 // to the overlay through this view. The caller must not Close the returned
@@ -1095,6 +1102,7 @@ func (m *MemoryMutation) newReadViewMut(tx kv.Tx) *MemoryMutation {
 		deletedEntries: m.deletedEntries,
 		deletedDups:    m.deletedDups,
 		clearedTables:  m.clearedTables,
+		readTx:         tx,
 		db:             dbTx,
 		DomainReader:   m.DomainReader,
 	}
