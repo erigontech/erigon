@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -731,4 +732,46 @@ func TestCaplinBlockProductionGlamsterdamSlotNumber(t *testing.T) {
 		"PayloadAttributes.SlotNumber must be set for Glamsterdam (EIP-7843)")
 	require.Equal(t, hexutil.Uint64(targetSlot), *spy.lastAttributes.SlotNumber,
 		"SlotNumber should equal the target slot")
+}
+
+func TestExpectedWithdrawalsReadsTheRightSourcePerFork(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch, cfg.BellatrixForkEpoch, cfg.CapellaForkEpoch = 0, 0, 0
+	a := &ApiHandler{beaconChainCfg: &cfg}
+
+	capellaState := state.New(&cfg)
+	capellaState.SetVersion(clparams.CapellaVersion)
+
+	// Before Gloas the expectation is computed from the head state itself, and the list is present
+	// even when empty: the execution layer rejects a nil one after Shanghai.
+	withdrawals, err := a.expectedWithdrawals(capellaState, nil, clparams.CapellaVersion, 0)
+	require.NoError(t, err)
+	require.NotNil(t, withdrawals)
+	require.Empty(t, withdrawals)
+
+	gloasState := state.New(&cfg)
+	gloasState.SetVersion(clparams.GloasVersion)
+
+	// A Gloas head whose payload was revealed is read from the state copy carrying that payload,
+	// not from the head state.
+	withParentPayload := state.New(&cfg)
+	withParentPayload.SetVersion(clparams.GloasVersion)
+	withdrawals, err = a.expectedWithdrawals(gloasState, withParentPayload, clparams.GloasVersion, 0)
+	require.NoError(t, err)
+	require.NotNil(t, withdrawals)
+
+	// An EMPTY Gloas head uses the expectation the state already cached rather than computing a
+	// fresh one, so what it returns is whatever was cached.
+	withdrawals, err = a.expectedWithdrawals(gloasState, nil, clparams.GloasVersion, 0)
+	require.NoError(t, err)
+	require.Empty(t, withdrawals)
+
+	cached := solid.NewDynamicListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload))
+	cached.Append(&cltypes.Withdrawal{Index: 7, Validator: 8, Address: common.Address{0xaa}, Amount: 9})
+	gloasState.SetPayloadExpectedWithdrawals(cached)
+	withdrawals, err = a.expectedWithdrawals(gloasState, nil, clparams.GloasVersion, 0)
+	require.NoError(t, err)
+	require.Equal(t, []*types.Withdrawal{
+		{Index: 7, Validator: 8, Address: common.Address{0xaa}, Amount: 9},
+	}, withdrawals)
 }
