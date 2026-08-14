@@ -229,7 +229,8 @@ func computeBlockBuilderWindow(now, slotStart time.Time, cfg *clparams.BeaconCha
 
 // payloadAttributes builds the attributes for a version of the forkchoice call. The wire format is
 // versioned, so a field the chosen version does not carry has to be left out rather than sent and
-// ignored: V1 and V2 reject a parent beacon block root outright.
+// ignored: V1 carries no withdrawals and V1 and V2 no parent beacon block root, and a strict
+// execution client rejects a request that includes them.
 func payloadAttributes(
 	version clparams.StateVersion,
 	timestamp hexutil.Uint64,
@@ -242,7 +243,9 @@ func payloadAttributes(
 		Timestamp:             timestamp,
 		PrevRandao:            prevRandao,
 		SuggestedFeeRecipient: feeRecipient,
-		Withdrawals:           withdrawals,
+	}
+	if version.AfterOrEqual(clparams.CapellaVersion) {
+		attrs.Withdrawals = withdrawals
 	}
 	if version.AfterOrEqual(clparams.DenebVersion) {
 		attrs.ParentBeaconBlockRoot = parentRoot
