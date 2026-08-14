@@ -57,14 +57,18 @@ const (
 	maxBlockFetchers = 4
 )
 
-// cacheKey identifies a processed block in the fee history cache. Keying by
-// header hash instead of number makes an entry live exactly as long as the
-// block itself: a same-height sibling (reorg, or an in-flight block replaced
-// before its commit lands) has a different hash and misses.
+// cacheKey identifies a processed block in the fee history cache. Above the
+// frozen boundary the header hash is part of the key, so an entry lives
+// exactly as long as the block itself: a same-height sibling (reorg, or an
+// in-flight block replaced before its commit lands) has a different hash and
+// misses. At or below the boundary the mapping is immutable and the hash
+// stays zero: the number alone identifies the block, with no per-block
+// resolution on the hit path.
 // The percentiles string is a binary encoding of the requested percentile slice,
 // so identical percentile arrays produce the same key.
 type cacheKey struct {
 	hash        common.Hash
+	number      uint64
 	percentiles string
 }
 
@@ -348,6 +352,12 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 
 	// Pre-fetch chain config once using the main backend (safe: single goroutine).
 	chainconfig := oracle.backend.ChainConfig()
+	var frozenBound uint64
+	if oracle.historyCache != nil {
+		if fb, err := oracle.backend.FrozenBlocks(); err == nil {
+			frozenBound = fb
+		}
+	}
 
 	// Launch up to maxBlockFetchers goroutines. Each goroutine opens its own
 	// TemporalTx via Fork so MDBX transactions are never shared across goroutines.
@@ -384,35 +394,45 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 				idx := int(blockNumber - oldestBlock)
 
 				// The pending block comes from the mining cache and is rebuilt
-				// continuously, so its results are never memoized. The cache key
-				// comes from the canonical-hash index — one cheap lookup, no
-				// header fetch and no keccak on the hit path.
+				// continuously, so its results are never memoized. Above the
+				// frozen boundary the key includes the canonical hash — one
+				// cheap lookup; a resolution error degrades the block to
+				// uncached instead of failing the request.
 				isPending := pendingBlock != nil && blockNumber >= pendingBlock.NumberU64()
 				cacheable := !isPending && oracle.historyCache != nil
-				var blockHash common.Hash
-				if cacheable {
-					hash, ok, err := localBackend.CanonicalHash(fetchCtx, blockNumber)
-					if err != nil {
-						return err
+				byHash := false
+				key := cacheKey{number: blockNumber, percentiles: percentileKey}
+				if cacheable && blockNumber > frozenBound {
+					if hash, ok, err := localBackend.CanonicalHash(fetchCtx, blockNumber); err == nil && ok {
+						key.hash = hash
+						byHash = true
+					} else {
+						cacheable = false
 					}
-					blockHash, cacheable = hash, ok
-					if ok {
-						if cached, ok := oracle.historyCache.get(cacheKey{blockHash, percentileKey}); ok {
-							blockResults[idx] = blockResult{processed: cached, hasResult: true}
-							continue
-						}
+				}
+				if cacheable {
+					if cached, ok := oracle.historyCache.get(key); ok {
+						blockResults[idx] = blockResult{processed: cached, hasResult: true}
+						continue
 					}
 				}
 
+				// Fetch by the resolved pair to skip a second canonical resolution.
 				fees := &blockFees{blockNumber: blockNumber}
 				switch {
 				case isPending:
 					fees.block, fees.receipts = pendingBlock, pendingReceipts
 				case len(rewardPercentiles) != 0:
-					fees.block, fees.err = localBackend.BlockByNumber(fetchCtx, rpc.BlockNumber(blockNumber))
+					if byHash {
+						fees.block, fees.err = localBackend.BlockByHashNumber(fetchCtx, key.hash, blockNumber)
+					} else {
+						fees.block, fees.err = localBackend.BlockByNumber(fetchCtx, rpc.BlockNumber(blockNumber))
+					}
 					if fees.block != nil && fees.err == nil {
 						fees.receipts, fees.err = localBackend.GetReceiptsGasUsed(fetchCtx, fees.block)
 					}
+				case byHash:
+					fees.header, fees.err = localBackend.HeaderByHashNumber(fetchCtx, key.hash, blockNumber)
 				default:
 					fees.header, fees.err = localBackend.HeaderByNumber(fetchCtx, rpc.BlockNumber(blockNumber))
 				}
@@ -435,10 +455,8 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 				}
 
 				blockResults[idx] = blockResult{processed: fees.results, hasResult: true}
-				// Store only when the fetched block is the one the key names,
-				// so a resolution/fetch divergence can never poison the cache.
-				if cacheable && fees.header.Hash() == blockHash {
-					oracle.historyCache.add(cacheKey{blockHash, percentileKey}, fees.results)
+				if cacheable {
+					oracle.historyCache.add(key, fees.results)
 				}
 			}
 		})

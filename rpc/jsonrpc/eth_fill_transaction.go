@@ -50,8 +50,9 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 		return nil, errors.New("maxFeePerBlobGas, if specified, must be non-zero")
 	}
 
-	// The pinned view keeps ReadCurrentHeader and the gas oracle on one head
-	// for the whole request, including the in-flight overlay block.
+	// The pinned view keeps ReadCurrentHeader and the gas-oracle fee defaults
+	// on one head (including the in-flight overlay block); the nonce and
+	// gas-estimate sub-calls still open their own txs.
 	overlayTx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
@@ -163,10 +164,7 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 }
 
 func (api *APIImpl) newGasOracle(dbTx kv.TemporalTx) *gasprice.Oracle {
-	return api.newGasOracleFromBackend(NewGasPriceOracleBackend(api.db, dbTx, api.BaseAPI))
-}
-
-func (api *APIImpl) newGasOracleFromBackend(backend *GasPriceOracleBackend) *gasprice.Oracle {
+	backend := NewGasPriceOracleBackend(api.db, dbTx, api.BaseAPI)
 	return gasprice.NewOracle(backend, ethconfig.Defaults.GPO, api.gasCache, api.feeHistoryCache, api.logger.New("app", "gasPriceOracle"))
 }
 

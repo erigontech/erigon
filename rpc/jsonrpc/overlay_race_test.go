@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -68,16 +69,32 @@ const (
 // test (the gas oracle, "latest" tag resolution) see this block as current.
 func writeHeadBlockMarkers(t *testing.T, tx kv.RwTx, header *types.Header, body *types.Body) {
 	t.Helper()
+	require.NoError(t, writeHeadBlockMarkersE(tx, header, body))
+}
+
+// writeHeadBlockMarkersE is the error-returning core, safe to call from hooks
+// running on non-test goroutines (testify's FailNow contract).
+func writeHeadBlockMarkersE(tx kv.RwTx, header *types.Header, body *types.Body) error {
 	hash := header.Hash()
 	num := header.Number.Uint64()
-	require.NoError(t, rawdb.WriteHeader(tx, header))
-	require.NoError(t, rawdb.WriteHeadHeaderHash(tx, hash))
-	require.NoError(t, rawdb.WriteCanonicalHash(tx, hash, num))
-	require.NoError(t, rawdb.WriteBody(tx, hash, num, body))
+	if err := rawdb.WriteHeader(tx, header); err != nil {
+		return err
+	}
+	if err := rawdb.WriteHeadHeaderHash(tx, hash); err != nil {
+		return err
+	}
+	if err := rawdb.WriteCanonicalHash(tx, hash, num); err != nil {
+		return err
+	}
+	if err := rawdb.WriteBody(tx, hash, num, body); err != nil {
+		return err
+	}
 	rawdb.WriteForkchoiceHead(tx, hash)
+	return nil
 }
 
 type overlayAheadHarness struct {
+	t             *testing.T
 	base          *BaseAPI
 	m             *execmoduletester.ExecModuleTester
 	overlayHeader *types.Header
@@ -167,7 +184,7 @@ func newOverlayAheadHarness(t *testing.T, withOverlayTxs bool) *overlayAheadHarn
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	base := newBaseApiWithFiltersForTest(filters, stateCache, m)
 
-	return &overlayAheadHarness{base: base, m: m, overlayHeader: overlayHeader, events: events, doms: doms}
+	return &overlayAheadHarness{t: t, base: base, m: m, overlayHeader: overlayHeader, events: events, doms: doms}
 }
 
 // overlayRaceTxPoolClient extends stubTxPoolClient with canned replies for
@@ -368,7 +385,7 @@ func TestGasPriceOracle_ForkKeepsOverlayAfterUnpublish(t *testing.T) {
 	tx, err := h.m.DB.BeginTemporalRo(h.m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	backend := NewGasPriceOracleBackend(h.m.DB, tx, h.base)
+	backend := NewGasPriceOracleBackend(h.m.DB, h.base.filters.WithTemporalOverlay(tx), h.base)
 
 	h.events.PublishOverlay(nil)
 	h.doms.Close()
@@ -393,18 +410,32 @@ func TestGasPriceOracle_ForkKeepsOverlayAfterUnpublish(t *testing.T) {
 // given header, with an empty body.
 func publishOverlayHead(t *testing.T, h *overlayAheadHarness, head *types.Header) {
 	t.Helper()
+	require.NoError(t, publishOverlayHeadE(h, head))
+}
+
+// publishOverlayHeadE is the hook-safe core: it reports errors instead of
+// calling testify's FailNow family, which is test-goroutine-only. t.Cleanup
+// is safe from any goroutine.
+func publishOverlayHeadE(h *overlayAheadHarness, head *types.Header) error {
 	ctx := h.m.Ctx
 	roTx, err := h.m.DB.BeginTemporalRo(ctx)
-	require.NoError(t, err)
-	t.Cleanup(roTx.Rollback)
+	if err != nil {
+		return err
+	}
+	h.t.Cleanup(roTx.Rollback)
 	doms, err := execctx.NewSharedDomains(ctx, roTx, h.m.Log)
-	require.NoError(t, err)
-	t.Cleanup(doms.Close)
-	require.NoError(t, doms.InitBlockOverlay(roTx, h.m.Dirs.Tmp))
-
-	writeHeadBlockMarkers(t, doms.BlockOverlay(), head, &types.Body{})
-
+	if err != nil {
+		return err
+	}
+	h.t.Cleanup(doms.Close)
+	if err := doms.InitBlockOverlay(roTx, h.m.Dirs.Tmp); err != nil {
+		return err
+	}
+	if err := writeHeadBlockMarkersE(doms.BlockOverlay(), head, &types.Body{}); err != nil {
+		return err
+	}
 	h.events.PublishOverlay(doms)
+	return nil
 }
 
 // publishSiblingOverlay publishes a second overlay holding a same-height
@@ -412,10 +443,15 @@ func publishOverlayHead(t *testing.T, h *overlayAheadHarness, head *types.Header
 // hash and header are distinguishable from the original.
 func publishSiblingOverlay(t *testing.T, h *overlayAheadHarness) *types.Header {
 	t.Helper()
-	sibling := types.CopyHeader(h.overlayHeader)
-	sibling.BaseFee = uint256.NewInt(overlayRaceBaseFee + 1111)
+	sibling := siblingOfOverlayHead(h)
 	require.NotEqual(t, h.overlayHeader.Hash(), sibling.Hash())
 	publishOverlayHead(t, h, sibling)
+	return sibling
+}
+
+func siblingOfOverlayHead(h *overlayAheadHarness) *types.Header {
+	sibling := types.CopyHeader(h.overlayHeader)
+	sibling.BaseFee = uint256.NewInt(overlayRaceBaseFee + 1111)
 	return sibling
 }
 
@@ -448,7 +484,7 @@ func TestGasPriceOracle_PinnedViewIgnoresLaterOverlayPublish(t *testing.T) {
 	tx, err := h.m.DB.BeginTemporalRo(h.m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	backend := NewGasPriceOracleBackend(h.m.DB, tx, h.base)
+	backend := NewGasPriceOracleBackend(h.m.DB, h.base.filters.WithTemporalOverlay(tx), h.base)
 
 	sibling := publishSiblingOverlay(t, h)
 
@@ -531,7 +567,7 @@ func TestGasPriceOracle_NilOverlayPinIgnoresLaterPublish(t *testing.T) {
 	tx, err := h.m.DB.BeginTemporalRo(h.m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	backend := NewGasPriceOracleBackend(h.m.DB, tx, h.base)
+	backend := NewGasPriceOracleBackend(h.m.DB, rpchelper.PinToOverlay(tx, nil), h.base)
 
 	sibling := publishSiblingOverlay(t, h)
 
@@ -567,12 +603,34 @@ func TestBeginTemporalRoWithOverlay_PreservesOptionalInterfaces(t *testing.T) {
 				"Apply must hand the pinned view to the callback, not the raw tx")
 			return nil
 		}))
+
+		require.NotPanics(t, func() { pinnedTx.FreezeInfo() },
+			"FreezeInfo must delegate to the raw tx, not promote the view's panic")
+		ut, ok := pinnedTx.(interface{ UnderlyingTx() kv.TemporalTx })
+		require.True(t, ok, "the pinned handle must not hide UnderlyingTx")
+		require.NotNil(t, ut.UnderlyingTx())
+		_, ok = pinnedTx.(interface{ Pin() kv.TemporalFilesPin })
+		require.True(t, ok, "the pinned handle must not hide Pin")
 	}
 
 	t.Run("overlay published", check)
 	h.events.PublishOverlay(nil)
 	h.doms.Close()
 	t.Run("no overlay", check)
+}
+
+// TestGasPriceOracleBackend_RequiresPinnedTx pins that the constructor rejects
+// an unpinned tx: resolving the overlay after the caller opened the tx would
+// re-open the torn (tx, overlay) window the pinned acquisition closes.
+func TestGasPriceOracleBackend_RequiresPinnedTx(t *testing.T) {
+	t.Parallel()
+	h := newOverlayAheadHarness(t, false)
+	tx, err := h.m.DB.BeginTemporalRo(h.m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	require.Panics(t, func() { NewGasPriceOracleBackend(h.m.DB, tx, h.base) },
+		"an unpinned tx must be rejected, not silently re-pinned to the live overlay")
 }
 
 // remoteishBlockReader simulates the rpcdaemon RemoteBlockReader: CanonicalHash
@@ -638,23 +696,44 @@ func TestFeeHistory_ReorgedCommittedBlockNotServedFromCache(t *testing.T) {
 }
 
 // commitOverlayBlock writes the harness's overlay head into MDBX the way the
-// background commit would (header, canonical marker, forkchoice head), so txs
-// opened afterwards resolve it as the committed head.
+// background commit would, so txs opened afterwards resolve it as the
+// committed head.
 func commitOverlayBlock(t *testing.T, h *overlayAheadHarness) {
 	t.Helper()
+	require.NoError(t, commitOverlayBlockE(h))
+}
+
+// commitOverlayBlockE writes head markers plus the Execution stage progress
+// and the canonical TxNums entry production advances with them: without those
+// two, state readers reject the new head.
+func commitOverlayBlockE(h *overlayAheadHarness) error {
 	rwTx, err := h.m.DB.BeginRw(h.m.Ctx)
-	require.NoError(t, err)
+	if err != nil {
+		return err
+	}
 	defer rwTx.Rollback()
-	writeHeadBlockMarkers(t, rwTx, h.overlayHeader, &types.Body{})
-	require.NoError(t, rwTx.Commit())
+	if err := writeHeadBlockMarkersE(rwTx, h.overlayHeader, &types.Body{}); err != nil {
+		return err
+	}
+	num := h.overlayHeader.Number.Uint64()
+	if err := stages.SaveStageProgress(rwTx, stages.Execution, num); err != nil {
+		return err
+	}
+	if err := rawdb.AppendCanonicalTxNums(rwTx, num); err != nil {
+		return err
+	}
+	return rwTx.Commit()
 }
 
 // beginHookDB runs a hook right after each BeginTemporalRo returns, simulating
-// commit/publish activity landing while a request acquires its tx. One-shot
-// scenarios pass a sync.OnceFunc-wrapped hook.
+// commit/publish activity landing while a request acquires its tx. Hooks also
+// run on the oracle's errgroup goroutines (via Fork), so they must not use
+// testify's FailNow family; failures are reported with the goroutine-safe
+// t.Errorf.
 type beginHookDB struct {
 	kv.TemporalRoDB
-	hook func()
+	t    *testing.T
+	hook func() error
 }
 
 func (db *beginHookDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
@@ -662,8 +741,28 @@ func (db *beginHookDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, erro
 	if err != nil {
 		return nil, err
 	}
-	db.hook()
+	if hookErr := db.hook(); hookErr != nil {
+		db.t.Errorf("begin hook: %v", hookErr)
+	}
 	return tx, nil
+}
+
+// newCycleHookDB returns a DB whose first BeginTemporalRo runs the
+// publish/commit/unpublish cycle (optionally skipping the initial publish):
+// the window closing while a request acquires its tx.
+func newCycleHookDB(h *overlayAheadHarness, publishFirst bool) *beginHookDB {
+	return &beginHookDB{TemporalRoDB: h.m.DB, t: h.t, hook: sync.OnceValue(func() error {
+		if publishFirst {
+			if err := publishOverlayHeadE(h, h.overlayHeader); err != nil {
+				return err
+			}
+		}
+		if err := commitOverlayBlockE(h); err != nil {
+			return err
+		}
+		h.events.PublishOverlay(nil)
+		return nil
+	})}
 }
 
 // TestFeeHistory_PublishCycleDuringTxAcquisition pins that overlay-capture
@@ -677,11 +776,7 @@ func TestFeeHistory_PublishCycleDuringTxAcquisition(t *testing.T) {
 	h.events.PublishOverlay(nil)
 	h.doms.Close()
 
-	db := &beginHookDB{TemporalRoDB: h.m.DB, hook: sync.OnceFunc(func() {
-		publishOverlayHead(t, h, h.overlayHeader)
-		commitOverlayBlock(t, h)
-		h.events.PublishOverlay(nil)
-	})}
+	db := newCycleHookDB(h, true)
 	api := newEthApiForTest(h.base, db, nil, nil)
 
 	got, err := api.FeeHistory(h.m.Ctx, 1, rpc.LatestBlockNumber, nil)
@@ -699,7 +794,7 @@ func TestFeeHistory_PublishCycleDuringTxAcquisition(t *testing.T) {
 func TestFeeHistory_OverlayUnstableDuringTxAcquisition(t *testing.T) {
 	t.Parallel()
 	h := newOverlayAheadHarness(t, false)
-	db := &beginHookDB{TemporalRoDB: h.m.DB, hook: func() { publishSiblingOverlay(t, h) }}
+	db := &beginHookDB{TemporalRoDB: h.m.DB, t: h.t, hook: func() error { return publishOverlayHeadE(h, siblingOfOverlayHead(h)) }}
 	api := newEthApiForTest(h.base, db, nil, nil)
 
 	got, err := api.FeeHistory(h.m.Ctx, 1, rpc.LatestBlockNumber, nil)
@@ -759,11 +854,7 @@ func TestBlockNumber_PublishCycleDuringTxAcquisition(t *testing.T) {
 	h.events.PublishOverlay(nil)
 	h.doms.Close()
 
-	db := &beginHookDB{TemporalRoDB: h.m.DB, hook: sync.OnceFunc(func() {
-		publishOverlayHead(t, h, h.overlayHeader)
-		commitOverlayBlock(t, h)
-		h.events.PublishOverlay(nil)
-	})}
+	db := newCycleHookDB(h, true)
 	api := newEthApiForTest(h.base, db, nil, nil)
 
 	got, err := api.BlockNumber(h.m.Ctx)
@@ -780,11 +871,7 @@ func TestBaseFee_PublishCycleDuringTxAcquisition(t *testing.T) {
 	h.events.PublishOverlay(nil)
 	h.doms.Close()
 
-	db := &beginHookDB{TemporalRoDB: h.m.DB, hook: sync.OnceFunc(func() {
-		publishOverlayHead(t, h, h.overlayHeader)
-		commitOverlayBlock(t, h)
-		h.events.PublishOverlay(nil)
-	})}
+	db := newCycleHookDB(h, true)
 	api := newEthApiForTest(h.base, db, nil, nil)
 
 	got, err := api.BaseFee(h.m.Ctx)
@@ -805,11 +892,7 @@ func TestFillTransaction_PublishCycleDuringTxAcquisition(t *testing.T) {
 	h.events.PublishOverlay(nil)
 	h.doms.Close()
 
-	db := &beginHookDB{TemporalRoDB: h.m.DB, hook: sync.OnceFunc(func() {
-		publishOverlayHead(t, h, h.overlayHeader)
-		commitOverlayBlock(t, h)
-		h.events.PublishOverlay(nil)
-	})}
+	db := newCycleHookDB(h, true)
 	api := newEthApiForTest(h.base, db, stubTxPoolClient{}, nil)
 
 	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
@@ -833,10 +916,7 @@ func TestFillTransaction_PublishCycleDuringTxAcquisition(t *testing.T) {
 func TestFeeHistory_HeadCommittedDuringTxAcquisition(t *testing.T) {
 	t.Parallel()
 	h := newOverlayAheadHarness(t, false)
-	db := &beginHookDB{TemporalRoDB: h.m.DB, hook: sync.OnceFunc(func() {
-		commitOverlayBlock(t, h)
-		h.events.PublishOverlay(nil)
-	})}
+	db := newCycleHookDB(h, false)
 	api := newEthApiForTest(h.base, db, nil, nil)
 
 	got, err := api.FeeHistory(h.m.Ctx, 1, rpc.LatestBlockNumber, nil)

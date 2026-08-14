@@ -1102,10 +1102,8 @@ type OverlayViewCarrier interface {
 	OverlayView() (overlay *MemoryMutation, pinned bool)
 }
 
-// CarriesOverlayView reports whether tx is already a pinned overlay view.
-// Overlay wrap points skip such txs so the first wrap pins the overlay a
-// request reads from: re-wrapping would layer a possibly newer overlay on
-// top, mixing two heads within one request.
+// CarriesOverlayView reports whether tx is already a pinned overlay view, so
+// wrap points leave it alone (rationale on rpchelper.PinToOverlay).
 func CarriesOverlayView(tx kv.Tx) bool {
 	_, ok := ViewOverlay(tx)
 	return ok

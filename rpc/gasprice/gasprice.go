@@ -51,6 +51,16 @@ type OracleBackend interface {
 	// the backend's view, or ok=false when the height is beyond the head.
 	CanonicalHash(ctx context.Context, number uint64) (common.Hash, bool, error)
 
+	// FrozenBlocks returns the frozen (snapshot) boundary: the canonical
+	// number-to-hash mapping at or below it is immutable.
+	FrozenBlocks() (uint64, error)
+
+	// HeaderByHashNumber and BlockByHashNumber fetch by an already-resolved
+	// canonical (hash, number) pair, so a cached entry can never name a
+	// different block than the one processed.
+	HeaderByHashNumber(ctx context.Context, hash common.Hash, number uint64) (*types.Header, error)
+	BlockByHashNumber(ctx context.Context, hash common.Hash, number uint64) (*types.Block, error)
+
 	// Fork opens a new TemporalTx and returns a goroutine-local backend together
 	// with a cleanup function (call via defer cleanup()).
 	// If the backend does not support forking, it returns (nil, nil, nil) and

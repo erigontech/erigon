@@ -49,7 +49,6 @@ func PinToOverlay(tx kv.TemporalTx, overlay *membatchwithdb.MemoryMutation) kv.T
 	return &PinnedRoTx{TemporalTx: view, raw: tx, overlay: overlay}
 }
 
-// Rollback releases the raw tx; the view in between owns no resources.
 func (t *PinnedRoTx) Rollback() {
 	t.raw.Rollback()
 }
@@ -68,7 +67,30 @@ func (t *PinnedRoTx) BlockFilesRoTx() *blocksnapshots.View {
 	return nil
 }
 
-// Apply hands the pinned handle to the callback, not the raw tx.
-func (t *PinnedRoTx) Apply(_ context.Context, f func(tx kv.Tx) error) error {
-	return f(t)
+// Apply goes through the raw tx's guard (closed-tx checks) but hands the
+// pinned handle to the callback, not the raw tx.
+func (t *PinnedRoTx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
+	return t.raw.Apply(ctx, func(kv.Tx) error { return f(t) })
+}
+
+// FreezeInfo delegates to the raw tx: the overlay read view in between does
+// not support it.
+func (t *PinnedRoTx) FreezeInfo() kv.FreezeInfo {
+	return t.raw.FreezeInfo()
+}
+
+// UnderlyingTx exposes the fallback tx like the wrapped view would.
+func (t *PinnedRoTx) UnderlyingTx() kv.TemporalTx {
+	if p, ok := t.TemporalTx.(interface{ UnderlyingTx() kv.TemporalTx }); ok {
+		return p.UnderlyingTx()
+	}
+	return t.raw
+}
+
+// Pin forwards the files-pin capability of the wrapped view (or the raw tx).
+func (t *PinnedRoTx) Pin() kv.TemporalFilesPin {
+	if p, ok := t.TemporalTx.(interface{ Pin() kv.TemporalFilesPin }); ok {
+		return p.Pin()
+	}
+	return nil
 }

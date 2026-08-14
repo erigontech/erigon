@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
@@ -495,12 +496,13 @@ type GasPriceOracleBackend struct {
 	baseApi *BaseAPI
 }
 
-// NewGasPriceOracleBackend pins the block overlay once so the head the oracle
-// resolves stays readable for the whole request, including on the txs Fork
-// opens. A tx that already carries a pinned view keeps its own overlay.
+// NewGasPriceOracleBackend requires a tx already pinned at acquisition (see
+// rpchelper.BeginTemporalRoWithOverlay): resolving the overlay here, after
+// the caller opened the tx, would re-open the torn (tx, overlay) window the
+// pinned acquisition exists to close.
 func NewGasPriceOracleBackend(db kv.TemporalRoDB, tx kv.TemporalTx, baseApi *BaseAPI) *GasPriceOracleBackend {
 	if !membatchwithdb.CarriesOverlayView(tx) {
-		tx = rpchelper.PinToOverlay(tx, baseApi.filters.LatestOverlay())
+		panic("NewGasPriceOracleBackend: tx must be pinned via rpchelper.BeginTemporalRoWithOverlay or PinToOverlay")
 	}
 	return &GasPriceOracleBackend{db: db, tx: tx, baseApi: baseApi}
 }
@@ -513,8 +515,7 @@ func (b *GasPriceOracleBackend) Fork(ctx context.Context) (gasprice.OracleBacken
 	if err != nil {
 		return nil, nil, err
 	}
-	// Reuse the parent's pinned overlay instead of re-resolving: it may have
-	// been unpublished since the request started.
+	// Reuse the parent's pin (rationale on rpchelper.PinToOverlay).
 	overlay, _ := membatchwithdb.ViewOverlay(b.tx)
 	return &GasPriceOracleBackend{db: b.db, tx: rpchelper.PinToOverlay(tx, overlay), baseApi: b.baseApi},
 		func() { tx.Rollback() },
@@ -534,6 +535,21 @@ func (b *GasPriceOracleBackend) CanonicalHash(ctx context.Context, number uint64
 		return hash, true, nil
 	}
 	return b.baseApi._blockReader.CanonicalHash(ctx, b.tx, number)
+}
+
+// FrozenBlocks reads the Snapshots stage progress through the pinned tx — one
+// KV read that works in both embedded and remote mode, unlike the block
+// reader's FrozenBlocks which panics remotely.
+func (b *GasPriceOracleBackend) FrozenBlocks() (uint64, error) {
+	return stages.GetStageProgress(b.tx, stages.Snapshots)
+}
+
+func (b *GasPriceOracleBackend) HeaderByHashNumber(ctx context.Context, hash common.Hash, number uint64) (*types.Header, error) {
+	return b.baseApi._blockReader.Header(ctx, b.tx, hash, number)
+}
+
+func (b *GasPriceOracleBackend) BlockByHashNumber(ctx context.Context, hash common.Hash, number uint64) (*types.Block, error) {
+	return b.baseApi.blockWithSenders(ctx, b.tx, hash, number)
 }
 
 func (b *GasPriceOracleBackend) HeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error) {

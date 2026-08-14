@@ -22,9 +22,12 @@ package gasprice_test
 import (
 	"container/heap"
 	"context"
+	"encoding/binary"
+	"errors"
 	"math"
 	"math/big"
 	"math/rand"
+	"sync/atomic"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -43,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/rpc/gasprice/gaspricecfg"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 func newTestBackend(t *testing.T) *execmoduletester.ExecModuleTester {
@@ -95,7 +99,7 @@ func TestSuggestPrice(t *testing.T) {
 	defer tx.Rollback()
 
 	cache := jsonrpc.NewGasPriceCache()
-	oracle := gasprice.NewOracle(jsonrpc.NewGasPriceOracleBackend(nil, tx, baseApi), config, cache, nil, log.New())
+	oracle := gasprice.NewOracle(jsonrpc.NewGasPriceOracleBackend(nil, rpchelper.PinToOverlay(tx, nil), baseApi), config, cache, nil, log.New())
 
 	// The gas price sampled is: 32G, 31G, 30G, 29G, 28G, 27G
 	got, err := oracle.SuggestTipCap(context.Background())
@@ -272,10 +276,23 @@ func BenchmarkKthPercentile(b *testing.B) {
 // cancelled, allowing us to verify that cancellation propagates correctly
 // through fetchBlockPricesParallel.
 type mockOracleBackend struct {
-	head *types.Header
+	head           *types.Header
+	frozen         uint64
+	canonicalErr   error
+	canonicalCalls atomic.Int32
+	headerCalls    atomic.Int32
+}
+
+// mockHeightHash derives a distinct hash per height, honoring the "one hash
+// per block" contract the fee-history cache keys rely on.
+func mockHeightHash(number uint64) common.Hash {
+	var h common.Hash
+	binary.BigEndian.PutUint64(h[:8], number+1)
+	return h
 }
 
 func (m *mockOracleBackend) HeaderByNumber(_ context.Context, _ rpc.BlockNumber) (*types.Header, error) {
+	m.headerCalls.Add(1)
 	return m.head, nil
 }
 
@@ -301,14 +318,73 @@ func (m *mockOracleBackend) PendingBlockAndReceipts() (*types.Block, types.Recei
 }
 
 func (m *mockOracleBackend) CanonicalHash(_ context.Context, number uint64) (common.Hash, bool, error) {
+	m.canonicalCalls.Add(1)
+	if m.canonicalErr != nil {
+		return common.Hash{}, false, m.canonicalErr
+	}
 	if number > m.head.Number.Uint64() {
 		return common.Hash{}, false, nil
 	}
-	return m.head.Hash(), true, nil
+	return mockHeightHash(number), true, nil
+}
+
+func (m *mockOracleBackend) FrozenBlocks() (uint64, error) {
+	return m.frozen, nil
+}
+
+func (m *mockOracleBackend) HeaderByHashNumber(ctx context.Context, _ common.Hash, _ uint64) (*types.Header, error) {
+	return m.HeaderByNumber(ctx, 0)
+}
+
+func (m *mockOracleBackend) BlockByHashNumber(ctx context.Context, _ common.Hash, _ uint64) (*types.Block, error) {
+	return m.BlockByNumber(ctx, 0)
 }
 
 func (m *mockOracleBackend) Fork(_ context.Context) (gasprice.OracleBackend, func(), error) {
 	return nil, nil, nil // sequential mode
+}
+
+// TestFeeHistory_CanonicalHashErrorDegradesToUncached pins that a transient
+// error on the auxiliary cache-key resolution degrades the block to uncached
+// instead of failing the whole request — the number-keyed hit path had no
+// failure mode at all.
+func TestFeeHistory_CanonicalHashErrorDegradesToUncached(t *testing.T) {
+	head := types.NewEmptyHeaderForAssembling()
+	head.Number.SetUint64(10)
+	head.GasLimit = 30_000_000
+	head.BaseFee = uint256.NewInt(1_000_000_000)
+
+	backend := &mockOracleBackend{head: head, canonicalErr: errors.New("transient lookup failure")}
+	oracle := gasprice.NewOracle(backend, gaspricecfg.Config{Blocks: 2, Percentile: 60}, jsonrpc.NewGasPriceCache(), gasprice.NewFeeHistoryCache(), log.New())
+
+	_, _, baseFee, _, _, _, err := oracle.FeeHistory(context.Background(), 3, rpc.LatestBlockNumber, nil)
+	require.NoError(t, err, "a cache-key resolution error must degrade to uncached, not fail the request")
+	require.Len(t, baseFee, 4)
+}
+
+// TestFeeHistory_FrozenRangeCachesByNumberWithoutResolution pins that at or
+// below the frozen boundary — where the number-to-hash mapping is immutable —
+// no per-block hash resolution happens and repeat requests hit the cache.
+func TestFeeHistory_FrozenRangeCachesByNumberWithoutResolution(t *testing.T) {
+	head := types.NewEmptyHeaderForAssembling()
+	head.Number.SetUint64(10)
+	head.GasLimit = 30_000_000
+	head.BaseFee = uint256.NewInt(1_000_000_000)
+
+	backend := &mockOracleBackend{head: head, frozen: 10}
+	oracle := gasprice.NewOracle(backend, gaspricecfg.Config{Blocks: 2, Percentile: 60}, jsonrpc.NewGasPriceCache(), gasprice.NewFeeHistoryCache(), log.New())
+
+	_, _, _, _, _, _, err := oracle.FeeHistory(context.Background(), 4, rpc.LatestBlockNumber, nil)
+	require.NoError(t, err)
+	require.EqualValues(t, 0, backend.canonicalCalls.Load(),
+		"the frozen range must not resolve hashes: the mapping is immutable")
+	fetchesAfterFirst := backend.headerCalls.Load()
+
+	_, _, _, _, _, _, err = oracle.FeeHistory(context.Background(), 4, rpc.LatestBlockNumber, nil)
+	require.NoError(t, err)
+	require.EqualValues(t, 0, backend.canonicalCalls.Load())
+	require.Equal(t, fetchesAfterFirst, backend.headerCalls.Load(),
+		"the second request must be served from number-keyed cache entries")
 }
 
 // TestSuggestTipCap_EmptyBlocksFallbackMatchesGeth verifies that on a chain
@@ -408,7 +484,7 @@ func TestSuggestTipCap_SparseBlocks(t *testing.T) {
 	defer dbTx.Rollback()
 
 	cache := jsonrpc.NewGasPriceCache()
-	oracle := gasprice.NewOracle(jsonrpc.NewGasPriceOracleBackend(nil, dbTx, baseApi), cfg, cache, nil, log.New())
+	oracle := gasprice.NewOracle(jsonrpc.NewGasPriceOracleBackend(nil, rpchelper.PinToOverlay(dbTx, nil), baseApi), cfg, cache, nil, log.New())
 
 	got, err := oracle.SuggestTipCap(context.Background())
 	require.NoError(t, err)
@@ -445,7 +521,7 @@ func TestSuggestTipCap_AllEmptyBlocks(t *testing.T) {
 	defer dbTx.Rollback()
 
 	cache := jsonrpc.NewGasPriceCache()
-	oracle := gasprice.NewOracle(jsonrpc.NewGasPriceOracleBackend(nil, dbTx, baseApi), cfg, cache, nil, log.New())
+	oracle := gasprice.NewOracle(jsonrpc.NewGasPriceOracleBackend(nil, rpchelper.PinToOverlay(dbTx, nil), baseApi), cfg, cache, nil, log.New())
 
 	// With no transactions anywhere, the oracle returns (nil, nil): no price, no error.
 	_, err = oracle.SuggestTipCap(context.Background())
