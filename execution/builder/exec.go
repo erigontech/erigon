@@ -232,42 +232,18 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 
 	// When assembled in versioned (BAL) mode, FinalizeBlockExecution skipped the
 	// so.data CommitBlock; commit the accumulated per-phase write-sets to the
-	// domains via WriteSet.Normalize/Apply instead — the same path the parallel
-	// executor and block generation use. Each recorded phase (init/txs/finalize)
-	// is applied in order so the next phase's stateReader fallback sees it.
+	// domains via ApplyWrites instead — the same domain apply the parallel
+	// executor and block generation use (rw_v3 handles the self-destruct delete,
+	// EIP-161 removal and storage-subtree cascade). Each recorded phase
+	// (init/txs/finalize) is applied in order.
 	if ibs.IsVersioned() {
 		blockCtx := protocol.NewEVMBlockContext(current.Header, protocol.GetHashFn(current.Header, nil), cfg.engine, accounts.NilAddress, cfg.chainConfig)
 		blockRules := blockCtx.Rules(cfg.chainConfig)
-		var domainKeysErr error
-		domainStorageKeys := func(addr accounts.Address) []accounts.StorageKey {
-			av := addr.Value()
-			const addrLen, hashLen = 20, 32
-			var keys []accounts.StorageKey
-			if iterErr := sd.IteratePrefix(kv.StorageDomain, av[:], tx, func(k, _ []byte) (bool, error) {
-				if len(k) >= addrLen+hashLen {
-					keys = append(keys, accounts.InternKey(common.BytesToHash(k[addrLen:addrLen+hashLen])))
-				}
-				return true, nil
-			}); iterErr != nil {
-				domainKeysErr = iterErr
-				return nil
-			}
-			return keys
-		}
-		emptyRemoval := blockHeight != 0 && cfg.chainConfig.IsEIP161Enabled(blockHeight)
-		isAura := cfg.chainConfig.Aura != nil
-		for i, ws := range ba.BalIO().Outputs() {
+		for _, ws := range ba.BalIO().Outputs() {
 			if ws == nil || ws.IsEmpty() {
 				continue
 			}
-			normalized, normErr := ws.Normalize(ibs.VersionMap(), i-1, 0, stateReader, domainStorageKeys, emptyRemoval, isAura, blockRules.IsAmsterdam)
-			if domainKeysErr != nil {
-				return fmt.Errorf("iterate storage prefix for block write normalization: %w", domainKeysErr)
-			}
-			if normErr != nil {
-				return fmt.Errorf("normalize block writes: %w", normErr)
-			}
-			if err := state.ApplyWrites(normalized, sd, tx, blockHeight, txNum, nil, blockRules, nil, false); err != nil {
+			if err := state.ApplyWrites(ws, sd, tx, blockHeight, txNum, nil, blockRules, nil, false); err != nil {
 				return fmt.Errorf("apply versioned block writes: %w", err)
 			}
 		}

@@ -583,43 +583,17 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			blockContext := protocol.NewEVMBlockContext(b.header, protocol.GetHashFn(b.header, nil), b.engine, accounts.NilAddress, config)
 			blockRules := blockContext.Rules(config)
 			if b.versionMap != nil && b.blockIO != nil {
-				// Commit from the versionMap write-set via WriteSet.Normalize/Apply
-				// — the same path the parallel executor uses — instead of so.data
-				// via CommitBlock, so generation matches import once the write path
-				// bypasses so.data. Each recorded phase (init txIdx=-1, txs,
-				// finalize) is applied in order; applying a phase before normalizing
-				// the next lets the next phase's stateReader fallback see it.
+				// Commit from the versionMap write-set via ApplyWrites — the same
+				// domain apply the parallel executor uses (rw_v3 handles the
+				// self-destruct delete, EIP-161 removal and storage-subtree cascade)
+				// — instead of so.data via CommitBlock, so generation matches import.
+				// Each recorded phase (init txIdx=-1, txs, finalize) is applied in order.
 				blockNum := b.header.Number.Uint64()
-				var domainKeysErr error
-				domainStorageKeys := func(addr accounts.Address) []accounts.StorageKey {
-					av := addr.Value()
-					const addrLen, hashLen = 20, 32
-					var keys []accounts.StorageKey
-					if iterErr := domains.IteratePrefix(kv.StorageDomain, av[:], tx, func(k, _ []byte) (bool, error) {
-						if len(k) >= addrLen+hashLen {
-							keys = append(keys, accounts.InternKey(common.BytesToHash(k[addrLen:addrLen+hashLen])))
-						}
-						return true, nil
-					}); iterErr != nil {
-						domainKeysErr = iterErr
-						return nil
-					}
-					return keys
-				}
-				emptyRemoval := blockNum != 0 && config.IsEIP161Enabled(blockNum)
-				isAura := config.Aura != nil
-				for i, ws := range b.blockIO.Outputs() {
+				for _, ws := range b.blockIO.Outputs() {
 					if ws == nil || ws.IsEmpty() {
 						continue
 					}
-					normalized, normErr := ws.Normalize(b.versionMap, i-1, 0, stateReader, domainStorageKeys, emptyRemoval, isAura, config.IsAmsterdam(b.header.Time))
-					if domainKeysErr != nil {
-						return nil, nil, nil, fmt.Errorf("iterate storage prefix for block write normalization: %w", domainKeysErr)
-					}
-					if normErr != nil {
-						return nil, nil, nil, fmt.Errorf("normalize block writes: %w", normErr)
-					}
-					if err := state.ApplyWrites(normalized, domains, tx, blockNum, txNum, nil, blockRules, nil, false); err != nil {
+					if err := state.ApplyWrites(ws, domains, tx, blockNum, txNum, nil, blockRules, nil, false); err != nil {
 						return nil, nil, nil, fmt.Errorf("apply versioned block writes: %w", err)
 					}
 				}
