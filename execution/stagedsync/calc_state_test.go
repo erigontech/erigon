@@ -45,6 +45,7 @@ func newTestCalcState() *calcState {
 		storageState: make(map[accounts.Address]map[accounts.StorageKey]uint256.Int),
 		storageDirty: make(map[accounts.Address]map[accounts.StorageKey]bool),
 		sdSubtree:    make(map[accounts.Address]bool),
+		fieldMask:    make(map[accounts.Address]uint8),
 	}
 }
 

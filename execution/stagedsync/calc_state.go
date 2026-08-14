@@ -17,6 +17,12 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
+const (
+	fieldBal   uint8 = 1 << 0
+	fieldNonce uint8 = 1 << 1
+	fieldCode  uint8 = 1 << 2
+)
+
 // calcAccountState holds the accumulated account state for the commitment calculator.
 type calcAccountState struct {
 	Balance     uint256.Int
@@ -89,6 +95,14 @@ type calcState struct {
 	// enumeration.
 	sdSubtree map[accounts.Address]bool
 
+	// fieldMask records whether the current block explicitly wrote any account
+	// field (bit0=balance, bit1=nonce, bit2=codeHash). EIP-161 removal requires at
+	// least one field write so a storage-only dirty account (present only to refold
+	// its storageRoot) is not mistaken for a touched-empty account — matching
+	// Normalize. Kept out of calcAccountState so it does not enter the raw-view
+	// vs normalize account equality (the two paths carry different field writes).
+	fieldMask map[accounts.Address]uint8
+
 	// domainReader provides lazy-load from the domain via asOfStateReader.
 	domainReader *calcDomainReader
 
@@ -114,6 +128,7 @@ func newCalcState(reader *asOfStateReader, logger log.Logger, logPrefix string) 
 		storageState: make(map[accounts.Address]map[accounts.StorageKey]uint256.Int),
 		storageDirty: make(map[accounts.Address]map[accounts.StorageKey]bool),
 		sdSubtree:    make(map[accounts.Address]bool),
+		fieldMask:    make(map[accounts.Address]uint8),
 		domainReader: &calcDomainReader{reader: reader},
 		logger:       logger,
 		logPrefix:    logPrefix,
@@ -185,6 +200,7 @@ func (cs *calcState) ApplyWrites(writes state.WriteSetView, eip8246 bool) {
 		acc := cs.ensureAccount(addr)
 		acc.Balance = vw.Val
 		acc.dirty = true
+		cs.fieldMask[addr] |= fieldBal
 		if clearsDeleted(addr, !acc.Balance.IsZero()) {
 			acc.Deleted = false
 		}
@@ -200,6 +216,7 @@ func (cs *calcState) ApplyWrites(writes state.WriteSetView, eip8246 bool) {
 		acc := cs.ensureAccount(addr)
 		acc.Nonce = vw.Val
 		acc.dirty = true
+		cs.fieldMask[addr] |= fieldNonce
 		if !sdThisCall[addr] {
 			acc.Deleted = false
 		}
@@ -208,6 +225,7 @@ func (cs *calcState) ApplyWrites(writes state.WriteSetView, eip8246 bool) {
 		acc := cs.ensureAccount(addr)
 		acc.CodeHash = vw.Val.Value()
 		acc.dirty = true
+		cs.fieldMask[addr] |= fieldCode
 		if !sdThisCall[addr] {
 			acc.Deleted = false
 		}
@@ -382,6 +400,14 @@ func (cs *calcState) ApplyEIP161Removal(emptyRemoval, isAura bool) {
 		if !acc.dirty || acc.Deleted {
 			continue
 		}
+		// A touched-empty account (EIP-161 removal) is touched via a balance/nonce/
+		// codeHash interaction, so it carries at least one field write. An account
+		// dirtied solely by a storage write (fieldMask == 0, present only to refold
+		// its storageRoot) is not touched-empty — keep it, matching Normalize, which
+		// removes only accounts that wrote account fields.
+		if cs.fieldMask[addr] == 0 {
+			continue
+		}
 		if acc.Balance.IsZero() && acc.Nonce == 0 && acc.CodeHash == empty.CodeHash &&
 			state.EIP161EmptyRemoval(emptyRemoval, isAura, addr) {
 			acc.Deleted = true
@@ -485,4 +511,5 @@ func (cs *calcState) ResetBlockFlags() {
 		delete(cs.storageDirty, addr)
 	}
 	clear(cs.sdSubtree)
+	clear(cs.fieldMask)
 }
