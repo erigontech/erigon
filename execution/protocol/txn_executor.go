@@ -86,13 +86,11 @@ func (e ErrExecAbortError) Error() string {
 	}
 }
 
-// IsError reports whether the abort carries a genuine, non-dependency
-// execution error. A dependency abort (DependencyTxIndex >= 0, raised by the
-// ErrDependency panic when a versioned read observes an unsettled predecessor)
-// carries no OriginError and is resolved by re-execution. An IsError abort, by
-// contrast, must be validated before it can be attributed to genuinely invalid
-// block data rather than stale speculative input — the two are mutually
-// exclusive, since Execute's recover sets OriginError only when DepTxIndex < 0.
+// IsError reports whether the abort carries an execution error rather than only
+// a speculative dependency. Dependency aborts raised by state.ErrDependency
+// carry no OriginError and are retried; DependencyTxIndex is scheduling
+// metadata, not the classifier. An OriginError must be validated against settled
+// input before it can be attributed to block data rather than stale state.
 func (e ErrExecAbortError) IsError() bool {
 	return e.OriginError != nil
 }
