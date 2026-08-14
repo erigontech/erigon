@@ -106,7 +106,7 @@ func (b *BlockBuilder) Cancel() {
 	b.interrupt.Store(true)
 }
 
-// Failed reports whether the builder finished without producing anything. The error is latched, so
+// Failed reports whether the builder has finished and ended in an error. That error is latched, so
 // a caller that would otherwise reuse this builder has to treat it as absent. Being cancelled is
 // not failure: a stopped builder still holds the payload it was stopped for.
 func (b *BlockBuilder) Failed() bool {

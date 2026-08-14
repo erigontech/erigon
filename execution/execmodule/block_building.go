@@ -204,11 +204,13 @@ func (e *ExecModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (A
 	}
 	blockWithReceipts, err := entry.builder.Stop(ctx)
 	if err != nil {
-		// Keeping a failed entry would hand the same latched error to every retry. A caller whose
-		// own context expired says nothing about the builder.
-		if ctx.Err() == nil {
-			e.dropBuilder(payloadID, entry)
+		// A caller that gave up says nothing about the builder, which keeps running and may still
+		// be collected. Only a builder that actually failed is reported and dropped, so its latched
+		// error stops being handed to every retry.
+		if ctx.Err() != nil {
+			return AssembledBlockResult{}, err
 		}
+		e.dropBuilder(payloadID, entry)
 		e.logger.Error("Failed to build PoS block", "err", err)
 		return AssembledBlockResult{}, err
 	}

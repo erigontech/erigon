@@ -254,6 +254,39 @@ func TestGetAssembledBlockDropsFailedBuilder(t *testing.T) {
 	require.NotContains(t, module.buildersByTimestamp, uint64(100))
 }
 
+func TestGetAssembledBlockKeepsBuilderWhenTheCallerGivesUp(t *testing.T) {
+	started := make(chan struct{}, 1)
+	module := &ExecModule{
+		logger:    log.Root(),
+		config:    &chain.Config{},
+		semaphore: semaphore.NewWeighted(1),
+		builders:  map[uint64]*builderEntry{},
+		builderFunc: func(_ *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
+			started <- struct{}{}
+			for !interrupt.Load() {
+				time.Sleep(time.Millisecond)
+			}
+			return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil)}, nil
+		},
+	}
+
+	result, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: 100, ParentHash: common.Hash{0x01}})
+	require.NoError(t, err)
+	<-started
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err = module.GetAssembledBlock(ctx, result.PayloadID)
+	require.ErrorIs(t, err, context.Canceled)
+
+	// The caller gave up; the builder did not. Dropping it here would lose a payload that is still
+	// on its way, and reporting it as a build failure would misattribute the timeout.
+	require.Contains(t, module.builders, result.PayloadID)
+	require.Equal(t, result.PayloadID, module.buildersByTimestamp[100])
+
+	_, _ = module.builders[result.PayloadID].builder.Stop(context.Background())
+}
+
 func TestAssembleBlockOwnsParameters(t *testing.T) {
 	type observedParameters struct {
 		parentRoot common.Hash
