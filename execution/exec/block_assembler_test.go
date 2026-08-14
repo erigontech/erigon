@@ -41,13 +41,16 @@ import (
 // TestBlockAssemblerMinTxGasEarlyExit exercises the early-exit condition in
 // AddTransactions:
 //
-//	gasPool.Gas() < minTxGas || (isAmsterdam && gasPool.StateGasAvailable() < minTxGas)
+//	gasPool.Gas() < minTxGas
 //
 // Pre-Amsterdam the assembler stops when remaining execution gas falls below
 // params.TxGas (21,000). Post-Amsterdam EIP-2780 lowers the minimum intrinsic
-// cost to params.TxBaseEIP2780 (12,000) for self-transfers, and EIP-8037 adds
-// a state-gas dimension: the inclusion check reserves the full tx.gas_limit
-// in the state pool, so the assembler also exits when state gas is exhausted.
+// cost to params.TxBaseEIP2780 (12,000) for self-transfers.
+//
+// Only execution gas is checked. AA transactions (RIP-7560) bypass
+// CheckBlockGasInclusion and consume execution gas only, so a state-gas
+// early exit would incorrectly skip valid AA txns. State-gas exhaustion is
+// handled per-tx by CheckBlockGasInclusion inside commitTx.
 //
 // Each subtest uses a zero-value self-transfer (to == sender, value == 0) so
 // the intrinsic gas is exactly the fork-specific minimum:
@@ -79,11 +82,10 @@ func TestBlockAssemblerMinTxGasEarlyExit(t *testing.T) {
 		name          string
 		amsterdam     bool
 		gasUsed       uint64 // execution gas already consumed; remaining = blockGasLimit - gasUsed
-		stateGasUsed  uint64 // state gas already consumed (post-Amsterdam only)
+		stateGasUsed  uint64 // state gas already consumed
 		wantEarlyExit bool
 	}{
 		// ── Pre-Amsterdam: threshold is params.TxGas (21,000) ──
-		// Part B (state check) is always false due to the isAmsterdam guard.
 
 		// Off-by-one below threshold: 20,999 < 21,000 → exit.
 		{"pre-Amsterdam/exec=20999/exits", false, 79_001, 0, true},
@@ -93,12 +95,11 @@ func TestBlockAssemblerMinTxGasEarlyExit(t *testing.T) {
 		// Paired with post-Amsterdam/exec=15000, this forms the core
 		// regression pair: same gas, different fork, different outcome.
 		{"pre-Amsterdam/exec=15000/exits", false, 85_000, 0, true},
-		// State gas exhausted but isAmsterdam guard prevents early exit.
-		// Verifies the guard: pre-Amsterdam ignores state gas entirely.
+		// State gas exhausted pre-Amsterdam: irrelevant, only exec matters.
 		{"pre-Amsterdam/stateExhausted/continues", false, 79_000, 88_001, false},
 
 		// ── Post-Amsterdam: threshold is params.TxBaseEIP2780 (12,000) ──
-		// Both Part A (execution check) and Part B (state check) can trigger.
+		// Only execution gas triggers the early exit.
 
 		// Off-by-one below threshold: 11,999 < 12,000 → exit.
 		{"post-Amsterdam/exec=11999/exits", true, 88_001, 0, true},
@@ -108,22 +109,17 @@ func TestBlockAssemblerMinTxGasEarlyExit(t *testing.T) {
 		// Paired with pre-Amsterdam/exec=15000, this forms the core
 		// regression pair: same gas, different fork, different outcome.
 		{"post-Amsterdam/exec=15000/continues", true, 85_000, 0, false},
-		// State gas below threshold (execution gas plentiful).
-		// InclusionContributions reserves the full tx.gas_limit in the state
-		// pool, so no transaction can pass the inclusion check.
-		{"post-Amsterdam/state=11999/exits", true, 50_000, 88_001, true},
-		// State gas at exact boundary: 12,000 is NOT < 12,000 → continue.
-		{"post-Amsterdam/state=12000/continues", true, 50_000, 88_000, false},
+		// State gas below threshold but exec plentiful: NO early exit.
+		// AA txns (RIP-7560) only consume execution gas, so the assembler
+		// must keep scanning. The regular tx in this test fails individually
+		// at CheckBlockGasInclusion (state dimension), not via early exit.
+		{"post-Amsterdam/stateExhausted/noEarlyExit", true, 50_000, 88_001, false},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			chainCfg := makeConfig(tc.amsterdam)
 
-			// For "continues" cases the tx gas limit must fit both the
-			// remaining pool and the fork-specific intrinsic cost. Use
-			// the fork-appropriate intrinsic minimum (self-transfer).
-			// For "exits" cases the tx is never reached.
 			var txGasLimit uint64
 			if tc.amsterdam {
 				txGasLimit = params.TxBaseEIP2780
@@ -174,7 +170,14 @@ func TestBlockAssemblerMinTxGasEarlyExit(t *testing.T) {
 				require.Empty(t, ba.Txns, "no txns packed on early exit")
 			} else {
 				require.False(t, done, "expected loop to continue past gas check")
-				require.Len(t, ba.Txns, 1, "self-transfer should be packed")
+				// When state gas is exhausted but exec is fine, the tx
+				// fails individually at CheckBlockGasInclusion — no early
+				// exit, but no packing either.
+				if tc.stateGasUsed > 0 && tc.amsterdam {
+					require.Empty(t, ba.Txns, "tx fails state-gas inclusion check individually")
+				} else {
+					require.Len(t, ba.Txns, 1, "self-transfer should be packed")
+				}
 			}
 		})
 	}
