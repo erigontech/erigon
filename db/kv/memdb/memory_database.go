@@ -28,14 +28,23 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
+func inMemOpts(tb testing.TB, tmpDir string, label kv.Label) mdbx.MdbxOpts {
+	opts := mdbx.New(label, log.New())
+	if tb == nil {
+		return opts.InMem(tmpDir)
+	}
+	return mdbxtest.InMem(tb, opts, tmpDir)
+}
+
 func New(tb testing.TB, tmpDir string, label kv.Label) kv.RwDB {
-	return mdbx.New(label, log.New()).InMem(tb, tmpDir).MustOpen()
+	return inMemOpts(tb, tmpDir, label).MustOpen()
 }
 
 func NewChainDB(tb testing.TB, tmpDir string) kv.RwDB {
-	return mdbx.New(dbcfg.ChainDB, log.New()).InMem(tb, tmpDir).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	return inMemOpts(tb, tmpDir, dbcfg.ChainDB).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 }
 
 func NewTestDB(tb testing.TB, label kv.Label) kv.RwDB {
