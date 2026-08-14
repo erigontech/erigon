@@ -517,6 +517,17 @@ func SyncSnapshots(
 		// then feeds the union set into recsplit, producing duplicate
 		// tx-hash keys and a runaway retry loop.
 		items := FilterPreverifiedBySubsumingLocal(preverifiedBlockSnapshots.Items, snapDir)
+		// Symmetric to the snapCfg.Local branch above: drop preverified
+		// block entries whose upper bound extends past our locally-
+		// processed tip. Post mode-B unwind the trimmed pre-unwind wide
+		// files still live in the preverified list, and if a peer
+		// chain.toml merge flipped snapCfg.Local to false we land here
+		// on the next reconcile — without this filter the download would
+		// re-materialise every file unwind just swept, they'd enter the
+		// aggregator visible set, FrozenBlocks() would jump past the EL
+		// head, and InsertBlocks would silently skip every Caplin-fed
+		// recovery block.
+		items = filterPreverifiedByLocalTip(items, blockReader.Snapshots().SegmentsMax())
 		downloadRequest := make([]dbservices.DownloadRequest, 0, len(items))
 
 		blockPrune, historyPrune := computeBlocksToPrune(blockReader, prune)
