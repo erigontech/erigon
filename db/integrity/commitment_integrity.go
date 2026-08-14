@@ -18,6 +18,7 @@ package integrity
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
@@ -26,7 +27,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -619,12 +620,9 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 
 	// Producer: single goroutine iterating commitment keys sequentially.
 	// producerErr is written before return, which triggers defer close(ch).
-	// We wait on producerWg before closing decompressors to avoid use-after-close.
 	var producerErr error
 	var producerWg sync.WaitGroup
-	producerWg.Add(1)
-	go func() {
-		defer producerWg.Done()
+	producerWg.Go(func() {
 		defer close(ch)
 		commReader := seg.NewReader(commDecomp.MakeGetter(), commCompression)
 		branchKeyBuf := make([]byte, 0, 128)
@@ -657,7 +655,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 				return
 			}
 		}
-	}()
+	})
 
 	// Progress reporter
 	var processed atomic.Uint64
@@ -1156,7 +1154,7 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 					"blks/s", fmt.Sprintf("%.1f", blkRate),
 					"checked", fmt.Sprintf("%s/%s", common.PrettyCounter(done), common.PrettyCounter(expectedBlks)),
 					"windows", fmt.Sprintf("%d/%d", wDone, totalWindows),
-					"blkRange", fmt.Sprintf("%s-%s", common.PrettyCounter(from), common.PrettyCounter(to)),
+					"blkRange", fmt.Sprintf("%s-%s", common.PrettyExact(from), common.PrettyExact(to)),
 				)
 			}
 		}
@@ -1365,6 +1363,10 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 		branchKeys++
 
 		branchData := commitment.BranchData(branchValue)
+
+		if branchData.IsTombstone() {
+			continue // tombstones kept across merges, not corruption
+		}
 
 		// Check completeness
 		if !branchData.IsComplete() {
@@ -1575,6 +1577,9 @@ func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile
 		branchKeys++
 
 		branchData := commitment.BranchData(branchValue)
+		if branchData.IsTombstone() {
+			continue
+		}
 
 		if !branchData.IsComplete() {
 			touchMap := uint16(0)
@@ -1663,8 +1668,8 @@ func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile
 		prevCommitmentPaths = append(prevCommitmentPaths, pf.Fullpath())
 	}
 	// Sort newest-first so we check the most recent previous file first.
-	sort.Slice(prevCommitmentPaths, func(i, j int) bool {
-		return prevCommitmentPaths[i] > prevCommitmentPaths[j]
+	slices.SortFunc(prevCommitmentPaths, func(a, b string) int {
+		return cmp.Compare(b, a)
 	})
 	accMissing, err := reverseCheckDomainKeys(ctx, accDecomp, kv.AccountsDomain, accCollector, prevCommitmentPaths, fileName, failFast, logger)
 	if err != nil && !errors.Is(err, ErrIntegrity) {
@@ -1723,7 +1728,7 @@ func reverseCheckDomainKeys(ctx context.Context, decomp *seg.Decompressor, domai
 		defer close(refCh)
 		errCh <- sortedKeys.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error { //nolint:gocritic
 			select {
-			case refCh <- common.Copy(k):
+			case refCh <- bytes.Clone(k):
 				return nil
 			case <-loadCtx.Done():
 				return loadCtx.Err()
@@ -1769,8 +1774,8 @@ func reverseCheckDomainKeys(ctx context.Context, decomp *seg.Decompressor, domai
 		if !hasRef || !bytes.Equal(refKey, key) {
 			// Collect for no-op verification against previous files.
 			missingEntries = append(missingEntries, missingEntry{
-				key: common.Copy(key),
-				val: common.Copy(val),
+				key: bytes.Clone(key),
+				val: bytes.Clone(val),
 			})
 		}
 	}
@@ -1816,8 +1821,8 @@ func verifyMissingAgainstPrevFiles(entries []missingEntry, domain kv.Domain, pre
 	}
 
 	// Sort missing entries by key for merge-join.
-	sort.Slice(entries, func(i, j int) bool {
-		return bytes.Compare(entries[i].key, entries[j].key) < 0
+	slices.SortFunc(entries, func(a, b missingEntry) int {
+		return bytes.Compare(a.key, b.key)
 	})
 
 	// Track which entries are confirmed as no-ops.
@@ -2148,8 +2153,8 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 
 			// Copy data since buffers are reused.
 			item := hashWorkItem{
-				branchKey:   common.Copy(branchKey),
-				branchValue: common.Copy(branchValue),
+				branchKey:   bytes.Clone(branchKey),
+				branchValue: bytes.Clone(branchValue),
 			}
 
 			select {
@@ -2219,7 +2224,7 @@ func verifyHashItem(
 					return key, nil
 				}
 				val, _ := stoReader.Next(valBuf[:0])
-				storageValues[string(plainKey)] = common.Copy(val)
+				storageValues[string(plainKey)] = bytes.Clone(val)
 			} else if preloadedStoValues != nil {
 				strKey := string(plainKey)
 				if val, ok := preloadedStoValues[strKey]; ok {
@@ -2245,7 +2250,7 @@ func verifyHashItem(
 				return key, nil
 			}
 			val, _ := accReader.Next(valBuf[:0])
-			accountValues[string(plainKey)] = common.Copy(val)
+			accountValues[string(plainKey)] = bytes.Clone(val)
 		} else if preloadedAccValues != nil {
 			strKey := string(plainKey)
 			if val, ok := preloadedAccValues[strKey]; ok {
@@ -2298,7 +2303,7 @@ func preloadDomainValues(commitmentFile string, oldDomain, newDomain kv.Domain, 
 		}
 		val, _ := reader.Next(valBuf[:0])
 		if len(key) == expectedKeyLen {
-			values[string(key)] = common.Copy(val)
+			values[string(key)] = bytes.Clone(val)
 		}
 	}
 	return values, nil

@@ -170,7 +170,6 @@ func TestBuilderStaleSnapshotMustNotPoisonBranchCache(t *testing.T) {
 
 	ctx := t.Context()
 	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
-	exec := m.ExecModule
 	addrA, addrB, addrC := grindRecipients(t, m.Address)
 
 	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
@@ -195,7 +194,7 @@ func TestBuilderStaleSnapshotMustNotPoisonBranchCache(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	require.NoError(t, insertValidateAndUfc1By1(ctx, exec, chainPack.Blocks[:1]))
+	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, chainPack.Blocks[:1]))
 
 	// The row shared by A and B is the depth-1 commitment branch at their common
 	// first hashed nibble. Asserting how blocks 2 and 3 touch it makes
@@ -218,7 +217,7 @@ func TestBuilderStaleSnapshotMustNotPoisonBranchCache(t *testing.T) {
 	_, err = rand.Read(parentBeaconBlockRoot[:])
 	require.NoError(t, err)
 	head := chainPack.Blocks[0]
-	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
+	payloadId, err := m.AssembleBlock(ctx, &builder.Parameters{
 		ParentHash:            head.Hash(),
 		Timestamp:             head.Header().Time + 1,
 		PrevRandao:            head.Header().MixDigest,
@@ -234,22 +233,22 @@ func TestBuilderStaleSnapshotMustNotPoisonBranchCache(t *testing.T) {
 		t.Fatal("build did not reach its transaction loop")
 	}
 
-	require.NoError(t, insertValidateAndUfc1By1(ctx, exec, chainPack.Blocks[1:2]))
+	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, chainPack.Blocks[1:2]))
 	rowAfterBlock2 := latestBranchRow(t, m.DB, abBranchKey)
 	require.NotEqual(t, rowAfterBlock1, rowAfterBlock2, "block 2 (transfer to A) must rewrite the shared branch row")
 
-	require.NoError(t, insertValidateAndUfc1By1(ctx, exec, chainPack.Blocks[2:3]))
+	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, chainPack.Blocks[2:3]))
 	rowAfterBlock3 := latestBranchRow(t, m.DB, abBranchKey)
 	require.Equal(t, rowAfterBlock2, rowAfterBlock3, "block 3 (transfer to C) must leave the shared branch row untouched")
 
 	clearSharedBranchCache(t, m.DB)
 
 	close(gate.release)
-	junkBlock, err := getAssembledBlock(ctx, exec, payloadId)
+	junkBlock, err := m.GetAssembledBlock(ctx, payloadId)
 	require.NoError(t, err)
 	require.Len(t, junkBlock.Transactions(), 1)
 
-	require.NoError(t, insertValidateAndUfc1By1(ctx, exec, chainPack.Blocks[3:4]))
+	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, chainPack.Blocks[3:4]))
 }
 
 // someBranchKey returns a commitment branch row present in the latest state.
@@ -269,10 +268,10 @@ func someBranchKey(t *testing.T, tx kv.TemporalTx) []byte {
 	return nil
 }
 
-// TestWithoutBranchCacheNeverTouchesSharedCache pins the WithoutBranchCache
+// TestWithoutSharedBranchCacheNeverTouchesSharedCache pins the WithoutSharedBranchCache
 // contract: reads through such a SharedDomains must not read-fill the shared
 // BranchCache, while a default SharedDomains does.
-func TestWithoutBranchCacheNeverTouchesSharedCache(t *testing.T) {
+func TestWithoutSharedBranchCacheNeverTouchesSharedCache(t *testing.T) {
 	ctx := t.Context()
 	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
 
@@ -284,7 +283,7 @@ func TestWithoutBranchCacheNeverTouchesSharedCache(t *testing.T) {
 		gen.AddTx(txn)
 	})
 	require.NoError(t, err)
-	require.NoError(t, insertValidateAndUfc1By1(ctx, m.ExecModule, chainPack.Blocks))
+	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, chainPack.Blocks))
 
 	roTx, err := m.DB.BeginTemporalRo(ctx)
 	require.NoError(t, err)
@@ -303,7 +302,7 @@ func TestWithoutBranchCacheNeverTouchesSharedCache(t *testing.T) {
 	}
 
 	bc.Clear()
-	readBranch(execctx.WithoutBranchCache())
+	readBranch(execctx.WithoutSharedBranchCache())
 	_, _, ok := bc.Get(branchKey)
 	require.False(t, ok, "detached SharedDomains read-filled the shared BranchCache")
 

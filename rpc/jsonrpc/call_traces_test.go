@@ -28,7 +28,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/valyala/fastjson"
 
-	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/chain"
@@ -67,14 +66,14 @@ func TestCallTraceOneByOne(t *testing.T) {
 		t.Skip("slow test")
 	}
 	m := execmoduletester.New(t)
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, gen *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(10, func(i int, gen *blockgen.BlockGen) {
 		gen.SetCoinbase(common.Address{1})
 	})
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
 	}
 
-	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+	api := newTraceApiForTest(m)
 	// Insert blocks 1 by 1 to trigger possible "off by one" errors
 	for i := 0; i < chain.Length(); i++ {
 		if err = m.InsertChain(chain.Slice(i, i+1)); err != nil {
@@ -102,13 +101,13 @@ func TestCallTraceUnwind(t *testing.T) {
 	m := execmoduletester.New(t)
 	var chainA, chainB *blockgen.ChainPack
 	var err error
-	chainA, err = blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, gen *blockgen.BlockGen) {
+	chainA, err = m.GenerateChain(10, func(i int, gen *blockgen.BlockGen) {
 		gen.SetCoinbase(common.Address{1})
 	})
 	if err != nil {
 		t.Fatalf("generate chainA: %v", err)
 	}
-	chainB, err = blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 20, func(i int, gen *blockgen.BlockGen) {
+	chainB, err = m.GenerateChain(20, func(i int, gen *blockgen.BlockGen) {
 		if i < 5 || i >= 10 {
 			gen.SetCoinbase(common.Address{1})
 		} else {
@@ -119,7 +118,7 @@ func TestCallTraceUnwind(t *testing.T) {
 		t.Fatalf("generate chainB: %v", err)
 	}
 
-	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+	api := newTraceApiForTest(m)
 
 	if err = m.InsertChain(chainA); err != nil {
 		t.Fatalf("inserting chainA: %v", err)
@@ -177,13 +176,13 @@ func TestFilterNoAddresses(t *testing.T) {
 		t.Skip("slow test")
 	}
 	m := execmoduletester.New(t)
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, gen *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(10, func(i int, gen *blockgen.BlockGen) {
 		gen.SetCoinbase(common.Address{1})
 	})
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
 	}
-	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+	api := newTraceApiForTest(m)
 	// Insert blocks 1 by 1 to trigger possible "off by one" errors
 	for i := 0; i < chain.Length(); i++ {
 		if err = m.InsertChain(chain.Slice(i, i+1)); err != nil {
@@ -207,20 +206,21 @@ func TestFilterNoAddresses(t *testing.T) {
 
 func TestFilterAddressIntersection(t *testing.T) {
 	m := execmoduletester.New(t)
-	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+	api := newTraceApiForTest(m)
 
 	toAddress1, toAddress2, other := common.Address{1}, common.Address{2}, common.Address{3}
 
 	once := new(sync.Once)
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 15, func(i int, block *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(15, func(i int, block *blockgen.BlockGen) {
 		once.Do(func() { block.SetCoinbase(common.Address{4}) })
 
 		var rcv common.Address
-		if i < 5 {
+		switch {
+		case i < 5:
 			rcv = toAddress1
-		} else if i < 10 {
+		case i < 10:
 			rcv = toAddress2
-		} else {
+		default:
 			rcv = other
 		}
 

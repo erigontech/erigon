@@ -219,7 +219,7 @@ func UnmarshalTransactionFromJSON(input []byte) (Transaction, error) {
 	txTypeHex := v.GetStringBytes("type")
 	var txType hexutil.Uint64 = LegacyTxType
 	if txTypeHex != nil {
-		if err = txType.UnmarshalText(txTypeHex); err != nil {
+		if err := txType.UnmarshalText(txTypeHex); err != nil {
 			return nil, err
 		}
 	}
@@ -229,19 +229,19 @@ func UnmarshalTransactionFromJSON(input []byte) (Transaction, error) {
 	switch byte(txType) {
 	case LegacyTxType:
 		tx := &LegacyTx{}
-		if err = tx.UnmarshalJSON(input); err != nil {
+		if err := tx.UnmarshalJSON(input); err != nil {
 			return nil, err
 		}
 		return tx, nil
 	case AccessListTxType:
 		tx := &AccessListTx{}
-		if err = tx.UnmarshalJSON(input); err != nil {
+		if err := tx.UnmarshalJSON(input); err != nil {
 			return nil, err
 		}
 		return tx, nil
 	case DynamicFeeTxType:
 		tx := &DynamicFeeTransaction{}
-		if err = tx.UnmarshalJSON(input); err != nil {
+		if err := tx.UnmarshalJSON(input); err != nil {
 			return nil, err
 		}
 		return tx, nil
@@ -253,7 +253,7 @@ func UnmarshalTransactionFromJSON(input []byte) (Transaction, error) {
 		return tx, nil
 	case SetCodeTxType:
 		tx := &SetCodeTransaction{}
-		if err = tx.UnmarshalJSON(input); err != nil {
+		if err := tx.UnmarshalJSON(input); err != nil {
 			return nil, err
 		}
 		return tx, nil
@@ -512,10 +512,11 @@ func (tx *SetCodeTransaction) UnmarshalJSON(input []byte) error {
 	if err := tx.unmarshalJson(dec); err != nil {
 		return err
 	}
-	tx.Authorizations = make([]Authorization, len(*dec.Authorizations))
-	for i, auth := range *dec.Authorizations {
+	auths := *dec.Authorizations
+	tx.Authorizations = make([]Authorization, len(auths))
+	for i := range auths {
 		var err error
-		tx.Authorizations[i], err = auth.ToAuthorization()
+		tx.Authorizations[i], err = auths[i].ToAuthorization()
 		if err != nil {
 			return err
 		}

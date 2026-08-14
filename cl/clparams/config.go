@@ -17,6 +17,7 @@
 package clparams
 
 import (
+	"cmp"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -24,7 +25,6 @@ import (
 	mathrand "math/rand"
 	"os"
 	"slices"
-	"sort"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -39,7 +39,9 @@ import (
 	executiontypes "github.com/erigontech/erigon/execution/types"
 )
 
-var LatestStateFileName = "latest.ssz_snappy"
+// LatestFinalizedStateFileName holds the node's own most-recently-finalized beacon state, used to
+// resume from a locally-provable finalized anchor on restart.
+var LatestFinalizedStateFileName = "finalized.ssz_snappy"
 
 type CaplinConfig struct {
 	// Archive related config
@@ -58,6 +60,10 @@ type CaplinConfig struct {
 	NetworkId NetworkType
 	// DisableCheckpointSync is optional and is used to disable checkpoint sync used by default in the node
 	DisabledCheckpointSync bool
+	// ResumeMaxStalenessEpochs bounds how stale a locally-finalized state may be to resume from it
+	// on restart instead of remote checkpoint syncing. 0 = computed default; values above the active
+	// fork's sidecar-retention window are clamped down (see resolveResumeHorizonSlots).
+	ResumeMaxStalenessEpochs uint64
 	// CaplinMeVRelayUrl is optional and is used to connect to the external builder service.
 	// If it's set, the node will start in builder mode
 	MevRelayUrl string
@@ -104,6 +110,15 @@ func (c CaplinConfig) IsDevnet() bool {
 
 func (c CaplinConfig) HaveInvalidDevnetParams() bool {
 	return c.CustomConfigPath == "" || c.CustomGenesisStatePath == ""
+}
+
+func (c CaplinConfig) ApplyNetworkOverrides(networkConfig *NetworkConfig) {
+	if len(c.BootstrapNodes) > 0 {
+		networkConfig.BootNodes = c.BootstrapNodes
+	}
+	if c.StaticPeers != nil {
+		networkConfig.StaticPeers = c.StaticPeers
+	}
 }
 
 func (c CaplinConfig) RelayUrlExist() bool {
@@ -192,6 +207,16 @@ var (
 		"enr:-Ly4QAtr21x5Ps7HYhdZkIBRBgcBkvlIfEel1YNjtFWf4cV3au2LgBGICz9PtEs9-p2HUl_eME8m1WImxTxSB3AkCMwBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhANHhOeJc2VjcDI1NmsxoQNLp1QPV8-pyMCohOtj6xGtSBM_GtVTqzlbvNsCF4ezkYhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
 		// GnosisDAO Bootnode: 3.69.35.13
 		"enr:-Ly4QLgn8Bx6faigkKUGZQvd1HDToV2FAxZIiENK-lczruzQb90qJK-4E65ADly0s4__dQOW7IkLMW7ZAyJy2vtiLy8Bh2F0dG5ldHOIAAAAAAAAAACEZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhANFIw2Jc2VjcDI1NmsxoQMa-fWEy9UJHfOl_lix3wdY5qust78sHAqZnWwEiyqKgYhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
+		"/ip4/57.131.40.177/tcp/9000/p2p/16Uiu2HAm6HQoX8sEJxr58GkuM9FPWkgLdCs71vz5qcu7hyisYRLS",
+		"/ip4/45.79.214.176/tcp/9000/p2p/16Uiu2HAm7jUXmkWrC5cTwSa9bVtzeAwUXu3MZZnhcsY5QTAiNmyL",
+		"/ip4/51.210.221.124/tcp/9500/p2p/16Uiu2HAmSnLLjZfkFCythED8tQS5kP4NJKBuMdd1FYE23ZymKwL6",
+		"/ip4/57.129.122.18/tcp/9000/p2p/16Uiu2HAmALSWURS5G4Qsmm7eFbH5oXxoFJEQuVdhAZ1MMcE9XjrU",
+		"/ip4/51.210.221.124/tcp/9100/p2p/16Uiu2HAmUhn8VR7HFY7SLPqbBhnTT1yfjKBJQKSodUkWsE5adNNu",
+		"/ip4/137.74.112.3/tcp/9000/p2p/16Uiu2HAm1merr7djndkMFf2TxacP53tA6rFoU4tXD5NNPGYz6RPa",
+		"/ip4/65.21.231.153/tcp/9009/p2p/16Uiu2HAm5tjLaFaGnEwtrB7sRynYs5VpE3hjT7G4tkKhTEU2pcaf",
+		"/ip4/51.68.224.153/udp/9001/quic-v1/p2p/16Uiu2HAkxcBE3LK7zhnyZERguonkKmXLgYPRcuDPaF6C2vaigYuT",
+		"/ip4/139.144.16.95/tcp/9000/p2p/16Uiu2HAmH5pPnGrQEq7Q6McNA24ExRKRyaRzmJ44M1kAvvHYAeer",
+		"/ip4/65.109.101.48/tcp/9000/p2p/16Uiu2HAm98ceLNE6X3mjVcsu6ZAaKZPPcqKmeofidTDy7UCHyTtY",
 	}
 	HoodiBootstrapNodes = []string{
 		"enr:-Mq4QLkmuSwbGBUph1r7iHopzRpdqE-gcm5LNZfcE-6T37OCZbRHi22bXZkaqnZ6XdIyEDTelnkmMEQB8w6NbnJUt9GGAZWaowaYh2F0dG5ldHOIABgAAAAAAACEZXRoMpDS8Zl_YAAJEAAIAAAAAAAAgmlkgnY0gmlwhNEmfKCEcXVpY4IyyIlzZWNwMjU2azGhA0hGa4jZJZYQAS-z6ZFK-m4GCFnWS8wfjO0bpSQn6hyEiHN5bmNuZXRzAIN0Y3CCIyiDdWRwgiMo",
@@ -249,8 +274,8 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		TtfbTimeout:                     ConfigDurationSec(ReqTimeout),
 		RespTimeout:                     ConfigDurationSec(RespTimeout),
 		MaximumGossipClockDisparity:     ConfigDurationMSec(500 * time.Millisecond),
-		MessageDomainInvalidSnappy:      [4]byte{00, 00, 00, 00},
-		MessageDomainValidSnappy:        [4]byte{01, 00, 00, 00},
+		MessageDomainInvalidSnappy:      [4]byte{0o0, 0o0, 0o0, 0o0},
+		MessageDomainValidSnappy:        [4]byte{0o1, 0o0, 0o0, 0o0},
 		Eth2key:                         "eth2",
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
@@ -270,8 +295,8 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		TtfbTimeout:                     ConfigDurationSec(ReqTimeout),
 		RespTimeout:                     ConfigDurationSec(RespTimeout),
 		MaximumGossipClockDisparity:     ConfigDurationMSec(500 * time.Millisecond),
-		MessageDomainInvalidSnappy:      [4]byte{00, 00, 00, 00},
-		MessageDomainValidSnappy:        [4]byte{01, 00, 00, 00},
+		MessageDomainInvalidSnappy:      [4]byte{0o0, 0o0, 0o0, 0o0},
+		MessageDomainValidSnappy:        [4]byte{0o1, 0o0, 0o0, 0o0},
 		Eth2key:                         "eth2",
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
@@ -291,8 +316,8 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		TtfbTimeout:                     ConfigDurationSec(ReqTimeout),
 		RespTimeout:                     ConfigDurationSec(RespTimeout),
 		MaximumGossipClockDisparity:     ConfigDurationMSec(500 * time.Millisecond),
-		MessageDomainInvalidSnappy:      [4]byte{00, 00, 00, 00},
-		MessageDomainValidSnappy:        [4]byte{01, 00, 00, 00},
+		MessageDomainInvalidSnappy:      [4]byte{0o0, 0o0, 0o0, 0o0},
+		MessageDomainValidSnappy:        [4]byte{0o1, 0o0, 0o0, 0o0},
 		Eth2key:                         "eth2",
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
@@ -312,8 +337,8 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		TtfbTimeout:                     ConfigDurationSec(ReqTimeout),
 		RespTimeout:                     ConfigDurationSec(RespTimeout),
 		MaximumGossipClockDisparity:     ConfigDurationMSec(500 * time.Millisecond),
-		MessageDomainInvalidSnappy:      [4]byte{00, 00, 00, 00},
-		MessageDomainValidSnappy:        [4]byte{01, 00, 00, 00},
+		MessageDomainInvalidSnappy:      [4]byte{0o0, 0o0, 0o0, 0o0},
+		MessageDomainValidSnappy:        [4]byte{0o1, 0o0, 0o0, 0o0},
 		Eth2key:                         "eth2",
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
@@ -333,8 +358,8 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		TtfbTimeout:                     ConfigDurationSec(ReqTimeout),
 		RespTimeout:                     ConfigDurationSec(RespTimeout),
 		MaximumGossipClockDisparity:     ConfigDurationMSec(500 * time.Millisecond),
-		MessageDomainInvalidSnappy:      [4]byte{00, 00, 00, 00},
-		MessageDomainValidSnappy:        [4]byte{01, 00, 00, 00},
+		MessageDomainInvalidSnappy:      [4]byte{0o0, 0o0, 0o0, 0o0},
+		MessageDomainValidSnappy:        [4]byte{0o1, 0o0, 0o0, 0o0},
 		Eth2key:                         "eth2",
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
@@ -354,8 +379,8 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		TtfbTimeout:                     ConfigDurationSec(ReqTimeout),
 		RespTimeout:                     ConfigDurationSec(RespTimeout),
 		MaximumGossipClockDisparity:     ConfigDurationMSec(500 * time.Millisecond),
-		MessageDomainInvalidSnappy:      [4]byte{00, 00, 00, 00},
-		MessageDomainValidSnappy:        [4]byte{01, 00, 00, 00},
+		MessageDomainInvalidSnappy:      [4]byte{0o0, 0o0, 0o0, 0o0},
+		MessageDomainValidSnappy:        [4]byte{0o1, 0o0, 0o0, 0o0},
 		Eth2key:                         "eth2",
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
@@ -401,7 +426,7 @@ var ConfigurableCheckpointsURLs = []string{}
 
 // MinEpochsForBlockRequests  equal to MIN_VALIDATOR_WITHDRAWABILITY_DELAY + CHURN_LIMIT_QUOTIENT / 2
 func (b *BeaconChainConfig) MinEpochsForBlockRequests() uint64 {
-	return b.MinValidatorWithdrawabilityDelay + (b.ChurnLimitQuotient)/2
+	return b.MinValidatorWithdrawabilityDelay + b.ChurnLimitQuotient/2
 }
 
 // MinSlotsForBlobRequests  equal to MIN_EPOCHS_FOR_BLOB_SIDECARS_REQUESTS * SLOTS_PER_EPOCH
@@ -564,7 +589,7 @@ type BeaconChainConfig struct {
 	MaxVoluntaryExits                uint64 `yaml:"MAX_VOLUNTARY_EXITS" spec:"true" json:"MAX_VOLUNTARY_EXITS,string"`                                   // MaxVoluntaryExits defines the maximum number of validator exits in a block.
 	MaxWithdrawalsPerPayload         uint64 `yaml:"MAX_WITHDRAWALS_PER_PAYLOAD" spec:"true" json:"MAX_WITHDRAWALS_PER_PAYLOAD,string"`                   // MaxWithdrawalsPerPayload defines the maximum number of withdrawals in a block.
 	MaxBlsToExecutionChanges         uint64 `yaml:"MAX_BLS_TO_EXECUTION_CHANGES" spec:"true" json:"MAX_BLS_TO_EXECUTION_CHANGES,string"`                 // MaxBlsToExecutionChanges defines the maximum number of BLS-to-execution-change objects in a block.
-	MaxValidatorsPerWithdrawalsSweep uint64 `yaml:"MAX_VALIDATORS_PER_WITHDRAWALS_SWEEP" spec:"true" json:"MAX_VALIDATORS_PER_WITHDRAWALS_SWEEP,string"` //MaxValidatorsPerWithdrawalsSweep bounds the size of the sweep searching for withdrawals per slot.
+	MaxValidatorsPerWithdrawalsSweep uint64 `yaml:"MAX_VALIDATORS_PER_WITHDRAWALS_SWEEP" spec:"true" json:"MAX_VALIDATORS_PER_WITHDRAWALS_SWEEP,string"` // MaxValidatorsPerWithdrawalsSweep bounds the size of the sweep searching for withdrawals per slot.
 	MaxBlobCommittmentsPerBlock      uint64 `yaml:"MAX_BLOB_COMMITMENTS_PER_BLOCK" spec:"true" json:"MAX_BLOB_COMMITMENTS_PER_BLOCK,string"`             // MaxBlobsCommittmentsPerBlock defines the maximum number of blobs commitments in a block.
 	// BLS domain values.
 	DomainBeaconProposer              common.Bytes4 `yaml:"DOMAIN_BEACON_PROPOSER" spec:"true" json:"DOMAIN_BEACON_PROPOSER"`                               // DomainBeaconProposer defines the BLS signature domain for beacon proposal verification.
@@ -814,6 +839,15 @@ func (b *BeaconChainConfig) GetCurrentStateVersion(epoch uint64) StateVersion {
 	return stateVersion
 }
 
+// ForkSchemaMatchesSlot reports whether an object decoded with decodedVersion is
+// consistent with the fork implied by slot. A peer picks the response fork digest,
+// so the two are independent inputs; Gloas changed which fields BeaconBody and
+// DataColumnSidecar carry, so a disagreement reaches a field left unset.
+func (b *BeaconChainConfig) ForkSchemaMatchesSlot(slot uint64, decodedVersion StateVersion) bool {
+	slotIsGloas := b.GetCurrentStateVersion(slot/b.SlotsPerEpoch) >= GloasVersion
+	return slotIsGloas == (decodedVersion >= GloasVersion)
+}
+
 // AttestationDueMs returns the attestation deadline in milliseconds from slot start.
 func (b *BeaconChainConfig) AttestationDueMs(gloas bool) uint64 {
 	if b == nil || b.SecondsPerSlot == 0 {
@@ -832,8 +866,8 @@ func (b *BeaconChainConfig) AttestationDueMs(gloas bool) uint64 {
 func (b *BeaconChainConfig) InitializeForkSchedule() {
 	b.ForkVersionSchedule = configForkSchedule(b)
 	// sort blob schedule by epoch in ascending order
-	sort.Slice(b.BlobSchedule, func(i, j int) bool {
-		return b.BlobSchedule[i].Epoch < b.BlobSchedule[j].Epoch
+	slices.SortFunc(b.BlobSchedule, func(a, b BlobParameters) int {
+		return cmp.Compare(a.Epoch, b.Epoch)
 	})
 }
 
@@ -1081,7 +1115,7 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	MaxDepositRequestsPerPayload:          8192,
 	MaxWithdrawalRequestsPerPayload:       16,
 	MaxConsolidationRequestsPerPayload:    2,
-	MaxBuilderDepositRequestsPerPayload:   256,
+	MaxBuilderDepositRequestsPerPayload:   64,
 	MaxBuilderExitRequestsPerPayload:      16,
 	MinSlashingPenaltyQuotientElectra:     4096,
 	WhistleBlowerRewardQuotientElectra:    4096,
@@ -1115,14 +1149,14 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	ChurnLimitQuotientGloas:              1 << 15,
 	ConsolidationChurnLimitQuotient:      1 << 16,
 	MaxPerEpochActivationChurnLimitGloas: 256_000_000_000,
-	BuilderWithdrawalPrefix:              0x03,
+	BuilderWithdrawalPrefix:              0xB0,
 	PayloadDueBps:                        7500,
 	PtcSize:                              512,
 	MaxPayloadAttestations:               4,
 	BuilderRegistryLimit:                 1 << 40,
 	BuilderPendingWithdrawalsLimit:       1 << 20,
 	MaxBuildersPerWithdrawalsSweep:       1 << 14,
-	MinBuilderWithdrawabilityDelay:       8192,
+	MinBuilderWithdrawabilityDelay:       64,
 }
 
 func mainnetConfig() BeaconChainConfig {
@@ -1321,7 +1355,6 @@ func hoodiConfig() BeaconChainConfig {
 
 	cfg.InitializeForkSchedule()
 	return cfg
-
 }
 
 func bloatnetConfig() BeaconChainConfig {
@@ -1688,6 +1721,7 @@ func GetConfigsByNetworkName(net string) (*NetworkConfig, *BeaconChainConfig, Ne
 		return nil, nil, chainspec.MainnetChainID, errors.New("chain not found")
 	}
 }
+
 func GetAllCheckpointSyncEndpoints(net NetworkType) []string {
 	shuffle := func(urls []string) []string {
 		if len(urls) <= 1 {

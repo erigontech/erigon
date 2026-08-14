@@ -20,7 +20,7 @@ import (
 	"errors"
 	"math"
 
-	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/common/crypto"
 )
 
 // MerkleizeProgressive computes the progressive Merkle tree root specified by
@@ -28,6 +28,17 @@ import (
 // chunks, and the sequence is terminated by a zero chunk.
 func MerkleizeProgressive(chunks [][32]byte) ([32]byte, error) {
 	return merkleizeProgressive(chunks, 1)
+}
+
+// ProgressiveListRoot computes the EIP-7916 root from already packed basic
+// values or composite element roots. logicalLength counts elements, not chunks.
+func ProgressiveListRoot(chunks [][32]byte, logicalLength uint64) ([32]byte, error) {
+	progressiveRoot, err := MerkleizeProgressive(chunks)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	lengthRoot := Uint64Root(logicalLength)
+	return crypto.Sha256(progressiveRoot[:], lengthRoot[:]), nil
 }
 
 func merkleizeProgressive(chunks [][32]byte, numLeaves uint64) ([32]byte, error) {
@@ -57,5 +68,5 @@ func merkleizeProgressive(chunks [][32]byte, numLeaves uint64) ([32]byte, error)
 		return [32]byte{}, err
 	}
 
-	return utils.Sha256(left[:], right[:]), nil
+	return crypto.Sha256(left[:], right[:]), nil
 }

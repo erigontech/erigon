@@ -5,15 +5,15 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 )
 
 // isSyncCommitteeAggregator reports whether the selection proof selects the
 // validator as a sync committee contribution aggregator for its subcommittee.
 func isSyncCommitteeAggregator(cfg *clparams.BeaconChainConfig, selectionProof common.Bytes96) bool {
 	modulo := max(1, cfg.SyncCommitteeSize/cfg.SyncCommitteeSubnetCount/cfg.TargetAggregatorsPerSyncSubcommittee)
-	hash := utils.Sha256(selectionProof[:])
+	hash := crypto.Sha256(selectionProof[:])
 	return binary.LittleEndian.Uint64(hash[:8])%modulo == 0
 }
 

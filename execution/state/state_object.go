@@ -40,16 +40,23 @@ import (
 )
 
 var stateObjectPool = sync.Pool{
-	New: func() any {
-		return &stateObject{
-			originStorage:      make(Storage),
-			blockOriginStorage: make(Storage),
-			dirtyStorage:       make(Storage),
-		}
-	},
+	New: func() any { return newHeapObject() },
+}
+
+func newHeapObject() *stateObject {
+	return &stateObject{}
 }
 
 type Storage map[accounts.StorageKey]uint256.Int
+
+// set allocates the map on first write, so an object that never writes keeps a
+// nil Storage.
+func (s *Storage) set(key accounts.StorageKey, value uint256.Int) {
+	if *s == nil {
+		*s = make(Storage)
+	}
+	(*s)[key] = value
+}
 
 func (s Storage) String() string {
 	var str strings.Builder
@@ -95,11 +102,14 @@ type stateObject struct {
 	deleted         bool // true if account was deleted during the lifetime of this object
 	newlyCreated    bool // true if this object was created in the current transaction
 	createdContract bool // true if this object represents a newly created contract
+
+	// Set by stateObjectArena.alloc; keeps release from pooling a slot the arena owns.
+	arena bool
 }
 
-// newObject creates a state object from the pool.
+// newObject creates a state object from the arena or the pool.
 func newObject(db *IntraBlockState, address accounts.Address, data, original *accounts.Account) *stateObject {
-	so := stateObjectPool.Get().(*stateObject)
+	so := db.allocStateObject()
 	so.db = db
 	so.address = address
 	so.data.Copy(data)
@@ -114,8 +124,8 @@ func newObject(db *IntraBlockState, address accounts.Address, data, original *ac
 	return so
 }
 
-// release returns the stateObject to the pool after resetting it.
-func (so *stateObject) release() {
+// reset clears every per-use field, keeping any storage map already allocated.
+func (so *stateObject) reset() {
 	so.db = nil
 	so.address = accounts.NilAddress
 	so.data = accounts.Account{}
@@ -130,12 +140,20 @@ func (so *stateObject) release() {
 	so.deleted = false
 	so.newlyCreated = false
 	so.createdContract = false
+}
+
+// release resets the object and pools it, unless the arena owns the slot.
+func (so *stateObject) release() {
+	so.reset()
+	if so.arena {
+		return
+	}
 	stateObjectPool.Put(so)
 }
 
 // EncodeRLP implements rlp.Encoder.
 func (so *stateObject) EncodeRLP(w io.Writer) error {
-	return rlp.Encode(w, so.data)
+	return rlp.Encode(w, &so.data)
 }
 
 func (so *stateObject) markSelfdestructed() {
@@ -206,8 +224,8 @@ func (so *stateObject) GetCommittedState(key accounts.StorageKey) (uint256.Int, 
 		res.Clear()
 	}
 
-	so.originStorage[key] = res
-	so.blockOriginStorage[key] = res
+	so.originStorage.set(key, res)
+	so.blockOriginStorage.set(key, res)
 
 	return res, err
 }
@@ -216,11 +234,7 @@ func (so *stateObject) GetCommittedState(key accounts.StorageKey) (uint256.Int, 
 func (so *stateObject) SetState(key accounts.StorageKey, value uint256.Int, force bool) (_ bool, err error) {
 	// If the fake storage is set, put the temporary state update here.
 	if so.fakeStorage != nil {
-		so.db.journal.append(fakeStorageChange{
-			account:  so.address,
-			key:      key,
-			prevalue: so.fakeStorage[key],
-		})
+		so.db.journal.fakeStorageChange(so.address, key, so.fakeStorage[key])
 		so.fakeStorage[key] = value
 		return true, nil
 	}
@@ -240,7 +254,7 @@ func (so *stateObject) SetState(key accounts.StorageKey, value uint256.Int, forc
 	// callback is never called and commited stays at its zero-value (false).
 	// In both cases there is no versioned write for this key in the current
 	// transaction, so this IS the first write — commited must be true so
-	// that storageChange.revert deletes the versioned write instead of
+	// that the storage-change revert deletes the versioned write instead of
 	// updating it to the prevalue.
 	if source != WriteSetRead && source != UnknownSource && source != StorageRead {
 		commited = true
@@ -251,12 +265,7 @@ func (so *stateObject) SetState(key accounts.StorageKey, value uint256.Int, forc
 	}
 
 	// New value is different, update and journal the change
-	so.db.journal.append(storageChange{
-		account:     so.address,
-		key:         key,
-		prevalue:    prev,
-		wasCommited: commited,
-	})
+	so.db.journal.storageChange(so.address, key, prev, commited)
 
 	if so.db.tracingHooks != nil && so.db.tracingHooks.OnStorageChange != nil {
 		so.db.tracingHooks.OnStorageChange(so.address, key, prev, value)
@@ -284,7 +293,7 @@ func (so *stateObject) SetStorage(storage Storage) {
 }
 
 func (so *stateObject) setState(key accounts.StorageKey, value uint256.Int) {
-	so.dirtyStorage[key] = value
+	so.dirtyStorage.set(key, value)
 }
 
 // updateStorage writes cached storage modifications into the object's storage trie.
@@ -344,7 +353,7 @@ func (so *stateObject) applyStorageChanges(stateWriter StateWriter, updatedStora
 		if err := stateWriter.WriteAccountStorage(so.address, so.data.GetIncarnation(), key, originValue, value); err != nil {
 			return err
 		}
-		so.originStorage[key] = value
+		so.originStorage.set(key, value)
 	}
 	return nil
 }
@@ -356,11 +365,7 @@ func (so *stateObject) printTrie() {
 }
 
 func (so *stateObject) SetBalance(amount uint256.Int, wasCommited bool, reason tracing.BalanceChangeReason) {
-	so.db.journal.append(balanceChange{
-		account:     so.address,
-		prev:        so.data.Balance,
-		wasCommited: wasCommited,
-	})
+	so.db.journal.balanceChange(so.address, so.data.Balance, wasCommited)
 	if so.db.tracingHooks != nil && so.db.tracingHooks.OnBalanceChange != nil {
 		so.db.tracingHooks.OnBalanceChange(so.address, so.data.Balance, amount, reason)
 	}
@@ -459,12 +464,7 @@ func (so *stateObject) SetCode(code accounts.Code, wasCommited bool, reason trac
 		return false, nil
 	}
 
-	so.db.journal.append(codeChange{
-		account:     so.address,
-		prevhash:    so.data.CodeHash,
-		prevcode:    prev.Bytes,
-		wasCommited: wasCommited,
-	})
+	so.db.journal.codeChange(so.address, prev.Bytes, so.data.CodeHash, wasCommited)
 	if so.db.tracingHooks != nil && so.db.tracingHooks.OnCodeChangeV2 != nil {
 		so.db.tracingHooks.OnCodeChangeV2(so.address, so.data.CodeHash, prev.Bytes, code.Hash, code.Bytes, reason)
 	} else if so.db.tracingHooks != nil && so.db.tracingHooks.OnCodeChange != nil {
@@ -481,11 +481,7 @@ func (so *stateObject) setCode(code accounts.Code) {
 }
 
 func (so *stateObject) SetNonce(nonce uint64, wasCommited bool, reason tracing.NonceChangeReason) {
-	so.db.journal.append(nonceChange{
-		account:     so.address,
-		prev:        so.data.Nonce,
-		wasCommited: wasCommited,
-	})
+	so.db.journal.nonceChange(so.address, so.data.Nonce, wasCommited)
 	if so.db.tracingHooks != nil && so.db.tracingHooks.OnNonceChangeV2 != nil {
 		so.db.tracingHooks.OnNonceChangeV2(so.address, so.data.Nonce, nonce, reason)
 	} else if so.db.tracingHooks != nil && so.db.tracingHooks.OnNonceChange != nil {

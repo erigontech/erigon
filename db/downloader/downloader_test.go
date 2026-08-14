@@ -71,9 +71,7 @@ func TestAllActiveSnapshotsConcurrentWithWrites(t *testing.T) {
 	var wg sync.WaitGroup
 	stop := make(chan struct{})
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for {
 			select {
 			case <-stop:
@@ -82,7 +80,7 @@ func TestAllActiveSnapshotsConcurrentWithWrites(t *testing.T) {
 				d.allActiveSnapshots()
 			}
 		}
-	}()
+	})
 	// Stop the reader on every exit path, including a require failure (Goexit).
 	defer func() {
 		close(stop)
@@ -108,9 +106,7 @@ func TestAddNewSeedableFileConcurrentWithAllActiveSnapshots(t *testing.T) {
 	var wg sync.WaitGroup
 	stop := make(chan struct{})
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for {
 			select {
 			case <-stop:
@@ -119,7 +115,7 @@ func TestAddNewSeedableFileConcurrentWithAllActiveSnapshots(t *testing.T) {
 				d.allActiveSnapshots()
 			}
 		}
-	}()
+	})
 	defer func() {
 		close(stop)
 		wg.Wait()
@@ -130,6 +126,17 @@ func TestAddNewSeedableFileConcurrentWithAllActiveSnapshots(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(test.dirs.Snap, name), nil, 0o644))
 		require.NoError(t, d.AddNewSeedableFile(ctx, name))
 	}
+}
+
+// Caplin beacon-state snapshots (e.g. NextSyncCommittee) have no registered global
+// snaptype, so ParseFileName returns a nil Type for them. They are still seedable by
+// name, so AddNewSeedableFile must not reject them as malformed.
+func TestAddNewSeedableFileCaplinStateType(t *testing.T) {
+	test := newDownloaderTest(t)
+	name := filepath.Join("caplin", "v1.1-000000-007150-NextSyncCommittee.seg")
+	require.NoError(t, os.MkdirAll(filepath.Join(test.dirs.Snap, "caplin"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(test.dirs.Snap, name), nil, 0o644))
+	require.NoError(t, test.downloader.AddNewSeedableFile(t.Context(), name))
 }
 
 func TestChangeInfoHashOfSameFile(t *testing.T) {

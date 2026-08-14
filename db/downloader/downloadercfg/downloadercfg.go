@@ -141,7 +141,7 @@ func defaultTorrentClientConfig() *torrent.ClientConfig {
 	torrentConfig.NoDHT = true
 
 	torrentConfig.Seed = true
-	torrentConfig.UpnpID = torrentConfig.UpnpID + " leecher"
+	torrentConfig.UpnpID += " leecher"
 
 	return torrentConfig
 }

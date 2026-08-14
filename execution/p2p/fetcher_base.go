@@ -180,7 +180,7 @@ func (f *FetcherBase) FetchBlocksBackwardsByHash(
 	bodies := bodiesResponse.Data
 	blocks := make([]*types.Block, len(headers))
 	for i, header := range headers {
-		blocks[i] = types.NewBlockFromNetwork(header, bodies[i])
+		blocks[i] = types.NewBlockFromNetwork(header, bodies[i], nil)
 	}
 
 	response := FetcherResponse[[]*types.Block]{
@@ -229,7 +229,7 @@ func (f *FetcherBase) FetchHeadersBackwards(
 	offset := amount - 1 // safe, we check that amount > 0 at function start
 	startNum := startHeader.Number.Uint64()
 	if startNum > offset {
-		startNum = startNum - offset
+		startNum -= offset
 	} else {
 		startNum = 0
 	}

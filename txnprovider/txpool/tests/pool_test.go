@@ -54,8 +54,9 @@ var (
 // P2P helper is binded to node1 port, that's why we measure performance of local txs processing
 func skipIfNodeUnreachable(t *testing.T, addrs ...string) {
 	t.Helper()
+	dialer := net.Dialer{Timeout: 300 * time.Millisecond}
 	for _, addr := range addrs {
-		conn, err := net.DialTimeout("tcp", addr, 300*time.Millisecond)
+		conn, err := dialer.DialContext(t.Context(), "tcp", addr)
 		if err != nil {
 			t.Skipf("requires a running node at %s: %v", addr, err)
 		}
@@ -71,7 +72,7 @@ func TestSimpleLocalTxThroughputBenchmark(t *testing.T) {
 
 	p2p := helper.NewP2P(fmt.Sprintf("http://%s/", rpcAddressNode1))
 
-	gotTxCh, errCh, err := p2p.Connect()
+	gotTxCh, errCh, err := p2p.Connect(t.Context())
 	require.NoError(t, err)
 
 	start := time.Now()
@@ -147,7 +148,7 @@ func TestSimpleLocalTxLatencyBenchmark(t *testing.T) {
 
 	p2p := helper.NewP2P(fmt.Sprintf("http://%s/", rpcAddressNode1))
 
-	gotTxCh, errCh, err := p2p.Connect()
+	gotTxCh, errCh, err := p2p.Connect(t.Context())
 	require.NoError(t, err)
 
 	rpcClient := requests.NewRequestGenerator(
@@ -193,7 +194,7 @@ func TestSimpleLocalTxLatencyBenchmark(t *testing.T) {
 		averageLatency += time.Since(start)
 	}
 
-	averageLatency = averageLatency / time.Duration(txToSendCount)
+	averageLatency /= time.Duration(txToSendCount)
 	fmt.Println("Avg latency:", averageLatency)
 
 	dir.RemoveAll("./dev") //remove tmp dir
@@ -214,7 +215,7 @@ func TestSimpleRemoteTxThroughputBenchmark(t *testing.T) {
 
 	p2p := helper.NewP2P(fmt.Sprintf("http://%s/", rpcAddressNode1))
 
-	gotTxCh, errCh, err := p2p.Connect()
+	gotTxCh, errCh, err := p2p.Connect(t.Context())
 	require.NoError(t, err)
 
 	start := time.Now()
@@ -299,7 +300,7 @@ func TestSimpleRemoteTxLatencyBenchmark(t *testing.T) {
 
 	p2p := helper.NewP2P(fmt.Sprintf("http://%s/", rpcAddressNode1))
 
-	gotTxCh, errCh, err := p2p.Connect()
+	gotTxCh, errCh, err := p2p.Connect(t.Context())
 	require.NoError(t, err)
 
 	rpcClient := requests.NewRequestGenerator(
@@ -345,7 +346,7 @@ func TestSimpleRemoteTxLatencyBenchmark(t *testing.T) {
 		averageLatency += time.Since(start)
 	}
 
-	averageLatency = averageLatency / time.Duration(txToSendCount)
+	averageLatency /= time.Duration(txToSendCount)
 	fmt.Println("Avg latency:", averageLatency)
 
 	dir.RemoveAll("./dev") //remove tmp dir

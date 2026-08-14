@@ -19,6 +19,7 @@ package rpctest
 import (
 	"context"
 	"fmt"
+	"iter"
 	"maps"
 	"math/rand"
 	"slices"
@@ -33,6 +34,10 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 )
+
+// maxTopicPositions is how many topic positions a log filter can have, fixed by the
+// LOG0..LOG4 opcodes.
+const maxTopicPositions = 4
 
 // BenchEthGetLogs compares response of Erigon with Geth
 // but also can be used for comparing RPCDaemon with Geth or infura
@@ -132,7 +137,10 @@ func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint
 	return nil
 }
 
-func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCompare bool, blockFrom, blockTo uint64, latest, failFast bool) error {
+// EthGetLogsInvariants checks that logs found by a block-wide eth_getLogs are also found
+// when the same block is queried by address or by topic. queryLimit is the server's
+// --rpc.logs.querylimit: filters wider than that are split into several requests.
+func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCompare bool, blockFrom, blockTo uint64, latest, failFast bool, queryLimit int) error {
 	setRoutes(erigonURL, gethURL)
 
 	reqGen := &RequestGenerator{}
@@ -162,7 +170,8 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 			return nil
 		}
 		seen := make(map[hexutil.Uint]struct{}, len(logs))
-		for _, l := range logs {
+		for i := range logs {
+			l := &logs[i]
 			if _, ok := seen[l.Index]; ok {
 				return fmt.Errorf("duplicated log_index %d", l.Index)
 			}
@@ -205,12 +214,16 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 			}
 
 			sawAddr := map[common.Address]struct{}{}
-			topicsByPos := [4]map[common.Hash]struct{}{{}, {}, {}, {}}
+			var topicsByPos [maxTopicPositions]map[common.Hash]struct{}
+			for i := range topicsByPos {
+				topicsByPos[i] = map[common.Hash]struct{}{}
+			}
 			if baseOK {
-				for _, l := range resp.Result {
+				for i := range resp.Result {
+					l := &resp.Result[i]
 					sawAddr[l.Address] = struct{}{}
 					for pos, t := range l.Topics {
-						if pos < 4 {
+						if pos < maxTopicPositions {
 							topicsByPos[pos][t] = struct{}{}
 						}
 					}
@@ -218,27 +231,25 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 			}
 
 			if len(sawAddr) > 0 {
-				resp = EthGetLogs{}
-				res = reqGen.Erigon("eth_getLogs", reqGen.getLogsForAddresses(bn, bn, slices.Collect(maps.Keys(sawAddr))), &resp)
-				addrOK := true
-				if res.Err != nil {
+				logsByAddr := make(map[common.Address][]Log, len(sawAddr))
+				err := getLogsBatched(reqGen, slices.Collect(maps.Keys(sawAddr)), queryLimit,
+					func(batch []common.Address) string { return reqGen.getLogsForAddresses(bn, bn, batch) },
+					func(logs []Log) {
+						for i := range logs {
+							l := &logs[i]
+							if _, ok := sawAddr[l.Address]; ok {
+								logsByAddr[l.Address] = append(logsByAddr[l.Address], *l)
+							}
+						}
+					})
+				if err != nil {
 					if failFast {
-						return fmt.Errorf("could not get eth_getLogs by address (Erigon): %v", res.Err)
+						return fmt.Errorf("eth_getLogs by address (Erigon): %w", err)
 					}
-					log.Error("[ethGetLogsInvariants] could not get eth_getLogs by address", "blockNum", bn, "error", res.Err.Error())
-					addrOK = false
-				}
-				if resp.Error != nil {
-					if failFast {
-						return fmt.Errorf("error getting eth_getLogs by address (Erigon): %d %s", resp.Error.Code, resp.Error.Message)
-					}
-					log.Error("[ethGetLogsInvariants] error getting eth_getLogs by address", "blockNum", bn, "error", resp.Error.Code, "message", resp.Error.Message)
-					addrOK = false
-				}
-
-				if addrOK {
+					log.Error("[ethGetLogsInvariants] eth_getLogs by address (Erigon)", "blockNum", bn, "error", err.Error())
+				} else {
 					for k := range sawAddr {
-						logs := filterLogsByAddr(resp.Result, k)
+						logs := logsByAddr[k]
 						if len(logs) == 0 {
 							if failFast {
 								return fmt.Errorf("eth_getLogs: at blockNum=%d and addr %x not indexed", bn, k)
@@ -261,34 +272,30 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 				if len(topicsAtPos) == 0 {
 					continue
 				}
-				filter := make([][]common.Hash, pos+1)
-				filter[pos] = slices.Collect(maps.Keys(topicsAtPos))
-
-				resp = EthGetLogs{}
-				res = reqGen.Erigon("eth_getLogs", reqGen.getLogsForTopics(bn, bn, filter), &resp)
-				if res.Err != nil {
-					if failFast {
-						return fmt.Errorf("could not get logs by topics pos %d (Erigon): %v", pos, res.Err)
-					}
-					log.Error("[ethGetLogsInvariants] could not get logs by topics (Erigon)", "blockNum", bn, "pos", pos, "error", res.Err.Error())
-					continue
-				}
-				if resp.Error != nil {
-					if failFast {
-						return fmt.Errorf("error getting logs by topics pos %d (Erigon): %d %s", pos, resp.Error.Code, resp.Error.Message)
-					}
-					log.Error("[ethGetLogsInvariants] error getting logs by topics (Erigon)", "blockNum", bn, "pos", pos, "error", resp.Error.Code, "message", resp.Error.Message)
-					continue
-				}
-
 				logsByTopic := make(map[common.Hash][]Log, len(topicsAtPos))
-				for _, l := range resp.Result {
-					if pos < len(l.Topics) {
-						t := l.Topics[pos]
-						if _, ok := topicsAtPos[t]; ok {
-							logsByTopic[t] = append(logsByTopic[t], l)
+				err := getLogsBatched(reqGen, slices.Collect(maps.Keys(topicsAtPos)), queryLimit,
+					func(batch []common.Hash) string {
+						filter := make([][]common.Hash, pos+1)
+						filter[pos] = batch
+						return reqGen.getLogsForTopics(bn, bn, filter)
+					},
+					func(logs []Log) {
+						for i := range logs {
+							l := &logs[i]
+							if pos < len(l.Topics) {
+								t := l.Topics[pos]
+								if _, ok := topicsAtPos[t]; ok {
+									logsByTopic[t] = append(logsByTopic[t], *l)
+								}
+							}
 						}
+					})
+				if err != nil {
+					if failFast {
+						return fmt.Errorf("eth_getLogs by topics pos %d (Erigon): %w", pos, err)
 					}
+					log.Error("[ethGetLogsInvariants] eth_getLogs by topics (Erigon)", "blockNum", bn, "pos", pos, "error", err.Error())
+					continue
 				}
 
 				for k := range topicsAtPos {
@@ -437,11 +444,28 @@ func BenchEthGetLogsRandomBlock(erigonURL string, concurentRequests int) error {
 	}
 }
 
-func filterLogsByAddr(logs []Log, addr common.Address) (filtered []Log) {
-	for _, log := range logs {
-		if log.Address == addr {
-			filtered = append(filtered, log)
+// getLogsBatched sends one eth_getLogs per batch of at most queryLimit filter entries and
+// feeds every response to collect. On error what collect already gathered is incomplete,
+// so the caller must discard it.
+func getLogsBatched[T any](reqGen *RequestGenerator, keys []T, queryLimit int, request func(batch []T) string, collect func(logs []Log)) error {
+	for batch := range batches(keys, queryLimit) {
+		var resp EthGetLogs
+		if res := reqGen.Erigon("eth_getLogs", request(batch), &resp); res.Err != nil {
+			return fmt.Errorf("could not get logs: %w", res.Err)
 		}
+		if resp.Error != nil {
+			return fmt.Errorf("error getting logs: %d %s", resp.Error.Code, resp.Error.Message)
+		}
+		collect(resp.Result)
 	}
-	return
+	return nil
+}
+
+// batches splits s into slices of at most limit elements, so that one eth_getLogs request
+// stays within the server's --rpc.logs.querylimit. limit<=0 disables splitting.
+func batches[T any](s []T, limit int) iter.Seq[[]T] {
+	if limit <= 0 {
+		limit = max(len(s), 1)
+	}
+	return slices.Chunk(s, limit)
 }

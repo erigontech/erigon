@@ -18,23 +18,20 @@ package cache
 
 import (
 	"encoding/binary"
+	"runtime"
 	"sync"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/maphash"
 )
 
-// TestCodeCache_ConcurrentPutSameCode_NoSizeDrift guards against the size
-// accounting drift that the pre-LoadOrStore code had: parallel workers Putting
-// the same cold code all missed the membership check, all passed the cap gate,
-// and all added to the byte counter, leaving a permanent positive surplus that
-// eventually wedged the cap. With the atomic LoadOrStore insert, only the
-// goroutine that actually inserts accounts the size, so the counters must equal
-// exactly one entry regardless of how many concurrent Puts raced.
+// Concurrent puts of the same cold code must account each content layer once.
+// The per-key stripe keeps the membership check, accounting, and insertion atomic.
 func TestCodeCache_ConcurrentPutSameCode_NoSizeDrift(t *testing.T) {
 	cc := closeOnCleanup(t, NewCodeCache(64*datasize.MB, 16*datasize.MB))
 
@@ -45,12 +42,10 @@ func TestCodeCache_ConcurrentPutSameCode_NoSizeDrift(t *testing.T) {
 
 	const workers = 64
 	var wg sync.WaitGroup
-	wg.Add(workers)
 	for range workers {
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			cc.PutWithCodeHash(addr, code, codeHash, 1)
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -102,14 +97,13 @@ func TestCodeCache_ConcurrentDistinctPuts_RespectCap(t *testing.T) {
 
 	const workers = 128
 	var wg sync.WaitGroup
-	wg.Add(workers)
 	for i := range workers {
-		go func(n int) {
-			defer wg.Done()
+		idx := i
+		wg.Go(func() {
 			code := make([]byte, 256)
-			code[0], code[1] = byte(n), byte(n>>8) // distinct code per worker
+			code[0], code[1] = byte(idx), byte(idx>>8) // distinct code per worker
 			cc.PutWithCodeHash(nil, code, crypto.Keccak256(code), 1)
-		}(i)
+		})
 	}
 	wg.Wait()
 
@@ -133,12 +127,69 @@ func TestCodeCache_PutIfAbsentAtomicWithPut(t *testing.T) {
 	for round := range 20000 {
 		binary.BigEndian.PutUint64(addr[1:], uint64(round))
 		var wg sync.WaitGroup
-		wg.Add(2)
-		go func() { defer wg.Done(); cc.Put(addr, fresh, 20) }()
-		go func() { defer wg.Done(); cc.PutIfAbsent(addr, stale, 10) }()
+		wg.Go(func() { cc.Put(addr, fresh, 20) })
+		wg.Go(func() { cc.PutIfAbsent(addr, stale, 10) })
 		wg.Wait()
 		v, ok := cc.Get(addr)
 		require.True(t, ok)
 		require.Equal(t, fresh, v, "round %d: PutIfAbsent raced past a concurrent Put", round)
 	}
+}
+
+func TestCodeCache_ClearRacingPut_EpochAlias(t *testing.T) {
+	cc := closeOnCleanup(t, NewCodeCache(64*datasize.MB, 16*datasize.MB))
+	cc.Unwind(300)
+
+	addr := make([]byte, 20)
+	addr[0] = 0xef
+	code := []byte("dead-fork-code")
+	codeID := maphash.Hash(code)
+	preClearEpoch := cc.coh.Epoch()
+
+	cc.Clear()
+	// Model a writer that sampled the epoch before Clear and published after
+	// the relevant layers were purged.
+	cc.addrToHash.Add(common.BytesToAddress(addr), versionedAddressID{addrID: codeID, txNum: 200, epoch: preClearEpoch})
+	cc.hashToCode.Add(codeID, codeEntry{code: code, txNum: 200, epoch: preClearEpoch})
+	cc.Unwind(150)
+
+	_, ok := cc.Get(addr)
+	require.False(t, ok, "pre-Clear epoch must not alias the live epoch after a later unwind")
+}
+
+func TestCodeCache_ClearFencesStartedPut(t *testing.T) {
+	// Limit Go execution to one logical processor. Each runtime.Gosched call
+	// yields to the queued goroutine, which runs until it reaches the blocked lock.
+	previousProcs := runtime.GOMAXPROCS(1)
+	defer runtime.GOMAXPROCS(previousProcs)
+
+	cc := closeOnCleanup(t, NewCodeCache(64*datasize.MB, 16*datasize.MB))
+	cc.Unwind(300)
+
+	addr := []byte{0xef}
+	code := []byte("dead-fork-code")
+	cc.addrBindMu.Lock()
+
+	var wg sync.WaitGroup
+	putStarted := make(chan struct{})
+	wg.Go(func() {
+		close(putStarted)
+		cc.Put(addr, code, 200)
+	})
+	<-putStarted
+	runtime.Gosched()
+
+	clearStarted := make(chan struct{})
+	wg.Go(func() {
+		close(clearStarted)
+		cc.Clear()
+	})
+	<-clearStarted
+	runtime.Gosched()
+
+	cc.addrBindMu.Unlock()
+	wg.Wait()
+
+	_, ok := cc.Get(addr)
+	require.False(t, ok, "Clear must remove a write that started in the retiring generation")
 }

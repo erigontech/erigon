@@ -52,7 +52,11 @@ import (
 // an implementation defined in another package (e.g. execmodule.Dispatcher)
 // without creating a circular import.
 type NotificationSender interface {
-	Dispatch(ctx context.Context, tx kv.Tx, accumulator *shards.Accumulator, recentReceipts *shards.RecentReceipts, finishProgressBefore, finishProgressAfter uint64, prevUnwindPoint *uint64) error
+	Dispatch(ctx context.Context, tx kv.Tx, stateVersion uint64, accumulator *shards.Accumulator, recentReceipts *shards.RecentReceipts, finishProgressBefore, finishProgressAfter uint64, prevUnwindPoint *uint64) error
+}
+
+type FrozenBlocksReader interface {
+	FrozenBlocks() uint64
 }
 
 type Hook struct {
@@ -65,6 +69,7 @@ type Hook struct {
 	updateHead                          func(ctx context.Context)
 	statusDataGetter                    sentry_multi_client.StatusGetter
 	blockRangePublisher                 *execp2p.Publisher
+	frozenBlocksReader                  FrozenBlocksReader
 	lastAnnouncedBlockRangeLatestNumber uint64
 	lastAnnouncedBlockRangeTime         time.Time
 }
@@ -79,6 +84,7 @@ func NewHook(
 	updateHead func(ctx context.Context),
 	statusDataGetter sentry_multi_client.StatusGetter,
 	blockRangePublisher *execp2p.Publisher,
+	frozenBlocksReader FrozenBlocksReader,
 ) *Hook {
 	return &Hook{
 		ctx:                 ctx,
@@ -90,6 +96,7 @@ func NewHook(
 		updateHead:          updateHead,
 		statusDataGetter:    statusDataGetter,
 		blockRangePublisher: blockRangePublisher,
+		frozenBlocksReader:  frozenBlocksReader,
 	}
 }
 
@@ -116,6 +123,9 @@ func (h *Hook) BeforeRun(tx kv.Tx, inSync bool) error {
 	if h == nil {
 		return nil
 	}
+	// Cycle start is where a node that fell behind first sees it; waiting for
+	// a cycle to end while still behind would miss fast catch-ups entirely.
+	h.NotifySyncState(tx)
 	return h.beforeRun(tx, inSync)
 }
 
@@ -138,8 +148,15 @@ func (h *Hook) SendNotifications(tx kv.Tx, finishProgressBefore uint64) error {
 	if err != nil {
 		return err
 	}
+	var stateVersion uint64
+	if h.notifications.Accumulator != nil {
+		stateVersion, err = rawdb.GetStateVersion(tx)
+		if err != nil {
+			return err
+		}
+	}
 	return h.dispatcher.Dispatch(
-		h.ctx, tx,
+		h.ctx, tx, stateVersion,
 		h.notifications.Accumulator,
 		h.notifications.RecentReceipts,
 		finishProgressBefore,
@@ -162,7 +179,19 @@ func (h *Hook) UpdateHead(tx kv.Tx, finishProgressBefore uint64, isSynced bool) 
 		return err
 	}
 	h.maybeAnnounceBlockRange(finishProgressBefore, finishStageAfterSync, isSynced)
+	h.NotifySyncState(tx)
 	return nil
+}
+
+// NotifySyncState publishes the sync status on the event bus if it changed;
+// dedup and ordering live in Notifications.PublishSyncState.
+func (h *Hook) NotifySyncState(tx kv.Tx) {
+	if h == nil || h.notifications == nil || h.notifications.Events == nil || h.frozenBlocksReader == nil {
+		return
+	}
+	if err := h.notifications.PublishSyncState(tx, h.frozenBlocksReader.FrozenBlocks()); err != nil {
+		h.logger.Warn("[hook] sync state notification skipped", "err", err)
+	}
 }
 
 func (h *Hook) maybeAnnounceBlockRange(finishStageBeforeSync, finishStageAfterSync uint64, isSynced bool) {
@@ -284,7 +313,7 @@ func StateStep(ctx context.Context, chainReader rules.ChainReader, engine rules.
 		if err := stateSync.UnwindTo(unwindPoint, stagedsync.StagedUnwind, nil); err != nil {
 			return err
 		}
-		if err = stateSync.RunUnwind(sd, tx); err != nil {
+		if err := stateSync.RunUnwind(sd, tx); err != nil {
 			return err
 		}
 	}

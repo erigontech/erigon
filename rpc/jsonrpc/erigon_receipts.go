@@ -261,7 +261,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 	var logCount, blockCount, timestamp uint64
 
 	for it.HasNext() {
-		if err = ctx.Err(); err != nil {
+		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err := it.Next()
@@ -294,11 +294,11 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			return erigonLogs, nil
 		}
 
-		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
+		txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
 		if err != nil {
 			return nil, err
 		}
-		if txn == nil {
+		if !ok {
 			continue
 		}
 

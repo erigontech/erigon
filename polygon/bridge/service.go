@@ -369,7 +369,7 @@ func (s *Service) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) e
 		var endId uint64
 
 		if eventLimit == nil || *eventLimit > 0 {
-			if err = s.waitForScraper(ctx, toTime); err != nil {
+			if err := s.waitForScraper(ctx, toTime); err != nil {
 				return err
 			}
 
@@ -382,10 +382,8 @@ func (s *Service) ProcessNewBlocks(ctx context.Context, blocks []*types.Block) e
 		if eventLimit != nil {
 			if *eventLimit == 0 {
 				endId = 0
-			} else {
-				if endId > startId && endId-startId >= *eventLimit {
-					endId = startId + *eventLimit - 1
-				}
+			} else if endId > startId && endId-startId >= *eventLimit {
+				endId = startId + *eventLimit - 1
 			}
 		}
 

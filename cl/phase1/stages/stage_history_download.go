@@ -63,8 +63,10 @@ type StageHistoryReconstructionCfg struct {
 
 const logIntervalTime = 30 * time.Second
 
-const skippedEnvelopeRecoveryMaxAttempts = 3
-const skippedEnvelopeRecoveryRetryInterval = 10 * time.Second
+const (
+	skippedEnvelopeRecoveryMaxAttempts   = 3
+	skippedEnvelopeRecoveryRetryInterval = 10 * time.Second
+)
 
 func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, antiquary *antiquary.Antiquary, sn *freezeblocks.CaplinSnapshots, indiciesDB kv.RwDB, engine execution_client.ExecutionEngine, beaconCfg *clparams.BeaconChainConfig, caplinConfig clparams.CaplinConfig, waitForAllRoutines bool, startingRoot common.Hash, startinSlot uint64, tmpdir string, backfillingThrottling time.Duration, executionBlocksCollector block_collector.BlockCollector, blockReader freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, logger log.Logger, forkchoiceStore forkchoice.ForkChoiceStorage, blobDownloader *network.BlobHistoryDownloader) StageHistoryReconstructionCfg {
 	return StageHistoryReconstructionCfg{
@@ -301,7 +303,6 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 						}
 						continue
 					}
-
 				}
 				logArgs := []any{}
 				currProgress := cfg.downloader.Progress()
@@ -323,7 +324,8 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				highestBlockSeen := initialBeaconBlock.Block.Slot
 				lowestBlockToReach := cfg.sn.SegmentsMax()
 
-				logArgs = append(logArgs,
+				logArgs = append(
+					logArgs,
 					"slot", currProgress,
 					"blockNumber", currEth1Progress.Load(),
 					"blk/sec", fmt.Sprintf("%.1f", speed),

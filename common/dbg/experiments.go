@@ -79,7 +79,7 @@ var (
 
 	SnapshotMadvRnd = EnvBool("SNAPSHOT_MADV_RND", true)
 	// kill-switch: set SNAPSHOT_MADV_SEQUENTIAL=false to skip MADV_SEQUENTIAL in seg.OpenSequentialView
-	SnapshotMadvSequential = EnvBool("SNAPSHOT_MADV_SEQUENTIAL", true)
+	SnapshotMadvSequential = EnvBool("SNAPSHOT_MADV_SEQUENTIAL", false)
 	OnlyCreateDB           = EnvBool("ONLY_CREATE_DB", false)
 
 	CaplinSyncedDataMangerDeadlockDetection = EnvBool("CAPLIN_SYNCED_DATA_MANAGER_DEADLOCK_DETECTION", false)
@@ -96,18 +96,24 @@ var (
 
 	MergeThrottleMs = EnvInt("ERIGON_MERGE_THROTTLE_MS", 0)
 
+	// Trace is the umbrella switch: TRACE=true force-enables opcode + gas tracing
+	// for every tx (it makes IntraBlockState.Trace() true and turns on the
+	// instruction/gas sub-flags below), for debugging a single fixture end-to-end.
+	Trace                 = EnvBool("TRACE", false)
 	TraceAccounts         = EnvStrings("TRACE_ACCOUNTS", ",", nil)
 	TraceStateKeys        = EnvStrings("TRACE_STATE_KEYS", ",", nil)
-	TraceInstructions     = EnvBool("TRACE_INSTRUCTIONS", false)
+	TraceInstructions     = EnvBool("TRACE_INSTRUCTIONS", false) || Trace
 	TraceTransactionIO    = EnvBool("TRACE_TRANSACTION_IO", false)
 	TraceDomainIO         = EnvBool("TRACE_DOMAIN_IO", false)
 	TraceNoopIO           = EnvBool("TRACE_NOOP_IO", false)
 	TraceLogs             = EnvBool("TRACE_LOGS", false)
-	TraceGas              = EnvBool("TRACE_GAS", false)
-	TraceDynamicGas       = EnvBool("TRACE_DYNAMIC_GAS", false)
+	TraceGas              = EnvBool("TRACE_GAS", false) || Trace
+	TraceDynamicGas       = EnvBool("TRACE_DYNAMIC_GAS", false) || Trace
 	TraceApply            = EnvBool("TRACE_APPLY", false)
 	TraceTouchKey         = EnvBool("TRACE_TOUCH_KEY", false)
 	TraceBlockAccessLists = EnvBool("TRACE_BLOCK_ACCESS_LISTS", false)
+	TraceReexec           = EnvBool("TRACE_REEXEC", false)
+	TraceBALFeed          = EnvBool("TRACE_BAL_FEED", false)
 	TraceBlocks           = EnvUints("TRACE_BLOCKS", ",", nil)
 	TraceTxIndexes        = EnvInts("TRACE_TXINDEXES", ",", nil)
 	TraceUnwinds          = EnvBool("TRACE_UNWINDS", false)
@@ -129,9 +135,21 @@ var (
 	UseTxDependencies    = EnvBool("USE_TX_DEPENDENCIES", false)
 	UseStateCache        = EnvBool("USE_STATE_CACHE", true)
 	UseCodeStore         = EnvBool("USE_CODE_STORE", true)
-	DisableAdaptivePin   = EnvBool("DISABLE_ADAPTIVE_PIN", false)
+	DisableAdaptivePin   = EnvBool("DISABLE_ADAPTIVE_PIN", true)
 	AssertStateCache     = EnvBool("ASSERT_STATE_CACHE", false)
 	ReadAhead            = EnvBool("READ_AHEAD", true)
+	ReadAheadWorkers     = EnvInt("READ_AHEAD_WORKERS", estimate.AllCPUs())
+	ReadAheadWait        = EnvBool("READ_AHEAD_WAIT", false)
+	ReadAheadBALCode     = EnvBool("READ_AHEAD_BAL_CODE", false)
+	ReadAheadTxCode      = EnvBool("READ_AHEAD_TX_CODE", false)
+	// FilesAsyncIO warms cold state .kv pages via io_uring before the mmap read, so
+	// a would-be blocking page fault becomes a non-blocking read that releases the
+	// goroutine's P. Linux + io_uring only; self-disables (reads use ordinary faults)
+	// if io_uring is unavailable. Not free when on: each gated .kv file runs a
+	// background goroutine that mincore-rescans it every RESIDENCY_REFRESH_SEC
+	// (default 120s) — a real page-table-walk cost across a full datadir. Experimental,
+	// off by default.
+	FilesAsyncIO = EnvBool("FILES_ASYNC_IO", false)
 
 	BorValidateHeaderTime = EnvBool("BOR_VALIDATE_HEADER_TIME", true)
 	TraceDeletion         = EnvBool("TRACE_DELETION", false)

@@ -150,6 +150,7 @@ func (a *Antiquary) Loop() error {
 				// completed when added.
 				progress = time.Now() // reset the progress if we are not completed
 			case <-a.ctx.Done():
+				return nil
 			}
 		}
 	}
@@ -224,7 +225,10 @@ func (a *Antiquary) Loop() error {
 	if a.states {
 		go a.loopStates(a.ctx)
 	}
-	// Check for snapshots retirement every 3 minutes
+	return a.retirementLoop()
+}
+
+func (a *Antiquary) retirementLoop() error {
 	retirementTicker := time.NewTicker(12 * time.Second)
 	defer retirementTicker.Stop()
 	for {
@@ -234,7 +238,8 @@ func (a *Antiquary) Loop() error {
 				continue
 			}
 
-			if err := a.antiquate(); err != nil {
+			// A cancelled context is a shutdown, not a failure.
+			if err := a.antiquate(); err != nil && a.ctx.Err() == nil {
 				log.Warn("[Antiquary] Failed to antiquate", "err", err)
 			}
 			if a.cfg.DenebForkEpoch == math.MaxUint64 {
@@ -243,10 +248,11 @@ func (a *Antiquary) Loop() error {
 			if !a.blobBackfilled.Load() {
 				continue
 			}
-			if err := a.antiquateBlobs(); err != nil {
+			if err := a.antiquateBlobs(); err != nil && a.ctx.Err() == nil {
 				log.Error("[Antiquary] Failed to antiquate blobs", "err", err)
 			}
 		case <-a.ctx.Done():
+			return nil
 		}
 	}
 }
@@ -369,7 +375,7 @@ func pruneBeaconBlocksAndWriteProgress(ctx context.Context, db kv.RwDB, pruneTo,
 
 // weight for the semaphore to build only one type of snapshots at a time
 // for now all of them have the same weight
-//const caplinSnapshotBuildSemaWeight int64 = 1
+// const caplinSnapshotBuildSemaWeight int64 = 1
 
 // Antiquate will antiquate a specific block range (aka. retire snapshots), this should be ran in the background.
 func (a *Antiquary) antiquate() error {
@@ -510,12 +516,28 @@ func (a *Antiquary) antiquateBlobs() error {
 	}
 	defer roTx.Rollback()
 	// now prune blobs from the database
+	var removeFailures uint64
+	var firstFailedSlot uint64
+	var firstRemoveErr error
 	for i := currentBlobsProgress; i < to; i++ {
 		blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(roTx, i)
 		if err != nil {
 			return err
 		}
-		a.blobStorage.RemoveBlobSidecars(a.ctx, i, blockRoot)
+		if err := a.blobStorage.RemoveBlobSidecars(a.ctx, i, blockRoot); err != nil {
+			if a.ctx.Err() != nil {
+				return a.ctx.Err()
+			}
+			removeFailures++
+			if firstRemoveErr == nil {
+				firstFailedSlot, firstRemoveErr = i, err
+			}
+		}
+	}
+	if removeFailures > 0 {
+		// The loop spans at least CaplinMergeLimit slots and a storage fault hits every
+		// one of them, so the failures are aggregated rather than warned per slot.
+		a.logger.Warn("[Antiquary] Failed to remove blob sidecars", "slots", removeFailures, "firstSlot", firstFailedSlot, "err", firstRemoveErr)
 	}
 	return nil
 }

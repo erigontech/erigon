@@ -308,8 +308,9 @@ func TestNewP2PConfig_DiscoveryDefaults(t *testing.T) {
 func TestCommitmentPlainValuesFromCtx(t *testing.T) {
 	parse := func(args ...string) *bool {
 		var got *bool
+		flag := cli.BoolFlag{Name: CommitmentPlainValuesFlag.Name}
 		app := &cli.Command{
-			Flags: []cli.Flag{&CommitmentPlainValuesFlag},
+			Flags: []cli.Flag{&flag},
 			Action: func(ctx context.Context, cmd *cli.Command) error {
 				got = CommitmentPlainValuesFromCtx(cmd)
 				return nil

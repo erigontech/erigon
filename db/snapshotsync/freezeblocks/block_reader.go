@@ -210,28 +210,25 @@ func (r *RemoteBlockReader) TxnLookup(ctx context.Context, tx kv.Getter, txnHash
 	return reply.BlockNumber, reply.TxNumber, true, nil
 }
 
-func (r *RemoteBlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (txn types.Transaction, err error) {
+func (r *RemoteBlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (types.Transaction, bool, error) {
 	canonicalHash, ok, err := r.CanonicalHash(ctx, tx, blockNum)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if !ok {
-		return nil, nil
+		return nil, false, nil
 	}
 	b, err := r.BodyWithTransactions(ctx, tx, canonicalHash, blockNum)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if b == nil {
-		return nil, nil
+		return nil, false, nil
 	}
-	if i < 0 {
-		return nil, nil
+	if i < 0 || i >= len(b.Transactions) {
+		return nil, false, nil
 	}
-	if len(b.Transactions) <= i {
-		return nil, nil
-	}
-	return b.Transactions[i], nil
+	return b.Transactions[i], true, nil
 }
 
 func (r *RemoteBlockReader) HasSenders(ctx context.Context, _ kv.Getter, hash common.Hash, blockHeight uint64) (bool, error) {
@@ -573,20 +570,14 @@ func (r *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHei
 				h = rawdb.ReadHeader(tx, blockHash, blockHeight)
 				if h != nil {
 					return h, nil
-				} else {
-					if dbgLogs {
-						log.Info(dbgPrefix + "not found in db")
-					}
+				} else if dbgLogs {
+					log.Info(dbgPrefix + "not found in db")
 				}
-			} else {
-				if dbgLogs {
-					log.Info(dbgPrefix + "canonical hash is empty")
-				}
+			} else if dbgLogs {
+				log.Info(dbgPrefix + "canonical hash is empty")
 			}
-		} else {
-			if dbgLogs {
-				log.Info(dbgPrefix + "tx is nil")
-			}
+		} else if dbgLogs {
+			log.Info(dbgPrefix + "tx is nil")
 		}
 		return nil, nil
 	}
@@ -984,7 +975,7 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 		// Apparently some snapshots have pre-Shapella blocks with empty rather than nil withdrawals
 		b.Withdrawals = nil
 	}
-	block = types.NewBlockFromStorage(hash, h, txs, b.Uncles, b.Withdrawals)
+	block = types.NewBlockFromStorage(hash, h, txs, b.Uncles, b.Withdrawals, nil)
 	if len(senders) != block.Transactions().Len() {
 		if dbgLogs {
 			log.Info(dbgPrefix + fmt.Sprintf("found block with %d transactions, but %d senders", block.Transactions().Len(), len(senders)))
@@ -1197,24 +1188,24 @@ func (r *BlockReader) txsFromSnapshot(baseTxnID uint64, txCount uint32, txsSeg *
 	return txs, senders, nil
 }
 
-func (r *BlockReader) txnByID(txnID uint64, sn *snapshotsync.VisibleSegment, buf []byte) (txn types.Transaction, err error) {
+func (r *BlockReader) txnByID(txnID uint64, sn *snapshotsync.VisibleSegment, buf []byte) (types.Transaction, bool, error) {
 	idxTxnHash := sn.Src().Index(snaptype2.Indexes.TxnHash)
 
 	offset := idxTxnHash.OrdinalLookup(txnID - idxTxnHash.BaseDataID())
 	gg := sn.Src().MakeGetter()
 	gg.Reset(offset)
 	if !gg.HasNext() {
-		return nil, nil
+		return nil, false, nil
 	}
 	buf, _ = gg.Next(buf[:0])
 	sender, txnRlp := buf[1:1+20], buf[1+20:]
 
-	txn, err = types.DecodeTransaction(txnRlp)
+	txn, err := types.DecodeTransaction(txnRlp)
 	if err != nil {
-		return
+		return nil, false, err
 	}
 	txn.SetSender(accounts.InternAddress(*(*common.Address)(sender))) // see: https://tip.golang.org/ref/spec#Conversions_from_slice_to_array_pointer
-	return
+	return txn, true, nil
 }
 func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*snapshotsync.VisibleSegment, buf []byte) (types.Transaction, uint64, uint64, bool, error) {
 	for _, sn := range slices.Backward(segments) {
@@ -1262,45 +1253,45 @@ func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*snapshotsync.Vi
 	return nil, 0, 0, false, nil
 }
 
-// TxnByIdxInBlock - doesn't include system-transactions in the begin/end of block
-// return nil if 0 < i < body.txCount
-func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, txIdxInBlock int) (txn types.Transaction, err error) {
+// TxnByIdxInBlock returns the i-th transaction of the block, excluding the
+// system transactions at the block boundaries. ok is false when the block or
+// that transaction does not exist.
+func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, txIdxInBlock int) (types.Transaction, bool, error) {
 	maxBlockNumInFiles := r.sn.BlocksAvailable()
 	if blockNum == 0 || maxBlockNumInFiles == 0 || blockNum > maxBlockNumInFiles {
 		canonicalHash, ok, err := r.CanonicalHash(ctx, tx, blockNum)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		if !ok {
-			return nil, nil
+			return nil, false, nil
 		}
 		return rawdb.TxnByIdxInBlock(tx, canonicalHash, blockNum, txIdxInBlock)
 	}
 
 	seg, ok, release := r.viewSingleFile(tx, snaptype2.Bodies, blockNum)
 	if !ok {
-		return
+		return nil, false, nil
 	}
 	defer release()
 
-	var b *types.BodyOnlyTxn
-	b, _, err = BodyForTxnFromSnapshot(blockNum, seg, nil)
+	b, _, err := BodyForTxnFromSnapshot(blockNum, seg, nil)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	release()
 	if b == nil {
-		return
+		return nil, false, nil
 	}
 
 	// if block has no transactions, or requested txNum out of non-system transactions length
 	if b.TxCount == 2 || txIdxInBlock == -1 || txIdxInBlock >= int(b.TxCount-2) {
-		return nil, nil
+		return nil, false, nil
 	}
 
 	txnSeg, ok, release := r.viewSingleFile(tx, snaptype2.Transactions, blockNum)
 	if !ok {
-		return
+		return nil, false, nil
 	}
 	defer release()
 
@@ -1347,21 +1338,26 @@ func (r *BlockReader) IterateFrozenBodies(tx kv.Getter, f func(blockNum, baseTxN
 	view, release := r.view(tx)
 	defer release()
 	for _, sn := range view.Bodies() {
-		defer sn.Src().MadvSequential().DisableReadAhead()
+		if err := func() error {
+			defer sn.Src().MadvSequential().DisableReadAhead()
 
-		var buf []byte
-		g := sn.Src().MakeGetter()
-		blockNum := sn.From()
-		var b types.BodyOnlyTxn
-		for g.HasNext() {
-			buf, _ = g.Next(buf[:0])
-			if err := b.DecodeRLPBytes(buf); err != nil {
-				return err
+			var buf []byte
+			g := sn.Src().MakeGetter()
+			blockNum := sn.From()
+			var b types.BodyOnlyTxn
+			for g.HasNext() {
+				buf, _ = g.Next(buf[:0])
+				if err := b.DecodeRLPBytes(buf); err != nil {
+					return err
+				}
+				if err := f(blockNum, b.BaseTxnID.U64(), uint64(b.TxCount)); err != nil {
+					return err
+				}
+				blockNum++
 			}
-			if err := f(blockNum, b.BaseTxnID.U64(), uint64(b.TxCount)); err != nil {
-				return err
-			}
-			blockNum++
+			return nil
+		}(); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -1404,7 +1400,7 @@ func (r *BlockReader) IntegrityTxnID(ctx context.Context, failFast bool) error {
 				log.Error(err.Error())
 			}
 		}
-		expectedFirstTxnID = expectedFirstTxnID + uint64(sn.Src().Count())
+		expectedFirstTxnID += uint64(sn.Src().Count())
 	}
 	return nil
 }

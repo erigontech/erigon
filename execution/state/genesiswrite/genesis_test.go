@@ -44,7 +44,6 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
-	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -86,8 +85,10 @@ func TestGenesisBlockRoots(t *testing.T) {
 	t.Parallel()
 	require := require.New(t)
 
-	block, _, err := genesiswrite.GenesisToBlock(t, chainspec.MainnetGenesisBlock(), datadir.New(t.TempDir()), log.Root())
+	block, ibs, err := genesiswrite.GenesisToBlock(chainspec.MainnetGenesisBlock(), datadir.New(t.TempDir()), log.Root())
 	require.NoError(err)
+	ibs.Close()
+
 	if block.Hash() != chainspec.Mainnet.GenesisHash {
 		t.Errorf("wrong mainnet genesis hash, got %v, want %v", block.Hash(), chainspec.Mainnet.GenesisHash)
 	}
@@ -100,8 +101,9 @@ func TestGenesisBlockRoots(t *testing.T) {
 		require.NoError(err)
 		require.False(spec.IsEmpty())
 
-		block, _, err = genesiswrite.GenesisToBlock(t, spec.Genesis, datadir.New(t.TempDir()), log.Root())
+		block, ibs, err = genesiswrite.GenesisToBlock(spec.Genesis, datadir.New(t.TempDir()), log.Root())
 		require.NoError(err)
+		ibs.Close()
 
 		if block.Root() != spec.GenesisStateRoot {
 			t.Errorf("wrong %s Chain genesis state root, got %v, want %v", netw, block.Root(), spec.GenesisStateRoot)
@@ -171,6 +173,7 @@ func TestAllocConstructor(t *testing.T) {
 	reader, err := rpchelper.CreateHistoryStateReader(ctx, tx, 1, 0, rawdbv3.TxNums)
 	require.NoError(err)
 	state := state.New(reader)
+	defer state.Close()
 	balance, err := state.GetBalance(address)
 	require.NoError(err)
 	assert.Equal(funds, balance.ToBig())
@@ -186,6 +189,61 @@ func TestAllocConstructor(t *testing.T) {
 	storage1, err := state.GetState(address, key1)
 	require.NoError(err)
 	assert.Equal(u256.U64(0x01c9), storage1)
+}
+
+// A genesis alloc carrying storage but otherwise EIP-161-empty must still be materialized as a present account (so its storage never sits under an absent account).
+func TestGenesisStorageBearingEmptyAccountIsPresent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	t.Parallel()
+	require := require.New(t)
+	assert := assert.New(t)
+
+	address := accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000c0ffee01"))
+	slot := common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000001")
+	genSpec := &types.Genesis{
+		Config: chain.AllProtocolChanges,
+		Alloc: types.GenesisAlloc{
+			address.Value(): {Balance: big.NewInt(0), Storage: map[common.Hash]common.Hash{slot: common.HexToHash("0x2a")}},
+		},
+	}
+
+	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genSpec), execmoduletester.WithKey(key))
+
+	ctx := context.Background()
+	tx, err := m.DB.BeginTemporalRo(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+
+	// Ground truth for DomainDel's guard: the accounts domain must hold a
+	// non-empty entry for this address (not dangling storage under an absent account).
+	av := address.Value()
+	acc, _, err := tx.GetLatest(kv.AccountsDomain, av[:])
+	require.NoError(err)
+	require.NotEmpty(acc, "storage-bearing empty alloc must produce a present accounts-domain entry")
+
+	// High-level view agrees: account exists, storage is set, balance/nonce/code stay empty.
+	reader, err := rpchelper.CreateHistoryStateReader(ctx, tx, 1, 0, rawdbv3.TxNums)
+	require.NoError(err)
+	st := state.New(reader)
+
+	exist, err := st.Exist(address)
+	require.NoError(err)
+	assert.True(exist, "storage-bearing empty account must exist")
+
+	bal, err := st.GetBalance(address)
+	require.NoError(err)
+	assert.True(bal.IsZero(), "balance stays zero")
+
+	nonce, err := st.GetNonce(address)
+	require.NoError(err)
+	assert.Zero(nonce, "nonce stays zero")
+
+	got, err := st.GetState(address, accounts.InternKey(slot))
+	require.NoError(err)
+	assert.Equal(u256.U64(0x2a), got, "storage slot must be readable")
 }
 
 // See https://github.com/erigontech/erigon/pull/11264
@@ -299,11 +357,11 @@ func TestSetupGenesis(t *testing.T) {
 				key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 				m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&oldcustomg), execmoduletester.WithKey(key))
 
-				chainBlocks, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, nil)
+				chainBlocks, err := m.GenerateChain(4, nil)
 				if err != nil {
 					return nil, nil, err
 				}
-				if err = m.InsertChain(chainBlocks); err != nil {
+				if err := m.InsertChain(chainBlocks); err != nil {
 					return nil, nil, err
 				}
 				// This should return a compatibility error.

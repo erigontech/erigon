@@ -21,13 +21,11 @@ import (
 	"encoding/hex"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-// AdaptivePinControllerConfig sets the policy knobs for the adaptive
-// trunk-pin controller. Defaults target the SSTORE-bloat workload class
-// (single contract dominating storage reads).
 type AdaptivePinControllerConfig struct {
 	PromoteThresholdMisses    uint64
 	MaxPromotedContracts      int
@@ -40,18 +38,14 @@ type AdaptivePinControllerConfig struct {
 func DefaultAdaptivePinControllerConfig() AdaptivePinControllerConfig {
 	return AdaptivePinControllerConfig{
 		PromoteThresholdMisses:    100,
-		MaxPromotedContracts:      8,
+		MaxPromotedContracts:      4,
 		DemoteCooldownBlocks:      5,
-		InitialViewBudgetBytes:    4 << 20,
-		ExtensionBudgetBytes:      8 << 20,
-		PerContractMaxBudgetBytes: 64 << 20,
+		InitialViewBudgetBytes:    4 * 1024 * 1024,
+		ExtensionBudgetBytes:      8 * 1024 * 1024,
+		PerContractMaxBudgetBytes: 32 * 1024 * 1024,
 	}
 }
 
-// AdaptivePinController watches per-contract miss pressure on a
-// BranchCache and decides which contracts to pin (with a sync initial
-// view), grow (per-block extension), or demote (invalidate the pin
-// set after sustained inactivity).
 type AdaptivePinController struct {
 	cache  *BranchCache
 	cfg    AdaptivePinControllerConfig
@@ -63,22 +57,15 @@ type AdaptivePinController struct {
 	states map[[32]byte]*adaptiveContractState
 }
 
-// ParallelResolverFactory builds a fresh BatchBranchResolver for one
-// OnBlockComplete call. release() is invoked after the controller is done
-// with the resolver. Returning (nil, nil, err) makes the controller fall
-// back to the serial-BFS path for this block.
 type ParallelResolverFactory func() (resolve BatchBranchResolver, release func(), err error)
 
-// DbBranchesProvider returns the MDBX-resident branch overlay for one
-// contract — values shadow file values in the parallel preload's wave.
-// Empty/nil result is valid (no overlay; resolver is authoritative).
 type DbBranchesProvider func(contractHash []byte) map[string][]byte
 
 type adaptiveContractState struct {
 	contractHash     [32]byte
 	promotedAtTxNum  uint64
-	preload          *ContractTrunkPreload         // serial-BFS path (nil when parallel)
-	parallel         *ContractTrunkPreloadParallel // parallel-wave-BFS path (nil when serial)
+	preload          *ContractTrunkPreload
+	parallel         *ContractTrunkPreloadParallel
 	coldBlocksInARow int
 }
 
@@ -111,23 +98,24 @@ func (s *adaptiveContractState) pinnedPrefixes() [][]byte {
 }
 
 func NewAdaptivePinController(cache *BranchCache, cfg AdaptivePinControllerConfig, logger log.Logger) *AdaptivePinController {
+	def := DefaultAdaptivePinControllerConfig()
 	if cfg.InitialViewBudgetBytes <= 0 {
-		cfg.InitialViewBudgetBytes = 4 << 20
+		cfg.InitialViewBudgetBytes = def.InitialViewBudgetBytes
 	}
 	if cfg.ExtensionBudgetBytes <= 0 {
-		cfg.ExtensionBudgetBytes = 8 << 20
+		cfg.ExtensionBudgetBytes = def.ExtensionBudgetBytes
 	}
 	if cfg.PerContractMaxBudgetBytes <= 0 {
-		cfg.PerContractMaxBudgetBytes = 64 << 20
+		cfg.PerContractMaxBudgetBytes = def.PerContractMaxBudgetBytes
 	}
 	if cfg.MaxPromotedContracts <= 0 {
-		cfg.MaxPromotedContracts = 8
+		cfg.MaxPromotedContracts = def.MaxPromotedContracts
 	}
 	if cfg.DemoteCooldownBlocks <= 0 {
-		cfg.DemoteCooldownBlocks = 5
+		cfg.DemoteCooldownBlocks = def.DemoteCooldownBlocks
 	}
 	if cfg.PromoteThresholdMisses == 0 {
-		cfg.PromoteThresholdMisses = 100
+		cfg.PromoteThresholdMisses = def.PromoteThresholdMisses
 	}
 	return &AdaptivePinController{
 		cache:  cache,
@@ -137,14 +125,11 @@ func NewAdaptivePinController(cache *BranchCache, cfg AdaptivePinControllerConfi
 	}
 }
 
-// Bind installs the controller's miss-callback on the cache.
-// Safe to call multiple times — replaces any prior callback.
+// Idempotent.
 func (c *AdaptivePinController) Bind() {
 	c.cache.SetMissCallback(c.onCacheMiss)
 }
 
-// PerContractBudgetBytes is the per-contract pin ceiling; a dbBranches provider
-// need never gather more than this since the preload can't pin beyond it.
 func (c *AdaptivePinController) PerContractBudgetBytes() int {
 	return c.cfg.PerContractMaxBudgetBytes
 }
@@ -162,21 +147,13 @@ func (c *AdaptivePinController) onCacheMiss(prefix []byte) {
 	v.(*atomic.Uint64).Add(1)
 }
 
-// OnBlockComplete consumes the per-block miss snapshot and decides
-// promotions, extensions, and demotions. Synchronous — preloads run
-// inline so the new pin set is available for the next block's reads.
-//
-// The controller is aggregator-scoped (one owner across SharedDomains) so pin
-// residency ages by block-access recency, not SD binds; the tx-scoped reader/
-// factory/provider are therefore passed per call rather than stored, and c.mu
-// serializes concurrent callers.
+// Synchronous; aggregator-scoped (shared across tx-scoped binds via c.mu).
 func (c *AdaptivePinController) OnBlockComplete(ctx context.Context, txNum uint64, reader CommitmentReader, factory ParallelResolverFactory, provider DbBranchesProvider) {
 	misses := c.snapshotMisses()
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// One factory call per block, shared across all contracts. nil falls back to serial.
 	var parallelResolve BatchBranchResolver
 	var releaseParallel func()
 	if factory != nil {
@@ -299,12 +276,15 @@ func (c *AdaptivePinController) promoteLocked(
 		if provider != nil {
 			dbBranches = provider(hash[:])
 		}
+		started := time.Now()
 		if _, _, err := p.Run(c.cfg.InitialViewBudgetBytes, dbBranches, parallelResolve, c.cache, c.logger); err != nil {
+			recordPreload(started, 0)
 			for _, prefix := range p.PinnedPrefixes() {
 				c.cache.Invalidate(prefix)
 			}
 			return nil, err
 		}
+		recordPreload(started, p.usedBytes)
 		return &adaptiveContractState{
 			contractHash:    hash,
 			promotedAtTxNum: txNum,
@@ -316,12 +296,15 @@ func (c *AdaptivePinController) promoteLocked(
 		return nil, err
 	}
 	p.pinTxNum = txNum
+	started := time.Now()
 	if _, _, err := p.Run(c.cfg.InitialViewBudgetBytes, reader, c.cache, c.logger); err != nil {
+		recordPreload(started, 0)
 		for _, prefix := range p.PinnedPrefixes() {
 			c.cache.Invalidate(prefix)
 		}
 		return nil, err
 	}
+	recordPreload(started, p.usedBytes)
 	return &adaptiveContractState{
 		contractHash:    hash,
 		promotedAtTxNum: txNum,
@@ -329,9 +312,7 @@ func (c *AdaptivePinController) promoteLocked(
 	}, nil
 }
 
-// runExtensionLocked: caller must hold c.mu. Uses the saved state's mode
-// (parallel vs serial); a serial state with a parallel resolver available
-// keeps using serial — switching mid-contract would lose the queue position.
+// Caller must hold c.mu. Does not switch modes mid-contract.
 func (c *AdaptivePinController) runExtensionLocked(
 	ctx context.Context,
 	state *adaptiveContractState,
@@ -350,11 +331,15 @@ func (c *AdaptivePinController) runExtensionLocked(
 			dbBranches = provider(state.contractHash[:])
 		}
 		state.parallel.pinTxNum = txNum
+		before, started := state.parallel.usedBytes, time.Now()
 		_, _, err := state.parallel.Run(stepBudget, dbBranches, parallelResolve, c.cache, c.logger)
+		recordPreload(started, state.parallel.usedBytes-before)
 		return err
 	}
 	state.preload.pinTxNum = txNum
+	before, started := state.preload.usedBytes, time.Now()
 	_, _, err := state.preload.Run(stepBudget, reader, c.cache, c.logger)
+	recordPreload(started, state.preload.usedBytes-before)
 	return err
 }
 

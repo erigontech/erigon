@@ -256,7 +256,8 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 			currentStateRoot, _ = f.currentState.BlockRoot()
 			currentStateSlot = f.currentState.Slot()
 		}
-		log.Debug("AddChainSegment: missing segment",
+		log.Debug(
+			"AddChainSegment: missing segment",
 			"slot", block.Slot,
 			"blockRoot", common.Hash(blockRoot),
 			"parentRoot", block.ParentRoot,
@@ -331,7 +332,8 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		// Detailed diagnostics: compare state header fields with block fields.
 		hdr := newState.LatestBlockHeader()
 		stateHashSSZ, _ := newState.HashSSZ()
-		log.Warn("AddChainSegment: BlockRoot MISMATCH after TransitionState",
+		log.Warn(
+			"AddChainSegment: BlockRoot MISMATCH after TransitionState",
 			"slot", block.Slot,
 			"expectedBlockRoot", common.Hash(blockRoot),
 			"computedBlockRoot", computedRoot,
@@ -407,6 +409,7 @@ func (f *forkGraphDisk) GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBl
 
 	return obj.(*cltypes.SignedBeaconBlock), true
 }
+
 func (f *forkGraphDisk) GetState(blockRoot common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
 	return f.getState(blockRoot, alwaysCopy, false)
 }
@@ -700,7 +703,8 @@ func (f *forkGraphDisk) GetPreviousParticipationIndicies(epoch uint64) (*solid.P
 		return nil, nil
 	}
 	out := solid.NewParticipationBitList(0, int(f.beaconCfg.ValidatorRegistryLimit))
-	return out, out.DecodeSSZ(b, 0)
+	err := out.DecodeSSZ(b, 0)
+	return out, err
 }
 
 func (f *forkGraphDisk) GetCurrentParticipationIndicies(epoch uint64) (*solid.ParticipationBitList, error) {
@@ -718,7 +722,8 @@ func (f *forkGraphDisk) GetCurrentParticipationIndicies(epoch uint64) (*solid.Pa
 		return nil, nil
 	}
 	out := solid.NewParticipationBitList(0, int(f.beaconCfg.ValidatorRegistryLimit))
-	return out, out.DecodeSSZ(b, 0)
+	err := out.DecodeSSZ(b, 0)
+	return out, err
 }
 
 func (f *forkGraphDisk) GetValidatorSet(blockRoot common.Hash) (*solid.ValidatorSet, error) {

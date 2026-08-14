@@ -38,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/utils"
-	"github.com/erigontech/erigon/common"
 )
 
 func TestBlocksByRootHandler(t *testing.T) {
@@ -98,7 +97,7 @@ func TestBlocksByRootHandler(t *testing.T) {
 		return
 	}
 
-	reqData := common.Copy(reqBuf.Bytes())
+	reqData := bytes.Clone(reqBuf.Bytes())
 	stream, err := host1.NewStream(ctx, host.ID(), protocol.ID(communication.BeaconBlocksByRangeProtocolV2))
 	require.NoError(t, err)
 
@@ -161,6 +160,6 @@ func TestBlocksByRootHandler(t *testing.T) {
 		t.Fatal("Stream is not empty")
 	}
 
-	defer indiciesDB.Close()
-	defer tx.Rollback()
+	indiciesDB.Close()
+	tx.Rollback()
 }

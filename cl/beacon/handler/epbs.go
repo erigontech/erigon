@@ -18,13 +18,14 @@ package handler
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"mime"
 	"net/http"
-	"sort"
+	"slices"
 	"strconv"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
@@ -42,9 +43,11 @@ import (
 	execparams "github.com/erigontech/erigon/execution/protocol/params"
 )
 
-const maxProposerPreferencesRequestItems = 2048
-const maxEpbsJSONSize = 1 << 20
-const maxExecutionPayloadEnvelopeRequestSize = int64(execparams.MaxRlpBlockSize) * 4
+const (
+	maxProposerPreferencesRequestItems     = 2048
+	maxEpbsJSONSize                        = 1 << 20
+	maxExecutionPayloadEnvelopeRequestSize = int64(execparams.MaxRlpBlockSize) * 4
+)
 
 func maxSignedExecutionPayloadBidSSZSize() int64 {
 	emptyBidSize := (&cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{}}).EncodingSizeSSZ()
@@ -201,7 +204,7 @@ func (a *ApiHandler) GetEthV1ValidatorPayloadAttestationData(w http.ResponseWrit
 	}
 
 	// Get the beacon block root for this slot from fork choice
-	headRoot, headSlot, _, err := a.getHead()
+	headRoot, headSlot, _, err := a.getSelectedHead()
 	if err != nil {
 		return nil, err
 	}
@@ -404,22 +407,31 @@ func aggregatePayloadAttestationMessages(
 		})
 	}
 
-	sort.Slice(candidates, func(i, j int) bool {
-		if candidates[i].weight != candidates[j].weight {
-			return candidates[i].weight > candidates[j].weight
+	slices.SortFunc(candidates, func(a, b candidate) int {
+		if a.weight != b.weight {
+			return cmp.Compare(b.weight, a.weight)
 		}
-		left := candidates[i].attestation.Data
-		right := candidates[j].attestation.Data
+		left := a.attestation.Data
+		right := b.attestation.Data
 		if left.Slot != right.Slot {
-			return left.Slot < right.Slot
+			return cmp.Compare(left.Slot, right.Slot)
 		}
-		if cmp := bytes.Compare(left.BeaconBlockRoot[:], right.BeaconBlockRoot[:]); cmp != 0 {
-			return cmp < 0
+		if c := bytes.Compare(left.BeaconBlockRoot[:], right.BeaconBlockRoot[:]); c != 0 {
+			return c
 		}
 		if left.PayloadPresent != right.PayloadPresent {
-			return left.PayloadPresent
+			if left.PayloadPresent {
+				return -1
+			}
+			return 1
 		}
-		return left.BlobDataAvailable && !right.BlobDataAvailable
+		if left.BlobDataAvailable != right.BlobDataAvailable {
+			if left.BlobDataAvailable {
+				return -1
+			}
+			return 1
+		}
+		return 0
 	})
 	for i := 0; i < len(candidates) && result.Len() < int(cfg.MaxPayloadAttestations); i++ {
 		result.Append(candidates[i].attestation)
@@ -1038,7 +1050,7 @@ func (a *ApiHandler) GetEthV1ValidatorExecutionPayloadEnvelopeBySlot(w http.Resp
 func (a *ApiHandler) blockRootFromBlockId(blockId *beaconhttp.SegmentID) (common.Hash, error) {
 	switch {
 	case blockId.Head():
-		root, _, _, err := a.getHead()
+		root, _, _, err := a.getSelectedHead()
 		return root, err
 	case blockId.Finalized():
 		// Get finalized root from fork choice

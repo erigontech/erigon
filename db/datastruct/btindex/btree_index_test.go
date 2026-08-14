@@ -43,7 +43,7 @@ func Test_BtreeIndex_Init(t *testing.T) {
 	logger := log.New()
 	tmp := t.TempDir()
 
-	keyCount, M := 100, uint64(4)
+	keyCount := 100
 	compPath := generateKV(t, tmp, 52, 300, keyCount, logger, 0)
 	decomp, err := seg.NewDecompressor(compPath)
 	require.NoError(t, err)
@@ -53,7 +53,7 @@ func Test_BtreeIndex_Init(t *testing.T) {
 	err = BuildBtreeIndexWithDecompressor(filepath.Join(tmp, "a.bt"), filepath.Join(tmp, "a.kvei"), r, background.NewProgressSet(), tmp, 1, logger, true, statecfg.AccessorBTree|statecfg.AccessorExistence)
 	require.NoError(t, err)
 
-	bt, err := OpenBtreeIndexWithDecompressor(filepath.Join(tmp, "a.bt"), M, r)
+	bt, err := OpenBtreeIndexWithDecompressor(filepath.Join(tmp, "a.bt"), r)
 	require.NoError(t, err)
 	require.EqualValues(t, bt.KeyCount(), keyCount)
 	bt.Close()
@@ -64,7 +64,7 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 
 	tmp := t.TempDir()
 	logger := log.New()
-	keyCount, M := 120, 30
+	keyCount := 120
 	compressFlags := seg.CompressKeys | seg.CompressVals
 
 	t.Run("empty index", func(t *testing.T) {
@@ -72,7 +72,7 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 		indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
 		buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
 
-		kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), compressFlags, false)
+		kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, compressFlags, false)
 		require.NoError(t, err)
 		require.EqualValues(t, 0, bt.KeyCount())
 		bt.Close()
@@ -83,7 +83,7 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
 	buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
 
-	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), compressFlags, false)
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, compressFlags, false)
 	require.NoError(t, err)
 	require.EqualValues(t, bt.KeyCount(), keyCount)
 	defer bt.Close()
@@ -129,7 +129,7 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 		// require.EqualValues(t, uint64(i), cur.Value())
 	}
 	for i := 1; i < len(keys); i++ {
-		alt := common.Copy(keys[i])
+		alt := bytes.Clone(keys[i])
 		for j := len(alt) - 1; j >= 0; j-- {
 			if alt[j] > 0 {
 				alt[j] -= 1
@@ -151,7 +151,7 @@ func Test_BtreeIndex_Build(t *testing.T) {
 
 	tmp := t.TempDir()
 	logger := log.New()
-	keyCount, M := 20000, 510
+	keyCount := 20000
 
 	compressFlags := seg.CompressKeys | seg.CompressVals
 	dataPath := generateKV(t, tmp, 52, 48, keyCount, logger, compressFlags)
@@ -162,7 +162,7 @@ func Test_BtreeIndex_Build(t *testing.T) {
 	buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
 	require.NoError(t, err)
 
-	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), compressFlags, false)
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, compressFlags, false)
 	require.NoError(t, err)
 	require.EqualValues(t, bt.KeyCount(), keyCount)
 	defer bt.Close()
@@ -222,7 +222,7 @@ func writeV0Index(tb testing.TB, dataPath, indexPath string, compressed seg.File
 			key, _ = r.Next(key[:0])
 			ef.AddOffset(pos)
 			if di%m == 0 {
-				nodes = append(nodes, v0node{key: common.Copy(key), di: di})
+				nodes = append(nodes, v0node{key: bytes.Clone(key), di: di})
 			}
 			di++
 			pos, _ = r.Skip()
@@ -266,7 +266,7 @@ func Test_BtreeIndex_V0_V2_Read(t *testing.T) {
 
 	for _, tc := range []struct{ name, path string }{{"v0", v0Path}, {"v2", v2Path}} {
 		t.Run(tc.name, func(t *testing.T) {
-			kv, bt, err := OpenBtreeIndexAndDataFile(tc.path, dataPath, M, compressFlags, false)
+			kv, bt, err := OpenBtreeIndexAndDataFile(tc.path, dataPath, compressFlags, false)
 			require.NoError(t, err)
 			defer bt.Close()
 			defer kv.Close()
@@ -297,7 +297,7 @@ func Test_BtreeIndex_V0_M_Mismatch(t *testing.T) {
 	t.Parallel()
 	tmp := t.TempDir()
 	logger := log.New()
-	const writeM, openM = uint64(32), uint64(256)
+	const writeM = uint64(32)
 	keyCount := 500
 	compressFlags := seg.CompressKeys | seg.CompressVals
 
@@ -308,7 +308,7 @@ func Test_BtreeIndex_V0_M_Mismatch(t *testing.T) {
 	v0Path := filepath.Join(tmp, "v0.bt")
 	writeV0Index(t, dataPath, v0Path, compressFlags, writeM)
 
-	kv, bt, err := OpenBtreeIndexAndDataFile(v0Path, dataPath, openM, compressFlags, false)
+	kv, bt, err := OpenBtreeIndexAndDataFile(v0Path, dataPath, compressFlags, false)
 	require.NoError(t, err)
 	defer bt.Close()
 	defer kv.Close()
@@ -338,26 +338,9 @@ func TestBtIndex_SeekBeyondLast(t *testing.T) {
 	require.NoError(t, err)
 
 	indexPath := strings.TrimSuffix(kvPath, ".kv") + "_m8.bt"
-	func() {
-		decomp, err := seg.NewDecompressor(kvPath)
-		require.NoError(t, err)
-		defer decomp.Close()
-		iw, err := NewBtIndexWriter(BtIndexWriterArgs{IndexFile: indexPath, TmpDir: tmp, M: M, KeyCount: uint64(decomp.Count() / 2), MaxOffset: uint64(decomp.Size())}, logger)
-		require.NoError(t, err)
-		defer iw.Close()
-		r := seg.NewReader(decomp.MakeGetter(), compress)
-		r.Reset(0)
-		var pos uint64
-		for r.HasNext() {
-			key, _ := r.Next(nil)
-			require.NoError(t, iw.AddKey(key, pos))
-			pos, _ = r.Skip()
-		}
-		iw.DisableFsync()
-		require.NoError(t, iw.Build())
-	}()
+	buildBtreeIndexWithM(t, kvPath, indexPath, compress, M, logger)
 
-	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, M, compress, false)
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, compress, false)
 	require.NoError(t, err)
 	defer bt.Close()
 	defer kv.Close()
@@ -420,7 +403,7 @@ func TestFooter_ZeroKeyCount(t *testing.T) {
 	// Use a 1-key KV as the reader — it won't be consulted because Open will
 	// fail before building the BpsTree.
 	dataPath := generateKV(t, tmp, 8, 8, 1, log.New(), seg.CompressNone)
-	_, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, 256, seg.CompressNone, false)
+	_, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, seg.CompressNone, false)
 	if err == nil {
 		defer bt.Close()
 		require.True(t, bt.Empty())
@@ -463,6 +446,29 @@ func Test_BtreeIndex_V2_EfOffset(t *testing.T) {
 }
 
 // Opens .kv at dataPath and generates index over it to file 'indexPath'
+// buildBtreeIndexWithM writes an index with an explicit M, bypassing DefaultBtreeM.
+func buildBtreeIndexWithM(tb testing.TB, dataPath, indexPath string, compressed seg.FileCompression, m uint64, logger log.Logger) {
+	tb.Helper()
+	decomp, err := seg.NewDecompressor(dataPath)
+	require.NoError(tb, err)
+	defer decomp.Close()
+
+	iw, err := NewBtIndexWriter(BtIndexWriterArgs{IndexFile: indexPath, TmpDir: tb.TempDir(), M: m, KeyCount: uint64(decomp.Count() / 2), MaxOffset: uint64(decomp.Size())}, logger)
+	require.NoError(tb, err)
+	defer iw.Close()
+
+	r := seg.NewReader(decomp.MakeGetter(), compressed)
+	r.Reset(0)
+	var pos uint64
+	for r.HasNext() {
+		key, _ := r.Next(nil)
+		require.NoError(tb, iw.AddKey(key, pos))
+		pos, _ = r.Skip()
+	}
+	iw.DisableFsync()
+	require.NoError(tb, iw.Build())
+}
+
 func buildBtreeIndex(tb testing.TB, dataPath, indexPath string, compressed seg.FileCompression, seed uint32, logger log.Logger, noFsync bool) {
 	tb.Helper()
 	decomp, err := seg.NewDecompressor(dataPath)
@@ -488,7 +494,7 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
 	buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
 
-	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), compressFlags, false)
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, compressFlags, false)
 	require.NoError(t, err)
 	require.EqualValues(t, bt.KeyCount(), keyCount)
 	defer bt.Close()
@@ -598,7 +604,7 @@ func TestBpsTree_Seek(t *testing.T) {
 	//tr := newTrie()
 	ef := eliasfano32.NewEliasFano(uint64(keyCount), ps[len(ps)-1])
 	for i := 0; i < len(ps); i++ {
-		//tr.insert(Node{i: uint64(i), key: common.Copy(keys[i]), off: ps[i]})
+		//tr.insert(Node{i: uint64(i), key: bytes.Clone(keys[i]), off: ps[i]})
 		ef.AddOffset(ps[i])
 	}
 	ef.Build()
@@ -636,8 +642,8 @@ func (b *mockIndexReader) newCursor(k, v []byte, di uint64, g *seg.Reader) *Curs
 	return &Cursor{
 		ef:     b.ef,
 		getter: g,
-		key:    common.Copy(k),
-		value:  common.Copy(v),
+		key:    bytes.Clone(k),
+		value:  bytes.Clone(v),
 		d:      di,
 	}
 }
@@ -668,7 +674,7 @@ func TestNewBtIndex(t *testing.T) {
 
 	indexPath := strings.TrimSuffix(kvPath, ".kv") + ".bt"
 
-	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, DefaultBtreeM, seg.CompressNone, false)
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, seg.CompressNone, false)
 	require.NoError(t, err)
 	defer bt.Close()
 	defer kv.Close()
@@ -692,31 +698,17 @@ func TestBtIndex_MStoredInFile(t *testing.T) {
 	logger := log.New()
 	kvPath := generateKV(t, tmp, 20, 10, 1000, logger, seg.CompressNone)
 
+	indexPath := strings.TrimSuffix(kvPath, ".kv") + "_m8.bt"
+	buildBtreeIndexWithM(t, kvPath, indexPath, seg.CompressNone, wantM, logger)
+
 	decomp, err := seg.NewDecompressor(kvPath)
 	require.NoError(t, err)
 	defer decomp.Close()
 
-	indexPath := strings.TrimSuffix(kvPath, ".kv") + "_m8.bt"
-	iw, err := NewBtIndexWriter(BtIndexWriterArgs{IndexFile: indexPath, TmpDir: tmp, M: wantM, KeyCount: uint64(decomp.Count() / 2), MaxOffset: uint64(decomp.Size())}, logger)
-	require.NoError(t, err)
-	defer iw.Close()
-
-	r := seg.NewReader(decomp.MakeGetter(), seg.CompressNone)
-	r.Reset(0)
-	var pos uint64
-	for r.HasNext() {
-		key, _ := r.Next(nil)
-		require.NoError(t, iw.AddKey(key, pos))
-		pos, _ = r.Skip()
-	}
-	iw.DisableFsync()
-	require.NoError(t, iw.Build())
-
-	r2 := seg.NewReader(decomp.MakeGetter(), seg.CompressNone)
-	bt, err := OpenBtreeIndexWithDecompressor(indexPath, 1, r2) // pass wrong M — file M should win
+	bt, err := OpenBtreeIndexWithDecompressor(indexPath, seg.NewReader(decomp.MakeGetter(), seg.CompressNone))
 	require.NoError(t, err)
 	defer bt.Close()
-	require.Equal(t, wantM, bt.M())
+	require.Equal(t, wantM, bt.M(), "M must come from the file, not from DefaultBtreeM")
 }
 
 func BenchmarkBtIndex_Get(b *testing.B) {
@@ -727,14 +719,16 @@ func BenchmarkBtIndex_Get(b *testing.B) {
 	compress := seg.CompressKeys
 
 	for _, M := range []uint64{256, 128, 64, 32} {
-		kvPath := generateKV(b, b.TempDir(), 20, 10, keyCount, log.New(), compress)
+		tmp := b.TempDir()
+		kvPath := generateKV(b, tmp, 20, 10, keyCount, log.New(), compress)
 		keys, err := pivotKeysFromKV(kvPath)
 		require.NoError(b, err)
 
-		indexPath := strings.TrimSuffix(kvPath, ".kv") + ".bt"
+		indexPath := filepath.Join(tmp, fmt.Sprintf("m%d.bt", M))
+		buildBtreeIndexWithM(b, kvPath, indexPath, compress, M, log.New())
 
 		b.Run(fmt.Sprintf("M%d", M), func(b *testing.B) {
-			decomp, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, M, compress, false)
+			decomp, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, compress, false)
 			require.NoError(b, err)
 			defer bt.Close()
 			defer decomp.Close()
@@ -830,4 +824,42 @@ func TestNodeEncode_NoAlloc(t *testing.T) {
 		}
 	})
 	require.Zero(t, allocs)
+}
+
+func Test_BtreeIndex_GetValSize(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	logger := log.New()
+	const keyCount = 1200
+	compressFlags := seg.CompressVals
+	dataPath := generateKV(t, tmp, 20, 3000, keyCount, logger, compressFlags)
+	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
+	buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
+
+	kvFile, index, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, compressFlags, false)
+	require.NoError(t, err)
+	defer index.Close()
+	defer kvFile.Close()
+
+	keys, err := pivotKeysFromKV(dataPath)
+	require.NoError(t, err)
+	require.NotEmpty(t, keys)
+	getter := seg.NewReader(kvFile.MakeGetter(), compressFlags)
+
+	for _, key := range keys {
+		_, value, _, found, err := index.Get(key, getter)
+		require.NoError(t, err)
+		require.True(t, found)
+		size, found, err := index.GetValSize(key, getter)
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, len(value), size)
+	}
+
+	missing := bytes.Repeat([]byte{0xff}, 20)
+	size, found, err := index.GetValSize(missing, getter)
+	require.NoError(t, err)
+	require.False(t, found)
+	require.Zero(t, size)
 }

@@ -14,13 +14,15 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package mdbx
+package mdbx_test
 
 import (
 	"bytes"
 	"encoding/binary"
-	"sort"
+	"slices"
 	"testing"
+
+	"github.com/erigontech/erigon/db/kv/mdbx"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
@@ -28,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/order"
 )
 
@@ -44,7 +47,7 @@ func clusteredKey(i int) []byte {
 
 func TestSplitBucketByCount(t *testing.T) {
 	const table, n, chunks = "T", 100_000, 16
-	db := New(dbcfg.ChainDB, log.New()).InMem(t, t.TempDir()).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), t.TempDir()).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{table: kv.TableCfgItem{}}
 	}).MapSize(512 * datasize.MB).MustOpen()
 	t.Cleanup(db.Close)
@@ -66,9 +69,7 @@ func TestSplitBucketByCount(t *testing.T) {
 		require.Greater(t, len(bounds), 2, "must split clustered keys into many ranges, not one")
 		require.Nil(t, bounds[0])
 		require.Nil(t, bounds[len(bounds)-1])
-		require.True(t, sort.SliceIsSorted(bounds[1:len(bounds)-1], func(a, b int) bool {
-			return bytes.Compare(bounds[1+a], bounds[1+b]) < 0
-		}), "interior boundaries must be strictly increasing")
+		require.True(t, slices.IsSortedFunc(bounds[1:len(bounds)-1], bytes.Compare), "interior boundaries must be strictly increasing")
 
 		per, total := n/(len(bounds)-1), 0
 		for i := 0; i+1 < len(bounds); i++ {
@@ -93,7 +94,7 @@ func TestSplitBucketByCount(t *testing.T) {
 // the split must extract the raw cursor from either type instead of asserting one.
 func TestSplitBucketByCountDupSort(t *testing.T) {
 	const table, keys, dupsPerKey, chunks = "T", 50_000, 4, 16
-	db := New(dbcfg.ChainDB, log.New()).InMem(t, t.TempDir()).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), t.TempDir()).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{table: kv.TableCfgItem{Flags: kv.DupSort}}
 	}).MapSize(512 * datasize.MB).MustOpen()
 	t.Cleanup(db.Close)
@@ -119,9 +120,7 @@ func TestSplitBucketByCountDupSort(t *testing.T) {
 		require.Greater(t, len(bounds), 2, "must split into many ranges")
 		require.Nil(t, bounds[0])
 		require.Nil(t, bounds[len(bounds)-1])
-		require.True(t, sort.SliceIsSorted(bounds[1:len(bounds)-1], func(a, b int) bool {
-			return bytes.Compare(bounds[1+a], bounds[1+b]) < 0
-		}), "interior boundaries must be strictly increasing")
+		require.True(t, slices.IsSortedFunc(bounds[1:len(bounds)-1], bytes.Compare), "interior boundaries must be strictly increasing")
 
 		seen := 0
 		for i := 0; i+1 < len(bounds); i++ {
@@ -145,7 +144,7 @@ func TestSplitBucketByCountDupSort(t *testing.T) {
 // positions", not propagated as an error.
 func TestSplitBucketByCountFewerPositions(t *testing.T) {
 	const table, n = "T", 200_000
-	db := New(dbcfg.ChainDB, log.New()).InMem(t, t.TempDir()).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), t.TempDir()).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{table: kv.TableCfgItem{}}
 	}).MapSize(512 * datasize.MB).MustOpen()
 	t.Cleanup(db.Close)
@@ -183,7 +182,7 @@ func TestSplitBucketByCountFewerPositions(t *testing.T) {
 // deepness = full height + dup height, i.e. faulting the leaves this avoids.
 func TestSplitBucketByCountDupSortSkew(t *testing.T) {
 	const table, coldKeys, hotDups = "T", 1000, 200_000
-	db := New(dbcfg.ChainDB, log.New()).InMem(t, t.TempDir()).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), t.TempDir()).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{table: kv.TableCfgItem{Flags: kv.DupSort}}
 	}).MapSize(512 * datasize.MB).MustOpen()
 	t.Cleanup(db.Close)

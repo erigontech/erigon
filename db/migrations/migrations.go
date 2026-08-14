@@ -26,7 +26,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -114,9 +113,9 @@ func AppliedMigrations(tx kv.Tx, withPayload bool) (map[string][]byte, error) {
 			return nil
 		}
 		if withPayload {
-			applied[string(common.Copy(k))] = common.Copy(v)
+			applied[string(bytes.Clone(k))] = bytes.Clone(v)
 		} else {
-			applied[string(common.Copy(k))] = []byte{}
+			applied[string(bytes.Clone(k))] = []byte{}
 		}
 		return nil
 	})
@@ -175,13 +174,14 @@ func (m *Migrator) VerifyVersion(db kv.RwDB, chaindata string) error {
 			return fmt.Errorf("reading DB schema version: %w", err)
 		}
 		if ok {
-			if major > kv.DBSchemaVersion.Major {
+			switch {
+			case major > kv.DBSchemaVersion.Major:
 				return fmt.Errorf("cannot downgrade major DB version from %d to %d", major, kv.DBSchemaVersion.Major)
-			} else if major == kv.DBSchemaVersion.Major {
+			case major == kv.DBSchemaVersion.Major:
 				if minor > kv.DBSchemaVersion.Minor {
 					return fmt.Errorf("cannot downgrade minor DB version from %d.%d to %d.%d", major, minor, kv.DBSchemaVersion.Major, kv.DBSchemaVersion.Major)
 				}
-			} else {
+			default:
 				if kv.DBSchemaVersion.Major != major {
 					return fmt.Errorf(
 						"cannot switch major DB version, db: %d, erigon: %d, try \"rm -rf %s\" if you are sure that you are running right version of erigon on right datadir",

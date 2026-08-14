@@ -17,8 +17,8 @@
 package forkchoice
 
 import (
+	"cmp"
 	"slices"
-	"sort"
 	"sync"
 	"sync/atomic"
 
@@ -159,9 +159,14 @@ type ForkChoiceStore struct {
 
 	emitters *beaconevents.EventEmitter
 	// event sends queued under f.mu, emitted after release (see queueEmit)
-	queuedEmits  []func()
-	queuedPrunes []uint64
-	synced       atomic.Bool
+	queuedEmits           []func()
+	queuedPrunes          []uint64
+	queuedOperationPrunes []solid.Checkpoint
+	operationPruneMu      sync.Mutex
+	operationPruneTarget  solid.Checkpoint
+	operationPrunePending bool
+	operationPruneRunning bool
+	synced                atomic.Bool
 
 	ethClock                eth_clock.EthereumClock
 	optimisticStore         optimistic.OptimisticStore
@@ -734,8 +739,8 @@ func (f *ForkChoiceStore) ForkNodes() []ForkNode {
 			ExecutionBlock: blockHash,
 		})
 	}
-	sort.Slice(forkNodes, func(i, j int) bool {
-		return forkNodes[i].Slot < forkNodes[j].Slot
+	slices.SortFunc(forkNodes, func(a, b ForkNode) int {
+		return cmp.Compare(a.Slot, b.Slot)
 	})
 	return forkNodes
 }

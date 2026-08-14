@@ -193,11 +193,13 @@ func (db *DB) NewMemBatch(ioMetrics any) kv.TemporalMemBatch       { panic("not 
 func (db *DB) DomainTables(domain ...kv.Domain) []string           { panic("not implemented") }
 func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string { panic("not implemented") }
 func (db *DB) ReloadFiles() error                                  { panic("not implemented") }
-func (db *DB) BuildMissedAccessors(_ context.Context, _ int) error { panic("not implemented") }
-func (db *DB) EnableReadAhead() kv.TemporalDebugDB                 { panic("not implemented") }
-func (db *DB) DisableReadAhead()                                   { panic("not implemented") }
-func (db *DB) Files() []string                                     { panic("not implemented") }
-func (db *DB) MergeLoop(ctx context.Context) error                 { panic("not implemented") }
+func (db *DB) BuildMissedAccessors(_ context.Context, _ int, _ ...kv.BuildAccessorsOption) error {
+	panic("not implemented")
+}
+func (db *DB) EnableReadAhead() kv.TemporalDebugDB { panic("not implemented") }
+func (db *DB) DisableReadAhead()                   { panic("not implemented") }
+func (db *DB) Files() []string                     { panic("not implemented") }
+func (db *DB) MergeLoop(ctx context.Context) error { panic("not implemented") }
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	t, err := db.BeginRo(ctx) //nolint:gocritic
 	if err != nil {
@@ -253,6 +255,9 @@ func (tx *tx) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) (int, error)
 }
 func (tx *tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles { panic("not implemented") }
 func (tx *tx) DomainProgress(domain kv.Domain) uint64          { panic("not implemented") }
+func (tx *tx) DomainVisibleEnd(domain kv.Domain) (uint64, bool) {
+	return 0, false
+}
 func (tx *tx) GetLatestFromDB(domain kv.Domain, k []byte) (v []byte, step kv.Step, found bool, err error) {
 	panic("not implemented")
 }
@@ -724,6 +729,11 @@ func (tx *tx) GetLatest(name kv.Domain, k []byte) (v []byte, step kv.Step, err e
 		return nil, 0, err
 	}
 	return reply.V, 0, nil
+}
+
+func (tx *tx) GetLatestValSize(name kv.Domain, k []byte) (size int, found bool, err error) {
+	v, _, err := tx.GetLatest(name, k)
+	return len(v), len(v) > 0, err
 }
 
 func (tx *tx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {

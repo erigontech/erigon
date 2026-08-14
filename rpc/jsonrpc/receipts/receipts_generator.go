@@ -211,6 +211,7 @@ type PostStateInfo struct {
 }
 
 func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, header *types.Header, txn types.Transaction, index int, txNum uint64, postState *PostStateInfo) (_ *types.Receipt, err error) {
+	tx = g.filters.WithTemporalOverlay(tx)
 	blockHash := header.Hash()
 	blockNum := header.Number.Uint64()
 	txnHash := txn.Hash()
@@ -230,7 +231,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 				"blockNum", blockNum,
 				"firstLogIndex", firstLogIndex,
 				"logIdxAfterTx", logIdxAfterTx,
-				"nil receipt in db", receiptFromDB == nil,
+				"nilReceiptInDB", receiptFromDB == nil,
 				"err", err)
 		}
 	}()
@@ -274,6 +275,11 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 
 	var evm *vm.EVM
 	var genEnv *ReceiptEnv
+	defer func() {
+		if genEnv != nil {
+			genEnv.ibs.Close()
+		}
+	}()
 
 	err = rpchelper.CheckBlockExecuted(g.filters.WithOverlay(tx), blockNum)
 	if err != nil {
@@ -324,7 +330,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		var stateWriter state.StateWriter
 
 		if calculatePostState && postState.CommitmentHistory {
-			sharedDomains, err = execctx.NewSharedDomains(ctx, tx, log.Root(), execctx.WithoutDeferredBranchUpdates(), execctx.WithoutBranchCache(), execctx.WithSequentialCommitment())
+			sharedDomains, err = execctx.NewSharedDomains(ctx, tx, log.Root(), execctx.WithoutDeferredBranchUpdates(), execctx.WithoutSharedBranchCache(), execctx.WithSequentialCommitment())
 			if err != nil {
 				return nil, err
 			}
@@ -450,6 +456,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 }
 
 func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block, opts eth.ReceiptsOpts) (_ types.Receipts, err error) {
+	tx = g.filters.WithTemporalOverlay(tx)
 	blockHash := block.Hash()
 	blockNum := block.NumberU64()
 
@@ -460,7 +467,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		if dbg.Enabled(ctx) {
 			log.Info("[dbg] ReceiptGenerator.GetReceipts",
 				"blockNum", blockNum,
-				"nil receipts in db", receiptsFromDB == nil)
+				"nilReceiptsInDB", receiptsFromDB == nil)
 		}
 	}()
 
@@ -504,6 +511,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	if err != nil {
 		return nil, err
 	}
+	defer genEnv.ibs.Close()
 
 	ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
 	defer cancel()
@@ -542,7 +550,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 
 		var stateWriter state.StateWriter
 		if opts.CommitmentHistoryEnabled {
-			sharedDomains, err = execctx.NewSharedDomains(ctx, tx, log.Root(), execctx.WithoutDeferredBranchUpdates(), execctx.WithoutBranchCache(), execctx.WithSequentialCommitment())
+			sharedDomains, err = execctx.NewSharedDomains(ctx, tx, log.Root(), execctx.WithoutDeferredBranchUpdates(), execctx.WithoutSharedBranchCache(), execctx.WithSequentialCommitment())
 			if err != nil {
 				return nil, err
 			}
@@ -680,6 +688,7 @@ func (g *Generator) assertEqualReceipts(fromExecution, fromDB *types.Receipt) {
 }
 
 func (g *Generator) GetReceiptsGasUsed(ctx context.Context, tx kv.TemporalTx, block *types.Block, txNumsReader rawdbv3.TxNumsReader) (types.Receipts, error) {
+	tx = g.filters.WithTemporalOverlay(tx)
 	if receipts, ok := g.receiptsCache.Get(block.Hash()); ok {
 		return receipts, nil
 	}

@@ -153,11 +153,11 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 		}
 
 		if isDupsort {
-			if err = casted.AppendDup(k, v); err != nil {
+			if err := casted.AppendDup(k, v); err != nil {
 				return 0, err
 			}
 		} else {
-			if err = c.Append(k, v); err != nil {
+			if err := c.Append(k, v); err != nil {
 				return 0, err
 			}
 		}

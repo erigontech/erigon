@@ -192,7 +192,6 @@ func FillStaticValidatorsTableIfNeeded(ctx context.Context, logger log.Logger, s
 const stateAntiquaryMaxSlotsPerCommit uint64 = 4 * clparams.SlotsPerDump
 
 func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
-
 	// Check if you need to fill the static validators table
 	refilledStaticValidators, err := FillStaticValidatorsTableIfNeeded(ctx, s.logger, s.stateSn, s.validatorsTable)
 	if err != nil {
@@ -258,7 +257,6 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	// Use this as the event slot (it will be incremented by 1 each time we process a block)
 	slot := s.currentState.Slot() + 1
 
-	var prevValSet []byte
 	events := state_accessors.NewStateEvents()
 	slashingOccurred := false
 	// setup the events handler for historical states replay.
@@ -383,7 +381,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			if writeErr = validator.WriteTo(buf); writeErr != nil {
 				return false
 			}
-			if writeErr = rwTx.Put(kv.StaticValidators, base_encoding.Encode64ToBytes4(validatorIndex), common.Copy(buf.Bytes())); writeErr != nil {
+			if writeErr = rwTx.Put(kv.StaticValidators, base_encoding.Encode64ToBytes4(validatorIndex), bytes.Clone(buf.Bytes())); writeErr != nil {
 				return false
 			}
 			return true
@@ -401,6 +399,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		return fmt.Errorf("static validators table has %d entries, state at slot %d has %d validators (truncated table)", got, s.currentState.Slot(), want)
 	}
 
+	var prevEffectiveBalances, newEffectiveBalances []byte
 	for ; slot < to && startLoop.Add(timeBeforeCommit).After(time.Now()); slot++ {
 		// Bound each mdbx commit: once maxSlotsPerCommit slots have accumulated,
 		// flush + commit them and start a fresh collector, so no single commit
@@ -428,31 +427,31 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		// If we have a missed block, we just skip it.
 		if block == nil {
 			if isDumpSlot {
-				if err := stateAntiquaryCollector.collectBalancesDump(slot, s.currentState.RawBalances()); err != nil {
+				if err := stateAntiquaryCollector.collectBalancesDump(ctx, slot, s.currentState.RawBalances()); err != nil {
 					return err
 				}
 				if err := stateAntiquaryCollector.collectEffectiveBalancesDump(slot, s.currentState.RawValidatorSet()); err != nil {
 					return err
 				}
 				if s.currentState.Version() >= clparams.ElectraVersion {
-					if err := stateAntiquaryCollector.collectPendingDepositsDump(slot, s.currentState.PendingDeposits()); err != nil {
+					if err := stateAntiquaryCollector.collectPendingDepositsDump(ctx, slot, s.currentState.PendingDeposits()); err != nil {
 						return err
 					}
-					if err := stateAntiquaryCollector.collectPendingConsolidationsDump(slot, s.currentState.PendingConsolidations()); err != nil {
+					if err := stateAntiquaryCollector.collectPendingConsolidationsDump(ctx, slot, s.currentState.PendingConsolidations()); err != nil {
 						return err
 					}
-					if err := stateAntiquaryCollector.collectPendingWithdrawalsDump(slot, s.currentState.PendingPartialWithdrawals()); err != nil {
+					if err := stateAntiquaryCollector.collectPendingWithdrawalsDump(ctx, slot, s.currentState.PendingPartialWithdrawals()); err != nil {
 						return err
 					}
 				}
 				if s.currentState.Version() >= clparams.GloasVersion {
-					if err := stateAntiquaryCollector.collectBuildersDump(slot, s.currentState.GetBuilders()); err != nil {
+					if err := stateAntiquaryCollector.collectBuildersDump(ctx, slot, s.currentState.GetBuilders()); err != nil {
 						return err
 					}
-					if err := stateAntiquaryCollector.collectBuilderPendingWithdrawalsDump(slot, s.currentState.GetBuilderPendingWithdrawals()); err != nil {
+					if err := stateAntiquaryCollector.collectBuilderPendingWithdrawalsDump(ctx, slot, s.currentState.GetBuilderPendingWithdrawals()); err != nil {
 						return err
 					}
-					if err := stateAntiquaryCollector.collectPayloadExpectedWithdrawalsDump(slot, s.currentState.GetPayloadExpectedWithdrawals()); err != nil {
+					if err := stateAntiquaryCollector.collectPayloadExpectedWithdrawalsDump(ctx, slot, s.currentState.GetPayloadExpectedWithdrawals()); err != nil {
 						return err
 					}
 				}
@@ -467,9 +466,8 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			}
 			continue
 		}
-		// We now compute the difference between the two balances.
-		prevValSet = prevValSet[:0]
-		prevValSet = append(prevValSet, s.currentState.RawValidatorSet()...)
+		// snapshot before TransitionState mutates the validator buffer in place
+		prevEffectiveBalances = base_encoding.AppendEffectiveBalances(prevEffectiveBalances[:0], s.currentState.RawValidatorSet())
 
 		fullValidation := slot%1000 == 0 || first
 		blockRewardsCollector := &eth2.BlockRewardsCollector{}
@@ -503,7 +501,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		events.Reset()
 
 		if isDumpSlot {
-			if err := stateAntiquaryCollector.collectBalancesDump(slot, s.currentState.RawBalances()); err != nil {
+			if err := stateAntiquaryCollector.collectBalancesDump(ctx, slot, s.currentState.RawBalances()); err != nil {
 				return err
 			}
 			if err := stateAntiquaryCollector.collectEffectiveBalancesDump(slot, s.currentState.RawValidatorSet()); err != nil {
@@ -511,24 +509,24 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			}
 			if s.currentState.Version() >= clparams.ElectraVersion {
 				log.Debug("not-found dumping electra queues", "slot", slot, "pendingDeposits", s.currentState.PendingDeposits().Len(), "pendingConsolidations", s.currentState.PendingConsolidations().Len(), "pendingWithdrawals", s.currentState.PendingPartialWithdrawals().Len())
-				if err := stateAntiquaryCollector.collectPendingDepositsDump(slot, s.currentState.PendingDeposits()); err != nil {
+				if err := stateAntiquaryCollector.collectPendingDepositsDump(ctx, slot, s.currentState.PendingDeposits()); err != nil {
 					return err
 				}
-				if err := stateAntiquaryCollector.collectPendingConsolidationsDump(slot, s.currentState.PendingConsolidations()); err != nil {
+				if err := stateAntiquaryCollector.collectPendingConsolidationsDump(ctx, slot, s.currentState.PendingConsolidations()); err != nil {
 					return err
 				}
-				if err := stateAntiquaryCollector.collectPendingWithdrawalsDump(slot, s.currentState.PendingPartialWithdrawals()); err != nil {
+				if err := stateAntiquaryCollector.collectPendingWithdrawalsDump(ctx, slot, s.currentState.PendingPartialWithdrawals()); err != nil {
 					return err
 				}
 			}
 			if s.currentState.Version() >= clparams.GloasVersion {
-				if err := stateAntiquaryCollector.collectBuildersDump(slot, s.currentState.GetBuilders()); err != nil {
+				if err := stateAntiquaryCollector.collectBuildersDump(ctx, slot, s.currentState.GetBuilders()); err != nil {
 					return err
 				}
-				if err := stateAntiquaryCollector.collectBuilderPendingWithdrawalsDump(slot, s.currentState.GetBuilderPendingWithdrawals()); err != nil {
+				if err := stateAntiquaryCollector.collectBuilderPendingWithdrawalsDump(ctx, slot, s.currentState.GetBuilderPendingWithdrawals()); err != nil {
 					return err
 				}
-				if err := stateAntiquaryCollector.collectPayloadExpectedWithdrawalsDump(slot, s.currentState.GetPayloadExpectedWithdrawals()); err != nil {
+				if err := stateAntiquaryCollector.collectPayloadExpectedWithdrawalsDump(ctx, slot, s.currentState.GetPayloadExpectedWithdrawals()); err != nil {
 					return err
 				}
 			}
@@ -570,7 +568,8 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		isEpochCrossed := prevEpoch != state.Epoch(s.currentState)
 
 		if prevValidatorSetLength != s.currentState.ValidatorLength() || isEpochCrossed {
-			if err := stateAntiquaryCollector.collectEffectiveBalancesDiffs(ctx, slot, prevValSet, s.currentState.RawValidatorSet()); err != nil {
+			newEffectiveBalances = base_encoding.AppendEffectiveBalances(newEffectiveBalances[:0], s.currentState.RawValidatorSet())
+			if err := stateAntiquaryCollector.collectEffectiveBalancesDiffs(ctx, slot, prevEffectiveBalances, newEffectiveBalances); err != nil {
 				return err
 			}
 			if s.currentState.Version() >= clparams.AltairVersion {
@@ -632,7 +631,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		if to < (safetyMargin + blocksPerStatefulFile) {
 			return nil
 		}
-		to = to - (safetyMargin + blocksPerStatefulFile)
+		to -= (safetyMargin + blocksPerStatefulFile)
 		if from >= to {
 			return nil
 		}

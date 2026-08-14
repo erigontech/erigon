@@ -43,16 +43,15 @@ func TestGenericCache_ConcurrentPutAcrossGrow(t *testing.T) {
 	const perWorker = 20_000
 	var wg sync.WaitGroup
 	for w := range workers {
-		wg.Add(1)
-		go func(base int) {
-			defer wg.Done()
+		base := w
+		wg.Go(func() {
 			key := make([]byte, 8)
 			for i := range perWorker {
 				binary.BigEndian.PutUint64(key, uint64(base*perWorker+i))
 				c.Put(key, []byte{byte(i)}, uint64(i))
 				c.Get(key)
 			}
-		}(w)
+		})
 	}
 	wg.Wait()
 }
@@ -77,9 +76,7 @@ func TestGenericCache_PutNotLostAcrossGrow(t *testing.T) {
 		stop := make(chan struct{})
 		var regressed atomic.Bool
 		var wg sync.WaitGroup
-		wg.Add(2)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for n := uint64(1); ; n++ {
 				select {
 				case <-stop:
@@ -94,9 +91,8 @@ func TestGenericCache_PutNotLostAcrossGrow(t *testing.T) {
 					}
 				}
 			}
-		}()
-		go func() {
-			defer wg.Done()
+		})
+		wg.Go(func() {
 			last := uint64(0)
 			for {
 				select {
@@ -113,7 +109,7 @@ func TestGenericCache_PutNotLostAcrossGrow(t *testing.T) {
 					}
 				}
 			}
-		}()
+		})
 
 		// Cross the grow threshold so maybeGrow swaps the generation while the
 		// hot-key writer runs.
@@ -158,9 +154,7 @@ func TestGenericCache_PutIfAbsentDefersAcrossGrow(t *testing.T) {
 		var candidates [][]byte
 		stop := make(chan struct{})
 		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for j := 0; ; j++ {
 				select {
 				case <-stop:
@@ -176,7 +170,7 @@ func TestGenericCache_PutIfAbsentDefersAcrossGrow(t *testing.T) {
 					return
 				}
 			}
-		}()
+		})
 
 		binary.BigEndian.PutUint64(key, 0)
 		c.Put(key, []byte{1}, 1) // insert at the lowered cap → triggers the grow
@@ -218,9 +212,8 @@ func TestGenericCache_ModeNoOpAdmissionAtomicWithUpdate(t *testing.T) {
 	c.Put(a, v, 1)
 	for round := range 200000 {
 		var wg sync.WaitGroup
-		wg.Add(2)
-		go func() { defer wg.Done(); c.Put(a, v, 2) }()
-		go func() { defer wg.Done(); c.Put(b, v, 1) }()
+		wg.Go(func() { c.Put(a, v, 2) })
+		wg.Go(func() { c.Put(b, v, 1) })
 		wg.Wait()
 		if _, ok := c.Get(b); ok {
 			t.Fatalf("round %d: ModeNoOp admitted a key past a full budget (SizeBytes=%d, capacityB=%d)",
@@ -301,9 +294,8 @@ func TestGenericCache_CapacityEvictionAtomicWithPut_NoSizeDrift(t *testing.T) {
 	for range 100000 {
 		c.Put(b, v, 10)
 		var wg sync.WaitGroup
-		wg.Add(2)
-		go func() { defer wg.Done(); c.Put(a, v, 10) }() // insert → evicts b (cap 1)
-		go func() { defer wg.Done(); c.Put(b, v, 20) }() // same-key update path
+		wg.Go(func() { c.Put(a, v, 10) }) // insert → evicts b (cap 1)
+		wg.Go(func() { c.Put(b, v, 20) }) // same-key update path
 		wg.Wait()
 	}
 	c.Delete(a)
@@ -311,17 +303,14 @@ func TestGenericCache_CapacityEvictionAtomicWithPut_NoSizeDrift(t *testing.T) {
 	require.Zero(t, c.SizeBytes(), "capacity eviction raced the update-path delta")
 }
 
-// A put samples the coherence epoch and then contends for its stripe; a Clear
-// that wins the stripe first resets the epoch counter, so the put would stamp
-// a pre-Clear epoch onto an entry landing in the post-Clear generation. Once
-// a later unwind re-reaches that epoch value, the entry aliases the live
-// epoch and serves dead-fork state despite its txNum being at or above the
-// floor.
+// The failure mode is a pre-Clear epoch stamped on post-Clear storage. If Clear
+// reused that epoch value, a later unwind could reach the same value and treat
+// the entry as current even though its txNum is above the unwind floor.
 //
-// The test holds the key's stripe to park Clear on it (before the reset,
-// which runs inside the fence) and then the put behind it; waits beyond 1ms
-// put the mutex in starvation mode, so unlocking hands the stripe FIFO to
-// Clear first.
+// The test holds the key's stripe, then queues Clear before Put. Waiting beyond
+// the mutex starvation threshold makes the unlock hand the stripe to Clear
+// first. Clear must keep the stripe through the data and coherence generation
+// changes, so Put stamps the post-Clear epoch and a later unwind invalidates it.
 func TestGenericCache_ClearRacingPut_EpochAlias(t *testing.T) {
 	c := NewGenericCache[[]byte](64*datasize.MB, func(v []byte) int { return len(v) }, ModeEvictLRU)
 	defer c.Close()
@@ -332,29 +321,28 @@ func TestGenericCache_ClearRacingPut_EpochAlias(t *testing.T) {
 	mu.Lock()
 
 	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() { defer wg.Done(); c.Clear() }()
+	wg.Go(func() { c.Clear() })
 	time.Sleep(5 * time.Millisecond)
-	go func() { defer wg.Done(); c.Put(key, []byte("dead-fork-value"), 200) }()
+	wg.Go(func() { c.Put(key, []byte("dead-fork-value"), 200) })
 	time.Sleep(5 * time.Millisecond)
 	mu.Unlock()
 	wg.Wait()
 
-	c.Unwind(150) // epoch 0 -> 1 again, floor 150
+	c.Unwind(150)
 
 	_, ok := c.Get(key)
-	require.False(t, ok, "entry at txNum 200 outlived an unwind to 150: its pre-Clear epoch stamp aliases the live epoch")
+	require.False(t, ok, "entry at txNum 200 outlived an unwind to 150")
 }
 
 // A reader that captures a dead (unwind-invalidated) entry from the retiring
-// generation must not have it revalidated by Clear's coherence re-init:
-// judged against the post-Init state (fresh epoch, lifted floor), the entry
+// generation must not have it revalidated by Clear's coherence reset:
+// judged against the post-Reset state (new epoch, lifted floor), the entry
 // passes IsStale and dead-fork state is served. Coherence is snapshotted
 // before the generation load, so an old-generation entry is always judged by
-// coherence that still carries the unwind.
+// pre-Reset coherence that still carries the unwind.
 //
 // The reader gates on the fence reaching the key's stripe — the last one the
-// sweep locks — so its Get lands next to the Init that follows.
+// sweep locks — so its Get lands next to the Reset that follows.
 func TestGenericCache_ClearRacingGet_DeadEntryStaysDead(t *testing.T) {
 	var key []byte
 	for i := 0; ; i++ {
@@ -373,10 +361,8 @@ func TestGenericCache_ClearRacingGet_DeadEntryStaysDead(t *testing.T) {
 		c.Unwind(150) // the entry is dead-fork state; it must never be served again
 		var served atomic.Bool
 		var wg sync.WaitGroup
-		wg.Add(2)
-		go func() { defer wg.Done(); c.Clear() }()
-		go func() {
-			defer wg.Done()
+		wg.Go(func() { c.Clear() })
+		wg.Go(func() {
 			mu := &c.putStripes[putStripeCount-1]
 			for range 1 << 16 {
 				if mu.TryLock() {
@@ -391,7 +377,7 @@ func TestGenericCache_ClearRacingGet_DeadEntryStaysDead(t *testing.T) {
 					return
 				}
 			}
-		}()
+		})
 		wg.Wait()
 		require.False(t, served.Load(),
 			"round %d: Clear revalidated an unwind-invalidated entry for a concurrent reader", round)
@@ -411,9 +397,7 @@ func TestGenericCache_StatsResetAtomicWithDelete_NoPhantomEvictions(t *testing.T
 	key := []byte("metrics-key")
 	stop := make(chan struct{})
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for {
 			select {
 			case <-stop:
@@ -423,7 +407,7 @@ func TestGenericCache_StatsResetAtomicWithDelete_NoPhantomEvictions(t *testing.T
 			c.Put(key, []byte{1}, 1)
 			c.Delete(key)
 		}
-	}()
+	})
 	total := uint64(0)
 	for range 1_000_000 {
 		total += c.evictions.Swap(0)

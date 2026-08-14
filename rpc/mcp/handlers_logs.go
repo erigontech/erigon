@@ -12,10 +12,51 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
-// logTools implements the logs_* tool handlers; it is embedded by both the
-// embedded and standalone MCP servers.
+// logTools implements the logs_* tool handlers.
 type logTools struct {
 	logDir string
+}
+
+func registerLogTools(e *ErigonMCPServer) {
+	e.mcpServer.AddTool(
+		mcp.NewTool("logs_tail",
+			mcp.WithReadOnlyHintAnnotation(true),
+			mcp.WithDescription("Get last N lines from erigon or torrent logs"),
+			mcp.WithString("log_type", mcp.Description("Log type: 'erigon' or 'torrent' (default: erigon)")),
+			mcp.WithNumber("lines", mcp.Description("Number of lines to retrieve (default: 100, max: 10000)")),
+			mcp.WithString("filter", mcp.Description("Optional string to filter log lines")),
+		),
+		e.handleLogsTail,
+	)
+	e.mcpServer.AddTool(
+		mcp.NewTool("logs_head",
+			mcp.WithReadOnlyHintAnnotation(true),
+			mcp.WithDescription("Get first N lines from erigon or torrent logs"),
+			mcp.WithString("log_type", mcp.Description("Log type: 'erigon' or 'torrent' (default: erigon)")),
+			mcp.WithNumber("lines", mcp.Description("Number of lines to retrieve (default: 100, max: 10000)")),
+			mcp.WithString("filter", mcp.Description("Optional string to filter log lines")),
+		),
+		e.handleLogsHead,
+	)
+	e.mcpServer.AddTool(
+		mcp.NewTool("logs_grep",
+			mcp.WithReadOnlyHintAnnotation(true),
+			mcp.WithDescription("Search for a pattern in erigon or torrent logs"),
+			mcp.WithString("log_type", mcp.Description("Log type: 'erigon' or 'torrent' (default: erigon)")),
+			mcp.WithString("pattern", mcp.Required(), mcp.Description("Search pattern")),
+			mcp.WithNumber("max_lines", mcp.Description("Maximum matching lines to return (default: 1000, max: 10000)")),
+			mcp.WithBoolean("case_insensitive", mcp.Description("Case-insensitive search (default: false)")),
+		),
+		e.handleLogsGrep,
+	)
+	e.mcpServer.AddTool(
+		mcp.NewTool("logs_stats",
+			mcp.WithReadOnlyHintAnnotation(true),
+			mcp.WithDescription("Get statistics about erigon or torrent logs"),
+			mcp.WithString("log_type", mcp.Description("Log type: 'erigon' or 'torrent' (default: erigon)")),
+		),
+		e.handleLogsStats,
+	)
 }
 
 func (l logTools) resolveLogFile(logType string) (string, error) {
@@ -245,11 +286,12 @@ func getLogStats(filename string) (map[string]any, error) {
 		totalLines++
 		line := strings.ToLower(scanner.Text())
 
-		if strings.Contains(line, "error") || strings.Contains(line, "err=") {
+		switch {
+		case strings.Contains(line, "error") || strings.Contains(line, "err="):
 			errorLines++
-		} else if strings.Contains(line, "warn") {
+		case strings.Contains(line, "warn"):
 			warnLines++
-		} else if strings.Contains(line, "info") {
+		case strings.Contains(line, "info"):
 			infoLines++
 		}
 	}

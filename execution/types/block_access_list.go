@@ -2,11 +2,12 @@ package types
 
 import (
 	"bytes"
+	"cmp"
 	"errors"
 	"fmt"
 	"io"
 	"math"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/holiman/uint256"
@@ -140,8 +141,8 @@ func (ac *AccountChanges) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("account changes payload exceeds maximum size (%d bytes)", size)
 	}
 
-	var address common.Address
-	if err := s.ReadBytes(address[:]); err != nil {
+	address, err := s.Addr()
+	if err != nil {
 		return fmt.Errorf("read Address: %w", err)
 	}
 	ac.Address = accounts.InternAddress(address)
@@ -184,8 +185,8 @@ func (ac *AccountChanges) DecodeRLP(s *rlp.Stream) error {
 
 func (ac *AccountChanges) Normalize() {
 	if len(ac.StorageChanges) > 1 {
-		sort.Slice(ac.StorageChanges, func(i, j int) bool {
-			return ac.StorageChanges[i].Slot.Cmp(ac.StorageChanges[j].Slot) < 0
+		slices.SortFunc(ac.StorageChanges, func(a, b *SlotChanges) int {
+			return a.Slot.Cmp(b.Slot)
 		})
 	}
 
@@ -455,20 +456,20 @@ func dedupByEquality[T comparable](items []T) []T {
 }
 
 func sortByIndex[T interface{ GetIndex() uint32 }](changes []T) {
-	sort.Slice(changes, func(i, j int) bool {
-		return changes[i].GetIndex() < changes[j].GetIndex()
+	slices.SortFunc(changes, func(a, b T) int {
+		return cmp.Compare(a.GetIndex(), b.GetIndex())
 	})
 }
 
 func sortByBytes[T interface{ GetBytes() []byte }](items []T) {
-	sort.Slice(items, func(i, j int) bool {
-		return bytes.Compare(items[i].GetBytes(), items[j].GetBytes()) < 0
+	slices.SortFunc(items, func(a, b T) int {
+		return bytes.Compare(a.GetBytes(), b.GetBytes())
 	})
 }
 
 func sortHashes(hashes []accounts.StorageKey) {
-	sort.Slice(hashes, func(i, j int) bool {
-		return hashes[i].Cmp(hashes[j]) < 0
+	slices.SortFunc(hashes, func(a, b accounts.StorageKey) int {
+		return a.Cmp(b)
 	})
 }
 
@@ -555,7 +556,7 @@ func decodeBlockAccessList(out *BlockAccessList, s *rlp.Stream) error {
 		prevAddr = address
 		hasPrev = true
 	}
-	if err = checkErrListEnd(s, err); err != nil {
+	if err := checkErrListEnd(s, err); err != nil {
 		return err
 	}
 	if len(changes) == 0 {
@@ -631,7 +632,7 @@ func decodeSlotChangesList(s *rlp.Stream) ([]*SlotChanges, error) {
 		prevSlot = slot
 		hasPrev = true
 	}
-	if err = checkErrListEnd(s, err); err != nil {
+	if err := checkErrListEnd(s, err); err != nil {
 		return nil, err
 	}
 	if err := validateSlotChangeList(out); err != nil {
@@ -660,7 +661,7 @@ func decodeStorageChanges(s *rlp.Stream) ([]*StorageChange, error) {
 			break
 		}
 	}
-	if err = checkErrListEnd(s, err); err != nil {
+	if err := checkErrListEnd(s, err); err != nil {
 		return nil, err
 	}
 	if err := validateStorageChangeEntries(out); err != nil {
@@ -689,7 +690,7 @@ func decodeBalanceChanges(s *rlp.Stream) ([]*BalanceChange, error) {
 			break
 		}
 	}
-	if err = checkErrListEnd(s, err); err != nil {
+	if err := checkErrListEnd(s, err); err != nil {
 		return nil, err
 	}
 	if err := validateBalanceChangeList(out); err != nil {
@@ -726,7 +727,7 @@ func decodeNonceChanges(s *rlp.Stream) ([]*NonceChange, error) {
 		lastIdx = change.Index
 		hasLast = true
 	}
-	if err = checkErrListEnd(s, err); err != nil {
+	if err := checkErrListEnd(s, err); err != nil {
 		return nil, err
 	}
 	if err := validateNonceChangeList(out); err != nil {
@@ -763,7 +764,7 @@ func decodeCodeChanges(s *rlp.Stream) ([]*CodeChange, error) {
 		lastIdx = change.Index
 		hasLast = true
 	}
-	if err = checkErrListEnd(s, err); err != nil {
+	if err := checkErrListEnd(s, err); err != nil {
 		return nil, err
 	}
 	if err := validateCodeChangeList(out); err != nil {
@@ -797,7 +798,7 @@ func decodeStorageKeys(s *rlp.Stream) ([]accounts.StorageKey, error) {
 			break
 		}
 	}
-	if err = checkErrListEnd(s, err); err != nil {
+	if err := checkErrListEnd(s, err); err != nil {
 		return nil, err
 	}
 	if err := validateStorageReads(hashes); err != nil {

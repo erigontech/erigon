@@ -13,6 +13,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/mvcc"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
@@ -265,13 +266,16 @@ func (m *Merger) Merge(
 }
 
 func (m *Merger) integrateMergedDirtyFiles(snapshots *BaseRoSnapshots, in, out map[snaptype.Enum][]*DirtySegment) {
-	var retired []*DirtySegment
+	var retired retiredSegments
 
 	snapshots.dirtyLock.Lock()
 	defer snapshots.dirtyLock.Unlock()
 	// Publish under the same lock so the dirty mutation and the bundle publish are one
 	// atomic step (no window for a concurrent open to re-adopt a just-retired file).
-	defer func() { snapshots.recalcVisibleFiles(snapshots.alignMin, retired) }()
+	defer func() {
+		retire(mvcc.RetireReasonMerged, retired) // merge output is on disk and must be deleted on reclaim
+		snapshots.recalcVisibleFiles(snapshots.alignMin, retired)
+	}()
 
 	// add new segments
 	for enum, newSegs := range in {
@@ -329,12 +333,18 @@ func (m *Merger) merge(ctx context.Context, v *View, toMerge []*DirtySegment, ta
 	var word = make([]byte, 0, 4096)
 	var expectedTotal int
 	cList := make([]*seg.Decompressor, len(toMerge))
+	defer func() {
+		for _, d := range cList {
+			if d != nil {
+				d.Close()
+			}
+		}
+	}()
 	for i, cFile := range toMerge {
 		d, err := seg.NewDecompressor(cFile.FilePath())
 		if err != nil {
 			return nil, err
 		}
-		defer d.Close()
 		cList[i] = d
 		expectedTotal += d.Count()
 	}
@@ -352,23 +362,28 @@ func (m *Merger) merge(ctx context.Context, v *View, toMerge []*DirtySegment, ta
 	m.logger.Debug("[snapshots] merge", "file", targetFile.Name())
 
 	for _, d := range cList {
-		view, err := d.OpenSequentialView(true)
-		if err != nil {
-			return nil, err
-		}
-		defer view.Close()
-		g := view.MakeGetter()
-		for g.HasNext() {
-			word, _ = g.Next(word[:0])
-			if err := f.AddWord(word); err != nil {
-				return nil, err
+		if err := func() error {
+			view, err := d.OpenSequentialView(true)
+			if err != nil {
+				return err
 			}
+			defer view.Close()
+			g := view.MakeGetter()
+			for g.HasNext() {
+				word, _ = g.Next(word[:0])
+				if err := f.AddWord(word); err != nil {
+					return err
+				}
+			}
+			return nil
+		}(); err != nil {
+			return nil, err
 		}
 	}
 	if f.Count() != expectedTotal {
 		return nil, fmt.Errorf("unexpected amount after segments merge. got: %d, expected: %d", f.Count(), expectedTotal)
 	}
-	if err = f.Compress(); err != nil {
+	if err := f.Compress(); err != nil {
 		return nil, err
 	}
 	sn := &DirtySegment{

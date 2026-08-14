@@ -17,15 +17,20 @@
 package solid
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/clonable"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/ssz"
 )
+
+const maxExtraDataBytes = 32
 
 // ExtraData type stores data as a byte slice and its length.
 type ExtraData struct {
@@ -36,7 +41,7 @@ type ExtraData struct {
 // NewExtraData creates a new instance of ExtraData type with initialized byte slice of length 32.
 func NewExtraData() *ExtraData {
 	return &ExtraData{
-		data: make([]byte, 32),
+		data: make([]byte, maxExtraDataBytes),
 	}
 }
 
@@ -99,16 +104,23 @@ func (e *ExtraData) DecodeSSZ(buf []byte, _ int) error {
 	return nil
 }
 
+func (e *ExtraData) DecodeSSZStrict(buf []byte, version int) error {
+	if len(buf) > maxExtraDataBytes {
+		return fmt.Errorf("%w: ExtraData SSZ data length %d exceeds limit %d", ssz.ErrTooBigList, len(buf), maxExtraDataBytes)
+	}
+	return e.DecodeSSZ(buf, version)
+}
+
 // Bytes returns a copy of the ExtraData bytes.
 func (e *ExtraData) Bytes() []byte {
-	return common.Copy(e.data[:e.l])
+	return bytes.Clone(e.data[:e.l])
 }
 
 // SetBytes sets the ExtraData bytes from the provided byte slice.
 func (e *ExtraData) SetBytes(buf []byte) {
 	copy(e.data, buf)
 	e.l = len(buf)
-	if e.l > 32 {
+	if e.l > maxExtraDataBytes {
 		e.l = len(e.data)
 	}
 }

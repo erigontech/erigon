@@ -17,10 +17,11 @@
 package sentinel
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
-	"sort"
+	"slices"
 	"time"
 
 	"github.com/OffchainLabs/go-bitfield"
@@ -227,8 +228,8 @@ func (s *Sentinel) proactiveSubnetPeerSearch() {
 			}
 
 			// Sort by wanted count descending (subnets needing most peers first, i.e., 0-peer subnets)
-			sort.Slice(underserved, func(i, j int) bool {
-				return underserved[i].wanted > underserved[j].wanted
+			slices.SortFunc(underserved, func(a, b subnetSearchState) int {
+				return cmp.Compare(b.wanted, a.wanted)
 			})
 
 			// Extract just the subnet indices for logging
@@ -352,18 +353,16 @@ func (s *Sentinel) pruneExcessPeers() {
 
 	// Sort peers by "removability" (most removable first)
 	// Priority: peers with no critical subnets, then by fewest covered subnets
-	sort.Slice(peerInfos, func(i, j int) bool {
-		// Critical peers (covering unique subnets) should never be removed
-		iCritical := len(peerInfos[i].criticalSubnets) > 0
-		jCritical := len(peerInfos[j].criticalSubnets) > 0
-
-		if iCritical != jCritical {
-			return !iCritical // Non-critical peers first (more removable)
+	slices.SortFunc(peerInfos, func(a, b peerSubnetInfo) int {
+		aCritical := len(a.criticalSubnets) > 0
+		bCritical := len(b.criticalSubnets) > 0
+		if aCritical != bCritical {
+			if !aCritical {
+				return -1
+			}
+			return 1
 		}
-
-		// Among non-critical peers, prefer removing those covering fewer subnets
-		// (they provide less value)
-		return peerInfos[i].subnetsCount < peerInfos[j].subnetsCount
+		return cmp.Compare(a.subnetsCount, b.subnetsCount)
 	})
 
 	// Remove peers, but re-check coverage after each removal
@@ -446,19 +445,16 @@ func (s *Sentinel) ConnectWithPeer(ctx context.Context, info peer.AddrInfo, sem 
 	return nil
 }
 
-// connectWithAllPeers is a helper function used to connect with a list of addrs.
-// it only returns an error on fail to parse multiaddrs
-// will print connect with peer errors to trace debug level
 func (s *Sentinel) connectWithAllPeers(multiAddrs []multiaddr.Multiaddr) error {
 	addrInfos, err := peer.AddrInfosFromP2pAddrs(multiAddrs...)
 	if err != nil {
 		return err
 	}
 	for _, peerInfo := range addrInfos {
+		if err := s.connectSem.Acquire(s.ctx, 1); err != nil {
+			return err
+		}
 		go func(peerInfo peer.AddrInfo) {
-			if err := s.connectSem.Acquire(s.ctx, 1); err != nil {
-				return
-			}
 			if err := s.ConnectWithPeer(s.ctx, peerInfo, s.connectSem); err != nil {
 				log.Debug("[Sentinel] Could not connect with peer", "err", err)
 			} else {
@@ -485,21 +481,22 @@ func (s *Sentinel) stickToPeers(peers []multiaddr.Multiaddr) {
 }
 
 func (s *Sentinel) listenForPeers() {
-	enodes := []*enode.Node{}
+	multiAddresses := make([]multiaddr.Multiaddr, 0, len(s.cfg.NetworkConfig.StaticPeers))
 	for _, node := range s.cfg.NetworkConfig.StaticPeers {
-		newNode, err := enode.Parse(enode.ValidSchemes, node)
-		if err == nil {
-			enodes = append(enodes, newNode)
-		} else {
+		addr, err := p2p.ParseStaticPeer(node)
+		if err != nil {
 			log.Warn("Could not connect to static peer", "peer", node, "reason", err)
+			continue
 		}
+		multiAddresses = append(multiAddresses, addr)
 	}
-	log.Info("CL Sentinel static peers", "len", len(enodes))
+	log.Info("CL Sentinel static peers", "len", len(multiAddresses))
+	if len(multiAddresses) > 0 {
+		s.stickToPeers(multiAddresses)
+	}
 	if s.cfg.NoDiscovery {
 		return
 	}
-	multiAddresses := p2p.ConvertToMultiAddr(enodes)
-	s.stickToPeers(multiAddresses)
 
 	iterator := s.listener.RandomNodes()
 	defer iterator.Close()
@@ -580,11 +577,11 @@ func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 			return
 		}
 
-		valid, err := s.handshaker.ValidatePeer(peerId)
+		valid, err := s.handshaker.ValidatePeer(s.ctx, peerId)
 		if err != nil {
 			// Handshake transport error (stream reset, timeout, etc.) — keep the peer.
 			// The peer may still work for gossip even if status exchange failed.
-			log.Debug("[Sentinel] Handshake transport error (keeping connection)", "peer", peerId, "err", err)
+			log.Trace("[Sentinel] Handshake transport error (keeping connection)", "peer", peerId, "err", err)
 		}
 
 		if !valid && err == nil {

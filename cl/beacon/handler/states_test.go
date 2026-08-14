@@ -35,7 +35,6 @@ import (
 )
 
 func TestGetStateFork(t *testing.T) {
-
 	// setupTestingHandler(t, clparams.Phase0Version)
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 
@@ -74,7 +73,9 @@ func TestGetStateFork(t *testing.T) {
 			server := httptest.NewServer(handler.mux)
 			defer server.Close()
 			// Query the block in the handler with /eth/v2/beacon/blocks/{block_id}
-			resp, err := http.Get(server.URL + "/eth/v1/beacon/states/" + c.blockID + "/fork")
+			req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/states/"+c.blockID+"/fork", nil)
+			require.NoError(t, err)
+			resp, err := server.Client().Do(req)
 			require.NoError(t, err)
 			defer resp.Body.Close()
 			require.Equal(t, c.code, resp.StatusCode)
@@ -98,7 +99,6 @@ func stringRPCErr(r io.Reader) string {
 }
 
 func TestGetStateRoot(t *testing.T) {
-
 	// setupTestingHandler(t, clparams.Phase0Version)
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 
@@ -139,7 +139,9 @@ func TestGetStateRoot(t *testing.T) {
 			server := httptest.NewServer(handler.mux)
 			defer server.Close()
 			// Query the block in the handler with /eth/v2/beacon/blocks/{block_id}
-			resp, err := http.Get(server.URL + "/eth/v1/beacon/states/" + c.blockID + "/root")
+			req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/states/"+c.blockID+"/root", nil)
+			require.NoError(t, err)
+			resp, err := server.Client().Do(req)
 			require.NoError(t, err)
 			defer resp.Body.Close()
 			require.Equal(t, c.code, resp.StatusCode)
@@ -156,7 +158,6 @@ func TestGetStateRoot(t *testing.T) {
 }
 
 func TestGetStateFullHistorical(t *testing.T) {
-
 	// setupTestingHandler(t, clparams.Phase0Version)
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
 
@@ -198,7 +199,7 @@ func TestGetStateFullHistorical(t *testing.T) {
 			server := httptest.NewServer(handler.mux)
 			defer server.Close()
 			// Query the block in the handler with /eth/v2/beacon/states/{block_id} with content-type octet-stream
-			req, err := http.NewRequest("GET", server.URL+"/eth/v2/debug/beacon/states/"+c.blockID, nil)
+			req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v2/debug/beacon/states/"+c.blockID, nil)
 			require.NoError(t, err)
 			req.Header.Set("Accept", "application/octet-stream")
 
@@ -249,7 +250,6 @@ func TestGetStateFullHistorical(t *testing.T) {
 }
 
 func TestGetStateFullForkchoice(t *testing.T) {
-
 	// setupTestingHandler(t, clparams.Phase0Version)
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 
@@ -292,7 +292,7 @@ func TestGetStateFullForkchoice(t *testing.T) {
 			server := httptest.NewServer(handler.mux)
 			defer server.Close()
 			// Query the block in the handler with /eth/v2/beacon/states/{block_id} with content-type octet-stream
-			req, err := http.NewRequest("GET", server.URL+"/eth/v2/debug/beacon/states/"+c.blockID, nil)
+			req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v2/debug/beacon/states/"+c.blockID, nil)
 			require.NoError(t, err)
 			req.Header.Set("Accept", "application/octet-stream")
 
@@ -318,7 +318,6 @@ func TestGetStateFullForkchoice(t *testing.T) {
 }
 
 func TestGetStateSyncCommittees(t *testing.T) {
-
 	// setupTestingHandler(t, clparams.Phase0Version)
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
@@ -366,7 +365,9 @@ func TestGetStateSyncCommittees(t *testing.T) {
 		t.Run(c.blockID, func(t *testing.T) {
 			server := httptest.NewServer(handler.mux)
 			defer server.Close()
-			resp, err := http.Get(server.URL + "/eth/v1/beacon/states/" + c.blockID + "/sync_committees")
+			req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/states/"+c.blockID+"/sync_committees", nil)
+			require.NoError(t, err)
+			resp, err := server.Client().Do(req)
 			require.NoError(t, err)
 
 			defer resp.Body.Close()
@@ -383,7 +384,6 @@ func TestGetStateSyncCommittees(t *testing.T) {
 }
 
 func TestGetStateSyncCommitteesHistorical(t *testing.T) {
-
 	// setupTestingHandler(t, clparams.Phase0Version)
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
@@ -424,7 +424,9 @@ func TestGetStateSyncCommitteesHistorical(t *testing.T) {
 		t.Run(c.blockID, func(t *testing.T) {
 			server := httptest.NewServer(handler.mux)
 			defer server.Close()
-			resp, err := http.Get(server.URL + "/eth/v1/beacon/states/" + c.blockID + "/sync_committees")
+			req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/states/"+c.blockID+"/sync_committees", nil)
+			require.NoError(t, err)
+			resp, err := server.Client().Do(req)
 			require.NoError(t, err)
 
 			defer resp.Body.Close()
@@ -441,7 +443,6 @@ func TestGetStateSyncCommitteesHistorical(t *testing.T) {
 }
 
 func TestGetStateFinalityCheckpoints(t *testing.T) {
-
 	// setupTestingHandler(t, clparams.Phase0Version)
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
 
@@ -482,7 +483,9 @@ func TestGetStateFinalityCheckpoints(t *testing.T) {
 		t.Run(c.blockID, func(t *testing.T) {
 			server := httptest.NewServer(handler.mux)
 			defer server.Close()
-			resp, err := http.Get(server.URL + "/eth/v1/beacon/states/" + c.blockID + "/finality_checkpoints")
+			req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/states/"+c.blockID+"/finality_checkpoints", nil)
+			require.NoError(t, err)
+			resp, err := server.Client().Do(req)
 			require.NoError(t, err)
 
 			defer resp.Body.Close()
@@ -499,7 +502,6 @@ func TestGetStateFinalityCheckpoints(t *testing.T) {
 }
 
 func TestGetRandao(t *testing.T) {
-
 	// setupTestingHandler(t, clparams.Phase0Version)
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
 
@@ -539,7 +541,9 @@ func TestGetRandao(t *testing.T) {
 		t.Run(c.blockID, func(t *testing.T) {
 			server := httptest.NewServer(handler.mux)
 			defer server.Close()
-			resp, err := http.Get(server.URL + "/eth/v1/beacon/states/" + c.blockID + "/randao")
+			req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/states/"+c.blockID+"/randao", nil)
+			require.NoError(t, err)
+			resp, err := server.Client().Do(req)
 			require.NoError(t, err)
 
 			defer resp.Body.Close()
@@ -579,7 +583,9 @@ func TestGetPendingQueuesConsensusVersionHeader(t *testing.T) {
 
 	versions := map[string]string{}
 	for _, endpoint := range []string{"pending_consolidations", "pending_deposits", "pending_partial_withdrawals"} {
-		resp, err := http.Get(server.URL + "/eth/v1/beacon/states/head/" + endpoint)
+		req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/states/head/"+endpoint, nil)
+		require.NoError(t, err)
+		resp, err := server.Client().Do(req)
 		require.NoError(t, err)
 		resp.Body.Close()
 		require.Equal(t, http.StatusOK, resp.StatusCode, endpoint)

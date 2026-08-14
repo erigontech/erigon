@@ -148,7 +148,7 @@ func (b *Builder) Build(param *Parameters, interrupt *atomic.Bool) (result *type
 	// WithSequentialCommitment: the parallel trie's per-worker readers open
 	// fresh transactions at the current head, not this build's snapshot.
 	sd, err := execctx.NewSharedDomains(b.ctx, compositeTx, b.logger,
-		execctx.WithoutDeferredBranchUpdates(), execctx.WithoutBranchCache(), execctx.WithSequentialCommitment())
+		execctx.WithoutDeferredBranchUpdates(), execctx.WithoutSharedBranchCache(), execctx.WithSequentialCommitment())
 	if err != nil {
 		return nil, err
 	}

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -222,34 +221,62 @@ func (v Versions) MustSupport(ver Version, filename string) {
 	panic(msg)
 }
 
-// FindFilesWithVersionsByPattern return an filepath by pattern
+// FindFilesWithVersionsByPattern returns the highest-version file matching pattern.
 func FindFilesWithVersionsByPattern(pattern string) (string, Version, bool, error) {
-	matches, err := filepath.Glob(pattern)
+	groups, err := GroupByMaskedName(pattern)
 	if err != nil {
-		return "", Version{}, false, fmt.Errorf("invalid pattern: %w", err)
+		return "", Version{}, false, err
 	}
-
-	if len(matches) == 0 {
+	var best VersionedFile
+	found := false
+	for _, g := range groups {
+		for i := range g {
+			if !found || g[i].Version.Cmp(best.Version) > 0 {
+				best, found = g[i], true
+			}
+		}
+	}
+	if !found {
 		return "", Version{}, false, nil
 	}
-	if len(matches) > 1 {
-		sort.Slice(matches, func(i, j int) bool {
-			_, fName1 := filepath.Split(matches[i])
-			version1, _ := ParseVersion(fName1)
+	return best.Path, best.Version, true, nil
+}
 
-			_, fName2 := filepath.Split(matches[j])
-			version2, _ := ParseVersion(fName2)
+// VersionedFile is a file paired with the version parsed from its name.
+type VersionedFile struct {
+	Path    string
+	Name    string
+	Version Version
+}
 
-			return version1.Less(version2)
-		})
-		_, fName := filepath.Split(matches[len(matches)-1])
-		ver, _ := ParseVersion(fName)
-
-		return matches[len(matches)-1], ver, true, nil
+// GroupByMaskedName is FindFilesWithVersionsByPattern without the collapse to the
+// highest version: it globs pattern and groups every match by its version-masked
+// name, so a key holding more than one entry is the same logical file present under
+// multiple versions. Pass "<dir>/*" to scan a whole directory. Unversioned matches
+// (e.g. salt-blocks.txt, subdirectories) and .tmp leftovers are skipped.
+func GroupByMaskedName(pattern string) (map[string][]VersionedFile, error) {
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		return nil, fmt.Errorf("invalid pattern: %w", err)
 	}
-	_, fName := filepath.Split(matches[0])
-	ver, _ := ParseVersion(fName)
-	return matches[0], ver, true, nil
+	groups := map[string][]VersionedFile{}
+	for _, path := range matches {
+		name := filepath.Base(path)
+		if filepath.Ext(name) == ".tmp" {
+			continue
+		}
+		masked, err := ReplaceVersionWithMask(name)
+		if err != nil {
+			continue // unversioned file or directory
+		}
+		ver, _ := ParseVersion(name)
+		groups[masked] = append(groups[masked], VersionedFile{
+			Path:    path,
+			Name:    name,
+			Version: ver,
+		})
+	}
+	return groups, nil
 }
 
 // MatchVersionedFile searches for files matching a pattern within a pre-scanned list.

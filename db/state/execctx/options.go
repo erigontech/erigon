@@ -16,11 +16,15 @@
 
 package execctx
 
-import "github.com/erigontech/erigon/execution/commitment"
+import (
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/commitment"
+)
 
 type sharedDomainOptions struct {
-	trieCfg       commitment.TrieConfig
-	noBranchCache bool
+	trieCfg              commitment.TrieConfig
+	useSharedBranchCache bool
+	mem                  kv.TemporalMemBatch
 }
 
 // SharedDomainOption configures NewSharedDomains.
@@ -36,19 +40,22 @@ func WithoutDeferredBranchUpdates() SharedDomainOption {
 	return func(o *sharedDomainOptions) { o.trieCfg.DeferBranchUpdates = false }
 }
 
+// WithoutSharedBranchCache keeps commitment reads within the transaction snapshot.
+func WithoutSharedBranchCache() SharedDomainOption {
+	return func(o *sharedDomainOptions) { o.useSharedBranchCache = false }
+}
+
+// WithMemBatch supplies the in-memory domain batch instead of building the
+// default one from the tx. The seam an ephemeral single-block replay uses to
+// serve a flat witness (no temporal source) via SharedDomains. A general
+// top-down hoist of mem-batch construction out of the tx is a follow-up.
+func WithMemBatch(mem kv.TemporalMemBatch) SharedDomainOption {
+	return func(o *sharedDomainOptions) { o.mem = mem }
+}
+
 // WithSequentialCommitment forces the sequential HexPatriciaHashed trie regardless
 // of the experimental parallel/concurrent flags — for one-shot / empty-DB paths
 // (e.g. genesis) that wire no trie-context factory for the parallel trie.
 func WithSequentialCommitment() SharedDomainOption {
 	return func(o *sharedDomainOptions) { o.trieCfg.Variant = commitment.VariantHexPatriciaTrie }
-}
-
-// WithoutBranchCache leaves the SharedDomains detached from the aggregator-scope
-// BranchCache: commitment branch reads go straight to sd.mem/overlay/MDBX and no
-// read populates the shared cache. Required for SDs that read concurrently with
-// head progression (payload builds, latest-state RPC readers) — the shared cache
-// can be ahead of their snapshot, and their read-fills could shadow fresher
-// canonical entries. SDs serialized with head progression keep the warm cache.
-func WithoutBranchCache() SharedDomainOption {
-	return func(o *sharedDomainOptions) { o.noBranchCache = true }
 }

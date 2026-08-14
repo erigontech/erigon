@@ -20,6 +20,7 @@
 package vm
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
@@ -409,7 +410,7 @@ func (c *dataCopy) RequiredGas(input []byte) uint64 {
 	return ToWordSize(uint64(len(input)))*params.IdentityPerWordGas + params.IdentityBaseGas
 }
 func (c *dataCopy) Run(in []byte) ([]byte, error) {
-	return common.Copy(in), nil
+	return bytes.Clone(in), nil
 }
 
 func (c *dataCopy) Name() string {
@@ -631,10 +632,80 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 		expBig := new(big.Int).SetBytes(exp)
 		modBig := new(big.Int).SetBytes(mod)
 		baseBig.Exp(baseBig, expBig, modBig).FillBytes(result)
+	case modexpU256Applicable(base, mod):
+		// A fixed-width uint256 square-and-multiply avoids arbitrary-precision
+		// overhead and the cgo boundary.
+		modexpU256(result, base, exp, mod)
 	default:
 		evmone.ModExp(result, base, exp, mod)
 	}
 	return result, nil
+}
+
+// modexpU256Applicable reports whether modexpU256 may be used for these operands,
+// and whether it is worth using. The base must fit in 256 bits — uint256.SetBytes
+// silently truncates above that — and the modulus must lie in [2^192, 2^256):
+// below 2^192 uint256.Reciprocal yields no reciprocal, every modular multiply
+// degrades into a full division, and evmone wins by around 3x.
+func modexpU256Applicable(base, mod []byte) bool {
+	if len(base) > 32 || len(mod) > 32 || len(mod) <= 24 {
+		return false
+	}
+	return bitutil.TestBytes(mod[:len(mod)-24])
+}
+
+// modexpU256 computes base^exp mod modulus and writes the big-endian result into
+// dst, which must be len(modulus) zero bytes. Operands must satisfy
+// modexpU256Applicable; the exponent may be any length.
+//
+// It is a fixed-width uint256 left-to-right square-and-multiply using a
+// precomputed reciprocal, so each modular multiply is a multiply+reduce with no
+// division and no heap allocation.
+func modexpU256(dst, base, exp, mod []byte) {
+	// Operands are padded to their declared field widths, which EIP-7823 caps at
+	// 1024 bytes. The loops below cost the field width, not the value, so the
+	// two degenerate results are taken before entering them.
+	for len(exp) >= 8 && binary.BigEndian.Uint64(exp) == 0 {
+		exp = exp[8:]
+	}
+	for len(exp) > 0 && exp[0] == 0 {
+		exp = exp[1:]
+	}
+	if len(exp) == 0 {
+		dst[len(dst)-1] = 1 // exponent 0 and m > 1, so the result is 1 — including 0^0
+		return
+	}
+
+	var m, b uint256.Int
+	m.SetBytes(mod)
+	b.SetBytes(base)
+	b.Mod(&b, &m)
+	if b.IsZero() {
+		return // 0^exp with exp > 0; dst is already zero
+	}
+	mu := uint256.Reciprocal(&m)
+
+	// started stays false until the first set exponent bit, so leading zero bits
+	// of the top byte cost no squarings. It is always set by the end: exp[0] != 0.
+	var result uint256.Int
+	started := false
+	for _, by := range exp {
+		for bit := 7; bit >= 0; bit-- {
+			if started {
+				result.MulModWithReciprocal(&result, &result, &m, &mu) // square
+			}
+			if (by>>uint(bit))&1 == 1 {
+				if !started {
+					started = true
+					result.Set(&b) // result was 1, so 1*b = b
+				} else {
+					result.MulModWithReciprocal(&result, &b, &m, &mu) // multiply
+				}
+			}
+		}
+	}
+	b32 := result.Bytes32()
+	copy(dst, b32[32-len(dst):])
 }
 
 func (c *bigModExp) Name() string {
@@ -699,6 +770,9 @@ func runBn254ScalarMul(input []byte) ([]byte, error) {
 	err := libbn254.UnmarshalCurvePointG1(getData(input, 0, 64), &x)
 	if err != nil {
 		return nil, err
+	}
+	if x.IsInfinity() {
+		return make([]byte, 64), nil
 	}
 	return libbn254.MarshalCurvePointG1(x.ScalarMultiplication(&x, new(big.Int).SetBytes(getData(input, 64, 32)))), nil
 }
@@ -985,6 +1059,10 @@ func (c *bls12381G1MultiExp) Run(input []byte) ([]byte, error) {
 
 	// Compute r = e_0 * p_0 + e_1 * p_1 + ... + e_(k-1) * p_(k-1)
 	var r bls12381.G1Affine
+	if k == 1 {
+		scalarMulG1(&r, &points[0], &scalars[0])
+		return encodePointG1(&r), nil
+	}
 	_, err := r.MultiExp(points, scalars, ecc.MultiExpConfig{})
 	if err != nil {
 		return nil, err
@@ -1089,6 +1167,10 @@ func (c *bls12381G2MultiExp) Run(input []byte) ([]byte, error) {
 
 	// Compute r = e_0 * p_0 + e_1 * p_1 + ... + e_(k-1) * p_(k-1)
 	var r bls12381.G2Affine
+	if k == 1 {
+		scalarMulG2(&r, &points[0], &scalars[0])
+		return encodePointG2(&r), nil
+	}
 	_, err := r.MultiExp(points, scalars, ecc.MultiExpConfig{})
 	if err != nil {
 		return nil, err
@@ -1165,6 +1247,20 @@ func (c *bls12381Pairing) Run(input []byte) ([]byte, error) {
 
 func (c *bls12381Pairing) Name() string {
 	return "BLS12_PAIRING_CHECK"
+}
+
+// scalarMulG1 sets r to s*p. EIP-2537 has no dedicated MUL precompile, so a plain
+// scalar multiplication reaches G1MSM as k == 1, and the spec asks implementations
+// to recognise it: gnark's MultiExp pays full Pippenger setup even for one point.
+func scalarMulG1(r, p *bls12381.G1Affine, s *fr.Element) {
+	var b big.Int
+	r.ScalarMultiplication(p, s.BigInt(&b))
+}
+
+// scalarMulG2 sets r to s*p, see scalarMulG1.
+func scalarMulG2(r, p *bls12381.G2Affine, s *fr.Element) {
+	var b big.Int
+	r.ScalarMultiplication(p, s.BigInt(&b))
 }
 
 func decodePointG1(in []byte) (bls12381.G1Affine, error) {
