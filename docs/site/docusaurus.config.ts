@@ -9,17 +9,15 @@ const versionReplace = require('./src/remark/version-replace.js');
 // below derives everything from this list, no per-version config edits required.
 const archivedVersions: string[] = require('./versions.json');
 
-// The docs series this branch publishes. Declared here so the {ERIGON_VERSION}
-// lookup below is scoped to it; `docs-version-bump.yml` rewrites the `label:
-// 'vX.Y'` literal at each cutover, so this stays the single source of truth.
+// The docs series this branch publishes; also scopes the {ERIGON_VERSION}
+// lookup below. The `label: 'vX.Y'` literal is rewritten at each cutover.
 const currentDocsVersion = {
   label: 'v3.5',
   badge: false,
 };
 
-// Pre-release tag shapes that must never reach the install page. The API's
-// `prerelease` flag alone is not enough: release.yml drafts releases without it,
-// so e.g. v3.6.0-rc.1 exists with `prerelease: false`.
+// Releases carry a pre-release suffix without reliably setting the API's
+// `prerelease` flag, so tag shape is the load-bearing check.
 const PRERELEASE_TAG = /-(rc|alpha|beta|pre)/i;
 
 type Release = {tag_name: string; prerelease: boolean; draft: boolean};
@@ -30,17 +28,14 @@ function githubHeaders(): Record<string, string> {
   return headers;
 }
 
-// One request serves every series resolved below. 100 is the API maximum for a
-// single page; the repo has ~250 releases total, so this covers the newest ~6
-// series — comfortably more than the current version plus the 5-archive cap.
+// One page serves every series resolved below; 100 is the API maximum and must
+// stay wide enough to reach the oldest archived series.
 async function fetchReleases(): Promise<Release[]> {
   const res = await fetch(
     'https://api.github.com/repos/erigontech/erigon/releases?per_page=100',
     {headers: githubHeaders()},
   );
   if (!res.ok) {
-    // Unauthenticated builds share a 60 req/hour pool, so exhaustion is the one
-    // failure worth hinting at — but only when the status actually says so.
     const hint = res.status === 403 || res.status === 429
       ? ' Set GITHUB_TOKEN if this is rate limiting.'
       : '';
@@ -49,16 +44,10 @@ async function fetchReleases(): Promise<Release[]> {
   return await res.json() as Release[];
 }
 
-// Newest stable release of one series, e.g. 'v3.5.' -> '3.5.5'.
-//
-// Scoped by series rather than using /releases/latest, which returns the newest
-// release across the whole repo ordered by commit date, not by version — so a
-// back-ported patch or a pre-release could otherwise be pasted into this
-// branch's install commands.
-//
-// Throws instead of falling back to a placeholder: the result is substituted
-// into copy-paste `docker pull` / `git checkout` commands, so an unresolved
-// value ships instructions that look valid and are not, on a green build.
+// Newest stable release of one series, e.g. 'v3.5' -> '3.5.5'. Scoped by series
+// because the repo-wide newest release is ordered by date, not by version.
+// Throwing is deliberate: the result lands in copy-paste install commands, so an
+// unresolved value must fail the build rather than publish.
 function latestStableInSeries(releases: Release[], series: string): string {
   const prefix = `${series}.`;
   const match = releases.find(
