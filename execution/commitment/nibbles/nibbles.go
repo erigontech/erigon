@@ -33,10 +33,10 @@ func HexToCompact(hex []byte) []byte {
 	return HexToCompactInto(nil, hex)
 }
 
-// HexToCompactInto is HexToCompact but writes into dst's backing array when it
-// has enough capacity, returning dst re-sliced to the result; otherwise it
-// allocates, same as HexToCompact. The caller must not retain the result past
-// dst's next reuse.
+// HexToCompactInto is HexToCompact but writes into dst's backing array when it has
+// enough capacity, returning dst re-sliced to the result; otherwise it allocates and
+// the result is independent of dst. A result that aliases dst must not be retained
+// past dst's next reuse.
 func HexToCompactInto(dst, hex []byte) []byte {
 	terminator := byte(0)
 	if HasTerm(hex) {
