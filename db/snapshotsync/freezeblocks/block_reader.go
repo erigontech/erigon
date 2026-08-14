@@ -521,6 +521,19 @@ func txBlockView(tx kv.Getter) *blocksnapshots.View {
 	return nil
 }
 
+// maxBlockInFiles returns the max block covered by tx's pinned block-files
+// view, or the global r.sn.BlocksAvailable() when tx has no pin. Read paths
+// must branch files-vs-DB using this: if the tx holds an older generation
+// than r.sn, using the global would send reads at newly-published block
+// numbers into a pinned view that doesn't cover them, returning nil instead
+// of falling through to the DB.
+func (r *BlockReader) maxBlockInFiles(tx kv.Getter) uint64 {
+	if v := txBlockView(tx); v != nil {
+		return v.BlocksAvailable()
+	}
+	return r.sn.BlocksAvailable()
+}
+
 // viewSingleFile returns the segment of type t covering blockNum, from tx's pinned
 // view when present (no-op release), else a fresh r.sn view the caller releases.
 func (r *BlockReader) viewSingleFile(tx kv.Getter, t snaptype.Type, blockNum uint64) (*snapshotsync.VisibleSegment, bool, func()) {
@@ -558,7 +571,7 @@ func (r *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHei
 		dbgPrefix = fmt.Sprintf("[dbg] BlockReader(idxMax=%d,segMax=%d).HeaderByNumber(blk=%d) -> ", r.sn.IndicesMax(), r.sn.SegmentsMax(), blockHeight)
 	}
 
-	maxBlockNumInFiles := r.sn.BlocksAvailable()
+	maxBlockNumInFiles := r.maxBlockInFiles(tx)
 	if blockHeight == 0 || maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
 		if tx != nil {
 			blockHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
@@ -723,7 +736,7 @@ func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, ha
 		dbgPrefix = fmt.Sprintf("[dbg] BlockReader(idxMax=%d,segMax=%d).BodyWithTransactions(hash=%x,blk=%d) -> ", r.sn.IndicesMax(), r.sn.SegmentsMax(), hash, blockHeight)
 	}
 
-	maxBlockNumInFiles := r.sn.BlocksAvailable()
+	maxBlockNumInFiles := r.maxBlockInFiles(tx)
 	if blockHeight == 0 || maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
 		if tx == nil {
 			if dbgLogs {
@@ -810,7 +823,7 @@ func (r *BlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash common.Has
 }
 
 func (r *BlockReader) Body(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, txCount uint32, err error) {
-	maxBlockNumInFiles := r.sn.BlocksAvailable()
+	maxBlockNumInFiles := r.maxBlockInFiles(tx)
 	if blockHeight == 0 || maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
 		if tx == nil {
 			return nil, 0, nil
@@ -833,7 +846,7 @@ func (r *BlockReader) Body(ctx context.Context, tx kv.Getter, hash common.Hash, 
 }
 
 func (r *BlockReader) HasSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (bool, error) {
-	maxBlockNumInFiles := r.sn.BlocksAvailable()
+	maxBlockNumInFiles := r.maxBlockInFiles(tx)
 	if blockHeight == 0 || maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
 		return rawdb.HasSenders(tx, hash, blockHeight)
 	}
@@ -868,7 +881,7 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 		dbgPrefix = fmt.Sprintf("[dbg] BlockReader(idxMax=%d,segMax=%d).blockWithSenders(hash=%x,blk=%d) -> ", r.sn.IndicesMax(), r.sn.SegmentsMax(), hash, blockHeight)
 	}
 
-	maxBlockNumInFiles := r.sn.BlocksAvailable()
+	maxBlockNumInFiles := r.maxBlockInFiles(tx)
 	if blockHeight == 0 || maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
 		if tx == nil {
 			if dbgLogs {
@@ -1257,7 +1270,7 @@ func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*snapshotsync.Vi
 // system transactions at the block boundaries. ok is false when the block or
 // that transaction does not exist.
 func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, txIdxInBlock int) (types.Transaction, bool, error) {
-	maxBlockNumInFiles := r.sn.BlocksAvailable()
+	maxBlockNumInFiles := r.maxBlockInFiles(tx)
 	if blockNum == 0 || maxBlockNumInFiles == 0 || blockNum > maxBlockNumInFiles {
 		canonicalHash, ok, err := r.CanonicalHash(ctx, tx, blockNum)
 		if err != nil {
@@ -1405,7 +1418,7 @@ func (r *BlockReader) BadHeaderNumber(ctx context.Context, tx kv.Getter, hash co
 }
 func (r *BlockReader) BlockByNumber(ctx context.Context, db kv.Tx, number uint64) (*types.Block, error) {
 	hash := emptyHash
-	maxBlockNumInFiles := r.sn.BlocksAvailable()
+	maxBlockNumInFiles := r.maxBlockInFiles(db)
 	if number == 0 || maxBlockNumInFiles == 0 || number > maxBlockNumInFiles {
 		var err error
 		hash, err = rawdb.ReadCanonicalHash(db, number)

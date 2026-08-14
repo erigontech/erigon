@@ -1816,6 +1816,19 @@ func (v *View) Segments(t snaptype.Type) VisibleSegments {
 	return v.segments[t.Enum()]
 }
 
+// BlocksAvailable returns the max block covered by this pinned generation.
+// Callers that already hold a View must prefer this over the parent
+// BaseRoSnapshots.BlocksAvailable(), which reflects the LATEST generation —
+// using the global while reading through a pinned older view creates a gap:
+// the caller believes a block is in files and skips the DB fallback, but the
+// pinned view's lookup returns !ok, yielding a spurious nil.
+func (v *View) BlocksAvailable() uint64 {
+	if v == nil || v.snapshotVisible == nil {
+		return 0
+	}
+	return v.segmentsMax
+}
+
 func (v *View) Segment(t snaptype.Type, blockNum uint64) (*VisibleSegment, bool) {
 	for _, seg := range v.segments[t.Enum()] {
 		if !(blockNum >= seg.from && blockNum < seg.to) {

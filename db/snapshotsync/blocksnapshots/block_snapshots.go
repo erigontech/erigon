@@ -61,6 +61,17 @@ func (v *View) Txs() []*snapshotsync.VisibleSegment {
 func (v *View) Segment(t snaptype.Type, blockNum uint64) (*snapshotsync.VisibleSegment, bool) {
 	return v.base.Segment(t, blockNum)
 }
+
+// BlocksAvailable returns the max block covered by this pinned generation.
+// See snapshotsync.View.BlocksAvailable for why callers should prefer this
+// over the parent RoSnapshots.BlocksAvailable() when reading through a
+// pinned tx-scoped view.
+func (v *View) BlocksAvailable() uint64 {
+	if v == nil {
+		return 0
+	}
+	return v.base.BlocksAvailable()
+}
 func (v *View) Segments(t snaptype.Type) []*snapshotsync.VisibleSegment { return v.base.Segments(t) }
 
 func (v *View) HeadersSegment(blockNum uint64) (*snapshotsync.VisibleSegment, bool) {
