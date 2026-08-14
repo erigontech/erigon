@@ -378,6 +378,41 @@ func TestBlobHistoryDownloaderUnreadableDenebStorageWithholdsCompletion(t *testi
 	}
 }
 
+func TestBlobHistoryDownloaderDoesNotRepeatDeepVerification(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(1), nil).AnyTimes()
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	block.Block.Slot = 100
+	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	sidecar := storedFuluSidecar(block, 0)
+	blobStorage.EXPECT().ReadBlobSidecars(gomock.Any(), block.Block.Slot, gomock.Any()).Return([]*cltypes.BlobSidecar{sidecar}, true, nil)
+	downloader := newBoundaryDownloader(t, block.Block.Slot, 0, block.Block.Slot, &boundaryBlockReader{block: block})
+	downloader.blobStorage = blobStorage
+	downloader.verifyBlobSidecars = func([]*cltypes.BlobSidecar, clparams.StateVersion, func(*cltypes.SignedBeaconBlockHeader) error) error {
+		return nil
+	}
+
+	require.NoError(t, downloader.downloadOnce(false))
+	require.NoError(t, downloader.downloadOnce(false))
+}
+
+func TestBlobHistoryDownloaderVerifiedRootCacheEvicts(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.SlotsPerEpoch = 1
+	downloader := &BlobHistoryDownloader{beaconCfg: &cfg}
+	roots := []common.Hash{{1}, {2}, {3}, {4}, {5}}
+
+	for _, root := range roots {
+		downloader.rememberVerifiedBlobRoot(root)
+	}
+
+	require.False(t, downloader.blobRootVerified(roots[0]))
+	for _, root := range roots[1:] {
+		require.True(t, downloader.blobRootVerified(root))
+	}
+}
+
 func TestBlobHistoryDownloaderCorruptFuluStorageWithholdsCompletion(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
@@ -465,7 +500,7 @@ func TestBlobHistoryDownloaderFuluRecoveryRejectsFailedStoredSidecarVerification
 func TestBlobHistoryDownloaderFuluBlockWithoutBlobsCompletes(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
-	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), nil).Times(2)
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), nil)
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
 	block.Block.Slot = 100
 	downloader := newBoundaryDownloader(t, block.Block.Slot, 0, block.Block.Slot, &boundaryBlockReader{block: block})
@@ -683,7 +718,11 @@ func TestBlobHistoryDownloaderDenebWithoutBlobsRepairsStaleStorage(t *testing.T)
 		t.Run(name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
-			blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(test.stored, nil).Times(2)
+			countCalls := 2
+			if test.stored == 0 {
+				countCalls = 1
+			}
+			blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(test.stored, nil).Times(countCalls)
 			if test.wantRemoved {
 				blobStorage.EXPECT().RemoveBlobSidecars(gomock.Any(), gomock.Any(), gomock.Any()).Return(test.removeErr)
 			}

@@ -23,10 +23,12 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	blobstoragemock "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -87,16 +89,35 @@ func TestBlobHistoryDownloaderWaitsWithoutPeers(t *testing.T) {
 }
 
 func TestBlobHistoryDownloaderStopsWhenPeersDisappear(t *testing.T) {
-	reader := &boundaryBlockReader{}
+	ctrl := gomock.NewController(t)
+	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), nil).AnyTimes()
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	block.Block.Slot = 20
+	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	reader := &boundaryBlockReader{block: block}
 	downloader := newBoundaryDownloader(t, 20, 0, 0, reader)
-	downloader.rpc = &boundarySequencePeerCounter{counts: []uint64{1, 1, 0}}
+	peers := &boundarySequencePeerCounter{counts: []uint64{1, 0}}
+	downloader.rpc = peers
+	downloader.blobStorage = blobStorage
 	notified := false
 	downloader.SetNotifyBlobBackfilled(func() { notified = true })
 
 	require.NoError(t, downloader.downloadOnce(false))
 	require.Equal(t, []uint64{20, 19, 18, 17, 16, 15, 14, 13}, reader.slots)
+	require.Zero(t, peers.requests)
 	require.False(t, notified)
 	require.Zero(t, downloader.nextBackfillTargetSlot)
+}
+
+func TestBlobHistoryDownloaderLocalOnlyPassChecksPeersOnce(t *testing.T) {
+	reader := &boundaryBlockReader{}
+	downloader := newBoundaryDownloader(t, blocksBatchSize*2+1, 0, 1, reader)
+	peers := &boundarySequencePeerCounter{counts: []uint64{1}}
+	downloader.rpc = peers
+
+	require.NoError(t, downloader.downloadOnce(false))
+	require.Equal(t, 1, peers.calls)
 }
 
 func TestBlobHistoryDownloaderUnsyncedWaitObservesCancellation(t *testing.T) {
@@ -132,6 +153,23 @@ func TestBlobHistoryDownloaderSecondCompletedPassScansOnlyRecentWindow(t *testin
 	const head = uint64(1_000)
 	reader := &boundaryBlockReader{}
 	downloader := newBoundaryDownloader(t, head, 0, 0, reader)
+
+	require.NoError(t, downloader.downloadOnce(false))
+	reader.slots = nil
+	require.NoError(t, downloader.downloadOnce(false))
+
+	wantFloor := head - clparams.MainnetBeaconConfig.SlotsPerEpoch*2
+	require.Equal(t, wantFloor, downloader.nextBackfillTargetSlot)
+	require.Equal(t, head-wantFloor+1, uint64(len(reader.slots)))
+	require.Equal(t, wantFloor, reader.slots[len(reader.slots)-1])
+}
+
+func TestBlobHistoryDownloaderNonArchiveSecondPassScansOnlyRecentWindow(t *testing.T) {
+	const head = uint64(1_000)
+	reader := &boundaryBlockReader{}
+	downloader := newBoundaryDownloader(t, head, 0, 0, reader)
+	downloader.archiveBlobs = false
+	downloader.immediateBlobsBackfilling = true
 
 	require.NoError(t, downloader.downloadOnce(false))
 	reader.slots = nil
@@ -187,8 +225,9 @@ func (p boundaryPeerCounter) SendBlobsSidecarByIdentifierReq(context.Context, *s
 }
 
 type boundarySequencePeerCounter struct {
-	counts []uint64
-	calls  int
+	counts   []uint64
+	calls    int
+	requests int
 }
 
 func (p *boundarySequencePeerCounter) Peers() (uint64, error) {
@@ -198,6 +237,7 @@ func (p *boundarySequencePeerCounter) Peers() (uint64, error) {
 }
 
 func (p *boundarySequencePeerCounter) SendBlobsSidecarByIdentifierReq(context.Context, *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error) {
+	p.requests++
 	return nil, "", nil
 }
 

@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/das"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
+	statelru "github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
@@ -93,6 +94,7 @@ type BlobHistoryDownloader struct {
 	// columnBackfillTimeout bounds each fulu block's PeerDAS column recovery
 	columnBackfillTimeout time.Duration
 	verifyBlobSidecars    func([]*cltypes.BlobSidecar, clparams.StateVersion, func(*cltypes.SignedBeaconBlockHeader) error) error
+	verifiedBlobRoots     *statelru.Cache[common.Hash, struct{}]
 
 	running           atomic.Bool
 	backfillCompleted atomic.Bool
@@ -136,6 +138,7 @@ func NewBlobHistoryDownloader(
 		immediateBlobsBackfilling: immediateBlobsBackfilling,
 		columnBackfillTimeout:     blobColumnBackfillTimeout,
 		verifyBlobSidecars:        blob_storage.VerifyBlobSidecars,
+		verifiedBlobRoots:         newVerifiedBlobRootsCache(beaconCfg),
 		logger:                    logger,
 	}
 }
@@ -232,7 +235,8 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 	targetSlot := b.nextBackfillTargetSlot
 	// in case of non-archive mode, we only backfill the last relevant epochs
 	if !b.archiveBlobs {
-		targetSlot = currentSlot - min(currentSlot, b.beaconCfg.MinSlotsForBlobsSidecarsRequest())
+		retentionFloor := currentSlot - min(currentSlot, b.beaconCfg.MinSlotsForBlobsSidecarsRequest())
+		targetSlot = max(targetSlot, retentionFloor)
 	}
 
 	if shouldLog {
@@ -243,9 +247,6 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 		firstUnfrozenSlot := max(targetSlot, b.sn.FrozenBlobs())
 		if currentSlot < firstUnfrozenSlot {
 			break
-		}
-		if !b.peersAvailable() {
-			return nil
 		}
 		if !b.syncedChecker.Synced() {
 			if err := common.Sleep(b.ctx, 5*time.Second); err != nil {
@@ -279,6 +280,9 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 						"eta", utils.ETA(currentSlot-targetSlot, slotSec))
 				}
 			default:
+			}
+			if !b.peersAvailable() {
+				return nil
 			}
 			if !b.processBatch(batch) {
 				return nil
@@ -366,14 +370,19 @@ func (b *BlobHistoryDownloader) collectIncompleteBlocks(currentSlot, targetSlot 
 			return nil, 0, err
 		}
 		if commitments.Len() == int(blobsCount) {
+			if commitments.Len() == 0 || b.blobRootVerified(blockRoot) {
+				continue
+			}
 			_, complete, err := b.storedBlobSidecarsComplete(b.ctx, block, blockRoot)
 			if err != nil {
 				b.logger.Warn("[BlobHistoryDownloader] Stored blob sidecars are unreadable", "err", err, "slot", block.GetSlot())
 			}
 			if complete {
+				b.rememberVerifiedBlobRoot(blockRoot)
 				continue
 			}
 		}
+		b.forgetVerifiedBlobRoot(blockRoot)
 		batch = append(batch, block)
 	}
 	return batch, visited, nil
@@ -459,6 +468,7 @@ func (b *BlobHistoryDownloader) recoverDenebBlobs(blocks []*cltypes.SignedBeacon
 		if err != nil || !complete {
 			return false
 		}
+		b.rememberVerifiedBlobRoot(blockRoot)
 	}
 	return true
 }
@@ -655,17 +665,18 @@ func (b *BlobHistoryDownloader) recoverFuluColumns(blocks []*cltypes.SignedBeaco
 			continue
 		}
 		if complete {
+			b.rememberVerifiedBlobRoot(blockRoot)
 			cancel()
 			continue
 		}
 		if stored > 0 {
+			b.forgetVerifiedBlobRoot(blockRoot)
 			if err := b.blobStorage.RemoveBlobSidecars(ctx, block.GetSlot(), blockRoot); err != nil {
 				cancel()
 				b.logger.Warn("[BlobHistoryDownloader] Failed to clear incomplete blob storage", "err", err, "slot", block.GetSlot())
 				return false
 			}
 		}
-		// [Modified in Gloas:EIP7732] Use ColumnSyncableSignedBlock interface
 		peerDas := b.peerDasGetter.GetPeerDas()
 		err = peerDas.DownloadColumnsAndRecoverBlobs(ctx, []cltypes.ColumnSyncableSignedBlock{block})
 		if err != nil {
@@ -679,8 +690,43 @@ func (b *BlobHistoryDownloader) recoverFuluColumns(blocks []*cltypes.SignedBeaco
 			b.logger.Warn("[BlobHistoryDownloader] Blob recovery did not satisfy durable postcondition", "err", err, "slot", block.GetSlot(), "stored", stored, "expected", commitments.Len())
 			return false
 		}
+		b.rememberVerifiedBlobRoot(blockRoot)
 	}
 	return true
+}
+
+func newVerifiedBlobRootsCache(beaconCfg *clparams.BeaconChainConfig) *statelru.Cache[common.Hash, struct{}] {
+	size := 128
+	if beaconCfg != nil {
+		size = max(int(beaconCfg.SlotsPerEpoch*4), 1)
+	}
+	cache, err := statelru.New[common.Hash, struct{}]("blob_history_verified_roots", size)
+	if err != nil {
+		panic(err)
+	}
+	return cache
+}
+
+func (b *BlobHistoryDownloader) verifiedBlobRootsCache() *statelru.Cache[common.Hash, struct{}] {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.verifiedBlobRoots == nil {
+		b.verifiedBlobRoots = newVerifiedBlobRootsCache(b.beaconCfg)
+	}
+	return b.verifiedBlobRoots
+}
+
+func (b *BlobHistoryDownloader) blobRootVerified(root common.Hash) bool {
+	_, ok := b.verifiedBlobRootsCache().Get(root)
+	return ok
+}
+
+func (b *BlobHistoryDownloader) rememberVerifiedBlobRoot(root common.Hash) {
+	b.verifiedBlobRootsCache().Add(root, struct{}{})
+}
+
+func (b *BlobHistoryDownloader) forgetVerifiedBlobRoot(root common.Hash) {
+	b.verifiedBlobRootsCache().Remove(root)
 }
 
 func (b *BlobHistoryDownloader) waitForStoredBlobSidecars(ctx context.Context, block *cltypes.SignedBeaconBlock, blockRoot common.Hash) (uint32, bool, error) {

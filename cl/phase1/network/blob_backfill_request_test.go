@@ -175,6 +175,30 @@ func TestBlobBackfillRequestRetriesProgressingCandidateWithoutRefetch(t *testing
 	}
 }
 
+func TestBlobBackfillProgressWithPersistenceErrorBacksOff(t *testing.T) {
+	base := time.Unix(100, 0)
+	pacing := newBlobBackfillRequestPacing()
+	pacing.failed(base)
+	validationTime := base.Add(requestBlobRetryInterval)
+
+	pacing.recordValidation(validationTime, true, false, errors.New("temporary persistence failure"))
+
+	require.False(t, pacing.ready(validationTime.Add(requestBlobRetryInterval)))
+	require.True(t, pacing.ready(validationTime.Add(2*requestBlobRetryInterval)))
+}
+
+func TestBlobBackfillSuccessfulProgressResetsFailureBackoff(t *testing.T) {
+	base := time.Unix(100, 0)
+	pacing := newBlobBackfillRequestPacing()
+	pacing.failed(base)
+	validationTime := base.Add(requestBlobRetryInterval)
+
+	pacing.recordValidation(validationTime, true, false, nil)
+
+	require.False(t, pacing.ready(validationTime.Add(requestBlobRetryInterval-time.Nanosecond)))
+	require.True(t, pacing.ready(validationTime.Add(requestBlobRetryInterval)))
+}
+
 func TestBlobBackfillRequestPacingBacksOffEveryFailure(t *testing.T) {
 	now := time.Unix(100, 0)
 	pacing := newBlobBackfillRequestPacing()
