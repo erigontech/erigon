@@ -22,11 +22,12 @@ jobs:
     runs-on: ubuntu-latest
     # DOCS_DEPLOY_BRANCH is the single switch for which branch publishes, so a
     # merge here cannot flip the site and an older branch cannot clobber it.
-    if: github.ref_name == vars.DOCS_DEPLOY_BRANCH
+    # Accepted either as a bare branch name or as a full refs/heads/ ref.
+    if: github.ref_name == vars.DOCS_DEPLOY_BRANCH || github.ref == vars.DOCS_DEPLOY_BRANCH
     steps:
       # Full history: showLastUpdateTime and sitemap lastmod read git log per
       # file, and a shallow clone dates every page from the tip commit.
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           filter: blob:none
