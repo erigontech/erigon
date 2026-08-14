@@ -22,14 +22,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
 
 func buildReplyForTest(t *testing.T, lastNewBlockSeen, frozenBlocks, executionProgress uint64) *remoteproto.SyncingReply {
 	t.Helper()
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -93,7 +93,7 @@ func drainSyncStateEvents(ch chan *remoteproto.SyncingReply) []*remoteproto.Sync
 // point for every sync-state producer, so two producers observing the same
 // state must yield one notification.
 func TestPublishSyncStateDedupsAcrossPublishers(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -124,7 +124,7 @@ func TestPublishSyncStateDedupsAcrossPublishers(t *testing.T) {
 // published before the subscription is the seed, one published after arrives
 // on the channel — never both, never neither.
 func TestSubscribeSyncStateSeedsWithLastPublishedState(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -157,7 +157,7 @@ func TestSubscribeSyncStateSeedsWithLastPublishedState(t *testing.T) {
 // subscription: any publish is then ordered entirely before (impossible, none
 // happened) or entirely after it, and lands on the channel.
 func TestSubscribeSyncStateBeforeFirstPublishBuildsSeed(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()

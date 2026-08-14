@@ -1618,15 +1618,7 @@ func (sd *SharedDomains) getLatestValSize(domain kv.Domain, tx kv.TemporalTx, k 
 	if maxStep != kv.NoStepBound {
 		return 0, false, false, nil
 	}
-
-	type valSizeGetter interface {
-		GetLatestValSize(domain kv.Domain, k []byte, tx kv.Tx) (int, bool, error)
-	}
-	getter, ok := tx.AggTx().(valSizeGetter)
-	if !ok {
-		return 0, false, false, nil
-	}
-	size, found, err = getter.GetLatestValSize(domain, k, tx)
+	size, found, err = tx.GetLatestValSize(domain, k)
 	return size, found, true, err
 }
 
