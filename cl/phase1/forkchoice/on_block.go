@@ -90,6 +90,23 @@ func collectOnBlockLatencyToUnixTime(ethClock eth_clock.EthereumClock, slot, cur
 	monitor.ObserveBlockImportingLatency(initialSlotTime)
 }
 
+func hasCompleteBlobData(blobs [][]byte, proofs [][][]byte, expected int) bool {
+	if len(blobs) != expected || len(proofs) != expected {
+		return false
+	}
+	for i, blob := range blobs {
+		if len(blob) == 0 || len(proofs[i]) == 0 {
+			return false
+		}
+		for _, proof := range proofs[i] {
+			if len(proof) == 0 {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
 	f.mu.Lock()
 	unlocked := false
@@ -182,7 +199,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			if err != nil {
 				log.Warn("OnBlock: GetBlobs failed", "blockRoot", common.Hash(blockRoot), "err", err)
 			}
-			elHasBlobs = err == nil && len(blobsWithProof) == len(versionedHashes) && len(proofs) == len(versionedHashes)
+			elHasBlobs = err == nil && hasCompleteBlobData(blobsWithProof, proofs, len(versionedHashes))
 			log.Trace("OnBlock: EL blob data availability", "blockRoot", common.Hash(blockRoot), "elHasBlobs", elHasBlobs)
 		}
 

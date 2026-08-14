@@ -107,8 +107,8 @@ func (forkChoiceSpectestEngine) GetAssembledBlock(context.Context, []byte, clpar
 	return nil, nil, nil, nil, nil
 }
 
-func (forkChoiceSpectestEngine) GetBlobs(context.Context, []common.Hash, clparams.StateVersion) ([][]byte, [][][]byte, error) {
-	return nil, nil, nil
+func (forkChoiceSpectestEngine) GetBlobs(_ context.Context, versionedHashes []common.Hash, _ clparams.StateVersion) ([][]byte, [][][]byte, error) {
+	return make([][]byte, len(versionedHashes)), make([][][]byte, len(versionedHashes)), nil
 }
 
 func (forkChoiceSpectestEngine) GetClientVersionV1(context.Context, *engine_types.ClientVersionV1) ([]engine_types.ClientVersionV1, error) {
