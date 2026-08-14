@@ -303,7 +303,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 	anchorState, err := spectest.ReadBeaconState(root, c.Version(), "anchor_state.ssz_snappy")
 	require.NoError(t, err)
 
-	genesisState, err := initial_state.GetGenesisState(chainspec.MainnetChainID)
+	genesisState, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
 	require.NoError(t, err)
 
 	emitters := beaconevents.NewEventEmitter()

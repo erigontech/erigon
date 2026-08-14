@@ -1497,7 +1497,7 @@ func TestVmtouchMmap(t *testing.T) {
 
 	vmtouch := func(label string) {
 		fmt.Printf("\n=== %s ===\n", label)
-		cmd := exec.Command("vmtouch", "-v", fname)
+		cmd := exec.Command("vmtouch", "-v", fname) //nolint:noctx
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		cmd.Run()

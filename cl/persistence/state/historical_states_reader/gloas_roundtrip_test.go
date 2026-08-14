@@ -476,7 +476,7 @@ func TestReadHistoricalState_GloasFieldsReconstruction(t *testing.T) {
 	slot := cfg.SlotsPerEpoch // = 32
 
 	// ---- Genesis state (mainnet has real validators) ----
-	genesisState, err := initial_state.GetGenesisState(chainspec.MainnetChainID)
+	genesisState, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
 	require.NoError(t, err)
 	numValidators := uint64(genesisState.ValidatorLength())
 
