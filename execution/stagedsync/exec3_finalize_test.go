@@ -564,7 +564,7 @@ func (s *testFinalizeScenario) runFinalizeTx(t *testing.T, priorCoinbaseBalance 
 
 	task := result.Task.(*taskVersion)
 
-	writes, err := result.calcFees(task, vm, reader, s.rules, nil)
+	writes, _, err := result.calcFees(task, vm, reader, s.rules, nil)
 	require.NoError(t, err)
 	return writes
 }
@@ -825,7 +825,7 @@ func TestFinalizeTxSimple_SenderIsCoinbase_AccumulatedAcrossTxs(t *testing.T) {
 
 		vm.FlushVersionedWrites(result.TxOut, true, "")
 
-		writes, err := result.calcFees(task, vm, reader, s.rules, nil)
+		writes, _, err := result.calcFees(task, vm, reader, s.rules, nil)
 		require.NoError(t, err, "tx %d: calcFees", txIdx)
 
 		// Flush finalize writes so the next tx sees them via versionMap.
@@ -890,7 +890,7 @@ func TestFinalizeTxSimple_SenderIsCoinbase_ReExecutedIncarnation(t *testing.T) {
 	// Now flush the re-executed TxOut at incarnation 1.
 	vm.FlushVersionedWrites(result.TxOut, true, "")
 
-	writes, err := result.calcFees(task, vm, reader, s.rules, nil)
+	writes, _, err := result.calcFees(task, vm, reader, s.rules, nil)
 	require.NoError(t, err)
 
 	coinbaseWrite := findBalance(writes, s.coinbase)
@@ -979,7 +979,7 @@ func TestFinalizeTxSimple_AccumulatedFees(t *testing.T) {
 		// Flush TxOut to versionMap (simulates line 1928).
 		vm.FlushVersionedWrites(result.TxOut, true, "")
 
-		writes, err := result.calcFees(task, vm, reader, s.rules, nil)
+		writes, _, err := result.calcFees(task, vm, reader, s.rules, nil)
 		require.NoError(t, err)
 
 		// Flush finalize writes to versionMap for next TX.
@@ -1773,54 +1773,66 @@ func TestCalcFees_EmitsAddressPathForCoinbase(t *testing.T) {
 		"AddressPath sibling must share version with the BalancePath write")
 }
 
-// feeCreditRound mirrors one apply-loop validation round for a single tx:
-// calcFees derives the credit, and a non-empty result is folded into the
-// recorded write set the way nextResult does it.
+// feeCreditRound drives one apply-loop validation round for a single tx through
+// a real blockExecutor, so the credit, the recorded set and the version map go
+// through the same bookkeeping the apply loop uses.
 type feeCreditRound struct {
-	result   *execResult
-	task     *taskVersion
-	vm       *state.VersionMap
-	reader   *mapStateReader
-	rules    *chain.Rules
-	recorded *state.WriteSet
-	// credited tracks the recorded set once a fee merge produced it, which is
-	// blockExecutor.feeMergeTemp's job in the apply loop.
-	credited *state.WriteSet
+	be     *blockExecutor
+	result *execResult
+	task   *taskVersion
+	vm     *state.VersionMap
+	reader *mapStateReader
+	rules  *chain.Rules
 }
 
 func newFeeCreditRound(t testing.TB, s *testFinalizeScenario) *feeCreditRound {
 	t.Helper()
 
 	result := s.buildExecResult()
+	be := feeMergeTestExecutor(t)
+	be.versionMap.FlushVersionedWrites(result.TxOut, true, "")
 
-	vm := state.NewVersionMap(nil)
-	vm.FlushVersionedWrites(result.TxOut, true, "")
-
-	return &feeCreditRound{
-		result:   result,
-		task:     result.Task.(*taskVersion),
-		vm:       vm,
-		reader:   s.makeReader(),
-		rules:    s.rules,
-		recorded: result.TxOut,
+	r := &feeCreditRound{
+		be:     be,
+		result: result,
+		task:   result.Task.(*taskVersion),
+		vm:     be.versionMap,
+		reader: s.makeReader(),
+		rules:  s.rules,
 	}
+	be.recordWorkerWrites(r.task.Version(), result.TxOut)
+	return r
 }
 
-// run performs one round and returns the credit calcFees produced, nil when it
-// found the recorded set already carries it. The returned set is a copy: the
-// merge folds the recorded set into the credit in place, so the credit itself is
-// only observable before it.
+// recorded is the tx's write set as the apply loop has it, and credited is that
+// set once a fee merge produced it.
+func (r *feeCreditRound) recorded() *state.WriteSet {
+	return r.be.blockIO.WriteSet(r.task.Version().TxIndex)
+}
+
+func (r *feeCreditRound) credited() *state.WriteSet {
+	return r.be.creditedWrites(r.task.Version(), r.recorded())
+}
+
+// run performs one round and returns the credit calcFees produced, nil when the
+// round emits none — the recorded set already carries it, or there is no
+// adjustment left to make. The returned set is a copy: the merge folds the
+// recorded set into the credit in place, so the credit itself is only observable
+// before it.
 func (r *feeCreditRound) run(t testing.TB) *state.WriteSet {
 	t.Helper()
 
-	tip, err := r.result.calcFees(r.task, r.vm, r.reader, r.rules, r.credited)
+	version := r.task.Version()
+	recorded := r.recorded()
+	tip, outcome, err := r.result.calcFees(r.task, r.vm, r.reader, r.rules, r.credited())
 	require.NoError(t, err)
-	if tip.IsEmpty() {
-		return nil
+
+	var credit *state.WriteSet
+	if outcome == feeCreditNew {
+		credit = copyWrites(tip)
 	}
-	credit := copyWrites(tip)
-	r.recorded = r.recorded.MergeInto(tip)
-	r.credited = r.recorded
+	r.be.recordFeeMerge(version, recorded, tip, outcome)
+	r.vm.FlushVersionedWrites(r.recorded(), true, "")
 	return credit
 }
 
@@ -1870,9 +1882,9 @@ func TestCalcFees_ReCreditsWhenAddressPathMissing(t *testing.T) {
 	require.True(t, ok)
 	balanceOnly.SetBalance(s.coinbase, bw)
 
-	tip, err := r.result.calcFees(r.task, r.vm, r.reader, r.rules, balanceOnly)
+	tip, outcome, err := r.result.calcFees(r.task, r.vm, r.reader, r.rules, balanceOnly)
 	require.NoError(t, err)
-	require.False(t, tip.IsEmpty(), "a recorded balance without its AddressPath sibling must be re-credited")
+	require.Equal(t, feeCreditNew, outcome, "a recorded balance without its AddressPath sibling must be re-credited")
 	require.NotNil(t, findAddress(tip, s.coinbase))
 }
 
@@ -2087,34 +2099,44 @@ func TestFeeEntryRecordedInRejectsMutations(t *testing.T) {
 var feeCreditSink *state.WriteSet
 
 func BenchmarkCalcFees(b *testing.B) {
-	for _, bc := range []struct {
-		name     string
-		recredit bool
+	// The London row adds a burnt address: a second versioned read and a second
+	// recordedIn on top of the coinbase half.
+	for _, sc := range []struct {
+		name  string
+		build func() *testFinalizeScenario
 	}{
-		{"first_credit", false},
-		{"redundant_recredit", true},
+		{"pre_london", simpleTransferScenario},
+		{"london", londonTransferScenario},
 	} {
-		b.Run(bc.name, func(b *testing.B) {
-			r := newFeeCreditRound(b, simpleTransferScenario())
-			var credited *state.WriteSet
-			if bc.recredit {
-				require.NotNil(b, r.run(b))
-				credited = r.credited
-			}
-
-			b.ReportAllocs()
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				tip, err := r.result.calcFees(r.task, r.vm, r.reader, r.rules, credited)
-				if err != nil {
-					b.Fatal(err)
+		for _, bc := range []struct {
+			name     string
+			recredit bool
+		}{
+			{"first_credit", false},
+			{"redundant_recredit", true},
+		} {
+			b.Run(sc.name+"/"+bc.name, func(b *testing.B) {
+				r := newFeeCreditRound(b, sc.build())
+				var credited *state.WriteSet
+				if bc.recredit {
+					require.NotNil(b, r.run(b))
+					credited = r.credited()
 				}
-				feeCreditSink = tip
-				// The apply loop recycles the emitted set's maps through
-				// recordFeeMerge; without this the pools stay empty and the
-				// emit arm is measured against a permanently cold pool.
-				tip.ReleaseMaps()
-			}
-		})
+
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					tip, _, err := r.result.calcFees(r.task, r.vm, r.reader, r.rules, credited)
+					if err != nil {
+						b.Fatal(err)
+					}
+					feeCreditSink = tip
+					// The apply loop recycles the emitted set's maps through
+					// recordFeeMerge; without this the pools stay empty and the
+					// emit arm is measured against a permanently cold pool.
+					tip.ReleaseMaps()
+				}
+			})
+		}
 	}
 }
