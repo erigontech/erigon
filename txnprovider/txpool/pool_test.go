@@ -111,7 +111,12 @@ func newTestSetCodeTxnSlot(nonce uint64, senderID uint64, tip, feeCap uint64, ga
 	}
 }
 
-func newTestPoolWithFundedSender(t *testing.T) (context.Context, *TxPool, kv.RwDB, kv.TemporalRwDB, common.Address) {
+func testDelegationCodeHash() accounts.CodeHash {
+	delegation := types.AddressToDelegation(accounts.InternAddress(common.Address{2}))
+	return accounts.InternCodeHash(crypto.Keccak256Hash(delegation))
+}
+
+func newTestPoolWithFundedSender(t *testing.T, codeHash accounts.CodeHash) (context.Context, *TxPool, kv.RwDB, kv.TemporalRwDB, common.Address) {
 	t.Helper()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -140,7 +145,7 @@ func newTestPoolWithFundedSender(t *testing.T) (context.Context, *TxPool, kv.RwD
 	sender := common.Address{1}
 	account := accounts3.Account{
 		Balance:  *uint256.NewInt(common.Ether),
-		CodeHash: accounts.EmptyCodeHash,
+		CodeHash: codeHash,
 	}
 	change := &remoteproto.StateChangeBatch{
 		PendingBlockBaseFee: 1,
@@ -160,7 +165,7 @@ func newTestPoolWithFundedSender(t *testing.T) (context.Context, *TxPool, kv.RwD
 }
 
 func TestAddLocalTxnsRejectsTipAboveFeeCap(t *testing.T) {
-	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t)
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
 
 	tests := []struct {
 		name string
@@ -197,8 +202,74 @@ func TestAddLocalTxnsRejectsTipAboveFeeCap(t *testing.T) {
 	}
 }
 
+func TestAddLocalTxnsLimitsDelegatedSender(t *testing.T) {
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, testDelegationCodeHash())
+
+	first := newTestTxnSlot(0, 0, 1, 2, 21_000)
+	first.IDHash[0] = 1
+	var txns TxnSlots
+	txns.Append(first, sender[:], true)
+
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	second := newTestTxnSlot(1, 0, 1, 2, 21_000)
+	second.IDHash[0] = 2
+	txns = TxnSlots{}
+	txns.Append(second, sender[:], true)
+
+	reasons, err = pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.DelegatedTxnLimit}, reasons)
+
+	pending, baseFee, queued := pool.CountContent()
+	require.Equal(t, 1, pending+baseFee+queued)
+}
+
+func TestAddLocalTxnsRejectsGappedDelegatedSender(t *testing.T) {
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, testDelegationCodeHash())
+
+	txn := newTestTxnSlot(1, 0, 1, 2, 21_000)
+	txn.IDHash[0] = 1
+	var txns TxnSlots
+	txns.Append(txn, sender[:], true)
+
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.DelegatedNonceGap}, reasons)
+
+	pending, baseFee, queued := pool.CountContent()
+	require.Zero(t, pending+baseFee+queued)
+}
+
+func TestAddLocalTxnsAllowsDelegatedSenderReplacement(t *testing.T) {
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, testDelegationCodeHash())
+
+	first := newTestTxnSlot(0, 0, 1, 2, 21_000)
+	first.IDHash[0] = 1
+	var txns TxnSlots
+	txns.Append(first, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	replacement := newTestTxnSlot(0, 0, 2, 3, 21_000)
+	replacement.IDHash[0] = 2
+	txns = TxnSlots{}
+	txns.Append(replacement, sender[:], true)
+	reasons, err = pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	pending, baseFee, queued := pool.CountContent()
+	require.Equal(t, 1, pending+baseFee+queued)
+	require.NotContains(t, pool.byHash, string(first.IDHash[:]))
+	require.Contains(t, pool.byHash, string(replacement.IDHash[:]))
+}
+
 func TestFromDBSkipsInvalidTransactions(t *testing.T) {
-	ctx, pool, poolDB, coreDB, sender := newTestPoolWithFundedSender(t)
+	ctx, pool, poolDB, coreDB, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
 
 	invalidTxn := newTestTxnSlot(0, 0, 2, 1, 21_000)
 	validTxn := newTestTxnSlot(0, 0, 1, 2, 21_000)
