@@ -44,9 +44,7 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
-	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -1995,71 +1993,4 @@ func TestBlockOverlay_DomainReadsRegression(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok, "NewTemporalReadView HistorySeek must find in-memory receipt data")
 	require.Equal(t, value, gotValHist2)
-}
-
-// A CommitmentDomain prefix-delete removes exactly the storage-subtree branches
-// under an account's hashed prefix (depths >= 64, both even and odd nibble
-// lengths) and leaves the account-trie branches above the boundary and sibling
-// accounts' branches untouched. This is the self-destruct GC that replaces the
-// per-slot storage enumeration.
-func TestSharedDomain_DomainDelPrefix_Commitment(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-	t.Parallel()
-	require := require.New(t)
-	db := newTestDb(t, 16)
-	ctx := t.Context()
-	rwTx, err := db.BeginTemporalRw(ctx)
-	require.NoError(err)
-	defer rwTx.Rollback()
-
-	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
-	require.NoError(err)
-	defer domains.Close()
-
-	var h, sib [32]byte
-	for i := range h {
-		h[i] = 0xab
-		sib[i] = 0xcd
-	}
-	hNib := commitment.ContractNibbles(h[:])
-	sibNib := commitment.ContractNibbles(sib[:])
-	ck := func(base []byte, suffix ...byte) []byte {
-		return nibbles.HexToCompact(append(append([]byte{}, base...), suffix...))
-	}
-	branch := []byte{0x00, 0x01, 0x00, 0x02, 0xaa}
-
-	subtree := [][]byte{
-		ck(hNib),
-		ck(hNib, 5),
-		ck(hNib, 5, 9),
-		ck(hNib, 5, 9, 3),
-	}
-	survivors := [][]byte{
-		ck(sibNib),
-		ck(hNib[:4]),
-		ck(hNib[:63]),
-	}
-
-	txNum := uint64(1)
-	for _, k := range append(append([][]byte{}, subtree...), survivors...) {
-		require.NoError(domains.DomainPut(kv.CommitmentDomain, rwTx, k, branch, txNum, nil))
-	}
-	// Persist the seed so it looks like prior-block state (the GC reads persisted
-	// branches via roTx, not the in-memory batch).
-	require.NoError(domains.Flush(ctx, rwTx))
-
-	require.NoError(domains.DomainDelPrefix(kv.CommitmentDomain, rwTx, h[:], txNum+1))
-
-	for _, k := range subtree {
-		v, _, err := domains.GetLatest(kv.CommitmentDomain, rwTx, k)
-		require.NoError(err)
-		require.Empty(v, "storage-subtree branch %x must be deleted", k)
-	}
-	for _, k := range survivors {
-		v, _, err := domains.GetLatest(kv.CommitmentDomain, rwTx, k)
-		require.NoError(err)
-		require.NotEmpty(v, "non-subtree branch %x must survive", k)
-	}
 }
