@@ -241,6 +241,9 @@ jobs:
         working-directory: outgoing/docs/site
         env:
           ARCHIVE_LABEL: ${{ steps.plan.outputs.archive_label }}
+          # docs:version loads docusaurus.config.ts, whose release lookup now
+          # fails closed; without a token it runs on the anonymous rate limit.
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           npm ci

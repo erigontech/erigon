@@ -12,12 +12,9 @@ run-name: "Docs Version Bump — archive ${{ inputs.archive_version }}, publish 
 # artifacts, verifies the build, and opens a PR.
 #
 # NOTE on {ERIGON_VERSION} injection: the remark plugin
-# (src/remark/version-replace.js) currently special-cases specific archived
-# versions by path (e.g. version-v3.3), rather than resolving generically from
-# versions.json. Until that plugin is made generic, adding a new archived
-# version whose pages contain {ERIGON_VERSION} placeholders may require a
-# matching case in version-replace.js (and/or docusaurus.config.ts) by hand —
-# review the diff this workflow produces before merging.
+# (src/remark/version-replace.js) resolves every archived version generically
+# from versions.json, keyed off the version-vX.Y path segment, so a new archive
+# needs no hand-written case there or in docusaurus.config.ts.
 #
 # NOTE: this does NOT move the Pages deploy trigger. If the docs deploy still
 # lives on a per-release branch (docs-deploy.yml), update that branch separately.
@@ -87,6 +84,9 @@ jobs:
       - name: Snapshot current docs as ${{ inputs.archive_version }}
         env:
           ARCHIVE_VERSION: ${{ inputs.archive_version }}
+          # docs:version loads docusaurus.config.ts, whose release lookup now
+          # fails closed; without a token it runs on the anonymous rate limit.
+          GITHUB_TOKEN: ${{ github.token }}
         run: npx docusaurus docs:version "$ARCHIVE_VERSION"
 
       - name: Bump current version label to ${{ inputs.new_label }}
