@@ -344,13 +344,19 @@ jobs:
           path: /tmp/docker-cache
           key: docker-cl-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}-${{ env.KURTOSIS_CURL_JQ_IMAGE }}-${{ env.KURTOSIS_TRAEFIK_IMAGE }}-${{ env.KURTOSIS_ALPINE_IMAGE }}-${{ env.GENESIS_GENERATOR_IMAGE }}-${{ env.ETH2_VAL_TOOLS_IMAGE }}
       - name: Install Kurtosis CLI and start engine
-        # The engine otherwise bootstraps inside `kurtosis run`, mid-action,
-        # where a registry blip fails the whole test step. Start it here from
-        # the pre-loaded images, with cheap retries.
+        # The action cannot retry setup after it starts, so prepare the CLI
+        # and engine here with bounded backoff.
         run: |
           echo "deb [trusted=yes] https://apt.fury.io/kurtosis-tech/ /" | sudo tee /etc/apt/sources.list.d/kurtosis.list
-          sudo apt-get update
-          sudo apt-get install -y kurtosis-cli=${KURTOSIS_VERSION}
+          for n in 1 2 3; do
+            if sudo apt-get update \
+              && sudo apt-get install -y "kurtosis-cli=${KURTOSIS_VERSION}"; then
+              break
+            fi
+            echo "Kurtosis CLI install failed (attempt $n of 3)"
+            if [ "$n" -eq 3 ]; then exit 1; fi
+            sleep $((10 * n))
+          done
           kurtosis analytics disable
           for n in 1 2 3; do
             if kurtosis engine start; then exit 0; fi
