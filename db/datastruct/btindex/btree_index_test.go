@@ -863,38 +863,3 @@ func Test_BtreeIndex_GetValSize(t *testing.T) {
 	require.False(t, found)
 	require.Zero(t, size)
 }
-
-func Benchmark_BtreeIndex_GetVsGetValSize(b *testing.B) {
-	tmp := b.TempDir()
-	logger := log.New()
-	compressFlags := seg.CompressVals
-	dataPath := generateKV(b, tmp, 20, 64*1024, 512, logger, compressFlags)
-	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
-	buildBtreeIndex(b, dataPath, indexPath, compressFlags, 1, logger, true)
-	kvFile, index, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, compressFlags, false)
-	require.NoError(b, err)
-	defer index.Close()
-	defer kvFile.Close()
-	keys, err := pivotKeysFromKV(dataPath)
-	require.NoError(b, err)
-	getter := seg.NewReader(kvFile.MakeGetter(), compressFlags)
-
-	b.Run("Get", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; b.Loop(); i++ {
-			_, _, _, _, err := index.Get(keys[i%len(keys)], getter)
-			if err != nil {
-				b.Fatal(err)
-			}
-		}
-	})
-	b.Run("GetValSize", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; b.Loop(); i++ {
-			_, _, err := index.GetValSize(keys[i%len(keys)], getter)
-			if err != nil {
-				b.Fatal(err)
-			}
-		}
-	})
-}

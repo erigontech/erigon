@@ -260,7 +260,21 @@ func (oracle *Oracle) resolveBlockRange(ctx context.Context, lastBlock rpc.Block
 	}
 	if lastBlock == rpc.LatestBlockNumber {
 		lastBlock = headBlock
-	} else if pendingBlock == nil && lastBlock > headBlock {
+	} else if lastBlock < 0 {
+		// we have known reserved values for special block markers that can be negative
+		if lastBlock < rpc.LatestExecutedBlockNumber {
+			return nil, nil, 0, 0, fmt.Errorf("invalid block number %d", lastBlock)
+		}
+		lastBlockHeader, err := oracle.backend.HeaderByNumber(ctx, lastBlock)
+		if err != nil {
+			return nil, nil, 0, 0, err
+		}
+		if lastBlockHeader == nil {
+			return nil, nil, 0, 0, nil
+		}
+		lastBlock = rpc.BlockNumber(lastBlockHeader.Number.Uint64())
+	}
+	if pendingBlock == nil && lastBlock > headBlock {
 		return nil, nil, 0, 0, fmt.Errorf("%w: requested %d, head %d", ErrRequestBeyondHead, lastBlock, headBlock)
 	}
 	if maxHistory != 0 {

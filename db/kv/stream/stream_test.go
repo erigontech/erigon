@@ -25,7 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
 )
@@ -80,7 +80,7 @@ func TestUnion(t *testing.T) {
 	})
 }
 func TestUnionPairs(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	ctx := t.Context()
 	t.Run("simple", func(t *testing.T) {
 		require := require.New(t)
@@ -150,7 +150,7 @@ func TestUnionPairs(t *testing.T) {
 }
 
 func TestMultisetKV(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	ctx := t.Context()
 	t.Run("preserves duplicates", func(t *testing.T) {
 		require := require.New(t)
