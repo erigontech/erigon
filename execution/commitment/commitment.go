@@ -267,7 +267,10 @@ func getDeferredUpdate(prefix []byte, raw, prev []byte) *DeferredBranchUpdate {
 
 	upd.prefix = reuseBytes(upd.prefix, prefix)
 	upd.raw = reuseBytes(upd.raw, raw)
-	upd.prev = reuseBytes(upd.prev, prev)
+	// prev stays cloned: it is the one argument that is legitimately nil or empty, and
+	// callers read a nil prev as "look up the previous value". Deriving that shape from a
+	// recycled buffer's capacity rather than from the input is not worth one allocation.
+	upd.prev = bytes.Clone(prev)
 	upd.encoded = nil
 
 	return upd
@@ -298,6 +301,7 @@ func capLen(b []byte) []byte {
 // putDeferredUpdate returns a DeferredBranchUpdate to the global pool.
 func putDeferredUpdate(upd *DeferredBranchUpdate) {
 	if upd != nil {
+		upd.prev = nil
 		upd.encoded = nil
 		deferredUpdatePool.Put(upd)
 	}

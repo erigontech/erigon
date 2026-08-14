@@ -1082,8 +1082,8 @@ func TestReuseBytes(t *testing.T) {
 	require.Equal(t, []byte{1, 2, 3, 4}, reuseBytes(make([]byte, 0, 1), []byte{1, 2, 3, 4}))
 }
 
-// A recycled buffer must not turn a nil prev into an empty one: callers read nil as
-// "look up the previous value" and empty as "known absent".
+// prev is cloned rather than recycled precisely so its nil-ness follows the input; this
+// fails if it is ever switched to a pooled buffer.
 func TestGetDeferredUpdate_WarmPoolPreservesNilPrev(t *testing.T) {
 	putDeferredUpdate(getDeferredUpdate([]byte{1}, []byte{2, 3}, []byte{4, 5, 6}))
 
@@ -1100,7 +1100,7 @@ func TestGetDeferredUpdate_WritesIntoPooledBacking(t *testing.T) {
 		raw:    make([]byte, 0, 32),
 		prev:   make([]byte, 0, 32),
 	}
-	prefixArr, rawArr, prevArr := &seed.prefix[:1][0], &seed.raw[:1][0], &seed.prev[:1][0]
+	prefixArr, rawArr := &seed.prefix[:1][0], &seed.raw[:1][0]
 
 	saved := deferredUpdatePool
 	deferredUpdatePool = &sync.Pool{New: func() any { return seed }}
@@ -1110,7 +1110,6 @@ func TestGetDeferredUpdate_WritesIntoPooledBacking(t *testing.T) {
 	require.Same(t, seed, upd)
 	require.Same(t, prefixArr, &upd.prefix[0], "prefix must be written into the pooled array")
 	require.Same(t, rawArr, &upd.raw[0], "raw must be written into the pooled array")
-	require.Same(t, prevArr, &upd.prev[0], "prev must be written into the pooled array")
 }
 
 // A callback must not see capacity left over from whichever update used the object before.
