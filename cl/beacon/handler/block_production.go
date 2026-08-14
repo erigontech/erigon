@@ -230,20 +230,27 @@ func computeBlockBuilderWindow(now, slotStart time.Time, cfg *clparams.BeaconCha
 // payloadAttributes builds the attributes every fork sends. Withdrawals and the parent beacon block
 // root go out regardless of the consensus fork because the execution layer decides what to do with
 // them from the payload timestamp.
+// payloadAttributes builds the attributes for a version of the forkchoice call. The wire format is
+// versioned, so a field the chosen version does not carry has to be left out rather than sent and
+// ignored: V1 and V2 reject a parent beacon block root outright.
 func payloadAttributes(
+	version clparams.StateVersion,
 	timestamp hexutil.Uint64,
 	prevRandao common.Hash,
 	feeRecipient common.Address,
 	withdrawals []*types.Withdrawal,
 	parentRoot *common.Hash,
 ) *engine_types.PayloadAttributes {
-	return &engine_types.PayloadAttributes{
+	attrs := &engine_types.PayloadAttributes{
 		Timestamp:             timestamp,
 		PrevRandao:            prevRandao,
 		SuggestedFeeRecipient: feeRecipient,
 		Withdrawals:           withdrawals,
-		ParentBeaconBlockRoot: parentRoot,
 	}
+	if version.AfterOrEqual(clparams.DenebVersion) {
+		attrs.ParentBeaconBlockRoot = parentRoot
+	}
+	return attrs
 }
 
 // expectedWithdrawals resolves the withdrawals for the payload being built. Under Gloas the source
@@ -1032,6 +1039,7 @@ func (a *ApiHandler) produceBeaconBody(
 			return
 		}
 		attrs := payloadAttributes(
+			stateVersion,
 			hexutil.Uint64(state.ComputeTimestampAtSlot(baseState, targetSlot)),
 			random,
 			feeRecipient,

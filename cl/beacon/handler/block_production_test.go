@@ -775,3 +775,31 @@ func TestExpectedWithdrawalsReadsTheRightSourcePerFork(t *testing.T) {
 		{Index: 7, Validator: 8, Address: common.Address{0xaa}, Amount: 9},
 	}, withdrawals)
 }
+
+func TestPayloadAttributesOmitTheParentRootBelowDeneb(t *testing.T) {
+	root := common.Hash{0xaa}
+	withdrawals := []*types.Withdrawal{{Index: 1}}
+
+	for _, tc := range []struct {
+		version        clparams.StateVersion
+		wantParentRoot bool
+	}{
+		{clparams.BellatrixVersion, false},
+		{clparams.CapellaVersion, false},
+		{clparams.DenebVersion, true},
+		{clparams.FuluVersion, true},
+		{clparams.GloasVersion, true},
+	} {
+		t.Run(tc.version.String(), func(t *testing.T) {
+			attrs := payloadAttributes(tc.version, 1, common.Hash{0xbb}, common.Address{0xcc}, withdrawals, &root)
+
+			// The forkchoice call is versioned: V1 and V2 reject a parent beacon block root, so
+			// sending one below Deneb fails the request rather than being ignored.
+			require.Equal(t, tc.wantParentRoot, attrs.ParentBeaconBlockRoot != nil)
+
+			require.Equal(t, withdrawals, attrs.Withdrawals)
+			require.Nil(t, attrs.SlotNumber, "only a Gloas proposal knows its slot number")
+			require.Nil(t, attrs.TargetGasLimit)
+		})
+	}
+}
