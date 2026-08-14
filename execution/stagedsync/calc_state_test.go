@@ -345,11 +345,13 @@ func TestApplyWrites_IncarnationPath(t *testing.T) {
 		"Deleted+isAllZero routes through the EIP-161 DeleteUpdate branch (matches serial's DomainDel)")
 }
 
-// TestApplyWrites_BalancePathClearsDeleted verifies that a non-empty
-// account write after a SelfDestructPath resets the Deleted flag — the
-// same way TouchAccount drops the DeleteUpdate flag in serial when a
-// non-empty value arrives after a delete.
-func TestApplyWrites_BalancePathClearsDeleted(t *testing.T) {
+// TestApplyWrites_SelfDestructBalanceNotRevived verifies that a post-SD balance
+// write does NOT revive a finally-self-destructed account pre-EIP-8246: the
+// balance is burned and the leaf is deleted. This matches Normalize (which drops
+// the BalancePath for SD'd addresses pre-8246) — the raw-view calculator must
+// agree. A non-zero balance received after a SELFDESTRUCT that is not followed by
+// a same-tx recreate (SelfDestructPath stays true) is burned at end of tx.
+func TestApplyWrites_SelfDestructBalanceNotRevived(t *testing.T) {
 	cs := newTestCalcState()
 	addr := accounts.InternAddress([20]byte{0xd1})
 
@@ -361,7 +363,25 @@ func TestApplyWrites_BalancePathClearsDeleted(t *testing.T) {
 
 	acc, ok := cs.accounts[addr]
 	require.True(t, ok)
-	assert.False(t, acc.Deleted, "subsequent BalancePath write must clear Deleted")
+	assert.True(t, acc.Deleted, "finally-SD'd account is not revived by a post-SD balance pre-8246")
+	assert.True(t, acc.Balance.IsZero(), "post-SD balance is burned pre-8246")
+}
+
+// TestApplyWrites_SelfDestructBalanceRetained_EIP8246 verifies the EIP-8246
+// counterpart: a non-zero post-SD balance survives as a balance-only account.
+func TestApplyWrites_SelfDestructBalanceRetained_EIP8246(t *testing.T) {
+	cs := newTestCalcState()
+	addr := accounts.InternAddress([20]byte{0xd1})
+
+	writes := newWS().
+		selfDestruct(addr, state.Version{}, true).
+		bal(addr, state.Version{}, *uint256.NewInt(42)).
+		build()
+	cs.ApplyWrites(writes, true /*eip8246*/)
+
+	acc, ok := cs.accounts[addr]
+	require.True(t, ok)
+	assert.False(t, acc.Deleted, "EIP-8246 keeps a non-zero post-SD balance-only account")
 	assert.Equal(t, uint64(42), acc.Balance.Uint64())
 }
 

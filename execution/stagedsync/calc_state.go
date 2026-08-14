@@ -171,7 +171,15 @@ func (cs *calcState) ApplyWrites(writes state.WriteSetView, eip8246 bool) {
 		}
 	}
 	clearsDeleted := func(addr accounts.Address, nonZero bool) bool {
-		return nonZero || !sdThisCall[addr]
+		if !sdThisCall[addr] {
+			return true
+		}
+		// A finally-self-destructed account (SD=true this tx) is not revived by a
+		// post-SD balance write: pre-EIP-8246 that balance is burned and the leaf
+		// is deleted; under EIP-8246 a non-zero balance survives as a balance-only
+		// account (a zero balance still deletes). Matches Normalize, which drops
+		// the BalancePath for SD'd accounts pre-8246 and keeps it under 8246.
+		return eip8246 && nonZero
 	}
 	for addr, vw := range writes.Balances() {
 		acc := cs.ensureAccount(addr)
