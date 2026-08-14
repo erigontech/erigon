@@ -1061,17 +1061,18 @@ func TestInitializeTrieAndUpdates_HexVariantUnchanged(t *testing.T) {
 	require.Nil(t, upd.parallel)
 }
 
-// Pins the optimization itself, not just its safety: the correctness test above stays
-// green if the pooled buffers go back to being cloned per Get.
-func TestGetDeferredUpdate_WarmPoolDoesNotAllocate(t *testing.T) {
-	prefix, raw, prev := []byte{1, 2, 3}, []byte{4, 5, 6, 7, 8}, []byte{9, 10}
+// reuseBytes is what makes the pooled buffers reusable; sync.Pool itself guarantees
+// nothing, so the reuse is pinned here rather than through a pool round-trip.
+func TestReuseBytes(t *testing.T) {
+	dst := make([]byte, 0, 8)
+	got := reuseBytes(dst, []byte{1, 2, 3})
+	require.Equal(t, []byte{1, 2, 3}, got)
+	require.Same(t, &dst[:1][0], &got[0], "must write into dst's backing array")
 
-	putDeferredUpdate(getDeferredUpdate(prefix, raw, prev))
+	require.Nil(t, reuseBytes(dst, nil), "nil src must yield nil, as bytes.Clone does")
+	require.Equal(t, []byte{}, reuseBytes(dst, []byte{}), "empty src must stay non-nil empty")
 
-	allocs := testing.AllocsPerRun(100, func() {
-		putDeferredUpdate(getDeferredUpdate(prefix, raw, prev))
-	})
-	require.Zero(t, allocs, "get/put cycle must not allocate once the pool is warm")
+	require.Equal(t, []byte{1, 2, 3, 4}, reuseBytes(make([]byte, 0, 1), []byte{1, 2, 3, 4}))
 }
 
 // A recycled buffer must not turn a nil prev into an empty one: callers read nil as
