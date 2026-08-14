@@ -139,6 +139,7 @@ func defaultTorrentClientConfig() *torrent.ClientConfig {
 
 	// enable dht. TODO: We want DHT.
 	torrentConfig.NoDHT = true
+	torrentConfig.DisableUTP = true
 
 	torrentConfig.Seed = true
 	torrentConfig.UpnpID += " leecher"
