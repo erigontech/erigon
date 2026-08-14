@@ -16,7 +16,8 @@ import (
 var cmtTiming = os.Getenv("ERIGON_CMT_TIMING") == "1"
 
 // deepStorageThreshold is the touched-slot count above which an account's storage subtree folds concurrently instead of streaming through its worker.
-const deepStorageThreshold = 1_000
+// Set below the common hot-contract straggler size (~150 touched slots) so those subtrees fold in parallel rather than serializing through one nibble worker.
+const deepStorageThreshold = 128
 
 // unfoldRootWall unfolds base at the root until row 0 forms the top-nibble mount wall,
 // consuming at most one nibble per step: a restored root extension sharing the probe's
@@ -69,10 +70,26 @@ func (hph *HexPatriciaHashed) mountTo(root *HexPatriciaHashed, nibble int) {
 	hph.mountedNib = nibble
 	hph.mounted = true
 	hph.mountWall = root.currentKeyLen + 1
-	for row := 0; row <= hph.activeRows; row++ {
-		for nib := range len(hph.grid[row]) {
-			hph.grid[row][nib] = root.grid[row][nib]
+	n := hph.activeRows + 1
+	copy(hph.grid[:n], root.grid[:n])
+}
+
+// stitchSplitCells drops each folded split cell into the base row at its top-nibble slot;
+// foldMounted already returns cells excluding the mount nibble, so they are stitched verbatim.
+func stitchSplitCells(base *HexPatriciaHashed, cells *[16]cell, present *[16]bool) {
+	for nib := range 16 {
+		if !present[nib] {
+			continue
 		}
+		c := cells[nib]
+		base.touchMap[0] |= uint16(1) << nib
+		if !c.IsEmpty() {
+			base.afterMap[0] |= uint16(1) << nib
+		} else {
+			base.afterMap[0] &^= uint16(1) << nib
+		}
+		base.depths[0] = 1
+		base.grid[0][nib] = c
 	}
 }
 
@@ -151,7 +168,11 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 			path = append(path, byte(ni))
 			path = append(path, ch.ext...)
 			buildErr := dfsSubtreeDeep(w, ch, path, func(n *prefixNode, pth []byte, accountFresh bool) (cell, error) {
-				return foldStorageRoot(gctx, foldSem, p.newStorageWorker, pu, n, pth, accountFresh)
+				sr, err := foldStorageRoot(gctx, foldSem, p.newStorageWorker, pu, n, pth, accountFresh)
+				if err == nil {
+					p.deepLocalFolds.Add(1)
+				}
+				return sr, err
 			})
 			if buildErr != nil {
 				w.Release()

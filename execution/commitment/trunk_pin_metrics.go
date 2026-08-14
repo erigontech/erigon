@@ -17,6 +17,8 @@
 package commitment
 
 import (
+	"time"
+
 	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
@@ -36,6 +38,16 @@ var (
 	mxPreloadDurationSecondsTotal = metrics.GetOrCreateCounter("commitment_trunk_preload_duration_seconds_total")
 	mxPreloadBytesTotal           = metrics.GetOrCreateCounter("commitment_trunk_preload_bytes_total")
 )
+
+// recordPreload accounts one preload step: the wall time it took and the bytes
+// it newly pinned. Bytes are passed in rather than read back off the preloader
+// so a rolled-back step can report the time it cost without the pins it lost.
+func recordPreload(started time.Time, bytesPinned int) {
+	mxPreloadDurationSecondsTotal.Add(time.Since(started).Seconds())
+	if bytesPinned > 0 {
+		mxPreloadBytesTotal.AddInt(bytesPinned)
+	}
+}
 
 // PublishMetrics emits counter deltas (last-published tracked internally) and
 // sets gauges absolute. Call once per SD.Flush — once-per-batch avoids hot-path cost.

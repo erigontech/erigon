@@ -71,11 +71,11 @@ func (forkChoiceSpectestEngine) ForkChoiceUpdate(context.Context, common.Hash, c
 
 func (forkChoiceSpectestEngine) SupportInsertion() bool { return false }
 
-func (forkChoiceSpectestEngine) InsertBlocks(context.Context, []*types.Block, [][]byte) error {
+func (forkChoiceSpectestEngine) InsertBlocks(context.Context, []*types.Block) error {
 	return nil
 }
 
-func (forkChoiceSpectestEngine) InsertBlock(context.Context, *types.Block, []byte) error { return nil }
+func (forkChoiceSpectestEngine) InsertBlock(context.Context, *types.Block) error { return nil }
 
 func (forkChoiceSpectestEngine) CurrentHeader(context.Context) (*types.Header, error) {
 	return nil, nil
@@ -303,7 +303,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 	anchorState, err := spectest.ReadBeaconState(root, c.Version(), "anchor_state.ssz_snappy")
 	require.NoError(t, err)
 
-	genesisState, err := initial_state.GetGenesisState(chainspec.MainnetChainID)
+	genesisState, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
 	require.NoError(t, err)
 
 	emitters := beaconevents.NewEventEmitter()

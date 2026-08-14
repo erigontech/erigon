@@ -88,7 +88,7 @@ func TestForkChoiceBasic(t *testing.T) {
 	emitters := beaconevents.NewEventEmitter()
 
 	// Create required components
-	genesisState, err := initial_state.GetGenesisState(1) // Mainnet
+	genesisState, err := initial_state.GetGenesisState(t.Context(), 1) // Mainnet
 	require.NoError(t, err)
 	ethClock := eth_clock.NewEthereumClock(genesisState.GenesisTime(), genesisState.GenesisValidatorsRoot(), &clparams.MainnetBeaconConfig)
 	blobStorage := blob_storage.NewBlobStore(memdb.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), math.MaxUint64, &clparams.MainnetBeaconConfig, ethClock)
@@ -122,6 +122,10 @@ func TestForkChoiceBasic(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, headRoot, common.HexToHash("0xc9bd7bcb6dfa49dc4e5a67ca75e89062c36b5c300bc25a1b31db4e1a89306071"))
 	require.Equal(t, uint64(1), headSlot)
+	selectedRoot, selectedSlot, ok := sd.SelectedHead()
+	require.True(t, ok)
+	require.Equal(t, headRoot, selectedRoot)
+	require.Equal(t, headSlot, selectedSlot)
 	// process another tick and another block
 	store.OnTick(36)
 	require.NoError(t, store.OnBlock(ctx, block0xc2, false, true, false))
@@ -134,6 +138,10 @@ func TestForkChoiceBasic(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint64(3), headSlot)
 	require.Equal(t, headRoot, common.HexToHash("0x744cc484f6503462f0f3a5981d956bf4fcb3e57ab8687ed006467e05049ee033"))
+	selectedRoot, selectedSlot, ok = sd.SelectedHead()
+	require.True(t, ok)
+	require.Equal(t, headRoot, selectedRoot)
+	require.Equal(t, headSlot, selectedSlot)
 	// last block
 	require.NoError(t, store.OnBlock(ctx, block0xd4, false, true, false))
 	require.Equal(t, uint64(36), store.Time())
@@ -176,7 +184,7 @@ func TestForkChoiceChainBellatrix(t *testing.T) {
 	sd := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
 
 	// Create required components
-	genesisState, err := initial_state.GetGenesisState(1) // Mainnet
+	genesisState, err := initial_state.GetGenesisState(t.Context(), 1) // Mainnet
 	require.NoError(t, err)
 	ethClock := eth_clock.NewEthereumClock(genesisState.GenesisTime(), genesisState.GenesisValidatorsRoot(), &clparams.MainnetBeaconConfig)
 	blobStorage := blob_storage.NewBlobStore(memdb.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), math.MaxUint64, &clparams.MainnetBeaconConfig, ethClock)
