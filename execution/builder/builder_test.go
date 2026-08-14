@@ -48,14 +48,13 @@ func TestBuilder_Build_DBError(t *testing.T) {
 
 	want := errors.New("db open failed")
 	b := &Builder{
-		ctx:            context.Background(),
 		db:             &errDB{err: want},
 		builderCfg:     &buildercfg.BuilderConfig{},
 		pendingBlockCh: make(chan *types.Block, 1),
 		logger:         log.New(),
 	}
 
-	_, err := b.Build(&Parameters{}, &atomic.Bool{})
+	_, err := b.Build(t.Context(), &Parameters{}, &atomic.Bool{})
 	require.ErrorIs(t, err, want)
 }
 

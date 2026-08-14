@@ -28,19 +28,26 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-type BlockBuilderFunc func(param *Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error)
+// BlockBuilderFunc builds a payload. Its context ends when the payload is discarded, so anything
+// that can block - opening a read view, waiting on a transaction provider - has to honour it.
+type BlockBuilderFunc func(ctx context.Context, param *Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error)
 
-// BlockBuilder wraps a goroutine that builds Proof-of-Stake payloads (PoS "mining")
+// BlockBuilder wraps a goroutine that builds Proof-of-Stake payloads (PoS "mining").
+//
+// It answers to two different requests. Interrupting asks for the block it has so far, which is how
+// a payload is collected. Discarding says the payload is not wanted at all, and cancels the work.
 type BlockBuilder struct {
 	interrupt atomic.Bool
+	discard   context.CancelFunc
 	mu        sync.Mutex
 	done      chan struct{}
 	result    *types.BlockWithReceipts
 	err       error
 }
 
-func NewBlockBuilder(build BlockBuilderFunc, param *Parameters, maxBuildTime time.Duration) *BlockBuilder {
-	builder := &BlockBuilder{done: make(chan struct{})}
+func NewBlockBuilder(ctx context.Context, build BlockBuilderFunc, param *Parameters, maxBuildTime time.Duration) *BlockBuilder {
+	buildCtx, discard := context.WithCancel(ctx)
+	builder := &BlockBuilder{done: make(chan struct{}), discard: discard}
 
 	go func() {
 		var result *types.BlockWithReceipts
@@ -58,11 +65,12 @@ func NewBlockBuilder(build BlockBuilderFunc, param *Parameters, maxBuildTime tim
 			builder.err = err
 			builder.mu.Unlock()
 			close(builder.done)
+			discard()
 		}()
 
 		log.Info("Building block...")
 		t := time.Now()
-		result, err = build(param, &builder.interrupt)
+		result, err = build(buildCtx, param, &builder.interrupt)
 		if err != nil {
 			log.Warn("Failed to build a block", "err", err)
 		} else {
@@ -89,7 +97,7 @@ func NewBlockBuilder(build BlockBuilderFunc, param *Parameters, maxBuildTime tim
 }
 
 func (b *BlockBuilder) Stop(ctx context.Context) (*types.BlockWithReceipts, error) {
-	b.Cancel()
+	b.interrupt.Store(true)
 
 	select {
 	case <-ctx.Done():
@@ -102,13 +110,17 @@ func (b *BlockBuilder) Stop(ctx context.Context) (*types.BlockWithReceipts, erro
 	return b.result, b.err
 }
 
-func (b *BlockBuilder) Cancel() {
+// Discard abandons the build and releases what it holds. A read view or a transaction provider
+// blocked on the builder's context returns at once instead of waiting out its own deadline, which
+// is the difference between an evicted builder freeing its resources now and freeing them a slot
+// from now.
+func (b *BlockBuilder) Discard() {
 	b.interrupt.Store(true)
+	b.discard()
 }
 
-// Failed reports whether the builder has finished and ended in an error. That error is latched, so
-// a caller that would otherwise reuse this builder has to treat it as absent. Being cancelled is
-// not failure: a stopped builder still holds the payload it was stopped for.
+// Failed reports whether the builder has finished and ended in an error, which a caller looking to
+// reuse it has to read as absent because that error is latched.
 func (b *BlockBuilder) Failed() bool {
 	select {
 	case <-b.done:

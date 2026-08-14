@@ -19,6 +19,7 @@ package execmodule
 import (
 	"bytes"
 	"context"
+	"errors"
 	"reflect"
 	"time"
 
@@ -114,7 +115,7 @@ func (e *ExecModule) evictOldBuilders() {
 		id := ids[i]
 		if old := e.builders[id]; old != nil {
 			if old.builder != nil {
-				old.builder.Cancel()
+				old.builder.Discard()
 			}
 			if e.buildersByTimestamp[old.timestamp] == id {
 				delete(e.buildersByTimestamp, old.timestamp)
@@ -163,7 +164,7 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 		e.buildersByTimestamp = make(map[uint64]uint64)
 	}
 	e.builders[e.nextPayloadId] = &builderEntry{
-		builder:   builder.NewBlockBuilder(e.builderFunc, ownedParams, buildDuration(params.Timestamp, time.Now(), e.config.SecondsPerSlot())),
+		builder:   builder.NewBlockBuilder(e.bacgroundCtx, e.builderFunc, ownedParams, buildDuration(params.Timestamp, time.Now(), e.config.SecondsPerSlot())),
 		params:    ownedParams,
 		timestamp: params.Timestamp,
 	}
@@ -204,12 +205,13 @@ func (e *ExecModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (A
 	}
 	blockWithReceipts, err := entry.builder.Stop(ctx)
 	if err != nil {
-		// A caller that gave up says nothing about the builder, which keeps running and may still
-		// be collected. Only a builder that actually failed is reported and dropped, so its latched
-		// error stops being handed to every retry.
-		if ctx.Err() != nil {
+		// The caller gave up waiting; nothing about the build itself went wrong. Reading that from
+		// the returned error rather than the ambient context keeps the two from drifting apart
+		// between Stop returning and this check.
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return AssembledBlockResult{}, err
 		}
+		// Keeping a failed entry would hand its latched error to every retry.
 		e.dropBuilder(payloadID, entry)
 		e.logger.Error("Failed to build PoS block", "err", err)
 		return AssembledBlockResult{}, err

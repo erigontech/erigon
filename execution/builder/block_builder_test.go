@@ -17,6 +17,7 @@
 package builder
 
 import (
+	"context"
 	"errors"
 	"sync/atomic"
 	"testing"
@@ -32,7 +33,7 @@ func TestBlockBuilderRunningHasNotFailed(t *testing.T) {
 
 	release := make(chan struct{})
 	t.Cleanup(func() { close(release) })
-	b := NewBlockBuilder(func(_ *Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
+	b := NewBlockBuilder(t.Context(), func(_ context.Context, _ *Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
 		<-release
 		return nil, errors.New("builder stopped")
 	}, &Parameters{}, time.Minute)
@@ -43,7 +44,7 @@ func TestBlockBuilderRunningHasNotFailed(t *testing.T) {
 func TestBlockBuilderStoppedForItsPayloadHasNotFailed(t *testing.T) {
 	t.Parallel()
 
-	b := NewBlockBuilder(func(_ *Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
+	b := NewBlockBuilder(t.Context(), func(_ context.Context, _ *Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
 		for !interrupt.Load() {
 			time.Sleep(time.Millisecond)
 		}
@@ -61,7 +62,7 @@ func TestBlockBuilderStoppedForItsPayloadHasNotFailed(t *testing.T) {
 func TestBlockBuilderHasFailedOnceItErrors(t *testing.T) {
 	t.Parallel()
 
-	b := NewBlockBuilder(func(_ *Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
+	b := NewBlockBuilder(t.Context(), func(_ context.Context, _ *Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
 		return nil, errors.New("build failed")
 	}, &Parameters{}, time.Minute)
 
@@ -72,7 +73,7 @@ func TestBlockBuilderStaysReusableOnceItFillsTheBlock(t *testing.T) {
 	t.Parallel()
 
 	built := make(chan struct{})
-	b := NewBlockBuilder(func(_ *Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
+	b := NewBlockBuilder(t.Context(), func(_ context.Context, _ *Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
 		defer close(built)
 		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil)}, nil
 	}, &Parameters{}, time.Minute)

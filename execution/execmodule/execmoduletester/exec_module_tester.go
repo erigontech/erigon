@@ -682,7 +682,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 
 	readAheader := exec.NewBlockReadAheader()
 	blkBuilder := builder.NewBuilder(
-		mock.Ctx,
 		mock.DB,
 		&cfg.Builder,
 		mock.ChainConfig,
