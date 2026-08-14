@@ -1,4 +1,4 @@
-// Copyright 2026 The Erigon Authors
+// Copyright 2024 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,36 +14,25 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package commitment
+package mdbxtest
 
 import (
-	"fmt"
 	"testing"
+
+	"github.com/c2h5oh/datasize"
+
+	"github.com/erigontech/erigon/db/kv/mdbx"
 )
 
-func Benchmark_PrefixTrieBuildAcrossResets(b *testing.B) {
-	for _, keys := range []int{5_000, 20_000} {
-		b.Run(fmt.Sprintf("%dk-keys", keys/1000), func(b *testing.B) {
-			const keyLen = 64
-			corpus := make([][]byte, keys)
-			for i := range corpus {
-				k := make([]byte, keyLen)
-				v := i
-				for j := range keyLen {
-					k[j] = byte(v % 16)
-					v /= 3
-				}
-				corpus[i] = k
-			}
-			tr := newPrefixTrie()
-			b.ReportAllocs()
-			b.ResetTimer()
-			for range b.N {
-				for _, k := range corpus {
-					tr.Insert(k, k, nil)
-				}
-				tr.Reset()
-			}
-		})
+// InMem is InMem tuned for tests: the temp dir is left to the testing framework,
+// and the map size is capped because parallel unit tests pile 16GB VA
+// reservations into the Go race heap window ("too many address space collisions
+// for -race mode"). Benchmarks run sequentially and can need the full map.
+func InMem(tb testing.TB, opts mdbx.MdbxOpts, tmpDir string) mdbx.MdbxOpts {
+	tb.Helper()
+	opts = opts.InMem(tmpDir).AutoRemove(false).DirtySpace(uint64(2 * datasize.MB))
+	if _, isBench := tb.(*testing.B); !isBench {
+		opts = opts.MapSize(1 * datasize.GB)
 	}
+	return opts
 }

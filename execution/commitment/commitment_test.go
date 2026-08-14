@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 )
 
-// noopPatriciaContext is a mock PatriciaContext for testing warmup.
 type noopPatriciaContext struct{}
 
 func (n *noopPatriciaContext) Branch(prefix []byte) ([]byte, kv.Step, error) { return nil, 0, nil }
@@ -49,9 +48,6 @@ func noopCtxFactory(context.Context) (PatriciaContext, func()) {
 	return &noopPatriciaContext{}, nil
 }
 
-// gatedPatriciaContext is a mock PatriciaContext with a controllable in-flight window:
-// sleep+descend keep a worker re-reading its arena-backed key across batch boundaries,
-// while entered/release gate a worker inside Branch for deterministic ordering.
 type gatedPatriciaContext struct {
 	sleep    time.Duration
 	descend  bool
@@ -61,7 +57,6 @@ type gatedPatriciaContext struct {
 }
 
 func (g *gatedPatriciaContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
-	// Gate only the first Branch call so a released worker can't wedge re-sending to entered.
 	if (g.entered != nil || g.release != nil) && !g.gateDone.Swap(true) {
 		if g.entered != nil {
 			g.entered <- struct{}{}
@@ -74,8 +69,6 @@ func (g *gatedPatriciaContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
 		time.Sleep(g.sleep)
 	}
 	if g.descend {
-		// touch map + bitmap 0x0001 (child nibble 0) + fieldBits 0x00: warmupKey
-		// descends on nibble 0, re-reading hashedKey at every level.
 		return []byte{0, 0, 0, 1, 0, 0}, 0, nil
 	}
 	return []byte{0, 0, 0, 0}, 0, nil
@@ -86,8 +79,6 @@ func (g *gatedPatriciaContext) Account(plainKey []byte) (*Update, error)      { 
 func (g *gatedPatriciaContext) Storage(plainKey []byte) (*Update, error)      { return nil, nil }
 func (g *gatedPatriciaContext) TxNum() uint64                                 { return 0 }
 
-// slowCtxFactory makes the first worker a slow straggler that holds one key across many
-// batch resets while the rest run fast, so the producer's arena reset races its in-flight reads.
 func slowCtxFactory(stall time.Duration) TrieContextFactory {
 	var n atomic.Int32
 	return func(context.Context) (PatriciaContext, func()) {
@@ -98,16 +89,12 @@ func slowCtxFactory(stall time.Duration) TrieContextFactory {
 	}
 }
 
-// gatedCtxFactory returns a factory whose contexts signal entered then block on
-// release inside Branch, for deterministic single-worker ordering tests.
 func gatedCtxFactory(entered, release chan struct{}) TrieContextFactory {
 	return func(context.Context) (PatriciaContext, func()) {
 		return &gatedPatriciaContext{entered: entered, release: release}, nil
 	}
 }
 
-// genNibbleKeys produces n unique keyLen-byte keys whose every byte is a valid nibble
-// (0x00-0x0F), with the index encoded in the trailing nibbles so keys are distinct.
 func genNibbleKeys(n, keyLen int) [][]byte {
 	keys := make([][]byte, n)
 	for i := range n {
@@ -122,24 +109,21 @@ func genNibbleKeys(n, keyLen int) [][]byte {
 	return keys
 }
 
-// TestHashSort_WarmupArenaNoRace reproduces the arena data race: at a batch boundary HashSort
-// resets a buffer while warmup workers still read key slices aliasing it. -race is the signal.
 func TestHashSort_WarmupArenaNoRace(t *testing.T) {
 	t.Parallel()
 
-	const numKeys = 20_000 // two batches: one in-loop arena reset mid-stream plus the final batch
+	const numKeys = 20_000
 	const keyLen = 64
 
 	forEachMode(t, func(t *testing.T, mode Mode) {
 		ut := NewUpdates(mode, t.TempDir(), keyHasherNoop)
-		forceDirectSpill(ut) // these tests pin the arena/etl path
+		forceDirectSpill(ut)
 		for _, k := range genNibbleKeys(numKeys, keyLen) {
 			ut.TouchPlainKey(string(k), []byte("v"), ut.TouchStorage)
 		}
 		require.EqualValues(t, numKeys, ut.Size())
 
 		ctx := context.Background()
-		// Large per-level stall keeps the straggler in-flight across the arena reset.
 		warmuper := testWarmuper(ctx, slowCtxFactory(2*time.Millisecond), 4)
 		warmuper.Start()
 
@@ -154,8 +138,6 @@ func TestHashSort_WarmupArenaNoRace(t *testing.T) {
 	})
 }
 
-// TestHashSort_NilWarmuper exercises the nil-warmuper batch-boundary path (the else branch
-// that resets the arena directly), crossing the in-loop reset for both modes.
 func TestHashSort_NilWarmuper(t *testing.T) {
 	t.Parallel()
 
@@ -164,7 +146,7 @@ func TestHashSort_NilWarmuper(t *testing.T) {
 
 	forEachMode(t, func(t *testing.T, mode Mode) {
 		ut := NewUpdates(mode, t.TempDir(), keyHasherNoop)
-		forceDirectSpill(ut) // these tests pin the arena/etl path
+		forceDirectSpill(ut)
 		for _, k := range genNibbleKeys(numKeys, keyLen) {
 			ut.TouchPlainKey(string(k), []byte("v"), ut.TouchStorage)
 		}
@@ -180,18 +162,15 @@ func TestHashSort_NilWarmuper(t *testing.T) {
 	})
 }
 
-// TestHashSort_WarmupLap crosses ≥3 batch boundaries (K=2) so a ring slot is reused while a slow
-// straggler still holds a key from that slot's previous generation; the producer must block in
-// WaitBufferFree until it drains. -race is the signal.
 func TestHashSort_WarmupLap(t *testing.T) {
 	t.Parallel()
 
-	const numKeys = 30_000 // three batch boundaries → gen reaches 3, so each ring slot is reused
+	const numKeys = 30_000
 	const keyLen = 64
 
 	forEachMode(t, func(t *testing.T, mode Mode) {
 		ut := NewUpdates(mode, t.TempDir(), keyHasherNoop)
-		forceDirectSpill(ut) // these tests pin the arena/etl path
+		forceDirectSpill(ut)
 		for _, k := range genNibbleKeys(numKeys, keyLen) {
 			ut.TouchPlainKey(string(k), []byte("v"), ut.TouchStorage)
 		}
@@ -208,15 +187,11 @@ func TestHashSort_WarmupLap(t *testing.T) {
 		})
 		require.NoError(t, err)
 		require.Equal(t, numKeys, visited)
-		// gen advances once per batch boundary; ≥3 means at least one ring slot was
-		// reused (lapped) — the path WaitBufferFree guards.
 		require.GreaterOrEqual(t, ut.gen, uint64(3))
 		require.NoError(t, warmuper.Wait())
 	})
 }
 
-// gatedStragglerFactory makes the first worker block inside Branch on release (holding its
-// first key) while every other worker runs fast, so exactly one ring slot stays occupied.
 func gatedStragglerFactory(entered, release chan struct{}) TrieContextFactory {
 	var n atomic.Int32
 	return func(context.Context) (PatriciaContext, func()) {
@@ -227,19 +202,16 @@ func gatedStragglerFactory(entered, release chan struct{}) TrieContextFactory {
 	}
 }
 
-// TestHashSort_WaitBufferFreeErrorKeepsArenaInvariant cancels the context during a boundary
-// WaitBufferFree while a straggler pins the slot, asserting the curArena == gen % arenaRingSize
-// invariant survives the error return.
 func TestHashSort_WaitBufferFreeErrorKeepsArenaInvariant(t *testing.T) {
 	t.Parallel()
 
-	const numKeys = 30_000 // ≥3 batch boundaries so a ring slot is reused (lapped)
+	const numKeys = 30_000
 	const keyLen = 64
-	const lapFnCall = 2 * hashSortBatchSize // fn calls for gen 0 + gen 1, completing right before boundary 2
+	const lapFnCall = 2 * hashSortBatchSize
 
 	forEachMode(t, func(t *testing.T, mode Mode) {
 		ut := NewUpdates(mode, t.TempDir(), keyHasherNoop)
-		forceDirectSpill(ut) // these tests pin the arena/etl path
+		forceDirectSpill(ut)
 		for _, k := range genNibbleKeys(numKeys, keyLen) {
 			ut.TouchPlainKey(string(k), []byte("v"), ut.TouchStorage)
 		}
@@ -253,8 +225,6 @@ func TestHashSort_WaitBufferFreeErrorKeepsArenaInvariant(t *testing.T) {
 		defer warmuper.CloseAndWait()
 		defer close(release)
 
-		// fn runs only on the producer goroutine, so this counter is race-free. Signaling at
-		// lapFnCall (right before the gen++/WaitBufferFree block) makes the cancel land inside the wait.
 		fnCalls := 0
 		reachedLap := make(chan struct{})
 		errCh := make(chan error, 1)
@@ -268,10 +238,10 @@ func TestHashSort_WaitBufferFreeErrorKeepsArenaInvariant(t *testing.T) {
 			})
 		}()
 
-		<-entered // the straggler holds a gen-0 key, pinning slot 0
+		<-entered
 		require.GreaterOrEqual(t, warmuper.outstanding[0].Load(), int64(1))
 
-		<-reachedLap // batch-2 fn-loop done; producer heads into WaitBufferFree(0), which slot 0 pins
+		<-reachedLap
 		cancel()
 
 		select {
@@ -285,9 +255,6 @@ func TestHashSort_WaitBufferFreeErrorKeepsArenaInvariant(t *testing.T) {
 	})
 }
 
-// TestUpdates_ArenaAlloc verifies that sequential allocations within a ring buffer return
-// non-overlapping sub-slices, and that an over-capacity request falls back to an independent
-// allocation that leaves prior sub-slices intact.
 func TestUpdates_ArenaAlloc(t *testing.T) {
 	t.Parallel()
 
@@ -299,26 +266,19 @@ func TestUpdates_ArenaAlloc(t *testing.T) {
 	require.Equal(t, []byte("aaaa"), a)
 	require.Equal(t, []byte("bbbb"), b)
 
-	// Sub-slices are contiguous and non-overlapping within the same buffer.
 	require.Equal(t, &ut.arenas[ut.curArena][0], &a[0])
 	require.Equal(t, &ut.arenas[ut.curArena][4], &b[0])
 
-	// Mutating the second slice must not touch the first.
 	b[0] = 'X'
 	require.Equal(t, []byte("aaaa"), a)
 
-	// Over-capacity request falls back to an independent allocation; prior slices stay valid.
 	big := ut.arenaAlloc(bytes.Repeat([]byte("z"), 32))
 	require.Equal(t, bytes.Repeat([]byte("z"), 32), big)
 	require.Equal(t, []byte("aaaa"), a)
 	require.Equal(t, []byte("Xbbb"), b)
-	// The fallback slice is not backed by the current ring buffer.
 	require.NotEqual(t, &ut.arenas[ut.curArena][0], &big[0])
 }
 
-// TestWarmuper_WaitBufferFree_BlocksUntilStragglerDone verifies that WaitBufferFree
-// blocks while a warm item for the slot's generation is still in-flight, and returns
-// once that item completes (slot drains to zero).
 func TestWarmuper_WaitBufferFree_BlocksUntilStragglerDone(t *testing.T) {
 	t.Parallel()
 
@@ -329,7 +289,7 @@ func TestWarmuper_WaitBufferFree_BlocksUntilStragglerDone(t *testing.T) {
 	defer func() { require.NoError(t, warmuper.Wait()) }()
 
 	warmuper.WarmKey([]byte{0, 1, 2, 3}, 0, 0)
-	<-entered // worker is now inside Branch, key for gen 0 in-flight
+	<-entered
 	require.Equal(t, int64(1), warmuper.outstanding[0].Load())
 
 	done := make(chan struct{})
@@ -344,7 +304,7 @@ func TestWarmuper_WaitBufferFree_BlocksUntilStragglerDone(t *testing.T) {
 	case <-time.After(50 * time.Millisecond):
 	}
 
-	close(release) // let the worker finish
+	close(release)
 
 	select {
 	case <-done:
@@ -354,8 +314,6 @@ func TestWarmuper_WaitBufferFree_BlocksUntilStragglerDone(t *testing.T) {
 	require.Equal(t, int64(0), warmuper.outstanding[0].Load())
 }
 
-// TestWarmuper_WaitBufferFree_UnblocksOnCancel verifies a producer parked in WaitBufferFree wakes
-// and returns the context error when the warmuper is canceled while a counted item is stuck.
 func TestWarmuper_WaitBufferFree_UnblocksOnCancel(t *testing.T) {
 	t.Parallel()
 
@@ -368,7 +326,7 @@ func TestWarmuper_WaitBufferFree_UnblocksOnCancel(t *testing.T) {
 	defer close(release)
 
 	warmuper.WarmKey([]byte{0, 1, 2, 3}, 0, 0)
-	<-entered // worker is inside Branch holding the gen-0 item; slot 0 counter is 1
+	<-entered
 	require.Equal(t, int64(1), warmuper.outstanding[0].Load())
 
 	errCh := make(chan error, 1)
@@ -390,8 +348,6 @@ func TestWarmuper_WaitBufferFree_UnblocksOnCancel(t *testing.T) {
 	}
 }
 
-// TestWarmuper_WaitBufferFree_FastPath verifies WaitBufferFree returns immediately when
-// the slot is already drained.
 func TestWarmuper_WaitBufferFree_FastPath(t *testing.T) {
 	t.Parallel()
 
@@ -456,7 +412,6 @@ func TestBranchData_ChildCount(t *testing.T) {
 		require.Equal(t, size, enc.ChildCount(), "ChildCount must equal the number of afterMap children")
 	}
 
-	// ChildCount counts afterMap (bytes 2:4), not touchMap (bytes 0:2).
 	var buf BranchData = make([]byte, 4)
 	binary.BigEndian.PutUint16(buf[0:], 0xffff)
 	binary.BigEndian.PutUint16(buf[2:], 0b0000_0000_0000_0111)
@@ -473,13 +428,11 @@ func TestBranchData_IsComplete(t *testing.T) {
 	require.False(t, BranchData{0x00}.IsComplete())
 	require.False(t, BranchData{0xff, 0xff, 0x00}.IsComplete())
 
-	// Every child present in afterMap is also covered by touchMap -> complete.
 	complete := make(BranchData, 4)
 	binary.BigEndian.PutUint16(complete[0:], 0xffff)
 	binary.BigEndian.PutUint16(complete[2:], 0b0000_0000_0000_0111)
 	require.True(t, complete.IsComplete())
 
-	// afterMap references a child missing from touchMap -> incomplete.
 	incomplete := make(BranchData, 4)
 	binary.BigEndian.PutUint16(incomplete[0:], 0b0000_0000_0000_0001)
 	binary.BigEndian.PutUint16(incomplete[2:], 0b0000_0000_0000_0011)
@@ -489,17 +442,14 @@ func TestBranchData_IsComplete(t *testing.T) {
 func TestBranchData_MergeHexBranchesEmptyBranches(t *testing.T) {
 	t.Parallel()
 
-	// Create a BranchMerger instance with sufficient capacity for testing.
 	merger := NewHexBranchMerger(1024)
 
-	// Test merging when one branch is empty.
 	branch1 := BranchData{}
 	branch2 := BranchData{0x02, 0x02, 0x03, 0x03, 0x0C, 0x02, 0x04, 0x0C}
 	mergedBranch, err := merger.Merge(branch1, branch2)
 	require.NoError(t, err)
 	require.Equal(t, branch2, mergedBranch)
 
-	// Test merging when both branches are empty.
 	branch1 = BranchData{}
 	branch2 = BranchData{}
 	mergedBranch, err = merger.Merge(branch1, branch2)
@@ -606,8 +556,6 @@ func TestBranchData_ReplacePlainKeys_WithEmpty(t *testing.T) {
 	})
 }
 
-// TestBranchData_ReplacePlainKeys_PartialChange exercises the span-copy logic
-// when only some keys change (account keys shortened, storage keys kept).
 func TestBranchData_ReplacePlainKeys_PartialChange(t *testing.T) {
 	t.Parallel()
 
@@ -615,7 +563,6 @@ func TestBranchData_ReplacePlainKeys_PartialChange(t *testing.T) {
 
 	original := bytes.Clone(enc)
 
-	// Collect original keys and shorten only account keys.
 	type keyRecord struct {
 		key       []byte
 		isStorage bool
@@ -626,14 +573,13 @@ func TestBranchData_ReplacePlainKeys_PartialChange(t *testing.T) {
 		func(key []byte, isStorage bool) ([]byte, error) {
 			origKeys = append(origKeys, keyRecord{bytes.Clone(key), isStorage})
 			if isStorage {
-				return nil, nil // keep original
+				return nil, nil
 			}
-			return key[:4], nil // shorten account keys
+			return key[:4], nil
 		},
 	)
 	require.NoError(t, err)
 
-	// Expand back: restore account keys, keep storage keys.
 	keyI := 0
 	expandedBack, err := replaced.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
 		rec := origKeys[keyI]
@@ -728,7 +674,6 @@ func TestUpdates_TouchPlainKey(t *testing.T) {
 	warmuper.Start()
 
 	i := 0
-	// keyHasherNoop is used so ordering is going by plainKey
 	err := utUpdate.HashSort(ctx, warmuper, func(hk, pk []byte, upd *Update) error {
 		require.Equal(t, sortedUniqUpds[i].key, pk)
 		require.Equal(t, sortedUniqUpds[i].val, upd.Storage[:upd.StorageLen])
@@ -741,7 +686,6 @@ func TestUpdates_TouchPlainKey(t *testing.T) {
 	err = warmuper.Wait()
 	require.NoError(t, err)
 
-	// Create a new warmuper for the second test
 	warmuper2 := testWarmuper(ctx, noopCtxFactory, 2)
 	warmuper2.Start()
 
@@ -758,7 +702,6 @@ func TestUpdates_TouchPlainKey(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// recordingCtx captures Branch call count and PutBranch arguments for assertions.
 type recordingCtx struct {
 	branchCalls int
 	puts        []struct{ prefix, data, prev []byte }
@@ -784,14 +727,12 @@ func TestCollectUpdate_IsNewSkipsLookupAndMatchesNilPath(t *testing.T) {
 	row, bm := generateCellRow(t, 4)
 	cells := generateCellEncodeDataRow(t, row, bm)
 
-	// isNew=false: Branch is probed but returns nil (key doesn't exist yet)
 	ctxA := &recordingCtx{}
 	beA := NewBranchEncoder(1024)
 	require.NoError(t, beA.CollectUpdate(ctxA, prefix, bm, bm, bm, &cells, false))
 	require.Equal(t, 1, ctxA.branchCalls, "isNew=false must probe Branch")
 	require.Len(t, ctxA.puts, 1)
 
-	// isNew=true: Branch must not be called, but PutBranch output must be identical
 	ctxB := &recordingCtx{}
 	beB := NewBranchEncoder(1024)
 	require.NoError(t, beB.CollectUpdate(ctxB, prefix, bm, bm, bm, &cells, true))
@@ -808,7 +749,6 @@ func TestCollectDeferredUpdate_IsNewSkipsLookupAndMatchesNilPath(t *testing.T) {
 	row, bm := generateCellRow(t, 4)
 	cells := generateCellEncodeDataRow(t, row, bm)
 
-	// isNew=false: Branch is probed but returns nil
 	ctxA := &recordingCtx{}
 	beA := NewBranchEncoder(1024)
 	beA.setDeferUpdates(true)
@@ -817,7 +757,6 @@ func TestCollectDeferredUpdate_IsNewSkipsLookupAndMatchesNilPath(t *testing.T) {
 	require.Equal(t, 1, ctxA.branchCalls, "isNew=false must probe Branch")
 	require.Len(t, ctxA.puts, 1)
 
-	// isNew=true: Branch must not be called, deferred output must match
 	ctxB := &recordingCtx{}
 	beB := NewBranchEncoder(1024)
 	beB.setDeferUpdates(true)
@@ -883,11 +822,8 @@ func TestUpdates_TouchStorageClearsDeleteOnRewrite(t *testing.T) {
 	updates.TouchPlainKey(key, nil, updates.TouchStorage)
 	updates.TouchPlainKey(key, []byte("value"), updates.TouchStorage)
 
-	// Look up via treeIdx (the plainKey→KeyUpdate map). The btree's
-	// comparator (keyUpdateLessFn) orders entries by hashedKey first with
-	// plainKey as a tiebreaker, so scanning the tree with a pivot that has
-	// only plainKey set returns nothing — treeIdx is the right access path
-	// for plainKey lookups.
+	// treeIdx (plainKey→KeyUpdate) is required here: the btree orders by hashedKey first,
+	// so scanning it with only plainKey set as pivot returns nothing.
 	entry, ok := updates.treeIdx[key]
 	require.True(t, ok, "key should be present after TouchPlainKey rewrite")
 	got := entry.update
@@ -1041,7 +977,6 @@ func TestInitializeTrieAndUpdates_ParallelVariant(t *testing.T) {
 
 	require.IsType(t, (*ParallelPatriciaHashed)(nil), trie)
 	require.Equal(t, VariantParallelHexPatricia, trie.Variant())
-	// Parallel variant forces ModeParallel regardless of the mode argument.
 	require.Equal(t, ModeParallel, upd.Mode())
 	require.NotNil(t, upd.parallel)
 	require.True(t, upd.IsConcurrentCommitment())
