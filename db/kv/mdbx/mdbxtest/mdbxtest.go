@@ -17,10 +17,16 @@
 package mdbxtest
 
 import (
+	"context"
+	"os"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
 
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 )
 
@@ -35,4 +41,73 @@ func InMem(tb testing.TB, opts mdbx.MdbxOpts, tmpDir string) mdbx.MdbxOpts {
 		opts = opts.MapSize(1 * datasize.GB)
 	}
 	return opts
+}
+
+func inMemOpts(tb testing.TB, tmpDir string, label kv.Label) mdbx.MdbxOpts {
+	opts := mdbx.New(label, log.New())
+	if tb == nil {
+		return opts.InMem(tmpDir)
+	}
+	return InMem(tb, opts, tmpDir)
+}
+
+func New(tb testing.TB, tmpDir string, label kv.Label) kv.RwDB {
+	return inMemOpts(tb, tmpDir, label).MustOpen()
+}
+
+func NewChainDB(tb testing.TB, tmpDir string) kv.RwDB {
+	return inMemOpts(tb, tmpDir, dbcfg.ChainDB).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+}
+
+func NewTestDB(tb testing.TB, label kv.Label) kv.RwDB {
+	tb.Helper()
+	// we can't use tb.TempDir() here because some tests produce names long
+	// enough to cause 'file name too long' errors when reused as paths
+	dirname, err := os.MkdirTemp("", "testdb-"+string(label)+"-*")
+	if err != nil {
+		tb.Fatal(err)
+	}
+	tb.Cleanup(func() { dir.RemoveAll(dirname) })
+	db := New(tb, dirname, label)
+	tb.Cleanup(func() { db.Close() })
+	return db
+}
+
+func BeginRw(tb testing.TB, db kv.RwDB) kv.RwTx {
+	tb.Helper()
+	tx, err := db.BeginRw(context.Background()) //nolint:gocritic
+	if err != nil {
+		tb.Fatal(err)
+	}
+	tb.Cleanup(tx.Rollback)
+	return tx
+}
+
+func NewTestPoolDB(tb testing.TB) kv.RwDB {
+	tb.Helper()
+	tmpDir := tb.TempDir()
+	db := New(tb, tmpDir, dbcfg.TxPoolDB)
+	tb.Cleanup(db.Close)
+	return db
+}
+
+func NewTestDownloaderDB(tb testing.TB) kv.RwDB {
+	tb.Helper()
+	tmpDir := tb.TempDir()
+	db := New(tb, tmpDir, dbcfg.DownloaderDB)
+	tb.Cleanup(db.Close)
+	return db
+}
+
+func NewTestTx(tb testing.TB) (kv.RwDB, kv.RwTx) {
+	tb.Helper()
+	tmpDir := tb.TempDir()
+	db := New(tb, tmpDir, dbcfg.ChainDB)
+	tb.Cleanup(db.Close)
+	tx, err := db.BeginRw(context.Background()) //nolint:gocritic
+	if err != nil {
+		tb.Fatal(err)
+	}
+	tb.Cleanup(tx.Rollback)
+	return db, tx
 }
