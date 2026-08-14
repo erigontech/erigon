@@ -3694,3 +3694,57 @@ func TestDomain_UnwindRestoresDeletionMarker(t *testing.T) {
 		})
 	}
 }
+
+func TestDomain_GetLatestValSize(t *testing.T) {
+	t.Parallel()
+
+	check := func(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
+		t.Helper()
+		err := db.UpdateNosync(t.Context(), func(tx kv.RwTx) error {
+			collateAndMerge(t, tx, d, txs)
+			return nil
+		})
+		require.NoError(t, err)
+
+		domainTx := d.beginForTests()
+		defer domainTx.Close()
+		roTx, err := db.BeginRo(t.Context())
+		require.NoError(t, err)
+		defer roTx.Rollback()
+
+		for keyNum := uint64(1); keyNum <= 31; keyNum++ {
+			var key [8]byte
+			binary.BigEndian.PutUint64(key[:], keyNum)
+			fileValue, fileFound, _, _, err := domainTx.getLatestFromFiles(key[:], 0)
+			require.NoError(t, err)
+			fileSize, sizeFound, err := domainTx.getLatestFromFilesValSize(key[:], 0)
+			require.NoError(t, err)
+			require.Equal(t, fileFound, sizeFound)
+			require.Equal(t, len(fileValue), fileSize)
+
+			value, _, found, err := domainTx.GetLatest(key[:], roTx)
+			require.NoError(t, err)
+			require.True(t, found)
+			size, found, err := domainTx.GetLatestValSize(key[:], roTx)
+			require.NoError(t, err)
+			require.True(t, found)
+			require.Equal(t, len(value), size)
+		}
+
+		var missing [8]byte
+		binary.BigEndian.PutUint64(missing[:], 1000)
+		size, found, err := domainTx.GetLatestValSize(missing[:], roTx)
+		require.NoError(t, err)
+		require.False(t, found)
+		require.Zero(t, size)
+	}
+
+	t.Run("btree", func(t *testing.T) {
+		db, d, txs := filledDomain(t, log.New())
+		check(t, db, d, txs)
+	})
+	t.Run("hashmap", func(t *testing.T) {
+		db, d, txs := filledDomainWithHashMapAccessor(t, log.New())
+		check(t, db, d, txs)
+	})
+}

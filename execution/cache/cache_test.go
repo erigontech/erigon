@@ -1181,6 +1181,23 @@ func TestStateCache_CodeHashHitBindsAddress(t *testing.T) {
 	require.False(t, ok, "the derived binding must keep the mapping stamp for unwind invalidation")
 }
 
+func TestStateCache_FillCodeUsesKnownHash(t *testing.T) {
+	b := 1 * datasize.MB
+	c := NewStateCache(b, b, b, b)
+	t.Cleanup(c.Close)
+	addr := makeAddr(1)
+	code := makeCode(1)
+	codeHash := makeHash(1)
+	view := c.View(FrontierFunc(func(kv.Domain) (uint64, bool) { return 100, true }))
+
+	view.FillCode(addr, code, codeHash[:], 10)
+	code[0]++
+
+	got, ok := view.GetCodeByHash(codeHash[:])
+	require.True(t, ok)
+	require.Equal(t, makeCode(1), got)
+}
+
 func TestStateCache_EmptyCodeHashUsesViewFrontierStamp(t *testing.T) {
 	b := 1 * datasize.MB
 	c := NewStateCache(b, b, b, b)
