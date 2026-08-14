@@ -2472,10 +2472,27 @@ func (be *blockExecutor) mergeFeeWrites(tx int, txVersion state.Version, txOut, 
 	be.recordFeeMerge(tx, txOut, merged)
 }
 
-// recordFeeMerge tracks the write set a fee-merge round produced for tx and
-// reclaims the one it superseded. txOut is the merge's immutable baseline and
-// is never released. When tipWrites is empty, MergeInto returns txOut itself
-// as merged, so there is no new temp to track.
+// mergeFinalizeWrites rebuilds tx's recorded set from baseline plus what
+// finalize produced this round, rather than layering onto the previous
+// round's result — a re-validated tx re-finalizes, and a write an earlier
+// round produced must not outlive a round that no longer produces it. What
+// the rebuild drops is retracted from the version map at tx's own index.
+func (be *blockExecutor) mergeFinalizeWrites(txVersion state.Version, baseline, finalizeWrites *state.WriteSet) *state.WriteSet {
+	prevWrites := be.blockIO.WriteSet(txVersion.TxIndex)
+	merged := baseline.MergeInto(finalizeWrites)
+	for h := range prevWrites.AllHeaders() {
+		if !merged.Has(h) {
+			be.versionMap.Delete(h.Address, h.Path, h.Key, txVersion.TxIndex, false)
+		}
+	}
+	be.blockIO.RecordWrites(txVersion, merged)
+	return merged
+}
+
+// recordFeeMerge tracks the write set a merge round produced for tx and
+// reclaims the one it superseded. txOut is the baseline and is never released.
+// The caller must already have recorded merged: the superseded set is only
+// safe to pool once nothing can still reach it through blockIO.
 func (be *blockExecutor) recordFeeMerge(tx int, txOut, merged *state.WriteSet) {
 	if temp := be.feeMergeTemp[tx]; temp != nil && temp != txOut && temp != merged {
 		be.queueMapRelease(temp)
@@ -2685,12 +2702,14 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 			// Remove entries that were previously written but are no longer
 			// written — res.TxOut.Has answers membership directly, no cmp map.
+			// The header need not have a cell: a round that recorded a fee or
+			// finalize merge and then skipped the flush leaves one behind.
 			deletedWrites := 0
 			for h := range prevWrites.AllHeaders() {
 				if !res.TxOut.Has(h) {
 					hasWriteChange = true
 					deletedWrites++
-					be.versionMap.Delete(h.Address, h.Path, h.Key, txVersion.TxIndex, true)
+					be.versionMap.Delete(h.Address, h.Path, h.Key, txVersion.TxIndex, false)
 				}
 			}
 			if dbg.TraceReexec {
@@ -2752,6 +2771,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 		var trace bool
 		var tracePrefix string
+		feeMerged := false
 
 		if trace = dbg.TraceTransactionIO && dbg.TraceTx(be.number(), txVersion.TxIndex); trace {
 			tracePrefix = fmt.Sprintf("%d (%d.%d)", be.number(), txVersion.TxIndex, txVersion.Incarnation)
@@ -2784,6 +2804,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				return nil, err
 			}
 			be.mergeFeeWrites(tx, txVersion, txResult.TxOut, tipWrites)
+			feeMerged = true
 		}
 
 		validity := be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
@@ -2908,10 +2929,17 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					be.blockIO.RecordReads(txVersion, existing)
 				}
 				if !addWrites.IsEmpty() {
-					// Merge finalization writes with existing execution writes.
-					existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
-					merged := existingWrites.MergeInto(addWrites)
-					be.blockIO.RecordWrites(txVersion, merged)
+					// The fee merge already reset the recorded set to TxOut
+					// this round; a block-end or system tx never reaches it,
+					// so its baseline is TxOut itself.
+					baseline := be.blockIO.WriteSet(txVersion.TxIndex)
+					if !feeMerged {
+						baseline = txResult.TxOut
+					}
+					merged := be.mergeFinalizeWrites(txVersion, baseline, addWrites)
+					if !feeMerged {
+						be.recordFeeMerge(tx, txResult.TxOut, merged)
+					}
 
 					// Flush the merged writes (including fee calc changes)
 					// to the version map so that subsequent per-tx

@@ -226,6 +226,44 @@ func TestFeeMergeRevalidationReplacesRatherThanStacks(t *testing.T) {
 	require.Equal(t, uint64(500), bal.Val.Uint64())
 }
 
+// A block-end or system tx never reaches the fee merge, so finalize is the
+// only thing that builds its recorded set. Re-validation re-finalizes without
+// re-executing, so a write an earlier round produced must not survive a round
+// that no longer produces it — in blockIO or in the version map.
+func TestFinalizeMergeReplacesRatherThanStacks(t *testing.T) {
+	f := newFeeMergeRevalidationFixture(t)
+
+	round1 := &state.WriteSet{}
+	round1.SetSelfDestruct(f.coinbase, &state.VersionedWrite[bool]{
+		WriteHeader: state.WriteHeader{Address: f.coinbase, Path: state.SelfDestructPath, Version: f.version},
+		Val:         true,
+	})
+	merged1 := f.be.mergeFinalizeWrites(f.version, f.result.TxOut, round1)
+	f.be.versionMap.FlushVersionedWrites(merged1, true, "")
+
+	_, recorded := f.be.blockIO.WriteSet(f.version.TxIndex).GetSelfDestruct(f.coinbase)
+	require.True(t, recorded, "round 1's finalize delete is recorded")
+	_, _, found := f.be.versionMap.ReadSelfDestruct(f.coinbase, f.version.TxIndex+1)
+	require.True(t, found, "and flushed to the version map")
+
+	beneficiary := fAddr("beneficiary")
+	round2 := &state.WriteSet{}
+	round2.SetBalance(beneficiary, &state.VersionedWrite[uint256.Int]{
+		WriteHeader: state.WriteHeader{Address: beneficiary, Path: state.BalancePath, Version: f.version},
+		Val:         *uint256.NewInt(11),
+	})
+	f.be.mergeFinalizeWrites(f.version, f.result.TxOut, round2)
+
+	_, recorded = f.be.blockIO.WriteSet(f.version.TxIndex).GetSelfDestruct(f.coinbase)
+	require.False(t, recorded, "round 1's delete must not outlive a round that no longer produces it")
+	_, _, found = f.be.versionMap.ReadSelfDestruct(f.coinbase, f.version.TxIndex+1)
+	require.False(t, found, "and its version-map cell must be retracted")
+
+	kept, ok := f.be.blockIO.WriteSet(f.version.TxIndex).GetBalance(beneficiary)
+	require.True(t, ok, "round 2's own write survives the rebuild")
+	require.Equal(t, uint64(11), kept.Val.Uint64())
+}
+
 // TestFeeMergeRevalidationControlNormalizeNeedsTheStaleMerge is the negative
 // control: with no first pass ever recorded, Normalize must not invent the
 // coinbase delete on its own. This isolates the delete in the other test to
