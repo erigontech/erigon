@@ -319,7 +319,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 
 	var db kv.RwDB
 	if config.Dirs.DataDir == "" {
-		db = mdbx.New(label, log.New()).InMem("").MustOpen()
+		db = mdbx.New(label, logger).InMem("").MustOpen()
 		return db, nil
 	}
 
