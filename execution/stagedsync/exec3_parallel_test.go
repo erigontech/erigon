@@ -1693,6 +1693,65 @@ func TestParallelStateReadErrorUsesOperationalBlockResult(t *testing.T) {
 	require.True(t, result.Operational)
 }
 
+func newRetryLimitTestBlock() (*blockExecutor, *taskVersion) {
+	txTask := &exec.TxTask{
+		Header:  &types.Header{Number: *uint256.NewInt(1)},
+		TxIndex: 0,
+	}
+	eTask := &execTask{Task: txTask, index: 0}
+	be := newBlockExec(newParallelTestBlock(1), nil, nil, nil, nil, false, nil)
+	be.tasks = []*execTask{eTask}
+	be.results = make([]*execResult, len(be.tasks))
+	return be, &taskVersion{
+		execTask: eTask,
+		version:  state.Version{BlockNum: 1, TxIndex: 0, Incarnation: 2},
+	}
+}
+
+func TestParallelIncarnationLimitUsesOperationalBlockResult(t *testing.T) {
+	origin := errors.New("transaction execution failed")
+	for _, tc := range []struct {
+		name   string
+		origin error
+	}{
+		{name: "dependency retry"},
+		{name: "execution error retry", origin: origin},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			be, task := newRetryLimitTestBlock()
+
+			result, err := be.nextResult(context.Background(), nil, &exec.TxResult{
+				Task: task,
+				Err: protocol.ErrExecAbortError{
+					DependencyTxIndex: 0,
+					OriginError:       tc.origin,
+				},
+			}, nil)
+
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.True(t, result.Operational)
+			require.NotErrorIs(t, result.Err, rules.ErrInvalidBlock)
+			require.ErrorContains(t, result.Err, "too many incarnations")
+			if tc.origin != nil {
+				require.ErrorIs(t, result.Err, tc.origin)
+			}
+		})
+	}
+}
+
+func TestParallelValidatorRetryLimitUsesOperationalBlockResult(t *testing.T) {
+	be, _ := newRetryLimitTestBlock()
+	be.txIncarnations = []int{2}
+
+	result := be.retryLimitResult(0, 0, be.txIncarnations[0], "validator-invalid retries", nil)
+
+	require.NotNil(t, result)
+	require.True(t, result.Operational)
+	require.NotErrorIs(t, result.Err, rules.ErrInvalidBlock)
+	require.ErrorContains(t, result.Err, "too many validator-invalid retries")
+}
+
 func TestParallelTransitionPanicUsesOperationalBlockResult(t *testing.T) {
 	db := newResumeTestDB(t)
 	config := chain.TestChainBerlinConfig

@@ -2597,19 +2597,19 @@ func (be *blockExecutor) queueMapRelease(ws *state.WriteSet) {
 
 func (be *blockExecutor) awaitMapReleases() { be.mapReleasing.Wait() }
 
-// tooManyRetries returns an invalid-block result when tx has exceeded its
-// retry budget, otherwise nil. origin may be nil (validator-invalid path)
-// or carry the worker's underlying error.
-func (be *blockExecutor) tooManyRetries(tx, txIndex int, label string, origin error) *blockResult {
-	if be.txIncarnations[tx] <= len(be.tasks) {
+// retryLimitResult returns an operational result when the scheduler cannot
+// converge within the transaction's retry budget. Exhausting that budget does
+// not prove the block is invalid. origin retains an underlying worker error.
+func (be *blockExecutor) retryLimitResult(tx, txIndex, attempts int, label string, origin error) *blockResult {
+	if attempts <= len(be.tasks) {
 		return nil
 	}
 	if origin != nil {
-		return be.invalidBlockResult(fmt.Errorf("%w: could not apply tx %d:%d [%v]: %w: too many %s retries: %d, expected: %d",
-			rules.ErrInvalidBlock, be.number(), txIndex, be.tasks[tx].TxHash(), origin, label, be.txIncarnations[tx], len(be.tasks)))
+		return be.operationalBlockResult(fmt.Errorf("could not apply tx %d:%d [%v]: %w: too many %s: %d, expected: %d",
+			be.number(), txIndex, be.tasks[tx].TxHash(), origin, label, attempts, len(be.tasks)))
 	}
-	return be.invalidBlockResult(fmt.Errorf("%w: could not apply tx %d:%d [%v]: too many %s retries: %d, expected: %d",
-		rules.ErrInvalidBlock, be.number(), txIndex, be.tasks[tx].TxHash(), label, be.txIncarnations[tx], len(be.tasks)))
+	return be.operationalBlockResult(fmt.Errorf("could not apply tx %d:%d [%v]: too many %s: %d, expected: %d",
+		be.number(), txIndex, be.tasks[tx].TxHash(), label, attempts, len(be.tasks)))
 }
 
 func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, res *exec.TxResult, applyTx kv.TemporalTx) (result *blockResult, err error) {
@@ -2626,20 +2626,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			return be.operationalBlockResult(fmt.Errorf("block=%d txIdx=%d: %w", be.number(), res.Version().TxIndex, res.Err)), nil
 		}
 		if execErr, ok := res.Err.(protocol.ErrExecAbortError); ok {
-			if res.Version().Incarnation > len(be.tasks) {
-				// Parallel scheduler exhausted retries for this tx. Surface
-				// through blockResult.Err for the same reason as the other
-				// block-validity bailouts above: (nil, err) would race with
-				// the apply loop's channel-close completeness check and
-				// produce a doubled error chain. The underlying scheduler
-				// behaviour (why this test ordering hits the incarnation
-				// limit) is a separate investigation — see
-				// TestDeleteRecreateSlotsAcrossManyBlocks under
-				// GOMAXPROCS=2 -race for a stress repro.
-				if execErr.IsError() {
-					return be.invalidBlockResult(fmt.Errorf("%w: could not apply tx %d:%d [%v]: %w: too many incarnations: %d, expected: %d", rules.ErrInvalidBlock, be.number(), res.Version().TxIndex, task.TxHash(), execErr.OriginError, res.Version().Incarnation, len(be.tasks))), nil
-				}
-				return be.invalidBlockResult(fmt.Errorf("%w: could not apply tx %d:%d [%v]: too many incarnations: %d, expected: %d", rules.ErrInvalidBlock, be.number(), res.Version().TxIndex, task.TxHash(), res.Version().Incarnation, len(be.tasks))), nil
+			if r := be.retryLimitResult(tx, res.Version().TxIndex, res.Version().Incarnation, "incarnations", execErr.OriginError); r != nil {
+				return r, nil
 			}
 			if dbg.TraceTransactionIO && be.txIncarnations[tx] > 1 {
 				fmt.Println(be.number(), "err", execErr)
@@ -3067,7 +3055,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			be.execTasks.pushDeferred(tx)
 			be.preValidated[tx] = false
 			be.txIncarnations[tx]++
-			if r := be.tooManyRetries(tx, txVersion.TxIndex, "validator-invalid", nil); r != nil {
+			if r := be.retryLimitResult(tx, txVersion.TxIndex, be.txIncarnations[tx], "validator-invalid retries", nil); r != nil {
 				return r, nil
 			}
 		}
