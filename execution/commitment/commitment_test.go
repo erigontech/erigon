@@ -1070,7 +1070,13 @@ func TestReuseBytes(t *testing.T) {
 	require.Same(t, &dst[:1][0], &got[0], "must write into dst's backing array")
 
 	require.Nil(t, reuseBytes(dst, nil), "nil src must yield nil, as bytes.Clone does")
-	require.Equal(t, []byte{}, reuseBytes(dst, []byte{}), "empty src must stay non-nil empty")
+	require.Nil(t, reuseBytes(nil, nil))
+
+	// nil-ness must depend only on src, never on whether dst carries capacity
+	for _, d := range [][]byte{nil, make([]byte, 0, 8), make([]byte, 4)} {
+		require.NotNil(t, reuseBytes(d, []byte{}), "empty src must stay non-nil for any dst")
+		require.Empty(t, reuseBytes(d, []byte{}))
+	}
 
 	require.Equal(t, []byte{1, 2, 3, 4}, reuseBytes(make([]byte, 0, 1), []byte{1, 2, 3, 4}))
 }

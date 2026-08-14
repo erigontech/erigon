@@ -280,6 +280,9 @@ func reuseBytes(dst, src []byte) []byte {
 	if src == nil {
 		return nil
 	}
+	if cap(dst) == 0 {
+		dst = make([]byte, 0, len(src)) // non-nil even for an empty src, as bytes.Clone is
+	}
 	return append(dst[:0], src...)
 }
 
