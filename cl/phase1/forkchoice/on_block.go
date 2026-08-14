@@ -90,8 +90,8 @@ func collectOnBlockLatencyToUnixTime(ethClock eth_clock.EthereumClock, slot, cur
 	monitor.ObserveBlockImportingLatency(initialSlotTime)
 }
 
-func hasCompleteBlobData(blobs [][]byte, proofs [][][]byte, expected int) bool {
-	if len(blobs) != expected || len(proofs) != expected {
+func hasBlobDataForAllCommitments(blobs [][]byte, proofs [][][]byte, expectedCount int) bool {
+	if len(blobs) != expectedCount || len(proofs) != expectedCount {
 		return false
 	}
 	for i, blob := range blobs {
@@ -178,10 +178,10 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	startEngine := time.Now()
 	isVerifiedExecutionPayload := f.verifiedExecutionPayload.Contains(blockRoot)
 	if blockVersion < clparams.GloasVersion {
-		// Find the versioned hashes from blob commitments
+		blobCommitmentCount := block.Block.Body.BlobKzgCommitments.Len()
 		var versionedHashes []common.Hash
 		if newPayload && f.engine != nil && block.Version() >= clparams.DenebVersion {
-			versionedHashes = []common.Hash{}
+			versionedHashes = make([]common.Hash, 0, blobCommitmentCount)
 			solid.RangeErr[*cltypes.KZGCommitment](block.Block.Body.BlobKzgCommitments, func(i1 int, k *cltypes.KZGCommitment, i2 int) error {
 				versionedHash, err := utils.KzgCommitmentToVersionedHash(common.Bytes48(*k))
 				if err != nil {
@@ -192,33 +192,30 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			})
 		}
 
-		// Check if EL has blobs
-		elHasBlobs := false
-		if f.engine != nil && f.peerDas != nil && checkDataAvaiability && block.Block.Body.BlobKzgCommitments.Len() > 0 && !f.peerDas.IsArchivedMode() {
-			blobsWithProof, proofs, err := f.engine.GetBlobs(ctx, versionedHashes, block.Version())
+		hasAllVersionedHashes := len(versionedHashes) == blobCommitmentCount
+		elHasBlobData := false
+		if f.engine != nil && f.peerDas != nil && checkDataAvaiability && blobCommitmentCount > 0 && !f.peerDas.IsArchivedMode() && hasAllVersionedHashes {
+			blobs, proofs, err := f.engine.GetBlobs(ctx, versionedHashes, block.Version())
 			if err != nil {
 				log.Warn("OnBlock: GetBlobs failed", "blockRoot", common.Hash(blockRoot), "err", err)
 			}
-			elHasBlobs = err == nil && hasCompleteBlobData(blobsWithProof, proofs, len(versionedHashes))
-			log.Trace("OnBlock: EL blob data availability", "blockRoot", common.Hash(blockRoot), "elHasBlobs", elHasBlobs)
+			elHasBlobData = err == nil && hasBlobDataForAllCommitments(blobs, proofs, blobCommitmentCount)
+			log.Trace("OnBlock: EL blob data availability", "blockRoot", common.Hash(blockRoot), "elHasBlobData", elHasBlobData)
 		}
 
-		// Check if blob data is available (skip if blobs are in txpool)
-		if checkDataAvaiability && block.Block.Body.BlobKzgCommitments.Len() > 0 && !elHasBlobs {
+		if checkDataAvaiability && blobCommitmentCount > 0 && !elHasBlobData {
 			if block.Version() >= clparams.FuluVersion && f.peerDas != nil {
 				available, err := f.peerDas.IsDataAvailable(block.Block.Slot, blockRoot)
 				if err != nil {
 					return err
 				}
 				if !available {
-					if f.syncedDataManager.Syncing() {
-						return ErrEIP7594ColumnDataNotAvailable
-					} else {
+					if !f.syncedDataManager.Syncing() {
 						if err := f.peerDas.SyncColumnDataLater(block); err != nil {
 							log.Warn("failed to schedule deferred column data sync", "slot", block.Block.Slot, "blockRoot", blockRoot, "err", err)
 						}
-						return ErrEIP7594ColumnDataNotAvailable
 					}
+					return ErrEIP7594ColumnDataNotAvailable
 				}
 			} else if block.Version() >= clparams.DenebVersion {
 				if err := f.isDataAvailable(ctx, block.Block.Slot, blockRoot, block.Block.Body.BlobKzgCommitments); err != nil {

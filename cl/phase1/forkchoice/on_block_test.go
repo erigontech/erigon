@@ -16,40 +16,91 @@
 
 package forkchoice
 
-import "testing"
+import (
+	"context"
+	"testing"
 
-func TestHasCompleteBlobDataRejectsMissingBlob(t *testing.T) {
+	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
+
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	dasmock "github.com/erigontech/erigon/cl/das/mock_services"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/common"
+)
+
+func TestOnBlockChecksDataAvailabilityWithoutNewPayload(t *testing.T) {
+	store := buildExAnteStore(t)
+	cfg := clparams.MainnetBeaconConfig
+	cfg.FuluForkEpoch = 1
+	cfg.InitializeForkSchedule()
+	store.beaconCfg = &cfg
+
+	parentRoot, _, err := store.GetHead(nil)
+	require.NoError(t, err)
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.FuluVersion)
+	block.Block.Slot = cfg.SlotsPerEpoch
+	block.Block.ParentRoot = parentRoot
+	block.Block.Body.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})
+	store.OnTick(block.Block.Slot * cfg.SecondsPerSlot)
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+
+	ctrl := gomock.NewController(t)
+	store.engine = execution_client.NewMockExecutionEngine(ctrl)
+
+	peerDas := dasmock.NewMockPeerDas(ctrl)
+	peerDas.EXPECT().IsArchivedMode().Return(false)
+	peerDas.EXPECT().IsDataAvailable(block.Block.Slot, common.Hash(blockRoot)).Return(false, nil)
+	peerDas.EXPECT().SyncColumnDataLater(block).Return(nil)
+	store.InitPeerDas(peerDas)
+
+	err = store.OnBlock(context.Background(), block, false, false, true)
+	require.ErrorIs(t, err, ErrEIP7594ColumnDataNotAvailable)
+}
+
+func TestHasBlobDataForAllCommitmentsRejectsMissingBlob(t *testing.T) {
 	blobs := make([][]byte, 1)
 	proofs := [][][]byte{{{1}}}
 
-	if hasCompleteBlobData(blobs, proofs, 1) {
+	if hasBlobDataForAllCommitments(blobs, proofs, 1) {
 		t.Fatal("missing blob must not report blob data as complete")
 	}
 }
 
-func TestHasCompleteBlobDataRejectsMissingProofs(t *testing.T) {
+func TestHasBlobDataForAllCommitmentsRejectsMissingProofs(t *testing.T) {
 	blobs := [][]byte{{1}}
 	proofs := make([][][]byte, 1)
 
-	if hasCompleteBlobData(blobs, proofs, 1) {
+	if hasBlobDataForAllCommitments(blobs, proofs, 1) {
 		t.Fatal("blob data without proofs must not report as complete")
 	}
 }
 
-func TestHasCompleteBlobDataRejectsEmptyProof(t *testing.T) {
+func TestHasBlobDataForAllCommitmentsRejectsEmptyProof(t *testing.T) {
 	blobs := [][]byte{{1}}
 	proofs := [][][]byte{{nil}}
 
-	if hasCompleteBlobData(blobs, proofs, 1) {
+	if hasBlobDataForAllCommitments(blobs, proofs, 1) {
 		t.Fatal("empty proof must not report blob data as complete")
 	}
 }
 
-func TestHasCompleteBlobDataAcceptsCompleteEntries(t *testing.T) {
+func TestHasBlobDataForAllCommitmentsRejectsUnexpectedCount(t *testing.T) {
+	blobs := [][]byte{{1}}
+	proofs := [][][]byte{{{2}}}
+
+	if hasBlobDataForAllCommitments(blobs, proofs, 2) {
+		t.Fatal("partial blob data must not report as complete")
+	}
+}
+
+func TestHasBlobDataForAllCommitmentsAcceptsCompleteEntries(t *testing.T) {
 	blobs := [][]byte{{1}, {2}}
 	proofs := [][][]byte{{{3}}, {{4}}}
 
-	if !hasCompleteBlobData(blobs, proofs, 2) {
+	if !hasBlobDataForAllCommitments(blobs, proofs, 2) {
 		t.Fatal("complete blob data must be accepted")
 	}
 }
