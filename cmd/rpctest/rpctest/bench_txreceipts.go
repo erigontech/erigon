@@ -49,7 +49,7 @@ func BenchTxReceipt(erigonURL, gethURL string, needCompare bool, blockFrom uint6
 	var blockNumber EthBlockNumber
 	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
 	if res.Err != nil {
-		return fmt.Errorf("Could not get block number: %v\n", res.Err)
+		return fmt.Errorf("Could not get block number: %w\n", res.Err)
 	}
 	if blockNumber.Error != nil {
 		return fmt.Errorf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
@@ -102,7 +102,7 @@ func BenchBlockReceipts(erigonURL, gethURL string, needCompare bool, blockFrom u
 	var blockNumber EthBlockNumber
 	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
 	if res.Err != nil {
-		return fmt.Errorf("Could not get block number: %v\n", res.Err)
+		return fmt.Errorf("Could not get block number: %w\n", res.Err)
 	}
 	if blockNumber.Error != nil {
 		return fmt.Errorf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)

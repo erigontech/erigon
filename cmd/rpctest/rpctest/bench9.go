@@ -34,7 +34,7 @@ func Bench9(erigonURL, gethURL string, needCompare, latest bool) error {
 	var blockNumber EthBlockNumber
 	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
 	if res.Err != nil {
-		return fmt.Errorf("Could not get block number: %v\n", res.Err)
+		return fmt.Errorf("Could not get block number: %w\n", res.Err)
 	}
 	if blockNumber.Error != nil {
 		return fmt.Errorf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
@@ -60,7 +60,7 @@ func Bench9(erigonURL, gethURL string, needCompare, latest bool) error {
 		res = reqGen.Erigon("debug_accountRange", reqGen.accountRange(bn, page, 256), &sr)
 
 		if res.Err != nil {
-			return fmt.Errorf("Could not get accountRange (Erigon): %v\n", res.Err)
+			return fmt.Errorf("Could not get accountRange (Erigon): %w\n", res.Err)
 		}
 
 		getProofBn := bn
@@ -90,7 +90,7 @@ func Bench9(erigonURL, gethURL string, needCompare, latest bool) error {
 			}
 			res = reqGen.Erigon("eth_getProof", reqGen.getProof(getProofBn, address, storageList), &proof)
 			if res.Err != nil {
-				return fmt.Errorf("Could not get getProof (Erigon): %v\n", res.Err)
+				return fmt.Errorf("Could not get getProof (Erigon): %w\n", res.Err)
 			}
 			if proof.Error != nil {
 				fmt.Printf("Error getting getProof (Erigon): %d %s\n", proof.Error.Code, proof.Error.Message)
@@ -101,7 +101,7 @@ func Bench9(erigonURL, gethURL string, needCompare, latest bool) error {
 
 				res = reqGen.Geth("eth_getProof", reqGen.getProof(getProofBn, address, storageList), &gethProof)
 				if res.Err != nil {
-					return fmt.Errorf("Could not get getProof (geth): %v\n", res.Err)
+					return fmt.Errorf("Could not get getProof (geth): %w\n", res.Err)
 				}
 				if gethProof.Error != nil {
 					fmt.Printf("Error getting getProof (geth): %d %s\n", gethProof.Error.Code, gethProof.Error.Message)

@@ -213,7 +213,7 @@ func (evm *EVM) handleFrameRevert(gasRemaining *mdgas.MdGas, err error, snapshot
 		gasRemaining.Execution += stateGasSpill
 		gasRemaining.State = entryStateReservoir
 	}
-	if err != ErrExecutionReverted {
+	if !errors.Is(err, ErrExecutionReverted) {
 		if evm.config.Tracer != nil && evm.config.Tracer.OnGasChange != nil {
 			evm.config.Tracer.OnGasChange(gasRemaining.Execution, 0, tracing.GasChangeCallFailedExecution)
 		}
@@ -585,7 +585,7 @@ func (evm *EVM) createWithPreparation(caller accounts.Address, codeAndHash *code
 		var prepared createPreparation
 		prepared, err = evm.prepareCreate(caller, address, value, incrementNonce, bailout, false)
 		if err != nil {
-			if err != ErrDepth && err != ErrInsufficientBalance && err != ErrNonceUintOverflow {
+			if !errors.Is(err, ErrDepth) && !errors.Is(err, ErrInsufficientBalance) && !errors.Is(err, ErrNonceUintOverflow) {
 				gasRemaining = mdgas.MdGas{}
 			}
 			return
@@ -711,7 +711,7 @@ func (evm *EVM) createWithPreparation(caller accounts.Address, codeAndHash *code
 	// When an error was returned by the EVM or when setting the creation code
 	// above, we revert to the snapshot and consume any gas remaining. Additionally,
 	// when we're in Homestead, this also counts for code storage gas errors.
-	if err != nil && (evm.chainRules.IsHomestead || err != ErrCodeStoreOutOfGas) {
+	if err != nil && (evm.chainRules.IsHomestead || !errors.Is(err, ErrCodeStoreOutOfGas)) {
 		evm.handleFrameRevert(&gasRemaining, err, snapshot, gas.State, gasUsed.StateSpill)
 	}
 

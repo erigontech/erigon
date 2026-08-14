@@ -21,6 +21,7 @@ package vm
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"math"
 
@@ -1010,7 +1011,7 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 	var suberr error
 	if evm.chainRules.IsAmsterdam {
 		preparation, suberr = evm.prepareCreate(scope.Contract.Address(), address, value, true, false, true)
-		if suberr != nil && suberr != ErrDepth && suberr != ErrInsufficientBalance && suberr != ErrNonceUintOverflow {
+		if suberr != nil && !errors.Is(suberr, ErrDepth) && !errors.Is(suberr, ErrInsufficientBalance) && !errors.Is(suberr, ErrNonceUintOverflow) {
 			return pc, nil, suberr
 		}
 	}
@@ -1033,7 +1034,7 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 		forwarded = true
 		if !evm.chainRules.IsAmsterdam {
 			preparation, suberr = evm.prepareCreate(scope.Contract.Address(), address, value, true, false, true)
-			if suberr != nil && suberr != ErrDepth && suberr != ErrInsufficientBalance && suberr != ErrNonceUintOverflow {
+			if suberr != nil && !errors.Is(suberr, ErrDepth) && !errors.Is(suberr, ErrInsufficientBalance) && !errors.Is(suberr, ErrNonceUintOverflow) {
 				returnGas = mdgas.MdGas{}
 			}
 		}
@@ -1062,7 +1063,7 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 	// ignore this error and pretend the operation was successful.
 	var result uint256.Int
 	if suberr != nil {
-		if !evm.ChainRules().IsHomestead && suberr == ErrCodeStoreOutOfGas {
+		if !evm.ChainRules().IsHomestead && errors.Is(suberr, ErrCodeStoreOutOfGas) {
 			addrVal := addr.Value()
 			result.SetBytes(addrVal[:])
 		}
@@ -1071,7 +1072,7 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 		result.SetBytes(addrVal[:])
 	}
 	scope.Stack.push(result)
-	if suberr == ErrExecutionReverted {
+	if errors.Is(suberr, ErrExecutionReverted) {
 		evm.returnData = res // set REVERT data to return data buffer
 		return pc, res, nil
 	}
@@ -1125,7 +1126,7 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	} else {
 		res.SetOne()
 	}
-	if err == nil || err == ErrExecutionReverted {
+	if err == nil || errors.Is(err, ErrExecutionReverted) {
 		ret = bytes.Clone(ret)
 		scope.Memory.Set(retOffset, retSize, ret)
 	}
@@ -1179,7 +1180,7 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	} else {
 		res.SetOne()
 	}
-	if err == nil || err == ErrExecutionReverted {
+	if err == nil || errors.Is(err, ErrExecutionReverted) {
 		ret = bytes.Clone(ret)
 		scope.Memory.Set(retOffset, retSize, ret)
 	}
@@ -1225,7 +1226,7 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	} else {
 		res.SetOne()
 	}
-	if err == nil || err == ErrExecutionReverted {
+	if err == nil || errors.Is(err, ErrExecutionReverted) {
 		ret = bytes.Clone(ret)
 		scope.Memory.Set(retOffset, retSize, ret)
 	}
@@ -1271,7 +1272,7 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 	} else {
 		res.SetOne()
 	}
-	if err == nil || err == ErrExecutionReverted {
+	if err == nil || errors.Is(err, ErrExecutionReverted) {
 		scope.Memory.Set(retOffset, retSize, ret)
 	}
 

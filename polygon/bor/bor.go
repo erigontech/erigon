@@ -722,7 +722,7 @@ func (c *Bor) Prepare(chain rules.ChainHeaderReader, header *types.Header, state
 			blockExtraDataBytes, err := rlp.EncodeToBytes(blockExtraData)
 			if err != nil {
 				log.Error("[bor] encoding block extra data", "err", err)
-				return fmt.Errorf("error while encoding block extra data: %v", err)
+				return fmt.Errorf("error while encoding block extra data: %w", err)
 			}
 
 			header.Extra = append(header.Extra, blockExtraDataBytes...)
@@ -740,7 +740,7 @@ func (c *Bor) Prepare(chain rules.ChainHeaderReader, header *types.Header, state
 		blockExtraDataBytes, err := rlp.EncodeToBytes(blockExtraData)
 		if err != nil {
 			log.Error("[bor] encoding block extra data", "err", err)
-			return fmt.Errorf("error while encoding block extra data: %v", err)
+			return fmt.Errorf("error while encoding block extra data: %w", err)
 		}
 
 		header.Extra = append(header.Extra, blockExtraDataBytes...)
@@ -842,7 +842,7 @@ func (c *Bor) changeContractCodeIfNeeded(headerNumber uint64, state *state.Intra
 		if blockNumber == strconv.FormatUint(headerNumber, 10) {
 			allocs, err := types.DecodeGenesisAlloc(genesisAlloc)
 			if err != nil {
-				return fmt.Errorf("failed to decode genesis alloc: %v", err)
+				return fmt.Errorf("failed to decode genesis alloc: %w", err)
 			}
 
 			for addr, account := range allocs {

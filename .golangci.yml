@@ -20,9 +20,9 @@ linters:
     - makezero
     - errchkjson
     - noctx
+    - errorlint
   disable:
     - testifylint
-    - errorlint #TODO: enable me
     - unused #TODO: enable me
     - contextcheck
     - err113

@@ -93,19 +93,19 @@ func IsValidIndexedPayloadAttestation(s abstract.BeaconState, attestation *cltyp
 	epoch := GetEpochAtSlot(s.BeaconConfig(), attestation.Data.Slot)
 	domain, err := s.GetDomain(s.BeaconConfig().DomainPtcAttester, epoch)
 	if err != nil {
-		return false, fmt.Errorf("unable to get the domain: %v", err)
+		return false, fmt.Errorf("unable to get the domain: %w", err)
 	}
 
 	// Compute signing root
 	signingRoot, err := fork.ComputeSigningRoot(attestation.Data, domain)
 	if err != nil {
-		return false, fmt.Errorf("unable to get signing root: %v", err)
+		return false, fmt.Errorf("unable to get signing root: %w", err)
 	}
 
 	// Verify aggregate signature
 	valid, err := bls.VerifyAggregate(attestation.Signature[:], signingRoot[:], pks)
 	if err != nil {
-		return false, fmt.Errorf("error while validating signature: %v", err)
+		return false, fmt.Errorf("error while validating signature: %w", err)
 	}
 	if !valid {
 		return false, errors.New("invalid aggregate signature")

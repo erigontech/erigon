@@ -141,7 +141,7 @@ func TestBlobsByRangeHandler(t *testing.T) {
 	for i := range sidecars {
 		forkDigest := make([]byte, 4)
 		_, err := stream.Read(forkDigest)
-		if err != nil && err != io.EOF {
+		if err != nil && !errors.Is(err, io.EOF) {
 			require.NoError(t, err)
 		}
 
@@ -178,7 +178,7 @@ func TestBlobsByRangeHandler(t *testing.T) {
 	}
 
 	_, err = stream.Read(make([]byte, 1))
-	if err != io.EOF {
+	if !errors.Is(err, io.EOF) {
 		t.Fatal("Stream is not empty")
 	}
 
@@ -265,7 +265,7 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 	for i := range sidecars {
 		forkDigest := make([]byte, 4)
 		_, err := stream.Read(forkDigest)
-		if err != nil && err != io.EOF {
+		if err != nil && !errors.Is(err, io.EOF) {
 			require.NoError(t, err)
 		}
 
@@ -302,7 +302,7 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 	}
 
 	_, err = stream.Read(make([]byte, 1))
-	if err != io.EOF {
+	if !errors.Is(err, io.EOF) {
 		t.Fatal("Stream is not empty")
 	}
 

@@ -32,7 +32,7 @@ func Bench6(erigon_url string) error {
 `
 	var blockNumber EthBlockNumber
 	if err := post(client, erigon_url, fmt.Sprintf(template, req_id), &blockNumber); err != nil {
-		return fmt.Errorf("Could not get block number: %v\n", err)
+		return fmt.Errorf("Could not get block number: %w\n", err)
 	}
 	if blockNumber.Error != nil {
 		return fmt.Errorf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
@@ -48,7 +48,7 @@ func Bench6(erigon_url string) error {
 `
 		var b EthBlockByNumber
 		if err := post(client, erigon_url, fmt.Sprintf(template, bn, req_id), &b); err != nil {
-			return fmt.Errorf("Could not retrieve block %d: %v\n", bn, err)
+			return fmt.Errorf("Could not retrieve block %d: %w\n", bn, err)
 		}
 		if b.Error != nil {
 			fmt.Printf("Error retrieving block: %d %s\n", b.Error.Code, b.Error.Message)
@@ -67,7 +67,7 @@ func Bench6(erigon_url string) error {
 			var receipt EthReceipt
 			if err := post(client, erigon_url, fmt.Sprintf(template, txn.Hash, req_id), &receipt); err != nil {
 				printRPCRequest(client, erigon_url, fmt.Sprintf(template, txn.Hash, req_id))
-				return fmt.Errorf("Count not get receipt: %s: %v\n", txn.Hash, err)
+				return fmt.Errorf("Count not get receipt: %s: %w\n", txn.Hash, err)
 			}
 			if receipt.Error != nil {
 				return fmt.Errorf("Error getting receipt: %d %s\n", receipt.Error.Code, receipt.Error.Message)

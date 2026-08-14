@@ -415,7 +415,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	if err := randaoReveal.UnmarshalText([]byte(randaoRevealString)); err != nil {
 		return nil, beaconhttp.NewEndpointError(
 			http.StatusBadRequest,
-			fmt.Errorf("invalid randao_reveal: %v", err),
+			fmt.Errorf("invalid randao_reveal: %w", err),
 		)
 	}
 	if r.URL.Query().Has("skip_randao_verification") {
@@ -439,7 +439,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(
 			http.StatusBadRequest,
-			fmt.Errorf("invalid slot: %v", err),
+			fmt.Errorf("invalid slot: %w", err),
 		)
 	}
 
@@ -452,7 +452,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		if err != nil {
 			return nil, beaconhttp.NewEndpointError(
 				http.StatusBadRequest,
-				fmt.Errorf("invalid builder_boost_factor: %v", err),
+				fmt.Errorf("invalid builder_boost_factor: %w", err),
 			)
 		}
 	}
@@ -671,7 +671,7 @@ func (a *ApiHandler) produceBlock(
 		}()
 		if a.routerCfg.Builder && a.builderClient != nil {
 			builderHeader, builderErr = a.getBuilderPayload(ctx, baseState, targetSlot)
-			if builderErr != nil && builderErr != errBuilderNotEnabled {
+			if builderErr != nil && !errors.Is(builderErr, errBuilderNotEnabled) {
 				log.Warn("Failed to get builder payload", "err", builderErr)
 			}
 		}

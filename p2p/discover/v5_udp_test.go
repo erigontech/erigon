@@ -23,6 +23,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"errors"
 	"encoding/binary"
 	"fmt"
 	"math/rand"
@@ -394,7 +395,7 @@ func TestUDPv5_pingCall(t *testing.T) {
 		done <- err
 	}()
 	test.waitPacketOut(func(p *v5wire.Ping, addr netip.AddrPort, _ v5wire.Nonce) {})
-	if err := <-done; err != errTimeout {
+	if err := <-done; !errors.Is(err, errTimeout) {
 		t.Fatalf("want errTimeout, got %q", err)
 	}
 
@@ -419,7 +420,7 @@ func TestUDPv5_pingCall(t *testing.T) {
 		wrongAddr := netip.MustParseAddrPort("33.44.55.22:10101")
 		test.packetInFrom(test.remotekey, wrongAddr, &v5wire.Pong{ReqID: p.ReqID})
 	})
-	if err := <-done; err != errTimeout {
+	if err := <-done; !errors.Is(err, errTimeout) {
 		t.Fatalf("want errTimeout for reply from wrong IP, got %q", err)
 	}
 }
@@ -619,7 +620,7 @@ func TestUDPv5_multipleHandshakeRounds(t *testing.T) {
 	test.waitPacketOut(func(p *v5wire.Ping, addr netip.AddrPort, nonce v5wire.Nonce) {
 		test.packetIn(&v5wire.Whoareyou{Nonce: nonce})
 	})
-	if err := <-done; err != errTimeout {
+	if err := <-done; !errors.Is(err, errTimeout) {
 		t.Fatalf("unexpected ping error: %q", err)
 	}
 }
@@ -734,7 +735,7 @@ func TestUDPv5_talkRequest(t *testing.T) {
 		done <- err
 	}()
 	test.waitPacketOut(func(p *v5wire.TalkRequest, addr netip.AddrPort, _ v5wire.Nonce) {})
-	if err := <-done; err != errTimeout {
+	if err := <-done; !errors.Is(err, errTimeout) {
 		t.Fatalf("want errTimeout, got %q", err)
 	}
 
@@ -1005,7 +1006,7 @@ func (c *testCodec) SessionNode(id enode.ID, addr netip.AddrPort) *enode.Node {
 
 func (c *testCodec) decodeFrame(input []byte) (frame testCodecFrame, p v5wire.Packet, err error) {
 	if err = rlp.DecodeBytes(input, &frame); err != nil {
-		return frame, nil, fmt.Errorf("invalid frame: %v", err)
+		return frame, nil, fmt.Errorf("invalid frame: %w", err)
 	}
 	switch frame.Ptype {
 	case v5wire.UnknownPacket:
@@ -1097,10 +1098,10 @@ func (test *udpV5Test) waitPacketOut(validate any) (closed bool) {
 	exptype := fn.Type().In(0)
 
 	dgram, err := test.pipe.receive()
-	if err == errClosed {
+	if errors.Is(err, errClosed) {
 		return true
 	}
-	if err == errTimeout {
+	if errors.Is(err, errTimeout) {
 		test.t.Fatalf("timed out waiting for %v", exptype)
 		return false
 	}
