@@ -265,12 +265,22 @@ func getDeferredUpdate(prefix []byte, raw, prev []byte) *DeferredBranchUpdate {
 	getDeferredUpdateCount.Add(1)
 	upd := deferredUpdatePool.Get().(*DeferredBranchUpdate)
 
-	upd.prefix = append(upd.prefix[:0], prefix...)
-	upd.raw = append(upd.raw[:0], raw...)
-	upd.prev = append(upd.prev[:0], prev...)
+	upd.prefix = reuseBytes(upd.prefix, prefix)
+	upd.raw = reuseBytes(upd.raw, raw)
+	upd.prev = reuseBytes(upd.prev, prev)
 	upd.encoded = nil
 
 	return upd
+}
+
+// reuseBytes copies src into dst's backing array, matching bytes.Clone's nil handling:
+// a nil src yields nil, so pool history cannot change the result's nil-ness. Callers
+// distinguish a nil prev ("look it up") from an empty one ("known absent").
+func reuseBytes(dst, src []byte) []byte {
+	if src == nil {
+		return nil
+	}
+	return append(dst[:0], src...)
 }
 
 // putDeferredUpdate returns a DeferredBranchUpdate to the global pool.

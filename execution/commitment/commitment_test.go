@@ -1073,3 +1073,13 @@ func TestGetDeferredUpdate_WarmPoolDoesNotAllocate(t *testing.T) {
 	})
 	require.Zero(t, allocs, "get/put cycle must not allocate once the pool is warm")
 }
+
+// A recycled buffer must not turn a nil prev into an empty one: callers read nil as
+// "look up the previous value" and empty as "known absent".
+func TestGetDeferredUpdate_WarmPoolPreservesNilPrev(t *testing.T) {
+	putDeferredUpdate(getDeferredUpdate([]byte{1}, []byte{2, 3}, []byte{4, 5, 6}))
+
+	upd := getDeferredUpdate([]byte{1}, []byte{2, 3}, nil)
+	defer putDeferredUpdate(upd)
+	require.Nil(t, upd.prev)
+}
