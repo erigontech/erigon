@@ -200,9 +200,15 @@ func BenchmarkStorageDiversity(b *testing.B) {
 
 // BenchmarkAddressDiversity measures repeated BALANCE over n distinct warm
 // accounts, the way an airdrop or batch contract walks a holder list. The sweep
-// assumes the EVM interns addresses through a 256-entry table: 16 fits, 256
-// fills it and 1024 forces the conflict-miss path the call benchmarks never
-// reach — they touch a handful of addresses and hit every time.
+// assumes the EVM interns addresses through a 256-entry direct-mapped table and
+// covers the miss side the call benchmarks never reach — they touch a handful of
+// addresses and hit every time.
+//
+// The addresses are keccak output, so they land in buckets at random rather than
+// one per bucket: at n=256 they cover about 163 of the 256, and two thirds of
+// them share an entry with another address and miss. So 16 is the hitting tier,
+// 256 is already conflict thrash at table size, and 1024 is conflict thrash four
+// times oversubscribed.
 func BenchmarkAddressDiversity(b *testing.B) {
 	for _, n := range []int{16, 256, 1024} {
 		p, lbl := program.New().Jumpdest()

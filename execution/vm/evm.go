@@ -23,7 +23,6 @@ import (
 	"errors"
 	"fmt"
 	"sync/atomic"
-	"unsafe"
 
 	"github.com/holiman/uint256"
 
@@ -97,12 +96,12 @@ type EVM struct {
 	addrOps     uint32
 }
 
-// evmSizeClass is the Go allocation size class EVM fills exactly. One more word
-// moves every EVM into the 480-byte class, so a field added here has to either
-// pack into existing padding or accept that cost knowingly.
+// evmSizeClass is the Go allocation size class EVM fills. One more word moves
+// every EVM into the 480-byte class, so a field added here has to either pack
+// into existing padding or accept that cost knowingly. TestEVMFitsItsSizeClass
+// checks it — a build-time assert would also fire in every package that grows
+// an embedded type such as evmtypes.BlockContext.
 const evmSizeClass = 448
-
-var _ [0]struct{} = [unsafe.Sizeof(EVM{}) - evmSizeClass]struct{}{}
 
 // storageKeyCacheSize must comfortably exceed a contract's live slot count,
 // or conflict misses dominate.
@@ -162,7 +161,7 @@ func (evm *EVM) internStorageKey(word *uint256.Int) accounts.StorageKey {
 
 // Address streams are far narrower than storage-key streams — a handful of
 // routers and tokens dominate — so the address table is a quarter of the size
-// and wins its zeroing back sooner.
+// and pays its zeroing back sooner.
 const (
 	addressCacheSize   = 256
 	addressCacheMinOps = 32
@@ -171,23 +170,22 @@ const (
 var _ [0]struct{} = [addressCacheSize & (addressCacheSize - 1)]struct{}{}
 
 // addressCache is storageKeyCache for InternAddress; see that type for why the
-// entries never go stale and why the words sit beside the handles.
+// entries never go stale and why the words sit beside the handles. It differs in
+// its key: a stack word may hold anything above the low 20 bytes, so index,
+// compare and stored word all drop those bits and one entry then serves an
+// address whatever the rest of its word holds.
 type addressCache struct {
 	handles [addressCacheSize]accounts.Address
 	words   [addressCacheSize]uint256.Int
 }
 
-// addrIndex mixes only what Bytes20 reads: limbs 0 and 1 plus the low half of
-// limb 2. A stack word may carry anything above the address, and that dirt must
-// reach neither the index nor the compare — the bucket is masked to the low
-// bits, so a dirty word lands on its clean twin's entry, where a whole-word
-// compare would have the two evict each other on every access.
+// addrIndex mixes only the limbs Bytes20 reads: 0, 1 and the low half of 2.
 func addrIndex(word *uint256.Int) uint64 {
 	return (word[0] ^ word[1] ^ uint64(uint32(word[2]))) & (addressCacheSize - 1)
 }
 
-// fill clears the bits above the address, so the entry hits for every form of
-// the word carrying it.
+// fill stores the word with everything above the address cleared, which is also
+// what lets the probe compare three limbs instead of four.
 func (c *addressCache) fill(i uint64, word *uint256.Int) accounts.Address {
 	h := accounts.InternAddress(word.Bytes20())
 	c.words[i] = uint256.Int{word[0], word[1], uint64(uint32(word[2])), 0}
@@ -196,8 +194,8 @@ func (c *addressCache) fill(i uint64, word *uint256.Int) accounts.Address {
 }
 
 // internAddress returns the low 20 bytes of word interned as an Address,
-// skipping unique.Make for words seen before. One entry serves an address in
-// every form its word can take.
+// skipping unique.Make for addresses seen before. Short-lived EVMs intern
+// uncached: the table only earns back its allocation over a few dozen ops.
 func (evm *EVM) internAddress(word *uint256.Int) accounts.Address {
 	c := evm.addrCache
 	if c == nil {
@@ -207,6 +205,7 @@ func (evm *EVM) internAddress(word *uint256.Int) accounts.Address {
 		}
 		c = new(addressCache)
 		evm.addrCache = c
+		return c.fill(addrIndex(word), word)
 	}
 	i := addrIndex(word)
 	if h := c.handles[i]; h != accounts.NilAddress && c.words[i][0] == word[0] &&

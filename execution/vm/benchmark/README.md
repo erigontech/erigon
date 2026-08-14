@@ -70,6 +70,7 @@ Targets SLOAD/SSTORE which account for 6% of DeFi gas, plus account reads.
 - `BenchmarkTransientStorage` — TLOAD/TSTORE (EIP-1153)
 - `BenchmarkStorageDiversity` — 100/1000 unique slot accesses
 - `BenchmarkAddressDiversity` — BALANCE over 16/256/1024 distinct warm accounts
+  (16 hits the address intern table; 256 and 1024 measure its conflict misses)
 
 Hot paths: `IntraBlockState.GetState()`, dirty/origin/DB cache hierarchy, the
 EVM address intern table.
