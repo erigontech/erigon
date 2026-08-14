@@ -248,7 +248,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 
 		// If genesis state is provided and is hardcoded, use it
 		if initial_state.IsGenesisStateSupported(config.NetworkId) && !isGenesisDBInitialized {
-			genesisState, err = initial_state.GetGenesisState(config.NetworkId)
+			genesisState, err = initial_state.GetGenesisState(ctx, config.NetworkId)
 			if err != nil {
 				return err
 			}
@@ -629,9 +629,13 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			payloadAttestationService,
 			proposerPreferencesService,
 		)
-		go beacon.ListenAndServe(&beacon.LayeredBeaconHandler{
-			ArchiveApi: apiHandler,
-		}, config.BeaconAPIRouter)
+		go func() {
+			if err := beacon.ListenAndServe(ctx, &beacon.LayeredBeaconHandler{
+				ArchiveApi: apiHandler,
+			}, config.BeaconAPIRouter); err != nil {
+				log.Warn("[Beacon API] error serving", "err", err)
+			}
+		}()
 		log.Info("Beacon API started", "addr", config.BeaconAPIRouter.Address)
 	}
 

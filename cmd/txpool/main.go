@@ -202,7 +202,7 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 	}
 
 	miningGrpcServer := privateapi.NewMiningServer(ctx, &rpcdaemontest.IsMiningMock{}, nil, logger)
-	grpcServer, err := txpool.StartGrpc(txpoolGrpcServer, miningGrpcServer, txpoolApiAddr, nil, logger)
+	grpcServer, err := txpool.StartGrpc(ctx, txpoolGrpcServer, miningGrpcServer, txpoolApiAddr, nil, logger)
 	if err != nil {
 		return err
 	}

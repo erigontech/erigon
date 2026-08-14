@@ -577,7 +577,7 @@ func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 			return
 		}
 
-		valid, err := s.handshaker.ValidatePeer(peerId)
+		valid, err := s.handshaker.ValidatePeer(s.ctx, peerId)
 		if err != nil {
 			// Handshake transport error (stream reset, timeout, etc.) — keep the peer.
 			// The peer may still work for gossip even if status exchange failed.
