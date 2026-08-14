@@ -16,7 +16,10 @@ permissions:
   id-token: write
 
 concurrency:
-  group: docs-pages
+  # Only the publishing branch joins the production group. Any other ref gets its
+  # own, because this group is evaluated before the build job's gate can skip it
+  # and would otherwise cancel a live deployment.
+  group: ${{ (github.ref_name == vars.DOCS_DEPLOY_BRANCH || github.ref == vars.DOCS_DEPLOY_BRANCH) && 'docs-pages' || format('docs-pages-idle-{0}', github.ref) }}
   cancel-in-progress: true
 
 jobs:
