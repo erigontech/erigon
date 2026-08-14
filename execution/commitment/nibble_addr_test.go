@@ -14,9 +14,6 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-// Shared helpers for commitment tests: brute-force address generation keyed by
-// hashed-key nibble and a mock trie-context factory.
-
 package commitment
 
 import (
@@ -29,28 +26,16 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 )
 
-// maxAddrSearchIters bounds the brute-force address search helpers below so a
-// broken search space (e.g. hash function change) produces a descriptive panic
-// instead of an infinite hang. 1M iterations is well above the expected work:
-// a single-nibble hit averages ~16 iters; a 16-bit shared-prefix hit averages
-// ~65k, both comfortably under the cap.
+// maxAddrSearchIters bounds brute-force search so a broken search space fails loudly instead of hanging.
 const maxAddrSearchIters = 1 << 20
 
-// nibbleSeedKey is the composite cache key for findAddressForNibble.
 type nibbleSeedKey struct{ nibble, seed int }
 
-// nibbleAddressCache caches brute-forced addresses keyed by (nibble, seed) to
-// avoid repeated keccak work across tests and ensure each seed always returns
-// the same deterministic address regardless of call order.
 var (
 	nibbleAddressCacheMu sync.Mutex
 	nibbleAddressCache   = make(map[nibbleSeedKey][]byte)
 )
 
-// findAddressForNibble brute-force searches for a 20-byte address whose
-// keccak256 first nibble (upper 4 bits of hash[0]) matches targetNibble.
-// seed controls the starting point for the search; each unique seed produces
-// a different address. Results are cached globally.
 func findAddressForNibble(targetNibble int, seed int) []byte {
 	if targetNibble < 0 || targetNibble > 0xf {
 		panic(fmt.Sprintf("findAddressForNibble: nibble %d out of range [0,15]", targetNibble))
@@ -64,8 +49,6 @@ func findAddressForNibble(targetNibble int, seed int) []byte {
 	}
 	nibbleAddressCacheMu.Unlock()
 
-	// Brute force: we encode a counter into the first 8 bytes of a 20-byte
-	// address and increment until keccak(addr)[0] >> 4 == targetNibble.
 	var addr [20]byte
 	// Use seed * large prime to separate search spaces for different seeds.
 	counter := uint64(seed) * 1_000_003
@@ -86,10 +69,6 @@ func findAddressForNibble(targetNibble int, seed int) []byte {
 	panic(fmt.Sprintf("findAddressForNibble(nibble=%d, seed=%d): exceeded %d iterations", targetNibble, seed, maxAddrSearchIters))
 }
 
-// findAddressForHexPrefix brute-force searches for a 20-byte address whose keccak256
-// hashed-key nibbles start with the given nibble prefix (each entry in [0,15]). seed
-// separates search spaces. Used to force accounts to share a multi-nibble hashed prefix
-// (e.g. an extension-topped subtree under one root nibble).
 func findAddressForHexPrefix(nibblePrefix []byte, seed int) []byte {
 	for i, n := range nibblePrefix {
 		if n > 0xf {
@@ -124,16 +103,12 @@ func findAddressForHexPrefix(nibblePrefix []byte, seed int) []byte {
 	panic(fmt.Sprintf("findAddressForHexPrefix(%v, seed=%d): exceeded %d iterations", nibblePrefix, seed, maxAddrSearchIters))
 }
 
-// mockTrieCtxFactory returns a TrieContextFactory that always returns the
-// given MockState and a no-op cleanup.
 func mockTrieCtxFactory(ms *MockState) TrieContextFactory {
 	return func(context.Context) (PatriciaContext, func()) {
 		return ms, func() {}
 	}
 }
 
-// addrHex returns the hex-encoded string of a 20-byte address (no 0x prefix),
-// suitable for passing to UpdateBuilder methods.
 func addrHex(addr []byte) string {
 	return hex.EncodeToString(addr)
 }

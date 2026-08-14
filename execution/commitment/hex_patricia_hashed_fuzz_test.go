@@ -30,8 +30,6 @@ import (
 	"github.com/erigontech/erigon/common/length"
 )
 
-// go test -trimpath -v -fuzz=Fuzz_ProcessUpdate -fuzztime=300s ./erigon/execution/commitment
-
 func Fuzz_ProcessUpdate(f *testing.F) {
 	ctx := context.Background()
 	ha, _ := hex.DecodeString("13ccfe8074645cab4cb42b423625e055f0293c87")
@@ -40,7 +38,6 @@ func Fuzz_ProcessUpdate(f *testing.F) {
 	f.Add(uint64(2), ha, uint64(1235105), hb)
 
 	f.Fuzz(func(t *testing.T, balanceA uint64, accountA []byte, balanceB uint64, accountB []byte) {
-		// the trie is built with accountKeyLen == length.Addr, so only exact-length keys are valid
 		if len(accountA) != length.Addr || len(accountB) != length.Addr {
 			t.Skip()
 		}
@@ -74,8 +71,6 @@ func Fuzz_ProcessUpdate(f *testing.F) {
 		anotherUpds.Close()
 	})
 }
-
-// go test -trimpath -v -fuzz=Fuzz_ProcessUpdates_ArbitraryUpdateCount2 -fuzztime=300s ./commitment
 
 func Fuzz_ProcessUpdates_ArbitraryUpdateCount2(f *testing.F) {
 	ctx := context.Background()
@@ -230,7 +225,6 @@ func Fuzz_HexPatriciaHashed_ReviewKeys(f *testing.F) {
 		rnd := rand.New(rand.NewSource(seed))
 		builder := NewUpdateBuilder()
 
-		// generate updates
 		for i := 0; i < int(kc); i++ {
 			key := make([]byte, length.Addr)
 

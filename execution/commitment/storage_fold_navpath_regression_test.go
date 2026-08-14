@@ -24,23 +24,14 @@ import (
 	"github.com/erigontech/erigon/common/length"
 )
 
-// A storage row that propagates into an account cell must not overwrite that cell's
-// hashedExtension: the account cell navigates by its keccak-derived account path, while
-// the prepended extension is in storage nibble space. Writing the storage extension over
-// it sends the next unfold to a prefix that owns no branch record ("empty branch data read
-// during unfold" on the mount path).
-//
-// Only a cell carrying no plain key navigates by its extension, so only that cell may sync.
 func TestFillFromLowerCell_StorageFoldKeepsAccountNavPath(t *testing.T) {
 	t.Parallel()
 
-	// Account cell holding a storage root, carrying the keccak-derived path it navigates by.
 	accountCell := &cell{accountAddrLen: length.Addr, hashLen: 32}
 	navPath := []byte{0x3, 0xc, 0x1, 0x9, 0xe}
 	copy(accountCell.hashedExtension[:], navPath)
 	accountCell.hashedExtLen = int16(len(navPath))
 
-	// Storage branch one row below the account leaf (depth 65 > 64, no storage plain key).
 	storageBranch := &cell{hashLen: 32}
 
 	accountCell.fillFromLowerCell(storageBranch, 65, nil, 0x7)
@@ -52,9 +43,6 @@ func TestFillFromLowerCell_StorageFoldKeepsAccountNavPath(t *testing.T) {
 	require.EqualValues(t, 1, accountCell.extLen, "storage extension still travels up in extension space")
 }
 
-// The mirror case: an account-space branch cell (no plain key) navigates by its extension, so a
-// propagate fold must keep hashedExtension in sync or a restored extension-topped root demands a
-// root branch record that a propagate fold never writes.
 func TestFillFromLowerCell_AccountBranchSyncsNavPath(t *testing.T) {
 	t.Parallel()
 
@@ -65,7 +53,6 @@ func TestFillFromLowerCell_AccountBranchSyncsNavPath(t *testing.T) {
 
 	branchCell.fillFromLowerCell(lowBranch, 3, []byte{0x1}, 0x2)
 
-	// preExtension | nibble | lowCell.extension
 	want := []byte{0x1, 0x2, 0xa, 0xb}
 	require.Equal(t, want, branchCell.extension[:branchCell.extLen])
 	require.Equalf(t, want, branchCell.hashedExtension[:branchCell.hashedExtLen],
@@ -73,8 +60,6 @@ func TestFillFromLowerCell_AccountBranchSyncsNavPath(t *testing.T) {
 		branchCell.hashedExtLen)
 }
 
-// A storage-internal branch carries no plain key, so it navigates by its extension and
-// must sync like an account-space branch: the skip is keyed on the plain key, not on depth.
 func TestFillFromLowerCell_StorageBranchSyncsNavPath(t *testing.T) {
 	t.Parallel()
 

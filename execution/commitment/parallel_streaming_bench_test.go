@@ -56,7 +56,6 @@ func runDirectBench(b *testing.B, pk [][]byte, updates []Update) {
 func runParallelBench(b *testing.B, pk [][]byte, updates []Update, workers int) {
 	ctx := context.Background()
 	b.ReportAllocs()
-	// pph is reused across iterations so the worker pool amortizes.
 	var pph *ParallelPatriciaHashed
 	defer func() {
 		if pph != nil {
@@ -149,7 +148,6 @@ func Benchmark_Commitment_DirectVsParallel(b *testing.B) {
 	})
 }
 
-// Accounts are pinned to distinct top nibbles so their sub-tries don't share branches.
 func buildClusteredStorageCorpus(b testing.TB, numAccounts, slotsPerAccount int) ([][]byte, []Update) {
 	b.Helper()
 	rnd := rand.New(rand.NewSource(99001))
@@ -184,7 +182,6 @@ type storageGroup struct {
 	updates []Update
 }
 
-// Splits one whale account's slots into disjoint, independently processable sub-tries.
 func buildWhaleStorageGroups(slots, groups int) []storageGroup {
 	rnd := rand.New(rand.NewSource(919273))
 	addr := make([]byte, length.Addr)
@@ -213,7 +210,6 @@ type groupRun struct {
 	upds *Updates
 }
 
-// Must run on the test goroutine (uses require); each group gets its own MockState so concurrent process() shares no state.
 func setupGroup(tb testing.TB, g storageGroup) groupRun {
 	ms := NewMockState(tb)
 	require.NoError(tb, ms.applyPlainUpdates(g.pk, g.updates))
@@ -222,7 +218,6 @@ func setupGroup(tb testing.TB, g storageGroup) groupRun {
 	return groupRun{hph: hph, upds: upds}
 }
 
-// process is safe to call from any goroutine (no require/FailNow).
 func (r groupRun) process() error {
 	_, err := r.hph.Process(context.Background(), r.upds, "", nil, WarmupConfig{})
 	return err
@@ -293,10 +288,8 @@ func Benchmark_StorageConcurrency(b *testing.B) {
 	}
 }
 
-// Keeps burnCPU's result observable so the compiler cannot elide the synthetic work.
 var benchCPUSink atomic.Uint64
 
-// Synthetic per-touch CPU cost standing in for block execution.
 func burnCPU(iters int) {
 	var x uint64 = 1469598103934665603
 	for i := range iters {
@@ -322,7 +315,6 @@ func streamingBenchCorpora() []struct {
 	}
 }
 
-// scheduler=true overlaps folds with the per-touch CPU burn; false defers all folds to Process.
 func runStreamingOverlapBench(b *testing.B, pk [][]byte, upds []Update, cpuIters int, scheduler bool) {
 	ctx := context.Background()
 	b.ReportAllocs()
@@ -365,7 +357,6 @@ func runStreamingOverlapBench(b *testing.B, pk [][]byte, upds []Update, cpuIters
 	}
 }
 
-// Mechanism sanity-check with synthetic CPU cost; numbers are not a performance claim.
 func Benchmark_StreamingOverlap(b *testing.B) {
 	for _, c := range streamingBenchCorpora() {
 		for _, cpu := range []int{0, 500, 5000} {

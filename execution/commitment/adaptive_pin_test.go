@@ -22,9 +22,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-// A zero-value field means "unset", so the constructor's fallbacks must resolve
-// to DefaultAdaptivePinControllerConfig — one policy, not two that drift apart
-// when the defaults are tuned.
 func TestNewAdaptivePinController_ZeroConfigResolvesToDefaults(t *testing.T) {
 	c := NewAdaptivePinController(NewBranchCache(64), AdaptivePinControllerConfig{}, log.Root())
 	if want := DefaultAdaptivePinControllerConfig(); c.cfg != want {
@@ -32,7 +29,6 @@ func TestNewAdaptivePinController_ZeroConfigResolvesToDefaults(t *testing.T) {
 	}
 }
 
-// An explicitly-set field must survive the fallbacks.
 func TestNewAdaptivePinController_ExplicitConfigWins(t *testing.T) {
 	cfg := AdaptivePinControllerConfig{
 		PromoteThresholdMisses:    7,

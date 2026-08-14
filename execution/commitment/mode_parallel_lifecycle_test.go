@@ -70,9 +70,6 @@ type countingSink struct{ calls int }
 
 func (c *countingSink) TouchKey(hashedKey, plainKey []byte, update *Update) { c.calls++ }
 
-// The dedup map only dedups plain-key interning: every touch — including a repeat of an
-// already-collected key — must be forwarded to the streamer, or a scheduler's eagerly
-// folded split goes stale within the block.
 func TestModeParallel_RetouchReachesStreamer(t *testing.T) {
 	t.Parallel()
 	ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
@@ -87,9 +84,6 @@ func TestModeParallel_RetouchReachesStreamer(t *testing.T) {
 	require.Equal(t, uint64(1), ut.Size(), "interning stays deduped")
 }
 
-// A node carries one ModeParallel Updates buffer across blocks: a key re-touched in a
-// later block must land in that block's fold instead of being dropped by stale per-buffer
-// dedup state. Pins the carried-buffer lifecycle end to end.
 func TestModeParallel_StreamingRetouchAcrossBlocks(t *testing.T) {
 	t.Parallel()
 	k1, u1, k2, u2, kc, uc := lifecycleCorpus()
@@ -115,9 +109,6 @@ func TestModeParallel_StreamingRetouchAcrossBlocks(t *testing.T) {
 	require.Equal(t, oracle, got, "re-touched keys were dropped by the stale dedup map")
 }
 
-// Process must consume the ModeParallel collection the way HashSort consumes
-// ModeDirect/ModeUpdate: a carried Updates buffer starts every block empty, so block N+1
-// folds only its own touches instead of the union of everything since batch start.
 func TestModeParallel_ProcessConsumesUpdates(t *testing.T) {
 	t.Parallel()
 	k1, u1, k2, u2, kc, uc := lifecycleCorpus()
@@ -184,8 +175,6 @@ func TestModeParallel_ProcessConsumesUpdates(t *testing.T) {
 	})
 }
 
-// A failed Process must leave the collection intact so the caller's retry folds the
-// block's touches; only a successful fold consumes them.
 func TestModeParallel_ErrorKeepsCollection(t *testing.T) {
 	t.Parallel()
 	k1, u1, _, _, _, _ := lifecycleCorpus()

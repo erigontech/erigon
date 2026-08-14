@@ -46,23 +46,16 @@ type splitState struct {
 	mu             sync.Mutex
 }
 
-// reusable reports a cell cached by a background fold and not yet invalidated by
-// a later touch. Callers must hold s.mu.
 func (s *splitState) reusable() bool { return s.folded && !s.dirty }
 
 const defaultEagerFold = 256
 
-// shouldEagerFold re-folds only once the split's key count has at least doubled
-// since its last fold (and cleared the floor), keeping total re-fold work linear.
-// Callers hold s.mu.
 func (sc *StreamingCommitter) shouldEagerFold(s *splitState) bool {
 	return s.keyCount >= sc.eagerFloor && s.keyCount >= 2*s.lastFoldedSize
 }
 
-// SetEagerFold overrides the coalescing floor (default defaultEagerFold).
 func (sc *StreamingCommitter) SetEagerFold(n uint64) { sc.eagerFloor = n }
 
-// StreamingCommitter overlaps commitment fold work with block execution.
 type StreamingCommitter struct {
 	trieCtxFactory TrieContextFactory
 	cfg            TrieConfig
@@ -74,7 +67,6 @@ type StreamingCommitter struct {
 	splits     map[byte]*splitState
 	eagerFloor uint64
 
-	// trieMu serializes prefix-trie mutation against the scheduler's structural reads.
 	trieMu sync.RWMutex
 
 	started     atomic.Bool
@@ -87,7 +79,6 @@ type StreamingCommitter struct {
 	refoldTotal atomic.Uint64
 	inFlight    atomic.Int64
 
-	// foldGate, when set, is a test seam invoked just before a background fold.
 	foldGate func(nib byte)
 
 	leaveDeferredForCaller bool
@@ -95,16 +86,13 @@ type StreamingCommitter struct {
 
 	deepLocalFolds atomic.Uint64
 
-	// rootValid gates root promotion: cleared each Process and set only on the
-	// folded path, so the no-touch path leaves the template's prior root untouched.
 	rootCell    cell
 	rootChecked bool
 	rootTouched bool
 	rootPresent bool
 	rootValid   bool
-	// rootSeeded marks the same snapshot as a base seed: a trie whose root row
-	// collapsed to one child has no root branch record on disk, so the carried
-	// root cell is the only way a fresh base can see the existing state.
+	// rootSeeded: a collapsed root row has no branch record on disk, so the carried
+	// root cell is the only way a fresh base sees it.
 	rootSeeded bool
 
 	traceW io.Writer
@@ -112,7 +100,6 @@ type StreamingCommitter struct {
 
 func (sc *StreamingCommitter) SetTraceWriter(w io.Writer) { sc.traceW = NewSyncWriter(w) }
 
-// NewStreamingCommitter constructs a StreamingCommitter ready to accept touches.
 func NewStreamingCommitter(ctxFactory TrieContextFactory, accountKeyLen int16, cfg TrieConfig) *StreamingCommitter {
 	sc := &StreamingCommitter{
 		trieCtxFactory: ctxFactory,
@@ -135,8 +122,6 @@ func (sc *StreamingCommitter) resetPool() {
 	}
 }
 
-// SetNumWorkers overrides the worker count for the next Process call. Values
-// <= 0 fall back to runtime.NumCPU.
 func (sc *StreamingCommitter) SetNumWorkers(n int) {
 	if n <= 0 {
 		n = runtime.NumCPU()
@@ -144,28 +129,21 @@ func (sc *StreamingCommitter) SetNumWorkers(n int) {
 	sc.numWorkers = n
 }
 
-// SetTrieContextFactory replaces the per-worker context factory.
 func (sc *StreamingCommitter) SetTrieContextFactory(f TrieContextFactory) {
 	sc.trieCtxFactory = f
 }
 
-// SetLeaveDeferredForCaller makes Process leave the accumulated deferred branch
-// updates for the caller to flush instead of applying them inline.
 func (sc *StreamingCommitter) SetLeaveDeferredForCaller(leave bool) {
 	sc.leaveDeferredForCaller = leave
 }
 
-// TakeDeferredUpdates returns the deferred branch updates staged for the caller
-// and clears them; the caller takes ownership and returns them to the pool.
 func (sc *StreamingCommitter) TakeDeferredUpdates() []*DeferredBranchUpdate {
 	d := sc.deferredForCaller
 	sc.deferredForCaller = nil
 	return d
 }
 
-// TouchKey records a touched key. hashedKey is in nibble form; plainKey/update
-// backing must stay stable until Process, and a nil update makes the fold
-// re-read the value from ctx.
+// plainKey/update backing must stay stable until Process; a nil update re-reads from ctx.
 func (sc *StreamingCommitter) TouchKey(hashedKey, plainKey []byte, update *Update) {
 	sc.trieMu.Lock()
 	isNew := sc.trie.Insert(hashedKey, plainKey, update)
@@ -197,8 +175,6 @@ func (sc *StreamingCommitter) TouchKey(hashedKey, plainKey []byte, update *Updat
 	}
 }
 
-// Process folds every touched top-nibble split into a cell, stitches the cells
-// into the base row, and folds to the root.
 func (sc *StreamingCommitter) Process(ctx context.Context) ([]byte, error) {
 	if sc.trieCtxFactory == nil {
 		return nil, errors.New("StreamingCommitter.Process requires a TrieContextFactory")
@@ -272,9 +248,6 @@ func (sc *StreamingCommitter) Process(ctx context.Context) ([]byte, error) {
 	return rh, nil
 }
 
-// endBlock drains the per-block touch funnel and releases the scheduler base
-// (Process folds it down to the terminal root, so it cannot be reused), keeping
-// the worker pool and the caller's staged root/deferred snapshots.
 func (sc *StreamingCommitter) endBlock() {
 	if sc.trie != nil {
 		sc.trie.Reset()
@@ -284,8 +257,6 @@ func (sc *StreamingCommitter) endBlock() {
 	sc.releaseBase()
 }
 
-// captureRoot snapshots the base trie's terminal root cell and flags by value
-// so the snapshot survives the base being released.
 func (sc *StreamingCommitter) captureRoot(base *HexPatriciaHashed) {
 	sc.rootCell = base.root
 	sc.rootChecked = base.rootChecked
@@ -295,11 +266,6 @@ func (sc *StreamingCommitter) captureRoot(base *HexPatriciaHashed) {
 	sc.rootSeeded = true
 }
 
-// SeedRootFrom snapshots tmpl's root cell and flags as the seed for the next
-// Process's base — the mirror of PromoteRootInto, used after tmpl was restored
-// via SetState. A changed seed invalidates any base built from the previous one
-// (including a running scheduler's), which is dropped so the next Process
-// rebuilds from the new seed instead of folding against stale root state.
 func (sc *StreamingCommitter) SeedRootFrom(tmpl *HexPatriciaHashed) {
 	if tmpl == nil {
 		return
@@ -318,10 +284,8 @@ func (sc *StreamingCommitter) SeedRootFrom(tmpl *HexPatriciaHashed) {
 		sc.Stop()
 		sc.releaseBase()
 	}
-	// Splits folded against the previous seed's base are stale; drop their cells and
-	// deferred updates so Process re-folds them against the reseeded base. Read-lock
-	// trieMu: TouchKey inserts into sc.splits under its write lock, and iterating a
-	// map against a concurrent insert is a fatal runtime error.
+	// trieMu.RLock: a concurrent TouchKey inserts into sc.splits, and iterating a map
+	// against a concurrent insert is a fatal runtime error.
 	sc.trieMu.RLock()
 	for _, s := range sc.splits {
 		s.mu.Lock()
@@ -336,9 +300,6 @@ func (sc *StreamingCommitter) SeedRootFrom(tmpl *HexPatriciaHashed) {
 	sc.trieMu.RUnlock()
 }
 
-// PromoteRootInto copies the most recently folded root cell and flags into tmpl,
-// reporting whether a fold result was promoted; the no-touch path returns false
-// and leaves the template's prior root in place.
 func (sc *StreamingCommitter) PromoteRootInto(tmpl *HexPatriciaHashed) bool {
 	if !sc.rootValid || tmpl == nil {
 		return false
@@ -350,8 +311,6 @@ func (sc *StreamingCommitter) PromoteRootInto(tmpl *HexPatriciaHashed) bool {
 	return true
 }
 
-// newProcessBase builds the per-Process base trie, unfolded at the root unless
-// the prefix trie is empty (no touches).
 func (sc *StreamingCommitter) newProcessBase(ctx context.Context) (*HexPatriciaHashed, func(), *prefixNode, error) {
 	root := sc.trie.root
 	if root == nil || root.subtreeCount == 0 {
@@ -368,8 +327,6 @@ func (sc *StreamingCommitter) newProcessBase(ctx context.Context) (*HexPatriciaH
 	return base, cleanup, root, nil
 }
 
-// newBaseTrie constructs a fresh deferring base trie, seeded with the carried
-// root snapshot when one exists, and a cleanup releasing it.
 func (sc *StreamingCommitter) newBaseTrie(ctx context.Context) (*HexPatriciaHashed, func()) {
 	base := NewHexPatriciaHashed(sc.accountKeyLen, nil, sc.cfg)
 	bctx, bclean := sc.trieCtxFactory(ctx)
@@ -391,8 +348,6 @@ func (sc *StreamingCommitter) newBaseTrie(ctx context.Context) (*HexPatriciaHash
 	}
 }
 
-// processBase returns the base trie Process folds and stitches into, reusing the
-// persistent scheduler base when one exists (its cleanup is then a no-op).
 func (sc *StreamingCommitter) processBase(ctx context.Context) (*HexPatriciaHashed, func(), *prefixNode, error) {
 	if sc.base != nil {
 		root := sc.trie.root
@@ -404,8 +359,6 @@ func (sc *StreamingCommitter) processBase(ctx context.Context) (*HexPatriciaHash
 	return sc.newProcessBase(ctx)
 }
 
-// buildBase builds a base trie unfolded one level at the on-disk root so its
-// row 0 carries every top-nibble sibling the split cells stitch into.
 func (sc *StreamingCommitter) buildBase(ctx context.Context) (*HexPatriciaHashed, func(), error) {
 	base, cleanup := sc.newBaseTrie(ctx)
 
@@ -417,14 +370,10 @@ func (sc *StreamingCommitter) buildBase(ctx context.Context) (*HexPatriciaHashed
 	return base, cleanup, nil
 }
 
-// SetFoldGate installs a test seam invoked just before a background fold.
 func (sc *StreamingCommitter) SetFoldGate(fn func(nib byte)) { sc.foldGate = fn }
 
-// RefoldCount reports how many background folds were discarded as wasted work.
 func (sc *StreamingCommitter) RefoldCount() uint64 { return sc.refoldTotal.Load() }
 
-// StartScheduler builds the persistent base and launches the background fold
-// pool; after it returns TouchKey enqueues dirtied splits. Calling it twice is a no-op.
 func (sc *StreamingCommitter) StartScheduler(ctx context.Context) error {
 	if sc.trieCtxFactory == nil {
 		return errors.New("StreamingCommitter.StartScheduler requires a TrieContextFactory")
@@ -450,8 +399,6 @@ func (sc *StreamingCommitter) StartScheduler(ctx context.Context) error {
 	return nil
 }
 
-// Stop drains the background fold pool, waiting for any in-flight fold to finish.
-// Safe to call when no scheduler is running and to call twice.
 func (sc *StreamingCommitter) Stop() {
 	if !sc.started.CompareAndSwap(true, false) {
 		return
@@ -473,8 +420,6 @@ func (sc *StreamingCommitter) scheduleWorker() {
 	}
 }
 
-// enqueue offers a dirtied split to the fold pool without blocking; a full queue
-// just leaves the split dirty for Process, losing overlap but not safety.
 func (sc *StreamingCommitter) enqueue(nib byte) {
 	if !sc.started.Load() {
 		return
@@ -485,16 +430,12 @@ func (sc *StreamingCommitter) enqueue(nib byte) {
 	}
 }
 
-// touchedKey is a snapshotted touch a background fold replays; hk is copied off
-// the walk path while pk/upd reference the caller's stable backing.
 type touchedKey struct {
 	hk  []byte
 	pk  []byte
 	upd *Update
 }
 
-// foldSplitBg folds one split against an isolating overlay, installing the result
-// only if no touch bumped the split's gen and it did not self-flush meanwhile.
 func (sc *StreamingCommitter) foldSplitBg(nib byte) {
 	sc.trieMu.RLock()
 	root := sc.trie.root
@@ -513,8 +454,7 @@ func (sc *StreamingCommitter) foldSplitBg(nib byte) {
 	keys := collectSplitKeys(child, nib)
 	s.mu.Lock()
 	genStart := s.gen
-	// Close the coalescing gate at fold start (snapshot size), not end, or a stale
-	// lastFoldedSize would let every mid-fold touch re-enqueue for the fold's duration.
+	// snapshot at fold start, not end: a stale size here makes shouldEagerFold re-fold O(N^2) on a growing split.
 	s.lastFoldedSize = uint64(len(keys))
 	s.queued = false
 	s.mu.Unlock()
@@ -532,8 +472,6 @@ func (sc *StreamingCommitter) foldSplitBg(nib byte) {
 			putDeferredUpdate(upd)
 		}
 		sc.refoldTotal.Add(1)
-		// Re-fold a mid-fold-touched split only if the gate still passes, bounding
-		// a streaming whale to O(N) instead of O(N^2) re-folds.
 		reEnqueue := s.gen != genStart && sc.shouldEagerFold(s)
 		s.mu.Unlock()
 		if reEnqueue {
@@ -551,7 +489,6 @@ func (sc *StreamingCommitter) foldSplitBg(nib byte) {
 	s.mu.Unlock()
 }
 
-// markQueued re-enqueues a split, deduped so a burst of touches schedules it once.
 func (sc *StreamingCommitter) markQueued(s *splitState, nib byte) {
 	s.mu.Lock()
 	if s.queued {
@@ -563,8 +500,6 @@ func (sc *StreamingCommitter) markQueued(s *splitState, nib byte) {
 	sc.enqueue(nib)
 }
 
-// foldKeys folds a snapshotted split's keys on a pooled worker whose overlay ctx
-// discards branch writes; the returned flushed flag reports a mid-fold self-flush.
 func (sc *StreamingCommitter) foldKeys(nib byte, keys []touchedKey) (cell, []*DeferredBranchUpdate, bool, error) {
 	w := sc.workerPool.Get().(*HexPatriciaHashed)
 	w.mountTo(sc.base, int(nib))
@@ -598,8 +533,6 @@ func (sc *StreamingCommitter) foldKeys(nib byte, keys []touchedKey) (cell, []*De
 	return c, deferred, ov.flushed, err
 }
 
-// childForNib returns the top-nibble split-point child of root, or false if the
-// nibble carries no touched keys.
 func childForNib(root *prefixNode, nib byte) (*prefixNode, bool) {
 	if root == nil || len(root.ext) != 0 {
 		return nil, false
@@ -611,8 +544,6 @@ func childForNib(root *prefixNode, nib byte) (*prefixNode, bool) {
 	return root.children[idx], true
 }
 
-// keyArena copies walk-path nibbles into chunked backing buffers so each
-// collected key gets a stable slice without one allocation per key.
 type keyArena struct{ buf []byte }
 
 const keyArenaChunk = 64 * 1024
@@ -626,8 +557,6 @@ func (a *keyArena) copy(hk []byte) []byte {
 	return a.buf[start:len(a.buf):len(a.buf)]
 }
 
-// collectSplitKeys walks a split's subtree in sorted order, copying each key's
-// hashed nibbles off the reused walk path.
 func collectSplitKeys(child *prefixNode, nib byte) []touchedKey {
 	path := make([]byte, 0, 144)
 	path = append(path, nib)
@@ -635,8 +564,7 @@ func collectSplitKeys(child *prefixNode, nib byte) []touchedKey {
 	return collectSubtreeKeys(child, path)
 }
 
-// overlayContext isolates a background fold: writes never reach the real store
-// but a self-flushed prefix re-reads its own write, and flushed records that.
+// Writes never reach the real store, but a self-flushed prefix re-reads its own write.
 type overlayContext struct {
 	base    PatriciaContext
 	writes  map[string][]byte
@@ -664,8 +592,6 @@ func (o *overlayContext) PutBranch(prefix, data, _ []byte) error {
 func (o *overlayContext) Account(plainKey []byte) (*Update, error) { return o.base.Account(plainKey) }
 func (o *overlayContext) Storage(plainKey []byte) (*Update, error) { return o.base.Storage(plainKey) }
 
-// foldPresentSplits re-folds every touched top-nibble split concurrently onto the
-// base, recording which slots were folded; it never applies or merges.
 func (sc *StreamingCommitter) foldPresentSplits(ctx context.Context, base *HexPatriciaHashed, root *prefixNode) ([16]bool, error) {
 	var present [16]bool
 	foldSem := newFoldSem()
@@ -702,10 +628,8 @@ func (sc *StreamingCommitter) foldPresentSplits(ctx context.Context, base *HexPa
 	return present, nil
 }
 
-// foldDirtySplits re-folds every touched split without merging to the root or
-// writing to the store. Repeated calls are re-fold-invariant only while no touched
-// branch collapses, since a collapse self-flushes mid-fold and a second fold
-// would double-apply.
+// Safe to repeat only while no touched branch collapses: a collapse self-flushes
+// mid-fold and a second fold would double-apply.
 func (sc *StreamingCommitter) foldDirtySplits(ctx context.Context) error {
 	if sc.trieCtxFactory == nil {
 		return errors.New("StreamingCommitter.foldDirtySplits requires a TrieContextFactory")
@@ -722,8 +646,6 @@ func (sc *StreamingCommitter) foldDirtySplits(ctx context.Context) error {
 	return err
 }
 
-// stitchSplitCells drops each folded split cell into the base row at its top-nibble slot;
-// foldMounted already returns cells excluding the mount nibble, so they are stitched verbatim.
 func stitchSplitCells(base *HexPatriciaHashed, cells *[16]cell, present *[16]bool) {
 	for nib := range 16 {
 		if !present[nib] {
@@ -741,9 +663,6 @@ func stitchSplitCells(base *HexPatriciaHashed, cells *[16]cell, present *[16]boo
 	}
 }
 
-// foldSplit re-folds one top-nibble subtree on a worker mounted at the unfolded
-// base, to the split cell rather than the root, replacing the split's cell and
-// deferred set.
 func (sc *StreamingCommitter) foldSplit(ctx context.Context, foldSem *semaphore.Weighted, base *HexPatriciaHashed, s *splitState, child *prefixNode) error {
 	ni := s.prefix[0]
 	w := sc.workerPool.Get().(*HexPatriciaHashed)
@@ -808,16 +727,12 @@ func (sc *StreamingCommitter) foldSplit(ctx context.Context, foldSem *semaphore.
 	return nil
 }
 
-// DeepLocalFolds reports how many big-storage accounts the streaming path deep-folded.
 func (sc *StreamingCommitter) DeepLocalFolds() uint64 { return sc.deepLocalFolds.Load() }
 
-// newStorageWorker sources a concurrent-storage-fold worker; disjoint subtree
-// prefixes keep a mid-fold self-flush from racing another fold's writes.
 func (sc *StreamingCommitter) newStorageWorker(ctx context.Context) (*HexPatriciaHashed, func()) {
 	return newDeferredStorageWorker(ctx, &sc.workerPool, sc.trieCtxFactory, sc.traceW)
 }
 
-// dropSplitDeferred returns every split's staged deferred branch updates to the pool.
 func (sc *StreamingCommitter) dropSplitDeferred() {
 	for _, s := range sc.splits {
 		for _, upd := range s.deferred {
@@ -827,8 +742,6 @@ func (sc *StreamingCommitter) dropSplitDeferred() {
 	}
 }
 
-// mergeDeferredByPrefix combines two deferred-update slices, keeping newer's
-// entry for any prefix both supply and recycling the superseded older one.
 func mergeDeferredByPrefix(older, newer []*DeferredBranchUpdate) []*DeferredBranchUpdate {
 	if len(older) == 0 {
 		return newer
@@ -870,9 +783,8 @@ func (sc *StreamingCommitter) applyDeferred(ctx context.Context, deferred []*Def
 	return nil
 }
 
-// applyDeferredGuarded applies deferred branch updates, pre-merging in memory any
-// prefix emitted by more than one fold set because the apply context may be
-// write-only and a colliding update cannot re-read its predecessor from ctx.
+// Pre-merges duplicate prefixes in memory: the apply context may be write-only,
+// so a colliding update can't re-read its predecessor from ctx.
 func applyDeferredGuarded(ctx PatriciaContext, deferred []*DeferredBranchUpdate, numWorkers int) error {
 	if !hasDuplicatePrefix(deferred) {
 		_, err := ApplyDeferredBranchUpdates(deferred, numWorkers, ctx.PutBranch)
@@ -927,8 +839,6 @@ func hasDuplicatePrefix(deferred []*DeferredBranchUpdate) bool {
 	return false
 }
 
-// Reset clears per-split state, the prefix trie, and staged deferred updates so the
-// committer can be reused for the next block.
 func (sc *StreamingCommitter) Reset() {
 	sc.Stop()
 	sc.releaseBase()
@@ -945,7 +855,6 @@ func (sc *StreamingCommitter) Reset() {
 	sc.resetPool()
 }
 
-// releaseBase drops the scheduler's persistent base and its context.
 func (sc *StreamingCommitter) releaseBase() {
 	if sc.baseCleanup != nil {
 		sc.baseCleanup()
@@ -954,8 +863,6 @@ func (sc *StreamingCommitter) releaseBase() {
 	sc.base = nil
 }
 
-// Release drops all owned state; the committer must not be used afterwards.
-// Repeat calls are safe no-ops.
 func (sc *StreamingCommitter) Release() {
 	sc.Stop()
 	sc.releaseBase()

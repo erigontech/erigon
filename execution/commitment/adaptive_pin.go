@@ -25,9 +25,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-// AdaptivePinControllerConfig sets the policy knobs for the adaptive
-// trunk-pin controller. Defaults target the SSTORE-bloat workload class
-// (single contract dominating storage reads).
 type AdaptivePinControllerConfig struct {
 	PromoteThresholdMisses    uint64
 	MaxPromotedContracts      int
@@ -48,10 +45,6 @@ func DefaultAdaptivePinControllerConfig() AdaptivePinControllerConfig {
 	}
 }
 
-// AdaptivePinController watches per-contract miss pressure on a
-// BranchCache and decides which contracts to pin (with a sync initial
-// view), grow (per-block extension), or demote (invalidate the pin
-// set after sustained inactivity).
 type AdaptivePinController struct {
 	cache  *BranchCache
 	cfg    AdaptivePinControllerConfig
@@ -63,22 +56,15 @@ type AdaptivePinController struct {
 	states map[[32]byte]*adaptiveContractState
 }
 
-// ParallelResolverFactory builds a fresh BatchBranchResolver for one
-// OnBlockComplete call. release() is invoked after the controller is done
-// with the resolver. Returning (nil, nil, err) makes the controller fall
-// back to the serial-BFS path for this block.
 type ParallelResolverFactory func() (resolve BatchBranchResolver, release func(), err error)
 
-// DbBranchesProvider returns the MDBX-resident branch overlay for one
-// contract — values shadow file values in the parallel preload's wave.
-// Empty/nil result is valid (no overlay; resolver is authoritative).
 type DbBranchesProvider func(contractHash []byte) map[string][]byte
 
 type adaptiveContractState struct {
 	contractHash     [32]byte
 	promotedAtTxNum  uint64
-	preload          *ContractTrunkPreload         // serial-BFS path (nil when parallel)
-	parallel         *ContractTrunkPreloadParallel // parallel-wave-BFS path (nil when serial)
+	preload          *ContractTrunkPreload
+	parallel         *ContractTrunkPreloadParallel
 	coldBlocksInARow int
 }
 
@@ -138,14 +124,11 @@ func NewAdaptivePinController(cache *BranchCache, cfg AdaptivePinControllerConfi
 	}
 }
 
-// Bind installs the controller's miss-callback on the cache.
-// Safe to call multiple times — replaces any prior callback.
+// Idempotent.
 func (c *AdaptivePinController) Bind() {
 	c.cache.SetMissCallback(c.onCacheMiss)
 }
 
-// PerContractBudgetBytes is the per-contract pin ceiling; a dbBranches provider
-// need never gather more than this since the preload can't pin beyond it.
 func (c *AdaptivePinController) PerContractBudgetBytes() int {
 	return c.cfg.PerContractMaxBudgetBytes
 }
@@ -163,21 +146,13 @@ func (c *AdaptivePinController) onCacheMiss(prefix []byte) {
 	v.(*atomic.Uint64).Add(1)
 }
 
-// OnBlockComplete consumes the per-block miss snapshot and decides
-// promotions, extensions, and demotions. Synchronous — preloads run
-// inline so the new pin set is available for the next block's reads.
-//
-// The controller is aggregator-scoped (one owner across SharedDomains) so pin
-// residency ages by block-access recency, not SD binds; the tx-scoped reader/
-// factory/provider are therefore passed per call rather than stored, and c.mu
-// serializes concurrent callers.
+// Synchronous; aggregator-scoped (shared across tx-scoped binds via c.mu).
 func (c *AdaptivePinController) OnBlockComplete(ctx context.Context, txNum uint64, reader CommitmentReader, factory ParallelResolverFactory, provider DbBranchesProvider) {
 	misses := c.snapshotMisses()
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// One factory call per block, shared across all contracts. nil falls back to serial.
 	var parallelResolve BatchBranchResolver
 	var releaseParallel func()
 	if factory != nil {
@@ -330,9 +305,7 @@ func (c *AdaptivePinController) promoteLocked(
 	}, nil
 }
 
-// runExtensionLocked: caller must hold c.mu. Uses the saved state's mode
-// (parallel vs serial); a serial state with a parallel resolver available
-// keeps using serial — switching mid-contract would lose the queue position.
+// Caller must hold c.mu. Does not switch modes mid-contract.
 func (c *AdaptivePinController) runExtensionLocked(
 	ctx context.Context,
 	state *adaptiveContractState,

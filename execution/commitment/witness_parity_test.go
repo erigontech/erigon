@@ -38,10 +38,6 @@ func touchUpdates(touchAccounts, touchStorage [][]byte) *Updates {
 	return u
 }
 
-// Test_Witnesses_ExclusionAcrossFoldedExtension drives Witnesses() in legacy mode
-// on the #21810 shape (absent slot diverging inside a folded storage extension)
-// and asserts the captured set proves absence — the diverging branch is
-// materialized during positioning.
 func Test_Witnesses_ExclusionAcrossFoldedExtension(t *testing.T) {
 	acctPlains, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 2, 6)
 	acctPlain := acctPlains[0]

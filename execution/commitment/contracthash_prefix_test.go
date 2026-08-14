@@ -25,9 +25,6 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
-// reference is the pre-optimization implementation kept as the oracle: it
-// materializes the full hex expansion via CompactToHex, then repacks the first
-// 32 bytes. The zero-alloc ContractHashFromPrefix must agree with it exactly.
 func contractHashFromPrefixReference(prefix []byte) (hash [32]byte, ok bool) {
 	if len(prefix) < 33 {
 		return hash, false
@@ -45,7 +42,7 @@ func contractHashFromPrefixReference(prefix []byte) (hash [32]byte, ok bool) {
 func TestContractHashFromPrefix_MatchesReference(t *testing.T) {
 	rng := rand.New(rand.NewSource(1))
 	for range 5000 {
-		l := 30 + rng.Intn(40) // spans below and above the 33-byte minimum
+		l := 30 + rng.Intn(40)
 		prefix := make([]byte, l)
 		rng.Read(prefix)
 		wantHash, wantOK := contractHashFromPrefixReference(prefix)
@@ -64,7 +61,7 @@ func prefixByte0(p []byte) byte {
 
 func TestContractHashFromPrefix_ZeroAlloc(t *testing.T) {
 	prefix := make([]byte, 40)
-	prefix[0] = 0x10 // odd flag set, to exercise the shifting branch
+	prefix[0] = 0x10
 	allocs := testing.AllocsPerRun(1000, func() { _, _ = ContractHashFromPrefix(prefix) })
 	require.Zero(t, allocs, "ContractHashFromPrefix must not allocate")
 	prefix[0] = 0x00 // even branch

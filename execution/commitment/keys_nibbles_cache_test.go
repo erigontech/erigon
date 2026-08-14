@@ -8,9 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestKeyToHexNibbleHashCached_MatchesUncached verifies the cached variant is
-// byte-identical to KeyToHexNibbleHash regardless of key type or ordering — a
-// cache hit and a cache miss must both reproduce the uncached result.
 func TestKeyToHexNibbleHashCached_MatchesUncached(t *testing.T) {
 	t.Parallel()
 
@@ -36,7 +33,6 @@ func TestKeyToHexNibbleHashCached_MatchesUncached(t *testing.T) {
 		}
 	})
 
-	// Whale: one address, many slots — the reuse target.
 	t.Run("whale_storage", func(t *testing.T) {
 		var c addrHashCache
 		addr := make([]byte, length.Addr)
@@ -50,13 +46,11 @@ func TestKeyToHexNibbleHashCached_MatchesUncached(t *testing.T) {
 		}
 	})
 
-	// Account/storage interleaving forces cache misses and address changes;
-	// the cache must never leak a stale prefix across an address change.
 	t.Run("interleaved", func(t *testing.T) {
 		var c addrHashCache
 		for i := range 200 {
 			addr := make([]byte, length.Addr)
-			addr[0] = byte(i % 4) // only 4 distinct addresses, non-consecutive
+			addr[0] = byte(i % 4)
 			addr[19] = byte(i % 4)
 			assert.Equal(t, KeyToHexNibbleHash(addr), keyToHexNibbleHashCached(addr, &c), "acct %d", i)
 
@@ -69,9 +63,6 @@ func TestKeyToHexNibbleHashCached_MatchesUncached(t *testing.T) {
 	})
 }
 
-// TestAddrHashCache_ReuseAndInvalidation pins the cache state transitions the
-// reuse depends on: populated on first storage slot, retained across same-addr
-// slots, replaced on an address change, cleared by reset.
 func TestAddrHashCache_ReuseAndInvalidation(t *testing.T) {
 	t.Parallel()
 	var c addrHashCache
@@ -89,16 +80,13 @@ func TestAddrHashCache_ReuseAndInvalidation(t *testing.T) {
 	require.Equal(t, byte(0xAA), c.addr[0])
 	firstNibs := c.nibs
 
-	// Same address, different slot: prefix retained unchanged.
 	keyToHexNibbleHashCached(mkKey(0xAA, 1), &c)
 	require.Equal(t, firstNibs, c.nibs)
 
-	// Different address: prefix replaced.
 	keyToHexNibbleHashCached(mkKey(0xBB, 0), &c)
 	require.Equal(t, byte(0xBB), c.addr[0])
 	require.NotEqual(t, firstNibs, c.nibs)
 
-	// Account key does not touch the cache.
 	acctBefore := c.addr
 	keyToHexNibbleHashCached(make([]byte, length.Addr), &c)
 	require.Equal(t, acctBefore, c.addr)
@@ -107,8 +95,6 @@ func TestAddrHashCache_ReuseAndInvalidation(t *testing.T) {
 	require.False(t, c.valid)
 }
 
-// TestUpdatesHashKey_MatchesHasher verifies hashKey reproduces the configured
-// hasher across every mode that hashes plain keys.
 func TestUpdatesHashKey_MatchesHasher(t *testing.T) {
 	t.Parallel()
 	keys := [][]byte{

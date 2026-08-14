@@ -20,14 +20,12 @@ import (
 	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
-// Per-contract labels omitted to keep cardinality bounded; per-contract
-// detail is in the [adaptive-pin] structured log line.
-
 var (
 	mxPinnedHits    = metrics.GetOrCreateCounter("commitment_branchcache_pinned_hits_total")
 	mxPinnedMisses  = metrics.GetOrCreateCounter("commitment_branchcache_pinned_misses_total")
 	mxPinnedEntries = metrics.GetOrCreateGauge("commitment_branchcache_pinned_entries")
 
+	// no per-contract labels: Prometheus cardinality.
 	mxAdaptivePromoted = metrics.GetOrCreateCounter("commitment_adaptive_pin_promoted_total")
 	mxAdaptiveExtended = metrics.GetOrCreateCounter("commitment_adaptive_pin_extended_total")
 	mxAdaptiveDemoted  = metrics.GetOrCreateCounter("commitment_adaptive_pin_demoted_total")
@@ -37,8 +35,6 @@ var (
 	mxPreloadBytesTotal           = metrics.GetOrCreateCounter("commitment_trunk_preload_bytes_total")
 )
 
-// PublishMetrics emits counter deltas (last-published tracked internally) and
-// sets gauges absolute. Call once per SD.Flush — once-per-batch avoids hot-path cost.
 func (c *BranchCache) PublishMetrics() {
 	hits := c.pinnedHits.Load()
 	misses := c.pinnedMisses.Load()

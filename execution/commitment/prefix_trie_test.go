@@ -227,7 +227,6 @@ func TestPrefixTrieArenaReuse(t *testing.T) {
 
 func TestPrefixTrieArenaSpansMultipleSlabs(t *testing.T) {
 	tr := newPrefixTrie()
-	// Allocate directly to cross the slab boundary; reaching it via inserts needs >prefixSlabSize keys.
 	for range prefixSlabSize + 5 {
 		tr.arena.allocNode()
 	}
@@ -272,7 +271,6 @@ func TestPrefixTrieChildIndex(t *testing.T) {
 		idx, ok = childIndex(n, 0x0A)
 		assert.True(t, ok)
 		assert.Equal(t, 2, idx)
-		// missing nibble: idx is the insertion position, not a hit
 		idx, ok = childIndex(n, 0x03)
 		assert.False(t, ok)
 		assert.Equal(t, 1, idx)
@@ -372,7 +370,6 @@ func TestParallelUpdateAppendDeferredSequential(t *testing.T) {
 	assert.Same(t, c, pu.deferredCombined[2])
 }
 
-// Run with -race to catch data races in appendDeferred under contention.
 func TestParallelUpdateAppendDeferredConcurrent(t *testing.T) {
 	pu := newParallelUpdate()
 
@@ -428,6 +425,5 @@ func TestPrefixTrieInsertDuplicateMerges(t *testing.T) {
 	assert.Equal(t, uint64(100), got.Balance.Uint64())
 	assert.Equal(t, uint64(5), got.Nonce)
 
-	// Merge is copy-on-write: a concurrent fold snapshot may still hold the prior update pointer.
 	assert.Equal(t, BalanceUpdate, first.Flags, "merge must not mutate the previously stored update")
 }

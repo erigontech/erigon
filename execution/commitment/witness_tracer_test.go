@@ -35,14 +35,10 @@ func (r *recordingTracer) onNode(rlp, hash []byte) {
 	r.nodes = append(r.nodes, capturedNode{rlp: string(rlp), hash: string(hash)})
 }
 
-// Test_witness_capture exercises the witness helper directly: an inactive witness
-// passes the keccak writer through untouched and emits nothing, while an active one
-// tees leaf bytes through leafBuf and accumulates a branch from its prefix and slots.
 func Test_witness_capture(t *testing.T) {
 	var w witness
 	var sink bytes.Buffer
 
-	// inactive: passthrough writer, emits are no-ops, no panic on nil tracer
 	require.False(t, w.active())
 	require.Same(t, &sink, w.leafWriter(&sink))
 	w.emitLeaf([]byte("x"))
@@ -72,10 +68,6 @@ func Test_witness_capture(t *testing.T) {
 	require.False(t, w.active())
 }
 
-// Test_WitnessTracer_CapturedNodesReconstructRoot proves the fold-time tap captures
-// the exact consensus node bytes: decoding the full captured node-set rebuilds the
-// commitment root. memoizationOff forces every node to be re-hashed so the capture is
-// complete.
 func Test_WitnessTracer_CapturedNodesReconstructRoot(t *testing.T) {
 	ms := NewMockState(t)
 	hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())

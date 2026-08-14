@@ -28,11 +28,6 @@ import (
 	"github.com/erigontech/erigon/common/length"
 )
 
-// whaleSurvivorCorpus builds a whale (batch 1) whose touched storage in batch 2 collapses
-// to a single surviving first-nibble child. keepWholeNibble leaves one first nibble entirely
-// untouched on disk (a multi-slot branch survivor); otherwise every slot but one is deleted
-// (a single leaf survivor). Batch 2 still crosses the deep-fold threshold so the account folds
-// concurrently.
 func whaleSurvivorCorpus(keepWholeNibble bool) (pk [][]byte, upds []Update, k2 [][]byte, u2 []Update) {
 	var addr []byte
 	var groups [16][]storKV
@@ -54,7 +49,7 @@ func whaleSurvivorCorpus(keepWholeNibble bool) (pk [][]byte, upds []Update, k2 [
 		for i := range groups[x] {
 			kv := &groups[x][i]
 			if x == surv && (keepWholeNibble || i == 0) {
-				continue // keep the survivor(s)
+				continue
 			}
 			k2 = append(k2, kv.pk)
 			u2 = append(u2, Update{Flags: DeleteUpdate})
@@ -63,9 +58,6 @@ func whaleSurvivorCorpus(keepWholeNibble bool) (pk [][]byte, upds []Update, k2 [
 	return pk, upds, k2, u2
 }
 
-// A deep-folded account whose target cell was reused from a prior storage leaf: setAccountStorageRoot
-// injects the subtree root and must shed the stale storage identity, otherwise computeCellHash
-// recomputes the storage root from the stale slot and ignores the injected root.
 func TestDeepFold_InjectedRootClearsStaleStorage(t *testing.T) {
 	t.Parallel()
 	hph := NewHexPatriciaHashed(length.Addr, NewMockState(t), DefaultTrieConfig())
@@ -85,8 +77,6 @@ func TestDeepFold_InjectedRootClearsStaleStorage(t *testing.T) {
 		"injecting a storage root must clear the stale storage-loaded flag")
 }
 
-// The account leaf hash must be driven by the storage root injected via setAccountStorageRoot,
-// regardless of whether the target cell was freshly stamped or reused from a prior storage leaf.
 func TestDeepFold_InjectedStorageRootWins(t *testing.T) {
 	t.Parallel()
 
@@ -117,10 +107,6 @@ func TestDeepFold_InjectedStorageRootWins(t *testing.T) {
 		"account hash must be driven by the injected storage root, not a stale storage slot")
 }
 
-// A whale that deep-folds to a single-child storage root (extension) in one block and to a hash-only
-// root (multi-child or empty) in the next reuses the same account cell. The hash-only injection must
-// clear the extension the single-child collapse left, or computeCellHash hashes extension(oldExt, sr)
-// instead of sr and produces a wrong account/state root.
 func TestDeepFold_HashOnlyRootClearsStaleExtension(t *testing.T) {
 	t.Parallel()
 
@@ -179,15 +165,9 @@ func runEngineBatches(t *testing.T, mode runMode, workers int, batches []engineB
 	return roots, ms
 }
 
-// Re-touching an extension-topped top-nibble subtree over non-empty disk state: an over-strip of
-// the stitched cell desyncs the extension and corrupts the persisted branch, which surfaces as a
-// divergent root on the next block. Checks root and stored-branch parity across all engines.
 func TestStreaming_ExtensionToppedMountSplit(t *testing.T) {
 	t.Parallel()
 
-	// a and b share hashed nibbles [7,a] and fork at depth 2, so the subtree under root nibble 7
-	// is extension-topped ([a] -> branch{1,2}). Every other root nibble holds one account, so the
-	// root is a real branch and nibble 7 contains only {a,b}.
 	a := findAddressForHexPrefix([]byte{7, 0xa, 1}, 1)
 	b := findAddressForHexPrefix([]byte{7, 0xa, 2}, 2)
 
@@ -211,9 +191,9 @@ func TestStreaming_ExtensionToppedMountSplit(t *testing.T) {
 	}
 
 	batches := []engineBatch{
-		{k1, u1},        // seed disk
-		retouch(11, 22), // mount split over the extension-topped subtree
-		retouch(12, 23), // re-unfolds the subtree's stored branch
+		{k1, u1},
+		retouch(11, 22),
+		retouch(12, 23),
 	}
 
 	seqRoots, seqMs := runEngineBatches(t, modeSeq, 0, batches)
@@ -235,9 +215,6 @@ func TestStreaming_ExtensionToppedMountSplit(t *testing.T) {
 	}
 }
 
-// A whale whose touched storage collapses to a single surviving first-nibble branch. The deep
-// fold must yield the extension-node storage root over that survivor without prepending the
-// 64-nibble account prefix (which would overflow cell.extension and panic).
 func TestDeepFold_BranchSurvivorCollapse(t *testing.T) {
 	t.Parallel()
 	wk1, wu1, wk2, wu2 := whaleSurvivorCorpus(true)
@@ -249,8 +226,6 @@ func TestDeepFold_BranchSurvivorCollapse(t *testing.T) {
 	}
 }
 
-// The same collapse down to a single surviving storage leaf: the deep fold must compute the
-// leaf hash as the storage root rather than emitting the leaf cell's zero hash.
 func TestDeepFold_LeafSurvivorCollapse(t *testing.T) {
 	t.Parallel()
 	wk1, wu1, wk2, wu2 := whaleSurvivorCorpus(false)
@@ -262,11 +237,6 @@ func TestDeepFold_LeafSurvivorCollapse(t *testing.T) {
 	}
 }
 
-// Guards the default (sequential) path against the deep-fold storage reset leaking into it: a
-// persistent trie (as a real node carries across blocks) with a singleton account re-touched
-// account-only in block 2 must keep its storage slot. Its root must equal a fresh trie built
-// with the new account value plus the same slot. Cross-engine parity is blind to this because a
-// shared updateCell bug drops the slot in every engine identically.
 func TestSingletonAccountOnlyRetouchKeepsStorage(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

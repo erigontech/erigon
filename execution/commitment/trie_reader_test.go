@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
-// errTrieReaderTestCtx is a mock PatriciaContext that returns an error for a specific prefix.
 type errTrieReaderTestCtx struct {
 	trieReaderTestCtx
 	errPrefix string
@@ -41,7 +40,6 @@ func (tc *errTrieReaderTestCtx) Branch(prefix []byte) ([]byte, kv.Step, error) {
 	return tc.trieReaderTestCtx.Branch(prefix)
 }
 
-// trieReaderTestCtx is a mock PatriciaContext backed by a map of compact prefix -> branch data.
 type trieReaderTestCtx struct {
 	branches map[string][]byte
 }
@@ -59,7 +57,6 @@ func (tc *trieReaderTestCtx) Account(plainKey []byte) (*Update, error)      { re
 func (tc *trieReaderTestCtx) Storage(plainKey []byte) (*Update, error)      { return nil, nil }
 func (tc *trieReaderTestCtx) TxNum() uint64                                 { return 0 }
 
-// putBranch stores branch data for the given nibble prefix using the BranchEncoder.
 func (tc *trieReaderTestCtx) putBranch(nibblePrefix []byte, cells [16]*cell) {
 	var afterMap uint16
 	var encData [16]cellEncodeData
@@ -78,7 +75,6 @@ func (tc *trieReaderTestCtx) putBranch(nibblePrefix []byte, cells [16]*cell) {
 	tc.branches[string(key)] = bytes.Clone(data)
 }
 
-// makeAccountCell creates a cell representing an account leaf with the given plain address.
 func makeAccountCell(addr []byte, hash []byte) *cell {
 	c := &cell{}
 	c.accountAddrLen = int16(len(addr))
@@ -90,7 +86,6 @@ func makeAccountCell(addr []byte, hash []byte) *cell {
 	return c
 }
 
-// makeStorageCell creates a cell representing a storage leaf.
 func makeStorageCell(addr []byte, hash []byte) *cell {
 	c := &cell{}
 	c.storageAddrLen = int16(len(addr))
@@ -102,7 +97,6 @@ func makeStorageCell(addr []byte, hash []byte) *cell {
 	return c
 }
 
-// makeBranchCell creates a cell that represents a branch hash (subtree reference).
 func makeBranchCell(hash []byte) *cell {
 	c := &cell{}
 	c.hashLen = int16(len(hash))
@@ -110,8 +104,6 @@ func makeBranchCell(hash []byte) *cell {
 	return c
 }
 
-// makeExtensionCell creates a cell with an extension (hashed key nibbles) and a hash.
-// ext is the nibble sequence for the extension path.
 func makeExtensionCell(ext []byte, hash []byte) *cell {
 	c := &cell{}
 	c.extLen = int16(len(ext))
@@ -134,8 +126,6 @@ func dummyHash() []byte {
 func TestTrieReader_AccountLookupHit(t *testing.T) {
 	t.Parallel()
 
-	// Build a single-level trie: root branch has the account leaf at the
-	// nibble determined by the actual keccak hash of the address.
 	ctx := newTrieReaderTestCtx()
 	addr := bytes.Repeat([]byte{0xAB}, 20)
 	hashedKey := KeyToHexNibbleHash(addr)
@@ -155,7 +145,6 @@ func TestTrieReader_AccountLookupHit(t *testing.T) {
 func TestTrieReader_Miss(t *testing.T) {
 	t.Parallel()
 
-	// Root branch has one nibble but we query a different nibble.
 	ctx := newTrieReaderTestCtx()
 	addr := bytes.Repeat([]byte{0xCC}, 20)
 	hashedAddr := KeyToHexNibbleHash(addr)
@@ -163,9 +152,8 @@ func TestTrieReader_Miss(t *testing.T) {
 	rootCells[hashedAddr[0]] = makeAccountCell(addr, dummyHash())
 	ctx.putBranch(nil, rootCells)
 
-	// Query a key whose first nibble differs.
 	missKey := make([]byte, 64)
-	missKey[0] = (hashedAddr[0] + 1) % 16 // guaranteed different nibble
+	missKey[0] = (hashedAddr[0] + 1) % 16
 	tr := NewTrieReader(ctx, length.Addr)
 	_, found, err := tr.Lookup(missKey)
 	require.NoError(t, err)
@@ -175,7 +163,6 @@ func TestTrieReader_Miss(t *testing.T) {
 func TestTrieReader_MissEmptyTrie(t *testing.T) {
 	t.Parallel()
 
-	// No branch data at all.
 	ctx := newTrieReaderTestCtx()
 	hashedKey := make([]byte, 64)
 	hashedKey[0] = 0x1
@@ -189,18 +176,14 @@ func TestTrieReader_MissEmptyTrie(t *testing.T) {
 func TestTrieReader_ExtensionTraversal(t *testing.T) {
 	t.Parallel()
 
-	// Build a trie with a pure extension+hash node (no account) at the root,
-	// leading to a deeper branch with a hash-consistent account leaf.
 	ctx := newTrieReaderTestCtx()
 	addr := bytes.Repeat([]byte{0xDD}, 20)
 	hashedKey := KeyToHexNibbleHash(addr)
 
-	// Root: nibble hashedKey[0] → extension [hashedKey[1], hashedKey[2]] → branch at depth 3
 	var rootCells [16]*cell
 	rootCells[hashedKey[0]] = makeExtensionCell(hashedKey[1:3], dummyHash())
 	ctx.putBranch(nil, rootCells)
 
-	// Branch at prefix [hk[0], hk[1], hk[2]]: nibble hk[3] → account leaf
 	var deepCells [16]*cell
 	deepCells[hashedKey[3]] = makeAccountCell(addr, dummyHash())
 	ctx.putBranch(hashedKey[:3], deepCells)
@@ -216,7 +199,6 @@ func TestTrieReader_ExtensionTraversal(t *testing.T) {
 func TestTrieReader_ExtensionMismatch(t *testing.T) {
 	t.Parallel()
 
-	// Extension expects [7, 2] but key has a different second nibble.
 	ctx := newTrieReaderTestCtx()
 	var rootCells [16]*cell
 	rootCells[0x3] = makeExtensionCell([]byte{0x7, 0x2}, dummyHash())
@@ -225,7 +207,7 @@ func TestTrieReader_ExtensionMismatch(t *testing.T) {
 	hashedKey := make([]byte, 64)
 	hashedKey[0] = 0x3
 	hashedKey[1] = 0x7
-	hashedKey[2] = 0x9 // mismatch with extension [7, 2]
+	hashedKey[2] = 0x9
 
 	tr := NewTrieReader(ctx, length.Addr)
 	_, found, err := tr.Lookup(hashedKey)
@@ -236,21 +218,17 @@ func TestTrieReader_ExtensionMismatch(t *testing.T) {
 func TestTrieReader_MultiLevelDescent(t *testing.T) {
 	t.Parallel()
 
-	// Build a trie with multiple levels of branch-hash nodes, then an account leaf.
-	// Use a real address so the hashed key is consistent.
 	ctx := newTrieReaderTestCtx()
 	addr := bytes.Repeat([]byte{0xEE}, 20)
 	hashedKey := KeyToHexNibbleHash(addr)
 	depth := 12
 
-	// Create branch-hash cells following the actual hashed key path.
 	for d := range depth {
 		var cells [16]*cell
 		cells[hashedKey[d]] = makeBranchCell(dummyHash())
 		ctx.putBranch(hashedKey[:d], cells)
 	}
 
-	// At the final level, put an account leaf.
 	var leafCells [16]*cell
 	leafCells[hashedKey[depth]] = makeAccountCell(addr, dummyHash())
 	ctx.putBranch(hashedKey[:depth], leafCells)
@@ -266,22 +244,15 @@ func TestTrieReader_MultiLevelDescent(t *testing.T) {
 func TestTrieReader_StorageLookup(t *testing.T) {
 	t.Parallel()
 
-	// Storage lookups are best tested via HPH round-trip (see TestTrieReader_RoundTripWithHPH).
-	// This mock test verifies the basic mechanics using a cell at depth >= 64
-	// where only the storage slot hash matters.
 	ctx := newTrieReaderTestCtx()
 	storAddr := bytes.Repeat([]byte{0xFF}, 52) // 20 addr + 32 slot
 	hashedKey := KeyToHexNibbleHash(storAddr)  // 128 nibbles
 	require.Equal(t, 128, len(hashedKey), "storage hashed key must be 128 nibbles")
 
-	// Place a branch at depth 64 (the account/storage boundary).
 	var storageCells [16]*cell
 	storageCells[hashedKey[64]] = makeStorageCell(storAddr, dummyHash())
 	ctx.putBranch(hashedKey[:64], storageCells)
 
-	// To reach depth 64, we need branch-hash cells along the account path.
-	// For simplicity, create a single branch at root pointing to depth 64
-	// via chain of hash cells at key depths.
 	for d := range 64 {
 		var cells [16]*cell
 		cells[hashedKey[d]] = makeBranchCell(dummyHash())
@@ -298,8 +269,6 @@ func TestTrieReader_StorageLookup(t *testing.T) {
 func TestTrieReader_MultipleChildrenInBranch(t *testing.T) {
 	t.Parallel()
 
-	// Root has multiple account cells — verify we parse the correct one.
-	// Pick addresses that hash to different first nibbles.
 	ctx := newTrieReaderTestCtx()
 	addrs := [][]byte{
 		bytes.Repeat([]byte{0x22}, 20),
@@ -329,8 +298,6 @@ func TestTrieReader_MultipleChildrenInBranch(t *testing.T) {
 func TestTrieReader_BranchError(t *testing.T) {
 	t.Parallel()
 
-	// Root branch has a hash cell, so Lookup descends.
-	// The second Branch() call (at depth 1) returns an error.
 	inner := newTrieReaderTestCtx()
 	var rootCells [16]*cell
 	rootCells[0x5] = makeBranchCell(dummyHash())
@@ -364,29 +331,23 @@ func TestTrieReader_EmptyKey(t *testing.T) {
 
 	tr := NewTrieReader(ctx, length.Addr)
 
-	// Empty key should return not-found without error.
 	_, found, err := tr.Lookup([]byte{})
 	require.NoError(t, err)
 	require.False(t, found)
 
-	// Nil key should behave the same.
 	_, found, err = tr.Lookup(nil)
 	require.NoError(t, err)
 	require.False(t, found)
 }
 
-// TestTrieReader_RoundTripWithHPH verifies that TrieReader can look up keys
-// from branch data produced by a real HexPatriciaHashed Process cycle.
 func TestTrieReader_RoundTripWithHPH(t *testing.T) {
 	t.Parallel()
 
 	ms := NewMockState(t)
 
-	// Use real 20-byte account addresses (accountKeyLen = length.Addr).
 	hph := NewHexPatriciaHashed(int16(length.Addr), ms, DefaultTrieConfig())
 	hph.SetTraceWriter(nil)
 
-	// Build updates: several accounts with balance/nonce, plus storage.
 	plainKeys, updates := NewUpdateBuilder().
 		Balance("f000000000000000000000000000000000000001", 100).
 		Nonce("f000000000000000000000000000000000000001", 1).
@@ -410,10 +371,8 @@ func TestTrieReader_RoundTripWithHPH(t *testing.T) {
 	t.Logf("rootHash: %x, branches stored: %d", rootHash, len(ms.cm))
 	require.True(t, len(ms.cm) > 0, "expected at least one branch stored")
 
-	// Now use TrieReader with the same MockState to look up each key.
 	reader := NewTrieReader(ms, length.Addr)
 
-	// Track which keys are accounts vs storage so we check the right field.
 	for i, pk := range plainKeys {
 		if updates[i].Flags&DeleteUpdate != 0 {
 			continue
@@ -439,7 +398,6 @@ func TestTrieReader_RoundTripWithHPH(t *testing.T) {
 		}
 	}
 
-	// Verify miss: an unwritten key should not be found.
 	missKey := make([]byte, length.Addr)
 	missKey[0] = 0xEE
 	missKey[1] = 0xEE
@@ -449,8 +407,6 @@ func TestTrieReader_RoundTripWithHPH(t *testing.T) {
 	require.False(t, found, "unwritten key should not be found")
 }
 
-// TestTrieReader_RoundTripWithHPH_ManyAccounts uses a larger account set to
-// exercise deeper trie structures and extension nodes.
 func TestTrieReader_RoundTripWithHPH_ManyAccounts(t *testing.T) {
 	t.Parallel()
 
@@ -459,7 +415,6 @@ func TestTrieReader_RoundTripWithHPH_ManyAccounts(t *testing.T) {
 	hph := NewHexPatriciaHashed(int16(length.Addr), ms, DefaultTrieConfig())
 	hph.SetTraceWriter(nil)
 
-	// Generate 100 accounts with distinct addresses.
 	ub := NewUpdateBuilder()
 	for i := range 100 {
 		addr := fmt.Sprintf("%040x", i+1) // 20-byte hex addresses

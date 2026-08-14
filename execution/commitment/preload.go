@@ -24,13 +24,9 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
-// CommitmentReader does GetLatest on the CommitmentDomain. Decoupled from
-// tx/aggregator types to keep this package free of db/state imports.
 type CommitmentReader func(prefix []byte) (v []byte, step uint64, found bool, err error)
 
-// estimatedEntryOverheadBytes is the per-entry RAM cost beyond the encoded
-// value itself: branchCacheEntry (~80 B), maphash slot + hash (~40 B),
-// prefix slice (~24 B header + content), value slice header (~24 B).
+// branchCacheEntry ~80B + maphash slot/hash ~40B + prefix/value slice headers ~48B = 168.
 const estimatedEntryOverheadBytes = 168
 
 type pathDepth struct {
@@ -38,8 +34,6 @@ type pathDepth struct {
 	depth int
 }
 
-// ContractTrunkPreload holds the resumable state of a BFS preload for one
-// contract's storage subtree. Not goroutine-safe.
 type ContractTrunkPreload struct {
 	contractHash    []byte
 	queue           []pathDepth
@@ -47,14 +41,9 @@ type ContractTrunkPreload struct {
 	pinned          int
 	usedBytes       int
 	maxDepthReached int
-	// pinTxNum stamps pinned entries with the head txNum they were read at, so a
-	// later unwind below that point evicts them via the BranchCache floor (a
-	// txN=0 pin would escape it and be served stale after a deep unwind).
-	pinTxNum uint64
+	pinTxNum        uint64 // txN=0 escapes floor; evict via head txNum
 }
 
-// NewContractTrunkPreload seeds a preload state at depth 64 (storage
-// subtree root: keccak256(address), 32 bytes / 64 nibbles).
 func NewContractTrunkPreload(contractHash []byte) (*ContractTrunkPreload, error) {
 	if len(contractHash) != 32 {
 		return nil, fmt.Errorf("NewContractTrunkPreload: contractHash must be 32 bytes, got %d", len(contractHash))
@@ -71,10 +60,6 @@ func NewContractTrunkPreload(contractHash []byte) (*ContractTrunkPreload, error)
 	}, nil
 }
 
-// Run advances the BFS one chunk, pinning branches until additionalBudgetBytes
-// is exhausted or the queue is empty. Returns entries pinned THIS call, whether
-// the preload is now complete, and any reader error. On error the partial pin
-// set and queue position are preserved for a retry on the next Run.
 func (p *ContractTrunkPreload) Run(
 	additionalBudgetBytes int,
 	reader CommitmentReader,
@@ -111,7 +96,7 @@ func (p *ContractTrunkPreload) Run(
 		}
 
 		cache.PinEntry(prefix, v, step, p.pinTxNum)
-		// HexToCompact may alias a reused buffer; copy for a stable Invalidate handle.
+		// HexToCompact may alias; copy for stable handle
 		prefixCopy := make([]byte, len(prefix))
 		copy(prefixCopy, prefix)
 		p.pinnedPrefixes = append(p.pinnedPrefixes, prefixCopy)
@@ -126,7 +111,6 @@ func (p *ContractTrunkPreload) Run(
 				"used_mb", (p.usedBytes+chunkUsedBytes)/(1<<20))
 		}
 
-		// Branch encoding: 2-byte touchMap || 2-byte bitmap || per-child data.
 		if len(v) < 4 {
 			continue
 		}
@@ -156,7 +140,6 @@ func (p *ContractTrunkPreload) MaxDepthReached() int { return p.maxDepthReached 
 func (p *ContractTrunkPreload) PinnedPrefixes() [][]byte { return p.pinnedPrefixes }
 func (p *ContractTrunkPreload) ContractHash() []byte     { return p.contractHash }
 
-// PreloadContractTrunk is the one-shot wrapper around NewContractTrunkPreload + Run.
 func PreloadContractTrunk(
 	contractHash []byte,
 	ramBudgetBytes int,

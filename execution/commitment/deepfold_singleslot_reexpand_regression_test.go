@@ -23,17 +23,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// A whale's storage collapses to a single surviving slot through the streaming recursion (sub-threshold
-// touched set), leaving an afterMap==0 tombstone at the 64-nibble account prefix and carrying the
-// survivor onto the account leaf. A later block re-expands the storage with >deepStorageThreshold
-// brand-new slots placed in other first-nibbles, so the re-expansion runs through the deep fold while
-// the survivor's own first-nibble stays untouched. unfoldStorageBase reads that tombstone: it must not
-// seed an empty base from it (which drops the untouched survivor and diverges the storage root), it has
-// to fall back so the storage rebuilds from the account leaf's survivor, matching sequential.
-//
-// The collapse must go through the streaming recursion (not the deep fold): the deep-fold single-child
-// collapse deletes the branch key outright (unfoldStorageBase then sees len==0 and already falls back),
-// whereas the streaming recursion leaves the afterMap==0 record this fix has to recognize.
 func TestDeepFold_SingleSlotCollapseThenDeepReexpand(t *testing.T) {
 	t.Parallel()
 
@@ -50,13 +39,10 @@ func TestDeepFold_SingleSlotCollapseThenDeepReexpand(t *testing.T) {
 	}
 	require.GreaterOrEqual(t, survNib, 0, "need a survivor nibble")
 
-	// Dense account surround so the whale leaf sits in a real branch record.
 	mk, mu := buildMixedCorpus(0xC0FFEE, 4000)
 	k1 := append(append([][]byte{}, mk...), wk1...)
 	u1 := append(append([]Update{}, mu...), wu1...)
 
-	// Batch 2: touch the account and delete every storage slot but the one survivor -> streaming
-	// single-child collapse, leaving an afterMap==0 tombstone at the account prefix.
 	wk2 := [][]byte{addr}
 	wu2 := []Update{{Flags: BalanceUpdate | NonceUpdate}}
 	wu2[0].Balance.SetUint64(99)
@@ -66,7 +52,7 @@ func TestDeepFold_SingleSlotCollapseThenDeepReexpand(t *testing.T) {
 	for x := range 16 {
 		for _, kv := range groups[x] {
 			if !kept {
-				kept = true // survivor slot, in survNib
+				kept = true
 				continue
 			}
 			wk2 = append(wk2, kv.pk)
@@ -77,11 +63,8 @@ func TestDeepFold_SingleSlotCollapseThenDeepReexpand(t *testing.T) {
 	require.True(t, kept, "need a survivor slot")
 	require.LessOrEqual(t, deleted, int(deepStorageThreshold), "collapse must stream, not deep-fold")
 
-	// Batch 3: re-expand with > deepStorageThreshold brand-new slots in first-nibbles other than the
-	// survivor's, so the deep fold unfolds the account's storage base from the tombstone while the
-	// survivor's nibble stays untouched (only recoverable from the account leaf).
 	b3 := NewUpdateBuilder()
-	b3.Balance(a, 200) // touch the account so its leaf carries a plainKey (deep-fold precondition)
+	b3.Balance(a, 200)
 	added := 0
 	for nib := 0; nib < 16 && added <= int(deepStorageThreshold)+200; nib++ {
 		if nib == survNib {

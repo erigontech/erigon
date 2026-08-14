@@ -41,7 +41,6 @@ type whaleOpts struct {
 	tailAccounts     int
 }
 
-// addRandomSlot appends one random storage slot to account a, drawing loc then val.
 func addRandomSlot(ub *UpdateBuilder, rnd *rand.Rand, a string) {
 	loc := make([]byte, length.Hash)
 	rnd.Read(loc)
@@ -50,7 +49,6 @@ func addRandomSlot(ub *UpdateBuilder, rnd *rand.Rand, a string) {
 	ub.Storage(a, hex.EncodeToString(loc), hex.EncodeToString(val))
 }
 
-// addRandomAccount appends a random-address account (balance rnd.Uint64()+1) with slots storage slots.
 func addRandomAccount(ub *UpdateBuilder, rnd *rand.Rand, slots int) {
 	addr := make([]byte, length.Addr)
 	rnd.Read(addr)
@@ -61,7 +59,6 @@ func addRandomAccount(ub *UpdateBuilder, rnd *rand.Rand, slots int) {
 	}
 }
 
-// addNibbleAccount appends an account pinned to top nibble (balance rnd.Uint64()) with slots storage slots.
 func addNibbleAccount(ub *UpdateBuilder, rnd *rand.Rand, nibble, seed, slots int) {
 	a := hex.EncodeToString(findAddressForNibble(nibble, seed))
 	ub.Balance(a, rnd.Uint64())
@@ -134,8 +131,6 @@ func newStreamCommitter(t *testing.T, ms *MockState, workers int, scheduler bool
 	return sc
 }
 
-// newStreamingFixture builds a concurrent MockState with keys/upds applied and a StreamingCommitter
-// wired to it. Pass scheduler=true to start the background scheduler before returning.
 func newStreamingFixture(t *testing.T, keys [][]byte, upds []Update, workers int, scheduler ...bool) (*StreamingCommitter, *MockState) {
 	t.Helper()
 	ms := NewMockState(t)
@@ -164,11 +159,6 @@ func processModeBatch(t *testing.T, ms *MockState, mode runMode, workers int, ke
 	return root
 }
 
-// processModeBatchState folds one batch through the engine's production restart lifecycle:
-// the trie is restored from blob (the previous batch's EncodeCurrentState output, nil for
-// the first batch) before Process, and the new state blob is returned alongside the root.
-// State that never reaches a branch record — a propagate-folded root — survives batches
-// only through this blob.
 func processModeBatchState(t *testing.T, ms *MockState, mode runMode, workers int, keys [][]byte, upds []Update, blob []byte) ([]byte, []byte) {
 	t.Helper()
 	ctx := context.Background()
@@ -248,8 +238,6 @@ func engineRoot(t *testing.T, mode runMode, workers int, keys [][]byte, upds []U
 	return processModeBatch(t, ms, mode, workers, keys, upds), ms
 }
 
-// Folds two batches into one MockState so batch-1 branches become on-disk state for
-// batch-2, with the trie state blob carried across the batches (encode/restore cycle).
 func incrementalRoot(t *testing.T, mode runMode, workers int, k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update) ([]byte, *MockState) {
 	t.Helper()
 	ms := NewMockState(t)
@@ -433,8 +421,6 @@ func build500KStorageHeavyCorpus(b testing.TB) ([][]byte, []Update) {
 	return ub.Build()
 }
 
-// buildWitnessCorpus builds accts accounts (balance i+1) each with slots sequential
-// storage slots, processes them into (ms, hph) and returns the account plain keys.
 func buildWitnessCorpus(tb testing.TB, ms *MockState, hph *HexPatriciaHashed, accts, slots int) [][]byte {
 	tb.Helper()
 	builder := NewUpdateBuilder()
@@ -453,8 +439,6 @@ func buildWitnessCorpus(tb testing.TB, ms *MockState, hph *HexPatriciaHashed, ac
 	return addrs
 }
 
-// touchAccountsSlots touches each account and its first `slots` storage slots into u
-// (slots == 0 touches accounts only).
 func touchAccountsSlots(u *Updates, addrs [][]byte, slots int) {
 	for _, a := range addrs {
 		u.TouchPlainKey(string(a), nil, u.TouchAccount)

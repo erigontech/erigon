@@ -24,18 +24,8 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
-// A whale's storage is deleted ENTIRELY (deep fold, empty-storage case), then a LATER block
-// re-populates it. The deep fold used to persist the emptied account leaf with a storage-root hash of
-// empty.RootHash; single-trie leaves it with no storage-root hash (hashLen 0 — computeCellHash supplies
-// empty.RootHash at hash time). A stored empty.RootHash makes needUnfolding descend into the
-// storage-root branch record that was deleted when the storage emptied, so the re-populate fails with
-// "empty branch data read during unfold" on the parallel/streaming engines.
-//
-// The whale shares nibbles [7,8] with two siblings so its account leaf persists as a child of the
-// [7,8] branch record — carrying its (empty) storage-root hash — exactly as mainnet account
-// b4a038…e41 (hashed fd698ec0…) sits under the dense fd698e branch at block 5231408. A lone whale
-// instead propagates its leaf up a level, which hides the bug; the collapse tests keep a survivor slot
-// and never exercise the empty-storage branch at all.
+// Whale shares nibbles with siblings: account leaf persists in branch record, carrying empty
+// storage-root hash, which breaks when storage is re-populated (needUnfolding descends deleted subtree).
 func TestDeepFold_EmptyStorageThenRepopulate(t *testing.T) {
 	t.Parallel()
 
@@ -45,14 +35,13 @@ func TestDeepFold_EmptyStorageThenRepopulate(t *testing.T) {
 	f0 := findAddressForHexPrefix([]byte{0}, 104)
 	ff := findAddressForHexPrefix([]byte{0xf}, 105)
 
-	const slots = 1500 // > deepStorageThreshold(1000) => the whale folds concurrently
+	const slots = 1500 // > deepStorageThreshold (1000): forces the whale to fold concurrently
 
 	locs := make([]string, slots)
 	for i := range locs {
 		locs[i] = common.Bytes2Hex(slotHashBytes(i))
 	}
 
-	// Batch 1: create the cluster; the whale gets a deep storage trie.
 	b1 := NewUpdateBuilder().
 		Balance(addrHex(w), 100).Balance(addrHex(s1), 5).Balance(addrHex(s2), 6).
 		Balance(addrHex(f0), 7).Balance(addrHex(ff), 8)
@@ -61,14 +50,12 @@ func TestDeepFold_EmptyStorageThenRepopulate(t *testing.T) {
 	}
 	k1, u1 := b1.Build()
 
-	// Batch 2: keep the whale alive but delete every storage slot — the empty-storage deep-fold case.
 	b2 := NewUpdateBuilder().Balance(addrHex(w), 200)
 	for _, loc := range locs {
 		b2.DeleteStorage(addrHex(w), loc)
 	}
 	k2, u2 := b2.Build()
 
-	// Batch 3: re-populate every slot (again above the deep threshold), re-expanding the emptied whale.
 	b3 := NewUpdateBuilder()
 	for _, loc := range locs {
 		b3.Storage(addrHex(w), loc, "02")

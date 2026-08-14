@@ -27,10 +27,6 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/trie"
 )
 
-// Strict (reth-equivalent) witness oracle: root equality is necessary-not-sufficient,
-// so each accessed key must also strictly resolve — present keys fully materialized,
-// absent keys diverging at a materialized node, never a bare HashNode on the path.
-
 func assertPresentStrict(t *testing.T, wt *trie.Trie, plainKey []byte) {
 	t.Helper()
 	require.True(t, witnessMaterializesNodeAt(wt.RootNode, KeyToHexNibbleHash(plainKey)),

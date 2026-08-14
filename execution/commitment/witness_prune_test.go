@@ -37,9 +37,6 @@ func nodeSet(nodes [][]byte) map[string]struct{} {
 	return m
 }
 
-// TestWitnessNodesForKeys_ByHashEquivalence asserts the byHash-walk prune returns
-// exactly the same lean node set as RLPDecode + WitnessNodesForKeys, across account,
-// account+storage, and canonical (no exclusion) shapes.
 func TestWitnessNodesForKeys_ByHashEquivalence(t *testing.T) {
 	ctx := context.Background()
 	cases := []struct {
@@ -95,9 +92,6 @@ func TestWitnessNodesForKeys_ByHashEquivalence(t *testing.T) {
 	}
 }
 
-// RLPDecode rebuilds blinded children as *trie.HashNode; a proved key that steps
-// onto one (an absent slot diverging at a canonical-mode branch) must stop cleanly
-// in both the prune and Prove, never panic on the pointer type.
 func TestWitnessNodesForKeys_AbsentSlotStopsAtBlindedChild(t *testing.T) {
 	ctx := context.Background()
 	ms := NewMockState(t)
