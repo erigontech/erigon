@@ -243,3 +243,25 @@ func TestWarmKeyCloseRaceDoesNotPanic(t *testing.T) {
 		}
 	}
 }
+
+// Close must leave w.work open — closing it is what made a concurrent WarmKey send panic
+// and DrainPending spin. A receive on a closed channel is immediately ready with ok=false.
+func TestCloseLeavesWorkChannelOpen(t *testing.T) {
+	t.Parallel()
+	w := NewWarmuper(context.Background(), WarmupConfig{
+		Enabled:    true,
+		CtxFactory: func(ctx context.Context) (PatriciaContext, func()) { <-ctx.Done(); return nil, nil },
+		NumWorkers: 2,
+		MaxDepth:   WarmupMaxDepth,
+	})
+	w.Start()
+	w.Close()
+
+	select {
+	case _, ok := <-w.work:
+		if !ok {
+			t.Fatal("Close must not close w.work")
+		}
+	default:
+	}
+}
