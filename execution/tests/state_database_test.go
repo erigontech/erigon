@@ -17,7 +17,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package state_test
+package executiontests
 
 import (
 	"bytes"
@@ -32,7 +32,11 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
 	"github.com/erigontech/erigon/execution/chain"
@@ -952,7 +956,7 @@ func TestReproduceCrash(t *testing.T) {
 	storageKey2 := accounts.InternKey(common.HexToHash("0x0e4c0e7175f9d22279a4f63ff74f7fa28b7a954a6454debaa62ce43dd9132542"))
 	value2 := uint256.NewInt(0x58c00a51)
 
-	_, tx, sd := state.NewTestRwTx(t)
+	_, tx, sd := newTestRwTx(t)
 
 	txNum := uint64(1)
 	tsw := state.NewWriter(sd.AsPutDel(tx), nil, txNum)
@@ -1383,7 +1387,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	t.Parallel()
 	contract := accounts.InternAddress(common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624"))
 
-	_, tx, sd := state.NewTestRwTx(t)
+	_, tx, sd := newTestRwTx(t)
 	blockNum, txNum := uint64(1), uint64(3)
 	_ = blockNum
 
@@ -1430,7 +1434,7 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	contract := accounts.InternAddress(common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624"))
 	//root := common.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
 
-	_, tx, sd := state.NewTestRwTx(t)
+	_, tx, sd := newTestRwTx(t)
 	blockNum, txNum := uint64(1), uint64(3)
 	_ = blockNum
 
@@ -1468,7 +1472,7 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	contract := accounts.InternAddress(common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624"))
 	root := common.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
 
-	_, tx, sd := state.NewTestRwTx(t)
+	_, tx, sd := newTestRwTx(t)
 	blockNum := uint64(1)
 	txNum := uint64(3)
 
@@ -1781,4 +1785,18 @@ func TestTxLookupUnwind(t *testing.T) {
 	if count != 0 {
 		t.Errorf("txlookup record expected to be deleted, got %d", count)
 	}
+}
+
+func newTestRwTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx, *execctx.SharedDomains) {
+	tb.Helper()
+	dirs := datadir.New(tb.TempDir())
+	db := temporaltest.NewTestDBWithStepSize(tb, dirs, 16)
+	tb.Cleanup(db.Close)
+	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
+	require.NoError(tb, err)
+	tb.Cleanup(tx.Rollback)
+	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	require.NoError(tb, err)
+	tb.Cleanup(domains.Close)
+	return db, tx, domains
 }
