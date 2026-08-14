@@ -22,8 +22,9 @@ package misc_test
 import (
 	"testing"
 
-	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/execution/protocol/misc"
 )
 
 func TestFakeExponential(t *testing.T) {

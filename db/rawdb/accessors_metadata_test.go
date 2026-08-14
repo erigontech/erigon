@@ -17,13 +17,13 @@
 package rawdb_test
 
 import (
-	"github.com/erigontech/erigon/db/rawdb"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 )
 

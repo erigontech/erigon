@@ -19,8 +19,9 @@ package misc_test
 import (
 	"testing"
 
-	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/erigontech/erigon/execution/protocol/misc"
 )
 
 // A test for https://github.com/erigontech/erigon/issues/18424
