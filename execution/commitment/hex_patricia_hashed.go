@@ -144,8 +144,12 @@ type HexPatriciaHashed struct {
 	leafHashBuf   [33]byte               // shared scratch for leaf hash prefixing (avoids per-leaf escape)
 	leafRlpBuf    [maxLeafRlpLen]byte    // shared scratch for a leaf's RLP list prefix + compact key
 	rlpPrefixBuf  [8]byte                // shared scratch for RlpSerializable length prefixes
-	compactKeyBuf [maxCompactKeyLen]byte // shared scratch for HexToCompact on the fold/unfold path
-	auxBuffer     *bytes.Buffer          // auxiliary buffer used during branch updates encoding
+	compactKeyBuf [maxCompactKeyLen]byte // shared scratch for HexToCompact on the read paths
+	// foldKeyBuf must stay separate from compactKeyBuf: fold's update key is still live
+	// when foldDelete runs the collapse tracer, and that callback is caller code free to
+	// re-enter a read path.
+	foldKeyBuf    [maxCompactKeyLen]byte
+	auxBuffer     *bytes.Buffer // auxiliary buffer used during branch updates encoding
 	branchEncoder *BranchEncoder
 
 	mounted    bool  // true if this trie is mounted to some root trie
@@ -1995,7 +1999,7 @@ func (hph *HexPatriciaHashed) fold() error {
 
 	depth := hph.depths[row]
 
-	updateKey := nibbles.HexToCompactInto(hph.compactKeyBuf[:], hph.currentKey[:updateKeyLen])
+	updateKey := nibbles.HexToCompactInto(hph.foldKeyBuf[:], hph.currentKey[:updateKeyLen])
 	defer func() { hph.depthsToTxNum[depth] = 0 }()
 
 	if hph.traceW != nil {
