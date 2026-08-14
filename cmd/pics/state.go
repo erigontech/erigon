@@ -36,7 +36,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
 	"github.com/erigontech/erigon/execution/chain"
@@ -422,7 +422,7 @@ func initialState1() error {
 		return err
 	}
 
-	emptyKv := memdb.New(nil, "", dbcfg.ChainDB)
+	emptyKv := mdbxtest.New(nil, "", dbcfg.ChainDB)
 	if err := stateDatabaseComparison(emptyKv, m.DB, 0); err != nil {
 		return err
 	}
