@@ -2592,9 +2592,9 @@ func (a *ApiHandler) cacheExecutionBody(payload *cltypes.Eth1Block) {
 	}
 	var ws []*types.Withdrawal
 	if payload.Withdrawals != nil && payload.Withdrawals.Len() > 0 {
-		consensusWithdrawals := make([]*cltypes.Withdrawal, 0, payload.Withdrawals.Len())
-		payload.Withdrawals.Range(func(_ int, w *cltypes.Withdrawal, _ int) bool {
-			consensusWithdrawals = append(consensusWithdrawals, w)
+		consensusWithdrawals := make([]*cltypes.Withdrawal, payload.Withdrawals.Len())
+		payload.Withdrawals.Range(func(idx int, w *cltypes.Withdrawal, _ int) bool {
+			consensusWithdrawals[idx] = w
 			return true
 		})
 		ws = cltypes.ConvertConsensusWithdrawalsToExecutionWithdrawals(consensusWithdrawals)
