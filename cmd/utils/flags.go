@@ -1004,12 +1004,12 @@ var (
 	}
 	SentinelBootnodes = cli.StringSliceFlag{
 		Name:  "sentinel.bootnodes",
-		Usage: "Comma separated enode URLs for P2P discovery bootstrap",
+		Usage: "Comma-separated Consensus bootstrap nodes provided as ENRs or direct TCP libp2p multiaddrs",
 		Value: []string{},
 	}
 	SentinelStaticPeers = cli.StringSliceFlag{
 		Name:  "sentinel.staticpeers",
-		Usage: "connect to comma-separated Consensus static peers",
+		Usage: "connect to comma-separated Consensus static peers provided as ENRs or direct TCP libp2p multiaddrs",
 		Value: []string{},
 	}
 
@@ -1164,14 +1164,6 @@ var (
 	ExperimentalParallelCommitmentFlag = cli.BoolFlag{
 		Name:  "experimental.parallel-commitment",
 		Usage: "EXPERIMENTAL: enables fully parallel trie for commitment (ParallelPatriciaHashed).",
-		Value: false,
-	}
-	// ExperimentalStreamingCommitmentFlag selects the StreamingCommitter, which
-	// overlaps commitment fold work with block execution. Default off; takes
-	// precedence over the parallel flag when set.
-	ExperimentalStreamingCommitmentFlag = cli.BoolFlag{
-		Name:  "experimental.streaming-commitment",
-		Usage: "EXPERIMENTAL: enables streaming trie for commitment (StreamingCommitter, overlaps folding with execution). Takes precedence over --experimental.parallel-commitment if set.",
 		Value: false,
 	}
 	GDBMeFlag = cli.BoolFlag{
@@ -2007,7 +1999,14 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 	cfg.CaplinConfig.SentinelAddr = ctx.String(SentinelAddrFlag.Name)
 	cfg.CaplinConfig.SentinelPort = ctx.Uint64(SentinelPortFlag.Name)
 	cfg.CaplinConfig.BootstrapNodes = ctx.StringSlice(SentinelBootnodes.Name)
-	cfg.CaplinConfig.StaticPeers = ctx.StringSlice(SentinelStaticPeers.Name)
+	if ctx.IsSet(SentinelStaticPeers.Name) {
+		cfg.CaplinConfig.StaticPeers = []string{}
+		for _, staticPeer := range ctx.StringSlice(SentinelStaticPeers.Name) {
+			if staticPeer != "" {
+				cfg.CaplinConfig.StaticPeers = append(cfg.CaplinConfig.StaticPeers, staticPeer)
+			}
+		}
+	}
 
 	chain := resolveChainName(ctx)
 	if ctx.IsSet(NetworkIdFlag.Name) {
@@ -2058,10 +2057,6 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 
 	if ctx.Bool(ExperimentalParallelCommitmentFlag.Name) {
 		cfg.ExperimentalParallelCommitment = true
-	}
-
-	if ctx.Bool(ExperimentalStreamingCommitmentFlag.Name) {
-		cfg.ExperimentalStreamingCommitment = true
 	}
 
 	cfg.FcuTimeout = ctx.Duration(FcuTimeoutFlag.Name)

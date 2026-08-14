@@ -52,6 +52,27 @@ func (m *Map[V]) LoadOrStore(key []byte, value V) (actual V, loaded bool) {
 	return m.m.LoadOrStore(h, value)
 }
 
+// ReplaceIfPresent atomically overwrites an existing key, reporting whether it
+// was there. It never inserts, so external counts need no accounting.
+func (m *Map[V]) ReplaceIfPresent(key []byte, value V) bool {
+	h := Hash(key)
+	_, ok := m.m.Compute(h, func(old V, loaded bool) (V, xsync.ComputeOp) {
+		if !loaded {
+			return old, xsync.CancelOp
+		}
+		return value, xsync.UpdateOp
+	})
+	return ok
+}
+
+// LoadAndStore stores value and returns the previous one, loaded reporting
+// prior presence. Probing with a separate Get first races a concurrent delete,
+// so external counters must key off loaded.
+func (m *Map[V]) LoadAndStore(key []byte, value V) (previous V, loaded bool) {
+	h := Hash(key)
+	return m.m.LoadAndStore(h, value)
+}
+
 // Delete removes a key from the map.
 func (m *Map[V]) Delete(key []byte) {
 	h := Hash(key)
