@@ -57,18 +57,19 @@ import (
 func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logger, useRealSyncDataMgr bool) (db kv.RwDB, blocks []*cltypes.SignedBeaconBlock, f afero.Fs, preState, postState *state.CachingBeaconState, h *ApiHandler, opPool pool.OperationsPool, syncedData synced_data.SyncedData, fcu *mock_services2.ForkChoiceStorageMock, vp *validator_params.ValidatorParams) {
 	ctrl := gomock.NewController(t)
 	bcfg := clparams.MainnetBeaconConfig
-	if v == clparams.Phase0Version {
+	switch v {
+	case clparams.Phase0Version:
 		blocks, preState, postState = tests.GetPhase0Random()
-	} else if v == clparams.BellatrixVersion {
+	case clparams.BellatrixVersion:
 		bcfg.AltairForkEpoch = 1
 		bcfg.BellatrixForkEpoch = 1
 		blocks, preState, postState = tests.GetBellatrixRandom()
-	} else if v == clparams.CapellaVersion {
+	case clparams.CapellaVersion:
 		bcfg.AltairForkEpoch = 1
 		bcfg.BellatrixForkEpoch = 1
 		bcfg.CapellaForkEpoch = 1
 		blocks, preState, postState = tests.GetCapellaRandom()
-	} else if v == clparams.ElectraVersion {
+	case clparams.ElectraVersion:
 		bcfg.AltairForkEpoch = 1
 		bcfg.BellatrixForkEpoch = 1
 		bcfg.CapellaForkEpoch = 1
@@ -100,7 +101,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 	opPool = pool.NewOperationsPool(&bcfg)
 	fcu.Pool = opPool
 
-	genesis, err := initial_state.GetGenesisState(chainspec.MainnetChainID)
+	genesis, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
 	require.NoError(t, err)
 	ethClock := eth_clock.NewEthereumClock(genesis.GenesisTime(), genesis.GenesisValidatorsRoot(), &bcfg)
 	blobStorage := blob_storage.NewBlobStore(blobDb, afero.NewMemMapFs(), math.MaxUint64, &bcfg, ethClock)

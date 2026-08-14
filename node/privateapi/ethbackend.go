@@ -248,7 +248,7 @@ func (s *EthBackendServer) Subscribe(r *remoteproto.SubscribeRequest, subscribeS
 	if err != nil {
 		return err
 	}
-	if err = subscribeServer.Send(&remoteproto.SubscribeReply{Type: remoteproto.Event_SYNCING, Data: seedData}); err != nil {
+	if err := subscribeServer.Send(&remoteproto.SubscribeReply{Type: remoteproto.Event_SYNCING, Data: seedData}); err != nil {
 		return err
 	}
 	for {
@@ -259,7 +259,7 @@ func (s *EthBackendServer) Subscribe(r *remoteproto.SubscribeRequest, subscribeS
 			return subscribeServer.Context().Err()
 		case headersRlp := <-ch:
 			for _, headerRlp := range headersRlp {
-				if err = subscribeServer.Send(&remoteproto.SubscribeReply{
+				if err := subscribeServer.Send(&remoteproto.SubscribeReply{
 					Type: remoteproto.Event_HEADER,
 					Data: headerRlp,
 				}); err != nil {
@@ -267,7 +267,7 @@ func (s *EthBackendServer) Subscribe(r *remoteproto.SubscribeRequest, subscribeS
 				}
 			}
 		case <-newSnCh:
-			if err = subscribeServer.Send(&remoteproto.SubscribeReply{Type: remoteproto.Event_NEW_SNAPSHOT}); err != nil {
+			if err := subscribeServer.Send(&remoteproto.SubscribeReply{Type: remoteproto.Event_NEW_SNAPSHOT}); err != nil {
 				return err
 			}
 		case syncState := <-syncStateCh:
@@ -275,7 +275,7 @@ func (s *EthBackendServer) Subscribe(r *remoteproto.SubscribeRequest, subscribeS
 			if err != nil {
 				return err
 			}
-			if err = subscribeServer.Send(&remoteproto.SubscribeReply{Type: remoteproto.Event_SYNCING, Data: data}); err != nil {
+			if err := subscribeServer.Send(&remoteproto.SubscribeReply{Type: remoteproto.Event_SYNCING, Data: data}); err != nil {
 				return err
 			}
 		}
@@ -538,7 +538,11 @@ func (s *EthBackendServer) AAValidation(ctx context.Context, req *remoteproto.AA
 		return nil, err
 	}
 
-	totalGasLimit := preTxCost + aaTxn.ValidationGasLimit + aaTxn.PaymasterValidationGasLimit + aaTxn.GasLimit + aaTxn.PostOpGasLimit
+	totalGasLimit, ok := aaTxn.TotalGasLimit(preTxCost)
+	if !ok {
+		log.Info("RIP-7560 validation err", "err", "gas limits sum overflows uint64")
+		return &remoteproto.AAValidationReply{Valid: false}, nil
+	}
 	_, _, err = aa.ValidateAATransaction(aaTxn, ibs, new(protocol.GasPool).AddGas(totalGasLimit), header, evm, s.chainConfig)
 	if err != nil {
 		log.Info("RIP-7560 validation err", "err", err.Error())

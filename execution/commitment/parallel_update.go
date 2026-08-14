@@ -38,7 +38,7 @@ func (a *plainKeyArena) intern(b []byte) []byte {
 	return a.buf[off : off+len(b) : off+len(b)]
 }
 
-func (a *plainKeyArena) reset() { a.buf = nil }
+func (a *plainKeyArena) reset() { a.buf = a.buf[:0] }
 
 type parallelUpdate struct {
 	trie *prefixTrie

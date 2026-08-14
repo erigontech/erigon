@@ -193,7 +193,7 @@ func (e *EpochManager) zoomToAfter(chain rules.ChainHeaderReader, er *NonTransac
 		e.finalityChecker = NewRollingFinality(epochSet)
 		if proof.SignalNumber >= DEBUG_LOG_FROM {
 			fmt.Printf("new rolling finality: %d\n", proof.SignalNumber)
-			for i := 0; i < len(epochSet); i++ {
+			for i := range epochSet {
 				fmt.Printf("\t%x\n", epochSet[i])
 			}
 		}
@@ -754,7 +754,7 @@ func (c *AuRa) Finalize(config *chain.Config, header *types.Header, state *state
 		if header.Number.Uint64() >= DEBUG_LOG_FROM {
 			fmt.Printf("insert_pending_transition: %d,receipts=%d, lenProof=%d\n", header.Number.Uint64(), len(receipts), len(pendingTransitionProof))
 		}
-		if err = c.e.PutPendingEpoch(header.Hash(), header.Number.Uint64(), pendingTransitionProof); err != nil {
+		if err := c.e.PutPendingEpoch(header.Hash(), header.Number.Uint64(), pendingTransitionProof); err != nil {
 			return nil, err
 		}
 	}
@@ -885,7 +885,7 @@ func (c *AuRa) FinalizeAndAssemble(config *chain.Config, header *types.Header, s
 	}
 
 	// Assemble and return the final block for sealing
-	return types.NewBlockForAsembling(header, txs, uncles, receipts, withdrawals), nil, nil
+	return types.NewBlockForAsembling(header, txs, uncles, receipts, withdrawals, nil), nil, nil
 }
 
 // SignerFn hashes and signs the data to be signed by a backing account.

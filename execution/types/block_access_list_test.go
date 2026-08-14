@@ -10,6 +10,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -179,6 +180,50 @@ func TestBlockAccessListHashEmpty(t *testing.T) {
 
 	if err := bal.Validate(); err != nil {
 		t.Fatalf("empty BAL should be valid: %v", err)
+	}
+}
+
+func TestHeaderHasBAL(t *testing.T) {
+	nonEmptyBALHash := common.Hash{1}
+	tests := []struct {
+		name string
+		hash *common.Hash
+		want bool
+	}{
+		{name: "missing", want: false},
+		{name: "empty", hash: &empty.BlockAccessListHash, want: true},
+		{name: "non-empty", hash: &nonEmptyBALHash, want: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			header := Header{BlockAccessListHash: test.hash}
+			if got := header.HasBAL(); got != test.want {
+				t.Fatalf("HasBAL() = %t, want %t", got, test.want)
+			}
+		})
+	}
+}
+
+func TestHeaderHasNonEmptyBAL(t *testing.T) {
+	nonEmptyBALHash := common.Hash{1}
+	tests := []struct {
+		name string
+		hash *common.Hash
+		want bool
+	}{
+		{name: "missing", want: false},
+		{name: "empty", hash: &empty.BlockAccessListHash, want: false},
+		{name: "non-empty", hash: &nonEmptyBALHash, want: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			header := Header{BlockAccessListHash: test.hash}
+			if got := header.HasNonEmptyBAL(); got != test.want {
+				t.Fatalf("HasNonEmptyBAL() = %t, want %t", got, test.want)
+			}
+		})
 	}
 }
 

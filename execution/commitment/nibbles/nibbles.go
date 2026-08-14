@@ -27,7 +27,8 @@ package nibbles
 const Terminator byte = 0x10
 
 // HexToCompact converts a hex nibble sequence to compact (hex-prefix) encoding
-// as defined by the Ethereum Yellow Paper.
+// as defined by the Ethereum Yellow Paper. The result is a fresh allocation the
+// caller owns and may retain.
 func HexToCompact(hex []byte) []byte {
 	terminator := byte(0)
 	if HasTerm(hex) {

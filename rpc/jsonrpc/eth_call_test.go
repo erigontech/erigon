@@ -431,7 +431,7 @@ func TestGetProof(t *testing.T) {
 						continue
 					}
 					found = true
-					require.Equal(t, tt.stateVal, (*big.Int)(storageProof.Value).Uint64())
+					require.Equal(t, tt.stateVal, (*uint256.Int)(storageProof.Value).Uint64())
 					err = trie.VerifyStorageProof(proof.StorageHash, storageProof)
 					require.NoError(t, err)
 				}
@@ -771,7 +771,7 @@ func chainWithDeployedContractAndConfig(t *testing.T, cfg *chain.Config) (*execm
 
 	var contractAddr common.Address
 
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 6, func(i int, block *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(6, func(i int, block *blockgen.BlockGen) {
 		nonce := block.TxNonce(bankAddress)
 		switch i {
 		case 0:
@@ -883,7 +883,7 @@ func chainWithDeployedContractAndConfig(t *testing.T, cfg *chain.Config) (*execm
 	stateReader, err := rpchelper.CreateHistoryStateReader(ctx, tx, 1, 0, rawdbv3.TxNums)
 	require.NoError(t, err)
 	st := state.New(stateReader)
-	defer st.Release(false)
+	defer st.Close()
 	exist, err := st.Exist(accounts.InternAddress(contractAddr))
 	require.NoError(t, err)
 	assert.False(t, exist, "Contract should not exist at block #1")
@@ -891,7 +891,7 @@ func chainWithDeployedContractAndConfig(t *testing.T, cfg *chain.Config) (*execm
 	stateReader, err = rpchelper.CreateHistoryStateReader(ctx, tx, 2, 0, rawdbv3.TxNums)
 	require.NoError(t, err)
 	st = state.New(stateReader)
-	defer st.Release(false)
+	defer st.Close()
 	exist, err = st.Exist(accounts.InternAddress(contractAddr))
 	require.NoError(t, err)
 	assert.True(t, exist, "Contract should exist at block #2")
@@ -902,7 +902,7 @@ func chainWithDeployedContractAndConfig(t *testing.T, cfg *chain.Config) (*execm
 	stateReader, err = rpchelper.CreateHistoryStateReader(ctx, tx, 6, 0, rawdbv3.TxNums)
 	require.NoError(t, err)
 	st = state.New(stateReader)
-	defer st.Release(false)
+	defer st.Close()
 	createdFillers := 0
 	for _, pk := range fillerPublicKeys {
 		exist, err := st.Exist(accounts.InternAddress(crypto.PubkeyToAddress(*pk)))

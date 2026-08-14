@@ -1085,7 +1085,7 @@ func TestCommitmentValTransformDomainPanicsWithNeedMergeFalse(t *testing.T) {
 	defer dc.Close()
 
 	require.Panics(t, func() {
-		dc.commitmentValTransformDomain(MergeRange{needMerge: false}, dc, dc, nil, nil, false)
+		_, _ = dc.commitmentValTransformDomain(MergeRange{needMerge: false}, dc, dc, nil, nil, false)
 	})
 }
 
@@ -1379,7 +1379,7 @@ func TestHistoryAndIIAlignment(t *testing.T) {
 	agg := NewTest(dirs).Logger(logger).StepSize(1).MustOpen(t.Context(), db)
 	t.Cleanup(agg.Close)
 	setup := func() (account *Domain) {
-		agg.RegisterDomain(statecfg.Schema.GetDomainCfg(kv.AccountsDomain), nil, dirs, logger)
+		require.NoError(t, agg.RegisterDomain(statecfg.Schema.GetDomainCfg(kv.AccountsDomain), nil, dirs, logger))
 		domain := agg.d[kv.AccountsDomain]
 		domain.History.InvertedIndex.Accessors = 0
 		domain.History.Accessors = 0

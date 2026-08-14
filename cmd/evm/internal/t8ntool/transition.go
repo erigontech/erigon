@@ -348,11 +348,11 @@ func Main(_ context.Context, ctx *cli.Command) error {
 	result.StateRoot = *root
 
 	// Persist the post-execution state so the alloc dumper (which reads tx) sees it.
-	if err = sd.Flush(context.Background(), tx); err != nil {
+	if err := sd.Flush(context.Background(), tx); err != nil {
 		return err
 	}
 	// Record the block→txNum mapping the dumper needs to read the post-state as-of.
-	if err = rawdbv3.TxNums.Append(tx, blockNum, txNum); err != nil {
+	if err := rawdbv3.TxNums.Append(tx, blockNum, txNum); err != nil {
 		return err
 	}
 
@@ -412,66 +412,32 @@ func (t *txWithKey) UnmarshalJSON(input []byte) error {
 }
 
 func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
-	gasPrice, value := uint256.NewInt(0), uint256.NewInt(0)
-	var overflow bool
-	var chainId uint256.Int
-
-	if txJson.Value != nil {
-		value, overflow = uint256.FromBig(txJson.Value.ToInt())
-		if overflow {
-			return nil, errors.New("value field caused an overflow (uint256)")
+	deref := func(b *hexutil.U256) uint256.Int {
+		if b == nil {
+			return uint256.Int{}
 		}
+		return uint256.Int(*b)
 	}
+	value := deref(txJson.Value)
+	gasPrice := deref(txJson.GasPrice)
+	chainId := deref(txJson.ChainID)
+	v, r, s := deref(txJson.V), deref(txJson.R), deref(txJson.S)
 
-	if txJson.GasPrice != nil {
-		gasPrice, overflow = uint256.FromBig(txJson.GasPrice.ToInt())
-		if overflow {
-			return nil, errors.New("gasPrice field caused an overflow (uint256)")
-		}
-	}
-
-	if txJson.ChainID != nil {
-		cid, overflow := uint256.FromBig(txJson.ChainID.ToInt())
-		if overflow {
-			return nil, errors.New("chainId field caused an overflow (uint256)")
-		}
-		chainId = *cid
-	}
-
-	sig := func(name string, b *hexutil.Big) (uint256.Int, error) {
-		var out uint256.Int
-		if b != nil && out.SetFromBig(b.ToInt()) {
-			return out, fmt.Errorf("%s field caused an overflow (uint256)", name)
-		}
-		return out, nil
-	}
-	v, err := sig("v", txJson.V)
-	if err != nil {
-		return nil, err
-	}
-	r, err := sig("r", txJson.R)
-	if err != nil {
-		return nil, err
-	}
-	s, err := sig("s", txJson.S)
-	if err != nil {
-		return nil, err
-	}
-
-	if txJson.Type == types.LegacyTxType || txJson.Type == types.AccessListTxType {
+	switch {
+	case txJson.Type == types.LegacyTxType || txJson.Type == types.AccessListTxType:
 		if txJson.Type == types.LegacyTxType {
 			return &types.LegacyTx{
 				CommonTx: types.CommonTx{
 					Nonce:    uint64(txJson.Nonce),
 					To:       txJson.To,
-					Value:    *value,
+					Value:    value,
 					GasLimit: uint64(txJson.Gas),
 					Data:     txJson.Input,
 					V:        v,
 					R:        r,
 					S:        s,
 				},
-				GasPrice: *gasPrice,
+				GasPrice: gasPrice,
 			}, nil
 		}
 
@@ -480,42 +446,28 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 				CommonTx: types.CommonTx{
 					Nonce:    uint64(txJson.Nonce),
 					To:       txJson.To,
-					Value:    *value,
+					Value:    value,
 					GasLimit: uint64(txJson.Gas),
 					Data:     txJson.Input,
 					V:        v,
 					R:        r,
 					S:        s,
 				},
-				GasPrice: *gasPrice,
+				GasPrice: gasPrice,
 			},
 			ChainID:    chainId,
 			AccessList: *txJson.Accesses,
 		}, nil
-	} else if txJson.Type == types.DynamicFeeTxType || txJson.Type == types.SetCodeTxType {
-		var tipCap, feeCap uint256.Int
-		if txJson.MaxPriorityFeePerGas != nil {
-			tc, overflow := uint256.FromBig(txJson.MaxPriorityFeePerGas.ToInt())
-			if overflow {
-				return nil, errors.New("maxPriorityFeePerGas field caused an overflow (uint256)")
-			}
-			tipCap = *tc
-		}
-
-		if txJson.MaxFeePerGas != nil {
-			fc, overflow := uint256.FromBig(txJson.MaxFeePerGas.ToInt())
-			if overflow {
-				return nil, errors.New("maxFeePerGas field caused an overflow (uint256)")
-			}
-			feeCap = *fc
-		}
+	case txJson.Type == types.DynamicFeeTxType || txJson.Type == types.SetCodeTxType:
+		tipCap := deref(txJson.MaxPriorityFeePerGas)
+		feeCap := deref(txJson.MaxFeePerGas)
 
 		if txJson.Type == types.DynamicFeeTxType {
 			return &types.DynamicFeeTransaction{
 				CommonTx: types.CommonTx{
 					Nonce:    uint64(txJson.Nonce),
 					To:       txJson.To,
-					Value:    *value,
+					Value:    value,
 					GasLimit: uint64(txJson.Gas),
 					Data:     txJson.Input,
 					V:        v,
@@ -545,7 +497,7 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 				CommonTx: types.CommonTx{
 					Nonce:    uint64(txJson.Nonce),
 					To:       txJson.To,
-					Value:    *value,
+					Value:    value,
 					GasLimit: uint64(txJson.Gas),
 					Data:     txJson.Input,
 					V:        v,
@@ -559,7 +511,7 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 			},
 			Authorizations: auths,
 		}, nil
-	} else {
+	default:
 		return nil, nil
 	}
 }

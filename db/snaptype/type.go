@@ -238,6 +238,23 @@ var registeredTypes = map[Enum]Type{}
 var namedTypes = map[string]Type{}
 
 func RegisterType(enum Enum, name string, versions Versions, rangeExtractor RangeExtractor, indexes []Index, indexBuilder IndexBuilder) Type {
+	if prev, taken := registeredTypes[enum]; taken {
+		panic(fmt.Sprintf("snaptype: enum %d already registered as %q, cannot register %q", enum, prev.Name(), name))
+	}
+	if enum >= MinCaplinEnum && enum < MinBorEnum {
+		panic(fmt.Sprintf("snaptype: enum %d is in the caplin range, cannot register %q", enum, name))
+	}
+	// ParseEnum rather than namedTypes: caplin names resolve through its
+	// switch and never appear in the map.
+	if prevEnum, taken := ParseEnum(name); taken {
+		panic(fmt.Sprintf("snaptype: name %q already registered at enum %d", name, prevEnum))
+	}
+	// Runtime file slices are sized by MaxEnum and indexed by enum, so an
+	// out-of-range registration must fail here, not on first slice access.
+	if enum < MinCoreEnum || enum >= MaxEnum {
+		panic(fmt.Sprintf("snaptype: enum %d for %q outside [%d, %d)", enum, name, MinCoreEnum, MaxEnum))
+	}
+
 	t := SnapType{
 		enum: enum, name: name, versions: versions, indexes: indexes, rangeExtractor: rangeExtractor, indexBuilder: indexBuilder,
 	}
@@ -387,10 +404,10 @@ type Enums struct {
 }
 
 const MinCoreEnum = 1
-const MinBorEnum = 11
-const MinCaplinEnum = 9
+const MinBorEnum = 12
+const MinCaplinEnum = 10
 
-const MaxEnum = 15
+const MaxEnum = 16
 
 var CaplinEnums = struct {
 	Enums

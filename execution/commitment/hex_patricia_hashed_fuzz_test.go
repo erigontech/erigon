@@ -77,6 +77,11 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount2(f *testing.F) {
 	f.Add(uint16(100), uint32(1), uint32(2))
 
 	f.Fuzz(func(t *testing.T, keysCount uint16, ks, us uint32) {
+		// The top of the uint16 range costs ~40s per input and trips the
+		// fuzzer's hang detector, spending the budget on timeouts instead of
+		// tree shapes. Clamp rather than skip so every input stays a case.
+		keysCount %= 4096
+
 		keysSeed := rand.New(rand.NewSource(int64(ks)))
 		updateSeed := rand.New(rand.NewSource(int64(us)))
 
@@ -234,7 +239,7 @@ func Fuzz_HexPatriciaHashed_ReviewKeys(f *testing.F) {
 			addr := hex.EncodeToString(key)
 			builder.Balance(addr, rnd.Uint64())
 			builder.Nonce(addr, uint64(i))
-			builder.CodeHash(addr, hex.EncodeToString(append(key, make([]byte, 12)...)))
+			builder.CodeHash(addr, hex.EncodeToString(append(key, make([]byte, 12)...))) //nolint:makezero
 		}
 		t.Logf("keys count: %d", kc)
 

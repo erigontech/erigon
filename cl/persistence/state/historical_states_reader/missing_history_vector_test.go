@@ -40,7 +40,7 @@ func TestReadHistoryHashVector_MissingEntryIsTyped(t *testing.T) {
 	const size = uint64(64)
 	const slot = 2 * size // needFromGenesis=0; window [slot-size, slot-1]
 
-	genesisState, err := initial_state.GetGenesisState(chainspec.MainnetChainID)
+	genesisState, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
 	require.NoError(t, err)
 
 	for _, tc := range []struct {
@@ -85,7 +85,7 @@ func TestReadHistoryHashVector_CorruptEntryIsHardError(t *testing.T) {
 	const slot = 2 * size
 	const corruptAt = slot - size/2
 
-	genesisState, err := initial_state.GetGenesisState(chainspec.MainnetChainID)
+	genesisState, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
 	require.NoError(t, err)
 
 	db := memdb.NewTestDB(t, dbcfg.ChainDB)

@@ -1154,7 +1154,7 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 					"blks/s", fmt.Sprintf("%.1f", blkRate),
 					"checked", fmt.Sprintf("%s/%s", common.PrettyCounter(done), common.PrettyCounter(expectedBlks)),
 					"windows", fmt.Sprintf("%d/%d", wDone, totalWindows),
-					"blkRange", fmt.Sprintf("%s-%s", common.PrettyCounter(from), common.PrettyCounter(to)),
+					"blkRange", fmt.Sprintf("%s-%s", common.PrettyExact(from), common.PrettyExact(to)),
 				)
 			}
 		}
@@ -1363,6 +1363,10 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 		branchKeys++
 
 		branchData := commitment.BranchData(branchValue)
+
+		if branchData.IsTombstone() {
+			continue // tombstones kept across merges, not corruption
+		}
 
 		// Check completeness
 		if !branchData.IsComplete() {
@@ -1573,6 +1577,9 @@ func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile
 		branchKeys++
 
 		branchData := commitment.BranchData(branchValue)
+		if branchData.IsTombstone() {
+			continue
+		}
 
 		if !branchData.IsComplete() {
 			touchMap := uint16(0)
