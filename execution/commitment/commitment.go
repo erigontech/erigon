@@ -239,7 +239,7 @@ type DeferredBranchUpdate struct {
 }
 
 // Global pool for deferred branch updates.
-var deferredUpdatePool = sync.Pool{
+var deferredUpdatePool = &sync.Pool{
 	New: func() any {
 		return &DeferredBranchUpdate{}
 	},
@@ -284,6 +284,15 @@ func reuseBytes(dst, src []byte) []byte {
 		dst = make([]byte, 0, len(src)) // non-nil even for an empty src, as bytes.Clone is
 	}
 	return append(dst[:0], src...)
+}
+
+// capLen hides a recycled buffer's leftover capacity, so what a callback sees is derived
+// from the input rather than from whichever update last used the pooled object.
+func capLen(b []byte) []byte {
+	if b == nil {
+		return nil
+	}
+	return slices.Clip(b)
 }
 
 // putDeferredUpdate returns a DeferredBranchUpdate to the global pool.
@@ -445,7 +454,7 @@ func ApplyDeferredBranchUpdates(
 			if upd.encoded == nil {
 				continue
 			}
-			if err := putBranch(upd.prefix, upd.encoded, upd.prev); err != nil {
+			if err := putBranch(capLen(upd.prefix), capLen(upd.encoded), capLen(upd.prev)); err != nil {
 				return written, err
 			}
 			written++
@@ -489,7 +498,7 @@ func ApplyDeferredBranchUpdates(
 		if upd.encoded == nil {
 			continue // skip unchanged
 		}
-		if err := putBranch(upd.prefix, upd.encoded, upd.prev); err != nil {
+		if err := putBranch(capLen(upd.prefix), capLen(upd.encoded), capLen(upd.prev)); err != nil {
 			return written, err
 		}
 		written++

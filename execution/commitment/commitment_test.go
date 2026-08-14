@@ -23,6 +23,7 @@ import (
 	"math/bits"
 	"math/rand"
 	"slices"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1089,4 +1090,33 @@ func TestGetDeferredUpdate_WarmPoolPreservesNilPrev(t *testing.T) {
 	upd := getDeferredUpdate([]byte{1}, []byte{2, 3}, nil)
 	defer putDeferredUpdate(upd)
 	require.Nil(t, upd.prev)
+}
+
+// Pins the production path, not the helper: sync.Pool may hand back a fresh object, so the
+// pool is swapped for one that always yields a known object with known backing arrays.
+func TestGetDeferredUpdate_WritesIntoPooledBacking(t *testing.T) {
+	seed := &DeferredBranchUpdate{
+		prefix: make([]byte, 0, 32),
+		raw:    make([]byte, 0, 32),
+		prev:   make([]byte, 0, 32),
+	}
+	prefixArr, rawArr, prevArr := &seed.prefix[:1][0], &seed.raw[:1][0], &seed.prev[:1][0]
+
+	saved := deferredUpdatePool
+	deferredUpdatePool = &sync.Pool{New: func() any { return seed }}
+	t.Cleanup(func() { deferredUpdatePool = saved })
+
+	upd := getDeferredUpdate([]byte{1, 2}, []byte{3, 4, 5}, []byte{6})
+	require.Same(t, seed, upd)
+	require.Same(t, prefixArr, &upd.prefix[0], "prefix must be written into the pooled array")
+	require.Same(t, rawArr, &upd.raw[0], "raw must be written into the pooled array")
+	require.Same(t, prevArr, &upd.prev[0], "prev must be written into the pooled array")
+}
+
+// A callback must not see capacity left over from whichever update used the object before.
+func TestApplyDeferred_CallbackSeesInputDerivedCapacity(t *testing.T) {
+	require.Nil(t, capLen(nil))
+	big := make([]byte, 3, 64)
+	require.Equal(t, 3, cap(capLen(big)))
+	require.Equal(t, 0, cap(capLen(big[:0])))
 }
