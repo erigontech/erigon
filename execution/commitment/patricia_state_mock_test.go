@@ -69,6 +69,8 @@ func (ms *MockState) PutBranch(prefix []byte, data []byte, prevData []byte) erro
 		ms.mu.Lock()
 		defer ms.mu.Unlock()
 	}
+	// Clone is required by PutBranch's no-retain contract, not incidental: callers pass
+	// pooled buffers. Storing data directly silently corrupts branches on pool reuse.
 	ms.cm[string(prefix)] = bytes.Clone(data)
 	return nil
 }

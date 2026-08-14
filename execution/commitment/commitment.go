@@ -127,7 +127,8 @@ type PatriciaContext interface {
 	// For each cell, it sets the cell type, clears the modified flag, fills the hash,
 	// and for the extension, account, and leaf type, the `l` and `k`
 	Branch(prefix []byte) ([]byte, kv.Step, error)
-	// store branch data
+	// store branch data. Implementations must copy prefix and data rather than retain
+	// them: callers may pass pooled buffers that are recycled for a later, unrelated update.
 	PutBranch(prefix []byte, data []byte, prevData []byte) error
 	// fetch account with given plain key
 	Account(plainKey []byte) (*Update, error)
@@ -258,9 +259,8 @@ func GetDeferredUpdateMetrics() int64 {
 }
 
 // getDeferredUpdate gets a DeferredBranchUpdate from the pool and copies prefix,
-// raw, and prev into its own reused backing arrays. Because putDeferredUpdate
-// recycles those arrays for a later, unrelated update, every PutBranch
-// implementation must copy them rather than retain the slices it's given.
+// raw, and prev into its own reused backing arrays. putDeferredUpdate recycles
+// those arrays, so consumers are bound by PatriciaContext.PutBranch's no-retain rule.
 func getDeferredUpdate(prefix []byte, raw, prev []byte) *DeferredBranchUpdate {
 	getDeferredUpdateCount.Add(1)
 	upd := deferredUpdatePool.Get().(*DeferredBranchUpdate)
