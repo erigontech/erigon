@@ -37,10 +37,6 @@ func skipIfRequested(t testing.TB) {
 	}
 }
 
-func TemporalDB(t testing.TB) kv.TemporalRwDB {
-	return TemporalDBWithDirs(t, datadir.New(t.TempDir()))
-}
-
 func TemporalDBWithDirs(t testing.TB, dirs datadir.Dirs) kv.TemporalRwDB {
 	// Skip when ERIGON_SKIP_EXECUTION_TESTS is set: MDBX correctness is
 	// thoroughly exercised by the unit and integration tests in the main repo
