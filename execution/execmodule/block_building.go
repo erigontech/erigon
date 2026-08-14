@@ -19,7 +19,6 @@ package execmodule
 import (
 	"bytes"
 	"context"
-	"errors"
 	"reflect"
 	"time"
 
@@ -219,10 +218,11 @@ func (e *ExecModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (A
 	}
 	blockWithReceipts, err := entry.builder.Stop(ctx)
 	if err != nil {
-		// The caller gave up waiting; nothing about the build itself went wrong. Reading that from
-		// the returned error rather than the ambient context keeps the two from drifting apart
-		// between Stop returning and this check.
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		// Stop reports the caller's wait expiring and the build's own failure through the same
+		// error, and a build can fail with a context error of its own - a transaction provider
+		// giving up, say. Only the builder knows which happened, so ask it rather than guess from
+		// the error: a caller that gave up leaves a builder still worth collecting.
+		if !entry.builder.Failed() {
 			return AssembledBlockResult{}, err
 		}
 		// Keeping a failed entry would hand its latched error to every retry.

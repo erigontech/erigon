@@ -19,6 +19,7 @@ package execmodule
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"sync/atomic"
 	"testing"
@@ -572,4 +573,29 @@ func TestBuildDurationCapsOverflowingTimestamp(t *testing.T) {
 	// Beyond int64 seconds the conversion wraps into the past, which would collapse the budget to
 	// the floor instead of the cap.
 	require.Equal(t, 24*time.Second, buildDuration(math.MaxUint64, now, 12))
+}
+
+func TestGetAssembledBlockDropsABuildThatFailedWithAContextError(t *testing.T) {
+	module := &ExecModule{
+		logger:       log.Root(),
+		config:       &chain.Config{},
+		semaphore:    semaphore.NewWeighted(1),
+		builders:     map[uint64]*builderEntry{},
+		bacgroundCtx: t.Context(),
+		builderFunc: func(context.Context, *builder.Parameters, *atomic.Bool) (*types.BlockWithReceipts, error) {
+			// A transaction provider that gives up reports its own context error, which is a failed
+			// build rather than a caller that stopped waiting.
+			return nil, fmt.Errorf("issue while waiting for parent block: %w", context.DeadlineExceeded)
+		},
+	}
+
+	result, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: 100, ParentHash: common.Hash{0x01}})
+	require.NoError(t, err)
+
+	_, err = module.GetAssembledBlock(t.Context(), result.PayloadID)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+
+	// Keeping it would serve that latched error to every later retry of the same slot.
+	require.NotContains(t, module.builders, result.PayloadID)
+	require.NotContains(t, module.buildersByTimestamp, uint64(100))
 }
