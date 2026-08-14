@@ -626,7 +626,11 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			txpool.WithP2PSenderWg(nil),
 			txpool.WithFeeCalculator(nil),
 			txpool.WithPoolDBInitializer(func(_ context.Context, _ txpoolcfg.Config, _ log.Logger) (kv.RwDB, error) {
-				return mdbxtest.InMem(tb, mdbx.New(dbcfg.TxPoolDB, logger), tmpdir).MustOpen(), nil
+				opts := mdbx.New(dbcfg.TxPoolDB, logger)
+				if tb == nil {
+					return opts.InMem(tmpdir).MustOpen(), nil
+				}
+				return mdbxtest.InMem(tb, opts, tmpdir).MustOpen(), nil
 			}),
 		)
 		if err != nil {

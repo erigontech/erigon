@@ -32,11 +32,21 @@ import (
 )
 
 func New(tb testing.TB, tmpDir string, label kv.Label) kv.RwDB {
-	return mdbxtest.InMem(tb, mdbx.New(label, log.New()), tmpDir).MustOpen()
+	opts := mdbx.New(label, log.New())
+	if tb == nil {
+		return opts.InMem(tmpDir).MustOpen()
+	}
+	return mdbxtest.InMem(tb, opts, tmpDir).MustOpen()
 }
 
 func NewChainDB(tb testing.TB, tmpDir string) kv.RwDB {
-	return mdbxtest.InMem(tb, mdbx.New(dbcfg.ChainDB, log.New()), tmpDir).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	opts := mdbx.New(dbcfg.ChainDB, log.New())
+	if tb != nil {
+		opts = mdbxtest.InMem(tb, opts, tmpDir)
+	} else {
+		opts = opts.InMem(tmpDir)
+	}
+	return opts.GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 }
 
 func NewTestDB(tb testing.TB, label kv.Label) kv.RwDB {
