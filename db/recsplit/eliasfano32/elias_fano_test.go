@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/kv/stream/streamtest"
 )
 
 // This is a very implementation-dependant test using mainnet production data.
@@ -611,7 +612,7 @@ func TestIterator(t *testing.T) {
 			assert.Equal(t, offsets[i], v, "iter")
 			i++
 		}
-		stream.ExpectEqualU64(t, stream.ReverseArray(values), ef.ReverseIterator())
+		streamtest.ExpectEqualU64(t, stream.ReverseArray(values), ef.ReverseIterator())
 	})
 
 	t.Run("seek", func(t *testing.T) {
@@ -697,8 +698,8 @@ func TestIterator(t *testing.T) {
 		}
 		ef.Build()
 
-		stream.ExpectEqualU64(t, stream.Array(offsets), ef.Iterator())
-		stream.ExpectEqualU64(t, stream.ReverseArray(offsets), ef.ReverseIterator())
+		streamtest.ExpectEqualU64(t, stream.Array(offsets), ef.Iterator())
+		streamtest.ExpectEqualU64(t, stream.ReverseArray(offsets), ef.ReverseIterator())
 	})
 
 	t.Run("article-example2", func(t *testing.T) {
@@ -713,8 +714,8 @@ func TestIterator(t *testing.T) {
 		}
 		ef.Build()
 
-		stream.ExpectEqualU64(t, stream.Array(offsets), ef.Iterator())
-		stream.ExpectEqualU64(t, stream.ReverseArray(offsets), ef.ReverseIterator())
+		streamtest.ExpectEqualU64(t, stream.Array(offsets), ef.Iterator())
+		streamtest.ExpectEqualU64(t, stream.ReverseArray(offsets), ef.ReverseIterator())
 	})
 
 	t.Run("1 element", func(t *testing.T) {
@@ -722,8 +723,8 @@ func TestIterator(t *testing.T) {
 		ef.AddOffset(7)
 		ef.Build()
 
-		stream.ExpectEqualU64(t, stream.Array([]uint64{7}), ef.Iterator())
-		stream.ExpectEqualU64(t, stream.ReverseArray([]uint64{7}), ef.ReverseIterator())
+		streamtest.ExpectEqualU64(t, stream.Array([]uint64{7}), ef.Iterator())
+		streamtest.ExpectEqualU64(t, stream.ReverseArray([]uint64{7}), ef.ReverseIterator())
 	})
 }
 

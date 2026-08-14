@@ -69,7 +69,7 @@ func (r *CommitmentReplay) ComputeCustomCommitmentFromStateHistory(
 		mapSize = 1 * datasize.GB
 	}
 	db := mdbx.New(dbcfg.TemporaryDB, r.logger).
-		InMem(nil, r.dirs.Tmp).MapSize(mapSize).GrowthStep(1 * datasize.MB).MustOpen()
+		InMem(r.dirs.Tmp).MapSize(mapSize).GrowthStep(1 * datasize.MB).MustOpen()
 	defer db.Close()
 
 	erigonDBSettings, err := dbstate.ResolveErigonDBSettings(r.dirs, r.logger, false)

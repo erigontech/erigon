@@ -28,14 +28,15 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
 func New(tb testing.TB, tmpDir string, label kv.Label) kv.RwDB {
-	return mdbx.New(label, log.New()).InMem(tb, tmpDir).MustOpen()
+	return mdbxtest.InMem(tb, mdbx.New(label, log.New()), tmpDir).MustOpen()
 }
 
 func NewChainDB(tb testing.TB, tmpDir string) kv.RwDB {
-	return mdbx.New(dbcfg.ChainDB, log.New()).InMem(tb, tmpDir).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	return mdbxtest.InMem(tb, mdbx.New(dbcfg.ChainDB, log.New()), tmpDir).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 }
 
 func NewTestDB(tb testing.TB, label kv.Label) kv.RwDB {
