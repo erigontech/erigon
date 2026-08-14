@@ -24,7 +24,8 @@ jobs:
     runs-on: ubuntu-latest
     # DOCS_DEPLOY_BRANCH is the single switch for which branch publishes, so this
     # branch stops publishing when it moves on, without deleting this file.
-    if: github.ref_name == vars.DOCS_DEPLOY_BRANCH
+    # Accepted either as a bare branch name or as a full refs/heads/ ref.
+    if: github.ref_name == vars.DOCS_DEPLOY_BRANCH || github.ref == vars.DOCS_DEPLOY_BRANCH
     steps:
       - uses: actions/checkout@v6
 
