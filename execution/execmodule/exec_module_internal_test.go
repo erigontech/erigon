@@ -17,13 +17,46 @@
 package execmodule
 
 import (
+	"context"
+	"errors"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/types"
 )
+
+type sideForkReader struct {
+	dbservices.FullBlockReader
+	canonicalHash common.Hash
+	forkHeader    *types.Header
+	forkBody      *types.Body
+}
+
+func (r sideForkReader) IsCanonical(_ context.Context, _ kv.Getter, hash common.Hash, _ uint64) (bool, error) {
+	return hash == r.canonicalHash, nil
+}
+
+func (r sideForkReader) Header(_ context.Context, _ kv.Getter, hash common.Hash, _ uint64) (*types.Header, error) {
+	if hash == r.forkHeader.Hash() {
+		return r.forkHeader, nil
+	}
+	return nil, nil
+}
+
+func (r sideForkReader) BodyWithTransactions(_ context.Context, _ kv.Getter, hash common.Hash, _ uint64) (*types.Body, error) {
+	if hash == r.forkHeader.Hash() {
+		return r.forkBody, nil
+	}
+	return nil, nil
+}
 
 // The module is the one owner of the domain state cache: callers pass a byte
 // budget, never a constructed cache, so a disabled cache cannot be built
@@ -43,4 +76,24 @@ func TestNewDomainStateCacheRespectsUseStateCache(t *testing.T) {
 	scDefault := newDomainStateCache(0)
 	require.NotNil(t, scDefault, "zero budget means the production default, not no cache")
 	scDefault.Close()
+}
+
+func TestForkValidatorSuspendsReadAheadBeforeItsOwnUnwind(t *testing.T) {
+	canonicalHash := common.HexToHash("0x01")
+	forkHeader := &types.Header{ParentHash: canonicalHash, Number: *uint256.NewInt(2)}
+	payloadHeader := &types.Header{ParentHash: forkHeader.Hash(), Number: *uint256.NewInt(3)}
+	reader := sideForkReader{
+		canonicalHash: canonicalHash,
+		forkHeader:    forkHeader,
+		forkBody:      &types.Body{},
+	}
+	fv := newForkValidator(t.Context(), 10, &PipelineExecutor{}, reader, 16)
+
+	// Stop at the suspension boundary; this test needs no execution pipeline to
+	// prove that suspension failure aborts before the validator stages its unwind.
+	suspendErr := errors.New("read-ahead suspension cancelled")
+	_, _, _, criticalErr := fv.ValidatePayload(t.Context(), nil, nil, payloadHeader, &types.RawBody{}, func() error {
+		return suspendErr
+	}, log.New())
+	require.ErrorIs(t, criticalErr, suspendErr)
 }

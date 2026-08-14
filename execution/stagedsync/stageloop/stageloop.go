@@ -52,7 +52,7 @@ import (
 // an implementation defined in another package (e.g. execmodule.Dispatcher)
 // without creating a circular import.
 type NotificationSender interface {
-	Dispatch(ctx context.Context, tx kv.Tx, accumulator *shards.Accumulator, recentReceipts *shards.RecentReceipts, finishProgressBefore, finishProgressAfter uint64, prevUnwindPoint *uint64) error
+	Dispatch(ctx context.Context, tx kv.Tx, stateVersion uint64, accumulator *shards.Accumulator, recentReceipts *shards.RecentReceipts, finishProgressBefore, finishProgressAfter uint64, prevUnwindPoint *uint64) error
 }
 
 type Hook struct {
@@ -138,8 +138,15 @@ func (h *Hook) SendNotifications(tx kv.Tx, finishProgressBefore uint64) error {
 	if err != nil {
 		return err
 	}
+	var stateVersion uint64
+	if h.notifications.Accumulator != nil {
+		stateVersion, err = rawdb.GetStateVersion(tx)
+		if err != nil {
+			return err
+		}
+	}
 	return h.dispatcher.Dispatch(
-		h.ctx, tx,
+		h.ctx, tx, stateVersion,
 		h.notifications.Accumulator,
 		h.notifications.RecentReceipts,
 		finishProgressBefore,
