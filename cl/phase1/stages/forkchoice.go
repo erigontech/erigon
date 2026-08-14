@@ -306,23 +306,28 @@ func writeFinalizedStateFile(dirs datadir.Dirs, st *state.CachingBeaconState) er
 	if err := os.MkdirAll(dirs.CaplinLatest, 0o755); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
-	rootFileName := checkpoint_sync.FinalizedStateRootFileName(dat)
-	rootPath := filepath.Join(dirs.CaplinLatest, rootFileName)
-	rootTmpPath := rootPath + ".tmp"
-	stateRoot := st.PeekPreviousStateRoot()
-	if err := replaceDurableFile(rootTmpPath, rootPath, checkpoint_sync.EncodeFinalizedStateRoot(dat, stateRoot)); err != nil {
-		return fmt.Errorf("failed to replace finalized state root: %w", err)
+	var rootPath string
+	if st.Version() >= clparams.GloasVersion {
+		rootFileName := checkpoint_sync.FinalizedStateRootFileName(dat)
+		rootPath = filepath.Join(dirs.CaplinLatest, rootFileName)
+		rootTmpPath := rootPath + ".tmp"
+		stateRoot := st.PeekPreviousStateRoot()
+		if err := replaceDurableFile(rootTmpPath, rootPath, checkpoint_sync.EncodeFinalizedStateRoot(dat, stateRoot)); err != nil {
+			return fmt.Errorf("failed to replace finalized state root: %w", err)
+		}
 	}
 	tmpName := filepath.Join(dirs.CaplinLatest, clparams.LatestFinalizedStateFileName+".tmp")
 	statePath := filepath.Join(dirs.CaplinLatest, clparams.LatestFinalizedStateFileName)
 	if err := replaceDurableFile(tmpName, statePath, dat); err != nil {
 		return fmt.Errorf("failed to replace finalized state: %w", err)
 	}
-	if err := checkpoint_sync.RemoveObsoleteFinalizedStateRoots(dirs.CaplinLatest, rootPath); err != nil {
-		return fmt.Errorf("failed to remove obsolete finalized state roots: %w", err)
-	}
-	if err := syncDirectory(dirs.CaplinLatest); err != nil {
-		return fmt.Errorf("failed to sync finalized state root cleanup: %w", err)
+	if rootPath != "" {
+		if err := checkpoint_sync.RemoveObsoleteFinalizedStateRoots(dirs.CaplinLatest, rootPath); err != nil {
+			return fmt.Errorf("failed to remove obsolete finalized state roots: %w", err)
+		}
+		if err := syncDirectory(dirs.CaplinLatest); err != nil {
+			return fmt.Errorf("failed to sync finalized state root cleanup: %w", err)
+		}
 	}
 	return nil
 }

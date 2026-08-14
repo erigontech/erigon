@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -33,6 +34,7 @@ import (
 const (
 	payloadAttestationValidationContextCacheSize = 128
 	maxConcurrentValidationContextBuilds         = 1
+	maxPendingValidationContextBuilds            = int(clparams.PtcSize)
 )
 
 type payloadAttestationValidationContext struct {
@@ -45,6 +47,7 @@ type payloadAttestationValidationContext struct {
 type payloadAttestationValidationContexts struct {
 	cache          *lru.Cache[common.Hash, *payloadAttestationValidationContext]
 	buildAdmission chan struct{}
+	pendingBuilds  chan struct{}
 	mu             sync.Mutex
 	builds         map[common.Hash]*payloadAttestationValidationContextBuild
 }
@@ -67,6 +70,7 @@ func newPayloadAttestationValidationContexts() (*payloadAttestationValidationCon
 	return &payloadAttestationValidationContexts{
 		cache:          cache,
 		buildAdmission: make(chan struct{}, maxConcurrentValidationContextBuilds),
+		pendingBuilds:  make(chan struct{}, maxPendingValidationContextBuilds),
 		builds:         make(map[common.Hash]*payloadAttestationValidationContextBuild),
 	}, nil
 }
@@ -89,36 +93,58 @@ func (c *payloadAttestationValidationContexts) get(
 			}
 			return validationContext, err
 		}
+		c.mu.Unlock()
+		select {
+		case c.pendingBuilds <- struct{}{}:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+			return nil, fmt.Errorf("%w: payload attestation validation backlog full", ErrIgnore)
+		}
+		c.mu.Lock()
+		if current, ok := c.builds[blockRoot]; ok {
+			c.mu.Unlock()
+			<-c.pendingBuilds
+			validationContext, err, retry := waitForPayloadAttestationValidationContext(ctx, current)
+			if retry && ctx.Err() == nil {
+				continue
+			}
+			return validationContext, err
+		}
 		current := &payloadAttestationValidationContextBuild{done: make(chan struct{})}
 		c.builds[blockRoot] = current
 		c.mu.Unlock()
-
-		select {
-		case c.buildAdmission <- struct{}{}:
-		case <-ctx.Done():
-			c.complete(blockRoot, current, nil, ctx.Err(), true)
-			return nil, ctx.Err()
-		}
-		var validationContext *payloadAttestationValidationContext
-		var err error
-		var panicValue any
-		func() {
-			defer func() { panicValue = recover() }()
-			validationContext, err = build()
-		}()
-		<-c.buildAdmission
-		if panicValue != nil {
-			err = fmt.Errorf("payload attestation validation context build panicked: %v", panicValue)
-		}
-		if err == nil {
-			c.cache.Add(blockRoot, validationContext)
-		}
-		c.complete(blockRoot, current, validationContext, err, false)
-		if panicValue != nil {
-			panic(panicValue)
-		}
-		return validationContext, err
+		return c.build(ctx, blockRoot, current, build)
 	}
+}
+
+func (c *payloadAttestationValidationContexts) build(ctx context.Context, blockRoot common.Hash, current *payloadAttestationValidationContextBuild, build func() (*payloadAttestationValidationContext, error)) (*payloadAttestationValidationContext, error) {
+	defer func() { <-c.pendingBuilds }()
+	select {
+	case c.buildAdmission <- struct{}{}:
+	case <-ctx.Done():
+		c.complete(blockRoot, current, nil, ctx.Err(), true)
+		return nil, ctx.Err()
+	}
+	var validationContext *payloadAttestationValidationContext
+	var err error
+	var panicValue any
+	func() {
+		defer func() { panicValue = recover() }()
+		validationContext, err = build()
+	}()
+	<-c.buildAdmission
+	if panicValue != nil {
+		err = fmt.Errorf("payload attestation validation context build panicked: %v", panicValue)
+	}
+	if err == nil {
+		c.cache.Add(blockRoot, validationContext)
+	}
+	c.complete(blockRoot, current, validationContext, err, false)
+	if panicValue != nil {
+		panic(panicValue)
+	}
+	return validationContext, err
 }
 
 func waitForPayloadAttestationValidationContext(ctx context.Context, build *payloadAttestationValidationContextBuild) (*payloadAttestationValidationContext, error, bool) {

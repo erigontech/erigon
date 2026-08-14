@@ -42,6 +42,9 @@ func TestWriteFinalizedStateFile_RoundTrip(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 
 	require.NoError(t, writeFinalizedStateFile(dirs, st))
+	rootFiles, err := filepath.Glob(filepath.Join(dirs.CaplinLatest, ".finalized-state-root-*"))
+	require.NoError(t, err)
+	require.Empty(t, rootFiles)
 
 	got, err := checkpoint_sync.ReadLocalFinalizedState(dirs, &clparams.MainnetBeaconConfig)
 	require.NoError(t, err)
@@ -55,18 +58,7 @@ func TestWriteFinalizedStateFile_RoundTrip(t *testing.T) {
 }
 
 func TestWriteFinalizedStateFile_RestoresGloasStateRoot(t *testing.T) {
-	beaconCfg := clparams.MainnetBeaconConfig
-	beaconCfg.AltairForkEpoch = 0
-	beaconCfg.BellatrixForkEpoch = 0
-	beaconCfg.CapellaForkEpoch = 0
-	beaconCfg.DenebForkEpoch = 0
-	beaconCfg.ElectraForkEpoch = 0
-	beaconCfg.FuluForkEpoch = 0
-	beaconCfg.GloasForkEpoch = 0
-	st := state.New(&beaconCfg)
-	st.SetVersion(clparams.GloasVersion)
-	st.SetSlot(64)
-	st.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{Slot: 64})
+	beaconCfg, st := newGloasFinalizedState()
 	authoritativeRoot := common.Hash{0xaa}
 	st.SetPreviousStateRoot(authoritativeRoot)
 	wantBlockRoot, err := st.BlockRoot()
@@ -74,7 +66,7 @@ func TestWriteFinalizedStateFile_RestoresGloasStateRoot(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 
 	require.NoError(t, writeFinalizedStateFile(dirs, st))
-	got, err := checkpoint_sync.ReadLocalFinalizedState(dirs, &beaconCfg)
+	got, err := checkpoint_sync.ReadLocalFinalizedState(dirs, beaconCfg)
 	require.NoError(t, err)
 	require.Equal(t, authoritativeRoot, got.PeekPreviousStateRoot())
 	gotBlockRoot, err := got.BlockRoot()
@@ -83,34 +75,22 @@ func TestWriteFinalizedStateFile_RestoresGloasStateRoot(t *testing.T) {
 }
 
 func TestReadFinalizedGloasStateWithoutRootRejectsUnsafeResume(t *testing.T) {
-	beaconCfg := clparams.MainnetBeaconConfig
-	beaconCfg.AltairForkEpoch = 0
-	beaconCfg.BellatrixForkEpoch = 0
-	beaconCfg.CapellaForkEpoch = 0
-	beaconCfg.DenebForkEpoch = 0
-	beaconCfg.ElectraForkEpoch = 0
-	beaconCfg.FuluForkEpoch = 0
-	beaconCfg.GloasForkEpoch = 0
-	st := state.New(&beaconCfg)
-	st.SetVersion(clparams.GloasVersion)
-	st.SetSlot(64)
-	st.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{Slot: 64})
+	beaconCfg, st := newGloasFinalizedState()
 	dirs := datadir.New(t.TempDir())
 	require.NoError(t, os.MkdirAll(dirs.CaplinLatest, 0o755))
 	encoded, err := utils.EncodeSSZSnappy(st)
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.CaplinLatest, clparams.LatestFinalizedStateFileName), encoded, 0o644))
 
-	genesis := state.New(&beaconCfg)
+	genesis := state.New(beaconCfg)
 	got, err := checkpoint_sync.NewLocalCheckpointSyncer(genesis, afero.NewBasePathFs(afero.NewOsFs(), dirs.CaplinLatest)).GetLatestBeaconState(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, genesis.Slot(), got.Slot())
 }
 
 func TestReadFinalizedGloasStateRejectsCorruptRootRecord(t *testing.T) {
-	beaconCfg := clparams.MainnetBeaconConfig
+	beaconCfg, st := newGloasFinalizedState()
 	dirs := datadir.New(t.TempDir())
-	_, st, _ := tests.GetPhase0Random()
 	require.NoError(t, writeFinalizedStateFile(dirs, st))
 	encoded, err := os.ReadFile(filepath.Join(dirs.CaplinLatest, clparams.LatestFinalizedStateFileName))
 	require.NoError(t, err)
@@ -120,15 +100,14 @@ func TestReadFinalizedGloasStateRejectsCorruptRootRecord(t *testing.T) {
 	record[0] ^= 1
 	require.NoError(t, os.WriteFile(rootPath, record, 0o644))
 
-	_, err = checkpoint_sync.ReadLocalFinalizedState(dirs, &beaconCfg)
+	_, err = checkpoint_sync.ReadLocalFinalizedState(dirs, beaconCfg)
 	require.ErrorContains(t, err, "invalid finalized state root checksum")
 }
 
 func TestReadFinalizedStateRejectsRootRecordFromDifferentState(t *testing.T) {
-	beaconCfg := clparams.MainnetBeaconConfig
+	beaconCfg, stateA := newGloasFinalizedState()
 	dirsA := datadir.New(t.TempDir())
 	dirsB := datadir.New(t.TempDir())
-	_, stateA, _ := tests.GetPhase0Random()
 	stateB, err := stateA.Copy()
 	require.NoError(t, err)
 	stateB.SetSlot(stateA.Slot() + 1)
@@ -144,8 +123,24 @@ func TestReadFinalizedStateRejectsRootRecordFromDifferentState(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(dirsA.CaplinLatest, checkpoint_sync.FinalizedStateRootFileName(encodedA)), recordB, 0o644))
 
-	_, err = checkpoint_sync.ReadLocalFinalizedState(dirsA, &beaconCfg)
+	_, err = checkpoint_sync.ReadLocalFinalizedState(dirsA, beaconCfg)
 	require.ErrorContains(t, err, "invalid finalized state root checksum")
+}
+
+func newGloasFinalizedState() (*clparams.BeaconChainConfig, *state.CachingBeaconState) {
+	beaconCfg := clparams.MainnetBeaconConfig
+	beaconCfg.AltairForkEpoch = 0
+	beaconCfg.BellatrixForkEpoch = 0
+	beaconCfg.CapellaForkEpoch = 0
+	beaconCfg.DenebForkEpoch = 0
+	beaconCfg.ElectraForkEpoch = 0
+	beaconCfg.FuluForkEpoch = 0
+	beaconCfg.GloasForkEpoch = 0
+	st := state.New(&beaconCfg)
+	st.SetVersion(clparams.GloasVersion)
+	st.SetSlot(64)
+	st.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{Slot: 64})
+	return &beaconCfg, st
 }
 
 func TestSaveFinalizedStateOnDisk(t *testing.T) {

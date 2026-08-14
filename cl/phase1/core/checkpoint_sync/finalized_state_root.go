@@ -42,6 +42,9 @@ func RemoveObsoleteFinalizedStateRoots(directory, keepPath string) error {
 }
 
 func RestoreFinalizedStateRoot(storage afero.Fs, snappyState []byte, st *state.CachingBeaconState) error {
+	if st.Version() < clparams.GloasVersion {
+		return nil
+	}
 	record, err := afero.ReadFile(storage, FinalizedStateRootFileName(snappyState))
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {

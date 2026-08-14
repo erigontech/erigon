@@ -46,6 +46,10 @@ import (
 // and queues the execution block for later EL insertion.
 var errELBehind = errors.New("EL behind: payload not processable yet")
 
+var errPayloadValidationAdmission = errors.New("payload validation admission canceled")
+
+var errInvalidExecutionPayloadEnvelope = errors.New("invalid execution payload envelope")
+
 // validateEnvelopeAgainstBlock validates the envelope against the block and state.
 // This includes:
 //   - bid matching (slot, builder_index, block_hash)
@@ -292,7 +296,7 @@ func (f *ForkChoiceStore) newPayloadWhileYieldingForkChoiceLock(
 	case f.payloadValidationAdmission <- struct{}{}:
 		defer func() { <-f.payloadValidationAdmission }()
 	case <-ctx.Done():
-		return execution_client.PayloadStatusNone, ctx.Err()
+		return execution_client.PayloadStatusNone, fmt.Errorf("%w: %w", errPayloadValidationAdmission, ctx.Err())
 	}
 	f.mu.Lock()
 	alreadyApplied := f.forkGraph.HasEnvelope(beaconBlockRoot)
@@ -340,7 +344,7 @@ func (f *ForkChoiceStore) applyPayloadValidationResultLocked(
 	case execution_client.PayloadStatusInvalidated:
 		log.Warn("validatePayloadWithEL: payload is invalid", "beaconBlockRoot", beaconBlockRoot, "err", validationErr)
 		f.markPayloadInvalidLocked(beaconBlockRoot, executionBlockHash)
-		return errors.New("execution payload is invalid")
+		return fmt.Errorf("%w: execution payload is invalid", errInvalidExecutionPayloadEnvelope)
 	case execution_client.PayloadStatusValidated:
 		log.Trace("validatePayloadWithEL: payload is validated", "beaconBlockRoot", beaconBlockRoot)
 		f.markPayloadVerifiedLocked(beaconBlockRoot, executionBlockHash)
@@ -374,7 +378,7 @@ func (f *ForkChoiceStore) refreshEnvelopeBlockLocked(beaconBlockRoot common.Hash
 func (f *ForkChoiceStore) applyEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) (bool, error) {
 	if signedEnvelope.Message == nil {
 		log.Warn("[applyEnvelope] received signed envelope with nil message")
-		return false, errors.New("signed envelope has nil message")
+		return false, fmt.Errorf("%w: signed envelope has nil message", errInvalidExecutionPayloadEnvelope)
 	}
 
 	f.mu.Lock()
@@ -390,7 +394,7 @@ func (f *ForkChoiceStore) applyEnvelope(ctx context.Context, signedEnvelope *clt
 func (f *ForkChoiceStore) applyEnvelopeCoordinated(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) (bool, error) {
 	if signedEnvelope.Message == nil {
 		log.Warn("[applyEnvelopeCoordinated] received signed envelope with nil message")
-		return false, errors.New("signed envelope has nil message")
+		return false, fmt.Errorf("%w: signed envelope has nil message", errInvalidExecutionPayloadEnvelope)
 	}
 	envelope := signedEnvelope.Message
 	beaconBlockRoot := envelope.BeaconBlockRoot
@@ -427,7 +431,7 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(ctx context.Context, signedEn
 	// Validate envelope against block (bid matching + signature verification)
 	if validatePayload {
 		if err := f.validateEnvelopeAgainstBlock(signedEnvelope, block, blockState); err != nil {
-			return false, fmt.Errorf("OnExecutionPayload: envelope validation failed: %w", err)
+			return false, fmt.Errorf("%w: OnExecutionPayload: envelope validation failed: %v", errInvalidExecutionPayloadEnvelope, err)
 		}
 	}
 
@@ -437,11 +441,18 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(ctx context.Context, signedEn
 			return false, err
 		}
 	}
+	blockState.SetPreviousStateRoot(block.Block.StateRoot)
+	if err := transition.ValidatingMachine.ProcessExecutionPayloadEnvelope(blockState, signedEnvelope); err != nil {
+		return false, fmt.Errorf("%w: OnExecutionPayload: failed to verify execution payload: %v", errInvalidExecutionPayloadEnvelope, err)
+	}
 
 	// Validate payload with EL
 	var elBehind bool
 	if validatePayload && f.engine != nil {
 		payloadStatus, validationErr := f.validatePayloadWithEL(ctx, envelope, block, common.Hash(beaconBlockRoot))
+		if errors.Is(validationErr, errPayloadValidationAdmission) {
+			return false, validationErr
+		}
 		if f.forkGraph.HasEnvelope(beaconBlockRoot) {
 			return false, nil
 		}
@@ -459,21 +470,6 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(ctx context.Context, signedEn
 				return false, err
 			}
 		}
-	}
-
-	// Ensure the correct state root is available for the beacon_block_root check
-	// inside ProcessExecutionPayloadEnvelope. PreviousStateRoot() is consumptive
-	// (cleared on read) and may have already been consumed by transitionSlot during
-	// TransitionState, or by a replay in GetState. Re-setting it from the block's
-	// known-correct StateRoot guarantees ProcessExecutionPayloadEnvelope can
-	// reconstruct the block header root without relying on the incremental hash cache.
-	blockState.SetPreviousStateRoot(block.Block.StateRoot)
-
-	// Run ProcessExecutionPayloadEnvelope for CL-level verification (no state mutation).
-	// Always use ValidatingMachine so that signature verification and all spec checks run,
-	// regardless of whether the EL-level validatePayload flag is set.
-	if err := transition.ValidatingMachine.ProcessExecutionPayloadEnvelope(blockState, signedEnvelope); err != nil {
-		return false, fmt.Errorf("OnExecutionPayload: failed to verify execution payload: %w", err)
 	}
 
 	// Update eth2Roots mapping for FCU
@@ -555,18 +551,13 @@ func (f *ForkChoiceStore) OnExecutionPayload(ctx context.Context, signedEnvelope
 	// Process envelope under f.mu; DB index write happens after unlock to avoid
 	// deadlock with postForkchoiceOperations (which holds MDBX tx then needs f.mu.RLock).
 	applied, err := f.applyEnvelope(ctx, signedEnvelope, checkBlobData, validatePayload)
-	if err != nil || !applied {
+	if err != nil {
 		return err
 	}
-
-	// Write execution block indices outside f.mu.
-	if f.db != nil {
-		if err := f.db.Update(ctx, func(tx kv.RwTx) error {
-			return beacon_indicies.WriteExecutionPayloadEnvelopeIndicies(tx, common.Hash(beaconBlockRoot), envelope)
-		}); err != nil {
-			f.pendingEnvelopes.Add(common.Hash(beaconBlockRoot), signedEnvelope)
-			return fmt.Errorf("OnExecutionPayload: failed to write execution payload indices: %w", err)
-		}
+	indexEnvelope, err := f.ensureExecutionPayloadEnvelopeIndices(ctx, common.Hash(beaconBlockRoot), signedEnvelope, applied)
+	if err != nil {
+		f.pendingEnvelopes.Add(common.Hash(beaconBlockRoot), indexEnvelope)
+		return fmt.Errorf("OnExecutionPayload: failed to write execution payload indices: %w", err)
 	}
 
 	return nil
@@ -586,34 +577,106 @@ func (f *ForkChoiceStore) OnExecutionPayload(ctx context.Context, signedEnvelope
 // verifies BLS signatures.
 // [New in Gloas:EIP7732]
 func (f *ForkChoiceStore) ApplyLocalSelfBuildEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
-	if signedEnvelope == nil || signedEnvelope.Message == nil {
-		return errors.New("nil execution payload envelope")
+	if signedEnvelope == nil || signedEnvelope.Message == nil || signedEnvelope.Message.Payload == nil {
+		return errors.New("execution payload envelope has nil payload")
 	}
 
 	envelope := signedEnvelope.Message
 	beaconBlockRoot := envelope.BeaconBlockRoot
 
 	applied, err := f.applyLocalSelfBuildEnvelope(ctx, signedEnvelope)
-	if err != nil || !applied {
+	if err != nil {
 		return err
 	}
-
-	if f.db != nil {
-		if err := f.db.Update(ctx, func(tx kv.RwTx) error {
-			return beacon_indicies.WriteExecutionPayloadEnvelopeIndicies(tx, common.Hash(beaconBlockRoot), envelope)
-		}); err != nil {
-			f.pendingLocalSelfBuildEnvelopes.Add(common.Hash(beaconBlockRoot), signedEnvelope)
-			return fmt.Errorf("ApplyLocalSelfBuildEnvelope: failed to write execution payload indices: %w", err)
-		}
+	indexEnvelope, err := f.ensureExecutionPayloadEnvelopeIndices(ctx, common.Hash(beaconBlockRoot), signedEnvelope, applied)
+	if err != nil {
+		f.pendingLocalSelfBuildEnvelopes.Add(common.Hash(beaconBlockRoot), indexEnvelope)
+		return fmt.Errorf("ApplyLocalSelfBuildEnvelope: failed to write execution payload indices: %w", err)
 	}
 
 	return nil
 }
 
+func (f *ForkChoiceStore) ensureExecutionPayloadEnvelopeIndices(ctx context.Context, blockRoot common.Hash, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, applied bool) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+	if f.db == nil || (!applied && !f.forkGraph.HasEnvelope(blockRoot)) {
+		return signedEnvelope, nil
+	}
+	retried := false
+	for {
+		write := &envelopeIndexWrite{done: make(chan struct{})}
+		existing, loaded := f.envelopeIndexWrites.LoadOrStore(blockRoot, write)
+		if loaded {
+			current := existing.(*envelopeIndexWrite)
+			select {
+			case <-current.done:
+				if !retried && ctx.Err() == nil && (errors.Is(current.err, context.Canceled) || errors.Is(current.err, context.DeadlineExceeded) || errors.Is(current.err, errExecutionPayloadIndexWritePanicked)) {
+					retried = true
+					continue
+				}
+				return current.envelope, current.err
+			case <-ctx.Done():
+				return signedEnvelope, ctx.Err()
+			}
+		}
+		return f.runExecutionPayloadEnvelopeIndexWrite(ctx, blockRoot, signedEnvelope, applied, write)
+	}
+}
+
+var errExecutionPayloadIndexWritePanicked = errors.New("execution payload index write panicked")
+
+func (f *ForkChoiceStore) runExecutionPayloadEnvelopeIndexWrite(ctx context.Context, blockRoot common.Hash, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, applied bool, write *envelopeIndexWrite) (envelope *cltypes.SignedExecutionPayloadEnvelope, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			write.envelope = signedEnvelope
+			write.err = fmt.Errorf("%w: %v", errExecutionPayloadIndexWritePanicked, recovered)
+			f.envelopeIndexWrites.CompareAndDelete(blockRoot, write)
+			close(write.done)
+			panic(recovered)
+		}
+		write.envelope, write.err = envelope, err
+		f.envelopeIndexWrites.CompareAndDelete(blockRoot, write)
+		close(write.done)
+	}()
+	return f.writeExecutionPayloadEnvelopeIndices(ctx, blockRoot, signedEnvelope, applied)
+}
+
+func (f *ForkChoiceStore) writeExecutionPayloadEnvelopeIndices(ctx context.Context, blockRoot common.Hash, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, applied bool) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+	if !applied {
+		persisted, err := f.forkGraph.ReadEnvelopeFromDisk(blockRoot)
+		if err != nil {
+			return nil, err
+		}
+		signedEnvelope = persisted
+	}
+	if signedEnvelope == nil || signedEnvelope.Message == nil || signedEnvelope.Message.Payload == nil {
+		return signedEnvelope, errors.New("persisted execution payload envelope is incomplete")
+	}
+	indexed := false
+	err := f.db.View(ctx, func(tx kv.Tx) error {
+		blockNumber, err := beacon_indicies.ReadExecutionBlockNumber(tx, blockRoot)
+		if err != nil {
+			return err
+		}
+		blockHash, err := beacon_indicies.ReadExecutionBlockHash(tx, blockRoot)
+		if err != nil {
+			return err
+		}
+		indexed = blockNumber != nil && *blockNumber == signedEnvelope.Message.Payload.BlockNumber && blockHash == signedEnvelope.Message.Payload.BlockHash
+		return nil
+	})
+	if err != nil || indexed {
+		return signedEnvelope, err
+	}
+	err = f.db.Update(ctx, func(tx kv.RwTx) error {
+		return beacon_indicies.WriteExecutionPayloadEnvelopeIndicies(tx, blockRoot, signedEnvelope.Message)
+	})
+	return signedEnvelope, err
+}
+
 // applyLocalSelfBuildEnvelope coordinates fork-choice ownership around local envelope processing.
 func (f *ForkChoiceStore) applyLocalSelfBuildEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) (bool, error) {
 	if signedEnvelope.Message == nil {
-		return false, errors.New("signed envelope has nil message")
+		return false, fmt.Errorf("%w: signed envelope has nil message", errInvalidExecutionPayloadEnvelope)
 	}
 
 	f.mu.Lock()
@@ -653,11 +716,18 @@ func (f *ForkChoiceStore) applyLocalSelfBuildEnvelopeCoordinated(ctx context.Con
 	}
 
 	// Skip validateEnvelopeAgainstBlock — we produced this envelope locally.
+	blockState.SetPreviousStateRoot(block.Block.StateRoot)
+	if err := transition.DefaultMachine.ProcessExecutionPayloadEnvelope(blockState, signedEnvelope); err != nil {
+		return false, fmt.Errorf("%w: applyLocalSelfBuildEnvelopeCoordinated: failed to verify execution payload: %v", errInvalidExecutionPayloadEnvelope, err)
+	}
 
 	// Validate payload with EL (NewPayload).
 	var elBehind bool
 	if f.engine != nil {
 		payloadStatus, validationErr := f.validatePayloadWithEL(ctx, envelope, block, common.Hash(beaconBlockRoot))
+		if errors.Is(validationErr, errPayloadValidationAdmission) {
+			return false, validationErr
+		}
 		if f.forkGraph.HasEnvelope(beaconBlockRoot) {
 			return false, nil
 		}
@@ -672,14 +742,6 @@ func (f *ForkChoiceStore) applyLocalSelfBuildEnvelopeCoordinated(ctx context.Con
 				return false, err
 			}
 		}
-	}
-
-	blockState.SetPreviousStateRoot(block.Block.StateRoot)
-
-	// Use DefaultMachine (FullValidation=false) to skip BLS signature verification
-	// in ProcessExecutionPayloadEnvelope while still running all other spec checks.
-	if err := transition.DefaultMachine.ProcessExecutionPayloadEnvelope(blockState, signedEnvelope); err != nil {
-		return false, fmt.Errorf("applyLocalSelfBuildEnvelopeCoordinated: failed to verify execution payload: %w", err)
 	}
 
 	if envelope.Payload != nil {

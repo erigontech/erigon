@@ -58,17 +58,19 @@ type pendingPayloadAttestationJob struct {
 }
 
 type payloadAttestationValidation struct {
-	done chan struct{}
+	done      chan struct{}
+	hasWaiter atomic.Bool
 }
 
 const (
 	// seenPayloadAttestationCacheSize: PTC has 512 validators per slot.
 	// With clock disparity, we may see attestations for ~2 slots.
 	// 512 * 4 = 2048 provides safety margin.
-	seenPayloadAttestationCacheSize        = 2048
-	pendingPayloadAttestationExpiry        = 30 * time.Second
-	pendingPayloadAttestationCheckInterval = 100 * time.Millisecond
-	maxPendingAttestations                 = 2048
+	seenPayloadAttestationCacheSize            = 2048
+	pendingPayloadAttestationExpiry            = 30 * time.Second
+	pendingPayloadAttestationCheckInterval     = 100 * time.Millisecond
+	maxPendingAttestations                     = 2048
+	maxConcurrentPayloadAttestationValidations = clparams.PtcSize
 )
 
 type payloadAttestationService struct {
@@ -85,6 +87,7 @@ type payloadAttestationService struct {
 	pendingCount        atomic.Int32
 	pendingCond         *sync.Cond
 	validationsInFlight sync.Map
+	validationAdmission chan struct{}
 }
 
 // NewPayloadAttestationService creates a new payload attestation service.
@@ -107,6 +110,7 @@ func NewPayloadAttestationService(
 		emitters:              emitters,
 		seenAttestationsCache: seenCache,
 		pendingCond:           sync.NewCond(&sync.Mutex{}),
+		validationAdmission:   make(chan struct{}, maxConcurrentPayloadAttestationValidations),
 	}
 	go s.loop(ctx)
 	return s
@@ -171,15 +175,23 @@ func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint6
 	if blockHeader.Slot != slot {
 		return fmt.Errorf("%w: payload attestation slot %d does not match referenced block slot %d", ErrIgnore, slot, blockHeader.Slot)
 	}
-
 	finishValidation, alreadySeen, err := s.beginValidation(ctx, seenKey)
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return fmt.Errorf("%w: payload attestation validation canceled: %v", ErrIgnore, err)
+		}
 		return err
 	}
 	if alreadySeen {
 		return fmt.Errorf("%w: already seen payload attestation from validator %d for slot %d", ErrIgnore, validatorIndex, slot)
 	}
 	defer finishValidation()
+	select {
+	case s.validationAdmission <- struct{}{}:
+		defer func() { <-s.validationAdmission }()
+	default:
+		return fmt.Errorf("%w: payload attestation validation backlog full", ErrIgnore)
+	}
 
 	// Process through forkchoice which handles:
 	// [IGNORE] block state not found
@@ -188,7 +200,7 @@ func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint6
 	if err := s.forkchoiceStore.OnPayloadAttestationMessage(ctx, msg, false); err != nil {
 		// Preserve IGNORE vs REJECT distinction from forkchoice
 		// forkchoice.ErrIgnore != services.ErrIgnore, so we need to convert
-		if errors.Is(err, forkchoice.ErrIgnore) {
+		if errors.Is(err, forkchoice.ErrIgnore) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return fmt.Errorf("%w: %v", ErrIgnore, err)
 		}
 		return fmt.Errorf("forkchoice rejected payload attestation: %w", err)
@@ -228,9 +240,15 @@ func (s *payloadAttestationService) beginValidation(ctx context.Context, key see
 				close(validation.done)
 			}, false, nil
 		}
+		inFlight := existing.(*payloadAttestationValidation)
+		if !inFlight.hasWaiter.CompareAndSwap(false, true) {
+			return nil, false, fmt.Errorf("%w: payload attestation validation already in flight", ErrIgnore)
+		}
 		select {
-		case <-existing.(*payloadAttestationValidation).done:
+		case <-inFlight.done:
+			inFlight.hasWaiter.Store(false)
 		case <-ctx.Done():
+			inFlight.hasWaiter.Store(false)
 			return nil, false, ctx.Err()
 		}
 	}

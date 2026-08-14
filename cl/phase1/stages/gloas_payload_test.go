@@ -16,6 +16,7 @@ import (
 	state2 "github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
@@ -182,10 +183,28 @@ func TestGloasPayloadHelpers(t *testing.T) {
 	require.Equal(t, want, hash)
 }
 
+func TestGloasVerificationHeadUsesForkChoiceHead(t *testing.T) {
+	want := common.HexToHash("0x22")
+	fc := &mock_services.ForkChoiceStorageMock{HeadVal: want}
+
+	got, err := gloasVerificationHeadRoot(fc)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}
+
 func TestGloasPayloadValidationRequiresExecutionClient(t *testing.T) {
 	require.False(t, canValidateGloasPayloads(&Cfg{}))
 	require.True(t, canValidateGloasPayloads(&Cfg{executionClient: &testExecutionEngine{supportInsertion: false}}))
 	require.True(t, canValidateGloasPayloads(&Cfg{executionClient: &testExecutionEngine{supportInsertion: true}}))
+}
+
+func TestForwardSyncValidatesOnlyWhenInsertionIsUnavailable(t *testing.T) {
+	localEL := &Cfg{executionClient: &testExecutionEngine{supportInsertion: true}}
+	remoteEL := &Cfg{executionClient: &testExecutionEngine{supportInsertion: false}}
+
+	require.False(t, shouldValidateForwardSyncPayload(localEL, true))
+	require.True(t, shouldValidateForwardSyncPayload(remoteEL, false))
+	require.False(t, shouldValidateForwardSyncPayload(&Cfg{}, false))
 }
 
 func TestValidateAnchorPayloadWithAnyExecutionClient(t *testing.T) {
@@ -294,6 +313,22 @@ func TestDrainPendingGloasPayloadsStopsAfterCancellation(t *testing.T) {
 
 	require.Equal(t, 1, engine.newPayloadCalls)
 	require.Len(t, fc.DrainPendingELPayloads(), 3)
+}
+
+func TestGloasPayloadRetryPhasesRotateFirstClass(t *testing.T) {
+	calls := [3]int{}
+	for offset := range uint32(3) {
+		phases := make([]func(context.Context), 3)
+		for i := range phases {
+			index := i
+			phases[i] = func(ctx context.Context) {
+				calls[index]++
+				<-ctx.Done()
+			}
+		}
+		runGloasPayloadRetryPhases(context.Background(), 20*time.Millisecond, offset, phases...)
+	}
+	require.Equal(t, [3]int{1, 1, 1}, calls)
 }
 
 func validAnchorEnvelopeFixture(t *testing.T, builderIndex uint64) (*clparams.BeaconChainConfig, *state2.CachingBeaconState, *cltypes.ExecutionPayloadBid, *cltypes.SignedExecutionPayloadEnvelope, common.Hash) {

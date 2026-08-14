@@ -210,7 +210,7 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 		if block.Version() >= clparams.GloasVersion {
 			if env, ok := envelopes[blockRoot]; ok {
 				// FULL block: update forkchoice with the envelope (updates eth2Roots, persists to disk).
-				if fceErr := cfg.forkChoice.OnExecutionPayload(ctx, env, false, canValidateGloasPayloads(cfg)); fceErr != nil {
+				if fceErr := cfg.forkChoice.OnExecutionPayload(ctx, env, false, shouldValidateForwardSyncPayload(cfg, shouldInsert)); fceErr != nil {
 					logger.Warn("[Caplin] forward sync: failed to process GLOAS envelope", "slot", block.Block.Slot, "err", fceErr)
 				} else if shouldInsert {
 					if err = cfg.blockCollector.AddGloasBlock(block.Block, env); err != nil {
@@ -265,6 +265,10 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 		}
 	}
 	return
+}
+
+func shouldValidateForwardSyncPayload(cfg *Cfg, shouldInsert bool) bool {
+	return !shouldInsert && canValidateGloasPayloads(cfg)
 }
 
 // forwardSyncProgress returns the slots still to sync and the observed sync rate

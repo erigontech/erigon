@@ -253,6 +253,36 @@ func TestPayloadAttestationValidationContextsBoundDifferentRootBuilds(t *testing
 	require.Equal(t, int32(maxConcurrentValidationContextBuilds), maxActive.Load())
 }
 
+func TestPayloadAttestationValidationContextsBoundPendingRoots(t *testing.T) {
+	contexts, err := newPayloadAttestationValidationContexts()
+	require.NoError(t, err)
+	contexts.buildAdmission <- struct{}{}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	results := make(chan error, maxPendingValidationContextBuilds+1)
+	for i := range maxPendingValidationContextBuilds + 1 {
+		go func() {
+			_, getErr := contexts.get(ctx, common.Hash{byte(i), byte(i >> 8)}, func() (*payloadAttestationValidationContext, error) {
+				return &payloadAttestationValidationContext{}, nil
+			})
+			results <- getErr
+		}()
+	}
+
+	require.Eventually(t, func() bool {
+		contexts.mu.Lock()
+		defer contexts.mu.Unlock()
+		return len(contexts.builds) == maxPendingValidationContextBuilds
+	}, time.Second, time.Millisecond)
+	require.ErrorIs(t, <-results, ErrIgnore)
+	cancel()
+	<-contexts.buildAdmission
+	for range maxPendingValidationContextBuilds {
+		<-results
+	}
+}
+
 func TestPayloadAttestationValidationContextPositions(t *testing.T) {
 	validationContext := &payloadAttestationValidationContext{
 		slot:      100,

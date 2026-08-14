@@ -204,11 +204,18 @@ type ForkChoiceStore struct {
 	pendingELPayloads          []PendingELPayload
 	payloadValidationOnce      sync.Once
 	payloadValidationAdmission chan struct{}
+	envelopeIndexWrites        sync.Map
 
 	// db is used to persist execution payload indices (block number/hash) when an envelope
 	// is accepted in OnExecutionPayload. May be nil (e.g. in tests), in which case the
 	// index writes are skipped.
 	db kv.RwDB
+}
+
+type envelopeIndexWrite struct {
+	done     chan struct{}
+	err      error
+	envelope *cltypes.SignedExecutionPayloadEnvelope
 }
 
 // PendingELPayload holds a block+envelope pair that needs to be fed to the EL.

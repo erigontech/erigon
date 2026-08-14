@@ -19,6 +19,9 @@ package forkchoice
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -29,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	state2 "github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
@@ -45,6 +49,52 @@ type failingUpdateDB struct {
 	calls int
 }
 
+type blockingUpdateDB struct {
+	kv.RwDB
+	calls   atomic.Int32
+	started chan struct{}
+	release chan struct{}
+}
+
+type panickingUpdateDB struct {
+	kv.RwDB
+	started chan struct{}
+	release chan struct{}
+	calls   atomic.Int32
+}
+
+func (db *panickingUpdateDB) Update(ctx context.Context, f func(kv.RwTx) error) error {
+	if db.calls.Add(1) == 1 {
+		close(db.started)
+		<-db.release
+		panic("injected update panic")
+	}
+	return db.RwDB.Update(ctx, f)
+}
+
+type observedContext struct {
+	context.Context
+	doneObserved chan struct{}
+	once         sync.Once
+}
+
+func (ctx *observedContext) Done() <-chan struct{} {
+	ctx.once.Do(func() { close(ctx.doneObserved) })
+	return ctx.Context.Done()
+}
+
+func (db *blockingUpdateDB) Update(ctx context.Context, f func(kv.RwTx) error) error {
+	if db.calls.Add(1) == 1 {
+		close(db.started)
+		select {
+		case <-db.release:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return db.RwDB.Update(ctx, f)
+}
+
 func (db *failingUpdateDB) Update(ctx context.Context, f func(kv.RwTx) error) error {
 	db.calls++
 	if db.fail {
@@ -57,6 +107,25 @@ type pendingRetryForkGraph struct {
 	fork_graph.ForkGraph
 	completed         common.Hash
 	completedEnvelope *cltypes.SignedExecutionPayloadEnvelope
+}
+
+type transientEnvelopeReadForkGraph struct {
+	pendingRetryForkGraph
+	fail atomic.Bool
+}
+
+func (g *transientEnvelopeReadForkGraph) ReadEnvelopeFromDisk(root common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+	if g.fail.Load() {
+		return nil, errors.New("injected envelope read failure")
+	}
+	return g.pendingRetryForkGraph.ReadEnvelopeFromDisk(root)
+}
+
+func TestApplyLocalSelfBuildEnvelopeRejectsNilPayloadAtIngress(t *testing.T) {
+	f := &ForkChoiceStore{}
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{}}
+
+	require.ErrorContains(t, f.ApplyLocalSelfBuildEnvelope(context.Background(), envelope), "nil payload")
 }
 
 func (g pendingRetryForkGraph) HasEnvelope(root common.Hash) bool { return root == g.completed }
@@ -84,6 +153,29 @@ func TestApplyPendingEnvelopeDoesNotIndexConcurrentWinner(t *testing.T) {
 	appliedEnvelope := f.applyPendingEnvelope(context.Background(), blockRoot, envelope, false, false)
 	require.Nil(t, appliedEnvelope)
 	require.False(t, pending.Contains(blockRoot))
+}
+
+func TestApplyPendingEnvelopeDropsHardFailure(t *testing.T) {
+	pending, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](1)
+	require.NoError(t, err)
+	local, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](1)
+	require.NoError(t, err)
+	blockRoot := common.HexToHash("0x1234")
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{}
+	pending.Add(blockRoot, envelope)
+	f := &ForkChoiceStore{
+		forkGraph:                      payloadVoteForkGraph{},
+		pendingEnvelopes:               pending,
+		pendingLocalSelfBuildEnvelopes: local,
+	}
+
+	require.Nil(t, f.applyPendingEnvelope(context.Background(), blockRoot, envelope, false, false))
+	require.False(t, pending.Contains(blockRoot))
+}
+
+func TestPendingEnvelopeRetriesTransientStorageFailure(t *testing.T) {
+	require.True(t, retryPendingEnvelopeError(errors.New("temporary disk failure")))
+	require.False(t, retryPendingEnvelopeError(fmt.Errorf("%w: bad signature", errInvalidExecutionPayloadEnvelope)))
 }
 
 func TestRetryPendingExecutionPayloadEnvelopesCleansCompletedWork(t *testing.T) {
@@ -176,6 +268,195 @@ func TestPendingEnvelopeIndexWriteRetriesThroughOriginQueue(t *testing.T) {
 	f.RetryPendingExecutionPayloadEnvelopes(context.Background(), 1)
 	require.False(t, pending.Contains(blockRoot))
 	require.Equal(t, 2, db.calls)
+}
+
+func TestIndexRepairFailureQueuesPersistedEnvelope(t *testing.T) {
+	pending, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](1)
+	require.NoError(t, err)
+	blockRoot := common.HexToHash("0x1234")
+	persisted := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
+	persisted.Message.BeaconBlockRoot = blockRoot
+	persisted.Message.Payload.BlockHash = common.HexToHash("0xaaaa")
+	redelivered := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
+	redelivered.Message.BeaconBlockRoot = blockRoot
+	redelivered.Message.Payload.BlockHash = common.HexToHash("0xbbbb")
+	f := &ForkChoiceStore{
+		forkGraph:        pendingRetryForkGraph{completed: blockRoot, completedEnvelope: persisted},
+		pendingEnvelopes: pending,
+		db:               &failingUpdateDB{RwDB: memdb.NewTestDB(t, dbcfg.ChainDB), fail: true},
+	}
+
+	require.Error(t, f.OnExecutionPayload(context.Background(), redelivered, false, false))
+	queued, ok := pending.Get(blockRoot)
+	require.True(t, ok)
+	require.Same(t, persisted, queued)
+}
+
+func TestIndexRepairReadFailureQueuesRootRepair(t *testing.T) {
+	pending, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](1)
+	require.NoError(t, err)
+	local, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](1)
+	require.NoError(t, err)
+	blockRoot := common.HexToHash("0x1234")
+	persisted := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
+	persisted.Message.BeaconBlockRoot = blockRoot
+	persisted.Message.Payload.BlockHash = common.HexToHash("0xaaaa")
+	redelivered := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
+	redelivered.Message.BeaconBlockRoot = blockRoot
+	redelivered.Message.Payload.BlockHash = common.HexToHash("0xbbbb")
+	graph := &transientEnvelopeReadForkGraph{pendingRetryForkGraph: pendingRetryForkGraph{completed: blockRoot, completedEnvelope: persisted}}
+	graph.fail.Store(true)
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	f := &ForkChoiceStore{
+		forkGraph:                      graph,
+		pendingEnvelopes:               pending,
+		pendingLocalSelfBuildEnvelopes: local,
+		db:                             db,
+	}
+
+	require.Error(t, f.OnExecutionPayload(context.Background(), redelivered, false, false))
+	queued, ok := pending.Get(blockRoot)
+	require.True(t, ok)
+	require.Nil(t, queued)
+	graph.fail.Store(false)
+	f.RetryPendingExecutionPayloadEnvelopes(context.Background(), 1)
+	require.False(t, pending.Contains(blockRoot))
+	require.NoError(t, db.View(context.Background(), func(tx kv.Tx) error {
+		blockHash, err := beacon_indicies.ReadExecutionBlockHash(tx, blockRoot)
+		require.NoError(t, err)
+		require.Equal(t, persisted.Message.Payload.BlockHash, blockHash)
+		return nil
+	}))
+}
+
+func TestOnExecutionPayloadRedeliveryRepairsMissingIndices(t *testing.T) {
+	blockRoot := common.HexToHash("0x1234")
+	executionHash := common.HexToHash("0xabcd")
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
+	envelope.Message.BeaconBlockRoot = blockRoot
+	envelope.Message.Payload.BlockNumber = 42
+	envelope.Message.Payload.BlockHash = executionHash
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	f := &ForkChoiceStore{
+		forkGraph: pendingRetryForkGraph{completed: blockRoot, completedEnvelope: envelope},
+		db:        db,
+	}
+
+	require.NoError(t, f.OnExecutionPayload(context.Background(), envelope, false, true))
+	require.NoError(t, db.View(context.Background(), func(tx kv.Tx) error {
+		blockNumber, err := beacon_indicies.ReadExecutionBlockNumber(tx, blockRoot)
+		require.NoError(t, err)
+		require.Equal(t, uint64(42), *blockNumber)
+		blockHash, err := beacon_indicies.ReadExecutionBlockHash(tx, blockRoot)
+		require.NoError(t, err)
+		require.Equal(t, executionHash, blockHash)
+		return nil
+	}))
+}
+
+func TestOnExecutionPayloadRedeliverySkipsExistingIndices(t *testing.T) {
+	blockRoot := common.HexToHash("0x1234")
+	executionHash := common.HexToHash("0xabcd")
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
+	envelope.Message.BeaconBlockRoot = blockRoot
+	envelope.Message.Payload.BlockNumber = 42
+	envelope.Message.Payload.BlockHash = executionHash
+	rwdb := memdb.NewTestDB(t, dbcfg.ChainDB)
+	require.NoError(t, rwdb.Update(context.Background(), func(tx kv.RwTx) error {
+		return beacon_indicies.WriteExecutionPayloadEnvelopeIndicies(tx, blockRoot, envelope.Message)
+	}))
+	db := &failingUpdateDB{RwDB: rwdb}
+	f := &ForkChoiceStore{
+		forkGraph: pendingRetryForkGraph{completed: blockRoot, completedEnvelope: envelope},
+		db:        db,
+	}
+
+	require.NoError(t, f.OnExecutionPayload(context.Background(), envelope, false, true))
+	require.Zero(t, db.calls)
+}
+
+func TestExecutionPayloadIndexWritesCollapseByRoot(t *testing.T) {
+	blockRoot := common.HexToHash("0x1234")
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
+	envelope.Message.BeaconBlockRoot = blockRoot
+	db := &blockingUpdateDB{
+		RwDB:    memdb.NewTestDB(t, dbcfg.ChainDB),
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	f := &ForkChoiceStore{
+		forkGraph: pendingRetryForkGraph{completed: blockRoot, completedEnvelope: envelope},
+		db:        db,
+	}
+
+	results := make(chan error, 1)
+	go func() {
+		_, err := f.ensureExecutionPayloadEnvelopeIndices(context.Background(), blockRoot, envelope, true)
+		results <- err
+	}()
+	<-db.started
+	waiterCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := f.ensureExecutionPayloadEnvelopeIndices(waiterCtx, blockRoot, envelope, false)
+	require.ErrorIs(t, err, context.Canceled)
+	close(db.release)
+	require.NoError(t, <-results)
+	require.Equal(t, int32(1), db.calls.Load())
+}
+
+func TestExecutionPayloadIndexWriteCanceledLeaderDoesNotPoisonWaiter(t *testing.T) {
+	blockRoot := common.HexToHash("0x1234")
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
+	envelope.Message.BeaconBlockRoot = blockRoot
+	db := &blockingUpdateDB{
+		RwDB:    memdb.NewTestDB(t, dbcfg.ChainDB),
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	f := &ForkChoiceStore{forkGraph: pendingRetryForkGraph{completed: blockRoot, completedEnvelope: envelope}, db: db}
+	leaderCtx, cancelLeader := context.WithCancel(context.Background())
+	leaderDone := make(chan error, 1)
+	go func() {
+		_, err := f.ensureExecutionPayloadEnvelopeIndices(leaderCtx, blockRoot, envelope, true)
+		leaderDone <- err
+	}()
+	<-db.started
+	waiterCtx := &observedContext{Context: context.Background(), doneObserved: make(chan struct{})}
+	waiterDone := make(chan error, 1)
+	go func() {
+		_, err := f.ensureExecutionPayloadEnvelopeIndices(waiterCtx, blockRoot, envelope, false)
+		waiterDone <- err
+	}()
+	<-waiterCtx.doneObserved
+	cancelLeader()
+	require.ErrorIs(t, <-leaderDone, context.Canceled)
+	require.NoError(t, <-waiterDone)
+	require.Equal(t, int32(2), db.calls.Load())
+}
+
+func TestExecutionPayloadIndexWritePanicDoesNotReportSuccessToWaiter(t *testing.T) {
+	blockRoot := common.HexToHash("0x1234")
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
+	envelope.Message.BeaconBlockRoot = blockRoot
+	db := &panickingUpdateDB{RwDB: memdb.NewTestDB(t, dbcfg.ChainDB), started: make(chan struct{}), release: make(chan struct{})}
+	f := &ForkChoiceStore{forkGraph: pendingRetryForkGraph{completed: blockRoot, completedEnvelope: envelope}, db: db}
+	leaderDone := make(chan any, 1)
+	go func() {
+		defer func() { leaderDone <- recover() }()
+		_, _ = f.ensureExecutionPayloadEnvelopeIndices(context.Background(), blockRoot, envelope, true)
+	}()
+	<-db.started
+	waiterCtx := &observedContext{Context: context.Background(), doneObserved: make(chan struct{})}
+	waiterDone := make(chan error, 1)
+	go func() {
+		_, err := f.ensureExecutionPayloadEnvelopeIndices(waiterCtx, blockRoot, envelope, false)
+		waiterDone <- err
+	}()
+	<-waiterCtx.doneObserved
+	close(db.release)
+	require.Equal(t, "injected update panic", <-leaderDone)
+	require.NoError(t, <-waiterDone)
+	require.Equal(t, int32(2), db.calls.Load())
 }
 
 // TestValidateEnvelopeAgainstBlock_NoBid tests that validation fails when block has no bid
@@ -573,4 +854,23 @@ func TestValidatePayloadWithELReleasesForkChoiceMuDuringNewPayload(t *testing.T)
 	}
 	close(releaseEngine)
 	require.NoError(t, <-done)
+}
+
+func TestValidatePayloadWithELAdmissionCancellationIsNotELBehind(t *testing.T) {
+	f := &ForkChoiceStore{
+		engine:                     execution_client.NewMockExecutionEngine(gomock.NewController(t)),
+		payloadValidationAdmission: make(chan struct{}, 1),
+	}
+	f.payloadValidationOnce.Do(func() {})
+	f.payloadValidationAdmission <- struct{}{}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	f.mu.Lock()
+	status, err := f.newPayloadWhileYieldingForkChoiceLock(ctx, common.Hash{}, nil, nil, nil, nil)
+	f.mu.Unlock()
+
+	require.EqualValues(t, execution_client.PayloadStatusNone, status)
+	require.ErrorIs(t, err, errPayloadValidationAdmission)
+	require.ErrorIs(t, err, context.Canceled)
 }
