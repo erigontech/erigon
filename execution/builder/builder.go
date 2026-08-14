@@ -145,10 +145,7 @@ func (b *Builder) Build(param *Parameters, interrupt *atomic.Bool) (result *type
 		}
 	}
 
-	// WithSequentialCommitment: the parallel trie's per-worker readers open
-	// fresh transactions at the current head, not this build's snapshot.
-	sd, err := execctx.NewSharedDomains(b.ctx, compositeTx, b.logger,
-		execctx.WithoutDeferredBranchUpdates(), execctx.WithoutSharedBranchCache(), execctx.WithSequentialCommitment())
+	sd, err := execctx.NewSharedDomains(b.ctx, compositeTx, b.logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithoutSharedBranchCache())
 	if err != nil {
 		return nil, err
 	}
@@ -158,8 +155,9 @@ func (b *Builder) Build(param *Parameters, interrupt *atomic.Bool) (result *type
 		sd.SetParent(parentSD)
 	}
 
-	// Backs the trie warmuper's per-worker readers; their reads only heat the
-	// page cache, so the current-head view is fine.
+	// Wire the parallel commitment trie's context factory. Values still resolve
+	// through the sd/parent mem-batch overlay chain; b.db only backs the fresh
+	// per-worker readers. Mirrors exec3; no-op for the sequential trie.
 	sd.EnableParaTrieDB(b.db)
 
 	executionAt, err := stages.GetStageProgress(compositeTx, stages.Execution)
