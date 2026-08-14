@@ -16,7 +16,11 @@
 
 package storage
 
-import "github.com/erigontech/erigon/node/components/storage/snapshot"
+import (
+	"path/filepath"
+
+	"github.com/erigontech/erigon/node/components/storage/snapshot"
+)
 
 // localKVRanges narrows an Inventory's per-domain entries to the .kv
 // files actually present on disk locally. Inventory carries both
@@ -32,10 +36,23 @@ import "github.com/erigontech/erigon/node/components/storage/snapshot"
 func localKVRanges(entries []*snapshot.FileEntry) ([]*snapshot.FileEntry, []stateFileRange) {
 	files := make([]*snapshot.FileEntry, 0, len(entries))
 	ranges := make([]stateFileRange, 0, len(entries))
+	// Dedup by basename: Inventory can carry the same on-disk file under
+	// both the bare filename (from a legacy add path) and a subdir-prefixed
+	// name (`domain/<name>`) from the current OnFilesChange wire. Both
+	// resolve to the same on-disk file; treating them as distinct entries
+	// causes the downstream regen loop to call WriteCommitmentBoundaryFileV4
+	// twice for the same target, and the second call panics on the
+	// exhausted `recompute.regenBranches` etl.Collector.
+	seen := make(map[string]struct{}, len(entries))
 	for _, e := range entries {
 		if e == nil || e.Kind != snapshot.KindKV || !e.Local {
 			continue
 		}
+		base := filepath.Base(e.Name)
+		if _, dup := seen[base]; dup {
+			continue
+		}
+		seen[base] = struct{}{}
 		files = append(files, e)
 		ranges = append(ranges, stateFileRange{FromStep: e.FromStep, ToStep: e.ToStep})
 	}
