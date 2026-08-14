@@ -265,8 +265,8 @@ MainLoop:
 					}
 				}
 
-				// Process the block - DA can be downloaded later if we are behind (see blobHistoryDownloader)
-				if err := processBlock(ctx, cfg, cfg.indiciesDB, block, true, true, false); err != nil {
+				// Chain-tip blocks must pass data availability before entering fork choice.
+				if err := processBlock(ctx, cfg, cfg.indiciesDB, block, true, true, true); err != nil {
 					log.Debug("bad blocks segment received", "err", err, "blockSlot", block.Block.Slot)
 					seenBlockRoots[blockRoot] = struct{}{}
 					continue
