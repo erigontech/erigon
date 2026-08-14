@@ -59,16 +59,45 @@ func (m *execStatusList) takeNextPending() int {
 
 	x := m.pending[0]
 	m.pending = m.pending[1:]
-	m.ensureLen(x)
-	if !m.inProgress[x] {
-		m.inProgress[x] = true
-		m.inProgressCnt++
-	}
-	if x < m.minInProgressHint {
-		m.minInProgressHint = x
-	}
+	m.setInProgress(x)
 
 	return x
+}
+
+type dispatchAction uint8
+
+const (
+	dispatchStop     dispatchAction = iota // leave tx and the rest in pending, end the pass
+	dispatchConsume                        // tx dispatched: drop it from pending
+	dispatchHold                           // tx held back: keep it in pending
+	dispatchHoldStop                       // hold tx back, then end the pass
+)
+
+// dispatchPending walks pending front-to-back, dispatching or holding each tx
+// per decide. Held-back txs are compacted ahead of the suffix in O(consumed
+// prefix): the suffix is never moved and nothing is allocated, and the compacted
+// prefix stays sorted below the suffix, so it needs no re-sort or dedup.
+func (m *execStatusList) dispatchPending(decide func(tx int) dispatchAction) {
+	read, write := 0, 0
+	for read < len(m.pending) {
+		act := decide(m.pending[read])
+		if act == dispatchStop {
+			break
+		}
+		m.setInProgress(m.pending[read])
+		if act == dispatchHold || act == dispatchHoldStop {
+			m.pending[write] = m.pending[read]
+			write++
+		}
+		read++
+		if act == dispatchHoldStop {
+			break
+		}
+	}
+	if write > 0 {
+		copy(m.pending[read-write:read], m.pending[:write])
+	}
+	m.pending = m.pending[read-write:]
 }
 
 func (m execStatusList) maxComplete() int {
