@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/metrics"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -64,7 +65,6 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 	defer e.semaphore.Release(1)
 	e.logger.Debug("ethereumExecutionModule.InsertBlocks: semaphore acquired", "wait", time.Since(start))
 	e.forkValidator.ClearWithUnwind()
-	frozenBlocks := e.blockReader.FrozenBlocks()
 
 	// Open a read-only tx for the base data; writes accumulate in the
 	// SharedDomains block overlay and are flushed via a brief RwTx.
@@ -73,6 +73,18 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 		return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: could not begin transaction: %s", err)
 	}
 	defer roTx.Rollback()
+
+	// Only skip blocks that the EL has actually processed. Gating solely
+	// on FrozenBlocks() is unsafe: the visible-set upper edge can regress
+	// (mode-B unwind trim) or jump (reconcile/peer manifest re-fetches
+	// old wide files) independently of the EL head, and a bare skip drops
+	// blocks Caplin needs to feed for recovery.
+	frozenBlocks := e.blockReader.FrozenBlocks()
+	sendersProgress, err := stages.GetStageProgress(roTx, stages.Senders)
+	if err != nil {
+		return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: read Senders stage progress: %w", err)
+	}
+	skipBelow := min(frozenBlocks, sendersProgress)
 
 	// Ensure currentContext has a block overlay for accumulating writes.
 	sd := e.currentContext
@@ -102,8 +114,11 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 		header := block.Header
 		body := block.Body
 
-		// Skip frozen blocks.
-		if header.Number.Uint64() < frozenBlocks {
+		// Skip blocks whose data is already covered by both the frozen
+		// snapshots and the EL's canonical Senders stage. See the
+		// skipBelow computation above for why FrozenBlocks alone is
+		// unsafe post mode-B unwind.
+		if header.Number.Uint64() < skipBelow {
 			continue
 		}
 
