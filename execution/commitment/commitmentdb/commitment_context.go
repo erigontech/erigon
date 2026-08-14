@@ -327,6 +327,24 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	}()
 	if updateCount == 0 {
 		rootHash, err = sdc.patriciaTrie.RootHash()
+		if err != nil {
+			return nil, err
+		}
+		// Empty block (no touched keys): the trie root is unchanged, but the persisted
+		// commitment "state" marker ({blockNum, txNum} that SeekCommitment restores) must
+		// still advance. Otherwise it freezes at the last state-changing block and the
+		// Execution stage re-executes [lastCommitted..head] on EVERY forkchoice — O(n^2)
+		// at tip on a chain that produces empty blocks (an idle based-rollup L2, whose
+		// blocks touch no state because there is no EIP-4788/withdrawals system write).
+		// Mainnet never hits this (4788 makes every block non-empty); our model can.
+		// See the saveState block below — this mirrors it for the zero-update path.
+		if saveState {
+			trieContext := sdc.trieContext(tx, blockNum, txNum)
+			sdc.justRestored.Store(false)
+			if err = sdc.encodeAndStoreCommitmentState(trieContext, blockNum, txNum); err != nil {
+				return nil, err
+			}
+		}
 		return rootHash, err
 	}
 
