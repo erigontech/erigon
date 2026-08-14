@@ -417,10 +417,17 @@ func londonTransferScenario() *testFinalizeScenario {
 	return s
 }
 
-// senderIsCoinbaseScenario builds a scenario where sender == coinbase (via
-// a real signed tx so finalizeTxSimple's TxMessage().From() == result.Coinbase
-// check returns true). The TxOut and CollectorWrites shapes are minimal
-// baselines — each test customizes them to exercise its specific case.
+// zeroTipEmptyCoinbaseScenario: the fee adjustment is an EIP-161 delete of the
+// coinbase rather than a balance credit.
+func zeroTipEmptyCoinbaseScenario() *testFinalizeScenario {
+	s := simpleTransferScenario()
+	s.name = "zero_tip_empty_coinbase"
+	s.feeTipped = uint256.Int{}
+	return s
+}
+
+// senderIsCoinbaseScenario builds a scenario where the transaction sender is
+// also the fee recipient. Tests add the TxOut and CollectorWrites shapes they need.
 //
 // preBlockCoinbaseBal is the pre-block coinbase balance written into the
 // reader's accts map. tip is the FeeTipped value the worker-skipped tip
@@ -1804,14 +1811,18 @@ func newFeeCreditRound(t testing.TB, s *testFinalizeScenario) *feeCreditRound {
 	return r
 }
 
-// recorded is the tx's write set as the apply loop has it, and credited is that
-// set once a fee merge produced it.
 func (r *feeCreditRound) recorded() *state.WriteSet {
 	return r.be.blockIO.WriteSet(r.task.Version().TxIndex)
 }
 
 func (r *feeCreditRound) credited() *state.WriteSet {
 	return r.be.creditedWrites(r.task.Version(), r.recorded())
+}
+
+// setPreCreditBalance is what an earlier tx moving addr's balance looks like to
+// the next round: the same account, on a new base the credit lands on.
+func (r *feeCreditRound) setPreCreditBalance(addr accounts.Address, balance uint64) {
+	r.reader.accounts[addr].Balance = *uint256.NewInt(balance)
 }
 
 // run performs one round and returns the credit calcFees produced, nil when the
@@ -1851,11 +1862,8 @@ func TestCalcFees_ReCreditsWhenPriorBalanceChanged(t *testing.T) {
 
 	require.NotNil(t, r.run(t), "the first round must credit the tip")
 
-	// A prior tx moved the coinbase balance, so the tip lands on a new base.
-	// Only the balance changes — the rest of the account must stay put, or the
-	// test would pass even if recordedIn stopped comparing balances.
 	priorBalance := uint256.NewInt(7_000_000)
-	r.reader.accounts[s.coinbase].Balance = *priorBalance
+	r.setPreCreditBalance(s.coinbase, priorBalance.Uint64())
 
 	tip := r.run(t)
 	require.NotNil(t, tip, "a changed base balance must produce a fresh credit")
@@ -1873,8 +1881,6 @@ func TestCalcFees_ReCreditsWhenAddressPathMissing(t *testing.T) {
 	first := r.run(t)
 	require.NotNil(t, first, "the first round must credit the tip")
 
-	// A half-recorded credit is not a credit: the balance alone leaves
-	// downstream reads without an account record.
 	balanceOnly := &state.WriteSet{}
 	bw, ok := first.GetBalance(s.coinbase)
 	require.True(t, ok)
@@ -1901,11 +1907,7 @@ func TestCalcFees_SkipsRedundantReCreditWithBurntContract(t *testing.T) {
 
 func TestCalcFees_SkipsRedundantReCreditOnEmptyRemoval(t *testing.T) {
 	t.Parallel()
-	s := simpleTransferScenario()
-	// A zero tip on an already-empty coinbase is the EIP-161 case: the credit
-	// is a delete rather than a balance write, and takes a different path
-	// through both recordedIn and writeTo.
-	s.feeTipped = uint256.Int{}
+	s := zeroTipEmptyCoinbaseScenario()
 	r := newFeeCreditRound(t, s)
 
 	first := r.run(t)
@@ -1918,10 +1920,7 @@ func TestCalcFees_SkipsRedundantReCreditOnEmptyRemoval(t *testing.T) {
 		"the delete is already recorded, so the round is a no-op")
 }
 
-// TestFeeEntryWriteToIsRecordedIn pins the two halves against each other:
-// accepting less makes the skip silently never fire, accepting more skips a
-// credit that was never written.
-func TestFeeEntryWriteToIsRecordedIn(t *testing.T) {
+func TestFeeEntry_RecordedInAcceptsWhatWriteToWrote(t *testing.T) {
 	t.Parallel()
 	version := state.Version{TxIndex: 3, Incarnation: 1}
 	addr := fAddr("credited")
@@ -1945,7 +1944,7 @@ func TestFeeEntryWriteToIsRecordedIn(t *testing.T) {
 		e.writeTo(ws, version)
 
 		require.True(t, e.recordedIn(ws, version),
-			"entry %d: recordedIn must accept what writeTo wrote", i)
+			"entry %d: recordedIn must accept what writeTo wrote, or the skip never fires", i)
 		require.False(t, e.recordedIn(ws, state.Version{TxIndex: 3, Incarnation: 2}),
 			"entry %d: a credit stamped at another incarnation is not this credit", i)
 		require.False(t, e.recordedIn(&state.WriteSet{}, version),
@@ -1953,26 +1952,21 @@ func TestFeeEntryWriteToIsRecordedIn(t *testing.T) {
 	}
 }
 
-// TestFeeEntryNilIsAbsent pins the absent entry: an adjustment that does not
-// touch this address writes nothing and reads as already recorded, so the skip
-// turns on the entries that do exist.
-func TestFeeEntryNilIsAbsent(t *testing.T) {
+func TestFeeEntry_NilIsAbsent(t *testing.T) {
 	t.Parallel()
 	var absent *feeEntry
 	ws := &state.WriteSet{}
 
 	absent.writeTo(ws, state.Version{TxIndex: 3})
 	require.True(t, ws.IsEmpty(), "an absent entry has nothing to write")
-	require.True(t, absent.recordedIn(ws, state.Version{TxIndex: 3}))
+	require.True(t, absent.recordedIn(ws, state.Version{TxIndex: 3}),
+		"an address the adjustment does not touch must not hold the skip back")
 }
 
-// TestFeeEntryDeletedFencedByTxNum pins the version compare that keeps a
-// worker's own SELFDESTRUCT from passing as the delete arm of a credit.
-func TestFeeEntryDeletedFencedByTxNum(t *testing.T) {
+func TestFeeEntry_DeleteArmFencedByTxNum(t *testing.T) {
 	t.Parallel()
 	addr := fAddr("emptied")
 	taskVersion := state.Version{BlockNum: 9, TxNum: 42, TxIndex: 3, Incarnation: 1}
-	// What IntraBlockState.Version() produces for the same tx: no TxNum.
 	workerVersion := state.Version{BlockNum: 9, TxIndex: 3, Incarnation: 1}
 	e := &feeEntry{addr: addr, deleted: true}
 
@@ -1995,10 +1989,7 @@ func TestFeeEntryDeletedFencedByTxNum(t *testing.T) {
 		"a SelfDestruct write that is not a delete carries no empty-removal")
 }
 
-// TestFeeEntryRecordedInRejectsMutations pins the rejecting direction: flipping
-// any component writeTo emits must refuse the skip. Accepting too much is the
-// failure that skips a credit which was never written.
-func TestFeeEntryRecordedInRejectsMutations(t *testing.T) {
+func TestFeeEntry_RecordedInRejectsMutations(t *testing.T) {
 	t.Parallel()
 	version := state.Version{BlockNum: 9, TxNum: 42, TxIndex: 3, Incarnation: 1}
 	addr := fAddr("credited")
@@ -2067,7 +2058,8 @@ func TestFeeEntryRecordedInRejectsMutations(t *testing.T) {
 			require.True(t, entry.recordedIn(ws, version), "unmutated set must be accepted")
 			tc.mutate(ws)
 			require.False(t, entry.recordedIn(ws, version),
-				"a set differing in %s is not this credit", tc.name)
+				"a set differing in %s is not this credit, and skipping it drops a credit "+
+					"that was never written", tc.name)
 		})
 	}
 
