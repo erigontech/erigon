@@ -2463,13 +2463,21 @@ func (be *blockExecutor) invalidBlockResult(err error) *blockResult {
 // read through it doesn't see a fee cell this tx no longer writes.
 func (be *blockExecutor) mergeFeeWrites(tx int, txVersion state.Version, txOut, tipWrites *state.WriteSet) {
 	merged := txOut.MergeInto(tipWrites)
-	for h := range be.feeMergeTemp[tx].AllHeaders() {
+	be.retractDropped(txVersion, be.feeMergeTemp[tx], merged)
+	be.blockIO.RecordWrites(txVersion, merged)
+	be.recordFeeMerge(tx, txOut, merged)
+}
+
+// retractDropped removes from the version map every header prev held that
+// merged no longer does. Unlike the re-execution path's identical removal, it
+// pushes no revalidation range: finalize and publish accumulate gas with no
+// idempotence guard, so re-opening a completed tx double-counts it.
+func (be *blockExecutor) retractDropped(txVersion state.Version, prev, merged *state.WriteSet) {
+	for h := range prev.AllHeaders() {
 		if !merged.Has(h) {
 			be.versionMap.Delete(h.Address, h.Path, h.Key, txVersion.TxIndex, false)
 		}
 	}
-	be.blockIO.RecordWrites(txVersion, merged)
-	be.recordFeeMerge(tx, txOut, merged)
 }
 
 // mergeFinalizeWrites rebuilds tx's recorded set from baseline plus what
@@ -2480,11 +2488,7 @@ func (be *blockExecutor) mergeFeeWrites(tx int, txVersion state.Version, txOut, 
 func (be *blockExecutor) mergeFinalizeWrites(txVersion state.Version, baseline, finalizeWrites *state.WriteSet) *state.WriteSet {
 	prevWrites := be.blockIO.WriteSet(txVersion.TxIndex)
 	merged := baseline.MergeInto(finalizeWrites)
-	for h := range prevWrites.AllHeaders() {
-		if !merged.Has(h) {
-			be.versionMap.Delete(h.Address, h.Path, h.Key, txVersion.TxIndex, false)
-		}
-	}
+	be.retractDropped(txVersion, prevWrites, merged)
 	be.blockIO.RecordWrites(txVersion, merged)
 	return merged
 }
