@@ -17,14 +17,12 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package misc_test
+package misc
 
 import (
 	"testing"
 
 	"github.com/holiman/uint256"
-
-	"github.com/erigontech/erigon/execution/protocol/misc"
 )
 
 func TestFakeExponential(t *testing.T) {
@@ -52,7 +50,7 @@ func TestFakeExponential(t *testing.T) {
 	for _, tt := range tests {
 		factor := uint256.NewInt(tt.factor)
 		denom := uint256.NewInt(tt.denom)
-		result, err := misc.FakeExponential(factor, denom, tt.num)
+		result, err := FakeExponential(factor, denom, tt.num)
 		if err != nil {
 			t.Error(err)
 		}
