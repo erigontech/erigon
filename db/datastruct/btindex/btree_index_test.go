@@ -825,3 +825,76 @@ func TestNodeEncode_NoAlloc(t *testing.T) {
 	})
 	require.Zero(t, allocs)
 }
+
+func Test_BtreeIndex_GetValSize(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	logger := log.New()
+	const keyCount = 1200
+	compressFlags := seg.CompressVals
+	dataPath := generateKV(t, tmp, 20, 3000, keyCount, logger, compressFlags)
+	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
+	buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
+
+	kvFile, index, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, compressFlags, false)
+	require.NoError(t, err)
+	defer index.Close()
+	defer kvFile.Close()
+
+	keys, err := pivotKeysFromKV(dataPath)
+	require.NoError(t, err)
+	require.NotEmpty(t, keys)
+	getter := seg.NewReader(kvFile.MakeGetter(), compressFlags)
+
+	for _, key := range keys {
+		_, value, _, found, err := index.Get(key, getter)
+		require.NoError(t, err)
+		require.True(t, found)
+		size, found, err := index.GetValSize(key, getter)
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, len(value), size)
+	}
+
+	missing := bytes.Repeat([]byte{0xff}, 20)
+	size, found, err := index.GetValSize(missing, getter)
+	require.NoError(t, err)
+	require.False(t, found)
+	require.Zero(t, size)
+}
+
+func Benchmark_BtreeIndex_GetVsGetValSize(b *testing.B) {
+	tmp := b.TempDir()
+	logger := log.New()
+	compressFlags := seg.CompressVals
+	dataPath := generateKV(b, tmp, 20, 64*1024, 512, logger, compressFlags)
+	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
+	buildBtreeIndex(b, dataPath, indexPath, compressFlags, 1, logger, true)
+	kvFile, index, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, compressFlags, false)
+	require.NoError(b, err)
+	defer index.Close()
+	defer kvFile.Close()
+	keys, err := pivotKeysFromKV(dataPath)
+	require.NoError(b, err)
+	getter := seg.NewReader(kvFile.MakeGetter(), compressFlags)
+
+	b.Run("Get", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; b.Loop(); i++ {
+			_, _, _, _, err := index.Get(keys[i%len(keys)], getter)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+	b.Run("GetValSize", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; b.Loop(); i++ {
+			_, _, err := index.GetValSize(keys[i%len(keys)], getter)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}

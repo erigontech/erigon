@@ -420,6 +420,53 @@ func TestAccountOnlyDeleteDoesNotBlockUnrelatedCodeFill(t *testing.T) {
 	require.Equal(t, code, cached)
 }
 
+func TestGetCodeSizeColdReadDoesNotCacheCode(t *testing.T) {
+	const stepSize = uint64(16)
+	ctx := t.Context()
+	db := newTestDb(t, stepSize)
+	addr := make([]byte, 20)
+	addr[0] = 0xaa
+	code := []byte{0xcc, 1, 2, 3}
+	codeHash := crypto.Keccak256Hash(code)
+	account := accounts.SerialiseV3(&accounts.Account{
+		Nonce:    1,
+		Balance:  *uint256.NewInt(1),
+		CodeHash: accounts.InternCodeHash(codeHash),
+	})
+
+	seedTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer seedTx.Rollback()
+	seedDomains, err := execctx.NewSharedDomains(ctx, seedTx, log.New())
+	require.NoError(t, err)
+	seedDomains.SetTxNum(10)
+	require.NoError(t, seedDomains.DomainPut(kv.AccountsDomain, seedTx, addr, account, 10, nil))
+	require.NoError(t, seedDomains.DomainPut(kv.CodeDomain, seedTx, addr, code, 10, nil))
+	require.NoError(t, seedDomains.Commit(ctx, seedTx))
+	seedDomains.Close()
+
+	budget := 1 * datasize.MB
+	stateCache := cache.NewStateCache(budget, budget, budget, budget)
+	t.Cleanup(stateCache.Close)
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	domains, err := execctx.NewSharedDomains(ctx, roTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+	domains.SetStateCacheForTest(stateCache)
+
+	size, found, err := domains.GetCodeSize(roTx, addr, 20)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, len(code), size)
+	_, found = stateCache.View(nil).Get(kv.CodeDomain, addr)
+	require.False(t, found)
+	cachedSize, found := stateCache.View(nil).GetCodeSizeByHash(codeHash[:])
+	require.True(t, found)
+	require.Equal(t, len(code), cachedSize)
+}
+
 func TestSharedDomainsNegativeCacheEntryUsesLastVisibleTxNum(t *testing.T) {
 	const stepSize = uint64(16)
 	ctx := t.Context()

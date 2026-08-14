@@ -1380,11 +1380,27 @@ func (sd *SharedDomains) latestFromMem(domain kv.Domain, key []byte) (v []byte, 
 	return nil, 0, min(maxStep, step), false
 }
 
+type getLatestOptions struct {
+	codeHash []byte
+}
+
+type getLatestOption func(*getLatestOptions)
+
+func withCodeHash(codeHash []byte) getLatestOption {
+	return func(opts *getLatestOptions) {
+		opts.codeHash = codeHash
+	}
+}
+
 // getLatestMetered is the read implementation. wm is the caller's lock-free
 // per-task/per-worker metrics accumulator (nil disables metrics for the call).
 // No global metrics lock is taken on this hot path — accumulators are combined
 // into the shared DomainMetrics later via Merge.
-func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k []byte, wm *kvmetrics.DomainMetrics, view cache.ReadView) (v []byte, step kv.Step, err error) {
+func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k []byte, wm *kvmetrics.DomainMetrics, view cache.ReadView, options ...getLatestOption) (v []byte, step kv.Step, err error) {
+	var opts getLatestOptions
+	for _, option := range options {
+		option(&opts)
+	}
 	if tx == nil {
 		return nil, 0, errors.New("sd.GetLatest: unexpected nil tx")
 	}
@@ -1505,7 +1521,11 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 			// amortized by the backing read. Stale views do not request a retry.
 			fillView = fillView.WithFrontier(sd.cacheFrontierFor(tx))
 		}
-		fillView.Fill(domain, k, v, readTxNum)
+		if len(opts.codeHash) == len(common.Hash{}) {
+			fillView.FillCode(k, v, opts.codeHash, readTxNum)
+		} else {
+			fillView.Fill(domain, k, v, readTxNum)
+		}
 	}
 	// Only cache a branch when the read's txN is known: a txN=0 entry would
 	// be treated as immortal by UnwindTo, so skip the Put rather than insert
@@ -1549,8 +1569,9 @@ func (sd *SharedDomains) getCodeSize(tx kv.TemporalTx, view cache.ReadView, addr
 
 	// Fast path: when we can resolve codeHash from the account cache AND
 	// the size is in the size cache, return without loading bytes.
+	var codeHash []byte
 	if sd.stateCache != nil {
-		if codeHash := sd.codeHashForAddr(tx, view, addr, txNum); len(codeHash) > 0 {
+		if codeHash = sd.codeHashForAddr(tx, view, addr, txNum); len(codeHash) > 0 {
 			if size, ok := view.GetCodeSizeByHash(codeHash); ok {
 				return size, true, nil
 			}
@@ -1563,10 +1584,21 @@ func (sd *SharedDomains) getCodeSize(tx kv.TemporalTx, view cache.ReadView, addr
 		}
 	}
 
-	// Cold path: authoritative read via the normal SD.GetLatest chain.
-	// Populates L1, codeHashToCode, and (via PutWithCodeHash) the size layer for
-	// future callers.
-	v, _, err := sd.getLatestMetered(kv.CodeDomain, tx, addr, nil, view)
+	size, found, answered, err := sd.getLatestValSize(kv.CodeDomain, tx, addr, view)
+	if err != nil {
+		return 0, false, err
+	}
+	if answered {
+		if !found || size == 0 {
+			return 0, false, nil
+		}
+		if len(codeHash) == len(common.Hash{}) {
+			view.FillCodeSize(codeHash, size, txNum)
+		}
+		return size, true, nil
+	}
+
+	v, _, err := sd.getLatestMetered(kv.CodeDomain, tx, addr, nil, view, withCodeHash(codeHash))
 	if err != nil {
 		return 0, false, err
 	}
@@ -1574,6 +1606,31 @@ func (sd *SharedDomains) getCodeSize(tx kv.TemporalTx, view cache.ReadView, addr
 		return 0, false, nil
 	}
 	return len(v), true, nil
+}
+
+func (sd *SharedDomains) getLatestValSize(domain kv.Domain, tx kv.TemporalTx, k []byte, view cache.ReadView) (size int, found bool, answered bool, err error) {
+	v, _, maxStep, ok := sd.latestFromMem(domain, k)
+	if ok {
+		return len(v), true, true, nil
+	}
+	if sd.stateCache != nil {
+		if v, txNum, ok := view.GetWithTxNum(domain, k); ok && servableUnderBound(kv.Step(txNum/sd.StepSize()), maxStep) {
+			return len(v), true, true, nil
+		}
+	}
+	if maxStep != kv.NoStepBound {
+		return 0, false, false, nil
+	}
+
+	type valSizeGetter interface {
+		GetLatestValSize(domain kv.Domain, k []byte, tx kv.Tx) (int, bool, error)
+	}
+	getter, ok := tx.AggTx().(valSizeGetter)
+	if !ok {
+		return 0, false, false, nil
+	}
+	size, found, err = getter.GetLatestValSize(domain, k, tx)
+	return size, found, true, err
 }
 
 // GetCode returns the contract code at addr. The fast path resolves the
@@ -1620,7 +1677,7 @@ func (sd *SharedDomains) getCode(tx kv.TemporalTx, view cache.ReadView, addr []b
 	}
 
 	// Cold path: authoritative addr-keyed read (also populates the caches).
-	v, _, err := sd.getLatestMetered(kv.CodeDomain, tx, addr, nil, view)
+	v, _, err := sd.getLatestMetered(kv.CodeDomain, tx, addr, nil, view, withCodeHash(codeHash))
 	if err != nil {
 		return nil, false, err
 	}
