@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package misc
+package misc_test
 
 import (
 	"testing"
@@ -22,12 +22,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/tracing"
-	"github.com/erigontech/erigon/execution/types/accounts"
 )
-
-// noopSyscall is a no-op system call that satisfies the rules.SystemCall signature.
-func noopSyscall(_ accounts.Address, _ []byte) ([]byte, error) { return nil, nil }
 
 // TestApplyBeaconRootEip4788_V2Preferred verifies that when both
 // OnSystemCallStartV2 and OnSystemCallStart are set, the V2 hook is
@@ -48,7 +45,7 @@ func TestApplyBeaconRootEip4788_V2Preferred(t *testing.T) {
 		},
 	}
 
-	ApplyBeaconRootEip4788(&root, noopSyscall, tracer, vmctx)
+	misc.ApplyBeaconRootEip4788(&root, noopSyscall, tracer, vmctx)
 
 	require.Same(t, vmctx, receivedCtx,
 		"V2 hook must receive the exact VMContext pointer")
@@ -69,7 +66,7 @@ func TestApplyBeaconRootEip4788_V1FallbackWhenNoV2(t *testing.T) {
 		},
 	}
 
-	ApplyBeaconRootEip4788(&root, noopSyscall, tracer, vmctx)
+	misc.ApplyBeaconRootEip4788(&root, noopSyscall, tracer, vmctx)
 
 	require.True(t, v1Called,
 		"V1 hook must be called when V2 is nil")
@@ -93,7 +90,7 @@ func TestApplyBeaconRootEip4788_V1FallbackWhenVMContextNil(t *testing.T) {
 		},
 	}
 
-	ApplyBeaconRootEip4788(&root, noopSyscall, tracer, nil)
+	misc.ApplyBeaconRootEip4788(&root, noopSyscall, tracer, nil)
 
 	require.False(t, v2Called,
 		"V2 hook must not be called when vmctx is nil")
@@ -117,7 +114,7 @@ func TestApplyBeaconRootEip4788_OnSystemCallEndDeferred(t *testing.T) {
 		},
 	}
 
-	ApplyBeaconRootEip4788(&root, noopSyscall, tracer, nil)
+	misc.ApplyBeaconRootEip4788(&root, noopSyscall, tracer, nil)
 
 	require.Equal(t, []string{"start", "end"}, callOrder,
 		"OnSystemCallEnd must be called after the syscall completes")
@@ -129,6 +126,6 @@ func TestApplyBeaconRootEip4788_NilTracerNoPanic(t *testing.T) {
 	root := common.Hash{0x01}
 
 	require.NotPanics(t, func() {
-		ApplyBeaconRootEip4788(&root, noopSyscall, nil, nil)
+		misc.ApplyBeaconRootEip4788(&root, noopSyscall, nil, nil)
 	})
 }

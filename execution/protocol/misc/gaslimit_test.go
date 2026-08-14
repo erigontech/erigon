@@ -14,11 +14,12 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package misc
+package misc_test
 
 import (
 	"testing"
 
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -27,6 +28,6 @@ func TestCalcGasLimit(t *testing.T) {
 	// https://gnosisscan.io//block/43788389
 	parentGasLimit := uint64(16_999_984)
 	desiredLimit := uint64(17_000_000)
-	gasLimit := CalcGasLimit(parentGasLimit, desiredLimit)
+	gasLimit := misc.CalcGasLimit(parentGasLimit, desiredLimit)
 	assert.Equal(t, desiredLimit, gasLimit)
 }

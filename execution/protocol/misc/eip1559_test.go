@@ -17,7 +17,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package misc
+package misc_test
 
 import (
 	"testing"
@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -86,9 +87,9 @@ func TestBlockGasLimits(t *testing.T) {
 			Number:   *uint256.NewInt(tc.pNum + 1),
 		}
 		cfg := config()
-		err := VerifyEip1559Header(cfg, parent, header)
+		err := misc.VerifyEip1559Header(cfg, parent, header)
 		if err == nil {
-			err = VerifyParentGasLimit(cfg, parent, header)
+			err = misc.VerifyParentGasLimit(cfg, parent, header)
 		}
 		if tc.ok && err != nil {
 			t.Errorf("test %d: Expected valid header: %s", i, err)
@@ -118,7 +119,7 @@ func TestCalcBaseFee(t *testing.T) {
 			GasUsed:  test.parentGasUsed,
 			BaseFee:  uint256.NewInt(test.parentBaseFee),
 		}
-		if have, want := CalcBaseFee(config(), parent), uint256.NewInt(test.expectedBaseFee); have.Cmp(want) != 0 {
+		if have, want := misc.CalcBaseFee(config(), parent), uint256.NewInt(test.expectedBaseFee); have.Cmp(want) != 0 {
 			t.Errorf("test %d: have %d  want %d, ", i, have, want)
 		}
 	}
