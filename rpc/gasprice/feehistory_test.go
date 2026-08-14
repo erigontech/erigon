@@ -117,7 +117,7 @@ func TestFeeHistory(t *testing.T) {
 			if len(blobBaseFeeRatio) != c.expCount {
 				t.Fatalf("Test case %d: blobBaseFeeRatio array length mismatch, want %d, got %d", i, c.expCount, len(blobBaseFeeRatio))
 			}
-			if !errors.Is(err, c.expErr) && !errors.Is(err, c.expErr) {
+			if !errors.Is(err, c.expErr) {
 				t.Fatalf("Test case %d: error mismatch, want %v, got %v", i, c.expErr, err)
 			}
 		}()
