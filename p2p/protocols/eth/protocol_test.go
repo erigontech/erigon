@@ -401,6 +401,11 @@ func TestHashOrNumberEncodeRLPPointerIsAllocFree(t *testing.T) {
 		t.Fatalf("value=%x pointer=%x", byValue.Bytes(), byPointer.Bytes())
 	}
 
+	//goland:noinspection GoBoolExpressions
+	if race.Enabled {
+		return
+	}
+
 	// Panic rather than drop the error: a failing Encode would otherwise report a
 	// misleadingly low allocation count. The panic path never runs when it succeeds.
 	mustEncode := func(val any) func() {
@@ -416,9 +421,7 @@ func TestHashOrNumberEncodeRLPPointerIsAllocFree(t *testing.T) {
 	if pointerAllocs >= valueAllocs {
 		t.Errorf("pointer form should allocate less: value=%v pointer=%v", valueAllocs, pointerAllocs)
 	}
-	// encBuffer is pooled, and sync.Pool drops values under the race detector.
-	//goland:noinspection GoBoolExpressions
-	if !race.Enabled && pointerAllocs != 0 {
+	if pointerAllocs != 0 {
 		t.Errorf("pointer form should not allocate, got %v", pointerAllocs)
 	}
 }
