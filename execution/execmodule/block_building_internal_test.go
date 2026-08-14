@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/txnprovider"
 )
 
 func TestAssembleBlockKeepsBuildersApartByTimestamp(t *testing.T) {
@@ -352,6 +353,66 @@ func TestGetAssembledBlockKeepsBuilderWhenTheCallerGivesUpMidStop(t *testing.T) 
 	assembled, err := module.GetAssembledBlock(t.Context(), result.PayloadID)
 	require.NoError(t, err)
 	require.NotNil(t, assembled.Block)
+}
+
+// mutableTxnProvider stands in for the stateful providers the testing namespace supplies: it hands
+// its transactions over once and clears them, from the build goroutine.
+type mutableTxnProvider struct {
+	txns []types.Transaction
+	done atomic.Bool
+}
+
+func (m *mutableTxnProvider) ProvideTxns(context.Context, ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	if !m.done.CompareAndSwap(false, true) {
+		return nil, nil
+	}
+	txns := m.txns
+	m.txns = nil
+	return txns, nil
+}
+
+func TestAssembleBlockNeverReusesABuilderWithACustomProvider(t *testing.T) {
+	started := make(chan struct{}, 4)
+	module := &ExecModule{
+		logger:       log.Root(),
+		config:       &chain.Config{},
+		semaphore:    semaphore.NewWeighted(1),
+		builders:     map[uint64]*builderEntry{},
+		bacgroundCtx: t.Context(),
+		builderFunc: func(ctx context.Context, params *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
+			started <- struct{}{}
+			// Keep the provider busy for the whole test, which is when a comparison would read it.
+			for !interrupt.Load() && ctx.Err() == nil {
+				if params.CustomTxnProvider != nil {
+					_, _ = params.CustomTxnProvider.ProvideTxns(ctx)
+				}
+				time.Sleep(time.Millisecond)
+			}
+			return nil, errors.New("builder stopped")
+		},
+	}
+
+	withProvider := func() *builder.Parameters {
+		return &builder.Parameters{
+			Timestamp:         100,
+			ParentHash:        common.Hash{0x01},
+			CustomTxnProvider: &mutableTxnProvider{txns: []types.Transaction{}},
+		}
+	}
+	first, err := module.AssembleBlock(t.Context(), withProvider())
+	require.NoError(t, err)
+	<-started
+
+	// The provider is single-shot and mutates as it runs, so a second request carrying one is not
+	// asking for what the first is building, and its fields must never be compared.
+	second, err := module.AssembleBlock(t.Context(), withProvider())
+	require.NoError(t, err)
+	require.NotEqual(t, first.PayloadID, second.PayloadID)
+	<-started
+
+	for _, entry := range module.builders {
+		entry.builder.Discard()
+	}
 }
 
 func TestAssembleBlockOwnsParameters(t *testing.T) {

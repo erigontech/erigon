@@ -72,7 +72,11 @@ func NewBlockBuilder(ctx context.Context, build BlockBuilderFunc, param *Paramet
 		t := time.Now()
 		result, err = build(buildCtx, param, &builder.interrupt)
 		if err != nil {
-			log.Warn("Failed to build a block", "err", err)
+			if buildCtx.Err() != nil {
+				log.Debug("Block builder discarded", "err", err)
+			} else {
+				log.Warn("Failed to build a block", "err", err)
+			}
 		} else {
 			block := result.Block
 			log.Info("Built block", "hash", block.Hash(), "height", block.NumberU64(), "txs", len(block.Transactions()), "executionRequests", len(result.Requests), "gasUsedPct", 100*float64(block.GasUsed())/float64(block.GasLimit()), "time", time.Since(t))

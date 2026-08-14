@@ -92,6 +92,20 @@ func cloneBuilderParameters(params *builder.Parameters) *builder.Parameters {
 	return &cloned
 }
 
+// sameBuildRequest reports whether a request is asking for the payload another one is already
+// building. A custom transaction provider is never treated as the same request: it is stateful and
+// hands its transactions over once, so a second request carrying one is not asking for what the
+// first is building, and comparing the provider itself would read fields the running build writes.
+func sameBuildRequest(previous, current *builder.Parameters) bool {
+	if previous == nil || current == nil {
+		return false
+	}
+	if previous.CustomTxnProvider != nil || current.CustomTxnProvider != nil {
+		return false
+	}
+	return reflect.DeepEqual(previous, current)
+}
+
 // builderEntry keeps a builder with the parameters and timestamp it was created for, so the
 // three cannot drift apart and eviction can drop the timestamp index without scanning it.
 type builderEntry struct {
@@ -145,7 +159,7 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 	if previousID, ok := e.buildersByTimestamp[params.Timestamp]; ok {
 		if previous := e.builders[previousID]; previous != nil && previous.builder != nil && !previous.builder.Failed() {
 			params.PayloadId = previousID
-			if reflect.DeepEqual(previous.params, params) {
+			if sameBuildRequest(previous.params, params) {
 				e.logger.Info("[ForkChoiceUpdated] duplicate build request")
 				return AssembleBlockResult{PayloadID: previousID}, nil
 			}
