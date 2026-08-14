@@ -834,8 +834,9 @@ func TestCollectDeferredUpdate_IsNewSkipsLookupAndMatchesNilPath(t *testing.T) {
 // prefix/raw/prev backing arrays for a later, unrelated update, so a PutBranch
 // implementation that copies (as recordingCtx and every real implementation
 // do) must see its own copy stay correct across that recycle.
+// Not parallel: the assertion depends on this test's own Put/Get sequence on the global
+// deferredUpdatePool, which a concurrent test could interleave.
 func TestCollectDeferredUpdate_PoolRecycleDoesNotCorruptEarlierApply(t *testing.T) {
-	t.Parallel()
 	rowA, bmA := generateCellRow(t, 8)
 	cellsA := generateCellEncodeDataRow(t, rowA, bmA)
 	rowB, bmB := generateCellRow(t, 2)

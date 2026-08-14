@@ -127,8 +127,8 @@ type PatriciaContext interface {
 	// For each cell, it sets the cell type, clears the modified flag, fills the hash,
 	// and for the extension, account, and leaf type, the `l` and `k`
 	Branch(prefix []byte) ([]byte, kv.Step, error)
-	// store branch data. Implementations must copy prefix and data rather than retain
-	// them: callers may pass pooled buffers that are recycled for a later, unrelated update.
+	// store branch data. Implementations must copy prefix, data and prevData rather than
+	// retain them: callers may pass pooled buffers that are recycled for a later, unrelated update.
 	PutBranch(prefix []byte, data []byte, prevData []byte) error
 	// fetch account with given plain key
 	Account(plainKey []byte) (*Update, error)
@@ -385,8 +385,8 @@ func mergeDeferredUpdate(upd *DeferredBranchUpdate, merger *BranchMerger) error 
 }
 
 // ApplyDeferredUpdates encodes branch updates concurrently and writes them.
-// putBranch is bound by the same no-retain rule as PatriciaContext.PutBranch:
-// the slices it receives are pooled and are reused for a later, unrelated update.
+// putBranch is bound by the same no-retain rule as PatriciaContext.PutBranch: all three
+// slices it receives are pooled and are reused for a later, unrelated update.
 func (be *BranchEncoder) ApplyDeferredUpdates(
 	numWorkers int,
 	putBranch func(prefix []byte, data []byte, prevData []byte) error,
@@ -405,8 +405,8 @@ func (be *BranchEncoder) ApplyDeferredUpdates(
 var workerMergerPool = sync.Pool{New: func() any { return NewHexBranchMerger(512) }}
 
 // ApplyDeferredBranchUpdates encodes deferred branch updates concurrently and writes them.
-// Returns the number of updates successfully written. putBranch must copy the slices it
-// receives rather than retain them: they are pooled and reused for a later, unrelated update.
+// Returns the number of updates successfully written. putBranch must copy all three slices
+// it receives rather than retain them: they are pooled and reused for a later, unrelated update.
 func ApplyDeferredBranchUpdates(
 	deferred []*DeferredBranchUpdate,
 	numWorkers int,
