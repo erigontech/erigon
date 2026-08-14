@@ -1258,12 +1258,6 @@ func (c *component) addDependent(dependent *component, parentLocked bool) error 
 	return nil
 }
 
-func (c *component) removeDependent(dependent *component, dependentLocked bool) error {
-	c.dependents = c.dependents.Remove(dependent)
-	dependent.removeDependency(c, dependentLocked)
-	return nil
-}
-
 func (component *component) registerSubscriptions() error {
 	if domain, ok := component.provider.(*componentDomain); ok {
 		if serviceBus := domain.serviceBus(); serviceBus != nil {
