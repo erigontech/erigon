@@ -753,12 +753,22 @@ func TestExpectedWithdrawalsReadsTheRightSourcePerFork(t *testing.T) {
 	gloasState.SetVersion(clparams.GloasVersion)
 
 	// A Gloas head whose payload was revealed is read from the state copy carrying that payload,
-	// not from the head state.
+	// not from the head state. Only that copy carries a pending builder withdrawal, so reading the
+	// wrong one comes back empty rather than merely equal.
 	withParentPayload := state.New(&cfg)
 	withParentPayload.SetVersion(clparams.GloasVersion)
+	pending := solid.NewDynamicListSSZ[*cltypes.BuilderPendingWithdrawal](int(cfg.MaxWithdrawalsPerPayload))
+	pending.Append(&cltypes.BuilderPendingWithdrawal{FeeRecipient: common.Address{0xbb}, Amount: 12, BuilderIndex: 3})
+	withParentPayload.SetBuilderPendingWithdrawals(pending)
+
 	withdrawals, err = a.expectedWithdrawals(gloasState, withParentPayload, clparams.GloasVersion, 0)
 	require.NoError(t, err)
-	require.NotNil(t, withdrawals)
+	require.Equal(t, []*types.Withdrawal{{
+		Index:     0,
+		Validator: state.ConvertBuilderIndexToValidatorIndex(3),
+		Address:   common.Address{0xbb},
+		Amount:    12,
+	}}, withdrawals)
 
 	// An EMPTY Gloas head uses the expectation the state already cached rather than computing a
 	// fresh one, so what it returns is whatever was cached.

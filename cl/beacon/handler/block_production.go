@@ -227,9 +227,6 @@ func computeBlockBuilderWindow(now, slotStart time.Time, cfg *clparams.BeaconCha
 	}
 }
 
-// payloadAttributes builds the attributes every fork sends. Withdrawals and the parent beacon block
-// root go out regardless of the consensus fork because the execution layer decides what to do with
-// them from the payload timestamp.
 // payloadAttributes builds the attributes for a version of the forkchoice call. The wire format is
 // versioned, so a field the chosen version does not carry has to be left out rather than sent and
 // ignored: V1 and V2 reject a parent beacon block root outright.
