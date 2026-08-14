@@ -41,8 +41,10 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/kv/stream/streamtest"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 	"github.com/erigontech/erigon/db/seg"
@@ -53,7 +55,7 @@ import (
 func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB, *History) {
 	tb.Helper()
 	dirs := datadir.New(tb.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, logger).InMem(tb, dirs.Chaindata).MustOpen()
+	db := mdbxtest.InMem(tb, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).MustOpen()
 	tb.Cleanup(db.Close)
 
 	//TODO: tests will fail if set histCfg.Compression = CompressKeys | CompressValues
@@ -1566,7 +1568,7 @@ func TestHistoryRange2(t *testing.T) {
 				defer idxItDesc.Close()
 				descArr, err := stream.ToArrayU64(idxItDesc)
 				require.NoError(err)
-				stream.ExpectEqualU64(t, idxIt, stream.ReverseArray(descArr))
+				streamtest.ExpectEqualU64(t, idxIt, stream.ReverseArray(descArr))
 			}
 
 			it, err := hc.HistoryRange(2, 20, order.Asc, -1, roTx)

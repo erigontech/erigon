@@ -91,7 +91,7 @@ func NewMemoryBatch(tx kv.TemporalTx, tmpDir string, logger log.Logger) (*Memory
 // transaction pins the goroutine to an OS thread via runtime.LockOSThread(),
 // so this variant must not be held across goroutine migrations.
 func NewMemoryBatchMDBX(tx kv.TemporalTx, tmpDir string, logger log.Logger) (mm *MemoryMutation, err error) {
-	tmpDB := mdbx.New(dbcfg.TemporaryDB, logger).InMem(nil, tmpDir).GrowthStep(64 * datasize.MB).MapSize(512 * datasize.GB).MustOpen()
+	tmpDB := mdbx.New(dbcfg.TemporaryDB, logger).InMem(tmpDir).GrowthStep(64 * datasize.MB).MapSize(512 * datasize.GB).MustOpen()
 	defer func() {
 		if err != nil {
 			tmpDB.Close()

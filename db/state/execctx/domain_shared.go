@@ -1618,7 +1618,6 @@ func (sd *SharedDomains) getLatestValSize(domain kv.Domain, tx kv.TemporalTx, k 
 	if maxStep != kv.NoStepBound {
 		return 0, false, false, nil
 	}
-
 	size, found, err = tx.GetLatestValSize(domain, k)
 	return size, found, true, err
 }
