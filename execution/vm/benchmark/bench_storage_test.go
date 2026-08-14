@@ -205,10 +205,9 @@ func BenchmarkStorageDiversity(b *testing.B) {
 // addresses and hit every time.
 //
 // The addresses are keccak output, so they land in buckets at random rather than
-// one per bucket: at n=256 they cover about 163 of the 256, and two thirds of
-// them share an entry with another address and miss. So 16 is the hitting tier,
-// 256 is already conflict thrash at table size, and 1024 is conflict thrash four
-// times oversubscribed.
+// one per bucket: 16 of them get 16 buckets and always hit, 256 cover 163 of the
+// 256 and miss 64% of the time, 1024 miss 98%. The sweep is therefore one hitting
+// tier and two thrashing ones, not a fits/fills/overflows progression.
 func BenchmarkAddressDiversity(b *testing.B) {
 	for _, n := range []int{16, 256, 1024} {
 		p, lbl := program.New().Jumpdest()
