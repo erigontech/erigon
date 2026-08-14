@@ -23,9 +23,6 @@ import (
 	"time"
 )
 
-// Once CloseAndWait returns, the caller may reclaim exclusive use of state the
-// factory reads, so no factory code may still be running. Run with -race: a
-// factory outliving shutdown races with the post-CloseAndWait write below.
 func TestWarmuperFactoryMustNotOutliveCloseAndWait(t *testing.T) {
 	t.Parallel()
 	factoryEntered := make(chan struct{})
@@ -66,9 +63,6 @@ func TestWarmuperFactoryMustNotOutliveCloseAndWait(t *testing.T) {
 	<-readBack
 }
 
-// A ctxFactory may block (e.g. waiting for a read-tx semaphore slot) but must
-// honor ctx: Close cancels it, CloseAndWait returns, and the factory's cleanup
-// still runs.
 func TestWarmuperCloseAndWaitWithBlockedCtxFactory(t *testing.T) {
 	t.Parallel()
 	cleaned := make(chan struct{})
@@ -102,14 +96,10 @@ func TestWarmuperCloseAndWaitWithBlockedCtxFactory(t *testing.T) {
 	}
 }
 
-// A factory yielding no PatriciaContext while the warmuper ctx is still live is
-// a defect, not a shutdown: the worker must fail the group so producers unblock,
-// instead of exiting successfully and leaving w.work with no consumer — which
-// hangs WarmKey once the buffer fills.
 func TestWarmuperNilFactoryResultUnblocksProducers(t *testing.T) {
 	t.Parallel()
 	factory := func(ctx context.Context) (PatriciaContext, func()) {
-		return nil, nil // no context, but ctx is NOT cancelled
+		return nil, nil
 	}
 	const numWorkers = 2
 	w := NewWarmuper(context.Background(), WarmupConfig{

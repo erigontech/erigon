@@ -1276,7 +1276,7 @@ func TestAssembleBlockWithWithdrawalRequest(t *testing.T) {
 		time.Hour,
 	)
 
-	eth1Block, blobsBundle, requestsBundle, blockValue, err := chainRW.GetAssembledBlock(payloadId)
+	eth1Block, blobsBundle, requestsBundle, blockValue, err := chainRW.GetAssembledBlock(ctx, payloadId)
 	require.NoError(t, err)
 	require.NotNil(t, eth1Block, "Eth1Block should not be nil")
 	require.NotNil(t, blobsBundle, "BlobsBundle should not be nil")

@@ -33,11 +33,11 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
 func runTest(t *testing.T, blocks []*cltypes.SignedBeaconBlock, preState, postState *state.CachingBeaconState) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	reader := tests.LoadChain(blocks, postState, db, t)
 	sn := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
 	sn.OnHeadState(postState)
@@ -99,7 +99,7 @@ func TestStateAntiquaryCommitIsBounded(t *testing.T) {
 	to := blocks[len(blocks)-1].Block.Slot + 33
 
 	run := func(maxSlotsPerCommit uint64) (commits int64, progress uint64) {
-		db := memdb.NewTestDB(t, dbcfg.ChainDB)
+		db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 		reader := tests.LoadChain(blocks, postState, db, t)
 		sn := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
 		sn.OnHeadState(postState)

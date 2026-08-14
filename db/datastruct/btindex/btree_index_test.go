@@ -825,3 +825,41 @@ func TestNodeEncode_NoAlloc(t *testing.T) {
 	})
 	require.Zero(t, allocs)
 }
+
+func Test_BtreeIndex_GetValSize(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	logger := log.New()
+	const keyCount = 1200
+	compressFlags := seg.CompressVals
+	dataPath := generateKV(t, tmp, 20, 3000, keyCount, logger, compressFlags)
+	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
+	buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
+
+	kvFile, index, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, compressFlags, false)
+	require.NoError(t, err)
+	defer index.Close()
+	defer kvFile.Close()
+
+	keys, err := pivotKeysFromKV(dataPath)
+	require.NoError(t, err)
+	require.NotEmpty(t, keys)
+	getter := seg.NewReader(kvFile.MakeGetter(), compressFlags)
+
+	for _, key := range keys {
+		_, value, _, found, err := index.Get(key, getter)
+		require.NoError(t, err)
+		require.True(t, found)
+		size, found, err := index.GetValSize(key, getter)
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, len(value), size)
+	}
+
+	missing := bytes.Repeat([]byte{0xff}, 20)
+	size, found, err := index.GetValSize(missing, getter)
+	require.NoError(t, err)
+	require.False(t, found)
+	require.Zero(t, size)
+}

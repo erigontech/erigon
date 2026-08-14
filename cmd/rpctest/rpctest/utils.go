@@ -709,7 +709,7 @@ func post(client *http.Client, url, request string, response any) error {
 	//fmt.Printf("Request=%s\n", request)
 	//log.Info("Getting", "url", url, "request", request)
 	//start := time.Now()
-	r, err := client.Post(url, "application/json", strings.NewReader(request))
+	r, err := client.Post(url, "application/json", strings.NewReader(request)) //nolint:noctx
 	if err != nil {
 		return err
 	}
@@ -733,7 +733,7 @@ func post2(client *http.Client, url, request string) ([]byte, *fastjson.Value, e
 	//fmt.Printf("Request=%s\n", request)
 	//log.Info("Getting", "url", url, "request", request)
 	//start := time.Now()
-	r, err := client.Post(url, "application/json", strings.NewReader(request))
+	r, err := client.Post(url, "application/json", strings.NewReader(request)) //nolint:noctx
 	if err != nil {
 		return nil, nil, err
 	}
@@ -756,7 +756,7 @@ func post2(client *http.Client, url, request string) ([]byte, *fastjson.Value, e
 }
 
 func printRPCRequest(client *http.Client, url, request string) {
-	r, err := client.Post(url, "application/json", strings.NewReader(request))
+	r, err := client.Post(url, "application/json", strings.NewReader(request)) //nolint:noctx
 	if err != nil {
 		fmt.Printf("Could not print: %v\n", err)
 		return
