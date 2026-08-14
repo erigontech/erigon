@@ -50,7 +50,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
 
@@ -78,8 +78,8 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 		blocks, preState, postState = tests.GetElectraRandom()
 	}
 	fcu = mock_services2.NewForkChoiceStorageMock(t)
-	db = memdb.NewTestDB(t, dbcfg.ChainDB)
-	blobDb := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db = mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	blobDb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	reader := tests.LoadChain(blocks, postState, db, t)
 	firstBlockRoot, _ := blocks[0].Block.HashSSZ()
 	firstBlockHeader := blocks[0].SignedBeaconBlockHeader()

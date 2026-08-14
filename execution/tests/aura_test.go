@@ -30,7 +30,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/execution/abi"
@@ -63,7 +63,7 @@ func TestEmptyBlock(t *testing.T) {
 	genesis.Config.TerminalTotalDifficultyPassed = false
 
 	chainConfig := genesis.Config
-	auraDB := memdb.NewTestDB(t, dbcfg.ChainDB)
+	auraDB := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	engine, err := aura.NewAuRa(chainConfig.Aura, auraDB)
 	require.NoError(err)
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithEngine(engine))
@@ -101,7 +101,7 @@ func TestAuRaSkipGasLimit(t *testing.T) {
 	genesis.Config.Aura.BlockGasLimitContractTransitions = map[uint64]common.Address{0: common.HexToAddress("0x4000000000000000000000000000000000000001")}
 
 	chainConfig := genesis.Config
-	auraDB := memdb.NewTestDB(t, dbcfg.ChainDB)
+	auraDB := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	engine, err := aura.NewAuRa(chainConfig.Aura, auraDB)
 	require.NoError(err)
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithEngine(engine))

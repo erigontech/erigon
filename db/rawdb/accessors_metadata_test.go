@@ -22,7 +22,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 )
@@ -36,7 +36,7 @@ func (c *testL2Config) Name() string { return c.Stack }
 func (c *testL2Config) ResolveRules(l2Version, blockNum, blockTime uint64, r *chain.Rules) {}
 
 func TestChainConfigL2JSONRoundTrip(t *testing.T) {
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	hash := common.Hash{1}
 
 	cfg := &chain.Config{L2: &testL2Config{Stack: "testl2"}}
@@ -49,7 +49,7 @@ func TestChainConfigL2JSONRoundTrip(t *testing.T) {
 }
 
 func TestChainConfigL2JSONNullBackfill(t *testing.T) {
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	hash := common.Hash{2}
 
 	cfg := &chain.Config{L2JSON: []byte("null"), L2: &testL2Config{Stack: "testl2"}}
