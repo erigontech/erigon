@@ -27,7 +27,6 @@ import (
 	"runtime"
 	"slices"
 	"strings"
-	"testing"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
@@ -172,7 +171,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 
 	// Check whether the genesis block is already written.
 	if genesis != nil {
-		block, ibs, err1 := GenesisToBlock(nil, genesis, dirs, logger)
+		block, ibs, err1 := GenesisToBlock(genesis, dirs, logger)
 		if err1 != nil {
 			return genesis.Config, nil, err1
 		}
@@ -244,7 +243,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 }
 
 func WriteGenesisState(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*types.Block, error) {
-	block, statedb, err := GenesisToBlock(nil, g, dirs, logger)
+	block, statedb, err := GenesisToBlock(g, dirs, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -329,7 +328,7 @@ func WriteGenesisBesideState(block *types.Block, tx kv.RwTx, g *types.Genesis) e
 
 // GenesisToBlock creates the genesis block and writes state of a genesis specification
 // to the given database (or discards it if nil).
-func GenesisToBlock(tb testing.TB, g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
+func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
 	if dirs.SnapDomain == "" {
 		panic("empty `dirs` variable")
 	}
@@ -353,7 +352,7 @@ func GenesisToBlock(tb testing.TB, g *types.Genesis, dirs datadir.Dirs, logger l
 	if runtime.GOOS == "windows" {
 		genesisMapSize = 1 * datasize.GB
 	}
-	genesisTmpDB := mdbx.New(dbcfg.TemporaryDB, logger).InMem(tb, dirs.Tmp).MapSize(genesisMapSize).GrowthStep(1 * datasize.MB).MustOpen()
+	genesisTmpDB := mdbx.New(dbcfg.TemporaryDB, logger).InMem(dirs.Tmp).MapSize(genesisMapSize).GrowthStep(1 * datasize.MB).MustOpen()
 	defer genesisTmpDB.Close()
 
 	erigonDBSettings, err := dbstate.ResolveErigonDBSettings(dirs, logger, false)
