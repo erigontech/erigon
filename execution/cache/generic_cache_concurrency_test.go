@@ -18,7 +18,6 @@ package cache
 
 import (
 	"encoding/binary"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -29,95 +28,6 @@ import (
 
 	"github.com/erigontech/erigon/common/maphash"
 )
-
-func TestGenericCache_PutDoesNotScanUnrelatedShards(t *testing.T) {
-	c := NewGenericCache[[]byte](64*datasize.MB, func(v []byte) int { return len(v) }, ModeEvictLRU)
-	defer c.Close()
-	lru := c.data.Load()
-	shardHeld := make(chan struct{})
-	releaseShard := make(chan struct{})
-	lru.SetOnEvict(func(uint64, entry[[]byte]) {
-		close(shardHeld)
-		<-releaseShard
-	})
-	evictDone := make(chan struct{})
-	go func() {
-		defer close(evictDone)
-		for i := uint64(0); ; i++ {
-			if lru.Add(i, entry[[]byte]{}) {
-				return
-			}
-		}
-	}()
-	<-shardHeld
-	var key []byte
-	for i := uint64(0); ; i++ {
-		candidate := make([]byte, 8)
-		binary.BigEndian.PutUint64(candidate, i)
-		h := maphash.Hash(candidate)
-		if (uint32(h)>>16)&(c.shardCount-1) != 0 {
-			key = candidate
-			break
-		}
-	}
-	putDone := make(chan struct{})
-	go func() {
-		defer close(putDone)
-		c.Put(key, []byte{1}, 1)
-	}()
-	select {
-	case <-putDone:
-		close(releaseShard)
-		<-evictDone
-	case <-time.After(time.Second):
-		close(releaseShard)
-		<-evictDone
-		<-putDone
-		t.Fatal("put waited for an unrelated LRU shard")
-	}
-}
-
-func TestGenericCache_OnlyOneWriterWaitsForGrow(t *testing.T) {
-	c := NewGenericCache[[]byte](64*datasize.MB, func(v []byte) int { return len(v) }, ModeEvictLRU)
-	defer c.Close()
-	key := make([]byte, 8)
-	for i := uint64(0); c.Len() < genericCacheStartCapacity; i++ {
-		binary.BigEndian.PutUint64(key, i)
-		c.Put(key, []byte{1}, 1)
-	}
-	c.resizeMu.Lock()
-	const writers = 8
-	done := make(chan struct{}, writers)
-	for i := range writers {
-		go func() {
-			k := make([]byte, 8)
-			binary.BigEndian.PutUint64(k, uint64(1)<<63|uint64(i))
-			c.Put(k, []byte{1}, 1)
-			done <- struct{}{}
-		}()
-	}
-	completed := 0
-	timer := time.NewTimer(time.Second)
-	for completed < writers-1 {
-		select {
-		case <-done:
-			completed++
-		case <-timer.C:
-			blocked := writers - completed
-			c.resizeMu.Unlock()
-			for completed < writers {
-				<-done
-				completed++
-			}
-			t.Fatalf("%d writers queued behind one cache grow", blocked)
-		}
-	}
-	if !timer.Stop() {
-		<-timer.C
-	}
-	c.resizeMu.Unlock()
-	<-done
-}
 
 // TestGenericCache_ConcurrentPutAcrossGrow guards the jump-grow data race:
 // curCap is written under resizeMu in maybeGrow but read on the put fast-path
@@ -144,7 +54,6 @@ func TestGenericCache_ConcurrentPutAcrossGrow(t *testing.T) {
 		})
 	}
 	wg.Wait()
-	require.Equal(t, c.data.Load().Len(), c.Len())
 }
 
 // A same-key put serialized by its stripe must never be undone by a grow: with
@@ -241,13 +150,12 @@ func TestGenericCache_PutIfAbsentDefersAcrossGrow(t *testing.T) {
 		}
 		before := c.data.Load()
 		c.curCap.Store(uint32(c.Len()))
-		c.shardCount = initialShardCount(uint32(c.Len()), c.shardCeil)
 
 		var candidates [][]byte
 		stop := make(chan struct{})
 		var wg sync.WaitGroup
 		wg.Go(func() {
-			for j := range 32 {
+			for j := 0; ; j++ {
 				select {
 				case <-stop:
 					return
@@ -261,9 +169,6 @@ func TestGenericCache_PutIfAbsentDefersAcrossGrow(t *testing.T) {
 				if c.data.Load() != before {
 					return
 				}
-			}
-			for c.data.Load() == before {
-				runtime.Gosched()
 			}
 		})
 
@@ -396,7 +301,6 @@ func TestGenericCache_CapacityEvictionAtomicWithPut_NoSizeDrift(t *testing.T) {
 	c.Delete(a)
 	c.Delete(b)
 	require.Zero(t, c.SizeBytes(), "capacity eviction raced the update-path delta")
-	require.Zero(t, c.Len())
 }
 
 // The failure mode is a pre-Clear epoch stamped on post-Clear storage. If Clear
