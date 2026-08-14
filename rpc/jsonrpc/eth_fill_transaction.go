@@ -37,6 +37,8 @@ import (
 	"github.com/erigontech/erigon/rpc/gasprice"
 )
 
+var u256Two = uint256.NewInt(2)
+
 // FillTransaction implements eth_fillTransaction.
 func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (*ethapi.SignTransactionResult, error) {
 	if args.GasPrice != nil && (args.MaxFeePerGas != nil || args.MaxPriorityFeePerGas != nil) {
@@ -129,7 +131,11 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 			if err != nil {
 				return nil, err
 			}
-			args.MaxFeePerBlobGas = (*hexutil.U256)(new(uint256.Int).Lsh(&blobFee, 1))
+			blobFeeCap, overflow := new(uint256.Int).MulOverflow(&blobFee, u256Two)
+			if overflow {
+				return nil, fmt.Errorf("maxFeePerBlobGas overflow: 2*blobGasPrice (%v) exceeds 256 bits", &blobFee)
+			}
+			args.MaxFeePerBlobGas = (*hexutil.U256)(blobFeeCap)
 		}
 	}
 
@@ -208,10 +214,14 @@ func (api *APIImpl) fillFeeDefaults(ctx context.Context, args *ethapi.CallArgs, 
 		args.MaxPriorityFeePerGas = (*hexutil.U256)(new(uint256.Int).Set(tip))
 	}
 	if args.MaxFeePerGas == nil {
-		val := new(uint256.Int).Add(
-			(*uint256.Int)(args.MaxPriorityFeePerGas),
-			new(uint256.Int).Lsh(head.BaseFee, 1),
-		)
+		doubledBaseFee, overflow := new(uint256.Int).MulOverflow(head.BaseFee, u256Two)
+		if overflow {
+			return fmt.Errorf("maxFeePerGas overflow: 2*baseFee (%v) exceeds 256 bits", head.BaseFee)
+		}
+		val, overflow := new(uint256.Int).AddOverflow((*uint256.Int)(args.MaxPriorityFeePerGas), doubledBaseFee)
+		if overflow {
+			return fmt.Errorf("maxFeePerGas overflow: maxPriorityFeePerGas (%v) + 2*baseFee exceeds 256 bits", args.MaxPriorityFeePerGas)
+		}
 		args.MaxFeePerGas = (*hexutil.U256)(val)
 	}
 	if args.MaxFeePerGas.ToInt().Cmp(args.MaxPriorityFeePerGas.ToInt()) < 0 {

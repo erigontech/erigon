@@ -388,6 +388,23 @@ func TestFillTransactionOnlyMaxPriorityFeePerGas(t *testing.T) {
 	require.Equal(t, hexutil.Uint64(types.DynamicFeeTxType), result.Tx.Type)
 }
 
+// maxPriorityFeePerGas near the 256-bit ceiling makes the derived maxFeePerGas
+// wrap. The wrap must be reported as such, not silently produce a small fee or
+// surface as a comparison against a field the caller never set.
+func TestFillTransactionMaxPriorityFeePerGasOverflows(t *testing.T) {
+	api := newLondonApiForTest(t)
+	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	gas := hexutil.Uint64(21000)
+
+	_, err := api.FillTransaction(context.Background(), ethapi.CallArgs{
+		To:                   &to,
+		Gas:                  &gas,
+		MaxPriorityFeePerGas: (*hexutil.U256)(new(uint256.Int).SetAllOne()),
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "overflow")
+}
+
 func TestFillTransactionMaxFeePerGasTooLow(t *testing.T) {
 	api := newLondonApiForTest(t)
 	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
