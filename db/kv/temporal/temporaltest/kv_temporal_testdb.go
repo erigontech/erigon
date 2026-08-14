@@ -20,6 +20,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -29,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
@@ -98,4 +101,18 @@ func newTestDB(tb testing.TB, dirs datadir.Dirs, stepSize uint64) kv.TemporalRwD
 		tb.Cleanup(db.Close)
 	}
 	return db
+}
+
+// NewTestTxSD opens a read-write temporal tx and its SharedDomains, both closed
+// by the test's cleanup.
+func NewTestTxSD(tb testing.TB, db kv.TemporalRwDB) (kv.TemporalRwTx, *execctx.SharedDomains) {
+	tb.Helper()
+	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
+	require.NoError(tb, err)
+	tb.Cleanup(tx.Rollback)
+
+	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	require.NoError(tb, err)
+	tb.Cleanup(sd.Close)
+	return tx, sd
 }
