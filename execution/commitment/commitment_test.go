@@ -1060,3 +1060,16 @@ func TestInitializeTrieAndUpdates_HexVariantUnchanged(t *testing.T) {
 	require.Equal(t, ModeDirect, upd.Mode())
 	require.Nil(t, upd.parallel)
 }
+
+// Pins the optimization itself, not just its safety: the correctness test above stays
+// green if the pooled buffers go back to being cloned per Get.
+func TestGetDeferredUpdate_WarmPoolDoesNotAllocate(t *testing.T) {
+	prefix, raw, prev := []byte{1, 2, 3}, []byte{4, 5, 6, 7, 8}, []byte{9, 10}
+
+	putDeferredUpdate(getDeferredUpdate(prefix, raw, prev))
+
+	allocs := testing.AllocsPerRun(100, func() {
+		putDeferredUpdate(getDeferredUpdate(prefix, raw, prev))
+	})
+	require.Zero(t, allocs, "get/put cycle must not allocate once the pool is warm")
+}
