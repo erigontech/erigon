@@ -2,12 +2,9 @@ package stagedsync
 
 import (
 	"errors"
-	"fmt"
 	"slices"
 	"sort"
 	"time"
-
-	"github.com/erigontech/erigon/common/dbg"
 )
 
 type ExecutionStat struct {
@@ -60,16 +57,45 @@ func (m *execStatusList) takeNextPending() int {
 
 	x := m.pending[0]
 	m.pending = m.pending[1:]
-	m.ensureLen(x)
-	if !m.inProgress[x] {
-		m.inProgress[x] = true
-		m.inProgressCnt++
-	}
-	if x < m.minInProgressHint {
-		m.minInProgressHint = x
-	}
+	m.setInProgress(x)
 
 	return x
+}
+
+type dispatchAction uint8
+
+const (
+	dispatchStop     dispatchAction = iota // leave tx and the rest in pending, end the pass
+	dispatchConsume                        // tx dispatched: drop it from pending
+	dispatchHold                           // tx held back: keep it in pending
+	dispatchHoldStop                       // hold tx back, then end the pass
+)
+
+// dispatchPending walks pending front-to-back, dispatching or holding each tx
+// per decide. Held-back txs are compacted ahead of the suffix in O(consumed
+// prefix): the suffix is never moved and nothing is allocated, and the compacted
+// prefix stays sorted below the suffix, so it needs no re-sort or dedup.
+func (m *execStatusList) dispatchPending(decide func(tx int) dispatchAction) {
+	read, write := 0, 0
+	for read < len(m.pending) {
+		act := decide(m.pending[read])
+		if act == dispatchStop {
+			break
+		}
+		m.setInProgress(m.pending[read])
+		if act == dispatchHold || act == dispatchHoldStop {
+			m.pending[write] = m.pending[read]
+			write++
+		}
+		read++
+		if act == dispatchHoldStop {
+			break
+		}
+	}
+	if write > 0 {
+		copy(m.pending[read-write:read], m.pending[:write])
+	}
+	m.pending = m.pending[read-write:]
 }
 
 func (m execStatusList) maxComplete() int {
@@ -79,30 +105,6 @@ func (m execStatusList) maxComplete() int {
 func (m *execStatusList) pushPending(tx int) {
 	m.ensureLen(tx)
 	m.pending = insertInList(m.pending, tx)
-}
-
-// restoreHeldBack re-inserts holdBack ahead of pending in O(H+R). holdBack must
-// be strictly ascending and every entry below the current pending minimum: the
-// dispatch loop consumes pending front-to-back and nothing re-adds to it, so
-// held-back retries are always lower than the untouched suffix. Restoring per tx
-// with pushPending is O(H*R) — each held-back index sorts before the whole
-// suffix, so every insert shifts it.
-func (m *execStatusList) restoreHeldBack(holdBack []int) {
-	if len(holdBack) == 0 {
-		return
-	}
-	if dbg.AssertEnabled {
-		for i := 1; i < len(holdBack); i++ {
-			if holdBack[i] <= holdBack[i-1] {
-				panic(fmt.Errorf("restoreHeldBack: holdBack not strictly ascending: %v", holdBack))
-			}
-		}
-		if len(m.pending) > 0 && holdBack[len(holdBack)-1] >= m.pending[0] {
-			panic(fmt.Errorf("restoreHeldBack: holdBack max %d not below pending min %d", holdBack[len(holdBack)-1], m.pending[0]))
-		}
-	}
-	m.ensureLen(holdBack[len(holdBack)-1])
-	m.pending = slices.Insert(m.pending, 0, holdBack...)
 }
 
 // pushDeferred parks a tx that hit ErrDependency with no effective blocker

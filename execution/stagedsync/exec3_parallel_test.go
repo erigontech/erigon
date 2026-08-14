@@ -16,7 +16,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -1779,112 +1778,140 @@ func TestNextResult_NilVsEmptyRecordForkAware(t *testing.T) {
 	}
 }
 
-func TestRestoreHeldBack(t *testing.T) {
-	m := &execStatusList{pending: []int{10, 11, 12, 15}}
-	m.ensureLen(15)
-	m.restoreHeldBack([]int{3, 5, 7})
-	require.Equal(t, []int{3, 5, 7, 10, 11, 12, 15}, m.pending)
-}
-
-func TestRestoreHeldBackEdgeCases(t *testing.T) {
-	t.Run("empty holdBack leaves pending untouched", func(t *testing.T) {
-		m := &execStatusList{pending: []int{4, 8}}
-		m.restoreHeldBack(nil)
-		require.Equal(t, []int{4, 8}, m.pending)
-	})
-	t.Run("empty pending", func(t *testing.T) {
-		m := &execStatusList{}
-		m.restoreHeldBack([]int{1, 2, 3})
-		require.Equal(t, []int{1, 2, 3}, m.pending)
-	})
-}
-
-// restoreHeldBack must leave pending, complete and inProgress in the same state
-// as restoring each held-back tx with pushPending (the second and third catch a
-// dropped ensureLen).
-func TestRestoreHeldBackMatchesPushPending(t *testing.T) {
-	shapes := []struct {
-		holdBack []int
-		suffix   []int
+func TestDispatchPendingCompaction(t *testing.T) {
+	cases := []struct {
+		name       string
+		pending    []int
+		decide     func(tx int) dispatchAction
+		wantPend   []int
+		wantInProg []int
 	}{
-		{[]int{0, 1, 2}, []int{3, 4, 5, 6, 7}},
-		{[]int{2, 4, 9}, []int{11, 20, 30}},
-		{[]int{}, []int{5, 6}},
-		{[]int{5, 6}, []int{}},
-		{[]int{1, 3, 5, 7}, []int{8, 9, 10, 11, 12, 13}},
+		{
+			name:    "mix hold/consume then stop",
+			pending: []int{0, 1, 2, 3, 4, 5, 6, 7},
+			decide: func(tx int) dispatchAction {
+				switch tx {
+				case 1, 3:
+					return dispatchHold
+				case 5:
+					return dispatchStop
+				default:
+					return dispatchConsume
+				}
+			},
+			wantPend:   []int{1, 3, 5, 6, 7},
+			wantInProg: []int{0, 1, 2, 3, 4},
+		},
+		{
+			name:    "hold-stop when input is full",
+			pending: []int{0, 1, 2, 3},
+			decide: func(tx int) dispatchAction {
+				if tx == 1 {
+					return dispatchHoldStop
+				}
+				return dispatchConsume
+			},
+			wantPend:   []int{1, 2, 3},
+			wantInProg: []int{0, 1},
+		},
+		{
+			name:       "all consumed",
+			pending:    []int{0, 1, 2},
+			decide:     func(int) dispatchAction { return dispatchConsume },
+			wantPend:   []int{},
+			wantInProg: []int{0, 1, 2},
+		},
+		{
+			name:       "stop immediately leaves pending untouched",
+			pending:    []int{0, 1, 2},
+			decide:     func(int) dispatchAction { return dispatchStop },
+			wantPend:   []int{0, 1, 2},
+			wantInProg: []int{},
+		},
+		{
+			name:       "all held",
+			pending:    []int{0, 1, 2},
+			decide:     func(int) dispatchAction { return dispatchHold },
+			wantPend:   []int{0, 1, 2},
+			wantInProg: []int{0, 1, 2},
+		},
 	}
-	for i, s := range shapes {
-		t.Run(fmt.Sprintf("shape%d", i), func(t *testing.T) {
-			want := &execStatusList{pending: append([]int{}, s.suffix...)}
-			for _, tx := range s.holdBack {
-				want.pushPending(tx)
-			}
-			got := &execStatusList{pending: append([]int{}, s.suffix...)}
-			got.restoreHeldBack(append([]int{}, s.holdBack...))
-			require.Equal(t, want.pending, got.pending, "pending")
-			require.Equal(t, len(want.complete), len(got.complete), "complete len")
-			require.Equal(t, len(want.inProgress), len(got.inProgress), "inProgress len")
-		})
-	}
-}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := &execStatusList{pending: append([]int{}, tc.pending...)}
+			m.dispatchPending(tc.decide)
+			require.Equal(t, tc.wantPend, m.pending, "pending")
 
-func TestRestoreHeldBackAssertsPrecondition(t *testing.T) {
-	old := dbg.AssertEnabled
-	dbg.AssertEnabled = true
-	defer func() { dbg.AssertEnabled = old }()
-
-	t.Run("non-ascending holdBack panics", func(t *testing.T) {
-		m := &execStatusList{pending: []int{10}}
-		require.Panics(t, func() { m.restoreHeldBack([]int{5, 3}) })
-	})
-	t.Run("holdBack not below pending panics", func(t *testing.T) {
-		m := &execStatusList{pending: []int{4}}
-		require.Panics(t, func() { m.restoreHeldBack([]int{7}) })
-	})
-}
-
-func holdBackBenchInput(total int) (holdBack, suffix []int) {
-	h := total / 2
-	holdBack = make([]int, h)
-	for i := range holdBack {
-		holdBack[i] = i
-	}
-	suffix = make([]int, total-h)
-	for i := range suffix {
-		suffix[i] = h + i
-	}
-	return
-}
-
-// BenchmarkHoldBackReinsertion contrasts the previous per-tx pushPending restore
-// with the bulk prepend, on a sorted low-index held-back prefix in front of a
-// large untouched suffix. Each iteration rebuilds pending in a reused buffer, so
-// no per-iteration StopTimer is needed and both variants pay the same reset cost.
-func BenchmarkHoldBackReinsertion(b *testing.B) {
-	for _, total := range []int{1024, 2048, 4096, 8192} {
-		holdBack, suffix := holdBackBenchInput(total)
-		b.Run(fmt.Sprintf("perTx/%d", total), func(b *testing.B) {
-			m := &execStatusList{}
-			m.ensureLen(total)
-			buf := make([]int, 0, total)
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				buf = append(buf[:0], suffix...)
-				m.pending = buf
-				for _, tx := range holdBack {
-					m.pushPending(tx)
+			gotInProg := map[int]bool{}
+			for i, v := range m.inProgress {
+				if v {
+					gotInProg[i] = true
 				}
 			}
+			wantInProg := map[int]bool{}
+			for _, v := range tc.wantInProg {
+				wantInProg[v] = true
+			}
+			require.Equal(t, wantInProg, gotInProg, "inProgress")
+			require.Equal(t, len(tc.wantInProg), m.inProgressCnt, "inProgressCnt")
 		})
-		b.Run(fmt.Sprintf("merge/%d", total), func(b *testing.B) {
+	}
+}
+
+// dispatchPending must produce the same result on a slice whose start and
+// capacity have drifted through takeNextPending as on a fresh one.
+func TestDispatchPendingOnDriftedSlice(t *testing.T) {
+	m := &execStatusList{}
+	for i := range 10 {
+		m.pushPending(i)
+	}
+	m.takeNextPending()
+	m.takeNextPending()
+	m.dispatchPending(func(tx int) dispatchAction {
+		switch tx {
+		case 3, 4:
+			return dispatchHold
+		case 7:
+			return dispatchStop
+		default:
+			return dispatchConsume
+		}
+	})
+	require.Equal(t, []int{3, 4, 7, 8, 9}, m.pending)
+}
+
+// BenchmarkDispatchPendingCompaction holds back and dispatches a fixed prefix in
+// front of a growing suffix. The compaction never touches the suffix, so the
+// time stays flat as the suffix grows.
+func BenchmarkDispatchPendingCompaction(b *testing.B) {
+	const held, consumed = 8, 8
+	prefix := held + consumed
+	decide := func(tx int) dispatchAction {
+		switch {
+		case tx < held:
+			return dispatchHold
+		case tx < prefix:
+			return dispatchConsume
+		default:
+			return dispatchStop
+		}
+	}
+	for _, suffix := range []int{1024, 4096, 16384, 65536} {
+		total := prefix + suffix
+		base := make([]int, total)
+		for i := range base {
+			base[i] = i
+		}
+		buf := make([]int, total)
+		b.Run(fmt.Sprintf("suffix=%d", suffix), func(b *testing.B) {
 			m := &execStatusList{}
 			m.ensureLen(total)
-			buf := make([]int, 0, total)
+			copy(buf, base) // dispatchPending only rewrites the prefix, so the suffix stays valid
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				buf = append(buf[:0], suffix...)
+				copy(buf[:prefix], base[:prefix])
 				m.pending = buf
-				m.restoreHeldBack(holdBack)
+				m.dispatchPending(decide)
 			}
 		})
 	}
