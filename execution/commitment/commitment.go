@@ -385,6 +385,8 @@ func mergeDeferredUpdate(upd *DeferredBranchUpdate, merger *BranchMerger) error 
 }
 
 // ApplyDeferredUpdates encodes branch updates concurrently and writes them.
+// putBranch is bound by the same no-retain rule as PatriciaContext.PutBranch:
+// the slices it receives are pooled and are reused for a later, unrelated update.
 func (be *BranchEncoder) ApplyDeferredUpdates(
 	numWorkers int,
 	putBranch func(prefix []byte, data []byte, prevData []byte) error,
@@ -403,7 +405,8 @@ func (be *BranchEncoder) ApplyDeferredUpdates(
 var workerMergerPool = sync.Pool{New: func() any { return NewHexBranchMerger(512) }}
 
 // ApplyDeferredBranchUpdates encodes deferred branch updates concurrently and writes them.
-// Returns the number of updates successfully written.
+// Returns the number of updates successfully written. putBranch must copy the slices it
+// receives rather than retain them: they are pooled and reused for a later, unrelated update.
 func ApplyDeferredBranchUpdates(
 	deferred []*DeferredBranchUpdate,
 	numWorkers int,
