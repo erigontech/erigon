@@ -63,14 +63,16 @@ func TestUnwindOnExecError(t *testing.T) {
 		require.Empty(t, u.calls)
 	})
 
-	t.Run("plain invalid block unwinds to lastHeader-1 and propagates", func(t *testing.T) {
+	t.Run("plain invalid block propagates without setting an unwind point", func(t *testing.T) {
+		// A plain invalid block propagates the error and lets the caller own the
+		// unwind: setting a stage unwind point here would leave a stale bad-block
+		// verdict that blocks a fresh canonical block at the same height from
+		// re-executing on the next fork-choice.
 		u := &recordingUnwinder{}
 		s := &StageState{}
 		got := unwindOnExecError(plainInvalid, execV3Outcome{lastHeader: headerAt(20)}, ExecuteBlockCfg{}, s, u, logger)
 		require.ErrorIs(t, got, rules.ErrInvalidBlock)
-		require.Len(t, u.calls, 1)
-		require.Equal(t, uint64(19), u.calls[0].point)
-		require.True(t, u.calls[0].reason.IsBadBlock())
+		require.Empty(t, u.calls)
 	})
 
 	t.Run("plain invalid with nil lastHeader unwinds nothing but propagates", func(t *testing.T) {
@@ -109,14 +111,17 @@ func TestUnwindOnExecError(t *testing.T) {
 		require.Empty(t, u.calls, "must not take the plain lastHeader-1 unwind branch")
 	})
 
-	t.Run("wrong root on initial cycle falls back to the plain lastHeader-1 unwind", func(t *testing.T) {
+	t.Run("wrong root on initial cycle also routes through handleIncorrectRootHashError", func(t *testing.T) {
+		// Wrong-trie-root routes through handleIncorrectRootHashError regardless of
+		// cycle; it no longer falls back to the plain lastHeader-1 unwind on the
+		// initial cycle. failedBlock (5) <= s.BlockNumber (10) returns nil at the
+		// guard, taking no unwind — same as the non-initial case above.
 		u := &recordingUnwinder{}
 		s := &StageState{BlockNumber: 10}
 		s.CurrentSyncCycle.IsInitialCycle = true
-		out := execV3Outcome{lastHeader: headerAt(20), failedBlock: 5}
+		out := execV3Outcome{lastHeader: headerAt(20), failedBlock: 5, failedHash: common.HexToHash("0xdead")}
 		got := unwindOnExecError(wrongRoot, out, ExecuteBlockCfg{}, s, u, logger)
-		require.ErrorIs(t, got, ErrWrongTrieRoot)
-		require.Len(t, u.calls, 1)
-		require.Equal(t, uint64(19), u.calls[0].point)
+		require.NoError(t, got)
+		require.Empty(t, u.calls, "wrong-root routes through handleIncorrectRootHashError, not the plain lastHeader-1 branch")
 	})
 }
