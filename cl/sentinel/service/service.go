@@ -120,9 +120,15 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 	stopBodyClose := closeBodyOnCancel(ctx, resp.Body)
 	defer stopBodyClose()
 	defer resp.Body.Close()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	// some standard http error code parsing
 	if resp.StatusCode < 200 || resp.StatusCode > 399 {
 		errBody, _ := io.ReadAll(resp.Body)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		errorMessage := &HTTPError{
 			StatusCode: resp.StatusCode,
 			Body:       string(errBody),
@@ -141,6 +147,9 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 	// we should never get an invalid response to this. our responder should always set it on non-error response
 	code, err := strconv.Atoi(resp.Header.Get("REQRESP-RESPONSE-CODE"))
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
 		// TODO: think about how to properly handle this. should we? (or should we just assume no response is success?)
 		return nil, err
 	}
