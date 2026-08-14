@@ -1538,9 +1538,30 @@ func TestParallelResumeReconstructsPriorReceipts(t *testing.T) {
 		Task:  txTask,
 		index: 0,
 	}
-	be.tasks = []*execTask{eTask}
-	be.results = []*execResult{nil}
+	// Block-end anchor task (TxIndex == len(Txs)). The finalize step anchors on
+	// the last task, and a block-end task's versionMap index is exempt from the
+	// per-tx seal, so the coinbase-reward flush lands on an unsealed cell.
+	// Production's task generator always appends it (for txIndex := -1; txIndex <=
+	// len(txs)); without it here, finalize reuses the sealed last-tx index.
+	endTask := &exec.TxTask{
+		Header:  txTask.Header,
+		TxNum:   3,
+		TxIndex: 2,
+		Config:  config,
+		Txs:     []types.Transaction{tx0, tx1},
+	}
+	eTaskEnd := &execTask{Task: endTask, index: 1}
+	endVersion := &taskVersion{
+		execTask: eTaskEnd,
+		version:  state.Version{BlockNum: 1, TxIndex: 2, Incarnation: 1, TxNum: 3},
+	}
+	be.tasks = []*execTask{eTask, eTaskEnd}
+	be.results = []*execResult{nil, {TxResult: &exec.TxResult{Task: endVersion}}}
+	be.finalizedResults[1] = &execResult{TxResult: &exec.TxResult{Task: endVersion}}
 	be.execTasks.setInProgress(0)
+	be.execTasks.setComplete(1)
+	be.validateTasks.setComplete(1)
+	be.publishTasks.setComplete(1)
 
 	tVersion := &taskVersion{
 		execTask: eTask,
@@ -1611,9 +1632,30 @@ func TestParallelResumeReconstructionFailureIsNonFatal(t *testing.T) {
 		Task:  txTask,
 		index: 0,
 	}
-	be.tasks = []*execTask{eTask}
-	be.results = []*execResult{nil}
+	// Block-end anchor task (TxIndex == len(Txs)). The finalize step anchors on
+	// the last task, and a block-end task's versionMap index is exempt from the
+	// per-tx seal, so the coinbase-reward flush lands on an unsealed cell.
+	// Production's task generator always appends it (for txIndex := -1; txIndex <=
+	// len(txs)); without it here, finalize reuses the sealed last-tx index.
+	endTask := &exec.TxTask{
+		Header:  txTask.Header,
+		TxNum:   3,
+		TxIndex: 2,
+		Config:  config,
+		Txs:     []types.Transaction{tx0, tx1},
+	}
+	eTaskEnd := &execTask{Task: endTask, index: 1}
+	endVersion := &taskVersion{
+		execTask: eTaskEnd,
+		version:  state.Version{BlockNum: 1, TxIndex: 2, Incarnation: 1, TxNum: 3},
+	}
+	be.tasks = []*execTask{eTask, eTaskEnd}
+	be.results = []*execResult{nil, {TxResult: &exec.TxResult{Task: endVersion}}}
+	be.finalizedResults[1] = &execResult{TxResult: &exec.TxResult{Task: endVersion}}
 	be.execTasks.setInProgress(0)
+	be.execTasks.setComplete(1)
+	be.validateTasks.setComplete(1)
+	be.publishTasks.setComplete(1)
 
 	tVersion := &taskVersion{
 		execTask: eTask,
