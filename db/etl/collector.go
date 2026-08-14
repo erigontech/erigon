@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"sync"
 	"sync/atomic"
 
@@ -298,24 +299,33 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 		if key, value, err := provider.Next(); err == nil {
 			heapPush(h, &HeapElem{key, value, i})
 		} else /* we must have at least one entry per file */ {
-			// Enumerate every provider and its file size so a repro of the
-			// empty-provider panic tells us which providers are empty vs
-			// non-empty, not just the first one to fail. Historical plan
-			// section "Fix A" listed this as the missing diagnostic.
 			var providerDesc string
 			for j, p := range providers {
 				sz := int64(-1)
+				var firstBytes []byte
 				if fp, ok := p.(*fileDataProvider); ok && fp.file != nil {
 					if st, statErr := fp.file.Stat(); statErr == nil {
 						sz = st.Size()
+						// Read first 64 bytes directly (bypasses mmap) so we
+						// see the actual on-disk header of the failing file.
+						if sz > 0 {
+							buf := make([]byte, 64)
+							if n, rerr := fp.file.ReadAt(buf, 0); rerr == nil || n > 0 {
+								firstBytes = buf[:n]
+							}
+						}
 					}
 				}
 				marker := " "
 				if j == i {
 					marker = "*"
 				}
-				providerDesc += fmt.Sprintf("\n  [%d]%s size=%d provider=%s", j, marker, sz, p)
+				providerDesc += fmt.Sprintf("\n  [%d]%s size=%d firstBytes=%x provider=%s", j, marker, sz, firstBytes, p)
 			}
+			// stderr direct: the panic + service.go recover path can drop
+			// buffered log-package output. This goes straight to fd 2.
+			fmt.Fprintf(os.Stderr, "[etl-diag] merge panic: %s: error reading first readers: n=%d current=%d err=%v providers:%s\n",
+				logPrefix, len(providers), i, err, providerDesc)
 			eee := fmt.Errorf("%s: error reading first readers: n=%d current=%d err=%w providers:%s",
 				logPrefix, len(providers), i, err, providerDesc)
 			panic(eee)
