@@ -87,8 +87,9 @@ func convertExecutionWithdrawalsToConsensusWithdrawals(executionWithdrawal []*ty
 	return ret
 }
 
-// ConvertConsensusWithdrawalsToExecutionWithdrawals is the single crossing point between the two
-// representations, so callers building the same list cannot drift apart.
+// ConvertConsensusWithdrawalsToExecutionWithdrawals converts a withdrawal list to its execution
+// representation, in order and with no shared pointers. The result is never nil, which matters
+// because the execution layer rejects a nil list and an empty one under opposite conditions.
 func ConvertConsensusWithdrawalsToExecutionWithdrawals(consensusWithdrawals []*Withdrawal) []*types.Withdrawal {
 	ret := make([]*types.Withdrawal, len(consensusWithdrawals))
 	for i, w := range consensusWithdrawals {
