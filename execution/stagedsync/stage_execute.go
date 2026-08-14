@@ -245,11 +245,6 @@ func stateChangesStreamAtUnwind(ctx context.Context,
 
 	//TODO: why we don't call accumulator.ChangeCode???
 	handle := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		//TODO: This is broken - becuase it does not handle the way value changes
-		// for previous steps are represented - they will pass nil values here
-		// which will look like a delete (12/11/25 - I've not fixed this as it has
-		// been here for a while and I'm not sure what if anything receives these
-		// changes at what it does with them)
 		if len(k) == length.Addr {
 			if len(v) > 0 {
 				var account accounts.Account
@@ -311,13 +306,22 @@ func stateChangesStreamAtUnwind(ctx context.Context,
 					fmt.Printf("unwind (Block:%d,Tx:%d): del acc: %x, step: %d\n", blockUnwindTo, txUnwindTo, address, keyStep)
 				}
 			}
+			// nil = "different step" (see DomainEntryDiff.Value): the account reverts to
+			// a value at another step, not a deletion. Skip it — the collect->load below
+			// can't preserve nil vs empty, so a kept nil would DeleteAccount a live account.
+			if entry.Value == nil {
+				continue
+			}
 			if err := stateChanges.Collect(common.ToBytesZeroCopy(entry.Key)[:length.Addr], entry.Value); err != nil {
 				return err
 			}
 		}
 		storageDiffs := changeset[kv.StorageDomain]
-		for _, kv := range storageDiffs {
-			if err := stateChanges.Collect(common.ToBytesZeroCopy(kv.Key), kv.Value); err != nil {
+		for _, entry := range storageDiffs {
+			if entry.Value == nil {
+				continue // "different step", not a slot change — skip (see accounts loop)
+			}
+			if err := stateChanges.Collect(common.ToBytesZeroCopy(entry.Key), entry.Value); err != nil {
 				return err
 			}
 		}
