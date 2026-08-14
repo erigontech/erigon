@@ -98,3 +98,7 @@ jobs:
       - run: npm run build
         if: steps.guard.outputs.present == 'true'
         working-directory: docs/site
+        env:
+          # Version resolution fails the build rather than publishing a
+          # placeholder, so it must not run against the anonymous rate limit.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

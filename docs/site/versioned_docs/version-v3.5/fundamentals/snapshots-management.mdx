@@ -1,0 +1,141 @@
+---
+title: "Snapshots Management"
+description: "Understand and manage Erigon snapshot files — check disk usage by category, compare node type estimates, and migrate to v3.5 snapshot formats."
+sidebar_position: 5
+---
+
+# Snapshots Management
+
+Erigon stores the majority of its chain data in **snapshot files** (`.seg` segments and associated index files). These immutable, compressed files cover headers, bodies, transactions, and state history. Because snapshots can occupy hundreds of gigabytes, understanding what is on disk — and how much space each category consumes — is essential for capacity planning and node maintenance.
+
+## `seg du` — Disk Usage Report
+
+The `seg du` subcommand scans the snapshot directory for a given `--datadir` and reports a breakdown of disk usage by category, the detected (and configured) node type, and estimated sizes for each pruning mode.
+
+### Syntax
+
+```bash
+erigon seg du [--datadir <path>] [--json] [-v | --verbose]
+```
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--datadir <path>` | Path to the Erigon data directory. Defaults to Erigon's standard data directory (`paths.DefaultDataDir()`, OS-specific) when omitted. `seg du` has no `--chain` flag, so this default is chain-agnostic. |
+| `--json` | Output results as JSON instead of human-readable text. Useful for scripting or dashboards. |
+| `-v`, `--verbose` | Show a per-domain / per-type subcategory breakdown within each category. |
+
+### Example output (human-readable)
+
+```text
+mainnet | archive | blocks 0–25.296.000 | steps 0–9.153
+total: 1.8TB (4285 files)
+
+── Breakdown ──────────────────────────────────────────────────
+  block segments          900.2GB      48.3%   1195 files
+  domains                 306.3GB      16.4%    154 files
+  inverted indices        299.7GB      16.1%    596 files
+  history                 230.7GB      12.4%    296 files
+  accessors               127.7GB       6.8%    892 files
+  other                     9.8MB       0.0%   1152 files
+    extensions: .toml, .torrent, .txt
+
+── Estimated Size by Node Type ────────────────────────────────
+  archive            1.8TB          —    all blocks      all history
+  full             361.2GB     -1.5TB    last 262.144    last 262.144
+  blocks             1.2TB   -589.9GB    all blocks      last 262.144
+  minimal          342.3GB     -1.5TB    last 100.000    last 100.000
+```
+
+Sizes use Erigon's `ByteCount` format (e.g. `850.4GB`, `1.2TB` — binary scale, no space). Block/step counts and prune-window sizes use `.` as the thousands separator, matching the binary's own output.
+
+The estimator only sums files already on disk, so the **archive** row always equals the current total and no node-type estimate can exceed it. Estimates are therefore most meaningful against an archive datadir (shown above); on an already-pruned node the larger modes are capped at what is physically present. Rows are always printed in the fixed order `archive → full → blocks → minimal`.
+
+**Header fields explained:**
+
+- **Chain** — detected from `chaindata` (falls back to `unknown` if the database is locked or empty).
+- **Mode** — the configured pruning mode read from the database, plus the mode detected from which files are present on disk. If they disagree, both are shown (e.g., `full (files look like archive)`).
+- **blocks 0–N** — the highest block number across all block segment files.
+- **steps 0–N** — the highest step number across all state files. A step is an internal Erigon unit covering a fixed number of *transactions* (`config3.DefaultStepSize` = 390,625 txNums), so the number of blocks per step varies with chain activity.
+
+**Breakdown categories:**
+
+The category labels below are exactly what the command prints.
+
+| Category | Contents |
+|----------|----------|
+| `domains` | Current-state domain files (latest accounts, storage, code, commitment). Never pruned, so typically the largest category on pruned (full / minimal) nodes; on an archive node, `block segments` dominate. |
+| `block segments` | Headers, bodies, and transactions (`.seg` + index files) directly under `snapshots/`. |
+| `history` | State-history snapshots for accounts, storage, code. |
+| `inverted indices` | Inverted indices over state history (enables range lookups). |
+| `accessors` | Accessor index files that speed up state queries. |
+| `caplin` | Consensus-layer (beacon chain) snapshots. |
+| `commitment hist` | Commitment-history files (archive nodes only). |
+| `rcache` | Receipt cache (pre-computed receipts for RPC performance). |
+| `forkable` | Forkable (unwindable) snapshot data. |
+| `other` | Any files with unrecognised extensions (listed inline). |
+
+**Estimates table:** shows how much space the current snapshot set would occupy under each pruning mode, given the files already on disk. The `delta` column is relative to archive (negative = smaller than archive). This lets you compare your current footprint against what other modes would consume without resyncing.
+
+### Example output (verbose, `-v`)
+
+With `--verbose`, each category expands into its domain or type subcategories (excerpt — every category expands the same way):
+
+```text
+  block segments          900.2GB      48.3%   1195 files
+  ├─ transactions        874.2GB      97.1%    174 files
+  ├─ txn2block            12.3GB       1.4%     87 files
+  ├─ headers              10.3GB       1.1%    174 files
+  ├─ bodies                3.3GB       0.4%    174 files
+  └─ blocksidecars        26.9MB       0.0%    586 files
+
+  domains                 306.3GB      16.4%    154 files
+  ├─ commitment          195.0GB      63.7%     22 files
+  ├─ storage              79.7GB      26.0%     33 files
+  ├─ code                 16.5GB       5.4%     33 files
+  ├─ accounts             15.1GB       4.9%     33 files
+  └─ receipt               6.1KB       0.0%     33 files
+```
+
+### JSON output (`--json`)
+
+Use `--json` to get a machine-readable object suitable for scripting:
+
+```bash
+erigon seg du --datadir /data/erigon --json | jq '.estimates'
+```
+
+The JSON schema matches the `duResult` struct: top-level fields `chain`, `configured_mode`, `detected_mode`, `block_range`, `step_range`, `total_bytes`, `total_files`, `categories`, `subcategories`, `other_extensions`, `estimates`.
+
+:::tip
+Run `seg du` while the node is **stopped**. If Erigon is running and holds the database lock, the command falls back to `unknown` for the chain name and omits the configured mode — it will still scan snapshot files and produce size figures, but mode information will be incomplete.
+:::
+
+---
+
+## Snapshot Types (Pruning Modes)
+
+The snapshot set on disk reflects the node's **pruning mode**, and `seg du` automatically detects which mode your current files correspond to. For what each mode retains and how to choose one, see [Pruning Modes](pruning-modes).
+
+The `seg du` estimates table shows the projected disk footprint for each mode given the files currently present, so you can evaluate a mode change before committing to a resync.
+
+---
+
+## Upgrading Snapshots in v3.5
+
+### EIP-8252 retention window change
+
+v3.5 retargets the **Full** and **Blocks** pruning modes to the EIP-8252 reorg-retention window (262,144 blocks, ~36 days), up from the previous 100,000-block window. This changes **which snapshot files are present on disk** after upgrading — most notably, full nodes prune older block segments down to the window, freeing space. Existing datadirs migrate automatically on first start.
+
+For the full breaking-change details — what each mode keeps, why block data older than the window cannot be recovered, and what to do *before* upgrading if you need to keep all post-merge blocks — see the v3.5 breaking-change note in [Pruning Modes](pruning-modes).
+
+After the first prune pass, run `seg du` to inspect the resulting on-disk breakdown.
+
+### Manual snapshot operations
+
+To migrate snapshots to the latest format, reset them for maximum performance after a major upgrade, or downgrade to an older snapshot format, follow the step-by-step snapshot upgrade and downgrade instructions in the [Upgrading guide](../get-started/installation/upgrading). Those commands are subcommands of `erigon snapshots` (e.g. `erigon snapshots update-to-new-ver-format --datadir /your/datadir`).
+
+:::warning
+Always **back up your `--datadir`** before running snapshot reset, upgrade, or downgrade commands.
+:::
