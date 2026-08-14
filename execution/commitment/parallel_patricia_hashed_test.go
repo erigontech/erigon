@@ -126,8 +126,6 @@ func TestParallelPatriciaHashedSkeletonReset(t *testing.T) {
 	require.NotNil(t, p.template, "Reset preserves the template")
 }
 
-// Every checkout must be config-correct whether it hit the shared pool or
-// constructed fresh — that fungibility is what lets workers cross instances.
 func TestWorkerCheckoutAppliesConfig(t *testing.T) {
 	cfg := DefaultTrieConfig()
 	cfg.MemoizationOff = true
@@ -599,7 +597,6 @@ func TestParallelBloatnetShape(t *testing.T) {
 		len(plainKeys), numAccounts, root)
 }
 
-// guards against workers folding from deep storage depth overflowing the fixed-size cell.extension
 func TestParallelSingleAccountManyStorage(t *testing.T) {
 	t.Parallel()
 
@@ -883,8 +880,6 @@ func requireIncrementalEquiv(t *testing.T, k1 [][]byte, u1 []Update, k2 [][]byte
 	requireAllEnginesParity(t, k1, u1, k2, u2, workers)
 }
 
-// Folds two batches on ONE trie instance with the per-block Reset + SetState
-// lifecycle in between, so batch-2 runs on workers cached by batch-1.
 func reusedInstanceIncrementalRoot(t *testing.T, variant TrieVariant, workers int, k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update) []byte {
 	t.Helper()
 	ctx := context.Background()

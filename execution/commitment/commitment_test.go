@@ -47,7 +47,6 @@ func noopCtxFactory(context.Context) (PatriciaContext, func()) {
 	return &noopPatriciaContext{}, nil
 }
 
-// entered/release gate a worker inside Branch for deterministic test ordering.
 type gatedPatriciaContext struct {
 	sleep    time.Duration
 	descend  bool
@@ -109,8 +108,6 @@ func genNibbleKeys(n, keyLen int) [][]byte {
 	return keys
 }
 
-// Reproduces the arena data race: at a batch boundary HashSort resets a buffer while
-// warmup workers still read key slices aliasing it. -race is the signal.
 func TestHashSort_WarmupArenaNoRace(t *testing.T) {
 	t.Parallel()
 
@@ -164,9 +161,6 @@ func TestHashSort_NilWarmuper(t *testing.T) {
 	})
 }
 
-// Crosses ≥3 batch boundaries so a ring slot is reused while a slow straggler still holds a
-// key from that slot's previous generation; the producer must block in WaitBufferFree until
-// it drains.
 func TestHashSort_WarmupLap(t *testing.T) {
 	t.Parallel()
 
@@ -207,8 +201,6 @@ func gatedStragglerFactory(entered, release chan struct{}) TrieContextFactory {
 	}
 }
 
-// Cancels the context during a boundary WaitBufferFree while a straggler pins the slot,
-// asserting the curArena == gen % arenaRingSize invariant survives the error return.
 func TestHashSort_WaitBufferFreeErrorKeepsArenaInvariant(t *testing.T) {
 	t.Parallel()
 
@@ -419,7 +411,6 @@ func TestBranchData_ChildCount(t *testing.T) {
 		require.Equal(t, size, enc.ChildCount(), "ChildCount must equal the number of afterMap children")
 	}
 
-	// ChildCount counts afterMap (bytes 2:4), not touchMap (bytes 0:2).
 	var buf BranchData = make([]byte, 4)
 	binary.BigEndian.PutUint16(buf[0:], 0xffff)
 	binary.BigEndian.PutUint16(buf[2:], 0b0000_0000_0000_0111)
@@ -436,13 +427,11 @@ func TestBranchData_IsComplete(t *testing.T) {
 	require.False(t, BranchData{0x00}.IsComplete())
 	require.False(t, BranchData{0xff, 0xff, 0x00}.IsComplete())
 
-	// Every child present in afterMap is also covered by touchMap -> complete.
 	complete := make(BranchData, 4)
 	binary.BigEndian.PutUint16(complete[0:], 0xffff)
 	binary.BigEndian.PutUint16(complete[2:], 0b0000_0000_0000_0111)
 	require.True(t, complete.IsComplete())
 
-	// afterMap references a child missing from touchMap -> incomplete.
 	incomplete := make(BranchData, 4)
 	binary.BigEndian.PutUint16(incomplete[0:], 0b0000_0000_0000_0001)
 	binary.BigEndian.PutUint16(incomplete[2:], 0b0000_0000_0000_0011)
@@ -943,7 +932,6 @@ func TestInitializeTrieAndUpdates_ParallelVariant(t *testing.T) {
 
 	require.IsType(t, (*ParallelPatriciaHashed)(nil), trie)
 	require.Equal(t, VariantParallelHexPatricia, trie.Variant())
-	// Parallel variant forces ModeParallel regardless of the mode argument.
 	require.Equal(t, ModeParallel, upd.Mode())
 	require.NotNil(t, upd.parallel)
 	require.True(t, upd.IsConcurrentCommitment())

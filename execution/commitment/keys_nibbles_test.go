@@ -45,9 +45,6 @@ func BenchmarkKeyToHexNibbleHash(b *testing.B) {
 	}
 }
 
-// TestKeyToHexNibbleHashCached_MatchesUncached verifies the cached variant is
-// byte-identical to KeyToHexNibbleHash regardless of key type or ordering — a
-// cache hit and a cache miss must both reproduce the uncached result.
 func TestKeyToHexNibbleHashCached_MatchesUncached(t *testing.T) {
 	t.Parallel()
 
@@ -73,7 +70,6 @@ func TestKeyToHexNibbleHashCached_MatchesUncached(t *testing.T) {
 		}
 	})
 
-	// Whale: one address, many slots — the reuse target.
 	t.Run("whale_storage", func(t *testing.T) {
 		var c addrHashCache
 		addr := make([]byte, length.Addr)
@@ -87,13 +83,11 @@ func TestKeyToHexNibbleHashCached_MatchesUncached(t *testing.T) {
 		}
 	})
 
-	// Account/storage interleaving forces cache misses and address changes;
-	// the cache must never leak a stale prefix across an address change.
 	t.Run("interleaved", func(t *testing.T) {
 		var c addrHashCache
 		for i := range 200 {
 			addr := make([]byte, length.Addr)
-			addr[0] = byte(i % 4) // only 4 distinct addresses, non-consecutive
+			addr[0] = byte(i % 4)
 			addr[19] = byte(i % 4)
 			assert.Equal(t, KeyToHexNibbleHash(addr), keyToHexNibbleHashCached(addr, &c), "acct %d", i)
 
@@ -106,9 +100,6 @@ func TestKeyToHexNibbleHashCached_MatchesUncached(t *testing.T) {
 	})
 }
 
-// TestAddrHashCache_ReuseAndInvalidation pins the cache state transitions the
-// reuse depends on: populated on first storage slot, retained across same-addr
-// slots, replaced on an address change, cleared by reset.
 func TestAddrHashCache_ReuseAndInvalidation(t *testing.T) {
 	t.Parallel()
 	var c addrHashCache
@@ -126,16 +117,13 @@ func TestAddrHashCache_ReuseAndInvalidation(t *testing.T) {
 	require.Equal(t, byte(0xAA), c.addr[0])
 	firstNibs := c.nibs
 
-	// Same address, different slot: prefix retained unchanged.
 	keyToHexNibbleHashCached(mkKey(0xAA, 1), &c)
 	require.Equal(t, firstNibs, c.nibs)
 
-	// Different address: prefix replaced.
 	keyToHexNibbleHashCached(mkKey(0xBB, 0), &c)
 	require.Equal(t, byte(0xBB), c.addr[0])
 	require.NotEqual(t, firstNibs, c.nibs)
 
-	// Account key does not touch the cache.
 	acctBefore := c.addr
 	keyToHexNibbleHashCached(make([]byte, length.Addr), &c)
 	require.Equal(t, acctBefore, c.addr)
@@ -144,8 +132,6 @@ func TestAddrHashCache_ReuseAndInvalidation(t *testing.T) {
 	require.False(t, c.valid)
 }
 
-// TestUpdatesHashKey_MatchesHasher verifies hashKey reproduces the configured
-// hasher across every mode that hashes plain keys.
 func TestUpdatesHashKey_MatchesHasher(t *testing.T) {
 	t.Parallel()
 	keys := [][]byte{
@@ -224,9 +210,6 @@ func Benchmark_KeyNibbleHash_Cached(b *testing.B) {
 	}
 }
 
-// Shared helpers for commitment tests: brute-force address generation keyed by
-// hashed-key nibble and a mock trie-context factory.
-
 // maxAddrSearchIters bounds the brute-force address search helpers below so a
 // broken search space (e.g. hash function change) produces a descriptive panic
 // instead of an infinite hang. 1M iterations is well above the expected work:
@@ -234,21 +217,13 @@ func Benchmark_KeyNibbleHash_Cached(b *testing.B) {
 // ~65k, both comfortably under the cap.
 const maxAddrSearchIters = 1 << 20
 
-// nibbleSeedKey is the composite cache key for findAddressForNibble.
 type nibbleSeedKey struct{ nibble, seed int }
 
-// nibbleAddressCache caches brute-forced addresses keyed by (nibble, seed) to
-// avoid repeated keccak work across tests and ensure each seed always returns
-// the same deterministic address regardless of call order.
 var (
 	nibbleAddressCacheMu sync.Mutex
 	nibbleAddressCache   = make(map[nibbleSeedKey][]byte)
 )
 
-// findAddressForNibble brute-force searches for a 20-byte address whose
-// keccak256 first nibble (upper 4 bits of hash[0]) matches targetNibble.
-// seed controls the starting point for the search; each unique seed produces
-// a different address. Results are cached globally.
 func findAddressForNibble(targetNibble int, seed int) []byte {
 	if targetNibble < 0 || targetNibble > 0xf {
 		panic(fmt.Sprintf("findAddressForNibble: nibble %d out of range [0,15]", targetNibble))
@@ -262,10 +237,7 @@ func findAddressForNibble(targetNibble int, seed int) []byte {
 	}
 	nibbleAddressCacheMu.Unlock()
 
-	// Brute force: we encode a counter into the first 8 bytes of a 20-byte
-	// address and increment until keccak(addr)[0] >> 4 == targetNibble.
 	var addr [20]byte
-	// Use seed * large prime to separate search spaces for different seeds.
 	counter := uint64(seed) * 1_000_003
 	for range maxAddrSearchIters {
 		binary.BigEndian.PutUint64(addr[:8], counter)
@@ -284,10 +256,6 @@ func findAddressForNibble(targetNibble int, seed int) []byte {
 	panic(fmt.Sprintf("findAddressForNibble(nibble=%d, seed=%d): exceeded %d iterations", targetNibble, seed, maxAddrSearchIters))
 }
 
-// findAddressForHexPrefix brute-force searches for a 20-byte address whose keccak256
-// hashed-key nibbles start with the given nibble prefix (each entry in [0,15]). seed
-// separates search spaces. Used to force accounts to share a multi-nibble hashed prefix
-// (e.g. an extension-topped subtree under one root nibble).
 func findAddressForHexPrefix(nibblePrefix []byte, seed int) []byte {
 	for i, n := range nibblePrefix {
 		if n > 0xf {
@@ -322,16 +290,12 @@ func findAddressForHexPrefix(nibblePrefix []byte, seed int) []byte {
 	panic(fmt.Sprintf("findAddressForHexPrefix(%v, seed=%d): exceeded %d iterations", nibblePrefix, seed, maxAddrSearchIters))
 }
 
-// mockTrieCtxFactory returns a TrieContextFactory that always returns the
-// given MockState and a no-op cleanup.
 func mockTrieCtxFactory(ms *MockState) TrieContextFactory {
 	return func(context.Context) (PatriciaContext, func()) {
 		return ms, func() {}
 	}
 }
 
-// addrHex returns the hex-encoded string of a 20-byte address (no 0x prefix),
-// suitable for passing to UpdateBuilder methods.
 func addrHex(addr []byte) string {
 	return hex.EncodeToString(addr)
 }

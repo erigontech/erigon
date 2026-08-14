@@ -46,39 +46,29 @@ import (
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
-// DomainPutter is an interface for putting data into domains.
-// Used by commitment to write branch data.
 type DomainPutter = stateifs.DomainPutter
 
-// CommitmentWrite represents a commitment domain write that needs to be added to changesets.
 type CommitmentWrite = stateifs.CommitmentWrite
 
-// CollapseTracer is invoked when a trie node collapses during a commitment update.
-// hashedKeyPath is the surviving child's nibble path; branchPrefix is the collapsing branch's.
 type CollapseTracer func(hashedKeyPath, branchPrefix []byte)
 
-// witnessTracer receives canonical trie nodes as they are hashed during a
-// witness fold pass; nil on the normal commitment path.
 type witnessTracer interface {
 	onNode(rlp, hash []byte)
 }
 
-// witness captures consensus node bytes as they are hashed during a witness
-// fold pass. With a nil tracer the trie is on the normal commitment path and
-// every method is a no-op. The buffers keep their capacity across pooled reuse,
-// so reset() only detaches the tracer.
+// With a nil tracer every method is a no-op.
 type witness struct {
 	tracer          witnessTracer
 	leafBuf         bytes.Buffer
 	branchBuf       bytes.Buffer
-	leafWriterCache io.Writer // keccak+leafBuf tee, built once per keccak
+	leafWriterCache io.Writer
 }
 
 func (w *witness) active() bool { return w.tracer != nil }
-func (w *witness) reset()       { w.tracer = nil }
 
-// leafWriter tees the keccak stream into leafBuf so the leaf node bytes can be
-// emitted once the hash is read; without a tracer it returns keccak unchanged.
+// Buffers keep their capacity across pooled reuse; reset only detaches the tracer.
+func (w *witness) reset() { w.tracer = nil }
+
 func (w *witness) leafWriter(keccak io.Writer) io.Writer {
 	if w.tracer == nil {
 		return keccak
@@ -103,8 +93,6 @@ func (w *witness) beginBranch(prefix []byte) {
 	}
 }
 
-// writeBranch appends a hashed slot; callers gate the hot loop on active() so
-// this stays a bare Write with no per-slot nil check.
 func (w *witness) writeBranch(b []byte) { w.branchBuf.Write(b) }
 
 func (w *witness) emitBranch(hash []byte) {
@@ -113,73 +101,55 @@ func (w *witness) emitBranch(hash []byte) {
 	}
 }
 
-// HexPatriciaHashed implements commitment based on patricia merkle tree with radix 16,
-// with keys pre-hashed by keccak256
 type HexPatriciaHashed struct {
-	root cell // Root cell of the tree
-	// How many rows (starting from row 0) are currently active and have corresponding selected columns
-	// Last active row does not have selected column
-	activeRows int
-	// Length of the key that reflects current positioning of the grid. It may be larger than number of active rows,
-	// if an account leaf cell represents multiple nibbles in the key
+	root          cell
+	activeRows    int
 	currentKeyLen int16
 	accountKeyLen int16
-	// Rows of the grid correspond to the level of depth in the patricia tree
-	// Columns of the grid correspond to pointers to the nodes further from the root
-	grid          [128][16]cell // First 64 rows of this grid are for account trie, and next 64 rows are for storage trie
-	currentKey    [128]byte     // For each row indicates which column is currently selected
-	depths        [128]int16    // For each row, the depth of cells in that row
-	branchBefore  [128]bool     // For each row, whether there was a branch node in the database loaded in unfold
-	touchMap      [128]uint16   // For each row, bitmap of cells that were either present before modification, or modified or deleted
-	afterMap      [128]uint16   // For each row, bitmap of cells that were present after modification
+	grid          [128][16]cell // rows 0-63 account trie, 64-127 storage trie
+	currentKey    [128]byte
+	depths        [128]int16
+	branchBefore  [128]bool
+	// touchMap: cell present before modification, or modified, or deleted. afterMap: cell present after. Not symmetric.
+	touchMap      [128]uint16
+	afterMap      [128]uint16
 	keccak        keccak.KeccakState
 	keccak2       keccak.KeccakState
-	rootChecked   bool // Set to false if it is not known whether the root is empty, set to true if it is checked
+	rootChecked   bool
 	rootTouched   bool
 	rootPresent   bool
-	traceW        io.Writer // nil = disabled, non-nil = write trace output
+	traceW        io.Writer
 	ctx           PatriciaContext
-	hashAuxBuffer [128]byte           // buffer to compute cell hash or write hash-related things
-	cellHashBuf   common.Hash         // shared scratch buffer for hashKey calls (avoids per-cell allocation)
-	leafHashBuf   [33]byte            // shared scratch for leaf hash prefixing (avoids per-leaf escape)
-	leafRlpBuf    [maxLeafRlpLen]byte // shared scratch for a leaf's RLP list prefix + compact key
-	rlpPrefixBuf  [8]byte             // shared scratch for RlpSerializable length prefixes
-	auxBuffer     *bytes.Buffer       // auxiliary buffer used during branch updates encoding
+	hashAuxBuffer [128]byte
+	cellHashBuf   common.Hash
+	leafHashBuf   [33]byte
+	leafRlpBuf    [maxLeafRlpLen]byte
+	rlpPrefixBuf  [8]byte
+	auxBuffer     *bytes.Buffer
 	branchEncoder *BranchEncoder
 
-	mounted    bool  // true if this trie is mounted to some root trie
-	mountedNib int   // if 0 <= nib <= 15 means mounted to some root. If -1, means it's a storage subtrie so must not be folded above depth 63
-	mountWall  int16 // depth the mounted subtree folds down to (split depth + 1); foldMounted stops here
+	mounted    bool
+	mountedNib int   // -1 means it's a storage subtrie, must not be folded above depth 63
+	mountWall  int16 // depth the mounted subtree folds down to; foldMounted stops here
 
-	memoizationOff bool // if true, do not rely on memoized hashes
-	//temp buffers
-	accValBuf rlp.RlpEncodedBytes
+	memoizationOff bool
+	accValBuf      rlp.RlpEncodedBytes
 
-	// leaveDeferredForCaller when true, Process() leaves deferred updates on the branchEncoder
-	// for the caller to handle via TakeDeferredUpdates(). When false (default), Process()
-	// applies deferred updates inline.
 	leaveDeferredForCaller bool
-
-	// collapseTracer is called when a node collapse occurs (FullNode reduced to single child).
-	// Used by witness generation to capture paths that need resolution.
-	collapseTracer CollapseTracer
+	collapseTracer         CollapseTracer
 
 	witness witness
 
-	cfg TrieConfig // static config, set at construction
+	cfg TrieConfig
 
-	//processing metrics
 	metrics       *Metrics
-	depthsToTxNum [129]uint64 // endTxNum of file with branch data for that depth
+	depthsToTxNum [129]uint64
 
-	// lastUpdateCellWasEmpty reports whether the most recent updateCell stamped a key
-	// into an empty cell — i.e. the key is absent from the pre-state trie, so nothing
-	// can exist on disk beneath it.
+	// lastUpdateCellWasEmpty means the key is absent from the pre-state trie.
 	lastUpdateCellWasEmpty bool
 	hadToLoadL             map[uint64]skipStat
 }
 
-// Clones current trie state to allow concurrent processing.
 func (hph *HexPatriciaHashed) SpawnSubTrie(ctx PatriciaContext, forNibble int) *HexPatriciaHashed {
 	subCfg := hph.cfg.Subtrie()
 	subTrie := NewHexPatriciaHashed(hph.accountKeyLen, ctx, subCfg)
@@ -195,15 +165,12 @@ func NewHexPatriciaHashed(accountKeyLen int16, ctx PatriciaContext, cfg TrieConf
 	if !ok {
 		hph = newHexPatriciaHashed()
 	}
-	// No resetForReuse() needed — Release() already cleaned the object,
-	// and newHexPatriciaHashed() produces a zero-state struct.
 	hph.accountKeyLen = accountKeyLen
 	hph.ctx = ctx
 	hph.applyConfig(cfg)
 	return hph
 }
 
-// applyConfig stores the config and applies its fields to the trie.
 func (hph *HexPatriciaHashed) applyConfig(cfg TrieConfig) {
 	hph.cfg = cfg
 	hph.branchEncoder.setDeferUpdates(cfg.DeferBranchUpdates)
@@ -228,19 +195,12 @@ func newHexPatriciaHashed() *HexPatriciaHashed {
 	return hph
 }
 
-// SetCollapseTracer sets a callback that will be invoked when a node collapse occurs
-// during commitment calculation. This is used by witness generation to capture paths
-// to HashNodes that need resolution when a FullNode is reduced to a single child.
 func (hph *HexPatriciaHashed) SetCollapseTracer(tracer CollapseTracer) {
 	hph.collapseTracer = tracer
 }
 
-// resetForReuse resets all mutable state so a pooled HexPatriciaHashed is safe to reuse.
-// The large grid array is NOT zeroed — activeRows=0 means no cells are live,
-// and cells are properly initialized via cell.reset() during unfold/fold.
+// The grid array is NOT zeroed; activeRows=0 means no cells are live.
 func (hph *HexPatriciaHashed) resetForReuse() {
-	// SetState(nil) resets: root, rootTouched, rootChecked, rootPresent,
-	// currentKeyLen, activeRows, depths, branchBefore, touchMap, afterMap.
 	hph.root.reset()
 	hph.rootTouched = false
 	hph.rootChecked = false
@@ -254,44 +214,32 @@ func (hph *HexPatriciaHashed) resetForReuse() {
 		hph.afterMap[i] = 0
 	}
 
-	// ctx — set by caller after pool get
 	hph.ctx = nil
 
-	// reuse map, don't reallocate
 	clear(hph.hadToLoadL)
 
 	hph.mounted = false
 	hph.mountedNib = 0
 	hph.mountWall = 0
 
-	// tracing
 	hph.traceW = nil
 	hph.collapseTracer = nil
 	hph.witness.reset()
 
-	// flags — reset to zero values; applyConfig will restore from stored cfg
 	hph.memoizationOff = false
 	hph.leaveDeferredForCaller = false
 
-	// auxiliary buffer
 	hph.auxBuffer.Reset()
 
-	// branch encoder: clear deferred updates, reset buffer
 	hph.branchEncoder.ClearDeferred()
 	hph.branchEncoder.buf.Reset()
-	hph.branchEncoder.setDeferUpdates(false) // will be re-set by applyConfig
+	hph.branchEncoder.setDeferUpdates(false)
 
-	// reset config to zero — caller sets via applyConfig after pool get
 	hph.cfg = TrieConfig{}
 
-	// depth-to-txnum mapping
 	clear(hph.depthsToTxNum[:])
 }
 
-// Release clears all mutable state and returns this HexPatriciaHashed to the pool for reuse.
-// This ensures no stale database cursor references survive in the pool and releases large
-// transient data (maps, buffers) for GC promptly. After calling Release, the caller must
-// not use the struct.
 func (hph *HexPatriciaHashed) Release() {
 	hph.resetForReuse()
 	hphPool.Put(hph)
@@ -300,18 +248,18 @@ func (hph *HexPatriciaHashed) Release() {
 type cell struct {
 	hashedExtension [128]byte
 	extension       [64]byte
-	accountAddr     common.Address                  // account plain key
-	storageAddr     [length.Addr + length.Hash]byte // storage plain key
-	hash            common.Hash                     // cell hash
+	accountAddr     common.Address
+	storageAddr     [length.Addr + length.Hash]byte
+	hash            common.Hash
 	stateHash       common.Hash
-	hashedExtLen    int16     // length of the hashed extension, if any
-	extLen          int16     // length of the extension, if any
-	accountAddrLen  int16     // length of account plain key
-	storageAddrLen  int16     // length of the storage plain key
-	hashLen         int16     // Length of the hash (or embedded)
-	stateHashLen    int16     // stateHash length, if > 0 can reuse
-	loaded          loadFlags // folded Cell have only hash, unfolded have all fields
-	Update                    // state update
+	hashedExtLen    int16
+	extLen          int16
+	accountAddrLen  int16
+	storageAddrLen  int16
+	hashLen         int16
+	stateHashLen    int16
+	loaded          loadFlags
+	Update
 }
 
 type loadFlags uint8
@@ -322,10 +270,7 @@ const (
 	cellLoadStorage = loadFlags(2)
 )
 
-// maxLeafRlpLen bounds a leaf's assembled RLP header: list prefix (tag plus up to
-// 8 length bytes), key prefix byte, then the compact key. Derived from the nibble
-// array rather than from the shorter keys today's depth arithmetic yields, so a
-// caller slicing deeper cannot overflow the buffer.
+// Sized off the nibble array, not today's shorter depth-derived keys, so a caller slicing deeper cannot overflow.
 const maxLeafRlpLen = 9 + 1 + (len(cell{}.hashedExtension)/2 + 1)
 
 func (f loadFlags) String() string {
@@ -360,13 +305,10 @@ func (f loadFlags) addFlag(loadFlags loadFlags) loadFlags {
 
 var (
 	emptyRootHashBytes = empty.RootHash[:]
-	// Package-level because keccak2.Write is an interface call: a local copy would be
-	// heap-allocated on every hashed row.
+	// Package-level: a local copy would heap-allocate on every hashed row (keccak2.Write is an interface call).
 	emptyBranchSlotBytes = []byte{rlp.EmptyStringCode}
 )
 
-// traceHex hex-encodes b for a trace line without letting fmt box the slice, which would
-// pin its backing array to the heap on every call even when tracing is off.
 func traceHex(b []byte) string { return hex.EncodeToString(b) }
 
 func (cell *cell) hashAccKey(keccak keccak.KeccakState, depth int16, hashBuf []byte) error {
@@ -491,7 +433,6 @@ func (cell *cell) fillFromUpperCell(upCell *cell, depth, depthIncrement int16) {
 	cell.loaded = upCell.loaded
 }
 
-// fillFromLowerCell fills the cell with the data from the cell of the lower row during fold
 func (cell *cell) fillFromLowerCell(lowCell *cell, lowDepth int16, preExtension []byte, nibble int) {
 	if lowCell.accountAddrLen > 0 || lowDepth < 64 {
 		cell.accountAddrLen = lowCell.accountAddrLen
@@ -512,7 +453,6 @@ func (cell *cell) fillFromLowerCell(lowCell *cell, lowDepth int16, preExtension 
 	}
 	if lowCell.hashLen > 0 {
 		if (lowCell.accountAddrLen == 0 && lowDepth < 64) || (lowCell.storageAddrLen == 0 && lowDepth > 64) {
-			// Extension is related to either accounts branch node, or storage branch node, we prepend it by preExtension | nibble
 			if len(preExtension) > 0 {
 				copy(cell.extension[:], preExtension)
 			}
@@ -526,7 +466,6 @@ func (cell *cell) fillFromLowerCell(lowCell *cell, lowDepth int16, preExtension 
 				cell.hashedExtLen = cell.extLen
 			}
 		} else {
-			// Extension is related to a storage branch node, so we copy it upwards as is
 			cell.extLen = lowCell.extLen
 			if lowCell.extLen > 0 {
 				copy(cell.extension[:], lowCell.extension[:lowCell.extLen])
@@ -649,21 +588,17 @@ func readUvarint(data []byte) (uint64, int, error) {
 	return l, n, nil
 }
 
-// skipCellFields skips over the fields in branch data based on fieldBits.
-// Used during warmup traversal to find the right child's data.
 func skipCellFields(data []byte, pos int, fieldBits byte) int {
-	// Field flags: extension=1, accountAddr=2, storageAddr=4, hash=8, stateHash=16
 	for bit := byte(1); bit <= 16; bit <<= 1 {
 		if fieldBits&bit != 0 {
 			if pos >= len(data) {
 				return pos
 			}
-			// Read length varint
 			l, n := binary.Uvarint(data[pos:])
 			if n <= 0 {
 				return pos
 			}
-			pos += n + int(l) // Skip length + data
+			pos += n + int(l)
 		}
 	}
 	return pos
@@ -683,7 +618,7 @@ func (cell *cell) accountForHashing(buffer []byte, storageRootHash common.Hash) 
 	}
 
 	var structLength = uint(balanceBytes + nonceBytes + 2)
-	structLength += 66 // Two 32-byte arrays + 2 prefixes
+	structLength += 66
 
 	var pos int
 	if structLength < 56 {
@@ -701,7 +636,6 @@ func (cell *cell) accountForHashing(buffer []byte, storageRootHash common.Hash) 
 		pos = lengthBytes + 1
 	}
 
-	// Encoding nonce
 	if cell.Nonce < 128 && cell.Nonce != 0 {
 		buffer[pos] = byte(cell.Nonce)
 	} else {
@@ -714,7 +648,6 @@ func (cell *cell) accountForHashing(buffer []byte, storageRootHash common.Hash) 
 	}
 	pos += 1 + nonceBytes
 
-	// Encoding balance
 	if cell.Balance.LtUint64(128) && !cell.Balance.IsZero() {
 		buffer[pos] = byte(cell.Balance.Uint64())
 		pos++
@@ -725,7 +658,6 @@ func (cell *cell) accountForHashing(buffer []byte, storageRootHash common.Hash) 
 		pos += balanceBytes
 	}
 
-	// Encoding Root and CodeHash
 	buffer[pos] = 128 + 32
 	pos++
 	copy(buffer[pos:], storageRootHash[:])
@@ -738,7 +670,6 @@ func (cell *cell) accountForHashing(buffer []byte, storageRootHash common.Hash) 
 }
 
 func completeLeafHash[V rlp.RlpSerializable](hph *HexPatriciaHashed, buf []byte, compactLen int, key []byte, compact0 byte, ni int, val V, singleton bool) ([]byte, error) {
-	// Compute the total length of binary representation
 	var kp, kl int
 	if compactLen > 1 {
 		kp = 1
@@ -748,8 +679,7 @@ func completeLeafHash[V rlp.RlpSerializable](hph *HexPatriciaHashed, buf []byte,
 	}
 
 	totalLen := kp + kl + val.DoubleRLPLen()
-	// The header (list prefix, key prefix, compact key) is assembled into one scratch
-	// buffer: passing per-write stack arrays to the io.Writer interface heap-allocates them.
+	// Assembled into one scratch buffer: per-write stack arrays would heap-allocate through the io.Writer interface.
 	header := hph.leafRlpBuf[:]
 	pl := rlp.EncodeListPrefixToBuf(totalLen, header)
 	n := pl
@@ -794,13 +724,12 @@ func completeLeafHash[V rlp.RlpSerializable](hph *HexPatriciaHashed, buf []byte,
 }
 
 func (hph *HexPatriciaHashed) leafHashWithKeyVal(buf, key []byte, val rlp.RlpSerializableBytes, singleton bool) ([]byte, error) {
-	// Write key
 	var compactLen int
 	var ni int
 	var compact0 byte
 	compactLen = (len(key)-1)/2 + 1
 	if len(key)&1 == 0 {
-		compact0 = 0x30 + key[0] // Odd: (3<<4) + first nibble
+		compact0 = 0x30 + key[0]
 		ni = 1
 	} else {
 		compact0 = 0x20
@@ -809,14 +738,13 @@ func (hph *HexPatriciaHashed) leafHashWithKeyVal(buf, key []byte, val rlp.RlpSer
 }
 
 func (hph *HexPatriciaHashed) accountLeafHashWithKey(buf, key []byte, val rlp.RlpEncodedBytes) ([]byte, error) {
-	// Write key
 	var compactLen int
 	var ni int
 	var compact0 byte
 	if nibbles.HasTerm(key) {
 		compactLen = (len(key)-1)/2 + 1
 		if len(key)&1 == 0 {
-			compact0 = 48 + key[0] // Odd (1<<4) + first nibble
+			compact0 = 48 + key[0]
 			ni = 1
 		} else {
 			compact0 = 32
@@ -824,7 +752,7 @@ func (hph *HexPatriciaHashed) accountLeafHashWithKey(buf, key []byte, val rlp.Rl
 	} else {
 		compactLen = len(key)/2 + 1
 		if len(key)&1 == 1 {
-			compact0 = terminatorHexByte + key[0] // Odd (1<<4) + first nibble
+			compact0 = terminatorHexByte + key[0]
 			ni = 1
 		}
 	}
@@ -834,16 +762,14 @@ func (hph *HexPatriciaHashed) accountLeafHashWithKey(buf, key []byte, val rlp.Rl
 func (hph *HexPatriciaHashed) extensionHash(key []byte, hash []byte) (common.Hash, error) {
 	var hashBuf common.Hash
 
-	// Compute the total length of binary representation
 	var kp, kl int
-	// Write key
 	var compactLen int
 	var ni int
 	var compact0 byte
 	if nibbles.HasTerm(key) {
 		compactLen = (len(key)-1)/2 + 1
 		if len(key)&1 == 0 {
-			compact0 = 0x30 + key[0] // Odd: (3<<4) + first nibble
+			compact0 = 0x30 + key[0]
 			ni = 1
 		} else {
 			compact0 = 0x20
@@ -851,7 +777,7 @@ func (hph *HexPatriciaHashed) extensionHash(key []byte, hash []byte) (common.Has
 	} else {
 		compactLen = len(key)/2 + 1
 		if len(key)&1 == 1 {
-			compact0 = 0x10 + key[0] // Odd: (1<<4) + first nibble
+			compact0 = 0x10 + key[0]
 			ni = 1
 		}
 	}
@@ -894,7 +820,6 @@ func (hph *HexPatriciaHashed) extensionHash(key []byte, hash []byte) (common.Has
 	if _, err := w.Write(hash); err != nil {
 		return hashBuf, err
 	}
-	// Replace previous hash with the new one
 	if _, err := hph.keccak.Read(hashBuf[:]); err != nil {
 		return hashBuf, err
 	}
@@ -908,7 +833,7 @@ func (hph *HexPatriciaHashed) computeCellHashLen(cell *cell, depth int16) int16 
 			return cell.stateHashLen + 1
 		}
 
-		keyLen := 128 - depth + 1 // Length of hex key with terminator character
+		keyLen := 128 - depth + 1
 		var kp, kl int
 		compactLen := (keyLen-1)/2 + 1
 		if compactLen > 1 {
@@ -933,12 +858,10 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 	var storageRootHash common.Hash
 	var storageRootHashIsSet bool
 	if hph.memoizationOff {
-		cell.stateHashLen = 0 // Reset stateHashLen to force recompute
+		cell.stateHashLen = 0
 	}
 
-	// Use a temporary buffer for hashed key computation to avoid corrupting cell.hashedExtension
-	// which may be needed for subsequent witness operations on other keys
-	// note that the cell.hashedExtension overwrite is still present in the `computeCellHash()`
+	// Temporary buffer avoids corrupting cell.hashedExtension, still needed by later witness operations.
 	var hashedKeyBuf [128]byte
 
 	if cell.storageAddrLen > 0 {
@@ -949,13 +872,12 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 		singleton := depth <= 64
 		koffset := hph.accountKeyLen
 		if depth == 0 && cell.accountAddrLen == 0 {
-			// if account key is empty, then we need to hash storage key from the key beginning
 			koffset = 0
 		}
 		if err := hashKey(hph.keccak, cell.storageAddr[koffset:cell.storageAddrLen], hashedKeyBuf[:], hashedKeyOffset, hph.cellHashBuf[:]); err != nil {
 			return nil, storageRootHashIsSet, nil, err
 		}
-		hashedKeyBuf[64-hashedKeyOffset] = terminatorHexByte // Add terminator
+		hashedKeyBuf[64-hashedKeyOffset] = terminatorHexByte
 
 		if cell.stateHashLen > 0 {
 			res := append([]byte{160}, cell.stateHash[:cell.stateHashLen]...)
@@ -969,8 +891,6 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 			} else {
 				storageRootHashIsSet = true
 				storageRootHash = *(*common.Hash)(res[1:])
-				//copy(storageRootHash[:], res[1:])
-				//cell.stateHashLen = 0
 			}
 		} else {
 			if !cell.loaded.storage() {
@@ -1022,10 +942,10 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 		if err := hashKey(hph.keccak, cell.accountAddr[:cell.accountAddrLen], hashedKeyBuf[:], depth, hph.cellHashBuf[:]); err != nil {
 			return nil, storageRootHashIsSet, nil, err
 		}
-		hashedKeyBuf[64-depth] = terminatorHexByte // Add terminator
+		hashedKeyBuf[64-depth] = terminatorHexByte
 		if !storageRootHashIsSet {
 			switch {
-			case cell.extLen > 0: // Extension
+			case cell.extLen > 0:
 				if cell.hashLen == 0 {
 					return nil, storageRootHashIsSet, nil, errors.New("computeCellHash extension without hash")
 				}
@@ -1059,7 +979,6 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 				}
 				return res, storageRootHashIsSet, storageRootHash[:], nil
 			}
-			// storage root update or extension update could invalidate older stateHash, so we need to reload state
 			hph.metrics.AccountLoad(cell.accountAddr[:cell.accountAddrLen])
 			update, err := hph.accountFromCacheOrDB(cell.accountAddr[:cell.accountAddrLen])
 			if err != nil {
@@ -1087,7 +1006,7 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 
 	buf = append(buf, 0x80+32)
 	switch {
-	case cell.extLen > 0: // Extension
+	case cell.extLen > 0:
 		if cell.hashLen > 0 {
 			if hph.traceW != nil {
 				fmt.Fprintf(hph.traceW, "extensionHash for [%x]=>[%x]\n", cell.extension[:cell.extLen], cell.hash[:cell.hashLen])
@@ -1117,7 +1036,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 	var storageRootHash common.Hash
 	var storageRootHashIsSet bool
 	if hph.memoizationOff {
-		cell.stateHashLen = 0 // Reset stateHashLen to force recompute
+		cell.stateHashLen = 0
 	}
 	if cell.storageAddrLen > 0 {
 		var hashedKeyOffset int16
@@ -1126,7 +1045,6 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 		}
 		singleton := depth <= 64
 
-		// Check cached stateHash BEFORE hashing key (optimization: skip key hash if using cache)
 		if cell.stateHashLen > 0 {
 			if hph.traceW != nil {
 				fmt.Fprintf(hph.traceW, "REUSED stateHash %x spk %x\n", cell.stateHash[:cell.stateHashLen], cell.storageAddr[:cell.storageAddrLen])
@@ -1140,20 +1058,14 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 		} else {
 			koffset := hph.accountKeyLen
 			if depth == 0 && cell.accountAddrLen == 0 {
-				// if account key is empty, then we need to hash storage key from the key beginning
 				koffset = 0
 			}
 			if err := cell.hashStorageKey(hph.keccak, koffset, 0, hashedKeyOffset, hph.cellHashBuf[:]); err != nil {
 				return nil, err
 			}
-			cell.hashedExtension[64-hashedKeyOffset] = terminatorHexByte // Add terminator
+			cell.hashedExtension[64-hashedKeyOffset] = terminatorHexByte
 			if !cell.loaded.storage() {
 				return nil, fmt.Errorf("storage %x was not loaded as expected: cell %v", cell.storageAddr[:cell.storageAddrLen], cell.String())
-				// update, err := hph.storageFromCacheOrDB(cell.storageAddr[:cell.storageAddrLen])
-				// if err != nil {
-				// 	return nil, err
-				// }
-				// cell.setFromUpdate(update)
 			}
 
 			leafHash, err := hph.leafHashWithKeyVal(buf, cell.hashedExtension[:64-hashedKeyOffset+1], cell.Storage[:cell.StorageLen], singleton)
@@ -1179,10 +1091,10 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 		if err := cell.hashAccKey(hph.keccak, depth, hph.cellHashBuf[:]); err != nil {
 			return nil, err
 		}
-		cell.hashedExtension[64-depth] = terminatorHexByte // Add terminator
+		cell.hashedExtension[64-depth] = terminatorHexByte
 		if !storageRootHashIsSet {
 			switch {
-			case cell.extLen > 0: // Extension
+			case cell.extLen > 0:
 				if cell.hashLen == 0 {
 					return nil, errors.New("computeCellHash extension without hash")
 				}
@@ -1213,7 +1125,6 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 				}
 				return append(append(buf[:0], byte(160)), cell.stateHash[:cell.stateHashLen]...), nil
 			}
-			// storage root update or extension update could invalidate older stateHash, so we need to reload state
 			hph.metrics.AccountLoad(cell.accountAddr[:cell.accountAddrLen])
 			update, err := hph.accountFromCacheOrDB(cell.accountAddr[:cell.accountAddrLen])
 			if err != nil {
@@ -1237,7 +1148,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 
 	buf = append(buf, 0x80+32)
 	switch {
-	case cell.extLen > 0: // Extension
+	case cell.extLen > 0:
 		if cell.hashLen > 0 {
 			if hph.traceW != nil {
 				fmt.Fprintf(hph.traceW, "extensionHash for [%x]=>[%x]\n", cell.extension[:cell.extLen], cell.hash[:cell.hashLen])
@@ -1261,8 +1172,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 	return buf, nil
 }
 
-// clampToAccountBoundary caps an unfold/extension length so a descent from above the
-// 64-nibble account boundary stops exactly at it, where storage subtrees start.
+// Stops a descent from above the 64-nibble account boundary exactly at it, where storage subtrees start.
 func clampToAccountBoundary(depth, length int16) int16 {
 	if depth < 64 && depth+length > 64 {
 		return 64 - depth
@@ -1278,7 +1188,6 @@ func (hph *HexPatriciaHashed) needUnfolding(hashedKey []byte) int16 {
 			fmt.Fprintf(hph.traceW, "needUnfolding root, rootChecked = %t\n", hph.rootChecked)
 		}
 		if hph.root.hashedExtLen == 64 && hph.root.accountAddrLen > 0 && hph.root.storageAddrLen > 0 {
-			// in case if root is a leaf node with storage and account, we need to derive storage part of a key
 			if err := hph.root.deriveHashedKeys(depth, hph.keccak, hph.accountKeyLen, hph.cellHashBuf[:]); err != nil {
 				log.Warn("deriveHashedKeys for root with storage", "err", err, "cell", hph.root.FullString())
 				return 0
@@ -1289,9 +1198,9 @@ func (hph *HexPatriciaHashed) needUnfolding(hashedKey []byte) int16 {
 		}
 		if hph.root.hashedExtLen == 0 && hph.root.hashLen == 0 {
 			if hph.rootChecked {
-				return 0 // Previously checked, empty root, no unfolding needed
+				return 0
 			}
-			return 1 // Need to attempt to unfold the root
+			return 1
 		}
 		cell = &hph.root
 	} else {
@@ -1311,10 +1220,10 @@ func (hph *HexPatriciaHashed) needUnfolding(hashedKey []byte) int16 {
 		return 0
 	}
 	if cell.hashedExtLen == 0 {
-		if cell.hashLen == 0 { // cell is empty, no need to unfold further
+		if cell.hashLen == 0 {
 			return 0
 		}
-		return 1 // unfold branch node
+		return 1
 	}
 
 	cpl := nibbles.CommonPrefixLen(hashedKey[depth:], cell.hashedExtension[:cell.hashedExtLen-1])
@@ -1377,8 +1286,6 @@ func (hph *HexPatriciaHashed) PrintGrid() {
 	fmt.Printf("\n")
 }
 
-// witnessMaterializeBranch decodes the branch stored at the given hashed-nibble prefix into
-// a trie.FullNode whose children are HashNodes. Mirrors unfoldBranchNode's branch decode.
 func (hph *HexPatriciaHashed) witnessMaterializeBranch(branchPrefix []byte, childDepth int16) (*trie.FullNode, error) {
 	compact := nibbles.HexToCompact(branchPrefix)
 	branchData, err := hph.readBranchAndCheckForFlushing(compact)
@@ -1388,7 +1295,7 @@ func (hph *HexPatriciaHashed) witnessMaterializeBranch(branchPrefix []byte, chil
 	if len(branchData) < 2 {
 		return nil, fmt.Errorf("[witness] empty branch data at prefix %x", branchPrefix)
 	}
-	branchData = branchData[2:] // skip touch map
+	branchData = branchData[2:]
 	bitmap := binary.BigEndian.Uint16(branchData[0:])
 	pos := 2
 	fullNode := &trie.FullNode{}
@@ -1420,9 +1327,6 @@ func (hph *HexPatriciaHashed) witnessMaterializeBranch(branchPrefix []byte, chil
 	return fullNode, nil
 }
 
-// witnessMaterializeBranchChild decodes the branch at branchPrefix and verifies it
-// hashes to wantHash, returning a node a strict verifier can descend instead of a bare
-// HashNode. Same hash, so the witness root is unchanged.
 func (hph *HexPatriciaHashed) witnessMaterializeBranchChild(branchPrefix []byte, childDepth int16, wantHash []byte) (*trie.FullNode, error) {
 	branchNode, err := hph.witnessMaterializeBranch(branchPrefix, childDepth)
 	if err != nil {
@@ -1435,8 +1339,7 @@ func (hph *HexPatriciaHashed) witnessMaterializeBranchChild(branchPrefix []byte,
 	return branchNode, nil
 }
 
-// readBranchAndCheckForFlushing reads a branch from ctx, flushing deferred updates first if the prefix is pending.
-// This ensures we read fresh data when a prefix has been modified but not yet written.
+// Flushes deferred updates first if the prefix is pending, so a modified-but-unwritten prefix reads fresh.
 func (hph *HexPatriciaHashed) readBranchAndCheckForFlushing(prefix []byte) ([]byte, error) {
 	be := hph.branchEncoder
 	if be.DeferUpdatesEnabled() && be.HasPendingPrefix(prefix) {
@@ -1448,7 +1351,6 @@ func (hph *HexPatriciaHashed) readBranchAndCheckForFlushing(prefix []byte) ([]by
 	return hph.branchFromCacheOrDB(prefix)
 }
 
-// unfoldBranchNode returns true if unfolding has been done
 func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted bool) error {
 	key := nibbles.HexToCompact(hph.currentKey[:hph.currentKeyLen])
 	hph.metrics.BranchLoad(hph.currentKey[:hph.currentKeyLen])
@@ -1458,19 +1360,16 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted boo
 		return err
 	}
 
-	// depthsToTxNum is used for per-file metrics; step is no longer available
-	// from the cache-or-DB helper (cache never had a meaningful step anyway).
 	hph.depthsToTxNum[depth] = 0
 
 	if len(branchData) >= 2 {
-		branchData = branchData[2:] // skip touch map and keep the rest
+		branchData = branchData[2:]
 	}
 	if hph.traceW != nil {
 		fmt.Fprintf(hph.traceW, "unfoldBranchNode prefix '%x', nibbles [%x] depth %d row %d '%x'\n",
 			key, hph.currentKey[:hph.currentKeyLen], depth, row, branchData)
 	}
 	if !hph.rootChecked && hph.currentKeyLen == 0 && len(branchData) == 0 {
-		// Special case - empty or deleted root
 		hph.rootChecked = true
 		return nil
 	}
@@ -1491,9 +1390,6 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted boo
 	return nil
 }
 
-// decodeBranchIntoRow decodes branch (with the touch/after-map prefix already stripped)
-// into grid[row], records its touch/after maps, and derives hashed keys for present cells
-// at depth. The on-disk read and its flush/metrics handling stay with each caller.
 func (hph *HexPatriciaHashed) decodeBranchIntoRow(row int, depth int16, branch []byte, deleted bool) error {
 	maps, err := DecodeBranchInto(branch, deleted, &hph.grid[row])
 	if err != nil {
@@ -1525,7 +1421,7 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int16) error {
 	var upDepth, depth int16
 	if hph.activeRows == 0 {
 		if hph.rootChecked && hph.root.hashLen == 0 && hph.root.hashedExtLen == 0 {
-			return nil // No unfolding for empty root
+			return nil
 		}
 		upCell = &hph.root
 		touched = hph.rootTouched
@@ -1593,8 +1489,6 @@ func (hph *HexPatriciaHashed) needFolding(hashedKey []byte) bool {
 	return !bytes.HasPrefix(hashedKey, hph.currentKey[:hph.currentKeyLen])
 }
 
-// Process-cumulative trie-compute counters feeding the KVReadLevelledMetrics
-// "skipRatio"/"resetRatio" Debug log at the end of ComputeCommitment.
 var (
 	hadToLoad   atomic.Uint64
 	skippedLoad atomic.Uint64
@@ -1607,10 +1501,7 @@ var (
 	skipRatePublished uint64
 )
 
-// flushTrieStateRates publishes the cumulative load/skip atomics to their
-// prometheus counters once per Process, replacing the per-key .Inc() on the hot
-// path. The atomics are monotonic and the publish is delta-based, so the emitted
-// counter value is identical regardless of how often this is called.
+// Delta-based publish of the monotonic atomics, so the emitted counter value is idempotent per call.
 func flushTrieStateRates() {
 	rateFlushMu.Lock()
 	defer rateFlushMu.Unlock()
@@ -1630,30 +1521,17 @@ type skipStat struct {
 
 const terminatorHexByte = 16 // max nibble value +1. Defines end of nibble line in the trie or splits address and storage space in trie.
 
-// updateKind is a type of update that is being applied to the trie structure.
 type updateKind uint8
 
 const (
-	// updateKindDelete means after we processed longest common prefix, row ended up empty.
 	updateKindDelete updateKind = 0b0
 
-	// updateKindPropagate is an update operation ended up with a single nibble which is leaf or extension node.
-	// We do not store keys with only one cell as a value in db, instead we copy them upwards to the parent branch.
-	//
-	// In case current prefix existed before and node is fused to upper level, this causes deletion for current prefix
-	// and update of branch value on upper level.
-	// 	e.g.: leaf was at prefix 0xbeef, but we fuse it in level above, so
-	//  - delete 0xbeef
-	//  - update 0xbee
+	// A single surviving cell is not stored as a branch; it's fused into the parent branch instead.
 	updateKindPropagate updateKind = 0b01
 
-	// updateKindBranch is an update operation ended up as a branch of 2+ cells.
-	// That does not necessarily means that branch is NEW, it could be an existing branch that was updated.
 	updateKindBranch updateKind = 0b10
 )
 
-// Kind defines how exactly given update should be folded upwards to the parent branch or root.
-// It also returns number of nibbles that left in branch after the operation.
 func afterMapUpdateKind(afterMap uint16) (kind updateKind, nibblesAfterUpdate int) {
 	nibblesAfterUpdate = bits.OnesCount16(afterMap)
 	switch nibblesAfterUpdate {
@@ -1666,25 +1544,21 @@ func afterMapUpdateKind(afterMap uint16) (kind updateKind, nibblesAfterUpdate in
 	}
 }
 
-// foldBranch handles the updateKindBranch case: branch of 2+ cells.
 func (hph *HexPatriciaHashed) foldBranch(row int, nibble, upDepth, depth int16, upCell *cell, updateKey []byte) error {
-	if hph.touchMap[row] != 0 { // any modifications
+	if hph.touchMap[row] != 0 {
 		if row == 0 {
 			hph.rootTouched = true
 			hph.rootPresent = true
 		} else {
-			// Modification is propagated upwards
 			hph.touchMap[row-1] |= uint16(1) << nibble
 		}
 	}
 	bitmap := hph.touchMap[row] & hph.afterMap[row]
 	if !hph.branchBefore[row] {
-		// There was no branch node before, so we need to touch even the singular child that existed
 		hph.touchMap[row] |= hph.afterMap[row]
 		bitmap |= hph.afterMap[row]
 	}
 
-	// Calculate total length of all hashes
 	nibblesLeftAfterUpdate := bits.OnesCount16(hph.afterMap[row])
 	totalBranchLen, err := hph.prepareBranchCells(row, depth, nibblesLeftAfterUpdate)
 	if err != nil {
@@ -1698,7 +1572,6 @@ func (hph *HexPatriciaHashed) foldBranch(row int, nibble, upDepth, depth int16, 
 	}
 	hph.witness.beginBranch(hph.hashAuxBuffer[:pt])
 
-	// Single pass: feed keccak2 + extract cellEncodeData
 	cellData, err := hph.hashRow(row, depth)
 	if err != nil {
 		return err
@@ -1734,16 +1607,12 @@ func (hph *HexPatriciaHashed) foldBranch(row int, nibble, upDepth, depth int16, 
 	return nil
 }
 
-// hashRow performs a single pass over all 17 branch slots (16 nibbles + terminator),
-// feeding cell hashes to keccak2 for present cells (per afterMap) and writing 0x80
-// for empty slots. It simultaneously extracts cellEncodeData for each present cell.
 func (hph *HexPatriciaHashed) hashRow(row int, depth int16) ([16]cellEncodeData, error) {
 	var cellData [16]cellEncodeData
 	capture := hph.witness.active()
 
 	for bitset, lastNib := hph.afterMap[row], 0; ; {
 		if bitset == 0 {
-			// Write remaining empty cells to keccak2 (up to slot 16 inclusive = terminator)
 			for i := lastNib; i < 17; i++ {
 				if _, err := hph.keccak2.Write(emptyBranchSlotBytes); err != nil {
 					return cellData, err
@@ -1757,7 +1626,6 @@ func (hph *HexPatriciaHashed) hashRow(row int, depth int16) ([16]cellEncodeData,
 		bit := bitset & -bitset
 		nibble := bits.TrailingZeros16(bit)
 
-		// Write empty cells before this nibble
 		for i := lastNib; i < nibble; i++ {
 			if _, err := hph.keccak2.Write(emptyBranchSlotBytes); err != nil {
 				return cellData, err
@@ -1773,7 +1641,6 @@ func (hph *HexPatriciaHashed) hashRow(row int, depth int16) ([16]cellEncodeData,
 
 		cell := &hph.grid[row][nibble]
 
-		// Warn about unloaded state
 		if cell.accountAddrLen > 0 && cell.stateHashLen == 0 && !cell.loaded.account() && !cell.Deleted() {
 			log.Warn("account not loaded", "row", row, "nibble", fmt.Sprintf("%x", nibble), "depth", depth, "cell", cell.String())
 		}
@@ -1781,7 +1648,6 @@ func (hph *HexPatriciaHashed) hashRow(row int, depth int16) ([16]cellEncodeData,
 			log.Warn("storage not loaded", "row", row, "nibble", fmt.Sprintf("%x", nibble), "depth", depth, "cell", cell.String())
 		}
 
-		// Save hash before compute for metrics
 		var hashBefore []byte
 		if dbg.KVReadLevelledMetrics && (cell.accountAddrLen > 0 || cell.storageAddrLen > 0) {
 			hashBefore = make([]byte, cell.stateHashLen)
@@ -1797,7 +1663,6 @@ func (hph *HexPatriciaHashed) hashRow(row int, depth int16) ([16]cellEncodeData,
 			fmt.Fprintf(hph.traceW, "  %x: computeCellHash(%d, %x, depth=%d)=[%x]\n", nibble, row, nibble, depth, cellHash)
 		}
 
-		// Collect metrics on hash recomputation vs skip
 		if dbg.KVReadLevelledMetrics && hashBefore != nil {
 			counters := hph.hadToLoadL[hph.depthsToTxNum[depth]]
 			if !bytes.Equal(hashBefore, cell.stateHash[:cell.stateHashLen]) {
@@ -1827,7 +1692,6 @@ func (hph *HexPatriciaHashed) hashRow(row int, depth int16) ([16]cellEncodeData,
 			hph.witness.writeBranch(cellHash)
 		}
 
-		// Extract encoding data
 		cellData[nibble] = cellEncodeDataFromCell(cell)
 
 		bitset ^= bit
@@ -1835,10 +1699,8 @@ func (hph *HexPatriciaHashed) hashRow(row int, depth int16) ([16]cellEncodeData,
 	return cellData, nil
 }
 
-// prepareBranchCells iterates afterMap cells, drops stale memoized hashes,
-// loads state from DB where needed, and returns the total RLP-encoded branch length.
 func (hph *HexPatriciaHashed) prepareBranchCells(row int, depth int16, nibblesLeftAfterUpdate int) (int16, error) {
-	totalBranchLen := int16(17 - nibblesLeftAfterUpdate) // For every empty cell, one byte
+	totalBranchLen := int16(17 - nibblesLeftAfterUpdate)
 	for bitset, j := hph.afterMap[row], 0; bitset != 0; j++ {
 		bit := bitset & -bitset
 		nibble := bits.TrailingZeros16(bit)
@@ -1847,13 +1709,11 @@ func (hph *HexPatriciaHashed) prepareBranchCells(row int, depth int16, nibblesLe
 		if hph.memoizationOff {
 			cell.stateHashLen = 0
 		}
-		/* memoization of state hashes*/
 		var counters skipStat
 		if dbg.KVReadLevelledMetrics {
 			counters = hph.hadToLoadL[hph.depthsToTxNum[depth]]
 		}
 		if cell.stateHashLen > 0 && (hph.touchMap[row]&hph.afterMap[row]&uint16(1<<nibble) > 0 || cell.stateHashLen != length.Hash) {
-			// drop state hash if updated or hashLen < 32 (corner case, may even not encode such leaf hashes)
 			if hph.traceW != nil {
 				fmt.Fprintf(hph.traceW, "DROP hash for (%d, %x, depth=%d) %s\n", row, nibble, depth, cell.FullString())
 			}
@@ -1874,7 +1734,6 @@ func (hph *HexPatriciaHashed) prepareBranchCells(row int, depth int16, nibblesLe
 		if dbg.KVReadLevelledMetrics {
 			hph.hadToLoadL[hph.depthsToTxNum[depth]] = counters
 		}
-		/* end of memoization */
 
 		totalBranchLen += hph.computeCellHashLen(cell, depth)
 		bitset ^= bit
@@ -1882,17 +1741,14 @@ func (hph *HexPatriciaHashed) prepareBranchCells(row int, depth int16, nibblesLe
 	return totalBranchLen, nil
 }
 
-// foldPropagate handles the updateKindPropagate case: leaf or extension node.
 func (hph *HexPatriciaHashed) foldPropagate(row int, nibble, upDepth, depth int16, upCell *cell, updateKey []byte) error {
 	if hph.touchMap[row] != 0 {
-		// any modifications
 		if row == 0 {
 			hph.rootTouched = true
 			// A propagate fold leaves exactly one survivor, so the root exists; without this
 			// the next unfold reads touched && !present and deletes the whole subtree.
 			hph.rootPresent = true
 		} else {
-			// Modification is propagated upwards
 			hph.touchMap[row-1] |= uint16(1) << nibble
 		}
 	}
@@ -1911,7 +1767,6 @@ func (hph *HexPatriciaHashed) foldPropagate(row int, nibble, upDepth, depth int1
 	if dbg.KVReadLevelledMetrics {
 		hph.hadToLoadL[hph.depthsToTxNum[depth]] = counters
 	}
-	// propagate cell into parent row
 	upCell.fillFromLowerCell(cell, depth, hph.currentKey[upDepth:hph.currentKeyLen], childNibble)
 
 	if err := hph.collectDeleteUpdate(updateKey, row); err != nil {
@@ -1923,20 +1778,17 @@ func (hph *HexPatriciaHashed) foldPropagate(row int, nibble, upDepth, depth int1
 	return nil
 }
 
-// foldDelete handles the updateKindDelete case: everything at this row was deleted.
 func (hph *HexPatriciaHashed) foldDelete(row int, nibble, upDepth int16, upCell *cell, updateKey []byte) error {
 	if hph.touchMap[row] != 0 {
 		switch {
 		case row == 0:
-			// Root is deleted because the tree is empty
 			hph.rootTouched = true
 			hph.rootPresent = false
 		case upDepth == 64:
-			// Special case - all storage items of an account have been deleted, but it does not automatically delete the account, just makes it empty storage
-			// Therefore we are not propagating deletion upwards, but turn it into a modification
+			// All storage of an account was deleted, but that doesn't delete the account itself;
+			// turn it into a modification instead of propagating the deletion upward.
 			hph.touchMap[row-1] |= uint16(1) << nibble
 		default:
-			// Deletion is propagated upwards
 			hph.touchMap[row-1] |= uint16(1) << nibble
 			hph.afterMap[row-1] &^= uint16(1) << nibble
 			if hph.collapseTracer != nil && bits.OnesCount16(hph.afterMap[row-1]) == 1 {
@@ -1949,7 +1801,6 @@ func (hph *HexPatriciaHashed) foldDelete(row int, nibble, upDepth int16, upCell 
 	return hph.collectDeleteUpdate(updateKey, row)
 }
 
-// collectDeleteUpdate encodes a branch deletion if a branch existed before at this row.
 func (hph *HexPatriciaHashed) collectDeleteUpdate(updateKey []byte, row int) error {
 	if hph.branchBefore[row] {
 		if err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, nil, false); err != nil {
@@ -1959,9 +1810,7 @@ func (hph *HexPatriciaHashed) collectDeleteUpdate(updateKey []byte, row int) err
 	return nil
 }
 
-// The purpose of fold is to reduce hph.currentKey[:hph.currentKeyLen]. It should be invoked
-// until that current key becomes a prefix of hashedKey that we will process next
-// (in other words until the needFolding function returns 0)
+// Reduces hph.currentKey; invoke until needFolding returns false for the next key.
 func (hph *HexPatriciaHashed) fold() error {
 	updateKeyLen := hph.currentKeyLen
 	if hph.activeRows == 0 {
@@ -1970,7 +1819,6 @@ func (hph *HexPatriciaHashed) fold() error {
 	if hph.traceW != nil {
 		fmt.Fprintf(hph.traceW, "fold [%x] activeRows: %d touchMap: %016b afterMap: %016b\n", hph.currentKey[:hph.currentKeyLen], hph.activeRows, hph.touchMap[hph.activeRows-1], hph.afterMap[hph.activeRows-1])
 	}
-	// Move information to the row above
 	var upCell *cell
 	var nibble, upDepth int16
 	row := hph.activeRows - 1
@@ -2002,9 +1850,9 @@ func (hph *HexPatriciaHashed) fold() error {
 	updateKind, _ := afterMapUpdateKind(hph.afterMap[row])
 	var err error
 	switch updateKind {
-	case updateKindDelete: // Everything deleted
+	case updateKindDelete:
 		err = hph.foldDelete(row, nibble, upDepth, upCell, updateKey)
-	case updateKindPropagate: // Leaf or extension node
+	case updateKindPropagate:
 		err = hph.foldPropagate(row, nibble, upDepth, depth, upCell, updateKey)
 	case updateKindBranch:
 		err = hph.foldBranch(row, nibble, upDepth, depth, upCell, updateKey)
@@ -2027,7 +1875,6 @@ func (hph *HexPatriciaHashed) loadStateIfNeeded(cell *cell, counters skipStat) (
 				return counters, err
 			}
 			cell.setFromUpdate(upd)
-			// if the update is empty, the loaded flag was not updated so do it manually
 			cell.loaded = cell.loaded.addFlag(cellLoadAccount)
 			counters.accLoaded++
 		}
@@ -2038,7 +1885,6 @@ func (hph *HexPatriciaHashed) loadStateIfNeeded(cell *cell, counters skipStat) (
 				return counters, err
 			}
 			cell.setFromUpdate(upd)
-			// if the update is empty, the loaded flag was not updated so do it manually
 			cell.loaded = cell.loaded.addFlag(cellLoadStorage)
 			counters.storLoaded++
 		}
@@ -2051,7 +1897,7 @@ func (hph *HexPatriciaHashed) deleteCell(hashedKey []byte) {
 		fmt.Fprintf(hph.traceW, "deleteCell, activeRows = %d\n", hph.activeRows)
 	}
 	var cell *cell
-	if hph.activeRows == 0 { // Remove the root
+	if hph.activeRows == 0 {
 		cell = &hph.root
 		hph.rootTouched, hph.rootPresent = true, false
 	} else {
@@ -2066,7 +1912,6 @@ func (hph *HexPatriciaHashed) deleteCell(hashedKey []byte) {
 		cell = &hph.grid[row][nibble]
 		col := uint16(1) << nibble
 		if hph.afterMap[row]&col != 0 {
-			// Prevent "spurious deletions", i.e. deletion of absent items
 			hph.touchMap[row] |= col
 			hph.afterMap[row] &^= col
 			if hph.traceW != nil {
@@ -2079,10 +1924,7 @@ func (hph *HexPatriciaHashed) deleteCell(hashedKey []byte) {
 	cell.reset()
 }
 
-// detectCollapseBeforeDelete checks the row above the deepest row to see if
-// deleting the current key will cause a node collapse. If that row has exactly
-// 2 non-empty cells, one of them is on the delete path and the other is the
-// sibling that will survive the collapse.
+// If the row above has exactly 2 non-empty cells, deleting collapses it to the surviving sibling.
 func (hph *HexPatriciaHashed) detectCollapseBeforeDelete(hashedKey []byte) {
 	if hph.activeRows < 2 {
 		return
@@ -2093,18 +1935,14 @@ func (hph *HexPatriciaHashed) detectCollapseBeforeDelete(hashedKey []byte) {
 		return
 	}
 
-	// collapse detected!
 	if hph.traceW != nil {
 		fmt.Fprintf(hph.traceW, "[collapse] updateCell: hashedKey=%s (len=%d nibbles), deleted=true, activeRows=%d\n",
 			NibblesToString(hashedKey), len(hashedKey), hph.activeRows)
 	}
 
-	// Exactly 2 children in the parent row — one is on the delete path,
-	// the other is the sibling that will survive the collapse.
 	depth := hph.depths[parentRow] - 1
 	deleteNibble := int(hashedKey[depth])
 
-	// Find the sibling nibble (the other set bit in afterMap)
 	siblingNibble := -1
 	for i := range 16 {
 		if hph.afterMap[parentRow]&(1<<i) != 0 && i != deleteNibble {
@@ -2118,7 +1956,6 @@ func (hph *HexPatriciaHashed) detectCollapseBeforeDelete(hashedKey []byte) {
 
 	siblingCell := &hph.grid[parentRow][siblingNibble]
 
-	// Build the sibling's full hashed key path
 	siblingPath := make([]byte, int(depth)+1+int(siblingCell.hashedExtLen))
 	copy(siblingPath, hph.currentKey[:depth])
 	siblingPath[depth] = byte(siblingNibble)
@@ -2133,15 +1970,12 @@ func (hph *HexPatriciaHashed) detectCollapseBeforeDelete(hashedKey []byte) {
 	hph.collapseTracer(siblingPath, bytes.Clone(hph.currentKey[:depth]))
 }
 
-// detectCascadingCollapseAtRow detects a FullNode→ShortNode collapse caused by
-// a child deletion propagated upward from fold(). Called when afterMap[row]
-// has exactly 1 remaining child after a nibble was cleared.
+// Called when a fold() clearing a nibble leaves afterMap[row] with exactly 1 remaining child.
 func (hph *HexPatriciaHashed) detectCascadingCollapseAtRow(row int) {
 	depth := hph.depths[row] - 1
 	survivingNibble := bits.TrailingZeros16(hph.afterMap[row])
 	survivingCell := &hph.grid[row][survivingNibble]
 
-	// Build the surviving child's full hashed key path
 	siblingPath := make([]byte, int(depth)+1+int(survivingCell.hashedExtLen))
 	copy(siblingPath, hph.currentKey[:depth])
 	siblingPath[depth] = byte(survivingNibble)
@@ -2156,12 +1990,11 @@ func (hph *HexPatriciaHashed) detectCascadingCollapseAtRow(row int) {
 	hph.collapseTracer(siblingPath, bytes.Clone(hph.currentKey[:depth]))
 }
 
-// fetches cell by key and set touch/after maps. Requires that prefix to be already unfolded
+// Requires that prefix to already be unfolded.
 func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) (cell *cell) {
 	hph.metrics.Updates(plainKey)
 
 	if u.Deleted() {
-		// Before the delete, check if this will cause a node collapse (FullNode → single child).
 		if hph.collapseTracer != nil && hph.activeRows > 0 {
 			hph.detectCollapseBeforeDelete(hashedKey)
 		}
@@ -2203,7 +2036,7 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) 
 		copy(cell.accountAddr[:], plainKey)
 
 		cell.CodeHash = empty.CodeHash
-	} else { // set storage key
+	} else {
 		cell.storageAddrLen = int16(len(plainKey))
 		copy(cell.storageAddr[:], plainKey)
 	}
@@ -2222,16 +2055,10 @@ func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return rootHash[1:], nil // first byte is 128+hash_len=160
+	return rootHash[1:], nil
 }
 
-// unfoldKeyPath drives hph.unfold in a loop until the trie is unfolded
-// far enough that the cell at hashedKey can be updated — i.e. until
-// needUnfolding returns 0. This is the per-key traversal primitive
-// that follows the fold step in followAndUpdate.
-//
-// plainKey is used only for per-key metrics labelling (StartUnfolding).
-// Pass an empty/nil slice if no metric attribution is needed.
+// plainKey is used only for per-key metrics labelling; pass nil if no attribution is needed.
 func (hph *HexPatriciaHashed) unfoldKeyPath(hashedKey, plainKey []byte) error {
 	for unfolding := hph.needUnfolding(hashedKey); unfolding > 0; unfolding = hph.needUnfolding(hashedKey) {
 		printLater := hph.currentKeyLen == 0 && hph.mounted && hph.traceW != nil
@@ -2253,10 +2080,6 @@ func (hph *HexPatriciaHashed) unfoldKeyPath(hashedKey, plainKey []byte) error {
 }
 
 func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateUpdate *Update) (err error) {
-	//if hph.traceW != nil {
-	// fmt.Fprintf(hph.traceW, "mnt: %0x current: %x path %x\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hashedKey)
-	//}
-	// Keep folding until the currentKey is the prefix of the key we modify
 	for hph.needFolding(hashedKey) {
 		var foldDone func()
 		if dbg.KVReadLevelledMetrics {
@@ -2269,13 +2092,11 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 			foldDone()
 		}
 	}
-	// Now unfold the path so the cell at hashedKey is reachable.
 	if err := hph.unfoldKeyPath(hashedKey, plainKey); err != nil {
 		return err
 	}
 
 	if stateUpdate == nil {
-		// Update the cell
 		if int16(len(plainKey)) == hph.accountKeyLen {
 			hph.metrics.AccountLoad(plainKey)
 			stateUpdate, err = hph.accountFromCacheOrDB(plainKey)
@@ -2310,12 +2131,10 @@ func (hph *HexPatriciaHashed) foldMounted(ctx context.Context, nib int) (cell, e
 		if err := ctx.Err(); err != nil {
 			return cell{}, err
 		}
-		// fmt.Printf("===[%x] folding prefix %x (len %d)\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hph.currentKeyLen)
 		if hph.activeRows == 1 && hph.depths[hph.activeRows-1] == hph.mountWall {
 			if hph.traceW != nil {
 				fmt.Fprintf(hph.traceW, "mount early as nibble %02x %s\n", hph.mountedNib, hph.grid[0][hph.mountedNib].String())
 			}
-			// fmt.Printf("===[%x] stop folding at %x\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen])
 			return hph.grid[0][hph.mountedNib], nil
 		}
 		if err := hph.fold(); err != nil {
@@ -2335,9 +2154,8 @@ func (hph *HexPatriciaHashed) foldMounted(ctx context.Context, nib int) (cell, e
 	return cell{}, fmt.Errorf("foldMounted[%x]: folded past the mount wall to an unrooted base; the base must be seeded with a wall row", hph.mountedNib)
 }
 
-// captureExtensionDivergence materializes the branch behind a folded extension the
-// key diverges into (never unfolded during positioning) so a strict verifier can
-// descend it; it is hash-verified, so a wrong prefix errors rather than corrupts.
+// Materializes the branch a folded (never-unfolded) extension diverges into, so a strict verifier can descend it.
+// Hash-verified: a wrong prefix errors rather than corrupts.
 func (hph *HexPatriciaHashed) captureExtensionDivergence(hashedKey []byte, set *witnessNodeSet) error {
 	if hph.activeRows == 0 {
 		return nil
@@ -2376,9 +2194,8 @@ func (hph *HexPatriciaHashed) captureExtensionDivergence(hashedKey []byte, set *
 	return nil
 }
 
-// Witnesses builds the execution-witness node set on the fly during the fold,
-// capturing consensus node bytes as they are hashed. It returns the captured superset
-// (root first), the fold's hashed keys, and the root hash; callers prune to the lean set.
+// Returns the captured node superset (root first), the fold's hashed keys, and the root hash;
+// callers prune to the lean set.
 func (hph *HexPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, produceExclusionProofs bool, logPrefix string) (nodes [][]byte, provedKeys [][]byte, rootHash []byte, err error) {
 	hph.memoizationOff = true
 	set := newWitnessNodeSet()
@@ -2405,7 +2222,6 @@ func (hph *HexPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, p
 				return fmt.Errorf("fold: %w", err)
 			}
 		}
-		// fold back non-branch virtual rows left by previous extension splits
 		for hph.activeRows > 0 && !hph.branchBefore[hph.activeRows-1] {
 			if err := hph.fold(); err != nil {
 				return fmt.Errorf("fold non-branch: %w", err)
@@ -2478,8 +2294,6 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		logEvery     = time.NewTicker(20 * time.Second)
 	)
 
-	//hph.traceW = os.Stderr
-
 	hph.metrics.Reset()
 	hph.metrics.updates.Store(updatesCount)
 	if hph.metrics.collectCommitmentMetrics {
@@ -2491,7 +2305,6 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 	defer func() { logEvery.Stop() }()
 
-	// Setup warmup if configured
 	var warmuper *Warmuper
 	if warmup.Enabled {
 		warmuper = NewWarmuper(ctx, warmup)
@@ -2538,7 +2351,6 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 			trace := fmt.Sprintf("(%d/%d) plainKey [%x] %s hashedKey [%x] currentKey [%x]", ki+1, updatesCount, plainKey, update, hashedKey, hph.currentKey[:hph.currentKeyLen])
 
 			fmt.Fprintf(hph.traceW, "[proc] %s\n", trace)
-			// fmt.Println(trace)
 		}
 
 		if err := hph.followAndUpdate(hashedKey, plainKey, stateUpdate); err != nil {
@@ -2558,7 +2370,6 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		return nil, fmt.Errorf("hash sort failed: %w", err)
 	}
 
-	// Folding everything up to the root
 	for hph.activeRows > 0 {
 		var foldDone func()
 		if dbg.KVReadLevelledMetrics {
@@ -2595,8 +2406,6 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	if dbg.KVReadLevelledMetrics {
 		hph.metrics.CollectFileDepthStats(hph.hadToLoadL)
 		log.Debug("commitment finished, counters updated (no reset)",
-			//"hadToLoad", common.PrettyCounter(hadToLoad.Load()), "skippedLoad", common.PrettyCounter(skippedLoad.Load()),
-			//"hadToReset", common.PrettyCounter(hadToReset.Load()),
 			"skipRatio", fmt.Sprintf("%.1f%%", 100*(float64(skippedLoad.Load())/float64(hadToLoad.Load()+skippedLoad.Load()))),
 			"resetRatio", fmt.Sprintf("%.1f%%", 100*(float64(hadToReset.Load())/float64(hadToLoad.Load()))),
 			"keys", common.PrettyCounter(ki), "spent", time.Since(start),
@@ -2637,8 +2446,7 @@ func (hph *HexPatriciaHashed) EnableCsvMetrics(filePathPrefix string) {
 
 func (hph *HexPatriciaHashed) Variant() TrieVariant { return VariantHexPatriciaTrie }
 
-// TakeDeferredUpdates returns the current deferred updates from the branch encoder
-// and gives it a fresh empty slice. Caller takes ownership of the returned slice.
+// Caller takes ownership of the returned slice.
 func (hph *HexPatriciaHashed) TakeDeferredUpdates() []*DeferredBranchUpdate {
 	deferred := hph.branchEncoder.deferred
 	hph.branchEncoder.deferred = make([]*DeferredBranchUpdate, 0, 64)
@@ -2649,12 +2457,10 @@ func (hph *HexPatriciaHashed) TakeDeferredUpdates() []*DeferredBranchUpdate {
 	return deferred
 }
 
-// HasPendingDeferredUpdates returns true if the branch encoder has non-empty deferred updates.
 func (hph *HexPatriciaHashed) HasPendingDeferredUpdates() bool {
 	return len(hph.branchEncoder.deferred) > 0
 }
 
-// ApplyAndClearInlineDeferredUpdates applies deferred updates inline via ctx.PutBranch and clears them.
 func (hph *HexPatriciaHashed) ApplyAndClearInlineDeferredUpdates() error {
 	if err := hph.branchEncoder.ApplyDeferredUpdates(runtime.NumCPU(), hph.ctx.PutBranch); err != nil {
 		return fmt.Errorf("apply deferred updates: %w", err)
@@ -2663,15 +2469,12 @@ func (hph *HexPatriciaHashed) ApplyAndClearInlineDeferredUpdates() error {
 	return nil
 }
 
-// SetLeaveDeferredForCaller controls whether Process() leaves deferred updates on the
-// branchEncoder for the caller to handle (true) or applies them inline (false, default).
 func (hph *HexPatriciaHashed) SetLeaveDeferredForCaller(leave bool) {
 	hph.leaveDeferredForCaller = leave
 }
 
-// Reset allows HexPatriciaHashed instance to be reused for the new commitment calculation.
-// The aggregator-scope BranchCache is intentionally not cleared here;
-// SharedDomains.Unwind handles correctness via txN-tagged eviction.
+// The aggregator-scope BranchCache is intentionally not cleared here; SharedDomains.Unwind
+// handles correctness via txN-tagged eviction.
 func (hph *HexPatriciaHashed) Reset() {
 	hph.root.reset()
 	hph.rootTouched = false
@@ -2683,18 +2486,15 @@ func (hph *HexPatriciaHashed) ResetContext(ctx PatriciaContext) {
 	hph.ctx = ctx
 }
 
-// Reads via ctx.Branch (sd.mem → parent.mem → BranchCache → MDBX).
 func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, error) {
 	data, _, err := hph.ctx.Branch(key)
 	return data, err
 }
 
-// No Go-side cache; reads straight from the AccountsDomain.
 func (hph *HexPatriciaHashed) accountFromCacheOrDB(plainKey []byte) (*Update, error) {
 	return hph.ctx.Account(plainKey)
 }
 
-// No Go-side cache; reads straight from the StorageDomain.
 func (hph *HexPatriciaHashed) storageFromCacheOrDB(plainKey []byte) (*Update, error) {
 	return hph.ctx.Storage(plainKey)
 }
@@ -2707,14 +2507,14 @@ var (
 	stateRootTouched stateRootFlag = 4
 )
 
-// represents state of the tree
 type state struct {
-	Root         []byte      // encoded root cell
-	Depths       [128]int16  // For each row, the depth of cells in that row
-	TouchMap     [128]uint16 // For each row, bitmap of cells that were either present before modification, or modified or deleted
-	AfterMap     [128]uint16 // For each row, bitmap of cells that were present after modification
-	BranchBefore [128]bool   // For each row, whether there was a branch node in the database loaded in unfold
-	RootChecked  bool        // Set to false if it is not known whether the root is empty, set to true if it is checked
+	Root   []byte
+	Depths [128]int16
+	// TouchMap/AfterMap are not symmetric: see HexPatriciaHashed.touchMap/afterMap.
+	TouchMap     [128]uint16
+	AfterMap     [128]uint16
+	BranchBefore [128]bool
+	RootChecked  bool
 	RootTouched  bool
 	RootPresent  bool
 }
@@ -2836,7 +2636,7 @@ func (s *state) Decode(buf []byte) error {
 
 func (cell *cell) Encode() []byte {
 	var pos = int16(1)
-	size := pos + 5 + cell.hashLen + cell.accountAddrLen + cell.storageAddrLen + cell.hashedExtLen + cell.extLen // max size
+	size := pos + 5 + cell.hashLen + cell.accountAddrLen + cell.storageAddrLen + cell.hashedExtLen + cell.extLen
 	buf := make([]byte, size)
 
 	var flags uint8
@@ -2938,7 +2738,6 @@ func (cell *cell) Decode(buf []byte) error {
 	return nil
 }
 
-// Encode current state of hph into bytes
 func (hph *HexPatriciaHashed) EncodeCurrentState(buf []byte) ([]byte, error) {
 	s := state{
 		RootChecked: hph.rootChecked,
@@ -2958,12 +2757,10 @@ func (hph *HexPatriciaHashed) EncodeCurrentState(buf []byte) ([]byte, error) {
 	return s.Encode(buf)
 }
 
-// buf expected to be encoded hph state. Decode state and set up hph to that state.
 func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 	hph.Reset()
 
 	if buf == nil {
-		// reset state to 'empty'
 		hph.currentKeyLen = 0
 		hph.rootChecked = false
 		hph.rootTouched = false
@@ -3089,9 +2886,6 @@ func HexTrieStateToString(enc []byte) (string, error) {
 		return "", err
 	}
 	fmt.Fprintf(sb, "block: %d txn: %d\n", bn, txn)
-	// fmt.Fprintf(sb, " touchMaps: %v\n", s.TouchMap)
-	// fmt.Fprintf(sb, " afterMaps: %v\n", s.AfterMap)
-	// fmt.Fprintf(sb, " depths: %v\n", s.Depths)
 
 	printAfterMap := func(sb *strings.Builder, name string, list []uint16, depths []int16, existedBefore []bool) {
 		fmt.Fprintf(sb, "\t::%s::\n\n", name)

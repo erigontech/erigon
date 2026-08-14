@@ -254,8 +254,6 @@ func TestPrefixArenaAllocExt(t *testing.T) {
 func TestPrefixTrieExtSurvivesChunkBoundary(t *testing.T) {
 	tr := newPrefixTrie()
 
-	// keys share nibbles [4:keyLen) so leaf extensions stay long; nibbles [0:4) alone already
-	// make every key distinct, which is what drives enough allocExt traffic to cross a chunk.
 	const keyLen = 32
 	const total = 2 * prefixExtChunkSize / keyLen
 	want := make(map[string]bool, total)
