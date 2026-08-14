@@ -17,9 +17,6 @@
 package state
 
 import (
-	"fmt"
-	"os"
-
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -300,16 +297,6 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 		}
 	}
 
-	normTraceAddr := os.Getenv("NORM_TRACE_ADDR")
-	if normTraceAddr != "" {
-		for a := range allAddresses {
-			if fmt.Sprintf("%x", a.Value()) == normTraceAddr {
-				fmt.Printf("NORMTRACE tx=%d inc=%d addr=%s inAll=true inSd=%v fields=%v stateReaderNil=%v\n",
-					txIndex, incarnation, normTraceAddr, sdSet[a], addrFields[a], stateReader == nil)
-			}
-		}
-	}
-
 	for addr := range allAddresses {
 		if sdSet[addr] {
 			// Don't fill account fields for SD'd addresses — same rationale as
@@ -513,32 +500,6 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 			},
 			Val: true,
 		})
-	}
-
-	if os.Getenv("NORM_TRACE_STORAGE_ONLY") != "" {
-		acctSet := make(map[accounts.Address]bool)
-		for a := range filtered.Balances() {
-			acctSet[a] = true
-		}
-		for a := range filtered.Nonces() {
-			acctSet[a] = true
-		}
-		for a := range filtered.CodeHashes() {
-			acctSet[a] = true
-		}
-		for a := range filtered.Incarnations() {
-			acctSet[a] = true
-		}
-		for a, sm := range filtered.Storages() {
-			if len(sm) == 0 {
-				continue
-			}
-			if !acctSet[a] {
-				inAll := allAddresses[a]
-				fmt.Printf("NORMTRACE_DROP tx=%d inc=%d addr=%x storageSlots=%d inAllAddresses=%v inSdSet=%v hadFields=%v stateReaderNil=%v\n",
-					txIndex, incarnation, a.Value(), len(sm), inAll, sdSet[a], addrFields[a], stateReader == nil)
-			}
-		}
 	}
 
 	return filtered, nil
