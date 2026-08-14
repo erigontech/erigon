@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/rpc/filters"
 )
 
 type LogsFilterAggregator struct {
@@ -45,6 +46,7 @@ type LogsFilter struct {
 	allTopics      int
 	topics         *concurrent.SyncMap[common.Hash, int]
 	topicsOriginal [][]common.Hash // Original topic filters to be applied before distributing to individual subscribers
+	criteria       filters.FilterCriteria
 	sender         Sub[*types.Log] // nil for aggregate subscriber, for appropriate stream server otherwise
 }
 
@@ -68,17 +70,28 @@ func NewLogsFilterAggregator() *LogsFilterAggregator {
 
 // insertLogsFilter inserts a new log filter into the LogsFilterAggregator with the specified sender.
 // It generates a new filter ID, creates a new LogsFilter, and adds it to the logsFilters map.
-func (a *LogsFilterAggregator) insertLogsFilter(sender Sub[*types.Log]) (LogsSubID, *LogsFilter) {
+func (a *LogsFilterAggregator) insertLogsFilter(sender Sub[*types.Log], criteria filters.FilterCriteria) (LogsSubID, *LogsFilter) {
 	a.logsFilterLock.Lock()
 	defer a.logsFilterLock.Unlock()
 	filterId := LogsSubID(generateSubscriptionID())
 	filter := &LogsFilter{
-		addrs:  concurrent.NewSyncMap[common.Address, int](),
-		topics: concurrent.NewSyncMap[common.Hash, int](),
-		sender: sender,
+		addrs:    concurrent.NewSyncMap[common.Address, int](),
+		topics:   concurrent.NewSyncMap[common.Hash, int](),
+		criteria: criteria,
+		sender:   sender,
 	}
 	a.logsFilters.Put(filterId, filter)
 	return filterId, filter
+}
+
+func (a *LogsFilterAggregator) filterCriteria(filterId LogsSubID) (filters.FilterCriteria, bool) {
+	a.logsFilterLock.RLock()
+	defer a.logsFilterLock.RUnlock()
+	filter, ok := a.logsFilters.Get(filterId)
+	if !ok {
+		return filters.FilterCriteria{}, false
+	}
+	return filter.criteria, true
 }
 
 // removeLogsFilter removes a log filter identified by filterId from the LogsFilterAggregator.

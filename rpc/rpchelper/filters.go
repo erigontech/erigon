@@ -757,7 +757,7 @@ func (ff *Filters) sendReceiptsFilterUpdate() error {
 // installed and the error is returned.
 func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria, protocol SubProtocol) (<-chan *types.Log, LogsSubID, error) {
 	sub := newChanSub[*types.Log](size, protocol)
-	id, f := ff.logsSubs.insertLogsFilter(sub)
+	id, f := ff.logsSubs.insertLogsFilter(sub, criteria)
 
 	// Initialize address and topic maps
 	f.addrs = concurrent.NewSyncMap[common.Address, int]()
@@ -828,6 +828,10 @@ func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria, prot
 
 	ff.registerSubscription(SubscriptionID(id), FilterTypeLogs, sub)
 	return sub.ch, id, nil
+}
+
+func (ff *Filters) LogFilterCriteria(id LogsSubID) (filters.FilterCriteria, bool) {
+	return ff.logsSubs.filterCriteria(id)
 }
 
 // loadLogsRequester loads the current logs requester and returns it.

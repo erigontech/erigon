@@ -17,6 +17,8 @@
 package jsonrpc
 
 import (
+	"encoding/json"
+	"math/big"
 	"math/rand"
 	"strings"
 	"sync"
@@ -107,6 +109,36 @@ func TestNewFilters(t *testing.T) {
 	ok, err = api.UninstallFilter(ctx, ptf)
 	assert.NoError(err)
 	assert.True(ok)
+}
+
+func TestGetFilterLogsReturnsHistoricalLogs(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
+	mining := txpoolproto.NewMiningClient(conn)
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, mining, func() {}, m.Log, nil)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, stateCache, m), m.DB, nil, nil)
+	crit := filters.FilterCriteria{FromBlock: big.NewInt(10), ToBlock: big.NewInt(10)}
+
+	expected, err := api.GetLogs(ctx, crit)
+	require.NoError(t, err)
+	require.NotEmpty(t, expected)
+
+	filterID, err := api.NewFilter(ctx, crit)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = api.UninstallFilter(ctx, filterID)
+	})
+
+	expectedJSON, err := json.Marshal(expected)
+	require.NoError(t, err)
+	for range 2 {
+		actual, err := api.GetFilterLogs(ctx, filterID)
+		require.NoError(t, err)
+		actualJSON, err := json.Marshal(actual)
+		require.NoError(t, err)
+		require.JSONEq(t, string(expectedJSON), string(actualJSON))
+	}
 }
 
 func TestLogsSubscribeAndUnsubscribe_WithoutConcurrentMapIssue(t *testing.T) {

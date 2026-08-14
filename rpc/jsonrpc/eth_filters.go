@@ -134,9 +134,7 @@ func (api *APIImpl) GetFilterChanges(_ context.Context, index string) ([]any, er
 }
 
 // GetFilterLogs implements eth_getFilterLogs.
-// Polling method for a previously created filter
-// returns an array of logs which have occurred since the last poll.
-func (api *APIImpl) GetFilterLogs(_ context.Context, index string) ([]*types.Log, error) {
+func (api *APIImpl) GetFilterLogs(ctx context.Context, index string) (types.RPCLogs, error) {
 	if api.filters == nil {
 		return nil, rpc.ErrNotificationsUnsupported
 	}
@@ -144,10 +142,11 @@ func (api *APIImpl) GetFilterLogs(_ context.Context, index string) ([]*types.Log
 	if ft, ok := api.filters.TouchSubscription(rpchelper.SubscriptionID(cutIndex)); !ok || ft != rpchelper.FilterTypeLogs {
 		return nil, rpc.ErrFilterNotFound
 	}
-	if logs, ok := api.filters.ReadLogs(rpchelper.LogsSubID(cutIndex)); ok {
-		return logs, nil
+	criteria, ok := api.filters.LogFilterCriteria(rpchelper.LogsSubID(cutIndex))
+	if !ok {
+		return nil, rpc.ErrFilterNotFound
 	}
-	return []*types.Log{}, nil
+	return api.GetLogs(ctx, criteria)
 }
 
 // subscribeRPC runs the shared subscription skeleton: subscription creation and a
