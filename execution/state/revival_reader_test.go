@@ -645,3 +645,100 @@ func TestGetCodeAfterDestructThenRevivalIsEmpty(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, size, "code size must agree with code")
 }
+
+// A BAL-preloaded zero balance is a value like any other, not evidence that the
+// account exists. An overlay that leaves the record EIP-161-empty is no record.
+func TestVersionedStateReader_ZeroCellsSynthesizeNoRecord(t *testing.T) {
+	vm := NewVersionMap(nil)
+	addr := getAddress(1)
+	vm.WriteBalance(addr, Version{TxIndex: 2}, uint256.Int{}, true)
+
+	vr := NewVersionedStateReader(5, ReadSet{}, vm, nil)
+	acc, err := vr.ReadAccountData(addr)
+	require.NoError(t, err)
+	require.Nil(t, acc)
+}
+
+// An in-flight write above a committed destruct must not narrow the destruct
+// scan. It settles nothing on its own, and the reader records no read, so a
+// verdict drawn through it would never be re-checked.
+func TestVersionedStateReader_EstimateCellCannotHideDoneDestruct(t *testing.T) {
+	vm := NewVersionMap(nil)
+	addr := getAddress(1)
+	key := accounts.NilKey
+	vm.WriteSelfDestruct(addr, Version{TxIndex: 1}, true, true)
+	vm.WriteStorage(addr, key, Version{TxIndex: 3}, *uint256.NewInt(42), false)
+
+	vr := NewVersionedStateReader(5, ReadSet{}, vm, nil)
+	_, found, err := vr.ReadAccountStorage(addr, key)
+	require.NoError(t, err)
+	require.False(t, found, "the committed destruct erased the slot")
+
+	has, err := vr.HasStorage(addr)
+	require.NoError(t, err)
+	require.Equal(t, has, found, "HasStorage and ReadAccountStorage must answer alike")
+}
+
+// The skip recognises an uncommitted destruct's Balance and Incarnation by
+// their index, so a later SelfDestruct cell must not hide the destruct under it.
+func TestApplySubFieldWrites_LaterSelfDestructCellKeepsSkip(t *testing.T) {
+	overlay := func(withLaterSD bool) accounts.Account {
+		vm := NewVersionMap(nil)
+		addr := getAddress(1)
+		vm.WriteSelfDestruct(addr, Version{TxIndex: 1}, true, false)
+		vm.WriteBalance(addr, Version{TxIndex: 1}, uint256.Int{}, false)
+		vm.WriteIncarnation(addr, Version{TxIndex: 1}, 3, false)
+		if withLaterSD {
+			vm.WriteSelfDestruct(addr, Version{TxIndex: 2}, false, true)
+		}
+		acc := accounts.Account{Nonce: 7, Balance: *uint256.NewInt(1000)}
+		vm.applySubFieldWrites(addr, 5, &acc)
+		return acc
+	}
+
+	bare, withSD := overlay(false), overlay(true)
+	require.Equal(t, bare.Balance.Uint64(), withSD.Balance.Uint64(),
+		"a later SelfDestruct cell must not expose the uncommitted destruct's balance")
+	require.Equal(t, bare.Incarnation, withSD.Incarnation,
+		"nor its incarnation")
+}
+
+// The reader's Nonce/CodeHash wipe reads the destruct off the map alone, so it
+// rests on the writer shape pinned above. Close the loop from the reader's
+// side: the record a real destruct leaves must read back whole, not mixed with
+// the contract it replaced.
+func TestSelfdestructRecordReadsBackWiped(t *testing.T) {
+	t.Parallel()
+	for _, preserveBalance := range []bool{false, true} {
+		t.Run(map[bool]string{false: "burn", true: "eip8246"}[preserveBalance], func(t *testing.T) {
+			t.Parallel()
+			addr := getAddress(120)
+			base := accounts.NewAccount()
+			base.Balance = *uint256.NewInt(100)
+			base.Nonce = 1
+			base.Incarnation = 3
+
+			vm := NewVersionMap(nil)
+			ibs := NewWithVersionMap(&sdAccountReader{addr: addr, account: &base}, vm)
+			ibs.SetTxContext(1, 2)
+			ibs.SetVersion(0)
+			require.NoError(t, ibs.SetCode(addr, []byte{0x60, 0x00}, tracing.CodeChangeUnspecified))
+			require.NoError(t, ibs.SetNonce(addr, 9, tracing.NonceChangeUnspecified))
+			destroyed, err := ibs.Selfdestruct(addr, preserveBalance)
+			require.NoError(t, err)
+			require.True(t, destroyed)
+
+			vm.FlushVersionedWrites(ibs.FinalizedWrites(&chain.Rules{}), true, "")
+
+			acc := base
+			vm.applySubFieldWrites(addr, 5, &acc)
+			require.Zero(t, acc.Nonce, "the destruct erases the nonce it left no cell for")
+			require.True(t, acc.CodeHash.IsEmpty(), "and the code hash")
+			if preserveBalance {
+				require.Equal(t, uint64(100), acc.Balance.Uint64(), "EIP-8246 keeps the prior balance cell")
+			} else {
+				require.True(t, acc.Balance.IsZero(), "a burning destruct zeroes it")
+			}
+		})
+	}
+}

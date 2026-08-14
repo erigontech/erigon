@@ -2040,8 +2040,8 @@ func (result *execResult) calcFees(
 	// must respect those writes — otherwise SelfDestructPath is emitted
 	// and Normalize's sdSet filter drops them.
 	//
-	// The delete cannot be taken back either, so an emptiness resting on an
-	// in-flight incarnation waits for the pass that commits this tx.
+	// The delete cannot be taken back, so this pass stands down whenever the
+	// coinbase's emptiness rests on an in-flight incarnation.
 	coinbaseEmptyPre := (coinbaseAcc == nil || coinbaseAcc.Balance.IsZero()) &&
 		coinbaseNonce == 0 && coinbaseEmptyCodeHash && !coinbaseHasCodeHashWrite &&
 		!vm.AnyEstimateAccountCell(result.Coinbase, txIndex)

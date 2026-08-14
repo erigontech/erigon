@@ -1577,14 +1577,19 @@ func NewVersionedStateReader(txIndex int, reads ReadSet, versionMap *VersionMap,
 }
 
 func (vr *versionedStateReader) SetTrace(trace bool, tracePrefix string) {
-	vr.stateReader.SetTrace(trace, tracePrefix)
+	if vr.stateReader != nil {
+		vr.stateReader.SetTrace(trace, tracePrefix)
+	}
 }
 
 func (vr *versionedStateReader) Trace() bool {
-	return vr.stateReader.Trace()
+	return vr.stateReader != nil && vr.stateReader.Trace()
 }
 
 func (vr *versionedStateReader) TracePrefix() string {
+	if vr.stateReader == nil {
+		return ""
+	}
 	return vr.stateReader.TracePrefix()
 }
 
@@ -1640,12 +1645,13 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 	// AddressPath / stateReader. Synthesize an empty account and let
 	// applyVersionedUpdates apply the BAL-preloaded fields.
 	if vr.versionMap != nil {
-		// Whether a field was applied, not whether the result differs from the zero
-		// account: the wipe writes EmptyCodeHash, which differs from a zero
-		// account's NilCodeHash on its own and would synthesize a record for an
-		// address that holds nothing.
+		// A cell whose value leaves the record EIP-161-empty is no evidence the
+		// account exists: BAL pre-population writes zero balances and nonces
+		// value-blind, and a wipe only clears a field to the default a record
+		// with no cells already holds.
 		var synth accounts.Account
-		if vr.versionMap.applySubFieldWrites(address, vr.txIndex, &synth) {
+		vr.versionMap.applySubFieldWrites(address, vr.txIndex, &synth)
+		if synth.Nonce != 0 || !synth.Balance.IsZero() || !synth.CodeHash.IsEmpty() {
 			return &synth, nil
 		}
 	}
