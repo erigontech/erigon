@@ -270,6 +270,23 @@ runs:
       shell: bash
       run: echo "ERIGON_CI_MODCACHE_KEY=${{ steps.restore-mod-cache.outputs.primary-key }}" >> "$GITHUB_ENV"
 
+    - name: Download Go modules
+      shell: bash
+      env:
+        GOPROXY: 'https://proxy.golang.org|direct'
+      run: |
+        for attempt in 1 2 3; do
+          if go mod download; then
+            echo "ERIGON_CI_MODCACHE_COMPLETE=true" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          if [ "$attempt" -eq 3 ]; then
+            exit 1
+          fi
+          echo "go mod download failed (attempt $attempt), retrying..."
+          sleep $((attempt * 15))
+        done
+
     - id: restore-build-cache
       uses: ./.github/actions/restore-build-cache
       with:
