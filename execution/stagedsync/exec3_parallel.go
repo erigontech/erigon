@@ -3387,20 +3387,13 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 			return 0
 		}
 		budget := pe.in.Capacity() - pe.in.NewTasksLen()
-		var holdBack sort.IntSlice
-		for {
-			nextTx := be.execTasks.minPending()
-			if nextTx < 0 {
-				break
-			}
+		be.execTasks.dispatchPending(func(nextTx int) dispatchAction {
 			incarnation := be.txIncarnations[nextTx]
-			// A fresh tx needs a free input-channel slot. If none, leave it in
-			// pending (peek, don't take): taking then re-inserting the lowest
-			// index at the front would be O(pending) shift churn per call.
+			// A fresh tx needs a free input-channel slot. With none, stop: it is
+			// the lowest pending, so nothing after it dispatches this pass either.
 			if incarnation == 0 && budget <= 0 {
-				break
+				return dispatchStop
 			}
-			be.execTasks.takeNextPending()
 			execTask := be.tasks[nextTx]
 			isNextValidated := nextTx == maxValidated+1
 
@@ -3417,8 +3410,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 							}
 							return state.VersionInvalid
 						}, execTask.Rules().IsEIP161Enabled(), execTask.Rules().IsAura, false, "") != state.VersionValid {
-					holdBack = append(holdBack, nextTx)
-					continue
+					return dispatchHold
 				}
 			}
 
@@ -3433,8 +3425,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 			if incarnation == 0 {
 				tv.version = execTask.Version()
 				if !pe.in.TryAdd(tv) {
-					holdBack = append(holdBack, nextTx)
-					break
+					return dispatchHoldStop
 				}
 				budget--
 			} else {
@@ -3457,10 +3448,8 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 			}
 			be.cntExec++
 			dispatched++
-		}
-		for _, tx := range holdBack {
-			be.execTasks.pushPending(tx)
-		}
+			return dispatchConsume
+		})
 		return dispatched
 	}
 

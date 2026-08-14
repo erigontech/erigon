@@ -1087,7 +1087,7 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 				}
 			}
 		}
-		result = append(result, &TraceCallResult{
+		result = append(result, &TraceCallResult{ //nolint:makezero
 			Trace:     []*ParityTrace{},
 			StateDiff: sdMap,
 		})

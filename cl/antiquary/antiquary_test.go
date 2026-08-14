@@ -587,7 +587,7 @@ func TestBeaconStatesCollector_CollectBalancesDump(t *testing.T) {
 	binary.LittleEndian.PutUint64(balances[24:], 32_050_000_000)
 
 	slot := uint64(clparams.SlotsPerDump * 2) // aligned to dump boundary
-	require.NoError(t, c.collectBalancesDump(slot, balances))
+	require.NoError(t, c.collectBalancesDump(t.Context(), slot, balances))
 
 	db := memdb.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())

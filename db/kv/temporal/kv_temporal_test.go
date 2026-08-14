@@ -82,7 +82,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 		require.Equal(t, append(append([]byte{}, acc1[:]...), acc1slot1[:]...), k)
 		wantValueBytes := make([]byte, 8)                      // 8 bytes for uint64 step num
 		binary.BigEndian.PutUint64(wantValueBytes, ^uint64(1)) // step num
-		wantValueBytes = append(wantValueBytes, byte(1))       // value we wrote to the storage slot
+		wantValueBytes = append(wantValueBytes, byte(1))       //nolint:makezero // value we wrote to the storage slot
 		require.Equal(t, wantValueBytes, v)
 		k, v, err = c1.Next()
 		require.NoError(t, err)
@@ -152,7 +152,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 		require.Equal(t, append(append([]byte{}, acc2[:]...), acc2slot2[:]...), k)
 		wantValueBytes := make([]byte, 8)                      // 8 bytes for uint64 step num
 		binary.BigEndian.PutUint64(wantValueBytes, ^uint64(2)) // step num
-		wantValueBytes = append(wantValueBytes, byte(2))       // value we wrote to the storage slot
+		wantValueBytes = append(wantValueBytes, byte(2))       //nolint:makezero // value we wrote to the storage slot
 		require.Equal(t, wantValueBytes, v)
 		k, v, err = c2.Next() // acc1 storage from step 1 must not be there
 		require.NoError(t, err)

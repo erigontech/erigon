@@ -214,7 +214,7 @@ func newHTTPServerConn(r *http.Request, w http.ResponseWriter) ServerCodec {
 			param = pb
 		}
 		buf := new(bytes.Buffer)
-		json.NewEncoder(buf).Encode(jsonrpcMessage{
+		_ = json.NewEncoder(buf).Encode(jsonrpcMessage{ //nolint:errchkjson
 			ID:     json.RawMessage(id),
 			Method: method_up,
 			Params: param,

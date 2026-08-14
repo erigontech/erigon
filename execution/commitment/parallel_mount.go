@@ -54,7 +54,9 @@ func seedRootBase(base *HexPatriciaHashed) {
 
 // if nibble set is -1 then subtrie is not mounted to the nibble, but limited by depth: eg do not fold mounted trie above depth 63
 func (hph *HexPatriciaHashed) mountTo(root *HexPatriciaHashed, nibble int) {
-	hph.Reset()
+	hph.rootTouched = false
+	hph.rootChecked = false
+	hph.rootPresent = true
 
 	hph.root = root.root
 

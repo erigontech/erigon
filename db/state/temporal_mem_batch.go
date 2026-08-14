@@ -736,7 +736,8 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 }
 
 // flushLocked is the body of Flush, factored so the callback path can run it
-// inside latestStateLock without re-acquiring.
+// inside latestStateLock without re-acquiring. PlainStateVersion advances here
+// with the domain writes; metadata overlays must not advance it independently.
 func (sd *TemporalMemBatch) flushLocked(ctx context.Context, tx kv.RwTx) error {
 	if sd.unwindChangesetRaw != nil {
 		for domain := range sd.unwindChangesetRaw {
