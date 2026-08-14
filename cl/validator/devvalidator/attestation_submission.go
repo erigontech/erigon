@@ -43,8 +43,16 @@ func buildAttestationSubmission(
 		}
 	}
 
-	aggBits := make([]byte, (committeeLength+7)/8)
+	// SSZ Bitlist[N]: N participation bits PLUS a trailing sentinel/length-marker bit at index N
+	// (== committeeLength). Allocate the extra byte to hold that marker and set it. Without the
+	// sentinel, GetBitlistLength decodes the length from the highest set bit — i.e. the validator's
+	// own position (0..3) — instead of committeeLength (4), so the beacon node rejects every dev
+	// attestation ("aggregation bits count mismatch: N != 4"), the chain never justifies/finalizes,
+	// and downstream execution/rollup checkpoints stall. Mirrors the correct Electra construction in
+	// cltypes/solid/attestation.go (SingleAttestation.ToAttestation).
+	aggBits := make([]byte, committeeLength/8+1)
 	aggBits[validatorPosition/8] |= 1 << (validatorPosition % 8)
+	aggBits[committeeLength/8] |= 1 << (committeeLength % 8)
 	legacy := map[string]interface{}{
 		"aggregation_bits": hexutil.Encode(aggBits),
 		"data":             attData,
