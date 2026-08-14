@@ -423,7 +423,7 @@ func TestAccountOnlyDeleteDoesNotBlockUnrelatedCodeFill(t *testing.T) {
 func TestGetCodeSizeColdReadDoesNotCacheCode(t *testing.T) {
 	const stepSize = uint64(16)
 	ctx := t.Context()
-	db := newTestDb(t, stepSize)
+	db := execctxtest.NewTestDb(t, stepSize)
 	addr := make([]byte, 20)
 	addr[0] = 0xaa
 	code := []byte{0xcc, 1, 2, 3}
@@ -454,7 +454,7 @@ func TestGetCodeSizeColdReadDoesNotCacheCode(t *testing.T) {
 	domains, err := execctx.NewSharedDomains(ctx, roTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
-	domains.SetStateCacheForTest(stateCache)
+	domains.BindStateCache(stateCache)
 
 	size, found, err := domains.GetCodeSize(roTx, addr, 20)
 	require.NoError(t, err)
