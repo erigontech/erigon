@@ -113,7 +113,8 @@ func TestServerListen(t *testing.T) {
 	defer srv.Stop()
 
 	// dial the test server
-	conn, err := net.DialTimeout("tcp", srv.ListenAddr, 5*time.Second)
+	dialer := net.Dialer{Timeout: 5 * time.Second}
+	conn, err := dialer.DialContext(t.Context(), "tcp", srv.ListenAddr)
 	if err != nil {
 		t.Fatalf("could not dial: %v", err)
 	}
@@ -137,7 +138,7 @@ func TestServerListen(t *testing.T) {
 func TestServerDial(t *testing.T) {
 	logger := log.New()
 	// run a one-shot TCP server to handle the connection.
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := net.Listen("tcp", "127.0.0.1:0") //nolint:noctx
 	if err != nil {
 		t.Fatalf("could not setup listener: %v", err)
 	}
@@ -584,7 +585,8 @@ func TestServerInboundUsesStaticEnode(t *testing.T) {
 	srv.AddPeer(staticEnode)
 
 	// Drive an inbound connection.
-	conn, err := net.DialTimeout("tcp", srv.ListenAddr, 5*time.Second)
+	dialer := net.Dialer{Timeout: 5 * time.Second}
+	conn, err := dialer.DialContext(t.Context(), "tcp", srv.ListenAddr)
 	require.NoError(t, err)
 	defer conn.Close()
 
@@ -630,7 +632,8 @@ func TestServerInboundThrottle(t *testing.T) {
 	defer srv.Stop()
 
 	// Dial the test server.
-	conn, err := net.DialTimeout("tcp", srv.ListenAddr, timeout)
+	dialer := net.Dialer{Timeout: timeout}
+	conn, err := dialer.DialContext(t.Context(), "tcp", srv.ListenAddr)
 	if err != nil {
 		t.Fatalf("could not dial: %v", err)
 	}
@@ -644,7 +647,7 @@ func TestServerInboundThrottle(t *testing.T) {
 
 	// Dial again. This time the server should close the connection immediately.
 	connClosed := make(chan struct{}, 1)
-	conn, err = net.DialTimeout("tcp", srv.ListenAddr, timeout)
+	conn, err = dialer.DialContext(t.Context(), "tcp", srv.ListenAddr)
 	if err != nil {
 		t.Fatalf("could not dial: %v", err)
 	}
@@ -668,7 +671,7 @@ func TestServerInboundThrottle(t *testing.T) {
 }
 
 func listenFakeAddr(network, laddr string, remoteAddr net.Addr) (net.Listener, error) {
-	l, err := net.Listen(network, laddr)
+	l, err := net.Listen(network, laddr) //nolint:noctx
 	if err == nil {
 		l = &fakeAddrListener{l, remoteAddr}
 	}
