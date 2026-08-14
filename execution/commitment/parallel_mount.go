@@ -48,7 +48,9 @@ func seedRootBase(base *HexPatriciaHashed) {
 }
 
 func (hph *HexPatriciaHashed) mountTo(root *HexPatriciaHashed, nibble int) {
-	hph.Reset()
+	hph.rootTouched = false
+	hph.rootChecked = false
+	hph.rootPresent = true
 
 	hph.root = root.root
 

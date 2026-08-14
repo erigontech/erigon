@@ -55,7 +55,7 @@ func unfoldStorageBase(base *HexPatriciaHashed, accPrefix []byte) error {
 	}
 	base.touchMap[0], base.afterMap[0], base.branchBefore[0] = 0, 0, false
 
-	branch, err := base.branchFromCacheOrDB(nibbles.HexToCompact(accPrefix))
+	branch, err := base.branchFromCacheOrDB(nibbles.HexToCompactInto(base.compactKeyBuf[:], accPrefix))
 	if err != nil {
 		return err
 	}
@@ -239,7 +239,7 @@ func storageRootFromSingleChild(base *HexPatriciaHashed) (cell, error) {
 	child := base.grid[0][survNib]
 
 	if base.branchBefore[0] {
-		if err := base.collectDeleteUpdate(nibbles.HexToCompact(base.currentKey[:base.currentKeyLen]), 0); err != nil {
+		if err := base.collectDeleteUpdate(nibbles.HexToCompactInto(base.compactKeyBuf[:], base.currentKey[:base.currentKeyLen]), 0); err != nil {
 			return cell{}, err
 		}
 	}
