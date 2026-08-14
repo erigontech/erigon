@@ -193,12 +193,10 @@ func TestRecordFeeMergeReleaseKeepsSharedWrites(t *testing.T) {
 	require.Equal(t, uint64(1), vw.Val.Uint64())
 }
 
-// TestRecordFeeMergeRetractsVanishedCredit pins the transition an "already
-// recorded" reading of an empty credit cannot see: a round records an EIP-161
-// coinbase delete, then an earlier tx gives the coinbase a balance and the
-// round has no adjustment left to emit. calcFees reads the coinbase through a
-// throwaway ReadSet, so the tx revalidates without re-executing and nothing
-// else takes the delete back out.
+// TestRecordFeeMergeRetractsVanishedCredit: a round records an EIP-161 coinbase
+// delete, then an earlier tx funds that coinbase and the round has no adjustment
+// left to emit. The tx revalidates without re-executing, so nothing else takes
+// the delete back out.
 func TestRecordFeeMergeRetractsVanishedCredit(t *testing.T) {
 	t.Parallel()
 	s := simpleTransferScenario()

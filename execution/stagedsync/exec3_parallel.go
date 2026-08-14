@@ -1922,19 +1922,14 @@ func (result *execResult) finalizeSystemTx(
 	return nil, ibs.VersionedReads(), writes, nil
 }
 
-// feeOutcome is what a validation round's fee computation means for the tx's
-// recorded write set. The three cases are not interchangeable: an unchanged
-// credit must stay recorded, while one this round no longer emits must be
-// taken back out.
+// feeOutcome says what a round's fee computation means for the tx's recorded
+// writes: keep them as they are, merge a new credit in, or take back the credit
+// an earlier round merged.
 type feeOutcome uint8
 
 const (
-	// feeCreditRecorded: the recorded set already carries this exact credit.
-	// Zero value, so an unset outcome leaves the recorded set alone.
 	feeCreditRecorded feeOutcome = iota
-	// feeCreditNew: a credit was built and has to be merged in.
 	feeCreditNew
-	// feeCreditNone: this round emits no fee adjustment at all.
 	feeCreditNone
 )
 
@@ -2061,12 +2056,8 @@ func (result *execResult) calcFees(
 			reason: tracing.BalanceDecreaseGasBuy,
 		}
 	}
-	// The apply loop re-credits a tx once per validation round, and the credit
-	// only moves when a prior tx's writes moved under it. An unchanged credit
-	// would rebuild a set identical to the one already recorded. When the
-	// coinbase is also the burnt address and both entries take the balance arm,
-	// the two never match at once — one write cannot carry both tracing
-	// reasons — so those blocks pay the full rebuild every round.
+	// The credit only moves when a prior tx's writes moved under it, so most
+	// rounds would rebuild the set the tx already carries.
 	if coinbaseEntry.recordedIn(credited, taskVersion) && burntEntry.recordedIn(credited, taskVersion) {
 		return nil, feeCreditRecorded, nil
 	}
@@ -2079,9 +2070,8 @@ func (result *execResult) calcFees(
 }
 
 // feeEntry is one address's share of a fee adjustment: the post-adjustment
-// account, whose Balance is also the BalancePath value, or a delete when EIP-161
-// removes the emptied account instead. A nil *feeEntry is an address this
-// adjustment does not touch.
+// account, or a delete when EIP-161 removes the emptied account. A nil
+// *feeEntry is an address the adjustment does not touch.
 type feeEntry struct {
 	addr    accounts.Address
 	acc     accounts.Account
@@ -2089,11 +2079,10 @@ type feeEntry struct {
 	deleted bool
 }
 
-// recordedIn reports whether ws already carries this entry verbatim. Reason
-// fences the balance arm from a worker's own balance write. The deleted arm
-// carries no Reason, so its only fence is the whole-struct version compare:
-// writeTo stamps the task version, whose TxNum is non-zero, while a worker
-// stamps its own writes from IntraBlockState.Version, which leaves TxNum zero.
+// recordedIn reports whether ws already carries this entry verbatim. The delete
+// arm has no Reason to tell it apart from a worker's own SELFDESTRUCT, so it
+// leans on the version compare: the task version carries a TxNum, a worker's
+// own writes do not.
 func (e *feeEntry) recordedIn(ws *state.WriteSet, version state.Version) bool {
 	if e == nil {
 		return true
@@ -2125,10 +2114,9 @@ func (e *feeEntry) writeTo(ws *state.WriteSet, version state.Version) {
 		WriteHeader: state.WriteHeader{Address: e.addr, Path: state.BalancePath, Version: version, Reason: e.reason},
 		Val:         e.acc.Balance,
 	})
-	// The AddressPath sibling mirrors serial's AddBalance creating the account
-	// on first credit. Without it getVersionedAccount returns nil for a
-	// freshly-credited address and Empty() is true, charging the stale
-	// CallNewAccountGas for a CALL-with-value to the coinbase mid-tx.
+	// Serial AddBalance creates the account on first credit. Without the
+	// AddressPath sibling a freshly-credited address reads as empty, and a
+	// CALL-with-value to it is charged the new-account gas.
 	acc := e.acc
 	ws.SetAddress(e.addr, &state.VersionedWrite[*accounts.Account]{
 		WriteHeader: state.WriteHeader{Address: e.addr, Path: state.AddressPath, Version: version},
@@ -2320,8 +2308,8 @@ type blockExecutor struct {
 	results []*execResult
 
 	// feeMergeTemp[txIndex] is the write set the fee merge created and recorded
-	// for a tx. A revalidation round merges again and supersedes it; every other
-	// recorded set is some execResult's TxOut, which stays live.
+	// for a tx — the only recorded set that may be released. Every other one is
+	// some execResult's TxOut, which stays live.
 	feeMergeTemp map[int]feeMerge
 
 	mapReleasing sync.WaitGroup
@@ -2495,11 +2483,10 @@ func (be *blockExecutor) invalidBlockResult(err error) *blockResult {
 	}
 }
 
-// feeMerge is a recorded fee-merge product pinned to the tx version whose
-// credit it carries. The pin is what keeps a credit from outliving the
-// incarnation it was computed for. base is the set the credit was merged onto —
-// the worker's own TxOut, which stays live for as long as the entry does — and
-// is what the tx falls back to when the credit is rebuilt or retracted.
+// feeMerge is the write set a fee merge produced for a tx, pinned to the version
+// it was computed for so a credit cannot outlive its incarnation. base is the
+// worker's own TxOut the credit was merged onto, and what the tx falls back to
+// when the credit is rebuilt or retracted.
 type feeMerge struct {
 	writes  *state.WriteSet
 	base    *state.WriteSet
@@ -2507,15 +2494,10 @@ type feeMerge struct {
 }
 
 // recordWorkerWrites installs a worker result's write set and drops the fee
-// credit along with it: the credit belonged to the incarnation this result
-// supersedes, and crediting is what the apply loop does next. The displaced
-// merge product is feeMergeTemp's to reclaim.
+// credit with it: the credit belongs to the incarnation this result replaces.
 func (be *blockExecutor) recordWorkerWrites(txVersion state.Version, writes *state.WriteSet) {
 	be.blockIO.RecordWrites(txVersion, writes)
 	if temp, ok := be.feeMergeTemp[txVersion.TxIndex]; ok {
-		// Never release the set just recorded: a worker TxOut is not supposed to
-		// be the recorded merge product, but releasing on identity would zero
-		// live writes on the background goroutine if that ever stopped holding.
 		if temp.writes != writes {
 			be.queueMapRelease(temp.writes)
 		}
@@ -2524,9 +2506,9 @@ func (be *blockExecutor) recordWorkerWrites(txVersion state.Version, writes *sta
 }
 
 // creditedWrites returns ws when an earlier fee merge produced it for this tx
-// version, which makes it the one set already carrying the version's fee
-// credit. Anything else is the worker's own output, which calcFees reads as the
-// pre-credit balance.
+// version, so it is the set already carrying that version's credit. Anything
+// else is the worker's own output, which calcFees reads as the pre-credit
+// balance.
 func (be *blockExecutor) creditedWrites(txVersion state.Version, ws *state.WriteSet) *state.WriteSet {
 	if temp, ok := be.feeMergeTemp[txVersion.TxIndex]; ok && temp.writes == ws && temp.version == txVersion {
 		return ws
@@ -2534,12 +2516,10 @@ func (be *blockExecutor) creditedWrites(txVersion state.Version, ws *state.Write
 	return nil
 }
 
-// recordFeeMerge applies a round's fee outcome to the tx's recorded write set:
-// a new credit is merged in, an unchanged one is left alone, and one this round
-// no longer emits is retracted. It also reclaims the merge product it
-// supersedes, the only recorded set it may release. MergeInto shares
-// VersionedWrite pointers rather than the maps holding them, so pooling those
-// maps leaves the merged writes intact.
+// recordFeeMerge applies a round's fee outcome to the tx's recorded write set
+// and reclaims the merge product it supersedes. Releasing that product is safe
+// because MergeInto shares VersionedWrite pointers rather than the maps holding
+// them, so pooling those maps leaves the merged writes intact.
 func (be *blockExecutor) recordFeeMerge(txVersion state.Version, prev, tipWrites *state.WriteSet, outcome feeOutcome) {
 	if outcome == feeCreditRecorded {
 		return
@@ -2550,9 +2530,8 @@ func (be *blockExecutor) recordFeeMerge(txVersion state.Version, prev, tipWrites
 		return
 	}
 
-	// A credit is always merged onto the worker's own writes, never onto an
-	// earlier round's product: an entry that credit emitted and this one does
-	// not — an EIP-161 coinbase delete a prior tx has since outdated — would
+	// A credit is merged onto the worker's own writes, never onto an earlier
+	// round's product: an entry that credit emitted and this one does not would
 	// otherwise survive the merge.
 	base := prev
 	if superseded {
@@ -2563,9 +2542,6 @@ func (be *blockExecutor) recordFeeMerge(txVersion state.Version, prev, tipWrites
 		merged = base.MergeInto(tipWrites)
 	}
 
-	// merged != temp.writes guards the self-release: MergeInto is expected to
-	// return a fresh set, but if it ever returned base in place, releasing it
-	// would zero the writes just recorded.
 	if superseded && merged != temp.writes {
 		be.dropStaleVersionedWrites(txVersion, temp.writes, merged)
 		be.queueMapRelease(temp.writes)
@@ -2579,9 +2555,8 @@ func (be *blockExecutor) recordFeeMerge(txVersion state.Version, prev, tipWrites
 }
 
 // dropStaleVersionedWrites removes this tx's version-map entries for the writes
-// prev published and next no longer carries. The apply loop flushes the recorded
-// set after every round, so an entry a round drops stays visible to later txs
-// until it is deleted here.
+// prev published and next no longer carries. The recorded set is flushed after
+// every round, so a dropped entry stays visible to later txs until deleted here.
 func (be *blockExecutor) dropStaleVersionedWrites(txVersion state.Version, prev, next *state.WriteSet) {
 	for h := range prev.AllHeaders() {
 		if !next.Has(h) {

@@ -1607,9 +1607,9 @@ func TestCalcFees_EmitsAddressPathForCoinbase(t *testing.T) {
 		"AddressPath sibling must share version with the BalancePath write")
 }
 
-// feeCreditRound drives one apply-loop validation round for a single tx through
-// a real blockExecutor, so the credit, the recorded set and the version map go
-// through the same bookkeeping the apply loop uses.
+// feeCreditRound drives one validation round for a single tx through a real
+// blockExecutor, so the credit, the recorded set and the version map get the
+// same bookkeeping the apply loop gives them.
 type feeCreditRound struct {
 	be     *blockExecutor
 	result *execResult
@@ -1649,10 +1649,8 @@ func (r *feeCreditRound) credited() *state.WriteSet {
 }
 
 // run performs one round and returns the credit calcFees produced, nil when the
-// round emits none — the recorded set already carries it, or there is no
-// adjustment left to make. The returned set is a copy: the merge folds the
-// recorded set into the credit in place, so the credit itself is only observable
-// before it.
+// round emits none. The returned set is a copy, because the merge folds the
+// recorded set into the credit in place.
 func (r *feeCreditRound) run(t testing.TB) *state.WriteSet {
 	t.Helper()
 
@@ -1754,10 +1752,9 @@ func TestCalcFees_SkipsRedundantReCreditOnEmptyRemoval(t *testing.T) {
 		"the delete is already recorded, so the round is a no-op")
 }
 
-// TestFeeEntryWriteToIsRecordedIn pins the two halves against each other: if
-// recordedIn stops accepting what writeTo produces the skip silently never
-// fires, and if it accepts more the credit can be skipped without ever having
-// been written.
+// TestFeeEntryWriteToIsRecordedIn pins the two halves against each other:
+// accepting less makes the skip silently never fire, accepting more skips a
+// credit that was never written.
 func TestFeeEntryWriteToIsRecordedIn(t *testing.T) {
 	t.Parallel()
 	version := state.Version{TxIndex: 3, Incarnation: 1}
@@ -1803,10 +1800,8 @@ func TestFeeEntryNilIsAbsent(t *testing.T) {
 	require.True(t, absent.recordedIn(ws, state.Version{TxIndex: 3}))
 }
 
-// TestFeeEntryDeletedFencedByTxNum pins what fences the deleted arm. It carries
-// no Reason, so the whole-struct version compare is the only fence: writeTo
-// stamps the task version, whose TxNum is non-zero, while a worker's own
-// SELFDESTRUCT comes from IntraBlockState.Version, which leaves TxNum zero.
+// TestFeeEntryDeletedFencedByTxNum pins the version compare that keeps a
+// worker's own SELFDESTRUCT from passing as the delete arm of a credit.
 func TestFeeEntryDeletedFencedByTxNum(t *testing.T) {
 	t.Parallel()
 	addr := fAddr("emptied")
@@ -1933,8 +1928,6 @@ func TestFeeEntryRecordedInRejectsMutations(t *testing.T) {
 var feeCreditSink *state.WriteSet
 
 func BenchmarkCalcFees(b *testing.B) {
-	// The London row adds a burnt address: a second versioned read and a second
-	// recordedIn on top of the coinbase half.
 	for _, sc := range []struct {
 		name  string
 		build func() *testFinalizeScenario
@@ -1965,9 +1958,8 @@ func BenchmarkCalcFees(b *testing.B) {
 						b.Fatal(err)
 					}
 					feeCreditSink = tip
-					// The apply loop recycles the emitted set's maps through
-					// recordFeeMerge; without this the pools stay empty and the
-					// emit arm is measured against a permanently cold pool.
+					// The apply loop recycles these maps, so the benchmark must
+					// too, or the emit arm is measured against a cold pool.
 					tip.ReleaseMaps()
 				}
 			})
