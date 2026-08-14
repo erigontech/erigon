@@ -143,24 +143,20 @@ type parallelExecutor struct {
 	// accumulator for txpool state-diff notifications; set before execLoop
 	// starts so that AuRa system-call nonce changes are emitted per block.
 	accumulator *shards.Accumulator
-	// changesetAccumulator state owned by the exec loop. Accessing or mutating
-	// this is the exec loop's responsibility — putting it here (rather than on
-	// the apply-loop side) ensures all sd.mem mutations originate from a single
-	// goroutine and avoids the data race between SetChangesetAccumulator
-	// (apply loop) and ApplyStateWrites (exec loop, via SysCallContract for
-	// block-end system calls) on SharedDomains.mem.
 	// changesetWindowStart is the first block of the batch that must capture
 	// a changeset (see changesetWindowStart in exec3.go); blocks below it run
-	// without an accumulator.
+	// without one.
 	changesetWindowStart uint64
-	currentChangeSet     *changeset.StateChangeSet
+	// currentChangeSet is the block's changeset while it is being built: the
+	// exec loop creates it and saves it by hash (SavePastChangesetAccumulator),
+	// then the apply fold (account/storage diffs) and the committer (commitment
+	// diffs) bind it transiently by hash under changesetMu. It is deliberately
+	// NOT installed as a persistent live accumulator — under splitApply the
+	// apply loop is the sole sd.mem writer, so a global install would only race
+	// the fold's own transient bind.
+	currentChangeSet *changeset.StateChangeSet
 	// currentChangeSetBlock is the block number currentChangeSet belongs to
-	// (0 == none). Tracked so ensureChangesetAccumulator can be a no-op when the
-	// accumulator is already installed for the block whose writes are about to
-	// be applied — making changeset capture robust against blocks scheduled out
-	// of band (e.g. processRequest scheduling the first block of a new request
-	// after the blockExecutors map went empty mid-batch, with no preceding
-	// blockResult to trigger the install at the rotation site below).
+	// (0 == none), letting ensureChangesetAccumulator skip re-creating it.
 	currentChangeSetBlock uint64
 }
 
@@ -216,10 +212,9 @@ func stopCauseOf(ctx context.Context) (*stopCause, bool) {
 }
 
 // ensureChangesetAccumulator makes pe.currentChangeSet point at a fresh,
-// block-specific StateChangeSet before any of blockNum's sd.mem writes are
-// applied. Idempotent. Exec-loop only — it mutates SharedDomains.mem via
-// SetChangesetAccumulator, which must be single-writer (see the comment on
-// currentChangeSet).
+// block-specific StateChangeSet, to be saved by hash and bound transiently by
+// the apply fold and the committer. Idempotent; a no-op outside the changeset
+// window. Exec-loop only.
 func (pe *parallelExecutor) ensureChangesetAccumulator(blockNum uint64) {
 	if blockNum < pe.changesetWindowStart || blockNum == 0 || blockNum > pe.maxBlockNum {
 		return
@@ -227,33 +222,28 @@ func (pe *parallelExecutor) ensureChangesetAccumulator(blockNum uint64) {
 	if pe.currentChangeSet != nil && pe.currentChangeSetBlock == blockNum {
 		return
 	}
-	// A previous block's accumulator is normally saved+cleared at its
-	// blockResult; if one is still installed here for a different block the
-	// rotation was missed — overwrite (the previous block's changeset was
-	// already saved at its blockResult, so nothing is lost).
+	// A previous block's changeset is normally saved+cleared at its blockResult;
+	// if one is still here for a different block, overwrite it — it was already
+	// saved by hash, so nothing is lost.
 	pe.currentChangeSet = &changeset.StateChangeSet{}
 	pe.currentChangeSetBlock = blockNum
-	pe.domains().SetChangesetAccumulator(pe.currentChangeSet)
 }
 
 // clearChangesetAccumulator detaches the current changeset accumulator after
 // its block's changeset has been saved. Exec-loop only.
 func (pe *parallelExecutor) clearChangesetAccumulator() {
-	pe.domains().SetChangesetAccumulator(nil)
 	pe.currentChangeSet = nil
 	pe.currentChangeSetBlock = 0
 }
 
-// bindBlockChangesetForFold routes the apply loop's block-end state fold into
-// block N's own changeset so unwind can revert account/storage/code, not just
-// commitment. Under splitApply the apply loop — not the exec loop — is the sole
-// sd.mem state writer, so the exec loop's accumulator (the CS it saved by hash)
-// stays empty unless the fold's DomainPuts record into it here. The committer
-// finds the same CS by hash and adds commitment; each DomainPut serializes on
-// changesetMu (held throughout by the committer's compute), so the accumulator
-// stays this block's CS across the fold. Returns a restore closure; a no-op if
-// the block has no saved changeset (outside the changeset window). Mirrors the
-// committer's computeWithBlockAccumulator.
+// bindBlockChangesetForFold binds block N's saved changeset (looked up by hash)
+// so the apply fold's DomainPuts record account/storage/code diffs into it —
+// letting unwind revert state, not just commitment. Mirrors the committer's
+// computeWithBlockAccumulator, which binds the same CS by hash for its
+// commitment diffs. Both binds are transient and self-restoring under
+// changesetMu; nothing installs a persistent global, so the swapped-in CS stays
+// live across the fold. Returns a restore closure; a no-op if the block has no
+// saved changeset (outside the changeset window).
 func (pe *parallelExecutor) bindBlockChangesetForFold(blockNum uint64, blockHash common.Hash) (restore func()) {
 	pe.domains().LockChangesetAccumulator()
 	defer pe.domains().UnlockChangesetAccumulator()
@@ -888,12 +878,6 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						deliberateCancel()
 					}
 
-					// SavePastChangesetAccumulator + SetChangesetAccumulator(nil) +
-					// rotation-to-next-block accumulator are all driven by the exec
-					// loop now (see execLoop's blockResult handling), so the apply
-					// loop must NOT touch SharedDomains.mem here. Doing so used to
-					// race with the exec loop's ApplyStateWrites for the next block.
-
 					if dbg.StopAfterBlock > 0 && applyResult.BlockNum == dbg.StopAfterBlock {
 						pe.logger.Warn(fmt.Sprintf("[%s] STOP_AFTER_BLOCK reached, exiting without commit (debug mode)", pe.logPrefix), "block", applyResult.BlockNum)
 						// Intentional os.Exit: STOP_AFTER_BLOCK is a debug switch used to
@@ -1252,27 +1236,16 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						"spineUsPerIter", fmt.Sprintf("%.1f", float64(npProc.Nanoseconds())/float64(max(1, blockExecutor.cntExec))/1e3))
 					npWait, npProc = 0, 0
 				}
-				// Snapshot the just-completed block's changeset BEFORE sending the
-				// blockResult, so that the commitment calculator (which consumes
-				// blockResults on a separate goroutine) can find this block's
-				// saved changeset via GetChangesetByBlockNum at compute time.
-				// In per-block compute mode (changeset window), the
-				// calculator switches the accumulator to this saved CS for the
-				// duration of ComputeCommitment (committer.go:computeWithBlockAccumulator)
-				// so branch writes land in block N's CS rather than whatever the
-				// exec loop has installed as current. If we saved AFTER sendResult,
-				// the calculator could race ahead and look up an unsaved CS,
-				// causing branch deltas to leak into the next block's CS and
-				// produce wrong-trie-root chains on subsequent reorg-driven
-				// re-execution (see TestRecreateAndRewind reproducer). Clearing
-				// the live accumulator and the local pointer must still happen
-				// here (in the exec loop) so the rotation-to-next-block install
-				// at line 893-895 is serialized with the exec loop's other
-				// sd.mem writes (system calls, finalize, ApplyStateWrites for
-				// the next block).
-				// Belt-and-braces: an empty block (no tx-results reaching
-				// processResults) may not have triggered the install — create
-				// its (empty) accumulator so it gets saved like every other block.
+				// Save the just-completed block's changeset by hash BEFORE sending
+				// the blockResult, so the commitment calculator (a separate
+				// goroutine) can find it via GetChangesetByHash at compute time and
+				// record its branch diffs into block N's CS. Saving AFTER sendResult
+				// would let the calculator race ahead, look up an unsaved CS, and
+				// leak branch deltas into the next block's CS — wrong-trie-root
+				// chains on reorg re-execution (TestRecreateAndRewind reproducer).
+				// Belt-and-braces: an empty block may not have created its
+				// accumulator via a tx-result — ensure it exists so it is saved
+				// like every other block.
 				pe.ensureChangesetAccumulator(blockResult.BlockNum)
 				if pe.currentChangeSet != nil {
 					pe.domains().SavePastChangesetAccumulator(blockResult.BlockHash, blockResult.BlockNum, pe.currentChangeSet)
