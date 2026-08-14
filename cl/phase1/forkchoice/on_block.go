@@ -200,6 +200,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 						if err := f.peerDas.SyncColumnDataLater(block); err != nil {
 							log.Warn("failed to schedule deferred column data sync", "slot", block.Block.Slot, "blockRoot", blockRoot, "err", err)
 						}
+						return ErrEIP7594ColumnDataNotAvailable
 					}
 				}
 			} else if block.Version() >= clparams.DenebVersion {

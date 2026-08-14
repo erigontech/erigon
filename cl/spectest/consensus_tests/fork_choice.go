@@ -297,9 +297,6 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 	anchorBlock, err := spectest.ReadAnchorBlock(root, c.Version(), "anchor_block.ssz_snappy")
 	require.NoError(t, err)
 
-	// TODO: what to do with anchor block ?
-	_ = anchorBlock
-
 	anchorState, err := spectest.ReadBeaconState(root, c.Version(), "anchor_state.ssz_snappy")
 	require.NoError(t, err)
 
@@ -314,11 +311,15 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 	peerDasState := peerdasstate.NewPeerDasState(&clparams.MainnetBeaconConfig, &clparams.NetworkConfig{})
 	peerDas := das.NewPeerDas(ctx, nil, &clparams.MainnetBeaconConfig, &clparams.CaplinConfig{}, columnStorage, blobStorage, nil, enode.ID{}, ethClock, peerDasState, nil, nil, nil)
 	localValidators := validator_params.NewValidatorParams()
+	syncedDataManager := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+	anchorBlockRoot, err := anchorBlock.HashSSZ()
+	require.NoError(t, err)
+	require.NoError(t, syncedDataManager.OnHeadStateWithBlockRoot(anchorState, common.Hash(anchorBlockRoot)))
 
 	forkStore, err := forkchoice.NewForkChoiceStore(
 		ethClock, anchorState, forkChoiceSpectestEngine{}, pool.NewOperationsPool(&clparams.MainnetBeaconConfig),
 		fork_graph.NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}),
-		emitters, synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true), blobStorage, public_keys_registry.NewInMemoryPublicKeysRegistry(),
+		emitters, syncedDataManager, blobStorage, public_keys_registry.NewInMemoryPublicKeysRegistry(),
 		localValidators, false, nil,
 	)
 	require.NoError(t, err)
