@@ -138,7 +138,7 @@ var (
 	DisableAdaptivePin   = EnvBool("DISABLE_ADAPTIVE_PIN", true)
 	AssertStateCache     = EnvBool("ASSERT_STATE_CACHE", false)
 	ReadAhead            = EnvBool("READ_AHEAD", true)
-	ReadAheadWorkers     = EnvInt("READ_AHEAD_WORKERS", runtime.NumCPU())
+	ReadAheadWorkers     = EnvInt("READ_AHEAD_WORKERS", estimate.AllCPUs())
 	ReadAheadWait        = EnvBool("READ_AHEAD_WAIT", false)
 	ReadAheadBALCode     = EnvBool("READ_AHEAD_BAL_CODE", false)
 	ReadAheadTxCode      = EnvBool("READ_AHEAD_TX_CODE", false)

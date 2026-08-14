@@ -18,6 +18,7 @@ package exec
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -60,9 +61,33 @@ type countingGetter struct {
 	getOneCalls int
 }
 
+type singleTxRoDB struct {
+	kv.RoDB
+	tx kv.Tx
+}
+
+type firstAccountReadErrorTx struct {
+	kv.TemporalTx
+	accountReads int
+}
+
 func (g *countingGetter) GetOne(string, []byte) ([]byte, error) {
 	g.getOneCalls++
 	return nil, nil
+}
+
+func (db *singleTxRoDB) BeginRo(context.Context) (kv.Tx, error) {
+	return db.tx, nil
+}
+
+func (tx *firstAccountReadErrorTx) GetLatest(domain kv.Domain, _ []byte) ([]byte, kv.Step, error) {
+	if domain == kv.AccountsDomain {
+		tx.accountReads++
+		if tx.accountReads == 1 {
+			return nil, 0, errors.New("transient account read failure")
+		}
+	}
+	return nil, 0, nil
 }
 
 func (s stubTemporalGetter) GetLatest(kv.Domain, []byte) ([]byte, kv.Step, error) {
@@ -101,7 +126,13 @@ func newTestStateCache() *cache.StateCache {
 func TestBlockReadAheaderWaitForWarmup(t *testing.T) {
 	readAheader := NewBlockReadAheader()
 	for range 2 {
-		<-readAheader.warmDone
+		warmupStarted := make(chan struct{})
+		finishWarmup := make(chan struct{})
+		require.True(t, readAheader.startWarmup(func() {
+			close(warmupStarted)
+			<-finishWarmup
+		}))
+		<-warmupStarted
 		done := make(chan struct{})
 		go func() {
 			readAheader.WaitForWarmup(t.Context())
@@ -112,7 +143,7 @@ func TestBlockReadAheaderWaitForWarmup(t *testing.T) {
 			t.Fatal("warmup wait returned before warmup completed")
 		case <-time.After(50 * time.Millisecond):
 		}
-		readAheader.warmDone <- struct{}{}
+		close(finishWarmup)
 		select {
 		case <-done:
 		case <-time.After(time.Second):
@@ -128,6 +159,18 @@ func TestBlockReadAheaderIgnoresMissingHeaderOrBody(t *testing.T) {
 	require.NotPanics(t, func() { readAheader.AddHeaderAndBody(t.Context(), nil, nil, header, nil) })
 	require.Zero(t, readAheader.headers.Len())
 	require.Zero(t, readAheader.bodies.Len())
+}
+
+func TestBlockReadAheaderIgnoresNilGetter(t *testing.T) {
+	oldReadAhead := dbg.ReadAhead
+	dbg.SetReadAhead(true)
+	t.Cleanup(func() { dbg.SetReadAhead(oldReadAhead) })
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	bal := types.BlockAccessList{{Address: accounts.InternAddress(common.Address{19: 1})}}
+	balHash := bal.Hash()
+	header := &types.Header{Number: *uint256.NewInt(1), BlockAccessListHash: &balHash}
+	readAheader := NewBlockReadAheader()
+	require.NotPanics(t, func() { readAheader.AddHeaderAndBody(t.Context(), db, nil, header, new(types.Body)) })
 }
 
 func TestMakeBALWarmupTasksSplitsStorageHeavyAccount(t *testing.T) {
@@ -254,6 +297,38 @@ func TestWarmBALPropagatesWorkerCancellation(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 }
 
+func TestWarmBALContinuesAfterReadError(t *testing.T) {
+	ctx := t.Context()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	baseTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer baseTx.Rollback()
+	tx := &firstAccountReadErrorTx{TemporalTx: baseTx}
+	readDB := &singleTxRoDB{RoDB: db, tx: tx}
+	bal := types.BlockAccessList{
+		{Address: accounts.InternAddress(common.Address{19: 1})},
+		{Address: accounts.InternAddress(common.Address{19: 2})},
+	}
+	require.NoError(t, NewBlockReadAheader().warmBAL(ctx, readDB, bal, nil, balCodeWarmupNone, 1))
+	require.Equal(t, 2, tx.accountReads)
+}
+
+func TestWarmTxnsContinuesAfterReadError(t *testing.T) {
+	ctx := t.Context()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	baseTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer baseTx.Rollback()
+	tx := &firstAccountReadErrorTx{TemporalTx: baseTx}
+	readDB := &singleTxRoDB{RoDB: db, tx: tx}
+	txns := types.Transactions{
+		types.NewTransaction(0, common.Address{19: 1}, nil, 0, nil, nil),
+		types.NewTransaction(1, common.Address{19: 2}, nil, 0, nil, nil),
+	}
+	require.NoError(t, NewBlockReadAheader().warmTxns(ctx, readDB, txns, 1))
+	require.Equal(t, 2, tx.accountReads)
+}
+
 func TestBlockReadAheaderWarmsOverlayBlockAccessList(t *testing.T) {
 	oldReadAhead := dbg.ReadAhead
 	dbg.SetReadAhead(true)
@@ -300,6 +375,7 @@ func TestBlockReadAheaderWarmsOverlayBlockAccessList(t *testing.T) {
 		return nil
 	}))
 	stateCache := newTestStateCache()
+	t.Cleanup(stateCache.Close)
 	readAheader := NewBlockReadAheader()
 	readAheader.SetStateCache(stateCache)
 	readAheader.AddHeaderAndBody(ctx, db, overlay, header, body)
@@ -363,6 +439,124 @@ func TestBlockReadAheaderSkipsBlockAccessListReadWhenDisabledOrAbsent(t *testing
 	bra.AddHeaderAndBody(t.Context(), db, getter, headerWithoutBAL, new(types.Body))
 	bra.WaitForWarmup(t.Context())
 	require.Zero(t, getter.getOneCalls, "pre-Amsterdam blocks must skip the BAL lookup")
+	emptyBAL := make(types.BlockAccessList, 0)
+	emptyBALHash := emptyBAL.Hash()
+	headerWithEmptyBAL := &types.Header{Number: *uint256.NewInt(3), BlockAccessListHash: &emptyBALHash}
+	bra.AddHeaderAndBody(t.Context(), db, getter, headerWithEmptyBAL, new(types.Body))
+	bra.WaitForWarmup(t.Context())
+	require.Zero(t, getter.getOneCalls, "empty BAL commitments must skip the BAL lookup")
+}
+
+func TestBlockReadAheaderSuspendWarmupWaitsForActiveWarmup(t *testing.T) {
+	bra := NewBlockReadAheader()
+	warmupStarted := make(chan struct{})
+	finishWarmup := make(chan struct{})
+	warmupDone := make(chan struct{})
+	require.True(t, bra.startWarmup(func() {
+		close(warmupStarted)
+		<-finishWarmup
+		close(warmupDone)
+	}))
+	<-warmupStarted
+
+	suspendStarted := make(chan struct{})
+	type suspendResult struct {
+		resume func()
+		err    error
+	}
+	suspended := make(chan suspendResult)
+	go func() {
+		close(suspendStarted)
+		resume, err := bra.SuspendWarmup(t.Context())
+		suspended <- suspendResult{resume: resume, err: err}
+	}()
+	<-suspendStarted
+	select {
+	case result := <-suspended:
+		require.NoError(t, result.err)
+		result.resume()
+		close(finishWarmup)
+		<-warmupDone
+		t.Fatal("SuspendWarmup returned while a warmup was active")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(finishWarmup)
+	result := <-suspended
+	require.NoError(t, result.err)
+	result.resume()
+	<-warmupDone
+}
+
+func TestBlockReadAheaderSuspendWarmupSkipsNewWarmup(t *testing.T) {
+	bra := NewBlockReadAheader()
+	resume, err := bra.SuspendWarmup(t.Context())
+	require.NoError(t, err)
+
+	warmupStarted := make(chan struct{})
+	require.False(t, bra.startWarmup(func() { close(warmupStarted) }),
+		"warmup must be skipped rather than queued behind the suspension")
+
+	resume()
+	select {
+	case <-warmupStarted:
+		t.Fatal("a skipped warmup started after suspension ended")
+	default:
+	}
+
+	nextWarmupDone := make(chan struct{})
+	require.True(t, bra.startWarmup(func() { close(nextWarmupDone) }))
+	select {
+	case <-nextWarmupDone:
+	case <-time.After(time.Second):
+		t.Fatal("a new warmup did not start after suspension ended")
+	}
+	bra.WaitForWarmup(t.Context())
+}
+
+func TestBlockReadAheaderSuspendWarmupHonorsContext(t *testing.T) {
+	bra := NewBlockReadAheader()
+	warmupStarted := make(chan struct{})
+	finishWarmup := make(chan struct{})
+	warmupDone := make(chan struct{})
+	require.True(t, bra.startWarmup(func() {
+		close(warmupStarted)
+		<-finishWarmup
+		close(warmupDone)
+	}))
+	<-warmupStarted
+
+	ctx, cancel := context.WithCancel(t.Context())
+	suspendStarted := make(chan struct{})
+	suspendResult := make(chan error)
+	go func() {
+		close(suspendStarted)
+		resume, err := bra.SuspendWarmup(ctx)
+		if resume != nil {
+			resume()
+		}
+		suspendResult <- err
+	}()
+	<-suspendStarted
+	cancel()
+
+	select {
+	case err := <-suspendResult:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		close(finishWarmup)
+		<-warmupDone
+		<-suspendResult
+		t.Fatal("SuspendWarmup did not return when its context was cancelled")
+	}
+
+	close(finishWarmup)
+	<-warmupDone
+	bra.WaitForWarmup(t.Context())
+	nextWarmupDone := make(chan struct{})
+	require.True(t, bra.startWarmup(func() { close(nextWarmupDone) }),
+		"a cancelled suspension must not retain the warmup permit")
+	<-nextWarmupDone
 }
 
 // seedFill places an entry with an exact txNum stamp through the public fill
@@ -417,6 +611,7 @@ func TestCachePopulatingGetterReusesCodeByHashAcrossGetters(t *testing.T) {
 	account := accounts.Account{Nonce: 1, CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(code))}
 	source := &sharedCodeTemporalGetter{account: accounts.SerialiseV3(&account), code: code}
 	stateCache := newTestStateCache()
+	t.Cleanup(stateCache.Close)
 	frontier := cache.FrontierFunc(func(kv.Domain) (uint64, bool) { return 16, true })
 	firstAddress := accounts.InternAddress(common.Address{19: 1})
 	secondAddress := accounts.InternAddress(common.Address{19: 2})
@@ -519,11 +714,12 @@ func TestCachePopulatingGetterUnavailableVisibleEndNeverFills(t *testing.T) {
 func TestCachePopulatingGetterStaleViewDoesNotFill(t *testing.T) {
 	key := []byte("\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff\x00\x11\x22\x33\x44")
 	sc := newTestStateCache()
-	sc.Applier().Apply(kv.AccountsDomain, key, nil, 20)
+	sc.Applier().Publish(0, 1, []cache.StateUpdate{{Domain: kv.AccountsDomain, Key: key, TxNum: 20}})
 	cpg := &cachePopulatingGetter{
 		TemporalGetter: stubTemporalGetter{v: []byte("pre-delete-record")},
 		stepSize:       1_562_500,
-		view:           sc.View(cache.FrontierFunc(func(kv.Domain) (uint64, bool) { return 11, true })),
+		view: sc.View(cache.FrontierWithStateVersion(
+			cache.FrontierFunc(func(kv.Domain) (uint64, bool) { return 11, true }), 1)),
 	}
 
 	_, _, err := cpg.GetLatest(kv.AccountsDomain, key)

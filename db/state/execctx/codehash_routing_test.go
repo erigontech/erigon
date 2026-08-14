@@ -45,7 +45,10 @@ func TestCodeHashForAddr_InBatchAccountWinsOverStaleLRU(t *testing.T) {
 	}
 	var staleArr [32]byte
 	copy(staleArr[:], stale[:])
-	sc.View(frontierAt(0)).SeedAddrCodeHash(addr[:], staleArr, 0)
+	sc.View(frontierAtStateVersion(t, rwTx, frontierAt(0))).SeedAddrCodeHash(addr[:], staleArr, 0)
+	seeded, ok := sc.View(nil).GetAddrCodeHash(addr[:])
+	require.True(t, ok)
+	require.Equal(t, staleArr, seeded)
 
 	t.Run("empty in-batch account wins (codeHash-no-code repro)", func(t *testing.T) {
 		acc := accounts.Account{Nonce: 7, CodeHash: accounts.EmptyCodeHash}
