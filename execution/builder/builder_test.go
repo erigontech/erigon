@@ -25,8 +25,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -68,4 +72,22 @@ func TestBuilder_PendingBlockCh(t *testing.T) {
 	ch := b.PendingBlockCh()
 	require.NotNil(t, ch)
 	require.Equal(t, ch, b.PendingBlockCh(), "must return the same channel on repeated calls")
+}
+
+func TestBuilderSharedDomainsUsesSequentialCommitment(t *testing.T) {
+	original := statecfg.ExperimentalParallelCommitment
+	statecfg.ExperimentalParallelCommitment = true
+	t.Cleanup(func() { statecfg.ExperimentalParallelCommitment = original })
+
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	sd, err := newBuilderSharedDomains(t.Context(), tx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	sd.EnableParaTrieDB(db)
+
+	require.Equal(t, commitment.VariantHexPatriciaTrie, sd.GetCommitmentCtx().Trie().Variant())
 }
