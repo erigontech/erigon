@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxtest"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -80,7 +81,7 @@ func TestSharedDomains_ParallelFlag_RootEquivalence(t *testing.T) {
 		}
 		withCommitmentFlag(t, variant)
 
-		db := newTestDb(t, stepSize)
+		db := execctxtest.NewTestDb(t, stepSize)
 
 		ctx := t.Context()
 		rwTx, err := db.BeginTemporalRw(ctx)

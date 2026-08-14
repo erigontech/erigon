@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxtest"
 )
 
 // benchSeedDb commits one account so the domain tables are non-empty for
@@ -33,7 +34,7 @@ func benchSeedDb(b *testing.B) kv.TemporalRwDB {
 	b.Helper()
 	const stepSize = uint64(16)
 	ctx := b.Context()
-	db := newTestDb(b, stepSize)
+	db := execctxtest.NewTestDb(b, stepSize)
 
 	rwTx, err := db.BeginTemporalRw(ctx)
 	require.NoError(b, err)
@@ -44,7 +45,7 @@ func benchSeedDb(b *testing.B) kv.TemporalRwDB {
 	written := make([]byte, 20)
 	written[0] = 0x01
 	sd.SetTxNum(100)
-	require.NoError(b, sd.DomainPut(kv.AccountsDomain, rwTx, written, encAccount(7), 100, nil))
+	require.NoError(b, sd.DomainPut(kv.AccountsDomain, rwTx, written, execctxtest.EncAccount(7), 100, nil))
 	require.NoError(b, sd.Commit(ctx, rwTx))
 	return db
 }
@@ -82,9 +83,9 @@ func benchColdNegativeReads(b *testing.B, withCache, writable bool) {
 	require.NoError(b, err)
 	defer sd.Close()
 	if withCache {
-		stateCache := newSmallStateCache()
+		stateCache := execctxtest.NewSmallStateCache()
 		defer stateCache.Close()
-		sd.SetStateCacheForTest(stateCache)
+		sd.BindStateCache(stateCache)
 	}
 
 	key := make([]byte, 20)

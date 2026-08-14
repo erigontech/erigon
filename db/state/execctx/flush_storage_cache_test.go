@@ -21,6 +21,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/db/state/execctx/execctxtest"
+
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -43,7 +45,7 @@ func TestCommit_UpdatesStorageStateCache(t *testing.T) {
 
 	const stepSize = uint64(16)
 	ctx := t.Context()
-	db := newTestDb(t, stepSize)
+	db := execctxtest.NewTestDb(t, stepSize)
 
 	// composite storage key: 20-byte addr || 32-byte slot
 	key := make([]byte, 52)
@@ -66,7 +68,7 @@ func TestCommit_UpdatesStorageStateCache(t *testing.T) {
 		require.NoError(t, err)
 		defer sd.Close()
 
-		sd.SetStateCacheForTest(sc) // force-enable regardless of USE_STATE_CACHE
+		sd.BindStateCache(sc) // force-enable regardless of USE_STATE_CACHE
 
 		sd.SetTxNum(txNum)
 		require.NoError(t, sd.DomainPut(kv.StorageDomain, rwTx, key, val, txNum, prevVal))

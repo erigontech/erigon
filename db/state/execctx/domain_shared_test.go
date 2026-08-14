@@ -25,7 +25,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
@@ -35,17 +34,14 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
-	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxtest"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
@@ -53,22 +49,6 @@ import (
 
 func NewTest(dirs datadir.Dirs) state.AggOpts { //nolint:gocritic
 	return state.NewTest(dirs)
-}
-
-func newTestDb(tb testing.TB, stepSize uint64) kv.TemporalRwDB {
-	tb.Helper()
-	logger := log.New()
-	dirs := datadir.New(tb.TempDir())
-	db := mdbxtest.InMem(tb, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
-	tb.Cleanup(db.Close)
-
-	agg := NewTest(dirs).StepSize(stepSize).Logger(logger).MustOpen(tb.Context(), db)
-	tb.Cleanup(agg.Close)
-	err := agg.OpenFolder()
-	require.NoError(tb, err)
-	tdb, err := temporal.New(db, agg, nil)
-	require.NoError(tb, err)
-	return tdb
 }
 
 func composite(k, k2 []byte) []byte {
@@ -83,7 +63,7 @@ func TestSharedDomain_Unwind(t *testing.T) {
 	t.Parallel()
 
 	stepSize := uint64(100)
-	db := newTestDb(t, stepSize)
+	db := execctxtest.NewTestDb(t, stepSize)
 	//db := wrapDbWithCtx(_db, agg)
 
 	ctx := t.Context()
@@ -195,7 +175,7 @@ func TestSharedDomain_UnwindDoesNotRestoreOverlayForNewKey(t *testing.T) {
 	t.Parallel()
 
 	stepSize := uint64(100)
-	db := newTestDb(t, stepSize)
+	db := execctxtest.NewTestDb(t, stepSize)
 	ctx := t.Context()
 
 	rwTx, err := db.BeginTemporalRw(ctx)
@@ -259,7 +239,7 @@ func TestSharedDomain_UnwindDoesNotRestoreOverlayForNewKey(t *testing.T) {
 func TestSharedDomain_UnwindPrunesBoundaryTxNum(t *testing.T) {
 	t.Parallel()
 
-	db := newTestDb(t, uint64(100))
+	db := execctxtest.NewTestDb(t, uint64(100))
 	ctx := t.Context()
 
 	rwTx, err := db.BeginTemporalRw(ctx)
@@ -318,7 +298,7 @@ func TestNewSharedDomains_StateAheadOfBlocks(t *testing.T) {
 
 	stepSize := uint64(8)
 	require := require.New(t)
-	db := newTestDb(t, stepSize)
+	db := execctxtest.NewTestDb(t, stepSize)
 
 	ctx := t.Context()
 
@@ -393,7 +373,7 @@ func TestSharedDomain_RepeatedUnwindAcrossStepBoundary(t *testing.T) {
 	t.Parallel()
 
 	stepSize := uint64(10)
-	db := newTestDb(t, stepSize)
+	db := execctxtest.NewTestDb(t, stepSize)
 	ctx := t.Context()
 	require := require.New(t)
 
@@ -521,7 +501,7 @@ func TestSharedDomain_MergeUnwindAcrossStepBoundary(t *testing.T) {
 	t.Parallel()
 
 	stepSize := uint64(10)
-	db := newTestDb(t, stepSize)
+	db := execctxtest.NewTestDb(t, stepSize)
 	ctx := t.Context()
 	require := require.New(t)
 
@@ -679,7 +659,7 @@ func TestSharedDomain_UnwindAcrossStepBoundary(t *testing.T) {
 	t.Parallel()
 
 	stepSize := uint64(10)
-	db := newTestDb(t, stepSize)
+	db := execctxtest.NewTestDb(t, stepSize)
 	ctx := t.Context()
 	require := require.New(t)
 
@@ -807,7 +787,7 @@ func TestSharedDomain_UnwindWithDeleteAcrossStepBoundary(t *testing.T) {
 	t.Parallel()
 
 	stepSize := uint64(10)
-	db := newTestDb(t, stepSize)
+	db := execctxtest.NewTestDb(t, stepSize)
 	ctx := t.Context()
 	require := require.New(t)
 
@@ -955,7 +935,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlWarn, log.StderrHandler))
 
 	stepSize := uint64(4)
-	db := newTestDb(t, stepSize)
+	db := execctxtest.NewTestDb(t, stepSize)
 	//db := wrapDbWithCtx(_db, agg)
 
 	ctx := t.Context()
@@ -1100,7 +1080,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 
 	stepSize := uint64(8)
 	require := require.New(t)
-	db := newTestDb(t, stepSize)
+	db := execctxtest.NewTestDb(t, stepSize)
 
 	ctx := t.Context()
 	rwTx, err := db.BeginTemporalRw(ctx)
@@ -1271,7 +1251,7 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 	t.Cleanup(cancel)
 
 	stepSize := uint64(1)
-	db := newTestDb(t, stepSize)
+	db := execctxtest.NewTestDb(t, stepSize)
 
 	rwTtx1, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
@@ -1540,7 +1520,7 @@ func TestDomainPut_HistoryCorrectness(t *testing.T) {
 			t.Parallel()
 			ctx := t.Context()
 			stepSize := uint64(1000)
-			db := newTestDb(t, stepSize)
+			db := execctxtest.NewTestDb(t, stepSize)
 
 			rwTx, err := db.BeginTemporalRw(ctx)
 			require.NoError(t, err)
@@ -1682,7 +1662,7 @@ func TestDomainSameTxNumUpdate_HistoryKeepsFirstPrev(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			ctx := t.Context()
-			db := newTestDb(t, 1000)
+			db := execctxtest.NewTestDb(t, 1000)
 			rwTx, err := db.BeginTemporalRw(ctx)
 			require.NoError(t, err)
 			defer rwTx.Rollback()
@@ -1721,7 +1701,7 @@ func TestSharedDomain_TouchChangedKeysFromHistory(t *testing.T) {
 	t.Cleanup(cancel)
 
 	stepSize := uint64(1)
-	db1 := newTestDb(t, stepSize)
+	db1 := execctxtest.NewTestDb(t, stepSize)
 
 	db1RwTx, err := db1.BeginTemporalRw(ctx)
 	require.NoError(t, err)
@@ -1820,7 +1800,7 @@ func TestSharedDomain_TouchChangedKeysFromHistory(t *testing.T) {
 		require.NoError(t, err)
 
 		// now create a new empty database db2 and SharedDomains sd2 over it
-		db2 := newTestDb(t, stepSize)
+		db2 := execctxtest.NewTestDb(t, stepSize)
 		roTx2, err := db2.BeginTemporalRo(ctx)
 		require.NoError(t, err)
 		t.Cleanup(roTx2.Rollback)
@@ -1890,7 +1870,7 @@ func TestSharedDomain_DeleteAbsentKeyIsNoop(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			db := newTestDb(t, 100)
+			db := execctxtest.NewTestDb(t, 100)
 			ctx := t.Context()
 			rwTx, err := db.BeginTemporalRw(ctx)
 			require.NoError(t, err)
@@ -1943,7 +1923,7 @@ func TestSharedDomain_DeleteAbsentKeyIsNoop(t *testing.T) {
 func TestBlockOverlay_DomainReadsRegression(t *testing.T) {
 	ctx := context.Background()
 	stepSize := uint64(10)
-	db := newTestDb(t, stepSize)
+	db := execctxtest.NewTestDb(t, stepSize)
 
 	tx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
@@ -2007,7 +1987,7 @@ func TestReceiptAsOf_InFlightBlockLogIndex(t *testing.T) {
 
 	ctx := t.Context()
 	logger := log.New()
-	db := newTestDb(t, 10)
+	db := execctxtest.NewTestDb(t, 10)
 
 	tx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
