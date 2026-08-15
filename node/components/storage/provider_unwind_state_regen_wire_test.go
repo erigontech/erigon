@@ -69,6 +69,11 @@ func (a *pathSpyAggregator) DomainKVFilePathV4(domain kv.Domain, fromTxN, toTxN 
 	a.calls = append(a.calls, pathSpyCall{domain: domain, fromTxN: fromTxN, toTxN: toTxN, returnedPathTag: tag})
 	return tag
 }
+func (a *pathSpyAggregator) DomainKVFilePath(domain kv.Domain, fromStep, toStep kv.Step) string {
+	tag := fmt.Sprintf("v2.2-%s.%d-%d.kv", domain, fromStep, toStep)
+	a.calls = append(a.calls, pathSpyCall{domain: domain, fromTxN: uint64(fromStep) * a.stepSize, toTxN: uint64(toStep) * a.stepSize, returnedPathTag: tag})
+	return tag
+}
 func (a *pathSpyAggregator) BuildKVAccessors(_ context.Context, _ kv.Domain, _, _ string) error {
 	return nil
 }
@@ -276,6 +281,46 @@ func TestBoundaryRegenFinalPath_InPlaceKeepsOldPath(t *testing.T) {
 
 	require.Empty(t, agg.calls, "actionRegenInPlace must NOT dispatch to DomainKVFilePathV4 — the aligned file keeps its own name")
 	require.Equal(t, oldPath, got, "actionRegenInPlace must return the OLD path unchanged")
+}
+
+// TestSplitEmitPaths_AlignedPlusStubNoOverlap pins the mode-C split-
+// emit invariant: for a mid-step target the aligned wide file's
+// endTxN and the stub v4's fromTxN meet exactly at the target step
+// boundary. Any overlap of the two files' txN ranges is what produces
+// the aggregator visible-set collision SIGBUS (leg-M iter 4 mode_a
+// 2026-08-15). Any gap would leave a txN range uncovered.
+//
+// This asserts only the path-selection arithmetic; the full emit is
+// exercised in the finalize integration tests + soak.
+func TestSplitEmitPaths_AlignedPlusStubNoOverlap(t *testing.T) {
+	t.Parallel()
+	const (
+		stepSize     = uint64(390_625)
+		fromStep     = kv.Step(272)
+		stepBoundary = kv.Step(289)        // target step
+		lastTxNum    = uint64(113_250_000) // mid-step: (lastTxN+1)%stepSize != 0
+	)
+	agg := &pathSpyAggregator{stepSize: stepSize}
+
+	alignedPath := agg.DomainKVFilePath(kv.AccountsDomain, fromStep, stepBoundary)
+	stubPath := agg.DomainKVFilePathV4(kv.AccountsDomain, uint64(stepBoundary)*stepSize, lastTxNum+1)
+
+	require.Contains(t, alignedPath, "v2.2-accounts.272-289.kv",
+		"aligned name must be step-aligned (looks like a merged file)")
+	require.Contains(t, stubPath, "v4.0-accounts.112890625-113250001.kv",
+		"stub name must be v4 raw-txnum with fromTxN=289*stepSize=112890625")
+
+	// The critical invariant — no overlap, no gap between the two.
+	require.Len(t, agg.calls, 2)
+	alignedCall := agg.calls[0]
+	stubCall := agg.calls[1]
+	require.Equal(t, uint64(fromStep)*stepSize, alignedCall.fromTxN)
+	require.Equal(t, uint64(stepBoundary)*stepSize, alignedCall.toTxN,
+		"aligned toTxN == stepBoundary*stepSize")
+	require.Equal(t, uint64(stepBoundary)*stepSize, stubCall.fromTxN,
+		"stub fromTxN == aligned toTxN — no gap, no overlap")
+	require.Equal(t, lastTxNum+1, stubCall.toTxN,
+		"stub toTxN == lastTxNum+1 (honest end horizon)")
 }
 
 // TestBoundaryRegenFinalPath_CommitmentTruncateSameV4Shape verifies

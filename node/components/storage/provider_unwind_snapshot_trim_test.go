@@ -55,6 +55,7 @@ func (stubAggregator) WaitForBuildAndMergeQuiescence(_ time.Duration) error {
 	return nil
 }
 func (stubAggregator) DomainKVFilePathV4(_ kv.Domain, _, _ uint64) string { return "" }
+func (stubAggregator) DomainKVFilePath(_ kv.Domain, _, _ kv.Step) string  { return "" }
 func (stubAggregator) BuildKVAccessors(_ context.Context, _ kv.Domain, _, _ string) error {
 	return nil
 }

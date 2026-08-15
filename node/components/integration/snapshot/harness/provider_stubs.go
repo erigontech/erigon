@@ -52,6 +52,7 @@ func (mockAggregator) WaitForBuildAndMergeQuiescence(time.Duration) error {
 	return nil
 }
 func (mockAggregator) DomainKVFilePathV4(kv.Domain, uint64, uint64) string { return "" }
+func (mockAggregator) DomainKVFilePath(kv.Domain, kv.Step, kv.Step) string { return "" }
 func (mockAggregator) BuildKVAccessors(context.Context, kv.Domain, string, string) error {
 	return nil
 }

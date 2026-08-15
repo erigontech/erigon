@@ -84,6 +84,14 @@ type StateAggregator interface {
 	// convention).
 	DomainKVFilePathV4(domain kv.Domain, fromTxN, toTxN uint64) string
 
+	// DomainKVFilePath returns the step-aligned .kv path for the given
+	// domain — same naming scheme retire and merge produce (v2.2-*.
+	// <fromStep>-<toStep>.kv). Mode-C mid-step unwind emits its aligned
+	// wide file under this name so the file is subject to normal merge
+	// and reads as an ordinary step-aligned file. Paired with a stub v4
+	// under DomainKVFilePathV4 that covers the head-step remainder.
+	DomainKVFilePath(domain kv.Domain, fromStep, toStep kv.Step) string
+
 	// BuildKVAccessors builds the .bt/.kvei/.kvi sidecars for a
 	// freshly-written domain .kv file. dataPath is the physical .kv
 	// location (may carry a .regen suffix during Provider.Unwind);

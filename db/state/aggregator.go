@@ -1654,6 +1654,14 @@ func (a *Aggregator) DomainKVFilePathV4(domain kv.Domain, fromTxN, toTxN uint64)
 	return a.d[domain].kvNewFilePathV4(fromTxN, toTxN)
 }
 
+// DomainKVFilePath returns the step-aligned .kv path for the given
+// domain — matching the naming retire and merge produce. Used by
+// mode-C mid-step unwind's aligned-emit path (paired with
+// DomainKVFilePathV4 for the stub covering the head-step remainder).
+func (a *Aggregator) DomainKVFilePath(domain kv.Domain, fromStep, toStep kv.Step) string {
+	return a.d[domain].kvNewFilePath(fromStep, toStep)
+}
+
 func (at *AggregatorRoTx) TxNumsInFiles(entitySet ...kv.Domain) (minTxNum uint64) {
 	if len(entitySet) == 0 {
 		panic("assert: missed arguments")
