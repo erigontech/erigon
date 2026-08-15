@@ -247,20 +247,22 @@ func BenchmarkModexpBackends(b *testing.B) {
 	}
 }
 
+func packModexpInput(base, exp, mod []byte) []byte {
+	out := make([]byte, 0, 96+len(base)+len(exp)+len(mod))
+	for _, n := range []int{len(base), len(exp), len(mod)} {
+		var field [32]byte
+		big.NewInt(int64(n)).FillBytes(field[:])
+		out = append(out, field[:]...)
+	}
+	return append(append(append(out, base...), exp...), mod...)
+}
+
 // BenchmarkModexpRouted measures the precompile as callers see it, backend
 // selection included.
 func BenchmarkModexpRouted(b *testing.B) {
 	c7883 := &bigModExp{osaka: true}
 	for _, c := range benchModexpCases() {
-		input := make([]byte, 0, 96+len(c.base)+len(c.exp)+len(c.mod))
-		for _, n := range []int{len(c.base), len(c.exp), len(c.mod)} {
-			var field [32]byte
-			big.NewInt(int64(n)).FillBytes(field[:])
-			input = append(input, field[:]...)
-		}
-		input = append(input, c.base...)
-		input = append(input, c.exp...)
-		input = append(input, c.mod...)
+		input := packModexpInput(c.base, c.exp, c.mod)
 		b.Run(c.name, func(b *testing.B) {
 			for range b.N {
 				if _, err := c7883.Run(input); err != nil {
@@ -322,15 +324,6 @@ func TestModexpBigIntFaster(t *testing.T) {
 func TestModexpRoutingAgrees(t *testing.T) {
 	rng := rand.New(rand.NewSource(3))
 	c := &bigModExp{osaka: true}
-	pack := func(base, exp, mod []byte) []byte {
-		out := make([]byte, 0, 96+len(base)+len(exp)+len(mod))
-		for _, n := range []int{len(base), len(exp), len(mod)} {
-			var field [32]byte
-			big.NewInt(int64(n)).FillBytes(field[:])
-			out = append(out, field[:]...)
-		}
-		return append(append(append(out, base...), exp...), mod...)
-	}
 	for _, modLen := range []int{24, 25, 32, 33, 40, 63, 64, 65, 96, 127, 128, 129, 256} {
 		for _, expLen := range []int{0, 1, 3, 8, 9, 16, 64} {
 			for _, baseLen := range []int{0, 1, 32, 33, 64} {
@@ -349,7 +342,7 @@ func TestModexpRoutingAgrees(t *testing.T) {
 						mod[modLen-1] &^= 1
 					}
 
-					got, err := c.Run(pack(base, exp, mod))
+					got, err := c.Run(packModexpInput(base, exp, mod))
 					if err != nil {
 						t.Fatalf("mod %d exp %d base %d odd %v: %v", modLen, expLen, baseLen, odd, err)
 					}
