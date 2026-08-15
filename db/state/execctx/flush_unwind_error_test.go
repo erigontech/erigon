@@ -27,7 +27,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/db/state/execctx/execctxtest"
 )
 
 type errUnwindTx struct {
@@ -54,7 +53,7 @@ func TestTemporalMemBatch_FlushPropagatesUnwindError(t *testing.T) {
 	t.Parallel()
 
 	const stepSize = uint64(16)
-	db := execctxtest.NewTestDb(t, stepSize)
+	db := newTestDb(t, stepSize)
 	ctx := context.Background()
 
 	rwTx, err := db.BeginTemporalRw(ctx)

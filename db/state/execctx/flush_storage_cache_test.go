@@ -21,8 +21,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/db/state/execctx/execctxtest"
-
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -45,7 +43,7 @@ func TestCommit_UpdatesStorageStateCache(t *testing.T) {
 
 	const stepSize = uint64(16)
 	ctx := t.Context()
-	db := execctxtest.NewTestDb(t, stepSize)
+	db := newTestDb(t, stepSize)
 
 	// composite storage key: 20-byte addr || 32-byte slot
 	key := make([]byte, 52)

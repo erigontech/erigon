@@ -17,6 +17,7 @@
 package execctx_test
 
 import (
+	"encoding/binary"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -25,9 +26,14 @@ import (
 
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/kv/temporal"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/db/state/execctx/execctxtest"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -37,10 +43,10 @@ import (
 func TestEmbeddedRPCCacheViewDoesNotRefillUnwoundAccount(t *testing.T) {
 	const stepSize = uint64(16)
 	ctx := t.Context()
-	db := execctxtest.NewTestDb(t, stepSize)
-	stateCache := execctxtest.NewSmallStateCache()
+	db := newTestDb(t, stepSize)
+	stateCache := newSmallStateCache()
 	t.Cleanup(stateCache.Close)
-	key, v1, v2, diffs := execctxtest.TwoStepRows(t, db, stateCache)
+	key, v1, v2, diffs := twoStepRows(t, db, stateCache)
 
 	rpcTx, err := db.BeginTemporalRo(ctx)
 	require.NoError(t, err)
@@ -88,8 +94,8 @@ func TestEmbeddedRPCCacheViewDoesNotRefillUnwoundAccount(t *testing.T) {
 func TestEmbeddedRPCViewOpenedAfterCommitCanFillStateCache(t *testing.T) {
 	const stepSize = uint64(16)
 	ctx := t.Context()
-	db := execctxtest.NewTestDb(t, stepSize)
-	stateCache := execctxtest.NewSmallStateCache()
+	db := newTestDb(t, stepSize)
+	stateCache := newSmallStateCache()
 	t.Cleanup(stateCache.Close)
 
 	commitTx, err := db.BeginTemporalRw(ctx)
@@ -103,7 +109,7 @@ func TestEmbeddedRPCViewOpenedAfterCommitCanFillStateCache(t *testing.T) {
 	written := make([]byte, 20)
 	written[0] = 0x01
 	publishedDomains.SetTxNum(5)
-	require.NoError(t, publishedDomains.DomainPut(kv.AccountsDomain, commitTx, written, execctxtest.EncAccount(1), 5, nil))
+	require.NoError(t, publishedDomains.DomainPut(kv.AccountsDomain, commitTx, written, encAccount(1), 5, nil))
 	require.NoError(t, publishedDomains.Commit(ctx, commitTx))
 
 	events := shards.NewEvents()
@@ -129,10 +135,10 @@ func TestEmbeddedRPCViewOpenedAfterCommitCanFillStateCache(t *testing.T) {
 func TestEmbeddedRPCViewCreatedDuringStagedUnwindDoesNotRefillUnwoundAccount(t *testing.T) {
 	const stepSize = uint64(16)
 	ctx := t.Context()
-	db := execctxtest.NewTestDb(t, stepSize)
-	stateCache := execctxtest.NewSmallStateCache()
+	db := newTestDb(t, stepSize)
+	stateCache := newSmallStateCache()
 	t.Cleanup(stateCache.Close)
-	key, v1, v2, diffs := execctxtest.TwoStepRows(t, db, stateCache)
+	key, v1, v2, diffs := twoStepRows(t, db, stateCache)
 
 	publishedTx, err := db.BeginTemporalRo(ctx)
 	require.NoError(t, err)
@@ -195,10 +201,10 @@ func TestEmbeddedRPCViewCreatedDuringStagedUnwindDoesNotRefillUnwoundAccount(t *
 func TestEmbeddedRPCTxBoundAfterUnwindDoesNotRefillUnwoundAccount(t *testing.T) {
 	const stepSize = uint64(16)
 	ctx := t.Context()
-	db := execctxtest.NewTestDb(t, stepSize)
-	stateCache := execctxtest.NewSmallStateCache()
+	db := newTestDb(t, stepSize)
+	stateCache := newSmallStateCache()
 	t.Cleanup(stateCache.Close)
-	key, v1, v2, diffs := execctxtest.TwoStepRows(t, db, stateCache)
+	key, v1, v2, diffs := twoStepRows(t, db, stateCache)
 
 	rpcTx, err := db.BeginTemporalRo(ctx)
 	require.NoError(t, err)
@@ -245,10 +251,10 @@ func TestEmbeddedRPCTxBoundAfterUnwindDoesNotRefillUnwoundAccount(t *testing.T) 
 func TestEmbeddedRPCOverlayTxBoundAfterUnwindDoesNotRefillUnwoundAccount(t *testing.T) {
 	const stepSize = uint64(16)
 	ctx := t.Context()
-	db := execctxtest.NewTestDb(t, stepSize)
-	stateCache := execctxtest.NewSmallStateCache()
+	db := newTestDb(t, stepSize)
+	stateCache := newSmallStateCache()
 	t.Cleanup(stateCache.Close)
-	key, v1, v2, diffs := execctxtest.TwoStepRows(t, db, stateCache)
+	key, v1, v2, diffs := twoStepRows(t, db, stateCache)
 
 	rpcTx, err := db.BeginTemporalRo(ctx)
 	require.NoError(t, err)
@@ -297,7 +303,7 @@ func TestEmbeddedRPCOverlayTxBoundAfterUnwindDoesNotRefillUnwoundAccount(t *test
 func TestSharedDomainsNegativeCacheEntryUsesLastVisibleTxNum(t *testing.T) {
 	const stepSize = uint64(16)
 	ctx := t.Context()
-	db := execctxtest.NewTestDb(t, stepSize)
+	db := newTestDb(t, stepSize)
 
 	presentKey := make([]byte, 20)
 	presentKey[0] = 0xaa
@@ -360,7 +366,7 @@ func TestSharedDomainsNegativeCacheEntryUsesLastVisibleTxNum(t *testing.T) {
 func TestEmbeddedRPCCacheViewDoesNotRefillCodeOfDeletedAccount(t *testing.T) {
 	const stepSize = uint64(16)
 	ctx := t.Context()
-	db := execctxtest.NewTestDb(t, stepSize)
+	db := newTestDb(t, stepSize)
 
 	budget := 1 * datasize.MB
 	stateCache := cache.NewStateCache(budget, budget, budget, budget)
@@ -441,7 +447,7 @@ func testEmbeddedRPCCacheViewDoesNotResurrectDeletedValue(t *testing.T, domain k
 	t.Helper()
 	const stepSize = uint64(16)
 	ctx := t.Context()
-	db := execctxtest.NewTestDb(t, stepSize)
+	db := newTestDb(t, stepSize)
 
 	budget := 1 * datasize.MB
 	stateCache := cache.NewStateCache(budget, budget, budget, budget)
@@ -529,4 +535,63 @@ func testEmbeddedRPCCacheViewDoesNotResurrectDeletedValue(t *testing.T, domain k
 	got, _, err := freshDomains.GetLatest(domain, freshTx, key)
 	require.NoError(t, err)
 	require.Empty(t, got, "the old RPC read view must not repopulate the shared cache after the deletion")
+}
+
+func newTestDb(tb testing.TB, stepSize uint64) kv.TemporalRwDB {
+	tb.Helper()
+	logger := log.New()
+	dirs := datadir.New(tb.TempDir())
+	db := mdbxtest.InMem(tb, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	tb.Cleanup(db.Close)
+
+	agg := dbstate.NewTest(dirs).StepSize(stepSize).Logger(logger).MustOpen(tb.Context(), db)
+	tb.Cleanup(agg.Close)
+	err := agg.OpenFolder()
+	require.NoError(tb, err)
+	tdb, err := temporal.New(db, agg, nil)
+	require.NoError(tb, err)
+	return tdb
+}
+
+func encAccount(nonce uint64) []byte {
+	a := accounts.Account{Nonce: nonce, Balance: *uint256.NewInt(nonce * 1000)}
+	return accounts.SerialiseV3(&a)
+}
+
+// twoStepRows commits two versions of one account key so MDBX holds rows at
+// step 0 (txNum 5, v1) and step 1 (txNum 20, v2), and returns a delete-only
+// unwind diff for the step-1 row — the legacy-changeset shape that makes the
+// mem overlay publish a per-key maxStep bound while MDBX still holds the
+// dying row.
+func twoStepRows(t *testing.T, db kv.TemporalRwDB, sc *cache.StateCache) (key, v1, v2 []byte, diffs [kv.DomainLen][]kv.DomainEntryDiff) {
+	t.Helper()
+	ctx := t.Context()
+	key = make([]byte, 20)
+	key[0] = 0xaa
+	v1, v2 = encAccount(1), encAccount(2)
+
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	sd, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	sd.BindStateCache(sc)
+
+	sd.SetTxNum(5)
+	require.NoError(t, sd.DomainPut(kv.AccountsDomain, rwTx, key, v1, 5, nil))
+	sd.SetTxNum(20)
+	require.NoError(t, sd.DomainPut(kv.AccountsDomain, rwTx, key, v2, 20, v1))
+	require.NoError(t, sd.Commit(ctx, rwTx))
+
+	stepBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(stepBytes, ^uint64(1))
+	diffs[kv.AccountsDomain] = []kv.DomainEntryDiff{{Key: string(key) + string(stepBytes), Value: nil}}
+	return key, v1, v2, diffs
+}
+
+func newSmallStateCache() *cache.StateCache {
+	b := 1 * datasize.MB
+	return cache.NewStateCache(b, b, b, b)
 }

@@ -24,13 +24,12 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/db/state/execctx/execctxtest"
 )
 
 // Use Commit (not Flush) so the rebuilt branch refreshes the BranchCache entry.
 func TestBranchCacheCommitRefreshesAfterReadThrough(t *testing.T) {
 	stepSize := uint64(100)
-	db := execctxtest.NewTestDb(t, stepSize)
+	db := newTestDb(t, stepSize)
 	ctx := t.Context()
 	logger := log.New()
 

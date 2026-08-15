@@ -22,6 +22,8 @@ import (
 	"math"
 	"testing"
 
+	"github.com/c2h5oh/datasize"
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -31,10 +33,52 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/db/state/execctx/execctxtest"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+func encAccount(nonce uint64) []byte {
+	a := accounts.Account{Nonce: nonce, Balance: *uint256.NewInt(nonce * 1000)}
+	return accounts.SerialiseV3(&a)
+}
+
+// twoStepRows commits two versions of one account key so MDBX holds rows at
+// step 0 (txNum 5, v1) and step 1 (txNum 20, v2), and returns a delete-only
+// unwind diff for the step-1 row — the legacy-changeset shape that makes the
+// mem overlay publish a per-key maxStep bound while MDBX still holds the
+// dying row.
+func twoStepRows(t *testing.T, db kv.TemporalRwDB, sc *cache.StateCache) (key, v1, v2 []byte, diffs [kv.DomainLen][]kv.DomainEntryDiff) {
+	t.Helper()
+	ctx := t.Context()
+	key = make([]byte, 20)
+	key[0] = 0xaa
+	v1, v2 = encAccount(1), encAccount(2)
+
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	sd, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	sd.BindStateCache(sc)
+
+	sd.SetTxNum(5)
+	require.NoError(t, sd.DomainPut(kv.AccountsDomain, rwTx, key, v1, 5, nil))
+	sd.SetTxNum(20)
+	require.NoError(t, sd.DomainPut(kv.AccountsDomain, rwTx, key, v2, 20, v1))
+	require.NoError(t, sd.Commit(ctx, rwTx))
+
+	stepBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(stepBytes, ^uint64(1))
+	diffs[kv.AccountsDomain] = []kv.DomainEntryDiff{{Key: string(key) + string(stepBytes), Value: nil}}
+	return key, v1, v2, diffs
+}
+
+func newSmallStateCache() *cache.StateCache {
+	b := 1 * datasize.MB
+	return cache.NewStateCache(b, b, b, b)
+}
 
 func frontierAt(end uint64) cache.Frontier {
 	return cache.FrontierFunc(func(kv.Domain) (uint64, bool) { return end, true })
@@ -113,7 +157,7 @@ func TestNewSharedDomains_StateVersionReadErrorFailsConstruction(t *testing.T) {
 	t.Parallel()
 
 	ctx := t.Context()
-	db := execctxtest.NewTestDb(t, 16)
+	db := newTestDb(t, 16)
 	baseTx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer baseTx.Rollback()
@@ -132,7 +176,7 @@ func TestStaleGetterResolvesCacheStateVersionOnce(t *testing.T) {
 	t.Parallel()
 
 	ctx := t.Context()
-	db := execctxtest.NewTestDb(t, 16)
+	db := newTestDb(t, 16)
 
 	seedTx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
@@ -160,7 +204,7 @@ func TestStaleGetterResolvesCacheStateVersionOnce(t *testing.T) {
 	currentDomains, err := execctx.NewSharedDomains(ctx, currentTx, log.New())
 	require.NoError(t, err)
 	defer currentDomains.Close()
-	stateCache := execctxtest.NewSmallStateCache()
+	stateCache := newSmallStateCache()
 	t.Cleanup(stateCache.Close)
 	currentDomains.BindStateCache(stateCache)
 
@@ -184,7 +228,7 @@ func TestStateCache_MergedUnwindPublishesInvalidation(t *testing.T) {
 	t.Parallel()
 
 	ctx := t.Context()
-	db := execctxtest.NewTestDb(t, 16)
+	db := newTestDb(t, 16)
 	tx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -192,13 +236,13 @@ func TestStateCache_MergedUnwindPublishesInvalidation(t *testing.T) {
 	parent, err := execctx.NewSharedDomains(ctx, tx, log.New())
 	require.NoError(t, err)
 	defer parent.Close()
-	stateCache := execctxtest.NewSmallStateCache()
+	stateCache := newSmallStateCache()
 	t.Cleanup(stateCache.Close)
 	parent.BindStateCache(stateCache)
 
 	key := make([]byte, 20)
 	key[0] = 0x01
-	seed(t, stateCache, tx, kv.AccountsDomain, key, execctxtest.EncAccount(1), 12)
+	seed(t, stateCache, tx, kv.AccountsDomain, key, encAccount(1), 12)
 	_, ok := stateCache.View(nil).Get(kv.AccountsDomain, key)
 	require.True(t, ok)
 	var parentDiffs [kv.DomainLen][]kv.DomainEntryDiff
@@ -214,7 +258,7 @@ func TestStateCache_MergedUnwindPublishesInvalidation(t *testing.T) {
 	_, ok = stateCache.View(nil).Get(kv.AccountsDomain, key)
 	require.False(t, ok, "the merged unwind must invalidate the cache before the parent serves reads")
 
-	seed(t, stateCache, tx, kv.AccountsDomain, key, execctxtest.EncAccount(1), 12)
+	seed(t, stateCache, tx, kv.AccountsDomain, key, encAccount(1), 12)
 	_, ok = stateCache.View(nil).Get(kv.AccountsDomain, key)
 	require.True(t, ok, "a fill admitted after staging exercises commit-time invalidation")
 	require.NoError(t, parent.Commit(ctx, tx))
@@ -228,7 +272,7 @@ func TestReadFill_MemoizesWritableVisibleEndUntilFlush(t *testing.T) {
 
 	const stepSize = uint64(16)
 	ctx := t.Context()
-	db := execctxtest.NewTestDb(t, stepSize)
+	db := newTestDb(t, stepSize)
 
 	baseTx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
@@ -238,7 +282,7 @@ func TestReadFill_MemoizesWritableVisibleEndUntilFlush(t *testing.T) {
 	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
-	stateCache := execctxtest.NewSmallStateCache()
+	stateCache := newSmallStateCache()
 	t.Cleanup(stateCache.Close)
 	domains.BindStateCache(stateCache)
 
@@ -255,7 +299,7 @@ func TestReadFill_MemoizesWritableVisibleEndUntilFlush(t *testing.T) {
 	written := make([]byte, 20)
 	written[0] = 4
 	domains.SetTxNum(20)
-	require.NoError(t, domains.DomainPut(kv.AccountsDomain, rwTx, written, execctxtest.EncAccount(2), 20, nil))
+	require.NoError(t, domains.DomainPut(kv.AccountsDomain, rwTx, written, encAccount(2), 20, nil))
 	require.NoError(t, domains.Flush(ctx, rwTx))
 
 	missing := make([]byte, 20)
@@ -278,10 +322,10 @@ func TestAssertStateCache_NoFalsePanicDuringInFlightUnwind(t *testing.T) {
 
 	const stepSize = uint64(16)
 	ctx := t.Context()
-	db := execctxtest.NewTestDb(t, stepSize)
-	sc := execctxtest.NewSmallStateCache()
+	db := newTestDb(t, stepSize)
+	sc := newSmallStateCache()
 	t.Cleanup(sc.Close)
-	key, v1, _, diffs := execctxtest.TwoStepRows(t, db, sc)
+	key, v1, _, diffs := twoStepRows(t, db, sc)
 
 	roTx, err := db.BeginTemporalRo(ctx)
 	require.NoError(t, err)
@@ -320,13 +364,13 @@ func TestAssertStateCache_NoFalsePanicDuringInFlightUnwindStepZero(t *testing.T)
 
 	const stepSize = uint64(16)
 	ctx := t.Context()
-	db := execctxtest.NewTestDb(t, stepSize)
-	sc := execctxtest.NewSmallStateCache()
+	db := newTestDb(t, stepSize)
+	sc := newSmallStateCache()
 	t.Cleanup(sc.Close)
 
 	key := make([]byte, 20)
 	key[0] = 0xbb
-	v1 := execctxtest.EncAccount(1)
+	v1 := encAccount(1)
 
 	rwTx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
@@ -375,10 +419,10 @@ func TestReadFill_DoesNotClobberLiveEntry(t *testing.T) {
 
 	const stepSize = uint64(16)
 	ctx := t.Context()
-	db := execctxtest.NewTestDb(t, stepSize)
-	sc := execctxtest.NewSmallStateCache()
+	db := newTestDb(t, stepSize)
+	sc := newSmallStateCache()
 	t.Cleanup(sc.Close)
-	key, _, v2, diffs := execctxtest.TwoStepRows(t, db, sc)
+	key, _, v2, diffs := twoStepRows(t, db, sc)
 
 	roTx, err := db.BeginTemporalRo(ctx)
 	require.NoError(t, err)
@@ -392,7 +436,7 @@ func TestReadFill_DoesNotClobberLiveEntry(t *testing.T) {
 	sd.Unwind(10, &diffs)
 	// A live (current-epoch) entry above the read bound: the maxStep gate turns
 	// the hit into a miss, so the read falls through to the bounded DB read.
-	v3 := execctxtest.EncAccount(3)
+	v3 := encAccount(3)
 	seed(t, sc, roTx, kv.AccountsDomain, key, v3, 40)
 
 	v, _, err := sd.GetLatest(kv.AccountsDomain, roTx, key)
@@ -409,10 +453,10 @@ func TestReadFill_SkipsInFlightUnwindRow(t *testing.T) {
 
 	const stepSize = uint64(16)
 	ctx := t.Context()
-	db := execctxtest.NewTestDb(t, stepSize)
-	sc := execctxtest.NewSmallStateCache()
+	db := newTestDb(t, stepSize)
+	sc := newSmallStateCache()
 	t.Cleanup(sc.Close)
-	key, _, v2, diffs := execctxtest.TwoStepRows(t, db, sc)
+	key, _, v2, diffs := twoStepRows(t, db, sc)
 
 	roTx, err := db.BeginTemporalRo(ctx)
 	require.NoError(t, err)
@@ -437,7 +481,7 @@ func TestGetLatest_RejectsParentMemHitAboveStagedUnwindBound(t *testing.T) {
 
 	const stepSize = uint64(16)
 	ctx := t.Context()
-	db := execctxtest.NewTestDb(t, stepSize)
+	db := newTestDb(t, stepSize)
 	rwTx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer rwTx.Rollback()
@@ -452,7 +496,7 @@ func TestGetLatest_RejectsParentMemHitAboveStagedUnwindBound(t *testing.T) {
 
 	addr := make([]byte, 20)
 	addr[0] = 0xc1
-	deadForkAccount := execctxtest.EncAccount(1)
+	deadForkAccount := encAccount(1)
 	require.NoError(t, parent.DomainPut(kv.AccountsDomain, rwTx, addr, deadForkAccount, 40, nil)) // step 2
 
 	stepBytes := make([]byte, 8)
@@ -471,7 +515,7 @@ func TestGetCode_RejectsParentAccountAboveStagedUnwindBound(t *testing.T) {
 
 	const stepSize = uint64(16)
 	ctx := t.Context()
-	db := execctxtest.NewTestDb(t, stepSize)
+	db := newTestDb(t, stepSize)
 	rwTx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer rwTx.Rollback()
@@ -515,8 +559,8 @@ func TestCodeHashFill_SkipsInFlightUnwindRow(t *testing.T) {
 
 	const stepSize = uint64(16)
 	ctx := t.Context()
-	db := execctxtest.NewTestDb(t, stepSize)
-	sc := execctxtest.NewSmallStateCache()
+	db := newTestDb(t, stepSize)
+	sc := newSmallStateCache()
 	t.Cleanup(sc.Close)
 
 	key := make([]byte, 20)
@@ -565,8 +609,8 @@ func TestGetCode_RespectsStagedUnwindBound(t *testing.T) {
 
 	const stepSize = uint64(16)
 	ctx := t.Context()
-	db := execctxtest.NewTestDb(t, stepSize)
-	stateCache := execctxtest.NewSmallStateCache()
+	db := newTestDb(t, stepSize)
+	stateCache := newSmallStateCache()
 	t.Cleanup(stateCache.Close)
 	codeStore := cache.NewCodeStore(1<<20, 1<<20)
 
@@ -629,8 +673,8 @@ func TestReadFill_NegativeUsesLastVisibleTxNum(t *testing.T) {
 
 	const stepSize = uint64(16)
 	ctx := t.Context()
-	db := execctxtest.NewTestDb(t, stepSize)
-	sc := execctxtest.NewSmallStateCache()
+	db := newTestDb(t, stepSize)
+	sc := newSmallStateCache()
 	t.Cleanup(sc.Close)
 
 	rwTx, err := db.BeginTemporalRw(ctx)
@@ -645,7 +689,7 @@ func TestReadFill_NegativeUsesLastVisibleTxNum(t *testing.T) {
 	written := make([]byte, 20)
 	written[0] = 0x01
 	sd.SetTxNum(100)
-	require.NoError(t, sd.DomainPut(kv.AccountsDomain, rwTx, written, execctxtest.EncAccount(7), 100, nil))
+	require.NoError(t, sd.DomainPut(kv.AccountsDomain, rwTx, written, encAccount(7), 100, nil))
 	require.NoError(t, sd.Commit(ctx, rwTx))
 
 	roTx, err := db.BeginTemporalRo(ctx)
@@ -692,7 +736,7 @@ func (fakeHasBadAgg) Agg() any { return struct{}{} }
 // invariant or fail loudly — never silently drop it on a DB shape mismatch.
 // A nil or apply-only cache needs no guard at all.
 func TestGuardAggregatorForCache(t *testing.T) {
-	sc := execctxtest.NewSmallStateCache()
+	sc := newSmallStateCache()
 	t.Cleanup(sc.Close)
 
 	f := &fakeForbidder{}
@@ -711,7 +755,7 @@ func TestGuardAggregatorForCache(t *testing.T) {
 // frontier to poison, so the guard must not constrain the aggregator.
 func TestGuardAggregatorForCache_ApplyOnlySkips(t *testing.T) {
 	t.Setenv("STATE_CACHE_FILLS", "false")
-	sc := execctxtest.NewSmallStateCache()
+	sc := newSmallStateCache()
 	t.Cleanup(sc.Close)
 
 	f := &fakeForbidder{}

@@ -24,7 +24,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/db/state/execctx/execctxtest"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/holiman/uint256"
@@ -34,10 +33,10 @@ import (
 func TestSharedDomainsOldTxBoundAfterUnwindDoesNotRefillUnwoundAccount(t *testing.T) {
 	const stepSize = uint64(16)
 	ctx := t.Context()
-	db := execctxtest.NewTestDb(t, stepSize)
-	stateCache := execctxtest.NewSmallStateCache()
+	db := newTestDb(t, stepSize)
+	stateCache := newSmallStateCache()
 	t.Cleanup(stateCache.Close)
-	key, v1, v2, diffs := execctxtest.TwoStepRows(t, db, stateCache)
+	key, v1, v2, diffs := twoStepRows(t, db, stateCache)
 
 	oldTx, err := db.BeginTemporalRo(ctx)
 	require.NoError(t, err)
@@ -77,7 +76,7 @@ func TestSharedDomainsOldTxBoundAfterUnwindDoesNotRefillUnwoundAccount(t *testin
 func TestAccountOnlyDeleteDoesNotBlockUnrelatedCodeFill(t *testing.T) {
 	const stepSize = uint64(16)
 	ctx := t.Context()
-	db := execctxtest.NewTestDb(t, stepSize)
+	db := newTestDb(t, stepSize)
 
 	contractAddr := make([]byte, 20)
 	contractAddr[0] = 0xaa
@@ -148,7 +147,7 @@ func TestAccountOnlyDeleteDoesNotBlockUnrelatedCodeFill(t *testing.T) {
 func TestGetCodeSizeColdReadDoesNotCacheCode(t *testing.T) {
 	const stepSize = uint64(16)
 	ctx := t.Context()
-	db := execctxtest.NewTestDb(t, stepSize)
+	db := newTestDb(t, stepSize)
 	addr := make([]byte, 20)
 	addr[0] = 0xaa
 	code := []byte{0xcc, 1, 2, 3}

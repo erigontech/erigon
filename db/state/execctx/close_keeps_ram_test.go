@@ -25,7 +25,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/db/state/execctx/execctxtest"
 )
 
 // TestClose_KeepsDomainRamForReaders pins the lifetime guarantee readers rely
@@ -35,7 +34,7 @@ import (
 // miss and fall back to a tx that does not have the data yet.
 func TestClose_KeepsDomainRamForReaders(t *testing.T) {
 	t.Parallel()
-	db := execctxtest.NewTestDb(t, 16)
+	db := newTestDb(t, 16)
 	ctx := context.Background()
 
 	tx, err := db.BeginTemporalRo(ctx)

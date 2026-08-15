@@ -9,7 +9,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/db/state/execctx/execctxtest"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -23,7 +22,7 @@ func TestCodeHashForAddr_InBatchAccountWinsOverStaleLRU(t *testing.T) {
 	t.Parallel()
 
 	ctx := t.Context()
-	db := execctxtest.NewTestDb(t, 16)
+	db := newTestDb(t, 16)
 	rwTx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer rwTx.Rollback()
@@ -83,7 +82,7 @@ func TestCodeHashForAddr_CacheSourcedRecordDoesNotSeedMapping(t *testing.T) {
 	t.Parallel()
 
 	ctx := t.Context()
-	db := execctxtest.NewTestDb(t, 16)
+	db := newTestDb(t, 16)
 	sc := cache.NewDefaultStateCache()
 	t.Cleanup(sc.Close)
 
@@ -132,7 +131,7 @@ func TestCodeHashForAddr_ViewSourcedRecordSeedsMapping(t *testing.T) {
 	t.Parallel()
 
 	ctx := t.Context()
-	db := execctxtest.NewTestDb(t, 16)
+	db := newTestDb(t, 16)
 
 	var addr common.Address
 	addr[0] = 0xcd

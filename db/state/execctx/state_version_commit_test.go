@@ -25,12 +25,11 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/db/state/execctx/execctxtest"
 )
 
 func TestSharedDomainsCommitAdvancesStateVersionOnce(t *testing.T) {
 	ctx := t.Context()
-	db := execctxtest.NewTestDb(t, 16)
+	db := newTestDb(t, 16)
 	rwTx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer rwTx.Rollback()
@@ -52,7 +51,7 @@ func TestSharedDomainsCommitAdvancesStateVersionOnce(t *testing.T) {
 
 func TestSharedDomainsCommitRejectsAnotherStateVersionWriter(t *testing.T) {
 	ctx := t.Context()
-	db := execctxtest.NewTestDb(t, 16)
+	db := newTestDb(t, 16)
 	rwTx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer rwTx.Rollback()
@@ -70,7 +69,7 @@ func TestSharedDomainsCommitRejectsAnotherStateVersionWriter(t *testing.T) {
 
 func TestSharedDomainsCommitRejectsStaleBaseStateVersion(t *testing.T) {
 	ctx := t.Context()
-	db := execctxtest.NewTestDb(t, 16)
+	db := newTestDb(t, 16)
 	baseTx, err := db.BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer baseTx.Rollback()
