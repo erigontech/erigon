@@ -166,26 +166,79 @@ func TestInternAddressFillClearsBitsAboveTheAddress(t *testing.T) {
 		"a clean word must hit the entry its dirty form filled")
 }
 
-// TestInternAddressSeparatesAddressesSharingABucket pins the limb-2 term of the
-// probe. The two words differ only inside the 20 bytes Bytes20 keeps, so they
-// are different accounts, and they land in the same bucket — a compare that
-// dropped limb 2 would hand the second one the first one's handle.
+// TestInternAddressSeparatesAddressesSharingABucket pins every limb of the
+// probe. Each pair differs only inside the 20 bytes Bytes20 keeps, so they are
+// different accounts, and each lands in the same bucket — a compare that
+// dropped that limb would hand the second one the first one's handle. The
+// index masks the low 8 bits, so a difference above them collides by
+// construction.
 func TestInternAddressSeparatesAddressesSharingABucket(t *testing.T) {
-	evm := &EVM{}
 	first := uint256.Int{0x1122334455667788, 0x99aabbccddeeff00, 0x12345678, 0}
-	second := first
-	second[2] = 0x12345778
-	require.Equal(t, addrIndex(&first), addrIndex(&second), "the pair must collide to test the compare")
-	require.NotEqual(t, first.Bytes20(), second.Bytes20())
+	for _, tc := range []struct {
+		limb   string
+		second uint256.Int
+	}{
+		{"0", uint256.Int{first[0] ^ 0x100, first[1], first[2], 0}},
+		{"1", uint256.Int{first[0], first[1] ^ 0x100, first[2], 0}},
+		{"2", uint256.Int{first[0], first[1], 0x12345778, 0}},
+	} {
+		t.Run("limb_"+tc.limb, func(t *testing.T) {
+			evm := &EVM{}
+			second := tc.second
+			require.Equal(t, addrIndex(&first), addrIndex(&second), "the pair must collide to test the compare")
+			require.NotEqual(t, first.Bytes20(), second.Bytes20())
 
-	for range addressCacheMinOps + 1 {
-		evm.internAddress(&first)
+			for range addressCacheMinOps + 1 {
+				evm.internAddress(&first)
+			}
+			sentinel := accounts.InternAddress(common.HexToAddress("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"))
+			require.Equal(t, 1, poisonEntry(evm.addrCache.handles[:], accounts.InternAddress(first.Bytes20()), sentinel))
+
+			require.True(t, accounts.InternAddress(second.Bytes20()) == evm.internAddress(&second),
+				"a different address in the same bucket must not be served the resident entry")
+		})
 	}
-	sentinel := accounts.InternAddress(common.HexToAddress("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"))
-	require.Equal(t, 1, poisonEntry(evm.addrCache.handles[:], accounts.InternAddress(first.Bytes20()), sentinel))
+}
 
-	require.True(t, accounts.InternAddress(second.Bytes20()) == evm.internAddress(&second),
-		"a different address in the same bucket must not be served the resident entry")
+// TestInternAddressInternsTheZeroAddressOnAnEmptyBucket pins the handle guard.
+// An empty entry holds the zero word, so a zero-word probe matches it on every
+// limb: without the guard the caller is handed the zero handle, which means "no
+// address" rather than address 0x0.
+func TestInternAddressInternsTheZeroAddressOnAnEmptyBucket(t *testing.T) {
+	evm := &EVM{}
+	var zero uint256.Int
+
+	// Warm past the delay with words that leave the zero word's bucket empty.
+	for i := range uint64(addressCacheMinOps + 1) {
+		word := uint256.Int{i + 1, 0, 0, 0}
+		require.NotEqual(t, addrIndex(&zero), addrIndex(&word))
+		evm.internAddress(&word)
+	}
+	require.NotNil(t, evm.addrCache)
+	require.Equal(t, accounts.NilAddress, evm.addrCache.handles[addrIndex(&zero)],
+		"the zero word must probe an entry nothing has filled")
+
+	require.True(t, accounts.InternAddress(common.Address{}) == evm.internAddress(&zero),
+		"the zero address must intern, not read as the empty entry it collides with")
+}
+
+// TestInternStorageKeyInternsTheZeroKeyOnAnEmptyBucket is the same guard on the
+// key table: slot 0 is a legitimate key, and an empty entry holds its word.
+func TestInternStorageKeyInternsTheZeroKeyOnAnEmptyBucket(t *testing.T) {
+	evm := &EVM{}
+	var zero uint256.Int
+
+	for i := range uint64(storageKeyCacheMinOps + 1) {
+		word := uint256.Int{i + 1, 0, 0, 0}
+		require.NotEqual(t, slotIndex(&zero), slotIndex(&word))
+		evm.internStorageKey(&word)
+	}
+	require.NotNil(t, evm.internCache)
+	require.Equal(t, accounts.NilKey, evm.internCache.handles[slotIndex(&zero)],
+		"the zero word must probe an entry nothing has filled")
+
+	require.True(t, accounts.InternKey(common.Hash{}) == evm.internStorageKey(&zero),
+		"slot 0 must intern, not read as the empty entry it collides with")
 }
 
 // TestInternAddressSurvivesResetBetweenBlocks pins what makes the memo worth

@@ -209,6 +209,9 @@ func BenchmarkStorageDiversity(b *testing.B) {
 // 256 and miss 64% of the time, 1024 miss 98%. The sweep is therefore one hitting
 // tier and two thrashing ones, not a fits/fills/overflows progression.
 func BenchmarkAddressDiversity(b *testing.B) {
+	require.Equal(b, 256, vm.AddressCacheSize,
+		"the tiers below are one hitting and two thrashing only against this bucket count")
+
 	for _, n := range []int{16, 256, 1024} {
 		p, lbl := program.New().Jumpdest()
 		addrs := make([]common.Address, n)

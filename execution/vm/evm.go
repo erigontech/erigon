@@ -97,10 +97,12 @@ type EVM struct {
 }
 
 // evmSizeClass is the Go allocation size class EVM fills. One more word moves
-// every EVM into the 480-byte class, so a field added here has to either pack
-// into existing padding or accept that cost knowingly. TestEVMFitsItsSizeClass
-// checks it — a build-time assert would also fire in every package that grows
-// an embedded type such as evmtypes.BlockContext.
+// every EVM into the 480-byte class, whose cost measured within workload noise:
+// a field added here either packs into existing padding or bumps this const,
+// and bumping it is the expected answer to growth someone meant.
+// TestEVMFitsItsSizeClass is therefore a tripwire for the growth nobody meant,
+// not a budget — a build-time assert would also fire in every package that
+// grows an embedded type such as evmtypes.BlockContext.
 const evmSizeClass = 448
 
 // storageKeyCacheSize must comfortably exceed a contract's live slot count,
@@ -166,6 +168,10 @@ const (
 	addressCacheSize   = 256
 	addressCacheMinOps = 32
 )
+
+// AddressCacheSize lets benchmarks outside this package pin the bucket count
+// their hit/miss tiers were chosen against.
+const AddressCacheSize = addressCacheSize
 
 var _ [0]struct{} = [addressCacheSize & (addressCacheSize - 1)]struct{}{}
 
