@@ -569,6 +569,21 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 			"file contains incorrect dictionary size in bytes, got error %v", err)
 		require.Nil(t, d)
 	})
+	t.Run("patternDictionarySizeOverflows", func(t *testing.T) {
+		aux := make([]byte, 32)
+
+		// 24+dictSize wraps around uint64, so the size check passes and slicing the
+		// dictionary panics. Opening must still report an error, not (nil, nil).
+		binary.BigEndian.PutUint64(aux[16:24], ^uint64(0)) // pattern dict size in bytes
+
+		fpath := filepath.Join(tmpDir, "patternDictionarySizeOverflows")
+		err := os.WriteFile(fpath, aux, 0644)
+		require.NoError(t, err)
+
+		d, err := NewDecompressor(fpath)
+		require.Error(t, err)
+		require.Nil(t, d)
+	})
 	t.Run("fileSizeShouldBeMinimal", func(t *testing.T) {
 		aux := make([]byte, 33)
 
