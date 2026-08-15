@@ -123,16 +123,16 @@ func OpenIndex(indexFilePath string) (_ *Index, err error) {
 		filePath: indexFilePath,
 		fileName: fName,
 	}
-
-	idx.f, err = os.Open(indexFilePath)
-	if err != nil {
-		return nil, err
-	}
 	defer func() {
 		if err != nil {
 			idx.Close()
 		}
 	}()
+
+	idx.f, err = os.Open(indexFilePath)
+	if err != nil {
+		return nil, err
+	}
 	var stat os.FileInfo
 	if stat, err = idx.f.Stat(); err != nil {
 		return nil, err
@@ -144,7 +144,7 @@ func OpenIndex(indexFilePath string) (_ *Index, err error) {
 	}
 	idx.data = idx.mmapHandle1[:idx.size]
 
-	if err := idx.init(); err != nil {
+	if err = idx.init(); err != nil {
 		return nil, err
 	}
 
