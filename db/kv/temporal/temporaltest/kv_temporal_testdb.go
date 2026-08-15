@@ -25,7 +25,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/state"
@@ -66,9 +66,9 @@ func newTestDB(tb testing.TB, dirs datadir.Dirs, stepSize uint64) kv.TemporalRwD
 	ctx := context.Background()
 	if tb != nil {
 		ctx = tb.Context()
-		rawDB = memdb.NewTestDB(tb, dbcfg.ChainDB)
+		rawDB = mdbxtest.NewTestDB(tb, dbcfg.ChainDB)
 	} else {
-		rawDB = memdb.New(nil, dirs.DataDir, dbcfg.ChainDB)
+		rawDB = mdbxtest.New(nil, dirs.DataDir, dbcfg.ChainDB)
 	}
 
 	blockSnapCfg := ethconfig.Defaults.Snapshot

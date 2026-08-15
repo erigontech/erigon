@@ -434,14 +434,13 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 	return v, true, offset, nil
 }
 
-// GetValSize returns the size of the value for the exact given key without
-// materializing the value — for compressed values this skips decompression.
 func (b *BpsTree) GetValSize(g *seg.Reader, key []byte) (size int, ok bool, err error) {
-	// Mirrors Get, whose nil-key branch never matches: a key read back from the
-	// file is non-nil even when empty. Without this the search below would match
-	// an empty first key.
 	if len(key) == 0 && b.offt.Count() > 0 {
-		return 0, false, nil
+		k0, v0, _, err := b.dataLookupFunc(0, g)
+		if err != nil || k0 != nil {
+			return 0, false, err
+		}
+		return len(v0), true, nil
 	}
 	ok, _, err = b.seekExact(g, key)
 	if err != nil || !ok {
@@ -451,12 +450,11 @@ func (b *BpsTree) GetValSize(g *seg.Reader, key []byte) (size int, ok bool, err 
 	return size, true, nil
 }
 
-// seekExact searches the exact key and, on a match, leaves g positioned at the
-// key's value word.
 func (b *BpsTree) seekExact(g *seg.Reader, key []byte) (ok bool, offset uint64, err error) {
 	if b.trace {
 		fmt.Printf("get   %x\n", key)
 	}
+
 	l, r, klo, khi := b.bs(key) // l===r when key is found
 	if b.trace {
 		fmt.Printf("pivot di(LR): [%d %d] k: %x found: %t\n", l, r, key, l == r)
@@ -503,7 +501,7 @@ func (b *BpsTree) seekExact(g *seg.Reader, key []byte) (ok bool, offset uint64, 
 				g.Reset(offset)
 			}
 			if cmp = g.MatchCmp(key); cmp < 0 {
-				return false, 0, nil
+				return false, 0, err
 			} else if cmp > 0 {
 				// on non-match MatchCmp resets position; skip key+value to advance
 				g.Skip()

@@ -636,9 +636,10 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte, hi, lo uint64) (v
 
 }
 
-// getLatestFromFileValSize is getLatestFromFile returning only the value's
-// size — the value is never materialized, so nothing is allocated.
 func (dt *DomainRoTx) getLatestFromFileValSize(i int, filekey []byte, hi, lo uint64) (size int, ok bool, err error) {
+	if dbg.KVReadLevelledMetrics {
+		defer domainReadMetric(dt.name, i).ObserveDuration(time.Now())
+	}
 	if dt.d.Accessors.Has(statecfg.AccessorBTree) {
 		return dt.statelessBtree(i).GetValSize(filekey, dt.reusableReader(i))
 	}
@@ -653,7 +654,7 @@ func (dt *DomainRoTx) getLatestFromFileValSize(i int, filekey []byte, hi, lo uin
 		}
 		g := dt.reusableReader(i)
 		g.Reset(offset)
-		if g.MatchCmp(filekey) != 0 { // MPH false-positives protection
+		if g.MatchCmp(filekey) != 0 {
 			return 0, false, nil
 		}
 		_, size = g.Skip()
@@ -1394,8 +1395,13 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 			}
 			// nil = different step, skip; []byte{} = absent previously, write empty tombstone
 			if value != nil {
-				fullKey := key[:len(key)-8]
-				if err := rwTx.Put(d.ValuesTable, append(fullKey, unwindStepBytes...), value); err != nil {
+				// key aliases the diff's immutable string, and dropping its trailing
+				// step leaves exactly the 8 bytes of spare capacity the append needs,
+				// so appending in place would rewrite that string. Build a new key.
+				unwindKey := make([]byte, 0, len(key))
+				unwindKey = append(unwindKey, key[:len(key)-8]...)
+				unwindKey = append(unwindKey, unwindStepBytes...)
+				if err := rwTx.Put(d.ValuesTable, unwindKey, value); err != nil {
 					return err
 				}
 			}
@@ -1424,7 +1430,7 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		// returns the smallest. nil = different step, skip; []byte{} = absent, write tombstone.
 		lastForKey := i+1 == len(domainDiffs) || domainDiffs[i+1].Key[:len(domainDiffs[i+1].Key)-8] != keyStr[:len(keyStr)-8]
 		if value != nil && lastForKey {
-			if err := valsCursor.Put(fullKey, append(unwindStepBytes, value...)); err != nil {
+			if err := valsCursor.Put(fullKey, append(unwindStepBytes, value...)); err != nil { //nolint:makezero
 				return err
 			}
 		}
@@ -1519,9 +1525,6 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 	return nil, false, 0, 0, nil
 }
 
-// getLatestFromFilesValSize is getLatestFromFiles returning only the value's
-// size. Reads through getFromFileCache when present but never populates it —
-// a size-only read has no value bytes to fill it with.
 func (dt *DomainRoTx) getLatestFromFilesValSize(k []byte, maxTxNum uint64) (size int, found bool, err error) {
 	if len(dt.files) == 0 {
 		return 0, false, nil
@@ -1531,17 +1534,13 @@ func (dt *DomainRoTx) getLatestFromFilesValSize(k []byte, maxTxNum uint64) (size
 	}
 	useExistenceFilter := dt.d.Accessors.Has(statecfg.AccessorExistence)
 	useCache := dt.name != kv.CommitmentDomain && maxTxNum == math.MaxUint64
-
 	hi, lo := dt.ht.iit.hashKey(k)
 
 	if useCache && dt.getFromFileCache != nil {
-		// A nil cached value is ambiguous — it marks both "key is in no file" and
-		// an empty value stored in a file — so those are resolved from the files.
-		if cv, ok := dt.getFromFileCache.Get(hi); ok && cv.v != nil {
+		if cv, ok := dt.getFromFileCache.Get(hi); ok {
 			return len(cv.v), true, nil
 		}
 	}
-
 	for i, f := range slices.Backward(dt.files) {
 		if maxTxNum != math.MaxUint64 && f.startTxNum > maxTxNum {
 			continue
@@ -1560,19 +1559,15 @@ func (dt *DomainRoTx) getLatestFromFilesValSize(k []byte, maxTxNum uint64) (size
 	return 0, false, nil
 }
 
-// GetLatestValSize returns the size of the latest value without materializing
-// it — for domains with compressed values (Code) this skips decompression.
-// Mirrors GetLatest's db-then-files resolution; found=true with size=0 means
-// an empty (deleted) value, same as GetLatest's v=nil.
 func (dt *DomainRoTx) GetLatestValSize(key []byte, roTx kv.Tx) (size int, found bool, err error) {
 	if dt.d.Disable {
 		return 0, false, nil
 	}
-	v, _, foundInDb, err := dt.getLatestFromDb(key, roTx)
+	v, _, found, err := dt.getLatestFromDb(key, roTx)
 	if err != nil {
 		return 0, false, fmt.Errorf("getLatestFromDb: %w", err)
 	}
-	if foundInDb {
+	if found {
 		return len(v), true, nil
 	}
 	return dt.getLatestFromFilesValSize(key, 0)

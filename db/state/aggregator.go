@@ -2738,13 +2738,7 @@ func (at *AggregatorRoTx) MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx,
 	return at.getLatest(domain, k, tx, maxStep, metrics, start)
 }
 
-// GetLatestValSize returns the size of the latest value without materializing
-// it. Not supported for CommitmentDomain (values may need key un-shortening,
-// which changes the size).
 func (at *AggregatorRoTx) GetLatestValSize(domain kv.Domain, k []byte, tx kv.Tx) (size int, ok bool, err error) {
-	if domain == kv.CommitmentDomain {
-		return 0, false, errors.New("GetLatestValSize: not supported for CommitmentDomain")
-	}
 	return at.d[domain].GetLatestValSize(k, tx)
 }
 

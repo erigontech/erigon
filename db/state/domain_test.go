@@ -50,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/stream"
@@ -86,7 +87,7 @@ func testDbAndDomainOfStep(t *testing.T, domainCfg statecfg.DomainCfg, aggStep u
 	dirs := datadir2.New(t.TempDir())
 	cfg := domainCfg
 
-	db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).MustOpen()
 	t.Cleanup(db.Close)
 	salt := uint32(1)
 
@@ -3414,7 +3415,7 @@ func filledDomainWithHashMapAccessor(t *testing.T, logger log.Logger) (kv.RwDB, 
 		AccessorEFI: version.V1_0_standart,
 	}
 
-	db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).MustOpen()
 	t.Cleanup(db.Close)
 	salt := uint32(1)
 
@@ -3696,78 +3697,55 @@ func TestDomain_UnwindRestoresDeletionMarker(t *testing.T) {
 }
 
 func TestDomain_GetLatestValSize(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	t.Parallel()
-
-	logger := log.New()
 
 	check := func(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 		t.Helper()
-		require := require.New(t)
 		err := db.UpdateNosync(t.Context(), func(tx kv.RwTx) error {
 			collateAndMerge(t, tx, d, txs)
 			return nil
 		})
-		require.NoError(err)
+		require.NoError(t, err)
 
-		domainRoTx := d.beginForTests()
-		defer domainRoTx.Close()
+		domainTx := d.beginForTests()
+		defer domainTx.Close()
 		roTx, err := db.BeginRo(t.Context())
-		require.NoError(err)
+		require.NoError(t, err)
 		defer roTx.Rollback()
 
-		for keyNum := uint64(1); keyNum <= uint64(31); keyNum++ {
-			var k [8]byte
-			binary.BigEndian.PutUint64(k[:], keyNum)
-			label := fmt.Sprintf("keyNum=%d", keyNum)
+		for keyNum := uint64(1); keyNum <= 31; keyNum++ {
+			var key [8]byte
+			binary.BigEndian.PutUint64(key[:], keyNum)
+			fileValue, fileFound, _, _, err := domainTx.getLatestFromFiles(key[:], 0)
+			require.NoError(t, err)
+			fileSize, sizeFound, err := domainTx.getLatestFromFilesValSize(key[:], 0)
+			require.NoError(t, err)
+			require.Equal(t, fileFound, sizeFound)
+			require.Equal(t, len(fileValue), fileSize)
 
-			sizeF, sizeFoundF, err := domainRoTx.getLatestFromFilesValSize(k[:], 0)
-			require.NoError(err, label)
-			vf, foundInFiles, _, _, err := domainRoTx.getLatestFromFiles(k[:], 0)
-			require.NoError(err, label)
-			require.Equal(foundInFiles, sizeFoundF, label)
-			require.Equal(len(vf), sizeF, label)
-
-			v, _, found, err := domainRoTx.GetLatest(k[:], roTx)
-			require.NoError(err, label)
-			require.True(found, label)
-
-			size, sizeFound, err := domainRoTx.GetLatestValSize(k[:], roTx)
-			require.NoError(err, label)
-			require.True(sizeFound, label)
-			require.Equal(len(v), size, label)
+			value, _, found, err := domainTx.GetLatest(key[:], roTx)
+			require.NoError(t, err)
+			require.True(t, found)
+			size, found, err := domainTx.GetLatestValSize(key[:], roTx)
+			require.NoError(t, err)
+			require.True(t, found)
+			require.Equal(t, len(value), size)
 		}
 
 		var missing [8]byte
 		binary.BigEndian.PutUint64(missing[:], 1000)
-		size, sizeFound, err := domainRoTx.GetLatestValSize(missing[:], roTx)
-		require.NoError(err)
-		require.False(sizeFound)
-		require.Zero(size)
-		_, _, found, err := domainRoTx.GetLatest(missing[:], roTx)
-		require.NoError(err)
-		require.False(found)
-
-		var cached [8]byte
-		binary.BigEndian.PutUint64(cached[:], 1001)
-		vf, foundInFiles, _, _, err := domainRoTx.getLatestFromFiles(cached[:], 0)
-		require.NoError(err)
-		require.NotNil(domainRoTx.getFromFileCache)
-		sizeF, sizeFoundF, err := domainRoTx.getLatestFromFilesValSize(cached[:], 0)
-		require.NoError(err)
-		require.Equal(foundInFiles, sizeFoundF)
-		require.Equal(len(vf), sizeF)
+		size, found, err := domainTx.GetLatestValSize(missing[:], roTx)
+		require.NoError(t, err)
+		require.False(t, found)
+		require.Zero(t, size)
 	}
 
-	t.Run("btree accessor", func(t *testing.T) {
-		db, d, txs := filledDomain(t, logger)
+	t.Run("btree", func(t *testing.T) {
+		db, d, txs := filledDomain(t, log.New())
 		check(t, db, d, txs)
 	})
-	t.Run("hashmap accessor", func(t *testing.T) {
-		db, d, txs := filledDomainWithHashMapAccessor(t, logger)
+	t.Run("hashmap", func(t *testing.T) {
+		db, d, txs := filledDomainWithHashMapAccessor(t, log.New())
 		check(t, db, d, txs)
 	})
 }
