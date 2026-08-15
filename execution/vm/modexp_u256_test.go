@@ -254,8 +254,9 @@ func BenchmarkModexpRouted(b *testing.B) {
 	for _, c := range benchModexpCases() {
 		input := make([]byte, 0, 96+len(c.base)+len(c.exp)+len(c.mod))
 		for _, n := range []int{len(c.base), len(c.exp), len(c.mod)} {
-			input = append(input, make([]byte, 24)...)
-			input = append(input, new(big.Int).SetInt64(int64(n)).FillBytes(make([]byte, 8))...)
+			var field [32]byte
+			big.NewInt(int64(n)).FillBytes(field[:])
+			input = append(input, field[:]...)
 		}
 		input = append(input, c.base...)
 		input = append(input, c.exp...)
