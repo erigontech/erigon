@@ -730,6 +730,33 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte, hi, lo uint64) (v
 
 }
 
+func (dt *DomainRoTx) getLatestFromFileValSize(i int, filekey []byte, hi, lo uint64) (size int, ok bool, err error) {
+	if dbg.KVReadLevelledMetrics {
+		defer domainReadMetric(dt.name, i).ObserveDuration(time.Now())
+	}
+	if dt.d.Accessors.Has(statecfg.AccessorBTree) {
+		return dt.statelessBtree(i).GetValSize(filekey, dt.reusableReader(i))
+	}
+	if dt.d.Accessors.Has(statecfg.AccessorHashMap) {
+		reader := dt.statelessIdxReader(i)
+		if reader.Empty() {
+			return 0, false, nil
+		}
+		offset, ok := reader.TwoLayerLookupByHash(hi, lo)
+		if !ok {
+			return 0, false, nil
+		}
+		g := dt.reusableReader(i)
+		g.Reset(offset)
+		if g.MatchCmp(filekey) != 0 {
+			return 0, false, nil
+		}
+		_, size = g.Skip()
+		return size, true, nil
+	}
+	return 0, false, errors.New("no index defined")
+}
+
 // beginForTests recomputes visible files from dirtyFiles directly instead of
 // using Aggregator's published snapshot. Unsafe to mix with an Aggregator,
 // because it can observe an unsynchronized/torn view of dirtyFiles across
@@ -1646,6 +1673,54 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 		dt.getFromFileCache.Add(hi, domainGetFromFileCacheItem{lvl: 0, v: nil})
 	}
 	return nil, false, 0, 0, nil
+}
+
+func (dt *DomainRoTx) getLatestFromFilesValSize(k []byte, maxTxNum uint64) (size int, found bool, err error) {
+	if len(dt.files) == 0 {
+		return 0, false, nil
+	}
+	if maxTxNum == 0 {
+		maxTxNum = math.MaxUint64
+	}
+	useExistenceFilter := dt.d.Accessors.Has(statecfg.AccessorExistence)
+	useCache := dt.name != kv.CommitmentDomain && maxTxNum == math.MaxUint64
+	hi, lo := dt.ht.iit.hashKey(k)
+
+	if useCache && dt.getFromFileCache != nil {
+		if cv, ok := dt.getFromFileCache.Get(hi); ok {
+			return len(cv.v), true, nil
+		}
+	}
+	for i, f := range slices.Backward(dt.files) {
+		if maxTxNum != math.MaxUint64 && f.startTxNum > maxTxNum {
+			continue
+		}
+		if useExistenceFilter && f.src.existence != nil && !f.src.existence.ContainsHash(hi) {
+			continue
+		}
+		size, found, err = dt.getLatestFromFileValSize(i, k, hi, lo)
+		if err != nil {
+			return 0, false, err
+		}
+		if found {
+			return size, true, nil
+		}
+	}
+	return 0, false, nil
+}
+
+func (dt *DomainRoTx) GetLatestValSize(key []byte, roTx kv.Tx) (size int, found bool, err error) {
+	if dt.d.Disable {
+		return 0, false, nil
+	}
+	v, _, found, err := dt.getLatestFromDb(key, roTx)
+	if err != nil {
+		return 0, false, fmt.Errorf("getLatestFromDb: %w", err)
+	}
+	if found {
+		return len(v), true, nil
+	}
+	return dt.getLatestFromFilesValSize(key, 0)
 }
 
 // Returns the first txNum from available history
