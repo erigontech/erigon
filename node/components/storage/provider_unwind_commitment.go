@@ -37,13 +37,24 @@ import (
 // touching the OLD file. See node/components/storage/provider_unwind_state_regen_wire.go
 // for the commitment-v4 emit that consumes regenBranches.
 type commitmentRecomputeResult struct {
+	// Target compute — state as-of lastTxNum. Consumed by Apply (drain
+	// into writable shadow) and by the mode-C stub v4 emit.
 	lastTxNum        uint64
 	encodedTrieState []byte
 	branches         *etl.Collector // consumed by Apply
 	regenBranches    *etl.Collector // consumed by regen (v4 commitment emit)
+
+	// Aligned compute — state as-of the last txN of the step BEFORE
+	// lastTxNum's step. Populated ONLY when lastTxNum is mid-step (so a
+	// step-aligned wide file makes sense alongside the stub v4). Nil
+	// when lastTxNum lands on a step boundary — there the target
+	// compute alone is emitted, matching the pre-split behaviour.
+	alignedTxNum        uint64
+	alignedEncodedState []byte
+	alignedBranches     *etl.Collector // consumed by aligned emit
 }
 
-// Close releases both collectors. Safe to call on a nil receiver and
+// Close releases every collector. Safe to call on a nil receiver and
 // idempotent — each collector is nilled after Close so a second call
 // is a no-op.
 func (r *commitmentRecomputeResult) Close() {
@@ -57,6 +68,10 @@ func (r *commitmentRecomputeResult) Close() {
 	if r.regenBranches != nil {
 		r.regenBranches.Close()
 		r.regenBranches = nil
+	}
+	if r.alignedBranches != nil {
+		r.alignedBranches.Close()
+		r.alignedBranches = nil
 	}
 }
 
@@ -150,11 +165,39 @@ func (p *Provider) ensureCommitmentAtBlockCompute(ctx context.Context, tx kv.Tem
 		}
 		return nil, fmt.Errorf("recomputed root %x does not match header stateRoot %x at block %d (baselineTxNum=%d)", root, header.Root, toBlock, baselineTxNum)
 	}
-	return &commitmentRecomputeResult{
+
+	result := &commitmentRecomputeResult{
 		lastTxNum:        lastTxNum,
 		encodedTrieState: encodedTrieState,
 		branches:         branches,
-	}, nil
+	}
+
+	// Aligned compute — only when the target lands mid-step. A
+	// step-aligned target has no head-step content, so a single
+	// emit covering [baselineStep*stepSize .. lastTxNum+1] IS
+	// already step-aligned; the split would produce an empty stub.
+	if (lastTxNum+1)%stepSize != 0 {
+		alignedTxNum := uint64(stepBoundary)*stepSize - 1
+		alignedMaxStep := stepBoundary
+		alignedRoot, alignedEncoded, _, alignedBranches, err := commitmentdb.RecomputeAtTxNumWithoutSD(
+			ctx, tx, tmpDir, alignedTxNum, alignedMaxStep, stepSize,
+		)
+		if err != nil {
+			result.Close()
+			return nil, fmt.Errorf("aligned RecomputeAtTxNumWithoutSD(alignedTxNum=%d, alignedMaxStep=%d): %w",
+				alignedTxNum, alignedMaxStep, err)
+		}
+		// Aligned root has no header to cross-check against (aligned
+		// txN != any block boundary in general). Content correctness
+		// falls out of the trie fold; downstream reads via file+
+		// history reproduce the same value as the target compute.
+		_ = alignedRoot
+		result.alignedTxNum = alignedTxNum
+		result.alignedEncodedState = alignedEncoded
+		result.alignedBranches = alignedBranches
+	}
+
+	return result, nil
 }
 
 // ensureCommitmentAtBlockApply drains the branch collector from the
