@@ -83,7 +83,7 @@ func TestBlockBuilderWindowGloas(t *testing.T) {
 
 func TestPublishBlindedBlocksRejectsGloas(t *testing.T) {
 	_, _, _, _, _, h, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
-	req := httptest.NewRequest(http.MethodPost, "/eth/v2/beacon/blinded_blocks", bytes.NewReader(nil))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blinded_blocks", bytes.NewReader(nil))
 	req.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
 
 	_, err := h.publishBlindedBlocks(httptest.NewRecorder(), req, 2)
@@ -102,7 +102,7 @@ func TestPublishBlindedBlocksRejectsPreBellatrix(t *testing.T) {
 			block := cltypes.NewSignedBlindedBeaconBlock(&clparams.MainnetBeaconConfig, version)
 			body, err := json.Marshal(block)
 			require.NoError(t, err)
-			req := httptest.NewRequest(http.MethodPost, "/eth/v2/beacon/blinded_blocks", bytes.NewReader(body))
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blinded_blocks", bytes.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("Eth-Consensus-Version", version.String())
 
@@ -119,7 +119,7 @@ func TestPublishBlindedBlocksRejectsPreBellatrix(t *testing.T) {
 
 func TestPublishBlindedBlocksRejectsUnsupportedContentType(t *testing.T) {
 	h := &ApiHandler{beaconChainCfg: &clparams.MainnetBeaconConfig}
-	req := httptest.NewRequest(http.MethodPost, "/eth/v2/beacon/blinded_blocks", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blinded_blocks", nil)
 	req.Header.Set("Content-Type", "text/plain")
 	req.Header.Set("Eth-Consensus-Version", clparams.FuluVersion.String())
 
@@ -146,7 +146,7 @@ func TestPublishBlindedBlocksAcceptsEmptyFuluBuilderResponse(t *testing.T) {
 	block := cltypes.NewSignedBlindedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
 	body, err := json.Marshal(block)
 	require.NoError(t, err)
-	req := httptest.NewRequest(http.MethodPost, "/eth/v2/beacon/blinded_blocks", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blinded_blocks", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json; charset=utf-8")
 	req.Header.Set("Eth-Consensus-Version", clparams.FuluVersion.String())
 
@@ -166,7 +166,7 @@ func TestPublishBlindedBlocksRejectsMissingPreFuluPayload(t *testing.T) {
 	block := cltypes.NewSignedBlindedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.ElectraVersion)
 	body, err := json.Marshal(block)
 	require.NoError(t, err)
-	req := httptest.NewRequest(http.MethodPost, "/eth/v2/beacon/blinded_blocks", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blinded_blocks", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Eth-Consensus-Version", clparams.ElectraVersion.String())
 
@@ -234,7 +234,7 @@ func TestPublishBlindedBlocksRejectsMalformedRequest(t *testing.T) {
 			if tc.mutateJSON != nil {
 				body = tc.mutateJSON(t, body)
 			}
-			req := httptest.NewRequest(http.MethodPost, "/eth/v2/beacon/blinded_blocks", bytes.NewReader(body))
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blinded_blocks", bytes.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("Eth-Consensus-Version", clparams.FuluVersion.String())
 

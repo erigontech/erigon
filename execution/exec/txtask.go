@@ -511,7 +511,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
 			if genesis != nil {
 				var genesisIbs *state.IntraBlockState
-				_, genesisIbs, err = genesiswrite.GenesisToBlock(nil, genesis, dirs, txTask.Logger)
+				_, genesisIbs, err = genesiswrite.GenesisToBlock(genesis, dirs, txTask.Logger)
 				if err != nil {
 					panic(err)
 				}

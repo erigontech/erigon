@@ -21,7 +21,6 @@ import (
 	"slices"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
@@ -127,14 +126,15 @@ func (a *logArena) revertLast(txIndex int) {
 }
 
 // forTx returns the entries txIndex emitted, owned by the arena. They are held
-// in one run rather than grouped, and a transaction's own are the tail of it,
-// so any other transaction reads as empty.
+// in one run rather than grouped, and a transaction's own are the tail of it, so
+// a transaction newer than the tail reads as empty and an older one panics.
 func (a *logArena) forTx(txIndex int) types.Logs {
 	entries := a.entries
 	i := len(entries)
-	if dbg.AssertEnabled && i > 0 && txIndex < int(entries[i-1].TxIndex) {
+	if i > 0 && txIndex < int(entries[i-1].TxIndex) {
 		// Newer than the tail is a transaction that emitted nothing, which is
-		// how most of them end. Older is a caller reading what it has left.
+		// how most of them end. Older is a caller reading what it has left:
+		// answering empty would read as "emitted no logs", so say so instead.
 		panic(fmt.Sprintf("logs of tx %d asked for, the run has reached tx %d",
 			txIndex, int(entries[i-1].TxIndex)))
 	}
