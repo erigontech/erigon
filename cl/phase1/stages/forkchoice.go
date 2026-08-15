@@ -309,16 +309,20 @@ func saveHeadStateOnDisk(cfg *Cfg, headState *state.CachingBeaconState) error {
 	return nil
 }
 
+// smallValidatorSetForPerSlotSave gates the per-slot head-state save. At or below this validator count the
+// beacon state is small (tens of KB) so saving it every slot is negligible, AND such a network is a
+// dev/private/single-node setup with no peer to backfill a restart gap — so the durable head MUST track the
+// live head, or a warm restart re-anchors behind the execution head (backward fork-choice → wedge, or
+// unwind → silent history loss). Above it a network has peers to backfill on restart and a much larger
+// state, so the cheap 40-slot cadence is right. Physical (state-size) gate, not a mode flag. 128 to start
+// (dev runs 64 validators); tune as needed.
+const smallValidatorSetForPerSlotSave = 128
+
 // saveHeadStateOnDiskIfNeeded saves the head state on disk for eventual node restarts without checkpoint
-// sync. On a NETWORKED node it's enough to save every 40 slots — a restart re-anchors on that checkpoint
-// and a peer backfills the gap up to the live head. In DEV mode (IsDevnet — single-node, LocalDiscovery,
-// NO peers to backfill) that gap can never close, so the durable head must NOT lag the EL head or a warm
-// restart re-anchors behind it and the EL rejects the backward fork-choice update (wedge) or unwinds
-// (silent history loss). So save EVERY slot in dev; the dev state is tiny (~tens of KB, minimal preset)
-// so per-slot saves are negligible.
+// sync — every slot for a small (dev/single-node) validator set, else every 40 slots. See the constant.
 func saveHeadStateOnDiskIfNeeded(cfg *Cfg, headState *state.CachingBeaconState) error {
 	epochFrequency := uint64(5)
-	everySlot := cfg.caplinConfig.IsDevnet()
+	everySlot := headState.ValidatorLength() < smallValidatorSetForPerSlotSave
 	if everySlot || headState.Slot()%(cfg.beaconCfg.SlotsPerEpoch*epochFrequency) == 0 {
 		return saveHeadStateOnDisk(cfg, headState)
 	}
