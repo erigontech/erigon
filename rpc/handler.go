@@ -681,8 +681,13 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 // except '<', '>', '&' and U+2028/2029 in the id/result are left unescaped (valid JSON, same value).
 func (msg *jsonrpcMessage) writeTo(stream jsonstream.Stream) {
 	if msg.Error != nil || msg.Result == nil || msg.ID == nil || msg.Version == "" || msg.Method != "" || msg.Params != nil {
-		buf, _ := json.Marshal(msg)
-		_, _ = stream.Write(buf)
+		buf, err := json.Marshal(msg)
+		if err != nil {
+			buf, err = json.Marshal(msg.errorResponse(err))
+		}
+		if err == nil {
+			_, _ = stream.Write(buf)
+		}
 		return
 	}
 	stream.WriteObjectStart()

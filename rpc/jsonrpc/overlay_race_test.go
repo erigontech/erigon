@@ -198,6 +198,27 @@ func TestGetBlockByTimestamp_SeesOverlayHead(t *testing.T) {
 		"must resolve to the overlay head block, not the stale MDBX-committed head")
 }
 
+func TestGetModifiedAccountsByNumber_UsesCommittedStartTag(t *testing.T) {
+	t.Parallel()
+	base, m, _ := newOverlayAheadTestAPI(t)
+	api := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
+
+	result, err := api.GetModifiedAccountsByNumber(m.Ctx, rpc.LatestBlockNumber, nil)
+	require.NoError(t, err)
+	require.NotEmpty(t, result)
+}
+
+func TestGetModifiedAccountsByNumber_UsesCommittedEndTag(t *testing.T) {
+	t.Parallel()
+	base, m, _ := newOverlayAheadTestAPI(t)
+	api := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
+	latest := rpc.LatestBlockNumber
+
+	result, err := api.GetModifiedAccountsByNumber(m.Ctx, rpc.EarliestBlockNumber, &latest)
+	require.NoError(t, err)
+	require.NotEmpty(t, result)
+}
+
 // TestGetTransactionByHash_PendingTx_UsesOverlayHead pins that the pending-tx
 // fallback in GetTransactionByHash reads the current header through the block
 // overlay: the returned tx's gas price (derived from that header's base fee)

@@ -44,8 +44,6 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-const foreseenProposers = 16
-
 var (
 	ErrEIP4844DataNotAvailable       = errors.New("EIP-4844 blob data is not available")
 	ErrEIP7594ColumnDataNotAvailable = errors.New("EIP-7594 column data is not available")

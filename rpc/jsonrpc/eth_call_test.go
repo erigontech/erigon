@@ -434,7 +434,7 @@ func TestGetProof(t *testing.T) {
 						continue
 					}
 					found = true
-					require.Equal(t, tt.stateVal, (*big.Int)(storageProof.Value).Uint64())
+					require.Equal(t, tt.stateVal, (*uint256.Int)(storageProof.Value).Uint64())
 					err = trie.VerifyStorageProof(proof.StorageHash, storageProof)
 					require.NoError(t, err)
 				}
@@ -514,7 +514,7 @@ func TestGetProofPinsReadSnapshot(t *testing.T) {
 	)
 	require.NoError(t, err)
 	require.NotNil(t, proof)
-	require.Equal(t, uint64(2), (*big.Int)(proof.StorageProof[0].Value).Uint64())
+	require.Equal(t, uint64(2), (*uint256.Int)(proof.StorageProof[0].Value).Uint64())
 }
 
 func TestGetProofGenesisPrunedCommitmentHistory(t *testing.T) {

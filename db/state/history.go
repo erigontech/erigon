@@ -986,45 +986,6 @@ func (ht *HistoryRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
 	return r
 }
 
-func (ht *HistoryRoTx) canHashPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo uint64) {
-	minIdxTx, maxIdxTx := ht.iit.ii.minTxNumInDB(tx), ht.iit.ii.maxTxNumInDB(tx)
-	//defer func() {
-	//	fmt.Printf("CanPrune[%s]Until(%d) noFiles=%t txTo %d idxTx [%d-%d] keepRecentTxInDB=%d; result %t\n",
-	//		ht.h.filenameBase, untilTx, ht.h.dontProduceHistoryFiles, txTo, minIdxTx, maxIdxTx, ht.h.keepRecentTxInDB, minIdxTx < txTo)
-	//}()
-
-	if ht.h.SnapshotsDisabled {
-		if ht.h.KeepRecentTxnInDB >= maxIdxTx {
-			return false, 0
-		}
-		txTo = min(maxIdxTx-ht.h.KeepRecentTxnInDB, untilTx) // bound pruning
-	} else {
-		canPruneIdx := ht.iit.CanPrune(tx, untilTx)
-		if !canPruneIdx {
-			return false, 0
-		}
-		txTo = min(ht.files.EndTxNum(), ht.iit.files.EndTxNum(), untilTx)
-	}
-	minTxDB := ht.h.minTxNumInDB(tx)
-	delta := 0.0
-	if txTo > minTxDB {
-		delta = float64(txTo-minTxDB) / float64(ht.stepSize) //TODO: why this is happening?
-	}
-
-	switch ht.h.FilenameBase {
-	case "accounts":
-		mxPrunableHAcc.Set(delta)
-	case "storage":
-		mxPrunableHSto.Set(delta)
-	case "code":
-		mxPrunableHCode.Set(delta)
-	case "commitment":
-		mxPrunableHComm.Set(delta)
-	}
-
-	return minIdxTx < txTo, txTo
-}
-
 func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo uint64) {
 	minIdxTx, maxIdxTx := ht.iit.ii.minTxNumInDB(tx), ht.iit.ii.maxTxNumInDB(tx)
 

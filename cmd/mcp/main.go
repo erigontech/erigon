@@ -129,7 +129,7 @@ Examples:
 				url = fmt.Sprintf("http://127.0.0.1:%d", port)
 			} else {
 				// Auto-discover: probe default ports.
-				if discovered := autoDiscover(logger); discovered != "" {
+				if discovered := autoDiscover(ctx, logger); discovered != "" {
 					url = discovered
 				}
 			}
@@ -193,11 +193,14 @@ func serve(ctx context.Context, srv *mcpserver.ErigonMCPServer, transport, sseAd
 }
 
 // autoDiscover probes localhost on well-known JSON-RPC ports.
-func autoDiscover(logger log.Logger) string {
+func autoDiscover(ctx context.Context, logger log.Logger) string {
 	logger.Info("[MCP] Auto-discovering Erigon JSON-RPC endpoint...")
+	var dialer net.Dialer
 	for _, p := range defaultRPCPorts {
 		addr := fmt.Sprintf("127.0.0.1:%d", p)
-		conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
+		dialCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+		conn, err := dialer.DialContext(dialCtx, "tcp", addr)
+		cancel()
 		if err == nil {
 			conn.Close()
 			url := fmt.Sprintf("http://%s", addr)
