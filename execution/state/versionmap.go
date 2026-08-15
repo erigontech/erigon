@@ -1053,7 +1053,7 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 			// baseline, equivalent to a storage read of a non-existent cell; re-run the
 			// create/destruct cross-checks the storage-read path does so a concurrent
 			// lower-tx create or SELFDESTRUCT still invalidates it.
-			if valid == VersionValid && path == AddressPath && rr.Version().TxIndex == originTxIndex {
+			if valid == VersionValid && path == AddressPath && rr.Version().TxIndex == originIndex {
 				valid = vm.validateReadImpl(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, StorageRead,
 					version, vm.ReadStatus(addr, SelfDestructPath, accounts.StorageKey{}, txIndex), nil, checkVersion, traceInvalid, tracePrefix, true)
 				if valid == VersionValid {

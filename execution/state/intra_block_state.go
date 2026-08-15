@@ -2647,8 +2647,20 @@ func (sdb *IntraBlockState) withholdCreatedEmptyAccounts(chainRules *chain.Rules
 			continue
 		}
 		read, ok := sdb.versionedReads.GetAddress(addr)
-		if !ok || (read.Val != nil && !read.Val.IsNil()) || !writes.createdEmpty(addr) {
+		if (read.Val != nil && !read.Val.IsNil()) || !writes.createdEmpty(addr) {
 			continue
+		}
+		// With no address read this tx, the tx didn't observe the account's
+		// pre-tx state — which happens when an empty account created earlier in
+		// the block lingers in the IBS (e.g. a coinbase touched by a zero tip).
+		// Fall back to the pre-block base: a loaded account carries a non-zero
+		// CodeHash (EmptyCodeHash for an EOA), so a zero CodeHash means the
+		// account never existed and its created-empty writes are withheld;
+		// otherwise it existed and needs an explicit delete, so keep the writes.
+		if !ok {
+			if so, soOk := sdb.stateObjects[addr]; soOk && so.original.CodeHash != (accounts.CodeHash{}) {
+				continue
+			}
 		}
 		writes.deleteAddr(addr)
 	}

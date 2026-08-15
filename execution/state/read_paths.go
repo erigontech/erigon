@@ -18,14 +18,14 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// originTxIndex is the versionMap index of the pre-block committed base ("origin"
+// originIndex is the versionMap index of the pre-block committed base ("origin"
 // = all account fields read at once, the old stateObject.original). It is the
 // highest slot below every real task index: the lowest task is the block-begin
 // system task at -1, whose read floor (Descend at txIndex-1) is -2, so the origin
 // must be <= -2 for that task to read it; and UnknownDep sits one below (-3) so
 // readFloor never confuses the origin cell with a missing one. Being below any
 // SELFDESTRUCT index, the revival/lifecycle checks treat it as an inert baseline.
-const originTxIndex = -2
+const originIndex = -2
 
 // codeSizeFromStateObject is the per-stateObject code-size fetch used by
 // readCodeSize: cached so.code first, else a single code read that populates
@@ -827,14 +827,24 @@ func readAccountInternal(s *IntraBlockState, addr accounts.Address) (*accounts.A
 		// path, whose self-destruct dependency travels on the field reads. Recording
 		// it would trip the origin cross-check (an Incarnation cell from the destruct
 		// exists) and invalidate the tx forever.
-		if r.version.TxIndex == originTxIndex && gateOriginAccount(s, addr, acc) == nil {
+		if r.version.TxIndex == originIndex && gateOriginAccount(s, addr, acc) == nil {
 			return nil, r.source, r.version, nil
 		}
 		if r.recordVR {
 			s.versionedReads.SetAddress(addr, VersionedRead[AccountView]{r.hdr, NewAccountView(acc)})
 		}
 		return acc, r.source, r.version, nil
-	case outcomeReturnZero, outcomeReturnDefault:
+	case outcomeReturnZero:
+		// The account read as absent because a prior tx self-destructed it; the
+		// SD dependency is already recorded (at the destruct version). Return
+		// absent at that version WITHOUT re-seeding the committed origin. Seeding
+		// here would record a stale origin (-2) AddressPath read that the same-tx
+		// create+destruct write at index >= 0 invalidates forever (the origin
+		// cross-check), which is the same hazard the outcomeMapDone origin gate
+		// above avoids. Whole-account callers (versionedAccountBase) apply the
+		// EIP-8246 preserve/absent reconstruction from the destruct version.
+		return nil, r.source, r.version, nil
+	case outcomeReturnDefault:
 		// versionMap miss: the single point where the committed whole-account
 		// origin enters the execution store.
 		if acc, src, ver, seeded, err := seedOrigin(s, addr); seeded {
@@ -852,7 +862,7 @@ func readAccountInternal(s *IntraBlockState, addr accounts.Address) (*accounts.A
 }
 
 // SeedOrigin publishes acc as addr's committed origin in the versionMap (at
-// originTxIndex), for the one write path that obtains a committed account outside
+// originIndex), for the one write path that obtains a committed account outside
 // the IntraBlockState read path: the block-fee tip (calcFees) credits the
 // coinbase and burnt-fee contract's Balance via a versionedStateReader, without a
 // seeding read. Without this their whole-account base (nonce/code/committed
@@ -863,11 +873,11 @@ func SeedOrigin(vm *VersionMap, addr accounts.Address, acc *accounts.Account) {
 		return
 	}
 	origin := *acc
-	vm.WriteAddress(addr, Version{TxIndex: originTxIndex}, &origin, true)
+	vm.WriteAddress(addr, Version{TxIndex: originIndex}, &origin, true)
 }
 
 // gateOriginAccount applies the in-block lifecycle gate to a committed-origin
-// account (versionMap AddressPath at originTxIndex): if a prior tx destroyed it
+// account (versionMap AddressPath at originIndex): if a prior tx destroyed it
 // with no revival, it reads as absent. In-block-created accounts (AddressPath at
 // index >= 0) are not gated here — their lifecycle is carried by their own cells.
 func gateOriginAccount(s *IntraBlockState, addr accounts.Address, acc *accounts.Account) *accounts.Account {
@@ -882,8 +892,8 @@ func gateOriginAccount(s *IntraBlockState, addr accounts.Address, acc *accounts.
 
 // seedOrigin handles an AddressPath versionMap miss: it reads the committed
 // pre-block account once (the "origin" = all fields at once), seeds
-// it into the versionMap at originTxIndex so later reads and apply resolve the
-// base from the execution store, and records this read at originTxIndex so the
+// it into the versionMap at originIndex so later reads and apply resolve the
+// base from the execution store, and records this read at originIndex so the
 // tx's own re-reads agree (no self-dependency). seeded=false means the account
 // does not exist committed, so the caller falls back to the legacy miss record.
 func seedOrigin(s *IntraBlockState, addr accounts.Address) (acc *accounts.Account, src ReadSource, ver Version, seeded bool, err error) {
@@ -906,8 +916,8 @@ func seedOrigin(s *IntraBlockState, addr accounts.Address) (acc *accounts.Accoun
 		return nil, UnknownSource, UnknownVersion, false, nil
 	}
 	origin := *committed
-	s.versionMap.WriteAddress(addr, Version{TxIndex: originTxIndex}, &origin, true)
-	ver = Version{TxIndex: originTxIndex}
+	s.versionMap.WriteAddress(addr, Version{TxIndex: originIndex}, &origin, true)
+	ver = Version{TxIndex: originIndex}
 	// A destructed origin reads as absent and is NOT recorded as an AddressPath
 	// read (the self-destruct dependency travels on the field reads, as in the
 	// legacy path). Only an alive origin is recorded, so its cross-check catches a

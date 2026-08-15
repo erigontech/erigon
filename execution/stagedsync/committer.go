@@ -687,6 +687,12 @@ func (cc *commitmentCalculator) shadowCrossCheck(ctx context.Context, r *blockRe
 		cc.fail(ctx, r, fmt.Errorf("shadow incremental lazy-load: %w", err))
 		return
 	}
+	// Mirror compute(): the raw versionMap view carries no EIP-161 deletion
+	// marker, so an account touched-empty this block (e.g. the system address on
+	// an EIP-4788 beacon-root call) must be removed here before the flush, or the
+	// incremental recompute keeps a spurious leaf the BAL-driven root dropped.
+	emptyRemoval := r.BlockNum != 0 && cc.chainConfig.IsEIP161Enabled(r.BlockNum)
+	cc.state.ApplyEIP161Removal(emptyRemoval, cc.chainConfig.Aura != nil)
 	cc.state.flushToUpdates(cc.updates)
 	cc.state.ResetBlockFlags()
 	incUpdates := cc.updates

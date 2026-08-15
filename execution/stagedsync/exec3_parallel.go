@@ -2398,36 +2398,15 @@ func (result *execResult) calcFees(
 		newBurntBalance.Add(&newBurntBalance, &result.ExecutionResult.FeeBurnt)
 	}
 
-	// EIP-161 empty-removal: even when the tip is zero (newBal == oldBal)
-	// the coinbase must be "touched" so the commitment calculator sees the
-	// empty-account delete. Matches serial executor's AddBalance(coinbase, 0)
-	// → TouchAccount → MakeWriteSet emits a SelfDestructPath delete.
-	//
-	// Use the worker's post-write Nonce / CodeHash (not pre-tx coinbaseAcc) so
-	// that a sender==coinbase tx whose worker wrote a non-empty Nonce isn't
-	// mistakenly treated as empty here when FeeTipped==0.
-	coinbaseEmptyRemoval := state.EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, result.Coinbase)
-	// nil pre-state must not short-circuit to empty=true: a worker may
-	// have already bumped Nonce or set CodeHash, and EIP-161 emptiness
-	// must respect those writes — otherwise SelfDestructPath is emitted
-	// and Normalize's sdSet filter drops them.
-	coinbaseEmptyPre := (coinbaseAcc == nil || coinbaseAcc.Balance.IsZero()) &&
-		coinbaseNonce == 0 && coinbaseEmptyCodeHash && !coinbaseHasCodeHashWrite
-	emitCoinbase := newCoinbaseBalance != oldCoinbaseBalance ||
-		(coinbaseEmptyRemoval && coinbaseEmptyPre && newCoinbaseBalance.IsZero())
+	// A zero tip leaves the coinbase balance unchanged; a touch that changes
+	// nothing produces no write. Serial withholds a created-empty account
+	// (withholdCreatedEmptyAccounts) rather than emit a delete, so synthesizing a
+	// SelfDestructPath here would diverge from the canonical block access list.
+	emitCoinbase := newCoinbaseBalance != oldCoinbaseBalance
 
 	addWrites := &state.WriteSet{}
 	if emitCoinbase {
-		if coinbaseEmptyRemoval && coinbaseEmptyPre && newCoinbaseBalance.IsZero() {
-			addWrites.SetSelfDestruct(result.Coinbase, &state.VersionedWrite[bool]{
-				WriteHeader: state.WriteHeader{
-					Address: result.Coinbase,
-					Path:    state.SelfDestructPath,
-					Version: taskVersion,
-				},
-				Val: true,
-			})
-		} else {
+		{
 			addWrites.SetBalance(result.Coinbase, &state.VersionedWrite[uint256.Int]{
 				WriteHeader: state.WriteHeader{
 					Address: result.Coinbase,
