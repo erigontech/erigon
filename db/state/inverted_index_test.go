@@ -29,6 +29,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/prune"
 
 	"github.com/erigontech/erigon/common/background"
@@ -41,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/kv/stream/streamtest"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 	"github.com/erigontech/erigon/db/seg"
@@ -53,7 +55,7 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 	dirs := datadir.New(tb.TempDir())
 	keysTable := "Keys"
 	indexTable := "Index"
-	db := mdbx.New(dbcfg.ChainDB, logger).InMem(tb, dirs.Chaindata).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	db := mdbxtest.InMem(tb, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
 			keysTable:             kv.TableCfgItem{Flags: kv.DupSort},
 			indexTable:            kv.TableCfgItem{Flags: kv.DupSort},
@@ -85,6 +87,32 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 	ii.salt.Store(&salt)
 	ii.DisableFsync()
 	return db, ii
+}
+
+func TestInvertedIndexVisibleEnd(t *testing.T) {
+	db, ii := testDbAndInvertedIndex(t, 16, log.New())
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	iit := ii.beginForTests()
+	defer iit.Close()
+	require.Zero(t, iit.Progress(tx))
+	require.Zero(t, iit.visibleEnd(tx))
+
+	var txNum [8]byte
+	require.NoError(t, tx.Put(ii.KeysTable, txNum[:], []byte{1}))
+	require.Zero(t, iit.Progress(tx))
+	require.Equal(t, uint64(1), iit.visibleEnd(tx))
+
+	binary.BigEndian.PutUint64(txNum[:], 100)
+	require.NoError(t, tx.Put(ii.KeysTable, txNum[:], []byte{1}))
+	require.Equal(t, uint64(100), iit.Progress(tx))
+	require.Equal(t, uint64(101), iit.visibleEnd(tx))
+
+	iit.files = visibleFiles{{endTxNum: 200}}
+	require.Equal(t, uint64(200), iit.Progress(tx))
+	require.Equal(t, uint64(200), iit.visibleEnd(tx))
 }
 
 func TestInvIndexPruningCorrectness(t *testing.T) {
@@ -185,7 +213,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 			defer ic.Close()
 
 			// this should prune exactly pruneLimit*pruneIter transactions
-			for i := 0; i < pruneIters; i++ {
+			for i := range pruneIters {
 				stat, err := ic.HashSeekingPrune(t.Context(), tx, 0, 1000, pruneLimit, logEvery, true, nil, nil, prune.DefaultStorageMode)
 				require.NoError(t, err)
 				t.Logf("[%d] stats: %v", i, stat)
@@ -346,7 +374,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 		})
 
 		t.Run("retire_one_step_no_force", func(t *testing.T) {
-			t.Skip() //TODO: can't deal with this false-positive but it's so theoretical in scanprune, so IDK
+			ii, tx, logEvery, _, _ := setup(t)
 			collation, err := ii.collate(t.Context(), 0, tx)
 			require.NoError(t, err)
 			sf, _ := ii.buildFiles(t.Context(), 0, collation, background.NewProgressSet())
@@ -354,94 +382,50 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 			txFrom, txTo := firstTxNumOfStep(0, ii.stepSize), firstTxNumOfStep(1, ii.stepSize)
 			ii.integrateDirtyFiles(sf, txFrom, txTo)
 
-			// without `reCalcVisibleFiles` must be nothing to prune - because files are not visible yet.
 			ic := ii.beginForTests()
 			defer ic.Close()
-			st := &prune.Stat{
-				MinTxNum:         0,
-				MaxTxNum:         0,
-				PruneCountTx:     0,
-				PruneCountValues: 0,
-				DupsDeleted:      0,
-				LastPrunedValue:  nil,
-				LastPrunedKey:    nil,
-				KeyProgress:      prune.Done,
-				ValueProgress:    prune.Done,
-				TxFrom:           0,
-				TxTo:             10,
-			}
-			err = SavePruneValProgress(tx, ic.ii.ValuesTable, st)
-			require.NoError(t, err)
-			stat, err := ic.TableScanningPrune(ctx, tx, 0, 10, pruneLimit, logEvery, false, nil, nil, mxPruneSizeIndex, prune.DefaultStorageMode)
-			require.NoError(t, err)
-			require.Zero(t, stat.PruneCountTx)
-			require.Zero(t, stat.PruneCountValues)
-
-			ic = ii.beginForTests()
-			defer ic.Close()
-			newTHR := 9 * time.Millisecond
-			otherCtx := context.WithValue(t.Context(), throttle, &newTHR)
-			stat, err = ic.TableScanningPrune(otherCtx, tx, 0, 10, pruneLimit, logEvery, false, nil, nil, mxPruneSizeIndex, prune.DefaultStorageMode)
+			stat, err := ic.TableScanningPrune(t.Context(), tx, 0, 10, pruneLimit, logEvery, false, nil, nil, mxPruneSizeIndex, prune.DefaultStorageMode)
 			require.NoError(t, err)
 			require.Equal(t, 9, int(stat.PruneCountTx))
 			require.Equal(t, 9, int(stat.PruneCountValues))
 
-			// prune only what left in step 0. Even if requested more. don't allow print more than what we have in visible files
-			stat, err = ic.TableScanningPrune(otherCtx, tx, 0, 20, pruneLimit, logEvery, false, nil, nil, mxPruneSizeIndex, prune.DefaultStorageMode)
+			// even if requested more, don't prune beyond what visible files cover (step 0 ends at stepSize).
+			stat, err = ic.TableScanningPrune(t.Context(), tx, 0, 20, pruneLimit, logEvery, false, nil, nil, mxPruneSizeIndex, prune.DefaultStorageMode)
 			require.NoError(t, err)
 			require.Equal(t, 6, int(stat.PruneCountTx))
 			require.Equal(t, 6, int(stat.PruneCountValues))
 		})
 
 		t.Run("force", func(t *testing.T) {
-			t.Skip() //TODO: figure out how to make it pretty
+			ii, tx, logEvery, from, _ := setup(t)
 			ic := ii.beginForTests()
 			defer ic.Close()
-			newTHR := 1 * time.Millisecond
-			ctx := context.WithValue(t.Context(), "throttle", &newTHR)
-			// this should prune exactly pruneLimit*pruneIter transactions
-			for i := 0; i < pruneIters; i++ {
-				stat, err := ic.TableScanningPrune(ctx, tx, 0, 1000, pruneLimit, logEvery, true, nil, nil, mxPruneSizeIndex, prune.DefaultStorageMode)
-				require.NoError(t, err)
-				t.Logf("[%d] stats: %v %d %d", i, stat, stat.PruneCountTx, stat.PruneCountValues)
-			}
 
-			// ascending - empty
-			it, err := ic.IdxRange(nil, 0, pruneIters*int(pruneLimit), order.Asc, -1, tx)
+			// Unlike HashSeekingPrune, TableScanningPrune does not honor `limit` for the
+			// key range: a single forced call prunes the whole [txFrom, txTo) range.
+			pruneTo := uint64(pruneIters) * pruneLimit
+			stat, err := ic.TableScanningPrune(t.Context(), tx, 0, pruneTo, pruneLimit, logEvery, true, nil, nil, mxPruneSizeIndex, prune.DefaultStorageMode)
+			require.NoError(t, err)
+			t.Logf("pruned tx=%d vals=%d", stat.PruneCountTx, stat.PruneCountValues)
+
+			// [0, pruneTo) fully pruned
+			it, err := ic.IdxRange(nil, 0, int(pruneTo), order.Asc, -1, tx)
 			require.NoError(t, err)
 			require.False(t, it.HasNext())
 			it.Close()
 
-			// descending - empty
-			it, err = ic.IdxRange(nil, pruneIters*int(pruneLimit), 0, order.Desc, -1, tx)
+			it, err = ic.IdxRange(nil, int(pruneTo), 0, order.Desc, -1, tx)
 			require.NoError(t, err)
 			require.False(t, it.HasNext())
 			it.Close()
 
-			// straight from pruned - not empty
+			// first surviving txn in the keys table == pruneTo
 			icc, err := tx.CursorDupSort(ii.KeysTable)
 			require.NoError(t, err)
 			defer icc.Close()
 			txn, _, err := icc.Seek(from[:])
 			require.NoError(t, err)
-			println("from", binary.BigEndian.Uint64(from[:]), "txn", binary.BigEndian.Uint64(txn))
-
-			prunedInStep0 := 16 - 1
-			// we pruned by limit so next transaction after prune should be equal to `pruneIters*pruneLimit+1`
-			// If we would prune by txnum then txTo prune should be available after prune is finished
-			require.EqualValues(t, pruneIters*int(pruneLimit)+prunedInStep0, int(binary.BigEndian.Uint64(txn)-1))
-			icc.Close()
-
-			// check second table
-			icc2, err := tx.CursorDupSort(ii.ValuesTable)
-			require.NoError(t, err)
-			defer icc2.Close()
-			key, txn, err := icc2.First()
-			t.Logf("key: %x, txn: %x", key, txn)
-			require.NoError(t, err)
-			// we pruned by limit so next transaction after prune should be equal to `pruneIters*pruneLimit+1`
-			// If we would prune by txnum then txTo prune should be available after prune is finished
-			require.EqualValues(t, pruneIters*int(pruneLimit)+prunedInStep0, int(binary.BigEndian.Uint64(txn)-1))
+			require.EqualValues(t, pruneTo, binary.BigEndian.Uint64(txn))
 		})
 
 	}) // scan_prune
@@ -633,7 +617,7 @@ func TestInvIndex_PruneRollingCursorProgress(t *testing.T) {
 		defer ic.Close()
 		w := ic.NewWriter()
 		defer w.close()
-		for k := uint64(0); k < keyCount; k++ {
+		for k := range uint64(keyCount) {
 			var key [8]byte
 			binary.BigEndian.PutUint64(key[:], k)
 			require.NoError(t, w.Add(key[:], txNum))
@@ -792,33 +776,33 @@ func checkRanges(t *testing.T, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 			reverseStream, err := ic.IdxRange(k[:], 976-1, 0, order.Desc, -1, nil)
 			require.NoError(t, err)
 			defer reverseStream.Close()
-			stream.ExpectEqualU64(t, stream.ReverseArray(values), reverseStream)
+			streamtest.ExpectEqualU64(t, stream.ReverseArray(values), reverseStream)
 		})
 		t.Run("unbounded asc", func(t *testing.T) {
 			forwardLimited, err := ic.IdxRange(k[:], -1, 976, order.Asc, 2, nil)
 			require.NoError(t, err)
 			defer forwardLimited.Close()
-			stream.ExpectEqualU64(t, stream.Array(values[:2]), forwardLimited)
+			streamtest.ExpectEqualU64(t, stream.Array(values[:2]), forwardLimited)
 		})
 		t.Run("unbounded desc", func(t *testing.T) {
 			reverseLimited, err := ic.IdxRange(k[:], 976-1, -1, order.Desc, 2, nil)
 			require.NoError(t, err)
 			defer reverseLimited.Close()
-			stream.ExpectEqualU64(t, stream.ReverseArray(values[len(values)-2:]), reverseLimited)
+			streamtest.ExpectEqualU64(t, stream.ReverseArray(values[len(values)-2:]), reverseLimited)
 		})
 		t.Run("tiny bound asc", func(t *testing.T) {
 			it, err := ic.IdxRange(k[:], 100, 102, order.Asc, -1, nil)
 			require.NoError(t, err)
 			defer it.Close()
 			expect := stream.FilterU64(stream.Array(values), func(k uint64) bool { return k >= 100 && k < 102 })
-			stream.ExpectEqualU64(t, expect, it)
+			streamtest.ExpectEqualU64(t, expect, it)
 		})
 		t.Run("tiny bound desc", func(t *testing.T) {
 			it, err := ic.IdxRange(k[:], 102, 100, order.Desc, -1, nil)
 			require.NoError(t, err)
 			defer it.Close()
 			expect := stream.FilterU64(stream.ReverseArray(values), func(k uint64) bool { return k <= 102 && k > 100 })
-			stream.ExpectEqualU64(t, expect, it)
+			streamtest.ExpectEqualU64(t, expect, it)
 		})
 	}
 	// Now check invertedIndex that require access to DB
@@ -978,7 +962,7 @@ func TestInvIndexScanFiles(t *testing.T) {
 
 	scanDirsRes, err := scanDirs(ii.dirs)
 	require.NoError(err)
-	err = ii.openFolder(scanDirsRes)
+	_, err = ii.openFolder(t.Context(), scanDirsRes)
 	require.NoError(err)
 
 	mergeInverted(t, db, ii, txs)
@@ -1103,7 +1087,7 @@ func TestInvIndex_OpenFolder(t *testing.T) {
 
 	scanDirsRes, err := scanDirs(ii.dirs)
 	require.NoError(t, err)
-	err = ii.openFolder(scanDirsRes)
+	_, err = ii.openFolder(t.Context(), scanDirsRes)
 	require.NoError(t, err)
 	ii.Close()
 }

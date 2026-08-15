@@ -20,6 +20,8 @@
 package t8ntool
 
 import (
+	"slices"
+
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -33,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 type Prestate struct {
@@ -80,7 +81,7 @@ type stEnvMarshaling struct {
 }
 
 func MakePreState(chainRules *chain.Rules, tx kv.TemporalRwTx, sd *execctx.SharedDomains, alloc types.GenesisAlloc, blockNum, txNum uint64) (state.StateReader, state.StateWriter) {
-	stateReader, stateWriter := rpchelper.NewLatestStateReader(tx), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+	stateReader, stateWriter := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 	statedb := state.New(stateReader) //ibs
 	for address, account := range alloc {
 		addr := accounts.InternAddress(address)
@@ -91,7 +92,7 @@ func MakePreState(chainRules *chain.Rules, tx kv.TemporalRwTx, sd *execctx.Share
 		statedb.SetBalance(addr, balance, tracing.BalanceIncreaseGenesisBalance)
 		for k, v := range account.Storage {
 			key := accounts.InternKey(k)
-			val := uint256.NewInt(0).SetBytes(v.Bytes())
+			val := uint256.NewInt(0).SetBytes(v[:])
 			statedb.SetState(addr, key, *val)
 		}
 
@@ -99,11 +100,15 @@ func MakePreState(chainRules *chain.Rules, tx kv.TemporalRwTx, sd *execctx.Share
 			statedb.SetIncarnation(addr, state.FirstContractIncarnation)
 		}
 	}
-	// Commit and re-open to start with a clean state.
-	if err := statedb.FinalizeTx(chainRules, stateWriter); err != nil {
+	// Commit and re-open to start with a clean state. EIP-161 is disabled here
+	// so the alloc retains declared empty accounts (matching geth's pre-state);
+	// empty-account clearing still applies during transaction execution.
+	preStateRules := *chainRules
+	preStateRules.DisabledEIPs = append(slices.Clone(chainRules.DisabledEIPs), 161)
+	if err := statedb.FinalizeTx(&preStateRules, stateWriter); err != nil {
 		panic(err)
 	}
-	if err := statedb.CommitBlock(chainRules, stateWriter); err != nil {
+	if err := statedb.CommitBlock(&preStateRules, stateWriter); err != nil {
 		panic(err)
 	}
 	return stateReader, stateWriter
@@ -120,7 +125,6 @@ func calcDifficulty(config *chain.Config, number, currentTime, parentTime uint64
 		uncleHash = empty.UncleHash
 	}
 	parent := &types.Header{
-		ParentHash: common.Hash{},
 		UncleHash:  uncleHash,
 		Difficulty: parentDifficulty,
 		Time:       parentTime,

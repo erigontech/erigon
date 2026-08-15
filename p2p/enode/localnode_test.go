@@ -116,7 +116,7 @@ func TestLocalNodeEndpoint(t *testing.T) {
 	assert.Equal(t, initialSeq+1, ln.Node().Seq())
 
 	// Add endpoint statements from random hosts.
-	for i := 0; i < iptrackMinStatements; i++ {
+	for range iptrackMinStatements {
 		assert.Equal(t, fallback.IP, ln.Node().IP())
 		assert.Equal(t, fallback.Port, ln.Node().UDP())
 		assert.Equal(t, initialSeq+1, ln.Node().Seq())

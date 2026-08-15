@@ -72,7 +72,7 @@ func (t *talkSystem) register(protocol string, handler TalkRequestHandler) {
 
 // handleRequest handles a talk request.
 func (t *talkSystem) handleRequest(id enode.ID, addr netip.AddrPort, req *v5wire.TalkRequest) {
-	n := t.transport.codec.SessionNode(id, addr.String())
+	n := t.transport.codec.SessionNode(id, addr)
 	if n == nil {
 		// The node must be contained in the session here, since we wouldn't have
 		// received the request otherwise.

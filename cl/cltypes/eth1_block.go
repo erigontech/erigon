@@ -114,12 +114,8 @@ func NewEth1BlockFromExecutionHeader(header *Eth1Header, version clparams.StateV
 
 // NewEth1BlockFromHeaderAndBody with given header/body.
 func NewEth1BlockFromHeaderAndBody(header *types.Header, body *types.RawBody, beaconCfg *clparams.BeaconChainConfig) *Eth1Block {
-	baseFeeBytes := header.BaseFee.Bytes()
-	for i, j := 0, len(baseFeeBytes)-1; i < j; i, j = i+1, j-1 {
-		baseFeeBytes[i], baseFeeBytes[j] = baseFeeBytes[j], baseFeeBytes[i]
-	}
 	var baseFee32 [32]byte
-	copy(baseFee32[:], baseFeeBytes)
+	_, _ = header.BaseFee.MarshalSSZAppend(baseFee32[:0])
 
 	extra := solid.NewExtraData()
 	extra.SetBytes(header.Extra)
@@ -142,19 +138,20 @@ func NewEth1BlockFromHeaderAndBody(header *types.Header, body *types.RawBody, be
 		beaconCfg:     beaconCfg,
 	}
 
-	if header.BlobGasUsed != nil && header.ExcessBlobGas != nil {
+	switch {
+	case header.BlobGasUsed != nil && header.ExcessBlobGas != nil:
 		block.BlobGasUsed = *header.BlobGasUsed
 		block.ExcessBlobGas = *header.ExcessBlobGas
 		block.version = clparams.DenebVersion
-	} else if header.WithdrawalsHash != nil {
+	case header.WithdrawalsHash != nil:
 		block.version = clparams.CapellaVersion
-	} else {
+	default:
 		block.version = clparams.BellatrixVersion
 	}
 
 	if header.SlotNumber != nil {
 		// BlockAccessList is initialized empty here because types.RawBody does not
-		// carry the block access list bytes (only types.RawBlock does). In production,
+		// carry the block access list bytes. In production,
 		// GLOAS execution payloads arrive via the Engine API and are populated through
 		// SSZ decoding, not this constructor. This function is currently only called
 		// from test code.
@@ -170,8 +167,8 @@ func (*Eth1Block) Static() bool {
 }
 
 func (b *Eth1Block) MarshalJSON() ([]byte, error) {
-	baseFeePerGas := uint256.NewInt(0).SetBytes32(b.BaseFeePerGas[:])
-	baseFeePerGas.ReverseBytes(baseFeePerGas)
+	baseFeePerGas := new(uint256.Int)
+	_ = baseFeePerGas.UnmarshalSSZ(b.BaseFeePerGas[:])
 
 	// Ensure withdrawals is never nil for Capella+ (spec requires empty array, not absent)
 	withdrawals := b.Withdrawals
@@ -298,8 +295,7 @@ func (b *Eth1Block) UnmarshalJSON(data []byte) error {
 	if err := tmp.SetFromDecimal(aux.BaseFeePerGas); err != nil {
 		return err
 	}
-	tmp.ReverseBytes(tmp)
-	tmp.WriteToArray32((*[32]byte)(&b.BaseFeePerGas))
+	_, _ = tmp.MarshalSSZAppend(b.BaseFeePerGas[:0])
 	b.BlockHash = aux.BlockHash
 	b.Transactions = aux.Transactions
 	b.Withdrawals = aux.Withdrawals
@@ -406,12 +402,23 @@ func (b *Eth1Block) EncodingSizeSSZ() (size int) {
 
 // DecodeSSZ decodes the block in SSZ format.
 func (b *Eth1Block) DecodeSSZ(buf []byte, version int) error {
+	return b.decodeSSZ(buf, version, false)
+}
+
+func (b *Eth1Block) DecodeSSZStrict(buf []byte, version int) error {
+	return b.decodeSSZ(buf, version, true)
+}
+
+func (b *Eth1Block) decodeSSZ(buf []byte, version int, strict bool) error {
 	b.Extra = solid.NewExtraData()
-	b.Transactions = &solid.TransactionsSSZ{}
+	b.Transactions = solid.NewTransactionsSSZWithLimits(b.beaconCfg.MaxTransactionsPerPayload, b.beaconCfg.MaxBytesPerTransaction)
 	b.Withdrawals = solid.NewStaticListSSZ[*Withdrawal](int(b.beaconCfg.MaxWithdrawalsPerPayload), 44)
 	b.version = clparams.StateVersion(version)
 	if b.version >= clparams.GloasVersion {
 		b.BlockAccessList = solid.NewByteListSSZ(b.beaconCfg.MaxBytesPerTransaction)
+	}
+	if strict {
+		return ssz2.UnmarshalSSZStrict(buf, version, b.getSchema()...)
 	}
 	return ssz2.UnmarshalSSZ(buf, version, b.getSchema()...)
 }
@@ -425,7 +432,46 @@ func (b *Eth1Block) EncodeSSZ(dst []byte) ([]byte, error) {
 // HashSSZ calculates the SSZ hash of the Eth1Block's payload header.
 func (b *Eth1Block) HashSSZ() ([32]byte, error) {
 	b.ensureSSZFields()
+	if b.version >= clparams.GloasVersion {
+		return b.hashSSZGloas()
+	}
 	return merkle_tree.HashTreeRoot(b.getSchema()...)
+}
+
+func (b *Eth1Block) hashSSZGloas() ([32]byte, error) {
+	transactionsRoot, err := b.Transactions.HashSSZProgressive()
+	if err != nil {
+		return [32]byte{}, err
+	}
+	withdrawalsRoot, err := b.Withdrawals.HashSSZProgressive(nil)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	blockAccessListRoot, err := b.BlockAccessList.HashSSZProgressive()
+	if err != nil {
+		return [32]byte{}, err
+	}
+	return merkle_tree.ProgressiveContainerRootAll(
+		b.ParentHash[:],
+		b.FeeRecipient[:],
+		b.StateRoot[:],
+		b.ReceiptsRoot[:],
+		b.LogsBloom[:],
+		b.PrevRandao[:],
+		b.BlockNumber,
+		b.GasLimit,
+		b.GasUsed,
+		b.Time,
+		b.Extra,
+		b.BaseFeePerGas[:],
+		b.BlockHash[:],
+		transactionsRoot[:],
+		withdrawalsRoot[:],
+		b.BlobGasUsed,
+		b.ExcessBlobGas,
+		blockAccessListRoot[:],
+		b.SlotNumber,
+	)
 }
 
 // ensureSSZFields lazily initializes nil slice/list fields that getSchema()
@@ -443,8 +489,10 @@ func (b *Eth1Block) ensureSSZFields() {
 }
 
 func (b *Eth1Block) getSchema() []any {
-	s := []any{b.ParentHash[:], b.FeeRecipient[:], b.StateRoot[:], b.ReceiptsRoot[:], b.LogsBloom[:],
-		b.PrevRandao[:], &b.BlockNumber, &b.GasLimit, &b.GasUsed, &b.Time, b.Extra, b.BaseFeePerGas[:], b.BlockHash[:], b.Transactions}
+	s := []any{
+		b.ParentHash[:], b.FeeRecipient[:], b.StateRoot[:], b.ReceiptsRoot[:], b.LogsBloom[:],
+		b.PrevRandao[:], &b.BlockNumber, &b.GasLimit, &b.GasUsed, &b.Time, b.Extra, b.BaseFeePerGas[:], b.BlockHash[:], b.Transactions,
+	}
 	if b.version >= clparams.CapellaVersion {
 		s = append(s, b.Withdrawals)
 	}
@@ -459,12 +507,8 @@ func (b *Eth1Block) getSchema() []any {
 
 // RlpHeader returns the equivalent types.Header struct with RLP-based fields.
 func (b *Eth1Block) RlpHeader(parentRoot *common.Hash, executionReqHash common.Hash) (*types.Header, error) {
-	// Reverse the order of the bytes in the BaseFeePerGas array and convert it to a big integer.
-	reversedBaseFeePerGas := common.Copy(b.BaseFeePerGas[:])
-	for i, j := 0, len(reversedBaseFeePerGas)-1; i < j; i, j = i+1, j-1 {
-		reversedBaseFeePerGas[i], reversedBaseFeePerGas[j] = reversedBaseFeePerGas[j], reversedBaseFeePerGas[i]
-	}
-	baseFee := new(uint256.Int).SetBytes(reversedBaseFeePerGas)
+	baseFee := new(uint256.Int)
+	_ = baseFee.UnmarshalSSZ(b.BaseFeePerGas[:])
 	// If the block version is Capella or later, calculate the withdrawals hash.
 	var withdrawalsHash *common.Hash
 	if b.version >= clparams.CapellaVersion {
@@ -521,7 +565,7 @@ func (b *Eth1Block) RlpHeader(parentRoot *common.Hash, executionReqHash common.H
 		if b.BlockAccessList == nil || b.BlockAccessList.EncodingSizeSSZ() == 0 {
 			*blockAccessListHash = empty.BlockAccessListHash
 		} else {
-			*blockAccessListHash = crypto.HashData(b.BlockAccessList.Bytes())
+			*blockAccessListHash = crypto.Keccak256Hash(b.BlockAccessList.Bytes())
 		}
 		header.BlockAccessListHash = blockAccessListHash
 		slotNumber := b.SlotNumber

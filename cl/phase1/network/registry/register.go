@@ -3,13 +3,15 @@ package registry
 import (
 	"time"
 
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	"github.com/libp2p/go-libp2p/core/peer"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/network/gossip"
 	"github.com/erigontech/erigon/cl/phase1/network/services"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
-	pubsub "github.com/libp2p/go-libp2p-pubsub"
-	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 // RegisterGossipServices registers all the gossip services with the given gossip manager.
@@ -37,24 +39,32 @@ func RegisterGossipServices(
 ) {
 	waitReady := withHeadSlotReady(forkChoiceReader, ethClock)
 
+	var subscribed, expired int
+	add := func(s, e int) {
+		subscribed += s
+		expired += e
+	}
+
 	// register services
-	gossip.RegisterGossipService(gm, blockService, withRateLimiterByPeer(1, 2))
-	gossip.RegisterGossipService(gm, syncContributionService, waitReady, withRateLimiterByPeer(8, 16))
-	gossip.RegisterGossipService(gm, aggregateAndProofService, waitReady, withRateLimiterByPeer(8, 16))
-	gossip.RegisterGossipService(gm, syncCommitteeMessagesService, waitReady, withRateLimiterByPeer(8, 16))
-	gossip.RegisterGossipService(gm, attesterSlashingService, waitReady, withRateLimiterByPeer(2, 8))
-	gossip.RegisterGossipService(gm, voluntaryExitService, waitReady, withRateLimiterByPeer(2, 8))
-	gossip.RegisterGossipService(gm, blsToExecutionChangeService, waitReady, withRateLimiterByPeer(2, 8))
-	gossip.RegisterGossipService(gm, proposerSlashingService, waitReady, withRateLimiterByPeer(2, 8))
-	gossip.RegisterGossipService(gm, attestationService, waitReady, withGlobalTimeBasedRateLimiter(6*time.Second, 250))
-	gossip.RegisterGossipService(gm, blobService, withEndVersion(clparams.FuluVersion), withGlobalTimeBasedRateLimiter(6*time.Second, 32))
+	add(gossip.RegisterGossipService(gm, blockService, withRateLimiterByPeer(1, 2)))
+	add(gossip.RegisterGossipService(gm, syncContributionService, waitReady, withRateLimiterByPeer(8, 16)))
+	add(gossip.RegisterGossipService(gm, aggregateAndProofService, waitReady, withRateLimiterByPeer(8, 16)))
+	add(gossip.RegisterGossipService(gm, syncCommitteeMessagesService, waitReady, withRateLimiterByPeer(8, 16)))
+	add(gossip.RegisterGossipService(gm, attesterSlashingService, waitReady, withRateLimiterByPeer(2, 8)))
+	add(gossip.RegisterGossipService(gm, voluntaryExitService, waitReady, withRateLimiterByPeer(2, 8)))
+	add(gossip.RegisterGossipService(gm, blsToExecutionChangeService, waitReady, withRateLimiterByPeer(2, 8)))
+	add(gossip.RegisterGossipService(gm, proposerSlashingService, waitReady, withRateLimiterByPeer(2, 8)))
+	add(gossip.RegisterGossipService(gm, attestationService, waitReady, withGlobalTimeBasedRateLimiter(6*time.Second, 250)))
+	add(gossip.RegisterGossipService(gm, blobService, withEndVersion(clparams.FuluVersion), withGlobalTimeBasedRateLimiter(6*time.Second, 32)))
 	// fulu
-	gossip.RegisterGossipService(gm, dataColumnSidecarService, withBeginVersion(clparams.FuluVersion), withRateLimiterByPeer(32, 64))
+	add(gossip.RegisterGossipService(gm, dataColumnSidecarService, withBeginVersion(clparams.FuluVersion), withRateLimiterByPeer(32, 64)))
 	// gloas
-	gossip.RegisterGossipService(gm, executionPayloadService, waitReady, withBeginVersion(clparams.GloasVersion), withRateLimiterByPeer(2, 4))
-	gossip.RegisterGossipService(gm, payloadAttestationService, waitReady, withBeginVersion(clparams.GloasVersion), withRateLimiterByPeer(8, 16))
-	gossip.RegisterGossipService(gm, proposerPreferencesService, waitReady, withBeginVersion(clparams.GloasVersion), withRateLimiterByPeer(2, 4))
-	gossip.RegisterGossipService(gm, executionPayloadBidService, waitReady, withBeginVersion(clparams.GloasVersion), withRateLimiterByPeer(8, 16))
+	add(gossip.RegisterGossipService(gm, executionPayloadService, waitReady, withBeginVersion(clparams.GloasVersion), withRateLimiterByPeer(2, 4)))
+	add(gossip.RegisterGossipService(gm, payloadAttestationService, waitReady, withBeginVersion(clparams.GloasVersion), withRateLimiterByPeer(8, 16)))
+	add(gossip.RegisterGossipService(gm, proposerPreferencesService, waitReady, withBeginVersion(clparams.GloasVersion), withRateLimiterByPeer(2, 4)))
+	add(gossip.RegisterGossipService(gm, executionPayloadBidService, waitReady, withBeginVersion(clparams.GloasVersion), withRateLimiterByPeer(8, 16)))
+
+	log.Info("[GossipManager] Registered services", "subscribed", subscribed, "expired", expired)
 }
 
 func withHeadSlotReady(forkChoiceReader forkchoice.ForkChoiceStorageReader, ethClock eth_clock.EthereumClock) gossip.ConditionFunc {

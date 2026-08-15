@@ -54,7 +54,8 @@ func Bench6(erigon_url string) error {
 			fmt.Printf("Error retrieving block: %d %s\n", b.Error.Code, b.Error.Message)
 		}
 		accounts[b.Result.Miner] = struct{}{}
-		for _, txn := range b.Result.Transactions {
+		for i := range b.Result.Transactions {
+			txn := &b.Result.Transactions[i]
 			accounts[txn.From] = struct{}{}
 			if txn.To != nil {
 				accounts[*txn.To] = struct{}{}
@@ -65,7 +66,7 @@ func Bench6(erigon_url string) error {
 `
 			var receipt EthReceipt
 			if err := post(client, erigon_url, fmt.Sprintf(template, txn.Hash, req_id), &receipt); err != nil {
-				print(client, erigon_url, fmt.Sprintf(template, txn.Hash, req_id))
+				printRPCRequest(client, erigon_url, fmt.Sprintf(template, txn.Hash, req_id))
 				return fmt.Errorf("Count not get receipt: %s: %v\n", txn.Hash, err)
 			}
 			if receipt.Error != nil {

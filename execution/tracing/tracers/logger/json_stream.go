@@ -43,6 +43,7 @@ type JsonStreamLogger struct {
 	stream       jsonstream.Stream
 	hexEncodeBuf [128]byte
 	firstCapture bool
+	opcodeSteps  int // steps captured so far; executed-but-suppressed ones don't count
 
 	locations common.Hashes // For sorting
 	storage   map[accounts.Address]Storage
@@ -126,6 +127,13 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 		return
 	default:
 	}
+	// check if already captured the specified number of opcode steps. Execution
+	// keeps going, we just stop recording. Must happen before anything is written
+	// to the stream, otherwise a dangling separator would be emitted.
+	if l.cfg.Limit != 0 && l.cfg.Limit <= l.opcodeSteps {
+		return
+	}
+	l.opcodeSteps++
 	if !l.firstCapture {
 		l.stream.WriteMore()
 	} else {
@@ -202,15 +210,12 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 		}
 		l.stream.WriteArrayEnd()
 	}
-	if l.cfg.EnableMemory {
+	if l.cfg.EnableMemory && len(memory) > 0 {
 		l.stream.WriteMore()
 		l.stream.WriteObjectField("memory")
 		l.stream.WriteArrayStart()
 		for i := 0; i < len(memory); i += 32 {
-			end := i + 32
-			if end > len(memory) {
-				end = len(memory)
-			}
+			end := min(i+32, len(memory))
 			if i > 0 {
 				l.stream.WriteMore()
 			}

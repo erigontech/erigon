@@ -161,7 +161,7 @@ func TestIntegrateDirtyFile(t *testing.T) {
 	err := repo.OpenFolder()
 	require.NoError(t, err)
 
-	filesItem := newFilesItemWithSnapConfig(0, 1024, repo.cfg)
+	filesItem := newFilesItem(0, 1024)
 	filename, _ := repo.schema.DataFile(version.V1_0, 0, 1024)
 	comp, err := seg.NewCompressor(t.Context(), t.Name(), filename, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 	require.NoError(t, err)
@@ -288,7 +288,7 @@ func TestMergeRangeSnapRepo(t *testing.T) {
 	execTestCase := func(ranges []testFileRange, vfCount int, needMerge bool, mergeFromStep, mergeToStep uint64) {
 		testFn(ranges, vfCount, needMerge, mergeFromStep, mergeToStep)
 		// Clean up temporary files created by compressors/decompressors in dirs.Tmp
-		filepath.WalkDir(dirs.Tmp, func(path string, d os.DirEntry, err error) error {
+		require.NoError(t, filepath.WalkDir(dirs.Tmp, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
 				if os.IsNotExist(err) {
 					return nil
@@ -300,7 +300,7 @@ func TestMergeRangeSnapRepo(t *testing.T) {
 			}
 			_ = dir.RemoveFile(path)
 			return nil
-		})
+		}))
 	}
 
 	// 0-1, 1-2 => 0-2
@@ -495,7 +495,7 @@ func TestRecalcVisibleFilesAfterMerge(t *testing.T) {
 		items := repo.FilesInRange(mr, vf) // vf passed should ideally from rotx, but doesn't matter here
 		require.Len(t, items, nFilesInRange)
 
-		merged := newFilesItemWithSnapConfig(mr.from, mr.to, repo.cfg)
+		merged := newFilesItem(mr.from, mr.to)
 		repo.IntegrateDirtyFile(merged)
 		dirEntries, err := filesFromDir(repo.schema.DataDirectory())
 		require.NoError(t, err)
@@ -542,15 +542,6 @@ func TestRecalcVisibleFilesAfterMerge(t *testing.T) {
 	testFn([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 5}, {5, 6}, {6, 7}, {7, 8}, {8, 9}, {9, 10}, {10, 11}, {11, 12}, {12, 13}, {13, 15}, {15, 16}}, true, 15, 1, 1)
 }
 
-func TestSegMetadata_Marshal_UM(t *testing.T) {
-	metadata := NumMetadata{First: Num(89), Last: Num(120), Count: 28}
-	data, err := metadata.Marshal()
-	require.NoError(t, err)
-	metadata2 := NumMetadata{}
-	require.NoError(t, metadata2.Unmarshal(data))
-	require.Equal(t, metadata, metadata2)
-}
-
 // /////////////////////////////////////// helpers and utils
 
 func cleanupFiles(t *testing.T, repo *SnapshotRepo, dirs datadir.Dirs) {
@@ -558,7 +549,7 @@ func cleanupFiles(t *testing.T, repo *SnapshotRepo, dirs datadir.Dirs) {
 	repo.Close()
 	repo.RecalcVisibleFiles(0)
 
-	filepath.WalkDir(dirs.DataDir, func(path string, d os.DirEntry, err error) error {
+	require.NoError(t, filepath.WalkDir(dirs.DataDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			if os.IsNotExist(err) { //skip magically disappeared files
 				return nil
@@ -573,7 +564,7 @@ func cleanupFiles(t *testing.T, repo *SnapshotRepo, dirs datadir.Dirs) {
 			panic(err)
 		}
 		return nil
-	})
+	}))
 }
 
 func stepToRootNum(t *testing.T, step uint64, repo *SnapshotRepo) RootNum {
@@ -710,10 +701,11 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 			seg3, err := seg.NewDecompressor(sampleFile)
 			require.NoError(t, err)
 			defer seg3.Close()
-			defer dir.RemoveFile(sampleFile)
+			defer dir.RemoveFile(sampleFile) //nolint:errcheck
 
 			r := seg.NewReader(seg3.MakeGetter(), seg.CompressNone)
-			bti, err := btindex.CreateBtreeIndexWithDecompressor(filename, 128, r, uint32(1), background.NewProgressSet(), dirs.Tmp, log.New(), true, statecfg.AccessorBTree|statecfg.AccessorExistence)
+			kveiFile := strings.TrimSuffix(filename, ".bt") + ".kvei"
+			bti, err := btindex.CreateBtreeIndexWithDecompressor(filename, kveiFile, r, uint32(1), background.NewProgressSet(), dirs.Tmp, log.New(), true, statecfg.AccessorBTree|statecfg.AccessorExistence)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -728,7 +720,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 		}
 
 		if strings.HasSuffix(filename, ".kvei") {
-			filter, err := existence.NewFilter(0, filename, false)
+			filter, err := existence.NewFilter(0, filename)
 			require.NoError(t, err)
 			defer filter.Close()
 			filter.DisableFsync()

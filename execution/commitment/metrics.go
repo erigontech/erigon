@@ -1,10 +1,11 @@
 package commitment
 
 import (
+	"cmp"
 	"encoding/csv"
 	"fmt"
 	"os"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,27 +24,26 @@ type CsvMetrics interface {
 }
 
 type Metrics struct {
-	Accounts        *AccountMetrics
-	Branches        *BranchMetrics
-	updates         atomic.Uint64
-	addressKeys     atomic.Uint64
-	storageKeys     atomic.Uint64
-	loadBranch      atomic.Uint64
-	loadAccount     atomic.Uint64
-	loadStorage     atomic.Uint64
-	cacheBranch     atomic.Uint64
-	cacheAccount    atomic.Uint64
-	cacheStorage    atomic.Uint64
-	missBranch      atomic.Uint64
-	missAccount     atomic.Uint64
-	missStorage     atomic.Uint64
-	updateBranch    atomic.Uint64
-	loadDepths      [10]uint64
-	unfolds         atomic.Uint64
-	spentUnfolding  time.Duration
-	spentFolding    time.Duration
-	spentProcessing time.Duration
-	// metric config related
+	Accounts                 *AccountMetrics
+	Branches                 *BranchMetrics
+	updates                  atomic.Uint64
+	addressKeys              atomic.Uint64
+	storageKeys              atomic.Uint64
+	loadBranch               atomic.Uint64
+	loadAccount              atomic.Uint64
+	loadStorage              atomic.Uint64
+	cacheBranch              atomic.Uint64
+	cacheAccount             atomic.Uint64
+	cacheStorage             atomic.Uint64
+	missBranch               atomic.Uint64
+	missAccount              atomic.Uint64
+	missStorage              atomic.Uint64
+	updateBranch             atomic.Uint64
+	loadDepths               [10]uint64
+	unfolds                  atomic.Uint64
+	spentUnfolding           atomic.Int64
+	spentFolding             atomic.Int64
+	spentProcessing          atomic.Int64
 	metricsFilePrefix        string
 	collectCommitmentMetrics bool
 	writeCommitmentMetrics   bool
@@ -85,17 +85,33 @@ func (m MetricValues) RUnlock() {
 	}
 }
 
-func NewMetrics() *Metrics {
+func NewMetrics(csvPrefix string) *Metrics {
 	metrics := &Metrics{
 		Accounts:                 NewAccounts(),
 		Branches:                 NewBranches(),
 		collectCommitmentMetrics: dbg.KVReadLevelledMetrics,
 	}
-	csvFilePathPrefix := dbg.EnvString("ERIGON_COMMITMENT_CSV_METRICS_FILE_PATH_PREFIX", "")
-	if csvFilePathPrefix != "" {
-		metrics.EnableCsvMetrics(csvFilePathPrefix)
-	}
+	metrics.SetCsvMetrics(csvPrefix)
 	return metrics
+}
+
+var csvMetricsEnvPrefix = sync.OnceValue(func() string {
+	return dbg.EnvString("ERIGON_COMMITMENT_CSV_METRICS_FILE_PATH_PREFIX", "")
+})
+
+func (m *Metrics) SetCsvMetrics(filePathPrefix string) {
+	if filePathPrefix == "" {
+		filePathPrefix = csvMetricsEnvPrefix()
+	}
+	if filePathPrefix != "" {
+		m.EnableCsvMetrics(filePathPrefix)
+		return
+	}
+	m.metricsFilePrefix = ""
+	m.writeCommitmentMetrics = false
+	m.collectCommitmentMetrics = dbg.KVReadLevelledMetrics
+	m.Accounts.writeCommitmentMetrics = false
+	m.Branches.writeCommitmentMetrics = false
 }
 
 func (m *Metrics) EnableCsvMetrics(filePathPrefix string) {
@@ -126,9 +142,9 @@ func (m *Metrics) AsValues() MetricValues {
 		UpdateBranch:    m.updateBranch.Load(),
 		LoadDepths:      m.loadDepths,
 		Unfolds:         m.unfolds.Load(),
-		SpentUnfolding:  m.spentUnfolding,
-		SpentFolding:    m.spentFolding,
-		SpentProcessing: m.spentProcessing,
+		SpentUnfolding:  time.Duration(m.spentUnfolding.Load()),
+		SpentFolding:    time.Duration(m.spentFolding.Load()),
+		SpentProcessing: time.Duration(m.spentProcessing.Load()),
 	}
 }
 
@@ -156,8 +172,8 @@ func (m *Metrics) logMetrics() []any {
 		"cs", common.PrettyCounter(m.cacheStorage.Load()),
 		"mb", common.PrettyCounter(m.missBranch.Load()), "ma", common.PrettyCounter(m.missAccount.Load()),
 		"ms", common.PrettyCounter(m.missStorage.Load()),
-		"fld", common.PrettyCounter(m.unfolds.Load()), "pdur", common.Round(m.spentProcessing, 0).String(),
-		"fdur", common.Round(m.spentFolding, 0).String(), "ufdur", common.Round(m.spentUnfolding, 0),
+		"fld", common.PrettyCounter(m.unfolds.Load()), "pdur", common.Round(time.Duration(m.spentProcessing.Load()), 0).String(),
+		"fdur", common.Round(time.Duration(m.spentFolding.Load()), 0).String(), "ufdur", common.Round(time.Duration(m.spentUnfolding.Load()), 0),
 	}
 }
 
@@ -208,9 +224,9 @@ func (m *Metrics) Values() [][]string {
 			strconv.FormatUint(m.loadDepths[6], 10) + "/" + strconv.FormatUint(m.loadDepths[7], 10),
 			strconv.FormatUint(m.loadDepths[8], 10) + "/" + strconv.FormatUint(m.loadDepths[9], 10),
 			strconv.FormatUint(m.unfolds.Load(), 10),
-			strconv.FormatInt(m.spentUnfolding.Milliseconds(), 10),
-			strconv.FormatInt(m.spentFolding.Milliseconds(), 10),
-			strconv.FormatInt(m.spentProcessing.Milliseconds(), 10),
+			strconv.FormatInt(time.Duration(m.spentUnfolding.Load()).Milliseconds(), 10),
+			strconv.FormatInt(time.Duration(m.spentFolding.Load()).Milliseconds(), 10),
+			strconv.FormatInt(time.Duration(m.spentProcessing.Load()).Milliseconds(), 10),
 		},
 	}
 	if have, want := len(vals[0]), len(m.Headers()); have != want {
@@ -247,21 +263,29 @@ func UnmarshallMetricsCsv(filePath string) ([]*Metrics, error) {
 			col++
 			for k := range 5 {
 				depthsPair := row[col]
-				depthsSplit := strings.Split(depthsPair, "/")
-				if len(depthsSplit) != 2 {
+				left, right, ok := strings.Cut(depthsPair, "/")
+				if !ok || strings.Contains(right, "/") {
 					return nil, fmt.Errorf("invalid depths pair: %s", depthsPair)
 				}
-				current.loadDepths[k*2] = mustParseUintCsvCell(depthsSplit, 0, filePath)
-				current.loadDepths[k*2+1] = mustParseUintCsvCell(depthsSplit, 1, filePath)
+				leftVal, err := strconv.ParseUint(left, 10, 64)
+				if err != nil {
+					panic(fmt.Errorf("parsing %q cell at column 0 in %s: %w", left, filePath, err))
+				}
+				rightVal, err := strconv.ParseUint(right, 10, 64)
+				if err != nil {
+					panic(fmt.Errorf("parsing %q cell at column 1 in %s: %w", right, filePath, err))
+				}
+				current.loadDepths[k*2] = leftVal
+				current.loadDepths[k*2+1] = rightVal
 				col++
 			}
 			current.unfolds.Store(mustParseUintCsvCell(row, col, filePath))
 			col++
-			current.spentUnfolding = mustParseMillisecondsCsvCell(row, col, filePath)
+			current.spentUnfolding.Store(int64(mustParseMillisecondsCsvCell(row, col, filePath)))
 			col++
-			current.spentFolding = mustParseMillisecondsCsvCell(row, col, filePath)
+			current.spentFolding.Store(int64(mustParseMillisecondsCsvCell(row, col, filePath)))
 			col++
-			current.spentProcessing = mustParseMillisecondsCsvCell(row, col, filePath)
+			current.spentProcessing.Store(int64(mustParseMillisecondsCsvCell(row, col, filePath)))
 			if cols := col + 1; cols != len(row) {
 				return nil, fmt.Errorf("invalid number of columns processed: row=%d, have=%d, want=%d, file=%s", i, cols, len(row), filePath)
 			}
@@ -290,9 +314,9 @@ func (m *Metrics) Reset() {
 
 	m.Accounts.Reset()
 	m.Branches.Reset()
-	m.spentUnfolding = 0
-	m.spentFolding = 0
-	m.spentProcessing = 0
+	m.spentUnfolding.Store(0)
+	m.spentFolding.Store(0)
+	m.spentProcessing.Store(0)
 }
 
 func (m *Metrics) CollectFileDepthStats(endTxNumStats map[uint64]skipStat) {
@@ -303,12 +327,9 @@ func (m *Metrics) CollectFileDepthStats(endTxNumStats map[uint64]skipStat) {
 	for k := range endTxNumStats {
 		ends = append(ends, k)
 	}
-	// sort by file endTxNum
-	sort.Slice(ends, func(i, j int) bool { return ends[i] > ends[j] })
+	slices.SortFunc(ends, func(a, b uint64) int { return cmp.Compare(b, a) })
 	for i := 0; i < 5 && i < len(ends); i++ {
-		// get stats for specific file depth
 		v := endTxNumStats[ends[i]]
-		// write level i file stats - account and storage loads
 		m.loadDepths[i*2], m.loadDepths[i*2+1] = v.accLoaded, v.storLoaded
 	}
 }
@@ -360,7 +381,7 @@ func (m *Metrics) StartUnfolding(plainKey []byte) func() {
 		start := time.Now()
 		return func() {
 			d := time.Since(start)
-			m.spentUnfolding += d
+			m.spentUnfolding.Add(int64(d))
 			m.Accounts.collect(plainKey, func(mx *AccountStats) {
 				mx.SpentUnfolding += d
 			})
@@ -374,7 +395,7 @@ func (m *Metrics) StartFolding(plainKey []byte) func() {
 		start := time.Now()
 		return func() {
 			d := time.Since(start)
-			m.spentFolding += d
+			m.spentFolding.Add(int64(d))
 			m.Accounts.collect(plainKey, func(mx *AccountStats) {
 				mx.SpentFolding += d
 			})
@@ -385,7 +406,7 @@ func (m *Metrics) StartFolding(plainKey []byte) func() {
 
 func (m *Metrics) TotalProcessingTimeInc(t time.Time) {
 	if m.collectCommitmentMetrics {
-		m.spentProcessing += time.Since(t)
+		m.spentProcessing.Add(int64(time.Since(t)))
 	}
 }
 
@@ -406,10 +427,8 @@ type AccountStats struct {
 }
 
 type AccountMetrics struct {
-	m sync.RWMutex
-	// will be separate value for each key in parallel processing
-	AccountStats map[string]*AccountStats
-	// metric config related
+	m                      sync.RWMutex
+	AccountStats           map[string]*AccountStats
 	writeCommitmentMetrics bool
 }
 
@@ -451,7 +470,7 @@ func accountMetricsHeaders() []string {
 func (am *AccountMetrics) Values() [][]string {
 	am.m.Lock()
 	defer am.m.Unlock()
-	values := make([][]string, len(am.AccountStats)+1) // + 1 to add one empty line between "process" calls
+	values := make([][]string, len(am.AccountStats)+1)
 	headersLen := len(am.Headers())
 	var vi uint64
 	for addr, stat := range am.AccountStats {
@@ -531,10 +550,8 @@ func NewBranches() *BranchMetrics {
 }
 
 type BranchMetrics struct {
-	m sync.RWMutex
-	// will be separate value for each key in parallel processing
-	BranchStats map[string]*BranchStats
-	// metric config related
+	m                      sync.RWMutex
+	BranchStats            map[string]*BranchStats
 	writeCommitmentMetrics bool
 }
 
@@ -552,7 +569,7 @@ func branchMetricsHeaders() []string {
 func (bm *BranchMetrics) Values() [][]string {
 	bm.m.RLock()
 	defer bm.m.RUnlock()
-	values := make([][]string, len(bm.BranchStats)+1) // + 1 to add one empty line between "process" calls
+	values := make([][]string, len(bm.BranchStats)+1)
 	headersLen := len(bm.Headers())
 	var vi uint64
 	for branchKey, stat := range bm.BranchStats {
@@ -624,7 +641,6 @@ func UnmarshallBranchMetricsCsv(filePath string) ([]*BranchMetrics, error) {
 }
 
 func writeMetricsToCSV(metrics CsvMetrics, filePath string) (err error) {
-	// Open the file in append mode or create if it doesn't exist
 	file, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return err
@@ -636,11 +652,9 @@ func writeMetricsToCSV(metrics CsvMetrics, filePath string) (err error) {
 		}
 	}()
 
-	// Create a new writer
 	writer := csv.NewWriter(file)
 	defer writer.Flush()
 
-	// Optionally write header if file is empty
 	info, err := file.Stat()
 	if err != nil {
 		return err
@@ -650,7 +664,6 @@ func writeMetricsToCSV(metrics CsvMetrics, filePath string) (err error) {
 			return err
 		}
 	}
-	// Write the actual data
 	for _, value := range metrics.Values() {
 		if err := writer.Write(value); err != nil {
 			return err

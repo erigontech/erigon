@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/monitor/shuffling_metrics"
+	corestate "github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
 	"github.com/erigontech/erigon/common"
@@ -73,7 +74,8 @@ func readFromBitset(bitset []byte, i int) bool {
 }
 
 func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, publicKeysRegistry public_keys_registry.PublicKeyRegistry, validatorSet []solid.Validator, randaoMixes solid.HashVectorSSZ,
-	genesisValidatorsRoot common.Hash, fork *cltypes.Fork, activeBalance, epoch uint64, checkpoint solid.Checkpoint) *checkpointState {
+	genesisValidatorsRoot common.Hash, fork *cltypes.Fork, activeBalance, epoch uint64, checkpoint solid.Checkpoint,
+) *checkpointState {
 	balances := make([]uint64, len(validatorSet))
 
 	bitsetSize := (len(validatorSet) + 7) / 8
@@ -179,8 +181,9 @@ func (c *checkpointState) getDomain(domainType [4]byte, epoch uint64) ([]byte, e
 // isValidIndexedAttestation verifies indexed attestation
 func (c *checkpointState) isValidIndexedAttestation(att *cltypes.IndexedAttestation) (bool, error) {
 	inds := att.AttestingIndices
-	if inds.Length() == 0 || !solid.IsUint64SortedSet(inds) {
-		return false, errors.New("isValidIndexedAttestation: attesting indices are not sorted or are null")
+	version := c.beaconConfig.GetCurrentStateVersion(att.Data.Target.Epoch)
+	if err := corestate.ValidateIndexedAttestationIndices(c.beaconConfig, version, inds); err != nil {
+		return false, err
 	}
 
 	domain, err := c.getDomain(c.beaconConfig.DomainBeaconAttester, att.Data.Target.Epoch)
@@ -202,6 +205,7 @@ func (c *checkpointState) isValidIndexedAttestation(att *cltypes.IndexedAttestat
 	}
 	return true, nil
 }
+
 func (c *checkpointState) epochAtSlot(slot uint64) uint64 {
 	return slot / c.beaconConfig.SlotsPerEpoch
 }

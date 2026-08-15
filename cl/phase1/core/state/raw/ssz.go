@@ -87,14 +87,9 @@ func (b *BeaconState) baseOffsetSSZ() uint32 {
 	size += uint32(cfg.EpochsPerHistoricalVector) * 32 // randao_mixes (Vector[Hash, EPOCHS_PER_HISTORICAL_VECTOR])
 	size += uint32(cfg.EpochsPerSlashingsVector) * 8   // slashings (Vector[uint64, EPOCHS_PER_SLASHINGS_VECTOR])
 
-	if b.version == clparams.Phase0Version {
-		size += 4 // previous_epoch_attestations offset
-		size += 4 // current_epoch_attestations offset
-	} else {
-		// Altair+
-		size += 4 // previous_epoch_participation offset
-		size += 4 // current_epoch_participation offset
-	}
+	// Phase0: previous/current_epoch_attestations offset (4+4)
+	// Altair+: previous/current_epoch_participation offset (4+4)
+	size += 8
 
 	size += 1  // justification_bits
 	size += 40 // previous_justified_checkpoint (epoch + root)
@@ -158,8 +153,10 @@ func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 
 // getSchema gives the schema for the current beacon state version according to ETH 2.0 specs.
 func (b *BeaconState) getSchema() []any {
-	s := []any{&b.genesisTime, b.genesisValidatorsRoot[:], &b.slot, b.fork, b.latestBlockHeader, b.blockRoots, b.stateRoots, b.historicalRoots,
-		b.eth1Data, b.eth1DataVotes, &b.eth1DepositIndex, b.validators, b.balances, b.randaoMixes, b.slashings}
+	s := []any{
+		&b.genesisTime, b.genesisValidatorsRoot[:], &b.slot, b.fork, b.latestBlockHeader, b.blockRoots, b.stateRoots, b.historicalRoots,
+		b.eth1Data, b.eth1DataVotes, &b.eth1DepositIndex, b.validators, b.balances, b.randaoMixes, b.slashings,
+	}
 	if b.version == clparams.Phase0Version {
 		return append(s, b.previousEpochAttestations, b.currentEpochAttestations, &b.justificationBits, &b.previousJustifiedCheckpoint, &b.currentJustifiedCheckpoint,
 			&b.finalizedCheckpoint)

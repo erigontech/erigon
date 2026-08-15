@@ -21,6 +21,7 @@ package runtime
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math/big"
 	"os"
@@ -33,6 +34,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/chain"
@@ -114,15 +116,16 @@ func TestCall(t *testing.T) {
 	tx, domains := testutil.TemporalTxSD(t, db)
 
 	state := state.New(state.NewReaderV3(domains.AsGetter(tx)))
+	defer state.Close()
 	address := accounts.InternAddress(common.HexToAddress("0xaa"))
-	state.SetCode(address, []byte{
+	require.NoError(t, state.SetCode(address, []byte{
 		byte(vm.PUSH1), 10,
 		byte(vm.PUSH1), 0,
 		byte(vm.MSTORE),
 		byte(vm.PUSH1), 32,
 		byte(vm.PUSH1), 0,
 		byte(vm.RETURN),
-	}, tracing.CodeChangeUnspecified)
+	}, tracing.CodeChangeUnspecified))
 
 	ret, _, err := Call(address, nil, &Config{State: state})
 	if err != nil {
@@ -132,6 +135,193 @@ func TestCall(t *testing.T) {
 	num := new(big.Int).SetBytes(ret)
 	if num.Cmp(big.NewInt(10)) != 0 {
 		t.Error("Expected 10, got", num)
+	}
+}
+
+func TestCreateInsufficientBalanceLeavesGasUntouched(t *testing.T) {
+	t.Parallel()
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Close()
+	const gasLimit = uint64(500_000)
+	_, _, gasRemaining, err := Create(
+		[]byte{byte(vm.STOP)},
+		&Config{
+			GasLimit: gasLimit,
+			Value:    *uint256.NewInt(1),
+			State:    statedb,
+		},
+		0,
+	)
+	require.ErrorIs(t, err, vm.ErrInsufficientBalance)
+	require.Equal(t, mdgas.MdGas{Execution: gasLimit}, gasRemaining)
+}
+
+func TestCreateInsufficientBalancePreservesPreAmsterdamTrace(t *testing.T) {
+	t.Parallel()
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Close()
+	var entered []byte
+	exited := 0
+	hooks := &tracing.Hooks{
+		OnEnter: func(_ int, typ byte, _, _ accounts.Address, _ bool, _ []byte, _ uint64, _ uint256.Int, _ []byte) {
+			entered = append(entered, typ)
+		},
+		OnExit: func(_ int, _ []byte, _ uint64, _ error, _ bool) {
+			exited++
+		},
+	}
+	_, _, _, err := Create(
+		[]byte{byte(vm.STOP)},
+		&Config{
+			ChainConfig: chain.TestChainOsakaConfig,
+			EVMConfig:   vm.Config{Tracer: hooks},
+			GasLimit:    500_000,
+			Value:       *uint256.NewInt(1),
+			State:       statedb,
+		},
+		0,
+	)
+	require.ErrorIs(t, err, vm.ErrInsufficientBalance)
+	require.Equal(t, []byte{byte(vm.CREATE)}, entered)
+	require.Equal(t, 1, exited)
+}
+
+func TestCreateRuntimeOutOfGasEmitsCallGasChanges(t *testing.T) {
+	t.Parallel()
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Close()
+	type gasChange struct {
+		old    uint64
+		new    uint64
+		reason tracing.GasChangeReason
+	}
+	var gasChanges []gasChange
+	hooks := &tracing.Hooks{
+		OnGasChange: func(old, newGas uint64, reason tracing.GasChangeReason) {
+			if reason == tracing.GasChangeCallInitialBalance || reason == tracing.GasChangeCallFailedExecution {
+				gasChanges = append(gasChanges, gasChange{old: old, new: newGas, reason: reason})
+			}
+		},
+	}
+	gasLimit := uint64(params.StateGasNewAccount - 1)
+	_, _, _, err := Create(
+		[]byte{byte(vm.STOP)},
+		&Config{
+			EVMConfig: vm.Config{Tracer: hooks},
+			GasLimit:  gasLimit,
+			State:     statedb,
+		},
+		0,
+	)
+	require.ErrorIs(t, err, vm.ErrRuntimeOutOfGas)
+	require.Equal(
+		t,
+		[]gasChange{
+			{old: 0, new: gasLimit, reason: tracing.GasChangeCallInitialBalance},
+			{old: gasLimit, new: 0, reason: tracing.GasChangeCallFailedExecution},
+		},
+		gasChanges,
+	)
+}
+
+func TestCallChargesAmsterdamNewAccountStateGas(t *testing.T) {
+	t.Parallel()
+
+	db := testutil.TemporalDB(t)
+	tx, domains := testutil.TemporalTxSD(t, db)
+	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
+	defer statedb.Close()
+
+	sender := accounts.InternAddress(common.HexToAddress("0x1000"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2000"))
+	value := uint256.NewInt(1)
+	require.NoError(t, statedb.SetBalance(sender, *value, tracing.BalanceChangeUnspecified))
+
+	const gasLimit = uint64(500_000)
+	_, gasRemaining, err := Call(recipient, nil, &Config{
+		ChainConfig: chain.AllProtocolChanges,
+		Origin:      sender,
+		GasLimit:    gasLimit,
+		Value:       *value,
+		State:       statedb,
+	})
+	require.NoError(t, err)
+	require.Equal(t, mdgas.MdGas{Execution: gasLimit - params.StateGasNewAccount}, gasRemaining)
+}
+
+func TestCallChargesAmsterdamDelegationTargetAccess(t *testing.T) {
+	t.Parallel()
+
+	db := testutil.TemporalDB(t)
+	tx, domains := testutil.TemporalTxSD(t, db)
+	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
+	defer statedb.Close()
+
+	recipient := accounts.InternAddress(common.HexToAddress("0x2000"))
+	delegatedTo := accounts.InternAddress(common.HexToAddress("0x3000"))
+	require.NoError(t, statedb.SetCode(recipient, types.AddressToDelegation(delegatedTo), tracing.CodeChangeUnspecified))
+	require.NoError(t, statedb.SetCode(delegatedTo, []byte{byte(vm.STOP)}, tracing.CodeChangeUnspecified))
+
+	const gasLimit = uint64(100_000)
+	_, gasRemaining, err := Call(recipient, nil, &Config{
+		ChainConfig: chain.AllProtocolChanges,
+		GasLimit:    gasLimit,
+		State:       statedb,
+	})
+	require.NoError(t, err)
+	require.Equal(t, mdgas.MdGas{Execution: gasLimit - params.ColdAccountAccessCostEIP8038}, gasRemaining)
+	require.True(t, statedb.AddressInAccessList(delegatedTo))
+}
+
+func TestCallWarmsPragueDelegationTarget(t *testing.T) {
+	t.Parallel()
+
+	db := testutil.TemporalDB(t)
+	tx, domains := testutil.TemporalTxSD(t, db)
+	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
+	defer statedb.Close()
+
+	recipient := accounts.InternAddress(common.HexToAddress("0x2000"))
+	delegatedTo := accounts.InternAddress(common.HexToAddress("0x3000"))
+	require.NoError(t, statedb.SetCode(recipient, types.AddressToDelegation(delegatedTo), tracing.CodeChangeUnspecified))
+	require.NoError(t, statedb.SetCode(delegatedTo, []byte{byte(vm.STOP)}, tracing.CodeChangeUnspecified))
+
+	_, _, err := Call(recipient, nil, &Config{
+		ChainConfig: chain.TestChainOsakaConfig,
+		GasLimit:    100_000,
+		State:       statedb,
+	})
+	require.NoError(t, err)
+	require.True(t, statedb.AddressInAccessList(delegatedTo))
+}
+
+// benchState builds state on the parallel-execution path, the one staged sync
+// runs: the stateObject cache is off and reads resolve from the version map.
+func benchState(b *testing.B, reader state.StateReader) *state.IntraBlockState {
+	b.Helper()
+	statedb := state.NewWithVersionMap(reader, state.NewVersionMap(nil))
+	statedb.SetNoMaterialize(true)
+	return statedb
+}
+
+// mustOOG requires a program that loops until its gas budget is gone to have
+// done so. A call reaching an address with no code returns no error and burns
+// nothing, so the gas assertion - not the error - catches a broken fixture.
+func mustOOG(b *testing.B, left mdgas.MdGas, err error) {
+	b.Helper()
+	if !errors.Is(err, vm.ErrOutOfGas) || left.Total() != 0 {
+		b.Fatalf("expected gas exhaustion, got gasLeft=%d err=%v", left.Total(), err)
+	}
+}
+
+// mustComplete requires a bounded call to have finished and done work.
+func mustComplete(b *testing.B, gasLimit uint64, left mdgas.MdGas, err error) {
+	b.Helper()
+	if err != nil {
+		b.Fatal(err)
+	}
+	if left.Total() >= gasLimit {
+		b.Fatalf("call consumed no gas (gasLeft=%d, limit=%d)", left.Total(), gasLimit)
 	}
 }
 
@@ -161,17 +351,32 @@ func BenchmarkCall(b *testing.B) {
 	db := testutil.TemporalDB(b)
 	tx, sd := testutil.TemporalTxSD(b, db)
 	//cfg.w = state.NewWriter(execctx, nil)
-	cfg.State = state.New(state.NewReaderV3(sd.AsGetter(tx)))
+	cfg.State = benchState(b, state.NewReaderV3(sd.AsGetter(tx)))
+	defer cfg.State.Close()
+	// cfg carries a non-zero Value, so the origin has to be able to pay it or
+	// every call fails the balance check before reaching the interpreter.
+	cfg.Origin = accounts.ZeroAddress
+	require.NoError(b, cfg.State.SetBalance(cfg.Origin, *uint256.NewInt(1e18), tracing.BalanceChangeUnspecified))
 	//cfg.EVMConfig.JumpDestCache = vm.NewJumpDestCache(128)
 
 	tmpdir := b.TempDir()
 
+	// Execute runs the deployed runtime code, so the constructor never initialises
+	// seller/value and every entry point hits the contract's pre-REVERT throw.
+	// Pinned so the benchmark cannot degrade further without failing; making it
+	// execute the purchase flow needs a new fixture.
+	inputs := [][]byte{cpurchase, creceived, refund}
 	for b.Loop() {
-		for j := 0; j < 400; j++ {
-			_, _, _ = Execute(code, cpurchase, cfg, tmpdir)
-			_, _, _ = Execute(code, creceived, cfg, tmpdir)
-			_, _, _ = Execute(code, refund, cfg, tmpdir)
+		snap := cfg.State.PushSnapshot()
+		for range 400 {
+			for _, input := range inputs {
+				if _, _, err := Execute(code, input, cfg, tmpdir); !errors.Is(err, vm.ErrInvalidJump) {
+					b.Fatalf("expected the contract throw, got %v", err)
+				}
+			}
 		}
+		cfg.State.RevertToSnapshot(snap, nil)
+		cfg.State.PopSnapshot(snap)
 	}
 }
 
@@ -183,13 +388,14 @@ func benchmarkEVM_Create(b *testing.B, code string) {
 	require.NoError(b, err)
 
 	var (
-		statedb  = state.New(state.NewReaderV3(domains.AsGetter(tx)))
+		statedb  = benchState(b, state.NewReaderV3(domains.AsGetter(tx)))
 		sender   = accounts.InternAddress(common.BytesToAddress([]byte("sender")))
 		receiver = accounts.InternAddress(common.BytesToAddress([]byte("receiver")))
 	)
+	defer statedb.Close()
 
-	statedb.CreateAccount(sender, true)
-	statedb.SetCode(receiver, common.FromHex(code), tracing.CodeChangeUnspecified)
+	require.NoError(b, statedb.CreateAccount(sender, true))
+	require.NoError(b, statedb.SetCode(receiver, common.FromHex(code), tracing.CodeChangeUnspecified))
 	runtimeConfig := Config{
 		Origin:      sender,
 		State:       statedb,
@@ -203,6 +409,7 @@ func benchmarkEVM_Create(b *testing.B, code string) {
 			HomesteadBlock:        common.NewUint64(0),
 			ByzantiumBlock:        common.NewUint64(0),
 			ConstantinopleBlock:   common.NewUint64(0),
+			PetersburgBlock:       common.NewUint64(0),
 			TangerineWhistleBlock: common.NewUint64(0),
 			SpuriousDragonBlock:   common.NewUint64(0),
 		},
@@ -212,7 +419,11 @@ func benchmarkEVM_Create(b *testing.B, code string) {
 	}
 	// Warm up the intpools and stuff
 	for b.Loop() {
-		_, _, _ = Call(receiver, []byte{}, &runtimeConfig)
+		snap := statedb.PushSnapshot()
+		_, left, err := Call(receiver, []byte{}, &runtimeConfig)
+		mustOOG(b, left, err)
+		statedb.RevertToSnapshot(snap, nil)
+		statedb.PopSnapshot(snap)
 	}
 	b.StopTimer()
 }
@@ -249,7 +460,8 @@ func BenchmarkEVM_RETURN(b *testing.B) {
 	db := testutil.TemporalDB(b)
 	tx, domains := testutil.TemporalTxSD(b, db)
 
-	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
+	statedb := benchState(b, state.NewReaderV3(domains.AsGetter(tx)))
+	defer statedb.Close()
 	contractAddr := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
 
 	for _, n := range []uint64{1_000, 10_000, 100_000, 1_000_000} {
@@ -257,16 +469,20 @@ func BenchmarkEVM_RETURN(b *testing.B) {
 			b.ReportAllocs()
 
 			contractCode := returnContract(n)
-			statedb.SetCode(contractAddr, contractCode, tracing.CodeChangeUnspecified)
+			require.NoError(b, statedb.SetCode(contractAddr, contractCode, tracing.CodeChangeUnspecified))
+
+			cfg := Config{State: statedb}
+			setDefaults(&cfg)
 
 			for b.Loop() {
-				ret, _, err := Call(contractAddr, []byte{}, &Config{State: statedb})
-				if err != nil {
-					b.Fatal(err)
-				}
+				snap := statedb.PushSnapshot()
+				ret, left, err := Call(contractAddr, []byte{}, &cfg)
+				mustComplete(b, cfg.GasLimit, left, err)
 				if uint64(len(ret)) != n {
 					b.Fatalf("expected return size %d, got %d", n, len(ret))
 				}
+				statedb.RevertToSnapshot(snap, nil)
+				statedb.PopSnapshot(snap)
 			}
 		})
 	}
@@ -433,8 +649,9 @@ func benchmarkNonModifyingCode(gas mdgas.MdGas, code []byte, name string, tracer
 	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(b, err)
 
-	cfg.State = state.New(state.NewReaderV3(domains.AsGetter(tx)))
-	cfg.GasLimit = gas.Regular
+	cfg.State = benchState(b, state.NewReaderV3(domains.AsGetter(tx)))
+	defer cfg.State.Close()
+	cfg.GasLimit = gas.Execution
 	//
 	// TODO revise
 	//
@@ -454,31 +671,36 @@ func benchmarkNonModifyingCode(gas mdgas.MdGas, code []byte, name string, tracer
 		vmenv       = NewEnv(cfg)
 		sender      = cfg.Origin
 	)
-	cfg.State.CreateAccount(destination, true)
+	require.NoError(b, cfg.State.CreateAccount(destination, true))
 	eoa := accounts.InternAddress(common.HexToAddress("E0"))
 	{
-		cfg.State.CreateAccount(eoa, true)
-		cfg.State.SetNonce(eoa, 100, tracing.NonceChangeUnspecified)
+		require.NoError(b, cfg.State.CreateAccount(eoa, true))
+		require.NoError(b, cfg.State.SetNonce(eoa, 100, tracing.NonceChangeUnspecified))
 	}
 	reverting := accounts.InternAddress(common.HexToAddress("EE"))
 	{
-		cfg.State.CreateAccount(reverting, true)
-		cfg.State.SetCode(reverting, []byte{
+		require.NoError(b, cfg.State.CreateAccount(reverting, true))
+		require.NoError(b, cfg.State.SetCode(reverting, []byte{
 			byte(vm.PUSH1), 0x00,
 			byte(vm.PUSH1), 0x00,
 			byte(vm.REVERT),
-		}, tracing.CodeChangeUnspecified)
+		}, tracing.CodeChangeUnspecified))
 	}
 
 	//cfg.State.CreateAccount(cfg.Origin)
 	// set the receiver's (the executing contract) code for execution.
-	cfg.State.SetCode(destination, code, tracing.CodeChangeUnspecified)
-	vmenv.Call(sender, destination, nil, gas, cfg.Value, false /* bailout */) // nolint:errcheck
+	require.NoError(b, cfg.State.SetCode(destination, code, tracing.CodeChangeUnspecified))
+	_, warmLeft, _, warmErr := vmenv.Call(sender, destination, nil, gas, cfg.Value, false /* bailout */)
+	mustOOG(b, warmLeft, warmErr)
 
 	b.Run(name, func(b *testing.B) {
 		b.ReportAllocs()
 		for b.Loop() {
-			vmenv.Call(sender, destination, nil, gas, cfg.Value, false /* bailout */) // nolint:errcheck
+			snap := cfg.State.PushSnapshot()
+			_, left, _, err := vmenv.Call(sender, destination, nil, gas, cfg.Value, false /* bailout */)
+			mustOOG(b, left, err)
+			cfg.State.RevertToSnapshot(snap, nil)
+			cfg.State.PopSnapshot(snap)
 		}
 	})
 }
@@ -549,14 +771,14 @@ func BenchmarkSimpleLoop(b *testing.B) {
 	//		Tracer: tracer,
 	//	}})
 	// 100M gas
-	benchmarkNonModifyingCode(mdgas.MdGas{Regular: 100_000_000}, staticCallIdentity, "staticcall-identity-100M", "", b)
-	benchmarkNonModifyingCode(mdgas.MdGas{Regular: 100_000_000}, callIdentity, "call-identity-100M", "", b)
-	benchmarkNonModifyingCode(mdgas.MdGas{Regular: 100_000_000}, loopingCode, "loop-100M", "", b)
-	benchmarkNonModifyingCode(mdgas.MdGas{Regular: 100_000_000}, loopingCode2, "loop2-100M", "", b)
-	benchmarkNonModifyingCode(mdgas.MdGas{Regular: 100_000_000}, loopingCode3, "loop3-100M", "", b)
-	benchmarkNonModifyingCode(mdgas.MdGas{Regular: 100_000_000}, callInexistant, "call-nonexist-100M", "", b)
-	benchmarkNonModifyingCode(mdgas.MdGas{Regular: 100_000_000}, callEOA, "call-EOA-100M", "", b)
-	benchmarkNonModifyingCode(mdgas.MdGas{Regular: 100_000_000}, callRevertingContractWithInput, "call-reverting-100M", "", b)
+	benchmarkNonModifyingCode(mdgas.MdGas{Execution: 100_000_000}, staticCallIdentity, "staticcall-identity-100M", "", b)
+	benchmarkNonModifyingCode(mdgas.MdGas{Execution: 100_000_000}, callIdentity, "call-identity-100M", "", b)
+	benchmarkNonModifyingCode(mdgas.MdGas{Execution: 100_000_000}, loopingCode, "loop-100M", "", b)
+	benchmarkNonModifyingCode(mdgas.MdGas{Execution: 100_000_000}, loopingCode2, "loop2-100M", "", b)
+	benchmarkNonModifyingCode(mdgas.MdGas{Execution: 100_000_000}, loopingCode3, "loop3-100M", "", b)
+	benchmarkNonModifyingCode(mdgas.MdGas{Execution: 100_000_000}, callInexistant, "call-nonexist-100M", "", b)
+	benchmarkNonModifyingCode(mdgas.MdGas{Execution: 100_000_000}, callEOA, "call-EOA-100M", "", b)
+	benchmarkNonModifyingCode(mdgas.MdGas{Execution: 100_000_000}, callRevertingContractWithInput, "call-reverting-100M", "", b)
 
 	//benchmarkNonModifyingCode(10000000, staticCallIdentity, "staticcall-identity-10M", b)
 	//benchmarkNonModifyingCode(10000000, loopingCode, "loop-10M", b)
@@ -684,7 +906,7 @@ func BenchmarkEVM_SWAP1(b *testing.B) {
 			byte(vm.PUSH0), // PUSH0
 			byte(vm.PUSH0), // PUSH0
 		}
-		for i := uint64(0); i < n; i++ {
+		for range n {
 			contract = append(contract, byte(vm.SWAP1))
 		}
 		return contract
@@ -692,18 +914,23 @@ func BenchmarkEVM_SWAP1(b *testing.B) {
 
 	db := testutil.TemporalDB(b)
 	tx, domains := testutil.TemporalTxSD(b, db)
-	state := state.New(state.NewReaderV3(domains.AsGetter(tx)))
+	state := benchState(b, state.NewReaderV3(domains.AsGetter(tx)))
+	defer state.Close()
 	contractAddr := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
 
 	b.Run("10k", func(b *testing.B) {
 		contractCode := swapContract(10_000)
-		state.SetCode(contractAddr, contractCode, tracing.CodeChangeUnspecified)
+		require.NoError(b, state.SetCode(contractAddr, contractCode, tracing.CodeChangeUnspecified))
+
+		cfg := Config{State: state}
+		setDefaults(&cfg)
 
 		for b.Loop() {
-			_, _, err := Call(contractAddr, []byte{}, &Config{State: state})
-			if err != nil {
-				b.Fatal(err)
-			}
+			snap := state.PushSnapshot()
+			_, left, err := Call(contractAddr, []byte{}, &cfg)
+			mustComplete(b, cfg.GasLimit, left, err)
+			state.RevertToSnapshot(snap, nil)
+			state.PopSnapshot(snap)
 		}
 	})
 }
@@ -719,10 +946,11 @@ func TestCreate2CollisionWithEIP7702Delegation(t *testing.T) {
 	db := testutil.TemporalDB(t)
 	tx, domains := testutil.TemporalTxSD(t, db)
 	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
+	defer statedb.Close()
 
 	sender := accounts.InternAddress(common.HexToAddress("0x1234"))
-	statedb.CreateAccount(sender, true)
-	statedb.AddBalance(sender, *uint256.NewInt(1e18), tracing.BalanceChangeUnspecified)
+	require.NoError(t, statedb.CreateAccount(sender, true))
+	require.NoError(t, statedb.AddBalance(sender, *uint256.NewInt(1e18), tracing.BalanceChangeUnspecified))
 
 	// Initcode that just returns empty runtime code (PUSH1 0, PUSH1 0, RETURN).
 	initcode := []byte{byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.RETURN)}
@@ -730,14 +958,14 @@ func TestCreate2CollisionWithEIP7702Delegation(t *testing.T) {
 	// Compute the CREATE2 target address: keccak256(0xff ++ factory ++ salt ++ keccak256(initcode))[12:]
 	salt := uint256.NewInt(0)
 	factoryAddr := common.HexToAddress("0xfac0")
-	create2Addr := types.CreateAddress2(factoryAddr, salt.Bytes32(), accounts.InternCodeHash(crypto.HashData(initcode)))
+	create2Addr := types.CreateAddress2(factoryAddr, salt.Bytes32(), accounts.InternCodeHash(crypto.Keccak256Hash(initcode)))
 	delegatedAddr := accounts.InternAddress(create2Addr)
 
 	// Set an EIP-7702 delegation on the target address (points to some arbitrary empty account).
 	delegationTarget := common.HexToAddress("0xdead")
 	delegationCode := types.AddressToDelegation(accounts.InternAddress(delegationTarget))
-	statedb.CreateAccount(delegatedAddr, true)
-	statedb.SetCode(delegatedAddr, delegationCode, tracing.CodeChangeUnspecified)
+	require.NoError(t, statedb.CreateAccount(delegatedAddr, true))
+	require.NoError(t, statedb.SetCode(delegatedAddr, delegationCode, tracing.CodeChangeUnspecified))
 
 	// Build a factory contract that executes CREATE2 with the initcode and salt=0.
 	// The factory is placed at factoryAddr.
@@ -746,8 +974,8 @@ func TestCreate2CollisionWithEIP7702Delegation(t *testing.T) {
 	// Push the result to storage slot 0 for inspection.
 	factory.Push(0).Op(vm.SSTORE)
 
-	statedb.CreateAccount(accounts.InternAddress(factoryAddr), true)
-	statedb.SetCode(accounts.InternAddress(factoryAddr), factory.Bytes(), tracing.CodeChangeUnspecified)
+	require.NoError(t, statedb.CreateAccount(accounts.InternAddress(factoryAddr), true))
+	require.NoError(t, statedb.SetCode(accounts.InternAddress(factoryAddr), factory.Bytes(), tracing.CodeChangeUnspecified))
 
 	cfg := &Config{
 		State:  statedb,
@@ -777,10 +1005,11 @@ func TestCreateCollisionWithEIP7702Delegation(t *testing.T) {
 	db := testutil.TemporalDB(t)
 	tx, domains := testutil.TemporalTxSD(t, db)
 	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
+	defer statedb.Close()
 
 	sender := accounts.InternAddress(common.HexToAddress("0x1234"))
-	statedb.CreateAccount(sender, true)
-	statedb.AddBalance(sender, *uint256.NewInt(1e18), tracing.BalanceChangeUnspecified)
+	require.NoError(t, statedb.CreateAccount(sender, true))
+	require.NoError(t, statedb.AddBalance(sender, *uint256.NewInt(1e18), tracing.BalanceChangeUnspecified))
 
 	// Initcode that returns empty runtime code.
 	initcode := []byte{byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.RETURN)}
@@ -805,8 +1034,8 @@ func TestCreateCollisionWithEIP7702Delegation(t *testing.T) {
 	// Set an EIP-7702 delegation on the target address.
 	delegationTarget := common.HexToAddress("0xdead")
 	delegationCode := types.AddressToDelegation(accounts.InternAddress(delegationTarget))
-	statedb.CreateAccount(delegatedAddr, true)
-	statedb.SetCode(delegatedAddr, delegationCode, tracing.CodeChangeUnspecified)
+	require.NoError(t, statedb.CreateAccount(delegatedAddr, true))
+	require.NoError(t, statedb.SetCode(delegatedAddr, delegationCode, tracing.CodeChangeUnspecified))
 
 	// Build a factory that executes CREATE with the initcode.
 	factory := program.New()
@@ -817,8 +1046,8 @@ func TestCreateCollisionWithEIP7702Delegation(t *testing.T) {
 					Op(vm.CREATE)
 	factory.Push(0).Op(vm.SSTORE) // store result in slot 0
 
-	statedb.CreateAccount(factoryAcct, true)
-	statedb.SetCode(factoryAcct, factory.Bytes(), tracing.CodeChangeUnspecified)
+	require.NoError(t, statedb.CreateAccount(factoryAcct, true))
+	require.NoError(t, statedb.SetCode(factoryAcct, factory.Bytes(), tracing.CodeChangeUnspecified))
 
 	cfg := &Config{
 		State:  statedb,
@@ -838,9 +1067,9 @@ func TestCreateCollisionWithEIP7702Delegation(t *testing.T) {
 // callback receives correct (non-underflowing) gas values when an opcode
 // charges state gas under EIP-8037 multi-dimensional gas (Amsterdam rules).
 //
-// The bug: the interpreter accumulated both regular and state dynamic gas into
+// The bug: the interpreter accumulated both execution and state dynamic gas into
 // a single `cost` variable, then computed `gasCopy - cost` for the tracer
-// callback. Because `gasCopy` only captured regular gas, the subtraction
+// callback. Because `gasCopy` only captured execution gas, the subtraction
 // underflowed when state gas was non-zero (e.g. SSTORE creating a new slot).
 func TestGasTracingNoUnderflowOnStateGas(t *testing.T) {
 	t.Parallel()
@@ -900,7 +1129,7 @@ func TestGasTracingNoUnderflowOnStateGas(t *testing.T) {
 //   - SYSTEM_ADDRESS was touched and exists after the call (positive check on the
 //     caller-side empty-account creation for Gnosis/AuRa; see PR 5645, Issue 18276).
 //   - SYSTEM_ADDRESS remains an empty account after the call.
-//   - SYSTEM_ADDRESS is absent from the BAL produced by the call's TxIO.
+//   - SYSTEM_ADDRESS is absent from the BAL produced by the call's tx IO.
 //   - No balance-change tracer events fire for SYSTEM_ADDRESS as a result of
 //     the zero-value transfer path.
 func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
@@ -909,20 +1138,21 @@ func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
 	db := testutil.TemporalDB(t)
 	tx, domains := testutil.TemporalTxSD(t, db)
 	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
+	defer statedb.Close()
 
 	systemAddr := params.SystemAddress
 	target := accounts.InternAddress(common.HexToAddress("0xbeef"))
 
 	// Deploy a trivial contract at the target that returns 0x42.
-	statedb.CreateAccount(target, true)
-	statedb.SetCode(target, []byte{
+	require.NoError(t, statedb.CreateAccount(target, true))
+	require.NoError(t, statedb.SetCode(target, []byte{
 		byte(vm.PUSH1), 0x42,
 		byte(vm.PUSH1), 0,
 		byte(vm.MSTORE),
 		byte(vm.PUSH1), 32,
 		byte(vm.PUSH1), 0,
 		byte(vm.RETURN),
-	}, tracing.CodeChangeUnspecified)
+	}, tracing.CodeChangeUnspecified))
 
 	// Track balance-change events on SYSTEM_ADDRESS.
 	type balChange struct {
@@ -951,13 +1181,13 @@ func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
 
 	vmenv := NewEnv(cfg)
 	rules := vmenv.ChainRules()
-	statedb.Prepare(rules, systemAddr, cfg.Coinbase, target, vm.ActivePrecompiles(rules), nil, nil)
+	statedb.Prepare(rules, systemAddr, cfg.Coinbase, target, vm.ActivePrecompiles(rules), nil)
 
 	ret, _, _, err := vmenv.Call(
 		systemAddr,
 		target,
 		nil,
-		mdgas.SplitTxnGasLimit(cfg.GasLimit, mdgas.MdGas{}, rules),
+		mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules),
 		uint256.Int{}, // value = 0
 		false,
 	)
@@ -979,7 +1209,9 @@ func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
 
 	// The call-level BAL must not include SYSTEM_ADDRESS when the syscall only
 	// performs the sender-side touch and no actual account access.
-	bal := statedb.TxIO().AsBlockAccessList()
+	var io state.VersionedIO
+	statedb.MergeTxIOInto(&io, statedb.VersionedWrites())
+	bal := io.AsBlockAccessList()
 	for _, accountChanges := range bal {
 		require.NotEqual(t, systemAddr, accountChanges.Address,
 			"SYSTEM_ADDRESS should be absent from the BAL after a zero-value syscall")
@@ -988,4 +1220,23 @@ func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
 	// No balance-change events should have fired for SYSTEM_ADDRESS
 	// from the zero-value call path.
 	require.Empty(t, balChanges, "no balance-change events expected for SYSTEM_ADDRESS on zero-value syscall, got %v", balChanges)
+}
+
+// LOG's BlockNumber comes from the EVM context. Entry points that do not go
+// through SetTxContext leave the state's block number at zero, so the opcode
+// must not source it from there.
+func TestLogBlockNumberFromEVMContext(t *testing.T) {
+	t.Parallel()
+
+	cfg := &Config{BlockNumber: 42}
+	_, ibs, err := Execute([]byte{
+		byte(vm.PUSH1), 0,
+		byte(vm.PUSH1), 0,
+		byte(vm.LOG0),
+	}, nil, cfg, t.TempDir())
+	require.NoError(t, err)
+
+	logs := ibs.GetRawLogs(0)
+	require.Len(t, logs, 1)
+	require.Equal(t, hexutil.Uint64(42), logs[0].BlockNumber)
 }

@@ -72,7 +72,7 @@ func TestDump(t *testing.T) {
 
 	withConfig := func(config *chain.Config, sprints map[string]uint64) *chain.Config {
 		var copy chain.Config
-		copier.Copy(&copy, config)
+		require.NoError(t, copier.CopyWithOption(&copy, config, copier.Option{DeepCopy: true}))
 		bor := *config.Bor.(*borcfg.BorConfig)
 		bor.Sprint = sprints
 		copy.Bor = &bor
@@ -259,7 +259,7 @@ func TestDump(t *testing.T) {
 			snConfig, _ := snapcfg.KnownCfg(networkname.Mainnet)
 			snConfig.ExpectBlocks = math.MaxUint64
 
-			err := freezeblocks.DumpBlocks(m.Ctx, 0, uint64(test.chainSize), m.ChainConfig, tmpDir, snapDir, m.DB, 1, log.LvlInfo, logger, m.BlockReader, snConfig)
+			err := freezeblocks.DumpBlocks(m.Ctx, 0, uint64(test.chainSize), m.ChainConfig, tmpDir, snapDir, m.DB, 1, log.LvlInfo, logger, m.BlockReader, snConfig, nil)
 			require.NoError(err)
 		})
 	}
@@ -280,12 +280,11 @@ func createDumpTestKV(t *testing.T, chainConfig *chain.Config, chainSize int) *e
 		t,
 		execmoduletester.WithGenesisSpec(gspec),
 		execmoduletester.WithKey(key),
-		execmoduletester.WithBlockBufferSize(chainSize),
 		execmoduletester.WithPruneMode(prune.DefaultMode),
 	)
 
 	// Generate testing blocks
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainSize, func(i int, b *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(chainSize, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		tx, txErr := types.SignTx(types.NewTransaction(b.TxNonce(addr), common.HexToAddress("deadbeef"), uint256.NewInt(100), 21000, uint256.NewInt(uint64(int64(i+1)*common.GWei)), nil), *signer, key)
 		if txErr != nil {

@@ -45,7 +45,7 @@ func (api *APIImpl) GetUncleByBlockNumberAndIndex(ctx context.Context, number rp
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +81,7 @@ func (api *APIImpl) GetUncleByBlockHashAndIndex(ctx context.Context, hash common
 		return nil, nil
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +120,7 @@ func (api *APIImpl) GetUncleCountByBlockNumber(ctx context.Context, number rpc.B
 		return &n, err
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +153,7 @@ func (api *APIImpl) GetUncleCountByBlockHash(ctx context.Context, hash common.Ha
 		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, *number)
+	err = api.BaseAPI.checkPruneBlocks(ctx, tx, *number)
 	if err != nil {
 		return nil, err
 	}

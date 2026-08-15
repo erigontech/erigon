@@ -33,9 +33,11 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -139,7 +141,7 @@ func newTestAction(addr accounts.Address, r *rand.Rand) testAction {
 		{
 			name: "Selfdestruct",
 			fn: func(a testAction, s *IntraBlockState) {
-				s.Selfdestruct(addr)
+				s.Selfdestruct(addr, false)
 			},
 		},
 		{
@@ -250,6 +252,7 @@ func (test *snapshotTest) run(t *testing.T) bool {
 		snapshotRevs = make([]int, len(test.snapshots))
 		sindex       = 0
 	)
+	defer state.Close()
 	for i, action := range test.actions {
 		if len(test.snapshots) > sindex && i == test.snapshots[sindex] {
 			snapshotRevs[sindex] = state.PushSnapshot()
@@ -266,7 +269,9 @@ func (test *snapshotTest) run(t *testing.T) bool {
 		}
 		state.RevertToSnapshot(snapshotRevs[sindex], nil)
 		state.PopSnapshot(snapshotRevs[sindex])
-		if err := test.checkEqual(state, checkstate); err != nil {
+		err := test.checkEqual(state, checkstate)
+		checkstate.Close()
+		if err != nil {
 			test.err = fmt.Errorf("state mismatch after revert to snapshot %d\n%w", sindex, err)
 			return false
 		}
@@ -399,6 +404,7 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 func TestTransientStorage(t *testing.T) {
 	t.Parallel()
 	state := New(nil)
+	defer state.Close()
 
 	key := accounts.InternKey(common.Hash{0x01})
 	value := uint256.NewInt(2)
@@ -421,6 +427,45 @@ func TestTransientStorage(t *testing.T) {
 	}
 }
 
+func TestCloseResetsRevisions(t *testing.T) {
+	t.Parallel()
+	state := New(nil)
+	t.Cleanup(state.Close)
+
+	state.PushSnapshot()
+	require.NotEmpty(t, state.revisions.valid)
+
+	state.Close()
+	require.Empty(t, state.revisions.valid)
+	require.Zero(t, state.revisions.nextId)
+}
+
+func TestCloseReleasesVersionedWrites(t *testing.T) {
+	t.Parallel()
+	state := NewWithVersionMap(&minimalStateReader{}, NewVersionMap(nil))
+	t.Cleanup(state.Close)
+	state.SetNoMaterialize(true)
+	state.SetTxContext(1, 0)
+
+	require.NoError(t, state.TouchAccount(accounts.InternAddress([20]byte{0xe1})))
+	require.NotZero(t, state.versionedWrites.Count())
+
+	handedOut := state.VersionedWrites()
+	state.Close()
+
+	require.Zero(t, state.versionedWrites.Count())
+	require.NotZero(t, handedOut.Count(), "the clone handed to callers must survive Close")
+}
+
+func TestCloseIsIdempotent(t *testing.T) {
+	t.Parallel()
+	state := New(nil)
+
+	state.PushSnapshot()
+	state.Close()
+	require.NotPanics(t, state.Close)
+}
+
 func TestVersionMapReadWriteDelete(t *testing.T) {
 	t.Parallel()
 
@@ -430,12 +475,14 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	reader := NewReaderV3(domains.AsGetter(tx))
 
 	s := NewWithVersionMap(reader, mvhm)
+	defer s.Close()
 
 	states := []*IntraBlockState{s}
 
 	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
 		sCopy := NewWithVersionMap(reader, mvhm)
+		defer sCopy.Close() //nolint:gocritic
 		sCopy.txIndex = i
 		states = append(states, sCopy)
 	}
@@ -454,7 +501,7 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	states[1].GetOrNewStateObject(addr)
 	states[1].SetState(addr, key, val)
 	states[1].SetBalance(addr, balance, tracing.BalanceChangeUnspecified)
-	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true, "")
+	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true, "")
 
 	// Tx1 read
 	v, err = states[1].GetState(addr, key)
@@ -472,8 +519,13 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	assert.Equal(t, val, v)
 	assert.Equal(t, balance, b)
 
-	// Tx3 delete
-	states[3].Selfdestruct(addr)
+	// Tx3 delete. FinalizeTx below is the materialized-object commit path
+	// (serial/genesis/RPC); the parallel executor never runs it (see the
+	// IsVersioned guards in txtask.go) and instead commits via the write-set.
+	// Materialize explicitly here — as Tx1 does — so FinalizeTx's updateAccount
+	// marks the object deleted and the post-finalize read observes the wipe.
+	states[3].GetOrNewStateObject(addr)
+	states[3].Selfdestruct(addr, false)
 
 	// Within Tx 3, the state should not change before finalize
 	v, err = states[3].GetState(addr, key)
@@ -485,7 +537,7 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	v, err = states[3].GetState(addr, key)
 	assert.NoError(t, err)
 	assert.Equal(t, uint256.Int{}, v)
-	states[3].versionMap.FlushVersionedWrites(states[3].VersionedWrites(false), true, "")
+	states[3].versionMap.FlushVersionedWrites(states[3].VersionedWrites(), true, "")
 
 	// Tx4 read
 	v, err = states[4].GetState(addr, key)
@@ -504,12 +556,14 @@ func TestVersionMapRevert(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	s := NewWithVersionMap(reader, mvhm)
+	defer s.Close()
 
 	states := []*IntraBlockState{s}
 
 	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
 		sCopy := NewWithVersionMap(reader, mvhm)
+		defer sCopy.Close() //nolint:gocritic
 		sCopy.txIndex = i
 		states = append(states, sCopy)
 	}
@@ -523,7 +577,7 @@ func TestVersionMapRevert(t *testing.T) {
 	states[0].GetOrNewStateObject(addr)
 	states[0].SetState(addr, key, val)
 	states[0].SetBalance(addr, balance, tracing.BalanceChangeUnspecified)
-	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(true), true, "")
+	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true, "")
 
 	// Tx1 perform some ops and then revert
 	snapshot := states[1].PushSnapshot()
@@ -536,7 +590,7 @@ func TestVersionMapRevert(t *testing.T) {
 	assert.Equal(t, u256.U64(200), b)
 	assert.Equal(t, u256.U64(1), v)
 
-	states[1].Selfdestruct(addr)
+	states[1].Selfdestruct(addr, false)
 
 	states[1].RevertToSnapshot(snapshot, nil)
 	states[1].PopSnapshot(snapshot)
@@ -548,7 +602,7 @@ func TestVersionMapRevert(t *testing.T) {
 	assert.Equal(t, val, v)
 	assert.Equal(t, balance, b)
 	states[1].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0))
-	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true, "")
+	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true, "")
 
 	// Tx2 check the state and balance
 	v, err = states[2].GetState(addr, key)
@@ -566,11 +620,13 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	s := NewWithVersionMap(reader, mvhm)
+	defer s.Close()
 	states := []*IntraBlockState{s}
 
 	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
 		sCopy := NewWithVersionMap(reader, mvhm)
+		defer sCopy.Close() //nolint:gocritic
 		sCopy.txIndex = i
 		states = append(states, sCopy)
 	}
@@ -590,13 +646,13 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 	v, err = states[0].GetState(addr, key)
 	assert.NoError(t, err)
 	assert.Equal(t, val, v)
-	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(true), true, "")
+	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true, "")
 
 	// Tx1 write
 	states[1].GetOrNewStateObject(addr)
 	states[1].SetState(addr, key, val)
 	states[1].SetBalance(addr, balance, tracing.BalanceChangeUnspecified)
-	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true, "")
+	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true, "")
 
 	// Tx2 read
 	v, err = states[2].GetState(addr, key)
@@ -607,23 +663,30 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 	assert.Equal(t, balance, b)
 
 	// Tx1 mark estimate
-	for _, v := range states[1].VersionedWrites(true) {
-		mvhm.MarkEstimate(v.Address, v.Path, v.Key, 1)
+	for h := range states[1].VersionedWrites().AllHeaders() {
+		mvhm.MarkEstimate(h.Address, h.Path, h.Key, 1)
 	}
 
-	defer func() {
-		if r := recover(); r == nil {
-			t.Errorf("The code did not panic")
-		} else {
-			t.Log("Recovered in f", r)
-		}
-	}()
-
-	// Tx2 read again should get default (empty) vals because its dependency Tx1 is marked as estimate
+	// Read-once (Block-STM): states[2] already recorded its state/balance reads
+	// above, so the repeat reads are served from the read-set and no longer abort
+	// eagerly when Tx1's writes are marked ESTIMATE. The estimate dependency is
+	// caught at commit — ValidateVersion re-reads Tx1's now-Estimate balance cell
+	// (MVReadResultDependency) and returns VersionInvalid, which drives re-execution.
 	v, err = states[2].GetState(addr, key)
 	assert.NoError(t, err)
 	assert.Equal(t, u256.U64(1), v)
-	states[2].GetBalance(addr)
+	_, err = states[2].GetBalance(addr)
+	assert.NoError(t, err)
+
+	var io2 VersionedIO
+	states[2].MergeTxIOInto(&io2, states[2].VersionedWrites())
+	valid := mvhm.ValidateVersion(2, &io2, func(rv, wv Version) VersionValidity {
+		if rv == wv {
+			return VersionValid
+		}
+		return VersionInvalid
+	}, true, false, false, "")
+	assert.Equal(t, VersionInvalid, valid, "commit-time validation catches the ESTIMATE dependency")
 
 	// Tx1 read again should get Tx0 vals
 	v, err = states[1].GetState(addr, key)
@@ -638,12 +701,14 @@ func TestVersionMapOverwrite(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	s := NewWithVersionMap(reader, mvhm)
+	defer s.Close()
 
 	states := []*IntraBlockState{s}
 
 	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
 		sCopy := NewWithVersionMap(reader, mvhm)
+		defer sCopy.Close() //nolint:gocritic
 		sCopy.txIndex = i
 		states = append(states, sCopy)
 	}
@@ -659,7 +724,7 @@ func TestVersionMapOverwrite(t *testing.T) {
 	states[0].GetOrNewStateObject(addr)
 	states[0].SetState(addr, key, val1)
 	states[0].SetBalance(addr, balance1, tracing.BalanceChangeUnspecified)
-	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(true), true, "")
+	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true, "")
 
 	// Tx1 write
 	states[1].SetState(addr, key, val2)
@@ -668,7 +733,7 @@ func TestVersionMapOverwrite(t *testing.T) {
 	assert.NoError(t, err)
 	b, err := states[1].GetBalance(addr)
 	assert.NoError(t, err)
-	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true, "")
+	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true, "")
 
 	assert.Equal(t, val2, v)
 	assert.Equal(t, balance2, b)
@@ -682,14 +747,13 @@ func TestVersionMapOverwrite(t *testing.T) {
 	assert.Equal(t, balance2, b)
 
 	// Tx1 delete
-	states[1].versionedWrites.Scan(func(v *VersionedWrite) bool {
-		mvhm.Delete(v.Address, v.Path, v.Key, 1, true)
-		return true
-	})
-	states[1].versionedWrites = nil
+	for h := range states[1].versionedWrites.AllHeaders() {
+		mvhm.Delete(h.Address, h.Path, h.Key, 1, true)
+	}
+	states[1].versionedWrites = WriteSet{}
 
 	// Tx2 read should get Tx0's value
-	states[2].versionedReads = nil
+	states[2].versionedReads = ReadSet{}
 	v, err = states[2].GetState(addr, key)
 	assert.NoError(t, err)
 	b, err = states[2].GetBalance(addr)
@@ -706,14 +770,13 @@ func TestVersionMapOverwrite(t *testing.T) {
 	assert.Equal(t, balance1, b)
 
 	// Tx0 delete
-	states[0].versionedWrites.Scan(func(v *VersionedWrite) bool {
-		mvhm.Delete(v.Address, v.Path, v.Key, 0, true)
-		return true
-	})
-	states[0].versionedWrites = nil
+	for h := range states[0].versionedWrites.AllHeaders() {
+		mvhm.Delete(h.Address, h.Path, h.Key, 0, true)
+	}
+	states[0].versionedWrites = WriteSet{}
 
 	// Tx2 read again should get default vals
-	states[2].versionedReads = nil
+	states[2].versionedReads = ReadSet{}
 	v, err = states[2].GetState(addr, key)
 	assert.NoError(t, err)
 	b, err = states[2].GetBalance(addr)
@@ -729,12 +792,14 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	s := NewWithVersionMap(reader, mvhm)
+	defer s.Close()
 
 	states := []*IntraBlockState{s}
 
 	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
 		sCopy := NewWithVersionMap(reader, mvhm)
+		defer sCopy.Close() //nolint:gocritic
 		sCopy.txIndex = i
 		states = append(states, sCopy)
 	}
@@ -748,17 +813,17 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 
 	// Tx0 write
 	states[0].GetOrNewStateObject(addr)
-	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(true), true, "")
+	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true, "")
 
 	// Tx2 write
 	states[2].SetState(addr, key2, val2)
-	states[2].versionMap.FlushVersionedWrites(states[2].VersionedWrites(true), true, "")
+	states[2].versionMap.FlushVersionedWrites(states[2].VersionedWrites(), true, "")
 
 	// Tx1 write
 	tx1Snapshot := states[1].PushSnapshot()
 	states[1].SetState(addr, key1, val1)
 	states[1].SetBalance(addr, balance1, tracing.BalanceChangeUnspecified)
-	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true, "")
+	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true, "")
 
 	// Tx1 read
 	v, err := states[1].GetState(addr, key1)
@@ -778,7 +843,7 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	// Now that Tx1 has flushed, re-reading without stale cache simulates a
 	// re-execution that the scheduler would trigger on dependency.
 	states[2].stateObjects = map[accounts.Address]*stateObject{}
-	states[2].versionedReads = nil
+	states[2].versionedReads = ReadSet{}
 	v, err = states[2].GetState(addr, key2)
 	assert.NoError(t, err)
 	assert.Equal(t, val2, v)
@@ -802,14 +867,13 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	assert.Equal(t, balance1, b)
 
 	// Tx2 delete
-	states[2].versionedWrites.Scan(func(v *VersionedWrite) bool {
-		mvhm.Delete(v.Address, v.Path, v.Key, 2, true)
-		return true
-	})
-	states[2].versionedWrites = nil
+	for h := range states[2].versionedWrites.AllHeaders() {
+		mvhm.Delete(h.Address, h.Path, h.Key, 2, true)
+	}
+	states[2].versionedWrites = WriteSet{}
 
 	// Tx3 read
-	states[3].versionedReads = nil
+	states[3].versionedReads = ReadSet{}
 	v, err = states[3].GetState(addr, key1)
 	assert.NoError(t, err)
 	assert.Equal(t, val1, v)
@@ -824,7 +888,7 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	// Tx1 revert
 	states[1].RevertToSnapshot(tx1Snapshot, nil)
 	states[1].PopSnapshot(tx1Snapshot)
-	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true, "")
+	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true, "")
 	// map deletes necessary here as they happen in scheduler not ibs
 	states[1].versionMap.Delete(addr, StoragePath, key1, 1, true)
 	states[1].versionMap.Delete(addr, StoragePath, key2, 1, true)
@@ -834,7 +898,7 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	// we need to flush the local state objects as we're not
 	// resetting the state - which is artificial for the test
 	states[3].stateObjects = map[accounts.Address]*stateObject{}
-	states[3].versionedReads = nil
+	states[3].versionedReads = ReadSet{}
 	v, err = states[3].GetState(addr, key1)
 	assert.NoError(t, err)
 	assert.Equal(t, uint256.Int{}, v)
@@ -846,14 +910,13 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	assert.Equal(t, uint256.Int{}, b)
 
 	// Tx1 delete
-	states[1].versionedWrites.Scan(func(v *VersionedWrite) bool {
-		mvhm.Delete(v.Address, v.Path, v.Key, 1, true)
-		return true
-	})
-	states[1].versionedWrites = nil
+	for h := range states[1].versionedWrites.AllHeaders() {
+		mvhm.Delete(h.Address, h.Path, h.Key, 1, true)
+	}
+	states[1].versionedWrites = WriteSet{}
 
 	// Tx3 read
-	states[3].versionedReads = nil
+	states[3].versionedReads = ReadSet{}
 	v, err = states[3].GetState(addr, key1)
 	assert.NoError(t, err)
 	assert.Equal(t, uint256.Int{}, v)
@@ -871,15 +934,19 @@ func TestApplyVersionedWrites(t *testing.T) {
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	s := NewWithVersionMap(reader, mvhm)
+	defer s.Close()
 
 	sClean := New(reader)
+	defer sClean.Close()
 	sSingleProcess := New(reader)
+	defer sSingleProcess.Close()
 
 	states := []*IntraBlockState{s}
 
 	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
 		sCopy := NewWithVersionMap(reader, mvhm)
+		defer sCopy.Close() //nolint:gocritic
 		sCopy.txIndex = i
 		states = append(states, sCopy)
 	}
@@ -902,7 +969,7 @@ func TestApplyVersionedWrites(t *testing.T) {
 	states[0].SetState(addr2, key2, val2)
 	states[0].GetOrNewStateObject(addr3)
 	states[0].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0))
-	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(true), true, "")
+	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true, "")
 
 	sSingleProcess.GetOrNewStateObject(addr1)
 	sSingleProcess.SetState(addr1, key1, val1)
@@ -910,42 +977,78 @@ func TestApplyVersionedWrites(t *testing.T) {
 	sSingleProcess.SetState(addr2, key2, val2)
 	sSingleProcess.GetOrNewStateObject(addr3)
 
-	sClean.ApplyVersionedWrites(states[0].VersionedWrites(true))
+	sClean.ApplyVersionedWrites(states[0].VersionedWrites())
 
 	// Tx1 write
 	states[1].SetState(addr1, key2, val2)
 	states[1].SetBalance(addr1, *balance2, tracing.BalanceChangeUnspecified)
 	states[1].SetNonce(addr1, 1, tracing.NonceChangeUnspecified)
 	states[1].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0))
-	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true, "")
+	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true, "")
 
 	sSingleProcess.SetState(addr1, key2, val2)
 	sSingleProcess.SetBalance(addr1, *balance2, tracing.BalanceChangeUnspecified)
 	sSingleProcess.SetNonce(addr1, 1, tracing.NonceChangeUnspecified)
 
-	sClean.ApplyVersionedWrites(states[1].VersionedWrites(true))
+	sClean.ApplyVersionedWrites(states[1].VersionedWrites())
 
 	// Tx2 write
 	states[2].SetState(addr1, key1, val2)
 	states[2].SetBalance(addr1, *balance2, tracing.BalanceChangeUnspecified)
 	states[2].SetNonce(addr1, 2, tracing.NonceChangeUnspecified)
 	states[2].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0))
-	states[2].versionMap.FlushVersionedWrites(states[2].VersionedWrites(true), true, "")
+	states[2].versionMap.FlushVersionedWrites(states[2].VersionedWrites(), true, "")
 
 	sSingleProcess.SetState(addr1, key1, val2)
 	sSingleProcess.SetBalance(addr1, *balance2, tracing.BalanceChangeUnspecified)
 	sSingleProcess.SetNonce(addr1, 2, tracing.NonceChangeUnspecified)
 
-	sClean.ApplyVersionedWrites(states[2].VersionedWrites(true))
+	sClean.ApplyVersionedWrites(states[2].VersionedWrites())
 
 	// Tx3 write
-	states[3].Selfdestruct(addr2)
+	states[3].Selfdestruct(addr2, false)
 	states[3].SetCode(addr1, code, tracing.CodeChangeUnspecified)
 	states[3].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0))
-	states[3].versionMap.FlushVersionedWrites(states[3].VersionedWrites(true), true, "")
+	states[3].versionMap.FlushVersionedWrites(states[3].VersionedWrites(), true, "")
 
-	sSingleProcess.Selfdestruct(addr2)
+	sSingleProcess.Selfdestruct(addr2, false)
 	sSingleProcess.SetCode(addr1, code, tracing.CodeChangeUnspecified)
 
-	sClean.ApplyVersionedWrites(states[3].VersionedWrites(true))
+	sClean.ApplyVersionedWrites(states[3].VersionedWrites())
+}
+
+// TestMakeWriteSetClearsCodeDomainOnEmptyOverride pins that clearing an
+// account's code (e.g. an eth_simulateV1 stateOverride of "code":"0x") writes
+// through to the CodeDomain, keeping it consistent with the now-empty account
+// codeHash. Regression: gating the code write on a non-nil code slice skipped
+// the clear, leaving the CodeDomain holding stale code and tripping the
+// commitment codeHash-mismatch assert.
+func TestMakeWriteSetClearsCodeDomainOnEmptyOverride(t *testing.T) {
+	t.Parallel()
+
+	_, tx, domains := NewTestRwTx(t)
+
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	addrVal := addr.Value()
+	code := []byte{0x60, 0x00, 0x60, 0x00, 0xf3}
+
+	deploy := New(NewReaderV3(domains.AsGetter(tx)))
+	defer deploy.Close()
+	require.NoError(t, deploy.CreateAccount(addr, true))
+	require.NoError(t, deploy.SetNonce(addr, 1, tracing.NonceChangeUnspecified))
+	require.NoError(t, deploy.SetCode(addr, code, tracing.CodeChangeUnspecified))
+	require.NoError(t, deploy.MakeWriteSet(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0)))
+
+	got, _, err := domains.AsGetter(tx).GetLatest(kv.CodeDomain, addrVal[:])
+	require.NoError(t, err)
+	require.Equal(t, code, got)
+
+	clear := New(NewReaderV3(domains.AsGetter(tx)))
+	defer clear.Close()
+	require.NoError(t, clear.SetCode(addr, []byte{}, tracing.CodeChangeUnspecified))
+	require.NoError(t, clear.MakeWriteSet(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 1)))
+
+	got, _, err = domains.AsGetter(tx).GetLatest(kv.CodeDomain, addrVal[:])
+	require.NoError(t, err)
+	require.Empty(t, got, "clearing code must clear the CodeDomain entry")
 }

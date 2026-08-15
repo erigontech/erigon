@@ -51,7 +51,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
@@ -98,14 +98,14 @@ func retryTestFunc(t *testing.T, maxRetries int, fn func()) {
 }
 
 func getEthClock(t *testing.T) eth_clock.EthereumClock {
-	s, err := initial_state.GetGenesisState(chainspec.MainnetChainID)
+	s, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
 	noErr(err)
 	return eth_clock.NewEthereumClock(s.GenesisTime(), s.GenesisValidatorsRoot(), s.BeaconConfig())
 }
 
 func loadChain(t *testing.T) (db kv.RwDB, blocks []*cltypes.SignedBeaconBlock, preState, postState *state.CachingBeaconState, reader *antiquarytests.MockBlockReader) {
 	blocks, preState, postState = antiquarytests.GetPhase0Random()
-	db = memdb.NewTestDB(t, dbcfg.ChainDB)
+	db = mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	reader = antiquarytests.LoadChain(blocks, postState, db, t)
 
 	sn := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
@@ -198,7 +198,7 @@ func testSentinelBlocksByRange(t *testing.T) {
 
 	responsePacket := make([]*cltypes.SignedBeaconBlock, 0)
 	r := bytes.NewReader(w.Bytes())
-	for i := 0; i < len(blocks); i++ {
+	for range blocks {
 		forkDigest := make([]byte, 4)
 		if _, err := r.Read(forkDigest); err != nil {
 			if err == io.EOF {
@@ -229,7 +229,7 @@ func testSentinelBlocksByRange(t *testing.T) {
 		r.ReadByte()
 	}
 	assertPanic(len(blocks) == len(responsePacket), "expected %d blocks, got %d", len(blocks), len(responsePacket))
-	for i := 0; i < len(blocks); i++ {
+	for i := range blocks {
 		root1, err := responsePacket[i].HashSSZ()
 		noErr(err)
 		root2, err := blocks[i].HashSSZ()
@@ -278,7 +278,7 @@ func testSentinelBlocksByRoots(t *testing.T) {
 
 	responsePacket := make([]*cltypes.SignedBeaconBlock, 0)
 	r := bytes.NewReader(w.Bytes())
-	for i := 0; i < len(blocks); i++ {
+	for range blocks {
 		forkDigest := make([]byte, 4)
 		if _, err := r.Read(forkDigest); err != nil {
 			if err == io.EOF {

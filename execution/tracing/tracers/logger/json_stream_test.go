@@ -110,6 +110,98 @@ func captureOnOpcodeWithReturnData(t *testing.T, cfg *LogConfig, memory []byte, 
 	return outer.StructLogs[0]
 }
 
+// captureOnOpcodes runs n OnOpcode calls through a single logger and returns every
+// structLog entry that made it to the stream. The pc of each step is set to its
+// index so callers can assert which steps were kept.
+func captureOnOpcodes(t *testing.T, cfg *LogConfig, n int) []map[string]json.RawMessage {
+	t.Helper()
+	var buf bytes.Buffer
+	stream := jsonstream.New(&buf)
+	l := NewJsonStreamLogger(cfg, context.Background(), stream)
+	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+
+	scope := &mockOpContext{}
+	for i := range n {
+		l.OnOpcode(uint64(i), byte(vm.MLOAD), 100, 3, scope, nil, 1, nil)
+	}
+
+	// Mirror what ExecuteTraceTx does to close the stream after execution.
+	stream.WriteArrayEnd()
+	stream.WriteObjectEnd()
+	stream.Flush()
+
+	var outer struct {
+		StructLogs []map[string]json.RawMessage `json:"structLogs"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &outer); err != nil {
+		t.Fatalf("invalid JSON output: %v\nraw: %s", err, buf.Bytes())
+	}
+	return outer.StructLogs
+}
+
+// TestJsonStreamLogger_Limit verifies that LogConfig.Limit caps the number of
+// structLog entries emitted by the opcode logger, as required by the TraceConfig
+// `limit` field in execution-apis (src/schemas/opcode-tracer.yaml):
+//
+//	"Maximum number of opcode steps to capture. Zero means no limit. When the
+//	 limit is reached, execution continues but no further StructLog entries are
+//	 recorded."
+func TestJsonStreamLogger_Limit(t *testing.T) {
+	const steps = 5
+	tests := []struct {
+		name  string
+		limit int
+		want  int
+	}{
+		{"limit zero means unlimited", 0, steps},
+		{"limit of one keeps a single entry", 1, 1},
+		{"limit below step count truncates", 2, 2},
+		{"limit equal to step count keeps all", steps, steps},
+		{"limit above step count keeps all", steps + 3, steps},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logs := captureOnOpcodes(t, &LogConfig{Limit: tt.limit}, steps)
+			if len(logs) != tt.want {
+				t.Fatalf("structLogs count: got %d, want %d", len(logs), tt.want)
+			}
+			// The limit truncates the tail: the entries kept must be the first
+			// ones executed, in order.
+			for i, entry := range logs {
+				var pc uint64
+				if err := json.Unmarshal(entry["pc"], &pc); err != nil {
+					t.Fatalf("cannot parse pc of entry %d: %v", i, err)
+				}
+				if pc != uint64(i) {
+					t.Errorf("entry %d: got pc %d, want %d", i, pc, i)
+				}
+			}
+		})
+	}
+}
+
+// TestJsonStreamLogger_LimitDoesNotCorruptJSON verifies that suppressed steps emit
+// nothing at all — in particular no dangling separator that would break the array.
+func TestJsonStreamLogger_LimitDoesNotCorruptJSON(t *testing.T) {
+	var buf bytes.Buffer
+	stream := jsonstream.New(&buf)
+	l := NewJsonStreamLogger(&LogConfig{Limit: 1}, context.Background(), stream)
+	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+
+	scope := &mockOpContext{}
+	for i := range 4 {
+		l.OnOpcode(uint64(i), byte(vm.MLOAD), 100, 3, scope, nil, 1, nil)
+	}
+	stream.WriteArrayEnd()
+	stream.WriteObjectEnd()
+	stream.Flush()
+
+	if !json.Valid(buf.Bytes()) {
+		t.Fatalf("output is not valid JSON: %s", buf.Bytes())
+	}
+}
+
 // TestJsonStreamLogger_MemoryEncoding verifies that memory words are emitted as
 // 0x-prefixed 64-char hex strings and that a partial last word is padded to 32 bytes.
 func TestJsonStreamLogger_MemoryEncoding(t *testing.T) {
@@ -223,6 +315,13 @@ func TestJsonStreamLogger_EnableMemory(t *testing.T) {
 		obj := captureOnOpcode(t, &LogConfig{EnableMemory: false}, mem, nil, nil)
 		if _, ok := obj["memory"]; ok {
 			t.Error("expected 'memory' field to be absent, but it was present")
+		}
+	})
+
+	t.Run("enableMemory=true with empty memory excludes memory field", func(t *testing.T) {
+		obj := captureOnOpcode(t, &LogConfig{EnableMemory: true}, nil, nil, nil)
+		if _, ok := obj["memory"]; ok {
+			t.Error("expected 'memory' field to be absent when memory is empty, but it was present")
 		}
 	})
 }

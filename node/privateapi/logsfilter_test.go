@@ -43,7 +43,7 @@ var (
 
 func init() {
 	var a common.Address
-	a.SetBytes(address1.Bytes())
+	a.SetBytes(address1[:])
 	address160 = gointerfaces.ConvertAddressToH160(a)
 	topic1H256 = gointerfaces.ConvertHashToH256(topic1)
 }
@@ -191,7 +191,7 @@ func TestLogsFilter_AllAddressesAndTopicsFilter_DistributesLogRegardless(t *test
 
 	lg = createLog()
 	var addr common.Address
-	addr.SetBytes(address1.Bytes())
+	addr.SetBytes(address1[:])
 	lg.Address = addr
 	_ = agg.distributeLogs([]*notifications.LogNotification{lg})
 	if len(srv.sent) != 3 {
@@ -271,7 +271,7 @@ func TestLogsFilter_AddressFilter_OnlyAllowsThatAddressThrough(t *testing.T) {
 
 	lg = createLog()
 	var addr common.Address
-	addr.SetBytes(address1.Bytes())
+	addr.SetBytes(address1[:])
 	lg.Address = addr
 	_ = agg.distributeLogs([]*notifications.LogNotification{lg})
 	if len(srv.sent) != 1 {

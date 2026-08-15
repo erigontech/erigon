@@ -32,11 +32,14 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
 	ethapi "github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/filters"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/rpc/transactions"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 type GraphQLCallResult struct {
@@ -58,23 +61,26 @@ type GraphQLAPI interface {
 	EstimateGas(ctx context.Context, blockNumber rpc.BlockNumber, args ethapi.CallArgs) (uint64, error)
 	GasPrice(ctx context.Context) (string, error)
 	GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.RPCLogs, error)
+	GetPendingTransactions(ctx context.Context) ([]types.Transaction, error)
 }
 
 type GraphQLAPIImpl struct {
 	*BaseAPI
 	db              kv.TemporalRoDB
 	eth             EthAPI
+	txPool          txpoolproto.TxpoolClient
 	gasCap          uint64
 	returnDataLimit int
 }
 
-func NewGraphQLAPI(base *BaseAPI, db kv.TemporalRoDB, eth EthAPI, gasCap uint64, returnDataLimit int) *GraphQLAPIImpl {
+func NewGraphQLAPI(base *BaseAPI, db kv.TemporalRoDB, eth EthAPI, txPool txpoolproto.TxpoolClient, cfg *rpccfg.GraphQLApiConfig) *GraphQLAPIImpl {
 	return &GraphQLAPIImpl{
 		BaseAPI:         base,
 		db:              db,
 		eth:             eth,
-		gasCap:          gasCap,
-		returnDataLimit: returnDataLimit,
+		txPool:          txPool,
+		gasCap:          cfg.GasCap,
+		returnDataLimit: cfg.ReturnDataLimit,
 	}
 }
 
@@ -267,12 +273,12 @@ func (api *GraphQLAPIImpl) GetAccountInfo(ctx context.Context, address common.Ad
 		return "", 0, "", err
 	}
 
-	if err = api.checkPruneHistory(ctx, tx, blockNum); err != nil {
+	if err := api.checkPruneHistory(ctx, tx, blockNum); err != nil {
 		return "", 0, "", err
 	}
 
 	stateTx := api.filters.WithTemporalOverlay(tx)
-	if err = rpchelper.CheckBlockExecuted(stateTx, blockNum); err != nil {
+	if err := rpchelper.CheckBlockExecuted(stateTx, blockNum); err != nil {
 		return "", 0, "", err
 	}
 
@@ -323,12 +329,12 @@ func (api *GraphQLAPIImpl) GetAccountStorage(ctx context.Context, address common
 		return zeroStorageHash, err
 	}
 
-	if err = api.checkPruneHistory(ctx, tx, blockNum); err != nil {
+	if err := api.checkPruneHistory(ctx, tx, blockNum); err != nil {
 		return zeroStorageHash, err
 	}
 
 	stateTx := api.filters.WithTemporalOverlay(tx)
-	if err = rpchelper.CheckBlockExecuted(stateTx, blockNum); err != nil {
+	if err := rpchelper.CheckBlockExecuted(stateTx, blockNum); err != nil {
 		return zeroStorageHash, err
 	}
 
@@ -408,11 +414,11 @@ func (api *GraphQLAPIImpl) Call(ctx context.Context, blockNumber rpc.BlockNumber
 		return nil, fmt.Errorf("header not found")
 	}
 
-	if err = api.checkPruneHistory(ctx, tx, header.Number.Uint64()); err != nil {
+	if err := api.checkPruneHistory(ctx, tx, header.Number.Uint64()); err != nil {
 		return nil, err
 	}
 
-	if err = rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), header.Number.Uint64()); err != nil {
+	if err := rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), header.Number.Uint64()); err != nil {
 		return nil, err
 	}
 
@@ -459,4 +465,23 @@ func (api *GraphQLAPIImpl) GasPrice(ctx context.Context) (string, error) {
 
 func (api *GraphQLAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.RPCLogs, error) {
 	return api.eth.GetLogs(ctx, crit)
+}
+
+func (api *GraphQLAPIImpl) GetPendingTransactions(ctx context.Context) ([]types.Transaction, error) {
+	if api.txPool == nil {
+		return nil, nil
+	}
+	reply, err := api.txPool.Pending(ctx, &emptypb.Empty{})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]types.Transaction, 0, len(reply.Txs))
+	for _, txInfo := range reply.Txs {
+		txn, decErr := types.DecodeWrappedTransaction(txInfo.RlpTx)
+		if decErr != nil {
+			return nil, fmt.Errorf("decoding pending transaction: %w", decErr)
+		}
+		result = append(result, txn)
+	}
+	return result, nil
 }

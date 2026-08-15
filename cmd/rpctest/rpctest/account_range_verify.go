@@ -88,7 +88,8 @@ func CompareAccountRange(logger log.Logger, erigonURL, gethURL, tmpDataDir, geth
 	f := func(url string, db kv.RwTx) error {
 		i := uint64(0)
 		reqGen := &RequestGenerator{}
-		next := []byte{}
+		var nextAddr common.Address
+		next := nextAddr[:]
 		for {
 			ar := DebugAccountRange{}
 			req := reqGen.accountRange(blockFrom, next, 256)
@@ -109,7 +110,7 @@ func CompareAccountRange(logger log.Logger, erigonURL, gethURL, tmpDataDir, geth
 				if innerErr != nil {
 					return innerErr
 				}
-				err = db.Put(accountDumpBucket, addr.Bytes(), b)
+				err = db.Put(accountDumpBucket, addr[:], b)
 				if err != nil {
 					return err
 				}
@@ -186,7 +187,8 @@ func CompareAccountRange(logger log.Logger, erigonURL, gethURL, tmpDataDir, geth
 		if br {
 			break
 		}
-		if cmp == 0 {
+		switch {
+		case cmp == 0:
 			if !bytes.Equal(tgVal, gethVal) {
 				errsNum++
 				fmt.Println(common.Bytes2Hex(tgKey))
@@ -206,7 +208,7 @@ func CompareAccountRange(logger log.Logger, erigonURL, gethURL, tmpDataDir, geth
 				return
 
 			}
-		} else if cmp < 0 {
+		case cmp < 0:
 			gethMissed++
 			tgKey, tgVal, err1 = tgCursor.Next()
 			if err1 != nil {
@@ -214,7 +216,7 @@ func CompareAccountRange(logger log.Logger, erigonURL, gethURL, tmpDataDir, geth
 				return
 
 			}
-		} else if cmp > 0 {
+		case cmp > 0:
 			tgMissed++
 			gethKey, gethVal, err2 = gethCursor.Next()
 			if err2 != nil {

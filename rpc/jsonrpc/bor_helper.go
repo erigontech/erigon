@@ -30,13 +30,8 @@ import (
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
-const (
-	checkpointInterval = 1024 // Number of blocks after which vote snapshots are saved to db
-)
-
 var (
-	extraVanity = 32 // Fixed number of extra-data prefix bytes reserved for signer vanity
-	extraSeal   = 65 // Fixed number of extra-data suffix bytes reserved for signer seal
+	extraSeal = 65 // Fixed number of extra-data suffix bytes reserved for signer seal
 )
 
 var (
@@ -47,14 +42,6 @@ var (
 	// errMissingSignature is returned if a block's extra-data section doesn't seem
 	// to contain a 65 byte secp256k1 signature.
 	errMissingSignature = errors.New("extra-data 65 byte signature suffix missing")
-
-	// errOutOfRangeChain is returned if an authorization list is attempted to
-	// be modified via out-of-range or non-contiguous headers.
-	errOutOfRangeChain = errors.New("out of range or non-contiguous chain")
-
-	// errMissingVanity is returned if a block's extra-data section is shorter than
-	// 32 bytes, which is required to store the signer vanity.
-	errMissingVanity = errors.New("extra-data 32 byte vanity prefix missing")
 )
 
 // ecrecover extracts the Ethereum account address from a signed header.
@@ -66,7 +53,8 @@ func ecrecover(header *types.Header, c *borcfg.BorConfig) (common.Address, error
 	signature := header.Extra[len(header.Extra)-extraSeal:]
 
 	// Recover the public key and the Ethereum address
-	pubkey, err := crypto.Ecrecover(bor.SealHash(header, c).Bytes(), signature)
+	sealHash := bor.SealHash(header, c)
+	pubkey, err := crypto.Ecrecover(sealHash[:], signature)
 	if err != nil {
 		return common.Address{}, err
 	}

@@ -1,3 +1,19 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package handlers
 
 import (
@@ -29,9 +45,20 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 		return err
 	}
 
+	maxPayloads := c.beaconConfig.MaxRequestPayloadsLimit()
+	if maxPayloads == 0 {
+		return errors.New("MAX_REQUEST_PAYLOADS is zero")
+	}
 	// Validate count
-	if req.Count > c.beaconConfig.MaxRequestBlocksDeneb {
-		return errors.New("request count exceeds MAX_REQUEST_BLOCKS_DENEB")
+	if req.Count > maxPayloads {
+		return errors.New("request count exceeds MAX_REQUEST_PAYLOADS")
+	}
+	if req.Count == 0 {
+		return nil
+	}
+
+	if cost := min(int(req.Count), int(maxPayloads)) - 1; !c.consumeRateLimit(s, cost) {
+		return nil
 	}
 
 	// Compute minimum serve slot: max(GLOAS_FORK_EPOCH, current_epoch - MIN_EPOCHS_FOR_BLOCK_REQUESTS) * SLOTS_PER_EPOCH
@@ -105,7 +132,7 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 		}
 
 		count++
-		if count >= c.beaconConfig.MaxRequestBlocksDeneb {
+		if count >= maxPayloads {
 			break
 		}
 	}
@@ -121,13 +148,24 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRootHandler(s network.Str
 		return nil
 	}
 
+	maxPayloads := c.beaconConfig.MaxRequestPayloadsLimit()
+	if maxPayloads == 0 {
+		return errors.New("MAX_REQUEST_PAYLOADS is zero")
+	}
 	// Decode request: List[Root, MAX_REQUEST_PAYLOADS]
-	var req solid.HashListSSZ = solid.NewHashList(int(c.beaconConfig.MaxRequestBlocksDeneb))
+	var req solid.HashListSSZ = solid.NewHashList(int(maxPayloads))
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, clparams.Phase0Version); err != nil {
 		return err
 	}
 
 	if req.Length() == 0 {
+		return nil
+	}
+	if req.Length() > int(maxPayloads) {
+		return errors.New("request count exceeds MAX_REQUEST_PAYLOADS")
+	}
+
+	if cost := min(req.Length(), int(maxPayloads)) - 1; !c.consumeRateLimit(s, cost) {
 		return nil
 	}
 
@@ -148,7 +186,7 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRootHandler(s network.Str
 
 	count := 0
 	req.Range(func(_ int, blockRoot common.Hash, _ int) bool {
-		if count >= int(c.beaconConfig.MaxRequestBlocksDeneb) {
+		if count >= int(maxPayloads) {
 			return false
 		}
 

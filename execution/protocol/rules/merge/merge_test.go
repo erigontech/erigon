@@ -17,12 +17,15 @@
 package merge
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/execution/chain"
@@ -34,10 +37,12 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-type readerMock struct{}
+type readerMock struct {
+	config *chain.Config
+}
 
 func (r readerMock) Config() *chain.Config {
-	return nil
+	return r.config
 }
 
 func (r readerMock) CurrentHeader() *types.Header {
@@ -118,6 +123,47 @@ func TestVerifyHeaderNonce(t *testing.T) {
 	}
 }
 
+func TestVerifyHeaderRequiresSlotNumberAfterAmsterdam(t *testing.T) {
+	t.Parallel()
+
+	config := &chain.Config{
+		LondonBlock:   common.NewUint64(0),
+		ShanghaiTime:  common.NewUint64(0),
+		CancunTime:    common.NewUint64(0),
+		PragueTime:    common.NewUint64(0),
+		AmsterdamTime: common.NewUint64(0),
+	}
+	zero := uint64(0)
+	baseFee := uint256.NewInt(1)
+	parent := &types.Header{
+		Number:        *uint256.NewInt(0),
+		Time:          1,
+		GasLimit:      30_000_000,
+		GasUsed:       15_000_000,
+		BaseFee:       baseFee,
+		BlobGasUsed:   &zero,
+		ExcessBlobGas: &zero,
+	}
+	emptyHash := common.Hash{}
+	header := &types.Header{
+		Number:                *uint256.NewInt(1),
+		Time:                  2,
+		GasLimit:              parent.GasLimit,
+		BaseFee:               new(uint256.Int).Set(baseFee),
+		Difficulty:            *ProofOfStakeDifficulty,
+		UncleHash:             empty.UncleHash,
+		WithdrawalsHash:       &emptyHash,
+		BlobGasUsed:           &zero,
+		ExcessBlobGas:         &zero,
+		ParentBeaconBlockRoot: &emptyHash,
+		RequestsHash:          &emptyHash,
+		BlockAccessListHash:   &emptyHash,
+	}
+
+	err := New(nil).verifyHeader(readerMock{config: config}, header, parent)
+	require.ErrorIs(t, err, rules.ErrMissingSlotNumber)
+}
+
 func TestNullParentBeaconBlockRootDoesNotPanic(t *testing.T) {
 	chainConfig := chainspec.Mainnet.Config
 	header := &types.Header{ // fake PoS header *after* Cancun fork
@@ -135,4 +181,48 @@ func TestNullParentBeaconBlockRootDoesNotPanic(t *testing.T) {
 	mergeEngine := New(eth1Engine)
 	err := mergeEngine.Initialize(chainConfig, chainReader, header, &intraBlockState, systemCallCustom, logger, &tracer)
 	assert.NoError(t, err)
+}
+
+// withdrawalErrReader fails the account read for one address, standing in for a
+// domain read failure on a cold withdrawal recipient.
+type withdrawalErrReader struct {
+	state.StateReader
+	fail accounts.Address
+	err  error
+}
+
+func (r withdrawalErrReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
+	if addr == r.fail {
+		return nil, r.err
+	}
+	return r.StateReader.ReadAccountData(addr)
+}
+
+// TestFinalizeWithdrawalStateErrorPropagates verifies a state failure while
+// crediting a withdrawal aborts Finalize instead of silently skipping it.
+func TestFinalizeWithdrawalStateErrorPropagates(t *testing.T) {
+	chainConfig := chainspec.Mainnet.Config
+	header := &types.Header{
+		Difficulty: *ProofOfStakeDifficulty,
+		Time:       *chainConfig.CancunTime + 1,
+	}
+	recipient := common.HexToAddress("0x2222222222222222222222222222222222222222")
+	boom := errors.New("domain read failed")
+	ibs := state.New(withdrawalErrReader{
+		StateReader: state.NewNoopReader(),
+		fail:        accounts.InternAddress(recipient),
+		err:         boom,
+	})
+
+	logger := log.New()
+	var eth1Engine rules.Engine
+	mergeEngine := New(eth1Engine)
+	withdrawals := []*types.Withdrawal{{Index: 7, Address: recipient, Amount: 1_000}}
+	syscall := func(accounts.Address, []byte) ([]byte, error) { return nil, nil }
+
+	_, err := mergeEngine.Finalize(chainConfig, header, ibs, nil, nil, withdrawals,
+		consensuschain.NewReader(chainConfig, nil, nil, logger), syscall, false, logger)
+
+	require.ErrorIs(t, err, boom)
+	require.Contains(t, err.Error(), "withdrawal 7")
 }

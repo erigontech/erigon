@@ -78,11 +78,9 @@ func (reset *Reset) Run() (err error) {
 	err = reset.remove(OsFilePath(reset.Dirs.PreverifiedPath()))
 	if err == nil {
 		logger.Info("Removed snapshots lock file", "path", datadir.PreverifiedFileName)
-	} else {
-		if !errors.Is(err, fs.ErrNotExist) {
-			err = fmt.Errorf("removing snapshot lock file: %w", err)
-			return
-		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		err = fmt.Errorf("removing snapshot lock file: %w", err)
+		return
 	}
 	return nil
 }
@@ -132,6 +130,10 @@ type resetItemInfo struct {
 func (me *Reset) doSnapshots() (err error) {
 	snapDir := me.dataDirOsPath().Join(datadir.SnapDir)
 	ra := me.makeRemoveAll(snapDir)
+	// Data files retained this pass, keyed by their preverified name. A data file is walked before
+	// its sibling ".torrent" (os.ReadDir sorts, and "x.ef" < "x.ef.torrent"), so when an incorrect
+	// torrent is later removed we can retract the stale data file it vouched for.
+	retainedDataFiles := map[string]OsFilePath{}
 	ra.wrapRemove(func(inner removeAllRemoveFunc, filePath OsFilePath, info fs.FileInfo) error {
 		itemName := string(filePath.mustLocalRelSlash(snapDir))
 		itemName, _ = strings.CutSuffix(itemName, ".part")
@@ -151,6 +153,20 @@ func (me *Reset) doSnapshots() (err error) {
 			if err != nil {
 				return fmt.Errorf("removing file %v: %w", filePath, err)
 			}
+			// An incorrect torrent for a preverified file means the data it describes is unverifiable
+			// (stale local build): drop it too so the downloader re-fetches the canonical copy.
+			if isTorrent && ok {
+				if dataPath, retained := retainedDataFiles[itemName]; retained {
+					if err = inner(dataPath, nil); err != nil {
+						return fmt.Errorf("removing stale data file %v: %w", dataPath, err)
+					}
+					delete(retainedDataFiles, itemName)
+					me.stats.retained.DataFiles--
+					me.stats.removed.DataFiles++
+				}
+			}
+		} else if !isTorrent {
+			retainedDataFiles[itemName] = filePath
 		}
 		if isTorrent {
 			stats.TorrentFiles++
@@ -174,7 +190,6 @@ func (me *Reset) decideRemove(file resetItemInfo) bool {
 		}
 		return me.RemoveUnknown
 	}
-	// TODO: missing or incorrect torrent delete data file?
 	if file.isTorrent {
 		mi, err := me.loadMetainfoFromFile(file.filePath)
 		if err != nil {

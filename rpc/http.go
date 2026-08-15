@@ -214,7 +214,7 @@ func newHTTPServerConn(r *http.Request, w http.ResponseWriter) ServerCodec {
 			param = pb
 		}
 		buf := new(bytes.Buffer)
-		json.NewEncoder(buf).Encode(jsonrpcMessage{
+		_ = json.NewEncoder(buf).Encode(jsonrpcMessage{ //nolint:errchkjson
 			ID:     json.RawMessage(id),
 			Method: method_up,
 			Params: param,
@@ -251,7 +251,18 @@ type httpFlusherContextKey struct{}
 // writing the first byte of a streamable response, switching the gzip middleware from
 // one-shot buffering to incremental streaming. Must only be called by the gzip middleware.
 func WithGzipStreamingHook(ctx context.Context, hook func()) context.Context {
+	if hook == nil {
+		panic("rpc: WithGzipStreamingHook called with a nil hook")
+	}
 	return context.WithValue(ctx, httpFlusherContextKey{}, hook)
+}
+
+// withoutGzipStreamingHook masks any gzip-streaming hook set on an ancestor context. Batch
+// sub-calls write into a private per-item buffer rather than the HTTP response writer, so
+// the hook must not fire for them; calling it concurrently from multiple batch goroutines is
+// unsafe, since the underlying gzip.Writer it activates is not safe for concurrent use.
+func withoutGzipStreamingHook(ctx context.Context) context.Context {
+	return context.WithValue(ctx, httpFlusherContextKey{}, nil)
 }
 
 func withOverloadedFlag(ctx context.Context) (context.Context, *bool) {
@@ -380,8 +391,8 @@ func validateRequest(r *http.Request) (int, error) {
 func CheckJwtSecret(w http.ResponseWriter, r *http.Request, jwtSecret []byte) bool {
 	var tokenStr string
 	// Check if JWT signature is correct
-	if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
-		tokenStr = strings.TrimPrefix(auth, "Bearer ")
+	if auth := r.Header.Get("Authorization"); len(auth) >= 7 && strings.EqualFold(auth[:7], "bearer ") {
+		tokenStr = auth[7:]
 	}
 
 	if len(tokenStr) == 0 {

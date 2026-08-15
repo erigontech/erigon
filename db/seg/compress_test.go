@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -103,7 +104,7 @@ func prepareDictMetadata(t testing.TB, multiplier int, hasMetadata bool, metadat
 	defer c.Close()
 	k := bytes.Repeat([]byte("long"), multiplier)
 	v := bytes.Repeat([]byte("word"), multiplier)
-	for i := 0; i < keys; i++ {
+	for i := range keys {
 		if err = c.AddWord(nil); err != nil {
 			panic(err)
 		}
@@ -385,5 +386,66 @@ func TestCompressNoWordPatterns(t *testing.T) {
 
 	if cs := checksum(file); cs != 1879837905 {
 		t.Errorf("fast-path output differs from main, checksum=%d", cs)
+	}
+}
+
+// The number of superstring windows a file is split into is a property of the data, so it
+// must not depend on SamplingFactor — sampling only selects which windows feed the dict.
+func TestCompressSamplingCoversWholeFile(t *testing.T) {
+	const word = "mykeyabc"
+	const nWords = 5000
+
+	windowCount := func(samplingFactor uint64) uint64 {
+		logger := log.New()
+		tmpDir := t.TempDir()
+		file := filepath.Join(tmpDir, "compressed")
+		cfg := DefaultCfg
+		cfg.MinPatternScore = 1
+		cfg.SamplingFactor = samplingFactor
+		c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+		require.NoError(t, err)
+		defer c.Close()
+		c.superstringLimit = 1000
+
+		for range nWords {
+			require.NoError(t, c.AddWord([]byte(word)))
+		}
+		count := c.superstringCount
+		require.NoError(t, c.Compress())
+
+		d, err := NewDecompressor(file)
+		require.NoError(t, err)
+		defer d.Close()
+		require.EqualValues(t, nWords, d.Count())
+		return count
+	}
+
+	full := windowCount(1)
+	require.Greater(t, full, uint64(1))
+	require.Equal(t, full, windowCount(4))
+	require.Equal(t, full, windowCount(8))
+}
+
+// Close must reclaim the pattern workers NewCompressor started. A caller that
+// gives up between NewCompressor and Compress leaks one goroutine per worker,
+// each pinning its suffix-array buffers, for the lifetime of the parent context.
+func TestCompressorCloseReleasesWorkers(t *testing.T) {
+	logger := log.New()
+	tmpDir := t.TempDir()
+	c, err := NewCompressor(t.Context(), t.Name(), filepath.Join(tmpDir, "compressed"), tmpDir, DefaultCfg, log.LvlDebug, logger)
+	require.NoError(t, err)
+	require.NoError(t, c.AddWord([]byte("word")))
+
+	c.Close()
+
+	done := make(chan struct{})
+	go func() {
+		c.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Close() returned while pattern workers are still running")
 	}
 }

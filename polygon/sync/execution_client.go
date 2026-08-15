@@ -76,29 +76,14 @@ func (e *executionClient) Prepare(ctx context.Context) error {
 }
 
 func (e *executionClient) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
-	rawBlocks := make([]*types.RawBlock, len(blocks))
-	for i, blk := range blocks {
-		rawBlocks[i] = &types.RawBlock{
-			Header: blk.HeaderNoCopy(),
-			Body:   blk.RawBody(),
-		}
+	status, err := e.client.InsertBlocks(ctx, blocks)
+	if err != nil {
+		return err
 	}
-
-	return e.retryBusy(ctx, "insertBlocks", func() error {
-		status, err := e.client.InsertBlocks(ctx, rawBlocks)
-		if err != nil {
-			return err
-		}
-
-		switch status {
-		case execmodule.ExecutionStatusSuccess:
-			return nil
-		case execmodule.ExecutionStatusBusy:
-			return ErrExecutionClientBusy // gets retried
-		default:
-			return fmt.Errorf("executionClient.InsertBlocks failure status: %s", status.String())
-		}
-	})
+	if status != execmodule.ExecutionStatusSuccess {
+		return fmt.Errorf("executionClient.InsertBlocks failure status: %s", status.String())
+	}
+	return nil
 }
 
 func (e *executionClient) UpdateForkChoice(ctx context.Context, tip *types.Header, finalizedHeader *types.Header) (common.Hash, error) {

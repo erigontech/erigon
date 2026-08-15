@@ -32,16 +32,14 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/prune"
-	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
-	"github.com/erigontech/erigon/execution/stagedsync/headerdownload"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -54,12 +52,11 @@ type SendersCfg struct {
 	badBlockHalt    bool
 	tmpdir          string
 	chainConfig     *chain.Config
-	hd              *headerdownload.HeaderDownload
-	blockReader     services.FullBlockReader
+	blockReader     dbservices.FullBlockReader
 	readAheader     *exec.BlockReadAheader
 }
 
-func StageSendersCfg(chainCfg *chain.Config, syncCfg ethconfig.Sync, badBlockHalt bool, tmpdir string, prune prune.Mode, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload, readAheader *exec.BlockReadAheader) SendersCfg {
+func StageSendersCfg(chainCfg *chain.Config, syncCfg ethconfig.Sync, badBlockHalt bool, tmpdir string, prune prune.Mode, blockReader dbservices.FullBlockReader, readAheader *exec.BlockReadAheader) SendersCfg {
 	const sendersBatchSize = 1000
 	return SendersCfg{
 		batchSize:       sendersBatchSize,
@@ -67,7 +64,6 @@ func StageSendersCfg(chainCfg *chain.Config, syncCfg ethconfig.Sync, badBlockHal
 		badBlockHalt:    badBlockHalt,
 		tmpdir:          tmpdir,
 		chainConfig:     chainCfg,
-		hd:              hd,
 		blockReader:     blockReader,
 		readAheader:     readAheader,
 	}
@@ -105,17 +101,15 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 
 	jobs := make(chan *senderRecoveryJob, cfg.batchSize)
 	out := make(chan *senderRecoveryJob, cfg.batchSize)
-	wg := new(sync.WaitGroup)
-	wg.Add(cfg.numOfGoroutines)
+	var wg sync.WaitGroup
 	ctx, cancelWorkers := context.WithCancel(context.Background())
 	defer cancelWorkers()
 	for i := 0; i < cfg.numOfGoroutines; i++ {
-		go func(threadNo int) {
+		wg.Go(func() {
 			defer dbg.LogPanic()
-			defer wg.Done()
 			// each goroutine gets it's own crypto context to make sure they are really parallel
-			recoverSenders(ctx, secp256k1.ContextForThread(threadNo), cfg.chainConfig, jobs, out, quitCh)
-		}(i)
+			recoverSenders(ctx, secp256k1.ContextForThread(i), cfg.chainConfig, jobs, out, quitCh)
+		})
 	}
 
 	collectorSenders := etl.NewCollectorWithAllocator(logPrefix, cfg.tmpdir, etl.SmallSortableBuffers, logger)
@@ -314,10 +308,6 @@ Loop:
 		if cfg.badBlockHalt {
 			return minBlockErr
 		}
-		minHeader := rawdb.ReadHeader(tx, minBlockHash, minBlockNum)
-		if cfg.hd != nil && cfg.hd.POSSync() && errors.Is(minBlockErr, rules.ErrInvalidBlock) {
-			cfg.hd.ReportBadHeaderPoS(minBlockHash, minHeader.ParentHash)
-		}
 
 		if to > s.BlockNumber {
 			var unwindReason UnwindReason
@@ -339,7 +329,7 @@ Loop:
 		}); err != nil {
 			return err
 		}
-		if err = s.Update(tx, to); err != nil {
+		if err := s.Update(tx, to); err != nil {
 			return err
 		}
 		log.Debug(fmt.Sprintf("[%s] Recovery done", logPrefix), "from", startFrom, "to", to, "blocks", to-startFrom+1, "took", time.Since(recoveryStart))
@@ -408,7 +398,7 @@ func recoverSenders(ctx context.Context, cryptoContext *secp256k1.Context, confi
 
 func UnwindSendersStage(u *UnwindState, tx kv.RwTx, cfg SendersCfg, ctx context.Context) (err error) {
 	u.UnwindPoint = max(u.UnwindPoint, cfg.blockReader.FrozenBlocks()) // protect from unwind behind files
-	if err = u.Done(tx); err != nil {
+	if err := u.Done(tx); err != nil {
 		return err
 	}
 	return nil

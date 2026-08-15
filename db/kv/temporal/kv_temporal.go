@@ -21,16 +21,15 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"testing"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/version"
 )
@@ -77,27 +76,30 @@ var ( // Compile time interface checks
 type DB struct {
 	kv.RwDB
 	stateFiles *state.Aggregator
-	forkaggs   []*state.ForkableAgg
+	// blockFiles: block snapshots, the peer of stateFiles. Optional; nil for
+	// state-only tools, in which case block reads fall back to their own view.
+	blockFiles *blocksnapshots.RoSnapshots
 }
 
-func New(db kv.RwDB, agg *state.Aggregator, forkaggs ...*state.ForkableAgg) (*DB, error) {
-	tdb := &DB{RwDB: db, stateFiles: agg}
-	if len(forkaggs) > 0 {
-		arr := make([]*state.ForkableAgg, 0)
-		for _, forkagg := range forkaggs {
-			if forkagg == nil {
-				continue
-			}
-			arr = append(arr, forkagg)
-		}
-		tdb.forkaggs = arr
-	}
-	return tdb, nil
+// New wires the temporal DB over a raw kv.RwDB, its state aggregator, and the
+// (optional) block snapshots — the block-data peer of stateFiles. Pass nil
+// blockSnaps for state-only tools.
+func New(db kv.RwDB, agg *state.Aggregator, blockSnaps *blocksnapshots.RoSnapshots) (*DB, error) {
+	return &DB{RwDB: db, stateFiles: agg, blockFiles: blockSnaps}, nil
 }
-func (db *DB) Agg() any                         { return db.stateFiles }
-func (db *DB) ForkableAgg(id kv.ForkableId) any { return db.forkaggs[db.searchForkableAggIdx(id)] }
-func (db *DB) InternalDB() kv.RwDB              { return db.RwDB }
-func (db *DB) Debug() kv.TemporalDebugDB        { return kv.TemporalDebugDB(db) }
+
+func (db *DB) Agg() any                                     { return db.stateFiles }
+func (db *DB) DebugBlockFiles() *blocksnapshots.RoSnapshots { return db.blockFiles }
+
+// beginBlockFilesRo pins the block-files view for a tx, or nil if unset.
+func (db *DB) beginBlockFilesRo() *blocksnapshots.View {
+	if db.blockFiles == nil {
+		return nil
+	}
+	return db.blockFiles.View()
+}
+func (db *DB) InternalDB() kv.RwDB       { return db.RwDB }
+func (db *DB) Debug() kv.TemporalDebugDB { return kv.TemporalDebugDB(db) }
 
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	kvTx, err := db.RwDB.BeginRo(ctx) //nolint:gocritic
@@ -107,15 +109,39 @@ func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	tx := &Tx{Tx: kvTx, tx: tx{db: db, ctx: ctx}}
 
 	tx.aggtx = db.stateFiles.BeginFilesRo()
+	tx.blocktx = db.beginBlockFilesRo()
 
-	if len(db.forkaggs) > 0 {
-		tx.forkaggs = make([]*state.ForkableAggTemporalTx, len(db.forkaggs))
-		for i, forkagg := range db.forkaggs {
-			tx.forkaggs[i] = forkagg.BeginTemporalTx()
-		}
-	}
 	return tx, nil
 }
+
+// temporalFilesPin implements kv.TemporalFilesPin: it holds a consistent
+// aggregator file snapshot and opens read txns bound to it.
+type temporalFilesPin struct {
+	db  *DB
+	agg *state.AggregatorFilesPin
+}
+
+// Pin returns a kv.TemporalFilesPin holding this tx's aggregator file snapshot;
+// read txns opened from it stay on that generation. Independent of this tx's
+// lifetime — release with Close.
+func (tx *tx) Pin() kv.TemporalFilesPin {
+	return &temporalFilesPin{db: tx.db, agg: tx.aggtx.Pin()}
+}
+
+func (p *temporalFilesPin) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
+	kvTx, err := p.db.RwDB.BeginRo(ctx) //nolint:gocritic
+	if err != nil {
+		return nil, err
+	}
+	// Commitment workers read only state domains through aggtx, never forkable
+	// data, so the worker tx needs the pinned file snapshot and nothing else.
+	tx := &Tx{Tx: kvTx, tx: tx{db: p.db, ctx: ctx}}
+	tx.aggtx = p.agg.BeginFilesRo()
+	return tx, nil
+}
+
+func (p *temporalFilesPin) Close() { p.agg.Close() }
+
 func (db *DB) ViewTemporal(ctx context.Context, f func(tx kv.TemporalTx) error) error {
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -141,12 +167,7 @@ func (db *DB) View(ctx context.Context, f func(tx kv.Tx) error) error {
 func (db *DB) newRwTx(kvTx kv.RwTx, ctx context.Context) *RwTx {
 	tx := &RwTx{RwTx: kvTx, tx: tx{db: db, ctx: ctx}}
 	tx.aggtx = db.stateFiles.BeginFilesRo()
-	if len(db.forkaggs) > 0 {
-		tx.forkaggs = make([]*state.ForkableAggTemporalTx, len(db.forkaggs))
-		for i, forkagg := range db.forkaggs {
-			tx.forkaggs[i] = forkagg.BeginTemporalTx()
-		}
-	}
+	tx.blocktx = db.beginBlockFilesRo()
 	return tx
 }
 
@@ -166,7 +187,7 @@ func (db *DB) Update(ctx context.Context, f func(tx kv.RwTx) error) error {
 		return err
 	}
 	defer tx.Rollback()
-	if err = f(tx); err != nil {
+	if err := f(tx); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -178,7 +199,7 @@ func (db *DB) UpdateTemporal(ctx context.Context, f func(tx kv.TemporalRwTx) err
 		return err
 	}
 	defer tx.Rollback()
-	if err = f(tx); err != nil {
+	if err := f(tx); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -219,66 +240,35 @@ func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error 
 		return err
 	}
 	defer tx.Rollback()
-	if err = f(tx); err != nil {
+	if err := f(tx); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
 func (db *DB) Close() {
-	//db.stateFiles.Close()
-	db.RwDB.Close()
-	for _, forkagg := range db.forkaggs {
-		forkagg.Close()
+	if db.stateFiles != nil {
+		db.stateFiles.Close()
 	}
+	db.RwDB.Close()
 }
 
 func (db *DB) OnFilesChange(onChange, onDel kv.OnFilesChange) {
 	db.stateFiles.OnFilesChange(onChange, onDel)
 }
 
-func (db *DB) searchForkableAggIdx(forkableId kv.ForkableId) int {
-	for i, forkagg := range db.forkaggs {
-		if forkagg.IsForkablePresent(forkableId) {
-			return i
-		}
-	}
-	panic(fmt.Sprintf("forkable not found: %d", forkableId))
-}
-
-func NewTestDB(tb testing.TB, label kv.Label) kv.TemporalRwDB {
-	tb.Helper()
-	db := memdb.NewTestDB(tb, label)
-	dirs := datadir.New(tb.TempDir())
-	agg := state.NewTest(dirs).DisableHistory().MustOpen(context.Background(), db)
-	tb.Cleanup(agg.Close)
-	tdb, _ := New(db, agg)
-	return tdb
-}
-
-func NewTestTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx) {
-	tb.Helper()
-	db := NewTestDB(tb, dbcfg.ChainDB)
-	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
-	if err != nil {
-		tb.Fatal(err)
-	}
-	tb.Cleanup(tx.Rollback)
-	return db, tx
-}
-
 type tx struct {
-	db               *DB
-	aggtx            *state.AggregatorRoTx
-	forkaggs         []*state.ForkableAggTemporalTx
-	resourcesToClose []kv.Closer
-	ctx              context.Context
-	mu               sync.RWMutex
+	db      *DB
+	aggtx   *state.AggregatorRoTx
+	blocktx *blocksnapshots.View
+	ctx     context.Context
+	mu      sync.RWMutex
 }
 
 type Tx struct {
 	kv.Tx
 	tx
+	visibleEnds domainVisibleEnds
 }
 
 type RwTx struct {
@@ -286,26 +276,102 @@ type RwTx struct {
 	tx
 }
 
-func (tx *tx) ForceReopenAggCtx() {
-	tx.aggtx.Close()
+type domainVisibleEnds struct {
+	// ends is atomic so a lock-free read can overlap a reset-and-reload of
+	// the same slot without a data race. A torn read (state bit from one
+	// generation, end from another) can only be stale-low, which merely
+	// over-rejects fills: a view's frontier never decreases in a process that
+	// fills a cache — the DB component is frozen at tx begin, and a files
+	// reopen only extends it, an invariant the aggregator enforces once a
+	// fill-enabled cache is wired over it (ForbidVisibilityLowering).
+	ends  [kv.DomainLen]atomic.Uint64
+	mu    sync.Mutex
+	state atomic.Uint32
+}
+
+// state packs two bits per domain into one word so a single atomic load
+// returns a consistent (loaded, ok) pair: loadedBit says ends[domain] is
+// memoized, okBit is the memoized ok answer of DomainVisibleEnd. The array
+// size asserts at compile time that both halves fit in uint32.
+var _ [32 - 2*int(kv.DomainLen)]struct{}
+
+func visibleEndBits(domain kv.Domain) (loadedBit, okBit uint32) {
+	loadedBit = uint32(1) << uint32(domain)
+	return loadedBit, loadedBit << uint32(kv.DomainLen)
+}
+
+func (v *domainVisibleEnds) get(tx *Tx, domain kv.Domain) (uint64, bool) {
+	loadedBit, okBit := visibleEndBits(domain)
+	state := v.state.Load()
+	if state&loadedBit != 0 {
+		return v.ends[domain].Load(), state&okBit != 0
+	}
+	return v.load(tx, domain, loadedBit, okBit)
+}
+
+func (v *domainVisibleEnds) load(tx *Tx, domain kv.Domain, loadedBit, okBit uint32) (uint64, bool) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	state := v.state.Load()
+	if state&loadedBit == 0 {
+		end, ok := tx.aggtx.DomainVisibleEnd(domain, tx.Tx)
+		v.ends[domain].Store(end)
+		state |= loadedBit
+		if ok {
+			state |= okBit
+		}
+		v.state.Store(state)
+	}
+	return v.ends[domain].Load(), state&okBit != 0
+}
+
+// reset takes mu so an in-flight load can't re-store pre-reset bits.
+func (v *domainVisibleEnds) reset() {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.state.Store(0)
+}
+
+func (tx *tx) ForceReopenUnderlyingFilesTx() {
+	if tx.blocktx != nil {
+		tx.blocktx.Close()
+	}
+	tx.blocktx = tx.db.beginBlockFilesRo()
+	if tx.aggtx != nil {
+		tx.aggtx.Close()
+	}
 	tx.aggtx = tx.Agg().BeginFilesRo()
+}
+
+// ForceReopenUnderlyingFilesTx swaps in a fresh files view, which can extend
+// the visible frontier — drop the memoized ends so they are re-derived.
+func (tx *Tx) ForceReopenUnderlyingFilesTx() {
+	tx.tx.ForceReopenUnderlyingFilesTx()
+	tx.visibleEnds.reset()
 }
 func (tx *tx) FreezeInfo() kv.FreezeInfo { return tx.aggtx }
 
 func (tx *tx) AggTx() any             { return tx.aggtx }
 func (tx *tx) Agg() *state.Aggregator { return tx.db.stateFiles }
+
+// BlockFilesRoTx returns the tx's pinned block-files view, or nil if unset.
+func (tx *tx) BlockFilesRoTx() *blocksnapshots.View { return tx.blocktx }
 func (tx *tx) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 	return tx.aggtx.StepsInFiles(entitySet...)
 }
+func (tx *tx) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) (int, error) {
+	return tx.aggtx.Retire(ctx, cutoffs)
+}
 
 func (tx *tx) Rollback() {
-	tx.autoClose()
+	tx.closeFilesView()
 }
 func (tx *Tx) Rollback() {
 	if tx == nil {
 		return
 	}
-	tx.autoClose()
+	tx.closeFilesView()
 	if tx.Tx == nil { // invariant: it's safe to call Commit/Rollback multiple times
 		return
 	}
@@ -330,6 +396,22 @@ func (tx *Tx) LockDBInRam() error {
 	return nil
 }
 
+// DistributeCursors forwards to the underlying mdbx engine. Like DeleteRange, it
+// fails loud on a non-mdbx inner rather than silently degrading (none exists today).
+func (tx *Tx) DistributeCursors(table string, from []byte, n int) ([][]byte, error) {
+	if s, ok := tx.Tx.(kv.DBWithDistributionSupport); ok {
+		return s.DistributeCursors(table, from, n)
+	}
+	return nil, fmt.Errorf("DistributeCursors not supported by %T", tx.Tx)
+}
+
+func (tx *RwTx) DistributeCursors(table string, from []byte, n int) ([][]byte, error) {
+	if s, ok := tx.RwTx.(kv.DBWithDistributionSupport); ok {
+		return s.DistributeCursors(table, from, n)
+	}
+	return nil, fmt.Errorf("DistributeCursors not supported by %T", tx.RwTx)
+}
+
 func (tx *Tx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
 	tx.tx.mu.RLock()
 	applyTx := tx.Tx
@@ -340,40 +422,20 @@ func (tx *Tx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
 	return applyTx.Apply(ctx, f)
 }
 
-func (tx *tx) searchForkableAggIdx(forkableId kv.ForkableId) int {
-	for i, forkagg := range tx.forkaggs {
-		if forkagg.IsForkablePresent(forkableId) {
-			return i
-		}
-	}
-	panic(fmt.Sprintf("forkable not found: %d", forkableId))
-}
-
-func (tx *Tx) AggForkablesTx(id kv.ForkableId) any {
-	return tx.forkaggs[tx.searchForkableAggIdx(id)]
-}
-
-func (tx *Tx) Unmarked(id kv.ForkableId) kv.UnmarkedTx {
-	return newUnmarkedTx(tx.Tx, tx.forkaggs[tx.searchForkableAggIdx(id)].Unmarked(id))
-}
-
-func (tx *RwTx) Unmarked(id kv.ForkableId) kv.UnmarkedTx {
-	return newUnmarkedTx(tx.RwTx, tx.forkaggs[tx.searchForkableAggIdx(id)].Unmarked(id))
-}
-
-func (tx *RwTx) UnmarkedRw(id kv.ForkableId) kv.UnmarkedRwTx {
-	return newUnmarkedTx(tx.RwTx, tx.forkaggs[tx.searchForkableAggIdx(id)].Unmarked(id))
-}
-
-func (tx *RwTx) AggForkablesTx(id kv.ForkableId) any {
-	return tx.forkaggs[tx.searchForkableAggIdx(id)]
-}
-
 func (tx *RwTx) WarmupDB(force bool) error {
 	if mdbxTx, ok := tx.RwTx.(*mdbx.MdbxTx); ok {
 		return mdbxTx.WarmupDB(force)
 	}
 	return nil
+}
+
+func (tx *RwTx) DeleteRange(table string, from, to []byte) (uint64, error) {
+	if dr, ok := tx.RwTx.(kv.HasDeleteRange); ok {
+		return dr.DeleteRange(table, from, to)
+	}
+	// No non-mdbx temporal backend exists (mdbx's native range-delete is used
+	// above); fail loud rather than carry an unexercised, DupSort-unsafe emulation.
+	return 0, fmt.Errorf("DeleteRange not supported by %T", tx.RwTx)
 }
 
 func (tx *RwTx) LockDBInRam() error {
@@ -417,7 +479,7 @@ func (tx *RwTx) Rollback() {
 	if tx == nil {
 		return
 	}
-	tx.autoClose()
+	tx.closeFilesView()
 	if tx.RwTx == nil { // invariant: it's safe to call Commit/Rollback multiple times
 		return
 	}
@@ -438,10 +500,10 @@ func (rwtx *RwTx) AsyncClone(asyncTx kv.RwTx) *asyncClone {
 		RwTx{
 			RwTx: asyncTx,
 			tx: tx{
-				db:               rwtx.db,
-				aggtx:            rwtx.aggtx,
-				resourcesToClose: nil,
-				ctx:              rwtx.ctx,
+				db:      rwtx.db,
+				aggtx:   rwtx.aggtx,
+				blocktx: rwtx.blocktx,
+				ctx:     rwtx.ctx,
 			}}}
 }
 
@@ -455,21 +517,18 @@ func (tx *asyncClone) Commit() error {
 func (tx *asyncClone) Rollback() {
 }
 
-func (tx *tx) autoClose() {
-	for _, closer := range tx.resourcesToClose {
-		closer.Close()
-	}
+func (tx *tx) closeFilesView() {
 	tx.aggtx.Close()
-	for _, f := range tx.forkaggs {
-		f.Close()
-	}
+	tx.aggtx = nil
+	tx.blocktx.Close()
+	tx.blocktx = nil
 }
 
 func (tx *RwTx) Commit() error {
 	if tx == nil {
 		return nil
 	}
-	tx.autoClose()
+	tx.closeFilesView()
 	if tx.RwTx == nil { // invariant: it's safe to call Commit/Rollback multiple times
 		return nil
 	}
@@ -483,7 +542,6 @@ func (tx *tx) rangeAsOf(name kv.Domain, rtx kv.Tx, fromKey, toKey []byte, asOfTs
 	if err != nil {
 		return nil, err
 	}
-	tx.resourcesToClose = append(tx.resourcesToClose, it)
 	return it, nil
 }
 
@@ -504,6 +562,10 @@ func (tx *tx) getLatest(name kv.Domain, dbTx kv.Tx, k []byte) (v []byte, step kv
 		return nil, step, nil
 	}
 	return v, step, err
+}
+
+func (tx *tx) getLatestValSize(name kv.Domain, dbTx kv.Tx, k []byte) (size int, found bool, err error) {
+	return tx.aggtx.GetLatestValSize(name, k, dbTx)
 }
 
 func (tx *Tx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
@@ -546,6 +608,14 @@ func (tx *RwTx) GetLatest(name kv.Domain, k []byte) (v []byte, step kv.Step, err
 	return tx.getLatest(name, tx.RwTx, k)
 }
 
+func (tx *Tx) GetLatestValSize(name kv.Domain, k []byte) (size int, found bool, err error) {
+	return tx.getLatestValSize(name, tx.Tx, k)
+}
+
+func (tx *RwTx) GetLatestValSize(name kv.Domain, k []byte) (size int, found bool, err error) {
+	return tx.getLatestValSize(name, tx.RwTx, k)
+}
+
 func (tx *tx) getAsOf(name kv.Domain, gtx kv.Tx, key []byte, ts uint64) (v []byte, ok bool, err error) {
 	return tx.aggtx.GetAsOf(name, key, ts, gtx)
 }
@@ -575,7 +645,6 @@ func (tx *tx) indexRange(name kv.InvertedIdx, dbTx kv.Tx, k []byte, fromTs, toTs
 	if err != nil {
 		return nil, err
 	}
-	tx.resourcesToClose = append(tx.resourcesToClose, timestamps)
 	return timestamps, nil
 }
 
@@ -592,7 +661,6 @@ func (tx *tx) historyRange(name kv.Domain, dbTx kv.Tx, fromTs, toTs int, asc ord
 	if err != nil {
 		return nil, err
 	}
-	tx.resourcesToClose = append(tx.resourcesToClose, it)
 	return it, nil
 }
 
@@ -609,7 +677,6 @@ func (tx *tx) historyKeyTxNumRange(name kv.Domain, dbTx kv.Tx, fromTs, toTs int,
 	if err != nil {
 		return nil, err
 	}
-	tx.resourcesToClose = append(tx.resourcesToClose, it)
 	return it, nil
 }
 
@@ -677,27 +744,8 @@ func (db *DB) DomainTables(domain ...kv.Domain) []string {
 func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string {
 	return db.stateFiles.InvertedIdxTables(domain...)
 }
-func (db *DB) ForkableTables(names ...kv.ForkableId) (tables []string) {
-	for _, name := range names {
-		tables = append(tables, db.forkaggs[db.searchForkableAggIdx(name)].Tables()...)
-
-	}
-	return
-}
-func (db *DB) ReloadFiles() error { return db.stateFiles.ReloadFiles() }
-func (db *DB) BuildMissedAccessors(ctx context.Context, workers int) (err error) {
-	if err = db.stateFiles.BuildMissedAccessors(ctx, workers); err != nil {
-		return
-	}
-
-	if len(db.forkaggs) > 0 {
-		for _, forkagg := range db.forkaggs {
-			if err = forkagg.BuildMissedAccessors(ctx, workers); err != nil {
-				return
-			}
-		}
-	}
-	return
+func (db *DB) BuildMissedAccessors(ctx context.Context, workers int, opts ...kv.BuildAccessorsOption) (err error) {
+	return db.stateFiles.BuildMissedAccessors(ctx, workers, opts...)
 }
 func (db *DB) EnableReadAhead() kv.TemporalDebugDB {
 	db.stateFiles.MadvNormal()
@@ -733,34 +781,12 @@ func (tx *RwTx) CurrentDomainVersion(domain kv.Domain) version.Version {
 	return tx.aggtx.CurrentDomainVersion(domain)
 }
 func (tx *RwTx) PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error) {
-	if len(tx.forkaggs) > 0 {
-		timeTaken := time.Now()
-		for i := 0; i < len(tx.forkaggs); i++ {
-			hasMore, err := tx.forkaggs[i].PruneSmallBatches(ctx, timeout, tx.RwTx)
-			if err != nil {
-				return true, err
-			}
-			if time.Since(timeTaken) > timeout {
-				return true, nil
-			}
-			haveMore = haveMore || hasMore
-		}
-		timeout -= time.Since(timeTaken)
-	}
-
-	hasMore, err := tx.aggtx.PruneSmallBatches(ctx, timeout, tx.RwTx)
-	if err != nil {
-		return
-	}
-	return haveMore || hasMore, nil
+	return tx.aggtx.PruneSmallBatches(ctx, timeout, tx.RwTx)
 }
 func (tx *RwTx) Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {
 	return tx.aggtx.Unwind(ctx, tx.RwTx, txNumUnwindTo, changeset)
 }
 
-func (tx *tx) ForkableAggTx(id kv.ForkableId) any {
-	return tx.forkaggs[tx.searchForkableAggIdx(id)]
-}
 func (tx *tx) historyStartFrom(name kv.Domain, roTx kv.Tx) uint64 {
 	return tx.aggtx.HistoryStartFrom(name, roTx)
 }
@@ -775,6 +801,12 @@ func (tx *Tx) DomainProgress(domain kv.Domain) uint64 {
 }
 func (tx *RwTx) DomainProgress(domain kv.Domain) uint64 {
 	return tx.aggtx.DomainProgress(domain, tx.RwTx)
+}
+func (tx *Tx) DomainVisibleEnd(domain kv.Domain) (uint64, bool) {
+	return tx.visibleEnds.get(tx, domain)
+}
+func (tx *RwTx) DomainVisibleEnd(domain kv.Domain) (uint64, bool) {
+	return tx.aggtx.DomainVisibleEnd(domain, tx.RwTx)
 }
 func (tx *Tx) IIProgress(domain kv.InvertedIdx) uint64 {
 	return tx.aggtx.IIProgress(domain, tx.Tx)
@@ -793,16 +825,4 @@ func (tx *tx) stepSize() uint64 {
 func (tx *Tx) StepSize() uint64 { return tx.stepSize() }
 func (tx *RwTx) StepSize() uint64 {
 	return tx.stepSize()
-}
-func (tx *Tx) AllForkableIds() (ids []kv.ForkableId) {
-	for _, forkagg := range tx.tx.forkaggs {
-		ids = append(ids, forkagg.Ids()...)
-	}
-	return
-}
-func (tx *RwTx) AllForkableIds() (ids []kv.ForkableId) {
-	for _, forkagg := range tx.tx.forkaggs {
-		ids = append(ids, forkagg.Ids()...)
-	}
-	return
 }

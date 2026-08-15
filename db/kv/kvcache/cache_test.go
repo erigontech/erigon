@@ -170,7 +170,6 @@ func TestEviction(t *testing.T) {
 }
 
 func TestAPI(t *testing.T) {
-	t.Skip()
 	require := require.New(t)
 
 	// Create a context with timeout for the entire test
@@ -195,11 +194,9 @@ func TestAPI(t *testing.T) {
 
 	get := func(key [20]byte, expectTxnID uint64) (res [1]chan []byte) {
 		wg := sync.WaitGroup{}
-		for i := 0; i < len(res); i++ {
-			wg.Add(1)
-			res[i] = make(chan []byte, 1) // Buffered channel to prevent deadlock
-			go func(out chan []byte) {
-				defer wg.Done()
+		for idx := range len(res) {
+			res[idx] = make(chan []byte, 1) // Buffered channel to prevent deadlock
+			wg.Go(func() {
 				err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 					if expectTxnID != tx.ViewID() {
 						panic(fmt.Sprintf("epxected: %d, got: %d", expectTxnID, tx.ViewID()))
@@ -215,7 +212,7 @@ func TestAPI(t *testing.T) {
 					}
 
 					select {
-					case out <- common.Copy(v):
+					case res[idx] <- bytes.Clone(v):
 					case <-ctx.Done():
 						panic("Context done while sending result")
 					}
@@ -224,7 +221,7 @@ func TestAPI(t *testing.T) {
 				if err != nil {
 					panic(fmt.Sprintf("Database error: %v", err))
 				}
-			}(res[i])
+			})
 		}
 		wg.Wait() // ensure that all goroutines started their transactions
 		return res
@@ -254,9 +251,7 @@ func TestAPI(t *testing.T) {
 	wg := sync.WaitGroup{}
 
 	res1, res2 := get(k1, txID1), get(k2, txID1) // will return immediately
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for i := range res1 {
 			select {
 			case v := <-res1[i]:
@@ -279,7 +274,7 @@ func TestAPI(t *testing.T) {
 		}
 
 		fmt.Printf("done1: \n")
-	}()
+	})
 
 	txID2 := put(k1[:], account2Enc)
 	fmt.Printf("-----1 %d, %d\n", txID1, txID2)
@@ -303,9 +298,7 @@ func TestAPI(t *testing.T) {
 		},
 	})
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for i := range res3 {
 			select {
 			case v := <-res3[i]:
@@ -327,7 +320,7 @@ func TestAPI(t *testing.T) {
 			}
 		}
 		fmt.Printf("done2: \n")
-	}()
+	})
 	fmt.Printf("-----2\n")
 
 	res5, res6 := get(k1, txID3), get(k2, txID3) // will see View of transaction 3, even if notification has not enough changes
@@ -348,9 +341,7 @@ func TestAPI(t *testing.T) {
 		},
 	})
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for i := range res5 {
 			select {
 			case v := <-res5[i]:
@@ -374,7 +365,7 @@ func TestAPI(t *testing.T) {
 			}
 		}
 		fmt.Printf("done3: \n")
-	}()
+	})
 	fmt.Printf("-----3\n")
 	txID4 := put(k1[:], account2Enc)
 
@@ -416,9 +407,7 @@ func TestAPI(t *testing.T) {
 
 	res7, res8 := get(k1, txID5), get(k2, txID5) // will see View of transaction 3, even if notification has not enough changes
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for i := range res7 {
 			select {
 			case v := <-res7[i]:
@@ -440,7 +429,7 @@ func TestAPI(t *testing.T) {
 			}
 		}
 		fmt.Printf("done4: \n")
-	}()
+	})
 	// TODO: Used in other places too cant modify this.
 	// err := db.View(t.Context(), func(tx kv.Tx) error {
 	// 	_, err := AssertCheckValues(t.Context(), tx, c)
@@ -516,27 +505,37 @@ func TestOnNewBlockCodeHashKey(t *testing.T) {
 }
 
 func TestCode(t *testing.T) {
-	t.Skip("TODO: use state reader/writer instead of Put()")
 	require, ctx := require.New(t), t.Context()
 	c := New(DefaultCoherentConfig)
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	k1, k2 := [20]byte{1}, [20]byte{2}
+	k1 := [20]byte{1}
+	code := []byte{0x60, 0x00, 0x60, 0x00}
 
-	_ = db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
-		//todo: use kv.CodeDomain
-		//_ = tx.Put(kv.Code, k1[:], k2[:])
-		cacheView, _ := c.View(ctx, tx)
+	require.NoError(db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+		d, err := execctx.NewSharedDomains(ctx, tx, log.New())
+		if err != nil {
+			return err
+		}
+		defer d.Close()
+		if err := d.DomainPut(kv.CodeDomain, tx, k1[:], code, 0, nil); err != nil {
+			return err
+		}
+		return d.Flush(ctx, tx)
+	}))
+
+	require.NoError(db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		cacheView, err := c.View(ctx, tx)
+		require.NoError(err)
 		view := cacheView.(*CoherentView)
 
 		v, err := c.GetCode(k1[:], tx, view.stateVersionID)
 		require.NoError(err)
-		require.Equal(k2[:], v)
+		require.Equal(code, v)
 
+		// second read is served from the cache
 		v, err = c.GetCode(k1[:], tx, view.stateVersionID)
 		require.NoError(err)
-		require.Equal(k2[:], v)
-
-		//require.Equal(c.roots[c.latestViewID].cache.Len(), c.stateEvict.Len())
+		require.Equal(code, v)
 		return nil
-	})
+	}))
 }

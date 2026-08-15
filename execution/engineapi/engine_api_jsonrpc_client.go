@@ -265,10 +265,11 @@ func (c *JsonRpcClient) ForkchoiceUpdatedV4(
 	ctx context.Context,
 	forkChoiceState *enginetypes.ForkChoiceState,
 	payloadAttributes *enginetypes.PayloadAttributes,
+	custodyColumns *enginetypes.CustodyColumns,
 ) (*enginetypes.ForkChoiceUpdatedResponse, error) {
 	return backoff.RetryWithData(func() (*enginetypes.ForkChoiceUpdatedResponse, error) {
 		var result enginetypes.ForkChoiceUpdatedResponse
-		err := c.rpcClient.CallContext(ctx, &result, "engine_forkchoiceUpdatedV4", forkChoiceState, payloadAttributes)
+		err := c.rpcClient.CallContext(ctx, &result, "engine_forkchoiceUpdatedV4", forkChoiceState, payloadAttributes, custodyColumns)
 		if err != nil {
 			return nil, c.maybeMakePermanent(err)
 		}
@@ -390,6 +391,39 @@ func (c *JsonRpcClient) GetClientVersionV1(ctx context.Context, callerVersion *e
 	return backoff.RetryWithData(func() ([]enginetypes.ClientVersionV1, error) {
 		var result []enginetypes.ClientVersionV1
 		err := c.rpcClient.CallContext(ctx, &result, "engine_getClientVersionV1", callerVersion)
+		if err != nil {
+			return nil, c.maybeMakePermanent(err)
+		}
+		return result, nil
+	}, c.backOff(ctx))
+}
+
+func (c *JsonRpcClient) GetBlobsV1(ctx context.Context, blobHashes []common.Hash) ([]*enginetypes.BlobAndProofV1, error) {
+	return backoff.RetryWithData(func() ([]*enginetypes.BlobAndProofV1, error) {
+		var result []*enginetypes.BlobAndProofV1
+		err := c.rpcClient.CallContext(ctx, &result, "engine_getBlobsV1", blobHashes)
+		if err != nil {
+			return nil, c.maybeMakePermanent(err)
+		}
+		return result, nil
+	}, c.backOff(ctx))
+}
+
+func (c *JsonRpcClient) GetBlobsV2(ctx context.Context, blobHashes []common.Hash) ([]*enginetypes.BlobAndProofV2, error) {
+	return backoff.RetryWithData(func() ([]*enginetypes.BlobAndProofV2, error) {
+		var result []*enginetypes.BlobAndProofV2
+		err := c.rpcClient.CallContext(ctx, &result, "engine_getBlobsV2", blobHashes)
+		if err != nil {
+			return nil, c.maybeMakePermanent(err)
+		}
+		return result, nil
+	}, c.backOff(ctx))
+}
+
+func (c *JsonRpcClient) GetBlobsV3(ctx context.Context, blobHashes []common.Hash) ([]*enginetypes.BlobAndProofV2, error) {
+	return backoff.RetryWithData(func() ([]*enginetypes.BlobAndProofV2, error) {
+		var result []*enginetypes.BlobAndProofV2
+		err := c.rpcClient.CallContext(ctx, &result, "engine_getBlobsV3", blobHashes)
 		if err != nil {
 			return nil, c.maybeMakePermanent(err)
 		}

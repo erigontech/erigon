@@ -262,7 +262,7 @@ func TestUpdateProposerBoostRoot_TimelyBlock(t *testing.T) {
 	blockRoot := common.Hash{0x10}
 
 	f.recordBlockTimeliness(block, blockRoot)
-	f.updateProposerBoostRoot(block, blockRoot)
+	f.updateProposerBoostRoot(common.Hash{}, blockRoot)
 	require.Equal(t, blockRoot, f.proposerBoostRoot.Load().(common.Hash))
 }
 
@@ -274,7 +274,7 @@ func TestUpdateProposerBoostRoot_LateBlock(t *testing.T) {
 	blockRoot := common.Hash{0x11}
 
 	f.recordBlockTimeliness(block, blockRoot)
-	f.updateProposerBoostRoot(block, blockRoot)
+	f.updateProposerBoostRoot(common.Hash{}, blockRoot)
 	require.Equal(t, common.Hash{}, f.proposerBoostRoot.Load().(common.Hash))
 }
 
@@ -289,11 +289,11 @@ func TestUpdateProposerBoostRoot_NotOverwritten(t *testing.T) {
 	block2 := &cltypes.BeaconBlock{Slot: 0}
 
 	f.recordBlockTimeliness(block1, firstRoot)
-	f.updateProposerBoostRoot(block1, firstRoot)
+	f.updateProposerBoostRoot(common.Hash{}, firstRoot)
 	require.Equal(t, firstRoot, f.proposerBoostRoot.Load().(common.Hash))
 
 	f.recordBlockTimeliness(block2, secondRoot)
-	f.updateProposerBoostRoot(block2, secondRoot)
+	f.updateProposerBoostRoot(common.Hash{}, secondRoot)
 	require.Equal(t, firstRoot, f.proposerBoostRoot.Load().(common.Hash), "boost root should not be overwritten")
 
 	// But the second block's timeliness should still be recorded

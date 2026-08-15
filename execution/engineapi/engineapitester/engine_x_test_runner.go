@@ -30,6 +30,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
+	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
@@ -62,7 +63,7 @@ func NewEngineXTestRunner(ctx context.Context, logger log.Logger, preAllocsDir s
 			return err
 		}
 		var preAlloc PreAlloc
-		err = json.Unmarshal(b, &preAlloc)
+		err = jsoniter.ConfigFastest.Unmarshal(b, &preAlloc)
 		if err != nil {
 			return err
 		}
@@ -107,7 +108,6 @@ type EngineXTestRunner struct {
 	preAllocs          map[PreAllocHash]*PreAlloc
 	mu                 sync.Mutex
 	testers            map[Fork]map[PreAllocHash]testerEntry
-	wg                 sync.WaitGroup
 	profileHook        RequestProfileHook
 	warmupKzgCtxOnInit bool
 }
@@ -137,15 +137,15 @@ func (extr *EngineXTestRunner) Close() error {
 	extr.mu.Lock()
 	var entries []testerEntry
 	for _, perAlloc := range extr.testers {
-		for _, entry := range perAlloc {
-			entries = append(entries, entry)
+		for i := range perAlloc {
+			entries = append(entries, perAlloc[i])
 		}
 	}
 	extr.testers = nil
 	extr.mu.Unlock()
 	var errs []error
-	for _, entry := range entries {
-		err := extr.evict(entry)
+	for i := range entries {
+		err := extr.evict(entries[i])
 		if err != nil {
 			errs = append(errs, err)
 		}
@@ -296,7 +296,7 @@ func (extr *EngineXTestRunner) createTester(fork Fork, preAllocHash PreAllocHash
 		return testerEntry{}, fmt.Errorf("pre_alloc %s not found", preAllocHash)
 	}
 	var forkConfigCopy chain.Config
-	err := copier.Copy(&forkConfigCopy, forkConfig)
+	err := copier.CopyWithOption(&forkConfigCopy, forkConfig, copier.Option{DeepCopy: true})
 	if err != nil {
 		return testerEntry{}, err
 	}
@@ -324,6 +324,10 @@ func (extr *EngineXTestRunner) createTester(fork Fork, preAllocHash PreAllocHash
 		if env.BlobGasUsed != nil {
 			v := uint64(*env.BlobGasUsed)
 			genesis.BlobGasUsed = &v
+		}
+		if env.SlotNumber != nil {
+			v := uint64(*env.SlotNumber)
+			genesis.SlotNumber = &v
 		}
 	} else {
 		// Old format: genesis parsed directly from JSON
@@ -474,7 +478,7 @@ func processFcu(ctx context.Context, tester EngineApiTester, head common.Hash, v
 			case "3":
 				r, err = tester.EngineApiClient.ForkchoiceUpdatedV3(ctx, &fcu, nil)
 			case "4":
-				r, err = tester.EngineApiClient.ForkchoiceUpdatedV4(ctx, &fcu, nil)
+				r, err = tester.EngineApiClient.ForkchoiceUpdatedV4(ctx, &fcu, nil, nil)
 			default:
 				return nil, "", fmt.Errorf("unsupported fcu version: %s", version)
 			}
@@ -536,6 +540,7 @@ type EngineXEnvironment struct {
 	BaseFee       *math.HexOrDecimal64 `json:"currentBaseFee"`
 	ExcessBlobGas *math.HexOrDecimal64 `json:"currentExcessBlobGas"`
 	BlobGasUsed   *math.HexOrDecimal64 `json:"currentBlobGasUsed"`
+	SlotNumber    *math.HexOrDecimal64 `json:"slotNumber"`
 }
 
 type Fork string

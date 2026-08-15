@@ -48,6 +48,7 @@ type ServerConfig struct {
 }
 
 func createSentinel(
+	ctx context.Context,
 	cfg *sentinel.SentinelConfig,
 	blockReader freezeblocks.BeaconSnapshotReader,
 	blobStorage blob_storage.BlobStorage,
@@ -58,9 +59,10 @@ func createSentinel(
 	peerDasStateReader peerdasstate.PeerDasStateReader,
 	p2p p2p.P2PManager,
 	initialStatus *cltypes.Status,
-	logger log.Logger) (*sentinel.Sentinel, *enode.LocalNode, error) {
+	logger log.Logger,
+) (*sentinel.Sentinel, *enode.LocalNode, error) {
 	sent, err := sentinel.New(
-		context.Background(),
+		ctx,
 		cfg,
 		ethClock,
 		blockReader,
@@ -90,6 +92,7 @@ func createSentinel(
 }
 
 func StartSentinelService(
+	ctx context.Context,
 	cfg *sentinel.SentinelConfig,
 	blockReader freezeblocks.BeaconSnapshotReader,
 	blobStorage blob_storage.BlobStorage,
@@ -98,11 +101,12 @@ func StartSentinelService(
 	ethClock eth_clock.EthereumClock,
 	forkChoiceReader forkchoice.ForkChoiceStorageReader,
 	dataColumnStorage blob_storage.DataColumnStorage,
-	PeerDasStateReader peerdasstate.PeerDasStateReader,
+	peerDasStateReader peerdasstate.PeerDasStateReader,
 	p2p p2p.P2PManager,
-	logger log.Logger) (sentinelproto.SentinelClient, *enode.LocalNode, error) {
-	ctx := context.Background()
+	logger log.Logger,
+) (sentinelproto.SentinelClient, *enode.LocalNode, error) {
 	sent, localNode, err := createSentinel(
+		ctx,
 		cfg,
 		blockReader,
 		blobStorage,
@@ -110,7 +114,7 @@ func StartSentinelService(
 		forkChoiceReader,
 		ethClock,
 		dataColumnStorage,
-		PeerDasStateReader,
+		peerDasStateReader,
 		p2p,
 		srvCfg.InitialStatus,
 		logger,
@@ -130,14 +134,14 @@ func StartServe(
 	srvCfg *ServerConfig,
 	creds credentials.TransportCredentials,
 ) {
-	lis, err := net.Listen(srvCfg.Network, srvCfg.Addr)
+	lis, err := net.Listen(srvCfg.Network, srvCfg.Addr) //nolint:noctx
 	if err != nil {
 		log.Warn("[Sentinel] could not serve service", "reason", err)
 		return
 	}
 	// Create a gRPC server
 	gRPCserver := grpc.NewServer(grpc.Creds(creds))
-	//go server.ListenToGossip()
+	// go server.ListenToGossip()
 	// Regiser our server as a gRPC server
 	sentinelproto.RegisterSentinelServer(gRPCserver, server)
 	if err := gRPCserver.Serve(lis); err != nil {

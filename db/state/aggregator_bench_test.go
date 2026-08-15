@@ -24,13 +24,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/length"
@@ -70,6 +70,8 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 	domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
 	require.NoError(b, err)
 	defer domains.Close()
+	domains.EnableParaTrieDB(db)
+	require.Equal(b, execctx.PickTrieVariant(), domains.GetCommitmentCtx().Trie().Variant())
 
 	b.ReportAllocs()
 
@@ -99,7 +101,7 @@ func queueKeys(ctx context.Context, seed, ofSize uint64) <-chan []byte {
 				break
 			}
 			bb := make([]byte, ofSize)
-			rnd.Read(bb)
+			_, _ = rnd.Read(bb)
 
 			keys <- bb
 		}
@@ -118,14 +120,13 @@ func Benchmark_BtreeIndex_Search(b *testing.B) {
 	logger := log.New()
 	rnd := newRnd(uint64(time.Now().UnixNano()))
 	tmp := b.TempDir()
-	defer dir.RemoveAll(tmp)
+	defer dir.RemoveAll(tmp) //nolint:errcheck
 
 	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
 	comp := seg.CompressKeys | seg.CompressVals
 	buildBtreeIndex(b, dataPath, indexPath, comp, 1, logger, true)
 
-	M := 1024
-	kv, bt, err := btindex.OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), comp, false)
+	kv, bt, err := btindex.OpenBtreeIndexAndDataFile(indexPath, dataPath, comp, false)
 	require.NoError(b, err)
 	defer bt.Close()
 	defer kv.Close()
@@ -144,6 +145,266 @@ func Benchmark_BtreeIndex_Search(b *testing.B) {
 	}
 }
 
+type bTreeParameters struct {
+	KeySize   int // bytes
+	ValueSize int // bytes
+	KeyCount  int
+}
+
+func benchInitBtreeIndex(b *testing.B, params bTreeParameters, compression seg.FileCompression) (*seg.Decompressor, *btindex.BtIndex, [][]byte, string) {
+	b.Helper()
+
+	logger := log.New()
+	tmp := b.TempDir()
+	b.Cleanup(func() { _ = dir.RemoveAll(tmp) })
+
+	dataPath := generateKV(b, tmp, params.KeySize, params.ValueSize, params.KeyCount, logger, compression)
+	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bt")
+
+	buildBtreeIndex(b, dataPath, indexPath, compression, 1, logger, true)
+
+	kv, bt, err := btindex.OpenBtreeIndexAndDataFile(indexPath, dataPath, compression, false)
+	require.NoError(b, err)
+	b.Cleanup(func() { bt.Close() })
+	b.Cleanup(func() { kv.Close() })
+
+	keys, err := pivotKeysFromKV(dataPath)
+	require.NoError(b, err)
+	return kv, bt, keys, dataPath
+}
+
+func Benchmark_BTree_SeekVsGetCompressedV(b *testing.B) {
+	compress := seg.CompressVals
+	keyCount := 1_000_000
+	if testing.Short() {
+		keyCount = 10_000
+	}
+	kv, bt, keys, _ := benchInitBtreeIndex(b, bTreeParameters{
+		KeySize:   64,
+		ValueSize: 1024,
+		KeyCount:  keyCount,
+	}, compress)
+	rnd := newRnd(uint64(time.Now().UnixNano()))
+	getter := seg.NewReader(kv.MakeGetter(), compress)
+
+	b.Run("seek_only_v", func(b *testing.B) {
+		for b.Loop() {
+			p := rnd.IntN(len(keys))
+
+			cur, err := bt.Seek(getter, keys[p])
+			if err != nil {
+				panic(err)
+			}
+
+			if !bytes.Equal(keys[p], cur.Key()) {
+				panic("mistmatch")
+			}
+		}
+	})
+
+	b.Run("get_only_v", func(b *testing.B) {
+		for b.Loop() {
+			p := rnd.IntN(len(keys))
+
+			k, _, _, _, err := bt.Get(keys[p], getter)
+			if err != nil {
+				panic(err)
+			}
+
+			if !bytes.Equal(keys[p], k) {
+				panic("mistmatch")
+			}
+		}
+	})
+}
+
+func Benchmark_BTree_SeekVsGetCompressedK(b *testing.B) {
+	compress := seg.CompressKeys
+	keyCount := 1_000_000
+	if testing.Short() {
+		keyCount = 10_000
+	}
+	kv, bt, keys, _ := benchInitBtreeIndex(b, bTreeParameters{
+		KeySize:   64,
+		ValueSize: 1024,
+		KeyCount:  keyCount,
+	}, compress)
+	rnd := newRnd(uint64(time.Now().UnixNano()))
+	getter := seg.NewReader(kv.MakeGetter(), compress)
+
+	b.Run("seek_only_k", func(b *testing.B) {
+		for b.Loop() {
+			p := rnd.IntN(len(keys))
+
+			cur, err := bt.Seek(getter, keys[p])
+			if err != nil {
+				panic(err)
+			}
+
+			if !bytes.Equal(keys[p], cur.Key()) {
+				panic("mistmatch")
+			}
+		}
+	})
+
+	b.Run("get_only_k", func(b *testing.B) {
+		for b.Loop() {
+			p := rnd.IntN(len(keys))
+
+			k, _, _, _, err := bt.Get(keys[p], getter)
+			if err != nil {
+				panic(err)
+			}
+
+			if !bytes.Equal(keys[p], k) {
+				panic("mistmatch")
+			}
+		}
+	})
+}
+
+func Benchmark_BTree_SeekVsGetCompressedKV(b *testing.B) {
+	compress := seg.CompressKeys | seg.CompressVals
+	keyCount := 1_000_000
+	if testing.Short() {
+		keyCount = 10_000
+	}
+	kv, bt, keys, _ := benchInitBtreeIndex(b, bTreeParameters{
+		KeySize:   64,
+		ValueSize: 1024,
+		KeyCount:  keyCount,
+	}, compress)
+	rnd := newRnd(uint64(time.Now().UnixNano()))
+	getter := seg.NewReader(kv.MakeGetter(), compress)
+
+	b.Run("seek_only_kv", func(b *testing.B) {
+		for b.Loop() {
+			p := rnd.IntN(len(keys))
+
+			cur, err := bt.Seek(getter, keys[p])
+			if err != nil {
+				panic(err)
+			}
+
+			if !bytes.Equal(keys[p], cur.Key()) {
+				panic("mistmatch")
+			}
+		}
+	})
+
+	b.Run("get_only_kv", func(b *testing.B) {
+		for b.Loop() {
+			p := rnd.IntN(len(keys))
+
+			k, _, _, _, err := bt.Get(keys[p], getter)
+			if err != nil {
+				panic(err)
+			}
+
+			if !bytes.Equal(keys[p], k) {
+				panic("mistmatch")
+			}
+		}
+	})
+}
+
+func Benchmark_BTree_SeekVsGetUncompressed(b *testing.B) {
+	compress := seg.CompressNone
+	keyCount := 1_000_000
+	if testing.Short() {
+		keyCount = 10_000
+	}
+	kv, bt, keys, _ := benchInitBtreeIndex(b, bTreeParameters{
+		KeySize:   64,
+		ValueSize: 1024,
+		KeyCount:  keyCount,
+	}, compress)
+	rnd := newRnd(uint64(time.Now().UnixNano()))
+	getter := seg.NewReader(kv.MakeGetter(), compress)
+
+	b.Run("seek_only", func(b *testing.B) {
+		for b.Loop() {
+			p := rnd.IntN(len(keys))
+
+			cur, err := bt.Seek(getter, keys[p])
+			if err != nil {
+				panic(err)
+			}
+
+			if !bytes.Equal(keys[p], cur.Key()) {
+				panic("mistmatch")
+			}
+		}
+	})
+
+	b.Run("get_only", func(b *testing.B) {
+		for b.Loop() {
+			p := rnd.IntN(len(keys))
+
+			k, _, _, _, err := bt.Get(keys[p], getter)
+			if err != nil {
+				panic(err)
+			}
+
+			if !bytes.Equal(keys[p], k) {
+				panic("mistmatch")
+			}
+		}
+	})
+}
+
+func Benchmark_BTree_SeekThenNext(b *testing.B) {
+	compress := seg.CompressNone
+	keyCount := 1_000_000
+	if testing.Short() {
+		keyCount = 10_000
+	}
+	kv, bt, keys, _ := benchInitBtreeIndex(b, bTreeParameters{
+		KeySize:   64,
+		ValueSize: 1024,
+		KeyCount:  keyCount,
+	}, compress)
+	rnd := newRnd(uint64(time.Now().UnixNano()))
+	getter := seg.NewReader(kv.MakeGetter(), compress)
+
+	b.Run("seek_then_next", func(b *testing.B) {
+		for i := 0; b.Loop(); i++ {
+			p := rnd.IntN(len(keys))
+
+			cur, err := bt.Seek(getter, keys[p])
+			if err != nil {
+				panic(err)
+			}
+
+			if !bytes.Equal(keys[p], cur.Key()) {
+				panic("mistmatch")
+			}
+
+			prevKey := bytes.Clone(keys[p])
+			ntimer := time.Duration(0)
+			nextKeys := 5000
+			for range nextKeys {
+				ntime := time.Now()
+
+				if !cur.Next() {
+					break
+				}
+				ntimer += time.Since(ntime)
+
+				nk := cur.Key()
+				if bytes.Compare(prevKey, nk) > 0 {
+					b.Fatalf("prev %s cur %s, next key should be greater", prevKey, nk)
+				}
+				prevKey = nk
+			}
+			if i%1000 == 0 {
+				fmt.Printf("next_access_last[of %d keys] %v\n", nextKeys, ntimer/time.Duration(nextKeys))
+			}
+			cur.Close()
+		}
+	})
+}
+
 // requires existing KV index file at ../../data/storage.kv
 func Benchmark_Recsplit_Find_ExternalFile(b *testing.B) {
 	dataPath := "../../data/storage.kv"
@@ -155,7 +416,7 @@ func Benchmark_Recsplit_Find_ExternalFile(b *testing.B) {
 	rnd := newRnd(uint64(time.Now().UnixNano()))
 	tmp := b.TempDir()
 
-	defer dir.RemoveAll(tmp)
+	defer dir.RemoveAll(tmp) //nolint:errcheck
 
 	indexPath := dataPath + "i"
 	idx, err := recsplit.OpenIndex(indexPath)
@@ -345,7 +606,7 @@ func pivotKeysFromKV(dataPath string) ([][]byte, error) {
 			break
 		}
 		key, _ := getter.Next(key[:0])
-		listing = append(listing, common.Copy(key))
+		listing = append(listing, bytes.Clone(key))
 		getter.Skip()
 	}
 	decomp.Close()
@@ -370,7 +631,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	collector := etl.NewCollector(btindex.BtreeLogPrefix+" genCompress", tmp, etl.NewSortableBuffer(bufSize), logger)
 	defer collector.Close()
 
-	for i := 0; i < keyCount; i++ {
+	for i := range keyCount {
 		key := make([]byte, keySize)
 		n, err := rnd.Read(key)
 		require.Equal(tb, keySize, n)
@@ -411,12 +672,11 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 
 	IndexFile := filepath.Join(tmp, fmt.Sprintf("%dk.bt", keyCount/1000))
 	r := seg.NewReader(decomp.MakeGetter(), compressFlags)
-	err = btindex.BuildBtreeIndexWithDecompressor(IndexFile, r, ps, tmp, 777, logger, true, statecfg.AccessorBTree|statecfg.AccessorExistence)
+	err = btindex.BuildBtreeIndexWithDecompressor(IndexFile, strings.TrimSuffix(IndexFile, ".bt")+".kvei", r, ps, tmp, 777, logger, true, statecfg.AccessorBTree|statecfg.AccessorExistence)
 	require.NoError(tb, err)
 
 	return compPath
 }
-
 
 // Opens .kv at dataPath and generates index over it to file 'indexPath'
 func buildBtreeIndex(tb testing.TB, dataPath, indexPath string, compressed seg.FileCompression, seed uint32, logger log.Logger, noFsync bool) {
@@ -426,6 +686,6 @@ func buildBtreeIndex(tb testing.TB, dataPath, indexPath string, compressed seg.F
 	defer decomp.Close()
 
 	r := seg.NewReader(decomp.MakeGetter(), compressed)
-	err = btindex.BuildBtreeIndexWithDecompressor(indexPath, r, background.NewProgressSet(), filepath.Dir(indexPath), seed, logger, noFsync, statecfg.AccessorBTree|statecfg.AccessorExistence)
+	err = btindex.BuildBtreeIndexWithDecompressor(indexPath, strings.TrimSuffix(indexPath, ".bt")+".kvei", r, background.NewProgressSet(), filepath.Dir(indexPath), seed, logger, noFsync, statecfg.AccessorBTree|statecfg.AccessorExistence)
 	require.NoError(tb, err)
 }

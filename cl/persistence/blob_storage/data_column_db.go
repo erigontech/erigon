@@ -37,7 +37,7 @@ type dataColumnStorageImpl struct {
 	slotsKept         uint64
 	emitters          *beaconevents.EventEmitter
 
-	//lock sync.RWMutex
+	// lock sync.RWMutex
 	rwLocks []sync.RWMutex
 }
 
@@ -71,11 +71,12 @@ func (s *dataColumnStorageImpl) WriteColumnSidecars(ctx context.Context, blockRo
 	// For Fulu: slot is in SignedBlockHeader.Header.Slot
 	// For GLOAS: slot is directly in Slot field
 	var slot uint64
-	if columnData.Version() >= clparams.GloasVersion {
+	switch {
+	case columnData.Version() >= clparams.GloasVersion:
 		slot = columnData.Slot
-	} else if columnData.SignedBlockHeader != nil {
+	case columnData.SignedBlockHeader != nil:
 		slot = columnData.SignedBlockHeader.Header.Slot
-	} else {
+	default:
 		slot = columnData.Slot // fallback
 	}
 
@@ -87,7 +88,7 @@ func (s *dataColumnStorageImpl) WriteColumnSidecars(ctx context.Context, blockRo
 	lock.Lock()
 	defer lock.Unlock()
 	dir, filepath := dataColumnFilePath(slot, blockRoot, uint64(columnIndex))
-	if err := s.fs.MkdirAll(dir, 0755); err != nil {
+	if err := s.fs.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
 	if _, err := s.fs.Stat(filepath); err == nil {
@@ -105,10 +106,10 @@ func (s *dataColumnStorageImpl) WriteColumnSidecars(ctx context.Context, blockRo
 		}
 	}()
 	// snappy of | length | ssz data |
-	if err = ssz_snappy.EncodeAndWrite(fh, columnData); err != nil {
+	if err := ssz_snappy.EncodeAndWrite(fh, columnData); err != nil {
 		return err
 	}
-	if err = fh.Sync(); err != nil {
+	if err := fh.Sync(); err != nil {
 		return err
 	}
 	s.emitters.Operation().SendDataColumnSidecar(beaconevents.NewDataColumnSidecarData(columnData))

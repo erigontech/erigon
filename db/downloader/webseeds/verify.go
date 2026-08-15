@@ -67,13 +67,13 @@ func Verify(
 		// Strict evaluation for the win.
 		err = cmp.Or(err, json.NewEncoder(os.Stdout).Encode(checker.state))
 		logger.Info("finished check",
-			"total bytes read", checker.totalBytesRead.Load(),
-			"total request count", checker.totalRequestCount.Load())
+			"totalBytesRead", checker.totalBytesRead.Load(),
+			"totalRequestCount", checker.totalRequestCount.Load())
 	}()
 	for _, chain := range chains {
 		// Shift left?
 		//
-		err = snapcfg.LoadPreverified(ctx, preverifiedFlagValue, &dirs, chain)
+		err = snapcfg.LoadPreverified(ctx, preverifiedFlagValue, &dirs, chain, "")
 		if err != nil {
 			return
 		}
@@ -196,7 +196,7 @@ func (me *webseedChecker) checkPreverifiedItem(
 	}
 	info, err := mi.UnmarshalInfo()
 	panicif.Err(err)
-	me.logger.Debug("got metainfo", "piece length", info.PieceLength, "length", info.Length)
+	me.logger.Debug("got metainfo", "pieceLength", info.PieceLength, "length", info.Length)
 	dataUrl := baseUrl + "/" + item.Name
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, dataUrl, nil)
 	panicif.Err(err)
@@ -212,14 +212,14 @@ func (me *webseedChecker) checkPreverifiedItem(
 	}
 	etag := resp.Header.Get("ETag")
 	stateItem.Etag = etag
-	me.logger.Debug("item response", "etag", etag, "content length", resp.ContentLength)
+	me.logger.Debug("item response", "etag", etag, "contentLength", resp.ContentLength)
 	done, err = me.matchHashes(&info, resp, stateItem)
 	if err == nil {
 		stateItem.DataMatchesTorrent = true
 		me.logger.Info("snapshot matches",
 			"url", dataUrl,
 			//"name", item.Name,
-			"content length", resp.ContentLength,
+			"contentLength", resp.ContentLength,
 			//"etag", resp.Header.Get("etag"),
 		)
 	}

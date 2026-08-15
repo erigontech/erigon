@@ -23,6 +23,7 @@ import (
 	"math"
 	"os"
 	"path"
+	"slices"
 	"time"
 
 	"github.com/spf13/afero"
@@ -71,7 +72,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/downloader"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
@@ -182,7 +183,7 @@ func upgradeGenesisState(s *state.CachingBeaconState, from, to clparams.StateVer
 
 func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngine, config clparams.CaplinConfig,
 	dirs datadir.Dirs, eth1Getter snapshot_format.ExecutionBlockReaderByNumber,
-	snDownloader downloader.Client, creds credentials.TransportCredentials, snBuildSema *semaphore.Weighted) error {
+	snDownloader dbservices.DownloaderClient, creds credentials.TransportCredentials, snBuildSema *semaphore.Weighted) error {
 
 	var networkConfig *clparams.NetworkConfig
 	var beaconConfig *clparams.BeaconChainConfig
@@ -247,7 +248,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 
 		// If genesis state is provided and is hardcoded, use it
 		if initial_state.IsGenesisStateSupported(config.NetworkId) && !isGenesisDBInitialized {
-			genesisState, err = initial_state.GetGenesisState(config.NetworkId)
+			genesisState, err = initial_state.GetGenesisState(ctx, config.NetworkId)
 			if err != nil {
 				return err
 			}
@@ -261,12 +262,17 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		config.NetworkId = clparams.NetworkType(beaconConfig.DepositNetworkID)
 	}
 
-	if len(config.BootstrapNodes) > 0 {
-		networkConfig.BootNodes = config.BootstrapNodes
+	config.ApplyNetworkOverrides(networkConfig)
+	discoveryNodes, directBootnodes, unsupportedBootnodes, err := clp2p.ParseBootstrapNodes(networkConfig.BootNodes)
+	if err != nil {
+		return err
 	}
-
-	if len(config.StaticPeers) > 0 {
-		networkConfig.StaticPeers = config.StaticPeers
+	for _, bootnode := range unsupportedBootnodes {
+		log.Warn("Ignoring unsupported Consensus bootstrap node", "bootnode", bootnode)
+	}
+	networkConfig.BootNodes = discoveryNodes
+	if len(directBootnodes) > 0 {
+		networkConfig.StaticPeers = slices.Concat(networkConfig.StaticPeers, directBootnodes)
 	}
 	if genesisState != nil {
 		genesisDb.Initialize(genesisState)
@@ -360,7 +366,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	pksRegistry := public_keys_registry.NewHeadViewPublicKeysRegistry(syncedDataManager)
 	validatorParameters := validator_params.NewValidatorParams()
 	forkChoice, err := forkchoice.NewForkChoiceStore(
-		ethClock, state, engine, pool, fork_graph.NewForkGraphDisk(state, syncedDataManager, fcuFs, config.BeaconAPIRouter, emitters),
+		ethClock, state, engine, pool, fork_graph.NewForkGraphDisk(state, syncedDataManager, fcuFs, config.BeaconAPIRouter),
 		emitters, syncedDataManager, blobStorage, pksRegistry, validatorParameters, doLMDSampling, indexDB)
 	if err != nil {
 		logger.Error("Could not create forkchoice", "err", err)
@@ -409,7 +415,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	}
 	peerDasState := peerdasstate.NewPeerDasState(beaconConfig, networkConfig)
 	columnStorage := blob_storage.NewDataColumnStore(afero.NewBasePathFs(afero.NewOsFs(), dirs.CaplinColumnData), pruneBlobDistance, beaconConfig, ethClock, emitters)
-	sentinel, localNode, err := service.StartSentinelService(&sentinel.SentinelConfig{
+	sentinel, localNode, err := service.StartSentinelService(ctx, &sentinel.SentinelConfig{
 		P2PConfig: clp2p.P2PConfig{
 			IpAddr:             config.CaplinDiscoveryAddr,
 			Port:               int(config.CaplinDiscoveryPort),
@@ -594,7 +600,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			syncedDataManager,
 			statesReader,
 			sentinel,
-			version.GitTag,
+			version.NodeVersion(),
 			&config.BeaconAPIRouter,
 			emitters,
 			blobStorage,
@@ -623,9 +629,13 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			payloadAttestationService,
 			proposerPreferencesService,
 		)
-		go beacon.ListenAndServe(&beacon.LayeredBeaconHandler{
-			ArchiveApi: apiHandler,
-		}, config.BeaconAPIRouter)
+		go func() {
+			if err := beacon.ListenAndServe(ctx, &beacon.LayeredBeaconHandler{
+				ArchiveApi: apiHandler,
+			}, config.BeaconAPIRouter); err != nil {
+				log.Warn("[Beacon API] error serving", "err", err)
+			}
+		}()
 		log.Info("Beacon API started", "addr", config.BeaconAPIRouter.Address)
 	}
 

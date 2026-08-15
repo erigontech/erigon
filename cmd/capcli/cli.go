@@ -56,11 +56,13 @@ import (
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -673,7 +675,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 
 	freezingCfg := ethconfig.Defaults.Snapshot
 	freezingCfg.ChainName = r.Chain
-	allSnapshots := freezeblocks.NewRoSnapshots(freezingCfg, dirs.Snap, log.Root())
+	allSnapshots := blocksnapshots.NewRoSnapshots(freezingCfg, dirs.Snap, log.Root())
 	if err := allSnapshots.OpenFolder(); err != nil {
 		return err
 	}
@@ -689,7 +691,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 		return err
 	}
 	snr := freezeblocks.NewBeaconSnapshotReader(csn, eth1Getter, beaconConfig)
-	gSpot, err := initial_state.GetGenesisState(t)
+	gSpot, err := initial_state.GetGenesisState(ctx, t)
 	if err != nil {
 		return err
 	}
@@ -811,9 +813,9 @@ type ArchiveSanitizer struct {
 	FaultOut     string `help:"fault out" default:""`
 }
 
-func getHead(beaconApiURL string) (uint64, error) {
+func getHead(ctx context.Context, beaconApiURL string) (uint64, error) {
 	headResponse := map[string]any{}
-	req, err := http.NewRequest("GET", beaconApiURL+"/eth/v2/debug/beacon/heads", nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", beaconApiURL+"/eth/v2/debug/beacon/heads", nil)
 	if err != nil {
 		return 0, err
 	}
@@ -842,9 +844,9 @@ func getHead(beaconApiURL string) (uint64, error) {
 	return slot, nil
 }
 
-func getStateRootAtSlot(beaconApiURL string, slot uint64) (common.Hash, error) {
+func getStateRootAtSlot(ctx context.Context, beaconApiURL string, slot uint64) (common.Hash, error) {
 	response := map[string]any{}
-	req, err := http.NewRequest("GET", fmt.Sprintf("%s/eth/v1/beacon/states/%d/root", beaconApiURL, slot), nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/eth/v1/beacon/states/%d/root", beaconApiURL, slot), nil)
 	if err != nil {
 		return common.Hash{}, err
 	}
@@ -910,13 +912,13 @@ func (a *ArchiveSanitizer) Run(ctx *Context) error {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
 
 	// retrieve the head slot first through /eth/v2/debug/beacon/heads
-	headSlot, err := getHead(a.BeaconApiURL)
+	headSlot, err := getHead(ctx, a.BeaconApiURL)
 	if err != nil {
 		return err
 	}
 	for i := a.StartSlot; i < headSlot; i += a.IntervalSlot {
 		// retrieve the state root at slot i and skip if not found (can happen)
-		stateRoot, err := getStateRootAtSlot(a.BeaconApiURL, i)
+		stateRoot, err := getStateRootAtSlot(ctx, a.BeaconApiURL, i)
 		if err != nil {
 			return err
 		}
@@ -967,7 +969,7 @@ func (b *BenchmarkNode) Run(ctx *Context) error {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
 
 	// retrieve the head slot first through /eth/v2/debug/beacon/heads
-	headSlot, err := getHead(b.BaseURL)
+	headSlot, err := getHead(ctx, b.BaseURL)
 	if err != nil {
 		return err
 	}
@@ -992,12 +994,12 @@ func (b *BenchmarkNode) Run(ctx *Context) error {
 		uri := b.BaseURL + b.Endpoint
 		uri = strings.Replace(uri, "{slot}", strconv.FormatUint(i, 10), 1)
 		uri = strings.Replace(uri, "{epoch}", strconv.FormatUint(i/beaconConfig.SlotsPerEpoch, 10), 1)
-		elapsed, err := timeRequest(uri, b.Accept, b.Method, b.Body)
+		elapsed, err := timeRequest(ctx, uri, b.Accept, b.Method, b.Body)
 		if err != nil {
 			log.Warn("Failed to benchmark", "error", err, "uri", uri)
 			continue
 		}
-		_, err = f.WriteString(fmt.Sprintf("%d,%d\n", i, elapsed.Milliseconds()))
+		_, err = fmt.Fprintf(f, "%d,%d\n", i, elapsed.Milliseconds())
 		if err != nil {
 			return err
 		}
@@ -1006,8 +1008,8 @@ func (b *BenchmarkNode) Run(ctx *Context) error {
 	return nil
 }
 
-func timeRequest(uri, accept, method, body string) (time.Duration, error) {
-	req, err := http.NewRequest(method, uri, nil)
+func timeRequest(ctx context.Context, uri, accept, method, body string) (time.Duration, error) {
+	req, err := http.NewRequestWithContext(ctx, method, uri, nil)
 	if err != nil {
 		return 0, err
 	}
@@ -1390,7 +1392,7 @@ func (c *DumpStateSnapshots) Run(ctx *Context) error {
 	r, _ := stateSn.Get(kv.BlockRoot, 999424)
 	fmt.Printf("%x\n", r)
 
-	if err := stateSn.DumpCaplinState(ctx, stateSn.BlocksAvailable(), to, c.StepSize, salt, dirs, runtime.NumCPU(), log.LvlInfo, log.Root()); err != nil {
+	if err := stateSn.DumpCaplinState(ctx, to, c.StepSize, salt, dirs, runtime.NumCPU(), log.LvlInfo, log.Root()); err != nil {
 		return err
 	}
 	if err := stateSn.OpenFolder(); err != nil {
@@ -1482,7 +1484,7 @@ func (m *MakeDepositArgs) Run(ctx *Context) error {
 		return err
 	}
 
-	messageToSign := utils.Sha256(depositMessageRootForSigning[:], domain)
+	messageToSign := crypto.Sha256(depositMessageRootForSigning[:], domain)
 
 	signature := privateKeyBls.Sign(messageToSign[:])
 	signatureBytes := signature.Bytes()

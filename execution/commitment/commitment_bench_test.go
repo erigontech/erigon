@@ -17,23 +17,22 @@
 package commitment
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"testing"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/stretchr/testify/require"
 )
 
 func BenchmarkHexPatriciaHashedFold(b *testing.B) {
 	ctx := context.Background()
 	ms := NewMockState(b)
-	hph := NewHexPatriciaHashed(1, ms)
-	hph.SetTrace(false)
+	hph := NewHexPatriciaHashed(1, ms, DefaultTrieConfig())
+	hph.SetTraceWriter(nil)
 
-	// Build a trie with accounts and storage to exercise all fold paths
 	plainKeys, updates := NewUpdateBuilder().
 		Balance("00", 4).
 		Balance("01", 5).
@@ -53,7 +52,6 @@ func BenchmarkHexPatriciaHashedFold(b *testing.B) {
 		b.Fatal(err)
 	}
 
-	// Initial process to populate the trie
 	upds := WrapKeyUpdates(b, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 	_, err = hph.Process(ctx, upds, "", nil, WarmupConfig{})
 	if err != nil {
@@ -61,7 +59,6 @@ func BenchmarkHexPatriciaHashedFold(b *testing.B) {
 	}
 	upds.Close()
 
-	// Build incremental updates for the benchmark loop
 	incKeys, incUpdates := NewUpdateBuilder().
 		Balance("00", 100).
 		Storage("03", "56", "070707").
@@ -96,13 +93,9 @@ func BenchmarkHexPatriciaHashedFold(b *testing.B) {
 
 func BenchmarkBranchMerger_Merge(b *testing.B) {
 
-	row, bm := generateCellRow(b, 16)
+	row, bm, enc := encodeCellRow(b, 16)
 
 	be := NewBranchEncoder(1024)
-	cellData := generateCellEncodeDataRow(b, row, bm)
-	enc, err := be.EncodeBranch(bm, bm, bm, &cellData)
-	require.NoError(b, err)
-
 	var copies [16][]byte
 	var tm uint16
 	am := bm
@@ -110,11 +103,11 @@ func BenchmarkBranchMerger_Merge(b *testing.B) {
 	for i := 15; i >= 0; i-- {
 		row[i] = nil
 		tm, bm, am = uint16(1<<i), bm>>1, am>>1
-		cellData = generateCellEncodeDataRow(b, row, am)
+		cellData := generateCellEncodeDataRow(b, row, am)
 		enc1, err := be.EncodeBranch(bm, tm, am, &cellData)
 		require.NoError(b, err)
 
-		copies[i] = common.Copy(enc1)
+		copies[i] = bytes.Clone(enc1)
 	}
 
 	bmg := NewHexBranchMerger(4096)
@@ -131,9 +124,6 @@ func BenchmarkBranchMerger_Merge(b *testing.B) {
 	}
 }
 
-// benchReplacePlainKeys runs ReplacePlainKeys in a tight loop with b.ReportAllocs().
-// buf is a pre-allocated output buffer (pass nil to let ReplacePlainKeys allocate).
-// No assertions inside the hot loop.
 func benchReplacePlainKeys(b *testing.B, data BranchData, buf []byte, fn func(key []byte, isStorage bool) ([]byte, error)) {
 	b.Helper()
 	b.ReportAllocs()
@@ -145,21 +135,12 @@ func benchReplacePlainKeys(b *testing.B, data BranchData, buf []byte, fn func(ke
 	}
 }
 
-// encodeSyntheticBranch creates encoded BranchData from generateCellRow output.
 func encodeSyntheticBranch(b *testing.B, nCells int) (BranchData, uint16) {
 	b.Helper()
-	row, bm := generateCellRow(b, nCells)
-	be := NewBranchEncoder(1024)
-	cellData := generateCellEncodeDataRow(b, row, bm)
-	enc, err := be.EncodeBranch(bm, bm, bm, &cellData)
-	if err != nil {
-		b.Fatal(err)
-	}
-	return BranchData(common.Copy(enc)), bm
+	_, bm, enc := encodeCellRow(b, nCells)
+	return BranchData(bytes.Clone(enc)), bm
 }
 
-// preshortenBranchData shortens keys in enc and returns the shortened data plus
-// a map from shortened key to original key (for the expand benchmark).
 func preshortenBranchData(b *testing.B, enc BranchData) (BranchData, map[string][]byte) {
 	b.Helper()
 	keyMap := make(map[string][]byte)
@@ -170,17 +151,16 @@ func preshortenBranchData(b *testing.B, enc BranchData) (BranchData, map[string]
 		} else {
 			short = key[:4]
 		}
-		keyMap[string(short)] = common.Copy(key)
+		keyMap[string(short)] = bytes.Clone(key)
 		return short, nil
 	})
 	if err != nil {
 		b.Fatal(err)
 	}
-	return BranchData(common.Copy(shortened)), keyMap
+	return BranchData(bytes.Clone(shortened)), keyMap
 }
 
 func BenchmarkBranchData_ReplacePlainKeys(b *testing.B) {
-	// Shorten callback: truncate account keys to 4 bytes, storage keys to 8 bytes
 	shortenFn := func(key []byte, isStorage bool) ([]byte, error) {
 		if isStorage {
 			return key[:8], nil
@@ -188,27 +168,18 @@ func BenchmarkBranchData_ReplacePlainKeys(b *testing.B) {
 		return key[:4], nil
 	}
 
-	// --- Synthetic dense (16-cell) data ---
 	denseEnc, _ := encodeSyntheticBranch(b, 16)
 	denseShortened, denseKeyMap := preshortenBranchData(b, denseEnc)
 
-	// --- Synthetic sparse (2-cell) data ---
 	sparseEnc, _ := encodeSyntheticBranch(b, 2)
 	sparseShortened, sparseKeyMap := preshortenBranchData(b, sparseEnc)
 
-	// --- Real data from production hex string ---
-	// This data has already-shortened 4-byte storage keys and no account keys,
-	// so it exercises the no-change fast path (all keys already short).
-	// Its value is measuring parsing overhead on production-format data with
-	// mixed field types (hashes, extensions, storage addresses).
 	realDataHex := "86e586e5082035e72a782b51d9c98548467e3f868294d923cdbbdf4ce326c867bd972c4a2395090109203b51781a76dc87640aea038e3fdd8adca94049aaa436735b162881ec159f6fb408201aa2fa41b5fb019e8abf8fc32800805a2743cfa15373cf64ba16f4f70e683d8e0404a192d9050404f993d9050404e594d90508208642542ff3ce7d63b9703e85eb924ab3071aa39c25b1651c6dda4216387478f10404bd96d905"
 	realDataBytes, err := hex.DecodeString(realDataHex)
 	if err != nil {
 		b.Fatal(err)
 	}
 	realData := BranchData(realDataBytes)
-
-	// --- Sub-benchmarks ---
 
 	b.Run("Shorten/Dense", func(b *testing.B) {
 		buf := make([]byte, 0, len(denseEnc))
@@ -260,37 +231,33 @@ func BenchmarkBranchData_ReplacePlainKeys(b *testing.B) {
 }
 
 func BenchmarkGetDeferredUpdate(b *testing.B) {
-	// Create cellEncodeData grid similar to what fold() would produce
 	var cells [16]cellEncodeData
 	var bitmap uint16
 
-	// Fill cells with realistic data
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		c := &cells[i]
 		c.hashLen = 32
-		for j := 0; j < 32; j++ {
+		for j := range 32 {
 			c.hash[j] = byte(i*32 + j)
 		}
 
-		// Vary the cell types like real trie data
 		switch i % 4 {
-		case 0: // account cell
+		case 0:
 			c.accountAddrLen = 20
-			for j := 0; j < 20; j++ {
+			for j := range 20 {
 				c.accountAddr[j] = byte(i + j)
 			}
-		case 1: // storage cell
+		case 1:
 			c.storageAddrLen = 52
-			for j := 0; j < 52; j++ {
+			for j := range 52 {
 				c.storageAddr[j] = byte(i + j)
 			}
-		case 2: // extension cell
+		case 2:
 			c.extLen = 10
-			for j := 0; j < 10; j++ {
+			for j := range 10 {
 				c.extension[j] = byte(i + j)
 			}
-		case 3: // hash-only cell
-			// just hash, already set
+		case 3:
 		}
 
 		bitmap |= uint16(1 << i)
@@ -301,29 +268,33 @@ func BenchmarkGetDeferredUpdate(b *testing.B) {
 	prefix := []byte{0x01, 0x02, 0x03}
 	prev := []byte{0x04, 0x05, 0x06}
 
+	enc := NewBranchEncoder(1024)
+	raw, err := enc.EncodeBranch(bitmap, touchMap, afterMap, &cells)
+	if err != nil {
+		b.Fatal(err)
+	}
+
 	b.ResetTimer()
 	b.ReportAllocs()
 
 	for b.Loop() {
-		upd := getDeferredUpdate(prefix, bitmap, touchMap, afterMap, &cells, prev)
+		upd := getDeferredUpdate(prefix, raw, prev)
 		putDeferredUpdate(upd)
 	}
 }
 
 func BenchmarkGetDeferredUpdate_FewCells(b *testing.B) {
-	// Benchmark with only 2 cells set (more realistic for sparse updates)
 	var cells [16]cellEncodeData
 	var bitmap uint16
 
-	// Only set cells 0 and 5
 	for _, i := range []int{0, 5} {
 		c := &cells[i]
 		c.hashLen = 32
-		for j := 0; j < 32; j++ {
+		for j := range 32 {
 			c.hash[j] = byte(i*32 + j)
 		}
 		c.accountAddrLen = 20
-		for j := 0; j < 20; j++ {
+		for j := range 20 {
 			c.accountAddr[j] = byte(i + j)
 		}
 		bitmap |= uint16(1 << i)
@@ -334,22 +305,26 @@ func BenchmarkGetDeferredUpdate_FewCells(b *testing.B) {
 	prefix := []byte{0x01, 0x02, 0x03}
 	prev := []byte{0x04, 0x05, 0x06}
 
+	enc := NewBranchEncoder(1024)
+	raw, err := enc.EncodeBranch(bitmap, touchMap, afterMap, &cells)
+	if err != nil {
+		b.Fatal(err)
+	}
+
 	b.ResetTimer()
 	b.ReportAllocs()
 
 	for b.Loop() {
-		upd := getDeferredUpdate(prefix, bitmap, touchMap, afterMap, &cells, prev)
+		upd := getDeferredUpdate(prefix, raw, prev)
 		putDeferredUpdate(upd)
 	}
 }
 
-// populateUpdates inserts n unique keys into the given Updates instance.
-// Each key is 20 bytes (account-sized) with a unique 8-byte suffix.
 func populateUpdates(b *testing.B, upd *Updates, n int) {
 	b.Helper()
 	key := make([]byte, 20)
 	val := make([]byte, 8)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		binary.BigEndian.PutUint64(key[12:], uint64(i))
 		binary.BigEndian.PutUint64(val, uint64(i+1))
 		upd.TouchPlainKey(string(key), val, upd.TouchStorage)

@@ -25,7 +25,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/rpc"
@@ -131,7 +130,7 @@ func (e *EngineServer) GetPayloadV3(ctx context.Context, payloadID hexutil.Bytes
 	return e.getPayload(ctx, decodedPayloadId, clparams.DenebVersion)
 }
 
-// Same as [GetPayloadV3], but returning ExecutionPayloadV4 (= ExecutionPayloadV3 + requests)
+// Same as [GetPayloadV3], with executionRequests added to the response.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/prague.md#engine_getpayloadv4
 func (e *EngineServer) GetPayloadV4(ctx context.Context, payloadID hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
 	decodedPayloadId, err := decodePayloadID(payloadID)
@@ -153,7 +152,7 @@ func (e *EngineServer) GetPayloadV5(ctx context.Context, payloadID hexutil.Bytes
 	return e.getPayload(ctx, decodedPayloadId, clparams.FuluVersion)
 }
 
-// Same as [GetPayloadV5], but returning ExecutionPayloadV6
+// Same as [GetPayloadV5], but returning ExecutionPayloadV4.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_getpayloadv6
 func (e *EngineServer) GetPayloadV6(ctx context.Context, payloadID hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
 	decodedPayloadId, err := decodePayloadID(payloadID)
@@ -186,7 +185,7 @@ func (e *EngineServer) ForkchoiceUpdatedV3(ctx context.Context, forkChoiceState 
 
 // Successor of [ForkchoiceUpdatedV3] post Amsterdam, with stricter check on params
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_forkchoiceupdatedv4
-func (e *EngineServer) ForkchoiceUpdatedV4(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error) {
+func (e *EngineServer) ForkchoiceUpdatedV4(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes, custodyColumns *engine_types.CustodyColumns) (*engine_types.ForkChoiceUpdatedResponse, error) {
 	return e.forkchoiceUpdated(ctx, forkChoiceState, payloadAttributes, clparams.GloasVersion)
 }
 
@@ -263,22 +262,9 @@ func (e *EngineServer) GetPayloadBodiesByRangeV2(ctx context.Context, start, cou
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/identification.md#engine_getclientversionv1
 func (e *EngineServer) GetClientVersionV1(ctx context.Context, callerVersion *engine_types.ClientVersionV1) ([]engine_types.ClientVersionV1, error) {
 	if callerVersion != nil {
-		e.logger.Info("[GetClientVersionV1] Received request from" + callerVersion.String())
+		e.logger.Info("[GetClientVersionV1] Received request from " + callerVersion.String())
 	}
-	commitString := version.GitCommit
-	if len(commitString) >= 8 {
-		commitString = commitString[:8]
-	} else {
-		commitString = "00000000" // shouldn't be triggered
-	}
-	result := make([]engine_types.ClientVersionV1, 1)
-	result[0] = engine_types.ClientVersionV1{
-		Code:    version.ClientCode,
-		Name:    version.ClientName,
-		Version: version.VersionWithCommit(version.GitCommit),
-		Commit:  "0x" + commitString,
-	}
-	return result, nil
+	return []engine_types.ClientVersionV1{engine_types.LocalClientVersionV1()}, nil
 }
 
 func (e *EngineServer) ExchangeCapabilities(fromCl []string) []string {
@@ -293,19 +279,17 @@ func (e *EngineServer) ExchangeCapabilities(fromCl []string) []string {
 	return ourCapabilities
 }
 
-func (e *EngineServer) GetBlobsV1(ctx context.Context, blobHashes []common.Hash) ([]*engine_types.BlobAndProofV1, error) {
+func (e *EngineServer) GetBlobsV1(ctx context.Context, blobHashes []common.Hash) (engine_types.BlobsBundleV1, error) {
 	e.logger.Debug("[GetBlobsV1] Received Request", "hashes", len(blobHashes))
 	resp, err := e.getBlobs(ctx, blobHashes, clparams.DenebVersion)
 	if err != nil {
 		return nil, err
 	}
-	if ret, ok := resp.([]*engine_types.BlobAndProofV1); ok {
-		return ret, err
-	}
-	return nil, err
+	ret, _ := resp.([]*engine_types.BlobAndProofV1)
+	return engine_types.BlobsBundleV1(ret), nil
 }
 
-func (e *EngineServer) GetBlobsV2(ctx context.Context, blobHashes []common.Hash) ([]*engine_types.BlobAndProofV2, error) {
+func (e *EngineServer) GetBlobsV2(ctx context.Context, blobHashes []common.Hash) (engine_types.BlobsBundleV2, error) {
 	e.logger.Debug("[GetBlobsV2] Received Request", "hashes", len(blobHashes))
 	// GetBlobsV2 was actually introduced in Fusaka,
 	// but here we're using the Pectra version to differentiate it from GetBlobsV3.
@@ -313,20 +297,16 @@ func (e *EngineServer) GetBlobsV2(ctx context.Context, blobHashes []common.Hash)
 	if err != nil {
 		return nil, err
 	}
-	if ret, ok := resp.([]*engine_types.BlobAndProofV2); ok {
-		return ret, err
-	}
-	return nil, err
+	ret, _ := resp.([]*engine_types.BlobAndProofV2)
+	return engine_types.BlobsBundleV2(ret), nil
 }
 
-func (e *EngineServer) GetBlobsV3(ctx context.Context, blobHashes []common.Hash) ([]*engine_types.BlobAndProofV2, error) {
+func (e *EngineServer) GetBlobsV3(ctx context.Context, blobHashes []common.Hash) (engine_types.BlobsBundleV2, error) {
 	e.logger.Debug("[GetBlobsV3] Received Request", "hashes", len(blobHashes))
 	resp, err := e.getBlobs(ctx, blobHashes, clparams.FuluVersion)
 	if err != nil {
 		return nil, err
 	}
-	if ret, ok := resp.([]*engine_types.BlobAndProofV2); ok {
-		return ret, err
-	}
-	return nil, err
+	ret, _ := resp.([]*engine_types.BlobAndProofV2)
+	return engine_types.BlobsBundleV2(ret), nil
 }

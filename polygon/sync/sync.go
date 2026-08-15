@@ -201,9 +201,9 @@ func (s *Sync) handleMilestoneTipMismatch(ctx context.Context, ccb *CanonicalCha
 	}
 
 	blocks := make([]*types.Block, 0, distanceToRoot)
-	var batch []*types.Block
-	for batch, err = feed.Next(ctx); err == nil && len(batch) > 0; batch, err = feed.Next(ctx) {
-		blocks = append(blocks, batch...)
+	var batch p2p.BlockBatchResult
+	for batch, err = feed.Next(ctx); err == nil && len(batch.Blocks) > 0; batch, err = feed.Next(ctx) {
+		blocks = append(blocks, batch.Blocks...)
 	}
 	if err != nil {
 		s.logger.Warn(syncLogPrefix("failed to get next block batch during milestone mismatch"), "err", err)
@@ -612,8 +612,9 @@ func (s *Sync) backwardDownloadBlockBatches(
 	if err != nil {
 		return err
 	}
-	var blocks []*types.Block
-	for blocks, err = feed.Next(ctx); err == nil && len(blocks) > 0; blocks, err = feed.Next(ctx) {
+	var batch p2p.BlockBatchResult
+	for batch, err = feed.Next(ctx); err == nil && len(batch.Blocks) > 0; batch, err = feed.Next(ctx) {
+		blocks := batch.Blocks
 		processedC := make(chan error)
 		s.tipEvents.events.PushEvent(Event{
 			Type: EventTypeNewBlockBatch,
@@ -900,19 +901,19 @@ func (s *Sync) Run(ctx context.Context) error {
 
 			switch event.Type {
 			case EventTypeNewMilestone:
-				if err = s.applyNewMilestoneOnTip(ctx, event.AsNewMilestone(), ccBuilder); err != nil {
+				if err := s.applyNewMilestoneOnTip(ctx, event.AsNewMilestone(), ccBuilder); err != nil {
 					return err
 				}
 			case EventTypeNewBlock:
-				if err = s.applyNewBlockOnTip(ctx, event.AsNewBlock(), ccBuilder); err != nil {
+				if err := s.applyNewBlockOnTip(ctx, event.AsNewBlock(), ccBuilder); err != nil {
 					return err
 				}
 			case EventTypeNewBlockBatch:
-				if err = s.applyNewBlockBatchOnTip(ctx, event.AsNewBlockBatch(), ccBuilder); err != nil {
+				if err := s.applyNewBlockBatchOnTip(ctx, event.AsNewBlockBatch(), ccBuilder); err != nil {
 					return err
 				}
 			case EventTypeNewBlockHashes:
-				if err = s.applyNewBlockHashesOnTip(ctx, event.AsNewBlockHashes(), ccBuilder); err != nil {
+				if err := s.applyNewBlockHashesOnTip(ctx, event.AsNewBlockHashes(), ccBuilder); err != nil {
 					return err
 				}
 			default:

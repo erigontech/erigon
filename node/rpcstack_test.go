@@ -20,14 +20,24 @@
 package node
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"fmt"
 	"io"
+	"math/big"
+	"net"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
-	"strconv"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -46,9 +56,7 @@ import (
 
 // TestCorsHandler makes sure CORS are properly handled on the http server.
 func TestCorsHandler(t *testing.T) {
-	srv := createAndStartServer(t, &httpConfig{CorsAllowedOrigins: []string{"test", "test.com"}}, false, &wsConfig{})
-	defer srv.stop()
-	url := "http://" + srv.listenAddr()
+	url := startHTTPServer(t, nil, []string{"test", "test.com"}, nil)
 
 	resp := rpcRequest(t, url, "origin", "test.com")
 	defer resp.Body.Close()
@@ -61,9 +69,7 @@ func TestCorsHandler(t *testing.T) {
 
 // TestVhosts makes sure vhosts is properly handled on the http server.
 func TestVhosts(t *testing.T) {
-	srv := createAndStartServer(t, &httpConfig{Vhosts: []string{"test"}}, false, &wsConfig{})
-	defer srv.stop()
-	url := "http://" + srv.listenAddr()
+	url := startHTTPServer(t, nil, nil, []string{"test"})
 
 	resp := rpcRequest(t, url, "host", "test")
 	defer resp.Body.Close()
@@ -80,9 +86,7 @@ func TestVhosts(t *testing.T) {
 
 // TestVhostsAny makes sure vhosts any is properly handled on the http server.
 func TestVhostsAny(t *testing.T) {
-	srv := createAndStartServer(t, &httpConfig{Vhosts: []string{"any"}}, false, &wsConfig{})
-	defer srv.stop()
-	url := "http://" + srv.listenAddr()
+	url := startHTTPServer(t, nil, nil, []string{"any"})
 
 	resp := rpcRequest(t, url, "host", "test")
 	defer resp.Body.Close()
@@ -164,124 +168,51 @@ func TestWebsocketOrigins(t *testing.T) {
 		},
 	}
 	for _, tc := range tests {
-		srv := createAndStartServer(t, &httpConfig{}, true, &wsConfig{Origins: common.CliString2Array(tc.spec)})
-		url := fmt.Sprintf("ws://%v", srv.listenAddr())
-		for _, origin := range tc.expOk {
-			if err := wsRequest(t, url, origin); err != nil {
-				t.Errorf("spec '%v', origin '%v': expected ok, got %v", tc.spec, origin, err)
+		t.Run(tc.spec, func(t *testing.T) {
+			url := startWSServer(t, common.CliString2Array(tc.spec))
+			for _, origin := range tc.expOk {
+				if err := wsRequest(t, url, origin); err != nil {
+					t.Errorf("spec '%v', origin '%v': expected ok, got %v", tc.spec, origin, err)
+				}
 			}
-		}
-		for _, origin := range tc.expFail {
-			if err := wsRequest(t, url, origin); err == nil {
-				t.Errorf("spec '%v', origin '%v': expected not to allow,  got ok", tc.spec, origin)
+			for _, origin := range tc.expFail {
+				if err := wsRequest(t, url, origin); err == nil {
+					t.Errorf("spec '%v', origin '%v': expected not to allow,  got ok", tc.spec, origin)
+				}
 			}
-		}
-		srv.stop()
-	}
-}
-
-// TestIsWebsocket tests if an incoming websocket upgrade request is handled properly.
-func TestIsWebsocket(t *testing.T) {
-	r, _ := http.NewRequest("GET", "/", nil)
-
-	assert.False(t, isWebsocket(r))
-	r.Header.Set("upgrade", "websocket")
-	assert.False(t, isWebsocket(r))
-	r.Header.Set("connection", "upgrade")
-	assert.True(t, isWebsocket(r))
-	r.Header.Set("connection", "upgrade,keep-alive")
-	assert.True(t, isWebsocket(r))
-	r.Header.Set("connection", " UPGRADE,keep-alive")
-	assert.True(t, isWebsocket(r))
-}
-
-func Test_checkPath(t *testing.T) {
-	tests := []struct {
-		req      *http.Request
-		prefix   string
-		expected bool
-	}{
-		{
-			req:      &http.Request{URL: &url.URL{Path: "/test"}},
-			prefix:   "/test",
-			expected: true,
-		},
-		{
-			req:      &http.Request{URL: &url.URL{Path: "/testing"}},
-			prefix:   "/test",
-			expected: true,
-		},
-		{
-			req:      &http.Request{URL: &url.URL{Path: "/"}},
-			prefix:   "/test",
-			expected: false,
-		},
-		{
-			req:      &http.Request{URL: &url.URL{Path: "/fail"}},
-			prefix:   "/test",
-			expected: false,
-		},
-		{
-			req:      &http.Request{URL: &url.URL{Path: "/"}},
-			prefix:   "",
-			expected: true,
-		},
-		{
-			req:      &http.Request{URL: &url.URL{Path: "/fail"}},
-			prefix:   "",
-			expected: false,
-		},
-		{
-			req:      &http.Request{URL: &url.URL{Path: "/"}},
-			prefix:   "/",
-			expected: true,
-		},
-		{
-			req:      &http.Request{URL: &url.URL{Path: "/testing"}},
-			prefix:   "/",
-			expected: true,
-		},
-	}
-
-	for i, tt := range tests {
-		t.Run(strconv.Itoa(i), func(t *testing.T) {
-			assert.Equal(t, tt.expected, checkPath(tt.req, tt.prefix))
 		})
 	}
 }
 
-func createAndStartServer(t *testing.T, conf *httpConfig, ws bool, wsConf *wsConfig) *httpServer {
+// newTestRPCServer creates a bare rpc.Server like the production wiring in
+// cmd/rpcdaemon/cli does.
+func newTestRPCServer(t *testing.T) *rpc.Server {
 	t.Helper()
 
-	// Ensure RpcConcurrencyLimit is always set so admission control wiring is exercised.
-	// A high value avoids interfering with existing tests while still activating the path.
-	if conf.RpcConcurrencyLimit == 0 {
-		conf.RpcConcurrencyLimit = 1000
-	}
-	srv := newHTTPServer(testlog.Logger(t, log.LvlError), rpccfg.DefaultHTTPTimeouts)
-	require.NoError(t, srv.enableRPC(nil, *conf, nil))
-	if ws {
-		require.NoError(t, srv.enableWS(nil, *wsConf, nil))
-	}
-	require.NoError(t, srv.setListenAddr("localhost", 0))
-	require.NoError(t, srv.start())
+	srv := rpc.NewServer(50, false /* traceRequests */, false /* debugSingleRequest */, true, testlog.Logger(t, log.LvlError), 0)
+	t.Cleanup(srv.Stop)
 	return srv
 }
 
-func createAndStartServerWithAllowList(t *testing.T, conf httpConfig, ws bool, wsConf wsConfig) *httpServer {
+// startHTTPServer starts a test HTTP server wrapped in the production handler stack.
+func startHTTPServer(t *testing.T, allowList rpc.AllowList, cors, vhosts []string) string {
 	t.Helper()
 
-	srv := newHTTPServer(testlog.Logger(t, log.LvlError), rpccfg.DefaultHTTPTimeouts)
+	srv := newTestRPCServer(t)
+	srv.SetAllowList(allowList)
+	ts := httptest.NewServer(NewHTTPHandlerStack(srv, cors, vhosts, false, 1000, true))
+	t.Cleanup(ts.Close)
+	return ts.URL
+}
 
-	allowList := rpc.AllowList(map[string]struct{}{"net_version": {}}) //don't allow RPC modules
+// startWSServer starts a test WebSocket server with the production websocket handler.
+func startWSServer(t *testing.T, origins []string) string {
+	t.Helper()
 
-	require.NoError(t, srv.enableRPC(nil, conf, allowList))
-	if ws {
-		require.NoError(t, srv.enableWS(nil, wsConf, allowList))
-	}
-	require.NoError(t, srv.setListenAddr("localhost", 0))
-	require.NoError(t, srv.start())
-	return srv
+	srv := newTestRPCServer(t)
+	ts := httptest.NewServer(srv.WebsocketHandler(origins, nil, false, testlog.Logger(t, log.LvlError)))
+	t.Cleanup(ts.Close)
+	return "ws://" + ts.Listener.Addr().String()
 }
 
 // wsRequest attempts to open a WebSocket connection to the given URL.
@@ -305,15 +236,15 @@ func wsRequest(t *testing.T, url, browserOrigin string) error {
 }
 
 func TestAllowList(t *testing.T) {
-	srv := createAndStartServerWithAllowList(t, httpConfig{}, false, wsConfig{})
-	defer srv.stop()
+	allowList := rpc.AllowList(map[string]struct{}{"net_version": {}}) //don't allow RPC modules
+	url := startHTTPServer(t, allowList, nil, nil)
 
-	assert.False(t, testCustomRequest(t, srv, "rpc_modules"))
+	assert.False(t, testCustomRequest(t, url, "rpc_modules"))
 }
 
-func testCustomRequest(t *testing.T, srv *httpServer, method string) bool {
+func testCustomRequest(t *testing.T, url, method string) bool {
 	body := bytes.NewReader(fmt.Appendf(nil, `{"jsonrpc":"2.0","id":1,"method":"%s"}`, method))
-	req, _ := http.NewRequest("POST", "http://"+srv.listenAddr(), body)
+	req, _ := http.NewRequestWithContext(t.Context(), "POST", url, body)
 	req.Header.Set("content-type", "application/json")
 
 	client := http.DefaultClient
@@ -334,7 +265,7 @@ func rpcRequest(t *testing.T, url string, extraHeaders ...string) *http.Response
 
 	// Create the request.
 	body := bytes.NewReader([]byte(`{"jsonrpc":"2.0","id":1,"method":"rpc_modules","params":[]}`))
-	req, err := http.NewRequest("POST", url, body)
+	req, err := http.NewRequestWithContext(t.Context(), "POST", url, body)
 	if err != nil {
 		t.Fatal("could not create http request:", err)
 	}
@@ -363,11 +294,11 @@ func rpcRequest(t *testing.T, url string, extraHeaders ...string) *http.Response
 }
 
 func TestHTTP2H2C(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow test")
-	}
-	srv := createAndStartServer(t, &httpConfig{}, false, &wsConfig{})
-	defer srv.stop()
+	srv := newTestRPCServer(t)
+	handler := NewHTTPHandlerStack(srv, nil, nil, false, 1000, true)
+	httpSrv, addr, err := StartHTTPEndpoint("tcp://127.0.0.1:0", &HttpEndpointConfig{Timeouts: rpccfg.DefaultHTTPTimeouts}, handler)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = httpSrv.Shutdown(context.Background()) })
 
 	// Create an HTTP/2 cleartext client.
 	transport := &http.Transport{}
@@ -376,7 +307,10 @@ func TestHTTP2H2C(t *testing.T) {
 	client := &http.Client{Transport: transport}
 
 	body := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"rpc_modules","params":[]}`)
-	resp, err := client.Post("http://"+srv.listenAddr(), "application/json", body)
+	req, err := http.NewRequestWithContext(t.Context(), "POST", "http://"+addr.String(), body)
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -392,6 +326,117 @@ func TestHTTP2H2C(t *testing.T) {
 	assert.Contains(t, string(result), "jsonrpc", "expected JSON-RPC response")
 }
 
+// TestHTTP2H2CUpgrade checks the HTTP/1.1 Upgrade route into h2c (RFC 7540
+// Section 3.2), which curl uses for "--http2" over cleartext.
+func TestHTTP2H2CUpgrade(t *testing.T) {
+	srv := newTestRPCServer(t)
+	handler := NewHTTPHandlerStack(srv, nil, nil, false, 1000, true)
+	httpSrv, addr, err := StartHTTPEndpoint("tcp://127.0.0.1:0", &HttpEndpointConfig{Timeouts: rpccfg.DefaultHTTPTimeouts}, handler)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = httpSrv.Shutdown(context.Background()) })
+
+	var dialer net.Dialer
+	conn, err := dialer.DialContext(t.Context(), "tcp", addr.String())
+	require.NoError(t, err)
+	defer conn.Close()
+	require.NoError(t, conn.SetDeadline(time.Now().Add(10*time.Second)))
+
+	_, err = conn.Write([]byte("GET / HTTP/1.1\r\n" +
+		"Host: " + addr.String() + "\r\n" +
+		"Connection: Upgrade, HTTP2-Settings\r\n" +
+		"Upgrade: h2c\r\n" +
+		"HTTP2-Settings: AAMAAABkAAQAAP__\r\n\r\n"))
+	require.NoError(t, err)
+
+	statusLine, err := bufio.NewReader(conn).ReadString('\n')
+	require.NoError(t, err)
+	assert.Equal(t, "HTTP/1.1 101 Switching Protocols\r\n", statusLine)
+}
+
+// TestHTTPSEndpoint checks that the TLS endpoint negotiates HTTP/2 via ALPN and
+// still serves clients which only speak HTTP/1.1.
+func TestHTTPSEndpoint(t *testing.T) {
+	certFile, keyFile, roots := newSelfSignedCert(t)
+	srv := newTestRPCServer(t)
+	handler := NewHTTPHandlerStack(srv, nil, nil, false, 1000, true)
+	httpSrv, addr, err := StartHTTPEndpoint("tcp://127.0.0.1:0", &HttpEndpointConfig{
+		Timeouts: rpccfg.DefaultHTTPTimeouts,
+		HTTPS:    true,
+		CertFile: certFile,
+		KeyFile:  keyFile,
+	}, handler)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = httpSrv.Shutdown(context.Background()) })
+
+	for _, tc := range []struct {
+		name      string
+		http2     bool
+		wantProto string
+	}{
+		{name: "h2 via ALPN", http2: true, wantProto: "HTTP/2.0"},
+		{name: "http/1.1 only", http2: false, wantProto: "HTTP/1.1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			transport := &http.Transport{
+				TLSClientConfig: &tls.Config{
+					MinVersion: tls.VersionTLS12,
+					RootCAs:    roots,
+				},
+			}
+			transport.Protocols = new(http.Protocols)
+			transport.Protocols.SetHTTP1(!tc.http2)
+			transport.Protocols.SetHTTP2(tc.http2)
+			client := &http.Client{Transport: transport, Timeout: 10 * time.Second}
+			defer client.CloseIdleConnections()
+
+			body := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"rpc_modules","params":[]}`)
+			req, err := http.NewRequestWithContext(t.Context(), "POST", "https://"+addr.String(), body)
+			require.NoError(t, err)
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := client.Do(req)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+
+			assert.Equal(t, tc.wantProto, resp.Proto)
+			assert.Equal(t, http.StatusOK, resp.StatusCode)
+			result, err := io.ReadAll(resp.Body)
+			require.NoError(t, err)
+			assert.Contains(t, string(result), "jsonrpc", "expected JSON-RPC response")
+		})
+	}
+}
+
+func newSelfSignedCert(t *testing.T) (certFile, keyFile string, roots *x509.CertPool) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	template := x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "erigon-test"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		IPAddresses:  []net.IP{net.IPv4(127, 0, 0, 1)},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, &template, &template, &key.PublicKey, key)
+	require.NoError(t, err)
+	keyDER, err := x509.MarshalECPrivateKey(key)
+	require.NoError(t, err)
+
+	cert, err := x509.ParseCertificate(der)
+	require.NoError(t, err)
+	roots = x509.NewCertPool()
+	roots.AddCert(cert)
+
+	dir := t.TempDir()
+	certFile = filepath.Join(dir, "cert.pem")
+	keyFile = filepath.Join(dir, "key.pem")
+	require.NoError(t, os.WriteFile(certFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0600))
+	require.NoError(t, os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}), 0600))
+	return certFile, keyFile, roots
+}
+
 // TestRPCAdmissionHandler verifies that rpcAdmissionHandler correctly limits
 // concurrent requests and returns HTTP 503 when the limit is exceeded.
 func TestRPCAdmissionHandler(t *testing.T) {
@@ -402,14 +447,14 @@ func TestRPCAdmissionHandler(t *testing.T) {
 	t.Run("disabled when limit is zero", func(t *testing.T) {
 		h := newRPCAdmissionHandler(0, okHandler)
 		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", nil))
+		h.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil))
 		assert.Equal(t, http.StatusOK, rec.Code)
 	})
 
 	t.Run("allows requests under the limit", func(t *testing.T) {
 		h := newRPCAdmissionHandler(5, okHandler)
 		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", nil))
+		h.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil))
 		assert.Equal(t, http.StatusOK, rec.Code)
 	})
 
@@ -426,12 +471,10 @@ func TestRPCAdmissionHandler(t *testing.T) {
 		h := newRPCAdmissionHandler(limit, blockingHandler)
 
 		var wg sync.WaitGroup
-		for i := 0; i < limit; i++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/", nil))
-			}()
+		for range limit {
+			wg.Go(func() {
+				h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil))
+			})
 		}
 
 		// Give goroutines time to enter the handler and increment the counter.
@@ -443,7 +486,7 @@ func TestRPCAdmissionHandler(t *testing.T) {
 
 		// Now the limit is reached — next request must be rejected.
 		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", nil))
+		h.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil))
 		assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
 
 		// Release the held requests.
@@ -452,16 +495,17 @@ func TestRPCAdmissionHandler(t *testing.T) {
 	})
 }
 
-// TestWsConnectionLimit verifies that WsConnectionLimit rejects excess WebSocket
-// connections with HTTP 503 and allows new ones once a slot is freed.
+// TestWsConnectionLimit verifies that the WebSocket connection limiter rejects
+// excess WebSocket connections with HTTP 503 and allows new ones once a slot
+// is freed.
 func TestWsConnectionLimit(t *testing.T) {
 	const limit = 1
-	srv := createAndStartServer(t, &httpConfig{}, true, &wsConfig{
-		Origins:           []string{"*"},
-		WsConnectionLimit: limit,
-	})
-	defer srv.stop()
-	url := fmt.Sprintf("ws://%v", srv.listenAddr())
+	srv := newTestRPCServer(t)
+	limiter := NewWSConnectionLimiter(limit, srv.WebsocketHandler([]string{"*"}, nil, false, testlog.Logger(t, log.LvlError)))
+	wsLimiter := limiter.(*wsConnectionLimiter)
+	ts := httptest.NewServer(limiter)
+	t.Cleanup(ts.Close)
+	url := "ws://" + ts.Listener.Addr().String()
 
 	// First connection should succeed.
 	conn1, resp1, err := websocket.Dial(context.Background(), url, nil)
@@ -471,7 +515,7 @@ func TestWsConnectionLimit(t *testing.T) {
 	require.NoError(t, err, "first connection should succeed")
 
 	// Wait until the server increments its counter.
-	require.Eventually(t, func() bool { return srv.wsLimiter.count.Load() == 1 },
+	require.Eventually(t, func() bool { return wsLimiter.count.Load() == 1 },
 		5*time.Second, 5*time.Millisecond)
 
 	// While first connection is open the second must be rejected.
@@ -484,7 +528,7 @@ func TestWsConnectionLimit(t *testing.T) {
 
 	// Close first connection and wait for the counter to drop.
 	require.NoError(t, conn1.Close(websocket.StatusNormalClosure, ""))
-	require.Eventually(t, func() bool { return srv.wsLimiter.count.Load() == 0 },
+	require.Eventually(t, func() bool { return wsLimiter.count.Load() == 0 },
 		5*time.Second, 5*time.Millisecond)
 
 	// A new connection should now succeed.
@@ -503,7 +547,7 @@ func TestNewWSConnectionLimiter(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	rr0 := httptest.NewRecorder()
-	passthrough.ServeHTTP(rr0, httptest.NewRequest(http.MethodGet, "/", nil))
+	passthrough.ServeHTTP(rr0, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil))
 	assert.Equal(t, http.StatusOK, rr0.Code)
 
 	// Build a limiter with limit=1.
@@ -517,7 +561,7 @@ func TestNewWSConnectionLimiter(t *testing.T) {
 
 	// First request: should be accepted (blocks on hold).
 	go func() {
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 		limiter.ServeHTTP(httptest.NewRecorder(), req)
 	}()
 
@@ -528,7 +572,7 @@ func TestNewWSConnectionLimiter(t *testing.T) {
 
 	// Second request: should be rejected with 503.
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 	limiter.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusServiceUnavailable, rr.Code)
 

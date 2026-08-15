@@ -39,5 +39,5 @@ func ShouldReorg(localTd *uint256.Int, localHeight uint64, localHash common.Hash
 	if newHeight != localHeight {
 		return newHeight < localHeight
 	}
-	return bytes.Compare(localHash.Bytes(), newHash.Bytes()) < 0
+	return bytes.Compare(localHash[:], newHash[:]) < 0
 }

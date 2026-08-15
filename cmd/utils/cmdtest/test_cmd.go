@@ -51,6 +51,8 @@ type TestCmd struct {
 	Func    template.FuncMap
 	Data    any
 	Cleanup func()
+	// Env holds extra "KEY=VALUE" entries appended to the child's environment.
+	Env []string
 
 	cmd    *exec.Cmd
 	stdout *bufio.Reader
@@ -60,17 +62,20 @@ type TestCmd struct {
 	Err error
 }
 
-var id int32
+var id atomic.Int32
 
 // Run exec's the current binary using name as argv[0] which will trigger the
 // reexec init function for that name (e.g. "geth-test" in cmd/geth/run_test.go)
 func (tt *TestCmd) Run(name string, args ...string) {
-	id := atomic.AddInt32(&id, 1)
+	id := id.Add(1)
 	tt.stderr = &testlogger{t: tt.T, name: strconv.FormatUint(uint64(id), 10)}
 	tt.cmd = &exec.Cmd{
 		Path:   reexec.Self(),
 		Args:   append([]string{name}, args...),
 		Stderr: tt.stderr,
+	}
+	if len(tt.Env) > 0 {
+		tt.cmd.Env = append(os.Environ(), tt.Env...)
 	}
 	stdout, err := tt.cmd.StdoutPipe()
 	if err != nil {
@@ -137,7 +142,7 @@ func (tt *TestCmd) matchExactOutput(want []byte) error {
 	if n < len(want) || !bytes.Equal(buf, want) {
 		// Grab any additional buffered output in case of mismatch
 		// because it might help with debugging.
-		buf = append(buf, make([]byte, tt.stdout.Buffered())...)
+		buf = append(buf, make([]byte, tt.stdout.Buffered())...) //nolint:makezero
 		tt.stdout.Read(buf[n:])
 		// Find the mismatch position.
 		for i := 0; i < n; i++ {
