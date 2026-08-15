@@ -21,6 +21,7 @@ package node
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -218,12 +219,12 @@ var gzipWrapper = func() func(http.Handler) http.HandlerFunc {
 // which newNoGzipResponseWriter looks for on the pass-through path.
 type countingResponseWriter struct {
 	http.ResponseWriter
-	c metrics.Counter
+	n int
 }
 
 func (w *countingResponseWriter) Write(b []byte) (int, error) {
 	n, err := w.ResponseWriter.Write(b)
-	w.c.AddInt(n)
+	w.n += n
 	return n, err
 }
 
@@ -243,15 +244,39 @@ func (w *countingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	return nil, nil, errors.New("http.Hijacker interface is not supported")
 }
 
+// gzipMeter counts one request on both sides of the compressor: raw sees the
+// handler's bytes, wire sees what left the process.
+type gzipMeter struct {
+	raw  countingResponseWriter
+	wire countingResponseWriter
+}
+
+type gzipMeterKey struct{}
+
 func newGzipHandler(next http.Handler) http.Handler {
-	// Counted on both sides of the compressor: the inner writer sees the
-	// handler's raw bytes, the outer one sees what goes on the wire.
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		next.ServeHTTP(&countingResponseWriter{ResponseWriter: w, c: gzipInBytes}, r)
+		m, ok := r.Context().Value(gzipMeterKey{}).(*gzipMeter)
+		if !ok {
+			next.ServeHTTP(w, r)
+			return
+		}
+		m.raw.ResponseWriter = w
+		next.ServeHTTP(&m.raw, r)
 	})
 	compressed := gzipWrapper(inner)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		compressed.ServeHTTP(&countingResponseWriter{ResponseWriter: w, c: gzipOutBytes}, r)
+		m := &gzipMeter{}
+		m.wire.ResponseWriter = w
+		compressed.ServeHTTP(&m.wire, r.WithContext(context.WithValue(r.Context(), gzipMeterKey{}, m)))
+
+		// Only a compressed response has a ratio. gzhttp passes the rest through
+		// untouched — a client without gzip, a body under MinSize, a content type
+		// it skips — where both sides count the same bytes and out/in reads 1.
+		if !strings.EqualFold(m.wire.Header().Get("Content-Encoding"), "gzip") {
+			return
+		}
+		gzipInBytes.AddInt(m.raw.n)
+		gzipOutBytes.AddInt(m.wire.n)
 	})
 }
 

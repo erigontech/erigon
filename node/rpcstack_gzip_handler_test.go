@@ -198,6 +198,39 @@ func TestGzipMetricsCounters(t *testing.T) {
 	assert.Equal(t, uint64(rec.Body.Len()), gzipOutBytes.GetValueUint64()-outBefore, "streaming out must count the compressed bytes")
 }
 
+// A response gzhttp passes through untouched has no ratio to report: counting
+// it would add the same bytes to both counters and pull out/in towards 1.
+func TestGzipMetricsSkipUncompressedResponses(t *testing.T) {
+	body := bytes.Repeat([]byte("erigon "), 1024) // > minGzipBodySize
+
+	for _, tc := range []struct {
+		name   string
+		accept string
+		body   []byte
+	}{
+		{"client does not accept gzip", "", body},
+		{"body under the minimum size", "gzip", body[:minGzipBodySize-1]},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			inBefore, outBefore := gzipInBytes.GetValueUint64(), gzipOutBytes.GetValueUint64()
+
+			req := httptest.NewRequest(http.MethodPost, "/", nil)
+			if tc.accept != "" {
+				req.Header.Set("Accept-Encoding", tc.accept)
+			}
+			rec := httptest.NewRecorder()
+			newGzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write(tc.body)
+			})).ServeHTTP(rec, req)
+
+			require.NotEqual(t, "gzip", rec.Header().Get("Content-Encoding"))
+			require.Equal(t, tc.body, rec.Body.Bytes(), "the body must reach the client verbatim")
+			assert.Zero(t, gzipInBytes.GetValueUint64()-inBefore, "in must not count a body nothing compressed")
+			assert.Zero(t, gzipOutBytes.GetValueUint64()-outBefore, "out must not count a body nothing compressed")
+		})
+	}
+}
+
 // With --http.compression=false the stack must not wrap the handler at all:
 // no Content-Encoding, verbatim body, working Flush, and a status written by
 // an inner handler must survive (the removed streaming hook once risked

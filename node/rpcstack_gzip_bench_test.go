@@ -440,6 +440,10 @@ func BenchmarkGzipOneShotThroughput(b *testing.B) {
 	}
 }
 
+// stepsPerTracedTxn is how many trace steps the benchmark puts between flushes,
+// standing in for a transaction: debug_trace* flushes at every txn boundary.
+const stepsPerTracedTxn = 250
+
 // BenchmarkGzipStreamingThroughput drives the streaming path the way
 // debug_trace* does: a jsonstream writing through the gzip middleware. It
 // varies the jsoniter buffer, which is InitialBufferSize=4096 in production
@@ -460,15 +464,8 @@ func BenchmarkGzipStreamingThroughput(b *testing.B) {
 					for i := range stackWords {
 						stackWords[i] = fmt.Sprintf("0x%064x", i*2654435761)
 					}
-					var wrote atomic.Int64
 					inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 						w.Header().Set("Content-Type", "application/json")
-						// Production enters streaming mode via the gzip hook before
-						// the first write; Flush is that same entry point.
-						if f, ok := w.(http.Flusher); ok {
-							f.Flush()
-						}
-
 						st := jsoniter.NewStream(jsoniter.ConfigDefault, w, bufSize)
 						stream := jsonstream.Wrap(st)
 						stream.WriteArrayStart()
@@ -486,10 +483,15 @@ func BenchmarkGzipStreamingThroughput(b *testing.B) {
 							stream.WriteObjectField("stack")
 							stream.WriteString(stackWords[i%len(stackWords)])
 							stream.WriteObjectEnd()
+							// A traced txn ends by flushing (rpc/jsonrpc/tracing.go),
+							// so the middleware sees a run of writes rather than one
+							// whole body handed over at the end.
+							if (i+1)%stepsPerTracedTxn == 0 {
+								stream.Flush() //nolint:errcheck
+							}
 						}
 						stream.WriteArrayEnd()
 						stream.Flush() //nolint:errcheck
-						wrote.Add(int64(st.Buffered()))
 					})
 					var handler http.Handler = inner
 					if gz {
