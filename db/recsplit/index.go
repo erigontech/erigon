@@ -76,7 +76,6 @@ var IncompatibleErr = errors.New("incompatible. can re-build such files by comma
 type Index struct {
 	offsetEf           *eliasfano32.EliasFano
 	f                  *os.File
-	mmapHandle2        *[mmap.MaxMapSize]byte // mmap handle for windows (this is used to close mmap)
 	filePath, fileName string
 
 	grData      []uint64
@@ -140,7 +139,7 @@ func OpenIndex(indexFilePath string) (_ *Index, err error) {
 	}
 	idx.size = stat.Size()
 	idx.modTime = stat.ModTime()
-	if idx.mmapHandle1, idx.mmapHandle2, err = mmap.Mmap(idx.f, int(idx.size)); err != nil {
+	if idx.mmapHandle1, err = mmap.Mmap(idx.f, int(idx.size)); err != nil {
 		return nil, err
 	}
 	idx.data = idx.mmapHandle1[:idx.size]
@@ -393,7 +392,7 @@ func (idx *Index) Close() {
 	if idx == nil || idx.f == nil {
 		return
 	}
-	if err := mmap.Munmap(idx.mmapHandle1, idx.mmapHandle2); err != nil {
+	if err := mmap.Munmap(idx.mmapHandle1); err != nil {
 		log.Log(dbg.FileCloseLogLevel, "unmap", "err", err, "file", idx.FileName(), "stack", dbg.Stack())
 	}
 	if err := idx.f.Close(); err != nil {

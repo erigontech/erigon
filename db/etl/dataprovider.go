@@ -40,11 +40,10 @@ type dataProvider interface {
 }
 
 type fileDataProvider struct {
-	file        *os.File
-	mmapReader  *mmapBytesReader       // zero-copy reader over mmap'd data
-	mmapData    []byte                 // mmap'd file content
-	mmapHandle2 *[mmap.MaxMapSize]byte // pointer handle for cleanup
-	wg          *errgroup.Group
+	file       *os.File
+	mmapReader *mmapBytesReader // zero-copy reader over mmap'd data
+	mmapData   []byte           // mmap'd file content
+	wg         *errgroup.Group
 }
 
 // mmapBytesReader tracks position for reading from mmap'd data
@@ -144,7 +143,7 @@ func (p *fileDataProvider) initMmap() error {
 	if fi.Size() == 0 {
 		return io.EOF
 	}
-	p.mmapData, p.mmapHandle2, err = mmap.Mmap(p.file, int(fi.Size()))
+	p.mmapData, err = mmap.Mmap(p.file, int(fi.Size()))
 	if err != nil {
 		return fmt.Errorf("mmap failed: %w", err)
 	}
@@ -197,9 +196,8 @@ func (p *fileDataProvider) Dispose() {
 	p.Wait()
 
 	if p.mmapData != nil {
-		_ = mmap.Munmap(p.mmapData, p.mmapHandle2)
+		_ = mmap.Munmap(p.mmapData)
 		p.mmapData = nil
-		p.mmapHandle2 = nil
 		p.mmapReader = nil
 	}
 

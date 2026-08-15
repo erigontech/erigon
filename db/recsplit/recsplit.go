@@ -889,11 +889,11 @@ func (rs *RecSplit) buildOffsetEf() (retErr error) {
 	}
 
 	mmapSize := int(rs.keysAdded * 8)
-	mmapHandle1, mmapHandle2, err := mmap.Mmap(rs.offsetFile, mmapSize)
+	mmapHandle1, err := mmap.Mmap(rs.offsetFile, mmapSize)
 	if err != nil {
 		return fmt.Errorf("mmap offset file: %w", err)
 	}
-	defer mmap.Munmap(mmapHandle1, mmapHandle2)
+	defer mmap.Munmap(mmapHandle1)
 
 	data := mmapHandle1[:mmapSize]
 	for i := uint64(0); i < rs.keysAdded; i++ {

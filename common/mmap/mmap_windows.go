@@ -23,31 +23,27 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-const MaxMapSize = 0xFFFFFFFFFFFF
-
-func Mmap(f *os.File, size int) ([]byte, *[MaxMapSize]byte, error) {
+func Mmap(f *os.File, size int) ([]byte, error) {
 	// Open a file mapping handle.
-	sizelo := uint32(size >> 32)
-	sizehi := uint32(size) & 0xffffffff
-	h, errno := windows.CreateFileMapping(windows.Handle(f.Fd()), nil, windows.PAGE_READONLY, sizelo, sizehi, nil)
+	maxSizeHigh := uint32(size >> 32)
+	maxSizeLow := uint32(size) & 0xffffffff
+	h, errno := windows.CreateFileMapping(windows.Handle(f.Fd()), nil, windows.PAGE_READONLY, maxSizeHigh, maxSizeLow, nil)
 	if h == 0 {
-		return nil, nil, os.NewSyscallError("CreateFileMapping", errno)
+		return nil, os.NewSyscallError("CreateFileMapping", errno)
 	}
 
-	// Create the memory map.
+	// Create the memory map. The view keeps the section alive, so the mapping
+	// handle is closed either way.
 	addr, errno := windows.MapViewOfFile(h, windows.FILE_MAP_READ, 0, 0, uintptr(size))
 	if addr == 0 {
-		return nil, nil, os.NewSyscallError("MapViewOfFile", errno)
+		_ = windows.CloseHandle(h)
+		return nil, os.NewSyscallError("MapViewOfFile", errno)
 	}
-
-	// Close mapping handle.
 	if err := windows.CloseHandle(h); err != nil {
-		return nil, nil, os.NewSyscallError("CloseHandle", err)
+		return nil, os.NewSyscallError("CloseHandle", err)
 	}
 
-	// Convert to a byte array.
-	mmapHandle2 := ((*[MaxMapSize]byte)(unsafe.Pointer(addr)))
-	return mmapHandle2[:size], mmapHandle2, nil
+	return unsafe.Slice((*byte)(unsafe.Pointer(addr)), size), nil
 }
 
 func MadviseSequential(mmapHandle1 []byte) error { return nil }
@@ -55,12 +51,14 @@ func MadviseNormal(mmapHandle1 []byte) error     { return nil }
 func MadviseWillNeed(mmapHandle1 []byte) error   { return nil }
 func MadviseRandom(mmapHandle1 []byte) error     { return nil }
 
-func Munmap(_ []byte, mmapHandle2 *[MaxMapSize]byte) error {
-	if mmapHandle2 == nil {
+// Munmap accepts only the slice returned by Mmap: UnmapViewOfFile needs the
+// base address of the view, which a re-slice no longer carries.
+func Munmap(m []byte) error {
+	if len(m) == 0 {
 		return nil
 	}
 
-	addr := (uintptr)(unsafe.Pointer(&mmapHandle2[0]))
+	addr := uintptr(unsafe.Pointer(&m[0]))
 	if err := windows.UnmapViewOfFile(addr); err != nil {
 		return os.NewSyscallError("UnmapViewOfFile", err)
 	}

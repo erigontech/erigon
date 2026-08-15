@@ -168,7 +168,6 @@ func (e ErrCompressedFileCorrupted) Is(err error) bool {
 // Decompressor provides access to the superstrings in a file produced by a compressor
 type Decompressor struct {
 	f                   *os.File
-	mmapHandle2         *[mmap.MaxMapSize]byte // mmap handle for windows (this is used to close mmap)
 	dict                *patternTable
 	posDict             *posTable
 	patArena            *patternArena // arena keeping all pattern table allocations alive
@@ -249,7 +248,7 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 	}
 
 	d.modTime = stat.ModTime()
-	if d.mmapHandle1, d.mmapHandle2, err = mmap.Mmap(d.f, int(d.size)); err != nil {
+	if d.mmapHandle1, err = mmap.Mmap(d.f, int(d.size)); err != nil {
 		return nil, err
 	}
 	// read patterns from file
@@ -578,7 +577,7 @@ func (d *Decompressor) Close() {
 		rb.stop() // join the refresh goroutine before munmap so no mincore touches freed memory
 		d.residency.Store(nil)
 	}
-	if err := mmap.Munmap(d.mmapHandle1, d.mmapHandle2); err != nil {
+	if err := mmap.Munmap(d.mmapHandle1); err != nil {
 		log.Log(dbg.FileCloseLogLevel, "unmap", "err", err, "file", d.FileName(), "stack", dbg.Stack())
 	}
 	if err := d.f.Close(); err != nil {
@@ -681,7 +680,6 @@ func (d *Decompressor) MadvWillNeed() *Decompressor {
 type SequentialView struct {
 	d           *Decompressor
 	mmapHandle1 []byte
-	mmapHandle2 *[mmap.MaxMapSize]byte
 	data        []byte // words data region from the sequential mmap
 }
 
@@ -694,7 +692,7 @@ func (d *Decompressor) OpenSequentialView(separateReadahead bool) (*SequentialVi
 	if !separateReadahead {
 		return &SequentialView{d: d, data: d.data[d.wordsStart:]}, nil
 	}
-	h1, h2, err := mmap.Mmap(d.f, int(d.size))
+	h1, err := mmap.Mmap(d.f, int(d.size))
 	if err != nil {
 		return nil, err
 	}
@@ -709,7 +707,7 @@ func (d *Decompressor) OpenSequentialView(separateReadahead bool) (*SequentialVi
 	headerSize := d.size - int64(len(d.data))
 	wordsFileOffset := headerSize + int64(d.wordsStart)
 	return &SequentialView{
-		d: d, mmapHandle1: h1, mmapHandle2: h2,
+		d: d, mmapHandle1: h1,
 		data: h1[wordsFileOffset:d.size],
 	}, nil
 }
@@ -736,7 +734,7 @@ func (v *SequentialView) Close() {
 	if v == nil || v.mmapHandle1 == nil {
 		return
 	}
-	_ = mmap.Munmap(v.mmapHandle1, v.mmapHandle2)
+	_ = mmap.Munmap(v.mmapHandle1)
 	v.mmapHandle1 = nil
 	v.data = nil
 }

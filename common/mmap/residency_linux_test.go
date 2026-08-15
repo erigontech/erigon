@@ -49,9 +49,9 @@ func TestResidencyProbe(t *testing.T) {
 	require.NoError(t, f.Sync())
 	require.NoError(t, unix.Fadvise(int(f.Fd()), 0, int64(len(data)), unix.FADV_DONTNEED))
 
-	m, h2, err := Mmap(f, len(data))
+	m, err := Mmap(f, len(data))
 	require.NoError(t, err)
-	defer Munmap(m, h2)
+	defer Munmap(m)
 
 	res, err := Resident(m)
 	require.NoError(t, err)
