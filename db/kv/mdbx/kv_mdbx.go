@@ -99,7 +99,7 @@ func New(label kv.Label, log log.Logger) MdbxOpts {
 		bucketsCfg: WithChaindataTables,
 		flags:      mdbx.NoReadahead | mdbx.Durable,
 		log:        log,
-		pageSize:   DefaultPageSize(),
+		pageSize:   defaultPageSize(),
 
 		mapSize:         DefaultMapSize,
 		growthStep:      DefaultGrowthStep,
@@ -289,7 +289,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 		//   - after they will require rwtx-lock, which is not acceptable in ACCEDEE mode.
 		pageSize := opts.pageSize
 		if pageSize == 0 {
-			pageSize = DefaultPageSize()
+			pageSize = defaultPageSize()
 		}
 		var dirtySpace uint64
 		if opts.dirtySpace > 0 {
