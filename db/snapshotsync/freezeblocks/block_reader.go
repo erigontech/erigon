@@ -539,7 +539,7 @@ func (r *BlockReader) view(tx kv.Getter) *blocksnapshots.View {
 	}
 	v := p.BlockFilesRoTx()
 	if v == nil {
-		panic(fmt.Sprintf("block reads require a pinned block-files view, but %T has none: the DB was opened without block snapshots", tx))
+		panic(fmt.Sprintf("block reads require a pinned block-files view, but %T has none: the tx is already closed, or the DB was opened without block snapshots", tx))
 	}
 	return v
 }
@@ -563,24 +563,20 @@ func (r *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHei
 
 	maxBlockNumInFiles := r.FrozenBlocksInView(tx)
 	if blockHeight == 0 || maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
-		if tx != nil {
-			blockHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
-			if err != nil {
-				return nil, err
-			}
-			// if no canonical marker - still can try read from files
-			if blockHash != emptyHash {
-				h = rawdb.ReadHeader(tx, blockHash, blockHeight)
-				if h != nil {
-					return h, nil
-				} else if dbgLogs {
-					log.Info(dbgPrefix + "not found in db")
-				}
+		blockHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
+		if err != nil {
+			return nil, err
+		}
+		// if no canonical marker - still can try read from files
+		if blockHash != emptyHash {
+			h = rawdb.ReadHeader(tx, blockHash, blockHeight)
+			if h != nil {
+				return h, nil
 			} else if dbgLogs {
-				log.Info(dbgPrefix + "canonical hash is empty")
+				log.Info(dbgPrefix + "not found in db")
 			}
 		} else if dbgLogs {
-			log.Info(dbgPrefix + "tx is nil")
+			log.Info(dbgPrefix + "canonical hash is empty")
 		}
 		return nil, nil
 	}
@@ -726,12 +722,6 @@ func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, ha
 
 	maxBlockNumInFiles := r.FrozenBlocksInView(tx)
 	if blockHeight == 0 || maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
-		if tx == nil {
-			if dbgLogs {
-				log.Info(dbgPrefix + "RoTx is nil")
-			}
-			return nil, nil
-		}
 		body, err = rawdb.ReadBodyWithTransactions(tx, hash, blockHeight)
 		if err != nil {
 			return nil, err
@@ -770,7 +760,7 @@ func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, ha
 	txnSeg, ok := r.viewSingleFile(tx, snaptype2.Transactions, blockHeight)
 	if !ok {
 		if dbgLogs {
-			log.Info(dbgPrefix+"no transactions file for this block num", "r.sn.BlocksAvailable()", r.sn.BlocksAvailable(), "r.sn.idxMax", r.sn.IndicesMax(), "r.sn.segmetntsMax", r.sn.SegmentsMax())
+			log.Info(dbgPrefix+"no transactions file for this block num", "blocksAvailableInView", maxBlockNumInFiles, "r.sn.BlocksAvailable()", r.sn.BlocksAvailable(), "r.sn.idxMax", r.sn.IndicesMax(), "r.sn.segmetntsMax", r.sn.SegmentsMax())
 		}
 		return nil, nil
 	}
@@ -809,9 +799,6 @@ func (r *BlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash common.Has
 func (r *BlockReader) Body(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, txCount uint32, err error) {
 	maxBlockNumInFiles := r.FrozenBlocksInView(tx)
 	if blockHeight == 0 || maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
-		if tx == nil {
-			return nil, 0, nil
-		}
 		body, _, txCount = rawdb.ReadBody(tx, hash, blockHeight)
 		return body, txCount, nil
 	}
@@ -867,12 +854,6 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 
 	maxBlockNumInFiles := r.FrozenBlocksInView(tx)
 	if blockHeight == 0 || maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
-		if tx == nil {
-			if dbgLogs {
-				log.Info(dbgPrefix + "RoTx is nil")
-			}
-			return nil, nil, nil
-		}
 		if forceCanonical {
 			canonicalHash, ok, err := r.CanonicalHash(ctx, tx, blockHeight)
 			if err != nil {
@@ -952,7 +933,7 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 	if txCount != 0 {
 		txnSeg, ok := r.viewSingleFile(tx, snaptype2.Transactions, blockHeight)
 		if !ok {
-			err = fmt.Errorf("no transactions snapshot file for blockNum=%d, BlocksAvailable=%d", blockHeight, r.sn.BlocksAvailable())
+			err = fmt.Errorf("no transactions snapshot file for blockNum=%d, BlocksAvailableInView=%d", blockHeight, maxBlockNumInFiles)
 			return nil, nil, err
 		}
 		txs, senders, err = r.txsFromSnapshot(baseTxnId, txCount, txnSeg, buf)
@@ -1425,6 +1406,9 @@ func (r *BlockReader) CurrentBlock(tx kv.Tx) (*types.Block, error) {
 	headNumber, err := r.HeaderNumber(context.Background(), tx, headHash)
 	if err != nil {
 		return nil, fmt.Errorf("failed HeaderNumber: %w", err)
+	}
+	if headNumber == nil {
+		return nil, nil
 	}
 	block, _, err := r.blockWithSenders(context.Background(), tx, headHash, *headNumber, true)
 	return block, err
