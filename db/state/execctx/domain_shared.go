@@ -296,11 +296,10 @@ type SharedDomains struct {
 	// swap+compute+restore window, so a later unwind reads stale prev-values.
 	changesetMu sync.Mutex
 
-	// branchCache is the aggregator-scope commitment-branch cache. It sits
-	// behind sd.mem and sd.parent.mem in the read chain (consulted only after
-	// both miss, before the aggTx files/MDBX read), so writers' in-flight
-	// bytes always mask the cache and cross-SD pollution is impossible.
-	// Nil for snapshot-isolated readers and test AggTx implementations without a provider.
+	// branchCache is the aggregator-scoped commitment branch cache consulted
+	// after local and parent memory. Its entries are not bound to a transaction
+	// view, so snapshot-isolated readers must disable it. It is nil when disabled
+	// or when the transaction does not provide a cache.
 	branchCache *commitment.BranchCache
 
 	// collector is the process-level KV-read metrics collector (aggregator

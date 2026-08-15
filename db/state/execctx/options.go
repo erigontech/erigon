@@ -40,7 +40,8 @@ func WithoutDeferredBranchUpdates() SharedDomainOption {
 	return func(o *sharedDomainOptions) { o.trieCfg.DeferBranchUpdates = false }
 }
 
-// WithoutSharedBranchCache keeps commitment reads within the transaction snapshot.
+// WithoutSharedBranchCache disables all use of the aggregator-scoped commitment
+// branch cache, including its adaptive pin controller.
 func WithoutSharedBranchCache() SharedDomainOption {
 	return func(o *sharedDomainOptions) { o.useSharedBranchCache = false }
 }

@@ -782,7 +782,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		it.Close()
 	}
 
-	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates(), execctx.WithoutSharedBranchCache(), execctx.WithSequentialCommitment())
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
 	if err != nil {
 		return nil, err
 	}
