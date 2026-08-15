@@ -264,7 +264,7 @@ func retryConnects(ctx context.Context, op func(context.Context) error) error {
 	// up; on deadline expiry, report the last dial error it discarded. Compared
 	// by identity so a permanent error that merely wraps DeadlineExceeded (from
 	// backoff.Permanent) is left intact.
-	if lastDialErr != nil && errors.Is(err, context.DeadlineExceeded) {
+	if lastDialErr != nil && err == context.DeadlineExceeded { //nolint:errorlint // intentional bare sentinel check
 		return lastDialErr
 	}
 	return err
