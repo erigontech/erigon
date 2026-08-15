@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
@@ -1156,4 +1157,61 @@ func lastBalanceChange(ac *types.AccountChanges) *types.BalanceChange {
 		}
 	}
 	return last
+}
+
+// TestParallelBeaconRootReadRace reproduces a non-deterministic parallel-exec
+// consensus failure: the EIP-4788 block-init syscall (TxIndex -1) writes the
+// beacon-root ring-buffer slots for this block; a same-block user tx that reads
+// those slots must observe the block-init write, not the previous block's
+// committed value. When the read races ahead of the block-init write and the
+// stale base read is not caught, the tx consumes different gas and the block
+// gets a wrong trie root -> INSERT returns non-VALID. Each block's txs query the
+// current block's own timestamp so they read exactly the slots block-init wrote.
+func TestParallelBeaconRootReadRace(t *testing.T) {
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlError)
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
+	// Run pre-Amsterdam (no BAL) to match the failing eest forks (Cancun/Prague/
+	// Osaka), where the versionMap is not BAL-pre-populated.
+	genesis.Config.AmsterdamTime = nil
+
+	const nSenders = 8
+	senderKeys := make([]*ecdsa.PrivateKey, nSenders)
+	funds := new(big.Int).Exp(big.NewInt(10), big.NewInt(22), nil)
+	for i := range senderKeys {
+		senderKeys[i], err = crypto.GenerateKey()
+		require.NoError(t, err)
+		genesis.Alloc[crypto.PubkeyToAddress(senderKeys[i].PublicKey)] = types.GenesisAccount{Balance: funds}
+	}
+
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger: logger, DataDir: t.TempDir(), Genesis: genesis, CoinbaseKey: coinbaseKey,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, eat.Close()) })
+
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		chainID := eat.ChainId()
+		beaconAddr := common.HexToAddress("0x000F3df6D732807Ef1319fB7B8bB8522d0Beac02")
+		bound := bind.NewBoundContract(beaconAddr, abi.ABI{}, eat.ContractBackend, eat.ContractBackend, eat.ContractBackend)
+
+		const nBlocks = 80
+		ts := uint64(1_700_000_000)
+		for b := range nBlocks {
+			ts += 12
+			calldata := make([]byte, 32)
+			binary.BigEndian.PutUint64(calldata[24:], ts)
+			for _, sk := range senderKeys {
+				auth, err := bind.NewKeyedTransactorWithChainID(sk, chainID)
+				require.NoError(t, err)
+				auth.GasLimit = 100_000
+				auth.GasPrice = big.NewInt(5_000_000_000)
+				_, err = bound.RawTransact(auth, calldata)
+				require.NoError(t, err)
+			}
+			_, err := eat.MockCl.BuildCanonicalBlock(ctx, engineapitester.WithTimestamp(ts))
+			require.NoErrorf(t, err, "block %d (ts %d) failed to build/validate", b, ts)
+		}
+	})
 }

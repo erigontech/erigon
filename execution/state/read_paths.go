@@ -507,11 +507,16 @@ reread:
 					hdr.Version.TxIndex, hdr.Version.Incarnation,
 					addr, AccountKey{path, key})
 			}
-			s.versionedReads.SetHeader(addr, path, key, hdr)
-			if s.waitCommit != nil && s.waitCommit(hdr.Version.TxIndex) {
-				goto reread
+			// A newer committed writer appeared since this key's prior read. Fall
+			// through to outcomeMapDone, recording the value read this iteration
+			// (mapStorageVal, the committed value) at the new version. Advancing only
+			// the recorded version via SetHeader and re-reading is wrong: it leaves the
+			// cached value stale, and the reread re-hits the read-once cache (versions
+			// now match) and returns that stale value — which validation, checking only
+			// the version, then accepts.
+			if s.waitCommit != nil {
+				s.waitCommit(hdr.Version.TxIndex)
 			}
-			// Shutdown / no pause hook: fall through to return the current value.
 		}
 		// CodePath trumped by SelfDestruct at >= DepIdx
 		if path == CodePath {
