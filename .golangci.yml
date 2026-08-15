@@ -20,10 +20,10 @@ linters:
     - makezero
     - errchkjson
     - noctx
+    - unused
   disable:
     - testifylint
     - errorlint #TODO: enable me
-    - unused #TODO: enable me
     - contextcheck
     - err113
     - exhaustive
