@@ -26,7 +26,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snaptype"
@@ -137,7 +137,7 @@ func TestBlockNumberUsesTxBlockView(t *testing.T) {
 	defer snapshots.Close()
 	require.NoError(t, snapshots.OpenFolder())
 
-	memTx, err := memdb.NewTestDB(t, dbcfg.ChainDB).BeginRo(t.Context())
+	memTx, err := mdbxtest.NewTestDB(t, dbcfg.ChainDB).BeginRo(t.Context())
 	require.NoError(t, err)
 	t.Cleanup(memTx.Rollback)
 
@@ -156,6 +156,37 @@ func TestBlockNumberUsesTxBlockView(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, ok, "bodies integrated after the view was pinned must be invisible to the tx")
 	require.Zero(t, blockNum)
+}
+
+// The tip a reader may ask for must come from the same generation it reads from:
+// FrozenBlocks counts segments the tx's view cannot resolve.
+func TestFrozenBlocksInViewUsesTxBlockView(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	cfg := ethconfig.Defaults.Snapshot
+	cfg.ChainName = networkname.Mainnet
+	snapshots := blocksnapshots.NewRoSnapshots(cfg, dir, logger)
+	defer snapshots.Close()
+
+	ver := version.V1_0
+	for _, typ := range snaptype2.BlockSnapshotTypes {
+		createTestSegmentFile(t, 0, testMergeLimit, typ.Enum(), dir, ver, logger)
+	}
+	require.NoError(t, snapshots.OpenFolder())
+
+	blockReader := NewBlockReader(snapshots, nil)
+
+	tx := blockFilesTxStub{view: snapshots.View()}
+	defer tx.view.Close()
+
+	for _, typ := range snaptype2.BlockSnapshotTypes {
+		createTestSegmentFile(t, testMergeLimit, 2*testMergeLimit, typ.Enum(), dir, ver, logger)
+	}
+	require.NoError(t, snapshots.OpenFolder())
+
+	require.Equal(t, uint64(2*testMergeLimit-1), blockReader.FrozenBlocks())
+	require.Equal(t, uint64(testMergeLimit-1), blockReader.FrozenBlocksInView(tx),
+		"segments integrated after the view was pinned must not raise the tx's tip")
 }
 
 // The minimal/full-node step: expire old transaction segments (handing their files to the

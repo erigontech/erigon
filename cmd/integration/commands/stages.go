@@ -1211,11 +1211,8 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*blocksna
 // which only a tx pinning a block-files view may do.
 func logSnapshotStats(ctx context.Context, db kv.TemporalRoDB, blockSnaps *blocksnapshots.RoSnapshots, borSnaps *heimdall.RoSnapshots, logger log.Logger) {
 	txNums := freezeblocks.NewBlockReader(blockSnaps, borSnaps).TxnumReader()
-	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	_ = db.View(ctx, func(tx kv.Tx) error {
-		ac := agg.BeginFilesRo()
-		defer ac.Close()
-		stats.LogStats(ac, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
+		stats.LogStats(dbstate.AggTx(tx), tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
 			histBlockNumProgress, _, err := txNums.FindBlockNum(ctx, tx, endTxNumMinimax)
 			if err != nil {
 				return histBlockNumProgress, fmt.Errorf("findBlockNum(%d) fails: %w", endTxNumMinimax, err)

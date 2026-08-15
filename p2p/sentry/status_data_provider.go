@@ -241,14 +241,17 @@ func ReadChainHead(ctx context.Context, db kv.RoDB, minimumBlock uint64) (ChainH
 
 // readChainHeadFromSnapshots attempts to construct a ChainHead from snapshot data.
 func (s *StatusDataProvider) readChainHeadFromSnapshots(ctx context.Context, tx kv.Tx, minimumBlock uint64) (ChainHead, error) {
-	latest := s.blockReader.FrozenBlocks()
+	latest := s.blockReader.FrozenBlocksInView(tx)
 	if latest == 0 {
 		return ChainHead{}, ErrNoSnapshots
 	}
 
 	header, err := s.blockReader.HeaderByNumber(ctx, tx, latest)
-	if err != nil || header == nil {
+	if err != nil {
 		return ChainHead{}, fmt.Errorf("failed reading snapshot header %d: %w", latest, err)
+	}
+	if header == nil {
+		return ChainHead{}, fmt.Errorf("%w: snapshot header %d not found", ErrNoSnapshots, latest)
 	}
 
 	return ChainHead{

@@ -213,6 +213,7 @@ func (r *memBlockReader) BadHeaderNumber(ctx context.Context, tx kv.Getter, hash
 // --- misc / freezing ---
 
 func (r *memBlockReader) FrozenBlocks() uint64                      { return 0 }
+func (r *memBlockReader) FrozenBlocksInView(tx kv.Getter) uint64    { return 0 }
 func (r *memBlockReader) FrozenBorBlocks(align bool) uint64         { return 0 }
 func (r *memBlockReader) FreezingCfg() ethconfig.BlocksFreezing     { return ethconfig.BlocksFreezing{} }
 func (r *memBlockReader) CanPruneTo(currentBlockInDB uint64) uint64 { return 0 }

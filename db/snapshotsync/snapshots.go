@@ -1030,14 +1030,18 @@ func (s *BaseRoSnapshots) idxAvailability() uint64 {
 	//   4. user can manually remove all .idx files of given type: `rm snapshots/*type1*.idx`
 	//   5. file-types may have different height: 10 headers, 10 bodies, 9 transactions (for example if `kill -9` came during files building/merge). still need index all 3 types.
 
+	return s.idxAvailabilityOf(s.visible.Load())
+}
+
+func (s *BaseRoSnapshots) idxAvailabilityOf(visible *snapshotVisible) uint64 {
 	if len(s.enums) == 0 {
 		return 0
 	}
 
 	var maxIdx uint64
-	visible := s.visible.Load().segments[s.enums[0]]
-	if len(visible) > 0 {
-		maxIdx = visible[len(visible)-1].to - 1
+	segments := visible.segments[s.enums[0]]
+	if len(segments) > 0 {
+		maxIdx = segments[len(segments)-1].to - 1
 	}
 
 	return maxIdx
@@ -1849,6 +1853,16 @@ func (s *BaseRoSnapshots) ViewSingleFile(t snaptype.Type, blockNum uint64) (segm
 
 func (v *View) Segments(t snaptype.Type) VisibleSegments {
 	return v.segments[t.Enum()]
+}
+
+// BlocksAvailable is BaseRoSnapshots.BlocksAvailable for the generation this view pins,
+// which can be behind the live one.
+func (v *View) BlocksAvailable() uint64 {
+	if v == nil || v.s == nil {
+		return 0
+	}
+
+	return v.s.idxAvailabilityOf(v.snapshotVisible)
 }
 
 func (v *View) Segment(t snaptype.Type, blockNum uint64) (*VisibleSegment, bool) {

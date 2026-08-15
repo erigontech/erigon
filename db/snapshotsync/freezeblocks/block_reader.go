@@ -142,6 +142,7 @@ func (r *RemoteBlockReader) Snapshots() dbservices.BlockSnapshots    { panic("no
 func (r *RemoteBlockReader) BorSnapshots() dbservices.BlockSnapshots { panic("not implemented") }
 func (r *RemoteBlockReader) AllTypes() []snaptype.Type               { panic("not implemented") }
 func (r *RemoteBlockReader) FrozenBlocks() uint64                    { panic("not supported") }
+func (r *RemoteBlockReader) FrozenBlocksInView(tx kv.Getter) uint64  { panic("not supported") }
 func (r *RemoteBlockReader) FrozenBorBlocks(align bool) uint64       { panic("not supported") }
 func (r *RemoteBlockReader) FreezingCfg() ethconfig.BlocksFreezing   { panic("not supported") }
 
@@ -429,6 +430,10 @@ func (r *BlockReader) AllTypes() []snaptype.Type {
 }
 
 func (r *BlockReader) FrozenBlocks() uint64 { return r.sn.BlocksAvailable() }
+
+// FrozenBlocksInView is FrozenBlocks as seen by tx: a caller that then reads the block
+// must ask the same generation it reads from, not the live set that may be ahead of it.
+func (r *BlockReader) FrozenBlocksInView(tx kv.Getter) uint64 { return r.view(tx).BlocksAvailable() }
 
 func (r *BlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Tx) (uint64, error) {
 	if r.FrozenBlocks() > 0 {
