@@ -587,6 +587,33 @@ func (vm *VersionMap) AccountLifecycle(addr accounts.Address, txIdx int) (destro
 	return true, destroyedAt, false
 }
 
+// netAbsentDestruct reports whether a lower tx left addr net-ABSENT via a
+// create+self-destruct (EIP-6780): a self-destruct cell (committed or in-flight)
+// with no revival above it — no live re-create (AddressPath cell) and no field
+// write (Balance/Nonce/CodeHash) above the destruct. Such an account was absent
+// and empty both at the pre-block base and after the lower tx, so a base read of
+// it (absent AddressPath, empty/zero property) is not stale and must not be
+// invalidated by the create/destruct cross-checks. Returns false when there is no
+// destruct or the account was revived; those keep the normal cross-checks, so a
+// live re-create or an incarnation bump still invalidates a stale base read.
+func (vm *VersionMap) netAbsentDestruct(addr accounts.Address, txIndex int) bool {
+	destructed, sdRR, ok := vm.ReadSelfDestruct(addr, txIndex)
+	if !ok || !destructed || (sdRR.Status() != MVReadResultDone && sdRR.Status() != MVReadResultDependency) {
+		return false
+	}
+	destructTxIndex := sdRR.DepIdx()
+	revivalLimit := txIndex - 1
+	if hi, ok := vm.LatestTxIndex(addr, AddressPath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
+		return false
+	}
+	for _, p := range [...]AccountPath{BalancePath, NoncePath, CodeHashPath} {
+		if hi, ok := vm.LatestTxIndex(addr, p, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
+			return false
+		}
+	}
+	return true
+}
+
 // AnyDoneSelfDestructEquals reports whether any Done SelfDestruct write at
 // TxIdx ≤ txIdxLimit has value == target. Detects a prior in-block
 // SelfDestructPath=true write that a later revival flipped back to false
@@ -1098,12 +1125,16 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 		} else if source != StorageRead {
 			valid = VersionInvalid
 		} else {
-			if valid = checkVersion(version, version); valid == VersionValid {
+			if valid = checkVersion(version, version); valid == VersionValid &&
+				path != SelfDestructPath && !vm.netAbsentDestruct(addr, txIndex) {
 				// Cross-validate any account property read against AddressPath
 				// and SelfDestructPath.  A prior tx may have created or
 				// self-destructed the account, invalidating storage reads of
 				// any property (code, storage slots, balance, nonce, etc.).
-				if path != AddressPath && path != SelfDestructPath {
+				// Skipped for a net-absent create+self-destruct (netAbsentDestruct):
+				// the account was absent/empty both at base and after, so the base
+				// read is not stale — invalidating it livelocked a same-block reader.
+				if path != AddressPath {
 					if valid = vm.validateReadImpl(txIndex, addr, AddressPath, accounts.StorageKey{}, source,
 						version, vm.ReadStatus(addr, AddressPath, accounts.StorageKey{}, txIndex), nil, checkVersion, traceInvalid, tracePrefix, true); valid == VersionValid {
 						valid = vm.validateReadImpl(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
@@ -1112,7 +1143,7 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 						vm.validateReadImpl(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
 							version, vm.ReadStatus(addr, SelfDestructPath, accounts.StorageKey{}, txIndex), nil, checkVersion, traceInvalid, tracePrefix, true)
 					}
-				} else if path == AddressPath {
+				} else {
 					valid = vm.validateReadImpl(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
 						version, vm.ReadStatus(addr, SelfDestructPath, accounts.StorageKey{}, txIndex), nil, checkVersion, traceInvalid, tracePrefix, true)
 
