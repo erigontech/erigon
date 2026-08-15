@@ -643,17 +643,18 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 
 // modexpBigIntFaster reports whether math/big beats evmone for these operand
 // widths. math/big only takes its windowed Montgomery path once the exponent
-// exceeds one word, and from there it wins on 512-bit and wider moduli; on its
-// plain square-and-multiply path it needs a 1024-bit modulus to catch up.
+// exceeds one word, so the modulus width at which it overtakes evmone differs
+// sharply either side of that. Both widths are per-target: math/big's inner loop
+// is hand-written assembly, so where it wins depends on the target's assembly.
 func modexpBigIntFaster(exp []byte, modLen uint64) bool {
 	const wordBytes = bits.UintSize / 8 // a math/big Word, so the bound tracks the platform
-	if modLen <= 32 {
+	if modLen < min(modexpBigIntMinModLenWideExp, modexpBigIntMinModLenNarrowExp) {
 		return false
 	}
 	if len(exp) > wordBytes && bitutil.TestBytes(exp[:len(exp)-wordBytes]) {
-		return modLen >= 64
+		return modLen >= modexpBigIntMinModLenWideExp
 	}
-	return modLen >= 128
+	return modLen >= modexpBigIntMinModLenNarrowExp
 }
 
 // modexpU256Applicable reports whether modexpU256 may be used for these operands,

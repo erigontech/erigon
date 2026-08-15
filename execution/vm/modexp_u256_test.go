@@ -5,6 +5,7 @@ package vm
 
 import (
 	"bytes"
+	"fmt"
 	"math/big"
 	"math/rand"
 	"testing"
@@ -172,6 +173,9 @@ type benchModexpCase struct {
 	base, exp, mod []byte
 }
 
+// benchModexpCases sweeps the routing inputs: modulus width, exponent width
+// either side of the one-word boundary, and modulus parity. Parity is part of
+// the sweep because an even modulus takes a different path in every backend.
 func benchModexpCases() []benchModexpCase {
 	rng := rand.New(rand.NewSource(7))
 	fill := func(n int) []byte {
@@ -187,36 +191,52 @@ func benchModexpCases() []benchModexpCase {
 		v.FillBytes(b)
 		return b
 	}
-	base32, base1024 := fill(32), fill(1024)
-	mod256, mod512, mod1024, mod2048 := fill(32), fill(64), fill(128), fill(256)
-	mod256[31] |= 1
-	mod512[63] |= 1
-	mod1024[127] |= 1
-	mod2048[255] |= 1
-	exp3 := []byte{3}
-	exp65537 := []byte{0x01, 0x00, 0x01}
-	exp64, exp256, exp512, exp2048, exp8192 := fill(8), fill(32), fill(64), fill(256), fill(1024)
-
-	return []benchModexpCase{
-		{"mod256/exp65537", base32, exp65537, mod256},
-		{"mod256/exp64bit", base32, exp64, mod256},
-		{"mod256/exp256bit", base32, exp256, mod256},
-		{"mod256/exp512bit", base32, exp512, mod256},
-		{"mod256/exp2048bit", base32, exp2048, mod256},
-		{"mod256/exp8192bit", base32, exp8192, mod256},
-		{"mod2^192/exp64bit", base32, exp64, widthIn(32, 193)},
-		{"mod128bit/exp64bit", base32, exp64, widthIn(32, 128)},
-		{"mod64bit/exp64bit", base32, exp64, widthIn(32, 64)},
-		{"base1024/mod256/exp65537", base1024, exp65537, mod256},
-		{"mod512/exp65537", base32, exp65537, mod512},
-		{"mod512/exp256bit", base32, exp256, mod512},
-		{"mod1024/exp65537", base32, exp65537, mod1024},
-		{"mod1024/exp256bit", base32, exp256, mod1024},
-		{"mod2048/exp3", base32, exp3, mod2048},
-		{"mod2048/exp256bit", base32, exp256, mod2048},
-		{"mod2048/exp65537", base32, exp65537, mod2048},
-		{"mod2048/exp2048bit", base32, exp2048, mod2048},
+	setParity := func(mod []byte, odd bool) []byte {
+		m := bytes.Clone(mod)
+		if odd {
+			m[len(m)-1] |= 1
+		} else {
+			m[len(m)-1] &^= 1
+		}
+		return m
 	}
+	base32, base1024 := fill(32), fill(1024)
+	mod256, mod512, mod768 := fill(32), fill(64), fill(96)
+	mod1024, mod1536, mod2048 := fill(128), fill(192), fill(256)
+	exp65537, exp64 := []byte{0x01, 0x00, 0x01}, fill(8)
+	exps := []struct {
+		name string
+		b    []byte
+	}{
+		{"exp65537", exp65537},
+		{"exp64bit", exp64},
+		{"exp256bit", fill(32)},
+		{"exp2048bit", fill(256)},
+	}
+
+	var cases []benchModexpCase
+	for _, mod := range [][]byte{mod256, mod512, mod768, mod1024, mod1536, mod2048} {
+		for _, odd := range []bool{true, false} {
+			parity := "odd"
+			if !odd {
+				parity = "even"
+			}
+			for _, e := range exps {
+				cases = append(cases, benchModexpCase{
+					name: fmt.Sprintf("mod%d%s/%s", len(mod)*8, parity, e.name),
+					base: base32, exp: e.b, mod: setParity(mod, odd),
+				})
+			}
+		}
+	}
+	oddMod256 := setParity(mod256, true)
+	return append(cases,
+		benchModexpCase{"mod256odd/exp8192bit", base32, fill(1024), oddMod256},
+		benchModexpCase{"mod2^192/exp64bit", base32, exp64, widthIn(32, 193)},
+		benchModexpCase{"mod128bit/exp64bit", base32, exp64, widthIn(32, 128)},
+		benchModexpCase{"mod64bit/exp64bit", base32, exp64, widthIn(32, 64)},
+		benchModexpCase{"base1024/mod256odd/exp65537", base1024, exp65537, oddMod256},
+	)
 }
 
 // BenchmarkModexpBackends measures each MODEXP backend on the same operands, so
@@ -273,10 +293,14 @@ func BenchmarkModexpRouted(b *testing.B) {
 	}
 }
 
-// TestModexpBigIntFaster pins the measured math/big vs evmone boundary. math/big
-// only reaches its windowed Montgomery path above a one-word exponent, so the
-// modulus width at which it overtakes evmone differs sharply either side of that.
+// TestModexpBigIntFaster pins the exponent classification that picks the modulus
+// bound. math/big only reaches its windowed Montgomery path above a one-word
+// exponent, so the modulus width at which it overtakes evmone differs sharply
+// either side of that; the widths themselves are a per-target measurement.
 func TestModexpBigIntFaster(t *testing.T) {
+	if modexpBigIntMinModLenWideExp <= 32 || modexpBigIntMinModLenNarrowExp <= 32 {
+		t.Fatal("both bounds must stay above 32 bytes, or math/big shadows the uint256 route")
+	}
 	exp := func(n int) []byte {
 		b := make([]byte, n)
 		b[0] = 0xff
@@ -288,33 +312,30 @@ func TestModexpBigIntFaster(t *testing.T) {
 		return b
 	}
 	cases := []struct {
-		name   string
-		exp    []byte
-		modLen uint64
-		want   bool
+		name string
+		exp  []byte
+		wide bool
 	}{
-		{"256-bit modulus stays off math/big", exp(32), 32, false},
-		{"320-bit modulus, one-word exponent", exp(1), 40, false},
-		{"320-bit modulus, wide exponent", exp(16), 40, false},
-		{"512-bit modulus, one-word exponent", exp(8), 64, false},
-		{"512-bit modulus, wide exponent", exp(16), 64, true},
-		{"512-bit modulus, exponent just over one word", exp(9), 64, true},
-		{"512-bit modulus, one word in a padded field", padded(9), 64, false},
-		{"264-bit modulus, wide exponent", exp(16), 33, false},
-		{"504-bit modulus, wide exponent", exp(16), 63, false},
-		{"768-bit modulus, one-word exponent", exp(8), 96, false},
-		{"768-bit modulus, wide exponent", exp(32), 96, true},
-		{"1016-bit modulus, one-byte exponent", exp(1), 127, false},
-		{"1024-bit modulus, one-byte exponent", exp(1), 128, true},
-		{"1024-bit modulus, wide exponent", exp(32), 128, true},
-		{"2048-bit modulus, 65537", []byte{0x01, 0x00, 0x01}, 256, true},
-		{"8192-bit modulus, full exponent", exp(1024), 1024, true},
-		{"empty exponent, 512-bit modulus", nil, 64, false},
-		{"empty exponent, 1024-bit modulus", nil, 128, true},
+		{"empty exponent", nil, false},
+		{"one-byte exponent", exp(1), false},
+		{"65537", []byte{0x01, 0x00, 0x01}, false},
+		{"one-word exponent", exp(8), false},
+		{"one word in a padded field", padded(9), false},
+		{"one word in a 1024-byte field", padded(1024), false},
+		{"exponent just over one word", exp(9), true},
+		{"two-word exponent", exp(16), true},
+		{"full-length exponent", exp(1024), true},
 	}
 	for _, c := range cases {
-		if got := modexpBigIntFaster(c.exp, c.modLen); got != c.want {
-			t.Errorf("%s: modexpBigIntFaster = %v, want %v", c.name, got, c.want)
+		bound := uint64(modexpBigIntMinModLenNarrowExp)
+		if c.wide {
+			bound = modexpBigIntMinModLenWideExp
+		}
+		for _, modLen := range []uint64{1, 32, 33, 40, 63, 64, 65, 96, 127, 128, 129, 192, 256, 1024} {
+			want := modLen >= bound
+			if got := modexpBigIntFaster(c.exp, modLen); got != want {
+				t.Errorf("%s, %d-byte modulus: modexpBigIntFaster = %v, want %v", c.name, modLen, got, want)
+			}
 		}
 	}
 }
