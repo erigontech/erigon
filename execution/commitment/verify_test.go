@@ -15,7 +15,6 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// newAccountCell returns a cell loaded with the given account data at addr.
 func newAccountCell(addr common.Address, acc *accounts.Account) *cell {
 	c := new(cell)
 	copy(c.accountAddr[:], addr[:])
@@ -28,8 +27,6 @@ func newAccountCell(addr common.Address, acc *accounts.Account) *cell {
 	return c
 }
 
-// addStorageToCell loads the given storage slot and value into the cell, making it a
-// singleton account+storage cell when account data is already present.
 func addStorageToCell(c *cell, addr common.Address, loc common.Hash, val []byte) {
 	copy(c.storageAddr[:length.Addr], addr[:])
 	copy(c.storageAddr[length.Addr:], loc[:])
@@ -40,8 +37,6 @@ func addStorageToCell(c *cell, addr common.Address, loc common.Hash, val []byte)
 	c.loaded |= cellLoadStorage
 }
 
-// encodeCellToBranch computes the cell hash at the given depth (memoizing its stateHash) and
-// encodes the cell as a single-child branch at the given nibble.
 func encodeCellToBranch(t *testing.T, hph *HexPatriciaHashed, c *cell, depth int16, nibble int) BranchData {
 	t.Helper()
 
@@ -71,8 +66,6 @@ func TestVerifyBranchHashes_RoundTrip(t *testing.T) {
 	}
 	c := newAccountCell(addr, &acc)
 
-	// Hash the account key to get the hashed extension.
-	// In production, root branch is folded at depth=1 (branchKey has 0 nibbles, depth = 0+1).
 	keccak := keccak.NewFastKeccak()
 	depth := int16(1)
 	hashBuf := make([]byte, length.Hash)
@@ -81,7 +74,6 @@ func TestVerifyBranchHashes_RoundTrip(t *testing.T) {
 
 	branchData := encodeCellToBranch(t, hph, c, depth, int(c.hashedExtension[0]))
 
-	// Root branch: empty compacted path
 	branchKey := nibbles.HexToCompact(nil)
 
 	accountValues := map[string][]byte{
@@ -92,9 +84,8 @@ func TestVerifyBranchHashes_RoundTrip(t *testing.T) {
 	err := VerifyBranchHashes(branchKey, branchData, accountValues, storageValues)
 	require.NoError(t, err)
 
-	// Now corrupt the value and verify mismatch
 	corruptedAcc := accounts.Account{
-		Nonce:    43, // different nonce
+		Nonce:    43,
 		Balance:  *uint256.NewInt(1000000),
 		CodeHash: accounts.EmptyCodeHash,
 	}
@@ -112,7 +103,6 @@ func TestVerifyBranchHashes_Singleton(t *testing.T) {
 
 	hph := NewHexPatriciaHashed(length.Addr, nil, DefaultTrieConfig())
 
-	// Singleton cell with BOTH account and storage data at depth=2.
 	addr := common.HexToAddress("0x4c888535841acbe0709b0758083f61d375bc02b4")
 	loc := common.HexToHash("0x1df4f91929e18fda9e6f82e54e748e81e79e4bbd6fe34cdcba843ee8d63e8c4f")
 	acc := accounts.Account{
@@ -127,22 +117,18 @@ func TestVerifyBranchHashes_Singleton(t *testing.T) {
 	keccak := keccak.NewFastKeccak()
 	depth := int16(2)
 
-	// First hash storage key (offset 0 since depth < 64)
 	hashBuf := make([]byte, length.Hash)
 	require.NoError(t, c.hashStorageKey(keccak, length.Addr, 0, 0, hashBuf))
 	c.hashedExtension[64] = terminatorHexByte
 
-	// The nibble is determined by the hashed account key at depth=2
 	require.NoError(t, c.hashAccKey(keccak, depth, hashBuf))
 	nibble := int(c.hashedExtension[0])
 
-	// hashAccKey overwrote the storage path in hashedExtension; restore it before hashing the cell
 	require.NoError(t, c.hashStorageKey(keccak, length.Addr, 0, 0, hashBuf))
 	c.hashedExtension[64] = terminatorHexByte
 
 	branchData := encodeCellToBranch(t, hph, c, depth, nibble)
 
-	// branchKey for depth=2: 1 nibble of the hashed account key path
 	require.NoError(t, c.hashAccKey(keccak, 0, hashBuf))
 	branchKey := nibbles.HexToCompact([]byte{c.hashedExtension[0]})
 
@@ -157,8 +143,6 @@ func TestVerifyBranchHashes_Singleton(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// TestVerifyBranchHashes_SingletonDepth1 tests singleton at depth=1 (root branch).
-// In production, the root branch is folded at depth=1 (branchKey has 0 nibbles).
 func TestVerifyBranchHashes_SingletonDepth1(t *testing.T) {
 	t.Parallel()
 
@@ -190,7 +174,6 @@ func TestVerifyBranchHashes_SingletonDepth1(t *testing.T) {
 
 	branchData := encodeCellToBranch(t, hph, c, depth, nibble)
 
-	// branchKey for root branch: empty path (0 nibbles → depth = 0 + 1 = 1)
 	branchKey := nibbles.HexToCompact(nil)
 
 	accountValues := map[string][]byte{
@@ -209,14 +192,12 @@ func TestVerifyBranchHashes_Storage(t *testing.T) {
 
 	hph := NewHexPatriciaHashed(length.Addr, nil, DefaultTrieConfig())
 
-	// Pure storage cell (depth >= 64).
 	addr := common.HexToAddress("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	loc := common.HexToHash("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
 	storageVal := []byte{0x01, 0x02, 0x03}
 	c := new(cell)
 	addStorageToCell(c, addr, loc, storageVal)
 
-	// Hash the storage key (depth=65 means non-singleton storage-only cell)
 	keccak := keccak.NewFastKeccak()
 	depth := int16(65)
 	hashedKeyOffset := depth - 64
@@ -226,14 +207,12 @@ func TestVerifyBranchHashes_Storage(t *testing.T) {
 
 	branchData := encodeCellToBranch(t, hph, c, depth, int(c.hashedExtension[0]))
 
-	// branchKey for depth=65: 64 nibbles (hash of the account address), matching the
-	// production storage branch at currentKeyLen=64.
 	keccak.Reset()
 	keccak.Write(addr[:])
 	var hashBuf2 [32]byte
 	keccak.Read(hashBuf2[:])
 	var nib [64]byte
-	for i := 0; i < 32; i++ {
+	for i := range 32 {
 		nib[i*2] = hashBuf2[i] >> 4
 		nib[i*2+1] = hashBuf2[i] & 0x0f
 	}
@@ -362,7 +341,7 @@ func TestVerifyParallel_AllShapes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			plainKeys, updates := generateBatch(tc.shape, tc.n, tc.seed)
-			root := assertEquivalentRootWorkers(t, plainKeys, updates, 4)
+			root := requireRootParity(t, plainKeys, updates, 4)
 			require.NotEmpty(t, root, "root hash must be non-empty for shape %s", tc.name)
 		})
 	}
@@ -386,11 +365,10 @@ func TestVerifyParallel_RandomBatches(t *testing.T) {
 		}
 		seed := rnd.Int63()
 		plainKeys, updates := generateBatch(shape, n, seed)
-		_ = assertEquivalentRootWorkers(t, plainKeys, updates, 4)
+		_ = requireRootParity(t, plainKeys, updates, 4)
 	}
 }
 
-// Run: go test -fuzz=FuzzParallelEquivalence -fuzztime=60s ./execution/commitment/
 func FuzzParallelEquivalence(f *testing.F) {
 	f.Add(uint16(8), uint8(0), int64(0xA1))
 	f.Add(uint16(32), uint8(0), int64(0xA2))
@@ -406,6 +384,6 @@ func FuzzParallelEquivalence(f *testing.F) {
 		}
 		shape := randomBatchShape(int(shapeByte) % 5)
 		plainKeys, updates := generateBatch(shape, int(keysCount), seed)
-		_ = assertEquivalentRootWorkers(t, plainKeys, updates, 2)
+		_ = requireRootParity(t, plainKeys, updates, 2)
 	})
 }

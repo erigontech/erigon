@@ -23,9 +23,7 @@ import (
 	"math/rand"
 	"runtime"
 	"slices"
-	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
@@ -56,7 +54,6 @@ func runDirectBench(b *testing.B, pk [][]byte, updates []Update) {
 func runParallelBench(b *testing.B, pk [][]byte, updates []Update, workers int) {
 	ctx := context.Background()
 	b.ReportAllocs()
-	// pph is reused across iterations so the worker pool amortizes.
 	var pph *ParallelPatriciaHashed
 	defer func() {
 		if pph != nil {
@@ -72,7 +69,6 @@ func runParallelBench(b *testing.B, pk [][]byte, updates []Update, workers int) 
 			pph = NewParallelPatriciaHashed(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
 			pph.SetNumWorkers(workers)
 		} else {
-			// Rewire MockState without Reset()/Release(), which would drop the worker pool.
 			pph.SetTrieContextFactory(mockTrieCtxFactory(ms))
 			pph.ResetContext(ms)
 		}
@@ -149,22 +145,12 @@ func Benchmark_Commitment_DirectVsParallel(b *testing.B) {
 	})
 }
 
-// Accounts are pinned to distinct top nibbles so their sub-tries don't share branches.
 func buildClusteredStorageCorpus(b testing.TB, numAccounts, slotsPerAccount int) ([][]byte, []Update) {
 	b.Helper()
 	rnd := rand.New(rand.NewSource(99001))
 	ub := NewUpdateBuilder()
-	for i := 0; i < numAccounts; i++ {
-		addr := findAddressForNibble(i%16, i)
-		ah := hex.EncodeToString(addr)
-		ub.Balance(ah, rnd.Uint64())
-		for range slotsPerAccount {
-			loc := make([]byte, length.Hash)
-			rnd.Read(loc)
-			val := make([]byte, 32)
-			rnd.Read(val)
-			ub.Storage(ah, hex.EncodeToString(loc), hex.EncodeToString(val))
-		}
+	for i := range numAccounts {
+		addNibbleAccount(ub, rnd, i%16, i, slotsPerAccount)
 	}
 	return ub.Build()
 }
@@ -193,7 +179,6 @@ type storageGroup struct {
 	updates []Update
 }
 
-// Splits one whale account's slots into disjoint, independently processable sub-tries.
 func buildWhaleStorageGroups(slots, groups int) []storageGroup {
 	rnd := rand.New(rand.NewSource(919273))
 	addr := make([]byte, length.Addr)
@@ -205,12 +190,8 @@ func buildWhaleStorageGroups(slots, groups int) []storageGroup {
 		ubs[i] = NewUpdateBuilder()
 		ubs[i].Balance(a, rnd.Uint64()+1)
 	}
-	for i := 0; i < slots; i++ {
-		loc := make([]byte, length.Hash)
-		rnd.Read(loc)
-		val := make([]byte, 32)
-		rnd.Read(val)
-		ubs[i%groups].Storage(a, hex.EncodeToString(loc), hex.EncodeToString(val))
+	for i := range slots {
+		addRandomSlot(ubs[i%groups], rnd, a)
 	}
 
 	out := make([]storageGroup, groups)
@@ -226,7 +207,6 @@ type groupRun struct {
 	upds *Updates
 }
 
-// Must run on the test goroutine (uses require); each group gets its own MockState so concurrent process() shares no state.
 func setupGroup(tb testing.TB, g storageGroup) groupRun {
 	ms := NewMockState(tb)
 	require.NoError(tb, ms.applyPlainUpdates(g.pk, g.updates))
@@ -235,7 +215,7 @@ func setupGroup(tb testing.TB, g storageGroup) groupRun {
 	return groupRun{hph: hph, upds: upds}
 }
 
-// process is safe to call from any goroutine (no require/FailNow).
+// Returns err, not require: FailNow is unsafe off the test goroutine.
 func (r groupRun) process() error {
 	_, err := r.hph.Process(context.Background(), r.upds, "", nil, WarmupConfig{})
 	return err
@@ -293,7 +273,6 @@ func Benchmark_StorageConcurrency(b *testing.B) {
 						b.StartTimer()
 						var eg errgroup.Group
 						for _, r := range rs {
-							r := r
 							eg.Go(r.process)
 						}
 						require.NoError(b, eg.Wait())
@@ -304,92 +283,6 @@ func Benchmark_StorageConcurrency(b *testing.B) {
 				})
 			}
 		})
-	}
-}
-
-// Keeps burnCPU's result observable so the compiler cannot elide the synthetic work.
-var benchCPUSink atomic.Uint64
-
-// Synthetic per-touch CPU cost standing in for block execution.
-func burnCPU(iters int) {
-	var x uint64 = 1469598103934665603
-	for i := range iters {
-		x = (x ^ uint64(i)) * 1099511628211
-	}
-	benchCPUSink.Add(x)
-}
-
-func streamingBenchCorpora() []struct {
-	name string
-	pk   [][]byte
-	upds []Update
-} {
-	wk, wu := buildWhaleCorpus(bigAccountWhale(40_000))
-	mk, mu := buildMixedCorpus(99, 20_000)
-	return []struct {
-		name string
-		pk   [][]byte
-		upds []Update
-	}{
-		{"whale", wk, wu},
-		{"mixed", mk, mu},
-	}
-}
-
-// scheduler=true overlaps folds with the per-touch CPU burn; false defers all folds to Process.
-func runStreamingOverlapBench(b *testing.B, pk [][]byte, upds []Update, cpuIters int, scheduler bool) {
-	ctx := context.Background()
-	b.ReportAllocs()
-	var (
-		totalProcess time.Duration
-		totalRefold  uint64
-		iters        int
-	)
-	for b.Loop() {
-		b.StopTimer()
-		ms := NewMockState(b)
-		ms.SetConcurrentCommitment(true)
-		require.NoError(b, ms.applyPlainUpdates(pk, upds))
-		sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
-		sc.SetNumWorkers(runtime.NumCPU())
-		if scheduler {
-			require.NoError(b, sc.StartScheduler(ctx))
-		}
-		b.StartTimer()
-
-		for _, k := range pk {
-			burnCPU(cpuIters)
-			sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
-		}
-		procStart := time.Now()
-		_, err := sc.Process(ctx)
-		procDur := time.Since(procStart)
-
-		b.StopTimer()
-		require.NoError(b, err)
-		totalProcess += procDur
-		totalRefold += sc.RefoldCount()
-		iters++
-		sc.Release()
-		b.StartTimer()
-	}
-	if iters > 0 {
-		b.ReportMetric(float64(totalProcess.Nanoseconds())/float64(iters), "process-ns/op")
-		b.ReportMetric(float64(totalRefold)/float64(iters), "refolds/op")
-	}
-}
-
-// Mechanism sanity-check with synthetic CPU cost; numbers are not a performance claim.
-func Benchmark_StreamingOverlap(b *testing.B) {
-	for _, c := range streamingBenchCorpora() {
-		for _, cpu := range []int{0, 500, 5000} {
-			b.Run(fmt.Sprintf("%s/cpu=%d/overlap", c.name, cpu), func(b *testing.B) {
-				runStreamingOverlapBench(b, c.pk, c.upds, cpu, true)
-			})
-			b.Run(fmt.Sprintf("%s/cpu=%d/batch", c.name, cpu), func(b *testing.B) {
-				runStreamingOverlapBench(b, c.pk, c.upds, cpu, false)
-			})
-		}
 	}
 }
 

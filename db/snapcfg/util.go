@@ -121,8 +121,39 @@ type Preverified struct {
 	Items PreverifiedItems
 }
 
+// keepNewest stores item under key unless an entry with an equal or newer version is already there.
+func keepNewest(best *btree.Map[string, PreverifiedItem], kept *btree.Map[string, snaptype.Version], key string, item PreverifiedItem, v snaptype.Version) {
+	if current, ok := kept.Get(key); ok && !current.Less(v) {
+		return
+	}
+	best.Set(key, item)
+	kept.Set(key, v)
+}
+
+const maxLoggedDroppedNames = 16
+
+// droppedNames returns the names in all that kept no longer contains, capped at
+// limit, along with the total dropped count.
+func droppedNames(all, kept []PreverifiedItem, limit int) (names []string, dropped int) {
+	keptNames := make(map[string]struct{}, len(kept))
+	for _, item := range kept {
+		keptNames[item.Name] = struct{}{}
+	}
+	for _, item := range all {
+		if _, ok := keptNames[item.Name]; ok {
+			continue
+		}
+		dropped++
+		if len(names) < limit {
+			names = append(names, item.Name)
+		}
+	}
+	return names, dropped
+}
+
 func (p Preverified) Typed(types []snaptype.Type) Preverified {
 	var bestVersions btree.Map[string, PreverifiedItem]
+	var keptVersions btree.Map[string, snaptype.Version]
 
 	for _, p := range p.Items {
 		if strings.HasPrefix(p.Name, "salt") && strings.HasSuffix(p.Name, "txt") {
@@ -140,7 +171,18 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 		}
 
 		if strings.HasPrefix(p.Name, "caplin") {
-			bestVersions.Set(p.Name, p)
+			caplinVersion, err := ver.ParseVersion(strings.TrimPrefix(v, "caplin/"))
+			if err != nil {
+				continue
+			}
+			// Caplin state files borrow their versions from BeaconBlocks, and an .idx
+			// carries its .seg's data version: the loader derives the accessor path by
+			// swapping only the extension, so both go through the one data window.
+			versions := snaptype.BeaconBlocks.Versions()
+			if caplinVersion.Less(versions.MinSupported) || versions.Current.Less(caplinVersion) {
+				continue
+			}
+			keepNewest(&bestVersions, &keptVersions, "caplin/"+name, p, caplinVersion)
 			continue
 		}
 
@@ -210,16 +252,7 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 			continue
 		}
 
-		if current, ok := bestVersions.Get(name); ok {
-			v, _, _ := strings.Cut(current.Name, "-")
-			cv, _ := ver.ParseVersion(v)
-
-			if cv.Less(version) {
-				bestVersions.Set(name, p)
-			}
-		} else {
-			bestVersions.Set(name, p)
-		}
+		keepNewest(&bestVersions, &keptVersions, name, p, version)
 	}
 
 	var versioned []PreverifiedItem
@@ -234,14 +267,9 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 		return strings.Compare(i.Name, j.Name)
 	})
 	if len(p.Items) != len(versioned) {
-		log.Root().Warn("Preverified list reduced after applying type filter", "from", len(p.Items), "to", len(versioned))
-		// for _, v := range p.Items {
-		// 	if !slices.ContainsFunc(versioned, func(item PreverifiedItem) bool {
-		// 		return item.Name == v.Name
-		// 	}) {
-		// 		log.Root().Warn("Preverified item removed by type filter", "name", v.Name)
-		// 	}
-		// }
+		names, dropped := droppedNames(p.Items, versioned, maxLoggedDroppedNames)
+		log.Root().Warn("Preverified list reduced after applying type filter",
+			"from", len(p.Items), "to", len(versioned), "dropped", dropped, "names", strings.Join(names, ","))
 	} else {
 		log.Root().Debug("Preverified list has same len after applying type filter", "len", len(p.Items))
 	}
@@ -458,12 +486,12 @@ func KnownCfgOrDevnet(networkName string) *Cfg {
 // from erigon-snapshot/webseed, which used to ship one one-key TOML file per
 // chain; the only consumers want the URL list, so the TOML wrapper was dropped.
 var EmbeddedWebseeds = map[string][]string{
-	networkname.Mainnet:  {"v1:https://erigon34-v1-snapshots-mainnet.erigon.network"},
-	networkname.Sepolia:  {"v1:https://erigon34-v1-snapshots-sepolia.erigon.network"},
-	networkname.Gnosis:   {"v1:https://erigon34-v1-snapshots-gnosis.erigon.network"},
-	networkname.Chiado:   {"v1:https://erigon34-v1-snapshots-chiado.erigon.network"},
-	networkname.Hoodi:    {"v1:https://erigon34-v1-snapshots-hoodi.erigon.network"},
-	networkname.Bloatnet: {"v1:https://erigon34-v1-snapshots-bloatnet.erigon.network"},
+	networkname.Mainnet:  {"v1:https://erigon36-v1-snapshots-mainnet.erigon.network"},
+	networkname.Sepolia:  {"v1:https://erigon36-v1-snapshots-sepolia.erigon.network"},
+	networkname.Gnosis:   {"v1:https://erigon36-v1-snapshots-gnosis.erigon.network"},
+	networkname.Chiado:   {"v1:https://erigon36-v1-snapshots-chiado.erigon.network"},
+	networkname.Hoodi:    {"v1:https://erigon36-v1-snapshots-hoodi.erigon.network"},
+	networkname.Bloatnet: {"v1:https://erigon36-v1-snapshots-bloatnet.erigon.network"},
 }
 
 // GetEmbeddedWebseeds returns the webseed URLs for a single chain.

@@ -208,7 +208,7 @@ func (t *ValidationRulesTracer) isAssociatedStorage(slot accounts.StorageKey, ad
 	hash := keccak.NewFastKeccak()
 	result := make([]byte, 32)
 
-	for x := 0; x < 50; x++ {
+	for x := range 50 {
 		buf[51] = byte(x)
 
 		hash.Reset()

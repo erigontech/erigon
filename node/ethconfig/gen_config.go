@@ -57,9 +57,9 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		AllowAA                             bool
 		FcuTimeout                          time.Duration
 		FcuBackgroundPrune                  bool
-		FcuBackgroundCommit                 bool
 		MCPAddress                          string
 		ErigondbDomainStepsInFrozenFile     *uint64 `toml:",omitempty"`
+		CommitmentPlainValues               *bool   `toml:",omitempty"`
 		WarmupKzgCtxOnInit                  bool
 	}
 	var enc Config
@@ -97,9 +97,9 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.AllowAA = c.AllowAA
 	enc.FcuTimeout = c.FcuTimeout
 	enc.FcuBackgroundPrune = c.FcuBackgroundPrune
-	enc.FcuBackgroundCommit = c.FcuBackgroundCommit
 	enc.MCPAddress = c.MCPAddress
 	enc.ErigondbDomainStepsInFrozenFile = c.ErigondbDomainStepsInFrozenFile
+	enc.CommitmentPlainValues = c.CommitmentPlainValues
 	enc.WarmupKzgCtxOnInit = c.WarmupKzgCtxOnInit
 	return &enc, nil
 }
@@ -141,9 +141,9 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		AllowAA                             *bool
 		FcuTimeout                          *time.Duration
 		FcuBackgroundPrune                  *bool
-		FcuBackgroundCommit                 *bool
 		MCPAddress                          *string
 		ErigondbDomainStepsInFrozenFile     *uint64 `toml:",omitempty"`
+		CommitmentPlainValues               *bool   `toml:",omitempty"`
 		WarmupKzgCtxOnInit                  *bool
 	}
 	var dec Config
@@ -252,14 +252,14 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	if dec.FcuBackgroundPrune != nil {
 		c.FcuBackgroundPrune = *dec.FcuBackgroundPrune
 	}
-	if dec.FcuBackgroundCommit != nil {
-		c.FcuBackgroundCommit = *dec.FcuBackgroundCommit
-	}
 	if dec.MCPAddress != nil {
 		c.MCPAddress = *dec.MCPAddress
 	}
 	if dec.ErigondbDomainStepsInFrozenFile != nil {
 		c.ErigondbDomainStepsInFrozenFile = dec.ErigondbDomainStepsInFrozenFile
+	}
+	if dec.CommitmentPlainValues != nil {
+		c.CommitmentPlainValues = dec.CommitmentPlainValues
 	}
 	if dec.WarmupKzgCtxOnInit != nil {
 		c.WarmupKzgCtxOnInit = *dec.WarmupKzgCtxOnInit

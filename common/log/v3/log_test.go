@@ -581,17 +581,18 @@ func TestCallerStackHandler(t *testing.T) {
 		t.Fatalf("Wrong context value type, got %T expected string", r.Ctx[1])
 	}
 
-	exp := "["
+	var exp strings.Builder
+	exp.WriteString("[")
 	for i, line := range lines {
 		if i > 0 {
-			exp += " "
+			exp.WriteString(" ")
 		}
-		exp += fmt.Sprint(file, ":", line)
+		exp.WriteString(fmt.Sprint(file, ":", line))
 	}
-	exp += "]"
+	exp.WriteString("]")
 
-	if s != exp {
-		t.Fatalf("Wrong context value, got %s expected string matching %s", s, exp)
+	if s != exp.String() {
+		t.Fatalf("Wrong context value, got %s expected string matching %s", s, exp.String())
 	}
 }
 
@@ -616,14 +617,12 @@ func TestConcurrent(t *testing.T) {
 	var res [goroutines]int
 	l.SetHandler(SyncHandler(concurrentCaptureTestHandler{res: res[:], ctxLen: ctxLen}))
 	var wg sync.WaitGroup
-	wg.Add(goroutines)
-	for i := 0; i < goroutines; i++ {
-		go func(idx int) {
-			defer wg.Done()
-			for j := 0; j < 10000; j++ {
+	for idx := range goroutines {
+		wg.Go(func() {
+			for range 10000 {
 				l.Info("test message", "goroutine_idx", idx)
 			}
-		}(i)
+		})
 	}
 	wg.Wait()
 	for _, val := range res[:] {

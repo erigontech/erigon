@@ -1,10 +1,11 @@
 package commitment
 
 import (
+	"cmp"
 	"encoding/csv"
 	"fmt"
 	"os"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,27 +24,26 @@ type CsvMetrics interface {
 }
 
 type Metrics struct {
-	Accounts        *AccountMetrics
-	Branches        *BranchMetrics
-	updates         atomic.Uint64
-	addressKeys     atomic.Uint64
-	storageKeys     atomic.Uint64
-	loadBranch      atomic.Uint64
-	loadAccount     atomic.Uint64
-	loadStorage     atomic.Uint64
-	cacheBranch     atomic.Uint64
-	cacheAccount    atomic.Uint64
-	cacheStorage    atomic.Uint64
-	missBranch      atomic.Uint64
-	missAccount     atomic.Uint64
-	missStorage     atomic.Uint64
-	updateBranch    atomic.Uint64
-	loadDepths      [10]uint64
-	unfolds         atomic.Uint64
-	spentUnfolding  atomic.Int64
-	spentFolding    atomic.Int64
-	spentProcessing atomic.Int64
-	// metric config related
+	Accounts                 *AccountMetrics
+	Branches                 *BranchMetrics
+	updates                  atomic.Uint64
+	addressKeys              atomic.Uint64
+	storageKeys              atomic.Uint64
+	loadBranch               atomic.Uint64
+	loadAccount              atomic.Uint64
+	loadStorage              atomic.Uint64
+	cacheBranch              atomic.Uint64
+	cacheAccount             atomic.Uint64
+	cacheStorage             atomic.Uint64
+	missBranch               atomic.Uint64
+	missAccount              atomic.Uint64
+	missStorage              atomic.Uint64
+	updateBranch             atomic.Uint64
+	loadDepths               [10]uint64
+	unfolds                  atomic.Uint64
+	spentUnfolding           atomic.Int64
+	spentFolding             atomic.Int64
+	spentProcessing          atomic.Int64
 	metricsFilePrefix        string
 	collectCommitmentMetrics bool
 	writeCommitmentMetrics   bool
@@ -85,9 +85,6 @@ func (m MetricValues) RUnlock() {
 	}
 }
 
-// NewMetrics creates a new Metrics instance. If csvPrefix is non-empty, CSV metrics
-// are enabled with that prefix. Otherwise, falls back to the
-// ERIGON_COMMITMENT_CSV_METRICS_FILE_PATH_PREFIX environment variable.
 func NewMetrics(csvPrefix string) *Metrics {
 	metrics := &Metrics{
 		Accounts:                 NewAccounts(),
@@ -98,10 +95,6 @@ func NewMetrics(csvPrefix string) *Metrics {
 	return metrics
 }
 
-// SetCsvMetrics enables CSV metrics for filePathPrefix, falling back to the
-// ERIGON_COMMITMENT_CSV_METRICS_FILE_PATH_PREFIX env var when it is empty. An
-// empty prefix with no env var disables CSV metrics, so a pooled Metrics reused
-// without a prefix does not keep writing to a stale file.
 var csvMetricsEnvPrefix = sync.OnceValue(func() string {
 	return dbg.EnvString("ERIGON_COMMITMENT_CSV_METRICS_FILE_PATH_PREFIX", "")
 })
@@ -270,12 +263,20 @@ func UnmarshallMetricsCsv(filePath string) ([]*Metrics, error) {
 			col++
 			for k := range 5 {
 				depthsPair := row[col]
-				depthsSplit := strings.Split(depthsPair, "/")
-				if len(depthsSplit) != 2 {
+				left, right, ok := strings.Cut(depthsPair, "/")
+				if !ok || strings.Contains(right, "/") {
 					return nil, fmt.Errorf("invalid depths pair: %s", depthsPair)
 				}
-				current.loadDepths[k*2] = mustParseUintCsvCell(depthsSplit, 0, filePath)
-				current.loadDepths[k*2+1] = mustParseUintCsvCell(depthsSplit, 1, filePath)
+				leftVal, err := strconv.ParseUint(left, 10, 64)
+				if err != nil {
+					panic(fmt.Errorf("parsing %q cell at column 0 in %s: %w", left, filePath, err))
+				}
+				rightVal, err := strconv.ParseUint(right, 10, 64)
+				if err != nil {
+					panic(fmt.Errorf("parsing %q cell at column 1 in %s: %w", right, filePath, err))
+				}
+				current.loadDepths[k*2] = leftVal
+				current.loadDepths[k*2+1] = rightVal
 				col++
 			}
 			current.unfolds.Store(mustParseUintCsvCell(row, col, filePath))
@@ -326,12 +327,9 @@ func (m *Metrics) CollectFileDepthStats(endTxNumStats map[uint64]skipStat) {
 	for k := range endTxNumStats {
 		ends = append(ends, k)
 	}
-	// sort by file endTxNum
-	sort.Slice(ends, func(i, j int) bool { return ends[i] > ends[j] })
+	slices.SortFunc(ends, func(a, b uint64) int { return cmp.Compare(b, a) })
 	for i := 0; i < 5 && i < len(ends); i++ {
-		// get stats for specific file depth
 		v := endTxNumStats[ends[i]]
-		// write level i file stats - account and storage loads
 		m.loadDepths[i*2], m.loadDepths[i*2+1] = v.accLoaded, v.storLoaded
 	}
 }
@@ -429,10 +427,8 @@ type AccountStats struct {
 }
 
 type AccountMetrics struct {
-	m sync.RWMutex
-	// will be separate value for each key in parallel processing
-	AccountStats map[string]*AccountStats
-	// metric config related
+	m                      sync.RWMutex
+	AccountStats           map[string]*AccountStats
 	writeCommitmentMetrics bool
 }
 
@@ -474,7 +470,7 @@ func accountMetricsHeaders() []string {
 func (am *AccountMetrics) Values() [][]string {
 	am.m.Lock()
 	defer am.m.Unlock()
-	values := make([][]string, len(am.AccountStats)+1) // + 1 to add one empty line between "process" calls
+	values := make([][]string, len(am.AccountStats)+1)
 	headersLen := len(am.Headers())
 	var vi uint64
 	for addr, stat := range am.AccountStats {
@@ -554,10 +550,8 @@ func NewBranches() *BranchMetrics {
 }
 
 type BranchMetrics struct {
-	m sync.RWMutex
-	// will be separate value for each key in parallel processing
-	BranchStats map[string]*BranchStats
-	// metric config related
+	m                      sync.RWMutex
+	BranchStats            map[string]*BranchStats
 	writeCommitmentMetrics bool
 }
 
@@ -575,7 +569,7 @@ func branchMetricsHeaders() []string {
 func (bm *BranchMetrics) Values() [][]string {
 	bm.m.RLock()
 	defer bm.m.RUnlock()
-	values := make([][]string, len(bm.BranchStats)+1) // + 1 to add one empty line between "process" calls
+	values := make([][]string, len(bm.BranchStats)+1)
 	headersLen := len(bm.Headers())
 	var vi uint64
 	for branchKey, stat := range bm.BranchStats {
@@ -647,7 +641,6 @@ func UnmarshallBranchMetricsCsv(filePath string) ([]*BranchMetrics, error) {
 }
 
 func writeMetricsToCSV(metrics CsvMetrics, filePath string) (err error) {
-	// Open the file in append mode or create if it doesn't exist
 	file, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return err
@@ -659,11 +652,9 @@ func writeMetricsToCSV(metrics CsvMetrics, filePath string) (err error) {
 		}
 	}()
 
-	// Create a new writer
 	writer := csv.NewWriter(file)
 	defer writer.Flush()
 
-	// Optionally write header if file is empty
 	info, err := file.Stat()
 	if err != nil {
 		return err
@@ -673,7 +664,6 @@ func writeMetricsToCSV(metrics CsvMetrics, filePath string) (err error) {
 			return err
 		}
 	}
-	// Write the actual data
 	for _, value := range metrics.Values() {
 		if err := writer.Write(value); err != nil {
 			return err

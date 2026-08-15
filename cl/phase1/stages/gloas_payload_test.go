@@ -124,6 +124,19 @@ func TestValidateAnchorEnvelope(t *testing.T) {
 	}
 }
 
+func TestAnchorEnvelopeMatches(t *testing.T) {
+	_, _, _, env, anchorRoot := validAnchorEnvelopeFixture(t, 1)
+
+	require.True(t, anchorEnvelopeMatches(env, anchorRoot))
+
+	// Server finalized ahead of the local anchor: the HTTP endpoint returns a valid
+	// envelope for a newer block, which must be rejected so we fall back to a
+	// root-specific P2P request instead of failing anchor validation.
+	require.False(t, anchorEnvelopeMatches(env, common.HexToHash("0x99")))
+	require.False(t, anchorEnvelopeMatches(nil, anchorRoot))
+	require.False(t, anchorEnvelopeMatches(&cltypes.SignedExecutionPayloadEnvelope{}, anchorRoot))
+}
+
 func TestVerifyAnchorEnvelopeSignature(t *testing.T) {
 	_, st, bid, env, _ := validAnchorEnvelopeFixture(t, 2)
 	require.NoError(t, verifyAnchorEnvelopeSignature(st.BeaconConfig(), st, env, bid.Slot))
@@ -287,7 +300,7 @@ func validAnchorEnvelopeFixture(t *testing.T, builderIndex uint64) (*clparams.Be
 	parentHash := common.HexToHash("0x10")
 	prevRandao := common.HexToHash("0x13")
 	feeRecipient := common.HexToAddress("0x0000000000000000000000000000000000000014")
-	requests := cltypes.NewExecutionRequests(&cfg)
+	requests := cltypes.NewExecutionRequestsWithVersion(&cfg, clparams.GloasVersion)
 	requestsRoot, err := requests.HashSSZ()
 	require.NoError(t, err)
 	requestsHash := cltypes.ComputeExecutionRequestHash(cltypes.GetExecutionRequestsList(&cfg, requests))
@@ -392,11 +405,11 @@ func (t *testExecutionEngine) ForkChoiceUpdate(context.Context, common.Hash, com
 
 func (t *testExecutionEngine) SupportInsertion() bool { return t.supportInsertion }
 
-func (t *testExecutionEngine) InsertBlocks(context.Context, []*types.Block, [][]byte) error {
+func (t *testExecutionEngine) InsertBlocks(context.Context, []*types.Block) error {
 	return nil
 }
 
-func (t *testExecutionEngine) InsertBlock(context.Context, *types.Block, []byte) error { return nil }
+func (t *testExecutionEngine) InsertBlock(context.Context, *types.Block) error { return nil }
 
 func (t *testExecutionEngine) CurrentHeader(context.Context) (*types.Header, error) { return nil, nil }
 
@@ -426,6 +439,10 @@ func (t *testExecutionEngine) GetAssembledBlock(context.Context, []byte, clparam
 
 func (t *testExecutionEngine) GetBlobs(context.Context, []common.Hash, clparams.StateVersion) ([][]byte, [][][]byte, error) {
 	return nil, nil, nil
+}
+
+func (t *testExecutionEngine) GetClientVersionV1(context.Context, *engine_types.ClientVersionV1) ([]engine_types.ClientVersionV1, error) {
+	return nil, nil
 }
 
 var _ execution_client.ExecutionEngine = (*testExecutionEngine)(nil)

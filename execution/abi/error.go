@@ -46,18 +46,13 @@ type Error struct {
 func NewError(name string, inputs Arguments) Error {
 	names := make([]string, len(inputs))
 	types := make([]string, len(inputs))
-	for i, input := range inputs {
+	for i := range inputs {
+		input := &inputs[i]
 		if input.Name == "" {
-			inputs[i] = Argument{
-				Name:    fmt.Sprintf("arg%d", i),
-				Indexed: input.Indexed,
-				Type:    input.Type,
-			}
-		} else {
-			inputs[i] = input
+			input.Name = fmt.Sprintf("arg%d", i)
 		}
 		// string representation
-		names[i] = fmt.Sprintf("%v %v", input.Type, inputs[i].Name)
+		names[i] = fmt.Sprintf("%v %v", input.Type, input.Name)
 		if input.Indexed {
 			names[i] = fmt.Sprintf("%v indexed %v", input.Type, inputs[i].Name)
 		}
@@ -67,7 +62,7 @@ func NewError(name string, inputs Arguments) Error {
 
 	str := fmt.Sprintf("error %v(%v)", name, strings.Join(names, ", "))
 	sig := fmt.Sprintf("%v(%v)", name, strings.Join(types, ","))
-	id := common.BytesToHash(crypto.Keccak256([]byte(sig)))
+	id := crypto.Keccak256Hash([]byte(sig))
 
 	return Error{
 		Name:   name,
@@ -136,11 +131,12 @@ func typeCheck(t Type, value reflect.Value) error {
 	}
 
 	// Check base type validity. Element types will be checked later on.
-	if t.GetType().Kind() != value.Kind() {
+	switch {
+	case t.GetType().Kind() != value.Kind():
 		return typeErr(t.GetType().Kind(), value.Kind())
-	} else if t.T == FixedBytesTy && t.Size != value.Len() {
+	case t.T == FixedBytesTy && t.Size != value.Len():
 		return typeErr(t.GetType(), value.Type())
-	} else {
+	default:
 		return nil
 	}
 

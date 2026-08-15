@@ -20,13 +20,13 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
 // TraceAPI RPC interface into tracing API
@@ -42,7 +42,7 @@ type TraceAPI interface {
 	// Filtering (see ./trace_filtering.go)
 
 	Transaction(ctx context.Context, txHash common.Hash, gasBailOut *bool, traceConfig *config.TraceConfig) (ParityTraces, error)
-	Get(ctx context.Context, txHash common.Hash, txIndicies []hexutil.Uint64, gasBailOut *bool, traceConfig *config.TraceConfig) (*ParityTrace, error)
+	Get(ctx context.Context, txHash common.Hash, traceAddress []hexutil.Uint64, gasBailOut *bool, traceConfig *config.TraceConfig) (*ParityTrace, error)
 	Block(ctx context.Context, blockNr rpc.BlockNumber, gasBailOut *bool, traceConfig *config.TraceConfig) (ParityTraces, error)
 	Filter(ctx context.Context, req TraceFilterRequest, gasBailOut *bool, traceConfig *config.TraceConfig, stream jsonstream.Stream) error
 }
@@ -57,12 +57,12 @@ type TraceAPIImpl struct {
 }
 
 // NewTraceAPI returns NewTraceAPI instance
-func NewTraceAPI(base *BaseAPI, kv kv.TemporalRoDB, cfg *httpcfg.HttpCfg) *TraceAPIImpl {
+func NewTraceAPI(base *BaseAPI, kv kv.TemporalRoDB, cfg *rpccfg.TraceApiConfig) *TraceAPIImpl {
 	return &TraceAPIImpl{
 		BaseAPI:       base,
 		kv:            kv,
 		maxTraces:     cfg.MaxTraces,
-		gasCap:        cfg.Gascap,
-		compatibility: cfg.TraceCompatibility,
+		gasCap:        cfg.GasCap,
+		compatibility: cfg.Compatibility,
 	}
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/cmd/utils/flags"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/node/cli"
@@ -157,7 +158,7 @@ func withBucket(cmd *cobra.Command) {
 
 func withDataDir2(cmd *cobra.Command) {
 	// --datadir is required, but no --chain flag: read chainConfig from db instead
-	cmd.Flags().StringVar(&datadirCli, utils.DataDirFlag.Name, "", utils.DataDirFlag.Usage)
+	flags.DirVar(cmd.Flags(), &datadirCli, utils.DataDirFlag.Name, "", utils.DataDirFlag.Usage)
 	must(cmd.MarkFlagDirname(utils.DataDirFlag.Name))
 	must(cmd.MarkFlagRequired(utils.DataDirFlag.Name))
 
@@ -168,14 +169,12 @@ func withDataDir2(cmd *cobra.Command) {
 func withDataDir(cmd *cobra.Command) {
 	withDataDir2(cmd)
 
-	cmd.Flags().StringVar(&chaindata, "chaindata", "", "path to the db")
+	flags.DirVar(cmd.Flags(), &chaindata, "chaindata", "", "path to the db")
 	must(cmd.MarkFlagDirname("chaindata"))
 }
 
-func withConcurrentCommitment(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&statecfg.ExperimentalConcurrentCommitment, utils.ExperimentalConcurrentCommitmentFlag.Name, utils.ExperimentalConcurrentCommitmentFlag.Value, utils.ExperimentalConcurrentCommitmentFlag.Usage)
-	cmd.Flags().BoolVar(&statecfg.ExperimentalParallelCommitment, utils.ExperimentalParallelCommitmentFlag.Name, utils.ExperimentalParallelCommitmentFlag.Value, utils.ExperimentalParallelCommitmentFlag.Usage)
-	cmd.Flags().BoolVar(&statecfg.ExperimentalStreamingCommitment, utils.ExperimentalStreamingCommitmentFlag.Name, utils.ExperimentalStreamingCommitmentFlag.Value, utils.ExperimentalStreamingCommitmentFlag.Usage)
+func withExperimentalCommitment(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&statecfg.ExperimentalParallelCommitment, utils.ExperimentalParallelCommitmentFlag.Name, statecfg.ExperimentalParallelCommitment, utils.ExperimentalParallelCommitmentFlag.Usage)
 }
 
 func withBatchSize(cmd *cobra.Command) {

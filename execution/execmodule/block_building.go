@@ -19,6 +19,7 @@ package execmodule
 import (
 	"context"
 	"reflect"
+	"time"
 
 	"github.com/holiman/uint256"
 
@@ -37,6 +38,26 @@ func (e *ExecModule) checkWithdrawalsPresence(time uint64, withdrawals []*types.
 		return &rpc.InvalidParamsError{Message: "missing withdrawals list"}
 	}
 	return nil
+}
+
+// buildDuration returns how long a payload builder may run before it stops itself.
+//
+// A consensus layer may send payload attributes well ahead of the slot the payload is for and then
+// call getPayload against the cached payload id, without sending fresh attributes. A builder that
+// stops before that slot hands back a payload missing every transaction that arrived in between, so
+// build until shortly into the target slot, derived from the payload's own timestamp. The floor
+// leaves a late request no worse off than a fixed budget; the cap stops an implausible timestamp
+// from pinning a builder and its resources.
+func buildDuration(payloadTimestamp uint64, now time.Time, secondsPerSlot uint64) time.Duration {
+	slot := time.Duration(secondsPerSlot) * time.Second
+	// Reject beyond the cap horizon before converting: a large enough timestamp overflows
+	// time.Unix and lands in the past, which would take the floor instead of the cap.
+	horizon := now.Add(2 * slot)
+	if payloadTimestamp > uint64(max(horizon.Unix(), 0)) {
+		return 2 * slot
+	}
+	d := time.Unix(int64(payloadTimestamp), 0).Add(slot / 3).Sub(now)
+	return min(max(d, slot/4), 2*slot)
 }
 
 func (e *ExecModule) evictOldBuilders() {
@@ -74,7 +95,7 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 	params.PayloadId = e.nextPayloadId
 	e.lastParameters = params
 
-	e.builders[e.nextPayloadId] = builder.NewBlockBuilder(e.builderFunc, params, e.config.SecondsPerSlot()/4)
+	e.builders[e.nextPayloadId] = builder.NewBlockBuilder(e.builderFunc, params, buildDuration(params.Timestamp, time.Now(), e.config.SecondsPerSlot()))
 	e.logger.Info("[ForkChoiceUpdated] BlockBuilder added", "payload", e.nextPayloadId)
 
 	return AssembleBlockResult{PayloadID: e.nextPayloadId}, nil
@@ -96,7 +117,7 @@ func blockValue(br *types.BlockWithReceipts, baseFee *uint256.Int) *uint256.Int 
 	return blockValue
 }
 
-func (e *ExecModule) GetAssembledBlock(_ context.Context, payloadID uint64) (AssembledBlockResult, error) {
+func (e *ExecModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (AssembledBlockResult, error) {
 	if !e.semaphore.TryAcquire(1) {
 		return AssembledBlockResult{Busy: true}, nil
 	}
@@ -106,7 +127,7 @@ func (e *ExecModule) GetAssembledBlock(_ context.Context, payloadID uint64) (Ass
 	if !ok {
 		return AssembledBlockResult{}, nil
 	}
-	blockWithReceipts, err := bldr.Stop()
+	blockWithReceipts, err := bldr.Stop(ctx)
 	if err != nil {
 		e.logger.Error("Failed to build PoS block", "err", err)
 		return AssembledBlockResult{}, err

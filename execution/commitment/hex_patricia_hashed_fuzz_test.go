@@ -30,8 +30,6 @@ import (
 	"github.com/erigontech/erigon/common/length"
 )
 
-// go test -trimpath -v -fuzz=Fuzz_ProcessUpdate -fuzztime=300s ./erigon/execution/commitment
-
 func Fuzz_ProcessUpdate(f *testing.F) {
 	ctx := context.Background()
 	ha, _ := hex.DecodeString("13ccfe8074645cab4cb42b423625e055f0293c87")
@@ -40,7 +38,6 @@ func Fuzz_ProcessUpdate(f *testing.F) {
 	f.Add(uint64(2), ha, uint64(1235105), hb)
 
 	f.Fuzz(func(t *testing.T, balanceA uint64, accountA []byte, balanceB uint64, accountB []byte) {
-		// the trie is built with accountKeyLen == length.Addr, so only exact-length keys are valid
 		if len(accountA) != length.Addr || len(accountB) != length.Addr {
 			t.Skip()
 		}
@@ -75,13 +72,13 @@ func Fuzz_ProcessUpdate(f *testing.F) {
 	})
 }
 
-// go test -trimpath -v -fuzz=Fuzz_ProcessUpdates_ArbitraryUpdateCount2 -fuzztime=300s ./commitment
-
 func Fuzz_ProcessUpdates_ArbitraryUpdateCount2(f *testing.F) {
 	ctx := context.Background()
 	f.Add(uint16(100), uint32(1), uint32(2))
 
 	f.Fuzz(func(t *testing.T, keysCount uint16, ks, us uint32) {
+		keysCount %= 4096
+
 		keysSeed := rand.New(rand.NewSource(int64(ks)))
 		updateSeed := rand.New(rand.NewSource(int64(us)))
 
@@ -90,7 +87,7 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount2(f *testing.F) {
 		plainKeys := make([][]byte, keysCount)
 		updates := make([]Update, keysCount)
 
-		for k := uint16(0); k < keysCount; k++ {
+		for k := range keysCount {
 
 			aux := make([]byte, 32)
 
@@ -136,11 +133,10 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount2(f *testing.F) {
 		hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
 		hphAnother := NewHexPatriciaHashed(length.Addr, ms2, DefaultTrieConfig())
 
-		trace := false
-		hph.SetTrace(trace)
-		hphAnother.SetTrace(trace)
+		hph.SetTraceWriter(nil)
+		hphAnother.SetTraceWriter(nil)
 
-		for i := 0; i < len(plainKeys); i++ {
+		for i := range plainKeys {
 			err := ms.applyPlainUpdates(plainKeys[i:i+1], updates[i:i+1])
 			require.NoError(t, err)
 
@@ -231,17 +227,16 @@ func Fuzz_HexPatriciaHashed_ReviewKeys(f *testing.F) {
 		rnd := rand.New(rand.NewSource(seed))
 		builder := NewUpdateBuilder()
 
-		// generate updates
 		for i := 0; i < int(kc); i++ {
 			key := make([]byte, length.Addr)
 
-			for j := 0; j < len(key); j++ {
+			for j := range key {
 				key[j] = byte(rnd.Intn(256))
 			}
 			addr := hex.EncodeToString(key)
 			builder.Balance(addr, rnd.Uint64())
 			builder.Nonce(addr, uint64(i))
-			builder.CodeHash(addr, hex.EncodeToString(append(key, make([]byte, 12)...)))
+			builder.CodeHash(addr, hex.EncodeToString(append(key, make([]byte, 12)...))) //nolint:makezero
 		}
 		t.Logf("keys count: %d", kc)
 

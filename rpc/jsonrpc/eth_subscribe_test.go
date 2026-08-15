@@ -45,7 +45,7 @@ func TestEthSubscribe(t *testing.T) {
 	ctx := t.Context()
 	logger := log.New()
 	m := execmoduletester.New(t)
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 7, func(i int, b *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(7, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	})
 	require.NoError(t, err)
@@ -57,12 +57,11 @@ func TestEthSubscribe(t *testing.T) {
 	// at the start of Subscribe, to be sure that the subscription is ready, otherwise we could miss some events.
 	subscriptionReadyWg := sync.WaitGroup{}
 	subscriptionReadyWg.Add(1)
-	onNewSnapshot := func() {
-		subscriptionReadyWg.Done()
-	}
+	// Only the first NEW_SNAPSHOT signals readiness; background block retirement emits more.
+	onNewSnapshot := sync.OnceFunc(subscriptionReadyWg.Done)
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, backend, nil, nil, onNewSnapshot, m.Log, nil)
 	subscriptionReadyWg.Wait() // This is needed *before* inserting the blocks, which sends NEW_HEADER events
-	newHeads, id := ff.SubscribeNewHeads(16)
+	newHeads, id := ff.SubscribeNewHeads(16, "")
 	defer ff.UnsubscribeHeads(id)
 	highestSeenHeader := chain.TopBlock.NumberU64()
 	err = m.InsertChain(chain)
@@ -77,7 +76,7 @@ func TestEthSubscribeReceipts(t *testing.T) {
 	ctx := t.Context()
 	logger := log.New()
 	m := execmoduletester.New(t)
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, b *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(3, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		tx, err := types.SignTx(types.NewTransaction(uint64(i), m.Address, uint256.NewInt(1), params.TxGas, uint256.NewInt(1), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
 		require.NoError(t, err)
@@ -89,12 +88,11 @@ func TestEthSubscribeReceipts(t *testing.T) {
 	backend := rpcservices.NewRemoteBackend(backendClient, m.DB, m.BlockReader)
 	subscriptionReadyWg := sync.WaitGroup{}
 	subscriptionReadyWg.Add(1)
-	onNewSnapshot := func() {
-		subscriptionReadyWg.Done()
-	}
+	// Only the first NEW_SNAPSHOT signals readiness; background block retirement emits more.
+	onNewSnapshot := sync.OnceFunc(subscriptionReadyWg.Done)
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, backend, nil, nil, onNewSnapshot, m.Log, nil)
 	subscriptionReadyWg.Wait()
-	newReceipts, id := ff.SubscribeReceipts(16, filters.ReceiptsFilterCriteria{
+	newReceipts, id, _ := ff.SubscribeReceipts(16, filters.ReceiptsFilterCriteria{
 		TransactionHashes: []common.Hash{},
 	})
 	defer ff.UnsubscribeReceipts(id)

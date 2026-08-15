@@ -29,7 +29,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/kvcache"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/tests/testforks"
 	"github.com/erigontech/erigon/execution/types"
@@ -120,7 +120,7 @@ func newGetBlobsTestPool(tb testing.TB, numAccounts int) (*TxPool, context.Conte
 	tb.Helper()
 	ch := make(chan Announcements, 5)
 	coreDB := temporaltest.NewTestDB(tb, datadir.New(tb.TempDir()))
-	db := memdb.NewTestPoolDB(tb)
+	db := mdbxtest.NewTestPoolDB(tb)
 	cfg := txpoolcfg.DefaultConfig
 	cfg.TotalBlobPoolLimit = 1000
 	ctx, cancel := context.WithCancel(context.Background())
@@ -142,7 +142,7 @@ func newGetBlobsTestPool(tb testing.TB, numAccounts int) (*TxPool, context.Conte
 	acc := accounts3.Account{Nonce: 0, Balance: *uint256.NewInt(1 * common.Ether), CodeHash: accounts3.EmptyCodeHash, Incarnation: 1}
 	v := accounts3.SerialiseV3(&acc)
 	var addr [20]byte
-	for i := 0; i < numAccounts; i++ {
+	for i := range numAccounts {
 		addr[0] = uint8(i + 1)
 		change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
 			Action:  remoteproto.Action_UPSERT,

@@ -20,12 +20,24 @@
 package node
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"fmt"
 	"io"
+	"math/big"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -232,7 +244,7 @@ func TestAllowList(t *testing.T) {
 
 func testCustomRequest(t *testing.T, url, method string) bool {
 	body := bytes.NewReader(fmt.Appendf(nil, `{"jsonrpc":"2.0","id":1,"method":"%s"}`, method))
-	req, _ := http.NewRequest("POST", url, body)
+	req, _ := http.NewRequestWithContext(t.Context(), "POST", url, body)
 	req.Header.Set("content-type", "application/json")
 
 	client := http.DefaultClient
@@ -253,7 +265,7 @@ func rpcRequest(t *testing.T, url string, extraHeaders ...string) *http.Response
 
 	// Create the request.
 	body := bytes.NewReader([]byte(`{"jsonrpc":"2.0","id":1,"method":"rpc_modules","params":[]}`))
-	req, err := http.NewRequest("POST", url, body)
+	req, err := http.NewRequestWithContext(t.Context(), "POST", url, body)
 	if err != nil {
 		t.Fatal("could not create http request:", err)
 	}
@@ -282,9 +294,6 @@ func rpcRequest(t *testing.T, url string, extraHeaders ...string) *http.Response
 }
 
 func TestHTTP2H2C(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow test")
-	}
 	srv := newTestRPCServer(t)
 	handler := NewHTTPHandlerStack(srv, nil, nil, false, 1000, true)
 	httpSrv, addr, err := StartHTTPEndpoint("tcp://127.0.0.1:0", &HttpEndpointConfig{Timeouts: rpccfg.DefaultHTTPTimeouts}, handler)
@@ -298,7 +307,10 @@ func TestHTTP2H2C(t *testing.T) {
 	client := &http.Client{Transport: transport}
 
 	body := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"rpc_modules","params":[]}`)
-	resp, err := client.Post("http://"+addr.String(), "application/json", body)
+	req, err := http.NewRequestWithContext(t.Context(), "POST", "http://"+addr.String(), body)
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -314,6 +326,117 @@ func TestHTTP2H2C(t *testing.T) {
 	assert.Contains(t, string(result), "jsonrpc", "expected JSON-RPC response")
 }
 
+// TestHTTP2H2CUpgrade checks the HTTP/1.1 Upgrade route into h2c (RFC 7540
+// Section 3.2), which curl uses for "--http2" over cleartext.
+func TestHTTP2H2CUpgrade(t *testing.T) {
+	srv := newTestRPCServer(t)
+	handler := NewHTTPHandlerStack(srv, nil, nil, false, 1000, true)
+	httpSrv, addr, err := StartHTTPEndpoint("tcp://127.0.0.1:0", &HttpEndpointConfig{Timeouts: rpccfg.DefaultHTTPTimeouts}, handler)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = httpSrv.Shutdown(context.Background()) })
+
+	var dialer net.Dialer
+	conn, err := dialer.DialContext(t.Context(), "tcp", addr.String())
+	require.NoError(t, err)
+	defer conn.Close()
+	require.NoError(t, conn.SetDeadline(time.Now().Add(10*time.Second)))
+
+	_, err = conn.Write([]byte("GET / HTTP/1.1\r\n" +
+		"Host: " + addr.String() + "\r\n" +
+		"Connection: Upgrade, HTTP2-Settings\r\n" +
+		"Upgrade: h2c\r\n" +
+		"HTTP2-Settings: AAMAAABkAAQAAP__\r\n\r\n"))
+	require.NoError(t, err)
+
+	statusLine, err := bufio.NewReader(conn).ReadString('\n')
+	require.NoError(t, err)
+	assert.Equal(t, "HTTP/1.1 101 Switching Protocols\r\n", statusLine)
+}
+
+// TestHTTPSEndpoint checks that the TLS endpoint negotiates HTTP/2 via ALPN and
+// still serves clients which only speak HTTP/1.1.
+func TestHTTPSEndpoint(t *testing.T) {
+	certFile, keyFile, roots := newSelfSignedCert(t)
+	srv := newTestRPCServer(t)
+	handler := NewHTTPHandlerStack(srv, nil, nil, false, 1000, true)
+	httpSrv, addr, err := StartHTTPEndpoint("tcp://127.0.0.1:0", &HttpEndpointConfig{
+		Timeouts: rpccfg.DefaultHTTPTimeouts,
+		HTTPS:    true,
+		CertFile: certFile,
+		KeyFile:  keyFile,
+	}, handler)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = httpSrv.Shutdown(context.Background()) })
+
+	for _, tc := range []struct {
+		name      string
+		http2     bool
+		wantProto string
+	}{
+		{name: "h2 via ALPN", http2: true, wantProto: "HTTP/2.0"},
+		{name: "http/1.1 only", http2: false, wantProto: "HTTP/1.1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			transport := &http.Transport{
+				TLSClientConfig: &tls.Config{
+					MinVersion: tls.VersionTLS12,
+					RootCAs:    roots,
+				},
+			}
+			transport.Protocols = new(http.Protocols)
+			transport.Protocols.SetHTTP1(!tc.http2)
+			transport.Protocols.SetHTTP2(tc.http2)
+			client := &http.Client{Transport: transport, Timeout: 10 * time.Second}
+			defer client.CloseIdleConnections()
+
+			body := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"rpc_modules","params":[]}`)
+			req, err := http.NewRequestWithContext(t.Context(), "POST", "https://"+addr.String(), body)
+			require.NoError(t, err)
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := client.Do(req)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+
+			assert.Equal(t, tc.wantProto, resp.Proto)
+			assert.Equal(t, http.StatusOK, resp.StatusCode)
+			result, err := io.ReadAll(resp.Body)
+			require.NoError(t, err)
+			assert.Contains(t, string(result), "jsonrpc", "expected JSON-RPC response")
+		})
+	}
+}
+
+func newSelfSignedCert(t *testing.T) (certFile, keyFile string, roots *x509.CertPool) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	template := x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "erigon-test"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		IPAddresses:  []net.IP{net.IPv4(127, 0, 0, 1)},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, &template, &template, &key.PublicKey, key)
+	require.NoError(t, err)
+	keyDER, err := x509.MarshalECPrivateKey(key)
+	require.NoError(t, err)
+
+	cert, err := x509.ParseCertificate(der)
+	require.NoError(t, err)
+	roots = x509.NewCertPool()
+	roots.AddCert(cert)
+
+	dir := t.TempDir()
+	certFile = filepath.Join(dir, "cert.pem")
+	keyFile = filepath.Join(dir, "key.pem")
+	require.NoError(t, os.WriteFile(certFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0600))
+	require.NoError(t, os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}), 0600))
+	return certFile, keyFile, roots
+}
+
 // TestRPCAdmissionHandler verifies that rpcAdmissionHandler correctly limits
 // concurrent requests and returns HTTP 503 when the limit is exceeded.
 func TestRPCAdmissionHandler(t *testing.T) {
@@ -324,14 +447,14 @@ func TestRPCAdmissionHandler(t *testing.T) {
 	t.Run("disabled when limit is zero", func(t *testing.T) {
 		h := newRPCAdmissionHandler(0, okHandler)
 		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", nil))
+		h.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil))
 		assert.Equal(t, http.StatusOK, rec.Code)
 	})
 
 	t.Run("allows requests under the limit", func(t *testing.T) {
 		h := newRPCAdmissionHandler(5, okHandler)
 		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", nil))
+		h.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil))
 		assert.Equal(t, http.StatusOK, rec.Code)
 	})
 
@@ -348,12 +471,10 @@ func TestRPCAdmissionHandler(t *testing.T) {
 		h := newRPCAdmissionHandler(limit, blockingHandler)
 
 		var wg sync.WaitGroup
-		for i := 0; i < limit; i++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/", nil))
-			}()
+		for range limit {
+			wg.Go(func() {
+				h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil))
+			})
 		}
 
 		// Give goroutines time to enter the handler and increment the counter.
@@ -365,7 +486,7 @@ func TestRPCAdmissionHandler(t *testing.T) {
 
 		// Now the limit is reached — next request must be rejected.
 		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", nil))
+		h.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil))
 		assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
 
 		// Release the held requests.
@@ -426,7 +547,7 @@ func TestNewWSConnectionLimiter(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	rr0 := httptest.NewRecorder()
-	passthrough.ServeHTTP(rr0, httptest.NewRequest(http.MethodGet, "/", nil))
+	passthrough.ServeHTTP(rr0, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil))
 	assert.Equal(t, http.StatusOK, rr0.Code)
 
 	// Build a limiter with limit=1.
@@ -440,7 +561,7 @@ func TestNewWSConnectionLimiter(t *testing.T) {
 
 	// First request: should be accepted (blocks on hold).
 	go func() {
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 		limiter.ServeHTTP(httptest.NewRecorder(), req)
 	}()
 
@@ -451,7 +572,7 @@ func TestNewWSConnectionLimiter(t *testing.T) {
 
 	// Second request: should be rejected with 503.
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 	limiter.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusServiceUnavailable, rr.Code)
 

@@ -20,12 +20,15 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha1"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -35,20 +38,25 @@ import (
 )
 
 // VerifyTorrentFiles verifies that data files match their .torrent piece hashes.
-// It scans the given directory for .torrent files and verifies each corresponding data file.
-// If failFast is true, stops on first error. Otherwise logs warnings and continues.
+// It scans the given directory recursively for .torrent files and verifies each
+// corresponding data file. failFast only governs whether the run stops at the
+// first mismatch; either way a mismatch, an unreachable path or a cancelled
+// context fails the call, since a partial or failed scan must never pass as a
+// complete verification.
 func VerifyTorrentFiles(ctx context.Context, dir string, failFast bool, logger log.Logger) error {
-	torrentFiles, err := filepath.Glob(filepath.Join(dir, "*.torrent"))
-	if err != nil {
-		return fmt.Errorf("listing torrent files: %w", err)
+	torrentFiles, scanErr := collectTorrentFiles(ctx, dir, logger)
+	if scanErr != nil {
+		scanErr = fmt.Errorf("listing torrent files: %w", scanErr)
 	}
 
 	if len(torrentFiles) == 0 {
 		logger.Info("[verify] no torrent files found", "dir", dir)
-		return nil
+		return errors.Join(scanErr, ctx.Err())
 	}
 
 	var totalBytes int64
+	var unreadable int
+	var firstUnreadable error
 	toVerify := make([]string, 0, len(torrentFiles))
 	for _, tf := range torrentFiles {
 		dataFile := strings.TrimSuffix(tf, ".torrent")
@@ -57,15 +65,23 @@ func VerifyTorrentFiles(ctx context.Context, dir string, failFast bool, logger l
 			continue // no data file, skip
 		}
 		if err != nil {
-			return fmt.Errorf("stat %s: %w", dataFile, err)
+			logger.Warn("[verify] skipping unreadable data file", "path", dataFile, "err", err)
+			unreadable++
+			if firstUnreadable == nil {
+				firstUnreadable = fmt.Errorf("stat %s: %w", dataFile, err)
+			}
+			continue
 		}
 		toVerify = append(toVerify, tf)
 		totalBytes += info.Size()
 	}
+	if unreadable > 0 {
+		scanErr = errors.Join(scanErr, fmt.Errorf("%d unreadable data file(s), first: %w", unreadable, firstUnreadable))
+	}
 
 	if len(toVerify) == 0 {
 		logger.Info("[verify] no data files to verify", "dir", dir)
-		return nil
+		return errors.Join(scanErr, ctx.Err())
 	}
 
 	logger.Info("[verify] starting", "files", len(toVerify), "totalGB", totalBytes>>30)
@@ -73,7 +89,7 @@ func VerifyTorrentFiles(ctx context.Context, dir string, failFast bool, logger l
 	var completedBytes atomic.Uint64
 	var completedFiles atomic.Uint64
 
-	g, ctx := errgroup.WithContext(ctx)
+	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(runtime.GOMAXPROCS(-1) * 4)
 
 	// Progress logging
@@ -82,7 +98,7 @@ func VerifyTorrentFiles(ctx context.Context, dir string, failFast bool, logger l
 	go func() {
 		for {
 			select {
-			case <-ctx.Done():
+			case <-gctx.Done():
 				return
 			case <-logEvery.C:
 				logger.Info("[verify] progress",
@@ -93,26 +109,144 @@ func VerifyTorrentFiles(ctx context.Context, dir string, failFast bool, logger l
 		}
 	}()
 
+	var failedMu sync.Mutex
+	var failed int
+	var firstFailure error
+
 	for _, torrentFile := range toVerify {
 		g.Go(func() error {
 			defer completedFiles.Add(1)
-			err := verifyFileFromTorrent(ctx, torrentFile, &completedBytes)
+			err := verifyFileFromTorrent(gctx, torrentFile, &completedBytes)
 			if err != nil {
 				if failFast {
 					return err
 				}
+				// A cancelled run is a shutdown, not corruption: counting it would
+				// report every in-flight file as a verification failure.
+				if gctx.Err() != nil {
+					return nil
+				}
 				logger.Warn("[verify] file failed", "file", torrentFile, "err", err)
+				failedMu.Lock()
+				failed++
+				if firstFailure == nil {
+					firstFailure = err
+				}
+				failedMu.Unlock()
 			}
 			return nil
 		})
 	}
 
 	if err := g.Wait(); err != nil {
+		return errors.Join(scanErr, err)
+	}
+	var verifyErr error
+	if failed > 0 {
+		verifyErr = fmt.Errorf("%d file(s) failed verification, first: %w", failed, firstFailure)
+	}
+	// Without failFast the workers only warn, so an interrupted run would
+	// otherwise be indistinguishable from a complete one. gctx is always
+	// cancelled by now, hence ctx.
+	if err := ctx.Err(); err != nil {
+		return errors.Join(scanErr, verifyErr, err)
+	}
+	if err := errors.Join(scanErr, verifyErr); err != nil {
 		return err
 	}
 
 	logger.Info("[verify] complete", "files", len(toVerify))
 	return nil
+}
+
+// collectTorrentFiles lists .torrent files under dir recursively. Symlinked
+// directories are followed — a snapshots dir or one of its subtrees living on
+// another disk is a supported layout — and the resolved path doubles as the
+// cycle guard. Paths that could not be read are reported through the error
+// together with the files that were reached: they may hide any number of
+// torrents, so the caller verifies what it got and still fails the run. A data
+// file hides nothing, so an unreadable one is left to the caller to report.
+func collectTorrentFiles(ctx context.Context, dir string, logger log.Logger) (files []string, err error) {
+	visited := map[string]struct{}{}
+	var skipped int
+	var firstSkipped error
+	skip := func(path string, err error) {
+		logger.Warn("[verify] skipping unreadable path", "path", path, "err", err)
+		skipped++
+		if firstSkipped == nil {
+			firstSkipped = fmt.Errorf("%s: %w", path, err)
+		}
+	}
+	isDataFile := func(path string) bool {
+		_, err := os.Lstat(path + ".torrent")
+		return err == nil
+	}
+
+	var walk func(string) error
+
+	visitEntry := func(parentDir string, e fs.DirEntry) error {
+		child := filepath.Join(parentDir, e.Name())
+		isDir := e.IsDir()
+		if e.Type()&fs.ModeSymlink != 0 {
+			info, err := os.Stat(child)
+			if err != nil {
+				if !isDataFile(child) {
+					skip(child, err)
+				}
+				return nil
+			}
+			isDir = info.IsDir()
+		}
+		if isDir {
+			if err := walk(child); err != nil {
+				if ctx.Err() != nil {
+					return err
+				}
+				skip(child, err)
+			}
+			return nil
+		}
+		if strings.HasSuffix(e.Name(), ".torrent") {
+			files = append(files, child)
+		}
+		return nil
+	}
+
+	walk = func(path string) error {
+		resolved, err := filepath.EvalSymlinks(path)
+		if err != nil {
+			return err
+		}
+		if _, seen := visited[resolved]; seen {
+			return nil
+		}
+		visited[resolved] = struct{}{}
+
+		entries, err := os.ReadDir(resolved)
+		if err != nil {
+			return err
+		}
+		for _, e := range entries {
+			if err := visitEntry(resolved, e); err != nil {
+				return err
+			}
+			// Checked after the entry is accounted for, so a cancelled scan still
+			// reports what was wrong with the entries it reached.
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	walkErr := walk(dir)
+	if skipped > 0 {
+		walkErr = errors.Join(walkErr, fmt.Errorf("%d unreadable path(s), first: %w", skipped, firstSkipped))
+	}
+	if walkErr != nil {
+		return files, walkErr
+	}
+	return files, nil
 }
 
 // verifyFileFromTorrent verifies a single data file against its .torrent piece hashes.
@@ -138,7 +272,7 @@ func verifyFileFromTorrent(ctx context.Context, torrentPath string, completedByt
 	pieceLen := info.PieceLength
 	numPieces := info.NumPieces()
 
-	for i := 0; i < numPieces; i++ {
+	for i := range numPieces {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()

@@ -42,9 +42,10 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
+	math2 "github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -96,8 +97,6 @@ var (
 	errInvalidMixDigest = errors.New("non-zero mix digest")
 	// errInvalidUncleHash is returned if a block contains an non-empty uncle list.
 	errInvalidUncleHash = errors.New("non empty uncle hash")
-	// errInvalidDifficulty is returned if the difficulty of a block neither 1 or 2.
-	errInvalidDifficulty = errors.New("invalid difficulty")
 	// errInvalidTimestamp is returned if the timestamp of a block is lower than
 	// the previous block's timestamp + the minimum block period.
 	errInvalidTimestamp = errors.New("invalid timestamp")
@@ -292,7 +291,7 @@ type Bor struct {
 	mutex       sync.Mutex
 	chainConfig *chain.Config     // Chain config
 	config      *borcfg.BorConfig // Rules engine configuration parameters for bor rules
-	blockReader services.FullBlockReader
+	blockReader dbservices.FullBlockReader
 
 	Signatures   *lru.ARCCache[common.Hash, accounts.Address] // Signatures of recent blocks to speed up mining
 	Dependencies *lru.ARCCache[common.Hash, [][]int]
@@ -323,7 +322,7 @@ type signer struct {
 // New creates a Matic Bor rules engine.
 func New(
 	chainConfig *chain.Config,
-	blockReader services.FullBlockReader,
+	blockReader dbservices.FullBlockReader,
 	spanner Spanner,
 	genesisContracts StateReceiver,
 	logger log.Logger,
@@ -376,7 +375,7 @@ func New(
 }
 
 // NewRo is used by the rpcdaemon and tests which need read only access to the provided data services
-func NewRo(chainConfig *chain.Config, blockReader services.FullBlockReader, logger log.Logger) *Bor {
+func NewRo(chainConfig *chain.Config, blockReader dbservices.FullBlockReader, logger log.Logger) *Bor {
 	// get bor config
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 
@@ -597,15 +596,13 @@ func ValidateHeaderGas(header *types.Header, parent *types.Header, chainConfig *
 	}
 
 	if !chainConfig.IsLondon(header.Number.Uint64()) {
-		// Verify BaseFee not present before EIP-1559 fork.
 		if header.BaseFee != nil {
 			return fmt.Errorf("invalid baseFee before fork: have %d, want <nil>", header.BaseFee)
 		}
-		if err := misc.VerifyGaslimit(parent.GasLimit, header.GasLimit); err != nil {
-			return err
-		}
-	} else if err := misc.VerifyEip1559Header(chainConfig, parent, header, false /*skipGasLimit*/); err != nil {
-		// Verify the header's EIP-1559 attributes.
+	} else if err := misc.VerifyEip1559Header(chainConfig, parent, header); err != nil {
+		return err
+	}
+	if err := misc.VerifyParentGasLimit(chainConfig, parent, header); err != nil {
 		return err
 	}
 
@@ -722,7 +719,7 @@ func (c *Bor) Prepare(chain rules.ChainHeaderReader, header *types.Header, state
 
 			blockExtraDataBytes, err := rlp.EncodeToBytes(blockExtraData)
 			if err != nil {
-				log.Error("error while encoding block extra data: %v", err)
+				log.Error("[bor] encoding block extra data", "err", err)
 				return fmt.Errorf("error while encoding block extra data: %v", err)
 			}
 
@@ -740,7 +737,7 @@ func (c *Bor) Prepare(chain rules.ChainHeaderReader, header *types.Header, state
 
 		blockExtraDataBytes, err := rlp.EncodeToBytes(blockExtraData)
 		if err != nil {
-			log.Error("error while encoding block extra data: %v", err)
+			log.Error("[bor] encoding block extra data", "err", err)
 			return fmt.Errorf("error while encoding block extra data: %v", err)
 		}
 
@@ -773,16 +770,14 @@ func (c *Bor) Prepare(chain rules.ChainHeaderReader, header *types.Header, state
 	now := time.Now()
 	if header.Time < uint64(now.Unix()) {
 		header.Time = uint64(now.Unix())
-	} else {
+	} else if c.config.IsBhilai(number) && succession == 0 {
 		// For primary validators, wait until the current block production window
 		// starts. This prevents bor from starting to build next block before time
 		// as we'd like to wait for new transactions. Although this change doesn't
 		// need a check for hard fork as it doesn't change any consensus rules, we
 		// still keep it for safety and testing.
-		if c.config.IsBhilai(number) && succession == 0 {
-			startTime := time.Unix(int64(header.Time)-int64(c.config.CalculatePeriod(number)), 0)
-			time.Sleep(time.Until(startTime))
-		}
+		startTime := time.Unix(int64(header.Time)-int64(c.config.CalculatePeriod(number)), 0)
+		time.Sleep(time.Until(startTime))
 	}
 
 	return nil
@@ -901,7 +896,7 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 		return nil, nil, err
 	}
 
-	return types.NewBlockForAsembling(header, txs, nil, receipts, withdrawals), nil, nil
+	return types.NewBlockForAsembling(header, txs, nil, receipts, withdrawals, nil), nil, nil
 }
 
 func (c *Bor) Initialize(config *chain.Config, chain rules.ChainHeaderReader, header *types.Header,
@@ -1182,19 +1177,15 @@ func (c *Bor) GetRootHash(ctx context.Context, tx kv.Tx, start, end uint64) (str
 }
 
 func ComputeHeadersRootHash(blockHeaders []*types.Header) ([]byte, error) {
-	headers := make([][32]byte, NextPowerOfTwo(uint64(len(blockHeaders))))
-	for i := 0; i < len(blockHeaders); i++ {
+	headers := make([][32]byte, math2.NextPowerOfTwo(uint64(len(blockHeaders))))
+	for i := range blockHeaders {
 		blockHeader := blockHeaders[i]
-		header := crypto.Keccak256(AppendBytes32(
+		headers[i] = crypto.Keccak256Hash(AppendBytes32(
 			blockHeader.Number.Bytes(),
 			new(big.Int).SetUint64(blockHeader.Time).Bytes(),
 			blockHeader.TxHash[:],
 			blockHeader.ReceiptHash[:],
 		))
-
-		var arr [32]byte
-		copy(arr[:], header)
-		headers[i] = arr
 	}
 	tree := merkle.NewTreeWithOpts(merkle.TreeOptions{EnableHashSorting: false, DisableHashLeaves: true})
 	if err := tree.Generate(Convert(headers), keccak.NewFastKeccak()); err != nil {
@@ -1328,6 +1319,12 @@ func AddFeeTransferLog(ibs evmtypes.IntraBlockState, sender accounts.Address, co
 
 func (c *Bor) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
 	return AddFeeTransferLog
+}
+
+func (c *Bor) ValidateBlockPostExecution(chainConfig *chain.Config, header *types.Header,
+	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
+	receipts types.Receipts, txns types.Transactions, logger log.Logger) error {
+	return rules.DefaultBlockPostValidation(chainConfig, header, gasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, txns, logger)
 }
 
 func (c *Bor) TxDependencies(h *types.Header) [][]int {

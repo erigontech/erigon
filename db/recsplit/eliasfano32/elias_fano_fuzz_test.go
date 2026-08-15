@@ -151,7 +151,7 @@ func FuzzDoubleEliasFano(f *testing.F) {
 			return
 		}
 		// Try to read from ef
-		for bucket := 0; bucket < numBuckets; bucket++ {
+		for bucket := range numBuckets {
 			cumKey, bitPos := ef.Get2(uint64(bucket))
 			if cumKey != cumKeys[bucket] {
 				t.Fatalf("bucket %d: cumKey from EF = %d, expected %d", bucket, cumKey, cumKeys[bucket])
@@ -168,7 +168,7 @@ func FuzzDoubleEliasFano(f *testing.F) {
 				t.Fatalf("bucket %d: position from EF2 = %d, expected %d", bucket, bitPos, position[bucket])
 			}
 		}
-		for bucket := 0; bucket < numBuckets; bucket++ {
+		for bucket := range numBuckets {
 			cumKey, cumKeysNext, bitPos := ef.Get3(uint64(bucket))
 			if cumKey != cumKeys[bucket] {
 				t.Fatalf("bucket %d: cumKey from EF = %d, expected %d", bucket, cumKey, cumKeys[bucket])

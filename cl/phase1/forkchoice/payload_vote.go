@@ -37,11 +37,6 @@ func boolToVote(b bool) int8 {
 	return -1
 }
 
-func (f *ForkChoiceStore) calculateCommitteeFraction(s *state.CachingBeaconState, committeePercent uint64) uint64 {
-	committeeWeight := s.GetTotalActiveBalance() / f.beaconCfg.SlotsPerEpoch
-	return (committeeWeight * committeePercent) / 100
-}
-
 // notifyPtcMessages extracts a list of PayloadAttestationMessage from payload_attestations
 // and updates the store with them. These Payload attestations are assumed to be in the
 // beacon block hence signature verification is not needed.
@@ -182,12 +177,16 @@ func (f *ForkChoiceStore) payloadDataAvailability(root common.Hash, available bo
 // Compares current block's parent_block_hash with parent block's block_hash from their bids.
 // [New in Gloas:EIP7732]
 func (f *ForkChoiceStore) getParentPayloadStatus(block *cltypes.BeaconBlock) cltypes.PayloadStatus {
-	// Get the parent block
 	parentBlock, ok := f.forkGraph.GetBlock(block.ParentRoot)
 	if !ok || parentBlock == nil {
 		return cltypes.PayloadStatusEmpty
 	}
+	return parentPayloadStatusFromBids(parentBlock, block)
+}
 
+// parentPayloadStatusFromBids is getParentPayloadStatus with the parent block
+// already resolved, so callers iterating siblings fetch the parent only once.
+func parentPayloadStatusFromBids(parentBlock *cltypes.SignedBeaconBlock, block *cltypes.BeaconBlock) cltypes.PayloadStatus {
 	// Pre-GLOAS parent blocks have no bid field. From the GLOAS fork choice
 	// perspective they are treated as EMPTY: they always carried their execution
 	// payload inline (no separate envelope), so the PENDING → EMPTY/FULL

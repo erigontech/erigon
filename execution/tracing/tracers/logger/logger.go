@@ -23,8 +23,8 @@ import (
 	"fmt"
 	"io"
 	"maps"
-	"math/big"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/holiman/uint256"
@@ -73,7 +73,7 @@ type StructLog struct {
 	GasCost       uint64                      `json:"gasCost"`
 	Memory        []byte                      `json:"memory,omitempty"`
 	MemorySize    int                         `json:"memSize"`
-	Stack         []*big.Int                  `json:"stack"`
+	Stack         []uint256.Int               `json:"stack"`
 	ReturnData    []byte                      `json:"returnData"`
 	Storage       map[common.Hash]common.Hash `json:"-"`
 	Depth         int                         `json:"depth"`
@@ -83,7 +83,7 @@ type StructLog struct {
 
 // overrides for gencodec
 type structLogMarshaling struct {
-	Stack       []*math.HexOrDecimal256
+	Stack       []hexutil.U256
 	Gas         math.HexOrDecimal64
 	GasCost     math.HexOrDecimal64
 	Memory      hexutil.Bytes
@@ -204,12 +204,10 @@ func (l *StructLogger) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scope 
 		copy(mem, memory)
 	}
 	// Copy a snapshot of the current stack state to a new buffer
-	var stck []*big.Int
+	var stck []uint256.Int
 	if !l.cfg.DisableStack {
-		stck = make([]*big.Int, len(stack))
-		for i, item := range stack {
-			stck[i] = new(big.Int).Set(item.ToBig())
-		}
+		stck = make([]uint256.Int, len(stack))
+		copy(stck, stack)
 	}
 
 	stackLen := len(stack)
@@ -301,7 +299,8 @@ func (l *StructLogger) Flush(tx types.Transaction) {
 // FormatLogs formats EVM returned structured logs for json output
 func FormatLogs(logs []StructLog) []StructLogRes {
 	formatted := make([]StructLogRes, len(logs))
-	for index, trace := range logs {
+	for index := range logs {
+		trace := &logs[index]
 		formatted[index] = StructLogRes{
 			Pc:      trace.Pc,
 			Op:      trace.Op.String(),
@@ -313,7 +312,8 @@ func FormatLogs(logs []StructLog) []StructLogRes {
 		if trace.Stack != nil {
 			stack := make([]string, len(trace.Stack))
 			for i, stackValue := range trace.Stack {
-				stack[i] = hex.EncodeToString(math.PaddedBigBytes(stackValue, 32))
+				b := stackValue.Bytes32()
+				stack[i] = hex.EncodeToString(b[:])
 			}
 			formatted[index].Stack = &stack
 		}
@@ -337,7 +337,8 @@ func FormatLogs(logs []StructLog) []StructLogRes {
 
 // WriteTrace writes a formatted trace to the given writer
 func WriteTrace(writer io.Writer, logs []StructLog) {
-	for _, log := range logs {
+	for i := range logs {
+		log := &logs[i]
 		fmt.Fprintf(writer, "%-16spc=%08d gas=%v cost=%v", log.Op, log.Pc, log.Gas, log.GasCost)
 		if log.Err != nil {
 			fmt.Fprintf(writer, " ERROR: %v", log.Err)
@@ -346,8 +347,8 @@ func WriteTrace(writer io.Writer, logs []StructLog) {
 
 		if len(log.Stack) > 0 {
 			fmt.Fprintln(writer, "Stack:")
-			for i := len(log.Stack) - 1; i >= 0; i-- {
-				fmt.Fprintf(writer, "%08d  %x\n", len(log.Stack)-i-1, math.PaddedBigBytes(log.Stack[i], 32))
+			for i, val := range slices.Backward(log.Stack) {
+				fmt.Fprintf(writer, "%08d  %x\n", len(log.Stack)-i-1, val.Bytes32())
 			}
 		}
 		if len(log.Memory) > 0 {

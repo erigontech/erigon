@@ -21,10 +21,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
@@ -117,6 +119,7 @@ func BlobsBundleFromTransactions(txs types.Transactions) (*BlobsBundle, error) {
 			copy(pp, p[:])
 			bundle.Proofs = append(bundle.Proofs, pp)
 		}
+		//nolint:gocritic // rangeValCopy: iterating over 128KB blob byte array directly
 		for _, b := range blobTx.Blobs {
 			bp := make([]byte, len(b))
 			copy(bp, b[:])
@@ -146,7 +149,7 @@ type ExecutionPayloadBody struct {
 type ExecutionPayloadBodyV2 struct {
 	Transactions    []hexutil.Bytes     `json:"transactions" gencodec:"required"`
 	Withdrawals     []*types.Withdrawal `json:"withdrawals"  gencodec:"required"`
-	BlockAccessList hexutil.Bytes       `json:"blockAccessList,omitempty"`
+	BlockAccessList *hexutil.Bytes      `json:"blockAccessList"`
 }
 
 type PayloadStatus struct {
@@ -178,6 +181,29 @@ type ClientVersionV1 struct {
 
 func (c ClientVersionV1) String() string {
 	return fmt.Sprintf("ClientCode: %s, %s-%s-%s", c.Code, c.Name, c.Version, c.Commit)
+}
+
+// NewClientVersionV1 builds a ClientVersionV1 from a git commit hash, using its leading
+// 4 bytes as required by the standard, or all-zero bytes when the hash is missing or too
+// short. See https://github.com/ethereum/execution-apis/blob/main/src/engine/identification.md
+func NewClientVersionV1(code, name, versionStr, gitCommit string) ClientVersionV1 {
+	commit := strings.TrimPrefix(gitCommit, "0x")
+	if len(commit) >= 8 {
+		commit = commit[:8]
+	} else {
+		commit = "00000000"
+	}
+	return ClientVersionV1{
+		Code:    code,
+		Name:    name,
+		Version: versionStr,
+		Commit:  "0x" + commit,
+	}
+}
+
+// LocalClientVersionV1 returns the ClientVersionV1 describing this node.
+func LocalClientVersionV1() ClientVersionV1 {
+	return NewClientVersionV1(version.ClientCode, version.ClientName, version.VersionWithCommit(version.GitCommit), version.GitCommit)
 }
 
 type StringifiedError struct{ err error }

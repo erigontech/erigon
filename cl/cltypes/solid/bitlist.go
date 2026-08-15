@@ -19,7 +19,9 @@ package solid
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math/bits"
+	"slices"
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/common/clonable"
@@ -110,7 +112,7 @@ func (u *BitList) Range(fn func(index int, value byte, length int) bool) {
 // Pop removes the first bit from the list, like when the Red Ranger takes the first hit.
 func (u *BitList) Pop() (x byte) {
 	x, u.u = u.u[0], u.u[1:]
-	u.l = u.l - 1
+	u.l--
 	return x
 }
 
@@ -120,7 +122,7 @@ func (u *BitList) Append(v byte) {
 		u.u = append(u.u, 0)
 	}
 	u.u[u.l] = v
-	u.l = u.l + 1
+	u.l++
 }
 
 // Get lets us peek at a bit in the list, like when the team uses their sensors to spot the monster.
@@ -131,46 +133,6 @@ func (u *BitList) Get(index int) byte {
 // Set is like the Red Ranger giving an order - we set a bit to a certain value.
 func (u *BitList) Set(index int, v byte) {
 	u.u[index] = v
-}
-
-// removeMsb removes the most significant bit from the list, but doesn't change the length l.
-func (u *BitList) removeMsb() {
-	for i := len(u.u) - 1; i >= 0; i-- {
-		if u.u[i] != 0 {
-			// find last bit, make a mask and clear it
-			u.u[i] &= ^(1 << uint(bits.Len8(u.u[i])-1))
-			break
-		}
-	}
-}
-
-// addMsb adds a most significant bit to the list, but doesn't change the length l.
-func (u *BitList) addMsb() int {
-	byteLen := len(u.u)
-	found := false
-	for i := len(u.u) - 1; i >= 0; i-- {
-		if u.u[i] != 0 {
-			msb := bits.Len8(u.u[i])
-			if msb == 8 {
-				if i == len(u.u)-1 {
-					u.u = append(u.u, 0)
-				}
-				byteLen++
-				u.u[i+1] |= 1
-			} else {
-				u.u[i] |= 1 << uint(msb)
-			}
-			found = true
-			break
-		}
-		byteLen--
-	}
-	if !found {
-		u.u[0] = 1
-		byteLen = 1
-	}
-	u.l = byteLen
-	return byteLen
 }
 
 // Length gives us the length of the bitlist, just like a roll call tells us how many Rangers there are.
@@ -187,6 +149,17 @@ func (u *BitList) HashSSZ() ([32]byte, error) {
 	return merkle_tree.BitlistRootWithLimit(u.u[:u.l], uint64(u.c))
 }
 
+func (u *BitList) HashSSZProgressive() ([32]byte, error) {
+	bytes := u.Bytes()
+	bitLength := bitlistBits(bytes)
+	packed := append([]byte(nil), bytes...)
+	if bitLength < len(packed)*8 {
+		packed[bitLength/8] &^= 1 << uint(bitLength%8)
+	}
+	packed = packed[:(bitLength+7)/8]
+	return merkle_tree.ProgressiveBitlistRoot(packed, uint64(bitLength))
+}
+
 // EncodeSSZ appends the underlying byte slice of the BitList to the destination byte slice.
 // It returns the resulting byte slice.
 func (u *BitList) EncodeSSZ(dst []byte) ([]byte, error) {
@@ -196,6 +169,13 @@ func (u *BitList) EncodeSSZ(dst []byte) ([]byte, error) {
 // DecodeSSZ replaces the underlying byte slice of the BitList with a copy of the input byte slice.
 // It then updates the length of the BitList to match the length of the new byte slice.
 func (u *BitList) DecodeSSZ(dst []byte, _ int) error {
+	if len(dst) == 0 || dst[len(dst)-1] == 0 {
+		return errors.New("invalid bitlist: missing length bit")
+	}
+	bitLength := 8*(len(dst)-1) + bits.Len8(dst[len(dst)-1]) - 1
+	if bitLength > u.c {
+		return fmt.Errorf("invalid bitlist length: %d > %d", bitLength, u.c)
+	}
 	u.u = make([]byte, len(dst))
 	copy(u.u, dst)
 	u.l = len(dst)
@@ -216,15 +196,19 @@ func (u *BitList) Clone() clonable.Clonable {
 
 // getBitlistLength return the amount of bits in given bitlist.
 func (u *BitList) Bits() int {
-	if len(u.u) == 0 {
+	return bitlistBits(u.Bytes())
+}
+
+func bitlistBits(data []byte) int {
+	if len(data) == 0 {
 		return 0
 	}
 	// The most significant bit is present in the last byte in the array.
 	var last byte
 	var byteLen int
-	for i := len(u.u) - 1; i >= 0; i-- {
-		if u.u[i] != 0 {
-			last = u.u[i]
+	for i, b := range slices.Backward(data) {
+		if b != 0 {
+			last = b
 			byteLen = i + 1
 			break
 		}
@@ -259,16 +243,18 @@ func (u *BitList) UnmarshalJSON(input []byte) error {
 }
 
 func (u *BitList) Merge(other *BitList) (*BitList, error) {
+	uBytes, otherBytes := u.Bytes(), other.Bytes()
+	if len(uBytes) != len(otherBytes) {
+		return nil, errors.New("bitlist union: different length")
+	}
 	if u.Bits() != other.Bits() {
 		log.Warn("bitlist union: different length", "u", u.Bits(), "other", other.Bits())
 		return nil, errors.New("bitlist union: different length")
 	}
-	// copy by the longer one
-	var ret, unionFrom *BitList
-	ret = other.Copy()
-	unionFrom = u
-	for i := 0; i < len(unionFrom.u); i++ {
-		ret.u[i] |= unionFrom.u[i]
+	ret := other.Copy()
+	retBytes := ret.Bytes()
+	for i := range uBytes {
+		retBytes[i] |= uBytes[i]
 	}
 	return ret, nil
 }

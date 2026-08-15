@@ -27,7 +27,7 @@ verified against the Go code in this repository.
 | `get_head.go`: `accountWeights`, `computeVotes`, `getHead`, `GetHead` | Phase0 `get_attestation_score`, `get_weight`, `get_head`; Gloas dispatch boundary for modified `get_head` |
 | `get_head.go`: `getHeadGloas` | Gloas `get_head`, `get_node_children`, `get_weight`, `get_payload_status_tiebreaker` |
 | `get_head.go`: `getFilteredBlockTree`, `getFilterBlockTree` | Phase0 `get_filtered_block_tree`, `filter_block_tree`, `get_voting_source`; Gloas inherits filtered-tree viability |
-| `weight_store.go`, `weight_store_indexed.go`: `GetWeight`, `GetAttestationScore`, `GetProposerScore`, `ShouldApplyProposerBoost`, `IndexVote`, `RemoveVote` | Phase0 `get_weight`, `get_attestation_score`, `get_proposer_score`; Gloas modified `get_weight`, `get_attestation_score`, `should_apply_proposer_boost`, `LatestMessage` indexing |
+| `weight_store.go`, `gloas_weight_tree.go`: `GetWeight`, `GetAttestationScore`, `GetProposerScore`, `ShouldApplyProposerBoost` | Phase0 `get_weight`, `get_attestation_score`, `get_proposer_score`; Gloas modified `get_weight`, `get_attestation_score`, delta-maintained `LatestMessage` weights; delegates Gloas proposer-boost checks to `timing.go` |
 | `payload_vote.go`: `notifyPtcMessages`, `applyPayloadAttestationVote` | Gloas `notify_ptc_messages`, `on_payload_attestation_message` vote application |
 | `payload_vote.go`: `payloadTimeliness`, `payloadDataAvailability` | Gloas `payload_timeliness`, `payload_data_availability`; requires local envelope availability plus independent PTC majorities |
 | `payload_vote.go`: `getParentPayloadStatus`, `isParentNodeFull`, `getSupportedNode`, `isAncestor` | Gloas `get_parent_payload_status`, `is_parent_node_full`, `get_supported_node`, `is_ancestor` |
@@ -54,6 +54,16 @@ verified against the Go code in this repository.
 | `fork_graph/interface.go`, `fork_graph/fork_graph_disk.go`, `fork_graph/fork_graph_disk_fs.go`, `fork_graph/participation_indicies_store.go` | Implementation storage for Phase0/Gloas `Store.blocks`, `Store.block_states`, `Store.checkpoint_states`, payload envelope persistence, and participation data |
 | `optimistic/optimistic.go`, `optimistic/optimistic_impl.go` | Optimistic sync support for execution payload validity tracking; review with Bellatrix execution payload validity and fork-choice update semantics |
 | `public_keys_registry/interface.go`, `public_keys_registry/in_memory_public_keys_registry.go`, `public_keys_registry/db_public_keys_registry.go` | Signature verification support for `is_valid_indexed_attestation` and payload attestation validation |
+
+## Anchor State Invariant
+
+`NewForkChoiceStore` stores the anchor state's latest block root/epoch as *both* the
+justified and finalized checkpoint (`forkchoice.go:392-393`). The anchor is therefore
+assumed to be a finalized (FFG-final, reorg-immune) state, exactly as spec
+`get_forkchoice_store(anchor_state)` requires. Any code that produces the bootstrap
+anchor must honor this: a head state is reorg-eligible and must never be handed in. The
+local-restart resume path (`cl/phase1/core/checkpoint_sync`) depends on this — it resumes
+only from the persisted finalized state (`finalized.ssz_snappy`), never a head state.
 
 ## Fulu Review Notes
 

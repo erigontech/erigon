@@ -34,8 +34,6 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
 
-var json = jsoniter.ConfigFastest
-
 // ReadChainConfig retrieves the consensus settings based on the given genesis hash.
 func ReadChainConfig(db kv.Getter, hash common.Hash) (*chain.Config, error) {
 	data, err := db.GetOne(kv.ConfigTable, hash[:])
@@ -73,6 +71,19 @@ func WriteChainConfig(db kv.Putter, hash common.Hash, cfg *chain.Config) error {
 			return fmt.Errorf("failed to JSON encode chain config 'bor': %w", err)
 		}
 		cfg.BorJSON = borJSON
+	}
+
+	// L2 resolution from L2JSON is owned by the registering L2 package, so
+	// only the raw payload round-trips here; a present L2JSON is the source
+	// of truth and is not clobbered by re-marshalling the resolved value.
+	// A `"l2": null` payload counts as absent, so the resolved value still
+	// backfills it rather than persisting the literal `null`.
+	if cfg.L2 != nil && (len(cfg.L2JSON) == 0 || bytes.Equal(cfg.L2JSON, []byte("null"))) {
+		l2JSON, err := jsoniter.ConfigFastest.Marshal(cfg.L2)
+		if err != nil {
+			return fmt.Errorf("failed to JSON encode chain config 'l2': %w", err)
+		}
+		cfg.L2JSON = l2JSON
 	}
 
 	data, err := jsoniter.ConfigFastest.Marshal(cfg)

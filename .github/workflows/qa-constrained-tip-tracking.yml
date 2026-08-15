@@ -5,8 +5,12 @@ on:
     - cron: '0 20 * * 0'  # Run on Sunday at 08:00 PM UTC
   workflow_dispatch:     # Run manually
 
+permissions:
+  contents: read
+
 jobs:
   constrained-tip-tracking-test:
+    name: tip-tracking-test-${{ matrix.chain }}-${{ matrix.cgroup_name }}-${{ matrix.prune_mode }}
     strategy:
       fail-fast: false
       matrix:
@@ -34,6 +38,8 @@ jobs:
     steps:
     - name: Check out repository
       uses: actions/checkout@v7
+      with:
+        persist-credentials: false
 
     - name: Clean Erigon Build Directory
       run: |
@@ -147,13 +153,13 @@ jobs:
         python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
           --repo erigon \
           --commit $(git rev-parse HEAD) \
-          --branch ${{ github.ref_name }} \
+          --branch "$GITHUB_REF_NAME" \
           --test_name constrained-tip-tracking \
           --chain $CHAIN \
-          --runner ${{ runner.name }} \
+          --runner "$RUNNER_NAME" \
           --db_version $db_version \
           --outcome $TEST_RESULT \
-          --result_file ${{ github.workspace }}/result-$CHAIN.json
+          --result_file "$GITHUB_WORKSPACE/result-$CHAIN.json"
 
     - name: Upload test results
       if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}

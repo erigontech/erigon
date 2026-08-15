@@ -17,6 +17,7 @@
 package builder
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -27,9 +28,9 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
@@ -63,7 +64,7 @@ type BuilderCreateBlockCfg struct {
 	chainConfig            *chain.Config
 	engine                 rules.Engine
 	blockBuilderParameters *Parameters
-	blockReader            services.FullBlockReader
+	blockReader            dbservices.FullBlockReader
 }
 
 func StageBuilderCreateBlockCfg(
@@ -71,7 +72,7 @@ func StageBuilderCreateBlockCfg(
 	chainConfig *chain.Config,
 	engine rules.Engine,
 	blockBuilderParameters *Parameters,
-	blockReader services.FullBlockReader,
+	blockReader dbservices.FullBlockReader,
 ) BuilderCreateBlockCfg {
 	return BuilderCreateBlockCfg{
 		builder:                builder,
@@ -127,7 +128,7 @@ func createBlock(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalT
 		if number == nil {
 			return nil
 		}
-		for i := 0; i < n; i++ {
+		for range n {
 			block, _, _ := cfg.blockReader.BlockWithSenders(context.Background(), tx, hash, *number)
 			if block == nil {
 				break
@@ -176,10 +177,13 @@ func createBlock(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalT
 
 	header.Coinbase = coinbase.Value()
 	header.Extra = cfg.builder.BuilderConfig.ExtraData
+	if cfg.blockBuilderParameters != nil && cfg.blockBuilderParameters.ExtraData != nil {
+		header.Extra = cfg.blockBuilderParameters.ExtraData
+	}
 
 	logger.Info(fmt.Sprintf("[%s] Start building", logPrefix), "block", executionAt+1, "baseFee", header.BaseFee, "gasLimit", header.GasLimit)
 	ibs := state.New(state.NewReaderV3(sd.AsGetter(tx)))
-	defer ibs.Release(false)
+	defer ibs.Close()
 
 	if err = cfg.engine.Prepare(chain, header, ibs); err != nil {
 		logger.Error("Failed to prepare header for building",
@@ -210,7 +214,7 @@ func createBlock(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalT
 	if daoBlock := cfg.chainConfig.DAOForkBlock; daoBlock != nil {
 		// Check whether the block is among the fork extra-override range
 		if header.Number.Uint64() >= *daoBlock && header.Number.Uint64() < *daoBlock+misc.DAOForkExtraRange {
-			header.Extra = common.Copy(misc.DAOForkBlockExtra)
+			header.Extra = bytes.Clone(misc.DAOForkBlockExtra)
 		}
 	}
 

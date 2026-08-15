@@ -21,8 +21,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 )
@@ -140,13 +141,13 @@ func (b *BackwardBeaconDownloader) SetHTTPFallbackURL(checkpointSyncURL string) 
 	if checkpointSyncURL == "" {
 		return
 	}
-	idx := strings.Index(checkpointSyncURL, "/eth/")
-	if idx < 0 {
+	before, _, found := strings.Cut(checkpointSyncURL, "/eth/")
+	if !found {
 		// URL is already a base URL without path (e.g. https://beacon.example.io).
 		b.httpFallbackURL = strings.TrimRight(checkpointSyncURL, "/")
 		return
 	}
-	b.httpFallbackURL = checkpointSyncURL[:idx]
+	b.httpFallbackURL = before
 }
 
 // SetShouldStopAtFn sets the stop condition.
@@ -198,8 +199,8 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 // Falls back to the beacon API when P2P is unavailable and an HTTP URL is configured.
 func (b *BackwardBeaconDownloader) fetchBlockRange(ctx context.Context) ([]*cltypes.SignedBeaconBlock, error) {
 	const count = uint64(64)
-	start := b.slotToDownload.Load() - count + 1
-	if start > b.slotToDownload.Load() { // overflow check
+	start, underflow := math.SafeSub(b.slotToDownload.Load(), count-1)
+	if underflow {
 		start = 0
 	}
 
@@ -297,12 +298,11 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 	// when a retry causes the same batch to be re-fetched.
 	advanced := false
 	matched := false
-	for i := len(responses) - 1; i >= 0; i-- {
+	for _, block := range slices.Backward(responses) {
 		if b.finished.Load() {
 			return nil
 		}
 
-		block := responses[i]
 		blockRoot, err := block.Block.HashSSZ()
 		if err != nil {
 			log.Debug("Could not compute block root", "err", err)
@@ -313,7 +313,6 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 			log.Trace("[BackwardBeaconDownloader] root mismatch", "slot", block.Block.Slot, "got", common.Hash(blockRoot), "expected", b.expectedRoot)
 			continue
 		}
-		log.Debug("[BackwardBeaconDownloader] block matched", "slot", block.Block.Slot, "root", common.Hash(blockRoot))
 		matched = true
 
 		var envelope *cltypes.SignedExecutionPayloadEnvelope

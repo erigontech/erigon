@@ -10,10 +10,6 @@ inputs:
     description: "Partial clone filter (e.g. blob:none)"
     required: false
     default: 'blob:none'
-  submodules:
-    description: "Clone submodules (recursive shallow clone)"
-    required: false
-    default: 'false'
   cleanup-space:
     description: "Remove large pre-installed packages to free disk space (Linux only)"
     required: false
@@ -76,14 +72,18 @@ runs:
         fi
         df -h
 
-    - name: "Use D: drive for temp files on Windows"
+    - name: "Use D: drive for caches and temp files on Windows"
       if: ${{ runner.os == 'Windows' }}
       shell: bash
       run: |
-        mkdir -p D:/tmp
-        echo "TEMP=D:/tmp" >> "$GITHUB_ENV"
-        echo "TMP=D:/tmp" >> "$GITHUB_ENV"
-        echo "TMPDIR=D:/tmp" >> "$GITHUB_ENV"
+        mkdir -p D:/tmp D:/go-build D:/go/pkg/mod
+        {
+          echo "TEMP=D:/tmp"
+          echo "TMP=D:/tmp"
+          echo "TMPDIR=D:/tmp"
+          echo "GOCACHE=D:/go-build"
+          echo "GOMODCACHE=D:/go/pkg/mod"
+        } >> "$GITHUB_ENV"
 
     - name: Enable long paths on Windows
       if: ${{ runner.os == 'Windows' }}
@@ -103,7 +103,6 @@ runs:
         fetch-depth: 1
         filter: ${{ inputs.filter }}
         clean: false
-        submodules: false
 
     - name: Unshallow current commit
       shell: bash
@@ -118,36 +117,6 @@ runs:
         fi
         time git fetch $filter_arg --unshallow --no-tags \
           --prune --no-recurse-submodules origin "$(git rev-parse HEAD)"
-
-    - name: Compute submodule objects cache key
-      id: submodule-key
-      if: ${{ inputs.submodules == 'true' }}
-      shell: bash
-      run: |
-        hash=$(git ls-tree -r HEAD | awk '$2 == "commit" {print $3}' | sort | sha256sum | cut -d' ' -f1)
-        echo "hash=$hash" >> "$GITHUB_OUTPUT"
-
-    - name: Restore submodule git objects cache
-      id: restore-submodules
-      if: ${{ inputs.submodules == 'true' }}
-      uses: actions/cache/restore@v5
-      with:
-        path: |
-          .git/modules
-        key: gitobjects|${{ runner.os }}|${{ steps.submodule-key.outputs.hash }}
-        restore-keys: |
-          gitobjects|${{ runner.os }}|
-
-    - name: Warn on submodule cache miss
-      if: ${{ inputs.submodules == 'true' && steps.restore-submodules.outputs.cache-hit != 'true' }}
-      shell: bash
-      run: |
-        echo "::warning::.git/modules cache miss (matched key: '${{ steps.restore-submodules.outputs.cache-matched-key }}')"
-
-    - name: Clone submodules
-      if: ${{ inputs.submodules == 'true' }}
-      shell: bash
-      run: time git submodule update --init --recursive --depth 1 --filter=blob:none --jobs 4
 
     - name: Install git-restore-mtime
       shell: bash
@@ -173,10 +142,6 @@ runs:
         # Main repo: git-restore-mtime sets each fixture's mtime to the
         # commit that last touched it (deterministic and content-sensitive).
         #
-        # Submodules (depth 1): git-restore-mtime can't help because files
-        # not in the single commit's log keep checkout time. Instead, set
-        # all files to the submodule HEAD commit timestamp.
-        #
         # Directories: normalize to a fixed epoch since git-restore-mtime
         # only handles dirs for file adds/deletes, not modifications.
 
@@ -195,10 +160,6 @@ runs:
           'cl/transition/**/test_data/**' \
           'cl/utils/eth2shuffle/spec/**' \
           'execution/state/genesiswrite/*.json'
-
-        # Submodules are all fixture data; set mtimes to HEAD commit time.
-        git submodule foreach --quiet --recursive \
-          'ts=$(git log -1 --format=%cd --date=format:%Y%m%d%H%M.%S HEAD); find . -not -path "./.git/*" -not -type d -print0 | TZ=UTC xargs -0 touch -t $ts'
 
         # Normalize directory mtimes to a fixed epoch.
         find . -type d -not -path '*/.git/*' -print0 | TZ=UTC xargs -0 touch -t 200902132331.30
@@ -243,16 +204,15 @@ runs:
       if: ${{ runner.os == 'Linux' }}
       shell: bash
       # erigon only needs build-essential (gcc/make). The hosted runner image
-      # ships extra third-party apt repos (Google Chrome, Microsoft, …) that are
-      # periodically mid-mirror-sync and answer with a Packages.gz size mismatch,
-      # which fails `apt-get update` and so the whole job — the recurring
-      # "dl.google.com/linux/chrome-stable … File has unexpected size" flake.
-      # Drop those repos before updating (we never install from them) and let the
-      # remaining Ubuntu archive retry on transient blips.
+      # ships third-party apt repos (Google Chrome, Microsoft/azure-cli) whose
+      # CDNs intermittently break `apt-get update` — a Packages.gz size mismatch
+      # mid-mirror-sync, or a 403 "no longer signed" on the azure-cli repo —
+      # failing the whole job. Drop every source pointing at those CDNs before
+      # updating (we never install from them); the Ubuntu archive retries on blips.
       # Can't suppress "Reading database..." from apt-get install. Also it's very slow...
       run: |
-        sudo rm -f /etc/apt/sources.list.d/google-chrome.list \
-                   /etc/apt/sources.list.d/microsoft-prod.list || true
+        sudo grep -rlZE 'dl\.google\.com|packages\.microsoft\.com' \
+          /etc/apt/sources.list.d/ 2>/dev/null | sudo xargs -0 -r rm -f || true
         sudo apt-get update -qq -o Acquire::Retries=3 \
           && sudo apt-get install -qq -y build-essential 2>/dev/null
 
@@ -321,13 +281,6 @@ runs:
     - name: Export build cache key
       shell: bash
       run: echo "ERIGON_CI_GOCACHE_KEY=${{ steps.restore-build-cache.outputs.primary-key }}" >> "$GITHUB_ENV"
-
-    - name: Export submodule cache keys
-      if: ${{ inputs.submodules == 'true' }}
-      shell: bash
-      run: |
-        echo "ERIGON_CI_GITOBJECTS_CACHE_KEY=gitobjects|${{ runner.os }}|${{ steps.submodule-key.outputs.hash }}" >> "$GITHUB_ENV"
-        echo "ERIGON_CI_GITOBJECTS_CACHE_RESTORED_KEY=${{ steps.restore-submodules.outputs.cache-matched-key }}" >> "$GITHUB_ENV"
 
     - name: Display free disk space after setup
       shell: bash

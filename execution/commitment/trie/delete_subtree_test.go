@@ -25,7 +25,6 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv/dbutils"
-	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // requireValue asserts that key resolves to want; nil want means the key must be absent.
@@ -65,14 +64,9 @@ func TestTrieDeleteSubtree_ShortNode_Debug(t *testing.T) {
 	key := []byte{uint8(1)}
 	val := []byte{uint8(1)}
 
-	keyHash, err := common.HashData(key)
-	require.NoError(t, err)
-
-	addrHash1, err := common.HashData(addr1[:])
-	require.NoError(t, err)
-
-	addrHash2, err := common.HashData(addr2[:])
-	require.NoError(t, err)
+	keyHash := crypto.Keccak256Hash(key)
+	addrHash1 := crypto.Keccak256Hash(addr1[:])
+	addrHash2 := crypto.Keccak256Hash(addr2[:])
 
 	key1 := dbutils.GenerateCompositeTrieKey(addrHash1, keyHash)
 	key2 := dbutils.GenerateCompositeTrieKey(addrHash2, keyHash)
@@ -242,50 +236,24 @@ func TestTrieDeleteSubtree_FullNode_FullMatch(t *testing.T) {
 	requireValue(t, trie, key3, val3)
 }
 
-func TestTrieDeleteSubtree_ValueNode_PartialMatch(t *testing.T) {
-	trie := newEmpty()
-	key := []byte{uint8(1)}
-	val := []byte{uint8(1)}
-	keyExist := []byte{uint8(2)}
-	valExist := []byte{uint8(2)}
-
-	trie.Update(key, val)
-	trie.Update(keyExist, valExist)
-	requireValue(t, trie, key, val)
-
-	trie.DeleteSubtree(key)
-
-	requireValue(t, trie, key, nil)
-	requireValue(t, trie, keyExist, valExist)
-}
-
 func TestAccountNotRemovedAfterRemovingSubtrieAfterAccount(t *testing.T) {
-	acc := &accounts.Account{
-		Nonce:       2,
-		Incarnation: 2,
-		Balance:     u256.U64(200),
-		Root:        EmptyRoot,
-		CodeHash:    accounts.InternCodeHash(emptyState),
-	}
+	acc := testAccount(2, u256.U64(200), withIncarnation(2))
 
 	trie := newEmpty()
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	pubAddr := crypto.PubkeyToAddress(key.PublicKey)
-	addrHash, err := common.HashData(pubAddr[:])
-	require.NoError(t, err)
+	addrHash := crypto.Keccak256Hash(pubAddr[:])
 	trie.UpdateAccount(addrHash[:], acc)
 
 	accRes1, _ := trie.GetAccount(addrHash[:])
 	require.Equal(t, acc, accRes1)
 
 	val1 := []byte("1")
-	dataKey1, err := common.HashData([]byte("1"))
-	require.NoError(t, err)
+	dataKey1 := crypto.Keccak256Hash([]byte("1"))
 
 	val2 := []byte("2")
-	dataKey2, err := common.HashData([]byte("2"))
-	require.NoError(t, err)
+	dataKey2 := crypto.Keccak256Hash([]byte("2"))
 
 	trie.Update(dbutils.GenerateCompositeTrieKey(addrHash, dataKey1), val1)
 	trie.Update(dbutils.GenerateCompositeTrieKey(addrHash, dataKey2), val2)

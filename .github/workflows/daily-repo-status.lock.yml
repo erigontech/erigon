@@ -52,7 +52,7 @@ jobs:
       comment_repo: ""
     steps:
       - name: Setup Scripts
-        uses: github/gh-aw/actions/setup@a3624368c4e7d877586ff2784b61de73405e2cdd # v0.80.9
+        uses: github/gh-aw/actions/setup@53843da968225dc56e1590978a7ed6407a8438ac # v0.85.4
         with:
           destination: /opt/gh-aw/actions
       - name: Check workflow file timestamps
@@ -81,7 +81,7 @@ jobs:
       secret_verification_result: ${{ steps.validate-secret.outputs.verification_result }}
     steps:
       - name: Setup Scripts
-        uses: github/gh-aw/actions/setup@a3624368c4e7d877586ff2784b61de73405e2cdd # v0.80.9
+        uses: github/gh-aw/actions/setup@53843da968225dc56e1590978a7ed6407a8438ac # v0.85.4
         with:
           destination: /opt/gh-aw/actions
       - name: Checkout .github and .agents folders

@@ -17,6 +17,7 @@
 package commitment
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
@@ -34,14 +35,13 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 )
 
-// In memory commitment and state to use with the tests
 type MockState struct {
 	t          testing.TB
 	concurrent atomic.Bool
 
-	mu     sync.RWMutex          // to protect sm and cm for concurrent trie
-	sm     map[string][]byte     // backbone of the state
-	cm     map[string]BranchData // backbone of the commitments
+	mu     sync.RWMutex
+	sm     map[string][]byte
+	cm     map[string]BranchData
 	numBuf [binary.MaxVarintLen64]byte
 }
 
@@ -63,7 +63,6 @@ func (ms *MockState) TempDir() string {
 }
 
 func (ms *MockState) PutBranch(prefix []byte, data []byte, prevData []byte) error {
-	// updates already merged by trie
 	if ms.concurrent.Load() {
 		ms.mu.Lock()
 		defer ms.mu.Unlock()
@@ -159,7 +158,6 @@ func (ms *MockState) Storage(plainKey []byte) (*Update, error) {
 
 func (ms *MockState) TxNum() uint64 { return 0 }
 
-// applyPlainUpdates is called sequentially outside of the trie, so it needs no locking.
 func (ms *MockState) applyPlainUpdates(plainKeys [][]byte, updates []Update) error {
 	for i, key := range plainKeys {
 		update := updates[i]
@@ -185,7 +183,6 @@ func (ms *MockState) applyPlainUpdates(plainKeys [][]byte, updates []Update) err
 	return nil
 }
 
-// applyBranchNodeUpdates is called sequentially outside of the trie, so it needs no locking.
 func (ms *MockState) applyBranchNodeUpdates(updates map[string]BranchData) {
 	for key, update := range updates {
 		if pre, ok := ms.cm[key]; ok {
@@ -208,8 +205,6 @@ func decodeHex(in string) []byte {
 	return payload
 }
 
-// UpdateBuilder collects updates to the state
-// and provides them in properly sorted form
 type UpdateBuilder struct {
 	balances   map[string]*uint256.Int
 	nonces     map[string]uint64
@@ -345,7 +340,6 @@ func (ub *UpdateBuilder) DeleteStorage(addr string, loc string) *UpdateBuilder {
 	return ub
 }
 
-// Build returns plain keys and the corresponding updates, ordered by increasing hashed key.
 func (ub *UpdateBuilder) Build() (plainKeys [][]byte, updates []Update) {
 	hashed := make([]string, 0, len(ub.keyset)+len(ub.keyset2))
 	preimages := make(map[string][]byte)
@@ -380,7 +374,7 @@ func (ub *UpdateBuilder) Build() (plainKeys [][]byte, updates []Update) {
 				hashedKey[64+i*2] = (c >> 4) & 0xf
 				hashedKey[64+i*2+1] = c & 0xf
 			}
-			hs := string(common.Copy(hashedKey))
+			hs := string(bytes.Clone(hashedKey))
 			hashed = append(hashed, hs)
 			preimages[hs] = []byte(sk1)
 			preimages2[hs] = []byte(sk2)
@@ -437,23 +431,6 @@ func (ub *UpdateBuilder) Build() (plainKeys [][]byte, updates []Update) {
 	return
 }
 
-// WrapKeyUpdatesParallel is WrapKeyUpdates with concurrent commitment enabled on the result.
-func WrapKeyUpdatesParallel(tb testing.TB, mode Mode, hasher keyHasher, keys [][]byte, updates []Update) *Updates {
-	tb.Helper()
-
-	upd := NewUpdates(mode, tb.TempDir(), hasher)
-	upd.SetConcurrentCommitment(true)
-	for i, key := range keys {
-		ks := common.ToStringZeroCopy(key)
-		upd.TouchPlainKey(ks, nil, func(c *KeyUpdate, _ []byte) {
-			c.plainKey = ks
-			c.hashedKey = hasher(key)
-			c.update = &updates[i]
-		})
-	}
-	return upd
-}
-
 func WrapKeyUpdates(tb testing.TB, mode Mode, hasher keyHasher, keys [][]byte, updates []Update) *Updates {
 	tb.Helper()
 
@@ -468,7 +445,6 @@ func WrapKeyUpdates(tb testing.TB, mode Mode, hasher keyHasher, keys [][]byte, u
 	return upd
 }
 
-// WrapKeyUpdatesInto adds keys to an existing Updates without clearing its prior contents.
 func WrapKeyUpdatesInto(tb testing.TB, upd *Updates, keys [][]byte, updates []Update) {
 	tb.Helper()
 	for i, key := range keys {

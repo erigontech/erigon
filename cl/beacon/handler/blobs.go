@@ -76,9 +76,17 @@ func (a *ApiHandler) GetEthV1BeaconBlobSidecars(w http.ResponseWriter, r *http.R
 	if err != nil {
 		return nil, err
 	}
+
+	version := a.ethClock.StateVersionByEpoch(*slot / a.beaconChainCfg.SlotsPerEpoch)
+	isOptimistic := a.forkchoiceStore.IsRootOptimistic(blockRoot)
+	isFinalized := canonicalRoot == blockRoot && *slot <= a.forkchoiceStore.FinalizedSlot()
+
 	resp := solid.NewStaticListSSZ[*cltypes.BlobSidecar](696969, blobSidecarSSZLenght)
 	if !found {
-		return beaconhttp.NewBeaconResponse(resp), nil
+		return beaconhttp.NewBeaconResponse(resp).
+			WithFinalized(isFinalized).
+			WithVersion(version).
+			WithOptimistic(isOptimistic), nil
 	}
 	if len(strIdxs) == 0 {
 		for _, v := range out {
@@ -100,7 +108,10 @@ func (a *ApiHandler) GetEthV1BeaconBlobSidecars(w http.ResponseWriter, r *http.R
 		}
 	}
 
-	return beaconhttp.NewBeaconResponse(resp), nil
+	return beaconhttp.NewBeaconResponse(resp).
+		WithFinalized(isFinalized).
+		WithVersion(version).
+		WithOptimistic(isOptimistic), nil
 }
 
 func (a *ApiHandler) readBlobSidecars(ctx context.Context, slot uint64, blockRoot, canonicalRoot common.Hash) ([]*cltypes.BlobSidecar, bool, error) {
@@ -182,9 +193,9 @@ func (a *ApiHandler) GetEthV1DebugBeaconDataColumnSidecars(w http.ResponseWriter
 	version := a.ethClock.StateVersionByEpoch(*slot / a.beaconChainCfg.SlotsPerEpoch)
 	return beaconhttp.NewBeaconResponse(dataColumnSidecars).
 		WithHeader("Eth-Consensus-Version", version.String()).
+		WithFinalized(canonicalRoot == blockRoot && *slot <= a.forkchoiceStore.FinalizedSlot()).
 		WithVersion(version).
-		WithOptimistic(a.forkchoiceStore.IsRootOptimistic(blockRoot)).
-		WithFinalized(canonicalRoot == blockRoot && *slot <= a.forkchoiceStore.FinalizedSlot()), nil
+		WithOptimistic(a.forkchoiceStore.IsRootOptimistic(blockRoot)), nil
 }
 
 func (a *ApiHandler) GetEthV1BeaconBlobs(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -239,7 +250,7 @@ func (a *ApiHandler) GetEthV1BeaconBlobs(w http.ResponseWriter, r *http.Request)
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("block not found"))
 	}
 
-	indicies := []uint64{}
+	var indicies []uint64
 	commitments := block.Block.Body.GetBlobKzgCommitments()
 	if commitments == nil {
 		commitments = solid.NewStaticListSSZ[*cltypes.KZGCommitment](0, 48)
@@ -252,7 +263,8 @@ func (a *ApiHandler) GetEthV1BeaconBlobs(w http.ResponseWriter, r *http.Request)
 		}
 	} else {
 		// take the blobs by the versioned hashes
-		versionedHashesToIndex := make(map[common.Hash]uint64)
+		filtered := make([]uint64, 0, len(versionedHashes))
+		versionedHashesToIndex := make(map[common.Hash]uint64, commitments.Len())
 		commitments.Range(func(index int, value *cltypes.KZGCommitment, length int) bool {
 			hash, err := utils.KzgCommitmentToVersionedHash(common.Bytes48(*value))
 			if err != nil {
@@ -264,9 +276,10 @@ func (a *ApiHandler) GetEthV1BeaconBlobs(w http.ResponseWriter, r *http.Request)
 		for _, hash := range versionedHashes {
 			index, ok := versionedHashesToIndex[common.HexToHash(hash)]
 			if ok {
-				indicies = append(indicies, index)
+				filtered = append(filtered, index)
 			}
 		}
+		indicies = filtered
 	}
 
 	// collect the blobs
@@ -277,8 +290,8 @@ func (a *ApiHandler) GetEthV1BeaconBlobs(w http.ResponseWriter, r *http.Request)
 	}
 	if !found {
 		return beaconhttp.NewBeaconResponse(blobs).
-			WithOptimistic(a.forkchoiceStore.IsRootOptimistic(blockRoot)).
-			WithFinalized(canonicalRoot == blockRoot && *slot <= a.forkchoiceStore.FinalizedSlot()), nil
+			WithFinalized(canonicalRoot == blockRoot && *slot <= a.forkchoiceStore.FinalizedSlot()).
+			WithOptimistic(a.forkchoiceStore.IsRootOptimistic(blockRoot)), nil
 	}
 	for _, index := range indicies {
 		if index >= uint64(len(blobSidecars)) {
@@ -289,6 +302,6 @@ func (a *ApiHandler) GetEthV1BeaconBlobs(w http.ResponseWriter, r *http.Request)
 	}
 
 	return beaconhttp.NewBeaconResponse(blobs).
-		WithOptimistic(a.forkchoiceStore.IsRootOptimistic(blockRoot)).
-		WithFinalized(canonicalRoot == blockRoot && *slot <= a.forkchoiceStore.FinalizedSlot()), nil
+		WithFinalized(canonicalRoot == blockRoot && *slot <= a.forkchoiceStore.FinalizedSlot()).
+		WithOptimistic(a.forkchoiceStore.IsRootOptimistic(blockRoot)), nil
 }

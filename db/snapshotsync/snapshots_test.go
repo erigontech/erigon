@@ -17,6 +17,8 @@
 package snapshotsync
 
 import (
+	"bytes"
+	"context"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -24,17 +26,22 @@ import (
 	"testing/fstest"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/btree"
 
+	"github.com/erigontech/erigon/common/background"
 	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/testlog"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/mvcc"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -99,14 +106,14 @@ func BenchmarkFindMergeRange(t *testing.B) {
 	t.Run("big", func(t *testing.B) {
 		for j := 0; j < t.N; j++ {
 			var RangesOld []Range
-			for i := 0; i < 24; i++ {
+			for i := range 24 {
 				RangesOld = append(RangesOld, NewRange(uint64(i*100_000), uint64((i+1)*100_000)))
 			}
 			merger.FindMergeRanges(RangesOld, uint64(24*100_000))
 
 			var RangesNew []Range
 			start := uint64(19_000_000)
-			for i := uint64(0); i < 24; i++ {
+			for i := range uint64(24) {
 				RangesNew = append(RangesNew, NewRange(start+(i*100_000), start+((i+1)*100_000)))
 			}
 			merger.FindMergeRanges(RangesNew, uint64(24*100_000))
@@ -116,14 +123,14 @@ func BenchmarkFindMergeRange(t *testing.B) {
 	t.Run("small", func(t *testing.B) {
 		for j := 0; j < t.N; j++ {
 			var RangesOld Ranges
-			for i := uint64(0); i < 240; i++ {
+			for i := range uint64(240) {
 				RangesOld = append(RangesOld, NewRange(i*10_000, (i+1)*10_000))
 			}
 			merger.FindMergeRanges(RangesOld, uint64(240*10_000))
 
 			var RangesNew Ranges
 			start := uint64(19_000_000)
-			for i := uint64(0); i < 240; i++ {
+			for i := range uint64(240) {
 				RangesNew = append(RangesNew, NewRange(start+i*10_000, start+(i+1)*10_000))
 			}
 			merger.FindMergeRanges(RangesNew, uint64(240*10_000))
@@ -137,7 +144,7 @@ func TestFindMergeRange(t *testing.T) {
 	merger.DisableFsync()
 	t.Run("big", func(t *testing.T) {
 		var RangesOld []Range
-		for i := 0; i < 24; i++ {
+		for i := range 24 {
 			RangesOld = append(RangesOld, NewRange(uint64(i*100_000), uint64((i+1)*100_000)))
 		}
 		found := merger.FindMergeRanges(RangesOld, uint64(24*100_000))
@@ -151,7 +158,7 @@ func TestFindMergeRange(t *testing.T) {
 
 		var RangesNew []Range
 		start := uint64(99_000_000)
-		for i := uint64(0); i < 24; i++ {
+		for i := range uint64(24) {
 			RangesNew = append(RangesNew, NewRange(start+(i*100_000), start+((i+1)*100_000)))
 		}
 		found = merger.FindMergeRanges(RangesNew, uint64(24*100_000))
@@ -162,15 +169,15 @@ func TestFindMergeRange(t *testing.T) {
 
 	t.Run("small", func(t *testing.T) {
 		var RangesOld Ranges
-		for i := uint64(0); i < 240; i++ {
+		for i := range uint64(240) {
 			RangesOld = append(RangesOld, NewRange(i*10_000, (i+1)*10_000))
 		}
 		found := merger.FindMergeRanges(RangesOld, uint64(240*10_000))
 		var expect Ranges
-		for i := uint64(0); i < 4; i++ {
+		for i := range uint64(4) {
 			expect = append(expect, NewRange(i*snaptype.Erigon2OldMergeLimit, (i+1)*snaptype.Erigon2OldMergeLimit))
 		}
-		for i := uint64(0); i < 4; i++ {
+		for i := range uint64(4) {
 			expect = append(expect, NewRange(2_000_000+i*snaptype.Erigon2MergeLimit, 2_000_000+(i+1)*snaptype.Erigon2MergeLimit))
 		}
 
@@ -178,12 +185,12 @@ func TestFindMergeRange(t *testing.T) {
 
 		var RangesNew Ranges
 		start := uint64(99_000_000)
-		for i := uint64(0); i < 240; i++ {
+		for i := range uint64(240) {
 			RangesNew = append(RangesNew, NewRange(start+i*10_000, start+(i+1)*10_000))
 		}
 		found = merger.FindMergeRanges(RangesNew, uint64(240*10_000))
 		expect = nil
-		for i := uint64(0); i < 24; i++ {
+		for i := range uint64(24) {
 			expect = append(expect, NewRange(start+i*snaptype.Erigon2MergeLimit, start+(i+1)*snaptype.Erigon2MergeLimit))
 		}
 
@@ -211,10 +218,10 @@ func TestMergeSnapshots(t *testing.T) {
 
 	N := uint64(70)
 
-	for i := uint64(0); i < N; i++ {
+	for i := range N {
 		createFile(i*10_000, (i+1)*10_000)
 	}
-	s := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
 	defer s.Close()
 	require.NoError(s.OpenFolder())
 	{
@@ -263,7 +270,7 @@ func TestMergeSnapshots(t *testing.T) {
 	// for i := uint64(0); i < N; i++ {
 	// 	createFile(start+i*10_000, start+(i+1)*10_000)
 	// }
-	// s = NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: true}, dir, start, logger)
+	// s = NewBaseRoSnapshots(ethconfig.BlocksFreezing{Enabled: true}, dir, start, logger)
 	// defer s.Close()
 	// require.NoError(s.OpenFolder())
 	// {
@@ -305,12 +312,12 @@ func TestMergeSnapshots(t *testing.T) {
 func TestMergeSkipsPreClaimedRange(t *testing.T) {
 	logger := log.New()
 	dir, require := t.TempDir(), require.New(t)
-	for i := uint64(0); i < 4; i++ {
+	for i := range uint64(4) {
 		for _, snT := range snaptype2.BlockSnapshotTypes {
 			createTestSegmentFile(t, i*10_000, (i+1)*10_000, snT.Enum(), dir, version.V1_0, logger)
 		}
 	}
-	s := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
 	defer s.Close()
 	require.NoError(s.OpenFolder())
 
@@ -356,10 +363,10 @@ func TestDeleteSnapshots(t *testing.T) {
 
 	N := uint64(70)
 
-	for i := uint64(0); i < N; i++ {
+	for i := range N {
 		createFile(i*10_000, (i+1)*10_000)
 	}
-	s := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
 	defer s.Close()
 	retireFiles := []string{
 		"v1.0-000000-000010-bodies.seg",
@@ -368,12 +375,12 @@ func TestDeleteSnapshots(t *testing.T) {
 	}
 	require.NoError(s.OpenFolder())
 	for _, f := range retireFiles {
-		require.NoError(s.Delete(f))
+		require.NoError(s.retireFiles(mvcc.RetireReasonAged, f))
 		require.False(slices.Contains(s.Files(), f))
 	}
 }
 
-func TestDeleteSnapshotsIsIdempotent(t *testing.T) {
+func TestRetireFilesIsIdempotent(t *testing.T) {
 	logger := testlog.Logger(t, log.LvlCrit)
 	dir := t.TempDir()
 	require := require.New(t)
@@ -382,21 +389,188 @@ func TestDeleteSnapshotsIsIdempotent(t *testing.T) {
 		createTestSegmentFile(t, 0, 10_000, snT.Enum(), dir, version.V1_0, logger)
 	}
 
-	s := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
 	defer s.Close()
 	require.NoError(s.OpenFolder())
 
 	fileName := snaptype.SegmentFileName(version.V1_0, 0, 10_000, snaptype2.Bodies.Enum())
 
-	require.NoError(s.Delete(fileName))
+	require.NoError(s.retireFiles(mvcc.RetireReasonAged, fileName))
 	require.False(slices.Contains(s.Files(), fileName))
 
 	require.NotPanics(func() {
-		require.NoError(s.Delete(fileName))
+		require.NoError(s.retireFiles(mvcc.RetireReasonAged, fileName))
 	})
 	require.NotPanics(func() {
-		require.NoError(s.Delete("v1.0-999999-1000000-bodies.seg"))
+		require.NoError(s.retireFiles(mvcc.RetireReasonAged, "v1.0-999999-1000000-bodies.seg"))
 	})
+}
+
+func visibleHas(s *BaseRoSnapshots, enum snaptype.Enum, from, to uint64) bool {
+	for _, seg := range s.visible.Load().segments[enum] {
+		if seg.from == from && seg.to == to {
+			return true
+		}
+	}
+	return false
+}
+
+// RetireFiles must detach from dirtyFiles, not merely hide from the visible view: a segment
+// left in dirty would be rebuilt back into visible by the next recalcVisibleFiles.
+func TestRetireFilesDetachesFromDirty(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	require := require.New(t)
+
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	for _, snT := range snaptype2.BlockSnapshotTypes {
+		createTestSegmentFile(t, 0, 10_000, snT.Enum(), dir, version.V1_0, logger)
+		createTestSegmentFile(t, 10_000, 20_000, snT.Enum(), dir, version.V1_0, logger)
+	}
+	require.NoError(s.OpenFolder())
+
+	txEnum := snaptype2.Transactions.Enum()
+	require.Equal(2, s.dirty[txEnum].Len())
+	require.True(visibleHas(s, txEnum, 0, 10_000))
+
+	require.NoError(s.retireFiles(mvcc.RetireReasonAged, snaptype.SegmentFileName(version.V1_0, 0, 10_000, txEnum)))
+
+	// Detached from dirty, not just hidden...
+	require.Equal(1, s.dirty[txEnum].Len())
+	require.False(visibleHas(s, txEnum, 0, 10_000))
+
+	// ...so a fresh recalc (no-arg RetireFiles rebuilds visible from dirty) can't resurface it.
+	require.NoError(s.retireFiles(mvcc.RetireReasonAged))
+	require.False(visibleHas(s, txEnum, 0, 10_000))
+	require.True(visibleHas(s, txEnum, 10_000, 20_000))
+}
+
+// Retire selects over visible files, so a subsumed (dirty-but-not-visible) segment below
+// the cutoff is left to the merge clean-up, not retired here.
+func TestRetireFilesBelowSkipsDirtyButNotVisible(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	require := require.New(t)
+
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	const mergeLimit = snaptype.Erigon2MergeLimit
+	for _, snT := range snaptype2.BlockSnapshotTypes {
+		createTestSegmentFile(t, 0, mergeLimit, snT.Enum(), dir, version.V1_0, logger)
+		createTestSegmentFile(t, 0, 2*mergeLimit, snT.Enum(), dir, version.V1_0, logger)
+	}
+	require.NoError(s.OpenFolder())
+
+	txEnum := snaptype2.Transactions.Enum()
+	require.Equal(2, s.dirty[txEnum].Len())
+	require.False(visibleHas(s, txEnum, 0, mergeLimit), "the merge-sized subsumed segment is dirty but not visible")
+
+	// The subsumed merge-sized segment is below cutoff but invisible -> must not be retired.
+	retired, err := s.RetireFilesBelow(snaptype2.Transactions, 2*mergeLimit, func([]string) error { return nil })
+	require.NoError(err)
+	require.False(retired, "invisible subsumed file must not be retired")
+	require.Equal(2, s.dirty[txEnum].Len())
+}
+
+// A blockTo past the visible tip would wipe every file. That happens benignly when transactions
+// lag headers by more than the prune distance, so Retire skips this cycle (keeping the files)
+// and retries once the visible tip advances — it must not error in the background retire loop.
+func TestRetireFilesBelowSkipsWindowTooSmall(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	require := require.New(t)
+
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	const mergeLimit = snaptype.Erigon2MergeLimit
+	for _, snT := range snaptype2.BlockSnapshotTypes {
+		createTestSegmentFile(t, 0, mergeLimit, snT.Enum(), dir, version.V1_0, logger)
+		createTestSegmentFile(t, mergeLimit, 2*mergeLimit, snT.Enum(), dir, version.V1_0, logger)
+	}
+	require.NoError(s.OpenFolder())
+
+	txEnum := snaptype2.Transactions.Enum()
+	require.Equal(2, s.dirty[txEnum].Len())
+
+	retired, err := s.RetireFilesBelow(snaptype2.Transactions, 3*mergeLimit, func([]string) error { return nil })
+	require.NoError(err)
+	require.False(retired)
+	require.Equal(2, s.dirty[txEnum].Len())
+}
+
+// Block-segment retirement must be visible in the log: it is the only signal an operator
+// (or the QA retirement check) has that the prune window actually dropped files, since
+// unlink happens later, off the retire call.
+func TestRetireFilesBelowLogsWhatItRetired(t *testing.T) {
+	dir := t.TempDir()
+	require := require.New(t)
+
+	logger := log.New()
+	const mergeLimit = snaptype.Erigon2MergeLimit
+	for _, snT := range snaptype2.BlockSnapshotTypes {
+		createTestSegmentFile(t, 0, mergeLimit, snT.Enum(), dir, version.V1_0, logger)
+		createTestSegmentFile(t, mergeLimit, 2*mergeLimit, snT.Enum(), dir, version.V1_0, logger)
+		createTestSegmentFile(t, 2*mergeLimit, 3*mergeLimit, snT.Enum(), dir, version.V1_0, logger)
+	}
+
+	output := new(bytes.Buffer)
+	logger.SetHandler(log.StreamHandler(output, log.LogfmtFormat()))
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(s.OpenFolder())
+
+	txEnum := snaptype2.Transactions.Enum()
+	require.Equal(3, s.dirty[txEnum].Len())
+
+	retired, err := s.RetireFilesBelow(snaptype2.Transactions, 2*mergeLimit, func([]string) error { return nil })
+	require.NoError(err)
+	require.True(retired)
+
+	// The count in the log has to be the count actually detached, so assert both.
+	require.Equal(2, s.dirty[txEnum].Len())
+	require.False(visibleHas(s, txEnum, 0, mergeLimit))
+
+	require.Contains(output.String(), "retired old block files")
+	require.Contains(output.String(), "type=transactions")
+	require.Contains(output.String(), "removed=1")
+	require.Contains(output.String(), "blockTo=200000")
+}
+
+// The SnapshotDownloadToBlock cleanup: after downloading past the target block, the extra
+// segments (ending at/beyond it) are retired across all block types and handed to the seeder,
+// while segments fully below it stay.
+func TestRetireFilesAbove(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	require := require.New(t)
+
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	for _, snT := range snaptype2.BlockSnapshotTypes {
+		createTestSegmentFile(t, 0, 10_000, snT.Enum(), dir, version.V1_0, logger)
+		createTestSegmentFile(t, 10_000, 20_000, snT.Enum(), dir, version.V1_0, logger)
+		createTestSegmentFile(t, 20_000, 30_000, snT.Enum(), dir, version.V1_0, logger)
+	}
+	require.NoError(s.OpenFolder())
+
+	txEnum := snaptype2.Transactions.Enum()
+	require.Equal(3, s.dirty[txEnum].Len())
+
+	var deleted []string
+	require.NoError(s.RetireFilesAbove(20_000, func(files []string) error {
+		deleted = append(deleted, files...)
+		return nil
+	}))
+
+	require.Equal(1, s.dirty[txEnum].Len())
+	require.True(visibleHas(s, txEnum, 0, 10_000), "segment fully below the target is kept")
+	require.False(visibleHas(s, txEnum, 10_000, 20_000))
+	require.False(visibleHas(s, txEnum, 20_000, 30_000))
+
+	require.Contains(deleted, snaptype.SegmentFileName(version.V1_0, 10_000, 20_000, txEnum), "seeder told about removed files")
+	require.Contains(deleted, snaptype.SegmentFileName(version.V1_0, 20_000, 30_000, txEnum))
+	require.NotContains(deleted, snaptype.SegmentFileName(version.V1_0, 0, 10_000, txEnum))
 }
 
 func TestRemoveOverlaps(t *testing.T) {
@@ -423,7 +597,7 @@ func TestRemoveOverlaps(t *testing.T) {
 	// 100_000 - 200_000 => 1 file
 	// 200_000 - 210_000, ... , 220_000 - 230_000 => 3 files
 
-	for i := uint64(0); i < 5; i++ {
+	for i := range uint64(5) {
 		createFile(i*10_000, (i+1)*10_000)
 	}
 
@@ -435,11 +609,11 @@ func TestRemoveOverlaps(t *testing.T) {
 
 	createFile(100_000, 200_000)
 
-	for i := uint64(0); i < 3; i++ {
+	for i := range uint64(3) {
 		createFile(200_000+i*10_000, 200_000+(i+1)*10_000)
 	}
 
-	s := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
 	defer s.Close()
 
 	list, err := snaptype.Segments(s.Dir())
@@ -497,7 +671,7 @@ func TestRemoveOverlaps_CrossingTypeString(t *testing.T) {
 
 	createFile(0, 10000)
 
-	s := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
 	defer s.Close()
 
 	list, err := snaptype.Segments(s.Dir())
@@ -525,25 +699,31 @@ func TestRemoveOverlaps_CrossingTypeString(t *testing.T) {
 }
 
 func TestCanRetire(t *testing.T) {
-	require := require.New(t)
 	cases := []struct {
-		inFrom, inTo, outFrom, outTo uint64
-		can                          bool
+		inFrom, inTo, outFrom, outTo, retireStep uint64
+		can                                      bool
 	}{
-		{0, 1234, 0, 1000, true},
-		{1_000_000, 1_120_000, 1_000_000, 1_100_000, true},
-		{2_500_000, 4_100_000, 2_500_000, 2_600_000, true},
-		{2_500_000, 2_500_100, 2_500_000, 2_500_000, false},
-		{1_001_000, 2_000_000, 1_001_000, 1_002_000, true},
+		{0, 1234, 0, 1000, 0, true},
+		{1_000_000, 1_120_000, 1_000_000, 1_100_000, 0, true},
+		{2_500_000, 4_100_000, 2_500_000, 2_600_000, 0, true},
+		{2_500_000, 2_500_100, 2_500_000, 2_500_000, 0, false},
+		{1_001_000, 2_000_000, 1_001_000, 1_002_000, 0, true},
+		{0, 10, 0, 10, 10, true},
+		{0, 12, 0, 10, 10, true},
+		{0, 9, 0, 0, 10, false},
+		{10, 20, 10, 20, 10, true},
+		{10, 22, 10, 20, 10, true},
+		{10, 18, 10, 10, 10, false},
 	}
 	snCfg := snapcfg.KnownCfgOrDevnet(networkname.Mainnet)
 	for i, tc := range cases {
-		from, to, can := CanRetire(tc.inFrom, tc.inTo, snaptype.Unknown, snCfg)
-		require.Equal(int(tc.outFrom), int(from), i)
-		require.Equal(int(tc.outTo), int(to), i)
-		require.Equal(tc.can, can, tc.inFrom, tc.inTo, i)
+		from, to, can := CanRetire(tc.inFrom, tc.inTo, snaptype.Unknown, snCfg, tc.retireStep)
+		require.Equal(t, tc.outFrom, from, i)
+		require.Equal(t, tc.outTo, to, i)
+		require.Equal(t, tc.can, can, "CanRetire(%d, %d) case %d", tc.inFrom, tc.inTo, i)
 	}
 }
+
 func TestOpenAllSnapshot(t *testing.T) {
 	logger := log.New()
 	baseDir, require := t.TempDir(), require.New(t)
@@ -559,8 +739,8 @@ func TestOpenAllSnapshot(t *testing.T) {
 		createFile := func(from, to uint64, name snaptype.Type) {
 			createTestSegmentFile(t, from, to, name.Enum(), dir, version.V1_0, logger)
 		}
-		s := NewRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
-		defer s.Close()
+		s := NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+		defer s.Close() //nolint:gocritic
 		err := s.OpenFolder()
 		require.NoError(err)
 		require.NotNil(s.visible.Load().segments[snaptype2.Enums.Headers])
@@ -568,15 +748,15 @@ func TestOpenAllSnapshot(t *testing.T) {
 		s.Close()
 
 		createFile(step, step*2, snaptype2.Bodies)
-		s = NewRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
-		defer s.Close()
+		s = NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+		defer s.Close() //nolint:gocritic
 		require.NotNil(s.visible.Load().segments[snaptype2.Enums.Bodies])
 		require.Empty(s.visible.Load().segments[snaptype2.Enums.Bodies])
 		s.Close()
 
 		createFile(step, step*2, snaptype2.Headers)
 		createFile(step, step*2, snaptype2.Transactions)
-		s = NewRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
+		s = NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
 		err = s.OpenFolder()
 		require.NoError(err)
 		require.NotNil(s.visible.Load().segments[snaptype2.Enums.Headers])
@@ -587,8 +767,8 @@ func TestOpenAllSnapshot(t *testing.T) {
 		createFile(0, step, snaptype2.Bodies)
 		createFile(0, step, snaptype2.Headers)
 		createFile(0, step, snaptype2.Transactions)
-		s = NewRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
-		defer s.Close()
+		s = NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+		defer s.Close() //nolint:gocritic
 
 		err = s.OpenFolder()
 		require.NoError(err)
@@ -596,7 +776,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 		require.Len(s.visible.Load().segments[snaptype2.Enums.Headers], 2)
 
 		view := s.View()
-		defer view.Close()
+		defer view.Close() //nolint:gocritic
 
 		seg, ok := view.Segment(snaptype2.Transactions, 10)
 		require.True(ok)
@@ -612,10 +792,10 @@ func TestOpenAllSnapshot(t *testing.T) {
 		// Erigon may create new snapshots by itself - with high bigger than hardcoded ExpectedBlocks
 		// ExpectedBlocks - says only how much block must come from Torrent
 		chainSnapshotCfg.ExpectBlocks = 500_000 - 1
-		s = NewRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
+		s = NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
 		err = s.OpenFolder()
 		require.NoError(err)
-		defer s.Close()
+		defer s.Close() //nolint:gocritic
 		require.NotNil(s.visible.Load().segments[snaptype2.Enums.Headers])
 		require.Len(s.visible.Load().segments[snaptype2.Enums.Headers], 2)
 
@@ -623,8 +803,8 @@ func TestOpenAllSnapshot(t *testing.T) {
 		createFile(step, step*2-step/5, snaptype2.Bodies)
 		createFile(step, step*2-step/5, snaptype2.Transactions)
 		chainSnapshotCfg.ExpectBlocks = math.MaxUint64
-		s = NewRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
-		defer s.Close()
+		s = NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+		defer s.Close() //nolint:gocritic
 		err = s.OpenFolder()
 		require.NoError(err)
 	}
@@ -633,18 +813,19 @@ func TestOpenAllSnapshot(t *testing.T) {
 func TestParseCompressedFileName(t *testing.T) {
 	require := require.New(t)
 	fs := fstest.MapFS{
-		"a":                      &fstest.MapFile{},
-		"1-a":                    &fstest.MapFile{},
-		"1-2-a":                  &fstest.MapFile{},
-		"1-2-bodies.info":        &fstest.MapFile{},
-		"1-2-bodies.seg":         &fstest.MapFile{},
-		"v2-1-2-bodies.seg":      &fstest.MapFile{},
-		"v0-1-2-bodies.seg":      &fstest.MapFile{},
-		"v1-1-2-bodies.seg":      &fstest.MapFile{},
-		"v1.0-1-2-bodies.seg":    &fstest.MapFile{},
-		"v1-accounts.24-28.ef":   &fstest.MapFile{},
-		"v1.0-accounts.24-28.ef": &fstest.MapFile{},
-		"salt-blocks.txt":        &fstest.MapFile{},
+		"a":                                   &fstest.MapFile{},
+		"1-a":                                 &fstest.MapFile{},
+		"1-2-a":                               &fstest.MapFile{},
+		"1-2-bodies.info":                     &fstest.MapFile{},
+		"1-2-bodies.seg":                      &fstest.MapFile{},
+		"v2-000001-000002-bodies.seg":         &fstest.MapFile{},
+		"v0-000001-000002-bodies.seg":         &fstest.MapFile{},
+		"v1-000001-000002-bodies.seg":         &fstest.MapFile{},
+		"v1.0-000001-000002-bodies.seg":       &fstest.MapFile{},
+		"v1.0-000000001-000000002-bodies.seg": &fstest.MapFile{},
+		"v1-accounts.24-28.ef":                &fstest.MapFile{},
+		"v1.0-accounts.24-28.ef":              &fstest.MapFile{},
+		"salt-blocks.txt":                     &fstest.MapFile{},
 		"v1.0-022695-022696-transactions-to-block.idx":                     &fstest.MapFile{},
 		"v1-022695-022696-transactions-to-block.idx":                       &fstest.MapFile{},
 		"preverified.toml":                                                 &fstest.MapFile{},
@@ -674,11 +855,11 @@ func TestParseCompressedFileName(t *testing.T) {
 	require.False(ok)
 	_, _, ok = snaptype.ParseFileName("", stat("1-2-bodies.seg"))
 	require.False(ok)
-	_, _, ok = snaptype.ParseFileName("", stat("v2-1-2-bodies.seg"))
+	_, _, ok = snaptype.ParseFileName("", stat("v2-000001-000002-bodies.seg"))
 	require.True(ok)
-	_, _, ok = snaptype.ParseFileName("", stat("v0-1-2-bodies.seg"))
+	_, _, ok = snaptype.ParseFileName("", stat("v0-000001-000002-bodies.seg"))
 	require.True(ok)
-	f, _, ok := snaptype.ParseFileName("", stat("v1-1-2-bodies.seg"))
+	f, _, ok := snaptype.ParseFileName("", stat("v1-000001-000002-bodies.seg"))
 	require.True(ok)
 	require.Equal(f.Type.Enum(), snaptype2.Bodies.Enum())
 	require.Equal(1_000, int(f.From))
@@ -741,12 +922,18 @@ func TestParseCompressedFileName(t *testing.T) {
 	require.Equal(22695000, int(f.From))
 	require.Equal(22696000, int(f.To))
 
-	f, e3, ok = snaptype.ParseFileName("", stat("v1.0-1-2-bodies.seg"))
+	f, e3, ok = snaptype.ParseFileName("", stat("v1.0-000001-000002-bodies.seg"))
+	require.True(ok)
+	require.False(e3)
+	require.Equal(1_000, int(f.From))
+	require.Equal(2_000, int(f.To))
+	require.Equal("bodies", f.TypeString)
+	f, e3, ok = snaptype.ParseFileName("", stat("v1.0-000000001-000000002-bodies.seg"))
 	require.True(ok)
 	require.False(e3)
 	require.Equal(f.Type.Enum(), snaptype2.Bodies.Enum())
-	require.Equal(1_000, int(f.From))
-	require.Equal(2_000, int(f.To))
+	require.Equal(1, int(f.From))
+	require.Equal(2, int(f.To))
 	require.Equal("bodies", f.TypeString)
 
 	f, e3, ok = snaptype.ParseFileName("", stat("v1.0-070200-070300-bodies.seg.torrent4014494284"))
@@ -811,17 +998,17 @@ func TestCalculateVisibleSegments(t *testing.T) {
 		createTestSegmentFile(t, from, to, name.Enum(), dir, version.V1_0, logger)
 	}
 
-	for i := uint64(0); i < 7; i++ {
+	for i := range uint64(7) {
 		createFile(i*500_000, (i+1)*500_000, snaptype2.Headers)
 	}
-	for i := uint64(0); i < 6; i++ {
+	for i := range uint64(6) {
 		createFile(i*500_000, (i+1)*500_000, snaptype2.Bodies)
 	}
-	for i := uint64(0); i < 5; i++ {
+	for i := range uint64(5) {
 		createFile(i*500_000, (i+1)*500_000, snaptype2.Transactions)
 	}
 	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
-	s := NewRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	s := NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
 	defer s.Close()
 
 	{
@@ -882,7 +1069,7 @@ func TestCalculateVisibleSegmentsWhenGapsInIdx(t *testing.T) {
 		createTestSegmentFile(t, from, to, name.Enum(), dir, version.V1_0, logger)
 	}
 
-	for i := uint64(0); i < 3; i++ {
+	for i := range uint64(3) {
 		createFile(i*500_000, (i+1)*500_000, snaptype2.Headers)
 		createFile(i*500_000, (i+1)*500_000, snaptype2.Bodies)
 		createFile(i*500_000, (i+1)*500_000, snaptype2.Transactions)
@@ -893,7 +1080,7 @@ func TestCalculateVisibleSegmentsWhenGapsInIdx(t *testing.T) {
 	require.NoError(err)
 
 	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
-	s := NewRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	s := NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
 	defer s.Close()
 
 	require.NoError(s.OpenFolder())
@@ -912,17 +1099,17 @@ func TestSegmentsMaxDerivedFromVisible(t *testing.T) {
 	}
 	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
 
-	s := NewRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	s := NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
 	require.NoError(s.OpenFolder())
 	require.Equal(uint64(0), s.SegmentsMax())
 	s.Close()
 
-	for i := uint64(0); i < 3; i++ {
+	for i := range uint64(3) {
 		createFile(i*500_000, (i+1)*500_000, snaptype2.Headers)
 		createFile(i*500_000, (i+1)*500_000, snaptype2.Bodies)
 		createFile(i*500_000, (i+1)*500_000, snaptype2.Transactions)
 	}
-	s = NewRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	s = NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
 	require.NoError(s.OpenFolder())
 	require.Equal(uint64(1_500_000-1), s.SegmentsMax())
 
@@ -944,14 +1131,14 @@ func TestViewPinsGeneration(t *testing.T) {
 	createFile := func(from, to uint64, name snaptype.Type) {
 		createTestSegmentFile(t, from, to, name.Enum(), dir, version.V1_0, logger)
 	}
-	for i := uint64(0); i < 2; i++ {
+	for i := range uint64(2) {
 		createFile(i*500_000, (i+1)*500_000, snaptype2.Headers)
 		createFile(i*500_000, (i+1)*500_000, snaptype2.Bodies)
 		createFile(i*500_000, (i+1)*500_000, snaptype2.Transactions)
 	}
 
 	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
-	s := NewRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	s := NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
 	defer s.Close()
 	require.NoError(s.OpenFolder())
 
@@ -980,13 +1167,11 @@ func TestViewPinsGeneration(t *testing.T) {
 	require.Same(oldSrc1, pinned[1].src)
 }
 
-// TestCloseWhatNotInListVsLiveViewDoesNotCrash verifies that closeWhatNotInList
-// does not close a segment that a live View still holds a refcount on. After a
-// merge, integrateMergedDirtyFiles marks old sub-segments canDelete=true and
-// removes them from dirty. A concurrent OpenFolder then calls closeWhatNotInList
-// on those same segments — without the refcount guard (PR #21545), it would nil
-// the decompressor while the View still uses it, causing a panic on View.Close.
-func TestCloseWhatNotInListVsLiveViewDoesNotCrash(t *testing.T) {
+// TestRetireVsLiveViewDoesNotCrash verifies that retiring segments (as a merge's
+// cleanup does) while a live View still references them does not close or unlink them
+// out from under the reader: the View pins its generation, so deletion is deferred
+// until it drains.
+func TestRetireVsLiveViewDoesNotCrash(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
@@ -1007,37 +1192,27 @@ func TestCloseWhatNotInListVsLiveViewDoesNotCrash(t *testing.T) {
 		}
 	}
 
-	s := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
 	defer s.Close()
 	require.NoError(s.OpenFolder())
 
-	// A live reader holds the sub-segments (refcount +1), as a merge's View does.
+	// A live reader holds the sub-segments, as a merge's View does.
 	v := s.View()
 
-	// Simulate the merge result: a covering [0,10000) segment lands on disk, and
-	// the now-subsumed 1k sub-segments are marked deletable (integrateMergedDirtyFiles).
-	for i, snT := range snaptype2.BlockSnapshotTypes {
-		createTestSegmentFile(t, 0, 10_000, snT.Enum(), dir, verOf(i), logger)
+	// Retire the sub-segments while the View is still open (as merge cleanup / prune
+	// does). Their files must not be closed or unlinked out from under the live View.
+	var subNames []string
+	for from := uint64(0); from < 10_000; from += 1_000 {
+		for i, snT := range snaptype2.BlockSnapshotTypes {
+			subNames = append(subNames, snaptype.SegmentFileName(verOf(i), from, from+1_000, snT.Enum()))
+		}
 	}
-	for _, t2 := range s.enums {
-		s.dirty[t2].Walk(func(segs []*DirtySegment) bool {
-			for _, sn := range segs {
-				if sn.To()-sn.From() == 1_000 {
-					sn.canDelete.Store(true)
-				}
-			}
-			return true
-		})
-	}
-
-	// Reopen: NoOverlaps drops the subsumed sub-segments from the list, so
-	// closeWhatNotInList would close them out from under the live View.
-	require.NoError(s.OpenFolder())
+	require.NoError(s.retireFiles(mvcc.RetireReasonAged, subNames...))
 
 	// Closing the View must not crash.
 	defer func() {
 		if r := recover(); r != nil {
-			t.Fatalf("View.Close crashed (use-after-close of a refcount-held segment): %v", r)
+			t.Fatalf("View.Close crashed (use-after-close of a retired segment): %v", r)
 		}
 	}()
 	v.Close()
@@ -1095,7 +1270,7 @@ func TestOpenFolderPromotesCovering(t *testing.T) {
 	createTestSegmentOnlyFile(t, 0, 1_000_000, snaptype2.Enums.Transactions, dir, version.V1_0, logger)
 
 	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
-	s := NewRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	s := NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
 	defer s.Close()
 
 	require.NoError(s.OpenFolder())
@@ -1153,7 +1328,7 @@ func TestOverlapNoTruncation(t *testing.T) {
 	createFile(1_000_000, 1_500_000, snaptype2.Transactions)
 
 	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
-	s := NewRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	s := NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
 	defer s.Close()
 
 	require.NoError(s.OpenFolder())
@@ -1165,4 +1340,284 @@ func TestOverlapNoTruncation(t *testing.T) {
 	require.Equal(uint64(1_000_000), visibleTxn[1].from)
 	require.Equal(uint64(1_500_000), visibleTxn[1].to)
 	require.Equal(uint64(1_500_000-1), s.SegmentsMax())
+}
+
+func TestCloseAndDropNotProtected(t *testing.T) {
+	tree := btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 4, NoLocks: false})
+	protected := &DirtySegment{Range: Range{0, 1000}}
+	stale := &DirtySegment{Range: Range{2000, 3000}}
+	tree.Set(protected)
+	tree.Set(stale)
+
+	closeAndDropNotProtected(tree, map[string]struct{}{"keep": {}}, func(sn *DirtySegment) string {
+		if sn == protected {
+			return "keep"
+		}
+		return "drop"
+	})
+
+	require.Equal(t, 1, tree.Len(), "only the protected segment must survive")
+	var survivors []*DirtySegment
+	tree.Walk(func(segs []*DirtySegment) bool {
+		survivors = append(survivors, segs...)
+		return true
+	})
+	require.Contains(t, survivors, protected)
+	require.NotContains(t, survivors, stale)
+}
+
+func TestNewRoSnapshotsRejectsBadBaseSegType(t *testing.T) {
+	logger := log.New()
+	dir, require := t.TempDir(), require.New(t)
+	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
+
+	require.PanicsWithValue("baseSegType is nil", func() {
+		NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, nil, true, logger)
+	})
+
+	// BeaconBlocks is a registered type, but not one this collection manages, so
+	// Ranges would silently report nothing.
+	require.PanicsWithValue("baseSegType beaconblocks is not in types", func() {
+		NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, snaptype.BeaconBlocks, true, logger)
+	})
+}
+
+func TestSetIndexBuilder(t *testing.T) {
+	logger := log.New()
+	dir, require := t.TempDir(), require.New(t)
+	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
+	s := NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+
+	require.Nil(s.IndexBuilder(snaptype2.Headers))
+
+	built := false
+	builder := snaptype.IndexBuilderFunc(func(ctx context.Context, info snaptype.FileInfo, salt uint32, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
+		built = true
+		return nil
+	})
+	s.SetIndexBuilder(snaptype2.Headers, builder)
+
+	got := s.IndexBuilder(snaptype2.Headers)
+	require.NotNil(got)
+	require.NoError(got.Build(t.Context(), snaptype.FileInfo{}, 0, nil, dir, nil, log.LvlDebug, logger))
+	require.True(built)
+
+	// setter for one operator must not drop the other
+	extractor := snaptype.RangeExtractorFunc(func(ctx context.Context, blockFrom, blockTo uint64, firstKey snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger, hashResolver snaptype.BlockHashResolver) (uint64, error) {
+		return 0, nil
+	})
+	s.SetRangeExtractor(snaptype2.Headers, extractor)
+	require.NotNil(s.IndexBuilder(snaptype2.Headers))
+	require.NotNil(s.RangeExtractor(snaptype2.Headers))
+
+	s.SetIndexBuilder(snaptype2.Bodies, builder)
+	require.NotNil(s.IndexBuilder(snaptype2.Bodies))
+	require.Nil(s.IndexBuilder(snaptype2.Transactions))
+}
+
+// A producer writes the tip .seg before indexing it. DirtyBlocksAvailable stops at the
+// first unindexed segment, so it cannot answer "how far has data been dumped" —
+// DirtySegmentsMax must count that tail.
+func TestDirtySegmentsMaxCountsUnindexedTail(t *testing.T) {
+	logger := testlog.Logger(t, log.LvlCrit)
+	dir, require := t.TempDir(), require.New(t)
+	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
+
+	s := NewBaseRoSnapshots(cfg, dir, []snaptype.Type{snaptype2.Headers}, snaptype2.Headers, false, logger)
+	defer s.Close()
+	require.NoError(s.OpenFolder())
+	require.Equal(uint64(0), s.DirtySegmentsMax(snaptype2.Enums.Headers))
+
+	for i := range uint64(3) {
+		createTestSegmentFile(t, i*10_000, (i+1)*10_000, snaptype2.Enums.Headers, dir, version.V1_0, logger)
+	}
+	missingIdx := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, 20_000, 30_000, snaptype2.Headers.Name()))
+	require.NoError(dir2.RemoveFile(missingIdx))
+	require.NoError(s.OpenFolder())
+
+	require.Equal(uint64(20_000-1), s.DirtyBlocksAvailable(snaptype2.Enums.Headers))
+	require.Equal(uint64(20_000-1), s.VisibleBlocksAvailable(snaptype2.Enums.Headers))
+	require.Equal(uint64(30_000-1), s.DirtySegmentsMax(snaptype2.Enums.Headers))
+}
+
+// DirtySegmentsMax is served from a cache, so every path that mutates the dirty set has to
+// refresh it — a stale max would let the archive backfill stop short of history it still needs.
+func TestDirtySegmentsMaxFollowsRetire(t *testing.T) {
+	logger := testlog.Logger(t, log.LvlCrit)
+	dir, require := t.TempDir(), require.New(t)
+	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
+
+	for i := range uint64(3) {
+		createTestSegmentFile(t, i*10_000, (i+1)*10_000, snaptype2.Enums.Headers, dir, version.V1_0, logger)
+	}
+	s := NewBaseRoSnapshots(cfg, dir, []snaptype.Type{snaptype2.Headers}, snaptype2.Headers, false, logger)
+	defer s.Close()
+	require.NoError(s.OpenFolder())
+	require.Equal(uint64(30_000-1), s.DirtySegmentsMax(snaptype2.Enums.Headers))
+
+	tail := snaptype.SegmentFileName(version.V1_0, 20_000, 30_000, snaptype2.Enums.Headers)
+	require.NoError(s.retireFiles(mvcc.RetireReasonMerged, tail))
+	require.Equal(uint64(20_000-1), s.DirtySegmentsMax(snaptype2.Enums.Headers))
+}
+
+// An index builder needs the dumped-but-unindexed segments, which the visible set hides
+// and DirtySegmentsMax only summarizes into one number.
+func TestWalkDirtySegments(t *testing.T) {
+	logger := testlog.Logger(t, log.LvlCrit)
+	dir, require := t.TempDir(), require.New(t)
+	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
+
+	s := NewBaseRoSnapshots(cfg, dir, []snaptype.Type{snaptype2.Headers}, snaptype2.Headers, false, logger)
+	defer s.Close()
+
+	for i := range uint64(3) {
+		createTestSegmentFile(t, i*10_000, (i+1)*10_000, snaptype2.Enums.Headers, dir, version.V1_0, logger)
+	}
+	missingIdx := filepath.Join(dir, snaptype.IdxFileName(version.V1_0, 20_000, 30_000, snaptype2.Headers.Name()))
+	require.NoError(dir2.RemoveFile(missingIdx))
+	require.NoError(s.OpenFolder())
+
+	var walked, unindexed [][2]uint64
+	s.WalkDirtySegments(snaptype2.Enums.Headers, func(sn *DirtySegment) bool {
+		from, to := sn.GetRange()
+		walked = append(walked, [2]uint64{from, to})
+		if !sn.IsIndexed() {
+			unindexed = append(unindexed, [2]uint64{from, to})
+		}
+		return true
+	})
+	require.Equal([][2]uint64{{0, 10_000}, {10_000, 20_000}, {20_000, 30_000}}, walked)
+	require.Equal([][2]uint64{{20_000, 30_000}}, unindexed)
+
+	visited := 0
+	s.WalkDirtySegments(snaptype2.Enums.Headers, func(*DirtySegment) bool { visited++; return false })
+	require.Equal(1, visited)
+
+	require.NotPanics(func() {
+		s.WalkDirtySegments(snaptype.BeaconBlocks.Enum(), func(*DirtySegment) bool {
+			require.Fail("collection does not manage this type")
+			return false
+		})
+	})
+}
+
+func TestOpenListOpensOnlyNamedFiles(t *testing.T) {
+	logger := log.New()
+	dir, require := t.TempDir(), require.New(t)
+	for i := range uint64(3) {
+		createTestSegmentFile(t, i*10_000, (i+1)*10_000, snaptype2.Enums.Headers, dir, version.V1_0, logger)
+	}
+	name := func(i uint64) string {
+		return snaptype.SegmentFileName(version.V1_0, i*10_000, (i+1)*10_000, snaptype2.Enums.Headers)
+	}
+
+	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
+	s := NewBaseRoSnapshots(cfg, dir, []snaptype.Type{snaptype2.Headers}, snaptype2.Headers, false, logger)
+	defer s.Close()
+
+	require.NoError(s.OpenList([]string{name(0), name(1)}, false))
+	require.Equal(2, s.dirty[snaptype2.Enums.Headers].Len())
+	require.True(visibleHas(s, snaptype2.Enums.Headers, 0, 10_000))
+	require.True(visibleHas(s, snaptype2.Enums.Headers, 10_000, 20_000))
+	// on disk but not named: base must not pick it up
+	require.False(visibleHas(s, snaptype2.Enums.Headers, 20_000, 30_000))
+
+	// a name dropped from the list leaves dirty, like OpenFolder does for a vanished file
+	require.NoError(s.OpenList([]string{name(0)}, false))
+	require.Equal(1, s.dirty[snaptype2.Enums.Headers].Len())
+	require.False(visibleHas(s, snaptype2.Enums.Headers, 10_000, 20_000))
+	require.Equal(10_000-1, int(s.IndicesMax()))
+}
+
+// A reader pinned to generation G1 keeps every segment G1 references alive, even once an
+// unpinned G2 has superseded it. Close must hand those segments to the generation chain
+// rather than close them inline, and the last reader to drain must then release the fds —
+// Windows cannot delete a file that stays mapped.
+func TestCloseKeepsSegmentPinnedByOlderGeneration(t *testing.T) {
+	logger := log.New()
+	tmpDir := t.TempDir()
+	require := require.New(t)
+
+	for _, snT := range snaptype2.BlockSnapshotTypes {
+		createTestSegmentFile(t, 0, 1_000, snT.Enum(), tmpDir, version.V1_0, logger)
+	}
+
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, tmpDir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	require.NoError(s.OpenFolder())
+
+	v := s.View()
+	g1 := v.snapshotVisible
+
+	seg, ok := v.Segment(snaptype2.Headers, 500)
+	require.True(ok)
+	word, ok := readFirstWord(seg.Src())
+	require.True(ok)
+	require.Equal([]byte{1}, word, "sanity: the pinned segment reads before anything is closed")
+
+	// A no-op OpenFolder republishes the same segments as G2, which nobody pins.
+	require.NoError(s.OpenFolder())
+	g2 := s.visible.Load()
+	require.NotSame(g1, g2, "OpenFolder must have published a new generation")
+	require.Zero(g2.refcnt.Load(), "G2 must be unpinned")
+	require.Equal(int32(1), g1.refcnt.Load(), "G1 must still be pinned by the live View")
+
+	s.Close()
+
+	word, ok = readFirstWord(seg.Src())
+	require.True(ok, "a reader pinned to an older generation must still read its segment after Close")
+	require.Equal([]byte{1}, word)
+
+	v.Close()
+	require.Nil(seg.Src().Decompressor, "the last reader draining must release the fds Close deferred")
+}
+
+func readFirstWord(sn *DirtySegment) ([]byte, bool) {
+	if sn.Decompressor == nil {
+		return nil, false
+	}
+	g := sn.MakeGetter()
+	g.Reset(0)
+	if !g.HasNext() {
+		return nil, false
+	}
+	word, _ := g.Next(nil)
+	return word, true
+}
+
+func TestOpenListToleratesDuplicateNames(t *testing.T) {
+	logger := log.New()
+	dir, require := t.TempDir(), require.New(t)
+	createTestSegmentFile(t, 0, 10_000, snaptype2.Enums.Headers, dir, version.V1_0, logger)
+	name := snaptype.SegmentFileName(version.V1_0, 0, 10_000, snaptype2.Enums.Headers)
+
+	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
+	s := NewBaseRoSnapshots(cfg, dir, []snaptype.Type{snaptype2.Headers}, snaptype2.Headers, false, logger)
+	defer s.Close()
+
+	require.NoError(s.OpenList([]string{name, name}, false))
+	require.Equal(1, s.dirty[snaptype2.Enums.Headers].Len())
+	require.True(visibleHas(s, snaptype2.Enums.Headers, 0, 10_000))
+}
+
+func TestViewSegmentsOfUnmanagedType(t *testing.T) {
+	logger := log.New()
+	dir, require := t.TempDir(), require.New(t)
+	for _, snT := range snaptype2.BlockSnapshotTypes {
+		createTestSegmentFile(t, 0, 10_000, snT.Enum(), dir, version.V1_0, logger)
+	}
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(s.OpenFolder())
+
+	v := s.View()
+	defer v.Close()
+	require.NotEmpty(v.Segments(snaptype2.Transactions))
+
+	// A type this collection doesn't manage reads as empty rather than panicking.
+	require.NotPanics(func() {
+		require.Empty(v.Segments(snaptype.BeaconBlocks))
+		_, ok := v.Segment(snaptype.BeaconBlocks, 0)
+		require.False(ok)
+	})
 }

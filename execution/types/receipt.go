@@ -26,12 +26,14 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"sync"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/pool"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
@@ -115,7 +117,7 @@ type storedReceiptRLP struct {
 	CumulativeGasUsed uint64
 	FirstLogIndex     uint32 // Logs have their own incremental Index within block. To allow calc it without re-executing whole block - can store it in Receipt
 
-	Logs []*LogForStorage
+	Logs []rlpStorageLog
 
 	TransactionIndex uint
 	ContractAddress  common.Address
@@ -145,9 +147,8 @@ func (r Receipt) EncodeRLP(w io.Writer) error {
 	if r.Type == LegacyTxType {
 		return rlp.Encode(w, data)
 	}
-	buf := encodeBufferPool.Get().(*bytes.Buffer)
-	defer encodeBufferPool.Put(buf)
-	buf.Reset()
+	buf := pool.GetBuffer()
+	defer pool.PutBuffer(buf)
 	if err := r.encodeTyped(data, buf); err != nil {
 		return err
 	}
@@ -251,19 +252,8 @@ func (r *Receipt) decodePayload(s *rlp.Stream) error {
 		if err = s.ReadBytes(log.Address[:]); err != nil {
 			return fmt.Errorf("read Address: %w", err)
 		}
-		if _, err = s.List(); err != nil {
-			return fmt.Errorf("open Topics: %w", err)
-		}
-		for s.MoreDataInList() {
-			var topic common.Hash
-			if err = s.ReadBytes(topic[:]); err != nil {
-				return fmt.Errorf("read Topic: %w", err)
-			}
-			log.Topics = append(log.Topics, topic)
-		}
-		// end of Topics list
-		if err = s.ListEnd(); err != nil {
-			return fmt.Errorf("close Topics: %w", err)
+		if log.Topics, err = decodeHashList(s); err != nil {
+			return fmt.Errorf("read Topics: %w", err)
 		}
 		if log.Data, err = s.Bytes(); err != nil {
 			return fmt.Errorf("read Data: %w", err)
@@ -388,47 +378,131 @@ func (r *ReceiptForStorage) EncodeRLP(w io.Writer) error {
 		r.FirstLogIndexWithinBlock = uint32(r.Logs[0].Index)
 	}
 
-	logsForStorage := make([]*LogForStorage, len(r.Logs))
-	for i, l := range r.Logs {
-		logsForStorage[i] = (*LogForStorage)(l)
+	s := storedReceiptScratchPool.Get().(*storedReceiptScratch)
+	defer s.release()
+
+	s.logs = slices.Grow(s.logs[:0], len(r.Logs))
+	for _, l := range r.Logs {
+		s.logs = append(s.logs, rlpStorageLog{Address: l.Address, Topics: l.Topics, Data: l.Data})
 	}
-	return rlp.Encode(w, &storedReceiptRLP{
+	s.rec = storedReceiptRLP{
 		Type:              r.Type,
 		PostStateOrStatus: (*Receipt)(r).statusEncoding(),
 		CumulativeGasUsed: r.CumulativeGasUsed,
 		FirstLogIndex:     r.FirstLogIndexWithinBlock,
 
-		Logs:             logsForStorage,
+		Logs:             s.logs,
 		GasUsed:          r.GasUsed,
 		ContractAddress:  r.ContractAddress,
 		TransactionIndex: r.TransactionIndex,
-	})
+	}
+	return rlp.Encode(w, &s.rec)
+}
+
+// storedReceiptScratch keeps the reflection encoder's input off the heap: the
+// encoder needs an addressable struct and a log slice, and a receipt is encoded
+// once per transaction executed.
+type storedReceiptScratch struct {
+	rec  storedReceiptRLP
+	logs []rlpStorageLog
+}
+
+var storedReceiptScratchPool = sync.Pool{New: func() any { return new(storedReceiptScratch) }}
+
+// maxPooledLogs bounds what one pooled scratch keeps alive; a receipt with an
+// outlier log count is not worth pinning its backing array in the pool.
+const maxPooledLogs = 1024
+
+// release drops the borrowed topic and data slices so a pooled scratch never
+// keeps a receipt's logs alive.
+func (s *storedReceiptScratch) release() {
+	if cap(s.logs) > maxPooledLogs {
+		s.logs = nil
+	} else {
+		clear(s.logs)
+	}
+	s.rec = storedReceiptRLP{}
+	storedReceiptScratchPool.Put(s)
+}
+
+func decodeLogsForStorage(s *rlp.Stream) (Logs, error) {
+	l, err := s.List()
+	if err != nil {
+		return nil, err
+	}
+	if l == 0 {
+		return Logs{}, s.ListEnd()
+	}
+	const typicalLogSize = 128                    // estimate only, append grows past it
+	preAlloc := int(min(128, l/typicalLogSize+1)) // hard cap: l is attacker-controlled, see decodeHashList
+	logs := make(Logs, 0, preAlloc)
+	for s.MoreDataInList() {
+		log := &Log{}
+		if err := (*LogForStorage)(log).DecodeRLP(s); err != nil {
+			return nil, err
+		}
+		logs = append(logs, log)
+	}
+	return logs, s.ListEnd()
 }
 
 // DecodeRLP implements rlp.Decoder, and loads both consensus and implementation
-// fields of a receipt from an RLP stream.
+// fields of a receipt from an RLP stream
 func (r *ReceiptForStorage) DecodeRLP(s *rlp.Stream) error {
-	var stored storedReceiptRLP
-	if err := s.Decode(&stored); err != nil {
+	var dec ReceiptForStorage
+	_, err := s.List()
+	if err != nil {
 		return err
 	}
-	if err := (*Receipt)(r).setStatus(stored.PostStateOrStatus); err != nil {
+	if dec.Type, err = s.Uint8(); err != nil {
+		return fmt.Errorf("read Type: %w", err)
+	}
+	kind, size, err := s.Kind()
+	if err != nil {
+		return fmt.Errorf("read PostStateOrStatus: %w", err)
+	}
+	if kind == rlp.String && size == uint64(len(common.Hash{})) {
+		dec.PostState = make([]byte, size)
+		if err := s.ReadBytes(dec.PostState); err != nil {
+			return fmt.Errorf("read PostStateOrStatus: %w", err)
+		}
+	} else {
+		status, err := s.Uint64()
+		if err != nil {
+			return fmt.Errorf("read PostStateOrStatus: %w", err)
+		}
+		if status != ReceiptStatusSuccessful && status != ReceiptStatusFailed {
+			return fmt.Errorf("invalid receipt status %d", status)
+		}
+		dec.Status = status
+	}
+	if dec.CumulativeGasUsed, err = s.Uint64(); err != nil {
+		return fmt.Errorf("read CumulativeGasUsed: %w", err)
+	}
+	if dec.FirstLogIndexWithinBlock, err = s.Uint32(); err != nil {
+		return fmt.Errorf("read FirstLogIndex: %w", err)
+	}
+	if dec.Logs, err = decodeLogsForStorage(s); err != nil {
+		return fmt.Errorf("read Logs: %w", err)
+	}
+	txnIdx, err := s.Uint64()
+	if err != nil {
+		return fmt.Errorf("read TransactionIndex: %w", err)
+	}
+	if uint64(uint(txnIdx)) != txnIdx {
+		return fmt.Errorf("read TransactionIndex: %d overflows uint", txnIdx)
+	}
+	dec.TransactionIndex = uint(txnIdx)
+	if dec.ContractAddress, err = s.Addr(); err != nil {
+		return fmt.Errorf("read ContractAddress: %w", err)
+	}
+	if dec.GasUsed, err = s.Uint64(); err != nil {
+		return fmt.Errorf("read GasUsed: %w", err)
+	}
+	if err := s.ListEnd(); err != nil {
 		return err
 	}
-	r.Type = stored.Type
-	r.CumulativeGasUsed = stored.CumulativeGasUsed
-	r.FirstLogIndexWithinBlock = stored.FirstLogIndex
-
-	r.Logs = make([]*Log, len(stored.Logs))
-	for i, log := range stored.Logs {
-		r.Logs[i] = (*Log)(log)
-	}
-	//r.TxHash = stored.TxHash
-	r.ContractAddress = stored.ContractAddress
-	r.GasUsed = stored.GasUsed
-	r.TransactionIndex = stored.TransactionIndex
-	//r.Bloom = CreateBloom(Receipts{(*Receipt)(r)})
-
+	*r = dec
 	return nil
 }
 
