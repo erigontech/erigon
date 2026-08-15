@@ -172,8 +172,8 @@ func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint6
 	select {
 	case s.validationAdmission <- struct{}{}:
 		defer func() { <-s.validationAdmission }()
-	default:
-		return fmt.Errorf("%w: payload attestation validation backlog full", ErrIgnore)
+	case <-ctx.Done():
+		return fmt.Errorf("%w: payload attestation validation canceled: %v", ErrIgnore, ctx.Err())
 	}
 
 	// Process through forkchoice which handles:

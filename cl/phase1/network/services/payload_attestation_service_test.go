@@ -140,13 +140,53 @@ func TestPayloadAttestationServiceBoundsKnownBlockValidation(t *testing.T) {
 	}()
 	<-blockingForkchoice.started
 
-	err := service.ProcessMessage(context.Background(), nil, &cltypes.PayloadAttestationMessage{
+	secondCtx, cancelSecond := context.WithCancel(context.Background())
+	cancelSecond()
+	err := service.ProcessMessage(secondCtx, nil, &cltypes.PayloadAttestationMessage{
 		ValidatorIndex: 2,
 		Data:           &cltypes.PayloadAttestationData{Slot: 100, BeaconBlockRoot: blockRoot},
 	})
 	require.ErrorIs(t, err, ErrIgnore)
 	close(blockingForkchoice.release)
 	require.NoError(t, <-firstDone)
+}
+
+func TestPayloadAttestationServiceBackpressuresInsteadOfDroppingValidCandidate(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, fcu, ethClockMock := setupPayloadAttestationService(t, ctrl)
+	service.validationAdmission = make(chan struct{}, 1)
+	blockRoot := common.HexToHash("0x1234")
+	fcu.Headers[blockRoot] = &cltypes.BeaconBlockHeader{Slot: 100}
+	validations := &candidatePayloadAttestationForkchoice{
+		ForkChoiceStorage: fcu,
+		started:           make(chan byte, 2),
+		release:           make(chan struct{}),
+	}
+	service.forkchoiceStore = validations
+	ethClockMock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(uint64(100)).Return(true).Times(2)
+
+	invalid := newTestPayloadAttestationMessage(100, 1, blockRoot)
+	invalid.Signature[0] = 1
+	firstResult := make(chan error, 1)
+	go func() { firstResult <- service.ProcessMessage(context.Background(), nil, invalid) }()
+	require.Equal(t, byte(1), <-validations.started)
+
+	valid := newTestPayloadAttestationMessage(100, 1, blockRoot)
+	valid.Signature[0] = 3
+	secondResult := make(chan error, 1)
+	go func() { secondResult <- service.ProcessMessage(context.Background(), nil, valid) }()
+	select {
+	case err := <-secondResult:
+		close(validations.release)
+		t.Fatalf("valid candidate returned before admission was released: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	close(validations.release)
+	require.Error(t, <-firstResult)
+	require.NoError(t, <-secondResult)
 }
 
 func TestPayloadAttestationServiceDoesNotDropValidCandidateBehindInvalidCandidates(t *testing.T) {

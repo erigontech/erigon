@@ -531,15 +531,12 @@ func waitForSelectedHeadEnvelope(
 	validatePayload bool,
 ) {
 	pollCtx, pollCancel := context.WithTimeout(ctx, timeout)
+	defer pollCancel()
 	if store.HasEnvelope(headRoot) {
-		pollCancel()
 		return
 	}
-	var requestDone chan struct{}
 	if requestFromPeer {
-		requestDone = make(chan struct{})
 		go func() {
-			defer close(requestDone)
 			envelopes, err := requestEnvelopes(pollCtx, [][32]byte{headRoot})
 			if err != nil {
 				log.Debug("[chainTipSync] failed to request selected head envelope", "headRoot", headRoot, "err", err)
@@ -549,17 +546,14 @@ func waitForSelectedHeadEnvelope(
 			if envelope == nil {
 				return
 			}
+			if pollCtx.Err() != nil {
+				return
+			}
 			if err := store.OnExecutionPayload(pollCtx, envelope, true, validatePayload); err != nil {
 				log.Debug("[chainTipSync] failed to apply selected head envelope", "headRoot", headRoot, "err", err)
 			}
 		}()
 	}
-	defer func() {
-		pollCancel()
-		if requestDone != nil {
-			<-requestDone
-		}
-	}()
 
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
@@ -582,6 +576,10 @@ func claimSelectedHeadEnvelopeRequest(cfg *Cfg, headRoot common.Hash) bool {
 	}
 	cfg.gloasHeadEnvelopeRequestRoot = headRoot
 	return true
+}
+
+func blockSupportsExecutionPayloadEnvelope(block *cltypes.SignedBeaconBlock) bool {
+	return block != nil && block.Block != nil && block.Version() >= clparams.GloasVersion
 }
 
 func buildGloasNewPayloadArgs(cfg *Cfg, block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) ([]common.Hash, []hexutil.Bytes, error) {
@@ -925,7 +923,8 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 			if err != nil {
 				return err
 			}
-			if headRoot != (common.Hash{}) && !cfg.forkChoice.HasEnvelope(headRoot) {
+			headBlock, _ := cfg.forkChoice.GetBlock(headRoot)
+			if headRoot != (common.Hash{}) && blockSupportsExecutionPayloadEnvelope(headBlock) && !cfg.forkChoice.HasEnvelope(headRoot) {
 				requestFromPeer := claimSelectedHeadEnvelopeRequest(cfg, headRoot)
 				waitForSelectedHeadEnvelope(ctx, cfg.forkChoice, func(requestCtx context.Context, roots [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
 					return network.RequestEnvelopesFrantically(requestCtx, cfg.rpc, roots)

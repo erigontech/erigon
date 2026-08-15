@@ -73,6 +73,17 @@ func TestSelectedHeadEnvelopeRequestIsClaimedOncePerHead(t *testing.T) {
 	require.True(t, claimSelectedHeadEnvelopeRequest(cfg, firstHead))
 }
 
+func TestBlockSupportsExecutionPayloadEnvelopeUsesBlockVersion(t *testing.T) {
+	require.False(t, blockSupportsExecutionPayloadEnvelope(nil))
+	require.False(t, blockSupportsExecutionPayloadEnvelope(&cltypes.SignedBeaconBlock{}))
+	require.False(t, blockSupportsExecutionPayloadEnvelope(&cltypes.SignedBeaconBlock{
+		Block: &cltypes.BeaconBlock{Body: &cltypes.BeaconBody{Version: clparams.FuluVersion}},
+	}))
+	require.True(t, blockSupportsExecutionPayloadEnvelope(&cltypes.SignedBeaconBlock{
+		Block: &cltypes.BeaconBlock{Body: &cltypes.BeaconBody{Version: clparams.GloasVersion}},
+	}))
+}
+
 func TestWaitForSelectedHeadEnvelopeDoesNotRequestUnclaimedHead(t *testing.T) {
 	store := &selectedHeadEnvelopeTestStore{envelopes: make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)}
 	requests := make(chan struct{}, 1)
@@ -98,6 +109,35 @@ func TestWaitForSelectedHeadEnvelopeBoundsEmptyPeerResponse(t *testing.T) {
 	}, common.HexToHash("0x1234"), 10*time.Millisecond, true, false)
 
 	require.Len(t, requests, 1)
+}
+
+func TestWaitForSelectedHeadEnvelopeDoesNotJoinLateRequester(t *testing.T) {
+	headRoot := common.HexToHash("0x1234")
+	store := &selectedHeadEnvelopeTestStore{envelopes: make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)}
+	release := make(chan struct{})
+	requestDone := make(chan struct{})
+	returned := make(chan struct{})
+	go func() {
+		waitForSelectedHeadEnvelope(context.Background(), store, func(context.Context, [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
+			defer close(requestDone)
+			<-release
+			return map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{
+				headRoot: {Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: headRoot}},
+			}, nil
+		}, headRoot, 10*time.Millisecond, true, false)
+		close(returned)
+	}()
+
+	select {
+	case <-returned:
+	case <-time.After(100 * time.Millisecond):
+		close(release)
+		<-returned
+		t.Fatal("selected-head wait joined a late requester")
+	}
+	close(release)
+	<-requestDone
+	require.False(t, store.HasEnvelope(headRoot))
 }
 
 func TestValidateAnchorEnvelope(t *testing.T) {
