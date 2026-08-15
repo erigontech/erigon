@@ -141,8 +141,12 @@ var (
 	// turning a read through a slice that outlived its file into a fault at that
 	// read. Without it the address is free for the next file, and the stale read
 	// silently returns another file's bytes. Leaks address space — diagnostics only.
-	MmapPoison = EnvBool("MMAP_POISON", false)
-	ReadAhead  = EnvBool("READ_AHEAD", true)
+	MmapPoison       = EnvBool("MMAP_POISON", false)
+	ReadAhead        = EnvBool("READ_AHEAD", true)
+	ReadAheadWorkers = EnvInt("READ_AHEAD_WORKERS", estimate.AllCPUs())
+	ReadAheadWait    = EnvBool("READ_AHEAD_WAIT", false)
+	ReadAheadBALCode = EnvBool("READ_AHEAD_BAL_CODE", false)
+	ReadAheadTxCode  = EnvBool("READ_AHEAD_TX_CODE", false)
 	// FilesAsyncIO warms cold state .kv pages via io_uring before the mmap read, so
 	// a would-be blocking page fault becomes a non-blocking read that releases the
 	// goroutine's P. Linux + io_uring only; self-disables (reads use ordinary faults)
