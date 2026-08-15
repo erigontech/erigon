@@ -154,7 +154,7 @@ func dump(in *inStream, s *rlp.Stream, depth int, out io.Writer) error {
 				if i > 0 {
 					fmt.Fprint(out, ",\n")
 				}
-				if err := dump(in, s, depth+1, out); errors.Is(err, rlp.EOL) {
+				if err := dump(in, s, depth+1, out); err == rlp.EOL { //nolint:errorlint // intentional bare sentinel check
 					break
 				} else if err != nil {
 					return err
