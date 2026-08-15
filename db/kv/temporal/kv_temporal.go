@@ -578,6 +578,10 @@ func (tx *tx) getLatest(name kv.Domain, dbTx kv.Tx, k []byte) (v []byte, step kv
 	return v, step, err
 }
 
+func (tx *tx) getLatestValSize(name kv.Domain, dbTx kv.Tx, k []byte) (size int, found bool, err error) {
+	return tx.aggtx.GetLatestValSize(name, k, dbTx)
+}
+
 func (tx *Tx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
 	return tx.hasPrefix(name, tx.Tx, prefix)
 }
@@ -616,6 +620,14 @@ func (tx *Tx) GetLatest(name kv.Domain, k []byte) (v []byte, step kv.Step, err e
 
 func (tx *RwTx) GetLatest(name kv.Domain, k []byte) (v []byte, step kv.Step, err error) {
 	return tx.getLatest(name, tx.RwTx, k)
+}
+
+func (tx *Tx) GetLatestValSize(name kv.Domain, k []byte) (size int, found bool, err error) {
+	return tx.getLatestValSize(name, tx.Tx, k)
+}
+
+func (tx *RwTx) GetLatestValSize(name kv.Domain, k []byte) (size int, found bool, err error) {
+	return tx.getLatestValSize(name, tx.RwTx, k)
 }
 
 func (tx *tx) getAsOf(name kv.Domain, gtx kv.Tx, key []byte, ts uint64) (v []byte, ok bool, err error) {
