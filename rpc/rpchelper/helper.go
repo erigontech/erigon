@@ -200,6 +200,13 @@ func CreateStateReaderFromBlockNumber(ctx context.Context, tx kv.TemporalTx, blo
 	return CreateHistoryCachedStateReader(ctx, cacheView, tx, blockNumber+1, txnIndex, txNumsReader)
 }
 
+func CreateUncachedStateReaderFromBlockNumber(ctx context.Context, tx kv.TemporalTx, blockNumber uint64, latest bool, txnIndex int, txNumsReader rawdbv3.TxNumsReader) (state.StateReader, error) {
+	if latest {
+		return NewLatestStateReader(tx), nil
+	}
+	return CreateHistoryStateReader(ctx, tx, blockNumber+1, txnIndex, txNumsReader)
+}
+
 func CreateHistoryStateReader(ctx context.Context, tx kv.TemporalTx, blockNumber uint64, txnIndex int, txNumsReader rawdbv3.TxNumsReader) (state.StateReader, error) {
 	minTxNum, err := txNumsReader.Min(ctx, tx, blockNumber)
 	if err != nil {
