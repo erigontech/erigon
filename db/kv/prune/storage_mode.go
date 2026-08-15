@@ -174,16 +174,12 @@ func appendCommitmentHistory(sb *strings.Builder, m Mode) {
 }
 
 func appendReceipts(sb *strings.Builder, m Mode) {
-	if m.Receipts == nil {
+	// An unset or KeepAllBlocksPruneMode value is the follow-history default —
+	// nothing for the operator to re-pass.
+	if m.Receipts == nil || m.Receipts.toValue() == KeepAllBlocksPruneMode.toValue() {
 		return
 	}
-	switch m.Receipts.toValue() {
-	case KeepAllBlocksPruneMode.toValue(): // follow-history default — nothing to render
-	case KeepAllReceiptsPruneMode.toValue():
-		sb.WriteString(" --prune.receipts.distance=keep-all")
-	default:
-		fmt.Fprintf(sb, " --prune.receipts.distance=%s", stateHistoryDistanceCLIValue(m.Receipts.toValue(), KeepAllReceiptsPruneMode))
-	}
+	fmt.Fprintf(sb, " --prune.receipts.distance=%s", stateHistoryDistanceCLIValue(m.Receipts.toValue(), KeepAllReceiptsPruneMode))
 }
 
 func FromCli(pruneMode string, distanceHistory, distanceBlocks, commitmentHistoryOlder, receiptsDistance uint64) (Mode, error) {
