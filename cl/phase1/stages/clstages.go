@@ -285,6 +285,7 @@ func ConsensusClStages(ctx context.Context,
 					// peers as before. See warm-restart: the checkpoint IS the head; nothing to backfill.
 					soleProducer := cfg.caplinConfig.LocalDiscovery && cfg.caplinConfig.DevValidatorSeed != ""
 					if cfg.state.Slot() == 0 || soleProducer {
+						checkpointSlot := cfg.state.Slot()
 						// Set the loaded state (genesis, or the resumed checkpoint) as the head so
 						// Syncing() returns false and the VC produces on top of it at the current slot.
 						if err := cfg.syncedData.OnHeadStateWithBlockRoot(cfg.state, startingRoot); err != nil {
@@ -292,18 +293,28 @@ func ConsensusClStages(ctx context.Context,
 						}
 						// Mark forkchoice as synced so OnAttestation processes attestations.
 						cfg.forkChoice.SetSynced(true)
-						if cfg.state.Slot() == 0 {
+						cfg.state = nil // Release the state
+						if checkpointSlot == 0 {
 							// Cold start: write the genesis beacon block so production finds the parent.
-							// On a warm restart the head beacon block is already persisted in
-							// caplin/indexing (produced last run), so there is nothing to write.
 							if err := writeGenesisBeaconBlock(ctx, cfg); err != nil {
 								return fmt.Errorf("failed to write genesis beacon block: %w", err)
 							}
-						} else {
-							logger.Info("[Caplin] sole-producer warm resume: anchored on persisted checkpoint head",
-								"slot", cfg.state.Slot(), "blockRoot", common.Hash(startingRoot))
+							return nil
 						}
-						cfg.state = nil // Release the state
+						// Warm restart: the persisted chain head can be AHEAD of this loaded
+						// checkpoint state. The head-state save (latest.ssz_snappy) lags block
+						// persistence on a crash or a kill during rapid production, so
+						// caplin/indexing + the EL hold blocks checkpointSlot+1..N that the loaded
+						// state doesn't know about. Anchoring on the stale checkpoint and producing
+						// immediately leaves the fork-choice head STUCK at the anchor: the EL is told
+						// head == the checkpoint's exec block while it already holds N, so it
+						// unwind-thrashes every slot and never advances. Replay the persisted beacon
+						// blocks forward to the true head so the fork choice + synced head reach N;
+						// the EL already has these blocks (newPayload=false skips re-execution), so
+						// the resulting forkchoice update matches the EL head — no unwind.
+						if err := replaySoleProducerToHead(ctx, logger, cfg, checkpointSlot); err != nil {
+							return fmt.Errorf("sole-producer warm resume replay: %w", err)
+						}
 						return nil
 					}
 
@@ -408,6 +419,67 @@ func ConsensusClStages(ctx context.Context,
 			},
 		},
 	}
+}
+
+// replaySoleProducerToHead brings a warm-restarted sole-producer node from its
+// loaded checkpoint state (slot checkpointSlot) up to the true persisted chain head
+// by replaying the beacon blocks already on disk (caplin/indexing). The persisted
+// blocks checkpointSlot+1..N are NOT orphans — they are the canonical continuation
+// the (lagging) head-state save simply didn't capture; the EL already holds them.
+// Replaying them advances the fork choice + synced head to N so production resumes
+// at the real tip instead of sticking at the stale checkpoint and unwind-thrashing
+// the EL. See the call site in DownloadHistoricalBlocks.
+func replaySoleProducerToHead(ctx context.Context, logger log.Logger, cfg *Cfg, checkpointSlot uint64) error {
+	// Advance the fork-choice clock to the current wall-clock slot; otherwise OnBlock
+	// rejects the replayed blocks as "too early compared to current_slot".
+	cfg.forkChoice.OnTick(cfg.ethClock.GenesisTime() + cfg.ethClock.GetCurrentSlot()*cfg.beaconCfg.SecondsPerSlot)
+
+	var headSlot uint64
+	if err := cfg.indiciesDB.View(ctx, func(tx kv.Tx) error {
+		var e error
+		headSlot, _, e = beacon_indicies.ReadCanonicalHead(tx)
+		return e
+	}); err != nil {
+		return fmt.Errorf("read canonical head: %w", err)
+	}
+	if headSlot <= checkpointSlot {
+		// The checkpoint already IS the head (clean/graceful shutdown) — nothing to replay.
+		logger.Info("[Caplin] sole-producer warm resume: anchored on persisted checkpoint head",
+			"slot", checkpointSlot)
+		return nil
+	}
+
+	replayed := 0
+	for s := checkpointSlot + 1; s <= headSlot; s++ {
+		var blk *cltypes.SignedBeaconBlock
+		if err := cfg.indiciesDB.View(ctx, func(tx kv.Tx) error {
+			var e error
+			blk, e = cfg.blockReader.ReadBlockBySlot(ctx, tx, s)
+			return e
+		}); err != nil {
+			return fmt.Errorf("read persisted block at slot %d: %w", s, err)
+		}
+		if blk == nil {
+			continue // empty (skipped) slot — no block was produced here
+		}
+		// newPayload=false: the EL already holds these blocks, don't re-execute them.
+		// fullValidation=false: locally-produced history, already validated last run.
+		if err := processBlock(ctx, cfg, cfg.indiciesDB, blk, false, false, false); err != nil {
+			// Don't hard-fail the whole resume — anchor at whatever we reached (>=
+			// checkpoint) and let normal production continue from there.
+			logger.Warn("[Caplin] sole-producer warm resume: replay stopped early", "slot", s, "err", err)
+			break
+		}
+		replayed++
+	}
+	if replayed > 0 {
+		// Advance the synced head state to the replayed tip so block production builds
+		// on the real head (not the stale checkpoint).
+		setHeadStateFromForkChoice(cfg, logger)
+	}
+	logger.Info("[Caplin] sole-producer warm resume: replayed persisted blocks to head",
+		"fromSlot", checkpointSlot, "toSlot", headSlot, "replayed", replayed)
+	return nil
 }
 
 // writeGenesisBeaconBlock writes a synthetic genesis beacon block to the DB.
