@@ -110,7 +110,7 @@ func Main(_ context.Context, ctx *cli.Command) error {
 	// If user specified a basedir, make sure it exists
 	if ctx.IsSet(OutputBasedir.Name) {
 		if base := ctx.String(OutputBasedir.Name); len(base) > 0 {
-			err2 := os.MkdirAll(base, 0755) // //rw-r--r--
+			err2 := os.MkdirAll(base, 0o755) // //rw-r--r--
 			if err2 != nil {
 				return NewError(ErrorIO, fmt.Errorf("failed creating output basedir: %v", err2))
 			}
@@ -276,7 +276,7 @@ func Main(_ context.Context, ctx *cli.Command) error {
 	// manufacture block from above inputs
 	header := NewHeader(prestate.Env)
 
-	var ommerHeaders = make([]*types.Header, len(prestate.Env.Ommers))
+	ommerHeaders := make([]*types.Header, len(prestate.Env.Ommers))
 	header.Number.AddUint64(&header.Number, uint64(len(prestate.Env.Ommers)))
 	for i, ommer := range prestate.Env.Ommers {
 		var ommerN uint256.Int
@@ -578,7 +578,7 @@ func saveFile(baseDir, filename string, data any) error {
 		return NewError(ErrorJson, fmt.Errorf("failed marshalling output: %v", err))
 	}
 	location := filepath.Join(baseDir, filename)
-	if err = os.WriteFile(location, b, 0644); err != nil { //nolint:gosec
+	if err = os.WriteFile(location, b, 0o644); err != nil { //nolint:gosec
 		return NewError(ErrorIO, fmt.Errorf("failed writing output: %v", err))
 	}
 	log.Info("Wrote file", "file", location)
