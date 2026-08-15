@@ -29,7 +29,6 @@ import (
 	"slices"
 	"sync"
 	"sync/atomic"
-	"testing"
 	"time"
 	"unsafe"
 
@@ -159,7 +158,7 @@ func (opts MdbxOpts) Readonly(v bool) MdbxOpts   { return opts.boolToFlag(v, mdb
 func (opts MdbxOpts) Accede(v bool) MdbxOpts     { return opts.boolToFlag(v, mdbx.Accede) }
 func (opts MdbxOpts) AutoRemove(v bool) MdbxOpts { opts.autoRemove = v; return opts }
 
-func (opts MdbxOpts) InMem(tb testing.TB, tmpDir string) MdbxOpts {
+func (opts MdbxOpts) InMem(tmpDir string) MdbxOpts {
 	if tmpDir != "" {
 		if err := os.MkdirAll(tmpDir, 0755); err != nil {
 			panic(err)
@@ -171,20 +170,11 @@ func (opts MdbxOpts) InMem(tb testing.TB, tmpDir string) MdbxOpts {
 	}
 	opts.path = path
 	opts.inMem = true
-	opts.autoRemove = tb == nil
+	opts.autoRemove = true
 	opts.flags = mdbx.UtterlyNoSync | mdbx.NoMetaSync | mdbx.NoMemInit
 	opts.growthStep = 2 * datasize.MB
 	opts.mapSize = 16 * datasize.GB
 	opts.dirtySpace = uint64(16 * datasize.MB)
-	if tb != nil {
-		opts.dirtySpace = uint64(2 * datasize.MB)
-		// Parallel unit tests pile 16GB VA reservations into the Go race heap
-		// window ("too many address space collisions for -race mode"); cap them.
-		// Benchmarks run sequentially and can need the full map.
-		if _, isBench := tb.(*testing.B); !isBench {
-			opts.mapSize = 1 * datasize.GB
-		}
-	}
 	opts.shrinkThreshold = 0 // disable
 	opts.pageSize = 4096
 	return opts
@@ -789,7 +779,7 @@ type MdbxTx struct {
 
 type MdbxCursor struct {
 	toCloseMap map[uint64]kv.Closer
-	c          *mdbx.Cursor
+	c          mdbx.Cursor
 	bucketName string
 	isDupSort  bool
 	id         uint64
@@ -891,9 +881,9 @@ func (db *MdbxKV) View(ctx context.Context, f func(tx kv.Tx) error) (err error) 
 
 func rawCursor(c kv.Cursor) *mdbx.Cursor {
 	if dc, ok := c.(*MdbxDupSortCursor); ok {
-		return dc.c
+		return &dc.c
 	}
-	return c.(*MdbxCursor).c
+	return &c.(*MdbxCursor).c
 }
 
 const maxDistributeCursors = 4096
@@ -935,7 +925,7 @@ func (tx *MdbxTx) DistributeCursors(table string, from []byte, n int) ([][]byte,
 		if err != nil {
 			return nil, err
 		}
-		defer cw.Close()
+		defer cw.Close() //nolint:gocritic
 		wrappers[i], cursors[i] = cw, rawCursor(cw)
 	}
 
@@ -1536,9 +1526,7 @@ func (tx *MdbxTx) stdCursor(bucket string) (kv.RwCursor, error) {
 	if tx.tx == nil {
 		panic("assert: tx.tx nil. seems this `tx` was Rollback'ed")
 	}
-	var err error
-	c.c, err = tx.tx.OpenCursor(mdbx.DBI(tx.db.buckets[c.bucketName].DBI))
-	if err != nil {
+	if err := c.c.Open(tx.tx, mdbx.DBI(tx.db.buckets[c.bucketName].DBI)); err != nil {
 		return nil, fmt.Errorf("table: %s, %w, stack: %s", c.bucketName, err, dbg.Stack())
 	}
 
@@ -1688,14 +1676,13 @@ func (c *MdbxCursor) Append(k []byte, v []byte) error {
 }
 
 func (c *MdbxCursor) Close() {
-	if c.c != nil {
+	if !c.c.IsClosed() {
 		c.c.Close()
 		delete(c.toCloseMap, c.id)
-		c.c = nil
 	}
 }
 
-func (c *MdbxCursor) IsClosed() bool { return c.c == nil }
+func (c *MdbxCursor) IsClosed() bool { return c.c.IsClosed() }
 
 type MdbxCursorPseudoDupSort struct {
 	*MdbxCursor

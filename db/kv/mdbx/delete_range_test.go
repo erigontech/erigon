@@ -14,11 +14,13 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package mdbx
+package mdbx_test
 
 import (
 	"bytes"
 	"testing"
+
+	"github.com/erigontech/erigon/db/kv/mdbx"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
@@ -26,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
 const deleteRangeTable = "T"
@@ -35,7 +38,7 @@ const deleteRangeTable = "T"
 // keys 0..n-1.
 func newFilledDB(t *testing.T, n int) kv.RwDB {
 	t.Helper()
-	db := New(dbcfg.ChainDB, log.New()).InMem(t, t.TempDir()).WriteMap(true).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), t.TempDir()).WriteMap(true).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{deleteRangeTable: kv.TableCfgItem{}}
 	}).MapSize(512 * datasize.MB).MustOpen()
 	t.Cleanup(db.Close)
@@ -152,7 +155,7 @@ func TestChunkedDeleteRangeCoversAllKeys(t *testing.T) {
 
 func newFilledDupSortDB(t *testing.T, keys, dupsPerKey int) kv.RwDB {
 	t.Helper()
-	db := New(dbcfg.ChainDB, log.New()).InMem(t, t.TempDir()).WriteMap(true).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), t.TempDir()).WriteMap(true).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{deleteRangeTable: kv.TableCfgItem{Flags: kv.DupSort}}
 	}).MapSize(512 * datasize.MB).MustOpen()
 	t.Cleanup(db.Close)

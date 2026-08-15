@@ -27,19 +27,21 @@ func TestBlockAccessListBytes(t *testing.T) {
 	tests := []struct {
 		name      string
 		hash      *common.Hash
+		blockBAL  []byte
 		storedBAL []byte
 		wantBAL   []byte
 		wantReads int
 	}{
 		{name: "missing commitment"},
 		{name: "empty commitment", hash: &empty.BlockAccessListHash},
+		{name: "carried BAL", hash: &nonEmptyBALHash, blockBAL: storedBAL, wantBAL: storedBAL},
 		{name: "non-empty commitment", hash: &nonEmptyBALHash, storedBAL: storedBAL, wantBAL: storedBAL, wantReads: 1},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			getter := &countingBlockAccessListGetter{data: test.storedBAL}
-			block := types.NewBlockFromStorage(common.Hash{}, &types.Header{BlockAccessListHash: test.hash}, nil, nil, nil)
+			block := types.NewBlockFromStorage(common.Hash{}, &types.Header{BlockAccessListHash: test.hash}, nil, nil, nil, test.blockBAL)
 
 			got, err := blockAccessListBytes(getter, block, 1)
 			if err != nil {

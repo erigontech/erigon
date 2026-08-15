@@ -112,6 +112,8 @@ var (
 	TraceApply            = EnvBool("TRACE_APPLY", false)
 	TraceTouchKey         = EnvBool("TRACE_TOUCH_KEY", false)
 	TraceBlockAccessLists = EnvBool("TRACE_BLOCK_ACCESS_LISTS", false)
+	TraceReexec           = EnvBool("TRACE_REEXEC", false)
+	TraceBALFeed          = EnvBool("TRACE_BAL_FEED", false)
 	TraceBlocks           = EnvUints("TRACE_BLOCKS", ",", nil)
 	TraceTxIndexes        = EnvInts("TRACE_TXINDEXES", ",", nil)
 	TraceUnwinds          = EnvBool("TRACE_UNWINDS", false)
@@ -133,9 +135,13 @@ var (
 	UseTxDependencies    = EnvBool("USE_TX_DEPENDENCIES", false)
 	UseStateCache        = EnvBool("USE_STATE_CACHE", true)
 	UseCodeStore         = EnvBool("USE_CODE_STORE", true)
-	DisableAdaptivePin   = EnvBool("DISABLE_ADAPTIVE_PIN", false)
+	DisableAdaptivePin   = EnvBool("DISABLE_ADAPTIVE_PIN", true)
 	AssertStateCache     = EnvBool("ASSERT_STATE_CACHE", false)
 	ReadAhead            = EnvBool("READ_AHEAD", true)
+	ReadAheadWorkers     = EnvInt("READ_AHEAD_WORKERS", estimate.AllCPUs())
+	ReadAheadWait        = EnvBool("READ_AHEAD_WAIT", false)
+	ReadAheadBALCode     = EnvBool("READ_AHEAD_BAL_CODE", false)
+	ReadAheadTxCode      = EnvBool("READ_AHEAD_TX_CODE", false)
 	// FilesAsyncIO warms cold state .kv pages via io_uring before the mmap read, so
 	// a would-be blocking page fault becomes a non-blocking read that releases the
 	// goroutine's P. Linux + io_uring only; self-disables (reads use ordinary faults)

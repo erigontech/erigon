@@ -19,6 +19,7 @@ package membatchwithdb
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"sync"
 	"time"
@@ -55,6 +56,7 @@ type MemoryMutation struct {
 	deletedEntries   map[string]map[string]struct{}
 	deletedDups      map[string]map[string]map[string]struct{}
 	clearedTables    map[string]struct{}
+	readTx           kv.Tx
 	db               kv.TemporalTx
 	statelessCursors map[string]kv.RwCursor
 	DomainReader     DomainReader
@@ -72,12 +74,10 @@ type MemoryMutation struct {
 func NewMemoryBatch(tx kv.TemporalTx, tmpDir string, logger log.Logger) (*MemoryMutation, error) {
 	mem := newMemStore()
 	memDB := &memStoreDB{store: mem}
-	if err := initSequences(tx, mem); err != nil {
-		return nil, fmt.Errorf("NewMemoryBatch: init sequences: %w", err)
-	}
 
 	return &MemoryMutation{
 		mu:             &sync.RWMutex{},
+		readTx:         tx,
 		db:             tx,
 		memDb:          memDB,
 		memTx:          mem,
@@ -91,7 +91,7 @@ func NewMemoryBatch(tx kv.TemporalTx, tmpDir string, logger log.Logger) (*Memory
 // transaction pins the goroutine to an OS thread via runtime.LockOSThread(),
 // so this variant must not be held across goroutine migrations.
 func NewMemoryBatchMDBX(tx kv.TemporalTx, tmpDir string, logger log.Logger) (mm *MemoryMutation, err error) {
-	tmpDB := mdbx.New(dbcfg.TemporaryDB, logger).InMem(nil, tmpDir).GrowthStep(64 * datasize.MB).MapSize(512 * datasize.GB).MustOpen()
+	tmpDB := mdbx.New(dbcfg.TemporaryDB, logger).InMem(tmpDir).GrowthStep(64 * datasize.MB).MapSize(512 * datasize.GB).MustOpen()
 	defer func() {
 		if err != nil {
 			tmpDB.Close()
@@ -101,13 +101,9 @@ func NewMemoryBatchMDBX(tx kv.TemporalTx, tmpDir string, logger log.Logger) (mm 
 	if err != nil {
 		return nil, fmt.Errorf("NewMemoryBatchMDBX: begin tx: %w", err)
 	}
-	if err = initSequences(tx, memTx); err != nil {
-		memTx.Rollback()
-		return nil, fmt.Errorf("NewMemoryBatchMDBX: init sequences: %w", err)
-	}
-
 	return &MemoryMutation{
 		mu:             &sync.RWMutex{},
+		readTx:         tx,
 		db:             tx,
 		memDb:          tmpDB,
 		memTx:          memTx,
@@ -137,6 +133,7 @@ func (m *MemoryMutation) Pin() kv.TemporalFilesPin {
 func (m *MemoryMutation) UpdateTxn(tx kv.TemporalTx) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.readTx = tx
 	m.db = tx
 	m.statelessCursors = nil
 }
@@ -145,10 +142,13 @@ func (m *MemoryMutation) UpdateTxn(tx kv.TemporalTx) {
 // is a pure in-memory structure with no external resources — Close/Rollback
 // only frees the in-memory memDb. This makes the overlay safe to publish via
 // Events for concurrent RPC reads (consumers create ReadViews with their own tx).
+// Untouched sequences also require a read view because the overlay stores only
+// explicit sequence changes.
 func (m *MemoryMutation) DetachDB() kv.TemporalTx {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	db := m.db
+	m.readTx = nil
 	m.db = nil
 	m.statelessCursors = nil
 	return db
@@ -185,39 +185,47 @@ func (m *MemoryMutation) DBSize() (uint64, error) {
 	panic("not implemented")
 }
 
-func initSequences(db kv.Tx, memTx kv.RwTx) error {
-	cursor, err := db.Cursor(kv.Sequence)
-	if err != nil {
-		return err
-	}
-	defer cursor.Close()
-	for k, v, err := cursor.First(); k != nil; k, v, err = cursor.Next() {
-		if err != nil {
-			return err
-		}
-		if err := memTx.Put(kv.Sequence, k, v); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func (m *MemoryMutation) IncrementSequence(bucket string, amount uint64) (uint64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.memTx.IncrementSequence(bucket, amount)
+	current, err := m.readSequenceLocked(bucket)
+	if err != nil || amount == 0 {
+		return current, err
+	}
+	return current, m.memTx.ResetSequence(bucket, current+amount)
 }
 
 func (m *MemoryMutation) ReadSequence(bucket string) (uint64, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.memTx.ReadSequence(bucket)
+	return m.readSequenceLocked(bucket)
 }
 
 func (m *MemoryMutation) ResetSequence(bucket string, newValue uint64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.memTx.ResetSequence(bucket, newValue)
+}
+
+func (m *MemoryMutation) readSequenceLocked(bucket string) (uint64, error) {
+	key := []byte(bucket)
+	value, err := m.memTx.GetOne(kv.Sequence, key)
+	if err != nil {
+		return 0, err
+	}
+	if value != nil {
+		if len(value) == 0 {
+			return 0, nil
+		}
+		return binary.BigEndian.Uint64(value), nil
+	}
+	if m.isTableCleared(kv.Sequence) || m.isEntryDeleted(kv.Sequence, key) {
+		return 0, nil
+	}
+	if m.readTx == nil {
+		return 0, fmt.Errorf("read sequence %q: no backing transaction is attached", bucket)
+	}
+	return m.readTx.ReadSequence(bucket)
 }
 
 func (m *MemoryMutation) ForAmount(bucket string, prefix []byte, amount uint32, walker func(k, v []byte) error) error {
@@ -285,11 +293,11 @@ func (m *MemoryMutation) GetOne(table string, key []byte) ([]byte, error) {
 	if v != nil {
 		return v, nil
 	}
-	// Fall back to underlying DB (nil when overlay is detached for publishing).
-	if m.db == nil {
+	// Fall back to the caller's transaction (nil on an unbound detached overlay).
+	if m.readTx == nil {
 		return nil, nil
 	}
-	return m.db.GetOne(table, key)
+	return m.readTx.GetOne(table, key)
 }
 
 func (m *MemoryMutation) Last(table string) ([]byte, []byte, error) {
@@ -312,10 +320,10 @@ func (m *MemoryMutation) Has(table string, key []byte) (bool, error) {
 	if err != nil || has {
 		return has, err
 	}
-	if m.db == nil {
+	if m.readTx == nil {
 		return false, nil
 	}
-	return m.db.Has(table, key)
+	return m.readTx.Has(table, key)
 }
 
 func (m *MemoryMutation) Put(table string, k, v []byte) error {
@@ -382,8 +390,8 @@ func (m *MemoryMutation) StreamDescend(table string, fromPrefix, toPrefix []byte
 func (m *MemoryMutation) Range(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
 	s := &rangeIter{orderAscend: bool(asc), limit: int64(limit)}
 	var err error
-	if m.db != nil {
-		if s.iterDb, err = m.db.Range(table, fromPrefix, toPrefix, asc, limit); err != nil {
+	if m.readTx != nil {
+		if s.iterDb, err = m.readTx.Range(table, fromPrefix, toPrefix, asc, limit); err != nil {
 			return s, err
 		}
 	}
@@ -467,8 +475,8 @@ func (s *rangeIter) Next() (k, v []byte, err error) {
 func (m *MemoryMutation) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
 	s := &rangeDupSortIter{key: key, orderAscend: bool(asc), limit: int64(limit)}
 	var err error
-	if m.db != nil {
-		if s.iterDb, err = m.db.RangeDupSort(table, key, fromPrefix, toPrefix, asc, limit); err != nil {
+	if m.readTx != nil {
+		if s.iterDb, err = m.readTx.RangeDupSort(table, key, fromPrefix, toPrefix, asc, limit); err != nil {
 			return s, err
 		}
 	}
@@ -818,45 +826,50 @@ func (m *MemoryMutation) Diff() (*MemoryDiff, error) {
 	}
 	// Iterate over each bucket and apply changes accordingly.
 	for _, bucket := range buckets {
-		if isTablePurelyDupsort(bucket) {
-			cbucket, err := m.memTx.CursorDupSort(bucket)
-			if err != nil {
-				return nil, err
-			}
-			defer cbucket.Close()
+		if err := func() error {
+			if isTablePurelyDupsort(bucket) {
+				cbucket, err := m.memTx.CursorDupSort(bucket)
+				if err != nil {
+					return err
+				}
+				defer cbucket.Close()
 
-			t := table{
-				name:    bucket,
-				dupsort: true,
-			}
-			for k, v, err := cbucket.First(); k != nil; k, v, err = cbucket.Next() {
-				if err != nil {
-					return nil, err
+				t := table{
+					name:    bucket,
+					dupsort: true,
 				}
-				memDiff.diff[t] = append(memDiff.diff[t], entry{
-					k: bytes.Clone(k),
-					v: bytes.Clone(v),
-				})
-			}
-		} else {
-			cbucket, err := m.memTx.Cursor(bucket)
-			if err != nil {
-				return nil, err
-			}
-			defer cbucket.Close()
-			t := table{
-				name:    bucket,
-				dupsort: false,
-			}
-			for k, v, err := cbucket.First(); k != nil; k, v, err = cbucket.Next() {
-				if err != nil {
-					return nil, err
+				for k, v, err := cbucket.First(); k != nil; k, v, err = cbucket.Next() {
+					if err != nil {
+						return err
+					}
+					memDiff.diff[t] = append(memDiff.diff[t], entry{
+						k: bytes.Clone(k),
+						v: bytes.Clone(v),
+					})
 				}
-				memDiff.diff[t] = append(memDiff.diff[t], entry{
-					k: bytes.Clone(k),
-					v: bytes.Clone(v),
-				})
+			} else {
+				cbucket, err := m.memTx.Cursor(bucket)
+				if err != nil {
+					return err
+				}
+				defer cbucket.Close()
+				t := table{
+					name:    bucket,
+					dupsort: false,
+				}
+				for k, v, err := cbucket.First(); k != nil; k, v, err = cbucket.Next() {
+					if err != nil {
+						return err
+					}
+					memDiff.diff[t] = append(memDiff.diff[t], entry{
+						k: bytes.Clone(k),
+						v: bytes.Clone(v),
+					})
+				}
 			}
+			return nil
+		}(); err != nil {
+			return nil, err
 		}
 	}
 	return memDiff, nil
@@ -882,8 +895,8 @@ func (m *MemoryMutation) makeCursor(bucket string) (kv.RwCursorDupSort, error) {
 	c.table = bucket
 
 	var err error
-	if m.db != nil {
-		c.cursor, err = m.db.CursorDupSort(bucket) //nolint:gocritic
+	if m.readTx != nil {
+		c.cursor, err = m.readTx.CursorDupSort(bucket) //nolint:gocritic
 		if err != nil {
 			return nil, err
 		}
@@ -925,7 +938,7 @@ func (m *MemoryMutation) ApplyRw(_ context.Context, f func(tx kv.RwTx) error) er
 }
 
 func (m *MemoryMutation) ViewID() uint64 {
-	return m.db.ViewID()
+	return m.readTx.ViewID()
 }
 
 func (m *MemoryMutation) CHandle() unsafe.Pointer {
@@ -948,6 +961,13 @@ func (m *MemoryMutation) GetLatest(name kv.Domain, k []byte) (v []byte, step kv.
 		return nil, 0, fmt.Errorf("MemoryMutation: domain read requires backing tx (detached overlay)")
 	}
 	return m.db.GetLatest(name, k)
+}
+
+func (m *MemoryMutation) GetLatestValSize(name kv.Domain, k []byte) (size int, found bool, err error) {
+	if m.db == nil {
+		return 0, false, fmt.Errorf("MemoryMutation: domain read requires backing tx (detached overlay)")
+	}
+	return m.db.GetLatestValSize(name, k)
 }
 
 func (m *MemoryMutation) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
@@ -1066,10 +1086,9 @@ func (m *MemoryMutation) Unwind(ctx context.Context, txNumUnwindTo uint64, chang
 }
 
 // NewReadView creates a lightweight read-only view of this overlay backed by
-// the given tx for fallback reads. The view shares the same in-memory data
-// (memTx, deletedEntries, clearedTables) and the parent's mutex, but has its
-// own db field set to the caller's tx. All existing cursor/read logic works
-// naturally — memTx first, then db fallback.
+// the given tx for fallback reads. The view shares the in-memory data and the
+// parent's mutex, but uses the caller's tx for its own backing reads. Temporal
+// methods also use it when it implements kv.TemporalTx.
 //
 // The returned kv.TemporalTx only exposes read methods. Callers cannot write
 // to the overlay through this view. The caller must not Close the returned
@@ -1092,6 +1111,7 @@ func (m *MemoryMutation) newReadViewMut(tx kv.Tx) *MemoryMutation {
 		deletedEntries: m.deletedEntries,
 		deletedDups:    m.deletedDups,
 		clearedTables:  m.clearedTables,
+		readTx:         tx,
 		db:             dbTx,
 		DomainReader:   m.DomainReader,
 	}
@@ -1145,6 +1165,10 @@ func (v *OverlayTemporalReadView) Apply(_ context.Context, f func(tx kv.Tx) erro
 
 func (v *OverlayTemporalReadView) GetLatest(name kv.Domain, k []byte) ([]byte, kv.Step, error) {
 	return v.temporalTx.GetLatest(name, k)
+}
+
+func (v *OverlayTemporalReadView) GetLatestValSize(name kv.Domain, k []byte) (int, bool, error) {
+	return v.temporalTx.GetLatestValSize(name, k)
 }
 
 func (v *OverlayTemporalReadView) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {

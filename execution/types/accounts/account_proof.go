@@ -25,7 +25,7 @@ import (
 type AccProofResult struct {
 	Address      common.Address    `json:"address"`
 	AccountProof []hexutil.Bytes   `json:"accountProof"`
-	Balance      *hexutil.Big      `json:"balance"`
+	Balance      *hexutil.U256     `json:"balance"`
 	CodeHash     common.Hash       `json:"codeHash"`
 	Nonce        hexutil.Uint64    `json:"nonce"`
 	StorageHash  common.Hash       `json:"storageHash"`
@@ -33,6 +33,6 @@ type AccProofResult struct {
 }
 type StorProofResult struct {
 	Key   string          `json:"key"`
-	Value *hexutil.Big    `json:"value"`
+	Value *hexutil.U256   `json:"value"`
 	Proof []hexutil.Bytes `json:"proof"`
 }

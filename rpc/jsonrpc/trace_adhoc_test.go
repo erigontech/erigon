@@ -183,6 +183,62 @@ func TestSwapBalance(t *testing.T) {
 	}
 }
 
+// Same swap as TestSwapBalance, but call 1 requests only "trace": call 2 spends
+// the wei received in call 1, so its stateDiff must match the control run where
+// both calls request "stateDiff" — trace-type selection must not change the
+// sequential state seen by later calls.
+func TestCallManyMixedTraceTypesKeepSequentialState(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newTraceApiForTest(m)
+	var latest = rpc.LatestBlockNumber
+	parent := &rpc.BlockNumberOrHash{BlockNumber: &latest}
+
+	const swap = `[
+	[{"from":"0x71562b71999873db5b286df957af199ec94617f7","to":"0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b","gas":"0x5208","gasPrice":"0x0","value":"0x2"},[%s]],
+	[{"from":"0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b","to":"0x71562b71999873db5b286df957af199ec94617f7","gas":"0x5208","gasPrice":"0x0","value":"0x1"},["stateDiff"]]
+]`
+	control, err := api.CallMany(context.Background(), json.RawMessage(fmt.Sprintf(swap, `"trace", "stateDiff"`)), parent, nil)
+	require.NoError(t, err)
+	require.Len(t, control, 2)
+
+	mixed, err := api.CallMany(context.Background(), json.RawMessage(fmt.Sprintf(swap, `"trace"`)), parent, nil)
+	require.NoError(t, err)
+	require.Len(t, mixed, 2)
+
+	require.Equal(t, control[1].StateDiff, mixed[1].StateDiff)
+}
+
+// Pins the trace-only path: without stateDiff, ibs is never reset, so each call
+// still executes on top of the previous calls' state (whole-block replay
+// semantics). Call 1 deploys a contract, call 2 invokes it and must see its
+// runtime code.
+func TestCallManyTraceOnlyKeepsSequentialState(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newTraceApiForTest(m)
+	var latest = rpc.LatestBlockNumber
+	parent := &rpc.BlockNumberOrHash{BlockNumber: &latest}
+
+	// Init code deploys runtime code that returns 42.
+	const deploy = `[{"from":"0x71562b71999873db5b286df957af199ec94617f7","gas":"0x30000","gasPrice":"0x0","data":"0x600a600c600039600a6000f3602a60005260206000f3"},["trace"]]`
+	deployRes, err := api.CallMany(context.Background(), json.RawMessage("["+deploy+"]"), parent, nil)
+	require.NoError(t, err)
+	require.Len(t, deployRes, 1)
+	created, ok := deployRes[0].Trace[0].Result.(*CreateTraceResult)
+	require.True(t, ok)
+	require.NotNil(t, created.Address)
+
+	pair := fmt.Sprintf(`[
+	%s,
+	[{"from":"0x71562b71999873db5b286df957af199ec94617f7","to":"%s","gas":"0x30000","gasPrice":"0x0"},["trace"]]
+]`, deploy, created.Address)
+	results, err := api.CallMany(context.Background(), json.RawMessage(pair), parent, nil)
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+	invoked, ok := results[1].Trace[0].Result.(*TraceResult)
+	require.True(t, ok)
+	require.Equal(t, "0x000000000000000000000000000000000000000000000000000000000000002a", invoked.Output.String())
+}
+
 func TestCorrectStateDiff(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newTraceApiForTest(m)
@@ -711,7 +767,7 @@ func newBaseFeeTestChain(t *testing.T, cfg *chain.Config) *baseFeeTestChain {
 func (c *baseFeeTestChain) mineBlock(t *testing.T, gen func(*blockgen.BlockGen)) *blockgen.ChainPack {
 	t.Helper()
 
-	chainB, err := blockgen.GenerateChain(c.m.ChainConfig, c.head, c.m.Engine, c.m.DB, 1, func(_ int, block *blockgen.BlockGen) {
+	chainB, err := c.m.GenerateChainFrom(c.head, 1, func(_ int, block *blockgen.BlockGen) {
 		gen(block)
 	})
 	require.NoError(t, err)
@@ -820,7 +876,7 @@ func TestCallManyBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
 	contractAddr := c.deployOpcodeContract(t, opGasprice)
 	api := c.traceAPI()
 
-	calls := fmt.Sprintf(`[[{"from":"%s","to":"%s","maxFeePerGas":"0x77359400","maxPriorityFeePerGas":"0x2"},["trace"]]]`,
+	calls := fmt.Sprintf(`[[{"from":%q,"to":%q,"maxFeePerGas":"0x77359400","maxPriorityFeePerGas":"0x2"},["trace"]]]`,
 		c.bankAddress.Hex(), contractAddr.Hex())
 
 	results, err := api.CallMany(context.Background(), json.RawMessage(calls), nil, traceConfigWithBaseFeeOverride(uint256.NewInt(10)))
@@ -898,7 +954,7 @@ func TestCallManyBlockOverridesOtherFieldsAffectOpcodes(t *testing.T) {
 			contractAddr := c.deployOpcodeContract(t, tc.opcode)
 			api := c.traceAPI()
 
-			calls := fmt.Sprintf(`[[{"from":"%s","to":"%s"},["trace"]]]`, c.bankAddress.Hex(), contractAddr.Hex())
+			calls := fmt.Sprintf(`[[{"from":%q,"to":%q},["trace"]]]`, c.bankAddress.Hex(), contractAddr.Hex())
 			results, err := api.CallMany(context.Background(), json.RawMessage(calls), nil, &config.TraceConfig{
 				BlockOverrides: tc.override,
 			})

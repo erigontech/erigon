@@ -14,9 +14,6 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-// Shared helpers for commitment tests: trie processing wrappers, key generators,
-// cell-row generators and common update fixtures.
-
 package commitment
 
 import (
@@ -31,11 +28,8 @@ import (
 	"github.com/erigontech/erigon/common/length"
 )
 
-// forceDirectSpill makes ModeDirect collection spill to the etl collector from the
-// first touch, pinning the arena/etl HashSort path regardless of batch size.
 func forceDirectSpill(ut *Updates) { ut.directMemLimit = 0 }
 
-// forEachMode runs fn as a subtest once per Updates mode, named after the mode.
 func forEachMode(t *testing.T, fn func(t *testing.T, mode Mode)) {
 	t.Helper()
 	for _, mode := range []Mode{ModeDirect, ModeUpdate} {
@@ -47,8 +41,6 @@ func forEachMode(t *testing.T, fn func(t *testing.T, mode Mode)) {
 	}
 }
 
-// processSeq feeds updates to the trie one key at a time (a fresh Process call per key),
-// mirroring per-block processing, and returns the root after the last key.
 func processSeq(tb testing.TB, ms *MockState, trie *HexPatriciaHashed, plainKeys [][]byte, updates []Update) []byte {
 	tb.Helper()
 	ctx := context.Background()
@@ -64,7 +56,6 @@ func processSeq(tb testing.TB, ms *MockState, trie *HexPatriciaHashed, plainKeys
 	return root
 }
 
-// processBatch applies all updates in a single Process call and returns the root.
 func processBatch(tb testing.TB, ms *MockState, trie *HexPatriciaHashed, plainKeys [][]byte, updates []Update) []byte {
 	tb.Helper()
 	require.NoError(tb, ms.applyPlainUpdates(plainKeys, updates))
@@ -75,8 +66,6 @@ func processBatch(tb testing.TB, ms *MockState, trie *HexPatriciaHashed, plainKe
 	return bytes.Clone(root)
 }
 
-// processFreshTrie builds a fresh trie/state, applies the updates in a single ModeDirect batch and
-// returns both the trie (for post-run inspection) and the root.
 func processFreshTrie(t *testing.T, plainKeys [][]byte, updates []Update) (*HexPatriciaHashed, []byte) {
 	t.Helper()
 	ms := NewMockState(t)
@@ -90,8 +79,6 @@ func processFreshTrie(t *testing.T, plainKeys [][]byte, updates []Update) (*HexP
 	return hph, root
 }
 
-// fixtureBaseAccounts returns a builder with a mixed set of account and storage updates shared
-// by the unique-representation tests. Callers may chain further calls to vary the fixture.
 func fixtureBaseAccounts() *UpdateBuilder {
 	return NewUpdateBuilder().
 		Balance("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9", 4).
@@ -113,18 +100,12 @@ func fixtureBaseAccounts() *UpdateBuilder {
 		Storage("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9", "d1664244ae1a8a05f8f1d41e45548fbb7aa54609b985d6439ee5fd9bb0da619f", "9898")
 }
 
-// fixtureBaseWithCode is fixtureBaseAccounts plus a balance bump and a code hash, used by the
-// tests that exercise code-bearing accounts.
 func fixtureBaseWithCode() *UpdateBuilder {
 	return fixtureBaseAccounts().
 		Balance("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", 1237).
 		CodeHash("ba7a3b7b095d3370c022ca655c790f0c0ead66f5", "24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed")
 }
 
-// fixtureBrokenUniqueRepr is the broken-unique-representation corpus: base accounts with a smaller
-// ba7a3b7b balance, no code hash, and repeated keys that Build de-duplicates. Kept self-contained
-// (not derived from fixtureBaseAccounts) so edits to that shared fixture cannot reshape the
-// duplicate-key corpus this test pins.
 func fixtureBrokenUniqueRepr() *UpdateBuilder {
 	return NewUpdateBuilder().
 		Balance("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9", 4).
@@ -181,7 +162,6 @@ func generateCellRow(tb testing.TB, size int) (row []*cell, bitmap uint16) {
 	return row, bm
 }
 
-// generateCellEncodeDataRow converts a cell row (from generateCellRow) into a [16]cellEncodeData array.
 func generateCellEncodeDataRow(tb testing.TB, row []*cell, bm uint16) [16]cellEncodeData {
 	tb.Helper()
 	var data [16]cellEncodeData
@@ -196,8 +176,6 @@ func generateCellEncodeDataRow(tb testing.TB, row []*cell, bm uint16) [16]cellEn
 	return data
 }
 
-// encodeCellRow generates a random cell row of the given size and returns it with its
-// bitmap and the BranchData produced by encoding it (touchMap == afterMap == bitmap).
 func encodeCellRow(tb testing.TB, size int) (row []*cell, bm uint16, enc BranchData) {
 	tb.Helper()
 	row, bm = generateCellRow(tb, size)
@@ -208,8 +186,6 @@ func encodeCellRow(tb testing.TB, size int) (row []*cell, bm uint16, enc BranchD
 	return row, bm, enc
 }
 
-// testWarmuper builds a Warmuper with the constant test config (Enabled, MaxDepth 64,
-// LogPrefix "test"), varying only the context factory and worker count.
 func testWarmuper(ctx context.Context, factory TrieContextFactory, workers int) *Warmuper {
 	return NewWarmuper(ctx, WarmupConfig{
 		Enabled:    true,
@@ -233,11 +209,9 @@ func cellMustEqual(tb testing.TB, first, second *cell) {
 	require.Equal(tb, first.extension[:first.extLen], second.extension[:second.extLen])
 	require.Equal(tb, first.stateHash[:first.stateHashLen], second.stateHash[:second.stateHashLen])
 
-	// encode doesn't code Nonce, Balance, CodeHash and Storage, Delete fields
+	// encode doesn't check Nonce, Balance, CodeHash and Storage, Delete fields
 }
 
-// requireDecodedCellEq compares the fields the branch decoder is responsible for
-// restoring; hashedExtension and stateHash are derived separately and are skipped.
 func requireDecodedCellEq(tb testing.TB, i int, orig, decoded *cell) {
 	tb.Helper()
 	require.Equal(tb, orig.extLen, decoded.extLen, "cell %d extLen", i)

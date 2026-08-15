@@ -21,11 +21,12 @@ import (
 	"log"
 	"testing"
 
+	"github.com/stretchr/testify/suite"
+	"go.uber.org/mock/gomock"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
-	"github.com/stretchr/testify/suite"
-	"go.uber.org/mock/gomock"
 )
 
 var (
@@ -156,18 +157,20 @@ func (t *PoolTestSuite) TestAddAttestationElectra() {
 	}
 
 	for _, tc := range testcases {
-		log.Printf("test case: %s", tc.name)
-		if tc.mockFunc != nil {
-			tc.mockFunc()
-		}
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		pool := NewAggregationPool(ctx, t.mockBeaconConfig, nil, t.mockEthClock)
-		for i := range tc.atts {
-			pool.AddAttestation(tc.atts[i])
-		}
-		att := pool.GetAggregatationByRootAndCommittee(tc.hashRoot, 10)
-		t.Equal(tc.expect, att, tc.name)
+		func() {
+			log.Printf("test case: %s", tc.name)
+			if tc.mockFunc != nil {
+				tc.mockFunc()
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			pool := NewAggregationPool(ctx, t.mockBeaconConfig, nil, t.mockEthClock)
+			for i := range tc.atts {
+				pool.AddAttestation(tc.atts[i])
+			}
+			att := pool.GetAggregatationByRootAndCommittee(tc.hashRoot, 10)
+			t.Equal(tc.expect, att, tc.name)
+		}()
 	}
 }
 
@@ -305,20 +308,22 @@ func (t *PoolTestSuite) TestAddAttestation() {
 	}
 
 	for _, tc := range testcases {
-		log.Printf("test case: %s", tc.name)
-		if tc.mockFunc != nil {
-			tc.mockFunc()
-		}
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		pool := NewAggregationPool(ctx, t.mockBeaconConfig, nil, t.mockEthClock)
-		for i := range tc.atts {
-			pool.AddAttestation(tc.atts[i])
-		}
-		att := pool.GetAggregatationByRoot(tc.hashRoot)
-		expected := tc.expect.Copy()
-		expected.SetVersion(clparams.DenebVersion)
-		t.Equal(expected, att, tc.name)
+		func() {
+			log.Printf("test case: %s", tc.name)
+			if tc.mockFunc != nil {
+				tc.mockFunc()
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			pool := NewAggregationPool(ctx, t.mockBeaconConfig, nil, t.mockEthClock)
+			for i := range tc.atts {
+				pool.AddAttestation(tc.atts[i])
+			}
+			att := pool.GetAggregatationByRoot(tc.hashRoot)
+			expected := tc.expect.Copy()
+			expected.SetVersion(clparams.DenebVersion)
+			t.Equal(expected, att, tc.name)
+		}()
 	}
 }
 

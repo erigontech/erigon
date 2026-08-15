@@ -73,13 +73,13 @@ var (
 	}
 	BootnodesFlag = cli.StringFlag{
 		Name:  "sentinel.bootnodes",
-		Usage: "Comma separated enode URLs for P2P discovery bootstrap",
+		Usage: "Comma-separated Consensus bootstrap nodes provided as ENRs or direct TCP libp2p multiaddrs",
 		Value: "",
 	}
 
 	SentinelStaticPeersFlag = cli.StringFlag{
 		Name:  "sentinel.staticpeers",
-		Usage: "connect to comma-separated Consensus static peers",
+		Usage: "connect to comma-separated Consensus static peers provided as ENRs or direct TCP libp2p multiaddrs",
 		Value: "",
 	}
 )

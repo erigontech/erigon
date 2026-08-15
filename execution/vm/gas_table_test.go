@@ -36,20 +36,17 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
-	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
-	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/vm/program"
-	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 func TestMemoryGasCost(t *testing.T) {
@@ -724,52 +721,54 @@ var createGasTests = []struct {
 
 func TestCreateGas(t *testing.T) {
 	t.Parallel()
-	db := testutil.TemporalDB(t)
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	tx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
 	for i, tt := range createGasTests {
-		address := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
+		func() {
+			address := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
 
-		domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
-		require.NoError(t, err)
+			domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+			require.NoError(t, err)
+			defer domains.Close()
 
-		stateReader := rpchelper.NewLatestStateReader(domains.AsGetter(tx))
-		stateWriter := rpchelper.NewLatestStateWriter(tx, domains, (*freezeblocks.BlockReader)(nil), 0)
+			stateReader := state.NewReaderV3(domains.AsGetter(tx))
+			stateWriter := state.NewWriter(domains.AsPutDel(tx), nil, 1)
 
-		s := state.New(stateReader)
-		defer s.Close()
-		require.NoError(t, s.CreateAccount(address, true))
-		require.NoError(t, s.SetCode(address, hexutil.MustDecode(tt.code), tracing.CodeChangeUnspecified))
+			s := state.New(stateReader)
+			defer s.Close()
+			require.NoError(t, s.CreateAccount(address, true))
+			require.NoError(t, s.SetCode(address, hexutil.MustDecode(tt.code), tracing.CodeChangeUnspecified))
 
-		vmctx := evmtypes.BlockContext{
-			CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
-			Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
-				return nil
-			},
-		}
-		//
-		// TODO revis BlockContext and add test for eip8037?
-		//
-		_ = s.CommitBlock(vmctx.Rules(chain.TestChainBerlinConfig), stateWriter)
-		config := vm.Config{}
-		if tt.eip3860 {
-			config.ExtraEips = []int{3860}
-		}
+			vmctx := evmtypes.BlockContext{
+				CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
+				Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
+					return nil
+				},
+			}
+			//
+			// TODO revis BlockContext and add test for eip8037?
+			//
+			_ = s.CommitBlock(vmctx.Rules(chain.TestChainBerlinConfig), stateWriter)
+			config := vm.Config{}
+			if tt.eip3860 {
+				config.ExtraEips = []int{3860}
+			}
 
-		vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.TestChainBerlinConfig, config)
-		startGas := mdgas.MdGas{
-			Execution: math.MaxUint64,
-		}
-		_, gas, _, err := vmenv.Call(accounts.ZeroAddress, address, nil, startGas, uint256.Int{}, false /* bailout */)
-		if err != nil {
-			t.Errorf("test %d execution failed: %v", i, err)
-		}
-		if gasUsed := startGas.Execution - gas.Execution; gasUsed != tt.gasUsed {
-			t.Errorf("test %d: gas used mismatch: have %v, want %v", i, gasUsed, tt.gasUsed)
-		}
-		domains.Close()
+			vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.TestChainBerlinConfig, config)
+			startGas := mdgas.MdGas{
+				Execution: math.MaxUint64,
+			}
+			_, gas, _, err := vmenv.Call(accounts.ZeroAddress, address, nil, startGas, uint256.Int{}, false /* bailout */)
+			if err != nil {
+				t.Errorf("test %d execution failed: %v", i, err)
+			}
+			if gasUsed := startGas.Execution - gas.Execution; gasUsed != tt.gasUsed {
+				t.Errorf("test %d: gas used mismatch: have %v, want %v", i, gasUsed, tt.gasUsed)
+			}
+		}()
 	}
 	tx.Rollback()
 }
