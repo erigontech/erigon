@@ -451,7 +451,7 @@ func TestGetProofGenesisPrunedCommitmentHistory(t *testing.T) {
 	defer tx.Rollback()
 	pruneTo, err := m.BlockReader.TxnumReader().Min(ctx, tx, 3)
 	require.NoError(t, err)
-	c, err := tx.RwCursorDupSort(kv.TblCommitmentHistoryKeys)
+	c, err := tx.RwCursorDupSort(kv.TblCommitmentHistoryData)
 	require.NoError(t, err)
 	defer c.Close()
 	for {
