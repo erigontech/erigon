@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -167,22 +166,6 @@ func (sdc *SharedDomainsCommitmentContext) ResetPendingUpdates() {
 // HasPendingUpdate returns true if there is a pending update to flush.
 func (sdc *SharedDomainsCommitmentContext) HasPendingUpdate() bool {
 	return sdc.pendingUpdate != nil
-}
-
-// flushPendingUpdate applies the pending commitment update using the given putter.
-// The update is written with its original TxNum. Called at the start of ComputeCommitment
-// to ensure the previously deferred update is applied before processing new ones.
-func (sdc *SharedDomainsCommitmentContext) flushPendingUpdate(putter kv.TemporalPutDel) error {
-	upd := sdc.pendingUpdate
-	putBranch := func(prefix, data, prevData []byte) error {
-		return putter.DomainPut(kv.CommitmentDomain, prefix, data, upd.TxNum, prevData)
-	}
-	if _, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch); err != nil {
-		return err
-	}
-	upd.Clear()
-	sdc.pendingUpdate = nil
-	return nil
 }
 
 // SetHistoryStateReader sets the state reader to read *full* historical state at specified txNum.

@@ -69,14 +69,7 @@ type HistoricalTraceWorker struct {
 
 	taskGasPool *protocol.GasPool
 
-	// calculated by .changeBlock()
-	blockHash common.Hash
-	blockNum  uint64
-	header    *types.Header
-	blockCtx  *evmtypes.BlockContext
-	rules     *chain.Rules
-	signer    *types.Signer
-	vmCfg     *vm.Config
+	vmCfg *vm.Config
 }
 
 type TraceConsumer interface {
