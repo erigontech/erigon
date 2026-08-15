@@ -477,3 +477,78 @@ func TestProvider_FinalizeUnwind_RegenTruncatedRenameRemovesBroadFile(t *testing
 
 	require.Nil(t, p.pendingRegen, "FinalizeUnwind must drain pendingRegen")
 }
+
+// TestProvider_FinalizeUnwind_SplitEmitAlignedPlusStub pins mode-C's
+// split-emit finalize path: one straddler produces TWO pairs — an
+// aligned wide file (step-aligned name) plus a stub v4 (mid-step v4
+// name confined to the target step). Only the aligned pair carries
+// oldBroadPath — it owns the .old-dance + broad retire. The stub pair
+// leaves oldBroadPath empty so FinalizeUnwind skips the rename and
+// only lands the new file. Both new files must exist post-finalize,
+// broad file removed, downloader.Delete carries all three basenames.
+// Without the split, a single wide v4 mid-step file overlaps with the
+// retire that fires when forward-exec crosses the next step boundary
+// → aggregator visible-set has overlapping data files → SIGBUS in
+// getLatestFromFile's accessor-into-mmap read (leg-M iter 4 mode_a
+// 2026-08-15 repro).
+func TestProvider_FinalizeUnwind_SplitEmitAlignedPlusStub(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+
+	broadName := "v2.2-accounts.272-292.kv"
+	alignedName := "v2.2-accounts.272-289.kv"
+	stubName := "v4.0-accounts.112890625-113250001.kv"
+	broadPath := filepath.Join(tmpDir, broadName)
+	alignedFinal := filepath.Join(tmpDir, alignedName)
+	stubFinal := filepath.Join(tmpDir, stubName)
+	alignedRegen := alignedFinal + ".regen"
+	stubRegen := stubFinal + ".regen"
+	broadTorrent := broadPath + ".torrent"
+
+	require.NoError(t, os.WriteFile(broadPath, []byte("pre-split-broad"), 0o600))
+	require.NoError(t, os.WriteFile(alignedRegen, []byte("aligned-content"), 0o600))
+	require.NoError(t, os.WriteFile(stubRegen, []byte("stub-content"), 0o600))
+	require.NoError(t, os.WriteFile(broadTorrent, []byte("stale-broad-torrent"), 0o600))
+
+	stub := &recordingDownloaderClient{}
+	p := &Provider{
+		snapDir:          tmpDir,
+		downloaderClient: stub,
+	}
+	p.pendingRegen = &pendingRegenState{
+		pairs: []regenPair{
+			{
+				regenPath:    alignedRegen,
+				finalPath:    alignedFinal,
+				oldBroadPath: broadPath, // aligned owns the broad retire
+			},
+			{
+				regenPath:    stubRegen,
+				finalPath:    stubFinal,
+				oldBroadPath: "", // stub is additive; peer already retires broad
+			},
+		},
+	}
+
+	require.NoError(t, p.FinalizeUnwind())
+
+	alignedBytes, err := os.ReadFile(alignedFinal)
+	require.NoError(t, err, "aligned .kv must exist post-finalize")
+	require.Equal(t, "aligned-content", string(alignedBytes))
+
+	stubBytes, err := os.ReadFile(stubFinal)
+	require.NoError(t, err, "stub v4 .kv must exist post-finalize")
+	require.Equal(t, "stub-content", string(stubBytes))
+
+	_, err = os.Stat(broadPath)
+	require.True(t, os.IsNotExist(err), "broad .kv must be removed (superseded by aligned + stub)")
+	_, err = os.Stat(broadTorrent)
+	require.True(t, os.IsNotExist(err), "broad .torrent must be removed")
+
+	deletes := stub.snapshotDeletes()
+	require.Len(t, deletes, 1, "downloaderClient.Delete called once for the regen batch")
+	require.ElementsMatch(t, []string{alignedName, stubName, broadName}, deletes[0],
+		"Delete must carry aligned + stub new basenames AND the retired broad basename")
+
+	require.Nil(t, p.pendingRegen, "FinalizeUnwind must drain pendingRegen")
+}

@@ -32,7 +32,7 @@ import (
 // old broad file gets removed (it's a wider step range whose content
 // the regen has now replaced with a narrower truncated file).
 //
-// Two shapes:
+// Three shapes:
 //
 //   - Aligned: stepBoundary == boundary.ToStep — the boundary file is
 //     already at exactly the unwind-target step. No name change, the
@@ -44,10 +44,22 @@ import (
 //     it MUST live under a filename naming that narrower range. The
 //     wider pre-merge file at oldBroadPath co-existing with the
 //     narrower regen output is the 2026-06-25 union-cover wedge.
+//
+//   - Split-stub: mode-C emits two files per domain for a mid-step
+//     target — an aligned wide file (step-aligned name) and a stub v4
+//     (mid-step raw-txnum name confined to the target's step). Both
+//     replace the SAME old broad file. The aligned pair carries
+//     oldBroadPath (does the .old dance + retires the broad); the stub
+//     pair leaves oldBroadPath empty so FinalizeUnwind skips the retire
+//     and only lands the new file + Inventory entry. Without the split
+//     the single wide v4 spans multiple steps and overlaps with the
+//     retire that fires when forward-exec crosses the next step
+//     boundary, causing accessor/data-mmap mismatches (leg-M iter 4
+//     mode_a SIGBUS 2026-08-15).
 type regenPair struct {
 	regenPath    string // <snapDir>/domain/<truncatedName>.kv.regen
 	finalPath    string // <snapDir>/domain/<truncatedName>.kv  (truncated name when ToStep narrowed)
-	oldBroadPath string // <snapDir>/domain/<originalName>.kv   (removed in FinalizeUnwind when != finalPath)
+	oldBroadPath string // <snapDir>/domain/<originalName>.kv   (removed in FinalizeUnwind when != finalPath; "" when a peer pair owns the retire)
 	domain       kv.Domain
 }
 
@@ -220,8 +232,14 @@ func (p *Provider) regenerateBoundaryStepFiles(
 			// legacy flat-layout case.
 			oldPath := snapshot.ResolveExistingPath(p.snapDir, fileEntry.Name)
 
-			finalPath := boundaryRegenFinalPath(p.Aggregator, kvDomain, uint64(fileEntry.FromStep), stepSize, action, lastTxNum, oldPath)
-			regenPath := finalPath + ".regen"
+			// Split-emit gate: mode-C for a mid-step target with an
+			// aligned compute in hand emits TWO files per straddler —
+			// aligned wide + stub v4 — so the stub is confined to the
+			// target's single step and the aligned peer plays by
+			// normal-merge rules. Non-commitment domains gate on the
+			// aligned compute's presence via commitment's alignedBranches
+			// (they all recompute in lockstep — see plan doc).
+			splitEmit := action == actionRegenTruncate && recompute.alignedBranches != nil
 
 			// Mode-C boundary regen dispatch:
 			//   - Commitment truncate → WriteCommitmentBoundaryFileV4 (uses the
@@ -240,7 +258,19 @@ func (p *Provider) regenerateBoundaryStepFiles(
 			//     (aligned target: OLD file is complete for the step, so
 			//     iterating it is correct).
 			switch {
+			case splitEmit:
+				alignedPairEntry, stubPairEntry, err := p.emitSplitStraddler(
+					ctx, tx, kvDomain, fileEntry, kv.Step(stepBoundary), stepSize,
+					lastTxNum, recompute, anchor, compression, oldPath, lookup,
+				)
+				if err != nil {
+					return nil, err
+				}
+				pairs = append(pairs, alignedPairEntry, stubPairEntry)
+				continue
 			case kvDomain == kv.CommitmentDomain && action == actionRegenTruncate:
+				finalPath := boundaryRegenFinalPath(p.Aggregator, kvDomain, uint64(fileEntry.FromStep), stepSize, action, lastTxNum, oldPath)
+				regenPath := finalPath + ".regen"
 				if recompute.regenBranches == nil {
 					return nil, fmt.Errorf("regenerateBoundaryStepFiles: commitment truncate needs recompute.regenBranches (Apply must run first)")
 				}
@@ -250,7 +280,15 @@ func (p *Provider) regenerateBoundaryStepFiles(
 				); err != nil {
 					return nil, fmt.Errorf("emit v4 commitment file %s: %w", regenPath, err)
 				}
+				pairs = append(pairs, regenPair{
+					regenPath:    regenPath,
+					finalPath:    finalPath,
+					oldBroadPath: oldPath,
+					domain:       kvDomain,
+				})
 			case action == actionRegenTruncate:
+				finalPath := boundaryRegenFinalPath(p.Aggregator, kvDomain, uint64(fileEntry.FromStep), stepSize, action, lastTxNum, oldPath)
+				regenPath := finalPath + ".regen"
 				fromTxN := uint64(fileEntry.FromStep) * stepSize
 				walker := historyKeyWalker(tx, kvDomain, fromTxN, lastTxNum)
 				if err := WriteStateBoundaryFileV4(
@@ -259,20 +297,28 @@ func (p *Provider) regenerateBoundaryStepFiles(
 				); err != nil {
 					return nil, fmt.Errorf("emit v4 %s file %s: %w", sd, regenPath, err)
 				}
+				pairs = append(pairs, regenPair{
+					regenPath:    regenPath,
+					finalPath:    finalPath,
+					oldBroadPath: oldPath,
+					domain:       kvDomain,
+				})
 			default:
+				finalPath := boundaryRegenFinalPath(p.Aggregator, kvDomain, uint64(fileEntry.FromStep), stepSize, action, lastTxNum, oldPath)
+				regenPath := finalPath + ".regen"
 				if err := RegenerateBoundaryStepFile(
 					ctx, kvDomain, oldPath, regenPath, lookup, lastTxNum,
 					compression, anchor, p.snapTmpDir, p.logger,
 				); err != nil {
 					return nil, fmt.Errorf("regen %s boundary-step file %s: %w", sd, fileEntry.Name, err)
 				}
+				pairs = append(pairs, regenPair{
+					regenPath:    regenPath,
+					finalPath:    finalPath,
+					oldBroadPath: oldPath,
+					domain:       kvDomain,
+				})
 			}
-			pairs = append(pairs, regenPair{
-				regenPath:    regenPath,
-				finalPath:    finalPath,
-				oldBroadPath: oldPath,
-				domain:       kvDomain,
-			})
 		}
 	}
 
@@ -280,6 +326,103 @@ func (p *Provider) regenerateBoundaryStepFiles(
 		return nil, nil
 	}
 	return &pendingRegenState{pairs: pairs, removals: removals}, nil
+}
+
+// emitSplitStraddler emits BOTH files for a mid-step unwind
+// straddler — an aligned wide file at the target step boundary and a
+// stub v4 confined to the target's step. Returns the two regenPair
+// entries the caller stages into pendingRegenState.
+//
+// Aligned pair carries oldBroadPath so FinalizeUnwind runs the .old
+// dance + retires the broad; stub pair leaves oldBroadPath empty and
+// only lands the new file + Inventory entry.
+//
+// Contract: recompute.alignedBranches is non-nil (caller gates on it
+// as the split trigger). The aligned compute already produced the
+// aligned commitment state; state domains re-walk the aligned window
+// here.
+func (p *Provider) emitSplitStraddler(
+	ctx context.Context,
+	tx kv.TemporalTx,
+	kvDomain kv.Domain,
+	fileEntry *snapshot.FileEntry,
+	stepBoundary kv.Step,
+	stepSize uint64,
+	lastTxNum uint64,
+	recompute *commitmentRecomputeResult,
+	targetAnchor []byte,
+	compression seg.FileCompression,
+	oldPath string,
+	lookup AsOfLookup,
+) (regenPair, regenPair, error) {
+	if recompute.alignedBranches == nil {
+		return regenPair{}, regenPair{}, fmt.Errorf("emitSplitStraddler: alignedBranches required for split emit")
+	}
+	fromStep := kv.Step(fileEntry.FromStep)
+	fromTxN := uint64(fromStep) * stepSize
+	alignedTxN := recompute.alignedTxNum
+
+	// Aligned pair — step-aligned wide file naming.
+	alignedFinal := p.Aggregator.DomainKVFilePath(kvDomain, fromStep, stepBoundary)
+	alignedRegen := alignedFinal + ".regen"
+
+	// Stub pair — v4.0 raw-txnum naming confined to the target's step.
+	stubFinal := p.Aggregator.DomainKVFilePathV4(kvDomain, uint64(stepBoundary)*stepSize, lastTxNum+1)
+	stubRegen := stubFinal + ".regen"
+
+	if kvDomain == kv.CommitmentDomain {
+		alignedAnchorState := commitmentdb.NewCommitmentState(alignedTxN, 0, recompute.alignedEncodedState)
+		alignedAnchor, err := alignedAnchorState.Encode()
+		if err != nil {
+			return regenPair{}, regenPair{}, fmt.Errorf("encode aligned commitment anchor: %w", err)
+		}
+		if err := WriteCommitmentBoundaryFileV4(
+			ctx, recompute.alignedBranches, alignedAnchor, alignedRegen,
+			p.snapTmpDir, compression, p.Aggregator, p.logger,
+		); err != nil {
+			return regenPair{}, regenPair{}, fmt.Errorf("emit aligned commitment file %s: %w", alignedRegen, err)
+		}
+		if recompute.regenBranches == nil {
+			return regenPair{}, regenPair{}, fmt.Errorf("emitSplitStraddler: stub commitment emit needs recompute.regenBranches (Apply must run first)")
+		}
+		if err := WriteCommitmentBoundaryFileV4(
+			ctx, recompute.regenBranches, targetAnchor, stubRegen,
+			p.snapTmpDir, compression, p.Aggregator, p.logger,
+		); err != nil {
+			return regenPair{}, regenPair{}, fmt.Errorf("emit stub commitment file %s: %w", stubRegen, err)
+		}
+	} else {
+		// Aligned walker covers (fromTxN, alignedTxN]; lookup at alignedTxN.
+		alignedWalker := historyKeyWalker(tx, kvDomain, fromTxN, alignedTxN)
+		if err := WriteStateBoundaryFileV4(
+			ctx, kvDomain, alignedWalker, lookup, alignedTxN,
+			alignedRegen, p.snapTmpDir, compression, p.Aggregator, p.logger,
+		); err != nil {
+			return regenPair{}, regenPair{}, fmt.Errorf("emit aligned %s file %s: %w", kvDomain, alignedRegen, err)
+		}
+		// Stub walker covers (alignedTxN, lastTxNum]; lookup at lastTxNum.
+		stubWalker := historyKeyWalker(tx, kvDomain, alignedTxN, lastTxNum)
+		if err := WriteStateBoundaryFileV4(
+			ctx, kvDomain, stubWalker, lookup, lastTxNum,
+			stubRegen, p.snapTmpDir, compression, p.Aggregator, p.logger,
+		); err != nil {
+			return regenPair{}, regenPair{}, fmt.Errorf("emit stub %s file %s: %w", kvDomain, stubRegen, err)
+		}
+	}
+
+	alignedPairEntry := regenPair{
+		regenPath:    alignedRegen,
+		finalPath:    alignedFinal,
+		oldBroadPath: oldPath, // aligned owns retire of the old broad
+		domain:       kvDomain,
+	}
+	stubPairEntry := regenPair{
+		regenPath:    stubRegen,
+		finalPath:    stubFinal,
+		oldBroadPath: "", // stub is additive; aligned peer already retires the broad
+		domain:       kvDomain,
+	}
+	return alignedPairEntry, stubPairEntry, nil
 }
 
 // boundaryRegenFinalPath picks the destination path a mode-B/C regen

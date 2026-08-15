@@ -130,6 +130,11 @@ func (p *Provider) FinalizeUnwind() error {
 		// regenPair doc for the two shapes).
 		var accessorOlds []string
 		for _, pair := range regen.pairs {
+			if pair.oldBroadPath == "" {
+				// Split-emit stub pair: peer aligned pair owns the
+				// broad retire. Nothing to .old here.
+				continue
+			}
 			oldSidecar := pair.oldBroadPath + ".old"
 			if err := os.Rename(pair.oldBroadPath, oldSidecar); err != nil && p.logger != nil {
 				p.logger.Warn("[storage] Provider.FinalizeUnwind: rename old broad .kv → .old failed (continuing — regen will be retried on next mode-B)", "err", err, "path", pair.oldBroadPath)
@@ -178,8 +183,9 @@ func (p *Provider) FinalizeUnwind() error {
 			// alongside the broad .kv itself (the .kv was renamed to
 			// .old above and will be unlinked at the end of this
 			// block; the .torrent has no .old indirection so we drop
-			// it directly here).
-			if pair.oldBroadPath != pair.finalPath {
+			// it directly here). Split-stub pairs have no broad to
+			// retire (peer aligned pair owns it).
+			if pair.oldBroadPath != "" && pair.oldBroadPath != pair.finalPath {
 				_ = dir.RemoveFile(pair.oldBroadPath + ".torrent")
 				removedBroadBaseNames = append(removedBroadBaseNames, filepath.Base(pair.oldBroadPath))
 			}
@@ -218,6 +224,9 @@ func (p *Provider) FinalizeUnwind() error {
 			}
 		}
 		for _, pair := range regen.pairs {
+			if pair.oldBroadPath == "" {
+				continue
+			}
 			oldSidecar := pair.oldBroadPath + ".old"
 			if err := dir.RemoveFile(oldSidecar); err != nil && !os.IsNotExist(err) && p.logger != nil {
 				p.logger.Warn("[storage] Provider.FinalizeUnwind: remove .old sidecar failed (harmless leftover; cleanup on next restart)", "err", err, "path", oldSidecar)
