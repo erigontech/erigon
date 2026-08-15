@@ -684,6 +684,16 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	logger.Info("[Caplin] starting clstages loop")
 	err = sync.StartWithStage(ctx, "DownloadHistoricalBlocks", logger, stageCfg)
 	logger.Info("[Caplin] exiting clstages loop")
+	// Persist the head state on the way down so a warm restart resumes at the EXACT head. Without this the
+	// newest durable checkpoint lags the head, and a single-node dev node has no peer to backfill the gap
+	// → on restart the EL is ahead of the CL anchor and rejects the backward fork-choice / unwinds. Runs
+	// after the loop exits (ctx cancelled = graceful stop); best-effort so a save failure never masks the
+	// real exit error.
+	if serr := stages.SaveHeadStateOnShutdown(stageCfg); serr != nil {
+		logger.Warn("[Caplin] could not save head state on shutdown", "err", serr)
+	} else {
+		logger.Info("[Caplin] saved head state on shutdown")
+	}
 	if err != nil {
 		return err
 	}

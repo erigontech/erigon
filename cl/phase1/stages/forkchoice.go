@@ -287,30 +287,55 @@ func emitNextPaylodAttributesEvent(cfg *Cfg, headSlot uint64, headRoot common.Ha
 	return nil
 }
 
-// saveHeadStateOnDiskIfNeeded saves the head state on disk for eventual node restarts without checkpoint sync.
-func saveHeadStateOnDiskIfNeeded(cfg *Cfg, headState *state.CachingBeaconState) error {
-	epochFrequency := uint64(5)
-	if headState.Slot()%(cfg.beaconCfg.SlotsPerEpoch*epochFrequency) == 0 {
-		dat, err := utils.EncodeSSZSnappy(headState)
-		if err != nil {
-			return fmt.Errorf("failed to encode ssz snappy: %w", err)
-		}
-		// Write the head state to disk
-		fileToWriteTo := fmt.Sprintf("%s/%s", cfg.dirs.CaplinLatest, clparams.LatestStateFileName)
+// saveHeadStateOnDisk unconditionally encodes the head state and writes it to CaplinLatest, so a node
+// restart without checkpoint sync can re-anchor on it. Shared by the periodic path and the shutdown path.
+func saveHeadStateOnDisk(cfg *Cfg, headState *state.CachingBeaconState) error {
+	dat, err := utils.EncodeSSZSnappy(headState)
+	if err != nil {
+		return fmt.Errorf("failed to encode ssz snappy: %w", err)
+	}
+	// Write the head state to disk
+	fileToWriteTo := fmt.Sprintf("%s/%s", cfg.dirs.CaplinLatest, clparams.LatestStateFileName)
 
-		// Create the directory if it doesn't exist
-		err = os.MkdirAll(cfg.dirs.CaplinLatest, 0755)
-		if err != nil {
-			return fmt.Errorf("failed to create directory: %w", err)
-		}
+	// Create the directory if it doesn't exist
+	if err := os.MkdirAll(cfg.dirs.CaplinLatest, 0755); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
 
-		// Write the data to the file
-		err = os.WriteFile(fileToWriteTo, dat, 0644)
-		if err != nil {
-			return fmt.Errorf("failed to write head state to disk: %w", err)
-		}
+	// Write the data to the file
+	if err := os.WriteFile(fileToWriteTo, dat, 0644); err != nil {
+		return fmt.Errorf("failed to write head state to disk: %w", err)
 	}
 	return nil
+}
+
+// saveHeadStateOnDiskIfNeeded saves the head state on disk for eventual node restarts without checkpoint
+// sync. On a NETWORKED node it's enough to save every 40 slots — a restart re-anchors on that checkpoint
+// and a peer backfills the gap up to the live head. In DEV mode (IsDevnet — single-node, LocalDiscovery,
+// NO peers to backfill) that gap can never close, so the durable head must NOT lag the EL head or a warm
+// restart re-anchors behind it and the EL rejects the backward fork-choice update (wedge) or unwinds
+// (silent history loss). So save EVERY slot in dev; the dev state is tiny (~tens of KB, minimal preset)
+// so per-slot saves are negligible.
+func saveHeadStateOnDiskIfNeeded(cfg *Cfg, headState *state.CachingBeaconState) error {
+	epochFrequency := uint64(5)
+	everySlot := cfg.caplinConfig.IsDevnet()
+	if everySlot || headState.Slot()%(cfg.beaconCfg.SlotsPerEpoch*epochFrequency) == 0 {
+		return saveHeadStateOnDisk(cfg, headState)
+	}
+	return nil
+}
+
+// SaveHeadStateOnShutdown persists the current head state on a graceful stop, so a warm restart resumes at
+// the EXACT head rather than the last periodic checkpoint (which lags — and a single-node dev node has no
+// peer to backfill the gap). Best-effort and safe to call after ctx cancellation: it is a pure in-memory
+// read of the head state plus a file write. Exported for the Caplin service to call as it winds down.
+func SaveHeadStateOnShutdown(cfg *Cfg) error {
+	if cfg == nil || cfg.syncedData == nil {
+		return nil
+	}
+	return cfg.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		return saveHeadStateOnDisk(cfg, headState)
+	})
 }
 
 // postForkchoiceOperations performs the post fork choice operations such as updating the head state, producing and caching attestation data,
