@@ -35,7 +35,7 @@ const (
 
 func newLargeValsDupTestDB(t *testing.T) kv.RwDB {
 	t.Helper()
-	db := mdbx.New(dbcfg.ChainDB, log.New()).InMem(t, t.TempDir()).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
+	db := mdbx.New(dbcfg.ChainDB, log.New()).InMem(t.TempDir()).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
 			testDupKeysTable: {Flags: kv.DupSort},
 			testDupValsTable: {},

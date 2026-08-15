@@ -43,7 +43,10 @@ type rpcResp[T any] struct {
 }
 
 func (c *Client) Call(ctx context.Context, method string, params any, out any) error {
-	body, _ := json.Marshal(rpcReq{JsonRPC: "2.0", ID: 1, Method: method, Params: params})
+	body, err := json.Marshal(rpcReq{JsonRPC: "2.0", ID: 1, Method: method, Params: params})
+	if err != nil {
+		return err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url, bytes.NewReader(body))
 	if err != nil {
 		return err

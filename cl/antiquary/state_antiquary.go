@@ -427,31 +427,31 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		// If we have a missed block, we just skip it.
 		if block == nil {
 			if isDumpSlot {
-				if err := stateAntiquaryCollector.collectBalancesDump(slot, s.currentState.RawBalances()); err != nil {
+				if err := stateAntiquaryCollector.collectBalancesDump(ctx, slot, s.currentState.RawBalances()); err != nil {
 					return err
 				}
 				if err := stateAntiquaryCollector.collectEffectiveBalancesDump(slot, s.currentState.RawValidatorSet()); err != nil {
 					return err
 				}
 				if s.currentState.Version() >= clparams.ElectraVersion {
-					if err := stateAntiquaryCollector.collectPendingDepositsDump(slot, s.currentState.PendingDeposits()); err != nil {
+					if err := stateAntiquaryCollector.collectPendingDepositsDump(ctx, slot, s.currentState.PendingDeposits()); err != nil {
 						return err
 					}
-					if err := stateAntiquaryCollector.collectPendingConsolidationsDump(slot, s.currentState.PendingConsolidations()); err != nil {
+					if err := stateAntiquaryCollector.collectPendingConsolidationsDump(ctx, slot, s.currentState.PendingConsolidations()); err != nil {
 						return err
 					}
-					if err := stateAntiquaryCollector.collectPendingWithdrawalsDump(slot, s.currentState.PendingPartialWithdrawals()); err != nil {
+					if err := stateAntiquaryCollector.collectPendingWithdrawalsDump(ctx, slot, s.currentState.PendingPartialWithdrawals()); err != nil {
 						return err
 					}
 				}
 				if s.currentState.Version() >= clparams.GloasVersion {
-					if err := stateAntiquaryCollector.collectBuildersDump(slot, s.currentState.GetBuilders()); err != nil {
+					if err := stateAntiquaryCollector.collectBuildersDump(ctx, slot, s.currentState.GetBuilders()); err != nil {
 						return err
 					}
-					if err := stateAntiquaryCollector.collectBuilderPendingWithdrawalsDump(slot, s.currentState.GetBuilderPendingWithdrawals()); err != nil {
+					if err := stateAntiquaryCollector.collectBuilderPendingWithdrawalsDump(ctx, slot, s.currentState.GetBuilderPendingWithdrawals()); err != nil {
 						return err
 					}
-					if err := stateAntiquaryCollector.collectPayloadExpectedWithdrawalsDump(slot, s.currentState.GetPayloadExpectedWithdrawals()); err != nil {
+					if err := stateAntiquaryCollector.collectPayloadExpectedWithdrawalsDump(ctx, slot, s.currentState.GetPayloadExpectedWithdrawals()); err != nil {
 						return err
 					}
 				}
@@ -501,7 +501,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		events.Reset()
 
 		if isDumpSlot {
-			if err := stateAntiquaryCollector.collectBalancesDump(slot, s.currentState.RawBalances()); err != nil {
+			if err := stateAntiquaryCollector.collectBalancesDump(ctx, slot, s.currentState.RawBalances()); err != nil {
 				return err
 			}
 			if err := stateAntiquaryCollector.collectEffectiveBalancesDump(slot, s.currentState.RawValidatorSet()); err != nil {
@@ -509,24 +509,24 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			}
 			if s.currentState.Version() >= clparams.ElectraVersion {
 				log.Debug("not-found dumping electra queues", "slot", slot, "pendingDeposits", s.currentState.PendingDeposits().Len(), "pendingConsolidations", s.currentState.PendingConsolidations().Len(), "pendingWithdrawals", s.currentState.PendingPartialWithdrawals().Len())
-				if err := stateAntiquaryCollector.collectPendingDepositsDump(slot, s.currentState.PendingDeposits()); err != nil {
+				if err := stateAntiquaryCollector.collectPendingDepositsDump(ctx, slot, s.currentState.PendingDeposits()); err != nil {
 					return err
 				}
-				if err := stateAntiquaryCollector.collectPendingConsolidationsDump(slot, s.currentState.PendingConsolidations()); err != nil {
+				if err := stateAntiquaryCollector.collectPendingConsolidationsDump(ctx, slot, s.currentState.PendingConsolidations()); err != nil {
 					return err
 				}
-				if err := stateAntiquaryCollector.collectPendingWithdrawalsDump(slot, s.currentState.PendingPartialWithdrawals()); err != nil {
+				if err := stateAntiquaryCollector.collectPendingWithdrawalsDump(ctx, slot, s.currentState.PendingPartialWithdrawals()); err != nil {
 					return err
 				}
 			}
 			if s.currentState.Version() >= clparams.GloasVersion {
-				if err := stateAntiquaryCollector.collectBuildersDump(slot, s.currentState.GetBuilders()); err != nil {
+				if err := stateAntiquaryCollector.collectBuildersDump(ctx, slot, s.currentState.GetBuilders()); err != nil {
 					return err
 				}
-				if err := stateAntiquaryCollector.collectBuilderPendingWithdrawalsDump(slot, s.currentState.GetBuilderPendingWithdrawals()); err != nil {
+				if err := stateAntiquaryCollector.collectBuilderPendingWithdrawalsDump(ctx, slot, s.currentState.GetBuilderPendingWithdrawals()); err != nil {
 					return err
 				}
-				if err := stateAntiquaryCollector.collectPayloadExpectedWithdrawalsDump(slot, s.currentState.GetPayloadExpectedWithdrawals()); err != nil {
+				if err := stateAntiquaryCollector.collectPayloadExpectedWithdrawalsDump(ctx, slot, s.currentState.GetPayloadExpectedWithdrawals()); err != nil {
 					return err
 				}
 			}

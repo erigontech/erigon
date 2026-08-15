@@ -26,17 +26,17 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
 // newTestMigrationsDB opens an in-memory migrations-tracking DB for use in tests.
 func newTestMigrationsDB(t *testing.T) kv.RwDB {
 	t.Helper()
-	return memdb.NewTestDB(t, dbcfg.MigrationsDB)
+	return mdbxtest.NewTestDB(t, dbcfg.MigrationsDB)
 }
 
 func TestApplyWithInit(t *testing.T) {
-	require, db := require.New(t), memdb.NewTestDB(t, dbcfg.ChainDB)
+	require, db := require.New(t), mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	migrationsDB := newTestMigrationsDB(t)
 	m := []Migration{
 		{
@@ -102,7 +102,7 @@ func TestApplyWithInit(t *testing.T) {
 }
 
 func TestApplyWithoutInit(t *testing.T) {
-	require, db := require.New(t), memdb.NewTestDB(t, dbcfg.ChainDB)
+	require, db := require.New(t), mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	migrationsDB := newTestMigrationsDB(t)
 	m := []Migration{
 		{
@@ -168,7 +168,7 @@ func TestApplyWithoutInit(t *testing.T) {
 }
 
 func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
-	require, db := require.New(t), memdb.NewTestDB(t, dbcfg.ChainDB)
+	require, db := require.New(t), mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	migrationsDB := newTestMigrationsDB(t)
 	m := []Migration{
 		{
@@ -232,7 +232,7 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 }
 
 func TestValidation(t *testing.T) {
-	require, db := require.New(t), memdb.NewTestDB(t, dbcfg.ChainDB)
+	require, db := require.New(t), mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	migrationsDB := newTestMigrationsDB(t)
 	m := []Migration{
 		{
@@ -297,7 +297,7 @@ func TestWipeDataIfMajorBelow(t *testing.T) {
 
 	t.Run("no_wipe_when_version_absent", func(t *testing.T) {
 		// Fresh DB has no version record: ok=false → no wipe.
-		db := memdb.NewTestDB(t, dbcfg.ChainDB)
+		db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 		migrationsDB := newTestMigrationsDB(t)
 		wipeCalled := false
 		migrator := NewMigrator(dbcfg.ChainDB)
@@ -319,7 +319,7 @@ func TestWipeDataIfMajorBelow(t *testing.T) {
 	})
 
 	t.Run("no_wipe_when_version_at_threshold", func(t *testing.T) {
-		db := memdb.NewTestDB(t, dbcfg.ChainDB)
+		db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 		writeDBMajorVersion(t, db, 5)
 		migrationsDB := newTestMigrationsDB(t)
 		wipeCalled := false
@@ -333,7 +333,7 @@ func TestWipeDataIfMajorBelow(t *testing.T) {
 
 	t.Run("error_when_reopen_nil", func(t *testing.T) {
 		// Version below threshold but ReopenDB not set → error.
-		db := memdb.NewTestDB(t, dbcfg.ChainDB)
+		db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 		writeDBMajorVersion(t, db, 3)
 		migrationsDB := newTestMigrationsDB(t)
 		migrator := NewMigrator(dbcfg.ChainDB)
@@ -345,7 +345,7 @@ func TestWipeDataIfMajorBelow(t *testing.T) {
 }
 
 func TestCommitCallRequired(t *testing.T) {
-	require, db := require.New(t), memdb.NewTestDB(t, dbcfg.ChainDB)
+	require, db := require.New(t), mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	migrationsDB := newTestMigrationsDB(t)
 	m := []Migration{
 		{

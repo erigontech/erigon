@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
 const testTable = "T"
@@ -43,7 +44,7 @@ func u64Key(i uint64) []byte {
 // under which reusing stale chunk bounds would silently skip rows.
 func newWriteMapDB(t *testing.T) kv.RwDB {
 	t.Helper()
-	db := mdbx.New(dbcfg.ChainDB, log.New()).InMem(t, t.TempDir()).WriteMap(true).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), t.TempDir()).WriteMap(true).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{testTable: kv.TableCfgItem{}}
 	}).MapSize(1 * datasize.GB).MustOpen()
 	t.Cleanup(db.Close)
