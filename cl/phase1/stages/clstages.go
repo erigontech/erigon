@@ -275,17 +275,33 @@ func ConsensusClStages(ctx context.Context,
 					if err != nil {
 						return err
 					}
-					if cfg.state.Slot() == 0 {
-						// Initialize syncedData so Syncing() returns false at genesis.
-						// Without this, the VC gets 503 "beacon node is syncing" forever.
+					// A SOLE-PRODUCER node (embedded dev validator + LocalDiscovery, i.e. no peers to
+					// backfill from) must anchor on its OWN loaded state and resume producing, exactly
+					// like the genesis path — at cold start the loaded state is genesis (slot 0), on a
+					// WARM RESTART it is the persisted checkpoint (slot > 0). Without this it drops into
+					// the peer-based backward/forward sync below, which never completes with zero peers:
+					// the VC gets 503 "beacon node is syncing" forever, head_slot stays 0, and the chain
+					// stalls (no block production). A networked node still backward-syncs history from
+					// peers as before. See warm-restart: the checkpoint IS the head; nothing to backfill.
+					soleProducer := cfg.caplinConfig.LocalDiscovery && cfg.caplinConfig.DevValidatorSeed != ""
+					if cfg.state.Slot() == 0 || soleProducer {
+						// Set the loaded state (genesis, or the resumed checkpoint) as the head so
+						// Syncing() returns false and the VC produces on top of it at the current slot.
 						if err := cfg.syncedData.OnHeadStateWithBlockRoot(cfg.state, startingRoot); err != nil {
-							return fmt.Errorf("failed to set genesis head state: %w", err)
+							return fmt.Errorf("failed to set head state on resume: %w", err)
 						}
 						// Mark forkchoice as synced so OnAttestation processes attestations.
 						cfg.forkChoice.SetSynced(true)
-						// Write genesis beacon block to DB so block production can find the parent block.
-						if err := writeGenesisBeaconBlock(ctx, cfg); err != nil {
-							return fmt.Errorf("failed to write genesis beacon block: %w", err)
+						if cfg.state.Slot() == 0 {
+							// Cold start: write the genesis beacon block so production finds the parent.
+							// On a warm restart the head beacon block is already persisted in
+							// caplin/indexing (produced last run), so there is nothing to write.
+							if err := writeGenesisBeaconBlock(ctx, cfg); err != nil {
+								return fmt.Errorf("failed to write genesis beacon block: %w", err)
+							}
+						} else {
+							logger.Info("[Caplin] sole-producer warm resume: anchored on persisted checkpoint head",
+								"slot", cfg.state.Slot(), "blockRoot", common.Hash(startingRoot))
 						}
 						cfg.state = nil // Release the state
 						return nil
