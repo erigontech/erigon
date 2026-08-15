@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -299,7 +300,7 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 		if key, value, err := provider.Next(); err == nil {
 			heapPush(h, &HeapElem{key, value, i})
 		} else /* we must have at least one entry per file */ {
-			var providerDesc string
+			var providerDescBuf strings.Builder
 			for j, p := range providers {
 				sz := int64(-1)
 				var firstBytes []byte
@@ -320,8 +321,9 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 				if j == i {
 					marker = "*"
 				}
-				providerDesc += fmt.Sprintf("\n  [%d]%s size=%d firstBytes=%x provider=%s", j, marker, sz, firstBytes, p)
+				fmt.Fprintf(&providerDescBuf, "\n  [%d]%s size=%d firstBytes=%x provider=%s", j, marker, sz, firstBytes, p)
 			}
+			providerDesc := providerDescBuf.String()
 			// stderr direct: the panic + service.go recover path can drop
 			// buffered log-package output. This goes straight to fd 2.
 			fmt.Fprintf(os.Stderr, "[etl-diag] merge panic: %s: error reading first readers: n=%d current=%d err=%v providers:%s\n",
