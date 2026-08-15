@@ -138,30 +138,22 @@ func TestOverride_GasLimitAndMaxGasLimit(t *testing.T) {
 func TestOverrideBaseFee_NilReceiver(t *testing.T) {
 	var o *BlockOverrides
 	baseFee := uint256.NewInt(7)
-	got, err := o.OverrideBaseFee(baseFee)
-	require.NoError(t, err)
-	assert.Same(t, baseFee, got, "nil receiver must return the input unchanged")
+	assert.Same(t, baseFee, o.OverrideBaseFee(baseFee), "nil receiver must return the input unchanged")
 }
 
 func TestOverrideBaseFee_NoOverride(t *testing.T) {
 	baseFee := uint256.NewInt(7)
-	got, err := (&BlockOverrides{}).OverrideBaseFee(baseFee)
-	require.NoError(t, err)
-	assert.Same(t, baseFee, got, "no BaseFeePerGas must return the input unchanged")
+	assert.Same(t, baseFee, (&BlockOverrides{}).OverrideBaseFee(baseFee), "no BaseFeePerGas must return the input unchanged")
 }
 
 func TestOverrideBaseFee_AppliesOverride(t *testing.T) {
 	o := BlockOverrides{BaseFeePerGas: bigHex(500)}
-	got, err := o.OverrideBaseFee(uint256.NewInt(7))
-	require.NoError(t, err)
-	assert.Equal(t, uint256.NewInt(500), got)
+	assert.Equal(t, uint256.NewInt(500), o.OverrideBaseFee(uint256.NewInt(7)))
 }
 
 func TestOverrideBaseFee_AppliesOverrideOnPreLondonBlock(t *testing.T) {
 	o := BlockOverrides{BaseFeePerGas: bigHex(500)}
-	got, err := o.OverrideBaseFee(nil)
-	require.NoError(t, err)
-	assert.Equal(t, uint256.NewInt(500), got, "explicit BaseFeePerGas must apply even when the target block has no base fee")
+	assert.Equal(t, uint256.NewInt(500), o.OverrideBaseFee(nil), "explicit BaseFeePerGas must apply even when the target block has no base fee")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

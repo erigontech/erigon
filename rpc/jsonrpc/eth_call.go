@@ -266,10 +266,11 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		}
 		available := balance.ToBig()
 		if args.Value != nil {
-			if args.Value.ToInt().Cmp(available) >= 0 {
+			value := args.Value.ToInt()
+			if value.Cmp(available) >= 0 {
 				return 0, errors.New("insufficient funds for transfer")
 			}
-			available.Sub(available, args.Value.ToInt())
+			available.Sub(available, value)
 		}
 
 		allowance := new(big.Int).Div(available, feeCap)

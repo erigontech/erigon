@@ -97,11 +97,11 @@ func (overrides *BlockOverrides) Override(context *evmtypes.BlockContext) error 
 // OverrideBaseFee returns baseFee with BaseFeePerGas applied if set, applying it
 // even when baseFee is nil (pre-London block). It exists separately from Override
 // because some callers need the overridden base fee before a BlockContext exists.
-func (overrides *BlockOverrides) OverrideBaseFee(baseFee *uint256.Int) (*uint256.Int, error) {
+func (overrides *BlockOverrides) OverrideBaseFee(baseFee *uint256.Int) *uint256.Int {
 	if overrides == nil || overrides.BaseFeePerGas == nil {
-		return baseFee, nil
+		return baseFee
 	}
-	return new(uint256.Int).Set((*uint256.Int)(overrides.BaseFeePerGas)), nil
+	return new(uint256.Int).Set((*uint256.Int)(overrides.BaseFeePerGas))
 }
 
 // OverrideHeader returns a modified copy of header with the overridden fields
