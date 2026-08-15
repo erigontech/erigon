@@ -55,6 +55,16 @@ const (
 	overlayRaceBaseFee   = 424242
 )
 
+func insertOverlayRaceChain(t *testing.T, m *execmoduletester.ExecModuleTester) *blockgen.ChainPack {
+	t.Helper()
+	c, err := m.GenerateChain(overlayRaceChainSize, func(i int, gen *blockgen.BlockGen) {
+		gen.SetCoinbase(common.Address{1})
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(c))
+	return c
+}
+
 // newOverlayAheadTestAPI builds overlayRaceChainSize committed MDBX blocks,
 // then publishes a fabricated block one past them (overlayRaceChainSize+1)
 // into the block overlay only, never committed to MDBX. This reproduces the
@@ -72,11 +82,7 @@ func newOverlayAheadTestAPI(t *testing.T) (base *BaseAPI, m *execmoduletester.Ex
 	cfg.LondonBlock = common.NewUint64(0)
 	m = execmoduletester.New(t, execmoduletester.WithChainConfig(&cfg))
 
-	c, err := m.GenerateChain(overlayRaceChainSize, func(i int, gen *blockgen.BlockGen) {
-		gen.SetCoinbase(common.Address{1})
-	})
-	require.NoError(t, err)
-	require.NoError(t, m.InsertChain(c))
+	c := insertOverlayRaceChain(t, m)
 
 	ctx := m.Ctx
 	overlayRoTx, err := m.DB.BeginTemporalRo(ctx)
@@ -291,11 +297,7 @@ func TestTraceFilter_UsesCommittedFromTag(t *testing.T) {
 func newHeaderAheadTester(t *testing.T) (m *execmoduletester.ExecModuleTester, aheadHash common.Hash) {
 	t.Helper()
 	m = execmoduletester.New(t)
-	c, err := m.GenerateChain(overlayRaceChainSize, func(i int, gen *blockgen.BlockGen) {
-		gen.SetCoinbase(common.Address{1})
-	})
-	require.NoError(t, err)
-	require.NoError(t, m.InsertChain(c))
+	c := insertOverlayRaceChain(t, m)
 
 	aheadNumber := uint64(overlayRaceChainSize) + 1
 	header := &types.Header{

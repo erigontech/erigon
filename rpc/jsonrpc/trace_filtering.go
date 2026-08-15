@@ -325,8 +325,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 	if req.FromBlock == nil {
 		fromBlock = 0
 	} else {
-		// nil filters: tags must resolve on the same committed view as the
-		// txnum-index scan below, not on the block overlay.
+		// nil filters: resolve on the committed view, like the scan below.
 		fromBlock, _, _, err = rpchelper.GetBlockNumber(ctx, *req.FromBlock, dbtx, api._blockReader, nil)
 		if err != nil {
 			if errors.As(err, &rpc.BlockNotFoundErr{}) {
