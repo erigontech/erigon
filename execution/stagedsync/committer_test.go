@@ -37,7 +37,7 @@ import (
 //
 // In BatchCommitments mode the calculator only computes on
 // commitComputeRequest. The very first batch of an exec3 cycle that runs
-// only the genesis block produces lastBlockResult.BlockNum=0. The dedup
+// only the genesis block produces lastTarget.blockNum=0. The dedup
 // check used to be `lastBlockResult.BlockNum > lastComputedBlock`, which
 // for the (very common) initial state lastComputedBlock=0 evaluates to
 // `0 > 0 == false`. So the calculator silently skipped computing and
@@ -50,9 +50,10 @@ import (
 // computed" from "computed block 0".
 func TestShouldComputeOnRequest_GenesisFirstBatch(t *testing.T) {
 	cc := &commitmentCalculator{
-		lastBlockResult:   &blockResult{BlockNum: 0},
-		lastComputedBlock: 0,
-		hasComputed:       false,
+		lastTarget:         commitTarget{blockNum: 0},
+		lastComputedBlock:  0,
+		hasComputed:        false,
+		hasSeenBlockResult: true,
 	}
 	assert.True(t, cc.shouldComputeOnRequest(),
 		"first batch covering only genesis (block 0) MUST compute, "+
@@ -66,9 +67,10 @@ func TestShouldComputeOnRequest_GenesisFirstBatch(t *testing.T) {
 // new block boundary should NOT recompute.
 func TestShouldComputeOnRequest_AlreadyComputedSameBlock(t *testing.T) {
 	cc := &commitmentCalculator{
-		lastBlockResult:   &blockResult{BlockNum: 0},
-		lastComputedBlock: 0,
-		hasComputed:       true,
+		lastTarget:         commitTarget{blockNum: 0},
+		lastComputedBlock:  0,
+		hasComputed:        true,
+		hasSeenBlockResult: true,
 	}
 	assert.False(t, cc.shouldComputeOnRequest(),
 		"no new block boundary since last compute — skip and publish empty")
@@ -78,9 +80,10 @@ func TestShouldComputeOnRequest_AlreadyComputedSameBlock(t *testing.T) {
 // a new block arrived since the last compute, recompute.
 func TestShouldComputeOnRequest_AdvancedBlock(t *testing.T) {
 	cc := &commitmentCalculator{
-		lastBlockResult:   &blockResult{BlockNum: 5},
-		lastComputedBlock: 3,
-		hasComputed:       true,
+		lastTarget:         commitTarget{blockNum: 5},
+		lastComputedBlock:  3,
+		hasComputed:        true,
+		hasSeenBlockResult: true,
 	}
 	assert.True(t, cc.shouldComputeOnRequest(),
 		"new block boundary advanced past the last compute — recompute")
@@ -91,9 +94,10 @@ func TestShouldComputeOnRequest_AdvancedBlock(t *testing.T) {
 // we publish the empty result instead of computing against nothing.
 func TestShouldComputeOnRequest_NoBlockResult(t *testing.T) {
 	cc := &commitmentCalculator{
-		lastBlockResult:   nil,
-		lastComputedBlock: 0,
-		hasComputed:       false,
+		lastTarget:         commitTarget{},
+		lastComputedBlock:  0,
+		hasComputed:        false,
+		hasSeenBlockResult: false,
 	}
 	assert.False(t, cc.shouldComputeOnRequest(),
 		"no blockResult to compute against — publish empty so drainBeforeExit unblocks")
@@ -104,9 +108,10 @@ func TestShouldComputeOnRequest_NoBlockResult(t *testing.T) {
 // fires because we already advanced past it.
 func TestShouldComputeOnRequest_BlockZeroAfterAdvance(t *testing.T) {
 	cc := &commitmentCalculator{
-		lastBlockResult:   &blockResult{BlockNum: 0},
-		lastComputedBlock: 5,
-		hasComputed:       true,
+		lastTarget:         commitTarget{blockNum: 0},
+		lastComputedBlock:  5,
+		hasComputed:        true,
+		hasSeenBlockResult: true,
 	}
 	assert.False(t, cc.shouldComputeOnRequest(),
 		"stale block 0 result while we've already computed block 5 — skip")
@@ -199,7 +204,7 @@ func TestHandleMessage_TxResultPinsAsOfReaderTxNum(t *testing.T) {
 
 // TestHandleBlockRequest_EmptyBALFallsToIncremental pins the empty-BAL gate.
 // A genuine empty BAL (0xc0) decodes to a non-nil empty slice, so a nil check
-// alone selects BAL-driven mode and folds zero changes → parent root →
+// alone selects BAL-driven mode and computes zero changes → parent root →
 // spurious wrong-trie-root. Mode selection must gate on len(bal) > 0.
 func TestHandleBlockRequest_EmptyBALFallsToIncremental(t *testing.T) {
 	defer func(prev bool) { dbg.BALDrivenCommitment = prev }(dbg.BALDrivenCommitment)
@@ -208,12 +213,12 @@ func TestHandleBlockRequest_EmptyBALFallsToIncremental(t *testing.T) {
 	dbg.IgnoreBAL = false
 
 	cc := &commitmentCalculator{
-		pending:     map[uint64]*pendingBlock{},
-		foldedAhead: map[uint64]bool{},
-		balRoots:    map[uint64][]byte{},
+		pending:       map[uint64]*pendingBlock{},
+		computedAhead: map[uint64]bool{},
+		balRoots:      map[uint64][]byte{},
 		// Not the batch's first block and no blockResult seen yet, so the
-		// fold gate is shut — maybeFoldAhead returns before touching the
-		// (nil) doms/updates, isolating the mode-selection under test.
+		// compute-ahead gate is shut — maybeComputeAhead returns before touching
+		// the (nil) doms/updates, isolating the mode-selection under test.
 		hasFirstBlock:      true,
 		firstBlockNum:      100,
 		hasSeenBlockResult: false,
@@ -228,15 +233,16 @@ func TestHandleBlockRequest_EmptyBALFallsToIncremental(t *testing.T) {
 	require.True(t, ok, "block request must be recorded")
 	assert.Equal(t, calcModeIncremental, pb.mode,
 		"an empty (non-nil) BAL declares no changes and must fall to "+
-			"incremental mode; folding it would compute the parent root and "+
+			"incremental mode; computing it ahead would compute the parent root and "+
 			"fail an otherwise-valid block with ErrWrongTrieRoot")
 }
 
-// TestFoldCap_StopsFoldAhead pins the orphan guard: once the shared executor
-// context carries a stopCause, the calculator must not fold any block past the
-// coalesce block M — otherwise commitment would advance past the state exec
-// stops at. The signal is read from the context cause, not a shared flag.
-func TestFoldCap_StopsFoldAhead(t *testing.T) {
+// TestComputeAheadCap_StopsComputeAhead pins the orphan guard: once the shared
+// executor context carries a stopCause, the calculator must not compute any
+// block ahead past the coalesce block M — otherwise commitment would advance
+// past the state exec stops at. The signal is read from the context cause, not
+// a shared flag.
+func TestComputeAheadCap_StopsComputeAhead(t *testing.T) {
 	defer func(prev bool) { dbg.BALDrivenCommitment = prev }(dbg.BALDrivenCommitment)
 	dbg.BALDrivenCommitment = true
 
@@ -248,15 +254,53 @@ func TestFoldCap_StopsFoldAhead(t *testing.T) {
 		pending: map[uint64]*pendingBlock{
 			5: {req: &blockRequest{blockNum: 5, bal: make(types.BlockAccessList, 1)}, mode: calcModeBALDriven},
 		},
-		foldedAhead:   map[uint64]bool{},
+		computedAhead: map[uint64]bool{},
 		balRoots:      map[uint64][]byte{},
 		hasFirstBlock: true,
 		firstBlockNum: 5, // gate open for block 5 without a prior blockResult
 	}
 
-	// Coalesce block M=4: block 5 is past M and must not fold.
+	// Coalesce block M=4: block 5 is past M and must not compute ahead.
 	cancel(&stopCause{block: 4, kind: stopMoreWork})
-	cc.maybeFoldAhead(context.Background(), 5) // must return before foldBlockFromBAL
+	cc.maybeComputeAhead(context.Background(), 5) // must return before computeBlockFromBAL
 
-	assert.False(t, cc.foldedAhead[5], "a fold past the coalesce block M must not run")
+	assert.False(t, cc.computedAhead[5], "a compute-ahead past the coalesce block M must not run")
+}
+
+// TestContiguityGuard_ChainNeverRecovers pins that one block without a BAL ends
+// compute-ahead for the whole batch: the chain is anchored at the last block that
+// advanced the commitment domain, so every later block reads a stale baseline and
+// stays on the incremental path, however contiguous it is with its own predecessor.
+func TestContiguityGuard_ChainNeverRecovers(t *testing.T) {
+	defer func(prev bool) { dbg.BALDrivenCommitment = prev }(dbg.BALDrivenCommitment)
+	defer func(prev bool) { dbg.IgnoreBAL = prev }(dbg.IgnoreBAL)
+	dbg.BALDrivenCommitment = true
+	dbg.IgnoreBAL = false
+
+	ctx := context.Background()
+	cc := &commitmentCalculator{
+		signalCtx:     ctx,
+		pending:       map[uint64]*pendingBlock{},
+		computedAhead: map[uint64]bool{},
+		balRoots:      map[uint64][]byte{},
+		hasFirstBlock: true,
+		firstBlockNum: 5,
+		perBlockFrom:  1 << 62, // all blocks pre-window, so none owns a changeset
+		// Block 5 computed ahead, block 6 had no BAL and never advanced the domain.
+		hasComputedAhead:       true,
+		lastComputedAheadBlock: 5,
+		hasSeenBlockResult:     true,
+	}
+
+	for n := uint64(7); n <= 12; n++ {
+		cc.lastBlockResultSeen = n - 1 // gate open: only the contiguity guard may reject
+		cc.pending[n] = &pendingBlock{
+			req:  &blockRequest{blockNum: n, bal: make(types.BlockAccessList, 1)},
+			mode: calcModeBALDriven,
+		}
+		cc.maybeComputeAhead(ctx, n)
+		assert.False(t, cc.computedAhead[n], "block %d must not compute ahead across the gap at block 6", n)
+		assert.True(t, cc.computeAheadStopped, "the fall back to incremental must be reported at block %d", n)
+	}
+	assert.Equal(t, uint64(5), cc.lastComputedAheadBlock, "the chain must stay anchored at block 5")
 }

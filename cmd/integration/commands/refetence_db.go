@@ -278,19 +278,20 @@ func compareBuckets(ctx context.Context, tx kv.Tx, b string, refTx kv.Tx, refB s
 			}
 			fmt.Printf("Compared %d records\n", count)
 		}
-		if k == nil {
+		switch {
+		case k == nil:
 			fmt.Printf("Missing in db: %x [%x]\n", refK, refV)
 			refK, refV, revErr = refC.Next()
 			if revErr != nil {
 				return revErr
 			}
-		} else if refK == nil {
+		case refK == nil:
 			fmt.Printf("Missing refDB: %x [%x]\n", k, v)
 			k, v, e = c.Next()
 			if e != nil {
 				return e
 			}
-		} else {
+		default:
 			switch bytes.Compare(k, refK) {
 			case -1:
 				fmt.Printf("Missing refDB: %x [%x]\n", k, v)
@@ -357,9 +358,8 @@ MainLoop:
 				break
 			}
 
-			parts := strings.Split(string(kk), "=")
-			k, v := parts[0], parts[1]
-			if k == "database" {
+			k, v, ok := strings.Cut(string(kk), "=")
+			if ok && k == "database" {
 				bucket = v
 			}
 		}
@@ -375,35 +375,40 @@ MainLoop:
 		if err != nil {
 			return err
 		}
-		defer c.Close()
+		defer c.Close() //nolint:gocritic
 
 		for {
 			if !fileScanner.Scan() {
+				c.Close()
 				break MainLoop
 			}
-			k := common.Copy(fileScanner.Bytes())
+			k := bytes.Clone(fileScanner.Bytes())
 			if bytes.Equal(k, endData) {
 				break
 			}
 			k = common.FromHex(string(k[1:]))
 			if !fileScanner.Scan() {
+				c.Close()
 				break MainLoop
 			}
-			v := common.Copy(fileScanner.Bytes())
+			v := bytes.Clone(fileScanner.Bytes())
 			v = common.FromHex(string(v[1:]))
 
 			if casted, ok := c.(kv.RwCursorDupSort); ok {
 				if err = casted.AppendDup(k, v); err != nil {
+					c.Close()
 					panic(err)
 				}
 			} else {
 				if err = c.Append(k, v); err != nil {
+					c.Close()
 					panic(err)
 				}
 			}
 			select {
 			default:
 			case <-ctx.Done():
+				c.Close()
 				return ctx.Err()
 			case <-commitEvery.C:
 				logger.Info("Progress", "bucket", bucket, "key", hex.EncodeToString(k))

@@ -1,17 +1,18 @@
-name: Cache Warming — EEST fixtures
+name: Cache Warming — Execution fixtures
 
-# Populates the base-branch EEST fixture-tarball cache that test-eest-spec.yml
-# restores (restore-only there, so PR / merge_group runs never save their own
-# per-ref duplicates). GitHub cache scoping makes default-branch caches readable
-# from every PR and merge group, so warming on main/release is enough.
+# Populates the base-branch EEST and legacy fixture-tarball caches that
+# test-eest-spec.yml restores. PR / merge_group runs never save per-ref
+# duplicates. GitHub cache scoping makes default-branch caches readable from
+# every PR and merge group, so warming on main/release is enough.
 #
 # Triggers:
 #   - push to a protected branch touching test-fixtures.json -> warm on a version bump
 #   - schedule (daily)                                       -> safety net if LRU-evicted
 #   - workflow_dispatch                                      -> manual (use once to bootstrap)
 #
-# The key matches test-eest-spec.yml exactly:
+# The keys match test-eest-spec.yml exactly:
 #   test-fixtures-eest-${{ runner.os }}-${{ hashFiles('test-fixtures.json') }}
+#   test-fixtures-legacy-${{ runner.os }}-${{ hashFiles('test-fixtures.json') }}
 
 on:
   push:
@@ -78,3 +79,26 @@ jobs:
             test-fixtures-cache/eest_benchmark.tar.gz
             test-fixtures-cache/eest_zkevm.tar.gz
           key: test-fixtures-eest-${{ runner.os }}-${{ hashFiles('test-fixtures.json') }}
+
+      - name: Probe legacy fixture cache
+        id: probe-legacy
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            test-fixtures-cache/legacy_tests.tar.gz
+            test-fixtures-cache/legacy_cancun.tar.gz
+          key: test-fixtures-legacy-${{ runner.os }}-${{ hashFiles('test-fixtures.json') }}
+          lookup-only: true
+
+      - name: Download legacy fixture tarballs
+        if: steps.probe-legacy.outputs.cache-hit != 'true'
+        run: bash tools/test-fixtures.sh --download-only test-fixtures.json test-fixtures-cache legacy_tests legacy_cancun
+
+      - name: Save legacy fixture cache
+        if: steps.probe-legacy.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            test-fixtures-cache/legacy_tests.tar.gz
+            test-fixtures-cache/legacy_cancun.tar.gz
+          key: test-fixtures-legacy-${{ runner.os }}-${{ hashFiles('test-fixtures.json') }}

@@ -31,7 +31,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
@@ -55,7 +54,7 @@ import (
 
 func TestEmptyQuery(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+	api := newTraceApiForTest(m)
 	// Call GetTransactionReceipt for transaction which is not in the database
 	var latest = rpc.LatestBlockNumber
 	results, err := api.CallMany(context.Background(), json.RawMessage("[]"), &rpc.BlockNumberOrHash{BlockNumber: &latest}, nil)
@@ -71,7 +70,7 @@ func TestEmptyQuery(t *testing.T) {
 }
 func TestCoinbaseBalance(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+	api := newTraceApiForTest(m)
 	// Call GetTransactionReceipt for transaction which is not in the database
 	var latest = rpc.LatestBlockNumber
 	results, err := api.CallMany(context.Background(), json.RawMessage(`
@@ -101,7 +100,7 @@ func internedAddress(addr string) accounts.Address {
 
 func TestSwapBalance(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+	api := newTraceApiForTest(m)
 	// Call GetTransactionReceipt for transaction which is not in the database
 	var latest = rpc.LatestBlockNumber
 	results, err := api.CallMany(context.Background(), json.RawMessage(`
@@ -184,9 +183,65 @@ func TestSwapBalance(t *testing.T) {
 	}
 }
 
+// Same swap as TestSwapBalance, but call 1 requests only "trace": call 2 spends
+// the wei received in call 1, so its stateDiff must match the control run where
+// both calls request "stateDiff" — trace-type selection must not change the
+// sequential state seen by later calls.
+func TestCallManyMixedTraceTypesKeepSequentialState(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newTraceApiForTest(m)
+	var latest = rpc.LatestBlockNumber
+	parent := &rpc.BlockNumberOrHash{BlockNumber: &latest}
+
+	const swap = `[
+	[{"from":"0x71562b71999873db5b286df957af199ec94617f7","to":"0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b","gas":"0x5208","gasPrice":"0x0","value":"0x2"},[%s]],
+	[{"from":"0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b","to":"0x71562b71999873db5b286df957af199ec94617f7","gas":"0x5208","gasPrice":"0x0","value":"0x1"},["stateDiff"]]
+]`
+	control, err := api.CallMany(context.Background(), json.RawMessage(fmt.Sprintf(swap, `"trace", "stateDiff"`)), parent, nil)
+	require.NoError(t, err)
+	require.Len(t, control, 2)
+
+	mixed, err := api.CallMany(context.Background(), json.RawMessage(fmt.Sprintf(swap, `"trace"`)), parent, nil)
+	require.NoError(t, err)
+	require.Len(t, mixed, 2)
+
+	require.Equal(t, control[1].StateDiff, mixed[1].StateDiff)
+}
+
+// Pins the trace-only path: without stateDiff, ibs is never reset, so each call
+// still executes on top of the previous calls' state (whole-block replay
+// semantics). Call 1 deploys a contract, call 2 invokes it and must see its
+// runtime code.
+func TestCallManyTraceOnlyKeepsSequentialState(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newTraceApiForTest(m)
+	var latest = rpc.LatestBlockNumber
+	parent := &rpc.BlockNumberOrHash{BlockNumber: &latest}
+
+	// Init code deploys runtime code that returns 42.
+	const deploy = `[{"from":"0x71562b71999873db5b286df957af199ec94617f7","gas":"0x30000","gasPrice":"0x0","data":"0x600a600c600039600a6000f3602a60005260206000f3"},["trace"]]`
+	deployRes, err := api.CallMany(context.Background(), json.RawMessage("["+deploy+"]"), parent, nil)
+	require.NoError(t, err)
+	require.Len(t, deployRes, 1)
+	created, ok := deployRes[0].Trace[0].Result.(*CreateTraceResult)
+	require.True(t, ok)
+	require.NotNil(t, created.Address)
+
+	pair := fmt.Sprintf(`[
+	%s,
+	[{"from":"0x71562b71999873db5b286df957af199ec94617f7","to":"%s","gas":"0x30000","gasPrice":"0x0"},["trace"]]
+]`, deploy, created.Address)
+	results, err := api.CallMany(context.Background(), json.RawMessage(pair), parent, nil)
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+	invoked, ok := results[1].Trace[0].Result.(*TraceResult)
+	require.True(t, ok)
+	require.Equal(t, "0x000000000000000000000000000000000000000000000000000000000000002a", invoked.Output.String())
+}
+
 func TestCorrectStateDiff(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+	api := newTraceApiForTest(m)
 	// Call GetTransactionReceipt for transaction which is not in the database
 	var latest = rpc.LatestBlockNumber
 	results, err := api.CallMany(context.Background(), json.RawMessage(`
@@ -318,7 +373,7 @@ func TestCorrectStateDiff(t *testing.T) {
 
 func TestReplayTransaction(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+	api := newTraceApiForTest(m)
 	var txnHash common.Hash
 	if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
 		b, err := m.BlockReader.BlockByNumber(m.Ctx, tx, 6)
@@ -345,7 +400,7 @@ func TestReplayTransaction(t *testing.T) {
 
 func TestReplayBlockTransactions(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+	api := newTraceApiForTest(m)
 
 	// Call GetTransactionReceipt for transaction which is not in the database
 	n := rpc.BlockNumber(6)
@@ -478,7 +533,7 @@ func rawTxFromBlock(t *testing.T, m *execmoduletester.ExecModuleTester, blockNum
 		}
 		txn := b.Transactions()[0]
 		var buf bytes.Buffer
-		if err = txn.MarshalBinary(&buf); err != nil {
+		if err := txn.MarshalBinary(&buf); err != nil {
 			return err
 		}
 		encoded = buf.Bytes()
@@ -499,7 +554,7 @@ func rawTxFromBlock(t *testing.T, m *execmoduletester.ExecModuleTester, blockNum
 
 func TestRawTransaction(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+	api := newTraceApiForTest(m)
 
 	encoded, _, _ := rawTxFromBlock(t, m, 6)
 	result, err := api.RawTransaction(context.Background(), encoded, []string{"trace"})
@@ -510,7 +565,7 @@ func TestRawTransaction(t *testing.T) {
 
 func TestRawTransactionStateDiff(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+	api := newTraceApiForTest(m)
 
 	encoded, from, to := rawTxFromBlock(t, m, 6)
 
@@ -563,7 +618,7 @@ func TestRawTransactionStateDiff(t *testing.T) {
 
 func TestRawTransactionVmTrace(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+	api := newTraceApiForTest(m)
 
 	encoded, _, _ := rawTxFromBlock(t, m, 6)
 
@@ -578,7 +633,7 @@ func TestRawTransactionVmTrace(t *testing.T) {
 
 func TestRawTransactionAllTraceTypes(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+	api := newTraceApiForTest(m)
 
 	encoded, _, _ := rawTxFromBlock(t, m, 6)
 
@@ -607,7 +662,7 @@ func TestParseOeTracerConfigToleratesEmptyTracer(t *testing.T) {
 
 func TestTraceCallRejectsCustomTracer(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+	api := newTraceApiForTest(m)
 
 	tracer := "callTracer"
 	var latest = rpc.LatestBlockNumber
@@ -619,7 +674,7 @@ func TestTraceCallRejectsCustomTracer(t *testing.T) {
 
 func TestRawTransactionInvalidType(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+	api := newTraceApiForTest(m)
 
 	encoded, _, _ := rawTxFromBlock(t, m, 6)
 
@@ -634,7 +689,7 @@ func TestTraceCallBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
 	}
 
 	m, bankAddr, contractAddr, _ := chainWithDeployedContractAndConfig(t, chain.AllProtocolChanges)
-	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+	api := newTraceApiForTest(m)
 
 	// EVM bytecode: GASPRICE (0x3a), PUSH1 0x00, MSTORE, PUSH1 0x20, PUSH1 0x00, RETURN
 	gasPriceCode := hexutil.Bytes{0x3a, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3}
@@ -712,7 +767,7 @@ func newBaseFeeTestChain(t *testing.T, cfg *chain.Config) *baseFeeTestChain {
 func (c *baseFeeTestChain) mineBlock(t *testing.T, gen func(*blockgen.BlockGen)) *blockgen.ChainPack {
 	t.Helper()
 
-	chainB, err := blockgen.GenerateChain(c.m.ChainConfig, c.head, c.m.Engine, c.m.DB, 1, func(_ int, block *blockgen.BlockGen) {
+	chainB, err := c.m.GenerateChainFrom(c.head, 1, func(_ int, block *blockgen.BlockGen) {
 		gen(block)
 	})
 	require.NoError(t, err)
@@ -797,7 +852,7 @@ func traceConfigWithBaseFeeOverride(baseFee *uint256.Int) *config.TraceConfig {
 }
 
 func (c *baseFeeTestChain) traceAPI() *TraceAPIImpl {
-	return NewTraceAPI(newBaseApiForTest(c.m), c.m.DB, &httpcfg.HttpCfg{})
+	return newTraceApiForTest(c.m)
 }
 
 // setupBaseFeeOverrideCall deploys an opcode-emitting contract, mines a
@@ -821,7 +876,7 @@ func TestCallManyBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
 	contractAddr := c.deployOpcodeContract(t, opGasprice)
 	api := c.traceAPI()
 
-	calls := fmt.Sprintf(`[[{"from":"%s","to":"%s","maxFeePerGas":"0x77359400","maxPriorityFeePerGas":"0x2"},["trace"]]]`,
+	calls := fmt.Sprintf(`[[{"from":%q,"to":%q,"maxFeePerGas":"0x77359400","maxPriorityFeePerGas":"0x2"},["trace"]]]`,
 		c.bankAddress.Hex(), contractAddr.Hex())
 
 	results, err := api.CallMany(context.Background(), json.RawMessage(calls), nil, traceConfigWithBaseFeeOverride(uint256.NewInt(10)))
@@ -899,7 +954,7 @@ func TestCallManyBlockOverridesOtherFieldsAffectOpcodes(t *testing.T) {
 			contractAddr := c.deployOpcodeContract(t, tc.opcode)
 			api := c.traceAPI()
 
-			calls := fmt.Sprintf(`[[{"from":"%s","to":"%s"},["trace"]]]`, c.bankAddress.Hex(), contractAddr.Hex())
+			calls := fmt.Sprintf(`[[{"from":%q,"to":%q},["trace"]]]`, c.bankAddress.Hex(), contractAddr.Hex())
 			results, err := api.CallMany(context.Background(), json.RawMessage(calls), nil, &config.TraceConfig{
 				BlockOverrides: tc.override,
 			})

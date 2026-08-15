@@ -123,10 +123,8 @@ func (f *SnapshotRepo) DeleteFilesAfterMerge(files []*FilesItem) {
 			if f.schema.DataTag() == traceFileLife && file.decompressor != nil {
 				f.logger.Warn("[agg.dbg] DeleteFilesAfterMerge: remove", "f", file.decompressor.FileName())
 			}
-		} else {
-			if f.schema.DataTag() == traceFileLife && file.decompressor != nil {
-				f.logger.Warn("[agg.dbg] DeleteFilesAfterMerge: mark as canDelete=true", "f", file.decompressor.FileName())
-			}
+		} else if f.schema.DataTag() == traceFileLife && file.decompressor != nil {
+			f.logger.Warn("[agg.dbg] DeleteFilesAfterMerge: mark as canDelete=true", "f", file.decompressor.FileName())
 		}
 	}
 }
@@ -392,7 +390,7 @@ func (f *SnapshotRepo) openDirtyFiles(dirEntries []string) error {
 				f.logger.Error("SnapshotRepo.openDirtyFiles btindex path", "err", err, "f", fPath)
 			} else {
 				r := seg.NewReader(item.decompressor.MakeGetter(), p.DataFileCompression())
-				if item.bindex, err = btindex.OpenBtreeIndexWithDecompressor(fPath, btindex.DefaultBtreeM, r); err != nil {
+				if item.bindex, err = btindex.OpenBtreeIndexWithDecompressor(fPath, r); err != nil {
 					_, fName := filepath.Split(fPath)
 					f.logger.Error("SnapshotRepo.openDirtyFiles", "err", err, "f", fName)
 					// don't interrupt on error. other files maybe good

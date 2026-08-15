@@ -17,6 +17,7 @@
 package merkle_tree
 
 import (
+	"crypto/sha256"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -28,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/ssz"
 )
 
@@ -44,7 +46,7 @@ func HashTreeRoot(schema ...any) ([32]byte, error) {
 		return [32]byte{}, errors.New("empty schema")
 	}
 	var stack [maxStackLeaves * length.Hash]byte // stack-allocation for most of cases
-	size := NextPowerOfTwo(uint64(len(schema) * length.Hash))
+	size := math.NextPowerOfTwo(uint64(len(schema) * length.Hash))
 	var leaves []byte
 	if size <= uint64(len(stack)) {
 		leaves = stack[:size]
@@ -100,6 +102,172 @@ func HashTreeRoot(schema ...any) ([32]byte, error) {
 	return common.BytesToHash(leaves[:length.Hash]), nil
 }
 
+func ProgressiveContainerRoot(activeFields []bool, schema ...any) ([32]byte, error) {
+	if len(activeFields) == 0 || len(activeFields) > 256 || !activeFields[len(activeFields)-1] {
+		return [32]byte{}, errors.New("invalid progressive container active fields")
+	}
+	roots, err := progressiveSchemaRoots(schema)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	chunks := make([][32]byte, len(activeFields))
+	rootIndex := 0
+	var activeRoot [32]byte
+	for i, active := range activeFields {
+		if !active {
+			continue
+		}
+		if rootIndex >= len(roots) {
+			return [32]byte{}, errors.New("progressive container has fewer fields than active bits")
+		}
+		chunks[i] = roots[rootIndex]
+		activeRoot[i/8] |= 1 << uint(i%8)
+		rootIndex++
+	}
+	if rootIndex != len(roots) {
+		return [32]byte{}, errors.New("progressive container has more fields than active bits")
+	}
+	root, err := MerkleizeProgressive(chunks)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	return hashPair(root, activeRoot), nil
+}
+
+func ProgressiveContainerRootAll(schema ...any) ([32]byte, error) {
+	activeFields := make([]bool, len(schema))
+	for i := range activeFields {
+		activeFields[i] = true
+	}
+	return ProgressiveContainerRoot(activeFields, schema...)
+}
+
+func ProgressiveContainerProofAll(fieldIndex int, schema ...any) ([][32]byte, error) {
+	if len(schema) == 0 || len(schema) > 256 {
+		return nil, errors.New("invalid progressive container schema")
+	}
+	if fieldIndex < 0 || fieldIndex >= len(schema) {
+		return nil, errors.New("progressive container field index out of range")
+	}
+	roots, err := progressiveSchemaRoots(schema)
+	if err != nil {
+		return nil, err
+	}
+	proof, err := progressiveProof(roots, fieldIndex, 1)
+	if err != nil {
+		return nil, err
+	}
+	var activeRoot [32]byte
+	for i := range schema {
+		activeRoot[i/8] |= 1 << uint(i%8)
+	}
+	return append(proof, activeRoot), nil
+}
+
+func ProgressiveBitlistRoot(packed []byte, bitLength uint64) ([32]byte, error) {
+	chunks := make([][32]byte, (len(packed)+31)/32)
+	for i := range packed {
+		chunks[i/32][i%32] = packed[i]
+	}
+	return ProgressiveListRoot(chunks, bitLength)
+}
+
+func ProgressiveBasicListRoot(packed []byte, listLength uint64) ([32]byte, error) {
+	chunks := make([][32]byte, (len(packed)+31)/32)
+	for i := range packed {
+		chunks[i/32][i%32] = packed[i]
+	}
+	return ProgressiveListRoot(chunks, listLength)
+}
+
+func progressiveProof(chunks [][32]byte, target int, numLeaves uint64) ([][32]byte, error) {
+	if target < 0 || target >= len(chunks) {
+		return nil, errors.New("progressive proof target out of range")
+	}
+	count := min(len(chunks), int(numLeaves))
+	left := append([][32]byte(nil), chunks[:count]...)
+	leftRoot, err := MerkleizeVector(append([][32]byte(nil), left...), numLeaves)
+	if err != nil {
+		return nil, err
+	}
+	if numLeaves > ^uint64(0)/4 {
+		return nil, errors.New("progressive merkle tree is too large")
+	}
+	rightRoot, err := merkleizeProgressive(append([][32]byte(nil), chunks[count:]...), numLeaves*4)
+	if err != nil {
+		return nil, err
+	}
+	if target < count {
+		proof, err := vectorProof(left, target, int(numLeaves))
+		if err != nil {
+			return nil, err
+		}
+		return append(proof, rightRoot), nil
+	}
+	proof, err := progressiveProof(chunks[count:], target-count, numLeaves*4)
+	if err != nil {
+		return nil, err
+	}
+	return append(proof, leftRoot), nil
+}
+
+func vectorProof(chunks [][32]byte, target, capacity int) ([][32]byte, error) {
+	if capacity < 1 || target < 0 || target >= len(chunks) || len(chunks) > capacity {
+		return nil, errors.New("vector proof target out of range")
+	}
+	nodes := make([][32]byte, capacity)
+	copy(nodes, chunks)
+	proof := make([][32]byte, 0, GetDepth(uint64(capacity)))
+	for len(nodes) > 1 {
+		proof = append(proof, nodes[target^1])
+		next := make([][32]byte, len(nodes)/2)
+		for i := range next {
+			next[i] = hashPair(nodes[i*2], nodes[i*2+1])
+		}
+		nodes = next
+		target /= 2
+	}
+	return proof, nil
+}
+
+func progressiveSchemaRoots(schema []any) ([][32]byte, error) {
+	roots := make([][32]byte, len(schema))
+	for i, element := range schema {
+		switch obj := element.(type) {
+		case uint64:
+			binary.LittleEndian.PutUint64(roots[i][:], obj)
+		case *uint64:
+			binary.LittleEndian.PutUint64(roots[i][:], *obj)
+		case []byte:
+			if len(obj) < length.Hash {
+				copy(roots[i][:], obj)
+				continue
+			}
+			root, err := BytesRoot(obj)
+			if err != nil {
+				return nil, err
+			}
+			roots[i] = root
+		case ssz.HashableSSZ:
+			root, err := obj.HashSSZ()
+			if err != nil {
+				return nil, err
+			}
+			roots[i] = root
+		default:
+			panic(fmt.Sprintf("Can't create TreeRoot: unsupported type %T at index %d", obj, i))
+		}
+	}
+	return roots, nil
+}
+
+func hashPair(left, right [32]byte) [32]byte {
+	var pair [64]byte
+	copy(pair[:32], left[:])
+	copy(pair[32:], right[:])
+	return sha256.Sum256(pair[:])
+}
+
 // HashByteSlice is gohashtree HashBytSlice but using our hopefully safer header conversion
 func HashByteSlice(out, in []byte) error {
 	if len(in) == 0 {
@@ -142,7 +310,7 @@ func MerkleRootFromFlatLeaves(leaves []byte, out []byte) (err error) {
 		copy(out, leaves)
 		return
 	}
-	return globalHasher.merkleizeTrieLeavesFlat(leaves, out, NextPowerOfTwo(uint64((len(leaves)+31)/32)))
+	return globalHasher.merkleizeTrieLeavesFlat(leaves, out, math.NextPowerOfTwo(uint64((len(leaves)+31)/32)))
 }
 
 func MerkleRootFromFlatFromIntermediateLevel(nodes []byte, out []byte, leavesLen, intermediateLevel int) (err error) {
@@ -150,7 +318,7 @@ func MerkleRootFromFlatFromIntermediateLevel(nodes []byte, out []byte, leavesLen
 		copy(out, nodes)
 		return
 	}
-	return globalHasher.merkleizeTrieLeavesFlatWithStart(nodes, out, NextPowerOfTwo(uint64((leavesLen+31)/32)), uint64(intermediateLevel))
+	return globalHasher.merkleizeTrieLeavesFlatWithStart(nodes, out, math.NextPowerOfTwo(uint64((leavesLen+31)/32)), uint64(intermediateLevel))
 }
 
 func MerkleRootFromFlatFromIntermediateLevelWithLimit(nodes []byte, out []byte, limit, intermediateLevel int) (err error) {

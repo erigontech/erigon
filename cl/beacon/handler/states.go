@@ -36,10 +36,9 @@ import (
 )
 
 func (a *ApiHandler) blockRootFromStateId(ctx context.Context, tx kv.Tx, stateId *beaconhttp.SegmentID) (root common.Hash, httpStatusErr int, err error) {
-
 	switch {
 	case stateId.Head():
-		root, _, httpStatusErr, err = a.getHead()
+		root, _, httpStatusErr, err = a.getStateHead()
 		return
 	case stateId.Finalized():
 		root = a.forkchoiceStore.FinalizedCheckpoint().Root
@@ -659,7 +658,8 @@ func (a *ApiHandler) GetEthV1BeaconStatesProposerLookahead(w http.ResponseWriter
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(
 			http.StatusBadRequest,
-			err)
+			err,
+		)
 	}
 
 	tx, err := a.indiciesDB.BeginRo(ctx)

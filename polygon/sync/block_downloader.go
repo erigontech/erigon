@@ -263,10 +263,10 @@ func (d *BlockDownloader) downloadBlocksUsingWaypoints(
 		wg := sync.WaitGroup{}
 		for i, waypoint := range waypointsBatch {
 			maxWaypointLength = max(waypoint.Length(), maxWaypointLength)
-			wg.Add(1)
-			go func(i int, waypoint heimdall.Waypoint, peerId *p2p.PeerId) {
-				defer wg.Done()
-
+			i := i
+			waypoint := waypoint
+			peerId := peers[i]
+			wg.Go(func() {
 				if blocks, ok := waypointBlocksMemo.Get(waypoint.RootHash()); ok {
 					blockBatches[i] = blocks
 					return
@@ -292,7 +292,7 @@ func (d *BlockDownloader) downloadBlocksUsingWaypoints(
 
 				waypointBlocksMemo.Add(waypoint.RootHash(), blocks)
 				blockBatches[i] = blocks
-			}(i, waypoint, peers[i])
+			})
 		}
 
 		wg.Wait()
@@ -410,7 +410,7 @@ func (d *BlockDownloader) fetchVerifiedBlocks(
 	// 4. Assemble blocks
 	blocks := make([]*types.Block, len(headers.Data))
 	for i, header := range headers.Data {
-		blocks[i] = types.NewBlockFromNetwork(header, bodies.Data[i])
+		blocks[i] = types.NewBlockFromNetwork(header, bodies.Data[i], nil)
 	}
 
 	// 5. Verify blocks

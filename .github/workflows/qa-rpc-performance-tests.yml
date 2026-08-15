@@ -32,6 +32,9 @@ env:
   ERIGON_QA_PATH: /home/qarunner/erigon-qa
   RPC_PAST_TEST_DIR: /opt/rpc-past-tests
 
+permissions:
+  contents: read
+
 jobs:
   setup:
     name: Setup benchmark run
@@ -130,7 +133,6 @@ jobs:
         uses: actions/checkout@v7
         with:
           persist-credentials: false
-          submodules: recursive
           fetch-depth: "0"
           filter: blob:none
 

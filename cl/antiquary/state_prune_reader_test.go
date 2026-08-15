@@ -38,7 +38,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
@@ -75,7 +75,7 @@ func (e *historicalReadEnv) readRoot(t *testing.T, ctx context.Context, slot uin
 func runStateAntiquaryWithSnapshots(t *testing.T, ctx context.Context, blocks []*cltypes.SignedBeaconBlock, preState, postState *state.CachingBeaconState) (*historicalReadEnv, datadir.Dirs) {
 	t.Helper()
 	cfg := &clparams.MainnetBeaconConfig
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	reader := tests.LoadChain(blocks, postState, db, t)
 	sd := synced_data.NewSyncedDataManager(cfg, true)
 	sd.OnHeadState(postState)
@@ -217,7 +217,7 @@ func TestPruneStateTailReadsAboveCoverage(t *testing.T) {
 // seeded only for that path, so taking the wrong branch cannot pass.
 func TestPruneStateBalancesForwardAndReverseDumpPaths(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	ctx := context.Background()
 	const valCount = uint64(4)
 	boundary := statePruneTestFileSlots
@@ -233,7 +233,7 @@ func TestPruneStateBalancesForwardAndReverseDumpPaths(t *testing.T) {
 	epochDiff := func(oldSlot, newSlot uint64) []byte {
 		var b bytes.Buffer
 		require.NoError(t, base_encoding.ComputeCompressedSerializedUint64ListDiff(&b, balancesAt(oldSlot), balancesAt(newSlot)))
-		return common.Copy(b.Bytes())
+		return bytes.Clone(b.Bytes())
 	}
 	compressor, err := zstd.NewWriter(nil)
 	require.NoError(t, err)
@@ -243,7 +243,7 @@ func TestPruneStateBalancesForwardAndReverseDumpPaths(t *testing.T) {
 		var b bytes.Buffer
 		sdata := &state_accessors.SlotData{Version: clparams.BellatrixVersion, ValidatorLength: valCount, Eth1Data: &cltypes.Eth1Data{}, Fork: &cltypes.Fork{}}
 		require.NoError(t, sdata.WriteTo(&b))
-		return common.Copy(b.Bytes())
+		return bytes.Clone(b.Bytes())
 	}
 
 	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {

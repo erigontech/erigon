@@ -17,6 +17,7 @@
 package state
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -30,21 +31,49 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+func TestSetDomainStepsInFrozenFile(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		spec    string
+		want    uint64
+		wantErr bool
+	}{
+		{spec: "", want: 0}, // unset must mean "no override" (use erigondb.toml), matching the node's nil-pointer path
+		{spec: "Inf", want: config3.UnboundedDomainMerge},
+		{spec: "inf", want: config3.UnboundedDomainMerge},
+		{spec: "5", want: 5},
+		{spec: "0", wantErr: true},
+		{spec: "bad", wantErr: true},
+	} {
+		t.Run(tc.spec, func(t *testing.T) {
+			a := &Aggregator{}
+			err := a.SetDomainStepsInFrozenFile(tc.spec)
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.want, a.erigondbDomainStepsInFrozenFile)
+		})
+	}
+}
 
 // takes first 100k keys from file
 func pivotKeysFromKV(dataPath string) ([][]byte, error) {
@@ -65,7 +94,7 @@ func pivotKeysFromKV(dataPath string) ([][]byte, error) {
 			break
 		}
 		key, _ := getter.Next(key[:0])
-		listing = append(listing, common.Copy(key))
+		listing = append(listing, bytes.Clone(key))
 		getter.Skip()
 	}
 	decomp.Close()
@@ -141,7 +170,7 @@ func testDbAndAggregatorv3(tb testing.TB, stepSize uint64) (kv.RwDB, *Aggregator
 	tb.Helper()
 	logger := log.New()
 	dirs := datadir.New(tb.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, logger).InMem(tb, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	db := mdbxtest.InMem(tb, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	tb.Cleanup(db.Close)
 
 	agg := NewTest(dirs).StepSize(stepSize).Logger(logger).MustOpen(tb.Context(), db)
@@ -159,19 +188,16 @@ func TestReferencesInCommitmentBranchesConcurrent(t *testing.T) {
 
 	const iters = 2000
 	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for i := range iters {
 			agg.applyReferencesInCommitmentBranches(i%2 == 0)
 		}
-	}()
-	go func() {
-		defer wg.Done()
+	})
+	wg.Go(func() {
 		for range iters {
 			_ = agg.referencesInCommitmentBranches()
 		}
-	}()
+	})
 	wg.Wait()
 }
 
@@ -184,9 +210,7 @@ func TestFilesAmountConcurrent(t *testing.T) {
 	d := agg.d[kv.AccountsDomain]
 	const iters = 2000
 	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for i := range iters {
 			item := &FilesItem{startTxNum: uint64(i), endTxNum: uint64(i + 1)}
 			agg.dirtyFilesLock.Lock()
@@ -196,13 +220,12 @@ func TestFilesAmountConcurrent(t *testing.T) {
 			d.dirtyFiles.Delete(item)
 			agg.dirtyFilesLock.Unlock()
 		}
-	}()
-	go func() {
-		defer wg.Done()
+	})
+	wg.Go(func() {
 		for range iters {
 			_ = agg.FilesAmount()
 		}
-	}()
+	})
 	wg.Wait()
 }
 
@@ -219,12 +242,12 @@ func generateInputData(tb testing.TB, keySize, valueSize, keyCount int) ([][]byt
 		n, err := rnd.Read(bk)
 		require.Equal(tb, keySize, n)
 		require.NoError(tb, err)
-		keys[i] = common.Copy(bk[:n])
+		keys[i] = bytes.Clone(bk[:n])
 
 		n, err = rnd.Read(bv[:rnd.IntN(valueSize)+1])
 		require.NoError(tb, err)
 
-		values[i] = common.Copy(bv[:n])
+		values[i] = bytes.Clone(bv[:n])
 	}
 	return keys, values
 }
@@ -346,7 +369,7 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		fullpath := filepath.Join(dirs.SnapDomain, file)
 		ofile, err := os.Create(fullpath)
 		require.NoError(t, err)
-		ofile.Close()
+		require.NoError(t, ofile.Close())
 	}
 
 	t.Run("v1.0 files", func(t *testing.T) {
@@ -358,7 +381,7 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		require, logger := require.New(t), log.New()
 		dirs := datadir.New(t.TempDir())
 
-		db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+		db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 		t.Cleanup(db.Close)
 
 		touchFn(t, dirs, "v1.0-receipt.0-2048.kv")
@@ -384,7 +407,7 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		require, logger := require.New(t), log.New()
 		dirs := datadir.New(t.TempDir())
 
-		db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+		db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 		t.Cleanup(db.Close)
 
 		touchFn(t, dirs, "v1.1-receipt.0-2048.kv")
@@ -410,7 +433,7 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		require, logger := require.New(t), log.New()
 		dirs := datadir.New(t.TempDir())
 
-		db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+		db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 		t.Cleanup(db.Close)
 
 		touchFn(t, dirs, "v2.0-receipt.0-2048.kv")
@@ -436,7 +459,7 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		require, logger := require.New(t), log.New()
 		dirs := datadir.New(t.TempDir())
 
-		db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+		db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 		t.Cleanup(db.Close)
 		agg := NewTest(dirs).Logger(logger).MustOpen(t.Context(), db)
 		t.Cleanup(agg.Close)

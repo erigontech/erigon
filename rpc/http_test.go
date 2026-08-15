@@ -27,7 +27,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/golang-jwt/jwt/v4"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -48,7 +50,7 @@ func confirmStatusCode(t *testing.T, got, want int) {
 
 func confirmRequestValidationCode(t *testing.T, method, contentType, body string, expectedStatusCode int) {
 	t.Helper()
-	request := httptest.NewRequest(method, "http://url.com", strings.NewReader(body))
+	request := httptest.NewRequestWithContext(t.Context(), method, "http://url.com", strings.NewReader(body))
 	if len(contentType) > 0 {
 		request.Header.Set("Content-Type", contentType)
 	}
@@ -91,7 +93,7 @@ func confirmHTTPRequestYieldsStatusCode(t *testing.T, method, contentType, body 
 	ts := httptest.NewServer(&s)
 	defer ts.Close()
 
-	request, err := http.NewRequest(method, ts.URL, strings.NewReader(body))
+	request, err := http.NewRequestWithContext(t.Context(), method, ts.URL, strings.NewReader(body))
 	if err != nil {
 		t.Fatalf("failed to create a valid HTTP request: %v", err)
 	}
@@ -158,7 +160,10 @@ func TestHTTPBatchPreservesOrderWithStreaming(t *testing.T) {
 		`{"jsonrpc":"2.0","id":4,"method":"test_echo","params":["four",4,{"S":"y"}]}` +
 		`]`
 
-	resp, err := http.Post(ts.URL, "application/json", strings.NewReader(body))
+	req, err := http.NewRequestWithContext(t.Context(), "POST", ts.URL, strings.NewReader(body))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := ts.Client().Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(resp.Body)
@@ -233,4 +238,41 @@ func TestWithGzipStreamingHookPanicsOnNilHook(t *testing.T) {
 	require.Panics(t, func() {
 		WithGzipStreamingHook(context.Background(), nil)
 	})
+}
+
+func signJwt(t *testing.T, secret []byte) string {
+	t.Helper()
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"iat": time.Now().Unix()})
+	signed, err := token.SignedString(secret)
+	require.NoError(t, err)
+	return signed
+}
+
+// Auth-scheme names are case-insensitive (RFC 7235 §2.1).
+func TestCheckJwtSecretAuthScheme(t *testing.T) {
+	secret := []byte("0123456789abcdef0123456789abcdef")
+	token := signJwt(t, secret)
+
+	cases := []struct {
+		name   string
+		header string
+		want   bool
+	}{
+		{"canonical scheme", "Bearer " + token, true},
+		{"lowercase scheme", "bearer " + token, true},
+		{"uppercase scheme", "BEARER " + token, true},
+		{"mixed case scheme", "BeArEr " + token, true},
+		{"empty header", "", false},
+		{"scheme without token", "Bearer ", false},
+		{"header shorter than scheme", "Bear", false},
+		{"other scheme", "Basic " + token, false},
+		{"foreign secret", "Bearer " + signJwt(t, []byte("fedcba9876543210fedcba9876543210")), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "http://url.com", nil)
+			r.Header.Set("Authorization", tc.header)
+			require.Equal(t, tc.want, CheckJwtSecret(httptest.NewRecorder(), r, secret))
+		})
+	}
 }

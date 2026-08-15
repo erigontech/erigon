@@ -20,6 +20,7 @@
 package node
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -34,6 +35,7 @@ import (
 	"github.com/gofrs/flock"
 	"golang.org/x/sync/semaphore"
 
+	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -41,7 +43,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/migrations"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/version"
@@ -292,6 +293,14 @@ func (n *Node) DataDir() string {
 	return n.config.Dirs.DataDir
 }
 
+// Every path that runs exec workers reaches OpenDatabase through eth.New, which
+// stamps the resolved per-node count into config. The global is only a
+// conservative default for worker-less callers (init, standalone tools), where
+// the max() floor can at worst over-size the semaphore.
+func execWorkerCount(config *nodecfg.Config) int {
+	return cmp.Or(config.ExecWorkerCount, dbg.Exec3Workers)
+}
+
 func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, name string, readonly bool, logger log.Logger) (kv.RwDB, error) {
 	switch label {
 	case dbcfg.ChainDB:
@@ -310,7 +319,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 
 	var db kv.RwDB
 	if config.Dirs.DataDir == "" {
-		db = memdb.New(nil, "", label)
+		db = mdbx.New(label, logger).InMem("").MustOpen()
 		return db, nil
 	}
 
@@ -318,11 +327,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 
 	logger.Info("Opening Database", "label", name, "path", dbPath)
 	openFunc := func(exclusive bool) (kv.RwDB, error) {
-		roTxLimit := int64(32)
-		if config.Http.DBReadConcurrency > 0 {
-			roTxLimit = int64(config.Http.DBReadConcurrency)
-		}
-		roTxsLimiter := semaphore.NewWeighted(roTxLimit) // 1 less than max to allow unlocking to happen
+		roTxsLimiter := semaphore.NewWeighted(httpcfg.RoTxsLimit(config.Http.DBReadConcurrency, execWorkerCount(config)))
 		opts := mdbx.New(label, logger).
 			Path(dbPath).
 			GrowthStep(16 * datasize.MB).
@@ -388,7 +393,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 			if err != nil {
 				return nil, err
 			}
-			if err = migrator.Apply(db, migrationsDB, config.Dirs.DataDir, dbPath, logger); err != nil {
+			if err := migrator.Apply(db, migrationsDB, config.Dirs.DataDir, dbPath, logger); err != nil {
 				return nil, err
 			}
 			db.Close()

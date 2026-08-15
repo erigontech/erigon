@@ -14,7 +14,7 @@ import (
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -68,7 +68,7 @@ func newTestProvider(t *testing.T, db kv.RoDB) *StatusDataProvider {
 func TestGetStatusData_ReturnsDistinctProtobufs(t *testing.T) {
 	t.Parallel()
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	seedTestHeader(t, db, 42, 100)
 	p := newTestProvider(t, db)
 
@@ -90,12 +90,11 @@ func TestGetStatusData_ReturnsDistinctProtobufs(t *testing.T) {
 func TestGetStatusData_CacheInvalidatedByHeaderNotification(t *testing.T) {
 	t.Parallel()
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	seedTestHeader(t, db, 42, 100)
 	p := newTestProvider(t, db)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	// First call populates cache.
 	sd1, err := p.GetStatusData(ctx)
@@ -129,7 +128,7 @@ func TestGetStatusData_CacheInvalidatedByHeaderNotification(t *testing.T) {
 func TestGetStatusData_ConcurrentCallsCoalesce(t *testing.T) {
 	t.Parallel()
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	seedTestHeader(t, db, 42, 100)
 	p := newTestProvider(t, db)
 

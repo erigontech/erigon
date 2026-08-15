@@ -25,13 +25,13 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/state"
 )
 
 // History - usually don't have anything attributed to 1-st system txs (except genesis)
@@ -81,7 +81,7 @@ func HistoryCheckNoSystemTxsRange(ctx context.Context, prefixFrom, prefixTo []by
 	txNumsReader rawdbv3.TxNumsReader,
 	logEvery *time.Ticker,
 	keysCnt, prefixesDone, prefixesTotal *atomic.Uint64) error {
-	agg := state.AggTx(tx)
+	stepSize := tx.Debug().StepSize()
 
 	var minStep uint64 = math.MaxUint64
 	keys, err := tx.Debug().RangeLatest(kv.AccountsDomain, prefixFrom, prefixTo, -1)
@@ -148,8 +148,8 @@ func HistoryCheckNoSystemTxsRange(ctx context.Context, prefixFrom, prefixTo []by
 			}
 
 			if int64(txNum) == _min {
-				minStep = min(minStep, txNum/agg.StepSize())
-				log.Info(fmt.Sprintf("[integrity] HistoryNoSystemTxs: minStep=%d, step=%d, txNum=%d, blockNum=%d, key=%x", minStep, txNum/agg.StepSize(), txNum, blk, key))
+				minStep = min(minStep, txNum/stepSize)
+				log.Info(fmt.Sprintf("[integrity] HistoryNoSystemTxs: minStep=%d, step=%d, txNum=%d, blockNum=%d, key=%x", minStep, txNum/stepSize, txNum, blk, key))
 				break
 			}
 		}
@@ -158,7 +158,7 @@ func HistoryCheckNoSystemTxsRange(ctx context.Context, prefixFrom, prefixTo []by
 
 		select {
 		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[integrity] HistoryNoSystemTxs: progress=%d/%d, keys=%.3fm", prefixesDone.Load(), prefixesTotal.Load(), float64(keysCnt.Load())/1_000_000))
+			log.Info(fmt.Sprintf("[integrity] HistoryNoSystemTxs: progress=%d/%d, keys=%s", prefixesDone.Load(), prefixesTotal.Load(), common.PrettyCounter(keysCnt.Load())))
 		default:
 		}
 	}

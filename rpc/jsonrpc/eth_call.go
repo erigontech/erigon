@@ -24,6 +24,7 @@ import (
 	"math/big"
 	"unsafe"
 
+	"github.com/holiman/uint256"
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/common"
@@ -240,13 +241,14 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	}
 
 	var feeCap *big.Int
-	if args.GasPrice != nil && (args.MaxFeePerGas != nil || args.MaxPriorityFeePerGas != nil) {
+	switch {
+	case args.GasPrice != nil && (args.MaxFeePerGas != nil || args.MaxPriorityFeePerGas != nil):
 		return 0, errors.New("both gasPrice and (maxFeePerGas or maxPriorityFeePerGas) specified")
-	} else if args.GasPrice != nil {
+	case args.GasPrice != nil:
 		feeCap = args.GasPrice.ToInt()
-	} else if args.MaxFeePerGas != nil {
+	case args.MaxFeePerGas != nil:
 		feeCap = args.MaxFeePerGas.ToInt()
-	} else {
+	default:
 		feeCap = common.Big0
 	}
 
@@ -256,6 +258,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		if state == nil {
 			return 0, errors.New("can't get the current state")
 		}
+		defer state.Close()
 
 		balance, err := state.GetBalance(accounts.InternAddress(*args.From)) // from can't be nil
 		if err != nil {
@@ -293,6 +296,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	if err != nil {
 		return 0, err
 	}
+	defer caller.Close()
 
 	// If the transaction is a plain value transfer, short circuit estimation and
 	// directly try 21000. Returning 21000 without any execution is dangerous as
@@ -304,6 +308,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		if state == nil {
 			return 0, errors.New("can't get the current state")
 		}
+		defer state.Close()
 		codeSize, err := state.GetCodeSize(accounts.InternAddress(*args.To))
 		if err != nil {
 			return 0, errors.New("getCodeSize failed")
@@ -403,7 +408,8 @@ func doCall(ctx context.Context, caller *transactions.ReusableCaller, gasLimit u
 		}
 		return true, nil, err
 	}
-	return result.Failed(), result, nil
+	failed := result.Failed()
+	return failed, result, nil
 }
 
 type StorageKeysInfo struct {
@@ -411,7 +417,15 @@ type StorageKeysInfo struct {
 	KeyLength int
 }
 
-// GetProof implements eth_getProof partially; Proofs are available only with the `latest` block tag.
+func (s StorageKeysInfo) EncodeKey() string {
+	if s.KeyLength == 32 {
+		return hexutil.Encode(s.Hash[:])
+	}
+	u := s.Hash.U256()
+	return u.Hex()
+}
+
+// GetProof implements eth_getProof; historical blocks are supported as far back as the commitment history allows.
 func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storageKeys []hexutil.Bytes, blockNrOrHashArg *rpc.BlockNumberOrHash) (*accounts.AccProofResult, error) {
 	blockNrOrHash := orLatest(blockNrOrHashArg)
 	if len(storageKeys) > maxGetProofKeys {
@@ -427,11 +441,18 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 	}
 	defer roTx.Rollback()
 
-	requestedBlockNr, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, roTx, api._blockReader, api.filters)
+	// nil filters: the gate below and the commitment-history reads both go through
+	// this plain roTx, so the tag has to resolve on that same committed view.
+	requestedBlockNr, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, roTx, api._blockReader, nil)
 	if err != nil {
 		return nil, err
-	} else if requestedBlockNr == 0 {
-		return nil, errors.New("block not found")
+	}
+
+	// A canonical hash exists for blocks the header stage has downloaded but
+	// execution has not reached; the commitment history getProof needs is only
+	// written by execution.
+	if err := rpchelper.CheckBlockExecuted(roTx, uint64(requestedBlockNr)); err != nil {
+		return nil, err
 	}
 
 	err = api.BaseAPI.checkPruneHistory(ctx, roTx, uint64(requestedBlockNr))
@@ -448,22 +469,6 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 }
 
 func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address common.Address, storageKeys []StorageKeysInfo, blockNrOrHash rpc.BlockNumberOrHash, logger log.Logger) (*accounts.AccProofResult, error) {
-
-	// Output key encoding is a bit special: if the input was a 32-byte hash, it is
-	// returned as such. Otherwise, we apply the QUANTITY encoding mandated by the
-	// JSON-RPC spec for getProof. This behavior exists to preserve backwards
-	// compatibility with older client versions.
-	getKey := func(storageKey StorageKeysInfo) string {
-		var outputKey string
-
-		if storageKey.KeyLength != 32 {
-			outputKey = hexutil.EncodeBig(storageKey.Hash.Big())
-		} else {
-			outputKey = hexutil.Encode(storageKey.Hash[:])
-		}
-		return outputKey
-	}
-
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -473,6 +478,9 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	header, err := api._blockReader.HeaderByNumber(ctx, roTx, blockNrOrHash.BlockNumber.Uint64())
 	if err != nil {
 		return nil, err
+	}
+	if header == nil {
+		return nil, fmt.Errorf("header not found for block %d", blockNrOrHash.BlockNumber.Uint64())
 	}
 
 	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
@@ -521,7 +529,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	// set initial response fields
 	proof := &accounts.AccProofResult{
 		Address:      address,
-		Balance:      new(hexutil.Big),
+		Balance:      new(hexutil.U256),
 		Nonce:        hexutil.Uint64(0),
 		CodeHash:     common.Hash{},
 		StorageHash:  common.Hash{},
@@ -540,8 +548,8 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	if acc == nil {
 		for i, storageKey := range storageKeys {
 			proof.StorageProof[i] = accounts.StorProofResult{
-				Key:   getKey(storageKey),
-				Value: new(hexutil.Big),
+				Key:   storageKey.EncodeKey(),
+				Value: new(hexutil.U256),
 				Proof: []hexutil.Bytes{},
 			}
 		}
@@ -552,7 +560,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		return proof, nil
 	}
 
-	proof.Balance = (*hexutil.Big)(acc.Balance.ToBig())
+	proof.Balance = (*hexutil.U256)(new(uint256.Int).Set(&acc.Balance))
 	proof.Nonce = hexutil.Uint64(acc.Nonce)
 	proof.CodeHash = acc.CodeHash.Value()
 	proof.StorageHash = acc.Root
@@ -586,11 +594,11 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		proof.StorageProof[i].Key = getKey(storageKey)
+		proof.StorageProof[i].Key = storageKey.EncodeKey()
 		// if we have simple non contract account just set values directly without requesting any key proof
 		if proof.StorageHash.Cmp(common.BytesToHash(empty.RootHash[:])) == 0 {
 			proof.StorageProof[i].Proof = []hexutil.Bytes{}
-			proof.StorageProof[i].Value = new(hexutil.Big)
+			proof.StorageProof[i].Value = new(hexutil.U256)
 			continue
 		}
 
@@ -611,7 +619,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		if err != nil {
 			logger.Warn(fmt.Sprintf("couldn't read account storage for the address %s\n", address.String()))
 		}
-		proof.StorageProof[i].Value = (*hexutil.Big)(res.ToBig())
+		proof.StorageProof[i].Value = (*hexutil.U256)(&res)
 
 		// 0x80 represents RLP encoding of an empty proof slice
 		proof.StorageProof[i].Proof = []hexutil.Bytes{[]byte{0x80}}
@@ -662,7 +670,14 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		return emptyWitnessBytes()
 	}
 
-	if err = api.checkPruneHistory(ctx, tx, blockNr); err != nil {
+	// A head-capture minimal node keeps no commitment history and cannot build this
+	// RLP/uncached witness on demand; report out-of-window for any block rather than a
+	// prune-history or hard-gate error, so the caller sees one typed signal.
+	if api.witnessCache != nil && api.witnessCache.HeadCapture() {
+		return nil, errWitnessOutOfWindow
+	}
+
+	if err := api.checkPruneHistory(ctx, tx, blockNr); err != nil {
 		return nil, err
 	}
 
@@ -774,7 +789,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 	defer domains.Close()
 	sdCtx := domains.GetCommitmentContext()
 
-	siblingPaths, err := detectCollapseSiblings(ctx, tx, domains, sdCtx,
+	siblingPaths, err := detectCollapseSiblings(ctx, tx, nil, domains, sdCtx,
 		firstTxNumInBlock, endTxNum, blockNr, parentNum,
 		block.Root(), accessed, witnessModeLegacy)
 	if err != nil {
@@ -852,7 +867,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		logger.Warn("state root mismatch after stateless execution", "actual", newStateRoot, "expected", block.Root())
 	}
 
-	return common.Copy(witnessBuffer.Bytes()), nil
+	return bytes.Clone(witnessBuffer.Bytes()), nil
 }
 
 // emptyWitnessBytes serializes an empty op-stream witness, used for genesis and
@@ -990,10 +1005,9 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		if uint64(len(args.AuthorizationList)) > gasCap/params.CallNewAccountGas {
 			return nil, errors.New("insufficient gas to process all authorizations")
 		}
-		var data bytes.Buffer
-		var buf [32]byte
 		rules := blockCtx.Rules(chainConfig)
-		for _, jsonAuth := range args.AuthorizationList {
+		for i := range args.AuthorizationList {
+			jsonAuth := &args.AuthorizationList[i]
 			auth, err := jsonAuth.ToAuthorization()
 			if err != nil {
 				continue
@@ -1001,12 +1015,11 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 			if (!auth.ChainID.IsZero() && auth.ChainID.Cmp(rules.ChainID) != 0) || auth.Nonce+1 < auth.Nonce {
 				continue
 			}
-			data.Reset()
-			authorityPtr, err := auth.RecoverSigner(&data, buf[:])
+			authority, err := auth.RecoverSigner()
 			if err != nil {
 				continue
 			}
-			excl[*authorityPtr] = struct{}{}
+			excl[authority] = struct{}{}
 		}
 	}
 
@@ -1016,15 +1029,16 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		prevTracer = logger.NewAccessListTracer(*args.AccessList, excl, nil)
 	}
 
-	for {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
+	// One convergence iteration: a non-nil result means the access list converged,
+	// otherwise the returned tracer seeds the next iteration.
+	step := func(prevTracer *logger.AccessListTracer) (*accessListResult, *logger.AccessListTracer, error) {
 		ibs := state.New(stateReader)
+		defer ibs.Close()
+
 		// Override the fields of specified contracts before execution.
 		if stateOverrides != nil {
 			if err := stateOverrides.Override(ibs, nil, blockCtx.Rules(chainConfig)); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		}
 
@@ -1043,11 +1057,12 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 
 		msg, err := args.ToMessage(api.GasCap, header.BaseFee)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		// Apply the transaction with the access list tracer
 		tracer := logger.NewAccessListTracer(accessList, excl, ibs)
+		defer tracer.Close()
 		config := vm.Config{Tracer: tracer.Hooks(), NoBaseFee: true}
 		txCtx := protocol.NewEVMTxContext(msg)
 
@@ -1055,26 +1070,41 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 		res, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		if tracer.Equal(prevTracer) {
-			var errString string
-			if res.Err != nil {
-				errString = res.Err.Error()
-			}
-			accessList := &accessListResult{Accesslist: &accessList, Error: errString, GasUsed: hexutil.Uint64(res.ReceiptGasUsed)}
-			if args.To != nil {
-				optimizeWarmAddrAndAdjustGas(accessList, to)
-			}
-			if optimizeGas != nil && *optimizeGas {
-				optimizeWarmAddrInAccessList(accessList, header.Coinbase)
-				for addr := range tracer.CreatedContracts() {
-					if !tracer.UsedBeforeCreation(addr) {
-						optimizeWarmAddrInAccessList(accessList, addr)
-					}
+		if !tracer.Equal(prevTracer) {
+			return nil, tracer, nil
+		}
+
+		var errString string
+		if res.Err != nil {
+			errString = res.Err.Error()
+		}
+		result := &accessListResult{Accesslist: &accessList, Error: errString, GasUsed: hexutil.Uint64(res.ReceiptGasUsed)}
+		if args.To != nil {
+			optimizeWarmAddrAndAdjustGas(result, to)
+		}
+		if optimizeGas != nil && *optimizeGas {
+			optimizeWarmAddrInAccessList(result, header.Coinbase)
+			for addr := range tracer.CreatedContracts() {
+				if !tracer.UsedBeforeCreation(addr) {
+					optimizeWarmAddrInAccessList(result, addr)
 				}
 			}
-			return accessList, nil
+		}
+		return result, nil, nil
+	}
+
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		result, tracer, err := step(prevTracer)
+		if err != nil {
+			return nil, err
+		}
+		if result != nil {
+			return result, nil
 		}
 		prevTracer = tracer
 	}

@@ -32,12 +32,13 @@ import (
 )
 
 type hasher struct {
-	sha                  keccak.KeccakState
+	sha      keccak.KeccakState
+	bw       *ByteArrayWriter
+	callback func(common.Hash, Node)
+
 	valueNodesRlpEncoded bool
-	buffers              [1024 * 1024]byte
 	prefixBuf            [8]byte
-	bw                   *ByteArrayWriter
-	callback             func(common.Hash, Node)
+	buffers              [1024 * 1024]byte
 }
 
 const rlpPrefixLength = 4
@@ -129,20 +130,21 @@ func (h *hasher) hashInternal(n Node, force bool, storeTo []byte, bufOffset int)
 
 func writeRlpPrefix(buffer []byte, pos int) []byte {
 	serLength := pos - rlpPrefixLength
-	if serLength < 56 {
+	switch {
+	case serLength < 56:
 		buffer[3] = byte(192 + serLength)
 		return buffer[3:pos]
-	} else if serLength < 256 {
+	case serLength < 256:
 		// serLength can be encoded as 1 byte
 		buffer[3] = byte(serLength)
 		buffer[2] = byte(247 + 1)
 		return buffer[2:pos]
-	} else if serLength < 65536 {
+	case serLength < 65536:
 		buffer[3] = byte(serLength & 255)
 		buffer[2] = byte(serLength >> 8)
 		buffer[1] = byte(247 + 2)
 		return buffer[1:pos]
-	} else {
+	default:
 		buffer[3] = byte(serLength & 255)
 		buffer[2] = byte((serLength >> 8) & 255)
 		buffer[1] = byte(serLength >> 16)

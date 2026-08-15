@@ -1,6 +1,6 @@
 participants:
   - cl_type: lighthouse
-    cl_image: ethpandaops/lighthouse:glamsterdam-devnet-6
+    cl_image: ethpandaops/lighthouse:glamsterdam-devnet-7
     el_type: erigon
     el_image: test/erigon:current
     el_log_level: "debug"
@@ -29,7 +29,7 @@ spamoor_params:
     - scenario: setcodetx
       config: {throughput: 20, funding_gas_limit: 200000}
 ethereum_genesis_generator_params:
-  image: ethpandaops/ethereum-genesis-generator:6.1.2
+  image: ethpandaops/ethereum-genesis-generator:6.1.4
 additional_services: [spamoor, assertoor]
 assertoor_params:
   run_stability_check: false  # re-enable once go-eth2-client supports alpha.8 (#21442)

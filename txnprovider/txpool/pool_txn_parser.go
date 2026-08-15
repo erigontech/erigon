@@ -56,8 +56,6 @@ type TxnParseContext struct {
 	signer          *types.Signer // cached signer for sender recovery (non-malleable)
 	malleableSigner *types.Signer // cached signer that accepts pre-EIP-2 malleable signatures
 	bytesReader     bytes.Reader  // reusable reader to avoid allocation per parse
-	authBuf         bytes.Buffer  // reusable buffer for authorization signer recovery
-	authHashBuf     [32]byte      // reusable hash buffer for authorization signer recovery
 	innerTxBuf      []byte        // reusable buffer for blob wrapper inner tx bytes
 	withSender      bool
 	allowPreEip2s   bool // Allow s > secp256k1n/2; see EIP-2
@@ -188,15 +186,16 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	// Detect actual envelope from the RLP prefix: dataPos > pos means a multi-byte
 	// string prefix wraps the typed transaction bytes.
 	var txBytes []byte
-	if legacy {
+	switch {
+	case legacy:
 		// Legacy tx: full RLP list
 		txBytes = payload[pos : dataPos+dataLen]
 		p = dataPos + dataLen
-	} else if dataPos > pos {
+	case dataPos > pos:
 		// Typed tx with RLP string envelope: inner bytes are the binary encoding
 		txBytes = payload[dataPos : dataPos+dataLen]
 		p = dataPos + dataLen
-	} else {
+	default:
 		// Typed tx without envelope: type byte at pos, followed by RLP list
 		listPos, listLen, err := rlp.ParseList(payload, pos+1)
 		if err != nil {
@@ -224,6 +223,9 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		wrapperListPos, wrapperListLen, err := rlp.ParseList(txBytes, 1)
 		if err != nil {
 			return 0, fmt.Errorf("%w: blob wrapper list: %s", ErrParseTxn, err) //nolint
+		}
+		if wrapperListPos+wrapperListLen != len(txBytes) {
+			return 0, fmt.Errorf("%w: trailing bytes after blobs wrapper", ErrParseTxn)
 		}
 
 		// Parse the inner tx_payload_body (first element of the wrapper list).
@@ -402,17 +404,16 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	if txn.Type() == types.SetCodeTxType {
 		auths := txn.GetAuthorizations()
 		slot.AuthAndNonces = make([]AuthAndNonce, 0, len(auths))
-		for _, auth := range auths {
+		for i := range auths {
+			auth := &auths[i]
 			if !auth.ChainID.IsUint64() {
 				continue
 			}
-			authCopy := auth
-			ctx.authBuf.Reset()
-			authority, err := authCopy.RecoverSigner(&ctx.authBuf, ctx.authHashBuf[:])
+			authority, err := auth.RecoverSigner()
 			if err != nil {
 				continue
 			}
-			slot.AuthAndNonces = append(slot.AuthAndNonces, AuthAndNonce{*authority, auth.Nonce})
+			slot.AuthAndNonces = append(slot.AuthAndNonces, AuthAndNonce{authority, auth.Nonce})
 		}
 	}
 

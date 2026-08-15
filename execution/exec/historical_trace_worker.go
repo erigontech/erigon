@@ -128,6 +128,7 @@ func (rw *HistoricalTraceWorker) Run() (err error) {
 		}
 	}()
 	defer rw.LogStats()
+	defer rw.ibs.Close()
 	for txTask, ok := rw.in.Next(rw.ctx); ok; txTask, ok = rw.in.Next(rw.ctx) {
 		result := rw.RunTxTask(txTask.(*TxTask))
 		if err := rw.out.Add(rw.ctx, result); err != nil {
@@ -177,10 +178,15 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 	case txTask.TxIndex == -1:
 		if txTask.BlockNumber() == 0 {
 			// Genesis block
-			_, ibs, err = genesiswrite.GenesisToBlock(nil, rw.execArgs.Genesis, rw.execArgs.Dirs, rw.logger)
+			var genesisIbs *state.IntraBlockState
+			_, genesisIbs, err = genesiswrite.GenesisToBlock(rw.execArgs.Genesis, rw.execArgs.Dirs, rw.logger)
 			if err != nil {
 				panic(fmt.Errorf("GenesisToBlock: %w", err))
 			}
+			// This state replaces rw.ibs for the genesis task only, so it needs its
+			// own close; rw.ibs stays owned by the worker.
+			defer genesisIbs.Close()
+			ibs = genesisIbs
 			// For Genesis, rules should be empty, so that empty accounts can be included
 			rules = &chain.Rules{} //nolint
 			break
@@ -316,7 +322,7 @@ func (rw *HistoricalTraceWorker) execAATxn(txTask *TxTask, tracer *calltracer.Ca
 	}
 
 	result.ExecutionResult.ReceiptGasUsed = gasUsed
-	result.ExecutionResult.BlockRegularGasUsed = gasUsed
+	result.ExecutionResult.BlockExecutionGasUsed = gasUsed
 	// Update the state with pending changes
 	rw.ibs.SoftFinalise()
 	result.Logs = rw.ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), txTask.BlockNumber(), txTask.BlockHash())
@@ -483,24 +489,26 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 
 		if result.IsBlockEnd() {
 			if result.BlockNumber() > 0 {
-				chainReader := consensuschain.NewReader(cfg.ChainConfig, tx, cfg.BlockReader, logger)
-				// End of block transaction in a block
-				reader := state.NewHistoryReaderV3(tx, outputTxNum)
-				ibs := state.New(reader)
-				defer ibs.Release(false)
-				ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
-				syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-					ret, err := protocol.SysCallContract(contract, data, cfg.ChainConfig, ibs, txTask.Header, txTask.Engine, false /* constCall */, vm.Config{
-						Tracer: result.TracingHooks(),
-					})
-					result.Logs = append(result.Logs, ibs.GetRawLogs(txTask.TxIndex)...)
-					return ret, err
-				}
+				func() {
+					chainReader := consensuschain.NewReader(cfg.ChainConfig, tx, cfg.BlockReader, logger)
+					// End of block transaction in a block
+					reader := state.NewHistoryReaderV3(tx, outputTxNum)
+					ibs := state.New(reader)
+					defer ibs.Close()
+					ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
+					syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
+						ret, err := protocol.SysCallContract(contract, data, cfg.ChainConfig, ibs, txTask.Header, txTask.Engine, false /* constCall */, vm.Config{
+							Tracer: result.TracingHooks(),
+						})
+						result.Logs = append(result.Logs, ibs.GetRawLogs(txTask.TxIndex)...)
+						return ret, err
+					}
 
-				_, err := cfg.Engine.Finalize(cfg.ChainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles, p.blockResult.Receipts, txTask.Withdrawals, chainReader, syscall, true /* skipReceiptsEval */, logger)
-				if err != nil {
-					result.Err = err
-				}
+					_, err := cfg.Engine.Finalize(cfg.ChainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles, p.blockResult.Receipts, txTask.Withdrawals, chainReader, syscall, true /* skipReceiptsEval */, logger)
+					if err != nil {
+						result.Err = err
+					}
+				}()
 			}
 
 			p.blockResult.Complete = true
@@ -561,7 +569,7 @@ func CustomTraceMapReduce(ctx context.Context, fromBlock, toBlock uint64, consum
 		if err != nil {
 			return err
 		}
-		log.Info("[custom_trace] batch start", "blocks", fmt.Sprintf("%.1fm-%.1fm", float64(fromBlock)/1_000_000, float64(toBlock)/1_000_000), "steps", fmt.Sprintf("%.2f-%.2f", fromStep, toStep), "workers", cfg.Workers)
+		log.Info("[custom_trace] batch start", "blocks", fmt.Sprintf("%s-%s", common.PrettyExact(fromBlock), common.PrettyExact(toBlock)), "steps", fmt.Sprintf("%.2f-%.2f", fromStep, toStep), "workers", cfg.Workers)
 	}
 
 	getHeaderFunc := func(hash common.Hash, number uint64) (h *types.Header, err error) {

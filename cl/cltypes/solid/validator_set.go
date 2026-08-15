@@ -18,6 +18,7 @@ package solid
 
 import (
 	"encoding/json"
+	"slices"
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/common"
@@ -46,7 +47,8 @@ type Phase0Data struct {
 
 type ValidatorSet struct {
 	*merkle_tree.MerkleTree
-	buffer []byte
+	progressiveTrees []*merkle_tree.MerkleTree
+	buffer           []byte
 
 	l, c int
 
@@ -91,7 +93,7 @@ func (v *ValidatorSet) expandBuffer(newValidatorSetLength int) {
 func (v *ValidatorSet) Append(val Validator) {
 	offset := v.EncodingSizeSSZ()
 	// we are overflowing the buffer? append.
-	//if offset+validatorSize >= len(v.buffer) {
+	// if offset+validatorSize >= len(v.buffer) {
 	v.expandBuffer(v.l + 1)
 	v.phase0Data = append(v.phase0Data, Phase0Data{})
 	//}
@@ -100,6 +102,7 @@ func (v *ValidatorSet) Append(val Validator) {
 	if v.MerkleTree != nil {
 		v.MerkleTree.AppendLeaf()
 	}
+	v.appendProgressiveLeaf(v.l)
 	v.zeroTreeHash(v.l)
 
 	if v.l >= len(v.phase0Data) {
@@ -134,6 +137,7 @@ func (v *ValidatorSet) Clear() {
 	v.l = 0
 	v.attesterBits = v.attesterBits[:0]
 	v.MerkleTree = nil
+	v.progressiveTrees = nil
 }
 
 func (v *ValidatorSet) Clone() clonable.Clonable {
@@ -167,6 +171,21 @@ func (v *ValidatorSet) CopyTo(t *ValidatorSet) {
 	} else {
 		t.MerkleTree = nil
 	}
+	if v.progressiveTrees != nil {
+		t.progressiveTrees = make([]*merkle_tree.MerkleTree, len(v.progressiveTrees))
+		start := 0
+		capacity := 1
+		for i, tree := range v.progressiveTrees {
+			t.progressiveTrees[i] = &merkle_tree.MerkleTree{}
+			tree.CopyInto(t.progressiveTrees[i])
+			segmentStart := start
+			t.progressiveTrees[i].SetComputeLeafFn(t.progressiveLeafFn(segmentStart))
+			start += capacity
+			capacity *= 4
+		}
+	} else {
+		t.progressiveTrees = nil
+	}
 
 	if cap(t.phase0Data) <= len(v.phase0Data) {
 		t.phase0Data = make([]Phase0Data, len(v.phase0Data), len(v.phase0Data)*2)
@@ -186,6 +205,7 @@ func (v *ValidatorSet) DecodeSSZ(buf []byte, _ int) error {
 	v.expandBuffer(len(buf) / validatorSize)
 	copy(v.buffer, buf)
 	v.MerkleTree = nil
+	v.progressiveTrees = nil
 	v.l = len(buf) / validatorSize
 	v.phase0Data = make([]Phase0Data, v.l)
 	v.attesterBits = make([]byte, v.l)
@@ -237,6 +257,30 @@ func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
 	return crypto.Sha256(coreRoot[:], lengthRoot[:]), nil
 }
 
+func (v *ValidatorSet) HashSSZProgressive() ([32]byte, error) {
+	if v.progressiveTrees == nil {
+		v.initializeProgressiveTrees()
+	}
+	var root common.Hash
+	for _, tree := range slices.Backward(v.progressiveTrees) {
+		left := tree.ComputeRoot()
+		root = crypto.Sha256(left[:], root[:])
+	}
+	lengthRoot := merkle_tree.Uint64Root(uint64(v.l))
+	return crypto.Sha256(root[:], lengthRoot[:]), nil
+}
+
+func (v *ValidatorSet) SetProgressiveHashing(enabled bool) {
+	if v == nil {
+		return
+	}
+	if enabled {
+		v.MerkleTree = nil
+		return
+	}
+	v.progressiveTrees = nil
+}
+
 func (v *ValidatorSet) Set(idx int, val Validator) {
 	if idx >= v.l {
 		panic("ValidatorSet -- Set: out of bounds")
@@ -282,6 +326,63 @@ func (v *ValidatorSet) zeroTreeHash(idx int) {
 	if v.MerkleTree != nil {
 		v.MerkleTree.MarkLeafAsDirty(idx)
 	}
+	if v.progressiveTrees != nil {
+		segment, localIndex, _ := progressiveSegmentForIndex(idx)
+		v.progressiveTrees[segment].MarkLeafAsDirty(localIndex)
+	}
+}
+
+func (v *ValidatorSet) initializeProgressiveTrees() {
+	v.progressiveTrees = make([]*merkle_tree.MerkleTree, 0)
+	start := 0
+	capacity := 1
+	for start < v.l {
+		count := min(capacity, v.l-start)
+		tree := &merkle_tree.MerkleTree{}
+		limit := uint64(capacity)
+		tree.Initialize(count, merkle_tree.OptimalMaxTreeCacheDepth, v.progressiveLeafFn(start), &limit)
+		v.progressiveTrees = append(v.progressiveTrees, tree)
+		start += capacity
+		capacity *= 4
+	}
+}
+
+func (v *ValidatorSet) appendProgressiveLeaf(index int) {
+	if v.progressiveTrees == nil {
+		return
+	}
+	segment, localIndex, capacity := progressiveSegmentForIndex(index)
+	if segment < len(v.progressiveTrees) {
+		v.progressiveTrees[segment].AppendLeaf()
+		return
+	}
+	tree := &merkle_tree.MerkleTree{}
+	limit := uint64(capacity)
+	tree.Initialize(1, merkle_tree.OptimalMaxTreeCacheDepth, v.progressiveLeafFn(index-localIndex), &limit)
+	v.progressiveTrees = append(v.progressiveTrees, tree)
+}
+
+func (v *ValidatorSet) progressiveLeafFn(start int) func(int, []byte) {
+	var hashBuffer [8 * 32]byte
+	return func(idx int, out []byte) {
+		if err := v.Get(start + idx).CopyHashBufferTo(hashBuffer[:]); err != nil {
+			panic(err)
+		}
+		if err := merkle_tree.MerkleRootFromFlatLeaves(hashBuffer[:], out); err != nil {
+			panic(err)
+		}
+	}
+}
+
+func progressiveSegmentForIndex(index int) (segment, localIndex, capacity int) {
+	localIndex = index
+	capacity = 1
+	for localIndex >= capacity {
+		localIndex -= capacity
+		capacity *= 4
+		segment++
+	}
+	return segment, localIndex, capacity
 }
 
 func (v *ValidatorSet) IsCurrentMatchingSourceAttester(idx int) bool {

@@ -47,7 +47,7 @@ type EthereumClock interface {
 	LastFork() (common.Bytes4, error)                                      // GetLastFork
 	StateVersionByForkDigest(common.Bytes4) (clparams.StateVersion, error) // ForkDigestVersion
 	StateVersionByEpoch(uint64) clparams.StateVersion
-	//ComputeForkDigestForVersion(currentVersion common.Bytes4) (digest common.Bytes4, err error)
+	// ComputeForkDigestForVersion(currentVersion common.Bytes4) (digest common.Bytes4, err error)
 	ComputeForkDigest(epoch uint64) (digest common.Bytes4, err error) // new in fulu
 
 	GenesisValidatorsRoot() common.Hash
@@ -180,8 +180,13 @@ func (t *ethereumClockImpl) ForkId() ([]byte, error) {
 		currentEpoch = 0
 	}
 
+	// A fork parked at FAR_FUTURE_EPOCH is not scheduled, so it must not become
+	// next_fork_version: the spec wants the current version when nothing follows.
 	var nextForkVersion [4]byte
 	for _, fork := range forkList(t.beaconCfg.ForkVersionSchedule) {
+		if fork.epoch == t.beaconCfg.FarFutureEpoch || fork.epoch == math.MaxUint64 {
+			continue
+		}
 		if currentEpoch < fork.epoch {
 			nextForkVersion = fork.version
 			break

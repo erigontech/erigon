@@ -44,7 +44,7 @@ import (
 func TestPostPayloadAttestationsRejectsNullMessage(t *testing.T) {
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
-	request := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(`[null]`))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(`[null]`))
 	request.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 
@@ -59,7 +59,7 @@ func TestPostPayloadAttestationsRejectsOversizedSSZ(t *testing.T) {
 	msgSize := (&cltypes.PayloadAttestationMessage{Data: new(cltypes.PayloadAttestationData)}).EncodingSizeSSZ()
 	maxSize := int(handler.beaconChainCfg.PtcSize) * msgSize
 
-	request := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(strings.Repeat("\x00", maxSize+1)))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(strings.Repeat("\x00", maxSize+1)))
 	request.Header.Set("Content-Type", "application/octet-stream")
 	recorder := httptest.NewRecorder()
 
@@ -77,7 +77,7 @@ func TestPostPayloadAttestationsAcceptsMoreThanBlockAggregateLimitSSZ(t *testing
 	require.NoError(t, err)
 	body := strings.Repeat(string(encoded), int(handler.beaconChainCfg.MaxPayloadAttestations)+1)
 
-	request := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(body))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/octet-stream")
 	recorder := httptest.NewRecorder()
 
@@ -94,7 +94,7 @@ func TestPostPayloadAttestationsAcceptsSSZContentTypeParameters(t *testing.T) {
 	body, err := msg.EncodeSSZ(nil)
 	require.NoError(t, err)
 
-	request := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(string(body)))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(string(body)))
 	request.Header.Set("Content-Type", "application/octet-stream; charset=utf-8")
 	recorder := httptest.NewRecorder()
 
@@ -116,7 +116,7 @@ func TestPostPayloadAttestationsAcceptsQueuedWithoutPooling(t *testing.T) {
 
 	body, err := json.Marshal([]*cltypes.PayloadAttestationMessage{msg})
 	require.NoError(t, err)
-	request := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(string(body)))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(string(body)))
 	request.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 
@@ -130,7 +130,7 @@ func TestPostPayloadAttestationsAcceptsQueuedWithoutPooling(t *testing.T) {
 func TestPostPayloadAttestationsRejectsMalformedContentType(t *testing.T) {
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
-	request := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(`[]`))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(`[]`))
 	request.Header.Set("Content-Type", "application/octet-stream; bad")
 	recorder := httptest.NewRecorder()
 
@@ -142,7 +142,7 @@ func TestPostPayloadAttestationsRejectsMalformedContentType(t *testing.T) {
 func TestPostPayloadAttestationsRejectsUnsupportedContentType(t *testing.T) {
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
-	request := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(`[]`))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(`[]`))
 	request.Header.Set("Content-Type", "text/plain")
 	recorder := httptest.NewRecorder()
 
@@ -155,7 +155,7 @@ func TestPostExecutionPayloadEnvelopeReturnsForkchoiceError(t *testing.T) {
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	fcu.OnExecutionPayloadErr = errors.New("invalid execution payload")
 
-	request := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", strings.NewReader(`{}`))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", strings.NewReader(`{}`))
 	request.Header.Set("Content-Type", "application/json; charset=utf-8")
 	recorder := httptest.NewRecorder()
 
@@ -172,7 +172,7 @@ func TestPostPtcDutiesDoesNotCapValidatorCount(t *testing.T) {
 	for i := range indices {
 		indices[i] = `"1"`
 	}
-	request := httptest.NewRequest(http.MethodPost, "/eth/v1/validator/duties/ptc/5", strings.NewReader("["+strings.Join(indices, ",")+"]"))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/validator/duties/ptc/5", strings.NewReader("["+strings.Join(indices, ",")+"]"))
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("epoch", "5")
 	request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, rctx))
@@ -189,7 +189,7 @@ func TestPostExecutionPayloadBidAcceptsSSZ(t *testing.T) {
 	body, err := bid.EncodeSSZ(nil)
 	require.NoError(t, err)
 
-	request := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/execution_payload_bid", strings.NewReader(string(body)))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_bid", strings.NewReader(string(body)))
 	request.Header.Set("Content-Type", "application/octet-stream")
 	recorder := httptest.NewRecorder()
 
@@ -213,7 +213,7 @@ func TestPostExecutionPayloadBidAcceptsQueuedBid(t *testing.T) {
 	body, err := bid.EncodeSSZ(nil)
 	require.NoError(t, err)
 
-	request := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/execution_payload_bid", strings.NewReader(string(body)))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_bid", strings.NewReader(string(body)))
 	request.Header.Set("Content-Type", "application/octet-stream")
 	recorder := httptest.NewRecorder()
 
@@ -237,7 +237,7 @@ func TestPostExecutionPayloadBidRejectsHardIgnore(t *testing.T) {
 	body, err := bid.EncodeSSZ(nil)
 	require.NoError(t, err)
 
-	request := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/execution_payload_bid", strings.NewReader(string(body)))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_bid", strings.NewReader(string(body)))
 	request.Header.Set("Content-Type", "application/octet-stream")
 	recorder := httptest.NewRecorder()
 
@@ -249,7 +249,7 @@ func TestPostExecutionPayloadBidRejectsHardIgnore(t *testing.T) {
 func TestPostExecutionPayloadBidRejectsOversizedSSZ(t *testing.T) {
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
-	request := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/execution_payload_bid", strings.NewReader(strings.Repeat("\x00", int(maxSignedExecutionPayloadBidSSZSize())+1)))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_bid", strings.NewReader(strings.Repeat("\x00", int(maxSignedExecutionPayloadBidSSZSize())+1)))
 	request.Header.Set("Content-Type", "application/octet-stream")
 	recorder := httptest.NewRecorder()
 
@@ -261,7 +261,7 @@ func TestPostExecutionPayloadBidRejectsOversizedSSZ(t *testing.T) {
 func TestPostExecutionPayloadBidRejectsMissingMessage(t *testing.T) {
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
-	request := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/execution_payload_bid", strings.NewReader(`{}`))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_bid", strings.NewReader(`{}`))
 	request.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 
@@ -274,7 +274,7 @@ func TestPostExecutionPayloadBidRejectsMissingMessage(t *testing.T) {
 func TestPostExecutionPayloadBidRejectsMalformedContentType(t *testing.T) {
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
-	request := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/execution_payload_bid", strings.NewReader(`{}`))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_bid", strings.NewReader(`{}`))
 	request.Header.Set("Content-Type", "application/octet-stream; bad")
 	recorder := httptest.NewRecorder()
 
@@ -294,7 +294,7 @@ func TestGetValidatorExecutionPayloadBidReturnsUnsignedBid(t *testing.T) {
 		ParentBlockRoot: bid.ParentBlockRoot,
 	}, &cltypes.SignedExecutionPayloadBid{Message: bid})
 
-	request := httptest.NewRequest(http.MethodGet, "/eth/v1/validator/execution_payload_bid/12/3", nil)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/validator/execution_payload_bid/12/3", http.NoBody)
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, request)
@@ -406,7 +406,7 @@ func TestSnapshotPayloadAttestationPTCsCopiesMessageSlots(t *testing.T) {
 
 	snapshot := snapshotPayloadAttestationPTCs(provider, []*cltypes.PayloadAttestationMessage{
 		nil,
-		&cltypes.PayloadAttestationMessage{Data: nil},
+		{Data: nil},
 		msg,
 	})
 
@@ -476,7 +476,7 @@ func TestPostValidatorProposerPreferencesAcceptsBatchJSON(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	request := httptest.NewRequest(http.MethodPost, "/eth/v1/validator/proposer_preferences", strings.NewReader(string(body)))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/validator/proposer_preferences", strings.NewReader(string(body)))
 	request.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 
@@ -511,7 +511,7 @@ func TestPostBeaconPoolProposerPreferencesAcceptsBatchJSON(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	request := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/pool/proposer_preferences", strings.NewReader(string(body)))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/proposer_preferences", strings.NewReader(string(body)))
 	request.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 
@@ -533,7 +533,7 @@ func TestGetValidatorExecutionPayloadEnvelopesBySlot(t *testing.T) {
 	envelope.BuilderIndex = 7
 	handler.selfBuildEnvelopes.Add(slot, envelope)
 
-	request := httptest.NewRequest(http.MethodGet, "/eth/v1/validator/execution_payload_envelopes/3", nil)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/validator/execution_payload_envelopes/3", http.NoBody)
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, request)

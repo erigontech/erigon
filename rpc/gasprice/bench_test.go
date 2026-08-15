@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/rpc/gasprice"
 	"github.com/erigontech/erigon/rpc/gasprice/gaspricecfg"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
 const txsPerBlock = 100
@@ -58,7 +59,7 @@ func newTestBackendN(tb testing.TB, n int) *execmoduletester.ExecModuleTester {
 	}
 	signer := types.LatestSigner(gspec.Config)
 	m := execmoduletester.New(tb, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
-	ch, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, n, func(i int, b *blockgen.BlockGen) {
+	ch, err := m.GenerateChain(n, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		for j := range txsPerBlock {
 			gasPrice := uint256.NewInt(uint64(j+1) * uint64(common.GWei))
@@ -93,7 +94,7 @@ func BenchmarkSuggestTipCap(b *testing.B) {
 	m := newTestBackendN(b, numBlocks)
 	defer m.Close()
 
-	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewSimple(), m.BlockReader, m.Engine, nil, &jsonrpc.BaseApiConfig{Dirs: m.Dirs})
+	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewLatestBatchCache(), m.BlockReader, m.Engine, nil, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 
 	cases := []struct {
 		name        string
@@ -156,7 +157,7 @@ func BenchmarkFeeHistory(b *testing.B) {
 	m := newTestBackendN(b, numBlocks)
 	defer m.Close()
 
-	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewSimple(), m.BlockReader, m.Engine, nil, &jsonrpc.BaseApiConfig{Dirs: m.Dirs})
+	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewLatestBatchCache(), m.BlockReader, m.Engine, nil, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 
 	gasCache := jsonrpc.NewGasPriceCache()
 

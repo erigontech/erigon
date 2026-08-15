@@ -50,7 +50,8 @@ func Bench2(erigon_url string) error {
 			fmt.Printf("Error retrieving block: %d %s\n", b.Error.Code, b.Error.Message)
 		}
 
-		for i, txn := range b.Result.Transactions {
+		for i := range b.Result.Transactions {
+			txn := &b.Result.Transactions[i]
 			if txn.To != nil && txn.Gas.ToInt().Uint64() > 21000 {
 				// Request storage range
 				// blockHash common.Hash, txIndex int, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int
@@ -70,11 +71,12 @@ func Bench2(erigon_url string) error {
 						nextKey = sr.Result.NextKey
 						for k, v := range sr.Result.Storage {
 							sm[k] = v
-							if v.Key == nil {
+							switch {
+							case v.Key == nil:
 								fmt.Printf("No key for sec key: %x\n", k)
-							} else if k != crypto.Keccak256Hash(v.Key[:]) {
+							case k != crypto.Keccak256Hash(v.Key[:]):
 								fmt.Printf("Different sec key: %x %x (%x), value %x\n", k, crypto.Keccak256Hash(v.Key[:]), *(v.Key), v.Value)
-							} else {
+							default:
 								fmt.Printf("Keys: %x %x, value %x\n", *(v.Key), k, v.Value)
 							}
 						}

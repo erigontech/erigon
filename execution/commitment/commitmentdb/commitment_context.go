@@ -57,7 +57,7 @@ type SharedDomainsCommitmentContext struct {
 	sharedDomains sd
 	updates       *commitment.Updates
 	patriciaTrie  commitment.Trie
-	variant       commitment.TrieVariant // selected trie engine, for the [commitment] log (updates.Mode() is ModeParallel for both parallel and streaming)
+	variant       commitment.TrieVariant // selected trie engine, for the [commitment] log (updates.Mode() is ModeParallel for the parallel trie)
 	justRestored  atomic.Bool            // set to true when commitment trie was just restored from snapshot
 	traceW        io.Writer
 	stateReader   StateReader
@@ -75,8 +75,8 @@ type SharedDomainsCommitmentContext struct {
 	// pendingUpdate stores a single deferred branch update to be flushed at the next ComputeCommitment call.
 	pendingUpdate *commitment.PendingCommitmentUpdate
 
-	// pendingVariant holds a parallel/streaming trie selection that waits for
-	// EnableParaTrieDB: those variants need the DB-backed TrieContextFactory.
+	// pendingVariant holds a parallel trie selection that waits for
+	// EnableParaTrieDB: that variant needs the DB-backed TrieContextFactory.
 	pendingVariant commitment.TrieVariant
 	pendingCfg     commitment.TrieConfig
 }
@@ -231,12 +231,11 @@ func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, tmpDir strin
 			NumWorkers: cfg.WarmupNumWorkersOrDefault(),
 		},
 	}
-	// The parallel and streaming tries need a per-worker TrieContextFactory that
-	// only DB-backed consumers can provide (via EnableParaTrieDB). Start on the
-	// sequential trie and upgrade when the DB arrives, so context holders that
-	// never wire one (RPC, integrity, tests) keep working under a global variant
-	// selection.
-	if variant == commitment.VariantParallelHexPatricia || variant == commitment.VariantStreamingHexPatricia {
+	// The parallel trie needs a per-worker TrieContextFactory that only DB-backed
+	// consumers can provide (via EnableParaTrieDB). Start on the sequential trie
+	// and upgrade when the DB arrives, so context holders that never wire one
+	// (RPC, integrity, tests) keep working under a global variant selection.
+	if variant == commitment.VariantParallelHexPatricia {
 		ctx.pendingVariant = variant
 		cfg.Variant = commitment.VariantHexPatriciaTrie
 		ctx.pendingCfg = cfg
@@ -276,12 +275,6 @@ func (sdc *SharedDomainsCommitmentContext) Reset() {
 	if !sdc.justRestored.Load() {
 		sdc.patriciaTrie.Reset()
 	}
-}
-
-func (sdc *SharedDomainsCommitmentContext) ClearRam() {
-	sdc.updates.Reset()
-	sdc.Reset()
-	sdc.stateReader = nil
 }
 
 func (sdc *SharedDomainsCommitmentContext) KeysCount() uint64 {
@@ -561,13 +554,14 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 			// Each worker writes its branch updates through a private collector
 			// so concurrent PutBranch calls never race; collectors are drained
 			// after Process and merged into the main writer below.
-			warmupConfig.CtxFactory, drainCollectors = sdc.concurrentTrieContextFactory(ctx, sdc.paraTrieDB, workerPin, txNum)
-			trie.SetTrieContextFactory(warmupConfig.CtxFactory)
+			var concurrentFactory commitment.TrieContextFactory
+			concurrentFactory, drainCollectors = sdc.concurrentTrieContextFactory(sdc.paraTrieDB, workerPin, txNum)
+			warmupConfig.CtxFactory = concurrentFactory
+			trie.SetTrieContextFactory(concurrentFactory)
 		default:
 			// Serial: this factory only serves page-cache warmup, which does not
-			// compute the root, so its reads need no generation pin. (Streaming is
-			// a *ParallelPatriciaHashed and takes the pinned branch above.)
-			warmupConfig.CtxFactory = sdc.trieContextFactory(ctx, sdc.paraTrieDB, txNum)
+			// compute the root, so its reads need no generation pin.
+			warmupConfig.CtxFactory = sdc.warmupTrieContextFactory(sdc.paraTrieDB, txNum)
 		}
 	}
 
@@ -639,7 +633,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	sdc.justRestored.Store(false)
 
 	if saveState {
-		if err = sdc.encodeAndStoreCommitmentState(trieContext, blockNum, txNum); err != nil {
+		if err := sdc.encodeAndStoreCommitmentState(trieContext, blockNum, txNum); err != nil {
 			return nil, err
 		}
 	}
@@ -664,10 +658,13 @@ func beginWorkerRo(ctx context.Context, db kv.TemporalRoDB, pin kv.TemporalFiles
 	return db.BeginTemporalRo(ctx)
 }
 
-func (sdc *SharedDomainsCommitmentContext) trieContextFactory(ctx context.Context, db kv.TemporalRoDB, txNum uint64) commitment.TrieContextFactory {
+func (sdc *SharedDomainsCommitmentContext) warmupTrieContextFactory(db kv.TemporalRoDB, txNum uint64) commitment.TrieContextFactory {
 	// avoid races like this
 	stepSize := sdc.sharedDomains.StepSize()
-	return func() (commitment.PatriciaContext, func()) {
+	return func(ctx context.Context) (commitment.PatriciaContext, func()) {
+		// Warmup is best-effort: never queue on the read-tx semaphore. A blocking
+		// acquire here can starve execution workers of slots and stall shutdown.
+		ctx = kv.WithNonBlockingAcquire(ctx)
 		roTx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
 		if err != nil {
 			return &errorTrieContext{err: err}, func() {}
@@ -700,15 +697,15 @@ func (sdc *SharedDomainsCommitmentContext) trieContextFactory(ctx context.Contex
 	}
 }
 
-// concurrentTrieContextFactory is like trieContextFactory but also creates a per-goroutine
+// concurrentTrieContextFactory is like warmupTrieContextFactory but blocking, and also creates a per-goroutine
 // etl.Collector for each context so that PutBranch writes are isolated (no shared writer race).
 // Returns the factory and a drain function that collects all created collectors.
-func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(ctx context.Context, db kv.TemporalRoDB, pin kv.TemporalFilesPin, txNum uint64) (commitment.TrieContextFactory, func() []*etl.Collector) {
+func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(db kv.TemporalRoDB, pin kv.TemporalFilesPin, txNum uint64) (commitment.TrieContextFactory, func() []*etl.Collector) {
 	stepSize := sdc.sharedDomains.StepSize()
 	var mu sync.Mutex
 	var collectors []*etl.Collector
 
-	factory := func() (commitment.PatriciaContext, func()) {
+	factory := func(ctx context.Context) (commitment.PatriciaContext, func()) {
 		roTx, err := beginWorkerRo(ctx, db, pin) //nolint:gocritic
 		if err != nil {
 			return &errorTrieContext{err: err}, func() {}
@@ -793,7 +790,7 @@ func DecodeTxBlockNums(v []byte) (txNum, blockNum uint64) {
 // Found value does not become current state.
 func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(trieContext *TrieContext) (blockNum, txNum uint64, state []byte, err error) {
 	tv := sdc.patriciaTrie.Variant()
-	if tv != commitment.VariantHexPatriciaTrie && tv != commitment.VariantParallelHexPatricia && tv != commitment.VariantStreamingHexPatricia {
+	if tv != commitment.VariantHexPatriciaTrie && tv != commitment.VariantParallelHexPatricia {
 		return 0, 0, nil, errors.New("state storing is only supported hex patricia trie")
 	}
 	var step kv.Step
@@ -803,7 +800,7 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(trieContext *Tr
 		return 0, 0, nil, err
 	}
 
-	if err = trieContext.stateReader.CheckDataAvailable(kv.CommitmentDomain, step); err != nil {
+	if err := trieContext.stateReader.CheckDataAvailable(kv.CommitmentDomain, step); err != nil {
 		return 0, 0, nil, err
 	}
 
@@ -932,7 +929,7 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 			return 0, 0, errors.New("cannot typecast hex patricia trie")
 		}
 	}
-	if tv == commitment.VariantParallelHexPatricia || tv == commitment.VariantStreamingHexPatricia {
+	if tv == commitment.VariantParallelHexPatricia {
 		var ok bool
 		ppht, ok = sdc.patriciaTrie.(*commitment.ParallelPatriciaHashed)
 		if !ok {
@@ -970,7 +967,7 @@ type TrieContext struct {
 	localCollector *etl.Collector // per-goroutine collector for concurrent PutBranch
 }
 
-// NewTrieContextRo creates a read-only TrieContext suitable for TrieReader lookups.
+// NewTrieContextRo creates a read-only TrieContext for Branch-only lookups.
 // Only Branch() is functional; PutBranch/Account/Storage will return errors or nil.
 func NewTrieContextRo(reader StateReader, stepSize uint64) *TrieContext {
 	return &TrieContext{stateReader: reader, stepSize: stepSize}
@@ -989,7 +986,7 @@ func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
 	if sdc.traceW != nil {
 		fmt.Fprintf(sdc.traceW, "[SDC] Branch read %x => %x\n", pref, enc)
 	}
-	return common.Copy(enc), step, nil
+	return bytes.Clone(enc), step, nil
 }
 
 func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) error {
@@ -1026,7 +1023,7 @@ func (sdc *TrieContext) Account(plainKey []byte) (u *commitment.Update, err erro
 	}
 
 	acc := new(accounts.Account)
-	if err = accounts.DeserialiseV3(acc, encAccount); err != nil {
+	if err := accounts.DeserialiseV3(acc, encAccount); err != nil {
 		return nil, err
 	}
 
@@ -1041,17 +1038,19 @@ func (sdc *TrieContext) Account(plainKey []byte) (u *commitment.Update, err erro
 		u.CodeHash = acc.CodeHash.Value()
 	}
 
-	if dbg.AssertEnabled { // verify code hash from account encoding matches stored code
+	// Verify only code-bearing accounts whose code is actually in the domain,
+	// and never fold the read into u. A cleared EIP-7702 delegation leaves a
+	// benign CodeDomain residue on a code-less account, and eth_simulateV1
+	// overrides put code in an overlay the domain read doesn't see.
+	if dbg.AssertEnabled && !acc.IsEmptyCodeHash() {
 		code, _, err := sdc.readDomain(kv.CodeDomain, plainKey)
 		if err != nil {
 			return nil, err
 		}
 		if len(code) > 0 {
-			u.CodeHash = crypto.Keccak256Hash(code)
-			u.Flags |= commitment.CodeUpdate
-		}
-		if acc.CodeHash.Value() != u.CodeHash {
-			return nil, fmt.Errorf("code hash mismatch: account '%x' != codeHash '%x'", acc.CodeHash, u.CodeHash[:])
+			if codeHash := crypto.Keccak256Hash(code); acc.CodeHash.Value() != codeHash {
+				return nil, fmt.Errorf("code hash mismatch: account '%x' != codeHash '%x'", acc.CodeHash, codeHash[:])
+			}
 		}
 	}
 	return u, nil

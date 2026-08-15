@@ -77,8 +77,12 @@ type Collector struct {
 	allocator *Allocator
 }
 
+// NewCollectorWithAllocator builds a collector that draws its buffer from the
+// allocator's pool lazily, on the first Collect — a collector that never
+// receives a write never takes a buffer. Batch writers built upfront for every
+// domain rely on this to make unused writers cost nothing.
 func NewCollectorWithAllocator(logPrefix, tmpdir string, allocator *Allocator, logger log.Logger) *Collector {
-	c := NewCollector(logPrefix, tmpdir, allocator.Get(), logger)
+	c := &Collector{logPrefix: logPrefix, tmpdir: tmpdir, logLvl: log.LvlInfo, logger: logger}
 	c.Allocator(allocator)
 	return c
 }
@@ -94,6 +98,7 @@ func (c *Collector) SortAndFlushInBackground(v bool) *Collector {
 func (c *Collector) extractNextFunc(originalK, k []byte, v []byte) error {
 	if c.buf == nil && c.allocator != nil {
 		c.buf = c.allocator.Get()
+		c.bufType = getTypeByBuffer(c.buf)
 	}
 	c.buf.Put(k, v)
 	if !c.buf.CheckFlushSize() {
@@ -117,7 +122,7 @@ func (c *Collector) Allocator(a *Allocator) *Collector {
 }
 
 func (c *Collector) flushBuffer(canStoreInRam bool) error {
-	if c.buf.Len() == 0 {
+	if c.buf == nil || c.buf.Len() == 0 {
 		return nil
 	}
 
@@ -143,7 +148,7 @@ func (c *Collector) flushBuffer(canStoreInRam bool) error {
 
 	fullBuf := c.buf // can't `.Reset()` because this `buf` will move to another goroutine
 	if c.allocator != nil {
-		c.buf = c.allocator.Get()
+		c.buf = nil // drawn again lazily on the next Collect; a flush is often the collector's last write event
 	} else {
 		prevLen, prevSize := fullBuf.Len(), fullBuf.SizeLimit()
 		c.buf = getBufferByType(c.bufType, datasize.ByteSize(fullBuf.SizeLimit()))
@@ -170,9 +175,6 @@ func (c *Collector) Flush() error {
 }
 
 func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args TransformArgs) error {
-	if c.buf == nil && c.allocator != nil {
-		c.buf = c.allocator.Get()
-	}
 	args.BufferType = c.bufType
 
 	if !c.allFlushed {
@@ -253,7 +255,7 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 	simpleLoad := func(k, v []byte) error {
 		return loadFunc(k, v, currentTable, loadNextFunc)
 	}
-	if err := mergeSortFiles(c.logPrefix, c.dataProviders, simpleLoad, args, c.buf); err != nil {
+	if err := mergeSortFiles(c.logPrefix, c.dataProviders, simpleLoad, args); err != nil {
 		return fmt.Errorf("loadIntoTable %s: %w", toBucket, err)
 	}
 	//logger.Trace(fmt.Sprintf("[%s] ETL Load done", c.logPrefix), "bucket", bucket, "records", i)
@@ -285,7 +287,7 @@ func (c *Collector) Close() {
 // for the next item, which is then added back to the heap.
 // The subsequent iterations pop the heap again and load up the provider associated with it to get the next element after processing LoadFunc.
 // this continues until all providers have reached their EOF.
-func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleLoadFunc, args TransformArgs, buf Buffer) (err error) {
+func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleLoadFunc, args TransformArgs) (err error) {
 	for _, provider := range providers {
 		if err := provider.Wait(); err != nil {
 			return err
@@ -322,27 +324,28 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 		// SortableOldestAppearedBuffer must guarantee that only 1 oldest value of key will appear
 		// but because size of buffer is limited - each flushed file does guarantee "oldest appeared"
 		// property, but files may overlap. files are sorted, just skip repeated keys here
-		if args.BufferType == SortableOldestAppearedBuffer {
+		switch args.BufferType {
+		case SortableOldestAppearedBuffer:
 			if !bytes.Equal(prevK, element.Key) {
-				if err = loadFunc(element.Key, element.Value); err != nil {
+				if err := loadFunc(element.Key, element.Value); err != nil {
 					return err
 				}
 				prevK = element.Key
 			}
-		} else if args.BufferType == SortableAppendBuffer {
+		case SortableAppendBuffer:
 			if !bytes.Equal(prevK, element.Key) {
 				if prevK != nil {
-					if err = loadFunc(prevK, prevV); err != nil {
+					if err := loadFunc(prevK, prevV); err != nil {
 						return err
 					}
 				}
 				prevK = element.Key
-				prevV = common.Copy(element.Value) // copy needed: prevV is mutated by append below; element.Value may point into read-only mmap
+				prevV = bytes.Clone(element.Value) // copy needed: prevV is mutated by append below; element.Value may point into read-only mmap
 			} else {
 				prevV = append(prevV, element.Value...)
 			}
-		} else {
-			if err = loadFunc(element.Key, element.Value); err != nil {
+		default:
+			if err := loadFunc(element.Key, element.Value); err != nil {
 				return err
 			}
 		}
@@ -356,7 +359,7 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 
 	if args.BufferType == SortableAppendBuffer {
 		if prevK != nil {
-			if err = loadFunc(prevK, prevV); err != nil {
+			if err := loadFunc(prevK, prevV); err != nil {
 				return err
 			}
 		}
@@ -367,13 +370,14 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 
 func makeCurrentKeyStr(k []byte) string {
 	var currentKeyStr string
-	if k == nil {
+	switch {
+	case k == nil:
 		currentKeyStr = "final"
-	} else if len(k) < 4 {
+	case len(k) < 4:
 		currentKeyStr = hex.EncodeToString(k)
-	} else if k[0] == 0 && k[1] == 0 && k[2] == 0 && k[3] == 0 && len(k) >= 8 { // if key has leading zeroes, show a bit more info
+	case k[0] == 0 && k[1] == 0 && k[2] == 0 && k[3] == 0 && len(k) >= 8: // if key has leading zeroes, show a bit more info
 		currentKeyStr = hex.EncodeToString(k)
-	} else {
+	default:
 		currentKeyStr = hex.EncodeToString(k[:4])
 	}
 	return currentKeyStr

@@ -17,6 +17,7 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -40,7 +41,7 @@ import (
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
-	"github.com/erigontech/erigon/common"
+
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
@@ -178,6 +179,13 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	subnet *uint64,
 	aggregateAndProof *SignedAggregateAndProofForGossip,
 ) error {
+	if aggregateAndProof == nil || aggregateAndProof.SignedAggregateAndProof == nil ||
+		aggregateAndProof.SignedAggregateAndProof.Message == nil ||
+		aggregateAndProof.SignedAggregateAndProof.Message.Aggregate == nil ||
+		aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.Data == nil ||
+		aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.AggregationBits == nil {
+		return errors.New("invalid aggregate and proof")
+	}
 	selectionProof := aggregateAndProof.SignedAggregateAndProof.Message.SelectionProof
 	aggregateData := aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.Data
 	aggregate := aggregateAndProof.SignedAggregateAndProof.Message.Aggregate
@@ -191,7 +199,14 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 
 	epoch := slot / a.beaconCfg.SlotsPerEpoch
 	clversion := a.beaconCfg.GetCurrentStateVersion(epoch)
+	aggregateAndProof.SignedAggregateAndProof.SetVersion(clversion)
+	if err := aggregate.ValidateForConfig(a.beaconCfg, clversion); err != nil {
+		return err
+	}
 	if clversion.AfterOrEqual(clparams.ElectraVersion) {
+		if aggregate.CommitteeBits == nil {
+			return errors.New("invalid aggregate and proof: missing committee bits")
+		}
 		// [REJECT] len(committee_indices) == 1, where committee_indices = get_committee_indices(aggregate).
 		indices := aggregate.CommitteeBits.GetOnIndices()
 		if len(indices) != 1 {
@@ -367,7 +382,6 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 
 	a.batchSignatureVerifier.AsyncVerifyAggregateProof(aggregateVerificationData)
 	return nil
-
 }
 
 func GetSignaturesOnAggregate(
@@ -462,7 +476,7 @@ func AggregateMessageSignature(
 			return err
 		}
 		pk := val.PublicKeyBytes()
-		pks = append(pks, common.Copy(pk))
+		pks = append(pks, bytes.Clone(pk))
 		return nil
 	}); err != nil {
 		return nil, nil, nil, err

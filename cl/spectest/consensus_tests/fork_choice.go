@@ -51,7 +51,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/types"
@@ -71,11 +71,11 @@ func (forkChoiceSpectestEngine) ForkChoiceUpdate(context.Context, common.Hash, c
 
 func (forkChoiceSpectestEngine) SupportInsertion() bool { return false }
 
-func (forkChoiceSpectestEngine) InsertBlocks(context.Context, []*types.Block, [][]byte) error {
+func (forkChoiceSpectestEngine) InsertBlocks(context.Context, []*types.Block) error {
 	return nil
 }
 
-func (forkChoiceSpectestEngine) InsertBlock(context.Context, *types.Block, []byte) error { return nil }
+func (forkChoiceSpectestEngine) InsertBlock(context.Context, *types.Block) error { return nil }
 
 func (forkChoiceSpectestEngine) CurrentHeader(context.Context) (*types.Header, error) {
 	return nil, nil
@@ -176,6 +176,7 @@ func (f *ForkChoiceStep) GetTick() int {
 	}
 	return *f.Tick
 }
+
 func (f *ForkChoiceStep) GetValid() bool {
 	if f.Valid == nil {
 		return true
@@ -189,6 +190,7 @@ func (f *ForkChoiceStep) GetAttestation() string {
 	}
 	return *f.Attestation
 }
+
 func (f *ForkChoiceStep) GetBlock() string {
 	if f.Block == nil {
 		return ""
@@ -209,30 +211,35 @@ func (f *ForkChoiceStep) GetPowBlock() string {
 	}
 	return *f.PowBlock
 }
+
 func (f *ForkChoiceStep) GetAttesterSlashing() string {
 	if f.AttesterSlashing == nil {
 		return ""
 	}
 	return *f.AttesterSlashing
 }
+
 func (f *ForkChoiceStep) GetBlockHash() string {
 	if f.BlockHash == nil {
 		return ""
 	}
 	return *f.BlockHash
 }
+
 func (f *ForkChoiceStep) GetPayloadStatus() *ForkChoicePayloadStatus {
 	if f.PayloadStatus == nil {
 		return nil
 	}
 	return f.PayloadStatus
 }
+
 func (f *ForkChoiceStep) GetExecutionPayload() string {
 	if f.ExecutionPayload == nil {
 		return ""
 	}
 	return *f.ExecutionPayload
 }
+
 func (f *ForkChoiceStep) GetChecks() *ForkChoiceChecks {
 	if f.Checks == nil {
 		return nil
@@ -266,8 +273,7 @@ type ForkChoicePayloadStatus struct {
 	ValidationError string `yaml:"validation_error"`
 }
 
-type ForkChoice struct {
-}
+type ForkChoice struct{}
 
 func NewForkChoice(fn func(s abstract.BeaconState) error) *ForkChoice {
 	return &ForkChoice{}
@@ -297,13 +303,13 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 	anchorState, err := spectest.ReadBeaconState(root, c.Version(), "anchor_state.ssz_snappy")
 	require.NoError(t, err)
 
-	genesisState, err := initial_state.GetGenesisState(chainspec.MainnetChainID)
+	genesisState, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
 	require.NoError(t, err)
 
 	emitters := beaconevents.NewEventEmitter()
 	_, beaconConfig := clparams.GetConfigsByNetwork(chainspec.MainnetChainID)
 	ethClock := eth_clock.NewEthereumClock(genesisState.GenesisTime(), genesisState.GenesisValidatorsRoot(), beaconConfig)
-	blobStorage := blob_storage.NewBlobStore(memdb.New(t, "/tmp", dbcfg.ChainDB), afero.NewMemMapFs(), math.MaxUint64, &clparams.MainnetBeaconConfig, ethClock)
+	blobStorage := blob_storage.NewBlobStore(mdbxtest.New(t, "/tmp", dbcfg.ChainDB), afero.NewMemMapFs(), math.MaxUint64, &clparams.MainnetBeaconConfig, ethClock)
 	columnStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), 1000, &clparams.MainnetBeaconConfig, ethClock, emitters)
 	peerDasState := peerdasstate.NewPeerDasState(&clparams.MainnetBeaconConfig, &clparams.NetworkConfig{})
 	peerDas := das.NewPeerDas(ctx, nil, &clparams.MainnetBeaconConfig, &clparams.CaplinConfig{}, columnStorage, blobStorage, nil, enode.ID{}, ethClock, peerDasState, nil, nil, nil)
@@ -313,7 +319,8 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 		ethClock, anchorState, forkChoiceSpectestEngine{}, pool.NewOperationsPool(&clparams.MainnetBeaconConfig),
 		fork_graph.NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}),
 		emitters, synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true), blobStorage, public_keys_registry.NewInMemoryPublicKeysRegistry(),
-		localValidators, false, nil)
+		localValidators, false, nil,
+	)
 	require.NoError(t, err)
 	forkStore.SetSynced(true)
 	forkStore.InitPeerDas(peerDas)
@@ -350,10 +357,8 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 				require.NoError(t, err, stepstr)
 				if step.GetValid() {
 					require.False(t, len(step.Proofs) != blobs.Len() || len(step.Proofs) != blk.Block.Body.GetBlobKzgCommitments().Len(), "invalid number of proofs")
-				} else {
-					if len(step.Proofs) != blobs.Len() || len(step.Proofs) != blk.Block.Body.GetBlobKzgCommitments().Len() {
-						continue
-					}
+				} else if len(step.Proofs) != blobs.Len() || len(step.Proofs) != blk.Block.Body.GetBlobKzgCommitments().Len() {
+					continue
 				}
 				blobSidecarService := services.NewBlobSidecarService(ctx, &clparams.MainnetBeaconConfig, forkStore, nil, ethClock, emitters, true)
 
@@ -425,7 +430,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 			}
 		case "on_tick":
 			forkStore.OnTick(uint64(step.GetTick()))
-			//TODO: onTick needs to be able to return error
+			// TODO: onTick needs to be able to return error
 		//	if step.GetValid() {
 		//		require.NoError(t, err)
 		//	} else {

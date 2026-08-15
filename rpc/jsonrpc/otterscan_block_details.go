@@ -53,7 +53,7 @@ func (api *OtterscanAPIImpl) GetBlockDetails(ctx context.Context, number rpc.Blo
 			}
 			return nil, err
 		}
-		if err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum); err != nil {
+		if err := api.BaseAPI.checkPruneHistory(ctx, tx, blockNum); err != nil {
 			return nil, err
 		}
 		b, senders, err = api.getBlockWithSenders(ctx, rpc.BlockNumber(blockNum), tx)

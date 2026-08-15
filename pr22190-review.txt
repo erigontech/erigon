@@ -1,0 +1,303 @@
+CODE REVIEW - PR #22190
+execution: achieve 0 re-execs/aborts for BAL-driven parallel exec
+Author: taratorio | main <- worktree-remove-with-bals-from-versionedio
+3,640+ / 257- across 32 files | CI: 129/129 checks green
+Head reviewed: cbf202d86d9ad8eea8842bf1007f0f43cbfda433
+
+
+================================================================================
+OVERVIEW
+================================================================================
+
+The PR removes VersionMap.HasBAL and replaces flag-gated validation with one
+uniform, value-evidence-based scheme. Five threads run through it:
+
+1. Validation becomes value-based everywhere. CodePath/CodeSizePath graduate
+   from noValueRead (version/status only) to the tiebreakered validateRead
+   class, joining CodeHashPath. A cold read that collides with a value-matching
+   flush survives.
+
+2. Dead-equivalence gated on EIP-161. eqAccountDead treats a nil record and an
+   EIP-161-empty record as equal, but only post-Spurious-Dragon and not for
+   AuRa's SystemAddress - and only when no sub-field cell contradicts it
+   (accountLiveAt).
+
+3. Latest-only SD probes become range scans. ReadSelfDestruct ->
+   FindDoneSelfDestructInRange in the read path, in validation, and in
+   WriteSet.Normalize, because a re-creation flushes SelfDestruct=false on top
+   of the wiping true cell.
+
+4. Signals a BAL cannot carry stop being recorded reads. The SELFDESTRUCT
+   refund probe, CreateAccount's destructed derivation, and the no-cell
+   incarnation refresh all become unrecorded derivations.
+
+5. New ProvisionalRead source so a mid-load nil probe can adopt a cell flushed
+   underneath it instead of false-aborting.
+
+The load-bearing idea is that Block-STM soundness rests on VALUES, not
+versions. Once every EVM-visible field goes through its own value-recorded
+read, the AddressPath record can be validated existence-only, and version churn
+on an unchanged value stops being a conflict. Premise verified: on the
+versioned path Exist, Empty, GetBalance, GetNonce all route through per-field
+versioned reads (intra_block_state.go:614/643/726/751) rather than reading
+so.data.* directly - so existence-only AddressPath validation is not leaving
+fields unwitnessed.
+
+The second idea is evidence over flags: "is this account dead?" is no longer a
+boolean anyone stores, it is assembled at query time from sub-field cell
+floors. That is what makes the pre-populated BAL and the no-BAL path collapse
+into one code path.
+
+
+================================================================================
+CORRECTNESS
+================================================================================
+
+1. synthesizeCreatedAccountBase derives existence from cells it never witnesses
+   -- intra_block_state.go:1233
+
+It reads Balance/Nonce/Code cells to decide the account exists, then records
+only an AddressPath read at UnknownVersion. The three cells that justified the
+conclusion get no recorded read of their own.
+
+The comment says "the fields themselves flow through the per-field cell reads
+downstream", which covers the common case. But a tx that needs only EXISTENCE -
+CALL charging (or not charging) CallNewAccountGas - reaches Empty(), which does
+read the fields per-field, so it is likely covered in practice.
+
+QUESTION: is there a test for the pure case - synthesis fires, the tx reads no
+field, the creating tx re-executes and drops the balance write? If the answer
+is "the AddressPath@UnknownVersion read catches it", worth pinning that in
+versionmap_test.go, because it is the one place where the value-evidence chain
+has a gap by construction.
+
+
+2. The wiped-record escape hatch is broader than its purpose
+   -- versionmap.go:1233
+
+    if source == MapRead && absent && version.TxIndex >= 0 {
+        if _, ok := vm.FindDoneSelfDestructInRange(addr, version.TxIndex,
+                                                   version.TxIndex+1, true); ok {
+            break   // unconditionally VersionValid
+        }
+    }
+
+This sits BEFORE the fold-onto-AddressPath branch. A folded sub-field read
+(also MapRead, also absent when the value is zero) whose recorded AddressPath
+version happens to land on a destruct index will take this exit and skip fold
+validation entirely - including the new matchesRecord tiebreaker.
+
+The records this is meant to accept are exactly the ones recordWipedRead
+writes. Consider making that explicit rather than inferring it from shape - a
+dedicated WipedRead source (you already added one source enum this PR) would
+make the exit precise and self-documenting.
+
+
+3. ProvisionalRead demotion is spread across five exits
+
+finalizeProvisionalAddressRead is called at intra_block_state.go:1405, 1456,
+1467, 2103, 2112. A missed exit leaks a provisional marker into validation,
+where it degrades to StorageRead semantics - fail-safe, but silently, and
+versionedReadCore will keep adopting fresh cells for that address without
+recording a dependency for the rest of the tx.
+
+CLAUDE.md's own guidance applies: "prefer code that enforces it (a runtime
+assert, a type the caller can't misuse) over a comment that describes it." A
+defer at the top of the load, or scoping the marker to the load rather than to
+versionedReads, would make the invariant structural. At minimum, a debug assert
+at read-set finalization that no ProvisionalRead survives.
+
+
+4. recordRead becomes a no-op parameter -- intra_block_state.go:2039
+
+    if recordRead || sdb.versionMap != nil {
+        sdb.accountRead(addr, account, accountSource, accountVersion)
+    }
+
+On the versioned path the parameter no longer does anything. That silently
+converts the eight getStateObject(addr, false) callers into read-recording
+sites - including HasStorage, GetDelegatedDesignation (hot on the EIP-7702
+path), and six journal-revert sites in journal.go.
+
+The stated need is narrow: reconcile the nil marker the map-miss already
+recorded. Gating on that condition instead would keep the parameter honest and
+keep read sets from growing on the delegation path:
+
+    if recordRead || sdb.hasRecordedNilAddressRead(addr) {
+
+
+5. Read path and validator disagree on Code/CodeSize
+
+readValueUnchanged (read_paths.go:279) deliberately omits CodePath/CodeSizePath
+arms, while validation now gives both a value tiebreaker. The asymmetry is in
+the safe direction (extra aborts, never staleness), but the PR's goal is
+literally zero aborts.
+
+QUESTION: is there a reason the read-time relaxation can't cover them, or is it
+just "not needed to hit zero on gd6"?
+
+
+6. Smaller items
+
+- validateSelfDestruct trace gate - versionmap.go:1426 prints under
+  `traceInvalid && dbg.TraceReexec`; every other new trace uses
+  `dbg.TraceReexec` alone. The sd-witness reason will be absent from most
+  dumps, which is unfortunate since it is the hardest class to diagnose.
+
+- mergeFrom rotates the primary destruct - versionedio.go:409 re-enters
+  SetSelfDestruct for each witness, so the primary selfDestruct[a] ends up
+  being the last-merged witness. Validation treats primary and witnesses
+  uniformly, so the validated SET is preserved; but any reader that treats the
+  primary as "the destruct this tx concluded from" now gets an arbitrary
+  member. Worth a one-line note on the field at versionedio.go:126.
+
+- recordVR inconsistency - the two CodeHashPath revival early-returns in
+  read_paths.go both run after recordWipedRead, but one sets
+  `r.recordVR = false` and the other `r.recordVR = !commited`. The second
+  double-records the same header/value (idempotent, so harmless) - align them.
+
+- Trace formatting - validateRead's VINV dump prints readVal/live with %v; for
+  CodePath that is a full bytecode dump per invalid read. %x with a length cap
+  would keep the dumps usable.
+
+
+================================================================================
+PERFORMANCE
+================================================================================
+
+ValidateVersion runs in the apply loop for every settled tx, so anything
+allocated per-read there multiplies by tx count x re-execution count. This repo
+has a long history of PRs shaving single allocations off exactly these paths,
+which raises the bar for new closures here.
+
+CLOSURE ALLOCATIONS IN THE VALIDATION LOOP. Two new ones per validated read:
+
+- versionmap.go:1381 -
+  eqAccount := func(x, y *accounts.Account) bool {
+      return vm.eqAccountDead(txIdx, a, isAura, x, y)
+  }
+  allocated PER ADDRESS and, since eip161 is true for everything
+  post-Spurious-Dragon, on every mainnet block.
+
+- validateRead's matchesRecord closure, allocated for every
+  balance/nonce/incarnation/codeHash read that has a recordField.
+
+Both are passed into validateReadImpl, which recurses with them - escape
+analysis may well decide they leak. Worth confirming before merge:
+
+    go build -gcflags='-m' ./execution/state/ 2>&1 \
+      | grep -E 'versionmap.go:(13[0-9][0-9]|10[0-9][0-9]).*escapes'
+
+If they escape: threading eip161/isAura into validateRead and picking the
+comparison internally removes the first; the second could move behind the fold
+branch so it is only built when actually reached.
+
+LOCK TRAFFIC IN THE DEADNESS HELPERS. destroyedAndUnrevived (versionmap.go:658)
+calls FindDoneSelfDestructInRange, then selfDestructRevived (4x LatestTxIndex,
+each an RLock + btree Descend), then accountLiveSince (4 more locked reads) -
+up to NINE locked descends per call. It runs on the CodeHashPath read path, in
+recordWipedRead, and in getStateObject's SD gate. accountLiveAt
+(versionmap.go:1132) is 4 more.
+
+Since all sub-trees live under one AddressEntry.mu, a single helper that takes
+the lock once and walks Balance/Nonce/CodeHash/Code inline would cut this
+several-fold. Only matters on destruct-heavy blocks - but SELFDESTRUCT-heavy
+fuzz traffic is precisely what gd6 generates.
+
+
+================================================================================
+API & STYLE
+================================================================================
+
+THE THREE-BOOL SIGNATURE IS A TRANSPOSITION BUG WAITING TO HAPPEN:
+
+    ValidateVersion(txIdx, io, checkVersion, eip161, isAura, traceInvalid,
+                    tracePrefix)
+    // every call site reads:  ..., true, false, false, "")
+
+Every caller already holds *chain.Rules (txTask.Rules(), execTask.Rules()) and
+immediately destructures it into two of the three bools. Passing rules directly
+- or a small ValidateOpts{} - would remove the class entirely and shrink each
+call site. Nine call sites were mechanically updated in this PR; the next one
+won't be caught by the compiler.
+
+COMMENT VOLUME. .claude/rules/comments.md puts incident and repro narration in
+the commit message, not in source. A few of the new blocks carry it: the
+16-line SELFDESTRUCT range-scan comment in read_paths.go, and the
+destroyedAndUnrevived / selfDestructRevived docs. The INVARIANTS they state are
+genuinely load-bearing and should stay; the storytelling around them ("the
+'created then funded' phantom", "the decisive repro was the fund-then-deploy
+CREATE2 pattern") is already in the PR body, where it survives better.
+Judgment call, not a blocker.
+
+
+================================================================================
+TESTS
+================================================================================
+
+Genuinely strong, and the strongest part of the PR:
+
+- 29 new tests, TDD'd red->green per the PR body; versionmap_test.go alone
+  gains 1,359 lines.
+
+- Real e2e coverage, not just unit-level version-map probing: four new
+  execmodule tests drive metamorphic SELFDESTRUCT, fee-revived coinbase,
+  same-tx store-and-die, and the AuRa SystemAddress carve-out through the
+  actual parallel executor with real Solidity contracts, asserting on
+  post-state and state root.
+
+- New contracts follow repo convention - observer.sol / storeanddie.sol +
+  committed build/*.abi|bin + go:generate lines in gen.go, matching the
+  existing eleven.
+
+- Existing tests were STRENGTHENED, not weakened.
+  code_trio_validation_test.go flips two expectations from VersionInvalid to
+  VersionValid (the deliberate unification) but ADDS two stale-value cases
+  proving a genuinely different flushed value still invalidates. That is the
+  right shape for an intentional semantics change. No t.Skip anywhere in the
+  diff.
+
+- EEST 355,601 / 0 across five shards, make test-all clean, all 129 checks
+  green.
+
+
+================================================================================
+RISK
+================================================================================
+
+The one thing to underline: THESE SEMANTICS CHANGES ARE NOT SCOPED TO BAL
+BLOCKS. Removing HasBAL means uniform validation, the SD range scans,
+unrecorded incarnation reads, and the value tiebreakers all apply to ordinary
+mainnet parallel execution. The stable EEST shards (sequential + parallel,
+per-fork) cover the fork matrix well, and the devnet acceptance runs cover
+BAL-fed traffic - but neither exercises mainnet's real state shape at depth.
+
+The PR body calls a mainnet-from-0 parallel re-execution "the deferred final
+verification before enabling anything by default." Given the breadth of what
+changed on the no-BAL path, that should be a MERGE GATE FOR THIS PR, not for
+the later enablement flag - the blast radius is already in the tree once this
+lands.
+
+
+================================================================================
+VERDICT
+================================================================================
+
+Well-engineered and unusually well-verified for a change of this depth: the
+value-evidence direction is the right one, the flag removal genuinely
+simplifies rather than relocating complexity, and the test discipline is
+exemplary.
+
+BEFORE MERGE:
+  1. Confirm or fix the two soundness questions - the unwitnessed synthesis
+     cells (item 1) and the breadth of the MVReadResultNone escape hatch
+     (item 2).
+  2. Narrow the recordRead override to the reconcile case (item 4).
+  3. Check whether the two new validation-loop closures escape; if so,
+     restructure.
+  4. Run the mainnet from-0 parallel re-execution.
+
+NICE TO HAVE:
+  - A single choke point for ProvisionalRead demotion.
+  - *chain.Rules in place of the three bools.
+  - One locked pass in the deadness helpers.

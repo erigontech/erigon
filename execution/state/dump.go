@@ -20,6 +20,7 @@
 package state
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -116,14 +117,14 @@ func (d iterativeDump) OnAccount(addr common.Address, account DumpAccount) {
 	if addr != (common.Address{}) {
 		dumpAccount.Address = &addr
 	}
-	//nolint:errcheck
-	d.Encode(dumpAccount)
+	//nolint:errcheck,errchkjson
+	_ = d.Encode(dumpAccount)
 }
 
 // OnRoot implements DumpCollector interface
 func (d iterativeDump) OnRoot(root common.Hash) {
-	//nolint:errcheck
-	d.Encoder.Encode(struct {
+	//nolint:errcheck,errchkjson
+	_ = d.Encoder.Encode(struct {
 		Root common.Hash `json:"root"`
 	}{root})
 }
@@ -211,30 +212,33 @@ func (d *Dumper) DumpToCollector(ctx context.Context, c DumpCollector, excludeCo
 	for i, addr := range addrList {
 		account := accountList[i]
 		if !excludeStorage {
-			t := trie.New(common.Hash{})
-			nextAcc, _ := kv.NextSubtree(addr[:])
-			r, err := ttx.RangeAsOf(kv.StorageDomain, addr[:], nextAcc, txNumForStorage, order.Asc, kv.Unlim) //unlim because need skip empty vals
-			if err != nil {
-				return nil, fmt.Errorf("walking over storage for %x: %w", addr, err)
-			}
-			defer r.Close()
-			for r.HasNext() {
-				k, vs, err := r.Next()
+			if err := func() error {
+				t := trie.New(common.Hash{})
+				nextAcc, _ := kv.NextSubtree(addr[:])
+				r, err := ttx.RangeAsOf(kv.StorageDomain, addr[:], nextAcc, txNumForStorage, order.Asc, kv.Unlim) //unlim because need skip empty vals
 				if err != nil {
-					return nil, fmt.Errorf("walking over storage for %x: %w", addr, err)
+					return fmt.Errorf("walking over storage for %x: %w", addr, err)
 				}
-				if len(vs) == 0 {
-					continue // Skip deleted entries
+				defer r.Close()
+				for r.HasNext() {
+					k, vs, err := r.Next()
+					if err != nil {
+						return fmt.Errorf("walking over storage for %x: %w", addr, err)
+					}
+					if len(vs) == 0 {
+						continue // Skip deleted entries
+					}
+					loc := k[20:]
+					account.Storage[common.BytesToHash(loc).String()] = common.Bytes2Hex(vs)
+					h := crypto.Keccak256Hash(loc)
+					t.Update(h[:], bytes.Clone(vs))
 				}
-				loc := k[20:]
-				account.Storage[common.BytesToHash(loc).String()] = common.Bytes2Hex(vs)
-				h := crypto.Keccak256Hash(loc)
-				t.Update(h[:], common.Copy(vs))
+				tHash := t.Hash()
+				account.Root = tHash[:]
+				return nil
+			}(); err != nil {
+				return nil, err
 			}
-			r.Close()
-
-			tHash := t.Hash()
-			account.Root = tHash[:]
 		}
 		account.Address = &addr
 		seckey := crypto.Keccak256Hash(addr[:])

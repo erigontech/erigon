@@ -52,6 +52,27 @@ func (m *Map[V]) LoadOrStore(key []byte, value V) (actual V, loaded bool) {
 	return m.m.LoadOrStore(h, value)
 }
 
+// ReplaceIfPresent atomically overwrites an existing key, reporting whether it
+// was there. It never inserts, so external counts need no accounting.
+func (m *Map[V]) ReplaceIfPresent(key []byte, value V) bool {
+	h := Hash(key)
+	_, ok := m.m.Compute(h, func(old V, loaded bool) (V, xsync.ComputeOp) {
+		if !loaded {
+			return old, xsync.CancelOp
+		}
+		return value, xsync.UpdateOp
+	})
+	return ok
+}
+
+// LoadAndStore stores value and returns the previous one, loaded reporting
+// prior presence. Probing with a separate Get first races a concurrent delete,
+// so external counters must key off loaded.
+func (m *Map[V]) LoadAndStore(key []byte, value V) (previous V, loaded bool) {
+	h := Hash(key)
+	return m.m.LoadAndStore(h, value)
+}
+
 // Delete removes a key from the map.
 func (m *Map[V]) Delete(key []byte) {
 	h := Hash(key)
@@ -198,12 +219,13 @@ type ShardedLRU[V any] struct {
 	mask   uint64
 }
 
-// NewShardedLRU creates a sharded LRU holding size entries total, partitioned
-// as evenly as possible across shards. The shard count is the requested count
-// capped at size, rounded down to a power of two.
+// NewShardedLRU creates a sharded LRU of size entries total, partitioned evenly.
+// The shard count is capped at size/2 then rounded down to a power of two, so for
+// size >= 2 no shard has capacity 1 (where two colliding keys would evict each other).
 func NewShardedLRU[V any](size, shards int) (*ShardedLRU[V], error) {
-	if shards > size {
-		shards = size
+	const minShardCapacity = 2
+	if maxShards := max(size/minShardCapacity, 1); shards > maxShards {
+		shards = maxShards
 	}
 	n := 1
 	for n*2 <= shards {

@@ -113,7 +113,7 @@ func (n *FullNode) EncodeRLP(w io.Writer) error {
 			nodes[i] = nilValueNode
 		}
 	}
-	return rlp.Encode(w, nodes)
+	return rlp.Encode(w, &nodes)
 }
 
 func (n *DuoNode) EncodeRLP(w io.Writer) error {
@@ -126,7 +126,7 @@ func (n *DuoNode) EncodeRLP(w io.Writer) error {
 			children[i] = ValueNode(nil)
 		}
 	}
-	return rlp.Encode(w, children)
+	return rlp.Encode(w, &children)
 }
 
 func (n *DuoNode) childrenIdx() (i1 byte, i2 byte) {

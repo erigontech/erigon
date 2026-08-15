@@ -28,12 +28,9 @@ import (
 )
 
 const (
-	// ErrorTraceSuffix is appended to the trace filename when Process returns an error.
 	ErrorTraceSuffix = ".error"
 )
 
-// TrieTrace holds a self-contained snapshot of trie state captured during
-// Process. All keys and values are hex-encoded strings for TOML readability.
 type TrieTrace struct {
 	BlockNum    uint64                      `toml:"block_num,omitempty"`
 	TxNum       uint64                      `toml:"tx_num,omitempty"`
@@ -46,26 +43,16 @@ type TrieTrace struct {
 	PutBranches map[string]TraceBranchWrite `toml:"put_branches,omitempty"`
 }
 
-// TraceBranchWrite stores a single PutBranch write with both prev and new data hex-encoded.
 type TraceBranchWrite struct {
 	PrevData string `toml:"prev_data"`
 	NewData  string `toml:"new_data"`
 }
 
-// TraceKeyUpdate stores a single input update that was processed.
-// PlainKey and Update are hex-encoded binary data.
 type TraceKeyUpdate struct {
 	PlainKey string `toml:"plain_key"`
 	Update   string `toml:"update"`
 }
 
-// BuildTrieTrace converts the data recorded by a RecordingContext into a
-// TrieTrace. All recorded branches, accounts, and storages are included in the
-// state maps (for MockState population). The Updates list is filtered to only
-// include keys present in inputKeys — this prevents fold-time context reads
-// (for neighboring cells) from being treated as input updates during replay.
-// When inputKeys is nil, all recorded accounts and storages are included as
-// updates (useful in tests where the trie starts empty).
 func BuildTrieTrace(rc *RecordingContext, inputKeys map[string]struct{}, trieState []byte) (*TrieTrace, error) {
 	tt := &TrieTrace{
 		Branches: make(map[string]string, len(rc.branches)),
@@ -89,6 +76,7 @@ func BuildTrieTrace(rc *RecordingContext, inputKeys map[string]struct{}, trieSta
 		if !isDelete {
 			tt.Accounts[hexKey] = hex.EncodeToString(v)
 		}
+		// Filtered to inputKeys so fold-time context reads of neighbouring cells aren't recorded as touches.
 		if inputKeys == nil || containsKey(inputKeys, k) {
 			tt.Updates = append(tt.Updates, TraceKeyUpdate{
 				PlainKey: hexKey,
@@ -110,12 +98,10 @@ func BuildTrieTrace(rc *RecordingContext, inputKeys map[string]struct{}, trieSta
 		}
 	}
 
-	// Sort updates by plain key for deterministic output.
 	slices.SortFunc(tt.Updates, func(a, b TraceKeyUpdate) int {
 		return cmp.Compare(a.PlainKey, b.PlainKey)
 	})
 
-	// Include PutBranch writes if any were recorded.
 	if len(rc.putBranches) > 0 {
 		tt.PutBranches = make(map[string]TraceBranchWrite, len(rc.putBranches))
 		for k, bw := range rc.putBranches {
@@ -129,15 +115,11 @@ func BuildTrieTrace(rc *RecordingContext, inputKeys map[string]struct{}, trieSta
 	return tt, nil
 }
 
-// containsKey checks if the key (as raw bytes stored in a string) exists in the set.
 func containsKey(keys map[string]struct{}, k string) bool {
 	_, ok := keys[k]
 	return ok
 }
 
-// Save marshals the TrieTrace to TOML and writes it to the given path.
-// When the trace contains an error, the caller should use ErrorTracePath
-// to compute the appropriate filename with the .error suffix.
 func (tt *TrieTrace) Save(path string) error {
 	data, err := toml.Marshal(tt)
 	if err != nil {
@@ -149,16 +131,13 @@ func (tt *TrieTrace) Save(path string) error {
 	return nil
 }
 
-// ErrorTracePath inserts the ".error" suffix before the file extension.
-// For example, "trace.toml" becomes "trace.error.toml".
 func ErrorTracePath(path string) string {
-	if strings.HasSuffix(path, ".toml") {
-		return strings.TrimSuffix(path, ".toml") + ErrorTraceSuffix + ".toml"
+	if before, found := strings.CutSuffix(path, ".toml"); found {
+		return before + ErrorTraceSuffix + ".toml"
 	}
 	return path + ErrorTraceSuffix
 }
 
-// LoadTrieTrace reads a TOML file and unmarshals it into a TrieTrace.
 func LoadTrieTrace(path string) (*TrieTrace, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -171,8 +150,6 @@ func LoadTrieTrace(path string) (*TrieTrace, error) {
 	return &tt, nil
 }
 
-// DecodeTrieState returns the decoded trie state bytes, or nil if no state
-// was captured (empty trie or old trace format).
 func (tt *TrieTrace) DecodeTrieState() ([]byte, error) {
 	if tt.TrieState == "" {
 		return nil, nil

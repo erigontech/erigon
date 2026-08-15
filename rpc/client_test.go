@@ -318,7 +318,6 @@ func runCancelCallers(t *testing.T, client *Client, maxContextCancelTimeout time
 		ncallers = 10
 	)
 	caller := func(index int) {
-		defer wg.Done()
 		for range nreqs {
 			var (
 				ctx     context.Context
@@ -342,9 +341,10 @@ func runCancelCallers(t *testing.T, client *Client, maxContextCancelTimeout time
 			cancel()
 		}
 	}
-	wg.Add(ncallers)
 	for i := range ncallers {
-		go caller(i)
+		wg.Go(func() {
+			caller(i)
+		})
 	}
 	wg.Wait()
 }
@@ -675,7 +675,7 @@ func TestClientReconnect(t *testing.T) {
 	logger := log.New()
 	startServer := func(addr string) (*Server, net.Listener) {
 		srv := newTestServer(logger)
-		l, err := net.Listen("tcp", addr)
+		l, err := net.Listen("tcp", addr) //nolint:noctx
 		if err != nil {
 			t.Fatal("can't listen:", err)
 		}

@@ -17,11 +17,11 @@ linters:
     - prealloc
     - reassign
     - govet
+    - makezero
+    - errchkjson
+    - noctx
   disable:
     - testifylint
-    - errchkjson #TODO: enable me
-    - makezero #TODO: enable me
-    - noctx #TODO: enable me
     - errorlint #TODO: enable me
     - unused #TODO: enable me
     - contextcheck
@@ -50,32 +50,8 @@ linters:
       enabled-checks:
         - ruleguard
       disabled-checks:
-        - unnecessaryDefer
-        - appendAssign
-        - regexpMust
-        - rangeValCopy
-        - exitAfterDefer
-        - elseif
-        - dupBranchBody
-        - assignOp
-        - singleCaseSwitch
-        - unlambda
-        - captLocal
-        - commentFormatting
-        - ifElseChain
-        - sloppyReassign
-        - sprintfQuotedString
-        - deferInLoop
-        - nilValReturn
-        - evalOrder
-        - returnAfterHttpError
-        - weakCond
-        - builtinShadowDecl
-        - uncheckedInlineErr
-        - preferStringWriter
-        - commentedOutCode
-        - preferFprint
-        - deprecatedComment
+        - commentFormatting # disabled to avoid unnecessary friction on local lints and CI for minor whitespace changes without functional benefit
+        - commentedOutCode # disabled to avoid false positives on doc examples, EIP spec comments, and JSON templates
       enabled-tags:
         - performance
         - diagnostic
@@ -89,14 +65,6 @@ linters:
           rules: rules.go
         underef:
           skipRecvDeref: true
-    modernize:
-      disable: # each disabled analyzer has an existing backlog; enable it once its findings are cleared
-        - stringscut
-        - stringscutprefix
-        - testingcontext
-        - waitgroupgo
-        - waitgroup
-        - fmtappendf
     govet:
       enable:
         - nilness

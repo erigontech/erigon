@@ -63,8 +63,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
-	"github.com/erigontech/erigon/execution/protocol/params"
-	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
@@ -77,9 +75,7 @@ const (
 	BlockPublishingValidationConsensusAndEquivocation BlockPublishingValidation = "consensus_and_equivocation"
 )
 
-var (
-	errBuilderNotEnabled = errors.New("builder is not enabled")
-)
+var errBuilderNotEnabled = errors.New("builder is not enabled")
 
 const (
 	caplinClientCode = "CN"
@@ -128,7 +124,14 @@ func (a *ApiHandler) triggerELClientVersionFetch() {
 	if a.engine == nil || a.elClientVersion.Load() != nil {
 		return
 	}
-	if !a.elClientVersionFetching.CompareAndSwap(false, true) {
+	if a.elClientVersionFetching.Swap(true) {
+		return
+	}
+	// The fetch this call raced against may have cached the version and released the
+	// slot between the load above and this swap, so recheck before spending another
+	// engine round-trip.
+	if a.elClientVersion.Load() != nil {
+		a.elClientVersionFetching.Store(false)
 		return
 	}
 	go func() {
@@ -344,7 +347,8 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 		committeesPerSlot := a.syncedData.CommitteeCount(epoch)
 		subnet := subnets.ComputeSubnetForAttestation(
 			committeesPerSlot, *slot, *committeeIndex,
-			a.beaconChainCfg.SlotsPerEpoch, 64)
+			a.beaconChainCfg.SlotsPerEpoch, 64,
+		)
 		a.logger.Debug("Produced Attestation", "slot", *slot,
 			"committee_index", *committeeIndex, "subnet", subnet, "cached", ok, "beacon_block_root",
 			attestationData.BeaconBlockRoot, "duration", time.Since(start))
@@ -372,11 +376,11 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 		return newBeaconResponse(attestationData), nil
 	}
 
-	if err := a.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
+	if err := a.viewHeadStateWithIdentity(func(headState *state.CachingBeaconState, headRoot common.Hash, _ uint64) error {
 		attestationData, err = a.attestationProducer.ProduceAndCacheAttestationData(
 			tx,
 			headState,
-			a.syncedData.HeadRoot(),
+			headRoot,
 			*slot,
 		)
 
@@ -453,18 +457,14 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		}
 	}
 
-	baseBlockRoot := a.syncedData.HeadRoot()
-	if baseBlockRoot == (common.Hash{}) {
-		return nil, beaconhttp.NewEndpointError(
-			http.StatusServiceUnavailable,
-			errors.New("node is syncing"),
-		)
-	}
-
 	start := time.Now()
 
-	var baseState *state.CachingBeaconState
-	if err := a.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
+	var (
+		baseBlockRoot common.Hash
+		baseState     *state.CachingBeaconState
+	)
+	if err := a.viewHeadStateWithIdentity(func(headState *state.CachingBeaconState, root common.Hash, _ uint64) error {
+		baseBlockRoot = root
 		baseState, err = headState.Copy()
 		if err != nil {
 			return err
@@ -519,7 +519,8 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	}
 	log.Info("[Beacon API] Computed state root while producing slot", "slot", targetSlot, "duration", time.Since(startConsensusProcessing))
 
-	log.Info("BlockProduction: Block produced",
+	log.Info(
+		"BlockProduction: Block produced",
 		"proposerIndex", block.ProposerIndex,
 		"slot", targetSlot,
 		"state_root", block.StateRoot,
@@ -533,14 +534,15 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	rewardsCollector := blockBuldingMachine.BlockRewardsCollector
 	consensusValue := rewardsCollector.Attestations + rewardsCollector.ProposerSlashings + rewardsCollector.AttesterSlashings + rewardsCollector.SyncAggregate
 	var resp *beaconhttp.BeaconResponse
-	if block.IsBlinded() {
+	switch {
+	case block.IsBlinded():
 		resp = newBeaconResponse(block.ToBlinded())
-	} else if block.Version() >= clparams.GloasVersion {
+	case block.Version() >= clparams.GloasVersion:
 		// [Modified in Gloas:EIP7732] Return bare BeaconBlock (not BlockContents wrapper).
 		// In GLOAS/ePBS, blobs are delivered via the ExecutionPayloadEnvelope, not the
 		// block production response. The VC (Lighthouse v4) expects a plain BeaconBlock.
 		resp = newBeaconResponse(block.ToExecution().Block)
-	} else {
+	default:
 		resp = newBeaconResponse(block.ToExecution())
 	}
 	resp = resp.WithVersion(block.Version()).With("execution_payload_blinded", block.IsBlinded()).
@@ -614,8 +616,7 @@ func (a *ApiHandler) produceBlock(
 	randaoReveal common.Bytes96,
 	graffiti common.Hash,
 ) (*cltypes.BlindOrExecutionBeaconBlock, error) {
-	wg := sync.WaitGroup{}
-	wg.Add(2)
+	var wg sync.WaitGroup
 	// produce beacon body
 	var (
 		beaconBody     *cltypes.BeaconBody
@@ -624,12 +625,11 @@ func (a *ApiHandler) produceBlock(
 		blobs          []*cltypes.Blob
 		kzgProofs      []common.Bytes48
 	)
-	go func() {
+	wg.Go(func() {
 		start := time.Now()
 		defer func() {
 			a.logger.Debug("Produced BeaconBody", "slot", targetSlot, "duration", time.Since(start))
 		}()
-		defer wg.Done()
 		beaconBody, localExecValue, localErr = a.produceBeaconBody(ctx, 3, baseBlockSlot, baseBlockRoot, baseState, targetSlot, randaoReveal, graffiti)
 		// collect blobs
 		if beaconBody != nil {
@@ -657,26 +657,25 @@ func (a *ApiHandler) produceBlock(
 				kzgProofs = append(kzgProofs, blobBundle.KzgProofs...)
 			}
 		}
-	}()
+	})
 
 	// get the builder payload
 	var (
 		builderHeader *builder.ExecutionHeader
 		builderErr    error
 	)
-	go func() {
+	wg.Go(func() {
 		start := time.Now()
 		defer func() {
 			a.logger.Debug("MevBoost", "slot", targetSlot, "duration", time.Since(start))
 		}()
-		defer wg.Done()
 		if a.routerCfg.Builder && a.builderClient != nil {
 			builderHeader, builderErr = a.getBuilderPayload(ctx, baseState, targetSlot)
 			if builderErr != nil && builderErr != errBuilderNotEnabled {
 				log.Warn("Failed to get builder payload", "err", builderErr)
 			}
 		}
-	}()
+	})
 	// wait for both tasks to finish
 	wg.Wait()
 
@@ -890,11 +889,12 @@ func (a *ApiHandler) produceBeaconBody(
 			// parent bid. Pre-GLOAS blocks always had their payloads executed, so
 			// the EL head is parentBid.BlockHash (the last pre-GLOAS block hash).
 			isPreGloasParent := parentBid.ParentBlockHash == (common.Hash{}) && parentBid.Slot == 0
-			if isPreGloasParent {
+			switch {
+			case isPreGloasParent:
 				head = parentBid.BlockHash
-			} else if a.forkchoiceStore.GetHeadPayloadStatus() == cltypes.PayloadStatusFull &&
+			case a.forkchoiceStore.GetHeadPayloadStatus() == cltypes.PayloadStatusFull &&
 				a.forkchoiceStore.HasEnvelope(baseBlockRoot) &&
-				a.forkchoiceStore.ShouldBuildOnFull(forkchoice.ForkChoiceNode{Root: baseBlockRoot, PayloadStatus: cltypes.PayloadStatusFull}) {
+				a.forkchoiceStore.ShouldBuildOnFull(forkchoice.ForkChoiceNode{Root: baseBlockRoot, PayloadStatus: cltypes.PayloadStatusFull}):
 				head = parentBid.BlockHash
 				// Copy state and apply parent execution payload to compute correct withdrawals
 				stateCopy, err := baseState.Copy()
@@ -917,7 +917,7 @@ func (a *ApiHandler) produceBeaconBody(
 				// ProcessParentExecutionPayload can verify the root match
 				// against the parent bid's ExecutionRequestsRoot.
 				beaconBody.ParentExecutionRequests = envelope.Message.ExecutionRequests
-			} else {
+			default:
 				head = parentBid.ParentBlockHash
 			}
 		} else {
@@ -969,9 +969,7 @@ func (a *ApiHandler) produceBeaconBody(
 
 	blockRoot := baseBlockRoot
 	// Process the execution data in a thread.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		start := time.Now()
 		defer func() {
 			log.Info("BlockProduction: ForkChoiceUpdate&GetPayload took", "duration", time.Since(start))
@@ -979,7 +977,8 @@ func (a *ApiHandler) produceBeaconBody(
 		retryTime := 10 * time.Millisecond
 		feeRecipient, _ := a.validatorParams.GetFeeRecipient(proposerIndex)
 		var withdrawals []*types.Withdrawal
-		if gloasWithdrawalsState != nil {
+		switch {
+		case gloasWithdrawalsState != nil:
 			// GLOAS FULL: compute withdrawals from the state copy with parent payload applied
 			clWithdrawals, err := state.GetExpectedWithdrawals(
 				gloasWithdrawalsState,
@@ -998,7 +997,7 @@ func (a *ApiHandler) produceBeaconBody(
 					Address:   w.Address,
 				})
 			}
-		} else if stateVersion >= clparams.GloasVersion && gloasWithdrawalsState == nil {
+		case stateVersion >= clparams.GloasVersion && gloasWithdrawalsState == nil:
 			// GLOAS EMPTY: use cached payload_expected_withdrawals from state
 			cachedWithdrawals := baseState.GetPayloadExpectedWithdrawals()
 			if cachedWithdrawals != nil {
@@ -1013,7 +1012,7 @@ func (a *ApiHandler) produceBeaconBody(
 					})
 				}
 			}
-		} else {
+		default:
 			// Pre-GLOAS: compute withdrawals normally
 			clWithdrawals, err := state.GetExpectedWithdrawals(
 				baseState,
@@ -1210,11 +1209,9 @@ func (a *ApiHandler) produceBeaconBody(
 		// Cache the block body so the beacon API can return transactions
 		// immediately, before the EL commits to its database.
 		a.cacheExecutionBody(payload)
-	}()
+	})
 	// process the sync aggregate in parallel
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		start := time.Now()
 		defer func() {
 			log.Info("BlockProduction: GetSyncAggregate took", "duration", time.Since(start))
@@ -1223,11 +1220,9 @@ func (a *ApiHandler) produceBeaconBody(
 		if err != nil {
 			log.Error("BlockProduction: Failed to get sync aggregate", "err", err)
 		}
-	}()
+	})
 	// Process operations all in parallel with each other.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		start := time.Now()
 		defer func() {
 			poolSize := len(a.operationsPool.AttestationsPool.Raw())
@@ -1242,15 +1237,13 @@ func (a *ApiHandler) produceBeaconBody(
 			targetSlot,
 		)
 		beaconBody.Attestations = a.findBestAttestationsForBlockProduction(baseState)
-	}()
+	})
 	// [New in Gloas:EIP7732] Aggregate PTC votes into PayloadAttestations.
 	// The spec requires data.slot + 1 == state.slot, so we collect PTC votes
 	// for slot targetSlot-1 (= state.slot - 1), NOT baseBlockSlot. When slots
 	// are skipped the two differ and using baseBlockSlot produces invalid blocks.
 	if stateVersion.AfterOrEqual(clparams.GloasVersion) {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			start := time.Now()
 			defer func() {
 				paCount := 0
@@ -1260,7 +1253,7 @@ func (a *ApiHandler) produceBeaconBody(
 				log.Debug("BlockProduction: aggregatePayloadAttestations took", "duration", time.Since(start), "selectedPAs", paCount)
 			}()
 			beaconBody.PayloadAttestations = a.aggregatePayloadAttestations(baseState, targetSlot-1, baseBlockRoot)
-		}()
+		})
 	}
 	wg.Wait()
 	if executionErr != nil {
@@ -1312,8 +1305,8 @@ func (a *ApiHandler) getBlockOperations(s *state.CachingBeaconState, targetSlot 
 	*solid.ListSSZ[*cltypes.AttesterSlashing],
 	*solid.ListSSZ[*cltypes.ProposerSlashing],
 	*solid.ListSSZ[*cltypes.SignedVoluntaryExit],
-	*solid.ListSSZ[*cltypes.SignedBLSToExecutionChange]) {
-
+	*solid.ListSSZ[*cltypes.SignedBLSToExecutionChange],
+) {
 	targetEpoch := targetSlot / a.beaconChainCfg.SlotsPerEpoch
 	targetVersion := a.beaconChainCfg.GetCurrentStateVersion(targetEpoch)
 	var maxAttesterSlashings uint64
@@ -1400,8 +1393,8 @@ AttLoop:
 		wc := s.ValidatorSet().
 			Get(int(blsExecutionChange.Message.ValidatorIndex)).
 			WithdrawalCredentials()
-		// Check the validator's withdrawal credentials prefix.
-		if wc[0] != byte(a.beaconChainCfg.ETH1AddressWithdrawalPrefixByte) {
+		// A change is only valid while the validator still has BLS withdrawal credentials.
+		if wc[0] != byte(a.beaconChainCfg.BLSWithdrawalPrefixByte) {
 			continue
 		}
 
@@ -1412,6 +1405,9 @@ AttLoop:
 		}
 		blsToExecutionChanges.Append(blsExecutionChange)
 		slashedIndicies = append(slashedIndicies, blsExecutionChange.Message.ValidatorIndex)
+		if blsToExecutionChanges.Len() >= int(a.beaconChainCfg.MaxBlsToExecutionChanges) {
+			break
+		}
 	}
 	return attesterSlashings, proposerSlashings, voluntaryExits, blsToExecutionChanges
 }
@@ -1484,6 +1480,44 @@ func (a *ApiHandler) PostEthV2BlindedBlocks(w http.ResponseWriter, r *http.Reque
 	return resp, err
 }
 
+func validateBlindedBlockRequest(block *cltypes.SignedBlindedBeaconBlock, version clparams.StateVersion) error {
+	if version < clparams.BellatrixVersion {
+		return errors.New("blinded blocks are unsupported before Bellatrix")
+	}
+	if block == nil || block.Block == nil {
+		return errors.New("missing block")
+	}
+	if block.Block.Body == nil {
+		return errors.New("missing block body")
+	}
+	if block.Block.Body.ExecutionPayload == nil {
+		return errors.New("missing execution payload header")
+	}
+	return nil
+}
+
+func validateBuilderPayload(blockPayload *cltypes.Eth1Block, executionRequests *cltypes.ExecutionRequests, expectedVersion clparams.StateVersion) error {
+	if blockPayload == nil {
+		return errors.New("builder returned nil execution payload")
+	}
+	if blockPayload.Version() != expectedVersion {
+		return fmt.Errorf("builder execution payload version mismatch: got %s, expected %s", blockPayload.Version(), expectedVersion)
+	}
+	if blockPayload.Extra == nil {
+		return errors.New("builder execution payload missing extra data")
+	}
+	if blockPayload.Transactions == nil {
+		return errors.New("builder execution payload missing transactions")
+	}
+	if expectedVersion.AfterOrEqual(clparams.CapellaVersion) && blockPayload.Withdrawals == nil {
+		return errors.New("builder execution payload missing withdrawals")
+	}
+	if expectedVersion.AfterOrEqual(clparams.ElectraVersion) && executionRequests == nil {
+		return errors.New("builder response missing execution requests")
+	}
+	return nil
+}
+
 func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request, apiVersion int) (*beaconhttp.BeaconResponse, error) {
 	ethVersion := r.Header.Get("Eth-Consensus-Version")
 	version, err := a.parseEthConsensusVersion(ethVersion, apiVersion)
@@ -1493,17 +1527,26 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 	if version >= clparams.GloasVersion {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, cltypes.ErrGloasCannotBlind)
 	}
+	defer r.Body.Close()
+	contentType, err := requestContentType(r)
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusUnsupportedMediaType, err)
+	}
+	if contentType != "application/json" && contentType != "application/octet-stream" {
+		return nil, beaconhttp.NewEndpointError(http.StatusUnsupportedMediaType, fmt.Errorf("unsupported content type: %s", contentType))
+	}
+	isJSON := contentType == "application/json"
 
 	// todo: broadcast_validation
 
 	signedBlindedBlock := cltypes.NewSignedBlindedBeaconBlock(a.beaconChainCfg, version)
 	signedBlindedBlock.Block.SetVersion(version)
 	b, err := io.ReadAll(r.Body)
-	defer r.Body.Close()
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
-	if r.Header.Get("Content-Type") == "application/json" {
+	if isJSON {
+		signedBlindedBlock.Block.Body.ExecutionPayload = nil
 		if err := json.Unmarshal(b, signedBlindedBlock); err != nil {
 			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 		}
@@ -1512,6 +1555,17 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 		}
 	}
+	if err := validateBlindedBlockRequest(signedBlindedBlock, version); err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+	}
+	if err := solid.RangeErr(signedBlindedBlock.Block.Body.Attestations, func(_ int, attestation *solid.Attestation, _ int) error {
+		return attestation.ValidateForConfig(a.beaconChainCfg, version)
+	}); err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+	}
+	if isJSON {
+		signedBlindedBlock.Block.SetVersion(version)
+	}
 	// submit and unblind the signedBlindedBlock
 	blockPayload, blobsBundle, executionRequests, err := a.builderClient.SubmitBlindedBlocks(r.Context(), signedBlindedBlock)
 	if err != nil {
@@ -1519,21 +1573,11 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 	}
 
 	if signedBlindedBlock.Version().AfterOrEqual(clparams.FuluVersion) {
-		requestsList := cltypes.GetExecutionRequestsList(a.beaconChainCfg, executionRequests)
-		requestsHash := cltypes.ComputeExecutionRequestHash(requestsList)
-		header, err := blockPayload.RlpHeader(&signedBlindedBlock.Block.ParentRoot, requestsHash)
-		if err != nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
-		}
-		rawBlock := types.RawBlock{Header: header, Body: blockPayload.Body()}
-		blockRlpSize := rawBlock.EncodingSize()
-		blockRlpSize += rlp.ListPrefixLen(blockRlpSize)
-		if blockRlpSize > params.MaxRlpBlockSize {
-			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("block payload rlp size exceeds the limit: %d > %d", blockRlpSize, params.MaxRlpBlockSize))
-		}
-
 		log.Info("Successfully submitted blinded block", "block_num", signedBlindedBlock.Block.Body.ExecutionPayload.BlockNumber, "api_version", apiVersion)
 		return newBeaconResponse(nil), nil
+	}
+	if err := validateBuilderPayload(blockPayload, executionRequests, version); err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
 
 	signedBlock, err := signedBlindedBlock.Unblind(blockPayload)
@@ -2064,30 +2108,53 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	if err := a.forkchoiceStore.OnBlock(ctx, block, true, false, false); err != nil {
 		return err
 	}
-	finalizedHash := a.forkchoiceStore.GetFinalizedExecutionHash(a.forkchoiceStore.FinalizedCheckpoint().Root)
-	safeHash := a.forkchoiceStore.GetFinalizedExecutionHash(a.forkchoiceStore.JustifiedCheckpoint().Root)
-	if _, err := a.engine.ForkChoiceUpdate(ctx, finalizedHash, safeHash, a.forkchoiceStore.GetEth1Hash(blockRoot), nil, block.Version()); err != nil {
-		return err
-	}
-	headState, err := a.forkchoiceStore.GetStateAtBlockRoot(blockRoot, false)
+	headRoot, headSlot, headState, err := a.selectedHeadState(blockRoot)
 	if err != nil {
 		return err
 	}
-	if headState == nil {
-		return errors.New("failed to get head state")
+	finalizedHash := a.forkchoiceStore.GetFinalizedExecutionHash(a.forkchoiceStore.FinalizedCheckpoint().Root)
+	safeHash := a.forkchoiceStore.GetFinalizedExecutionHash(a.forkchoiceStore.JustifiedCheckpoint().Root)
+	headVersion := a.beaconChainCfg.GetCurrentStateVersion(headSlot / a.beaconChainCfg.SlotsPerEpoch)
+	if _, err := a.engine.ForkChoiceUpdate(ctx, finalizedHash, safeHash, a.forkchoiceStore.GetEth1Hash(headRoot), nil, headVersion); err != nil {
+		return err
 	}
 
 	if err := a.indiciesDB.View(ctx, func(tx kv.Tx) error {
-		_, err := a.attestationProducer.ProduceAndCacheAttestationData(tx, headState, blockRoot, block.Block.Slot)
+		_, err := a.attestationProducer.ProduceAndCacheAttestationData(tx, headState, headRoot, block.Block.Slot)
 		return err
 	}); err != nil {
 		return err
 	}
-	if err := a.syncedData.OnHeadStateWithBlockRoot(headState, blockRoot); err != nil {
+	if err := a.syncedData.OnHeadStateWithBlockRoot(headState, headRoot); err != nil {
 		return fmt.Errorf("failed to update synced data: %w", err)
 	}
 
 	return nil
+}
+
+func (a *ApiHandler) selectedHeadState(auxiliaryRoot common.Hash) (common.Hash, uint64, *state.CachingBeaconState, error) {
+	auxiliaryState, err := a.forkchoiceStore.GetStateAtBlockRoot(auxiliaryRoot, false)
+	if err != nil {
+		return common.Hash{}, 0, nil, err
+	}
+	if auxiliaryState == nil {
+		return common.Hash{}, 0, nil, fmt.Errorf("failed to get auxiliary state for root %s", auxiliaryRoot)
+	}
+	headRoot, headSlot, err := a.forkchoiceStore.GetHead(auxiliaryState)
+	if err != nil {
+		return common.Hash{}, 0, nil, err
+	}
+	if headRoot == auxiliaryRoot {
+		return headRoot, headSlot, auxiliaryState, nil
+	}
+	headState, err := a.forkchoiceStore.GetStateAtBlockRoot(headRoot, false)
+	if err != nil {
+		return common.Hash{}, 0, nil, err
+	}
+	if headState == nil {
+		return common.Hash{}, 0, nil, fmt.Errorf("failed to get selected head state for root %s", headRoot)
+	}
+	return headRoot, headSlot, headState, nil
 }
 
 type attestationCandidate struct {
@@ -2122,7 +2189,7 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) 
 		}
 		committeeBits := candidate.CommitteeBits.GetOnIndices()
 		if len(committeeBits) != 1 {
-			log.Warn("invalid candidate commitee bit length %v in attestation pool.", len(committeeBits))
+			log.Warn("invalid candidate committee bit length in attestation pool", "len", len(committeeBits))
 			continue
 		}
 		candCommitteeBit := uint64(committeeBits[0])
@@ -2265,12 +2332,13 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) 
 		}
 		// aggregate signatures
 		var buf [96]byte
-		if len(signatures) == 0 {
+		switch len(signatures) {
+		case 0:
 			// no candidates to merge
 			return nil
-		} else if len(signatures) == 1 {
+		case 1:
 			copy(buf[:], signatures[0])
-		} else {
+		default:
 			aggSig, err := bls.AggregateSignatures(signatures)
 			if err != nil {
 				log.Warn("Cannot aggregate signatures", "err", err)
@@ -2461,8 +2529,8 @@ func (a *ApiHandler) aggregatePayloadAttestations(
 // computeAttestationReward computes the reward for a specific attestation.
 func computeAttestationReward(
 	s abstract.BeaconState,
-	attestation *solid.Attestation) (uint64, error) {
-
+	attestation *solid.Attestation,
+) (uint64, error) {
 	baseRewardPerIncrement := s.BaseRewardPerIncrement()
 	data := attestation.Data
 	currentEpoch := state.Epoch(s)
@@ -2523,16 +2591,13 @@ func (a *ApiHandler) cacheExecutionBody(payload *cltypes.Eth1Block) {
 		})
 	}
 	var ws []*types.Withdrawal
-	if payload.Withdrawals != nil {
-		payload.Withdrawals.Range(func(idx int, w *cltypes.Withdrawal, total int) bool {
-			ws = append(ws, &types.Withdrawal{
-				Index:     w.Index,
-				Validator: w.Validator,
-				Address:   w.Address,
-				Amount:    w.Amount,
-			})
+	if payload.Withdrawals != nil && payload.Withdrawals.Len() > 0 {
+		consensusWithdrawals := make([]*cltypes.Withdrawal, payload.Withdrawals.Len())
+		payload.Withdrawals.Range(func(idx int, w *cltypes.Withdrawal, _ int) bool {
+			consensusWithdrawals[idx] = w
 			return true
 		})
+		ws = cltypes.ConvertConsensusWithdrawalsToExecutionWithdrawals(consensusWithdrawals)
 	}
 	a.blockReader.CacheBlockBody(payload.BlockNumber, rawTxs, ws)
 }

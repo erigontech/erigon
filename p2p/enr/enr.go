@@ -37,7 +37,6 @@
 package enr
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -167,12 +166,12 @@ func (r *Record) Set(e Entry) {
 	case i < len(r.pairs):
 		// insert pair before i-th elem
 		el := pair{e.ENRKey(), blob}
-		pairs = append(pairs, pair{})
+		pairs = append(pairs, pair{}) //nolint:makezero
 		copy(pairs[i+1:], pairs[i:])
 		pairs[i] = el
 	default:
 		// element should be placed at the end of r.pairs
-		pairs = append(pairs, pair{e.ENRKey(), blob})
+		pairs = append(pairs, pair{e.ENRKey(), blob}) //nolint:makezero
 	}
 	r.pairs = pairs
 }
@@ -226,33 +225,37 @@ func decodeRecord(s *rlp.Stream) (dec Record, raw []byte, err error) {
 	}
 
 	// Decode the RLP container.
-	s = rlp.NewStream(bytes.NewReader(raw), 0)
-	if _, err := s.List(); err != nil {
+	rs := rlp.NewBytesStream(raw)
+	defer rlp.PutStream(rs)
+	if _, err := rs.List(); err != nil {
 		return dec, raw, err
 	}
-	if err = s.Decode(&dec.signature); err != nil {
+	if dec.signature, err = rs.Bytes(); err != nil {
 		if errors.Is(err, rlp.EOL) {
 			err = errIncompleteList
 		}
 		return dec, raw, err
 	}
-	if err = s.Decode(&dec.seq); err != nil {
+	if dec.seq, err = rs.Uint64(); err != nil {
 		if errors.Is(err, rlp.EOL) {
 			err = errIncompleteList
 		}
 		return dec, raw, err
 	}
 	// The rest of the record contains sorted k/v pairs.
+	pairsLen := rs.Remaining() / (1 + 1)                // shortest pair: 1-byte key + 1-byte value
+	dec.pairs = make([]pair, 0, int(min(16, pairsLen))) // cap the prealloc, since a record of many tiny pairs would over-reserve
 	var prevkey string
 	for i := 0; ; i++ {
-		var kv pair
-		if err := s.Decode(&kv.k); err != nil {
+		key, err := rs.ViewBytes()
+		if err != nil {
 			if errors.Is(err, rlp.EOL) {
 				break
 			}
 			return dec, raw, err
 		}
-		if err := s.Decode(&kv.v); err != nil {
+		kv := pair{k: string(key)}
+		if kv.v, err = rs.Raw(); err != nil {
 			if errors.Is(err, rlp.EOL) {
 				return dec, raw, errIncompletePair
 			}
@@ -269,7 +272,7 @@ func decodeRecord(s *rlp.Stream) (dec Record, raw []byte, err error) {
 		dec.pairs = append(dec.pairs, kv)
 		prevkey = kv.k
 	}
-	return dec, raw, s.ListEnd()
+	return dec, raw, rs.ListEnd()
 }
 
 // IdentityScheme returns the name of the identity scheme in the record.

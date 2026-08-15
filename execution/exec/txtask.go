@@ -111,15 +111,8 @@ type TxResult struct {
 	Receipt *types.Receipt
 	Logs    []*types.Log
 
-	TraceFroms        map[accounts.Address]struct{}
-	TraceTos          map[accounts.Address]struct{}
-	AccessedAddresses state.AccessSet
-
-	// CollectorWrites holds collector-format writes (all 4 account fields per
-	// address) produced by MakeWriteSet during worker execution. Used by the
-	// parallel finalize path to skip full IBS reconstruction: fee-calc balance
-	// adjustments are applied directly to these writes.
-	CollectorWrites *state.WriteSet
+	TraceFroms map[accounts.Address]struct{}
+	TraceTos   map[accounts.Address]struct{}
 }
 
 func (r *TxResult) compare(other *TxResult) int {
@@ -454,7 +447,7 @@ func (t *TxTask) VersionedReads(ibs *state.IntraBlockState) state.ReadSet {
 }
 
 func (t *TxTask) VersionedWrites(ibs *state.IntraBlockState) *state.WriteSet {
-	return ibs.VersionedWrites(false)
+	return ibs.VersionedWrites()
 }
 
 func (t *TxTask) IsBlockEnd() bool {
@@ -516,10 +509,15 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 
 			//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
 			if genesis != nil {
-				_, ibs, err = genesiswrite.GenesisToBlock(nil, genesis, dirs, txTask.Logger)
+				var genesisIbs *state.IntraBlockState
+				_, genesisIbs, err = genesiswrite.GenesisToBlock(genesis, dirs, txTask.Logger)
 				if err != nil {
 					panic(err)
 				}
+				// Deferred, not closed here: the result's read/write sets are taken
+				// from this state after the switch.
+				defer genesisIbs.Close()
+				ibs = genesisIbs
 			}
 			// For Genesis, rules should be empty, so that empty accounts can be included
 			rules = &chain.Rules{}
@@ -533,7 +531,9 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			return ret, err
 		}
 		result.Err = engine.Initialize(chainConfig, chainReader, header, ibs, syscall, txTask.Logger, nil)
-		if result.Err == nil {
+		if result.Err == nil && !ibs.IsVersioned() {
+			// The versionMap path finalizes from the write-set after the switch;
+			// the serial path commits the init writes here.
 			result.Err = ibs.FinalizeTx(rules, state.NewNoopWriter())
 		}
 	case txTask.IsBlockEnd():
@@ -598,10 +598,11 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		}()
 
 		if result.Err == nil {
-			// TODO these can be removed - use result instead
-			// Update the state with pending changes
-			ibs.SoftFinalise()
-			//txTask.Error = ibs.FinalizeTx(rules, noop)
+			// The versionMap path produces its write-set from the recorded IO
+			// after the switch; only the serial path clears pending changes here.
+			if !ibs.IsVersioned() {
+				ibs.SoftFinalise()
+			}
 			result.Logs = ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), txTask.BlockNumber(), txTask.BlockHash())
 		}
 
@@ -609,13 +610,21 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 	// Prepare read set, write set and balanceIncrease set and send for serialisation
 	if result.Err == nil {
 		txTask.BalanceIncreaseSet = ibs.BalanceIncreaseSet()
-		if err = ibs.MakeWriteSet(rules, stateWriter); err != nil {
-			panic(err)
+		// Genesis (block 0, txIndex -1) resolves `ibs` to the throwaway versioned
+		// IBS that GenesisToBlock builds, whatever the executor. Its writes reach
+		// the executor only through MakeWriteSet(stateWriter); the FinalizedWrites
+		// write-set is not applied for it, so keep genesis on the MakeWriteSet path.
+		isGenesis := txTask.TxIndex == -1 && txTask.BlockNumber() == 0
+		if ibs.IsVersioned() && !isGenesis {
+			result.TxOut = ibs.FinalizedWrites(rules)
+		} else {
+			if err = ibs.MakeWriteSet(rules, stateWriter); err != nil {
+				panic(err)
+			}
+			result.TxOut = txTask.VersionedWrites(ibs)
 		}
 
-		result.AccessedAddresses = ibs.AccessedAddresses()
 		result.TxIn = txTask.VersionedReads(ibs)
-		result.TxOut = txTask.VersionedWrites(ibs)
 	}
 
 	return &result
@@ -687,9 +696,12 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 	}
 
 	result.ExecutionResult.ReceiptGasUsed = gasUsed
-	result.ExecutionResult.BlockRegularGasUsed = gasUsed
-	// Update the state with pending changes
-	ibs.SoftFinalise()
+	result.ExecutionResult.BlockExecutionGasUsed = gasUsed
+	// The versionMap path produces its write-set from the recorded IO after
+	// the switch; only the serial path clears pending changes here.
+	if !ibs.IsVersioned() {
+		ibs.SoftFinalise()
+	}
 	result.Logs = ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), txTask.BlockNumber(), txTask.BlockHash())
 
 	log.Info("🚀[aa] executed AA bundle transaction", "txIndex", txTask.TxIndex, "status", status)
