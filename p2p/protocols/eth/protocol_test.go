@@ -394,34 +394,31 @@ func TestHashOrNumberEncodeRLPPointerIsAllocFree(t *testing.T) {
 	if err := rlp.Encode(&byValue, hn.Hash); err != nil {
 		t.Fatal(err)
 	}
-	if err := rlp.Encode(&byPointer, &hn.Hash); err != nil {
+	if err := hn.EncodeRLP(&byPointer); err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(byValue.Bytes(), byPointer.Bytes()) {
 		t.Fatalf("value=%x pointer=%x", byValue.Bytes(), byPointer.Bytes())
 	}
 
+	// encBuffer is pooled, and sync.Pool deliberately drops values under the race
+	// detector, so the pooled path always allocates there and can't be measured.
 	//goland:noinspection GoBoolExpressions
 	if race.Enabled {
-		return
+		t.Skip("sync.Pool does not pool under -race")
 	}
 
-	// Panic rather than drop the error: a failing Encode would otherwise report a
-	// misleadingly low allocation count. The panic path never runs when it succeeds.
-	mustEncode := func(val any) func() {
-		return func() {
-			if err := rlp.Encode(io.Discard, val); err != nil {
-				panic(err)
+	allocsPerEncode := func(encode func(io.Writer) error) float64 {
+		return testing.AllocsPerRun(200, func() {
+			if err := encode(io.Discard); err != nil {
+				t.Fatal(err)
 			}
-		}
+		})
 	}
-	valueAllocs := testing.AllocsPerRun(200, mustEncode(hn.Hash))
-	pointerAllocs := testing.AllocsPerRun(200, mustEncode(&hn.Hash))
+	valueAllocs := allocsPerEncode(func(w io.Writer) error { return rlp.Encode(w, hn.Hash) })
+	pointerAllocs := allocsPerEncode(hn.EncodeRLP)
 	t.Logf("allocs/op: byValue=%v byPointer=%v", valueAllocs, pointerAllocs)
-	if pointerAllocs >= valueAllocs {
-		t.Errorf("pointer form should allocate less: value=%v pointer=%v", valueAllocs, pointerAllocs)
-	}
 	if pointerAllocs != 0 {
-		t.Errorf("pointer form should not allocate, got %v", pointerAllocs)
+		t.Errorf("EncodeRLP should not allocate, got %v (value form: %v)", pointerAllocs, valueAllocs)
 	}
 }

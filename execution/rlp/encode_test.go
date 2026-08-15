@@ -608,28 +608,30 @@ func TestEncodeValueAndPointerAgree(t *testing.T) {
 // fields of a value boxed into an interface are not addressable, so every [N]byte
 // field costs a reflect.New copy that the pointer form avoids entirely.
 func TestEncodePointerAvoidsByteArrayCopies(t *testing.T) {
+	// encBuffer is pooled, and sync.Pool deliberately drops values under the race
+	// detector, so the pooled path always allocates there and can't be measured.
+	//goland:noinspection GoBoolExpressions
+	if race.Enabled {
+		t.Skip("sync.Pool does not pool under -race")
+	}
+
 	v := ptrTestOuter{Inners: []*ptrTestInner{{}}, Payload: make([]byte, 64)}
 
-	// Panic rather than drop the error: a failing Encode would otherwise report a
-	// misleadingly low allocation count. The panic path never runs when it succeeds.
-	mustEncode := func(val any) func() {
-		return func() {
+	allocsPerEncode := func(val any) float64 {
+		return testing.AllocsPerRun(200, func() {
 			if err := Encode(io.Discard, val); err != nil {
-				panic(err)
+				t.Fatal(err)
 			}
-		}
+		})
 	}
-	byValue := testing.AllocsPerRun(200, mustEncode(v))
-	byPointer := testing.AllocsPerRun(200, mustEncode(&v))
+	byValue := allocsPerEncode(v)
+	byPointer := allocsPerEncode(&v)
 	t.Logf("allocs/op: byValue=%v byPointer=%v", byValue, byPointer)
 
 	if byValue <= byPointer {
 		t.Errorf("expected the value form to allocate more than the pointer form, got value=%v pointer=%v", byValue, byPointer)
 	}
-	// encBuffer comes from a sync.Pool, which deliberately drops values under the
-	// race detector, so only the relative comparison above holds there.
-	//goland:noinspection GoBoolExpressions
-	if !race.Enabled && byPointer != 0 {
+	if byPointer != 0 {
 		t.Errorf("pointer form should not allocate, got %v allocs/op", byPointer)
 	}
 }
