@@ -90,10 +90,9 @@ func parseDistanceNumber(s, flag, aliasHint string) (uint64, error) {
 }
 
 // stateHistoryDistanceCLIValue renders a state-history-style distance as its
-// operator-facing argument. keepAll is the flag's own "keep-all" sentinel, the
-// same one parseStateHistoryDistance takes: each flag maps the alias to a
-// different value, so only that one may render as the alias. Other sentinels
-// render as their number, which the parser still accepts unchanged.
+// operator-facing argument. Each flag maps "keep-all" to its own sentinel, so
+// only keepAll — the same sentinel parseStateHistoryDistance takes — may render
+// as the alias; any other sentinel stays a number the parser still accepts.
 func stateHistoryDistanceCLIValue(v uint64, keepAll Distance) string {
 	if Distance(v) == keepAll {
 		return "keep-all"
