@@ -752,7 +752,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 		if err != nil {
 			return fmt.Errorf("malformatted socket url %s: %w", cfg.SocketListenUrl, err)
 		}
-		tcpListener, err := net.Listen(socketUrl.Scheme, socketUrl.Host+socketUrl.EscapedPath())
+		tcpListener, err := net.Listen(socketUrl.Scheme, socketUrl.Host+socketUrl.EscapedPath()) //nolint:noctx
 		if err != nil {
 			return fmt.Errorf("could not start Socket Listener: %w", err)
 		}
@@ -875,7 +875,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 	)
 	if cfg.GRPCServerEnabled {
 		grpcEndpoint = fmt.Sprintf("%s:%d", cfg.GRPCListenAddress, cfg.GRPCPort)
-		if grpcListener, err = net.Listen("tcp", grpcEndpoint); err != nil {
+		if grpcListener, err = net.Listen("tcp", grpcEndpoint); err != nil { //nolint:noctx
 			return fmt.Errorf("could not start GRPC listener: %w", err)
 		}
 		grpcServer = grpc.NewServer()
