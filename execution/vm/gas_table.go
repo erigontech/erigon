@@ -53,9 +53,9 @@ func coldStorageAccessCost(rules *chain.Rules) uint64 {
 	return params.ColdSloadCostEIP2929
 }
 
-// MemoryGasCost calculates the quadratic gas for memory expansion. It does so
+// memoryGasCost calculates the quadratic gas for memory expansion. It does so
 // only for the memory region that is expanded, not the total memory.
-func MemoryGasCost(callContext *CallContext, newMemSize uint64) (uint64, error) {
+func memoryGasCost(callContext *CallContext, newMemSize uint64) (uint64, error) {
 	if newMemSize == 0 {
 		return 0, nil
 	}
@@ -95,7 +95,7 @@ func MemoryGasCost(callContext *CallContext, newMemSize uint64) (uint64, error) 
 func memoryCopierGas(stackpos int) gasFunc {
 	return func(_ *EVM, callContext *CallContext, scaopeGas mdgas.MdGas, memorySize uint64) (mdgas.MdGas, error) {
 		// Gas for expanding the memory
-		gas, err := MemoryGasCost(callContext, memorySize)
+		gas, err := memoryGasCost(callContext, memorySize)
 		if err != nil {
 			return mdgas.MdGas{}, err
 		}
@@ -263,7 +263,7 @@ func makeGasLog(n uint64) gasFunc {
 			return mdgas.MdGas{}, ErrGasUintOverflow
 		}
 
-		gas, err := MemoryGasCost(callContext, memorySize)
+		gas, err := memoryGasCost(callContext, memorySize)
 		if err != nil {
 			return mdgas.MdGas{}, err
 		}
@@ -287,7 +287,7 @@ func makeGasLog(n uint64) gasFunc {
 }
 
 func gasKeccak256(_ *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGas, error) {
-	gas, err := MemoryGasCost(callContext, memorySize)
+	gas, err := memoryGasCost(callContext, memorySize)
 	if err != nil {
 		return mdgas.MdGas{}, err
 	}
@@ -308,7 +308,7 @@ func gasKeccak256(_ *EVM, callContext *CallContext, availableGas mdgas.MdGas, me
 // static cost have a dynamic cost which is solely based on the memory
 // expansion
 func pureMemoryGascost(_ *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGas, error) {
-	g, err := MemoryGasCost(callContext, memorySize)
+	g, err := memoryGasCost(callContext, memorySize)
 	return mdgas.MdGas{Execution: g}, err
 }
 
@@ -324,7 +324,7 @@ func gasCreate(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, mem
 	if evm.readOnly {
 		return mdgas.MdGas{}, ErrWriteProtection
 	}
-	g, err := MemoryGasCost(callContext, memorySize)
+	g, err := memoryGasCost(callContext, memorySize)
 	return mdgas.MdGas{Execution: g}, err
 }
 
@@ -332,7 +332,7 @@ func gasCreate2(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, me
 	if evm.readOnly {
 		return mdgas.MdGas{}, ErrWriteProtection
 	}
-	gas, err := MemoryGasCost(callContext, memorySize)
+	gas, err := memoryGasCost(callContext, memorySize)
 	if err != nil {
 		return mdgas.MdGas{}, err
 	}
@@ -356,7 +356,7 @@ func gasCreateEip3860(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 	if evm.readOnly {
 		return mdgas.MdGas{}, ErrWriteProtection
 	}
-	gas.Execution, err = MemoryGasCost(callContext, memorySize)
+	gas.Execution, err = memoryGasCost(callContext, memorySize)
 	if err != nil {
 		return mdgas.MdGas{}, err
 	}
@@ -381,7 +381,7 @@ func gasCreate2Eip3860(evm *EVM, callContext *CallContext, availableGas mdgas.Md
 	if evm.readOnly {
 		return mdgas.MdGas{}, ErrWriteProtection
 	}
-	gas.Execution, err = MemoryGasCost(callContext, memorySize)
+	gas.Execution, err = memoryGasCost(callContext, memorySize)
 	if err != nil {
 		return mdgas.MdGas{}, err
 	}
@@ -440,7 +440,7 @@ func statelessGasCall(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 	if transfersValue {
 		gas.Execution += callValueTransferGas(evm.ChainRules())
 	}
-	memoryGas, err := MemoryGasCost(callContext, memorySize)
+	memoryGas, err := memoryGasCost(callContext, memorySize)
 	if err != nil {
 		return mdgas.MdGas{}, transfersValue, err
 	}
@@ -566,7 +566,7 @@ func statefulGasCallCode(evm *EVM, callContext *CallContext, gas mdgas.MdGas, av
 }
 
 func statelessGasCallCode(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64, withCallGasCalc bool) (mdgas.MdGas, bool, error) {
-	memoryGas, err := MemoryGasCost(callContext, memorySize)
+	memoryGas, err := memoryGasCost(callContext, memorySize)
 	if err != nil {
 		return mdgas.MdGas{}, false, err
 	}
@@ -619,7 +619,7 @@ func statefulGasDelegateCall(evm *EVM, callContext *CallContext, gas mdgas.MdGas
 }
 
 func statelessGasDelegateCall(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64, withCallGasCalc bool) (mdgas.MdGas, bool, error) {
-	gas, err := MemoryGasCost(callContext, memorySize)
+	gas, err := memoryGasCost(callContext, memorySize)
 	if err != nil {
 		return mdgas.MdGas{}, false, err
 	}
@@ -670,7 +670,7 @@ func statefulGasStaticCall(evm *EVM, callContext *CallContext, gas mdgas.MdGas, 
 }
 
 func statelessGasStaticCall(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64, withCallGasCalc bool) (mdgas.MdGas, bool, error) {
-	gas, err := MemoryGasCost(callContext, memorySize)
+	gas, err := memoryGasCost(callContext, memorySize)
 	if err != nil {
 		return mdgas.MdGas{}, false, err
 	}
