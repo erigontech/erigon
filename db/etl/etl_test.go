@@ -41,7 +41,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
 func decodeHex(in string) []byte {
@@ -100,7 +100,7 @@ func TestEmptyValueIsNotANil(t *testing.T) {
 
 func TestEmptyKeyValue(t *testing.T) {
 	logger := log.New()
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	require := require.New(t)
 	table := kv.ChaindataTables[0]
 	collector := NewCollector(t.Name(), "", NewSortableBuffer(1), logger)
@@ -185,7 +185,7 @@ func TestNextKeyErr(t *testing.T) {
 func TestFileDataProviders(t *testing.T) {
 	logger := log.New()
 	// test invariant when we go through files (> 1 buffer)
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	sourceBucket := kv.ChaindataTables[0]
 
 	generateTestData(t, tx, sourceBucket, 10)
@@ -219,7 +219,7 @@ func TestFileDataProviders(t *testing.T) {
 func TestRAMDataProviders(t *testing.T) {
 	logger := log.New()
 	// test invariant when we go through memory (1 buffer)
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	sourceBucket := kv.ChaindataTables[0]
 	generateTestData(t, tx, sourceBucket, 10)
 
@@ -239,7 +239,7 @@ func TestRAMDataProviders(t *testing.T) {
 func TestTransformRAMOnly(t *testing.T) {
 	logger := log.New()
 	// test invariant when we only have one buffer and it fits into RAM (exactly 1 buffer)
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 
 	sourceBucket := kv.ChaindataTables[0]
 	destBucket := kv.ChaindataTables[1]
@@ -261,7 +261,7 @@ func TestTransformRAMOnly(t *testing.T) {
 
 func TestEmptySourceBucket(t *testing.T) {
 	logger := log.New()
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	sourceBucket := kv.ChaindataTables[0]
 	destBucket := kv.ChaindataTables[1]
 	err := Transform(
@@ -282,7 +282,7 @@ func TestEmptySourceBucket(t *testing.T) {
 func TestTransformExtractStartKey(t *testing.T) {
 	logger := log.New()
 	// test invariant when we only have one buffer and it fits into RAM (exactly 1 buffer)
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	sourceBucket := kv.ChaindataTables[0]
 	destBucket := kv.ChaindataTables[1]
 	generateTestData(t, tx, sourceBucket, 10)
@@ -304,7 +304,7 @@ func TestTransformExtractStartKey(t *testing.T) {
 func TestTransformThroughFiles(t *testing.T) {
 	logger := log.New()
 	// test invariant when we go through files (> 1 buffer)
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	sourceBucket := kv.ChaindataTables[0]
 	destBucket := kv.ChaindataTables[1]
 	generateTestData(t, tx, sourceBucket, 10)
@@ -328,7 +328,7 @@ func TestTransformThroughFiles(t *testing.T) {
 func TestTransformDoubleOnExtract(t *testing.T) {
 	logger := log.New()
 	// test invariant when extractFunc multiplies the data 2x
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	sourceBucket := kv.ChaindataTables[0]
 	destBucket := kv.ChaindataTables[1]
 	generateTestData(t, tx, sourceBucket, 10)
@@ -350,7 +350,7 @@ func TestTransformDoubleOnExtract(t *testing.T) {
 func TestTransformDoubleOnLoad(t *testing.T) {
 	logger := log.New()
 	// test invariant when loadFunc multiplies the data 2x
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	sourceBucket := kv.ChaindataTables[0]
 	destBucket := kv.ChaindataTables[1]
 	generateTestData(t, tx, sourceBucket, 10)
@@ -1497,7 +1497,7 @@ func TestVmtouchMmap(t *testing.T) {
 
 	vmtouch := func(label string) {
 		fmt.Printf("\n=== %s ===\n", label)
-		cmd := exec.Command("vmtouch", "-v", fname)
+		cmd := exec.Command("vmtouch", "-v", fname) //nolint:noctx
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		cmd.Run()
@@ -1546,7 +1546,7 @@ func TestVmtouchMmap(t *testing.T) {
 // set is built upfront) cost no buffer at all.
 func TestCollectorWithAllocatorDrawsBufferLazily(t *testing.T) {
 	logger := log.New()
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	require := require.New(t)
 	table := kv.ChaindataTables[0]
 

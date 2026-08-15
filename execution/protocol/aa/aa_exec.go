@@ -64,7 +64,7 @@ func ValidateAATransaction(
 	}
 	validationGasUsed = preTxCost
 
-	if err := chargeGas(header, tx, gasPool, ibs, preTxCost); err != nil {
+	if err := chargeGas(header, tx, gasPool, ibs); err != nil {
 		return nil, 0, err
 	}
 

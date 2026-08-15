@@ -24,6 +24,7 @@ import (
 	"math/big"
 	"unsafe"
 
+	"github.com/holiman/uint256"
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/common"
@@ -416,6 +417,14 @@ type StorageKeysInfo struct {
 	KeyLength int
 }
 
+func (s StorageKeysInfo) EncodeKey() string {
+	if s.KeyLength == 32 {
+		return hexutil.Encode(s.Hash[:])
+	}
+	u := s.Hash.U256()
+	return u.Hex()
+}
+
 // GetProof implements eth_getProof; historical blocks are supported as far back as the commitment history allows.
 func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storageKeys []hexutil.Bytes, blockNrOrHashArg *rpc.BlockNumberOrHash) (*accounts.AccProofResult, error) {
 	blockNrOrHash := orLatest(blockNrOrHashArg)
@@ -460,22 +469,6 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 }
 
 func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address common.Address, storageKeys []StorageKeysInfo, blockNrOrHash rpc.BlockNumberOrHash, logger log.Logger) (*accounts.AccProofResult, error) {
-
-	// Output key encoding is a bit special: if the input was a 32-byte hash, it is
-	// returned as such. Otherwise, we apply the QUANTITY encoding mandated by the
-	// JSON-RPC spec for getProof. This behavior exists to preserve backwards
-	// compatibility with older client versions.
-	getKey := func(storageKey StorageKeysInfo) string {
-		var outputKey string
-
-		if storageKey.KeyLength != 32 {
-			outputKey = hexutil.EncodeBig(storageKey.Hash.Big())
-		} else {
-			outputKey = hexutil.Encode(storageKey.Hash[:])
-		}
-		return outputKey
-	}
-
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -536,7 +529,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	// set initial response fields
 	proof := &accounts.AccProofResult{
 		Address:      address,
-		Balance:      new(hexutil.Big),
+		Balance:      new(hexutil.U256),
 		Nonce:        hexutil.Uint64(0),
 		CodeHash:     common.Hash{},
 		StorageHash:  common.Hash{},
@@ -555,8 +548,8 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	if acc == nil {
 		for i, storageKey := range storageKeys {
 			proof.StorageProof[i] = accounts.StorProofResult{
-				Key:   getKey(storageKey),
-				Value: new(hexutil.Big),
+				Key:   storageKey.EncodeKey(),
+				Value: new(hexutil.U256),
 				Proof: []hexutil.Bytes{},
 			}
 		}
@@ -567,7 +560,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		return proof, nil
 	}
 
-	proof.Balance = (*hexutil.Big)(acc.Balance.ToBig())
+	proof.Balance = (*hexutil.U256)(new(uint256.Int).Set(&acc.Balance))
 	proof.Nonce = hexutil.Uint64(acc.Nonce)
 	proof.CodeHash = acc.CodeHash.Value()
 	proof.StorageHash = acc.Root
@@ -601,11 +594,11 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		proof.StorageProof[i].Key = getKey(storageKey)
+		proof.StorageProof[i].Key = storageKey.EncodeKey()
 		// if we have simple non contract account just set values directly without requesting any key proof
 		if proof.StorageHash.Cmp(common.BytesToHash(empty.RootHash[:])) == 0 {
 			proof.StorageProof[i].Proof = []hexutil.Bytes{}
-			proof.StorageProof[i].Value = new(hexutil.Big)
+			proof.StorageProof[i].Value = new(hexutil.U256)
 			continue
 		}
 
@@ -626,7 +619,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		if err != nil {
 			logger.Warn(fmt.Sprintf("couldn't read account storage for the address %s\n", address.String()))
 		}
-		proof.StorageProof[i].Value = (*hexutil.Big)(res.ToBig())
+		proof.StorageProof[i].Value = (*hexutil.U256)(&res)
 
 		// 0x80 represents RLP encoding of an empty proof slice
 		proof.StorageProof[i].Proof = []hexutil.Bytes{[]byte{0x80}}

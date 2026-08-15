@@ -110,7 +110,7 @@ func packBitsInto(dst [][32]byte, bytes []byte) [][32]byte {
 }
 
 func parseBitlist(dst, buf []byte) ([]byte, uint64) {
-	// a bitlist without its sentinel bit has no recoverable length
+	// A bitlist without its sentinel bit has no recoverable length.
 	if len(buf) == 0 || buf[len(buf)-1] == 0 {
 		return dst, 0
 	}

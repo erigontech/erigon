@@ -97,8 +97,6 @@ var (
 	errInvalidMixDigest = errors.New("non-zero mix digest")
 	// errInvalidUncleHash is returned if a block contains an non-empty uncle list.
 	errInvalidUncleHash = errors.New("non empty uncle hash")
-	// errInvalidDifficulty is returned if the difficulty of a block neither 1 or 2.
-	errInvalidDifficulty = errors.New("invalid difficulty")
 	// errInvalidTimestamp is returned if the timestamp of a block is lower than
 	// the previous block's timestamp + the minimum block period.
 	errInvalidTimestamp = errors.New("invalid timestamp")
