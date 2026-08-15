@@ -99,7 +99,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		return nil, err
 	}
 
-	header, err := api.headerByNumber(ctx, rpc.BlockNumber(blockNumber), tx)
+	header, err := api._blockReader.HeaderByNumber(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -828,7 +828,7 @@ func (api *TraceAPIImpl) callBlock(
 		RequireCanonical: true,
 	}
 
-	err := rpchelper.CheckBlockExecuted(api.filters.WithOverlay(dbtx), blockNumber)
+	err := rpchelper.CheckBlockExecuted(dbtx, blockNumber)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1173,7 +1173,7 @@ func (api *TraceAPIImpl) callTransaction(
 		RequireCanonical: true,
 	}
 
-	err := rpchelper.CheckBlockExecuted(api.filters.WithOverlay(dbtx), blockNumber)
+	err := rpchelper.CheckBlockExecuted(dbtx, blockNumber)
 	if err != nil {
 		return nil, err
 	}

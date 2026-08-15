@@ -25,9 +25,15 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/execmodule"
+	"github.com/erigontech/erigon/execution/tracing/tracers/config"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
@@ -65,5 +71,43 @@ func TestTraceCallUsesCommittedState(t *testing.T) {
 
 	expected := make(hexutil.Bytes, 32)
 	expected[len(expected)-1] = 2
+	require.Equal(t, expected, result.Output)
+}
+
+func TestTraceCallUsesCommittedHeader(t *testing.T) {
+	base, m, _, events := newOverlayAheadTestAPIWithEvents(t)
+
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	committedHeader, err := m.BlockReader.HeaderByNumber(m.Ctx, tx, overlayRaceChainSize)
+	require.NoError(t, err)
+	require.NotNil(t, committedHeader)
+	committedHash := committedHeader.Hash()
+
+	overlayHeader := types.CopyHeader(committedHeader)
+	overlayHeader.Coinbase = common.Address{2}
+	overlay := events.LatestSD().BlockOverlay()
+	require.NoError(t, rawdb.WriteHeader(overlay, overlayHeader))
+	require.NoError(t, rawdb.WriteCanonicalHash(overlay, overlayHeader.Hash(), overlayRaceChainSize))
+
+	contractAddress := common.Address{3}
+	coinbaseCode := hexutil.Bytes{byte(vm.COINBASE), 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3}
+	traceConfig := &config.TraceConfig{
+		StateOverrides: &ethapi.StateOverrides{
+			accounts.InternAddress(contractAddress): {Code: &coinbaseCode},
+		},
+	}
+	requestedBlock := rpc.BlockNumberOrHashWithHash(committedHash, true)
+	api := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
+	result, err := api.Call(m.Ctx, TraceCallParam{
+		From: &m.Address,
+		To:   &contractAddress,
+	}, []string{TraceTypeTrace}, &requestedBlock, traceConfig)
+	require.NoError(t, err)
+
+	expected := make(hexutil.Bytes, 32)
+	copy(expected[len(expected)-len(committedHeader.Coinbase):], committedHeader.Coinbase[:])
 	require.Equal(t, expected, result.Output)
 }
