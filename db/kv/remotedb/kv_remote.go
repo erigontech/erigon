@@ -734,6 +734,11 @@ func (tx *tx) GetLatest(name kv.Domain, k []byte) (v []byte, step kv.Step, err e
 	return reply.V, 0, nil
 }
 
+func (tx *tx) GetLatestValSize(name kv.Domain, k []byte) (size int, found bool, err error) {
+	v, _, err := tx.GetLatest(name, k)
+	return len(v), len(v) > 0, err
+}
+
 func (tx *tx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
 	req := &remoteproto.HasPrefixReq{TxId: tx.id, Table: name.String(), Prefix: prefix}
 	reply, err := tx.db.remoteKV.HasPrefix(tx.ctx, req)

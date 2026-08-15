@@ -85,7 +85,7 @@ func TestGenesisBlockRoots(t *testing.T) {
 	t.Parallel()
 	require := require.New(t)
 
-	block, ibs, err := genesiswrite.GenesisToBlock(t, chainspec.MainnetGenesisBlock(), datadir.New(t.TempDir()), log.Root())
+	block, ibs, err := genesiswrite.GenesisToBlock(chainspec.MainnetGenesisBlock(), datadir.New(t.TempDir()), log.Root())
 	require.NoError(err)
 	ibs.Close()
 
@@ -101,7 +101,7 @@ func TestGenesisBlockRoots(t *testing.T) {
 		require.NoError(err)
 		require.False(spec.IsEmpty())
 
-		block, ibs, err = genesiswrite.GenesisToBlock(t, spec.Genesis, datadir.New(t.TempDir()), log.Root())
+		block, ibs, err = genesiswrite.GenesisToBlock(spec.Genesis, datadir.New(t.TempDir()), log.Root())
 		require.NoError(err)
 		ibs.Close()
 

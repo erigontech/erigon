@@ -33,7 +33,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
@@ -57,7 +57,7 @@ func newTestLegacyTx(nonce uint64, to common.Address, value uint256.Int, gasLimi
 }
 
 func TestWriteRawTransactions(t *testing.T) {
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	defer tx.Rollback()
 
 	rawTx1 := []byte("raw_transaction_1")
@@ -82,7 +82,7 @@ func TestWriteRawTransactions(t *testing.T) {
 }
 
 func TestWriteRawTransactions_EmptySlice(t *testing.T) {
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	defer tx.Rollback()
 
 	// Test with empty slice
@@ -100,7 +100,7 @@ func TestWriteRawTransactions_EmptySlice(t *testing.T) {
 }
 
 func TestWriteTransactions(t *testing.T) {
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	defer tx.Rollback()
 
 	tx1 := types.NewTransaction(0, common.HexToAddress("0x1234"), uint256.NewInt(100), 21000, uint256.NewInt(1000000000), []byte{})
@@ -135,7 +135,7 @@ func TestWriteTransactions(t *testing.T) {
 }
 
 func TestWriteTransactions_EmptySlice(t *testing.T) {
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	defer tx.Rollback()
 
 	err := rawdb.WriteTransactions(tx, []types.Transaction{}, types.BaseTxnID(300))
@@ -154,10 +154,10 @@ func TestWriteTransactions_WrapperBehavior(t *testing.T) {
 	// This test verifies that WriteTransactions is truly a wrapper around WriteRawTransactions
 	// by comparing the results of both functions with the same input
 
-	_, tx1 := memdb.NewTestTx(t)
+	_, tx1 := mdbxtest.NewTestTx(t)
 	defer tx1.Rollback()
 
-	_, tx2 := memdb.NewTestTx(t)
+	_, tx2 := mdbxtest.NewTestTx(t)
 	defer tx2.Rollback()
 
 	tx := types.NewTransaction(1337, common.HexToAddress("0x1234"), uint256.NewInt(100), 21000, uint256.NewInt(1000000000), []byte{})
@@ -190,7 +190,7 @@ func TestWriteTransactions_WrapperBehavior(t *testing.T) {
 }
 
 func TestWriteTransactions_SequentialTxnIDs(t *testing.T) {
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	defer tx.Rollback()
 
 	txs := make([]types.Transaction, 5)
@@ -220,7 +220,7 @@ func TestWriteTransactions_SequentialTxnIDs(t *testing.T) {
 }
 
 func TestWriteRawTransactions_SequentialTxnIDs(t *testing.T) {
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	defer tx.Rollback()
 
 	// Create test raw transaction data
@@ -248,7 +248,7 @@ func TestWriteRawTransactions_SequentialTxnIDs(t *testing.T) {
 }
 
 func TestWriteTransactions_UniqueKeys(t *testing.T) {
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	defer tx.Rollback()
 
 	txs := make([]types.Transaction, 5)
@@ -288,7 +288,7 @@ func TestWriteTransactions_UniqueKeys(t *testing.T) {
 }
 
 func TestWriteRawTransactions_UniqueKeys(t *testing.T) {
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	defer tx.Rollback()
 
 	rawTxs := [][]byte{
@@ -330,7 +330,7 @@ func TestWriteRawTransactions_UniqueKeys(t *testing.T) {
 }
 
 func TestTxnByIdxInBlock(t *testing.T) {
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	defer tx.Rollback()
 
 	const blockNum = uint64(1)
@@ -743,7 +743,7 @@ func TestCanonicalMappingStorage(t *testing.T) {
 // Tests that head headers and head blocks can be assigned, individually.
 func TestHeadStorage2(t *testing.T) {
 	t.Parallel()
-	_, db := memdb.NewTestTx(t)
+	_, db := mdbxtest.NewTestTx(t)
 
 	blockHead := types.NewBlockWithHeader(&types.Header{Extra: []byte("test block header")})
 	blockFull := types.NewBlockWithHeader(&types.Header{Extra: []byte("test block full")})
@@ -1156,7 +1156,7 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 
 func TestReadBlockLoadsEmptyBlockAccessList(t *testing.T) {
 	t.Parallel()
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	defer tx.Rollback()
 
 	emptyBALHash := empty.BlockAccessListHash
@@ -1190,7 +1190,7 @@ func TestReadBlockLoadsEmptyBlockAccessList(t *testing.T) {
 
 func TestBlockAccessListStorage(t *testing.T) {
 	t.Parallel()
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	defer tx.Rollback()
 
 	block := types.NewBlockWithHeader(&types.Header{
@@ -1398,7 +1398,7 @@ func checkReceiptsRLP(have, want types.Receipts) error {
 // slot and takes TxCount raw entries therefore drifts past its block and returns
 // another chain's transactions.
 func TestRawTransactionsRangeExcludesForeignTxns(t *testing.T) {
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	require := require.New(t)
 	genesisHash := common.Hash{0x0e}
 	require.NoError(rawdb.WriteBodyForStorage(tx, genesisHash, 0, &types.BodyForStorage{BaseTxnID: 0, TxCount: 2}))

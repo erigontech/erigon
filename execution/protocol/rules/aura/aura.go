@@ -193,7 +193,7 @@ func (e *EpochManager) zoomToAfter(chain rules.ChainHeaderReader, er *NonTransac
 		e.finalityChecker = NewRollingFinality(epochSet)
 		if proof.SignalNumber >= DEBUG_LOG_FROM {
 			fmt.Printf("new rolling finality: %d\n", proof.SignalNumber)
-			for i := 0; i < len(epochSet); i++ {
+			for i := range epochSet {
 				fmt.Printf("\t%x\n", epochSet[i])
 			}
 		}

@@ -538,7 +538,11 @@ func (s *EthBackendServer) AAValidation(ctx context.Context, req *remoteproto.AA
 		return nil, err
 	}
 
-	totalGasLimit := preTxCost + aaTxn.ValidationGasLimit + aaTxn.PaymasterValidationGasLimit + aaTxn.GasLimit + aaTxn.PostOpGasLimit
+	totalGasLimit, ok := aaTxn.TotalGasLimit(preTxCost)
+	if !ok {
+		log.Info("RIP-7560 validation err", "err", "gas limits sum overflows uint64")
+		return &remoteproto.AAValidationReply{Valid: false}, nil
+	}
 	_, _, err = aa.ValidateAATransaction(aaTxn, ibs, new(protocol.GasPool).AddGas(totalGasLimit), header, evm, s.chainConfig)
 	if err != nil {
 		log.Info("RIP-7560 validation err", "err", err.Error())

@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/prune"
 )
 
@@ -36,8 +37,7 @@ const testDupSortTable = "TestDupSort"
 
 func openTestDB(tb testing.TB) kv.RwDB {
 	tb.Helper()
-	return mdbx2.New(dbcfg.ChainDB, log.New()).
-		InMem(tb, tb.TempDir()).
+	return mdbxtest.InMem(tb, mdbx2.New(dbcfg.ChainDB, log.New()), tb.TempDir()).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
 			return kv.TableCfg{testTxLookupTable: {}}
 		}).MustOpen()
@@ -45,8 +45,7 @@ func openTestDB(tb testing.TB) kv.RwDB {
 
 func openTestDupSortDB(tb testing.TB) kv.RwDB {
 	tb.Helper()
-	return mdbx2.New(dbcfg.ChainDB, log.New()).
-		InMem(tb, tb.TempDir()).
+	return mdbxtest.InMem(tb, mdbx2.New(dbcfg.ChainDB, log.New()), tb.TempDir()).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
 			return kv.TableCfg{testDupSortTable: {Flags: kv.DupSort}}
 		}).MustOpen()

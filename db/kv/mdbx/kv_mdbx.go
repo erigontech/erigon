@@ -29,7 +29,6 @@ import (
 	"slices"
 	"sync"
 	"sync/atomic"
-	"testing"
 	"time"
 	"unsafe"
 
@@ -159,7 +158,7 @@ func (opts MdbxOpts) Readonly(v bool) MdbxOpts   { return opts.boolToFlag(v, mdb
 func (opts MdbxOpts) Accede(v bool) MdbxOpts     { return opts.boolToFlag(v, mdbx.Accede) }
 func (opts MdbxOpts) AutoRemove(v bool) MdbxOpts { opts.autoRemove = v; return opts }
 
-func (opts MdbxOpts) InMem(tb testing.TB, tmpDir string) MdbxOpts {
+func (opts MdbxOpts) InMem(tmpDir string) MdbxOpts {
 	if tmpDir != "" {
 		if err := os.MkdirAll(tmpDir, 0755); err != nil {
 			panic(err)
@@ -171,20 +170,11 @@ func (opts MdbxOpts) InMem(tb testing.TB, tmpDir string) MdbxOpts {
 	}
 	opts.path = path
 	opts.inMem = true
-	opts.autoRemove = tb == nil
+	opts.autoRemove = true
 	opts.flags = mdbx.UtterlyNoSync | mdbx.NoMetaSync | mdbx.NoMemInit
 	opts.growthStep = 2 * datasize.MB
 	opts.mapSize = 16 * datasize.GB
 	opts.dirtySpace = uint64(16 * datasize.MB)
-	if tb != nil {
-		opts.dirtySpace = uint64(2 * datasize.MB)
-		// Parallel unit tests pile 16GB VA reservations into the Go race heap
-		// window ("too many address space collisions for -race mode"); cap them.
-		// Benchmarks run sequentially and can need the full map.
-		if _, isBench := tb.(*testing.B); !isBench {
-			opts.mapSize = 1 * datasize.GB
-		}
-	}
 	opts.shrinkThreshold = 0 // disable
 	opts.pageSize = 4096
 	return opts

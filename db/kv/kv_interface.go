@@ -487,6 +487,7 @@ type TemporalTx interface {
 	Tx
 	TemporalGetter
 	WithFreezeInfo
+	GetLatestValSize(name Domain, k []byte) (size int, found bool, err error)
 
 	// GetAsOf - state as of given `ts`
 	// Example: GetAsOf(Account, key, txNum) - returns account's value before `txNum` transaction changed it
