@@ -19,7 +19,6 @@ package execmodule
 import (
 	"context"
 	"fmt"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -125,7 +124,7 @@ type ExecutionModule interface {
 	// InsertBlocks stores one or more blocks in the execution layer.
 	// Returns ExecutionStatusSuccess on success or a non-success status on
 	// rejection (e.g. ExecutionStatusTooFarAway).
-	InsertBlocks(ctx context.Context, blocks []*types.RawBlock) (ExecutionStatus, error)
+	InsertBlocks(ctx context.Context, blocks []*types.Block) (ExecutionStatus, error)
 
 	// --- Chain validation -------------------------------------------------
 
@@ -204,7 +203,7 @@ type ExecutionModule interface {
 	// GetTD returns the total difficulty for the block identified by
 	// blockHash and/or blockNumber.  Pass nil for an unknown argument.
 	// Returns nil (no error) when the block is not found.
-	GetTD(ctx context.Context, blockHash *common.Hash, blockNumber *uint64) (*big.Int, error)
+	GetTD(ctx context.Context, blockHash *common.Hash, blockNumber *uint64) (*uint256.Int, error)
 
 	// --- Module state -----------------------------------------------------
 

@@ -18,21 +18,18 @@ package kvcache
 
 import (
 	"bytes"
-
 	"context"
 	"encoding/binary"
 	"fmt"
-	"hash"
-
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	keccak "github.com/erigontech/fastkeccak"
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -102,7 +99,6 @@ type CacheView interface {
 //   - changes in Canonical View SHOULD reflect in stateEvict
 //   - changes in Non-Canonical View SHOULD NOT reflect in stateEvict
 type Coherent struct {
-	hasher               hash.Hash
 	codeEvictLen         metrics.Gauge
 	codeKeys             metrics.Gauge
 	keys                 metrics.Gauge
@@ -121,7 +117,6 @@ type Coherent struct {
 	lock                 sync.Mutex
 	waitExceededCount    atomic.Int32 // used as a circuit breaker to stop the cache waiting for new blocks
 }
-
 type CoherentRoot struct {
 	cache           *btree2.BTreeG[*Element]
 	codeCache       *btree2.BTreeG[*Element]
@@ -198,17 +193,16 @@ func New(cfg CoherentConfig) *Coherent {
 		roots:        map[uint64]*CoherentRoot{},
 		stateEvict:   &ThreadSafeEvictionList{l: NewList()},
 		codeEvict:    &ThreadSafeEvictionList{l: NewList()},
-		hasher:       keccak.NewFastKeccak(),
 		cfg:          cfg,
-		miss:         metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="miss",name="%s"}`, cfg.MetricsLabel)),
-		hits:         metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="hit",name="%s"}`, cfg.MetricsLabel)),
-		timeout:      metrics.GetOrCreateCounter(fmt.Sprintf(`cache_timeout_total{name="%s"}`, cfg.MetricsLabel)),
-		keys:         metrics.GetOrCreateGauge(fmt.Sprintf(`cache_keys_total{name="%s"}`, cfg.MetricsLabel)),
-		evict:        metrics.GetOrCreateGauge(fmt.Sprintf(`cache_list_total{name="%s"}`, cfg.MetricsLabel)),
-		codeMiss:     metrics.GetOrCreateCounter(fmt.Sprintf(`cache_code_total{result="miss",name="%s"}`, cfg.MetricsLabel)),
-		codeHits:     metrics.GetOrCreateCounter(fmt.Sprintf(`cache_code_total{result="hit",name="%s"}`, cfg.MetricsLabel)),
-		codeKeys:     metrics.GetOrCreateGauge(fmt.Sprintf(`cache_code_keys_total{name="%s"}`, cfg.MetricsLabel)),
-		codeEvictLen: metrics.GetOrCreateGauge(fmt.Sprintf(`cache_code_list_total{name="%s"}`, cfg.MetricsLabel)),
+		miss:         metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="miss",name=%q}`, cfg.MetricsLabel)),
+		hits:         metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="hit",name=%q}`, cfg.MetricsLabel)),
+		timeout:      metrics.GetOrCreateCounter(fmt.Sprintf(`cache_timeout_total{name=%q}`, cfg.MetricsLabel)),
+		keys:         metrics.GetOrCreateGauge(fmt.Sprintf(`cache_keys_total{name=%q}`, cfg.MetricsLabel)),
+		evict:        metrics.GetOrCreateGauge(fmt.Sprintf(`cache_list_total{name=%q}`, cfg.MetricsLabel)),
+		codeMiss:     metrics.GetOrCreateCounter(fmt.Sprintf(`cache_code_total{result="miss",name=%q}`, cfg.MetricsLabel)),
+		codeHits:     metrics.GetOrCreateCounter(fmt.Sprintf(`cache_code_total{result="hit",name=%q}`, cfg.MetricsLabel)),
+		codeKeys:     metrics.GetOrCreateGauge(fmt.Sprintf(`cache_code_keys_total{name=%q}`, cfg.MetricsLabel)),
+		codeEvictLen: metrics.GetOrCreateGauge(fmt.Sprintf(`cache_code_list_total{name=%q}`, cfg.MetricsLabel)),
 	}
 }
 
@@ -301,20 +295,16 @@ func (c *Coherent) OnNewBlock(stateChanges *remoteproto.StateChangeBatch) {
 				addr := gointerfaces.ConvertH160toAddress(sc.Changes[i].Address)
 				v := sc.Changes[i].Data
 				c.add(addr[:], v, r, id)
-				c.hasher.Reset()
-				c.hasher.Write(sc.Changes[i].Code)
-				k := c.hasher.Sum(nil)
-				c.addCode(k, sc.Changes[i].Code, r, id)
+				k := crypto.Keccak256Hash(sc.Changes[i].Code)
+				c.addCode(k[:], sc.Changes[i].Code, r, id)
 			case remoteproto.Action_REMOVE:
 				addr := gointerfaces.ConvertH160toAddress(sc.Changes[i].Address)
 				c.add(addr[:], nil, r, id)
 			case remoteproto.Action_STORAGE:
 				//skip, will check later
 			case remoteproto.Action_CODE:
-				c.hasher.Reset()
-				c.hasher.Write(sc.Changes[i].Code)
-				k := c.hasher.Sum(nil)
-				c.addCode(k, sc.Changes[i].Code, r, id)
+				k := crypto.Keccak256Hash(sc.Changes[i].Code)
+				c.addCode(k[:], sc.Changes[i].Code, r, id)
 			default:
 				panic("not implemented yet")
 			}
@@ -421,7 +411,7 @@ func (c *Coherent) Get(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err err
 
 	defer c.lock.Unlock()
 
-	v = c.add(common.Copy(k), common.Copy(v), r, id).V
+	v = c.add(bytes.Clone(k), bytes.Clone(v), r, id).V
 	return v, nil
 }
 
@@ -446,7 +436,7 @@ func (c *Coherent) GetCode(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err
 
 	c.lock.Lock()
 	defer c.lock.Unlock()
-	v = c.addCode(common.Copy(k), common.Copy(v), r, id).V
+	v = c.addCode(bytes.Clone(k), bytes.Clone(v), r, id).V
 	return v, nil
 }
 func (c *Coherent) removeOldest(r *CoherentRoot) {
@@ -633,46 +623,6 @@ func (c *Coherent) clearCaches(r *CoherentRoot) {
 	r.codeCache.Clear()
 }
 
-func AssertCheckValues(ctx context.Context, tx kv.TemporalTx, cache Cache) (int, error) {
-	defer func(t time.Time) { fmt.Printf("AssertCheckValues:327: %s\n", time.Since(t)) }(time.Now())
-	view, err := cache.View(ctx, tx)
-	if err != nil {
-		return 0, err
-	}
-	castedView, ok := view.(*CoherentView)
-	if !ok {
-		return 0, nil
-	}
-	casted, ok := cache.(*Coherent)
-	if !ok {
-		return 0, nil
-	}
-	checked := 0
-	casted.lock.Lock()
-	defer casted.lock.Unlock()
-	//log.Info("AssertCheckValues start", "db_id", tx.ViewID(), "mem_id", casted.id.Load(), "len", casted.cache.Len())
-	root, ok := casted.roots[castedView.stateVersionID]
-	if !ok {
-		return 0, nil
-	}
-	root.cache.Walk(func(items []*Element) bool {
-		for _, i := range items {
-			k, v := i.K, i.V
-			var dbV []byte
-			dbV, err = tx.GetOne(kv.PlainState, k)
-			if err != nil {
-				return false
-			}
-			if !bytes.Equal(dbV, v) {
-				err = fmt.Errorf("key: %x, has different values: %x != %x", k, v, dbV)
-				return false
-			}
-			checked++
-		}
-		return true
-	})
-	return checked, err
-}
 func (c *Coherent) evictRoots() {
 	if c.latestStateVersionID <= c.cfg.KeepViews {
 		return

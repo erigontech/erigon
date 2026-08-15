@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -42,7 +43,9 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/filters"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
+	"github.com/erigontech/erigon/rpc/transactions"
 )
 
 type OverlayAPI interface {
@@ -76,13 +79,13 @@ type blockReplayResult struct {
 }
 
 // NewOverlayAPI returns OverlayAPIImpl instance
-func NewOverlayAPI(base *BaseAPI, db kv.TemporalRoDB, gascap uint64, overlayGetLogsTimeout time.Duration, overlayReplayBlockTimeout time.Duration, otsApi OtterscanAPI) *OverlayAPIImpl {
+func NewOverlayAPI(base *BaseAPI, db kv.TemporalRoDB, cfg *rpccfg.OverlayApiConfig, otsApi OtterscanAPI) *OverlayAPIImpl {
 	return &OverlayAPIImpl{
 		BaseAPI:                   base,
 		db:                        db,
-		GasCap:                    gascap,
-		OverlayGetLogsTimeout:     overlayGetLogsTimeout,
-		OverlayReplayBlockTimeout: overlayReplayBlockTimeout,
+		GasCap:                    cfg.GasCap,
+		OverlayGetLogsTimeout:     cfg.OverlayGetLogsTimeout,
+		OverlayReplayBlockTimeout: cfg.OverlayReplayBlockTimeout,
 		OtsAPI:                    otsApi,
 	}
 }
@@ -163,23 +166,15 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	}
 
 	statedb := state.New(stateReader)
+	defer statedb.Close()
 
-	header := block.Header()
+	header := block.HeaderNoCopy()
 
 	if header == nil {
 		return nil, fmt.Errorf("block %d(%x) not found", blockNum, block.Hash())
 	}
 
-	getHash := func(i uint64) (common.Hash, error) {
-		if hash, ok := overrideBlockHash[i]; ok {
-			return hash, nil
-		}
-		hash, ok, err := api._blockReader.CanonicalHash(ctx, tx, i)
-		if err != nil || !ok {
-			log.Debug("Can't get block hash by number", "number", i, "only-canonical", true, "err", err, "ok", ok)
-		}
-		return hash, err
-	}
+	getHash := transactions.MakeBlockHashProvider(ctx, tx, api._blockReader, overrideBlockHash)
 
 	blockCtx = protocol.NewEVMBlockContext(header, getHash, api.engine(), accounts.NilAddress, chainConfig)
 
@@ -227,11 +222,12 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	txCtx = protocol.NewEVMTxContext(msg)
 	ct := OverlayCreateTracer{contractAddress: accounts.InternAddress(address), code: *code, gasCap: api.GasCap}
 	evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{Tracer: ct.Tracer().Hooks})
+	ct.evm = evm
 
 	// Execute the transaction message
 	_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, api.engine())
 	if ct.err != nil {
-		return nil, err
+		return nil, ct.err
 	}
 
 	resultCode := &CreationCode{}
@@ -300,6 +296,10 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 		return nil, fmt.Errorf("%s: %d", errExceedBlockRange, api.blockRangeLimit)
 	}
 
+	// State overrides can flip an originally failed txn to success, so replayBlock
+	// must re-execute failed txns instead of trusting the original receipt.
+	hasStateOverrides := stateOverride != nil && len(*stateOverride) > 0
+
 	numBlocks := end - begin + 1
 	var (
 		results = make([]*blockReplayResult, numBlocks)
@@ -308,10 +308,8 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 
 	threads := min(runtime.NumCPU(), int(numBlocks))
 	jobs := make(chan *blockReplayTask, threads)
-	for th := 0; th < threads; th++ {
-		pend.Add(1)
-		go func() {
-			defer pend.Done()
+	for range threads {
+		pend.Go(func() {
 			tx, err := api.db.BeginTemporalRo(ctx)
 			if err != nil {
 				log.Error("Error", "error", err)
@@ -332,26 +330,27 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 					continue
 				}
 				statedb := state.New(stateReader)
-
-				if stateOverride != nil {
-					err = stateOverride.Override(statedb, nil, rules)
+				func() {
+					defer statedb.Close()
+					if hasStateOverrides {
+						if err := stateOverride.Override(statedb, nil, rules); err != nil {
+							results[task.idx] = &blockReplayResult{BlockNumber: task.BlockNumber, Error: err.Error()}
+							return
+						}
+					}
+					blockLogs, err := api.replayBlock(ctx, uint64(blockNumber), statedb, chainConfig, tx, hasStateOverrides)
 					if err != nil {
 						results[task.idx] = &blockReplayResult{BlockNumber: task.BlockNumber, Error: err.Error()}
-						continue
+						return
 					}
-				}
-				blockLogs, err := api.replayBlock(ctx, uint64(blockNumber), statedb, chainConfig, tx)
-				if err != nil {
-					results[task.idx] = &blockReplayResult{BlockNumber: task.BlockNumber, Error: err.Error()}
-					continue
-				}
-				log.Debug("[GetLogs]", "len(blockLogs)", len(blockLogs))
-				logs := filterLogs(blockLogs, crit.Addresses, crit.Topics)
-				log.Debug("[GetLogs]", "len(logs)", len(logs))
+					log.Debug("[GetLogs]", "len(blockLogs)", len(blockLogs))
+					logs := filterLogs(blockLogs, crit.Addresses, crit.Topics)
+					log.Debug("[GetLogs]", "len(logs)", len(logs))
 
-				results[task.idx] = &blockReplayResult{BlockNumber: task.BlockNumber, Logs: logs}
+					results[task.idx] = &blockReplayResult{BlockNumber: task.BlockNumber, Logs: logs}
+				}()
 			}
-		}()
+		})
 	}
 
 	hasOverrides := false
@@ -427,7 +426,7 @@ func filterLogs(logs types.Logs, addresses []common.Address, topics [][]common.H
 	return logs.Filter(addrMap, topics, 0)
 }
 
-func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, statedb *state.IntraBlockState, chainConfig *chain.Config, tx kv.TemporalTx) ([]*types.Log, error) {
+func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, statedb *state.IntraBlockState, chainConfig *chain.Config, tx kv.TemporalTx, replayFailedTxns bool) ([]*types.Log, error) {
 	log.Debug("[replayBlock] begin", "block", blockNum)
 	var (
 		hash               common.Hash
@@ -455,49 +454,28 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 	replayTransactions = block.Transactions()
 	log.Debug("[replayBlock] replayTx", "length", len(replayTransactions))
 
-	header := block.Header()
+	header := block.HeaderNoCopy()
 
 	if header == nil {
 		return nil, fmt.Errorf("block %d(%x) not found", blockNum, hash)
 	}
 
-	getHash := func(i uint64) (common.Hash, error) {
-		if hash, ok := overrideBlockHash[i]; ok {
-			return hash, nil
-		}
-		hash, ok, err := api._blockReader.CanonicalHash(ctx, tx, i)
-		if err != nil || !ok {
-			log.Debug("Can't get block hash by number", "number", i, "only-canonical", true, "err", err, "ok", ok)
-		}
-		return hash, err
-	}
+	timeout := api.OverlayReplayBlockTimeout
+	ctx, storeEVM, cleanup := setupEVMTimeout(ctx, timeout)
+	defer cleanup()
+
+	getHash := transactions.MakeBlockHashProvider(ctx, tx, api._blockReader, overrideBlockHash)
 
 	blockCtx = protocol.NewEVMBlockContext(header, getHash, api.engine(), accounts.NilAddress, chainConfig)
 
 	signer := types.MakeSigner(chainConfig, blockNum, blockCtx.Time)
 	rules := blockCtx.Rules(chainConfig)
 
-	timeout := api.OverlayReplayBlockTimeout
-	// Setup context so it may be cancelled the call has completed
-	// or, in case of unmetered gas, setup a context with a timeout.
-	var cancel context.CancelFunc
-	if timeout > 0 {
-		ctx, cancel = context.WithTimeout(ctx, timeout)
-	} else {
-		ctx, cancel = context.WithCancel(ctx)
-	}
-	// Make sure the context is cancelled when the call has completed
-	// this makes sure resources are cleaned up.
-	defer cancel()
-
 	// Setup the gas pool (also for unmetered requests)
 	// and apply the message.
 	gp := new(protocol.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
-	vmConfig := vm.Config{}
-	evm = vm.NewEVM(blockCtx, evmtypes.TxContext{}, statedb, chainConfig, vmConfig)
-
-	stop := context.AfterFunc(ctx, evm.Cancel)
-	defer stop()
+	evm = vm.NewEVM(blockCtx, evmtypes.TxContext{}, statedb, chainConfig, vm.Config{})
+	storeEVM(evm)
 	receipts, err := api.getReceipts(ctx, tx, block)
 	if err != nil {
 		return nil, err
@@ -516,8 +494,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 
 		receipt := receipts[uint64(idx)]
 		log.Debug("[replayBlock]", "receipt.TransactionIndex", receipt.TransactionIndex, "receipt.TxHash", receipt.TxHash, "receipt.Status", receipt.Status)
-		// check if this txn has failed in the original context
-		if receipt.Status == types.ReceiptStatusFailed {
+		if receipt.Status == types.ReceiptStatusFailed && !replayFailedTxns {
 			log.Debug("[replayBlock] skipping transaction because it has status=failed", "transactionHash", txn.Hash())
 
 			contractCreation := msg.To().IsNil()
@@ -529,7 +506,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 					log.Error(err.Error())
 					return nil, err
 				}
-				err = statedb.SetNonce(msg.From(), nonce+1)
+				err = statedb.SetNonce(msg.From(), nonce+1, tracing.NonceChangeUnspecified)
 				if err != nil {
 					log.Error(err.Error())
 					return nil, err
@@ -574,54 +551,9 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 }
 
 func getBeginEnd(ctx context.Context, tx kv.Tx, api *OverlayAPIImpl, crit filters.FilterCriteria) (uint64, uint64, error) {
-	var begin, end uint64
-	if crit.BlockHash != nil {
-		block, err := api.blockByHashWithSenders(ctx, tx, *crit.BlockHash)
-		if err != nil {
-			return 0, 0, err
-		}
-
-		if block == nil {
-			return 0, 0, fmt.Errorf("block not found: %x", *crit.BlockHash)
-		}
-
-		num := block.NumberU64()
-		begin = num
-		end = num
-	} else {
-		// Convert the RPC block numbers into internal representations
-		latest, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber), tx, api._blockReader, nil)
-		if err != nil {
-			return 0, 0, err
-		}
-
-		begin = latest
-		if crit.FromBlock != nil {
-			fromBlock := crit.FromBlock.Int64()
-			if fromBlock > 0 {
-				begin = uint64(fromBlock)
-			} else {
-				blockNum := rpc.BlockNumber(fromBlock)
-				begin, _, _, err = rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), tx, api._blockReader, api.filters)
-				if err != nil {
-					return 0, 0, err
-				}
-			}
-
-		}
-		end = latest
-		if crit.ToBlock != nil {
-			toBlock := crit.ToBlock.Int64()
-			if toBlock > 0 {
-				end = uint64(toBlock)
-			} else {
-				blockNum := rpc.BlockNumber(toBlock)
-				end, _, _, err = rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), tx, api._blockReader, api.filters)
-				if err != nil {
-					return 0, 0, err
-				}
-			}
-		}
+	begin, end, err := api.resolveLogsRange(ctx, tx, crit, false)
+	if err != nil {
+		return 0, 0, err
 	}
 
 	if end < begin {

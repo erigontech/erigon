@@ -17,8 +17,9 @@
 package ethash
 
 import (
-	"math/big"
 	"testing"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 )
@@ -32,10 +33,10 @@ func TestShouldReorg(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		localTd     int64
+		localTd     uint64
 		localHeight uint64
 		localHash   common.Hash
-		newTd       int64
+		newTd       uint64
 		newHeight   uint64
 		newHash     common.Hash
 		want        bool
@@ -49,8 +50,8 @@ func TestShouldReorg(t *testing.T) {
 		{"equal TD, equal height, equal hash", 100, 5, hashLow, 100, 5, hashLow, false},
 	}
 	for _, tc := range tests {
-		got := ShouldReorg(big.NewInt(tc.localTd), tc.localHeight, tc.localHash,
-			big.NewInt(tc.newTd), tc.newHeight, tc.newHash)
+		got := ShouldReorg(uint256.NewInt(tc.localTd), tc.localHeight, tc.localHash,
+			uint256.NewInt(tc.newTd), tc.newHeight, tc.newHash)
 		if got != tc.want {
 			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
 		}

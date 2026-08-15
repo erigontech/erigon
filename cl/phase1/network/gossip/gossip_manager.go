@@ -203,38 +203,46 @@ func (g *GossipManager) newPubsubValidator(service serviceintf.Service[any], con
 	}
 }
 
-func (g *GossipManager) registerGossipService(service serviceintf.Service[any], conditions ...ConditionFunc) error {
+func (g *GossipManager) registerGossipService(service serviceintf.Service[any], conditions ...ConditionFunc) (subscribed, expired int, err error) {
 	validator := g.newPubsubValidator(service, conditions...)
 	forkDigest, err := g.ethClock.CurrentForkDigest()
 	if err != nil {
-		return err
+		return
 	}
 	// register all topics and subscribe
 	for _, name := range service.Names() {
 		topic := composeTopic(forkDigest, name)
-		if err := g.p2p.Pubsub().RegisterTopicValidator(topic, validator); err != nil {
-			return err
+		if err = g.p2p.Pubsub().RegisterTopicValidator(topic, validator); err != nil {
+			return
 		}
-		topicHandle, err := g.p2p.Pubsub().Join(topic)
-		if err != nil {
-			return err
+		topicHandle, joinErr := g.p2p.Pubsub().Join(topic)
+		if joinErr != nil {
+			err = joinErr
+			return
 		}
 		if params := g.topicScoreParams(name); params != nil {
-			if err := topicHandle.SetScoreParams(params); err != nil {
+			if err = topicHandle.SetScoreParams(params); err != nil {
 				topicHandle.Close()
-				return err
+				return
 			}
 		}
-		if err := g.subscriptions.Add(topic, topicHandle, validator); err != nil {
+		if err = g.subscriptions.Add(topic, topicHandle, validator); err != nil {
 			topicHandle.Close()
-			return err
+			return
 		}
-		if err := g.subscriptions.SubscribeWithExpiry(topic, g.defaultExpiryForTopic(name)); err != nil && !errors.Is(err, ErrExpiryInThePast) {
-			return err
+		err = g.subscriptions.SubscribeWithExpiry(topic, g.defaultExpiryForTopic(name))
+		switch {
+		case err == nil:
+			subscribed++
+		case errors.Is(err, ErrExpiryInThePast):
+			expired++
+		default:
+			return
 		}
 		log.Debug("[GossipManager] registered topic", "topic", topic)
 	}
-	return nil
+	err = nil
+	return
 }
 
 func (g *GossipManager) defaultExpiryForTopic(name string) time.Time {
@@ -303,6 +311,15 @@ func (g *GossipManager) goCheckForkAndResubscribe(ctx context.Context) {
 
 	slotLookahead := uint64(8)
 	for {
+		// Wait for the next slot tick before checking. This ensures that
+		// RegisterGossipServices has completed before we attempt to
+		// re-subscribe topics for an upcoming fork.
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+
 		// compute upcoming ForkDigest
 		epoch := g.ethClock.GetEpochAtSlot(g.ethClock.GetCurrentSlot() + slotLookahead)
 		upcomingForkDigest, err := g.ethClock.ComputeForkDigest(epoch)
@@ -311,7 +328,7 @@ func (g *GossipManager) goCheckForkAndResubscribe(ctx context.Context) {
 			continue
 		}
 		if upcomingForkDigest != forkDigest {
-			log.Debug("[GossipManager] upcoming fork digest", "old", fmt.Sprintf("%x", forkDigest), "new", fmt.Sprintf("%x", upcomingForkDigest))
+			log.Info("[GossipManager] upcoming fork digest change detected", "old", fmt.Sprintf("%x", forkDigest), "new", fmt.Sprintf("%x", upcomingForkDigest))
 			oldForkDigest := fmt.Sprintf("%x", forkDigest)
 
 			// Start goroutine to unsubscribe old topics after delay
@@ -336,13 +353,10 @@ func (g *GossipManager) goCheckForkAndResubscribe(ctx context.Context) {
 			}(oldForkDigest)
 
 			// subscribe new topics immediately
-			g.subscribeUpcomingTopics(upcomingForkDigest)
+			if err := g.subscribeUpcomingTopics(upcomingForkDigest); err != nil {
+				log.Warn("[GossipManager] failed to subscribe upcoming topics", "err", err)
+			}
 			forkDigest = upcomingForkDigest
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
 		}
 	}
 }
@@ -371,11 +385,15 @@ func (g *GossipManager) subscribeUpcomingTopics(digest common.Bytes4) error {
 				return err
 			}
 		}
+		if err := g.p2p.Pubsub().RegisterTopicValidator(newTopic, prevTopicHandle.validator); err != nil {
+			topicHandle.Close()
+			return err
+		}
 		if err := g.subscriptions.Add(newTopic, topicHandle, prevTopicHandle.validator); err != nil {
 			topicHandle.Close()
 			return err
 		}
-		if err := g.subscriptions.SubscribeWithExpiry(newTopic, prevTopicHandle.expiry); err != nil {
+		if err := g.subscriptions.SubscribeWithExpiry(newTopic, prevTopicHandle.expiry); err != nil && !errors.Is(err, ErrExpiryInThePast) {
 			return err
 		}
 	}

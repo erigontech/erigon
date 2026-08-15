@@ -2,13 +2,14 @@ package exec
 
 import (
 	"context"
-	"math/big"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -16,11 +17,11 @@ import (
 type ChainReaderImpl struct {
 	config      *chain.Config
 	tx          kv.Tx
-	blockReader services.FullBlockReader
+	blockReader dbservices.FullBlockReader
 	logger      log.Logger
 }
 
-func NewChainReader(config *chain.Config, tx kv.Tx, blockReader services.FullBlockReader, logger log.Logger) *ChainReaderImpl {
+func NewChainReader(config *chain.Config, tx kv.Tx, blockReader dbservices.FullBlockReader, logger log.Logger) *ChainReaderImpl {
 	return &ChainReaderImpl{config, tx, blockReader, logger}
 }
 
@@ -63,7 +64,7 @@ func (cr ChainReaderImpl) GetHeaderByHash(hash common.Hash) *types.Header {
 	h, _ := rawdb.ReadHeaderByHash(cr.tx, hash)
 	return h
 }
-func (cr ChainReaderImpl) GetTd(hash common.Hash, number uint64) *big.Int {
+func (cr ChainReaderImpl) GetTd(hash common.Hash, number uint64) *uint256.Int {
 	td, err := rawdb.ReadTd(cr.tx, hash, number)
 	if err != nil {
 		cr.logger.Error("ReadTd failed", "err", err)

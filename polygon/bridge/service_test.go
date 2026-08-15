@@ -138,12 +138,8 @@ func TestService(t *testing.T) {
 	heimdallClient.EXPECT().FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return([]*EventRecordWithTime{}, nil).AnyTimes()
 
 	var wg sync.WaitGroup
-	wg.Add(1)
-
-	go func(bridge *Service) {
-		defer wg.Done()
-
-		err := bridge.Run(ctx)
+	wg.Go(func() {
+		err := b.Run(ctx)
 		if err != nil {
 			if !errors.Is(err, ctx.Err()) {
 				t.Error(err)
@@ -151,7 +147,7 @@ func TestService(t *testing.T) {
 
 			return
 		}
-	}(b)
+	})
 
 	err = b.store.Prepare(ctx)
 	require.NoError(t, err)
@@ -255,12 +251,8 @@ func TestService_Unwind(t *testing.T) {
 	heimdallClient.EXPECT().FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return([]*EventRecordWithTime{}, nil).AnyTimes()
 
 	var wg sync.WaitGroup
-	wg.Add(1)
-
-	go func(bridge *Service) {
-		defer wg.Done()
-
-		err := bridge.Run(ctx)
+	wg.Go(func() {
+		err := b.Run(ctx)
 		if err != nil {
 			if !errors.Is(err, ctx.Err()) {
 				t.Error(err)
@@ -268,7 +260,7 @@ func TestService_Unwind(t *testing.T) {
 
 			return
 		}
-	}(b)
+	})
 
 	err := b.store.Prepare(ctx)
 	require.NoError(t, err)
@@ -369,12 +361,8 @@ func setupOverrideTest(t *testing.T, ctx context.Context, borConfig borcfg.BorCo
 
 	heimdallClient.EXPECT().FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(events, nil).Times(1)
 	heimdallClient.EXPECT().FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return([]*EventRecordWithTime{}, nil).AnyTimes()
-	wg.Add(1)
-
-	go func(bridge *Service) {
-		defer wg.Done()
-
-		err := bridge.Run(ctx)
+	wg.Go(func() {
+		err := b.Run(ctx)
 		if err != nil {
 			if !errors.Is(err, ctx.Err()) {
 				t.Error(err)
@@ -382,7 +370,7 @@ func setupOverrideTest(t *testing.T, ctx context.Context, borConfig borcfg.BorCo
 
 			return
 		}
-	}(b)
+	})
 
 	err := b.store.Prepare(ctx)
 	require.NoError(t, err)
@@ -518,12 +506,8 @@ func TestReaderEventsWithinTime(t *testing.T) {
 	heimdallClient.EXPECT().FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return([]*EventRecordWithTime{}, nil).AnyTimes()
 
 	var wg sync.WaitGroup
-	wg.Add(1)
-
-	go func(bridge *Service) {
-		defer wg.Done()
-
-		err := bridge.Run(ctx)
+	wg.Go(func() {
+		err := b.Run(ctx)
 		if err != nil {
 			if !errors.Is(err, ctx.Err()) {
 				t.Error(err)
@@ -531,7 +515,7 @@ func TestReaderEventsWithinTime(t *testing.T) {
 
 			return
 		}
-	}(b)
+	})
 
 	err = b.store.Prepare(ctx)
 	require.NoError(t, err)

@@ -35,11 +35,11 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/mclock"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
-	"github.com/erigontech/erigon/p2p/event"
 	"github.com/erigontech/erigon/p2p/netutil"
 )
 
@@ -478,7 +478,7 @@ func (tab *Table) doRefresh(done chan struct{}) {
 	// (not hash-sized) and it is not easily possible to generate a
 	// sha3 preimage that falls into a chosen bucket.
 	// We perform a few lookups with a random target instead.
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		tab.net.lookupRandom()
 	}
 }
@@ -744,6 +744,41 @@ func (tab *Table) deleteNode(n *enode.Node) {
 
 // waitForNodes blocks until the table contains at least n nodes.
 func (tab *Table) waitForNodes(ctx context.Context, n int) error {
+	// Wrap ctx so the forwarder goroutine exits when waitForNodes returns,
+	// regardless of whether the caller's ctx is canceled.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	// Set up a notification channel that gets unblocked when there was any activity on
+	// the table. Ultimately this reads from the table's nodeFeed, but can't use the feed
+	// directly on the same goroutine that takes Table.mutex, it would deadlock.
+	var notify chan struct{}
+	var notifyErr error
+	initsub := func() event.Subscription {
+		notify = make(chan struct{}, 1)
+		newnode := make(chan *enode.Node, 1)
+		sub := tab.nodeFeed.Subscribe(newnode)
+		go func() {
+			defer close(notify)
+			for {
+				select {
+				case <-newnode:
+					select {
+					case notify <- struct{}{}:
+					default:
+					}
+				case <-ctx.Done():
+					notifyErr = ctx.Err()
+					return
+				case <-tab.closeReq:
+					notifyErr = errClosed
+					return
+				}
+			}
+		}()
+		return sub
+	}
+
 	getlength := func() (count int) {
 		for _, b := range &tab.buckets {
 			count += len(b.entries)
@@ -751,28 +786,24 @@ func (tab *Table) waitForNodes(ctx context.Context, n int) error {
 		return count
 	}
 
-	var ch chan *enode.Node
 	for {
 		tab.mutex.Lock()
 		if getlength() >= n {
 			tab.mutex.Unlock()
 			return nil
 		}
-		if ch == nil {
-			// Init subscription.
-			ch = make(chan *enode.Node)
-			sub := tab.nodeFeed.Subscribe(ch)
-			defer sub.Unsubscribe()
+		if notify == nil {
+			// Lazily init the subscription. Do this while holding the
+			// lock so we don't miss any events that change the node count.
+			sub := initsub()
+			defer sub.Unsubscribe() //nolint:gocritic
 		}
 		tab.mutex.Unlock()
 
-		// Wait for a node add event.
-		select {
-		case <-ch:
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-tab.closeReq:
-			return errClosed
+		// Wait for table event.
+		if _, ok := <-notify; !ok {
+			break
 		}
 	}
+	return notifyErr
 }

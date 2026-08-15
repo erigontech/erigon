@@ -20,9 +20,9 @@
 package types
 
 import (
+	"bytes"
 	"fmt"
 	"io"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -184,7 +184,7 @@ func (tx *LegacyTx) copy() *LegacyTx {
 			TransactionMisc: TransactionMisc{},
 			Nonce:           tx.Nonce,
 			To:              tx.To, // TODO: copy pointed-to address
-			Data:            common.Copy(tx.Data),
+			Data:            bytes.Clone(tx.Data),
 			GasLimit:        tx.GasLimit,
 			Value:           tx.Value,
 			V:               tx.V,
@@ -354,14 +354,9 @@ func (tx *LegacyTx) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := RlpHash([]any{
-		tx.Nonce,
-		&tx.GasPrice,
-		tx.GasLimit,
-		tx.To,
-		&tx.Value,
-		tx.Data,
-		tx.V, tx.R, tx.S,
+	payloadSize := tx.payloadSize()
+	hash := rlpPayloadHash(func(w io.Writer, b []byte) error {
+		return tx.encodePayload(w, b, payloadSize)
 	})
 	tx.hash.Store(&hash)
 	return hash
@@ -374,12 +369,12 @@ type legacyTxSigHash struct {
 	To       *common.Address `rlp:"nil"`
 	Value    *uint256.Int
 	Data     []byte
-	ChainID  *big.Int
+	ChainID  *uint256.Int
 	V        uint
 	R        uint
 }
 
-func (tx *LegacyTx) SigningHash(chainID *big.Int) common.Hash {
+func (tx *LegacyTx) SigningHash(chainID *uint256.Int) common.Hash {
 	if chainID != nil && chainID.Sign() != 0 {
 		return RlpHash(&legacyTxSigHash{
 			Nonce:    tx.Nonce,
@@ -410,7 +405,11 @@ func (tx *LegacyTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.I
 }
 
 func (tx *LegacyTx) GetChainID() *uint256.Int {
-	return DeriveChainId(&tx.V)
+	chainID, err := DeriveChainId(&tx.V)
+	if err != nil {
+		return new(uint256.Int)
+	}
+	return chainID
 }
 
 func (tx *LegacyTx) cachedSender() (sender accounts.Address, ok bool) {

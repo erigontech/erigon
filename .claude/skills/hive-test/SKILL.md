@@ -1,3 +1,8 @@
+---
+name: hive-test
+description: Run Ethereum Hive integration tests against a local Erigon build, including engine, RPC compatibility, stable and devnet EEST EngineX, and RLP suites. Use when setting up an ephemeral Hive environment, selecting or running Hive suites, interpreting Hive failures, or cleaning up Hive test resources.
+---
+
 # Skill: hive-test
 
 Run Ethereum Hive integration tests against a local Erigon build. Works from a clean
@@ -26,8 +31,8 @@ The user may specify one or more test suites in any combination:
 | `api` | ethereum/engine | Engine API |
 | `auth` | ethereum/engine | Engine auth |
 | `rpc-compat` | ethereum/rpc | RPC compatibility |
-| `eest` | ethereum/eels/consume-engine | Execution Spec Tests (version auto-discovered) |
-| `eest-devnet` | ethereum/eels/consume-engine | EEST devnet (BAL/glamsterdam) fixtures (version auto-discovered) |
+| `eest` | ethereum/eels/consume-enginex | Stable EEST EngineX fixtures |
+| `eest-devnet` | ethereum/eels/consume-enginex | Fork-partitioned devnet EEST EngineX fixtures |
 | `eest-rlp` | ethereum/eels/consume-rlp | EEST RLP block import (BlockchainTest, all forks) |
 
 ### Groups
@@ -50,14 +55,14 @@ The user may specify one or more test suites in any combination:
 - **branch=BRANCH** - Clone erigon from a remote branch instead of using the local
   working directory. The branch is cloned from `https://github.com/erigontech/erigon.git`
   into the hive client directory. Example: `/hive-test api branch=fix/my-feature`
-- **eest-version=VERSION** - Pin EEST fixtures version (e.g. `v5.3.0`). Default: auto-discover latest.
-- **bal-version=VERSION** - Pin BAL fixtures version (e.g. `bal@v5.1.0`). Default: auto-discover latest.
+- **eest-version=VERSION** - Override the stable fixture release. Default: use `eest_stable` from `test-fixtures.json`.
+- **devnet-version=VERSION** - Override the devnet fixture release. Default: use `eest_devnet` from `test-fixtures.json`.
 
 ## Expected Failures (CI thresholds)
 
 Sources of truth: `.github/workflows/test-hive.yml` (`max-allowed-failures` per matrix
 entry) for engine + rpc-compat suites, `.github/workflows/test-hive-eest.yml`
-(`max-failures`, default 0) for eest shards.
+(`max-failures` per matrix entry, currently 0 everywhere) for eest shards.
 
 | Suite | Max Allowed Failures |
 |-------|---------------------|
@@ -67,57 +72,29 @@ entry) for engine + rpc-compat suites, `.github/workflows/test-hive-eest.yml`
 | api | 0 |
 | auth | 0 |
 | rpc-compat | 0 |
-| eest (consume-engine) | 0 |
+| eest (consume-enginex) | 0 |
 | eest-rlp | 0 |
-| eest-devnet (CI shard: `glamsterdam-devnet`) | 1 (`test_block_regular_gas_limit` — `GAS_USED_OVERFLOW` vs `GAS_ALLOWANCE_EXCEEDED` error classification mismatch) |
+| every eest-devnet consume-enginex shard | 0 |
 
 Note: Failure counts are version-dependent and may change with newer fixtures.
-The CI `glamsterdam-devnet` shard runs BAL EIPs (`8024|7708|7778|7843|7928|7954|8037`)
-against the URL and hive `branch` pinned under the `eest_devnet`
-entry in `test-fixtures.json` (currently `bal@v5.7.0` / `devnets/bal/4`),
-with `--experimental.bal` enabled on the erigon side. Reproduce locally by
-aligning the invocation with those values — `make eest-devnet` reads them
-from the manifest via `jq` and applies them automatically.
+The CI devnet rows split every EngineX fork exactly once and run only with parallel
+execution on GitHub-hosted runners at simulator parallelism 4. Read the current
+filters and client flags from `.github/workflows/test-hive-eest.yml`; the Amsterdam
+row enables `--experimental.bal`.
 
 ## Procedure
 
-### Phase 0: Discover Versions
+### Phase 0: Resolve Fixtures
 
-Before setup, discover the latest EEST fixture versions from GitHub. Skip this phase
-if the user provided explicit version overrides (`eest-version=`, `bal-version=`).
-
-```bash
-# Latest standard EEST fixtures (tag matching v*.*.*)
-EEST_VERSION=$(curl -s https://api.github.com/repos/ethereum/execution-spec-tests/releases \
-  | jq -r '[.[] | select(.tag_name | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))][0].tag_name')
-
-# Latest BAL fixtures (tag matching bal@v*.*.*)
-BAL_TAG=$(curl -s https://api.github.com/repos/ethereum/execution-spec-tests/releases \
-  | jq -r '[.[] | select(.tag_name | startswith("bal@"))][0].tag_name')
-BAL_BRANCH="tests-${BAL_TAG}"
-BAL_TAG_URLENC=$(echo "$BAL_TAG" | sed 's/@/%40/')
-BAL_FIXTURES_URL="https://github.com/ethereum/execution-spec-tests/releases/download/${BAL_TAG_URLENC}/fixtures_bal.tar.gz"
-```
-
-Then check whether the EEST mapper at the discovered tag already has the exception
-entries Erigon needs. If not, the `disable_strict_exception_matching` workaround is
-required:
+Use the repository pins by default so local results reproduce CI:
 
 ```bash
-MAPPER_URL="https://raw.githubusercontent.com/ethereum/execution-specs/refs/tags/${BAL_BRANCH}/packages/testing/src/execution_testing/client_clis/clis/erigon.py"
-if curl -sf "$MAPPER_URL" | grep -q "GAS_USED_OVERFLOW"; then
-    DISABLE_STRICT=""
-    echo "Mapper has BAL exception entries — strict matching enabled"
-else
-    DISABLE_STRICT='--sim.buildarg disable_strict_exception_matching=erigon'
-    echo "Mapper missing BAL exception entries — strict matching disabled for erigon"
-fi
+EEST_FIXTURES_URL=$(jq -r '.eest_stable.url' test-fixtures.json)
+DEVNET_FIXTURES_URL=$(jq -r '.eest_devnet.url' test-fixtures.json)
+DEVNET_BRANCH=$(jq -r '.eest_devnet.branch' test-fixtures.json)
 ```
 
-Log the discovered versions:
-```
-EEST: $EEST_VERSION | BAL: $BAL_TAG (branch: $BAL_BRANCH) | Strict matching: enabled/disabled
-```
+Only replace these values when the user explicitly requests another release.
 
 ### Phase 1: Setup
 
@@ -182,19 +159,13 @@ EEST: $EEST_VERSION | BAL: $BAL_TAG (branch: $BAL_BRANCH) | Strict matching: ena
    Do NOT add `--p2p.protocol` flags to erigon.sh. Let erigon use its default
    protocol negotiation.
 
-6b. **Parallel execution for Amsterdam (BAL) blocks:**
-   Verify that `erigon.sh` enables parallel execution when Amsterdam is configured.
-   BAL validation only runs in the parallel execution path. If the following block
-   is missing from `erigon.sh`, add it after the `--sync.parallel-state-flushing` line:
-   ```bash
-   # Enable parallel execution for Amsterdam (BAL) blocks.
-   # BAL validation only runs in the parallel execution path.
-   if [ "$HIVE_AMSTERDAM_TIMESTAMP" != "" ]; then
-       export ERIGON_EXEC3_PARALLEL=true
-   fi
-   ```
-   Without this, Amsterdam blocks run through serial execution which has no BAL
-   validation, causing `test_bal_invalid` tests to incorrectly return VALID.
+6b. **EngineX client configuration:**
+   Mirror the selected row from `.github/workflows/test-hive-eest.yml`. For every
+   stable or devnet EngineX run, patch `clients/erigon/erigon.sh` with
+   `--fcu.background.prune=false --fcu.timeout=0`. Devnet runs also bake
+   `ERIGON_EXEC3_PARALLEL=true` into the client image. Add `--experimental.bal`
+   only for the Amsterdam family; use a separate client image when running it
+   alongside other EngineX families.
 
 7. **Create client config file:**
    ```bash
@@ -211,7 +182,9 @@ EEST: $EEST_VERSION | BAL: $BAL_TAG (branch: $BAL_BRANCH) | Strict matching: ena
 
 ### Phase 2: Run Tests
 
-Always use `--sim.parallelism 12` for all suites to maximize throughput.
+Use `--sim.parallelism 4` for EEST EngineX runs to match the GitHub-hosted CI
+runners and avoid simulator connection exhaustion on the larger devnet shards.
+Use up to 12 for the smaller engine and RPC suites when local resources allow it.
 
 When running multiple suites, launch **separate hive sessions in parallel** (as
 background shell commands) whenever the suites use different simulators. This gives
@@ -231,27 +204,25 @@ with `--sim.limit "suite1|suite2|..."`.
   --sim.limit "compat" --sim.parallelism 12 --sim.timelimit 30m
 ```
 
-**EEST** (sim: `ethereum/eels/consume-engine`):
+**Stable EEST EngineX** (sim: `ethereum/eels/consume-enginex`):
 ```bash
-# $EEST_VERSION discovered in Phase 0 (e.g. v5.4.0), or user-provided via eest-version=
 ./hive --client-file erigon-local.yaml \
-  --sim ethereum/eels/consume-engine \
-  --sim.parallelism=12 --docker.nocache=true \
-  --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/${EEST_VERSION}/fixtures_develop.tar.gz \
+  --sim ethereum/eels/consume-enginex \
+  --sim.parallelism=4 --docker.nocache=true \
+  --sim.buildarg fixtures=${EEST_FIXTURES_URL} \
   --sim.timelimit 60m
 ```
 
-**EEST BAL** (sim: `ethereum/eels/consume-engine`, amsterdam filter):
+**Devnet EEST EngineX** (sim: `ethereum/eels/consume-enginex`):
 ```bash
-# $BAL_BRANCH, $BAL_FIXTURES_URL, $DISABLE_STRICT discovered in Phase 0
-# (e.g. BAL_BRANCH=tests-bal@v5.2.0), or user-provided via bal-version=
+# Use one devnet sim-limit from .github/workflows/test-hive-eest.yml at a time.
+# This example runs the Amsterdam family.
 ./hive --client-file erigon-local.yaml \
-  --sim ethereum/eels/consume-engine \
-  --sim.limit=".*amsterdam.*" \
-  --sim.parallelism=12 --docker.nocache=true \
-  --sim.buildarg branch=${BAL_BRANCH} \
-  --sim.buildarg fixtures=${BAL_FIXTURES_URL} \
-  ${DISABLE_STRICT} \
+  --sim ethereum/eels/consume-enginex \
+  --sim.limit=".*/.*fork_(Amsterdam|BPO2ToAmsterdam)" \
+  --sim.parallelism=4 --docker.nocache=true \
+  --sim.buildarg branch=${DEVNET_BRANCH} \
+  --sim.buildarg fixtures=${DEVNET_FIXTURES_URL} \
   --sim.timelimit 60m
 ```
 
@@ -259,31 +230,24 @@ with `--sim.limit "suite1|suite2|..."`.
 
 Tests block import via RLP-encoded blocks loaded at client startup (the historical
 sync code path). Uses the `BlockchainTest` fixture format and covers all forks
-including pre-merge, complementary to consume-engine which only covers Paris+.
+including pre-merge, complementary to consume-enginex which only covers Paris+.
 See https://eest.ethereum.org/main/running_tests/running/#engine-vs-rlp-simulator.
 
 The full RLP test set is too large to run end-to-end in CI — always pass a
 `--sim.limit` regex narrowing the scope. CI mirrors this by running only
 `.*eip2930_access_list.*`. For local debugging, target a single EIP / opcode
 group similarly. Fixtures come from the same `fixtures_develop.tar.gz` archive
-as consume-engine.
+as consume-enginex.
 
 ```bash
-# $EEST_VERSION discovered in Phase 0 (e.g. v5.4.0), or user-provided via eest-version=
 # Replace the sim.limit regex to scope to the area under test.
 ./hive --client-file erigon-local.yaml \
   --sim ethereum/eels/consume-rlp \
   --sim.limit=".*eip2930_access_list.*" \
   --sim.parallelism=12 --docker.nocache=true \
-  --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/${EEST_VERSION}/fixtures_develop.tar.gz \
+  --sim.buildarg fixtures=${EEST_FIXTURES_URL} \
   --sim.timelimit 60m
 ```
-
-Note: The `disable_strict_exception_matching` flag is only added when Phase 0 detects
-that the EEST `ErigonExceptionMapper` at the discovered tag is missing required entries
-(e.g. `BlockException.GAS_USED_OVERFLOW`, BAL exception types). Once upstream updates
-their tagged releases with the mapper fixes (already on `forks/amsterdam` HEAD), this
-flag will no longer be needed automatically.
 
 ### Phase 3: Parse Results
 

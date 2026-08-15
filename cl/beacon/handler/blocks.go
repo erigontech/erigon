@@ -39,7 +39,7 @@ func (a *ApiHandler) rootFromBlockId(ctx context.Context, tx kv.Tx, blockId *bea
 	switch {
 	case blockId.Head():
 		var statusCode int
-		root, _, statusCode, err = a.getHead()
+		root, _, statusCode, err = a.getSelectedHead()
 		if err != nil {
 			return common.Hash{}, beaconhttp.NewEndpointError(statusCode, err)
 		}
@@ -141,6 +141,9 @@ func (a *ApiHandler) GetEthV1BlindedBlock(w http.ResponseWriter, r *http.Request
 	}
 	blinded, err := blk.Blinded()
 	if err != nil {
+		if errors.Is(err, cltypes.ErrGloasCannotBlind) {
+			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+		}
 		return nil, err
 	}
 	return newBeaconResponse(blinded).

@@ -32,7 +32,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/cmd/evm/internal/compiler"
 	"github.com/erigontech/erigon/cmd/utils"
@@ -49,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
 	"github.com/erigontech/erigon/execution/types"
@@ -143,7 +144,7 @@ func timedExec(bench bool, execFunc func() ([]byte, uint64, error)) (output []by
 	return output, stats, err
 }
 
-func runCmd(ctx *cli.Context) error {
+func runCmd(_ context.Context, ctx *cli.Command) error {
 	machineFriendlyOutput := ctx.Bool(MachineFlag.Name)
 	if machineFriendlyOutput {
 		log.Root().SetHandler(log.DiscardHandler())
@@ -167,12 +168,13 @@ func runCmd(ctx *cli.Context) error {
 		receiver      = accounts.InternAddress(common.BytesToAddress([]byte("receiver")))
 		genesisConfig *types.Genesis
 	)
-	if machineFriendlyOutput {
+	switch {
+	case machineFriendlyOutput:
 		tracer = logger.NewJSONLogger(logconfig, os.Stderr).Tracer()
-	} else if ctx.Bool(DebugFlag.Name) {
+	case ctx.Bool(DebugFlag.Name):
 		debugLogger = logger.NewStructLogger(logconfig)
 		tracer = debugLogger.Tracer()
-	} else {
+	default:
 		debugLogger = logger.NewStructLogger(logconfig)
 	}
 	tmpDir, err := os.MkdirTemp("", "erigon-evm-run-*")
@@ -226,14 +228,12 @@ func runCmd(ctx *cli.Context) error {
 			if codeFileFlag == "-" {
 				//Try reading from stdin
 				if hexcode, err = io.ReadAll(os.Stdin); err != nil {
-					fmt.Printf("Could not load code from stdin: %v\n", err)
-					os.Exit(1)
+					return fmt.Errorf("could not load code from stdin: %w", err)
 				}
 			} else {
 				// Codefile with hex assembly
 				if hexcode, err = os.ReadFile(codeFileFlag); err != nil {
-					fmt.Printf("Could not load code from file: %v\n", err)
-					os.Exit(1)
+					return fmt.Errorf("could not load code from file: %w", err)
 				}
 			}
 		} else {
@@ -241,8 +241,7 @@ func runCmd(ctx *cli.Context) error {
 		}
 		hexcode = bytes.TrimSpace(hexcode)
 		if len(hexcode)%2 != 0 {
-			fmt.Printf("Invalid input length for hex data (%d)\n", len(hexcode))
-			os.Exit(1)
+			return fmt.Errorf("invalid input length for hex data (%d)", len(hexcode))
 		}
 		code = hexutil.MustDecodeHex(string(hexcode))
 	} else if fn := ctx.Args().First(); len(fn) > 0 {
@@ -282,12 +281,11 @@ func runCmd(ctx *cli.Context) error {
 	if cpuProfilePath := ctx.String(CPUProfileFlag.Name); cpuProfilePath != "" {
 		f, err := os.Create(cpuProfilePath)
 		if err != nil {
-			fmt.Println("could not create CPU profile: ", err)
-			os.Exit(1)
+			return fmt.Errorf("could not create CPU profile: %w", err)
 		}
+		defer f.Close()
 		if err := pprof.StartCPUProfile(f); err != nil {
-			fmt.Println("could not start CPU profile: ", err)
-			os.Exit(1)
+			return fmt.Errorf("could not start CPU profile: %w", err)
 		}
 		defer pprof.StopCPUProfile()
 	}
@@ -302,8 +300,7 @@ func runCmd(ctx *cli.Context) error {
 	if inputFileFlag := ctx.String(InputFileFlag.Name); inputFileFlag != "" {
 		var err error
 		if hexInput, err = os.ReadFile(inputFileFlag); err != nil {
-			fmt.Printf("could not load input from file: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("could not load input from file: %w", err)
 		}
 	} else {
 		hexInput = []byte(ctx.String(InputFlag.Name))
@@ -319,7 +316,7 @@ func runCmd(ctx *cli.Context) error {
 		}
 	} else {
 		if len(code) > 0 {
-			statedb.SetCode(receiver, code)
+			statedb.SetCode(receiver, code, tracing.CodeChangeUnspecified)
 		}
 		execFunc = func() ([]byte, uint64, error) {
 			output, gasLeft, err := runtime.Call(receiver, input, &runtimeConfig)
@@ -340,8 +337,7 @@ func runCmd(ctx *cli.Context) error {
 			rules = blockContext.Rules(chainConfig)
 		}
 		if err = statedb.CommitBlock(rules, state.NewNoopWriter()); err != nil {
-			fmt.Println("Could not commit state: ", err)
-			os.Exit(1)
+			return fmt.Errorf("could not commit state: %w", err)
 		}
 		fmt.Println(string(state.NewDumper(tx, rawdbv3.TxNums, 0).DefaultDump()))
 	}
@@ -349,12 +345,10 @@ func runCmd(ctx *cli.Context) error {
 	if memProfilePath := ctx.String(MemProfileFlag.Name); memProfilePath != "" {
 		f, err := os.Create(memProfilePath)
 		if err != nil {
-			fmt.Println("could not create memory profile: ", err)
-			os.Exit(1)
+			return fmt.Errorf("could not create memory profile: %w", err)
 		}
 		if err := pprof.WriteHeapProfile(f); err != nil {
-			fmt.Println("could not write memory profile: ", err)
-			os.Exit(1)
+			return fmt.Errorf("could not write memory profile: %w", err)
 		}
 		closeErr := f.Close()
 		if closeErr != nil {

@@ -42,18 +42,13 @@ import (
 )
 
 var stateBuckets = []string{
-	kv.HashedAccountsDeprecated,
-	kv.HashedStorageDeprecated,
-	kv.PlainState,
-	kv.E2AccountsHistory,
-	kv.E2StorageHistory,
 	kv.TxLookup,
 }
 
 var cmdMdbxTopDup = &cobra.Command{
 	Use: "mdbx_top_dup",
 	Run: func(cmd *cobra.Command, args []string) {
-		ctx, _ := common.RootContext()
+		ctx := cmd.Context()
 		logger := debug.SetupCobra(cmd, "integration")
 		err := mdbxTopDup(ctx, chaindata, bucket, logger)
 		if err != nil {
@@ -68,7 +63,7 @@ var cmdCompareBucket = &cobra.Command{
 	Use:   "compare_bucket",
 	Short: "compare bucket to the same bucket in '--chaindata.reference'",
 	Run: func(cmd *cobra.Command, args []string) {
-		ctx, _ := common.RootContext()
+		ctx := cmd.Context()
 		logger := debug.SetupCobra(cmd, "integration")
 		if referenceChaindata == "" {
 			referenceChaindata = chaindata + "-copy"
@@ -87,7 +82,7 @@ var cmdCompareStates = &cobra.Command{
 	Use:   "compare_states",
 	Short: "compare state buckets to buckets in '--chaindata.reference'",
 	Run: func(cmd *cobra.Command, args []string) {
-		ctx, _ := common.RootContext()
+		ctx := cmd.Context()
 		logger := debug.SetupCobra(cmd, "integration")
 		if referenceChaindata == "" {
 			referenceChaindata = chaindata + "-copy"
@@ -106,10 +101,10 @@ var cmdMdbxToMdbx = &cobra.Command{
 	Use:   "mdbx_to_mdbx",
 	Short: "copy data from '--chaindata' to '--chaindata.to'",
 	Run: func(cmd *cobra.Command, args []string) {
-		ctx, _ := common.RootContext()
+		ctx := cmd.Context()
 		logger := debug.SetupCobra(cmd, "integration")
 		from, to := backup.OpenPair(chaindata, toChaindata, dbcfg.ChainDB, 0, logger)
-		err := backup.Kv2kv(ctx, from, to, nil, backup.ReadAheadThreads, logger)
+		err := backup.Kv2kv(ctx, from, to, nil, logger)
 		if err != nil && !errors.Is(err, context.Canceled) {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
@@ -123,7 +118,7 @@ var cmdFToMdbx = &cobra.Command{
 	Use:   "f_to_mdbx",
 	Short: "copy data from '--chaindata' to '--chaindata.to'",
 	Run: func(cmd *cobra.Command, args []string) {
-		ctx, _ := common.RootContext()
+		ctx := cmd.Context()
 		logger := debug.SetupCobra(cmd, "integration")
 		err := fToMdbx(ctx, logger, toChaindata)
 		if err != nil && !errors.Is(err, context.Canceled) {
@@ -283,19 +278,20 @@ func compareBuckets(ctx context.Context, tx kv.Tx, b string, refTx kv.Tx, refB s
 			}
 			fmt.Printf("Compared %d records\n", count)
 		}
-		if k == nil {
+		switch {
+		case k == nil:
 			fmt.Printf("Missing in db: %x [%x]\n", refK, refV)
 			refK, refV, revErr = refC.Next()
 			if revErr != nil {
 				return revErr
 			}
-		} else if refK == nil {
+		case refK == nil:
 			fmt.Printf("Missing refDB: %x [%x]\n", k, v)
 			k, v, e = c.Next()
 			if e != nil {
 				return e
 			}
-		} else {
+		default:
 			switch bytes.Compare(k, refK) {
 			case -1:
 				fmt.Printf("Missing refDB: %x [%x]\n", k, v)
@@ -362,9 +358,8 @@ MainLoop:
 				break
 			}
 
-			parts := strings.Split(string(kk), "=")
-			k, v := parts[0], parts[1]
-			if k == "database" {
+			k, v, ok := strings.Cut(string(kk), "=")
+			if ok && k == "database" {
 				bucket = v
 			}
 		}
@@ -380,35 +375,40 @@ MainLoop:
 		if err != nil {
 			return err
 		}
-		defer c.Close()
+		defer c.Close() //nolint:gocritic
 
 		for {
 			if !fileScanner.Scan() {
+				c.Close()
 				break MainLoop
 			}
-			k := common.Copy(fileScanner.Bytes())
+			k := bytes.Clone(fileScanner.Bytes())
 			if bytes.Equal(k, endData) {
 				break
 			}
 			k = common.FromHex(string(k[1:]))
 			if !fileScanner.Scan() {
+				c.Close()
 				break MainLoop
 			}
-			v := common.Copy(fileScanner.Bytes())
+			v := bytes.Clone(fileScanner.Bytes())
 			v = common.FromHex(string(v[1:]))
 
 			if casted, ok := c.(kv.RwCursorDupSort); ok {
 				if err = casted.AppendDup(k, v); err != nil {
+					c.Close()
 					panic(err)
 				}
 			} else {
 				if err = c.Append(k, v); err != nil {
+					c.Close()
 					panic(err)
 				}
 			}
 			select {
 			default:
 			case <-ctx.Done():
+				c.Close()
 				return ctx.Err()
 			case <-commitEvery.C:
 				logger.Info("Progress", "bucket", bucket, "key", hex.EncodeToString(k))

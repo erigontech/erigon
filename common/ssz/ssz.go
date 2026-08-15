@@ -50,6 +50,19 @@ type Unmarshaler interface {
 	clonable.Clonable
 }
 
+// StrictUnmarshaler supports recursive strict decoding, which rejects
+// non-canonical offsets, non-canonical boolean encodings, and trailing bytes.
+type StrictUnmarshaler interface {
+	DecodeSSZStrict(buf []byte, version int) error
+}
+
+func decodeObjectStrict(obj Unmarshaler, buf []byte, version int) error {
+	if obj, ok := obj.(StrictUnmarshaler); ok {
+		return obj.DecodeSSZStrict(buf, version)
+	}
+	return obj.DecodeSSZ(buf, version)
+}
+
 func MarshalUint64SSZ(buf []byte, x uint64) {
 	binary.LittleEndian.PutUint64(buf, x)
 }
@@ -70,12 +83,14 @@ func OffsetSSZ(x uint32) []byte {
 	return b
 }
 
-// EncodeOffset marshals a little endian uint32 to buf
+// EncodeOffset writes offset as a four-byte little-endian SSZ offset.
+// buf must contain at least four bytes.
 func EncodeOffset(buf []byte, offset uint32) {
 	binary.LittleEndian.PutUint32(buf, offset)
 }
 
-// ReadOffset unmarshals a little endian uint32 to dst
+// DecodeOffset reads a four-byte little-endian SSZ offset.
+// x must contain at least four bytes.
 func DecodeOffset(x []byte) uint32 {
 	return binary.LittleEndian.Uint32(x)
 }
@@ -85,12 +100,34 @@ func UnmarshalUint64SSZ(x []byte) uint64 {
 }
 
 func DecodeDynamicList[T Unmarshaler](bytes []byte, start, end uint32, _max uint64, version int) ([]T, error) {
+	return decodeDynamicList[T](bytes, start, end, _max, version, false)
+}
+
+// DecodeDynamicListStrict rejects non-canonical offset tables and propagates
+// strict decoding to elements that support it. Elements without
+// DecodeSSZStrict are decoded with DecodeSSZ.
+func DecodeDynamicListStrict[T Unmarshaler](bytes []byte, start, end uint32, _max uint64, version int) ([]T, error) {
+	return decodeDynamicList[T](bytes, start, end, _max, version, true)
+}
+
+func decodeDynamicList[T Unmarshaler](bytes []byte, start, end uint32, _max uint64, version int, strict bool) ([]T, error) {
 	if start > end || len(bytes) < int(end) {
 		return nil, ErrBadOffset
 	}
 	buf := bytes[start:end]
 	var elementsNum, currentOffset uint32
-	if len(buf) > 4 {
+	// In a canonical variable-element list, the first offset is the byte length
+	// of the offset table; dividing it by four yields the element count.
+	if strict && len(buf) != 0 {
+		if len(buf) < 4 {
+			return nil, ErrLowBufferSize
+		}
+		currentOffset = DecodeOffset(buf)
+		if currentOffset == 0 || currentOffset%4 != 0 || currentOffset > uint32(len(buf)) {
+			return nil, ErrBadOffset
+		}
+		elementsNum = currentOffset / 4
+	} else if len(buf) >= 4 {
 		currentOffset = DecodeOffset(buf)
 		elementsNum = currentOffset / 4
 	}
@@ -99,6 +136,8 @@ func DecodeDynamicList[T Unmarshaler](bytes []byte, start, end uint32, _max uint
 		return nil, errors.Join(ErrTooBigList, fmt.Errorf("DecodeDynamicList: expected %d elements, got %d", _max, elementsNum))
 	}
 	objs := make([]T, elementsNum)
+	// Equal consecutive offsets are valid because variable-size elements may
+	// have empty encodings.
 	for i := range objs {
 		endOffset := uint32(len(buf))
 		if i != len(objs)-1 {
@@ -112,7 +151,13 @@ func DecodeDynamicList[T Unmarshaler](bytes []byte, start, end uint32, _max uint
 			return nil, ErrBadOffset
 		}
 		objs[i] = objs[i].Clone().(T)
-		if err := objs[i].DecodeSSZ(buf[currentOffset:endOffset], version); err != nil {
+		var err error
+		if strict {
+			err = decodeObjectStrict(objs[i], buf[currentOffset:endOffset], version)
+		} else {
+			err = objs[i].DecodeSSZ(buf[currentOffset:endOffset], version)
+		}
+		if err != nil {
 			return nil, err
 		}
 		currentOffset = endOffset
@@ -121,6 +166,16 @@ func DecodeDynamicList[T Unmarshaler](bytes []byte, start, end uint32, _max uint
 }
 
 func DecodeStaticList[T Unmarshaler](bytes []byte, start, end, bytesPerElement uint32, _max uint64, version int) ([]T, error) {
+	return decodeStaticList[T](bytes, start, end, bytesPerElement, _max, version, false)
+}
+
+// DecodeStaticListStrict propagates strict decoding to elements that support
+// it. Elements without DecodeSSZStrict are decoded with DecodeSSZ.
+func DecodeStaticListStrict[T Unmarshaler](bytes []byte, start, end, bytesPerElement uint32, _max uint64, version int) ([]T, error) {
+	return decodeStaticList[T](bytes, start, end, bytesPerElement, _max, version, true)
+}
+
+func decodeStaticList[T Unmarshaler](bytes []byte, start, end, bytesPerElement uint32, _max uint64, version int, strict bool) ([]T, error) {
 	if start > end || len(bytes) < int(end) {
 		return nil, ErrBadOffset
 	}
@@ -136,7 +191,15 @@ func DecodeStaticList[T Unmarshaler](bytes []byte, start, end, bytesPerElement u
 	objs := make([]T, elementsNum)
 	for i := range objs {
 		objs[i] = objs[i].Clone().(T)
-		if err := objs[i].DecodeSSZ(buf[i*int(bytesPerElement):], version); err != nil {
+		elemStart := i * int(bytesPerElement)
+		elemEnd := elemStart + int(bytesPerElement)
+		var err error
+		if strict {
+			err = decodeObjectStrict(objs[i], buf[elemStart:elemEnd], version)
+		} else {
+			err = objs[i].DecodeSSZ(buf[elemStart:elemEnd], version)
+		}
+		if err != nil {
 			return nil, err
 		}
 	}

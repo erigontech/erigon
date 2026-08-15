@@ -62,7 +62,7 @@ func Count(baseNum uint64, data []byte) uint64 {
 }
 
 // TODO: optimize me - to avoid object allocation (this TODO was inherited from elias_fano.go)
-func Seek(baseNum uint64, data []byte, n uint64) (uint64, bool) {
+func Seek(baseNum uint64, data []byte, n uint64) (uint64, uint64, bool) {
 	seq := ReadMultiEncSeq(baseNum, data)
 	return seq.Seek(n)
 }
@@ -146,7 +146,7 @@ func (s *SequenceReader) assertSorted() {
 	}
 }
 
-func (s *SequenceReader) Seek(v uint64) (uint64, bool) {
+func (s *SequenceReader) Seek(v uint64) (uint64, uint64, bool) {
 	switch s.currentEnc {
 	case SimpleEncoding:
 		return s.sseq.Seek(v)
@@ -158,7 +158,7 @@ func (s *SequenceReader) Seek(v uint64) (uint64, bool) {
 }
 
 func (s *SequenceReader) Has(v uint64) bool {
-	n, ok := s.Seek(v)
+	n, _, ok := s.Seek(v)
 	return ok && n == v
 }
 

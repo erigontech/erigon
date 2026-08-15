@@ -29,13 +29,14 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 func TestNoOverflowPages(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, log.Root()).InMem(t, dirs.Chaindata).PageSize(ethconfig.DefaultChainDBPageSize).MustOpen()
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.Root()), dirs.Chaindata).PageSize(ethconfig.DefaultChainDBPageSize).MustOpen()
 	t.Cleanup(db.Close)
 
 	ctx := t.Context()
@@ -191,7 +192,7 @@ func TestMergeDiffSet(t *testing.T) {
 func BenchmarkSerializeDiffSet(b *testing.B) {
 	// Create a realistic diffSet with varying sizes
 	var d []kv.DomainEntryDiff
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		key := fmt.Sprintf("key%08d_padding", i)
 		value := make([]byte, 32+i%64) // varying value sizes
 		d = append(d, kv.DomainEntryDiff{
@@ -211,7 +212,7 @@ func BenchmarkSerializeDiffSet(b *testing.B) {
 
 func BenchmarkWriteDiffSet(b *testing.B) {
 	dirs := datadir.New(b.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, log.Root()).InMem(b, dirs.Chaindata).PageSize(ethconfig.DefaultChainDBPageSize).MustOpen()
+	db := mdbxtest.InMem(b, mdbx.New(dbcfg.ChainDB, log.Root()), dirs.Chaindata).PageSize(ethconfig.DefaultChainDBPageSize).MustOpen()
 	b.Cleanup(db.Close)
 
 	// Create a realistic StateChangeSet
@@ -228,7 +229,7 @@ func BenchmarkWriteDiffSet(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-		defer tx.Rollback()
+		defer tx.Rollback() //nolint:gocritic
 		if err := changeset.WriteDiffSet(tx, uint64(i), blockHash, diffSet); err != nil {
 			tx.Rollback()
 			b.Fatal(err)
@@ -239,7 +240,7 @@ func BenchmarkWriteDiffSet(b *testing.B) {
 
 func BenchmarkWriteDiffSetLarge(b *testing.B) {
 	dirs := datadir.New(b.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, log.Root()).InMem(b, dirs.Chaindata).PageSize(ethconfig.DefaultChainDBPageSize).MustOpen()
+	db := mdbxtest.InMem(b, mdbx.New(dbcfg.ChainDB, log.Root()), dirs.Chaindata).PageSize(ethconfig.DefaultChainDBPageSize).MustOpen()
 	b.Cleanup(db.Close)
 
 	// Create a large StateChangeSet (simulating a heavy block)
@@ -256,7 +257,7 @@ func BenchmarkWriteDiffSetLarge(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-		defer tx.Rollback()
+		defer tx.Rollback() //nolint:gocritic
 		if err := changeset.WriteDiffSet(tx, uint64(i), blockHash, diffSet); err != nil {
 			tx.Rollback()
 			b.Fatal(err)
@@ -272,7 +273,7 @@ func createTestDiffSet(tb testing.TB, numAccounts, numStorage, numCode, numCommi
 	diffSet := &changeset.StateChangeSet{}
 
 	// Accounts domain - 20 byte addresses with account data
-	for i := 0; i < numAccounts; i++ {
+	for i := range numAccounts {
 		key := make([]byte, 20)
 		key[0] = byte(i >> 8)
 		key[1] = byte(i)
@@ -281,7 +282,7 @@ func createTestDiffSet(tb testing.TB, numAccounts, numStorage, numCode, numCommi
 	}
 
 	// Storage domain - 20 byte address + 32 byte location
-	for i := 0; i < numStorage; i++ {
+	for i := range numStorage {
 		key := make([]byte, 52)
 		key[0] = byte(i >> 16)
 		key[1] = byte(i >> 8)
@@ -291,7 +292,7 @@ func createTestDiffSet(tb testing.TB, numAccounts, numStorage, numCode, numCommi
 	}
 
 	// Code domain - 20 byte address with code hash
-	for i := 0; i < numCode; i++ {
+	for i := range numCode {
 		key := make([]byte, 20)
 		key[0] = byte(i >> 8)
 		key[1] = byte(i)
@@ -300,7 +301,7 @@ func createTestDiffSet(tb testing.TB, numAccounts, numStorage, numCode, numCommi
 	}
 
 	// Commitment domain - variable key with trie node data
-	for i := 0; i < numCommitment; i++ {
+	for i := range numCommitment {
 		key := make([]byte, 8+i%32) // variable length keys
 		key[0] = byte(i >> 8)
 		key[1] = byte(i)

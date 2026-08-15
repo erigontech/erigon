@@ -27,6 +27,7 @@ import (
 const (
 	validatorAttestationCacheSize = 100_000
 	proposerSlashingCacheSize     = 100
+	operationSeenCacheSize        = 16_384
 	seenBlockCacheSize            = 1000 // SeenBlockCacheSize is the size of the cache for seen blocks.
 	blockJobsIntervalTick         = 50 * time.Millisecond
 	blobJobsIntervalTick          = 5 * time.Millisecond
@@ -40,6 +41,8 @@ const (
 
 var (
 	ErrIgnore                          = errors.New("ignore") // ErrIgnore is used to indicate that the message should be ignored.
+	ErrBidQueued                       = errors.New("bid queued")
+	ErrAttestationQueued               = errors.New("attestation queued")
 	ErrBlockYoungerThanParent          = errors.New("block is younger than parent")
 	ErrInvalidCommitmentsCount         = errors.New("invalid commitments count")
 	ErrCommitmentsInclusionProofFailed = errors.New("commitments inclusion proof failed")

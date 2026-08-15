@@ -29,6 +29,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -39,7 +41,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
 func decodeHex(in string) []byte {
@@ -98,7 +100,7 @@ func TestEmptyValueIsNotANil(t *testing.T) {
 
 func TestEmptyKeyValue(t *testing.T) {
 	logger := log.New()
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	require := require.New(t)
 	table := kv.ChaindataTables[0]
 	collector := NewCollector(t.Name(), "", NewSortableBuffer(1), logger)
@@ -159,9 +161,10 @@ func TestNextKey(t *testing.T) {
 		"000000FF->00000100",
 		"FEFFFFFF->FF000000",
 	} {
-		parts := strings.Split(tc, "->")
-		input := decodeHex(parts[0])
-		expectedOutput := decodeHex(parts[1])
+		inputStr, expectedStr, ok := strings.Cut(tc, "->")
+		require.True(t, ok)
+		input := decodeHex(inputStr)
+		expectedOutput := decodeHex(expectedStr)
 		actualOutput, err := NextKey(input)
 		require.NoError(t, err)
 		assert.Equal(t, expectedOutput, actualOutput)
@@ -182,7 +185,7 @@ func TestNextKeyErr(t *testing.T) {
 func TestFileDataProviders(t *testing.T) {
 	logger := log.New()
 	// test invariant when we go through files (> 1 buffer)
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	sourceBucket := kv.ChaindataTables[0]
 
 	generateTestData(t, tx, sourceBucket, 10)
@@ -216,7 +219,7 @@ func TestFileDataProviders(t *testing.T) {
 func TestRAMDataProviders(t *testing.T) {
 	logger := log.New()
 	// test invariant when we go through memory (1 buffer)
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	sourceBucket := kv.ChaindataTables[0]
 	generateTestData(t, tx, sourceBucket, 10)
 
@@ -236,7 +239,7 @@ func TestRAMDataProviders(t *testing.T) {
 func TestTransformRAMOnly(t *testing.T) {
 	logger := log.New()
 	// test invariant when we only have one buffer and it fits into RAM (exactly 1 buffer)
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 
 	sourceBucket := kv.ChaindataTables[0]
 	destBucket := kv.ChaindataTables[1]
@@ -258,7 +261,7 @@ func TestTransformRAMOnly(t *testing.T) {
 
 func TestEmptySourceBucket(t *testing.T) {
 	logger := log.New()
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	sourceBucket := kv.ChaindataTables[0]
 	destBucket := kv.ChaindataTables[1]
 	err := Transform(
@@ -279,7 +282,7 @@ func TestEmptySourceBucket(t *testing.T) {
 func TestTransformExtractStartKey(t *testing.T) {
 	logger := log.New()
 	// test invariant when we only have one buffer and it fits into RAM (exactly 1 buffer)
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	sourceBucket := kv.ChaindataTables[0]
 	destBucket := kv.ChaindataTables[1]
 	generateTestData(t, tx, sourceBucket, 10)
@@ -301,7 +304,7 @@ func TestTransformExtractStartKey(t *testing.T) {
 func TestTransformThroughFiles(t *testing.T) {
 	logger := log.New()
 	// test invariant when we go through files (> 1 buffer)
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	sourceBucket := kv.ChaindataTables[0]
 	destBucket := kv.ChaindataTables[1]
 	generateTestData(t, tx, sourceBucket, 10)
@@ -325,7 +328,7 @@ func TestTransformThroughFiles(t *testing.T) {
 func TestTransformDoubleOnExtract(t *testing.T) {
 	logger := log.New()
 	// test invariant when extractFunc multiplies the data 2x
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	sourceBucket := kv.ChaindataTables[0]
 	destBucket := kv.ChaindataTables[1]
 	generateTestData(t, tx, sourceBucket, 10)
@@ -347,7 +350,7 @@ func TestTransformDoubleOnExtract(t *testing.T) {
 func TestTransformDoubleOnLoad(t *testing.T) {
 	logger := log.New()
 	// test invariant when loadFunc multiplies the data 2x
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	sourceBucket := kv.ChaindataTables[0]
 	destBucket := kv.ChaindataTables[1]
 	generateTestData(t, tx, sourceBucket, 10)
@@ -368,7 +371,7 @@ func TestTransformDoubleOnLoad(t *testing.T) {
 
 func generateTestData(t *testing.T, db kv.Putter, bucket string, count int) {
 	t.Helper()
-	for i := 0; i < count; i++ {
+	for i := range count {
 		k := fmt.Appendf(nil, "%10d-key-%010d", i, i)
 		v := fmt.Appendf(nil, "val-%099d", i)
 		err := db.Put(bucket, k, v)
@@ -390,7 +393,9 @@ func testExtractDoubleToMapFunc(k, v []byte, next ExtractNextFunc) error {
 	var err error
 	valueMap := make(map[string][]byte)
 	valueMap["value"] = append(v, 0xAA)
-	k1 := append(k, 0xAA)
+	k1 := make([]byte, len(k)+1)
+	copy(k1, k)
+	k1[len(k)] = 0xAA
 	out, err := json.Marshal(valueMap)
 	if err != nil {
 		panic(err)
@@ -403,7 +408,9 @@ func testExtractDoubleToMapFunc(k, v []byte, next ExtractNextFunc) error {
 
 	valueMap = make(map[string][]byte)
 	valueMap["value"] = append(v, 0xBB)
-	k2 := append(k, 0xBB)
+	k2 := make([]byte, len(k)+1)
+	copy(k2, k)
+	k2[len(k)] = 0xBB
 	out, err = json.Marshal(valueMap)
 	if err != nil {
 		panic(err)
@@ -530,7 +537,7 @@ func TestAppendAndSortPrefixes(t *testing.T) {
 	require := require.New(t)
 
 	key := common.FromHex("ed7229d50cde8de174cc64a882a0833ca5f11669")
-	key1 := append(common.Copy(key), make([]byte, 16)...)
+	key1 := append(bytes.Clone(key), make([]byte, 16)...)
 
 	keys := make([]string, 0)
 	for i := 10; i >= 0; i-- {
@@ -578,11 +585,12 @@ func TestAppend(t *testing.T) {
 	require.NoError(collector.Collect([]byte{3}, nil))
 	require.NoError(collector.Load(nil, "", func(k, v []byte, table CurrentTableReader, next LoadNextFunc) error {
 		fmt.Printf("%x %x\n", k, v)
-		if k[0] == 1 {
+		switch k[0] {
+		case 1:
 			require.Equal([]byte{1, 2, 3, 4, 5, 6, 7}, v)
-		} else if k[0] == 2 {
+		case 2:
 			require.Equal([]byte{10, 20, 30, 40, 50}, v)
-		} else {
+		default:
 			require.Nil(v)
 		}
 		return nil
@@ -649,12 +657,12 @@ func TestAppendAcrossMemProviders(t *testing.T) {
 	type kv struct{ k, v []byte }
 	var results []kv
 	loadFunc := func(k, v []byte) error {
-		results = append(results, kv{common.Copy(k), common.Copy(v)})
+		results = append(results, kv{bytes.Clone(k), bytes.Clone(v)})
 		return nil
 	}
 
 	err = mergeSortFiles("test", providers, loadFunc,
-		TransformArgs{BufferType: SortableAppendBuffer}, NewAppendBuffer(1))
+		TransformArgs{BufferType: SortableAppendBuffer})
 	require.NoError(t, err)
 
 	require.Len(t, results, 4)
@@ -798,7 +806,7 @@ func TestMixedProvidersMergeSortFiles(t *testing.T) {
 
 	// Build file provider
 	fileBuf := NewSortableBuffer(BufferOptimalSize)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		k := fmt.Appendf(nil, "a%02d", i)
 		v := fmt.Appendf(nil, "file-val-%02d", i)
 		fileBuf.Put(k, v)
@@ -809,7 +817,7 @@ func TestMixedProvidersMergeSortFiles(t *testing.T) {
 
 	// Build memory provider
 	memBuf := NewSortableBuffer(BufferOptimalSize)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		k := fmt.Appendf(nil, "b%02d", i)
 		v := fmt.Appendf(nil, "mem-val-%02d", i)
 		memBuf.Put(k, v)
@@ -824,24 +832,24 @@ func TestMixedProvidersMergeSortFiles(t *testing.T) {
 	loadFunc := func(k, v []byte) error {
 		// Must copy because providers return zero-copy references
 		results = append(results, sortableBufferEntry{
-			key:   common.Copy(k),
-			value: common.Copy(v),
+			key:   bytes.Clone(k),
+			value: bytes.Clone(v),
 		})
 		return nil
 	}
 
-	err = mergeSortFiles("test", providers, loadFunc, TransformArgs{}, NewSortableBuffer(1))
+	err = mergeSortFiles("test", providers, loadFunc, TransformArgs{})
 	require.NoError(t, err)
 
 	// Should have all 10 entries in sorted order
 	require.Len(t, results, 10)
 
 	// Verify sorted order and correct values
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		assert.Equal(t, fmt.Sprintf("a%02d", i), string(results[i].key), "file key %d", i)
 		assert.Equal(t, fmt.Sprintf("file-val-%02d", i), string(results[i].value), "file val %d", i)
 	}
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		assert.Equal(t, fmt.Sprintf("b%02d", i), string(results[5+i].key), "mem key %d", i)
 		assert.Equal(t, fmt.Sprintf("mem-val-%02d", i), string(results[5+i].value), "mem val %d", i)
 	}
@@ -888,12 +896,12 @@ func TestMixedProvidersInterleavedKeys(t *testing.T) {
 		return nil
 	}
 
-	err = mergeSortFiles("test", providers, loadFunc, TransformArgs{}, NewSortableBuffer(1))
+	err = mergeSortFiles("test", providers, loadFunc, TransformArgs{})
 	require.NoError(t, err)
 
 	require.Len(t, keys, 10)
 	// Verify interleaved order
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		assert.Equal(t, fmt.Sprintf("key-%04d", i), keys[i])
 		if i%2 == 0 {
 			assert.Equal(t, fmt.Sprintf("file-%04d", i), vals[i])
@@ -941,7 +949,7 @@ func TestMixedProvidersZeroCopyIntegrity(t *testing.T) {
 		return nil
 	}
 
-	err = mergeSortFiles("test", providers, loadFunc, TransformArgs{}, NewSortableBuffer(1))
+	err = mergeSortFiles("test", providers, loadFunc, TransformArgs{})
 	require.NoError(t, err)
 
 	require.Len(t, entries, 4)
@@ -1457,7 +1465,7 @@ func makeSortedBuffer(keySize, valSize, n int) *sortableBuffer {
 	buf := NewSortableBuffer(256 * datasize.MB)
 	key := make([]byte, keySize)
 	val := make([]byte, valSize)
-	for i := 0; i < n; i++ {
+	for range n {
 		rand.Read(key)
 		rand.Read(val)
 		buf.Put(key, val)
@@ -1489,7 +1497,7 @@ func TestVmtouchMmap(t *testing.T) {
 
 	vmtouch := func(label string) {
 		fmt.Printf("\n=== %s ===\n", label)
-		cmd := exec.Command("vmtouch", "-v", fname)
+		cmd := exec.Command("vmtouch", "-v", fname) //nolint:noctx
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		cmd.Run()
@@ -1505,19 +1513,19 @@ func TestVmtouchMmap(t *testing.T) {
 	vmtouch("AFTER first Next() (initMmap + madvise)")
 
 	// Read 25%
-	for i := 0; i < n/4-1; i++ {
+	for range n/4 - 1 {
 		provider.Next()
 	}
 	vmtouch("AFTER 25%")
 
 	// Read to 50%
-	for i := 0; i < n/4; i++ {
+	for range n / 4 {
 		provider.Next()
 	}
 	vmtouch("AFTER 50%")
 
 	// Read to 75%
-	for i := 0; i < n/4; i++ {
+	for range n / 4 {
 		provider.Next()
 	}
 	vmtouch("AFTER 75%")
@@ -1530,4 +1538,38 @@ func TestVmtouchMmap(t *testing.T) {
 		}
 	}
 	vmtouch("AFTER full scan")
+}
+
+// TestCollectorWithAllocatorDrawsBufferLazily pins the lazy-draw contract:
+// an allocator-backed collector must not take a pooled buffer until the
+// first Collect, so never-written collectors (common when a batch writer
+// set is built upfront) cost no buffer at all.
+func TestCollectorWithAllocatorDrawsBufferLazily(t *testing.T) {
+	logger := log.New()
+	_, tx := mdbxtest.NewTestTx(t)
+	require := require.New(t)
+	table := kv.ChaindataTables[0]
+
+	var draws atomic.Int64
+	pool := &sync.Pool{New: func() any {
+		draws.Add(1)
+		return NewSortableBuffer(BufferOptimalSize)
+	}}
+	allocator := NewAllocator(pool)
+
+	empty := NewCollectorWithAllocator(t.Name()+"-empty", "", allocator, logger)
+	defer empty.Close()
+	require.NoError(empty.Flush())
+	require.NoError(empty.Load(tx, table, IdentityLoadFunc, TransformArgs{}))
+	empty.Close()
+	require.Zero(draws.Load(), "empty collector must not draw from the pool")
+
+	c := NewCollectorWithAllocator(t.Name(), "", allocator, logger)
+	defer c.Close()
+	require.NoError(c.Collect([]byte{1}, []byte{1}))
+	require.EqualValues(1, draws.Load(), "first Collect draws exactly one pooled buffer")
+	require.NoError(c.Load(tx, table, IdentityLoadFunc, TransformArgs{}))
+	v, err := tx.GetOne(table, []byte{1})
+	require.NoError(err)
+	require.Equal([]byte{1}, v)
 }

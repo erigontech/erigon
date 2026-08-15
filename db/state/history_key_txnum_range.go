@@ -17,10 +17,10 @@
 package state
 
 import (
+	"bytes"
 	"container/heap"
 	"encoding/binary"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
@@ -103,13 +103,10 @@ type HistoryKeyTxNumIterFiles struct {
 	startTxNum uint64
 	endTxNum   int
 
-	k, kBackup []byte
-	txNum      uint64
-	err        error
-	limit      int
+	err   error
+	limit int
 
 	curKey    []byte
-	curIdxVal []byte
 	curSeq    multiencseq.SequenceReader
 	curTxIter multiencseq.SequenceIterator
 	hasIter   bool
@@ -141,7 +138,8 @@ func (hi *HistoryKeyTxNumIterFiles) advance() error {
 		}
 
 		top := hi.h[0]
-		key, idxVal := top.key, top.val
+		hi.curKey = top.key
+		idxVal := top.val
 
 		if top.g.HasNext() {
 			top.key, _ = top.g.Next(nil)
@@ -155,11 +153,7 @@ func (hi *HistoryKeyTxNumIterFiles) advance() error {
 			heap.Pop(&hi.h)
 		}
 
-		// Clone: segment reader reuses buffers
-		hi.curKey = append(hi.curKey[:0], key...)
-		hi.curIdxVal = append(hi.curIdxVal[:0], idxVal...)
-
-		hi.curSeq.Reset(top.startTxNum, hi.curIdxVal)
+		hi.curSeq.Reset(top.startTxNum, idxVal)
 		hi.curTxIter.Reset(&hi.curSeq, int(hi.startTxNum))
 		hi.hasIter = true
 	}
@@ -174,15 +168,11 @@ func (hi *HistoryKeyTxNumIterFiles) Next() ([]byte, uint64, error) {
 		return nil, 0, hi.err
 	}
 	hi.limit--
-	hi.k = append(hi.k[:0], hi.nextKey...)
-	hi.txNum = hi.nextTxNum
-
-	// Satisfy iter.Duo Invariant 2 for key buffer
-	hi.k, hi.kBackup = hi.kBackup, hi.k
+	k, txNum := hi.nextKey, hi.nextTxNum
 	if err := hi.advance(); err != nil {
 		return nil, 0, err
 	}
-	return hi.kBackup, hi.txNum, nil
+	return k, txNum, nil
 }
 
 // HistoryKeyTxNumIterDB emits (key, txNum) for every txNum at which a key changed in the DB.
@@ -198,8 +188,6 @@ type HistoryKeyTxNumIterDB struct {
 
 	nextKey   []byte
 	nextTxNum uint64
-	k         []byte
-	txNum     uint64
 	err       error
 }
 
@@ -211,7 +199,7 @@ func (hi *HistoryKeyTxNumIterDB) Close() {
 
 // setNext copies k (cursor ops invalidate previous return values).
 func (hi *HistoryKeyTxNumIterDB) setNext(k []byte, txNum uint64) {
-	hi.nextKey = common.Copy(k)
+	hi.nextKey = bytes.Clone(k)
 	hi.nextTxNum = txNum
 }
 
@@ -289,9 +277,9 @@ func (hi *HistoryKeyTxNumIterDB) Next() ([]byte, uint64, error) {
 		return nil, 0, hi.err
 	}
 	hi.limit--
-	hi.k, hi.txNum = hi.nextKey, hi.nextTxNum
+	k, txNum := hi.nextKey, hi.nextTxNum
 	if err := hi.advance(); err != nil {
 		return nil, 0, err
 	}
-	return hi.k, hi.txNum, nil
+	return k, txNum, nil
 }

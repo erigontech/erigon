@@ -118,11 +118,6 @@ var slashingsResetTest = NewEpochProcessing(func(s abstract.BeaconState) error {
 	return nil
 })
 
-var recordsResetTest = NewEpochProcessing(func(s abstract.BeaconState) error {
-	statechange.ProcessParticipationRecordUpdates(s)
-	return nil
-})
-
 var pendingDepositTest = NewEpochProcessing(func(s abstract.BeaconState) error {
 	statechange.ProcessPendingDeposits(s)
 	return nil
@@ -137,3 +132,12 @@ var ProposerLookaheadTest = NewEpochProcessing(func(s abstract.BeaconState) erro
 	statechange.ProcessProposerLookahead(s)
 	return nil
 })
+
+var historicalSummariesUpdateTest = NewEpochProcessing(statechange.ProcessHistoricalRootsUpdate)
+
+var builderPendingPaymentsTest = NewEpochProcessing(func(s abstract.BeaconState) error {
+	statechange.ProcessBuilderPendingPayments(s)
+	return nil
+})
+
+var ptcWindowTest = NewEpochProcessing(statechange.ProcessPtcWindow)

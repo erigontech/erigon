@@ -39,24 +39,46 @@ type IndexedAttestation struct {
 	AttestingIndices *solid.RawUint64List   `json:"attesting_indices"`
 	Data             *solid.AttestationData `json:"data"`
 	Signature        common.Bytes96         `json:"signature"`
+	version          clparams.StateVersion
 }
 
 func NewIndexedAttestation(version clparams.StateVersion) *IndexedAttestation {
+	return NewIndexedAttestationWithConfig(version, nil)
+}
+
+// NewIndexedAttestationWithConfig creates a new IndexedAttestation with preset-aware limits.
+// If cfg is nil, mainnet defaults are used.
+func NewIndexedAttestationWithConfig(version clparams.StateVersion, cfg *clparams.BeaconChainConfig) *IndexedAttestation {
 	var attLimit int
 	if version.AfterOrEqual(clparams.ElectraVersion) {
 		attLimit = attestingIndicesLimitElectra
+		if cfg != nil && cfg.MaxCommitteesPerSlot > 0 {
+			attLimit = int(cfg.MaxValidatorsPerCommittee) * int(cfg.MaxCommitteesPerSlot)
+		}
 	} else {
 		attLimit = attestingIndicesLimit
 	}
 	return &IndexedAttestation{
 		AttestingIndices: solid.NewRawUint64List(attLimit, []uint64{}),
 		Data:             &solid.AttestationData{},
+		version:          version,
 	}
 }
 
 func (i *IndexedAttestation) SetVersion(v clparams.StateVersion) {
+	i.SetVersionWithConfig(v, nil)
+}
+
+// SetVersionWithConfig sets the version and adjusts the attesting indices limit based on config.
+// If cfg is nil, mainnet defaults are used.
+func (i *IndexedAttestation) SetVersionWithConfig(v clparams.StateVersion, cfg *clparams.BeaconChainConfig) {
+	i.version = v
 	if v >= clparams.ElectraVersion {
-		i.AttestingIndices.SetCap(attestingIndicesLimitElectra)
+		limit := attestingIndicesLimitElectra
+		if cfg != nil && cfg.MaxCommitteesPerSlot > 0 {
+			limit = int(cfg.MaxValidatorsPerCommittee) * int(cfg.MaxCommitteesPerSlot)
+		}
+		i.AttestingIndices.SetCap(limit)
 	} else {
 		i.AttestingIndices.SetCap(attestingIndicesLimit)
 	}
@@ -98,9 +120,20 @@ func (i *IndexedAttestation) EncodeSSZ(buf []byte) (dst []byte, err error) {
 
 // DecodeSSZ ssz unmarshals the IndexedAttestation object
 func (i *IndexedAttestation) DecodeSSZ(buf []byte, version int) error {
+	return i.DecodeSSZWithConfig(buf, version, nil)
+}
+
+// DecodeSSZWithConfig ssz unmarshals the IndexedAttestation object with preset-aware limits.
+// If cfg is nil, mainnet defaults are used.
+func (i *IndexedAttestation) DecodeSSZWithConfig(buf []byte, version int, cfg *clparams.BeaconChainConfig) error {
+	i.version = clparams.StateVersion(version)
 	i.Data = &solid.AttestationData{}
 	if version >= int(clparams.ElectraVersion) {
-		i.AttestingIndices = solid.NewRawUint64List(attestingIndicesLimitElectra, nil)
+		limit := attestingIndicesLimitElectra
+		if cfg != nil && cfg.MaxCommitteesPerSlot > 0 {
+			limit = int(cfg.MaxValidatorsPerCommittee) * int(cfg.MaxCommitteesPerSlot)
+		}
+		i.AttestingIndices = solid.NewRawUint64List(limit, nil)
 	} else {
 		i.AttestingIndices = solid.NewRawUint64List(attestingIndicesLimit, nil)
 	}
@@ -115,7 +148,18 @@ func (i *IndexedAttestation) EncodingSizeSSZ() int {
 
 // HashSSZ ssz hashes the IndexedAttestation object
 func (i *IndexedAttestation) HashSSZ() ([32]byte, error) {
+	if i.version >= clparams.GloasVersion {
+		return i.HashSSZProgressive()
+	}
 	return merkle_tree.HashTreeRoot(i.AttestingIndices, i.Data, i.Signature[:])
+}
+
+func (i *IndexedAttestation) HashSSZProgressive() ([32]byte, error) {
+	indices, err := i.AttestingIndices.HashSSZProgressive()
+	if err != nil {
+		return [32]byte{}, err
+	}
+	return merkle_tree.ProgressiveContainerRootAll(indices[:], i.Data, i.Signature[:])
 }
 
 func IsSlashableAttestationData(d1, d2 *solid.AttestationData) bool {

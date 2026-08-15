@@ -22,7 +22,6 @@ import (
 	"math"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -33,7 +32,7 @@ import (
 )
 
 type StateChangeSet struct {
-	Diffs [kv.DomainLen]kv.DomainDiff // there are 4 domains of state changes
+	Diffs [kv.DomainLen]kv.DomainDiff
 }
 
 func (s *StateChangeSet) Copy() *StateChangeSet {
@@ -219,14 +218,15 @@ func MergeDiffSets(newer, older []kv.DomainEntryDiff) []kv.DomainEntryDiff {
 	i, j := 0, 0
 	for i < len(newer) && j < len(older) {
 		cmp := strings.Compare(older[j].Key, newer[i].Key)
-		if cmp < 0 {
+		switch {
+		case cmp < 0:
 			result = append(result, older[j])
 			j++
-		} else if cmp == 0 {
+		case cmp == 0:
 			result = append(result, older[j])
 			i++
 			j++
-		} else {
+		default:
 			result = append(result, newer[i])
 			i++
 		}
@@ -256,14 +256,15 @@ func (d *StateChangeSet) serializeKeys(out []byte, blockNumber uint64) []byte {
 				for _, entry := range diffSet {
 					address := entry.Key[:len(entry.Key)-8]
 					keyStep := ^binary.BigEndian.Uint64([]byte(entry.Key[len(entry.Key)-8:]))
-					if entry.Value != nil && len(entry.Value) > 0 {
+					switch {
+					case len(entry.Value) > 0:
 						var account accounts.Account
 						if err := accounts.DeserialiseV3(&account, entry.Value); err == nil {
 							fmt.Printf("diffset (Block:%d): acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}, step: %d\n", blockNumber, address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash, keyStep)
 						}
-					} else if entry.Value == nil {
+					case entry.Value == nil:
 						fmt.Printf("diffset (Block:%d): acc %x: [different step], step: %d\n", blockNumber, address, keyStep)
-					} else {
+					default:
 						fmt.Printf("diffset (Block:%d): del acc: %x, step: %d\n", blockNumber, address, keyStep)
 					}
 				}
@@ -275,11 +276,12 @@ func (d *StateChangeSet) serializeKeys(out []byte, blockNumber uint64) []byte {
 					copy(address[:], entry.Key[:length.Addr])
 					copy(location[:], entry.Key[length.Addr:len(entry.Key)-8])
 					keyStep := ^binary.BigEndian.Uint64([]byte(entry.Key[len(entry.Key)-8:]))
-					if entry.Value != nil && len(entry.Value) > 0 {
+					switch {
+					case len(entry.Value) > 0:
 						fmt.Printf("diffset (Block:%d): storage [%x %x] => [%x]\n", blockNumber, address, location, entry.Value)
-					} else if entry.Value == nil {
+					case entry.Value == nil:
 						fmt.Printf("diffset (Block:%d): storage [%x %x] => [different step], step: %d\n", blockNumber, address, location, keyStep)
-					} else {
+					default:
 						fmt.Printf("diffset (Block:%d): storage [%x %x] => [empty], step: %d\n", blockNumber, address, location, keyStep)
 					}
 				}
@@ -350,7 +352,7 @@ func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet
 	binary.BigEndian.PutUint64(key, blockNumber)
 	copy(key[8:], blockHash[:])
 
-	for i := 0; i < chunkCount; i++ {
+	for i := range chunkCount {
 		start := i * DiffChunkLen
 		end := min((i+1)*DiffChunkLen, len(keys))
 		binary.BigEndian.PutUint64(key[40:], uint64(i))
@@ -395,7 +397,7 @@ func ReadDiffSet(tx kv.Tx, blockNumber uint64, blockHash common.Hash) ([kv.Domai
 
 	key := make([]byte, 48)
 	val := make([]byte, 0, DiffChunkLen*chunkCount)
-	for i := uint64(0); i < chunkCount; i++ {
+	for i := range chunkCount {
 		binary.BigEndian.PutUint64(key, blockNumber)
 		copy(key[8:], blockHash[:])
 		binary.BigEndian.PutUint64(key[40:], i)
@@ -447,78 +449,4 @@ func ReadLowestUnwindableBlock(tx kv.Tx) (uint64, error) {
 	}
 	return blockNumber, nil
 
-}
-
-type DomainIOMetrics struct {
-	CacheReadCount    int64
-	CacheReadDuration time.Duration
-	CacheGetCount     int64
-	CachePutCount     int64
-	CacheGetSize      int
-	CacheGetKeySize   int
-	CacheGetValueSize int
-	CachePutSize      int
-	CachePutKeySize   int
-	CachePutValueSize int
-	DbReadCount       int64
-	DbReadDuration    time.Duration
-	FileReadCount     int64
-	FileReadDuration  time.Duration
-}
-
-type DomainMetrics struct {
-	sync.RWMutex
-	DomainIOMetrics
-	Domains map[kv.Domain]*DomainIOMetrics
-}
-
-func (dm *DomainMetrics) UpdateCacheReads(domain kv.Domain, start time.Time) {
-	dm.Lock()
-	defer dm.Unlock()
-	dm.CacheReadCount++
-	readDuration := time.Since(start)
-	dm.CacheReadDuration += readDuration
-	if d, ok := dm.Domains[domain]; ok {
-		d.CacheReadCount++
-		d.CacheReadDuration += readDuration
-	} else {
-		dm.Domains[domain] = &DomainIOMetrics{
-			CacheReadCount:    1,
-			CacheReadDuration: readDuration,
-		}
-	}
-}
-
-func (dm *DomainMetrics) UpdateDbReads(domain kv.Domain, start time.Time) {
-	dm.Lock()
-	defer dm.Unlock()
-	dm.DbReadCount++
-	readDuration := time.Since(start)
-	dm.DbReadDuration += readDuration
-	if d, ok := dm.Domains[domain]; ok {
-		d.DbReadCount++
-		d.DbReadDuration += readDuration
-	} else {
-		dm.Domains[domain] = &DomainIOMetrics{
-			DbReadCount:    1,
-			DbReadDuration: readDuration,
-		}
-	}
-}
-
-func (dm *DomainMetrics) UpdateFileReads(domain kv.Domain, start time.Time) {
-	dm.Lock()
-	defer dm.Unlock()
-	dm.FileReadCount++
-	readDuration := time.Since(start)
-	dm.FileReadDuration += readDuration
-	if d, ok := dm.Domains[domain]; ok {
-		d.FileReadCount++
-		d.FileReadDuration += readDuration
-	} else {
-		dm.Domains[domain] = &DomainIOMetrics{
-			FileReadCount:    1,
-			FileReadDuration: readDuration,
-		}
-	}
 }

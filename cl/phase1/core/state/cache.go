@@ -20,6 +20,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/caches"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
@@ -64,6 +65,34 @@ func New(cfg *clparams.BeaconChainConfig) *CachingBeaconState {
 	return state
 }
 
+// BlockRoot overrides raw.BeaconState.BlockRoot to use previousStateRoot
+// (set by TransitionState after VerifyTransition) when latestBlockHeader.Root
+// is still zero. In GLOAS, the execution payload envelope has not yet been
+// processed at the point AddChainSegment checks this, so the raw fallback to
+// HashSSZ() can return a diverged value. previousStateRoot is the
+// authoritative state root confirmed by TransitionState.
+func (b *CachingBeaconState) BlockRoot() ([32]byte, error) {
+	hdr := b.LatestBlockHeader()
+	root := hdr.Root
+	if root == (common.Hash{}) && b.previousStateRoot != (common.Hash{}) {
+		root = b.previousStateRoot
+	}
+	if root == (common.Hash{}) {
+		var err error
+		root, err = b.HashSSZ()
+		if err != nil {
+			return [32]byte{}, err
+		}
+	}
+	return (&cltypes.BeaconBlockHeader{
+		Slot:          hdr.Slot,
+		ProposerIndex: hdr.ProposerIndex,
+		BodyRoot:      hdr.BodyRoot,
+		ParentRoot:    hdr.ParentRoot,
+		Root:          root,
+	}).HashSSZ()
+}
+
 func (b *CachingBeaconState) SetPreviousStateRoot(root common.Hash) {
 	b.previousStateRoot = root
 }
@@ -82,7 +111,9 @@ func (b *CachingBeaconState) _updateProposerIndex() (err error) {
 	binary.LittleEndian.PutUint64(slotByteArray, b.Slot())
 
 	// Add slot to the end of the input.
-	inputWithSlot := append(input[:], slotByteArray...)
+	inputWithSlot := make([]byte, 0, len(input)+len(slotByteArray))
+	inputWithSlot = append(inputWithSlot, input[:]...)
+	inputWithSlot = append(inputWithSlot, slotByteArray...)
 
 	// Calculate the hash.
 	hash.Write(inputWithSlot)
@@ -244,7 +275,6 @@ func (b *CachingBeaconState) initCaches() error {
 }
 
 func (b *CachingBeaconState) InitBeaconState() error {
-
 	b.publicKeyIndicies = maphash.NewNonConcurrentMap[uint64]()
 	b.ForEachValidator(func(validator solid.Validator, i, total int) bool {
 		pk := validator.PublicKey()

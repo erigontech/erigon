@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -16,8 +19,11 @@ import (
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/persistence/genesisdb"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/datadir"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
 
@@ -29,6 +35,7 @@ func newMockHttpServer(expectedState *state.CachingBeaconState, sent *bool) *htt
 			http.Error(w, fmt.Sprintf("could not encode state: %s", err), http.StatusInternalServerError)
 			return
 		}
+		w.Header().Set("Content-Type", "application/octet-stream")
 		_, err = w.Write(enc)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("could not write encoded state: %s", err), http.StatusInternalServerError)
@@ -37,6 +44,23 @@ func newMockHttpServer(expectedState *state.CachingBeaconState, sent *bool) *htt
 		*sent = true
 	}))
 	return mockServer
+}
+
+// newMockFailingHttpServer creates a mock HTTP server that always fails with 500 so remote
+// checkpoint sync returns a non-cancel error and the resume logic falls back to disk.
+func newMockFailingHttpServer() *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+}
+
+// setCheckpointURLs points remote checkpoint sync at urls and restores the previous value when the
+// test finishes, so tests mutating this package-level global do not leak into each other.
+func setCheckpointURLs(t *testing.T, urls ...string) {
+	t.Helper()
+	prev := clparams.ConfigurableCheckpointsURLs
+	t.Cleanup(func() { clparams.ConfigurableCheckpointsURLs = prev })
+	clparams.ConfigurableCheckpointsURLs = urls
 }
 
 // newMockSlowHttpServer creates a mock HTTP server that never responds and exits gracefully when context is cancelled
@@ -60,7 +84,7 @@ func TestRemoteCheckpointSync(t *testing.T) {
 	defer mockServer.Close()
 
 	// Only 1 OK HTTP server, so we must get the expected state
-	clparams.ConfigurableCheckpointsURLs = []string{mockServer.URL}
+	setCheckpointURLs(t, mockServer.URL)
 	syncer := NewRemoteCheckpointSync(&clparams.MainnetBeaconConfig, chainspec.MainnetChainID)
 	actualState, err := syncer.GetLatestBeaconState(context.Background())
 	assert.True(t, rec)
@@ -83,7 +107,7 @@ func TestRemoteCheckpointSyncTimeout(t *testing.T) {
 	defer cancel()
 
 	// Only slow HTTP servers, so we must get a timeout
-	clparams.ConfigurableCheckpointsURLs = []string{mockSlowServer.URL, mockSlowServer.URL, mockSlowServer.URL}
+	setCheckpointURLs(t, mockSlowServer.URL, mockSlowServer.URL, mockSlowServer.URL)
 	syncer := &RemoteCheckpointSync{&clparams.MainnetBeaconConfig, chainspec.MainnetChainID, 50 * time.Millisecond}
 	currentState, err := syncer.GetLatestBeaconState(ctx)
 	require.Nil(t, currentState)
@@ -94,7 +118,7 @@ func TestRemoteCheckpointSyncCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	clparams.ConfigurableCheckpointsURLs = []string{"http://127.0.0.1:1"}
+	setCheckpointURLs(t, "http://127.0.0.1:1")
 	syncer := NewRemoteCheckpointSync(&clparams.MainnetBeaconConfig, chainspec.MainnetChainID)
 	currentState, err := syncer.GetLatestBeaconState(ctx)
 
@@ -120,7 +144,7 @@ func TestRemoteCheckpointSyncPossiblyAfterTimeout(t *testing.T) {
 	defer mockServer.Close()
 
 	// 3 slow + 1 OK HTTP servers, so we may get some timeout(s) with probability 0.75 but will eventually succeed
-	clparams.ConfigurableCheckpointsURLs = []string{mockSlowServer.URL, mockSlowServer.URL, mockSlowServer.URL, mockServer.URL}
+	setCheckpointURLs(t, mockSlowServer.URL, mockSlowServer.URL, mockSlowServer.URL, mockServer.URL)
 	syncer := &RemoteCheckpointSync{&clparams.MainnetBeaconConfig, chainspec.MainnetChainID, 1 * time.Second}
 	actualState, err := syncer.GetLatestBeaconState(ctx)
 	assert.True(t, rec)
@@ -135,13 +159,43 @@ func TestRemoteCheckpointSyncPossiblyAfterTimeout(t *testing.T) {
 	assert.Equal(t, expectedRoot, actualRoot)
 }
 
-func TestLocalCheckpointSyncFromFile(t *testing.T) {
+func TestNormalizeCheckpointURL(t *testing.T) {
+	tests := []struct {
+		input, want string
+	}{
+		{"https://checkpoint-sync.example.io", "https://checkpoint-sync.example.io/eth/v2/debug/beacon/states/finalized"},
+		{"https://checkpoint-sync.example.io/", "https://checkpoint-sync.example.io/eth/v2/debug/beacon/states/finalized"},
+		{"https://checkpoint-sync.example.io/eth/v2/debug/beacon/states/finalized", "https://checkpoint-sync.example.io/eth/v2/debug/beacon/states/finalized"},
+		{"https://example.io/eth/v2/debug/beacon/states/head", "https://example.io/eth/v2/debug/beacon/states/head"},
+	}
+	for _, tt := range tests {
+		got := normalizeCheckpointURL(tt.input)
+		assert.Equal(t, tt.want, got, "normalizeCheckpointURL(%q)", tt.input)
+	}
+}
+
+func TestRemoteCheckpointSyncRejectsHTML(t *testing.T) {
+	mockHTMLServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, `<!doctype html><html><head><meta charset="utf-8"/></head></html>`)
+	}))
+	defer mockHTMLServer.Close()
+
+	setCheckpointURLs(t, mockHTMLServer.URL+beaconStatePath)
+	syncer := NewRemoteCheckpointSync(&clparams.MainnetBeaconConfig, chainspec.MainnetChainID)
+	st, err := syncer.GetLatestBeaconState(context.Background())
+	require.Nil(t, st)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "unexpected content-type")
+}
+
+func TestLocalCheckpointSyncFromFinalizedFile(t *testing.T) {
 	_, st, _ := tests.GetPhase0Random()
 	f := afero.NewMemMapFs()
 	enc, err := st.EncodeSSZ(nil)
-	enc = utils.CompressSnappy(enc)
 	require.NoError(t, err)
-	require.NoError(t, afero.WriteFile(f, clparams.LatestStateFileName, enc, 0644))
+	enc = utils.CompressSnappy(enc)
+	require.NoError(t, afero.WriteFile(f, clparams.LatestFinalizedStateFileName, enc, 0o644))
 
 	genesisState, err := st.Copy()
 	require.NoError(t, err)
@@ -160,7 +214,295 @@ func TestLocalCheckpointSyncFromFile(t *testing.T) {
 	assert.Equal(t, wantRoot, haveRoot)
 }
 
-func TestLocalCheckpointSyncFromGenesis(t *testing.T) {
+func TestReadLocalFinalizedState_RoundTrip(t *testing.T) {
+	_, st, _ := tests.GetPhase0Random()
+	dirs := datadir.New(t.TempDir())
+
+	enc, err := st.EncodeSSZ(nil)
+	require.NoError(t, err)
+	enc = utils.CompressSnappy(enc)
+	statePath := filepath.Join(dirs.CaplinLatest, clparams.LatestFinalizedStateFileName)
+	require.NoError(t, os.WriteFile(statePath, enc, 0o644))
+
+	got, err := ReadLocalFinalizedState(dirs, &clparams.MainnetBeaconConfig)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+
+	wantRoot, err := st.HashSSZ()
+	require.NoError(t, err)
+	gotRoot, err := got.HashSSZ()
+	require.NoError(t, err)
+	assert.Equal(t, wantRoot, gotRoot)
+}
+
+func TestReadLocalFinalizedState_Absent(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	got, err := ReadLocalFinalizedState(dirs, &clparams.MainnetBeaconConfig)
+	require.Error(t, err)
+	require.Nil(t, got)
+}
+
+func TestStateWithinResumeHorizon(t *testing.T) {
+	const (
+		genesisTime    = uint64(1_000_000)
+		secondsPerSlot = uint64(12)
+		horizonSlots   = uint64(100)
+	)
+	// slotToNow returns a now-unix at which the current slot equals wantCurrentSlot.
+	slotToNow := func(wantCurrentSlot uint64) uint64 {
+		return genesisTime + wantCurrentSlot*secondsPerSlot
+	}
+
+	tests := []struct {
+		name           string
+		localSlot      uint64
+		nowUnix        uint64
+		secondsPerSlot uint64
+		want           bool
+	}{
+		{"equal", 500, slotToNow(500), secondsPerSlot, true},
+		{"one-behind", 499, slotToNow(500), secondsPerSlot, true},
+		{"exactly-at-horizon", 400, slotToNow(500), secondsPerSlot, true},
+		{"just-beyond", 399, slotToNow(500), secondsPerSlot, false},
+		{"far-beyond", 100, slotToNow(500), secondsPerSlot, false},
+		{"local-ahead", 600, slotToNow(500), secondsPerSlot, true},
+		{"now-before-genesis", 500, genesisTime - 1, secondsPerSlot, true},
+		{"zero-seconds-per-slot", 100, slotToNow(500), 0, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := stateWithinResumeHorizon(tt.localSlot, genesisTime, tt.nowUnix, tt.secondsPerSlot, horizonSlots)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func setupResumeScaffold(t *testing.T) (datadir.Dirs, *state.CachingBeaconState, genesisdb.GenesisDB) {
+	t.Helper()
+	_, base, _ := tests.GetPhase0Random()
+	dirs := datadir.New(t.TempDir())
+
+	genesisState, err := base.Copy()
+	require.NoError(t, err)
+	db := genesisdb.NewGenesisDB(&clparams.MainnetBeaconConfig, dirs.CaplinGenesis)
+	require.NoError(t, db.Initialize(genesisState))
+
+	finalized, err := base.Copy()
+	require.NoError(t, err)
+	return dirs, finalized, db
+}
+
+func writeFinalizedStateForTest(t *testing.T, dirs datadir.Dirs, st *state.CachingBeaconState) {
+	t.Helper()
+	enc, err := st.EncodeSSZ(nil)
+	require.NoError(t, err)
+	path := filepath.Join(dirs.CaplinLatest, clparams.LatestFinalizedStateFileName)
+	require.NoError(t, os.WriteFile(path, utils.CompressSnappy(enc), 0o644))
+}
+
+func makeFresh(st *state.CachingBeaconState) {
+	st.SetGenesisTime(uint64(time.Now().Unix()) - st.Slot()*clparams.MainnetBeaconConfig.SecondsPerSlot)
+}
+
+func distinctRemoteState(t *testing.T, base *state.CachingBeaconState) *state.CachingBeaconState {
+	t.Helper()
+	remote, err := base.Copy()
+	require.NoError(t, err)
+	remote.AddEth1DataVote(cltypes.NewEth1Data())
+	return remote
+}
+
+func assertSameRoot(t *testing.T, want, got *state.CachingBeaconState) {
+	t.Helper()
+	wantRoot, err := want.HashSSZ()
+	require.NoError(t, err)
+	gotRoot, err := got.HashSSZ()
+	require.NoError(t, err)
+	assert.Equal(t, wantRoot, gotRoot)
+}
+
+func TestResumeFromFreshFinalizedStateSkipsRemote(t *testing.T) {
+	dirs, finalized, db := setupResumeScaffold(t)
+	makeFresh(finalized)
+	writeFinalizedStateForTest(t, dirs, finalized)
+
+	sent := false
+	mockServer := newMockHttpServer(distinctRemoteState(t, finalized), &sent)
+	defer mockServer.Close()
+	setCheckpointURLs(t, mockServer.URL)
+
+	caplinConfig := clparams.CaplinConfig{NetworkId: chainspec.MainnetChainID}
+	got, err := ReadOrFetchLatestBeaconState(context.Background(), dirs, &clparams.MainnetBeaconConfig, caplinConfig, db)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.False(t, sent, "remote checkpoint sync must not be hit when a fresh local finalized state is present")
+	assertSameRoot(t, finalized, got)
+}
+
+func TestStaleFinalizedStateFetchesRemote(t *testing.T) {
+	dirs, finalized, db := setupResumeScaffold(t)
+	cfg := &clparams.MainnetBeaconConfig
+	staleGap := cfg.MinEpochsForBlobSidecarsRequests*cfg.SlotsPerEpoch + 10_000
+	finalized.SetGenesisTime(uint64(time.Now().Unix()) - (finalized.Slot()+staleGap)*cfg.SecondsPerSlot)
+	writeFinalizedStateForTest(t, dirs, finalized)
+
+	remoteState := distinctRemoteState(t, finalized)
+	sent := false
+	mockServer := newMockHttpServer(remoteState, &sent)
+	defer mockServer.Close()
+	setCheckpointURLs(t, mockServer.URL)
+
+	caplinConfig := clparams.CaplinConfig{NetworkId: chainspec.MainnetChainID}
+	got, err := ReadOrFetchLatestBeaconState(context.Background(), dirs, cfg, caplinConfig, db)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.True(t, sent, "a finalized state beyond the resume horizon must fall through to remote")
+	assertSameRoot(t, remoteState, got)
+}
+
+func TestForeignFinalizedStateFetchesRemote(t *testing.T) {
+	dirs, finalized, db := setupResumeScaffold(t)
+	makeFresh(finalized)
+	finalized.SetGenesisValidatorsRoot(common.HexToHash("0x0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"))
+	writeFinalizedStateForTest(t, dirs, finalized)
+
+	remoteState := distinctRemoteState(t, finalized)
+	sent := false
+	mockServer := newMockHttpServer(remoteState, &sent)
+	defer mockServer.Close()
+	setCheckpointURLs(t, mockServer.URL)
+
+	caplinConfig := clparams.CaplinConfig{NetworkId: chainspec.MainnetChainID}
+	got, err := ReadOrFetchLatestBeaconState(context.Background(), dirs, &clparams.MainnetBeaconConfig, caplinConfig, db)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.True(t, sent, "a finalized state from a different network (GVR mismatch) must fall through to remote")
+	assertSameRoot(t, remoteState, got)
+}
+
+func TestAbsentFinalizedStateFetchesRemote(t *testing.T) {
+	dirs, finalized, db := setupResumeScaffold(t)
+	// Deliberately do NOT write the finalized state file.
+
+	remoteState := distinctRemoteState(t, finalized)
+	sent := false
+	mockServer := newMockHttpServer(remoteState, &sent)
+	defer mockServer.Close()
+	setCheckpointURLs(t, mockServer.URL)
+
+	caplinConfig := clparams.CaplinConfig{NetworkId: chainspec.MainnetChainID}
+	got, err := ReadOrFetchLatestBeaconState(context.Background(), dirs, &clparams.MainnetBeaconConfig, caplinConfig, db)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.True(t, sent, "with no local finalized state, checkpoint sync must fetch remote (today's behavior)")
+	assertSameRoot(t, remoteState, got)
+}
+
+// When remote sync is unreachable, a stale-but-same-network finalized state is still adopted as a
+// last-resort anchor (the primary path rejected it as stale, but a same-network anchor beats a
+// hard start failure).
+func TestRemoteFailureFallsBackToStaleLocalFinalizedState(t *testing.T) {
+	dirs, finalized, db := setupResumeScaffold(t)
+	cfg := &clparams.MainnetBeaconConfig
+	staleGap := cfg.MinEpochsForBlobSidecarsRequests*cfg.SlotsPerEpoch + 10_000
+	finalized.SetGenesisTime(uint64(time.Now().Unix()) - (finalized.Slot()+staleGap)*cfg.SecondsPerSlot)
+	writeFinalizedStateForTest(t, dirs, finalized)
+
+	mockServer := newMockFailingHttpServer()
+	defer mockServer.Close()
+	setCheckpointURLs(t, mockServer.URL)
+
+	caplinConfig := clparams.CaplinConfig{NetworkId: chainspec.MainnetChainID}
+	got, err := ReadOrFetchLatestBeaconState(context.Background(), dirs, cfg, caplinConfig, db)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assertSameRoot(t, finalized, got)
+}
+
+// When remote sync is unreachable, a foreign-network finalized state on disk must NOT anchor the
+// node — the fallback re-validates the genesis-validators-root and errors instead of adopting it.
+func TestRemoteFailureWithForeignLocalStateErrors(t *testing.T) {
+	dirs, finalized, db := setupResumeScaffold(t)
+	makeFresh(finalized)
+	finalized.SetGenesisValidatorsRoot(common.HexToHash("0x0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"))
+	writeFinalizedStateForTest(t, dirs, finalized)
+
+	mockServer := newMockFailingHttpServer()
+	defer mockServer.Close()
+	setCheckpointURLs(t, mockServer.URL)
+
+	caplinConfig := clparams.CaplinConfig{NetworkId: chainspec.MainnetChainID}
+	got, err := ReadOrFetchLatestBeaconState(context.Background(), dirs, &clparams.MainnetBeaconConfig, caplinConfig, db)
+	require.Error(t, err)
+	require.Nil(t, got)
+	require.Contains(t, err.Error(), "different network")
+}
+
+// When remote sync is unreachable and there is no local finalized state, both failures are wrapped
+// into the returned error.
+func TestRemoteFailureWithNoLocalStateErrors(t *testing.T) {
+	dirs, _, db := setupResumeScaffold(t)
+
+	mockServer := newMockFailingHttpServer()
+	defer mockServer.Close()
+	setCheckpointURLs(t, mockServer.URL)
+
+	caplinConfig := clparams.CaplinConfig{NetworkId: chainspec.MainnetChainID}
+	got, err := ReadOrFetchLatestBeaconState(context.Background(), dirs, &clparams.MainnetBeaconConfig, caplinConfig, db)
+	require.Error(t, err)
+	require.Nil(t, got)
+}
+
+func TestResumeHorizonHonorsAndClampsConfig(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	retention := cfg.MinEpochsForBlobSidecarsRequests * cfg.SlotsPerEpoch
+
+	assert.Equal(t, retention, resolveResumeHorizonSlots(cfg, 0, 0), "0 resolves to the sidecar-retention window")
+	assert.Equal(t, uint64(10)*cfg.SlotsPerEpoch, resolveResumeHorizonSlots(cfg, 10, 0), "a value below the window is honored")
+	assert.Equal(t, retention, resolveResumeHorizonSlots(cfg, cfg.MinEpochsForBlobSidecarsRequests+1000, 0), "a value above the window is clamped down")
+
+	// The retention window is selected by the anchor's fork: blob sidecars pre-Fulu, data-column
+	// sidecars Fulu+. Use a config whose two retention values differ so the branch is observable
+	// (they are equal on mainnet).
+	fuluCfg := clparams.MainnetBeaconConfig
+	fuluCfg.MinEpochsForBlobSidecarsRequests = 4096
+	fuluCfg.MinEpochsForDataColumnSidecarsRequests = 8192
+	fuluEpoch := fuluCfg.FuluForkEpoch
+	assert.Equal(t, fuluCfg.MinEpochsForBlobSidecarsRequests*fuluCfg.SlotsPerEpoch,
+		resolveResumeHorizonSlots(&fuluCfg, 0, fuluEpoch-1), "pre-Fulu uses the blob-retention window")
+	assert.Equal(t, fuluCfg.MinEpochsForDataColumnSidecarsRequests*fuluCfg.SlotsPerEpoch,
+		resolveResumeHorizonSlots(&fuluCfg, 0, fuluEpoch), "Fulu+ uses the data-column-retention window")
+
+	// An epochs-to-slots conversion before the clamp overflows uint64 and wraps to a tiny horizon.
+	for _, epochs := range []uint64{1 << 59, math.MaxUint64} {
+		assert.Equal(t, retention, resolveResumeHorizonSlots(cfg, epochs, 0),
+			"an overflowing value clamps to the window, epochs=%d", epochs)
+	}
+}
+
+func TestLocalCheckpointSyncRejectsForeignNetworkFile(t *testing.T) {
+	_, foreign, _ := tests.GetPhase0Random()
+	foreign.SetGenesisValidatorsRoot(common.Hash{0xaa})
+	f := afero.NewMemMapFs()
+	enc, err := foreign.EncodeSSZ(nil)
+	require.NoError(t, err)
+	require.NoError(t, afero.WriteFile(f, clparams.LatestFinalizedStateFileName, utils.CompressSnappy(enc), 0o644))
+
+	_, genesisState, _ := tests.GetPhase0Random()
+	genesisState.SetGenesisValidatorsRoot(common.Hash{0xbb})
+
+	got, err := NewLocalCheckpointSyncer(genesisState, f).GetLatestBeaconState(context.Background())
+	require.NoError(t, err)
+	require.NotNil(t, got)
+
+	wantRoot, err := genesisState.HashSSZ()
+	require.NoError(t, err)
+	gotRoot, err := got.HashSSZ()
+	require.NoError(t, err)
+	assert.Equal(t, wantRoot, gotRoot, "a foreign-network file must not anchor the node")
+}
+
+func TestLocalCheckpointSyncFallsBackToGenesisWhenAbsent(t *testing.T) {
 	_, st, _ := tests.GetPhase0Random()
 	f := afero.NewMemMapFs()
 

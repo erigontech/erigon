@@ -38,12 +38,15 @@ import (
 var (
 	MaxReorgDepth = EnvUint("MAX_REORG_DEPTH", 96)
 
-	noMemstat            = EnvBool("NO_MEMSTAT", false)
-	saveHeapProfile      = EnvBool("SAVE_HEAP_PROFILE", false)
-	heapProfileFilePath  = EnvString("HEAP_PROFILE_FILE_PATH", "")
-	heapProfileThreshold = EnvUint("HEAP_PROFILE_THRESHOLD", 35)
-	heapProfileFrequency = EnvDuration("HEAP_PROFILE_FREQUENCY", 30*time.Second)
-	StagesOnlyBlocks     = EnvBool("STAGES_ONLY_BLOCKS", false)
+	WarmupTableWorkers = EnvUint("WARMUP_TABLE_WORKERS", 0)
+
+	saveHeapProfile             = EnvBool("SAVE_HEAP_PROFILE", false)
+	heapProfileFilePath         = EnvString("HEAP_PROFILE_FILE_PATH", "")
+	heapProfileThresholdPercent = EnvUint("HEAP_PROFILE_THRESHOLD", 35)
+	heapProfileFrequency        = EnvDuration("HEAP_PROFILE_FREQUENCY", 30*time.Second)
+	noMemstat                   = EnvBool("NO_MEMSTAT", false)
+
+	StagesOnlyBlocks = EnvBool("STAGES_ONLY_BLOCKS", false)
 
 	MdbxLockInRam    = EnvBool("MDBX_LOCK_IN_RAM", false)
 	MdbxNoSync       = EnvBool("MDBX_NO_FSYNC", false)
@@ -56,6 +59,7 @@ var (
 
 	//state v3
 	noPrune              = EnvBool("NO_PRUNE", false)
+	noRetire             = EnvBool("NO_RETIRE", false)              // kill-switch: don't delete aged frozen files (history/II + block snapshots)
 	noMerge              = EnvBool("NO_MERGE", false)               // don't merge Domain/Hist/II
 	noBackgroundE3Build  = EnvBool("NO_BACKGROUND_E3_BUILD", false) // suppress background E3 file build / merge / retire goroutines
 	noMergeHistory       = EnvBool("NO_MERGE_HISTORY", false)       // don't merge Hist/II but still merge Domain
@@ -74,12 +78,14 @@ var (
 	BuildSnapshotAllowance = EnvInt("SNAPSHOT_BUILD_SEMA_SIZE", 1) // allows 1 kind of snapshots to be built simultaneously
 
 	SnapshotMadvRnd = EnvBool("SNAPSHOT_MADV_RND", true)
-	OnlyCreateDB    = EnvBool("ONLY_CREATE_DB", false)
+	// kill-switch: set SNAPSHOT_MADV_SEQUENTIAL=false to skip MADV_SEQUENTIAL in seg.OpenSequentialView
+	SnapshotMadvSequential = EnvBool("SNAPSHOT_MADV_SEQUENTIAL", false)
+	OnlyCreateDB           = EnvBool("ONLY_CREATE_DB", false)
 
 	CaplinSyncedDataMangerDeadlockDetection = EnvBool("CAPLIN_SYNCED_DATA_MANAGER_DEADLOCK_DETECTION", false)
 
-	Exec3Parallel        = EnvBool("EXEC3_PARALLEL", false)
-	numWorkers           = runtime.NumCPU() / 2
+	Exec3Parallel        = EnvBool("EXEC3_PARALLEL", true)
+	numWorkers           = runtime.NumCPU()
 	Exec3Workers         = EnvInt("EXEC3_WORKERS", numWorkers)
 	ExecTerseLoggerLevel = EnvInt("EXEC_TERSE_LOGGER_LEVEL", int(log.LvlWarn))
 	CompressWorkers      = EnvInt("COMPRESS_WORKERS", 0) // 0 means "not set": online presets default to 1, offline presets use RAM/CPU estimates
@@ -90,18 +96,24 @@ var (
 
 	MergeThrottleMs = EnvInt("ERIGON_MERGE_THROTTLE_MS", 0)
 
+	// Trace is the umbrella switch: TRACE=true force-enables opcode + gas tracing
+	// for every tx (it makes IntraBlockState.Trace() true and turns on the
+	// instruction/gas sub-flags below), for debugging a single fixture end-to-end.
+	Trace                 = EnvBool("TRACE", false)
 	TraceAccounts         = EnvStrings("TRACE_ACCOUNTS", ",", nil)
 	TraceStateKeys        = EnvStrings("TRACE_STATE_KEYS", ",", nil)
-	TraceInstructions     = EnvBool("TRACE_INSTRUCTIONS", false)
+	TraceInstructions     = EnvBool("TRACE_INSTRUCTIONS", false) || Trace
 	TraceTransactionIO    = EnvBool("TRACE_TRANSACTION_IO", false)
 	TraceDomainIO         = EnvBool("TRACE_DOMAIN_IO", false)
 	TraceNoopIO           = EnvBool("TRACE_NOOP_IO", false)
 	TraceLogs             = EnvBool("TRACE_LOGS", false)
-	TraceGas              = EnvBool("TRACE_GAS", false)
-	TraceDynamicGas       = EnvBool("TRACE_DYNAMIC_GAS", false)
+	TraceGas              = EnvBool("TRACE_GAS", false) || Trace
+	TraceDynamicGas       = EnvBool("TRACE_DYNAMIC_GAS", false) || Trace
 	TraceApply            = EnvBool("TRACE_APPLY", false)
 	TraceTouchKey         = EnvBool("TRACE_TOUCH_KEY", false)
 	TraceBlockAccessLists = EnvBool("TRACE_BLOCK_ACCESS_LISTS", false)
+	TraceReexec           = EnvBool("TRACE_REEXEC", false)
+	TraceBALFeed          = EnvBool("TRACE_BAL_FEED", false)
 	TraceBlocks           = EnvUints("TRACE_BLOCKS", ",", nil)
 	TraceTxIndexes        = EnvInts("TRACE_TXINDEXES", ",", nil)
 	TraceUnwinds          = EnvBool("TRACE_UNWINDS", false)
@@ -110,18 +122,50 @@ var (
 	BadBlockHalt          = EnvBool("BAD_BLOCK_HALT", false)
 	IgnoreBAL             = EnvBool("IGNORE_BAL", false)
 	BatchCommitments      = EnvBool("BATCH_COMMITMENTS", true)
-	CaplinEfficientReorg  = EnvBool("CAPLIN_EFFICIENT_REORG", true)
-	UseTxDependencies     = EnvBool("USE_TX_DEPENDENCIES", false)
-	UseStateCache         = EnvBool("USE_STATE_CACHE", true)
-	AssertStateCache      = EnvBool("ASSERT_STATE_CACHE", false)
-	ReadAhead             = EnvBool("READ_AHEAD", true)
+	// BALDrivenCommitment folds a block's commitment from its BAL ahead of the
+	// per-tx result stream, overlapping execution. On by default; set
+	// BAL_DRIVEN_COMMITMENT=false (or IGNORE_BAL=true) to fall back to the
+	// incremental path if it ever misbehaves.
+	BALDrivenCommitment = EnvBool("BAL_DRIVEN_COMMITMENT", true)
+	// BALShadowCompute (requires BALDrivenCommitment) also computes each
+	// BAL-driven block incrementally and asserts both roots match before
+	// publishing; without it the BAL-driven root is published directly.
+	BALShadowCompute     = EnvBool("BAL_SHADOW_COMPUTE", false)
+	CaplinEfficientReorg = EnvBool("CAPLIN_EFFICIENT_REORG", true)
+	UseTxDependencies    = EnvBool("USE_TX_DEPENDENCIES", false)
+	UseStateCache        = EnvBool("USE_STATE_CACHE", true)
+	UseCodeStore         = EnvBool("USE_CODE_STORE", true)
+	DisableAdaptivePin   = EnvBool("DISABLE_ADAPTIVE_PIN", true)
+	AssertStateCache     = EnvBool("ASSERT_STATE_CACHE", false)
+	ReadAhead            = EnvBool("READ_AHEAD", true)
+	ReadAheadWorkers     = EnvInt("READ_AHEAD_WORKERS", estimate.AllCPUs())
+	ReadAheadWait        = EnvBool("READ_AHEAD_WAIT", false)
+	ReadAheadBALCode     = EnvBool("READ_AHEAD_BAL_CODE", false)
+	ReadAheadTxCode      = EnvBool("READ_AHEAD_TX_CODE", false)
+	// FilesAsyncIO warms cold state .kv pages via io_uring before the mmap read, so
+	// a would-be blocking page fault becomes a non-blocking read that releases the
+	// goroutine's P. Linux + io_uring only; self-disables (reads use ordinary faults)
+	// if io_uring is unavailable. Not free when on: each gated .kv file runs a
+	// background goroutine that mincore-rescans it every RESIDENCY_REFRESH_SEC
+	// (default 120s) — a real page-table-walk cost across a full datadir. Experimental,
+	// off by default.
+	FilesAsyncIO = EnvBool("FILES_ASYNC_IO", false)
 
 	BorValidateHeaderTime = EnvBool("BOR_VALIDATE_HEADER_TIME", true)
 	TraceDeletion         = EnvBool("TRACE_DELETION", false)
 
 	RpcDropResponse  = EnvBool("RPC_DROP_RESPONSE", false)
-	TipTrieWarmupers = EnvInt("TIP_TRIE_WARMUPERS", runtime.NumCPU()*8) //io-bound (not cpu-bound). it's ok to have `io-threads > cpus`
+	TipTrieWarmupers = EnvInt("TIP_TRIE_WARMUPERS", estimate.HalfCPUs())
+
+	PerfProfiles = EnvBool("PERF_PROFILES", false)
 )
+
+func init() {
+	if PerfProfiles {
+		runtime.SetBlockProfileRate(1)
+		runtime.SetMutexProfileFraction(1)
+	}
+}
 
 func ReadMemStats(m *runtime.MemStats) {
 	if noMemstat {
@@ -132,6 +176,7 @@ func ReadMemStats(m *runtime.MemStats) {
 
 func DiscardCommitment() bool       { return discardCommitment }
 func NoPrune() bool                 { return noPrune }
+func NoRetire() bool                { return noRetire }
 func NoMerge() bool                 { return noMerge }
 func NoBackgroundMaintenance() bool { return noBackgroundE3Build }
 func NoMergeHistory() bool          { return noMergeHistory }
@@ -240,10 +285,7 @@ func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
 		opt(&options)
 	}
 
-	var logger log.Logger
-	if options.logger != nil {
-		logger = *options.logger
-	}
+	logger := common.Deref(options.logger)
 
 	var memStats runtime.MemStats
 	if options.memStats != nil {
@@ -253,14 +295,19 @@ func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
 	}
 
 	totalMemory := estimate.TotalMemory()
+	threshold := (totalMemory / 100) * heapProfileThresholdPercent
+	aboveThreshold := memStats.Alloc >= threshold
 	if logger != nil {
 		logger.Info(
-			"[Experiment] heap profile threshold check",
+			"[Experiment] heap check",
+			"threshold", common.ByteCount(threshold),
 			"alloc", common.ByteCount(memStats.Alloc),
+			"aboveThreshold", aboveThreshold,
+			"sys", common.ByteCount(memStats.Sys),
 			"total", common.ByteCount(totalMemory),
 		)
 	}
-	if memStats.Alloc < (totalMemory/100)*heapProfileThreshold {
+	if !aboveThreshold {
 		return
 	}
 

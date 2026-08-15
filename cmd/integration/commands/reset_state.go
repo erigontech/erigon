@@ -26,14 +26,14 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/backup"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
-	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
@@ -46,13 +46,12 @@ var cmdResetState = &cobra.Command{
 	Use:   "reset_state",
 	Short: "Reset StateStages (5,6,7,8,9,10) and buckets",
 	Run: func(cmd *cobra.Command, args []string) {
-		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
+		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
+		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
 		}
-		ctx, _ := common.RootContext()
 		defer db.Close()
 
 		sn, borSn, _, _, _, _, err := allSnapshots(ctx, db, logger)
@@ -71,7 +70,9 @@ var cmdResetState = &cobra.Command{
 			return
 		}
 
-		if err = rawdbreset.ResetState(db, ctx); err != nil {
+		dirs := datadir.New(datadirCli)
+		br, _ := blocksIO(db, logger)
+		if err = rawdbreset.ResetState(db, ctx, dirs, br, logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}
@@ -93,9 +94,8 @@ var cmdClearBadBlocks = &cobra.Command{
 	Use:   "clear_bad_blocks",
 	Short: "Clear table with bad block hashes to allow to process this blocks one more time",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		logger := debug.SetupCobra(cmd, "integration")
-		ctx, _ := common.RootContext()
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
+		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
+		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return err
@@ -103,7 +103,7 @@ var cmdClearBadBlocks = &cobra.Command{
 		defer db.Close()
 
 		return db.Update(ctx, func(tx kv.RwTx) error {
-			return backup.ClearTables(ctx, tx, kv.BadHeaderNumber)
+			return backup.ClearTables(ctx, db, tx, kv.BadHeaderNumber)
 		})
 	},
 }
@@ -118,7 +118,7 @@ func init() {
 	rootCmd.AddCommand(cmdClearBadBlocks)
 }
 
-func printStages(tx kv.TemporalTx, snapshots *freezeblocks.RoSnapshots, borSn *heimdall.RoSnapshots) error {
+func printStages(tx kv.TemporalTx, snapshots *blocksnapshots.RoSnapshots, borSn *heimdall.RoSnapshots) error {
 	var err error
 	var progress uint64
 	w := new(tabwriter.Writer)
@@ -156,8 +156,9 @@ func printStages(tx kv.TemporalTx, snapshots *freezeblocks.RoSnapshots, borSn *h
 	_lb, _lt, _ := rawdbv3.TxNums.Last(tx)
 	stepSize := tx.Debug().StepSize()
 
+	dbg := tx.Debug()
 	fmt.Fprintf(w, "state.history: idx steps: %.02f, TxNums_Index(%d,%d)\n", rawdbhelpers.IdxStepsCountV3(tx, stepSize), _lb, _lt)
-	for i := 0; i < int(kv.DomainLen); i++ {
+	for i := range int(kv.DomainLen) {
 		d := kv.Domain(i)
 		cfg := statecfg.Schema.GetDomainCfg(d)
 		keysSteps := rawdbhelpers.IdxStepsInDB(tx, cfg.Hist.IiCfg.KeysTable, stepSize)
@@ -205,20 +206,18 @@ func printStages(tx kv.TemporalTx, snapshots *freezeblocks.RoSnapshots, borSn *h
 
 	w.Init(os.Stdout, 8, 8, 0, '\t', 0)
 	fmt.Fprintf(w, "domain and ii progress\n\n")
+	fmt.Fprintf(w, "Note: progress for commitment domain (in terms of txNum) is not presented.\n")
 	fmt.Fprint(w, "\n \t\t historyStartFrom \t\t progress(txnum) \t\t progress(step)\n")
 
-	dbg := tx.Debug()
-	for i := 0; i < int(kv.DomainLen); i++ {
+	for i := range int(kv.DomainLen) {
 		d := kv.Domain(i)
 		txNum := dbg.DomainProgress(d)
 		step := txNum / stepSize
-
-		cfg := statecfg.Schema.GetDomainCfg(d)
-		if cfg.Hist.HistoryDisabled {
-			fmt.Fprintf(w, "%s \t\t - \t\t %d \t\t %d\n", d.String(), txNum, step)
-		} else {
-			fmt.Fprintf(w, "%s \t\t %d \t\t %d \t\t %d\n", d.String(), dbg.HistoryStartFrom(d), txNum, step)
+		if d == kv.CommitmentDomain {
+			fmt.Fprintf(w, "%s \t\t - \t\t - \t\t %d\n", d.String(), step)
+			continue
 		}
+		fmt.Fprintf(w, "%s \t\t %d \t\t %d \t\t %d\n", d.String(), dbg.HistoryStartFrom(d), txNum, step)
 	}
 	fmt.Fprintf(w, " \t\t  \t\t  \t\t  \n") // newline acts as a table separator, this is a hack to maintain same tabwriter group
 	for _, ii := range []kv.InvertedIdx{kv.LogTopicIdx, kv.LogAddrIdx, kv.TracesFromIdx, kv.TracesToIdx} {

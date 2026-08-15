@@ -25,7 +25,7 @@ import (
 	"go.uber.org/goleak"
 )
 
-const max = 20
+const maxWorkers = 20
 
 func TestExample(t *testing.T) {
 	defer goleak.VerifyNone(t)
@@ -35,7 +35,6 @@ func TestExample(t *testing.T) {
 
 	rspChan := make(chan string, len(requests))
 	for _, r := range requests {
-		r := r
 		wp.Submit(func() {
 			rspChan <- r
 		})
@@ -67,18 +66,18 @@ func TestMaxWorkers(t *testing.T) {
 		t.Fatal("should have created one worker")
 	}
 
-	wp = New(max)
+	wp = New(maxWorkers)
 	defer wp.Stop()
 
-	if wp.Size() != max {
+	if wp.Size() != maxWorkers {
 		t.Fatal("wrong size returned")
 	}
 
-	started := make(chan struct{}, max)
+	started := make(chan struct{}, maxWorkers)
 	release := make(chan struct{})
 
 	// Start workers, and have them all wait on a channel before completing.
-	for i := 0; i < max; i++ {
+	for range maxWorkers {
 		wp.Submit(func() {
 			started <- struct{}{}
 			<-release
@@ -90,7 +89,7 @@ func TestMaxWorkers(t *testing.T) {
 		t.Fatal("Working Queue size returned should not be 0")
 	}
 	timeout := time.After(5 * time.Second)
-	for startCount := 0; startCount < max; {
+	for startCount := 0; startCount < maxWorkers; {
 		select {
 		case <-started:
 			startCount++
@@ -112,7 +111,7 @@ func TestReuseWorkers(t *testing.T) {
 	release := make(chan struct{})
 
 	// Cause worker to be created, and available for reuse before next task.
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		wp.Submit(func() { <-release })
 		release <- struct{}{}
 		time.Sleep(time.Millisecond)
@@ -129,7 +128,7 @@ func TestReuseWorkers(t *testing.T) {
 func TestWorkerTimeout(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
-	wp := New(max)
+	wp := New(maxWorkers)
 	defer wp.Stop()
 
 	// Start workers, and have them all wait on ctx before completing.
@@ -147,19 +146,19 @@ func TestWorkerTimeout(t *testing.T) {
 	// Release workers.
 	cancel()
 
-	if countReady(wp) != max {
-		t.Fatal("Expected", max, "ready workers")
+	if countReady(wp) != maxWorkers {
+		t.Fatal("Expected", maxWorkers, "ready workers")
 	}
 
 	// Check that a worker timed out.
 	time.Sleep(idleTimeout*2 + idleTimeout/2)
-	if countReady(wp) != max-1 {
+	if countReady(wp) != maxWorkers-1 {
 		t.Fatal("First worker did not timeout")
 	}
 
 	// Check that another worker timed out.
 	time.Sleep(idleTimeout)
-	if countReady(wp) != max-2 {
+	if countReady(wp) != maxWorkers-2 {
 		t.Fatal("Second worker did not timeout")
 	}
 }
@@ -167,7 +166,7 @@ func TestWorkerTimeout(t *testing.T) {
 func TestStop(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
-	wp := New(max)
+	wp := New(maxWorkers)
 
 	// Start workers, and have them all wait on ctx before completing.
 	ctx, cancel := context.WithCancel(t.Context())
@@ -193,8 +192,8 @@ func TestStop(t *testing.T) {
 	wp = New(5)
 
 	release := make(chan struct{})
-	finished := make(chan struct{}, max)
-	for i := 0; i < max; i++ {
+	finished := make(chan struct{}, maxWorkers)
+	for range maxWorkers {
 		wp.Submit(func() {
 			<-release
 			finished <- struct{}{}
@@ -209,7 +208,7 @@ func TestStop(t *testing.T) {
 	wp.Stop()
 	var count int
 Count:
-	for count < max {
+	for count < maxWorkers {
 		select {
 		case <-finished:
 			count++
@@ -231,8 +230,8 @@ func TestStopWait(t *testing.T) {
 	// Start workers, and have them all wait on a channel before completing.
 	wp := New(5)
 	release := make(chan struct{})
-	finished := make(chan struct{}, max)
-	for i := 0; i < max; i++ {
+	finished := make(chan struct{}, maxWorkers)
+	for range maxWorkers {
 		wp.Submit(func() {
 			<-release
 			finished <- struct{}{}
@@ -245,7 +244,7 @@ func TestStopWait(t *testing.T) {
 		close(release)
 	}()
 	wp.StopWait()
-	for count := 0; count < max; count++ {
+	for range maxWorkers {
 		select {
 		case <-finished:
 		default:
@@ -314,7 +313,7 @@ func TestOverflow(t *testing.T) {
 	releaseChan := make(chan struct{})
 
 	// Start workers, and have them all wait on a channel before completing.
-	for i := 0; i < 64; i++ {
+	for range 64 {
 		wp.Submit(func() { <-releaseChan })
 	}
 
@@ -338,16 +337,16 @@ func TestOverflow(t *testing.T) {
 func TestStopRace(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
-	wp := New(max)
+	wp := New(maxWorkers)
 	defer wp.Stop()
 
 	workRelChan := make(chan struct{})
 
 	var started sync.WaitGroup
-	started.Add(max)
+	started.Add(maxWorkers)
 
 	// Start workers, and have them all wait on a channel before completing.
-	for i := 0; i < max; i++ {
+	for range maxWorkers {
 		wp.Submit(func() {
 			started.Done()
 			<-workRelChan
@@ -358,7 +357,7 @@ func TestStopRace(t *testing.T) {
 
 	const doneCallers = 5
 	stopDone := make(chan struct{}, doneCallers)
-	for i := 0; i < doneCallers; i++ {
+	for range doneCallers {
 		go func() {
 			wp.Stop()
 			stopDone <- struct{}{}
@@ -374,7 +373,7 @@ func TestStopRace(t *testing.T) {
 	close(workRelChan)
 
 	timeout := time.After(time.Second)
-	for i := 0; i < doneCallers; i++ {
+	for range doneCallers {
 		select {
 		case <-stopDone:
 		case <-timeout:
@@ -396,15 +395,18 @@ func TestWaitingQueueSizeRace(t *testing.T) {
 	wp := New(workers)
 	defer wp.Stop()
 
+	// Block every worker so that, once all are busy, the dispatcher must put
+	// further tasks on the waiting queue — making a non-zero WaitingQueueSize
+	// deterministic rather than dependent on goroutine scheduling.
+	release := make(chan struct{})
+
 	maxChan := make(chan int)
-	for g := 0; g < goroutines; g++ {
+	for range goroutines {
 		go func() {
 			max := 0
-			// Submit 100 tasks, checking waiting queue size each time.  Report
-			// the maximum queue size seen.
-			for i := 0; i < tasks; i++ {
+			for range tasks {
 				wp.Submit(func() {
-					time.Sleep(time.Microsecond)
+					<-release
 				})
 				waiting := wp.WaitingQueueSize()
 				if waiting > max {
@@ -417,7 +419,7 @@ func TestWaitingQueueSizeRace(t *testing.T) {
 
 	// Find maximum queuesize seen by any goroutine.
 	maxMax := 0
-	for g := 0; g < goroutines; g++ {
+	for range goroutines {
 		max := <-maxChan
 		if max > maxMax {
 			maxMax = max
@@ -429,6 +431,9 @@ func TestWaitingQueueSizeRace(t *testing.T) {
 	if maxMax >= goroutines*tasks {
 		t.Error("should not have seen all tasks on waiting queue")
 	}
+
+	// Unblock workers so the deferred Stop can drain and join them.
+	close(release)
 }
 
 func TestPause(t *testing.T) {
@@ -603,7 +608,7 @@ func TestWorkerLeak(t *testing.T) {
 	wp := New(workerCount)
 
 	// Start workers, and have them all wait on a channel before completing.
-	for i := 0; i < workerCount; i++ {
+	for range workerCount {
 		wp.Submit(func() {
 			time.Sleep(time.Millisecond)
 		})
@@ -636,12 +641,12 @@ func countReady(w *WorkerPool) int {
 		<-release
 	}
 	var readyCount int
-	for i := 0; i < max; i++ {
+	for i := 0; i < maxWorkers; i++ {
 		select {
 		case w.workerQueue <- wait:
 			readyCount++
 		case <-timeout:
-			i = max
+			i = maxWorkers
 		}
 	}
 
@@ -678,7 +683,7 @@ func BenchmarkEnqueue2(b *testing.B) {
 	// Start workers, and have them all wait on a channel before completing.
 	for i := 0; i < b.N; i++ {
 		releaseChan := make(chan struct{})
-		for i := 0; i < 64; i++ {
+		for range 64 {
 			wp.Submit(func() { <-releaseChan })
 		}
 		close(releaseChan)
@@ -719,7 +724,7 @@ func benchmarkExecWorkers(n int, b *testing.B) {
 
 	// Start workers, and have them all wait on a channel before completing.
 	for i := 0; i < b.N; i++ {
-		for j := 0; j < n; j++ {
+		for range n {
 			wp.Submit(func() {
 				//time.Sleep(100 * time.Microsecond)
 				allDone.Done()

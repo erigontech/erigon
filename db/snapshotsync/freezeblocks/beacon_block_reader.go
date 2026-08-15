@@ -34,10 +34,6 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-var buffersPool = sync.Pool{
-	New: func() any { return &bytes.Buffer{} },
-}
-
 var decompressorPool = sync.Pool{
 	New: func() any {
 		r, err := zstd.NewReader(nil)
@@ -48,13 +44,21 @@ var decompressorPool = sync.Pool{
 	},
 }
 
+func putDecoder(reader *zstd.Decoder) {
+	_ = reader.Reset(nil)
+	decompressorPool.Put(reader)
+}
+
 type BeaconSnapshotReader interface {
 	// ReadBlockBySlot reads the block at the given slot.
 	// If the block is not present, it returns nil.
 	ReadBlockBySlot(ctx context.Context, tx kv.Tx, slot uint64) (*cltypes.SignedBeaconBlock, error)
 	ReadBlockByRoot(ctx context.Context, tx kv.Tx, blockRoot common.Hash) (*cltypes.SignedBeaconBlock, error)
 	ReadHeaderByRoot(ctx context.Context, tx kv.Tx, blockRoot common.Hash) (*cltypes.SignedBeaconBlockHeader, error)
-	ReadBlindedBlockBySlot(ctx context.Context, tx kv.Tx, slot uint64) (*cltypes.SignedBlindedBeaconBlock, error)
+	// ReadBeaconBlockBodyBySlot reads a block without full execution payload data (no transactions/
+	// withdrawals). Works for both pre- and post-GLOAS blocks. Use ReadBlockBySlot when full EL
+	// data is needed.
+	ReadBeaconBlockBodyBySlot(ctx context.Context, tx kv.Tx, slot uint64) (*cltypes.SignedBeaconBlock, error)
 
 	FrozenSlots() uint64
 	// CacheBlockBody caches a recently produced block's execution body so it can
@@ -132,20 +136,15 @@ func (r *beaconSnapshotReader) ReadBlockBySlot(ctx context.Context, tx kv.Tx, sl
 	}
 
 	// Decompress this thing
-	buffer := buffersPool.Get().(*bytes.Buffer)
-	defer buffersPool.Put(buffer)
-
-	buffer.Reset()
-	buffer.Write(buf)
 	reader := decompressorPool.Get().(*zstd.Decoder)
-	defer decompressorPool.Put(reader)
-	reader.Reset(buffer)
+	defer putDecoder(reader)
+	reader.Reset(bytes.NewReader(buf))
 
-	// Use pooled buffers and readers to avoid allocations.
+	// Use pooled readers to avoid allocations.
 	return snapshot_format.ReadBlockFromSnapshot(reader, r.eth1Getter, r.cfg)
 }
 
-func (r *beaconSnapshotReader) ReadBlindedBlockBySlot(ctx context.Context, tx kv.Tx, slot uint64) (*cltypes.SignedBlindedBeaconBlock, error) {
+func (r *beaconSnapshotReader) ReadBeaconBlockBodyBySlot(ctx context.Context, tx kv.Tx, slot uint64) (*cltypes.SignedBeaconBlock, error) {
 	view := r.sn.View()
 	defer view.Close()
 
@@ -194,17 +193,12 @@ func (r *beaconSnapshotReader) ReadBlindedBlockBySlot(ctx context.Context, tx kv
 	}
 
 	// Decompress this thing
-	buffer := buffersPool.Get().(*bytes.Buffer)
-	defer buffersPool.Put(buffer)
-
-	buffer.Reset()
-	buffer.Write(buf)
 	reader := decompressorPool.Get().(*zstd.Decoder)
-	defer decompressorPool.Put(reader)
-	reader.Reset(buffer)
+	defer putDecoder(reader)
+	reader.Reset(bytes.NewReader(buf))
 
-	// Use pooled buffers and readers to avoid allocations.
-	return snapshot_format.ReadBlindedBlockFromSnapshot(reader, r.cfg)
+	// Use pooled readers to avoid allocations.
+	return snapshot_format.ReadBeaconBlockBodyFromSnapshot(reader, r.cfg)
 }
 
 func (r *beaconSnapshotReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, root common.Hash) (*cltypes.SignedBeaconBlock, error) {
@@ -272,16 +266,11 @@ func (r *beaconSnapshotReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, ro
 		return nil, nil
 	}
 	// Decompress this thing
-	buffer := buffersPool.Get().(*bytes.Buffer)
-	defer buffersPool.Put(buffer)
-
-	buffer.Reset()
-	buffer.Write(buf)
 	reader := decompressorPool.Get().(*zstd.Decoder)
-	defer decompressorPool.Put(reader)
-	reader.Reset(buffer)
+	defer putDecoder(reader)
+	reader.Reset(bytes.NewReader(buf))
 
-	// Use pooled buffers and readers to avoid allocations.
+	// Use pooled readers to avoid allocations.
 	return snapshot_format.ReadBlockFromSnapshot(reader, r.eth1Getter, r.cfg)
 }
 
@@ -311,7 +300,6 @@ func (r *beaconSnapshotReader) ReadHeaderByRoot(ctx context.Context, tx kv.Tx, r
 		return nil, nil
 	}
 
-	h, _, _, err := r.sn.ReadHeader(*slot)
-	// Use pooled buffers and readers to avoid allocations.
+	h, _, _, err := r.sn.ReadHeader(*slot, tx)
 	return h, err
 }

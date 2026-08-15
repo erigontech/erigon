@@ -1,16 +1,15 @@
 package wit
 
 import (
-	"errors"
+	"fmt"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types/stateless"
-	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 )
 
 var ProtocolToString = map[uint]string{
-	direct.WIT0: "wit0",
+	WIT1: "wit0",
 }
 
 // Constants to match up protocol versions and messages
@@ -54,17 +53,6 @@ const (
 	NewWitnessHashesMsg = 0x01 // announces witness availability
 	GetWitnessMsg       = 0x02 // witness request
 	WitnessMsg          = 0x03 // witness response
-)
-
-var (
-	errNoStatusMsg             = errors.New("no status message")
-	errMsgTooLarge             = errors.New("message too long")
-	errDecode                  = errors.New("invalid message")
-	errInvalidMsgCode          = errors.New("invalid message code")
-	errProtocolVersionMismatch = errors.New("protocol version mismatch")
-	errNetworkIDMismatch       = errors.New("network ID mismatch")
-	errGenesisMismatch         = errors.New("genesis mismatch")
-	errForkIDRejected          = errors.New("fork ID rejected")
 )
 
 // Packet represents a p2p message in the `wit` protocol.
@@ -128,7 +116,7 @@ func (w *NewWitnessHashesPacket) Name() string { return "NewWitnessHashes" }
 func (w *NewWitnessHashesPacket) Kind() byte   { return NewWitnessHashesMsg }
 
 var ToProto = map[uint]map[uint64]sentryproto.MessageId{
-	direct.WIT0: {
+	WIT1: {
 		NewWitnessMsg:       sentryproto.MessageId_NEW_WITNESS_W0,
 		NewWitnessHashesMsg: sentryproto.MessageId_NEW_WITNESS_HASHES_W0,
 		GetWitnessMsg:       sentryproto.MessageId_GET_BLOCK_WITNESS_W0,
@@ -136,11 +124,19 @@ var ToProto = map[uint]map[uint64]sentryproto.MessageId{
 	},
 }
 
-var FromProto = map[uint]map[sentryproto.MessageId]uint64{
-	direct.WIT0: {
-		sentryproto.MessageId_NEW_WITNESS_W0:        NewWitnessMsg,
-		sentryproto.MessageId_NEW_WITNESS_HASHES_W0: NewWitnessHashesMsg,
-		sentryproto.MessageId_GET_BLOCK_WITNESS_W0:  GetWitnessMsg,
-		sentryproto.MessageId_BLOCK_WITNESS_W0:      WitnessMsg,
-	},
+var FromProto = inverse(ToProto)
+
+func inverse(toProto map[uint]map[uint64]sentryproto.MessageId) map[uint]map[sentryproto.MessageId]uint64 {
+	fromProto := make(map[uint]map[sentryproto.MessageId]uint64, len(toProto))
+	for version, codes := range toProto {
+		inv := make(map[sentryproto.MessageId]uint64, len(codes))
+		for code, id := range codes {
+			if _, ok := inv[id]; ok {
+				panic(fmt.Sprintf("wit/%d: message id %s mapped from multiple message codes", version, id))
+			}
+			inv[id] = code
+		}
+		fromProto[version] = inv
+	}
+	return fromProto
 }

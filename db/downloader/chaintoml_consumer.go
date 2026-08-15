@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"net"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -51,9 +53,7 @@ func BuildTomlFromMap(m map[string]string) []byte {
 // conflict (same key). Returns the merged map and the count of genuinely new entries.
 func MergeChainToml(existing, discovered map[string]string) (merged map[string]string, newCount int) {
 	merged = make(map[string]string, len(existing)+len(discovered))
-	for k, v := range existing {
-		merged[k] = v
-	}
+	maps.Copy(merged, existing)
 	for k, v := range discovered {
 		if _, exists := merged[k]; !exists {
 			merged[k] = v
@@ -172,7 +172,7 @@ type ipPortAddr struct {
 
 func (a ipPortAddr) Network() string { return "tcp" }
 func (a ipPortAddr) String() string {
-	return net.JoinHostPort(a.IP.String(), fmt.Sprintf("%d", a.Port))
+	return net.JoinHostPort(a.IP.String(), strconv.Itoa(a.Port))
 }
 
 // ApplyDiscoveredChainToml merges discovered chain.toml entries into the preverified registry.

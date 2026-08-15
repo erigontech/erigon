@@ -7,6 +7,9 @@ defaults:
   run:
     shell: bash
 
+permissions:
+  contents: read
+
 jobs:
   tests:
     strategy:
@@ -14,18 +17,25 @@ jobs:
         #        disable macos-15 until https://github.com/erigontech/erigon/issues/8789
         os: [ ubuntu-24.04 ] # required check includes runner version. Do not change it only here.
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      actions: write
+    timeout-minutes: 60
 
     steps:
       - name: Checkout custom actions
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
+          persist-credentials: false
 
       - uses: ./.github/actions/setup-erigon
         id: erigon
+        with:
+          cache-namespace: test-integration-caplin
 
       - name: Cache cl_mainnet tarball
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           # Only cache the .tar.gz; the extracted dir is recreated by
           # tools/test-fixtures.sh on each run from the cached tarball.
@@ -53,25 +63,34 @@ jobs:
         if: failure() && github.event_name == 'merge_group'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh run cancel ${{ github.run_id }} || true
+        run: |
+          echo "::error title=Merge-queue root-cause failure::This job failed and is fast-cancelling the CI Gate run; THIS job is the real failure (the others show as cancelled). See its logs."
+          gh run cancel ${{ github.run_id }} || true
 
   tests-windows:
     strategy:
       matrix:
         os: [ windows-2025 ]
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      actions: write
+    timeout-minutes: 60
 
     steps:
       - name: Checkout custom actions
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
+          persist-credentials: false
 
       - uses: ./.github/actions/setup-erigon
         id: erigon
+        with:
+          cache-namespace: test-integration-caplin
 
       - name: Cache cl_mainnet tarball
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: test-fixtures-cache/cl_mainnet.tar.gz
           key: test-fixtures-cl-${{ runner.os }}-${{ hashFiles('test-fixtures.json') }}
@@ -93,4 +112,6 @@ jobs:
         if: failure() && github.event_name == 'merge_group'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh run cancel ${{ github.run_id }} || true
+        run: |
+          echo "::error title=Merge-queue root-cause failure::This job failed and is fast-cancelling the CI Gate run; THIS job is the real failure (the others show as cancelled). See its logs."
+          gh run cancel ${{ github.run_id }} || true

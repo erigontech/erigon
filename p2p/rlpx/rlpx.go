@@ -34,6 +34,7 @@ import (
 	"io"
 	mrand "math/rand"
 	"net"
+	"slices"
 	"time"
 
 	keccak "github.com/erigontech/fastkeccak"
@@ -156,7 +157,7 @@ func (c *Conn) Read() (code uint64, data []byte, wireSize int, err error) {
 		if actualSize > maxUint24 {
 			return code, nil, 0, errPlainMessageTooLarge
 		}
-		c.snappyReadBuffer = growslice(c.snappyReadBuffer, actualSize)
+		c.snappyReadBuffer = slices.Grow(c.snappyReadBuffer[:0], actualSize)[:actualSize]
 		data, err = snappy.Decode(c.snappyReadBuffer, data)
 	}
 	return code, data, wireSize, err
@@ -222,7 +223,8 @@ func (c *Conn) Write(code uint64, data []byte) (uint32, error) {
 		// Ensure the buffer has sufficient size.
 		// Package snappy will allocate its own buffer if the provided
 		// one is smaller than MaxEncodedLen.
-		c.snappyWriteBuffer = growslice(c.snappyWriteBuffer, snappy.MaxEncodedLen(len(data)))
+		snappyBound := snappy.MaxEncodedLen(len(data))
+		c.snappyWriteBuffer = slices.Grow(c.snappyWriteBuffer[:0], snappyBound)[:snappyBound]
 		data = snappy.Encode(c.snappyWriteBuffer, data)
 	}
 
@@ -640,7 +642,7 @@ func (h *handshakeState) sealEIP8(msg any) ([]byte, error) {
 	binary.BigEndian.PutUint16(prefix, uint16(len(h.wbuf.data)+eciesOverhead))
 
 	enc, err := ecies.Encrypt(rand.Reader, h.remote, h.wbuf.data, nil, prefix)
-	return append(prefix, enc...), err
+	return append(prefix, enc...), err //nolint:makezero
 }
 
 // importPublicKey unmarshals 64 or 65 bytes long public keys.
@@ -673,7 +675,7 @@ func exportPubkey(pub *ecies.PublicKey) []byte {
 
 func xor(one, other []byte) (xor []byte) {
 	xor = make([]byte, len(one))
-	for i := 0; i < len(one); i++ {
+	for i := range one {
 		xor[i] = one[i] ^ other[i]
 	}
 	return xor

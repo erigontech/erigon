@@ -151,6 +151,7 @@ func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.TemporalTx, ha
 	if err != nil {
 		return nil, err
 	}
+	defer ibs.Close()
 
 	msg, txCtx, err := transactions.ComputeTxContext(ibs, engine, rules, signer, block, chainConfig, int(txIndex))
 	if err != nil {
@@ -361,14 +362,27 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 	}
 	defer tx.Rollback()
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, number.Uint64())
-	if err != nil {
-		return nil, err
-	}
-
-	b, _, err := api.getBlockWithSenders(ctx, number, tx)
-	if err != nil {
-		return nil, err
+	var b *types.Block
+	if number == rpc.PendingBlockNumber {
+		b, _, err = api.getBlockWithSenders(ctx, number, tx)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
+		if err != nil {
+			if errors.As(err, &rpc.BlockNotFoundErr{}) {
+				return nil, nil
+			}
+			return nil, err
+		}
+		if err := api.BaseAPI.checkPruneHistory(ctx, tx, blockNum); err != nil {
+			return nil, err
+		}
+		b, _, err = api.getBlockWithSenders(ctx, rpc.BlockNumber(blockNum), tx)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if b == nil {
 		return nil, nil

@@ -27,7 +27,6 @@ import (
 	"runtime"
 	"slices"
 	"strings"
-	"testing"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
@@ -68,8 +67,8 @@ func (e *GenesisMismatchError) Error() string {
 		advice = fmt.Sprintf(" (try with flag --chain=%s)", specs[0].Name)
 	} else if len(specs) > 1 {
 		names := make([]string, len(specs))
-		for i, s := range specs {
-			names[i] = s.Name
+		for i := range specs {
+			names[i] = specs[i].Name
 		}
 		advice = fmt.Sprintf(" (try with flag --chain=<%s>)", strings.Join(names, "|"))
 	}
@@ -160,7 +159,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 			custom = false
 		}
 		applyOverrides(genesis.Config)
-		block, _, err1 := write(tx, genesis, dirs, logger)
+		block, err1 := write(tx, genesis, dirs, logger)
 		if err1 != nil {
 			return genesis.Config, nil, err1
 		}
@@ -172,10 +171,11 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 
 	// Check whether the genesis block is already written.
 	if genesis != nil {
-		block, _, err1 := GenesisToBlock(nil, genesis, dirs, logger)
+		block, ibs, err1 := GenesisToBlock(genesis, dirs, logger)
 		if err1 != nil {
 			return genesis.Config, nil, err1
 		}
+		ibs.Close()
 		hash := block.Hash()
 		if hash != storedHash {
 			return genesis.Config, block, &GenesisMismatchError{Stored: storedHash, New: hash}
@@ -242,23 +242,24 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 	return newCfg, storedBlock, nil
 }
 
-func WriteGenesisState(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
-	block, statedb, err := GenesisToBlock(nil, g, dirs, logger)
+func WriteGenesisState(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*types.Block, error) {
+	block, statedb, err := GenesisToBlock(g, dirs, logger)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
+	defer statedb.Close()
 
 	stateWriter := state.NewNoopWriter()
 
 	blockNum := block.Number()
 	if !blockNum.IsZero() {
-		return nil, statedb, errors.New("can't commit genesis block with number > 0")
+		return nil, errors.New("can't commit genesis block with number > 0")
 	}
 	if err := statedb.CommitBlock(&chain.Rules{}, stateWriter); err != nil {
-		return nil, statedb, fmt.Errorf("cannot write state: %w", err)
+		return nil, fmt.Errorf("cannot write state: %w", err)
 	}
 
-	return block, statedb, nil
+	return block, nil
 }
 
 func MustCommitGenesis(g *types.Genesis, db kv.RwDB, dirs datadir.Dirs, logger log.Logger) *types.Block {
@@ -267,7 +268,7 @@ func MustCommitGenesis(g *types.Genesis, db kv.RwDB, dirs datadir.Dirs, logger l
 		panic(err)
 	}
 	defer tx.Rollback()
-	block, _, err := write(tx, g, dirs, logger)
+	block, err := write(tx, g, dirs, logger)
 	if err != nil {
 		panic(err)
 	}
@@ -280,13 +281,13 @@ func MustCommitGenesis(g *types.Genesis, db kv.RwDB, dirs datadir.Dirs, logger l
 
 // Write writes the block and state of a genesis specification to the database.
 // The block is committed as the canonical head block.
-func write(tx kv.RwTx, g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
-	block, statedb, err := WriteGenesisState(g, dirs, logger)
+func write(tx kv.RwTx, g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*types.Block, error) {
+	block, err := WriteGenesisState(g, dirs, logger)
 	if err != nil {
-		return block, statedb, err
+		return block, err
 	}
 	err = WriteGenesisBesideState(block, tx, g)
-	return block, statedb, err
+	return block, err
 }
 
 // Write writes the block a genesis specification to the database.
@@ -303,7 +304,11 @@ func WriteGenesisBesideState(block *types.Block, tx kv.RwTx, g *types.Genesis) e
 	if err := rawdb.WriteBlock(tx, block); err != nil {
 		return err
 	}
-	if err := rawdb.WriteTd(tx, block.Hash(), block.NumberU64(), g.Difficulty.ToBig()); err != nil {
+	var genesisTd uint256.Int
+	if g.Difficulty != nil {
+		genesisTd = *g.Difficulty
+	}
+	if err := rawdb.WriteTd(tx, block.Hash(), block.NumberU64(), genesisTd); err != nil {
 		return err
 	}
 	if err := rawdbv3.TxNums.Append(tx, 0, uint64(block.Transactions().Len()+1)); err != nil {
@@ -323,7 +328,7 @@ func WriteGenesisBesideState(block *types.Block, tx kv.RwTx, g *types.Genesis) e
 
 // GenesisToBlock creates the genesis block and writes state of a genesis specification
 // to the given database (or discards it if nil).
-func GenesisToBlock(tb testing.TB, g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
+func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
 	if dirs.SnapDomain == "" {
 		panic("empty `dirs` variable")
 	}
@@ -347,20 +352,20 @@ func GenesisToBlock(tb testing.TB, g *types.Genesis, dirs datadir.Dirs, logger l
 	if runtime.GOOS == "windows" {
 		genesisMapSize = 1 * datasize.GB
 	}
-	genesisTmpDB := mdbx.New(dbcfg.TemporaryDB, logger).InMem(tb, dirs.Tmp).MapSize(genesisMapSize).GrowthStep(1 * datasize.MB).MustOpen()
+	genesisTmpDB := mdbx.New(dbcfg.TemporaryDB, logger).InMem(dirs.Tmp).MapSize(genesisMapSize).GrowthStep(1 * datasize.MB).MustOpen()
 	defer genesisTmpDB.Close()
 
 	erigonDBSettings, err := dbstate.ResolveErigonDBSettings(dirs, logger, false)
 	if err != nil {
 		return nil, nil, err
 	}
-	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings).Open(ctx, genesisTmpDB)
+	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings).DisableBranchCache().Open(ctx, genesisTmpDB)
 	if err != nil {
 		return nil, nil, err
 	}
 	defer agg.Close()
 
-	tdb, err := temporal.New(genesisTmpDB, agg)
+	tdb, err := temporal.New(genesisTmpDB, agg, nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -372,7 +377,9 @@ func GenesisToBlock(tb testing.TB, g *types.Genesis, dirs datadir.Dirs, logger l
 	}
 	defer tx.Rollback()
 
-	sd, err := execctx.NewSharedDomains(ctx, tx, logger)
+	// Genesis is a one-shot commitment over an empty DB; the parallel trie has no
+	// context factory wired here, so use the sequential trie (identical root).
+	sd, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithSequentialCommitment())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -425,17 +432,17 @@ func ComputeGenesisCommitment(ctx context.Context, g *types.Genesis, tx kv.Tempo
 		if err != nil {
 			return nil, nil, err
 		}
-		err = statedb.SetCode(address, account.Code)
+		err = statedb.SetCode(address, account.Code, tracing.CodeChangeGenesis)
 		if err != nil {
 			return nil, nil, err
 		}
-		err = statedb.SetNonce(address, account.Nonce)
+		err = statedb.SetNonce(address, account.Nonce, tracing.NonceChangeGenesis)
 		if err != nil {
 			return nil, nil, err
 		}
 		var slotVal uint256.Int
 		for key, value := range account.Storage {
-			slotVal.SetBytes(value.Bytes())
+			slotVal.SetBytes(value[:])
 			err = statedb.SetState(address, accounts.InternKey(key), slotVal)
 			if err != nil {
 				return nil, nil, err
@@ -537,17 +544,19 @@ func GenesisWithoutStateToBlock(g *types.Genesis) (head *types.Header, withdrawa
 	}
 
 	if g.Config != nil && g.Config.IsAmsterdam(g.Timestamp) {
-		if g.BlockAccessListHash != nil {
-			head.BlockAccessListHash = g.BlockAccessListHash
-		} else {
-			head.BlockAccessListHash = &empty.BlockAccessListHash
+		if g.Config.IsEIPEnabled(7928, g.Timestamp) {
+			if g.BlockAccessListHash != nil {
+				head.BlockAccessListHash = g.BlockAccessListHash
+			} else {
+				head.BlockAccessListHash = &empty.BlockAccessListHash
+			}
 		}
 		if g.SlotNumber != nil {
 			head.SlotNumber = g.SlotNumber
 		}
 	}
 
-	// these fields need to be overriden for Bor running in a kurtosis devnet
+	// these fields need to be overridden for Bor running in a kurtosis devnet
 	if g.Config != nil && g.Config.Bor != nil && g.Config.ChainID.Uint64() == polygonchain.BorKurtosisDevnetChainId {
 		withdrawals = []*types.Withdrawal{}
 		head.BlobGasUsed = new(uint64)
@@ -568,15 +577,4 @@ func sortedAllocAddresses(m types.GenesisAlloc) []common.Address {
 		return bytes.Compare(a[:], b[:])
 	})
 	return addrs
-}
-
-func sortedAllocKeys(m types.GenesisAlloc) []string {
-	keys := make([]string, len(m))
-	i := 0
-	for k := range m {
-		keys[i] = string(k.Bytes())
-		i++
-	}
-	slices.Sort(keys)
-	return keys
 }

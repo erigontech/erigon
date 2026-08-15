@@ -22,11 +22,10 @@ package rlp
 import (
 	"encoding/binary"
 	"io"
-	"math/big"
 	"reflect"
+	"slices"
 	"sync"
 
-	"github.com/erigontech/erigon/common/math"
 	"github.com/holiman/uint256"
 )
 
@@ -39,7 +38,7 @@ type encBuffer struct {
 
 // The global encBuffer pool.
 var encBufferPool = sync.Pool{
-	New: func() interface{} { return new(encBuffer) },
+	New: func() any { return new(encBuffer) },
 }
 
 func getEncBuffer() *encBuffer {
@@ -123,12 +122,13 @@ func (buf *encBuffer) writeBool(b bool) {
 }
 
 func (buf *encBuffer) writeUint64(i uint64) {
-	if i == 0 {
+	switch {
+	case i == 0:
 		buf.str = append(buf.str, EmptyStringCode)
-	} else if i < SingleByteThreshold {
+	case i < SingleByteThreshold:
 		// fits single byte
 		buf.str = append(buf.str, byte(i))
-	} else {
+	default:
 		s := putint(buf.sizebuf[1:], i)
 		buf.sizebuf[0] = EmptyStringCode + byte(s)
 		buf.str = append(buf.str, buf.sizebuf[:s+1]...)
@@ -147,23 +147,6 @@ func (buf *encBuffer) writeBytes(b []byte) {
 
 func (buf *encBuffer) writeString(s string) {
 	buf.writeBytes([]byte(s))
-}
-
-// writeBigInt writes i as an integer.
-func (buf *encBuffer) writeBigInt(i *big.Int) {
-	bitlen := i.BitLen()
-	if bitlen <= 64 {
-		buf.writeUint64(i.Uint64())
-		return
-	}
-	// Integer is larger than 64 bits, encode from i.Bits().
-	// The minimal byte length is bitlen rounded up to the next
-	// multiple of 8, divided by 8.
-	length := ((bitlen + 7) & -8) >> 3
-	buf.encodeStringHeader(length)
-	buf.str = append(buf.str, make([]byte, length)...)
-	bytesBuf := buf.str[len(buf.str)-length:]
-	math.ReadBits(i, bytesBuf)
 }
 
 // writeUint256 writes z as an integer.
@@ -200,7 +183,7 @@ func (buf *encBuffer) listEnd(index int) {
 	}
 }
 
-func (buf *encBuffer) encode(val interface{}) error {
+func (buf *encBuffer) encode(val any) error {
 	rval := reflect.ValueOf(val)
 	writer, err := cachedWriter(rval.Type())
 	if err != nil {
@@ -364,7 +347,7 @@ func (w *EncoderBuffer) ToBytes() []byte {
 // AppendToBytes appends the encoded bytes to dst.
 func (w *EncoderBuffer) AppendToBytes(dst []byte) []byte {
 	size := w.buf.size()
-	out := append(dst, make([]byte, size)...)
+	out := slices.Grow(dst, size)[:len(dst)+size]
 	w.buf.copyTo(out[len(dst):])
 	return out
 }
@@ -382,12 +365,6 @@ func (w EncoderBuffer) WriteBool(b bool) {
 // WriteUint64 encodes an unsigned integer.
 func (w EncoderBuffer) WriteUint64(i uint64) {
 	w.buf.writeUint64(i)
-}
-
-// WriteBigInt encodes a big.Int as an RLP string.
-// Note: Unlike with Encode, the sign of i is ignored.
-func (w EncoderBuffer) WriteBigInt(i *big.Int) {
-	w.buf.writeBigInt(i)
 }
 
 // WriteUint256 encodes uint256.Int as an RLP string.

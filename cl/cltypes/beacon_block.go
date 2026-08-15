@@ -40,6 +40,12 @@ var (
 	_ ssz2.SizedObjectSSZ = (*DenebSignedBeaconBlock)(nil)
 )
 
+// ErrGloasCannotBlind is returned when Blinded() is called on a GLOAS block.
+// In GLOAS (EIP-7732/ePBS), the execution payload is delivered via a separate
+// SignedExecutionPayloadEnvelope, so the blinded block concept doesn't apply.
+// Callers should check the block version before calling Blinded() or handle this error.
+var ErrGloasCannotBlind = errors.New("blinded beacon block not supported for GLOAS blocks")
+
 const (
 	MaxAttesterSlashings         = 2
 	MaxProposerSlashings         = 16
@@ -127,6 +133,25 @@ func (b *SignedBeaconBlock) HashSSZ() ([32]byte, error) {
 
 func (b *SignedBeaconBlock) Static() bool {
 	return false
+}
+
+// GetSlot returns the slot of the inner block.
+// Implements ColumnSyncableSignedBlock interface.
+func (b *SignedBeaconBlock) GetSlot() uint64 {
+	return b.Block.Slot
+}
+
+// BlockHashSSZ returns the hash of the inner block (not the signed block).
+// Implements ColumnSyncableSignedBlock interface.
+func (b *SignedBeaconBlock) BlockHashSSZ() ([32]byte, error) {
+	return b.Block.HashSSZ()
+}
+
+// GetBlobKzgCommitments returns blob KZG commitments from the block body.
+// Implements ColumnSyncableSignedBlock interface.
+// [Modified in Gloas:EIP7732] For GLOAS, commitments are in SignedExecutionPayloadBid.
+func (b *SignedBeaconBlock) GetBlobKzgCommitments() *solid.ListSSZ[*KZGCommitment] {
+	return b.Block.Body.GetBlobKzgCommitments()
 }
 
 // Definition of BeaconBlock
@@ -221,13 +246,17 @@ type BeaconBody struct {
 	// A summary of the current state of the beacon chain
 	SyncAggregate *SyncAggregate `json:"sync_aggregate,omitempty"`
 	// Data related to crosslink records and executing operations on the Ethereum 2.0 chain
-	ExecutionPayload *Eth1Block `json:"execution_payload,omitempty"`
+	ExecutionPayload *Eth1Block `json:"execution_payload,omitempty"` // will be removed after Gloas fork for EPBS
 	// Withdrawals Diffs for Execution Layer
 	ExecutionChanges *solid.ListSSZ[*SignedBLSToExecutionChange] `json:"bls_to_execution_changes,omitempty"`
 	// The commitments for beacon chain blobs
 	// With a max of 4 per block
-	BlobKzgCommitments *solid.ListSSZ[*KZGCommitment] `json:"blob_kzg_commitments,omitempty"`
-	ExecutionRequests  *ExecutionRequests             `json:"execution_requests,omitempty"`
+	BlobKzgCommitments *solid.ListSSZ[*KZGCommitment] `json:"blob_kzg_commitments,omitempty"` // will be removed after Gloas fork for EPBS
+	ExecutionRequests  *ExecutionRequests             `json:"execution_requests,omitempty"`   // will be removed after Gloas fork for EPBS
+	// Gloas
+	SignedExecutionPayloadBid *SignedExecutionPayloadBid          `json:"signed_execution_payload_bid,omitempty"`
+	PayloadAttestations       *solid.ListSSZ[*PayloadAttestation] `json:"payload_attestations,omitempty"`
+	ParentExecutionRequests   *ExecutionRequests                  `json:"parent_execution_requests,omitempty"`
 
 	// The version of the beacon chain
 	Version   clparams.StateVersion       `json:"-"`
@@ -235,45 +264,129 @@ type BeaconBody struct {
 }
 
 func NewBeaconBody(beaconCfg *clparams.BeaconChainConfig, version clparams.StateVersion) *BeaconBody {
-	var (
-		executionRequests *ExecutionRequests
-		maxAttSlashing    = MaxAttesterSlashings
-		maxAttestation    = MaxAttestations
-	)
-	if version.AfterOrEqual(clparams.ElectraVersion) {
-		// upgrade to electra
-		maxAttSlashing = int(beaconCfg.MaxAttesterSlashingsElectra)
-		maxAttestation = int(beaconCfg.MaxAttestationsElectra)
-		executionRequests = NewExecutionRequests(beaconCfg)
+	limits := beaconBodyLimitsForConfig(beaconCfg, version)
+
+	body := &BeaconBody{
+		beaconCfg:         beaconCfg,
+		Eth1Data:          &Eth1Data{},
+		ProposerSlashings: solid.NewStaticListSSZ[*ProposerSlashing](limits.proposerSlashings, 416),
+		AttesterSlashings: solid.NewDynamicListSSZ[*AttesterSlashing](limits.attesterSlashings),
+		Attestations:      solid.NewDynamicListSSZ[*solid.Attestation](limits.attestations),
+		Deposits:          solid.NewStaticListSSZ[*Deposit](limits.deposits, 1240),
+		VoluntaryExits:    solid.NewStaticListSSZ[*SignedVoluntaryExit](limits.voluntaryExits, 112),
+		ExecutionChanges:  solid.NewStaticListSSZ[*SignedBLSToExecutionChange](limits.executionChanges, 172),
+		Version:           version,
 	}
 
-	return &BeaconBody{
-		beaconCfg:          beaconCfg,
-		Eth1Data:           &Eth1Data{},
-		ProposerSlashings:  solid.NewStaticListSSZ[*ProposerSlashing](MaxProposerSlashings, 416),
-		AttesterSlashings:  solid.NewDynamicListSSZ[*AttesterSlashing](maxAttSlashing),
-		Attestations:       solid.NewDynamicListSSZ[*solid.Attestation](maxAttestation),
-		Deposits:           solid.NewStaticListSSZ[*Deposit](MaxDeposits, 1240),
-		VoluntaryExits:     solid.NewStaticListSSZ[*SignedVoluntaryExit](MaxVoluntaryExits, 112),
-		ExecutionPayload:   NewEth1Block(version, beaconCfg),
-		ExecutionChanges:   solid.NewStaticListSSZ[*SignedBLSToExecutionChange](MaxExecutionChanges, 172),
-		BlobKzgCommitments: solid.NewStaticListSSZ[*KZGCommitment](int(beaconCfg.MaxBlobCommittmentsPerBlock), 48),
-		ExecutionRequests:  executionRequests,
-		Version:            version,
+	// [Modified in Gloas:EIP7732] Version-specific fields
+	if version < clparams.GloasVersion {
+		// Pre-GLOAS: ExecutionPayload, BlobKzgCommitments in BeaconBody
+		body.ExecutionPayload = NewEth1Block(version, beaconCfg)
+		body.BlobKzgCommitments = solid.NewStaticListSSZ[*KZGCommitment](maxBlobCommitmentsForConfig(beaconCfg), 48)
+		if version >= clparams.ElectraVersion {
+			body.ExecutionRequests = NewExecutionRequestsWithVersion(beaconCfg, version)
+		}
+	} else {
+		body.resetGloasProgressiveLists()
+		// GLOAS: SignedExecutionPayloadBid and PayloadAttestations replace above
+		body.SignedExecutionPayloadBid = &SignedExecutionPayloadBid{
+			Message: &ExecutionPayloadBid{
+				BlobKzgCommitments: *solid.NewStaticProgressiveListSSZ[*KZGCommitment](maxBlobCommitmentsForConfig(beaconCfg), 48),
+			},
+		}
+		body.ParentExecutionRequests = NewExecutionRequestsWithVersion(beaconCfg, version)
 	}
+
+	return body
+}
+
+func maxBlobCommitmentsForConfig(beaconCfg *clparams.BeaconChainConfig) int {
+	if beaconCfg != nil && beaconCfg.MaxBlobCommittmentsPerBlock > 0 {
+		return saturatingPositiveInt(beaconCfg.MaxBlobCommittmentsPerBlock, MaxBlobsCommittmentsPerBlock)
+	}
+	return MaxBlobsCommittmentsPerBlock
+}
+
+func maxPayloadAttestationsForConfig(beaconCfg *clparams.BeaconChainConfig) int {
+	fallback := int(clparams.MainnetBeaconConfig.MaxPayloadAttestations)
+	if globalCfg := clparams.GetBeaconConfig(); globalCfg != nil {
+		fallback = saturatingPositiveInt(globalCfg.MaxPayloadAttestations, fallback)
+	}
+	if beaconCfg != nil && beaconCfg.MaxPayloadAttestations > 0 {
+		return saturatingPositiveInt(beaconCfg.MaxPayloadAttestations, fallback)
+	}
+	return fallback
+}
+
+type beaconBodyListLimits struct {
+	proposerSlashings int
+	attesterSlashings int
+	attestations      int
+	deposits          int
+	voluntaryExits    int
+	executionChanges  int
+}
+
+func beaconBodyLimitsForConfig(beaconCfg *clparams.BeaconChainConfig, version clparams.StateVersion) beaconBodyListLimits {
+	limits := beaconBodyListLimits{
+		proposerSlashings: MaxProposerSlashings,
+		attesterSlashings: MaxAttesterSlashings,
+		attestations:      MaxAttestations,
+		deposits:          MaxDeposits,
+		voluntaryExits:    MaxVoluntaryExits,
+		executionChanges:  MaxExecutionChanges,
+	}
+	if version.AfterOrEqual(clparams.ElectraVersion) {
+		limits.attesterSlashings = MaxAttesterSlashingsElectra
+		limits.attestations = MaxAttestationsElectra
+	}
+	if beaconCfg == nil {
+		return limits
+	}
+	limits.proposerSlashings = saturatingPositiveInt(beaconCfg.MaxProposerSlashings, limits.proposerSlashings)
+	limits.deposits = saturatingPositiveInt(beaconCfg.MaxDeposits, limits.deposits)
+	limits.voluntaryExits = saturatingPositiveInt(beaconCfg.MaxVoluntaryExits, limits.voluntaryExits)
+	limits.executionChanges = saturatingPositiveInt(beaconCfg.MaxBlsToExecutionChanges, limits.executionChanges)
+	if version.AfterOrEqual(clparams.ElectraVersion) {
+		limits.attesterSlashings = saturatingPositiveInt(beaconCfg.MaxAttesterSlashingsElectra, limits.attesterSlashings)
+		limits.attestations = saturatingPositiveInt(beaconCfg.MaxAttestationsElectra, limits.attestations)
+	} else {
+		limits.attesterSlashings = saturatingPositiveInt(beaconCfg.MaxAttesterSlashings, limits.attesterSlashings)
+		limits.attestations = saturatingPositiveInt(beaconCfg.MaxAttestations, limits.attestations)
+	}
+	return limits
+}
+
+func saturatingPositiveInt(value uint64, fallback int) int {
+	if value == 0 {
+		return fallback
+	}
+	maxInt := int(^uint(0) >> 1)
+	if value > uint64(maxInt) {
+		return maxInt
+	}
+	return int(value)
+}
+
+func (b *BeaconBody) resetGloasProgressiveLists() {
+	limits := beaconBodyLimitsForConfig(b.beaconCfg, b.Version)
+	b.ProposerSlashings = solid.NewStaticProgressiveListSSZ[*ProposerSlashing](limits.proposerSlashings, 416)
+	b.AttesterSlashings = solid.NewDynamicProgressiveListSSZ[*AttesterSlashing](limits.attesterSlashings)
+	b.Attestations = solid.NewDynamicProgressiveListSSZ[*solid.Attestation](limits.attestations)
+	b.Deposits = solid.NewStaticProgressiveListSSZ[*Deposit](limits.deposits, 1240)
+	b.VoluntaryExits = solid.NewStaticProgressiveListSSZ[*SignedVoluntaryExit](limits.voluntaryExits, 112)
+	b.ExecutionChanges = solid.NewStaticProgressiveListSSZ[*SignedBLSToExecutionChange](limits.executionChanges, 172)
+	ptcSize := clparams.MaxPtcSize
+	if b.beaconCfg != nil && b.beaconCfg.PtcSize > 0 {
+		ptcSize = b.beaconCfg.PtcSize
+	}
+	b.PayloadAttestations = solid.NewStaticProgressiveListSSZ[*PayloadAttestation](maxPayloadAttestationsForConfig(b.beaconCfg), PayloadAttestationSSZSizeWithPtcSize(ptcSize))
 }
 
 // ensureNilFields initializes any nil fields that must be present for SSZ encoding,
 // hashing, and size computation. It is idempotent and safe to call multiple times.
 func (b *BeaconBody) ensureNilFields() {
-	var (
-		maxAttSlashing = MaxAttesterSlashings
-		maxAttestation = MaxAttestations
-	)
-	if b.Version.AfterOrEqual(clparams.ElectraVersion) {
-		maxAttSlashing = MaxAttesterSlashingsElectra
-		maxAttestation = MaxAttestationsElectra
-	}
+	limits := beaconBodyLimitsForConfig(b.beaconCfg, b.Version)
 	if b.Eth1Data == nil {
 		b.Eth1Data = &Eth1Data{}
 	}
@@ -285,32 +398,80 @@ func (b *BeaconBody) ensureNilFields() {
 		b.SyncAggregate = NewSyncAggregateWithSize(bitsSize)
 	}
 	if b.ProposerSlashings == nil {
-		b.ProposerSlashings = solid.NewStaticListSSZ[*ProposerSlashing](MaxProposerSlashings, 416)
+		if b.Version >= clparams.GloasVersion {
+			b.ProposerSlashings = solid.NewStaticProgressiveListSSZ[*ProposerSlashing](limits.proposerSlashings, 416)
+		} else {
+			b.ProposerSlashings = solid.NewStaticListSSZ[*ProposerSlashing](limits.proposerSlashings, 416)
+		}
 	}
 	if b.AttesterSlashings == nil {
-		b.AttesterSlashings = solid.NewDynamicListSSZ[*AttesterSlashing](maxAttSlashing)
+		if b.Version >= clparams.GloasVersion {
+			b.AttesterSlashings = solid.NewDynamicProgressiveListSSZ[*AttesterSlashing](limits.attesterSlashings)
+		} else {
+			b.AttesterSlashings = solid.NewDynamicListSSZ[*AttesterSlashing](limits.attesterSlashings)
+		}
 	}
 	if b.Attestations == nil {
-		b.Attestations = solid.NewDynamicListSSZ[*solid.Attestation](maxAttestation)
+		if b.Version >= clparams.GloasVersion {
+			b.Attestations = solid.NewDynamicProgressiveListSSZ[*solid.Attestation](limits.attestations)
+		} else {
+			b.Attestations = solid.NewDynamicListSSZ[*solid.Attestation](limits.attestations)
+		}
 	}
 	if b.Deposits == nil {
-		b.Deposits = solid.NewStaticListSSZ[*Deposit](MaxDeposits, 1240)
+		if b.Version >= clparams.GloasVersion {
+			b.Deposits = solid.NewStaticProgressiveListSSZ[*Deposit](limits.deposits, 1240)
+		} else {
+			b.Deposits = solid.NewStaticListSSZ[*Deposit](limits.deposits, 1240)
+		}
 	}
 	if b.VoluntaryExits == nil {
-		b.VoluntaryExits = solid.NewStaticListSSZ[*SignedVoluntaryExit](MaxVoluntaryExits, 112)
+		if b.Version >= clparams.GloasVersion {
+			b.VoluntaryExits = solid.NewStaticProgressiveListSSZ[*SignedVoluntaryExit](limits.voluntaryExits, 112)
+		} else {
+			b.VoluntaryExits = solid.NewStaticListSSZ[*SignedVoluntaryExit](limits.voluntaryExits, 112)
+		}
 	}
-	if b.ExecutionPayload == nil {
+	// [Modified in Gloas:EIP7732] ExecutionPayload removed in GLOAS
+	if b.ExecutionPayload == nil && b.Version < clparams.GloasVersion {
 		b.ExecutionPayload = NewEth1Block(b.Version, b.beaconCfg)
 	}
 	if b.ExecutionChanges == nil {
-		b.ExecutionChanges = solid.NewStaticListSSZ[*SignedBLSToExecutionChange](MaxExecutionChanges, 172)
-	}
-	if b.BlobKzgCommitments == nil {
-		maxBlobCommitments := MaxBlobsCommittmentsPerBlock
-		if b.beaconCfg != nil && b.beaconCfg.MaxBlobCommittmentsPerBlock > 0 {
-			maxBlobCommitments = int(b.beaconCfg.MaxBlobCommittmentsPerBlock)
+		if b.Version >= clparams.GloasVersion {
+			b.ExecutionChanges = solid.NewStaticProgressiveListSSZ[*SignedBLSToExecutionChange](limits.executionChanges, 172)
+		} else {
+			b.ExecutionChanges = solid.NewStaticListSSZ[*SignedBLSToExecutionChange](limits.executionChanges, 172)
 		}
-		b.BlobKzgCommitments = solid.NewStaticListSSZ[*KZGCommitment](maxBlobCommitments, 48)
+	}
+	// [Modified in Gloas:EIP7732] BlobKzgCommitments removed in GLOAS
+	if b.BlobKzgCommitments == nil && b.Version < clparams.GloasVersion {
+		b.BlobKzgCommitments = solid.NewStaticListSSZ[*KZGCommitment](maxBlobCommitmentsForConfig(b.beaconCfg), 48)
+	}
+	// [New in Electra] ExecutionRequests — removed in GLOAS
+	if b.ExecutionRequests == nil && b.Version.AfterOrEqual(clparams.ElectraVersion) && b.Version < clparams.GloasVersion {
+		if b.beaconCfg != nil {
+			b.ExecutionRequests = NewExecutionRequestsWithVersion(b.beaconCfg, b.Version)
+		}
+	}
+	// [New in Gloas:EIP7732] Initialize GLOAS fields if nil
+	if b.Version >= clparams.GloasVersion {
+		if b.SignedExecutionPayloadBid == nil {
+			b.SignedExecutionPayloadBid = &SignedExecutionPayloadBid{
+				Message: &ExecutionPayloadBid{
+					BlobKzgCommitments: *solid.NewStaticProgressiveListSSZ[*KZGCommitment](maxBlobCommitmentsForConfig(b.beaconCfg), 48),
+				},
+			}
+		}
+		if b.PayloadAttestations == nil {
+			ptcSize := clparams.MaxPtcSize
+			if b.beaconCfg != nil && b.beaconCfg.PtcSize > 0 {
+				ptcSize = b.beaconCfg.PtcSize
+			}
+			b.PayloadAttestations = solid.NewStaticProgressiveListSSZ[*PayloadAttestation](maxPayloadAttestationsForConfig(b.beaconCfg), PayloadAttestationSSZSizeWithPtcSize(ptcSize))
+		}
+		if b.ParentExecutionRequests == nil {
+			b.ParentExecutionRequests = NewExecutionRequestsWithVersion(b.beaconCfg, b.Version)
+		}
 	}
 }
 
@@ -327,19 +488,28 @@ func (b *BeaconBody) EncodingSizeSSZ() (size int) {
 	size += b.Attestations.EncodingSizeSSZ()
 	size += b.Deposits.EncodingSizeSSZ()
 	size += b.VoluntaryExits.EncodingSizeSSZ()
-	if b.Version >= clparams.BellatrixVersion {
+	// [Modified in Gloas:EIP7732] ExecutionPayload removed in GLOAS
+	if b.Version >= clparams.BellatrixVersion && b.Version < clparams.GloasVersion {
 		size += b.ExecutionPayload.EncodingSizeSSZ()
 	}
 	if b.Version >= clparams.CapellaVersion {
 		size += b.ExecutionChanges.EncodingSizeSSZ()
 	}
-	if b.Version >= clparams.DenebVersion {
+	// [Modified in Gloas:EIP7732] BlobKzgCommitments removed in GLOAS
+	if b.Version >= clparams.DenebVersion && b.Version < clparams.GloasVersion {
 		size += b.BlobKzgCommitments.EncodingSizeSSZ()
 	}
-	if b.Version >= clparams.ElectraVersion {
+	// [Modified in Gloas:EIP7732] ExecutionRequests removed in GLOAS
+	if b.Version >= clparams.ElectraVersion && b.Version < clparams.GloasVersion {
 		if b.ExecutionRequests != nil {
 			size += b.ExecutionRequests.EncodingSizeSSZ()
 		}
+	}
+	// [New in Gloas:EIP7732] SignedExecutionPayloadBid, PayloadAttestations, and ParentExecutionRequests
+	if b.Version >= clparams.GloasVersion {
+		size += b.SignedExecutionPayloadBid.EncodingSizeSSZ()
+		size += b.PayloadAttestations.EncodingSizeSSZ()
+		size += b.ParentExecutionRequests.EncodingSizeSSZ()
 	}
 
 	return
@@ -347,17 +517,55 @@ func (b *BeaconBody) EncodingSizeSSZ() (size int) {
 
 func (b *BeaconBody) DecodeSSZ(buf []byte, version int) error {
 	b.Version = clparams.StateVersion(version)
+	if b.Version >= clparams.GloasVersion {
+		b.resetGloasProgressiveLists()
+	}
 
 	if len(buf) < b.EncodingSizeSSZ() {
 		return fmt.Errorf("[BeaconBody] err: %s", ssz.ErrLowBufferSize)
 	}
 
-	b.ExecutionPayload = NewEth1Block(b.Version, b.beaconCfg)
-	err := ssz2.UnmarshalSSZ(buf, version, b.getSchema(false)...)
-	return err
+	// [Modified in Gloas:EIP7732] ExecutionPayload removed in GLOAS
+	if b.Version < clparams.GloasVersion {
+		b.ExecutionPayload = NewEth1Block(b.Version, b.beaconCfg)
+	}
+	// [New in Gloas:EIP7732] Initialize GLOAS fields for decoding
+	if b.Version >= clparams.GloasVersion {
+		b.SignedExecutionPayloadBid = &SignedExecutionPayloadBid{
+			Message: &ExecutionPayloadBid{
+				BlobKzgCommitments: *solid.NewStaticProgressiveListSSZ[*KZGCommitment](maxBlobCommitmentsForConfig(b.beaconCfg), 48),
+			},
+		}
+		b.ParentExecutionRequests = NewExecutionRequestsWithVersion(b.beaconCfg, b.Version)
+	}
+	if err := ssz2.UnmarshalSSZ(buf, version, b.getSchema(false)...); err != nil {
+		return err
+	}
+
+	// Post-decode fixup: propagate preset-aware limits to decoded attestations and slashings.
+	// DecodeDynamicList calls DecodeSSZ on each element with hardcoded mainnet limits.
+	// We must override those limits for minimal preset compatibility.
+	if b.beaconCfg != nil && b.Version.AfterOrEqual(clparams.ElectraVersion) {
+		if err := solid.RangeErr(b.Attestations, func(_ int, att *solid.Attestation, _ int) error {
+			return att.ValidateForConfig(b.beaconCfg, b.Version)
+		}); err != nil {
+			return err
+		}
+		b.AttesterSlashings.Range(func(_ int, as *AttesterSlashing, _ int) bool {
+			as.SetVersionWithConfig(b.Version, b.beaconCfg)
+			return true
+		})
+	}
+	return nil
 }
 
 func (b *BeaconBody) Blinded() (*BlindedBeaconBody, error) {
+	// [Modified in Gloas:EIP7732] Blinded concept not applicable to GLOAS blocks
+	// In GLOAS, execution payload is delivered via SignedExecutionPayloadEnvelope
+	if b.Version >= clparams.GloasVersion {
+		return nil, ErrGloasCannotBlind
+	}
+
 	header, err := b.ExecutionPayload.PayloadHeader()
 	if err != nil {
 		return nil, err
@@ -383,7 +591,68 @@ func (b *BeaconBody) Blinded() (*BlindedBeaconBody, error) {
 
 func (b *BeaconBody) HashSSZ() ([32]byte, error) {
 	b.ensureNilFields()
+	if b.Version >= clparams.GloasVersion {
+		return b.hashSSZGloas()
+	}
 	return merkle_tree.HashTreeRoot(b.getSchema(false)...)
+}
+
+func (b *BeaconBody) hashSSZGloas() ([32]byte, error) {
+	schema, err := b.gloasHashSchema()
+	if err != nil {
+		return [32]byte{}, err
+	}
+	return merkle_tree.ProgressiveContainerRootAll(schema...)
+}
+
+func (b *BeaconBody) gloasHashSchema() ([]any, error) {
+	proposerSlashings, err := b.ProposerSlashings.HashSSZProgressive(nil)
+	if err != nil {
+		return nil, err
+	}
+	attesterSlashings, err := b.AttesterSlashings.HashSSZProgressive(func(slashing *AttesterSlashing) ([32]byte, error) {
+		return slashing.HashSSZProgressive()
+	})
+	if err != nil {
+		return nil, err
+	}
+	attestations, err := b.Attestations.HashSSZProgressive(func(att *solid.Attestation) ([32]byte, error) {
+		return att.HashSSZProgressive()
+	})
+	if err != nil {
+		return nil, err
+	}
+	deposits, err := b.Deposits.HashSSZProgressive(nil)
+	if err != nil {
+		return nil, err
+	}
+	voluntaryExits, err := b.VoluntaryExits.HashSSZProgressive(nil)
+	if err != nil {
+		return nil, err
+	}
+	executionChanges, err := b.ExecutionChanges.HashSSZProgressive(nil)
+	if err != nil {
+		return nil, err
+	}
+	payloadAttestations, err := b.PayloadAttestations.HashSSZProgressive(nil)
+	if err != nil {
+		return nil, err
+	}
+	return []any{
+		b.RandaoReveal[:],
+		b.Eth1Data,
+		b.Graffiti[:],
+		proposerSlashings[:],
+		attesterSlashings[:],
+		attestations[:],
+		deposits[:],
+		voluntaryExits[:],
+		b.SyncAggregate,
+		executionChanges[:],
+		b.SignedExecutionPayloadBid,
+		payloadAttestations[:],
+		b.ParentExecutionRequests,
+	}, nil
 }
 
 func (b *BeaconBody) getSchema(storage bool) []any {
@@ -391,17 +660,24 @@ func (b *BeaconBody) getSchema(storage bool) []any {
 	if b.Version >= clparams.AltairVersion {
 		s = append(s, b.SyncAggregate)
 	}
-	if b.Version >= clparams.BellatrixVersion && !storage {
+	// [Modified in Gloas:EIP7732] ExecutionPayload removed in GLOAS
+	if b.Version >= clparams.BellatrixVersion && b.Version < clparams.GloasVersion && !storage {
 		s = append(s, b.ExecutionPayload)
 	}
 	if b.Version >= clparams.CapellaVersion {
 		s = append(s, b.ExecutionChanges)
 	}
-	if b.Version >= clparams.DenebVersion {
+	// [Modified in Gloas:EIP7732] BlobKzgCommitments removed in GLOAS
+	if b.Version >= clparams.DenebVersion && b.Version < clparams.GloasVersion {
 		s = append(s, b.BlobKzgCommitments)
 	}
-	if b.Version >= clparams.ElectraVersion {
+	// [Modified in Gloas:EIP7732] ExecutionRequests removed in GLOAS
+	if b.Version >= clparams.ElectraVersion && b.Version < clparams.GloasVersion {
 		s = append(s, b.ExecutionRequests)
+	}
+	// [New in Gloas:EIP7732] SignedExecutionPayloadBid, PayloadAttestations, and ParentExecutionRequests
+	if b.Version >= clparams.GloasVersion {
+		s = append(s, b.SignedExecutionPayloadBid, b.PayloadAttestations, b.ParentExecutionRequests)
 	}
 	return s
 }
@@ -409,12 +685,45 @@ func (b *BeaconBody) getSchema(storage bool) []any {
 func (*BeaconBody) Static() bool {
 	return false
 }
+
 func (b *BeaconBody) ExecutionPayloadMerkleProof() ([][32]byte, error) {
+	// [Modified in Gloas:EIP7732] ExecutionPayload not present in GLOAS blocks
+	if b.Version >= clparams.GloasVersion {
+		return nil, errors.New("execution payload merkle proof not available for GLOAS blocks")
+	}
 	return merkle_tree.MerkleProof(4, 9, b.getSchema(false)...)
 }
 
+func (b *BeaconBody) ExecutionBlockHashMerkleProof() ([][32]byte, error) {
+	if b.Version < clparams.GloasVersion || b.SignedExecutionPayloadBid == nil || b.SignedExecutionPayloadBid.Message == nil {
+		return nil, errors.New("execution block hash merkle proof requires a GLOAS execution payload bid")
+	}
+	// The Gloas execution proof targets ParentBlockHash through bid, signed-bid, and body layers.
+	bidProof, err := b.SignedExecutionPayloadBid.Message.ParentBlockHashMerkleProof()
+	if err != nil {
+		return nil, err
+	}
+	signedBidProof, err := merkle_tree.MerkleProof(1, 0, b.SignedExecutionPayloadBid.Message, b.SignedExecutionPayloadBid.Signature[:])
+	if err != nil {
+		return nil, err
+	}
+	schema, err := b.gloasHashSchema()
+	if err != nil {
+		return nil, err
+	}
+	bodyProof, err := merkle_tree.ProgressiveContainerProofAll(10, schema...)
+	if err != nil {
+		return nil, err
+	}
+	return append(append(bidProof, signedBidProof...), bodyProof...), nil
+}
+
 func (b *BeaconBody) KzgCommitmentMerkleProof(index int) ([][32]byte, error) {
-	if index >= b.BlobKzgCommitments.Len() {
+	// [Modified in Gloas:EIP7732] BlobKzgCommitments not in BeaconBody for GLOAS
+	if b.Version >= clparams.GloasVersion {
+		return nil, errors.New("kzg commitment merkle proof not available for GLOAS blocks; use SignedExecutionPayloadBid")
+	}
+	if b.BlobKzgCommitments == nil || index >= b.BlobKzgCommitments.Len() {
 		return nil, errors.New("index out of range")
 	}
 	kzgCommitmentsProof, err := merkle_tree.MerkleProof(4, 11, b.getSchema(false)...)
@@ -426,18 +735,15 @@ func (b *BeaconBody) KzgCommitmentMerkleProof(index int) ([][32]byte, error) {
 }
 
 func (b *BeaconBody) KzgCommitmentsInclusionProof() ([][32]byte, error) {
+	// [Modified in Gloas:EIP7732] BlobKzgCommitments not in BeaconBody for GLOAS
+	if b.Version >= clparams.GloasVersion {
+		return nil, errors.New("kzg commitments inclusion proof not available for GLOAS blocks; use SignedExecutionPayloadBid")
+	}
 	return merkle_tree.MerkleProof(4, 11, b.getSchema(false)...)
 }
 
 func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
-	var (
-		maxAttSlashing = MaxAttesterSlashings
-		maxAttestation = MaxAttestations
-	)
-	if b.Version.AfterOrEqual(clparams.ElectraVersion) {
-		maxAttSlashing = MaxAttesterSlashingsElectra
-		maxAttestation = MaxAttestationsElectra
-	}
+	limits := beaconBodyLimitsForConfig(b.beaconCfg, b.Version)
 
 	var tmp struct {
 		RandaoReveal       common.Bytes96                              `json:"randao_reveal"`
@@ -453,29 +759,86 @@ func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
 		ExecutionChanges   *solid.ListSSZ[*SignedBLSToExecutionChange] `json:"bls_to_execution_changes,omitempty"`
 		BlobKzgCommitments *solid.ListSSZ[*KZGCommitment]              `json:"blob_kzg_commitments,omitempty"`
 		ExecutionRequests  *ExecutionRequests                          `json:"execution_requests,omitempty"`
+		// [New in Gloas:EIP7732]
+		SignedExecutionPayloadBid *SignedExecutionPayloadBid          `json:"signed_execution_payload_bid,omitempty"`
+		PayloadAttestations       *solid.ListSSZ[*PayloadAttestation] `json:"payload_attestations,omitempty"`
+		ParentExecutionRequests   *ExecutionRequests                  `json:"parent_execution_requests,omitempty"`
 	}
-	tmp.ProposerSlashings = solid.NewStaticListSSZ[*ProposerSlashing](MaxProposerSlashings, 416)
-	tmp.AttesterSlashings = solid.NewDynamicListSSZ[*AttesterSlashing](maxAttSlashing)
-	tmp.Attestations = solid.NewDynamicListSSZ[*solid.Attestation](maxAttestation)
-	tmp.Deposits = solid.NewStaticListSSZ[*Deposit](MaxDeposits, 1240)
-	tmp.VoluntaryExits = solid.NewStaticListSSZ[*SignedVoluntaryExit](MaxVoluntaryExits, 112)
-	tmp.ExecutionChanges = solid.NewStaticListSSZ[*SignedBLSToExecutionChange](MaxExecutionChanges, 172)
-	maxBlobCommitments := MaxBlobsCommittmentsPerBlock
-	if b.beaconCfg != nil && b.beaconCfg.MaxBlobCommittmentsPerBlock > 0 {
-		maxBlobCommitments = int(b.beaconCfg.MaxBlobCommittmentsPerBlock)
+	tmp.ProposerSlashings = solid.NewStaticListSSZ[*ProposerSlashing](limits.proposerSlashings, 416)
+	tmp.AttesterSlashings = solid.NewDynamicListSSZ[*AttesterSlashing](limits.attesterSlashings)
+	tmp.Attestations = solid.NewDynamicListSSZ[*solid.Attestation](limits.attestations)
+	tmp.Deposits = solid.NewStaticListSSZ[*Deposit](limits.deposits, 1240)
+	tmp.VoluntaryExits = solid.NewStaticListSSZ[*SignedVoluntaryExit](limits.voluntaryExits, 112)
+	tmp.ExecutionChanges = solid.NewStaticListSSZ[*SignedBLSToExecutionChange](limits.executionChanges, 172)
+	// [Modified in Gloas:EIP7732] Only initialize pre-GLOAS fields when needed
+	if b.Version < clparams.GloasVersion {
+		tmp.BlobKzgCommitments = solid.NewStaticListSSZ[*KZGCommitment](maxBlobCommitmentsForConfig(b.beaconCfg), 48)
+		tmp.ExecutionRequests = NewExecutionRequestsWithVersion(b.beaconCfg, b.Version)
+		tmp.ExecutionPayload = NewEth1Block(b.Version, b.beaconCfg)
 	}
-	tmp.BlobKzgCommitments = solid.NewStaticListSSZ[*KZGCommitment](maxBlobCommitments, 48)
-	tmp.ExecutionRequests = NewExecutionRequests(b.beaconCfg)
-	tmp.ExecutionPayload = NewEth1Block(b.Version, b.beaconCfg)
+	// [New in Gloas:EIP7732] Initialize GLOAS fields
+	if b.Version >= clparams.GloasVersion {
+		tmp.ProposerSlashings = solid.NewStaticProgressiveListSSZ[*ProposerSlashing](limits.proposerSlashings, 416)
+		tmp.AttesterSlashings = solid.NewDynamicProgressiveListSSZ[*AttesterSlashing](limits.attesterSlashings)
+		tmp.Attestations = solid.NewDynamicProgressiveListSSZ[*solid.Attestation](limits.attestations)
+		tmp.Deposits = solid.NewStaticProgressiveListSSZ[*Deposit](limits.deposits, 1240)
+		tmp.VoluntaryExits = solid.NewStaticProgressiveListSSZ[*SignedVoluntaryExit](limits.voluntaryExits, 112)
+		tmp.ExecutionChanges = solid.NewStaticProgressiveListSSZ[*SignedBLSToExecutionChange](limits.executionChanges, 172)
+		tmp.SignedExecutionPayloadBid = &SignedExecutionPayloadBid{
+			Message: &ExecutionPayloadBid{
+				BlobKzgCommitments: *solid.NewStaticProgressiveListSSZ[*KZGCommitment](maxBlobCommitmentsForConfig(b.beaconCfg), 48),
+			},
+		}
+		ptcSize := clparams.MaxPtcSize
+		if b.beaconCfg != nil && b.beaconCfg.PtcSize > 0 {
+			ptcSize = b.beaconCfg.PtcSize
+		}
+		tmp.PayloadAttestations = solid.NewStaticProgressiveListSSZ[*PayloadAttestation](maxPayloadAttestationsForConfig(b.beaconCfg), PayloadAttestationSSZSizeWithPtcSize(ptcSize))
+		tmp.ParentExecutionRequests = NewExecutionRequestsWithVersion(b.beaconCfg, b.Version)
+	}
 
 	if err := json.Unmarshal(buf, &tmp); err != nil {
 		return err
 	}
+	if b.Version >= clparams.GloasVersion {
+		if tmp.SignedExecutionPayloadBid == nil || tmp.SignedExecutionPayloadBid.Message == nil {
+			return errors.New("gloas beacon body contains a null execution payload bid")
+		}
+		if err := solid.RangeErr(&tmp.SignedExecutionPayloadBid.Message.BlobKzgCommitments, func(i int, commitment *KZGCommitment, _ int) error {
+			if commitment == nil {
+				return fmt.Errorf("blob KZG commitment %d is null", i)
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+		if tmp.PayloadAttestations == nil {
+			return errors.New("gloas beacon body contains null payload attestations")
+		}
+		if err := solid.RangeErr(tmp.PayloadAttestations, func(i int, attestation *PayloadAttestation, _ int) error {
+			if attestation == nil || attestation.AggregationBits == nil || attestation.Data == nil {
+				return fmt.Errorf("payload attestation %d is incomplete", i)
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+		if tmp.ParentExecutionRequests == nil {
+			return errors.New("gloas beacon body contains null parent execution requests")
+		}
+	}
 	tmp.AttesterSlashings.Range(func(_ int, value *AttesterSlashing, _ int) bool {
-		// Trick to set version
-		value.SetVersion(b.Version)
+		// Set version with config for preset-aware limits
+		value.SetVersionWithConfig(b.Version, b.beaconCfg)
 		return true
 	})
+	if b.beaconCfg != nil && b.Version.AfterOrEqual(clparams.ElectraVersion) {
+		if err := solid.RangeErr(tmp.Attestations, func(_ int, att *solid.Attestation, _ int) error {
+			return att.ValidateForConfig(b.beaconCfg, b.Version)
+		}); err != nil {
+			return err
+		}
+	}
 
 	b.RandaoReveal = tmp.RandaoReveal
 	b.Eth1Data = tmp.Eth1Data
@@ -486,16 +849,30 @@ func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
 	b.Deposits = tmp.Deposits
 	b.VoluntaryExits = tmp.VoluntaryExits
 	b.SyncAggregate = tmp.SyncAggregate
-	b.ExecutionPayload = tmp.ExecutionPayload
 	b.ExecutionChanges = tmp.ExecutionChanges
-	b.BlobKzgCommitments = tmp.BlobKzgCommitments
-	if b.Version >= clparams.ElectraVersion {
-		b.ExecutionRequests = tmp.ExecutionRequests
+
+	// [Modified in Gloas:EIP7732] Version-specific field assignment
+	if b.Version < clparams.GloasVersion {
+		b.ExecutionPayload = tmp.ExecutionPayload
+		b.BlobKzgCommitments = tmp.BlobKzgCommitments
+		if b.Version >= clparams.ElectraVersion {
+			b.ExecutionRequests = tmp.ExecutionRequests
+		}
+	}
+	// [New in Gloas:EIP7732]
+	if b.Version >= clparams.GloasVersion {
+		b.SignedExecutionPayloadBid = tmp.SignedExecutionPayloadBid
+		b.PayloadAttestations = tmp.PayloadAttestations
+		b.ParentExecutionRequests = tmp.ParentExecutionRequests
 	}
 	return nil
 }
 
 func (b *BeaconBody) GetPayloadHeader() (*Eth1Header, error) {
+	// [Modified in Gloas:EIP7732] ExecutionPayload not present in GLOAS blocks
+	if b.Version >= clparams.GloasVersion || b.ExecutionPayload == nil {
+		return nil, errors.New("execution payload not available for GLOAS blocks")
+	}
 	return b.ExecutionPayload.PayloadHeader()
 }
 
@@ -532,6 +909,13 @@ func (b *BeaconBody) GetVoluntaryExits() *solid.ListSSZ[*SignedVoluntaryExit] {
 }
 
 func (b *BeaconBody) GetBlobKzgCommitments() *solid.ListSSZ[*KZGCommitment] {
+	// [Modified in Gloas:EIP7732] In GLOAS, blob_kzg_commitments moved to signed_execution_payload_bid.message
+	if b.Version >= clparams.GloasVersion {
+		if b.SignedExecutionPayloadBid != nil && b.SignedExecutionPayloadBid.Message != nil {
+			return &b.SignedExecutionPayloadBid.Message.BlobKzgCommitments
+		}
+		return nil
+	}
 	return b.BlobKzgCommitments
 }
 
@@ -541,6 +925,21 @@ func (b *BeaconBody) GetExecutionChanges() *solid.ListSSZ[*SignedBLSToExecutionC
 
 func (b *BeaconBody) GetExecutionRequests() *ExecutionRequests {
 	return b.ExecutionRequests
+}
+
+func (b *BeaconBody) GetSignedExecutionPayloadBid() *SignedExecutionPayloadBid {
+	return b.SignedExecutionPayloadBid
+}
+
+func (b *BeaconBody) GetPayloadAttestations() *solid.ListSSZ[*PayloadAttestation] {
+	return b.PayloadAttestations
+}
+
+func (b *BeaconBody) GetParentExecutionRequests() *ExecutionRequests {
+	if b.Version >= clparams.GloasVersion {
+		return b.ParentExecutionRequests
+	}
+	return nil
 }
 
 func (b *BeaconBody) GetExecutionRequestsList() []hexutil.Bytes {
@@ -556,22 +955,32 @@ func GetExecutionRequestsList(beaconCfg *clparams.BeaconChainConfig, r *Executio
 		return nil
 	}
 	ret := []hexutil.Bytes{}
-	for _, r := range []struct {
-		typ      byte
-		requests ssz.EncodableSSZ
-	}{
-		{byte(beaconCfg.DepositRequestType), r.Deposits},
-		{byte(beaconCfg.WithdrawalRequestType), r.Withdrawals},
-		{byte(beaconCfg.ConsolidationRequestType), r.Consolidations},
-	} {
-		ssz, err := r.requests.EncodeSSZ([]byte{})
+	appendRequests := func(typ byte, requests ssz.EncodableSSZ) bool {
+		encoded, err := requests.EncodeSSZ([]byte{})
 		if err != nil {
-			log.Warn("Error encoding deposits", "err", err)
+			log.Warn("Error encoding execution requests", "type", typ, "err", err)
+			return false
+		}
+		if len(encoded) > 0 {
+			ret = append(ret, append(hexutil.Bytes{typ}, encoded...))
+		}
+		return true
+	}
+	if r.Deposits != nil && !appendRequests(byte(beaconCfg.DepositRequestType), r.Deposits) {
+		return nil
+	}
+	if r.Withdrawals != nil && !appendRequests(byte(beaconCfg.WithdrawalRequestType), r.Withdrawals) {
+		return nil
+	}
+	if r.Consolidations != nil && !appendRequests(byte(beaconCfg.ConsolidationRequestType), r.Consolidations) {
+		return nil
+	}
+	if r.effectiveVersion() >= clparams.GloasVersion {
+		if r.BuilderDeposits != nil && !appendRequests(byte(beaconCfg.BuilderDepositRequestType), r.BuilderDeposits) {
 			return nil
 		}
-		// type + ssz
-		if len(ssz) > 0 {
-			ret = append(ret, append(hexutil.Bytes{r.typ}, ssz...))
+		if r.BuilderExits != nil && !appendRequests(byte(beaconCfg.BuilderExitRequestType), r.BuilderExits) {
+			return nil
 		}
 	}
 	return ret
@@ -641,6 +1050,10 @@ type DenebSignedBeaconBlock struct {
 	SignedBlock *SignedBeaconBlock        `json:"signed_block"`
 	KZGProofs   *solid.ListSSZ[*KZGProof] `json:"kzg_proofs"`
 	Blobs       *solid.ListSSZ[*Blob]     `json:"blobs"`
+	// SignedExecutionPayloadEnvelope is the validator-signed envelope for GLOAS self-build blocks.
+	// Present only on POST /eth/v2/beacon/blocks when the validator client submits a signed
+	// envelope alongside the signed block. [New in Gloas:EIP7732]
+	SignedExecutionPayloadEnvelope *SignedExecutionPayloadEnvelope `json:"signed_execution_payload_envelope,omitempty"`
 }
 
 func NewDenebSignedBeaconBlock(beaconCfg *clparams.BeaconChainConfig, version clparams.StateVersion) *DenebSignedBeaconBlock {
@@ -649,10 +1062,14 @@ func NewDenebSignedBeaconBlock(beaconCfg *clparams.BeaconChainConfig, version cl
 		return nil
 	}
 
+	maxBlobCommitments := MaxBlobsCommittmentsPerBlock
+	if beaconCfg != nil && beaconCfg.MaxBlobCommittmentsPerBlock > 0 {
+		maxBlobCommitments = int(beaconCfg.MaxBlobCommittmentsPerBlock)
+	}
 	b := &DenebSignedBeaconBlock{
 		SignedBlock: NewSignedBeaconBlock(beaconCfg, version),
-		KZGProofs:   solid.NewStaticListSSZ[*KZGProof](MaxBlobsCommittmentsPerBlock*int(beaconCfg.NumberOfColumns), BYTES_KZG_PROOF),
-		Blobs:       solid.NewStaticListSSZ[*Blob](MaxBlobsCommittmentsPerBlock, int(BYTES_PER_BLOB)),
+		KZGProofs:   solid.NewStaticListSSZ[*KZGProof](maxBlobCommitments*int(beaconCfg.NumberOfColumns), BYTES_KZG_PROOF),
+		Blobs:       solid.NewStaticListSSZ[*Blob](maxBlobCommitments, int(BYTES_PER_BLOB)),
 	}
 	return b
 }

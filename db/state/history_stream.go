@@ -23,7 +23,6 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -136,7 +135,7 @@ func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 		}
 
 		hi.seq.Reset(top.startTxNum, idxVal)
-		txNum, ok := hi.seq.Seek(hi.startTxNum)
+		txNum, _, ok := hi.seq.Seek(hi.startTxNum)
 		if !ok {
 			continue
 		}
@@ -215,7 +214,7 @@ func (hi *HistoryRangeAsOfFiles) Next() ([]byte, []byte, error) {
 	}
 	hi.orderAscend.Assert(hi.kBackup, hi.nextKey)
 	// TODO: remove `common.Copy`. it protecting from some existing bug. https://github.com/erigontech/erigon/issues/12672
-	return common.Copy(hi.kBackup), common.Copy(hi.vBackup), nil
+	return bytes.Clone(hi.kBackup), bytes.Clone(hi.vBackup), nil
 }
 
 // HistoryRangeAsOfDB - returns state range at given time in history
@@ -354,7 +353,7 @@ func (hi *HistoryRangeAsOfDB) Next() ([]byte, []byte, error) {
 	}
 	hi.orderAscend.Assert(hi.kBackup, hi.nextKey)
 	// TODO: remove `common.Copy`. it protecting from some existing bug. https://github.com/erigontech/erigon/issues/12672
-	return common.Copy(hi.kBackup), common.Copy(hi.vBackup), nil
+	return bytes.Clone(hi.kBackup), bytes.Clone(hi.vBackup), nil
 }
 
 // HistoryChangesIterFiles - producing state-patch for Unwind - return state-patch for Unwind: "what keys changed between `[from, to)` and what was their value BEFORE txNum"
@@ -400,7 +399,7 @@ func (hi *HistoryChangesIterFiles) advance() error {
 		}
 
 		hi.seq.Reset(top.startTxNum, idxVal)
-		txNum, ok := hi.seq.Seek(hi.startTxNum)
+		txNum, _, ok := hi.seq.Seek(hi.startTxNum)
 		if !ok {
 			continue
 		}
@@ -659,14 +658,14 @@ func (ht *HistoryTraceKeyFiles) advance() error {
 
 			offset, ok := idxReader.TwoLayerLookup(ht.key)
 			if !ok {
-				ht.logger.Debug("weird thing - no offset found for %s in file %s", hexutil.Encode(ht.key), item.src.decompressor.FileName())
+				ht.logger.Debug("weird thing - no offset found", "key", hexutil.Encode(ht.key), "file", item.src.decompressor.FileName())
 				moveToNextFileFn()
 				continue
 			}
 			getter.Reset(offset)
 			gkey, _ := getter.Next(ht.efbuf[:0]) // skip key
 			if !bytes.Equal(gkey, ht.key) {
-				ht.logger.Debug("weird thing - key mismatch for %s in file %s", hexutil.Encode(ht.key), item.src.decompressor.FileName())
+				ht.logger.Debug("weird thing - key mismatch", "key", hexutil.Encode(ht.key), "file", item.src.decompressor.FileName())
 				moveToNextFileFn()
 				continue
 			}
@@ -747,8 +746,11 @@ func (ht *HistoryTraceKeyFiles) Next() (uint64, []byte, error) {
 	default:
 	}
 
-	defer ht.advance()
-	return ht.txNum, ht.v, nil
+	txNum, v := ht.txNum, ht.v
+	if err := ht.advance(); err != nil {
+		return 0, nil, err
+	}
+	return txNum, v, nil
 }
 
 type HistoryTraceKeyDB struct {
@@ -856,6 +858,6 @@ func (ht *HistoryTraceKeyDB) advanceSmallVals() error {
 	if err != nil {
 		return fmt.Errorf("HistoryTraceKeyDB data lookup key %x txNum %d: %w", ht.key, ht.txNum, err)
 	}
-	ht.v = common.Copy(ht.v)
+	ht.v = bytes.Clone(ht.v)
 	return nil
 }

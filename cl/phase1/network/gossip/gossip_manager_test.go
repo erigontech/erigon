@@ -471,7 +471,7 @@ func (s *subscribeUpcomingTopicsTestSuite) TestRegisterGossipService_PropagatesC
 		return false
 	}
 
-	err := s.gm.registerGossipService(service, condition)
+	_, _, err := s.gm.registerGossipService(service, condition)
 	s.Require().NoError(err)
 
 	forkDigest, err := s.mockClock.CurrentForkDigest()
@@ -643,7 +643,7 @@ func (s *subscribeUpcomingTopicsTestSuite) TestRegisterGossipService_ConditionsF
 	// Register via registerGossipService which is the call site that had the bug.
 	// It must forward conditions to newPubsubValidator so that the pubsub
 	// topic validator actually evaluates them.
-	err := s.gm.registerGossipService(wrappedService, condition)
+	_, _, err := s.gm.registerGossipService(wrappedService, condition)
 	s.Require().NoError(err)
 
 	// Verify the topic was registered with pubsub

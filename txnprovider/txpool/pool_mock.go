@@ -16,6 +16,7 @@ import (
 	common "github.com/erigontech/erigon/common"
 	kv "github.com/erigontech/erigon/db/kv"
 	remoteproto "github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	sentryproto "github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	txpoolcfg "github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 	gomock "go.uber.org/mock/gomock"
 )
@@ -120,15 +121,15 @@ func (c *MockPoolAddNewGoodPeerCall) DoAndReturn(f func(PeerID)) *MockPoolAddNew
 }
 
 // AddRemoteTxns mocks base method.
-func (m *MockPool) AddRemoteTxns(ctx context.Context, newTxns TxnSlots) {
+func (m *MockPool) AddRemoteTxns(ctx context.Context, newTxns TxnSlots, peerID PeerID, sentry sentryproto.SentryClient) {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "AddRemoteTxns", ctx, newTxns)
+	m.ctrl.Call(m, "AddRemoteTxns", ctx, newTxns, peerID, sentry)
 }
 
 // AddRemoteTxns indicates an expected call of AddRemoteTxns.
-func (mr *MockPoolMockRecorder) AddRemoteTxns(ctx, newTxns any) *MockPoolAddRemoteTxnsCall {
+func (mr *MockPoolMockRecorder) AddRemoteTxns(ctx, newTxns, peerID, sentry any) *MockPoolAddRemoteTxnsCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddRemoteTxns", reflect.TypeOf((*MockPool)(nil).AddRemoteTxns), ctx, newTxns)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddRemoteTxns", reflect.TypeOf((*MockPool)(nil).AddRemoteTxns), ctx, newTxns, peerID, sentry)
 	return &MockPoolAddRemoteTxnsCall{Call: call}
 }
 
@@ -144,13 +145,13 @@ func (c *MockPoolAddRemoteTxnsCall) Return() *MockPoolAddRemoteTxnsCall {
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockPoolAddRemoteTxnsCall) Do(f func(context.Context, TxnSlots)) *MockPoolAddRemoteTxnsCall {
+func (c *MockPoolAddRemoteTxnsCall) Do(f func(context.Context, TxnSlots, PeerID, sentryproto.SentryClient)) *MockPoolAddRemoteTxnsCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockPoolAddRemoteTxnsCall) DoAndReturn(f func(context.Context, TxnSlots)) *MockPoolAddRemoteTxnsCall {
+func (c *MockPoolAddRemoteTxnsCall) DoAndReturn(f func(context.Context, TxnSlots, PeerID, sentryproto.SentryClient)) *MockPoolAddRemoteTxnsCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

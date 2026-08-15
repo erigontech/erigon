@@ -34,7 +34,7 @@ func DeriveKey(seed string, index uint64) (*bls.PrivateKey, error) {
 // DeriveKeys derives N deterministic BLS keypairs from a seed.
 func DeriveKeys(seed string, count int) ([]*bls.PrivateKey, error) {
 	keys := make([]*bls.PrivateKey, count)
-	for i := 0; i < count; i++ {
+	for i := range count {
 		var err error
 		keys[i], err = DeriveKey(seed, uint64(i))
 		if err != nil {
@@ -131,7 +131,7 @@ func BuildGenesisState(
 
 	// Add validators.
 	maxEffectiveBalance := cfg.MaxEffectiveBalance
-	for i := 0; i < validatorCount; i++ {
+	for i := range validatorCount {
 		pubkey := keys[i].PublicKey()
 		pubkeyCompressed := bls.CompressPublicKey(pubkey)
 		var pubkeyBytes [48]byte
@@ -165,7 +165,7 @@ func BuildGenesisState(
 	if version >= clparams.AltairVersion {
 		committeeSize := int(cfg.SyncCommitteeSize)
 		committeePubkeys := make([]common.Bytes48, committeeSize)
-		for i := 0; i < committeeSize; i++ {
+		for i := range committeeSize {
 			committeePubkeys[i] = allPubkeys[i%len(allPubkeys)]
 		}
 		// Compute aggregate pubkey (needed for sync committee verification).
@@ -191,10 +191,16 @@ func BuildGenesisState(
 	}
 
 	// Compute genesis validators root.
-	validatorsRoot, err := beaconState.Validators().HashSSZ()
+	var validatorsRoot [32]byte
+	if version >= clparams.GloasVersion {
+		validatorsRoot, err = beaconState.Validators().HashSSZProgressive()
+	} else {
+		validatorsRoot, err = beaconState.Validators().HashSSZ()
+	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("hash validators: %w", err)
 	}
+	beaconState.Validators().SetProgressiveHashing(version >= clparams.GloasVersion)
 	beaconState.SetGenesisValidatorsRoot(common.Hash(validatorsRoot))
 
 	// Initialize RANDAO mixes with the genesis validators root.
@@ -202,19 +208,38 @@ func BuildGenesisState(
 		beaconState.SetRandaoMixAt(int(i), common.Hash(validatorsRoot))
 	}
 
-	// Set the latest execution payload header referencing the EL genesis block.
-	execHeader := cltypes.NewEth1Header(version)
-	execHeader.BlockHash = elGenesisHash
-	beaconState.SetLatestExecutionPayloadHeader(execHeader)
+	var genesisBid *cltypes.ExecutionPayloadBid
+	if version >= clparams.GloasVersion {
+		emptyRequests := cltypes.NewExecutionRequestsWithVersion(cfg, version)
+		emptyRequestsRoot, err := emptyRequests.HashSSZ()
+		if err != nil {
+			return nil, nil, fmt.Errorf("hash empty execution requests: %w", err)
+		}
+		genesisBid = &cltypes.ExecutionPayloadBid{
+			ParentBlockHash:       elGenesisHash,
+			BlobKzgCommitments:    *solid.NewStaticProgressiveListSSZ[*cltypes.KZGCommitment](int(cfg.MaxBlobCommittmentsPerBlock), 48),
+			ExecutionRequestsRoot: emptyRequestsRoot,
+		}
+		beaconState.SetLatestExecutionPayloadBid(genesisBid)
+		beaconState.SetLatestBlockHash(elGenesisHash)
+	} else {
+		execHeader := cltypes.NewEth1Header(version)
+		execHeader.BlockHash = elGenesisHash
+		beaconState.SetLatestExecutionPayloadHeader(execHeader)
+	}
 
 	// Set latest block header. The body root for genesis is the hash of
 	// an empty BeaconBlockBody at the genesis version.
 	genesisBody := cltypes.NewBeaconBody(cfg, version)
-	// Ensure the execution payload has all required sub-fields initialized.
-	genesisBody.ExecutionPayload.Extra = solid.NewExtraData()
-	genesisBody.ExecutionPayload.Transactions = &solid.TransactionsSSZ{}
-	if version >= clparams.CapellaVersion {
-		genesisBody.ExecutionPayload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), 44)
+	if genesisBid != nil {
+		genesisBody.SignedExecutionPayloadBid.Message = genesisBid.Copy()
+	}
+	if genesisBody.ExecutionPayload != nil {
+		genesisBody.ExecutionPayload.Extra = solid.NewExtraData()
+		genesisBody.ExecutionPayload.Transactions = &solid.TransactionsSSZ{}
+		if version >= clparams.CapellaVersion {
+			genesisBody.ExecutionPayload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), 44)
+		}
 	}
 	if version >= clparams.AltairVersion {
 		genesisBody.SyncAggregate = cltypes.NewSyncAggregateWithSize(int(cfg.SyncCommitteeSize) / 8)

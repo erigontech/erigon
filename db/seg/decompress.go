@@ -24,13 +24,13 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon/common/assert"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/mmap"
@@ -62,10 +62,9 @@ func (pt *patternTable) insertWord(cw *codeword) {
 	}
 }
 
-// posEntry is one slot in a Huffman position table.
-// bits==0 signals a subtable pointer (see posTable.ptrs); otherwise bits is
-// the number of Huffman code bits consumed and pos is the decoded position.
-// pos fits in uint32 because positions are bounded by the word length.
+// posEntry is one slot in a Huffman position table: bits>0 is a terminal
+// (pos is the decoded position); bits==0 is a subtable router (pos is the
+// child index in posArena.tables), valid on the posMask!=0 path only.
 type posEntry struct {
 	pos  uint32
 	bits uint8
@@ -74,7 +73,6 @@ type posEntry struct {
 
 type posTable struct {
 	entries []posEntry
-	ptrs    []*posTable
 	bitLen  int
 	mask    uint16 // precomputed (1<<bitLen)-1
 }
@@ -108,26 +106,25 @@ func (a *patternArena) allocTable(bitLen int) *patternTable {
 	return t
 }
 
-// posArena pre-allocates all storage for a decompressor's Huffman position table,
-// consolidating O(N) individual heap allocations into 3 large slabs.
+// posArena pre-allocates all storage for a decompressor's Huffman position table
+// up front, to reduce per-table heap allocations and GC pressure.
 type posArena struct {
 	tables     []posTable
 	entriesArr []posEntry
-	ptrsArr    []*posTable
 	tableIdx   int
 	slotIdx    int
 }
 
-func (a *posArena) allocTable(bitLen int) *posTable {
+func (a *posArena) allocTable(bitLen int) (uint32, *posTable) {
 	sz := 1 << bitLen
-	t := &a.tables[a.tableIdx]
+	idx := a.tableIdx
+	t := &a.tables[idx]
 	a.tableIdx++
 	t.bitLen = bitLen
 	t.mask = uint16(1)<<bitLen - 1
 	t.entries = a.entriesArr[a.slotIdx : a.slotIdx+sz]
-	t.ptrs = a.ptrsArr[a.slotIdx : a.slotIdx+sz]
 	a.slotIdx += sz
-	return t
+	return uint32(idx), t
 }
 
 // countHuffmanArena mirrors the recursive build logic to count, without allocating,
@@ -197,6 +194,9 @@ type Decompressor struct {
 	filePath, fileName string
 
 	readAheadRefcnt atomic.Int32 // ref-counter: allow enable/disable read-ahead from goroutines. only when refcnt=0 - disable read-ahead once
+
+	residency     atomic.Pointer[residencyBitmap] // page-residency bitmap for the async-io gate; nil unless enabled
+	residencyOnce sync.Once
 }
 
 const (
@@ -349,7 +349,7 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 		}
 	}
 
-	if assert.Enable && pos != 24 {
+	if dbg.AssertEnabled && pos != 24 {
 		panic("pos != 24")
 	}
 	pos += dictSize // offset patterns
@@ -401,9 +401,8 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 		d.posArena = &posArena{
 			tables:     make([]posTable, 1+numSubTables),
 			entriesArr: make([]posEntry, totalSlots),
-			ptrsArr:    make([]*posTable, totalSlots),
 		}
-		d.posDict = d.posArena.allocTable(bitLen)
+		_, d.posDict = d.posArena.allocTable(bitLen)
 		if _, err = buildPosTable(posDepths, poss, d.posDict, 0, 0, 0, posMaxDepth, d.posArena); err != nil {
 			return nil, &ErrCompressedFileCorrupted{FileName: fName, Reason: err.Error()}
 		}
@@ -469,14 +468,12 @@ func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16,
 		entry := posEntry{pos: uint32(p), bits: uint8(bits)}
 		if table.bitLen == bits {
 			table.entries[code] = entry
-			table.ptrs[code] = nil
 		} else {
 			codeStep := uint16(1) << bits
 			codeFrom := code
 			codeTo := code | (uint16(1) << table.bitLen)
 			for c := codeFrom; c < codeTo; c += codeStep {
 				table.entries[c] = entry
-				table.ptrs[c] = nil
 			}
 		}
 		return 1, nil
@@ -488,9 +485,8 @@ func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16,
 		} else {
 			bitLen = int(maxDepth)
 		}
-		newTable := arena.allocTable(bitLen)
-		table.entries[code] = posEntry{} // bits==0 signals subtable
-		table.ptrs[code] = newTable
+		newIdx, newTable := arena.allocTable(bitLen)
+		table.entries[code] = posEntry{pos: newIdx} // bits==0 marks a subtable
 		return buildPosTable(depths, poss, newTable, 0, 0, depth, maxDepth, arena)
 	}
 	if maxDepth == 0 {
@@ -526,7 +522,6 @@ func (d *Decompressor) DictMemSize() uint64 {
 	if d.posArena != nil {
 		total += uint64(cap(d.posArena.tables)) * uint64(unsafe.Sizeof(posTable{}))
 		total += uint64(cap(d.posArena.entriesArr)) * uint64(unsafe.Sizeof(posEntry{}))
-		total += uint64(cap(d.posArena.ptrsArr)) * uint64(unsafe.Sizeof((*posTable)(nil)))
 	}
 	return total
 }
@@ -579,6 +574,10 @@ func (d *Decompressor) Close() {
 		return
 	}
 	d.checkFileLenChange()
+	if rb := d.residency.Load(); rb != nil {
+		rb.stop() // join the refresh goroutine before munmap so no mincore touches freed memory
+		d.residency.Store(nil)
+	}
 	if err := mmap.Munmap(d.mmapHandle1, d.mmapHandle2); err != nil {
 		log.Log(dbg.FileCloseLogLevel, "unmap", "err", err, "file", d.FileName(), "stack", dbg.Stack())
 	}
@@ -603,13 +602,17 @@ func (d *Decompressor) GetMetadata() []byte {
 	return d.metadata
 }
 
-// WithReadAhead - Expect read in sequential order. (Hence, pages in the given range can be aggressively read ahead, and may be freed soon after they are accessed.)
-func (d *Decompressor) WithReadAhead(f func() error) error {
+// WithReadAhead reads in sequential order via a separate MADV_SEQUENTIAL mmap, so the shared mmap used by concurrent random readers is unaffected.
+func (d *Decompressor) WithReadAhead(f func(*Getter) error) error {
 	if d == nil || d.mmapHandle1 == nil {
 		return nil
 	}
-	defer d.MadvSequential().DisableReadAhead()
-	return f()
+	v, err := d.OpenSequentialView(true)
+	if err != nil {
+		return err
+	}
+	defer v.Close()
+	return f(v.MakeGetter())
 }
 
 // DisableReadAhead - usage: `defer d.EnableReadAhead().DisableReadAhead()`. Please don't use this funcs without `defer` to avoid leak.
@@ -656,59 +659,25 @@ func (d *Decompressor) MadvWillNeed() *Decompressor {
 	return d
 }
 
-// SequentialView provides a separate mmap of the same file with MADV_NORMAL for
-// sequential operations (merges, full scans) that run concurrently with random readers.
+// SequentialView is a scan over its own mmap of the file, so MADV_SEQUENTIAL lands on a
+// separate VMA and the shared mapping keeps the MADV_RANDOM that NewDecompressor left on it.
 //
-// All default RPC requests (eth_getBalance, eth_call, debug_traceTransaction, etc.)
-// continue to use the Decompressor's original mmap with MADV_RANDOM. They never touch
-// this second mapping — so their page fault behavior, readahead suppression, and hot
-// page residency are completely unaffected by concurrent merge I/O.
+// madvise sets vm_flags per-VMA, so two mmaps of one fd get independent readahead
+// (mm/madvise.c: SEQUENTIAL sets VM_SEQ_READ and clears VM_RAND_READ, RANDOM the reverse,
+// NORMAL clears both; mm/filemap.c do_sync_mmap_readahead: VM_RAND_READ skips readahead,
+// VM_SEQ_READ forces it). The page cache is keyed (inode, offset), so the second mapping
+// shares pages and costs no extra RAM. MADV_SEQUENTIAL also deactivates pages behind the
+// scan; pages hot in the shared VMA carry the referenced bit and the two-list LRU promotes
+// them back.
 //
-// Design decisions and kernel-level rationale:
+// On Windows every Madvise* is a no-op — FILE_FLAG_SEQUENTIAL_SCAN affects ReadFile, not
+// MapViewOfFile — so the view still isolates the VMA but gets no kernel hint.
 //
-//  1. Separate VMA isolates madvise flags from the shared mmap.
-//     madvise(2) sets VM_SEQ_READ / VM_RAND_READ flags on the struct vm_area_struct.
-//     A second mmap() of the same fd creates a separate VMA with its own vm_flags —
-//     the original VMA's MADV_RANDOM (VM_RAND_READ) is untouched.
-//
-//     Proof in kernel source:
-//     - madvise_vma_behavior() sets flags per-VMA (vma->vm_flags):
-//     https://github.com/torvalds/linux/blob/master/mm/madvise.c
-//     MADV_SEQUENTIAL: new_flags = (new_flags & ~VM_RAND_READ) | VM_SEQ_READ
-//     MADV_RANDOM:     new_flags = (new_flags & ~VM_SEQ_READ) | VM_RAND_READ
-//     MADV_NORMAL:     new_flags = new_flags & ~VM_RAND_READ & ~VM_SEQ_READ
-//     - Page fault handler checks these flags per-VMA to decide readahead:
-//     https://github.com/torvalds/linux/blob/master/mm/filemap.c
-//     do_sync_mmap_readahead():
-//     if (vm_flags & VM_RAND_READ) return;     // skip readahead
-//     if (vm_flags & VM_SEQ_READ) { sync_ra(); } // aggressive readahead
-//     So two mmaps of the same file get independent readahead behavior.
-//
-//  2. Shared page cache — no double memory cost.
-//     Both mappings are backed by the same page cache pages (same inode). A second
-//     mmap does NOT duplicate physical memory. The page cache is indexed by
-//     (inode, offset), so identical pages are shared regardless of how many VMAs
-//     map them:
-//     https://www.kernel.org/doc/html/latest/admin-guide/mm/concepts.html#page-cache
-//
-//  3. MADV_SEQUENTIAL triggers readahead and "deactivate behind".
-//     The kernel performs aggressive readahead on sequential VMAs and moves accessed
-//     pages to the inactive LRU list ("deactivate behind"). However, pages that are
-//     also hot in the MADV_RANDOM VMA have the "referenced" bit set and get promoted
-//     back to the active list by the second-chance / two-list LRU algorithm:
-//     https://www.kernel.org/doc/html/latest/admin-guide/mm/multigen_lru.html
-//     https://www.kernel.org/doc/html/latest/mm/page_reclaim.html
-//     https://www.kernel.org/doc/html/latest/mm/readahead.html
-//
-//  4. Why not just call MadvSequential() on the shared mmap?
-//     That changes the VMA flags for ALL concurrent readers of that file. Random RPC
-//     lookups would get sequential readahead (wasted I/O) and "deactivate behind"
-//     (evicting hot pages). This is the core problem we are solving.
-//
-//  5. Windows: Mmap/Munmap work cross-platform. All Madvise* calls are no-ops on
-//     Windows — there is no madvise(2) equivalent for memory-mapped files.
-//     FILE_FLAG_SEQUENTIAL_SCAN only affects ReadFile/WriteFile, not MapViewOfFile.
-//     SequentialView still provides VMA isolation but without kernel hint benefits.
+//	https://github.com/torvalds/linux/blob/master/mm/madvise.c
+//	https://github.com/torvalds/linux/blob/master/mm/filemap.c
+//	https://www.kernel.org/doc/html/latest/admin-guide/mm/concepts.html#page-cache
+//	https://www.kernel.org/doc/html/latest/mm/readahead.html
+//	https://www.kernel.org/doc/html/latest/mm/page_reclaim.html
 type SequentialView struct {
 	d           *Decompressor
 	mmapHandle1 []byte
@@ -716,17 +685,24 @@ type SequentialView struct {
 	data        []byte // words data region from the sequential mmap
 }
 
-// OpenSequentialView creates a separate mmap of the same file with MADV_SEQUENTIAL.
-// The caller must call Close when done.
-func (d *Decompressor) OpenSequentialView() (*SequentialView, error) {
+// OpenSequentialView returns a view for a full scan. separateReadahead opens a second
+// MADV_SEQUENTIAL mmap; without it the scan reads through the shared one. Caller must Close.
+func (d *Decompressor) OpenSequentialView(separateReadahead bool) (*SequentialView, error) {
 	if d == nil || d.f == nil {
 		return nil, nil
+	}
+	if !separateReadahead {
+		return &SequentialView{d: d, data: d.data[d.wordsStart:]}, nil
 	}
 	h1, h2, err := mmap.Mmap(d.f, int(d.size))
 	if err != nil {
 		return nil, err
 	}
-	_ = mmap.MadviseSequential(h1)
+	if dbg.SnapshotMadvSequential {
+		_ = mmap.MadviseSequential(h1)
+	} else {
+		_ = mmap.MadviseRandom(h1)
+	}
 	// d.data is a sub-slice of d.mmapHandle1 starting after file headers
 	// (version, feature flags, metadata). wordsStart is relative to d.data,
 	// so the file offset is: headerSize + wordsStart.
@@ -741,11 +717,13 @@ func (d *Decompressor) OpenSequentialView() (*SequentialView, error) {
 func (v *SequentialView) MakeGetter() *Getter {
 	g := &Getter{
 		d:           v.d,
-		posDict:     v.d.posDict,
 		data:        v.data,
 		dataLen:     uint64(len(v.data)),
 		patternDict: v.d.dict,
 		fName:       v.d.FileName(),
+	}
+	if v.d.posArena != nil {
+		g.posTables = v.d.posArena.tables
 	}
 	if v.d.posDict != nil {
 		g.posMask = v.d.posDict.mask
@@ -769,15 +747,16 @@ type Getter struct {
 	dataP      uint64     // current byte offset in data
 	dataLen    uint64     // u64-typed len(data) to reduce amount of type-casting
 	dataBit    int        // bit offset within current byte (0-7)
-	posMask    uint16     // cached posDict.mask, avoids pointer chain
-	posEntries []posEntry // cached posDict.entries, avoids pointer-chase through posDict
+	posMask    uint16     // cached d.posDict.mask, avoids pointer chain on hot path
+	posEntries []posEntry // cached d.posDict.entries, avoids pointer chain on hot path
 	data       []byte
 	//less hot fields
-	posDict     *posTable // Huffman table for positions (only used for subtable path)
-	patternDict *patternTable
-	d           *Decompressor
-	fName       string
-	trace       bool
+	posTables     []posTable // posArena.tables; only used for the subtable path
+	patternDict   *patternTable
+	d             *Decompressor
+	fName         string
+	trace         bool
+	residencyGate bool
 }
 
 func (g *Getter) MadvNormal() MadvDisabler {
@@ -817,7 +796,7 @@ func (g *Getter) nextPos() uint64 {
 	entry := g.posEntries[code]
 	l := uint(entry.bits)
 	if l == 0 {
-		return g.nextPosSubtable(g.posDict, code)
+		return g.nextPosSubtable(entry.pos)
 	}
 	dataBit += l
 	dataP += uint64(dataBit >> 3)
@@ -827,19 +806,21 @@ func (g *Getter) nextPos() uint64 {
 }
 
 // nextPosSubtable handles the uncommon case where the initial table lookup
-// leads to a subtable (Huffman depth > 9).
+// leads to a subtable (Huffman depth > 9). tableIdx is the subtable to descend
+// into within g.posTables.
 //
 //go:noinline
-func (g *Getter) nextPosSubtable(table *posTable, code uint16) uint64 {
+func (g *Getter) nextPosSubtable(tableIdx uint32) uint64 {
+	tables := g.posTables
 	data := g.data
 	dataP := g.dataP
 	dataBit := uint(g.dataBit) & 7
 	for {
-		table = table.ptrs[code]
+		table := &tables[tableIdx]
 		dataBit += 9
 		dataP += uint64(dataBit >> 3)
 		dataBit &= 7
-		code = uint16(data[dataP]) >> dataBit
+		code := uint16(data[dataP]) >> dataBit
 		if 8-dataBit < uint(table.bitLen) && dataP+1 < g.dataLen {
 			code |= uint16(data[dataP+1]) << (8 - dataBit)
 		}
@@ -852,6 +833,7 @@ func (g *Getter) nextPosSubtable(table *posTable, code uint16) uint64 {
 			g.dataBit = int(dataBit & 7)
 			return uint64(entry.pos)
 		}
+		tableIdx = entry.pos
 	}
 }
 
@@ -903,11 +885,13 @@ func (d *Decompressor) MakeGetter() *Getter {
 	data := d.data[d.wordsStart:]
 	g := &Getter{
 		d:           d,
-		posDict:     d.posDict,
 		data:        data,
 		dataLen:     uint64(len(data)),
 		patternDict: d.dict,
 		fName:       d.FileName(),
+	}
+	if d.posArena != nil {
+		g.posTables = d.posArena.tables
 	}
 	if d.posDict != nil {
 		g.posMask = d.posDict.mask
@@ -923,6 +907,9 @@ func (g *Getter) DataLen() int {
 func (g *Getter) Reset(offset uint64) {
 	g.dataP = offset
 	g.dataBit = 0
+	if g.residencyGate {
+		g.ensureResident(offset)
+	}
 }
 
 func (g *Getter) HasNext() bool {
@@ -955,7 +942,7 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 	} else {
 		// Expand buffer
 		if len(buf)+int(wordLen) < 0 {
-			log.Error("can't expand buffer", "filename", g.fName, "pos", savePos, "buf len", len(buf))
+			log.Error("can't expand buffer", "filename", g.fName, "pos", savePos, "bufLen", len(buf))
 			return nil, 0
 		}
 		buf = buf[:len(buf)+int(wordLen)]

@@ -19,7 +19,9 @@ package execmodule
 import (
 	"context"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -42,9 +44,9 @@ func NewAccumulation() *Accumulation {
 // Shared between the DevP2P StageLoop path (via Hook) and the Engine API path
 // (via PipelineExecutor).
 //
-// Key design: reads from a kv.Tx which can be either the SD's blockOverlay
-// (before commit) or a committed DB tx (legacy path). This decouples
-// notification dispatch from commit ordering.
+// Key design: reads block metadata from a kv.Tx which can be either the SD's
+// blockOverlay (before commit) or a committed DB tx. The state version is
+// supplied separately because only the durable state flush owns that value.
 type Dispatcher struct {
 	chainConfig         *chain.Config
 	events              *shards.Events
@@ -67,12 +69,13 @@ func NewDispatcher(
 }
 
 // Dispatch sends all pending notifications. The tx parameter is the data source
-// for headers, state version, and forkchoice markers — it can be the SD's
-// blockOverlay (MemoryMutation) for pre-commit dispatch, or a committed DB tx.
+// for headers and forkchoice markers — it can be the SD's blockOverlay
+// (MemoryMutation) for pre-commit dispatch, or a committed DB tx.
 //
 // Parameters:
 //   - ctx: context for cancellation
 //   - tx: data source (overlay or committed tx)
+//   - stateVersion: durable version represented by the accumulated state changes
 //   - accumulator: state change accumulator (may be nil)
 //   - recentReceipts: receipt/log cache (may be nil)
 //   - finishProgressBefore: Finish stage progress before the sync run
@@ -81,35 +84,35 @@ func NewDispatcher(
 func (d *Dispatcher) Dispatch(
 	ctx context.Context,
 	tx kv.Tx,
+	stateVersion uint64,
 	accumulator *notifications.Accumulator,
 	recentReceipts *notifications.RecentReceipts,
 	finishProgressBefore uint64,
 	finishProgressAfter uint64,
 	prevUnwindPoint *uint64,
 ) error {
-	// Update the accumulator with the current plain state version so downstream
-	// consumers (e.g. state cache) know state has moved on.
 	if accumulator != nil {
-		plainStateVersion, err := rawdb.GetStateVersion(tx)
-		if err != nil {
-			return err
-		}
-		accumulator.SetStateID(plainStateVersion)
+		accumulator.SetStateID(stateVersion)
 	}
 
 	if d.events != nil {
 		var notifyFrom uint64
 		var isUnwind bool
-		if prevUnwindPoint != nil && *prevUnwindPoint != 0 && (*prevUnwindPoint) < finishProgressBefore {
+		switch {
+		case prevUnwindPoint != nil && *prevUnwindPoint != 0 && (*prevUnwindPoint) < finishProgressBefore:
 			notifyFrom = *prevUnwindPoint + 1 // +1: unwind already reverted *prevUnwindPoint; notify starting from the block after
 			isUnwind = true
-		} else if finishProgressAfter == 0 {
+		case finishProgressAfter == 0:
 			// Genesis (block 0): notify from block 0.
 			notifyFrom = 0
-		} else {
-			heightSpan := min(finishProgressAfter-finishProgressBefore, 1024)
-			notifyFrom = finishProgressAfter - heightSpan
-			notifyFrom++
+		default:
+			// finishProgressAfter can trail finishProgressBefore, and a wrapped
+			// span would clamp to 1024 and notify over a range that never ran.
+			span, underflow := math.SafeSub(finishProgressAfter, finishProgressBefore)
+			if underflow {
+				span = 0
+			}
+			notifyFrom = finishProgressAfter - min(span, 1024) + 1
 		}
 		notifyTo := finishProgressAfter + 1 //[from, to)
 
@@ -140,10 +143,7 @@ func (d *Dispatcher) Dispatch(
 			pendingBlobFee = f.Uint64()
 		}
 
-		var finalizedBlock uint64
-		if fb := rawdb.ReadHeaderNumber(tx, rawdb.ReadForkchoiceFinalized(tx)); fb != nil {
-			finalizedBlock = *fb
-		}
+		finalizedBlock := common.Deref(rawdb.ReadHeaderNumber(tx, rawdb.ReadForkchoiceFinalized(tx)))
 
 		accumulator.SendAndReset(ctx, d.stateChangeConsumer, pendingBaseFee.Uint64(), pendingBlobFee, currentHeader.GasLimit, finalizedBlock)
 	}

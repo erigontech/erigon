@@ -17,15 +17,17 @@
 package eth_clock
 
 import (
+	"cmp"
 	"encoding/binary"
+	"fmt"
 	"math"
 	"slices"
-	"sort"
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 )
 
 var maximumClockDisparity = 500 * time.Millisecond
@@ -45,7 +47,7 @@ type EthereumClock interface {
 	LastFork() (common.Bytes4, error)                                      // GetLastFork
 	StateVersionByForkDigest(common.Bytes4) (clparams.StateVersion, error) // ForkDigestVersion
 	StateVersionByEpoch(uint64) clparams.StateVersion
-	//ComputeForkDigestForVersion(currentVersion common.Bytes4) (digest common.Bytes4, err error)
+	// ComputeForkDigestForVersion(currentVersion common.Bytes4) (digest common.Bytes4, err error)
 	ComputeForkDigest(epoch uint64) (digest common.Bytes4, err error) // new in fulu
 
 	GenesisValidatorsRoot() common.Hash
@@ -62,11 +64,11 @@ func forkList(schedule map[common.Bytes4]clparams.VersionScheduleEntry) (f []for
 	for version, entry := range schedule {
 		f = append(f, forkNode{epoch: entry.Epoch, version: version, stateVersion: entry.StateVersion})
 	}
-	sort.Slice(f, func(i, j int) bool {
-		if f[i].epoch == f[j].epoch {
-			return f[i].stateVersion < f[j].stateVersion
+	slices.SortFunc(f, func(a, b forkNode) int {
+		if a.epoch == b.epoch {
+			return cmp.Compare(a.stateVersion, b.stateVersion)
 		}
-		return f[i].epoch < f[j].epoch
+		return cmp.Compare(a.epoch, b.epoch)
 	})
 	return
 }
@@ -91,7 +93,25 @@ func NewEthereumClock(genesisTime uint64, genesisValidatorsRoot common.Hash, bea
 		if err != nil {
 			panic(err)
 		}
+		if fork.stateVersion >= clparams.FuluVersion {
+			// For Fulu+, the fork digest is XOR'd with blob parameters hash
+			impl.xorDigestWithBlobParams(&digest, fork.epoch)
+		}
 		impl.forkDigestToVersion[digest] = fork.stateVersion
+	}
+	// Also register fork digests for blob schedule change points (Fulu+)
+	for _, blobEntry := range beaconCfg.BlobSchedule {
+		stateVersion := beaconCfg.GetCurrentStateVersion(blobEntry.Epoch)
+		if stateVersion < clparams.FuluVersion {
+			continue
+		}
+		forkVersion := utils.Uint32ToBytes4(beaconCfg.GetForkVersionByVersion(stateVersion))
+		digest, err := impl.computeForkDigestForVersion(forkVersion)
+		if err != nil {
+			panic(err)
+		}
+		impl.xorDigestWithBlobParams(&digest, blobEntry.Epoch)
+		impl.forkDigestToVersion[digest] = stateVersion
 	}
 	return impl
 }
@@ -160,8 +180,13 @@ func (t *ethereumClockImpl) ForkId() ([]byte, error) {
 		currentEpoch = 0
 	}
 
+	// A fork parked at FAR_FUTURE_EPOCH is not scheduled, so it must not become
+	// next_fork_version: the spec wants the current version when nothing follows.
 	var nextForkVersion [4]byte
 	for _, fork := range forkList(t.beaconCfg.ForkVersionSchedule) {
+		if fork.epoch == t.beaconCfg.FarFutureEpoch || fork.epoch == math.MaxUint64 {
+			continue
+		}
 		if currentEpoch < fork.epoch {
 			nextForkVersion = fork.version
 			break
@@ -226,7 +251,7 @@ func (t *ethereumClockImpl) StateVersionByForkDigest(digest common.Bytes4) (clpa
 		return stateVersion, nil
 	}
 
-	return clparams.FuluVersion, nil
+	return 0, fmt.Errorf("unknown fork digest: %x", digest)
 }
 
 func (t *ethereumClockImpl) computeForkDigestForVersion(currentVersion common.Bytes4) (digest common.Bytes4, err error) {
@@ -234,6 +259,19 @@ func (t *ethereumClockImpl) computeForkDigestForVersion(currentVersion common.By
 	// copy first four bytes to output
 	copy(digest[:], dataRoot[:4])
 	return
+}
+
+// xorDigestWithBlobParams XORs a fork digest with the hash of blob parameters at the given epoch.
+// This is required for Fulu+ forks where the fork digest includes blob scheduling info.
+func (t *ethereumClockImpl) xorDigestWithBlobParams(digest *common.Bytes4, epoch uint64) {
+	blobParams := t.beaconCfg.GetBlobParameters(epoch)
+	blobParamsBytes := make([]byte, 16)
+	binary.LittleEndian.PutUint64(blobParamsBytes[:8], blobParams.Epoch)
+	binary.LittleEndian.PutUint64(blobParamsBytes[8:], blobParams.MaxBlobsPerBlock)
+	blobParamsHash := crypto.Sha256(blobParamsBytes)
+	for i := range 4 {
+		digest[i] ^= blobParamsHash[i]
+	}
 }
 
 func (t *ethereumClockImpl) ComputeForkDigest(epoch uint64) (digest common.Bytes4, err error) {
@@ -245,25 +283,12 @@ func (t *ethereumClockImpl) ComputeForkDigest(epoch uint64) (digest common.Bytes
 	// Compute base digest from fork version and genesis validators root
 	baseDigest := computeForkDataRoot(forkVersion, t.genesisValidatorsRoot)
 
-	if stateVersion < clparams.FuluVersion {
-		digest = common.Bytes4{}
-		copy(digest[:], baseDigest[:4])
-		return
-	}
-
-	// For Fulu and later, XOR base digest with hash of blob parameters
-	blobParams := t.beaconCfg.GetBlobParameters(epoch)
-
-	// Hash blob parameters (epoch and max_blobs_per_block)
-	blobParamsBytes := make([]byte, 16)
-	binary.LittleEndian.PutUint64(blobParamsBytes[:8], blobParams.Epoch)
-	binary.LittleEndian.PutUint64(blobParamsBytes[8:], blobParams.MaxBlobsPerBlock)
-	blobParamsHash := utils.Sha256(blobParamsBytes)
-
-	// XOR first 4 bytes of base digest with first 4 bytes of blob params hash
 	digest = common.Bytes4{}
-	for i := 0; i < 4; i++ {
-		digest[i] = baseDigest[i] ^ blobParamsHash[i]
+	copy(digest[:], baseDigest[:4])
+
+	if stateVersion >= clparams.FuluVersion {
+		// For Fulu and later, XOR base digest with hash of blob parameters
+		t.xorDigestWithBlobParams(&digest, epoch)
 	}
 
 	return digest, nil
@@ -280,5 +305,5 @@ func (t *ethereumClockImpl) GenesisTime() uint64 {
 func computeForkDataRoot(version [4]byte, genesisValidatorsRoot common.Hash) common.Hash {
 	var currentVersion32 common.Hash
 	copy(currentVersion32[:], version[:])
-	return utils.Sha256(currentVersion32[:], genesisValidatorsRoot[:])
+	return crypto.Sha256(currentVersion32[:], genesisValidatorsRoot[:])
 }

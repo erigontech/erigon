@@ -27,6 +27,8 @@ import (
 	"math/big"
 	"strings"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
@@ -44,6 +46,8 @@ type RLPTest struct {
 	// Out is a hex-encoded RLP value.
 	Out string
 }
+
+type rlpTestBigInt []byte
 
 // FromHex returns the bytes represented by the hexadecimal string s.
 // s may be prefixed with "0x".
@@ -102,11 +106,15 @@ func translateJSON(v any) any {
 		return uint64(v)
 	case string:
 		if len(v) > 0 && v[0] == '#' { // # starts a faux big int.
-			big, ok := new(big.Int).SetString(v[1:], 10)
+			b, ok := new(big.Int).SetString(v[1:], 10)
 			if !ok {
 				panic(fmt.Errorf("bad test: bad big int: %q", v))
 			}
-			return big
+			u, overflow := uint256.FromBig(b)
+			if overflow {
+				return rlpTestBigInt(b.Bytes())
+			}
+			return u
 		}
 		return []byte(v)
 	case []any:
@@ -134,13 +142,21 @@ func checkDecodeFromJSON(s *rlp.Stream, exp any) error {
 		if i != exp {
 			return addStack("Uint", exp, fmt.Errorf("result mismatch: got %d", i))
 		}
-	case *big.Int:
-		big := new(big.Int)
-		if err := s.Decode(&big); err != nil {
+	case *uint256.Int:
+		u := new(uint256.Int)
+		if err := s.Decode(&u); err != nil {
+			return addStack("Uint256", exp, err)
+		}
+		if u.Cmp(exp) != 0 {
+			return addStack("Uint256", exp, fmt.Errorf("result mismatch: got %d", u))
+		}
+	case rlpTestBigInt:
+		b, err := s.Bytes()
+		if err != nil {
 			return addStack("Big", exp, err)
 		}
-		if big.Cmp(exp) != 0 {
-			return addStack("Big", exp, fmt.Errorf("result mismatch: got %d", big))
+		if !bytes.Equal(b, exp) {
+			return addStack("Big", exp, fmt.Errorf("result mismatch: got %x", b))
 		}
 	case []byte:
 		b, err := s.Bytes()

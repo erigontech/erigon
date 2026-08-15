@@ -40,9 +40,9 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node"
@@ -78,7 +78,7 @@ type Service struct {
 	pongCh chan struct{} // Pong notifications are fed into this channel
 	histCh chan []uint64 // History request block numbers are fed into this channel
 
-	blockReader services.FullBlockReader
+	blockReader dbservices.FullBlockReader
 	txPool      txpoolproto.TxpoolClient
 }
 
@@ -125,7 +125,7 @@ func (w *connWrapper) Close() error {
 }
 
 // New returns a monitoring service ready for stats reporting.
-func New(node *node.Node, servers []*sentry.GrpcServer, chainDB kv.RoDB, blockReader services.FullBlockReader,
+func New(node *node.Node, servers []*sentry.GrpcServer, chainDB kv.RoDB, blockReader dbservices.FullBlockReader,
 	url string, networkid uint64, quitCh <-chan struct{}, headCh chan [][]byte, txPoolRpcClient txpoolproto.TxpoolClient) error {
 	// Parse the netstats connection url
 	parts := urlRegex.FindStringSubmatch(url)
@@ -549,9 +549,9 @@ func (s *Service) reportBlock(conn *connWrapper) error {
 
 // assembleBlockStats retrieves any required metadata to report a single block
 // and assembles the block stats. If block is nil, the current head is processed.
-func (s *Service) assembleBlockStats(block *types.Block, td *big.Int) *blockStats {
+func (s *Service) assembleBlockStats(block *types.Block, td *uint256.Int) *blockStats {
 	if td == nil {
-		td = common.Big0
+		td = new(uint256.Int)
 	}
 	// Gather the block infos from the local blockchain
 	txs := make([]txStats, 0, len(block.Transactions()))
@@ -563,7 +563,7 @@ func (s *Service) assembleBlockStats(block *types.Block, td *big.Int) *blockStat
 		Number:     block.Header().Number,
 		Hash:       block.Hash(),
 		ParentHash: block.Header().ParentHash,
-		Timestamp:  new(big.Int).SetUint64(block.Header().Time),
+		Timestamp:  new(big.Int).SetUint64(block.Time()),
 		Miner:      block.Header().Coinbase,
 		GasUsed:    block.Header().GasUsed,
 		GasLimit:   block.Header().GasLimit,

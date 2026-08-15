@@ -24,11 +24,13 @@ import (
 	"math/big"
 	"net"
 	"path"
+	"slices"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
@@ -39,10 +41,12 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/engineapi"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
@@ -128,6 +132,18 @@ func DefaultEngineApiTesterGenesis() (*types.Genesis, *ecdsa.PrivateKey, error) 
 				Nonce:   1,
 				Balance: new(big.Int),
 			},
+			chainConfig.GetBuilderDepositContract().Value(): {
+				Code:    misc.BuilderDepositRequestCode,
+				Storage: make(map[common.Hash]common.Hash),
+				Balance: new(big.Int),
+				Nonce:   1,
+			},
+			chainConfig.GetBuilderExitContract().Value(): {
+				Code:    misc.BuilderExitRequestCode,
+				Storage: make(map[common.Hash]common.Hash),
+				Balance: new(big.Int),
+				Nonce:   1,
+			},
 		},
 	}
 	return genesis, coinbasePrivKey, nil
@@ -164,8 +180,8 @@ type cleanupHandle struct {
 func (h *cleanupHandle) close() error {
 	h.once.Do(func() {
 		var errs []error
-		for i := len(h.cleanups) - 1; i >= 0; i-- {
-			err := h.cleanups[i]()
+		for _, cleanup := range slices.Backward(h.cleanups) {
+			err := cleanup()
 			if err != nil {
 				errs = append(errs, err)
 			}
@@ -217,13 +233,13 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 	// happy path the http server's Shutdown closes the listener first and the
 	// cleanup is a silent no-op. The sentry/P2P stack picks its own kernel-
 	// assigned port directly via its config below, so no pre-bind there.
-	jsonRpcListener, err := net.Listen("tcp", localhostEphemeral)
+	jsonRpcListener, err := net.Listen("tcp", localhostEphemeral) //nolint:noctx
 	if err != nil {
 		return EngineApiTester{}, fmt.Errorf("listen json-rpc: %w", err)
 	}
 	addCleanup(closeListenerCleanup(jsonRpcListener))
 	jsonRpcPort := jsonRpcListener.Addr().(*net.TCPAddr).Port
-	engineApiListener, err := net.Listen("tcp", localhostEphemeral)
+	engineApiListener, err := net.Listen("tcp", localhostEphemeral) //nolint:noctx
 	if err != nil {
 		return EngineApiTester{}, fmt.Errorf("listen engine-api: %w", err)
 	}
@@ -235,6 +251,7 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 		Enabled:                  true,
 		HttpServerEnabled:        true,
 		WebsocketEnabled:         true,
+		HttpCompression:          true,
 		HttpListenAddress:        "127.0.0.1",
 		HttpPort:                 jsonRpcPort,
 		HttpListener:             jsonRpcListener,
@@ -270,7 +287,6 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 			NoDiscovery:     true,
 			NoDial:          true,
 			ProtocolVersion: []uint{direct.ETH68},
-			AllowedPorts:    []uint{0},
 			PrivateKey:      nodeKey,
 		},
 		MdbxDBSizeLimit: mdbxDBSizeLimit,
@@ -279,6 +295,10 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 	txPoolConfig := txpoolcfg.DefaultConfig
 	txPoolConfig.DBDir = dirs.TxPool
 	txPoolConfig.Disable = args.DisableTxPool
+	// Without a limit the txpool DB reserves 1TB of VA, which cannot fit below
+	// the Go race-mode heap window on darwin and starves arena reservation
+	// ("too many address space collisions for -race mode").
+	txPoolConfig.MdbxDBSizeLimit = mdbxDBSizeLimit
 	syncDefault := ethconfig.Defaults.Sync
 	syncDefault.ParallelStateFlushing = false
 	ethConfig := ethconfig.Config{
@@ -291,7 +311,11 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 		Builder: buildercfg.BuilderConfig{
 			EnabledPOS: true,
 		},
+		BatchSize:             512 * datasize.MB,
 		KeepStoredChainConfig: true,
+		// Small per-instance state cache: one ExecModule is built per fixture,
+		// so the full production cache would exhaust memory across the corpus.
+		StateCacheBudget: 1 * datasize.MB,
 	}
 	if args.EthConfigTweaker != nil {
 		args.EthConfigTweaker(&ethConfig)
@@ -340,6 +364,7 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 
 	rpcDaemonHttpUrl := fmt.Sprintf("%s:%d", httpConfig.HttpListenAddress, httpConfig.HttpPort)
 	rpcApiClient := requests.NewRequestGenerator(rpcDaemonHttpUrl, logger)
+	addCleanup(func() error { rpcApiClient.UnsubscribeAll(); return nil })
 	contractBackend := contracts.NewJsonRpcBackend(rpcDaemonHttpUrl, logger)
 	//goland:noinspection HttpUrlsUsage
 	engineApiClientOpts := []engineapi.JsonRpcClientOption{
@@ -367,9 +392,9 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 	}
 	var mockCl *MockCl
 	if args.MockClState != nil {
-		mockCl = NewMockCl(ctx, logger, engineApiClient, ethBackend.StateDiffClient(), genesisBlock, args.Genesis.Config, WithMockClState(args.MockClState))
+		mockCl = NewMockCl(logger, engineApiClient, genesisBlock, args.Genesis.Config, WithMockClState(args.MockClState))
 	} else {
-		mockCl = NewMockCl(ctx, logger, engineApiClient, ethBackend.StateDiffClient(), genesisBlock, args.Genesis.Config)
+		mockCl = NewMockCl(logger, engineApiClient, genesisBlock, args.Genesis.Config)
 	}
 	if !args.NoEmptyBlock1 {
 		// build 1 empty block before proceeding to properly initialise everything
@@ -382,12 +407,19 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 	// must be appended last) — that way ctx-watching background goroutines
 	// see Done before downstream resources (DB, node) are torn down.
 	addCleanup(func() error { cancel(); return nil })
+	var stateAgg *state.Aggregator
+	if aggHolder, ok := ethBackend.ChainDB().(state.HasAgg); ok {
+		stateAgg, _ = aggHolder.Agg().(*state.Aggregator)
+	}
 	success = true
 	return EngineApiTester{
 		GenesisBlock:         genesisBlock,
 		CoinbaseKey:          args.CoinbaseKey,
 		ChainConfig:          genesis.Config,
 		EngineApiClient:      engineApiClient,
+		JsonRpcUrl:           "http://" + rpcDaemonHttpUrl,
+		EngineApiUrl:         engineApiUrl,
+		JwtSecret:            jwtSecret,
 		RpcApiClient:         rpcApiClient,
 		ContractBackend:      contractBackend,
 		MockCl:               mockCl,
@@ -395,6 +427,7 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 		TxnInclusionVerifier: NewTxnInclusionVerifier(rpcApiClient),
 		Node:                 ethNode,
 		NodeKey:              nodeKey,
+		StateAgg:             stateAgg,
 		cleanup:              cleanup,
 	}, nil
 }
@@ -418,6 +451,9 @@ type EngineApiTester struct {
 	CoinbaseKey          *ecdsa.PrivateKey
 	ChainConfig          *chain.Config
 	EngineApiClient      *engineapi.JsonRpcClient
+	JsonRpcUrl           string
+	EngineApiUrl         string
+	JwtSecret            []byte
 	RpcApiClient         requests.RequestGenerator
 	ContractBackend      contracts.JsonRpcBackend
 	MockCl               *MockCl
@@ -425,6 +461,7 @@ type EngineApiTester struct {
 	TxnInclusionVerifier TxnInclusionVerifier
 	Node                 *node.Node
 	NodeKey              *ecdsa.PrivateKey
+	StateAgg             *state.Aggregator
 	cleanup              *cleanupHandle
 }
 
@@ -436,7 +473,7 @@ func (eat EngineApiTester) Run(t *testing.T, test func(ctx context.Context, t *t
 	test(t.Context(), t, eat)
 }
 
-func (eat EngineApiTester) ChainId() *big.Int {
+func (eat EngineApiTester) ChainId() *uint256.Int {
 	return eat.ChainConfig.ChainID
 }
 

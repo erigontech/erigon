@@ -21,12 +21,17 @@ import (
 )
 
 const (
-	filterLabelName = "filter"
-	clientLabelName = "client"
+	filterLabelName   = "filter"
+	clientLabelName   = "client"
+	protocolLabelName = "protocol"
 )
 
 var (
-	activeSubscriptionsGauge                 = metrics.GetOrCreateGaugeVec("subscriptions", []string{filterLabelName}, "Current number of subscriptions")
+	activeSubscriptionsGauge         = metrics.GetOrCreateGaugeVec("subscriptions_active", []string{filterLabelName, protocolLabelName}, "Current number of active subscriptions")
+	createdSubscriptionsCounter      = metrics.GetOrCreateCounterVec("subscriptions_created_total", []string{filterLabelName, protocolLabelName}, "Total number of subscriptions created")
+	unsubscribedSubscriptionsCounter = metrics.GetOrCreateCounterVec("subscriptions_unsubscribed_total", []string{filterLabelName, protocolLabelName}, "Total number of subscriptions removed by client unsubscribe or timeout eviction")
+	reapedSubscriptionsCounter       = metrics.GetOrCreateCounterVec("subscriptions_reaped_total", []string{filterLabelName}, "Total number of idle subscriptions evicted by timeout")
+
 	activeSubscriptionsLogsAllAddressesGauge = metrics.GetOrCreateGauge("subscriptions_logs_all_addresses")
 	activeSubscriptionsLogsAllTopicsGauge    = metrics.GetOrCreateGauge("subscriptions_logs_all_topics")
 	activeSubscriptionsLogsAddressesGauge    = metrics.GetOrCreateGauge("subscriptions_logs_addresses")

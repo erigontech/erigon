@@ -17,6 +17,7 @@
 package solid
 
 import (
+	"bytes"
 	"encoding/json"
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
@@ -34,14 +35,12 @@ type ListSSZ[T EncodableHashableSSZ] struct {
 	list []T
 
 	limit int
-	// this needs to be set to true if the underlying schema of the object
-	// includes an offset in any of its sub elements.
-	static bool
-	// If the underlying object has static size, aka static=true
-	// then we can cache its size instead of calling EncodeSizeSSZ on
-	// an always newly created object
+	// static means elements have fixed-size encodings and bytesPerElement is
+	// valid. The list itself remains variable-size.
+	static          bool
 	bytesPerElement int
-	// We can keep hash_tree_root result cached
+	progressive     bool
+	// root caches the hash-tree root computed by HashSSZ.
 	root common.Hash
 }
 
@@ -59,6 +58,41 @@ func NewStaticListSSZ[T EncodableHashableSSZ](limit int, bytesPerElement int) *L
 		static:          true,
 		bytesPerElement: bytesPerElement,
 	}
+}
+
+func NewDynamicProgressiveListSSZ[T EncodableHashableSSZ](limit int) *ListSSZ[T] {
+	return &ListSSZ[T]{list: make([]T, 0), limit: progressiveDecodeLimit(limit), progressive: true}
+}
+
+func NewStaticProgressiveListSSZ[T EncodableHashableSSZ](limit int, bytesPerElement int) *ListSSZ[T] {
+	return &ListSSZ[T]{list: make([]T, 0), limit: progressiveDecodeLimit(limit), static: true, bytesPerElement: bytesPerElement, progressive: true}
+}
+
+func (l *ListSSZ[T]) EnsureStaticProgressive(limit int, bytesPerElement int) {
+	if l.progressive && l.static && l.bytesPerElement == bytesPerElement {
+		return
+	}
+	if l.static && l.limit > 0 && l.bytesPerElement == bytesPerElement {
+		l.limit = progressiveDecodeLimit(l.limit)
+	} else {
+		l.limit = progressiveDecodeLimit(limit)
+		l.static = true
+		l.bytesPerElement = bytesPerElement
+	}
+	l.progressive = true
+}
+
+// Progressive lists are semantically unbounded, so decode limits are resource guards rather than protocol maxima.
+func progressiveDecodeLimit(semanticLimit int) int {
+	const minimum = 16
+	if semanticLimit <= minimum/2 {
+		return minimum
+	}
+	maxInt := int(^uint(0) >> 1)
+	if semanticLimit > maxInt/2 {
+		return maxInt
+	}
+	return semanticLimit * 2
 }
 
 func (l ListSSZ[T]) MarshalJSON() ([]byte, error) {
@@ -92,7 +126,6 @@ func (l *ListSSZ[T]) Static() bool {
 func (l *ListSSZ[T]) EncodeSSZ(buf []byte) (dst []byte, err error) {
 	if !l.static {
 		return ssz.EncodeDynamicList(buf, l.list)
-
 	}
 	dst = buf
 	for _, element := range l.list {
@@ -103,11 +136,25 @@ func (l *ListSSZ[T]) EncodeSSZ(buf []byte) (dst []byte, err error) {
 	return
 }
 
-func (l *ListSSZ[T]) DecodeSSZ(buf []byte, version int) (err error) {
-	if l.static {
-		l.list, err = ssz.DecodeStaticList[T](buf, 0, uint32(len(buf)), uint32(l.bytesPerElement), uint64(l.limit), version)
-	} else {
-		l.list, err = ssz.DecodeDynamicList[T](buf, 0, uint32(len(buf)), uint64(l.limit), version)
+func (l *ListSSZ[T]) DecodeSSZ(buf []byte, version int) error {
+	return l.decodeSSZ(buf, version, false)
+}
+
+func (l *ListSSZ[T]) DecodeSSZStrict(buf []byte, version int) error {
+	return l.decodeSSZ(buf, version, true)
+}
+
+func (l *ListSSZ[T]) decodeSSZ(buf []byte, version int, strict bool) (err error) {
+	limit := uint64(l.limit)
+	switch {
+	case l.static && strict:
+		l.list, err = ssz.DecodeStaticListStrict[T](buf, 0, uint32(len(buf)), uint32(l.bytesPerElement), limit, version)
+	case l.static:
+		l.list, err = ssz.DecodeStaticList[T](buf, 0, uint32(len(buf)), uint32(l.bytesPerElement), limit, version)
+	case strict:
+		l.list, err = ssz.DecodeDynamicListStrict[T](buf, 0, uint32(len(buf)), limit, version)
+	default:
+		l.list, err = ssz.DecodeDynamicList[T](buf, 0, uint32(len(buf)), limit, version)
 	}
 	l.root = common.Hash{}
 	return
@@ -129,11 +176,40 @@ func (l *ListSSZ[T]) HashSSZ() ([32]byte, error) {
 		return l.root, nil
 	}
 	var err error
-	l.root, err = merkle_tree.ListObjectSSZRoot(l.list, uint64(l.limit))
+	if l.progressive {
+		l.root, err = l.HashSSZProgressive(nil)
+	} else {
+		l.root, err = merkle_tree.ListObjectSSZRoot(l.list, uint64(l.limit))
+	}
 	return l.root, err
 }
 
+func (l *ListSSZ[T]) HashSSZProgressive(hashElement func(T) ([32]byte, error)) ([32]byte, error) {
+	roots := make([][32]byte, len(l.list))
+	for i, element := range l.list {
+		var err error
+		if hashElement == nil {
+			roots[i], err = element.HashSSZ()
+		} else {
+			roots[i], err = hashElement(element)
+		}
+		if err != nil {
+			return [32]byte{}, err
+		}
+	}
+	return merkle_tree.ProgressiveListRoot(roots, uint64(len(l.list)))
+}
+
 func (l *ListSSZ[T]) Clone() clonable.Clonable {
+	if l.progressive {
+		return &ListSSZ[T]{
+			list:            make([]T, 0),
+			limit:           l.limit,
+			static:          l.static,
+			bytesPerElement: l.bytesPerElement,
+			progressive:     true,
+		}
+	}
 	if l.static {
 		return NewStaticListSSZ[T](l.limit, l.bytesPerElement)
 	}
@@ -155,6 +231,11 @@ func (l *ListSSZ[T]) Range(fn func(index int, value T, length int) bool) {
 
 func (l *ListSSZ[T]) Len() int {
 	return len(l.list)
+}
+
+func (l *ListSSZ[T]) Set(index int, value T) {
+	l.list[index] = value
+	l.root = common.Hash{}
 }
 
 func (l *ListSSZ[T]) Append(obj T) {
@@ -207,7 +288,8 @@ func (l *ListSSZ[T]) ShallowCopy() *ListSSZ[T] {
 		limit:           l.limit,
 		static:          l.static,
 		bytesPerElement: l.bytesPerElement,
-		root:            common.Hash(common.Copy(l.root[:])),
+		progressive:     l.progressive,
+		root:            common.Hash(bytes.Clone(l.root[:])),
 	}
 	copy(cpy.list, l.list)
 	return cpy

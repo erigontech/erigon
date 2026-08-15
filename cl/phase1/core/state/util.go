@@ -129,14 +129,35 @@ func GetActivationExitChurnLimit(s abstract.BeaconState) uint64 {
 }
 
 func GetBalanceChurnLimit(s abstract.BeaconState) uint64 {
+	churnLimitQuotient := s.BeaconConfig().ChurnLimitQuotient
+	if s.Version() >= clparams.GloasVersion {
+		churnLimitQuotient = s.BeaconConfig().ChurnLimitQuotientGloas
+	}
 	churn := max(
 		s.BeaconConfig().MinPerEpochChurnLimitElectra,
-		s.GetTotalActiveBalance()/s.BeaconConfig().ChurnLimitQuotient,
+		s.GetTotalActiveBalance()/churnLimitQuotient,
 	)
 	return churn - churn%s.BeaconConfig().EffectiveBalanceIncrement
 }
 
+// GetExitChurnLimit returns the per-epoch exit churn limit. [New in Gloas:EIP8061]
+func GetExitChurnLimit(s abstract.BeaconState) uint64 {
+	return GetBalanceChurnLimit(s)
+}
+
+// GetActivationChurnLimit returns the per-epoch activation churn limit. [New in Gloas:EIP8061]
+func GetActivationChurnLimit(s abstract.BeaconState) uint64 {
+	return min(
+		s.BeaconConfig().MaxPerEpochActivationChurnLimitGloas,
+		GetBalanceChurnLimit(s),
+	)
+}
+
 func GetConsolidationChurnLimit(s abstract.BeaconState) uint64 {
+	if s.Version() >= clparams.GloasVersion {
+		churn := s.GetTotalActiveBalance() / s.BeaconConfig().ConsolidationChurnLimitQuotient
+		return churn - churn%s.BeaconConfig().EffectiveBalanceIncrement
+	}
 	return GetBalanceChurnLimit(s) - GetActivationExitChurnLimit(s)
 }
 
@@ -178,4 +199,23 @@ func GetValidatorsCustodyRequirement(s abstract.BeaconState, validatorIndices []
 		max(count, s.BeaconConfig().ValidatorCustodyRequirement),
 		s.BeaconConfig().NumberOfCustodyGroups,
 	)
+}
+
+// IsAttestationSameSlot checks if the attestation is for the block proposed at the attestation slot.
+func IsAttestationSameSlot(s abstract.BeaconState, data *solid.AttestationData) (bool, error) {
+	if data.Slot == 0 {
+		return true, nil
+	}
+
+	blockRoot := data.BeaconBlockRoot
+	slotBlockRoot, err := s.GetBlockRootAtSlot(data.Slot)
+	if err != nil {
+		return false, err
+	}
+	prevBlockRoot, err := s.GetBlockRootAtSlot(data.Slot - 1)
+	if err != nil {
+		return false, err
+	}
+
+	return blockRoot == slotBlockRoot && blockRoot != prevBlockRoot, nil
 }

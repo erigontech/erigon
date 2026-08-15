@@ -8,18 +8,26 @@ defaults:
   run:
     shell: bash
 
+permissions:
+  contents: read
+
 jobs:
   # Workflow files can't read local files directly — they must be loaded via a
   # job step. We do this so the matrix group names come from the same source as
   # the test code (tools/test-groups), keeping CI and local runs in sync.
   load-matrix:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+    timeout-minutes: 60
     outputs:
       test-groups: ${{ steps.load.outputs.groups }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 1
+          persist-credentials: false
       - id: load
         run: echo "groups=$(./tools/test-groups names)" >> $GITHUB_OUTPUT
 
@@ -30,18 +38,35 @@ jobs:
         if: failure() && github.event_name == 'merge_group'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh run cancel ${{ github.run_id }} || true
+        run: |
+          echo "::error title=Merge-queue root-cause failure::This job failed and is fast-cancelling the CI Gate run; THIS job is the real failure (the others show as cancelled). See its logs."
+          gh run cancel ${{ github.run_id }} || true
 
   tests-linux:
     needs: load-matrix
-    timeout-minutes: 90
+    timeout-minutes: 60
     strategy:
-      fail-fast: false
+      # In merge_group: cancel sibling shards on first failure so ci-gate's
+      # `needs` reach terminal state quickly and the broken PR can be evicted.
+      # In PR runs: keep all shards going so authors see the full failure
+      # picture across every shard.
+      fail-fast: ${{ github.event_name == 'merge_group' }}
       matrix:
         os:
           - ubuntu-latest
         test-group: ${{ fromJson(needs.load-matrix.outputs.test-groups) }}
+        # Run both serial and parallel commitment paths so race-detector
+        # signal covers both. Execution is parallel in both legs (default).
+        # Each entry runs on its own GitHub-hosted runner — wall-clock
+        # unchanged, runner-minutes doubled.
+        commitment_mode:
+          - serial
+          - parallel
+    name: tests-linux (${{ matrix.os }}, ${{ matrix.test-group }}, ${{ matrix.commitment_mode }})
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      actions: write
 
     steps:
       - name: Declare runners
@@ -50,24 +75,32 @@ jobs:
           echo "This workflow is being executed by this runner: $RUNNER_NAME"
 
       - name: Checkout custom actions
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
+          persist-credentials: false
 
       - uses: ./.github/actions/setup-erigon
         id: erigon
         with:
-          submodules: true
-          lfs: tests
           cleanup-space: true
-          build-cache-extra-key: ${{ matrix.test-group }}
+          # Go's test cache can't see ERIGON_COMMITMENT_PARALLEL (read at package
+          # init), so serial and parallel results only stay mode-pure if each
+          # commitment mode keeps its own cache lineage.
+          build-cache-extra-key: ${{ matrix.test-group }}-commitment-${{ matrix.commitment_mode }}
           ramdisk: true
+          cache-namespace: test-all-erigon-race
 
-      - name: Run ${{ matrix.test-group }} tests on ${{ matrix.os }}
+      - name: Run ${{ matrix.test-group }} tests on ${{ matrix.os }} (${{ matrix.commitment_mode }} commitment)
         env:
           SKIP_FLAKY_TESTS: 'true'
           CGO_CFLAGS: -D__BLST_PORTABLE__
-        run: make test-group TEST_GROUP=${{ matrix.test-group }} GO_FLAGS="-race -timeout=60m"
+          # Toggle statecfg.ExperimentalParallelCommitment from CI without code
+          # changes. envLookup in common/dbg/dbg_env.go auto-prepends ERIGON_, so
+          # this maps to the COMMITMENT_PARALLEL flag read in db/state/statecfg.
+          ERIGON_COMMITMENT_PARALLEL: ${{ matrix.commitment_mode == 'parallel' && 'true' || 'false' }}
+          TEST_GROUP: ${{ matrix.test-group }}
+        run: make test-group TEST_GROUP="$TEST_GROUP" GO_FLAGS="-race -timeout=60m"
 
       - uses: ./.github/actions/cleanup-erigon
         if: always()
@@ -79,4 +112,6 @@ jobs:
         if: failure() && github.event_name == 'merge_group'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh run cancel ${{ github.run_id }} || true
+        run: |
+          echo "::error title=Merge-queue root-cause failure::This job failed and is fast-cancelling the CI Gate run; THIS job is the real failure (the others show as cancelled). See its logs."
+          gh run cancel ${{ github.run_id }} || true

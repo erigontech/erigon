@@ -26,7 +26,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/length"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -171,8 +170,7 @@ func runLifecycle(b *testing.B, cfg lifecycleConfig) (*lifecycleTimings, kv.Temp
 	require.NoError(b, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
-	require.NoError(b, err)
+	domains := newSharedDomainsBench(b, db, rwTx)
 	defer domains.Close()
 
 	rnd := newRnd(42)
@@ -199,7 +197,7 @@ func runLifecycle(b *testing.B, cfg lifecycleConfig) (*lifecycleTimings, kv.Temp
 				storageKeys := cfg.keysPerTx * 4 / 5
 				accountKeys := cfg.keysPerTx - storageKeys
 
-				for k := 0; k < storageKeys; k++ {
+				for range storageKeys {
 					sKey := keyGen.nextStorageKey()
 					val := make([]byte, 32)
 					binary.BigEndian.PutUint64(val[24:], txNum)
@@ -207,7 +205,7 @@ func runLifecycle(b *testing.B, cfg lifecycleConfig) (*lifecycleTimings, kv.Temp
 					require.NoError(b, err)
 				}
 
-				for k := 0; k < accountKeys; k++ {
+				for range accountKeys {
 					aKey, aVal := keyGen.nextAccountKey(txNum)
 					err := domains.DomainPut(kv.AccountsDomain, rwTx, aKey, aVal, txNum, nil)
 					require.NoError(b, err)
@@ -338,8 +336,7 @@ func BenchmarkLifecycle_PhaseIsolation(b *testing.B) {
 		require.NoError(b, err)
 		defer rwTx.Rollback()
 
-		domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
-		require.NoError(b, err)
+		domains := newSharedDomainsBench(b, db, rwTx)
 		defer domains.Close()
 
 		rnd := newRnd(42)
@@ -371,8 +368,7 @@ func BenchmarkLifecycle_PhaseIsolation(b *testing.B) {
 		require.NoError(b, err)
 		defer rwTx.Rollback()
 
-		domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
-		require.NoError(b, err)
+		domains := newSharedDomainsBench(b, db, rwTx)
 		defer domains.Close()
 
 		rnd := newRnd(42)
@@ -413,8 +409,7 @@ func BenchmarkLifecycle_PhaseIsolation(b *testing.B) {
 		require.NoError(b, err)
 		defer rwTx.Rollback()
 
-		domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
-		require.NoError(b, err)
+		domains := newSharedDomainsBench(b, db, rwTx)
 		defer domains.Close()
 
 		txNum := initAccounts(b, domains, rwTx, keyGen)
@@ -446,8 +441,7 @@ func BenchmarkLifecycle_PhaseIsolation(b *testing.B) {
 		require.NoError(b, err)
 		defer rwTx.Rollback()
 
-		domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
-		require.NoError(b, err)
+		domains := newSharedDomainsBench(b, db, rwTx)
 		defer domains.Close()
 
 		rnd := newRnd(42)
@@ -461,7 +455,7 @@ func BenchmarkLifecycle_PhaseIsolation(b *testing.B) {
 
 		// Write 10 steps of data to MDBX without building files
 		targetSteps := 10
-		for step := 0; step < targetSteps; step++ {
+		for range targetSteps {
 			for blk := 0; blk < cfg.blocksPerStep; blk++ {
 				for tx := 0; tx < cfg.txsPerBlock; tx++ {
 					txNum++

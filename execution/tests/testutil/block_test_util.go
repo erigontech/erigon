@@ -35,10 +35,11 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
@@ -47,12 +48,13 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/rulesconfig"
+	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
 
 // A BlockTest checks handling of entire blocks.
 type BlockTest struct {
 	json            btJSON
-	br              services.FullBlockReader
+	br              dbservices.FullBlockReader
 	ExperimentalBAL bool
 }
 
@@ -121,7 +123,8 @@ func (bal btBlockAccessList) toBAL() types.BlockAccessList {
 		return nil
 	}
 	result := make(types.BlockAccessList, len(bal))
-	for i, ac := range bal {
+	for i := range bal {
+		ac := &bal[i]
 		entry := &types.AccountChanges{
 			Address:        accounts.InternAddress(ac.Address),
 			StorageChanges: make([]*types.SlotChanges, 0, len(ac.StorageChanges)),
@@ -212,27 +215,41 @@ type btHeaderMarshaling struct {
 }
 
 func (bt *BlockTest) Run(t *testing.T) error {
+	_, err := bt.RunWithTester(t)
+	return err
+}
+
+// newTester builds the ExecModuleTester for this block test. tb may be nil for
+// CLI usage, in which case the caller owns the tester's lifecycle and MUST Close it.
+func (bt *BlockTest) newTester(tb testing.TB) (*execmoduletester.ExecModuleTester, error) {
 	config, ok := testforks.Forks[bt.json.Network]
 	if !ok {
-		return testforks.UnsupportedForkError{Name: bt.json.Network}
+		return nil, testforks.UnsupportedForkError{Name: bt.json.Network}
 	}
 	engine := rulesconfig.CreateRulesEngineBareBones(context.Background(), config, log.New())
 	mOpts := []execmoduletester.Option{
 		execmoduletester.WithGenesisSpec(bt.genesis(config)),
 		execmoduletester.WithEngine(engine),
+		execmoduletester.WithoutAmsterdamBuilderContracts(),
 	}
 	if bt.ExperimentalBAL {
 		mOpts = append(mOpts, execmoduletester.WithExperimentalBAL())
 	}
-	m := execmoduletester.New(t, mOpts...)
+	return execmoduletester.New(tb, mOpts...), nil
+}
 
+// runChecks imports the test blocks into m and validates the result against the
+// fixture (genesis, head block hash, post-state, imported headers).
+func (bt *BlockTest) runChecks(m *execmoduletester.ExecModuleTester) error {
 	bt.br = m.BlockReader
 	// import pre accounts & construct test genesis block & state root
-	if m.Genesis.Hash() != bt.json.Genesis.Hash {
-		return fmt.Errorf("genesis block hash doesn't match test: computed=%x, test=%x", m.Genesis.Hash().Bytes()[:6], bt.json.Genesis.Hash[:6])
+	genesisHash := m.Genesis.Hash()
+	if genesisHash != bt.json.Genesis.Hash {
+		return fmt.Errorf("genesis block hash doesn't match test: computed=%x, test=%x", genesisHash[:6], bt.json.Genesis.Hash[:6])
 	}
-	if m.Genesis.Root() != bt.json.Genesis.StateRoot {
-		return fmt.Errorf("genesis block state root does not match test: computed=%x, test=%x", m.Genesis.Root().Bytes()[:6], bt.json.Genesis.StateRoot[:6])
+	genesisRoot := m.Genesis.Root()
+	if genesisRoot != bt.json.Genesis.StateRoot {
+		return fmt.Errorf("genesis block state root does not match test: computed=%x, test=%x", genesisRoot[:6], bt.json.Genesis.StateRoot[:6])
 	}
 
 	validBlocks, err := bt.insertBlocks(m)
@@ -258,46 +275,37 @@ func (bt *BlockTest) Run(t *testing.T) error {
 	return bt.validateImportedHeaders(tx, validBlocks, m)
 }
 
+// RunWithTester runs the block test and returns the ExecModuleTester it built.
+// The returned tester's lifetime is bound to t (via t.Cleanup); callers MUST NOT Close it.
+func (bt *BlockTest) RunWithTester(t *testing.T) (*execmoduletester.ExecModuleTester, error) {
+	m, err := bt.newTester(t)
+	if err != nil {
+		return nil, err
+	}
+	if err := bt.runChecks(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+// RunWithTesterCLI is the CLI counterpart of RunWithTester: it builds the tester
+// with a nil testing.TB and returns it even on failure so the caller owns its
+// lifecycle and MUST Close it.
+func (bt *BlockTest) RunWithTesterCLI() (*execmoduletester.ExecModuleTester, error) {
+	m, err := bt.newTester(nil)
+	if err != nil {
+		return nil, err
+	}
+	return m, bt.runChecks(m)
+}
+
 // RunCLI executes the test without requiring a testing.T context, suitable for CLI usage.
 func (bt *BlockTest) RunCLI() error {
-	config, ok := testforks.Forks[bt.json.Network]
-	if !ok {
-		return testforks.UnsupportedForkError{Name: bt.json.Network}
+	m, err := bt.RunWithTesterCLI()
+	if m != nil {
+		defer m.Close()
 	}
-	engine := rulesconfig.CreateRulesEngineBareBones(context.Background(), config, log.New())
-	m := execmoduletester.New(nil, execmoduletester.WithGenesisSpec(bt.genesis(config)), execmoduletester.WithEngine(engine))
-	defer m.Close()
-
-	bt.br = m.BlockReader
-	// import pre accounts & construct test genesis block & state root
-	if m.Genesis.Hash() != bt.json.Genesis.Hash {
-		return fmt.Errorf("genesis block hash doesn't match test: computed=%x, test=%x", m.Genesis.Hash().Bytes()[:6], bt.json.Genesis.Hash[:6])
-	}
-	if m.Genesis.Root() != bt.json.Genesis.StateRoot {
-		return fmt.Errorf("genesis block state root does not match test: computed=%x, test=%x", m.Genesis.Root().Bytes()[:6], bt.json.Genesis.StateRoot[:6])
-	}
-
-	validBlocks, err := bt.insertBlocks(m)
-	if err != nil {
-		return err
-	}
-
-	tx, err := m.DB.BeginTemporalRo(m.Ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	cmlast := rawdb.ReadHeadBlockHash(tx)
-	if common.Hash(bt.json.BestBlock) != cmlast {
-		return fmt.Errorf("last block hash validation mismatch: want: %x, have: %x", bt.json.BestBlock, cmlast)
-	}
-	newDB := state.New(m.NewStateReader(tx))
-	if err := bt.validatePostState(newDB); err != nil {
-		return fmt.Errorf("post state validation failed: %w", err)
-	}
-
-	return bt.validateImportedHeaders(tx, validBlocks, m)
+	return err
 }
 
 func (bt *BlockTest) genesis(config *chain.Config) *types.Genesis {
@@ -357,8 +365,15 @@ func (bt *BlockTest) insertBlocks(m *execmoduletester.ExecModuleTester) ([]btBlo
 			}
 		}
 		// RLP decoding worked, try to insert into chain:
-		chain := &blockgen.ChainPack{Blocks: []*types.Block{cb}, Headers: []*types.Header{cb.Header()}, TopBlock: cb, BlockAccessLists: [][]byte{balBytes}}
-
+		cb = types.NewBlockFromNetwork(cb.HeaderNoCopy(), cb.Body(), balBytes)
+		chain := &blockgen.ChainPack{Blocks: []*types.Block{cb}, Headers: []*types.Header{cb.Header()}, TopBlock: cb}
+		var previousHead *types.Header
+		if b.BlockHeader == nil {
+			previousHead, err = m.ExecModule.CurrentHeader(m.Ctx)
+			if err != nil {
+				return nil, err
+			}
+		}
 		err1 := m.InsertChain(chain)
 		if err1 != nil {
 			if b.BlockHeader == nil {
@@ -366,16 +381,29 @@ func (bt *BlockTest) insertBlocks(m *execmoduletester.ExecModuleTester) ([]btBlo
 			} else {
 				return nil, fmt.Errorf("block #%v insertion into chain failed: %w", cb.Number(), err1)
 			}
-		} else if b.BlockHeader == nil {
+		}
+		if b.BlockHeader == nil {
 			isCanonical, err := bt.isCanonical(m, cb)
 			if err != nil {
 				return nil, err
 			}
+			if isCanonical && !m.ChainConfig.IsByzantium(cb.NumberU64()) {
+				// Staged execution does not retain the per-transaction post-state roots needed
+				// for legacy receipt tries, so use the slower receipt generator to reconstruct them.
+				validReceipts, err := bt.validatePreByzantiumReceipts(m, cb)
+				if err != nil {
+					return nil, err
+				}
+				if !validReceipts {
+					if err := restoreForkChoice(m, previousHead.Hash()); err != nil {
+						return nil, err
+					}
+					continue
+				}
+			}
 			if isCanonical {
 				return nil, fmt.Errorf("block (index %d) insertion should have failed due to: %v", bi, b.ExpectException)
 			}
-		}
-		if b.BlockHeader == nil {
 			continue
 		}
 		// validate RLP decoding by checking all values against test file JSON
@@ -385,6 +413,32 @@ func (bt *BlockTest) insertBlocks(m *execmoduletester.ExecModuleTester) ([]btBlo
 		validBlocks = append(validBlocks, b)
 	}
 	return validBlocks, nil
+}
+
+func (bt *BlockTest) validatePreByzantiumReceipts(m *execmoduletester.ExecModuleTester, block *types.Block) (bool, error) {
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	receipts, err := m.ReceiptsReader.GetReceipts(m.Ctx, m.ChainConfig, tx, block, eth.ReceiptsOpts{})
+	if err != nil {
+		return false, err
+	}
+	return types.DeriveSha(receipts) == block.ReceiptHash(), nil
+}
+
+func restoreForkChoice(m *execmoduletester.ExecModuleTester, headHash common.Hash) error {
+	m.ExecModule.WaitIdle(m.Ctx)
+	result, err := m.ExecModule.UpdateForkChoice(m.Ctx, headHash, headHash, headHash)
+	if err != nil {
+		return err
+	}
+	m.ExecModule.WaitIdle(m.Ctx)
+	if result.Status != execmodule.ExecutionStatusSuccess {
+		return fmt.Errorf("restore fork choice failed, status: %s, error: %s", result.Status, result.ValidationError)
+	}
+	return nil
 }
 
 // isCanonical reports whether block is the canonical block at its height.
@@ -515,7 +569,7 @@ func (bt *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
 			return fmt.Errorf("account balance mismatch for addr: %x, want: %d, have: %d", addr, acct.Balance, &balance2)
 		}
 		for loc, val := range acct.Storage {
-			val1 := uint256.NewInt(0).SetBytes(val.Bytes())
+			val1 := uint256.NewInt(0).SetBytes(val[:])
 			val2, _ := statedb.GetState(address, accounts.InternKey(loc))
 			if !val1.Eq(&val2) {
 				return fmt.Errorf("storage mismatch for addr: %x loc: %x want: %d have: %d", addr, loc, val1, &val2)

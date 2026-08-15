@@ -2,19 +2,7 @@ package kv
 
 import (
 	"encoding/binary"
-	"math"
 )
-
-func (a ForkableId) Id() uint64 {
-	return uint64(a)
-}
-
-// all forkable id match this
-const AllForkableId = math.MaxUint16
-
-func (a ForkableId) MatchAll() bool {
-	return a == AllForkableId
-}
 
 // canonical sequence number of entity (in context)
 type Num uint64
@@ -63,17 +51,3 @@ func Decode64FromBytes(buf []byte, x8Bytes bool) (x uint64) {
 	}
 	return
 }
-
-type CanonicityStrategy uint8
-
-const (
-	// canonicalTbl & valsTbl
-	Marked CanonicityStrategy = iota
-
-	/*
-		valsTbl; storing only canonical values
-		unwinds are rare or values arrive far apart
-		and so unwind doesn't need to be very performant.
-	*/
-	Unmarked
-)

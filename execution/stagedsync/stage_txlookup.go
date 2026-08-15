@@ -26,13 +26,13 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
@@ -41,13 +41,13 @@ import (
 type TxLookupCfg struct {
 	prune       prune.Mode
 	tmpdir      string
-	blockReader services.FullBlockReader
+	blockReader dbservices.FullBlockReader
 }
 
 func StageTxLookupCfg(
 	prune prune.Mode,
 	tmpdir string,
-	blockReader services.FullBlockReader,
+	blockReader dbservices.FullBlockReader,
 ) TxLookupCfg {
 	return TxLookupCfg{
 		prune:       prune,
@@ -74,7 +74,7 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 		pruneTo := cfg.prune.History.PruneTo(endBlock)
 		if startBlock < pruneTo {
 			startBlock = pruneTo
-			if err = s.UpdatePrune(tx, pruneTo); err != nil { // prune func of this stage will use this value to prevent all ancient blocks traversal
+			if err := s.UpdatePrune(tx, pruneTo); err != nil { // prune func of this stage will use this value to prevent all ancient blocks traversal
 				return err
 			}
 		}
@@ -83,7 +83,7 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 	if cfg.blockReader.FrozenBlocks() > startBlock {
 		// Snapshot .idx files already have TxLookup index - then no reason iterate over them here
 		startBlock = cfg.blockReader.FrozenBlocks()
-		if err = s.UpdatePrune(tx, startBlock); err != nil { // prune func of this stage will use this value to prevent all ancient blocks traversal
+		if err := s.UpdatePrune(tx, startBlock); err != nil { // prune func of this stage will use this value to prevent all ancient blocks traversal
 			return err
 		}
 	}
@@ -96,7 +96,7 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 		return fmt.Errorf("txnLookupTransform: %w", err)
 	}
 
-	if err = s.Update(tx, endBlock); err != nil {
+	if err := s.Update(tx, endBlock); err != nil {
 		return err
 	}
 
@@ -133,7 +133,8 @@ func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64,
 
 		for i, txn := range body.Transactions {
 			binary.BigEndian.PutUint64(data[8:], firstTxNumInBlock+uint64(i)+1)
-			if err := next(k, txn.Hash().Bytes(), data); err != nil {
+			txHash := txn.Hash()
+			if err := next(k, txHash[:], data); err != nil {
 				return err
 			}
 		}
@@ -293,7 +294,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	pruneCtx, pruneCancel := context.WithTimeout(ctx, pruneTimeout)
 	defer pruneCancel()
 
-	pruneStat, err := prune.TableScanningPrune(pruneCtx, logPrefix, "txlookup", txFrom, txTo, 0, 1,
+	pruneStat, err := prune.TableScanningPrune(pruneCtx, logPrefix, "txlookup", txFrom, txTo, 1,
 		logEvery, logger, nil, valsCursor, false, prevStat, prune.ValueOffset8StorageMode)
 	if err != nil {
 		return fmt.Errorf("prune TxLookup: %w", err)
@@ -306,7 +307,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	}()
 
 	if pruneStat.ValueProgress == prune.Done {
-		if err = s.DoneAt(tx, blockTo); err != nil {
+		if err := s.DoneAt(tx, blockTo); err != nil {
 			return err
 		}
 	}
@@ -328,7 +329,8 @@ func deleteTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64
 		}
 
 		for _, txn := range body.Transactions {
-			if err := next(k, txn.Hash().Bytes(), nil); err != nil {
+			txHash := txn.Hash()
+			if err := next(k, txHash[:], nil); err != nil {
 				return err
 			}
 		}

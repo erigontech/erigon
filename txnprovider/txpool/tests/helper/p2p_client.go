@@ -3,6 +3,7 @@ package helper
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -44,7 +45,7 @@ func NewP2P(adminRPC string) *p2pClient {
 	}
 }
 
-func (p *p2pClient) Connect() (<-chan TxMessage, <-chan error, error) {
+func (p *p2pClient) Connect(ctx context.Context) (<-chan TxMessage, <-chan error, error) {
 	privateKey, err := crypto.GenerateKey()
 	if err != nil {
 		return nil, nil, err
@@ -52,7 +53,6 @@ func (p *p2pClient) Connect() (<-chan TxMessage, <-chan error, error) {
 
 	cfg := &p2p.Config{
 		ListenAddr:      ":30307",
-		AllowedPorts:    []uint{30303, 30304, 30305, 30306, 30307},
 		ProtocolVersion: []uint{direct.ETH70, direct.ETH69, direct.ETH68},
 		MaxPeers:        32,
 		MaxPendingPeers: 1000,
@@ -63,9 +63,14 @@ func (p *p2pClient) Connect() (<-chan TxMessage, <-chan error, error) {
 		PrivateKey:      privateKey,
 	}
 
-	r, err := http.Post(p.adminRPC, "application/json", strings.NewReader(
+	req, err := http.NewRequestWithContext(ctx, "POST", p.adminRPC, strings.NewReader(
 		`{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}`,
 	))
+	if err != nil {
+		return nil, nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	r, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -92,34 +97,34 @@ func (p *p2pClient) Connect() (<-chan TxMessage, <-chan error, error) {
 		return nil, nil, err
 	}
 
-	ready, err := p.notifyWhenReady()
+	ready, err := p.notifyWhenReady(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	grpcServer := sentry.NewGrpcServer(context.TODO(), nil, func() *eth.NodeInfo { return nil }, cfg, direct.ETH68, log.New(), nil, "")
+	grpcServer := sentry.NewGrpcServer(ctx, nil, func() *eth.NodeInfo { return nil }, cfg, direct.ETH68, log.New(), nil, "")
 	sentryClient, err := direct.NewSentryClientDirect(direct.ETH69, grpcServer, nil)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	_, err = sentryClient.SetStatus(context.TODO(), &sentryproto.StatusData{
+	genesis := common.FromHex(resp.Result.Protocols.Eth.Genesis)
+	if len(genesis) != 32 {
+		return nil, nil, fmt.Errorf("admin_nodeInfo returned genesis of length %d, want 32 (%q)", len(genesis), resp.Result.Protocols.Eth.Genesis)
+	}
+	_, err = sentryClient.SetStatus(ctx, &sentryproto.StatusData{
 		NetworkId:       uint64(resp.Result.Protocols.Eth.Network),
 		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(uint256.MustFromDecimal(strconv.Itoa(resp.Result.Protocols.Eth.Difficulty))),
-		BestHash: gointerfaces.ConvertHashToH256(
-			[32]byte(common.FromHex(resp.Result.Protocols.Eth.Genesis)),
-		),
+		BestHash:        gointerfaces.ConvertHashToH256([32]byte(genesis)),
 		ForkData: &sentryproto.Forks{
-			Genesis: gointerfaces.ConvertHashToH256(
-				[32]byte(common.FromHex(resp.Result.Protocols.Eth.Genesis)),
-			),
+			Genesis: gointerfaces.ConvertHashToH256([32]byte(genesis)),
 		},
 	})
 	if err != nil {
 		return nil, nil, err
 	}
 
-	conn, err := sentryClient.Messages(context.TODO(), &sentryproto.MessagesRequest{
+	conn, err := sentryClient.Messages(ctx, &sentryproto.MessagesRequest{
 		Ids: []sentryproto.MessageId{
 			sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
 			sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66,
@@ -141,12 +146,17 @@ func (p *p2pClient) Connect() (<-chan TxMessage, <-chan error, error) {
 	return gotTxCh, errCh, nil
 }
 
-func (p *p2pClient) notifyWhenReady() (<-chan struct{}, error) {
+func (p *p2pClient) notifyWhenReady(ctx context.Context) (<-chan struct{}, error) {
 	ready := make(chan struct{})
 
-	r, err := http.Post(p.adminRPC, "application/json", strings.NewReader(
+	req, err := http.NewRequestWithContext(ctx, "POST", p.adminRPC, strings.NewReader(
 		`{"jsonrpc":"2.0","method":"admin_peers","params":[],"id":1}`,
 	))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	r, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -166,17 +176,27 @@ func (p *p2pClient) notifyWhenReady() (<-chan struct{}, error) {
 
 	go func() {
 		for {
-			time.Sleep(100 * time.Millisecond)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(100 * time.Millisecond):
+			}
 
-			r, err := http.Post(p.adminRPC, "application/json", strings.NewReader(
+			req, err := http.NewRequestWithContext(ctx, "POST", p.adminRPC, strings.NewReader(
 				`{"jsonrpc":"2.0","method":"admin_peers","params":[],"id":1}`,
 			))
 			if err != nil {
 				continue
 			}
-			defer r.Body.Close()
+			req.Header.Set("Content-Type", "application/json")
+			r, err := http.DefaultClient.Do(req)
+			if err != nil {
+				continue
+			}
 
-			if err := json.NewDecoder(r.Body).Decode(&resp); err != nil {
+			err = json.NewDecoder(r.Body).Decode(&resp)
+			r.Body.Close()
+			if err != nil {
 				continue
 			}
 

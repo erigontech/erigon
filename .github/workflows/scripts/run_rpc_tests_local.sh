@@ -141,7 +141,7 @@ mkdir -p "$RESULT_DIR"
 RPC_DAEMON_PID=$!
 
 echo "Waiting for port 8545..."
-for i in {1..30}; do
+for _ in {1..30}; do
   if nc -z localhost 8545 2>/dev/null; then
     echo "Port 8545 is open"
     break

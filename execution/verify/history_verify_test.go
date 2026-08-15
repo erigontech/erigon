@@ -33,7 +33,7 @@ func TestHistoryVerification_SimpleBlocks(t *testing.T) {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
 	chainConfig := chain.AllProtocolChanges
-	chainConfig.TerminalTotalDifficulty = common.Big0
+	chainConfig.TerminalTotalDifficulty = uint256.NewInt(0)
 	gspec := &types.Genesis{
 		Config: chainConfig,
 		Alloc: types.GenesisAlloc{
@@ -61,7 +61,7 @@ func TestHistoryVerification_SimpleBlocks(t *testing.T) {
 	const batchSize = 100
 	for batchStart := 0; batchStart < numBlocks; batchStart += batchSize {
 		batchEnd := min(batchStart+batchSize, numBlocks)
-		chainResult, err := blockgen.GenerateChain(m.ChainConfig, parent, m.Engine, m.DB, batchEnd-batchStart, func(i int, b *blockgen.BlockGen) {
+		chainResult, err := m.GenerateChainFrom(parent, batchEnd-batchStart, func(i int, b *blockgen.BlockGen) {
 			b.SetCoinbase(common.Address{1})
 		})
 		require.NoError(t, err)
@@ -119,7 +119,7 @@ func TestHistoryVerification_WithUserTransactions(t *testing.T) {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
 	chainConfig := chain.AllProtocolChanges
-	chainConfig.TerminalTotalDifficulty = common.Big0
+	chainConfig.TerminalTotalDifficulty = uint256.NewInt(0)
 	gspec := &types.Genesis{
 		Config: chainConfig,
 		Alloc: types.GenesisAlloc{
@@ -147,10 +147,10 @@ func TestHistoryVerification_WithUserTransactions(t *testing.T) {
 	nonce := uint64(0)
 	recipient := common.Address{0xDE, 0xAD}
 
-	chainResult, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, numBlocks, func(i int, b *blockgen.BlockGen) {
+	chainResult, err := m.GenerateChain(numBlocks, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// Add 2 ETH transfers per block.
-		for j := 0; j < 2; j++ {
+		for range 2 {
 			tx := types.NewTransaction(nonce, recipient, uint256.NewInt(1), 21000, uint256.NewInt(875000000), nil)
 			signed, signErr := types.SignTx(tx, *signer, key)
 			if signErr != nil {

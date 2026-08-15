@@ -20,6 +20,7 @@
 package js
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -104,7 +105,6 @@ type jsTracer struct {
 	activePrecompiles []accounts.Address    // List of active precompiles at current block
 	traceStep         bool                  // True if tracer object exposes a `step()` method
 	traceFrame        bool                  // True if tracer object exposes the `enter()` and `exit()` methods
-	gasLimit          uint64                // Amount of gas bought for the whole tx
 	err               error                 // Any error that should stop tracing
 	obj               *goja.Object          // Trace object
 
@@ -148,10 +148,10 @@ func newJsTracer(code string, ctx *tracers.Context, cfg json.RawMessage) (*trace
 		ctx = new(tracers.Context)
 	}
 	if ctx.BlockHash != (common.Hash{}) {
-		t.ctx["blockHash"] = vm.ToValue(ctx.BlockHash.Bytes())
+		t.ctx["blockHash"] = vm.ToValue(ctx.BlockHash[:])
 		if ctx.TxHash != (common.Hash{}) {
 			t.ctx["txIndex"] = vm.ToValue(ctx.TxIndex)
-			t.ctx["txHash"] = vm.ToValue(ctx.TxHash.Bytes())
+			t.ctx["txHash"] = vm.ToValue(ctx.TxHash[:])
 		}
 	}
 
@@ -211,12 +211,13 @@ func newJsTracer(code string, ctx *tracers.Context, cfg json.RawMessage) (*trace
 	t.logValue = t.log.setupObject()
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
-			OnTxStart: t.OnTxStart,
-			OnTxEnd:   t.OnTxEnd,
-			OnEnter:   t.OnEnter,
-			OnExit:    t.OnExit,
-			OnOpcode:  t.OnOpcode,
-			OnFault:   t.OnFault,
+			OnTxStart:           t.OnTxStart,
+			OnSystemCallStartV2: t.OnSystemCallStartV2,
+			OnTxEnd:             t.OnTxEnd,
+			OnEnter:             t.OnEnter,
+			OnExit:              t.OnExit,
+			OnOpcode:            t.OnOpcode,
+			OnFault:             t.OnFault,
 		},
 		GetResult: t.GetResult,
 		Stop:      t.Stop,
@@ -226,6 +227,14 @@ func newJsTracer(code string, ctx *tracers.Context, cfg json.RawMessage) (*trace
 // OnTxStart implements the Tracer interface and is invoked at the beginning of
 // transaction processing.
 func (t *jsTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
+	t.onExecutionStart(env, tx.GetGasLimit())
+}
+
+func (t *jsTracer) OnSystemCallStartV2(env *tracing.VMContext) {
+	t.onExecutionStart(env, 0)
+}
+
+func (t *jsTracer) onExecutionStart(env *tracing.VMContext, gasLimit uint64) {
 	t.env = env
 
 	db := &dbObj{ibs: env.IntraBlockState, vm: t.vm, toBig: t.toBig, toBuf: t.toBuf, fromBuf: t.fromBuf}
@@ -237,7 +246,7 @@ func (t *jsTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from 
 	rules := blockContext.Rules(env.ChainConfig)
 	t.activePrecompiles = vm.ActivePrecompiles(rules)
 	t.ctx["block"] = t.vm.ToValue(t.env.BlockNumber)
-	t.ctx["gas"] = t.vm.ToValue(tx.GetGasLimit())
+	t.ctx["gas"] = t.vm.ToValue(gasLimit)
 	gasPriceBig, err := t.toBig(t.vm, env.GasPrice.String())
 	if err != nil {
 		t.err = err
@@ -309,7 +318,7 @@ func (t *jsTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing.
 	log.pc = pc
 	log.gas = gas
 	log.cost = cost
-	log.refund = t.env.IntraBlockState.GetRefund().Total()
+	log.refund = t.env.IntraBlockState.GetRefund()
 	log.depth = depth
 	log.err = err
 	if _, err := t.step(t.obj, t.logValue, t.dbValue); err != nil {
@@ -355,7 +364,7 @@ func (t *jsTracer) OnEnter(depth int, typ byte, from accounts.Address, to accoun
 	t.frame.typ = vm.OpCode(typ).String()
 	t.frame.from = from
 	t.frame.to = to
-	t.frame.input = common.Copy(input)
+	t.frame.input = bytes.Clone(input)
 	t.frame.gas = uint(gas)
 	t.frame.value = nil
 	t.frame.value = value.ToBig()
@@ -382,7 +391,7 @@ func (t *jsTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, r
 	}
 
 	t.frameResult.gasUsed = uint(gasUsed)
-	t.frameResult.output = common.Copy(output)
+	t.frameResult.output = bytes.Clone(output)
 	t.frameResult.err = err
 
 	if _, err := t.exit(t.obj, t.frameResultValue); err != nil {
@@ -440,7 +449,8 @@ func (t *jsTracer) setBuiltinFunctions() {
 			vm.Interrupt(err)
 			return nil
 		}
-		b = common.BytesToHash(b).Bytes()
+		word := common.BytesToHash(b)
+		b = word[:]
 		res, err := t.toBuf(vm, b)
 		if err != nil {
 			vm.Interrupt(err)
@@ -454,7 +464,8 @@ func (t *jsTracer) setBuiltinFunctions() {
 			vm.Interrupt(err)
 			return nil
 		}
-		a = common.BytesToAddress(a).Bytes()
+		addr := common.BytesToAddress(a)
+		a = addr[:]
 		res, err := t.toBuf(vm, a)
 		if err != nil {
 			vm.Interrupt(err)
@@ -469,7 +480,8 @@ func (t *jsTracer) setBuiltinFunctions() {
 			return nil
 		}
 		addr := common.BytesToAddress(a)
-		b := types.CreateAddress(addr, uint64(nonce)).Bytes()
+		contractAddr := types.CreateAddress(addr, uint64(nonce))
+		b := contractAddr[:]
 		res, err := t.toBuf(vm, b)
 		if err != nil {
 			vm.Interrupt(err)
@@ -489,9 +501,10 @@ func (t *jsTracer) setBuiltinFunctions() {
 			vm.Interrupt(err)
 			return nil
 		}
-		code = common.Copy(code)
-		codeHash := accounts.InternCodeHash(crypto.HashData(code))
-		b := types.CreateAddress2(addr, common.HexToHash(salt), codeHash).Bytes()
+		code = bytes.Clone(code)
+		codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
+		contractAddr := types.CreateAddress2(addr, common.HexToHash(salt), codeHash)
+		b := contractAddr[:]
 		res, err := t.toBuf(vm, b)
 		if err != nil {
 			vm.Interrupt(err)
@@ -843,7 +856,7 @@ func (co *contractObj) GetValue() goja.Value {
 }
 
 func (co *contractObj) GetInput() goja.Value {
-	input := common.Copy(co.scope.CallInput())
+	input := bytes.Clone(co.scope.CallInput())
 	res, err := co.toBuf(co.vm, input)
 	if err != nil {
 		co.vm.Interrupt(err)

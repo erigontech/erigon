@@ -17,24 +17,17 @@
 package eth2
 
 import (
-	"encoding/binary"
-
 	"github.com/erigontech/erigon/cl/abstract"
-	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
 )
-
-func computeSigningRootEpoch(epoch uint64, domain []byte) (common.Hash, error) {
-	b := make([]byte, 32)
-	binary.LittleEndian.PutUint64(b, epoch)
-	return utils.Sha256(b, domain), nil
-}
 
 // transitionSlot is called each time there is a new slot to process
 func transitionSlot(s abstract.BeaconState) error {
 	slot := s.Slot()
 	previousStateRoot := s.PreviousStateRoot()
 	var err error
+
 	if previousStateRoot == (common.Hash{}) {
 		previousStateRoot, err = s.HashSSZ()
 		if err != nil {
@@ -58,5 +51,10 @@ func transitionSlot(s abstract.BeaconState) error {
 		return err
 	}
 	s.SetBlockRootAt(int(slot%beaconConfig.SlotsPerHistoricalRoot), previousBlockRoot)
+
+	if s.Version() >= clparams.GloasVersion {
+		// Unset the next payload availability
+		s.SetExecutionPayloadAvailability(slot+1, false)
+	}
 	return nil
 }

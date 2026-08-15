@@ -128,19 +128,20 @@ func forEachUnpack(t Type, output []byte, start, size int) (any, error) {
 		return nil, fmt.Errorf("cannot marshal input to array, size is negative (%d)", size)
 	}
 	if start+32*size > len(output) {
-		return nil, fmt.Errorf("abi: cannot marshal in to go array: offset %d would go over slice boundary (len=%d)", len(output), start+32*size)
+		return nil, fmt.Errorf("abi: cannot marshal in to go array: offset %d would go over slice boundary (len=%d)", start+32*size, len(output))
 	}
 
 	// this value will become our slice or our array, depending on the type
 	var refSlice reflect.Value
 
-	if t.T == SliceTy {
+	switch t.T {
+	case SliceTy:
 		// declare our slice
 		refSlice = reflect.MakeSlice(t.GetType(), size, size)
-	} else if t.T == ArrayTy {
+	case ArrayTy:
 		// declare our array
 		refSlice = reflect.New(t.GetType()).Elem()
-	} else {
+	default:
 		return nil, errors.New("abi: invalid type in array/slice unpacking stage")
 	}
 

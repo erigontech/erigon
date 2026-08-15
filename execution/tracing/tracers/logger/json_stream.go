@@ -43,6 +43,7 @@ type JsonStreamLogger struct {
 	stream       jsonstream.Stream
 	hexEncodeBuf [128]byte
 	firstCapture bool
+	opcodeSteps  int // steps captured so far; executed-but-suppressed ones don't count
 
 	locations common.Hashes // For sorting
 	storage   map[accounts.Address]Storage
@@ -66,14 +67,19 @@ func NewJsonStreamLogger(cfg *LogConfig, ctx context.Context, stream jsonstream.
 func (l *JsonStreamLogger) Tracer() *tracers.Tracer {
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
-			OnTxStart: l.OnTxStart,
-			OnExit:    l.OnExit,
-			OnOpcode:  l.OnOpcode,
+			OnTxStart:           l.OnTxStart,
+			OnSystemCallStartV2: l.OnSystemCallStartV2,
+			OnExit:              l.OnExit,
+			OnOpcode:            l.OnOpcode,
 		},
 	}
 }
 
 func (l *JsonStreamLogger) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
+	l.env = env
+}
+
+func (l *JsonStreamLogger) OnSystemCallStartV2(env *tracing.VMContext) {
 	l.env = env
 }
 
@@ -121,6 +127,13 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 		return
 	default:
 	}
+	// check if already captured the specified number of opcode steps. Execution
+	// keeps going, we just stop recording. Must happen before anything is written
+	// to the stream, otherwise a dangling separator would be emitted.
+	if l.cfg.Limit != 0 && l.cfg.Limit <= l.opcodeSteps {
+		return
+	}
+	l.opcodeSteps++
 	if !l.firstCapture {
 		l.stream.WriteMore()
 	} else {
@@ -174,10 +187,10 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 	l.stream.WriteObjectField("depth")
 	l.stream.WriteInt(depth)
 	refund := l.env.IntraBlockState.GetRefund()
-	if refund.Total() != 0 {
+	if refund != 0 {
 		l.stream.WriteMore()
 		l.stream.WriteObjectField("refund")
-		l.stream.WriteUint64(l.env.IntraBlockState.GetRefund().Total())
+		l.stream.WriteUint64(refund)
 	}
 
 	if err != nil {
@@ -197,15 +210,12 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 		}
 		l.stream.WriteArrayEnd()
 	}
-	if l.cfg.EnableMemory {
+	if l.cfg.EnableMemory && len(memory) > 0 {
 		l.stream.WriteMore()
 		l.stream.WriteObjectField("memory")
 		l.stream.WriteArrayStart()
 		for i := 0; i < len(memory); i += 32 {
-			end := i + 32
-			if end > len(memory) {
-				end = len(memory)
-			}
+			end := min(i+32, len(memory))
 			if i > 0 {
 				l.stream.WriteMore()
 			}

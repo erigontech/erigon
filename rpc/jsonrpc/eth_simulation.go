@@ -33,12 +33,12 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -148,7 +148,7 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 	simulatedBlockResults := make(SimulationResult, 0, len(req.BlockStateCalls))
 
 	// Check if we have commitment history: this is required to know if state root will be computed or left zero for historical state.
-	commitmentHistory, _, err := rawdb.ReadDBCommitmentHistoryEnabled(tx)
+	commitmentHistory, err := api.commitmentHistoryEnabled(tx)
 	if err != nil {
 		return nil, err
 	}
@@ -164,12 +164,15 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 		return nil, err
 	}
 
-	sharedDomains, err := execctx.NewSharedDomains(ctx, tx, api.logger)
+	sharedDomains, err := execctx.NewSharedDomains(ctx, tx, api.logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
 	if err != nil {
 		return nil, err
 	}
 	defer sharedDomains.Close()
-	sharedDomains.GetCommitmentContext().SetDeferBranchUpdates(false)
+	// Meter this request's state reads under the rpc source (flushed at Close).
+	// SimulateV1 owns this SharedDomains on a single goroutine.
+	sharedDomains.StartRequestMetrics(kvmetrics.SourceRPC)
+	sharedDomains.SetDeferCommitmentUpdates(false)
 
 	// Iterate over each given SimulatedBlock
 	parent := sim.base
@@ -212,7 +215,7 @@ type simulator struct {
 	dirs              datadir.Dirs
 	engine            protocolrules.EngineReader
 	txNumReader       rawdbv3.TxNumsReader
-	blockReader       services.FullBlockReader
+	blockReader       dbservices.FullBlockReader
 	logger            log.Logger
 	gasPool           *protocol.GasPool
 	returnDataLimit   int
@@ -230,7 +233,7 @@ func newSimulator(
 	dirs datadir.Dirs,
 	engine protocolrules.EngineReader,
 	txNumReader rawdbv3.TxNumsReader,
-	blockReader services.FullBlockReader,
+	blockReader dbservices.FullBlockReader,
 	logger log.Logger,
 	gasCap uint64,
 	returnDataLimit int,
@@ -286,7 +289,7 @@ func (s *simulator) sanitizeSimulatedBlocks(blocks []SimulatedBlock) ([]Simulate
 			// Fill the gap with empty blocks.
 			gap := diff - 1
 			// Assign block number to the empty blocks.
-			for i := uint64(0); i < gap; i++ {
+			for i := range gap {
 				n := prevNumber + i + 1
 				t := prevTimestamp + timestampIncrement
 				b := SimulatedBlock{
@@ -381,17 +384,11 @@ func (s *simulator) sanitizeCall(
 
 	if args.Gas == nil {
 		// Default to remaining block gas, but capped by the node's effective gas cap.
-		remaining := blockContext.GasLimit - gasUsed
-		if remaining > effectiveCap {
-			remaining = effectiveCap
-		}
+		remaining := min(blockContext.GasLimit-gasUsed, effectiveCap)
 		args.Gas = (*hexutil.Uint64)(&remaining)
-	} else {
-		// Cap user-specified gas against the node's gas cap.
-		if globalGasCap > 0 && globalGasCap < uint64(*args.Gas) {
-			log.Warn("Caller gas above allowance, capping", "requested", args.Gas, "cap", globalGasCap)
-			args.Gas = (*hexutil.Uint64)(&globalGasCap)
-		}
+	} else if globalGasCap > 0 && globalGasCap < uint64(*args.Gas) {
+		log.Warn("Caller gas above allowance, capping", "requested", args.Gas, "cap", globalGasCap)
+		args.Gas = (*hexutil.Uint64)(&globalGasCap)
 	}
 	if gasUsed+uint64(*args.Gas) > blockContext.GasLimit {
 		return blockGasLimitReachedError(fmt.Sprintf("block gas limit reached: %d >= %d", gasUsed, blockContext.GasLimit))
@@ -399,9 +396,9 @@ func (s *simulator) sanitizeCall(
 
 	if args.ChainID == nil {
 		// Copy the chain ID to avoid aliasing the live chainConfig pointer.
-		args.ChainID = (*hexutil.Big)(new(big.Int).Set(s.chainConfig.ChainID))
+		args.ChainID = (*hexutil.Big)(s.chainConfig.ChainID.ToBig())
 	} else {
-		if have := (*big.Int)(args.ChainID); have.Cmp(s.chainConfig.ChainID) != 0 {
+		if have := (*big.Int)(args.ChainID); have.Cmp(s.chainConfig.ChainID.ToBig()) != 0 {
 			return fmt.Errorf("chainId does not match node's (have=%v, want=%v)", have, s.chainConfig.ChainID)
 		}
 	}
@@ -543,6 +540,7 @@ func (s *simulator) simulateBlock(
 		return nil, nil, err
 	}
 	intraBlockState := state.New(stateReader)
+	defer intraBlockState.Close()
 
 	// Create a custom block context and apply any custom block overrides
 	blockCtx := transactions.NewEVMBlockContextWithOverrides(ctx, s.engine, header, tx, s.newSimulatedCanonicalReader(ancestors), s.chainConfig,
@@ -591,8 +589,9 @@ func (s *simulator) simulateBlock(
 
 	stateWriter := newDiffTrackingWriter(sharedDomains.AsPutDel(tx), minTxNum)
 	callResults := make([]CallResult, 0, len(bsc.Calls))
-	for callIndex, call := range bsc.Calls {
-		callResult, txn, receipt, err := s.simulateCall(ctx, blockCtx, intraBlockState, callIndex, &call, header,
+	for callIndex := range bsc.Calls {
+		call := &bsc.Calls[callIndex]
+		callResult, txn, receipt, err := s.simulateCall(ctx, blockCtx, intraBlockState, callIndex, call, header,
 			&cumulativeGasUsed, &cumulativeBlobGasUsed, tracer, vmConfig, activePrecompiles)
 		if err != nil {
 			return nil, nil, err
@@ -771,14 +770,8 @@ func (s *simulator) simulateCall(
 	vmConfig vm.Config,
 	precompiles vm.PrecompiledContracts,
 ) (*CallResult, types.Transaction, *types.Receipt, error) {
-	// Setup context, so it may be cancelled after the call has completed or in case of unmetered gas use a timeout.
-	var cancel context.CancelFunc
-	if s.evmCallTimeout > 0 {
-		ctx, cancel = context.WithTimeout(ctx, s.evmCallTimeout)
-	} else {
-		ctx, cancel = context.WithCancel(ctx)
-	}
-	defer cancel()
+	_, storeEVM, cleanup := setupEVMTimeout(ctx, s.evmCallTimeout)
+	defer cleanup()
 
 	err := s.sanitizeCall(call, intraBlockState, &blockCtx, header.BaseFee, *cumulativeGasUsed, s.gasPool.Gas())
 	if err != nil {
@@ -805,9 +798,7 @@ func (s *simulator) simulateCall(
 
 	// It is possible to override precompiles with EVM bytecode or move them to another address.
 	evm.SetPrecompiles(precompiles)
-
-	stop := context.AfterFunc(ctx, evm.Cancel)
-	defer stop()
+	storeEVM(evm)
 
 	s.gasPool.AddBlobGas(msg.BlobGas())
 	result, err := protocol.ApplyMessage(evm, msg, s.gasPool, true, false, s.engine)
@@ -869,7 +860,7 @@ func (s *simulator) simulateCall(
 }
 
 type simulatedCanonicalReader struct {
-	canonicalReader services.CanonicalReader
+	canonicalReader dbservices.CanonicalReader
 	headers         []*types.Header
 }
 
@@ -894,7 +885,7 @@ func (s *simulatedCanonicalReader) BadHeaderNumber(context.Context, kv.Getter, c
 	return nil, errors.New("bad header not found")
 }
 
-func (s *simulator) newSimulatedCanonicalReader(headers []*types.Header) services.CanonicalReader {
+func (s *simulator) newSimulatedCanonicalReader(headers []*types.Header) dbservices.CanonicalReader {
 	return &simulatedCanonicalReader{s.blockReader, headers}
 }
 
@@ -927,7 +918,9 @@ func txValidationError(err error) error {
 	case errors.Is(err, protocol.ErrTipAboveFeeCap):
 		return &rpc.CustomError{Message: err.Error(), Code: rpc.ErrCodeInvalidParams}
 	case errors.Is(err, protocol.ErrFeeCapTooLow):
-		return &rpc.CustomError{Message: err.Error(), Code: rpc.ErrCodeInvalidParams}
+		// "fee cap too low" means maxFeePerGas is below the current baseFee,
+		// which the RPC API reports as "base fee too low".
+		return &rpc.CustomError{Message: err.Error(), Code: rpc.ErrCodeBaseFeeTooLow}
 	case errors.Is(err, protocol.ErrInsufficientFunds):
 		return &rpc.CustomError{Message: err.Error(), Code: rpc.ErrCodeInsufficientFunds}
 	case errors.Is(err, protocol.ErrIntrinsicGas):
@@ -997,6 +990,12 @@ func (r *simulationStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint
 }
 
 func (r *simulationStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
+	return newHistoryCommitmentOnlyReader(tx, r.sd, r.commitmentAsOfTxNum, r.plainStateAsOfTxNum)
+}
+
+// CloneForWorker mirrors Clone. eth_simulation runs commitment single-threaded
+// (no concurrent warmup), so worker metering isn't needed here.
+func (r *simulationStateReader) CloneForWorker(_ context.Context, tx kv.TemporalTx) commitmentdb.StateReader {
 	return newHistoryCommitmentOnlyReader(tx, r.sd, r.commitmentAsOfTxNum, r.plainStateAsOfTxNum)
 }
 
@@ -1163,11 +1162,13 @@ func (s *simulator) computeCommitmentFromStateHistory(
 		tsd.GetCommitmentCtx().SetStateReader(newSimulateStateReader(ttx, tx, tsd, sd))
 		storageFullKey := make([]byte, length.Addr+length.Hash)
 		for address, locations := range touched {
-			addressKey := address.Value().Bytes()
+			addrValue := address.Value()
+			addressKey := addrValue[:]
 			tsd.GetCommitmentCtx().TouchKey(kv.AccountsDomain, string(addressKey), nil)
 			s.logger.Debug("Touch key", "domain", kv.AccountsDomain, "key", address.Value().Hex()[2:])
 			for _, loc := range locations {
-				locationKey := loc.Value().Bytes()
+				locValue := loc.Value()
+				locationKey := locValue[:]
 				copy(storageFullKey[:length.Addr], addressKey)
 				copy(storageFullKey[length.Addr:], locationKey)
 				tsd.GetCommitmentCtx().TouchKey(kv.StorageDomain, string(storageFullKey), nil)

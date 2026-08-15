@@ -2,13 +2,21 @@ package state
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
 // AggOpts is an Aggregator builder and contains only runtime-changeable configs (which may vary between Erigon nodes)
@@ -20,9 +28,14 @@ type AggOpts struct { //nolint:gocritic
 	erigondbDomainStepsInFrozenFile uint64
 	reorgBlockDepth                 uint64
 
-	genSaltIfNeed  bool
-	disableFsync   bool // for tests speed
-	disableHistory bool // for temp/inmem aggregator instances
+	referencesInCommitmentBranches *bool // nil = leave global schema default untouched
+
+	genSaltIfNeed       bool
+	sanityOldNaming     bool // prevent start directory with old file names
+	disableFsync        bool // for tests speed
+	disableHistory      bool // for temp/inmem aggregator instances
+	disableBranchCache  bool // for one-shot aggregators with no cross-block reuse (e.g. genesis)
+	skipFilesDBGapCheck bool
 }
 
 func New(dirs datadir.Dirs) AggOpts { //nolint:gocritic
@@ -30,6 +43,9 @@ func New(dirs datadir.Dirs) AggOpts { //nolint:gocritic
 		logger:          log.Root(),
 		dirs:            dirs,
 		reorgBlockDepth: dbg.MaxReorgDepth,
+		genSaltIfNeed:   false,
+		sanityOldNaming: false,
+		disableFsync:    false,
 	}
 }
 
@@ -39,6 +55,12 @@ func NewTest(dirs datadir.Dirs) AggOpts { //nolint:gocritic
 
 func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) { //nolint:gocritic
 	//TODO: rename `OpenFolder` to `ReopenFolder`
+	if opts.sanityOldNaming {
+		if err := CheckSnapshotsCompatibility(opts.dirs); err != nil {
+			panic(err)
+		}
+	}
+
 	salt, err := GetStateIndicesSalt(opts.dirs, opts.genSaltIfNeed, opts.logger)
 	if err != nil {
 		return nil, err
@@ -54,9 +76,15 @@ func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) {
 	a.erigondbDomainStepsInFrozenFile = opts.erigondbDomainStepsInFrozenFile
 
 	a.disableHistory = opts.disableHistory
+	a.branchCacheDisabled = opts.disableBranchCache
 	a.disableFsync = opts.disableFsync
+	a.skipFilesDBGapCheck = opts.skipFilesDBGapCheck
 
 	a.savedSalt = salt
+
+	if opts.referencesInCommitmentBranches != nil {
+		a.applyReferencesInCommitmentBranches(*opts.referencesInCommitmentBranches)
+	}
 
 	if err := a.ConfigureDomains(); err != nil {
 		return nil, err
@@ -98,9 +126,136 @@ func (opts AggOpts) Logger(l log.Logger) AggOpts  { opts.logger = l; return opts
 func (opts AggOpts) DisableFsync() AggOpts        { opts.disableFsync = true; return opts }   //nolint:gocritic
 func (opts AggOpts) DisableHistory() AggOpts      { opts.disableHistory = true; return opts } //nolint:gocritic
 
-// WithErigonDBSettings assigns pre-resolved DB settings (stepSize, stepsInFrozenFile).
+func (opts AggOpts) SkipFilesDBGapCheck() AggOpts { opts.skipFilesDBGapCheck = true; return opts } //nolint:gocritic
+func (opts AggOpts) DisableBranchCache() AggOpts { //nolint:gocritic
+	opts.disableBranchCache = true
+	return opts
+}
+func (opts AggOpts) SanityOldNaming() AggOpts { //nolint:gocritic
+	opts.sanityOldNaming = true
+	return opts
+}
+
+// WithErigonDBSettings assigns pre-resolved DB settings.
 func (opts AggOpts) WithErigonDBSettings(s *ErigonDBSettings) AggOpts { //nolint:gocritic
 	opts.stepSize = s.StepSize
 	opts.stepsInFrozenFile = s.StepsInFrozenFile
+	refs := s.RefsInCommitmentBranches()
+	opts.referencesInCommitmentBranches = &refs
 	return opts
+}
+
+type workersCfg struct {
+	mu              sync.Mutex
+	editLocks       int // >0 while background build/merge pins config; Preset* writes are no-ops
+	merge           int // usually 1
+	collateAndBuild int
+}
+
+func (w *workersCfg) getMerge() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.merge
+}
+
+func (w *workersCfg) setMerge(n int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.editLocks == 0 {
+		w.merge = n
+	}
+}
+
+func (w *workersCfg) getCollateAndBuild() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.collateAndBuild
+}
+
+func (w *workersCfg) setCollateAndBuild(n int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.editLocks == 0 {
+		w.collateAndBuild = n
+	}
+}
+
+// trySet runs fn under mu only while editing is unlocked (no background op holds it).
+func (w *workersCfg) trySet(fn func()) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.editLocks == 0 {
+		fn()
+	}
+}
+
+// lockEditing is reentrant: overlapping build/merge ops each hold a lock, and
+// editing stays disabled until the last one releases it.
+func (w *workersCfg) lockEditing() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.editLocks++
+}
+
+func (w *workersCfg) unlockEditing() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.editLocks > 0 {
+		w.editLocks--
+	}
+}
+
+func CheckSnapshotsCompatibility(d datadir.Dirs) error {
+	directories := []string{
+		d.Chaindata, d.Tmp, d.SnapIdx, d.SnapHistory, d.SnapDomain,
+		d.SnapAccessors, d.SnapCaplin, d.Downloader, d.TxPool, d.Snap,
+		d.Nodes, d.CaplinBlobs, d.CaplinIndexing, d.CaplinLatest, d.CaplinGenesis,
+	}
+	for _, dirPath := range directories {
+		err := filepath.WalkDir(dirPath, func(path string, entry fs.DirEntry, err error) error {
+			if err != nil {
+				if os.IsNotExist(err) { //skip magically disappeared files
+					return nil
+				}
+				return err
+			}
+			if entry.IsDir() {
+				return nil
+			}
+
+			name := entry.Name()
+			if strings.HasPrefix(name, "v1-") {
+				return errors.New("The datadir has bad snapshot files or they are " +
+					"incompatible with the current erigon version. If you want to upgrade from an" +
+					"older version, you may run the following to rename files to the " +
+					"new version: `erigon snapshots update-to-new-ver-format`")
+			}
+			fileInfo, _, _ := snaptype.ParseFileName("", name)
+
+			currentFileVersion := fileInfo.Version
+
+			msVs, ok := statecfg.SchemeMinSupportedVersions[fileInfo.TypeString]
+			if !ok {
+				return nil
+			}
+			requiredVersion, ok := msVs[fileInfo.Ext]
+			if !ok {
+				return nil
+			}
+
+			if currentFileVersion.Major < requiredVersion.Major {
+				return fmt.Errorf("snapshot file major version mismatch for file %s, "+
+					" requiredVersion: %d, currentVersion: %d"+
+					" You may want to downgrade to an older version (not older than 3.1)",
+					fileInfo.Name(), requiredVersion.Major, currentFileVersion.Major)
+			}
+			return nil
+		})
+
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

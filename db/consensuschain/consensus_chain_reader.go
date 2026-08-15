@@ -18,13 +18,14 @@ package consensuschain
 
 import (
 	"context"
-	"math/big"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -32,11 +33,16 @@ import (
 type Reader struct {
 	config      *chain.Config
 	tx          kv.Tx
-	blockReader services.FullBlockReader
+	blockReader dbservices.FullBlockReader
 	logger      log.Logger
 }
 
-func NewReader(config *chain.Config, tx kv.Tx, blockReader services.FullBlockReader, logger log.Logger) *Reader {
+// logger is used only on read-error paths, so a nil one stays invisible until
+// something fails. log.Logger is an interface, and calling it then panics.
+func NewReader(config *chain.Config, tx kv.Tx, blockReader dbservices.FullBlockReader, logger log.Logger) *Reader {
+	if logger == nil {
+		logger = log.Root()
+	}
 	return &Reader{config, tx, blockReader, logger}
 }
 
@@ -79,7 +85,7 @@ func (cr Reader) GetHeaderByHash(hash common.Hash) *types.Header {
 	h, _ := rawdb.ReadHeaderByHash(cr.tx, hash)
 	return h
 }
-func (cr Reader) GetTd(hash common.Hash, number uint64) *big.Int {
+func (cr Reader) GetTd(hash common.Hash, number uint64) *uint256.Int {
 	td, err := rawdb.ReadTd(cr.tx, hash, number)
 	if err != nil {
 		cr.logger.Warn("ReadTd failed", "err", err)

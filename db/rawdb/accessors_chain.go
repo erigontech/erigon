@@ -25,12 +25,12 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"math/big"
 	"sync"
 	"time"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/rawdb/utils"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
@@ -57,7 +58,7 @@ func ReadCanonicalHash(db kv.Getter, number uint64) (common.Hash, error) {
 
 // WriteCanonicalHash stores the hash assigned to a canonical block number.
 func WriteCanonicalHash(db kv.Putter, hash common.Hash, number uint64) error {
-	if err := db.Put(kv.HeaderCanonical, hexutil.EncodeTs(number), hash.Bytes()); err != nil {
+	if err := db.Put(kv.HeaderCanonical, hexutil.EncodeTs(number), hash[:]); err != nil {
 		return fmt.Errorf("failed to store number to hash mapping: %w", err)
 	}
 	return nil
@@ -144,7 +145,7 @@ func IsCanonicalHash(db kv.Getter, hash common.Hash, number uint64) (bool, error
 
 // ReadHeaderNumber returns the header number assigned to a hash.
 func ReadHeaderNumber(db kv.Getter, hash common.Hash) *uint64 {
-	data, err := db.GetOne(kv.HeaderNumber, hash.Bytes())
+	data, err := db.GetOne(kv.HeaderNumber, hash[:])
 	if err != nil {
 		log.Error("ReadHeaderNumber failed", "err", err)
 	}
@@ -159,7 +160,7 @@ func ReadHeaderNumber(db kv.Getter, hash common.Hash) *uint64 {
 	return &number
 }
 func ReadBadHeaderNumber(db kv.Getter, hash common.Hash) (*uint64, error) {
-	data, err := db.GetOne(kv.BadHeaderNumber, hash.Bytes())
+	data, err := db.GetOne(kv.BadHeaderNumber, hash[:])
 	if err != nil {
 		return nil, err
 	}
@@ -199,7 +200,7 @@ func ReadHeadHeaderHash(db kv.Getter) common.Hash {
 // It is updated in stage_headers, updateForkChoice.
 // See: WriteHeadBlockHash
 func WriteHeadHeaderHash(db kv.Putter, hash common.Hash) error {
-	if err := db.Put(kv.HeadHeaderKey, []byte(kv.HeadHeaderKey), hash.Bytes()); err != nil {
+	if err := db.Put(kv.HeadHeaderKey, []byte(kv.HeadHeaderKey), hash[:]); err != nil {
 		return fmt.Errorf("failed to store last header's hash: %w", err)
 	}
 	return nil
@@ -223,7 +224,7 @@ func ReadHeadBlockHash(db kv.Getter) common.Hash {
 // It is updated in stage_finish.
 // See: kv.HeadBlockKey
 func WriteHeadBlockHash(db kv.Putter, hash common.Hash) {
-	if err := db.Put(kv.HeadBlockKey, []byte(kv.HeadBlockKey), hash.Bytes()); err != nil {
+	if err := db.Put(kv.HeadBlockKey, []byte(kv.HeadBlockKey), hash[:]); err != nil {
 		log.Crit("Failed to store last block's hash", "err", err)
 	}
 }
@@ -405,7 +406,7 @@ func DeleteHeader(db kv.Putter, hash common.Hash, number uint64) {
 	if err := db.Delete(kv.Headers, dbutils.HeaderKey(number, hash)); err != nil {
 		log.Crit("Failed to delete header", "err", err)
 	}
-	if err := db.Delete(kv.HeaderNumber, hash.Bytes()); err != nil {
+	if err := db.Delete(kv.HeaderNumber, hash[:]); err != nil {
 		log.Crit("Failed to delete hash to number mapping", "err", err)
 	}
 }
@@ -429,27 +430,27 @@ func ReadStorageBodyRLP(db kv.Getter, hash common.Hash, number uint64) rlp.RawVa
 	return bodyRlp
 }
 
-func TxnByIdxInBlock(db kv.Getter, blockHash common.Hash, blockNum uint64, txIdxInBlock int) (types.Transaction, error) {
+func TxnByIdxInBlock(db kv.Getter, blockHash common.Hash, blockNum uint64, txIdxInBlock int) (types.Transaction, bool, error) {
 	b, err := ReadBodyForStorageByKey(db, dbutils.BlockBodyKey(blockNum, blockHash))
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if b == nil {
-		return nil, nil
+		return nil, false, nil
 	}
 
 	v, err := db.GetOne(kv.EthTx, hexutil.EncodeTs(b.BaseTxnID.At(txIdxInBlock)))
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if len(v) == 0 {
-		return nil, nil
+		return nil, false, nil
 	}
 	txn, err := types.DecodeTransaction(v)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return txn, nil
+	return txn, true, nil
 }
 
 func CanonicalTransactions(db kv.Getter, txnID uint64, amount uint32) ([]types.Transaction, error) {
@@ -545,9 +546,14 @@ func RawTransactionsRange(db kv.Getter, from, to uint64) (res [][]byte, err erro
 		if err != nil {
 			return nil, err
 		}
+		if txCount <= 2 {
+			continue
+		}
 
-		binary.BigEndian.PutUint64(encNum, baseTxnID.U64())
-		if err = db.ForAmount(kv.EthTx, encNum, txCount, func(k, v []byte) error {
+		// TxCount counts the two system txns, which have no kv.EthTx entries;
+		// reading from the system slot drifts into neighbouring blocks' txns.
+		binary.BigEndian.PutUint64(encNum, baseTxnID.First())
+		if err := db.ForAmount(kv.EthTx, encNum, txCount-2, func(k, v []byte) error {
 			res = append(res, v)
 			return nil
 		}); err != nil {
@@ -603,7 +609,10 @@ func ReadBlockAccessListBytes(db kv.Getter, hash common.Hash, number uint64) ([]
 	return data, nil
 }
 
-// WriteBlockAccessListBytes stores the RLP-encoded block access list sidecar for a block.
+// WriteBlockAccessListBytes stores the RLP-encoded block access list sidecar for
+// a block. This is secondary storage (serving, backfill, unwind); the primary
+// carry into execution is Block.BlockAccessList(), written via the block overlay
+// in InsertBlocks and flushed at commit.
 func WriteBlockAccessListBytes(db kv.Putter, hash common.Hash, number uint64, data []byte) error {
 	if err := db.Put(kv.BlockAccessList, dbutils.BlockBodyKey(number, hash), data); err != nil {
 		return fmt.Errorf("failed to store block access list: %w", err)
@@ -621,7 +630,7 @@ func ReadSenders(db kv.Getter, hash common.Hash, number uint64) ([]common.Addres
 		return nil, fmt.Errorf("readSenders failed: %w", err)
 	}
 	senders := make([]common.Address, len(data)/length.Addr)
-	for i := 0; i < len(senders); i++ {
+	for i := range senders {
 		copy(senders[i][:], data[i*length.Addr:])
 	}
 	return senders, nil
@@ -740,7 +749,7 @@ func AppendCanonicalTxNums(tx kv.RwTx, from uint64) (err error) {
 }
 
 // ReadTd retrieves a block's total difficulty corresponding to the hash.
-func ReadTd(db kv.Getter, hash common.Hash, number uint64) (*big.Int, error) {
+func ReadTd(db kv.Getter, hash common.Hash, number uint64) (*uint256.Int, error) {
 	data, err := db.GetOne(kv.HeaderTD, dbutils.HeaderKey(number, hash))
 	if err != nil {
 		return nil, fmt.Errorf("failed ReadTd: %w", err)
@@ -748,14 +757,14 @@ func ReadTd(db kv.Getter, hash common.Hash, number uint64) (*big.Int, error) {
 	if len(data) == 0 {
 		return nil, nil
 	}
-	td := new(big.Int)
+	td := new(uint256.Int)
 	if err := rlp.DecodeBytes(data, td); err != nil {
 		return nil, fmt.Errorf("invalid block total difficulty RLP: %x, %w", hash, err)
 	}
 	return td, nil
 }
 
-func ReadTdByHash(db kv.Getter, hash common.Hash) (*big.Int, error) {
+func ReadTdByHash(db kv.Getter, hash common.Hash) (*uint256.Int, error) {
 	headNumber := ReadHeaderNumber(db, hash)
 	if headNumber == nil {
 		return nil, nil
@@ -764,8 +773,8 @@ func ReadTdByHash(db kv.Getter, hash common.Hash) (*big.Int, error) {
 }
 
 // WriteTd stores the total difficulty of a block into the database.
-func WriteTd(db kv.Putter, hash common.Hash, number uint64, td *big.Int) error {
-	data, err := rlp.EncodeToBytes(td)
+func WriteTd(db kv.Putter, hash common.Hash, number uint64, td uint256.Int) error {
+	data, err := rlp.EncodeToBytes(&td)
 	if err != nil {
 		return fmt.Errorf("failed to RLP encode block total difficulty: %w", err)
 	}
@@ -800,8 +809,15 @@ func ReadBlock(tx kv.Getter, hash common.Hash, number uint64) *types.Block {
 	if body == nil {
 		return nil
 	}
-	block := types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals)
-	return block
+	var bal []byte
+	// Carry the BAL sidecar (secondary storage) so a block reconstructed from the
+	// DB carries its BAL like its header/body. Only Amsterdam+ blocks have one.
+	if header.HasBAL() {
+		if data, err := ReadBlockAccessListBytes(tx, hash, number); err == nil && len(data) > 0 {
+			bal = bytes.Clone(data)
+		}
+	}
+	return types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals, bal)
 }
 
 // HasBlock - is more efficient than ReadBlock because doesn't read transactions.
@@ -883,24 +899,24 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (deleted int
 			txIDBytes := make([]byte, 8)
 			for txID := b.BaseTxnID.U64(); txID <= b.BaseTxnID.LastSystemTx(b.TxCount); txID++ {
 				binary.BigEndian.PutUint64(txIDBytes, txID)
-				if err = tx.Delete(kv.EthTx, txIDBytes); err != nil {
+				if err := tx.Delete(kv.EthTx, txIDBytes); err != nil {
 					return deleted, err
 				}
 			}
 		}
 		// Copying k because otherwise the same memory will be reused
 		// for the next key and Delete below will end up deleting 1 more record than required
-		kCopy := common.Copy(k)
-		if err = tx.Delete(kv.Senders, kCopy); err != nil {
+		kCopy := bytes.Clone(k)
+		if err := tx.Delete(kv.Senders, kCopy); err != nil {
 			return deleted, err
 		}
-		if err = tx.Delete(kv.BlockBody, kCopy); err != nil {
+		if err := tx.Delete(kv.BlockBody, kCopy); err != nil {
 			return deleted, err
 		}
-		if err = tx.Delete(kv.BlockAccessList, kCopy); err != nil {
+		if err := tx.Delete(kv.BlockAccessList, kCopy); err != nil {
 			return deleted, err
 		}
-		if err = tx.Delete(kv.Headers, kCopy); err != nil {
+		if err := tx.Delete(kv.Headers, kCopy); err != nil {
 			return deleted, err
 		}
 
@@ -934,14 +950,14 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 			txIDBytes := make([]byte, 8)
 			for txID := b.BaseTxnID.U64(); txID <= b.BaseTxnID.LastSystemTx(b.TxCount); txID++ {
 				binary.BigEndian.PutUint64(txIDBytes, txID)
-				if err = tx.Delete(kv.EthTx, txIDBytes); err != nil {
+				if err := tx.Delete(kv.EthTx, txIDBytes); err != nil {
 					return err
 				}
 			}
 		}
 		// Copying k because otherwise the same memory will be reused
 		// for the next key and Delete below will end up deleting 1 more record than required
-		kCopy := common.Copy(k)
+		kCopy := bytes.Clone(k)
 		if err := tx.Delete(kv.Senders, kCopy); err != nil {
 			return err
 		}
@@ -998,6 +1014,7 @@ func ReadHeaderByHash(db kv.Getter, hash common.Hash) (*types.Header, error) {
 	return ReadHeader(db, hash, *number), nil
 }
 
+// DeleteNewerEpochs drops [blockNum, ∞)
 func DeleteNewerEpochs(tx kv.RwTx, number uint64) error {
 	if err := tx.ForEach(kv.PendingEpoch, hexutil.EncodeTs(number), func(k, v []byte) error {
 		return tx.Delete(kv.PendingEpoch, k)
@@ -1063,7 +1080,7 @@ func WritePendingEpoch(tx kv.RwTx, blockNum uint64, blockHash common.Hash, trans
 }
 
 // Transitioned returns true if the block number comes after POS transition or is the last POW block
-func Transitioned(db kv.Getter, blockNum uint64, terminalTotalDifficulty *big.Int) (trans bool, err error) {
+func Transitioned(db kv.Getter, blockNum uint64, terminalTotalDifficulty *uint256.Int) (trans bool, err error) {
 	if terminalTotalDifficulty == nil {
 		return false, nil
 	}
@@ -1128,19 +1145,15 @@ func PruneTable(tx kv.RwTx, table string, pruneTo uint64, ctx context.Context, l
 			break
 		}
 
-		select {
-		case <-logEvery.C:
-			logger.Info(fmt.Sprintf("[%s] pruning table periodic progress", logPrefix), "table", table, "blockNum", blockNum)
-		default:
-		}
-
 		if err = c.DeleteCurrent(); err != nil {
 			return fmt.Errorf("failed to remove for block %d: %w", blockNum, err)
 		}
-		if i%100 == 0 {
+		if i%1000 == 0 {
 			select {
 			case <-ctx.Done():
 				return common.ErrStopped
+			case <-logEvery.C:
+				logger.Info(fmt.Sprintf("[%s] pruning table periodic progress", logPrefix), "table", table, "blockNum", blockNum)
 			default:
 			}
 			if time.Since(t) > timeout {
@@ -1250,7 +1263,7 @@ type RCacheV2Query struct {
 
 // doesn't do DeriveFieldsV4ForCachedReceipt
 func ReceiptCacheV2Stream(tx kv.TemporalTx, fromTxNum, toTxNum uint64) (stream.Duo[uint64, *types.Receipt], error) {
-	it, err := tx.Debug().TraceKey(kv.RCacheDomain, receiptCacheKey, fromTxNum, toTxNum)
+	it, err := tx.Debug().TraceKey(kv.RCacheDomain, rawtemporaldb.ReceiptCacheKey, fromTxNum, toTxNum)
 	if err != nil {
 		return nil, err
 	}
@@ -1273,7 +1286,7 @@ func ReceiptCacheV2Stream(tx kv.TemporalTx, fromTxNum, toTxNum uint64) (stream.D
 }
 
 func ReadReceiptCacheV2(tx kv.TemporalTx, query RCacheV2Query) (*types.Receipt, bool, error) {
-	v, ok, err := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, query.TxNum+1 /*history storing value BEFORE-change*/)
+	v, ok, err := tx.HistorySeek(kv.RCacheDomain, rawtemporaldb.ReceiptCacheKey, query.TxNum+1 /*history storing value BEFORE-change*/)
 	if err != nil {
 		return nil, false, err
 	}
@@ -1297,6 +1310,7 @@ func ReadReceiptCacheV2(tx kv.TemporalTx, query RCacheV2Query) (*types.Receipt, 
 func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdbv3.TxNumsReader) (res types.Receipts, err error) {
 	blockHash := block.Hash()
 	blockNum := block.NumberU64()
+	transactions := block.Transactions()
 
 	minTxNum, err := txNumReader.Min(context.Background(), tx, blockNum)
 	if err != nil {
@@ -1307,8 +1321,9 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 		return
 	}
 
+	receiptIdx := 0
 	for txNum := minTxNum; txNum < maxTxNum+1; txNum++ {
-		v, ok, err := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txNum+1)
+		v, ok, err := tx.HistorySeek(kv.RCacheDomain, rawtemporaldb.ReceiptCacheKey, txNum+1)
 		if err != nil {
 			return nil, err
 		}
@@ -1325,53 +1340,25 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 			return nil, fmt.Errorf("ReadReceiptsCacheV2: deserialize %d, len(v)=%d, %w", blockNum, len(v), err)
 		}
 		x := (*types.Receipt)(receipt)
-		transactions := block.Transactions()
 		txnIdx := int(receipt.TransactionIndex)
-		if txnIdx < 0 || txnIdx >= len(transactions) {
-			return nil, fmt.Errorf("ReadReceiptsCacheV2: out of range txnIdx=%d, len(transactions)=%d", txnIdx, len(transactions))
+		if txnIdx < 0 || txnIdx != receiptIdx || txnIdx >= len(transactions) {
+			// RCacheV2 is read in txNum order. The stored transaction index must
+			// match the next receipt position, otherwise derive the block instead.
+			return nil, nil
 		}
 		txn := transactions[txnIdx]
 		x.DeriveFieldsV4ForCachedReceipt(blockHash, blockNum, txn.Hash(), true)
 		res = append(res, x)
+		receiptIdx++
+	}
+	if receiptIdx != len(transactions) {
+		// Block receipt RPCs require the full ordered receipt set.
+		return nil, nil
 	}
 	return res, nil
 }
 
 func WriteReceiptCacheV2(tx kv.TemporalPutDel, receipt *types.Receipt, txNum uint64) error {
-	var toWrite []byte
-
-	if receipt != nil {
-		if len(receipt.Logs) > 0 && int(receipt.FirstLogIndexWithinBlock) != int(receipt.Logs[0].Index) {
-			panic(fmt.Sprintf("assert: FirstLogIndexWithinBlock is wrong: %d %d, blockNum=%d", receipt.FirstLogIndexWithinBlock, receipt.Logs[0].Index, receipt.BlockNumber.Uint64()))
-		}
-
-		var err error
-		storageReceipt := (*types.ReceiptForStorage)(receipt)
-		toWrite, err = rlp.EncodeToBytes(storageReceipt)
-		if err != nil {
-			return fmt.Errorf("WriteReceiptCache: %w", err)
-		}
-		if dbg.AssertEnabled {
-			storageReceipt2 := &types.ReceiptForStorage{}
-			rlp.DecodeBytes(toWrite, storageReceipt2)
-			if storageReceipt.ContractAddress != storageReceipt2.ContractAddress {
-				panic(fmt.Sprintf("assert: %x, %x\n", storageReceipt.ContractAddress, storageReceipt2.ContractAddress))
-			}
-			if storageReceipt.FirstLogIndexWithinBlock != storageReceipt2.FirstLogIndexWithinBlock {
-				panic(fmt.Sprintf("assert: %x, %x\n", storageReceipt.FirstLogIndexWithinBlock, storageReceipt2.FirstLogIndexWithinBlock))
-			}
-		}
-	} else {
-		toWrite = []byte{}
-	}
-
-	if err := tx.DomainPut(kv.RCacheDomain, receiptCacheKey, toWrite, txNum, nil); err != nil {
-		return fmt.Errorf("WriteReceiptCache: %w", err)
-	}
-
-	return nil
+	var w rawtemporaldb.ReceiptWriter
+	return w.Append(tx, receipt, txNum)
 }
-
-var (
-	receiptCacheKey = []byte{0x0}
-)

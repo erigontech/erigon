@@ -24,7 +24,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
@@ -73,7 +72,7 @@ type Transaction interface {
 	AsMessage(s Signer, baseFee *uint256.Int, rules *chain.Rules) (*Message, error)
 	WithSignature(signer Signer, sig []byte) (Transaction, error)
 	Hash() common.Hash
-	SigningHash(chainID *big.Int) common.Hash
+	SigningHash(chainID *uint256.Int) common.Hash
 	GetData() []byte
 	GetAccessList() AccessList
 	GetAuthorizations() []Authorization // If this is a network wrapper, returns the unwrapped txn. Otherwise returns itself.
@@ -104,6 +103,25 @@ type TransactionMisc struct {
 	// caches
 	hash atomic.Pointer[common.Hash]
 	from accounts.Address
+}
+
+// The sender-cache trio is promoted from the embedding type when it doesn't
+// define its own; cachedSender being unexported, this is what lets a
+// transaction type outside this package satisfy the Transaction interface.
+func (t *TransactionMisc) cachedSender() (sender accounts.Address, ok bool) {
+	s := t.from
+	if s.IsNil() {
+		return sender, false
+	}
+	return s, true
+}
+
+func (t *TransactionMisc) GetSender() (accounts.Address, bool) {
+	return t.cachedSender()
+}
+
+func (t *TransactionMisc) SetSender(addr accounts.Address) {
+	t.from = addr
 }
 
 // CalcEffectiveGasTip computes the effective gas tip given a transaction's tip/fee caps and a base fee.
@@ -153,13 +171,14 @@ func DecodeRLPTransaction(s *rlp.Stream, blobTxnsAreWrappedWithBlobs bool) (Tran
 		}
 		txn = legacy
 	case rlp.String:
-		// Decode the EIP-2718 typed txn envelope.
+		// Decode the EIP-2718 typed txn envelope. Safe to view: every decoder
+		// copies out the fields it keeps.
 		var b []byte
-		if b, err = s.Bytes(); err != nil {
+		if b, err = s.ViewBytes(); err != nil {
 			return nil, err
 		}
-		if len(b) == 0 {
-			return nil, rlp.EOL
+		if len(b) > 0 && b[0] >= rlp.SingleByteThreshold {
+			return nil, ErrInvalidTxType
 		}
 		if txn, err = UnmarshalTransactionFromBinary(b, blobTxnsAreWrappedWithBlobs); err != nil {
 			return nil, err
@@ -190,8 +209,8 @@ func DecodeWrappedTransaction(data []byte) (Transaction, error) {
 	if data[0] < 0x80 { // the encoding is canonical, not RLP
 		return UnmarshalTransactionFromBinary(data, blobTxnsAreWrappedWithBlobs)
 	}
-	s, done := rlp.NewStreamFromPool(bytes.NewReader(data), uint64(len(data)))
-	defer done()
+	s := rlp.NewBytesStream(data)
+	defer rlp.PutStream(s)
 	return DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs)
 }
 
@@ -204,8 +223,8 @@ func DecodeTransaction(data []byte) (Transaction, error) {
 	if data[0] < 0x80 { // the encoding is canonical, not RLP
 		return UnmarshalTransactionFromBinary(data, blobTxnsAreWrappedWithBlobs)
 	}
-	s, done := rlp.NewStreamFromPool(bytes.NewReader(data), uint64(len(data)))
-	defer done()
+	s := rlp.NewBytesStream(data)
+	defer rlp.PutStream(s)
 	tx, err := DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs)
 	if err != nil {
 		return nil, err
@@ -218,8 +237,8 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 	if len(data) <= 1 {
 		return nil, fmt.Errorf("short input: %v", len(data))
 	}
-	s, done := rlp.NewStreamFromPool(bytes.NewReader(data[1:]), uint64(len(data)-1))
-	defer done()
+	s := rlp.NewBytesStream(data[1:])
+	defer rlp.PutStream(s)
 	var t Transaction
 	switch data[0] {
 	case AccessListTxType:
@@ -237,6 +256,10 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 	case AccountAbstractionTxType:
 		t = &AccountAbstractionTransaction{}
 	default:
+		if spec, ok := registeredTxType(data[0]); ok {
+			t = spec.New()
+			break
+		}
 		if data[0] >= 0x80 {
 			// txn is type legacy which is RLP encoded
 			return DecodeTransaction(data)
@@ -292,7 +315,7 @@ func MarshalTransactionsBinary(txs Transactions) ([][]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		result[i] = common.Copy(buf.Bytes())
+		result[i] = bytes.Clone(buf.Bytes())
 	}
 	return result, nil
 }
@@ -320,15 +343,19 @@ func sanityCheckSignature(v *uint256.Int, r *uint256.Int, s *uint256.Int, maybeP
 	}
 
 	var plainV byte
-	if isProtectedV(v) {
-		chainID := DeriveChainId(v).Uint64()
-		plainV = byte(v.Uint64() - 35 - 2*chainID)
-	} else if maybeProtected {
+	switch {
+	case isProtectedV(v):
+		chainID, err := DeriveChainId(v)
+		if err != nil {
+			return err
+		}
+		plainV = byte(v.Uint64() - 35 - 2*chainID.Uint64())
+	case maybeProtected:
 		// Only EIP-155 signatures can be optionally protected. Since
 		// we determined this v value is not protected, it must be a
 		// raw 27 or 28.
 		plainV = byte(v.Uint64() - 27)
-	} else {
+	default:
 		// If the signature is not optionally protected, we assume it
 		// must already be equal to the recovery id.
 		plainV = byte(v.Uint64())
@@ -340,10 +367,10 @@ func sanityCheckSignature(v *uint256.Int, r *uint256.Int, s *uint256.Int, maybeP
 	return nil
 }
 
-func isProtectedV(V *uint256.Int) bool {
-	if V.BitLen() <= 8 {
-		v := V.Uint64()
-		return v != 27 && v != 28 && v != 1 && v != 0
+func isProtectedV(v *uint256.Int) bool {
+	if v.BitLen() <= 8 {
+		vVal := v.Uint64()
+		return vVal != 27 && vVal != 28 && vVal != 1 && vVal != 0
 	}
 	// anything not 27 or 28 is considered protected
 	return true

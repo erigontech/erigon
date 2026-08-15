@@ -6,7 +6,7 @@ description: "Complete API reference for Erigon — JSON-RPC namespaces, GraphQL
 
 # RPC Service
 
-The Erigon RPC Service, managed by Erigon's modular [RPC daemon](/fundamentals/modules/rpc-daemon), supports various API namespaces, which can be enabled or disabled using the `--http.api` flag. The available namespaces include:
+The Erigon RPC Service, managed by Erigon's modular [RPC Daemon](/fundamentals/modules/rpc-daemon), supports various API namespaces, which can be enabled or disabled using the `--http.api` flag. The available namespaces include:
 
 * [`eth`](/interacting-with-erigon/eth): Standard Ethereum API.
 * [`erigon`](/interacting-with-erigon/erigon): Erigon-specific extensions.
@@ -23,13 +23,13 @@ The Erigon RPC Service, managed by Erigon's modular [RPC daemon](/fundamentals/m
 * [`gRPC`](/interacting-with-erigon/grpc): API for lower-level data access.
 * [`overlay`](/interacting-with-erigon/overlay): Erigon-specific overlay API for replaying blocks with state overrides (archive nodes only).
 * [`parity`](/interacting-with-erigon/parity): Partial OpenEthereum compatibility (`parity_listStorageKeys`).
-* [`graphql`](/interacting-with-erigon/graphql): GraphQL endpoint following EIP-1767.
+* [`graphql`](/interacting-with-erigon/graphql): GraphQL endpoint following the ethereum/execution-apis schema.
 
 For a complete reference on the standard Ethereum JSON-RPC methods, especially those in the `eth`, `net`, and `web3` namespaces, it is recommended to consult the general documentation on [ethereum.org's JSON-RPC API page](https://ethereum.org/en/developers/docs/apis/json-rpc/). Additionally, for the formal specification of the `debug`, `engine`, and `eth` namespaces, including unique, detailed descriptions for methods like `eth_getProof` and `eth_simulateV1`, refer to the [Execution APIs documentation](https://ethereum.github.io/execution-apis).
 
 ## Erigon RPC Transports
 
-Erigon supports [HTTP](/interacting-with-erigon/#http), [HTTPS](/interacting-with-erigon/#https), [WebSockets](/interacting-with-erigon/#websockets), [IPC](/interacting-with-erigon/#ipc), [gRPC](/interacting-with-erigon/#grpc) and [GraphQL](/interacting-with-erigon/#graphql) through its RPC daemon.
+Erigon supports [HTTP](/interacting-with-erigon/#http), [HTTPS](/interacting-with-erigon/#https), [WebSockets](/interacting-with-erigon/#websockets), [IPC](/interacting-with-erigon/#ipc), [gRPC](/interacting-with-erigon/#grpc) and [GraphQL](/interacting-with-erigon/#graphql) through its RPC Daemon.
 
 ### HTTP
 
@@ -87,6 +87,22 @@ Erigon supports HTTPS and HTTP/2 out of the box:
 rpcdaemon --https.enabled --https.cert /path/to/cert.pem --https.key /path/to/key.pem
 ```
 
+**New in v3.7:** the same flags work on the `erigon` binary, so the embedded RPC server can serve TLS without a separate
+daemon:
+
+```bash
+erigon --https.enabled --https.cert /path/to/cert.pem --https.key /path/to/key.pem
+```
+
+The HTTPS listener is independent of the plain HTTP one and binds its own port: `--https.port`, which defaults to
+`--http.port` + 363 (`8908` with a default `--http.port`) — the derivation reads `--http.port` whether or not the plain
+HTTP listener is running. Both `--https.cert` and `--https.key` are required — if either is missing the
+port still binds but TLS serving fails with only a `Failed to serve https endpoint` warning in the log. Setting
+`--https.url` enables the HTTPS server on its own and overrides `--https.addr` and `--https.port`.
+
+Note that `--http=false` switches off the entire RPC stack, HTTPS included. For a TLS-only node, keep `--http` and
+disable just the plain HTTP listener with `--http.enabled=false`.
+
 ### WebSockets
 
 WebSockets is a bidirectional transport protocol. Most modern browsers support WebSockets.
@@ -110,10 +126,21 @@ erigon --http --ws --http.api eth,net,debug,trace
 
 IPC is a simpler transport protocol for use in local environments where the node and the client exist on the same machine.
 
-**Note:** IPC is only available through the separate `rpcdaemon` process, not the main `erigon` binary. Erigon uses a
-modular architecture where RPC functionality is handled by a standalone daemon.
+**New in v3.7:** the `erigon` binary accepts `--socket.enabled` and `--socket.url` directly, so IPC no longer requires a
+separate process:
 
-#### Enabling IPC with rpcdaemon
+```bash
+erigon --datadir=<path-to-datadir> --socket.enabled --socket.url unix:///<path-to-datadir>/erigon.ipc
+```
+
+The default `--socket.url` is `unix:///var/run/erigon.sock`, which is usually not writable by the Erigon user — point it
+at your datadir as above. On earlier releases these flags exist only on `rpcdaemon`, and the geth-style `--ipcpath`
+endpoint remains permanently disabled in the `erigon` binary regardless of release.
+
+#### Enabling IPC with RPC Daemon
+
+IPC is also available from the standalone daemon, which is still the right choice when RPC serving runs on its own
+process or host.
 
 First, start Erigon with the private API enabled:
 
@@ -121,7 +148,7 @@ First, start Erigon with the private API enabled:
 erigon --datadir=<path-to-datadir> --private.api.addr=localhost:9090
 ```
 
-Then, in a separate terminal, start rpcdaemon with IPC enabled:
+Then, in a separate terminal, start RPC Daemon with IPC enabled:
 
 ```bash
 rpcdaemon --private.api.addr=localhost:9090 --socket.enabled --socket.url unix:///<path-to-datadir>/erigon.ipc

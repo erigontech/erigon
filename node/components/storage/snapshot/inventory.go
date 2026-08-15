@@ -17,7 +17,7 @@
 package snapshot
 
 import (
-	"sort"
+	"slices"
 	"sync"
 )
 
@@ -250,7 +250,7 @@ func (inv *Inventory) Domains() []Domain {
 			domains = append(domains, d)
 		}
 	}
-	sort.Slice(domains, func(i, j int) bool { return domains[i] < domains[j] })
+	slices.Sort(domains)
 	return domains
 }
 

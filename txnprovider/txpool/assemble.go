@@ -56,7 +56,7 @@ func Assemble(
 		return nil, nil, err
 	}
 
-	chainID, _ := uint256.FromBig(chainConfig.ChainID)
+	chainID := new(uint256.Int).Set(chainConfig.ChainID)
 
 	newTxns := make(chan Announcements, 1024)
 	newSlotsStreams := &NewSlotsStreams{}

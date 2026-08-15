@@ -126,7 +126,7 @@ Required flags (substitute values discovered in Step 2):
 - `--networkid=<chainId>`
 - `--bootnodes="<comma-joined enodes from inventory>"`
 - `--staticpeers="<same enodes>"` — small devnets benefit from explicit static peers
-- All offset ports (HTTP, WS, authrpc, P2P, p2p.allowed-ports, torrent, private.api.addr, pprof, metrics)
+- All offset ports (HTTP, WS, authrpc, P2P, torrent, private.api.addr, pprof, metrics)
 - `--http`, `--http.api=eth,erigon,engine,debug,net,trace,txpool,web3`, `--http.addr=127.0.0.1`
 - `--ws`
 - `--authrpc.addr=127.0.0.1`, `--authrpc.vhosts=*`

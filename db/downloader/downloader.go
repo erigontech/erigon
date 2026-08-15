@@ -471,11 +471,9 @@ func (d *Downloader) ManifestReady() <-chan struct{} {
 // It discovers chain.toml from P2P peers and either merges new entries (acquiring mode)
 // or verifies against local entries (verify mode after initial sync).
 func (d *Downloader) StartChainTomlDiscovery(ctx context.Context, networkName string) {
-	d.wg.Add(1)
-	go func() {
-		defer d.wg.Done()
+	d.wg.Go(func() {
 		d.chainTomlDiscoveryLoop(ctx, networkName)
-	}()
+	})
 }
 
 // StartTorrentPeerManager launches the background torrent peer manager that
@@ -490,11 +488,9 @@ func (d *Downloader) StartTorrentPeerManager(ctx context.Context) {
 	}
 
 	d.peerManager = NewTorrentPeerManager(d.torrentClient, fn, d.logger)
-	d.wg.Add(1)
-	go func() {
-		defer d.wg.Done()
+	d.wg.Go(func() {
 		d.peerManager.Run(ctx)
-	}()
+	})
 }
 
 // Check snapshot data looks right.
@@ -750,7 +746,10 @@ func (d *Downloader) VerifyData(
 func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error {
 	ff, isStateFile, ok := snaptype.ParseFileName("", name)
 	if ok {
-		if !isStateFile && ff.Type == nil {
+		// Caplin beacon-state snapshots have no registered global snaptype, so
+		// ParseFileName leaves ff.Type nil but populates CaplinTypeString; they are
+		// still seedable by name.
+		if !isStateFile && ff.Type == nil && ff.CaplinTypeString == "" {
 			return fmt.Errorf("nil ptr after parsing file: %s", name)
 		}
 	}
@@ -834,9 +833,7 @@ func (d *Downloader) startSnapshotsDownload(
 	var batchCtx context.Context
 	batchCtx, batch.cancel = context.WithCancelCause(d.ctx)
 
-	batch.all.Add(1)
-	go func() {
-		defer batch.all.Done()
+	batch.all.Go(func() {
 		d.logDownload(
 			batchCtx,
 			items,
@@ -854,7 +851,7 @@ func (d *Downloader) startSnapshotsDownload(
 				}
 			},
 		)
-	}()
+	})
 
 	defer func() {
 		if err != nil {
@@ -884,6 +881,8 @@ func (d *Downloader) decDownloadRequests() {
 // Returns all torrents, with names, because if a Torrent info isn't available, we can't just yank
 // the name from there.
 func (d *Downloader) allActiveSnapshots() (ret []snapshot) {
+	d.lock.RLock()
+	defer d.lock.RUnlock()
 	for name, t := range d.torrentsByName {
 		ret = append(ret, snapshot{
 			Name:     name,
@@ -1304,6 +1303,11 @@ func (d *Downloader) addCompleteTorrent(
 		err = fmt.Errorf("loading metainfo from disk: %w", err)
 		return
 	}
+	// Hold d.lock only for the torrentsByName mutation, like the download add paths do,
+	// so it cannot race allActiveSnapshots' iteration (which holds only RLock). This is
+	// the sole caller path that reaches addTorrent without the caller already holding it.
+	d.lock.Lock()
+	defer d.lock.Unlock()
 	return d.addCompleteTorrentFromMetainfo(name, mi)
 }
 
@@ -1501,8 +1505,8 @@ func (d *Downloader) logSyncStats(startTime time.Time, stats AggStats, target st
 	}
 
 	addCtx(
-		"time-left", calculateTime(remainingBytes, stats.CompletionRate),
-		"time-elapsed", time.Since(startTime).Truncate(time.Second).String(),
+		"eta", calculateTime(remainingBytes, stats.CompletionRate),
+		"elapsed", time.Since(startTime).Truncate(time.Second).String(),
 	)
 
 	d.logStatsInner(log.LvlInfo, stats, fmt.Sprintf("Syncing %v", target), logCtx, true)
@@ -1533,7 +1537,7 @@ func (d *Downloader) logStatsInner(
 		}
 	}
 	addCtx(
-		"file-metadata", fmt.Sprintf("%d/%d", stats.MetadataReady, stats.NumTorrents),
+		"metadata", fmt.Sprintf("%d/%d", stats.MetadataReady, stats.NumTorrents),
 		"files", fmt.Sprintf(
 			"%d/%d",
 			// For now it's 1:1 files:torrents.
@@ -1543,7 +1547,7 @@ func (d *Downloader) logStatsInner(
 		"data", func() string {
 			if haveAllMetadata {
 				return fmt.Sprintf(
-					"%.2f%% - %s/%s",
+					"%.2f%%,%s/%s",
 					percentDone,
 					common.ByteCount(bytesDone),
 					common.ByteCount(stats.BytesTotal),
@@ -1624,11 +1628,7 @@ func (d *Downloader) spawn(f func()) bool {
 	if d.ctx.Err() != nil {
 		return false
 	}
-	d.wg.Add(1)
-	go func() {
-		defer d.wg.Done()
-		f()
-	}()
+	d.wg.Go(f)
 	return true
 }
 

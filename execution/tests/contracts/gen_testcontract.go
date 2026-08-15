@@ -9,19 +9,17 @@ import (
 	"reflect"
 	"strings"
 
-	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/p2p/event"
 )
 
 // Reference imports to suppress errors if they are not otherwise used.
 var (
 	_ = big.NewInt
 	_ = strings.NewReader
-	_ = ethereum.NotFound
 	_ = bind.Bind
 	_ = common.Big1
 	_ = types.BloomLookup
@@ -158,7 +156,7 @@ func bindTestcontract(address common.Address, caller bind.ContractCaller, transa
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_Testcontract *TestcontractRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
+func (_Testcontract *TestcontractRaw) Call(opts *bind.CallOpts, result *[]any, method string, params ...any) error {
 	return _Testcontract.Contract.TestcontractCaller.contract.Call(opts, result, method, params...)
 }
 
@@ -169,7 +167,7 @@ func (_Testcontract *TestcontractRaw) Transfer(opts *bind.TransactOpts) (types.T
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_Testcontract *TestcontractRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
+func (_Testcontract *TestcontractRaw) Transact(opts *bind.TransactOpts, method string, params ...any) (types.Transaction, error) {
 	return _Testcontract.Contract.TestcontractTransactor.contract.Transact(opts, method, params...)
 }
 
@@ -177,7 +175,7 @@ func (_Testcontract *TestcontractRaw) Transact(opts *bind.TransactOpts, method s
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_Testcontract *TestcontractCallerRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
+func (_Testcontract *TestcontractCallerRaw) Call(opts *bind.CallOpts, result *[]any, method string, params ...any) error {
 	return _Testcontract.Contract.contract.Call(opts, result, method, params...)
 }
 
@@ -188,7 +186,7 @@ func (_Testcontract *TestcontractTransactorRaw) Transfer(opts *bind.TransactOpts
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_Testcontract *TestcontractTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
+func (_Testcontract *TestcontractTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...any) (types.Transaction, error) {
 	return _Testcontract.Contract.contract.Transact(opts, method, params...)
 }
 
@@ -196,7 +194,7 @@ func (_Testcontract *TestcontractTransactorRaw) Transact(opts *bind.TransactOpts
 //
 // Solidity: function balances(address ) view returns(uint256)
 func (_Testcontract *TestcontractCaller) Balances(opts *bind.CallOpts, arg0 common.Address) (*big.Int, error) {
-	var out []interface{}
+	var out []any
 	err := _Testcontract.contract.Call(opts, &out, "balances", arg0)
 
 	if err != nil {

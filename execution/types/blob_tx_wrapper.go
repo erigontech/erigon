@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"math/bits"
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
@@ -167,8 +166,8 @@ func (blobs Blobs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
 	if err := rlp.EncodeListPrefix(payloadSize, w, b); err != nil {
 		return err
 	}
-	for _, blob := range blobs {
-		if err := rlp.EncodeString(blob[:], w, b); err != nil {
+	for i := range blobs {
+		if err := rlp.EncodeString(blobs[i][:], w, b); err != nil {
 			return err
 		}
 	}
@@ -200,7 +199,7 @@ func (blobs Blobs) ComputeCommitmentsAndProofs() (commitments []KZGCommitment, v
 	versionedHashes = make([]common.Hash, len(blobs))
 
 	kzgCtx := libkzg.Ctx()
-	for i := 0; i < len(blobs); i++ {
+	for i := range blobs {
 		commitment, err := kzgCtx.BlobToKZGCommitment((*goethkzg.Blob)(&blobs[i]), 1 /*numGoRoutines*/)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("could not convert blob to commitment: %w", err)
@@ -312,7 +311,7 @@ func (txw *BlobTxWrapper) WithSignature(signer Signer, sig []byte) (Transaction,
 
 func (txw *BlobTxWrapper) Hash() common.Hash { return txw.Tx.Hash() }
 
-func (txw *BlobTxWrapper) SigningHash(chainID *big.Int) common.Hash {
+func (txw *BlobTxWrapper) SigningHash(chainID *uint256.Int) common.Hash {
 	return txw.Tx.SigningHash(chainID)
 }
 

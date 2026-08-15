@@ -16,7 +16,6 @@
 */**/*dapps*
 build/_vendor/pkg
 /*.a
-docs/readthedocs/build
 /.VSCodeCounter
 #*
 .#*
@@ -123,6 +122,7 @@ mdbx.lck
 
 .claude/projects/
 */**/*.local.json
+.claude/skills/
 
 # Prevent accidental commit of locally-built binaries
 /erigon
@@ -137,3 +137,5 @@ agentspecs/
 .gomodcache
 _artifacts
 gocache
+.claude/scheduled_tasks.lock
+test-fixtures-cache

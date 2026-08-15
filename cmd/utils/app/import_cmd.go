@@ -22,29 +22,30 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 	"time"
 
-	"github.com/urfave/cli/v2"
+	"github.com/holiman/uint256"
+	"github.com/urfave/cli/v3"
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/cmd/erigon/node"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
+	erigoncli "github.com/erigontech/erigon/node/cli"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/eth"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
@@ -53,6 +54,8 @@ import (
 const (
 	importBatchSize = 2500
 )
+
+var errInterrupted = errors.New("interrupted")
 
 var importCommand = cli.Command{
 	Action:    MigrateFlags(importChain),
@@ -73,7 +76,7 @@ If only one file is used, import error will result in failure. If several files 
 processing will proceed even if an individual RLP-file import failure occurs.`,
 }
 
-func importChain(cliCtx *cli.Context) error {
+func importChain(ctx context.Context, cliCtx *cli.Command) error {
 	if cliCtx.NArg() < 1 {
 		utils.Fatalf("This command requires an argument.")
 	}
@@ -87,13 +90,18 @@ func importChain(cliCtx *cli.Context) error {
 		utils.NATFlag.Name:               "none",
 		utils.NoDownloaderFlag.Name:      "true",
 		utils.ExternalConsensusFlag.Name: "true",
+		utils.MCPDisableFlag.Name:        "true",
+		utils.TxPoolDisableFlag.Name:     "true",
+		utils.HTTPEnabledFlag.Name:       "false",
+		erigoncli.PrivateApiAddr.Name:    "",
+		utils.AuthRpcPort.Name:           "0", // no disable flag; 0 binds an ephemeral port
 	} {
 		if err := cliCtx.Set(flag, value); err != nil {
 			return fmt.Errorf("importChain: set %s=%s: %w", flag, value, err)
 		}
 	}
 
-	logger, tracer, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, tracer, _, _, err := debug.Setup(ctx, cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -102,25 +110,51 @@ func importChain(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
+	// p2p has no disable flag; a one-shot import needs no peers.
+	nodeCfg.DisableSentry = true
 
-	ethCfg := node.NewEthConfigUrfave(cliCtx, nodeCfg, logger)
-	stack := makeConfigNode(cliCtx.Context, nodeCfg, logger)
+	ethCfg := node.NewEthConfigUrfave(ctx, cliCtx, nodeCfg, logger)
+	// Skip the ~2s KZG warmup: Stop waits it out on exit, and kzg.Ctx()
+	// lazy-inits if a block actually needs the trusted setup.
+	ethCfg.WarmupKzgCtxOnInit = false
+	stack := makeConfigNode(ctx, nodeCfg, logger)
 	defer stack.Close()
 
-	ethereum, err := eth.New(cliCtx.Context, stack, ethCfg, logger, tracer)
+	ethereum, err := eth.New(ctx, stack, ethCfg, logger, tracer)
 	if err != nil {
 		return err
 	}
+	// The stack is never Start()ed, so the deferred stack.Close() skips
+	// lifecycle Stop — stop the backend explicitly to close chaindata on exit.
+	defer ethereum.Stop()
+
 	err = ethereum.Init(stack, ethCfg, ethCfg.Genesis.Config)
 	if err != nil {
 		return err
 	}
 
-	if err := ImportChain(ethereum, ethereum.ChainDB(), cliCtx.Args().First(), logger); err != nil {
-		return err
-	}
+	return importFiles(cliCtx.Args().Slice(), logger, func(fn string) error {
+		return ImportChain(ethereum, ethereum.ChainDB(), fn, logger)
+	})
+}
 
-	return nil
+// importFiles imports each file in order; with more than one file, per-file
+// failures are logged and skipped (matching go-ethereum), except a user
+// interrupt aborts the whole command.
+func importFiles(files []string, logger log.Logger, importOne func(fn string) error) error {
+	var importErr error
+	for _, fn := range files {
+		if err := importOne(fn); err != nil {
+			importErr = err
+			if errors.Is(err, errInterrupted) {
+				return err
+			}
+			if len(files) > 1 {
+				logger.Error("Import error", "file", fn, "err", err)
+			}
+		}
+	}
+	return importErr
 }
 
 func ImportChain(ethereum *eth.Ethereum, chainDB kv.RwDB, fn string, logger log.Logger) error {
@@ -169,7 +203,7 @@ func ImportChain(ethereum *eth.Ethereum, chainDB kv.RwDB, fn string, logger log.
 	for batch := 0; ; batch++ {
 		// Load a batch of RLP blocks.
 		if checkInterrupt() {
-			return errors.New("interrupted")
+			return errInterrupted
 		}
 		i := 0
 		for ; i < importBatchSize; i++ {
@@ -192,7 +226,7 @@ func ImportChain(ethereum *eth.Ethereum, chainDB kv.RwDB, fn string, logger log.
 		}
 		// Import the batch.
 		if checkInterrupt() {
-			return errors.New("interrupted")
+			return errInterrupted
 		}
 
 		br, _ := ethereum.BlockIO()
@@ -226,7 +260,7 @@ func ChainHasBlock(chainDB kv.RwDB, block *types.Block) bool {
 	return chainHasBlock
 }
 
-func missingBlocks(chainDB kv.RwDB, blocks []*types.Block, blockReader services.FullBlockReader) []*types.Block {
+func missingBlocks(chainDB kv.RwDB, blocks []*types.Block, blockReader dbservices.FullBlockReader) []*types.Block {
 	var headBlock *types.Block
 	chainDB.View(context.Background(), func(tx kv.Tx) (err error) {
 		headBlock, err = blockReader.CurrentBlock(tx)
@@ -248,10 +282,6 @@ func missingBlocks(chainDB kv.RwDB, blocks []*types.Block, blockReader services.
 	}
 
 	return nil
-}
-
-type stateChangesClient interface {
-	StateChanges(ctx context.Context, in *remoteproto.StateChangeRequest, opts ...grpc.CallOption) (remoteproto.KV_StateChangesClient, error)
 }
 
 func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool) error {
@@ -278,7 +308,7 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 	// expect when Hive imports one block per file.
 	firstBlock := chain.Blocks[0]
 	tipBlock := chain.TopBlock
-	var parentTd, currentHeadTd *big.Int
+	var parentTd, currentHeadTd *uint256.Int
 	var currentHeadHash common.Hash
 	var currentHeadNumber uint64
 	if err := ethereum.ChainDB().View(ctx, func(tx kv.Tx) error {
@@ -289,7 +319,7 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 			}
 			parentTd = td
 		} else {
-			parentTd = new(big.Int)
+			parentTd = new(uint256.Int)
 		}
 		if hash := rawdb.ReadHeadBlockHash(tx); hash != (common.Hash{}) {
 			if num := rawdb.ReadHeaderNumber(tx, hash); num != nil {
@@ -315,21 +345,25 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 	// UpdateForkChoice as before.
 	isPoW := tipBlock.Header().Difficulty.Sign() > 0
 	if setHead && isPoW && parentTd != nil && currentHeadTd != nil {
-		importedTipTd := new(big.Int).Set(parentTd)
+		importedTipTd := new(uint256.Int).Set(parentTd)
 		for _, b := range chain.Blocks {
-			importedTipTd.Add(importedTipTd, b.Header().Difficulty.ToBig())
+			if _, overflow := importedTipTd.AddOverflow(importedTipTd, &b.Header().Difficulty); overflow {
+				return fmt.Errorf("imported tip TD overflows uint256 at block %d", b.NumberU64())
+			}
 		}
 		if !ethash.ShouldReorg(currentHeadTd, currentHeadNumber, currentHeadHash, importedTipTd, tipBlock.NumberU64(), tipBlock.Hash()) {
 			// Side chain — write headers/bodies/TDs directly without executing
 			// or changing head.
 			return ethereum.ChainDB().Update(ctx, func(tx kv.RwTx) error {
-				td := new(big.Int).Set(parentTd)
+				td := new(uint256.Int).Set(parentTd)
 				for _, b := range chain.Blocks {
-					td.Add(td, b.Header().Difficulty.ToBig())
+					if _, overflow := td.AddOverflow(td, &b.Header().Difficulty); overflow {
+						return fmt.Errorf("side-chain TD overflows uint256 at block %d", b.NumberU64())
+					}
 					if err := rawdb.WriteHeader(tx, b.Header()); err != nil {
 						return fmt.Errorf("write side-chain header: %w", err)
 					}
-					if err := rawdb.WriteTd(tx, b.Hash(), b.NumberU64(), td); err != nil {
+					if err := rawdb.WriteTd(tx, b.Hash(), b.NumberU64(), *td); err != nil {
 						return fmt.Errorf("write side-chain TD: %w", err)
 					}
 					if _, err := rawdb.WriteRawBodyIfNotExists(tx, b.Hash(), b.NumberU64(), b.RawBody()); err != nil {
@@ -355,7 +389,7 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 
 	chainRW := chainreader.NewChainReaderEth1(ethereum.ChainConfig(), ethereum.ExecutionModule(), time.Hour)
 
-	if err := chainRW.InsertBlocksAndWait(ctx, chain.Blocks); err != nil {
+	if err := chainRW.InsertBlocks(ctx, chain.Blocks); err != nil {
 		return err
 	}
 

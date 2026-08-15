@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -24,14 +23,14 @@ func TestDependency(t *testing.T) {
 
 	dirs := datadir.New(t.TempDir())
 	logger := log.New()
-	dfs := btree.NewBTreeGOptions(filesItemLess, btree.Options{Degree: 128, NoLocks: false})
+	dfs := newDirtyFiles()
 	df1 := getPopulatedCommitmentFilesItem(t, dirs, 0, 1, false, logger)
 	df2 := getPopulatedCommitmentFilesItem(t, dirs, 1, 2, false, logger)
 	dfs.Set(df1)
 	dfs.Set(df2)
-	fg := func() *btree.BTreeG[*FilesItem] {
+	fg := func() *DirtyFiles {
 		// only commitment files
-		return dfs.Copy()
+		return dfs.copy()
 	}
 
 	dinfo := &DependentInfo{
@@ -65,16 +64,16 @@ func TestDependency_UnindexedMerged(t *testing.T) {
 
 	dirs := datadir.New(t.TempDir())
 	logger := log.New()
-	dfs := btree.NewBTreeGOptions(filesItemLess, btree.Options{Degree: 128, NoLocks: false})
+	dfs := newDirtyFiles()
 	df1 := getPopulatedCommitmentFilesItem(t, dirs, 0, 1, false, logger)
 	df2 := getPopulatedCommitmentFilesItem(t, dirs, 1, 2, false, logger)
 	df3 := getPopulatedCommitmentFilesItem(t, dirs, 0, 2, true, logger)
 	dfs.Set(df1)
 	dfs.Set(df2)
 	dfs.Set(df3)
-	fg := func() *btree.BTreeG[*FilesItem] {
+	fg := func() *DirtyFiles {
 		// only commitment files
-		return dfs.Copy()
+		return dfs.copy()
 	}
 
 	dinfo := &DependentInfo{
@@ -120,7 +119,7 @@ func TestDependency_DisableInterDomain(t *testing.T) {
 	// commitment domain files: 0-1, 1-2
 	cf01 := getPopulatedCommitmentFilesItem(t, dirs, 0, 1, false, logger)
 	cf12 := getPopulatedCommitmentFilesItem(t, dirs, 1, 2, false, logger)
-	commitmentFiles := btree.NewBTreeGOptions(filesItemLess, btree.Options{Degree: 128, NoLocks: false})
+	commitmentFiles := newDirtyFiles()
 	commitmentFiles.Set(cf01)
 	commitmentFiles.Set(cf12)
 
@@ -128,7 +127,7 @@ func TestDependency_DisableInterDomain(t *testing.T) {
 	// Reuse the same FilesItem objects — CheckDependentPresent only inspects
 	// startTxNum/endTxNum ranges, and reusing avoids Windows file-locking
 	// issues when two decompressors open the same path.
-	historyFiles := btree.NewBTreeGOptions(filesItemLess, btree.Options{Degree: 128, NoLocks: false})
+	historyFiles := newDirtyFiles()
 	historyFiles.Set(cf01)
 	historyFiles.Set(cf12)
 
@@ -137,7 +136,7 @@ func TestDependency_DisableInterDomain(t *testing.T) {
 	// Inter-domain: account → commitment
 	checker.AddDependency(AccountDomainUniversal, &DependentInfo{
 		entity:      CommitmentDomainUniversal,
-		filesGetter: func() *btree.BTreeG[*FilesItem] { return commitmentFiles.Copy() },
+		filesGetter: func() *DirtyFiles { return commitmentFiles.copy() },
 		accessors:   statecfg.AccessorHashMap,
 	})
 
@@ -145,7 +144,7 @@ func TestDependency_DisableInterDomain(t *testing.T) {
 	commitmentII := FromII(kv.CommitmentHistoryIdx)
 	checker.AddDependency(commitmentII, &DependentInfo{
 		entity:      commitmentII,
-		filesGetter: func() *btree.BTreeG[*FilesItem] { return historyFiles.Copy() },
+		filesGetter: func() *DirtyFiles { return historyFiles.copy() },
 		accessors:   statecfg.AccessorHashMap,
 	})
 

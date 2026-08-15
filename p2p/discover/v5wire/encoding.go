@@ -30,6 +30,7 @@ import (
 	"errors"
 	"fmt"
 	"hash"
+	"net/netip"
 	"slices"
 
 	"github.com/erigontech/erigon/common/mclock"
@@ -183,7 +184,7 @@ func NewCodec(ln *enode.LocalNode, key *ecdsa.PrivateKey, clock mclock.Clock, pr
 // Encode encodes a packet to a node. 'id' and 'addr' specify the destination node. The
 // 'challenge' parameter should be the most recently received WHOAREYOU packet from that
 // node.
-func (c *Codec) Encode(id enode.ID, addr string, packet Packet, challenge *Whoareyou) ([]byte, Nonce, error) {
+func (c *Codec) Encode(id enode.ID, addr netip.AddrPort, packet Packet, challenge *Whoareyou) ([]byte, Nonce, error) {
 	// Create the packet header.
 	var (
 		head    Header
@@ -264,7 +265,7 @@ func (c *Codec) EncodeRaw(id enode.ID, head Header, msgdata []byte) ([]byte, err
 
 // CurrentChallenge returns the latest challenge sent to the given node.
 // This will return non-nil while a handshake is in progress.
-func (c *Codec) CurrentChallenge(id enode.ID, addr string) *Whoareyou {
+func (c *Codec) CurrentChallenge(id enode.ID, addr netip.AddrPort) *Whoareyou {
 	return c.sc.getHandshake(id, addr)
 }
 
@@ -344,7 +345,7 @@ func (c *Codec) encodeWhoareyou(toID enode.ID, packet *Whoareyou) (Header, error
 }
 
 // encodeHandshakeHeader encodes the handshake message packet header.
-func (c *Codec) encodeHandshakeHeader(toID enode.ID, addr string, challenge *Whoareyou) (Header, *session, error) {
+func (c *Codec) encodeHandshakeHeader(toID enode.ID, addr netip.AddrPort, challenge *Whoareyou) (Header, *session, error) {
 	// Ensure calling code sets challenge.node.
 	if challenge.Node == nil {
 		panic("BUG: missing challenge.Node in encode")
@@ -381,7 +382,7 @@ func (c *Codec) encodeHandshakeHeader(toID enode.ID, addr string, challenge *Who
 }
 
 // makeHandshakeAuth creates the auth header on a request packet following WHOAREYOU.
-func (c *Codec) makeHandshakeAuth(toID enode.ID, addr string, challenge *Whoareyou) (*handshakeAuthData, *session, error) {
+func (c *Codec) makeHandshakeAuth(toID enode.ID, addr netip.AddrPort, challenge *Whoareyou) (*handshakeAuthData, *session, error) {
 	auth := new(handshakeAuthData)
 	auth.h.SrcID = c.localnode.ID()
 
@@ -457,7 +458,7 @@ func (c *Codec) encryptMessage(s *session, p Packet, head *Header, headerData []
 }
 
 // Decode decodes a discovery packet.
-func (c *Codec) Decode(inputData []byte, addr string) (src enode.ID, n *enode.Node, p Packet, err error) {
+func (c *Codec) Decode(inputData []byte, addr netip.AddrPort) (src enode.ID, n *enode.Node, p Packet, err error) {
 	if len(inputData) < minPacketSize {
 		return enode.ID{}, nil, nil, errTooShort
 	}
@@ -523,7 +524,7 @@ func (c *Codec) decodeWhoareyou(head *Header, headerData []byte) (Packet, error)
 	return p, nil
 }
 
-func (c *Codec) decodeHandshakeMessage(fromAddr string, head *Header, headerData, msgData []byte) (n *enode.Node, p Packet, err error) {
+func (c *Codec) decodeHandshakeMessage(fromAddr netip.AddrPort, head *Header, headerData, msgData []byte) (n *enode.Node, p Packet, err error) {
 	node, auth, session, err := c.decodeHandshake(fromAddr, head)
 	if err != nil {
 		c.sc.deleteHandshake(auth.h.SrcID, fromAddr)
@@ -543,7 +544,7 @@ func (c *Codec) decodeHandshakeMessage(fromAddr string, head *Header, headerData
 	return node, msg, nil
 }
 
-func (c *Codec) decodeHandshake(fromAddr string, head *Header) (n *enode.Node, auth handshakeAuthData, s *session, err error) {
+func (c *Codec) decodeHandshake(fromAddr netip.AddrPort, head *Header) (n *enode.Node, auth handshakeAuthData, s *session, err error) {
 	if auth, err = c.decodeHandshakeAuthData(head); err != nil {
 		return nil, auth, nil, err
 	}
@@ -630,7 +631,7 @@ func (c *Codec) decodeHandshakeRecord(local *enode.Node, wantID enode.ID, remote
 }
 
 // decodeMessage reads packet data following the header as an ordinary message packet.
-func (c *Codec) decodeMessage(fromAddr string, head *Header, headerData, msgData []byte) (Packet, error) {
+func (c *Codec) decodeMessage(fromAddr netip.AddrPort, head *Header, headerData, msgData []byte) (Packet, error) {
 	if len(head.AuthData) != sizeofMessageAuthData {
 		return nil, fmt.Errorf("invalid auth size %d for message packet", len(head.AuthData))
 	}
@@ -660,7 +661,7 @@ func (c *Codec) decryptMessage(input, nonce, headerData, readKey []byte) (Packet
 	return DecodeMessage(msgdata[0], msgdata[1:])
 }
 
-func (c *Codec) SessionNode(id enode.ID, addr string) *enode.Node {
+func (c *Codec) SessionNode(id enode.ID, addr netip.AddrPort) *enode.Node {
 	return c.sc.readNode(id, addr)
 }
 

@@ -2,19 +2,11 @@ package compress
 
 import (
 	"fmt"
+	"slices"
 	"sync"
 
 	"github.com/klauspost/compress/zstd"
 )
-
-// growslice ensures b has the wanted length by either expanding it to its capacity
-// or allocating a new slice if b has insufficient capacity.
-func growslice(b []byte, wantLength int) []byte {
-	if cap(b) >= wantLength {
-		return b[:wantLength]
-	}
-	return make([]byte, wantLength, max(wantLength, 2*cap(b)))
-}
 
 var (
 	// Decoder side: saw 2x higher throughput (parallel RPC with much decoding if use `zstdDecPool` (sync.Pool) vs single `zstd.NewReader`. So, keep pool for decoders.
@@ -40,7 +32,7 @@ func EncodeZstdIfNeed(buf, v []byte, enabled bool) (outBuf []byte, compressed []
 		return buf, v
 	}
 	bound := len(v) + len(v)/255 + 16
-	buf = growslice(buf, bound)
+	buf = slices.Grow(buf[:0], bound)[:bound]
 
 	// EncodeAll uses buf[:0] to reuse the backing array
 	buf = zstdEnc.EncodeAll(v, buf[:0])
@@ -53,7 +45,7 @@ func DecodeZstdIfNeed(buf, v []byte, enabled bool) ([]byte, []byte, error) {
 	if !enabled {
 		return buf, v, nil
 	}
-	buf = growslice(buf, len(v))
+	buf = slices.Grow(buf[:0], len(v))[:len(v)]
 
 	dec := zstdDecPool.Get().(*zstd.Decoder)
 	defer putDec(dec)

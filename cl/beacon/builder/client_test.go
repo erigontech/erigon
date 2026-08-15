@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"testing"
@@ -44,7 +45,10 @@ func (m mockRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 var (
 	mockUrl, _       = url.Parse("https://anywhere.io")
 	mockBeaconConfig = &clparams.BeaconChainConfig{
-		SlotsPerEpoch: 32,
+		SlotsPerEpoch:    32,
+		ElectraForkEpoch: math.MaxUint64,
+		FuluForkEpoch:    math.MaxUint64,
+		GloasForkEpoch:   math.MaxUint64,
 	}
 
 	//go:embed test_data/mock_blinded_block.json
@@ -327,6 +331,61 @@ func TestSubmitBlindedBlocks(t *testing.T) {
 		require.Error(t, err)
 		require.Nil(t, block)
 		require.Nil(t, bundle)
+	})
+}
+
+func TestSubmitBlindedBlocksFulu(t *testing.T) {
+	ctx := context.Background()
+	expectPath := mockUrl.JoinPath("/eth/v2/builder/blinded_blocks").String()
+	block := cltypes.NewSignedBlindedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
+
+	t.Run("empty accepted response", func(t *testing.T) {
+		mockHttpClient := &http.Client{
+			Transport: mockRoundTripper(func(req *http.Request) (*http.Response, error) {
+				require.Equal(t, expectPath, req.URL.String())
+				require.Equal(t, http.MethodPost, req.Method)
+				require.Equal(t, clparams.FuluVersion.String(), req.Header.Get("Eth-Consensus-Version"))
+				return &http.Response{
+					StatusCode: http.StatusAccepted,
+					Body:       io.NopCloser(bytes.NewReader(nil)),
+					Request:    req.Clone(context.Background()),
+				}, nil
+			}),
+		}
+		builderClient := &builderClient{
+			httpClient:   mockHttpClient,
+			url:          mockUrl,
+			beaconConfig: mockBeaconConfig,
+		}
+
+		payload, bundle, requests, err := builderClient.SubmitBlindedBlocks(ctx, block)
+		require.NoError(t, err)
+		require.Nil(t, payload)
+		require.Nil(t, bundle)
+		require.Nil(t, requests)
+	})
+
+	t.Run("server error", func(t *testing.T) {
+		mockHttpClient := &http.Client{
+			Transport: mockRoundTripper(func(req *http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: http.StatusInternalServerError,
+					Body:       io.NopCloser(bytes.NewBufferString("builder error")),
+					Request:    req.Clone(context.Background()),
+				}, nil
+			}),
+		}
+		builderClient := &builderClient{
+			httpClient:   mockHttpClient,
+			url:          mockUrl,
+			beaconConfig: mockBeaconConfig,
+		}
+
+		payload, bundle, requests, err := builderClient.SubmitBlindedBlocks(ctx, block)
+		require.Error(t, err)
+		require.Nil(t, payload)
+		require.Nil(t, bundle)
+		require.Nil(t, requests)
 	})
 }
 
