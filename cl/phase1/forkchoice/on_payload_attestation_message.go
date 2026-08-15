@@ -23,6 +23,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/common"
 )
 
 // OnPayloadAttestationMessage processes a payload attestation message and updates
@@ -67,9 +68,18 @@ func (f *ForkChoiceStore) OnPayloadAttestationMessage(
 		}
 	}
 
-	// Atomically update PTC vote arrays under mutex to prevent concurrent
-	// Load→modify→Store from losing votes. See also applyPayloadAttestationVote.
+	return f.applyValidatedPayloadAttestation(msg.ValidatorIndex, ptcIndices, data, blockRoot, isFromBlock)
+}
+
+func (f *ForkChoiceStore) applyValidatedPayloadAttestation(
+	validatorIndex uint64,
+	ptcIndices []int,
+	data *cltypes.PayloadAttestationData,
+	blockRoot common.Hash,
+	isFromBlock bool,
+) error {
 	f.ptcVoteMu.Lock()
+	defer f.ptcVoteMu.Unlock()
 
 	var timelinessVotes [clparams.PtcSize]int8
 	if existing, ok := f.payloadTimelinessVote.Load(blockRoot); ok {
@@ -79,14 +89,24 @@ func (f *ForkChoiceStore) OnPayloadAttestationMessage(
 	if existing, ok := f.payloadDataAvailabilityVote.Load(blockRoot); ok {
 		dataAvailabilityVotes = existing.([clparams.PtcSize]int8)
 	}
+	if !isFromBlock {
+		if f.payloadAttestationSeen != nil && data.Slot < f.payloadAttestationSeenSlot {
+			return fmt.Errorf("%w: payload attestation validation completed after a newer slot", ErrIgnore)
+		}
+		if f.payloadAttestationSeen == nil || f.payloadAttestationSeenSlot < data.Slot {
+			f.payloadAttestationSeenSlot = data.Slot
+			f.payloadAttestationSeen = make(map[uint64]struct{}, clparams.PtcSize)
+		}
+		if _, seen := f.payloadAttestationSeen[validatorIndex]; seen {
+			return fmt.Errorf("%w: already processed a valid payload attestation", ErrIgnore)
+		}
+		f.payloadAttestationSeen[validatorIndex] = struct{}{}
+	}
 	for _, idx := range ptcIndices {
 		timelinessVotes[idx] = boolToVote(data.PayloadPresent)
 		dataAvailabilityVotes[idx] = boolToVote(data.BlobDataAvailable)
 	}
 	f.payloadTimelinessVote.Store(blockRoot, timelinessVotes)
 	f.payloadDataAvailabilityVote.Store(blockRoot, dataAvailabilityVotes)
-
-	f.ptcVoteMu.Unlock()
-
 	return nil
 }

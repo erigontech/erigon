@@ -57,11 +57,6 @@ type pendingPayloadAttestationJob struct {
 	creationTime time.Time
 }
 
-type payloadAttestationValidation struct {
-	done      chan struct{}
-	hasWaiter atomic.Bool
-}
-
 const (
 	// seenPayloadAttestationCacheSize: PTC has 512 validators per slot.
 	// With clock disparity, we may see attestations for ~2 slots.
@@ -86,7 +81,6 @@ type payloadAttestationService struct {
 	pendingAttestations sync.Map // pendingPayloadAttestationKey -> *pendingPayloadAttestationJob
 	pendingCount        atomic.Int32
 	pendingCond         *sync.Cond
-	validationsInFlight sync.Map
 	validationAdmission chan struct{}
 }
 
@@ -175,17 +169,6 @@ func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint6
 	if blockHeader.Slot != slot {
 		return fmt.Errorf("%w: payload attestation slot %d does not match referenced block slot %d", ErrIgnore, slot, blockHeader.Slot)
 	}
-	finishValidation, alreadySeen, err := s.beginValidation(ctx, seenKey)
-	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return fmt.Errorf("%w: payload attestation validation canceled: %v", ErrIgnore, err)
-		}
-		return err
-	}
-	if alreadySeen {
-		return fmt.Errorf("%w: already seen payload attestation from validator %d for slot %d", ErrIgnore, validatorIndex, slot)
-	}
-	defer finishValidation()
 	select {
 	case s.validationAdmission <- struct{}{}:
 		defer func() { <-s.validationAdmission }()
@@ -220,38 +203,6 @@ func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint6
 		"blobDataAvailable", data.BlobDataAvailable)
 
 	return nil
-}
-
-func (s *payloadAttestationService) beginValidation(ctx context.Context, key seenPayloadAttestationKey) (func(), bool, error) {
-	for {
-		if s.seenAttestationsCache.Contains(key) {
-			return nil, true, nil
-		}
-		validation := &payloadAttestationValidation{done: make(chan struct{})}
-		existing, loaded := s.validationsInFlight.LoadOrStore(key, validation)
-		if !loaded {
-			if s.seenAttestationsCache.Contains(key) {
-				s.validationsInFlight.CompareAndDelete(key, validation)
-				close(validation.done)
-				return nil, true, nil
-			}
-			return func() {
-				s.validationsInFlight.CompareAndDelete(key, validation)
-				close(validation.done)
-			}, false, nil
-		}
-		inFlight := existing.(*payloadAttestationValidation)
-		if !inFlight.hasWaiter.CompareAndSwap(false, true) {
-			return nil, false, fmt.Errorf("%w: payload attestation validation already in flight", ErrIgnore)
-		}
-		select {
-		case <-inFlight.done:
-			inFlight.hasWaiter.Store(false)
-		case <-ctx.Done():
-			inFlight.hasWaiter.Store(false)
-			return nil, false, ctx.Err()
-		}
-	}
 }
 
 // queuePendingAttestation adds an attestation to the pending queue for later processing.

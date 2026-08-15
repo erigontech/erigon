@@ -3,6 +3,7 @@ package stages
 import (
 	"context"
 	"math/big"
+	"sync"
 	"testing"
 	"time"
 
@@ -27,6 +28,77 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
+
+type selectedHeadEnvelopeTestStore struct {
+	mu        sync.Mutex
+	envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
+}
+
+func (s *selectedHeadEnvelopeTestStore) HasEnvelope(root common.Hash) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.envelopes[root] != nil
+}
+
+func (s *selectedHeadEnvelopeTestStore) OnExecutionPayload(_ context.Context, envelope *cltypes.SignedExecutionPayloadEnvelope, _, _ bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.envelopes[envelope.Message.BeaconBlockRoot] = envelope
+	return nil
+}
+
+func TestWaitForSelectedHeadEnvelopeRequestsAndAppliesPeerEnvelope(t *testing.T) {
+	headRoot := common.HexToHash("0x1234")
+	store := &selectedHeadEnvelopeTestStore{envelopes: make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)}
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: headRoot}}
+	requests := make(chan [][32]byte, 1)
+
+	waitForSelectedHeadEnvelope(context.Background(), store, func(_ context.Context, roots [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
+		requests <- roots
+		return map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{headRoot: envelope}, nil
+	}, headRoot, time.Second, true, false)
+
+	require.Equal(t, [][32]byte{headRoot}, <-requests)
+	require.True(t, store.HasEnvelope(headRoot))
+}
+
+func TestSelectedHeadEnvelopeRequestIsClaimedOncePerHead(t *testing.T) {
+	cfg := &Cfg{}
+	firstHead := common.HexToHash("0x1234")
+	secondHead := common.HexToHash("0x5678")
+
+	require.True(t, claimSelectedHeadEnvelopeRequest(cfg, firstHead))
+	require.False(t, claimSelectedHeadEnvelopeRequest(cfg, firstHead))
+	require.True(t, claimSelectedHeadEnvelopeRequest(cfg, secondHead))
+	require.True(t, claimSelectedHeadEnvelopeRequest(cfg, firstHead))
+}
+
+func TestWaitForSelectedHeadEnvelopeDoesNotRequestUnclaimedHead(t *testing.T) {
+	store := &selectedHeadEnvelopeTestStore{envelopes: make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)}
+	requests := make(chan struct{}, 1)
+	waitForSelectedHeadEnvelope(context.Background(), store, func(context.Context, [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
+		requests <- struct{}{}
+		return nil, nil
+	}, common.HexToHash("0x1234"), time.Millisecond, false, false)
+
+	select {
+	case <-requests:
+		t.Fatal("unclaimed head triggered a peer request")
+	default:
+	}
+}
+
+func TestWaitForSelectedHeadEnvelopeBoundsEmptyPeerResponse(t *testing.T) {
+	store := &selectedHeadEnvelopeTestStore{envelopes: make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)}
+	requests := make(chan struct{}, 1)
+	waitForSelectedHeadEnvelope(context.Background(), store, func(requestCtx context.Context, _ [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
+		requests <- struct{}{}
+		<-requestCtx.Done()
+		return nil, requestCtx.Err()
+	}, common.HexToHash("0x1234"), 10*time.Millisecond, true, false)
+
+	require.Len(t, requests, 1)
+}
 
 func TestValidateAnchorEnvelope(t *testing.T) {
 	cfg, st, bid, env, anchorRoot := validAnchorEnvelopeFixture(t, 1)

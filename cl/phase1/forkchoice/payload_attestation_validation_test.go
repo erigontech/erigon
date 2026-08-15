@@ -26,6 +26,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/utils/bls"
@@ -65,6 +66,91 @@ func TestOnPayloadAttestationMessageRejectsNil(t *testing.T) {
 	f := &ForkChoiceStore{}
 	require.Error(t, f.OnPayloadAttestationMessage(context.Background(), nil, false))
 	require.Error(t, f.OnPayloadAttestationMessage(context.Background(), &cltypes.PayloadAttestationMessage{}, false))
+}
+
+func TestApplyValidatedPayloadAttestationAcceptsOnlyFirstGossipVote(t *testing.T) {
+	f := &ForkChoiceStore{}
+	root := common.HexToHash("0x1234")
+	first := &cltypes.PayloadAttestationData{PayloadPresent: true, BlobDataAvailable: true}
+	second := &cltypes.PayloadAttestationData{PayloadPresent: false, BlobDataAvailable: false}
+
+	require.NoError(t, f.applyValidatedPayloadAttestation(42, []int{7}, first, root, false))
+	require.ErrorIs(t, f.applyValidatedPayloadAttestation(42, []int{7}, second, common.HexToHash("0x5678"), false), ErrIgnore)
+
+	timeliness := f.payloadTimelinessVoteValue(root)
+	availability := f.payloadDataAvailabilityVoteValue(root)
+	require.Equal(t, int8(1), timeliness[7])
+	require.Equal(t, int8(1), availability[7])
+}
+
+func TestApplyValidatedPayloadAttestationFromBlockOverwritesGossipVote(t *testing.T) {
+	f := &ForkChoiceStore{}
+	root := common.HexToHash("0x1234")
+
+	require.NoError(t, f.applyValidatedPayloadAttestation(42, []int{7}, &cltypes.PayloadAttestationData{
+		PayloadPresent: true, BlobDataAvailable: true,
+	}, root, false))
+	require.NoError(t, f.applyValidatedPayloadAttestation(42, []int{7}, &cltypes.PayloadAttestationData{}, root, true))
+
+	timeliness := f.payloadTimelinessVoteValue(root)
+	availability := f.payloadDataAvailabilityVoteValue(root)
+	require.Equal(t, int8(-1), timeliness[7])
+	require.Equal(t, int8(-1), availability[7])
+}
+
+func TestApplyValidatedPayloadAttestationResetsFirstValidAtNextSlot(t *testing.T) {
+	f := &ForkChoiceStore{}
+	data := &cltypes.PayloadAttestationData{Slot: 100, PayloadPresent: true}
+
+	require.NoError(t, f.applyValidatedPayloadAttestation(42, []int{7}, data, common.HexToHash("0x1234"), false))
+	data.Slot++
+	require.NoError(t, f.applyValidatedPayloadAttestation(42, []int{7}, data, common.HexToHash("0x5678"), false))
+	require.Len(t, f.payloadAttestationSeen, 1)
+}
+
+func TestApplyValidatedPayloadAttestationDoesNotRegressSeenSlot(t *testing.T) {
+	f := &ForkChoiceStore{}
+	root := common.HexToHash("0x1234")
+
+	require.NoError(t, f.applyValidatedPayloadAttestation(42, []int{7}, &cltypes.PayloadAttestationData{Slot: 101}, root, false))
+	require.ErrorIs(t, f.applyValidatedPayloadAttestation(43, []int{8}, &cltypes.PayloadAttestationData{Slot: 100}, root, false), ErrIgnore)
+	require.Equal(t, uint64(101), f.payloadAttestationSeenSlot)
+}
+
+func TestApplyValidatedPayloadAttestationConcurrentCandidatesHaveOneWinner(t *testing.T) {
+	f := &ForkChoiceStore{}
+	start := make(chan struct{})
+	results := make(chan error, 16)
+
+	for i := range 16 {
+		go func() {
+			<-start
+			data := &cltypes.PayloadAttestationData{Slot: 100, PayloadPresent: i%2 == 0}
+			results <- f.applyValidatedPayloadAttestation(42, []int{7}, data, common.Hash{byte(i + 1)}, false)
+		}()
+	}
+	close(start)
+
+	var successes int
+	for range 16 {
+		err := <-results
+		if err == nil {
+			successes++
+		} else {
+			require.ErrorIs(t, err, ErrIgnore)
+		}
+	}
+	require.Equal(t, 1, successes)
+}
+
+func (f *ForkChoiceStore) payloadTimelinessVoteValue(root common.Hash) [clparams.PtcSize]int8 {
+	votes, _ := f.payloadTimelinessVote.Load(root)
+	return votes.([clparams.PtcSize]int8)
+}
+
+func (f *ForkChoiceStore) payloadDataAvailabilityVoteValue(root common.Hash) [clparams.PtcSize]int8 {
+	votes, _ := f.payloadDataAvailabilityVote.Load(root)
+	return votes.([clparams.PtcSize]int8)
 }
 
 func TestPayloadAttestationValidationContextsCollapseConcurrentBuilds(t *testing.T) {

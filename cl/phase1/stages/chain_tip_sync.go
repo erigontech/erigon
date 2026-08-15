@@ -514,10 +514,52 @@ func recoverMissingEnvelopes(ctx context.Context, cfg *Cfg) {
 	}
 }
 
-// pollForEnvelope polls HasEnvelope until the envelope arrives or the timeout expires.
-func pollForEnvelope(ctx context.Context, cfg *Cfg, headRoot common.Hash, timeout time.Duration) {
+type selectedHeadEnvelopeStore interface {
+	HasEnvelope(common.Hash) bool
+	OnExecutionPayload(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error
+}
+
+type envelopeRequestFunc func(context.Context, [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error)
+
+func waitForSelectedHeadEnvelope(
+	ctx context.Context,
+	store selectedHeadEnvelopeStore,
+	requestEnvelopes envelopeRequestFunc,
+	headRoot common.Hash,
+	timeout time.Duration,
+	requestFromPeer bool,
+	validatePayload bool,
+) {
 	pollCtx, pollCancel := context.WithTimeout(ctx, timeout)
-	defer pollCancel()
+	if store.HasEnvelope(headRoot) {
+		pollCancel()
+		return
+	}
+	var requestDone chan struct{}
+	if requestFromPeer {
+		requestDone = make(chan struct{})
+		go func() {
+			defer close(requestDone)
+			envelopes, err := requestEnvelopes(pollCtx, [][32]byte{headRoot})
+			if err != nil {
+				log.Debug("[chainTipSync] failed to request selected head envelope", "headRoot", headRoot, "err", err)
+				return
+			}
+			envelope := envelopes[headRoot]
+			if envelope == nil {
+				return
+			}
+			if err := store.OnExecutionPayload(pollCtx, envelope, true, validatePayload); err != nil {
+				log.Debug("[chainTipSync] failed to apply selected head envelope", "headRoot", headRoot, "err", err)
+			}
+		}()
+	}
+	defer func() {
+		pollCancel()
+		if requestDone != nil {
+			<-requestDone
+		}
+	}()
 
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
@@ -527,11 +569,19 @@ func pollForEnvelope(ctx context.Context, cfg *Cfg, headRoot common.Hash, timeou
 		case <-pollCtx.Done():
 			return
 		case <-ticker.C:
-			if cfg.forkChoice.HasEnvelope(headRoot) {
+			if store.HasEnvelope(headRoot) {
 				return
 			}
 		}
 	}
+}
+
+func claimSelectedHeadEnvelopeRequest(cfg *Cfg, headRoot common.Hash) bool {
+	if cfg.gloasHeadEnvelopeRequestRoot == headRoot {
+		return false
+	}
+	cfg.gloasHeadEnvelopeRequestRoot = headRoot
+	return true
 }
 
 func buildGloasNewPayloadArgs(cfg *Cfg, block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) ([]common.Hash, []hexutil.Bytes, error) {
@@ -876,7 +926,10 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 				return err
 			}
 			if headRoot != (common.Hash{}) && !cfg.forkChoice.HasEnvelope(headRoot) {
-				pollForEnvelope(ctx, cfg, headRoot, 2*time.Second)
+				requestFromPeer := claimSelectedHeadEnvelopeRequest(cfg, headRoot)
+				waitForSelectedHeadEnvelope(ctx, cfg.forkChoice, func(requestCtx context.Context, roots [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
+					return network.RequestEnvelopesFrantically(requestCtx, cfg.rpc, roots)
+				}, headRoot, 2*time.Second, requestFromPeer, canValidateGloasPayloads(cfg))
 			}
 			if canValidateGloasPayloads(cfg) {
 				verifyCtx, cancelVerify := context.WithTimeout(ctx, gloasPayloadRetryBudget)

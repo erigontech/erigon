@@ -45,7 +45,7 @@ type blockingPayloadAttestationForkchoice struct {
 	release chan struct{}
 }
 
-func (f *blockingPayloadAttestationForkchoice) OnPayloadAttestationMessage(context.Context, *cltypes.PayloadAttestationMessage, bool) error {
+func (f *blockingPayloadAttestationForkchoice) OnPayloadAttestationMessage(ctx context.Context, _ *cltypes.PayloadAttestationMessage, _ bool) error {
 	active := f.active.Add(1)
 	defer f.active.Add(-1)
 	for {
@@ -55,8 +55,12 @@ func (f *blockingPayloadAttestationForkchoice) OnPayloadAttestationMessage(conte
 		}
 	}
 	f.started <- struct{}{}
-	<-f.release
-	return nil
+	select {
+	case <-f.release:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 type retryPayloadAttestationForkchoice struct {
@@ -64,6 +68,22 @@ type retryPayloadAttestationForkchoice struct {
 	calls        atomic.Int32
 	firstStarted chan struct{}
 	releaseFirst chan struct{}
+}
+
+type candidatePayloadAttestationForkchoice struct {
+	forkchoice.ForkChoiceStorage
+	started chan byte
+	release chan struct{}
+}
+
+func (f *candidatePayloadAttestationForkchoice) OnPayloadAttestationMessage(_ context.Context, msg *cltypes.PayloadAttestationMessage, _ bool) error {
+	candidate := msg.Signature[0]
+	f.started <- candidate
+	<-f.release
+	if candidate != 3 {
+		return errors.New("invalid signature")
+	}
+	return nil
 }
 
 func (f *retryPayloadAttestationForkchoice) OnPayloadAttestationMessage(context.Context, *cltypes.PayloadAttestationMessage, bool) error {
@@ -129,38 +149,47 @@ func TestPayloadAttestationServiceBoundsKnownBlockValidation(t *testing.T) {
 	require.NoError(t, <-firstDone)
 }
 
-func TestPayloadAttestationServiceBoundsDuplicateWaiters(t *testing.T) {
+func TestPayloadAttestationServiceDoesNotDropValidCandidateBehindInvalidCandidates(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
 	service, fcu, ethClockMock := setupPayloadAttestationService(t, ctrl)
 	blockRoot := common.HexToHash("0x1234")
 	fcu.Headers[blockRoot] = &cltypes.BeaconBlockHeader{Slot: 100}
-	blockingForkchoice := &retryPayloadAttestationForkchoice{
+	blockingForkchoice := &candidatePayloadAttestationForkchoice{
 		ForkChoiceStorage: fcu,
-		firstStarted:      make(chan struct{}),
-		releaseFirst:      make(chan struct{}),
+		started:           make(chan byte, 3),
+		release:           make(chan struct{}),
 	}
 	service.forkchoiceStore = blockingForkchoice
 	ethClockMock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(uint64(100)).Return(true).Times(3)
-	msg := &cltypes.PayloadAttestationMessage{
-		ValidatorIndex: 1,
-		Data:           &cltypes.PayloadAttestationData{Slot: 100, BeaconBlockRoot: blockRoot},
-	}
 
-	results := make(chan error, 2)
-	go func() { results <- service.ProcessMessage(context.Background(), nil, msg) }()
-	<-blockingForkchoice.firstStarted
-	go func() { results <- service.ProcessMessage(context.Background(), nil, msg) }()
-	key := seenPayloadAttestationKey{slot: 100, validatorIndex: 1}
-	require.Eventually(t, func() bool {
-		validation, ok := service.validationsInFlight.Load(key)
-		return ok && validation.(*payloadAttestationValidation).hasWaiter.Load()
-	}, time.Second, time.Millisecond)
-	require.ErrorIs(t, service.ProcessMessage(context.Background(), nil, msg), ErrIgnore)
-	close(blockingForkchoice.releaseFirst)
-	first, second := <-results, <-results
-	require.True(t, (first == nil && second != nil) || (first != nil && second == nil))
+	results := make(chan error, 3)
+	for candidate := byte(1); candidate <= 3; candidate++ {
+		msg := newTestPayloadAttestationMessage(100, 1, blockRoot)
+		msg.Signature[0] = candidate
+		go func() { results <- service.ProcessMessage(context.Background(), nil, msg) }()
+		if candidate == 1 {
+			require.Equal(t, byte(1), <-blockingForkchoice.started)
+		}
+	}
+	for range 2 {
+		select {
+		case <-blockingForkchoice.started:
+		case <-time.After(time.Second):
+			close(blockingForkchoice.release)
+			t.Fatal("candidate was dropped before validation")
+		}
+	}
+	close(blockingForkchoice.release)
+
+	var successes int
+	for range 3 {
+		if <-results == nil {
+			successes++
+		}
+	}
+	require.Equal(t, 1, successes)
 }
 
 func TestPayloadAttestationServiceAllowsConcurrentValidationForDifferentValidators(t *testing.T) {
@@ -206,7 +235,7 @@ func TestPayloadAttestationServiceAllowsConcurrentValidationForDifferentValidato
 	require.Equal(t, int32(8), blockingForkchoice.max.Load())
 }
 
-func TestPayloadAttestationServiceSerializesDuplicateValidation(t *testing.T) {
+func TestPayloadAttestationServiceAllowsConcurrentValidationForSameValidator(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
@@ -232,19 +261,15 @@ func TestPayloadAttestationServiceSerializesDuplicateValidation(t *testing.T) {
 	<-blockingForkchoice.started
 	select {
 	case <-blockingForkchoice.started:
-	case <-time.After(100 * time.Millisecond):
+	case <-time.After(time.Second):
+		close(blockingForkchoice.release)
+		t.Fatal("second candidate did not reach validation")
 	}
 	close(blockingForkchoice.release)
 
-	firstErr := <-results
-	secondErr := <-results
-	require.Equal(t, 1, int(blockingForkchoice.max.Load()))
-	require.True(t, (firstErr == nil) != (secondErr == nil))
-	if firstErr != nil {
-		require.ErrorIs(t, firstErr, ErrIgnore)
-	} else {
-		require.ErrorIs(t, secondErr, ErrIgnore)
-	}
+	require.NoError(t, <-results)
+	require.NoError(t, <-results)
+	require.Equal(t, int32(2), blockingForkchoice.max.Load())
 }
 
 func TestPayloadAttestationServiceRetriesAfterInvalidDuplicate(t *testing.T) {
@@ -276,7 +301,7 @@ func TestPayloadAttestationServiceRetriesAfterInvalidDuplicate(t *testing.T) {
 		secondResult <- service.ProcessMessage(context.Background(), nil, second)
 	}()
 
-	require.Never(t, func() bool { return retryForkchoice.calls.Load() > 1 }, 100*time.Millisecond, 10*time.Millisecond)
+	require.Eventually(t, func() bool { return retryForkchoice.calls.Load() == 2 }, time.Second, time.Millisecond)
 	close(retryForkchoice.releaseFirst)
 
 	require.ErrorContains(t, <-firstResult, "invalid signature")
