@@ -622,10 +622,15 @@ func TestOnNewFinalizedPrunesGloasWeightTree(t *testing.T) {
 	defer f.mu.Unlock()
 	f.gloasWeightTree.prepare(justified, cs)
 	require.Contains(t, f.gloasWeightTree.nodes, rootC2)
+	f.headSet[rootC2] = struct{}{}
+	f.addGloasVerificationLeaf(rootC2)
+	require.Contains(t, f.gloasVerificationLeafByRoot, rootC2)
 
 	f.onNewFinalized(solid.Checkpoint{Epoch: 1, Root: rootC2})
 
 	require.NotContains(t, f.gloasWeightTree.nodes, rootC2)
+	require.NotContains(t, f.headSet, rootC2)
+	require.NotContains(t, f.gloasVerificationLeafByRoot, rootC2)
 	require.True(t, f.gloasWeightTree.allDirty)
 }
 

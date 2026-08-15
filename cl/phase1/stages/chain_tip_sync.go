@@ -22,7 +22,14 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-const maxGloasVerificationSweepPerCycle = 32
+const (
+	maxGloasVerificationSweepPerCycle      = 32
+	maxGloasVerificationScanPerLineage     = 256
+	maxGloasVerificationStartRootsPerCycle = 8
+	maxGloasVerificationLeafRootsPerCycle  = maxGloasVerificationStartRootsPerCycle - 2
+	maxGloasVerificationStalledCycles      = 8
+	maxGloasVerificationCheckpoints        = 256
+)
 
 func gloasVersionedHashes(blobCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) ([]common.Hash, error) {
 	if blobCommitments == nil || blobCommitments.Len() == 0 {
@@ -62,6 +69,10 @@ func gloasEnvelopePayloadHash(envelope *cltypes.SignedExecutionPayloadEnvelope) 
 
 func canRetryGloasPayloads(cfg *Cfg) bool {
 	return cfg.executionClient != nil && cfg.executionClient.SupportInsertion()
+}
+
+func canValidateGloasPayloads(cfg *Cfg) bool {
+	return cfg.executionClient != nil
 }
 
 // waitForExecutionEngineToBeFinished checks if the execution engine is ready within a specified timeout.
@@ -259,7 +270,7 @@ MainLoop:
 				if block.Version() >= clparams.GloasVersion && len(envelopes) > 0 {
 					parentRoot := block.Block.ParentRoot
 					if env, ok := envelopes[common.Hash(parentRoot)]; ok {
-						if envErr := cfg.forkChoice.OnExecutionPayload(ctx, env, false, canRetryGloasPayloads(cfg)); envErr != nil {
+						if envErr := cfg.forkChoice.OnExecutionPayload(ctx, env, false, canValidateGloasPayloads(cfg)); envErr != nil && !errors.Is(envErr, forkchoice.ErrExecutionPayloadAlreadyStored) {
 							log.Debug("[chainTipSync] failed to apply parent envelope", "slot", block.Block.Slot, "err", envErr)
 						}
 					}
@@ -295,9 +306,23 @@ func fetchAndApplyEnvelopes(ctx context.Context, cfg *Cfg, roots [][32]byte) {
 		log.Debug("[chainTipSync] failed to request GLOAS envelopes", "err", err)
 		return
 	}
-	for _, env := range envelopes {
-		if err := cfg.forkChoice.OnExecutionPayload(ctx, env, true, canRetryGloasPayloads(cfg)); err != nil {
-			log.Debug("[chainTipSync] failed to apply recovered GLOAS envelope", "beaconBlockRoot", env.Message.BeaconBlockRoot, "err", err)
+	applyRecoveredEnvelopes(ctx, cfg, envelopes)
+}
+
+func applyRecoveredEnvelopes(ctx context.Context, cfg *Cfg, envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) {
+	for root, env := range envelopes {
+		if env == nil || env.Message == nil {
+			log.Debug("[chainTipSync] ignoring invalid recovered GLOAS envelope", "beaconBlockRoot", root)
+			continue
+		}
+		var err error
+		if cfg.recoveredEnvelopeProcessor != nil {
+			err = cfg.recoveredEnvelopeProcessor.ProcessRecoveredEnvelope(ctx, env, true)
+		} else {
+			err = cfg.forkChoice.OnExecutionPayload(ctx, env, true, true)
+		}
+		if err != nil && !errors.Is(err, forkchoice.ErrExecutionPayloadAlreadyStored) {
+			log.Debug("[chainTipSync] failed to apply recovered GLOAS envelope", "beaconBlockRoot", root, "err", err)
 		}
 	}
 }
@@ -547,43 +572,58 @@ func drainPendingGloasPayloads(ctx context.Context, cfg *Cfg) {
 }
 
 func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
-	headRoot := cfg.forkChoice.HighestSeenRoot()
-	if headRoot == (common.Hash{}) {
+	cfg.gloasVerificationMu.Lock()
+	if cfg.gloasVerificationRunning {
+		cfg.gloasVerificationMu.Unlock()
+		return
+	}
+	cfg.gloasVerificationRunning = true
+	cfg.gloasVerificationMu.Unlock()
+	defer func() {
+		cfg.gloasVerificationMu.Lock()
+		cfg.gloasVerificationRunning = false
+		cfg.gloasVerificationMu.Unlock()
+	}()
+
+	startRoots := make([]common.Hash, 0, 2)
+	addStartRoot := func(root common.Hash) {
+		if root == (common.Hash{}) || slices.Contains(startRoots, root) || len(startRoots) >= maxGloasVerificationStartRootsPerCycle {
+			return
+		}
+		startRoots = append(startRoots, root)
+	}
+	canonicalRoot, _, err := cfg.forkChoice.GetHead(nil)
+	if err != nil {
+		log.Warn("[chainTipSync] failed to resolve canonical head for GLOAS verification", "err", err)
+	}
+	addStartRoot(canonicalRoot)
+	addStartRoot(cfg.forkChoice.HighestSeenRoot())
+	cfg.gloasVerificationLineages = prioritizeGloasVerificationLineages(cfg.gloasVerificationLineages, startRoots)
+	leafLimit := min(maxGloasVerificationLeafRootsPerCycle, maxGloasVerificationStartRootsPerCycle-len(cfg.gloasVerificationLineages))
+	if leafLimit > 0 {
+		cfg.gloasVerificationLineages = mergeGloasVerificationLineages(
+			cfg.gloasVerificationLineages,
+			cfg.forkChoice.GloasVerificationLeaves(leafLimit),
+		)
+	}
+	if len(cfg.gloasVerificationLineages) == 0 {
 		return
 	}
 
-	finalizedSlot := cfg.forkChoice.FinalizedSlot()
-	var blocks []struct {
-		root  common.Hash
-		block *cltypes.SignedBeaconBlock
-	}
-
-	for root := headRoot; root != (common.Hash{}); {
-		block, ok := cfg.forkChoice.GetBlock(root)
-		if !ok || block == nil {
-			break
-		}
-		if block.Block.Slot <= finalizedSlot {
-			break
-		}
-		epoch := block.Block.Slot / cfg.beaconCfg.SlotsPerEpoch
-		if cfg.beaconCfg.GetCurrentStateVersion(epoch) < clparams.GloasVersion {
-			break
-		}
-		if cfg.forkChoice.HasEnvelope(root) && !cfg.forkChoice.IsPayloadVerified(root) {
-			blocks = append(blocks, struct {
-				root  common.Hash
-				block *cltypes.SignedBeaconBlock
-			}{root: root, block: block})
-			if len(blocks) >= maxGloasVerificationSweepPerCycle {
-				break
-			}
-		}
-		root = common.Hash(block.Block.ParentRoot)
-	}
+	blocks, lineages := collectUnverifiedGloasPayloadPages(
+		cfg.gloasVerificationLineages,
+		cfg.forkChoice.FinalizedSlot(),
+		cfg.beaconCfg,
+		cfg.forkChoice.GetBlock,
+		func(root common.Hash) bool {
+			status, hasStatus := cfg.forkChoice.GetRecentExecutionPayloadStatusByRoot(root)
+			return shouldVerifyGloasPayload(cfg.forkChoice.HasEnvelope(root), cfg.forkChoice.IsPayloadVerified(root), status, hasStatus)
+		},
+	)
+	cfg.gloasVerificationLineages = lineages
 
 	swept := 0
-	for _, item := range slices.Backward(blocks) {
+	for _, item := range blocks {
 		if cfg.forkChoice.IsPayloadVerified(item.root) {
 			continue
 		}
@@ -619,6 +659,368 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 	if swept > 0 || len(blocks) >= maxGloasVerificationSweepPerCycle {
 		log.Info("[chainTipSync] GLOAS verification sweep", "swept", swept, "queued", len(blocks), "limit", maxGloasVerificationSweepPerCycle)
 	}
+}
+
+type gloasVerificationBlock struct {
+	root  common.Hash
+	block *cltypes.SignedBeaconBlock
+}
+
+type gloasVerificationLineage struct {
+	origin        common.Hash
+	cursor        common.Hash
+	readyBoundary common.Hash
+	checkpoints   []common.Hash
+	pending       int
+	stalled       int
+	truncated     bool
+}
+
+func mergeGloasVerificationLineages(states []gloasVerificationLineage, roots []common.Hash) []gloasVerificationLineage {
+	for _, root := range roots {
+		if root == (common.Hash{}) || len(states) >= maxGloasVerificationStartRootsPerCycle {
+			continue
+		}
+		known := false
+		for i := range states {
+			if states[i].origin == root || states[i].cursor == root {
+				known = true
+				break
+			}
+		}
+		if !known {
+			states = append(states, gloasVerificationLineage{origin: root, cursor: root, checkpoints: []common.Hash{root}})
+		}
+	}
+	return states
+}
+
+func prioritizeGloasVerificationLineages(states []gloasVerificationLineage, roots []common.Hash) []gloasVerificationLineage {
+	prioritized := make([]gloasVerificationLineage, 0, maxGloasVerificationStartRootsPerCycle)
+	selected := make(map[int]struct{}, len(roots))
+	for _, root := range roots {
+		if len(prioritized) >= maxGloasVerificationStartRootsPerCycle {
+			break
+		}
+		if root == (common.Hash{}) {
+			continue
+		}
+		found := -1
+		for i := range states {
+			if states[i].origin == root || states[i].cursor == root {
+				found = i
+				break
+			}
+		}
+		if found >= 0 {
+			if _, ok := selected[found]; !ok {
+				prioritized = append(prioritized, states[found])
+				selected[found] = struct{}{}
+			}
+		} else {
+			prioritized = append(prioritized, gloasVerificationLineage{origin: root, cursor: root, checkpoints: []common.Hash{root}})
+		}
+	}
+	for i := range states {
+		if len(prioritized) >= maxGloasVerificationStartRootsPerCycle {
+			break
+		}
+		if _, ok := selected[i]; !ok {
+			prioritized = append(prioritized, states[i])
+		}
+	}
+	return prioritized
+}
+
+func shouldVerifyGloasPayload(hasEnvelope, verified bool, status execution_client.PayloadStatus, hasStatus bool) bool {
+	if !hasEnvelope || verified {
+		return false
+	}
+	if !hasStatus {
+		return true
+	}
+	return status != execution_client.PayloadStatusValidated && status != execution_client.PayloadStatusInvalidated
+}
+
+func gloasPageDependsOnBoundary(page []gloasVerificationBlock, boundary *cltypes.SignedBeaconBlock) bool {
+	if boundary == nil || boundary.Block == nil {
+		return true
+	}
+	boundaryBid := boundary.Block.Body.GetSignedExecutionPayloadBid()
+	if boundaryBid == nil || boundaryBid.Message == nil {
+		return true
+	}
+	for _, item := range page {
+		if item.block == nil || item.block.Block == nil {
+			return true
+		}
+		bid := item.block.Block.Body.GetSignedExecutionPayloadBid()
+		if bid == nil || bid.Message == nil || bid.Message.ParentBlockHash == boundaryBid.Message.BlockHash {
+			return true
+		}
+	}
+	return false
+}
+
+func gloasPageDependsOnSharedAncestry(
+	page []gloasVerificationBlock,
+	root common.Hash,
+	getBlock func(common.Hash) (*cltypes.SignedBeaconBlock, bool),
+	shouldVerify func(common.Hash) bool,
+) bool {
+	for scanned := 0; root != (common.Hash{}) && scanned < maxGloasVerificationScanPerLineage; scanned++ {
+		block, ok := getBlock(root)
+		if !ok || block == nil || block.Block == nil {
+			return true
+		}
+		if shouldVerify(root) && gloasPageDependsOnBoundary(page, block) {
+			return true
+		}
+		root = common.Hash(block.Block.ParentRoot)
+	}
+	return root != (common.Hash{})
+}
+
+func collectUnverifiedGloasPayloadPages(
+	states []gloasVerificationLineage,
+	finalizedSlot uint64,
+	beaconCfg *clparams.BeaconChainConfig,
+	getBlock func(common.Hash) (*cltypes.SignedBeaconBlock, bool),
+	shouldVerify func(common.Hash) bool,
+) ([]gloasVerificationBlock, []gloasVerificationLineage) {
+	return collectUnverifiedGloasPayloadPagesWithCheckpointLimit(
+		states,
+		finalizedSlot,
+		beaconCfg,
+		getBlock,
+		shouldVerify,
+		maxGloasVerificationCheckpoints,
+	)
+}
+
+func collectUnverifiedGloasPayloadPagesWithCheckpointLimit(
+	states []gloasVerificationLineage,
+	finalizedSlot uint64,
+	beaconCfg *clparams.BeaconChainConfig,
+	getBlock func(common.Hash) (*cltypes.SignedBeaconBlock, bool),
+	shouldVerify func(common.Hash) bool,
+	checkpointLimit int,
+) ([]gloasVerificationBlock, []gloasVerificationLineage) {
+	seen := make(map[common.Hash]struct{}, maxGloasVerificationScanPerLineage)
+	pages := make([][]gloasVerificationBlock, 0, len(states))
+	next := make([]gloasVerificationLineage, 0, len(states))
+	for i := range states {
+		state := states[i]
+		if len(state.checkpoints) == 0 {
+			state.checkpoints = []common.Hash{state.origin}
+		}
+		page := make([]gloasVerificationBlock, 0)
+		pageRoots := make([]common.Hash, 0, maxGloasVerificationScanPerLineage)
+		root := state.cursor
+		scanned := 0
+		blocked := false
+		unavailable := false
+		for ; root != (common.Hash{}) && scanned < maxGloasVerificationScanPerLineage; scanned++ {
+			if _, ok := seen[root]; ok {
+				if gloasPageDependsOnSharedAncestry(page, root, getBlock, shouldVerify) {
+					blocked = true
+				}
+				root = common.Hash{}
+				break
+			}
+			seen[root] = struct{}{}
+			pageRoots = append(pageRoots, root)
+			block, ok := getBlock(root)
+			if !ok || block == nil || block.Block == nil {
+				unavailable = true
+				root = common.Hash{}
+				break
+			}
+			if block.Block.Slot <= finalizedSlot {
+				root = common.Hash{}
+				break
+			}
+			epoch := block.Block.Slot / beaconCfg.SlotsPerEpoch
+			if beaconCfg.GetCurrentStateVersion(epoch) < clparams.GloasVersion {
+				root = common.Hash{}
+				break
+			}
+			if shouldVerify(root) {
+				page = append(page, gloasVerificationBlock{root: root, block: block})
+			}
+			root = common.Hash(block.Block.ParentRoot)
+		}
+		if blocked {
+			for _, pageRoot := range pageRoots {
+				delete(seen, pageRoot)
+			}
+			next = append(next, state)
+			continue
+		}
+		if unavailable {
+			state.pending = 0
+			state.stalled++
+			if state.stalled < maxGloasVerificationStalledCycles {
+				next = append(next, state)
+			}
+			continue
+		}
+		if scanned == maxGloasVerificationScanPerLineage && root != (common.Hash{}) && root != state.readyBoundary {
+			if gloasPageDependsOnSharedAncestry(page, root, getBlock, shouldVerify) {
+				for _, pageRoot := range pageRoots {
+					delete(seen, pageRoot)
+				}
+				page = page[:0]
+			}
+			state.cursor = root
+			if state.checkpoints[len(state.checkpoints)-1] != root {
+				state.checkpoints = append(state.checkpoints, root)
+				if len(state.checkpoints) > checkpointLimit {
+					state.checkpoints = append([]common.Hash(nil), state.checkpoints[len(state.checkpoints)-checkpointLimit:]...)
+					state.truncated = true
+				}
+			}
+			state.pending = 0
+			state.stalled = 0
+			next = append(next, state)
+			slices.Reverse(page)
+			if len(page) > 0 {
+				pages = append(pages, page)
+			}
+			continue
+		}
+		slices.Reverse(page)
+		if len(page) > 0 {
+			pages = append(pages, page)
+			if state.pending == len(page) {
+				state.stalled++
+			} else {
+				state.pending = len(page)
+				state.stalled = 0
+			}
+			if state.stalled < maxGloasVerificationStalledCycles {
+				next = append(next, state)
+			}
+			continue
+		}
+		if len(state.checkpoints) > 1 {
+			state.readyBoundary = state.cursor
+			state.checkpoints = state.checkpoints[:len(state.checkpoints)-1]
+			state.cursor = state.checkpoints[len(state.checkpoints)-1]
+			state.pending = 0
+			state.stalled = 0
+			next = append(next, state)
+		} else if state.truncated {
+			state.readyBoundary = state.cursor
+			state.cursor = state.origin
+			state.checkpoints = []common.Hash{state.origin}
+			state.pending = 0
+			state.stalled = 0
+			state.truncated = false
+			next = append(next, state)
+		}
+	}
+	return interleaveGloasVerificationPages(pages), next
+}
+
+func interleaveGloasVerificationPages(pages [][]gloasVerificationBlock) []gloasVerificationBlock {
+	blocks := make([]gloasVerificationBlock, 0, maxGloasVerificationSweepPerCycle)
+	for index := 0; len(blocks) < maxGloasVerificationSweepPerCycle; index++ {
+		added := false
+		for _, page := range pages {
+			if index >= len(page) {
+				continue
+			}
+			blocks = append(blocks, page[index])
+			added = true
+			if len(blocks) >= maxGloasVerificationSweepPerCycle {
+				break
+			}
+		}
+		if !added {
+			break
+		}
+	}
+	slices.SortStableFunc(blocks, func(a, b gloasVerificationBlock) int {
+		return cmp.Compare(a.block.Block.Slot, b.block.Block.Slot)
+	})
+	return blocks
+}
+
+func collectUnverifiedGloasPayloads(
+	startRoots []common.Hash,
+	finalizedSlot uint64,
+	beaconCfg *clparams.BeaconChainConfig,
+	getBlock func(common.Hash) (*cltypes.SignedBeaconBlock, bool),
+	shouldVerify func(common.Hash) bool,
+) ([]gloasVerificationBlock, []common.Hash) {
+	blocks := make([]gloasVerificationBlock, 0, maxGloasVerificationSweepPerCycle)
+	seen := make(map[common.Hash]struct{}, maxGloasVerificationScanPerLineage)
+	lineages := make([][]gloasVerificationBlock, 0, min(len(startRoots), maxGloasVerificationStartRootsPerCycle))
+	continuations := make([]common.Hash, 0, len(lineages))
+	for _, startRoot := range startRoots {
+		if len(lineages) >= maxGloasVerificationStartRootsPerCycle {
+			break
+		}
+		lineage := make([]gloasVerificationBlock, 0)
+		lineageRoots := make([]common.Hash, 0, maxGloasVerificationScanPerLineage)
+		root := startRoot
+		scanned := 0
+		for ; root != (common.Hash{}) && scanned < maxGloasVerificationScanPerLineage; scanned++ {
+			if _, ok := seen[root]; ok {
+				if shouldVerify(root) {
+					lineage = lineage[:0]
+				}
+				root = common.Hash{}
+				break
+			}
+			seen[root] = struct{}{}
+			lineageRoots = append(lineageRoots, root)
+			block, ok := getBlock(root)
+			if !ok || block == nil || block.Block == nil || block.Block.Slot <= finalizedSlot {
+				break
+			}
+			epoch := block.Block.Slot / beaconCfg.SlotsPerEpoch
+			if beaconCfg.GetCurrentStateVersion(epoch) < clparams.GloasVersion {
+				break
+			}
+			if shouldVerify(root) {
+				lineage = append(lineage, gloasVerificationBlock{root: root, block: block})
+			}
+			root = common.Hash(block.Block.ParentRoot)
+		}
+		if scanned == maxGloasVerificationScanPerLineage && root != (common.Hash{}) {
+			lineage = lineage[:0]
+			for _, lineageRoot := range lineageRoots {
+				delete(seen, lineageRoot)
+			}
+			if !slices.Contains(continuations, root) {
+				continuations = append(continuations, root)
+			}
+		}
+		slices.Reverse(lineage)
+		lineages = append(lineages, lineage)
+	}
+	for index := 0; len(blocks) < maxGloasVerificationSweepPerCycle; index++ {
+		added := false
+		for _, lineage := range lineages {
+			if index >= len(lineage) {
+				continue
+			}
+			blocks = append(blocks, lineage[index])
+			added = true
+			if len(blocks) >= maxGloasVerificationSweepPerCycle {
+				break
+			}
+		}
+		if !added {
+			break
+		}
+	}
+	slices.SortStableFunc(blocks, func(a, b gloasVerificationBlock) int {
+		return cmp.Compare(a.block.Block.Slot, b.block.Block.Slot)
+	})
+	return blocks, continuations
 }
 
 func retryUnverifiedAnchorPayload(ctx context.Context, cfg *Cfg) {
@@ -676,11 +1078,13 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 	// insertion — so it must run regardless of SupportInsertion().
 	recoverMissingEnvelopes(ctx, cfg)
 
-	if canRetryGloasPayloads(cfg) {
+	if canValidateGloasPayloads(cfg) {
 		// [New in Gloas:EIP7732] Drain execution blocks whose CL transition succeeded
 		// but whose EL newPayload previously returned SYNCING/ACCEPTED.
 		drainPendingGloasPayloads(ctx, cfg)
 		retryUnverifiedAnchorPayload(ctx, cfg)
+	}
+	if canRetryGloasPayloads(cfg) {
 		if err := cfg.blockCollector.Flush(context.Background()); err != nil {
 			log.Warn("[chainTipSync] blockCollector.Flush failed (EL may still be catching up)", "err", err)
 		}
@@ -696,7 +1100,7 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 			if headRoot != (common.Hash{}) && !cfg.forkChoice.HasEnvelope(headRoot) {
 				pollForEnvelope(ctx, cfg, headRoot, 2*time.Second)
 			}
-			if canRetryGloasPayloads(cfg) {
+			if canValidateGloasPayloads(cfg) {
 				verifyUnverifiedGloasPayloads(ctx, cfg)
 			}
 			// NOTE: recoverMissingEnvelopes runs unconditionally above (before

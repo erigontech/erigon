@@ -47,6 +47,7 @@ import (
 var (
 	ErrEIP4844DataNotAvailable       = errors.New("EIP-4844 blob data is not available")
 	ErrEIP7594ColumnDataNotAvailable = errors.New("EIP-7594 column data is not available")
+	ErrExecutionPayloadAlreadyStored = errors.New("execution payload envelope already stored")
 	ErrNewPayloadNoStatus            = errors.New("newPayload returned no status")
 	ErrMissingSegment                = errors.New("missing segment: parent state not available")
 	ErrParentEnvelopePending         = errors.New("parent execution payload envelope not yet available")
@@ -322,7 +323,9 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 
 	// Remove the parent from the head set
 	delete(f.headSet, block.Block.ParentRoot)
+	f.removeGloasVerificationLeaf(block.Block.ParentRoot)
 	f.headSet[blockRoot] = struct{}{}
+	f.addGloasVerificationLeaf(blockRoot)
 	// record_block_timeliness: store [block_timely, ptc_timely] vector.
 	// [Modified in Gloas:EIP7732] Post-GLOAS stores a two-element timeliness vector;
 	// pre-GLOAS stores [block_timely, false]. See recordBlockTimeliness for details.

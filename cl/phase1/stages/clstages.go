@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/erigontech/erigon/cl/antiquary"
@@ -48,26 +49,34 @@ import (
 )
 
 type Cfg struct {
-	rpc                     *rpc.BeaconRpcP2P
-	ethClock                eth_clock.EthereumClock
-	beaconCfg               *clparams.BeaconChainConfig
-	executionClient         execution_client.ExecutionEngine
-	state                   *state.CachingBeaconState
-	forkChoice              *forkchoice.ForkChoiceStore
-	indiciesDB              kv.RwDB
-	dirs                    datadir.Dirs
-	blockReader             freezeblocks.BeaconSnapshotReader
-	antiquary               *antiquary.Antiquary
-	syncedData              *synced_data.SyncedDataManager
-	emitter                 *beaconevents.EventEmitter
-	blockCollector          block_collector.BlockCollector
-	sn                      *freezeblocks.CaplinSnapshots
-	blobStore               blob_storage.BlobStorage
-	peerDas                 das.PeerDas
-	blobDownloader          *network2.BlobHistoryDownloader
-	attestationDataProducer attestation_producer.AttestationDataProducer
-	caplinConfig            clparams.CaplinConfig
-	hasDownloaded           bool
+	rpc                        *rpc.BeaconRpcP2P
+	ethClock                   eth_clock.EthereumClock
+	beaconCfg                  *clparams.BeaconChainConfig
+	executionClient            execution_client.ExecutionEngine
+	state                      *state.CachingBeaconState
+	forkChoice                 *forkchoice.ForkChoiceStore
+	recoveredEnvelopeProcessor recoveredEnvelopeProcessor
+	indiciesDB                 kv.RwDB
+	dirs                       datadir.Dirs
+	blockReader                freezeblocks.BeaconSnapshotReader
+	antiquary                  *antiquary.Antiquary
+	syncedData                 *synced_data.SyncedDataManager
+	emitter                    *beaconevents.EventEmitter
+	blockCollector             block_collector.BlockCollector
+	sn                         *freezeblocks.CaplinSnapshots
+	blobStore                  blob_storage.BlobStorage
+	peerDas                    das.PeerDas
+	blobDownloader             *network2.BlobHistoryDownloader
+	attestationDataProducer    attestation_producer.AttestationDataProducer
+	caplinConfig               clparams.CaplinConfig
+	hasDownloaded              bool
+	gloasVerificationMu        sync.Mutex
+	gloasVerificationRunning   bool
+	gloasVerificationLineages  []gloasVerificationLineage
+}
+
+type recoveredEnvelopeProcessor interface {
+	ProcessRecoveredEnvelope(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool) error
 }
 
 type Args struct {
@@ -88,6 +97,7 @@ func ClStagesCfg(
 	state *state.CachingBeaconState,
 	executionClient execution_client.ExecutionEngine,
 	forkChoice *forkchoice.ForkChoiceStore,
+	recoveredEnvelopeProcessor recoveredEnvelopeProcessor,
 	indiciesDB kv.RwDB,
 	sn *freezeblocks.CaplinSnapshots,
 	blockReader freezeblocks.BeaconSnapshotReader,
@@ -115,25 +125,26 @@ func ClStagesCfg(
 	)
 
 	return &Cfg{
-		rpc:                     rpc,
-		antiquary:               antiquary,
-		ethClock:                ethClock,
-		caplinConfig:            caplinConfig,
-		beaconCfg:               beaconCfg,
-		state:                   state,
-		executionClient:         executionClient,
-		forkChoice:              forkChoice,
-		dirs:                    dirs,
-		indiciesDB:              indiciesDB,
-		sn:                      sn,
-		blockReader:             blockReader,
-		peerDas:                 peerDas,
-		blobDownloader:          blobDownloader,
-		syncedData:              syncedData,
-		emitter:                 emitters,
-		blobStore:               blobStore,
-		blockCollector:          block_collector.NewPersistentBlockCollector(log.Root(), executionClient, beaconCfg, dirs.CaplinHistory),
-		attestationDataProducer: attestationDataProducer,
+		rpc:                        rpc,
+		antiquary:                  antiquary,
+		ethClock:                   ethClock,
+		caplinConfig:               caplinConfig,
+		beaconCfg:                  beaconCfg,
+		state:                      state,
+		executionClient:            executionClient,
+		forkChoice:                 forkChoice,
+		recoveredEnvelopeProcessor: recoveredEnvelopeProcessor,
+		dirs:                       dirs,
+		indiciesDB:                 indiciesDB,
+		sn:                         sn,
+		blockReader:                blockReader,
+		peerDas:                    peerDas,
+		blobDownloader:             blobDownloader,
+		syncedData:                 syncedData,
+		emitter:                    emitters,
+		blobStore:                  blobStore,
+		blockCollector:             block_collector.NewPersistentBlockCollector(log.Root(), executionClient, beaconCfg, dirs.CaplinHistory),
+		attestationDataProducer:    attestationDataProducer,
 	}
 }
 

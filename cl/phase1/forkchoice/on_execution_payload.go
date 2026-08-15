@@ -297,6 +297,7 @@ func (f *ForkChoiceStore) validatePayloadWithEL(
 		if err := f.optimisticStore.AddOptimisticCandidate(beaconBlockRoot, block.Block); err != nil {
 			return fmt.Errorf("failed to add block to optimistic store: %v", err)
 		}
+		return errELBehind
 	case execution_client.PayloadStatusInvalidated:
 		log.Warn("validatePayloadWithEL: payload is invalid", "beaconBlockRoot", beaconBlockRoot, "err", err)
 		f.markPayloadInvalidLocked(beaconBlockRoot, executionBlockHash)
@@ -495,8 +496,11 @@ func (f *ForkChoiceStore) OnExecutionPayload(ctx context.Context, signedEnvelope
 	// Process envelope under f.mu; DB index write happens after unlock to avoid
 	// deadlock with postForkchoiceOperations (which holds MDBX tx then needs f.mu.RLock).
 	applied, err := f.applyEnvelope(ctx, signedEnvelope, checkBlobData, validatePayload)
-	if err != nil || !applied {
+	if err != nil {
 		return err
+	}
+	if !applied {
+		return fmt.Errorf("%w: %w", ErrIgnore, ErrExecutionPayloadAlreadyStored)
 	}
 
 	// Write execution block indices outside f.mu.

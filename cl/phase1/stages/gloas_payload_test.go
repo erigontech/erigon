@@ -2,7 +2,9 @@ package stages
 
 import (
 	"context"
+	"encoding/binary"
 	"math/big"
+	"slices"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -124,6 +126,591 @@ func TestValidateAnchorEnvelope(t *testing.T) {
 	}
 }
 
+func TestCollectUnverifiedGloasPayloadsIncludesCanonicalAndHighestSeenForks(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	clparams.ApplyMinimalPreset(&cfg)
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.GloasForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	parentRoot := common.HexToHash("0x10")
+	rootA := common.HexToHash("0xa")
+	rootB := common.HexToHash("0xb")
+	blocks := map[common.Hash]*cltypes.SignedBeaconBlock{
+		parentRoot: testGloasVerificationBlock(&cfg, 1, common.HexToHash("0x01")),
+		rootA:      testGloasVerificationBlock(&cfg, 2, parentRoot),
+		rootB:      testGloasVerificationBlock(&cfg, 2, parentRoot),
+	}
+	getBlock := func(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+		block, ok := blocks[root]
+		return block, ok
+	}
+	shouldVerify := func(root common.Hash) bool {
+		_, ok := blocks[root]
+		return ok
+	}
+
+	for _, tt := range []struct {
+		name   string
+		starts []common.Hash
+	}{
+		{name: "canonical B and highest-seen A", starts: []common.Hash{rootB, rootA}},
+		{name: "canonical A and highest-seen B", starts: []common.Hash{rootA, rootB}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			items, _ := collectUnverifiedGloasPayloads(tt.starts, 0, &cfg, getBlock, shouldVerify)
+			roots := verificationRoots(items)
+			require.Len(t, roots, 2)
+			require.Equal(t, parentRoot, roots[0])
+			require.Equal(t, tt.starts[0], roots[1])
+		})
+	}
+}
+
+func TestCollectUnverifiedGloasPayloadsDoesNotStarveLineageAtScanLimit(t *testing.T) {
+	cfg := testGloasVerificationConfig()
+	blocks := make(map[common.Hash]*cltypes.SignedBeaconBlock, maxGloasVerificationScanPerLineage+2)
+	canonicalRoot := common.Hash{}
+	for i := 1; i <= maxGloasVerificationScanPerLineage+1; i++ {
+		root := testGloasVerificationRoot(uint64(i))
+		blocks[root] = testGloasVerificationBlock(&cfg, uint64(i), canonicalRoot)
+		canonicalRoot = root
+	}
+	sideRoot := testGloasVerificationRoot(10_000)
+	blocks[sideRoot] = testGloasVerificationBlock(&cfg, 1, common.Hash{})
+	getBlock := func(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+		block, ok := blocks[root]
+		return block, ok
+	}
+
+	for _, length := range []int{maxGloasVerificationScanPerLineage, maxGloasVerificationScanPerLineage + 1} {
+		canonicalRoot = testGloasVerificationRoot(uint64(length))
+		for _, starts := range [][]common.Hash{{canonicalRoot, sideRoot}, {sideRoot, canonicalRoot}} {
+			items, _ := collectUnverifiedGloasPayloads(starts, 0, &cfg, getBlock, func(root common.Hash) bool {
+				return root == sideRoot
+			})
+			require.Contains(t, verificationRoots(items), sideRoot)
+		}
+	}
+}
+
+func TestCollectUnverifiedGloasPayloadsReturnsDeepLineageContinuation(t *testing.T) {
+	cfg := testGloasVerificationConfig()
+	blocks := make(map[common.Hash]*cltypes.SignedBeaconBlock, maxGloasVerificationScanPerLineage+1)
+	parentRoot := common.Hash{}
+	oldestRoot := common.Hash{}
+	for i := 1; i <= maxGloasVerificationScanPerLineage+1; i++ {
+		root := testGloasVerificationRoot(uint64(i))
+		blocks[root] = testGloasVerificationBlock(&cfg, uint64(i), parentRoot)
+		if i == 1 {
+			oldestRoot = root
+		}
+		parentRoot = root
+	}
+	newestRoot := parentRoot
+	verified := make(map[common.Hash]bool)
+	shouldVerify := func(root common.Hash) bool { return !verified[root] }
+	items, continuations := collectUnverifiedGloasPayloads(
+		[]common.Hash{newestRoot},
+		0,
+		&cfg,
+		func(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+			block, ok := blocks[root]
+			return block, ok
+		},
+		shouldVerify,
+	)
+
+	require.Empty(t, items)
+	require.Equal(t, []common.Hash{oldestRoot}, continuations)
+	items, continuations = collectUnverifiedGloasPayloads(
+		continuations,
+		0,
+		&cfg,
+		func(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+			block, ok := blocks[root]
+			return block, ok
+		},
+		shouldVerify,
+	)
+	require.Empty(t, continuations)
+	require.Equal(t, []common.Hash{oldestRoot}, verificationRoots(items))
+}
+
+func TestCollectUnverifiedGloasPayloadsContinuesThroughEmptyBoundaryWithoutDeferringDescendant(t *testing.T) {
+	cfg := testGloasVerificationConfig()
+	blocks := make(map[common.Hash]*cltypes.SignedBeaconBlock, maxGloasVerificationScanPerLineage+1)
+	parentRoot := common.Hash{}
+	for i := 1; i <= maxGloasVerificationScanPerLineage+1; i++ {
+		root := testGloasVerificationRoot(uint64(i))
+		blocks[root] = testGloasVerificationBlock(&cfg, uint64(i), parentRoot)
+		parentRoot = root
+	}
+	newestRoot := parentRoot
+	items, continuations := collectUnverifiedGloasPayloads(
+		[]common.Hash{newestRoot},
+		0,
+		&cfg,
+		func(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+			block, ok := blocks[root]
+			return block, ok
+		},
+		func(root common.Hash) bool { return root == newestRoot },
+	)
+
+	require.Equal(t, []common.Hash{testGloasVerificationRoot(1)}, continuations)
+	require.Empty(t, items)
+}
+
+func TestCollectUnverifiedGloasPayloadsFindsWorkBehindNonActionableBoundary(t *testing.T) {
+	cfg := testGloasVerificationConfig()
+	blocks := make(map[common.Hash]*cltypes.SignedBeaconBlock, maxGloasVerificationScanPerLineage+2)
+	parentRoot := common.Hash{}
+	for i := 1; i <= maxGloasVerificationScanPerLineage+2; i++ {
+		root := testGloasVerificationRoot(uint64(i))
+		blocks[root] = testGloasVerificationBlock(&cfg, uint64(i), parentRoot)
+		parentRoot = root
+	}
+	oldestRoot := testGloasVerificationRoot(1)
+	boundaryRoot := testGloasVerificationRoot(2)
+	blocks[oldestRoot].Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash = common.HexToHash("0x01")
+	blocks[boundaryRoot].Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash = common.HexToHash("0x02")
+	getBlock := func(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+		block, ok := blocks[root]
+		return block, ok
+	}
+	shouldVerify := func(root common.Hash) bool { return root == oldestRoot }
+
+	items, continuations := collectUnverifiedGloasPayloads([]common.Hash{parentRoot}, 0, &cfg, getBlock, shouldVerify)
+	require.Empty(t, items)
+	require.Equal(t, []common.Hash{boundaryRoot}, continuations)
+	items, continuations = collectUnverifiedGloasPayloads(continuations, 0, &cfg, getBlock, shouldVerify)
+	require.Empty(t, continuations)
+	require.Equal(t, []common.Hash{oldestRoot}, verificationRoots(items))
+}
+
+func TestCollectUnverifiedGloasPayloadsDoesNotDeferIndependentEmptyDescendants(t *testing.T) {
+	cfg := testGloasVerificationConfig()
+	blocks := make(map[common.Hash]*cltypes.SignedBeaconBlock, maxGloasVerificationScanPerLineage+1)
+	parentRoot := common.Hash{}
+	for i := 1; i <= maxGloasVerificationScanPerLineage+1; i++ {
+		root := testGloasVerificationRoot(uint64(i))
+		blocks[root] = testGloasVerificationBlock(&cfg, uint64(i), parentRoot)
+		parentRoot = root
+	}
+	oldestRoot := testGloasVerificationRoot(1)
+	oldestChildRoot := testGloasVerificationRoot(2)
+	blocks[oldestRoot].Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash = common.HexToHash("0x01")
+	blocks[oldestChildRoot].Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash = common.HexToHash("0x02")
+	items, continuations := collectUnverifiedGloasPayloads(
+		[]common.Hash{parentRoot},
+		0,
+		&cfg,
+		func(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+			block, ok := blocks[root]
+			return block, ok
+		},
+		func(common.Hash) bool { return true },
+	)
+
+	require.Equal(t, []common.Hash{oldestRoot}, continuations)
+	require.Empty(t, items)
+}
+
+func TestCollectUnverifiedGloasPayloadsDefersSharedForkUntilAncestor(t *testing.T) {
+	cfg := testGloasVerificationConfig()
+	blocks := make(map[common.Hash]*cltypes.SignedBeaconBlock, maxGloasVerificationScanPerLineage+2)
+	parentRoot := common.Hash{}
+	for i := 1; i <= maxGloasVerificationScanPerLineage+1; i++ {
+		root := testGloasVerificationRoot(uint64(i))
+		blocks[root] = testGloasVerificationBlock(&cfg, uint64(i), parentRoot)
+		parentRoot = root
+	}
+	oldestRoot := testGloasVerificationRoot(1)
+	sharedRoot := testGloasVerificationRoot(200)
+	sideRoot := testGloasVerificationRoot(10_000)
+	blocks[sideRoot] = testGloasVerificationBlock(&cfg, maxGloasVerificationScanPerLineage+2, sharedRoot)
+	items, continuations := collectUnverifiedGloasPayloads(
+		[]common.Hash{parentRoot, sideRoot},
+		0,
+		&cfg,
+		func(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+			block, ok := blocks[root]
+			return block, ok
+		},
+		func(common.Hash) bool { return true },
+	)
+
+	require.Equal(t, []common.Hash{oldestRoot}, continuations)
+	require.NotEmpty(t, items)
+	require.Equal(t, oldestRoot, items[0].root)
+	require.NotContains(t, verificationRoots(items), sideRoot)
+}
+
+func TestCollectUnverifiedGloasPayloadPagesAdvancesBeyondContinuationCapacity(t *testing.T) {
+	cfg := testGloasVerificationConfig()
+	checkpointLimit := maxGloasVerificationStartRootsPerCycle
+	depth := maxGloasVerificationScanPerLineage*(checkpointLimit*3) + 1
+	blocks := make(map[common.Hash]*cltypes.SignedBeaconBlock, depth)
+	parentRoot := common.Hash{}
+	for i := 1; i <= depth; i++ {
+		root := testGloasVerificationRoot(uint64(i))
+		blocks[root] = testGloasVerificationBlock(&cfg, uint64(i), parentRoot)
+		parentRoot = root
+	}
+	verified := make(map[common.Hash]bool, depth)
+	states := []gloasVerificationLineage{{origin: parentRoot, cursor: parentRoot}}
+	getBlockCalls := 0
+	for cycle := 0; cycle < 500 && !verified[parentRoot]; cycle++ {
+		if len(states) == 0 {
+			states = []gloasVerificationLineage{{origin: parentRoot, cursor: parentRoot}}
+		}
+		items, next := collectUnverifiedGloasPayloadPagesWithCheckpointLimit(
+			states,
+			0,
+			&cfg,
+			func(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+				getBlockCalls++
+				block, ok := blocks[root]
+				return block, ok
+			},
+			func(root common.Hash) bool { return !verified[root] },
+			checkpointLimit,
+		)
+		for _, item := range items {
+			verified[item.root] = true
+		}
+		states = next
+		for _, state := range states {
+			require.LessOrEqual(t, len(state.checkpoints), checkpointLimit)
+		}
+	}
+
+	require.True(t, verified[testGloasVerificationRoot(1)])
+	require.True(t, verified[parentRoot])
+	require.Less(t, getBlockCalls, depth*20)
+}
+
+func TestCollectUnverifiedGloasPayloadPagesDefersSharedSideUntilParent(t *testing.T) {
+	cfg := testGloasVerificationConfig()
+	blocks := make(map[common.Hash]*cltypes.SignedBeaconBlock, 66)
+	parentRoot := common.Hash{}
+	for i := 1; i <= 64; i++ {
+		root := testGloasVerificationRoot(uint64(i))
+		blocks[root] = testGloasVerificationBlock(&cfg, uint64(i), parentRoot)
+		parentRoot = root
+	}
+	sharedRoot := parentRoot
+	canonicalRoot := testGloasVerificationRoot(65)
+	sideRoot := testGloasVerificationRoot(10_000)
+	blocks[canonicalRoot] = testGloasVerificationBlock(&cfg, 65, sharedRoot)
+	blocks[sideRoot] = testGloasVerificationBlock(&cfg, 65, sharedRoot)
+	verified := make(map[common.Hash]bool)
+	states := []gloasVerificationLineage{
+		{origin: canonicalRoot, cursor: canonicalRoot},
+		{origin: sideRoot, cursor: sideRoot},
+	}
+	sawSide := false
+	for cycle := 0; cycle < 20 && len(states) > 0; cycle++ {
+		items, next := collectUnverifiedGloasPayloadPages(
+			states,
+			0,
+			&cfg,
+			func(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+				block, ok := blocks[root]
+				return block, ok
+			},
+			func(root common.Hash) bool { return !verified[root] },
+		)
+		for _, item := range items {
+			if item.root == sideRoot {
+				require.True(t, verified[sharedRoot])
+				sawSide = true
+			}
+			verified[item.root] = true
+		}
+		states = next
+	}
+	require.True(t, sawSide)
+}
+
+func TestCollectUnverifiedGloasPayloadPagesProcessesIndependentEmptyBoundary(t *testing.T) {
+	cfg := testGloasVerificationConfig()
+	blocks := make(map[common.Hash]*cltypes.SignedBeaconBlock, maxGloasVerificationScanPerLineage+1)
+	parentRoot := common.Hash{}
+	for i := 1; i <= maxGloasVerificationScanPerLineage+1; i++ {
+		root := testGloasVerificationRoot(uint64(i))
+		blocks[root] = testGloasVerificationBlock(&cfg, uint64(i), parentRoot)
+		parentRoot = root
+	}
+	boundaryRoot := testGloasVerificationRoot(1)
+	blocks[boundaryRoot].Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash = common.HexToHash("0x01")
+	newestRoot := parentRoot
+	items, next := collectUnverifiedGloasPayloadPages(
+		[]gloasVerificationLineage{{origin: newestRoot, cursor: newestRoot}},
+		0,
+		&cfg,
+		func(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+			block, ok := blocks[root]
+			return block, ok
+		},
+		func(root common.Hash) bool { return root == newestRoot || root == boundaryRoot },
+	)
+
+	require.Equal(t, []common.Hash{newestRoot}, verificationRoots(items))
+	require.NotEmpty(t, next)
+}
+
+func TestCollectUnverifiedGloasPayloadPagesDefersTransitiveFullBoundary(t *testing.T) {
+	cfg := testGloasVerificationConfig()
+	blocks := make(map[common.Hash]*cltypes.SignedBeaconBlock, maxGloasVerificationScanPerLineage+2)
+	parentRoot := common.Hash{}
+	for i := 1; i <= maxGloasVerificationScanPerLineage+2; i++ {
+		root := testGloasVerificationRoot(uint64(i))
+		blocks[root] = testGloasVerificationBlock(&cfg, uint64(i), parentRoot)
+		parentRoot = root
+	}
+	fullAncestorRoot := testGloasVerificationRoot(1)
+	fullAncestorHash := common.HexToHash("0x01")
+	blocks[fullAncestorRoot].Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash = fullAncestorHash
+	boundaryRoot := testGloasVerificationRoot(2)
+	blocks[boundaryRoot].Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash = fullAncestorHash
+	oldestPageRoot := testGloasVerificationRoot(3)
+	blocks[oldestPageRoot].Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash = fullAncestorHash
+	newestRoot := parentRoot
+	items, next := collectUnverifiedGloasPayloadPages(
+		[]gloasVerificationLineage{{origin: newestRoot, cursor: newestRoot}},
+		0,
+		&cfg,
+		func(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+			block, ok := blocks[root]
+			return block, ok
+		},
+		func(root common.Hash) bool { return root == oldestPageRoot || root == fullAncestorRoot },
+	)
+
+	require.Empty(t, items)
+	require.Equal(t, boundaryRoot, next[0].cursor)
+}
+
+func TestCollectUnverifiedGloasPayloadPagesDefersSharedEmptyUntilFullAncestor(t *testing.T) {
+	cfg := testGloasVerificationConfig()
+	blocks := make(map[common.Hash]*cltypes.SignedBeaconBlock, 66)
+	parentRoot := common.Hash{}
+	for i := 1; i <= 64; i++ {
+		root := testGloasVerificationRoot(uint64(i))
+		blocks[root] = testGloasVerificationBlock(&cfg, uint64(i), parentRoot)
+		parentRoot = root
+	}
+	sharedEmptyRoot := parentRoot
+	fullAncestorRoot := testGloasVerificationRoot(63)
+	fullAncestorHash := common.HexToHash("0x63")
+	blocks[fullAncestorRoot].Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash = fullAncestorHash
+	canonicalRoot := testGloasVerificationRoot(65)
+	sideRoot := testGloasVerificationRoot(10_000)
+	blocks[canonicalRoot] = testGloasVerificationBlock(&cfg, 65, sharedEmptyRoot)
+	blocks[sideRoot] = testGloasVerificationBlock(&cfg, 65, sharedEmptyRoot)
+	blocks[sideRoot].Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash = fullAncestorHash
+	items, _ := collectUnverifiedGloasPayloadPages(
+		[]gloasVerificationLineage{
+			{origin: canonicalRoot, cursor: canonicalRoot},
+			{origin: sideRoot, cursor: sideRoot},
+		},
+		0,
+		&cfg,
+		func(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+			block, ok := blocks[root]
+			return block, ok
+		},
+		func(root common.Hash) bool { return root != sharedEmptyRoot },
+	)
+
+	require.NotContains(t, verificationRoots(items), sideRoot)
+}
+
+func TestShouldVerifyGloasPayloadExcludesTerminalStatus(t *testing.T) {
+	require.True(t, shouldVerifyGloasPayload(true, false, execution_client.PayloadStatusNone, false))
+	require.True(t, shouldVerifyGloasPayload(true, false, execution_client.PayloadStatusNotValidated, true))
+	require.False(t, shouldVerifyGloasPayload(true, false, execution_client.PayloadStatusInvalidated, true))
+	require.False(t, shouldVerifyGloasPayload(true, false, execution_client.PayloadStatusValidated, true))
+	require.False(t, shouldVerifyGloasPayload(true, true, execution_client.PayloadStatusValidated, true))
+	require.False(t, shouldVerifyGloasPayload(false, false, execution_client.PayloadStatusNone, false))
+}
+
+func TestMergeGloasVerificationLineagesAddsNewRootWhileActive(t *testing.T) {
+	activeRoot := testGloasVerificationRoot(1)
+	newRoot := testGloasVerificationRoot(2)
+	states := mergeGloasVerificationLineages(
+		[]gloasVerificationLineage{{origin: activeRoot, cursor: activeRoot}},
+		[]common.Hash{activeRoot, newRoot},
+	)
+
+	require.Len(t, states, 2)
+	require.Equal(t, newRoot, states[1].origin)
+}
+
+func TestPrioritizeGloasVerificationLineagesReplacesOldRootAtCapacity(t *testing.T) {
+	states := make([]gloasVerificationLineage, 0, maxGloasVerificationStartRootsPerCycle)
+	for i := 1; i <= maxGloasVerificationStartRootsPerCycle; i++ {
+		root := testGloasVerificationRoot(uint64(i))
+		states = append(states, gloasVerificationLineage{origin: root, cursor: root})
+	}
+	currentRoot := testGloasVerificationRoot(100)
+	states = prioritizeGloasVerificationLineages(states, []common.Hash{currentRoot})
+
+	require.Len(t, states, maxGloasVerificationStartRootsPerCycle)
+	require.Equal(t, currentRoot, states[0].origin)
+}
+
+func TestCollectUnverifiedGloasPayloadPagesDropsStalledLineage(t *testing.T) {
+	cfg := testGloasVerificationConfig()
+	root := testGloasVerificationRoot(1)
+	block := testGloasVerificationBlock(&cfg, 1, common.Hash{})
+	states := []gloasVerificationLineage{{origin: root, cursor: root}}
+	for cycle := 0; cycle <= maxGloasVerificationStalledCycles && len(states) > 0; cycle++ {
+		_, states = collectUnverifiedGloasPayloadPages(
+			states,
+			0,
+			&cfg,
+			func(common.Hash) (*cltypes.SignedBeaconBlock, bool) { return block, true },
+			func(common.Hash) bool { return true },
+		)
+	}
+
+	require.Empty(t, states)
+}
+
+func TestCollectUnverifiedGloasPayloadPagesDoesNotPromoteMissingBoundary(t *testing.T) {
+	cfg := testGloasVerificationConfig()
+	blocks := make(map[common.Hash]*cltypes.SignedBeaconBlock, maxGloasVerificationScanPerLineage)
+	parentRoot := common.Hash{}
+	for i := 2; i <= maxGloasVerificationScanPerLineage+1; i++ {
+		root := testGloasVerificationRoot(uint64(i))
+		blocks[root] = testGloasVerificationBlock(&cfg, uint64(i), parentRoot)
+		parentRoot = root
+	}
+	missingRoot := testGloasVerificationRoot(1)
+	blocks[testGloasVerificationRoot(2)].Block.ParentRoot = missingRoot
+	states := []gloasVerificationLineage{{origin: parentRoot, cursor: parentRoot}}
+	getBlock := func(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+		block, ok := blocks[root]
+		return block, ok
+	}
+	items, states := collectUnverifiedGloasPayloadPages(states, 0, &cfg, getBlock, func(common.Hash) bool { return true })
+	require.Empty(t, items)
+	require.Equal(t, missingRoot, states[0].cursor)
+
+	items, states = collectUnverifiedGloasPayloadPages(states, 0, &cfg, getBlock, func(common.Hash) bool { return true })
+	require.Empty(t, items)
+	require.Equal(t, missingRoot, states[0].cursor)
+	require.Equal(t, common.Hash{}, states[0].readyBoundary)
+}
+
+func TestCollectUnverifiedGloasPayloadPagesSharesOutputAcrossLineages(t *testing.T) {
+	cfg := testGloasVerificationConfig()
+	blocks := make(map[common.Hash]*cltypes.SignedBeaconBlock, maxGloasVerificationSweepPerCycle+1)
+	canonicalRoot := common.Hash{}
+	for i := 1; i <= maxGloasVerificationSweepPerCycle; i++ {
+		root := testGloasVerificationRoot(uint64(i))
+		blocks[root] = testGloasVerificationBlock(&cfg, uint64(i), canonicalRoot)
+		canonicalRoot = root
+	}
+	sideRoot := testGloasVerificationRoot(10_000)
+	blocks[sideRoot] = testGloasVerificationBlock(&cfg, 1, common.Hash{})
+	getBlock := func(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+		block, ok := blocks[root]
+		return block, ok
+	}
+
+	for _, starts := range [][]common.Hash{{canonicalRoot, sideRoot}, {sideRoot, canonicalRoot}} {
+		states := make([]gloasVerificationLineage, 0, len(starts))
+		for _, root := range starts {
+			states = append(states, gloasVerificationLineage{origin: root, cursor: root})
+		}
+		items, _ := collectUnverifiedGloasPayloadPages(states, 0, &cfg, getBlock, func(common.Hash) bool { return true })
+		require.LessOrEqual(t, len(items), maxGloasVerificationSweepPerCycle)
+		require.Contains(t, verificationRoots(items), sideRoot)
+		lastSlot := uint64(0)
+		for _, item := range items {
+			require.GreaterOrEqual(t, item.block.Block.Slot, lastSlot)
+			lastSlot = item.block.Block.Slot
+		}
+	}
+}
+
+func TestCollectUnverifiedGloasPayloadPagesWalksHiddenLeafLineage(t *testing.T) {
+	cfg := testGloasVerificationConfig()
+	canonicalRoot := testGloasVerificationRoot(100)
+	highestSeenRoot := testGloasVerificationRoot(200)
+	hiddenRoots := []common.Hash{
+		testGloasVerificationRoot(301),
+		testGloasVerificationRoot(302),
+		testGloasVerificationRoot(303),
+	}
+	blocks := map[common.Hash]*cltypes.SignedBeaconBlock{
+		canonicalRoot:   testGloasVerificationBlock(&cfg, 4, common.Hash{}),
+		highestSeenRoot: testGloasVerificationBlock(&cfg, 5, common.Hash{}),
+		hiddenRoots[0]:  testGloasVerificationBlock(&cfg, 1, common.Hash{}),
+		hiddenRoots[1]:  testGloasVerificationBlock(&cfg, 2, hiddenRoots[0]),
+		hiddenRoots[2]:  testGloasVerificationBlock(&cfg, 3, hiddenRoots[1]),
+	}
+	items, _ := collectUnverifiedGloasPayloadPages(
+		[]gloasVerificationLineage{
+			{origin: canonicalRoot, cursor: canonicalRoot},
+			{origin: highestSeenRoot, cursor: highestSeenRoot},
+			{origin: hiddenRoots[2], cursor: hiddenRoots[2]},
+		},
+		0,
+		&cfg,
+		func(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+			block, ok := blocks[root]
+			return block, ok
+		},
+		func(root common.Hash) bool { return slices.Contains(hiddenRoots, root) },
+	)
+
+	require.Equal(t, hiddenRoots, verificationRoots(items))
+}
+
+func testGloasVerificationConfig() clparams.BeaconChainConfig {
+	cfg := clparams.MainnetBeaconConfig
+	clparams.ApplyMinimalPreset(&cfg)
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.GloasForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	return cfg
+}
+
+func testGloasVerificationRoot(i uint64) common.Hash {
+	var root common.Hash
+	binary.BigEndian.PutUint64(root[len(root)-8:], i)
+	return root
+}
+
+func verificationRoots(items []gloasVerificationBlock) []common.Hash {
+	roots := make([]common.Hash, len(items))
+	for i, item := range items {
+		roots[i] = item.root
+	}
+	return roots
+}
+
+func testGloasVerificationBlock(cfg *clparams.BeaconChainConfig, slot uint64, parentRoot common.Hash) *cltypes.SignedBeaconBlock {
+	block := cltypes.NewSignedBeaconBlock(cfg, clparams.GloasVersion)
+	block.Block.Slot = slot
+	block.Block.ParentRoot = parentRoot
+	return block
+}
+
 func TestAnchorEnvelopeMatches(t *testing.T) {
 	_, _, _, env, anchorRoot := validAnchorEnvelopeFixture(t, 1)
 
@@ -187,30 +774,72 @@ func TestStandaloneExecutionClientDoesNotRunLocalGloasRetry(t *testing.T) {
 	require.True(t, canRetryGloasPayloads(&Cfg{executionClient: &testExecutionEngine{supportInsertion: true}}))
 }
 
-func TestValidateAnchorPayloadIfLocalELFollowsSupportInsertion(t *testing.T) {
+func TestStandaloneExecutionClientCanValidateGloasPayloads(t *testing.T) {
+	require.False(t, canValidateGloasPayloads(&Cfg{}))
+	require.True(t, canValidateGloasPayloads(&Cfg{executionClient: &testExecutionEngine{supportInsertion: false}}))
+	require.True(t, canValidateGloasPayloads(&Cfg{executionClient: &testExecutionEngine{supportInsertion: true}}))
+}
+
+func TestValidateAnchorPayloadUsesRemoteExecutionClient(t *testing.T) {
 	cfg, _, bid, env, anchorRoot := validAnchorEnvelopeFixture(t, 1)
 	remoteEL := &testExecutionEngine{
 		supportInsertion: false,
-		payloadStatus:    execution_client.PayloadStatusInvalidated,
+		payloadStatus:    execution_client.PayloadStatusValidated,
 	}
 
-	require.NoError(t, validateAnchorPayloadIfLocalEL(context.Background(), &Cfg{
+	require.NoError(t, validateAnchorPayloadWithExecutionClient(context.Background(), &Cfg{
 		beaconCfg:       cfg,
 		executionClient: remoteEL,
 		forkChoice:      &forkchoice.ForkChoiceStore{},
 	}, anchorRoot, bid, env))
-	require.Equal(t, 0, remoteEL.newPayloadCalls)
+	require.Equal(t, 1, remoteEL.newPayloadCalls)
 
 	localEL := &testExecutionEngine{
 		supportInsertion: true,
 		payloadStatus:    execution_client.PayloadStatusValidated,
 	}
-	require.NoError(t, validateAnchorPayloadIfLocalEL(context.Background(), &Cfg{
+	require.NoError(t, validateAnchorPayloadWithExecutionClient(context.Background(), &Cfg{
 		beaconCfg:       cfg,
 		executionClient: localEL,
 		forkChoice:      &forkchoice.ForkChoiceStore{},
 	}, anchorRoot, bid, env))
 	require.Equal(t, 1, localEL.newPayloadCalls)
+}
+
+func TestValidateAnchorPayloadHandlesRemoteExecutionStatuses(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		status execution_client.PayloadStatus
+	}{
+		{name: "validated", status: execution_client.PayloadStatusValidated},
+		{name: "syncing", status: execution_client.PayloadStatusNotValidated},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, _, bid, env, anchorRoot := validAnchorEnvelopeFixture(t, 1)
+			engine := &testExecutionEngine{payloadStatus: tt.status}
+			err := validateAnchorPayloadWithExecutionClient(context.Background(), &Cfg{
+				beaconCfg:       cfg,
+				executionClient: engine,
+				forkChoice:      &forkchoice.ForkChoiceStore{},
+			}, anchorRoot, bid, env)
+			require.NoError(t, err)
+			require.Equal(t, 1, engine.newPayloadCalls)
+		})
+	}
+}
+
+func TestValidateAnchorPayloadWithELReturnsRemoteInvalidation(t *testing.T) {
+	cfg, _, bid, env, _ := validAnchorEnvelopeFixture(t, 1)
+	engine := &testExecutionEngine{payloadStatus: execution_client.PayloadStatusInvalidated}
+
+	status, err := validateAnchorPayloadWithEL(context.Background(), &Cfg{
+		beaconCfg:       cfg,
+		executionClient: engine,
+	}, bid, env)
+
+	require.NoError(t, err)
+	require.EqualValues(t, execution_client.PayloadStatusInvalidated, status)
+	require.Equal(t, 1, engine.newPayloadCalls)
 }
 
 func TestDrainPendingGloasPayloadsRequeuesNotValidatedPayload(t *testing.T) {

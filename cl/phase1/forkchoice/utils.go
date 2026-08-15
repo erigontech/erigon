@@ -154,10 +154,24 @@ func (f *ForkChoiceStore) onNewFinalized(newFinalized solid.Checkpoint) {
 	f.childrens.Range(func(k, v any) bool {
 		if v.(childrens).parentSlot <= finalizedSlot {
 			f.childrens.Delete(k)
-			delete(f.headSet, k.(common.Hash))
+			root := k.(common.Hash)
+			delete(f.headSet, root)
+			f.removeGloasVerificationLeaf(root)
 		}
 		return true
 	})
+	if f.gloasVerificationLeaves != nil {
+		for element := f.gloasVerificationLeaves.Front(); element != nil; {
+			next := element.Next()
+			root := element.Value.(common.Hash)
+			header, ok := f.forkGraph.GetHeader(root)
+			if !ok || header.Slot <= finalizedSlot {
+				delete(f.headSet, root)
+				f.removeGloasVerificationLeaf(root)
+			}
+			element = next
+		}
+	}
 
 	// Clean up per-block unrealized justifications/finalizations for finalized blocks.
 	f.unrealizedJustifications.Range(func(k, v any) bool {

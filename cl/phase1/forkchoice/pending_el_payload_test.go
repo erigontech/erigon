@@ -50,4 +50,22 @@ func TestPendingELPayloadsDeduplicateByEnvelopeRoot(t *testing.T) {
 	payloads := f.DrainPendingELPayloads()
 	require.Len(t, payloads, 1)
 	require.Equal(t, uint64(1), payloads[0].Block.Block.Slot)
+	require.False(t, f.hasPendingELPayload(root))
+}
+
+func TestPendingELPayloadsEvictionUpdatesRootMembership(t *testing.T) {
+	f := &ForkChoiceStore{}
+	firstRoot := common.Hash{31: 1}
+
+	for i := range maxPendingELPayloads + 1 {
+		root := common.Hash{30: byte((i + 1) >> 8), 31: byte(i + 1)}
+		f.addPendingELPayload(nil, &cltypes.SignedExecutionPayloadEnvelope{
+			Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: root},
+		})
+	}
+
+	require.False(t, f.hasPendingELPayload(firstRoot))
+	require.True(t, f.hasPendingELPayload(common.Hash{
+		30: byte((maxPendingELPayloads + 1) >> 8), 31: byte((maxPendingELPayloads + 1) & 0xff),
+	}))
 }

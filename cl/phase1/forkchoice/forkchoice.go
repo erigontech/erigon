@@ -18,6 +18,7 @@ package forkchoice
 
 import (
 	"cmp"
+	"container/list"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -94,16 +95,19 @@ type ForkChoiceStore struct {
 	unrealizedJustifiedCheckpoint atomic.Value
 	unrealizedFinalizedCheckpoint atomic.Value
 
-	proposerBoostRoot        atomic.Value
-	headHash                 common.Hash
-	headSlot                 uint64
-	headPayloadStatus        cltypes.PayloadStatus
-	genesisTime              uint64
-	genesisValidatorsRoot    common.Hash
-	weights                  map[common.Hash]uint64
-	headSet                  map[common.Hash]struct{}
-	hotSidecars              map[common.Hash][]*cltypes.BlobSidecar // Set of sidecars that are not yet processed.
-	verifiedExecutionPayload *lru.Cache[common.Hash, struct{}]
+	proposerBoostRoot           atomic.Value
+	headHash                    common.Hash
+	headSlot                    uint64
+	headPayloadStatus           cltypes.PayloadStatus
+	genesisTime                 uint64
+	genesisValidatorsRoot       common.Hash
+	weights                     map[common.Hash]uint64
+	headSet                     map[common.Hash]struct{}
+	gloasVerificationLeaves     *list.List
+	gloasVerificationLeafByRoot map[common.Hash]*list.Element
+	gloasVerificationLeafCursor *list.Element
+	hotSidecars                 map[common.Hash][]*cltypes.BlobSidecar // Set of sidecars that are not yet processed.
+	verifiedExecutionPayload    *lru.Cache[common.Hash, struct{}]
 	// [New in Gloas:EIP7732] Track execution payload validation status by execution block hash.
 	// Used to check if parent execution payload has been validated/invalidated for gossip validation.
 	executionPayloadStatus *lru.Cache[common.Hash, execution_client.PayloadStatus]
@@ -199,8 +203,9 @@ type ForkChoiceStore struct {
 	// whose EL newPayload failed (e.g. because EL hasn't caught up after forward sync).
 	// The stages layer drains these into blockCollector before each Flush() so EL
 	// eventually receives the blocks.
-	pendingELPayloadsMu sync.Mutex
-	pendingELPayloads   []PendingELPayload
+	pendingELPayloadsMu   sync.Mutex
+	pendingELPayloads     []PendingELPayload
+	pendingELPayloadRoots map[common.Hash]struct{}
 
 	// db is used to persist execution payload indices (block number/hash) when an envelope
 	// is accepted in OnExecutionPayload. May be nil (e.g. in tests), in which case the
@@ -420,6 +425,7 @@ func NewForkChoiceStore(
 	f.payloadDataAvailabilityVote.Store(common.Hash(anchorRoot), anchorDataAvailabilityVotes)
 
 	f.gloasWeightTree = newGloasWeightTree(f)
+	f.initializeGloasVerificationLeaves()
 
 	return f, nil
 }
@@ -737,6 +743,71 @@ func (f *ForkChoiceStore) ForkNodes() []ForkNode {
 	return forkNodes
 }
 
+func (f *ForkChoiceStore) initializeGloasVerificationLeaves() {
+	f.gloasVerificationLeaves = list.New()
+	f.gloasVerificationLeafByRoot = make(map[common.Hash]*list.Element, len(f.headSet))
+	for root := range f.headSet {
+		f.addGloasVerificationLeaf(root)
+	}
+}
+
+func (f *ForkChoiceStore) addGloasVerificationLeaf(root common.Hash) {
+	if f.gloasVerificationLeaves == nil {
+		return
+	}
+	if _, ok := f.gloasVerificationLeafByRoot[root]; ok {
+		return
+	}
+	f.gloasVerificationLeafByRoot[root] = f.gloasVerificationLeaves.PushBack(root)
+}
+
+func (f *ForkChoiceStore) removeGloasVerificationLeaf(root common.Hash) {
+	if f.gloasVerificationLeaves == nil {
+		return
+	}
+	element, ok := f.gloasVerificationLeafByRoot[root]
+	if !ok {
+		return
+	}
+	if f.gloasVerificationLeafCursor == element {
+		if f.gloasVerificationLeaves.Len() == 1 {
+			f.gloasVerificationLeafCursor = nil
+		} else if previous := element.Prev(); previous != nil {
+			f.gloasVerificationLeafCursor = previous
+		} else {
+			f.gloasVerificationLeafCursor = f.gloasVerificationLeaves.Back()
+		}
+	}
+	f.gloasVerificationLeaves.Remove(element)
+	delete(f.gloasVerificationLeafByRoot, root)
+}
+
+// GloasVerificationLeaves returns the next bounded page of fork-tree leaves.
+func (f *ForkChoiceStore) GloasVerificationLeaves(limit int) []common.Hash {
+	if limit <= 0 {
+		return nil
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.gloasVerificationLeaves == nil || f.gloasVerificationLeaves.Len() == 0 {
+		return nil
+	}
+
+	leaves := make([]common.Hash, 0, min(limit, f.gloasVerificationLeaves.Len()))
+	for visited := 0; visited < f.gloasVerificationLeaves.Len() && len(leaves) < limit; visited++ {
+		if f.gloasVerificationLeafCursor == nil || f.gloasVerificationLeafCursor.Next() == nil {
+			f.gloasVerificationLeafCursor = f.gloasVerificationLeaves.Front()
+		} else {
+			f.gloasVerificationLeafCursor = f.gloasVerificationLeafCursor.Next()
+		}
+		root := f.gloasVerificationLeafCursor.Value.(common.Hash)
+		if root != (common.Hash{}) {
+			leaves = append(leaves, root)
+		}
+	}
+	return leaves
+}
+
 func (f *ForkChoiceStore) Synced() bool {
 	return f.synced.Load()
 }
@@ -1049,14 +1120,18 @@ func (f *ForkChoiceStore) addPendingELPayload(block *cltypes.SignedBeaconBlock, 
 	defer f.pendingELPayloadsMu.Unlock()
 	root, ok := pendingELPayloadRoot(PendingELPayload{Block: block, Envelope: envelope})
 	if ok {
-		for _, p := range f.pendingELPayloads {
-			if existingRoot, existingOk := pendingELPayloadRoot(p); existingOk && existingRoot == root {
-				return
-			}
+		if _, exists := f.pendingELPayloadRoots[root]; exists {
+			return
+		}
+		if f.pendingELPayloadRoots == nil {
+			f.pendingELPayloadRoots = make(map[common.Hash]struct{})
 		}
 	}
 	if len(f.pendingELPayloads) >= maxPendingELPayloads {
 		log.Warn("addPendingELPayload: dropping oldest pending EL payload", "queueLen", len(f.pendingELPayloads))
+		if evictedRoot, exists := pendingELPayloadRoot(f.pendingELPayloads[0]); exists {
+			delete(f.pendingELPayloadRoots, evictedRoot)
+		}
 		copy(f.pendingELPayloads, f.pendingELPayloads[1:])
 		f.pendingELPayloads[len(f.pendingELPayloads)-1] = PendingELPayload{}
 		f.pendingELPayloads = f.pendingELPayloads[:len(f.pendingELPayloads)-1]
@@ -1065,6 +1140,16 @@ func (f *ForkChoiceStore) addPendingELPayload(block *cltypes.SignedBeaconBlock, 
 		Block:    block,
 		Envelope: envelope,
 	})
+	if ok {
+		f.pendingELPayloadRoots[root] = struct{}{}
+	}
+}
+
+func (f *ForkChoiceStore) hasPendingELPayload(root common.Hash) bool {
+	f.pendingELPayloadsMu.Lock()
+	defer f.pendingELPayloadsMu.Unlock()
+	_, ok := f.pendingELPayloadRoots[root]
+	return ok
 }
 
 func pendingELPayloadRoot(p PendingELPayload) (common.Hash, bool) {
@@ -1086,16 +1171,19 @@ func (f *ForkChoiceStore) DrainPendingELPayloads() []PendingELPayload {
 	f.pendingELPayloadsMu.Lock()
 	defer f.pendingELPayloadsMu.Unlock()
 	if len(f.pendingELPayloads) == 0 {
+		clear(f.pendingELPayloadRoots)
 		return nil
 	}
 	if cap(f.pendingELPayloads) > pendingELPayloadsShrinkCap {
 		result := f.pendingELPayloads
 		f.pendingELPayloads = nil
+		f.pendingELPayloadRoots = nil
 		return result
 	}
 	result := make([]PendingELPayload, len(f.pendingELPayloads))
 	copy(result, f.pendingELPayloads)
 	clear(f.pendingELPayloads)
 	f.pendingELPayloads = f.pendingELPayloads[:0]
+	clear(f.pendingELPayloadRoots)
 	return result
 }

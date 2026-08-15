@@ -18,6 +18,7 @@ package mock_services
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 
 	"go.uber.org/mock/gomock"
@@ -75,8 +76,12 @@ type ForkChoiceStorageMock struct {
 	Headers                      map[common.Hash]*cltypes.BeaconBlockHeader
 	Blocks                       map[common.Hash]*cltypes.SignedBeaconBlock
 	Envelopes                    map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
+	ReadEnvelopeErr              error
+	ReadEnvelopeCalls            atomic.Int32
+	HasEnvelopeOverride          *bool
 	VerifiedPayloads             map[common.Hash]bool
 	OnExecutionPayloadErr        error
+	OnExecutionPayloadFunc       func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error
 	GetBeaconCommitteeMock       func(slot, committeeIndex uint64) ([]uint64, error)
 
 	Pool pool.OperationsPool
@@ -352,6 +357,9 @@ func (f *ForkChoiceStorageMock) OnBlock(
 }
 
 func (f *ForkChoiceStorageMock) OnExecutionPayload(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) error {
+	if f.OnExecutionPayloadFunc != nil {
+		return f.OnExecutionPayloadFunc(ctx, signedEnvelope, checkBlobData, validatePayload)
+	}
 	return f.OnExecutionPayloadErr
 }
 
@@ -439,6 +447,9 @@ func (f *ForkChoiceStorageMock) GetBlock(
 }
 
 func (f *ForkChoiceStorageMock) HasEnvelope(blockRoot common.Hash) bool {
+	if f.HasEnvelopeOverride != nil {
+		return *f.HasEnvelopeOverride
+	}
 	_, ok := f.Envelopes[blockRoot]
 	return ok
 }
@@ -451,7 +462,8 @@ func (f *ForkChoiceStorageMock) IsPayloadVerified(blockRoot common.Hash) bool {
 }
 
 func (f *ForkChoiceStorageMock) ReadEnvelopeFromDisk(blockRoot common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
-	return f.Envelopes[blockRoot], nil
+	f.ReadEnvelopeCalls.Add(1)
+	return f.Envelopes[blockRoot], f.ReadEnvelopeErr
 }
 
 func (f *ForkChoiceStorageMock) IsBlobDataAvailable(slot uint64, blockRoot common.Hash) bool {
