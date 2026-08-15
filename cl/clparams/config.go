@@ -112,6 +112,15 @@ func (c CaplinConfig) HaveInvalidDevnetParams() bool {
 	return c.CustomConfigPath == "" || c.CustomGenesisStatePath == ""
 }
 
+func (c CaplinConfig) ApplyNetworkOverrides(networkConfig *NetworkConfig) {
+	if len(c.BootstrapNodes) > 0 {
+		networkConfig.BootNodes = c.BootstrapNodes
+	}
+	if c.StaticPeers != nil {
+		networkConfig.StaticPeers = c.StaticPeers
+	}
+}
+
 func (c CaplinConfig) RelayUrlExist() bool {
 	return c.MevRelayUrl != ""
 }
@@ -198,6 +207,16 @@ var (
 		"enr:-Ly4QAtr21x5Ps7HYhdZkIBRBgcBkvlIfEel1YNjtFWf4cV3au2LgBGICz9PtEs9-p2HUl_eME8m1WImxTxSB3AkCMwBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhANHhOeJc2VjcDI1NmsxoQNLp1QPV8-pyMCohOtj6xGtSBM_GtVTqzlbvNsCF4ezkYhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
 		// GnosisDAO Bootnode: 3.69.35.13
 		"enr:-Ly4QLgn8Bx6faigkKUGZQvd1HDToV2FAxZIiENK-lczruzQb90qJK-4E65ADly0s4__dQOW7IkLMW7ZAyJy2vtiLy8Bh2F0dG5ldHOIAAAAAAAAAACEZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhANFIw2Jc2VjcDI1NmsxoQMa-fWEy9UJHfOl_lix3wdY5qust78sHAqZnWwEiyqKgYhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
+		"/ip4/57.131.40.177/tcp/9000/p2p/16Uiu2HAm6HQoX8sEJxr58GkuM9FPWkgLdCs71vz5qcu7hyisYRLS",
+		"/ip4/45.79.214.176/tcp/9000/p2p/16Uiu2HAm7jUXmkWrC5cTwSa9bVtzeAwUXu3MZZnhcsY5QTAiNmyL",
+		"/ip4/51.210.221.124/tcp/9500/p2p/16Uiu2HAmSnLLjZfkFCythED8tQS5kP4NJKBuMdd1FYE23ZymKwL6",
+		"/ip4/57.129.122.18/tcp/9000/p2p/16Uiu2HAmALSWURS5G4Qsmm7eFbH5oXxoFJEQuVdhAZ1MMcE9XjrU",
+		"/ip4/51.210.221.124/tcp/9100/p2p/16Uiu2HAmUhn8VR7HFY7SLPqbBhnTT1yfjKBJQKSodUkWsE5adNNu",
+		"/ip4/137.74.112.3/tcp/9000/p2p/16Uiu2HAm1merr7djndkMFf2TxacP53tA6rFoU4tXD5NNPGYz6RPa",
+		"/ip4/65.21.231.153/tcp/9009/p2p/16Uiu2HAm5tjLaFaGnEwtrB7sRynYs5VpE3hjT7G4tkKhTEU2pcaf",
+		"/ip4/51.68.224.153/udp/9001/quic-v1/p2p/16Uiu2HAkxcBE3LK7zhnyZERguonkKmXLgYPRcuDPaF6C2vaigYuT",
+		"/ip4/139.144.16.95/tcp/9000/p2p/16Uiu2HAmH5pPnGrQEq7Q6McNA24ExRKRyaRzmJ44M1kAvvHYAeer",
+		"/ip4/65.109.101.48/tcp/9000/p2p/16Uiu2HAm98ceLNE6X3mjVcsu6ZAaKZPPcqKmeofidTDy7UCHyTtY",
 	}
 	HoodiBootstrapNodes = []string{
 		"enr:-Mq4QLkmuSwbGBUph1r7iHopzRpdqE-gcm5LNZfcE-6T37OCZbRHi22bXZkaqnZ6XdIyEDTelnkmMEQB8w6NbnJUt9GGAZWaowaYh2F0dG5ldHOIABgAAAAAAACEZXRoMpDS8Zl_YAAJEAAIAAAAAAAAgmlkgnY0gmlwhNEmfKCEcXVpY4IyyIlzZWNwMjU2azGhA0hGa4jZJZYQAS-z6ZFK-m4GCFnWS8wfjO0bpSQn6hyEiHN5bmNuZXRzAIN0Y3CCIyiDdWRwgiMo",

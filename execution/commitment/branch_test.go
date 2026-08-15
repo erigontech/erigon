@@ -25,9 +25,53 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
-// reference is the pre-optimization implementation kept as the oracle: it
-// materializes the full hex expansion via CompactToHex, then repacks the first
-// 32 bytes. The zero-alloc ContractHashFromPrefix must agree with it exactly.
+func TestDecodeBranchInto_RoundTrip(t *testing.T) {
+	t.Parallel()
+	row, bm, enc := encodeCellRow(t, 16)
+	require.NotEmpty(t, enc)
+
+	branchData := []byte(enc)[2:]
+
+	var cells [16]cell
+	maps, err := DecodeBranchInto(branchData, false /* not deleted */, &cells)
+	require.NoError(t, err)
+
+	require.Equal(t, bm, maps.Bitmap, "decoded bitmap mismatch")
+	require.Equal(t, uint16(0), maps.TouchMap, "expected empty touchMap when deleted=false")
+	require.Equal(t, bm, maps.AfterMap, "afterMap should equal bitmap when deleted=false")
+
+	for i, orig := range row {
+		requireDecodedCellEq(t, i, orig, &cells[i])
+	}
+}
+
+func TestDecodeBranchInto_DeletedFlag(t *testing.T) {
+	t.Parallel()
+	_, bm, enc := encodeCellRow(t, 16)
+	branchData := []byte(enc)[2:]
+
+	var cells [16]cell
+	maps, err := DecodeBranchInto(branchData, true, &cells)
+	require.NoError(t, err)
+	require.Equal(t, bm, maps.Bitmap)
+	require.Equal(t, bm, maps.TouchMap, "deleted=true → touchMap = bitmap")
+	require.Equal(t, uint16(0), maps.AfterMap, "deleted=true → afterMap = 0")
+}
+
+func TestDecodeBranchInto_TruncatedInput(t *testing.T) {
+	t.Parallel()
+	var cells [16]cell
+
+	_, err := DecodeBranchInto(nil, false, &cells)
+	require.Error(t, err)
+
+	_, err = DecodeBranchInto([]byte{0x00, 0x00}, false, &cells)
+	require.NoError(t, err, "bitmap=0 with no cell data should decode cleanly")
+
+	_, err = DecodeBranchInto([]byte{0x00, 0x01}, false, &cells)
+	require.Error(t, err, "bitmap with set bit but no cell data should error")
+}
+
 func contractHashFromPrefixReference(prefix []byte) (hash [32]byte, ok bool) {
 	if len(prefix) < 33 {
 		return hash, false
@@ -45,7 +89,7 @@ func contractHashFromPrefixReference(prefix []byte) (hash [32]byte, ok bool) {
 func TestContractHashFromPrefix_MatchesReference(t *testing.T) {
 	rng := rand.New(rand.NewSource(1))
 	for range 5000 {
-		l := 30 + rng.Intn(40) // spans below and above the 33-byte minimum
+		l := 30 + rng.Intn(40)
 		prefix := make([]byte, l)
 		rng.Read(prefix)
 		wantHash, wantOK := contractHashFromPrefixReference(prefix)
@@ -64,10 +108,10 @@ func prefixByte0(p []byte) byte {
 
 func TestContractHashFromPrefix_ZeroAlloc(t *testing.T) {
 	prefix := make([]byte, 40)
-	prefix[0] = 0x10 // odd flag set, to exercise the shifting branch
+	prefix[0] = 0x10
 	allocs := testing.AllocsPerRun(1000, func() { _, _ = ContractHashFromPrefix(prefix) })
 	require.Zero(t, allocs, "ContractHashFromPrefix must not allocate")
-	prefix[0] = 0x00 // even branch
+	prefix[0] = 0x00
 	allocs = testing.AllocsPerRun(1000, func() { _, _ = ContractHashFromPrefix(prefix) })
 	require.Zero(t, allocs, "ContractHashFromPrefix (even) must not allocate")
 }

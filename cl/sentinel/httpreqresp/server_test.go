@@ -139,7 +139,7 @@ func TestDoCopiesHandlerWriteBuffer(t *testing.T) {
 		_, _ = w.Write(buf)
 		copy(buf, "XXXXX") // simulate fmt reusing its pooled buffer after Write returns
 	})
-	req, err := http.NewRequest("GET", "http://service.internal/", http.NoBody)
+	req, err := http.NewRequestWithContext(t.Context(), "GET", "http://service.internal/", http.NoBody)
 	require.NoError(t, err)
 	resp, err := Do(h, req)
 	require.NoError(t, err)
@@ -199,7 +199,7 @@ func TestDoRecoversHandlerPanic(t *testing.T) {
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		panic("boom")
 	})
-	req, err := http.NewRequest("GET", "http://service.internal/", http.NoBody)
+	req, err := http.NewRequestWithContext(t.Context(), "GET", "http://service.internal/", http.NoBody)
 	require.NoError(t, err)
 	resp, err := Do(h, req)
 	require.NoError(t, err)
@@ -227,7 +227,7 @@ func TestDoThroughChiRouterPreservesStreamingHandoff(t *testing.T) {
 	mux := chi.NewRouter()
 	mux.Get("/", h)
 
-	req, err := http.NewRequest("GET", "http://service.internal/", http.NoBody)
+	req, err := http.NewRequestWithContext(t.Context(), "GET", "http://service.internal/", http.NoBody)
 	require.NoError(t, err)
 	resp, err := Do(mux, req)
 	require.NoError(t, err)

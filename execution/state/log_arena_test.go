@@ -653,12 +653,11 @@ func TestLogIndexIsBlockWide(t *testing.T) {
 	require.Equal(t, hexutil.Uint(0), ibs.GetRawLogs(0)[0].Index, "next block restarts at zero")
 }
 
-// Reading a transaction the run has moved past answers empty, which a receipt
-// records as "emitted no logs". A transaction that simply emitted nothing is
-// newer than the tail, not older, so it stays legal.
-func TestGetLogsOfPastTxAsserts(t *testing.T) {
-	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
-	dbg.AssertEnabled = true
+// Reading a transaction the run has moved past would answer empty, which a
+// receipt records as "emitted no logs" - so it panics instead. A transaction that
+// simply emitted nothing is newer than the tail, not older, so it stays legal.
+func TestGetLogsOfPastTxPanics(t *testing.T) {
+	t.Parallel()
 
 	ibs := New(nil)
 	ibs.SetTxContext(1, 0)
@@ -669,6 +668,20 @@ func TestGetLogsOfPastTxAsserts(t *testing.T) {
 	require.Len(t, ibs.GetRawLogs(5), 1, "the tail")
 	require.Empty(t, ibs.GetRawLogs(9), "a later transaction emitted nothing")
 	require.Panics(t, func() { ibs.GetRawLogs(0) }, "the run has moved past tx 0")
+}
+
+// The past-transaction check guards production, not just assert builds: a caller
+// that reads what the run has left must not be handed the tail's logs as if they
+// were its own. Not parallel - it writes the global assert flag.
+func TestGetLogsOfPastTxPanicsWithoutAsserts(t *testing.T) {
+	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
+	dbg.AssertEnabled = false
+
+	ibs := New(nil)
+	ibs.SetTxContext(1, 3)
+	ibs.AddLog(&types.Log{Address: common.HexToAddress("0x1")})
+
+	require.Panics(t, func() { ibs.GetRawLogs(2) }, "tx 2 is older than the tail")
 }
 
 // Whatever the traffic looks like, one arena holds a bounded amount: the one
