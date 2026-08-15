@@ -48,7 +48,7 @@ func poisonSharedBranchCache(t *testing.T, db kv.TemporalRoDB) func() {
 
 	poison := []byte("invalid commitment branch")
 	var poisonedKeys [][]byte
-	it, err := tx.Debug().RangeLatest(kv.CommitmentDomain, nil, nil, 1<<20)
+	it, err := tx.Debug().RangeLatest(kv.CommitmentDomain, nil, nil, kv.Unlim)
 	require.NoError(t, err)
 	defer it.Close()
 	for it.HasNext() {
