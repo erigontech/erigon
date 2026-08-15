@@ -118,6 +118,14 @@ type replyMatcher struct {
 	reply v4wire.Packet
 }
 
+// replyKey identifies a recently-expired matcher so that late replies are
+// recognized as "matched" instead of "unsolicited".
+type replyKey struct {
+	from  enode.ID
+	ip    netip.Addr
+	ptype byte
+}
+
 type replyMatchFunc func(v4wire.Packet) (matched bool, requestDone bool)
 
 // reply is a reply packet from a certain node.
@@ -442,6 +450,12 @@ func (t *UDPv4) loop() {
 		nextTimeout  *replyMatcher // head of plist when timeout was last reset
 		contTimeouts = 0           // number of continuous timeouts to do NTP checks
 		ntpWarnTime  = time.Unix(0, 0)
+
+		// recentExpired tracks recently-timed-out matchers so that late
+		// replies are recognized as matched (preventing errUnsolicitedReply)
+		// without keeping entries in the active pending list.
+		recentExpired    = make(map[replyKey]time.Time)
+		expiredGraceTTL  = respTimeout
 	)
 	<-timeout.C // ignore first timeout
 	defer timeout.Stop()
@@ -498,6 +512,15 @@ func (t *UDPv4) loop() {
 					contTimeouts = 0
 				}
 			}
+			if !matched {
+				// Check recently-expired matchers so late replies aren't
+				// classified as unsolicited.
+				key := replyKey{from: r.from, ip: r.ip, ptype: r.data.Kind()}
+				if _, ok := recentExpired[key]; ok {
+					matched = true
+					delete(recentExpired, key)
+				}
+			}
 			r.matched <- matched
 
 		case now := <-timeout.C:
@@ -509,6 +532,13 @@ func (t *UDPv4) loop() {
 					p.errc <- errTimeout
 					plist.Remove(el)
 					contTimeouts++
+					recentExpired[replyKey{from: p.from, ip: p.ip, ptype: p.ptype}] = now
+				}
+			}
+			// Evict stale entries from recentExpired.
+			for key, expiredAt := range recentExpired {
+				if now.Sub(expiredAt) > expiredGraceTTL {
+					delete(recentExpired, key)
 				}
 			}
 			// If we've accumulated too many timeouts, do an NTP time sync check
