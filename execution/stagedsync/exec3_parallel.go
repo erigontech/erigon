@@ -2168,6 +2168,22 @@ func (be *blockExecutor) selfLoopEvaluate(tv *taskVersion, result *exec.TxResult
 			return state.VersionValid
 		}, false, "")
 	if v != state.VersionValid {
+		if blocker == -1 {
+			// The read-set is invalid but no Done writer was named: the invalidation
+			// is an in-flight ESTIMATE (MVReadResultDependency), which ValidateReadSet
+			// resolves without ever calling checkVersion. Find the estimate's writer so
+			// the caller waits for it to commit; re-executing immediately would re-read
+			// the same estimate and busy-loop to the incarnation limit.
+			result.TxIn.RangeFullHeaders(func(a accounts.Address, p state.AccountPath, k accounts.StorageKey, _ state.ReadHeader) bool {
+				rr := be.versionMap.ReadStatus(a, p, k, tv.version.TxIndex)
+				if rr.Status() == state.MVReadResultDependency {
+					if b := be.taskIndexOf(rr.DepIdx()); b > blocker && b < tv.index {
+						blocker = b
+					}
+				}
+				return true
+			})
+		}
 		return false, -1, blocker
 	}
 	target = -1
