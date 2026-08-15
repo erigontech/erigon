@@ -654,6 +654,17 @@ func (o *Orchestrator) requestGapsFor(domain snapshot.Domain, peerEntries []*sna
 		return
 	}
 
+	// Drop peer block entries whose range starts at or below our local
+	// block tip. Mirrors filterDiscoveredByLocalTip on the discovery-merge
+	// path: a peer's manifest may still list pre-unwind wide files we
+	// deliberately trimmed, and re-fetching them re-materialises the
+	// visible-set drift that InsertBlocks's frozen-skip check depends on
+	// staying stable. Pass-through when we have no block files yet
+	// (bootstrap) so peer-driven catch-up still works.
+	if domain == "" {
+		peerEntries = filterPeerBlockEntriesByLocalTip(peerEntries, o.storage.Inventory())
+	}
+
 	// First pass: decide which entries to request and mark them pending under
 	// a single lock, so subsequent coverage checks in the same manifest see
 	// their own earlier selections. Phase-1 file tracking is folded into the
@@ -1315,4 +1326,38 @@ func (o *Orchestrator) onDownloadComplete(e DownloadComplete) {
 	// Covers the phase-2 case: this completion may have drained the last
 	// caplin (or any post-stateReady) download.
 	o.maybeFireInitialDownloadsComplete()
+}
+
+// filterPeerBlockEntriesByLocalTip drops peer block-file entries whose
+// FromBlock falls at or below our local block tip — overlap with what
+// mode-B unwind trimmed and would re-materialise into the aggregator's
+// visible set. Cold-start pass-through (no local block files) so first-
+// time bootstrap can still fetch every peer-advertised block file.
+func filterPeerBlockEntriesByLocalTip(peerEntries []*snapshot.FileEntry, inv *snapshot.Inventory) []*snapshot.FileEntry {
+	if inv == nil {
+		return peerEntries
+	}
+	var localTip uint64
+	for _, f := range inv.BlockFiles() {
+		if !f.Local {
+			continue
+		}
+		if f.ToBlock > localTip {
+			localTip = f.ToBlock
+		}
+	}
+	if localTip == 0 {
+		return peerEntries
+	}
+	out := peerEntries[:0]
+	for _, e := range peerEntries {
+		if e == nil {
+			continue
+		}
+		if e.FromStep <= localTip {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
 }
