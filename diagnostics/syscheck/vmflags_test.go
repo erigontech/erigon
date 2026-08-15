@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -83,12 +84,12 @@ func TestNonRandom(t *testing.T) {
 	all, err := parseSmaps(strings.NewReader(smapsSample))
 	require.NoError(t, err)
 
-	got := nonRandom(all, "/data/snapshots")
+	got := nonRandomGroups(all, "/data/snapshots")
 	require.Len(t, got, 2)
 	require.Equal(t, "/data/snapshots/domain/v1-storage.0-2048.kv", got[0].Path)
-	require.True(t, got[0].Sequential)
+	require.True(t, got[0].Mappings[0].Sequential)
 	require.Equal(t, "/data/snapshots/domain/v1-commitment.0-2048.kv", got[1].Path)
-	require.False(t, got[1].Sequential)
+	require.False(t, got[1].Mappings[0].Sequential)
 }
 
 func TestParseSmapsRss(t *testing.T) {
@@ -100,19 +101,6 @@ func TestParseSmapsRss(t *testing.T) {
 	require.Equal(t, uint64(1024*1024), got[1].RssBytes)
 	require.Equal(t, uint64(512*1024), got[2].RssBytes)
 	require.Equal(t, uint64(256*1024), got[3].RssBytes)
-}
-
-func TestNonRandomRanksByRss(t *testing.T) {
-	all, err := parseSmaps(strings.NewReader(smapsSample))
-	require.NoError(t, err)
-
-	got := nonRandom(all, "")
-	require.Len(t, got, 3) // erigon binary + storage + commitment
-	// storage 512 kB > commitment 256 kB > binary 132 kB — biggest offender first,
-	// not file order.
-	require.Equal(t, "/data/snapshots/domain/v1-storage.0-2048.kv", got[0].Path)
-	require.Equal(t, "/data/snapshots/domain/v1-commitment.0-2048.kv", got[1].Path)
-	require.Equal(t, "/usr/bin/erigon", got[2].Path)
 }
 
 func TestFileMappings(t *testing.T) {
@@ -147,10 +135,51 @@ func TestServeFileMappings(t *testing.T) {
 		Supported bool        `json:"supported"`
 		Total     int         `json:"total"`
 		NonRandom []PathGroup `json:"nonRandom"`
+		All       []PathGroup `json:"all"`
 	}
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
 	require.Equal(t, runtime.GOOS == "linux", got.Supported)
 	require.Empty(t, got.NonRandom, "no mapping lives under /nonexistent")
+	require.Nil(t, got.All, "`all` is only filled when asked for")
+}
+
+// TestServeFileMappingsAllListsEverySeparately pins that `all=true` widens the
+// report with a second field instead of stuffing every mapping under `nonRandom`,
+// which would make a monitor alerting on that field fire on a healthy node.
+func TestServeFileMappingsAllListsEverySeparately(t *testing.T) {
+	self, err := os.Executable()
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	ServeFileMappings(rec, httptest.NewRequest(http.MethodGet, "/debug/mmap?all=true&prefix="+self, nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var got struct {
+		NonRandom []PathGroup `json:"nonRandom"`
+		All       []PathGroup `json:"all"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	if runtime.GOOS != "linux" {
+		require.Nil(t, got.All, "VmFlags is a Linux-only interface")
+		return
+	}
+	require.NotEmpty(t, got.All, "the test binary maps itself")
+	require.GreaterOrEqual(t, len(got.All), len(got.NonRandom))
+	for _, g := range got.NonRandom {
+		require.True(t, slices.ContainsFunc(g.Mappings, func(m Mapping) bool { return !m.Random }),
+			"nonRandom must hold only files with a non-random mapping")
+	}
+}
+
+func TestNonRandomRssBytesCountsOnlyTheWrongAdvice(t *testing.T) {
+	all, err := parseSmaps(strings.NewReader(smapsTwoVMAsOneFile))
+	require.NoError(t, err)
+
+	bad := nonRandomGroups(all, "/data/snap")
+	require.Len(t, bad, 1)
+	// The file's random VMA holds 1024 kB and is correctly advised; only the
+	// 256 kB sequential VMA is what the wrong advice costs.
+	require.Equal(t, uint64(256*1024), nonRandomRssBytes(bad))
 }
 
 const smapsTwoVMAsOneFile = `7f1000000000-7f1000200000 r--s 00000000 08:01 2001    /data/snap/v1-accounts.0-2048.kv

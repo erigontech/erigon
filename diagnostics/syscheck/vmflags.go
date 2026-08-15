@@ -34,14 +34,14 @@ import (
 
 // Mapping is one file-backed VMA of this process and its readahead hint.
 type Mapping struct {
-	Path       string
-	Start      uint64
-	End        uint64
-	Random     bool // VM_RAND_READ — MADV_RANDOM
-	Sequential bool // VM_SEQ_READ  — MADV_SEQUENTIAL
+	Path       string `json:"path"`
+	Start      uint64 `json:"start"`
+	End        uint64 `json:"end"`
+	Random     bool   `json:"random"`     // VM_RAND_READ — MADV_RANDOM
+	Sequential bool   `json:"sequential"` // VM_SEQ_READ  — MADV_SEQUENTIAL
 	// RssBytes is what this mapping holds in page cache. The VMA spans the whole
 	// file, so it is Rss — not End-Start — that says what a wrong advice costs.
-	RssBytes uint64
+	RssBytes uint64 `json:"rssBytes"`
 }
 
 func (m Mapping) Advice() string {
@@ -54,8 +54,6 @@ func (m Mapping) Advice() string {
 		return "normal"
 	}
 }
-
-func (m Mapping) SizeBytes() uint64 { return m.End - m.Start }
 
 // PathGroup is every VMA of one file. More than one mapping means a second
 // mmap of the same fd is live — a SequentialView that is open, or leaked.
@@ -114,22 +112,26 @@ func LogNonRandomFileMappings(logger log.Logger, pathPrefix string) {
 	if all == nil {
 		return
 	}
+	var checked int
+	for _, m := range all {
+		if pathPrefix == "" || strings.HasPrefix(m.Path, pathPrefix) {
+			checked++
+		}
+	}
 	bad := nonRandomGroups(all, pathPrefix)
 	if len(bad) == 0 {
-		logger.Info("[mmap] all file mappings are MADV_RANDOM", "checked", len(all), "prefix", pathPrefix)
+		logger.Info("[mmap] all file mappings are MADV_RANDOM", "checked", checked, "prefix", pathPrefix)
 		return
 	}
-	var rss uint64
 	for _, g := range bad {
-		rss += g.RssBytes
 		logger.Warn("[mmap] not MADV_RANDOM", "file", g.Path, "maps", len(g.Mappings), "advice", g.Advices())
 	}
-	logger.Warn("[mmap] non-random files", "files", len(bad), "rssMb", rss/(1<<20), "ofMappings", len(all), "prefix", pathPrefix)
+	logger.Warn("[mmap] non-random files", "files", len(bad), "rssMb", nonRandomRssBytes(bad)/(1<<20), "ofMappings", checked, "prefix", pathPrefix)
 }
 
 // ServeFileMappings answers /debug/mmap with this process's file mappings that are
 // not MADV_RANDOM. Optional query param `prefix` restricts to one path prefix;
-// `all=true` returns every file mapping regardless of advice.
+// `all=true` adds an `all` field listing every file mapping regardless of advice.
 func ServeFileMappings(w http.ResponseWriter, r *http.Request) {
 	mappings, err := FileMappings()
 	if err != nil {
@@ -140,15 +142,15 @@ func ServeFileMappings(w http.ResponseWriter, r *http.Request) {
 		Supported bool        `json:"supported"`
 		Total     int         `json:"total"`
 		NonRandom []PathGroup `json:"nonRandom"`
+		All       []PathGroup `json:"all,omitempty"`
 	}{
 		Supported: runtime.GOOS == "linux",
 		Total:     len(mappings),
 	}
 	prefix := r.URL.Query().Get("prefix")
+	resp.NonRandom = nonRandomGroups(mappings, prefix)
 	if r.URL.Query().Get("all") == "true" {
-		resp.NonRandom = allGroups(mappings, prefix)
-	} else {
-		resp.NonRandom = nonRandomGroups(mappings, prefix)
+		resp.All = allGroups(mappings, prefix)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
@@ -160,6 +162,19 @@ func ServeFileMappings(w http.ResponseWriter, r *http.Request) {
 // is not MADV_RANDOM. Every mapping of that file is included, so the random
 // sibling of a sequential view shows up next to it. Ranked by summed Rss.
 func nonRandomGroups(all []Mapping, pathPrefix string) []PathGroup {
+	return groupByPath(all, pathPrefix, func(g PathGroup) bool {
+		return slices.ContainsFunc(g.Mappings, func(m Mapping) bool { return !m.Random })
+	})
+}
+
+// allGroups is nonRandomGroups without the non-random filter.
+func allGroups(all []Mapping, pathPrefix string) []PathGroup {
+	return groupByPath(all, pathPrefix, nil)
+}
+
+// groupByPath collects the mappings under pathPrefix into one group per file,
+// drops the groups keep rejects, and ranks the rest by summed Rss.
+func groupByPath(all []Mapping, pathPrefix string, keep func(PathGroup) bool) []PathGroup {
 	byPath := map[string]*PathGroup{}
 	var order []string
 	for _, m := range all {
@@ -178,52 +193,27 @@ func nonRandomGroups(all []Mapping, pathPrefix string) []PathGroup {
 	out := make([]PathGroup, 0, len(order))
 	for _, p := range order {
 		g := byPath[p]
-		if slices.ContainsFunc(g.Mappings, func(m Mapping) bool { return !m.Random }) {
-			out = append(out, *g)
+		if keep != nil && !keep(*g) {
+			continue
 		}
+		out = append(out, *g)
 	}
-	slices.SortFunc(out, func(a, b PathGroup) int { return cmp.Compare(b.RssBytes, a.RssBytes) })
+	slices.SortStableFunc(out, func(a, b PathGroup) int { return cmp.Compare(b.RssBytes, a.RssBytes) })
 	return out
 }
 
-// allGroups is nonRandomGroups without the non-random filter.
-func allGroups(all []Mapping, pathPrefix string) []PathGroup {
-	byPath := map[string]*PathGroup{}
-	var order []string
-	for _, m := range all {
-		if pathPrefix != "" && !strings.HasPrefix(m.Path, pathPrefix) {
-			continue
+// nonRandomRssBytes is the resident cost of the wrong advice alone: the random
+// mappings of an offending file are correctly advised and must not be counted.
+func nonRandomRssBytes(groups []PathGroup) uint64 {
+	var rss uint64
+	for _, g := range groups {
+		for _, m := range g.Mappings {
+			if !m.Random {
+				rss += m.RssBytes
+			}
 		}
-		g, ok := byPath[m.Path]
-		if !ok {
-			g = &PathGroup{Path: m.Path}
-			byPath[m.Path] = g
-			order = append(order, m.Path)
-		}
-		g.Mappings = append(g.Mappings, m)
-		g.RssBytes += m.RssBytes
 	}
-	out := make([]PathGroup, 0, len(order))
-	for _, p := range order {
-		out = append(out, *byPath[p])
-	}
-	slices.SortFunc(out, func(a, b PathGroup) int { return cmp.Compare(b.RssBytes, a.RssBytes) })
-	return out
-}
-
-func nonRandom(all []Mapping, pathPrefix string) []Mapping {
-	var out []Mapping
-	for _, m := range all {
-		if m.Random {
-			continue
-		}
-		if pathPrefix != "" && !strings.HasPrefix(m.Path, pathPrefix) {
-			continue
-		}
-		out = append(out, m)
-	}
-	slices.SortFunc(out, func(a, b Mapping) int { return cmp.Compare(b.RssBytes, a.RssBytes) })
-	return out
+	return rss
 }
 
 // parseSmapsKB decodes a smaps size field, always reported as "<n> kB".
