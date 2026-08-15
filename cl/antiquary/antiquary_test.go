@@ -40,7 +40,7 @@ import (
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 )
@@ -90,7 +90,7 @@ func (db *countingRwDB) Update(ctx context.Context, f func(tx kv.RwTx) error) er
 }
 
 func TestIndexBeaconSnapshotsCommitsPerBatchAndPersistsProgress(t *testing.T) {
-	baseDB := memdb.NewTestDB(t, dbcfg.ChainDB)
+	baseDB := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	db := &countingRwDB{RwDB: baseDB}
 	ctx := context.Background()
 	to := uint64(snaptype.CaplinMergeLimit + 2)
@@ -130,7 +130,7 @@ func TestIndexBeaconSnapshotsCommitsPerBatchAndPersistsProgress(t *testing.T) {
 }
 
 func TestIndexBeaconSnapshotsDoesNotAdvanceProgressOnFailedBatch(t *testing.T) {
-	baseDB := memdb.NewTestDB(t, dbcfg.ChainDB)
+	baseDB := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	db := &countingRwDB{RwDB: baseDB}
 	ctx := context.Background()
 	to := uint64(snaptype.CaplinMergeLimit + 2)
@@ -305,7 +305,7 @@ func TestAntiquateBytesListDiff_WithRealDiffFn(t *testing.T) {
 }
 
 func TestFindNearestSlotBackwards(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -340,7 +340,7 @@ func TestFindNearestSlotBackwards(t *testing.T) {
 }
 
 func TestFindNearestSlotBackwards_NoRoots(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -354,7 +354,7 @@ func TestFindNearestSlotBackwards_NoRoots(t *testing.T) {
 }
 
 func TestComputeSlotToBeRequested(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -386,7 +386,7 @@ func TestComputeSlotToBeRequested(t *testing.T) {
 }
 
 func TestComputeSlotToBeRequested_ReturnsGenesis(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -439,7 +439,7 @@ func TestBeaconStatesCollector_CollectStateRoot(t *testing.T) {
 	root := common.HexToHash("0xdeadbeef")
 	require.NoError(t, c.collectStateRoot(42, root))
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -459,7 +459,7 @@ func TestBeaconStatesCollector_CollectBlockRoot(t *testing.T) {
 	root := common.HexToHash("0xcafebabe")
 	require.NoError(t, c.collectBlockRoot(100, root))
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -480,7 +480,7 @@ func TestBeaconStatesCollector_CollectEpochRandaoMix(t *testing.T) {
 	epoch := uint64(5)
 	require.NoError(t, c.collectEpochRandaoMix(epoch, mix))
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -501,7 +501,7 @@ func TestBeaconStatesCollector_CollectIntraEpochRandaoMix(t *testing.T) {
 	mix := common.HexToHash("0x1111222233334444")
 	require.NoError(t, c.collectIntraEpochRandaoMix(77, mix))
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -525,7 +525,7 @@ func TestBeaconStatesCollector_CollectSlashings(t *testing.T) {
 
 	require.NoError(t, c.collectSlashings(200, slashings))
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -559,7 +559,7 @@ func TestBeaconStatesCollector_CollectBalancesDiffs(t *testing.T) {
 
 	require.NoError(t, c.collectBalancesDiffs(context.Background(), 500, old, newBal))
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -589,7 +589,7 @@ func TestBeaconStatesCollector_CollectBalancesDump(t *testing.T) {
 	slot := uint64(clparams.SlotsPerDump * 2) // aligned to dump boundary
 	require.NoError(t, c.collectBalancesDump(t.Context(), slot, balances))
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -618,7 +618,7 @@ func TestBeaconStatesCollector_CollectActiveIndices(t *testing.T) {
 	epoch := uint64(7)
 	require.NoError(t, c.collectActiveIndices(epoch, indices))
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -650,7 +650,7 @@ func TestBeaconStatesCollector_FlushMultipleCollections(t *testing.T) {
 	require.NoError(t, c.collectBlockRoot(10, root2))
 	require.NoError(t, c.collectIntraEpochRandaoMix(10, mix))
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -683,7 +683,7 @@ func TestBeaconStatesCollector_CollectInactivityScores(t *testing.T) {
 
 	require.NoError(t, c.collectInactivityScores(300, scores))
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -717,7 +717,7 @@ func TestBeaconStatesCollector_CollectEffectiveBalancesDump(t *testing.T) {
 	slot := uint64(clparams.SlotsPerDump * 4)
 	require.NoError(t, c.collectEffectiveBalancesDump(slot, raw))
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()

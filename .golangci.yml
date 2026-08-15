@@ -21,9 +21,9 @@ linters:
     - errchkjson
     - noctx
     - errorlint
+    - unused
   disable:
     - testifylint
-    - unused #TODO: enable me
     - contextcheck
     - err113
     - exhaustive

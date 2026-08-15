@@ -284,10 +284,6 @@ func missingBlocks(chainDB kv.RwDB, blocks []*types.Block, blockReader dbservice
 	return nil
 }
 
-type stateChangesClient interface {
-	StateChanges(ctx context.Context, in *remoteproto.StateChangeRequest, opts ...grpc.CallOption) (remoteproto.KV_StateChangesClient, error)
-}
-
 func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool) error {
 	if len(chain.Blocks) == 0 {
 		return nil

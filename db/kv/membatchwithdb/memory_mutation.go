@@ -91,7 +91,7 @@ func NewMemoryBatch(tx kv.TemporalTx, tmpDir string, logger log.Logger) (*Memory
 // transaction pins the goroutine to an OS thread via runtime.LockOSThread(),
 // so this variant must not be held across goroutine migrations.
 func NewMemoryBatchMDBX(tx kv.TemporalTx, tmpDir string, logger log.Logger) (mm *MemoryMutation, err error) {
-	tmpDB := mdbx.New(dbcfg.TemporaryDB, logger).InMem(nil, tmpDir).GrowthStep(64 * datasize.MB).MapSize(512 * datasize.GB).MustOpen()
+	tmpDB := mdbx.New(dbcfg.TemporaryDB, logger).InMem(tmpDir).GrowthStep(64 * datasize.MB).MapSize(512 * datasize.GB).MustOpen()
 	defer func() {
 		if err != nil {
 			tmpDB.Close()
@@ -963,6 +963,13 @@ func (m *MemoryMutation) GetLatest(name kv.Domain, k []byte) (v []byte, step kv.
 	return m.db.GetLatest(name, k)
 }
 
+func (m *MemoryMutation) GetLatestValSize(name kv.Domain, k []byte) (size int, found bool, err error) {
+	if m.db == nil {
+		return 0, false, fmt.Errorf("MemoryMutation: domain read requires backing tx (detached overlay)")
+	}
+	return m.db.GetLatestValSize(name, k)
+}
+
 func (m *MemoryMutation) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
 	if m.DomainReader != nil {
 		val, ok, err := m.DomainReader.GetAsOf(name, k, ts)
@@ -1158,6 +1165,10 @@ func (v *OverlayTemporalReadView) Apply(_ context.Context, f func(tx kv.Tx) erro
 
 func (v *OverlayTemporalReadView) GetLatest(name kv.Domain, k []byte) ([]byte, kv.Step, error) {
 	return v.temporalTx.GetLatest(name, k)
+}
+
+func (v *OverlayTemporalReadView) GetLatestValSize(name kv.Domain, k []byte) (int, bool, error) {
+	return v.temporalTx.GetLatestValSize(name, k)
 }
 
 func (v *OverlayTemporalReadView) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {

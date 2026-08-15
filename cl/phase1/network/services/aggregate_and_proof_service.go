@@ -500,20 +500,6 @@ func AggregateMessageSignature(
 	return indexedAttestation.Signature[:], signingRoot[:], pubKeys, nil
 }
 
-func (a *aggregateAndProofServiceImpl) scheduleAggregateForLaterProcessing(
-	aggregateAndProof *SignedAggregateAndProofForGossip,
-) {
-	key, err := aggregateAndProof.SignedAggregateAndProof.HashSSZ()
-	if err != nil {
-		panic(err)
-	}
-
-	a.aggregatesScheduledForLaterExecution.Store(key, &aggregateJob{
-		aggregate:    aggregateAndProof,
-		creationTime: time.Now(),
-	})
-}
-
 func (a *aggregateAndProofServiceImpl) loop(ctx context.Context) {
 	ticker := time.NewTicker(attestationJobsIntervalTick)
 	defer ticker.Stop()

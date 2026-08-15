@@ -1194,16 +1194,6 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	return pc, ret, nil
 }
 
-func stCallCode(_ uint64, scope *CallContext) string {
-	stack := &scope.Stack
-	addr, _, inOffset, inSize := stack.data[stack.top-2], stack.data[stack.top-3], stack.data[stack.top-4], stack.data[stack.top-5]
-	toAddr := common.Address(addr.Bytes20())
-	// Get the arguments from the memory.
-	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
-
-	return fmt.Sprintf("%s %x %x", CALLCODE.String(), toAddr, args)
-}
-
 func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	stack := &scope.Stack
 	// Pop gas. The actual gas is in evm.callGasTemp.

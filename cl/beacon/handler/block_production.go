@@ -2591,16 +2591,13 @@ func (a *ApiHandler) cacheExecutionBody(payload *cltypes.Eth1Block) {
 		})
 	}
 	var ws []*types.Withdrawal
-	if payload.Withdrawals != nil {
-		payload.Withdrawals.Range(func(idx int, w *cltypes.Withdrawal, total int) bool {
-			ws = append(ws, &types.Withdrawal{
-				Index:     w.Index,
-				Validator: w.Validator,
-				Address:   w.Address,
-				Amount:    w.Amount,
-			})
+	if payload.Withdrawals != nil && payload.Withdrawals.Len() > 0 {
+		consensusWithdrawals := make([]*cltypes.Withdrawal, payload.Withdrawals.Len())
+		payload.Withdrawals.Range(func(idx int, w *cltypes.Withdrawal, _ int) bool {
+			consensusWithdrawals[idx] = w
 			return true
 		})
+		ws = cltypes.ConvertConsensusWithdrawalsToExecutionWithdrawals(consensusWithdrawals)
 	}
 	a.blockReader.CacheBlockBody(payload.BlockNumber, rawTxs, ws)
 }

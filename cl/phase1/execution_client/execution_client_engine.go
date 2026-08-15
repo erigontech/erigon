@@ -320,7 +320,7 @@ func (cc *ExecutionClientEngine) HasBlock(ctx context.Context, hash common.Hash)
 
 func (cc *ExecutionClientEngine) GetAssembledBlock(ctx context.Context, id []byte, version clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 	if cc.isLocal() {
-		return cc.chainRW.GetAssembledBlock(binary.LittleEndian.Uint64(id))
+		return cc.chainRW.GetAssembledBlock(ctx, binary.LittleEndian.Uint64(id))
 	}
 
 	// GetPayload versions advance with the response fields introduced by each fork.
