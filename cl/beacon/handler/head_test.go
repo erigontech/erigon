@@ -74,7 +74,7 @@ func TestDebugBeaconHeadsReportsSelectedHeadOptimistic(t *testing.T) {
 				forkchoiceStore:         fcu,
 			}
 
-			response, err := a.GetEthV2DebugBeaconHeads(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/eth/v2/debug/beacon/heads", nil))
+			response, err := a.GetEthV2DebugBeaconHeads(httptest.NewRecorder(), httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v2/debug/beacon/heads", nil))
 			require.NoError(t, err)
 			heads := response.Data.([]any)
 			require.Len(t, heads, 1)
@@ -139,7 +139,7 @@ func TestHeadBlockIDUsesSelectedHead(t *testing.T) {
 		forkchoiceStore:         fcu,
 	}
 
-	request := httptest.NewRequest(http.MethodGet, "/eth/v1/beacon/blocks/head/root", nil)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/beacon/blocks/head/root", nil)
 	routeContext := chi.NewRouteContext()
 	routeContext.URLParams.Add("block_id", "head")
 	request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))

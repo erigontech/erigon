@@ -309,9 +309,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		if config.ExperimentalParallelCommitment {
 			statecfg.ExperimentalParallelCommitment = true
 		}
-		if config.ExperimentalStreamingCommitment {
-			statecfg.ExperimentalStreamingCommitment = true
-		}
 
 		if err := stages.UpdateMetrics(tx); err != nil {
 			return err
@@ -853,6 +850,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			}
 		}
 		backend.privateAPI, err = privateapi2.StartGrpc(
+			ctx,
 			backend.kvRPC,
 			backend.ethBackendRPC,
 			backend.txPoolGrpcServer,
@@ -1346,26 +1344,7 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
 
-	erigonDBSettings, err := state.ResolveErigonDBSettingsWithRefsDefault(dirs, logger, snConfig.Snapshot.NoDownloader, snConfig.CommitmentRefsFirstStart())
-	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, err
-	}
-	aggOpts := state.New(dirs).Logger(logger).SanityOldNaming().GenSaltIfNeed(createNewSaltFileIfNeeded).WithErigonDBSettings(erigonDBSettings)
-	if snConfig.ErigondbDomainStepsInFrozenFile != nil {
-		v := *snConfig.ErigondbDomainStepsInFrozenFile
-		stepsStr := "Inf"
-		if v != config3.UnboundedDomainMerge {
-			stepsStr = fmt.Sprintf("%d", v)
-		}
-		logger.Info("domain merge cap overridden", "steps_in_frozen_file", stepsStr)
-		aggOpts = aggOpts.ErigondbDomainStepsInFrozenFile(v)
-	}
-	agg, err := aggOpts.Open(ctx, db)
-	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, err
-	}
-	agg.SetSnapshotBuildSema(blockSnapBuildSema)
-	agg.SetProduceMod(snConfig.Snapshot.ProduceE3)
+	tdb, dbIsTemporal := db.(*temporal.DB)
 
 	allSegmentsDownloadComplete, err := rawdb.AllSegmentsDownloadCompleteFromDB(db)
 	if err != nil {
@@ -1376,14 +1355,41 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		if chainConfig.Bor != nil {
 			allBorSnapshots.OptimisticalyOpenFolder()
 		}
-		_ = agg.OpenFolder()
 	} else {
 		logger.Debug("[rpc] download of segments not complete yet. please wait StageSnapshots to finish")
 	}
 
-	temporalDb, err := temporal.New(db, agg, allSnapshots)
-	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, err
+	var temporalDb kv.TemporalRwDB
+	if dbIsTemporal {
+		temporalDb = tdb
+	} else {
+		erigonDBSettings, settingsErr := state.ResolveErigonDBSettingsWithRefsDefault(dirs, logger, snConfig.Snapshot.NoDownloader, snConfig.CommitmentRefsFirstStart())
+		if settingsErr != nil {
+			return nil, nil, nil, nil, nil, nil, nil, settingsErr
+		}
+		aggOpts := state.New(dirs).Logger(logger).SanityOldNaming().GenSaltIfNeed(createNewSaltFileIfNeeded).WithErigonDBSettings(erigonDBSettings)
+		if snConfig.ErigondbDomainStepsInFrozenFile != nil {
+			v := *snConfig.ErigondbDomainStepsInFrozenFile
+			stepsStr := "Inf"
+			if v != config3.UnboundedDomainMerge {
+				stepsStr = fmt.Sprintf("%d", v)
+			}
+			logger.Info("domain merge cap overridden", "steps_in_frozen_file", stepsStr)
+			aggOpts = aggOpts.ErigondbDomainStepsInFrozenFile(v)
+		}
+		agg, openErr := aggOpts.Open(ctx, db)
+		if openErr != nil {
+			return nil, nil, nil, nil, nil, nil, nil, openErr
+		}
+		agg.SetSnapshotBuildSema(blockSnapBuildSema)
+		agg.SetProduceMod(snConfig.Snapshot.ProduceE3)
+		if allSegmentsDownloadComplete {
+			_ = agg.OpenFolder()
+		}
+		temporalDb, err = temporal.New(db, agg, allSnapshots)
+		if err != nil {
+			return nil, nil, nil, nil, nil, nil, nil, err
+		}
 	}
 
 	blockWriter := blockio.NewBlockWriter()
