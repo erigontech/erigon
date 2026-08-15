@@ -7,6 +7,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    # Callers grant actions/pull-requests write and reusable jobs inherit it,
+    # so pin this one down before the build step gets a token.
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v7
         with:
